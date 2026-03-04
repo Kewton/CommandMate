@@ -193,18 +193,18 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
             {/* Description */}
             {description && (
               <div>
-                <p className="text-xs text-gray-500 mb-1">Description</p>
-                <p className="text-sm text-gray-700 line-clamp-2 whitespace-pre-wrap">{description}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Description</p>
+                <p className="text-sm text-gray-700 dark:text-gray-300 line-clamp-2 whitespace-pre-wrap">{description}</p>
               </div>
             )}
 
             {/* Link */}
             {link && (
               <div>
-                <p className="text-xs text-gray-500 mb-1">Link</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Link</p>
                 <button
                   onClick={handleLinkClick}
-                  className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 hover:underline transition-colors"
+                  className="flex items-center gap-1 text-sm text-cyan-600 dark:text-cyan-400 hover:text-cyan-800 dark:hover:text-cyan-300 hover:underline transition-colors"
                   title="Open link in new tab"
                 >
                   <svg
@@ -227,15 +227,15 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
 
             {/* Status - Azure DevOps style */}
             <div>
-              <p className="text-xs text-gray-500 mb-1">Status</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Status</p>
               <div className="flex gap-1 flex-wrap">
                 <button
                   onClick={(e) => handleStatusChange(null, e)}
                   disabled={isUpdatingStatus}
                   className={`px-2 py-1 text-xs font-medium rounded border transition-colors disabled:opacity-50 ${
                     currentStatus === null
-                      ? 'bg-gray-100 text-gray-700 border-gray-400'
-                      : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                      ? 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-400 dark:border-gray-500'
+                      : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
                   }`}
                 >
                   Not set
@@ -245,8 +245,8 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
                   disabled={isUpdatingStatus}
                   className={`px-2 py-1 text-xs font-medium rounded border transition-colors disabled:opacity-50 ${
                     currentStatus === 'todo'
-                      ? 'bg-gray-100 text-gray-700 border-gray-400'
-                      : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                      ? 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-400 dark:border-gray-500'
+                      : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
                   }`}
                 >
                   ToDo
@@ -256,8 +256,8 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
                   disabled={isUpdatingStatus}
                   className={`px-2 py-1 text-xs font-medium rounded border transition-colors disabled:opacity-50 ${
                     currentStatus === 'doing'
-                      ? 'bg-blue-100 text-blue-700 border-blue-400'
-                      : 'bg-white text-gray-600 border-gray-200 hover:bg-blue-50'
+                      ? 'bg-cyan-100 dark:bg-cyan-900 text-cyan-700 dark:text-cyan-300 border-cyan-400 dark:border-cyan-600'
+                      : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:bg-cyan-50 dark:hover:bg-gray-700'
                   }`}
                 >
                   Doing
@@ -267,8 +267,8 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
                   disabled={isUpdatingStatus}
                   className={`px-2 py-1 text-xs font-medium rounded border transition-colors disabled:opacity-50 ${
                     currentStatus === 'done'
-                      ? 'bg-green-100 text-green-700 border-green-400'
-                      : 'bg-white text-gray-600 border-gray-200 hover:bg-green-50'
+                      ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 border-green-400 dark:border-green-600'
+                      : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:bg-green-50 dark:hover:bg-gray-700'
                   }`}
                 >
                   Done
@@ -278,7 +278,7 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
 
             {/* Updated At */}
             {relativeTime && (
-              <div className="flex items-center text-xs text-gray-500">
+              <div className="flex items-center text-xs text-gray-500 dark:text-gray-400">
                 <svg
                   className="w-4 h-4 mr-1"
                   fill="none"

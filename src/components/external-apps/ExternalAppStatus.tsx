@@ -77,8 +77,8 @@ export function ExternalAppStatus({
   if (isLoading) {
     return (
       <div className="flex items-center gap-1.5">
-        <span className="inline-block h-2.5 w-2.5 rounded-full bg-gray-300 animate-pulse" />
-        {!compact && <span className="text-xs text-gray-400">Checking...</span>}
+        <span className="inline-block h-2.5 w-2.5 rounded-full bg-gray-300 dark:bg-gray-600 animate-pulse" />
+        {!compact && <span className="text-xs text-gray-400 dark:text-gray-500">Checking...</span>}
       </div>
     );
   }
@@ -99,7 +99,7 @@ export function ExternalAppStatus({
   return (
     <div className="flex items-center gap-1.5">
       <span className={`inline-block h-2.5 w-2.5 rounded-full ${statusColor}`} />
-      <span className={`text-xs ${isHealthy ? 'text-green-600' : 'text-gray-500'}`}>
+      <span className={`text-xs ${isHealthy ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'}`}>
         {statusText}
       </span>
       {showResponseTime && health?.responseTime !== undefined && (

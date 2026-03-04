@@ -100,7 +100,7 @@ export function AutoYesConfirmDialog({
       showCloseButton={true}
     >
       <div className="space-y-4">
-        <div className="text-sm text-gray-700">
+        <div className="text-sm text-gray-700 dark:text-gray-200">
           <p className="font-medium mb-2">{t('featureDescription')}</p>
           <ul className="list-disc list-inside space-y-1">
             <li>{t('yesNoAutoResponse')}</li>
@@ -108,14 +108,14 @@ export function AutoYesConfirmDialog({
           </ul>
           <p className="mt-1">{t('autoDisableAfter', { duration: durationLabel(selectedDuration) })}</p>
           {cliToolName && (
-            <p className="mt-2 text-gray-500">
+            <p className="mt-2 text-gray-500 dark:text-gray-300">
               {t('appliesOnlyToCurrent', { toolName: cliToolName })}
             </p>
           )}
         </div>
 
         {/* Duration selection - horizontal button group */}
-        <div className="text-sm text-gray-700">
+        <div className="text-sm text-gray-700 dark:text-gray-200">
           <p className="font-medium mb-2">{t('duration')}</p>
           <div className="flex gap-2">
             {ALLOWED_DURATIONS.map((duration) => (
@@ -125,8 +125,8 @@ export function AutoYesConfirmDialog({
                 onClick={() => setSelectedDuration(duration)}
                 className={`flex-1 py-2 px-3 text-sm font-medium rounded-md border-2 transition-colors ${
                   selectedDuration === duration
-                    ? 'border-blue-600 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                    ? 'border-cyan-600 bg-cyan-50 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-400'
+                    : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:border-gray-400 dark:hover:border-gray-500'
                 }`}
                 style={{ minHeight: '44px' }}
               >
@@ -137,7 +137,7 @@ export function AutoYesConfirmDialog({
         </div>
 
         {/* Stop Pattern input (Issue #314) */}
-        <div className="text-sm text-gray-700">
+        <div className="text-sm text-gray-700 dark:text-gray-200">
           <div className="flex items-center gap-1.5 mb-1">
             <label htmlFor="stop-pattern-input" className="font-medium">
               {t('stopPatternLabel')}
@@ -146,7 +146,7 @@ export function AutoYesConfirmDialog({
               <button
                 type="button"
                 onClick={() => setShowRegexTips(!showRegexTips)}
-                className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-300 text-gray-600 text-[10px] font-bold hover:bg-gray-400 focus:outline-none"
+                className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-300 dark:bg-gray-600 text-gray-600 dark:text-gray-200 text-[10px] font-bold hover:bg-gray-400 dark:hover:bg-gray-500 focus:outline-none"
                 aria-label={t('regexTipsLabel')}
                 data-testid="regex-tips-button"
               >
@@ -154,30 +154,30 @@ export function AutoYesConfirmDialog({
               </button>
               {showRegexTips && (
                 <div
-                  className="absolute left-0 top-6 z-50 w-72 rounded-md border border-gray-200 bg-white p-3 shadow-lg text-xs text-gray-700"
+                  className="absolute left-0 top-6 z-50 w-72 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-3 shadow-lg text-xs text-gray-700 dark:text-gray-200"
                   data-testid="regex-tips-tooltip"
                 >
                   <p className="font-medium mb-1.5">{t('regexTipsTitle')}</p>
                   <ul className="space-y-1">
-                    <li><code className="bg-gray-100 px-1 rounded">\bcat\b</code> {t('regexTipWordBoundary')}</li>
-                    <li><code className="bg-gray-100 px-1 rounded">error|fatal</code> {t('regexTipOr')}</li>
-                    <li><code className="bg-gray-100 px-1 rounded">(?i)error</code> {t('regexTipCaseNote')}</li>
+                    <li><code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">\bcat\b</code> {t('regexTipWordBoundary')}</li>
+                    <li><code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">error|fatal</code> {t('regexTipOr')}</li>
+                    <li><code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">(?i)error</code> {t('regexTipCaseNote')}</li>
                   </ul>
                 </div>
               )}
             </div>
           </div>
-          <p className="text-xs text-gray-500 mb-2">{t('stopPatternDescription')}</p>
+          <p className="text-xs text-gray-500 dark:text-gray-300 mb-2">{t('stopPatternDescription')}</p>
           <input
             id="stop-pattern-input"
             type="text"
             value={stopPattern}
             onChange={(e) => setStopPattern(e.target.value)}
             placeholder={t('stopPatternPlaceholder')}
-            className={`w-full px-3 py-2 border rounded-md text-sm font-mono ${
+            className={`w-full px-3 py-2 border rounded-md text-sm font-mono dark:bg-gray-800 dark:text-gray-100 ${
               regexError
                 ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
-                : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
+                : 'border-gray-300 dark:border-gray-600 focus:ring-cyan-500 focus:border-cyan-500'
             } focus:outline-none focus:ring-1`}
             data-testid="stop-pattern-input"
           />
@@ -188,15 +188,15 @@ export function AutoYesConfirmDialog({
           )}
         </div>
 
-        <div className="text-sm text-gray-700">
+        <div className="text-sm text-gray-700 dark:text-gray-200">
           <p className="font-medium mb-2">{t('aboutRisks')}</p>
           <p>
             {t('riskWarning')}
           </p>
         </div>
 
-        <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3">
-          <p className="text-sm text-yellow-800">
+        <div className="bg-yellow-50 dark:bg-yellow-900/30 border-l-4 border-yellow-400 dark:border-yellow-600 p-3">
+          <p className="text-sm text-yellow-800 dark:text-yellow-300">
             <span className="font-medium">{t('disclaimer')}</span>
             {t('disclaimerText')}
           </p>
@@ -206,7 +206,7 @@ export function AutoYesConfirmDialog({
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 text-sm font-medium rounded-md bg-gray-200 hover:bg-gray-300 text-gray-700"
+            className="px-4 py-2 text-sm font-medium rounded-md bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200"
           >
             {tCommon('cancel')}
           </button>

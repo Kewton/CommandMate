@@ -72,7 +72,7 @@ describe('AutoYesConfirmDialog', () => {
     it('should have 1 hour selected by default (highlighted style)', () => {
       render(<AutoYesConfirmDialog {...defaultProps} />);
       const btn1h = screen.getByText('autoYes.durations.1h');
-      expect(btn1h.className).toContain('border-blue-600');
+      expect(btn1h.className).toContain('border-cyan-600');
     });
 
     it('should display "有効時間" section header', () => {
@@ -85,10 +85,10 @@ describe('AutoYesConfirmDialog', () => {
       const btn3h = screen.getByText('autoYes.durations.3h');
 
       fireEvent.click(btn3h);
-      expect(btn3h.className).toContain('border-blue-600');
+      expect(btn3h.className).toContain('border-cyan-600');
 
       const btn1h = screen.getByText('autoYes.durations.1h');
-      expect(btn1h.className).not.toContain('border-blue-600');
+      expect(btn1h.className).not.toContain('border-cyan-600');
     });
   });
 

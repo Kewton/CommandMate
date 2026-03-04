@@ -252,10 +252,10 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
 
   return (
     <div className="p-4">
-      <h3 className="text-sm font-semibold text-gray-700 mb-1">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">
         {t('agentSettings')}
       </h3>
-      <p className="text-xs text-gray-500 mb-4">
+      <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
         {t('selectAgents')}
       </p>
 
@@ -269,10 +269,10 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
               key={toolId}
               className={`flex items-center gap-3 p-2 rounded-lg border transition-colors ${
                 isChecked
-                  ? 'border-blue-200 bg-blue-50'
+                  ? 'border-cyan-200 dark:border-cyan-700 bg-cyan-50 dark:bg-cyan-900/30'
                   : isDisabled
-                    ? 'border-gray-100 bg-gray-50 opacity-50'
-                    : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                    ? 'border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800 opacity-50'
+                    : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
               }`}
             >
               <input
@@ -282,9 +282,9 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
                 checked={isChecked}
                 disabled={isDisabled || saving}
                 onChange={(e) => handleCheckboxChange(toolId, e.target.checked)}
-                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-cyan-600 focus:ring-cyan-500"
               />
-              <span className="text-sm font-medium text-gray-700">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
                 {getCliToolDisplayName(toolId)}
               </span>
             </label>
@@ -295,27 +295,27 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
       {saving && (
         <div
           data-testid="agent-settings-loading"
-          className="mt-3 flex items-center gap-2 text-xs text-gray-500"
+          className="mt-3 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400"
         >
-          <span className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          <span className="w-3 h-3 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
           {t('loading')}
         </div>
       )}
 
       {/* Ollama model selector */}
       {isVibeLocalChecked && (
-        <div className="mt-4 pt-4 border-t border-gray-200">
-          <h4 className="text-sm font-semibold text-gray-700 mb-2">
+        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+          <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">
             {t('vibeLocalModel')}
           </h4>
 
           {loadingModels ? (
-            <div className="flex items-center gap-2 text-xs text-gray-500">
-              <span className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+              <span className="w-3 h-3 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
               {t('loading')}
             </div>
           ) : ollamaError && ollamaModels.length === 0 ? (
-            <p className="text-xs text-amber-600">
+            <p className="text-xs text-amber-600 dark:text-amber-400">
               {t('ollamaNotAvailable')}
             </p>
           ) : (
@@ -324,7 +324,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
               value={vibeLocalModel ?? ''}
               onChange={handleModelChange}
               disabled={savingModel}
-              className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
+              className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 disabled:opacity-50"
             >
               <option value="">{t('vibeLocalModelDefault')}</option>
               {ollamaModels.map((model) => (
@@ -337,7 +337,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
 
           {/* Context window input */}
           <div className="mt-3">
-            <h4 className="text-sm font-semibold text-gray-700 mb-2">
+            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">
               {t('vibeLocalContextWindow')}
             </h4>
             <input
@@ -351,7 +351,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
               onBlur={handleContextWindowBlur}
               placeholder={t('vibeLocalContextWindowDefault')}
               disabled={savingContextWindow}
-              className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
+              className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 disabled:opacity-50"
             />
           </div>
         </div>

@@ -69,7 +69,7 @@ const Icon = memo(function Icon({ path, className = 'w-6 h-6' }: IconProps) {
 
 /** Icon path definitions */
 const ICON_PATHS = {
-  back: 'M15 19l-7-7 7-7',
+  back: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1h-2z',
   menu: 'M4 6h16M4 12h16M4 18h16',
 } as const;
 
@@ -100,7 +100,7 @@ export function MobileHeader({
     <header
       data-testid="mobile-header"
       role="banner"
-      className="sticky top-0 inset-x-0 bg-white border-b border-gray-200 shadow-sm pt-safe z-40"
+      className="sticky top-0 inset-x-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 shadow-sm pt-safe z-40"
     >
       <div className="flex items-center justify-between h-14 px-4">
         {/* Left section: Back button or spacer */}
@@ -110,7 +110,7 @@ export function MobileHeader({
               type="button"
               onClick={onBackClick}
               aria-label="Back"
-              className="p-2 -ml-2 rounded-full hover:bg-gray-100 transition-colors"
+              className="p-2 -ml-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors dark:text-gray-300"
             >
               <Icon path={ICON_PATHS.back} />
             </button>
@@ -140,11 +140,11 @@ export function MobileHeader({
               role="heading"
               data-testid="worktree-name"
               title={worktreeName}
-              className="text-sm font-medium text-gray-900 truncate text-center leading-tight"
+              className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate text-center leading-tight"
             >
               {worktreeName}
             </h1>
-            <div className="flex items-center gap-1 text-xs text-gray-500">
+            <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
               {repositoryName && (
                 <span className="truncate max-w-[100px] text-center">
                   {repositoryName}
@@ -152,7 +152,7 @@ export function MobileHeader({
               )}
               {gitStatus && gitStatus.currentBranch !== '(unknown)' && (
                 <>
-                  {repositoryName && <span className="text-gray-300">/</span>}
+                  {repositoryName && <span className="text-gray-300 dark:text-gray-600">/</span>}
                   <span
                     className="truncate max-w-[80px] font-mono"
                     title={gitStatus.currentBranch}
@@ -176,7 +176,7 @@ export function MobileHeader({
               type="button"
               onClick={onMenuClick}
               aria-label="Menu"
-              className="p-2 -mr-2 rounded-full hover:bg-gray-100 transition-colors"
+              className="p-2 -mr-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors dark:text-gray-300"
             >
               <Icon path={ICON_PATHS.menu} />
             </button>

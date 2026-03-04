@@ -212,19 +212,19 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
         <Card padding="lg">
           <div className="space-y-4">
             <div>
-              <h3 className="text-lg font-semibold mb-2">Add New Repository</h3>
+              <h3 className="text-lg font-semibold mb-2 dark:text-gray-100">Add New Repository</h3>
             </div>
 
             {/* Mode Toggle Tabs */}
-            <div className="flex border-b border-gray-200" role="tablist">
+            <div className="flex border-b border-gray-200 dark:border-gray-700" role="tablist">
               <button
                 role="tab"
                 aria-selected={inputMode === 'local'}
                 onClick={() => setInputMode('local')}
                 className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
                   inputMode === 'local'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                    ? 'border-cyan-500 text-cyan-600 dark:text-cyan-400'
+                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
               >
                 Local Path
@@ -235,8 +235,8 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
                 onClick={() => setInputMode('url')}
                 className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
                   inputMode === 'url'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                    ? 'border-cyan-500 text-cyan-600 dark:text-cyan-400'
+                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
               >
                 Clone URL
@@ -247,10 +247,10 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
             {inputMode === 'local' && (
               <form onSubmit={handleAddRepository} className="space-y-4">
                 <div>
-                  <p className="text-sm text-gray-600 mb-4">
+                  <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
                     Enter the absolute path to a git repository containing worktrees.
                   </p>
-                  <label htmlFor="repositoryPath" className="block text-sm font-medium text-gray-700 mb-2">
+                  <label htmlFor="repositoryPath" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
                     Repository Path
                   </label>
                   <input
@@ -262,7 +262,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
                     className="input w-full font-mono text-sm"
                     disabled={isScanning}
                   />
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                     Example: /Users/username/projects/my-repo
                   </p>
                 </div>
@@ -291,10 +291,10 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
             {inputMode === 'url' && (
               <form onSubmit={handleCloneRepository} className="space-y-4">
                 <div>
-                  <p className="text-sm text-gray-600 mb-4">
+                  <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
                     Enter a git clone URL to clone a remote repository.
                   </p>
-                  <label htmlFor="cloneUrl" className="block text-sm font-medium text-gray-700 mb-2">
+                  <label htmlFor="cloneUrl" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
                     Clone URL
                   </label>
                   <input
@@ -306,7 +306,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
                     className="input w-full font-mono text-sm"
                     disabled={isCloning}
                   />
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                     Supports HTTPS and SSH URLs
                   </p>
                 </div>
@@ -336,15 +336,15 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
 
       {/* Success Message */}
       {success && (
-        <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-          <p className="text-sm text-green-800">{success}</p>
+        <div className="p-4 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-lg">
+          <p className="text-sm text-green-800 dark:text-green-300">{success}</p>
         </div>
       )}
 
       {/* Error Message */}
       {error && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-          <p className="text-sm text-red-800">{error}</p>
+        <div className="p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg">
+          <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
         </div>
       )}
     </div>

@@ -78,7 +78,7 @@ describe('Toast Component', () => {
       expect(toast).toHaveClass('bg-red-50');
     });
 
-    it('should render info toast with blue styling', () => {
+    it('should render info toast with cyan styling', () => {
       const mockOnClose = vi.fn();
       render(
         <Toast
@@ -92,7 +92,7 @@ describe('Toast Component', () => {
       const toast = screen.getByTestId('toast-test-3');
       expect(toast).toBeInTheDocument();
       expect(toast).toHaveTextContent('Info message');
-      expect(toast).toHaveClass('bg-blue-50');
+      expect(toast).toHaveClass('bg-cyan-50');
     });
 
     it('should display success icon for success toast', () => {

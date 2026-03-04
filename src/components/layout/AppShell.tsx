@@ -102,6 +102,7 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
         data-testid="sidebar-container"
         className={`
           fixed left-0 top-0 h-full w-72
+          border-r border-gray-200 dark:border-gray-600
           ${SIDEBAR_TRANSITION}
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}
         `}

@@ -147,7 +147,7 @@ describe('PaneResizer', () => {
       fireEvent.mouseDown(separator, { clientX: 100, clientY: 50 });
 
       // Should have visual indication of dragging
-      expect(separator.className).toMatch(/dragging|active|bg-blue/);
+      expect(separator.className).toMatch(/dragging|active|bg-cyan/);
 
       fireEvent.mouseUp(document);
 

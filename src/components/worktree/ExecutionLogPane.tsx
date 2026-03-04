@@ -69,11 +69,11 @@ function formatTimestamp(ts: number): string {
 /** Map execution log status to Tailwind CSS color classes */
 function getStatusColor(status: ExecutionLogStatus): string {
   switch (status) {
-    case 'completed': return 'text-green-600 bg-green-50';
-    case 'failed': return 'text-red-600 bg-red-50';
-    case 'timeout': return 'text-yellow-600 bg-yellow-50';
-    case 'running': return 'text-blue-600 bg-blue-50';
-    case 'cancelled': return 'text-gray-600 bg-gray-50';
+    case 'completed': return 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/30';
+    case 'failed': return 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30';
+    case 'timeout': return 'text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-900/30';
+    case 'running': return 'text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-900/30';
+    case 'cancelled': return 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800';
   }
 }
 
@@ -146,8 +146,8 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
     return (
       <div className={`flex items-center justify-center h-full p-4 ${className}`}>
         <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-4 border-gray-200 border-t-blue-500 rounded-full animate-spin" />
-          <span className="text-sm text-gray-500">{t('loading')}</span>
+          <div className="w-8 h-8 border-4 border-gray-200 dark:border-gray-700 border-t-cyan-500 rounded-full animate-spin" />
+          <span className="text-sm text-gray-500 dark:text-gray-400">{t('loading')}</span>
         </div>
       </div>
     );
@@ -157,11 +157,11 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
     return (
       <div className={`flex items-center justify-center h-full p-4 ${className}`}>
         <div className="text-center">
-          <span className="text-sm text-red-600">{error}</span>
+          <span className="text-sm text-red-600 dark:text-red-400">{error}</span>
           <button
             type="button"
             onClick={() => void fetchData()}
-            className="ml-2 px-3 py-1 text-sm text-white bg-blue-500 rounded hover:bg-blue-600"
+            className="ml-2 px-3 py-1 text-sm text-white bg-cyan-500 rounded hover:bg-cyan-600"
           >
             {t('retry')}
           </button>
@@ -174,10 +174,10 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
     <div className={`flex flex-col gap-4 p-4 overflow-y-auto ${className}`}>
       {/* Schedules Section */}
       <div>
-        <h3 className="text-sm font-semibold text-gray-700 mb-2">{t('title')} ({schedules.length})</h3>
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">{t('title')} ({schedules.length})</h3>
         {schedules.length === 0 ? (
-          <div className="text-center py-8 text-gray-500">
-            <p className="font-medium text-gray-600 mb-3">{t('noSchedulesTitle')}</p>
+          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+            <p className="font-medium text-gray-600 dark:text-gray-300 mb-3">{t('noSchedulesTitle')}</p>
             <ol className="text-sm text-left inline-block space-y-1.5 list-decimal list-inside">
               <li>{t('noSchedulesStep1')}</li>
               <li>{t('noSchedulesStep2')}</li>
@@ -188,14 +188,14 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
         ) : (
           <div className="space-y-2">
             {schedules.map((schedule) => (
-              <div key={schedule.id} className="border border-gray-200 rounded p-3 bg-white">
+              <div key={schedule.id} className="border border-gray-200 dark:border-gray-700 rounded p-3 bg-white dark:bg-gray-900">
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-sm">{schedule.name}</span>
-                  <span className={`text-xs px-2 py-0.5 rounded ${schedule.enabled ? 'bg-green-50 text-green-600' : 'bg-gray-50 text-gray-500'}`}>
+                  <span className={`text-xs px-2 py-0.5 rounded ${schedule.enabled ? 'bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400' : 'bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>
                     {schedule.enabled ? t('enabled') : t('disabled')}
                   </span>
                 </div>
-                <div className="text-xs text-gray-500 mt-1">
+                <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   <span>{t('cron')}: {schedule.cron_expression || 'N/A'}</span>
                   {schedule.last_executed_at && (
                     <span className="ml-3">{t('lastRun')}: {formatTimestamp(schedule.last_executed_at)}</span>
@@ -209,17 +209,17 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
 
       {/* Execution Logs Section */}
       <div>
-        <h3 className="text-sm font-semibold text-gray-700 mb-2">{t('executionLogs')} ({logs.length})</h3>
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">{t('executionLogs')} ({logs.length})</h3>
         {logs.length === 0 ? (
-          <p className="text-sm text-gray-500">{t('noLogs')}</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t('noLogs')}</p>
         ) : (
           <div className="space-y-2">
             {logs.map((log) => (
-              <div key={log.id} className="border border-gray-200 rounded bg-white">
+              <div key={log.id} className="border border-gray-200 dark:border-gray-700 rounded bg-white dark:bg-gray-900">
                 <button
                   type="button"
                   onClick={() => void handleExpandLog(log.id)}
-                  className="w-full text-left p-3 hover:bg-gray-50 transition-colors"
+                  className="w-full text-left p-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-sm truncate max-w-[60%]">{log.schedule_name || t('unknownSchedule')}</span>
@@ -227,23 +227,23 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
                       {t(`status.${log.status}`)}
                     </span>
                   </div>
-                  <div className="text-xs text-gray-500 mt-1">
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                     {formatTimestamp(log.started_at)}
                     {log.exit_code !== null && <span className="ml-2">{t('exitCode')}: {log.exit_code}</span>}
                   </div>
                 </button>
 
                 {expandedLogId === log.id && logDetail && (
-                  <div className="border-t border-gray-200 p-3 bg-gray-50 space-y-3">
+                  <div className="border-t border-gray-200 dark:border-gray-700 p-3 bg-gray-50 dark:bg-gray-800 space-y-3">
                     <div>
-                      <div className="text-xs font-semibold text-gray-600 mb-1">{t('message')}</div>
-                      <pre className="text-xs whitespace-pre-wrap font-mono text-gray-700">
+                      <div className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">{t('message')}</div>
+                      <pre className="text-xs whitespace-pre-wrap font-mono text-gray-700 dark:text-gray-200">
                         {logDetail.message}
                       </pre>
                     </div>
                     <div>
-                      <div className="text-xs font-semibold text-gray-600 mb-1">{t('response')}</div>
-                      <pre className="text-xs whitespace-pre-wrap font-mono text-gray-700 max-h-60 overflow-y-auto">
+                      <div className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">{t('response')}</div>
+                      <pre className="text-xs whitespace-pre-wrap font-mono text-gray-700 dark:text-gray-200 max-h-60 overflow-y-auto">
                         {logDetail.result || t('noOutput')}
                       </pre>
                     </div>

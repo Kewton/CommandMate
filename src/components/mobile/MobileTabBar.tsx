@@ -111,8 +111,8 @@ export function MobileTabBar({
       const isActive = tabId === activeTab;
       const baseStyles = 'flex flex-col items-center justify-center flex-1 py-2 px-1 transition-colors relative';
       const activeStyles = isActive
-        ? 'text-blue-600 bg-blue-50'
-        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50';
+        ? 'text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-900/30'
+        : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800';
       return `${baseStyles} ${activeStyles}`;
     },
     [activeTab]
@@ -147,7 +147,7 @@ export function MobileTabBar({
       data-testid="mobile-tab-bar"
       role="tablist"
       aria-label="Mobile navigation"
-      className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-200 flex pb-safe z-40"
+      className="fixed bottom-0 inset-x-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex pb-safe z-40"
     >
       {TABS.map((tab) => (
         <button

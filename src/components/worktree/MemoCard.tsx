@@ -171,7 +171,7 @@ export const MemoCard = memo(function MemoCard({
   return (
     <div
       data-testid="memo-card"
-      className={`bg-white border border-gray-200 rounded-lg p-4 space-y-3 ${className}`}
+      className={`bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-3 ${className}`}
     >
       {/* Header: Title and Delete button */}
       <div className="flex items-center gap-2">
@@ -181,12 +181,12 @@ export const MemoCard = memo(function MemoCard({
           onChange={handleTitleChange}
           onBlur={handleTitleBlur}
           placeholder="Memo title"
-          className="flex-1 text-sm font-medium text-gray-900 bg-transparent border-none focus:outline-none focus:ring-0 p-0"
+          className="flex-1 text-sm font-medium text-gray-900 dark:text-gray-100 bg-transparent border-none focus:outline-none focus:ring-0 p-0"
         />
         {isSaving && (
           <span
             data-testid="saving-indicator"
-            className="text-xs text-gray-400"
+            className="text-xs text-gray-400 dark:text-gray-500"
           >
             Saving...
           </span>
@@ -196,7 +196,7 @@ export const MemoCard = memo(function MemoCard({
           type="button"
           onClick={handleCopy}
           aria-label="Copy memo content"
-          className="p-1 text-gray-400 hover:text-gray-600 transition-colors rounded"
+          className="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors rounded"
         >
           {copied ? (
             <Check className="w-4 h-4 text-green-600" />
@@ -208,7 +208,7 @@ export const MemoCard = memo(function MemoCard({
           type="button"
           onClick={handleDelete}
           aria-label="Delete memo"
-          className="p-1 text-gray-400 hover:text-red-500 transition-colors rounded"
+          className="p-1 text-gray-400 dark:text-gray-500 hover:text-red-500 transition-colors rounded"
         >
           <svg
             className="w-4 h-4"
@@ -234,7 +234,7 @@ export const MemoCard = memo(function MemoCard({
         onBlur={handleContentBlur}
         placeholder="Enter memo content..."
         rows={4}
-        className="w-full text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-md p-2 resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        className="w-full text-sm text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md p-2 resize-y focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
       />
 
       {/* Error message */}

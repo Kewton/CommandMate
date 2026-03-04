@@ -167,7 +167,7 @@ const ChevronIcon = memo(function ChevronIcon({ expanded }: { expanded: boolean 
   return (
     <svg
       data-testid="chevron-icon"
-      className={`w-4 h-4 text-gray-500 transition-transform ${expanded ? 'rotate-90' : ''}`}
+      className={`w-4 h-4 text-gray-500 dark:text-gray-400 transition-transform ${expanded ? 'rotate-90' : ''}`}
       fill="none"
       stroke="currentColor"
       viewBox="0 0 24 24"
@@ -224,7 +224,7 @@ const HighlightedText = memo(function HighlightedText({
     <>
       {parts.map((part, i) =>
         part.toLowerCase() === query.toLowerCase() ? (
-          <mark key={i} className="bg-yellow-200 text-gray-900 px-0.5 rounded">
+          <mark key={i} className="bg-yellow-200 dark:bg-yellow-700 text-gray-900 dark:text-gray-100 px-0.5 rounded">
             {part}
           </mark>
         ) : (
@@ -377,7 +377,7 @@ const TreeNode = memo(function TreeNode({
         aria-selected={false}
         aria-expanded={isDirectory ? isExpanded : undefined}
         tabIndex={0}
-        className="flex items-center gap-2 py-1.5 pr-2 cursor-pointer hover:bg-gray-100 rounded transition-colors"
+        className="flex items-center gap-2 py-1.5 pr-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
         style={combinedStyle}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
@@ -391,7 +391,7 @@ const TreeNode = memo(function TreeNode({
         {isDirectory ? (
           <span className="w-4 h-4 flex items-center justify-center">
             {loading ? (
-              <span className="w-3 h-3 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
+              <span className="w-3 h-3 border-2 border-gray-300 dark:border-gray-600 border-t-cyan-500 rounded-full animate-spin" />
             ) : (
               <ChevronIcon expanded={isExpanded} />
             )}
@@ -408,7 +408,7 @@ const TreeNode = memo(function TreeNode({
         )}
 
         {/* Name - with highlight for name search */}
-        <span className="flex-1 truncate text-sm text-gray-700">
+        <span className="flex-1 truncate text-sm text-gray-700 dark:text-gray-300">
           {searchMode === 'name' && searchQuery ? (
             <HighlightedText text={item.name} query={searchQuery} />
           ) : (
@@ -808,8 +808,8 @@ export const FileTreeView = memo(function FileTreeView({
         data-testid="file-tree-loading"
         className={`flex items-center justify-center p-4 ${className}`}
       >
-        <span className="w-5 h-5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
-        <span className="ml-2 text-sm text-gray-500">Loading files...</span>
+        <span className="w-5 h-5 border-2 border-gray-300 dark:border-gray-600 border-t-cyan-500 rounded-full animate-spin" />
+        <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">Loading files...</span>
       </div>
     );
   }
@@ -831,7 +831,7 @@ export const FileTreeView = memo(function FileTreeView({
     return (
       <div
         data-testid="file-tree-empty"
-        className={`p-4 text-center text-gray-500 ${className}`}
+        className={`p-4 text-center text-gray-500 dark:text-gray-400 ${className}`}
       >
         <p className="text-sm">No files found</p>
         {/* Action buttons for empty state - only show when callbacks are provided */}
@@ -868,7 +868,7 @@ export const FileTreeView = memo(function FileTreeView({
     return (
       <div
         data-testid="file-tree-no-results"
-        className={`p-4 text-center text-gray-500 ${className}`}
+        className={`p-4 text-center text-gray-500 dark:text-gray-400 ${className}`}
       >
         <p className="text-sm">
           No {searchMode === 'content' ? 'files containing' : 'files matching'} &quot;{searchQuery}&quot;
@@ -882,7 +882,7 @@ export const FileTreeView = memo(function FileTreeView({
       data-testid="file-tree-view"
       role="tree"
       aria-label="File tree"
-      className={`overflow-auto bg-white ${className}`}
+      className={`overflow-auto bg-white dark:bg-gray-900 ${className}`}
     >
       {/* [Issue #300] Toolbar for root-level file/directory creation */}
       {(onNewFile || onNewDirectory || onCmateSetup) && (

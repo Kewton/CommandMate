@@ -89,7 +89,7 @@ describe('BranchListItem', () => {
       );
 
       const item = screen.getByTestId('branch-list-item');
-      expect(item.className).toMatch(/bg-gray-700|selected|border-l|border-blue/);
+      expect(item.className).toMatch(/bg-gray-700|selected|border-l|border-cyan/);
     });
 
     it('should not apply selected styling when not selected', () => {
@@ -244,7 +244,7 @@ describe('BranchListItem', () => {
       expect(screen.queryByTestId('unread-indicator')).not.toBeInTheDocument();
     });
 
-    it('should have blue styling for unread indicator', () => {
+    it('should have cyan styling for unread indicator', () => {
       render(
         <BranchListItem
           branch={{ ...defaultBranch, hasUnread: true }}
@@ -254,7 +254,7 @@ describe('BranchListItem', () => {
       );
 
       const indicator = screen.getByTestId('unread-indicator');
-      expect(indicator.className).toMatch(/bg-blue|blue/);
+      expect(indicator.className).toMatch(/bg-cyan|cyan/);
     });
   });
 

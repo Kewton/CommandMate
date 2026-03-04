@@ -60,10 +60,10 @@ function getToastStyles(type: ToastType): {
     case 'info':
     default:
       return {
-        bgColor: 'bg-blue-50',
-        borderColor: 'border-blue-200',
-        textColor: 'text-blue-800',
-        iconColor: 'text-blue-500',
+        bgColor: 'bg-cyan-50',
+        borderColor: 'border-cyan-200',
+        textColor: 'text-cyan-800',
+        iconColor: 'text-cyan-500',
       };
   }
 }

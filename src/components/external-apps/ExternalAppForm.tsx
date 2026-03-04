@@ -201,8 +201,8 @@ export function ExternalAppForm({
     >
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* Issue #395: Security warning about same-origin proxy risks */}
-        <div className="rounded-md bg-amber-50 p-3 mb-4 border border-amber-200">
-          <p className="text-sm text-amber-800">
+        <div className="rounded-md bg-amber-50 dark:bg-amber-900/30 p-3 mb-4 border border-amber-200 dark:border-amber-700">
+          <p className="text-sm text-amber-800 dark:text-amber-300">
             Proxied apps run under the CommandMate origin and can access CommandMate APIs. Only register trusted applications.
           </p>
         </div>
@@ -211,7 +211,7 @@ export function ExternalAppForm({
         <div>
           <label
             htmlFor="displayName"
-            className="block text-sm font-medium text-gray-700 mb-1"
+            className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
           >
             Display Name <span className="text-red-500">*</span>
           </label>
@@ -234,7 +234,7 @@ export function ExternalAppForm({
           <div>
             <label
               htmlFor="name"
-              className="block text-sm font-medium text-gray-700 mb-1"
+              className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
             >
               Identifier Name <span className="text-red-500">*</span>
             </label>
@@ -247,7 +247,7 @@ export function ExternalAppForm({
               placeholder="my-app"
               disabled={isSubmitting}
             />
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               Alphanumeric and hyphens only. Cannot be changed later.
             </p>
             {errors.name && (
@@ -261,12 +261,12 @@ export function ExternalAppForm({
           <div>
             <label
               htmlFor="pathPrefix"
-              className="block text-sm font-medium text-gray-700 mb-1"
+              className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
             >
               Path Prefix <span className="text-red-500">*</span>
             </label>
             <div className="flex items-center">
-              <span className="text-sm text-gray-500 mr-1">/proxy/</span>
+              <span className="text-sm text-gray-500 dark:text-gray-400 mr-1">/proxy/</span>
               <input
                 id="pathPrefix"
                 type="text"
@@ -276,9 +276,9 @@ export function ExternalAppForm({
                 placeholder="app-name"
                 disabled={isSubmitting}
               />
-              <span className="text-sm text-gray-500 ml-1">/</span>
+              <span className="text-sm text-gray-500 dark:text-gray-400 ml-1">/</span>
             </div>
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               URL path for accessing this app. Cannot be changed later.
             </p>
             {errors.pathPrefix && (
@@ -291,7 +291,7 @@ export function ExternalAppForm({
         <div>
           <label
             htmlFor="targetPort"
-            className="block text-sm font-medium text-gray-700 mb-1"
+            className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
           >
             Port Number <span className="text-red-500">*</span>
           </label>
@@ -321,7 +321,7 @@ export function ExternalAppForm({
           <div>
             <label
               htmlFor="appType"
-              className="block text-sm font-medium text-gray-700 mb-1"
+              className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
             >
               App Type <span className="text-red-500">*</span>
             </label>
@@ -349,7 +349,7 @@ export function ExternalAppForm({
         <div>
           <label
             htmlFor="description"
-            className="block text-sm font-medium text-gray-700 mb-1"
+            className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
           >
             Description
           </label>
@@ -376,7 +376,7 @@ export function ExternalAppForm({
           />
           <label
             htmlFor="websocketEnabled"
-            className="ml-2 text-sm text-gray-700"
+            className="ml-2 text-sm text-gray-700 dark:text-gray-200"
           >
             Enable WebSocket support
           </label>
@@ -393,7 +393,7 @@ export function ExternalAppForm({
               className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               disabled={isSubmitting}
             />
-            <label htmlFor="enabled" className="ml-2 text-sm text-gray-700">
+            <label htmlFor="enabled" className="ml-2 text-sm text-gray-700 dark:text-gray-200">
               App is enabled
             </label>
           </div>
@@ -401,13 +401,13 @@ export function ExternalAppForm({
 
         {/* Submit Error */}
         {submitError && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+          <div className="p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded text-sm text-red-700 dark:text-red-300">
             {submitError}
           </div>
         )}
 
         {/* Actions */}
-        <div className="flex justify-end gap-2 pt-4 border-t border-gray-200">
+        <div className="flex justify-end gap-2 pt-4 border-t border-gray-200 dark:border-gray-700">
           <Button
             type="button"
             variant="ghost"

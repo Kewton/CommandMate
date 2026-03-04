@@ -12,6 +12,7 @@
 
 import { type ReactNode } from 'react';
 import { NextIntlClientProvider } from 'next-intl';
+import { ThemeProvider } from 'next-themes';
 import { SidebarProvider } from '@/contexts/SidebarContext';
 import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
 import { AuthProvider } from '@/contexts/AuthContext';
@@ -37,13 +38,15 @@ interface AppProvidersProps {
 export function AppProviders({ children, locale, messages, timeZone, authEnabled = false }: AppProvidersProps) {
   return (
     <NextIntlClientProvider locale={locale} messages={messages} timeZone={timeZone}>
-      <AuthProvider authEnabled={authEnabled}>
-        <SidebarProvider>
-          <WorktreeSelectionProvider>
-            {children}
-          </WorktreeSelectionProvider>
-        </SidebarProvider>
-      </AuthProvider>
+      <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
+        <AuthProvider authEnabled={authEnabled}>
+          <SidebarProvider>
+            <WorktreeSelectionProvider>
+              {children}
+            </WorktreeSelectionProvider>
+          </SidebarProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </NextIntlClientProvider>
   );
 }

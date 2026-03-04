@@ -140,13 +140,13 @@ describe('Issue #278 Acceptance: fetch Data Cache fix & Info notification indica
       expect(source).toContain('className');
     });
 
-    it('should apply base styles: w-2 h-2 rounded-full bg-blue-500', () => {
+    it('should apply base styles: w-2 h-2 rounded-full bg-cyan-500', () => {
       const source = readFileSync(
         resolve(ROOT, 'src/components/common/NotificationDot.tsx'),
         'utf-8'
       );
 
-      expect(source).toContain('w-2 h-2 rounded-full bg-blue-500');
+      expect(source).toContain('w-2 h-2 rounded-full bg-cyan-500');
     });
 
     it('should be imported by both MobileTabBar and WorktreeDetailRefactored', () => {

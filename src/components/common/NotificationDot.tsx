@@ -26,8 +26,8 @@ interface NotificationDotProps {
 /**
  * NotificationDot - Shared dot badge indicator component.
  *
- * Renders a small blue circle used as a notification indicator.
- * Base styles: w-2 h-2 rounded-full bg-blue-500
+ * Renders a small cyan circle used as a notification indicator.
+ * Base styles: w-2 h-2 rounded-full bg-cyan-500
  *
  * @example
  * ```tsx
@@ -46,7 +46,7 @@ export function NotificationDot({
   return (
     <span
       data-testid={testId}
-      className={`w-2 h-2 rounded-full bg-blue-500 ${className}`.trim()}
+      className={`w-2 h-2 rounded-full bg-cyan-500 ${className}`.trim()}
       aria-label={ariaLabel}
     />
   );

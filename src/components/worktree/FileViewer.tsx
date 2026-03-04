@@ -118,16 +118,16 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
       <div className="max-h-[60vh] sm:max-h-[70vh] overflow-y-auto">
         {loading && (
           <div className="flex items-center justify-center py-12">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 border-t-blue-600" />
-            <p className="ml-3 text-gray-600">Loading file...</p>
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-cyan-600 dark:border-t-cyan-400" />
+            <p className="ml-3 text-gray-600 dark:text-gray-400">Loading file...</p>
           </div>
         )}
 
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg p-4">
             <div className="flex items-center gap-2">
               <svg
-                className="w-5 h-5 text-red-600"
+                className="w-5 h-5 text-red-600 dark:text-red-400"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -139,15 +139,15 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
                   d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                 />
               </svg>
-              <p className="text-sm text-red-800">{error}</p>
+              <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
             </div>
           </div>
         )}
 
         {content && !loading && !error && (
-          <div className="bg-gray-50 rounded-lg overflow-hidden">
-            <div className="bg-gray-100 px-4 py-2 border-b border-gray-200 flex items-center justify-between">
-              <p className="text-xs text-gray-600 font-mono truncate">
+          <div className="bg-gray-50 dark:bg-gray-800 rounded-lg overflow-hidden">
+            <div className="bg-gray-100 dark:bg-gray-700 px-4 py-2 border-b border-gray-200 dark:border-gray-600 flex items-center justify-between">
+              <p className="text-xs text-gray-600 dark:text-gray-400 font-mono truncate">
                 {content.worktreePath}/{content.path}
               </p>
               {/* [Issue #162] Copy button for text files */}
@@ -155,7 +155,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
                 <button
                   data-testid="copy-content-button"
                   onClick={handleCopy}
-                  className="flex-shrink-0 ml-2 p-1 rounded hover:bg-gray-200 transition-colors text-gray-500 hover:text-gray-700"
+                  className="flex-shrink-0 ml-2 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
                   aria-label="Copy file content"
                 >
                   {copied ? (
@@ -182,7 +182,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
             ) : (
               /* Text file: render with syntax highlighting */
               <div className="p-4">
-                <pre className="text-sm overflow-x-auto">
+                <pre className="text-sm overflow-x-auto text-gray-900 dark:text-gray-100">
                   <code className={`language-${content.extension}`}>
                     {content.content}
                   </code>
