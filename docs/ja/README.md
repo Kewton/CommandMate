@@ -9,9 +9,8 @@
 
 [English](../../README.md) | [日本語](./README.md)
 
-<!-- TODO: Upload docs/images/demo-desktop.mp4 via GitHub UI and replace this URL -->
 <p align="center">
-  <video src="../../docs/images/demo-desktop.mp4" width="600" controls></video>
+  <img src="../images/demo-desktop.gif" width="600" alt="CommandMate デスクトップデモ" />
 </p>
 
 > **ターミナルをさばくな。Issue を前に進めよう。**
@@ -30,9 +29,8 @@ npx commandmate
 
 「自分でコードを書く」より「Issue を定義し、方向を確認し、受け入れる」時間の方が長くなってきたなら、CommandMate は開発の中心になれます。
 
-<!-- TODO: Upload docs/images/demo-mobile.mp4 via GitHub UI and replace this URL -->
 <p align="center">
-  <video src="../../docs/images/demo-mobile.mp4" width="300" controls></video>
+  <img src="../images/demo-mobile.gif" width="300" alt="CommandMate モバイルデモ" />
 </p>
 
 デスクトップでもモバイルでも使えます。あらゆるブラウザからセッションを監視・操作できます。
@@ -89,15 +87,6 @@ Issue 定義 → AI で補強 → 方向性レビュー → 計画生成 → エ
 | **夜間自律実行** | スケジュール実行で Issue をキュー — 朝に進捗を確認 |
 | **モバイルレビュー** | AI が生成した変更をスマホから確認・方向修正 |
 | **ビジュアルバグ修正** | スマホで UI バグを撮影 →「これ直して」で送信 |
-
----
-
-## スクリーンショット
-
-<!-- TODO: Upload docs/images/demo-desktop.mp4 via GitHub UI and replace this URL -->
-<p align="center">
-  <video src="../../docs/images/demo-desktop.mp4" width="600" controls></video>
-</p>
 
 ---
 

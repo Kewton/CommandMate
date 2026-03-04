@@ -89,18 +89,6 @@ For details, see the [issues](https://github.com/Kewton/CommandMate/issues), [de
 
 ---
 
-## Screenshots
-
-<p align="center">
-  <img src="./docs/images/demo-desktop.gif" width="600" alt="CommandMate Desktop Screenshot" />
-</p>
-
-<p align="center">
-  <img src="./docs/images/demo-mobile.gif" width="300" alt="CommandMate Mobile Screenshot" />
-</p>
-
----
-
 ## Security
 
 Runs **100% locally**. No external server, no cloud relay, no account required. The only network traffic is Claude CLI's own API calls.
