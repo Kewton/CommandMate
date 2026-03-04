@@ -53,7 +53,7 @@ const MarkdownEditor = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex items-center justify-center h-full bg-white text-gray-400">
+      <div className="flex items-center justify-center h-full bg-white dark:bg-gray-900 text-gray-400 dark:text-gray-500">
         <Loader2 className="animate-spin h-6 w-6 mr-2" />
         <span>Loading editor...</span>
       </div>
@@ -296,31 +296,31 @@ const WorktreeInfoFields = memo(function WorktreeInfoFields({
     <>
       {/* Worktree Name */}
       <div className={cardClassName}>
-        <h2 className="text-sm font-medium text-gray-500 mb-1">Worktree</h2>
-        <p className="text-lg font-semibold text-gray-900">{worktree.name}</p>
+        <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Worktree</h2>
+        <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">{worktree.name}</p>
       </div>
 
       {/* Repository Info */}
       <div className={cardClassName}>
-        <h2 className="text-sm font-medium text-gray-500 mb-1">Repository</h2>
-        <p className="text-base text-gray-900">{worktree.repositoryName}</p>
-        <p className="text-xs text-gray-500 mt-1 break-all">{worktree.repositoryPath}</p>
+        <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Repository</h2>
+        <p className="text-base text-gray-900 dark:text-gray-100">{worktree.repositoryName}</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 break-all">{worktree.repositoryPath}</p>
       </div>
 
       {/* Path */}
       <div className={cardClassName}>
-        <h2 className="text-sm font-medium text-gray-500 mb-1">Path</h2>
-        <p className="text-sm text-gray-700 break-all font-mono">{worktree.path}</p>
+        <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Path</h2>
+        <p className="text-sm text-gray-700 dark:text-gray-300 break-all font-mono">{worktree.path}</p>
       </div>
 
       {/* Status */}
       {worktree.status && (
         <div className={cardClassName}>
-          <h2 className="text-sm font-medium text-gray-500 mb-1">Status</h2>
+          <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Status</h2>
           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-            worktree.status === 'done' ? 'bg-green-100 text-green-800' :
-            worktree.status === 'doing' ? 'bg-blue-100 text-blue-800' :
-            'bg-gray-100 text-gray-800'
+            worktree.status === 'done' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' :
+            worktree.status === 'doing' ? 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-300' :
+            'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
           }`}>
             {worktree.status.toUpperCase()}
           </span>
@@ -330,12 +330,12 @@ const WorktreeInfoFields = memo(function WorktreeInfoFields({
       {/* Description - Editable */}
       <div className={cardClassName}>
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-medium text-gray-500">Description</h2>
+          <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400">Description</h2>
           {!isEditing && (
             <button
               type="button"
               onClick={startEditing}
-              className="text-sm text-blue-600 hover:text-blue-800"
+              className="text-sm text-cyan-600 hover:text-cyan-800 dark:text-cyan-400 dark:hover:text-cyan-300"
             >
               Edit
             </button>
@@ -347,7 +347,7 @@ const WorktreeInfoFields = memo(function WorktreeInfoFields({
               value={text}
               onChange={(e) => setText(e.target.value)}
               placeholder="Add notes about this branch..."
-              className="w-full min-h-[150px] p-3 border border-gray-300 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full min-h-[150px] p-3 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
               autoFocus
             />
             <div className="flex gap-2">
@@ -363,7 +363,7 @@ const WorktreeInfoFields = memo(function WorktreeInfoFields({
                 type="button"
                 onClick={handleCancel}
                 disabled={isSaving}
-                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 text-sm font-medium"
+                className="px-4 py-2 bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600 rounded-lg hover:bg-gray-300 disabled:opacity-50 text-sm font-medium"
               >
                 Cancel
               </button>
@@ -372,7 +372,7 @@ const WorktreeInfoFields = memo(function WorktreeInfoFields({
         ) : (
           <div className="min-h-[50px]">
             {worktree.description ? (
-              <p className="text-sm text-gray-700 whitespace-pre-wrap">{worktree.description}</p>
+              <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{worktree.description}</p>
             ) : (
               <p className="text-sm text-gray-400 italic">No description added yet</p>
             )}
@@ -383,7 +383,7 @@ const WorktreeInfoFields = memo(function WorktreeInfoFields({
       {/* Link */}
       {worktree.link && (
         <div className={cardClassName}>
-          <h2 className="text-sm font-medium text-gray-500 mb-1">Link</h2>
+          <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Link</h2>
           <a
             href={worktree.link}
             target="_blank"
@@ -398,8 +398,8 @@ const WorktreeInfoFields = memo(function WorktreeInfoFields({
       {/* Last Updated */}
       {worktree.updatedAt && (
         <div className={cardClassName}>
-          <h2 className="text-sm font-medium text-gray-500 mb-1">Last Updated</h2>
-          <p className="text-sm text-gray-700">
+          <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Last Updated</h2>
+          <p className="text-sm text-gray-700 dark:text-gray-300">
             {new Date(worktree.updatedAt).toLocaleString()}
           </p>
         </div>
@@ -472,14 +472,14 @@ const DesktopHeader = memo(function DesktopHeader({
     : null;
 
   return (
-    <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-200">
+    <div className="flex items-center justify-between px-4 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
       {/* Left: Menu, Back button and title */}
       <div className="flex items-center gap-3">
         {/* Hamburger menu button */}
         <button
           type="button"
           onClick={onMenuClick}
-          className="p-2 -ml-2 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+          className="p-2 -ml-2 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-gray-800 transition-colors"
           aria-label="Toggle sidebar"
         >
           <svg
@@ -497,11 +497,11 @@ const DesktopHeader = memo(function DesktopHeader({
             />
           </svg>
         </button>
-        <div className="w-px h-6 bg-gray-300" aria-hidden="true" />
+        <div className="w-px h-6 bg-gray-300 dark:bg-gray-600" aria-hidden="true" />
         <button
           type="button"
           onClick={onBackClick}
-          className="flex items-center gap-1 text-gray-600 hover:text-gray-900 transition-colors"
+          className="flex items-center gap-1 text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 transition-colors"
           aria-label="Go back to worktree list"
         >
           <svg
@@ -520,7 +520,7 @@ const DesktopHeader = memo(function DesktopHeader({
           </svg>
           <span className="text-sm font-medium">Back</span>
         </button>
-        <div className="w-px h-6 bg-gray-300" aria-hidden="true" />
+        <div className="w-px h-6 bg-gray-300 dark:bg-gray-600" aria-hidden="true" />
         {/* Status indicator */}
         {statusConfig.type === 'spinner' ? (
           <span
@@ -540,25 +540,25 @@ const DesktopHeader = memo(function DesktopHeader({
         {/* Worktree name, memo, and repository */}
         <div className="flex flex-col min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-semibold text-gray-900 truncate max-w-[200px] leading-tight">
+            <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate max-w-[200px] leading-tight">
               {worktreeName}
             </h1>
             {truncatedDescription && (
               <span
-                className="text-sm text-gray-500 truncate max-w-md"
+                className="text-sm text-gray-500 dark:text-gray-400 truncate max-w-md"
                 title={worktreeDescription}
               >
                 {truncatedDescription}
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2 text-xs text-gray-500">
+          <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
             <span className="truncate max-w-[200px]">
               {repositoryName}
             </span>
             {gitStatus && gitStatus.currentBranch !== '(unknown)' && (
               <>
-                <span className="text-gray-300">/</span>
+                <span className="text-gray-300 dark:text-gray-600">/</span>
                 <span
                   className="truncate max-w-[150px] font-mono"
                   title={gitStatus.currentBranch}
@@ -579,7 +579,7 @@ const DesktopHeader = memo(function DesktopHeader({
       <button
         type="button"
         onClick={onInfoClick}
-        className="relative flex items-center gap-1.5 px-3 py-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+        className="relative flex items-center gap-1.5 px-3 py-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
         aria-label="View worktree information"
       >
         <svg
@@ -653,7 +653,7 @@ const InfoModal = memo(function InfoModal({
         <WorktreeInfoFields
           worktreeId={worktreeId}
           worktree={worktree}
-          cardClassName="bg-gray-50 rounded-lg p-4"
+          cardClassName="bg-gray-50 dark:bg-gray-800 rounded-lg p-4"
           descriptionEditor={descriptionEditor}
           showLogs={showLogs}
           onToggleLogs={() => setShowLogs(!showLogs)}
@@ -673,10 +673,10 @@ const LoadingIndicator = memo(function LoadingIndicator() {
     >
       <div className="flex flex-col items-center gap-3">
         <div
-          className="animate-spin rounded-full h-8 w-8 border-4 border-gray-300 border-t-blue-600"
+          className="animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-cyan-600 dark:border-t-cyan-400"
           aria-hidden="true"
         />
-        <p className="text-gray-600">Loading worktree...</p>
+        <p className="text-gray-600 dark:text-gray-400">Loading worktree...</p>
       </div>
     </div>
   );
@@ -784,7 +784,7 @@ const MobileInfoContent = memo(function MobileInfoContent({
       <WorktreeInfoFields
         worktreeId={worktreeId}
         worktree={worktree}
-        cardClassName="bg-white rounded-lg border border-gray-200 p-4"
+        cardClassName="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4"
         descriptionEditor={descriptionEditor}
         showLogs={showLogs}
         onToggleLogs={() => setShowLogs(!showLogs)}
@@ -1995,7 +1995,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             hasUpdate={hasUpdate}
           />
           {/* Issue #4/#368: CLI Tool Tab Switcher (dynamic from selectedAgents) */}
-          <div className="px-4 py-2 bg-white border-b border-gray-200 flex items-center justify-between">
+          <div className="px-4 py-2 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
             <nav className="flex gap-4" aria-label="CLI Tool Selection">
               {selectedAgents.map((tool) => {
                 const toolStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[tool]);
@@ -2006,8 +2006,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                     onClick={() => setActiveCliTab(tool)}
                     className={`pb-2 px-2 border-b-2 font-medium text-sm transition-colors flex items-center gap-1.5 ${
                       activeCliTab === tool
-                        ? 'border-blue-600 text-blue-600'
-                        : 'border-transparent text-gray-600 hover:text-gray-900'
+                        ? 'border-cyan-600 text-cyan-600'
+                        : 'border-transparent text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
                     }`}
                     aria-current={activeCliTab === tool ? 'page' : undefined}
                   >
@@ -2058,7 +2058,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               maxLeftWidth={60}
             />
           </div>
-          <div className="flex-shrink-0 border-t border-gray-200 p-4 bg-gray-50">
+          <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-800">
             <MessageInput
               worktreeId={worktreeId}
               onMessageSent={handleMessageSent}
@@ -2141,14 +2141,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             showCloseButton={true}
           >
             <div className="space-y-4">
-              <p className="text-sm text-gray-700">
+              <p className="text-sm text-gray-700 dark:text-gray-300">
                 {tWorktree('session.endWarning')}
               </p>
               <div className="flex justify-end gap-3 pt-2">
                 <button
                   type="button"
                   onClick={handleKillCancel}
-                  className="px-4 py-2 text-sm font-medium rounded-md bg-gray-200 hover:bg-gray-300 text-gray-700"
+                  className="px-4 py-2 text-sm font-medium rounded-md bg-gray-200 hover:bg-gray-300 text-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-300"
                 >
                   {tCommon('cancel')}
                 </button>
@@ -2205,7 +2205,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         )}
 
         {/* Auto Yes + CLI Tool Tabs combined row (Mobile) */}
-        <div className="sticky top-0 z-30 flex items-center justify-between px-3 py-1.5 bg-gray-50 border-b border-gray-200">
+        <div className="sticky top-0 z-30 flex items-center justify-between px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
           {/* Left: Auto Yes toggle (inline mode) */}
           <AutoYesToggle
             enabled={autoYesEnabled}
@@ -2305,7 +2305,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
         {/* Message Input - fixed above tab bar */}
         <div
-          className="fixed left-0 right-0 border-t border-gray-200 bg-white p-2 z-30"
+          className="fixed left-0 right-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-2 z-30"
           style={{ bottom: 'calc(4rem + env(safe-area-inset-bottom, 0px))' }}
         >
           <MessageInput

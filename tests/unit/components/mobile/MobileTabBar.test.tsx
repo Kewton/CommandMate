@@ -53,7 +53,7 @@ describe('MobileTabBar', () => {
 
       const terminalTab = screen.getByRole('tab', { name: /terminal/i });
       expect(terminalTab).toHaveAttribute('aria-selected', 'true');
-      expect(terminalTab.className).toMatch(/active|selected|primary|bg-blue|text-blue/);
+      expect(terminalTab.className).toMatch(/active|selected|primary|bg-cyan|text-cyan/);
     });
 
     it('should highlight history tab when activeTab is history', () => {

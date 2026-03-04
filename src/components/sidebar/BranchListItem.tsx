@@ -83,8 +83,8 @@ export const BranchListItem = memo(function BranchListItem({
       className={`
         w-full px-4 py-3 flex flex-col gap-1
         hover:bg-gray-800 transition-colors
-        focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500
-        ${isSelected ? 'bg-gray-700 border-l-2 border-blue-500' : 'border-l-2 border-transparent'}
+        focus:outline-none focus:ring-2 focus:ring-inset focus:ring-cyan-500
+        ${isSelected ? 'bg-gray-700 border-l-2 border-cyan-500' : 'border-l-2 border-transparent'}
       `}
     >
       {/* Main row: CLI status dots, info, unread */}
@@ -116,7 +116,7 @@ export const BranchListItem = memo(function BranchListItem({
         {branch.hasUnread && (
           <span
             data-testid="unread-indicator"
-            className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"
+            className="w-2 h-2 rounded-full bg-cyan-500 flex-shrink-0"
             aria-label="Has unread messages"
           />
         )}

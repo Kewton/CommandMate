@@ -28,7 +28,7 @@ const BUTTON_BASE_STYLES = `
 const BUTTON_PRIMARY_STYLES = 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500';
 
 /** Secondary button styles */
-const BUTTON_SECONDARY_STYLES = 'bg-white border-2 border-gray-300 hover:bg-gray-50 text-gray-800 focus:ring-gray-500';
+const BUTTON_SECONDARY_STYLES = 'bg-white dark:bg-gray-700 border-2 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 focus:ring-gray-500';
 
 /**
  * Props for PromptPanel component
@@ -150,13 +150,13 @@ function PromptPanelContent({
 
       {/* Instruction Text (context preceding the prompt) */}
       {promptData.instructionText && (
-        <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-gray-600 bg-gray-50 rounded p-2 border border-gray-200">
+        <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 rounded p-2 border border-gray-200 dark:border-gray-700">
           {promptData.instructionText}
         </div>
       )}
 
       {/* Question */}
-      <p className="text-gray-800 leading-relaxed">{promptData.question}</p>
+      <p className="text-gray-800 dark:text-gray-200 leading-relaxed">{promptData.question}</p>
 
       {/* Answering indicator */}
       {isDisabled && (
@@ -271,8 +271,8 @@ function MultipleChoicePromptActions({
     const isSelected = selectedOption === optionNumber;
     const baseClasses = 'flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-all';
     const selectionClasses = isSelected
-      ? 'bg-blue-50 border-2 border-blue-500'
-      : 'bg-white border-2 border-gray-200 hover:border-gray-300';
+      ? 'bg-cyan-50 dark:bg-cyan-900/30 border-2 border-cyan-500'
+      : 'bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600';
     const disabledClasses = disabled ? 'opacity-50 cursor-not-allowed' : '';
     return `${baseClasses} ${selectionClasses} ${disabledClasses}`;
   }, [selectedOption, disabled]);
@@ -321,7 +321,7 @@ function MultipleChoicePromptActions({
             onChange={(e) => onTextInputChange(e.target.value)}
             disabled={disabled}
             placeholder={t('enterValuePlaceholder')}
-            className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 disabled:opacity-50"
+            className="w-full px-4 py-2 border-2 border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg focus:outline-none focus:border-cyan-500 disabled:opacity-50"
           />
         </div>
       )}

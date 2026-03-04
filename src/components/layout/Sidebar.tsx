@@ -14,6 +14,7 @@ import { useSidebarContext } from '@/contexts/SidebarContext';
 import { BranchListItem } from '@/components/sidebar/BranchListItem';
 import { SortSelector } from '@/components/sidebar/SortSelector';
 import { LocaleSwitcher } from '@/components/common/LocaleSwitcher';
+import { ThemeToggle } from '@/components/common/ThemeToggle';
 import { LogoutButton } from '@/components/common/LogoutButton';
 import { toBranchItem } from '@/types/sidebar';
 import { sortBranches } from '@/lib/sidebar-utils';
@@ -93,7 +94,7 @@ export const Sidebar = memo(function Sidebar() {
             w-full px-3 py-2 rounded-md
             bg-gray-800 text-white placeholder-gray-400
             border border-gray-600
-            focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+            focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent
           "
         />
       </div>
@@ -119,9 +120,14 @@ export const Sidebar = memo(function Sidebar() {
         )}
       </div>
 
-      {/* Footer: Language Switcher + Logout */}
+      {/* Footer: Language Switcher + Theme Toggle + Logout */}
       <div className="flex-shrink-0 px-4 py-3 border-t border-gray-700 space-y-2">
-        <LocaleSwitcher />
+        <div className="flex items-center gap-2">
+          <div className="flex-1">
+            <LocaleSwitcher />
+          </div>
+          <ThemeToggle />
+        </div>
         <LogoutButton />
       </div>
     </nav>

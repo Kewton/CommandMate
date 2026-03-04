@@ -46,10 +46,10 @@ const BASE_CLASSES = [
   'bg-gray-700',
   'transition-colors',
   'duration-150',
-  'hover:bg-blue-500',
+  'hover:bg-cyan-500',
   'focus:outline-none',
   'focus:ring-2',
-  'focus:ring-blue-500',
+  'focus:ring-cyan-500',
   'focus:ring-offset-2',
   'focus:ring-offset-gray-900',
 ] as const;
@@ -242,7 +242,7 @@ export const PaneResizer = memo(function PaneResizer({
   const className = useMemo(() => {
     const orientationClasses = isHorizontal ? HORIZONTAL_CLASSES : VERTICAL_CLASSES;
     const draggingClasses = isDragging
-      ? ['bg-blue-500', 'dragging', isHorizontal ? 'w-2' : 'h-2']
+      ? ['bg-cyan-500', 'dragging', isHorizontal ? 'w-2' : 'h-2']
       : [];
 
     return [...BASE_CLASSES, ...orientationClasses, ...draggingClasses].join(' ');

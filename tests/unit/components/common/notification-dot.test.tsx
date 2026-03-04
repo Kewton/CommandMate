@@ -19,13 +19,13 @@ describe('NotificationDot', () => {
       expect(dot.tagName).toBe('SPAN');
     });
 
-    it('should apply base styles: w-2 h-2 rounded-full bg-blue-500', () => {
+    it('should apply base styles: w-2 h-2 rounded-full bg-cyan-500', () => {
       render(<NotificationDot data-testid="test-dot" />);
       const dot = screen.getByTestId('test-dot');
       expect(dot.className).toContain('w-2');
       expect(dot.className).toContain('h-2');
       expect(dot.className).toContain('rounded-full');
-      expect(dot.className).toContain('bg-blue-500');
+      expect(dot.className).toContain('bg-cyan-500');
     });
   });
 
@@ -56,7 +56,7 @@ describe('NotificationDot', () => {
       expect(dot.className).toContain('w-2');
       expect(dot.className).toContain('h-2');
       expect(dot.className).toContain('rounded-full');
-      expect(dot.className).toContain('bg-blue-500');
+      expect(dot.className).toContain('bg-cyan-500');
       expect(dot.className).toContain('absolute');
       expect(dot.className).toContain('top-1');
       expect(dot.className).toContain('right-1');
@@ -66,7 +66,7 @@ describe('NotificationDot', () => {
       render(<NotificationDot data-testid="test-dot" className="" />);
       const dot = screen.getByTestId('test-dot');
       expect(dot.className).toContain('w-2');
-      expect(dot.className).toContain('bg-blue-500');
+      expect(dot.className).toContain('bg-cyan-500');
       // Should not have trailing spaces
       expect(dot.className).toBe(dot.className.trim());
     });
@@ -83,7 +83,7 @@ describe('NotificationDot', () => {
       const dot = container.querySelector('span');
       expect(dot).not.toBeNull();
       expect(dot!.className).toContain('w-2');
-      expect(dot!.className).toContain('bg-blue-500');
+      expect(dot!.className).toContain('bg-cyan-500');
     });
   });
 

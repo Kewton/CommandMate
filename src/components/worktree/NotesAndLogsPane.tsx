@@ -90,7 +90,7 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
   return (
     <div className={`flex flex-col h-full ${className}`}>
       {/* Sub-tab switcher */}
-      <div className="flex border-b border-gray-200 bg-white flex-shrink-0">
+      <div className="flex border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex-shrink-0">
         {SUB_TABS.map((tab) => (
           <button
             key={tab.id}

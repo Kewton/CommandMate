@@ -234,12 +234,12 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   return (
     <div ref={containerRef} className="space-y-2 relative">
       {error && (
-        <div className="p-2 bg-red-50 border border-red-200 rounded text-sm text-red-800">
+        <div className="p-2 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded text-sm text-red-800 dark:text-red-300">
           {error}
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="flex items-end gap-2 bg-white border border-gray-300 rounded-lg px-4 py-2 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500">
+      <form onSubmit={handleSubmit} className="flex items-end gap-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus-within:border-cyan-500 focus-within:ring-1 focus-within:ring-cyan-500">
         {/* Mobile: Slash command button */}
         {isMobile && (
           <button
@@ -250,7 +250,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
               }
               setShowCommandSelector(true);
             }}
-            className="flex-shrink-0 p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-colors"
+            className="flex-shrink-0 p-2 text-gray-500 hover:text-cyan-600 hover:bg-cyan-50 dark:text-gray-400 dark:hover:text-cyan-400 dark:hover:bg-cyan-900/30 rounded-full transition-colors"
             aria-label="Show slash commands"
             data-testid="mobile-command-button"
           >
@@ -284,7 +284,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         <button
           type="submit"
           disabled={!message.trim() || sending}
-          className="flex-shrink-0 p-2 text-blue-600 hover:bg-blue-50 rounded-full transition-colors disabled:text-gray-300 disabled:hover:bg-transparent"
+          className="flex-shrink-0 p-2 text-cyan-600 hover:bg-cyan-50 dark:text-cyan-400 dark:hover:bg-cyan-900/30 rounded-full transition-colors disabled:text-gray-300 dark:disabled:text-gray-600 disabled:hover:bg-transparent"
           aria-label="Send message"
         >
           {sending ? (

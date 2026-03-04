@@ -154,10 +154,10 @@ export const LeftPaneTabSwitcher = memo(function LeftPaneTabSwitcher({
     (tabId: LeftPaneTab) => {
       const isActive = tabId === activeTab;
       const baseStyles =
-        'flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset';
+        'flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-inset';
       const activeStyles = isActive
-        ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600'
-        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50';
+        ? 'bg-cyan-50 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400'
+        : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800';
       return `${baseStyles} ${activeStyles}`;
     },
     [activeTab]
@@ -167,7 +167,7 @@ export const LeftPaneTabSwitcher = memo(function LeftPaneTabSwitcher({
     <div
       role="tablist"
       aria-label="Left pane view switcher"
-      className={`flex border-b border-gray-200 bg-white ${className}`}
+      className={`flex border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 ${className}`}
     >
       {TABS.map((tab) => (
         <button

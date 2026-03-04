@@ -148,16 +148,16 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
         {/* Bottom sheet */}
         <div
           data-testid="slash-command-bottom-sheet"
-          className="fixed bottom-0 left-0 right-0 bg-white rounded-t-xl z-50 max-h-[70vh] flex flex-col shadow-xl"
+          className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-900 rounded-t-xl z-50 max-h-[70vh] flex flex-col shadow-xl"
         >
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
             <h2 className="text-lg font-semibold">Commands</h2>
             <button
               type="button"
               onClick={onClose}
               aria-label="Close"
-              className="p-2 rounded-full hover:bg-gray-100"
+              className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800"
             >
               <svg
                 className="w-5 h-5"
@@ -183,7 +183,7 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Search commands..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
             />
           </div>
 
@@ -200,7 +200,7 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                 </svg>
               </span>
-              <span className="text-gray-600">Enter custom command...</span>
+              <span className="text-gray-600 dark:text-gray-400">Enter custom command...</span>
             </button>
           )}
 
@@ -220,7 +220,7 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
   return (
     <div
       role="listbox"
-      className="absolute bg-white border border-gray-200 rounded-lg shadow-lg z-50 w-80 max-h-96 flex flex-col"
+      className="absolute bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 w-80 max-h-96 flex flex-col"
       style={position ? { top: position.top, left: position.left } : { bottom: '100%', left: 0, marginBottom: '4px' }}
     >
       {/* Search */}
@@ -231,7 +231,7 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="Search commands..."
-          className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-cyan-500"
         />
       </div>
 
@@ -248,7 +248,7 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
             </svg>
           </span>
-          <span className="text-gray-600">Enter custom command...</span>
+          <span className="text-gray-600 dark:text-gray-400">Enter custom command...</span>
         </button>
       )}
 
@@ -263,10 +263,10 @@ export const SlashCommandSelector = memo(function SlashCommandSelector({
       {/* Keyboard hints */}
       <div className="px-3 py-1.5 border-t border-gray-100 text-xs text-gray-400 flex gap-3">
         <span>
-          <kbd className="px-1 py-0.5 bg-gray-100 rounded">Enter</kbd> select
+          <kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded">Enter</kbd> select
         </span>
         <span>
-          <kbd className="px-1 py-0.5 bg-gray-100 rounded">Esc</kbd> close
+          <kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded">Esc</kbd> close
         </span>
       </div>
     </div>

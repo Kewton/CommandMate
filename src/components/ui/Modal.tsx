@@ -95,16 +95,16 @@ export function Modal({
       <div className="relative flex min-h-full items-center justify-center p-2 sm:p-4">
         <div
           ref={modalRef}
-          className={`relative w-full ${sizeClasses[size]} max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-2rem)] flex flex-col bg-white rounded-lg shadow-xl transform transition-all`}
+          className={`relative w-full ${sizeClasses[size]} max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-2rem)] flex flex-col bg-white dark:bg-gray-900 rounded-lg shadow-xl transform transition-all`}
         >
           {/* Header */}
           {(title || showCloseButton) && (
-            <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200 flex-shrink-0">
-              <h3 className="text-base sm:text-lg font-semibold text-gray-900 truncate pr-2">{title}</h3>
+            <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+              <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100 truncate pr-2">{title}</h3>
               {showCloseButton && (
                 <button
                   onClick={onClose}
-                  className="text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0"
+                  className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors flex-shrink-0"
                 >
                   <svg
                     className="w-5 h-5 sm:w-6 sm:h-6"

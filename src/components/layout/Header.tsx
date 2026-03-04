@@ -22,13 +22,13 @@ export interface HeaderProps {
  */
 export function Header({ title = 'CommandMate' }: HeaderProps) {
   return (
-    <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
+    <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50">
       <div className="container-custom">
         <div className="flex items-center justify-between h-16">
           {/* Logo and Title */}
           <div className="flex items-center space-x-4">
             <Link href="/" className="flex items-center space-x-2 hover:opacity-80 transition-opacity">
-              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+              <div className="w-8 h-8 bg-cyan-600 rounded-lg flex items-center justify-center">
                 <svg
                   className="w-5 h-5 text-white"
                   fill="none"
@@ -43,7 +43,7 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
                   />
                 </svg>
               </div>
-              <h1 className="text-xl font-bold text-gray-900">{title}</h1>
+              <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">{title}</h1>
             </Link>
           </div>
 
@@ -51,7 +51,7 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
           <nav className="flex items-center space-x-6">
             <Link
               href="/"
-              className="text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
+              className="text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
             >
               Worktrees
             </Link>
@@ -59,7 +59,7 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
               href="https://github.com/kewton/MyCodeBranchDesk"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors flex items-center space-x-1"
+              className="text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors flex items-center space-x-1"
             >
               <svg
                 className="w-5 h-5"

@@ -18,8 +18,8 @@ export default async function RootLayout({
   const timeZone = await getTimeZone();
 
   return (
-    <html lang={locale}>
-      <body className="min-h-screen bg-gray-50">
+    <html lang={locale} suppressHydrationWarning>
+      <body className="min-h-screen bg-gray-50 dark:bg-cmd-bg-dark">
         <AppProviders locale={locale} messages={messages as Record<string, unknown>} timeZone={timeZone} authEnabled={!!process.env.CM_AUTH_TOKEN_HASH}>
           {children}
         </AppProviders>

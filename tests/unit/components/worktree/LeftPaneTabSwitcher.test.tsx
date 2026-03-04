@@ -78,8 +78,8 @@ describe('LeftPaneTabSwitcher', () => {
       render(<LeftPaneTabSwitcher activeTab="history" onTabChange={onTabChange} />);
 
       const historyTab = screen.getByRole('tab', { name: /history/i });
-      expect(historyTab).toHaveClass('bg-blue-50');
-      expect(historyTab).toHaveClass('text-blue-600');
+      expect(historyTab).toHaveClass('bg-cyan-50');
+      expect(historyTab).toHaveClass('text-cyan-600');
     });
 
     it('should apply inactive styling to inactive tab', () => {
@@ -87,7 +87,7 @@ describe('LeftPaneTabSwitcher', () => {
       render(<LeftPaneTabSwitcher activeTab="history" onTabChange={onTabChange} />);
 
       const filesTab = screen.getByRole('tab', { name: /files/i });
-      expect(filesTab).not.toHaveClass('bg-blue-50');
+      expect(filesTab).not.toHaveClass('bg-cyan-50');
     });
   });
 

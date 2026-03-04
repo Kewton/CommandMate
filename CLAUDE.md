@@ -237,6 +237,7 @@ tests/
 | `src/lib/locale-cookie.ts` | ロケールCookieユーティリティ（SameSite=Lax、条件付きSecure、1年有効期限） |
 | `src/hooks/useLocaleSwitch.ts` | ロケール切替フック（バリデーション、Cookie/localStorage永続化、reload） |
 | `src/components/common/LocaleSwitcher.tsx` | 言語切替ドロップダウンコンポーネント（Sidebar下部配置） |
+| `src/components/common/ThemeToggle.tsx` | ダーク/ライトテーマ切替トグルコンポーネント（Issue #424: `'use client'`、`useTheme()`でtheme/setTheme取得、mounted stateでSSR hydration対策、Sun/Moonアイコン切替（lucide-react）、Sidebar下部LocaleSwitcherの隣に配置、`focus:ring-cyan-500`） |
 | `src/components/common/NotificationDot.tsx` | 通知ドットバッジ共通コンポーネント（Issue #278: DRY原則準拠、w-2 h-2 rounded-full bg-blue-500、Desktop/Mobile通知インジケーター統一） |
 | `src/lib/date-locale.ts` | date-fnsロケールマッピング（getDateFnsLocale()、enUS/jaサポート） |
 | `src/config/github-links.ts` | GitHub URL定数の一元管理（Issue #264: GITHUB_REPO_BASE_URL派生、DRY原則対応、SSRF防止のためGITHUB_API_URLは除外） |

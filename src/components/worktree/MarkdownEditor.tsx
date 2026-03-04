@@ -549,7 +549,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
 
   // Calculate container classes for maximized state
   const containerClasses = useMemo(() => {
-    const base = 'flex flex-col bg-white';
+    const base = 'flex flex-col bg-white dark:bg-gray-900';
 
     if (isMaximized && isFallbackMode) {
       // CSS fallback for fullscreen (iOS Safari, etc.)
@@ -629,11 +629,11 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     return (
       <div
         data-testid="markdown-editor"
-        className="flex items-center justify-center h-full bg-white"
+        className="flex items-center justify-center h-full bg-white dark:bg-gray-900"
       >
         <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 border-t-blue-600" />
-          <p className="mt-4 text-gray-600">Loading...</p>
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-cyan-600 dark:border-t-cyan-400" />
+          <p className="mt-4 text-gray-600 dark:text-gray-400">Loading...</p>
         </div>
       </div>
     );
@@ -644,15 +644,15 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     return (
       <div
         data-testid="markdown-editor-error"
-        className="flex items-center justify-center h-full bg-white"
+        className="flex items-center justify-center h-full bg-white dark:bg-gray-900"
       >
         <div className="text-center">
           <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-          <p className="text-red-600">{error}</p>
+          <p className="text-red-600 dark:text-red-400">{error}</p>
           {onClose && (
             <button
               onClick={onClose}
-              className="mt-4 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg"
+              className="mt-4 px-4 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg dark:text-gray-300"
             >
               Close
             </button>
@@ -678,15 +678,15 @@ export const MarkdownEditor = memo(function MarkdownEditor({
       aria-modal={isMaximized && isFallbackMode ? 'true' : undefined}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-gray-50">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
         {/* File path and dirty indicator */}
         <div className="flex items-center gap-2 min-w-0 flex-shrink">
-          <FileText className="h-4 w-4 text-gray-500 flex-shrink-0" />
-          <span className="text-sm font-medium text-gray-700 truncate">{filePath}</span>
+          <FileText className="h-4 w-4 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">{filePath}</span>
           {isDirty && (
             <span
               data-testid="dirty-indicator"
-              className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 flex-shrink-0"
+              className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-300 flex-shrink-0"
             >
               Unsaved
             </span>
@@ -697,15 +697,15 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         <div className="flex items-center gap-2 flex-shrink-0">
           {/* View mode buttons - hide on mobile portrait with split mode */}
           {!showMobileTabs && (
-            <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+            <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
               <button
                 data-testid="view-mode-split"
                 aria-pressed={viewMode === 'split'}
                 onClick={() => handleViewModeChange('split')}
                 className={`p-1.5 rounded ${
                   viewMode === 'split'
-                    ? 'bg-white shadow-sm text-blue-600'
-                    : 'text-gray-500 hover:text-gray-700'
+                    ? 'bg-white dark:bg-gray-600 shadow-sm text-cyan-600 dark:text-cyan-400'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
                 }`}
                 title="Split view"
               >
@@ -717,8 +717,8 @@ export const MarkdownEditor = memo(function MarkdownEditor({
                 onClick={() => handleViewModeChange('editor')}
                 className={`p-1.5 rounded ${
                   viewMode === 'editor'
-                    ? 'bg-white shadow-sm text-blue-600'
-                    : 'text-gray-500 hover:text-gray-700'
+                    ? 'bg-white dark:bg-gray-600 shadow-sm text-cyan-600 dark:text-cyan-400'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
                 }`}
                 title="Editor only"
               >
@@ -730,8 +730,8 @@ export const MarkdownEditor = memo(function MarkdownEditor({
                 onClick={() => handleViewModeChange('preview')}
                 className={`p-1.5 rounded ${
                   viewMode === 'preview'
-                    ? 'bg-white shadow-sm text-blue-600'
-                    : 'text-gray-500 hover:text-gray-700'
+                    ? 'bg-white dark:bg-gray-600 shadow-sm text-cyan-600 dark:text-cyan-400'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
                 }`}
                 title="Preview only"
               >
@@ -744,8 +744,8 @@ export const MarkdownEditor = memo(function MarkdownEditor({
           <button
             data-testid="copy-content-button"
             onClick={handleCopy}
-            className={`p-1.5 hover:bg-gray-100 rounded ${
-              copied ? 'text-green-500' : 'text-gray-500 hover:text-gray-700'
+            className={`p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded ${
+              copied ? 'text-green-500' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
             }`}
             title="Copy content"
           >
@@ -760,7 +760,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
           <button
             data-testid="maximize-button"
             onClick={toggleFullscreen}
-            className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
+            className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
             title={isMaximized ? 'Exit fullscreen (ESC)' : 'Enter fullscreen (Ctrl+Shift+F)'}
             aria-pressed={isMaximized}
           >
@@ -773,14 +773,14 @@ export const MarkdownEditor = memo(function MarkdownEditor({
 
           {/* Auto-save toggle */}
           <div className="flex items-center gap-1.5">
-            <span className="text-xs text-gray-500">Auto</span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">Auto</span>
             <button
               data-testid="auto-save-toggle"
               role="switch"
               aria-checked={isAutoSaveEnabled}
               onClick={() => handleAutoSaveToggle(!isAutoSaveEnabled)}
               className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                isAutoSaveEnabled ? 'bg-blue-600' : 'bg-gray-300'
+                isAutoSaveEnabled ? 'bg-cyan-600' : 'bg-gray-300 dark:bg-gray-600'
               }`}
             >
               <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
@@ -791,7 +791,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
 
           {/* Save button OR auto-save indicator */}
           {isAutoSaveEnabled ? (
-            <span data-testid="auto-save-indicator" className="text-sm text-gray-500">
+            <span data-testid="auto-save-indicator" className="text-sm text-gray-500 dark:text-gray-400">
               {isAutoSaving ? 'Saving...' : isDirty ? '' : 'Saved'}
             </span>
           ) : (
@@ -801,8 +801,8 @@ export const MarkdownEditor = memo(function MarkdownEditor({
               disabled={!isDirty || isSaving}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 isDirty && !isSaving
-                  ? 'bg-blue-600 text-white hover:bg-blue-700'
-                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  ? 'bg-cyan-600 text-white hover:bg-cyan-700'
+                  : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
               }`}
             >
               <Save className="h-4 w-4" />
@@ -815,7 +815,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
             <button
               data-testid="close-button"
               onClick={handleClose}
-              className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
+              className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
               title="Close"
             >
               <X className="h-4 w-4" />
@@ -838,7 +838,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
       {showLargeFileWarning && (
         <div
           data-testid="large-file-warning"
-          className="flex items-center gap-2 px-4 py-2 bg-yellow-50 border-b border-yellow-200 text-yellow-800 text-sm"
+          className="flex items-center gap-2 px-4 py-2 bg-yellow-50 dark:bg-yellow-900/30 border-b border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-300 text-sm"
         >
           <AlertTriangle className="h-4 w-4" />
           Large file: Performance may be affected.
@@ -853,14 +853,14 @@ export const MarkdownEditor = memo(function MarkdownEditor({
 
       {/* Mobile tab bar (portrait mode with split view) */}
       {showMobileTabs && (
-        <div className="flex border-b border-gray-200">
+        <div className="flex border-b border-gray-200 dark:border-gray-700">
           <button
             data-testid="mobile-tab-editor"
             onClick={() => setMobileTab('editor')}
             className={`flex-1 py-2 text-sm font-medium ${
               mobileTab === 'editor'
-                ? 'text-blue-600 border-b-2 border-blue-600'
-                : 'text-gray-500'
+                ? 'text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400'
+                : 'text-gray-500 dark:text-gray-400'
             }`}
           >
             <FileText className="h-4 w-4 inline-block mr-1" />
@@ -871,8 +871,8 @@ export const MarkdownEditor = memo(function MarkdownEditor({
             onClick={() => setMobileTab('preview')}
             className={`flex-1 py-2 text-sm font-medium ${
               mobileTab === 'preview'
-                ? 'text-blue-600 border-b-2 border-blue-600'
-                : 'text-gray-500'
+                ? 'text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400'
+                : 'text-gray-500 dark:text-gray-400'
             }`}
           >
             <Eye className="h-4 w-4 inline-block mr-1" />
@@ -901,7 +901,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
                 value={content}
                 onChange={handleContentChange}
                 onKeyDown={handleKeyDown}
-                className="flex-1 p-4 font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset"
+                className="flex-1 p-4 font-mono text-sm resize-none bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-inset"
                 placeholder="Start typing markdown..."
                 spellCheck={false}
               />
@@ -922,7 +922,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
               value={content}
               onChange={handleContentChange}
               onKeyDown={handleKeyDown}
-              className="flex-1 p-4 font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset"
+              className="flex-1 p-4 font-mono text-sm resize-none bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-inset"
               placeholder="Start typing markdown..."
               spellCheck={false}
             />
@@ -950,7 +950,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
             >
               <div
                 data-testid="markdown-preview"
-                className="flex-1 p-4 overflow-y-auto prose prose-sm max-w-none"
+                className="flex-1 p-4 overflow-y-auto prose prose-sm dark:prose-invert max-w-none"
               >
                 {markdownPreview}
               </div>
@@ -967,7 +967,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
           >
             <div
               data-testid="markdown-preview"
-              className="flex-1 p-4 overflow-y-auto prose prose-sm max-w-none"
+              className="flex-1 p-4 overflow-y-auto prose prose-sm dark:prose-invert max-w-none"
             >
               {markdownPreview}
             </div>
