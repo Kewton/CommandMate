@@ -171,18 +171,27 @@ function FileToolbar({ filePath, isMaximized, onToggleMaximize, copyableContent 
   );
 }
 
-/** Syntax-highlighted code viewer */
+/** Syntax-highlighted code viewer with line numbers */
 function CodeViewer({ content, extension }: { content: string; extension: string }) {
   const highlighted = hljs.highlightAuto(content);
+  const lineCount = content.split('\n').length;
   return (
-    <div className="p-4 overflow-auto h-full">
-      <pre className="text-sm overflow-x-auto text-gray-900 dark:text-gray-100">
-        <code
-          data-testid="file-content-code"
-          className={`language-${extension} hljs`}
-          dangerouslySetInnerHTML={{ __html: highlighted.value }}
-        />
-      </pre>
+    <div className="overflow-auto h-full">
+      <div className="flex text-sm">
+        <div className="flex-shrink-0 py-4 pl-3 pr-2 text-right select-none text-gray-400 dark:text-gray-600 font-mono border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 sticky left-0">
+          {Array.from({ length: lineCount }, (_, i) => (
+            <div key={i + 1} className="leading-[1.5rem]">{i + 1}</div>
+          ))}
+        </div>
+        <pre className="flex-1 p-4 overflow-x-auto text-gray-900 dark:text-gray-100 m-0">
+          <code
+            data-testid="file-content-code"
+            className={`language-${extension} hljs`}
+            style={{ lineHeight: '1.5rem' }}
+            dangerouslySetInnerHTML={{ __html: highlighted.value }}
+          />
+        </pre>
+      </div>
     </div>
   );
 }

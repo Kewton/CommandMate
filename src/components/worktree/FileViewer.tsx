@@ -237,14 +237,23 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
         </div>
       );
     }
+    const lineCount = content.content.split('\n').length;
     return (
-      <div className="p-4">
-        <pre className="text-sm overflow-x-auto text-gray-900 dark:text-gray-100">
-          <code
-            className={`language-${content.extension} hljs`}
-            dangerouslySetInnerHTML={{ __html: hljs.highlightAuto(content.content).value }}
-          />
-        </pre>
+      <div className="overflow-auto">
+        <div className="flex text-sm">
+          <div className="flex-shrink-0 py-4 pl-3 pr-2 text-right select-none text-gray-400 dark:text-gray-600 font-mono border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 sticky left-0">
+            {Array.from({ length: lineCount }, (_, i) => (
+              <div key={i + 1} className="leading-[1.5rem]">{i + 1}</div>
+            ))}
+          </div>
+          <pre className="flex-1 p-4 overflow-x-auto text-gray-900 dark:text-gray-100 m-0">
+            <code
+              className={`language-${content.extension} hljs`}
+              style={{ lineHeight: '1.5rem' }}
+              dangerouslySetInnerHTML={{ __html: hljs.highlightAuto(content.content).value }}
+            />
+          </pre>
+        </div>
       </div>
     );
   };
