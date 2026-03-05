@@ -9,7 +9,7 @@
 
 'use client';
 
-import { useReducer, useCallback } from 'react';
+import { useReducer, useCallback, useEffect, useRef } from 'react';
 import type { FileContent } from '@/types/models';
 
 // ============================================================================
@@ -18,6 +18,15 @@ import type { FileContent } from '@/types/models';
 
 /** Maximum number of simultaneously open file tabs */
 export const MAX_FILE_TABS = 5;
+
+/** localStorage key prefix for file tab persistence */
+const STORAGE_KEY_PREFIX = 'commandmate:file-tabs:';
+
+/** Persisted tab data (paths only, content is re-fetched) */
+interface PersistedTabData {
+  paths: string[];
+  activePath: string | null;
+}
 
 // ============================================================================
 // Types
@@ -54,7 +63,8 @@ export type FileTabsAction =
   | { type: 'SET_LOADING'; path: string; loading: boolean }
   | { type: 'SET_ERROR'; path: string; error: string }
   | { type: 'RENAME_FILE'; oldPath: string; newPath: string }
-  | { type: 'DELETE_FILE'; path: string };
+  | { type: 'DELETE_FILE'; path: string }
+  | { type: 'RESTORE'; paths: string[]; activePath: string | null };
 
 // ============================================================================
 // Helper Functions
@@ -202,6 +212,23 @@ export function fileTabsReducer(state: FileTabsState, action: FileTabsAction): F
       return fileTabsReducer(state, { type: 'CLOSE_TAB', path: action.path });
     }
 
+    case 'RESTORE': {
+      const tabs: FileTab[] = action.paths
+        .slice(0, MAX_FILE_TABS)
+        .map((path) => ({
+          path,
+          name: extractFileName(path),
+          content: null,
+          loading: false,
+          error: null,
+        }));
+      if (tabs.length === 0) return initialState;
+      const activeIndex = action.activePath
+        ? Math.max(0, tabs.findIndex((t) => t.path === action.activePath))
+        : 0;
+      return { tabs, activeIndex };
+    }
+
     default:
       return state;
   }
@@ -222,13 +249,63 @@ export interface UseFileTabsReturn {
   onFileDeleted: (path: string) => void;
 }
 
+/** Read persisted tab data from localStorage */
+function readPersistedTabs(worktreeId: string): PersistedTabData | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY_PREFIX + worktreeId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (
+      typeof parsed === 'object' && parsed !== null &&
+      Array.isArray(parsed.paths) &&
+      parsed.paths.every((p: unknown) => typeof p === 'string') &&
+      (parsed.activePath === null || typeof parsed.activePath === 'string')
+    ) {
+      return parsed as PersistedTabData;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+/** Write persisted tab data to localStorage */
+function writePersistedTabs(worktreeId: string, state: FileTabsState): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const data: PersistedTabData = {
+      paths: state.tabs.map((t) => t.path),
+      activePath: state.activeIndex !== null ? state.tabs[state.activeIndex]?.path ?? null : null,
+    };
+    window.localStorage.setItem(STORAGE_KEY_PREFIX + worktreeId, JSON.stringify(data));
+  } catch { /* quota exceeded or unavailable */ }
+}
+
 /**
  * Hook for managing file tabs in the desktop file panel.
+ * Persists open tab paths to localStorage per worktreeId.
  *
+ * @param worktreeId - Worktree identifier for localStorage scoping
  * @returns File tabs state and action dispatchers
  */
-export function useFileTabs(): UseFileTabsReturn {
+export function useFileTabs(worktreeId: string): UseFileTabsReturn {
   const [state, dispatch] = useReducer(fileTabsReducer, initialState);
+  const restoredRef = useRef(false);
+
+  // Restore tabs from localStorage on mount
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    const persisted = readPersistedTabs(worktreeId);
+    if (persisted && persisted.paths.length > 0) {
+      dispatch({ type: 'RESTORE', paths: persisted.paths, activePath: persisted.activePath });
+    }
+  }, [worktreeId]);
+
+  // Persist tabs to localStorage on state change (skip initial empty state before restore)
+  useEffect(() => {
+    if (!restoredRef.current) return;
+    writePersistedTabs(worktreeId, state);
+  }, [worktreeId, state]);
 
   const openFile = useCallback(
     (path: string): 'opened' | 'activated' | 'limit_reached' => {

@@ -5,7 +5,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useFileTabs, MAX_FILE_TABS, fileTabsReducer } from '@/hooks/useFileTabs';
 import type { FileTabsState, FileTabsAction, FileTab } from '@/hooks/useFileTabs';
@@ -273,8 +273,12 @@ describe('fileTabsReducer', () => {
 // ============================================================================
 
 describe('useFileTabs', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
   it('should initialize with empty state', () => {
-    const { result } = renderHook(() => useFileTabs());
+    const { result } = renderHook(() => useFileTabs('test-wt'));
 
     expect(result.current.state.tabs).toHaveLength(0);
     expect(result.current.state.activeIndex).toBeNull();
@@ -282,7 +286,7 @@ describe('useFileTabs', () => {
 
   describe('openFile', () => {
     it('should return "opened" when opening a new file', () => {
-      const { result } = renderHook(() => useFileTabs());
+      const { result } = renderHook(() => useFileTabs('test-wt'));
 
       let returnValue: string;
       act(() => {
@@ -295,7 +299,7 @@ describe('useFileTabs', () => {
     });
 
     it('should return "activated" when opening an already open file', () => {
-      const { result } = renderHook(() => useFileTabs());
+      const { result } = renderHook(() => useFileTabs('test-wt'));
 
       act(() => {
         result.current.openFile('src/index.ts');
@@ -311,7 +315,7 @@ describe('useFileTabs', () => {
     });
 
     it('should return "limit_reached" when at max tabs', () => {
-      const { result } = renderHook(() => useFileTabs());
+      const { result } = renderHook(() => useFileTabs('test-wt'));
 
       // Open MAX_FILE_TABS files
       for (let i = 0; i < MAX_FILE_TABS; i++) {
@@ -332,7 +336,7 @@ describe('useFileTabs', () => {
 
   describe('closeTab', () => {
     it('should close the specified tab', () => {
-      const { result } = renderHook(() => useFileTabs());
+      const { result } = renderHook(() => useFileTabs('test-wt'));
 
       act(() => {
         result.current.openFile('a.ts');
@@ -350,7 +354,7 @@ describe('useFileTabs', () => {
 
   describe('activateTab', () => {
     it('should activate the specified tab', () => {
-      const { result } = renderHook(() => useFileTabs());
+      const { result } = renderHook(() => useFileTabs('test-wt'));
 
       act(() => {
         result.current.openFile('a.ts');
@@ -367,7 +371,7 @@ describe('useFileTabs', () => {
 
   describe('onFileRenamed', () => {
     it('should update tab path and name', () => {
-      const { result } = renderHook(() => useFileTabs());
+      const { result } = renderHook(() => useFileTabs('test-wt'));
 
       act(() => {
         result.current.openFile('src/old.ts');
@@ -384,7 +388,7 @@ describe('useFileTabs', () => {
 
   describe('onFileDeleted', () => {
     it('should remove the tab for the deleted file', () => {
-      const { result } = renderHook(() => useFileTabs());
+      const { result } = renderHook(() => useFileTabs('test-wt'));
 
       act(() => {
         result.current.openFile('a.ts');

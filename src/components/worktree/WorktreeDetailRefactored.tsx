@@ -995,7 +995,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const [error, setError] = useState<string | null>(null);
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
   // Issue #438: File tabs state (replaces fileViewerPath for desktop)
-  const fileTabs = useFileTabs();
+  const fileTabs = useFileTabs(worktreeId);
   // Mobile-only: file viewer path for modal display (desktop uses fileTabs)
   const [mobileFileViewerPath, setMobileFileViewerPath] = useState<string | null>(null);
   const [editorFilePath, setEditorFilePath] = useState<string | null>(null);
