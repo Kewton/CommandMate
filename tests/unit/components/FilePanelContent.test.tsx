@@ -132,8 +132,7 @@ describe('FilePanelContent', () => {
       expect(codeElement).toBeInTheDocument();
     });
 
-    it('should render markdown with edit button for .md files', () => {
-      const onEditMarkdown = vi.fn();
+    it('should render markdown editor for .md files', () => {
       const content = createContent({
         content: '# Hello World',
         extension: 'md',
@@ -144,12 +143,12 @@ describe('FilePanelContent', () => {
         <FilePanelContent
           tab={tab}
           {...defaultProps}
-          onEditMarkdown={onEditMarkdown}
         />,
       );
 
-      const editButton = screen.getByText('Edit');
-      expect(editButton).toBeInTheDocument();
+      // MarkdownEditor is dynamically imported; the loading placeholder should appear
+      // or the component renders. Either way, the maximize button should be present.
+      expect(document.querySelector('button[aria-label="Maximize"]')).toBeInTheDocument();
     });
   });
 

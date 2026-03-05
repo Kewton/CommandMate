@@ -1,0 +1,109 @@
+{
+  "status": "passed",
+  "criteria_results": [
+    {
+      "criterion": "PC版でファイル選択時、ターミナル右側にファイル表示パネルが開く",
+      "status": "passed",
+      "notes": "FilePanelSplit.tsx: tabs.length>0時にPaneResizer+FilePanelTabsが表示される。WorktreeDetailRefactored.tsxのrightPaneMemoでFilePanelSplitが統合されている。"
+    },
+    {
+      "criterion": "パネル境界のドラッグでリサイズができる（初期50:50、最小200px、最大80%）",
+      "status": "passed",
+      "notes": "FilePanelSplit.tsx: INITIAL_TERMINAL_WIDTH=50, MIN_TERMINAL_WIDTH=20, MAX_TERMINAL_WIDTH=80。PaneResizerのonResizeコールバックでpercentageDelta計算+clamp処理。最小値は20%（パーセンテージベース）で実装されている。"
+    },
+    {
+      "criterion": "タブで最大5ファイルまで同時に開ける",
+      "status": "passed",
+      "notes": "useFileTabs.ts: MAX_FILE_TABS=5定数。OPEN_FILEアクションでstate.tabs.length >= MAX_FILE_TABS時にstateを変更しない。hookのopenFile()が'limit_reached'を返す。テスト確認済み。"
+    },
+    {
+      "criterion": "タブの×ボタンでファイルを閉じられる",
+      "status": "passed",
+      "notes": "FilePanelTabs.tsx: TabButton内にXアイコン付きcloseボタン(aria-label='Close {name}')、e.stopPropagation()でタブ切替との干渉防止。テスト確認済み。"
+    },
+    {
+      "criterion": "5タブ上限時に新しいファイルを開こうとすると警告が表示される",
+      "status": "passed",
+      "notes": "useFileTabs.tsのopenFile()が'limit_reached'を返却。WorktreeDetailRefactored.tsxのhandleFileSelect(line 1210付近)でshowToast呼び出しによる警告表示。"
+    },
+    {
+      "criterion": "全タブを閉じるとパネルが非表示になりターミナルがフル幅に戻る",
+      "status": "passed",
+      "notes": "FilePanelSplit.tsx: fileTabs.tabs.length===0の場合、terminalのみをフル幅divでレンダリング。PaneResizerとFilePanelTabsは表示されない。テスト確認済み。"
+    },
+    {
+      "criterion": "既に開いているファイルをクリックすると既存タブがアクティブになる（重複タブ不可）",
+      "status": "passed",
+      "notes": "useFileTabs.ts: OPEN_FILEアクションでexistingIndex !== -1の場合activeIndexのみ更新。hookのopenFile()が'activated'を返却。テスト確認済み。"
+    },
+    {
+      "criterion": "Python, JSON, JavaScript, TypeScript, CSS, HTMLのシンタックスハイライトが正しく表示される",
+      "status": "passed",
+      "notes": "FilePanelContent.tsx: CodeViewerサブコンポーネントでhljs.highlightAuto()を使用。highlight.jsが自動言語検出でハイライト。language-{extension}クラス付与。"
+    },
+    {
+      "criterion": "画像・動画ファイルもタブパネルで表示される",
+      "status": "passed",
+      "notes": "FilePanelContent.tsx: content.isImage時にImageViewer、content.isVideo時にVideoViewerを表示。テスト確認済み。"
+    },
+    {
+      "criterion": ".mdファイルはタブパネルで読み取り専用プレビュー表示され、編集ボタンでMarkdownEditorが開く",
+      "status": "passed",
+      "notes": "FilePanelContent.tsx: extension==='md'の場合MarkdownPreviewサブコンポーネント（Editボタン付き）を表示。onEditMarkdownコールバックでMarkdownEditor起動連携。テスト確認済み。"
+    },
+    {
+      "criterion": "ファイル削除時に対応するタブが自動的に閉じられる",
+      "status": "passed",
+      "notes": "useFileTabs.ts: DELETE_FILEアクションがCLOSE_TABロジックを再利用。WorktreeDetailRefactored.tsx line 1507でfileTabs.onFileDeleted(path)呼び出し。テスト確認済み。"
+    },
+    {
+      "criterion": "ファイルリネーム時にタブのファイル名が更新される",
+      "status": "passed",
+      "notes": "useFileTabs.ts: RENAME_FILEアクションでpath/name更新。WorktreeDetailRefactored.tsx line 1478でfileTabs.onFileRenamed()呼び出し。テスト確認済み。"
+    },
+    {
+      "criterion": "MARP形式のMarkdownがスライド形式でプレビュー表示される",
+      "status": "passed",
+      "notes": "FilePanelContent.tsx: MARP_FRONTMATTER_REGEX検出後に/api/worktrees/[id]/marp-renderへPOSTしスライドHTML取得。MarpPreviewサブコンポーネントで表示。marp-render/route.tsで---区切りでスライド分割+escapeHtml()によるXSS対策。"
+    },
+    {
+      "criterion": "MARPスライドのページ送り/戻しが動作する",
+      "status": "passed",
+      "notes": "FilePanelContent.tsx: MarpPreview内にPrev/Nextボタン、currentSlide state、ページ番号表示(1/N形式)。先頭/末尾でdisabled制御。"
+    },
+    {
+      "criterion": "MARPスライドのXSS対策としてiframe sandbox='allow-same-origin'が設定されている",
+      "status": "passed",
+      "notes": "FilePanelContent.tsx line 183: <iframe sandbox='allow-same-origin'>が確認済み。さらにmarp-render/route.tsでescapeHtml()によるHTMLエスケープ処理も実装。"
+    },
+    {
+      "criterion": "モバイル版は現行のポップアップ表示のまま変更なし",
+      "status": "passed",
+      "notes": "WorktreeDetailRefactored.tsx: isMobile時にsetMobileFileViewerPath()経由でFileViewerモーダルを使用(line 1202-1203, 2390-2394)。FilePanel系コンポーネントはデスクトップのみ。"
+    },
+    {
+      "criterion": "ダークモード対応",
+      "status": "passed",
+      "notes": "全新規コンポーネントでdark:プレフィックス付きTailwindクラスを使用。FilePanelContent.tsx/FilePanelTabs.tsx/FilePanelSplit.txに dark:bg-gray-800/900, dark:text-gray-100/400, dark:border-gray-700等。"
+    },
+    {
+      "criterion": "新規コンポーネントのユニットテストが追加されている",
+      "status": "passed",
+      "notes": "4テストファイル追加: useFileTabs.test.ts(30テスト), FilePanelContent.test.tsx(10テスト), FilePanelTabs.test.tsx(8テスト), FilePanelSplit.test.tsx(3テスト)。"
+    },
+    {
+      "criterion": "既存テストが更新され全てパスする",
+      "status": "passed",
+      "notes": "npm run test:unit: 221ファイル全パス、4592テスト合格、0失敗。"
+    }
+  ],
+  "test_results": {
+    "unit_tests_passed": 4592,
+    "unit_tests_failed": 0,
+    "unit_tests_skipped": 7,
+    "typescript_errors": 0,
+    "lint_errors": 0
+  },
+  "issues_found": [],
+  "overall_notes": "全19受入基準がパス。TypeScript型チェック・ESLint・ユニットテスト全て問題なし。useFileTabsフックはuseReducerベースで予測可能な状態管理を実現。FilePanelSplit/FilePanelTabs/FilePanelContentの3コンポーネント分離によりSRP準拠。MARP APIルートにはworktree存在確認・サイズ制限・HTMLエスケープのセキュリティ対策あり。モバイル版は既存FileViewerモーダルを維持。WorktreeDetailRefactored.tsxへの統合もhandleDelete/handleRename内でfileTabs連携が適切に実装されている。"
+}

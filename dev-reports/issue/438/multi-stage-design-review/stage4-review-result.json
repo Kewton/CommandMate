@@ -1,0 +1,39 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "issue_number": 438,
+  "focus_area": "セキュリティ",
+  "review_summary": "MARP APIルートのDoS防御とsandbox設定の詳細に改善点あり。highlight.jsのdangerouslySetInnerHTMLは既存の実装パターンと比較して注意が必要。",
+  "findings": [
+    {
+      "id": "D4-001",
+      "severity": "Must Fix",
+      "category": "セキュリティ/DoS防御",
+      "title": "marp-render API RouteにMARKDOWNサイズ制限が未定義",
+      "description": "新しい`/api/worktrees/[id]/marp-render`APIのリクエストボディ（markdownContent）のサイズ制限が設計書に未定義。巨大なMarkdownファイルを送信するDoS攻撃が可能。既存の`claude-executor.ts`（MAX_MESSAGE_LENGTH=10000）や`files`APIの5MB制限等と整合した制限値が必要。",
+      "suggestion": "## marp-render APIのセキュリティ制約\n- `MAX_MARP_CONTENT_LENGTH = 1 * 1024 * 1024` (1MB) でMarkdownコンテンツをサイズ制限\n- リクエストボディバリデーション: markdownContentが文字列かつ制限内であることを確認\n- 固定文字列エラーレスポンス（D1-007パターン踏襲）\n\nとして設計書のセキュリティセクションに追記する。"
+    },
+    {
+      "id": "D4-002",
+      "severity": "Must Fix",
+      "category": "セキュリティ/XSS",
+      "title": "highlight.jsのdangerouslySetInnerHTMLのXSSリスク注記が必要",
+      "description": "設計書では「highlight.jsはHTMLエスケープ済みHTMLを返すため安全」としているが、`highlight.js`の`highlightAuto()`は入力のHTMLをエスケープした上でspanタグでラップしたHTMLを返す（公式仕様）。この事実を設計書に明記し、`dangerouslySetInnerHTML`使用の根拠を明確にすべき。またMARKDOWNとhighlight.jsで2箇所のdangerouslySetInnerHTML使用があるため、セキュリティ審査時の混乱を避けるためにも根拠を明記する。",
+      "suggestion": "## dangerouslySetInnerHTMLの安全性根拠\n```\n// highlight.js はエスケープ済みHTMLを出力\n// 参考: https://highlightjs.org/usage/\n// highlightAuto(str).value は HTMLエンティティエスケープ済みの文字列\n// XSSリスクなし（公式仕様）\n```\nとしてコードコメントと設計書に追記する。"
+    },
+    {
+      "id": "D4-003",
+      "severity": "Should Fix",
+      "category": "セキュリティ/iframe",
+      "title": "iframe sandboxの詳細設定の再検討",
+      "description": "`sandbox=\"allow-same-origin\"`はsame-originのスクリプトは許可される。MARPの生成HTMLにインラインスクリプトやsame-originスクリプト参照が含まれる可能性がある場合、セキュリティ上のリスクとなりうる。`sandbox=\"\"`（完全制限）の方が安全だが、スタイルシートも制限されるためMARPのレイアウトが崩れる可能性がある。`sandbox=\"allow-same-origin allow-popups\"`等の検討も必要。",
+      "suggestion": "## iframeセキュリティ設計の詳細\n- `@marp-team/marp-core`の出力HTMLにインラインスクリプトが含まれないことを実装時に検証\n- 検証結果に応じて`sandbox=\"allow-same-origin\"`または`sandbox=\"\"`を選択\n- 設計書に「MARPの出力HTML検証後にsandbox値を確定する」旨を記載\n\nとして設計書に追記する。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 2,
+    "should_fix": 1,
+    "nice_to_have": 0,
+    "total": 3
+  }
+}

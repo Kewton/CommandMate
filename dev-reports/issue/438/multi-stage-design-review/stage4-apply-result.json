@@ -1,0 +1,12 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー 指摘事項反映",
+  "issue_number": 438,
+  "applied": [
+    {"id": "D4-001", "severity": "Must Fix", "status": "applied", "description": "marp-render APIのサイズ制限（MAX_MARP_CONTENT_LENGTH=1MB）をセキュリティセクション（S4）に追加"},
+    {"id": "D4-002", "severity": "Must Fix", "status": "applied", "description": "highlight.jsのdangerouslySetInnerHTMLの安全性根拠をセキュリティセクション（S5）に追記"},
+    {"id": "D4-003", "severity": "Should Fix", "status": "applied", "description": "iframe sandbox検証方針をS3に追記"}
+  ],
+  "applied_count": 3,
+  "skipped_count": 0
+}

@@ -1,0 +1,13 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー 指摘事項反映",
+  "issue_number": 438,
+  "applied": [
+    {"id": "D1-001", "severity": "Must Fix", "status": "applied", "description": "MARPレンダリング方針をAPI Route経由サーバーサイドに変更、MarpPreview実装方針を更新、技術選定テーブルを更新"},
+    {"id": "D1-002", "severity": "Must Fix", "status": "applied", "description": "useFileTabsの責務を純粋な状態管理のみと明記、FilePanelContent内でフェッチする方針を追加"},
+    {"id": "D1-003", "severity": "Should Fix", "status": "applied", "description": "シンタックスハイライトをhighlight.js直接呼び出し方式に変更、技術選定テーブル更新"},
+    {"id": "D1-004", "severity": "Should Fix", "status": "applied", "description": "FilePanelSplit.test.tsxを影響ファイル一覧に追加、marp-render API Routeも追加"}
+  ],
+  "applied_count": 4,
+  "skipped_count": 0
+}

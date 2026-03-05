@@ -1,0 +1,47 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "issue_number": 438,
+  "focus_area": "設計原則",
+  "review_summary": "設計方針書はKISS/DRY/SRP原則をよく遵守している。主要な問題は@marp-team/marp-coreのブラウザ環境での動作確認不足と、FilePanelContentのデータフェッチタイミングの未定義。",
+  "findings": [
+    {
+      "id": "D1-001",
+      "severity": "Must Fix",
+      "category": "技術選定",
+      "title": "@marp-team/marp-coreのブラウザ環境での動作検証が未記載",
+      "description": "`@marp-team/marp-core`はNode.js向けに最適化されており、ブラウザ（Next.jsクライアントコンポーネント）での直接利用には制限がある可能性がある。`@marp-team/marp-core`のBrowserバンドル（`@marp-team/marp-core/browser`）の存在確認と、`dynamic import`でSSRを無効化する必要性の検討が必要。実際にはサーバーサイドでHTMLを生成してAPIで返す方式（サーバーコンポーネント or API Route経由）が現実的な可能性がある。",
+      "suggestion": "## @marp-team/marp-coreの利用方針\n- Next.js API Route（`/api/worktrees/[id]/marp-render`）でサーバーサイドMARPレンダリングを行い、クライアントにHTMLを返す\n- クライアントはHTMLをiframeのsrcDocに設定\n- この方式により: (1)SSR問題を回避 (2)ブラウザバンドルサイズ最小化 (3)Node.js専用APIの利用が可能\n\nとして設計を変更する。"
+    },
+    {
+      "id": "D1-002",
+      "severity": "Must Fix",
+      "category": "SRP/責務設計",
+      "title": "FilePanelContentのデータフェッチタイミングが未定義",
+      "description": "設計書では`FileTab.content`がnullの場合にどこでAPIフェッチを行うかが未定義。useFileTabs側でdispatch(SET_CONTENT)を呼ぶのか、FilePanelContent内でuseEffectで呼ぶのかが不明。これによりuseFileTabsの責務範囲（純粋な状態管理 vs データフェッチ込み）が変わる。",
+      "suggestion": "## データフェッチ責務の明確化\n- **useFileTabs**は純粋な状態管理のみ（dispatch/state）\n- **FilePanelContent**のuseEffectでコンテンツをフェッチし、`dispatch(SET_CONTENT)` or `dispatch(SET_ERROR)`を呼ぶ（Reactのコロケーション原則）\n- `tab.content === null && !tab.loading`のとき自動フェッチ開始\n\nとして設計に追記する。"
+    },
+    {
+      "id": "D1-003",
+      "severity": "Should Fix",
+      "category": "技術的詳細",
+      "title": "シンタックスハイライトの実装方式が既存FileViewerと異なる可能性",
+      "description": "現行の`FileViewer`は`<code className={`language-${content.extension}`}>`というCSSクラス付与のみ（実際にはhighlight.jsのCSSは読み込まれていない）。`MarkdownEditor`は`rehype-highlight` + `highlight.js/styles/github-dark.css`で実際にハイライト処理を行っている。設計書では「既存のrehype-highlightを活用」とあるが、FilePanelContentはReactコンポーネントで直接テキストをレンダリングするため、rehype-highlightのreactマークダウンプロセッサ統合か、`highlight.js`の`hljs.highlight()`を直接呼ぶ方式か選択が必要。",
+      "suggestion": "## シンタックスハイライト実装方針\n- `highlight.js`の`highlightAuto()`または`highlight()`を直接呼び出す方式を採用\n- `highlight.js/styles/github-dark.css`（既存インポート）を共用\n- `dangerouslySetInnerHTML`でhighlight結果HTMLを設定（XSSリスク: highlight.jsはエスケープ済みHTMLを返すため安全）\n\nとして設計に追記する。"
+    },
+    {
+      "id": "D1-004",
+      "severity": "Should Fix",
+      "category": "テスト設計",
+      "title": "FilePanelSplitのテストファイルが影響ファイル一覧に未記載",
+      "description": "新規コンポーネント`FilePanelSplit`のユニットテストファイルが影響ファイル一覧に含まれていない。`FilePanelTabs.test.tsx`と`FilePanelContent.test.tsx`は記載されているが`FilePanelSplit.test.tsx`が欠けている。",
+      "suggestion": "影響ファイル一覧に`tests/unit/components/FilePanelSplit.test.tsx | 新規 | FilePanelSplitのユニットテスト`を追加する。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 2,
+    "should_fix": 2,
+    "nice_to_have": 0,
+    "total": 4
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "issue_number": 438,
+  "title": "feat(ui): PC版ファイル表示をポップアップからタブ付きサイドパネルに変更",
+  "acceptance_criteria": [
+    "PC版でファイル選択時、ターミナル右側にファイル表示パネルが開く",
+    "パネル境界のドラッグでリサイズができる（初期50:50、最小200px、最大80%）",
+    "タブで最大5ファイルまで同時に開ける",
+    "タブの×ボタンでファイルを閉じられる",
+    "5タブ上限時に新しいファイルを開こうとすると警告が表示される",
+    "全タブを閉じるとパネルが非表示になりターミナルがフル幅に戻る",
+    "既に開いているファイルをクリックすると既存タブがアクティブになる（重複タブ不可）",
+    "Python, JSON, JavaScript, TypeScript, CSS, HTMLのシンタックスハイライトが正しく表示される",
+    "画像・動画ファイルもタブパネルで表示される",
+    ".mdファイルはタブパネルで読み取り専用プレビュー表示され、編集ボタンでMarkdownEditorが開く",
+    "ファイル削除時に対応するタブが自動的に閉じられる",
+    "ファイルリネーム時にタブのファイル名が更新される",
+    "MARP形式のMarkdownがスライド形式でプレビュー表示される",
+    "MARPスライドのページ送り/戻しが動作する",
+    "MARPスライドのXSS対策としてiframe sandbox='allow-same-origin'が設定されている",
+    "モバイル版は現行のポップアップ表示のまま変更なし",
+    "ダークモード対応",
+    "新規コンポーネントのユニットテストが追加されている",
+    "既存テストが更新され全てパスする"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: useFileTabsフック実装（useReducer、FileTab/FileTabsState型定義）",
+    "Task 2.1: FilePanelContent実装（コンテンツ表示・フェッチ・highlight.js）",
+    "Task 2.2: FilePanelTabs実装（タブバーUI・コンテンツ表示）",
+    "Task 2.3: FilePanelSplit実装（Terminal+FilePanelの水平分割）",
+    "Task 3.1: MARPレンダリングAPI Route実装（@marp-team/marp-core）",
+    "Task 4.1: WorktreeDetailRefactored統合（fileViewerPath→useFileTabs移行）",
+    "Task 4.2: 既存テスト更新（WorktreeDetailRefactored.test.tsx等）"
+  ],
+  "design_doc": "dev-reports/design/issue-438-file-panel-tabs-design-policy.md",
+  "work_plan": "dev-reports/issue/438/work-plan.md",
+  "target_coverage": 80
+}

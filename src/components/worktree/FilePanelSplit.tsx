@@ -36,8 +36,8 @@ export interface FilePanelSplitProps {
   onLoadError: (path: string, error: string) => void;
   /** Callback to set loading state */
   onSetLoading: (path: string, loading: boolean) => void;
-  /** Callback to open markdown editor */
-  onEditMarkdown?: (path: string) => void;
+  /** Callback when file is saved (refresh tree) */
+  onFileSaved?: (path: string) => void;
 }
 
 // ============================================================================
@@ -72,7 +72,7 @@ export const FilePanelSplit = memo(function FilePanelSplit({
   onLoadContent,
   onLoadError,
   onSetLoading,
-  onEditMarkdown,
+  onFileSaved,
 }: FilePanelSplitProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [terminalWidth, setTerminalWidth] = useState(INITIAL_TERMINAL_WIDTH);
@@ -138,7 +138,7 @@ export const FilePanelSplit = memo(function FilePanelSplit({
           onLoadContent={onLoadContent}
           onLoadError={onLoadError}
           onSetLoading={onSetLoading}
-          onEditMarkdown={onEditMarkdown}
+          onFileSaved={onFileSaved}
         />
       </div>
     </div>

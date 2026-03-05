@@ -3,19 +3,40 @@
  *
  * Renders file content in the file panel tab view.
  * Supports text (with syntax highlighting), images, videos,
- * markdown preview, and MARP slides.
+ * markdown editor/preview, and MARP slides.
  *
  * Issue #438: PC file display panel with tabs
  */
 
 'use client';
 
-import React, { useEffect, useRef, memo, useCallback, useState } from 'react';
+import React, { useEffect, useRef, memo, useState, useCallback } from 'react';
+import dynamic from 'next/dynamic';
+import { Maximize2, Minimize2, ClipboardCopy, Check } from 'lucide-react';
 import type { FileTab } from '@/hooks/useFileTabs';
 import type { FileContent } from '@/types/models';
 import { ImageViewer } from './ImageViewer';
 import { VideoViewer } from './VideoViewer';
+import { copyToClipboard } from '@/lib/clipboard-utils';
 import hljs from 'highlight.js';
+import 'highlight.js/styles/github-dark.css';
+import { Z_INDEX } from '@/config/z-index';
+
+/** Dynamic import of MarkdownEditor for .md files in tab panel */
+const MarkdownEditor = dynamic(
+  () =>
+    import('@/components/worktree/MarkdownEditor').then((mod) => ({
+      default: mod.MarkdownEditor,
+    })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center py-12 bg-white dark:bg-gray-900">
+        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-cyan-600 dark:border-t-cyan-400" />
+      </div>
+    ),
+  },
+);
 
 // ============================================================================
 // Types
@@ -32,8 +53,8 @@ export interface FilePanelContentProps {
   onLoadError: (path: string, error: string) => void;
   /** Callback to set loading state */
   onSetLoading: (path: string, loading: boolean) => void;
-  /** Callback to open markdown editor */
-  onEditMarkdown?: (path: string) => void;
+  /** Callback when file is saved (refresh tree) */
+  onFileSaved?: (path: string) => void;
 }
 
 // ============================================================================
@@ -84,6 +105,47 @@ function ErrorDisplay({ error }: { error: string }) {
   );
 }
 
+/** Toolbar with path copy and maximize/minimize buttons */
+function FileToolbar({ filePath, isMaximized, onToggleMaximize }: { filePath: string; isMaximized: boolean; onToggleMaximize: () => void }) {
+  const [pathCopied, setPathCopied] = useState(false);
+
+  const handleCopyPath = async () => {
+    try {
+      await copyToClipboard(filePath);
+      setPathCopied(true);
+      setTimeout(() => setPathCopied(false), 2000);
+    } catch {
+      // Silent failure
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-between p-1 border-b border-gray-200 dark:border-gray-700 gap-1">
+      <div className="flex items-center gap-1 min-w-0">
+        <button
+          type="button"
+          onClick={handleCopyPath}
+          className="flex-shrink-0 p-1 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 transition-colors"
+          aria-label="Copy file path"
+          title="Copy path"
+        >
+          {pathCopied ? <Check className="w-3.5 h-3.5 text-green-600" /> : <ClipboardCopy className="w-3.5 h-3.5" />}
+        </button>
+        <span className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate">{filePath}</span>
+      </div>
+      <button
+        type="button"
+        onClick={onToggleMaximize}
+        className="flex-shrink-0 p-1.5 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 transition-colors"
+        aria-label={isMaximized ? 'Minimize' : 'Maximize'}
+        title={isMaximized ? 'Minimize' : 'Maximize'}
+      >
+        {isMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+      </button>
+    </div>
+  );
+}
+
 /** Syntax-highlighted code viewer */
 function CodeViewer({ content, extension }: { content: string; extension: string }) {
   const highlighted = hljs.highlightAuto(content);
@@ -100,38 +162,6 @@ function CodeViewer({ content, extension }: { content: string; extension: string
   );
 }
 
-/** Markdown preview with edit button */
-function MarkdownPreview({
-  content,
-  path,
-  onEdit,
-}: {
-  content: string;
-  path: string;
-  onEdit?: (path: string) => void;
-}) {
-  return (
-    <div className="h-full flex flex-col">
-      {onEdit && (
-        <div className="flex justify-end p-2 border-b border-gray-200 dark:border-gray-700">
-          <button
-            type="button"
-            onClick={() => onEdit(path)}
-            className="px-3 py-1 text-sm font-medium text-cyan-600 dark:text-cyan-400 hover:text-cyan-800 dark:hover:text-cyan-300 border border-cyan-300 dark:border-cyan-600 rounded-md hover:bg-cyan-50 dark:hover:bg-cyan-900/30 transition-colors"
-          >
-            Edit
-          </button>
-        </div>
-      )}
-      <div className="flex-1 overflow-auto p-4">
-        <pre className="text-sm whitespace-pre-wrap text-gray-900 dark:text-gray-100">
-          <code data-testid="file-content-code">{content}</code>
-        </pre>
-      </div>
-    </div>
-  );
-}
-
 /** MARP slide preview */
 function MarpPreview({
   slides,
@@ -142,13 +172,13 @@ function MarpPreview({
 }) {
   const [currentSlide, setCurrentSlide] = useState(0);
 
-  const handlePrev = useCallback(() => {
+  const handlePrev = () => {
     setCurrentSlide((prev) => Math.max(0, prev - 1));
-  }, []);
+  };
 
-  const handleNext = useCallback(() => {
+  const handleNext = () => {
     setCurrentSlide((prev) => Math.min(slides.length - 1, prev + 1));
-  }, [slides.length]);
+  };
 
   if (slides.length === 0) {
     return <div className="p-4 text-gray-500">No slides found in {fileName}</div>;
@@ -189,6 +219,100 @@ function MarpPreview({
   );
 }
 
+/** MARP file with slides view + editor toggle */
+function MarpEditorWithSlides({
+  marpSlides,
+  fileName,
+  worktreeId,
+  filePath,
+  onFileSaved,
+  isMaximized,
+  onToggleMaximize,
+}: {
+  marpSlides: string[];
+  fileName: string;
+  worktreeId: string;
+  filePath: string;
+  onFileSaved?: (path: string) => void;
+  isMaximized: boolean;
+  onToggleMaximize: () => void;
+}) {
+  const [marpViewMode, setMarpViewMode] = useState<'slides' | 'editor'>('slides');
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="flex items-center justify-between p-1 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={() => setMarpViewMode('slides')}
+            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+              marpViewMode === 'slides'
+                ? 'bg-cyan-100 dark:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300'
+                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+            }`}
+          >
+            Slides
+          </button>
+          <button
+            type="button"
+            onClick={() => setMarpViewMode('editor')}
+            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+              marpViewMode === 'editor'
+                ? 'bg-cyan-100 dark:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300'
+                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+            }`}
+          >
+            Editor
+          </button>
+        </div>
+        <FileToolbar filePath={filePath} isMaximized={isMaximized} onToggleMaximize={onToggleMaximize} />
+      </div>
+      <div className="flex-1 min-h-0">
+        {marpViewMode === 'slides' ? (
+          <MarpPreview slides={marpSlides} fileName={fileName} />
+        ) : (
+          <MarkdownEditor
+            worktreeId={worktreeId}
+            filePath={filePath}
+            onSave={onFileSaved}
+            initialViewMode="split"
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Wrapper that adds a maximize overlay */
+function MaximizableWrapper({
+  children,
+  isMaximized,
+  onToggle,
+  filePath,
+}: {
+  children: React.ReactNode;
+  isMaximized: boolean;
+  onToggle: () => void;
+  filePath: string;
+}) {
+  if (isMaximized) {
+    return (
+      <div
+        className="fixed inset-0 bg-white dark:bg-gray-900 flex flex-col"
+        style={{ zIndex: Z_INDEX.MAXIMIZED_EDITOR }}
+      >
+        <FileToolbar filePath={filePath} isMaximized={isMaximized} onToggleMaximize={onToggle} />
+        <div className="flex-1 min-h-0 overflow-hidden">
+          {children}
+        </div>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
+
 // ============================================================================
 // Main Component
 // ============================================================================
@@ -198,6 +322,8 @@ function MarpPreview({
  *
  * Auto-fetches content when tab has no content loaded.
  * Renders appropriate viewer based on file type.
+ * Supports maximize mode for all content types.
+ * Markdown files get full editor/preview with save support.
  */
 export const FilePanelContent = memo(function FilePanelContent({
   tab,
@@ -205,10 +331,27 @@ export const FilePanelContent = memo(function FilePanelContent({
   onLoadContent,
   onLoadError,
   onSetLoading,
-  onEditMarkdown,
+  onFileSaved,
 }: FilePanelContentProps) {
   const fetchingRef = useRef(false);
   const [marpSlides, setMarpSlides] = useState<string[] | null>(null);
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  const toggleMaximize = useCallback(() => {
+    setIsMaximized((prev) => !prev);
+  }, []);
+
+  // ESC to exit maximize
+  useEffect(() => {
+    if (!isMaximized) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsMaximized(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isMaximized]);
 
   // Auto-fetch content when needed
   useEffect(() => {
@@ -293,37 +436,76 @@ export const FilePanelContent = memo(function FilePanelContent({
   // Image viewer
   if (content.isImage) {
     return (
-      <div className="h-full overflow-auto">
-        <ImageViewer src={content.content} alt={content.path} mimeType={content.mimeType} />
-      </div>
+      <MaximizableWrapper isMaximized={isMaximized} onToggle={toggleMaximize} filePath={tab.path}>
+        <div className="h-full flex flex-col">
+          <FileToolbar filePath={tab.path} isMaximized={isMaximized} onToggleMaximize={toggleMaximize} />
+          <div className="flex-1 overflow-auto">
+            <ImageViewer src={content.content} alt={content.path} mimeType={content.mimeType} />
+          </div>
+        </div>
+      </MaximizableWrapper>
     );
   }
 
   // Video viewer
   if (content.isVideo) {
     return (
-      <div className="h-full overflow-auto">
-        <VideoViewer src={content.content} mimeType={content.mimeType} />
-      </div>
+      <MaximizableWrapper isMaximized={isMaximized} onToggle={toggleMaximize} filePath={tab.path}>
+        <div className="h-full flex flex-col">
+          <FileToolbar filePath={tab.path} isMaximized={isMaximized} onToggleMaximize={toggleMaximize} />
+          <div className="flex-1 overflow-auto">
+            <VideoViewer src={content.content} mimeType={content.mimeType} />
+          </div>
+        </div>
+      </MaximizableWrapper>
     );
   }
 
-  // MARP slides (if available)
-  if (content.extension === 'md' && marpSlides) {
-    return <MarpPreview slides={marpSlides} fileName={tab.name} />;
-  }
-
-  // Markdown preview with edit button
+  // Markdown (including MARP): editor with preview/edit modes, save, auto-save
+  // MARP files get an additional "Slides" tab to view rendered slides
   if (content.extension === 'md') {
     return (
-      <MarkdownPreview
-        content={content.content}
-        path={tab.path}
-        onEdit={onEditMarkdown}
-      />
+      <MaximizableWrapper isMaximized={isMaximized} onToggle={toggleMaximize} filePath={tab.path}>
+        <div className="h-full flex flex-col">
+          {marpSlides ? (
+            <MarpEditorWithSlides
+              marpSlides={marpSlides}
+              fileName={tab.name}
+              worktreeId={worktreeId}
+              filePath={tab.path}
+              onFileSaved={onFileSaved}
+              isMaximized={isMaximized}
+              onToggleMaximize={toggleMaximize}
+            />
+          ) : (
+            <>
+              {!isMaximized && (
+                <FileToolbar filePath={tab.path} isMaximized={isMaximized} onToggleMaximize={toggleMaximize} />
+              )}
+              <div className="flex-1 min-h-0">
+                <MarkdownEditor
+                  worktreeId={worktreeId}
+                  filePath={tab.path}
+                  onSave={onFileSaved}
+                  initialViewMode="preview"
+                />
+              </div>
+            </>
+          )}
+        </div>
+      </MaximizableWrapper>
     );
   }
 
   // Default: syntax-highlighted code
-  return <CodeViewer content={content.content} extension={content.extension} />;
+  return (
+    <MaximizableWrapper isMaximized={isMaximized} onToggle={toggleMaximize} filePath={tab.path}>
+      <div className="h-full flex flex-col">
+        <FileToolbar filePath={tab.path} isMaximized={isMaximized} onToggleMaximize={toggleMaximize} />
+        <div className="flex-1 min-h-0">
+          <CodeViewer content={content.content} extension={content.extension} />
+        </div>
+      </div>
+    </MaximizableWrapper>
+  );
 });

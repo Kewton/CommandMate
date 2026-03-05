@@ -32,6 +32,6 @@
     "Task 4.1: WorktreeDetailRefactored integration (useFileTabs, FilePanelSplit, mobile FileViewer preserved)",
     "Task 4.2: Existing test updates (useFileTabs/FilePanelSplit mocks, 3 test adaptations)"
   ],
-  "commits": [],
+  "commits": ["422393d: feat(ui): replace desktop file viewer modal with tabbed split panel"],
   "message": "TDD implementation complete. All 7 tasks implemented. 221 test files pass (4592 tests). 0 TypeScript errors. 0 ESLint errors. Desktop file viewer modal replaced with tabbed file panel split view. Mobile retains modal FileViewer."
 }

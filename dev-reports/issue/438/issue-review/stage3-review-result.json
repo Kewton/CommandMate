@@ -1,0 +1,56 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 438,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "review_summary": "Issue #438の実装は`WorktreeDetailRefactored`を中心に大規模な変更が必要。現行の2ペインレイアウト（左ペイン：History/Files/Memo、右ペイン：Terminal）に加え、ファイルパネルをTerminalの右側に追加する必要がある。`WorktreeDesktopLayout`の3ペイン対応、`FileViewer`のモーダルからパネルへの変換、既存テストの更新が主な影響範囲。",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "Must Fix",
+      "category": "アーキテクチャ影響",
+      "title": "WorktreeDesktopLayoutの3ペイン対応が未検討",
+      "description": "現行の`WorktreeDesktopLayout`は2ペイン（leftPane/rightPane）のみ対応。ファイルパネルをTerminal右側に追加するには、3ペイン構成（左：History/Files/Memo、中：Terminal、右：FilePanel）への変更または新コンポーネント作成が必要。この設計方針がIssueに未定義。",
+      "suggestion": "## レイアウト設計方針\n- ファイルパネルはTerminalペインの内部で右側に分割表示（2段階ネスト方式）\n  - Terminalペイン内部に`FilePanelSplit`コンポーネントを設け、Terminal表示とFileパネルを水平分割\n  - `WorktreeDesktopLayout`本体の変更は最小限（rightPaneの内容を変えるのみ）\n\nとIssueに記載することを推奨。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "Must Fix",
+      "category": "コンポーネント影響",
+      "title": "FileViewerコンポーネントの大規模リファクタリングが必要",
+      "description": "`FileViewer`は現在Modalベースのコンポーネント（`isOpen`, `onClose`プロップ）。タブパネルとして機能させるには、Modal依存の除去とタブ管理ロジックの追加が必要。また`WorktreeDetailRefactored`での`fileViewerPath`ステートをタブリスト管理に変更する必要がある。",
+      "suggestion": "## FileViewerリファクタリング方針\n- 新規`FilePanelTabs`コンポーネント（タブ管理）と`FileContent`コンポーネント（コンテンツ表示）を分離\n- 旧`FileViewer`はモバイル版のモーダル表示用に残す（またはモバイル向けに内部でModalを使用する構造に変更）\n\nとIssueの実装方針に記載。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "Must Fix",
+      "category": "テスト影響",
+      "title": "既存テストファイルへの影響が大きい",
+      "description": "以下のテストファイルがFileViewerをモックしており、実装変更の影響を受ける:\n- `tests/unit/components/WorktreeDetailRefactored.test.tsx`\n- `tests/unit/components/app-version-display.test.tsx`\n- `tests/integration/issue-266-acceptance.test.tsx`\n\nまた`WorktreeDesktopLayout.test.tsx`もレイアウト変更に影響を受ける可能性がある。テスト更新コストをIssueに明記すべき。",
+      "suggestion": "## テスト更新方針\n- 既存のFileViewerモックを新しいFilePanelTabsのモックに更新\n- タブ管理・リサイズ機能の新規テストを追加\n- MARP表示のユニットテストを追加\n\nを受入基準に追加。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "Should Fix",
+      "category": "パフォーマンス影響",
+      "title": "WorktreeDetailRefactoredのuseMemo依存配列への影響",
+      "description": "`WorktreeDetailRefactored`には`leftPaneMemo`（27項目の依存配列）と`rightPaneMemo`のuseMemoがある（Issue #411）。新しいタブ状態（タブリスト）を追加するとこれらの依存配列に影響し、不要な再レンダーが発生する可能性がある。",
+      "suggestion": "## パフォーマンス考慮\n- タブ状態はuseReducerまたは専用のuseTabsフックで管理し、rightPaneMemoの依存を最小化すること\n\nを実装方針に追加。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "Should Fix",
+      "category": "セキュリティ影響",
+      "title": "MARPレンダリングのXSSリスクがIssueに未記載",
+      "description": "MARPはMarkdownをHTMLに変換する。ユーザーが作成したMarkdownファイルを直接レンダリングすると、悪意のあるスクリプトが実行されるXSSリスクがある。iframeのsandbox設定が必須だが、具体的なsandbox値がIssueに未定義。",
+      "suggestion": "## MARPセキュリティ要件\n- iframeのsandbox属性: `sandbox=\"allow-same-origin\"` (スクリプト実行禁止)\n- または`sandbox=\"\"` (完全制限)\n- Content Security Policy (CSP)ヘッダーとの整合性を確認\n\nを受入基準に追加。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 3,
+    "should_fix": 2,
+    "nice_to_have": 0,
+    "total": 5
+  }
+}

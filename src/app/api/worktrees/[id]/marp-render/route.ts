@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db-instance';
+import { escapeHtml } from '@/lib/utils';
 
 // ============================================================================
 // Constants
@@ -88,14 +89,4 @@ export async function POST(
       { status: 500 },
     );
   }
-}
-
-/** Escape HTML special characters */
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }

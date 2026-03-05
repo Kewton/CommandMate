@@ -1,0 +1,31 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 438,
+  "focus_area": "影響範囲",
+  "review_summary": "影響範囲は概ね設計書に記載されている。新しく注意が必要な点として、marp-render API RouteのテストファイルとWorktreeDetailRefactored.test.tsxの大規模更新コストがある。",
+  "findings": [
+    {
+      "id": "D3-001",
+      "severity": "Should Fix",
+      "category": "影響範囲",
+      "title": "marp-render API Routeのテストファイルが影響ファイル一覧に未記載",
+      "description": "新規の`/api/worktrees/[id]/marp-render/route.ts`に対応するテストファイルが影響ファイル一覧に含まれていない。API Routeはサーバーサイドロジックのため単体テストが重要。",
+      "suggestion": "影響ファイル一覧に`tests/unit/api/marp-render.test.ts | 新規 | MARPレンダリングAPIのユニットテスト`を追加する。"
+    },
+    {
+      "id": "D3-002",
+      "severity": "Should Fix",
+      "category": "影響範囲",
+      "title": "WorktreeDetailRefactored.test.tsxの更新コストが高い",
+      "description": "既存の`WorktreeDetailRefactored.test.tsx`は規模が大きく（多数のモック設定を含む）、FileViewer→FilePanelSplitへの変更は広範な更新が必要。設計書に「既存テストの更新方針」がより具体的に記載されるべき。",
+      "suggestion": "## WorktreeDetailRefactored.test.tsx更新方針\n- FilePanelSplitとuseFileTabsをモック化\n- `vi.mock('@/components/worktree/FilePanelSplit', ...)`\n- `vi.mock('@/hooks/useFileTabs', ...)`\n- FileViewerモックは残す（モバイル版用）\n\nとして設計書に追記する。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 0,
+    "should_fix": 2,
+    "nice_to_have": 0,
+    "total": 2
+  }
+}

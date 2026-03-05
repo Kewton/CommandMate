@@ -36,8 +36,8 @@ export interface FilePanelTabsProps {
   onLoadError: (path: string, error: string) => void;
   /** Callback to set loading state */
   onSetLoading: (path: string, loading: boolean) => void;
-  /** Callback to open markdown editor */
-  onEditMarkdown?: (path: string) => void;
+  /** Callback when file is saved (refresh tree) */
+  onFileSaved?: (path: string) => void;
 }
 
 // ============================================================================
@@ -111,7 +111,7 @@ export const FilePanelTabs = memo(function FilePanelTabs({
   onLoadContent,
   onLoadError,
   onSetLoading,
-  onEditMarkdown,
+  onFileSaved,
 }: FilePanelTabsProps) {
   const activeTab = activeIndex !== null && activeIndex >= 0 && activeIndex < tabs.length
     ? tabs[activeIndex]
@@ -136,12 +136,13 @@ export const FilePanelTabs = memo(function FilePanelTabs({
       <div className="flex-1 min-h-0 overflow-hidden">
         {activeTab && (
           <FilePanelContent
+            key={activeTab.path}
             tab={activeTab}
             worktreeId={worktreeId}
             onLoadContent={onLoadContent}
             onLoadError={onLoadError}
             onSetLoading={onSetLoading}
-            onEditMarkdown={onEditMarkdown}
+            onFileSaved={onFileSaved}
           />
         )}
       </div>

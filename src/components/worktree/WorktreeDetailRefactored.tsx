@@ -1216,17 +1216,19 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
    * Issue #438: Uses file tabs instead of modal for non-editable files on desktop
    */
   const handleFileSelect = useCallback((path: string) => {
-    const extension = path.split('.').pop()?.toLowerCase();
-    const extWithDot = extension ? `.${extension}` : '';
+    if (isMobile) {
+      const extension = path.split('.').pop()?.toLowerCase();
+      const extWithDot = extension ? `.${extension}` : '';
 
-    if (EDITABLE_EXTENSIONS.includes(extWithDot)) {
-      // Open in MarkdownEditor
-      setEditorFilePath(path);
-    } else if (isMobile) {
-      // Mobile: open in modal
-      setMobileFileViewerPath(path);
+      if (EDITABLE_EXTENSIONS.includes(extWithDot)) {
+        // Mobile: open MarkdownEditor directly
+        setEditorFilePath(path);
+      } else {
+        // Mobile: open in modal
+        setMobileFileViewerPath(path);
+      }
     } else {
-      // Desktop: open in file tab panel
+      // Desktop: open in file tab panel (including .md files for preview)
       const result = fileTabs.openFile(path);
       if (result === 'limit_reached') {
         showToast('Maximum 5 file tabs. Close a tab first.', 'info');
@@ -1239,9 +1241,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     setMobileFileViewerPath(null);
   }, []);
 
-  /** Handle opening markdown editor from file tab panel */
-  const handleEditorFileSelect = useCallback((path: string) => {
-    setEditorFilePath(path);
+  /** Handle file save in tab panel - refresh tree to reflect changes */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- savedPath accepted for callback interface compatibility
+  const handleFilePanelSave = useCallback((_savedPath: string) => {
+    setFileTreeRefresh(prev => prev + 1);
   }, []);
 
   /** Handle MarkdownEditor close */
@@ -1936,10 +1939,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         onLoadContent={handleLoadContent}
         onLoadError={handleLoadError}
         onSetLoading={handleSetLoading}
-        onEditMarkdown={handleEditorFileSelect}
+        onFileSaved={handleFilePanelSave}
       />
     ),
-    [state.terminal.output, state.terminal.isActive, state.terminal.isThinking, state.terminal.autoScroll, handleAutoScrollChange, disableAutoFollow, fileTabs.state, fileTabs.closeTab, fileTabs.activateTab, worktreeId, handleLoadContent, handleLoadError, handleSetLoading, handleEditorFileSelect]
+    [state.terminal.output, state.terminal.isActive, state.terminal.isThinking, state.terminal.autoScroll, handleAutoScrollChange, disableAutoFollow, fileTabs.state, fileTabs.closeTab, fileTabs.activateTab, worktreeId, handleLoadContent, handleLoadError, handleSetLoading, handleFilePanelSave]
   );
 
   /**
