@@ -1910,6 +1910,67 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Memoized Panes (Issue #411: avoid re-render on polling)
   // ========================================================================
 
+  /** Memoized CLI tool tab header for the terminal pane */
+  const terminalHeaderMemo = useMemo(
+    () => (
+      <div className="px-3 py-1.5 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between flex-shrink-0">
+        <nav className="flex items-center gap-3" aria-label="CLI Tool Selection">
+          <AutoYesToggle
+            enabled={autoYesEnabled}
+            expiresAt={autoYesExpiresAt}
+            onToggle={handleAutoYesToggle}
+            lastAutoResponse={lastAutoResponse}
+            cliToolName={activeCliTab}
+            inline
+          />
+          <div className="w-px h-4 bg-gray-300 dark:bg-gray-600" />
+          {selectedAgents.map((tool) => {
+            const toolStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[tool]);
+            const statusConfig = SIDEBAR_STATUS_CONFIG[toolStatus];
+            return (
+              <button
+                key={tool}
+                onClick={() => setActiveCliTab(tool)}
+                className={`pb-1 px-1.5 border-b-2 font-medium text-xs transition-colors flex items-center gap-1 ${
+                  activeCliTab === tool
+                    ? 'border-cyan-600 text-cyan-600'
+                    : 'border-transparent text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
+                }`}
+                aria-current={activeCliTab === tool ? 'page' : undefined}
+              >
+                {statusConfig.type === 'spinner' ? (
+                  <span
+                    className={`w-2 h-2 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`}
+                    title={statusConfig.label}
+                    aria-label={`${tool} status: ${statusConfig.label}`}
+                  />
+                ) : (
+                  <span
+                    className={`w-2 h-2 rounded-full flex-shrink-0 ${statusConfig.className}`}
+                    title={statusConfig.label}
+                    aria-label={`${tool} status: ${statusConfig.label}`}
+                  />
+                )}
+                {getCliToolDisplayName(tool)}
+              </button>
+            );
+          })}
+        </nav>
+        {worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning && (
+          <button
+            onClick={handleKillSession}
+            className="flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors"
+            aria-label={`End ${activeCliTab} session`}
+          >
+            <span aria-hidden="true">&#x2715;</span>
+            End
+          </button>
+        )}
+      </div>
+    ),
+    [autoYesEnabled, autoYesExpiresAt, handleAutoYesToggle, lastAutoResponse, activeCliTab, selectedAgents, worktree?.sessionStatusByCli, handleKillSession]
+  );
+
   /** Memoized right pane (terminal + file panel) to prevent re-render when left pane state changes */
   const rightPaneMemo = useMemo(
     () => (
@@ -1924,6 +1985,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             disableAutoFollow={disableAutoFollow}
           />
         }
+        terminalHeader={terminalHeaderMemo}
         fileTabs={fileTabs.state}
         worktreeId={worktreeId}
         onCloseTab={fileTabs.closeTab}
@@ -1934,7 +1996,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         onFileSaved={handleFilePanelSave}
       />
     ),
-    [state.terminal.output, state.terminal.isActive, state.terminal.isThinking, state.terminal.autoScroll, handleAutoScrollChange, disableAutoFollow, fileTabs.state, fileTabs.closeTab, fileTabs.activateTab, worktreeId, handleLoadContent, handleLoadError, handleSetLoading, handleFilePanelSave]
+    [state.terminal.output, state.terminal.isActive, state.terminal.isThinking, state.terminal.autoScroll, handleAutoScrollChange, disableAutoFollow, terminalHeaderMemo, fileTabs.state, fileTabs.closeTab, fileTabs.activateTab, worktreeId, handleLoadContent, handleLoadError, handleSetLoading, handleFilePanelSave]
   );
 
   /**
@@ -2046,62 +2108,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onMenuClick={toggle}
             hasUpdate={hasUpdate}
           />
-          {/* Issue #4/#368: CLI Tool Tab Switcher (dynamic from selectedAgents) */}
-          <div className="px-4 py-2 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-            <nav className="flex items-center gap-4" aria-label="CLI Tool Selection">
-              <AutoYesToggle
-                enabled={autoYesEnabled}
-                expiresAt={autoYesExpiresAt}
-                onToggle={handleAutoYesToggle}
-                lastAutoResponse={lastAutoResponse}
-                cliToolName={activeCliTab}
-                inline
-              />
-              <div className="w-px h-5 bg-gray-300 dark:bg-gray-600" />
-              {selectedAgents.map((tool) => {
-                const toolStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[tool]);
-                const statusConfig = SIDEBAR_STATUS_CONFIG[toolStatus];
-                return (
-                  <button
-                    key={tool}
-                    onClick={() => setActiveCliTab(tool)}
-                    className={`pb-2 px-2 border-b-2 font-medium text-sm transition-colors flex items-center gap-1.5 ${
-                      activeCliTab === tool
-                        ? 'border-cyan-600 text-cyan-600'
-                        : 'border-transparent text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
-                    }`}
-                    aria-current={activeCliTab === tool ? 'page' : undefined}
-                  >
-                    {statusConfig.type === 'spinner' ? (
-                      <span
-                        className={`w-2 h-2 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`}
-                        title={statusConfig.label}
-                        aria-label={`${tool} status: ${statusConfig.label}`}
-                      />
-                    ) : (
-                      <span
-                        className={`w-2 h-2 rounded-full flex-shrink-0 ${statusConfig.className}`}
-                        title={statusConfig.label}
-                        aria-label={`${tool} status: ${statusConfig.label}`}
-                      />
-                    )}
-                    {getCliToolDisplayName(tool)}
-                  </button>
-                );
-              })}
-            </nav>
-            {/* Issue #4: End Session button - shown only when active CLI tool session is running */}
-            {worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning && (
-              <button
-                onClick={handleKillSession}
-                className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors"
-                aria-label={`End ${activeCliTab} session`}
-              >
-                <span aria-hidden="true">&#x2715;</span>
-                End Session
-              </button>
-            )}
-          </div>
           {/* Issue #111: Branch mismatch warning */}
           {worktree?.gitStatus && (
             <BranchMismatchAlert

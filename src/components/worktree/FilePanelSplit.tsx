@@ -22,6 +22,8 @@ import type { FileContent } from '@/types/models';
 export interface FilePanelSplitProps {
   /** Terminal display element */
   terminal: React.ReactNode;
+  /** Optional header rendered above the terminal (e.g. CLI tool tabs) */
+  terminalHeader?: React.ReactNode;
   /** File tabs state */
   fileTabs: FileTabsState;
   /** Worktree ID for API calls */
@@ -65,6 +67,7 @@ const MAX_TERMINAL_WIDTH = 80;
  */
 export const FilePanelSplit = memo(function FilePanelSplit({
   terminal,
+  terminalHeader,
   fileTabs,
   worktreeId,
   onCloseTab,
@@ -96,11 +99,19 @@ export const FilePanelSplit = memo(function FilePanelSplit({
   const terminalStyle = useMemo(() => ({ width: `${terminalWidth}%` }), [terminalWidth]);
   const filePanelStyle = useMemo(() => ({ width: `${100 - terminalWidth}%` }), [terminalWidth]);
 
+  /** Terminal with optional header */
+  const terminalWithHeader = (
+    <div className="h-full flex flex-col">
+      {terminalHeader}
+      <div className="flex-1 min-h-0">{terminal}</div>
+    </div>
+  );
+
   // No tabs: terminal at full width
   if (fileTabs.tabs.length === 0) {
     return (
       <div className="h-full">
-        {terminal}
+        {terminalWithHeader}
       </div>
     );
   }
@@ -113,7 +124,7 @@ export const FilePanelSplit = memo(function FilePanelSplit({
         style={terminalStyle}
         className="flex-shrink-0 overflow-hidden"
       >
-        {terminal}
+        {terminalWithHeader}
       </div>
 
       {/* Resizer */}
