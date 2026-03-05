@@ -40,7 +40,7 @@ import { LeftPaneTabSwitcher, type LeftPaneTab } from '@/components/worktree/Lef
 import { FileViewer } from '@/components/worktree/FileViewer';
 import { FilePanelSplit } from '@/components/worktree/FilePanelSplit';
 import { useFileTabs } from '@/hooks/useFileTabs';
-import { EDITABLE_EXTENSIONS } from '@/config/editable-extensions';
+
 
 /**
  * Dynamic import of MarkdownEditor with SSR disabled.
@@ -1217,16 +1217,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
    */
   const handleFileSelect = useCallback((path: string) => {
     if (isMobile) {
-      const extension = path.split('.').pop()?.toLowerCase();
-      const extWithDot = extension ? `.${extension}` : '';
-
-      if (EDITABLE_EXTENSIONS.includes(extWithDot)) {
-        // Mobile: open MarkdownEditor directly
-        setEditorFilePath(path);
-      } else {
-        // Mobile: open in modal
-        setMobileFileViewerPath(path);
-      }
+      // Mobile: all files open in FileViewer modal (includes MARP, path copy, fullscreen)
+      setMobileFileViewerPath(path);
     } else {
       // Desktop: open in file tab panel (including .md files for preview)
       const result = fileTabs.openFile(path);
@@ -2395,6 +2387,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onClose={handleMobileFileViewerClose}
           worktreeId={worktreeId}
           filePath={mobileFileViewerPath ?? ''}
+          onEditMarkdown={setEditorFilePath}
         />
         {/* Markdown Editor Modal (Mobile) - Issue #104: disableClose when editor is maximized */}
         {editorFilePath && (

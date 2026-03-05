@@ -24,7 +24,7 @@ import { FileContent } from '@/types/models';
 import { ImageViewer } from './ImageViewer';
 import { VideoViewer } from './VideoViewer';
 import { copyToClipboard } from '@/lib/clipboard-utils';
-import { Copy, Check, Maximize2, Minimize2, ClipboardCopy } from 'lucide-react';
+import { Copy, Check, Maximize2, Minimize2, ClipboardCopy, Pencil } from 'lucide-react';
 import { Z_INDEX } from '@/config/z-index';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
@@ -40,6 +40,8 @@ export interface FileViewerProps {
   onClose: () => void;
   worktreeId: string;
   filePath: string;
+  /** Callback to open markdown editor (mobile) */
+  onEditMarkdown?: (path: string) => void;
 }
 
 /**
@@ -55,7 +57,7 @@ export interface FileViewerProps {
  * />
  * ```
  */
-export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId, filePath }: FileViewerProps) {
+export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId, filePath, onEditMarkdown }: FileViewerProps) {
   const [content, setContent] = useState<FileContent | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -180,6 +182,17 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
   /** Whether the current file is a MARP presentation */
   const isMarp = Boolean(marpSlides && marpSlides.length > 0);
 
+  /** Whether current file is editable markdown */
+  const isMarkdown = content?.extension === 'md';
+
+  /** Open markdown editor (closes this viewer first) */
+  const handleEditMarkdown = useCallback(() => {
+    if (onEditMarkdown && filePath) {
+      onClose();
+      onEditMarkdown(filePath);
+    }
+  }, [onEditMarkdown, filePath, onClose]);
+
   /** Render the file content body */
   const renderContent = () => {
     if (!content) return null;
@@ -257,6 +270,16 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
         </p>
       </div>
       <div className="flex items-center gap-1 flex-shrink-0">
+        {isMarkdown && onEditMarkdown && (
+          <button
+            onClick={handleEditMarkdown}
+            className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+            aria-label="Edit file"
+            title="Edit"
+          >
+            <Pencil className="w-3.5 h-3.5" />
+          </button>
+        )}
         {canCopy && (
           <button
             data-testid="copy-content-button"

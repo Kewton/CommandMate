@@ -12,7 +12,7 @@
 
 import React, { useEffect, useRef, memo, useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import { Maximize2, Minimize2, ClipboardCopy, Check } from 'lucide-react';
+import { Maximize2, Minimize2, ClipboardCopy, Check, Copy } from 'lucide-react';
 import type { FileTab } from '@/hooks/useFileTabs';
 import type { FileContent } from '@/types/models';
 import { ImageViewer } from './ImageViewer';
@@ -105,15 +105,27 @@ function ErrorDisplay({ error }: { error: string }) {
   );
 }
 
-/** Toolbar with path copy and maximize/minimize buttons */
-function FileToolbar({ filePath, isMaximized, onToggleMaximize }: { filePath: string; isMaximized: boolean; onToggleMaximize: () => void }) {
+/** Toolbar with path copy, content copy, and maximize/minimize buttons */
+function FileToolbar({ filePath, isMaximized, onToggleMaximize, copyableContent }: { filePath: string; isMaximized: boolean; onToggleMaximize: () => void; copyableContent?: string }) {
   const [pathCopied, setPathCopied] = useState(false);
+  const [contentCopied, setContentCopied] = useState(false);
 
   const handleCopyPath = async () => {
     try {
       await copyToClipboard(filePath);
       setPathCopied(true);
       setTimeout(() => setPathCopied(false), 2000);
+    } catch {
+      // Silent failure
+    }
+  };
+
+  const handleCopyContent = async () => {
+    if (!copyableContent) return;
+    try {
+      await copyToClipboard(copyableContent);
+      setContentCopied(true);
+      setTimeout(() => setContentCopied(false), 2000);
     } catch {
       // Silent failure
     }
@@ -133,15 +145,28 @@ function FileToolbar({ filePath, isMaximized, onToggleMaximize }: { filePath: st
         </button>
         <span className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate">{filePath}</span>
       </div>
-      <button
-        type="button"
-        onClick={onToggleMaximize}
-        className="flex-shrink-0 p-1.5 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 transition-colors"
-        aria-label={isMaximized ? 'Minimize' : 'Maximize'}
-        title={isMaximized ? 'Minimize' : 'Maximize'}
-      >
-        {isMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-      </button>
+      <div className="flex items-center gap-1 flex-shrink-0">
+        {copyableContent && (
+          <button
+            type="button"
+            onClick={handleCopyContent}
+            className="flex-shrink-0 p-1 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 transition-colors"
+            aria-label="Copy file content"
+            title="Copy content"
+          >
+            {contentCopied ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onToggleMaximize}
+          className="flex-shrink-0 p-1.5 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 transition-colors"
+          aria-label={isMaximized ? 'Minimize' : 'Maximize'}
+          title={isMaximized ? 'Minimize' : 'Maximize'}
+        >
+          {isMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+        </button>
+      </div>
     </div>
   );
 }
@@ -225,6 +250,7 @@ function MarpEditorWithSlides({
   fileName,
   worktreeId,
   filePath,
+  contentText,
   onFileSaved,
   isMaximized,
   onToggleMaximize,
@@ -233,6 +259,7 @@ function MarpEditorWithSlides({
   fileName: string;
   worktreeId: string;
   filePath: string;
+  contentText?: string;
   onFileSaved?: (path: string) => void;
   isMaximized: boolean;
   onToggleMaximize: () => void;
@@ -266,7 +293,7 @@ function MarpEditorWithSlides({
             Editor
           </button>
         </div>
-        <FileToolbar filePath={filePath} isMaximized={isMaximized} onToggleMaximize={onToggleMaximize} />
+        <FileToolbar filePath={filePath} isMaximized={isMaximized} onToggleMaximize={onToggleMaximize} copyableContent={contentText} />
       </div>
       <div className="flex-1 min-h-0">
         {marpViewMode === 'slides' ? (
@@ -473,6 +500,7 @@ export const FilePanelContent = memo(function FilePanelContent({
               fileName={tab.name}
               worktreeId={worktreeId}
               filePath={tab.path}
+              contentText={content.content}
               onFileSaved={onFileSaved}
               isMaximized={isMaximized}
               onToggleMaximize={toggleMaximize}
@@ -480,7 +508,7 @@ export const FilePanelContent = memo(function FilePanelContent({
           ) : (
             <>
               {!isMaximized && (
-                <FileToolbar filePath={tab.path} isMaximized={isMaximized} onToggleMaximize={toggleMaximize} />
+                <FileToolbar filePath={tab.path} isMaximized={isMaximized} onToggleMaximize={toggleMaximize} copyableContent={content.content} />
               )}
               <div className="flex-1 min-h-0">
                 <MarkdownEditor
@@ -501,7 +529,7 @@ export const FilePanelContent = memo(function FilePanelContent({
   return (
     <MaximizableWrapper isMaximized={isMaximized} onToggle={toggleMaximize} filePath={tab.path}>
       <div className="h-full flex flex-col">
-        <FileToolbar filePath={tab.path} isMaximized={isMaximized} onToggleMaximize={toggleMaximize} />
+        <FileToolbar filePath={tab.path} isMaximized={isMaximized} onToggleMaximize={toggleMaximize} copyableContent={content.content} />
         <div className="flex-1 min-h-0">
           <CodeViewer content={content.content} extension={content.extension} />
         </div>
