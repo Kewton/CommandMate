@@ -1,0 +1,22 @@
+{
+  "issue_number": 438,
+  "refactor_targets": [
+    "src/hooks/useFileTabs.ts",
+    "src/components/worktree/FilePanelContent.tsx",
+    "src/components/worktree/FilePanelTabs.tsx",
+    "src/components/worktree/FilePanelSplit.tsx",
+    "src/app/api/worktrees/[id]/marp-render/route.ts"
+  ],
+  "quality_metrics": {
+    "before_tests_passed": 4592,
+    "before_typescript_errors": 0,
+    "before_lint_errors": 0
+  },
+  "improvement_goals": [
+    "JSDoc/コメントの適切な追加（設計書パターン準拠）",
+    "不要なコードの除去",
+    "SOLID原則の遵守確認",
+    "エラーハンドリングの一貫性確認",
+    "既存プロジェクトコーディング規約への準拠確認（named export形式、React.memo等）"
+  ]
+}

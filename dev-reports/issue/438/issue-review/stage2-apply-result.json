@@ -1,0 +1,17 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 438,
+  "applied": [
+    {"id": "S1-001", "severity": "Must Fix", "status": "applied", "description": ".mdファイルの扱いを要件・受入基準に追加"},
+    {"id": "S1-002", "severity": "Must Fix", "status": "applied", "description": "MARPライブラリ(@marp-team/marp-core)・XSS対策をMARPスライドプレビュー要件に追加"},
+    {"id": "S1-003", "severity": "Must Fix", "status": "applied", "description": "ドラッグリサイズの初期幅・最小/最大幅・実装方針を要件に追加"},
+    {"id": "S1-004", "severity": "Should Fix", "status": "applied", "description": "画像・動画ファイルのタブ表示を受入基準に追加"},
+    {"id": "S1-005", "severity": "Should Fix", "status": "applied", "description": "ファイル削除・リネーム時のタブ動作をタブ管理要件・受入基準に追加"},
+    {"id": "S1-006", "severity": "Should Fix", "status": "applied", "description": "PC版の定義（useIsMobileフック）を概要に追加"},
+    {"id": "S1-007", "severity": "Nice to Have", "status": "skipped", "description": "パネル幅のlocalStorage永続化はスコープ外としてスキップ"}
+  ],
+  "applied_count": 6,
+  "skipped_count": 1,
+  "github_issue_updated": true
+}

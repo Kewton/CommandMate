@@ -1,0 +1,72 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 438,
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_summary": "Issue #438はPC版ファイル表示をタブ付きサイドパネルに変更する機能追加。要件は概ね明確だが、.mdファイルの扱い・MARPライブラリ選定・ドラッグリサイズ実装方法などの重要な仕様が未定義。",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "Must Fix",
+      "category": "仕様不足",
+      "title": ".mdファイルのタブパネルでの扱いが未定義",
+      "description": "現行実装では.mdファイルは`MarkdownEditor`（フルスクリーンモーダル）で開き、それ以外はFileViewerモーダルで開く。新しいサイドパネル機能で.mdファイルをどう扱うかが未定義。MarkdownEditorもタブとして組み込むか、FileViewerとして表示のみにするか、MarkdownEditorは現行のままにするか。",
+      "suggestion": "## .mdファイルの扱い\n- .mdファイルはタブパネルではFileViewer相当のプレビュー表示（読み取り専用）とし、編集はMarkdownEditorを引き続き使用する\n\nという形でIssueに明記する必要がある。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "Must Fix",
+      "category": "依存関係",
+      "title": "MARPスライドプレビューの実装ライブラリが未定義",
+      "description": "package.jsonに`@marp-team/marp-core`等のMARPライブラリは存在しない。MARPスライドプレビューを実現するには新たなnpmパッケージのインストールが必要だが、どのライブラリを使用するか未定義。@marp-team/marp-coreはBrowser環境でのレンダリングに対応している。",
+      "suggestion": "## MARPスライドプレビュー実装方針\n- `@marp-team/marp-core`を使用してMARPをHTMLにレンダリングし、iframeまたはshadow DOMで表示する\n- XSSリスクに対するsandbox設定も要件に含める\n\nという実装方針をIssueに記載する。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "Must Fix",
+      "category": "仕様不足",
+      "title": "ドラッグリサイズの実装方法が未定義",
+      "description": "パネル境界のドラッグリサイズについて、react-resizableやカスタムCSS resizeなど実装方法の選択が必要。また初期パネル幅・最小/最大パネル幅の仕様が未定義。",
+      "suggestion": "## リサイズ仕様\n- 初期パネル幅: ターミナルとファイルパネルを50:50\n- 最小パネル幅: 200px（ターミナル側・ファイルパネル側それぞれ）\n- 最大パネル幅: 80%（ファイルパネル最大）\n- 実装: カスタムドラッグハンドラー（依存なし）またはreact-resizable\n\nとIssueに記載する。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "Should Fix",
+      "category": "仕様不足",
+      "title": "画像・動画ファイルのタブ内表示が未定義",
+      "description": "現行のFileViewerは画像ファイル（isImage）・動画ファイル（isVideo）を表示できる。タブパネルでも同様に対応するか未定義。",
+      "suggestion": "受入基準に「画像・動画ファイルもタブパネルで表示される」を追加する。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "Should Fix",
+      "category": "仕様不足",
+      "title": "ファイルリネーム・削除時のタブ状態が未定義",
+      "description": "ファイルツリーでファイルをリネーム・削除した場合、開いているタブの扱いが未定義。",
+      "suggestion": "## ファイル削除・リネーム時の動作\n- 削除: 対応するタブを自動的に閉じる\n- リネーム: タブのファイル名を更新する\n\nをIssueに記載する。"
+    },
+    {
+      "id": "S1-006",
+      "severity": "Should Fix",
+      "category": "仕様不足",
+      "title": "PC版判定のブレークポイントが未定義",
+      "description": "現行の`useIsMobile`フックのブレークポイントと整合が必要。現行実装では特定の幅以下でモバイル表示に切り替わるが、Issue上で「PC版」の定義が明記されていない。",
+      "suggestion": "「PC版とは現行のuseIsMobileフックがfalseを返す環境（デスクトップ幅）を指す」とIssueに明記する。"
+    },
+    {
+      "id": "S1-007",
+      "severity": "Nice to Have",
+      "category": "UX",
+      "title": "タブのパネル幅がブラウザリロード後にリセットされる",
+      "description": "パネル幅をlocalStorageで永続化するかどうかが未定義。",
+      "suggestion": "必要性は低いが、localStorageでパネル幅を保持するとUXが向上する。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 3,
+    "should_fix": 3,
+    "nice_to_have": 1,
+    "total": 7
+  }
+}

@@ -38,7 +38,9 @@ import { SearchBar } from '@/components/worktree/SearchBar';
 import { useFileSearch } from '@/hooks/useFileSearch';
 import { LeftPaneTabSwitcher, type LeftPaneTab } from '@/components/worktree/LeftPaneTabSwitcher';
 import { FileViewer } from '@/components/worktree/FileViewer';
-import { EDITABLE_EXTENSIONS } from '@/config/editable-extensions';
+import { FilePanelSplit } from '@/components/worktree/FilePanelSplit';
+import { useFileTabs } from '@/hooks/useFileTabs';
+
 
 /**
  * Dynamic import of MarkdownEditor with SSR disabled.
@@ -76,7 +78,7 @@ import { AutoYesToggle, type AutoYesToggleParams } from '@/components/worktree/A
 import type { AutoYesStopReason } from '@/config/auto-yes-config';
 import { NotificationDot } from '@/components/common/NotificationDot';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
-import type { Worktree, ChatMessage, PromptData, GitStatus } from '@/types/models';
+import type { Worktree, ChatMessage, PromptData, GitStatus, FileContent } from '@/types/models';
 import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
 import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
 import { deriveCliStatus } from '@/types/sidebar';
@@ -992,7 +994,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
-  const [fileViewerPath, setFileViewerPath] = useState<string | null>(null);
+  // Issue #438: File tabs state (replaces fileViewerPath for desktop)
+  const fileTabs = useFileTabs(worktreeId);
+  // Mobile-only: file viewer path for modal display (desktop uses fileTabs)
+  const [mobileFileViewerPath, setMobileFileViewerPath] = useState<string | null>(null);
   const [editorFilePath, setEditorFilePath] = useState<string | null>(null);
   // Issue #104: Track editor maximized state to disable Modal close handlers
   const [isEditorMaximized, setIsEditorMaximized] = useState(false);
@@ -1185,36 +1190,53 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     }
   }, [activeCliTab, actions, fetchMessages, fetchCurrentOutput]);
 
+  // Toast state for notifications (moved before event handlers that reference showToast)
+  const { toasts, showToast, removeToast } = useToast();
+
   // ========================================================================
   // Event Handlers
   // ========================================================================
 
-  /** Handle file path click in history pane - opens file viewer */
+  /** Handle file path click in history pane */
   const handleFilePathClick = useCallback((path: string) => {
-    setFileViewerPath(path);
-  }, []);
+    if (isMobile) {
+      setMobileFileViewerPath(path);
+    } else {
+      const result = fileTabs.openFile(path);
+      if (result === 'limit_reached') {
+        showToast('Maximum 5 file tabs. Close a tab first.', 'info');
+      }
+    }
+  }, [isMobile, fileTabs, showToast]);
 
   /**
    * Handle file select from FileTreeView
-   * Opens MarkdownEditor for .md files, FileViewer for others
-   * [Stage 3 SF-004] Separate editorFilePath state to avoid FileViewer conflict
+   * Opens MarkdownEditor for .md files, file tab panel (desktop) or modal (mobile) for others
+   * [Stage 3 SF-004] Separate editorFilePath state to avoid conflict
+   * Issue #438: Uses file tabs instead of modal for non-editable files on desktop
    */
   const handleFileSelect = useCallback((path: string) => {
-    const extension = path.split('.').pop()?.toLowerCase();
-    const extWithDot = extension ? `.${extension}` : '';
-
-    if (EDITABLE_EXTENSIONS.includes(extWithDot)) {
-      // Open in MarkdownEditor
-      setEditorFilePath(path);
+    if (isMobile) {
+      // Mobile: all files open in FileViewer modal (includes MARP, path copy, fullscreen)
+      setMobileFileViewerPath(path);
     } else {
-      // Open in FileViewer
-      setFileViewerPath(path);
+      // Desktop: open in file tab panel (including .md files for preview)
+      const result = fileTabs.openFile(path);
+      if (result === 'limit_reached') {
+        showToast('Maximum 5 file tabs. Close a tab first.', 'info');
+      }
     }
+  }, [isMobile, fileTabs, showToast]);
+
+  /** Handle closing mobile FileViewer modal */
+  const handleMobileFileViewerClose = useCallback(() => {
+    setMobileFileViewerPath(null);
   }, []);
 
-  /** Handle FileViewer close */
-  const handleFileViewerClose = useCallback(() => {
-    setFileViewerPath(null);
+  /** Handle file save in tab panel - refresh tree to reflect changes */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- savedPath accepted for callback interface compatibility
+  const handleFilePanelSave = useCallback((_savedPath: string) => {
+    setFileTreeRefresh(prev => prev + 1);
   }, []);
 
   /** Handle MarkdownEditor close */
@@ -1446,13 +1468,16 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       if (!response.ok) {
         throw new Error('Failed to rename');
       }
-      // Renamed successfully - trigger FileTreeView refresh
+      // Renamed successfully - update file tab if the renamed file was open
+      const parentDir = path.includes('/') ? path.substring(0, path.lastIndexOf('/') + 1) : '';
+      fileTabs.onFileRenamed(path, `${parentDir}${newName}`);
+      // Trigger FileTreeView refresh
       setFileTreeRefresh(prev => prev + 1);
     } catch (err) {
       console.error('[WorktreeDetailRefactored] Failed to rename:', err);
       window.alert(tError('fileOps.failedToRename'));
     }
-  }, [worktreeId, tError]);
+  }, [worktreeId, fileTabs, tError]);
 
   /** Handle file/directory delete in FileTreeView */
   const handleDelete = useCallback(async (path: string) => {
@@ -1473,16 +1498,15 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       if (editorFilePath === path || editorFilePath?.startsWith(`${path}/`)) {
         setEditorFilePath(null);
       }
+      // Issue #438: Close file tab if the deleted file was open
+      fileTabs.onFileDeleted(path);
       // Trigger FileTreeView refresh
       setFileTreeRefresh(prev => prev + 1);
     } catch (err) {
       console.error('[WorktreeDetailRefactored] Failed to delete:', err);
       window.alert(tError('fileOps.failedToDelete'));
     }
-  }, [worktreeId, editorFilePath, tCommon, tError]);
-
-  // Toast state for upload notifications
-  const { toasts, showToast, removeToast } = useToast();
+  }, [worktreeId, editorFilePath, fileTabs, tCommon, tError]);
 
   // Issue #314: Show stop reason toast when pending (deferred from fetchCurrentOutput)
   useEffect(() => {
@@ -1867,22 +1891,112 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const worktreeName = worktree?.name ?? DEFAULT_WORKTREE_NAME;
 
   // ========================================================================
+  // Issue #438: File panel loading callbacks (memoized for FilePanelSplit)
+  // ========================================================================
+
+  const handleLoadContent = useCallback((path: string, content: FileContent) => {
+    fileTabs.dispatch({ type: 'SET_CONTENT', path, content });
+  }, [fileTabs]);
+
+  const handleLoadError = useCallback((path: string, errorMsg: string) => {
+    fileTabs.dispatch({ type: 'SET_ERROR', path, error: errorMsg });
+  }, [fileTabs]);
+
+  const handleSetLoading = useCallback((path: string, isLoading: boolean) => {
+    fileTabs.dispatch({ type: 'SET_LOADING', path, loading: isLoading });
+  }, [fileTabs]);
+
+  // ========================================================================
   // Memoized Panes (Issue #411: avoid re-render on polling)
   // ========================================================================
 
-  /** Memoized right pane (terminal) to prevent re-render when left pane state changes */
+  /** Memoized CLI tool tab header for the terminal pane */
+  const terminalHeaderMemo = useMemo(
+    () => (
+      <div className="px-3 py-1.5 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between flex-shrink-0">
+        <nav className="flex items-center gap-3" aria-label="CLI Tool Selection">
+          <AutoYesToggle
+            enabled={autoYesEnabled}
+            expiresAt={autoYesExpiresAt}
+            onToggle={handleAutoYesToggle}
+            lastAutoResponse={lastAutoResponse}
+            cliToolName={activeCliTab}
+            inline
+          />
+          <div className="w-px h-4 bg-gray-300 dark:bg-gray-600" />
+          {selectedAgents.map((tool) => {
+            const toolStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[tool]);
+            const statusConfig = SIDEBAR_STATUS_CONFIG[toolStatus];
+            return (
+              <button
+                key={tool}
+                onClick={() => setActiveCliTab(tool)}
+                className={`pb-1 px-1.5 border-b-2 font-medium text-xs transition-colors flex items-center gap-1 ${
+                  activeCliTab === tool
+                    ? 'border-cyan-600 text-cyan-600'
+                    : 'border-transparent text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
+                }`}
+                aria-current={activeCliTab === tool ? 'page' : undefined}
+              >
+                {statusConfig.type === 'spinner' ? (
+                  <span
+                    className={`w-2 h-2 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`}
+                    title={statusConfig.label}
+                    aria-label={`${tool} status: ${statusConfig.label}`}
+                  />
+                ) : (
+                  <span
+                    className={`w-2 h-2 rounded-full flex-shrink-0 ${statusConfig.className}`}
+                    title={statusConfig.label}
+                    aria-label={`${tool} status: ${statusConfig.label}`}
+                  />
+                )}
+                {getCliToolDisplayName(tool)}
+              </button>
+            );
+          })}
+        </nav>
+        {worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning && (
+          <button
+            onClick={handleKillSession}
+            className="flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors"
+            aria-label={`End ${activeCliTab} session`}
+          >
+            <span aria-hidden="true">&#x2715;</span>
+            End
+          </button>
+        )}
+      </div>
+    ),
+    [autoYesEnabled, autoYesExpiresAt, handleAutoYesToggle, lastAutoResponse, activeCliTab, selectedAgents, worktree?.sessionStatusByCli, handleKillSession]
+  );
+
+  /** Memoized right pane (terminal + file panel) to prevent re-render when left pane state changes */
   const rightPaneMemo = useMemo(
     () => (
-      <TerminalDisplay
-        output={state.terminal.output}
-        isActive={state.terminal.isActive}
-        isThinking={state.terminal.isThinking}
-        autoScroll={state.terminal.autoScroll}
-        onScrollChange={handleAutoScrollChange}
-        disableAutoFollow={disableAutoFollow}
+      <FilePanelSplit
+        terminal={
+          <TerminalDisplay
+            output={state.terminal.output}
+            isActive={state.terminal.isActive}
+            isThinking={state.terminal.isThinking}
+            autoScroll={state.terminal.autoScroll}
+            onScrollChange={handleAutoScrollChange}
+            disableAutoFollow={disableAutoFollow}
+          />
+        }
+        terminalHeader={terminalHeaderMemo}
+        fileTabs={fileTabs.state}
+        worktreeId={worktreeId}
+        onCloseTab={fileTabs.closeTab}
+        onActivateTab={fileTabs.activateTab}
+        onLoadContent={handleLoadContent}
+        onLoadError={handleLoadError}
+        onSetLoading={handleSetLoading}
+        onFileSaved={handleFilePanelSave}
       />
     ),
-    [state.terminal.output, state.terminal.isActive, state.terminal.isThinking, state.terminal.autoScroll, handleAutoScrollChange, disableAutoFollow]
+    [state.terminal.output, state.terminal.isActive, state.terminal.isThinking, state.terminal.autoScroll, handleAutoScrollChange, disableAutoFollow, terminalHeaderMemo, fileTabs.state, fileTabs.closeTab, fileTabs.activateTab, worktreeId, handleLoadContent, handleLoadError, handleSetLoading, handleFilePanelSave]
   );
 
   /**
@@ -1994,53 +2108,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onMenuClick={toggle}
             hasUpdate={hasUpdate}
           />
-          {/* Issue #4/#368: CLI Tool Tab Switcher (dynamic from selectedAgents) */}
-          <div className="px-4 py-2 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-            <nav className="flex gap-4" aria-label="CLI Tool Selection">
-              {selectedAgents.map((tool) => {
-                const toolStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[tool]);
-                const statusConfig = SIDEBAR_STATUS_CONFIG[toolStatus];
-                return (
-                  <button
-                    key={tool}
-                    onClick={() => setActiveCliTab(tool)}
-                    className={`pb-2 px-2 border-b-2 font-medium text-sm transition-colors flex items-center gap-1.5 ${
-                      activeCliTab === tool
-                        ? 'border-cyan-600 text-cyan-600'
-                        : 'border-transparent text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
-                    }`}
-                    aria-current={activeCliTab === tool ? 'page' : undefined}
-                  >
-                    {statusConfig.type === 'spinner' ? (
-                      <span
-                        className={`w-2 h-2 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`}
-                        title={statusConfig.label}
-                        aria-label={`${tool} status: ${statusConfig.label}`}
-                      />
-                    ) : (
-                      <span
-                        className={`w-2 h-2 rounded-full flex-shrink-0 ${statusConfig.className}`}
-                        title={statusConfig.label}
-                        aria-label={`${tool} status: ${statusConfig.label}`}
-                      />
-                    )}
-                    {getCliToolDisplayName(tool)}
-                  </button>
-                );
-              })}
-            </nav>
-            {/* Issue #4: End Session button - shown only when active CLI tool session is running */}
-            {worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning && (
-              <button
-                onClick={handleKillSession}
-                className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors"
-                aria-label={`End ${activeCliTab} session`}
-              >
-                <span aria-hidden="true">&#x2715;</span>
-                End Session
-              </button>
-            )}
-          </div>
           {/* Issue #111: Branch mismatch warning */}
           {worktree?.gitStatus && (
             <BranchMismatchAlert
@@ -2053,8 +2120,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             <WorktreeDesktopLayout
               leftPane={leftPaneMemo}
               rightPane={rightPaneMemo}
-              initialLeftWidth={40}
-              minLeftWidth={20}
+              initialLeftWidth={20}
+              minLeftWidth={15}
               maxLeftWidth={60}
             />
           </div>
@@ -2066,14 +2133,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               isSessionRunning={state.terminal.isActive}
             />
           </div>
-          {/* Auto Yes Toggle */}
-          <AutoYesToggle
-            enabled={autoYesEnabled}
-            expiresAt={autoYesExpiresAt}
-            onToggle={handleAutoYesToggle}
-            lastAutoResponse={lastAutoResponse}
-            cliToolName={activeCliTab}
-          />
           {/* Prompt Panel - fixed overlay at bottom */}
           {state.prompt.visible && !autoYesEnabled && (
             <div className="fixed bottom-20 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-2xl px-4">
@@ -2096,13 +2155,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onClose={handleInfoModalClose}
             onWorktreeUpdate={setWorktree}
           />
-          {/* File Viewer Modal */}
-          <FileViewer
-            isOpen={fileViewerPath !== null}
-            onClose={handleFileViewerClose}
-            worktreeId={worktreeId}
-            filePath={fileViewerPath ?? ''}
-          />
+          {/* Issue #438: Desktop FileViewer modal replaced by FilePanelSplit in rightPaneMemo */}
           {/* Markdown Editor Modal - Issue #104: disableClose when editor is maximized */}
           {editorFilePath && (
             <Modal
@@ -2335,12 +2388,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           />
         )}
 
-        {/* File Viewer Modal */}
+        {/* File Viewer Modal (Mobile only) */}
         <FileViewer
-          isOpen={fileViewerPath !== null}
-          onClose={handleFileViewerClose}
+          isOpen={mobileFileViewerPath !== null}
+          onClose={handleMobileFileViewerClose}
           worktreeId={worktreeId}
-          filePath={fileViewerPath ?? ''}
+          filePath={mobileFileViewerPath ?? ''}
+          onEditMarkdown={setEditorFilePath}
         />
         {/* Markdown Editor Modal (Mobile) - Issue #104: disableClose when editor is maximized */}
         {editorFilePath && (

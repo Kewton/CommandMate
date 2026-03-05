@@ -1,0 +1,12 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー 指摘事項反映",
+  "issue_number": 438,
+  "applied": [
+    {"id": "D2-001", "severity": "Must Fix", "status": "applied", "description": "handleDelete/handleRenameのuseFileTabs連携を影響ファイル一覧に追記"},
+    {"id": "D2-002", "severity": "Must Fix", "status": "applied", "description": "FilePanelContentPropsにonLoadContent/onLoadError/onSetLoadingコールバックを追加、useEffectでのフェッチ実装例を追加"},
+    {"id": "D2-003", "severity": "Should Fix", "status": "applied", "description": "rightPaneMemoの依存配列にhandleLoadContent/handleLoadError/handleSetLoadingを追加"}
+  ],
+  "applied_count": 3,
+  "skipped_count": 0
+}

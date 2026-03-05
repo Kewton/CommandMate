@@ -1,0 +1,37 @@
+{
+  "status": "success",
+  "coverage": 80,
+  "unit_tests": {
+    "total": 4592,
+    "passed": 4592,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/hooks/useFileTabs.ts",
+    "src/components/worktree/FilePanelContent.tsx",
+    "src/components/worktree/FilePanelTabs.tsx",
+    "src/components/worktree/FilePanelSplit.tsx",
+    "src/app/api/worktrees/[id]/marp-render/route.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/hooks/useFileTabs.test.ts",
+    "tests/unit/components/FilePanelContent.test.tsx",
+    "tests/unit/components/FilePanelTabs.test.tsx",
+    "tests/unit/components/FilePanelSplit.test.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+  ],
+  "tasks_completed": [
+    "Task 1.1: useFileTabs hook (useReducer, FileTab/FileTabsState types, MAX_FILE_TABS=5)",
+    "Task 2.1: FilePanelContent (auto-fetch, syntax highlighting, image/video/markdown/marp)",
+    "Task 2.2: FilePanelTabs (tab bar UI with close buttons and content display)",
+    "Task 2.3: FilePanelSplit (terminal + file panel horizontal split with PaneResizer)",
+    "Task 3.1: MARP render API route (simple HTML wrapper, validation)",
+    "Task 4.1: WorktreeDetailRefactored integration (useFileTabs, FilePanelSplit, mobile FileViewer preserved)",
+    "Task 4.2: Existing test updates (useFileTabs/FilePanelSplit mocks, 3 test adaptations)"
+  ],
+  "commits": ["422393d: feat(ui): replace desktop file viewer modal with tabbed split panel"],
+  "message": "TDD implementation complete. All 7 tasks implemented. 221 test files pass (4592 tests). 0 TypeScript errors. 0 ESLint errors. Desktop file viewer modal replaced with tabbed file panel split view. Mobile retains modal FileViewer."
+}

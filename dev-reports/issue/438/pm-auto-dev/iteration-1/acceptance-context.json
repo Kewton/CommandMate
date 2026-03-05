@@ -1,0 +1,50 @@
+{
+  "issue_number": 438,
+  "feature_summary": "PC版ファイル表示をポップアップからタブ付きサイドパネルに変更",
+  "acceptance_criteria": [
+    "PC版でファイル選択時、ターミナル右側にファイル表示パネルが開く",
+    "パネル境界のドラッグでリサイズができる（初期50:50、最小200px、最大80%）",
+    "タブで最大5ファイルまで同時に開ける",
+    "タブの×ボタンでファイルを閉じられる",
+    "5タブ上限時に新しいファイルを開こうとすると警告が表示される",
+    "全タブを閉じるとパネルが非表示になりターミナルがフル幅に戻る",
+    "既に開いているファイルをクリックすると既存タブがアクティブになる（重複タブ不可）",
+    "Python, JSON, JavaScript, TypeScript, CSS, HTMLのシンタックスハイライトが正しく表示される",
+    "画像・動画ファイルもタブパネルで表示される",
+    ".mdファイルはタブパネルで読み取り専用プレビュー表示され、編集ボタンでMarkdownEditorが開く",
+    "ファイル削除時に対応するタブが自動的に閉じられる",
+    "ファイルリネーム時にタブのファイル名が更新される",
+    "MARP形式のMarkdownがスライド形式でプレビュー表示される",
+    "MARPスライドのページ送り/戻しが動作する",
+    "MARPスライドのXSS対策としてiframe sandbox='allow-same-origin'が設定されている",
+    "モバイル版は現行のポップアップ表示のまま変更なし",
+    "ダークモード対応",
+    "新規コンポーネントのユニットテストが追加されている",
+    "既存テストが更新され全てパスする"
+  ],
+  "test_scenarios": [
+    "シナリオ1: useFileTabsのopenFile - 新規ファイル開く → 'opened'返却、タブ追加",
+    "シナリオ2: useFileTabsのopenFile - 同じファイル再クリック → 'activated'返却、重複なし",
+    "シナリオ3: useFileTabsのopenFile - 5タブ上限 → 'limit_reached'返却",
+    "シナリオ4: useFileTabsのcloseTab - タブ削除後のactiveIndex調整",
+    "シナリオ5: useFileTabsのonFileDeleted - 対応タブ自動削除",
+    "シナリオ6: useFileTabsのonFileRenamed - タブのpath/name更新",
+    "シナリオ7: FilePanelSplit - tabs.length=0時はTerminalのみ",
+    "シナリオ8: FilePanelSplit - tabs.length>0時はPaneResizer+FilePanelTabs表示",
+    "シナリオ9: FilePanelContent - コンテンツ未ロード時にフェッチ開始",
+    "シナリオ10: MarpPreviewのiframe sandbox属性の確認",
+    "シナリオ11: npm run test:unit 全テストパス確認",
+    "シナリオ12: npx tsc --noEmit エラー0件確認"
+  ],
+  "implemented_files": [
+    "src/hooks/useFileTabs.ts",
+    "src/components/worktree/FilePanelContent.tsx",
+    "src/components/worktree/FilePanelTabs.tsx",
+    "src/components/worktree/FilePanelSplit.tsx",
+    "src/app/api/worktrees/[id]/marp-render/route.ts",
+    "tests/unit/hooks/useFileTabs.test.ts",
+    "tests/unit/components/FilePanelContent.test.tsx",
+    "tests/unit/components/FilePanelTabs.test.tsx",
+    "tests/unit/components/FilePanelSplit.test.tsx"
+  ]
+}

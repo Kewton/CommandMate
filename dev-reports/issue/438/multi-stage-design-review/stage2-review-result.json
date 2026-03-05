@@ -1,0 +1,39 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 438,
+  "focus_area": "整合性",
+  "review_summary": "設計書と既存コードの整合性を確認。主な問題として、WorktreeDetailRefactoredのhandleDelete/handleRenameのuseFileTabs連携方法が設計書に未記載。FilePanelContentへのdispatch渡し方法も未定義。",
+  "findings": [
+    {
+      "id": "D2-001",
+      "severity": "Must Fix",
+      "category": "実装整合性",
+      "title": "handleDelete/handleRenameとuseFileTabsの連携が未定義",
+      "description": "既存の`handleDelete`は削除成功後に`editorFilePath`のクリアのみ行う。`useFileTabs`の`onFileDeleted(path)`や`onFileRenamed(oldPath, newPath)`を呼ぶ箇所が設計書に未定義。これらの連携がないとファイル削除/リネーム時にタブが自動クローズ/更新されない。",
+      "suggestion": "## handleDelete/handleRenameとuseFileTabs連携\n```typescript\n// WorktreeDetailRefactored.tsx の handleDelete拡張\nconst handleDelete = useCallback(async (path: string) => {\n  // ...既存処理...\n  // 成功後: タブも閉じる\n  fileTabs.onFileDeleted(path);\n  // ...既存のeditorFilePath処理...\n}, [worktreeId, fileTabs, ...]);\n\n// WorktreeDetailRefactored.tsx の handleRename拡張\nconst handleRename = useCallback(async (path: string) => {\n  // ...既存処理...\n  // 成功後: タブのパス更新\n  const newPath = path.replace(currentName, newName);\n  fileTabs.onFileRenamed(path, newPath);\n}, [worktreeId, fileTabs, ...]);\n```\nとして設計書に追記する。"
+    },
+    {
+      "id": "D2-002",
+      "severity": "Must Fix",
+      "category": "実装整合性",
+      "title": "FilePanelContentへのdispatch渡し方法が未定義",
+      "description": "設計書では「FilePanelContentのuseEffectでフェッチし`dispatch(SET_CONTENT)`を呼ぶ」とあるが、`dispatch`は`useFileTabs`から返されるものを`WorktreeDetailRefactored`が保持する。`FilePanelContent`がdispatchを必要とするなら、propsとして渡す必要がある。しかし`FilePanelContentProps`にdispatchが含まれていない。",
+      "suggestion": "## FilePanelContentのコンテンツフェッチ設計\n**方針A（推奨）**: `FilePanelContent`のpropsに`onLoadContent: (path: string, content: FileContent) => void`と`onLoadError: (path: string, error: string) => void`コールバックを追加（dispatch型を隠蔽）\n```typescript\ninterface FilePanelContentProps {\n  tab: FileTab;\n  worktreeId: string;\n  onLoadContent: (path: string, content: FileContent) => void;\n  onLoadError: (path: string, error: string) => void;\n  onSetLoading: (path: string, loading: boolean) => void;\n  onEditMarkdown?: (path: string) => void;\n}\n```\nとして設計書のFilePanelContentProps定義を更新する。"
+    },
+    {
+      "id": "D2-003",
+      "severity": "Should Fix",
+      "category": "整合性",
+      "title": "rightPaneMemoの依存配列の整合性確認",
+      "description": "設計書では`rightPaneMemo`の依存配列を`[state.terminal.*, fileTabsState, handleCloseTab, handleActivateTab, handleEditMarkdown, worktreeId]`としているが、`FilePanelSplit`のpropsに`onLoadContent`/`onLoadError`/`onSetLoading`コールバックが追加された場合、これらも依存配列に含める必要がある。`useCallback`でメモ化しないと毎回新参照になりrightPaneMemoが無効化される。",
+      "suggestion": "## rightPaneMemo最適化\n- `handleLoadContent`, `handleLoadError`, `handleSetLoading`をuseCallbackでメモ化し依存配列に追加\n- または`dispatch`を直接propsとして渡してメモ化コストを削減\n\nとして設計書に追記する。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 2,
+    "should_fix": 1,
+    "nice_to_have": 0,
+    "total": 3
+  }
+}

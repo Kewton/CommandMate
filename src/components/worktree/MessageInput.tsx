@@ -239,7 +239,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="flex items-end gap-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus-within:border-cyan-500 focus-within:ring-1 focus-within:ring-cyan-500">
+      <form onSubmit={handleSubmit} className="flex items-center gap-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus-within:border-cyan-500 focus-within:ring-1 focus-within:ring-cyan-500">
         {/* Mobile: Slash command button */}
         {isMobile && (
           <button
@@ -270,8 +270,8 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
           placeholder={isMobile ? "Type your message..." : "Type your message... (/ for commands, Shift+Enter for line break)"}
           disabled={sending}
           rows={1}
-          className="flex-1 outline-none bg-transparent resize-none py-1 overflow-y-auto scrollbar-thin"
-          style={{ minHeight: '24px', maxHeight: '160px' }}
+          className="flex-1 outline-none bg-transparent resize-none overflow-y-auto scrollbar-thin"
+          style={{ minHeight: '36px', maxHeight: '160px', paddingTop: '8px', paddingBottom: '8px', lineHeight: '20px' }}
         />
 
         {/* Interrupt Button - visible when session is running */}
