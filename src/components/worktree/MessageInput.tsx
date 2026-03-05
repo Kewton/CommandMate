@@ -29,6 +29,9 @@ export interface MessageInputProps {
  * <MessageInput worktreeId="main" onMessageSent={handleRefresh} cliToolId="claude" />
  * ```
  */
+/** localStorage key prefix for draft message persistence */
+const DRAFT_STORAGE_KEY_PREFIX = 'commandmate:draft-message:';
+
 export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, isSessionRunning = false }: MessageInputProps) {
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
@@ -40,11 +43,41 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   const compositionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const justFinishedComposingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Hooks for slash command functionality
   // Issue #4: Pass cliToolId to filter commands by CLI tool
   const isMobile = useIsMobile();
   const { groups } = useSlashCommands(worktreeId, cliToolId);
+
+  // Restore draft message from localStorage on mount or worktreeId change
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(DRAFT_STORAGE_KEY_PREFIX + worktreeId);
+      if (saved) {
+        setMessage(saved);
+      } else {
+        setMessage('');
+      }
+    } catch { /* localStorage unavailable */ }
+    return () => {
+      if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
+    };
+  }, [worktreeId]);
+
+  // Debounced save of draft message to localStorage
+  useEffect(() => {
+    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
+    draftSaveTimerRef.current = setTimeout(() => {
+      try {
+        if (message) {
+          window.localStorage.setItem(DRAFT_STORAGE_KEY_PREFIX + worktreeId, message);
+        } else {
+          window.localStorage.removeItem(DRAFT_STORAGE_KEY_PREFIX + worktreeId);
+        }
+      } catch { /* localStorage unavailable */ }
+    }, 500);
+  }, [message, worktreeId]);
 
   /**
    * Auto-resize textarea based on content
@@ -76,6 +109,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       await worktreeApi.sendMessage(worktreeId, message.trim(), effectiveCliTool);
       setMessage('');
       setIsFreeInputMode(false);
+      try { window.localStorage.removeItem(DRAFT_STORAGE_KEY_PREFIX + worktreeId); } catch { /* ignore */ }
       onMessageSent?.(effectiveCliTool);
     } catch (err) {
       setError(handleApiError(err));
