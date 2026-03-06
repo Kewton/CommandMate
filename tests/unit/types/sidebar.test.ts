@@ -153,6 +153,7 @@ describe('sidebar types', () => {
       expect(result.cliStatus).toEqual({
         claude: 'running',
         codex: 'waiting',
+        gemini: 'idle',
       });
     });
 
@@ -170,6 +171,7 @@ describe('sidebar types', () => {
       expect(result.cliStatus).toEqual({
         claude: 'idle',
         codex: 'idle',
+        gemini: 'idle',
       });
     });
 
@@ -230,10 +232,11 @@ describe('sidebar types', () => {
 
       const result = toBranchItem(worktree);
 
-      // DEFAULT_SELECTED_AGENTS is ['claude', 'codex']
+      // DEFAULT_SELECTED_AGENTS is ['claude', 'codex', 'gemini']
       expect(result.cliStatus).toEqual({
         claude: 'idle',
         codex: 'idle',
+        gemini: 'idle',
       });
     });
 
