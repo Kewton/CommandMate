@@ -35,11 +35,13 @@ If your workflow is shifting from "writing code yourself" to "defining issues, r
 
 Works on desktop and mobile — monitor and steer sessions from any browser, including your phone.
 
+If this is the kind of AI development workflow you want, [give the repo a star](https://github.com/Kewton/CommandMate).
+
 ---
 
 ## Issue-Driven Development
 
-CommandMate recommends the following development method. By adopting this process, humans can focus on defining issues and verifying final outputs.
+CommandMate is built for developers who spend less time editing files and more time defining issues, reviewing direction, and accepting outcomes from coding agents. The commands below turn that workflow into a repeatable process.
 
 ```
 Define Issue → Refine with AI → Review Direction → Generate Plan → Agent Executes
