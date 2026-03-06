@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-03-06
+
+### Added
+- Tabbed split file panel replacing desktop file viewer modal (Issue #438)
+  - Code highlighting, MARP slide rendering, fullscreen mode, path copy
+  - Line numbers in code viewers and markdown editor
+  - File tab persistence to localStorage per worktree
+  - Content copy buttons for file panels
+- Show description next to branch name in PC header
+- Persist draft message input across worktree switches
+- Allow up to 4 agents on PC, keep 2 on mobile
+
+### Fixed
+- File panel XSS, sandbox escape, and edge case hardening (Issue #438)
+- Encode file paths and reset MARP slide state
+- Center placeholder text vertically in message input
+
+### Changed
+- Move CLI tool tabs into terminal pane header (Issue #438)
+- Move AutoYesToggle to CLI tool tab bar (Issue #438)
+- Narrow left pane initial width for 1:2:2 layout ratio (Issue #438)
+- Add --port option and stop guidance to rebuild skill
+
 ## [0.4.0] - 2026-03-05
 
 ### Added
@@ -679,7 +702,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.4.0...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/Kewton/CommandMate/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Kewton/CommandMate/compare/v0.3.6...v0.4.0
 [0.3.6]: https://github.com/Kewton/CommandMate/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/Kewton/CommandMate/compare/v0.3.4...v0.3.5
