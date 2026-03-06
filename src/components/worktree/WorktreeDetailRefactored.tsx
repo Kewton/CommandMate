@@ -541,19 +541,9 @@ const DesktopHeader = memo(function DesktopHeader({
         )}
         {/* Worktree name, memo, and repository */}
         <div className="flex flex-col min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate max-w-[200px] leading-tight">
-              {worktreeName}
-            </h1>
-            {truncatedDescription && (
-              <span
-                className="text-sm text-gray-500 dark:text-gray-400 truncate max-w-md"
-                title={worktreeDescription}
-              >
-                {truncatedDescription}
-              </span>
-            )}
-          </div>
+          <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate max-w-[200px] leading-tight">
+            {worktreeName}
+          </h1>
           <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
             <span className="truncate max-w-[200px]">
               {repositoryName}
@@ -571,6 +561,17 @@ const DesktopHeader = memo(function DesktopHeader({
                 {gitStatus.isDirty && (
                   <span className="text-amber-500" title="Uncommitted changes">*</span>
                 )}
+              </>
+            )}
+            {truncatedDescription && (
+              <>
+                <span className="text-gray-300 dark:text-gray-600">—</span>
+                <span
+                  className="truncate max-w-[300px] text-gray-400 dark:text-gray-500"
+                  title={worktreeDescription}
+                >
+                  {truncatedDescription}
+                </span>
               </>
             )}
           </div>
