@@ -1149,13 +1149,19 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     }
   }, [worktreeId, actions, state.prompt.visible]);
 
-  // Issue #368: Sync activeCliTab when selectedAgents changes
-  // If current activeCliTab is no longer in selectedAgents, switch to first agent
+  // Mobile: limit displayed agents to 2 (screen space constraint)
+  const MOBILE_MAX_AGENTS = 2;
+  const displayedAgents = isMobile && selectedAgents.length > MOBILE_MAX_AGENTS
+    ? selectedAgents.slice(0, MOBILE_MAX_AGENTS)
+    : selectedAgents;
+
+  // Issue #368: Sync activeCliTab when displayedAgents changes
+  // If current activeCliTab is no longer in displayedAgents, switch to first agent
   useEffect(() => {
-    if (!selectedAgents.includes(activeCliTab)) {
-      setActiveCliTab(selectedAgents[0]);
+    if (!displayedAgents.includes(activeCliTab)) {
+      setActiveCliTab(displayedAgents[0]);
     }
-  }, [selectedAgents, activeCliTab]);
+  }, [displayedAgents, activeCliTab]);
 
   // Issue #379: Disable auto-follow for OpenCode (full-screen TUI).
   // OpenCode renders its TUI in a fixed viewport where menus (e.g., /model, /commands)
@@ -1925,7 +1931,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             inline
           />
           <div className="w-px h-4 bg-gray-300 dark:bg-gray-600" />
-          {selectedAgents.map((tool) => {
+          {displayedAgents.map((tool) => {
             const toolStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[tool]);
             const statusConfig = SIDEBAR_STATUS_CONFIG[toolStatus];
             return (
@@ -1969,7 +1975,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         )}
       </div>
     ),
-    [autoYesEnabled, autoYesExpiresAt, handleAutoYesToggle, lastAutoResponse, activeCliTab, selectedAgents, worktree?.sessionStatusByCli, handleKillSession]
+    [autoYesEnabled, autoYesExpiresAt, handleAutoYesToggle, lastAutoResponse, activeCliTab, displayedAgents, worktree?.sessionStatusByCli, handleKillSession]
   );
 
   /** Memoized right pane (terminal + file panel) to prevent re-render when left pane state changes */
@@ -2273,7 +2279,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           {/* Right: CLI tool tabs + End button */}
           <div className="flex items-center gap-2 flex-shrink-0">
             <nav className="flex gap-2" aria-label="CLI Tool Selection">
-              {selectedAgents.map((tool) => {
+              {displayedAgents.map((tool) => {
                 const toolStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[tool]);
                 const statusConfig = SIDEBAR_STATUS_CONFIG[toolStatus];
                 return (
