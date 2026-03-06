@@ -76,9 +76,14 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
 }: AgentSettingsPaneProps) {
   const t = useTranslations('schedule');
 
+  // Clamp selectedAgents to maxAgents (e.g. mobile limits to 2)
+  const clampedAgents = selectedAgents.length > maxAgents
+    ? selectedAgents.slice(0, maxAgents)
+    : selectedAgents;
+
   // Local checked state allows intermediate states (0 or 1 selected)
   const [checkedIds, setCheckedIds] = useState<Set<CLIToolType>>(
-    () => new Set(selectedAgents)
+    () => new Set(clampedAgents)
   );
   const [saving, setSaving] = useState(false);
   // Prevents polling-driven prop sync from overwriting intermediate checkbox state
@@ -103,9 +108,10 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
   // guarded by isEditing to prevent polling-driven overwrites during editing.
   useEffect(() => {
     if (!isEditing) {
-      setCheckedIds(new Set(selectedAgents));
+      setCheckedIds(new Set(clampedAgents));
     }
-  }, [selectedAgents, isEditing]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAgents, isEditing, maxAgents]);
 
   // Keep local context window input in sync with server-backed prop.
   useEffect(() => {
@@ -172,18 +178,18 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
             onSelectedAgentsChange(pair);
           } else {
             // Revert on failure
-            setCheckedIds(new Set(selectedAgents));
+            setCheckedIds(new Set(clampedAgents));
           }
         } catch {
           // Revert on network error
-          setCheckedIds(new Set(selectedAgents));
+          setCheckedIds(new Set(clampedAgents));
         } finally {
           setSaving(false);
           setIsEditing(false);
         }
       }
     },
-    [worktreeId, selectedAgents, onSelectedAgentsChange]
+    [worktreeId, clampedAgents, onSelectedAgentsChange]
   );
 
   const handleModelChange = useCallback(
