@@ -32,16 +32,26 @@ describe('validateAgentsPair()', () => {
     expect(result3.value).toEqual(['vibe-local', 'claude']);
   });
 
-  it('should return invalid for arrays with length != 2', () => {
+  it('should return valid for 3 or 4 tool IDs', () => {
+    const result3 = validateAgentsPair(['claude', 'codex', 'gemini']);
+    expect(result3.valid).toBe(true);
+    expect(result3.value).toEqual(['claude', 'codex', 'gemini']);
+
+    const result4 = validateAgentsPair(['claude', 'codex', 'gemini', 'vibe-local']);
+    expect(result4.valid).toBe(true);
+    expect(result4.value).toEqual(['claude', 'codex', 'gemini', 'vibe-local']);
+  });
+
+  it('should return invalid for arrays with length < 2 or > 4', () => {
     const result1 = validateAgentsPair([]);
     expect(result1.valid).toBe(false);
-    expect(result1.error).toContain('2 elements');
+    expect(result1.error).toContain('2-4 elements');
 
     const result2 = validateAgentsPair(['claude']);
     expect(result2.valid).toBe(false);
 
-    const result3 = validateAgentsPair(['claude', 'codex', 'gemini']);
-    expect(result3.valid).toBe(false);
+    const result5 = validateAgentsPair(['claude', 'codex', 'gemini', 'vibe-local', 'opencode']);
+    expect(result5.valid).toBe(false);
   });
 
   it('should return invalid for non-string elements', () => {
@@ -108,6 +118,14 @@ describe('parseSelectedAgents()', () => {
     expect(consoleWarnSpy).toHaveBeenCalled();
   });
 
+  it('should parse valid JSON with 3 or 4 agents', () => {
+    const result3 = parseSelectedAgents('["claude","codex","gemini"]');
+    expect(result3).toEqual(['claude', 'codex', 'gemini']);
+
+    const result4 = parseSelectedAgents('["claude","codex","gemini","vibe-local"]');
+    expect(result4).toEqual(['claude', 'codex', 'gemini', 'vibe-local']);
+  });
+
   it('should return default and warn for array with wrong length', () => {
     const result = parseSelectedAgents('["claude"]');
     expect(result).toEqual(DEFAULT_SELECTED_AGENTS);
@@ -149,10 +167,19 @@ describe('validateSelectedAgentsInput()', () => {
     expect(result.value).toEqual(['claude', 'codex']);
   });
 
+  it('should return valid for 3 or 4 agents', () => {
+    const result3 = validateSelectedAgentsInput(['claude', 'codex', 'gemini']);
+    expect(result3.valid).toBe(true);
+    expect(result3.value).toEqual(['claude', 'codex', 'gemini']);
+
+    const result4 = validateSelectedAgentsInput(['claude', 'codex', 'gemini', 'vibe-local']);
+    expect(result4.valid).toBe(true);
+  });
+
   it('should return invalid for non-array input', () => {
     const result = validateSelectedAgentsInput('claude,codex');
     expect(result.valid).toBe(false);
-    expect(result.error).toContain('array of 2 elements');
+    expect(result.error).toContain('array of 2-4 elements');
   });
 
   it('should return invalid for null input', () => {
@@ -161,8 +188,11 @@ describe('validateSelectedAgentsInput()', () => {
   });
 
   it('should return invalid for array with wrong length', () => {
-    const result = validateSelectedAgentsInput(['claude']);
-    expect(result.valid).toBe(false);
+    const result1 = validateSelectedAgentsInput(['claude']);
+    expect(result1.valid).toBe(false);
+
+    const result5 = validateSelectedAgentsInput(['claude', 'codex', 'gemini', 'vibe-local', 'opencode']);
+    expect(result5.valid).toBe(false);
   });
 
   it('should return invalid for invalid tool IDs', () => {

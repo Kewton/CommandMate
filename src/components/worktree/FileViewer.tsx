@@ -26,6 +26,7 @@ import { VideoViewer } from './VideoViewer';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { Copy, Check, Maximize2, Minimize2, ClipboardCopy, Pencil } from 'lucide-react';
 import { Z_INDEX } from '@/config/z-index';
+import { encodePathForUrl } from '@/lib/url-path-encoder';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
 
@@ -129,7 +130,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
 
       try {
         const response = await fetch(
-          `/api/worktrees/${worktreeId}/files/${filePath}`
+          `/api/worktrees/${worktreeId}/files/${encodePathForUrl(filePath)}`
         );
 
         if (!response.ok) {
@@ -193,6 +194,30 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
     }
   }, [onEditMarkdown, filePath, onClose]);
 
+  const codeViewData = useMemo(() => {
+    if (!content || content.isImage || content.isVideo || (isMarp && marpSlides)) {
+      return null;
+    }
+    const lineNumbers = Array.from(
+      { length: content.content.split('\n').length },
+      (_, i) => i + 1,
+    );
+    try {
+      return {
+        lineNumbers,
+        highlightedHtml: hljs.highlight(content.content, {
+          language: content.extension,
+          ignoreIllegals: true,
+        }).value,
+      };
+    } catch {
+      return {
+        lineNumbers,
+        highlightedHtml: hljs.highlightAuto(content.content).value,
+      };
+    }
+  }, [content, isMarp, marpSlides]);
+
   /** Render the file content body */
   const renderContent = () => {
     if (!content) return null;
@@ -237,20 +262,21 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
         </div>
       );
     }
-    const lineCount = content.content.split('\n').length;
+    if (!codeViewData) return null;
+
     return (
       <div className="overflow-auto">
         <div className="flex text-sm">
           <div className="flex-shrink-0 py-4 pl-3 pr-2 text-right select-none text-gray-400 dark:text-gray-600 font-mono border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 sticky left-0">
-            {Array.from({ length: lineCount }, (_, i) => (
-              <div key={i + 1} className="leading-[1.5rem]">{i + 1}</div>
+            {codeViewData.lineNumbers.map((lineNumber) => (
+              <div key={lineNumber} className="leading-[1.5rem]">{lineNumber}</div>
             ))}
           </div>
           <pre className="flex-1 p-4 overflow-x-auto text-gray-900 dark:text-gray-100 m-0">
             <code
               className={`language-${content.extension} hljs`}
               style={{ lineHeight: '1.5rem' }}
-              dangerouslySetInnerHTML={{ __html: (() => { try { return hljs.highlight(content.content, { language: content.extension, ignoreIllegals: true }).value; } catch { return hljs.highlightAuto(content.content).value; } })() }}
+              dangerouslySetInnerHTML={{ __html: codeViewData.highlightedHtml }}
             />
           </pre>
         </div>

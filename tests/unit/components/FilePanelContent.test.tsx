@@ -188,6 +188,33 @@ describe('FilePanelContent', () => {
       });
     });
 
+    it('should encode file path in fetch URL', async () => {
+      const mockContent = createContent({
+        path: 'dir/My File #1.ts',
+      });
+      const mockResponse = {
+        ok: true,
+        json: () => Promise.resolve(mockContent),
+      };
+      const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+      fetchMock.mockResolvedValue(mockResponse);
+
+      const tab = createTab({
+        path: 'dir/My File #1.ts',
+        name: 'My File #1.ts',
+        content: null,
+        loading: false,
+        error: null,
+      });
+      render(<FilePanelContent tab={tab} {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledWith(
+          '/api/worktrees/test-wt/files/dir/My%20File%20%231.ts',
+        );
+      });
+    });
+
     it('should not fetch when content is already loaded', () => {
       const content = createContent();
       const tab = createTab({ content });
@@ -208,6 +235,49 @@ describe('FilePanelContent', () => {
       render(<FilePanelContent tab={tab} {...defaultProps} />);
 
       expect(global.fetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('MARP state', () => {
+    it('should clear stale MARP slides when content is no longer MARP', async () => {
+      const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+      fetchMock.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ slides: ['<html><body><section>Slide</section></body></html>'] }),
+      });
+
+      const marpContent = createContent({
+        extension: 'md',
+        path: 'slides.md',
+        content: '---\nmarp: true\n---\n# Slide',
+      });
+      const nonMarpContent = createContent({
+        extension: 'md',
+        path: 'notes.md',
+        content: '# Plain markdown',
+      });
+
+      const { rerender } = render(
+        <FilePanelContent
+          tab={createTab({ path: 'slides.md', name: 'slides.md', content: marpContent })}
+          {...defaultProps}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('marp-preview')).toBeInTheDocument();
+      });
+
+      rerender(
+        <FilePanelContent
+          tab={createTab({ path: 'notes.md', name: 'notes.md', content: nonMarpContent })}
+          {...defaultProps}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('marp-preview')).not.toBeInTheDocument();
+      });
     });
   });
 });

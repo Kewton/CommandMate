@@ -23,6 +23,15 @@ import Marp from '@marp-team/marp-core';
 /** Maximum MARP content length (1MB) */
 const MAX_MARP_CONTENT_LENGTH = 1_000_000;
 
+/** Reuse Marp engine instance across requests to reduce per-request setup cost */
+const marp = new Marp({
+  html: false,
+  math: true,
+});
+
+/** Marp renders each slide as a <section> element */
+const SECTION_REGEX = /<section[^>]*>[\s\S]*?<\/section>/g;
+
 // ============================================================================
 // Handler
 // ============================================================================
@@ -73,17 +82,10 @@ export async function POST(
     }
 
     // Render with Marp Core
-    const marp = new Marp({
-      html: false,
-      math: true,
-    });
-
     const { html, css } = marp.render(markdownContent);
 
     // Extract individual slide sections from the rendered HTML
-    // Marp renders each slide as a <section> element
-    const sectionRegex = /<section[^>]*>[\s\S]*?<\/section>/g;
-    const sections = html.match(sectionRegex) || [];
+    const sections = html.match(SECTION_REGEX) || [];
 
     // Wrap each slide with full HTML document including Marp CSS
     const slides = sections.map(

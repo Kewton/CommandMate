@@ -31,11 +31,18 @@ function sanitizeRawForLog(raw: string): string {
   return stripAnsi(raw).replace(/[\n\r]/g, ' ').substring(0, 100);
 }
 
+/** Minimum number of selected agents */
+export const MIN_SELECTED_AGENTS = 2;
+
+/** Maximum number of selected agents (PC can select up to 4) */
+export const MAX_SELECTED_AGENTS = 4;
+
 /** Default selected agents when DB value is missing or invalid */
-export const DEFAULT_SELECTED_AGENTS: [CLIToolType, CLIToolType] = ['claude', 'codex'];
+export const DEFAULT_SELECTED_AGENTS: CLIToolType[] = ['claude', 'codex'];
 
 /**
- * Core validation function for a pair of CLI tool IDs (R1-001)
+ * Core validation function for CLI tool ID arrays (R1-001)
+ * Accepts 2-4 unique valid CLI tool IDs.
  * Shared between parseSelectedAgents() and validateSelectedAgentsInput()
  *
  * @param input - Array of values to validate
@@ -43,19 +50,19 @@ export const DEFAULT_SELECTED_AGENTS: [CLIToolType, CLIToolType] = ['claude', 'c
  */
 export function validateAgentsPair(input: unknown[]): {
   valid: boolean;
-  value?: [CLIToolType, CLIToolType];
+  value?: CLIToolType[];
   error?: string;
 } {
-  if (input.length !== 2) {
-    return { valid: false, error: 'Must be 2 elements' };
+  if (input.length < MIN_SELECTED_AGENTS || input.length > MAX_SELECTED_AGENTS) {
+    return { valid: false, error: `Must be ${MIN_SELECTED_AGENTS}-${MAX_SELECTED_AGENTS} elements` };
   }
   if (!input.every(id => typeof id === 'string' && (CLI_TOOL_IDS as readonly string[]).includes(id))) {
     return { valid: false, error: 'Invalid CLI tool ID' };
   }
-  if (input[0] === input[1]) {
+  if (new Set(input).size !== input.length) {
     return { valid: false, error: 'Duplicate tool IDs not allowed' };
   }
-  return { valid: true, value: input as [CLIToolType, CLIToolType] };
+  return { valid: true, value: input as CLIToolType[] };
 }
 
 /**
@@ -66,9 +73,9 @@ export function validateAgentsPair(input: unknown[]): {
  * Log output is sanitized (R4-005): ANSI stripped, newlines removed, truncated.
  *
  * @param raw - Raw JSON string from DB (or null)
- * @returns Validated tuple of 2 CLIToolType values
+ * @returns Validated array of 2-4 CLIToolType values
  */
-export function parseSelectedAgents(raw: string | null): [CLIToolType, CLIToolType] {
+export function parseSelectedAgents(raw: string | null): CLIToolType[] {
   if (!raw) return DEFAULT_SELECTED_AGENTS;
   try {
     const parsed = JSON.parse(raw);
@@ -97,11 +104,11 @@ export function parseSelectedAgents(raw: string | null): [CLIToolType, CLIToolTy
  */
 export function validateSelectedAgentsInput(input: unknown): {
   valid: boolean;
-  value?: [CLIToolType, CLIToolType];
+  value?: CLIToolType[];
   error?: string;
 } {
-  if (!Array.isArray(input) || input.length !== 2) {
-    return { valid: false, error: 'selected_agents must be an array of 2 elements' };
+  if (!Array.isArray(input) || input.length < MIN_SELECTED_AGENTS || input.length > MAX_SELECTED_AGENTS) {
+    return { valid: false, error: `selected_agents must be an array of ${MIN_SELECTED_AGENTS}-${MAX_SELECTED_AGENTS} elements` };
   }
   return validateAgentsPair(input);
 }

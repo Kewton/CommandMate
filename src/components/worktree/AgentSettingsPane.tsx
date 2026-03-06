@@ -27,10 +27,12 @@ import {
 export interface AgentSettingsPaneProps {
   /** Worktree ID for API calls */
   worktreeId: string;
-  /** Currently selected agent pair */
-  selectedAgents: [CLIToolType, CLIToolType];
+  /** Currently selected agents (2-4 CLI tool IDs) */
+  selectedAgents: CLIToolType[];
   /** Callback when selected agents change (after successful API persist) */
-  onSelectedAgentsChange: (agents: [CLIToolType, CLIToolType]) => void;
+  onSelectedAgentsChange: (agents: CLIToolType[]) => void;
+  /** Maximum number of agents that can be selected (2 on mobile, 4 on PC) */
+  maxAgents?: number;
   /** Current vibe-local model selection (null = default) */
   vibeLocalModel: string | null;
   /** Callback when vibe-local model changes */
@@ -52,8 +54,11 @@ interface OllamaModelInfo {
 // Constants
 // ============================================================================
 
-/** Maximum number of agents that can be selected */
-const MAX_SELECTED_AGENTS = 2;
+/** Default maximum number of agents that can be selected */
+const DEFAULT_MAX_AGENTS = 2;
+
+/** Minimum number of agents required for persistence */
+const MIN_AGENTS_FOR_PERSIST = 2;
 
 // ============================================================================
 // Component
@@ -67,6 +72,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
   onVibeLocalModelChange,
   vibeLocalContextWindow,
   onVibeLocalContextWindowChange,
+  maxAgents = DEFAULT_MAX_AGENTS,
 }: AgentSettingsPaneProps) {
   const t = useTranslations('schedule');
 
@@ -151,9 +157,9 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
       }
       setCheckedIds(next);
 
-      // Only persist when exactly 2 are selected
-      if (next.size === MAX_SELECTED_AGENTS) {
-        const pair = Array.from(next) as [CLIToolType, CLIToolType];
+      // Persist when at least MIN_AGENTS_FOR_PERSIST are selected
+      if (next.size >= MIN_AGENTS_FOR_PERSIST) {
+        const pair = Array.from(next) as CLIToolType[];
         setSaving(true);
         try {
           const response = await fetch(`/api/worktrees/${worktreeId}`, {
@@ -248,7 +254,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
     [contextWindowInput, vibeLocalContextWindow, worktreeId, onVibeLocalContextWindowChange]
   );
 
-  const isMaxSelected = checkedIds.size >= MAX_SELECTED_AGENTS;
+  const isMaxSelected = checkedIds.size >= maxAgents;
 
   return (
     <div className="p-4">

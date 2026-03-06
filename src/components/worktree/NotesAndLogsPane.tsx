@@ -36,9 +36,11 @@ export interface NotesAndLogsPaneProps {
   /** Additional CSS classes */
   className?: string;
   /** Issue #368: Currently selected agents for the worktree */
-  selectedAgents: [CLIToolType, CLIToolType];
+  selectedAgents: CLIToolType[];
   /** Issue #368: Callback when selected agents change */
-  onSelectedAgentsChange: (agents: [CLIToolType, CLIToolType]) => void;
+  onSelectedAgentsChange: (agents: CLIToolType[]) => void;
+  /** Issue #438: Maximum number of agents that can be selected */
+  maxAgents?: number;
   /** Issue #368: Current vibe-local model selection */
   vibeLocalModel: string | null;
   /** Issue #368: Callback when vibe-local model changes */
@@ -78,6 +80,7 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
   onVibeLocalModelChange,
   vibeLocalContextWindow,
   onVibeLocalContextWindowChange,
+  maxAgents,
 }: NotesAndLogsPaneProps) {
   const t = useTranslations('schedule');
   // Internal sub-tab state (not leaked to parent)
@@ -122,6 +125,7 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
             onVibeLocalModelChange={onVibeLocalModelChange}
             vibeLocalContextWindow={vibeLocalContextWindow}
             onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
+            maxAgents={maxAgents}
           />
         )}
       </div>

@@ -31,7 +31,7 @@ vi.mock('@/components/worktree/AgentSettingsPane', () => ({
 describe('NotesAndLogsPane', () => {
   const defaultProps = {
     worktreeId: 'test-worktree',
-    selectedAgents: ['claude', 'codex'] as [CLIToolType, CLIToolType],
+    selectedAgents: ['claude', 'codex'] as CLIToolType[],
     onSelectedAgentsChange: vi.fn(),
     vibeLocalModel: null as string | null,
     onVibeLocalModelChange: vi.fn(),
