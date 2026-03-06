@@ -1003,12 +1003,12 @@ export function updateCliToolId(
  *
  * @param db - Database instance
  * @param id - Worktree ID
- * @param selectedAgents - Tuple of 2 CLIToolType values
+ * @param selectedAgents - Array of 2-4 CLIToolType values
  */
 export function updateSelectedAgents(
   db: Database.Database,
   id: string,
-  selectedAgents: [CLIToolType, CLIToolType]
+  selectedAgents: CLIToolType[]
 ): void {
   const stmt = db.prepare(`
     UPDATE worktrees

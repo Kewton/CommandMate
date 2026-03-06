@@ -142,6 +142,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
 
   // Refs
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const lineNumberRef = useRef<HTMLDivElement>(null);
   const beforeUnloadRef = useRef<((e: BeforeUnloadEvent) => void) | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const contentAreaRef = useRef<HTMLDivElement>(null);
@@ -326,6 +327,16 @@ export const MarkdownEditor = memo(function MarkdownEditor({
       setIsSaving(false);
     }
   }, [saveToApi, content, isDirty, isSaving, onSave, filePath, showToast]);
+
+  /** Line count for line number gutter */
+  const lineCount = content.split('\n').length;
+
+  /** Sync line number gutter scroll with textarea */
+  const handleEditorScroll = useCallback(() => {
+    if (textareaRef.current && lineNumberRef.current) {
+      lineNumberRef.current.scrollTop = textareaRef.current.scrollTop;
+    }
+  }, []);
 
   /**
    * Handle content change
@@ -893,15 +904,25 @@ export const MarkdownEditor = memo(function MarkdownEditor({
           mobileTab === 'editor' && (
             <div
               data-testid="markdown-editor-container"
-              className="flex flex-col overflow-hidden w-full"
+              className="flex overflow-hidden w-full flex-1"
             >
+              <div
+                ref={lineNumberRef}
+                className="flex-shrink-0 py-4 pl-2 pr-2 text-right select-none text-gray-400 dark:text-gray-600 font-mono text-sm bg-gray-50 dark:bg-gray-800/50 border-r border-gray-200 dark:border-gray-700 overflow-hidden"
+                aria-hidden="true"
+              >
+                {Array.from({ length: lineCount }, (_, i) => (
+                  <div key={i + 1} className="leading-[1.5rem]">{i + 1}</div>
+                ))}
+              </div>
               <textarea
                 ref={textareaRef}
                 data-testid="markdown-editor-textarea"
                 value={content}
                 onChange={handleContentChange}
                 onKeyDown={handleKeyDown}
-                className="flex-1 p-4 font-mono text-sm resize-none bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-inset"
+                onScroll={handleEditorScroll}
+                className="flex-1 py-4 pr-4 pl-3 font-mono text-sm resize-none bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none leading-[1.5rem]"
                 placeholder="Start typing markdown..."
                 spellCheck={false}
               />
@@ -911,18 +932,28 @@ export const MarkdownEditor = memo(function MarkdownEditor({
           // Desktop or mobile landscape: normal layout
           <div
             data-testid="markdown-editor-container"
-            className={`flex flex-col overflow-hidden transition-all duration-200 ${
+            className={`flex overflow-hidden transition-all duration-200 ${
               !strategy.showEditor ? 'hidden' : ''
             }`}
             style={viewMode === 'split' ? editorWidthStyle : { width: strategy.showEditor ? '100%' : '0%' }}
           >
+            <div
+              ref={lineNumberRef}
+              className="flex-shrink-0 py-4 pl-2 pr-2 text-right select-none text-gray-400 dark:text-gray-600 font-mono text-sm bg-gray-50 dark:bg-gray-800/50 border-r border-gray-200 dark:border-gray-700 overflow-hidden"
+              aria-hidden="true"
+            >
+              {Array.from({ length: lineCount }, (_, i) => (
+                <div key={i + 1} className="leading-[1.5rem]">{i + 1}</div>
+              ))}
+            </div>
             <textarea
               ref={textareaRef}
               data-testid="markdown-editor-textarea"
               value={content}
               onChange={handleContentChange}
               onKeyDown={handleKeyDown}
-              className="flex-1 p-4 font-mono text-sm resize-none bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-inset"
+              onScroll={handleEditorScroll}
+              className="flex-1 py-4 pr-4 pl-3 font-mono text-sm resize-none bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-inset leading-[1.5rem]"
               placeholder="Start typing markdown..."
               spellCheck={false}
             />

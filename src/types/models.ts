@@ -75,8 +75,8 @@ export interface Worktree {
   link?: string;
   /** CLI tool type (claude, codex, gemini, vibe-local) - defaults to 'claude' */
   cliToolId?: CLIToolType;
-  /** Selected agents for UI display (Issue #368) - 2 CLI tool IDs */
-  selectedAgents?: [CLIToolType, CLIToolType];
+  /** Selected agents for UI display (Issue #368) - 2-4 CLI tool IDs */
+  selectedAgents?: CLIToolType[];
   /** Ollama model name for vibe-local (Issue #368) - null means default */
   vibeLocalModel?: string | null;
   /** Ollama context window size for vibe-local (Issue #374) - null means default */

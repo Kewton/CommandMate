@@ -13,11 +13,14 @@ allowed-tools: Bash(./scripts/*), Bash(git worktree list)
 ```bash
 /rebuild                        # 現在のリポジトリで実行
 /rebuild feature/235-worktree   # 指定ブランチのWorktreeで実行
+/rebuild --port 3011            # ポート3011で起動
+/rebuild feature/235-worktree --port 3011  # ブランチ指定+ポート指定
 ```
 
 ## パラメータ
 
 - **branch_name**: 対象ブランチ名（省略可）。指定時は `git worktree list` からディレクトリを解決する。
+- **--port {number}**: 起動ポート番号（省略可）。指定時は `CM_PORT` 環境変数を設定してサーバーを起動する。未指定時はデフォルト（3000）。
 
 ## 実行手順
 
@@ -35,11 +38,17 @@ allowed-tools: Bash(./scripts/*), Bash(git worktree list)
 
 停止とビルド・再起動を **1回のBash呼び出し** で実行する（ユーザーへの許可確認を1回に抑えるため）。
 
+**ポート指定なしの場合:**
 ```bash
 cd {TARGET_DIR} && ./scripts/stop.sh && ./scripts/build-and-start.sh --daemon
 ```
 
-**注意**: ポート競合が発生した場合は `lsof -i :3000 -t` でプロセスを特定し、killしてから再試行する。
+**ポート指定ありの場合:**
+```bash
+cd {TARGET_DIR} && CM_PORT={port} ./scripts/stop.sh && CM_PORT={port} ./scripts/build-and-start.sh --daemon
+```
+
+**注意**: ポート競合が発生した場合は `lsof -i :{port} -t` でプロセスを特定し、killしてから再試行する。
 
 ## 完了報告形式
 
@@ -50,10 +59,13 @@ cd {TARGET_DIR} && ./scripts/stop.sh && ./scripts/build-and-start.sh --daemon
   ディレクトリ: {TARGET_DIR}
   ブランチ:     {branch_name}
   PID:          [プロセスID]
-  URL:          http://localhost:3000
+  ポート:       {port} (デフォルト: 3000)
+  URL:          http://localhost:{port}
   ログ:         {TARGET_DIR}/logs/server.log
 
 🔧 操作コマンド:
   ログ確認: tail -f {TARGET_DIR}/logs/server.log
-  停止:     cd {TARGET_DIR} && ./scripts/stop.sh
+  停止:     cd {TARGET_DIR} && CM_PORT={port} ./scripts/stop.sh
 ```
+
+**注意**: `./scripts/stop.sh` は `CM_PORT` 環境変数で対象ポートを決定する。未指定時はデフォルト（3000）のみ停止する。複数ポートで起動している場合、特定ポートだけ停止するには必ず `CM_PORT={port}` を付けること。

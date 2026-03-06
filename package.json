@@ -48,6 +48,7 @@
     "db:reset": "rm -f db.sqlite && npm run db:init"
   },
   "dependencies": {
+    "@marp-team/marp-core": "^4.3.0",
     "ansi-to-html": "^0.7.2",
     "autoprefixer": "^10.4.22",
     "better-sqlite3": "^12.4.1",

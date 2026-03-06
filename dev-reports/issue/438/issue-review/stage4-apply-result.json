@@ -1,0 +1,15 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目 - 影響範囲）",
+  "issue_number": 438,
+  "applied": [
+    {"id": "S3-001", "severity": "Must Fix", "status": "applied", "description": "レイアウト設計方針（2段階ネスト方式）を実装方針セクションに追加"},
+    {"id": "S3-002", "severity": "Must Fix", "status": "applied", "description": "コンポーネント設計（FilePanelTabs/FilePanelContent分離）を実装方針セクションに追加"},
+    {"id": "S3-003", "severity": "Must Fix", "status": "applied", "description": "影響ファイル一覧テーブルとテスト更新受入基準を追加"},
+    {"id": "S3-004", "severity": "Should Fix", "status": "applied", "description": "パフォーマンス考慮（useReducer/useFileTabs）を実装方針セクションに追加"},
+    {"id": "S3-005", "severity": "Should Fix", "status": "applied", "description": "MARPセキュリティ要件（sandbox値・CSP確認）を要件・受入基準に追加"}
+  ],
+  "applied_count": 5,
+  "skipped_count": 0,
+  "github_issue_updated": true
+}

@@ -15,7 +15,7 @@ global.fetch = mockFetch;
 describe('AgentSettingsPane', () => {
   const defaultProps = {
     worktreeId: 'test-worktree-id',
-    selectedAgents: ['claude', 'codex'] as [CLIToolType, CLIToolType],
+    selectedAgents: ['claude', 'codex'] as CLIToolType[],
     onSelectedAgentsChange: vi.fn(),
     vibeLocalModel: null as string | null,
     onVibeLocalModelChange: vi.fn(),
@@ -292,7 +292,7 @@ describe('AgentSettingsPane', () => {
   describe('Context window input', () => {
     const vibeLocalProps = {
       ...defaultProps,
-      selectedAgents: ['claude', 'vibe-local'] as [CLIToolType, CLIToolType],
+      selectedAgents: ['claude', 'vibe-local'] as CLIToolType[],
       vibeLocalContextWindow: null as number | null,
       onVibeLocalContextWindowChange: vi.fn(),
     };

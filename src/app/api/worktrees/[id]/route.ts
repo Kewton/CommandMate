@@ -165,7 +165,7 @@ export async function PATCH(
         );
       }
 
-      const validatedAgents = validation.value as [CLIToolType, CLIToolType];
+      const validatedAgents = validation.value as CLIToolType[];
       updateSelectedAgents(db, params.id, validatedAgents);
 
       // R1-007: cli_tool_id consistency check
