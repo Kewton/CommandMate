@@ -1,0 +1,15 @@
+{
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 47,
+  "applied_date": "2026-03-07",
+  "applied_findings": [
+    {
+      "id": "S5-SF-001",
+      "status": "Applied",
+      "description": "実装方針2を修正。「sanitizeTerminalOutput済み」という誤解を招く記述を「ANSIエスケープシーケンスを除去したプレーンテキスト（outputプロップから生成）」に変更。実装タスクにも「ANSIエスケープ除去後のプレーンテキストを対象」を明記。"
+    }
+  ],
+  "issue_update_url": "https://github.com/Kewton/CommandMate/issues/47",
+  "summary": "2回目通常レビューの1件を反映完了。"
+}

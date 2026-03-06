@@ -1,0 +1,34 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "issue_number": 47,
+  "review_date": "2026-03-07",
+  "focus_area": "通常（整合性・正確性）",
+  "summary": "更新後のIssueは大幅に改善された。前回の主要指摘事項はすべて対応済み。軽微な改善点を1件発見。",
+  "findings": [
+    {
+      "id": "S5-SF-001",
+      "severity": "Should Fix",
+      "category": "技術的詳細の明確化",
+      "description": "実装方針2で「ターミナル出力テキスト（sanitizeTerminalOutput済み）に対してindexOf/includesでテキスト検索」と記載されているが、TerminalDisplay.tsxでは「output」プロップ（生のターミナルテキスト、ANSI含む）とsanitizeTerminalOutput後のHTML文字列が存在する。検索はANSIエスケープシーケンスを除去したプレーンテキストに対して行う必要があり、sanitizeTerminalOutput済みのHTMLには対してではないことを明記すべき。",
+      "location": "提案する解決策 1. 実装方針 2.",
+      "suggested_fix": "「ターミナル出力テキスト（ANSI除去後のプレーンテキスト）に対してindexOf/includesでテキスト検索を実装。sanitizeTerminalOutputの出力HTML文字列ではなく、raw outputからANSIを除去したテキストを検索対象とする」に修正する。"
+    }
+  ],
+  "previous_findings_check": [
+    { "id": "MF-001", "status": "Resolved", "note": "TerminalDisplay.tsx独自実装の説明が正確に記載されている" },
+    { "id": "MF-002", "status": "Resolved", "note": "ファイル内容検索の既実装が明記され、受入条件でもチェック済みとして区別されている" },
+    { "id": "SF-001", "status": "Resolved", "note": "実装方針がxterm-addon-searchからTerminalDisplay.tsx独自実装に修正されている" },
+    { "id": "SF-002", "status": "Resolved", "note": "セキュリティ考慮事項セクションが追加されている" },
+    { "id": "IR-MF-001", "status": "Resolved", "note": "モバイル向け検索アイコンボタンが実装タスクと受入条件に追加されている" },
+    { "id": "IR-SF-001", "status": "Resolved", "note": "パフォーマンス考慮事項セクションが追加されている" },
+    { "id": "IR-SF-002", "status": "Resolved", "note": "アクセシビリティ対応がタスクリストと受入条件に追加されている" }
+  ],
+  "statistics": {
+    "must_fix": 0,
+    "should_fix": 1,
+    "nice_to_have": 0,
+    "total": 1
+  },
+  "overall_assessment": "Issue品質が大幅に向上した。1件のShould Fix指摘（検索対象テキストの明確化）のみ。"
+}

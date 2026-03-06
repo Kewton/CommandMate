@@ -1,0 +1,30 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目・影響範囲）",
+  "issue_number": 47,
+  "applied_date": "2026-03-07",
+  "applied_findings": [
+    {
+      "id": "IR-MF-001",
+      "status": "Applied",
+      "description": "モバイル対応を追加。実装方針にモバイル向け検索アイコンボタン追加を記載。実装タスクに「モバイル: ターミナルヘッダーに検索アイコンボタンを追加」を追加。受入条件にモバイル受入条件を追加。"
+    },
+    {
+      "id": "IR-SF-001",
+      "status": "Applied",
+      "description": "パフォーマンス考慮事項セクションを追加。デバウンス処理・件数上限・UIフリーズ回避について明記。受入条件に「大量テキスト（10万文字以上）に対してもUIがフリーズしない」を追加。"
+    },
+    {
+      "id": "IR-SF-002",
+      "status": "Applied",
+      "description": "アクセシビリティ対応をタスクリストに追加。aria-label, aria-live, フォーカス管理を明記。受入条件に「検索バーを開くと入力欄にフォーカスが当たる」を追加。"
+    },
+    {
+      "id": "IR-NTH-001",
+      "status": "Applied",
+      "description": "受入条件に「検索バーを開くと入力欄にフォーカスが当たる」「件数表示」を追加。"
+    }
+  ],
+  "issue_update_url": "https://github.com/Kewton/CommandMate/issues/47",
+  "summary": "影響範囲レビューの全4件を反映完了。モバイル対応・パフォーマンス・アクセシビリティの考慮事項を追記し、影響ファイル一覧テーブルも追加した。"
+}
