@@ -26,6 +26,7 @@ import { VideoViewer } from './VideoViewer';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { Copy, Check, Maximize2, Minimize2, ClipboardCopy, Pencil } from 'lucide-react';
 import { Z_INDEX } from '@/config/z-index';
+import { encodePathForUrl } from '@/lib/url-path-encoder';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
 
@@ -129,7 +130,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
 
       try {
         const response = await fetch(
-          `/api/worktrees/${worktreeId}/files/${filePath}`
+          `/api/worktrees/${worktreeId}/files/${encodePathForUrl(filePath)}`
         );
 
         if (!response.ok) {

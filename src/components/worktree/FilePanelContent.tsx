@@ -18,6 +18,7 @@ import type { FileContent } from '@/types/models';
 import { ImageViewer } from './ImageViewer';
 import { VideoViewer } from './VideoViewer';
 import { copyToClipboard } from '@/lib/clipboard-utils';
+import { encodePathForUrl } from '@/lib/url-path-encoder';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
 import { Z_INDEX } from '@/config/z-index';
@@ -418,7 +419,7 @@ export const FilePanelContent = memo(function FilePanelContent({
     const fetchContent = async () => {
       try {
         const response = await fetch(
-          `/api/worktrees/${worktreeId}/files/${tab.path}`,
+          `/api/worktrees/${worktreeId}/files/${encodePathForUrl(tab.path)}`,
         );
 
         if (!response.ok) {
@@ -444,10 +445,12 @@ export const FilePanelContent = memo(function FilePanelContent({
 
   // Fetch MARP slides when content is loaded and is a MARP file
   useEffect(() => {
+    setMarpSlides(null);
     if (!tab.content || tab.content.extension !== 'md') return;
     if (!MARP_FRONTMATTER_REGEX.test(tab.content.content)) return;
     if (tab.content.content.length > MAX_MARP_CONTENT_LENGTH) return;
 
+    let cancelled = false;
     const fetchMarpSlides = async () => {
       try {
         const response = await fetch(
@@ -460,14 +463,19 @@ export const FilePanelContent = memo(function FilePanelContent({
         );
         if (response.ok) {
           const data = await response.json();
-          setMarpSlides(data.slides);
+          if (!cancelled) {
+            setMarpSlides(Array.isArray(data.slides) ? data.slides : null);
+          }
         }
       } catch {
         // MARP rendering is best-effort; fall back to text display
       }
     };
 
-    fetchMarpSlides();
+    void fetchMarpSlides();
+    return () => {
+      cancelled = true;
+    };
   }, [tab.content, worktreeId]);
 
   // Loading state
