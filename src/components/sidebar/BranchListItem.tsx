@@ -91,7 +91,7 @@ export const BranchListItem = memo(function BranchListItem({
       <div className="flex items-center gap-3 w-full">
         {/* CLI tool status dots (Issue #368: dynamic from selectedAgents) */}
         {branch.cliStatus && Object.keys(branch.cliStatus).length > 0 && (
-          <div className="flex items-center gap-1 flex-shrink-0" aria-label="CLI tool status">
+          <div className="flex items-center gap-1 flex-shrink-0 w-11" aria-label="CLI tool status">
             {Object.entries(branch.cliStatus).map(([tool, status]) => (
               <CliStatusDot
                 key={tool}
