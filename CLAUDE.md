@@ -176,6 +176,7 @@ tests/
 | `src/lib/slash-commands.ts` | スラッシュコマンドローダー |
 | `src/lib/url-path-encoder.ts` | ファイルパスURLエンコード |
 | `src/lib/file-search.ts` | ファイル内容検索 |
+| `src/lib/terminal-highlight.ts` | CSS Custom Highlight API ラッパー（Issue #47）XSS安全なターミナルハイライト |
 | `src/lib/file-tree.ts` | ディレクトリツリー構造生成 |
 | `src/lib/git-utils.ts` | Git情報取得 |
 | `src/lib/utils.ts` | 汎用ユーティリティ |
@@ -191,6 +192,7 @@ tests/
 | `src/components/worktree/AgentSettingsPane.tsx` | エージェント選択UI |
 | `src/components/worktree/MessageInput.tsx` | メッセージ入力（下書き永続化対応） |
 | `src/components/worktree/MarkdownEditor.tsx` | マークダウンエディタ（auto-save対応） |
+| `src/components/worktree/TerminalSearchBar.tsx` | ターミナル内テキスト検索バーUI（Issue #47）件数表示・前/次ナビ・Esc閉じ |
 | `src/components/worktree/FilePanelSplit.tsx` | ターミナル+ファイルパネル分割 |
 | `src/components/worktree/FilePanelTabs.tsx` | ファイルタブバーUI |
 | `src/components/worktree/FilePanelContent.tsx` | ファイルコンテンツ表示 |
@@ -199,6 +201,7 @@ tests/
 | `src/hooks/useFileTabs.ts` | タブ状態管理フック |
 | `src/hooks/useAutoYes.ts` | Auto-Yesクライアント側フック |
 | `src/hooks/useFileSearch.ts` | 検索状態管理フック |
+| `src/hooks/useTerminalSearch.ts` | ターミナル内テキスト検索フック（Issue #47）debounce 300ms、最大500件、最小2文字 |
 | `src/hooks/useFragmentLogin.ts` | フラグメントベース自動ログイン |
 | `src/app/api/worktrees/[id]/terminal/route.ts` | ターミナルコマンド送信API |
 | `src/app/api/worktrees/[id]/capture/route.ts` | ターミナル出力キャプチャAPI |

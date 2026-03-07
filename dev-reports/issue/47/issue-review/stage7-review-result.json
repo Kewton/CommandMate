@@ -1,0 +1,21 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "issue_number": 47,
+  "review_date": "2026-03-07",
+  "focus_area": "影響範囲",
+  "summary": "更新後のIssueは影響範囲レビューの観点からも十分な内容となっている。前回の指摘はすべて反映済み。新規の Must Fix 指摘なし。",
+  "findings": [],
+  "previous_findings_check": [
+    { "id": "IR-MF-001", "status": "Resolved", "note": "モバイル対応がPC/モバイル両方の実装タスクと受入条件に明記されている" },
+    { "id": "IR-SF-001", "status": "Resolved", "note": "パフォーマンス考慮事項セクションが追加されており、具体的な制限値も記載されている" },
+    { "id": "IR-SF-002", "status": "Resolved", "note": "アクセシビリティ対応がタスクリストと受入条件に追加されている" }
+  ],
+  "statistics": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 0,
+    "total": 0
+  },
+  "overall_assessment": "影響範囲の観点からも Issue 内容は十分。Stage 8 の反映処理はスキップ可能（指摘なし）。"
+}

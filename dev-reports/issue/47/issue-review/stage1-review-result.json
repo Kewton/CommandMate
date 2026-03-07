@@ -1,0 +1,59 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 47,
+  "review_date": "2026-03-07",
+  "focus_area": "通常（整合性・正確性）",
+  "summary": "コードベースとの照合により、Issue #47 の記述に重大な不正確さを発見。ファイル内容検索はIssue #21で既に実装済みであり、ターミナルはxterm.jsではなく独自コンポーネントを使用している。",
+  "findings": [
+    {
+      "id": "MF-001",
+      "severity": "Must Fix",
+      "category": "技術的不正確さ",
+      "description": "Issue本文でメインターミナルが「xterm@5.3.0」を使用していると記載されているが、実際のメインターミナル(TerminalDisplay.tsx)はxterm.jsを使用しておらず、sanitizeTerminalOutput()でANSI→HTML変換した内容をdangerouslySetInnerHTMLで表示する独自実装。xterm.jsはTerminal.tsx（WebSocket専用の別コンポーネント）でのみ使用されており、メイン画面(WorktreeDetailRefactored.tsx)ではTerminalDisplay.tsxが使われている。",
+      "location": "Issue本文「背景・課題 - ターミナル検索」セクション",
+      "suggested_fix": "ターミナルの実装詳細を正確に記述する。「xterm-addon-searchを導入」という方針は実際のコードに適用できないため、TerminalDisplay.tsxに独自検索バーを追加する方針に変更する。",
+      "evidence": "src/components/worktree/TerminalDisplay.tsx: dangerouslySetInnerHTML使用、src/components/Terminal.tsx: xterm.js使用（WebSocket専用）"
+    },
+    {
+      "id": "MF-002",
+      "severity": "Must Fix",
+      "category": "重複実装リスク",
+      "description": "「ファイル内容検索（grep的機能）」はIssue #21で既に完全実装済み。src/lib/file-search.ts, src/app/api/worktrees/[id]/search/route.ts, src/hooks/useFileSearch.ts（mode='name'/'content'対応）, FileTreeView.tsx（searchQuery, searchMode, searchResults対応）, WorktreeDetailRefactored.tsx（SearchBar, useFileSearch統合）がすべて実装されている。Issue本文の「現在のファイル検索はファイル名のみが対象」は誤り。",
+      "location": "Issue本文「背景・課題 - ファイル内容検索」および「提案する解決策 2.」セクション",
+      "suggested_fix": "ファイル内容検索の実装タスクを削除またはUX改善（検索結果表示の改善等）に変更する。実装済み機能を詳細に記述し、本Issueの対象範囲をターミナル検索とUI改善のみに絞る。",
+      "evidence": "src/lib/file-search.ts: searchFileContents(), findMatchingLines()実装済み, src/hooks/useFileSearch.ts: mode='content'対応済み"
+    },
+    {
+      "id": "SF-001",
+      "severity": "Should Fix",
+      "category": "実装方針の修正",
+      "description": "ターミナル検索の実装方針「xterm-addon-searchパッケージを追加」はメインターミナルには適用できない。TerminalDisplay.tsxはdangerouslySetInnerHTMLでHTML文字列を表示しているため、xterm-addon-searchの対象外。ターミナル出力テキストに対して独自の検索バーを実装する必要がある。",
+      "location": "「提案する解決策 1. ターミナル検索 - 実装方針」",
+      "suggested_fix": "実装方針を以下に変更する: 1) TerminalDisplay.tsxに検索バーUI（入力欄+前/次ボタン）を追加, 2) ターミナル出力テキスト（sanitized済み）に対してindexOf/includes等でテキスト検索を実装, 3) mark要素またはCSSハイライトでマッチ箇所を強調表示, 4) Ctrl+F/Cmd+FはブラウザデフォルトとのEvent競合に注意が必要"
+    },
+    {
+      "id": "SF-002",
+      "severity": "Should Fix",
+      "category": "セキュリティ考慮",
+      "description": "ターミナル検索でハイライト表示を実装する際、検索クエリをHTMLに埋め込む処理でXSSが発生しないよう注意が必要。現在のTerminalDisplay.tsxはsanitizeTerminalOutput()でHTMLをサニタイズしているが、検索ハイライト追加時に別途XSS対策が必要。",
+      "location": "「提案する解決策 1.」および「受入条件」",
+      "suggested_fix": "ハイライト実装はdangerouslySetInnerHTMLを避け、React DOM要素でレンダリングするか、DOMPurifyで検索クエリをエスケープした上でHTML操作を行う。セキュリティ設計をIssueに明記する。"
+    },
+    {
+      "id": "NTH-001",
+      "severity": "Nice to Have",
+      "category": "実装タスクリストの整合性",
+      "description": "実装タスクにファイル内容検索の各タスクが記載されているが、MF-002の指摘により既実装のものを除外する必要がある。残すべきタスクはターミナル検索関連のみ。",
+      "location": "「実装タスク - ファイル内容検索」",
+      "suggested_fix": "既実装のタスクを削除し、ターミナル検索タスクに集中する。既存のファイル内容検索に関しては「UI/UX改善」として別途検討項目として記載する。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 2,
+    "should_fix": 2,
+    "nice_to_have": 1,
+    "total": 5
+  },
+  "overall_assessment": "Issueの背景認識に重大な誤りがある。ファイル内容検索は既実装、ターミナルはxterm.js非使用という2点を修正した上で、本Issueの実際のスコープ（ターミナル検索のみ）を明確化する必要がある。"
+}

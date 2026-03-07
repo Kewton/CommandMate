@@ -125,6 +125,18 @@
   }
 }
 
+/* [Issue #47] CSS Custom Highlight API - Terminal text search highlighting */
+/* SEC-TS-002: Highlights DOM text without modifying DOM structure (XSS-safe) */
+::highlight(terminal-search) {
+  background-color: rgba(255, 255, 0, 0.4);
+  color: inherit;
+}
+
+::highlight(terminal-search-current) {
+  background-color: rgba(255, 165, 0, 0.8);
+  color: black;
+}
+
 @layer utilities {
   .pt-safe {
     padding-top: env(safe-area-inset-top, 0px);

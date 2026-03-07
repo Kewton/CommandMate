@@ -1,0 +1,36 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "issue_number": 47,
+  "review_date": "2026-03-07",
+  "focus_area": "セキュリティ（OWASP Top 10）",
+  "summary": "設計全体のセキュリティ方針は良好。CSS Custom Highlight API採用によりXSSリスクを根本的に排除。ReDoS対策も適切。1件の軽微なShould Fix指摘。",
+  "findings": [
+    {
+      "id": "S-SF-001",
+      "severity": "Should Fix",
+      "category": "DoS対策",
+      "description": "findMatches()がDOM textContentを対象とするが、テキスト量の上限チェックがない。クエリが1文字の場合、非常に大量のマッチ（例: \" \"を検索すると数十万件）が発生し、Range生成ループでUIがフリーズする可能性がある。TERMINAL_SEARCH_MAX_MATCHES=500の上限は設定されているが、ループが上限に達するまでの処理が遅い可能性がある。",
+      "location": "セクション 5. findMatches関数",
+      "suggested_fix": "クエリ最小文字数制限（例: 2文字以上）を追加するか、または検索処理自体のタイムアウト（requestIdleCallback等）を追加することを設計方針書に明記する。"
+    }
+  ],
+  "owasp_check": [
+    { "item": "A01:2021 Broken Access Control", "status": "N/A", "note": "フロントエンドのみの機能変更" },
+    { "item": "A02:2021 Cryptographic Failures", "status": "N/A", "note": "暗号化不要" },
+    { "item": "A03:2021 Injection (XSS)", "status": "PASS", "note": "CSS Highlight APIはDOM変更なし。検索クエリはindexOf比較のみ" },
+    { "item": "A04:2021 Insecure Design", "status": "PASS", "note": "container.textContent使用でANSI injection防止済み" },
+    { "item": "A05:2021 Security Misconfiguration", "status": "N/A", "note": "設定変更なし" },
+    { "item": "A06:2021 Vulnerable Components", "status": "PASS", "note": "新規npm依存なし" },
+    { "item": "A07:2021 Identification/Authentication Failures", "status": "N/A", "note": "認証変更なし" },
+    { "item": "A08:2021 Software/Data Integrity Failures", "status": "N/A", "note": "該当なし" },
+    { "item": "A09:2021 Logging/Monitoring Failures", "status": "N/A", "note": "クライアントサイドのみ" },
+    { "item": "A10:2021 Server-Side Request Forgery", "status": "N/A", "note": "サーバーリクエストなし" }
+  ],
+  "statistics": {
+    "must_fix": 0,
+    "should_fix": 1,
+    "nice_to_have": 0,
+    "total": 1
+  }
+}

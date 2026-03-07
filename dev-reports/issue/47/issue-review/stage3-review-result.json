@@ -1,0 +1,75 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 47,
+  "review_date": "2026-03-07",
+  "focus_area": "影響範囲",
+  "summary": "ターミナル検索機能の実装は主にTerminalDisplay.tsxへの変更にとどまるが、モバイル対応・パフォーマンス・テスト・アクセシビリティについての考慮事項をIssueに追記する必要がある。",
+  "impact_analysis": {
+    "direct_impact": [
+      {
+        "file": "src/components/worktree/TerminalDisplay.tsx",
+        "impact": "主要変更ファイル。検索バーUI追加、検索ロジック実装、ハイライト表示実装が必要。",
+        "risk": "高"
+      },
+      {
+        "file": "tests/unit/components/TerminalDisplay.test.tsx",
+        "impact": "既存テストの更新と検索機能の新規テスト追加が必要。",
+        "risk": "中"
+      }
+    ],
+    "indirect_impact": [
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "impact": "TerminalDisplayにpropsを追加する場合（検索状態の外部管理など）は変更が必要。TerminalDisplay内で完結する場合は変更不要。",
+        "risk": "低"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDesktopLayout.tsx",
+        "impact": "TerminalDisplayのprops変更に伴う修正が必要な場合あり。",
+        "risk": "低"
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "IR-MF-001",
+      "severity": "Must Fix",
+      "category": "モバイル対応",
+      "description": "Ctrl+F（Cmd+F）ショートカットはモバイルデバイスでは機能しない。TerminalDisplay.tsxはモバイル画面（WorktreeDetailRefactored.tsx の mobile layout）でも使用される。モバイル用の検索バー表示手段（ボタンUIなど）を実装タスクと受入条件に追記する必要がある。",
+      "location": "「実装タスク - ターミナル検索」",
+      "suggested_fix": "モバイル向けの検索アイコンボタンをターミナルヘッダーに追加する実装タスクと受入条件を追記する。"
+    },
+    {
+      "id": "IR-SF-001",
+      "severity": "Should Fix",
+      "category": "パフォーマンス",
+      "description": "AIエージェントが長時間動作するとターミナル出力が数万〜数十万文字になる可能性がある。大量テキストに対するリアルタイム検索・ハイライト処理がUIフリーズを引き起こすリスクがある。特にハイライト表示で全テキストを再レンダリングするアプローチは危険。",
+      "location": "「提案する解決策 1.」",
+      "suggested_fix": "パフォーマンス考慮事項を追記する。例: 検索結果件数の上限設定、デバウンス処理、virtualizedリストや部分レンダリングの検討。また、テキスト量制限（現在のTerminalDisplay.tsxに上限があるか確認し、必要なら追記）。"
+    },
+    {
+      "id": "IR-SF-002",
+      "severity": "Should Fix",
+      "category": "アクセシビリティ",
+      "description": "検索バーを開閉するCtrl+F/Cmd+Fのインターセプトは、スクリーンリーダーユーザーや特殊キーボードユーザーに影響を与える可能性がある。また、検索バー内の前/次ナビゲーションのARIAアノテーション（aria-label等）が必要。",
+      "location": "受入条件全般",
+      "suggested_fix": "アクセシビリティ要件を受入条件に追加する: 検索バーのaria-label, 検索結果件数のaria-live通知, キーボードフォーカス管理。"
+    },
+    {
+      "id": "IR-NTH-001",
+      "severity": "Nice to Have",
+      "category": "ユーザー体験",
+      "description": "検索バーを開いた際に自動でフォーカスされること、前回の検索クエリが保持されること（任意）など、UX詳細が受入条件に含まれていない。",
+      "location": "受入条件",
+      "suggested_fix": "「検索バーを開いた際に入力欄にフォーカスが当たる」を受入条件に追加することを推奨。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 1,
+    "should_fix": 2,
+    "nice_to_have": 1,
+    "total": 4
+  },
+  "overall_assessment": "影響範囲は比較的局所的（主にTerminalDisplay.tsx）だが、モバイル対応の漏れが致命的。パフォーマンスとアクセシビリティの考慮事項もIssueに明記が必要。"
+}

@@ -7,9 +7,11 @@
 
 'use client';
 
-import React, { useEffect, useRef, useMemo, memo } from 'react';
+import React, { useEffect, useRef, useMemo, memo, useCallback } from 'react';
 import { sanitizeTerminalOutput } from '@/lib/sanitize';
 import { useTerminalScroll } from '@/hooks/useTerminalScroll';
+import { useTerminalSearch } from '@/hooks/useTerminalSearch';
+import { TerminalSearchBar } from '@/components/worktree/TerminalSearchBar';
 
 /**
  * Props for TerminalDisplay component
@@ -77,6 +79,38 @@ export const TerminalDisplay = memo(function TerminalDisplay({
       initialAutoScroll,
       onAutoScrollChange: onScrollChange,
     });
+
+  // [Issue #47] Terminal search - scrollRef is reused as containerRef
+  const {
+    isOpen: isSearchOpen,
+    query: searchQuery,
+    matchCount,
+    currentIndex: searchCurrentIndex,
+    isAtMaxMatches,
+    openSearch,
+    closeSearch,
+    setQuery: setSearchQuery,
+    nextMatch,
+    prevMatch,
+  } = useTerminalSearch({ output, containerRef: scrollRef });
+
+  // [Issue #47] Ctrl+F / Cmd+F handler to open search (suppresses browser find)
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        openSearch();
+      }
+    },
+    [openSearch]
+  );
+
+  // [Issue #47] Listen for custom event from terminal header search button
+  useEffect(() => {
+    const handler = () => openSearch();
+    window.addEventListener('terminal-search-open', handler);
+    return () => window.removeEventListener('terminal-search-open', handler);
+  }, [openSearch]);
 
   // Sanitize the output for safe rendering
   const sanitizedOutput = sanitizeTerminalOutput(output || '');
@@ -147,6 +181,22 @@ export const TerminalDisplay = memo(function TerminalDisplay({
 
   return (
     <div className="relative h-full flex flex-col">
+      {/* [Issue #47] Terminal search bar overlay */}
+      {isSearchOpen && (
+        <div className="absolute top-2 right-2 z-10">
+          <TerminalSearchBar
+            query={searchQuery}
+            onQueryChange={setSearchQuery}
+            matchCount={matchCount}
+            currentIndex={searchCurrentIndex}
+            onNext={nextMatch}
+            onPrev={prevMatch}
+            onClose={closeSearch}
+            isAtMaxMatches={isAtMaxMatches}
+          />
+        </div>
+      )}
+
       <div
         ref={scrollRef}
         role="log"
@@ -154,6 +204,8 @@ export const TerminalDisplay = memo(function TerminalDisplay({
         aria-label="Terminal output"
         className={containerClasses}
         onScroll={handleScroll}
+        onKeyDown={handleKeyDown}
+        tabIndex={0}
       >
         {/* Terminal output with sanitized HTML */}
         <div

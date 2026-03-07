@@ -2,11 +2,12 @@
  * Tests for TerminalDisplay component
  *
  * Tests the terminal output display with ANSI color support and XSS prevention
+ * [Issue #47] Terminal search integration tests added
  * @vitest-environment jsdom
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 
 describe('TerminalDisplay', () => {
@@ -237,6 +238,72 @@ describe('TerminalDisplay', () => {
     it('should handle Japanese characters', () => {
       render(<TerminalDisplay output="こんにちは世界" isActive={false} />);
       expect(screen.getByText('こんにちは世界')).toBeInTheDocument();
+    });
+  });
+
+  // ============================================================================
+  // [Issue #47] Terminal search integration
+  // ============================================================================
+
+  describe('[Issue #47] Terminal search', () => {
+    beforeEach(() => {
+      // Mock CSS.highlights for search tests
+      const mockHighlightsMap = {
+        set: vi.fn(),
+        delete: vi.fn(),
+        has: vi.fn(),
+      };
+      Object.defineProperty(globalThis, 'CSS', {
+        value: { highlights: mockHighlightsMap },
+        writable: true,
+        configurable: true,
+      });
+      // Mock Highlight constructor
+      function MockHighlight(..._args: unknown[]) { return {}; }
+      Object.defineProperty(globalThis, 'Highlight', {
+        value: MockHighlight,
+        writable: true,
+        configurable: true,
+      });
+    });
+
+    it('should have tabIndex=0 on the terminal container', () => {
+      render(<TerminalDisplay output="Test" isActive={false} />);
+      const log = screen.getByRole('log');
+      expect(log).toHaveAttribute('tabindex', '0');
+    });
+
+    it('should show TerminalSearchBar when Ctrl+F is pressed', () => {
+      render(<TerminalDisplay output="hello world" isActive={false} />);
+      const log = screen.getByRole('log');
+      fireEvent.keyDown(log, { key: 'f', ctrlKey: true });
+      expect(screen.getByRole('textbox')).toBeInTheDocument();
+    });
+
+    it('should show TerminalSearchBar when Cmd+F is pressed', () => {
+      render(<TerminalDisplay output="hello world" isActive={false} />);
+      const log = screen.getByRole('log');
+      fireEvent.keyDown(log, { key: 'f', metaKey: true });
+      expect(screen.getByRole('textbox')).toBeInTheDocument();
+    });
+
+    it('should hide TerminalSearchBar when search is closed', () => {
+      render(<TerminalDisplay output="hello world" isActive={false} />);
+      const log = screen.getByRole('log');
+      fireEvent.keyDown(log, { key: 'f', ctrlKey: true });
+      expect(screen.getByRole('textbox')).toBeInTheDocument();
+
+      // Close with Esc
+      fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    });
+
+    it('should open search bar when terminal-search-open custom event is dispatched', () => {
+      render(<TerminalDisplay output="Test" isActive={false} />);
+      act(() => {
+        window.dispatchEvent(new CustomEvent('terminal-search-open'));
+      });
+      expect(screen.getByRole('textbox')).toBeInTheDocument();
     });
   });
 });

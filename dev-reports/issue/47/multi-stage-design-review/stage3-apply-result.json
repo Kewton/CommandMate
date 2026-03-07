@@ -1,0 +1,8 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー 指摘反映",
+  "applied_date": "2026-03-07",
+  "applied_findings": [
+    { "id": "I-SF-001", "status": "Applied", "description": "キーボードショートカット設計セクションにtabIndex追加による既存テスト影響の注意事項を追記。" }
+  ]
+}

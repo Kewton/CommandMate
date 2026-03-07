@@ -1,0 +1,45 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 47,
+  "review_date": "2026-03-07",
+  "focus_area": "設計書と実装の整合性",
+  "summary": "Stage 1修正後も整合性の問題が2件残存。useTerminalSearchフックのインターフェース設計とcontainerRef受け渡し設計が不整合。ansi-stripper.tsの必要性も要確認。",
+  "findings": [
+    {
+      "id": "C-MF-001",
+      "severity": "Must Fix",
+      "category": "設計整合性",
+      "description": "D-MF-001対応でDOM container.textContentを検索ソースとする設計に変更されたが、useTerminalSearch hookのインターフェースに containerRef が含まれていない。useTerminalSearch は `output: string` を受け取る設計だが、DOM ベースの検索には containerRef (HTMLElement の ref) が必要。設計書のSection 3（フックインターフェース）とSection 5（ハイライト実装）が不整合。",
+      "location": "セクション 3. カスタムフックパターン / セクション 5. ハイライト実装詳細",
+      "suggested_fix": "useTerminalSearch のシグネチャに containerRef を追加: `useTerminalSearch(options: { output: string; containerRef: React.RefObject<HTMLElement> })`. または、検索ロジック（findMatches）とハイライト適用（applyTerminalHighlights）を分離し、検索はhookで状態管理、DOM操作はTerminalDisplay.tsxのuseEffectで実施する設計を明記する。"
+    },
+    {
+      "id": "C-SF-001",
+      "severity": "Should Fix",
+      "category": "不要ファイルの整理",
+      "description": "Stage 1の修正（container.textContent使用）後、`src/lib/ansi-stripper.ts` の用途が不明確。検索ソースをDOM textContentに変更したため、ANSIストリップは不要になった可能性がある。しかし、設計書の影響ファイル一覧には依然としてansi-stripper.tsが含まれており、テスト設計にも「ANSI除去テスト」が残っている。",
+      "location": "セクション 1. アーキテクチャ設計（レイヤー構成）/ セクション 13. 影響ファイル",
+      "suggested_fix": "ansi-stripper.tsの用途を明確化する。DOM textContent検索に切り替えた場合、ansi-stripper.tsは不要なため影響ファイルから削除する。useTerminalSearchのテスト設計からもANSI除去テストを削除する。"
+    },
+    {
+      "id": "C-SF-002",
+      "severity": "Should Fix",
+      "category": "設計整合性（既存フックとの統合）",
+      "description": "TerminalDisplay.tsxはuseTerminalScrollフックのscrollRefをスクロール制御に使用しているが、設計書ではハイライト実装にcontainerRef（別のref）を使用する設計になっている。2つのrefが必要なのか、または同じref（scrollRef）をcontainerRefとして共用できるかが不明。",
+      "location": "セクション 5. ハイライト実装詳細",
+      "suggested_fix": "useTerminalScrollのscrollRefをハイライト用のcontainerRefとして兼用できることを設計書に明記する（scrollRefはターミナルコンテンツのdivを参照しているため、テキストノードも含む）。"
+    }
+  ],
+  "codebase_consistency_check": {
+    "globals_css_path": "src/app/globals.css（確認済み）",
+    "showSearchButton_prop": "既存callerへの影響なし（optional prop追加のみ）",
+    "containerRef_vs_scrollRef": "scrollRefが同一DIVを参照しているため兼用可能だが設計書に未記載"
+  },
+  "statistics": {
+    "must_fix": 1,
+    "should_fix": 2,
+    "nice_to_have": 0,
+    "total": 3
+  }
+}

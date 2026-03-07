@@ -1,0 +1,14 @@
+{
+  "issue_number": 47,
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "hypothesis_verification_path": "dev-reports/issue/47/issue-review/hypothesis-verification.md",
+  "codebase_findings": {
+    "file_content_search": "既存実装あり(Issue #21): src/lib/file-search.ts, src/app/api/worktrees/[id]/search/route.ts, src/hooks/useFileSearch.ts - モード切替(name/content)対応済み",
+    "terminal_component": "メインターミナルはTerminalDisplay.tsx(xterm.js非使用・独自ANSI描画). src/components/Terminal.tsxはxterm.js使用だがWebSocket専用の別コンポーネント",
+    "xterm_addons": "インストール済み: xterm-addon-fit, xterm-addon-web-links. 未インストール: xterm-addon-search",
+    "search_api": "既存API: GET /api/worktrees/[id]/search?q=...&mode=content"
+  }
+}

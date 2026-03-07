@@ -1,0 +1,39 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 47,
+  "review_date": "2026-03-07",
+  "focus_area": "影響範囲",
+  "summary": "影響範囲は設計書に記載の通り局所的。新規プロップ追加は既存呼び出し元との後方互換性がある。CSS globals.css の追記は全体影響なし。既存テストへの波及を1件確認。",
+  "findings": [
+    {
+      "id": "I-SF-001",
+      "severity": "Should Fix",
+      "category": "テスト影響",
+      "description": "TerminalDisplay.tsxに tabIndex={0} を追加する設計だが、既存の tests/unit/components/TerminalDisplay.test.tsx でフォーカス関連のテストが存在する場合、意図しない挙動変更が発生する可能性がある。既存テストへの影響を設計書に明記する必要がある。",
+      "location": "セクション 8. キーボードショートカット設計",
+      "suggested_fix": "設計書に「tabIndex追加により既存テストのfocusアサーションに影響が出る可能性がある」と記載。既存テストの確認タスクを追加する。"
+    },
+    {
+      "id": "I-NTH-001",
+      "severity": "Nice to Have",
+      "category": "CSS影響範囲",
+      "description": "globals.cssへの`::highlight()`追加はグローバルスコープだが、terminal-search という固有名称のため他コンポーネントへの影響はない。設計書に明記するとレビュアーが安心できる。",
+      "location": "セクション 5. CSS定義",
+      "suggested_fix": "「::highlight(terminal-search) はターミナルコンポーネント専用の名前空間。他コンポーネントへの影響なし」と記載する。"
+    }
+  ],
+  "impact_confirmed": [
+    "WorktreeDetailRefactored.tsx: props変更なし（showSearchButton はoptional）",
+    "WorktreeDesktopLayout.tsx: 変更不要",
+    "APIレイヤー: 変更不要",
+    "useFileSearch.ts, file-search.ts: 変更不要",
+    "globals.css: ::highlight追加のみ（既存スタイルへの影響なし）"
+  ],
+  "statistics": {
+    "must_fix": 0,
+    "should_fix": 1,
+    "nice_to_have": 1,
+    "total": 2
+  }
+}

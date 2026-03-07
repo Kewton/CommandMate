@@ -1,0 +1,56 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "issue_number": 47,
+  "review_date": "2026-03-07",
+  "focus_area": "設計原則（SOLID/KISS/YAGNI/DRY）",
+  "summary": "設計方針書の基本的な構成は良好。CSS Custom Highlight APIの実装詳細に重大な課題あり。ANSIストリップ後のプレーンテキストとDOM内のテキストノードの位置対応が困難な問題を修正が必要。",
+  "findings": [
+    {
+      "id": "D-MF-001",
+      "severity": "Must Fix",
+      "category": "設計実現性",
+      "description": "CSS Custom Highlight APIの実装でANSIストリップ後プレーンテキストの位置とDOM内テキストノード位置の対応が困難。TerminalDisplay.tsxはsanitizeTerminalOutput()でANSI→HTMLに変換後DOMPurifyでサニタイズしている。DOMのテキストノードはHTMLエンティティデコード済みの文字列を持つが、ansi-to-html変換でエスケープ変換等が発生する可能性があり、stripAnsi(output)のプレーンテキストとDOM textContentが完全に一致しない可能性がある。",
+      "location": "セクション 5. ハイライト実装詳細",
+      "suggested_fix": "アプローチを変更: CSS Highlight API使用時に、DOM textContentを検索ソースとして使用する（stripAnsiではなく）。具体的には: 1) container.textContentから検索、2) TreeWalkerでテキストノードをすべて収集、3) テキストノード連結文字列でindexOfして位置計算、4) Range生成。これによりDOM内テキストと検索文字列の完全一致が保証される。"
+    },
+    {
+      "id": "D-MF-002",
+      "severity": "Must Fix",
+      "category": "実装不完全",
+      "description": "CSS Highlight APIの非サポートブラウザでのフォールバック（「件数表示とスクロールのみ提供」）について、スクロール実装の詳細が不明。どのDOM要素にスクロールするかが設計されていない。LineNumber情報なしでマッチ位置へのスクロールを実現する具体的な方法が必要。",
+      "location": "セクション 5. ハイライト実装詳細（フォールバック部分）",
+      "suggested_fix": "フォールバック設計を具体化する: ブラウザがCSS Highlight API非サポートの場合、現在のマッチ件数表示のみを提供（スクロールなし）。または、querySelectorAll等でテキスト含有要素を特定してスクロール。設計方針書にフォールバック時のUXを明確に記述する。"
+    },
+    {
+      "id": "D-SF-001",
+      "severity": "Should Fix",
+      "category": "YAGNI/KISS",
+      "description": "TerminalHighlightManagerインターフェース（`src/lib/terminal-highlight.ts`）が独立したクラス/オブジェクトとして設計されているが、useTerminalSearch hookの内部ロジックとして実装したほうがシンプル。独立したmanagerオブジェクトはYAGNIに反する。",
+      "location": "セクション 3. 設計パターン - ハイライトマネージャー",
+      "suggested_fix": "TerminalHighlightManagerを独立したクラスとして設計するのではなく、useEffect内でhighlight適用ロジックを直接記述するか、または単純な関数として実装する。独立モジュールとするのはテスタビリティが高い場合のみ。"
+    },
+    {
+      "id": "D-SF-002",
+      "severity": "Should Fix",
+      "category": "DRY",
+      "description": "TERMINAL_SEARCH_MAX_MATCHES=500とSEARCH_MAX_RESULTS=100（file-search.ts）が異なる値で定義されている。ターミナルはメモリ上のテキストなのでAPI通信のfile-searchより上限を高くするのは理由があるが、その根拠が設計方針書に記載されていない。",
+      "location": "セクション 7. パフォーマンス設計",
+      "suggested_fix": "上限値の根拠を設計方針書に記載する。「ターミナル検索はメモリ上のテキスト操作であり、APIタイムアウトリスクがないため500件とした」等。"
+    },
+    {
+      "id": "D-NTH-001",
+      "severity": "Nice to Have",
+      "category": "設計原則",
+      "description": "ANSI除去正規表現 /\\x1b\\[[0-9;]*[mGKHF]/g が不完全。OSC sequences（\\x1b]...\\x07）、DEC sequences（\\x1b[?...]など）を見落とす可能性がある。ただし実用上の影響は限定的（検索精度への影響のみ）。",
+      "location": "セクション 2. 技術選定 - ANSI除去",
+      "suggested_fix": "より包括的な正規表現を採用するか、'strip-ansi'パッケージ（軽量、型サポートあり）の使用を検討する。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 2,
+    "should_fix": 2,
+    "nice_to_have": 1,
+    "total": 5
+  }
+}

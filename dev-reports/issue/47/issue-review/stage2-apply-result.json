@@ -1,0 +1,35 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 47,
+  "applied_date": "2026-03-07",
+  "applied_findings": [
+    {
+      "id": "MF-001",
+      "status": "Applied",
+      "description": "ターミナルの技術的不正確さを修正。「xterm@5.3.0統合」→「TerminalDisplay.tsx独自実装（sanitizeTerminalOutput）」に変更。xterm-addon-searchが適用できない理由を明記。"
+    },
+    {
+      "id": "MF-002",
+      "status": "Applied",
+      "description": "ファイル内容検索が既実装（Issue #21）であることを明記。概要・背景・提案の解決策・実装タスク・受入条件を全面改訂。既実装タスクをチェック済みとして記録。"
+    },
+    {
+      "id": "SF-001",
+      "status": "Applied",
+      "description": "ターミナル検索の実装方針をxterm-addon-searchからTerminalDisplay.tsxへの独自検索バー追加に変更。ブラウザデフォルトイベント競合への注意事項を追加。"
+    },
+    {
+      "id": "SF-002",
+      "status": "Applied",
+      "description": "XSSリスクに関するセキュリティ考慮事項を実装方針に追加。dangerouslySetInnerHTMLへの直接埋め込み禁止を明記。"
+    },
+    {
+      "id": "NTH-001",
+      "status": "Applied",
+      "description": "実装タスクリストから既実装のファイル内容検索タスクを削除。ターミナル検索タスクのみに整理。"
+    }
+  ],
+  "issue_update_url": "https://github.com/Kewton/CommandMate/issues/47",
+  "summary": "全5件の指摘事項を反映完了。Issue本文を大幅に改訂し、実装スコープをターミナル検索（新規実装）とファイル内容検索UI改善（オプション）に絞り込んだ。"
+}

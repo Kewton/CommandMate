@@ -1,0 +1,8 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー 指摘反映",
+  "applied_date": "2026-03-07",
+  "applied_findings": [
+    { "id": "S-SF-001", "status": "Applied", "description": "セキュリティテーブルにDoS対策として「クエリ最小文字数2文字以上を強制」を追加。SEC-TS-004アノテーションを追加。" }
+  ]
+}

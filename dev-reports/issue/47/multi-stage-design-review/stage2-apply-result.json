@@ -1,0 +1,10 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー 指摘反映",
+  "applied_date": "2026-03-07",
+  "applied_findings": [
+    { "id": "C-MF-001", "status": "Applied", "description": "useTerminalSearch のインターフェースに containerRef を追加。UseTerminalSearchOptions 型を新設。" },
+    { "id": "C-SF-001", "status": "Applied", "description": "ansi-stripper.ts を影響ファイルから削除。terminal-highlight.ts に変更。テスト設計からANSI除去テストを削除。" },
+    { "id": "C-SF-002", "status": "Applied", "description": "containerRef は useTerminalScroll の scrollRef を共用することを設計ノートとして明記。" }
+  ]
+}

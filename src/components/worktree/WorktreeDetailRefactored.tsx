@@ -1963,16 +1963,32 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             );
           })}
         </nav>
-        {worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning && (
+        <div className="flex items-center gap-2">
+          {/* [Issue #47] Terminal search button */}
           <button
-            onClick={handleKillSession}
-            className="flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors"
-            aria-label={`End ${activeCliTab} session`}
+            onClick={() => {
+              // Dispatch a custom event that TerminalDisplay listens for
+              window.dispatchEvent(new CustomEvent('terminal-search-open'));
+            }}
+            className="flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-gray-500 hover:text-gray-800 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+            aria-label="ターミナル内を検索"
+            data-testid="terminal-search-button"
           >
-            <span aria-hidden="true">&#x2715;</span>
-            End
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
           </button>
-        )}
+          {worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning && (
+            <button
+              onClick={handleKillSession}
+              className="flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors"
+              aria-label={`End ${activeCliTab} session`}
+            >
+              <span aria-hidden="true">&#x2715;</span>
+              End
+            </button>
+          )}
+        </div>
       </div>
     ),
     [autoYesEnabled, autoYesExpiresAt, handleAutoYesToggle, lastAutoResponse, activeCliTab, displayedAgents, worktree?.sessionStatusByCli, handleKillSession]
@@ -2309,6 +2325,19 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 );
               })}
             </nav>
+            {/* [Issue #47] Terminal search button (Mobile) */}
+            <button
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('terminal-search-open'));
+              }}
+              className="flex items-center px-1.5 py-0.5 text-xs text-gray-500 hover:text-gray-800 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+              aria-label="ターミナル内を検索"
+              data-testid="terminal-search-button-mobile"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </button>
             <button
               onClick={handleKillSession}
               disabled={!worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning}

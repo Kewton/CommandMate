@@ -1,0 +1,33 @@
+{
+  "issue_number": 47,
+  "feature_summary": "ターミナル出力テキスト検索機能",
+  "acceptance_criteria": [
+    "PC: ターミナル画面でCtrl+F（Cmd+F）により検索バーが表示される（ブラウザのページ内検索が抑制される）",
+    "モバイル: ターミナルヘッダーの検索アイコンボタンで検索バーが表示される",
+    "検索バーを開くと入力欄にフォーカスが当たる",
+    "検索文字列に一致する箇所がハイライトされる（XSSリスクなし、2文字以上のクエリのみ）",
+    "件数表示（例: 3/12）が表示される",
+    "前/次ボタンで検索結果間を移動できる（スクロール連動）",
+    "Escで検索バーを閉じられる",
+    "大量テキスト（10万文字以上）に対してもUIがフリーズしない"
+  ],
+  "test_scenarios": [
+    "シナリオ1: Ctrl+F キーで検索バーが表示され、入力にフォーカスが当たる",
+    "シナリオ2: Cmd+F キーで検索バーが表示される（Mac）",
+    "シナリオ3: showSearchButton=true でモバイル検索ボタンが表示される",
+    "シナリオ4: 2文字以上入力すると件数が表示される",
+    "シナリオ5: 前/次ボタンで currentIndex が変化する",
+    "シナリオ6: Esc キーで検索バーが閉じる",
+    "シナリオ7: 1文字クエリでマッチなし（DoS対策）",
+    "シナリオ8: 500件上限でisAtMaxMatchesが立つ",
+    "シナリオ9: 大文字小文字を区別しない検索",
+    "シナリオ10: XSSスクリプトタグは検索対象になるが実行されない"
+  ],
+  "implemented_files": [
+    "src/lib/terminal-highlight.ts",
+    "src/hooks/useTerminalSearch.ts",
+    "src/components/worktree/TerminalSearchBar.tsx",
+    "src/components/worktree/TerminalDisplay.tsx",
+    "src/app/globals.css"
+  ]
+}

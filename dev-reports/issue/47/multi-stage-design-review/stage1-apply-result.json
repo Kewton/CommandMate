@@ -1,0 +1,11 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー 指摘反映",
+  "applied_date": "2026-03-07",
+  "applied_findings": [
+    { "id": "D-MF-001", "status": "Applied", "description": "CSS Highlight API検索ソースをstripAnsi(output)からcontainer.textContentに変更。findMatches()関数をcontainer.textContent基準に修正。メモ化をuseMemoからuseEffectに変更（DOM更新後に実行するため）。" },
+    { "id": "D-MF-002", "status": "Applied", "description": "フォールバック設計を「件数表示のみ（スクロールなし）」と明確化。CSS Highlight API非サポートはCommandMate対象外環境と明記。" },
+    { "id": "D-SF-001", "status": "Applied", "description": "TerminalHighlightManagerクラスを廃止し、シンプルな関数（applyTerminalHighlights, clearTerminalHighlights, isCSSHighlightSupported）に変更。" },
+    { "id": "D-SF-002", "status": "Applied", "description": "TERMINAL_SEARCH_MAX_MATCHES=500の根拠コメントを追加。ファイル検索(100件)と異なる理由（メモリ操作・タイムアウトなし）を記載。" }
+  ]
+}

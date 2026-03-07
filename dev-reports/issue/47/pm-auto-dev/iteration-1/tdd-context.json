@@ -1,0 +1,43 @@
+{
+  "issue_number": 47,
+  "feature_name": "ターミナル出力テキスト検索機能",
+  "design_policy_path": "dev-reports/design/issue-47-terminal-search-design-policy.md",
+  "work_plan_path": "dev-reports/issue/47/work-plan.md",
+  "acceptance_criteria": [
+    "PC: ターミナル画面でCtrl+F（Cmd+F）により検索バーが表示される（ブラウザのページ内検索が抑制される）",
+    "モバイル: ターミナルヘッダーの検索アイコンボタンで検索バーが表示される",
+    "検索バーを開くと入力欄にフォーカスが当たる",
+    "検索文字列に一致する箇所がハイライトされる（XSSリスクなし、2文字以上のクエリのみ）",
+    "件数表示（例: 3/12）が表示される",
+    "前/次ボタンで検索結果間を移動できる（スクロール連動）",
+    "Escで検索バーを閉じられる",
+    "大量テキスト（10万文字以上）に対してもUIがフリーズしない"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: src/lib/terminal-highlight.ts - CSS Custom Highlight API ラッパー関数（isCSSHighlightSupported, applyTerminalHighlights, clearTerminalHighlights）",
+    "Task 1.2: src/hooks/useTerminalSearch.ts - 検索状態管理フック（containerRef受け取り、container.textContent検索、debounce 300ms、最小2文字、上限500件）",
+    "Task 2.1: src/components/worktree/TerminalSearchBar.tsx - 検索バーUIコンポーネント（入力欄、前/次ボタン、件数表示、Esc閉じ、aria-live）",
+    "Task 2.2: src/components/worktree/TerminalDisplay.tsx 更新 - useTerminalSearch統合、Ctrl+F/Cmd+Fハンドリング、showSearchButton prop追加",
+    "Task 3.1: src/app/globals.css 更新 - ::highlight(terminal-search) と ::highlight(terminal-search-current) CSS定義追加"
+  ],
+  "security_constraints": [
+    "SEC-TS-001: indexOf のみ使用（RegExp 禁止）",
+    "SEC-TS-002: CSS Custom Highlight API で XSS 回避（DOM 変更なし）",
+    "SEC-TS-003: container.textContent を検索ソースに使用",
+    "SEC-TS-004: クエリ最小2文字以上を強制（DoS 防止）"
+  ],
+  "new_files": [
+    "src/lib/terminal-highlight.ts",
+    "src/hooks/useTerminalSearch.ts",
+    "src/components/worktree/TerminalSearchBar.tsx",
+    "tests/unit/lib/terminal-highlight.test.ts",
+    "tests/unit/hooks/useTerminalSearch.test.ts",
+    "tests/unit/components/TerminalSearchBar.test.tsx"
+  ],
+  "modified_files": [
+    "src/components/worktree/TerminalDisplay.tsx",
+    "src/app/globals.css",
+    "tests/unit/components/TerminalDisplay.test.tsx"
+  ],
+  "target_coverage": 80
+}
