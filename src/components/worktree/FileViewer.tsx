@@ -208,6 +208,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
     };
 
     fetchFile();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- closeSearch is stable (only resets state)
   }, [isOpen, worktreeId, filePath]);
 
   // Fetch MARP slides when content is a MARP markdown file
@@ -446,8 +447,8 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Escape') closeSearch();
-                if (e.key === 'Enter') { e.shiftKey ? prevSearchMatch() : nextSearchMatch(); }
+                if (e.key === 'Escape') { closeSearch(); }
+                if (e.key === 'Enter') { if (e.shiftKey) { prevSearchMatch(); } else { nextSearchMatch(); } }
               }}
               placeholder="検索..."
               className="flex-1 min-w-0 px-2 py-0.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-cyan-500"
@@ -521,8 +522,8 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Escape') closeSearch();
-                      if (e.key === 'Enter') { e.shiftKey ? prevSearchMatch() : nextSearchMatch(); }
+                      if (e.key === 'Escape') { closeSearch(); }
+                      if (e.key === 'Enter') { if (e.shiftKey) { prevSearchMatch(); } else { nextSearchMatch(); } }
                     }}
                     placeholder="検索..."
                     className="flex-1 min-w-0 px-2 py-0.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-cyan-500"

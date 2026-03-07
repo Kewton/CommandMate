@@ -31,11 +31,6 @@ export interface TerminalDisplayProps {
   disableAutoFollow?: boolean;
   /** Additional CSS classes */
   className?: string;
-  /**
-   * [Issue #47] Show a search icon button for mobile users.
-   * When true, a search button appears to open the terminal search bar.
-   */
-  showSearchButton?: boolean;
 }
 
 /**
@@ -78,7 +73,6 @@ export const TerminalDisplay = memo(function TerminalDisplay({
   onScrollChange,
   disableAutoFollow = false,
   className = '',
-  showSearchButton = false,
 }: TerminalDisplayProps) {
   const { scrollRef, autoScroll, handleScroll, scrollToBottom, scrollToTop } =
     useTerminalScroll({
