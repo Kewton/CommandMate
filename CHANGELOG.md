@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-03-08
+
+### Added
+- Terminal text search with highlight and navigation (Issue #47)
+  - TerminalSearchBar component with match count and prev/next buttons
+  - File content search with line highlighting in file panels
+  - Mobile search UX with overlay highlight and header buttons
+- Git tab with commit history and diff viewer (Issue #447)
+  - GitPane with commit log, diff display, and collapsible sections
+  - Git API endpoints (log, diff, show)
+- Sidebar repository-based grouping with collapse/expand (Issue #449)
+  - useLocalStorageSync hook extraction
+- File content search in PC file panel (Issue #47)
+- Default selected agents changed to include Gemini (claude, codex, gemini)
+
+### Fixed
+- Sidebar branch name alignment regardless of agent count
+- Mobile CLI tool tabs limited to 2 agents
+- Mobile agent selection clamped to maxAgents (max 2)
+- File viewer line number alignment on mobile with table layout
+
+### Changed
+- Detailed module descriptions extracted from CLAUDE.md to docs/module-reference.md
+- Branch strategy documentation updated to include develop branch
+
 ## [0.4.1] - 2026-03-06
 
 ### Added
@@ -702,7 +727,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.4.1...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/Kewton/CommandMate/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Kewton/CommandMate/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Kewton/CommandMate/compare/v0.3.6...v0.4.0
 [0.3.6]: https://github.com/Kewton/CommandMate/compare/v0.3.5...v0.3.6
