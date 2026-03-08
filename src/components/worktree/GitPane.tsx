@@ -101,6 +101,11 @@ export const GitPane = memo(function GitPane({
   const [commitError, setCommitError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
 
+  // Collapsible section states
+  const [commitListOpen, setCommitListOpen] = useState(true);
+  const [changedFilesOpen, setChangedFilesOpen] = useState(true);
+  const [diffOpen, setDiffOpen] = useState(true);
+
   /**
    * Fetch commit history
    */
@@ -216,9 +221,14 @@ export const GitPane = memo(function GitPane({
     <div className={`flex flex-col overflow-hidden ${className}`}>
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700">
-        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+        <button
+          type="button"
+          onClick={() => setCommitListOpen((prev) => !prev)}
+          className="flex items-center gap-1 text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer hover:text-gray-900 dark:hover:text-gray-100"
+        >
+          <span className="text-xs w-4 text-center">{commitListOpen ? '▼' : '▶'}</span>
           Commit History
-        </h3>
+        </button>
         <button
           type="button"
           onClick={handleRefresh}
@@ -230,7 +240,7 @@ export const GitPane = memo(function GitPane({
       </div>
 
       {/* Loading state */}
-      {isLoading && (
+      {commitListOpen && isLoading && (
         <div className="flex items-center justify-center py-8" role="status">
           <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-cyan-500" />
           <span className="sr-only">Loading commit history...</span>
@@ -238,14 +248,14 @@ export const GitPane = memo(function GitPane({
       )}
 
       {/* Commit-level error state */}
-      {commitError && !isLoading && (
+      {commitListOpen && commitError && !isLoading && (
         <div className="px-3 py-4 text-sm text-red-600 dark:text-red-400" role="alert">
           {commitError}
         </div>
       )}
 
       {/* Empty state */}
-      {!isLoading && !commitError && commits.length === 0 && (
+      {commitListOpen && !isLoading && !commitError && commits.length === 0 && (
         <div className="px-3 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
           No commits found
         </div>
@@ -254,117 +264,137 @@ export const GitPane = memo(function GitPane({
       {/* Commit list + detail split layout */}
       {!isLoading && !commitError && commits.length > 0 && (
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          {/* Upper: Commit list (scrollable, max 40%) */}
-          <div className={`overflow-y-auto ${selectedCommit ? 'max-h-[40%] shrink-0' : 'flex-1'}`}>
-            <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-              {commits.map((commit) => (
-                <li key={commit.hash}>
-                  <button
-                    type="button"
-                    onClick={() => handleCommitSelect(commit.hash)}
-                    className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
-                      selectedCommit === commit.hash
-                        ? 'bg-cyan-50 dark:bg-cyan-900/30'
-                        : ''
-                    }`}
-                  >
-                    <div className="flex items-baseline gap-2">
-                      <span className="font-mono text-xs text-cyan-600 dark:text-cyan-400 shrink-0">
-                        {commit.shortHash}
-                      </span>
-                      <span className="truncate text-gray-800 dark:text-gray-200">
-                        {commit.message}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                      <span>{commit.author}</span>
-                      <span>{new Date(commit.date).toLocaleDateString()}</span>
-                    </div>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
+          {/* Upper: Commit list (scrollable, max 40% when open) */}
+          {commitListOpen && (
+            <div className={`overflow-y-auto ${selectedCommit ? 'max-h-[40%] shrink-0' : 'flex-1'}`}>
+              <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                {commits.map((commit) => (
+                  <li key={commit.hash}>
+                    <button
+                      type="button"
+                      onClick={() => handleCommitSelect(commit.hash)}
+                      className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
+                        selectedCommit === commit.hash
+                          ? 'bg-cyan-50 dark:bg-cyan-900/30'
+                          : ''
+                      }`}
+                    >
+                      <div className="flex items-baseline gap-2">
+                        <span className="font-mono text-xs text-cyan-600 dark:text-cyan-400 shrink-0">
+                          {commit.shortHash}
+                        </span>
+                        <span className="truncate text-gray-800 dark:text-gray-200">
+                          {commit.message}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                        <span>{commit.author}</span>
+                        <span>{new Date(commit.date).toLocaleDateString()}</span>
+                      </div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* Lower: Changed files + Diff (scrollable) */}
           {selectedCommit && (
             <div className="flex-1 overflow-y-auto min-h-0 border-t border-gray-200 dark:border-gray-700">
               {/* Changed files header */}
-              <div className="px-3 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/50 sticky top-0 z-10">
+              <button
+                type="button"
+                onClick={() => setChangedFilesOpen((prev) => !prev)}
+                className="w-full flex items-center gap-1 px-3 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/50 sticky top-0 z-10 cursor-pointer hover:text-gray-700 dark:hover:text-gray-200"
+              >
+                <span className="w-4 text-center">{changedFilesOpen ? '▼' : '▶'}</span>
                 Changed Files
-              </div>
+              </button>
 
-              {/* Detail-level error (files/diff) - shown inline */}
-              {detailError && <InlineError message={detailError} />}
+              {changedFilesOpen && (
+                <>
+                  {/* Detail-level error (files/diff) - shown inline */}
+                  {detailError && <InlineError message={detailError} />}
 
-              {isLoadingFiles && (
-                <div className="flex items-center justify-center py-4" role="status">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-500" />
-                  <span className="sr-only">Loading changed files...</span>
-                </div>
-              )}
-              {!isLoadingFiles && !detailError && changedFiles.length === 0 && (
-                <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
-                  No changed files
-                </div>
-              )}
-              {!isLoadingFiles && changedFiles.length > 0 && (
-                <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-                  {changedFiles.map((file) => (
-                    <li key={file.path}>
-                      <button
-                        type="button"
-                        onClick={() => handleFileSelect(file.path)}
-                        className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
-                          selectedFile === file.path
-                            ? 'bg-cyan-50 dark:bg-cyan-900/30'
-                            : ''
-                        }`}
-                      >
-                        <span className={`inline-block w-14 font-medium ${
-                          file.status === 'added' ? 'text-green-600 dark:text-green-400' :
-                          file.status === 'deleted' ? 'text-red-600 dark:text-red-400' :
-                          file.status === 'renamed' ? 'text-blue-600 dark:text-blue-400' :
-                          'text-yellow-600 dark:text-yellow-400'
-                        }`}>
-                          {file.status}
-                        </span>
-                        <span className="font-mono text-gray-700 dark:text-gray-300">
-                          {file.path}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                  {isLoadingFiles && (
+                    <div className="flex items-center justify-center py-4" role="status">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-500" />
+                      <span className="sr-only">Loading changed files...</span>
+                    </div>
+                  )}
+                  {!isLoadingFiles && !detailError && changedFiles.length === 0 && (
+                    <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                      No changed files
+                    </div>
+                  )}
+                  {!isLoadingFiles && changedFiles.length > 0 && (
+                    <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                      {changedFiles.map((file) => (
+                        <li key={file.path}>
+                          <button
+                            type="button"
+                            onClick={() => handleFileSelect(file.path)}
+                            className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
+                              selectedFile === file.path
+                                ? 'bg-cyan-50 dark:bg-cyan-900/30'
+                                : ''
+                            }`}
+                          >
+                            <span className={`inline-block w-14 font-medium ${
+                              file.status === 'added' ? 'text-green-600 dark:text-green-400' :
+                              file.status === 'deleted' ? 'text-red-600 dark:text-red-400' :
+                              file.status === 'renamed' ? 'text-blue-600 dark:text-blue-400' :
+                              'text-yellow-600 dark:text-yellow-400'
+                            }`}>
+                              {file.status}
+                            </span>
+                            <span className="font-mono text-gray-700 dark:text-gray-300">
+                              {file.path}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
               )}
 
               {/* Inline diff viewer (mobile only) */}
               {isMobile && selectedFile && (
                 <div className="border-t border-gray-200 dark:border-gray-700">
-                  <div className="px-3 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/50 sticky top-0 z-10">
+                  <button
+                    type="button"
+                    onClick={() => setDiffOpen((prev) => !prev)}
+                    className="w-full flex items-center gap-1 px-3 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/50 sticky top-0 z-10 cursor-pointer hover:text-gray-700 dark:hover:text-gray-200"
+                  >
+                    <span className="w-4 text-center">{diffOpen ? '▼' : '▶'}</span>
                     Diff: {selectedFile}
-                  </div>
-                  {isLoadingDiff && (
-                    <div className="flex items-center justify-center py-4" role="status">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-500" />
-                      <span className="sr-only">Loading diff...</span>
-                    </div>
-                  )}
-                  {!isLoadingDiff && diffContent && (
-                    <div className="overflow-x-auto p-2">
-                      <pre className="text-xs">
-                        <code>
-                          {diffContent.split('\n').map((line, index) => (
-                            <DiffLine key={index} line={line} />
-                          ))}
-                        </code>
-                      </pre>
-                    </div>
-                  )}
-                  {!isLoadingDiff && !diffContent && !detailError && (
-                    <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
-                      No diff available
-                    </div>
+                  </button>
+                  {diffOpen && (
+                    <>
+                      {isLoadingDiff && (
+                        <div className="flex items-center justify-center py-4" role="status">
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-500" />
+                          <span className="sr-only">Loading diff...</span>
+                        </div>
+                      )}
+                      {!isLoadingDiff && diffContent && (
+                        <div className="overflow-x-auto p-2">
+                          <pre className="text-xs">
+                            <code>
+                              {diffContent.split('\n').map((line, index) => (
+                                <DiffLine key={index} line={line} />
+                              ))}
+                            </code>
+                          </pre>
+                        </div>
+                      )}
+                      {!isLoadingDiff && !diffContent && !detailError && (
+                        <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                          No diff available
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}
