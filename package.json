@@ -1,6 +1,6 @@
 {
   "name": "commandmate",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "IDE for issue-driven AI development — define, plan, and let coding agents execute across Git worktrees",
   "keywords": [
     "claude-code",

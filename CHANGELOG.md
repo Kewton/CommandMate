@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-03-08
+
+### Fixed
+- Reset hljs padding in CodeViewer to fix line height issue
+
 ## [0.4.2] - 2026-03-08
 
 ### Added
@@ -727,7 +732,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.4.2...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/Kewton/CommandMate/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/Kewton/CommandMate/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Kewton/CommandMate/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Kewton/CommandMate/compare/v0.3.6...v0.4.0
