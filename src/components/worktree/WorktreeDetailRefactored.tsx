@@ -841,6 +841,12 @@ interface MobileContentProps {
   onScrollChange?: (enabled: boolean) => void;
   /** [Issue #379] Disable auto-follow for TUI tools (OpenCode) */
   disableAutoFollow?: boolean;
+  /** [Issue #447] History sub-tab state */
+  historySubTab: 'message' | 'git';
+  /** [Issue #447] History sub-tab change handler */
+  onHistorySubTabChange: (tab: 'message' | 'git') => void;
+  /** [Issue #447] Diff select handler for GitPane */
+  onDiffSelect: (diff: string, filePath: string) => void;
 }
 
 /** [Issue #21] Type for file search hook return */
@@ -877,6 +883,9 @@ const MobileContent = memo(function MobileContent({
   autoScroll,
   onScrollChange,
   disableAutoFollow,
+  historySubTab,
+  onHistorySubTabChange,
+  onDiffSelect,
 }: MobileContentProps) {
   switch (activeTab) {
     case 'terminal':
@@ -895,15 +904,53 @@ const MobileContent = memo(function MobileContent({
       );
     case 'history':
       return (
-        <ErrorBoundary componentName="HistoryPane">
-          <HistoryPane
-            messages={messages}
-            worktreeId={worktreeId}
-            onFilePathClick={onFilePathClick}
-            className="h-full"
-            showToast={showToast}
-          />
-        </ErrorBoundary>
+        <div className="h-full flex flex-col">
+          {/* History sub-tab switcher: Message | Git (Issue #447) */}
+          <div className="flex border-b border-gray-200 dark:border-gray-700 shrink-0">
+            <button
+              type="button"
+              onClick={() => onHistorySubTabChange('message')}
+              className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
+                historySubTab === 'message'
+                  ? 'text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400 bg-cyan-50 dark:bg-cyan-900/30'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+              }`}
+            >
+              Message
+            </button>
+            <button
+              type="button"
+              onClick={() => onHistorySubTabChange('git')}
+              className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
+                historySubTab === 'git'
+                  ? 'text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400 bg-cyan-50 dark:bg-cyan-900/30'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+              }`}
+            >
+              Git
+            </button>
+          </div>
+          {historySubTab === 'message' ? (
+            <ErrorBoundary componentName="HistoryPane">
+              <HistoryPane
+                messages={messages}
+                worktreeId={worktreeId}
+                onFilePathClick={onFilePathClick}
+                className="flex-1 min-h-0"
+                showToast={showToast}
+              />
+            </ErrorBoundary>
+          ) : (
+            <ErrorBoundary componentName="GitPane">
+              <GitPane
+                worktreeId={worktreeId}
+                onDiffSelect={onDiffSelect}
+                isMobile={true}
+                className="flex-1 min-h-0"
+              />
+            </ErrorBoundary>
+          )}
+        </div>
       );
     case 'files':
       return (
@@ -1025,6 +1072,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   activeCliTabRef.current = activeCliTab;
   // Trigger to refresh FileTreeView after file operations
   const [fileTreeRefresh, setFileTreeRefresh] = useState(0);
+
+  // [Issue #447] History sub-tab: 'message' (default) or 'git'
+  const [historySubTab, setHistorySubTab] = useState<'message' | 'git'>('message');
+
+  // [Issue #447] Diff content for right pane display (PC only)
+  const [diffContent, setDiffContent] = useState<string | null>(null);
+  const [diffFilePath, setDiffFilePath] = useState<string | null>(null);
 
   // [Issue #21] File search state
   const fileSearch = useFileSearch({ worktreeId });
@@ -1272,10 +1326,19 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   }, [router]);
 
   /** Handle diff selection from GitPane (Issue #447) */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const handleDiffSelect = useCallback((diff: string) => {
-    // Diff content is displayed within GitPane itself
-    // This callback can be extended for right-pane integration in the future
+  const handleDiffSelect = useCallback((diff: string, filePath: string) => {
+    if (!isMobile) {
+      // PC: show diff in right pane file panel area
+      setDiffContent(diff);
+      setDiffFilePath(filePath);
+    }
+    // Mobile: diff is shown inline within GitPane
+  }, [isMobile]);
+
+  /** Close diff view in right pane (Issue #447) */
+  const handleCloseDiff = useCallback(() => {
+    setDiffContent(null);
+    setDiffFilePath(null);
   }, []);
 
   /** Handle info button click - open info modal */
@@ -2025,9 +2088,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         onLoadError={handleLoadError}
         onSetLoading={handleSetLoading}
         onFileSaved={handleFilePanelSave}
+        diffContent={diffContent}
+        diffFilePath={diffFilePath}
+        onCloseDiff={handleCloseDiff}
       />
     ),
-    [state.terminal.output, state.terminal.isActive, state.terminal.isThinking, state.terminal.autoScroll, handleAutoScrollChange, disableAutoFollow, terminalHeaderMemo, fileTabs.state, fileTabs.closeTab, fileTabs.activateTab, worktreeId, handleLoadContent, handleLoadError, handleSetLoading, handleFilePanelSave]
+    [state.terminal.output, state.terminal.isActive, state.terminal.isThinking, state.terminal.autoScroll, handleAutoScrollChange, disableAutoFollow, terminalHeaderMemo, fileTabs.state, fileTabs.closeTab, fileTabs.activateTab, worktreeId, handleLoadContent, handleLoadError, handleSetLoading, handleFilePanelSave, diffContent, diffFilePath, handleCloseDiff]
   );
 
   /**
@@ -2048,13 +2114,52 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         />
         <div className="flex-1 min-h-0 overflow-hidden">
           {leftPaneTab === 'history' && (
-            <HistoryPane
-              messages={state.messages}
-              worktreeId={worktreeId}
-              onFilePathClick={handleFilePathClick}
-              className="h-full"
-              showToast={showToast}
-            />
+            <div className="h-full flex flex-col">
+              {/* History sub-tab switcher: Message | Git (Issue #447) */}
+              <div className="flex border-b border-gray-200 dark:border-gray-700 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setHistorySubTab('message')}
+                  className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
+                    historySubTab === 'message'
+                      ? 'text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400 bg-cyan-50 dark:bg-cyan-900/30'
+                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                  }`}
+                >
+                  Message
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHistorySubTab('git')}
+                  className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
+                    historySubTab === 'git'
+                      ? 'text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400 bg-cyan-50 dark:bg-cyan-900/30'
+                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                  }`}
+                >
+                  Git
+                </button>
+              </div>
+              {historySubTab === 'message' && (
+                <HistoryPane
+                  messages={state.messages}
+                  worktreeId={worktreeId}
+                  onFilePathClick={handleFilePathClick}
+                  className="flex-1 min-h-0"
+                  showToast={showToast}
+                />
+              )}
+              {historySubTab === 'git' && (
+                <ErrorBoundary componentName="GitPane">
+                  <GitPane
+                    worktreeId={worktreeId}
+                    onDiffSelect={handleDiffSelect}
+                    isMobile={false}
+                    className="flex-1 min-h-0"
+                  />
+                </ErrorBoundary>
+              )}
+            </div>
           )}
           {leftPaneTab === 'files' && (
             <ErrorBoundary componentName="FileTreeView">
@@ -2103,19 +2208,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               />
             </ErrorBoundary>
           )}
-          {leftPaneTab === 'git' && (
-            <ErrorBoundary componentName="GitPane">
-              <GitPane
-                worktreeId={worktreeId}
-                onDiffSelect={handleDiffSelect}
-                className="h-full"
-              />
-            </ErrorBoundary>
-          )}
         </div>
       </div>
     ),
-    [leftPaneTab, handleLeftPaneTabChange, state.messages, worktreeId, handleFilePathClick, showToast, fileSearch.query, fileSearch.mode, fileSearch.isSearching, fileSearch.error, fileSearch.setQuery, fileSearch.setMode, fileSearch.clearSearch, fileSearch.results?.results, handleFileSelect, handleNewFile, handleNewDirectory, handleRename, handleDelete, handleUpload, handleMove, handleCmateSetup, fileTreeRefresh, selectedAgents, handleSelectedAgentsChange, vibeLocalModel, handleVibeLocalModelChange, vibeLocalContextWindow, handleVibeLocalContextWindowChange, handleDiffSelect]
+    [leftPaneTab, handleLeftPaneTabChange, historySubTab, state.messages, worktreeId, handleFilePathClick, showToast, fileSearch.query, fileSearch.mode, fileSearch.isSearching, fileSearch.error, fileSearch.setQuery, fileSearch.setMode, fileSearch.clearSearch, fileSearch.results?.results, handleFileSelect, handleNewFile, handleNewDirectory, handleRename, handleDelete, handleUpload, handleMove, handleCmateSetup, fileTreeRefresh, selectedAgents, handleSelectedAgentsChange, vibeLocalModel, handleVibeLocalModelChange, vibeLocalContextWindow, handleVibeLocalContextWindowChange, handleDiffSelect]
   );
 
   // ========================================================================
@@ -2407,6 +2503,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             autoScroll={state.terminal.autoScroll}
             onScrollChange={handleAutoScrollChange}
             disableAutoFollow={disableAutoFollow}
+            historySubTab={historySubTab}
+            onHistorySubTabChange={setHistorySubTab}
+            onDiffSelect={handleDiffSelect}
           />
         </main>
 

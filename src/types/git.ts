@@ -51,3 +51,9 @@ export interface GitDiffResponse {
   /** Unified diff format */
   diff: string;
 }
+
+/**
+ * Commit hash validation pattern: 7-40 lowercase hex characters
+ * Used by API routes to validate commit hash parameters before passing to git commands.
+ */
+export const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/;

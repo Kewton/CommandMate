@@ -16,7 +16,7 @@ import React, { useCallback, memo } from 'react';
 /**
  * Available tabs for the left pane
  */
-export type LeftPaneTab = 'history' | 'files' | 'memo' | 'git';
+export type LeftPaneTab = 'history' | 'files' | 'memo';
 
 export interface LeftPaneTabSwitcherProps {
   /** Currently active tab */
@@ -94,25 +94,6 @@ const MemoIcon = memo(function MemoIcon() {
   );
 });
 
-const GitIcon = memo(function GitIcon() {
-  return (
-    <svg
-      className="w-4 h-4"
-      fill="none"
-      stroke="currentColor"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M13 10V3L4 14h7v7l9-11h-7z"
-      />
-    </svg>
-  );
-});
-
 // ============================================================================
 // Tab Configuration
 // ============================================================================
@@ -121,7 +102,6 @@ const TABS: TabConfig[] = [
   { id: 'history', label: 'History', icon: <HistoryIcon /> },
   { id: 'files', label: 'Files', icon: <FilesIcon /> },
   { id: 'memo', label: 'CMATE', icon: <MemoIcon /> },
-  { id: 'git', label: 'Git', icon: <GitIcon /> },
 ];
 
 // ============================================================================

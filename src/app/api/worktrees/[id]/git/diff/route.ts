@@ -9,10 +9,8 @@ import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { isValidWorktreeId } from '@/lib/auto-yes-manager';
 import { isPathSafe } from '@/lib/path-validator';
-import { getGitDiff, GitTimeoutError, GitNotRepoError } from '@/lib/git-utils';
-
-/** Commit hash validation pattern: 7-40 hex characters */
-const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/;
+import { getGitDiff, handleGitApiError } from '@/lib/git-utils';
+import { COMMIT_HASH_PATTERN } from '@/types/git';
 
 export async function GET(
   request: NextRequest,
@@ -76,22 +74,6 @@ export async function GET(
 
     return NextResponse.json({ diff }, { status: 200 });
   } catch (error) {
-    if (error instanceof GitNotRepoError) {
-      return NextResponse.json(
-        { error: 'Not a git repository' },
-        { status: 400 }
-      );
-    }
-    if (error instanceof GitTimeoutError) {
-      return NextResponse.json(
-        { error: 'Git command timed out' },
-        { status: 504 }
-      );
-    }
-    console.error('[GET /api/worktrees/:id/git/diff] Error:', error);
-    return NextResponse.json(
-      { error: 'Failed to execute git command' },
-      { status: 500 }
-    );
+    return handleGitApiError(error, 'GET /api/worktrees/:id/git/diff');
   }
 }

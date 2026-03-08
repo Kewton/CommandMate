@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { isValidWorktreeId } from '@/lib/auto-yes-manager';
-import { getGitLog, GitTimeoutError, GitNotRepoError } from '@/lib/git-utils';
+import { getGitLog, handleGitApiError } from '@/lib/git-utils';
 
 export async function GET(
   request: NextRequest,
@@ -65,22 +65,6 @@ export async function GET(
 
     return NextResponse.json({ commits }, { status: 200 });
   } catch (error) {
-    if (error instanceof GitNotRepoError) {
-      return NextResponse.json(
-        { error: 'Not a git repository' },
-        { status: 400 }
-      );
-    }
-    if (error instanceof GitTimeoutError) {
-      return NextResponse.json(
-        { error: 'Git command timed out' },
-        { status: 504 }
-      );
-    }
-    console.error('[GET /api/worktrees/:id/git/log] Error:', error);
-    return NextResponse.json(
-      { error: 'Failed to execute git command' },
-      { status: 500 }
-    );
+    return handleGitApiError(error, 'GET /api/worktrees/:id/git/log');
   }
 }

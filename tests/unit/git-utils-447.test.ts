@@ -136,20 +136,24 @@ describe('git-utils Issue #447', () => {
   });
 
   describe('getGitShow', () => {
-    it('should parse commit info and changed files', async () => {
-      const mockOutput = [
+    it('should parse commit info and changed files using diff-tree', async () => {
+      const mockLogOutput = [
         'abc123def456abc123def456abc123def456abc12345',
         'abc123d',
         'feat: add new feature',
         'John Doe',
         '2026-03-08T10:00:00+09:00',
-        '',
-        ' src/lib/new-file.ts | 50 ++++++++++++++++++++++++++++++++++++++++++++++++++',
-        ' src/lib/old-file.ts | 10 +++-------',
-        ' 2 files changed, 53 insertions(+), 7 deletions(-)',
       ].join('\n');
 
-      execFileMock.mockResolvedValue({ stdout: mockOutput, stderr: '' });
+      const mockDiffTreeOutput = [
+        'A\tsrc/lib/new-file.ts',
+        'M\tsrc/lib/old-file.ts',
+      ].join('\n');
+
+      // First call: git log, Second call: git diff-tree
+      execFileMock
+        .mockResolvedValueOnce({ stdout: mockLogOutput, stderr: '' })
+        .mockResolvedValueOnce({ stdout: mockDiffTreeOutput, stderr: '' });
 
       const { getGitShow } = await import('@/lib/git-utils');
       const result = await getGitShow('/path/to/worktree', 'abc123d');
@@ -162,6 +166,35 @@ describe('git-utils Issue #447', () => {
       expect(result!.files[0].status).toBe('added');
       expect(result!.files[1].path).toBe('src/lib/old-file.ts');
       expect(result!.files[1].status).toBe('modified');
+    });
+
+    it('should handle renamed and deleted files', async () => {
+      const mockLogOutput = [
+        'abc123def456abc123def456abc123def456abc12345',
+        'abc123d',
+        'refactor: rename files',
+        'John Doe',
+        '2026-03-08T10:00:00+09:00',
+      ].join('\n');
+
+      const mockDiffTreeOutput = [
+        'R100\tsrc/old-name.ts\tsrc/new-name.ts',
+        'D\tsrc/removed.ts',
+      ].join('\n');
+
+      execFileMock
+        .mockResolvedValueOnce({ stdout: mockLogOutput, stderr: '' })
+        .mockResolvedValueOnce({ stdout: mockDiffTreeOutput, stderr: '' });
+
+      const { getGitShow } = await import('@/lib/git-utils');
+      const result = await getGitShow('/path/to/worktree', 'abc123d');
+
+      expect(result).not.toBeNull();
+      expect(result!.files).toHaveLength(2);
+      expect(result!.files[0].status).toBe('renamed');
+      expect(result!.files[0].path).toBe('src/new-name.ts');
+      expect(result!.files[1].status).toBe('deleted');
+      expect(result!.files[1].path).toBe('src/removed.ts');
     });
 
     it('should return null for unknown commit', async () => {

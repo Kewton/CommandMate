@@ -4,17 +4,15 @@
  * Issue #447: Git tab feature
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { isValidWorktreeId } from '@/lib/auto-yes-manager';
-import { getGitShow, GitTimeoutError, GitNotRepoError } from '@/lib/git-utils';
-
-/** Commit hash validation pattern: 7-40 hex characters */
-const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/;
+import { getGitShow, handleGitApiError } from '@/lib/git-utils';
+import { COMMIT_HASH_PATTERN } from '@/types/git';
 
 export async function GET(
-  request: NextRequest,
+  _request: Request,
   { params }: { params: { id: string; commitHash: string } }
 ) {
   try {
@@ -55,22 +53,6 @@ export async function GET(
 
     return NextResponse.json(result, { status: 200 });
   } catch (error) {
-    if (error instanceof GitNotRepoError) {
-      return NextResponse.json(
-        { error: 'Not a git repository' },
-        { status: 400 }
-      );
-    }
-    if (error instanceof GitTimeoutError) {
-      return NextResponse.json(
-        { error: 'Git command timed out' },
-        { status: 504 }
-      );
-    }
-    console.error('[GET /api/worktrees/:id/git/show/:hash] Error:', error);
-    return NextResponse.json(
-      { error: 'Failed to execute git command' },
-      { status: 500 }
-    );
+    return handleGitApiError(error, 'GET /api/worktrees/:id/git/show/:hash');
   }
 }

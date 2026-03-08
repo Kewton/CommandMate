@@ -19,15 +19,32 @@ vi.mock('@/lib/auto-yes-manager', () => ({
   isValidWorktreeId: vi.fn(),
 }));
 
-vi.mock('@/lib/git-utils', () => ({
-  getGitShow: vi.fn(),
-  GitTimeoutError: class GitTimeoutError extends Error {
+vi.mock('@/lib/git-utils', async () => {
+  const { NextResponse } = await import('next/server');
+
+  class GitTimeoutError extends Error {
     constructor(msg: string) { super(msg); this.name = 'GitTimeoutError'; }
-  },
-  GitNotRepoError: class GitNotRepoError extends Error {
+  }
+  class GitNotRepoError extends Error {
     constructor(msg: string) { super(msg); this.name = 'GitNotRepoError'; }
-  },
-}));
+  }
+
+  return {
+    getGitShow: vi.fn(),
+    GitTimeoutError,
+    GitNotRepoError,
+    handleGitApiError: (error: unknown, logPrefix: string) => {
+      if (error instanceof GitNotRepoError) {
+        return NextResponse.json({ error: 'Not a git repository' }, { status: 400 });
+      }
+      if (error instanceof GitTimeoutError) {
+        return NextResponse.json({ error: 'Git command timed out' }, { status: 504 });
+      }
+      console.error(`[${logPrefix}] Error:`, error);
+      return NextResponse.json({ error: 'Failed to execute git command' }, { status: 500 });
+    },
+  };
+});
 
 import { GET } from '@/app/api/worktrees/[id]/git/show/[commitHash]/route';
 import { getWorktreeById } from '@/lib/db';

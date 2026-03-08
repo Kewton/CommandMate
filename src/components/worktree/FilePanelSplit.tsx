@@ -12,6 +12,7 @@
 import React, { memo, useState, useCallback, useRef, useMemo } from 'react';
 import { PaneResizer } from './PaneResizer';
 import { FilePanelTabs } from './FilePanelTabs';
+import { DiffViewer } from './DiffViewer';
 import type { FileTabsState } from '@/hooks/useFileTabs';
 import type { FileContent } from '@/types/models';
 
@@ -40,6 +41,12 @@ export interface FilePanelSplitProps {
   onSetLoading: (path: string, loading: boolean) => void;
   /** Callback when file is saved (refresh tree) */
   onFileSaved?: (path: string) => void;
+  /** Diff content to display in the file panel area (Issue #447) */
+  diffContent?: string | null;
+  /** File path of the diff being displayed (Issue #447) */
+  diffFilePath?: string | null;
+  /** Callback to close the diff view (Issue #447) */
+  onCloseDiff?: () => void;
 }
 
 // ============================================================================
@@ -76,6 +83,9 @@ export const FilePanelSplit = memo(function FilePanelSplit({
   onLoadError,
   onSetLoading,
   onFileSaved,
+  diffContent,
+  diffFilePath,
+  onCloseDiff,
 }: FilePanelSplitProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [terminalWidth, setTerminalWidth] = useState(INITIAL_TERMINAL_WIDTH);
@@ -107,8 +117,11 @@ export const FilePanelSplit = memo(function FilePanelSplit({
     </div>
   );
 
-  // No tabs: terminal at full width
-  if (fileTabs.tabs.length === 0) {
+  // Determine if the right panel should show (file tabs or diff)
+  const hasRightPanel = fileTabs.tabs.length > 0 || (diffContent && diffFilePath);
+
+  // No tabs and no diff: terminal at full width
+  if (!hasRightPanel) {
     return (
       <div className="h-full">
         {terminalWithHeader}
@@ -140,17 +153,26 @@ export const FilePanelSplit = memo(function FilePanelSplit({
         style={filePanelStyle}
         className="flex-grow overflow-hidden"
       >
-        <FilePanelTabs
-          tabs={fileTabs.tabs}
-          activeIndex={fileTabs.activeIndex}
-          worktreeId={worktreeId}
-          onClose={onCloseTab}
-          onActivate={onActivateTab}
-          onLoadContent={onLoadContent}
-          onLoadError={onLoadError}
-          onSetLoading={onSetLoading}
-          onFileSaved={onFileSaved}
-        />
+        {/* Diff view takes priority when active (Issue #447) */}
+        {diffContent && diffFilePath && onCloseDiff ? (
+          <DiffViewer
+            diff={diffContent}
+            filePath={diffFilePath}
+            onClose={onCloseDiff}
+          />
+        ) : (
+          <FilePanelTabs
+            tabs={fileTabs.tabs}
+            activeIndex={fileTabs.activeIndex}
+            worktreeId={worktreeId}
+            onClose={onCloseTab}
+            onActivate={onActivateTab}
+            onLoadContent={onLoadContent}
+            onLoadError={onLoadError}
+            onSetLoading={onSetLoading}
+            onFileSaved={onFileSaved}
+          />
+        )}
       </div>
     </div>
   );

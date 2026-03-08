@@ -4,6 +4,9 @@
  *
  * Displays commit history, changed files per commit, and file diffs.
  * Uses execFile-based API endpoints for security.
+ *
+ * PC: Clicking a file triggers onDiffSelect to show diff in the right pane.
+ * Mobile: Diff is displayed inline within this component.
  */
 
 'use client';
@@ -17,7 +20,10 @@ import type { CommitInfo, ChangedFile } from '@/types/git';
 
 interface GitPaneProps {
   worktreeId: string;
-  onDiffSelect: (diff: string) => void;
+  /** Called when a diff is selected (PC: displays in right pane) */
+  onDiffSelect: (diff: string, filePath: string) => void;
+  /** When true, shows diff inline instead of calling onDiffSelect */
+  isMobile?: boolean;
   className?: string;
 }
 
@@ -63,6 +69,17 @@ const DiffLine = memo(function DiffLine({ line }: { line: string }) {
   return <div className={className}>{line}</div>;
 });
 
+/**
+ * Inline error display for sub-section errors
+ */
+const InlineError = memo(function InlineError({ message }: { message: string }) {
+  return (
+    <div className="px-3 py-2 text-xs text-red-600 dark:text-red-400" role="alert">
+      {message}
+    </div>
+  );
+});
+
 // ============================================================================
 // Main Component
 // ============================================================================
@@ -70,6 +87,7 @@ const DiffLine = memo(function DiffLine({ line }: { line: string }) {
 export const GitPane = memo(function GitPane({
   worktreeId,
   onDiffSelect,
+  isMobile = false,
   className = '',
 }: GitPaneProps) {
   const [commits, setCommits] = useState<CommitInfo[]>([]);
@@ -80,25 +98,26 @@ export const GitPane = memo(function GitPane({
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
   const [isLoadingDiff, setIsLoadingDiff] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [commitError, setCommitError] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
 
   /**
    * Fetch commit history
    */
   const fetchCommits = useCallback(async () => {
     setIsLoading(true);
-    setError(null);
+    setCommitError(null);
     try {
       const response = await fetch(`/api/worktrees/${worktreeId}/git/log`);
       if (!response.ok) {
         const data = await response.json();
-        setError(data.error || 'Failed to fetch commit history');
+        setCommitError(data.error || 'Failed to fetch commit history');
         return;
       }
       const data = await response.json();
       setCommits(data.commits);
     } catch {
-      setError('Failed to fetch commit history');
+      setCommitError('Failed to fetch commit history');
     } finally {
       setIsLoading(false);
     }
@@ -112,17 +131,18 @@ export const GitPane = memo(function GitPane({
     setChangedFiles([]);
     setSelectedFile(null);
     setDiffContent(null);
+    setDetailError(null);
     try {
       const response = await fetch(`/api/worktrees/${worktreeId}/git/show/${commitHash}`);
       if (!response.ok) {
         const data = await response.json();
-        setError(data.error || 'Failed to fetch commit details');
+        setDetailError(data.error || 'Failed to fetch commit details');
         return;
       }
       const data = await response.json();
       setChangedFiles(data.files);
     } catch {
-      setError('Failed to fetch commit details');
+      setDetailError('Failed to fetch commit details');
     } finally {
       setIsLoadingFiles(false);
     }
@@ -133,20 +153,22 @@ export const GitPane = memo(function GitPane({
    */
   const fetchDiff = useCallback(async (commitHash: string, filePath: string) => {
     setIsLoadingDiff(true);
+    setDiffContent(null);
+    setDetailError(null);
     try {
       const response = await fetch(
         `/api/worktrees/${worktreeId}/git/diff?commit=${commitHash}&file=${encodeURIComponent(filePath)}`
       );
       if (!response.ok) {
         const data = await response.json();
-        setError(data.error || 'Failed to fetch diff');
+        setDetailError(data.error || 'Failed to fetch diff');
         return;
       }
       const data = await response.json();
       setDiffContent(data.diff);
-      onDiffSelect(data.diff);
+      onDiffSelect(data.diff, filePath);
     } catch {
-      setError('Failed to fetch diff');
+      setDetailError('Failed to fetch diff');
     } finally {
       setIsLoadingDiff(false);
     }
@@ -182,6 +204,7 @@ export const GitPane = memo(function GitPane({
     setChangedFiles([]);
     setSelectedFile(null);
     setDiffContent(null);
+    setDetailError(null);
     fetchCommits();
   }, [fetchCommits]);
 
@@ -214,66 +237,73 @@ export const GitPane = memo(function GitPane({
         </div>
       )}
 
-      {/* Error state */}
-      {error && !isLoading && (
+      {/* Commit-level error state */}
+      {commitError && !isLoading && (
         <div className="px-3 py-4 text-sm text-red-600 dark:text-red-400" role="alert">
-          {error}
+          {commitError}
         </div>
       )}
 
       {/* Empty state */}
-      {!isLoading && !error && commits.length === 0 && (
+      {!isLoading && !commitError && commits.length === 0 && (
         <div className="px-3 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
           No commits found
         </div>
       )}
 
-      {/* Commit list */}
-      {!isLoading && !error && commits.length > 0 && (
-        <div className="flex-1 overflow-y-auto min-h-0">
-          {/* Commits */}
-          <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-            {commits.map((commit) => (
-              <li key={commit.hash}>
-                <button
-                  type="button"
-                  onClick={() => handleCommitSelect(commit.hash)}
-                  className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
-                    selectedCommit === commit.hash
-                      ? 'bg-cyan-50 dark:bg-cyan-900/30'
-                      : ''
-                  }`}
-                >
-                  <div className="flex items-baseline gap-2">
-                    <span className="font-mono text-xs text-cyan-600 dark:text-cyan-400 shrink-0">
-                      {commit.shortHash}
-                    </span>
-                    <span className="truncate text-gray-800 dark:text-gray-200">
-                      {commit.message}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    <span>{commit.author}</span>
-                    <span>{new Date(commit.date).toLocaleDateString()}</span>
-                  </div>
-                </button>
-              </li>
-            ))}
-          </ul>
+      {/* Commit list + detail split layout */}
+      {!isLoading && !commitError && commits.length > 0 && (
+        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+          {/* Upper: Commit list (scrollable, max 40%) */}
+          <div className={`overflow-y-auto ${selectedCommit ? 'max-h-[40%] shrink-0' : 'flex-1'}`}>
+            <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+              {commits.map((commit) => (
+                <li key={commit.hash}>
+                  <button
+                    type="button"
+                    onClick={() => handleCommitSelect(commit.hash)}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
+                      selectedCommit === commit.hash
+                        ? 'bg-cyan-50 dark:bg-cyan-900/30'
+                        : ''
+                    }`}
+                  >
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-mono text-xs text-cyan-600 dark:text-cyan-400 shrink-0">
+                        {commit.shortHash}
+                      </span>
+                      <span className="truncate text-gray-800 dark:text-gray-200">
+                        {commit.message}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      <span>{commit.author}</span>
+                      <span>{new Date(commit.date).toLocaleDateString()}</span>
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
 
-          {/* Changed files for selected commit */}
+          {/* Lower: Changed files + Diff (scrollable) */}
           {selectedCommit && (
-            <div className="border-t border-gray-200 dark:border-gray-700">
-              <div className="px-3 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/50">
+            <div className="flex-1 overflow-y-auto min-h-0 border-t border-gray-200 dark:border-gray-700">
+              {/* Changed files header */}
+              <div className="px-3 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/50 sticky top-0 z-10">
                 Changed Files
               </div>
+
+              {/* Detail-level error (files/diff) - shown inline */}
+              {detailError && <InlineError message={detailError} />}
+
               {isLoadingFiles && (
                 <div className="flex items-center justify-center py-4" role="status">
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-500" />
                   <span className="sr-only">Loading changed files...</span>
                 </div>
               )}
-              {!isLoadingFiles && changedFiles.length === 0 && (
+              {!isLoadingFiles && !detailError && changedFiles.length === 0 && (
                 <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
                   No changed files
                 </div>
@@ -307,30 +337,42 @@ export const GitPane = memo(function GitPane({
                   ))}
                 </ul>
               )}
-            </div>
-          )}
 
-          {/* Diff viewer */}
-          {selectedFile && diffContent && (
-            <div className="border-t border-gray-200 dark:border-gray-700">
-              <div className="px-3 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/50">
-                Diff: {selectedFile}
-              </div>
-              {isLoadingDiff && (
-                <div className="flex items-center justify-center py-4" role="status">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-500" />
-                  <span className="sr-only">Loading diff...</span>
+              {/* Inline diff viewer (mobile only) */}
+              {isMobile && selectedFile && (
+                <div className="border-t border-gray-200 dark:border-gray-700">
+                  <div className="px-3 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/50 sticky top-0 z-10">
+                    Diff: {selectedFile}
+                  </div>
+                  {isLoadingDiff && (
+                    <div className="flex items-center justify-center py-4" role="status">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-500" />
+                      <span className="sr-only">Loading diff...</span>
+                    </div>
+                  )}
+                  {!isLoadingDiff && diffContent && (
+                    <div className="overflow-x-auto p-2">
+                      <pre className="text-xs">
+                        <code>
+                          {diffContent.split('\n').map((line, index) => (
+                            <DiffLine key={index} line={line} />
+                          ))}
+                        </code>
+                      </pre>
+                    </div>
+                  )}
+                  {!isLoadingDiff && !diffContent && !detailError && (
+                    <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                      No diff available
+                    </div>
+                  )}
                 </div>
               )}
-              {!isLoadingDiff && (
-                <div className="overflow-x-auto p-2">
-                  <pre className="text-xs">
-                    <code>
-                      {diffContent.split('\n').map((line, index) => (
-                        <DiffLine key={index} line={line} />
-                      ))}
-                    </code>
-                  </pre>
+
+              {/* PC: show selected file indicator */}
+              {!isMobile && selectedFile && !detailError && (
+                <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 border-t border-gray-200 dark:border-gray-700">
+                  {isLoadingDiff ? 'Loading diff...' : `Diff displayed in file panel: ${selectedFile}`}
                 </div>
               )}
             </div>

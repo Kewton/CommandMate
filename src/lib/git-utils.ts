@@ -10,6 +10,7 @@
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { NextResponse } from 'next/server';
 import type { GitStatus } from '@/types/models';
 import type { CommitInfo, ChangedFile } from '@/types/git';
 
@@ -237,39 +238,31 @@ export async function getGitLog(
 }
 
 /**
- * Parse git show --stat output to extract changed files
+ * Parse git diff-tree --name-status output to extract changed files.
+ * Format: "STATUS\tpath" (e.g., "M\tsrc/lib/foo.ts", "A\tnew-file.ts")
+ * For renames: "RXXX\told-path\tnew-path"
+ *
+ * Uses diff-tree instead of show --stat to avoid path truncation with long paths.
  */
-function parseGitShowStatOutput(statSection: string): ChangedFile[] {
+function parseDiffTreeOutput(output: string): ChangedFile[] {
   const files: ChangedFile[] = [];
-  const lines = statSection.trim().split('\n');
+  const lines = output.trim().split('\n');
 
   for (const line of lines) {
-    // git show --stat format: " path/to/file | N +++---"
-    // Last line is summary: " N files changed, N insertions(+), N deletions(-)"
-    const statMatch = line.match(/^\s*(.+?)\s+\|\s+\d+/);
-    if (!statMatch) continue;
+    if (!line.trim()) continue;
 
-    const filePath = statMatch[1].trim();
+    const parts = line.split('\t');
+    if (parts.length < 2) continue;
 
-    // Detect renamed files: "old => new" or "{old => new}/path"
-    if (filePath.includes('=>')) {
+    const statusCode = parts[0].trim();
+    const filePath = parts[parts.length - 1].trim(); // Use last part (new path for renames)
+
+    if (statusCode.startsWith('R')) {
       files.push({ path: filePath, status: 'renamed' });
-      continue;
-    }
-
-    // Determine status from the +/- indicators
-    const plusMinus = line.match(/\|\s+\d+\s+([+-]+)/);
-    if (plusMinus) {
-      const indicators = plusMinus[1];
-      const hasPlus = indicators.includes('+');
-      const hasMinus = indicators.includes('-');
-      if (hasPlus && !hasMinus) {
-        files.push({ path: filePath, status: 'added' });
-      } else if (!hasPlus && hasMinus) {
-        files.push({ path: filePath, status: 'deleted' });
-      } else {
-        files.push({ path: filePath, status: 'modified' });
-      }
+    } else if (statusCode === 'A') {
+      files.push({ path: filePath, status: 'added' });
+    } else if (statusCode === 'D') {
+      files.push({ path: filePath, status: 'deleted' });
     } else {
       files.push({ path: filePath, status: 'modified' });
     }
@@ -293,13 +286,14 @@ export async function getGitShow(
   commitHash: string
 ): Promise<{ commit: CommitInfo; files: ChangedFile[] } | null> {
   try {
-    const stdout = await execGitCommandTyped(
-      ['show', '--stat', '--format=%H%n%h%n%s%n%an%n%aI', commitHash, '--'],
+    // Get commit info using git log (1 commit)
+    const logStdout = await execGitCommandTyped(
+      ['log', '-1', '--format=%H%n%h%n%s%n%an%n%aI', commitHash, '--'],
       worktreePath,
       GIT_LOG_TIMEOUT_MS
     );
 
-    const lines = stdout.trim().split('\n');
+    const lines = logStdout.trim().split('\n');
     if (lines.length < 5) return null;
 
     const commit: CommitInfo = {
@@ -310,9 +304,14 @@ export async function getGitShow(
       date: lines[4],
     };
 
-    // Lines after the 5 commit info lines (and an empty line) are the --stat output
-    const statSection = lines.slice(5).join('\n');
-    const files = parseGitShowStatOutput(statSection);
+    // Get changed files using diff-tree (outputs full paths, no truncation)
+    const diffTreeStdout = await execGitCommandTyped(
+      ['diff-tree', '--no-commit-id', '-r', '--name-status', commitHash, '--'],
+      worktreePath,
+      GIT_LOG_TIMEOUT_MS
+    );
+
+    const files = parseDiffTreeOutput(diffTreeStdout);
 
     return { commit, files };
   } catch (error) {
@@ -358,4 +357,33 @@ export async function getGitDiff(
     }
     return null;
   }
+}
+
+/**
+ * Handle git-related errors in API routes and return appropriate NextResponse.
+ * Centralizes the error-to-HTTP-status mapping for GitNotRepoError, GitTimeoutError,
+ * and generic errors.
+ *
+ * @param error - The caught error
+ * @param logPrefix - Prefix for the console.error log message
+ * @returns NextResponse with the appropriate status code and error message
+ */
+export function handleGitApiError(error: unknown, logPrefix: string): NextResponse {
+  if (error instanceof GitNotRepoError) {
+    return NextResponse.json(
+      { error: 'Not a git repository' },
+      { status: 400 }
+    );
+  }
+  if (error instanceof GitTimeoutError) {
+    return NextResponse.json(
+      { error: 'Git command timed out' },
+      { status: 504 }
+    );
+  }
+  console.error(`[${logPrefix}] Error:`, error);
+  return NextResponse.json(
+    { error: 'Failed to execute git command' },
+    { status: 500 }
+  );
 }

@@ -178,7 +178,8 @@ tests/
 | `src/lib/file-search.ts` | ファイル内容検索 |
 | `src/lib/terminal-highlight.ts` | CSS Custom Highlight API ラッパー（Issue #47）XSS安全なターミナルハイライト |
 | `src/lib/file-tree.ts` | ディレクトリツリー構造生成 |
-| `src/lib/git-utils.ts` | Git情報取得 |
+| `src/lib/git-utils.ts` | Git情報取得・コミット履歴/diff取得（Issue #447） |
+| `src/types/git.ts` | Git関連型定義（CommitInfo, ChangedFile, GitLogResponse等）（Issue #447） |
 | `src/lib/utils.ts` | 汎用ユーティリティ |
 | `src/lib/date-utils.ts` | 相対時刻フォーマット |
 | `src/lib/clipboard-utils.ts` | クリップボードコピー |
@@ -198,6 +199,7 @@ tests/
 | `src/components/worktree/FilePanelContent.tsx` | ファイルコンテンツ表示 |
 | `src/components/worktree/FileViewer.tsx` | ファイルビューア |
 | `src/components/worktree/FileTreeView.tsx` | ファイルツリー表示 |
+| `src/components/worktree/GitPane.tsx` | Gitタブ（コミット履歴・diff表示）（Issue #447） |
 | `src/hooks/useFileTabs.ts` | タブ状態管理フック |
 | `src/hooks/useAutoYes.ts` | Auto-Yesクライアント側フック |
 | `src/hooks/useFileSearch.ts` | 検索状態管理フック |
@@ -206,6 +208,9 @@ tests/
 | `src/app/api/worktrees/[id]/terminal/route.ts` | ターミナルコマンド送信API |
 | `src/app/api/worktrees/[id]/capture/route.ts` | ターミナル出力キャプチャAPI |
 | `src/app/api/worktrees/[id]/marp-render/route.ts` | MARPスライドレンダリングAPI |
+| `src/app/api/worktrees/[id]/git/log/route.ts` | Gitコミット履歴取得API（Issue #447） |
+| `src/app/api/worktrees/[id]/git/show/[commitHash]/route.ts` | Gitコミット変更ファイル一覧API（Issue #447） |
+| `src/app/api/worktrees/[id]/git/diff/route.ts` | Gitファイルdiff取得API（Issue #447） |
 
 ### CLIモジュール
 

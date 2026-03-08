@@ -15,7 +15,7 @@ global.fetch = mockFetch;
 describe('GitPane', () => {
   const defaultProps = {
     worktreeId: 'test-worktree-id',
-    onDiffSelect: vi.fn(),
+    onDiffSelect: vi.fn() as (diff: string, filePath: string) => void,
   };
 
   beforeEach(() => {
