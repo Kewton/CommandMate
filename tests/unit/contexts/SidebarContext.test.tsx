@@ -12,6 +12,8 @@ import {
   SidebarProvider,
   useSidebarContext,
   DEFAULT_SIDEBAR_WIDTH,
+  SIDEBAR_VIEW_MODE_STORAGE_KEY,
+  DEFAULT_VIEW_MODE,
 } from '@/contexts/SidebarContext';
 
 // Test component to access context
@@ -22,10 +24,13 @@ function TestConsumer() {
       <span data-testid="isOpen">{String(context.isOpen)}</span>
       <span data-testid="width">{context.width}</span>
       <span data-testid="isMobileDrawerOpen">{String(context.isMobileDrawerOpen)}</span>
+      <span data-testid="viewMode">{context.viewMode}</span>
       <button data-testid="toggle" onClick={context.toggle}>Toggle</button>
       <button data-testid="setWidth" onClick={() => context.setWidth(400)}>Set Width</button>
       <button data-testid="openMobileDrawer" onClick={context.openMobileDrawer}>Open Drawer</button>
       <button data-testid="closeMobileDrawer" onClick={context.closeMobileDrawer}>Close Drawer</button>
+      <button data-testid="setViewModeFlat" onClick={() => context.setViewMode('flat')}>Set Flat</button>
+      <button data-testid="setViewModeGrouped" onClick={() => context.setViewMode('grouped')}>Set Grouped</button>
     </div>
   );
 }
@@ -165,6 +170,96 @@ describe('SidebarContext', () => {
   describe('DEFAULT_SIDEBAR_WIDTH', () => {
     it('should export default width constant', () => {
       expect(DEFAULT_SIDEBAR_WIDTH).toBe(288); // 72 * 4 = 288px (w-72)
+    });
+  });
+
+  describe('viewMode', () => {
+    it('should have default viewMode as grouped', () => {
+      render(
+        <SidebarProvider>
+          <TestConsumer />
+        </SidebarProvider>
+      );
+
+      expect(screen.getByTestId('viewMode').textContent).toBe('grouped');
+    });
+
+    it('should change viewMode to flat', () => {
+      render(
+        <SidebarProvider>
+          <TestConsumer />
+        </SidebarProvider>
+      );
+
+      act(() => {
+        screen.getByTestId('setViewModeFlat').click();
+      });
+
+      expect(screen.getByTestId('viewMode').textContent).toBe('flat');
+    });
+
+    it('should change viewMode back to grouped', () => {
+      render(
+        <SidebarProvider>
+          <TestConsumer />
+        </SidebarProvider>
+      );
+
+      act(() => {
+        screen.getByTestId('setViewModeFlat').click();
+      });
+      expect(screen.getByTestId('viewMode').textContent).toBe('flat');
+
+      act(() => {
+        screen.getByTestId('setViewModeGrouped').click();
+      });
+      expect(screen.getByTestId('viewMode').textContent).toBe('grouped');
+    });
+
+    it('should persist viewMode to localStorage', () => {
+      render(
+        <SidebarProvider>
+          <TestConsumer />
+        </SidebarProvider>
+      );
+
+      act(() => {
+        screen.getByTestId('setViewModeFlat').click();
+      });
+
+      const stored = localStorage.getItem(SIDEBAR_VIEW_MODE_STORAGE_KEY);
+      expect(stored).toBe('flat');
+    });
+
+    it('should load viewMode from localStorage on mount', () => {
+      localStorage.setItem(SIDEBAR_VIEW_MODE_STORAGE_KEY, 'flat');
+
+      render(
+        <SidebarProvider>
+          <TestConsumer />
+        </SidebarProvider>
+      );
+
+      // After useEffect runs, viewMode should be loaded from localStorage
+      expect(screen.getByTestId('viewMode').textContent).toBe('flat');
+    });
+
+    it('should use default when localStorage has invalid value', () => {
+      localStorage.setItem(SIDEBAR_VIEW_MODE_STORAGE_KEY, 'invalid');
+
+      render(
+        <SidebarProvider>
+          <TestConsumer />
+        </SidebarProvider>
+      );
+
+      expect(screen.getByTestId('viewMode').textContent).toBe('grouped');
+    });
+  });
+
+  describe('DEFAULT_VIEW_MODE', () => {
+    it('should export default view mode constant as grouped', () => {
+      expect(DEFAULT_VIEW_MODE).toBe('grouped');
     });
   });
 });

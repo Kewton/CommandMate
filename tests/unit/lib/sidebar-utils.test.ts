@@ -7,10 +7,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   sortBranches,
+  groupBranches,
   SortKey,
   SortDirection,
   STATUS_PRIORITY,
 } from '@/lib/sidebar-utils';
+import type { ViewMode, BranchGroup } from '@/lib/sidebar-utils';
 import type { SidebarBranchItem } from '@/types/sidebar';
 
 // ============================================================================
@@ -260,6 +262,115 @@ describe('sidebar-utils', () => {
 
         expect(branches[0]).toBe(originalFirst);
       });
+    });
+  });
+
+  // ==========================================================================
+  // ViewMode type
+  // ==========================================================================
+
+  describe('ViewMode', () => {
+    it('should have valid view mode values', () => {
+      const modes: ViewMode[] = ['grouped', 'flat'];
+      expect(modes).toHaveLength(2);
+    });
+  });
+
+  // ==========================================================================
+  // groupBranches
+  // ==========================================================================
+
+  describe('groupBranches', () => {
+    it('should group branches by repositoryName', () => {
+      const branches: SidebarBranchItem[] = [
+        createBranchItem({ id: '1', name: 'feature/a', repositoryName: 'RepoA' }),
+        createBranchItem({ id: '2', name: 'feature/b', repositoryName: 'RepoB' }),
+        createBranchItem({ id: '3', name: 'feature/c', repositoryName: 'RepoA' }),
+      ];
+
+      const result = groupBranches(branches, 'branchName', 'asc');
+
+      expect(result).toHaveLength(2);
+      expect(result[0].repositoryName).toBe('RepoA');
+      expect(result[0].branches).toHaveLength(2);
+      expect(result[1].repositoryName).toBe('RepoB');
+      expect(result[1].branches).toHaveLength(1);
+    });
+
+    it('should sort groups alphabetically by repositoryName (case-insensitive)', () => {
+      const branches: SidebarBranchItem[] = [
+        createBranchItem({ id: '1', repositoryName: 'Zoo' }),
+        createBranchItem({ id: '2', repositoryName: 'alpha' }),
+        createBranchItem({ id: '3', repositoryName: 'Beta' }),
+      ];
+
+      const result = groupBranches(branches, 'branchName', 'asc');
+
+      expect(result[0].repositoryName).toBe('alpha');
+      expect(result[1].repositoryName).toBe('Beta');
+      expect(result[2].repositoryName).toBe('Zoo');
+    });
+
+    it('should sort branches within each group using sortBranches', () => {
+      const branches: SidebarBranchItem[] = [
+        createBranchItem({ id: '1', name: 'z-branch', repositoryName: 'Repo' }),
+        createBranchItem({ id: '2', name: 'a-branch', repositoryName: 'Repo' }),
+        createBranchItem({ id: '3', name: 'm-branch', repositoryName: 'Repo' }),
+      ];
+
+      const result = groupBranches(branches, 'branchName', 'asc');
+
+      expect(result).toHaveLength(1);
+      expect(result[0].branches[0].name).toBe('a-branch');
+      expect(result[0].branches[1].name).toBe('m-branch');
+      expect(result[0].branches[2].name).toBe('z-branch');
+    });
+
+    it('should sort branches within groups by updatedAt descending', () => {
+      const branches: SidebarBranchItem[] = [
+        createBranchItem({
+          id: '1', name: 'old', repositoryName: 'Repo',
+          lastActivity: new Date('2024-01-01'),
+        }),
+        createBranchItem({
+          id: '2', name: 'new', repositoryName: 'Repo',
+          lastActivity: new Date('2024-06-01'),
+        }),
+      ];
+
+      const result = groupBranches(branches, 'updatedAt', 'desc');
+
+      expect(result[0].branches[0].id).toBe('2'); // newest first
+      expect(result[0].branches[1].id).toBe('1');
+    });
+
+    it('should return empty array for empty input', () => {
+      const result = groupBranches([], 'branchName', 'asc');
+      expect(result).toEqual([]);
+    });
+
+    it('should handle single branch', () => {
+      const branches: SidebarBranchItem[] = [
+        createBranchItem({ id: '1', repositoryName: 'Solo' }),
+      ];
+
+      const result = groupBranches(branches, 'branchName', 'asc');
+
+      expect(result).toHaveLength(1);
+      expect(result[0].repositoryName).toBe('Solo');
+      expect(result[0].branches).toHaveLength(1);
+    });
+
+    it('should return correct BranchGroup shape', () => {
+      const branches: SidebarBranchItem[] = [
+        createBranchItem({ id: '1', repositoryName: 'MyRepo' }),
+      ];
+
+      const result: BranchGroup[] = groupBranches(branches, 'branchName', 'asc');
+
+      expect(result[0]).toHaveProperty('repositoryName');
+      expect(result[0]).toHaveProperty('branches');
+      expect(Array.isArray(result[0].branches)).toBe(true);
     });
   });
 });

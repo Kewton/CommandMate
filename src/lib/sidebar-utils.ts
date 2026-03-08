@@ -20,6 +20,23 @@ export type SortKey = 'updatedAt' | 'repositoryName' | 'branchName' | 'status';
  */
 export type SortDirection = 'asc' | 'desc';
 
+/**
+ * View mode for sidebar display
+ * - grouped: Branches grouped by repository name
+ * - flat: Traditional flat list
+ */
+export type ViewMode = 'grouped' | 'flat';
+
+/**
+ * A group of branches belonging to the same repository
+ */
+export interface BranchGroup {
+  /** Repository name used as group header */
+  repositoryName: string;
+  /** Sorted branches within this group */
+  branches: SidebarBranchItem[];
+}
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -113,4 +130,44 @@ export function sortBranches(
   });
 
   return sorted;
+}
+
+/**
+ * Group branches by repository name, sort groups alphabetically,
+ * and sort branches within each group using the specified sort key.
+ *
+ * @param branches - Array of branch items to group
+ * @param sortKey - Key to sort branches within each group
+ * @param direction - Sort direction for branches within each group
+ * @returns Array of BranchGroup sorted by repositoryName (case-insensitive)
+ *
+ * @example
+ * ```ts
+ * const groups = groupBranches(branches, 'updatedAt', 'desc');
+ * // Returns groups sorted by repo name, branches sorted by update time
+ * ```
+ */
+export function groupBranches(
+  branches: SidebarBranchItem[],
+  sortKey: SortKey,
+  direction: SortDirection
+): BranchGroup[] {
+  // 1. Group by repositoryName
+  const groupMap = new Map<string, SidebarBranchItem[]>();
+  for (const branch of branches) {
+    const key = branch.repositoryName;
+    if (!groupMap.has(key)) groupMap.set(key, []);
+    groupMap.get(key)!.push(branch);
+  }
+
+  // 2. Sort groups alphabetically by repositoryName (case-insensitive)
+  const sortedKeys = [...groupMap.keys()].sort((a, b) =>
+    a.toLowerCase().localeCompare(b.toLowerCase())
+  );
+
+  // 3. Sort branches within each group using existing sortBranches()
+  return sortedKeys.map((repositoryName) => ({
+    repositoryName,
+    branches: sortBranches(groupMap.get(repositoryName)!, sortKey, direction),
+  }));
 }

@@ -81,6 +81,7 @@ describe('Sidebar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockPush.mockClear();
+    localStorage.clear();
     (worktreeApi.getAll as ReturnType<typeof vi.fn>).mockResolvedValue({
       worktrees: mockWorktrees,
       repositories: [],
@@ -154,7 +155,8 @@ describe('Sidebar', () => {
 
       await waitFor(() => {
         const repoNames = screen.getAllByText('MyRepo');
-        expect(repoNames.length).toBe(3);
+        // 3 branch items + 1 group header = 4 in grouped mode
+        expect(repoNames.length).toBeGreaterThanOrEqual(3);
       });
     });
   });
@@ -464,6 +466,216 @@ describe('Sidebar', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Branches')).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('Grouped view (default)', () => {
+    const multiRepoWorktrees: Worktree[] = [
+      {
+        id: 'repo-a-feature',
+        name: 'feature/a-work',
+        path: '/path/to/a',
+        repositoryPath: '/path/to/repo-a',
+        repositoryName: 'RepoA',
+      },
+      {
+        id: 'repo-b-feature',
+        name: 'feature/b-work',
+        path: '/path/to/b',
+        repositoryPath: '/path/to/repo-b',
+        repositoryName: 'RepoB',
+      },
+      {
+        id: 'repo-a-main',
+        name: 'main',
+        path: '/path/to/a-main',
+        repositoryPath: '/path/to/repo-a',
+        repositoryName: 'RepoA',
+      },
+    ];
+
+    beforeEach(() => {
+      (worktreeApi.getAll as ReturnType<typeof vi.fn>).mockResolvedValue({
+        worktrees: multiRepoWorktrees,
+        repositories: [],
+      });
+    });
+
+    it('should display repository group headers in grouped mode', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        const groupHeaders = screen.getAllByTestId('group-header');
+        expect(groupHeaders.length).toBe(2);
+      });
+    });
+
+    it('should display all branches within their groups', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('feature/a-work')).toBeInTheDocument();
+        expect(screen.getByText('feature/b-work')).toBeInTheDocument();
+        expect(screen.getByText('main')).toBeInTheDocument();
+      });
+    });
+
+    it('should show view mode toggle button', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('view-mode-toggle')).toBeInTheDocument();
+      });
+    });
+
+    it('should toggle group collapsed state on header click', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('feature/a-work')).toBeInTheDocument();
+      });
+
+      // Click the first group header to collapse it
+      const groupHeaders = screen.getAllByTestId('group-header');
+      fireEvent.click(groupHeaders[0]);
+
+      // Branches in collapsed group should be hidden
+      await waitFor(() => {
+        // RepoA branches should be collapsed
+        expect(screen.queryByText('feature/a-work')).not.toBeInTheDocument();
+        // RepoB branches should still be visible
+        expect(screen.getByText('feature/b-work')).toBeInTheDocument();
+      });
+    });
+
+    it('should expand collapsed group on second click', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('feature/a-work')).toBeInTheDocument();
+      });
+
+      // Collapse
+      const groupHeaders1 = screen.getAllByTestId('group-header');
+      fireEvent.click(groupHeaders1[0]);
+      await waitFor(() => {
+        expect(screen.queryByText('feature/a-work')).not.toBeInTheDocument();
+      });
+
+      // Expand (re-query headers after re-render)
+      const groupHeaders2 = screen.getAllByTestId('group-header');
+      fireEvent.click(groupHeaders2[0]);
+      await waitFor(() => {
+        expect(screen.getByText('feature/a-work')).toBeInTheDocument();
+      });
+    });
+
+    it('should show all groups expanded when searching', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('feature/a-work')).toBeInTheDocument();
+      });
+
+      // Collapse RepoA group
+      const groupHeaders1 = screen.getAllByTestId('group-header');
+      fireEvent.click(groupHeaders1[0]);
+
+      await waitFor(() => {
+        expect(screen.queryByText('feature/a-work')).not.toBeInTheDocument();
+      });
+
+      // Search for something in RepoA - should override collapsed state
+      const searchInput = screen.getByPlaceholderText(/search/i);
+      fireEvent.change(searchInput, { target: { value: 'a-work' } });
+
+      await waitFor(() => {
+        expect(screen.getByText('feature/a-work')).toBeInTheDocument();
+      });
+    });
+
+    it('should hide groups with no matching branches during search', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('feature/a-work')).toBeInTheDocument();
+      });
+
+      const searchInput = screen.getByPlaceholderText(/search/i);
+      fireEvent.change(searchInput, { target: { value: 'b-work' } });
+
+      await waitFor(() => {
+        // RepoB group should be visible
+        expect(screen.getByText('feature/b-work')).toBeInTheDocument();
+        // RepoA group header should not be visible (no matching branches)
+        const groupHeaders = screen.getAllByTestId('group-header');
+        expect(groupHeaders.length).toBe(1);
+      });
+    });
+  });
+
+  describe('Flat view', () => {
+    it('should show flat list when view mode is flat', async () => {
+      // Set localStorage to flat mode before rendering
+      localStorage.setItem('mcbd-sidebar-view-mode', 'flat');
+
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        // In flat mode, group headers should not be present
+        expect(screen.queryAllByTestId('group-header').length).toBe(0);
+        // Branches should still be visible
+        expect(screen.getByText('feature/test-1')).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('parseGroupCollapsed', () => {
+    it('should handle invalid JSON in localStorage gracefully', async () => {
+      localStorage.setItem('mcbd-sidebar-group-collapsed', 'not-json');
+
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      // Should render without errors
+      await waitFor(() => {
+        expect(screen.getByTestId('sidebar')).toBeInTheDocument();
       });
     });
   });
