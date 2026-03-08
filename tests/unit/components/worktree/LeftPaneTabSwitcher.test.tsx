@@ -19,13 +19,14 @@ describe('LeftPaneTabSwitcher', () => {
   });
 
   describe('Basic rendering', () => {
-    it('should render tab buttons for history, files, and memo', () => {
+    it('should render tab buttons for history, files, memo, and git', () => {
       const onTabChange = vi.fn();
       render(<LeftPaneTabSwitcher activeTab="history" onTabChange={onTabChange} />);
 
       expect(screen.getByRole('tab', { name: /history/i })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /files/i })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /cmate/i })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /git/i })).toBeInTheDocument();
     });
 
     it('should render with tablist role', () => {
@@ -191,6 +192,7 @@ describe('LeftPaneTabSwitcher', () => {
       expect(screen.getByRole('tab', { name: /history/i })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /files/i })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /cmate/i })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /git/i })).toBeInTheDocument();
     });
   });
 
@@ -219,6 +221,34 @@ describe('LeftPaneTabSwitcher', () => {
 
       const memoTab = screen.getByRole('tab', { name: /cmate/i });
       expect(memoTab.querySelector('svg')).toBeInTheDocument();
+    });
+  });
+
+  describe('Git tab', () => {
+    it('should indicate git tab as active when activeTab is git', () => {
+      const onTabChange = vi.fn();
+      render(<LeftPaneTabSwitcher activeTab="git" onTabChange={onTabChange} />);
+
+      const gitTab = screen.getByRole('tab', { name: /git/i });
+      expect(gitTab).toHaveAttribute('aria-selected', 'true');
+    });
+
+    it('should call onTabChange with "git" when git tab is clicked', () => {
+      const onTabChange = vi.fn();
+      render(<LeftPaneTabSwitcher activeTab="history" onTabChange={onTabChange} />);
+
+      const gitTab = screen.getByRole('tab', { name: /git/i });
+      fireEvent.click(gitTab);
+
+      expect(onTabChange).toHaveBeenCalledWith('git');
+    });
+
+    it('should show git icon', () => {
+      const onTabChange = vi.fn();
+      render(<LeftPaneTabSwitcher activeTab="history" onTabChange={onTabChange} />);
+
+      const gitTab = screen.getByRole('tab', { name: /git/i });
+      expect(gitTab.querySelector('svg')).toBeInTheDocument();
     });
   });
 

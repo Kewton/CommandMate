@@ -65,6 +65,7 @@ const MarkdownEditor = dynamic(
 import { UPLOADABLE_EXTENSIONS, getMaxFileSize, isUploadableExtension } from '@/config/uploadable-extensions';
 import { ToastContainer, useToast } from '@/components/common/Toast';
 import { NotesAndLogsPane } from '@/components/worktree/NotesAndLogsPane';
+import { GitPane } from '@/components/worktree/GitPane';
 import { LogViewer } from '@/components/worktree/LogViewer';
 import { VersionSection } from '@/components/worktree/VersionSection';
 import { FeedbackSection } from '@/components/worktree/FeedbackSection';
@@ -1270,6 +1271,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     router.push('/');
   }, [router]);
 
+  /** Handle diff selection from GitPane (Issue #447) */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const handleDiffSelect = useCallback((diff: string) => {
+    // Diff content is displayed within GitPane itself
+    // This callback can be extended for right-pane integration in the future
+  }, []);
+
   /** Handle info button click - open info modal */
   const handleInfoClick = useCallback(() => {
     setIsInfoModalOpen(true);
@@ -2095,10 +2103,19 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               />
             </ErrorBoundary>
           )}
+          {leftPaneTab === 'git' && (
+            <ErrorBoundary componentName="GitPane">
+              <GitPane
+                worktreeId={worktreeId}
+                onDiffSelect={handleDiffSelect}
+                className="h-full"
+              />
+            </ErrorBoundary>
+          )}
         </div>
       </div>
     ),
-    [leftPaneTab, handleLeftPaneTabChange, state.messages, worktreeId, handleFilePathClick, showToast, fileSearch.query, fileSearch.mode, fileSearch.isSearching, fileSearch.error, fileSearch.setQuery, fileSearch.setMode, fileSearch.clearSearch, fileSearch.results?.results, handleFileSelect, handleNewFile, handleNewDirectory, handleRename, handleDelete, handleUpload, handleMove, handleCmateSetup, fileTreeRefresh, selectedAgents, handleSelectedAgentsChange, vibeLocalModel, handleVibeLocalModelChange, vibeLocalContextWindow, handleVibeLocalContextWindowChange]
+    [leftPaneTab, handleLeftPaneTabChange, state.messages, worktreeId, handleFilePathClick, showToast, fileSearch.query, fileSearch.mode, fileSearch.isSearching, fileSearch.error, fileSearch.setQuery, fileSearch.setMode, fileSearch.clearSearch, fileSearch.results?.results, handleFileSelect, handleNewFile, handleNewDirectory, handleRename, handleDelete, handleUpload, handleMove, handleCmateSetup, fileTreeRefresh, selectedAgents, handleSelectedAgentsChange, vibeLocalModel, handleVibeLocalModelChange, vibeLocalContextWindow, handleVibeLocalContextWindowChange, handleDiffSelect]
   );
 
   // ========================================================================

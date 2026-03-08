@@ -59,7 +59,7 @@ export type MobileActivePane = 'history' | 'terminal' | 'files' | 'memo' | 'info
 /**
  * Left pane tab type for desktop view
  */
-export type LeftPaneTab = 'history' | 'files' | 'memo';
+export type LeftPaneTab = 'history' | 'files' | 'memo' | 'git';
 
 /**
  * Layout State
