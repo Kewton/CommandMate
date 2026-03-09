@@ -82,8 +82,9 @@ export function extractAssistantResponseBeforeLastPrompt(
   }
 
   if (cliToolId !== 'claude') {
-    // For non-Claude tools, use simple trimming
-    return output.trim();
+    // For non-Claude tools, strip ANSI escape codes and trim
+    // Gemini CLI uses 24-bit color ANSI codes (\x1b[38;2;r;g;bm) that must be removed
+    return stripAnsi(output).trim();
   }
 
   const cleanOutput = stripAnsi(output);

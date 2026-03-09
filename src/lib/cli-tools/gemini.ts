@@ -20,7 +20,7 @@ import {
 } from '../tmux';
 import { detectAndResendIfPastedText } from '../pasted-text-helper';
 import { invalidateCache } from '../tmux-capture-cache';
-import { GEMINI_PROMPT_PATTERN } from '../cli-patterns';
+import { GEMINI_PROMPT_PATTERN, stripAnsi } from '../cli-patterns';
 
 /**
  * Extract error message from unknown error type (DRY)
@@ -32,11 +32,14 @@ function getErrorMessage(error: unknown): string {
 /** Wait for Gemini CLI to initialize after launch (banner + auth + dialog) */
 const GEMINI_INIT_WAIT_MS = 6000;
 
-/** Interval for polling trust dialog detection */
-const TRUST_DIALOG_POLL_INTERVAL_MS = 1000;
+/** Interval for polling trust dialog / prompt detection */
+const GEMINI_POLL_INTERVAL_MS = 1000;
 
-/** Max attempts to detect trust dialog (10 * 1000ms = 10s polling window) */
-const TRUST_DIALOG_MAX_ATTEMPTS = 10;
+/** Max attempts for initialization polling (30 * 1000ms = 30s total window) */
+const GEMINI_INIT_MAX_ATTEMPTS = 30;
+
+/** Timeout for waiting for prompt before sending a message */
+const GEMINI_PROMPT_WAIT_TIMEOUT_MS = 15000;
 
 /**
  * Gemini CLI tool implementation
@@ -95,11 +98,12 @@ export class GeminiTool extends BaseCLITool {
       // Start Gemini CLI in interactive mode (no flags = interactive REPL)
       await sendKeys(sessionName, 'gemini', true);
 
-      // Wait for Gemini to initialize
+      // Wait for Gemini to initialize (minimum wait for banner/auth)
       await new Promise((resolve) => setTimeout(resolve, GEMINI_INIT_WAIT_MS));
 
-      // Auto-handle "Do you trust this folder?" dialog on first run
-      await this.handleTrustDialog(sessionName);
+      // Poll until Gemini interactive prompt is ready
+      // Handles trust dialog automatically if encountered
+      await this.waitForReady(sessionName);
 
       console.log(`✓ Started Gemini session: ${sessionName}`);
     } catch (error: unknown) {
@@ -109,36 +113,60 @@ export class GeminiTool extends BaseCLITool {
   }
 
   /**
-   * Handle Gemini "Do you trust this folder?" dialog
-   * On first run in a new directory, Gemini shows a trust confirmation.
-   * Option "1. Trust folder" is pre-selected (marked with a bullet indicator);
-   * this method sends Enter to confirm the pre-selected option.
-   * Polls up to TRUST_DIALOG_MAX_ATTEMPTS times, exiting early if the
-   * interactive prompt appears (no dialog needed).
+   * Wait for Gemini CLI to become ready (prompt visible).
+   * Handles trust dialog automatically if encountered.
+   * Polls until GEMINI_PROMPT_PATTERN is detected or max attempts reached.
    */
-  private async handleTrustDialog(sessionName: string): Promise<void> {
-    for (let i = 0; i < TRUST_DIALOG_MAX_ATTEMPTS; i++) {
+  private async waitForReady(sessionName: string): Promise<void> {
+    let trustDialogHandled = false;
+    for (let i = 0; i < GEMINI_INIT_MAX_ATTEMPTS; i++) {
       try {
-        const output = await capturePane(sessionName, 50);
-        if (output.includes('Do you trust this folder?')) {
-          // Option 1 "Trust folder" is pre-selected (● marker).
-          // Send Enter to confirm the selection.
-          await sendSpecialKey(sessionName, 'Enter');
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-          console.log('✓ Auto-trusted folder for Gemini session');
+        const rawOutput = await capturePane(sessionName, 50);
+        // Strip ANSI escape codes before pattern matching
+        // (Gemini TUI uses 24-bit color codes that break regex matching)
+        const output = stripAnsi(rawOutput);
+
+        // Check if interactive prompt is ready
+        if (GEMINI_PROMPT_PATTERN.test(output)) {
+          console.log(`✓ Gemini prompt detected (attempt ${i + 1})`);
           return;
         }
-        // Check if Gemini interactive prompt is already showing (no dialog needed)
-        if (GEMINI_PROMPT_PATTERN.test(output)) {
-          console.log('✓ Gemini prompt detected - no trust dialog needed');
-          return;
+
+        // Handle trust dialog if not yet handled
+        if (!trustDialogHandled && output.includes('Do you trust this folder?')) {
+          await sendSpecialKey(sessionName, 'Enter');
+          trustDialogHandled = true;
+          console.log('✓ Auto-trusted folder for Gemini session');
+          // Continue polling for prompt after trust dialog
         }
       } catch {
         // Capture may fail during initialization - continue polling
       }
-      await new Promise((resolve) => setTimeout(resolve, TRUST_DIALOG_POLL_INTERVAL_MS));
+      await new Promise((resolve) => setTimeout(resolve, GEMINI_POLL_INTERVAL_MS));
     }
-    console.log('⚠ Trust dialog detection timed out - proceeding anyway');
+    console.log('⚠ Gemini prompt detection timed out after initialization');
+  }
+
+  /**
+   * Wait for Gemini prompt before sending a message.
+   * Used by sendMessage to ensure Gemini is ready to accept input.
+   */
+  private async waitForPrompt(sessionName: string): Promise<void> {
+    const startTime = Date.now();
+    const pollInterval = 500;
+    while (Date.now() - startTime < GEMINI_PROMPT_WAIT_TIMEOUT_MS) {
+      try {
+        const rawOutput = await capturePane(sessionName, 50);
+        const output = stripAnsi(rawOutput);
+        if (GEMINI_PROMPT_PATTERN.test(output)) {
+          return;
+        }
+      } catch {
+        // Capture may fail - continue polling
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    }
+    console.log('⚠ Gemini prompt not detected before send - proceeding anyway');
   }
 
   /**
@@ -159,6 +187,9 @@ export class GeminiTool extends BaseCLITool {
     }
 
     try {
+      // Verify Gemini is at prompt state before sending
+      await this.waitForPrompt(sessionName);
+
       // Send message to Gemini (without Enter)
       await sendKeys(sessionName, message, false);
 

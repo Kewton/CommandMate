@@ -464,8 +464,10 @@ export function cleanClaudeResponse(response: string): string {
  * @returns Cleaned response
  */
 export function cleanGeminiResponse(response: string): string {
+  // Strip ANSI escape codes first (Gemini uses 24-bit color codes like \x1b[38;2;r;g;bm)
+  const strippedResponse = stripAnsi(response);
   // Split response into lines
-  const lines = response.split('\n');
+  const lines = strippedResponse.split('\n');
   const cleanedLines: string[] = [];
 
   // Patterns to remove
