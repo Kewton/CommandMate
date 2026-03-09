@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-03-10
+
+### Added
+- tmux control mode transport for live terminal interaction (Issue #460)
+  - `SessionTransport` interface abstraction
+  - `PollingTmuxTransport` wrapping existing send-keys/capture-pane
+  - `ControlModeTmuxTransport` with live output streaming via WebSocket
+  - `TmuxControlClient`, `TmuxControlParser`, `TmuxControlRegistry`
+  - Terminal page migration to control-mode streaming
+  - Feature flag (`tmux-control-mode-flags.ts`) and metrics tracking
+
+### Fixed
+- Gemini CLI model selection dialog detection with description lines between options
+- Codex prompt detection: skip unreasonably large option numbers
+- OpenCode: use full output for prompt detection to support long prompts
+- OpenCode: strip scrollbar character in stripBoxDrawing for status detection
+- Gemini CLI: strip ANSI codes and wait for prompt before sending messages
+- Prompt detector: tolerate garbage prefix and single-gap in option detection
+- CLI patterns: support new Gemini CLI prompt format with placeholder text
+- Prompt detector: tolerate garbage chars between indicator and option number
+- Prompt detector: handle missing period in tmux capture-pane option lines
+
 ### Changed
 - docs: reposition CommandMate as "a local control plane for agent CLIs" instead of "IDE for issue-driven AI development" (#457)
   - Updated README.md hero copy, sub copy, and section ordering
@@ -739,7 +761,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.4.3...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.4.4...HEAD
+[0.4.4]: https://github.com/Kewton/CommandMate/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/Kewton/CommandMate/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/Kewton/CommandMate/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Kewton/CommandMate/compare/v0.4.0...v0.4.1
