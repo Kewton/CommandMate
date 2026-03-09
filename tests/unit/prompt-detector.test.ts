@@ -2331,4 +2331,116 @@ Are you sure you want to continue? (yes/no)
       expect(result.promptData?.question).toContain('Would you like to run');
     });
   });
+
+  describe('tmux capture-pane rendering artifact: missing period after option number', () => {
+    // Claude CLI's interactive menu renderer uses cursor positioning to draw options.
+    // When tmux capture-pane captures the final screen state, periods after option
+    // numbers can be overwritten by rendering artifacts, resulting in "2  Yes" instead
+    // of "2. Yes". The detector must handle this gracefully.
+
+    it('should detect options without period (2+ spaces) when requireDefaultIndicator=false', () => {
+      const output = [
+        ' Do you want to allow Claude to fetch this content?',
+        ' \u276F 1. Yes, and remember my choice',
+        '   2  Yes, and don\'t ask again for medium.com',
+        '   3  No, and tell Claude what to do differently (esc)',
+      ].join('\n');
+
+      const options: DetectPromptOptions = { requireDefaultIndicator: false };
+      const result = detectPrompt(output, options);
+
+      expect(result.isPrompt).toBe(true);
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options).toHaveLength(3);
+        expect(result.promptData.options[0].number).toBe(1);
+        expect(result.promptData.options[1].number).toBe(2);
+        expect(result.promptData.options[2].number).toBe(3);
+        expect(result.promptData.question).toContain('allow Claude to fetch');
+      } else {
+        expect.fail('Expected multiple_choice prompt');
+      }
+    });
+
+    it('should detect options without period when all options lack periods', () => {
+      const output = [
+        ' Do you want to proceed?',
+        '   1  Yes',
+        '   2  No',
+        '   3  Cancel',
+      ].join('\n');
+
+      const options: DetectPromptOptions = { requireDefaultIndicator: false };
+      const result = detectPrompt(output, options);
+
+      expect(result.isPrompt).toBe(true);
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options).toHaveLength(3);
+      } else {
+        expect.fail('Expected multiple_choice prompt');
+      }
+    });
+
+    it('should still detect standard format with periods', () => {
+      const output = [
+        ' Do you want to proceed?',
+        ' \u276F 1. Yes',
+        '   2. No',
+        '   3. Cancel',
+      ].join('\n');
+
+      const options: DetectPromptOptions = { requireDefaultIndicator: false };
+      const result = detectPrompt(output, options);
+
+      expect(result.isPrompt).toBe(true);
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options).toHaveLength(3);
+      } else {
+        expect.fail('Expected multiple_choice prompt');
+      }
+    });
+
+    it('should not match single-space after number (avoids false positives)', () => {
+      // "2 items remaining" should not match as an option
+      const output = [
+        'Build completed successfully.',
+        '2 items remaining',
+        '3 warnings found',
+      ].join('\n');
+
+      const options: DetectPromptOptions = { requireDefaultIndicator: false };
+      const result = detectPrompt(output, options);
+
+      // Should not detect as prompt (no question line with ? or keyword)
+      expect(result.isPrompt).toBe(false);
+    });
+
+    it('should detect real-world garbled tmux capture from Claude CLI web fetch permission', () => {
+      // Actual tmux capture-pane output observed in the field
+      const output = [
+        ' Fetch',
+        '      ct-654d3d394ca6',
+        '   https://medium.com/free-code-camp/how-i-got-1000-%EF%B8%8F-on-my-github-pr',
+        '   oject-654d3d394 a6',
+        ' DoClaude wants to fetch content from medium.comnt?',
+        ' \u276F',
+        ' Do2youewantntodallowaClaudeitoffetchdthisccontent?',
+        ' \u276F 1. Yes   d  e     a      a  t     d    r        sc)',
+        '   2  Yes, and don\'t ask again for medium.com',
+        '   3  No, and tell Cl ude what t  do differently (esc)',
+      ].join('\n');
+
+      const options: DetectPromptOptions = { requireDefaultIndicator: false };
+      const result = detectPrompt(output, options);
+
+      expect(result.isPrompt).toBe(true);
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options).toHaveLength(3);
+        expect(result.promptData.options[0].isDefault).toBe(true);
+        expect(result.promptData.options[1].isDefault).toBe(false);
+        expect(result.promptData.options[2].isDefault).toBe(false);
+      } else {
+        expect.fail('Expected multiple_choice prompt');
+      }
+    });
+  });
 });

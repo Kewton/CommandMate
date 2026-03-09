@@ -280,8 +280,18 @@ const DEFAULT_OPTION_PATTERN = /^\s*[\u276F\u25CF\u203A]\s*(\d+)\.\s*(.+)$/;
  * Pattern for normal option lines (no ❯ indicator, just leading whitespace + number).
  * Only applied in Pass 2 when ❯ indicator existence is confirmed by Pass 1.
  * Anchored at both ends -- ReDoS safe (S4-001).
+ *
+ * Supports two formats:
+ *   - Standard: "  2. Yes, and don't ask again" (number + period)
+ *   - Artifact: "  2  Yes, and don't ask again" (number + 2+ spaces, no period)
+ *
+ * The artifact format occurs when Claude CLI's interactive menu renderer uses
+ * cursor positioning to draw options, and tmux capture-pane captures the final
+ * screen state where periods are overwritten by rendering artifacts.
+ * The \s{2,} variant requires 2+ spaces to avoid matching casual text lines
+ * that happen to start with a number followed by a single space.
  */
-const NORMAL_OPTION_PATTERN = /^\s*(\d+)\.\s*(.+)$/;
+const NORMAL_OPTION_PATTERN = /^\s*(\d+)(?:\.|\s{2,})\s*(.+)$/;
 
 /**
  * Pattern for separator lines (horizontal rules).
