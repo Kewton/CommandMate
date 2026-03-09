@@ -129,7 +129,8 @@ export const MAX_PASTED_TEXT_RETRIES = 3;
  * Gemini CLI shows a `>` or `❯` prompt when waiting for user input in interactive mode.
  * Also matches shell prompts as fallback for session initialization phase.
  */
-export const GEMINI_PROMPT_PATTERN = /^[>❯]\s*$/m;
+// [S4-5] /g flag prohibited: would make test() stateful
+export const GEMINI_PROMPT_PATTERN = /^[>❯]\s*$|^\s*[>❯]\s+Type your message.*$/m;
 
 /**
  * Gemini thinking/processing pattern
@@ -308,7 +309,7 @@ export function getCliToolPatterns(cliToolId: CLIToolType): {
         separatorPattern: /^[─━]{3,}$/m,
         thinkingPattern: GEMINI_THINKING_PATTERN,
         skipPatterns: [
-          /^[>❯]\s*$/, // Prompt line
+          GEMINI_PROMPT_PATTERN, // Prompt line (DRY: shared with GEMINI_PROMPT_PATTERN)
           GEMINI_THINKING_PATTERN, // Thinking indicators
           /^\s*$/, // Empty lines
           /Gemini\s+\d+\.\d+/, // Version line

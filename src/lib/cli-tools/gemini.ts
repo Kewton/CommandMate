@@ -20,6 +20,7 @@ import {
 } from '../tmux';
 import { detectAndResendIfPastedText } from '../pasted-text-helper';
 import { invalidateCache } from '../tmux-capture-cache';
+import { GEMINI_PROMPT_PATTERN } from '../cli-patterns';
 
 /**
  * Extract error message from unknown error type (DRY)
@@ -125,7 +126,7 @@ export class GeminiTool extends BaseCLITool {
           return;
         }
         // Check if Gemini interactive prompt is already showing (no dialog needed)
-        if (output.match(/^[>❯]\s*$/m)) {
+        if (GEMINI_PROMPT_PATTERN.test(output)) {
           console.log('✓ Gemini prompt detected - no trust dialog needed');
           return;
         }

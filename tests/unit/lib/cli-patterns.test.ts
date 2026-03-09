@@ -12,6 +12,7 @@ import {
   MAX_PASTED_TEXT_RETRIES,
   OPENCODE_THINKING_PATTERN,
   OPENCODE_PROMPT_PATTERN,
+  GEMINI_PROMPT_PATTERN,
   getCliToolPatterns,
   detectThinking,
   buildDetectPromptOptions,
@@ -335,6 +336,35 @@ More text`;
     it('should return undefined for vibe-local (default behavior)', () => {
       const options = buildDetectPromptOptions('vibe-local');
       expect(options).toBeUndefined();
+    });
+  });
+
+  // Issue #386: GEMINI_PROMPT_PATTERN - new prompt format support
+  describe('GEMINI_PROMPT_PATTERN', () => {
+    it('should match legacy ">" only line', () => {
+      expect(GEMINI_PROMPT_PATTERN.test('>')).toBe(true);
+    });
+
+    it('should match legacy "❯" only line', () => {
+      expect(GEMINI_PROMPT_PATTERN.test('❯')).toBe(true);
+    });
+
+    it('should match new format with leading space and placeholder', () => {
+      expect(GEMINI_PROMPT_PATTERN.test(' >   Type your message or @path/to/file')).toBe(true);
+    });
+
+    it('should NOT match quoted text in response body', () => {
+      expect(GEMINI_PROMPT_PATTERN.test('> some quoted response')).toBe(false);
+    });
+
+    it('should NOT match indented empty prompt (false positive guard)', () => {
+      expect(GEMINI_PROMPT_PATTERN.test('  > ')).toBe(false);
+    });
+
+    it('skipPatterns should match new format prompt line', () => {
+      const { skipPatterns } = getCliToolPatterns('gemini');
+      const newPrompt = ' >   Type your message or @path/to/file';
+      expect(skipPatterns.some(p => p.test(newPrompt))).toBe(true);
     });
   });
 
