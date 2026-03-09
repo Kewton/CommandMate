@@ -10,22 +10,51 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { IncomingMessage } from 'http';
 import { isAuthEnabled, parseCookies, AUTH_COOKIE_NAME, verifyToken } from './auth';
 import { getAllowedRanges, isIpAllowed, isIpRestrictionEnabled, normalizeIp } from './ip-restriction';
+import { isCliToolType } from './cli-tools/types';
+import { CLIToolManager } from './cli-tools/manager';
+import { getDbInstance } from './db-instance';
+import { getWorktreeById } from './db';
+import { observeTmuxControlFirstOutputLatency } from './tmux-control-mode-metrics';
+import { getControlModeTmuxTransport } from './transports/control-mode-tmux-transport';
+import { isTmuxControlModeEnabled } from './tmux-control-mode-flags';
 
 interface WebSocketMessage {
-  type: 'subscribe' | 'unsubscribe' | 'broadcast';
-  worktreeId: string;
+  type:
+    | 'subscribe'
+    | 'unsubscribe'
+    | 'broadcast'
+    | 'terminal_subscribe'
+    | 'terminal_input'
+    | 'terminal_resize'
+    | 'terminal_unsubscribe';
+  worktreeId?: string;
+  cliToolId?: string;
   data?: unknown;
+  cols?: number;
+  rows?: number;
+}
+
+interface TerminalSubscription {
+  worktreeId: string;
+  cliToolId: string;
+  sessionName: string;
+  startedAt: number;
+  unsubscribe: () => Promise<void>;
 }
 
 interface ClientInfo {
   ws: WebSocket;
   worktreeIds: Set<string>;
+  terminalSubscription: TerminalSubscription | null;
 }
 
 // Global state
 let wss: WebSocketServer | null = null;
 const clients = new Map<WebSocket, ClientInfo>();
 const rooms = new Map<string, Set<WebSocket>>();
+const MAX_TERMINAL_INPUT_LENGTH = 4096;
+const MAX_TERMINAL_SUBSCRIBERS_PER_SESSION = 4;
+const TERMINAL_FALLBACK_CAPTURE_LINES = -200;
 
 /**
  * Check if a WebSocket error is an expected non-fatal error.
@@ -124,6 +153,7 @@ export function setupWebSocket(server: HTTPServer | HTTPSServer): void {
     const clientInfo: ClientInfo = {
       ws,
       worktreeIds: new Set(),
+      terminalSubscription: null,
     };
     clients.set(ws, clientInfo);
 
@@ -187,15 +217,34 @@ export function setupWebSocket(server: HTTPServer | HTTPSServer): void {
 function handleMessage(ws: WebSocket, message: WebSocketMessage): void {
   switch (message.type) {
     case 'subscribe':
+      if (!message.worktreeId) return;
       handleSubscribe(ws, message.worktreeId);
       break;
 
     case 'unsubscribe':
+      if (!message.worktreeId) return;
       handleUnsubscribe(ws, message.worktreeId);
       break;
 
     case 'broadcast':
+      if (!message.worktreeId) return;
       handleBroadcast(message.worktreeId, message.data);
+      break;
+
+    case 'terminal_subscribe':
+      void handleTerminalSubscribe(ws, message);
+      break;
+
+    case 'terminal_input':
+      void handleTerminalInput(ws, message);
+      break;
+
+    case 'terminal_resize':
+      void handleTerminalResize(ws, message);
+      break;
+
+    case 'terminal_unsubscribe':
+      void handleTerminalUnsubscribe(ws);
       break;
 
     default:
@@ -316,8 +365,193 @@ function handleDisconnect(ws: WebSocket): void {
     }
   });
 
+  if (clientInfo.terminalSubscription) {
+    void clientInfo.terminalSubscription.unsubscribe();
+    clientInfo.terminalSubscription = null;
+  }
+
   // Remove client from clients map
   clients.delete(ws);
+}
+
+function sendTerminalEvent(ws: WebSocket, data: Record<string, unknown>): void {
+  if (ws.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  ws.send(JSON.stringify(data));
+}
+
+async function handleTerminalSubscribe(ws: WebSocket, message: WebSocketMessage): Promise<void> {
+  const clientInfo = clients.get(ws);
+  if (!clientInfo) {
+    sendTerminalEvent(ws, {
+      type: 'terminal_error',
+      error: 'Unauthorized WebSocket client',
+    });
+    return;
+  }
+
+  if (!isTmuxControlModeEnabled()) {
+    sendTerminalEvent(ws, {
+      type: 'terminal_error',
+      error: 'Tmux control mode is disabled',
+    });
+    return;
+  }
+
+  const { worktreeId, cliToolId } = message;
+  if (!worktreeId || !cliToolId || !isCliToolType(cliToolId)) {
+    sendTerminalEvent(ws, {
+      type: 'terminal_error',
+      error: 'Invalid terminal subscription parameters',
+    });
+    return;
+  }
+
+  const db = getDbInstance();
+  const worktree = getWorktreeById(db, worktreeId);
+  if (!worktree) {
+    sendTerminalEvent(ws, {
+      type: 'terminal_error',
+      error: 'Worktree not found',
+    });
+    return;
+  }
+
+  if (clientInfo.terminalSubscription) {
+    await clientInfo.terminalSubscription.unsubscribe();
+    clientInfo.terminalSubscription = null;
+  }
+
+  const cliTool = CLIToolManager.getInstance().getTool(cliToolId);
+  const sessionName = cliTool.getSessionName(worktreeId);
+  const transport = getControlModeTmuxTransport();
+  if (transport.getSubscriberCount(sessionName) >= MAX_TERMINAL_SUBSCRIBERS_PER_SESSION) {
+    sendTerminalEvent(ws, {
+      type: 'terminal_error',
+      error: 'Terminal subscriber limit reached',
+    });
+    return;
+  }
+
+  let firstOutputObserved = false;
+  const startedAt = Date.now();
+  const subscription = await transport.subscribe(sessionName, {
+    onOutput: (data) => {
+      if (!firstOutputObserved) {
+        firstOutputObserved = true;
+        observeTmuxControlFirstOutputLatency(Date.now() - startedAt);
+      }
+      sendTerminalEvent(ws, { type: 'terminal_output', data });
+    },
+    onExit: ({ exitCode }) => {
+      sendTerminalEvent(ws, { type: 'terminal_exit', exitCode });
+    },
+    onError: (error) => {
+      void (async () => {
+        try {
+          const snapshot = await transport.captureSnapshot(sessionName, {
+            startLine: TERMINAL_FALLBACK_CAPTURE_LINES,
+          });
+          if (snapshot.length > 0) {
+            sendTerminalEvent(ws, {
+              type: 'terminal_output',
+              data: snapshot,
+              fallback: true,
+            });
+          }
+        } catch {
+          // Best-effort snapshot fallback. The original control-mode error is still reported.
+        }
+
+        sendTerminalEvent(ws, {
+          type: 'terminal_error',
+          error: error.message,
+          fallback: true,
+        });
+      })();
+    },
+  });
+
+  clientInfo.terminalSubscription = {
+    worktreeId,
+    cliToolId,
+    sessionName,
+    startedAt,
+    unsubscribe: subscription.unsubscribe,
+  };
+
+  sendTerminalEvent(ws, {
+    type: 'terminal_status',
+    connected: true,
+    worktreeId,
+    cliToolId,
+  });
+}
+
+async function handleTerminalInput(ws: WebSocket, message: WebSocketMessage): Promise<void> {
+  const clientInfo = clients.get(ws);
+  const subscription = clientInfo?.terminalSubscription;
+  if (!subscription) {
+    sendTerminalEvent(ws, { type: 'terminal_error', error: 'No active terminal subscription' });
+    return;
+  }
+
+  const input = typeof message.data === 'string' ? message.data : '';
+  if (input.length === 0 || input.length > MAX_TERMINAL_INPUT_LENGTH) {
+    sendTerminalEvent(ws, { type: 'terminal_error', error: 'Invalid terminal input' });
+    return;
+  }
+
+  try {
+    await getControlModeTmuxTransport().sendInput(subscription.sessionName, input);
+  } catch (error) {
+    sendTerminalEvent(ws, {
+      type: 'terminal_error',
+      error: error instanceof Error ? error.message : 'Failed to send terminal input',
+    });
+  }
+}
+
+async function handleTerminalResize(ws: WebSocket, message: WebSocketMessage): Promise<void> {
+  const clientInfo = clients.get(ws);
+  const subscription = clientInfo?.terminalSubscription;
+  if (!subscription) {
+    return;
+  }
+
+  if (
+    typeof message.cols !== 'number' || !Number.isInteger(message.cols) || message.cols < 20 || message.cols > 500 ||
+    typeof message.rows !== 'number' || !Number.isInteger(message.rows) || message.rows < 5 || message.rows > 200
+  ) {
+    sendTerminalEvent(ws, { type: 'terminal_error', error: 'Invalid terminal resize payload' });
+    return;
+  }
+
+  try {
+    await getControlModeTmuxTransport().resize(subscription.sessionName, message.cols, message.rows);
+  } catch (error) {
+    sendTerminalEvent(ws, {
+      type: 'terminal_error',
+      error: error instanceof Error ? error.message : 'Failed to resize terminal',
+    });
+  }
+}
+
+async function handleTerminalUnsubscribe(ws: WebSocket): Promise<void> {
+  const clientInfo = clients.get(ws);
+  if (!clientInfo?.terminalSubscription) {
+    return;
+  }
+
+  try {
+    await clientInfo.terminalSubscription.unsubscribe();
+  } catch {
+    // Best-effort cleanup during terminal unsubscribe.
+  }
+  clientInfo.terminalSubscription = null;
+  sendTerminalEvent(ws, { type: 'terminal_status', connected: false });
 }
 
 /**
@@ -405,3 +639,26 @@ export function closeWebSocket(): void {
     // WebSocket server closed (no log in production per CLAUDE.md)
   }
 }
+
+export const __internal = {
+  handleMessage,
+  handleTerminalSubscribe,
+  handleTerminalInput,
+  handleTerminalResize,
+  handleTerminalUnsubscribe,
+  handleDisconnect,
+  registerClientForTest(ws: WebSocket): void {
+    clients.set(ws, {
+      ws,
+      worktreeIds: new Set(),
+      terminalSubscription: null,
+    });
+  },
+  getClientInfoForTest(ws: WebSocket): ClientInfo | undefined {
+    return clients.get(ws);
+  },
+  resetStateForTest(): void {
+    clients.clear();
+    rooms.clear();
+  },
+};

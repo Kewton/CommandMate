@@ -15,6 +15,8 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
+const mockIsTmuxControlModeEnabledForClient = vi.fn();
+
 // Use a module-scoped variable that vi.mock can access via closure
 // vi.mock is hoisted, so we use vi.hoisted() to ensure the variable is available
 const { dynamicCalls } = vi.hoisted(() => {
@@ -34,7 +36,13 @@ vi.mock('next/dynamic', () => ({
     dynamicCalls.push({ loader, options: options || {} });
     // Return a stub component that renders with data-testid
     const DynamicComponent = (props: Record<string, unknown>) => {
-      return <div data-testid="terminal-component-mock" data-worktree-id={props.worktreeId as string} />;
+      return (
+        <div
+          data-testid="terminal-component-mock"
+          data-worktree-id={props.worktreeId as string}
+          data-control-mode-enabled={String(props.controlModeEnabled)}
+        />
+      );
     };
     return DynamicComponent;
   },
@@ -47,12 +55,17 @@ vi.mock('next/link', () => ({
   ),
 }));
 
+vi.mock('@/lib/tmux-control-mode-flags', () => ({
+  isTmuxControlModeEnabledForClient: () => mockIsTmuxControlModeEnabledForClient(),
+}));
+
 // Import the component after mocks are set up
 import TerminalPage from '@/app/worktrees/[id]/terminal/page';
 
 describe('TerminalPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsTmuxControlModeEnabledForClient.mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -135,7 +148,23 @@ describe('TerminalPage', () => {
     it('should render status bar with terminal mode info', () => {
       render(<TerminalPage params={{ id: 'test-worktree-123' }} />);
 
-      expect(screen.getByText('Terminal Mode')).toBeInTheDocument();
+      expect(screen.getByText('Control Mode')).toBeInTheDocument();
+    });
+
+    it('should pass controlModeEnabled to TerminalComponent', () => {
+      render(<TerminalPage params={{ id: 'test-worktree-123' }} />);
+
+      const terminal = screen.getByTestId('terminal-component-mock');
+      expect(terminal.getAttribute('data-control-mode-enabled')).toBe('true');
+    });
+
+    it('should render fallback banner and status when control mode is disabled', () => {
+      mockIsTmuxControlModeEnabledForClient.mockReturnValue(false);
+
+      render(<TerminalPage params={{ id: 'test-worktree-123' }} />);
+
+      expect(screen.getByText(/Tmux control mode is disabled for this client/)).toBeInTheDocument();
+      expect(screen.getByText('Snapshot Fallback')).toBeInTheDocument();
     });
   });
 });

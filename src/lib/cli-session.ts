@@ -1,16 +1,21 @@
 /**
  * Generic CLI session management
- * Manages CLI tool sessions (Claude, Codex, Gemini) within tmux
+ * Manages CLI tool sessions (Claude, Codex, Gemini) within tmux.
+ *
+ * Issue #460 Phase 1:
+ * - Introduces SessionTransport as the abstraction seam
+ * - Uses PollingTmuxTransport as the current default transport
  *
  * Issue #405: Cache integration via tmux-capture-cache.ts
  * - captureSessionOutput() uses getOrFetchCapture() for cache-backed capture
  * - captureSessionOutputFresh() bypasses cache for prompt-response verification
  */
 
-import { hasSession, capturePane } from './tmux';
 import { CLIToolManager } from './cli-tools/manager';
 import type { CLIToolType } from './cli-tools/types';
 import { createLogger } from './logger';
+import type { SessionTransport } from './session-transport';
+import { getPollingTmuxTransport } from './transports/polling-tmux-transport';
 import {
   getOrFetchCapture,
   setCachedCapture,
@@ -20,6 +25,17 @@ import {
 } from './tmux-capture-cache';
 
 const logger = createLogger('cli-session');
+
+function getDefaultTransport(): SessionTransport {
+  return getPollingTmuxTransport();
+}
+
+function resolveSessionContext(worktreeId: string, cliToolId: CLIToolType) {
+  const manager = CLIToolManager.getInstance();
+  const cliTool = manager.getTool(cliToolId);
+  const sessionName = cliTool.getSessionName(worktreeId);
+  return { cliTool, sessionName };
+}
 
 /**
  * Check if CLI tool session is running
@@ -32,10 +48,8 @@ export async function isSessionRunning(
   worktreeId: string,
   cliToolId: CLIToolType
 ): Promise<boolean> {
-  const manager = CLIToolManager.getInstance();
-  const cliTool = manager.getTool(cliToolId);
-  const sessionName = cliTool.getSessionName(worktreeId);
-  return await hasSession(sessionName);
+  const { sessionName } = resolveSessionContext(worktreeId, cliToolId);
+  return getDefaultTransport().sessionExists(sessionName);
 }
 
 /**
@@ -57,18 +71,17 @@ export async function captureSessionOutput(
   const log = logger.withContext({ worktreeId, cliToolId });
   log.debug('captureSessionOutput:start', { requestedLines: lines });
 
-  const manager = CLIToolManager.getInstance();
-  const cliTool = manager.getTool(cliToolId);
-  const sessionName = cliTool.getSessionName(worktreeId);
+  const { cliTool, sessionName } = resolveSessionContext(worktreeId, cliToolId);
+  const transport = getDefaultTransport();
 
   try {
     const output = await getOrFetchCapture(sessionName, lines, async () => {
       // fetchFn: check session existence then capture
-      const exists = await hasSession(sessionName);
+      const exists = await transport.sessionExists(sessionName);
       if (!exists) {
         throw new Error(`${cliTool.name} session ${sessionName} does not exist`);
       }
-      return await capturePane(sessionName, { startLine: -CACHE_MAX_CAPTURE_LINES });
+      return await transport.captureSnapshot(sessionName, { startLine: -CACHE_MAX_CAPTURE_LINES });
     });
 
     log.debug('captureSessionOutput:success', {
@@ -108,12 +121,11 @@ export async function captureSessionOutputFresh(
   const log = logger.withContext({ worktreeId, cliToolId });
   log.debug('captureSessionOutputFresh:start', { requestedLines: lines });
 
-  const manager = CLIToolManager.getInstance();
-  const cliTool = manager.getTool(cliToolId);
-  const sessionName = cliTool.getSessionName(worktreeId);
+  const { cliTool, sessionName } = resolveSessionContext(worktreeId, cliToolId);
+  const transport = getDefaultTransport();
 
   try {
-    const output = await capturePane(sessionName, { startLine: -lines });
+    const output = await transport.captureSnapshot(sessionName, { startLine: -lines });
 
     // Write back to cache if non-empty [SEC4-007]
     if (output.length > 0) {
@@ -140,7 +152,5 @@ export async function captureSessionOutputFresh(
  * @returns Session name
  */
 export function getSessionName(worktreeId: string, cliToolId: CLIToolType): string {
-  const manager = CLIToolManager.getInstance();
-  const cliTool = manager.getTool(cliToolId);
-  return cliTool.getSessionName(worktreeId);
+  return resolveSessionContext(worktreeId, cliToolId).sessionName;
 }

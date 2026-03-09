@@ -9,6 +9,7 @@ import React, { useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { ArrowLeft, Terminal, Monitor, Code, Loader2 } from 'lucide-react';
+import { isTmuxControlModeEnabledForClient } from '@/lib/tmux-control-mode-flags';
 
 /**
  * Dynamic import of TerminalComponent with SSR disabled.
@@ -37,6 +38,7 @@ export default function TerminalPage({
   params: { id: string }
 }) {
   const [selectedTool, setSelectedTool] = useState<string>('claude');
+  const controlModeEnabled = isTmuxControlModeEnabledForClient();
 
   const cliTools = [
     { id: 'claude', name: 'Claude', icon: '🤖', color: 'bg-purple-600' },
@@ -91,11 +93,18 @@ export default function TerminalPage({
 
       {/* Terminal Container */}
       <div className="flex-1 p-4">
+        {!controlModeEnabled && (
+          <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            Tmux control mode is disabled for this client. Live streaming is unavailable until
+            `NEXT_PUBLIC_TMUX_CONTROL_MODE_ENABLED=true`.
+          </div>
+        )}
         <div className="h-full bg-gray-800 rounded-lg overflow-hidden shadow-2xl">
           <TerminalComponent
             worktreeId={params.id}
             cliToolId={selectedTool}
             className="h-full"
+            controlModeEnabled={controlModeEnabled}
           />
         </div>
       </div>
@@ -106,7 +115,7 @@ export default function TerminalPage({
           <div className="flex items-center gap-4">
             <span className="flex items-center gap-1">
               <Monitor size={14} />
-              Terminal Mode
+              {controlModeEnabled ? 'Control Mode' : 'Snapshot Fallback'}
             </span>
             <span className="flex items-center gap-1">
               <Code size={14} />

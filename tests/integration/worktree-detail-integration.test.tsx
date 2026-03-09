@@ -20,11 +20,54 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { WorktreeDetailRefactored } from '@/components/worktree/WorktreeDetailRefactored';
 
+const mockPush = vi.fn();
+const mockOpenMobileDrawer = vi.fn();
+const mockToggle = vi.fn();
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: mockPush,
+    back: vi.fn(),
+    forward: vi.fn(),
+    refresh: vi.fn(),
+    replace: vi.fn(),
+    prefetch: vi.fn(),
+  }),
+  usePathname: () => '/worktrees/test-worktree-123',
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 // Mock useIsMobile hook
 const mockIsMobile = vi.fn(() => false);
 vi.mock('@/hooks/useIsMobile', () => ({
   useIsMobile: () => mockIsMobile(),
   MOBILE_BREAKPOINT: 768,
+}));
+
+vi.mock('@/contexts/SidebarContext', () => ({
+  useSidebarContext: () => ({
+    isOpen: true,
+    width: 288,
+    isMobileDrawerOpen: false,
+    toggle: mockToggle,
+    setWidth: vi.fn(),
+    openMobileDrawer: mockOpenMobileDrawer,
+    closeMobileDrawer: vi.fn(),
+  }),
+  SidebarProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
+vi.mock('@/hooks/useSlashCommands', () => ({
+  useSlashCommands: () => ({
+    groups: [],
+    filteredGroups: [],
+    allCommands: [],
+    loading: false,
+    error: null,
+    filter: '',
+    setFilter: vi.fn(),
+    clearFilter: vi.fn(),
+  }),
 }));
 
 // Mock fetch for API calls
@@ -493,7 +536,7 @@ describe('WorktreeDetailRefactored Integration', () => {
         );
         expect(promptResponseCall).toBeDefined();
         const body = JSON.parse(promptResponseCall![1].body as string);
-        expect(body.answer).toBe('y');
+        expect(body.answer).toBe('yes');
         expect(body.cliTool).toBe('claude');
         expect(body.promptType).toBe('yes_no');
         // yes_no does not have defaultOptionNumber
@@ -558,10 +601,14 @@ describe('WorktreeDetailRefactored Integration', () => {
         { timeout: 5000 }
       );
 
-      // Click option 2 button
-      const optionButton = screen.getByRole('button', { name: /option b/i });
+      const optionRadio = screen.getByRole('radio', { name: /2\. option b/i });
       await act(async () => {
-        fireEvent.click(optionButton);
+        fireEvent.click(optionRadio);
+      });
+
+      const submitButton = screen.getByRole('button', { name: /prompt\.submit/i });
+      await act(async () => {
+        fireEvent.click(submitButton);
       });
 
       // Verify the request body contains promptType and defaultOptionNumber
