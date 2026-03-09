@@ -1,0 +1,107 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 457,
+  "apply_date": "2026-03-09",
+  "applied_findings": [
+    {
+      "finding_id": "F1",
+      "severity": "must_fix",
+      "applied": true,
+      "description": "package.jsonのdescription更新を「更新対象ファイル」テーブルに追加。推奨descriptionの具体例を記載。Acceptance Criteriaにpackage.json description一致の項目を追加。"
+    },
+    {
+      "finding_id": "F2",
+      "severity": "must_fix",
+      "applied": true,
+      "description": "GitHubリポジトリのAbout description更新をAcceptance Criteriaに追加（gh repo editまたはGitHub UIで対応可能と明記）。Notesセクションに現在のAbout descriptionの内容と更新が必要な旨を記載。"
+    },
+    {
+      "finding_id": "F3",
+      "severity": "must_fix",
+      "applied": true,
+      "description": "src/app/page.tsxを「更新対象ファイル」テーブルに追加。トップページのサブコピー（L23-26）の更新内容を明記。Acceptance Criteriaにランディングページコピーの一致項目を追加。"
+    },
+    {
+      "finding_id": "F4",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "package.jsonのkeywords更新をAcceptance Criteriaに追加（agent-cli-manager, control-plane等の追加）。更新対象ファイルテーブルのpackage.json行にkeywordsの更新も含めて記載。"
+    },
+    {
+      "finding_id": "F5",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "docs/concept.mdのCLIツール一覧が古い点をNotesセクションに記載。本Issueの直接スコープ外として別Issueで対応を検討する旨を明記。"
+    },
+    {
+      "finding_id": "F6",
+      "severity": "should_fix",
+      "applied": false,
+      "description": "docs/architecture.mdは技術ドキュメントであり、マーケティングコピーとは性質が異なるため即時対応不要。レビュー結果の推奨通りスキップ。"
+    },
+    {
+      "finding_id": "F7",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "user-guideドキュメント群（quick-start.md等）がissue-drivenワークフロー前提で構成されている点をNotesセクションに記載。将来的なドキュメント整合性タスクとして認識する旨を追記。"
+    },
+    {
+      "finding_id": "F8",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "CHANGELOG更新をAcceptance Criteriaに追加。具体的な記載例（README repositioned from issue-driven IDE to agent CLI control plane）を含めた。"
+    },
+    {
+      "finding_id": "F9",
+      "severity": "nice_to_have",
+      "applied": false,
+      "description": "user-guideドキュメント群の構成変更は本Issueの対象外。レビュー結果の推奨通りスキップ。"
+    },
+    {
+      "finding_id": "F10",
+      "severity": "nice_to_have",
+      "applied": false,
+      "description": "webapp-guide.mdのAuto Yesセクションは現状維持で問題なし。READMEのリフレームとは独立した機能ドキュメント。レビュー結果の推奨通りスキップ。"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "finding_id": "F6",
+      "severity": "should_fix",
+      "reason": "docs/architecture.mdは技術ドキュメントであり、マーケティングコピーとは性質が異なるため即時対応不要（レビュー結果の推奨に従う）"
+    },
+    {
+      "finding_id": "F9",
+      "severity": "nice_to_have",
+      "reason": "user-guideドキュメント群の構成変更は本Issueのスコープ外（別Issueで対応）"
+    },
+    {
+      "finding_id": "F10",
+      "severity": "nice_to_have",
+      "reason": "webapp-guide.mdのAuto Yesセクションは現状維持で適切（レビュー結果の推奨に従う）"
+    }
+  ],
+  "issue_updated": true,
+  "summary": {
+    "total_findings": 10,
+    "applied": 7,
+    "skipped": 3,
+    "must_fix_applied": 3,
+    "must_fix_total": 3,
+    "should_fix_applied": 4,
+    "should_fix_total": 5,
+    "nice_to_have_applied": 0,
+    "nice_to_have_total": 2
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/457"
+  },
+  "changes_summary": {
+    "更新対象ファイルテーブル": "package.json と src/app/page.tsx を追加（2ファイル追加、計4ファイルに拡大）",
+    "Acceptance Criteria": "4項目追加（package.json description、package.json keywords、page.tsxランディングページ、GitHub About description、CHANGELOG）",
+    "Notes": "3項目追加（GitHub About description、docs/concept.mdのCLIツール一覧、user-guideドキュメント群の将来タスク）",
+    "レビュー履歴": "Stage 3-4のレビュー履歴セクションを追加"
+  }
+}

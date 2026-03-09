@@ -1,0 +1,137 @@
+{
+  "issue_number": 457,
+  "overall_status": "passed",
+  "criteria_results": [
+    {
+      "id": "AC1",
+      "description": "README hero no longer leads with 'IDE for issue-driven AI development'",
+      "status": "passed",
+      "evidence": "README.md hero blockquote is 'Orchestrate your agent CLIs, not your terminal tabs.' and intro line is 'CommandMate is a local control plane for agent CLIs.' No mention of 'IDE for issue-driven' anywhere."
+    },
+    {
+      "id": "AC2",
+      "description": "Hero copy adopts 'A local control plane for agent CLIs'",
+      "status": "passed",
+      "evidence": "README.md line 18: 'CommandMate is a local control plane for agent CLIs.'"
+    },
+    {
+      "id": "AC3",
+      "description": "README top section explicitly states integration with existing agent CLIs",
+      "status": "passed",
+      "evidence": "README.md line 29: 'CommandMate adds orchestration and visibility on top of your existing agent CLIs. It does not replace tmux, Git worktrees, or your terminal. It makes them easier to manage at scale.'"
+    },
+    {
+      "id": "AC4",
+      "description": "Workflow messaging moved below core session management value",
+      "status": "passed",
+      "evidence": "README.md line 291: '## Optional Workflow Layer' section appears after Key Features, Use Cases, Security, How it works, Quick Start, CLI Commands, Troubleshooting, Developer Setup, and Comparison sections. Workflow is clearly positioned as secondary."
+    },
+    {
+      "id": "AC5",
+      "description": "Auto Yes demoted from hero-level positioning",
+      "status": "passed",
+      "evidence": "Auto Yes appears only in the Key Features table (line 47) with description 'Optional unattended mode for trusted workflows'. Not present in hero or top-level copy."
+    },
+    {
+      "id": "AC6",
+      "description": "README contains tmux/CLI compatibility and fallback language",
+      "status": "passed",
+      "evidence": "README.md line 29: 'It does not replace tmux, Git worktrees, or your terminal.' Also tmux troubleshooting section (lines 189-205) shows direct tmux session access as fallback."
+    },
+    {
+      "id": "AC7",
+      "description": "Japanese README (docs/ja/README.md) updated correspondingly",
+      "status": "passed",
+      "evidence": "docs/ja/README.md line 18: 'CommandMate は、エージェント CLI のローカルコントロールプレーンです。' Line 28-29: 'CommandMate は、既存のエージェント CLI の上にオーケストレーションと可視性を追加します。tmux、Git worktree、ターミナルを置き換えません。' Line 47: 'オプショナル自動実行モード'. Line 291: '## オプショナルワークフローレイヤー'. All changes mirror English version."
+    },
+    {
+      "id": "AC8",
+      "description": "package.json description matches new positioning",
+      "status": "passed",
+      "evidence": "package.json description: 'A local control plane for agent CLIs -- orchestration and visibility for Claude Code, Codex, Gemini CLI, and more across Git worktrees'"
+    },
+    {
+      "id": "AC9",
+      "description": "package.json keywords reflect new positioning (agent-cli, cli-orchestration etc.)",
+      "status": "passed",
+      "evidence": "package.json keywords include: 'agent-cli', 'cli-orchestration', 'codex-cli', 'gemini-cli', 'session-manager', 'tmux', 'developer-tools' among others."
+    },
+    {
+      "id": "AC10",
+      "description": "src/app/page.tsx landing page copy matches new positioning (L23 hero + L25 sub copy)",
+      "status": "passed",
+      "evidence": "page.tsx line 23: 'A local control plane for agent CLIs -- orchestration and visibility on top of Claude Code, Codex, Gemini CLI, and more.' Line 25: 'CommandMate does not replace tmux, Git worktrees, or your terminal. It makes them easier to manage across sessions and worktrees.'"
+    },
+    {
+      "id": "AC11",
+      "description": "CHANGELOG contains entry for this issue",
+      "status": "passed",
+      "evidence": "CHANGELOG.md [Unreleased] section line 11: 'docs: reposition CommandMate as \"a local control plane for agent CLIs\" instead of \"IDE for issue-driven AI development\" (#457)' with sub-items listing all changed files."
+    }
+  ],
+  "static_analysis": {
+    "eslint": "passed",
+    "typescript": "passed",
+    "evidence": "ESLint: No warnings or errors. TypeScript: tsc --noEmit completed with no errors."
+  },
+  "failed_criteria": [],
+  "summary": "All 11 acceptance criteria passed. README.md hero copy successfully repositioned from 'IDE for issue-driven AI development' to 'A local control plane for agent CLIs'. Workflow section moved to 'Optional Workflow Layer' below core features. Auto Yes demoted to feature table only. Japanese README mirrors all changes. package.json description/keywords updated. Landing page copy updated. CHANGELOG entry present. ESLint and TypeScript checks pass with no errors.",
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "Scenario 1: README.md hero copy verification",
+      "result": "passed",
+      "evidence": "Hero is 'Orchestrate your agent CLIs, not your terminal tabs.' and 'A local control plane for agent CLIs.' No 'IDE for issue-driven' present."
+    },
+    {
+      "scenario": "Scenario 2: README.md Issue-Driven section moved",
+      "result": "passed",
+      "evidence": "'## Optional Workflow Layer' appears at line 291, after all core feature sections."
+    },
+    {
+      "scenario": "Scenario 3: Auto Yes demotion",
+      "result": "passed",
+      "evidence": "Auto Yes only in feature table with 'Optional unattended mode' description."
+    },
+    {
+      "scenario": "Scenario 4: Japanese README changes",
+      "result": "passed",
+      "evidence": "All positioning changes mirrored in docs/ja/README.md with proper Japanese translations."
+    },
+    {
+      "scenario": "Scenario 5: package.json description/keywords",
+      "result": "passed",
+      "evidence": "Description includes 'local control plane for agent CLIs'. Keywords include agent-cli, cli-orchestration."
+    },
+    {
+      "scenario": "Scenario 6: src/app/page.tsx UI copy",
+      "result": "passed",
+      "evidence": "Line 23 hero and line 25 sub-copy both updated to new positioning."
+    },
+    {
+      "scenario": "Scenario 7: CHANGELOG.md update",
+      "result": "passed",
+      "evidence": "Entry under [Unreleased] references #457 and describes repositioning."
+    },
+    {
+      "scenario": "Scenario 8: Static analysis (ESLint/TypeScript)",
+      "result": "passed",
+      "evidence": "ESLint: no warnings/errors. TypeScript: no type errors."
+    }
+  ],
+  "acceptance_criteria_status": [
+    { "criterion": "READMEのヒーローが 'IDE for issue-driven AI development' でリードしなくなっている", "verified": true },
+    { "criterion": "ヒーローコピーとして 'A local control plane for agent CLIs' を採用する", "verified": true },
+    { "criterion": "READMEトップセクションが既存エージェントCLIとの連携を明示している", "verified": true },
+    { "criterion": "ワークフロー重視のメッセージングがコアセッション管理価値の下に移動している", "verified": true },
+    { "criterion": "Auto Yesがヒーローレベルのポジショニングから降格している", "verified": true },
+    { "criterion": "READMEにtmux/CLIとの互換性・フォールバック言語が含まれている", "verified": true },
+    { "criterion": "日本語README（docs/ja/README.md）も同様に更新されている", "verified": true },
+    { "criterion": "package.jsonのdescriptionが新しいポジショニングと一致している", "verified": true },
+    { "criterion": "package.jsonのkeywordsが新しいポジショニングを反映している", "verified": true },
+    { "criterion": "src/app/page.tsxのランディングページコピーが新しいポジショニングと一致している", "verified": true },
+    { "criterion": "CHANGELOGに本Issue対応のエントリが追加されている", "verified": true }
+  ],
+  "evidence_files": [],
+  "message": "すべての受入条件を満たしています"
+}

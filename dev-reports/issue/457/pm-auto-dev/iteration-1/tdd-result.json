@@ -1,0 +1,14 @@
+{
+  "issue_number": 457,
+  "status": "success",
+  "changed_files": [
+    "README.md",
+    "docs/ja/README.md",
+    "package.json",
+    "src/app/page.tsx",
+    "CHANGELOG.md"
+  ],
+  "lint_result": "pass",
+  "typescript_result": "pass",
+  "summary": "CommandMateのポジショニングを「IDE for issue-driven AI development」から「A local control plane for agent CLIs」に変更。README.md（英語・日本語）のヒーローコピー、サブコピー、セクション構成を更新。Issue-Driven DevelopmentセクションをOptional Workflow Layerにリネームしてドキュメントセクション直前に移動。Auto Yesの説明をセキュリティ注意喚起を含む表現に変更。package.jsonのdescriptionとkeywordsを更新。page.tsxのランディングページコピーを更新。CHANGELOGにUnreleasedエントリを追加。"
+}

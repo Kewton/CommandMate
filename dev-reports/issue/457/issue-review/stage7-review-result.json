@@ -1,0 +1,91 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "issue_number": 457,
+  "review_focus": "影響範囲",
+  "review_date": "2026-03-09",
+  "previous_findings_status": {
+    "stage3_F1_must_fix": "resolved - package.json descriptionが更新対象ファイルテーブルとACに追加済み。具体的な更新例も記載",
+    "stage3_F2_must_fix": "resolved - GitHub About descriptionがACとNotesに追加済み。gh repo editコマンドでの対応方法も記載",
+    "stage3_F3_must_fix": "resolved - src/app/page.tsxが更新対象ファイルテーブルとACに追加済み。L23-26の具体的な変更箇所も特定",
+    "stage3_F4_should_fix": "resolved - package.json keywordsの更新がACに追加済み（agent-cli-manager, control-plane等の追加）",
+    "stage3_F5_should_fix": "resolved - docs/concept.mdのCLIツール一覧が古い点をNotesに記載（別Issue対応）",
+    "stage3_F6_should_fix": "skipped - docs/architecture.mdは技術ドキュメントのため即時対応不要（妥当な判断）",
+    "stage3_F7_should_fix": "resolved - user-guideドキュメント群のissue-driven前提構成をNotesに記載（将来タスク）",
+    "stage3_F8_should_fix": "resolved - CHANGELOG更新がACに追加済み。具体的な記載例も含む",
+    "stage3_F9_nice_to_have": "skipped - user-guideドキュメント構成変更はスコープ外（妥当な判断）",
+    "stage3_F10_nice_to_have": "skipped - webapp-guide.mdのAuto Yesセクションは現状維持（妥当な判断）"
+  },
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "should_fix",
+      "category": "UI影響",
+      "description": "src/app/page.tsx L25の2行目サブコピー「CommandMate helps you refine issues, run them in parallel, switch agents when needed, and keep work moving wherever you are.」もissue-driven前提の表現（refine issues, run them in parallel）を含んでいる。IssueのACおよび更新対象ファイルテーブルではL23-26を変更対象としているが、具体的な変更後テキスト案が提示されているのはL23のみ。L25の2行目サブコピーについてもConcrete Changesセクションの推奨サブコピー案で対応可能だが、対応が明示的ではない。",
+      "suggestion": "更新対象ファイルテーブルの「src/app/page.tsx」の説明を「L23-26の全テキスト（1行目のヒーローコピーおよび2行目のサブコピー）を新しいポジショニングに合わせて更新」と明確化する。Concrete Changes #1のサブコピー案をpage.tsxにも適用する旨を補足すると実装者に分かりやすい。ただし現状でもL23-26が変更対象として特定されているため、致命的な漏れではない。",
+      "location": "src/app/page.tsx L25 / Issue ## 更新対象ファイル テーブル"
+    },
+    {
+      "id": "F2",
+      "severity": "should_fix",
+      "category": "一貫性",
+      "description": "package.jsonの更新対象ファイルテーブルでは description の更新例として「A local control plane for agent CLIs -- manage Claude Code, Codex, Gemini CLI, and other agents across Git worktrees」が記載されている。一方、Concrete Changes #1のヒーローコピー推奨案は「CommandMate is a local control plane for agent CLIs.」であり、サブコピー案は「CommandMate adds orchestration and visibility on top of your existing agent CLIs.」である。package.json descriptionの提案文は「manage ... across Git worktrees」とworktree管理を前面に出しており、ヒーローコピーの「orchestration and visibility」とは若干異なるフレーミングになっている。矛盾ではないが、トーンの一貫性を検討する余地がある。",
+      "suggestion": "package.json descriptionの提案文をConcrete Changes #1のトーンと揃える。例: 「A local control plane for agent CLIs -- orchestration and visibility for Claude Code, Codex, Gemini CLI, and more across Git worktrees」。または現在の提案文のままでも実質的に問題はないため、実装時にPRレビューで最終調整する方針でもよい。",
+      "location": "Issue ## 更新対象ファイル テーブル package.json行 / ## Concrete Changes #1"
+    },
+    {
+      "id": "F3",
+      "severity": "nice_to_have",
+      "category": "ドキュメント波及",
+      "description": "README.md L16のブロック引用「Move issues forward, not terminal tabs.」および日本語README L16の「ターミナルをさばくな。Issue を前に進めよう。」はREADMEのヒーロー直上に位置するキャッチコピーであり、issue-driven開発を強く示唆する表現。Issueの更新対象ファイルテーブルではREADME.mdの「ヒーローコピー」が変更対象に含まれているため、このブロック引用も変更範囲に含まれると解釈できるが、明示的には言及されていない。",
+      "suggestion": "Concrete Changesに記載のヒーローコピー変更がこのブロック引用も含むことを確認する。新ポジショニングに合わせたブロック引用案（例: 「Orchestrate your agent CLIs, not your terminal tabs.」）を検討してもよいが、実装者の裁量に委ねても問題ない。READMEのヒーローコピー変更に伴い自然に対応されるべき範囲。",
+      "location": "README.md L16 / docs/ja/README.md L16"
+    },
+    {
+      "id": "F4",
+      "severity": "nice_to_have",
+      "category": "一貫性",
+      "description": "README.md L28-31の説明文「Instead of jumping straight into implementation, you define an issue, refine it with AI, review the direction, generate a plan, and then let your coding agent execute...」および「If your workflow is shifting from writing code yourself to defining issues, reviewing direction, and accepting outcomes, CommandMate can become the center of your development workflow.」はissue-driven IDEのフレーミングの核心部分。日本語READMEのL28-31にも同様の表現がある。Issue本文ではこれらの変更はREADMEの「バリュープロポジション順序変更」「互換性言語追加」「ワークフローセクション移動」で対応されると想定されるが、具体的にこの説明文をどう書き換えるかの案はConcrete Changesには含まれていない。",
+      "suggestion": "Concrete Changes #2（バリュープロポジション順序変更）および #4（互換性言語追加）の適用により、READMEのヒーロー周辺テキストは全面的に書き換えとなるため、この説明文も自然に対応される。実装者がREADME全体のリライトとして認識していれば問題ない。明示的な指示を追加する必要性は低い。",
+      "location": "README.md L28-31 / docs/ja/README.md L28-31"
+    },
+    {
+      "id": "F5",
+      "severity": "nice_to_have",
+      "category": "一貫性",
+      "description": "Stage 5で指摘されたF2（更新対象ファイルテーブルにGitHub About descriptionが含まれていない）がStage 6で「その他の更新対象」として追記されている。Issueの最新版を確認すると、更新対象ファイルテーブルの下に「その他の更新対象: GitHub About description」が適切に記載されている。前回指摘の対応が適切に反映されていることを確認。",
+      "suggestion": "対応済み。追加の指摘なし。",
+      "location": "Issue ## 更新対象ファイル セクション"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 3,
+    "overall_assessment": "Stage 3の影響範囲レビューで検出された全10件の指摘事項（must_fix 3件、should_fix 5件、nice_to_have 2件）は、Stage 4の反映によりすべて適切に対応またはスキップ判断されている。更新後のIssueでは package.json（description + keywords）、src/app/page.tsx（L23-26）、GitHub About description の3つの追加更新対象が明確にスコープに組み込まれており、Acceptance Criteriaも12項目に拡充されている。2回目の影響範囲レビューでは新たなmust_fix項目は検出されなかった。should_fix 2件はいずれもフレーミングの一貫性に関する軽微な改善提案であり、実装時のPRレビューで十分に対応可能な範囲である。スコープ拡大によるリスクも限定的で、追加対象はいずれもテキスト変更のみ（コードロジックへの影響なし）。Issueは実装着手可能な品質に達している。"
+  },
+  "code_references": [
+    {
+      "file": "src/app/page.tsx",
+      "relevance": "L23のヒーローコピーに加えL25のサブコピーもissue-driven表現を含む。L23-26の全体が変更対象"
+    },
+    {
+      "file": "package.json",
+      "relevance": "description（L4）とkeywords（L5-16）が更新対象として正しく特定済み"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "README.md",
+      "relevance": "リポジショニング変更の主要対象。L16のブロック引用、L18のヒーローコピー、L28-31の説明文が変更範囲"
+    },
+    {
+      "file": "docs/ja/README.md",
+      "relevance": "日本語版。L16のブロック引用、L18のヒーローコピー、L28-31の説明文が変更範囲。英語版より構造変更が広範"
+    },
+    {
+      "file": "CHANGELOG.md",
+      "relevance": "リポジショニング変更のエントリ追加がACに含まれている"
+    }
+  ]
+}

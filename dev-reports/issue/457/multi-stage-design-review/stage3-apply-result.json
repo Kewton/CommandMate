@@ -1,0 +1,56 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘対応",
+  "issue_number": 457,
+  "target_file": "dev-reports/design/issue-457-readme-repositioning-design-policy.md",
+  "applied_findings": [
+    {
+      "id": "F1",
+      "severity": "should_fix",
+      "category": "互換性",
+      "action": "セクション2-1のIssue-Driven Development移動先にアンカー互換性のNoteを追記。Optional Workflow Layerテンプレートに<a id=\"issue-driven-development\"></a>を追加。リスクテーブルにアンカーリンク破損リスクを追記"
+    },
+    {
+      "id": "F2",
+      "severity": "should_fix",
+      "category": "SEO影響",
+      "action": "セクション2-3のkeywords変更後リストにai-codingとcoding-agentを継続保持する形に修正。削除対象はissue-driven-developmentのみと明記。受入条件も更新"
+    },
+    {
+      "id": "F6",
+      "severity": "should_fix",
+      "category": "互換性",
+      "action": "セクション2-1のOptional Workflow Layerテンプレート下にworkflow-examplesリンクテキスト調整のNoteを追加。リスクテーブルにも追記"
+    },
+    {
+      "id": "F7",
+      "severity": "nice_to_have",
+      "category": "ドキュメント波及",
+      "action": "セクション3の「変更しないもの」テーブルにdocs/en/concept.mdを追加し、将来タスクとして認識を明示"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "F3",
+      "severity": "nice_to_have",
+      "reason": "レビューでCLAUDE.mdの判断が妥当と確認済み。対応不要"
+    },
+    {
+      "id": "F4",
+      "severity": "nice_to_have",
+      "reason": "実装順序で同一リリース内の変更を担保済み。追加対策不要"
+    },
+    {
+      "id": "F5",
+      "severity": "nice_to_have",
+      "reason": "CI/CD影響なし確認済み。対応不要"
+    },
+    {
+      "id": "F8",
+      "severity": "nice_to_have",
+      "reason": "現在のCHANGELOGテンプレートで経緯追跡は十分可能。対応不要"
+    }
+  ],
+  "doc_updated": true,
+  "summary": "Stage 3（影響分析レビュー）の指摘8件のうち、should_fix 3件（F1: アンカーリンク互換性、F2: keywords保持、F6: リンクテキスト調整）とnice_to_have 1件（F7: concept.mdのスコープ外明記）を設計方針書に反映。残り4件のnice_to_haveは対応不要と判断しスキップ。主な変更点: (1) Optional Workflow Layerセクションに旧アンカーID設置を追加、(2) package.json keywordsでai-codingとcoding-agentの継続保持を明確化、(3) セクション移動後のリンクテキスト調整推奨を追記、(4) 変更しないものテーブルにdocs/en/concept.mdを追加"
+}

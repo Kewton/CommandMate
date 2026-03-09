@@ -1,0 +1,79 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "issue_number": 457,
+  "review_focus": "設計原則",
+  "review_date": "2026-03-09",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "must_fix",
+      "category": "明確性",
+      "description": "セクション2-1のREADME.md行番号が実際のファイルと一致しない。設計方針書では「L16 ブロック引用」「L20 ヒーローコピー」「L23-26 サブコピー」と記載されているが、実際のREADME.mdではブロック引用はL16（正しい）、ヒーローコピーはL18（L20ではない）、サブコピーはL28-30（L23-26ではない）。実装者が誤った行を編集するリスクがある。",
+      "suggestion": "行番号の参照を実際のファイルに合わせて修正する。あるいは、行番号ではなく内容ベースの特定（例：「> **Move issues forward...** のブロック引用」）に変更し、行番号のズレによる混乱を防ぐ。",
+      "location": "セクション2-1 README.md 変更箇所テーブル"
+    },
+    {
+      "id": "F2",
+      "severity": "should_fix",
+      "category": "完全性",
+      "description": "README.md L28-30の既存サブコピー（Instead of jumping straight into implementation...）とL30の「CommandMate can become the center of your development workflow」の扱いが設計方針書に記載されていない。特にL30の表現はセクション6のポジショニングガードレールで「the center of your development workflow」が避けるべき表現として明記されているにもかかわらず、セクション2-1の変更対象に含まれていない。",
+      "suggestion": "L28-30のサブコピーとL30の表現を変更対象として明示的に追加する。新しいポジショニングに沿った代替コピーを提案すること。",
+      "location": "セクション2-1 README.md 変更箇所テーブルおよびセクション6 ポジショニングガードレール"
+    },
+    {
+      "id": "F3",
+      "severity": "should_fix",
+      "category": "完全性",
+      "description": "CHANGELOG.mdへの記録が受入条件（セクション7）と実装順序（セクション8、ステップ5）に含まれているが、セクション2の変更対象ファイル一覧には含まれていない。設計方針書の構成として不整合がある。",
+      "suggestion": "セクション2に「2-6. CHANGELOG.md」を追加し、記録すべき変更内容のテンプレートを記載する。あるいはセクション2の冒頭で「本セクションは主要な変更対象のみを記載。CHANGELOG.mdは実装順序のステップ5を参照」と注記する。",
+      "location": "セクション2 変更対象ファイルと変更内容"
+    },
+    {
+      "id": "F4",
+      "severity": "should_fix",
+      "category": "明確性",
+      "description": "Issue-Driven Developmentセクションの移動先が「Key Featuresの後に移動」とあるが、README.mdにはKey Featuresの後にUse Cases、Security、How it worksなど複数セクションが続く。正確な挿入位置が曖昧である。また、Optional Workflow Layerセクションの英語テンプレートは提供されているが、移動後のIssue-Driven Developmentセクション自体をOptional Workflow Layerセクション内に統合するのか、別セクションとして残すのかが不明確。",
+      "suggestion": "移動先を「Optional Workflow Layerセクションとして、Documentationセクションの直前に配置」のように具体的に指定する。Optional Workflow Layer導入文の後にIssue-Driven Developmentの表を配置する構成を明記する。",
+      "location": "セクション2-1 README.md「Issue-Driven Development セクション」行"
+    },
+    {
+      "id": "F5",
+      "severity": "should_fix",
+      "category": "DRY",
+      "description": "日本語版README（セクション2-2）の変更内容が英語版と比較して記述が薄い。ブロック引用の翻訳が「実装者が新しいポジショニングに合わせて翻訳」と実装者任せになっており、推奨訳が提供されていない。英語版には具体的なコピーが記載されているのに対し、日本語版は抽象的な指示にとどまっている。",
+      "suggestion": "日本語版にも推奨訳を具体的に記載する。例：ブロック引用 → 「ターミナルをさばくな。エージェントCLIをオーケストレーションしよう。」、ヒーローコピーは既に記載済み、サブコピー → 英語版新サブコピーの推奨日本語訳を記載する。Optional Workflow Layerの日本語テンプレートも提供する。",
+      "location": "セクション2-2 docs/ja/README.md 変更箇所テーブル"
+    },
+    {
+      "id": "F6",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "Key Featuresテーブル内のAuto Yes Mode以外の項目（例：「Multiple issues progress simultaneously without interference」等のissue-driven寄りの表現）の見直しが設計方針書に含まれていない。セクション2-1にFeature Copyの推奨フレーミングテーブルが記載されているが、これがKey Featuresテーブルの置き換えなのか追記なのかが明確でない。",
+      "suggestion": "Feature Copyの推奨フレーミングテーブルがKey Featuresテーブルのどの列（What it does / Why it matters）を置き換えるのかを明示する。",
+      "location": "セクション2-1 Feature Copyの推奨フレーミング"
+    },
+    {
+      "id": "F7",
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "description": "Use Casesセクション（README.md L82-91）には「Parallel issue development」「Issue refinement」「Overnight execution」などissue-driven前提の表現が含まれているが、変更対象として言及されていない。ポジショニング変更の完全性の観点で、Use Casesセクションの表現もcontrol plane寄りに更新すべきか検討が必要。",
+      "suggestion": "Use Casesセクションの更新が本Issueのスコープ内か否かを明記する。スコープ外とする場合は、セクション3「変更しないもの」に理由とともに追記する。",
+      "location": "セクション3 変更しないもの"
+    },
+    {
+      "id": "F8",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "description": "設計方針書全体としてYAGNI原則に適合している。コピーライティング変更のみに絞り、機能実装の変更を含まない方針は適切。ただし、バリュープロポジション順序（10項目のリスト）が設計方針書内のみの参考情報なのか、README.mdに実際にこの順序でセクションを再構成する指示なのかが曖昧。",
+      "suggestion": "バリュープロポジション順序が実装上どのように反映されるのか（Key Featuresテーブルの行順序として反映するのか、セクション全体の構成順序なのか）を明記する。",
+      "location": "セクション2-1 バリュープロポジション順序"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3,
+    "overall_assessment": "設計方針書はポジショニング変更の目的・方針・ガードレールが明確に整理されており、KISS/YAGNI原則に概ね適合している。機能変更を含まずコピーライティングのみに絞った判断は適切である。しかし、実装者が迷わず作業できるかという明確性の観点で改善の余地がある。特に (1) README.mdの行番号参照が実際のファイルと不一致である点は実装ミスに直結するため必須修正、(2) ポジショニングガードレールで避けるべきとした表現が変更対象から漏れている点、(3) Issue-Driven Developmentセクションの移動先が曖昧な点、(4) 日本語版の具体的な推奨コピーが不足している点は改善が望ましい。全体として設計方針書の品質は良好であり、上記の指摘を反映すれば実装可能な状態になる。"
+  }
+}

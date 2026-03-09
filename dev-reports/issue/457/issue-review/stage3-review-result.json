@@ -1,0 +1,135 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 457,
+  "review_focus": "影響範囲",
+  "review_date": "2026-03-09",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "must_fix",
+      "category": "一貫性",
+      "description": "package.json の description フィールドが「IDE for issue-driven AI development -- define, plan, and let coding agents execute across Git worktrees」であり、npmページおよび各種パッケージマネージャーの検索結果に表示される。READMEのリポジショニングを変更してもpackage.jsonが旧メッセージのままだと、npmレジストリとREADMEで矛盾したメッセージが表示される。",
+      "suggestion": "package.json の description を新しいポジショニングに合わせて更新する。例: 「A local control plane for agent CLIs -- manage Claude Code, Codex, Gemini CLI, and other agents across Git worktrees」。更新対象ファイルリストに package.json を追加する。",
+      "location": "package.json L4 / Issue ## 更新対象ファイル セクション"
+    },
+    {
+      "id": "F2",
+      "severity": "must_fix",
+      "category": "一貫性",
+      "description": "GitHub リポジトリの About（description）が「Issue-driven AI development IDE for Claude Code and Codex CLI. Run multiple issues in parallel and keep work moving from desktop or mobile.」であり、Issue-driven IDE のフレーミングを維持している。READMEだけ変更してもGitHub検索結果やリポジトリトップに旧メッセージが残る。",
+      "suggestion": "GitHub リポジトリの About description を新しいポジショニングに合わせて更新する作業をAcceptance Criteriaに追加する。gh repo edit コマンドまたはGitHub UIで更新可能。",
+      "location": "GitHub リポジトリ About / Issue ## 更新対象ファイル セクション"
+    },
+    {
+      "id": "F3",
+      "severity": "must_fix",
+      "category": "UI影響",
+      "description": "src/app/page.tsx（トップページコンポーネント）に「Stop managing terminal tabs. Start running issue-driven development.」というサブコピーがハードコードされている。READMEのリポジショニングを変更してもアプリのランディングページが旧メッセージのままだと、ユーザー体験で矛盾が生じる。",
+      "suggestion": "src/app/page.tsx のサブコピーを新しいポジショニングに合わせて更新する。例: 「A local control plane for your agent CLIs. Manage sessions across Git worktrees from any browser.」。更新対象ファイルリストに追加する。",
+      "location": "src/app/page.tsx L23-26"
+    },
+    {
+      "id": "F4",
+      "severity": "should_fix",
+      "category": "一貫性",
+      "description": "package.json の keywords 配列に「issue-driven-development」が含まれている（L8）。npm検索でのディスカバリに影響する。新しいポジショニングでは control-plane, agent-cli, orchestration 等のキーワードがより適切。",
+      "suggestion": "package.json の keywords を新しいポジショニングに合わせて見直す。「issue-driven-development」は残しつつ、「agent-cli-manager」「control-plane」等を追加するか、優先度を入れ替える。",
+      "location": "package.json L8"
+    },
+    {
+      "id": "F5",
+      "severity": "should_fix",
+      "category": "ドキュメント波及",
+      "description": "docs/concept.md のタイトルが「Vibe Coderのための並行開発プラットフォーム」であり、IDE/issue-drivenの表現は使用していないが、READMEのリポジショニング変更と方向性が一致しているか確認が必要。concept.md自体は「並行開発」「モバイルアクセス」を前面に出しており、新ポジショニングと概ね整合するが、主要機能テーブル（L134-141）に「CLI サポート: Claude Code, Codex CLI」とあり、Gemini CLI/Vibe-Local/OpenCodeが反映されていない。",
+      "suggestion": "docs/concept.md の主要機能テーブルを現在のCLIツール対応状況に合わせて更新する。本Issueのスコープ外として別Issueで対応するか、本Issueの更新対象に含めるか判断をNotesに明記する。",
+      "location": "docs/concept.md L134-141"
+    },
+    {
+      "id": "F6",
+      "severity": "should_fix",
+      "category": "ドキュメント波及",
+      "description": "docs/architecture.md の冒頭説明（L7）が「git worktree ごとに Claude Code / tmux セッションを張り、スマホブラウザからチャット操作できる開発コンパニオンツール」と記述されており、issue-driven表現は使用していない。ただし「チャット操作」という表現はissue #457の新ポジショニング（control plane / orchestration）と若干異なるトーンである。影響は軽微。",
+      "suggestion": "本Issueのスコープ外とする。architecture.mdは技術ドキュメントであり、マーケティングコピーとは性質が異なるため、即時対応は不要。",
+      "location": "docs/architecture.md L7"
+    },
+    {
+      "id": "F7",
+      "severity": "should_fix",
+      "category": "ドキュメント波及",
+      "description": "docs/user-guide/quick-start.md の冒頭（L5）が「CommandMateでClaude Codeのスラッシュコマンドとエージェントを使った開発フローを始めましょう。」とあり、issue-driven表現は使用していないが、開発フローの説明がStep 1: Issue確認 -> Step 2: 作業計画立案と、issue-drivenワークフローを前提とした順序構成になっている。新ポジショニングではワークフロー機能はオプショナルなセカンダリ機能。",
+      "suggestion": "quick-start.mdの構成変更は本Issueの直接的なスコープ外だが、Notesセクションにuser-guideドキュメント群がissue-drivenワークフロー前提で書かれている点を記載し、将来的なドキュメント整合性タスクとして認識する。",
+      "location": "docs/user-guide/quick-start.md"
+    },
+    {
+      "id": "F8",
+      "severity": "should_fix",
+      "category": "ドキュメント波及",
+      "description": "CHANGELOG.md L76に「README repositioned around issue-driven AI development messaging (Issue #433)」という過去の変更記録がある。Issue #457のリポジショニング変更は#433と逆方向の変更であり、CHANGELOGにその経緯を記録すべき。",
+      "suggestion": "Issue #457のPR完了時にCHANGELOGに適切なエントリを追加する。例: 「README repositioned from issue-driven IDE to agent CLI control plane (Issue #457)」。",
+      "location": "CHANGELOG.md"
+    },
+    {
+      "id": "F9",
+      "severity": "nice_to_have",
+      "category": "ドキュメント波及",
+      "description": "docs/user-guide/workflow-examples.md と docs/user-guide/commands-guide.md はissue-drivenワークフローのコマンド使用例を中心に構成されている。新ポジショニングではこれらはOptional Workflow Layerに位置づけられるが、ドキュメント自体の変更は不要（機能の削除ではなく順序・フレーミングの変更のため）。",
+      "suggestion": "user-guideドキュメント群の構成変更は本Issueのスコープ外とし、必要に応じて別Issueで対応する。",
+      "location": "docs/user-guide/"
+    },
+    {
+      "id": "F10",
+      "severity": "nice_to_have",
+      "category": "ドキュメント波及",
+      "description": "docs/user-guide/webapp-guide.md のAuto Yesセクション（L166-219）は機能の説明として詳細に記述されており、ヒーロー機能としての提示はしていない。新ポジショニングでのAuto Yesリフレーム（Optional unattended mode）とは矛盾しない。",
+      "suggestion": "webapp-guide.mdのAuto Yesセクションは現状維持で問題ない。READMEのリフレームとは独立した機能ドキュメントとして適切。",
+      "location": "docs/user-guide/webapp-guide.md L166-219"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 3,
+    "should_fix_count": 5,
+    "nice_to_have_count": 2,
+    "overall_assessment": "Issue #457の影響範囲レビューにおいて、READMEの変更だけでは一貫性を担保できない重要な波及箇所が3件発見された。(1) package.jsonのdescription（npmレジストリに直接反映）、(2) GitHubリポジトリのAbout description（検索結果に直接表示）、(3) src/app/page.tsxのランディングページコピー（ユーザーが最初に見るUI）はいずれもissue-drivenメッセージングを維持しており、READMEだけ変更すると矛盾が生じる。Issue本文の更新対象ファイルリストにこれら3点を追加すべきである。user-guideドキュメント群はissue-drivenワークフロー前提で構成されているが、機能自体の削除ではなくフレーミング変更のため、即時対応は不要。docs/concept.mdのCLIツール一覧は古い情報だが本Issueとは別の課題。"
+  },
+  "code_references": [
+    {
+      "file": "src/app/page.tsx",
+      "relevance": "トップページのサブコピーに「issue-driven development」表現がハードコードされている（L23）"
+    },
+    {
+      "file": "package.json",
+      "relevance": "description（L4）とkeywords（L8）にissue-driven表現が含まれ、npmレジストリに反映される"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "README.md",
+      "relevance": "リポジショニング変更の主要対象ファイル"
+    },
+    {
+      "file": "docs/ja/README.md",
+      "relevance": "リポジショニング変更の対象ファイル（日本語版）"
+    },
+    {
+      "file": "docs/concept.md",
+      "relevance": "プロダクトコンセプト文書。issue-driven表現は不使用だがCLIツール一覧が古い"
+    },
+    {
+      "file": "docs/architecture.md",
+      "relevance": "アーキテクチャ文書。冒頭説明の表現確認"
+    },
+    {
+      "file": "docs/user-guide/quick-start.md",
+      "relevance": "issue-drivenワークフロー前提の構成"
+    },
+    {
+      "file": "docs/user-guide/workflow-examples.md",
+      "relevance": "issue-drivenワークフローのコマンド使用例中心の構成"
+    },
+    {
+      "file": "CHANGELOG.md",
+      "relevance": "Issue #433のリポジショニング変更記録あり。逆方向の変更を記録すべき"
+    }
+  ]
+}

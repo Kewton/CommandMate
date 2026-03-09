@@ -13,9 +13,9 @@
   <img src="./docs/images/demo-desktop.gif" width="600" alt="CommandMate Desktop Demo" />
 </p>
 
-> **Move issues forward, not terminal tabs.**
+> **Orchestrate your agent CLIs, not your terminal tabs.**
 
-CommandMate is an IDE for issue-driven AI development.
+CommandMate is a local control plane for agent CLIs.
 
 ```bash
 npx commandmate
@@ -25,9 +25,8 @@ npx commandmate
 
 ---
 
-Instead of jumping straight into implementation, you define an issue, refine it with AI, review the direction, generate a plan, and then let your coding agent execute. CommandMate helps you run multiple issues in parallel with Git worktrees, choose the right agent for each issue, and keep work moving even when you leave your desk.
-
-If your workflow is shifting from "writing code yourself" to "defining issues, reviewing direction, and accepting outcomes," CommandMate can become the center of your development workflow.
+CommandMate adds orchestration and visibility on top of your existing agent CLIs.
+It does not replace tmux, Git worktrees, or your terminal. It makes them easier to manage at scale.
 
 <p align="center">
   <img src="./docs/images/demo-mobile.gif" width="300" alt="CommandMate Mobile Demo" />
@@ -39,38 +38,13 @@ If this is the kind of AI development workflow you want, [give the repo a star](
 
 ---
 
-## Issue-Driven Development
-
-CommandMate is built for developers who spend less time editing files and more time defining issues, reviewing direction, and accepting outcomes from coding agents. The commands below turn that workflow into a repeatable process.
-
-```
-Define Issue → Refine with AI → Review Direction → Generate Plan → Agent Executes
-```
-
-| Step | Command | What happens |
-|------|---------|-------------|
-| Refine the issue | `/issue-enhance` | AI asks clarifying questions and fills in missing details |
-| Review the issue | `/multi-stage-issue-review` | Multi-stage review (consistency, impact scope) with automated fixes |
-| Review the design | `/multi-stage-design-review` | 4-stage review (general → consistency → impact → security) |
-| Plan the work | `/work-plan` | Generates a task breakdown with dependencies |
-| Implement via TDD | `/tdd-impl` | Red-Green-Refactor cycle, automated |
-| Verify acceptance | `/acceptance-test` | Validates all acceptance criteria from the issue |
-| Create the PR | `/create-pr` | Auto-generates title, description, and labels |
-| Dev (full) | `/pm-auto-dev` | TDD implementation → acceptance test → refactoring → progress report |
-| Issue → Dev (full) | `/pm-auto-issue2dev` | Issue review → design review → work plan → TDD → acceptance test → refactoring → progress report |
-| Design → Dev (full) | `/pm-auto-design2dev` | Design review → work plan → TDD → acceptance test → refactoring → progress report |
-
-For details, see the [issues](https://github.com/Kewton/CommandMate/issues), [dev reports](./dev-reports/issue/), and [workflow examples](./docs/en/user-guide/workflow-examples.md) in the CommandMate repository.
-
----
-
 ## Key Features
 
 | Feature | What it does | Why it matters |
 |---------|-------------|----------------|
 | **Git Worktree Sessions** | One session per worktree, parallel execution | Multiple issues progress simultaneously without interference |
 | **Multi-Agent Support** | Choose Claude Code, Codex, Gemini, or local models per issue | Pick the right agent for each task |
-| **Auto Yes Mode** | Agent runs without stopping for confirmations | No babysitting — the agent keeps working while you're away |
+| **Auto Yes Mode** | Agent runs without stopping for confirmations | Optional unattended mode for trusted workflows — review the Security section before enabling |
 | **Web UI (Desktop & Mobile)** | Full session control from any browser | Monitor and steer from your desk or your phone |
 | **File Viewer & Markdown Editor** | Browse and edit worktree files in the browser | Review changes and update AI instructions without opening an IDE |
 | **Screenshot Instructions** | Attach images to your prompts | Snap a bug → "Fix this" — the agent sees the screenshot |
@@ -311,6 +285,37 @@ npm start
 | Runs 100% Locally | Yes | Via Anthropic API | Server-routed | Yes | Cloud fallback |
 
 </details>
+
+---
+
+## Optional Workflow Layer
+
+<a id="issue-driven-development"></a>
+
+If your team wants more structure, CommandMate can also help you standardize
+issue refinement, design review, planning, implementation, and acceptance checks.
+These workflows build on top of the same CLI sessions and worktrees. They are optional, not required.
+
+CommandMate is built for developers who spend less time editing files and more time defining issues, reviewing direction, and accepting outcomes from coding agents. The commands below turn that workflow into a repeatable process.
+
+```
+Define Issue → Refine with AI → Review Direction → Generate Plan → Agent Executes
+```
+
+| Step | Command | What happens |
+|------|---------|-------------|
+| Refine the issue | `/issue-enhance` | AI asks clarifying questions and fills in missing details |
+| Review the issue | `/multi-stage-issue-review` | Multi-stage review (consistency, impact scope) with automated fixes |
+| Review the design | `/multi-stage-design-review` | 4-stage review (general → consistency → impact → security) |
+| Plan the work | `/work-plan` | Generates a task breakdown with dependencies |
+| Implement via TDD | `/tdd-impl` | Red-Green-Refactor cycle, automated |
+| Verify acceptance | `/acceptance-test` | Validates all acceptance criteria from the issue |
+| Create the PR | `/create-pr` | Auto-generates title, description, and labels |
+| Dev (full) | `/pm-auto-dev` | TDD implementation → acceptance test → refactoring → progress report |
+| Issue → Dev (full) | `/pm-auto-issue2dev` | Issue review → design review → work plan → TDD → acceptance test → refactoring → progress report |
+| Design → Dev (full) | `/pm-auto-design2dev` | Design review → work plan → TDD → acceptance test → refactoring → progress report |
+
+For details, see the [issues](https://github.com/Kewton/CommandMate/issues), [dev reports](./dev-reports/issue/), and [workflow examples](./docs/en/user-guide/workflow-examples.md) in the CommandMate repository.
 
 ---
 

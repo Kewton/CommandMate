@@ -1,0 +1,85 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 457,
+  "review_focus": "整合性",
+  "reviewed_at": "2026-03-09",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "nice_to_have",
+      "category": "その他",
+      "description": "セクション番号の欠番: セクション2の変更対象ファイル一覧で2-4（src/app/page.tsx）の次が2-6（CHANGELOG.md）となっており、2-5が存在しない。Stage 1でCHANGELOG.mdを追加した際に番号が飛んでしまったと思われる。",
+      "suggestion": "CHANGELOG.mdのセクション番号を2-5に変更し、GitHub About Descriptionのセクション番号を2-6に修正する。または現状のまま許容する（実装に影響なし）。",
+      "location": "設計方針書 セクション2-6（L152行目付近）"
+    },
+    {
+      "id": "F2",
+      "severity": "nice_to_have",
+      "category": "チェックリスト不備",
+      "description": "日本語版READMEのKey Features順序変更がImplementation Checklistに含まれていない。設計方針書セクション2-2では「英語版と同様の管理機能優先の並びに変更」と明記されているが、セクション9の実装チェックリストにはF5（ブロック引用・サブコピー・Optional Workflow Layer）のみで、Key Features並び順の変更が明示されていない。",
+      "suggestion": "実装チェックリストに「日本語版READMEのKey Featuresテーブルの順序を英語版に合わせて変更（Issue ドリブンコマンドを下位へ移動）」を追加する。",
+      "location": "設計方針書 セクション9 実装チェックリスト（L274-280行目付近）"
+    },
+    {
+      "id": "F3",
+      "severity": "nice_to_have",
+      "category": "チェックリスト不備",
+      "description": "page.tsxのヒーローコピー変更がImplementation Checklistに含まれていない。セクション2-4で変更内容は定義されているが、実装チェックリスト（F1-F5）はStage 1指摘事項のみを対象としている。",
+      "suggestion": "実装チェックリストはStage 1指摘のみを対象としている設計意図と理解されるため、Acceptance Criteria（セクション7）が全変更をカバーしている限り問題ない。ただし、実装チェックリストをAcceptance Criteriaと対応付ける注記を追加するとより明確になる。",
+      "location": "設計方針書 セクション9 実装チェックリスト（L274-280行目付近）"
+    },
+    {
+      "id": "F4",
+      "severity": "should_fix",
+      "category": "内容不一致",
+      "description": "日本語版READMEのDocumentationセクション行番号が設計方針書に記載されていない。英語版ではDocumentationセクションがL317と具体的に指定されているが、日本語版の対応セクション（ドキュメント、L318）の行番号が言及されていない。日本語版のIssue-Driven Developmentセクション移動先が曖昧。",
+      "suggestion": "セクション2-2に「イシュードリブン開発セクションをOptional Workflow Layerとして、ドキュメントセクション（L318）の直前に配置」と具体的な行番号を追記する。または「英語版と同様にドキュメントセクションの直前」と明記する。",
+      "location": "設計方針書 セクション2-2（L99-121行目付近）"
+    },
+    {
+      "id": "F5",
+      "severity": "should_fix",
+      "category": "内容不一致",
+      "description": "日本語版READMEのサブコピー（L28-30）の変更前テキストが設計方針書に正確に記載されていない。セクション2-2のテーブルでは「Issue-driven前提の説明」と曖昧に記述されている。英語版（セクション2-1）では具体的な現行テキストが記載されているのと対照的。",
+      "suggestion": "セクション2-2のサブコピー行のBefore列に、実際の日本語テキスト「いきなり実装に入るのではなく...」（L28）と「CommandMate は開発の中心になれます」（L30）を具体的に記載する。特にL30はガードレール違反に対応する箇所なので明示が重要。",
+      "location": "設計方針書 セクション2-2 テーブルのサブコピー行（L107行目付近）"
+    },
+    {
+      "id": "F6",
+      "severity": "nice_to_have",
+      "category": "矛盾",
+      "description": "設計方針書セクション2-1のpage.tsx参照が「L23-25のヒーローコピー」とあるが、セクション2-4のBefore/Afterコードブロックではコメントに行番号が含まれていない。page.tsxの実際のコードでは、テキストはL22（pタグ開始）からL26（pタグ終了）に渡るため、「L23-25」は内容行としては正確だが、テーブル内のAcceptance Criteria（L241-242）では「L23」「L25」と個別に参照しており表記が微妙に異なる。",
+      "suggestion": "セクション2-4の見出しとAcceptance Criteriaの行番号参照を統一する（例: 両方とも「L22-26」または「L23, L25」に統一）。",
+      "location": "設計方針書 セクション2-4（L132行目）とセクション7（L241-242行目）"
+    }
+  ],
+  "verification_results": {
+    "line_number_consistency": {
+      "status": "pass",
+      "details": "Stage 1で修正された行番号参照（L16, L18, L28-30, L42, L317）は全て実ファイルと一致。page.tsxのL23-25も実質的に正確。"
+    },
+    "content_consistency": {
+      "status": "pass_with_notes",
+      "details": "英語版READMEのBefore内容は全て正確。日本語版READMEのBefore内容はブロック引用・ヒーローコピーは正確だが、サブコピーの現行テキストが曖昧記述（F5参照）。package.json、page.tsxのBefore内容は正確。"
+    },
+    "file_existence": {
+      "status": "pass",
+      "details": "変更対象の全ファイルが実在: README.md, docs/ja/README.md, package.json, src/app/page.tsx, CHANGELOG.md。GitHub About Descriptionは手動更新のため検証対象外。"
+    },
+    "checklist_coverage": {
+      "status": "pass_with_notes",
+      "details": "Acceptance Criteria（12項目）は変更対象を網羅。Implementation Checklistは Stage 1指摘事項のみを対象としており、全変更のカバーは意図的にAcceptance Criteriaに委ねている。日本語版Key Features並び順変更がチェックリストに未記載（F2参照）。"
+    },
+    "internal_contradictions": {
+      "status": "pass",
+      "details": "設計方針書内の重大な矛盾は検出されなかった。セクション番号の欠番（F1）と行番号表記の軽微な不統一（F6）のみ。"
+    }
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 4,
+    "overall_assessment": "Stage 1の指摘反映により行番号の整合性は大幅に改善され、英語版READMEの変更内容は実ファイルと正確に一致している。must_fix相当の重大な不整合は検出されなかった。should_fixは日本語版READMEに関する2件で、(1)セクション移動先の行番号が未記載、(2)サブコピーの現行テキストが曖昧記述である点。これらはStage 1で英語版に適用された改善（具体的な行番号と内容の明記）を日本語版にも適用するだけで解消できる。nice_to_haveはセクション番号の欠番やチェックリスト網羅性の改善など、実装に直接影響しない軽微な改善提案。全体として設計方針書の品質は高く、実装に着手可能な状態にある。"
+  }
+}

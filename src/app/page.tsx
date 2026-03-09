@@ -20,9 +20,9 @@ export default function Home() {
         <div className="mb-8">
           <h1 className="mb-2">CommandMate</h1>
           <p className="text-base text-gray-600 dark:text-gray-400">
-            Stop managing terminal tabs. Start running issue-driven development.
+            A local control plane for agent CLIs — orchestration and visibility on top of Claude Code, Codex, Gemini CLI, and more.
             <br />
-            CommandMate helps you refine issues, run them in parallel, switch agents when needed, and keep work moving wherever you are.
+            CommandMate does not replace tmux, Git worktrees, or your terminal. It makes them easier to manage across sessions and worktrees.
           </p>
         </div>
 

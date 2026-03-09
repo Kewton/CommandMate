@@ -1,0 +1,79 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 457,
+  "review_focus": "影響範囲",
+  "review_date": "2026-03-09",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "should_fix",
+      "category": "互換性",
+      "description": "Issue-Driven DevelopmentセクションがOptional Workflow Layerとしてリネーム・移動されると、README.md L63の「For details, see the ... workflow examples ... in the CommandMate repository.」がOptional Workflow Layer内に残留する。この文はIssue-Driven Developmentセクションの末尾に配置されており、移動後も内容的には問題ないが、コンテキストが変わるため文言の調整が必要か検討すべき。また、セクション名変更により外部からの #issue-driven-development アンカーリンクが壊れる。ただし、Grepによる調査ではプロジェクト内に #issue-driven-development へのリンクは存在しないため、内部リンク破損のリスクは低い。",
+      "suggestion": "外部サイトやブログ記事等からの #issue-driven-development アンカーリンクが存在する可能性を考慮し、Optional Workflow Layerセクションに旧セクション名を含むHTMLアンカー（<a id=\"issue-driven-development\"></a>）を設置するか、リスクを許容して省略するか設計方針書に方針を記載する。",
+      "location": "設計方針書セクション2-1 Issue-Driven Developmentセクション移動、README.md L42-63"
+    },
+    {
+      "id": "F2",
+      "severity": "should_fix",
+      "category": "SEO影響",
+      "description": "package.jsonのkeywords変更で ai-coding と coding-agent が削除対象に含まれている。設計方針書セクション2-3の変更前リストには ai-coding, coding-agent が含まれているが、変更後リストからは両方とも除外されている。issue-driven-development の削除は意図通りだが、ai-coding と coding-agent の削除は設計方針書で明示的に言及されていない。これらはnpm検索でのディスカバリに影響するキーワードであり、新ポジショニングでも依然として有効なキーワードである可能性がある。",
+      "suggestion": "ai-coding と coding-agent の削除が意図的かどうかを設計方針書に明記する。新ポジショニングでも「agent CLI」を管理するツールとして ai-coding は有効なキーワードのため、残すことを推奨する。変更後のキーワードリストに ai-coding を追加検討する。",
+      "location": "設計方針書セクション2-3 package.json keywords"
+    },
+    {
+      "id": "F3",
+      "severity": "nice_to_have",
+      "category": "ドキュメント波及",
+      "description": "CLAUDE.mdのプロジェクト概要は「Git worktree管理とClaude CLI/tmuxセッション統合ツール」と記述されており、設計方針書のセクション3で「変更不要」と判断されている。この判断は妥当だが、CLAUDE.mdの「主要モジュール一覧」テーブル内のモジュール説明（例：claude-session.ts の「Claude CLIセッション管理・ヘルスチェック」）はcontrol plane的な表現で既に整合しており、追加変更は不要であることを確認した。",
+      "suggestion": "対応不要。セクション3の判断は妥当。",
+      "location": "設計方針書セクション3、CLAUDE.md"
+    },
+    {
+      "id": "F4",
+      "severity": "nice_to_have",
+      "category": "ユーザー影響",
+      "description": "npmパッケージページでは package.json の description がパッケージ名の直下に表示される。現在「IDE for issue-driven AI development」から「A local control plane for agent CLIs」への変更は、既存ユーザーにとっては大きなメッセージ転換だが、Beta段階のプロジェクトでは許容範囲内。ただし、npm上のREADMEは自動的にGitHub READMEと同期されるため、descriptionとREADMEの同時更新（同一リリースバージョン内）が重要。descriptionだけ先に変更されてREADMEが旧版のまま公開される中間状態を避ける必要がある。",
+      "suggestion": "設計方針書セクション8の実装順序にて、package.jsonの変更（ステップ3）がREADMEの変更（ステップ1-2）の後であることは確認済み。npm publishは全変更がコミットされた後に行われるため、中間状態のリスクは低い。追加対策は不要。",
+      "location": "設計方針書セクション2-3、セクション8"
+    },
+    {
+      "id": "F5",
+      "severity": "nice_to_have",
+      "category": "CI/CD影響",
+      "description": "変更対象ファイル（README.md、docs/ja/README.md、package.json、src/app/page.tsx、CHANGELOG.md）はいずれもビルドプロセスに影響しないファイルである。page.tsxはJSX内のテキスト変更のみでレイアウト・ロジックの変更はなく、TypeScriptのコンパイルに影響しない。package.jsonのdescriptionとkeywordsはビルド・テスト・リントのいずれにも使用されないフィールドである。CI/CDへの影響はない。",
+      "suggestion": "対応不要。CI/CDへの影響は確認されなかった。",
+      "location": "設計方針書セクション2全体"
+    },
+    {
+      "id": "F6",
+      "severity": "should_fix",
+      "category": "互換性",
+      "description": "日本語版README（docs/ja/README.md）のイシュードリブン開発セクション末尾（L63）にある内部リンク「詳細は CommandMate リポジトリの Issues、開発レポート、ワークフロー例 を参照してください。」はセクション移動に伴い位置が変わるが、リンク自体は相対パスで記述されているため、docs/ja/ からの相対パスが変わらない限り壊れない。ただし、英語版README L63の同等のリンクも同様に、セクション移動後のコンテキストで適切かどうか検討が必要。特に workflow-examples へのリンクはIssue-Driven Developmentの文脈で配置されているが、Optional Workflow Layerに移動後は「オプショナル」な機能の参考資料という位置づけに変わる。",
+      "suggestion": "Optional Workflow Layerセクション内にworkflow-examplesリンクを残すことは適切（オプショナル機能の詳細として案内する文脈）。ただし、リンクテキストの調整（例：「These optional workflows are documented in ...」）を検討することを設計方針書に注記する。",
+      "location": "設計方針書セクション2-1、2-2、README.md L63、docs/ja/README.md L63"
+    },
+    {
+      "id": "F7",
+      "severity": "nice_to_have",
+      "category": "ドキュメント波及",
+      "description": "docs/en/concept.md はプロダクトのビジョンと解決する課題を記述するドキュメントであり、READMEのDocumentationセクションからリンクされている。Issue Stage 3レビュー（issue-review/stage3-review-result.json）では「CLIツール一覧が古い」と指摘されているが、本Issue #457のスコープ外として設計方針書セクション3で除外されている。この判断は妥当だが、将来的にconcept.mdのトーンが新ポジショニングと乖離する可能性がある。",
+      "suggestion": "設計方針書セクション3の「変更しないもの」テーブルにdocs/en/concept.mdを追加し、将来タスクとしての認識を明示する。または現状のdocs/user-guide/と同様にスコープ外の理由を簡潔に記載する。",
+      "location": "設計方針書セクション3"
+    },
+    {
+      "id": "F8",
+      "severity": "nice_to_have",
+      "category": "その他",
+      "description": "CHANGELOG.md L76に過去のリポジショニング変更記録「README repositioned around issue-driven AI development messaging (Issue #433)」が存在する。Issue #457は#433と逆方向のポジショニング変更であり、CHANGELOG.mdのセクション2-6テンプレートでは適切に記録される設計になっている。ただし、#433からの変更経緯（なぜ#433で寄せたものを#457で戻すのか）がCHANGELOGから追跡可能かという点について、設計方針書のテンプレートでは十分にカバーされている（#457への参照があるため、Issue本文から経緯を追える）。",
+      "suggestion": "対応不要。現在のCHANGELOGテンプレートで経緯追跡は十分可能。",
+      "location": "設計方針書セクション2-6、CHANGELOG.md L76"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 3,
+    "nice_to_have_count": 5,
+    "overall_assessment": "影響分析の結果、本設計方針書のドキュメント変更はCI/CDやビルドプロセスに影響を与えず、プロジェクト内部のリンク破損リスクも低い。主要な指摘は3点のshould_fix：(1) Issue-Driven Developmentセクションのリネーム・移動によるアンカーリンク互換性の考慮、(2) package.json keywordsでai-codingとcoding-agentが意図せず削除される可能性、(3) セクション移動後のworkflow-examplesリンクのコンテキスト変化。いずれも致命的ではなく、設計方針書への注記追加で対応可能。既存ユーザーへの影響はBeta段階のプロジェクトとして許容範囲内であり、全変更を同一リリースで行うことでメッセージの不整合は回避できる。"
+  }
+}

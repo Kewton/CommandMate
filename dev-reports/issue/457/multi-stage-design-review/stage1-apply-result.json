@@ -1,0 +1,52 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー指摘対応",
+  "issue_number": 457,
+  "target_file": "dev-reports/design/issue-457-readme-repositioning-design-policy.md",
+  "applied_findings": [
+    {
+      "id": "F1",
+      "severity": "must_fix",
+      "action": "セクション2-1のREADME.md変更箇所テーブルの行番号をL20→L18、L23-26→L28-30に修正。内容ベースの特定文字列も併記して行番号ズレによる混乱を防止。"
+    },
+    {
+      "id": "F2",
+      "severity": "should_fix",
+      "action": "L28-30のサブコピー全体（L30の'the center of your development workflow'を含む）を変更対象に追加。ガードレール違反であることを注記に明記。"
+    },
+    {
+      "id": "F3",
+      "severity": "should_fix",
+      "action": "セクション2-6としてCHANGELOG.mdを変更対象ファイル一覧に追加。記録すべき変更内容のテンプレートを記載。"
+    },
+    {
+      "id": "F4",
+      "severity": "should_fix",
+      "action": "Issue-Driven Developmentセクションの移動先を「Optional Workflow Layerセクションとして、Documentationセクション（L317）の直前に配置」と具体的に指定。Optional Workflow Layer導入文の後にIssue-Driven Developmentの表を配置する構成を明記。"
+    },
+    {
+      "id": "F5",
+      "severity": "should_fix",
+      "action": "日本語版のブロック引用に推奨訳（ターミナルをさばくな。エージェント CLI をオーケストレーションしよう。）を記載。サブコピーに具体的な推奨日本語訳を記載。Optional Workflow Layerの日本語テンプレートも追加。"
+    },
+    {
+      "id": "F7",
+      "severity": "nice_to_have",
+      "action": "Use Casesセクション（README.md L82-91）をセクション3「変更しないもの」にスコープ外として明記。"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "F6",
+      "severity": "nice_to_have",
+      "reason": "Feature CopyテーブルとKey Featuresテーブルの対応関係は実装時に判断可能。nice_to_haveのため設計方針書への反映は見送り。"
+    },
+    {
+      "id": "F8",
+      "severity": "nice_to_have",
+      "reason": "バリュープロポジション順序の具体的な反映先は実装時に判断可能。nice_to_haveのため設計方針書への反映は見送り。"
+    }
+  ],
+  "doc_updated": true,
+  "summary": "Stage 1の全must_fix(1件)と全should_fix(4件)を設計方針書に反映完了。nice_to_have 3件のうち1件(F7)を反映、2件(F6, F8)は実装時判断として見送り。主な変更: (1) README.md行番号の正確な修正と内容ベース特定の併記、(2) ガードレール違反表現の変更対象への追加、(3) CHANGELOG.mdのファイル一覧追加、(4) セクション移動先の具体化、(5) 日本語版推奨コピーの追加、(6) レビュー指摘サマリーと実装チェックリストの追加。"
+}

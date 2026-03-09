@@ -1,0 +1,10 @@
+{
+  "issue_number": 457,
+  "status": "success",
+  "guardrail_violations_found": 0,
+  "fixes_applied": [],
+  "consistency_check": "passed",
+  "final_lint": "pass",
+  "final_typescript": "pass",
+  "summary": "全ガードレール違反表現（IDE for, center of your development, no babysitting, issue-driven development.）が残っていないことを確認。英語版・日本語版READMEのヒーローコピー、Key Featuresテーブルの並び順、Optional Workflow Layerセクションの導入文、issue-driven-developmentアンカーの存在をすべて検証し、一貫性に問題なし。page.tsxのメッセージングもREADMEと整合。ESLint・TypeScript型チェックともにエラーゼロ。修正不要。"
+}

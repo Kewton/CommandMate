@@ -13,9 +13,9 @@
   <img src="../images/demo-desktop.gif" width="600" alt="CommandMate デスクトップデモ" />
 </p>
 
-> **ターミナルをさばくな。Issue を前に進めよう。**
+> **ターミナルをさばくな。エージェント CLI をオーケストレーションしよう。**
 
-CommandMate は、Issue ドリブン AI 開発のための IDE です。
+CommandMate は、エージェント CLI のローカルコントロールプレーンです。
 
 ```bash
 npx commandmate
@@ -25,9 +25,8 @@ npx commandmate
 
 ---
 
-いきなり実装に入るのではなく、Issue を定義し、AI に補強させ、人間が方向性をレビューし、計画を作ってから実装を任せる。CommandMate は、その流れを Git worktree で安全に並列化し、Issue ごとに適切なエージェントを選び、席を離れている間も開発を止めずに進められるようにします。
-
-「自分でコードを書く」より「Issue を定義し、方向を確認し、受け入れる」時間の方が長くなってきたなら、CommandMate は開発の中心になれます。
+CommandMate は、既存のエージェント CLI の上にオーケストレーションと可視性を追加します。
+tmux、Git worktree、ターミナルを置き換えません。大規模な管理を容易にします。
 
 <p align="center">
   <img src="../images/demo-mobile.gif" width="300" alt="CommandMate モバイルデモ" />
@@ -39,39 +38,13 @@ npx commandmate
 
 ---
 
-## イシュードリブン開発
-
-CommandMate は、ファイルを直接編集する時間よりも、Issue を定義し、方向性を確認し、コーディングエージェントの成果を受け入れる時間の方が長い開発者のために作られています。以下のコマンドは、そのワークフローを再現可能なプロセスに変えます。
-
-```
-Issue 定義 → AI で補強 → 方向性レビュー → 計画生成 → エージェントが実行
-```
-
-| ステップ | コマンド | 実行内容 |
-|---------|---------|---------|
-| Issue を補強 | `/issue-enhance` | AI が不足情報を質問し、Issue を補完 |
-| Issue レビュー | `/multi-stage-issue-review` | 多段階レビュー（整合性・影響範囲）と指摘の自動対応 |
-| 設計レビュー | `/multi-stage-design-review` | 4 段階レビュー（通常 → 整合性 → 影響分析 → セキュリティ） |
-| 作業計画 | `/work-plan` | タスク分割と依存関係を生成 |
-| TDD 実装 | `/tdd-impl` | Red-Green-Refactor サイクルを自動実行 |
-| 受入テスト | `/acceptance-test` | Issue の受入基準を検証 |
-| PR 作成 | `/create-pr` | タイトル・説明・ラベルを自動生成 |
-| 開発（一括） | `/pm-auto-dev` | TDD 実装 → 受入テスト → リファクタリング → 進捗レポート |
-| Issue → 実装（一括） | `/pm-auto-issue2dev` | Issue レビュー → 設計レビュー → 作業計画 → TDD 実装 → 受入テスト → リファクタリング → 進捗レポート |
-| 設計 → 実装（一括） | `/pm-auto-design2dev` | 設計レビュー → 作業計画 → TDD 実装 → 受入テスト → リファクタリング → 進捗レポート |
-
-詳細は CommandMate リポジトリの [Issues](https://github.com/Kewton/CommandMate/issues)、[開発レポート](../../dev-reports/issue/)、[ワークフロー例](../user-guide/workflow-examples.md) を参照してください。
-
----
-
 ## 主な機能
 
 | 機能 | できること | なぜ重要か |
 |------|-----------|-----------|
-| **Issue ドリブンコマンド** | 定義 → 計画 → 実行のサイクルに沿ったスラッシュコマンド | 場当たり的なプロンプトではなく、Issue を軸に開発が進む |
 | **Git Worktree セッション** | worktree ごとに独立したセッション、並列実行 | 複数の Issue が干渉なく同時に進む |
 | **マルチエージェント対応** | Issue ごとに Claude Code、Codex、Gemini、ローカルモデルを選択 | タスクに最適なエージェントを使い分け |
-| **Auto Yes モード** | 確認なしでエージェントが動き続ける | 放置しても止まらない |
+| **Auto Yes モード** | 確認なしでエージェントが動き続ける | 信頼できるワークフロー向けのオプショナル自動実行モード |
 | **Web UI（デスクトップ & モバイル）** | あらゆるブラウザからセッションを操作 | デスクからでもスマホからでも監視・指示が可能 |
 | **ファイルビューワ & Markdown エディタ** | ブラウザからファイルの閲覧・編集 | IDE を開かずにコード確認や AI への指示更新 |
 | **スクリーンショット指示** | プロンプトに画像を添付 | バグ画面を撮影 →「これ直して」— エージェントが画像を認識 |
@@ -312,6 +285,37 @@ npm start
 | 完全ローカル実行 | あり | Anthropic API 経由 | サーバー経由 | あり | クラウドフォールバック |
 
 </details>
+
+---
+
+## オプショナルワークフローレイヤー
+
+<a id="issue-driven-development"></a>
+
+チームでより構造的な開発を行いたい場合、CommandMate は Issue の精査、設計レビュー、
+計画立案、実装、受け入れチェックの標準化もサポートします。
+これらのワークフローは同じ CLI セッションと worktree の上に構築されます。利用は任意です。
+
+CommandMate は、ファイルを直接編集する時間よりも、Issue を定義し、方向性を確認し、コーディングエージェントの成果を受け入れる時間の方が長い開発者のために作られています。以下のコマンドは、そのワークフローを再現可能なプロセスに変えます。
+
+```
+Issue 定義 → AI で補強 → 方向性レビュー → 計画生成 → エージェントが実行
+```
+
+| ステップ | コマンド | 実行内容 |
+|---------|---------|---------|
+| Issue を補強 | `/issue-enhance` | AI が不足情報を質問し、Issue を補完 |
+| Issue レビュー | `/multi-stage-issue-review` | 多段階レビュー（整合性・影響範囲）と指摘の自動対応 |
+| 設計レビュー | `/multi-stage-design-review` | 4 段階レビュー（通常 → 整合性 → 影響分析 → セキュリティ） |
+| 作業計画 | `/work-plan` | タスク分割と依存関係を生成 |
+| TDD 実装 | `/tdd-impl` | Red-Green-Refactor サイクルを自動実行 |
+| 受入テスト | `/acceptance-test` | Issue の受入基準を検証 |
+| PR 作成 | `/create-pr` | タイトル・説明・ラベルを自動生成 |
+| 開発（一括） | `/pm-auto-dev` | TDD 実装 → 受入テスト → リファクタリング → 進捗レポート |
+| Issue → 実装（一括） | `/pm-auto-issue2dev` | Issue レビュー → 設計レビュー → 作業計画 → TDD 実装 → 受入テスト → リファクタリング → 進捗レポート |
+| 設計 → 実装（一括） | `/pm-auto-design2dev` | 設計レビュー → 作業計画 → TDD 実装 → 受入テスト → リファクタリング → 進捗レポート |
+
+詳細は CommandMate リポジトリの [Issues](https://github.com/Kewton/CommandMate/issues)、[開発レポート](../../dev-reports/issue/)、[ワークフロー例](../user-guide/workflow-examples.md) を参照してください。
 
 ---
 

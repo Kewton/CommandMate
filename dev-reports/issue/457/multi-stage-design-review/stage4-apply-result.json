@@ -1,0 +1,42 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘対応",
+  "issue_number": 457,
+  "target_file": "dev-reports/design/issue-457-readme-repositioning-design-policy.md",
+  "applied_findings": [
+    {
+      "id": "F1",
+      "severity": "should_fix",
+      "category": "Auto Yes誤解",
+      "action": "セクション2-1 Feature CopyテーブルのAuto Yes行に「review the Security Guide before enabling; see the Security section for risks and limitations」の注記を追記。セクション12にStage 4レビュー指摘事項サマリーと実装チェックリストを追加"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "F2",
+      "severity": "nice_to_have",
+      "category": "ソーシャルエンジニアリング",
+      "reason": "既存Security セクションに適切な注意事項があり対応済み。追加対策不要"
+    },
+    {
+      "id": "F3",
+      "severity": "nice_to_have",
+      "category": "依存関係",
+      "reason": "パッケージ名変更を伴わないkeywords追加のみであり、typosquattingリスクなし"
+    },
+    {
+      "id": "F4",
+      "severity": "nice_to_have",
+      "category": "情報漏洩",
+      "reason": "全変更対象が公開ドキュメントであり情報漏洩リスクなし"
+    },
+    {
+      "id": "F5",
+      "severity": "nice_to_have",
+      "category": "信頼性",
+      "reason": "「for agent CLIs」修飾により「control plane」用語の誤解リスクは低い"
+    }
+  ],
+  "doc_updated": true,
+  "summary": "Stage 4セキュリティレビューのshould_fix指摘（F1: Auto Yes Modeの「trusted workflows」表現にSecurity Guide参照を追加）を設計方針書に反映。Feature CopyテーブルのAuto Yes行にリスク確認の注記を追記し、セクション12にStage 4レビュー指摘事項サマリーと実装チェックリストを追加した。nice_to_have 4件（F2-F5）はいずれも実質的リスクが低く、既存の対策で十分なため設計方針書への記録のみとした。"
+}

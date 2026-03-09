@@ -1,0 +1,48 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 457,
+  "applied_findings": [
+    {
+      "id": "F1",
+      "severity": "should_fix",
+      "description": "src/app/page.tsx L25のサブコピー変更後テキスト案をConcrete Changes #1に追記。更新対象ファイルテーブルのpage.tsx説明をL23ヒーローコピーとL25サブコピーの両方を明示するよう明確化。ACのpage.tsx項目にもL25サブコピーを明示。",
+      "changes_made": [
+        "Concrete Changes #1に「page.tsxサブコピーへの適用」段落を追加。L25の現在のテキストと変更方針を明記",
+        "更新対象ファイルテーブルのsrc/app/page.tsx行の説明をL23とL25の両方を含む詳細な記述に更新",
+        "Acceptance CriteriaのL10を「L23ヒーローコピーおよびL25サブコピーの両方」と明示化"
+      ]
+    },
+    {
+      "id": "F2",
+      "severity": "should_fix",
+      "description": "package.json descriptionの提案文をConcrete Changes #1のトーン（orchestration and visibility）と揃えた案を更新対象ファイルテーブルに反映。",
+      "changes_made": [
+        "更新対象ファイルテーブルのpackage.json行のdescription例を「A local control plane for agent CLIs -- orchestration and visibility for Claude Code, Codex, Gemini CLI, and more across Git worktrees」に更新"
+      ]
+    },
+    {
+      "id": "F3",
+      "severity": "nice_to_have",
+      "description": "README.md L16のブロック引用変更案をConcrete Changes #1および更新対象ファイルテーブルに追記。",
+      "changes_made": [
+        "Concrete Changes #1に「README.md L16 ブロック引用の更新」段落を追加。英語版推奨案と日本語版の対応方針を明記",
+        "更新対象ファイルテーブルのREADME.md行の説明に「L16ブロック引用」を追加"
+      ]
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "F4",
+      "severity": "nice_to_have",
+      "reason": "README.md L28-31の説明文はConcrete Changes #2（バリュープロポジション順序変更）および#4（互換性言語追加）の適用によりREADME全体のリライトとして自然に対応される。明示的な指示を追加する必要性は低い。"
+    },
+    {
+      "id": "F5",
+      "severity": "nice_to_have",
+      "reason": "確認のみの項目。Stage 5のF2対応（GitHub About descriptionの追記）が適切に反映済みであることの確認。追加の指摘なし。"
+    }
+  ],
+  "issue_updated": true,
+  "summary": "Stage 7（影響範囲レビュー2回目）の指摘事項5件のうち3件を反映、2件をスキップ。主な変更は (1) src/app/page.tsx L25サブコピーの変更方針をConcrete Changes・更新対象テーブル・ACに明示、(2) package.json descriptionの提案文をヒーローコピーのトーンと一貫するよう調整、(3) README.md L16ブロック引用の変更案を追記。Must Fix項目は0件であり、Issueは実装着手可能な品質に達している。"
+}

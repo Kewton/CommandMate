@@ -1,0 +1,42 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘対応",
+  "issue_number": 457,
+  "target_file": "dev-reports/design/issue-457-readme-repositioning-design-policy.md",
+  "applied_findings": [
+    {
+      "id": "F4",
+      "severity": "should_fix",
+      "action": "セクション2-2テーブルのイシュードリブン開発セクション行に「ドキュメントセクション（L318）の直前に配置」と具体的な行番号を追記。移動先を曖昧な記述から具体的な位置指定に変更。"
+    },
+    {
+      "id": "F5",
+      "severity": "should_fix",
+      "action": "セクション2-2テーブルのサブコピー行をL28とL30に分割し、それぞれの現行テキストを具体的に記載。L30の「CommandMate は開発の中心になれます」がガードレール違反であることを明示し、変更対象として追加。"
+    },
+    {
+      "id": "F2",
+      "severity": "nice_to_have",
+      "action": "Stage 2実装チェックリストに「日本語版READMEのKey Featuresテーブルの順序を英語版に合わせて変更」を追加。"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "F1",
+      "severity": "nice_to_have",
+      "reason": "セクション番号の欠番（2-5）は実装に影響しないため未反映。"
+    },
+    {
+      "id": "F3",
+      "severity": "nice_to_have",
+      "reason": "page.tsxのヒーローコピー変更はAcceptance Criteria（セクション7）でカバー済みのため、実装チェックリストへの追加は不要。"
+    },
+    {
+      "id": "F6",
+      "severity": "nice_to_have",
+      "reason": "page.tsxの行番号参照の微妙な不統一は実装に影響しないため未反映。"
+    }
+  ],
+  "doc_updated": true,
+  "summary": "Stage 2（整合性レビュー）のshould_fix 2件を全て反映。F4: 日本語版READMEのイシュードリブン開発セクション移動先にL318（ドキュメントセクション）を具体的に追記。F5: 日本語版READMEサブコピーのL28・L30の現行テキストを具体的に記載し、L30のガードレール違反を明示。nice_to_have 4件のうちF2（Key Features順序変更のチェックリスト追加）を反映、残り3件は実装に影響しないため未反映。設計方針書にセクション10（Stage 2レビュー指摘事項サマリー）および対応する実装チェックリストを追加。"
+}

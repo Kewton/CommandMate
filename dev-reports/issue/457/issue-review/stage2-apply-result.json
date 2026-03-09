@@ -1,0 +1,61 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 457,
+  "apply_date": "2026-03-09",
+  "applied_findings": [
+    {
+      "finding_id": "F1",
+      "severity": "must_fix",
+      "applied": true,
+      "description": "Referencesセクションの無効リンク2件（docs/positioning-redline.md, docs/issue-positioning-redline.md）を削除。Referencesセクション自体を除去した。"
+    },
+    {
+      "finding_id": "F2",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "Acceptance Criteriaにヒーローコピー推奨案「A local control plane for agent CLIs」を明記。代替案を採用する場合はPRレビュー時に合意を得る旨を追加。Concrete Changes #1にも推奨案・代替案の区別を明確化。"
+    },
+    {
+      "finding_id": "F3",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "「更新対象ファイル」セクションを新設し、README.md と docs/ja/README.md の2ファイルを明示。CLAUDE.mdは変更不要である旨も記載。Acceptance Criteriaに対象ファイル数の確認項目を追加。"
+    },
+    {
+      "finding_id": "F4",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "Problemセクションに補足を追加し、問題の本質がREADME全体のセクション構成（Issue-Driven DevelopmentセクションがKey Featuresの前に配置されている点）にあることを明確化。Key Featuresテーブル内の並び自体は適切である旨を記載。"
+    },
+    {
+      "finding_id": "F5",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "Notesセクションに日本語READMEのKey Features構成差異（1番目が「Issue ドリブンコマンド」）を明記。日本語版の更新は英語版より作業範囲が広くなる可能性がある旨を追加。"
+    },
+    {
+      "finding_id": "F6",
+      "severity": "nice_to_have",
+      "applied": true,
+      "description": "Concrete Changes #6のFeature Copyセクションに、日本語訳は実装者に委ねる旨の方針を追記。"
+    },
+    {
+      "finding_id": "F7",
+      "severity": "nice_to_have",
+      "applied": true,
+      "description": "NotesセクションにCLAUDE.mdのプロジェクト概要が既にcontrol plane的な表現であり変更不要である旨を追記。更新対象ファイルセクションにも同様の記載を追加。"
+    }
+  ],
+  "skipped_findings": [],
+  "summary": {
+    "total_findings": 7,
+    "applied": 7,
+    "skipped": 0
+  },
+  "issue_updated": true,
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/457"
+  }
+}

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- docs: reposition CommandMate as "a local control plane for agent CLIs" instead of "IDE for issue-driven AI development" (#457)
+  - Updated README.md hero copy, sub copy, and section ordering
+  - Updated docs/ja/README.md with corresponding Japanese translations
+  - Updated package.json description and keywords
+  - Updated src/app/page.tsx hero copy
+
 ## [0.4.3] - 2026-03-08
 
 ### Fixed

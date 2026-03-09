@@ -1,0 +1,88 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 457,
+  "review_focus": "通常",
+  "review_date": "2026-03-09",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "must_fix",
+      "category": "整合性",
+      "description": "Referencesセクションで参照されている docs/positioning-redline.md と docs/issue-positioning-redline.md が存在しない。無効なリンクがIssue本文に含まれており、実装者が参照しようとした際に混乱を招く。",
+      "suggestion": "Referencesセクションを削除するか、これらのファイルをIssueの一部として事前に作成する。または「参考ドキュメント（未作成）」と明示する。",
+      "location": "## References セクション",
+      "evidence": "ls docs/positioning-redline.md docs/issue-positioning-redline.md で存在しないことを確認済み（仮説検証レポート 仮説5: Rejected）"
+    },
+    {
+      "id": "F2",
+      "severity": "should_fix",
+      "category": "完全性",
+      "description": "Acceptance Criteriaが最終的に採用するコピー（ヒーローテキスト、サブコピー等）を指定していない。Issue本文のConcrete Changesセクションでは複数の候補案が提示されているが、どれを採用するかが不明確。実装者の判断に委ねられており、レビュー時のブレが生じやすい。",
+      "suggestion": "Acceptance Criteriaに「ヒーローコピーは Concrete Changes セクションの候補から選定し、PRレビュー時に最終決定する」旨を明記するか、1つの推奨案を明確にする。",
+      "location": "## Acceptance Criteria / ## Concrete Changes セクション"
+    },
+    {
+      "id": "F3",
+      "severity": "should_fix",
+      "category": "完全性",
+      "description": "更新対象ファイルの明示的なリストが不足している。Acceptance Criteriaでは「README」「日本語README（docs/ja/README.md）」の2ファイルのみ言及しているが、CLAUDE.mdのプロジェクト概要セクションにも「Issue ドリブン AI 開発のための IDE」に相当する記述がないか、他のドキュメント（docs/architecture.md等）への波及を確認する必要がある。",
+      "suggestion": "更新対象ファイルの完全なリストをAcceptance Criteriaに追記する。最低限 README.md と docs/ja/README.md が対象であることは明記されているが、CLAUDE.mdの「説明」フィールド（現在: Git worktree管理とClaude CLI/tmuxセッション統合ツール）の更新要否も確認すべき。",
+      "location": "## Acceptance Criteria"
+    },
+    {
+      "id": "F4",
+      "severity": "should_fix",
+      "category": "正確性",
+      "description": "Issue本文のProblemセクションで「フルの構造化ワークフロー」がリードだと述べているが、実際のREADMEのKey Featuresテーブルでは Git Worktree Sessions と Multi-Agent Support が1-2番目に配置されており、Issue内の問題記述がやや誇張されている。Issue-Driven Developmentセクション自体は確かにKey Featuresより前に配置されているため、セクション構成レベルの問題は正確だが、Key Features内の並びについての指摘は正確ではない。",
+      "suggestion": "Problemセクションの記述を「Key Featuresテーブルの並びが問題」ではなく「README全体のセクション構成において、Issue-Driven DevelopmentセクションがKey Featuresセクションの前に配置されている点が問題」と明確化する。",
+      "location": "## Problem セクション"
+    },
+    {
+      "id": "F5",
+      "severity": "should_fix",
+      "category": "正確性",
+      "description": "日本語READMEのKey Featuresテーブルの1番目が「Issue ドリブンコマンド」であり、英語版READMEの「Git Worktree Sessions」と構成が異なっている。Issue本文では両READMEを同一視しているが、日本語版は英語版より更にissue-drivenに寄った構成になっている。日本語版の修正はより大きな構造変更が必要になる可能性がある。",
+      "suggestion": "日本語READMEと英語READMEの現状の差異を明記し、日本語版の更新作業がより広範になる可能性をNotesに追加する。",
+      "location": "## Acceptance Criteria（日本語README関連）",
+      "evidence": "英語README Key Features 1番目: Git Worktree Sessions / 日本語README 主な機能 1番目: Issue ドリブンコマンド"
+    },
+    {
+      "id": "F6",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "Feature Copyの推奨フレーミングテーブル（Concrete Changes #6）に対応する日本語訳が提供されていない。日本語READMEの更新がAcceptance Criteriaに含まれているため、日本語コピーの方針も示されていると実装がスムーズになる。",
+      "suggestion": "Feature Copyの推奨フレーミングテーブルに日本語訳の候補を追加するか、「英語コピーの翻訳は実装者に委ねる」旨を明記する。",
+      "location": "## Concrete Changes / ### 6. Feature Copyの推奨フレーミング"
+    },
+    {
+      "id": "F7",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "CLAUDE.mdのプロジェクト概要「説明」フィールドの値が「Git worktree管理とClaude CLI/tmuxセッション統合ツール」であり、既にcontrol plane寄りの表現になっている。READMEのリポジショニング変更との整合性は問題ないが、この点をIssueで言及しておくと実装者が安心できる。",
+      "suggestion": "NotesセクションにCLAUDE.mdのプロジェクト概要は既にcontrol plane的な表現であり、変更不要である旨を追記する。",
+      "location": "## Notes セクション"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 2,
+    "overall_assessment": "Issue #457の問題設定と提案方向性は的確であり、仮説検証でも主要な主張が全てConfirmedされている。ただし、(1) Referencesセクションの無効リンクは必須修正事項、(2) Acceptance Criteriaの具体性不足（採用コピーの未確定、対象ファイルリストの不完全さ）は推奨修正事項として対応すべき。日本語READMEと英語READMEの構成差異も事前に認識しておくべき点である。全体として、指摘事項を反映すれば実装可能な質の高いIssueである。"
+  },
+  "code_references": [],
+  "doc_references": [
+    {
+      "file": "README.md",
+      "relevance": "英語README - リポジショニング変更の主要対象ファイル"
+    },
+    {
+      "file": "docs/ja/README.md",
+      "relevance": "日本語README - リポジショニング変更の対象ファイル（英語版と構成差異あり）"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト概要の説明フィールドとの整合性確認"
+    }
+  ]
+}

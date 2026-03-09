@@ -1,0 +1,34 @@
+{
+  "issue_number": 457,
+  "feature_summary": "CommandMate READMEポジショニング変更：IDE for issue-driven AI development → A local control plane for agent CLIs",
+  "acceptance_criteria": [
+    "READMEのヒーローが `IDE for issue-driven AI development` でリードしなくなっている",
+    "ヒーローコピーとして `A local control plane for agent CLIs` を採用する",
+    "READMEトップセクションが既存エージェントCLIとの連携を明示している",
+    "ワークフロー重視のメッセージングがコアセッション管理価値の下に移動している",
+    "Auto Yesがヒーローレベルのポジショニングから降格している",
+    "READMEにtmux/CLIとの互換性・フォールバック言語が含まれている",
+    "日本語README（docs/ja/README.md）も同様に更新されている",
+    "package.jsonのdescriptionが新しいポジショニングと一致している",
+    "package.jsonのkeywordsが新しいポジショニングを反映している（agent-cli, cli-orchestration 等の追加）",
+    "src/app/page.tsxのランディングページコピー（L23ヒーローコピーおよびL25サブコピーの両方）が新しいポジショニングと一致している",
+    "CHANGELOGに本Issue対応のエントリが追加されている"
+  ],
+  "test_scenarios": [
+    "シナリオ1: README.mdのヒーローコピー確認",
+    "シナリオ2: README.mdのIssue-Drivenセクション移動確認",
+    "シナリオ3: README.mdのAuto Yes降格確認",
+    "シナリオ4: docs/ja/README.mdの日本語版変更確認",
+    "シナリオ5: package.jsonのdescription/keywords確認",
+    "シナリオ6: src/app/page.tsxのUIコピー確認",
+    "シナリオ7: CHANGELOG.mdの更新確認",
+    "シナリオ8: ESLint/TypeScript静的解析確認"
+  ],
+  "target_files": [
+    "README.md",
+    "docs/ja/README.md",
+    "package.json",
+    "src/app/page.tsx",
+    "CHANGELOG.md"
+  ]
+}

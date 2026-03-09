@@ -1,0 +1,55 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "issue_number": 457,
+  "review_focus": "セキュリティ",
+  "review_date": "2026-03-09",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "should_fix",
+      "category": "Auto Yes誤解",
+      "description": "Auto Yes Modeの説明が「No babysitting -- the agent keeps working while you're away」から「Optional unattended mode for trusted workflows」に変更される。新しい表現は旧表現のカジュアルさを排除しているが、「trusted workflows」という言葉がユーザーに「信頼済みのワークフローでは安全」と誤解させる可能性がある。実際にはAuto Yesはエージェントの確認プロンプトを自動的に承認する機能であり、悪意のある操作や予期しないファイル変更・削除を自動承認するリスクがある。設計方針書ではAuto Yesの表現変更は記載されているが、「trusted」の定義やリスク注釈の追加については言及されていない。",
+      "suggestion": "設計方針書のFeature Copyテーブル内のAuto Yesの推奨フレーミング「Optional unattended mode for trusted flows」に、README上での実装時にリスク注釈を付記する方針を追記することを推奨する。例えば、Auto Yesの説明行またはその近傍に「Review the Security Guide before enabling」等のリンクを設置し、ユーザーがリスクを認識してから有効化する導線を確保する。設計方針書セクション2-1のFeature Copyテーブルに注記として追加するのが適切。",
+      "location": "設計方針書 セクション2-1 Feature Copyテーブル Auto Yes行、およびセクション2-1変更箇所テーブル Auto Yes Mode説明行"
+    },
+    {
+      "id": "F2",
+      "severity": "nice_to_have",
+      "category": "ソーシャルエンジニアリング",
+      "description": "新しいポジショニングで「fully local」「does not replace tmux」「no external server」を強調する方針となっている。これらは事実であるが、READMEのSecurity セクション（L94-102）は変更対象外のため、新しいヒーローコピーで「fully local」を強調した場合にSecurity セクションの「remote access」に関する記述（トンネリングサービス、VPN等）との間でユーザーが「完全にローカルだから安全」と過信する可能性がある。ただし、既存のSecurity セクションには適切なリモートアクセスの注意事項が記載されており、Security Guide/Trust & Safetyへの誘導リンクも存在するため、実質的なリスクは低い。",
+      "suggestion": "設計方針書のセクション3「変更しないもの」にSecurity セクション（README.md L94-102）が含まれていないが、これは変更不要であるため問題ない。ただし、新ヒーローコピーの互換性コピー「fully local」が既存Security セクションと矛盾しないことを実装時に確認する方針を、セクション5「リスクと対策」に注記として追加することを推奨する。",
+      "location": "設計方針書 セクション2-1 互換性コピーの追加「fully local」、およびセクション3「変更しないもの」"
+    },
+    {
+      "id": "F3",
+      "severity": "nice_to_have",
+      "category": "依存関係",
+      "description": "package.jsonのkeywordsに「agent-cli」「cli-orchestration」「gemini-cli」を追加する方針となっている。npm上で同名・類似名のパッケージが存在する場合、ユーザーが悪意のあるパッケージをインストールするリスク（typosquatting）がある。ただし、これはkeywordsの追加であり、パッケージ名自体は「commandmate」のまま変更されないため、直接的なtyposquattingリスクは低い。keywordsはnpm searchの結果に影響するのみで、パッケージ解決には影響しない。",
+      "suggestion": "現状の設計方針書の対応で十分。パッケージ名の変更は含まれておらず、keywords追加のみであるため、typosquattingリスクは実質的にない。追加の対策は不要。",
+      "location": "設計方針書 セクション2-3 package.json keywords変更"
+    },
+    {
+      "id": "F4",
+      "severity": "nice_to_have",
+      "category": "情報漏洩",
+      "description": "設計方針書で変更対象となっているファイル（README.md, docs/ja/README.md, package.json, page.tsx, CHANGELOG.md, GitHub About）はいずれも公開ドキュメントであり、変更内容もポジショニング・コピーライティングのみである。内部実装の詳細（API構造、認証トークンの仕組み、DBスキーマ等）を新たに露出する変更は含まれていない。既に公開されている情報（対応CLIツール名、機能一覧）の表現を変更するのみであるため、情報漏洩リスクはない。",
+      "suggestion": "対応不要。情報漏洩リスクは認められない。",
+      "location": "設計方針書 セクション2 全体"
+    },
+    {
+      "id": "F5",
+      "severity": "nice_to_have",
+      "category": "信頼性",
+      "description": "ポジショニングを「IDE」から「local control plane」に変更することにより、ユーザーの期待値が変化する。「control plane」はインフラストラクチャ/Kubernetes文脈で使われる用語であり、エンタープライズ水準のセキュリティ・信頼性を暗示する可能性がある。ただし、「for agent CLIs」という限定句が付いており、Kubernetesのcontrol planeとは異なることは文脈から判断可能。また、既存のSecurity セクションとTrust & Safety文書が適切なセキュリティ情報を提供しているため、実質的な信頼性への悪影響は限定的。",
+      "suggestion": "現状の設計方針書の対応で十分。「control plane」という用語選択は技術的に適切であり、「for agent CLIs」の修飾により誤解のリスクは低い。追加の対策は不要。",
+      "location": "設計方針書 セクション1 コアポジショニング変更、セクション2-1 ヒーローコピー"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 1,
+    "nice_to_have_count": 4,
+    "overall_assessment": "本Issueはドキュメント変更のみであり、コードレベルのセキュリティリスクは発生しない。設計方針書は全体として安全な変更を記述している。唯一のshould_fix指摘は、Auto Yes Modeの新しい表現「Optional unattended mode for trusted workflows」が「trusted」の定義を曖昧にし、ユーザーがリスクを過小評価する可能性がある点である。Security GuideやTrust & Safety文書への誘導を設計方針書内で明示することで対処可能。その他の指摘（情報漏洩、ソーシャルエンジニアリング、依存関係、信頼性）はいずれも実質的リスクが低く、nice_to_haveレベルである。Stage 1-3で反映済みの改善と合わせて、セキュリティ上の問題なく実装を進めることができると評価する。"
+  }
+}

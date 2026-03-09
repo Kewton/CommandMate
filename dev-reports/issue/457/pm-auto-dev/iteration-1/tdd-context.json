@@ -1,0 +1,35 @@
+{
+  "issue_number": 457,
+  "issue_title": "docs: reposition CommandMate as an agent CLI control plane, not an opinionated AI IDE",
+  "issue_type": "documentation",
+  "acceptance_criteria": [
+    "READMEのヒーローが `IDE for issue-driven AI development` でリードしなくなっている",
+    "ヒーローコピーとして `A local control plane for agent CLIs` を採用する",
+    "READMEトップセクションが既存エージェントCLIとの連携を明示している",
+    "ワークフロー重視のメッセージングがコアセッション管理価値の下に移動している",
+    "Auto Yesがヒーローレベルのポジショニングから降格している",
+    "READMEにtmux/CLIとの互換性・フォールバック言語が含まれている",
+    "日本語README（docs/ja/README.md）も同様に更新されている",
+    "package.jsonのdescriptionが新しいポジショニングと一致している",
+    "package.jsonのkeywordsが新しいポジショニングを反映している（agent-cli, cli-orchestration 等の追加）",
+    "src/app/page.tsxのランディングページコピー（L23ヒーローコピーおよびL25サブコピーの両方）が新しいポジショニングと一致している",
+    "CHANGELOGに本Issue対応のエントリが追加されている"
+  ],
+  "implementation_tasks": [
+    "Task 1.1-1.6: README.md変更（L16ブロック引用、L18ヒーロー、L28-30サブコピー、Issue-Drivenセクション移動、Auto Yes降格、Feature Copy更新）",
+    "Task 2.1-2.6: docs/ja/README.md変更（日本語版の同様変更）",
+    "Task 3.1-3.2: package.json変更（description、keywords）",
+    "Task 4.1: src/app/page.tsx変更（L23-25のUIコピー）",
+    "Task 5.1: CHANGELOG.md更新"
+  ],
+  "design_policy_path": "dev-reports/design/issue-457-readme-repositioning-design-policy.md",
+  "work_plan_path": "dev-reports/issue/457/work-plan.md",
+  "target_files": [
+    "README.md",
+    "docs/ja/README.md",
+    "package.json",
+    "src/app/page.tsx",
+    "CHANGELOG.md"
+  ],
+  "note": "このIssueはドキュメント変更のみ。コードロジックへの変更はなく、テキストコピーの変更のみ。テストファイルの追加は不要。"
+}
