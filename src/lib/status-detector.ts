@@ -156,10 +156,17 @@ export function detectSessionStatus(
   // 1. Interactive prompt detection (highest priority)
   // This includes yes/no prompts, multiple choice, and approval prompts
   const promptOptions = buildDetectPromptOptions(cliToolId);
-  // Apply stripBoxDrawing() for Gemini CLI compatibility:
+  // Apply stripBoxDrawing() for Gemini CLI and OpenCode TUI compatibility:
   // Gemini wraps prompts in box-drawing characters (╭╮╰╯│─) which prevent
   // detectPrompt() from recognizing the prompt content.
-  const promptDetection = detectPrompt(stripBoxDrawing(lastLines), promptOptions);
+  // OpenCode TUI uses ┃ borders and █ scrollbar that need stripping.
+  // For OpenCode, use full cleanOutput instead of lastLines (15-line window)
+  // because OpenCode's multiple-choice prompts with descriptions can exceed
+  // 15 lines. detectPrompt() applies its own 50-line window internally.
+  const promptInput = cliToolId === 'opencode'
+    ? stripBoxDrawing(cleanOutput)
+    : stripBoxDrawing(lastLines);
+  const promptDetection = detectPrompt(promptInput, promptOptions);
   if (promptDetection.isPrompt) {
     return {
       status: 'waiting',
