@@ -1886,7 +1886,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       setLoading(true);
       // Parallel: fetch worktree, messages, and current output simultaneously.
       // fetchMessages/fetchCurrentOutput handle missing worktree gracefully.
-      const [worktreeData] = await Promise.all([
+      await Promise.all([
         fetchWorktree(),
         fetchMessages(),
         fetchCurrentOutput(),
