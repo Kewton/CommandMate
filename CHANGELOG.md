@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-03-10
+
+### Added
+- Persist active CLI tool tab selection via localStorage
+
+### Fixed
+- Codex: detect approval prompts by expanding detection window and skipping collapsed lines
+- Codex: skip update notification instead of triggering npm install
+- Codex: polling-based init with trust dialog and update notification handling
+
+### Performance
+- Parallelize CLI tool status detection, git commands, and initial data fetch
+
 ## [0.4.4] - 2026-03-10
 
 ### Added
@@ -761,7 +774,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.4.4...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.4.5...HEAD
+[0.4.5]: https://github.com/Kewton/CommandMate/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/Kewton/CommandMate/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/Kewton/CommandMate/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/Kewton/CommandMate/compare/v0.4.1...v0.4.2
