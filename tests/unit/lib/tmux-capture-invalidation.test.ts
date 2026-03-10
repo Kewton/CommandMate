@@ -20,7 +20,7 @@ vi.mock('@/lib/tmux', () => ({
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKey: vi.fn().mockResolvedValue(undefined),
-  capturePane: vi.fn().mockResolvedValue('\u276F '),
+  capturePane: vi.fn().mockResolvedValue('\u276F \n\u203A '),
   killSession: vi.fn().mockResolvedValue(true),
   listSessions: vi.fn().mockResolvedValue([]),
 }));

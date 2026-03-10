@@ -34,7 +34,7 @@ vi.mock('@/lib/cli-tools/validation', () => ({
 }));
 
 import { CodexTool } from '@/lib/cli-tools/codex';
-import { hasSession, sendKeys, sendSpecialKey } from '@/lib/tmux';
+import { hasSession, sendKeys, sendSpecialKey, capturePane } from '@/lib/tmux';
 import { detectAndResendIfPastedText } from '@/lib/pasted-text-helper';
 
 const TEST_WORKTREE_ID = 'test-worktree';
@@ -49,6 +49,8 @@ describe('CodexTool.sendMessage() - Pasted text detection (Issue #212)', () => {
     vi.mocked(hasSession).mockResolvedValue(true);
     vi.mocked(sendKeys).mockResolvedValue();
     vi.mocked(sendSpecialKey).mockResolvedValue();
+    // waitForPrompt needs capturePane to return output matching CODEX_PROMPT_PATTERN (›)
+    vi.mocked(capturePane).mockResolvedValue('› ');
   });
 
   afterEach(() => {
@@ -91,12 +93,15 @@ describe('CodexTool.sendMessage() - Pasted text detection (Issue #212)', () => {
 
     await tool.sendMessage(TEST_WORKTREE_ID, 'line1\nline2');
 
-    // Verify order: sendKeys (message) -> sendSpecialKey (C-m Enter) -> detectAndResendIfPastedText
-    expect(callOrder).toEqual([
-      'sendKeys',       // sendKeys(message, false)
-      'sendSpecialKey', // sendSpecialKey(sessionName, 'C-m')
-      'detectAndResendIfPastedText',  // Pasted text detection
-    ]);
+    // Verify order: capturePane (waitForPrompt) -> sendKeys (message) -> sendSpecialKey (C-m Enter) -> detectAndResendIfPastedText
+    expect(callOrder).toContain('sendKeys');
+    expect(callOrder).toContain('sendSpecialKey');
+    expect(callOrder).toContain('detectAndResendIfPastedText');
+    const sendKeysIdx = callOrder.indexOf('sendKeys');
+    const sendSpecialKeyIdx = callOrder.indexOf('sendSpecialKey');
+    const pastedTextIdx = callOrder.indexOf('detectAndResendIfPastedText');
+    expect(sendKeysIdx).toBeLessThan(sendSpecialKeyIdx);
+    expect(sendSpecialKeyIdx).toBeLessThan(pastedTextIdx);
   });
 
   // Verify existing send flow is maintained
