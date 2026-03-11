@@ -40,6 +40,8 @@ import { LeftPaneTabSwitcher, type LeftPaneTab } from '@/components/worktree/Lef
 import { FileViewer } from '@/components/worktree/FileViewer';
 import { FilePanelSplit } from '@/components/worktree/FilePanelSplit';
 import { useFileTabs } from '@/hooks/useFileTabs';
+import { useFilePolling } from '@/hooks/useFilePolling';
+import { FILE_TREE_POLL_INTERVAL_MS } from '@/config/file-polling-config';
 
 
 /**
@@ -1095,6 +1097,27 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Trigger to refresh FileTreeView after file operations
   const [fileTreeRefresh, setFileTreeRefresh] = useState(0);
 
+  // [Issue #469] Tree polling: detect file tree changes via JSON comparison
+  const prevTreeHashRef = useRef<string | null>(null);
+  useFilePolling({
+    intervalMs: FILE_TREE_POLL_INTERVAL_MS,
+    enabled: state.layout.leftPaneTab === 'files',
+    onPoll: async () => {
+      try {
+        const response = await fetch(`/api/worktrees/${worktreeId}/tree`);
+        if (!response.ok) return; // Ignore errors in polling
+        const data = await response.json();
+        const newHash = JSON.stringify(data?.items);
+        if (newHash !== prevTreeHashRef.current) {
+          prevTreeHashRef.current = newHash;
+          setFileTreeRefresh(prev => prev + 1);
+        }
+      } catch {
+        // Silently ignore network errors during polling
+      }
+    },
+  });
+
   // [Issue #447] History sub-tab: 'message' (default) or 'git'
   const [historySubTab, setHistorySubTab] = useState<'message' | 'git'>('message');
 
@@ -2007,6 +2030,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     fileTabs.dispatch({ type: 'SET_LOADING', path, loading: isLoading });
   }, [fileTabs]);
 
+  // [Issue #469] isDirty state change callback for file content polling control
+  const handleDirtyChange = useCallback((path: string, isDirty: boolean) => {
+    fileTabs.dispatch({ type: 'SET_DIRTY', path, isDirty });
+  }, [fileTabs]);
+
   // ========================================================================
   // Memoized Panes (Issue #411: avoid re-render on polling)
   // ========================================================================
@@ -2114,9 +2142,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         diffContent={diffContent}
         diffFilePath={diffFilePath}
         onCloseDiff={handleCloseDiff}
+        onDirtyChange={handleDirtyChange}
       />
     ),
-    [state.terminal.output, state.terminal.isActive, state.terminal.isThinking, state.terminal.autoScroll, handleAutoScrollChange, disableAutoFollow, terminalHeaderMemo, fileTabs.state, fileTabs.closeTab, fileTabs.activateTab, worktreeId, handleLoadContent, handleLoadError, handleSetLoading, handleFilePanelSave, diffContent, diffFilePath, handleCloseDiff]
+    [state.terminal.output, state.terminal.isActive, state.terminal.isThinking, state.terminal.autoScroll, handleAutoScrollChange, disableAutoFollow, terminalHeaderMemo, fileTabs.state, fileTabs.closeTab, fileTabs.activateTab, worktreeId, handleLoadContent, handleLoadError, handleSetLoading, handleFilePanelSave, diffContent, diffFilePath, handleCloseDiff, handleDirtyChange]
   );
 
   /**

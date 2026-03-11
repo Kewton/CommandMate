@@ -44,6 +44,8 @@ export interface FileTab {
   loading: boolean;
   /** Error message if fetch failed */
   error: string | null;
+  /** Whether the file has unsaved edits (blocks auto-update polling) */
+  isDirty: boolean;
 }
 
 /** State for all file tabs */
@@ -64,7 +66,8 @@ export type FileTabsAction =
   | { type: 'SET_ERROR'; path: string; error: string }
   | { type: 'RENAME_FILE'; oldPath: string; newPath: string }
   | { type: 'DELETE_FILE'; path: string }
-  | { type: 'RESTORE'; paths: string[]; activePath: string | null };
+  | { type: 'RESTORE'; paths: string[]; activePath: string | null }
+  | { type: 'SET_DIRTY'; path: string; isDirty: boolean };
 
 // ============================================================================
 // Helper Functions
@@ -141,6 +144,7 @@ export function fileTabsReducer(state: FileTabsState, action: FileTabsAction): F
         content: null,
         loading: false,
         error: null,
+        isDirty: false,
       };
       const newTabs = [...state.tabs, newTab];
       return { tabs: newTabs, activeIndex: newTabs.length - 1 };
@@ -171,6 +175,7 @@ export function fileTabsReducer(state: FileTabsState, action: FileTabsAction): F
         content: action.content,
         loading: false,
         error: null,
+        isDirty: false,
       }));
       if (!newTabs) return state;
       return { ...state, tabs: newTabs };
@@ -221,12 +226,22 @@ export function fileTabsReducer(state: FileTabsState, action: FileTabsAction): F
           content: null,
           loading: false,
           error: null,
+          isDirty: false,
         }));
       if (tabs.length === 0) return initialState;
       const activeIndex = action.activePath
         ? Math.max(0, tabs.findIndex((t) => t.path === action.activePath))
         : 0;
       return { tabs, activeIndex };
+    }
+
+    case 'SET_DIRTY': {
+      const newTabs = updateTabByPath(state.tabs, action.path, (tab) => ({
+        ...tab,
+        isDirty: action.isDirty,
+      }));
+      if (!newTabs) return state;
+      return { ...state, tabs: newTabs };
     }
 
     default:

@@ -254,6 +254,27 @@ export async function GET(
     }
 
     // Non-image file: use existing text file reading logic
+    // [Issue #469] Last-Modified / If-Modified-Since conditional request support
+    const fullPath = join(worktree.path, relativePath);
+    const fileStat = await stat(fullPath);
+    const lastModified = fileStat.mtime.toUTCString();
+
+    // Check If-Modified-Since header for 304 response
+    const ifModifiedSince = request.headers.get('If-Modified-Since');
+    if (ifModifiedSince) {
+      const clientDate = new Date(ifModifiedSince);
+      // [SEC-F7] isNaN check: invalid date strings fallback to 200 (full body)
+      if (!isNaN(clientDate.getTime()) && fileStat.mtime <= clientDate) {
+        return new Response(null, {
+          status: 304,
+          headers: {
+            'Last-Modified': lastModified,
+            'Cache-Control': 'no-store, private',
+          },
+        });
+      }
+    }
+
     const fileResult = await readFileContent(worktree.path, relativePath);
 
     if (!fileResult.success) {
@@ -269,6 +290,11 @@ export async function GET(
       content: fileResult.content,
       extension,
       worktreePath: worktree.path,
+    }, {
+      headers: {
+        'Last-Modified': lastModified,
+        'Cache-Control': 'no-store, private',
+      },
     });
   } catch (error: unknown) {
     console.error('Error reading file:', error);

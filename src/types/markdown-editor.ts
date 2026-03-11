@@ -88,6 +88,11 @@ export interface EditorProps {
    * Used to notify parent (Modal) to disable its ESC/backdrop handlers
    */
   onMaximizedChange?: (isMaximized: boolean) => void;
+  /**
+   * Callback when isDirty state changes (Issue #469)
+   * Used by file content polling to pause updates during editing
+   */
+  onDirtyChange?: (isDirty: boolean) => void;
 }
 
 /**

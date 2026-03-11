@@ -51,7 +51,7 @@ describe('FilePanelSplit', () => {
 
   it('should render split view with terminal and file panel when tabs exist', () => {
     const fileTabs: FileTabsState = {
-      tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null }],
+      tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false }],
       activeIndex: 0,
     };
     render(<FilePanelSplit fileTabs={fileTabs} {...defaultProps} />);
@@ -63,7 +63,7 @@ describe('FilePanelSplit', () => {
 
   it('should render both terminal pane and file panel pane as children', () => {
     const fileTabs: FileTabsState = {
-      tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null }],
+      tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false }],
       activeIndex: 0,
     };
     const { container } = render(
