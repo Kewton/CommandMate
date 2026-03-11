@@ -1,0 +1,77 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "issue_number": 469,
+  "review_focus": "設計原則",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "should_fix",
+      "category": "DRY",
+      "title": "MarkdownWithSearch と CodeViewerWithSearch の検索ロジック重複",
+      "description": "FilePanelContent.tsx 内の MarkdownWithSearch（行415-513）と CodeViewerWithSearch（行516-603）で、searchOpen/searchQuery/searchMatches/searchCurrentIdx の状態管理、openSearch/closeSearch/nextMatch/prevMatch のコールバック、検索マッチングのuseEffect、検索バーUI（JSX）がほぼ完全に重複している。設計方針書では useFilePolling のDRY化は明記しているが、既存の重複コードへのポーリング追加時にこの重複が拡大するリスクについて言及がない。",
+      "suggestion": "検索状態管理を useFileContentSearch カスタムフックとして抽出し、検索バーUIを FileContentSearchBar 共通コンポーネントとして分離することを推奨する。Issue #469のスコープ外であれば、設計方針書の「将来の拡張性」セクションに技術的負債として記録すべき。",
+      "affected_section": "4-3. ファイル内容ポーリング（FilePanelContent）"
+    },
+    {
+      "id": "F2",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "title": "FileTreeView へのポーリング差分検知ロジック追加による責務肥大化",
+      "description": "設計方針書セクション4-2では、FileTreeView.tsx 内に JSON.stringify 比較による差分検知ロジックと useFilePolling 呼び出しを直接組み込む設計になっている。現状の FileTreeView は既に963行あり、ツリー表示・検索フィルタリング・コンテキストメニュー・キーボードナビゲーション・遅延読み込みなど多数の責務を担っている。ここにポーリングと差分検知の責務を追加すると、単一責任原則に反する方向へ進む。",
+      "suggestion": "onPoll コールバックの差分検知ロジック（fetchDirectory + JSON.stringify比較 + onRefreshRequest呼び出し）を、FileTreeView の外側（WorktreeDetailRefactored または専用ラッパーコンポーネント）に配置し、FileTreeView 自体はポーリングを意識しない設計とすることを推奨する。具体的には、WorktreeDetailRefactored 内で useFilePolling を呼び出し、差分検知時に既存の setFileTreeRefresh をインクリメントするだけで済む。",
+      "affected_section": "4-2. ツリーポーリング（FileTreeView統合）"
+    },
+    {
+      "id": "F3",
+      "severity": "nice_to_have",
+      "category": "SOLID",
+      "title": "useFileTabs の isDirty 管理と FilePanelContent のポーリング制御の結合",
+      "description": "設計方針書セクション4-4でisDirtyフラグを useFileTabs のReducerに追加し、セクション4-3で FilePanelContent がポーリングの enabled 条件として !tab.isDirty を参照する設計となっている。これは isDirty の発生源（MarkdownEditor）、状態管理（useFileTabs）、消費先（FilePanelContent のポーリング制御）が3箇所に分散し、依存関係が暗黙的になる。ただし、既存の useFileTabs Reducer パターンに沿っているため、大きな設計変更は不要。",
+      "suggestion": "設計方針書のデータフローセクション（セクション6）に isDirty の依存関係図を追加し、伝搬経路を明文化することで保守性を高めることを推奨する。現在のセクション6にある「isDirty伝搬フロー」は良いが、ポーリング停止条件との関連も図に含めるとよい。",
+      "affected_section": "4-4. isDirtyフラグの管理（useFileTabs拡張）"
+    },
+    {
+      "id": "F4",
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "title": "ツリー差分検知のJSON.stringify比較は十分にシンプルだが制約の明記が不足",
+      "description": "設計方針書セクション4-2のクライアント側JSONハッシュ（JSON.stringify比較）はKISS原則に沿ったシンプルなアプローチだが、制約事項が明記されていない。具体的には、(1) JSON.stringifyはキーの順序に依存するため、サーバーがオブジェクトのキー順を変更した場合に偽の差分を検出する可能性、(2) ルートディレクトリのアイテム数が非常に多い場合のJSON.stringifyのコスト。",
+      "suggestion": "セクション11（設計上の決定事項とトレードオフ）にJSON.stringify比較の制約として「サーバーレスポンスのキー順序が安定していることを前提」「大規模ディレクトリ（1000ファイル超）ではstringifyコストが増加」を追記することを推奨する。",
+      "affected_section": "4-2. ツリーポーリング（FileTreeView統合）"
+    },
+    {
+      "id": "F5",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "title": "ポーリング定数の設定ファイル分離は現時点で過剰な可能性",
+      "description": "設計方針書セクション5で file-polling-config.ts を新規作成し、FILE_TREE_POLL_INTERVAL_MS と FILE_CONTENT_POLL_INTERVAL_MS の2定数のみを定義する設計となっている。現時点でポーリング間隔のユーザーカスタマイズは「将来の拡張性」として除外されており、定数が2つだけのファイルは過剰分離の可能性がある。ただし、プロジェクト全体で config/ ディレクトリに定数を分離するパターン（auto-yes-config.ts 等）が確立されているため、既存の慣行に沿っている。",
+      "suggestion": "既存のプロジェクト慣行に従い、config ファイルとして分離する現行設計を維持して問題ない。ただし、将来的にポーリング関連の定数が増えない場合は、useFilePolling.ts 内にデフォルト値として定義する選択肢もある。現行設計でよい。",
+      "affected_section": "5. 定数設計"
+    },
+    {
+      "id": "F6",
+      "severity": "must_fix",
+      "category": "DRY",
+      "title": "useFilePolling の visibilitychange 処理と既存 handleVisibilityChange の重複リスク",
+      "description": "設計方針書セクション4-1で useFilePolling に visibilitychange 監視を組み込む設計だが、WorktreeDetailRefactored.tsx には既に handleVisibilityChange（行1841-1892）が存在し、独自の visibilitychange リスナーを登録している（行1940-1945）。useFilePolling が独自に visibilitychange をリッスンすると、同一ページ内に複数の visibilitychange リスナーが競合する。設計方針書の「WorktreeDetailRefactored.tsxの既存handleVisibilityChangeパターンを参考」という記載はあるが、共存方法や重複排除の方針が明記されていない。",
+      "suggestion": "以下のいずれかの方針を設計方針書に明記すべき。(A) useFilePolling の visibilitychange は独立して動作し、既存の handleVisibilityChange とは干渉しない（各自が独立してリスナー登録する）ことを明記。(B) visibilitychange の監視を WorktreeDetailRefactored の既存ハンドラに統合し、useFilePolling には enabled prop の切り替えのみで対応する。推奨は(A)で、各フックが独立してライフサイクルを管理するほうがカプセル化の観点で優れている。ただし、その場合はスロットル（RECOVERY_THROTTLE_MS 相当）の適用有無について言及すべき。",
+      "affected_section": "4-1. useFilePolling カスタムフック（新規）"
+    },
+    {
+      "id": "F7",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "title": "FilePanelContent へのポーリング責務追加による責務の混在",
+      "description": "現在の FilePanelContent.tsx は既にファイルコンテンツの表示、自動フェッチ、MARPスライド処理、最大化UI、検索機能など多数の責務を担っている（803行）。設計方針書セクション4-3では、ここに useFilePolling の呼び出し、If-Modified-Since ヘッダの管理、lastModifiedRef の保持、304ハンドリングを追加する。開放閉鎖原則（OCP）の観点から、既存コンポーネントへの大幅な変更より、ポーリング機能をラッパーまたは別フックで分離することが望ましい。",
+      "suggestion": "FilePanelContent のポーリングロジックを useFileContentPolling(tab, worktreeId, onLoadContent) のような専用フックに分離し、FilePanelContent 内では1行の呼び出しで済むようにすることを推奨する。フック内で lastModifiedRef、If-Modified-Since、304判定を完結させれば、FilePanelContent の変更は最小限になる。",
+      "affected_section": "4-3. ファイル内容ポーリング（FilePanelContent）"
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 3,
+    "nice_to_have": 3,
+    "overall_quality": "good"
+  }
+}

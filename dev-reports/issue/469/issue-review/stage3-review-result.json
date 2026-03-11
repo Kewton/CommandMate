@@ -1,0 +1,207 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 469,
+  "review_focus": "影響範囲",
+  "review_date": "2026-03-11",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "must_fix",
+      "category": "パフォーマンス・メモリリーク",
+      "title": "FileTreeViewのポーリングがrefreshTriggerベースのuseEffectと競合し、二重リロードが発生する可能性",
+      "description": "FileTreeView.tsxの行594-666にある既存のuseEffectはrefreshTriggerの変更で全ツリーを再取得する（ルート+展開済みディレクトリをCONCURRENT_LIMIT=5の並列チャンクで）。ポーリングをsetIntervalで追加した場合、UIファイル操作（setFileTreeRefresh）がポーリング間隔と同タイミングで発生すると、2つの独立した再取得が同時に走る。展開ディレクトリが多い場合（10ディレクトリ展開時、20リクエスト同時発生）、サーバーへの負荷とクライアント側の状態競合（setRootItems/setCacheの上書き合戦）が問題となる。",
+      "affected_files": [
+        "src/components/worktree/FileTreeView.tsx",
+        "src/app/api/worktrees/[id]/tree/route.ts"
+      ],
+      "suggestion": "ポーリングとrefreshTriggerを統合する設計を検討する。方法1: ポーリングはrefreshTriggerをインクリメントする形にし、既存のuseEffectにフローを統一する。方法2: ポーリング用のuseEffectにAbortControllerを導入し、前回の未完了リクエストをキャンセルしてからポーリングを開始する。いずれの方式でも、同時再取得の排他制御が必要。loadingPathsRefは個別ディレクトリの重複を防ぐが、ルート再取得+展開ディレクトリ一括再取得の排他はカバーしていない。"
+    },
+    {
+      "id": "F2",
+      "severity": "must_fix",
+      "category": "パフォーマンス・サーバー負荷",
+      "title": "複数ワークツリー同時使用時のポーリング累積によるAPI負荷",
+      "description": "CommandMateは複数のワークツリーを同時に表示できる設計になっている（commandmate start --issue 135 --auto-port等で複数サーバー起動）。ブラウザで複数タブを開いた場合、各タブのFileTreeViewとFilePanelContentが独立してポーリングを行う。5秒間隔でワークツリー3個、各ワークツリーで3ファイルタブを開いている場合、5秒ごとに3（ツリー）+ 9（ファイル内容）= 12リクエストが発生する。さらにFileTreeViewの展開ディレクトリ再取得を含めると、各ポーリングサイクルで数十リクエストに達する可能性がある。既存のターミナルポーリング（2秒/5秒）と合わせて計算すると、サーバーリソースへの影響が大きい。",
+      "affected_files": [
+        "src/components/worktree/FileTreeView.tsx",
+        "src/components/worktree/FilePanelContent.tsx",
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "suggestion": "受け入れ条件またはIssue本文に、複数ワークツリー同時使用時の負荷上限を定義する。対策として: (1) document.visibilitychange APIによるバックグラウンドタブでのポーリング停止（WorktreeDetailRefactoredの既存handleVisibilityChangeパターンを参照）。(2) ファイルツリーポーリングでは、ルートディレクトリのみ再取得し、クライアント側ハッシュ比較で変更なしなら展開ディレクトリの再取得をスキップするIssue記載の方式を厳守する設計上の強調。(3) 同一ワークツリーへのポーリングを1コンポーネントに集約し、Contextで配信する方式の検討。"
+    },
+    {
+      "id": "F3",
+      "severity": "should_fix",
+      "category": "破壊的変更・後方互換性",
+      "title": "FileTab型へのisDirtyフィールド追加による既存コードへの影響範囲が広い",
+      "description": "useFileTabs.tsのFileTab型（行36-47）にisDirtyフィールドを追加する場合、以下の箇所に影響がある: (1) fileTabsReducerのOPEN_FILE/RESTORE/SET_CONTENTアクションでisDirtyの初期値を設定する必要がある（行126-235）。(2) localStorage永続化（writePersistedTabs/readPersistedTabs）でisDirty状態の扱いを決める必要がある（リストア時は常にfalseにすべき）。(3) FilePanelTabs.tsx、FilePanelContent.tsx、FilePanelSplit.tsxのprops伝搬チェーン。(4) FileTabsAction型にSET_DIRTYアクションの追加が必要。(5) 既存テストがある場合、FileTab型のモック更新が必要。isDirtyフィールドの更新タイミング（MarkdownEditor -> FilePanelContent -> useFileTabs dispatch）のデータフローが複数コンポーネントをまたぐ。",
+      "affected_files": [
+        "src/hooks/useFileTabs.ts",
+        "src/components/worktree/FilePanelContent.tsx",
+        "src/components/worktree/FilePanelTabs.tsx",
+        "src/components/worktree/FilePanelSplit.tsx",
+        "src/components/worktree/MarkdownEditor.tsx",
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "suggestion": "Issueの変更対象ファイルにFilePanelTabs.tsx、FilePanelSplit.tsxを追加する。また、FileTabsAction型にSET_DIRTYアクションを追加する設計を明記する。isDirtyの更新データフロー（MarkdownEditor -> onDirtyChange callback -> FilePanelContent -> dispatch SET_DIRTY -> useFileTabs state）を設計セクションに図示するか、明示的にフロー記述すると実装者の理解が容易になる。"
+    },
+    {
+      "id": "F4",
+      "severity": "should_fix",
+      "category": "影響ファイル・依存関係",
+      "title": "304 Not Modified対応がファイルAPI GETハンドラの既存レスポンス形式に影響",
+      "description": "現在のファイルAPI GET（src/app/api/worktrees/[id]/files/[...path]/route.ts）はNextResponse.jsonでJSONレスポンスを返している。If-Modified-Since/Last-Modifiedヘッダの処理を追加する場合、以下の変更が必要: (1) fs.statでmtimeを取得するコードの追加（テキストファイルパスで現在statを呼んでいない）。(2) リクエストヘッダのIf-Modified-Sinceをパースして比較するロジック。(3) 304レスポンス時はボディなしでNextResponse(null, { status: 304 })を返す必要があるが、クライアント側のresponse.json()呼び出しが304でエラーになる可能性がある。FilePanelContentの既存fetchContent（行653-676）はresponse.okチェック後にresponse.json()を呼んでおり、304はHTTPステータス上response.ok=falseとなるため、現在のエラーハンドリングに影響する。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+        "src/components/worktree/FilePanelContent.tsx"
+      ],
+      "suggestion": "304レスポンスのクライアント側ハンドリングを明確に設計する。具体的には: (1) FilePanelContentのポーリングfetchで、response.status === 304の場合は「変更なし」としてコンテンツ更新をスキップする分岐を追加。(2) 既存のauto-fetch useEffect（行646-678）は初回読み込み専用なのでIf-Modified-Sinceを送らず、ポーリング用は別のuseEffectまたはカスタムフックとして分離する設計が望ましい。(3) 画像・動画ファイルのGETハンドラ部分でもLast-Modifiedヘッダを返すかスコープ外とするか明記する。"
+    },
+    {
+      "id": "F5",
+      "severity": "should_fix",
+      "category": "テスト範囲",
+      "title": "テスト計画が未記載であり、影響範囲に応じたテストケースが不明",
+      "description": "本Issueの変更は複数のコンポーネントとAPIルートにまたがるが、受け入れ条件にテスト要件の記載がない。既存テスト（Vitest）でFileTreeView、FilePanelContent、useFileTabsのテストが存在する場合、ポーリングロジック追加やFileTab型変更でテストの修正が必要となる。特に: (1) useFileTabsのreducer単体テスト（isDirtyフィールド追加の影響）。(2) ファイルAPIルートの304レスポンステスト。(3) ポーリングのsetInterval/clearIntervalのライフサイクルテスト（タイマーモック使用）。",
+      "affected_files": [
+        "tests/unit/",
+        "tests/integration/"
+      ],
+      "suggestion": "受け入れ条件にテスト要件を追加する。最低限: (1) useFileTabs reducerのisDirty関連アクションの単体テスト。(2) ファイルAPI GETの304レスポンスの結合テスト。(3) ポーリング開始/停止のライフサイクルテスト（vi.useFakeTimers使用）。(4) isDirty=trueのタブでポーリング更新がスキップされることの検証テスト。"
+    },
+    {
+      "id": "F6",
+      "severity": "should_fix",
+      "category": "影響ファイル・依存関係",
+      "title": "WorktreeDetailRefactored.tsxの既存fileTreeRefresh状態管理との統合設計が必要",
+      "description": "WorktreeDetailRefactored.tsxの行1096でfileTreeRefresh状態を管理し、11箇所（ファイル作成、削除、リネーム、保存、移動、アップロード等）でsetFileTreeRefreshをインクリメントしている。ポーリングによるFileTreeViewの自動更新が加わると、refreshTriggerによる手動リフレッシュとポーリングによる自動リフレッシュの2系統が並存する。FileTreeViewコンポーネント内でポーリングを完結させる場合、WorktreeDetailRefactored.tsxの変更は不要だが、ポーリング条件（Filesタブがアクティブかどうか）の判定にはleftPaneTab状態（state.layout.leftPaneTab）へのアクセスが必要となる可能性がある。",
+      "affected_files": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/components/worktree/FileTreeView.tsx"
+      ],
+      "suggestion": "ポーリングの所在を明確にする。推奨: FileTreeViewコンポーネント内にポーリングを実装し、isActive propまたは既存のrefreshTrigger propを活用する方式。WorktreeDetailRefactored.tsxからはFilesタブのアクティブ状態をpropとして渡し、ポーリングの開始/停止条件に使用する。これにより既存のrefreshTriggerによる手動更新と自動ポーリングの共存が明確になる。"
+    },
+    {
+      "id": "F7",
+      "severity": "nice_to_have",
+      "category": "ドキュメント更新",
+      "title": "CLAUDE.mdのモジュール一覧にポーリング定数やフックの追記が必要になる可能性",
+      "description": "ポーリング間隔定数（FILE_TREE_POLL_INTERVAL_MS, FILE_CONTENT_POLL_INTERVAL_MS）を新設する場合、CLAUDE.mdの主要モジュール一覧や設定定数の記載に反映が必要。また、ポーリングロジックをカスタムフック（例: useFileTreePolling, useFileContentPolling）として分離する場合、hooksセクションへの追記が必要。",
+      "affected_files": [
+        "CLAUDE.md"
+      ],
+      "suggestion": "実装完了後にCLAUDE.mdのモジュール一覧を更新する。特にポーリング定数の定義場所とカスタムフックの一覧を追記する。"
+    },
+    {
+      "id": "F8",
+      "severity": "nice_to_have",
+      "category": "移行考慮",
+      "title": "ポーリング追加がデバッグ/開発時のAPI呼び出しログに与える影響",
+      "description": "src/lib/api-logger.tsによる開発環境APIロギングが有効な場合、5秒ごとのポーリングでコンソールにログが大量出力され、開発体験を損なう可能性がある。既存のターミナルポーリング（2秒間隔）のログとも合わせて、開発者コンソールがログで埋まる問題が発生しうる。",
+      "affected_files": [
+        "src/lib/api-logger.ts"
+      ],
+      "suggestion": "ポーリング系のAPIリクエストにはロギングを抑制するオプションを検討する。または、api-loggerにフィルタリング機能（特定パスのログ抑制）を追加する。本Issueのスコープ外であれば、追加Issueとして記録することを推奨。"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 4,
+    "nice_to_have": 2,
+    "overall_quality": "good"
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "line": "594-666",
+      "relevance": "refreshTrigger依存のuseEffect - ポーリングとの競合リスク箇所"
+    },
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "line": "118",
+      "relevance": "CONCURRENT_LIMIT=5 - 展開ディレクトリ並列取得の上限"
+    },
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "line": "548-556",
+      "relevance": "expanded/cache状態 - ポーリングリロード時の状態管理"
+    },
+    {
+      "file": "src/components/worktree/FilePanelContent.tsx",
+      "line": "646-678",
+      "relevance": "auto-fetch useEffect - 初回のみ。ポーリング追加時の分離が必要"
+    },
+    {
+      "file": "src/components/worktree/FilePanelContent.tsx",
+      "line": "625",
+      "relevance": "fetchingRef - 重複fetchガード。ポーリングにも同様のガードが必要"
+    },
+    {
+      "file": "src/hooks/useFileTabs.ts",
+      "line": "36-47",
+      "relevance": "FileTab型 - isDirtyフィールド追加箇所"
+    },
+    {
+      "file": "src/hooks/useFileTabs.ts",
+      "line": "58-67",
+      "relevance": "FileTabsAction型 - SET_DIRTYアクション追加箇所"
+    },
+    {
+      "file": "src/hooks/useFileTabs.ts",
+      "line": "124-235",
+      "relevance": "fileTabsReducer - isDirtyフィールドの初期化が必要な全アクション"
+    },
+    {
+      "file": "src/hooks/useFileTabs.ts",
+      "line": "253-281",
+      "relevance": "localStorage永続化 - isDirtyはリストア時falseとすべき"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "line": "143-277",
+      "relevance": "GET handler - Last-Modified/304対応の追加箇所"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "line": "257-271",
+      "relevance": "テキストファイルGET - 現在statを呼んでいない部分"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/tree/route.ts",
+      "line": "15-45",
+      "relevance": "Tree API GET - 現在キャッシュヘッダなし"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "line": "1096",
+      "relevance": "fileTreeRefresh状態 - 11箇所でインクリメント"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "line": "1940-1962",
+      "relevance": "既存ポーリングパターン - 適応型ポーリング間隔の参考実装"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "line": "131-134",
+      "relevance": "ACTIVE_POLLING_INTERVAL_MS=2000, IDLE_POLLING_INTERVAL_MS=5000 - 既存定数"
+    },
+    {
+      "file": "src/components/worktree/FilePanelSplit.tsx",
+      "line": "75-179",
+      "relevance": "FilePanelSplit - isDirty関連のprops追加不要を確認済み（FilePanelContent内で完結可能）"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "line": "202",
+      "relevance": "isDirty = content !== originalContent - onDirtyChangeコールバック追加箇所"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュール一覧・技術スタック・既存フック一覧"
+    }
+  ]
+}

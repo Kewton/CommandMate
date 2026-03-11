@@ -1,0 +1,20 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘対応",
+  "issue_number": 469,
+  "applied_findings": ["F1", "F2", "F3", "F4", "F5", "F6"],
+  "skipped_findings": ["F7", "F8"],
+  "changes_made": [
+    "セクション4-5: MarpEditorWithSlidesへのonDirtyChange伝搬設計を追記（F1）",
+    "セクション4-4: FilePanelContentのmemo化とisDirty再レンダリング影響分析・対策方針を追記（F2）",
+    "セクション4-3: useFileContentPollingのlastModifiedRef初期値null前提をコメントに明記（F3）",
+    "セクション4-6直後: 304応答とauto-fetchの分離設計・防衛的プログラミング推奨を追記（F3）",
+    "セクション8: setFileTreeRefreshによるuseMemo再計算の影響分析を追記（F4）",
+    "セクション4-3: タブ切替時のlastModifiedRefライフサイクル注意事項を追記（F5）",
+    "セクション12: lastModifiedのタブ間共有を将来拡張として追記（F5）",
+    "セクション9: MarkdownEditor onDirtyChangeコールバック検証テストを追加（F6）",
+    "セクション6: isDirty伝搬フローにMarpEditorWithSlides経路を追加（F1）",
+    "セクション13: Stage 3影響分析レビューサマリーテーブルと実装チェックリストを追加"
+  ],
+  "status": "completed"
+}

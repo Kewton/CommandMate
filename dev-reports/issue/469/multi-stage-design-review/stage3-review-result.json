@@ -1,0 +1,116 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 469,
+  "review_focus": "影響範囲",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "MarpEditorWithSlidesでのonDirtyChange未伝搬によるisDirty不整合",
+      "description": "FilePanelContent.tsx内のMarkdownWithSearchコンポーネントにはonDirtyChangeの伝搬が設計されているが、MarpEditorWithSlides（行319-383）も内部でMarkdownEditorを使用している（行373-378）。MarpEditorWithSlidesにはonDirtyChangeの伝搬が設計方針書に記載されていない。MARPファイルをエディタモードで編集した場合、isDirtyがtrueに設定されず、ポーリングによる上書きが発生するリスクがある。",
+      "affected_files": [
+        "src/components/worktree/FilePanelContent.tsx"
+      ],
+      "suggestion": "MarpEditorWithSlidesコンポーネントにもonDirtyChangeプロパティを追加し、MarkdownEditorへ中継する設計を追記する。設計方針書セクション4-5にMarpEditorWithSlidesのケースを明記すること。",
+      "affected_section": "4-5. MarkdownEditor onDirtyChange 実装パターン"
+    },
+    {
+      "id": "F2",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "FilePanelContentのmemo化がポーリングによるtab.isDirty変更で無効化される影響",
+      "description": "FilePanelContentはmemo化されており（行617）、tab propの浅い比較で再レンダリングが判定される。isDirtyフィールドの追加により、FileTab型のオブジェクト参照はSET_DIRTYディスパッチのたびに新しいオブジェクトになる。MarkdownEditorのisDirty状態が変化するたびにtab propが変わり、FilePanelContent全体が再レンダリングされる。特にCodeViewerのhljs.highlight（行203-208）はuseMemoで保護されているが、MarpPreviewのiframe srcDocやMarkdownEditorのReactMarkdownなど重いコンポーネントへの波及を確認する必要がある。",
+      "affected_files": [
+        "src/components/worktree/FilePanelContent.tsx",
+        "src/hooks/useFileTabs.ts"
+      ],
+      "suggestion": "FilePanelContentのmemo比較関数でisDirtyを除外する、またはisDirtyをtab propの外に分離してFilePanelContentPropsに独立propとして追加することを検討する。MarkdownEditor使用時のみisDirtyが頻繁に変化するため、パフォーマンスへの実影響をプロファイリングで確認し、問題がなければ設計方針書に「memo再レンダリングの影響は限定的」と根拠を明記すること。",
+      "affected_section": "4-4. isDirtyフラグの管理（useFileTabs拡張）"
+    },
+    {
+      "id": "F3",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "304応答がFilePanelContentの既存auto-fetchエラーハンドリングに与える影響",
+      "description": "FilePanelContent.tsxの既存auto-fetch（行646-678）では、response.okがfalseの場合にresponse.json()を呼んでerrorDataを取得する。useFileContentPollingでは304応答を正しくハンドリングするが、仮にauto-fetchの初回ロード時にIf-Modified-Sinceヘッダが誤って付与されるシナリオ（例：lastModifiedRefの初期化不備）では、304応答が返りresponse.okがfalseとして処理される。304応答はボディが空のためresponse.json()がJSONパースエラーをスローし、fetchContent内のcatchブロックでエラー表示になる可能性がある。",
+      "affected_files": [
+        "src/components/worktree/FilePanelContent.tsx",
+        "src/app/api/worktrees/[id]/files/[...path]/route.ts"
+      ],
+      "suggestion": "useFileContentPollingのlastModifiedRefの初期値がnullであり、初回リクエストにはIf-Modified-Sinceが付与されない設計であることを設計方針書に明記する。また、防衛的プログラミングとして、既存auto-fetchの応答処理にstatus === 304の早期リターンを追加することを推奨する。",
+      "affected_section": "4-6. サーバー側304応答（files API）"
+    },
+    {
+      "id": "F4",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "WorktreeDetailRefactoredへのポーリング追加がuseMemo依存配列に与える影響",
+      "description": "WorktreeDetailRefactored.tsxの左ペインレンダリング（行2237付近）はuseMemoでメモ化されており、その依存配列にfileTreeRefreshが含まれている。ツリーポーリングによるsetFileTreeRefreshの発火は、このuseMemoの再計算をトリガーし、左ペイン全体（SearchBar, FileTreeView, NotesAndLogsPane等）のReactノード再生成を引き起こす。FileTreeViewのrefreshTrigger propが変わるため再レンダリングは期待動作だが、同じuseMemo内のNotesAndLogsPaneやSearchBar等の無関係なコンポーネントも再生成される。ポーリング間隔が5秒のため、12回/分の再生成が発生する。",
+      "affected_files": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "suggestion": "現行設計ではFileTreeViewはleftPaneTab === 'files'時のみレンダリングされ（行2200付近の条件分岐）、NotesAndLogsPaneはleftPaneTab === 'memo'時のため、同時にレンダリングされることはない。この点を設計方針書のパフォーマンス設計（セクション8）に明記し、ポーリングが非Filesタブ時にはenabled=falseで停止されることをフロー図で示す。ただし、SearchBarは常にレンダリングされるため、SearchBarコンポーネント側のmemo化が有効であることを確認すること。",
+      "affected_section": "8. パフォーマンス設計"
+    },
+    {
+      "id": "F5",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "複数タブで同一ファイルパスが開かれるケースの影響未考慮",
+      "description": "useFileTabsのreducerではOPEN_FILEアクション時に同一パスのタブが既存かチェックし、existingIndexが見つかればアクティブ化するのみで重複タブは作成されない（行127-132）。したがって同一ファイルの複数タブは発生しない。しかし、useFileContentPollingがFilePanelContentのライフサイクル単位で動作する場合、タブ切り替え時にFilePanelContentがkey={activeTab.path}でマウント/アンマウントされるため（FilePanelTabs.tsx行139）、lastModifiedRefがリセットされる。これにより、タブ切替後の最初のポーリングでは必ず200応答（フルボディ転送）が発生する。",
+      "affected_files": [
+        "src/components/worktree/FilePanelTabs.tsx",
+        "src/hooks/useFileContentPolling.ts"
+      ],
+      "suggestion": "タブ切替時のlastModifiedRefリセットによるフル転送は、5タブ各5秒間隔での切替でも影響は軽微であるため、現行設計で許容可能。ただし、将来lastModifiedをFileTab型に保持してタブ間で共有する拡張性を「将来の拡張性」（セクション12）に記載することを推奨する。",
+      "affected_section": "4-3. ファイル内容ポーリング"
+    },
+    {
+      "id": "F6",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "onDirtyChange追加がMarkdownEditorの既存テストに与える影響",
+      "description": "MarkdownEditor.test.tsx（tests/unit/components/MarkdownEditor.test.tsx）はEditorProps型を使用してpropsを渡している。EditorProps型にonDirtyChangeを追加する場合、オプショナル（?）であるため既存テストはコンパイルエラーにはならない。しかし、MarkdownEditor内でuseEffect(() => { onDirtyChange?.(isDirty); }, [isDirty, onDirtyChange])を追加すると、既存テスト中のisDirty状態変化時にonDirtyChangeがundefinedのまま呼ばれる（?.で安全）ため、既存テストの動作には影響しない。ただし、onDirtyChangeの動作を検証する新規テストが設計方針書のテスト設計（セクション9）に含まれていない。",
+      "affected_files": [
+        "src/components/worktree/MarkdownEditor.tsx",
+        "src/types/markdown-editor.ts",
+        "tests/unit/components/MarkdownEditor.test.tsx"
+      ],
+      "suggestion": "セクション9のユニットテスト一覧に「MarkdownEditor onDirtyChangeコールバック検証」テストを追加する。テスト内容: (1) onDirtyChangeが編集時にtrueで呼ばれること、(2) 保存後にfalseで呼ばれること、(3) onDirtyChange未指定時にエラーが発生しないこと。",
+      "affected_section": "9. テスト設計"
+    },
+    {
+      "id": "F7",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "ツリーポーリングのJSON.stringify比較がサブディレクトリ展開状態を検知しない",
+      "description": "設計方針書ではツリーポーリングはルートディレクトリのみ取得してJSON.stringifyで比較する（セクション4-2、データフロー6）。しかし、CLIツールがサブディレクトリ内にファイルを作成した場合、ルートディレクトリの応答itemsが変化しない可能性がある（ルートの子エントリ数が変わらず、サブディレクトリの更新日時がAPIレスポンスに含まれない場合）。tree APIの応答形式によっては、サブディレクトリ内の変更が検知されず、FileTreeViewが更新されないケースがあり得る。",
+      "affected_files": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "suggestion": "tree APIのレスポンスがフラットリスト（全階層のエントリ含む）なのか、ルート直下のみなのかを確認し、設計方針書に前提条件として明記する。ルート直下のみの場合、差分検知の限界として「サブディレクトリ内のみの変更は次回の手動展開時に反映される」旨を記載する。",
+      "affected_section": "4-2. ツリーポーリング（WorktreeDetailRefactored管理）"
+    },
+    {
+      "id": "F8",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "FilePanelTabsのTabButtonにisDirtyインジケーター表示の波及影響",
+      "description": "設計方針書セクション2レイヤー構成でFilePanelTabs.tsxにisDirtyインジケーター表示の変更が記載されている。現在のTabButton（FilePanelTabs.tsx行47-96）はtab: FileTabをprops受け取りしているため、FileTab型にisDirtyが追加されればアクセス可能。ただし、TabButtonはmemo化されており（行47）、tab propの参照変化で再レンダリングされる。isDirty変化時にtab参照が変わるため、全タブのTabButtonが再レンダリングされる可能性がある（reducerのtabs.map(...)が全タブの新参照を生成するため）。",
+      "affected_files": [
+        "src/components/worktree/FilePanelTabs.tsx",
+        "src/hooks/useFileTabs.ts"
+      ],
+      "suggestion": "SET_DIRTYアクションのreducer実装で、対象タブのみ新オブジェクトを生成し他タブの参照は維持する設計（設計方針書セクション4-4のコード例通り tab.path === action.path の条件分岐）を確認する。この実装であれば、memo化されたTabButtonは対象タブのみ再レンダリングされるため影響は限定的。",
+      "affected_section": "4-4. isDirtyフラグの管理（useFileTabs拡張）"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 4,
+    "nice_to_have": 2,
+    "overall_quality": "good"
+  }
+}

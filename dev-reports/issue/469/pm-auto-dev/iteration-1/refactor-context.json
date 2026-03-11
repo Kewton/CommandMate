@@ -1,0 +1,23 @@
+{
+  "issue_number": 469,
+  "refactor_targets": [
+    "src/hooks/useFilePolling.ts",
+    "src/hooks/useFileContentPolling.ts",
+    "src/hooks/useFileTabs.ts",
+    "src/components/worktree/FilePanelContent.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/app/api/worktrees/[id]/files/[...path]/route.ts"
+  ],
+  "quality_metrics": {
+    "tests_passed": 4846,
+    "tests_failed": 0,
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "improvement_goals": [
+    "SOLID原則の遵守確認",
+    "重複コードの削除",
+    "不要なコメントの整理",
+    "型安全性の確認"
+  ]
+}

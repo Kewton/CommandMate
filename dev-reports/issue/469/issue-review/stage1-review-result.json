@@ -1,0 +1,122 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 469,
+  "review_focus": "通常",
+  "review_date": "2026-03-11",
+  "findings": [
+    {
+      "id": "SF-1",
+      "severity": "should_fix",
+      "category": "明確性",
+      "title": "ポーリング間隔が「5〜10秒」と幅があり、具体的な初期値が未定義",
+      "description": "案A・案Bともにポーリング間隔が「5〜10秒」と範囲で記載されている。実装時にどの値を採用するか、またユーザー設定可能にするかの判断基準がない。既存のターミナルポーリングはCACHE_TTL_MS=2000（2秒）で固定されており、ファイルツリーポーリングとの整合性も考慮が必要。",
+      "suggestion": "初期値を明示する（例: 5秒）。可能であれば定数として定義し、将来的にユーザー設定可能にするかどうかも記載する。例: FILE_TREE_POLL_INTERVAL_MS = 5000, FILE_CONTENT_POLL_INTERVAL_MS = 5000。"
+    },
+    {
+      "id": "SF-2",
+      "severity": "should_fix",
+      "category": "技術的妥当性",
+      "title": "案Aの「ルートディレクトリのレスポンスハッシュ比較」の実装方法が不明確",
+      "description": "案Aで「ルートディレクトリのレスポンスハッシュ比較で変更有無を判定し、変更がなければ展開ディレクトリの再取得をスキップ」と記載されているが、現在のTree API（GET /api/worktrees/:id/tree）はTreeResponseにハッシュやETag等のメタデータを返していない。クライアント側でJSONをシリアライズしてハッシュ計算するのか、サーバー側でハッシュヘッダを返すのか、あるいはitems配列の浅い比較で十分なのかが不明。",
+      "suggestion": "差分検知の具体的な方法を明記する。推奨案: (1) クライアント側でJSON.stringify(rootItems)のハッシュを保持し前回値と比較、または (2) サーバー側でETagヘッダを返しIf-None-Matchで304を返す。サーバー側ETag方式のほうがネットワーク負荷削減に有効だが、実装コストとのトレードオフを記載すべき。"
+    },
+    {
+      "id": "SF-3",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "案Bの「編集中の保護」の具体的な判定方法が未記載",
+      "description": "受け入れ条件に「ユーザーが編集中のファイルは自動更新で上書きされない」とあるが、FilePanelContentからMarkdownEditorのisDirty状態を取得する方法が記載されていない。現在のMarkdownEditorはisDirty状態を内部で管理しており（content !== originalContent）、FilePanelContent側からは参照できない。また、useFileTabsのFileTab型にもunsaved/dirty状態のフィールドが存在しない。",
+      "suggestion": "編集中検知の設計を追加する。選択肢: (1) FileTab型にisDirtyフィールドを追加しMarkdownEditorから伝搬、(2) FilePanelContentがonDirtyChangeコールバックを受け取りポーリングスキップ判定に使用、(3) MarkdownEditorが表示されている場合はポーリングを一律スキップ（簡易方式）。useFileTabs.tsの変更も関連ファイルに含めるべき。"
+    },
+    {
+      "id": "SF-4",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "案Bのmtime/sizeヘッダが「オプション」とされているが、差分検知の基本設計に関わる",
+      "description": "案Bで「サーバー側でファイルのmtime/sizeをレスポンスヘッダに含め、変更がなければ内容取得をスキップ（軽量チェック）」が「オプション」とされている。しかし、mtime/sizeによる軽量チェックなしでは、毎回ファイル全体を取得することになり、ポーリングの負荷軽減効果が大幅に減少する。現在のファイルAPI GETハンドラはstatを一部で使用しているが（動画サイズチェック）、テキストファイルではmtime/sizeを返していない。",
+      "suggestion": "mtime/sizeによる軽量チェックを「オプション」ではなく基本設計に含める。実装アプローチ: (1) サーバー側でLast-Modified/Content-Lengthヘッダを返す、(2) クライアント側でIf-Modified-Sinceヘッダを送信、(3) 変更なしなら304 Not Modifiedを返す。HTTP標準の条件付きリクエストに沿った設計が望ましい。"
+    },
+    {
+      "id": "NTH-1",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "FileViewer.tsx（モーダル表示）の自動更新について言及がない",
+      "description": "関連ファイルにFileViewer.tsxが含まれているが、対策案ではFilePanelContent（タブ表示）のみ言及されている。FileViewerはモーダル表示のファイルビューアであり、モーダル表示中のファイル内容更新も同様の問題がある可能性がある。対象外であれば明示的にスコープ外と記載すべき。",
+      "suggestion": "FileViewer.tsxが本Issueのスコープ内かスコープ外かを明記する。モバイル表示やモーダル表示で使用されるFileViewerも対象とする場合、変更対象ファイルに追加する。"
+    },
+    {
+      "id": "NTH-2",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "ポーリング開始/停止のライフサイクルについて詳細な記載がない",
+      "description": "案Aで「Filesタブがアクティブな場合のみ」と記載されているが、タブ切り替え時のポーリング開始/停止、ブラウザタブがバックグラウンドになった場合のvisibilitychange対応、コンポーネントアンマウント時のクリーンアップについて言及がない。",
+      "suggestion": "以下のライフサイクル考慮事項を追記: (1) Filesタブからの切り替え時にsetIntervalをクリア、(2) document.visibilitychange APIによるバックグラウンド時のポーリング停止、(3) useEffectのクリーンアップでのintervalクリア。"
+    },
+    {
+      "id": "NTH-3",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "関連ファイルにFilePanelSplit.tsxやFilePanelTabs.tsxが含まれていない",
+      "description": "FilePanelSplit.tsxはターミナルとファイルパネルの分割表示を管理しており、Filesタブのアクティブ状態（ポーリング条件の判定に必要）に関与する可能性がある。FilePanelTabs.tsxもタブバーUIとして関連する。",
+      "suggestion": "FilePanelSplit.tsxおよびFilePanelTabs.tsxを関連ファイルに追加するか、影響がない理由を記載する。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 4,
+    "nice_to_have": 3,
+    "overall_quality": "good"
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "line": "594-666",
+      "relevance": "refreshTriggerによるuseEffect依存 - ポーリングロジック追加箇所"
+    },
+    {
+      "file": "src/components/worktree/FilePanelContent.tsx",
+      "line": "646-678",
+      "relevance": "初回fetchのみでポーリングなし - 自動リフレッシュ追加箇所"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "line": "202",
+      "relevance": "isDirty状態（content !== originalContent） - 編集中保護の判定元"
+    },
+    {
+      "file": "src/hooks/useFileTabs.ts",
+      "line": "36-47",
+      "relevance": "FileTab型定義 - isDirtyフィールドの追加候補"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "line": "1096",
+      "relevance": "fileTreeRefresh状態管理 - 現在はUI操作のみでインクリメント"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/tree/route.ts",
+      "relevance": "ツリーAPI - ハッシュ/ETag未対応"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "relevance": "ファイルAPI GET - mtime/sizeヘッダ未返却（テキストファイル）"
+    },
+    {
+      "file": "src/types/models.ts",
+      "line": "244-271",
+      "relevance": "TreeItem/TreeResponse型 - ハッシュフィールドなし"
+    },
+    {
+      "file": "src/lib/tmux-capture-cache.ts",
+      "line": "36",
+      "relevance": "CACHE_TTL_MS=2000 - 既存ポーリング間隔の参考値"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュール一覧・技術スタック確認"
+    }
+  ]
+}

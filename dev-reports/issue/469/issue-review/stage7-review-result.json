@@ -1,0 +1,196 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "issue_number": 469,
+  "review_focus": "影響範囲",
+  "review_date": "2026-03-11",
+  "previous_findings_addressed": [
+    {
+      "finding_id": "F1",
+      "stage": 3,
+      "severity": "must_fix",
+      "title": "FileTreeViewのポーリングがrefreshTriggerベースのuseEffectと競合し、二重リロードが発生する可能性",
+      "addressed": true,
+      "notes": "案Aに「実装上の注意: refreshTriggerとの排他制御」セクションが追加され、ポーリングはrefreshTriggerをインクリメントする方式が推奨として明記されている。既存useEffect（行594-666）への統一フローが具体的に記述されており、排他制御の懸念は解消されている。"
+    },
+    {
+      "finding_id": "F2",
+      "stage": 3,
+      "severity": "must_fix",
+      "title": "複数ワークツリー同時使用時のポーリング累積によるAPI負荷",
+      "addressed": true,
+      "notes": "受け入れ条件に「パフォーマンス要件」セクションが追加され、document.visibilitychange APIによるバックグラウンドタブ停止と、複数ワークツリー同時使用時の非アクティブタブでのポーリング停止が明記されている。WorktreeDetailRefactored.tsxの既存handleVisibilityChangeパターン（行1841-1945）への参照も具体的。"
+    },
+    {
+      "finding_id": "F3",
+      "stage": 3,
+      "severity": "should_fix",
+      "title": "FileTab型へのisDirtyフィールド追加による既存コードへの影響範囲が広い",
+      "addressed": true,
+      "notes": "変更対象ファイル一覧にFilePanelTabs.tsx、FilePanelSplit.tsxが追加され、isDirtyデータフローがMarkdownEditor -> onDirtyChange -> FilePanelContent -> dispatch SET_DIRTY -> useFileTabs reducerとして明示的に記述されている。FileTabsAction型へのSET_DIRTYアクション追加、reducer各アクションでのisDirty初期値false設定、localStorage永続化時のisDirty=false化も全て記載済み。"
+    },
+    {
+      "finding_id": "F4",
+      "stage": 3,
+      "severity": "should_fix",
+      "title": "304 Not Modified対応がファイルAPI GETハンドラの既存レスポンス形式に影響",
+      "addressed": true,
+      "notes": "案Bに「実装上の注意: 304レスポンスのクライアント側ハンドリング」セクションが追加され、ポーリング用fetchと初回fetchの分離設計、response.status === 304の正常系扱い、response.ok === falseとなる問題への対処、画像・動画のスコープ外明記がされている。"
+    },
+    {
+      "finding_id": "F5",
+      "stage": 3,
+      "severity": "should_fix",
+      "title": "テスト計画が未記載であり、影響範囲に応じたテストケースが不明",
+      "addressed": true,
+      "notes": "受け入れ条件に「テスト要件」セクションが追加され、4つの具体的なテストケース（isDirty reducerテスト、304レスポンステスト、ポーリングライフサイクルテスト、isDirtyスキップテスト）が記載されている。vi.useFakeTimers使用やdocument.visibilitychange検証も含まれている。"
+    },
+    {
+      "finding_id": "F6",
+      "stage": 3,
+      "severity": "should_fix",
+      "title": "WorktreeDetailRefactored.tsxの既存fileTreeRefresh状態管理との統合設計が必要",
+      "addressed": true,
+      "notes": "案Aに「実装上の注意: WorktreeDetailRefactored.tsxとの統合」セクションが追加され、FileTreeViewコンポーネント内でのポーリング実装、isActive propの活用、WorktreeDetailRefactored.tsxからのFilesタブアクティブ状態prop受け渡しが具体的に設計されている。変更対象ファイルにもWorktreeDetailRefactored.tsxが含まれている。"
+    },
+    {
+      "finding_id": "F7",
+      "stage": 3,
+      "severity": "nice_to_have",
+      "title": "CLAUDE.mdのモジュール一覧にポーリング定数やフックの追記が必要になる可能性",
+      "addressed": false,
+      "notes": "実装完了後の対応として認識されており、Issue本文への反映は不要。nice_to_haveのため問題なし。"
+    },
+    {
+      "finding_id": "F8",
+      "stage": 3,
+      "severity": "nice_to_have",
+      "title": "ポーリング追加がデバッグ/開発時のAPI呼び出しログに与える影響",
+      "addressed": false,
+      "notes": "本Issueのスコープ外として認識されており、追加Issueでの対応が適切。nice_to_haveのため問題なし。"
+    },
+    {
+      "finding_id": "F1",
+      "stage": 5,
+      "severity": "should_fix",
+      "title": "案AとBのポーリング設計パターンの不統一",
+      "addressed": true,
+      "notes": "案Cに「ポーリング設計の統一方針」セクションが追加され、useFilePollingカスタムフックによるvisibilitychange一括管理方針が明記されている。各コンポーネントの個別トリガー方式は許容しつつ、ライフサイクル管理をカスタムフックに委譲する設計。"
+    },
+    {
+      "finding_id": "F2",
+      "stage": 5,
+      "severity": "should_fix",
+      "title": "isDirty中の外部変更通知が未設計",
+      "addressed": true,
+      "notes": "案Bおよび受け入れ条件に「初版スコープ外」として明記されている。現時点の動作（ポーリングスキップ、保存後次回ポーリングで最新取得）が記述され、将来Issueでの対応検討が記載されている。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "should_fix",
+      "category": "影響ファイル・新規ファイル追加",
+      "title": "useFilePollingカスタムフックの新規ファイルが関連ファイル一覧・変更対象に未記載",
+      "description": "案Cのポーリング設計統一方針でuseFilePollingカスタムフックの導入が明記されているが、関連ファイル一覧および案A/案Bの変更対象ファイルにこの新規フックファイル（例: src/hooks/useFilePolling.ts）が含まれていない。新規ファイル作成は実装計画上重要な情報であり、変更対象から漏れると工数見積もりや影響分析が不正確になる。",
+      "affected_files": [
+        "src/hooks/useFilePolling.ts（新規作成予定）"
+      ],
+      "suggestion": "関連ファイルセクションおよび案Cの変更対象に「src/hooks/useFilePolling.ts（新規作成）- ファイルツリー/ファイル内容ポーリングのライフサイクル一元管理」を追加する。"
+    },
+    {
+      "id": "F2",
+      "severity": "should_fix",
+      "category": "テスト範囲",
+      "title": "useFilePollingカスタムフックのテストがテスト要件に含まれていない",
+      "description": "テスト要件にはポーリング開始/停止のライフサイクルテストが含まれているが、useFilePollingカスタムフック自体の単体テスト（フック初期化、visibilitychange連携、cleanup時のインターバル解除）が明示的に記載されていない。案Cでvisibilitychange一括管理の中核として位置づけられたフックであり、テスト対象として明示すべき。",
+      "affected_files": [
+        "tests/unit/hooks/useFilePolling.test.ts（新規作成予定）"
+      ],
+      "suggestion": "テスト要件の既存項目「ポーリング開始/停止のライフサイクルテスト」の説明に、useFilePollingカスタムフック自体のテストを含む旨を追記する。または独立したテスト項目として「useFilePollingフックの単体テスト（初期化、visibilitychange連携、アンマウント時cleanup）」を追加する。"
+    },
+    {
+      "id": "F3",
+      "severity": "should_fix",
+      "category": "影響ファイル・依存関係",
+      "title": "FileTreeViewPropsにisActive propが追加される場合の既存テストへの影響",
+      "description": "案Aの統合設計で「isActive propまたは既存のrefreshTrigger propを活用する」と記載されている。FileTreeViewPropsにisActive propを追加する場合、既存のFileTreeView.test.tsx（tests/unit/components/worktree/FileTreeView.test.tsx）でrenderに渡すpropsの更新が必要になる。現在のテストではrefreshTriggerを使用しているが、isActiveは未テスト。必須propsとして追加するとテストがコンパイルエラーになり、オプショナルでもデフォルト値の挙動テストが必要。",
+      "affected_files": [
+        "tests/unit/components/worktree/FileTreeView.test.tsx",
+        "src/components/worktree/FileTreeView.tsx"
+      ],
+      "suggestion": "テスト要件に「FileTreeView既存テストへのisActive prop追加に伴う修正」を追記する。また、isActiveのデフォルト値（undefinedまたはtrue）を設計セクションで明記し、既存テストへの影響を最小化する方針を記載する。推奨: isActiveはオプショナルpropとしデフォルトtrueとすることで後方互換性を維持。"
+    },
+    {
+      "id": "F4",
+      "severity": "nice_to_have",
+      "category": "影響ファイル・ドキュメント",
+      "title": "ポーリング定数の定義場所が未確定",
+      "description": "FILE_TREE_POLL_INTERVAL_MSとFILE_CONTENT_POLL_INTERVAL_MSの定数定義が記載されているが、これらをどのファイルに定義するか（各コンポーネント内、useFilePollingフック内、または既存のconfigディレクトリ内の専用ファイル）が明記されていない。WorktreeDetailRefactored.tsxではACTIVE_POLLING_INTERVAL_MS等がコンポーネントファイル内に直接定義されている（行131-134）ため、同様のパターンを踏襲するか統一するかの判断が必要。",
+      "affected_files": [
+        "src/hooks/useFilePolling.ts（新規作成予定）",
+        "src/components/worktree/FileTreeView.tsx",
+        "src/components/worktree/FilePanelContent.tsx"
+      ],
+      "suggestion": "useFilePollingカスタムフック内に定数を定義するか、WorktreeDetailRefactored.tsxの既存パターンに合わせてコンポーネントファイル内に定義するか、実装者の判断に委ねる旨を記載する。本Issueでの明記は必須ではないが、実装時の指針として記載があると望ましい。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 3,
+    "nice_to_have": 1,
+    "overall_quality": "good"
+  },
+  "code_references": [
+    {
+      "file": "src/hooks/useFileTabs.ts",
+      "line": "36-47",
+      "relevance": "FileTab型 - isDirtyフィールド追加箇所（Stage 3 F3で指摘、反映済み）"
+    },
+    {
+      "file": "src/hooks/useFileTabs.ts",
+      "line": "58-67",
+      "relevance": "FileTabsAction型 - SET_DIRTYアクション追加箇所（Stage 3 F3で指摘、反映済み）"
+    },
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "line": "35-55",
+      "relevance": "FileTreeViewProps - isActive prop追加候補箇所"
+    },
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "line": "594-666",
+      "relevance": "refreshTrigger依存useEffect - ポーリング統合先"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "line": "131-134",
+      "relevance": "既存ポーリング定数定義パターン"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "line": "1841-1945",
+      "relevance": "既存handleVisibilityChangeパターン - useFilePollingの参考実装"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "line": "202",
+      "relevance": "isDirty = content !== originalContent - onDirtyChangeコールバック追加箇所"
+    },
+    {
+      "file": "src/components/worktree/FilePanelContent.tsx",
+      "line": "646-678",
+      "relevance": "auto-fetch useEffect - ポーリング用fetchの分離対象"
+    },
+    {
+      "file": "tests/unit/components/worktree/FileTreeView.test.tsx",
+      "relevance": "既存テスト - isActive prop追加時に修正が必要"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュール一覧 - 実装完了後にuseFilePollingフック追記が必要"
+    }
+  ]
+}

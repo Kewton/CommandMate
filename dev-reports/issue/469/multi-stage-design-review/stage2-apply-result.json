@@ -1,0 +1,16 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘対応",
+  "issue_number": 469,
+  "applied_findings": ["F1", "F2", "F3", "F4", "F5", "F6"],
+  "skipped_findings": ["F7", "F8"],
+  "changes_made": [
+    "F1: セクション4-4をBefore/After形式に全面改訂。現在のFileTab型・FileTabsAction型の定義と変更後の定義を並記し、reducerの変更箇所も具体的に記載",
+    "F2: セクション4-5を新設。EditorProps型へのonDirtyChange追加、MarkdownEditor内のuseEffectパターン、MarkdownWithSearchでのprops中継を具体的に記載",
+    "F3: セクション4-2のコード例をfetchDirectory('') から fetch(`/api/worktrees/${worktreeId}/tree`) に修正。fetchDirectoryがFileTreeView内部に閉じている理由をコメントで明記。データフロー図も修正",
+    "F4: セクション4-6（旧4-5）からContent-Lengthヘッダを削除。stat.sizeとJSONレスポンスサイズの不一致理由をコメントで記載。アーキテクチャ図からもContent-Length行を削除",
+    "F5: セクション4-3にポーリングによるSET_CONTENTとMarkdownEditor再マウントの競合リスクに関する注意事項を追記。前提条件、安全策、エッジケース、テスト検証事項を記載。セクション9にテストケース追加",
+    "F6: セクション9の既存テスト修正からFileTreeView isActive propテストを削除。代替テスト（WorktreeDetailRefactoredツリーポーリング統合テスト）を記載"
+  ],
+  "status": "completed"
+}

@@ -1,0 +1,17 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘対応",
+  "issue_number": 469,
+  "applied_findings": ["F1", "F2", "F7"],
+  "skipped_findings": ["F3", "F4", "F5", "F6"],
+  "changes_made": [
+    "セクション4-6: If-Modified-Sinceのパースにisnan(clientDate.getTime())チェックを追加し、不正日時文字列時に200応答へフォールバックする設計を明記（F7）",
+    "セクション4-6: 304応答と200応答の両方にCache-Control: no-store, privateヘッダを追加する設計を明記（F2）",
+    "セクション7: 情報漏洩行に認証無効環境（CM_AUTH_TOKEN_HASH未設定）でのLast-Modifiedヘッダリスク注記を追加（F1）",
+    "セクション7: キャッシュ制御行を新規追加し、Cache-Control: no-store, privateによるキャッシュポイズニング防止を明記（F2）",
+    "セクション7: ヘッダバリデーション行を新規追加し、If-Modified-SinceのisNaNチェックによるフォールバック設計を明記（F7）",
+    "セクション13: Stage 4セキュリティレビューの指摘一覧テーブルを追加（F1-F7、対応状況・反映箇所付き）",
+    "セクション13: Stage 4実装チェックリストを追加（F1, F2, F7の具体的な実装確認項目6件）"
+  ],
+  "status": "completed"
+}

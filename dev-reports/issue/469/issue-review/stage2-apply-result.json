@@ -1,0 +1,14 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 469,
+  "applied_findings": ["SF-1", "SF-2", "SF-3", "SF-4"],
+  "skipped_findings": [],
+  "changes_made": [
+    "SF-1: ポーリング間隔を「5〜10秒」から初期値5秒（FILE_TREE_POLL_INTERVAL_MS = 5000, FILE_CONTENT_POLL_INTERVAL_MS = 5000）に明確化。将来的なユーザー設定可能性にも言及",
+    "SF-2: 案Aの差分検知方法を「クライアント側JSON.stringify(rootItems)のハッシュ比較方式」として明記。サーバー側ETag方式とのトレードオフも記載",
+    "SF-3: 案Bの編集中保護をFileTab型へのisDirtyフィールド追加+MarkdownEditorからonDirtyChangeコールバックで伝搬する設計として明記。変更対象ファイルにuseFileTabs.tsとMarkdownEditor.tsxを追加",
+    "SF-4: mtime/sizeによる軽量チェックを「オプション」から「基本設計として必須実装」に格上げ。HTTP標準の条件付きリクエスト（Last-Modified/If-Modified-Since/304）に準拠する設計として明記。受け入れ条件にもAPIヘッダ要件を追加"
+  ],
+  "status": "completed"
+}

@@ -1,0 +1,61 @@
+{
+  "issue_number": 469,
+  "status": "success",
+  "changes_made": [
+    {
+      "file": "src/hooks/useFileContentSearch.ts",
+      "type": "refactor",
+      "description": "New shared hook extracted from duplicated search logic in MarkdownWithSearch and CodeViewerWithSearch. Encapsulates search state, case-insensitive line matching, and cyclic navigation."
+    },
+    {
+      "file": "src/components/worktree/FileSearchBar.tsx",
+      "type": "refactor",
+      "description": "New shared search bar component extracted from duplicated JSX in MarkdownWithSearch and CodeViewerWithSearch. Includes keyboard shortcuts (Escape, Enter, Shift+Enter)."
+    },
+    {
+      "file": "src/components/worktree/FilePanelContent.tsx",
+      "type": "refactor",
+      "description": "Replaced ~120 lines of duplicated search logic in MarkdownWithSearch and CodeViewerWithSearch with useFileContentSearch hook and FileSearchBar component. Removed unused X import."
+    },
+    {
+      "file": "tests/unit/hooks/useFileContentSearch.test.ts",
+      "type": "refactor",
+      "description": "Added 10 unit tests covering: initialization, open/close, case-insensitive matching, minimum query length, undefined content, cyclic next/prev navigation, and query change reset."
+    }
+  ],
+  "quality_metrics": {
+    "before": {
+      "tests_passed": 4846,
+      "test_files": 242,
+      "eslint_errors": 0,
+      "typescript_errors": 0
+    },
+    "after": {
+      "tests_passed": 4856,
+      "test_files": 243,
+      "eslint_errors": 0,
+      "typescript_errors": 0
+    }
+  },
+  "refactorings_applied": [
+    "DRY: Extract duplicated search state/logic into useFileContentSearch hook",
+    "DRY: Extract duplicated search bar UI into FileSearchBar component",
+    "Cleanup: Remove unused X import from FilePanelContent"
+  ],
+  "files_changed": [
+    "src/hooks/useFileContentSearch.ts",
+    "src/components/worktree/FileSearchBar.tsx",
+    "src/components/worktree/FilePanelContent.tsx",
+    "tests/unit/hooks/useFileContentSearch.test.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "commits": [
+    "94c8fe8: refactor(file-panel): extract duplicated search logic into shared hook and component"
+  ],
+  "notes": "The primary DRY violation was ~120 lines of identical search logic duplicated between MarkdownWithSearch and CodeViewerWithSearch in FilePanelContent.tsx. Other files (useFilePolling, useFileContentPolling, file-polling-config, useFileTabs, markdown-editor types, API route, FilePanelTabs, FilePanelSplit, MarkdownEditor) were reviewed and found to be well-structured with clear single responsibilities, proper typing, and no significant code smells."
+}

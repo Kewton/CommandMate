@@ -1,0 +1,75 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 469,
+  "iteration": 1,
+  "apply_date": "2026-03-11",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "F1",
+        "status": "applied",
+        "change_summary": "案Aに「実装上の注意: refreshTriggerとの排他制御」セクションを追加。ポーリングはrefreshTriggerインクリメント方式に統一する推奨設計を明記"
+      },
+      {
+        "id": "F2",
+        "status": "applied",
+        "change_summary": "受け入れ条件に「パフォーマンス要件」セクションを新設。document.visibilitychange APIによるバックグラウンドタブでのポーリング停止を必須要件として追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "F3",
+        "status": "applied",
+        "change_summary": "案Bの変更対象にFilePanelTabs.tsx、FilePanelSplit.tsxを追加。isDirtyの更新データフロー（MarkdownEditor → FilePanelContent → useFileTabs dispatch）を明記。SET_DIRTYアクション追加とreducer/永続化の修正要件を追記"
+      },
+      {
+        "id": "F4",
+        "status": "applied",
+        "change_summary": "案Bに「実装上の注意: 304レスポンスのクライアント側ハンドリング」セクションを追加。ポーリング用fetchと初回fetchの分離設計、304のresponse.ok===false問題の対処方法を明記"
+      },
+      {
+        "id": "F5",
+        "status": "applied",
+        "change_summary": "受け入れ条件に「テスト要件」セクションを新設。isDirty reducer単体テスト、304レスポンス結合テスト、ポーリングライフサイクルテスト、isDirtyスキップ検証テストの4項目を追加"
+      },
+      {
+        "id": "F6",
+        "status": "applied",
+        "change_summary": "案Aに「実装上の注意: WorktreeDetailRefactored.tsxとの統合」セクションを追加。ポーリングをFileTreeView内に実装しisActive propで制御する設計を明記。関連ファイルにWorktreeDetailRefactored.tsxの役割説明を更新"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F7",
+        "status": "skipped",
+        "reason": "CLAUDE.mdの更新は実装完了後に行うべきであり、Issue本文への反映は不要"
+      },
+      {
+        "id": "F8",
+        "status": "skipped",
+        "reason": "開発時のAPIログ量の問題は本Issueのスコープ外。必要に応じて別Issueとして起票"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 6,
+    "skipped": 2
+  },
+  "changes_made": [
+    "案Aに「実装上の注意: refreshTriggerとの排他制御」セクションを追加（F1対応）",
+    "案Aに「実装上の注意: WorktreeDetailRefactored.tsxとの統合」セクションを追加（F6対応）",
+    "案Bに「実装上の注意: 304レスポンスのクライアント側ハンドリング」セクションを追加（F4対応）",
+    "案Bに「isDirtyフィールドの更新データフロー」セクションを追加（F3対応）",
+    "案Bの変更対象にFilePanelTabs.tsx、FilePanelSplit.tsxを追加（F3対応）",
+    "受け入れ条件を「機能要件」「パフォーマンス要件」「テスト要件」の3セクションに構造化（F2, F5対応）",
+    "関連ファイルにFilePanelTabs.tsx、FilePanelSplit.tsxを追加し、各ファイルの役割説明を更新（F3, F6対応）",
+    "レビュー履歴セクションを追加（Stage 3の指摘事項一覧）"
+  ],
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/469"
+  },
+  "status": "completed"
+}

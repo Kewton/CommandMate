@@ -1,0 +1,15 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 469,
+  "applied_findings": ["F1", "F2", "F3"],
+  "skipped_findings": [],
+  "changes_made": [
+    "F1: 関連ファイルセクションに「src/hooks/useFilePolling.ts（新規作成）」を追加。案Cの変更対象に同ファイルを追加し、役割説明（ライフサイクル一元管理、visibilitychange対応含む）を記載",
+    "F2: テスト要件のポーリングライフサイクルテスト項目を拡張し、useFilePollingカスタムフック自体の単体テスト（初期化、visibilitychange連携、アンマウント時のインターバルcleanup）を含む旨を追記。関連テストファイルセクションにtests/unit/hooks/useFilePolling.test.ts（新規作成予定）を追加",
+    "F3: 関連ファイルセクションの下に「関連テストファイル」サブセクションを新設し、tests/unit/components/worktree/FileTreeView.test.tsx（既存テスト、isActive prop追加時の修正必要性と後方互換性方針を注記）を追加。テスト要件にFileTreeView既存テストへのisActive prop追加に伴う修正項目を追加（オプショナルprop、デフォルトtrue推奨）",
+    "Noteヘッダを「Stage 7（影響範囲レビュー 2回目）」に更新",
+    "レビュー履歴にStage 7セクションを追加（F1, F2, F3の3件）"
+  ],
+  "status": "completed"
+}
