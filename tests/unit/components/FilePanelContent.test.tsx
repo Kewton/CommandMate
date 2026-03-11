@@ -45,6 +45,7 @@ function createTab(overrides: Partial<FileTab> = {}): FileTab {
     content: null,
     loading: false,
     error: null,
+    isDirty: false,
     ...overrides,
   };
 }

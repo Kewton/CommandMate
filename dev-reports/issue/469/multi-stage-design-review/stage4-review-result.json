@@ -1,0 +1,89 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "issue_number": 469,
+  "review_focus": "セキュリティ",
+  "design_doc_path": "dev-reports/design/issue-469-file-auto-update-design-policy.md",
+  "reviewed_source_files": [
+    "src/middleware.ts",
+    "src/lib/path-validator.ts",
+    "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+    "src/app/api/worktrees/[id]/tree/route.ts",
+    "src/app/api/worktrees/[id]/tree/[...path]/route.ts",
+    "src/lib/file-tree.ts",
+    "src/config/auth-config.ts"
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "should_fix",
+      "category": "A01:2021 Broken Access Control",
+      "title": "Last-Modifiedヘッダによるファイル更新時刻の情報漏洩",
+      "description": "設計方針書セクション4-6で、files APIのGETレスポンスにLast-Modifiedヘッダ（stat.mtime.toUTCString()）を追加する設計となっている。mtimeはファイルの最終更新時刻であり、攻撃者がこの情報を収集することで、ファイルの更新パターン（開発者の作業時間帯、デプロイ頻度等）を推測可能となる。設計方針書セクション7では「Last-Modifiedヘッダはmtime情報のみ（低リスク）」と評価しているが、認証が有効な環境では認証済みユーザーのみがアクセスするため実質的なリスクは低い。一方、認証が無効な環境（CM_AUTH_TOKEN_HASH未設定）ではネットワーク上の全ユーザーがmtimeを取得できる。CommandMateの想定利用環境（ローカル/信頼ネットワーク）を考慮すると、現行の評価は妥当であるが、設計方針書に認証無効時のリスクを明記すべきである。",
+      "suggestion": "セクション7のセキュリティ設計テーブルの「情報漏洩」行に「認証無効環境ではネットワーク上の全ユーザーがファイル更新時刻を取得可能。CommandMateの想定利用環境（ローカル/信頼ネットワーク）では低リスクと判断」の注記を追加する。",
+      "affected_section": "セクション7 セキュリティ設計"
+    },
+    {
+      "id": "F2",
+      "severity": "should_fix",
+      "category": "A05:2021 Security Misconfiguration",
+      "title": "304応答のCache-Controlヘッダ未設定によるキャッシュポイズニングリスク",
+      "description": "設計方針書セクション4-6で304応答を返す設計だが、Cache-Controlヘッダの設定について言及がない。304応答にCache-Control: no-store/no-cacheが未設定の場合、ブラウザや中間プロキシがレスポンスをキャッシュする可能性がある。特にリバースプロキシ経由でCommandMateにアクセスする構成では、プロキシが304応答をキャッシュし、認証が異なるユーザーに対して古いキャッシュを返すリスクがある（キャッシュポイズニング）。既存のfiles APIの200応答にもCache-Controlが設定されていないことを確認した。設計方針書の304応答実装と同時に、Cache-Controlヘッダの明示的な設定を設計に含めるべきである。",
+      "suggestion": "セクション4-6の304応答と200応答の両方にCache-Control: no-store, privateヘッダを追加する設計を明記する。これにより中間プロキシによるキャッシュを防止し、ブラウザキャッシュも無効化する。例: headers: { 'Last-Modified': lastModified, 'Cache-Control': 'no-store, private' }",
+      "affected_section": "セクション4-6 サーバー側304応答（files API）"
+    },
+    {
+      "id": "F3",
+      "severity": "nice_to_have",
+      "category": "A07:2021 Identification and Authentication Failures",
+      "title": "ポーリングAPIの認証保護の明示的な設計記述の欠如",
+      "description": "設計方針書セクション7ではセキュリティ項目を列挙しているが、ポーリング対象のAPIエンドポイント（/api/worktrees/:id/tree、/api/worktrees/:id/files/:path）が既存の認証ミドルウェアによって保護されていることの明示的な記述がない。実コード検証の結果、middleware.tsのmatcher設定（/((?!_next/|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)）はこれらのAPIパスにマッチし、AUTH_EXCLUDED_PATHSにも含まれていないため、認証有効時にはトークン検証が必須である。設計上の暗黙の前提として問題はないが、セキュリティ設計として明記すると信頼性が向上する。",
+      "suggestion": "セクション7のセキュリティ設計テーブルに「認証・認可」行を追加し、「ポーリング対象API（/api/worktrees/:id/tree, /api/worktrees/:id/files/:path）は既存のmiddleware.tsによるトークン認証で保護される（変更なし）」と記載する。",
+      "affected_section": "セクション7 セキュリティ設計"
+    },
+    {
+      "id": "F4",
+      "severity": "nice_to_have",
+      "category": "A06:2021 Vulnerable and Outdated Components",
+      "title": "ポーリングAPIへのDoS耐性設計の詳細化",
+      "description": "設計方針書セクション7では「visibilitychangeによるバックグラウンド停止、最大タブ数5制限」をDoS対策として挙げているが、これらはクライアント側の制御であり、悪意あるクライアントはこれらの制限を無視して高頻度リクエストを送信可能である。サーバー側にはレートリミティングが存在しない（loginエンドポイントにのみ実装済み）。CommandMateの想定利用環境（ローカル/信頼ネットワーク）ではリスクは低いが、セクション8のパフォーマンス設計で最悪ケース216 req/分と見積もっており、これが悪意あるクライアントにより大幅に増加する可能性について言及がない。",
+      "suggestion": "セクション7に「サーバー側レートリミティングは現時点では未実装（loginエンドポイントのみ実装済み）。CommandMateの想定利用環境（ローカル/信頼ネットワーク）では低リスクと判断。公開ネットワーク利用時にはサーバー側レートリミティングの追加を検討」の注記を追加する。",
+      "affected_section": "セクション7 セキュリティ設計"
+    },
+    {
+      "id": "F5",
+      "severity": "nice_to_have",
+      "category": "A01:2021 Broken Access Control",
+      "title": "パストラバーサル保護の継続適用に関する明示的確認",
+      "description": "設計方針書セクション4-2のツリーポーリングでは、WorktreeDetailRefactored内でfetch(`/api/worktrees/${worktreeId}/tree`)を直接呼び出す設計となっている。worktreeIdはコンポーネントのpropsから取得されるため、クライアント側でのworktreeIdの改竄リスクがある。実コード検証の結果、tree APIのGETハンドラはgetWorktreeById(db, params.id)でDBからworktreeを取得し、存在しないIDには404を返すため、任意パスへのアクセスは防止されている。また、files APIではisPathSafe() + resolveAndValidateRealPath()による多層防御が実装されている。設計方針書セクション7の「既存のpath-validator.tsによるバリデーション（変更なし）」の記述は正確である。",
+      "suggestion": "指摘事項なし。既存のセキュリティ機構が適切に機能しており、設計方針書の記述も正確。確認結果としてレビュー記録に残す。",
+      "affected_section": "セクション7 セキュリティ設計"
+    },
+    {
+      "id": "F6",
+      "severity": "nice_to_have",
+      "category": "A03:2021 Injection",
+      "title": "JSON.stringifyによるXSSリスクの評価",
+      "description": "設計方針書セクション4-2では、ツリーポーリングの差分検知にJSON.stringify(data?.items)を使用している。data.itemsにはファイル名（TreeItem.name）が含まれ、悪意あるファイル名（例: <script>alert(1)</script>.txt）が存在する可能性がある。ただし、JSON.stringifyは文字列のハッシュ比較にのみ使用され、DOMに直接挿入されない。FileTreeView側のレンダリングでは、Reactの自動エスケープにより<script>タグ等はテキストとしてレンダリングされるため、XSSリスクは存在しない。また、tree APIのレスポンスはJSON形式でContent-Type: application/jsonとして返されるため、ブラウザがHTMLとして解釈することもない。",
+      "suggestion": "指摘事項なし。JSON.stringifyの使用はハッシュ比較目的のみであり、ReactのJSX自動エスケープによりXSSリスクは排除されている。確認結果としてレビュー記録に残す。",
+      "affected_section": "セクション4-2 ツリーポーリング"
+    },
+    {
+      "id": "F7",
+      "severity": "should_fix",
+      "category": "A04:2021 Insecure Design",
+      "title": "If-Modified-Sinceヘッダの日時パース安全性の未考慮",
+      "description": "設計方針書セクション4-6で、サーバー側でIf-Modified-Sinceヘッダをnew Date(ifModifiedSince)でパースする設計となっている。不正な日時文字列（例: 'invalid', '9999-99-99'、極端に長い文字列）が送信された場合、new DateはInvalid Dateを返し、stat.mtime <= clientDateの比較がfalseとなるため、200応答（フルボディ返却）にフォールバックする。これは安全な動作であるが、設計方針書にInvalid Date時の挙動が明記されていない。また、If-Modified-Sinceヘッダの値が極端に長い場合のメモリ消費リスクも考慮すべきである（HTTPヘッダサイズはNext.js/Node.jsのデフォルト設定で8KB上限のため、実質的なリスクは低い）。",
+      "suggestion": "セクション4-6のIf-Modified-Sinceチェック部分に以下のバリデーションを追加する設計を記載する: (1) new Date(ifModifiedSince)の結果がInvalid Date（isNaN）の場合は304判定をスキップし200応答を返す、(2) コメントで「不正な日時文字列は200応答へのフォールバックで安全に処理される」旨を明記する。",
+      "affected_section": "セクション4-6 サーバー側304応答（files API）"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 3,
+    "nice_to_have": 4,
+    "overall_quality": "good"
+  },
+  "review_date": "2026-03-11",
+  "reviewer": "architecture-review-agent (Stage 4: Security)"
+}

@@ -1,0 +1,33 @@
+{
+  "issue_number": 469,
+  "title": "feat: Filesタブ・ファイル内容の自動更新（外部変更検知）",
+  "acceptance_criteria": [
+    "CLIツールがファイルを作成した後、Filesタブのツリーに自動反映される（ポーリング間隔: 5秒以内）",
+    "CLIツールがファイルを更新した後、開いているファイルタブの内容が自動更新される（ポーリング間隔: 5秒以内）",
+    "ユーザーが編集中（isDirty === true）のファイルは自動更新で上書きされない",
+    "isDirty === true の状態で外部変更が発生した場合、通知は行わず保存後の次回ポーリングで最新内容を取得する",
+    "ポーリングによるサーバー負荷が許容範囲内（mtime/sizeによる軽量チェックで不要な再取得を避ける）",
+    "Filesタブが非表示の場合はポーリングしない",
+    "ファイルツリーの差分検知にクライアント側JSONハッシュ比較を使用",
+    "ファイルAPIがLast-Modified ヘッダを返し、If-Modified-Sinceによる304応答に対応する",
+    "document.visibilitychange APIによるバックグラウンドタブでのポーリング停止",
+    "useFileTabs reducerのisDirty関連アクション単体テスト",
+    "ファイルAPI GETの304レスポンス結合テスト",
+    "ポーリング開始/停止のライフサイクルテスト",
+    "isDirty === trueのタブでポーリング更新がスキップされることの検証テスト"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: ポーリング定数定義 (src/config/file-polling-config.ts)",
+    "Task 1.2: useFilePolling カスタムフック (src/hooks/useFilePolling.ts)",
+    "Task 1.3: useFileTabs isDirty拡張 (src/hooks/useFileTabs.ts)",
+    "Task 1.4: EditorProps型拡張 + MarkdownEditor onDirtyChange",
+    "Task 2.1: files API Last-Modified / 304応答",
+    "Task 3.1: useFileContentPolling フック (src/hooks/useFileContentPolling.ts)",
+    "Task 3.2: FilePanelContent ポーリング統合",
+    "Task 3.3: WorktreeDetailRefactored ツリーポーリング",
+    "Task 3.4: FilePanelTabs isDirtyインジケーター"
+  ],
+  "design_policy_path": "dev-reports/design/issue-469-file-auto-update-design-policy.md",
+  "work_plan_path": "dev-reports/issue/469/work-plan.md",
+  "target_coverage": 80
+}

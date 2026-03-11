@@ -1421,4 +1421,51 @@ def hello():
       }, 35000);
     });
   });
+
+  // ============================================================================
+  // onDirtyChange Tests (Issue #469)
+  // ============================================================================
+
+  describe('onDirtyChange callback', () => {
+    it('should call onDirtyChange with false on initial load', async () => {
+      const onDirtyChange = vi.fn();
+      render(
+        <MarkdownEditor {...defaultProps} onDirtyChange={onDirtyChange} initialViewMode="editor" />,
+      );
+
+      await waitForEditorReady();
+
+      // isDirty starts as false (content === originalContent)
+      expect(onDirtyChange).toHaveBeenCalledWith(false);
+    });
+
+    it('should call onDirtyChange with true when content is edited', async () => {
+      const onDirtyChange = vi.fn();
+      render(
+        <MarkdownEditor {...defaultProps} onDirtyChange={onDirtyChange} initialViewMode="editor" />,
+      );
+
+      await waitForEditorReady();
+      onDirtyChange.mockClear();
+
+      // Edit content
+      const textarea = screen.getByTestId('markdown-editor-textarea');
+      fireEvent.change(textarea, { target: { value: 'modified content' } });
+
+      await waitFor(() => {
+        expect(onDirtyChange).toHaveBeenCalledWith(true);
+      });
+    });
+
+    it('should not throw when onDirtyChange is not provided', async () => {
+      // Render without onDirtyChange - should not throw
+      expect(() => {
+        render(
+          <MarkdownEditor {...defaultProps} initialViewMode="editor" />,
+        );
+      }).not.toThrow();
+
+      await waitForEditorReady();
+    });
+  });
 });

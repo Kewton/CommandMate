@@ -5,6 +5,7 @@
  * Displays the active tab's content via FilePanelContent.
  *
  * Issue #438: PC file display panel with tabs
+ * Issue #469: isDirty indicator for unsaved edits
  */
 
 'use client';
@@ -38,6 +39,8 @@ export interface FilePanelTabsProps {
   onSetLoading: (path: string, loading: boolean) => void;
   /** Callback when file is saved (refresh tree) */
   onFileSaved?: (path: string) => void;
+  /** Callback when isDirty state changes (Issue #469) */
+  onDirtyChange?: (path: string, isDirty: boolean) => void;
 }
 
 // ============================================================================
@@ -83,6 +86,14 @@ const TabButton = memo(function TabButton({
       <span className="truncate max-w-[120px]" title={tab.path}>
         {tab.name}
       </span>
+      {/* [Issue #469] Unsaved changes indicator */}
+      {tab.isDirty && (
+        <span
+          data-testid={`file-tab-dirty-${tab.path}`}
+          className="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0"
+          title="Unsaved changes"
+        />
+      )}
       <button
         type="button"
         onClick={handleClose}
@@ -112,6 +123,7 @@ export const FilePanelTabs = memo(function FilePanelTabs({
   onLoadError,
   onSetLoading,
   onFileSaved,
+  onDirtyChange,
 }: FilePanelTabsProps) {
   const activeTab = activeIndex !== null && activeIndex >= 0 && activeIndex < tabs.length
     ? tabs[activeIndex]
@@ -143,6 +155,7 @@ export const FilePanelTabs = memo(function FilePanelTabs({
             onLoadError={onLoadError}
             onSetLoading={onSetLoading}
             onFileSaved={onFileSaved}
+            onDirtyChange={onDirtyChange}
           />
         )}
       </div>

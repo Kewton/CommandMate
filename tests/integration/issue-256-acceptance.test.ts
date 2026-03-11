@@ -126,6 +126,49 @@ describe('Issue #256 Acceptance Test: Multiple choice prompt detection improveme
         expect(result.promptData.options.length).toBe(3);
       }
     });
+
+    it('AC6b: should detect Codex approval choices without cursor when confirmation footer is present', () => {
+      const output = [
+        'Would you like to run the following command?',
+        '',
+        '  $ npm test',
+        '',
+        '  1. Yes, proceed (y)',
+        '  2. Yes, and don\'t ask again for commands that start with `npm test` (p)',
+        '  3. No, and tell Codex what to do differently (esc)',
+        '',
+        '  Press enter to confirm or esc to cancel',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options.length).toBe(3);
+      }
+    });
+
+    it('AC6c: should ignore decimal-looking preview lines before Codex approval choices', () => {
+      const output = [
+        'mode: plan | hint: /memory show | tokens: 2400/200000',
+        'anvil>',
+        '  workspace/implementation-plan-phases.md && git commit -m "Implement Phase',
+        '  3.2 local model stabilization"',
+        '',
+        '› 1. Yes, proceed (y)',
+        '  2. Yes, and don\'t ask again for commands that start with `git add foo` (p)',
+        '  3. No, and tell Codex what to do differently (esc)',
+        '',
+        '  Press enter to confirm or esc to cancel',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options.length).toBe(3);
+      }
+    });
   });
 
   // ========================================================================

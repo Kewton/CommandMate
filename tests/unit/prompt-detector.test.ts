@@ -2436,6 +2436,41 @@ Are you sure you want to continue? (yes/no)
         expect(result.promptData.options.map(option => option.number)).toEqual([1, 2, 3]);
       }
     });
+
+    it('should detect Codex approval prompts when option labels wrap across many deep-indented lines', () => {
+      const output = [
+        'Would you like to run the following command?',
+        '',
+        '  Reason: Do you want me to create the requested git commit for the',
+        '  local-first planning and evidence changes?',
+        '',
+        '  $ git add schemas/handoff-file.schema.json schemas/session-state.schema.json',
+        '  src/agents/editor.rs src/agents/mod.rs src/agents/pm.rs src/agents/reader.rs',
+        '  [… 14 lines] ctrl + a view all',
+        '',
+        '\u203A 1. Yes, proceed (y)',
+        '  2. Yes, and don\'t ask again for commands that start with `git add schemas/',
+        '     handoff-file.schema.json schemas/session-state.schema.json src/agents/',
+        '     editor.rs src/agents/mod.rs src/agents/pm.rs src/agents/reader.rs src/',
+        '     agents/reviewer.rs src/agents/tester.rs src/cli/commands.rs src/cli/',
+        '     output.rs src/models/mod.rs src/runtime/engine.rs src/runtime/',
+        '     loop_state.rs src/state/handoff.rs src/state/session.rs tests/cli.rs',
+        '     tests/pm_and_models.rs tests/state_roundtrip.rs workspace/anvil-',
+        '     implementation-plan.md src/agents/executor.rs src/agents/planning.rs src/',
+        '     models/profile.rs` (p)',
+        '  3. No, and tell Codex what to do differently (esc)',
+        '',
+        '  Press enter to confirm or esc to cancel',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options.map(option => option.number)).toEqual([1, 2, 3]);
+      }
+    });
   });
 
   describe('tmux capture-pane rendering artifact: missing period after option number', () => {

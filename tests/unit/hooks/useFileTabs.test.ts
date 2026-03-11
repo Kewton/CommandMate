@@ -35,8 +35,8 @@ describe('fileTabsReducer', () => {
     it('should activate existing tab if path already open', () => {
       const stateWithTab: FileTabsState = {
         tabs: [
-          { path: 'src/a.ts', name: 'a.ts', content: null, loading: false, error: null },
-          { path: 'src/b.ts', name: 'b.ts', content: null, loading: false, error: null },
+          { path: 'src/a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false },
+          { path: 'src/b.ts', name: 'b.ts', content: null, loading: false, error: null, isDirty: false },
         ],
         activeIndex: 0,
       };
@@ -54,6 +54,7 @@ describe('fileTabsReducer', () => {
         content: null,
         loading: false,
         error: null,
+        isDirty: false,
       }));
       const stateAtLimit: FileTabsState = { tabs, activeIndex: 0 };
       const action: FileTabsAction = { type: 'OPEN_FILE', path: 'new-file.ts' };
@@ -81,9 +82,9 @@ describe('fileTabsReducer', () => {
     it('should remove the specified tab', () => {
       const stateWithTabs: FileTabsState = {
         tabs: [
-          { path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null },
-          { path: 'b.ts', name: 'b.ts', content: null, loading: false, error: null },
-          { path: 'c.ts', name: 'c.ts', content: null, loading: false, error: null },
+          { path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false },
+          { path: 'b.ts', name: 'b.ts', content: null, loading: false, error: null, isDirty: false },
+          { path: 'c.ts', name: 'c.ts', content: null, loading: false, error: null, isDirty: false },
         ],
         activeIndex: 1,
       };
@@ -96,7 +97,7 @@ describe('fileTabsReducer', () => {
 
     it('should set activeIndex to null when last tab is closed', () => {
       const stateWithOneTab: FileTabsState = {
-        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null }],
+        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false }],
         activeIndex: 0,
       };
       const action: FileTabsAction = { type: 'CLOSE_TAB', path: 'a.ts' };
@@ -109,9 +110,9 @@ describe('fileTabsReducer', () => {
     it('should adjust activeIndex when closing a tab before the active tab', () => {
       const stateWithTabs: FileTabsState = {
         tabs: [
-          { path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null },
-          { path: 'b.ts', name: 'b.ts', content: null, loading: false, error: null },
-          { path: 'c.ts', name: 'c.ts', content: null, loading: false, error: null },
+          { path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false },
+          { path: 'b.ts', name: 'b.ts', content: null, loading: false, error: null, isDirty: false },
+          { path: 'c.ts', name: 'c.ts', content: null, loading: false, error: null, isDirty: false },
         ],
         activeIndex: 2,
       };
@@ -125,9 +126,9 @@ describe('fileTabsReducer', () => {
     it('should activate previous tab when closing the active tab', () => {
       const stateWithTabs: FileTabsState = {
         tabs: [
-          { path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null },
-          { path: 'b.ts', name: 'b.ts', content: null, loading: false, error: null },
-          { path: 'c.ts', name: 'c.ts', content: null, loading: false, error: null },
+          { path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false },
+          { path: 'b.ts', name: 'b.ts', content: null, loading: false, error: null, isDirty: false },
+          { path: 'c.ts', name: 'c.ts', content: null, loading: false, error: null, isDirty: false },
         ],
         activeIndex: 2,
       };
@@ -140,7 +141,7 @@ describe('fileTabsReducer', () => {
 
     it('should not change state when closing non-existent tab', () => {
       const stateWithTab: FileTabsState = {
-        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null }],
+        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false }],
         activeIndex: 0,
       };
       const action: FileTabsAction = { type: 'CLOSE_TAB', path: 'nonexistent.ts' };
@@ -154,8 +155,8 @@ describe('fileTabsReducer', () => {
     it('should set activeIndex to the matching tab', () => {
       const stateWithTabs: FileTabsState = {
         tabs: [
-          { path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null },
-          { path: 'b.ts', name: 'b.ts', content: null, loading: false, error: null },
+          { path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false },
+          { path: 'b.ts', name: 'b.ts', content: null, loading: false, error: null, isDirty: false },
         ],
         activeIndex: 0,
       };
@@ -167,7 +168,7 @@ describe('fileTabsReducer', () => {
 
     it('should not change state when path not found', () => {
       const stateWithTab: FileTabsState = {
-        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null }],
+        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false }],
         activeIndex: 0,
       };
       const action: FileTabsAction = { type: 'ACTIVATE_TAB', path: 'nonexistent.ts' };
@@ -180,7 +181,7 @@ describe('fileTabsReducer', () => {
   describe('SET_CONTENT', () => {
     it('should set content for the specified tab', () => {
       const stateWithTab: FileTabsState = {
-        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: true, error: null }],
+        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: true, error: null, isDirty: false }],
         activeIndex: 0,
       };
       const mockContent: FileContent = {
@@ -201,7 +202,7 @@ describe('fileTabsReducer', () => {
   describe('SET_LOADING', () => {
     it('should set loading state for the specified tab', () => {
       const stateWithTab: FileTabsState = {
-        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null }],
+        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false }],
         activeIndex: 0,
       };
       const action: FileTabsAction = { type: 'SET_LOADING', path: 'a.ts', loading: true };
@@ -214,7 +215,7 @@ describe('fileTabsReducer', () => {
   describe('SET_ERROR', () => {
     it('should set error for the specified tab', () => {
       const stateWithTab: FileTabsState = {
-        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: true, error: null }],
+        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: true, error: null, isDirty: false }],
         activeIndex: 0,
       };
       const action: FileTabsAction = { type: 'SET_ERROR', path: 'a.ts', error: 'File not found' };
@@ -228,7 +229,7 @@ describe('fileTabsReducer', () => {
   describe('RENAME_FILE', () => {
     it('should update path and name for the matching tab', () => {
       const stateWithTab: FileTabsState = {
-        tabs: [{ path: 'src/old.ts', name: 'old.ts', content: null, loading: false, error: null }],
+        tabs: [{ path: 'src/old.ts', name: 'old.ts', content: null, loading: false, error: null, isDirty: false }],
         activeIndex: 0,
       };
       const action: FileTabsAction = { type: 'RENAME_FILE', oldPath: 'src/old.ts', newPath: 'src/new.ts' };
@@ -240,7 +241,7 @@ describe('fileTabsReducer', () => {
 
     it('should not change state when old path not found', () => {
       const stateWithTab: FileTabsState = {
-        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null }],
+        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false }],
         activeIndex: 0,
       };
       const action: FileTabsAction = { type: 'RENAME_FILE', oldPath: 'nonexistent.ts', newPath: 'new.ts' };
@@ -254,8 +255,8 @@ describe('fileTabsReducer', () => {
     it('should remove the tab for the deleted file', () => {
       const stateWithTabs: FileTabsState = {
         tabs: [
-          { path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null },
-          { path: 'b.ts', name: 'b.ts', content: null, loading: false, error: null },
+          { path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false },
+          { path: 'b.ts', name: 'b.ts', content: null, loading: false, error: null, isDirty: false },
         ],
         activeIndex: 0,
       };
@@ -264,6 +265,96 @@ describe('fileTabsReducer', () => {
 
       expect(result.tabs).toHaveLength(1);
       expect(result.tabs[0].path).toBe('b.ts');
+    });
+  });
+
+  // ============================================================================
+  // isDirty Tests (Issue #469)
+  // ============================================================================
+
+  describe('isDirty flag', () => {
+    it('OPEN_FILE should initialize isDirty as false', () => {
+      const action: FileTabsAction = { type: 'OPEN_FILE', path: 'src/index.ts' };
+      const result = fileTabsReducer(initialState, action);
+
+      expect(result.tabs[0].isDirty).toBe(false);
+    });
+
+    it('RESTORE should set isDirty to false for all tabs', () => {
+      const action: FileTabsAction = {
+        type: 'RESTORE',
+        paths: ['a.ts', 'b.ts'],
+        activePath: 'a.ts',
+      };
+      const result = fileTabsReducer(initialState, action);
+
+      expect(result.tabs[0].isDirty).toBe(false);
+      expect(result.tabs[1].isDirty).toBe(false);
+    });
+
+    it('SET_CONTENT should reset isDirty to false', () => {
+      const stateWithDirtyTab: FileTabsState = {
+        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: true, error: null, isDirty: true }],
+        activeIndex: 0,
+      };
+      const mockContent: FileContent = {
+        path: 'a.ts',
+        content: 'const x = 1;',
+        extension: 'ts',
+        worktreePath: '/repo',
+      };
+      const action: FileTabsAction = { type: 'SET_CONTENT', path: 'a.ts', content: mockContent };
+      const result = fileTabsReducer(stateWithDirtyTab, action);
+
+      expect(result.tabs[0].isDirty).toBe(false);
+    });
+
+    it('SET_DIRTY should set isDirty to true for the specified tab', () => {
+      const stateWithTab: FileTabsState = {
+        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false }],
+        activeIndex: 0,
+      };
+      const action: FileTabsAction = { type: 'SET_DIRTY', path: 'a.ts', isDirty: true };
+      const result = fileTabsReducer(stateWithTab, action);
+
+      expect(result.tabs[0].isDirty).toBe(true);
+    });
+
+    it('SET_DIRTY should set isDirty to false for the specified tab', () => {
+      const stateWithTab: FileTabsState = {
+        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: true }],
+        activeIndex: 0,
+      };
+      const action: FileTabsAction = { type: 'SET_DIRTY', path: 'a.ts', isDirty: false };
+      const result = fileTabsReducer(stateWithTab, action);
+
+      expect(result.tabs[0].isDirty).toBe(false);
+    });
+
+    it('SET_DIRTY should only affect the specified tab', () => {
+      const stateWithTabs: FileTabsState = {
+        tabs: [
+          { path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false },
+          { path: 'b.ts', name: 'b.ts', content: null, loading: false, error: null, isDirty: false },
+        ],
+        activeIndex: 0,
+      };
+      const action: FileTabsAction = { type: 'SET_DIRTY', path: 'a.ts', isDirty: true };
+      const result = fileTabsReducer(stateWithTabs, action);
+
+      expect(result.tabs[0].isDirty).toBe(true);
+      expect(result.tabs[1].isDirty).toBe(false);
+    });
+
+    it('SET_DIRTY should return same state if path not found', () => {
+      const stateWithTab: FileTabsState = {
+        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false }],
+        activeIndex: 0,
+      };
+      const action: FileTabsAction = { type: 'SET_DIRTY', path: 'nonexistent.ts', isDirty: true };
+      const result = fileTabsReducer(stateWithTab, action);
+
+      expect(result).toBe(stateWithTab);
     });
   });
 });

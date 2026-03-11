@@ -12,9 +12,12 @@
 
 import React, { useEffect, useRef, memo, useState, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
-import { Maximize2, Minimize2, ClipboardCopy, Check, Copy, Search, X } from 'lucide-react';
+import { Maximize2, Minimize2, ClipboardCopy, Check, Copy, Search } from 'lucide-react';
 import type { FileTab } from '@/hooks/useFileTabs';
 import type { FileContent } from '@/types/models';
+import { useFileContentPolling } from '@/hooks/useFileContentPolling';
+import { useFileContentSearch } from '@/hooks/useFileContentSearch';
+import { FileSearchBar } from './FileSearchBar';
 import { ImageViewer } from './ImageViewer';
 import { VideoViewer } from './VideoViewer';
 import { copyToClipboard } from '@/lib/clipboard-utils';
@@ -56,6 +59,8 @@ export interface FilePanelContentProps {
   onSetLoading: (path: string, loading: boolean) => void;
   /** Callback when file is saved (refresh tree) */
   onFileSaved?: (path: string) => void;
+  /** Callback when isDirty state changes (Issue #469: polling control) */
+  onDirtyChange?: (path: string, isDirty: boolean) => void;
 }
 
 // ============================================================================
@@ -325,6 +330,7 @@ function MarpEditorWithSlides({
   onFileSaved,
   isMaximized,
   onToggleMaximize,
+  onDirtyChange,
 }: {
   marpSlides: string[];
   fileName: string;
@@ -334,6 +340,7 @@ function MarpEditorWithSlides({
   onFileSaved?: (path: string) => void;
   isMaximized: boolean;
   onToggleMaximize: () => void;
+  onDirtyChange?: (isDirty: boolean) => void;
 }) {
   const [marpViewMode, setMarpViewMode] = useState<'slides' | 'editor'>('slides');
 
@@ -375,6 +382,7 @@ function MarpEditorWithSlides({
             filePath={filePath}
             onSave={onFileSaved}
             initialViewMode="split"
+            onDirtyChange={onDirtyChange}
           />
         )}
       </div>
@@ -412,92 +420,33 @@ function MaximizableWrapper({
 }
 
 /** [Issue #47] Markdown editor with file content search (PC) */
-function MarkdownWithSearch({ tab, content, worktreeId, isMaximized, onToggleMaximize, onFileSaved }: { tab: FileTab; content: FileContent; worktreeId: string; isMaximized: boolean; onToggleMaximize: () => void; onFileSaved?: (path: string) => void }) {
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchMatches, setSearchMatches] = useState<number[]>([]);
-  const [searchCurrentIdx, setSearchCurrentIdx] = useState(0);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-
-  const openSearch = useCallback(() => {
-    setSearchOpen(true);
-    setTimeout(() => searchInputRef.current?.focus(), 50);
-  }, []);
-
-  const closeSearch = useCallback(() => {
-    setSearchOpen(false);
-    setSearchQuery('');
-    setSearchMatches([]);
-    setSearchCurrentIdx(0);
-  }, []);
-
-  // Find matching lines
-  useEffect(() => {
-    if (!searchQuery || searchQuery.length < 2 || !content.content) {
-      setSearchMatches([]);
-      setSearchCurrentIdx(0);
-      return;
-    }
-    const lines = content.content.split('\n');
-    const lowerQuery = searchQuery.toLowerCase();
-    const matches: number[] = [];
-    lines.forEach((line, idx) => {
-      if (line.toLowerCase().includes(lowerQuery)) {
-        matches.push(idx + 1);
-      }
-    });
-    setSearchMatches(matches);
-    setSearchCurrentIdx(0);
-  }, [searchQuery, content.content]);
-
-  const nextMatch = useCallback(() => {
-    if (searchMatches.length === 0) return;
-    setSearchCurrentIdx((prev) => (prev + 1) % searchMatches.length);
-  }, [searchMatches.length]);
-
-  const prevMatch = useCallback(() => {
-    if (searchMatches.length === 0) return;
-    setSearchCurrentIdx((prev) => (prev - 1 + searchMatches.length) % searchMatches.length);
-  }, [searchMatches.length]);
+function MarkdownWithSearch({ tab, content, worktreeId, isMaximized, onToggleMaximize, onFileSaved, onDirtyChange }: { tab: FileTab; content: FileContent; worktreeId: string; isMaximized: boolean; onToggleMaximize: () => void; onFileSaved?: (path: string) => void; onDirtyChange?: (isDirty: boolean) => void }) {
+  const search = useFileContentSearch(content.content);
 
   return (
     <>
       {!isMaximized && (
-        <FileToolbar filePath={tab.path} isMaximized={isMaximized} onToggleMaximize={onToggleMaximize} copyableContent={content.content} onSearch={openSearch} />
+        <FileToolbar filePath={tab.path} isMaximized={isMaximized} onToggleMaximize={onToggleMaximize} copyableContent={content.content} onSearch={search.openSearch} />
       )}
-      {searchOpen && (
-        <div className="flex items-center gap-1 px-2 py-1 bg-gray-200 dark:bg-gray-700 border-b border-gray-300 dark:border-gray-600 flex-shrink-0">
-          <input
-            ref={searchInputRef}
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') { closeSearch(); }
-              if (e.key === 'Enter') { if (e.shiftKey) { prevMatch(); } else { nextMatch(); } }
-            }}
-            placeholder="検索..."
-            className="flex-1 min-w-0 px-2 py-0.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-cyan-500"
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-          />
-          <span className="text-xs text-gray-500 min-w-[3rem] text-right">
-            {searchMatches.length > 0 ? `${searchCurrentIdx + 1}/${searchMatches.length}` : '0/0'}
-          </span>
-          <button type="button" onClick={prevMatch} disabled={searchMatches.length === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white disabled:text-gray-300 dark:disabled:text-gray-600" aria-label="前の結果">▲</button>
-          <button type="button" onClick={nextMatch} disabled={searchMatches.length === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white disabled:text-gray-300 dark:disabled:text-gray-600" aria-label="次の結果">▼</button>
-          <button type="button" onClick={closeSearch} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-gray-400 hover:text-gray-800 dark:hover:text-white" aria-label="検索を閉じる"><X className="w-4 h-4" /></button>
-        </div>
+      {search.searchOpen && (
+        <FileSearchBar
+          inputRef={search.searchInputRef}
+          searchQuery={search.searchQuery}
+          onQueryChange={search.setSearchQuery}
+          matchCount={search.searchMatches.length}
+          currentIdx={search.searchCurrentIdx}
+          onNextMatch={search.nextMatch}
+          onPrevMatch={search.prevMatch}
+          onClose={search.closeSearch}
+        />
       )}
       <div className="flex-1 min-h-0">
-        {searchOpen && searchQuery.length >= 2 ? (
+        {search.searchOpen && search.searchQuery.length >= 2 ? (
           <CodeViewer
             content={content.content}
             extension="md"
-            searchMatches={searchMatches}
-            searchCurrentIdx={searchCurrentIdx}
+            searchMatches={search.searchMatches}
+            searchCurrentIdx={search.searchCurrentIdx}
           />
         ) : (
           <MarkdownEditor
@@ -505,6 +454,7 @@ function MarkdownWithSearch({ tab, content, worktreeId, isMaximized, onToggleMax
             filePath={tab.path}
             onSave={onFileSaved}
             initialViewMode="preview"
+            onDirtyChange={onDirtyChange}
           />
         )}
       </div>
@@ -514,88 +464,29 @@ function MarkdownWithSearch({ tab, content, worktreeId, isMaximized, onToggleMax
 
 /** [Issue #47] Code viewer with file content search (PC) */
 function CodeViewerWithSearch({ tab, content, isMaximized, onToggleMaximize }: { tab: FileTab; content: FileContent; isMaximized: boolean; onToggleMaximize: () => void }) {
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchMatches, setSearchMatches] = useState<number[]>([]);
-  const [searchCurrentIdx, setSearchCurrentIdx] = useState(0);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-
-  const openSearch = useCallback(() => {
-    setSearchOpen(true);
-    setTimeout(() => searchInputRef.current?.focus(), 50);
-  }, []);
-
-  const closeSearch = useCallback(() => {
-    setSearchOpen(false);
-    setSearchQuery('');
-    setSearchMatches([]);
-    setSearchCurrentIdx(0);
-  }, []);
-
-  // Find matching lines
-  useEffect(() => {
-    if (!searchQuery || searchQuery.length < 2 || !content.content) {
-      setSearchMatches([]);
-      setSearchCurrentIdx(0);
-      return;
-    }
-    const lines = content.content.split('\n');
-    const lowerQuery = searchQuery.toLowerCase();
-    const matches: number[] = [];
-    lines.forEach((line, idx) => {
-      if (line.toLowerCase().includes(lowerQuery)) {
-        matches.push(idx + 1);
-      }
-    });
-    setSearchMatches(matches);
-    setSearchCurrentIdx(0);
-  }, [searchQuery, content.content]);
-
-  const nextMatch = useCallback(() => {
-    if (searchMatches.length === 0) return;
-    setSearchCurrentIdx((prev) => (prev + 1) % searchMatches.length);
-  }, [searchMatches.length]);
-
-  const prevMatch = useCallback(() => {
-    if (searchMatches.length === 0) return;
-    setSearchCurrentIdx((prev) => (prev - 1 + searchMatches.length) % searchMatches.length);
-  }, [searchMatches.length]);
+  const search = useFileContentSearch(content.content);
 
   return (
     <div className="h-full flex flex-col">
-      <FileToolbar filePath={tab.path} isMaximized={isMaximized} onToggleMaximize={onToggleMaximize} copyableContent={content.content} onSearch={openSearch} />
-      {searchOpen && (
-        <div className="flex items-center gap-1 px-2 py-1 bg-gray-200 dark:bg-gray-700 border-b border-gray-300 dark:border-gray-600 flex-shrink-0">
-          <input
-            ref={searchInputRef}
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') { closeSearch(); }
-              if (e.key === 'Enter') { if (e.shiftKey) { prevMatch(); } else { nextMatch(); } }
-            }}
-            placeholder="検索..."
-            className="flex-1 min-w-0 px-2 py-0.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-cyan-500"
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-          />
-          <span className="text-xs text-gray-500 min-w-[3rem] text-right">
-            {searchMatches.length > 0 ? `${searchCurrentIdx + 1}/${searchMatches.length}` : '0/0'}
-          </span>
-          <button type="button" onClick={prevMatch} disabled={searchMatches.length === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white disabled:text-gray-300 dark:disabled:text-gray-600" aria-label="前の結果">▲</button>
-          <button type="button" onClick={nextMatch} disabled={searchMatches.length === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white disabled:text-gray-300 dark:disabled:text-gray-600" aria-label="次の結果">▼</button>
-          <button type="button" onClick={closeSearch} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-gray-400 hover:text-gray-800 dark:hover:text-white" aria-label="検索を閉じる"><X className="w-4 h-4" /></button>
-        </div>
+      <FileToolbar filePath={tab.path} isMaximized={isMaximized} onToggleMaximize={onToggleMaximize} copyableContent={content.content} onSearch={search.openSearch} />
+      {search.searchOpen && (
+        <FileSearchBar
+          inputRef={search.searchInputRef}
+          searchQuery={search.searchQuery}
+          onQueryChange={search.setSearchQuery}
+          matchCount={search.searchMatches.length}
+          currentIdx={search.searchCurrentIdx}
+          onNextMatch={search.nextMatch}
+          onPrevMatch={search.prevMatch}
+          onClose={search.closeSearch}
+        />
       )}
       <div className="flex-1 min-h-0">
         <CodeViewer
           content={content.content}
           extension={content.extension}
-          searchMatches={searchOpen ? searchMatches : undefined}
-          searchCurrentIdx={searchOpen ? searchCurrentIdx : undefined}
+          searchMatches={search.searchOpen ? search.searchMatches : undefined}
+          searchCurrentIdx={search.searchOpen ? search.searchCurrentIdx : undefined}
         />
       </div>
     </div>
@@ -621,10 +512,14 @@ export const FilePanelContent = memo(function FilePanelContent({
   onLoadError,
   onSetLoading,
   onFileSaved,
+  onDirtyChange,
 }: FilePanelContentProps) {
   const fetchingRef = useRef(false);
   const [marpSlides, setMarpSlides] = useState<string[] | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
+
+  // [Issue #469] File content polling for auto-update
+  useFileContentPolling({ tab, worktreeId, onLoadContent });
 
   const toggleMaximize = useCallback(() => {
     setIsMaximized((prev) => !prev);
@@ -655,6 +550,9 @@ export const FilePanelContent = memo(function FilePanelContent({
         const response = await fetch(
           `/api/worktrees/${worktreeId}/files/${encodePathForUrl(tab.path)}`,
         );
+
+        // [Issue #469] Defensive 304 check for future-proofing
+        if (response.status === 304) return;
 
         if (!response.ok) {
           const errorData = await response.json();
@@ -773,6 +671,7 @@ export const FilePanelContent = memo(function FilePanelContent({
               onFileSaved={onFileSaved}
               isMaximized={isMaximized}
               onToggleMaximize={toggleMaximize}
+              onDirtyChange={onDirtyChange ? (isDirty: boolean) => onDirtyChange(tab.path, isDirty) : undefined}
             />
           ) : (
             <MarkdownWithSearch
@@ -782,6 +681,7 @@ export const FilePanelContent = memo(function FilePanelContent({
               isMaximized={isMaximized}
               onToggleMaximize={toggleMaximize}
               onFileSaved={onFileSaved}
+              onDirtyChange={onDirtyChange ? (isDirty: boolean) => onDirtyChange(tab.path, isDirty) : undefined}
             />
           )}
         </div>

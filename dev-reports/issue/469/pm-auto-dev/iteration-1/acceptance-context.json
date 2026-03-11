@@ -1,0 +1,29 @@
+{
+  "issue_number": 469,
+  "feature_summary": "Filesタブ・ファイル内容の自動更新（外部変更検知）",
+  "acceptance_criteria": [
+    "CLIツールがファイルを作成した後、Filesタブのツリーに自動反映される（ポーリング間隔: 5秒以内）",
+    "CLIツールがファイルを更新した後、開いているファイルタブの内容が自動更新される（ポーリング間隔: 5秒以内）",
+    "ユーザーが編集中（isDirty === true）のファイルは自動更新で上書きされない",
+    "isDirty === true の状態で外部変更が発生した場合、通知は行わず保存後の次回ポーリングで最新内容を取得する",
+    "ポーリングによるサーバー負荷が許容範囲内（mtime/sizeによる軽量チェックで不要な再取得を避ける）",
+    "Filesタブが非表示の場合はポーリングしない",
+    "ファイルツリーの差分検知にクライアント側JSONハッシュ比較を使用",
+    "ファイルAPIがLast-Modifiedヘッダを返し、If-Modified-Sinceによる304応答に対応する",
+    "document.visibilitychange APIによるバックグラウンドタブでのポーリング停止",
+    "useFileTabs reducerのisDirty関連アクション単体テスト",
+    "ファイルAPI GETの304レスポンス結合テスト",
+    "ポーリング開始/停止のライフサイクルテスト",
+    "isDirty === trueのタブでポーリング更新がスキップされることの検証テスト"
+  ],
+  "test_scenarios": [
+    "シナリオ1: useFilePollingフックが5秒間隔でonPollを呼び出し、enabled=falseで停止する",
+    "シナリオ2: visibilitychangeでhidden時にポーリング停止、visible時に再開する",
+    "シナリオ3: useFileContentPollingがisDirty=trueのタブでポーリングをスキップする",
+    "シナリオ4: files APIがLast-Modifiedヘッダを返し、304応答を返す",
+    "シナリオ5: If-Modified-Sinceに不正日時を送信すると200応答にフォールバックする",
+    "シナリオ6: useFileTabs reducerのSET_DIRTYアクションがisDirtyを更新する",
+    "シナリオ7: OPEN_FILE/RESTORE/SET_CONTENTでisDirtyがfalseに初期化される",
+    "シナリオ8: WorktreeDetailRefactoredのツリーポーリングがJSON差分検知で動作する"
+  ]
+}

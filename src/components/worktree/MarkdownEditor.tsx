@@ -115,6 +115,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   onSave,
   initialViewMode,
   onMaximizedChange,
+  onDirtyChange,
 }: EditorProps) {
   // State
   const [content, setContent] = useState('');
@@ -201,6 +202,11 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   // Computed state
   const isDirty = content !== originalContent;
   const strategy = VIEW_MODE_STRATEGIES[viewMode];
+
+  // Notify parent of isDirty state changes (Issue #469: polling control)
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   // In mobile portrait mode with split view, use tab switching
   const isMobilePortrait = isMobile && typeof window !== 'undefined' && window.innerHeight > window.innerWidth;

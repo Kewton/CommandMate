@@ -1,0 +1,14 @@
+{
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 469,
+  "applied_findings": ["F1", "F2"],
+  "skipped_findings": [],
+  "changes_made": [
+    "F1: 案Cセクションに「ポーリング設計の統一方針（Stage 5 F1対応）」を追加。visibilitychangeをuseFilePolling等のカスタムフックで一括管理する方針、各コンポーネントのトリガー方式は既存設計に合わせつつライフサイクル管理はカスタムフックに委譲する旨を明記",
+    "F2: 案Bに「isDirty中の外部変更について（Stage 5 F2対応）」を追加。isDirty中の外部変更通知は初版スコープ外とし、保存後の次回ポーリングで最新内容を取得する動作を明記。受け入れ条件にも「isDirty中の外部変更時は通知なし、保存後に最新取得」の項目を追加",
+    "レビュー履歴にStage 5の2件（F1, F2）を追記",
+    "Noteヘッダを「Stage 5（通常レビュー 2回目）の結果を反映」に更新"
+  ],
+  "status": "completed"
+}

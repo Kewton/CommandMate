@@ -1,0 +1,165 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "issue_number": 469,
+  "review_focus": "通常",
+  "review_date": "2026-03-11",
+  "previous_findings_addressed": [
+    {
+      "finding_id": "Stage1-SF-1",
+      "title": "ポーリング間隔が曖昧",
+      "addressed": true,
+      "notes": "FILE_TREE_POLL_INTERVAL_MS=5000, FILE_CONTENT_POLL_INTERVAL_MS=5000 として明示済み。将来的にユーザー設定可能とする余地も記載。"
+    },
+    {
+      "finding_id": "Stage1-SF-2",
+      "title": "差分検知方法が不明確",
+      "addressed": true,
+      "notes": "クライアント側JSON.stringify(rootItems)ハッシュ比較方式を明記。サーバー側ETag方式とのトレードオフも記載。"
+    },
+    {
+      "finding_id": "Stage1-SF-3",
+      "title": "編集中保護の判定方法が未記載",
+      "addressed": true,
+      "notes": "FileTab型にisDirtyフィールド追加、MarkdownEditorからonDirtyChangeコールバック、SET_DIRTYアクション追加、データフロー図も記載。"
+    },
+    {
+      "finding_id": "Stage1-SF-4",
+      "title": "mtime/sizeチェックがオプション扱い",
+      "addressed": true,
+      "notes": "基本設計として必須実装に格上げ。Last-Modified/If-Modified-Since/304のHTTP標準準拠設計を明記。"
+    },
+    {
+      "finding_id": "Stage1-NTH-1",
+      "title": "FileViewer.tsxのスコープが不明",
+      "addressed": true,
+      "notes": "関連ファイルセクションで「モーダル表示（FileViewer）は対象外」と明記。"
+    },
+    {
+      "finding_id": "Stage1-NTH-2",
+      "title": "ポーリングライフサイクルの詳細なし",
+      "addressed": true,
+      "notes": "visibilitychange APIによるバックグラウンド停止をパフォーマンス要件に追加。handleVisibilityChangeパターン参照も記載。"
+    },
+    {
+      "finding_id": "Stage1-NTH-3",
+      "title": "FilePanelSplit/FilePanelTabsが関連ファイルに未記載",
+      "addressed": true,
+      "notes": "両ファイルとも関連ファイルおよび変更対象に追加済み。"
+    },
+    {
+      "finding_id": "Stage3-F1",
+      "title": "refreshTriggerとポーリングの排他制御",
+      "addressed": true,
+      "notes": "案Aに「実装上の注意」セクションを追加。refreshTriggerインクリメント方式による統合を推奨方式として明記。AbortController代替案も記載。"
+    },
+    {
+      "finding_id": "Stage3-F2",
+      "title": "バックグラウンドタブでのポーリング停止",
+      "addressed": true,
+      "notes": "パフォーマンス要件として受け入れ条件に追加。複数ワークツリー同時利用時の負荷累積防止も記載。"
+    },
+    {
+      "finding_id": "Stage3-F3",
+      "title": "FileTab型isDirty追加の影響範囲",
+      "addressed": true,
+      "notes": "変更対象ファイル一覧更新、isDirtyデータフローの詳細記述、FileTabsAction型SET_DIRTY追加、OPEN_FILE/RESTORE/SET_CONTENTでの初期値false設定、localStorage永続化時のリストアfalse設定を全て記載。"
+    },
+    {
+      "finding_id": "Stage3-F4",
+      "title": "304応答のクライアント側ハンドリング",
+      "addressed": true,
+      "notes": "案Bに「実装上の注意: 304レスポンスのクライアント側ハンドリング」セクション追加。ポーリング用fetchと初回fetchの分離設計、response.ok===falseの注意点、画像/動画のスコープ外明記。"
+    },
+    {
+      "finding_id": "Stage3-F5",
+      "title": "テスト計画未記載",
+      "addressed": true,
+      "notes": "受け入れ条件に「テスト要件」セクション追加。reducer単体テスト、304結合テスト、ポーリングライフサイクルテスト、isDirtyスキップテストの4項目を明記。"
+    },
+    {
+      "finding_id": "Stage3-F6",
+      "title": "WorktreeDetailRefactored.tsxとの統合設計",
+      "addressed": true,
+      "notes": "案Aに統合設計の注記追加。FileTreeView内ポーリング、isActive prop、WorktreeDetailRefactoredからのFilesタブアクティブ状態prop伝搬を明記。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "案A推奨方式（refreshTriggerインクリメント）と案Bの304ポーリング設計に設計思想の不統一がある",
+      "description": "案Aではポーリングを「refreshTriggerをインクリメントする形にし、既存のuseEffectにフローを統一する」と記載している。この方式はポーリング専用のuseEffectを持たないシンプルな設計。一方、案Bでは「ポーリング用は別のuseEffectまたはカスタムフックとして分離する」と記載している。案Cが推奨とされているが、案Aと案Bでポーリングの設計パターンが異なるため、実装者が統一的なポーリング管理を行いにくい。例えば、visibilitychangeによるポーリング停止を1箇所で管理したい場合、2つの異なるパターンのポーリングを統括する必要がある。",
+      "suggestion": "案Cの実装指針として、ポーリング管理の統一方針を追記する。例: 「ファイルツリーポーリングとファイル内容ポーリングは共に1つのuseEffect（またはカスタムフック）内でsetIntervalを管理し、visibilitychangeによる一括停止/再開を容易にする」など。あるいは、ポーリング管理をFileTreeView/FilePanelContentの各コンポーネントに閉じ込める場合でも、visibilitychange対応はWorktreeDetailRefactoredの既存パターンを参照して各コンポーネントが独立して対応する旨を明記する。"
+    },
+    {
+      "id": "F2",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "isDirtyがtrueの状態でサーバー側のファイルが変更された場合のユーザー通知が未設計",
+      "description": "受け入れ条件で「isDirty === trueのファイルは自動更新で上書きされない」と定義されているが、サーバー側でファイルが変更されたこと自体をユーザーに通知する仕組みが記載されていない。例えば、ユーザーがMarkdownEditorで編集中にCLIツールが同じファイルを更新した場合、ポーリングで304以外（200）が返ってきてもisDirtyのためスキップされるが、ユーザーは外部変更が発生したことを知る手段がない。結果として、保存時に外部変更を上書きするリスクがある。",
+      "suggestion": "本Issueのスコープ内で対応する場合: isDirtyかつサーバー側変更ありの場合に、タブにコンフリクト警告アイコンを表示する。スコープ外とする場合: 「isDirty中の外部変更通知は将来Issueで対応」と明記し、現時点での動作（最後に保存した内容が優先される）を受け入れ条件に追記する。"
+    },
+    {
+      "id": "F3",
+      "severity": "nice_to_have",
+      "category": "明確性",
+      "title": "FilePanelTabs.tsxでのisDirty表示仕様が具体化されていない",
+      "description": "変更対象ファイルにFilePanelTabs.tsxが含まれ「isDirty状態に応じたタブ表示（未保存インジケーター等）」と記載されているが、具体的なUI仕様（ドットアイコン、タブ名の色変更、アスタリスク付与など）が記載されていない。MarkdownEditorには既に未保存インジケーター（行697のisDirty表示）が存在するため、タブバーとの表示重複の可能性もある。",
+      "suggestion": "isDirtyインジケーターの具体的な表示仕様を記載する。例: 「タブ名の前にドット(●)を表示」など。MarkdownEditor内の既存isDirty表示との関係（両方表示/タブバーのみ/など）も明記するとよい。ただし、UIの詳細は実装時判断でも問題ないため、nice_to_haveとする。"
+    },
+    {
+      "id": "F4",
+      "severity": "nice_to_have",
+      "category": "技術的妥当性",
+      "title": "JSON.stringify(rootItems)ハッシュ比較のパフォーマンス特性に関する補足があると望ましい",
+      "description": "案Aでクライアント側のJSON.stringify(rootItems)ハッシュ比較を採用しているが、ファイルツリーが大規模（数百〜数千ファイル）の場合のJSON.stringifyのコストについて言及がない。実用上、CommandMateで扱うworktreeのルートレベルのアイテム数は通常数十程度であるため問題にならないと想定されるが、この前提を明記するとよい。",
+      "suggestion": "「ルートディレクトリのアイテム数は通常数十程度であり、JSON.stringifyのコストは無視できる」旨の補足を追加する。あるいは、将来的に大規模リポジトリに対応する場合のETag方式への移行パスに触れる。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 2,
+    "nice_to_have": 2,
+    "overall_quality": "good"
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "line": "594-666",
+      "relevance": "refreshTrigger統合方式の適用対象"
+    },
+    {
+      "file": "src/components/worktree/FilePanelContent.tsx",
+      "line": "646-678",
+      "relevance": "ポーリング用fetch分離の対象"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "line": "202, 697",
+      "relevance": "isDirty状態管理と既存の未保存インジケーター表示"
+    },
+    {
+      "file": "src/hooks/useFileTabs.ts",
+      "line": "36-47, 58-67",
+      "relevance": "FileTab型とFileTabsAction型 - isDirty/SET_DIRTY追加対象"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "line": "1841-1945",
+      "relevance": "既存handleVisibilityChangeパターン - ポーリング停止の参考実装"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "line": "256-272",
+      "relevance": "テキストファイルGET - Last-Modified/304対応追加箇所"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュール一覧・技術スタック確認"
+    }
+  ]
+}

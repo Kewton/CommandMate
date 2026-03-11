@@ -276,6 +276,82 @@ Previous response
         expect(result.reason).toBe('prompt_detected');
         expect(result.hasActivePrompt).toBe(true);
       });
+
+      it('should return "waiting" for Codex approval prompts with long wrapped option labels', () => {
+        const output = [
+          'Would you like to run the following command?',
+          '',
+          '  Reason: Do you want me to create the requested git commit for the',
+          '  local-first planning and evidence changes?',
+          '',
+          '  $ git add schemas/handoff-file.schema.json schemas/session-state.schema.json',
+          '  src/agents/editor.rs src/agents/mod.rs src/agents/pm.rs src/agents/reader.rs',
+          '  [… 14 lines] ctrl + a view all',
+          '',
+          '› 1. Yes, proceed (y)',
+          '  2. Yes, and don\'t ask again for commands that start with `git add schemas/',
+          '     handoff-file.schema.json schemas/session-state.schema.json src/agents/',
+          '     editor.rs src/agents/mod.rs src/agents/pm.rs src/agents/reader.rs src/',
+          '     agents/reviewer.rs src/agents/tester.rs src/cli/commands.rs src/cli/',
+          '     output.rs src/models/mod.rs src/runtime/engine.rs src/runtime/',
+          '     loop_state.rs src/state/handoff.rs src/state/session.rs tests/cli.rs',
+          '     tests/pm_and_models.rs tests/state_roundtrip.rs workspace/anvil-',
+          '     implementation-plan.md src/agents/executor.rs src/agents/planning.rs src/',
+          '     models/profile.rs` (p)',
+          '  3. No, and tell Codex what to do differently (esc)',
+          '',
+          '  Press enter to confirm or esc to cancel',
+        ].join('\n');
+
+        const result = detectSessionStatus(output, 'codex');
+
+        expect(result.status).toBe('waiting');
+        expect(result.confidence).toBe('high');
+        expect(result.reason).toBe('prompt_detected');
+        expect(result.hasActivePrompt).toBe(true);
+      });
+
+      it('should return "waiting" for Codex approval prompts when the default cursor line is missing', () => {
+        const output = [
+          'Would you like to run the following command?',
+          '',
+          '  $ npm test',
+          '',
+          '  1. Yes, proceed (y)',
+          '  2. Yes, and don\'t ask again for commands that start with `npm test` (p)',
+          '  3. No, and tell Codex what to do differently (esc)',
+          '',
+          '  Press enter to confirm or esc to cancel',
+        ].join('\n');
+
+        const result = detectSessionStatus(output, 'codex');
+
+        expect(result.status).toBe('waiting');
+        expect(result.confidence).toBe('high');
+        expect(result.reason).toBe('prompt_detected');
+        expect(result.hasActivePrompt).toBe(true);
+      });
+
+      it('should ignore decimal-looking command preview lines above Codex options', () => {
+        const output = [
+          'mode: plan | hint: /memory show | tokens: 2400/200000',
+          'anvil>',
+          '  workspace/implementation-plan-phases.md && git commit -m "Implement Phase',
+          '  3.2 local model stabilization"',
+          '',
+          '› 1. Yes, proceed (y)',
+          '  2. Yes, and don\'t ask again for commands that start with `git add foo` (p)',
+          '  3. No, and tell Codex what to do differently (esc)',
+          '',
+          '  Press enter to confirm or esc to cancel',
+        ].join('\n');
+
+        const result = detectSessionStatus(output, 'codex');
+
+        expect(result.status).toBe('waiting');
+        expect(result.reason).toBe('prompt_detected');
+        expect(result.hasActivePrompt).toBe(true);
+      });
     });
 
     describe('gemini', () => {

@@ -1,0 +1,86 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 469,
+  "review_focus": "整合性",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "FileTab型にisDirtyフィールドが存在しない",
+      "description": "設計方針書セクション4-4では FileTab 型に isDirty: boolean を追加すると記載されているが、現在の useFileTabs.ts（行36-47）の FileTab インターフェースには isDirty フィールドが存在しない。また、FileTabsAction 型（行58-67）にも SET_DIRTY アクションが定義されていない。reducer 内の OPEN_FILE, RESTORE, SET_CONTENT の各 case でも isDirty: false の初期化が行われていない。設計方針書では「既存変更」として useFileTabs.ts を変更対象に挙げているが、コードの現状と設計方針書の記述が乖離しており、実装者が設計通りに変更する際の差分が正確に把握できる状態である必要がある。",
+      "suggestion": "設計方針書セクション4-4の記述は「追加予定の変更」として正しいが、実装時に以下を確実に行う必要がある: (1) FileTab に isDirty: boolean を追加、(2) FileTabsAction に SET_DIRTY アクションを追加、(3) reducer の OPEN_FILE/RESTORE/SET_CONTENT で isDirty: false を設定、(4) readPersistedTabs で isDirty は常に false でリストア。設計方針書側には「現在の FileTab 型の定義」と「変更後の定義」を Before/After で明示すると、実装者の誤解を防げる。",
+      "affected_section": "4-4. isDirtyフラグの管理（useFileTabs拡張）"
+    },
+    {
+      "id": "F2",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "MarkdownEditor に onDirtyChange コールバックが存在しない",
+      "description": "設計方針書セクション4-3の isDirty 伝搬フロー（セクション6）では MarkdownEditor が onDirtyChange(isDirty: boolean) コールバックを呼び出すと記載されている。しかし現在の EditorProps 型（src/types/markdown-editor.ts 行75-91）には onDirtyChange プロパティが定義されていない。MarkdownEditor.tsx 内では isDirty は content !== originalContent（行202）として内部的に計算されているが、外部に伝搬する仕組みが存在しない。設計方針書のレイヤー構成（セクション2）で MarkdownEditor.tsx を「既存変更: onDirtyChangeコールバック追加」と記載しているが、具体的な実装パターン（useEffect で isDirty の変化を検知して呼び出すのか、content 変更時に直接呼び出すのか）が明記されていない。",
+      "suggestion": "設計方針書に MarkdownEditor への onDirtyChange 追加の具体的な実装パターンを記載する。推奨: (1) EditorProps に onDirtyChange?: (isDirty: boolean) => void を追加、(2) MarkdownEditor 内で useEffect(() => { onDirtyChange?.(isDirty); }, [isDirty, onDirtyChange]) のパターンで伝搬。また、MarkdownEditor が FilePanelContent 内で MarkdownWithSearch 経由で使われている場合、MarkdownWithSearch も props を中継する必要があることを明記すべき。",
+      "affected_section": "4-3. ファイル内容ポーリング / 6. isDirty伝搬フロー"
+    },
+    {
+      "id": "F3",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "ツリーポーリングの fetchDirectory がFileTreeView内部に閉じている",
+      "description": "設計方針書セクション4-2では WorktreeDetailRefactored 内で fetchDirectory('') を呼び出してルートディレクトリを取得し、JSON.stringify で比較すると記載されている。しかし現在の fetchDirectory 関数は FileTreeView.tsx 内部の useCallback（行564-584）として定義されており、WorktreeDetailRefactored から直接呼び出すことができない。WorktreeDetailRefactored が独自に /api/worktrees/${worktreeId}/tree を fetch する必要があるが、設計方針書のコード例では fetchDirectory('') と簡潔に書かれており、この関数の出所が曖昧になっている。",
+      "suggestion": "設計方針書のセクション4-2のコード例を修正し、WorktreeDetailRefactored 内で直接 fetch('/api/worktrees/${worktreeId}/tree') を呼び出すことを明示する。あるいは、fetchDirectory を共通ユーティリティとして抽出することを検討するが、YAGNI の観点からは WorktreeDetailRefactored 内にインラインの fetch で十分。コード例を以下のように修正: const response = await fetch(`/api/worktrees/${worktreeId}/tree`); const data = await response.json();",
+      "affected_section": "4-2. ツリーポーリング（WorktreeDetailRefactored管理）"
+    },
+    {
+      "id": "F4",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "files API の GET ハンドラにおける Content-Length ヘッダの整合性",
+      "description": "設計方針書セクション4-5では GET レスポンスに Content-Length: String(stat.size) を含めると記載されている。しかし、テキストファイルの場合は readFileContent() 経由で content が返されるため、stat.size（バイト数）とJSON レスポンスの実サイズは一致しない。JSON にラップされた { success: true, path, content, extension, worktreePath } のレスポンスサイズは元のファイルサイズとは異なる。また、画像/動画ファイルのパスでは既に stat を実行しているが、テキストファイルのパス（行257-276）では stat を呼んでいないため、Last-Modified 取得のために追加の fs.stat 呼び出しが必要になる。",
+      "suggestion": "設計方針書の Content-Length ヘッダについて再検討する。JSON レスポンスに Content-Length を手動設定するのは不正確（Next.js が自動設定する）なため、Content-Length は削除し、Last-Modified のみ追加する方針に修正する。テキストファイルのパスに fs.stat 呼び出しを追加する必要があることをコード例に反映する。",
+      "affected_section": "4-5. サーバー側304応答（files API）"
+    },
+    {
+      "id": "F5",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "useFileContentPolling の enabled 条件とFilePanelContent の auto-fetch useEffect の競合可能性",
+      "description": "設計方針書セクション4-3では useFileContentPolling の enabled 条件を tab.content !== null && !tab.loading && !tab.isDirty としている。一方、FilePanelContent.tsx の auto-fetch useEffect（行646-678）は tab.content === null の場合にコンテンツを取得する。ポーリングが 200 OK で onLoadContent を呼び出すと dispatch SET_CONTENT が発火し、tab.content が更新される。この場合、auto-fetch の useEffect は tab.content !== null となり再実行されないため直接的な競合はない。しかし、ポーリングが SET_CONTENT を dispatch した際にタブの content が置き換わり、MarkdownEditor などのコンポーネントが再マウントされる可能性がある。MarkdownEditor は filePath が変わらなくても再マウント時に内部の originalContent をリセットするため、編集中のテキストが失われる可能性がある（isDirty スキップが機能しない場合）。",
+      "suggestion": "設計方針書に「MarkdownEditor は content prop ではなく filePath prop で内容を管理しており、SET_CONTENT dispatch 時に再マウントされない限り内部状態は保持される」ことを前提として明記する。また、FilePanelContent 内で markdown ファイルが開かれている場合、ポーリングによる SET_CONTENT が MarkdownEditor の UX に影響しないことを検証するテストケースをテスト設計（セクション9）に追加する。",
+      "affected_section": "4-3. ファイル内容ポーリング / 9. テスト設計"
+    },
+    {
+      "id": "F6",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "既存テスト修正セクションに FileTreeView の isActive prop テストが記載されているが、設計では isActive prop を削除済み",
+      "description": "設計方針書セクション9の「既存テスト修正」に tests/unit/components/worktree/FileTreeView.test.tsx について 'isActive propのデフォルト値（true）確認' と記載されている。しかし、セクション4-2の設計変更（F2対応）では FileTreeView に isActive prop は追加しない方針に改訂されており、ポーリング責務は WorktreeDetailRefactored に移動している。テスト設計とアーキテクチャ設計が矛盾している。",
+      "suggestion": "セクション9の既存テスト修正から FileTreeView.test.tsx の isActive prop テストを削除する。代わりに、WorktreeDetailRefactored のツリーポーリング統合テスト（setFileTreeRefresh がポーリングで呼ばれること）を追加する。",
+      "affected_section": "9. テスト設計"
+    },
+    {
+      "id": "F7",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "データフロー図とレイヤー構成表の FilePanelTabs.tsx の変更内容が未詳細",
+      "description": "設計方針書のレイヤー構成（セクション2）では FilePanelTabs.tsx に 'isDirtyインジケーター表示' と記載されているが、現在の FilePanelTabs.tsx には isDirty に関するコードが一切存在しない。データフロー図（セクション6）の isDirty 伝搬フローでは FilePanelTabs が言及されていない。isDirty インジケーターの具体的な表示方法（ドットアイコン、タブ名の装飾等）が設計方針書に記載されておらず、実装者の判断に委ねられている。",
+      "suggestion": "セクション4-4 または新規セクションとして、FilePanelTabs の isDirty インジケーターの具体的な UI 仕様を追記する。例: タブ名の横に小さなドットを表示する、タブ名をイタリック表示にする等。",
+      "affected_section": "2. アーキテクチャ設計 / レイヤー構成"
+    },
+    {
+      "id": "F8",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "セキュリティ設計の最大タブ数5の根拠と既存コードの整合性確認",
+      "description": "設計方針書セクション7のセキュリティ設計で 'DoSリスク: 最大タブ数5制限' と記載されている。useFileTabs.ts の MAX_FILE_TABS = 5（行20）と一致しており整合性がある。この確認は問題なし。ただし、ポーリングによるリクエスト増加について、セクション8のパフォーマンス設計では最大5タブ時の負荷見積もりが記載されている一方、バックグラウンドタブが全て個別にポーリングを実行する前提でありながら、useFileContentPolling は FilePanelContent 内で呼ばれるため、アクティブタブのみがレンダリングされる場合は1タブ分のポーリングしか発生しない可能性がある。",
+      "suggestion": "FilePanelContent のレンダリングが全タブ分行われるのか、アクティブタブのみなのかを設計方針書のパフォーマンス設計に明記する。FilePanelTabs の実装を確認し、全タブがマウントされているのかアクティブタブのみかを記載する。",
+      "affected_section": "8. パフォーマンス設計"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 4,
+    "nice_to_have": 2,
+    "overall_quality": "fair"
+  }
+}

@@ -25,6 +25,7 @@ import {
   MAX_CONSECUTIVE_ERRORS,
   THINKING_CHECK_LINE_COUNT,
   COOLDOWN_INTERVAL_MS,
+  DUPLICATE_RETRY_EXPIRY_MS,
   type AutoYesState,
   type AutoYesPollerState,
 } from '@/lib/auto-yes-manager';
@@ -1365,6 +1366,7 @@ describe('auto-yes-manager', () => {
       currentInterval: POLLING_INTERVAL_MS,
       lastServerResponseTimestamp: null,
       lastAnsweredPromptKey: null,
+      lastAnsweredAt: null,
       stopCheckBaselineLength: -1,
       ...overrides,
     };
@@ -1600,11 +1602,12 @@ describe('auto-yes-manager', () => {
       expect(pollerState.lastAnsweredPromptKey).toBeNull();
     });
 
-    it('should return duplicate for already-answered prompt', async () => {
+    it('should return duplicate for already-answered prompt within retry window', async () => {
       // The prompt detector extracts the question as 'Do you want to proceed?'
       // (stripping the '(y/n)' suffix), so the key is 'yes_no:Do you want to proceed?'
       const pollerState = createTestPollerState({
         lastAnsweredPromptKey: 'yes_no:Do you want to proceed?',
+        lastAnsweredAt: Date.now(), // within DUPLICATE_RETRY_EXPIRY_MS
       });
 
       const promptOutput = 'Do you want to proceed? (y/n)';
@@ -1617,6 +1620,35 @@ describe('auto-yes-manager', () => {
       );
 
       expect(result).toBe('duplicate');
+    });
+
+    it('should retry same promptKey after DUPLICATE_RETRY_EXPIRY_MS expires', async () => {
+      const { sendKeys } = await import('@/lib/tmux');
+      vi.mocked(sendKeys).mockReset();
+      vi.mocked(sendKeys).mockResolvedValue(undefined);
+
+      setAutoYesEnabled('test-wt-retry', true);
+      const pollerState = createTestPollerState({
+        lastAnsweredPromptKey: 'yes_no:Do you want to proceed?',
+        lastAnsweredAt: Date.now() - DUPLICATE_RETRY_EXPIRY_MS - 1, // expired
+      });
+      globalThis.__autoYesPollerStates?.set('test-wt-retry', pollerState);
+
+      const promptOutput = 'Do you want to proceed? (y/n)';
+
+      const result = await detectAndRespondToPrompt(
+        'test-wt-retry',
+        pollerState,
+        'claude',
+        promptOutput
+      );
+
+      expect(result).toBe('responded');
+      expect(sendKeys).toHaveBeenCalled();
+
+      // Cleanup
+      globalThis.__autoYesPollerStates?.delete('test-wt-retry');
+      vi.mocked(sendKeys).mockReset();
     });
 
     it('should return responded after successful yes/no answer', async () => {
@@ -1702,9 +1734,10 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendKeys).mockReset();
     });
 
-    it('should reset lastAnsweredPromptKey to null on no_prompt', async () => {
+    it('should reset lastAnsweredPromptKey and lastAnsweredAt to null on no_prompt', async () => {
       const pollerState = createTestPollerState({
         lastAnsweredPromptKey: 'yes_no:previous prompt',
+        lastAnsweredAt: Date.now(),
       });
 
       const result = await detectAndRespondToPrompt(
@@ -1716,6 +1749,7 @@ describe('auto-yes-manager', () => {
 
       expect(result).toBe('no_prompt');
       expect(pollerState.lastAnsweredPromptKey).toBeNull();
+      expect(pollerState.lastAnsweredAt).toBeNull();
     });
   });
 

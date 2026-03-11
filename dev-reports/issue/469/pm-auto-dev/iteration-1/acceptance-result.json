@@ -1,0 +1,162 @@
+{
+  "issue_number": 469,
+  "status": "passed",
+  "acceptance_criteria_results": [
+    {
+      "criterion": "CLIツールがファイルを作成した後、Filesタブのツリーに自動反映される（ポーリング間隔: 5秒以内）",
+      "status": "passed",
+      "evidence": "src/components/worktree/WorktreeDetailRefactored.tsx:1100-1119 - useFilePolling with FILE_TREE_POLL_INTERVAL_MS (5000ms) polls /api/worktrees/:id/tree and triggers setFileTreeRefresh on JSON diff. src/config/file-polling-config.ts:8 - FILE_TREE_POLL_INTERVAL_MS = 5000",
+      "notes": "Tree polling uses JSON.stringify comparison of tree items to detect changes"
+    },
+    {
+      "criterion": "CLIツールがファイルを更新した後、開いているファイルタブの内容が自動更新される（ポーリング間隔: 5秒以内）",
+      "status": "passed",
+      "evidence": "src/hooks/useFileContentPolling.ts:48-50 - uses FILE_CONTENT_POLL_INTERVAL_MS (5000ms). Tests: tests/unit/hooks/useFileContentPolling.test.ts:52-62 verifies intervalMs=5000",
+      "notes": "Content polling uses If-Modified-Since/304 for efficient change detection"
+    },
+    {
+      "criterion": "ユーザーが編集中（isDirty === true）のファイルは自動更新で上書きされない",
+      "status": "passed",
+      "evidence": "src/hooks/useFileContentPolling.ts:50 - enabled condition includes !tab.isDirty. Tests: tests/unit/hooks/useFileContentPolling.test.ts:76-87 verifies disabled when isDirty=true",
+      "notes": "Polling is completely disabled when isDirty is true, preventing any overwrite"
+    },
+    {
+      "criterion": "isDirty === true の状態で外部変更が発生した場合、通知は行わず保存後の次回ポーリングで最新内容を取得する",
+      "status": "passed",
+      "evidence": "src/hooks/useFileContentPolling.ts:50 - polling disabled when isDirty. src/hooks/useFileTabs.ts:173-180 SET_CONTENT resets isDirty to false, re-enabling polling. No notification UI implemented (by design).",
+      "notes": "After save (SET_CONTENT), isDirty becomes false and polling resumes automatically"
+    },
+    {
+      "criterion": "ポーリングによるサーバー負荷が許容範囲内（mtime/sizeによる軽量チェックで不要な再取得を避ける）",
+      "status": "passed",
+      "evidence": "src/app/api/worktrees/[id]/files/[...path]/route.ts:259-276 - uses fs.stat() for mtime check and returns 304 when file unchanged. Tests: tests/integration/api/files-304.test.ts:98-111 verifies 304 response",
+      "notes": "304 Not Modified avoids sending file content when unchanged"
+    },
+    {
+      "criterion": "Filesタブが非表示の場合はポーリングしない",
+      "status": "passed",
+      "evidence": "src/components/worktree/WorktreeDetailRefactored.tsx:1104 - enabled: state.layout.leftPaneTab === 'files'. useFilePolling stops interval when enabled=false. Tests: tests/unit/hooks/useFilePolling.test.ts:40-49 verifies no polling when disabled",
+      "notes": "Tree polling only active when files tab is selected"
+    },
+    {
+      "criterion": "ファイルツリーの差分検知にクライアント側JSONハッシュ比較を使用",
+      "status": "passed",
+      "evidence": "src/components/worktree/WorktreeDetailRefactored.tsx:1110-1114 - JSON.stringify(data?.items) compared with prevTreeHashRef.current",
+      "notes": "Uses JSON.stringify as a simple hash for tree comparison"
+    },
+    {
+      "criterion": "ファイルAPIがLast-Modifiedヘッダを返し、If-Modified-Sinceによる304応答に対応する",
+      "status": "passed",
+      "evidence": "src/app/api/worktrees/[id]/files/[...path]/route.ts:260-276 and 287-298. Tests: tests/integration/api/files-304.test.ts - 8 tests covering Last-Modified header, 304 response, and invalid date fallback",
+      "notes": "Full HTTP conditional request support with security-conscious isNaN check"
+    },
+    {
+      "criterion": "document.visibilitychange APIによるバックグラウンドタブでのポーリング停止",
+      "status": "passed",
+      "evidence": "src/hooks/useFilePolling.ts:60-68 - handleVisibilityChange stops polling on hidden, resumes on visible. Tests: tests/unit/hooks/useFilePolling.test.ts:106-145 verifies stop/resume behavior",
+      "notes": "Also verifies no resume when enabled=false (test line 164-189)"
+    },
+    {
+      "criterion": "useFileTabs reducerのisDirty関連アクション単体テスト",
+      "status": "passed",
+      "evidence": "tests/unit/hooks/useFileTabs.test.ts - 'isDirty flag' describe block with 7 tests: OPEN_FILE init false, RESTORE init false, SET_CONTENT resets, SET_DIRTY true/false, only affects target, path not found returns same state",
+      "notes": "All 33 useFileTabs tests pass including isDirty tests"
+    },
+    {
+      "criterion": "ファイルAPI GETの304レスポンス結合テスト",
+      "status": "passed",
+      "evidence": "tests/integration/api/files-304.test.ts - 8 integration tests: Last-Modified in 200, Cache-Control header, 304 on match, 304 on future date, 200 on past date, 200 on invalid string, 200 on nonsensical date, 200 when header absent",
+      "notes": "All 8 integration tests pass"
+    },
+    {
+      "criterion": "ポーリング開始/停止のライフサイクルテスト",
+      "status": "passed",
+      "evidence": "tests/unit/hooks/useFilePolling.test.ts - 9 tests covering: enabled/disabled, start/stop transitions, unmount cleanup, visibilitychange stop/resume, latest callback ref, disabled+visible no resume, listener cleanup",
+      "notes": "All 9 useFilePolling tests pass"
+    },
+    {
+      "criterion": "isDirty === trueのタブでポーリング更新がスキップされることの検証テスト",
+      "status": "passed",
+      "evidence": "tests/unit/hooks/useFileContentPolling.test.ts:76-87 - 'should be disabled when isDirty is true' test verifies enabled=false when isDirty=true",
+      "notes": "All 10 useFileContentPolling tests pass"
+    }
+  ],
+  "test_results": {
+    "total": 4853,
+    "passed": 4846,
+    "failed": 0,
+    "skipped": 7
+  },
+  "quality_checks": {
+    "typescript": "pass",
+    "eslint": "pass",
+    "unit_tests": "pass"
+  },
+  "issues_found": [],
+  "recommendations": [],
+  "test_cases": [
+    {
+      "scenario": "シナリオ1: useFilePollingフックが5秒間隔でonPollを呼び出し、enabled=falseで停止する",
+      "result": "passed",
+      "evidence": "tests/unit/hooks/useFilePolling.test.ts: 9 tests all pass - interval polling at 5000ms, disabled stops polling"
+    },
+    {
+      "scenario": "シナリオ2: visibilitychangeでhidden時にポーリング停止、visible時に再開する",
+      "result": "passed",
+      "evidence": "tests/unit/hooks/useFilePolling.test.ts:106-145 - visibilitychange hidden stops, visible resumes with immediate onPoll call"
+    },
+    {
+      "scenario": "シナリオ3: useFileContentPollingがisDirty=trueのタブでポーリングをスキップする",
+      "result": "passed",
+      "evidence": "tests/unit/hooks/useFileContentPolling.test.ts:76-87 - isDirty=true sets enabled=false"
+    },
+    {
+      "scenario": "シナリオ4: files APIがLast-Modifiedヘッダを返し、304応答を返す",
+      "result": "passed",
+      "evidence": "tests/integration/api/files-304.test.ts:78-111 - Last-Modified in 200 response, 304 when If-Modified-Since matches"
+    },
+    {
+      "scenario": "シナリオ5: If-Modified-Sinceに不正日時を送信すると200応答にフォールバックする",
+      "result": "passed",
+      "evidence": "tests/integration/api/files-304.test.ts:141-167 - 'invalid' and '9999-99-99' both return 200"
+    },
+    {
+      "scenario": "シナリオ6: useFileTabs reducerのSET_DIRTYアクションがisDirtyを更新する",
+      "result": "passed",
+      "evidence": "tests/unit/hooks/useFileTabs.test.ts - SET_DIRTY true/false tests, only affects specified tab"
+    },
+    {
+      "scenario": "シナリオ7: OPEN_FILE/RESTORE/SET_CONTENTでisDirtyがfalseに初期化される",
+      "result": "passed",
+      "evidence": "tests/unit/hooks/useFileTabs.test.ts - OPEN_FILE isDirty=false, RESTORE isDirty=false, SET_CONTENT resets isDirty=false"
+    },
+    {
+      "scenario": "シナリオ8: WorktreeDetailRefactoredのツリーポーリングがJSON差分検知で動作する",
+      "result": "passed",
+      "evidence": "src/components/worktree/WorktreeDetailRefactored.tsx:1100-1119 - useFilePolling with JSON.stringify comparison, enabled only when leftPaneTab === 'files'"
+    }
+  ],
+  "acceptance_criteria_status": [
+    { "criterion": "CLIツールがファイルを作成した後、Filesタブのツリーに自動反映される", "verified": true },
+    { "criterion": "CLIツールがファイルを更新した後、開いているファイルタブの内容が自動更新される", "verified": true },
+    { "criterion": "ユーザーが編集中のファイルは自動更新で上書きされない", "verified": true },
+    { "criterion": "isDirty状態で外部変更発生時、通知なし・保存後に自動取得", "verified": true },
+    { "criterion": "ポーリングによるサーバー負荷が許容範囲内", "verified": true },
+    { "criterion": "Filesタブが非表示の場合はポーリングしない", "verified": true },
+    { "criterion": "ファイルツリーの差分検知にJSONハッシュ比較を使用", "verified": true },
+    { "criterion": "ファイルAPIがLast-Modifiedヘッダと304応答に対応", "verified": true },
+    { "criterion": "visibilitychange APIによるバックグラウンドタブでのポーリング停止", "verified": true },
+    { "criterion": "useFileTabs reducerのisDirty関連アクション単体テスト", "verified": true },
+    { "criterion": "ファイルAPI GETの304レスポンス結合テスト", "verified": true },
+    { "criterion": "ポーリング開始/停止のライフサイクルテスト", "verified": true },
+    { "criterion": "isDirty === trueのタブでポーリング更新がスキップされることの検証テスト", "verified": true }
+  ],
+  "evidence_files": [
+    "tests/unit/config/file-polling-config.test.ts",
+    "tests/unit/hooks/useFilePolling.test.ts",
+    "tests/unit/hooks/useFileContentPolling.test.ts",
+    "tests/unit/hooks/useFileTabs.test.ts",
+    "tests/integration/api/files-304.test.ts"
+  ],
+  "message": "すべての受入条件を満たしています。13件の受入条件すべてが検証済み、8件のテストシナリオすべてが成功、品質チェック（TypeScript, ESLint, Unit Tests）すべてパスしています。"
+}

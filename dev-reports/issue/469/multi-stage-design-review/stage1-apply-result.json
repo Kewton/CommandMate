@@ -1,0 +1,18 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー指摘対応",
+  "issue_number": 469,
+  "applied_findings": ["F1", "F2", "F6", "F7"],
+  "skipped_findings": ["F3", "F4", "F5"],
+  "changes_made": [
+    "セクション4-1: useFilePollingに既存visibilitychangeハンドラとの共存方針を追記（F6対応）。独立動作の根拠（スコープの違い: セッションデータ vs ファイルポーリング）とスロットル不要の理由を明記",
+    "セクション4-2: タイトルを「FileTreeView統合」から「WorktreeDetailRefactored管理」に変更。ポーリングと差分検知のロジックをFileTreeViewの外側（WorktreeDetailRefactored）に配置する推奨構成に全面改訂（F2対応）",
+    "セクション4-3: タイトルを「FilePanelContent」から「useFileContentPolling分離」に変更。ポーリングロジックを専用フックuseFileContentPollingとして分離する設計に改訂（F7対応）。検索ロジック重複の拡大防止に関する注意事項を追記（F1対応）",
+    "セクション2アーキテクチャ図: ツリーポーリングのWorktreeDetailRefactored管理、useFileContentPolling分離、visibilitychange独立動作を反映",
+    "セクション6データフロー: ツリー自動更新フローをWorktreeDetailRefactored管理に更新",
+    "セクション10変更対象ファイル一覧: useFileContentPolling.tsを新規ファイルに追加、FileTreeView/FilePanelContent/WorktreeDetailRefactoredの変更内容を更新",
+    "セクション12将来の拡張性: 検索ロジックDRY化を技術的負債として追記（F1対応）",
+    "セクション13新設: レビュー指摘事項の反映サマリー（全7件の対応状況表）と実装チェックリスト（5項目）を追加"
+  ],
+  "status": "completed"
+}

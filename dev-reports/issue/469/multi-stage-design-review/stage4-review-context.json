@@ -1,0 +1,7 @@
+{
+  "issue_number": 469,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "design_doc_path": "dev-reports/design/issue-469-file-auto-update-design-policy.md"
+}

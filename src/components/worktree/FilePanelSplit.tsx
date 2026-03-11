@@ -47,6 +47,8 @@ export interface FilePanelSplitProps {
   diffFilePath?: string | null;
   /** Callback to close the diff view (Issue #447) */
   onCloseDiff?: () => void;
+  /** Callback when isDirty state changes (Issue #469) */
+  onDirtyChange?: (path: string, isDirty: boolean) => void;
 }
 
 // ============================================================================
@@ -86,6 +88,7 @@ export const FilePanelSplit = memo(function FilePanelSplit({
   diffContent,
   diffFilePath,
   onCloseDiff,
+  onDirtyChange,
 }: FilePanelSplitProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [terminalWidth, setTerminalWidth] = useState(INITIAL_TERMINAL_WIDTH);
@@ -171,6 +174,7 @@ export const FilePanelSplit = memo(function FilePanelSplit({
             onLoadError={onLoadError}
             onSetLoading={onSetLoading}
             onFileSaved={onFileSaved}
+            onDirtyChange={onDirtyChange}
           />
         )}
       </div>

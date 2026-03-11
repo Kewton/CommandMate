@@ -153,6 +153,7 @@ tests/
 | `src/lib/auto-yes-manager.ts` | Auto-Yes状態管理・サーバー側ポーリング |
 | `src/lib/auto-yes-resolver.ts` | Auto-Yes自動応答判定 |
 | `src/config/auto-yes-config.ts` | Auto-Yes設定定数・バリデーション |
+| `src/config/file-polling-config.ts` | ファイルポーリング定数（FILE_TREE_POLL_INTERVAL_MS, FILE_CONTENT_POLL_INTERVAL_MS）（Issue #469） |
 | `src/lib/prompt-key.ts` | promptKey重複排除ユーティリティ |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
 | `src/lib/cli-tools/types.ts` | CLIツール型定義（5ツール対応） |
@@ -191,18 +192,22 @@ tests/
 | `src/i18n.ts` | next-intl設定 |
 | `src/lib/locale-cookie.ts` | ロケールCookie管理 |
 | `src/lib/date-locale.ts` | date-fnsロケールマッピング |
-| `src/components/worktree/WorktreeDetailRefactored.tsx` | Worktree詳細画面（メイン画面） |
+| `src/components/worktree/WorktreeDetailRefactored.tsx` | Worktree詳細画面（メイン画面、ツリーポーリング対応）（Issue #469） |
 | `src/components/worktree/AgentSettingsPane.tsx` | エージェント選択UI |
 | `src/components/worktree/MessageInput.tsx` | メッセージ入力（下書き永続化対応） |
 | `src/components/worktree/MarkdownEditor.tsx` | マークダウンエディタ（auto-save対応） |
 | `src/components/worktree/TerminalSearchBar.tsx` | ターミナル内テキスト検索バーUI（Issue #47）件数表示・前/次ナビ・Esc閉じ |
 | `src/components/worktree/FilePanelSplit.tsx` | ターミナル+ファイルパネル分割 |
 | `src/components/worktree/FilePanelTabs.tsx` | ファイルタブバーUI |
-| `src/components/worktree/FilePanelContent.tsx` | ファイルコンテンツ表示 |
+| `src/components/worktree/FilePanelContent.tsx` | ファイルコンテンツ表示（ファイル内容ポーリング対応）（Issue #469） |
 | `src/components/worktree/FileViewer.tsx` | ファイルビューア |
+| `src/components/worktree/FileSearchBar.tsx` | ファイル検索バー共通コンポーネント（Issue #469） |
 | `src/components/worktree/FileTreeView.tsx` | ファイルツリー表示 |
 | `src/components/worktree/GitPane.tsx` | Gitタブ（コミット履歴・diff表示）（Issue #447） |
-| `src/hooks/useFileTabs.ts` | タブ状態管理フック |
+| `src/hooks/useFilePolling.ts` | ポーリングライフサイクル管理（visibilitychange対応）（Issue #469） |
+| `src/hooks/useFileContentPolling.ts` | ファイル内容ポーリング（If-Modified-Since/304）（Issue #469） |
+| `src/hooks/useFileContentSearch.ts` | ファイル内容検索共通フック（Issue #469） |
+| `src/hooks/useFileTabs.ts` | タブ状態管理フック（isDirty管理対応）（Issue #469） |
 | `src/hooks/useAutoYes.ts` | Auto-Yesクライアント側フック |
 | `src/hooks/useFileSearch.ts` | 検索状態管理フック |
 | `src/hooks/useTerminalSearch.ts` | ターミナル内テキスト検索フック（Issue #47）debounce 300ms、最大500件、最小2文字 |
