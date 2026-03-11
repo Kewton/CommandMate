@@ -105,10 +105,26 @@ export const Sidebar = memo(function Sidebar() {
   }, []);
 
   // Handle branch selection
+  // Fallback: if router.push fails to navigate (e.g., Next.js Router Cache corruption),
+  // use window.location.href after a short delay to ensure navigation succeeds.
   const handleBranchClick = useCallback((branchId: string) => {
     selectWorktree(branchId);
-    router.push(`/worktrees/${branchId}`);
+    const targetPath = `/worktrees/${branchId}`;
+    router.push(targetPath);
     closeMobileDrawer();
+    // Fallback navigation if router.push silently fails
+    const timerId = setTimeout(() => {
+      if (window.location.pathname !== targetPath) {
+        window.location.href = targetPath;
+      }
+    }, 300);
+    // Cleanup: if route changes before timeout, cancel fallback
+    const handleRouteChange = () => clearTimeout(timerId);
+    window.addEventListener('popstate', handleRouteChange, { once: true });
+    return () => {
+      clearTimeout(timerId);
+      window.removeEventListener('popstate', handleRouteChange);
+    };
   }, [selectWorktree, router, closeMobileDrawer]);
 
   // Check if list is empty (for both modes)
