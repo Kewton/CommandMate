@@ -310,6 +310,48 @@ Previous response
         expect(result.reason).toBe('prompt_detected');
         expect(result.hasActivePrompt).toBe(true);
       });
+
+      it('should return "waiting" for Codex approval prompts when the default cursor line is missing', () => {
+        const output = [
+          'Would you like to run the following command?',
+          '',
+          '  $ npm test',
+          '',
+          '  1. Yes, proceed (y)',
+          '  2. Yes, and don\'t ask again for commands that start with `npm test` (p)',
+          '  3. No, and tell Codex what to do differently (esc)',
+          '',
+          '  Press enter to confirm or esc to cancel',
+        ].join('\n');
+
+        const result = detectSessionStatus(output, 'codex');
+
+        expect(result.status).toBe('waiting');
+        expect(result.confidence).toBe('high');
+        expect(result.reason).toBe('prompt_detected');
+        expect(result.hasActivePrompt).toBe(true);
+      });
+
+      it('should ignore decimal-looking command preview lines above Codex options', () => {
+        const output = [
+          'mode: plan | hint: /memory show | tokens: 2400/200000',
+          'anvil>',
+          '  workspace/implementation-plan-phases.md && git commit -m "Implement Phase',
+          '  3.2 local model stabilization"',
+          '',
+          '› 1. Yes, proceed (y)',
+          '  2. Yes, and don\'t ask again for commands that start with `git add foo` (p)',
+          '  3. No, and tell Codex what to do differently (esc)',
+          '',
+          '  Press enter to confirm or esc to cancel',
+        ].join('\n');
+
+        const result = detectSessionStatus(output, 'codex');
+
+        expect(result.status).toBe('waiting');
+        expect(result.reason).toBe('prompt_detected');
+        expect(result.hasActivePrompt).toBe(true);
+      });
     });
 
     describe('gemini', () => {

@@ -282,7 +282,7 @@ const TEXT_INPUT_PATTERNS: RegExp[] = [
  * Uses (?:\.|\s{2,}) after the number to handle missing periods (same as
  * NORMAL_OPTION_PATTERN artifact tolerance).
  */
-const DEFAULT_OPTION_PATTERN = /^\s*[\u276F\u25CF\u203A][^\d]*(\d+)(?:\.|\s{2,})\s*(.+)$/;
+const DEFAULT_OPTION_PATTERN = /^\s*[\u276F\u25CF\u203A][^\d]*(\d+)(?:\.(?!\d)|\s{2,})\s*(.+)$/;
 
 /**
  * Pattern for normal option lines (no ❯ indicator, just leading whitespace + number).
@@ -309,7 +309,7 @@ const DEFAULT_OPTION_PATTERN = /^\s*[\u276F\u25CF\u203A][^\d]*(\d+)(?:\.|\s{2,})
  * False positive protection relies on Layer 3 (consecutive from 1),
  * Layer 4 (2+ options), and Layer 5 (SEC-001 question line validation).
  */
-const NORMAL_OPTION_PATTERN = /^\s*[^\d]{0,3}(\d+)(?:\.|\s+)\s*(.+)$/;
+const NORMAL_OPTION_PATTERN = /^\s*[^\d]{0,3}(\d+)(?:\.(?!\d)|\s+)\s*(.+)$/;
 
 /**
  * Pattern for separator lines (horizontal rules).
@@ -327,6 +327,13 @@ const SEPARATOR_LINE_PATTERN = /^[-─]+$/;
  * not selectable options and must not be parsed as numbered choices.
  */
 const COLLAPSED_OUTPUT_PATTERN = /^\s*\[[^\]]*\d+\s+lines?\]/i;
+
+/**
+ * Codex/OpenAI TUI confirmation footer shown beneath interactive choices.
+ * When this footer is present, numbered options form an active prompt even if
+ * the default cursor marker is missing from the capture output.
+ */
+const CONFIRMATION_FOOTER_PATTERN = /press\s+enter\s+to\s+confirm\s+or\s+esc\s+to\s+cancel/i;
 
 /**
  * Maximum number of lines to scan upward from questionEndIndex
@@ -718,6 +725,8 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
 
   // Calculate scan window: last 50 non-trailing-empty lines
   const scanStart = Math.max(0, effectiveEnd - 50);
+  const scanWindow = lines.slice(scanStart, effectiveEnd);
+  const hasConfirmationFooter = scanWindow.some((rawLine) => CONFIRMATION_FOOTER_PATTERN.test(rawLine.trim()));
 
   // ==========================================================================
   // Pass 1: Check for ❯ indicator existence in scan window
@@ -726,15 +735,15 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
   // ==========================================================================
   if (requireDefault) {
     let hasDefaultLine = false;
-    for (let i = scanStart; i < effectiveEnd; i++) {
-      const line = lines[i].trim();
+    for (const rawLine of scanWindow) {
+      const line = rawLine.trim();
       if (DEFAULT_OPTION_PATTERN.test(line)) {
         hasDefaultLine = true;
         break;
       }
     }
 
-    if (!hasDefaultLine) {
+    if (!hasDefaultLine && !hasConfirmationFooter) {
       return noPromptResult(output);
     }
   }
@@ -864,7 +873,8 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
   // Layer 4: Must have at least 2 options. When requireDefault is true,
   // also require at least one option with ❯ indicator.
   const hasDefaultIndicator = collectedOptions.some(opt => opt.isDefault);
-  if (collectedOptions.length < 2 || (requireDefault && !hasDefaultIndicator)) {
+  const allowMissingDefaultIndicator = requireDefault && hasConfirmationFooter;
+  if (collectedOptions.length < 2 || (requireDefault && !hasDefaultIndicator && !allowMissingDefaultIndicator)) {
     return noPromptResult(output);
   }
 
