@@ -491,8 +491,10 @@ export const NAVIGATION_KEY_VALUES = ['Up', 'Down', 'Enter', 'Escape', 'Tab', 'B
 export type NavigationKey = typeof NAVIGATION_KEY_VALUES[number];
 
 /**
- * Type guard for navigation key validation.
+ * Type guard for navigation key validation (special-keys API).
  * Returns true if the key is in the NAVIGATION_KEY_VALUES set.
+ * Named "SpecialKey" to align with the special-keys API route that calls it,
+ * though it validates NavigationKey (a subset of all special keys).
  *
  * @param key - String to validate
  * @returns True if key is a valid NavigationKey

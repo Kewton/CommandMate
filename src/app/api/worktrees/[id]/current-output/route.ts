@@ -80,7 +80,7 @@ export async function GET(
     // ordering (Issue #188 root cause: thinking detected on full output instead of
     // 5-line window, causing perpetual spinner when thinking summary was in scrollback).
     const statusResult = detectSessionStatus(output, cliToolId);
-    const thinking = statusResult.status === 'running' && statusResult.reason === 'thinking_indicator';
+    const thinking = statusResult.status === 'running' && statusResult.reason === STATUS_REASON.THINKING_INDICATOR;
 
     // Issue #408: promptDetection is obtained from detectSessionStatus() return value.
     // Previously, detectPrompt() was called separately here (SF-001 tradeoff).

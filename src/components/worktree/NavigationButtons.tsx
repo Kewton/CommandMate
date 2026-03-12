@@ -9,7 +9,7 @@
  * [DR4-006] No dangerouslySetInnerHTML usage.
  */
 
-import { useCallback, useRef, type KeyboardEvent } from 'react';
+import { useCallback, type KeyboardEvent } from 'react';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 export interface NavigationButtonsProps {
@@ -26,8 +26,6 @@ const NAVIGATION_BUTTONS = [
 ] as const;
 
 export function NavigationButtons({ worktreeId, cliToolId }: NavigationButtonsProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-
   const sendKeys = useCallback(async (keys: string[]) => {
     try {
       await fetch(`/api/worktrees/${encodeURIComponent(worktreeId)}/special-keys`, {
@@ -57,7 +55,6 @@ export function NavigationButtons({ worktreeId, cliToolId }: NavigationButtonsPr
 
   return (
     <div
-      ref={containerRef}
       className="flex items-center gap-2 p-2 bg-gray-100 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
       onKeyDown={handleKeyDown}
       role="toolbar"
