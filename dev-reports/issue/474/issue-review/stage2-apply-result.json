@@ -1,0 +1,24 @@
+{
+  "issue_number": 474,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "applied_findings": ["S1-M1", "S1-M2", "S1-S1", "S1-S2", "S1-S3", "S1-S4"],
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "updated_sections": [
+    "影響範囲",
+    "受入条件",
+    "提案する解決策",
+    "実装タスク",
+    "レビュー履歴"
+  ],
+  "github_updated": true,
+  "changes_summary": {
+    "S1-M1": "影響範囲の変更対象ファイルテーブルにgemini.ts、opencode.ts、vibe-local.tsを追加。変更内容は「画像送信方式調査・対応」と記載",
+    "S1-M2": "受入条件の対応画像形式記載にSVGの除外方針を明記。XSSリスクのため添付対象外とし、選択時エラーメッセージ表示を条件に追加",
+    "S1-S1": "実装タスクの画像送信方式調査項目にブロッキングタスクである旨と調査結果の文書化要件を追記",
+    "S1-S2": "受入条件に画像ファイルサイズ上限（5MB、IMAGE_MAX_SIZE_BYTES踏襲）のバリデーションと超過時エラーメッセージ表示を追加",
+    "S1-S3": "提案する解決策に「後方互換性」セクションを新設。supportsImageデフォルトfalse、BaseCLIToolデフォルト実装方針を明記",
+    "S1-S4": "フォールバック方式の説明に保存先ディレクトリ（.commandmate/attachments/等gitignore対象）を追記"
+  }
+}

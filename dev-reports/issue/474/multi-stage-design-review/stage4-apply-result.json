@@ -1,0 +1,25 @@
+{
+  "issue_number": 474,
+  "stage": 4,
+  "applied_findings": ["S4-M1", "S4-M2", "S4-S1", "S4-S2", "S4-S3", "S4-S4"],
+  "skipped_findings": ["S4-N1", "S4-N2", "S4-N3"],
+  "skip_reasons": {
+    "S4-N1": "Nice to Have - 設計方針書への反映不要",
+    "S4-N2": "Nice to Have - スコープ外",
+    "S4-N3": "Nice to Have - 設計方針書への反映不要"
+  },
+  "updated_sections": [
+    "6. セキュリティ設計",
+    "8. 設計上の決定事項とトレードオフ",
+    "9. 実装順序"
+  ],
+  "design_doc_updated": true,
+  "changes_summary": {
+    "S4-M1": "セキュリティ設計に「フォールバック方式のインジェクション対策」セクションを新設。制御文字拒否と.commandmate/attachments/プレフィックス検証を追加。実装順序ステップ6にも追記。",
+    "S4-M2": "パストラバーサル防御セクションにURLスキーム拒否バリデーション（SSRF対策）を追加。実装順序ステップ6にも追記。",
+    "S4-S1": ".gitignore管理セクションに失敗時のベストエフォート継続と警告トースト推奨を追記。",
+    "S4-S2": "画像セキュリティチェックテーブルにMagic bytes検証によるMIME typeスプーフィング防止の説明を追記。",
+    "S4-S3": "設計上の決定事項の画像保存先行に孤立ファイル対策（UI再送信促進、自動クリーンアップはスコープ外）を追記。",
+    "S4-S4": "パストラバーサル防御セクションにimagePathの.commandmate/attachments/プレフィックス強制検証を追加。実装順序ステップ6にも追記。"
+  }
+}

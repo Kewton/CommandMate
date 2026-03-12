@@ -1,0 +1,38 @@
+{
+  "issue_number": 474,
+  "feature_summary": "メッセージ入力時画像ファイル添付機能",
+  "acceptance_criteria": [
+    "画像対応CLIツールで画像ファイルを添付してメッセージ送信できること",
+    "CLIツール固有の画像送信方式がある場合はそれに準拠すること",
+    "固有方式がない場合はアップロードした画像のファイルパスをメッセージに含めて送信できること",
+    "画像非対応ツールでは添付ボタンが非表示または無効化されていること",
+    "対応画像形式（png, jpg, jpeg, gif, webp）のバリデーションが機能すること",
+    "画像ファイルサイズ上限（5MB）のバリデーションが機能すること",
+    "既存のメッセージ送信機能（テキストのみ）が壊れないこと",
+    "主要ロジックのユニットテストが追加されていること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: 画像対応CLIツール（Claude）で画像添付してメッセージ送信できること",
+    "シナリオ2: 画像非対応CLIツールでフォールバック（パス埋め込み）送信できること",
+    "シナリオ3: 対応画像形式（png/jpg/jpeg/gif/webp）のバリデーションが正常に動作すること",
+    "シナリオ4: 非対応形式（svg等）を選択した際にバリデーションエラーが表示されること",
+    "シナリオ5: 5MBを超えるファイルを選択した際にサイズエラーが表示されること",
+    "シナリオ6: 既存のテキストのみ送信が壊れないこと（sendMessageシグネチャ変更の影響確認）",
+    "シナリオ7: IImageCapableCLITool型ガードが正しく機能すること",
+    "シナリオ8: セキュリティバリデーション（URLスキーム拒否・パストラバーサル防御・プレフィックスホワイトリスト）が機能すること",
+    "シナリオ9: ATTACHABLE_IMAGE_EXTENSIONSにSVGが含まれないこと",
+    "シナリオ10: uploadImageFileがFormDataを使って正しくアップロードすること"
+  ],
+  "implemented_files": [
+    "src/config/image-extensions.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/cli-tools/index.ts",
+    "src/lib/cli-tools/claude.ts",
+    "src/app/api/worktrees/[id]/upload/[...path]/route.ts",
+    "src/app/api/worktrees/[id]/send/route.ts",
+    "src/lib/api-client.ts",
+    "src/hooks/useImageAttachment.ts",
+    "src/components/worktree/MessageInput.tsx"
+  ],
+  "tdd_result_path": "dev-reports/issue/474/pm-auto-dev/iteration-1/tdd-result.json"
+}

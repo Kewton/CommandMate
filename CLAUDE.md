@@ -156,7 +156,7 @@ tests/
 | `src/config/file-polling-config.ts` | ファイルポーリング定数（FILE_TREE_POLL_INTERVAL_MS, FILE_CONTENT_POLL_INTERVAL_MS）（Issue #469） |
 | `src/lib/prompt-key.ts` | promptKey重複排除ユーティリティ |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
-| `src/lib/cli-tools/types.ts` | CLIツール型定義（5ツール対応） |
+| `src/lib/cli-tools/types.ts` | CLIツール型定義（IImageCapableCLITool/isImageCapableCLITool追加）（Issue #474） |
 | `src/lib/cli-tools/codex.ts` | Codex CLIセッション管理 |
 | `src/lib/cli-tools/vibe-local.ts` | Vibe Local CLIツール |
 | `src/lib/cli-tools/opencode.ts` | OpenCode CLIツール |
@@ -208,6 +208,7 @@ tests/
 | `src/hooks/useFileContentPolling.ts` | ファイル内容ポーリング（If-Modified-Since/304）（Issue #469） |
 | `src/hooks/useFileContentSearch.ts` | ファイル内容検索共通フック（Issue #469） |
 | `src/hooks/useFileTabs.ts` | タブ状態管理フック（isDirty管理対応）（Issue #469） |
+| `src/hooks/useImageAttachment.ts` | 画像添付カスタムフック（バリデーション・アップロード・状態管理・resetAfterSend）（Issue #474） |
 | `src/hooks/useAutoYes.ts` | Auto-Yesクライアント側フック |
 | `src/hooks/useFileSearch.ts` | 検索状態管理フック |
 | `src/hooks/useTerminalSearch.ts` | ターミナル内テキスト検索フック（Issue #47）debounce 300ms、最大500件、最小2文字 |
