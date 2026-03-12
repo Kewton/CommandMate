@@ -12,6 +12,7 @@ import { SlashCommandSelector } from './SlashCommandSelector';
 import { InterruptButton } from './InterruptButton';
 import { useSlashCommands } from '@/hooks/useSlashCommands';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { useImageAttachment } from '@/hooks/useImageAttachment';
 import type { SlashCommand } from '@/types/slash-commands';
 
 export interface MessageInputProps {
@@ -49,6 +50,23 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // Issue #4: Pass cliToolId to filter commands by CLI tool
   const isMobile = useIsMobile();
   const { groups } = useSlashCommands(worktreeId, cliToolId);
+
+  // Issue #474: Image attachment hook
+  const uploadFn = useCallback(
+    (wId: string, file: File) => worktreeApi.uploadImageFile(wId, file),
+    []
+  );
+  const {
+    attachedImage,
+    fileInputRef,
+    isUploading,
+    error: imageError,
+    acceptAttribute,
+    openFileDialog,
+    handleFileSelect,
+    removeAttachment,
+    resetAfterSend,
+  } = useImageAttachment(worktreeId, uploadFn);
 
   // Restore draft message from localStorage on mount or worktreeId change
   useEffect(() => {
@@ -98,7 +116,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
    * Handle message submission
    */
   const submitMessage = useCallback(async () => {
-    if (isComposing || !message.trim() || sending) {
+    if (isComposing || (!message.trim() && !attachedImage) || sending) {
       return;
     }
 
@@ -106,9 +124,14 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setSending(true);
       setError(null);
       const effectiveCliTool: CLIToolType = cliToolId || 'claude';
-      await worktreeApi.sendMessage(worktreeId, message.trim(), { cliToolId: effectiveCliTool });
+      const options: { cliToolId: CLIToolType; imagePath?: string } = { cliToolId: effectiveCliTool };
+      if (attachedImage) {
+        options.imagePath = attachedImage.path;
+      }
+      await worktreeApi.sendMessage(worktreeId, message.trim(), options);
       setMessage('');
       setIsFreeInputMode(false);
+      resetAfterSend();
       try { window.localStorage.removeItem(DRAFT_STORAGE_KEY_PREFIX + worktreeId); } catch { /* ignore */ }
       onMessageSent?.(effectiveCliTool);
     } catch (err) {
@@ -116,7 +139,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, sending, worktreeId, cliToolId, onMessageSent]);
+  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, onMessageSent, resetAfterSend]);
 
   const handleSubmit = useCallback(async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -267,11 +290,43 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
 
   return (
     <div ref={containerRef} className="space-y-2 relative">
-      {error && (
+      {/* Error display (send error or image error) */}
+      {(error || imageError) && (
         <div className="p-2 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded text-sm text-red-800 dark:text-red-300">
-          {error}
+          {error || imageError}
         </div>
       )}
+
+      {/* Issue #474: Image attachment preview */}
+      {attachedImage && (
+        <div className="flex items-center gap-2 px-4 py-1.5 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 rounded-lg text-sm" data-testid="image-attachment-preview">
+          <svg className="h-4 w-4 flex-shrink-0 text-cyan-600 dark:text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+          <span className="truncate text-cyan-800 dark:text-cyan-300">{attachedImage.file.name}</span>
+          <button
+            type="button"
+            onClick={removeAttachment}
+            className="flex-shrink-0 p-0.5 text-cyan-600 hover:text-red-500 dark:text-cyan-400 dark:hover:text-red-400 rounded transition-colors"
+            aria-label="Remove attachment"
+            data-testid="remove-attachment-button"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
+      {/* Hidden file input for image selection */}
+      <input
+        ref={fileInputRef as React.RefObject<HTMLInputElement>}
+        type="file"
+        accept={acceptAttribute}
+        onChange={handleFileSelect}
+        className="hidden"
+        data-testid="image-file-input"
+      />
 
       <form onSubmit={handleSubmit} className="flex items-center gap-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus-within:border-cyan-500 focus-within:ring-1 focus-within:ring-cyan-500">
         {/* Mobile: Slash command button */}
@@ -293,6 +348,27 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
             </svg>
           </button>
         )}
+
+        {/* Issue #474: Image attach button */}
+        <button
+          type="button"
+          onClick={openFileDialog}
+          disabled={isUploading || sending}
+          className="flex-shrink-0 p-2 text-gray-500 hover:text-cyan-600 hover:bg-cyan-50 dark:text-gray-400 dark:hover:text-cyan-400 dark:hover:bg-cyan-900/30 rounded-full transition-colors disabled:text-gray-300 dark:disabled:text-gray-600 disabled:hover:bg-transparent"
+          aria-label="Attach image"
+          data-testid="attach-image-button"
+        >
+          {isUploading ? (
+            <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+          ) : (
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+            </svg>
+          )}
+        </button>
 
         <textarea
           ref={textareaRef}
@@ -317,7 +393,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
 
         <button
           type="submit"
-          disabled={!message.trim() || sending}
+          disabled={(!message.trim() && !attachedImage) || sending}
           className="flex-shrink-0 p-2 text-cyan-600 hover:bg-cyan-50 dark:text-cyan-400 dark:hover:bg-cyan-900/30 rounded-full transition-colors disabled:text-gray-300 dark:disabled:text-gray-600 disabled:hover:bg-transparent"
           aria-label="Send message"
         >

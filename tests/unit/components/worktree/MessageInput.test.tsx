@@ -35,6 +35,7 @@ import {
 vi.mock('@/lib/api-client', () => ({
   worktreeApi: {
     sendMessage: vi.fn().mockResolvedValue({}),
+    uploadImageFile: vi.fn().mockResolvedValue({ path: '.commandmate/attachments/test.png' }),
   },
   handleApiError: vi.fn((err: Error) => err?.message || 'Unknown error'),
 }));
