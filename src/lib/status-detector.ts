@@ -289,6 +289,19 @@ export function detectSessionStatus(
           promptDetection,
         };
       }
+
+      // E. Check content area for prompt pattern (Issue #473: "Ask anything..." is in content area,
+      // not in lastLines, due to OpenCode TUI padding between content and footer)
+      const { promptPattern: ocPromptPattern } = getCliToolPatterns('opencode');
+      if (ocPromptPattern.test(contentCheckWindow)) {
+        return {
+          status: 'ready',
+          confidence: 'high',
+          reason: STATUS_REASON.PROMPT_DETECTED,
+          hasActivePrompt: true,
+          promptDetection,
+        };
+      }
     }
   }
 
