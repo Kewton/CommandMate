@@ -24,7 +24,7 @@
  * coupling via a minimal DTO/projection type.
  */
 
-import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN } from './cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
 import type { PromptDetectionResult } from './prompt-detector';
 import type { CLIToolType } from './cli-tools/types';
@@ -119,6 +119,7 @@ export const STATUS_REASON = {
   THINKING_INDICATOR: 'thinking_indicator',
   OPENCODE_PROCESSING_INDICATOR: 'opencode_processing_indicator',
   OPENCODE_SELECTION_LIST: 'opencode_selection_list',
+  CLAUDE_SELECTION_LIST: 'claude_selection_list',
   OPENCODE_RESPONSE_COMPLETE: 'opencode_response_complete',
   INPUT_PROMPT: 'input_prompt',
   NO_RECENT_OUTPUT: 'no_recent_output',
@@ -190,6 +191,21 @@ export function detectSessionStatus(
       confidence: 'high',
       reason: 'prompt_detected',
       hasActivePrompt: true,
+      promptDetection,
+    };
+  }
+
+  // 1.5. Claude CLI selection list detection
+  // Claude CLI's multi-select/checkbox prompts (e.g., AskUserQuestion with checkboxes)
+  // use arrow keys + Enter to navigate and toggle, not number input.
+  // The 15-line window may miss the question line, causing SEC-001a rejection above.
+  // Detect via the footer instruction pattern and show NavigationButtons instead of PromptPanel.
+  if (cliToolId === 'claude' && CLAUDE_SELECTION_LIST_FOOTER.test(lastLines)) {
+    return {
+      status: 'waiting',
+      confidence: 'high',
+      reason: STATUS_REASON.CLAUDE_SELECTION_LIST,
+      hasActivePrompt: false,
       promptDetection,
     };
   }

@@ -92,9 +92,10 @@ export async function GET(
     // the single source of truth, ensuring consistency between status and prompt state.
     const isPromptWaiting = statusResult.hasActivePrompt;
 
-    // Issue #473: Selection list active flag for OpenCode TUI navigation
+    // Issue #473: Selection list active flag for TUI navigation (OpenCode + Claude)
     const isSelectionListActive = statusResult.status === 'waiting'
-      && statusResult.reason === STATUS_REASON.OPENCODE_SELECTION_LIST;
+      && (statusResult.reason === STATUS_REASON.OPENCODE_SELECTION_LIST
+        || statusResult.reason === STATUS_REASON.CLAUDE_SELECTION_LIST);
 
     // Extract realtime snippet (last 100 lines for better context)
     const realtimeSnippet = lines.slice(-100).join('\n');
