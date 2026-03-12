@@ -1,0 +1,74 @@
+{
+  "issue_number": 474,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "focus_area": "通常",
+  "review_summary": "Issue #474の記載内容は全体的に明確で、既存コードとの整合性も概ね取れている。ただし、変更対象ファイルリストにgemini.tsが欠落している点、SVGファイルの取り扱い方針が未定義な点、CLIツールごとの画像送信方式の具体性不足、画像ファイルサイズ上限の未記載など、実装時に曖昧さを生む箇所が複数確認された。",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "S1-M1",
+        "title": "変更対象ファイルリストにgemini.tsが欠落",
+        "description": "実装タスクの「対象CLIツール」セクションではClaude, Codex, Gemini, Vibe Local, OpenCodeの5ツール全てが列挙されているが、影響範囲の変更対象ファイルテーブルにはsrc/lib/cli-tools/gemini.tsが記載されていない。src/lib/cli-tools/gemini.tsは実在するファイルであり、他のCLIツール（claude.ts, codex.ts）が変更対象に含まれている以上、gemini.tsも含まれるべきである。",
+        "suggestion": "影響範囲の変更対象ファイルテーブルに `src/lib/cli-tools/gemini.ts | Gemini CLIの画像送信実装` を追加する。同様にopencode.tsとvibe-local.tsも変更対象として明示する。"
+      },
+      {
+        "id": "S1-M2",
+        "title": "SVGファイルの画像添付方針が未定義",
+        "description": "既存のimage-extensions.tsではSVGがサポート対象に含まれ（IMAGE_EXTENSIONS配列に'.svg'あり）、XSS対策としてvalidateSvgContent()でscriptタグ、イベントハンドラ、危険なURIスキーム、foreignObjectを検出する実装がある。Issueの受入条件では対応画像形式として「png, jpg, jpeg, gif, webp」のみ列挙されており、SVGが含まれていない。既存のIMAGE_EXTENSIONS定数を再利用する場合、SVGの扱いを明確にしないと実装時に判断が分かれる。",
+        "suggestion": "受入条件にSVGの方針を追記する。選択肢は2つ: (a) CLIツールへの画像添付ではSVGを対象外とし、対応形式リストから明示的に除外する旨を記載する。(b) SVGも対応する場合、既存のvalidateSvgContent()によるXSSバリデーションを必須とする受入条件を追加する。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S1-S1",
+        "title": "CLIツール固有の画像送信方式に関する具体性不足",
+        "description": "Issueでは「CLIツールが画像送信用のフラグやAPIを提供している場合、それを使用」と記載しているが、各CLIツールの具体的な画像送信方式（例: Claude CLIの--imageフラグ等）が一切記載されていない。実装タスクに「各CLIツールの画像送信方式調査」が含まれているが、調査結果をIssueに反映してから実装に進むべきか、調査と実装を同時進行するかの方針が不明確。",
+        "suggestion": "実装タスクの「各CLIツールの画像送信方式調査」を最初のブロッキングタスクとして明示し、調査結果をIssueに追記してからインターフェース設計に進む流れにする。または、各ツールの現時点で判明している情報（例: Claude CLIはclaude --imageや入力時のパス参照で画像を送れるか等）を記載する。"
+      },
+      {
+        "id": "S1-S2",
+        "title": "画像ファイルサイズ上限の受入条件への未記載",
+        "description": "既存のimage-extensions.tsにはIMAGE_MAX_SIZE_BYTES = 5MBの定数が定義されているが、Issueの受入条件にファイルサイズ制限に関する記載がない。CLIツールに送信する画像とファイルビューア用の画像では適切なサイズ上限が異なる可能性がある。",
+        "suggestion": "受入条件に「画像ファイルサイズの上限が設定されており、上限超過時に適切なエラーメッセージが表示されること」を追加する。具体的な値は既存のIMAGE_MAX_SIZE_BYTES（5MB）を踏襲するか、別途定義するかを明記する。"
+      },
+      {
+        "id": "S1-S3",
+        "title": "ICLIToolインターフェース拡張の後方互換性への言及不足",
+        "description": "Issueでは「ICLIToolインターフェースに画像対応メソッドを拡張（supportsImage, sendMessageWithImage等）」と記載しているが、既存のICLIToolインターフェースを拡張すると、全ての実装クラス（5ツール全て）が新メソッドを実装する必要がある。TypeScriptの型安全性上、既存コードとの互換性をどう保つかが未記載。",
+        "suggestion": "拡張方針を明記する。選択肢: (a) ICLIToolにオプショナルメソッドとして追加（supportsImage?(): boolean）、(b) BaseCLIToolにデフォルト実装を設け、各サブクラスでオーバーライド、(c) 別インターフェース（IImageCapableCLITool）を定義。推奨は(b)で、base.tsにデフォルトのsupportsImage()=falseとフォールバックのsendMessageWithImage()を実装する形。"
+      },
+      {
+        "id": "S1-S4",
+        "title": "フォールバック方式の画像保存先パスが未定義",
+        "description": "「固有方式がない場合、画像をworktree内にアップロードし、そのファイルパスをメッセージに含めて送信」と記載があるが、worktree内のどのディレクトリに画像を保存するかが未定義。ユーザーのソースコードと混在する場所に画像を配置すると、gitの管理対象になりコミットに含まれるリスクがある。",
+        "suggestion": "画像の保存先ディレクトリを明記する（例: `.commandmate/images/` や一時ディレクトリ）。また、.gitignoreへの追記が必要かどうかも検討事項として記載する。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S1-N1",
+        "title": "ドラッグ&ドロップ/クリップボード貼り付けへの言及",
+        "description": "Issueでは画像添付ボタンによるファイル選択のみが記載されているが、UXの観点からドラッグ&ドロップやクリップボードからの画像貼り付け（Ctrl+V）も一般的な画像入力手段である。スコープ外であれば明示的に除外する旨の記載があると実装範囲が明確になる。",
+        "suggestion": "「スコープ外: ドラッグ&ドロップ、クリップボード貼り付けは将来の拡張として検討」等の記載を追加する。または、対応する場合はタスクに追加する。"
+      },
+      {
+        "id": "S1-N2",
+        "title": "複数画像の同時添付に関する仕様の明確化",
+        "description": "Issueの記載からは1回のメッセージで添付できる画像が1枚なのか複数枚なのか判断できない。CLIツールによって対応が異なる可能性もある。",
+        "suggestion": "1メッセージあたりの添付画像数の上限を明記する（例: 初期実装は1枚まで、将来的に複数対応等）。"
+      },
+      {
+        "id": "S1-N3",
+        "title": "画像プレビュー機能への言及",
+        "description": "添付前の画像プレビューや、添付後のサムネイル表示についての記載がない。UXとして最低限、添付済みファイル名の表示と削除ボタンは必要と思われる。",
+        "suggestion": "UIの最低限の要件（添付ファイル名表示、添付解除ボタン）を受入条件またはタスクに追加する。"
+      }
+    ]
+  },
+  "total_findings": {
+    "must_fix": 2,
+    "should_fix": 4,
+    "nice_to_have": 3
+  }
+}

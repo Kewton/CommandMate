@@ -4,7 +4,7 @@
  */
 
 import { BaseCLITool } from './base';
-import type { CLIToolType } from './types';
+import type { CLIToolType, IImageCapableCLITool } from './types';
 import {
   isClaudeInstalled,
   isClaudeRunning,
@@ -18,7 +18,7 @@ import {
  * Claude Code CLI tool implementation
  * Uses existing claude-session module for compatibility
  */
-export class ClaudeTool extends BaseCLITool {
+export class ClaudeTool extends BaseCLITool implements IImageCapableCLITool {
   readonly id: CLIToolType = 'claude';
   readonly name = 'Claude Code';
   readonly command = 'claude';
@@ -64,6 +64,28 @@ export class ClaudeTool extends BaseCLITool {
    */
   async sendMessage(worktreeId: string, message: string): Promise<void> {
     await sendMessageToClaude(worktreeId, message);
+  }
+
+  /**
+   * Indicates this tool supports image attachments
+   * Issue #474: IImageCapableCLITool implementation
+   */
+  supportsImage(): true {
+    return true;
+  }
+
+  /**
+   * Send a message with an attached image to Claude session
+   * Issue #474: Appends image path as markdown reference
+   *
+   * @param worktreeId - Worktree ID
+   * @param message - Message text
+   * @param imagePath - Absolute path to the image file
+   */
+  async sendMessageWithImage(worktreeId: string, message: string, imagePath: string): Promise<void> {
+    const imageMarkdown = `\n![](${imagePath})`;
+    const fullMessage = message ? `${message}${imageMarkdown}` : imageMarkdown;
+    await this.sendMessage(worktreeId, fullMessage);
   }
 
   /**

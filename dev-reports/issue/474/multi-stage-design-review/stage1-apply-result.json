@@ -1,0 +1,23 @@
+{
+  "issue_number": 474,
+  "stage": 1,
+  "applied_findings": ["S1-M1", "S1-M2", "S1-S1", "S1-S2", "S1-S3"],
+  "skipped_findings": ["S1-N1", "S1-N2"],
+  "skip_reasons": {
+    "S1-N1": "Nice to Have - 設計方針書への反映不要（実装時の微調整事項）",
+    "S1-N2": "Nice to Have - 設計方針書への反映不要（実装時の微調整事項）"
+  },
+  "updated_sections": [
+    "設計パターン",
+    "データモデル設計",
+    "API設計",
+    "セキュリティ設計",
+    "UI設計",
+    "設計上の決定事項とトレードオフ",
+    "実装順序",
+    "SOLID原則への準拠"
+  ],
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-474-image-attachment-design-policy.md",
+  "applied_at": "2026-03-12"
+}

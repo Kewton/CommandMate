@@ -6,7 +6,8 @@
  */
 
 // Export types and interfaces
-export type { CLIToolType, ICLITool, CLIToolInfo } from './types';
+export type { CLIToolType, ICLITool, CLIToolInfo, IImageCapableCLITool } from './types';
+export { isImageCapableCLITool } from './types';
 
 // Export base class
 export { BaseCLITool } from './base';

@@ -116,7 +116,7 @@ describe('MessageInput', () => {
         expect(worktreeApi.sendMessage).toHaveBeenCalledWith(
           'test-worktree',
           'Hello world',
-          'claude'
+          { cliToolId: 'claude' }
         );
       });
     });
@@ -168,7 +168,7 @@ describe('MessageInput', () => {
         expect(worktreeApi.sendMessage).toHaveBeenCalledWith(
           'test-worktree',
           'Hello from mobile',
-          'claude'
+          { cliToolId: 'claude' }
         );
       });
     });
@@ -274,7 +274,7 @@ describe('MessageInput', () => {
         expect(worktreeApi.sendMessage).toHaveBeenCalledWith(
           'test-worktree',
           'Hello',
-          'claude'
+          { cliToolId: 'claude' }
         );
       });
 
@@ -343,7 +343,7 @@ describe('MessageInput', () => {
           expect(worktreeApi.sendMessage).toHaveBeenCalledWith(
             'test-worktree',
             '/model gpt-4o',
-            'claude'
+            { cliToolId: 'claude' }
           );
         });
       });
@@ -423,7 +423,7 @@ describe('MessageInput', () => {
           expect(worktreeApi.sendMessage).toHaveBeenCalledWith(
             'test-worktree',
             '/compact',
-            'claude'
+            { cliToolId: 'claude' }
           );
         });
       });
@@ -528,7 +528,7 @@ describe('MessageInput', () => {
         expect(worktreeApi.sendMessage).toHaveBeenCalledWith(
           'test-worktree',
           'Test message',
-          'claude'
+          { cliToolId: 'claude' }
         );
       });
     });

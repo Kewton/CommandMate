@@ -1,0 +1,137 @@
+{
+  "issue_number": 474,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "review_summary": "設計方針書のセキュリティ設計は全体として堅牢である。既存のpath-validator.ts（isPathSafe + resolveAndValidateRealPath）によるパストラバーサル防御、upload/route.tsの7層バリデーション（拡張子・MIME・サイズ・magic bytes・ファイル名・構造検証）、middleware.tsによる認証保護が適切に活用されている。ただし、フォールバック方式でのimagePath埋め込みによるCLIインジェクション、MIME typeスプーフィング対策の不足、孤立ファイルのクリーンアップ未設計、URLスキーム検証の欠如など、対処すべきセキュリティリスクが存在する。",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "S4-M1",
+        "owasp_category": "A03 インジェクション",
+        "title": "フォールバック方式のimagePath埋め込みによるCLIインジェクションリスク",
+        "description": "フォールバック方式では `[添付画像: ${absoluteImagePath}]` という形式でメッセージにファイルパスを埋め込み、tmux send-keysで送信する。ファイル名にtmux send-keysの特殊文字（例: C-m相当の改行、バッククォート等）が含まれている場合、意図しないコマンド実行につながる可能性がある。現状のupload/route.tsでは isValidNewName() でファイル名バリデーションを行っているが、タイムスタンプリネーム後の最終パスが send-keys に安全であることを明示的に保証する設計が必要。",
+        "current_design": "フォールバック: `${trimmedContent}\\n\\n[添付画像: ${absoluteImagePath}]` をそのまま sendMessage に渡す",
+        "recommendation": "send/route.tsでフォールバック方式を使う場合、absoluteImagePathに制御文字やtmux特殊シーケンスが含まれていないことを追加検証する。具体的には、absoluteImagePathが `[\\x00-\\x1F]` を含まないこと、および worktree.path + '.commandmate/attachments/' プレフィックスで始まることを確認するホワイトリスト検証を追加すること。",
+        "affected_section": "3. 設計パターン（BaseCLITool デフォルト実装）, 5. API設計（send API）"
+      },
+      {
+        "id": "S4-M2",
+        "owasp_category": "A10 SSRF",
+        "title": "imagePath入力に対するURLスキーム検証の欠如",
+        "description": "send/route.tsに送信されるbody.imagePathに対して、isPathSafe()とresolveAndValidateRealPath()によるパストラバーサル検証は行われるが、`file://`、`http://`、`https://`、`data:` 等のURLスキームを含む文字列に対する明示的な拒否処理が設計に記載されていない。path.resolve()はURLスキーム付き文字列を相対パスとして処理するため、isPathSafe()を通過する可能性がある（例: `file:///etc/passwd` は `{worktreePath}/file:///etc/passwd` に解決される）。ただし実ファイルとしてはアクセスされないため実害は限定的だが、防御的プログラミングとして明示的に拒否すべき。",
+        "current_design": "isPathSafe() + resolveAndValidateRealPath() のみ",
+        "recommendation": "send/route.tsのimagePathバリデーションの冒頭で、`/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(body.imagePath)` によるURLスキーム検出を追加し、マッチした場合は400エラーを返す。",
+        "affected_section": "6. セキュリティ設計（パストラバーサル防御）"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S4-S1",
+        "owasp_category": "A05 セキュリティの設定ミス",
+        "title": ".gitignore自動追加の実装タイミングと失敗時の挙動が未定義",
+        "description": "設計書では `.commandmate/attachments/` を .gitignore に自動追加すると記載されているが、追加のタイミング（upload時？ディレクトリ作成時？）、.gitignoreが存在しない場合の作成、追加が失敗した場合のエラーハンドリング、既に追加済みの場合の重複チェックが未定義。.gitignoreへの追加が失敗した場合、画像ファイルがgitにコミットされ、機密情報（スクリーンショットに含まれるAPI鍵、個人情報等）がリモートリポジトリに漏洩するリスクがある。",
+        "current_design": "「各worktreeの .gitignore に以下を自動追加」とのみ記載",
+        "recommendation": ".commandmate/attachments/ ディレクトリの自動作成時（S3-S2）に .gitignore 更新も行う。失敗時はアップロード処理を中断してエラーを返す（fail-safe）。また、.gitignore の更新はファイルロック等で競合を防ぐこと。",
+        "affected_section": "6. セキュリティ設計（.gitignore管理）"
+      },
+      {
+        "id": "S4-S2",
+        "owasp_category": "A05 セキュリティの設定ミス",
+        "title": "MIME typeスプーフィング対策の不足",
+        "description": "設計書ではクライアント側で ATTACHABLE_IMAGE_ACCEPT でファイル選択を制御し、サーバー側（upload/route.ts）ではuploadable-extensions.tsのvalidateMimeType()で検証すると記載されている。しかし、ブラウザが送信するMIME typeはクライアント側で容易に偽装可能であり、MIME typeチェックだけでは不十分。既存のmagic bytes検証がこれを補完しているが、設計書のセキュリティ設計セクション（Section 6）にMIME typeスプーフィングへの対策方針（magic bytesによる二重検証で対処済みであること）を明記すべき。",
+        "current_design": "magic bytes検証は実装済みだが、設計書のセキュリティ設計セクションにMIME typeスプーフィングの対策が明示されていない",
+        "recommendation": "セキュリティ設計セクションのチェック表に「MIME typeスプーフィング対策: magic bytes検証で二重チェック済み」を追加し、MIME type単体では信頼しない方針を明文化する。",
+        "affected_section": "6. セキュリティ設計"
+      },
+      {
+        "id": "S4-S3",
+        "owasp_category": "A04 安全でない設計",
+        "title": "アップロード後のsend失敗時に孤立ファイルが蓄積するリスク",
+        "description": "2段階方式（upload -> send）では、ステップ1でアップロード成功後にステップ2のsendが失敗した場合、.commandmate/attachments/ に孤立ファイルが蓄積する。設計書のトレードオフセクションで「クリーンアップ未実装」と認識されているが、蓄積によるディスク圧迫リスクに対する緩和策が未定義。",
+        "current_design": "「ディスク容量に蓄積（クリーンアップ未実装）」とトレードオフに記載のみ",
+        "recommendation": "以下のいずれかを設計に追加: (1) 一定期間（例: 24時間）経過した孤立ファイルを定期クリーンアップするバッチ処理の設計方針を記載, (2) .commandmate/attachments/ ディレクトリの合計サイズ上限（例: 100MB）を設け、超過時は古いファイルから削除, (3) 将来のIssueとして孤立ファイルクリーンアップを明示的にスコープアウトする旨を記載。",
+        "affected_section": "8. 設計上の決定事項とトレードオフ"
+      },
+      {
+        "id": "S4-S4",
+        "owasp_category": "A03 インジェクション",
+        "title": "imagePath のホワイトリスト検証（.commandmate/attachments/ プレフィックス）の未設計",
+        "description": "send/route.tsのimagePathバリデーションでは isPathSafe() と resolveAndValidateRealPath() を使用してworktree外へのアクセスを防いでいるが、worktree内の任意のファイルパスを imagePath として指定できてしまう。例えば `.env` や `src/config/auth-config.ts` など、画像以外のファイルパスが指定された場合、フォールバック方式ではそのパスがCLIツールに送信される。CLIツールがそのファイルを読み取る可能性がある。",
+        "current_design": "isPathSafe() + resolveAndValidateRealPath() のみ（worktree内の任意パスが許可される）",
+        "recommendation": "send/route.tsで imagePath が `.commandmate/attachments/` プレフィックスで始まることをホワイトリスト検証する。加えて、拡張子が ATTACHABLE_IMAGE_EXTENSIONS に含まれることも検証する。これにより、worktree内の任意ファイルへのアクセスを防止する。",
+        "affected_section": "5. API設計（send API）, 6. セキュリティ設計"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S4-N1",
+        "owasp_category": "A06 脆弱なコンポーネント",
+        "title": "WebP magic bytes検証の完全性",
+        "description": "image-extensions.tsのvalidateImageMagicBytes()ではWebPのRIFFヘッダ（4バイト）のみ検証しているが、validateWebPMagicBytes()ではRIFFヘッダ+WEBPシグネチャ（オフセット8-11）の完全検証を行っている。upload/route.tsで使用されるuploadable-extensions.tsもRIFFヘッダのみの検証。RIFFヘッダはAVI等の他フォーマットでも使用されるため、WebPシグネチャまで検証することが望ましい。",
+        "recommendation": "uploadable-extensions.tsのWebP magic bytes定義にオフセット8-11のWEBPシグネチャ検証を追加するか、validateWebPMagicBytes()を共通化して使用する。"
+      },
+      {
+        "id": "S4-N2",
+        "owasp_category": "A08 ソフトウェアとデータの整合性",
+        "title": "アップロード後の画像ファイル改ざん検知",
+        "description": "upload完了後からsend実行までの間に、ファイルシステム上の画像ファイルが改ざんされるリスクがある。ローカル開発ツールであるため脅威レベルは低いが、完全性を保証するにはupload時にハッシュを記録し、send時に再検証する仕組みが考えられる。",
+        "recommendation": "現時点ではスコープ外として許容可能。ローカル開発ツールのため、ファイルシステムへのアクセス権を持つ攻撃者を想定する脅威モデルは過剰。将来的にリモートサーバー対応する場合に再検討。"
+      },
+      {
+        "id": "S4-N3",
+        "owasp_category": "A01 アクセス制御の不備",
+        "title": "他のworktreeの画像ファイルへの横断アクセス防止の明示",
+        "description": "isPathSafe(body.imagePath, worktree.path) により、imagePathは当該worktreeのルートディレクトリ配下に制限されるため、他のworktreeの画像にはアクセスできない設計になっている。この防御が機能していることを設計書のセキュリティ設計セクションに明記すると、レビュアーの理解が容易になる。",
+        "recommendation": "セキュリティ設計セクションに「worktree間の画像アクセス分離: isPathSafe(imagePath, worktree.path) によりworktree単位でパスを制限」を追記する。"
+      }
+    ]
+  },
+  "total_findings": {
+    "must_fix": 2,
+    "should_fix": 4,
+    "nice_to_have": 3
+  },
+  "owasp_coverage": {
+    "A01_access_control": {
+      "status": "OK",
+      "detail": "middleware.tsによる認証保護がAPIルート全体に適用済み。upload/send APIはmatcher対象。worktree間のパス分離はisPathSafe()で実現。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "OK",
+      "detail": "画像ファイルは.commandmate/attachments/に保存され、.gitignoreで追跡除外設計。機密情報の暗号化は不要（ローカルファイルシステム）。"
+    },
+    "A03_injection": {
+      "status": "RISK",
+      "detail": "フォールバック方式でのパス埋め込みにCLIインジェクションリスクあり（S4-M1）。パストラバーサル防御は既存コードで十分。imagePathのホワイトリスト検証が不足（S4-S4）。"
+    },
+    "A04_insecure_design": {
+      "status": "RISK",
+      "detail": "孤立ファイル蓄積リスク（S4-S3）。2段階方式のトレードオフとして認識済みだが緩和策が未定義。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "RISK",
+      "detail": ".gitignore自動追加の失敗時挙動が未定義（S4-S1）。MIME typeスプーフィング対策の明文化不足（S4-S2）。"
+    },
+    "A06_vulnerable_components": {
+      "status": "OK",
+      "detail": "magic bytes検証は各形式に対して実装済み。WebPのシグネチャ検証は改善余地あり（S4-N1）だがリスクは低い。"
+    },
+    "A07_auth_session": {
+      "status": "OK",
+      "detail": "middleware.tsの認証ミドルウェアがupload/send APIを保護。AUTH_EXCLUDED_PATHSにupload/sendは含まれない。matcherパターンもAPI pathをカバー。"
+    },
+    "A08_integrity": {
+      "status": "OK",
+      "detail": "ローカル開発ツールのため改ざん検知は過剰。将来的なリモート対応時に再検討（S4-N2）。"
+    },
+    "A09_logging_monitoring": {
+      "status": "OK",
+      "detail": "既存のコードベースにセキュリティイベントログ（IP制限拒否、symlink traversal拒否）が実装済み。"
+    },
+    "A10_ssrf": {
+      "status": "RISK",
+      "detail": "imagePathにURLスキームが含まれる場合の明示的な拒否処理が未設計（S4-M2）。"
+    }
+  }
+}

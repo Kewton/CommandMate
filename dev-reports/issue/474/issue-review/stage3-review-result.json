@@ -1,0 +1,181 @@
+{
+  "issue_number": 474,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "focus_area": "影響範囲",
+  "review_date": "2026-03-12",
+  "review_summary": "影響範囲の記載について、Issue内の一覧表は主要な変更対象ファイルを概ね網羅しているが、いくつかの重要な漏れがある。特に、fetchApiのContent-Type固定問題（multipart/form-data送信不可）、テストファイルへの影響、.commandmate/attachmentsディレクトリの.gitignore管理、ICLIToolインターフェース変更に伴うindex.tsエクスポート更新、CLIToolManagerへの影響が記載されていない。また、セキュリティ面では画像アップロード専用APIの新設とpath-validatorの適用、アップロード画像の一時ファイル管理について明確化が必要。",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "fetchApi関数がContent-Type: application/jsonを強制設定しており、multipart/form-dataでの画像アップロードに対応できない",
+        "location": "src/lib/api-client.ts: fetchApi関数（L46-47）、worktreeApi.sendMessage（L185-194）",
+        "recommendation": "画像添付時にはfetchApiを使わず、専用のupload関数（FormData対応）を新設するか、fetchApiをContent-Typeの上書きを許容する形に修正する必要がある。影響範囲表にapi-client.tsの記載はあるが、この根本的な制約について言及がなく、設計判断が必要。2つの方針を検討すべき: (1) 画像アップロードは既存の/api/worktrees/[id]/upload/APIを再利用し、パスをsend APIに渡す方式、(2) send APIをmultipart対応にする方式。方針(1)ならfetchApiの変更は不要だが、2回のAPIコールが必要になる",
+        "evidence": "api-client.ts L46-47: headers.set('Content-Type', 'application/json') が全リクエストに強制適用されている。sendMessage関数はJSON.stringifyでbodyを送信しており、バイナリファイルの直接送信に対応していない"
+      },
+      {
+        "id": "MF-2",
+        "category": "影響ファイル",
+        "issue": "ICLIToolインターフェースにsendMessageWithImageを追加する場合、CLIToolManager.getToolの戻り値型が変わるため、send/route.tsでの呼び出し方法に影響する",
+        "location": "src/lib/cli-tools/manager.ts、src/app/api/worktrees/[id]/send/route.ts",
+        "recommendation": "send/route.tsはcliTool.sendMessage(params.id, body.content)（L161）を呼び出しているが、画像パス付きの場合にsendMessageWithImageを呼び分けるロジックが必要。この分岐ロジックについてIssueの影響範囲表に記載がない。manager.tsのgetTool()の戻り値はICLITool型なので、supportsImageやsendMessageWithImageがインターフェースに追加されれば型は自動的に伝播するが、send/route.tsのリクエストパース・バリデーション・呼び出しロジック変更の詳細を影響範囲に含めるべき",
+        "evidence": "send/route.ts L161: await cliTool.sendMessage(params.id, body.content); この行が画像パス対応に変わる必要がある。SendMessageRequest型(L31-34)にもimagePath等のフィールド追加が必要"
+      },
+      {
+        "id": "MF-3",
+        "category": "セキュリティ",
+        "issue": ".commandmate/attachmentsディレクトリへの画像保存について、パストラバーサル防御とシンボリックリンク検証の適用が影響範囲に記載されていない",
+        "location": "提案する解決策セクション - フォールバック方式",
+        "recommendation": "画像アップロードAPIでは既存のpath-validator.ts（isPathSafe、resolveAndValidateRealPath）を必ず適用する旨をIssueに明記すべき。また、.commandmate/attachmentsディレクトリの自動作成ロジックとパーミッション設定についても影響範囲に含める。既存のupload APIが参考になるが、アップロード先がworktreeルート配下ではなく.commandmate/attachments固定であることの制約を明記する必要がある",
+        "evidence": "既存upload API (src/app/api/worktrees/[id]/upload/[...path]/route.ts) はisPathSafe()とresolveAndValidateRealPath()を使用している（L117, L122）。新規の画像アップロードAPIにも同等の防御が必要"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト範囲",
+        "issue": "影響を受ける既存テストファイルが影響範囲に記載されていない",
+        "location": "影響範囲セクション",
+        "recommendation": "以下のテストファイルが影響を受ける可能性が高いため、影響範囲に追加すべき: (1) tests/unit/components/worktree/MessageInput.test.tsx - 画像添付ボタンのテスト追加、(2) tests/unit/cli-tools/base.test.ts - BaseCLIToolのデフォルト画像メソッドテスト、(3) tests/unit/lib/cli-tools/types.test.ts - supportsImageプロパティテスト、(4) tests/integration/api-send-cli-tool.test.ts - 画像パス付きsend APIテスト、(5) tests/helpers/message-input-test-utils.ts - テストヘルパー更新、(6) tests/unit/config/image-extensions.test.ts - 既存テストとの整合性確認",
+        "evidence": "testsディレクトリにMessageInput.test.tsx、base.test.ts、api-send-cli-tool.test.ts等の既存テストが存在し、インターフェース変更やコンポーネント変更に伴い修正が必要になる"
+      },
+      {
+        "id": "SF-2",
+        "category": "影響ファイル",
+        "issue": "cli-tools/index.tsのエクスポート一覧に画像関連の新しいエクスポートが必要になる可能性がある",
+        "location": "src/lib/cli-tools/index.ts",
+        "recommendation": "ICLIToolインターフェースの拡張（supportsImage等）はtypes.tsで定義されるためindex.tsの型エクスポートは自動的に含まれるが、base.tsに新しいメソッドが追加される場合や、画像送信用のユーティリティが追加される場合はindex.tsの更新が必要。影響範囲表に含めるべき",
+        "evidence": "src/lib/cli-tools/index.ts はICLITool、BaseCLITool、CLIToolManagerをエクスポートしている。VibeLocalToolとOpenCodeToolはindex.tsにエクスポートされていないが、manager.tsから直接インポートされている"
+      },
+      {
+        "id": "SF-3",
+        "category": "影響ファイル",
+        "issue": ".commandmate/attachmentsディレクトリが.gitignore対象であることの管理方法が未記載",
+        "location": "提案する解決策セクション",
+        "recommendation": "ユーザーのworktree内に.commandmate/attachments/を作成する場合、各worktreeの.gitignoreに追記する仕組みが必要。プロジェクトルートの.gitignoreには.commandmate/が含まれていない。実装時にworktree内の.gitignoreを自動更新するか、CMATE.md/.claudeignore等の既存パターンに合わせるかの設計判断が必要。影響範囲に.gitignore管理ロジックを含めるべき",
+        "evidence": "プロジェクトの.gitignoreに.commandmate/の記載はない。worktree内に新規ディレクトリを作成するなら、そのworktreeの.gitignoreに追記するか、ユーザーに手動追加を求めるかの方針が必要"
+      },
+      {
+        "id": "SF-4",
+        "category": "影響ファイル",
+        "issue": "WorktreeDetailRefactored.tsx（MessageInputの親コンポーネント）への影響が影響範囲表に含まれていない",
+        "location": "影響範囲セクション - 変更対象ファイル表",
+        "recommendation": "MessageInputコンポーネントのpropsに画像関連のstateやcallbackが追加される場合、WorktreeDetailRefactored.tsxからの呼び出し箇所（2箇所: L2335, L2596付近）の修正が必要になる。関連コンポーネントとして記載はあるが、変更対象ファイル表にも含めるべき。特にcliToolIdに基づくsupportsImage判定ロジックの伝播が必要",
+        "evidence": "WorktreeDetailRefactored.tsxのL2335とL2596付近で<MessageInput>を使用している。MessageInputPropsの変更があれば親からの呼び出し部分も修正が必要"
+      },
+      {
+        "id": "SF-5",
+        "category": "破壊的変更",
+        "issue": "image-extensions.tsの既存IMAGE_EXTENSIONSにはSVGが含まれているが、Issue受入条件ではSVGを添付対象外としている。再利用方法の齟齬がある",
+        "location": "受入条件セクション、config/image-extensions.ts",
+        "recommendation": "image-extensions.tsのIMAGE_EXTENSIONSにはsvgが含まれている。画像添付用のバリデーションではSVGを除外する必要があるため、IMAGE_EXTENSIONSをそのまま再利用するのではなく、SVG除外のフィルタリングロジックまたはATTACHABLE_IMAGE_EXTENSIONSのような新しい定数が必要。この点を影響範囲に含め、image-extensions.tsの変更有無を明確にすべき",
+        "evidence": "image-extensions.ts L19-26: IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']。受入条件: 「SVGはXSSリスクがあるため添付対象外」"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント更新",
+        "issue": "CLAUDE.mdのモジュール一覧にimage-extensions.tsの画像添付対応の記述更新や新規モジュールの追加が必要になる",
+        "location": "CLAUDE.md - 主要モジュール一覧",
+        "recommendation": "画像アップロード用のAPIエンドポイントやユーティリティを新規追加する場合、CLAUDE.mdの主要モジュール一覧への追記が必要。docs/implementation-history.mdへの追記も推奨",
+        "evidence": "CLAUDE.mdにはimage-extensions.tsの記載がなく、新規追加されるAPIエンドポイントの記載も必要になる"
+      },
+      {
+        "id": "NTH-2",
+        "category": "パフォーマンス",
+        "issue": "画像ファイルのアップロードサイズ上限（5MB）はimage-extensions.tsのIMAGE_MAX_SIZE_BYTESと一致しているが、大量画像添付時のメモリ使用量について考慮されていない",
+        "location": "受入条件セクション",
+        "recommendation": "同時に添付可能な画像数の制限（例: 1枚のみ）を設けるか、複数画像の場合の合計サイズ制限を検討すると良い。Issue本文では1画像添付を暗に想定しているように見えるが、明示的な制限の記載があるとよい",
+        "evidence": "MessageInputの現在の設計はテキスト入力のみ。画像添付UIの設計（単一 vs 複数）によりメモリ使用パターンが変わる"
+      },
+      {
+        "id": "NTH-3",
+        "category": "依存関係",
+        "issue": "画像プレビュー表示を行う場合、MessageInputまたは新コンポーネントにURL.createObjectURL等のブラウザAPI依存が発生する",
+        "location": "実装タスクセクション",
+        "recommendation": "画像添付後のプレビュー表示UIについて、実装タスクに明記すると実装時の曖昧さが減る。プレビューなしで即送信する方式もあるが、UXとして添付確認UIがあることが望ましい",
+        "evidence": "現在のMessageInput.tsxはテキストのみのUI。画像添付時のプレビューUIは実装タスクに含まれていない"
+      }
+    ]
+  },
+  "total_findings": {
+    "must_fix": 3,
+    "should_fix": 5,
+    "nice_to_have": 3
+  },
+  "code_references": [
+    {
+      "file": "src/lib/api-client.ts",
+      "relevance": "fetchApi関数のContent-Type固定がmultipart/form-data送信を阻害。sendMessage関数のシグネチャ変更が必要"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/send/route.ts",
+      "relevance": "画像パスパラメータの受取り・バリデーション・CLI tool呼び分けロジックの追加が必要"
+    },
+    {
+      "file": "src/lib/cli-tools/types.ts",
+      "relevance": "ICLIToolインターフェースにsupportsImage/sendMessageWithImage追加。CLIToolInfo型にもsupportsImage追加の可能性"
+    },
+    {
+      "file": "src/lib/cli-tools/base.ts",
+      "relevance": "BaseCLIToolにデフォルト実装（supportsImage()=false、sendMessageWithImage()フォールバック）追加"
+    },
+    {
+      "file": "src/lib/cli-tools/manager.ts",
+      "relevance": "getTool()の戻り値型がICLIToolなので型は自動伝播するが、画像サポート判定用のヘルパーメソッド追加の可能性"
+    },
+    {
+      "file": "src/lib/cli-tools/index.ts",
+      "relevance": "新しい型やエクスポートの追加が必要になる可能性"
+    },
+    {
+      "file": "src/config/image-extensions.ts",
+      "relevance": "SVG除外のフィルタリングロジックまたは新定数ATTACHABLE_IMAGE_EXTENSIONSの追加が必要"
+    },
+    {
+      "file": "src/lib/path-validator.ts",
+      "relevance": "画像アップロード先ディレクトリのパストラバーサル防御で再利用"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/upload/[...path]/route.ts",
+      "relevance": "既存アップロードAPIの参考実装。セキュリティパターンの再利用元"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "MessageInputの親コンポーネント。props変更に伴う修正が2箇所必要"
+    },
+    {
+      "file": "tests/unit/components/worktree/MessageInput.test.tsx",
+      "relevance": "画像添付ボタンのレンダリング・クリック・無効化テスト追加"
+    },
+    {
+      "file": "tests/unit/cli-tools/base.test.ts",
+      "relevance": "BaseCLIToolのデフォルト画像メソッドテスト追加"
+    },
+    {
+      "file": "tests/integration/api-send-cli-tool.test.ts",
+      "relevance": "画像パス付きsend APIテスト追加。モッククラスのインターフェース適合更新"
+    },
+    {
+      "file": "tests/helpers/message-input-test-utils.ts",
+      "relevance": "MessageInputの新propsに対応したテストヘルパー更新"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "主要モジュール一覧への新規モジュール追記"
+    },
+    {
+      "file": ".gitignore",
+      "relevance": ".commandmate/attachments用のgitignore管理方針の確認"
+    },
+    {
+      "file": "docs/implementation-history.md",
+      "relevance": "Issue #474の実装履歴追記"
+    }
+  ]
+}

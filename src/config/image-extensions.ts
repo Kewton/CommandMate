@@ -244,6 +244,26 @@ export function validateSvgContent(content: string): ImageValidationResult {
 }
 
 /**
+ * Attachable image extensions (SVG excluded for XSS prevention)
+ * Issue #474: Used for image attachment file selection dialog
+ * [S1-S3] DRY: Single source of truth for attachable image extensions
+ */
+export const ATTACHABLE_IMAGE_EXTENSIONS: readonly string[] = IMAGE_EXTENSIONS.filter(
+  (ext) => ext !== '.svg'
+);
+
+/**
+ * File selection dialog accept attribute value for image attachments
+ * Issue #474: Generated from ATTACHABLE_IMAGE_EXTENSIONS for DRY compliance
+ * [DRY] Uses getMimeTypeByExtension instead of direct validator lookup
+ * Format: comma-separated MIME types (e.g., 'image/png,image/jpeg,...')
+ */
+export const ATTACHABLE_IMAGE_ACCEPT: string = ATTACHABLE_IMAGE_EXTENSIONS
+  .map((ext) => getMimeTypeByExtension(ext))
+  .filter((mime) => mime !== 'application/octet-stream')
+  .join(',');
+
+/**
  * Validate image content comprehensively
  * [SF-002] Combines size, magic bytes, and SVG security validation
  * [DRY] Uses normalizeExtension helper

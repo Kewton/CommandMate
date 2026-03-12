@@ -1,0 +1,29 @@
+{
+  "issue_number": 474,
+  "refactor_targets": [
+    "src/config/image-extensions.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/cli-tools/index.ts",
+    "src/lib/cli-tools/claude.ts",
+    "src/app/api/worktrees/[id]/send/route.ts",
+    "src/app/api/worktrees/[id]/upload/[...path]/route.ts",
+    "src/lib/api-client.ts",
+    "src/hooks/useImageAttachment.ts",
+    "src/components/worktree/MessageInput.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0
+  },
+  "improvement_goals": [
+    "コードの可読性向上",
+    "重複コードの削除",
+    "型安全性の確保",
+    "セキュリティバリデーションの堅牢性確認",
+    "SOLID原則への準拠確認"
+  ],
+  "constraints": [
+    "既存テスト（4921件）が引き続きパスすること",
+    "TypeScriptエラー0件を維持すること",
+    "ESLintエラー0件を維持すること"
+  ]
+}

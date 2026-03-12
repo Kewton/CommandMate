@@ -1,0 +1,80 @@
+{
+  "issue_number": 474,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "review_summary": "設計方針書と既存コードベースの間に複数の不整合を検出した。特にpath-validator.tsの関数シグネチャ(引数順序・引数数)の不一致はセキュリティバリデーションが意図通りに動作しないリスクがあるため、Must Fixとして報告する。また、api-client.tsのfetchApiラッパーがContent-Type: application/jsonを強制する制約により、FormDataアップロード用メソッドの設計に追加考慮が必要である。クラス名の不一致やAPI名前空間の不一致など、実装時の混乱を招く記述も複数確認された。",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "S2-M1",
+        "title": "resolveAndValidateRealPath関数のシグネチャ不一致(引数数・用途)",
+        "description": "設計書セクション6では resolveAndValidateRealPath(worktreePath, body.imagePath, '.commandmate/attachments') と3引数で呼び出しているが、実際のpath-validator.tsの関数シグネチャは resolveAndValidateRealPath(targetPath: string, rootDir: string): boolean の2引数である。第3引数の「許可サブディレクトリ」制限機能は実装に存在しない。さらに、実際の関数は最初の引数がtargetPath(検証対象パス)で、第2引数がrootDir(許可ルート)だが、設計書ではworktreePathを第1引数として渡しており、引数の意味も逆転している。",
+        "suggestion": "resolveAndValidateRealPathの実際のシグネチャに合わせて設計書を修正する。サブディレクトリ制限が必要な場合は、resolveAndValidateRealPath呼び出し後に追加のパスプレフィックスチェックを行うロジックを設計に明記する。正しい呼び出し例: const fullImagePath = path.resolve(worktree.path, body.imagePath); resolveAndValidateRealPath(fullImagePath, worktree.path) のように、検証対象パスを第1引数、ルートディレクトリを第2引数にする。"
+      },
+      {
+        "id": "S2-M2",
+        "title": "isPathSafe関数の引数順序が設計書で逆転",
+        "description": "設計書セクション6のパストラバーサル防御コードで isPathSafe(worktreePath, absoluteImagePath) と記述しているが、実際の関数シグネチャは isPathSafe(targetPath: string, rootDir: string): boolean であり、第1引数が検証対象パス、第2引数がルートディレクトリである。設計書の呼び出しではworktreePathが第1引数(ルートを検証対象に)、absoluteImagePathが第2引数(検証対象をルートに)となっており、セキュリティチェックが正しく機能しない。既存のupload/route.tsでは isPathSafe(normalizedDir, worktree.path) と正しい順序で呼び出している。",
+        "suggestion": "設計書のコード例を isPathSafe(absoluteImagePath, worktreePath) に修正する。既存のupload/route.tsの呼び出しパターン(第1引数=検証対象、第2引数=ルート)と一致させる。"
+      },
+      {
+        "id": "S2-M3",
+        "title": "fetchApiラッパーがContent-Type: application/jsonを強制するため、uploadImageFileメソッドの実装に制約",
+        "description": "設計書セクション4でapi-client.tsに uploadImageFile メソッドを追加する方針だが、既存のfetchApi関数はすべてのリクエストにContent-Type: application/jsonヘッダーを強制設定する(api-client.ts 47行目: headers.set('Content-Type', 'application/json'))。FormDataアップロードではContent-Typeをブラウザに自動設定させる必要があり(multipart/form-data + boundary)、fetchApiをそのまま使用できない。設計書はこの制約について言及していない。",
+        "suggestion": "uploadImageFileメソッドはfetchApiを使わず、直接fetchを呼び出す実装にする旨を設計書に明記する。または、fetchApiにContent-Type自動設定をスキップするオプションを追加する設計を検討する。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S2-S1",
+        "title": "ClaudeCLIToolクラス名が実際のClaudeToolと不一致",
+        "description": "設計書セクション3の画像対応CLIツール実装例で class ClaudeCLITool extends BaseCLITool implements IImageCapableCLITool と記述しているが、実際のclaude.tsではクラス名は ClaudeTool である(export class ClaudeTool extends BaseCLITool)。",
+        "suggestion": "設計書のクラス名を ClaudeTool に修正し、実際のコードベースと一致させる。"
+      },
+      {
+        "id": "S2-S2",
+        "title": "API名前空間の不一致: apiClient vs worktreeApi",
+        "description": "設計書セクション7のMessageInput.tsx変更方針で apiClient.uploadImageFile と記述しているが、既存のapi-client.tsではworktreeApi名前空間が使用されている(MessageInput.tsxでも worktreeApi.sendMessage を呼び出している)。uploadImageFileメソッドをworktreeApiに追加するのか、別の名前空間を作るのかが不明確。",
+        "suggestion": "設計書の apiClient を worktreeApi に修正するか、新規名前空間を使う場合はその理由と定義場所を明記する。既存のMessageInput.tsxがworktreeApiを使用しているため、uploadImageFileもworktreeApiに追加するのが一貫性の観点から望ましい。"
+      },
+      {
+        "id": "S2-S3",
+        "title": "upload APIのバリデーション方式の不整合: image-extensions.ts vs uploadable-extensions.ts",
+        "description": "設計書セクション6では画像バリデーションにimage-extensions.tsのATTACHABLE_IMAGE_EXTENSIONS/IMAGE_EXTENSION_VALIDATORSを使用する方針だが、既存のupload/route.tsはuploadable-extensions.tsのisUploadableExtension/validateMagicBytes/validateMimeTypeを使用している。設計書は「既存のupload APIを拡張する」方針(セクション2, 5)だが、バリデーションロジックをどちらのモジュールに統一するのかが不明確。uploadable-extensions.tsには既にSVG除外済みの画像拡張子が含まれており、ATTACHABLE_IMAGE_EXTENSIONS定数を別途作成する必要性が薄い可能性がある。",
+        "suggestion": "upload APIの拡張時にどちらのバリデーションモジュールを使用するかを明確にする。既存のupload/route.tsがuploadable-extensions.tsを使用しているため、画像添付もこのバリデーションパイプラインをそのまま活用し、ATTACHABLE_IMAGE_EXTENSIONSはUI側のaccept属性とクライアント側バリデーション専用と位置づけるのが整合的。"
+      },
+      {
+        "id": "S2-S4",
+        "title": "send/route.tsのSendMessageRequest型にimagePath未定義",
+        "description": "設計書セクション4でSendMessageRequestにimagePath?: stringを追加する方針を記載しているが、設計書セクション5のコード例ではbody.imagePathを直接参照している。send/route.tsの実装では現在body.contentをトリムせずにそのままcliTool.sendMessageに渡している箇所(161行目)とトリム済み変数trimmedContentを使う箇所(64行目)が混在している。imagePath追加時にパスバリデーション(resolveAndValidateRealPath)をどのタイミングで行うかの詳細フローが設計書のコード例と既存の処理フローで整合していない。",
+        "suggestion": "send/route.tsの既存処理フロー(1.worktree検証 -> 2.body解析 -> 3.content検証 -> 4.CLIツール選定 -> ... -> 9.sendMessage呼び出し)のどの位置にimagePathバリデーションを挿入するかを明記する。特に、imagePathバリデーションはcliToolのセッション起動前(早期リターン)に行うべき。"
+      },
+      {
+        "id": "S2-S5",
+        "title": "MessageInput.tsxのprops変更が未定義",
+        "description": "設計書セクション7でuseImageAttachmentフックにworktreeIdを渡す方針だが、MessageInputPropsにworktreeIdは既に存在する。一方、送信時にimagePath付きでsendMessageを呼ぶにはMessageInputのsubmitMessage関数を変更する必要がある。現在のsubmitMessageは worktreeApi.sendMessage(worktreeId, message.trim(), effectiveCliTool) と位置引数で呼び出しており、設計書のオブジェクト形式 sendMessage(id, content, { cliToolId, imagePath }) への移行が必要だが、この移行の影響範囲(MessageInput.tsx以外の呼び出し箇所)が設計書に記載されていない。",
+        "suggestion": "sendMessageのシグネチャ変更による影響範囲(全呼び出し箇所のリスト)を設計書セクション4またはセクション9に追記する。現在の呼び出し箇所はMessageInput.tsxの1箇所のみだが、将来の変更に備えて影響範囲を明示する。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S2-N1",
+        "title": "画像添付のクリーンアップ機構が設計書で「未実装」と記載のみ",
+        "description": "設計書セクション8のトレードオフ表で「ディスク容量に蓄積(クリーンアップ未実装)」と記載しているが、.commandmate/attachments/のクリーンアップ方針(手動削除、一定期間後の自動削除、セッション終了時の削除等)について今後のIssueとして記録する方針が明記されていない。",
+        "suggestion": "クリーンアップについて将来の対応方針(例: 別Issueとして起票予定)を設計書に一文追記する。"
+      },
+      {
+        "id": "S2-N2",
+        "title": "セクション9(実装順序)とセクション11(チェックリスト)の項目対応が不完全",
+        "description": "セクション9のステップ5「upload API拡張」とステップ10「WorktreeDetailRefactored.tsx対応」に対応するチェックリスト項目がセクション11に存在しない。また、セクション9のステップ11「ユニットテスト追加」もチェックリストに含まれていない。",
+        "suggestion": "セクション11のチェックリストにupload API拡張、WorktreeDetailRefactored.tsx変更、ユニットテスト追加の項目を追加して、実装順序との対応を完全にする。"
+      }
+    ]
+  },
+  "total_findings": {
+    "must_fix": 3,
+    "should_fix": 5,
+    "nice_to_have": 2
+  }
+}

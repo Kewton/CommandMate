@@ -18,7 +18,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
-import { normalize, extname } from 'path';
+import { normalize, extname, resolve } from 'path';
+import { mkdirSync, existsSync } from 'fs';
 import { isPathSafe, resolveAndValidateRealPath } from '@/lib/path-validator';
 import {
   writeBinaryFile,
@@ -113,6 +114,19 @@ export async function POST(
     // Validate target directory path
     const targetDir = params.path.join('/');
     const normalizedDir = normalize(targetDir);
+
+    // [S3-S2] Auto-create .commandmate/attachments/ directory if needed
+    if (normalizedDir.startsWith('.commandmate/attachments') || normalizedDir === '.commandmate/attachments') {
+      const fullDir = resolve(worktree.path, normalizedDir);
+      if (!existsSync(fullDir)) {
+        try {
+          mkdirSync(fullDir, { recursive: true });
+        } catch (mkdirError) {
+          console.error('[upload] Failed to create attachments directory:', mkdirError);
+          return createUploadErrorResponse('INTERNAL_ERROR', 'Failed to create upload directory');
+        }
+      }
+    }
 
     if (!isPathSafe(normalizedDir, worktree.path)) {
       return createUploadErrorResponse('INVALID_PATH', 'Invalid file path');

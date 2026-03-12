@@ -106,7 +106,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setSending(true);
       setError(null);
       const effectiveCliTool: CLIToolType = cliToolId || 'claude';
-      await worktreeApi.sendMessage(worktreeId, message.trim(), effectiveCliTool);
+      await worktreeApi.sendMessage(worktreeId, message.trim(), { cliToolId: effectiveCliTool });
       setMessage('');
       setIsFreeInputMode(false);
       try { window.localStorage.removeItem(DRAFT_STORAGE_KEY_PREFIX + worktreeId); } catch { /* ignore */ }
