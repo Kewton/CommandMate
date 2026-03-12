@@ -9,7 +9,7 @@ import { getWorktreeById, getSessionState } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
-import { detectSessionStatus } from '@/lib/status-detector';
+import { detectSessionStatus, STATUS_REASON } from '@/lib/status-detector';
 import { getAutoYesState, getLastServerResponseTimestamp, isValidWorktreeId } from '@/lib/auto-yes-manager';
 
 /** Issue #368: Derive from CLI_TOOL_IDS (DRY) */
@@ -92,6 +92,10 @@ export async function GET(
     // the single source of truth, ensuring consistency between status and prompt state.
     const isPromptWaiting = statusResult.hasActivePrompt;
 
+    // Issue #473: Selection list active flag for OpenCode TUI navigation
+    const isSelectionListActive = statusResult.status === 'waiting'
+      && statusResult.reason === STATUS_REASON.OPENCODE_SELECTION_LIST;
+
     // Extract realtime snippet (last 100 lines for better context)
     const realtimeSnippet = lines.slice(-100).join('\n');
 
@@ -124,6 +128,8 @@ export async function GET(
         expiresAt: autoYesState?.enabled ? autoYesState.expiresAt : null,
         stopReason: autoYesState?.stopReason,
       },
+      // Issue #473: Selection list active flag for OpenCode TUI navigation
+      isSelectionListActive,
       // Issue #138: Server-side response timestamp for duplicate prevention
       lastServerResponseTimestamp,
     });

@@ -24,7 +24,7 @@
  * coupling via a minimal DTO/projection type.
  */
 
-import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR } from './cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
 import type { PromptDetectionResult } from './prompt-detector';
 import type { CLIToolType } from './cli-tools/types';
@@ -109,6 +109,21 @@ const STATUS_CHECK_LINE_COUNT: number = 15;
  * @constant
  */
 const STATUS_THINKING_LINE_COUNT: number = 5;
+
+/**
+ * Reason string constants for StatusDetectionResult.reason.
+ * Shared between status-detector.ts and current-output/route.ts to prevent typos (DR2-003).
+ */
+export const STATUS_REASON = {
+  PROMPT_DETECTED: 'prompt_detected',
+  THINKING_INDICATOR: 'thinking_indicator',
+  OPENCODE_PROCESSING_INDICATOR: 'opencode_processing_indicator',
+  OPENCODE_SELECTION_LIST: 'opencode_selection_list',
+  OPENCODE_RESPONSE_COMPLETE: 'opencode_response_complete',
+  INPUT_PROMPT: 'input_prompt',
+  NO_RECENT_OUTPUT: 'no_recent_output',
+  DEFAULT: 'default',
+} as const;
 
 /**
  * Time threshold (in ms) for considering output as "stale"
@@ -247,15 +262,26 @@ export function detectSessionStatus(
         };
       }
 
-      // C. Check last few content lines for completion marker (▣ Build · model · time)
+      // C. Check content area for selection list (Issue #473: fuzzy-search list detection)
       const contentCheckWindow = contentCandidates
         .slice(Math.max(0, lastContentIdx - STATUS_CHECK_LINE_COUNT + 1), lastContentIdx + 1)
         .join('\n');
+      if (OPENCODE_SELECTION_LIST_PATTERN.test(contentCheckWindow)) {
+        return {
+          status: 'waiting',
+          confidence: 'high',
+          reason: STATUS_REASON.OPENCODE_SELECTION_LIST,
+          hasActivePrompt: false,
+          promptDetection,
+        };
+      }
+
+      // D. Check last few content lines for completion marker (▣ Build · model · time)
       if (OPENCODE_RESPONSE_COMPLETE.test(contentCheckWindow)) {
         return {
           status: 'ready',
           confidence: 'high',
-          reason: 'opencode_response_complete',
+          reason: STATUS_REASON.OPENCODE_RESPONSE_COMPLETE,
           hasActivePrompt: false,
           promptDetection,
         };

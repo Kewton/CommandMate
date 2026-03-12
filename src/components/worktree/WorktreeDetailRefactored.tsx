@@ -33,6 +33,7 @@ import { MobileTabBar, type MobileTab } from '@/components/mobile/MobileTabBar';
 import { MobilePromptSheet } from '@/components/mobile/MobilePromptSheet';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { MessageInput } from '@/components/worktree/MessageInput';
+import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { FileTreeView } from '@/components/worktree/FileTreeView';
 import { SearchBar } from '@/components/worktree/SearchBar';
 import { useFileSearch } from '@/hooks/useFileSearch';
@@ -118,6 +119,8 @@ interface CurrentOutputResponse {
   fullOutput?: string;
   realtimeSnippet?: string;
   thinking?: boolean;
+  /** Issue #473: OpenCode TUI selection list active flag */
+  isSelectionListActive?: boolean;
   autoYes?: {
     enabled: boolean;
     expiresAt: number | null;
@@ -1061,6 +1064,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const [isEditorMaximized, setIsEditorMaximized] = useState(false);
   const [autoYesEnabled, setAutoYesEnabled] = useState(false);
   const [autoYesExpiresAt, setAutoYesExpiresAt] = useState<number | null>(null);
+  // Issue #473: Track OpenCode TUI selection list state
+  const [isSelectionListActive, setIsSelectionListActive] = useState(false);
   // Issue #314: Track previous auto-yes enabled state for stop reason toast
   const prevAutoYesEnabledRef = useRef<boolean>(false);
   // Issue #314: Pending stop reason toast (deferred until showToast is available)
@@ -1231,6 +1236,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       } else if (!data.isPromptWaiting && state.prompt.visible) {
         actions.clearPrompt();
       }
+
+      // Issue #473: Update selection list state from server
+      setIsSelectionListActive(data.isSelectionListActive ?? false);
 
       // Update auto-yes state from server (Issue #314: stopReason tracking)
       if (data.autoYes) {
@@ -2314,6 +2322,15 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               maxLeftWidth={60}
             />
           </div>
+          {/* Issue #473: Navigation buttons for OpenCode TUI selection list */}
+          {isSelectionListActive && (
+            <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700 px-4 pt-2 bg-gray-50 dark:bg-gray-800">
+              <NavigationButtons
+                worktreeId={worktreeId}
+                cliToolId={activeCliTab}
+              />
+            </div>
+          )}
           <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-800">
             <MessageInput
               worktreeId={worktreeId}
@@ -2560,6 +2577,19 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onDiffSelect={handleDiffSelect}
           />
         </main>
+
+        {/* Issue #473: Navigation buttons for OpenCode TUI selection list (mobile) */}
+        {isSelectionListActive && (
+          <div
+            className="fixed left-0 right-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 pt-1 z-30"
+            style={{ bottom: 'calc(7rem + env(safe-area-inset-bottom, 0px))' }}
+          >
+            <NavigationButtons
+              worktreeId={worktreeId}
+              cliToolId={activeCliTab}
+            />
+          </div>
+        )}
 
         {/* Message Input - fixed above tab bar */}
         <div

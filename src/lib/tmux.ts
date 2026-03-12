@@ -5,6 +5,7 @@
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { invalidateCache } from './tmux-capture-cache';
 
 const execFileAsync = promisify(execFile);
 
@@ -469,4 +470,48 @@ export async function sendSpecialKey(
     const errorMessage = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to send special key: ${errorMessage}`);
   }
+}
+
+/**
+ * Allowed navigation key names for special-keys API validation.
+ * Used for TUI navigation sequences (e.g., Up/Down cursor, Enter/Escape selection).
+ *
+ * Separate from SPECIAL_KEY_VALUES (sendSpecialKey() control keys) and
+ * ALLOWED_SPECIAL_KEYS (sendSpecialKeys() broader TUI key set).
+ * This as const array is exported for route-level validation (immutable, DRY).
+ *
+ * [DR3-001] Named NAVIGATION_KEY_VALUES to avoid collision with existing SPECIAL_KEY_VALUES.
+ * [DR2-004] Exported as as const array + type guard (not Set) for immutability guarantee.
+ */
+export const NAVIGATION_KEY_VALUES = ['Up', 'Down', 'Enter', 'Escape', 'Tab', 'BTab'] as const;
+
+/**
+ * Navigation key type derived from NAVIGATION_KEY_VALUES.
+ */
+export type NavigationKey = typeof NAVIGATION_KEY_VALUES[number];
+
+/**
+ * Type guard for navigation key validation.
+ * Returns true if the key is in the NAVIGATION_KEY_VALUES set.
+ *
+ * @param key - String to validate
+ * @returns True if key is a valid NavigationKey
+ */
+export function isAllowedSpecialKey(key: string): key is NavigationKey {
+  return (NAVIGATION_KEY_VALUES as readonly string[]).includes(key);
+}
+
+/**
+ * Send special keys to a tmux session and invalidate the capture cache.
+ * Wrapper combining sendSpecialKeys() + invalidateCache() for DRY (DR1-003).
+ *
+ * @param sessionName - Target tmux session name
+ * @param keys - Array of tmux special key names
+ */
+export async function sendSpecialKeysAndInvalidate(
+  sessionName: string,
+  keys: string[]
+): Promise<void> {
+  await sendSpecialKeys(sessionName, keys);
+  invalidateCache(sessionName);
 }

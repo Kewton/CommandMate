@@ -194,6 +194,23 @@ export const OPENCODE_RESPONSE_COMPLETE = /\u25A3\s+\w+\s+\u00b7\s+\S+(?:\s+\u00
 export const OPENCODE_PROCESSING_INDICATOR = /esc interrupt/;
 
 /**
+ * OpenCode TUI selection list pattern (Issue #473)
+ * Placeholder pattern for detecting fuzzy-search selection lists in OpenCode TUI
+ * (e.g., /models, /providers commands).
+ *
+ * Matches two typical patterns:
+ * 1. "> " followed by a model/provider name (selected item indicator)
+ * 2. "filter: " input bar (fuzzy search input)
+ *
+ * The ">" pattern requires a non-whitespace character after "> " to avoid
+ * matching Claude prompt patterns (which use ">" or ">" followed by space only).
+ *
+ * This is a placeholder pattern - to be refined after capture-pane output
+ * samples are collected from actual OpenCode TUI selection lists.
+ */
+export const OPENCODE_SELECTION_LIST_PATTERN = /^>\s+\S|^filter:\s/m;
+
+/**
  * OpenCode TUI separator pattern (Issue #379)
  * Matches lines composed entirely of box-drawing / TUI decoration characters.
  * Covers: vertical lines (U+2503), box corners, horizontal lines, and other TUI elements.
