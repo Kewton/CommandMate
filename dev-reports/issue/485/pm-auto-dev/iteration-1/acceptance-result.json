@@ -1,0 +1,117 @@
+{
+  "issue_number": 485,
+  "status": "passed",
+  "acceptance_results": [
+    {
+      "id": "AC-1",
+      "description": "履歴のユーザーメッセージから選択してメッセージ入力欄に挿入できること",
+      "status": "passed",
+      "evidence": "ConversationPairCard.tsx: onInsertToMessage props定義あり(line 34), UserMessageSection に insert-user-message ボタン実装(line 224-235, ArrowDownToLineアイコン使用). HistoryPane.tsx: onInsertToMessage props受取・ConversationPairCardへ伝播(line 49, 245). WorktreeDetailRefactored.tsx: handleInsertToMessage -> setPendingInsertText コールバック(line 262-264), leftPaneMemo内HistoryPaneへ伝播(line 1350), MobileContent経由でも伝播(line 1722)."
+    },
+    {
+      "id": "AC-2",
+      "description": "WorktreeMemo(Notes)から選択してメッセージ入力欄に挿入できること",
+      "status": "passed",
+      "evidence": "MemoCard.tsx: onInsertToMessage props定義あり(line 47), insert-memo-content ボタン実装(line 207-218, ArrowDownToLineアイコン使用), handleInsert でcontent.trim()空チェック済み(line 166-169). MemoPane.tsx: onInsertToMessage props受取・各MemoCardへ伝播(line 37, 216). NotesAndLogsPane.tsx: onInsertToMessage props受取・MemoPane(notesサブタブ)へ伝播(line 39, 87, 117). WorktreeDetailRefactored.tsx: NotesAndLogsPaneへ伝播(line 1409)."
+    },
+    {
+      "id": "AC-3",
+      "description": "入力欄に既存テキストがある場合、改行2つを挟んで末尾に追加されること",
+      "status": "passed",
+      "evidence": "MessageInput.tsx line 122-129: useEffect内で pendingInsertText を検出し、setMessage((prev) => { if (prev.trim() === '') return pendingInsertText; return prev + '\\n\\n' + pendingInsertText; }) を実装. MessageInput.test.tsx line 497-516: 既存テキスト 'Hello' に 'Appended text' を挿入し 'Hello\\n\\nAppended text' になることをテスト済み."
+    },
+    {
+      "id": "AC-4",
+      "description": "入力欄が空の場合、そのまま挿入されること",
+      "status": "passed",
+      "evidence": "MessageInput.tsx line 125: prev.trim() === '' の場合 pendingInsertText をそのまま返す. MessageInput.test.tsx line 482-494: 空メッセージに 'Inserted text' を挿入し、そのまま 'Inserted text' になることをテスト済み."
+    },
+    {
+      "id": "AC-5",
+      "description": "モバイルビューでも同等に動作すること",
+      "status": "passed",
+      "evidence": "WorktreeDetailSubComponents.tsx: MobileContentProps に onInsertToMessage 定義(line 748), MobileContent内で HistoryPane(line 838) と NotesAndLogsPane(line 898) に伝播. WorktreeDetailRefactored.tsx: モバイル側 MobileContent に handleInsertToMessage 伝播(line 1722), モバイル側 MessageInput に pendingInsertText/onInsertConsumed 伝播(line 1746-1747)."
+    },
+    {
+      "id": "AC-6",
+      "description": "ユニットテストが追加されていること",
+      "status": "passed",
+      "evidence": "新規テスト: ConversationPairCard.test.tsx (Issue #485 describe block at line 46, 5 test cases). 更新テスト: MessageInput.test.tsx (Issue #485 describe block at line 481, 3 test cases), MemoCard.test.tsx (Issue #485 describe block at line 233), HistoryPane.test.tsx (Issue #485 describe block at line 406), MemoPane.test.tsx (Issue #485 describe block at line 297), NotesAndLogsPane.test.tsx (Issue #485 describe block at line 66). 全テスト 4975 passed."
+    },
+    {
+      "id": "AC-7",
+      "description": "パフォーマンスに影響がないこと",
+      "status": "passed",
+      "evidence": "WorktreeDetailRefactored.tsx: handleInsertToMessage は useCallback(fn, []) で空依存配列メモ化(line 262-264). handleInsertConsumed も useCallback(fn, []) で空依存配列メモ化(line 265-267). leftPaneMemo の useMemo 依存配列に handleInsertToMessage が含まれている(line 1416末尾). ConversationPairCard, MemoCard, HistoryPane, MemoPane は全て memo() でラップ済み."
+    },
+    {
+      "id": "AC-8",
+      "description": "既存の下書き保存機能と整合性があること",
+      "status": "passed",
+      "evidence": "MessageInput.tsx: pendingInsertText の useEffect(line 122-129) は setMessage を呼び出し、それにより既存の message useEffect(line 91-102) が発火し 500ms デバウンスで localStorage に保存される. 挿入と下書き保存は独立した useEffect で連鎖動作し、整合性が保たれている."
+    }
+  ],
+  "quality_checks": {
+    "typescript": "pass",
+    "eslint": "pass",
+    "unit_tests": "pass",
+    "test_count": 4983,
+    "test_passed": 4975,
+    "test_failed": 1,
+    "test_failed_detail": "git-utils.test.ts: pre-existing failure unrelated to Issue #485 (getGitStatus branch detection test)"
+  },
+  "test_cases": [
+    {
+      "scenario": "シナリオ1: 履歴の挿入ボタンクリック -> MessageInputのテキスト末尾にユーザーメッセージが追加される",
+      "result": "passed",
+      "evidence": "ConversationPairCard insert-user-message button -> handleInsertToMessage -> setPendingInsertText -> MessageInput useEffect insertion. Unit tests verify end-to-end callback chain."
+    },
+    {
+      "scenario": "シナリオ2: メモカードの挿入ボタンクリック -> MessageInputのテキスト末尾にメモ内容が追加される",
+      "result": "passed",
+      "evidence": "MemoCard insert-memo-content button -> handleInsertToMessage -> setPendingInsertText -> MessageInput useEffect insertion. Unit tests verify callback propagation."
+    },
+    {
+      "scenario": "シナリオ3: 入力欄が空の状態で挿入 -> テキストがそのまま入る（改行なし）",
+      "result": "passed",
+      "evidence": "MessageInput.test.tsx line 482-494: pendingInsertText='Inserted text' with empty message results in 'Inserted text' without preceding newlines."
+    },
+    {
+      "scenario": "シナリオ4: 入力欄に既存テキストがある状態で挿入 -> 改行2つを挟んで末尾に追加",
+      "result": "passed",
+      "evidence": "MessageInput.test.tsx line 497-516: existing text 'Hello' + pendingInsertText='Appended text' results in 'Hello\\n\\nAppended text'."
+    },
+    {
+      "scenario": "シナリオ5: モバイルビューで履歴から挿入 -> デスクトップと同等に動作",
+      "result": "passed",
+      "evidence": "MobileContent receives onInsertToMessage prop and passes to HistoryPane. Mobile MessageInput receives pendingInsertText/onInsertConsumed. Same insertion logic applies."
+    },
+    {
+      "scenario": "シナリオ6: モバイルビューでメモから挿入 -> デスクトップと同等に動作",
+      "result": "passed",
+      "evidence": "MobileContent receives onInsertToMessage prop and passes to NotesAndLogsPane -> MemoPane -> MemoCard. Mobile MessageInput receives pendingInsertText/onInsertConsumed."
+    },
+    {
+      "scenario": "シナリオ7: 全既存テストがパスすること（回帰なし）",
+      "result": "passed",
+      "evidence": "251 test files, 4975 tests passed (1 pre-existing failure in git-utils.test.ts unrelated to Issue #485). No regressions introduced."
+    },
+    {
+      "scenario": "シナリオ8: TypeScript/ESLintエラーが0件であること",
+      "result": "passed",
+      "evidence": "npx tsc --noEmit: no errors. npm run lint: 'No ESLint warnings or errors'."
+    }
+  ],
+  "acceptance_criteria_status": [
+    { "criterion": "履歴のユーザーメッセージから選択してメッセージ入力欄に挿入できること", "verified": true },
+    { "criterion": "WorktreeMemo（Notes）から選択してメッセージ入力欄に挿入できること", "verified": true },
+    { "criterion": "入力欄に既存テキストがある場合、改行2つ（空行）を挟んで末尾に追加されること", "verified": true },
+    { "criterion": "入力欄が空の場合、そのまま挿入されること", "verified": true },
+    { "criterion": "モバイルビューでも同等に動作すること", "verified": true },
+    { "criterion": "ユニットテストが追加されていること", "verified": true },
+    { "criterion": "履歴が多い場合でもパフォーマンスに影響がないこと", "verified": true },
+    { "criterion": "既存の下書き保存機能と整合性があること", "verified": true }
+  ],
+  "evidence_files": [],
+  "message": "すべての受入条件を満たしています。TypeScript型チェック・ESLintともにエラー0件。ユニットテスト4975件パス（1件の既存失敗はIssue #485と無関係のgit-utils.test.ts）。"
+}

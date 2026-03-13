@@ -1,0 +1,67 @@
+{
+  "issue_number": 485,
+  "stage": 4,
+  "apply_date": "2026-03-13",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "S3-001",
+        "status": "applied",
+        "change_summary": "デスクトップ履歴のコールバック伝播経路を「WorktreeDetailRefactored → HistoryPane → ConversationPairCard」に修正。LeftPaneTabSwitcher経由の誤った記述を削除し、関連コンポーネント欄に「変更不要」と明記"
+      },
+      {
+        "id": "S3-002",
+        "status": "applied",
+        "change_summary": "実装タスクにMessageInputのmemo()とforwardRefの組み合わせに関する注記を追加。pendingInsertText propsパターンの親和性の高さについても記載"
+      },
+      {
+        "id": "S3-003",
+        "status": "applied",
+        "change_summary": "影響範囲テーブルのWorktreeDetailRefactored.tsxの説明に「leftPaneMemoのuseMemo依存配列にonInsertToMessageコールバックを追加する必要がある」を追記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S3-004",
+        "status": "applied",
+        "change_summary": "MemoPane.tsxの変更内容を「MemoPanePropsにonInsertToMessage追加、MemoCardへの伝播」に詳細化"
+      },
+      {
+        "id": "S3-005",
+        "status": "applied",
+        "change_summary": "テスト項目を拡充。HistoryPane・MemoPaneの伝播テスト追加、既存テストファイル（HistoryPane.test.tsx, MemoPane.test.tsx, MemoCard.test.tsx, NotesAndLogsPane.test.tsx, MessageInput.test.tsx）の更新を明記"
+      },
+      {
+        "id": "S3-006",
+        "status": "applied",
+        "change_summary": "ConversationPairCardのテストを「新規作成」と明記し、テスト内容（挿入ボタン表示・クリック時のコールバック呼び出し）を具体化"
+      },
+      {
+        "id": "S3-007",
+        "status": "applied",
+        "change_summary": "影響範囲に「変更不要なファイル」セクションを追加し、src/types/配下のファイルへの変更は不要であることを明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S3-008",
+        "status": "skipped",
+        "reason": "pendingInsertTextパターンのリセット機構は実装時に判断すべき詳細設計事項であり、Issue本文には過度な実装詳細を含めない方針"
+      },
+      {
+        "id": "S3-009",
+        "status": "applied",
+        "change_summary": "S3-001の対応に含めてLeftPaneTabSwitcherに「変更不要」の注記を追加済み"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 9,
+    "applied": 8,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/485"
+  }
+}

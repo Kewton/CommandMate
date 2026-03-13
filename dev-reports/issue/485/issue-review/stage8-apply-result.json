@@ -1,0 +1,24 @@
+{
+  "issue_number": 485,
+  "stage": 8,
+  "applied_findings": ["S7-001", "S7-002", "S7-003"],
+  "skipped_findings": [],
+  "updated_sections": ["影響範囲", "実装タスク", "コールバック伝播経路", "レビュー履歴"],
+  "github_updated": true,
+  "applied_details": {
+    "S7-001": {
+      "severity": "should_fix",
+      "action": "メモ（デスクトップ）のコールバック伝播経路の末尾に「NotesAndLogsPane 内では notes サブタブの MemoPane レンダリング箇所（114行目付近）にのみ伝播」と補足追加"
+    },
+    "S7-002": {
+      "severity": "should_fix",
+      "action": "ユニットテスト一覧に「WorktreeDetailSubComponents.tsx（MobileContent）の onInsertToMessage 伝播確認テスト（任意・新規作成が必要）」を追加"
+    },
+    "S7-003": {
+      "severity": "nice_to_have",
+      "action": "影響範囲テーブルの MessageInput.tsx の変更内容に「デスクトップ/モバイルで2箇所レンダリングされるため、pendingInsertText props パターンの方が実装が簡潔になる」を補足追加"
+    }
+  },
+  "note_header_updated": true,
+  "review_history_added": "Stage 7 - 影響範囲レビュー 2回目 (2026-03-13)"
+}

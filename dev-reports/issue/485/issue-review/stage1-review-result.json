@@ -1,0 +1,148 @@
+{
+  "issue_number": 485,
+  "stage": 1,
+  "review_type": "通常",
+  "review_date": "2026-03-13",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "正確性",
+        "issue": "Issue記載の「draftKey」はMessageInput.tsxに存在しない",
+        "location": "コードベースのコンテキスト セクション",
+        "recommendation": "MessageInput.tsxでは「DRAFT_STORAGE_KEY_PREFIX」(定数値: 'commandmate:draft-message:')とworktreeIdの組み合わせで下書きを管理している。Issueの記載を「DRAFT_STORAGE_KEY_PREFIX + worktreeIdによるlocalStorage下書き保存」に修正すべき。",
+        "evidence": "MessageInput.tsx L34: const DRAFT_STORAGE_KEY_PREFIX = 'commandmate:draft-message:'; -- 'draftKey'というpropや変数は存在しない"
+      },
+      {
+        "id": "MF-2",
+        "category": "正確性",
+        "issue": "「useInfiniteMessages - 履歴データ取得（変更なし、既存活用）」は不正確 -- useInfiniteMessagesは現在どのコンポーネントでも使用されていない",
+        "location": "関連コンポーネント セクション",
+        "recommendation": "HistoryPaneはmessages配列をpropsとして受け取り、useConversationHistoryフックでペアにグループ化している。useInfiniteMessagesは定義のみ存在し未使用。受入条件の「既存の無限スクロールを活用」も実態と乖離しているため、「既存のメッセージ取得フロー（WorktreeDetailRefactored -> HistoryPane props）を活用」に修正すべき。",
+        "evidence": "src/hooks/useInfiniteMessages.ts は存在するが、src/components/ 配下でimportしているファイルは0件。HistoryPaneはmessages: ChatMessage[]をpropsで受け取る（HistoryPane.tsx L37）。"
+      },
+      {
+        "id": "MF-3",
+        "category": "整合性",
+        "issue": "ConversationPairCardの記載「useConversationHistory フックを使用」は不正確",
+        "location": "コードベースのコンテキスト セクション",
+        "recommendation": "useConversationHistoryフックを使用しているのはHistoryPaneであり、ConversationPairCardではない。ConversationPairCardはConversationPair型のデータをpropsとして受け取り表示するだけのコンポーネント。正確な記載に修正すべき。",
+        "evidence": "ConversationPairCard.tsx ではuseConversationHistoryをimportしていない。HistoryPane.tsx L191: const { pairs, isExpanded, toggleExpand } = useConversationHistory(messages);"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "MessageInputへの外部テキスト挿入方式の設計判断が未決定（コールバック or ref経由 or Context）",
+        "location": "実装タスク セクション",
+        "recommendation": "MessageInputは現在memo()でラップされており、内部stateのmessageを外部から変更する手段がない。具体的な方式を明記すべき。推奨案: (1) useImperativeHandle + forwardRef でinsertText(text: string)メソッドを公開する、または (2) WorktreeDetailRefactored内でpendingInsertText stateを管理しMessageInputにpropとして渡す。方式により影響範囲が異なるため、設計段階で決定しておくべき。",
+        "evidence": "MessageInput.tsx はReact.memo()でラップ (L36)。setMessageはコンポーネント内部のstate。外部からテキストを注入するインターフェースは現時点で存在しない。"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "コールバック伝播経路がデスクトップとモバイルで異なるが、その違いが明記されていない",
+        "location": "影響範囲 セクション",
+        "recommendation": "デスクトップ: WorktreeDetailRefactored -> LeftPaneTabSwitcher -> HistoryPane -> ConversationPairCard。モバイル: WorktreeDetailRefactored -> MobileContent (WorktreeDetailSubComponents.tsx) -> HistoryPane -> ConversationPairCard。影響範囲にWorktreeDetailSubComponents.tsxが含まれていないため追加すべき。特にMobileContentPropsへのコールバック追加が必要。",
+        "evidence": "WorktreeDetailSubComponents.tsx L750: MobileContent内でHistoryPaneとNotesAndLogsPaneが使用されている。Issue記載の影響範囲にsrc/components/mobile/のみ記載があるが、実際にはWorktreeDetailSubComponents.tsxのMobileContent(L697-783)が変更対象。"
+      },
+      {
+        "id": "SF-3",
+        "category": "完全性",
+        "issue": "MemoCard -> MemoPane -> NotesAndLogsPane の伝播経路における中間コンポーネントのprops追加が影響範囲に不足",
+        "location": "影響範囲 セクション",
+        "recommendation": "MemoCardに挿入ボタンを追加する場合、onInsertToMessageコールバックをMemoCard -> MemoPane -> NotesAndLogsPane -> WorktreeDetailRefactored (またはMobileContent)と伝播させる必要がある。NotesAndLogsPane.tsxとNotesAndLogsPanePropsへの変更が影響範囲に含まれていない。明記すべき。",
+        "evidence": "NotesAndLogsPane.tsx L33-52: NotesAndLogsPanePropsに挿入系コールバックは未定義。MemoPane.tsx L31-36: MemoPanePropsにも未定義。"
+      },
+      {
+        "id": "SF-4",
+        "category": "明確性",
+        "issue": "「末尾に追加」の挿入動作の詳細仕様が不明確",
+        "location": "受入条件 セクション",
+        "recommendation": "末尾追加時の区切り（改行を入れるか、スペースを入れるか、何も入れないか）を明記すべき。既存テキストが改行で終わっている場合の挙動も定義が必要。提案: 既存テキストがある場合は改行2つ（空行）を挟んで追加する。",
+        "evidence": "受入条件に「入力欄に既存テキストがある場合は末尾に追加されること」とあるが、区切り文字の仕様が未定義。"
+      },
+      {
+        "id": "SF-5",
+        "category": "整合性",
+        "issue": "HistoryPaneのonInsertコールバック追加がHistoryPanePropsに与える影響が未記載",
+        "location": "影響範囲 セクション",
+        "recommendation": "HistoryPaneは現在onCopyコールバックをConversationPairCardに伝播している（handleCopy, L212-224）。同様のパターンでonInsertコールバックを追加する場合、HistoryPanePropsにonInsertToMessage?: (content: string) => voidの追加が必要。この変更はHistoryPaneの型定義にも影響する。",
+        "evidence": "HistoryPane.tsx L36-48: HistoryPanePropsの現在の定義にonInsert系プロパティは存在しない。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "挿入ボタンのUIデザイン（アイコン、配置、ツールチップ）が未定義",
+        "location": "実装タスク セクション",
+        "recommendation": "ConversationPairCardには既にCopy（コピー）ボタンが存在する（Copy icon from lucide-react）。挿入ボタンも同様の配置パターンを採用し、lucide-reactのArrowDownToLine等のアイコンを使用することを推奨。",
+        "evidence": "ConversationPairCard.tsx L11: import { Copy } from 'lucide-react'; -- 既存のUIパターンがある。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "挿入成功時のユーザーフィードバック（Toast通知等）が未定義",
+        "location": "受入条件 セクション",
+        "recommendation": "既存のCopyボタンではToast通知（'Copied to clipboard'）を表示している。挿入操作でも同様にToast通知（例: 'Inserted to message input'）を表示するとUXが向上する。showToastコールバックは既にHistoryPaneに渡されている。",
+        "evidence": "HistoryPane.tsx L216: showToast?.('Copied to clipboard', 'success');"
+      },
+      {
+        "id": "NTH-3",
+        "category": "完全性",
+        "issue": "LeftPaneTabSwitcherのタブ一覧にmemoタブが既にあるが、IssueではLeftPaneTabSwitcherを「履歴タブ経由での挿入」と記載しており、memoタブとの関係が明確でない",
+        "location": "関連コンポーネント セクション",
+        "recommendation": "LeftPaneTabSwitcherにはhistory/files/memoの3タブがあり、memoタブはCMATE.mdエディタ用であってMemoPane（Notes）ではない。NotesはNotesAndLogsPaneを経由して表示される。この構造の説明があると実装者にとって分かりやすい。",
+        "evidence": "LeftPaneTabSwitcher.tsx L101-105: TABS定義。memoタブのlabelは'CMATE'であり、WorktreeMemoとは別物。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/MessageInput.tsx",
+      "relevance": "主要変更対象: 外部テキスト挿入インターフェース追加が必要"
+    },
+    {
+      "file": "src/components/worktree/ConversationPairCard.tsx",
+      "relevance": "変更対象: ユーザーメッセージ挿入ボタン追加"
+    },
+    {
+      "file": "src/components/worktree/MemoCard.tsx",
+      "relevance": "変更対象: メモ内容挿入ボタン追加"
+    },
+    {
+      "file": "src/components/worktree/HistoryPane.tsx",
+      "relevance": "変更対象: 挿入コールバック伝播"
+    },
+    {
+      "file": "src/components/worktree/MemoPane.tsx",
+      "relevance": "変更対象: 挿入コールバック伝播（Issueで未記載）"
+    },
+    {
+      "file": "src/components/worktree/NotesAndLogsPane.tsx",
+      "relevance": "変更対象: 挿入コールバック伝播（Issueで未記載）"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "変更対象: コールバック接続の起点"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailSubComponents.tsx",
+      "relevance": "変更対象: MobileContent propsへのコールバック追加（Issueで未記載）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構造・モジュール一覧の整合性確認"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 3,
+    "should_fix_count": 5,
+    "nice_to_have_count": 3,
+    "overall_quality": "medium"
+  }
+}

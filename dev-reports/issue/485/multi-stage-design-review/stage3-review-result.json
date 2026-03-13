@@ -1,0 +1,98 @@
+{
+  "issue_number": 485,
+  "stage": 3,
+  "review_type": "影響範囲",
+  "review_date": "2026-03-13",
+  "design_doc_path": "dev-reports/design/issue-485-insert-to-message-design-policy.md",
+  "findings": [
+    {
+      "id": "D3-001",
+      "severity": "should_fix",
+      "category": "パフォーマンス",
+      "title": "pendingInsertText state変更によるWorktreeDetailRefactored全体の再レンダリングリスク",
+      "description": "pendingInsertTextのstate変更(null -> content -> null)は、WorktreeDetailRefactored内で2回のsetState呼び出しを引き起こす(setPendingInsertText(content)とonInsertConsumed経由のsetPendingInsertText(null))。各setState呼び出しでWorktreeDetailRefactored全体が再レンダリングされる。ただしleftPaneMemoはuseMemoで保護されており、MessageInputはmemo()でラップされているため、pendingInsertTextがnullに戻った時点でMessageInputは前回と同じpropsとなりスキップされる。実際のDOM更新コストは限定的だが、WorktreeDetailRefactoredの仮想DOM差分計算は2回走る。設計書セクション7でこの2回のレンダリングサイクルについて明示的に言及されていない。",
+      "suggestion": "設計書セクション7に、挿入操作1回あたり2回のレンダリングサイクル(content設定 -> null リセット)が発生すること、およびmemo()/useMemo()により実DOM更新は最小限に抑えられることを明記する。React 18のバッチング(automatic batching)がuseEffect内のsetStateには適用されないため、この2回のレンダリングは避けられない点も記載するとよい。"
+    },
+    {
+      "id": "D3-002",
+      "severity": "should_fix",
+      "category": "パフォーマンス",
+      "title": "leftPaneMemo依存配列へのhandleInsertToMessage追加による再計算リスクの検証",
+      "description": "設計書セクション4-1ではleftPaneMemoの依存配列にhandleInsertToMessageを追加する方針だが、handleInsertToMessageはuseCallback([], [])で空配列依存のため参照が安定している。したがってleftPaneMemoの再計算は発生しない。現在の依存配列には既に30個以上の項目があり(実測: 31個)、handleInsertToMessage追加は問題ない。ただしNotesAndLogsPaneにonInsertToMessageを渡す場合、leftPaneMemoの依存配列に追加不要であることの理由(useCallbackの空依存配列)をコード内コメントで説明すべきである。",
+      "suggestion": "leftPaneMemoの依存配列にhandleInsertToMessageを追加する箇所に、handleInsertToMessageがuseCallback(fn, [])で安定参照であるため再計算を誘発しない旨のコメントを付与する。"
+    },
+    {
+      "id": "D3-003",
+      "severity": "must_fix",
+      "category": "既存機能",
+      "title": "MessageInputのuseEffect競合: pendingInsertText消費とlocalStorage下書き復元の順序問題",
+      "description": "MessageInput内には既にworktreeId変更時にlocalStorageから下書きを復元するuseEffect(行72-84)がある。pendingInsertText消費のuseEffectが追加された場合、コンポーネントマウント直後にpendingInsertTextが非nullで渡されるシナリオでは、(1) localStorage復元のuseEffectでsetMessage(saved)が実行され、(2) 直後にpendingInsertText消費のuseEffectでsetMessage(prev => prev + '\\n\\n' + text)が実行される。これにより下書きテキストの後にpendingInsertTextが追加される。通常の使用フローではマウント時にpendingInsertTextはnullであるため問題は発生しないが、設計書にこの前提条件が明記されていない。",
+      "suggestion": "設計書セクション4-2のuseEffect定義に「pendingInsertTextは初回レンダリング時にnullであることを前提とする。コンポーネントマウント時にpendingInsertTextが非nullの場合、localStorage復元後のテキストに追加される動作となる」という前提条件を明記する。また、useEffectの実装ではpendingInsertTextのnullチェック(if (!pendingInsertText) return)により初回マウント時は安全にスキップされることを確認コメントとして記載する。"
+    },
+    {
+      "id": "D3-004",
+      "severity": "nice_to_have",
+      "category": "既存機能",
+      "title": "pendingInsertText=nullの場合のMessageInput既存動作への影響なし確認",
+      "description": "pendingInsertText prop未指定時はundefined、明示的にnullを渡した場合はnull。useEffect内のif (!pendingInsertText) returnにより、undefined/null/空文字の場合はいずれも早期リターンされる。MessageInputの既存動作(下書き保存、送信、IME処理、スラッシュコマンド等)には一切影響しない。memo()のshallow comparisonでpendingInsertText: undefined -> nullの変更は再レンダリングを誘発するが、useEffect内で早期リターンされるため副作用はない。",
+      "suggestion": "設計書に「pendingInsertTextがundefinedまたはnullの場合、MessageInputの既存動作に影響しないことを検証済み」と明記することで、レビュアーの確認コストを下げる。"
+    },
+    {
+      "id": "D3-005",
+      "severity": "should_fix",
+      "category": "テスト",
+      "title": "既存テストのコンパイル互換性: props型拡張はoptionalのため影響なし",
+      "description": "全ての新規propsはoptional(?)として定義されている。MessageInputProps(pendingInsertText?, onInsertConsumed?)、HistoryPaneProps(onInsertToMessage?)、ConversationPairCardProps(onInsertToMessage?)、MemoCardProps(onInsertToMessage?)、MemoPaneProps(onInsertToMessage?)、NotesAndLogsPaneProps(onInsertToMessage?)、MobileContentProps(onInsertToMessage?)。既存テストはこれらのpropsを渡していないため、TypeScriptコンパイルエラーは発生しない。ただしNotesAndLogsPane.test.tsxのモックでMemoPaneがmockされており、onInsertToMessageの伝播テストを追加する場合はモックの修正が必要。",
+      "suggestion": "設計書セクション8のテスト設計に、NotesAndLogsPane.test.tsxのMemoPaneモック(行13-16)がonInsertToMessageを受け取れるようモックの更新が必要である旨を追記する。"
+    },
+    {
+      "id": "D3-006",
+      "severity": "nice_to_have",
+      "category": "テスト",
+      "title": "ConversationPairCard.test.tsxが未存在: 新規テストファイル作成が必要",
+      "description": "設計書セクション8のテスト設計ではConversationPairCard.test.tsxを「新規作成」としているが、現時点でこのテストファイルは存在しない(tests/unit/components/worktree/配下にもtests/unit/components/配下にも未確認)。テスト新規作成のコストは中程度。ConversationPairCardのonInsertToMessage挿入ボタンのテストだけでなく、既存のonCopy機能のテストも同時に作成することでテストカバレッジが向上する。",
+      "suggestion": "設計書のテスト設計セクションに、ConversationPairCard.test.tsxの新規作成時にonCopy機能のテストも含めてカバレッジを向上させることを推奨事項として追記する。"
+    },
+    {
+      "id": "D3-007",
+      "severity": "nice_to_have",
+      "category": "後方互換性",
+      "title": "MobileContent(WorktreeDetailSubComponents.tsx)のprops追加漏れリスク",
+      "description": "MobileContentPropsインターフェース(行698-728)にonInsertToMessage追加が必要だが、設計書セクション4-8の記述が簡略化されている(「MobileContentPropsにonInsertToMessage追加」のみ)。MobileContent内部ではHistoryPane(行829)とNotesAndLogsPane(行885)の両方にonInsertToMessageを伝播する必要がある。さらにMobileContent呼び出し元(WorktreeDetailRefactored.tsx)でもhandleInsertToMessageをMobileContentに渡す必要がある。",
+      "suggestion": "設計書セクション4-8に、(1) MobileContentPropsへのonInsertToMessage?追加、(2) HistoryPane(行829付近)へのonInsertToMessage伝播、(3) NotesAndLogsPane(行885付近)へのonInsertToMessage伝播、(4) WorktreeDetailRefactored.tsx内のMobileContent呼び出し箇所でのhandleInsertToMessage指定、の4つの変更ポイントを明記する。"
+    },
+    {
+      "id": "D3-008",
+      "severity": "should_fix",
+      "category": "パフォーマンス",
+      "title": "handleInsertConsumedのuseCallback空依存配列の妥当性確認",
+      "description": "設計書セクション4-1でhandleInsertConsumedをuseCallback(() => setPendingInsertText(null), [])と定義している。setPendingInsertTextはReactのstateセッター関数であり参照が安定しているため、空依存配列は正しい。これによりMessageInputのmemo()による再レンダリングスキップが正しく機能する。ただし、将来的にonInsertConsumed内で他の処理(例: トースト通知、アナリティクス送信)を追加する場合は依存配列の更新が必要になる点に注意が必要。",
+      "suggestion": "現時点の実装では空依存配列で問題ない。設計書に「handleInsertConsumedの依存配列が空なのは、setPendingInsertTextがReactの安定参照であるため」というコメントを実装ガイドラインとして追記する。"
+    },
+    {
+      "id": "D3-009",
+      "severity": "nice_to_have",
+      "category": "既存機能",
+      "title": "HistoryPaneのshowToast propとの関係性",
+      "description": "HistoryPaneは既にshowToast optional propを受け取っている(行720, 実装行1339)。onInsertToMessageはshowToastと同様のoptional callback伝播パターンであり、既存パターンとの一貫性が保たれている。HistoryPaneのテスト(HistoryPane.test.tsx)はshowToastを渡さずにテストしており、onInsertToMessageも同様に省略可能。既存テストへの影響はない。",
+      "suggestion": "特に対応不要。設計の一貫性が確認できた。"
+    },
+    {
+      "id": "D3-010",
+      "severity": "should_fix",
+      "category": "既存機能",
+      "title": "pendingInsertTextのデスクトップ/モバイル同時配信の安全性",
+      "description": "WorktreeDetailRefactoredでは、デスクトップ(行1465)とモバイル(行1726)の両方にMessageInputがレンダリングされるが、isMobile条件分岐により実際には一方のみが表示される。pendingInsertTextは両方のMessageInputに渡されるため、表示されていない側のMessageInputでもuseEffectが発火する。ただしmemo()により非表示側のMessageInputはアンマウントされている(条件分岐でレンダリングされない)ため、実際にはuseEffectは発火しない。設計書セクション9-3(D1-005)でisMobileによる排他レンダリングに言及されているが、pendingInsertTextが両方に渡される点の安全性について具体的な説明がない。",
+      "suggestion": "設計書セクション7または9-3に「デスクトップ/モバイルはisMobile条件分岐で排他的にレンダリングされるため、pendingInsertTextを両方に渡しても一方のみが実際にマウントされ、useEffectも一方のみで実行される」と明記する。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 5,
+    "nice_to_have_count": 4,
+    "overall_quality": "high",
+    "verdict": "conditionally_approved",
+    "score": "4/5",
+    "assessment": "設計方針書は既存コードの構造を正確に把握した上で設計されており、後方互換性(全props optional)とパフォーマンス(useCallback/useMemo/memo())への配慮が適切である。must_fixはuseEffect間の順序前提の明文化1件のみで、実装上の致命的な問題はない。should_fix 5件はいずれも設計書の記述補強であり、実装の正確性には影響しない。"
+  }
+}

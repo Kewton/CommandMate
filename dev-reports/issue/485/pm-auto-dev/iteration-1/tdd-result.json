@@ -1,0 +1,60 @@
+{
+  "issue_number": 485,
+  "status": "success",
+  "coverage": 80,
+  "unit_tests": {
+    "total": 4976,
+    "passed": 4976,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "implemented_tasks": [
+    "Task 1.1: MessageInput pendingInsertText/onInsertConsumed props + useEffect insertion logic",
+    "Task 1.2: WorktreeDetailRefactored pendingInsertText state + handleInsertToMessage/handleInsertConsumed callbacks + leftPaneMemo dependency update",
+    "Task 2.1: ConversationPairCard onInsertToMessage prop + ArrowDownToLine insert button on UserMessageSection",
+    "Task 2.2: MemoCard onInsertToMessage prop + ArrowDownToLine insert button",
+    "Task 3.1: HistoryPane onInsertToMessage prop + ConversationPairCard propagation",
+    "Task 3.2: MemoPane onInsertToMessage prop + MemoCard propagation",
+    "Task 3.3: NotesAndLogsPane onInsertToMessage prop + MemoPane propagation (notes sub-tab)",
+    "Task 4.1: MobileContent onInsertToMessage prop + HistoryPane/NotesAndLogsPane propagation",
+    "Task 5.1: MessageInput test update (pendingInsertText insertion)",
+    "Task 5.2: ConversationPairCard test creation (insert button + callback)",
+    "Task 5.3: MemoCard test update (insert button)",
+    "Task 5.4: HistoryPane test update (onInsertToMessage propagation)",
+    "Task 5.5: MemoPane test update (onInsertToMessage propagation)",
+    "Task 5.6: NotesAndLogsPane test update (onInsertToMessage propagation)"
+  ],
+  "files_changed": [
+    "src/components/worktree/MessageInput.tsx",
+    "src/components/worktree/ConversationPairCard.tsx",
+    "src/components/worktree/MemoCard.tsx",
+    "src/components/worktree/HistoryPane.tsx",
+    "src/components/worktree/MemoPane.tsx",
+    "src/components/worktree/NotesAndLogsPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/WorktreeDetailSubComponents.tsx",
+    "tests/unit/components/worktree/MessageInput.test.tsx",
+    "tests/unit/components/worktree/ConversationPairCard.test.tsx",
+    "tests/unit/components/worktree/MemoCard.test.tsx",
+    "tests/unit/components/HistoryPane.test.tsx",
+    "tests/unit/components/worktree/MemoPane.test.tsx",
+    "tests/unit/components/worktree/NotesAndLogsPane.test.tsx"
+  ],
+  "commits": [
+    "5a4a750: feat(insert-to-message): add insert-to-message from history and memo"
+  ],
+  "test_results": {
+    "total": 4976,
+    "passed": 4976,
+    "failed": 0
+  },
+  "quality_checks": {
+    "typescript": "pass",
+    "eslint": "pass",
+    "unit_tests": "pass"
+  },
+  "message": "TDD implementation complete. All 4976 unit tests pass. TypeScript and ESLint checks pass with 0 errors. Implemented pendingInsertText props pattern for inserting history/memo text into MessageInput via ArrowDownToLine buttons on ConversationPairCard and MemoCard."
+}

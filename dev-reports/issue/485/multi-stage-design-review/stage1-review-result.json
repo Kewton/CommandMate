@@ -1,0 +1,80 @@
+{
+  "issue_number": 485,
+  "stage": 1,
+  "review_type": "設計原則",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "D1-001",
+      "severity": "should_fix",
+      "principle": "SRP",
+      "title": "WorktreeDetailRefactored の責務過多が更に悪化する",
+      "description": "WorktreeDetailRefactored は既に 21 個の useState と 44 個の useCallback を持つ巨大コンポーネントである。pendingInsertText state と handleInsertToMessage コールバックの追加は責務を更に広げる。このコンポーネントはターミナル管理、ファイル操作、エージェント設定、Git操作、Auto-Yes、プロンプト応答など多数の関心事を抱えており、テキスト挿入状態管理の追加は責務の肥大化を加速させる。",
+      "suggestion": "今回のIssue単独では許容範囲だが、将来的にカスタムフック useTextInsertion(setPendingInsertText, pendingInsertText) のような形で状態管理ロジックを抽出することを検討すべき。少なくとも TODO コメントとして技術的負債を明記しておくことを推奨する。"
+    },
+    {
+      "id": "D1-002",
+      "severity": "should_fix",
+      "principle": "OCP",
+      "title": "コールバック伝播による中間コンポーネントの修正範囲が広い",
+      "description": "onInsertToMessage コールバックの追加により、HistoryPane, MemoPane, NotesAndLogsPane, WorktreeDetailSubComponents (MobileContent) の4つの中間コンポーネントの Props 型とレンダリングロジックに変更が必要となる。これらのコンポーネントはコールバックを通過させるだけで自身のロジックには関係がなく、開放閉鎖原則に反する。将来、別の挿入ソース（例: ファイル内容、Git diff）を追加する場合にも同様の修正が発生する。",
+      "suggestion": "現時点ではプロジェクト全体が props バケツリレーパターンを採用しており一貫性は保たれている。ただし将来的に挿入ソースが増える場合は、React Context (InsertToMessageContext) による伝播に切り替えることで、中間コンポーネントへの変更を不要にできる。現段階では onCopy パターンとの一貫性を優先し、このまま進めて問題ない。"
+    },
+    {
+      "id": "D1-003",
+      "severity": "nice_to_have",
+      "principle": "DRY",
+      "title": "ConversationPairCard と MemoCard の挿入ボタン UI が重複する",
+      "description": "設計書では ConversationPairCard と MemoCard の両方に類似した挿入ボタン（ArrowDownToLine アイコン、hover 色変更、title 属性、conditional rendering）を個別に追加する。ボタンのスタイルクラスや表示ロジックが重複している。",
+      "suggestion": "InsertToMessageButton のような小さな共通コンポーネント（3-5行程度）を src/components/common/ に作成し、両カードから利用する。ただし、現時点ではコピーボタンも同様にインラインで定義されているため、プロジェクトの既存パターンとの一貫性を考慮すると、今回はインライン実装でも許容できる。"
+    },
+    {
+      "id": "D1-004",
+      "severity": "nice_to_have",
+      "principle": "KISS",
+      "title": "pendingInsertText の useEffect 消費パターンにおける依存配列の注意点",
+      "description": "MessageInput 内の useEffect は pendingInsertText と onInsertConsumed を依存配列に持つ。onInsertConsumed が useCallback でラップされていない場合、毎レンダリングで useEffect が再実行され、意図しない二重挿入が発生する可能性がある。設計書にはこの注意点が記載されているが、実装時の見落としリスクがある。",
+      "suggestion": "onInsertConsumed を WorktreeDetailRefactored 側でインラインアロー関数ではなく useCallback でラップすることを設計書で明確に指定している点は良い。実装時に必ずこのパターンを遵守すること。また、useEffect 内で onInsertConsumed を呼ぶ前に pendingInsertText の null チェックが入っているため、最悪でも空の挿入にはならない安全設計になっている。"
+    },
+    {
+      "id": "D1-005",
+      "severity": "nice_to_have",
+      "principle": "YAGNI",
+      "title": "デスクトップ/モバイル両対応の pendingInsertText 同時配信",
+      "description": "pendingInsertText は デスクトップとモバイルの両方の MessageInput に渡される設計だが、実際にはどちらか一方しかアクティブにならない（isMobile フラグで切り替え）。両方の MessageInput が同時に pendingInsertText を受け取り、両方で useEffect が発火する可能性がある。",
+      "suggestion": "現在の実装では isMobile による条件分岐でどちらか一方のみがレンダリングされるため、実際には問題にならない。ただし、将来的にレイアウトが変わった場合に備え、useEffect 内で二重消費を防ぐガード（例: pendingInsertText が既に null かどうかの再チェック）を入れておくと堅牢性が上がる。"
+    },
+    {
+      "id": "D1-006",
+      "severity": "nice_to_have",
+      "principle": "KISS",
+      "title": "挿入ロジックのエッジケース考慮",
+      "description": "挿入ロジックは prev.trim() === '' で空判定を行い、空でなければ '\\n\\n' で連結する。同じテキストを連続で挿入した場合、pendingInsertText が同じ値のままとなり useEffect が再発火しない可能性がある（React の state 同値比較）。",
+      "suggestion": "連続同一テキスト挿入のユースケースは稀だが、もし対応が必要なら pendingInsertText を { text: string; id: number } のようなオブジェクトにして一意性を保証する方法がある。ただし YAGNI の観点からは、現時点では過剰な対応であり、実際にユーザーから要望が出た段階で対応すれば十分。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 4,
+    "overall_quality": "high"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-485-insert-to-message-design-policy.md",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/MessageInput.tsx",
+    "src/components/worktree/ConversationPairCard.tsx",
+    "src/components/worktree/MemoCard.tsx",
+    "src/components/worktree/HistoryPane.tsx",
+    "src/components/worktree/MemoPane.tsx",
+    "src/components/worktree/NotesAndLogsPane.tsx",
+    "src/components/worktree/WorktreeDetailSubComponents.tsx"
+  ],
+  "timestamp": "2026-03-13T12:00:00Z"
+}

@@ -1,0 +1,65 @@
+{
+  "issue_number": 485,
+  "issue_title": "履歴、cmate_noteから選択してメッセージに初期表示したい",
+  "acceptance_criteria": [
+    "履歴のユーザーメッセージから選択してメッセージ入力欄に挿入できること",
+    "WorktreeMemo（Notes）から選択してメッセージ入力欄に挿入できること",
+    "入力欄に既存テキストがある場合、改行2つ（空行）を挟んで末尾に追加されること",
+    "入力欄が空の場合、そのまま挿入されること",
+    "モバイルビューでも同等に動作すること",
+    "ユニットテストが追加されていること",
+    "履歴が多い場合でもパフォーマンスに影響がないこと（既存のメッセージ取得フロー WorktreeDetailRefactored → HistoryPane props経由 を活用）",
+    "既存の下書き保存機能と整合性があること"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: MessageInput に pendingInsertText?: string | null と onInsertConsumed?: () => void プロパティ追加、useEffect で末尾追加ロジック実装",
+    "Task 1.2: WorktreeDetailRefactored に pendingInsertText state と handleInsertToMessage/handleInsertConsumed useCallback 追加、leftPaneMemo 依存配列更新、MessageInput へ props 渡し",
+    "Task 2.1: ConversationPairCard に onInsertToMessage? props 追加、UserMessageSection に ArrowDownToLine アイコンの挿入ボタン追加",
+    "Task 2.2: MemoCard に onInsertToMessage? props 追加、ArrowDownToLine アイコンの挿入ボタン追加",
+    "Task 3.1: HistoryPane に onInsertToMessage? props 追加、ConversationPairCard への伝播",
+    "Task 3.2: MemoPane に onInsertToMessage? props 追加、MemoCard への伝播",
+    "Task 3.3: NotesAndLogsPane に onInsertToMessage? props 追加、notes サブタブ内の MemoPane への伝播",
+    "Task 4.1: WorktreeDetailSubComponents の MobileContent に onInsertToMessage? props 追加、HistoryPane と NotesAndLogsPane への伝播",
+    "Task 5.1: MessageInput テスト更新（pendingInsertText 挿入動作）",
+    "Task 5.2: ConversationPairCard テスト新規作成（挿入ボタン表示・コールバック）",
+    "Task 5.3: MemoCard テスト更新（挿入ボタン）",
+    "Task 5.4: HistoryPane テスト更新（onInsertToMessage 伝播）",
+    "Task 5.5: MemoPane テスト更新（onInsertToMessage 伝播）",
+    "Task 5.6: NotesAndLogsPane テスト更新（onInsertToMessage 伝播）"
+  ],
+  "design_policy_path": "dev-reports/design/issue-485-insert-to-message-design-policy.md",
+  "work_plan_path": "dev-reports/issue/485/work-plan.md",
+  "target_coverage": 80,
+  "key_design_decisions": {
+    "insertion_method": "pendingInsertText props パターン（WorktreeDetailRefactored で state 管理）",
+    "insert_separator": "既存テキストがある場合は末尾に \\n\\n で追加",
+    "insert_when_empty": "既存テキストが空の場合はそのまま挿入",
+    "icon": "lucide-react の ArrowDownToLine",
+    "callback_chain": "バケツリレーパターン（既存 onCopy と同様）",
+    "useCallback_required": "handleInsertConsumed は useCallback(() => setPendingInsertText(null), []) で空依存配列必須",
+    "todo_comment": "WorktreeDetailRefactored に useTextInsertion フック抽出の技術的負債 TODO を追記",
+    "memo_compatibility": "全コンポーネントは memo() でラップ済み、pendingInsertText props パターンは既存構造と親和性高い"
+  },
+  "affected_files": [
+    "src/components/worktree/MessageInput.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/ConversationPairCard.tsx",
+    "src/components/worktree/MemoCard.tsx",
+    "src/components/worktree/HistoryPane.tsx",
+    "src/components/worktree/MemoPane.tsx",
+    "src/components/worktree/NotesAndLogsPane.tsx",
+    "src/components/worktree/WorktreeDetailSubComponents.tsx"
+  ],
+  "test_files": {
+    "update": [
+      "tests/unit/components/worktree/MessageInput.test.tsx",
+      "tests/unit/components/worktree/MemoCard.test.tsx",
+      "tests/unit/components/HistoryPane.test.tsx",
+      "tests/unit/components/worktree/MemoPane.test.tsx",
+      "tests/unit/components/worktree/NotesAndLogsPane.test.tsx"
+    ],
+    "create": [
+      "tests/unit/components/worktree/ConversationPairCard.test.tsx"
+    ]
+  }
+}

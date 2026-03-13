@@ -1,0 +1,25 @@
+{
+  "issue_number": 485,
+  "stage": 1,
+  "applied_findings": ["D1-001", "D1-002", "D1-006"],
+  "skipped_findings": ["D1-003", "D1-004", "D1-005"],
+  "design_doc_updated": true,
+  "changes_summary": {
+    "D1-001": "セクション 9-1 を追加。WorktreeDetailRefactored の責務過多に関する注記、useTextInsertion フック抽出の推奨、TODO コメント明記の義務化を記載",
+    "D1-002": "セクション 9-2 を追加。InsertToMessageContext による React Context 化の将来方針を記載",
+    "D1-006": "セクション 9-3 を追加。YAGNI の観点から現時点は対応しない方針と、将来的なオブジェクト型への変更方法を記載"
+  },
+  "skip_reasons": {
+    "D1-003": "既存 Copy ボタンもインライン実装のため、プロジェクトの一貫性を優先しスキップ",
+    "D1-004": "設計書セクション 4-2 に既に useCallback でのラップに関する注意書きが記載済み",
+    "D1-005": "isMobile フラグによる排他的レンダリングで実質的に問題が発生しないため対応不要"
+  },
+  "sections_added": [
+    "9-1. WorktreeDetailRefactored の責務過多に関する注記 (D1-001)",
+    "9-2. コールバック伝播の将来的な拡張性に関する注記 (D1-002)",
+    "9-3. 連続同一テキスト挿入のエッジケースに関する注記 (D1-006)",
+    "11. レビュー指摘事項サマリー",
+    "実装時チェックリスト（レビュー指摘対応）"
+  ],
+  "timestamp": "2026-03-13T12:30:00Z"
+}

@@ -1,0 +1,92 @@
+{
+  "issue_number": 485,
+  "stage": 7,
+  "review_type": "影響範囲（2回目）",
+  "review_date": "2026-03-13",
+  "previous_issues_resolved": {
+    "S3-001": {
+      "resolved": true,
+      "evidence": "デスクトップ履歴経路が「WorktreeDetailRefactored → HistoryPane → ConversationPairCard」に修正済み。LeftPaneTabSwitcher経由の誤りは削除されている。"
+    },
+    "S3-002": {
+      "resolved": true,
+      "evidence": "実装タスクに「MessageInput は現在 memo() で包まれているため、forwardRef パターンを採用する場合は memo(forwardRef(...)) の形にする必要がある」旨の注記が追加済み。pendingInsertText props パターンの親和性についても言及あり。"
+    },
+    "S3-003": {
+      "resolved": true,
+      "evidence": "影響範囲テーブルの WorktreeDetailRefactored.tsx に「leftPaneMemo の useMemo 依存配列に onInsertToMessage コールバックを追加する必要がある」と明記済み。"
+    },
+    "S3-004": {
+      "resolved": true,
+      "evidence": "MemoPane.tsx の変更内容が「MemoPanePropsに onInsertToMessage?: (content: string) => void 追加、MemoCard への伝播」と詳細化済み。"
+    },
+    "S3-005": {
+      "resolved": true,
+      "evidence": "テスト追加対象に HistoryPane の伝播テスト、MemoPane の伝播テスト、既存テストファイル更新一覧（HistoryPane.test.tsx, MemoPane.test.tsx, MemoCard.test.tsx, NotesAndLogsPane.test.tsx, MessageInput.test.tsx）が追記済み。"
+    },
+    "S3-006": {
+      "resolved": true,
+      "evidence": "ConversationPairCard のテストが「新規作成」と明記済み。"
+    },
+    "S3-007": {
+      "resolved": true,
+      "evidence": "「変更不要なファイル」セクションとして src/types/ 配下が変更不要であることが明記済み。理由（すべてのprops型はコンポーネントファイル内で定義、ConversationPair等のデータ構造型はUIコールバックを含まない）も記載。"
+    }
+  },
+  "findings": [
+    {
+      "id": "S7-001",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "NotesAndLogsPane から MemoPane への onInsertToMessage 伝播が現在のコードで欠落していることの実装注記",
+      "description": "NotesAndLogsPane.tsx の114行目で MemoPane を呼び出している箇所は現在 `<MemoPane worktreeId={worktreeId} className=\"h-full\" />` のみで、onInsertToMessage を渡していない。Issue本文の影響範囲テーブルには NotesAndLogsPane の変更内容に「内部のMemoPane呼び出し箇所へのコールバック伝播」と記載されており、認識は正しい。ただし、NotesAndLogsPane は notes/logs/agent の3つのサブタブを持ち、MemoPane は notes サブタブでのみレンダリングされる。実装時に NotesAndLogsPane が受け取った onInsertToMessage を MemoPane に渡す際、コールバック伝播が notes サブタブ内のみで行われることは自明であるが、実装上の注意として認識しておくべき点である。",
+      "suggestion": "現在の記載で実装に支障はないが、実装者の参考情報として Issue 本文のコールバック伝播経路の末尾に「NotesAndLogsPane 内では notes サブタブの MemoPane レンダリング箇所（114行目付近）にのみ伝播」と補足してもよい。"
+    },
+    {
+      "id": "S7-002",
+      "severity": "should_fix",
+      "category": "テスト",
+      "title": "WorktreeDetailSubComponents.tsx の MobileContent に対するテスト対象が未記載",
+      "description": "MobileContentProps に onInsertToMessage を追加する変更が影響範囲テーブルに記載されているが、テスト追加・更新対象リストに WorktreeDetailSubComponents の MobileContent は含まれていない。MobileContent は HistoryPane や NotesAndLogsPane にコールバックを伝播する中間コンポーネントであり、伝播が正しく行われることを確認するテストが望ましい。ただし、現在 WorktreeDetailSubComponents のテストファイルが存在しないため、新規作成となる。MobileContent は memo() で包まれた大きなコンポーネントであり、テスト作成コストを考慮するとこの Issue のスコープでは任意とする判断も妥当。",
+      "suggestion": "テスト対象の一覧に「WorktreeDetailSubComponents.tsx（MobileContent）: onInsertToMessage が HistoryPane / NotesAndLogsPane に正しく伝播されることの確認（任意・テストファイル新規作成が必要）」を追記するか、スコープ外であることを明記する。"
+    },
+    {
+      "id": "S7-003",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "MessageInput が desktop/mobile で別々にレンダリングされていることの明示",
+      "description": "WorktreeDetailRefactored.tsx では MessageInput がデスクトップ版（1465行目）とモバイル版（1726行目）の2箇所でレンダリングされている。useImperativeHandle + forwardRef パターンを採用する場合、両方の MessageInput に ref を渡す必要があるが、同一の ref を2つの MessageInput に渡すことはできない（条件分岐で排他的にレンダリングされるため実際には問題にならないが、実装上の考慮点ではある）。pendingInsertText props パターンであれば、単に state を両方の MessageInput に渡すだけで済む。Issue本文の実装タスクで両パターンを選択肢として提示しているが、この2箇所レンダリングの観点からも pendingInsertText パターンの優位性が補強される。",
+      "suggestion": "影響範囲の MessageInput の説明に「デスクトップ/モバイルで2箇所レンダリングされるため、pendingInsertText props パターンの方が実装が簡潔になる」旨を補足してもよい。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 1,
+    "overall_quality": "high"
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/NotesAndLogsPane.tsx",
+      "lines": "114",
+      "relevance": "MemoPane 呼び出し箇所 - onInsertToMessage の伝播を追加する箇所"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailSubComponents.tsx",
+      "lines": "697-747, 882-896",
+      "relevance": "MobileContentProps 定義と NotesAndLogsPane レンダリング箇所"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "1465-1470, 1726-1731",
+      "relevance": "MessageInput のデスクトップ/モバイル 2箇所レンダリング"
+    }
+  ],
+  "doc_references": [],
+  "test_references": [
+    {
+      "file": "tests/unit/components/worktree/WorktreeDetailSubComponents.test.tsx",
+      "relevance": "現在存在しない - MobileContent の伝播テスト新規作成が必要（任意）"
+    }
+  ]
+}

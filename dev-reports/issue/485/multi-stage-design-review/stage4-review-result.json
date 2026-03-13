@@ -1,0 +1,105 @@
+{
+  "issue_number": 485,
+  "stage": 4,
+  "review_type": "セキュリティ",
+  "status": "approved",
+  "score": 5,
+  "findings": [
+    {
+      "id": "D4-001",
+      "severity": "nice_to_have",
+      "category": "XSS",
+      "title": "挿入コンテンツのReact標準エスケープ依存の明示的文書化",
+      "description": "設計方針書セクション6で「Reactの標準レンダリングで表示済み（自動エスケープ）」と記載されているが、挿入テキストがMessageInputのtextarea value属性にsetStateで設定される点について、textarea要素のvalue属性はReactが自動的にエスケープするため安全である。ただし、将来的にtextareaからcontentEditableやdangerouslySetInnerHTMLを使用するリッチテキストエディタに変更された場合、この前提が崩れる可能性がある。現時点では問題なし。",
+      "suggestion": "MessageInput.tsxに「pendingInsertTextはtextarea value経由でのみ表示されるため、HTMLエスケープはReactが保証する」旨のコメントを追加すると、将来の保守者への注意喚起になる。"
+    },
+    {
+      "id": "D4-002",
+      "severity": "nice_to_have",
+      "category": "データ流出",
+      "title": "localStorage下書き保存における挿入コンテンツの永続化",
+      "description": "挿入されたテキストはmessage stateに追加された後、既存の500msデバウンスによりlocalStorageに自動保存される。これは既存の下書き保存機能の正常な動作であり、セキュリティ上の新たなリスクは発生しない。localStorageは同一オリジンポリシーにより保護されており、第三者からのアクセスは防止されている。挿入元データ（履歴・メモ）は既にDBに保存済みのデータであり、localStorageへの二重保存による情報漏洩の追加リスクはない。",
+      "suggestion": "対応不要。既存の下書き保存と同一の保護レベルが適用される。"
+    },
+    {
+      "id": "D4-003",
+      "severity": "nice_to_have",
+      "category": "インジェクション",
+      "title": "挿入テキストに含まれるスラッシュコマンドの意図しない発火",
+      "description": "挿入されるメモや履歴テキストが '/' で始まる場合、MessageInputのhandleMessageChange内のスラッシュコマンド検出ロジック（行244: newValue.startsWith('/')）に合致する可能性がある。ただし、pendingInsertTextの挿入はsetMessage経由で行われ、handleMessageChangeイベントハンドラは発火しない（onChangeイベントはプログラマティックなstate変更では発火しない）。よって、スラッシュコマンドセレクタが意図せず表示されることはない。",
+      "suggestion": "対応不要。Reactのイベントモデルにより安全性が担保されている。"
+    },
+    {
+      "id": "D4-004",
+      "severity": "nice_to_have",
+      "category": "XSS",
+      "title": "ConversationPairCardのparseContentPartsとの相互作用",
+      "description": "ConversationPairCardはparseContentParts関数でメッセージ内容をテキストとファイルパスに分割して表示しているが、挿入ボタンはuserMessage.contentを直接onInsertToMessageに渡すため、parseContentPartsの出力ではなく元のプレーンテキストが挿入される。これにより、パース済みHTMLではなく生テキストが安全にtextareaに挿入される。",
+      "suggestion": "対応不要。設計は正しい。"
+    }
+  ],
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "not_applicable",
+      "note": "新規API追加なし。既存の認証ミドルウェア（middleware.ts）とトークン認証（auth.ts）に影響なし。UIのみの変更。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "note": "暗号化処理の変更なし。"
+    },
+    "A03_injection": {
+      "status": "pass",
+      "note": "挿入テキストはReact stateとして保持され、textarea value属性経由で表示される。dangerouslySetInnerHTMLは使用されない。sendMessage APIへの送信時もmessage.trim()のみで、既存のサーバーサイド処理に委譲される。"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "note": "props-drivenパターンによるデータフローは一方向であり、予測可能。pendingInsertTextのライフサイクルは明確（set→consume→null）。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "not_applicable",
+      "note": "設定変更なし。"
+    },
+    "A06_vulnerable_outdated_components": {
+      "status": "not_applicable",
+      "note": "新規依存ライブラリの追加なし。lucide-reactのArrowDownToLineは既存依存。"
+    },
+    "A07_identification_authentication_failures": {
+      "status": "not_applicable",
+      "note": "認証フローに変更なし。既存のmiddleware.tsによる保護が継続。"
+    },
+    "A08_software_data_integrity_failures": {
+      "status": "pass",
+      "note": "挿入データはDBから取得済みのデータを再利用。外部からの未検証データは使用されない。"
+    },
+    "A09_security_logging_monitoring_failures": {
+      "status": "not_applicable",
+      "note": "ログ変更なし。"
+    },
+    "A10_server_side_request_forgery": {
+      "status": "not_applicable",
+      "note": "サーバーサイドリクエストの変更なし。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 0,
+    "nice_to_have_count": 4,
+    "overall_quality": "high"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-485-insert-to-message-design-policy.md",
+    "src/components/worktree/MessageInput.tsx",
+    "src/components/worktree/ConversationPairCard.tsx",
+    "src/components/worktree/MemoCard.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/middleware.ts",
+    "src/lib/security/env-sanitizer.ts",
+    "src/lib/api-client.ts"
+  ],
+  "timestamp": "2026-03-13T12:00:00Z"
+}

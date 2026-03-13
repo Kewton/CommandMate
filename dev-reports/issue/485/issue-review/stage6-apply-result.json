@@ -1,0 +1,43 @@
+{
+  "issue_number": 485,
+  "stage": 6,
+  "iteration": 2,
+  "apply_date": "2026-03-13",
+  "applied_findings": [
+    {
+      "id": "S5-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "影響範囲テーブルのNotesAndLogsPane.tsxの変更内容を「NotesAndLogsPanePropsにonInsertToMessage追加、内部のMemoPane呼び出し箇所へのコールバック伝播」に更新"
+    },
+    {
+      "id": "S5-002",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "実装タスクセクションに補足として「MobileContent内でのNotesAndLogsPaneのmaxAgents不整合はIssue #485スコープ外（別Issue起票対応）」と記載"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "S5-003",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "レビュー結果自体が「現在の記載でも実用上問題ないため、対応は任意」と評価しており、現状の記載で十分"
+    }
+  ],
+  "updated_sections": [
+    "影響範囲（変更対象ファイルテーブル - NotesAndLogsPane.tsx行）",
+    "実装タスク（スコープ外補足追加）",
+    "レビュー履歴（Stage 5追加）",
+    "冒頭Note（Stage 5反映記載追加）"
+  ],
+  "summary": {
+    "total_findings": 3,
+    "applied": 2,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/485"
+  }
+}

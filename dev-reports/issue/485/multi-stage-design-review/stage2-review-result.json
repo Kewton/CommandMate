@@ -1,0 +1,120 @@
+{
+  "issue_number": 485,
+  "stage": 2,
+  "review_type": "整合性",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "D2-001",
+      "severity": "must_fix",
+      "category": "型定義",
+      "title": "MessageInputProps の既存プロパティが設計書と不一致",
+      "description": "設計書セクション4-2で定義された MessageInputProps は worktreeId, onMessageSent, cliToolId, isSessionRunning の4つの既存プロパティに pendingInsertText と onInsertConsumed を追加する形で記載されている。実際の MessageInputProps（src/components/worktree/MessageInput.tsx:18-23）も同じ4プロパティを持ち、追加プロパティの定義位置は整合している。問題なし。",
+      "suggestion": "対応不要。確認のみ。"
+    },
+    {
+      "id": "D2-002",
+      "severity": "must_fix",
+      "category": "コード例",
+      "title": "onInsertConsumed がインライン関数で渡されており useCallback 未使用",
+      "description": "設計書セクション4-1のコード例では onInsertConsumed={() => setPendingInsertText(null)} とインライン関数で渡している。一方、セクション4-2の注意書きでは「onInsertConsumed を依存配列に含めるため、WorktreeDetailRefactored側でuseCallbackでラップすること」と明記している。この2箇所が矛盾しており、コード例をそのまま実装するとMessageInput内のuseEffectが毎レンダリングで再発火する。",
+      "suggestion": "設計書セクション4-1のコード例を修正し、onInsertConsumed を useCallback でラップした変数として定義し、それを MessageInput に渡す形に変更する。例: const handleInsertConsumed = useCallback(() => setPendingInsertText(null), []); として <MessageInput ... onInsertConsumed={handleInsertConsumed} /> とする。"
+    },
+    {
+      "id": "D2-003",
+      "severity": "should_fix",
+      "category": "型定義",
+      "title": "ConversationPairCard の UserMessageSection への onInsertToMessage 伝播が未記載",
+      "description": "設計書セクション4-3では ConversationPairCard の Props に onInsertToMessage を追加し、UserMessageSection 内に挿入ボタンを配置する記載がある。しかし実際のコード構造では UserMessageSection は ConversationPairCard とは別の内部サブコンポーネント（props として onCopy を個別に受け取る形式、200-204行目）であり、onInsertToMessage も同様に UserMessageSection の props として明示的に渡す必要がある。設計書にはこの内部伝播の詳細が記載されていない。",
+      "suggestion": "設計書に UserMessageSection の props 拡張（onInsertToMessage 追加）と、ConversationPairCard から UserMessageSection への伝播を明記する。"
+    },
+    {
+      "id": "D2-004",
+      "severity": "should_fix",
+      "category": "コード例",
+      "title": "ConversationPairCard の挿入ボタン配置位置 right-10 の根拠不明",
+      "description": "設計書セクション4-3で挿入ボタンの className に right-10 を指定しているが、既存の Copy ボタンは right-2 に配置されている（ConversationPairCard.tsx:225行目）。right-10 は Tailwind CSS で 2.5rem = 40px であり、Copy ボタン（right-2 = 0.5rem = 8px）との間に約32pxの間隔が生じる。ボタンサイズ（p-1 + 14px icon = 約22px幅）を考慮すると、若干間隔が広すぎる可能性がある。",
+      "suggestion": "実装時に right-8（2rem = 32px）程度に調整するか、実際のレイアウトを確認して適切な値を設定する。もしくは flexbox ベースのレイアウトに変更してボタン間隔を自動調整する方式を検討する。"
+    },
+    {
+      "id": "D2-005",
+      "severity": "nice_to_have",
+      "category": "ファイルパス",
+      "title": "設計書の影響ファイルパスは全て正しい",
+      "description": "設計書に記載された全ての影響ファイルパスを確認した。src/components/worktree/MessageInput.tsx, ConversationPairCard.tsx, MemoCard.tsx, HistoryPane.tsx, MemoPane.tsx, NotesAndLogsPane.tsx, WorktreeDetailRefactored.tsx, WorktreeDetailSubComponents.tsx は全て実在する。",
+      "suggestion": "対応不要。"
+    },
+    {
+      "id": "D2-006",
+      "severity": "nice_to_have",
+      "category": "インポート",
+      "title": "lucide-react の ArrowDownToLine は利用可能",
+      "description": "package.json で lucide-react ^0.554.0 が依存に含まれており、node_modules/lucide-react/dist の型定義ファイルに ArrowDownToLine がエクスポートされていることを確認した。",
+      "suggestion": "対応不要。"
+    },
+    {
+      "id": "D2-007",
+      "severity": "should_fix",
+      "category": "テスト",
+      "title": "HistoryPane テストファイルパスのディレクトリ構造不一致",
+      "description": "設計書セクション8のテスト設計では HistoryPane のテストパスを tests/unit/components/HistoryPane.test.tsx と記載しているが、他のコンポーネントテストは全て tests/unit/components/worktree/ ディレクトリ配下にある（MemoCard.test.tsx, MemoPane.test.tsx, NotesAndLogsPane.test.tsx 等）。実際の HistoryPane テストファイルも tests/unit/components/HistoryPane.test.tsx に存在し、設計書の記載自体は正しいが、ディレクトリ構成の一貫性がない。",
+      "suggestion": "実装時に tests/unit/components/worktree/HistoryPane.test.tsx への移動を検討する。既存テストファイルの位置が worktree/ サブディレクトリにないのは歴史的経緯と思われるが、新規テスト追加のタイミングで統一することを推奨する。"
+    },
+    {
+      "id": "D2-008",
+      "severity": "should_fix",
+      "category": "型定義",
+      "title": "MemoPaneProps に onInsertToMessage が未定義（設計書との差異）",
+      "description": "設計書セクション4-6では MemoPaneProps に onInsertToMessage?: (content: string) => void を追加すると記載されているが、現在の MemoPaneProps（src/components/worktree/MemoPane.tsx:31-36）は worktreeId と className のみ。設計書の記載は正しいが、追加するプロパティが MemoCard への伝播経路として必須であることを強調すべき。特に MemoPane は MemoCard を直接レンダリングしているため（207-214行目）、onInsertToMessage の伝播漏れがないように注意が必要。",
+      "suggestion": "実装チェックリストに「MemoPane から MemoCard への onInsertToMessage 伝播を確認する」項目を追加する。"
+    },
+    {
+      "id": "D2-009",
+      "severity": "should_fix",
+      "category": "コード例",
+      "title": "leftPaneMemo 内の HistoryPane と NotesAndLogsPane の構造が設計書と実装で異なる",
+      "description": "設計書セクション4-1のコード例では leftPaneMemo 内で HistoryPane と NotesAndLogsPane が直接並列に配置される形で記載されているが、実際の実装（WorktreeDetailRefactored.tsx:1298-1405）では LeftPaneTabSwitcher によるタブ切り替えで排他的に表示される。HistoryPane は leftPaneTab === 'history' && historySubTab === 'message' の条件下、NotesAndLogsPane は leftPaneTab === 'memo' の条件下でレンダリングされる。設計書のコード例が簡略化されすぎており、実装時に混乱を招く可能性がある。",
+      "suggestion": "設計書セクション4-1のコード例を実際のタブ切り替え構造に合わせて修正する。具体的には、HistoryPane への onInsertToMessage 追加は historySubTab === 'message' ブロック内、NotesAndLogsPane への追加は leftPaneTab === 'memo' ブロック内であることを明記する。"
+    },
+    {
+      "id": "D2-010",
+      "severity": "nice_to_have",
+      "category": "コード例",
+      "title": "MobileContent への onInsertToMessage 伝播の詳細が不足",
+      "description": "設計書セクション4-8は WorktreeDetailSubComponents.tsx の MobileContent 変更について「MobileContentPropsにonInsertToMessage追加、HistoryPaneとNotesAndLogsPaneへの伝播を追加」と簡潔に記載されているのみ。MobileContentProps は現在22個のプロパティを持つ大きなインターフェースであり（698-747行目）、実装者にとって具体的なコード例があると有益。",
+      "suggestion": "MobileContentProps への onInsertToMessage 追加と、MobileContent 内の HistoryPane / NotesAndLogsPane への伝播コード例を追記する。"
+    },
+    {
+      "id": "D2-011",
+      "severity": "nice_to_have",
+      "category": "型定義",
+      "title": "ConversationPairCard の既存 Props にある maxAgents プロパティが設計書に記載なし",
+      "description": "設計書セクション4-7の NotesAndLogsPaneProps にはプロジェクトで追加済みの maxAgents?: number プロパティが含まれておらず、既存の Props 定義と部分的にずれがある。ただし maxAgents は NotesAndLogsPane.tsx:43行目で実際に定義済みであり、設計書のコード例には記載されているため大きな問題ではない。",
+      "suggestion": "設計書の Props リストに maxAgents を含めて網羅性を向上させる。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 5,
+    "nice_to_have_count": 4,
+    "overall_quality": "high"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "src/components/worktree/MessageInput.tsx",
+    "src/components/worktree/ConversationPairCard.tsx",
+    "src/components/worktree/MemoCard.tsx",
+    "src/components/worktree/HistoryPane.tsx",
+    "src/components/worktree/MemoPane.tsx",
+    "src/components/worktree/NotesAndLogsPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/WorktreeDetailSubComponents.tsx",
+    "package.json"
+  ],
+  "timestamp": "2026-03-13T12:00:00Z"
+}

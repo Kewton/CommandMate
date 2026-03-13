@@ -1,0 +1,23 @@
+{
+  "issue_number": 485,
+  "stage": 2,
+  "applied_findings": ["D2-002", "D2-003", "D2-009", "D2-008", "D2-007"],
+  "skipped_findings": ["D2-001", "D2-004", "D2-005", "D2-006", "D2-010", "D2-011"],
+  "design_doc_updated": true,
+  "changes_summary": {
+    "D2-002": "セクション4-1: onInsertConsumed のインライン関数を useCallback でメモ化した handleInsertConsumed に変更",
+    "D2-003": "セクション4-3: ConversationPairCard 内部で UserMessageSection サブコンポーネントへの onInsertToMessage 伝播を明記",
+    "D2-009": "セクション4-1: leftPaneMemo のコード例にタブ構造の注記を追加（historySubTab === 'message' / leftPaneTab === 'memo'）",
+    "D2-008": "セクション11 実装チェックリスト: MemoPane から MemoCard への onInsertToMessage 伝播確認項目を追加",
+    "D2-007": "セクション8 テスト設計: HistoryPane テストファイルの実パスに関する注記を追加"
+  },
+  "skip_reasons": {
+    "D2-001": "確認結果: 問題なし（対応不要）",
+    "D2-004": "実装時にレイアウト確認で調整する運用対応",
+    "D2-005": "確認結果: 問題なし（対応不要）",
+    "D2-006": "確認結果: 問題なし（対応不要）",
+    "D2-010": "セクション4-8の既存記載で実装可能と判断",
+    "D2-011": "既存コード参照で対応可能と判断"
+  },
+  "timestamp": "2026-03-13T12:30:00Z"
+}

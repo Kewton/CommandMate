@@ -1,0 +1,30 @@
+{
+  "issue_number": 485,
+  "stage": 3,
+  "applied_findings": ["D3-003", "D3-001", "D3-005", "D3-010", "D3-007"],
+  "skipped_findings": ["D3-002", "D3-004", "D3-006", "D3-008", "D3-009"],
+  "design_doc_updated": true,
+  "apply_date": "2026-03-13",
+  "changes_summary": {
+    "D3-003": "セクション4-2のuseEffect定義に前提条件コメントを追記（pendingInsertTextは初回レンダリング時にnullであること、if (!pendingInsertText) returnにより安全にスキップされること）",
+    "D3-001": "セクション7に挿入操作1回あたり2回のレンダリングサイクルの詳細説明を追記（React 18 automatic batchingの制約、memo()/useMemo()による実DOM更新最小化）",
+    "D3-005": "セクション8のテスト設計にNotesAndLogsPane.test.tsxのMemoPaneモック更新が必要である旨の注記を追加",
+    "D3-010": "セクション7にデスクトップ/モバイル排他レンダリングの安全性説明を追記（isMobile条件分岐で一方のみマウント）",
+    "D3-007": "セクション4-8を詳細化（MobileContentPropsへの追加、HistoryPane伝播、NotesAndLogsPane伝播、呼び出し元での指定の4つの変更ポイントをコード例で明記）"
+  },
+  "skip_reasons": {
+    "D3-002": "セクション4-1でuseCallbackの空依存配列による安定参照が既に記載済み。追加コメントは過剰",
+    "D3-004": "useEffect内の早期リターンで自明。設計書への追記は不要",
+    "D3-006": "セクション8で「新規作成」と既に記載済み。onCopy併記の推奨は実装時判断に委ねる",
+    "D3-008": "セクション4-1でuseCallback定義済み。安定参照の理由はReactの基本仕様で自明",
+    "D3-009": "レビュー結果で「対応不要」と判定済み"
+  },
+  "sections_modified": [
+    "4-2 (MessageInput useEffect前提条件追記)",
+    "4-8 (MobileContent変更ポイント詳細化)",
+    "7 (レンダリングサイクル・排他レンダリング安全性追記)",
+    "8 (MemoPaneモック更新注記追加)",
+    "11 (Stage 3レビューサマリー・チェックリスト追加)",
+    "関連ドキュメント (Stage 3レビュー結果リンク追加)"
+  ]
+}

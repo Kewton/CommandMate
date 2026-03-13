@@ -1,0 +1,23 @@
+{
+  "issue_number": 485,
+  "refactor_targets": [
+    "src/components/worktree/MessageInput.tsx",
+    "src/components/worktree/ConversationPairCard.tsx",
+    "src/components/worktree/MemoCard.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/HistoryPane.tsx",
+    "src/components/worktree/MemoPane.tsx",
+    "src/components/worktree/NotesAndLogsPane.tsx",
+    "src/components/worktree/WorktreeDetailSubComponents.tsx"
+  ],
+  "quality_metrics": {
+    "before_test_count": 4975,
+    "before_test_passed": 4975
+  },
+  "improvement_goals": [
+    "Issue #485 で追加されたコードの品質確認",
+    "重複コードの削除",
+    "不要なコメントの削除",
+    "型安全性の確認"
+  ]
+}

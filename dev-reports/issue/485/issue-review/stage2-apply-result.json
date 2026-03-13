@@ -1,0 +1,78 @@
+{
+  "issue_number": 485,
+  "iteration": 1,
+  "stage": 2,
+  "apply_date": "2026-03-13",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "「draftKey」の記載を削除し、「DRAFT_STORAGE_KEY_PREFIX + worktreeId によるlocalStorage下書き保存」に修正。補足セクションにも正確な定数値を記載"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "「useInfiniteMessages - 履歴データ取得（変更なし、既存活用）」を関連コンポーネントから削除。受入条件を「既存のメッセージ取得フロー WorktreeDetailRefactored → HistoryPane props経由 を活用」に修正。代わりにuseConversationHistoryフックの説明を追加"
+      },
+      {
+        "id": "MF-3",
+        "status": "applied",
+        "change_summary": "ConversationPairCardの説明を「propsとしてConversationPairデータを受け取る表示コンポーネント」に修正。useConversationHistoryはHistoryPane内で使用される旨を関連コンポーネントに記載"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "MessageInputへの外部テキスト挿入方式として「useImperativeHandle + forwardRef によるinsertTextメソッド公開、またはpendingInsertText propsパターンのいずれかを採用」を実装タスクと主要な変更点に明記"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "影響範囲にWorktreeDetailSubComponents.tsxを追加。MobileContent propsへのコールバック追加が必要な旨を記載。コールバック伝播経路セクションでデスクトップ/モバイル各経路を明記"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "影響範囲にNotesAndLogsPane.tsxを独立した行として追加。NotesAndLogsPanePropsへのonInsertToMessageコールバック追加を明記"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "受入条件を「入力欄に既存テキストがある場合、改行2つ（空行）を挟んで末尾に追加されること」に修正。入力欄が空の場合の条件も追加"
+      },
+      {
+        "id": "SF-5",
+        "status": "applied",
+        "change_summary": "HistoryPanePropsへの型変更（onInsertToMessage?: (content: string) => void）を影響範囲テーブルに明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "UIアイコン選定は実装時に決定する方が適切なため、Issueには詳細指定しない"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "Toast通知は実装時の判断事項として扱い、Issueには追加しない"
+      },
+      {
+        "id": "NTH-3",
+        "status": "skipped",
+        "reason": "LeftPaneTabSwitcherのタブ構造の説明は実装者がコード参照で把握可能なため、Issueには追加しない"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 11,
+    "applied": 8,
+    "skipped": 3
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/485"
+  }
+}

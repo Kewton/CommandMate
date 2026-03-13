@@ -1,0 +1,144 @@
+{
+  "issue_number": 485,
+  "stage": 3,
+  "review_type": "影響範囲",
+  "review_date": "2026-03-13",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "must_fix",
+      "category": "伝播経路",
+      "title": "デスクトップ履歴経路にLeftPaneTabSwitcherの中間伝播が不要であることの明確化",
+      "description": "Issueのコールバック伝播経路に「WorktreeDetailRefactored → LeftPaneTabSwitcher → HistoryPane → ConversationPairCard」と記載されているが、実際のコードを確認すると LeftPaneTabSwitcher はタブ切替ボタンのみを描画するコンポーネントであり、HistoryPaneへのprops伝播には関与しない。WorktreeDetailRefactored.tsx の leftPaneMemo 内で HistoryPane は LeftPaneTabSwitcher と並列に直接レンダリングされている（1301行目: LeftPaneTabSwitcher, 1334行目: HistoryPane）。従って LeftPaneTabSwitcher を経由する伝播経路は誤りであり、LeftPaneTabSwitcherProps の変更は不要である。",
+      "suggestion": "コールバック伝播経路（デスクトップ）を「WorktreeDetailRefactored → HistoryPane → ConversationPairCard」に修正する。LeftPaneTabSwitcher への言及を削除する。LeftPaneTabSwitcherProps の変更は不要であることを明記する。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "MessageInput が React.memo() で包まれておりforwardRef との組み合わせに注意が必要",
+      "description": "現在の MessageInput は memo(function MessageInput(...)) で定義されている（36行目）。forwardRef を使用する場合、forwardRef(function ...) を memo() で包む形「memo(forwardRef(...))」にする必要がある。もしくは pendingInsertText props パターンを採用すれば forwardRef は不要になる。Issue本文にはどちらのパターンも選択肢として記載されているが、memo() との組み合わせの技術的制約について言及がない。",
+      "suggestion": "実装タスクに「MessageInput は現在 memo() で包まれているため、forwardRef パターンを採用する場合は memo(forwardRef(...)) の形にする必要がある」旨の注記を追加する。あるいは pendingInsertText props パターンの方が memo() との親和性が高いため、そちらを推奨パターンとして明記する。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "leftPaneMemo の useMemo 依存配列への onInsertToMessage コールバック追加が必要",
+      "description": "WorktreeDetailRefactored.tsx の leftPaneMemo（1298行目）は useMemo で包まれており、依存配列（1404行目）に HistoryPane や NotesAndLogsPane に渡すすべての props を列挙する必要がある。コード内のコメント（1294-1296行目）にも「新しい prop やstate変数を左ペインのコンテンツに追加する場合、この依存配列にも必ず追加すること」と明記されている。onInsertToMessage コールバックを HistoryPane と NotesAndLogsPane に渡す場合、この依存配列にも追加しなければ stale closure の問題が発生する。この点が変更対象ファイルの説明に記載されていない。",
+      "suggestion": "影響範囲の WorktreeDetailRefactored.tsx の説明に「leftPaneMemo の useMemo 依存配列に onInsertToMessage コールバックを追加する必要がある」ことを明記する。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "MemoPane のprops型変更が影響範囲に未記載",
+      "description": "Issue本文の影響範囲に MemoPane.tsx が変更対象ファイルとして記載されているが、MemoPaneProps への onInsertToMessage の追加は明示されていない。NotesAndLogsPane → MemoPane → MemoCard の伝播経路で、MemoPane は中間コンポーネントとしてコールバックを受け取り MemoCard に渡す必要がある。現在の MemoPaneProps には onInsertToMessage がない。",
+      "suggestion": "変更対象ファイルの一覧に「MemoPane.tsx: MemoPaneProps に onInsertToMessage コールバック追加、MemoCard への伝播」を明記する。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "should_fix",
+      "category": "テスト",
+      "title": "HistoryPane の既存テストへの影響が未記載",
+      "description": "tests/unit/components/HistoryPane.test.tsx が既に存在する。HistoryPaneProps に onInsertToMessage を追加すると、既存テストで HistoryPane をレンダリングしている箇所が影響を受ける可能性がある（オプショナルpropsならビルドエラーにはならないが、テストカバレッジとして挿入機能のテストが必要）。同様に MemoPane.test.tsx、MemoCard.test.tsx、NotesAndLogsPane.test.tsx にも影響がある。Issue のテストタスクには「MessageInput, ConversationPairCard, MemoCard」のみ記載されている。",
+      "suggestion": "テスト追加対象に「HistoryPane（onInsertToMessage の ConversationPairCard への伝播テスト）」「MemoPane（onInsertToMessage の MemoCard への伝播テスト）」を追加する。また既存テストファイル（HistoryPane.test.tsx, MemoPane.test.tsx, MemoCard.test.tsx, NotesAndLogsPane.test.tsx）の更新が必要であることを実装タスクに明記する。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "ConversationPairCard のテストファイルが存在しない",
+      "description": "ConversationPairCard.test.tsx が tests/ 配下に存在しない。Issue のユニットテスト追加タスクに ConversationPairCard が含まれているが、これは既存テストの修正ではなく新規テストファイルの作成が必要である。実装タスクの記述ではこの区別が不明確。",
+      "suggestion": "実装タスクのテスト項目を「ConversationPairCard のユニットテスト新規作成（挿入ボタン表示・クリック時のコールバック呼び出し）」と具体化する。"
+    },
+    {
+      "id": "S3-007",
+      "severity": "should_fix",
+      "category": "型定義",
+      "title": "src/types/ 配下の型定義ファイルへの変更は不要であることの確認",
+      "description": "ConversationPairCardProps は src/components/worktree/ConversationPairCard.tsx 内で定義されている（コンポーネントファイル内のexport）。ConversationPair 型は src/types/conversation.ts に定義されているが、この型自体はデータ構造であり、UIコールバックを含まないため変更不要。MemoCardProps も src/components/worktree/MemoCard.tsx 内で定義されている。HistoryPaneProps、MemoPaneProps、NotesAndLogsPaneProps もすべてコンポーネントファイル内定義。従って src/types/ 配下のファイルへの変更は不要。",
+      "suggestion": "影響範囲に「src/types/ 配下のファイルへの変更は不要（すべてのprops型はコンポーネントファイル内で定義されている）」と明記し、実装者の混乱を防ぐ。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "pendingInsertText props パターン採用時の MessageInput 再レンダリング考慮",
+      "description": "pendingInsertText props パターンを採用した場合、親コンポーネント（WorktreeDetailRefactored）が state として pendingInsertText を管理し、MessageInput に渡す形になる。MessageInput は memo() で包まれているため、pendingInsertText が変わらない限り再レンダリングされないが、挿入実行後にpendingInsertTextをnullに戻す処理が必要。このリセット処理のタイミング（MessageInput内のuseEffectで消費後にリセットコールバックを呼ぶ等）について、実装方針の記載があるとよい。",
+      "suggestion": "実装タスクに「pendingInsertText パターンの場合、挿入後のリセット機構（onInsertConsumed コールバックまたは useEffect 内でのリセット）を設計すること」と追記する。"
+    },
+    {
+      "id": "S3-009",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "関連コンポーネント LeftPaneTabSwitcher は変更不要であることの明記",
+      "description": "Issue の「関連コンポーネント」セクションに LeftPaneTabSwitcher が記載されているが、S3-001 で指摘の通りこのコンポーネントの変更は不要。関連コンポーネントとして列挙されていると、実装者が不要な変更を行う可能性がある。",
+      "suggestion": "関連コンポーネントの LeftPaneTabSwitcher の項目に「変更不要（タブ切替UIのみを担当し、コンテンツへのprops伝播には関与しない）」と明記する。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 3,
+    "should_fix_count": 4,
+    "nice_to_have_count": 2,
+    "overall_quality": "medium"
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "1298-1404",
+      "relevance": "leftPaneMemo の useMemo 依存配列にコールバック追加が必要"
+    },
+    {
+      "file": "src/components/worktree/LeftPaneTabSwitcher.tsx",
+      "lines": "21-28",
+      "relevance": "LeftPaneTabSwitcherProps にコールバック伝播は不要（タブ切替のみ）"
+    },
+    {
+      "file": "src/components/worktree/MessageInput.tsx",
+      "lines": "36",
+      "relevance": "memo() で包まれているため forwardRef との組み合わせに注意"
+    },
+    {
+      "file": "src/components/worktree/MemoPane.tsx",
+      "lines": "31-36",
+      "relevance": "MemoPaneProps に onInsertToMessage 追加が必要（中間伝播）"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailSubComponents.tsx",
+      "lines": "697-747",
+      "relevance": "MobileContentProps に onInsertToMessage 追加が必要"
+    },
+    {
+      "file": "src/types/conversation.ts",
+      "relevance": "ConversationPair 型自体の変更は不要"
+    }
+  ],
+  "doc_references": [],
+  "test_references": [
+    {
+      "file": "tests/unit/components/HistoryPane.test.tsx",
+      "relevance": "既存テスト - onInsertToMessage 伝播テスト追加が必要"
+    },
+    {
+      "file": "tests/unit/components/worktree/MemoCard.test.tsx",
+      "relevance": "既存テスト - 挿入ボタンテスト追加が必要"
+    },
+    {
+      "file": "tests/unit/components/worktree/MemoPane.test.tsx",
+      "relevance": "既存テスト - onInsertToMessage 伝播テスト追加が必要"
+    },
+    {
+      "file": "tests/unit/components/worktree/NotesAndLogsPane.test.tsx",
+      "relevance": "既存テスト - onInsertToMessage 伝播テスト追加が必要"
+    },
+    {
+      "file": "tests/unit/components/worktree/MessageInput.test.tsx",
+      "relevance": "既存テスト - 外部テキスト挿入テスト追加が必要"
+    },
+    {
+      "file": "tests/unit/components/worktree/ConversationPairCard.test.tsx",
+      "relevance": "新規作成 - 挿入ボタン表示・コールバックテスト"
+    }
+  ]
+}
