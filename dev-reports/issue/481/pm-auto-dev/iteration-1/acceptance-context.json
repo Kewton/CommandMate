@@ -1,0 +1,28 @@
+{
+  "issue_number": 481,
+  "feature_summary": "src/lib ディレクトリ再整理（R-3）: 36ファイルを7つのドメイン別サブディレクトリ（db/, tmux/, security/, detection/, session/, polling/, git/）に移行",
+  "acceptance_criteria": [
+    "各新規サブディレクトリ（db/, tmux/, security/, detection/, session/, polling/, git/）に index.ts が設置されていること",
+    "transports/ ディレクトリが完全に削除されていること",
+    "npm run lint がエラー0件でパスすること",
+    "npx tsc --noEmit がエラー0件でパスすること",
+    "npm run test:unit が全テストパスすること",
+    "npm run build がパスすること",
+    "npm run build:cli がパスすること",
+    "security/index.ts が named export 方式であること（isWithinRoot, generateToken, hashToken がバレルから除外されていること）",
+    "middleware.ts が ip-restriction.ts を ./lib/security/ip-restriction で直接importしていること",
+    "ws-server.ts が @/lib/security 経由で auth.ts の関数を正しくimportしていること",
+    "db.ts が src/lib/db/ に移動し、src/lib/db.ts が存在しないこと（互換レイヤー除く）",
+    "CLAUDE.md のモジュール一覧が新しいパス（@/lib/db/, @/lib/tmux/ 等）に更新されていること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: 各サブディレクトリのindex.tsが存在し、全対象ファイルが移動済みであること",
+    "シナリオ2: transports/ ディレクトリが存在しないこと",
+    "シナリオ3: npm run lint が0エラーでパスすること",
+    "シナリオ4: npx tsc --noEmit が0エラーでパスすること",
+    "シナリオ5: npm run test:unit が全テストパスすること",
+    "シナリオ6: security/index.ts の named export 確認（isWithinRoot が除外されていること）",
+    "シナリオ7: middleware.ts の直接importパス確認",
+    "シナリオ8: CLAUDE.md のパス更新確認"
+  ]
+}
