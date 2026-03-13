@@ -17,8 +17,11 @@ import { cleanupRooms, broadcastMessage } from '@/lib/ws-server';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { killSession } from '@/lib/tmux';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { createLogger } from '@/lib/logger';
 
-const LOG_PREFIX = '[Repository Delete]';
+const logger = createLogger('api/repositories');
+
+
 
 /**
  * Kill a CLI tool session for a worktree
@@ -84,9 +87,7 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    console.info(
-      `${LOG_PREFIX} Starting deletion: ${repositoryPath}, worktrees: ${worktreeIds.length}`
-    );
+    logger.info('repository:delete-start', { repositoryPath, worktreeCount: worktreeIds.length });
 
     // 1. Clean up sessions and pollers for all worktrees
     const cleanupResult = await cleanupMultipleWorktrees(
@@ -97,14 +98,10 @@ export async function DELETE(request: NextRequest) {
     // Log cleanup results
     for (const result of cleanupResult.results) {
       if (result.sessionsKilled.length > 0) {
-        console.info(
-          `${LOG_PREFIX} Sessions killed for ${result.worktreeId}: ${result.sessionsKilled.join(', ')}`
-        );
+        logger.info('session:killed', { worktreeId: result.worktreeId, sessions: result.sessionsKilled });
       }
       if (result.sessionErrors.length > 0) {
-        console.warn(
-          `${LOG_PREFIX} Session kill errors for ${result.worktreeId}: ${result.sessionErrors.join(', ')}`
-        );
+        logger.warn('session-kill-errors-for:');
       }
     }
 
@@ -116,11 +113,9 @@ export async function DELETE(request: NextRequest) {
     try {
       const deleteResult = deleteRepositoryWorktrees(db, repositoryPath);
       deletedCount = deleteResult.deletedCount;
-      console.info(
-        `${LOG_PREFIX} Successfully deleted ${deletedCount} worktrees from: ${repositoryPath}`
-      );
+      logger.info('repository:deleted', { repositoryPath, deletedCount });
     } catch (error) {
-      console.error(`${LOG_PREFIX} Database deletion failed for ${repositoryPath}:`, error);
+      logger.error('database-deletion-failed-for:', { error: error instanceof Error ? error.message : String(error) });
       return NextResponse.json(
         { success: false, error: 'Database deletion failed' },
         { status: 500 }
@@ -149,16 +144,14 @@ export async function DELETE(request: NextRequest) {
 
     if (cleanupResult.warnings.length > 0) {
       response.warnings = cleanupResult.warnings;
-      console.info(
-        `${LOG_PREFIX} Completed with ${cleanupResult.warnings.length} warnings: ${repositoryPath}`
-      );
+      logger.info('repository:delete-completed', { repositoryPath, warningCount: cleanupResult.warnings.length });
     } else {
-      console.info(`${LOG_PREFIX} Completed successfully: ${repositoryPath}`);
+      logger.info('repository:delete-completed', { repositoryPath });
     }
 
     return NextResponse.json(response, { status: 200 });
   } catch (error: unknown) {
-    console.error(`${LOG_PREFIX} Unexpected error:`, error);
+    logger.error('unexpected-error:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { success: false, error: 'Failed to delete repository' },
       { status: 500 }

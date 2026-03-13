@@ -7,6 +7,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById, getMemosByWorktreeId, createMemo } from '@/lib/db';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/memos');
 
 /** Maximum number of memos allowed per worktree */
 const MAX_MEMOS = 5;
@@ -42,7 +45,7 @@ export async function GET(
 
     return NextResponse.json({ memos }, { status: 200 });
   } catch (error) {
-    console.error('Error fetching memos:', error);
+    logger.error('error-fetching-memos:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to fetch memos' },
       { status: 500 }
@@ -128,7 +131,7 @@ export async function POST(
 
     return NextResponse.json({ memo }, { status: 201 });
   } catch (error) {
-    console.error('Error creating memo:', error);
+    logger.error('error-creating-memo:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to create memo' },
       { status: 500 }

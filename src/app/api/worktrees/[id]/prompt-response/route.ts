@@ -15,6 +15,9 @@ import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/cli-
 import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
 import { isValidWorktreeId } from '@/lib/auto-yes-manager';
 import type { PromptType } from '@/types/models';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/prompt-response');
 
 interface PromptResponseRequest {
   answer: string;
@@ -107,7 +110,7 @@ export async function POST(
       }
     } catch {
       // If capture fails, proceed with caution - don't block manual responses
-      console.warn('[prompt-response] Failed to verify prompt state, proceeding with send');
+      logger.warn('failed-to-verify-prompt');
     }
 
     // Send answer to tmux
@@ -135,7 +138,7 @@ export async function POST(
       answer,
     });
   } catch (error: unknown) {
-    console.error('Failed to respond to prompt:', error);
+    logger.error('failed-to-respond-to-prompt:', { error: error instanceof Error ? error.message : String(error) });
     const errorMessage = error instanceof Error ? error.message : 'Internal server error';
     return NextResponse.json(
       { error: errorMessage },

@@ -1,0 +1,17 @@
+{
+  "issue_number": 480,
+  "refactor_targets": [
+    "src/lib/conversation-logger.ts",
+    "tests/helpers/logger-mock.ts"
+  ],
+  "quality_metrics": {
+    "unit_tests_pass": 4921,
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "improvement_goals": [
+    "コードの一貫性確認（logger命名パターン）",
+    "不要なimportや変数の確認",
+    "テストモックパターンの一貫性確認"
+  ]
+}

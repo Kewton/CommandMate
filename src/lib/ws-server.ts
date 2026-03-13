@@ -17,6 +17,9 @@ import { getWorktreeById } from './db';
 import { observeTmuxControlFirstOutputLatency } from './tmux-control-mode-metrics';
 import { getControlModeTmuxTransport } from './transports/control-mode-tmux-transport';
 import { isTmuxControlModeEnabled } from './tmux-control-mode-flags';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('ws-server');
 
 interface WebSocketMessage {
   type:
@@ -115,7 +118,7 @@ export function setupWebSocket(server: HTTPServer | HTTPSServer): void {
       if (!isIpAllowed(wsClientIp, getAllowedRanges())) {
         // [S4-004] Log injection prevention: normalizeIp() + substring(0, 45)
         const safeIp = wsClientIp.substring(0, 45);
-        console.warn(`[IP-RESTRICTION] WebSocket denied: ${safeIp}`);
+        logger.warn('websocket:denied', { ip: safeIp });
         socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
         socket.destroy();
         return;
@@ -142,7 +145,7 @@ export function setupWebSocket(server: HTTPServer | HTTPSServer): void {
 
   // Handle WebSocket server errors (e.g., invalid frames from clients)
   wss.on('error', (error) => {
-    console.error('[WS Server] Error:', error.message);
+    logger.error('server:error', { error: error.message });
   });
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -163,7 +166,7 @@ export function setupWebSocket(server: HTTPServer | HTTPSServer): void {
     if (socket) {
       socket.on('error', (err: Error & { code?: string }) => {
         if (!isExpectedWebSocketError(err)) {
-          console.error('[WS Socket] Error:', err.message);
+          logger.error('socket:error', { error: err.message });
         }
 
         // Immediately destroy the socket to prevent further errors
@@ -182,7 +185,7 @@ export function setupWebSocket(server: HTTPServer | HTTPSServer): void {
         const message: WebSocketMessage = JSON.parse(data.toString());
         handleMessage(ws, message);
       } catch (parseError) {
-        console.error('Error parsing WebSocket message:', parseError);
+        logger.error('message:parse-failed', { error: parseError instanceof Error ? parseError.message : String(parseError) });
         // Don't close connection on parse error, just log it
       }
     });
@@ -195,7 +198,7 @@ export function setupWebSocket(server: HTTPServer | HTTPSServer): void {
     // Handle errors (including invalid close codes from mobile browsers)
     ws.on('error', (error: Error & { code?: string }) => {
       if (!isExpectedWebSocketError(error)) {
-        console.error('[WS] WebSocket error:', error.message);
+        logger.error('websocket:error', { error: error.message });
       }
 
       // Immediately terminate to prevent further errors
@@ -248,7 +251,7 @@ function handleMessage(ws: WebSocket, message: WebSocketMessage): void {
       break;
 
     default:
-      console.warn('Unknown message type:', message);
+      logger.warn('message:unknown-type');
   }
 }
 
@@ -318,12 +321,12 @@ function handleBroadcast(worktreeId: string, data: unknown): void {
         try {
           client.send(message);
         } catch (sendError) {
-          console.error(`Error sending WebSocket message to client:`, sendError);
+          logger.error('broadcast:send-failed', { error: sendError instanceof Error ? sendError.message : String(sendError) });
         }
       }
     });
   } catch (broadcastError) {
-    console.error(`Error broadcasting to worktree ${worktreeId}:`, broadcastError);
+    logger.error('broadcast:failed', { worktreeId, error: broadcastError instanceof Error ? broadcastError.message : String(broadcastError) });
     // Try to broadcast with sanitized data
     try {
       const sanitizedMessage = JSON.stringify({
@@ -341,7 +344,7 @@ function handleBroadcast(worktreeId: string, data: unknown): void {
         }
       });
     } catch (fallbackError) {
-      console.error('Failed to send fallback message:', fallbackError);
+      logger.error('fallback:send-failed', { error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError) });
     }
   }
 }
@@ -584,7 +587,7 @@ export function broadcastMessage(type: string, data: { worktreeId?: string; [key
   if (data.worktreeId) {
     handleBroadcast(data.worktreeId, { type, ...data });
   } else {
-    console.warn('broadcastMessage called without worktreeId');
+    logger.warn('broadcast:missing-worktree-id');
   }
 }
 

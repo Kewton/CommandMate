@@ -9,8 +9,9 @@ import { getDbInstance } from '@/lib/db-instance';
 import { getEnv } from '@/lib/env';
 import { CloneManager } from '@/lib/clone-manager';
 import type { CloneJobStatus } from '@/types/clone';
+import { createLogger } from '@/lib/logger';
 
-const LOG_PREFIX = '[Clone Status API]';
+const logger = createLogger('api/repositories-clone');
 
 /**
  * Response type for clone job status
@@ -88,7 +89,7 @@ export async function GET(
 
     return NextResponse.json(response, { status: 200 });
   } catch (error: unknown) {
-    console.error(`${LOG_PREFIX} Unexpected error:`, error);
+    logger.error('unexpected-error:', { error: error instanceof Error ? error.message : String(error) });
 
     return NextResponse.json(
       { success: false, error: 'Failed to get clone job status' },

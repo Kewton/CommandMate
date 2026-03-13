@@ -17,6 +17,9 @@ import {
 } from '@/config/schedule-config';
 import { ALLOWED_CLI_TOOLS } from '@/lib/claude-executor';
 import { isValidCronExpression } from '@/config/cmate-constants';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/schedules');
 
 /**
  * GET /api/worktrees/:id/schedules
@@ -44,7 +47,7 @@ export async function GET(
 
     return NextResponse.json({ schedules }, { status: 200 });
   } catch (error) {
-    console.error('Error fetching schedules:', error);
+    logger.error('error-fetching-schedules:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: 'Failed to fetch schedules' }, { status: 500 });
   }
 }
@@ -121,7 +124,7 @@ export async function POST(
 
     return NextResponse.json({ schedule }, { status: 201 });
   } catch (error) {
-    console.error('Error creating schedule:', error);
+    logger.error('error-creating-schedule:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: 'Failed to create schedule' }, { status: 500 });
   }
 }

@@ -6,6 +6,9 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import { initDatabase } from './db';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('db-migrations');
 
 /**
  * Current schema version
@@ -179,7 +182,7 @@ const migrations: Migration[] = [
     },
     down: () => {
       // No down migration needed - this is a data fix
-      console.log('No rollback needed for repository path fix');
+      logger.debug('migration:skip-rollback', { name: 'repository-path-fix' });
     }
   },
   {
@@ -243,7 +246,7 @@ const migrations: Migration[] = [
     },
     down: () => {
       // No down migration needed - SQLite doesn't support DROP COLUMN directly
-      console.log('No rollback needed for link field');
+      logger.debug('migration:skip-rollback', { name: 'link-field' });
     }
   },
   {
@@ -276,7 +279,7 @@ const migrations: Migration[] = [
 
       // Note: SQLite doesn't support DROP COLUMN directly
       // In production, you would need to recreate the table without cli_tool_id
-      console.log('No full rollback for cli_tool_id column (SQLite limitation)');
+      logger.debug('migration:skip-rollback', { name: 'cli-tool-id', reason: 'SQLite limitation' });
     }
   },
   {
@@ -339,8 +342,7 @@ const migrations: Migration[] = [
         ON chat_messages(timestamp);
       `);
 
-      console.log('✓ Changed role constraint from "claude" to "assistant"');
-      console.log('✓ Updated existing messages with role="claude" to role="assistant"');
+      logger.info('migration:completed', { name: 'change-role-constraint', detail: 'claude to assistant' });
     },
     down: (db) => {
       // Rollback: change 'assistant' back to 'claude'
@@ -391,7 +393,7 @@ const migrations: Migration[] = [
         ON chat_messages(timestamp);
       `);
 
-      console.log('✓ Rolled back: Changed role constraint from "assistant" to "claude"');
+      logger.info('migration:rollback', { name: 'change-role-constraint', detail: 'assistant to claude' });
     }
   },
   {
@@ -404,12 +406,12 @@ const migrations: Migration[] = [
         ALTER TABLE session_states ADD COLUMN in_progress_message_id TEXT DEFAULT NULL;
       `);
 
-      console.log('✓ Added in_progress_message_id column to session_states table');
+      logger.info('migration:completed', { name: 'add-in-progress-message-id' });
     },
     down: () => {
       // Note: SQLite doesn't support DROP COLUMN directly
       // In production, you would need to recreate the table without in_progress_message_id
-      console.log('No full rollback for in_progress_message_id column (SQLite limitation)');
+      logger.debug('migration:skip-rollback', { name: 'in-progress-message-id', reason: 'SQLite limitation' });
     }
   },
   {
@@ -456,12 +458,11 @@ const migrations: Migration[] = [
         insertStmt.run(randomUUID(), wt.id, wt.memo, now, now);
       }
 
-      console.log(`✓ Created worktree_memos table`);
-      console.log(`✓ Migrated ${worktrees.length} existing memos to new table`);
+      logger.info('migration:completed', { name: 'worktree-memos-table', migratedCount: worktrees.length });
     },
     down: (db) => {
       db.exec('DROP TABLE IF EXISTS worktree_memos');
-      console.log('✓ Dropped worktree_memos table');
+      logger.info('migration:rollback', { name: 'worktree-memos-table' });
     }
   },
   {
@@ -479,12 +480,11 @@ const migrations: Migration[] = [
         ON chat_messages(worktree_id, role, timestamp DESC);
       `);
 
-      console.log('✓ Added last_viewed_at column to worktrees table');
-      console.log('✓ Created index for assistant message queries');
+      logger.info('migration:completed', { name: 'add-viewed-tracking' });
     },
     down: (db) => {
       db.exec('DROP INDEX IF EXISTS idx_chat_messages_assistant_latest');
-      console.log('✓ Dropped idx_chat_messages_assistant_latest index');
+      logger.info('migration:rollback', { name: 'viewed-tracking' });
       // Note: SQLite doesn't support DROP COLUMN directly
     }
   },
@@ -532,14 +532,13 @@ const migrations: Migration[] = [
         CREATE INDEX idx_external_apps_enabled ON external_apps(enabled);
       `);
 
-      console.log('✓ Created external_apps table');
-      console.log('✓ Created indexes for external_apps');
+      logger.info('migration:completed', { name: 'external-apps-table' });
     },
     down: (db) => {
       db.exec('DROP INDEX IF EXISTS idx_external_apps_enabled');
       db.exec('DROP INDEX IF EXISTS idx_external_apps_path_prefix');
       db.exec('DROP TABLE IF EXISTS external_apps');
-      console.log('✓ Dropped external_apps table and indexes');
+      logger.info('migration:rollback', { name: 'external-apps-table' });
     }
   },
   {
@@ -550,14 +549,14 @@ const migrations: Migration[] = [
         ALTER TABLE worktrees RENAME COLUMN memo TO description;
       `);
 
-      console.log('✓ Renamed worktrees.memo column to description');
+      logger.info('migration:completed', { name: 'rename-memo-to-description' });
     },
     down: (db) => {
       db.exec(`
         ALTER TABLE worktrees RENAME COLUMN description TO memo;
       `);
 
-      console.log('✓ Rolled back: Renamed worktrees.description column back to memo');
+      logger.info('migration:rollback', { name: 'rename-memo-to-description' });
     }
   },
   {
@@ -629,9 +628,7 @@ const migrations: Migration[] = [
         ON clone_jobs(normalized_clone_url);
       `);
 
-      console.log('✓ Created repositories table');
-      console.log('✓ Created clone_jobs table');
-      console.log('✓ Created indexes for repositories and clone_jobs');
+      logger.info('migration:completed', { name: 'repositories-and-clone-jobs-tables' });
     },
     down: (db) => {
       db.exec('DROP INDEX IF EXISTS idx_clone_jobs_normalized_clone_url');
@@ -640,7 +637,7 @@ const migrations: Migration[] = [
       db.exec('DROP INDEX IF EXISTS idx_repositories_path');
       db.exec('DROP INDEX IF EXISTS idx_repositories_normalized_clone_url');
       db.exec('DROP TABLE IF EXISTS repositories');
-      console.log('✓ Dropped repositories and clone_jobs tables');
+      logger.info('migration:rollback', { name: 'repositories-and-clone-jobs-tables' });
     }
   },
   {
@@ -653,7 +650,7 @@ const migrations: Migration[] = [
         ALTER TABLE worktrees ADD COLUMN initial_branch TEXT;
       `);
 
-      console.log('✓ Added initial_branch column to worktrees table');
+      logger.info('migration:completed', { name: 'add-initial-branch' });
     },
     down: (db) => {
       // SQLite doesn't support DROP COLUMN directly
@@ -717,7 +714,7 @@ const migrations: Migration[] = [
         ON worktrees(cli_tool_id);
       `);
 
-      console.log('✓ Removed initial_branch column from worktrees table');
+      logger.info('migration:rollback', { name: 'initial-branch' });
     }
   },
   {
@@ -736,8 +733,7 @@ const migrations: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_external_apps_issue_no ON external_apps(issue_no);
       `);
 
-      console.log('✓ Added issue_no column to external_apps table');
-      console.log('✓ Created index idx_external_apps_issue_no');
+      logger.info('migration:completed', { name: 'add-issue-no-to-external-apps' });
     },
     down: (db) => {
       // SQLite doesn't support DROP COLUMN directly
@@ -787,7 +783,7 @@ const migrations: Migration[] = [
         CREATE INDEX idx_external_apps_enabled ON external_apps(enabled);
       `);
 
-      console.log('✓ Removed issue_no column from external_apps table');
+      logger.info('migration:rollback', { name: 'issue-no-from-external-apps' });
     }
   },
   {
@@ -877,10 +873,7 @@ const migrations: Migration[] = [
           ON execution_logs(status);
       `);
 
-      console.log('✓ Cleaned up orphan records');
-      console.log('✓ Created scheduled_executions table');
-      console.log('✓ Created execution_logs table');
-      console.log('✓ Created indexes for schedule tables');
+      logger.info('migration:completed', { name: 'scheduled-executions-and-execution-logs' });
     },
     down: (db) => {
       db.exec('DROP INDEX IF EXISTS idx_execution_logs_status');
@@ -890,7 +883,7 @@ const migrations: Migration[] = [
       db.exec('DROP INDEX IF EXISTS idx_scheduled_executions_enabled');
       db.exec('DROP INDEX IF EXISTS idx_scheduled_executions_worktree');
       db.exec('DROP TABLE IF EXISTS scheduled_executions');
-      console.log('✓ Dropped scheduled_executions and execution_logs tables');
+      logger.info('migration:rollback', { name: 'scheduled-executions-and-execution-logs' });
     }
   },
   {
@@ -920,13 +913,12 @@ const migrations: Migration[] = [
           END;
       `);
 
-      console.log('✓ Added selected_agents column to worktrees table');
-      console.log('✓ Initialized selected_agents based on cli_tool_id');
+      logger.info('migration:completed', { name: 'add-selected-agents' });
     },
     down: () => {
       // selected_agents is a nullable TEXT column; dropping it requires table recreation
       // which is disproportionate for a rollback. The column is harmless if unused.
-      console.log('No rollback for selected_agents column (SQLite limitation)');
+      logger.debug('migration:skip-rollback', { name: 'selected-agents', reason: 'SQLite limitation' });
     }
   },
   {
@@ -939,11 +931,11 @@ const migrations: Migration[] = [
         ALTER TABLE worktrees ADD COLUMN vibe_local_model TEXT DEFAULT NULL;
       `);
 
-      console.log('✓ Added vibe_local_model column to worktrees table');
+      logger.info('migration:completed', { name: 'add-vibe-local-model' });
     },
     down: () => {
       // vibe_local_model is a nullable TEXT column; harmless if unused
-      console.log('No rollback for vibe_local_model column (SQLite limitation)');
+      logger.debug('migration:skip-rollback', { name: 'vibe-local-model', reason: 'SQLite limitation' });
     }
   },
   {
@@ -956,11 +948,11 @@ const migrations: Migration[] = [
         ALTER TABLE worktrees ADD COLUMN vibe_local_context_window INTEGER DEFAULT NULL;
       `);
 
-      console.log('✓ Added vibe_local_context_window column to worktrees table');
+      logger.info('migration:completed', { name: 'add-vibe-local-context-window' });
     },
     down: () => {
       // vibe_local_context_window is a nullable INTEGER column; harmless if unused
-      console.log('No rollback for vibe_local_context_window column (SQLite limitation)');
+      logger.debug('migration:skip-rollback', { name: 'vibe-local-context-window', reason: 'SQLite limitation' });
     }
   },
   {
@@ -974,11 +966,11 @@ const migrations: Migration[] = [
           ON scheduled_executions(worktree_id, enabled);
       `);
 
-      console.log('✓ Created composite index idx_scheduled_executions_worktree_enabled');
+      logger.info('migration:completed', { name: 'scheduled-executions-worktree-enabled-index' });
     },
     down: (db) => {
       db.exec('DROP INDEX IF EXISTS idx_scheduled_executions_worktree_enabled');
-      console.log('✓ Dropped idx_scheduled_executions_worktree_enabled index');
+      logger.info('migration:rollback', { name: 'scheduled-executions-worktree-enabled-index' });
     }
   }
 ];
@@ -1067,7 +1059,7 @@ export function runMigrations(db: Database.Database): void {
   // Get current version
   const currentVersion = getCurrentVersion(db);
 
-  console.log(`Current schema version: ${currentVersion}`);
+  logger.info('schema:version', { currentVersion });
 
   // Find pending migrations
   const pendingMigrations = migrations.filter(
@@ -1075,15 +1067,15 @@ export function runMigrations(db: Database.Database): void {
   );
 
   if (pendingMigrations.length === 0) {
-    console.log('✓ Schema is up to date');
+    logger.info('schema:up-to-date');
     return;
   }
 
-  console.log(`Found ${pendingMigrations.length} pending migration(s)`);
+  logger.info('migration:pending', { count: pendingMigrations.length });
 
   // Run each pending migration in a transaction
   for (const migration of pendingMigrations) {
-    console.log(`Applying migration ${migration.version}: ${migration.name}...`);
+    logger.info('migration:start', { version: migration.version, name: migration.name });
 
     try {
       // Run migration in transaction
@@ -1098,17 +1090,17 @@ export function runMigrations(db: Database.Database): void {
         `).run(migration.version, migration.name, Date.now());
       })();
 
-      console.log(`✓ Migration ${migration.version} applied successfully`);
+      logger.info('migration:applied', { version: migration.version });
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(`✗ Migration ${migration.version} failed:`, errorMessage);
+      logger.error('migration:failed', { version: migration.version, error: errorMessage });
       throw new Error(
         `Migration ${migration.version} (${migration.name}) failed: ${errorMessage}`
       );
     }
   }
 
-  console.log(`✓ All migrations completed. Current version: ${getCurrentVersion(db)}`);
+  logger.info('migration:all-completed', { version: getCurrentVersion(db) });
 }
 
 /**
@@ -1125,11 +1117,11 @@ export function rollbackMigrations(
   const currentVersion = getCurrentVersion(db);
 
   if (targetVersion >= currentVersion) {
-    console.log('No rollback needed');
+    logger.info('rollback:skip', { reason: 'no rollback needed' });
     return;
   }
 
-  console.log(`Rolling back from version ${currentVersion} to ${targetVersion}...`);
+  logger.info('rollback:start', { from: currentVersion, to: targetVersion });
 
   // Get migrations to rollback (in reverse order)
   const migrationsToRollback = migrations
@@ -1144,7 +1136,7 @@ export function rollbackMigrations(
       );
     }
 
-    console.log(`Rolling back migration ${migration.version}: ${migration.name}...`);
+    logger.info('rollback:migration-start', { version: migration.version, name: migration.name });
 
     try {
       db.transaction(() => {
@@ -1156,17 +1148,17 @@ export function rollbackMigrations(
           .run(migration.version);
       })();
 
-      console.log(`✓ Migration ${migration.version} rolled back`);
+      logger.info('rollback:migration-completed', { version: migration.version });
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(`✗ Rollback ${migration.version} failed:`, errorMessage);
+      logger.error('rollback:failed', { version: migration.version, error: errorMessage });
       throw new Error(
         `Rollback of migration ${migration.version} failed: ${errorMessage}`
       );
     }
   }
 
-  console.log(`✓ Rollback completed. Current version: ${getCurrentVersion(db)}`);
+  logger.info('rollback:completed', { version: getCurrentVersion(db) });
 }
 
 /**
@@ -1222,13 +1214,14 @@ export function validateSchema(db: Database.Database): boolean {
     const missingTables = requiredTables.filter(t => !tableNames.includes(t));
 
     if (missingTables.length > 0) {
-      console.error('Missing required tables:', missingTables.join(', '));
+      logger.error('schema:validation-failed', { missingTables: missingTables.join(', ') });
       return false;
     }
 
     return true;
   } catch (schemaError) {
-    console.error('Schema validation failed:', schemaError);
+    const errMsg = schemaError instanceof Error ? schemaError.message : String(schemaError);
+    logger.error('schema:validation-error', { error: errMsg });
     return false;
   }
 }

@@ -8,6 +8,9 @@ import Database from 'better-sqlite3';
 import type { Worktree, ChatMessage, WorktreeSessionState, WorktreeMemo } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { parseSelectedAgents } from '@/lib/selected-agents-validator';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('db');
 
 type ChatMessageRow = {
   id: string;
@@ -658,7 +661,7 @@ export function deleteAllMessages(
   `);
 
   stmt.run(worktreeId);
-  console.log(`[deleteAllMessages] Deleted all messages for worktree: ${worktreeId}`);
+  logger.info('deleted-all-messages-for-worktree:worktr');
 }
 
 /**
@@ -707,7 +710,7 @@ export function deleteMessagesByCliTool(
   `);
 
   const result = stmt.run(worktreeId, cliTool);
-  console.log(`[deleteMessagesByCliTool] Deleted ${result.changes} messages for worktree: ${worktreeId}, cliTool: ${cliTool}`);
+  logger.info('deleted-resultchanges-messages-for-workt');
   return result.changes;
 }
 

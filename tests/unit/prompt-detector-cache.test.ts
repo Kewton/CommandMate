@@ -10,22 +10,32 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { detectPrompt, resetDetectPromptCache } from '@/lib/prompt-detector';
 
-describe('Prompt Detector - Duplicate log suppression', () => {
-  let debugSpy: ReturnType<typeof vi.spyOn>;
-  let infoSpy: ReturnType<typeof vi.spyOn>;
+// Mock logger module (Issue #480)
+const { mockLogger } = vi.hoisted(() => {
+  const mockLogger = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    withContext: vi.fn().mockReturnThis(),
+  };
+  return { mockLogger };
+});
+vi.mock('@/lib/logger', () => ({
+  createLogger: vi.fn(() => mockLogger),
+}));
 
+
+describe('Prompt Detector - Duplicate log suppression', () => {
   beforeEach(() => {
     // T5: Cache reset for test isolation
     resetDetectPromptCache();
 
-    // Create a fresh logger spy setup
-    // We spy on the module-level logger by intercepting createLogger
-    // Since prompt-detector.ts creates its logger at module scope,
-    // we need to spy on the console methods that the logger ultimately calls
-    debugSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    infoSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    // Also suppress console.error for clean test output
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    // Clear mock logger call counts
+    mockLogger.debug.mockClear();
+    mockLogger.info.mockClear();
+    mockLogger.warn.mockClear();
+    mockLogger.error.mockClear();
   });
 
   afterEach(() => {
@@ -40,15 +50,15 @@ describe('Prompt Detector - Duplicate log suppression', () => {
 
     // First call - should produce logs
     const result1 = detectPrompt(output);
-    const callCountAfterFirst = debugSpy.mock.calls.length;
+    const callCountAfterFirst = mockLogger.debug.mock.calls.length;
 
     // Reset spy counts to measure second call independently
-    debugSpy.mockClear();
-    infoSpy.mockClear();
+    mockLogger.debug.mockClear();
+    mockLogger.info.mockClear();
 
     // Second call with same output - should suppress logs
     const result2 = detectPrompt(output);
-    const callCountAfterSecond = debugSpy.mock.calls.length;
+    const callCountAfterSecond = mockLogger.debug.mock.calls.length;
 
     // Second call should produce fewer log calls than first
     // (debug logs for detectPrompt:start and detectPrompt:complete should be suppressed)
@@ -65,14 +75,14 @@ describe('Prompt Detector - Duplicate log suppression', () => {
     const output2 = 'Second output\nDo you want to continue? (y/n)';
 
     detectPrompt(output1);
-    debugSpy.mockClear();
-    infoSpy.mockClear();
+    mockLogger.debug.mockClear();
+    mockLogger.info.mockClear();
 
     // Different output should produce logs
     detectPrompt(output2);
 
     // Should have at least one debug log call (detectPrompt:start)
-    const hasDetectPromptLog = debugSpy.mock.calls.some(
+    const hasDetectPromptLog = mockLogger.debug.mock.calls.some(
       (call: unknown[]) => typeof call[0] === 'string' && call[0].includes('detectPrompt')
     );
     expect(hasDetectPromptLog).toBe(true);
@@ -116,17 +126,17 @@ describe('Prompt Detector - Duplicate log suppression', () => {
     detectPrompt(output);
 
     // Second call (should be suppressed)
-    debugSpy.mockClear();
+    mockLogger.debug.mockClear();
     detectPrompt(output);
-    const suppressedCount = debugSpy.mock.calls.length;
+    const suppressedCount = mockLogger.debug.mock.calls.length;
 
     // Reset cache
     resetDetectPromptCache();
 
     // Third call after reset (should emit logs again)
-    debugSpy.mockClear();
+    mockLogger.debug.mockClear();
     detectPrompt(output);
-    const afterResetCount = debugSpy.mock.calls.length;
+    const afterResetCount = mockLogger.debug.mock.calls.length;
 
     // After reset, should have more log calls than when suppressed
     expect(afterResetCount).toBeGreaterThan(suppressedCount);
@@ -147,7 +157,7 @@ describe('Prompt Detector - Duplicate log suppression', () => {
 
     // The debug log for detectPrompt:start should have been emitted
     // (because this is the first call after cache reset)
-    const hasStartLog = debugSpy.mock.calls.some(
+    const hasStartLog = mockLogger.debug.mock.calls.some(
       (call: unknown[]) => typeof call[0] === 'string' && call[0].includes('detectPrompt:start')
     );
     expect(hasStartLog).toBe(true);
@@ -164,13 +174,13 @@ describe('Prompt Detector - Duplicate log suppression', () => {
 
     // First call
     detectPrompt(output);
-    debugSpy.mockClear();
+    mockLogger.debug.mockClear();
 
     // Second call with same output
     detectPrompt(output);
 
     // multipleChoice info log should also be suppressed
-    const hasMultipleChoiceLog = debugSpy.mock.calls.some(
+    const hasMultipleChoiceLog = mockLogger.debug.mock.calls.some(
       (call: unknown[]) => typeof call[0] === 'string' && call[0].includes('multipleChoice')
     );
     // Since logger uses console.log for info level too (in text format),

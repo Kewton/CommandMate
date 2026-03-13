@@ -1,0 +1,135 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 480,
+  "review_date": "2026-03-13",
+  "findings": [
+    {
+      "id": "DS3-001",
+      "severity": "must_fix",
+      "category": "テスト影響の網羅性",
+      "title": "影響テスト一覧に存在しないテストファイルが6件含まれている",
+      "description": "設計方針書のDS2-007で追記された13ファイルのテスト一覧のうち、以下の6ファイルは実際には存在しないか、console spyを使用していない: (1) tests/unit/lib/resource-cleanup.test.ts - ファイル不在, (2) tests/unit/lib/assistant-response-saver.test.ts - ファイル不在, (3) tests/unit/lib/session-cleanup.test.ts - ファイル不在, (4) tests/unit/lib/cli-tools/codex.test.ts - ファイル不在, (5) tests/unit/lib/cli-tools/gemini.test.ts - ファイル不在, (6) tests/unit/lib/ws-server.test.ts - ws-server-terminal.test.tsは存在するがconsole spyなし",
+      "recommendation": "テスト一覧を実在するファイルのみに修正する。該当ソースファイルにconsole.log/warn/errorが含まれる場合はテスト新規作成が必要であることを明記する",
+      "affected_files": [
+        "tests/unit/lib/resource-cleanup.test.ts",
+        "tests/unit/lib/assistant-response-saver.test.ts",
+        "tests/unit/lib/session-cleanup.test.ts",
+        "tests/unit/lib/cli-tools/codex.test.ts",
+        "tests/unit/lib/cli-tools/gemini.test.ts",
+        "tests/unit/lib/ws-server.test.ts"
+      ]
+    },
+    {
+      "id": "DS3-002",
+      "severity": "must_fix",
+      "category": "テスト影響の網羅性",
+      "title": "console spyを使用している5つのテストファイルが影響一覧から漏れている",
+      "description": "以下のテストファイルはvi.spyOn(console, ...)を使用しているが、設計方針書の影響テスト一覧に記載されていない: (1) tests/unit/lib/tmux-capture-cache.test.ts - console.debug spy, (2) tests/unit/lib/cmate-parser.test.ts - console.warn spy x5, (3) tests/integration/security.test.ts - console.warn spy, (4) tests/integration/auth-middleware.test.ts - console.warn spy x3, (5) tests/unit/prompt-detector-cache.test.ts - console.log/warn/error spy。これらはlogger移行に伴い修正が必要になる可能性がある",
+      "recommendation": "影響テスト一覧にこの5ファイルを追加し、各テストがlogger移行後も正常に動作するか評価する。特にcmate-parser.test.tsのconsole.warn spy x5は対応漏れのリスクが高い",
+      "affected_files": [
+        "tests/unit/lib/tmux-capture-cache.test.ts",
+        "tests/unit/lib/cmate-parser.test.ts",
+        "tests/integration/security.test.ts",
+        "tests/integration/auth-middleware.test.ts",
+        "tests/unit/prompt-detector-cache.test.ts"
+      ]
+    },
+    {
+      "id": "DS3-003",
+      "severity": "should_fix",
+      "category": "他モジュールへの依存影響",
+      "title": "logger.ts依存チェーンにNode.js専用モジュール(install-context.ts)が含まれる間接影響の明記不足",
+      "description": "logger.ts -> env.ts -> db-path-resolver.ts -> cli/utils/install-context.ts というNode.js専用の依存チェーンが存在する。設計方針書ではdb-migrations.tsの循環依存について言及しているが、この依存チェーン全体が新たにloggerをimportする約30ファイルに波及する点が明記されていない。特にNext.jsのServer Componentsでは問題ないが、Edge Runtimeを使用するmiddleware.tsなどでloggerが誤ってimportされた場合にランタイムエラーとなるリスクがある",
+      "recommendation": "「logger.tsの依存制約」セクションを追加し、Edge Runtime環境やクライアントサイドでは絶対にimportしてはならないことをESLint no-restricted-importsルールで強制することを検討する",
+      "affected_files": [
+        "src/lib/logger.ts",
+        "src/lib/env.ts",
+        "src/lib/db-path-resolver.ts",
+        "src/middleware.ts"
+      ]
+    },
+    {
+      "id": "DS3-004",
+      "severity": "should_fix",
+      "category": "ビルド成果物への影響",
+      "title": "約30ファイルへのlogger.ts import追加によるバンドル依存グラフの拡大評価が未実施",
+      "description": "現在loggerをimportしているのは18ファイルだが、移行後は約50ファイルとなる。logger.tsはenv.ts、db-path-resolver.ts、install-context.tsへの依存チェーンを持つため、これまでこれらに依存していなかったモジュール（例: cmate-parser.ts, slash-commands.ts等）が新たにこの依存チェーンに組み込まれる。Next.jsのServer ComponentsではTree-shakingにより問題ないが、APIルート38ファイル全てにこの依存が追加される点について、コールドスタート時間への影響を事前に計測すべき",
+      "recommendation": "Phase 1完了時点でnpm run buildを実行し、ビルド出力のチャンクサイズ変化を記録する。特にAPIルートのLambda/Serverlessデプロイ時のコールドスタート影響を確認する",
+      "affected_files": [
+        "src/lib/logger.ts",
+        "src/app/api/"
+      ]
+    },
+    {
+      "id": "DS3-005",
+      "severity": "should_fix",
+      "category": "フェーズ並行リスク",
+      "title": "Phase 1-3の移行期間中にconsole.logとloggerが混在する検知手段が未定義",
+      "description": "段階的移行中、Phase 1完了後もPhase 2/3対象ファイルにはconsole.logが残る。この期間中に新規開発でconsole.logが追加されると、移行完了判定の品質保証コマンド結果が不正確になる。設計方針書の品質保証セクションの検証コマンドは最終確認用であり、移行期間中の新規追加を防止する仕組みがない",
+      "recommendation": "Phase 1開始時からESLint no-console ルールを段階的に有効化する。Phase 1完了時にsrc/lib/にno-console: error、Phase 2完了時にsrc/app/api/にno-console: error（logger.ts, env.ts, cli/を除外）とすることで、移行済みスコープへの退行を防止できる",
+      "affected_files": [
+        ".eslintrc.json"
+      ]
+    },
+    {
+      "id": "DS3-006",
+      "severity": "should_fix",
+      "category": "リリース時の影響",
+      "title": "ログ出力形式変更による既存運用ツール・grep解析への影響が未評価",
+      "description": "console.logの非構造化出力からloggerの構造化出力への変更により、ログの出力形式が大幅に変わる。例: 'Running migration: xxx' -> '[2026-03-13T...] [INFO] [db-migrations] migration:start {\"name\":\"xxx\"}'。運用中にtailやgrepでログを監視しているユーザーがいる場合、既存のフィルタパターンが壊れる。LOG_FORMAT=textとjsonのどちらがデフォルトかの明記も必要",
+      "recommendation": "設計方針書に「ログ形式変更による運用影響」セクションを追加し、(1) text形式のフォーマット例を全レベルで提示、(2) LOG_FORMATのデフォルト値（現状: text）を明記、(3) CHANGELOGに破壊的変更として記載する方針を明記する",
+      "affected_files": [
+        "src/lib/logger.ts",
+        "CHANGELOG.md"
+      ]
+    },
+    {
+      "id": "DS3-007",
+      "severity": "should_fix",
+      "category": "db-migrations.ts独立PR",
+      "title": "db-migrations.ts独立PR化時のベースブランチ戦略と並行作業の競合リスクが未定義",
+      "description": "DS1-002でdb-migrations.ts(57件)の独立PR化を推奨しているが、独立PRのベースブランチ（featureブランチ or develop）、残りのPhase 1ファイルとの依存関係（tests/helpers/logger-mock.tsの共有等）、マージ順序の制約が未定義。db-migrations.tsのPRが先にマージされた場合、残りのPhase 1 PRでtests/helpers/logger-mock.tsの定義が重複する可能性がある",
+      "recommendation": "以下のPR分割戦略を明記する: (1) PR-A: tests/helpers/logger-mock.tsヘルパー作成（基盤PR、最初にマージ）, (2) PR-B: db-migrations.ts移行（PR-Aに依存）, (3) PR-C: Phase 1残りファイル（PR-Aに依存）。これによりPR-BとPR-Cは並行レビュー可能になる",
+      "affected_files": [
+        "src/lib/db-migrations.ts",
+        "tests/helpers/logger-mock.ts"
+      ]
+    },
+    {
+      "id": "DS3-008",
+      "severity": "nice_to_have",
+      "category": "他モジュールへの依存影響",
+      "title": "src/lib/の実測件数が設計方針書の記載値(約220件)と実測値(約223件)で微差あり",
+      "description": "grepによる実測ではsrc/lib/配下のconsole使用は249件（logger.ts:3件、env.ts:6件、JSDoc約17件を除くと約223件）。設計方針書の約220件とは3件の差があるが、実作業には大きな影響なし",
+      "recommendation": "実装着手時に最新の実測値で再確認すれば十分。設計方針書の値は概算として許容範囲内",
+      "affected_files": []
+    },
+    {
+      "id": "DS3-009",
+      "severity": "nice_to_have",
+      "category": "テスト影響の網羅性",
+      "title": "console.debug spyを使用するテストへの対応方針が未記載",
+      "description": "tmux-capture-cache.test.tsではconsole.debugをspyしているが、loggerにはdebugメソッドがある一方、loggerの内部実装ではconsole.debugではなくconsole.logを使用している。この差異がテスト修正時に混乱を招く可能性がある",
+      "recommendation": "テスト修正方針に「console.debug spyはlogger.debugモックに置換する」旨を追記する",
+      "affected_files": [
+        "tests/unit/lib/tmux-capture-cache.test.ts"
+      ]
+    },
+    {
+      "id": "DS3-010",
+      "severity": "nice_to_have",
+      "category": "リリース時の影響",
+      "title": "LOG_LEVEL=debugでの出力量増大リスクの注意書きがない",
+      "description": "現在console.logで出力されているログの多くがlogger.debug()に分類される予定。本番環境でLOG_LEVEL=debugに設定されている場合は現状と同等の出力量だが、LOG_LEVEL=info（本番デフォルト）では大幅に出力が減少する。これは意図された動作だが、ユーザーが「ログが消えた」と認識する可能性がある",
+      "recommendation": "リリースノートまたはCHANGELOGに「console.logからlogger移行により、本番環境ではLOG_LEVEL=infoがデフォルトとなりdebugレベルのログは出力されません。詳細ログが必要な場合はLOG_LEVEL=debugを設定してください」と記載する",
+      "affected_files": []
+    }
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 5,
+    "nice_to_have_count": 3,
+    "overall_quality": "fair"
+  }
+}

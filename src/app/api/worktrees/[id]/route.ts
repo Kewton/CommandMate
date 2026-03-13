@@ -15,6 +15,9 @@ import { isValidWorktreeId } from '@/lib/auto-yes-manager';
 import { validateSelectedAgentsInput } from '@/lib/selected-agents-validator';
 import { listSessions } from '@/lib/tmux';
 import { detectWorktreeSessionStatus } from '@/lib/worktree-status-helper';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/worktrees');
 
 export async function GET(
   request: NextRequest,
@@ -55,7 +58,7 @@ export async function GET(
       ),
       getGitStatus(worktree.path, initialBranch).catch((gitError) => {
         // Log but don't fail - git status is non-critical
-        console.error(`[GET /api/worktrees/:id] Failed to get git status:`, gitError);
+        logger.error('get-apiworktrees:id-failed-to-get-git-status', { error: gitError instanceof Error ? gitError.message : String(gitError) });
         return undefined as GitStatus | undefined;
       }),
     ]);
@@ -70,7 +73,7 @@ export async function GET(
       { status: 200 }
     );
   } catch (error) {
-    console.error('Error fetching worktree:', error);
+    logger.error('error-fetching-worktree:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to fetch worktree' },
       { status: 500 }
@@ -171,10 +174,7 @@ export async function PATCH(
       // If current cli_tool_id is not in new selectedAgents, auto-update to selectedAgents[0]
       if (!validatedAgents.includes(nextCliToolId)) {
         const newCliToolId = validatedAgents[0];
-        console.info(
-          `[PATCH /api/worktrees/:id] Auto-updating cli_tool_id from '${nextCliToolId}' to '${newCliToolId}' ` +
-          `because '${nextCliToolId}' is not in new selectedAgents [${validatedAgents.join(', ')}]`
-        );
+        logger.info('worktree:auto-update-cli-tool', { from: nextCliToolId, to: newCliToolId, selectedAgents: validatedAgents });
         updateCliToolId(db, params.id, newCliToolId);
         nextCliToolId = newCliToolId;
         cliToolIdAutoUpdated = true;
@@ -231,7 +231,7 @@ export async function PATCH(
       { status: 200 }
     );
   } catch (error) {
-    console.error('Error updating worktree:', error);
+    logger.error('error-updating-worktree:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to update worktree' },
       { status: 500 }

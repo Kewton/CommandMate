@@ -10,6 +10,9 @@ import type { Worktree } from '@/types/models';
 import type Database from 'better-sqlite3';
 import { upsertWorktree, getWorktreeIdsByRepository, deleteWorktreesByIds } from './db';
 import { getEnvByKey } from './env';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('worktrees');
 
 /**
  * Parsed worktree information from git
@@ -182,13 +185,13 @@ export async function scanWorktrees(rootDir: string): Promise<Worktree[]> {
         const isDangerous = dangerousPaths.some(danger => wt.path.startsWith(danger));
 
         if (isDangerous) {
-          console.warn(`Skipping potentially unsafe worktree path: ${wt.path}`);
+          logger.warn('skipping-potentially-unsafe-worktree-pat');
           return false;
         }
 
         // Check for path traversal attempts in the path itself
         if (wt.path.includes('\x00') || wt.path.includes('..')) {
-          console.warn(`Skipping path with potentially malicious characters: ${wt.path}`);
+          logger.warn('skipping-path-with-potentially-malicious');
           return false;
         }
 
@@ -229,12 +232,12 @@ export async function scanMultipleRepositories(
 
   for (const repoPath of repositoryPaths) {
     try {
-      console.log(`Scanning repository: ${repoPath}`);
+      logger.info('scanning-repository:repopath');
       const worktrees = await scanWorktrees(repoPath);
       allWorktrees.push(...worktrees);
-      console.log(`  Found ${worktrees.length} worktree(s)`);
+      logger.info('found-worktreeslength-worktrees');
     } catch (_error) {
-      console.error(`Error scanning repository ${repoPath}:`, _error);
+      logger.error('error-scanning-repository-repopath:', { error: _error instanceof Error ? _error.message : String(_error) });
       // Continue with other repositories even if one fails
     }
   }
@@ -294,7 +297,7 @@ export function syncWorktreesToDB(
     // Delete removed worktrees from DB
     if (deletedIds.length > 0) {
       const result = deleteWorktreesByIds(db, deletedIds);
-      console.log(`Removed ${result.deletedCount} deleted worktree(s) from ${repoPath}`);
+      logger.info('worktree:cleanup', { deletedCount: result.deletedCount });
     }
 
     // Upsert current worktrees

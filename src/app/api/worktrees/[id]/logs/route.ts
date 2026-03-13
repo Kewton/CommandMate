@@ -10,6 +10,9 @@ import { listLogs } from '@/lib/log-manager';
 import { withLogging } from '@/lib/api-logger';
 import fs from 'fs/promises';
 import path from 'path';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/logs');
 
 export const GET = withLogging<{ id: string }>(async (
   request: NextRequest,
@@ -60,7 +63,7 @@ export const GET = withLogging<{ id: string }>(async (
 
     return NextResponse.json(filenames, { status: 200 });
   } catch (error) {
-    console.error('Error fetching log files:', error);
+    logger.error('error-fetching-log-files:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to fetch log files' },
       { status: 500 }

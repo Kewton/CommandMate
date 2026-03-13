@@ -1,0 +1,27 @@
+{
+  "issue_number": 480,
+  "feature_summary": "console.log/error/warn を logger モジュール経由に統一するリファクタリング",
+  "acceptance_criteria": [
+    "src/（src/cli/ 除く）のconsole.log/error/warnがlogger経由に統一されている（env.ts除く）",
+    "デバッグ用途のログはlogger.debug()に移行されている",
+    "CLI出力（src/cli/）が維持されている",
+    "既存の全ユニットテスト（4921件）がパスしている",
+    "影響テストがloggerモック方式に更新されている",
+    "JSDocコメント内のconsole.logは変更されていない",
+    "env.tsのconsole.warn（3件）は変更されていない",
+    "src/components/, src/hooks/のconsole.log/warnが削除されている（console.errorは残置）",
+    "ESLintエラー0件",
+    "TypeScriptエラー0件"
+  ],
+  "test_scenarios": [
+    "src/lib/ 配下にconsole.log/warn/errorの実行コードが残っていないこと（env.ts, logger.ts, JSDoc除く）",
+    "src/app/api/ 配下にconsole.log/warn/errorの実行コードが残っていないこと",
+    "src/components/, src/hooks/ にconsole.log/warnの実行コードが残っていないこと",
+    "src/lib/env.ts にconsole.warnが3件存在すること（対象外）",
+    "src/cli/ 配下が変更されていないこと",
+    "tests/helpers/logger-mock.ts が存在すること",
+    "npm run test:unit が全パスすること",
+    "npm run lint がエラー0件であること",
+    "npx tsc --noEmit がエラー0件であること"
+  ]
+}

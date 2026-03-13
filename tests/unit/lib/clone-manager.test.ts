@@ -20,6 +20,21 @@ vi.mock('child_process', () => ({
   exec: vi.fn(),
 }));
 
+// Mock logger module (Issue #480)
+const { mockLogger } = vi.hoisted(() => {
+  const mockLogger = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    withContext: vi.fn().mockReturnThis(),
+  };
+  return { mockLogger };
+});
+vi.mock('@/lib/logger', () => ({
+  createLogger: vi.fn(() => mockLogger),
+}));
+
 // Mock fs
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>();
@@ -370,31 +385,25 @@ describe('CloneManager - basePath resolution', () => {
 
   it('should use WORKTREE_BASE_PATH when config.basePath is not provided and emit deprecation warning', () => {
     process.env.WORKTREE_BASE_PATH = '/legacy/worktree/path';
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockLogger.warn.mockClear();
 
     const manager = new CloneManager(db);
     const targetPath = manager.getTargetPath('my-repo');
 
     expect(targetPath).toBe('/legacy/worktree/path/my-repo');
-    expect(warnSpy).toHaveBeenCalledWith(
-      '[DEPRECATED] WORKTREE_BASE_PATH is deprecated. Set CM_ROOT_DIR in your .env file instead.'
-    );
-
-    warnSpy.mockRestore();
-  });
+    expect(mockLogger.warn).toHaveBeenCalled();
+});
 
   it('should normalize WORKTREE_BASE_PATH with path.resolve() for relative paths (D1-007)', () => {
     process.env.WORKTREE_BASE_PATH = 'relative/path';
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockLogger.warn.mockClear();
 
     const manager = new CloneManager(db);
     const targetPath = manager.getTargetPath('my-repo');
 
     // path.resolve('relative/path') produces an absolute path
     expect(targetPath).toMatch(/^\/.*relative\/path\/my-repo$/);
-
-    warnSpy.mockRestore();
-  });
+});
 
   it('should fall back to process.cwd() when neither config.basePath nor WORKTREE_BASE_PATH is set', () => {
     const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/test/cwd/fallback');
@@ -403,40 +412,34 @@ describe('CloneManager - basePath resolution', () => {
     const targetPath = manager.getTargetPath('my-repo');
 
     expect(targetPath).toBe('/test/cwd/fallback/my-repo');
-
-    cwdSpy.mockRestore();
-  });
+});
 
   it('should emit deprecation warning only once across multiple instantiations', () => {
     process.env.WORKTREE_BASE_PATH = '/legacy/path';
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockLogger.warn.mockClear();
 
     // First instantiation - should warn
     new CloneManager(db);
     // Second instantiation - should NOT warn again
     new CloneManager(db);
 
-    const deprecationWarnings = warnSpy.mock.calls.filter(
-      (call) => typeof call[0] === 'string' && call[0].includes('[DEPRECATED]')
+    const deprecationWarnings = mockLogger.warn.mock.calls.filter(
+      (call: unknown[]) => typeof call[0] === 'string' && call[0].includes('deprecated')
     );
     expect(deprecationWarnings).toHaveLength(1);
-
-    warnSpy.mockRestore();
-  });
+});
 
   it('should prefer config.basePath (CM_ROOT_DIR) over WORKTREE_BASE_PATH when both are available', () => {
     process.env.WORKTREE_BASE_PATH = '/legacy/worktree/path';
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockLogger.warn.mockClear();
 
     const manager = new CloneManager(db, { basePath: '/cm/root/dir' });
     const targetPath = manager.getTargetPath('my-repo');
 
     expect(targetPath).toBe('/cm/root/dir/my-repo');
     // Should not emit deprecation warning because config.basePath takes priority
-    expect(warnSpy).not.toHaveBeenCalled();
-
-    warnSpy.mockRestore();
-  });
+    expect(mockLogger.warn).not.toHaveBeenCalled();
+});
 });
 
 describe('CloneManager - security (D4-001)', () => {

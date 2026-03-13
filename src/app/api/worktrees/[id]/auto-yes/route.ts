@@ -18,6 +18,9 @@ import {
 } from '@/lib/auto-yes-manager';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { isAllowedDuration, DEFAULT_AUTO_YES_DURATION, validateStopPattern, type AutoYesDuration } from '@/config/auto-yes-config';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/auto-yes');
 
 /**
  * Allowed CLI tool IDs for interactive auto-yes (session-based).
@@ -79,7 +82,7 @@ export async function GET(
     const state = getAutoYesState(params.id);
     return NextResponse.json(buildAutoYesResponse(state));
   } catch (error: unknown) {
-    console.error('Error getting auto-yes state:', error);
+    logger.error('error-getting-auto-yes-state:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to get auto-yes state' },
       { status: 500 }
@@ -167,7 +170,7 @@ export async function POST(
       const result = startAutoYesPolling(params.id, cliToolId);
       pollingStarted = result.started;
       if (!result.started) {
-        console.warn(`[Auto-Yes API] Polling not started: ${result.reason}`);
+        logger.warn('polling-not-started:');
       }
     } else {
       stopAutoYesPolling(params.id);
@@ -175,7 +178,7 @@ export async function POST(
 
     return NextResponse.json(buildAutoYesResponse(state, pollingStarted));
   } catch (error: unknown) {
-    console.error('Error setting auto-yes state:', error);
+    logger.error('error-setting-auto-yes-state:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to set auto-yes state' },
       { status: 500 }

@@ -11,6 +11,9 @@ import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
 import { detectSessionStatus, STATUS_REASON } from '@/lib/status-detector';
 import { getAutoYesState, getLastServerResponseTimestamp, isValidWorktreeId } from '@/lib/auto-yes-manager';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/current-output');
 
 /** Issue #368: Derive from CLI_TOOL_IDS (DRY) */
 function isCliTool(value: string | null): value is CLIToolType {
@@ -135,7 +138,7 @@ export async function GET(
       lastServerResponseTimestamp,
     });
   } catch (error: unknown) {
-    console.error('Error getting current output:', error);
+    logger.error('error-getting-current-output:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to get current output' },
       { status: 500 }

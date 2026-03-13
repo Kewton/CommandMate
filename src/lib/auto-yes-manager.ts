@@ -17,8 +17,10 @@ import { CLIToolManager } from './cli-tools/manager';
 import { stripAnsi, stripBoxDrawing, detectThinking, buildDetectPromptOptions } from './cli-patterns';
 import { DEFAULT_AUTO_YES_DURATION, validateStopPattern, type AutoYesDuration, type AutoYesStopReason } from '@/config/auto-yes-config';
 import { generatePromptKey } from './prompt-key';
-import { getErrorMessage } from './errors';
 import { invalidateCache } from './tmux-capture-cache';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('auto-yes-manager');
 
 // Re-export from shared config for backward compatibility (Issue #314)
 export type { AutoYesStopReason } from '@/config/auto-yes-config';
@@ -435,7 +437,7 @@ export function checkStopCondition(worktreeId: string, cleanOutput: string): boo
 
   const validation = validateStopPattern(autoYesState.stopPattern);
   if (!validation.valid) {
-    console.warn('[Auto-Yes] Invalid stop pattern, disabling', { worktreeId });
+    logger.warn('invalid-stop-pattern', { detail: String({ worktreeId }) });
     disableAutoYes(worktreeId);
     return false;
   }
@@ -446,7 +448,7 @@ export function checkStopCondition(worktreeId: string, cleanOutput: string): boo
 
     if (matched === null) {
       // Execution failed - disable to prevent future errors
-      console.warn('[Auto-Yes] Stop condition check failed, disabling pattern', { worktreeId });
+      logger.warn('stop-condition-check', { detail: String({ worktreeId }) });
       disableAutoYes(worktreeId);
       return false;
     }
@@ -454,11 +456,11 @@ export function checkStopCondition(worktreeId: string, cleanOutput: string): boo
     if (matched) {
       disableAutoYes(worktreeId, 'stop_pattern_matched');
       stopAutoYesPolling(worktreeId);
-      console.warn('[Auto-Yes] Stop condition matched, auto-yes disabled', { worktreeId });
+      logger.warn('stop-condition-matched', { detail: String({ worktreeId }) });
       return true;
     }
   } catch {
-    console.warn('[Auto-Yes] Stop condition check error', { worktreeId });
+    logger.warn('stop-condition-check', { detail: String({ worktreeId }) });
   }
 
   return false;
@@ -639,15 +641,15 @@ export async function detectAndRespondToPrompt(
     pollerState.lastAnsweredAt = Date.now();
 
     // Log success (without sensitive content)
-    console.info(`[Auto-Yes Poller] Sent response for worktree: ${worktreeId}`);
+    logger.info('poller:response-sent', { worktreeId });
 
     return 'responded';
-  } catch (error) {
+  } catch {
     // IC003: This catch handles errors from prompt detection/sending only.
     // incrementErrorCount is called here, and this function never throws,
     // preventing double incrementErrorCount in the outer pollAutoYes() catch.
     incrementErrorCount(worktreeId);
-    console.warn(`[Auto-Yes Poller] Error in detectAndRespondToPrompt for worktree ${worktreeId}: ${getErrorMessage(error)}`);
+    logger.warn('poller:detect-respond-error', { worktreeId });
     return 'error';
   }
 }
@@ -702,7 +704,7 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     // errors only. detectAndRespondToPrompt() catches its own errors and returns
     // 'error' instead of throwing (preventing double incrementErrorCount).
     incrementErrorCount(worktreeId);
-    console.warn(`[Auto-Yes Poller] Error for worktree ${worktreeId}: ${getErrorMessage(error)}`);
+    logger.warn('poller:poll-error', { worktreeId, error: error instanceof Error ? error.message : String(error) });
   }
 
   // Schedule next poll (catch block fallthrough or other paths)
@@ -784,7 +786,7 @@ export function startAutoYesPolling(
     pollAutoYes(worktreeId, cliToolId);
   }, POLLING_INTERVAL_MS);
 
-  console.info(`[Auto-Yes Poller] Started for worktree: ${worktreeId}, cliTool: ${cliToolId}`);
+  logger.info('poller:started', { worktreeId, cliToolId });
   return { started: true };
 }
 
@@ -805,7 +807,7 @@ export function stopAutoYesPolling(worktreeId: string): void {
 
   // Remove state
   autoYesPollerStates.delete(worktreeId);
-  console.info(`[Auto-Yes Poller] Stopped for worktree: ${worktreeId}`);
+  logger.info('poller:stopped', { worktreeId });
 }
 
 /**
@@ -817,7 +819,7 @@ export function stopAllAutoYesPolling(): void {
     if (pollerState.timerId) {
       clearTimeout(pollerState.timerId);
     }
-    console.info(`[Auto-Yes Poller] Stopped for worktree: ${worktreeId} (shutdown)`);
+    logger.info('poller:stopped', { worktreeId, reason: 'shutdown' });
   }
   autoYesPollerStates.clear();
 }

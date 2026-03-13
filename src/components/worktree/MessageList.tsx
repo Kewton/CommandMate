@@ -427,7 +427,7 @@ export function MessageList({
 
     // Validate target message
     if (!targetMessage?.promptData) {
-      console.warn('[MessageList] Target message not found or has no promptData:', messageId);
+      // Target message not found or has no promptData - skip silently
       return;
     }
 
@@ -461,7 +461,6 @@ export function MessageList({
       }
 
       // Success: WebSocket will confirm the update (already optimistically applied)
-      console.log('[MessageList] Prompt response sent successfully:', messageId);
 
     } catch (error) {
       // 4. Rollback on failure

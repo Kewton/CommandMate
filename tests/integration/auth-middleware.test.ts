@@ -48,6 +48,21 @@ vi.mock('next/server', () => {
   };
 });
 
+// Mock logger module (Issue #480)
+const { mockLogger } = vi.hoisted(() => {
+  const mockLogger = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    withContext: vi.fn().mockReturnThis(),
+  };
+  return { mockLogger };
+});
+vi.mock('@/lib/logger', () => ({
+  createLogger: vi.fn(() => mockLogger),
+}));
+
 describe('Auth Middleware', () => {
   const originalEnv = process.env;
 
@@ -249,33 +264,30 @@ describe('Auth Middleware', () => {
 
     it('should return 403 for denied IP', async () => {
       process.env.CM_ALLOWED_IPS = '192.168.1.0/24';
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockLogger.warn.mockClear();
       const { middleware } = await import('@/middleware');
       const req = createMockRequest('/', {}, { 'x-real-ip': '10.0.0.1' });
       const res = await middleware(req as never);
       expect(res.status).toBe(403);
-      warnSpy.mockRestore();
-    });
+});
 
     it('should return 403 for excluded paths when IP is denied (S4-003)', async () => {
       process.env.CM_ALLOWED_IPS = '192.168.1.0/24';
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockLogger.warn.mockClear();
       const { middleware } = await import('@/middleware');
       const req = createMockRequest('/login', {}, { 'x-real-ip': '10.0.0.1' });
       const res = await middleware(req as never);
       expect(res.status).toBe(403);
-      warnSpy.mockRestore();
-    });
+});
 
     it('should return 403 when no client IP is available', async () => {
       process.env.CM_ALLOWED_IPS = '192.168.1.0/24';
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockLogger.warn.mockClear();
       const { middleware } = await import('@/middleware');
       const req = createMockRequest('/');
       const res = await middleware(req as never);
       expect(res.status).toBe(403);
-      warnSpy.mockRestore();
-    });
+});
 
     it('should use X-Forwarded-For when CM_TRUST_PROXY=true', async () => {
       process.env.CM_ALLOWED_IPS = '192.168.1.0/24';

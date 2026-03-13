@@ -16,6 +16,9 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { killSession } from '@/lib/tmux';
 import { broadcast } from '@/lib/ws-server';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/kill-session');
 
 export async function POST(
   request: NextRequest,
@@ -67,7 +70,7 @@ export async function POST(
 
         if (killed) {
           killedSessions.push(sessionName);
-          console.log(`[kill-session] Killed ${cliToolId} session: ${sessionName}`);
+          logger.info('killed-session:');
         }
 
         // Stop poller if running (uses CLIToolManager.stopPollers for DIP compliance - MF1-001)
@@ -117,7 +120,7 @@ export async function POST(
       { status: 200 }
     );
   } catch (error: unknown) {
-    console.error('Error killing sessions:', error);
+    logger.error('error-killing-sessions:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to kill sessions' },
       { status: 500 }

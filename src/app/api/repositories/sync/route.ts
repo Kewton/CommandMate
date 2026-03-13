@@ -8,6 +8,9 @@ import { NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getRepositoryPaths, scanMultipleRepositories, syncWorktreesToDB } from '@/lib/worktrees';
 import { registerAndFilterRepositories } from '@/lib/db-repository';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/repositories-sync');
 
 export async function POST() {
   try {
@@ -47,7 +50,7 @@ export async function POST() {
       { status: 200 }
     );
   } catch (error: unknown) {
-    console.error('Error syncing repositories:', error);
+    logger.error('error-syncing-repositories:', { error: error instanceof Error ? error.message : String(error) });
     const errorMessage = error instanceof Error ? error.message : 'Failed to sync repositories';
     return NextResponse.json(
       { error: errorMessage },

@@ -11,6 +11,9 @@ import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { isValidWorktreeId } from '@/lib/auto-yes-manager';
 import { isValidUuidV4 } from '@/config/schedule-config';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/execution-logs');
 
 /**
  * GET /api/worktrees/:id/execution-logs/:logId
@@ -48,7 +51,7 @@ export async function GET(
 
     return NextResponse.json({ log }, { status: 200 });
   } catch (error) {
-    console.error('Error fetching execution log:', error);
+    logger.error('error-fetching-execution-log:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: 'Failed to fetch execution log' }, { status: 500 });
   }
 }

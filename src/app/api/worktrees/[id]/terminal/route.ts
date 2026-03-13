@@ -18,6 +18,9 @@ import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db-instance';
 import { hasSession, sendKeys } from '@/lib/tmux';
 import { invalidateCache } from '@/lib/tmux-capture-cache';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/terminal');
 
 /** Maximum command length to prevent DoS via large send-keys payloads (D1-006) */
 const MAX_COMMAND_LENGTH = 10000;
@@ -84,7 +87,7 @@ export async function POST(
     return NextResponse.json({ success: true });
   } catch (error) {
     // Fixed-string error response (no internal details exposed to client)
-    console.error('Terminal API error:', error);
+    logger.error('terminal-api-error:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to send command to terminal' },
       { status: 500 }

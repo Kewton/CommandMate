@@ -47,6 +47,9 @@ import {
   OPENCODE_PROCESSING_INDICATOR,
   OPENCODE_SKIP_PATTERNS,
 } from './cli-patterns';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('response-poller');
 
 /**
  * Polling interval in milliseconds (default: 2 seconds)
@@ -1012,7 +1015,7 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
     // Get worktree to verify it exists
     const worktree = getWorktreeById(db, worktreeId);
     if (!worktree) {
-      console.error(`Worktree ${worktreeId} not found, stopping poller`);
+      logger.error('worktree-worktreeid-not');
       stopPolling(worktreeId, cliToolId);
       return false;
     }
@@ -1020,7 +1023,7 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
     // Check if CLI tool session is running
     const running = await isSessionRunning(worktreeId, cliToolId);
     if (!running) {
-      console.log(`[checkForResponse] Session not running for ${worktreeId} (${cliToolId}), stopping poller`);
+      logger.info('session-not-running');
       stopPolling(worktreeId, cliToolId);
       return false;
     }
@@ -1055,7 +1058,7 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
       if (thinkingPattern.test(tailLines)) {
         const answeredCount = markPendingPromptsAsAnswered(db, worktreeId, cliToolId);
         if (answeredCount > 0) {
-          console.log(`Marked ${answeredCount} pending prompt(s) as answered (thinking detected) for ${worktreeId}`);
+          logger.info('marked-answeredcount-pending');
         }
       }
       return false;
@@ -1079,7 +1082,7 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
     // Issue #372: Skip this check when buffer reset is detected (TUI redraw, screen clear).
     // Codex TUI redraws cause totalLines to shrink, making lineCount < lastCapturedLine.
     if (!result.bufferReset && !isFullScreenTui && result.lineCount <= lastCapturedLine) {
-      console.log(`[checkForResponse] Already saved up to line ${lastCapturedLine}, skipping (result: ${result.lineCount})`);
+      logger.info('already-saved-up-to-line-lastcapturedlin');
       return false;
     }
 
@@ -1156,7 +1159,7 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
     // This handles cases where user responded to prompts directly via terminal
     const answeredCount = markPendingPromptsAsAnswered(db, worktreeId, cliToolId);
     if (answeredCount > 0) {
-      console.log(`Marked ${answeredCount} pending prompt(s) as answered for ${worktreeId}`);
+      logger.info('marked-answeredcount-pending');
     }
 
     // Race condition prevention: re-check session state before saving
@@ -1164,7 +1167,7 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
     // Issue #379: Skip for OpenCode full-screen TUI (fixed buffer size, lineCount never advances)
     const currentSessionState = getSessionState(db, worktreeId, cliToolId);
     if (!isFullScreenTui && currentSessionState && result.lineCount <= currentSessionState.lastCapturedLine) {
-      console.log(`[checkForResponse] Race condition detected, skipping save (result: ${result.lineCount}, current: ${currentSessionState.lastCapturedLine})`);
+      logger.info('race-condition-detected-skipping-save-re');
       return false;
     }
 
@@ -1197,8 +1200,7 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
 
     return true;
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error(`Error checking for response (${worktreeId}):`, errorMessage);
+    logger.error('response:check-failed', { error: error instanceof Error ? error.message : String(error) });
     return false;
   }
 }
@@ -1248,7 +1250,7 @@ function scheduleNextResponsePoll(worktreeId: string, cliToolId: CLIToolType): v
     try {
       await checkForResponse(worktreeId, cliToolId);
     } catch (error: unknown) {
-      console.error(`[Poller] Error:`, error);
+      logger.error('error:', { error: error instanceof Error ? error.message : String(error) });
     }
 
     // Schedule next poll ONLY after current one completes

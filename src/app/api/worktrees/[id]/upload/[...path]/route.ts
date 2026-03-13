@@ -34,6 +34,9 @@ import {
   isYamlSafe,
   isJsonValid,
 } from '@/config/uploadable-extensions';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/upload');
 
 /**
  * [DRY] Centralized mapping of error codes to HTTP status codes
@@ -122,7 +125,7 @@ export async function POST(
         try {
           mkdirSync(fullDir, { recursive: true });
         } catch (mkdirError) {
-          console.error('[upload] Failed to create attachments directory:', mkdirError);
+          logger.error('failed-to-create-attachments-directory:', { error: mkdirError instanceof Error ? mkdirError.message : String(mkdirError) });
           return createUploadErrorResponse('INTERNAL_ERROR', 'Failed to create upload directory');
         }
       }
@@ -223,7 +226,7 @@ export async function POST(
       { status: 201 }
     );
   } catch (error: unknown) {
-    console.error('Error uploading file:', error);
+    logger.error('error-uploading-file:', { error: error instanceof Error ? error.message : String(error) });
     return createUploadErrorResponse('INTERNAL_ERROR', 'Failed to upload file');
   }
 }

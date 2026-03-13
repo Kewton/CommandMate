@@ -10,6 +10,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { isValidWorktreeId } from '@/lib/auto-yes-manager';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/execution-logs');
 
 /**
  * GET /api/worktrees/:id/execution-logs
@@ -46,7 +49,7 @@ export async function GET(
 
     return NextResponse.json({ logs }, { status: 200 });
   } catch (error) {
-    console.error('Error fetching execution logs:', error);
+    logger.error('error-fetching-execution-logs:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: 'Failed to fetch execution logs' }, { status: 500 });
   }
 }

@@ -9,8 +9,11 @@ import { getDbInstance } from '@/lib/db-instance';
 import { getEnv } from '@/lib/env';
 import { CloneManager } from '@/lib/clone-manager';
 import type { CloneError } from '@/types/clone';
+import { createLogger } from '@/lib/logger';
 
-const LOG_PREFIX = '[Clone API]';
+const logger = createLogger('api/repositories-clone');
+
+
 
 /**
  * [S1-003][S4-007] Maximum allowed length for targetDir input.
@@ -97,7 +100,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<CloneStar
     const { CM_ROOT_DIR } = getEnv();
     const cloneManager = new CloneManager(db, { basePath: CM_ROOT_DIR });
 
-    console.info(`${LOG_PREFIX} Starting clone job for: ${cloneUrl}`);
+    logger.info('clone:start', { cloneUrl });
 
     // [S1-003] Trim and validate targetDir length before passing to startCloneJob().
     const trimmedTargetDir = targetDir?.trim() || undefined;
@@ -126,7 +129,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<CloneStar
         status = 409;
       }
 
-      console.warn(`${LOG_PREFIX} Clone job failed: ${result.error?.code} - ${result.error?.message}`);
+      logger.warn('clone-job-failed:-');
 
       return NextResponse.json(
         {
@@ -138,7 +141,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<CloneStar
       );
     }
 
-    console.info(`${LOG_PREFIX} Clone job created: ${result.jobId}`);
+    logger.info('clone:job-created', { jobId: result.jobId });
 
     return NextResponse.json(
       {
@@ -150,7 +153,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<CloneStar
       { status: 202 }
     );
   } catch (error: unknown) {
-    console.error(`${LOG_PREFIX} Unexpected error:`, error);
+    logger.error('unexpected-error:', { error: error instanceof Error ? error.message : String(error) });
 
     return NextResponse.json(
       {

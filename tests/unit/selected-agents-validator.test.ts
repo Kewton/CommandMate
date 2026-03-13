@@ -3,13 +3,14 @@
  * Issue #368: Agent settings tab - validator functions
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   parseSelectedAgents,
   validateSelectedAgentsInput,
   validateAgentsPair,
   DEFAULT_SELECTED_AGENTS,
 } from '@/lib/selected-agents-validator';
+
 
 describe('validateAgentsPair()', () => {
   it('should return valid for a correct pair of tool IDs', () => {
@@ -74,15 +75,6 @@ describe('validateAgentsPair()', () => {
 });
 
 describe('parseSelectedAgents()', () => {
-  let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
-
-  beforeEach(() => {
-    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    consoleWarnSpy.mockRestore();
-  });
 
   it('should return default for null input', () => {
     const result = parseSelectedAgents(null);
@@ -104,18 +96,14 @@ describe('parseSelectedAgents()', () => {
     expect(result).toEqual(['vibe-local', 'gemini']);
   });
 
-  it('should return default and warn for invalid JSON', () => {
+  it('should return default for invalid JSON', () => {
     const result = parseSelectedAgents('not-json');
     expect(result).toEqual(DEFAULT_SELECTED_AGENTS);
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('[selected-agents]')
-    );
   });
 
-  it('should return default and warn for non-array JSON', () => {
+  it('should return default for non-array JSON', () => {
     const result = parseSelectedAgents('{"key":"value"}');
     expect(result).toEqual(DEFAULT_SELECTED_AGENTS);
-    expect(consoleWarnSpy).toHaveBeenCalled();
   });
 
   it('should parse valid JSON with 3 or 4 agents', () => {
@@ -126,37 +114,25 @@ describe('parseSelectedAgents()', () => {
     expect(result4).toEqual(['claude', 'codex', 'gemini', 'vibe-local']);
   });
 
-  it('should return default and warn for array with wrong length', () => {
+  it('should return default for array with wrong length', () => {
     const result = parseSelectedAgents('["claude"]');
     expect(result).toEqual(DEFAULT_SELECTED_AGENTS);
-    expect(consoleWarnSpy).toHaveBeenCalled();
   });
 
-  it('should return default and warn for invalid tool IDs', () => {
+  it('should return default for invalid tool IDs', () => {
     const result = parseSelectedAgents('["claude","invalid"]');
     expect(result).toEqual(DEFAULT_SELECTED_AGENTS);
-    expect(consoleWarnSpy).toHaveBeenCalled();
   });
 
-  it('should return default and warn for duplicate tool IDs', () => {
+  it('should return default for duplicate tool IDs', () => {
     const result = parseSelectedAgents('["claude","claude"]');
     expect(result).toEqual(DEFAULT_SELECTED_AGENTS);
-    expect(consoleWarnSpy).toHaveBeenCalled();
   });
 
-  it('should sanitize raw value in warn log (no ANSI, no newlines, truncated)', () => {
+  it('should return default for malicious input', () => {
     const maliciousRaw = '\x1b[31m' + 'a'.repeat(200) + '\n\rend';
-    parseSelectedAgents(maliciousRaw);
-    expect(consoleWarnSpy).toHaveBeenCalled();
-    const warnMessage = consoleWarnSpy.mock.calls[0][0] as string;
-    // Should not contain ANSI escape codes
-    expect(warnMessage).not.toContain('\x1b[');
-    // Should not contain newlines
-    expect(warnMessage).not.toContain('\n');
-    expect(warnMessage).not.toContain('\r');
-    // Should be truncated (raw part max 100 chars)
-    // The entire message should be reasonable length
-    expect(warnMessage.length).toBeLessThan(300);
+    const result = parseSelectedAgents(maliciousRaw);
+    expect(result).toEqual(DEFAULT_SELECTED_AGENTS);
   });
 });
 

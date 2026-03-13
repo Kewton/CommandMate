@@ -9,6 +9,9 @@ import { getDbInstance } from '@/lib/db-instance';
 import { scanWorktrees, syncWorktreesToDB } from '@/lib/worktrees';
 import { isPathSafe } from '@/lib/path-validator';
 import { getEnv } from '@/lib/env';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/repositories-scan');
 
 export async function POST(request: NextRequest) {
   try {
@@ -60,7 +63,7 @@ export async function POST(request: NextRequest) {
       { status: 200 }
     );
   } catch (error: unknown) {
-    console.error('Error scanning repository:', error);
+    logger.error('error-scanning-repository:', { error: error instanceof Error ? error.message : String(error) });
     const errorMessage = error instanceof Error ? error.message : 'Failed to scan repository';
     return NextResponse.json(
       { error: errorMessage },

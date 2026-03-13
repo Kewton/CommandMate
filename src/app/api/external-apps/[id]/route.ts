@@ -16,6 +16,9 @@ import {
 } from '@/lib/external-apps/db';
 import { getExternalAppCache } from '@/lib/external-apps/cache';
 import type { UpdateExternalAppInput } from '@/types/external-apps';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/external-apps');
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic';
@@ -87,7 +90,7 @@ export async function GET(
 
     return NextResponse.json({ app }, { status: 200 });
   } catch (error) {
-    console.error('Error fetching external app:', error);
+    logger.error('error-fetching-external-app:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to fetch external app' },
       { status: 500 }
@@ -152,7 +155,7 @@ export async function PATCH(
 
     return NextResponse.json({ app }, { status: 200 });
   } catch (error) {
-    console.error('Error updating external app:', error);
+    logger.error('error-updating-external-app:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to update external app' },
       { status: 500 }
@@ -193,7 +196,7 @@ export async function DELETE(
 
     return new Response(null, { status: 204 });
   } catch (error) {
-    console.error('Error deleting external app:', error);
+    logger.error('error-deleting-external-app:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to delete external app' },
       { status: 500 }

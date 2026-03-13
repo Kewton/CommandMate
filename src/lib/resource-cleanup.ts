@@ -23,6 +23,9 @@ import {
 } from './auto-yes-manager';
 import { stopScheduleForWorktree, getScheduleWorktreeIds } from './schedule-manager';
 import { getDbInstance } from './db-instance';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('resource-cleanup');
 
 // =============================================================================
 // Constants
@@ -132,7 +135,7 @@ export async function cleanupOrphanedMcpProcesses(): Promise<OrphanCleanupResult
       { maxBuffer: MAX_PS_OUTPUT_BYTES },
       (error, stdout) => {
         if (error) {
-          console.warn('[resource-cleanup] Failed to list processes:', error);
+          logger.warn('failed-to-list-processes:', { error: error instanceof Error ? error.message : String(error) });
           resolve(result);
           return;
         }
@@ -162,15 +165,15 @@ export async function cleanupOrphanedMcpProcesses(): Promise<OrphanCleanupResult
           try {
             process.kill(pid, 'SIGTERM');
             result.killedPids.push(pid);
-            console.log(`[resource-cleanup] Killed orphaned MCP process: PID=${pid}, command="${command}"`);
+            logger.info('killed-orphaned-mcp-process:pidpid-comma');
           } catch (killError) {
             result.failedPids.push(pid);
-            console.warn(`[resource-cleanup] Failed to kill PID=${pid}:`, killError);
+            logger.warn('failed-to-kill-pidpid:', { error: killError instanceof Error ? killError.message : String(killError) });
           }
         }
 
         if (result.killedPids.length > 0) {
-          console.log(`[resource-cleanup] Cleaned up ${result.killedPids.length} orphaned MCP process(es)`);
+          logger.info('cleaned-up-resultkilledpidslength');
         }
 
         resolve(result);
@@ -194,7 +197,7 @@ function getDbWorktreeIds(): Set<string> {
     const rows = db.prepare('SELECT id FROM worktrees').all() as { id: string }[];
     return new Set(rows.map(r => r.id));
   } catch (error) {
-    console.warn('[resource-cleanup] Failed to query worktrees from DB:', error);
+    logger.warn('failed-to-query-worktrees-from-db:', { error: error instanceof Error ? error.message : String(error) });
     return new Set();
   }
 }
@@ -255,14 +258,12 @@ export function cleanupOrphanedMapEntries(): CleanupMapResult {
     result.deletedScheduleWorktreeIds.length;
 
   if (totalDeleted > 0) {
-    console.log(
-      `[resource-cleanup] Cleaned up ${totalDeleted} orphaned Map entries:`,
-      {
-        autoYesStates: result.deletedAutoYesStateIds.length,
-        autoYesPollers: result.deletedAutoYesPollerIds.length,
-        schedules: result.deletedScheduleWorktreeIds.length,
-      }
-    );
+    logger.info('cleanup:orphaned-map-entries', {
+      totalDeleted,
+      autoYesStates: result.deletedAutoYesStateIds.length,
+      autoYesPollers: result.deletedAutoYesPollerIds.length,
+      schedules: result.deletedScheduleWorktreeIds.length,
+    });
   }
 
   return result;
@@ -280,13 +281,13 @@ async function runCleanupCycle(): Promise<void> {
   try {
     await cleanupOrphanedMcpProcesses();
   } catch (error) {
-    console.warn('[resource-cleanup] MCP cleanup error:', error);
+    logger.warn('mcp-cleanup-error:', { error: error instanceof Error ? error.message : String(error) });
   }
 
   try {
     cleanupOrphanedMapEntries();
   } catch (error) {
-    console.warn('[resource-cleanup] Map cleanup error:', error);
+    logger.warn('map-cleanup-error:', { error: error instanceof Error ? error.message : String(error) });
   }
 }
 
@@ -297,7 +298,7 @@ async function runCleanupCycle(): Promise<void> {
  */
 export function initResourceCleanup(): void {
   if (globalThis.__resourceCleanupTimerId !== undefined) {
-    console.log('[resource-cleanup] Already initialized, skipping');
+    logger.info('already-initialized-skipping');
     return;
   }
 
@@ -309,7 +310,7 @@ export function initResourceCleanup(): void {
     void runCleanupCycle();
   }, CLEANUP_INTERVAL_MS);
 
-  console.log('[resource-cleanup] Initialized (interval: 24h)');
+  logger.info('initialized-interval:24h');
 }
 
 /**
@@ -320,6 +321,6 @@ export function stopResourceCleanup(): void {
   if (globalThis.__resourceCleanupTimerId !== undefined) {
     clearInterval(globalThis.__resourceCleanupTimerId);
     globalThis.__resourceCleanupTimerId = undefined;
-    console.log('[resource-cleanup] Stopped');
+    logger.info('stopped');
   }
 }

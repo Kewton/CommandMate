@@ -1,0 +1,59 @@
+{
+  "issue_number": 480,
+  "title": "refactor: console.log 整理・logger統一（R-2）",
+  "acceptance_criteria": [
+    "src/（src/cli/ 除く）のconsole.log/error/warnをlogger経由に統一（env.ts除く）",
+    "デバッグ用途はlogger.debug()に移行（LOG_LEVEL制御で管理）",
+    "CLI出力（src/cli/）は維持",
+    "既存テスト全パス",
+    "影響テスト（trust-dialog-auto-response.test.ts, schedule-manager.test.ts等）をlogger移行に合わせて修正",
+    "JSDocコメント内のconsole.logは対象外",
+    "env.tsのconsole.warn（3件）は循環依存回避のため対象外",
+    "クライアントサイド（src/components/, src/hooks/）のconsole.log/warnは削除、console.errorは残置"
+  ],
+  "implementation_tasks": [
+    "PR-A: tests/helpers/logger-mock.ts作成（共通テストヘルパー）",
+    "PR-B: src/lib/db-migrations.ts の logger移行（57件）",
+    "PR-C: src/lib/ 残りファイルのlogger移行（約163件）",
+    "PR-D: src/app/api/ 配下のlogger移行（約80件）",
+    "PR-E: クライアントサイドのconsole.log/warn削除（6件）"
+  ],
+  "design_doc_path": "dev-reports/design/issue-480-console-log-logger-unification-design-policy.md",
+  "work_plan_path": "dev-reports/issue/480/work-plan.md",
+  "target_coverage": 80,
+  "logger_api": {
+    "import": "import { createLogger } from '@/lib/logger';",
+    "instantiate": "const logger = createLogger('module-name');",
+    "methods": ["logger.debug(action, data?)", "logger.info(action, data?)", "logger.warn(action, data?)", "logger.error(action, data?)"],
+    "action_rule": "静的文字列のみ。'verb:target'形式（例: 'session:start', 'migration:completed'）",
+    "data_rule": "認証情報禁止。worktreeId/ファイルパス許容。ユーザー入力はdebugのみ",
+    "error_rule": "error.messageのみ記録、stackはlogger.debugで分離"
+  },
+  "excluded_files": [
+    "src/cli/**",
+    "src/lib/logger.ts",
+    "src/lib/env.ts（console.warnのみ）",
+    "JSDocコメント内"
+  ],
+  "client_side_policy": {
+    "console_log": "削除",
+    "console_warn": "削除",
+    "console_error": "残置（正当なエラーハンドリング）"
+  },
+  "test_helper_to_create": "tests/helpers/logger-mock.ts",
+  "affected_tests": [
+    "tests/integration/trust-dialog-auto-response.test.ts",
+    "tests/unit/lib/schedule-manager.test.ts",
+    "tests/unit/selected-agents-validator.test.ts",
+    "tests/unit/ip-restriction.test.ts",
+    "tests/unit/db-migration-path.test.ts",
+    "tests/unit/lib/clone-manager.test.ts",
+    "tests/unit/lib/cmate-parser.test.ts",
+    "tests/unit/slash-commands.test.ts",
+    "tests/unit/prompt-detector-cache.test.ts",
+    "tests/unit/log-manager.test.ts",
+    "tests/unit/lib/tmux-capture-cache.test.ts",
+    "tests/integration/security.test.ts",
+    "tests/integration/auth-middleware.test.ts"
+  ]
+}

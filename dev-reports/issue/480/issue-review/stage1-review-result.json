@@ -1,0 +1,90 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 480,
+  "review_date": "2026-03-13",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "should_fix",
+      "category": "正確性",
+      "title": "サーバーサイド console.log 合計件数の不一致（209件 vs 159件）",
+      "description": "Issueでは「サーバーサイドの console.log 209件」と記載されているが、実際に src/cli/ を除外した .ts/.tsx ファイルの console.log 件数は159件である。親Issue #475 でも同じ209件という数字が使われているため、カウント方法の差異（全体223件のうちCLI 64件を引いた数とも合わない）が考えられる。",
+      "suggestion": "合計件数を「約160件（CLI出力除く）」に更新するか、カウント基準（対象ディレクトリ、対象ファイル拡張子）を明記する。親Issue #475 の数字も併せて更新する。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "上位10ファイル以外の43件（25ファイル）に対する方針が未記載",
+      "description": "Issueでは上位10ファイルの件数と方針を表にまとめているが、残り25ファイルに散在する43件の console.log に対する方針が記載されていない。これらには API route ハンドラ（send/respond/kill-session 等）、hooks（useSwipeGesture, useFullscreen）、コンポーネント（TerminalDisplay, MarkdownEditor 等）が含まれる。",
+      "suggestion": "上位10以外のファイルについても、方針を一括で記載する（例: 「その他のファイル（約43件/25ファイル）: 個別にlogger経由 or 削除を判断」）。少なくとも、クライアントサイドコンポーネント（hooks/, components/）の console.log がスコープ内かスコープ外かを明確にする。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "クライアントサイド（hooks/components）の console.log のスコープ定義が曖昧",
+      "description": "Issueの概要では「サーバーサイドの console.log」を対象としているが、実際には src/hooks/useSwipeGesture.ts（2件）、src/hooks/useFullscreen.ts（2件）、src/components/worktree/TerminalDisplay.tsx（1件）等のクライアントサイドコードにも console.log が含まれる。「サーバーサイド」の定義が src/cli/ 以外の全 src/ なのか、Server Components / API routes のみなのかが不明確。",
+      "suggestion": "スコープの定義を明確化する。例: 「対象: src/ 配下の全ファイル（src/cli/ を除く）」または「対象: サーバーサイドコード（src/lib/, src/app/api/）のみ。hooks/, components/ は対象外」のいずれかを明記する。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "logger モジュールのAPI仕様への参照が不足",
+      "description": "Issueでは「logger モジュール経由に統一」と記載しているが、logger モジュールの具体的な使い方（createLogger() の呼び出し方、ログレベルの選択基準）への言及がない。既に7ファイルで createLogger が利用されているため、既存の利用パターンを参照できると実装者にとって有用。",
+      "suggestion": "受け入れ基準または参考情報として、src/lib/logger.ts の使用例（例: `const logger = createLogger('module-name'); logger.info('action', { key: value });`）や、既に logger を導入済みのファイル（cli-session.ts, prompt-detector.ts 等）への参照を追加する。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "cli-tools/gemini.ts が CLAUDE.md の主要モジュール一覧に未記載",
+      "description": "Issue の上位10表に含まれる cli-tools/gemini.ts が CLAUDE.md の主要モジュール一覧に記載されていない。実ファイルは存在し console.log 8件が確認されている。本Issue自体の問題ではないが、関連する整合性の課題として記録する。",
+      "suggestion": "本Issueの作業と併せて CLAUDE.md にgemini.ts のエントリを追加するか、別途ドキュメント更新Issueを起票する。"
+    },
+    {
+      "id": "S1-006",
+      "severity": "should_fix",
+      "category": "実装可能性",
+      "title": "「削除」方針のログに対する判断基準が不明確",
+      "description": "response-poller.ts（5件）と assistant-response-saver.ts（5件）は「デバッグログ → 削除」方針だが、削除してよいかの判断基準が記載されていない。運用中の障害調査時にこれらのログが必要になる可能性がある。「デバッグログ」と「運用ログ」の分類基準が明示されていない。",
+      "suggestion": "削除基準を明記する。例: 「開発時のみ使用し、本番環境で不要なログは削除。障害調査に有用な情報は logger.debug() に移行し、LOG_LEVEL 制御で出力を管理する」。現実的には全て logger.debug() に移行する方が安全。"
+    },
+    {
+      "id": "S1-007",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "既存の logger 導入済みファイルとの関係が未記載",
+      "description": "既に createLogger を使用しているファイルが7つ存在する（cli-session.ts, prompt-detector.ts, cli-patterns.ts 等）。これらのファイルに残存する console.log がある場合（例: claude-session.ts には createLogger 利用あり + console.log 12件が共存）、混在状態の解消が必要。この点がIssueに記載されていない。",
+      "suggestion": "「既に logger 導入済みだが console.log が残存しているファイル（例: claude-session.ts）は優先的に統一する」旨を追記する。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3,
+    "overall_quality": "good"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/logger.ts",
+      "relevance": "統一先の logger モジュール実装"
+    },
+    {
+      "file": "src/lib/db-migrations.ts",
+      "relevance": "最多 console.log（53件）の対象ファイル"
+    },
+    {
+      "file": "src/lib/claude-session.ts",
+      "relevance": "createLogger 導入済みだが console.log 12件が残存"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "主要モジュール一覧との整合性確認（gemini.ts 未記載）"
+    }
+  ]
+}

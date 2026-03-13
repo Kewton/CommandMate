@@ -7,6 +7,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById, upsertWorktree } from '@/lib/db';
 import { CLI_TOOL_IDS, isCliToolType } from '@/lib/cli-tools/types';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/cli-tool');
 
 export async function PATCH(
   request: NextRequest,
@@ -61,7 +64,7 @@ export async function PATCH(
     // Return updated worktree
     return NextResponse.json(updatedWorktree, { status: 200 });
   } catch (error: unknown) {
-    console.error('Error updating CLI tool:', error);
+    logger.error('error-updating-cli-tool:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to update CLI tool' },
       { status: 500 }

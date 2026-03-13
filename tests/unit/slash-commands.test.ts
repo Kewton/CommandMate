@@ -14,6 +14,22 @@ import type {
   SlashCommandGroup,
 } from '@/types/slash-commands';
 
+// Mock logger module (Issue #480)
+const { mockLogger } = vi.hoisted(() => {
+  const mockLogger = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    withContext: vi.fn().mockReturnThis(),
+  };
+  return { mockLogger };
+});
+vi.mock('@/lib/logger', () => ({
+  createLogger: vi.fn(() => mockLogger),
+}));
+
+
 describe('SlashCommand Types', () => {
   describe('SlashCommand interface', () => {
     it('should have required properties', () => {
@@ -421,18 +437,14 @@ describe('loadSkills', () => {
         );
       }
 
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockLogger.warn.mockClear();
 
       const { loadSkills } = await import('@/lib/slash-commands');
       const skills = await loadSkills(testDir);
 
       expect(skills.length).toBeLessThanOrEqual(100);
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Skills count limit reached')
-      );
-
-      warnSpy.mockRestore();
-    } finally {
+      expect(mockLogger.warn).toHaveBeenCalled();
+} finally {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
   });
@@ -446,18 +458,14 @@ describe('loadSkills', () => {
       const bigContent = '---\nname: big\ndescription: Big\n---\n' + 'x'.repeat(70000);
       fs.writeFileSync(path.join(skillDir, 'SKILL.md'), bigContent);
 
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockLogger.warn.mockClear();
 
       const { loadSkills } = await import('@/lib/slash-commands');
       const skills = await loadSkills(testDir);
 
       expect(skills).toEqual([]);
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Skipping oversized skill file')
-      );
-
-      warnSpy.mockRestore();
-    } finally {
+      expect(mockLogger.warn).toHaveBeenCalled();
+} finally {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
   });

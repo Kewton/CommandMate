@@ -16,6 +16,9 @@ import {
 } from '@/lib/db-repository';
 import { scanWorktrees, syncWorktreesToDB } from '@/lib/worktrees';
 import fs from 'fs';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/repositories-restore');
 
 export async function PUT(request: NextRequest) {
   try {
@@ -65,7 +68,7 @@ export async function PUT(request: NextRequest) {
     });
   } catch (error: unknown) {
     // SEC-SF-003: Fixed error message - do not expose internal details
-    console.error('[Repository Restore] Error:', error);
+    logger.error('error:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { success: false, error: 'Failed to restore repository' },
       { status: 500 }

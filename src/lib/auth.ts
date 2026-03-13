@@ -39,7 +39,8 @@ const storedTokenHash: string | undefined = (() => {
   // Store validation result to avoid type predicate narrowing to 'never' in else branch
   const valid: boolean = isValidTokenHash(hash);
   if (!valid) {
-    console.error(`[Security] CM_AUTH_TOKEN_HASH is not a valid 64-character hex string (got ${hash.length} chars). Authentication will be disabled.`);
+    // C001: Cannot use logger (CLI build compatibility) - use console.error
+    console.error('[auth] CM_AUTH_TOKEN_HASH is not a valid SHA-256 hash');
     return undefined;
   }
   return hash;

@@ -10,6 +10,9 @@ import { captureClaudeOutput } from '@/lib/claude-session';
 import { broadcastMessage } from '@/lib/ws-server';
 import { parseClaudeOutput } from '@/lib/claude-output';
 import { recordClaudeConversation } from '@/lib/conversation-logger';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/hooks-claude-done');
 
 interface ClaudeDoneRequest {
   worktreeId: string;
@@ -44,7 +47,7 @@ export async function POST(request: NextRequest) {
     try {
       output = await captureClaudeOutput(body.worktreeId, 10000);
     } catch (error: unknown) {
-      console.error('Failed to capture Claude output:', error);
+      logger.error('failed-to-capture-claude-output:', { error: error instanceof Error ? error.message : String(error) });
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return NextResponse.json(
         { error: `Failed to capture Claude output: ${errorMessage}` },
@@ -81,7 +84,7 @@ export async function POST(request: NextRequest) {
       message,
     });
 
-    console.log(`✓ Processed Claude response for worktree: ${body.worktreeId}`);
+    logger.info('processed-claude-response-for-worktree:');
 
     return NextResponse.json(
       {
@@ -92,7 +95,7 @@ export async function POST(request: NextRequest) {
       { status: 200 }
     );
   } catch (error: unknown) {
-    console.error('Error processing Claude done hook:', error);
+    logger.error('error-processing-claude-done-hook:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to process Claude done hook' },
       { status: 500 }

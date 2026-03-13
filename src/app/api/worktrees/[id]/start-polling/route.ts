@@ -9,6 +9,9 @@ import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { startPolling } from '@/lib/response-poller';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/start-polling');
 
 interface StartPollingRequest {
   cliToolId: CLIToolType;
@@ -42,7 +45,7 @@ export async function POST(
     }
 
     // Start polling
-    console.log(`[API] Manually starting polling for ${params.id} (${body.cliToolId})`);
+    logger.info('manually-starting-polling-for');
     startPolling(params.id, body.cliToolId);
 
     return NextResponse.json({
@@ -50,7 +53,7 @@ export async function POST(
       message: `Started polling for ${body.cliToolId} session`
     });
   } catch (error) {
-    console.error('Error starting polling:', error);
+    logger.error('error-starting-polling:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to start polling' },
       { status: 500 }
