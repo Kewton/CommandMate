@@ -1,0 +1,77 @@
+{
+  "issue_number": 490,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "applied_at": "2026-03-13",
+  "applied_findings": [
+    {
+      "id": "S3-001",
+      "severity": "must_fix",
+      "title": "CSPにframe-srcディレクティブが未定義のためiframe srcDocがブロックされる可能性",
+      "action": "影響範囲テーブルに next.config.js を追加（CSPヘッダーに frame-src 'self' blob: 追加）。レンダリング方式セクションにCSP設定変更の必要性を記載。実装タスクに next.config.js のCSPヘッダー変更タスクを追加。受入条件にCSP動作確認を追加。セキュリティ考慮セクションにCSP frame-src設定の記載を追加。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "must_fix",
+      "title": "editable-extensions.tsへの.html/.htm追加により既存テストが失敗する",
+      "action": "実装タスクに「既存テストの更新: tests/unit/config/editable-extensions.test.ts」を追加。テスト名変更とEDITABLE_EXTENSIONS長さの変更、EXTENSION_VALIDATORS検証追加を明記。影響範囲テーブルに editable-extensions.test.ts を追加。受入条件に既存テスト更新・全パスを追加。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "should_fix",
+      "title": "FileContent.isHtml追加時のcanCopy判定およびcodeViewData生成への影響",
+      "action": "FileViewer.tsx の実装タスクを詳細化。codeViewData の useMemo に isHtml 条件追加、renderContent() に isHtml 分岐を isVideo/isImage の後・codeViewData 参照の前に追加する旨を明記。影響範囲テーブルのFileViewer.tsx説明にcodeViewData isHtml条件追加を追記。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "should_fix",
+      "title": "HTMLファイル編集・保存時のvalidateContent対応",
+      "action": "editable-extensions.ts の実装タスクに「EDITABLE_EXTENSIONS と EXTENSION_VALIDATORS は必ず同時に追加する（アトミックな変更）」の注意書きを追加。片方のみ追加した場合の Unsupported extension エラーリスクを明記。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "should_fix",
+      "title": "FileViewer.tsxのHTML表示分岐でモバイル固有の考慮事項",
+      "action": "モバイル版での表示モードセクションにタブ切り替えUI新規実装が必要である旨を追記。FileViewer.tsx の実装タスクにモバイル版タブ切り替えUI新規実装を明記。iframeの高さはisFullscreenで切り替える旨を記載。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "should_fix",
+      "title": "editable-extensions追加がMarkdownEditorの動作に影響しないことの確認",
+      "action": "「HTMLファイル編集方針」セクションを新設し、HtmlPreview.tsxで独立実装しMarkdownEditorを再利用しない方針を明記。参考実装セクションのMarkdownEditor記載にも再利用しない旨を追記。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "nice_to_have",
+      "title": "影響範囲テーブルにnext.config.jsとテストファイルが含まれていない",
+      "action": "影響範囲テーブルに next.config.js、tests/unit/config/editable-extensions.test.ts、tests/unit/config/html-extensions.test.ts、tests/unit/components/html-preview.test.ts を追加。S3-001およびS3-002の反映に含めて対応。"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "S3-007",
+      "severity": "nice_to_have",
+      "title": "useFileContentPollingとHTMLプレビューの相互作用",
+      "reason": "nice_to_haveかつ初期実装では必須ではないとレビューでも明記されている。将来の改善事項として認識するが、Issue本文への明記は見送り。"
+    }
+  ],
+  "total_applied": 7,
+  "total_skipped": 1,
+  "github_issue_updated": true,
+  "changes_summary": {
+    "sections_added": [
+      "HTMLファイル編集方針（MarkdownEditor非再利用方針を明記）",
+      "レビュー履歴テーブル（Stage 1-2, Stage 3-4）"
+    ],
+    "sections_modified": [
+      "レンダリング方式: CSP設定変更の必要性を追記",
+      "モバイル版での表示モード: タブ切り替えUI新規実装の必要性を追記",
+      "主要な変更点: CSPヘッダー変更を追加",
+      "実装タスク: 7項目の追加・詳細化（CSP、既存テスト更新、FileViewer詳細化、EXTENSION_VALIDATORS同時追加注意）",
+      "受入条件: CSP動作確認、既存テスト更新の2項目追加",
+      "影響範囲テーブル: 4ファイル追加（next.config.js、テスト3ファイル）",
+      "セキュリティ考慮: CSP frame-src設定の記載追加",
+      "参考実装: MarkdownEditor非再利用方針を追記"
+    ]
+  }
+}

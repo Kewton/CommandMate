@@ -1,0 +1,104 @@
+{
+  "issue_number": 490,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "reviewed_at": "2026-03-13",
+  "summary": "Stage 1の全指摘事項（S1-001〜S1-008）は適切に対応されており、Issue全体の品質は大幅に向上した。MARPとの違いの明記、EXTENSION_VALIDATORS追加の具体化、5MBサイズ上限の確定、Fullレベルのセキュリティリスク記載、route.tsのisHtmlフラグ付与の詳細化など、全て反映済み。Stage 3の指摘も同様に反映されている。2回目レビューでの新規指摘は軽微なものに限られ、Issue全体として実装着手可能な品質に達している。",
+  "previous_findings_status": [
+    {
+      "finding_id": "S1-001",
+      "resolved": true,
+      "note": "「レンダリング方式」セクションにMARPとの違いが明記された。「MARPはサーバーサイドAPI（POST /marp-render）でMarkdownをHTMLに変換した結果をiframe srcDocに設定するが、HTMLプレビューではサーバーサイドAPIは不要。既存のファイル取得API（GET /files/...）が返すHTMLテキストをそのままiframe srcDocに設定するクライアントサイドのみのパターン」と具体的に記載されている。"
+    },
+    {
+      "finding_id": "S1-002",
+      "resolved": true,
+      "note": "実装タスクに「EXTENSION_VALIDATORS配列にHTMLファイル用エントリを追加（maxFileSize: 5MB、additionalValidation: XSS危険パターン検出等を検討）」が明記された。また「EDITABLE_EXTENSIONSとEXTENSION_VALIDATORSは必ず同時に追加する（アトミックな変更）」という重要な注意事項も追加されている。"
+    },
+    {
+      "finding_id": "S1-003",
+      "resolved": true,
+      "note": "ファイルサイズ上限が5MBに確定された。html-extensions.tsの定数として「HTML_MAX_SIZE_BYTES」を定義し、受入条件にも「5MBを超えるHTMLファイルはプレビュー表示せず、ソースコード表示のみとする」が追加されている。"
+    },
+    {
+      "finding_id": "S1-004",
+      "resolved": true,
+      "note": "「Fullレベルのセキュリティリスク」セクションが新設され、allow-scripts + allow-same-originの危険性がMDN Web Docs参照付きで説明されている。対策として警告ダイアログ表示、blob: URLによるorigin分離検討、2段階構成への簡素化検討が記載されている。"
+    },
+    {
+      "finding_id": "S1-005",
+      "resolved": true,
+      "note": "route.tsの変更内容が具体化された。「HTMLファイルは既存のテキスト読み込みロジックで処理する（バイナリ変換は不要）」「非画像・非動画パスにおいて、拡張子がHTML拡張子の場合にレスポンスにisHtml: trueフラグを追加する」「html-extensions.tsのisHtmlExtension()をimportして判定」と実装箇所が明確。"
+    },
+    {
+      "finding_id": "S1-006",
+      "resolved": true,
+      "note": "セキュリティ考慮セクションにDOMPurify方針が明記された。「iframe srcDoc方式ではDOMPurifyによるサニタイズは行わず、sandbox属性による隔離で安全性を担保する」「DOMPurifyはSafeモードでのフォールバック表示を将来検討する場合のオプション」と方針が明確。"
+    },
+    {
+      "finding_id": "S1-007",
+      "resolved": true,
+      "note": "html-extensions.tsの実装タスクに最小API仕様が記載された。「HTML_EXTENSIONS配列、isHtmlExtension()判定関数、HTML_MAX_SIZE_BYTES定数」を定義し、「image-extensions.tsほど複雑な構造（magic bytes検証等）は不要」と付記されている。"
+    },
+    {
+      "finding_id": "S1-008",
+      "resolved": true,
+      "note": "モバイル版での表示モードが具体的に記載された。「MarkdownEditorのmobileTab方式と同様にタブ切り替え（ソース/プレビュー）で実装する」「FileViewer.tsxにはタブ切り替えUIの既存基盤がないため、新規実装が必要」と明記。iframeの高さもMARPプレビュー同様のisFullscreen対応が記載されている。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "S5-001",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "FileContentインターフェースへのisHtml追加がmodels.tsの既存パターンとコメント規約に沿うか確認が必要",
+      "description": "Issueでは「src/types/models.tsにisHtml?: booleanフラグ追加」と記載されている。既存のFileContentインターフェース（models.ts行278-293）にはisImage、isVideoにそれぞれ「optional, for image files」「optional, for video files - Issue #302」とJSDocコメントとIssue番号が付記されている。isHtmlの追加においても同様にJSDocコメントとIssue番号（Issue #490）を付記する仕様を実装タスクに明記しておくと、コードの一貫性が保たれる。",
+      "suggestion": "実装タスクの「src/types/models.tsにisHtml?: booleanフラグ追加」に「JSDocコメント付き（例: /** Whether the file is an HTML file (optional) - Issue #490 */）」を追記する。"
+    },
+    {
+      "id": "S5-002",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "route.tsのGETレスポンスにisHtmlを追加する際のFileContentResponse型との整合性",
+      "description": "現在のroute.tsのGETハンドラ（行290-301）はNextResponse.json({ success: true, path, content, extension, worktreePath })を返している。ここにisHtml: trueを追加する場合、FileContentResponseの型定義（models.ts行299: type FileContentResponse = { success: true } & FileContent）を通してisHtml?がクライアント側で型安全にアクセスできることを確認する必要がある。FileContentにisHtml?を追加すればFileContentResponseにも自動的に含まれるため型的には問題ないが、クライアント側でレスポンスをFileContentResponseとして型付けしている箇所で型チェックが正しく機能することをIssueのテスト項目に含めると安全。",
+      "suggestion": "受入条件またはテスト項目に「FileContentResponse型にisHtmlが含まれ、クライアント側で型安全にアクセスできること」を追加することを検討する。これは既存のisImage/isVideoと同じパターンであり大きなリスクではないが、明示しておくと実装時の確認漏れを防げる。"
+    },
+    {
+      "id": "S5-003",
+      "severity": "nice_to_have",
+      "category": "明確性",
+      "title": "EXTENSION_VALIDATORSのadditionalValidation仕様が「検討」のまま",
+      "description": "実装タスクに「additionalValidation: XSS危険パターン検出等を検討」とあるが、実装するのか見送るのかが不確定のまま。sandbox属性による隔離が主たるセキュリティ対策である方針は明記されているが、保存時のadditionalValidationの有無は実装者の判断に委ねられる状態。初期実装ではadditionalValidationなし（undefinedのまま）で問題ないが、その方針を明記しておくと実装時の判断が不要になる。",
+      "suggestion": "実装タスクのEXTENSION_VALIDATORSの記述を「additionalValidation: 初期実装ではundefined（sandbox属性による隔離で安全性を担保するため）。将来的にXSS危険パターン検出を追加する可能性あり」のように方針を明確化する。"
+    },
+    {
+      "id": "S5-004",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "blob: URLによるorigin分離の具体的な実装判断が未確定",
+      "description": "Fullレベルのセキュリティ対策として「srcdocではなくblob: URLを使用してoriginを分離することを検討する」と記載されているが、初期実装でblob: URLを採用するか、srcdocで進めるかの判断が明示されていない。CSPにframe-src 'self' blob:を追加する旨は記載されており、blob: URLを使う準備はされているが、HtmlPreview.tsxの実装方式が確定していない。",
+      "suggestion": "初期実装の方針として「Safe/InteractiveレベルはsrcdocでOK。FullレベルではまずsrcdocでMVPを実装し、セキュリティテストの結果に応じてblob: URLへの移行を検討する」のように段階的な方針を明記すると実装者の判断が容易になる。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 2,
+  "nice_to_have_count": 2,
+  "overall_quality": "good",
+  "code_references": [
+    {
+      "file": "src/types/models.ts",
+      "lines": "278-299",
+      "relevance": "FileContentインターフェースとFileContentResponse型。isHtml追加時のJSDocコメント規約と型整合性の確認対象"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "lines": "290-301",
+      "relevance": "GETレスポンスのJSON構造。isHtml: trueフラグ追加箇所"
+    },
+    {
+      "file": "src/config/editable-extensions.ts",
+      "lines": "32-37",
+      "relevance": "EXTENSION_VALIDATORS配列。HTMLエントリのadditionalValidation方針の確認対象"
+    }
+  ]
+}

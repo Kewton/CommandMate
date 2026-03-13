@@ -1,0 +1,101 @@
+{
+  "issue_number": 490,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "reviewed_at": "2026-03-13",
+  "summary": "Issue #490 HTMLプレビュー機能の影響範囲を分析した。既存コンポーネント（FilePanelContent, FileViewer, FilePanelSplit）への影響は設計方針書で適切にカバーされている。しかし、CSP設定変更に関して既存MARP iframe機能との整合性リスク、PUT APIの挙動変更がファイル操作全体に与える影響、およびuseFileContentPollingのisDirty制御における考慮不足を検出した。全体として設計の影響範囲把握は良好だが、3件の改善が必要である。",
+  "findings": [
+    {
+      "id": "DR3-001",
+      "severity": "must_fix",
+      "category": "CSP設定変更の既存機能への影響",
+      "title": "frame-src追加とX-Frame-Options: DENYの矛盾、および既存MARPプレビューへの影響分析の欠如",
+      "description": "next.config.jsに`frame-src 'self' blob:`を追加する設計だが、同じ設定ファイルに`X-Frame-Options: DENY`が存在する（行32-33）。X-Frame-Optionsはページ全体の埋め込みを制御するヘッダーであり、CSPのframe-srcとは異なる動作をする。srcdocのiframeは同一ページ内のインラインフレームであるため、X-Frame-Optionsの影響は受けないが、設計方針書にこの点の技術的整理が不足している。また、既存のMARPプレビュー（FilePanelContent.tsx行312-315、FileViewer.tsx行316-320）は現在frame-src未定義のままsrcDoc iframeが動作しているが、frame-src追加後も既存MARPプレビューが問題なく動作し続けることの確認が設計方針書に記載されていない。",
+      "affected_components": [
+        "next.config.js",
+        "src/components/worktree/FilePanelContent.tsx（MARPプレビュー部分）",
+        "src/components/worktree/FileViewer.tsx（MARPプレビュー部分）"
+      ],
+      "suggestion": "設計方針書のセクション4-2に以下を追記すること: (1) X-Frame-Options: DENYはページが他サイトのiframeに埋め込まれることを防ぐヘッダーであり、ページ内のsrcdoc iframeには影響しない旨の技術的整理。(2) 既存MARPプレビュー（sandbox=''のsrcDoc iframe）がframe-src追加後も正常動作する旨の確認記述。(3) frame-src 'self' blob:の追加が既存のdefault-src 'self'フォールバック動作を上書きするため、frame-src追加前後で動作が変わらないことの根拠を明記。"
+    },
+    {
+      "id": "DR3-002",
+      "severity": "must_fix",
+      "category": "PUT API書き込み許可リスト拡大の影響",
+      "title": "editable-extensions.tsへのhtml/htm追加がPOST APIのコンテンツバリデーションにも波及する",
+      "description": "設計方針書はPUT APIへの影響を正しく認識しているが、POST API（route.ts行386-394）でもisEditableExtension()とvalidateContent()が呼ばれている点の影響分析が不足している。POST APIでは新規ファイル作成時にisEditableExtensionで拡張子チェックし、該当する場合にvalidateContentでコンテンツバリデーションを行う。.html/.htmをEDITABLE_EXTENSIONSに追加しEXTENSION_VALIDATORSにも追加すると、POST APIで.htmlファイルを新規作成する際にも5MBサイズ制限とバイナリ検出が適用される。これは意図した動作と思われるが、設計方針書にPOST APIへの影響が明示されていないため、実装者が見落とすリスクがある。",
+      "affected_components": [
+        "src/config/editable-extensions.ts",
+        "src/app/api/worktrees/[id]/files/[...path]/route.ts（POST handler）"
+      ],
+      "suggestion": "設計方針書のセクション5（設定変更）またはセクション1（レイヤー構成）にPOST APIへの影響を追記すること。具体的には「POST /api/worktrees/[id]/files/[...path]で.htmlファイルを新規作成する場合にもEXTENSION_VALIDATORSによるサイズ制限（5MB）とバイナリ検出が適用される。これは意図した動作である。」と明記する。テスト設計（セクション6）にもPOST APIでのHTML新規作成テストケースを受入テストに追加することを推奨する。"
+    },
+    {
+      "id": "DR3-003",
+      "severity": "should_fix",
+      "category": "ファイルポーリングとの相互作用",
+      "title": "useFileContentPollingがHTMLファイルのisHtmlフラグを正しく伝播するかの確認不足",
+      "description": "useFileContentPolling（useFileContentPolling.ts行65-66）はポーリング結果をFileContent型としてパースし、onLoadContentコールバックに渡す。HTMLファイルの場合、APIレスポンスにisHtml: trueが含まれるため、ポーリングで再取得された際にもisHtmlフラグが正しく伝播される必要がある。現在のコードはconst data: FileContent = await response.json()でレスポンスをパースしているため、FileContent型にisHtml?が追加されれば自動的に伝播される。しかし、ポーリング更新時にHtmlPreviewコンポーネントがisDirty状態であった場合のポーリング停止が設計方針書のセクション3-4で言及されているものの、具体的にどのレイヤーでisDirty状態がポーリング無効化に連携するかの記述が不十分である。useFileContentPolling.tsの行50でtab.isDirtyがenabledフラグに使われていることと、HtmlPreviewのonDirtyChangeコールバックがuseFileTabs経由でtab.isDirtyを更新するパスが設計方針書で明示されていない。",
+      "affected_components": [
+        "src/hooks/useFileContentPolling.ts",
+        "src/components/worktree/HtmlPreview.tsx（新規）",
+        "src/hooks/useFileTabs.ts"
+      ],
+      "suggestion": "設計方針書のセクション3-4（HtmlPreview.tsx）のポーリング制御の記述を拡充し、isDirtyの伝播パスを明示すること。具体的には「HtmlPreview.onDirtyChange -> FilePanelContent.onDirtyChange(tab.path, isDirty) -> useFileTabs.setDirty(path, isDirty) -> tab.isDirty更新 -> useFileContentPolling.enabled=falseによりポーリング停止」というデータフロー図を追加する。"
+    },
+    {
+      "id": "DR3-004",
+      "severity": "should_fix",
+      "category": "既存テストへの影響",
+      "title": "editable-extensions.test.tsのテスト「should return false for non-editable extensions」がhtml追加後も正しいか",
+      "description": "既存テスト（editable-extensions.test.ts行56-61）のisEditableExtensionテストケース「should return false for non-editable extensions」では.txt, .js, .ts, .jsonがfalseを返すことをテストしている。.html/.htmはテストされていないが、これは現状「非editableのサンプル」として記載されていないだけなので問題はない。しかし設計方針書のDR2-005で言及されている既存テスト名変更（should only include .md for now -> should include .md, .html, .htm）およびtoHaveLength(3)への更新は、テスト行28-31の直接的な変更であり、この変更が他のテストケースと矛盾しないことを確認する必要がある。具体的には行65のエッジケーステスト「should handle edge cases」でisEditableExtension('md')（ドットなし）がfalseを返すことをテストしているが、html-extensions.tsのisHtmlExtensionがnormalizeExtensionを使用してドットなしも受け付ける設計とされている（DR2-001）。この非対称性について設計方針書で触れられているものの、テスト設計でisEditableExtension('html')（ドットなし）がfalseであることを確認するテストケースが明示されていない。",
+      "affected_components": [
+        "tests/unit/config/editable-extensions.test.ts",
+        "src/config/editable-extensions.ts",
+        "src/config/html-extensions.ts（新規）"
+      ],
+      "suggestion": "テスト設計（セクション6-1）に以下を追加すること: isEditableExtension('html')（ドットなし）がfalseを返すことを確認するテストケース。これにより、isHtmlExtensionとisEditableExtensionのドット正規化に関する非対称性が意図的であることをテストで担保できる。"
+    },
+    {
+      "id": "DR3-005",
+      "severity": "should_fix",
+      "category": "FilePanelContentの分岐順序と拡張子判定の整合性",
+      "title": "FilePanelContent.tsxでHTMLファイルがextension==='md'分岐より前に判定される必要性の明記",
+      "description": "FilePanelContent.tsx（行660）ではcontent.extension === 'md'でMarkdownEditor分岐が行われているが、設計方針書のセクション3-5では「isVideo分岐の後、デフォルトのCodeViewer分岐の前」にHTML分岐を追加するとされている。現在のコードの分岐順序はisImage -> isVideo -> md(extension) -> defaultである。HTMLのisHtml分岐を追加する場合、isVideo分岐の後かつmd分岐の前に配置する必要がある。ただし、.htmlファイルのextensionフィールドはAPIレスポンスでは'html'（ドットなし）が返されるため、extension === 'md'チェックとは干渉しない。しかし万一.htmファイルでextension==='htm'がmdと混同されることはないものの、将来.mhtml等の拡張子が追加された場合の分岐順序のロバスト性について、設計方針書で分岐挿入位置の根拠を明確化すべきである。",
+      "affected_components": [
+        "src/components/worktree/FilePanelContent.tsx"
+      ],
+      "suggestion": "設計方針書のセクション3-5に、分岐の挿入位置が「isVideo分岐の後、extension==='md'分岐の前」であることを明示し、その理由として「isHtmlフラグはAPIレスポンスのブーリアンフラグであり拡張子文字列比較ではないため、分岐が明確に分離される」旨を追記すること。"
+    },
+    {
+      "id": "DR3-006",
+      "severity": "nice_to_have",
+      "category": "FilePanelSplitへの影響なし確認",
+      "title": "FilePanelSplitコンポーネントへの変更が不要であることの明示",
+      "description": "FilePanelSplit.tsxはFilePanelTabsにpropsを委譲するだけのレイアウトコンポーネントであり、FileContent型を直接利用していない（FilePanelSplitPropsではFileContent型をonLoadContentコールバックの引数型としてのみ使用）。FileContentにisHtml?が追加されてもFilePanelSplit自体のコード変更は不要である。設計方針書の変更対象ファイル一覧（セクション1のレイヤー構成表）にFilePanelSplitが含まれていないのは正しい。",
+      "affected_components": [
+        "src/components/worktree/FilePanelSplit.tsx"
+      ],
+      "suggestion": "これは確認事項であり、対応不要。FilePanelSplitは透過的にpropsを委譲するため、FileContent型の拡張に影響されない。"
+    },
+    {
+      "id": "DR3-007",
+      "severity": "nice_to_have",
+      "category": "FileContent型の波及効果",
+      "title": "FileContent型を使用する15ファイルへの影響確認",
+      "description": "FileContent型はsrc配下15ファイルで参照されている。isHtml?フィールドはオプショナル（isHtml?: boolean）であるため、既存コードは型エラーなくコンパイルされる。既存のisImage/isVideoと同じパターンであり、波及リスクは低い。ただし、useFileContentSearch.ts、useFileTabs.ts、FilePanelTabs.tsx、WorktreeDetailRefactored.tsx等のファイルがFileContentを受け渡しのみで使用しているか、フィールドを直接参照しているかの確認が設計方針書にない。",
+      "affected_components": [
+        "src/types/models.ts",
+        "src/hooks/useFileContentSearch.ts",
+        "src/hooks/useFileTabs.ts",
+        "src/components/worktree/FilePanelTabs.tsx",
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "suggestion": "設計方針書のセクション3-2に「FileContentを参照する他のモジュール（useFileTabs、FilePanelTabs等）はFileContentオブジェクトの受け渡しのみを行い、isHtmlフィールドを直接参照しないため変更不要」という影響なし確認を追記すると、実装者の安心材料となる。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 3,
+  "nice_to_have_count": 2,
+  "overall_quality": "good"
+}

@@ -1,0 +1,128 @@
+{
+  "issue_number": 490,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "reviewed_at": "2026-03-13",
+  "summary": "HTMLプレビュー機能のセキュリティ設計は、iframe sandbox属性による段階的制御、既存path-validator.tsとの整合、認証ミドルウェアとの一貫性など、基本的なセキュリティ要件を満たしている。ただし、Interactiveモードにおけるallow-scriptsの警告UI欠如、CSP内のiframeコンテンツに対するscript-src制御の不在、HTMLサニタイズ方針の未明記という3点のmust_fix指摘がある。加えて、サイズ制限のバイパス可能性やblob: CSPの将来的リスクについてshould_fix指摘を行う。全体としてセキュリティ意識の高い設計であるが、XSS防御の最終ラインに関する明確な方針記載が必要である。",
+  "findings": [
+    {
+      "id": "DR4-001",
+      "severity": "must_fix",
+      "category": "XSS防御方針の明確化",
+      "owasp": "A03 Injection / A07 XSS",
+      "title": "HTMLコンテンツのサニタイズ方針が未明記 - DOMPurify使用/不使用の明確な設計判断が必要",
+      "description": "設計方針書では「HTMLの変換・加工ができない（意図通り）」と記載されているが、これはHTMLコンテンツをサニタイズせずにそのままiframe srcDocに渡すことを意味する。プロジェクトには既にDOMPurify（isomorphic-dompurify）がsrc/lib/security/sanitize.tsで導入されているにもかかわらず、HTMLプレビュー機能においてDOMPurifyを使用しない設計判断とその根拠が明記されていない。Safeモード（sandbox=''）ではスクリプト実行がブロックされるためXSSリスクは低いが、Interactiveモード（allow-scripts）ではユーザーが意図的にスクリプト実行を許可しているとはいえ、悪意あるHTMLファイルがworktree内に存在するケース（例: git clone経由で取得したリポジトリ内のHTMLファイル）への対策方針が不明確である。",
+      "suggestion": "設計方針書のセクション4に「4-4. HTMLサニタイズ方針」を新設し、以下を明記すること: (1) Safeモードではsandbox=''によりスクリプト・フォーム・ナビゲーションが全て無効化されるため、DOMPurifyによるサニタイズは不要である。(2) Interactiveモードではユーザーが明示的にスクリプト実行を許可する操作であり、HTMLファイルの忠実なレンダリングが目的であるためサニタイズは行わない。(3) ただし、Interactiveモードのトグル切り替え時にはユーザーに対して「スクリプトが実行されます。信頼できるHTMLファイルのみInteractiveモードで開いてください」という警告を表示すること。この設計判断の明記により、将来の保守者がDOMPurify導入の要否を再判断する際の根拠となる。"
+    },
+    {
+      "id": "DR4-002",
+      "severity": "must_fix",
+      "category": "Interactiveモードのリスク軽減",
+      "owasp": "A07 XSS",
+      "title": "Interactiveモード（allow-scripts）切り替え時の警告UIが未設計",
+      "description": "設計方針書のセクション3-4ではSandboxLevel切り替え（Safe/Interactive）のUIが記載されているが、Interactiveモードへのトグルはワンクリックで切り替わる設計となっている。allow-scriptsを有効にすると、iframe内でJavaScriptが実行可能になる。sandbox属性によりallow-same-originは付与されないため親ページのDOM/Cookie/localStorageへのアクセスは不可能だが、iframe内でのCPU消費（無限ループ）、大量DOM生成によるメモリ消費、window.alert/confirm/promptによるUIブロック等のリスクが残る。特に、他者のリポジトリをcloneした場合に悪意あるHTMLが含まれる可能性がある。",
+      "suggestion": "Interactiveモードへの切り替え時に確認ダイアログを表示する設計を追加すること。具体的には: (1) HtmlPreview.tsxでSandboxLevel変更ハンドラにconfirmロジックを追加。(2) 「Interactiveモードではスクリプトが実行されます。信頼できないHTMLファイルではSafeモードを使用してください。」というメッセージを表示。(3) ユーザーが確認した場合のみsandboxLevelをinteractiveに変更。(4) セッション中は同一ファイルに対する再確認をスキップする（useState等で管理）。これはDR1-003でFullレベル追加時に「警告ダイアログ必須」と記載されている方針と一貫する設計である。"
+    },
+    {
+      "id": "DR4-003",
+      "severity": "must_fix",
+      "category": "CSP設定とiframeスクリプト実行の整合性",
+      "owasp": "A05 Security Misconfiguration",
+      "title": "CSPのscript-srcがunsafe-inline/unsafe-evalを許可しておりiframe内スクリプトへの制約が不明確",
+      "description": "現在のnext.config.jsのCSPは「script-src 'self' 'unsafe-inline' 'unsafe-eval'」を設定している。iframe srcDocのコンテンツは親ページのCSPを継承する（sandbox属性でallow-same-originがない場合はunique originとなるが、CSPの適用はブラウザ実装依存）。Interactiveモード（allow-scripts）でiframe内のインラインスクリプトが実行される際、親ページの'unsafe-inline'が適用される場合と、unique originにより別途CSPが必要になる場合がある。設計方針書ではこのCSP継承の挙動について分析が不足している。特に、iframe内から外部リソース（CDN等）をfetchするケースやWebSocket接続を試みるケースの制約が明記されていない。",
+      "suggestion": "設計方針書のセクション4-2に以下を追記すること: (1) sandbox属性でallow-same-originが付与されない場合、iframe内はunique origin（opaque origin）として扱われ、親ページの'self'オリジンとは異なるため、外部fetch/XHR/WebSocketは実質的にCORSポリシーによりブロックされる。(2) ただし、インラインスクリプト（<script>タグ内のコード）とinline event handlers（onclick等）は実行可能である。(3) これにより、Interactiveモードのリスクは「iframe内でのローカル実行」に限定されることを明記する。(4) 将来Fullレベル（allow-scripts allow-same-origin）を追加する場合には、iframe専用のCSPメタタグをsrcDoc内に注入する設計を検討すること。"
+    },
+    {
+      "id": "DR4-004",
+      "severity": "should_fix",
+      "category": "DoS防止",
+      "owasp": "A05 Security Misconfiguration",
+      "title": "HTMLファイルサイズ制限（5MB）がGETリクエスト時に適用されるタイミングの明確化",
+      "description": "設計方針書では「APIルートでサイズチェック後にisHtml: trueフラグを返す」と記載されているが、現在のGET APIルート（route.ts行260-301）はテキストファイルの読み込み時にサイズ制限チェックを行っていない。readFileContent関数経由でファイル全体をメモリに読み込んだ後にレスポンスを返す設計となっている。5MBのHTMLファイルは既にメモリに読み込まれた後にサイズチェックが行われると、DoS防御として不十分である。画像・動画ファイルではstat()によるサイズ事前チェックが実装されている（行214-217）が、HTMLテキストファイルには同等の防御がない。",
+      "suggestion": "HTMLファイルのGET処理において、readFileContent呼び出し前にfs.stat()によるファイルサイズ事前チェックを追加すること。具体的には: (1) isHtmlExtension(ext)がtrueの場合、fileStat.size（行262で既に取得済み）をHTML_MAX_SIZE_BYTESと比較。(2) 超過時はreadFileContentを呼び出さずにFILE_TOO_LARGEエラーを返す。(3) これにより、画像・動画と同等のメモリ効率的なサイズ制限が実現される。設計方針書のセクション3-3にこの事前チェックのコード例を追記すること。"
+    },
+    {
+      "id": "DR4-005",
+      "severity": "should_fix",
+      "category": "パスバリデーション整合性",
+      "owasp": "A03 Injection",
+      "title": "HTMLファイルのパスバリデーションが既存の5層防御と整合していることの明記",
+      "description": "設計方針書ではHTMLファイルが既存のGET /files/... APIパスを通ることは示されているが、path-validator.tsの5層防御（空パスチェック、NULLバイト検出、URLデコード検証、パストラバーサル検出、シンボリックリンク検証）がHTMLファイルにも適用されることが明示的に記載されていない。route.tsのgetWorktreeAndValidatePath関数が全HTTPメソッドで共通呼び出しされることから暗黙的に適用されるが、セキュリティレビューの観点からは明記が望ましい。",
+      "suggestion": "設計方針書のセクション4に「4-5. パスバリデーション」を追加し、以下を明記すること: (1) HTMLファイルは既存のGET /files/... APIを経由するため、getWorktreeAndValidatePath()による全てのパスバリデーション（isPathSafe、resolveAndValidateRealPath）が自動的に適用される。(2) PUT API（保存）時もisEditableFile()およびvalidateContent()による検証が適用される。(3) 新たなパスバリデーションロジックの追加は不要である。"
+    },
+    {
+      "id": "DR4-006",
+      "severity": "should_fix",
+      "category": "認証・認可への影響",
+      "owasp": "A07 XSS",
+      "title": "iframe内からの親ページCookie/認証トークンへのアクセス不可能性の明記",
+      "description": "middleware.tsで実装されている認証（CM_AUTH_TOKEN_HASH、AUTH_COOKIE_NAME）は、iframe srcdocのコンテンツからアクセスされるリスクがないことを確認する必要がある。sandbox属性でallow-same-originが付与されない限り、iframe内のスクリプトは親ページのdocument.cookieやlocalStorageにアクセスできない。この点は設計上正しいが、明示的な記載がない。また、Interactiveモードでallow-scriptsが有効な場合でも、allow-same-originがないためこの防御は維持される。",
+      "suggestion": "設計方針書のセクション4-1の表に「認証トークン保護」列を追加し、各サンドボックスレベルでの認証情報へのアクセス可否を明記すること: Safe - 不可（全機能無効）、Interactive - 不可（allow-same-origin未付与のためopaque origin）。将来Fullレベルを追加する場合にはallow-same-originにより親ページのCookieにアクセス可能となるため、「認証トークン漏洩リスクあり」と警告を追記すること。"
+    },
+    {
+      "id": "DR4-007",
+      "severity": "should_fix",
+      "category": "CSP設定のblob:スキーム",
+      "owasp": "A05 Security Misconfiguration",
+      "title": "frame-srcへのblob:追加が現時点で不要な攻撃面を増やす可能性",
+      "description": "設計方針書では「blob:は将来的なiframe利用への予防的措置」と記載されているが、YAGNI原則（DR1-003で適用済み）との一貫性から疑問がある。blob: URLはJavaScriptで動的に生成可能であり、XSS脆弱性が存在する場合にblob: URLを介した攻撃ベクターとなり得る。現時点でblob:を必要とする具体的な機能がないにもかかわらず、CSPに追加することはattack surfaceの不要な拡大である。",
+      "suggestion": "frame-srcは「frame-src 'self'」のみとし、blob:は除外すること。srcdoc iframeは多くのブラウザで'self'の範囲内として処理される（Chrome、Firefox、Safari全てで動作確認済みのMARPプレビューの実績がある）。blob:が必要になった時点で追加する方が、YAGNI原則およびCSPのleast-privilege原則に適合する。設計方針書のセクション4-2を更新し、blob:除外の設計判断を明記すること。"
+    },
+    {
+      "id": "DR4-008",
+      "severity": "nice_to_have",
+      "category": "Interactiveモードのリソース消費制御",
+      "owasp": "A05 Security Misconfiguration",
+      "title": "iframe内の無限ループ・メモリリーク検出機構の検討",
+      "description": "Interactiveモードでallow-scriptsが有効な場合、悪意あるHTMLが無限ループやsetIntervalによるCPU消費、大量DOM生成によるメモリリークを引き起こす可能性がある。ブラウザはタブ単位でのメモリ制限を持つが、iframe内のリソース消費が親ページのパフォーマンスに影響する場合がある。",
+      "suggestion": "初期リリースでは対応不要だが、将来的にiframe内のパフォーマンス劣化を検出するための仕組み（例: Performance Observer APIによる監視、一定時間後の自動sandbox強化）を検討課題として記録すること。"
+    },
+    {
+      "id": "DR4-009",
+      "severity": "nice_to_have",
+      "category": "containsDangerousContent関数との連携",
+      "owasp": "A03 Injection",
+      "title": "既存のcontainsDangerousContent関数をHTMLプレビューの情報表示に活用する検討",
+      "description": "src/lib/security/sanitize.tsにはcontainsDangerousContent関数が実装されており、<script>、javascript:、event handlers、<iframe>、<object>、<embed>、data:text/htmlの検出が可能である。HTMLプレビューのSafeモードではこれらは無害だが、Interactiveモードへの切り替え前にこの関数で検査を行い、危険なコンテンツが検出された場合に追加の警告を表示することで、ユーザーの安全意識を高めることができる。",
+      "suggestion": "Interactiveモード切り替え時のconfirmダイアログ（DR4-002）において、containsDangerousContent()の結果に基づき警告レベルを変更する実装を将来検討すること。例: スクリプトを含まないHTMLは通常の確認、スクリプトを含むHTMLは強い警告メッセージを表示する。"
+    }
+  ],
+  "must_fix_count": 3,
+  "should_fix_count": 4,
+  "nice_to_have_count": 2,
+  "overall_quality": "acceptable",
+  "checklist": {
+    "owasp_a03_injection": {
+      "status": "conditional_pass",
+      "note": "パスバリデーションは既存の5層防御で担保。HTMLコンテンツのインジェクション防御はsandbox属性に依存するが、方針の明記が必要（DR4-001）。"
+    },
+    "owasp_a05_security_misconfiguration": {
+      "status": "conditional_pass",
+      "note": "CSP frame-src追加は妥当だがblob:の必要性に疑問（DR4-007）。iframe sandbox設定は適切だがCSP継承の分析が不足（DR4-003）。"
+    },
+    "owasp_a07_xss": {
+      "status": "conditional_pass",
+      "note": "Safeモードはsandbox=''で完全防御。Interactiveモードは警告UI未設計（DR4-002）、サニタイズ方針未明記（DR4-001）が課題。"
+    },
+    "iframe_sandbox": {
+      "status": "pass",
+      "note": "Safe（sandbox=''）とInteractive（allow-scripts）の2段階設計は適切。allow-same-originの除外により認証トークン保護が担保される。"
+    },
+    "file_size_limit": {
+      "status": "conditional_pass",
+      "note": "5MB制限は妥当だが、GET時のメモリ効率的な事前チェックが未設計（DR4-004）。"
+    },
+    "path_validation": {
+      "status": "pass",
+      "note": "既存のgetWorktreeAndValidatePath()が自動適用される。明示的な記載の追加を推奨（DR4-005）。"
+    },
+    "csp_configuration": {
+      "status": "conditional_pass",
+      "note": "frame-src追加自体は妥当。blob:除外を推奨（DR4-007）。X-Frame-Options: DENYとの関係はDR3-001で整理済み。"
+    },
+    "authentication_impact": {
+      "status": "pass",
+      "note": "既存のmiddleware.ts認証はHTMLファイルのGET/PUT APIに自動適用される。iframe内からのCookieアクセスはsandboxで防御（DR4-006）。"
+    }
+  }
+}

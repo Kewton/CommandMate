@@ -1,0 +1,40 @@
+{
+  "issue_number": 490,
+  "feature_summary": "ファイルパネルでHTMLファイルを選択した際に、ソースコード表示に加えてブラウザレンダリング（プレビュー）表示を可能にする",
+  "acceptance_criteria": [
+    ".html / .htm ファイルがプレビュー表示される（HtmlPreviewコンポーネントが表示される）",
+    "ソース/プレビュー/分割の3モード切り替えが動作する（PC版）",
+    "モバイル版ではタブ切り替え（ソース/プレビュー）で動作する",
+    "サンドボックスレベル（Safe / Interactive）の切り替えが動作する",
+    "Interactive切り替え時に確認ダイアログが表示される",
+    "5MBを超えるHTMLファイルはソースコード表示のみとする",
+    "HTMLファイルの保存がEXTENSION_VALIDATORSのバリデーションを通過する",
+    "CSPヘッダーにframe-src 'self'が設定される",
+    "既存テストが全パスする",
+    "FileContentResponse型にisHtmlが含まれ型安全にアクセスできる"
+  ],
+  "test_scenarios": [
+    "シナリオ1: .htmlファイルを選択するとHtmlPreviewコンポーネントが表示される",
+    "シナリオ2: .htmファイルも同様にプレビュー表示される",
+    "シナリオ3: isHtmlExtension('.html')がtrueを返す",
+    "シナリオ4: isHtmlExtension('.md')がfalseを返す",
+    "シナリオ5: SANDBOX_ATTRIBUTESにsafeとinteractiveの2エントリのみ存在する",
+    "シナリオ6: editable-extensionsに.html/.htmが追加されている",
+    "シナリオ7: HTML_MAX_SIZE_BYTESが5MB(5*1024*1024)である",
+    "シナリオ8: CSPにframe-src 'self'が設定されている",
+    "シナリオ9: npx tsc --noEmit がエラー0件",
+    "シナリオ10: npm run test:unit が全テストパス"
+  ],
+  "implemented_files": [
+    "src/config/html-extensions.ts",
+    "src/config/editable-extensions.ts",
+    "src/types/models.ts",
+    "next.config.js",
+    "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+    "src/components/worktree/HtmlPreview.tsx",
+    "src/components/worktree/FilePanelContent.tsx",
+    "src/components/worktree/FileViewer.tsx",
+    "tests/unit/config/html-extensions.test.ts",
+    "tests/unit/config/editable-extensions.test.ts"
+  ]
+}

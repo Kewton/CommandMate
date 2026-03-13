@@ -1,0 +1,53 @@
+{
+  "issue_number": 490,
+  "stage": 3,
+  "applied_at": "2026-03-13",
+  "applied_findings": [
+    {
+      "id": "DR3-001",
+      "severity": "must_fix",
+      "title": "frame-src追加とX-Frame-Options: DENYの矛盾、および既存MARPプレビューへの影響分析の欠如",
+      "action": "セクション4-2にX-Frame-Options: DENYとsrcdoc iframeの関係整理、既存MARPプレビューへの影響確認、frame-src追加前後の動作同一性の根拠を追記"
+    },
+    {
+      "id": "DR3-002",
+      "severity": "must_fix",
+      "title": "editable-extensions.tsへのhtml/htm追加がPOST APIのコンテンツバリデーションにも波及する",
+      "action": "セクション5にPOST APIへの影響を追記。セクション6-2にPOST APIでのHTML新規作成・5MB超拒否のテストケースを追加"
+    },
+    {
+      "id": "DR3-003",
+      "severity": "should_fix",
+      "title": "useFileContentPollingがHTMLファイルのisHtmlフラグを正しく伝播するかの確認不足",
+      "action": "セクション3-4にisDirtyの伝播パスのデータフロー図（HtmlPreview -> FilePanelContent -> useFileTabs -> useFileContentPolling）を追記"
+    },
+    {
+      "id": "DR3-004",
+      "severity": "should_fix",
+      "title": "editable-extensions.test.tsのテストとhtml追加後の整合性",
+      "action": "セクション6-1にisEditableExtension('html')（ドットなし）がfalseを返すテストケースを追加"
+    },
+    {
+      "id": "DR3-005",
+      "severity": "should_fix",
+      "title": "FilePanelContent.tsxでHTMLファイルがextension==='md'分岐より前に判定される必要性の明記",
+      "action": "セクション3-5に分岐挿入位置の設計根拠を追記。isHtmlフラグがブーリアンフラグであり拡張子文字列比較と干渉しない旨を明記"
+    },
+    {
+      "id": "DR3-006",
+      "severity": "nice_to_have",
+      "title": "FilePanelSplitコンポーネントへの変更が不要であることの明示",
+      "action": "Stage 3サマリのスコープ外セクションに記録。変更対象ファイル一覧に含まれていないのは正しい旨を確認"
+    },
+    {
+      "id": "DR3-007",
+      "severity": "nice_to_have",
+      "title": "FileContent型を使用する15ファイルへの影響確認",
+      "action": "セクション3-2にFileContent型の波及影響について追記。参照ファイルはオブジェクト受け渡しのみでisHtmlを直接参照しないため変更不要である旨を明記"
+    }
+  ],
+  "skipped_findings": [],
+  "total_applied": 7,
+  "total_skipped": 0,
+  "design_doc_updated": true
+}

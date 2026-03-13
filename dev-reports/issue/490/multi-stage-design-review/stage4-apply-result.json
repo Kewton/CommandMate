@@ -1,0 +1,81 @@
+{
+  "issue_number": 490,
+  "stage": 4,
+  "applied_at": "2026-03-13",
+  "applied_findings": [
+    {
+      "id": "DR4-001",
+      "severity": "must_fix",
+      "title": "HTMLコンテンツのサニタイズ方針が未明記",
+      "action": "セクション4-4「HTMLサニタイズ方針」を新設。DOMPurify不使用の設計判断とiframe sandboxによる安全性確保の根拠を明記。Safeモード・Interactiveモードそれぞれでのサニタイズ不要の理由を記載"
+    },
+    {
+      "id": "DR4-002",
+      "severity": "must_fix",
+      "title": "Interactiveモード切り替え時の警告UIが未設計",
+      "action": "セクション3-4にInteractiveモード切り替え時の確認ダイアログ設計を追加。確認メッセージ、セッション中の再確認スキップ機構、DR1-003との一貫性を記載。セクション6-2に受入テスト3件追加"
+    },
+    {
+      "id": "DR4-003",
+      "severity": "must_fix",
+      "title": "CSPのscript-srcがiframe内スクリプトへの制約が不明確",
+      "action": "セクション4-1にopaque originによる外部リソースブロックの仕組みを追記。外部fetch/XHR/WebSocketがCORSポリシーによりブロックされること、Interactiveモードのリスクが「iframe内でのローカル実行」に限定されることを明記"
+    },
+    {
+      "id": "DR4-004",
+      "severity": "should_fix",
+      "title": "HTMLファイルサイズ制限のGET時適用タイミングの明確化",
+      "action": "セクション4-3にGETハンドラでのfileStat.sizeによる事前チェックのコード例を追記。readFileContent呼び出し前にDoS防御を実施する設計を明記。セクション6-2に受入テスト1件追加"
+    },
+    {
+      "id": "DR4-005",
+      "severity": "should_fix",
+      "title": "path-validator.tsの5層防御がHTMLファイルにも適用される明記",
+      "action": "セクション4-5「パスバリデーション」を新設。GET/PUT/POST全APIパスでの既存防御機構の自動適用を明記。新規パスバリデーション追加不要であることを確認"
+    },
+    {
+      "id": "DR4-006",
+      "severity": "should_fix",
+      "title": "iframe内からの認証Cookie/localStorageアクセス不可能性の明記",
+      "action": "セクション4-1の表に「認証トークン保護」列を追加。各サンドボックスレベルでの認証情報アクセス不可能性とその根拠を明記。将来Fullレベル追加時の警告も記載"
+    },
+    {
+      "id": "DR4-007",
+      "severity": "should_fix",
+      "title": "frame-srcへのblob:追加が不要な攻撃面を増やす",
+      "action": "セクション4-2のCSP設定をframe-src 'self'に変更（blob:除外）。YAGNI原則・least-privilege原則に基づく設計判断を明記。システム構成図、レイヤー構成表、実装順序、トレードオフ表、Stage 2/3チェックリスト等の関連箇所を全て更新"
+    }
+  ],
+  "skipped_findings": [],
+  "total_applied": 7,
+  "total_skipped": 0,
+  "design_doc_updated": true,
+  "nice_to_have_recorded": [
+    {
+      "id": "DR4-008",
+      "title": "iframe内の無限ループ・メモリリーク検出機構の検討",
+      "action": "Stage 4スコープ外として記録。将来検討課題"
+    },
+    {
+      "id": "DR4-009",
+      "title": "containsDangerousContent関数をHTMLプレビューの情報表示に活用",
+      "action": "Stage 4スコープ外として記録。将来検討課題"
+    }
+  ],
+  "sections_modified": [
+    "1. アーキテクチャ設計 - システム構成図のCSP表記更新",
+    "1. アーキテクチャ設計 - レイヤー構成表のインフラ層更新",
+    "3-4. HtmlPreview.tsx - Interactiveモード確認ダイアログ設計追加（DR4-002）",
+    "4-1. iframe sandbox段階的制御 - 認証トークン保護列追加（DR4-006）、opaque origin解説追加（DR4-003）",
+    "4-2. CSP設定変更 - frame-src 'self'に変更、blob:除外の設計判断追記（DR4-007）",
+    "4-3. HTMLファイルサイズ制限 - GETハンドラ事前チェック追記（DR4-004）",
+    "4-4. HTMLサニタイズ方針 - 新設（DR4-001）",
+    "4-5. パスバリデーション - 新設（DR4-005）",
+    "6-2. 受入テスト - DR4-002/DR4-004のテストケース4件追加",
+    "7. 設計上の決定事項とトレードオフ - iframe srcdoc方式の記述更新",
+    "8. 実装順序 - ステップ6の記述更新",
+    "10. Stage 2 実装チェックリスト - DR2-003のblob:除外反映",
+    "11. Stage 3 実装チェックリスト - DR3-001のblob:除外反映",
+    "12. Stage 4 セキュリティレビュー指摘事項サマリ - 新設"
+  ]
+}

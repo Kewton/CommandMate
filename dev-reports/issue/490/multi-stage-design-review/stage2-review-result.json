@@ -1,0 +1,69 @@
+{
+  "issue_number": 490,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "reviewed_at": "2026-03-13",
+  "summary": "設計方針書は全体的に既存コードベースとの整合性が高く、video-extensions.tsパターンの踏襲やFileContent型の拡張パターンが正確に理解されている。must_fix指摘が2件あり、(1) editable-extensions.tsのisEditableExtensionがドットなし拡張子を処理できない既存の不整合がhtml追加時に顕在化する点、(2) FileViewer.tsxのcanCopyとcodeViewDataにisHtml考慮が設計方針書で未記載である点を修正すべき。should_fix指摘3件とnice_to_have指摘2件を含め合計7件の指摘事項を報告する。",
+  "findings": [
+    {
+      "id": "DR2-001",
+      "severity": "must_fix",
+      "category": "型定義・API整合性",
+      "title": "isEditableExtensionのドット正規化がhtml-extensions.tsのisHtmlExtensionと不整合",
+      "description": "設計方針書セクション3-1ではisHtmlExtensionがimage-extensions.tsのnormalizeExtensionを使ってドット正規化する方針だが、editable-extensions.tsのisEditableExtension(行45-49)は現在normalizeExtensionを使用していない。既存のisEditableExtensionはextension.toLowerCase()のみで、ドットなし入力（例: 'html'）ではfalseを返す。一方、APIルートroute.ts行337でextname()の結果を渡すため実運用上は問題が顕在化していないが、html-extensions.tsでnormalizeExtensionを使う設計とeditable-extensions.tsで使わない設計が混在し、validateContent()でも同様にドットなし入力で'Unsupported extension'エラーとなる。設計方針書セクション5のEXTENSION_VALIDATORSに.html/.htmを追加する際、この不整合を認識して対処方針を明記すべき。",
+      "suggestion": "設計方針書に以下の注記を追加する: editable-extensions.tsのisEditableExtension()およびvalidateContent()でもnormalizeExtension()を導入してドット正規化を統一するか、既存動作（呼び出し元がextname()で常にドット付きを渡す）に依存する設計判断を明記すること。後者の場合、html-extensions.tsのisHtmlExtensionだけがnormalizeExtensionを使う理由（APIルート以外の呼び出し元での防御的コーディング）を記載する。"
+    },
+    {
+      "id": "DR2-002",
+      "severity": "must_fix",
+      "category": "UIコンポーネント整合性",
+      "title": "FileViewer.tsxのcanCopyとcodeViewDataにisHtml考慮が未記載",
+      "description": "設計方針書セクション3-6ではFileViewer.tsx（モバイル版）にHTML分岐を追加する方針だが、FileViewer.tsx行78-79のcanCopy計算では現在isImageとisVideoのみを除外している。isHtmlフラグが付いたファイルでもcontent.contentにはHTMLソースが含まれるためcanCopy=trueとなりソースコードがそのままコピーされる動作自体は問題ないが、行258-260のcodeViewDataではisImageとisVideoのみをガードしており、isHtmlファイルがHtmlPreviewではなくCodeViewerでレンダリングされてしまう。FileViewer.tsxのrenderContent()内にisHtml分岐を追加する実装詳細が設計方針書に不足している。",
+      "suggestion": "設計方針書セクション3-6に以下を追加する: (1) renderContent()内でcontent.isImageとcontent.isVideoの分岐の後にcontent.isHtml分岐を追加し、HtmlPreviewコンポーネントを表示する。(2) codeViewDataのuseMemo内でcontent.isHtmlを除外条件に追加する。(3) canCopyはisHtml時もtrue（ソースHTMLのコピーが有用）とする設計判断を明記する。"
+    },
+    {
+      "id": "DR2-003",
+      "severity": "should_fix",
+      "category": "CSP設定整合性",
+      "title": "iframe srcdocのCSP frame-src要件の技術的根拠に不正確な記述がある",
+      "description": "設計方針書セクション4-2では「srcdoc属性のiframeはブラウザによってblob: originとして扱われるため、明示的なframe-src 'self' blob:が必要」と記載されているが、これは技術的に正確ではない。srcdoc iframeのオリジンは仕様上about:srcdocであり、blob: URIとは異なる。現行のnext.config.js（行58-67）にはframe-srcが未定義でdefault-src 'self'にフォールバックされるが、srcdocはself扱いになるブラウザ実装が多い。ただし、frame-srcを明示的に追加すること自体は防御的で良い判断である。",
+      "suggestion": "設計方針書の技術的根拠を以下に修正する: 「srcdoc属性のiframeはブラウザ実装によってオリジンの扱いが異なる（about:srcdoc）。確実に動作させるため、明示的にframe-src 'self' blob:を追加する。blob:はsrcdoc以外の将来的なiframe利用（例: Blob URLでのプレビュー）にも対応するための予防的措置」。"
+    },
+    {
+      "id": "DR2-004",
+      "severity": "should_fix",
+      "category": "実装順序の依存関係整合性",
+      "title": "テスト実装がステップ9で最後に配置されているがTDD原則と不整合",
+      "description": "設計方針書セクション8の実装順序ではユニットテスト追加がステップ9（最後）に配置されている。プロジェクトのテストファイル（video-extensions.test.tsなど）のヘッダーに「TDD Approach: Red (test first) -> Green (implement) -> Refactor」と明記されているパターンと不整合がある。特にhtml-extensions.tsのテストはステップ1の実装と同時またはそれ以前に作成すべき。",
+      "suggestion": "実装順序を以下のように修正する: ステップ1を「html-extensions.test.ts作成（Red）」、ステップ2を「html-extensions.ts実装（Green）」とし、editable-extensions.test.tsの更新もステップ3のeditable-extensions.ts変更と同時に行う。UIコンポーネントのテストは後段でよい。"
+    },
+    {
+      "id": "DR2-005",
+      "severity": "should_fix",
+      "category": "テスト設計の網羅性",
+      "title": "editable-extensions.test.tsの既存テストとの整合性考慮が不足",
+      "description": "設計方針書セクション6-1ではeditable-extensions.tsのテスト更新として「EDITABLE_EXTENSIONS.lengthの更新」と記載しているが、既存のeditable-extensions.test.ts行28-31に「should only include .md for now」というテストケースがあり、このテスト名と期待値の両方を更新する必要がある。また、validateContent('.html', content)のテストケースでは5MBサイズ制限の境界値テスト（5MB丁度でvalid、5MB+1でinvalid）が設計方針書に記載されているが、バイナリデータ検出テスト（NULLバイト含むHTMLの拒否）が未記載。",
+      "suggestion": "テスト設計に以下を追加する: (1) 既存テスト「should only include .md for now」のテスト名を「should include .md, .html, .htm」に変更し、toHaveLength(3)に更新。(2) validateContent('.html', ...)でNULLバイト含有HTMLの拒否テストを追加。(3) validateContent('.htm', ...)のテストケースも明記（.htmlと同等の検証が必要）。"
+    },
+    {
+      "id": "DR2-006",
+      "severity": "nice_to_have",
+      "category": "用語・命名規則の一貫性",
+      "title": "設計方針書内でsrcdoc/srcDoc表記が混在",
+      "description": "設計方針書内でHTML属性としての「srcdoc」とReact JSXプロパティとしての「srcDoc」が混在している。セクション2では「iframe srcdoc」、セクション3-4では「iframe srcDoc」（React記法）、セクション4-2でも「srcdoc属性」と表記されている。HTML仕様上は「srcdoc」、React JSXでは「srcDoc」がそれぞれ正しい。",
+      "suggestion": "設計方針書内で文脈に応じて使い分けを明示する: HTML仕様やCSPの文脈では「srcdoc」、React JSXコード例では「srcDoc」と統一し、初出時に注釈を入れる。"
+    },
+    {
+      "id": "DR2-007",
+      "severity": "nice_to_have",
+      "category": "受入条件の網羅性",
+      "title": "受入テストにエディタ保存フローのテストケースが未記載",
+      "description": "設計方針書セクション5でeditable-extensions.tsに.html/.htmを追加し、HtmlPreviewにonFileSavedコールバックを持たせる設計だが、セクション6-2の受入テストにHTMLファイルの編集・保存フローのテストケースが含まれていない。ソース表示モードでHTMLを編集し、PUT APIで保存できることの確認が必要。",
+      "suggestion": "受入テストに以下を追加: (1) HTMLファイルをソースモードで編集し保存できること。(2) 5MB超のHTMLファイルの保存がvalidateContentで拒否されること。(3) .htmファイルでも同等の編集・保存フローが動作すること。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 3,
+  "nice_to_have_count": 2,
+  "overall_quality": "good"
+}

@@ -1,0 +1,38 @@
+{
+  "issue_number": 490,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "applied_at": "2026-03-13",
+  "applied_findings": [
+    {
+      "id": "DR1-001",
+      "severity": "must_fix",
+      "title": "SandboxLevel型がhtml-extensions.tsとHtmlPreview.tsxの2箇所で重複定義されている",
+      "action": "html-extensions.tsをSingle Source of Truthとし、HtmlPreview.tsxではimportのみ行う方針に設計書を修正。セクション3-1でSandboxLevel型定義を一元化し、セクション3-4のコード例からexport type SandboxLevelを除去してimport文に置換した。"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "should_fix",
+      "title": "normalizeExtension関数がimage-extensions.tsに既存だが再利用が明記されていない",
+      "action": "セクション3-1のisHtmlExtension関数の説明に、image-extensions.tsのnormalizeExtensionをimportして再利用する方針を明記。video-extensions.tsの既存パターンに準拠する旨をコメントに追加した。"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "should_fix",
+      "title": "Fullサンドボックスレベル（allow-scripts allow-same-origin）の初期リリースでの必要性",
+      "action": "初期リリースをSafe/Interactiveの2段階に簡素化。SandboxLevel型を'safe' | 'interactive'に変更し、SANDBOX_ATTRIBUTESからfullエントリを除去。セクション2（技術選定）、3-1、3-4、4-1、6-1（テスト）、6-2（受入テスト）、7（設計決定）を一貫して更新した。"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "should_fix",
+      "title": "editable-extensionsへのHTML追加の設計意図が不明確",
+      "action": "セクション5にEDITABLE_EXTENSIONSがPUT APIの書き込み許可リストとして機能する設計意図を明記。JSDocコメントの更新方針（MarkdownEditor専用 → ブラウザ上で編集・保存可能なファイル拡張子）を改善項目として記載した。"
+    }
+  ],
+  "skipped_findings": [],
+  "total_applied": 4,
+  "total_skipped": 0,
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-490-html-preview-design-policy.md",
+  "notes": "nice_to_have指摘3件（DR1-005, DR1-006, DR1-007）はセクション9のスコープ外テーブルに記録済み。実装チェックリストを追加済み。"
+}

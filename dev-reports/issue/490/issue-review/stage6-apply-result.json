@@ -1,0 +1,55 @@
+{
+  "issue_number": 490,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "applied_at": "2026-03-13",
+  "applied_findings": [
+    {
+      "id": "S5-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "models.tsのisHtml追加タスクにJSDocコメント規約を明記（/** Whether the file is an HTML file (optional) - Issue #490 */）。影響範囲テーブルにも反映"
+    },
+    {
+      "id": "S5-002",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "受入条件に「FileContentResponse型にisHtmlが含まれ、クライアント側で型安全にアクセスできること」を追加"
+    },
+    {
+      "id": "S5-003",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "EXTENSION_VALIDATORSのadditionalValidation方針を明確化。「初期実装ではundefined。sandbox属性による隔離で安全性を担保するため、保存時のXSSパターン検出は不要。将来的に追加する可能性あり」と記載。セキュリティ考慮セクションにも反映"
+    },
+    {
+      "id": "S5-004",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "Fullレベルのblob: URL方針を段階的に明確化。「初期実装では全レベルsrcdoc方式。Fullレベルはセキュリティテスト結果に応じてblob: URL方式への移行を検討」と記載。セキュリティ考慮セクションにも反映"
+    }
+  ],
+  "skipped_findings": [],
+  "total_applied": 4,
+  "total_skipped": 0,
+  "github_issue_updated": true,
+  "github_issue_url": "https://github.com/Kewton/CommandMate/issues/490",
+  "summary": {
+    "must_fix": 0,
+    "should_fix_applied": 2,
+    "nice_to_have_applied": 2,
+    "total_findings": 4,
+    "applied": 4,
+    "skipped": 0
+  },
+  "changes_made": [
+    "Noteヘッダーを Stage 5 レビュー反映に更新",
+    "実装タスク: models.ts isHtml追加にJSDocコメント規約を明記（S5-001）",
+    "実装タスク: EXTENSION_VALIDATORS additionalValidation方針を明確化（S5-003）",
+    "受入条件: FileContentResponse型安全性テスト項目を追加（S5-002）",
+    "Fullレベル対策: srcdoc/blob: URLの段階的方針を明記（S5-004）",
+    "セキュリティ考慮: 初期実装のiframe方式とadditionalValidation方針を追記",
+    "影響範囲テーブル: models.tsにJSDocコメント注記を追加",
+    "レビュー履歴: Stage 5-6エントリを追加"
+  ]
+}

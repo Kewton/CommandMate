@@ -1,0 +1,99 @@
+{
+  "issue_number": 490,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "reviewed_at": "2026-03-13",
+  "summary": "Stage 3の指摘事項（S3-001からS3-008）は全て適切に対応されている。CSP frame-src設定、既存テスト更新、FileViewer codeViewData対応、EXTENSION_VALIDATORSアトミック追加、モバイルタブUI、MarkdownEditor非再利用方針のいずれも、Issueの実装タスク・影響範囲・受入条件に反映済みである。新たな影響範囲の問題として1件（nice_to_have）を検出した。全体として影響範囲の網羅性は高く、実装に着手可能な品質に達している。",
+  "previous_findings_status": [
+    {
+      "finding_id": "S3-001",
+      "resolved": true,
+      "note": "next.config.jsへのframe-src 'self' blob:追加が、提案セクション・実装タスク・受入条件・影響範囲テーブル・セキュリティ考慮の全箇所に反映されている"
+    },
+    {
+      "finding_id": "S3-002",
+      "resolved": true,
+      "note": "既存テスト更新タスクが明示的に追加され、具体的な変更内容（テスト名変更、長さ3に更新、EXTENSION_VALIDATORS検証追加）が記載されている。影響範囲テーブルにもtests/unit/config/editable-extensions.test.tsが含まれている"
+    },
+    {
+      "finding_id": "S3-003",
+      "resolved": true,
+      "note": "FileViewer.tsxの実装タスクにcodeViewData useMemoへのisHtml条件追加、renderContent()でのisHtml分岐位置（isVideo/isImageの後、codeViewData参照の前）、canCopy判定の方針が具体的に記載されている"
+    },
+    {
+      "finding_id": "S3-004",
+      "resolved": true,
+      "note": "EDITABLE_EXTENSIONSとEXTENSION_VALIDATORSの同時追加（アトミックな変更）が太字で強調記載されている。maxFileSize: 5MB、additionalValidation: 初期実装ではundefinedの方針も明確"
+    },
+    {
+      "finding_id": "S3-005",
+      "resolved": true,
+      "note": "モバイル版での表示モード専用セクションが追加され、タブ切り替え方式（ソース/プレビュー）の新規実装が必要であること、MARPプレビューのisFullscreen方式を参考にすることが記載されている"
+    },
+    {
+      "finding_id": "S3-006",
+      "resolved": true,
+      "note": "HTMLファイル編集方針セクションで、HtmlPreview.tsxとして独立実装しMarkdownEditorは再利用しない方針が明記されている"
+    },
+    {
+      "finding_id": "S3-007",
+      "resolved": false,
+      "note": "nice_to_haveの指摘。ポーリングによるsrcDoc更新でインタラクティブ状態がリセットされる問題は、Issue本文では直接言及されていない。ただし初期実装での必須対応ではないため、未対応でも問題なし"
+    },
+    {
+      "finding_id": "S3-008",
+      "resolved": true,
+      "note": "影響範囲テーブルにnext.config.js、tests/unit/config/editable-extensions.test.ts、tests/unit/config/html-extensions.test.ts、tests/unit/components/html-preview.test.tsの全てが追加されている"
+    }
+  ],
+  "findings": [
+    {
+      "id": "S7-001",
+      "severity": "nice_to_have",
+      "category": "影響範囲の網羅性",
+      "title": "GETハンドラのレスポンスにisHtmlフラグを追加する際のFileContentResponse型との整合性",
+      "description": "files API route.tsのGETハンドラ（行290-301）では現在、success/path/content/extension/worktreePathのみを返している。isHtmlフラグを追加する場合、レスポンスオブジェクトにisHtml: trueを含める実装が必要だが、models.tsのFileContentResponse型はFileContentの拡張型（{ success: true } & FileContent）として定義されている。FileContentにisHtml?: booleanを追加するだけでTypeScript型としては十分だが、実際のAPIレスポンス生成コード（route.ts行290-296）にもisHtmlプロパティの追加が必要である。Issueの実装タスクには「isHtmlフラグ追加」と記載されているが、route.tsの該当行でisHtmlExtension()の結果をレスポンスオブジェクトに含める具体的なコード変更ポイントまでは言及されていない。ただし実装タスクの記述から実装者には十分伝わる範囲であり、必須ではない。",
+      "affected_components": [
+        "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+        "src/types/models.ts"
+      ],
+      "suggestion": "実装タスクの route.ts GETハンドラの項目に「NextResponse.jsonの引数オブジェクトに isHtml: isHtmlExtension(extension) を追加」のように、具体的な変更行を付記するとより明確になる。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 0,
+  "nice_to_have_count": 1,
+  "overall_quality": "good",
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "lines": "290-301",
+      "relevance": "GETハンドラのレスポンス生成箇所。isHtmlフラグの追加が必要"
+    },
+    {
+      "file": "src/types/models.ts",
+      "lines": "278-299",
+      "relevance": "FileContent/FileContentResponse型定義。isHtml追加対象"
+    },
+    {
+      "file": "next.config.js",
+      "lines": "57-67",
+      "relevance": "CSPヘッダー。frame-src追加対象（S3-001で指摘済み、Issue反映済み）"
+    },
+    {
+      "file": "src/config/editable-extensions.ts",
+      "lines": "14, 32-37",
+      "relevance": "EDITABLE_EXTENSIONS/EXTENSION_VALIDATORS。アトミック追加対象（S3-004反映済み）"
+    },
+    {
+      "file": "tests/unit/config/editable-extensions.test.ts",
+      "lines": "28-31",
+      "relevance": "既存テスト更新対象（S3-002反映済み）"
+    },
+    {
+      "file": "src/components/worktree/FileViewer.tsx",
+      "lines": "78-80, 258-280, 283-361",
+      "relevance": "canCopy/codeViewData/renderContent。isHtml分岐追加対象（S3-003反映済み）"
+    }
+  ]
+}

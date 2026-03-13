@@ -1,0 +1,144 @@
+{
+  "issue_number": 490,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "reviewed_at": "2026-03-13",
+  "summary": "影響範囲レビューの結果、CSP設定との競合（must_fix）、editable-extensions追加による既存テスト破壊（must_fix）、FileContent型変更の波及範囲の確認不足（should_fix）、canCopy判定へのisHtml考慮漏れ（should_fix）、useFileContentPollingとの相互作用（nice_to_have）を検出した。特にCSPのframe-src未設定はiframe srcDocが動作しない可能性が高く、実装前に対処が必要である。",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "must_fix",
+      "category": "セキュリティ・CSP設定との競合",
+      "title": "CSPにframe-srcディレクティブが未定義のためiframe srcDocがブロックされる可能性",
+      "description": "next.config.jsのCSPヘッダーにframe-src/child-srcが定義されていない。default-src 'self'がフォールバックとして適用されるため、srcdoc属性を使用したiframeのコンテンツ表示がブロックされる可能性がある。frame-ancestors 'none'は親フレームへの埋め込みを禁止する設定であり別の問題だが、frame-src（子フレームのソース制限）が未定義であることは問題となる。srcdocはブラウザによってはblob: originとして扱われるため、明示的なCSP設定が必要。",
+      "affected_components": [
+        "next.config.js",
+        "src/components/worktree/HtmlPreview.tsx（新規）",
+        "src/components/worktree/FilePanelContent.tsx"
+      ],
+      "suggestion": "next.config.jsのCSPヘッダーに frame-src 'self' blob: を追加する。srcdocの挙動はブラウザにより異なるため、開発環境での動作確認を受入条件に追加すること。また、Issueの影響範囲テーブルにnext.config.jsを追加すべき。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "must_fix",
+      "category": "既存テストの破壊",
+      "title": "editable-extensions.tsへの.html/.htm追加により既存テストが失敗する",
+      "description": "tests/unit/config/editable-extensions.test.tsの既存テスト 'should only include .md for now' (行28-31) は EDITABLE_EXTENSIONS の長さが1であることをアサートしている。.htmlと.htmを追加すると長さが3になりこのテストが失敗する。また 'should reject unsupported extensions' テストケースでは.txtが非対応であることを確認しているが、HTMLが追加されてもこのテスト自体は影響しない。validateContent の 'Unsupported extension' テストは.htmlバリデーター追加前は.htmlに対して失敗を返すことになるため、テスト追加の順序に注意が必要。",
+      "affected_components": [
+        "tests/unit/config/editable-extensions.test.ts",
+        "src/config/editable-extensions.ts"
+      ],
+      "suggestion": "既存テスト 'should only include .md for now' を 'should include .md, .html, .htm extensions' のように更新し、長さを3に変更する。また、EXTENSION_VALIDATORSのテストにもHTMLエントリの検証を追加する。Issueの実装タスクに既存テスト修正を明記すべき。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "should_fix",
+      "category": "型定義変更の波及効果",
+      "title": "FileContent.isHtml追加時のcanCopy判定およびcodeViewData生成への影響",
+      "description": "FileViewer.tsxのcanCopy（行78-80）は content.isImage と content.isVideo のみを除外条件としている。HTMLファイルのプレビューモードではコンテンツコピーは引き続き可能だが、codeViewData（行258-280）の生成条件にはisMarpチェックがある一方でisHtmlのチェックがない。HTMLファイルをプレビューのみ表示する場合、codeViewDataが不要に生成されるか、あるいはHTMLプレビュー表示とcodeViewDataのコード表示が競合する可能性がある。FilePanelContent.tsxでも同様にcontent.extensionによる分岐（行660: extension === 'md'）にHTML分岐を追加する際、表示モードの排他制御を正しく行う必要がある。",
+      "affected_components": [
+        "src/components/worktree/FileViewer.tsx",
+        "src/components/worktree/FilePanelContent.tsx",
+        "src/types/models.ts"
+      ],
+      "suggestion": "FileViewer.tsxのrenderContent()にisHtml分岐をisVideo/isImageの後、codeViewData参照の前に追加する。codeViewDataのuseMemoにもisHtml条件を追加してHTML表示時は不要なハイライト処理をスキップする。Issueの実装タスクにこれらの既存コード修正ポイントを具体的に列挙すべき。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "should_fix",
+      "category": "PUT APIルートへの影響",
+      "title": "HTMLファイル編集・保存時のvalidateContent対応",
+      "description": "PUT /api/worktrees/:id/files/:path のハンドラ（route.ts 行312-360）ではisEditableFile()チェックの後にvalidateContent()を呼び出す。.html/.htmをEDITABLE_EXTENSIONSに追加すると、isEditableFile()はtrueを返すが、EXTENSION_VALIDATORSにHTMLエントリがなければvalidateContent()が 'Unsupported extension' エラーを返して保存が失敗する。Issueでは EXTENSION_VALIDATORSへのHTMLエントリ追加に言及しているが、実装順序を間違えると保存APIが壊れる。また、POST /api/worktrees/:id/files/:path（行366-413）でもisEditableExtension()チェック後にvalidateContent()を呼ぶため同様の影響がある。",
+      "affected_components": [
+        "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+        "src/config/editable-extensions.ts",
+        "src/lib/file-operations.ts"
+      ],
+      "suggestion": "EDITABLE_EXTENSIONSとEXTENSION_VALIDATORSは必ず同時に追加する（アトミックな変更）。HTMLのmaxFileSizeは5MB（5 * 1024 * 1024）。additionalValidationは必須ではないが、Issueで言及しているXSS危険パターン検出を実装するか、意図的にスキップするかを明示すべき。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "should_fix",
+      "category": "モバイル版への影響",
+      "title": "FileViewer.tsxのHTML表示分岐でモバイル固有の考慮事項",
+      "description": "FileViewer.tsxはモーダル内にコンテンツを表示する構造（行476-552）。HTMLプレビューのiframeをモーダル内に配置する場合、max-h-[60vh]の制約内でiframeの高さ管理が必要。MARPプレビュー（行292-325）ではisFullscreenに応じた高さ切り替え（style={{ height: isFullscreen ? 'calc(100vh - 100px)' : '50vh' }}）を行っているが、HTMLプレビューでも同様の対応が必要。Issueではモバイル版のタブ切り替え方式に言及しているが、FileViewer.tsxにはタブ切り替えUIの既存基盤がないため、新規実装が必要になる。",
+      "affected_components": [
+        "src/components/worktree/FileViewer.tsx"
+      ],
+      "suggestion": "FileViewer.tsxにHTML用のソース/プレビュータブ切り替えUIを追加する際、MARPスライドのnavigation UIの直後に配置するのが自然。iframeの高さはisFullscreenの有無で切り替える。実装タスクにFileViewer.tsx内のタブ切り替えUI新規実装を具体的に記載すべき。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "should_fix",
+      "category": "MarkdownEditorへの影響",
+      "title": "editable-extensions追加がMarkdownEditorの動作に影響しないことの確認",
+      "description": "MarkdownEditor.tsxは直接EDITABLE_EXTENSIONSを参照していない。MarkdownEditorの呼び出し元はFilePanelContent.tsx（extension === 'md'の条件分岐内）であり、HTMLファイルに対してMarkdownEditorが呼び出されることはない。しかし、HTMLファイルの保存API（PUT）ではisEditableFile()とvalidateContent()を通るため、HTML固有のバリデーション（additionalValidation）の有無がMarkdownEditorのMD保存と異なる動作パスになる。この差異は意図的だが、ドキュメントに明記すべき。",
+      "affected_components": [
+        "src/components/worktree/MarkdownEditor.tsx",
+        "src/config/editable-extensions.ts"
+      ],
+      "suggestion": "MarkdownEditorへの直接的な影響はない。ただし、HTMLファイルの編集UIは新規のHtmlPreview.tsxコンポーネントで行い、MarkdownEditorを再利用しない方針であることをIssueに明記すると誤解を防げる。"
+    },
+    {
+      "id": "S3-007",
+      "severity": "nice_to_have",
+      "category": "ポーリング・パフォーマンス",
+      "title": "useFileContentPollingとHTMLプレビューの相互作用",
+      "description": "useFileContentPollingフックはtab.isDirtyがfalseの場合にポーリングを実行する。HTMLファイルの編集中（ソース編集モード）にisDirtyがtrueになりポーリングが停止し、保存後にfalseに戻りポーリングが再開する動作は既存のMarkdownEditor同様で問題ない。ただし、HTMLプレビューモード（編集なし）ではisDirtyは常にfalseでポーリングが継続する。外部でHTMLファイルが変更された場合にプレビューが自動更新されるが、iframeのsrcDocが更新されるとインタラクティブ状態（ゲーム進行中等）がリセットされる可能性がある。",
+      "affected_components": [
+        "src/hooks/useFileContentPolling.ts",
+        "src/components/worktree/HtmlPreview.tsx（新規）"
+      ],
+      "suggestion": "Interactiveモード以上でスクリプト実行中の場合、ポーリングによるsrcDoc更新を抑制するオプションの検討を推奨。ただし、これは初期実装では必須ではなく、将来の改善として検討すればよい。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "nice_to_have",
+      "category": "影響範囲の網羅性",
+      "title": "影響範囲テーブルにnext.config.jsとテストファイルが含まれていない",
+      "description": "Issueの影響範囲テーブルには変更対象ファイルが7つ列挙されているが、next.config.js（CSP設定）とtests/unit/config/editable-extensions.test.ts（既存テスト更新）が含まれていない。また、新規テストファイル（HTMLプレビュー関連のユニットテスト）の具体的なファイルパスも記載されていない。",
+      "affected_components": [
+        "next.config.js",
+        "tests/unit/config/editable-extensions.test.ts",
+        "tests/unit/（新規テストファイル）"
+      ],
+      "suggestion": "影響範囲テーブルに以下を追加: (1) next.config.js - CSPにframe-src追加, (2) tests/unit/config/editable-extensions.test.ts - 既存テスト更新, (3) tests/unit/config/html-extensions.test.ts - 新規テスト, (4) tests/unit/components/html-preview.test.ts - 新規テスト。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 4,
+  "nice_to_have_count": 2,
+  "overall_quality": "acceptable",
+  "code_references": [
+    {
+      "file": "next.config.js",
+      "lines": "57-67",
+      "relevance": "CSPヘッダー定義。frame-src未定義でiframe srcdocがブロックされる可能性"
+    },
+    {
+      "file": "tests/unit/config/editable-extensions.test.ts",
+      "lines": "28-31",
+      "relevance": "EDITABLE_EXTENSIONSの長さが1であることをアサート。.html/.htm追加で破壊される"
+    },
+    {
+      "file": "src/components/worktree/FileViewer.tsx",
+      "lines": "78-80, 258-280",
+      "relevance": "canCopy判定とcodeViewData生成。isHtml条件の追加が必要"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "lines": "259-301, 312-360",
+      "relevance": "GETハンドラのテキストファイルパスとPUTハンドラのバリデーション"
+    },
+    {
+      "file": "src/config/editable-extensions.ts",
+      "lines": "14, 32-37",
+      "relevance": "EDITABLE_EXTENSIONS配列とEXTENSION_VALIDATORS配列。同時更新が必要"
+    },
+    {
+      "file": "src/types/models.ts",
+      "lines": "278-293",
+      "relevance": "FileContentインターフェース。isHtml追加の対象"
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "issue_number": 490,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "reviewed_at": "2026-03-13",
+  "summary": "設計方針書は全体的に高品質であり、既存のコードベースパターン（isImage/isVideo、dynamic import、拡張子設定ファイル）との整合性が優れている。SOLID原則・KISS原則は概ね遵守されている。主な指摘事項は、SandboxLevel型の重複定義（DRY違反）、normalizeExtension関数の未再利用（DRY違反）、Fullサンドボックスレベルの必要性への疑問（YAGNI原則）、およびeditable-extensionsへのHTML追加の設計意図の曖昧さの4点である。",
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "must_fix",
+      "category": "DRY原則",
+      "title": "SandboxLevel型がhtml-extensions.tsとHtmlPreview.tsxの2箇所で重複定義されている",
+      "description": "設計方針書のセクション3-1でSandboxLevel型をhtml-extensions.tsに定義し、セクション3-4でHtmlPreview.tsxにも同一のSandboxLevel型をexportしている。型定義が2箇所に存在すると、将来の変更時に片方だけ更新される不整合リスクがある。",
+      "suggestion": "SandboxLevel型はhtml-extensions.tsのみで定義し、HtmlPreview.tsxではimportして使用する。SANDBOX_ATTRIBUTES定数も同様にhtml-extensions.tsをSingle Source of Truthとする。HtmlPreview.tsxにはHtmlViewMode型のみを定義する。"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "should_fix",
+      "category": "DRY原則",
+      "title": "normalizeExtension関数がimage-extensions.tsに既存だが再利用が明記されていない",
+      "description": "設計方針書のisHtmlExtension関数の説明に「ドット正規化対応」と記載されているが、image-extensions.tsに既にexportされているnormalizeExtension関数の再利用について言及がない。video-extensions.tsはimage-extensions.tsからimportして再利用している既存パターンがある。",
+      "suggestion": "html-extensions.tsのisHtmlExtension実装では、image-extensions.tsからnormalizeExtensionをimportして再利用する旨を設計方針書に明記する。video-extensions.tsの既存パターンに従う。"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "should_fix",
+      "category": "YAGNI原則",
+      "title": "Fullサンドボックスレベル（allow-scripts allow-same-origin）の初期リリースでの必要性",
+      "description": "設計方針書自体がセクション3-4で「将来的に2段階（Safe/Interactive）への簡素化を検討」と記載しており、Fullレベルの必要性に疑問を呈している。allow-scripts + allow-same-originの組み合わせはsandboxを実質無効化するため、セキュリティリスクが高い。初期リリースでこのレベルを提供する明確なユースケースが設計書に記載されていない。",
+      "suggestion": "初期リリースではSafe/Interactiveの2段階のみとし、Fullレベルは具体的なユーザー要求が発生してから追加する。YAGNI原則に従い、不要な機能とセキュリティリスクを同時に排除できる。SANDBOX_ATTRIBUTESの型もRecord<'safe' | 'interactive', string>に簡素化する。"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "should_fix",
+      "category": "単一責任原則（SRP）",
+      "title": "editable-extensionsへのHTML追加の設計意図が不明確",
+      "description": "editable-extensions.tsのJSDocコメントに「MarkdownEditorで編集可能な拡張子」と明記されているが、HTMLファイルはMarkdownEditorではなくHtmlPreviewで編集される。EDITABLE_EXTENSIONSに.html/.htmを追加する理由（PUT APIでの保存許可が目的と推測される）が設計書で明確に説明されていない。モジュールの責務名と実際の用途に乖離が生じる。",
+      "suggestion": "設計方針書に、EDITABLE_EXTENSIONSが実際にはPUT /files/... APIの書き込み許可リストとして機能する旨を明記する。あるいは、モジュール名やJSDocを「ブラウザ上で編集可能なファイル拡張子」に更新することを改善項目として記載する。"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "nice_to_have",
+      "category": "既存パターンとの整合性",
+      "title": "MARP_FRONTMATTER_REGEXとMAX_MARP_CONTENT_LENGTHがFilePanelContent.tsxとFileViewer.tsxで重複している",
+      "description": "既存コードベースにおいてMARPのフロントマター検出パターンと最大コンテンツ長がFilePanelContent.tsxとFileViewer.tsxの両方で独立定義されている。Issue #490の直接スコープ外だが、HTMLプレビュー追加時にFileViewer.tsxを変更する際に整理する機会がある。",
+      "suggestion": "Issue #490のスコープ外として別Issueで対応する。将来的にはファイルタイプ判定ロジックをユーティリティモジュールに集約することを検討する。"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "nice_to_have",
+      "category": "型定義の完全性",
+      "title": "HtmlViewMode型の定義場所の検討",
+      "description": "HtmlViewMode型（'source' | 'preview' | 'split'）がHtmlPreview.tsxコンポーネント内で定義される設計だが、MarkdownEditorのViewModeはsrc/types/markdown-editor.tsに定義されている。型定義の配置ポリシーに一貫性がない。",
+      "suggestion": "HtmlViewMode型をsrc/types/配下に配置するか、コンポーネントローカルに留めるかの方針を明記する。現時点ではHtmlPreviewのみが使用するためコンポーネントローカルで問題ないが、将来FileViewer.tsxでも使用する場合は外部化が必要。"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "nice_to_have",
+      "category": "設計原則（開放閉鎖原則）",
+      "title": "FilePanelContent.tsxのファイルタイプ分岐がif-else連鎖で拡張性に課題",
+      "description": "FilePanelContent.tsxは現在isImage -> isVideo -> extension === 'md' -> デフォルトのif-else連鎖でファイルタイプを判定しており、isHtml追加で更にネストが深くなる。OCP（開放閉鎖原則）の観点では、新しいファイルタイプ追加のたびにメインコンポーネントを変更する必要がある。",
+      "suggestion": "Issue #490の直接スコープ外だが、将来的にはファイルタイプごとのレンダラーをStrategy/Registryパターンで管理する設計を検討する。現時点では分岐が5種類程度であり、シンプルなif-else連鎖はKISS原則とのバランスが取れているため、即時対応は不要。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 3,
+  "nice_to_have_count": 3,
+  "overall_quality": "good"
+}

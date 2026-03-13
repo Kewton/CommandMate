@@ -1,0 +1,105 @@
+{
+  "issue_number": 490,
+  "status": "success",
+  "improvements": [
+    {
+      "file": "src/config/html-extensions.ts",
+      "description": "No issues found. Clean implementation with proper JSDoc, DR1-001/DR1-002/DR1-003 all satisfied."
+    },
+    {
+      "file": "src/components/worktree/HtmlPreview.tsx",
+      "description": "No issues found. SandboxLevel imported (DR1-001), confirm dialog present (DR4-002), no console.log, no unused imports."
+    },
+    {
+      "file": "src/components/worktree/FilePanelContent.tsx",
+      "description": "HTML branch correctly placed after isVideo and before md (DR3-005). Dynamic import with loading spinner. No issues found."
+    },
+    {
+      "file": "src/components/worktree/FileViewer.tsx",
+      "description": "codeViewData guard includes content.isHtml (DR2-002). HtmlPreviewMobile with confirm dialog (DR4-002). No issues found."
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "description": "HTML size pre-check with HTML_MAX_SIZE_BYTES before readFileContent (DR4-004). isHtml flag spread correctly."
+    },
+    {
+      "file": "next.config.js",
+      "description": "CSP frame-src 'self' configured without blob: (DR4-007)."
+    },
+    {
+      "file": "tests/unit/config/html-extensions.test.ts",
+      "description": "Comprehensive test coverage: HTML_EXTENSIONS, HTML_MAX_SIZE_BYTES, isHtmlExtension (case sensitivity, dot handling, edge cases), SANDBOX_ATTRIBUTES (DR1-003 YAGNI), SandboxLevel type."
+    }
+  ],
+  "checklist_results": [
+    {
+      "item": "console.log residue check",
+      "status": "pass",
+      "note": "No console.log found in any target files"
+    },
+    {
+      "item": "Unused imports check",
+      "status": "pass",
+      "note": "All imports are used. ESLint confirms zero warnings."
+    },
+    {
+      "item": "Type safety check (no any types)",
+      "status": "pass",
+      "note": "No any types in target files. TypeScript strict mode passes."
+    },
+    {
+      "item": "Comment quality check",
+      "status": "pass",
+      "note": "JSDoc comments present with Issue references and DR references."
+    },
+    {
+      "item": "DR1-001: SandboxLevel type defined in html-extensions.ts, imported in HtmlPreview.tsx",
+      "status": "pass",
+      "note": "Type exported from html-extensions.ts line 45, imported in HtmlPreview.tsx line 19 and FileViewer.tsx line 26."
+    },
+    {
+      "item": "DR1-002: isHtmlExtension reuses normalizeExtension",
+      "status": "pass",
+      "note": "normalizeExtension imported from image-extensions.ts and used in isHtmlExtension."
+    },
+    {
+      "item": "DR1-003: SANDBOX_ATTRIBUTES has 2 entries only (no full)",
+      "status": "pass",
+      "note": "Only safe and interactive entries. Test explicitly verifies no full key."
+    },
+    {
+      "item": "DR4-002: Interactive mode requires confirm dialog",
+      "status": "pass",
+      "note": "window.confirm in HtmlPreview.tsx line 133 and FileViewer.tsx line 58. Confirmed files tracked via Set ref."
+    },
+    {
+      "item": "DR4-007: CSP frame-src 'self' (no blob:)",
+      "status": "pass",
+      "note": "next.config.js line 66: frame-src 'self' with comment referencing DR4-007."
+    },
+    {
+      "item": "DR2-002: FileViewer.tsx codeViewData guard includes isHtml",
+      "status": "pass",
+      "note": "FileViewer.tsx line 378: content.isHtml in guard condition prevents double rendering."
+    }
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "after_coverage": 80.0
+  },
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "final_test_results": {
+    "typescript_errors": 0,
+    "lint_errors": 0,
+    "tests_passed": 4956
+  },
+  "refactorings_applied": [],
+  "files_changed": [],
+  "commits": [],
+  "message": "All target files passed quality checks. No refactoring needed - code is clean with proper type safety, no console.log residue, no unused imports, and all design policy checklist items (DR1-001 through DR4-007) are satisfied. All 4956 tests pass, 0 TypeScript errors, 0 ESLint errors."
+}

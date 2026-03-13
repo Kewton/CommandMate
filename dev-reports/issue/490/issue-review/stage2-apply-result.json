@@ -1,0 +1,80 @@
+{
+  "issue_number": 490,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "applied_at": "2026-03-13",
+  "applied_findings": [
+    {
+      "finding_id": "S1-005",
+      "severity": "must_fix",
+      "title": "APIレスポンスでのHTML判定とisHtmlフラグ設定の実装詳細が不足",
+      "applied": true,
+      "note": "実装タスクのroute.ts変更内容を具体化。HTMLファイルは既存テキスト読み込みロジックで処理し、非画像・非動画パスでisHtmlExtension()判定によりisHtml: trueフラグを追加する旨を明記"
+    },
+    {
+      "finding_id": "S1-001",
+      "severity": "should_fix",
+      "title": "MARPとの実装パターン相違点が未記載",
+      "applied": true,
+      "note": "レンダリング方式セクションにMARPとの違いを明記。サーバーサイドAPI不要、既存ファイル取得APIのHTMLテキストをそのままiframe srcDocに設定するクライアントサイドのみのパターンである旨を追記"
+    },
+    {
+      "finding_id": "S1-002",
+      "severity": "should_fix",
+      "title": "editable-extensions追加時のEXTENSION_VALIDATORS設定が未記載",
+      "applied": true,
+      "note": "実装タスクにEXTENSION_VALIDATORS配列へのHTMLエントリ追加（maxFileSize: 5MB、additionalValidation）を明記。受入条件にもバリデーション通過条件を追加"
+    },
+    {
+      "finding_id": "S1-003",
+      "severity": "should_fix",
+      "title": "ファイルサイズ上限が未確定",
+      "applied": true,
+      "note": "ファイルサイズ上限を5MBに確定。受入条件に「5MBを超えるHTMLファイルはプレビュー表示せず、ソースコード表示のみとする」を追加。セキュリティ考慮セクションにも明記"
+    },
+    {
+      "finding_id": "S1-004",
+      "severity": "should_fix",
+      "title": "sandbox Fullレベル（allow-same-origin）のリスク説明不足",
+      "applied": true,
+      "note": "Fullレベルのセキュリティリスクサブセクションを新設。MDN Web Docs参照のリスク説明、警告ダイアログ表示、blob: URLによるorigin分離検討、将来的な2段階簡素化の検討を記載。受入条件にもFullレベル選択時の警告表示を追加"
+    },
+    {
+      "finding_id": "S1-006",
+      "severity": "nice_to_have",
+      "title": "DOMPurify基盤の活用方針が不明確",
+      "applied": true,
+      "note": "セキュリティ考慮セクションにDOMPurify方針を明記。iframe srcDoc方式ではDOMPurifyサニタイズは行わず、sandbox属性による隔離で安全性を担保する方針を記載"
+    },
+    {
+      "finding_id": "S1-007",
+      "severity": "nice_to_have",
+      "title": "html-extensions.tsの設計パターンの明示",
+      "applied": true,
+      "note": "実装タスクにhtml-extensions.tsの最小API仕様（HTML_EXTENSIONS配列、isHtmlExtension()関数、HTML_MAX_SIZE_BYTES定数）を記載。image-extensions.tsほど複雑な構造は不要な旨も付記"
+    },
+    {
+      "finding_id": "S1-008",
+      "severity": "nice_to_have",
+      "title": "モバイル版FileViewerでの3モード切り替えUI仕様が未記載",
+      "applied": true,
+      "note": "表示モードセクションにモバイル版サブセクションを追加。MarkdownEditorのmobileTab方式と同様にタブ切り替え（ソース/プレビュー）で実装する旨を明記。受入条件にもモバイル版の動作条件を追加"
+    }
+  ],
+  "skipped_findings": [],
+  "total_applied": 8,
+  "total_skipped": 0,
+  "github_issue_updated": true,
+  "summary": {
+    "total_findings": 8,
+    "applied": 8,
+    "skipped": 0,
+    "must_fix_applied": 1,
+    "should_fix_applied": 4,
+    "nice_to_have_applied": 3
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/490"
+  }
+}

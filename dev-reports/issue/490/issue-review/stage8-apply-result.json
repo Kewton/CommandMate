@@ -1,0 +1,18 @@
+{
+  "issue_number": 490,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "applied_at": "2026-03-13",
+  "applied_findings": [
+    {
+      "finding_id": "S7-001",
+      "severity": "nice_to_have",
+      "title": "GETハンドラのレスポンスにisHtmlフラグを追加する際のFileContentResponse型との整合性",
+      "action_taken": "実装タスクのroute.ts GETハンドラの項目に「NextResponse.jsonのレスポンスオブジェクト（行290-296付近）にisHtml: isHtmlExtension(extension)プロパティを追加する」という具体的な変更ポイントを付記した。影響範囲テーブルのroute.tsの変更内容も同様に具体化した。レビュー履歴にStage 7-8を追加した。"
+    }
+  ],
+  "skipped_findings": [],
+  "total_applied": 1,
+  "total_skipped": 0,
+  "github_issue_updated": true
+}

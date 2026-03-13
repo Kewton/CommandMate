@@ -1,0 +1,25 @@
+{
+  "issue_number": 490,
+  "refactor_targets": [
+    "src/config/html-extensions.ts",
+    "src/components/worktree/HtmlPreview.tsx",
+    "src/components/worktree/FilePanelContent.tsx",
+    "src/components/worktree/FileViewer.tsx",
+    "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+    "tests/unit/config/html-extensions.test.ts",
+    "tests/unit/config/editable-extensions.test.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "typescript_errors": 0,
+    "lint_errors": 0,
+    "test_count": 4956
+  },
+  "improvement_goals": [
+    "コードの可読性向上（変数名・コメントの整理）",
+    "不要なconsole.logの削除確認",
+    "設計方針書チェックリストの全項目を満たしているか確認",
+    "未使用importの除去",
+    "型安全性の確認"
+  ]
+}

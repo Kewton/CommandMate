@@ -1,0 +1,63 @@
+{
+  "issue_number": 490,
+  "stage": 2,
+  "applied_at": "2026-03-13",
+  "applied_findings": [
+    {
+      "id": "DR2-001",
+      "severity": "must_fix",
+      "title": "isEditableExtensionのドット正規化がhtml-extensions.tsのisHtmlExtensionと不整合",
+      "action": "セクション3-1にドット正規化の設計方針を追記。editable-extensions.tsへのnormalizeExtension導入はスコープ外とし、既存動作との整合性を維持する設計判断を明記。実装チェックリストにも追加。"
+    },
+    {
+      "id": "DR2-002",
+      "severity": "must_fix",
+      "title": "FileViewer.tsxのcanCopyとcodeViewDataにisHtml考慮が未記載",
+      "action": "セクション3-6にrenderContent()分岐追加、codeViewData除外条件更新（content.isHtml追加）、canCopy設計判断（isHtml時もtrue）の3点を詳細記載。コード例も追加。"
+    },
+    {
+      "id": "DR2-003",
+      "severity": "should_fix",
+      "title": "iframe srcdocのCSP frame-src要件の技術的根拠に不正確な記述",
+      "action": "セクション4-2の技術的根拠を修正。srcdocのオリジンはabout:srcdocであり、blob:は将来的なiframe利用への予防的措置である旨に訂正。用語注記も追加。"
+    },
+    {
+      "id": "DR2-004",
+      "severity": "should_fix",
+      "title": "テスト実装がステップ9で最後に配置されているがTDD原則と不整合",
+      "action": "セクション8の実装順序をTDD原則に準拠して再配置。ステップ1をhtml-extensions.test.ts作成（Red）、ステップ2をhtml-extensions.ts実装（Green）に変更。editable-extensions.test.tsもステップ3に前倒し。"
+    },
+    {
+      "id": "DR2-005",
+      "severity": "should_fix",
+      "title": "editable-extensions.test.tsの既存テストとの整合性考慮が不足",
+      "action": "セクション6-1にテスト名変更（should include .md, .html, .htm）、toHaveLength(3)更新、NULLバイト含有HTML拒否テスト、.htm同等テストケースを追加。"
+    },
+    {
+      "id": "DR2-006",
+      "severity": "nice_to_have",
+      "title": "srcdoc/srcDoc表記の混在",
+      "action": "セクション4-2に用語注記を追加。セクション2の技術選定表にもReact JSX表記を併記。HTML仕様文脈ではsrcdoc、React JSX文脈ではsrcDocと使い分けを明示。"
+    },
+    {
+      "id": "DR2-007",
+      "severity": "nice_to_have",
+      "title": "受入テストにエディタ保存フローのテストケースが未記載",
+      "action": "セクション6-2にHTMLファイル編集・保存フロー、5MB超保存拒否、.htmファイル保存フローの3つのテストケースを追加。"
+    }
+  ],
+  "skipped_findings": [],
+  "total_applied": 7,
+  "total_skipped": 0,
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-490-html-preview-design-policy.md",
+  "sections_modified": [
+    "3-1 (html-extensions.ts): ドット正規化設計方針追記",
+    "3-6 (FileViewer.tsx): renderContent分岐・codeViewData・canCopy詳細追記",
+    "4-2 (CSP設定): 技術的根拠修正・用語注記追加",
+    "6-1 (ユニットテスト): テストケース追加・更新",
+    "6-2 (受入テスト): 編集・保存フローテストケース追加",
+    "8 (実装順序): TDD原則に準拠して再配置",
+    "10 (新規セクション): Stage 2整合性レビュー指摘事項サマリ・実装チェックリスト追加"
+  ]
+}

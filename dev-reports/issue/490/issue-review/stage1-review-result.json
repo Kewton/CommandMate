@@ -1,0 +1,111 @@
+{
+  "issue_number": 490,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "reviewed_at": "2026-03-13",
+  "summary": "Issue #490は全体として技術的に妥当な提案であり、既存コードパターン（isImage/isVideo、MarkdownEditor 3モード）との整合性が高い。ただし、MARPとの類似性に関する記述の誤解リスク、editable-extensions追加時のバリデーター未記載、ファイルサイズ上限の未確定、sandbox Fullレベルのセキュリティリスク説明不足など、実装者が迷うポイントがいくつか存在する。",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "should_fix",
+      "category": "正確性",
+      "title": "MARPとの実装パターン相違点が未記載",
+      "description": "Issueでは「iframe + sandbox属性を使用（MARPスライドと同じパターン）」と記載されているが、MARPはサーバーサイドAPI（POST /marp-render）でMarkdownをHTMLに変換した結果をiframe srcDocに設定するパターンであり、HTML プレビューは既存ファイル取得API（GET /files/...）で取得した生HTMLをそのままsrcDocに流し込むクライアントサイドのみのパターンで、本質的に異なる。実装者がMARPのようにサーバーサイドAPIを新設する必要があると誤解する可能性がある。",
+      "suggestion": "「レンダリング方式」セクションにて、MARPとの違いを明記する。例: 「MARPと異なりサーバーサイドAPIは不要。既存のファイル取得APIが返すHTMLテキストをそのままiframe srcDocに設定する。」"
+    },
+    {
+      "id": "S1-002",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "editable-extensions追加時のEXTENSION_VALIDATORS設定が未記載",
+      "description": "Issueでは「editable-extensions.tsに.html, .htmを追加」と記載されているが、既存の実装では EDITABLE_EXTENSIONS 配列への追加だけでなく EXTENSION_VALIDATORS 配列にもバリデーターエントリを追加する必要がある。現在.mdのみmaxFileSize: 1MBで定義されている。HTML用のバリデーターエントリ（maxFileSize、additionalValidation）が未定義の場合、validateContent()が 'Unsupported extension' エラーを返してPUT /files/... による保存が失敗する。",
+      "suggestion": "実装タスク「editable-extensions.tsに.html, .htmを追加」に、EXTENSION_VALIDATORS配列へのエントリ追加を明記する。HTMLファイルのmaxFileSizeとadditionalValidation（XSS危険パターン検出など）の仕様も決定する必要がある。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "should_fix",
+      "category": "明確性",
+      "title": "ファイルサイズ上限が未確定",
+      "description": "セキュリティ考慮セクションに「ファイルサイズ上限の設定（検討: 5-10MB）」と記載があるが、具体的な値が未確定のまま。この上限はiframe srcDocに巨大HTMLを読み込ませた際のブラウザパフォーマンス・メモリ問題に直結するため、受入条件として値を確定させるべき。",
+      "suggestion": "ファイルサイズ上限を確定させる（推奨: 画像と同じ5MB）。確定値を受入条件に追加する。例: 「5MBを超えるHTMLファイルはプレビュー表示せず、ソースコード表示のみとする」"
+    },
+    {
+      "id": "S1-004",
+      "severity": "should_fix",
+      "category": "セキュリティ",
+      "title": "sandbox Fullレベル（allow-same-origin）のリスク説明不足",
+      "description": "サンドボックスレベルFullは sandbox='allow-scripts allow-same-origin' を設定するが、allow-scripts + allow-same-origin の組み合わせはiframe内のスクリプトが親ページのDOMやCookieにアクセス可能になるため、sandbox属性を実質無効化する危険な組み合わせとして知られている（MDN Web Docsにも警告あり）。Issueのセキュリティ考慮セクションではこのリスクに言及がない。",
+      "suggestion": "Fullレベルのリスクをセキュリティ考慮セクションに明記する。対策として以下を検討: (1) Fullレベル使用時に警告ダイアログを表示する、(2) srcdocではなくblob: URLを使いoriginを分離する、(3) Fullレベルを廃止してallow-scriptsのみ（2段階）に簡素化する。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "must_fix",
+      "category": "完全性",
+      "title": "APIレスポンスでのHTML判定とisHtmlフラグ設定の実装詳細が不足",
+      "description": "実装タスクに「route.tsにHTML判定ロジック追加」とあるが、既存のroute.tsのGETハンドラではisImage/isVideoの場合はバイナリ読み込み+Base64変換の特別処理を行い、それ以外はテキスト読み込みを行う。HTMLファイルはテキストとして既に正常に取得可能であり、API側で必要な変更は「isHtml: trueフラグをレスポンスに付与する」ことだけ。しかし、フラグ付与にはhtml-extensions.tsのisHtmlExtension()をimportして判定を追加する必要がある。この具体的な実装箇所（テキスト読み込みのNextResponse.jsonに isHtml フラグを追加する行）がIssueに明記されていない。",
+      "suggestion": "route.tsの変更内容を具体化する: 「GET ハンドラの非画像・非動画パスにおいて、拡張子がHTML拡張子の場合にレスポンスに isHtml: true を追加する。HTMLファイルは既存のテキスト読み込みロジックで処理し、バイナリ変換は不要。」"
+    },
+    {
+      "id": "S1-006",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "DOMPurify基盤の活用方針が不明確",
+      "description": "セキュリティ考慮に「既存のDOMPurify基盤（src/lib/security/sanitize.ts）を必要に応じて活用」とあるが、iframe srcDocパターンではDOMPurifyでのサニタイズはHTMLの構造を破壊する可能性があり、sandboxによるサンドボックス化とは異なるアプローチ。どのケースでDOMPurifyを使うのか（使わないのか）を明確にしておくと実装時の判断が容易になる。",
+      "suggestion": "iframe srcDoc方式ではDOMPurifyによるサニタイズは行わず、sandbox属性による隔離で安全性を担保する方針を明記する。DOMPurifyはSafeモードでのフォールバック表示（iframeなしのインラインHTML表示）を将来検討する場合のオプションとして位置づける。"
+    },
+    {
+      "id": "S1-007",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "html-extensions.tsの設計パターンの明示",
+      "description": "新規作成するhtml-extensions.tsについて、Issueには「HTML拡張子定義・判定関数」とだけある。既存のimage-extensions.tsやvideo-extensions.tsはバリデーター構造体、magic bytes検証、MIME type取得などリッチな設計になっている。HTMLの場合はテキストベースでmagic bytes不要だが、設計パターンの整合性のためにどの程度のAPIを持たせるか明示があると良い。",
+      "suggestion": "html-extensions.tsの最小API仕様を記載する: HTML_EXTENSIONS配列、isHtmlExtension()関数、HTML_MAX_SIZE_BYTES定数。image-extensions.tsほど複雑な構造は不要な旨も付記する。"
+    },
+    {
+      "id": "S1-008",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "モバイル版FileViewerでの3モード切り替えUI仕様が未記載",
+      "description": "PC版FilePanelContentでは MarkdownEditorと同様の3モード（ソース/プレビュー/分割）が提案されているが、モバイル版FileViewerでのUI仕様の詳細がない。FileViewerはモーダル内でのレンダリングであり、分割表示はスペース的に困難な可能性がある。",
+      "suggestion": "モバイル版での表示モードをタブ切り替え（MarkdownEditorのmobileTab方式）にするか、プレビューのみにするかを明記する。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 4,
+  "nice_to_have_count": 3,
+  "overall_quality": "acceptable",
+  "code_references": [
+    {
+      "file": "src/components/worktree/FilePanelContent.tsx",
+      "relevance": "HTML用表示分岐の追加先。既存のisImage/isVideo/extension判定パターンを参照"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "relevance": "3モード（ソース/プレビュー/分割）の参照実装"
+    },
+    {
+      "file": "src/components/worktree/FileViewer.tsx",
+      "relevance": "モバイル版での表示分岐追加先"
+    },
+    {
+      "file": "src/config/editable-extensions.ts",
+      "relevance": "EDITABLE_EXTENSIONSとEXTENSION_VALIDATORS両方への追加が必要"
+    },
+    {
+      "file": "src/config/image-extensions.ts",
+      "relevance": "html-extensions.tsの設計パターン参照"
+    },
+    {
+      "file": "src/types/models.ts",
+      "relevance": "FileContentインターフェースへのisHtml追加先"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "relevance": "GETハンドラのテキスト読み込みパスにisHtmlフラグ追加"
+    },
+    {
+      "file": "src/lib/security/sanitize.ts",
+      "relevance": "DOMPurify基盤の確認（iframe srcDoc方式では使用しない方針推奨）"
+    }
+  ]
+}
