@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-03-13
+
+### Added
+- OpenCode TUI selection list navigation support (Issue #473)
+  - Detect prompt state in OpenCode TUI content area
+  - NavigationButtons for TUI selection lists
+- Image file attachment for message input (Issue #474)
+  - Image attachment UI integrated into MessageInput
+  - Mobile: split message input into two rows
+- Claude CLI selection list prompt detection with NavigationButtons
+
+### Fixed
+- OpenCode: selection list pattern, mobile layout overlap, and button responsiveness
+- Build: remove logger imports from auth.ts and selected-agents-validator (client bundle compatibility)
+- Logger: fix remaining console.error in conversation-logger
+
+### Refactored
+- Logger: migrate console.log/warn/error to structured logger (#480)
+- TODO/FIXME markers cleanup (#482)
+- Large file splitting into smaller modules (Issue #479)
+  - Phase 1: split schedule-manager, FileTreeView, MarkdownEditor
+  - Phase 2: split 5 large files into smaller modules
+  - Phase 3: split db.ts and response-poller.ts
+- lib/ directory restructuring (Issue #481)
+  - Phase 1-7: reorganize into db/, tmux/, security/, detection/, session/, polling/, git/ groups
+  - Add @deprecated compatibility layer for old import paths
+
 ## [0.4.6] - 2026-03-11
 
 ### Added
@@ -794,7 +821,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.4.6...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.4.7...HEAD
+[0.4.7]: https://github.com/Kewton/CommandMate/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/Kewton/CommandMate/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/Kewton/CommandMate/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/Kewton/CommandMate/compare/v0.4.3...v0.4.4
