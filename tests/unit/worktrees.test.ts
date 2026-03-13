@@ -16,7 +16,7 @@ import {
   parseWorktreeOutput,
   scanWorktrees,
   syncWorktreesToDB,
-} from '@/lib/worktrees';
+} from '@/lib/git/worktrees';
 
 describe('Worktree Management', () => {
   beforeEach(() => {

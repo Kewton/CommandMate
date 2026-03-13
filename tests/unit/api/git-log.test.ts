@@ -19,7 +19,7 @@ vi.mock('@/lib/polling/auto-yes-manager', () => ({
   isValidWorktreeId: vi.fn(),
 }));
 
-vi.mock('@/lib/git-utils', async () => {
+vi.mock('@/lib/git/git-utils', async () => {
   const { NextResponse } = await import('next/server');
 
   class GitTimeoutError extends Error {
@@ -49,7 +49,7 @@ vi.mock('@/lib/git-utils', async () => {
 import { GET } from '@/app/api/worktrees/[id]/git/log/route';
 import { getWorktreeById } from '@/lib/db';
 import { isValidWorktreeId } from '@/lib/polling/auto-yes-manager';
-import { getGitLog, GitTimeoutError, GitNotRepoError } from '@/lib/git-utils';
+import { getGitLog, GitTimeoutError, GitNotRepoError } from '@/lib/git/git-utils';
 
 function createRequest(url: string): NextRequest {
   return new NextRequest(new URL(url, 'http://localhost:3000'));

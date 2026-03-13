@@ -8,8 +8,8 @@ import { promisify } from 'util';
 import path from 'path';
 import type { Worktree } from '@/types/models';
 import type Database from 'better-sqlite3';
-import { upsertWorktree, getWorktreeIdsByRepository, deleteWorktreesByIds } from './db';
-import { getEnvByKey } from './env';
+import { upsertWorktree, getWorktreeIdsByRepository, deleteWorktreesByIds } from '@/lib/db';
+import { getEnvByKey } from '@/lib/env';
 
 /**
  * Parsed worktree information from git

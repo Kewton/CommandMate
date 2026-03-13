@@ -14,8 +14,8 @@ import { spawn, ChildProcess } from 'child_process';
 import { existsSync, mkdirSync } from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
-import { UrlNormalizer } from './url-normalizer';
-import { validateWorktreePath } from './security/path-validator';
+import { UrlNormalizer } from '@/lib/url-normalizer';
+import { validateWorktreePath } from '@/lib/security/path-validator';
 import {
   createCloneJob as dbCreateCloneJob,
   getCloneJob,
@@ -25,7 +25,7 @@ import {
   createRepository,
   type CloneJobDB,
   type Repository,
-} from './db-repository';
+} from '@/lib/db/db-repository';
 import { scanWorktrees, syncWorktreesToDB } from './worktrees';
 import type { CloneError, CloneErrorCategory, CloneJobStatus } from '@/types/clone';
 

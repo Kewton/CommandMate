@@ -33,14 +33,14 @@ describe('git-utils Issue #447', () => {
 
   describe('GIT_LOG_TIMEOUT_MS', () => {
     it('should export GIT_LOG_TIMEOUT_MS as 3000', async () => {
-      const { GIT_LOG_TIMEOUT_MS } = await import('@/lib/git-utils');
+      const { GIT_LOG_TIMEOUT_MS } = await import('@/lib/git/git-utils');
       expect(GIT_LOG_TIMEOUT_MS).toBe(3000);
     });
   });
 
   describe('GitTimeoutError', () => {
     it('should be instance of Error with name GitTimeoutError', async () => {
-      const { GitTimeoutError } = await import('@/lib/git-utils');
+      const { GitTimeoutError } = await import('@/lib/git/git-utils');
       const err = new GitTimeoutError('timed out');
       expect(err).toBeInstanceOf(Error);
       expect(err.name).toBe('GitTimeoutError');
@@ -50,7 +50,7 @@ describe('git-utils Issue #447', () => {
 
   describe('GitNotRepoError', () => {
     it('should be instance of Error with name GitNotRepoError', async () => {
-      const { GitNotRepoError } = await import('@/lib/git-utils');
+      const { GitNotRepoError } = await import('@/lib/git/git-utils');
       const err = new GitNotRepoError('not a repo');
       expect(err).toBeInstanceOf(Error);
       expect(err.name).toBe('GitNotRepoError');
@@ -75,7 +75,7 @@ describe('git-utils Issue #447', () => {
 
       execFileMock.mockResolvedValue({ stdout: mockOutput, stderr: '' });
 
-      const { getGitLog } = await import('@/lib/git-utils');
+      const { getGitLog } = await import('@/lib/git/git-utils');
       const result = await getGitLog('/path/to/worktree');
 
       expect(result).toHaveLength(2);
@@ -92,7 +92,7 @@ describe('git-utils Issue #447', () => {
     it('should return empty array for empty output', async () => {
       execFileMock.mockResolvedValue({ stdout: '', stderr: '' });
 
-      const { getGitLog } = await import('@/lib/git-utils');
+      const { getGitLog } = await import('@/lib/git/git-utils');
       const result = await getGitLog('/path/to/worktree');
 
       expect(result).toEqual([]);
@@ -101,7 +101,7 @@ describe('git-utils Issue #447', () => {
     it('should pass limit and offset to git command', async () => {
       execFileMock.mockResolvedValue({ stdout: '', stderr: '' });
 
-      const { getGitLog } = await import('@/lib/git-utils');
+      const { getGitLog } = await import('@/lib/git/git-utils');
       await getGitLog('/path/to/worktree', 10, 5);
 
       expect(execFileMock).toHaveBeenCalledWith(
@@ -119,7 +119,7 @@ describe('git-utils Issue #447', () => {
       (timeoutError as Error & { killed?: boolean }).killed = true;
       execFileMock.mockRejectedValue(timeoutError);
 
-      const { getGitLog, GitTimeoutError } = await import('@/lib/git-utils');
+      const { getGitLog, GitTimeoutError } = await import('@/lib/git/git-utils');
 
       await expect(getGitLog('/path/to/worktree')).rejects.toThrow(GitTimeoutError);
     });
@@ -129,7 +129,7 @@ describe('git-utils Issue #447', () => {
       (notRepoError as Error & { stderr?: string }).stderr = 'fatal: not a git repository';
       execFileMock.mockRejectedValue(notRepoError);
 
-      const { getGitLog, GitNotRepoError } = await import('@/lib/git-utils');
+      const { getGitLog, GitNotRepoError } = await import('@/lib/git/git-utils');
 
       await expect(getGitLog('/path/to/worktree')).rejects.toThrow(GitNotRepoError);
     });
@@ -155,7 +155,7 @@ describe('git-utils Issue #447', () => {
         .mockResolvedValueOnce({ stdout: mockLogOutput, stderr: '' })
         .mockResolvedValueOnce({ stdout: mockDiffTreeOutput, stderr: '' });
 
-      const { getGitShow } = await import('@/lib/git-utils');
+      const { getGitShow } = await import('@/lib/git/git-utils');
       const result = await getGitShow('/path/to/worktree', 'abc123d');
 
       expect(result).not.toBeNull();
@@ -186,7 +186,7 @@ describe('git-utils Issue #447', () => {
         .mockResolvedValueOnce({ stdout: mockLogOutput, stderr: '' })
         .mockResolvedValueOnce({ stdout: mockDiffTreeOutput, stderr: '' });
 
-      const { getGitShow } = await import('@/lib/git-utils');
+      const { getGitShow } = await import('@/lib/git/git-utils');
       const result = await getGitShow('/path/to/worktree', 'abc123d');
 
       expect(result).not.toBeNull();
@@ -201,7 +201,7 @@ describe('git-utils Issue #447', () => {
       const error = new Error('unknown revision');
       execFileMock.mockRejectedValue(error);
 
-      const { getGitShow } = await import('@/lib/git-utils');
+      const { getGitShow } = await import('@/lib/git/git-utils');
       const result = await getGitShow('/path/to/worktree', 'deadbeef');
 
       expect(result).toBeNull();
@@ -212,7 +212,7 @@ describe('git-utils Issue #447', () => {
       (timeoutError as Error & { killed?: boolean }).killed = true;
       execFileMock.mockRejectedValue(timeoutError);
 
-      const { getGitShow, GitTimeoutError } = await import('@/lib/git-utils');
+      const { getGitShow, GitTimeoutError } = await import('@/lib/git/git-utils');
 
       await expect(getGitShow('/path/to/worktree', 'abc123d')).rejects.toThrow(GitTimeoutError);
     });
@@ -233,7 +233,7 @@ describe('git-utils Issue #447', () => {
 
       execFileMock.mockResolvedValue({ stdout: mockDiff, stderr: '' });
 
-      const { getGitDiff } = await import('@/lib/git-utils');
+      const { getGitDiff } = await import('@/lib/git/git-utils');
       const result = await getGitDiff('/path/to/worktree', 'abc123d', 'src/file.ts');
 
       expect(result).toBe(mockDiff);
@@ -242,7 +242,7 @@ describe('git-utils Issue #447', () => {
     it('should return null for empty output', async () => {
       execFileMock.mockResolvedValue({ stdout: '', stderr: '' });
 
-      const { getGitDiff } = await import('@/lib/git-utils');
+      const { getGitDiff } = await import('@/lib/git/git-utils');
       const result = await getGitDiff('/path/to/worktree', 'abc123d', 'nonexistent.ts');
 
       expect(result).toBeNull();
@@ -251,7 +251,7 @@ describe('git-utils Issue #447', () => {
     it('should pass file path with -- separator', async () => {
       execFileMock.mockResolvedValue({ stdout: 'diff output', stderr: '' });
 
-      const { getGitDiff } = await import('@/lib/git-utils');
+      const { getGitDiff } = await import('@/lib/git/git-utils');
       await getGitDiff('/path/to/worktree', 'abc123d', 'src/file.ts');
 
       expect(execFileMock).toHaveBeenCalledWith(
@@ -269,7 +269,7 @@ describe('git-utils Issue #447', () => {
       (timeoutError as Error & { killed?: boolean }).killed = true;
       execFileMock.mockRejectedValue(timeoutError);
 
-      const { getGitDiff, GitTimeoutError } = await import('@/lib/git-utils');
+      const { getGitDiff, GitTimeoutError } = await import('@/lib/git/git-utils');
 
       await expect(getGitDiff('/path/to/worktree', 'abc123d', 'file.ts')).rejects.toThrow(GitTimeoutError);
     });
@@ -277,7 +277,7 @@ describe('git-utils Issue #447', () => {
     it('should return null on general error', async () => {
       execFileMock.mockRejectedValue(new Error('some error'));
 
-      const { getGitDiff } = await import('@/lib/git-utils');
+      const { getGitDiff } = await import('@/lib/git/git-utils');
       const result = await getGitDiff('/path/to/worktree', 'abc123d', 'file.ts');
 
       expect(result).toBeNull();

@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getEnv } from '@/lib/env';
-import { CloneManager } from '@/lib/clone-manager';
+import { CloneManager } from '@/lib/git/clone-manager';
 import type { CloneJobStatus } from '@/types/clone';
 
 const LOG_PREFIX = '[Clone Status API]';

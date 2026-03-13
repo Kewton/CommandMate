@@ -38,7 +38,7 @@ import {
   getRepositoryPaths,
   scanMultipleRepositories,
   syncWorktreesToDB
-} from './src/lib/worktrees';
+} from './src/lib/git/worktrees';
 import { getDbInstance } from './src/lib/db-instance';
 import { stopAllPolling } from './src/lib/polling/response-poller';
 import { stopAllAutoYesPolling } from './src/lib/polling/auto-yes-manager';

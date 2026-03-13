@@ -20,7 +20,7 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, isImageCapableCLITool, type CLIToolType } from '@/lib/cli-tools/types';
 import { startPolling } from '@/lib/polling/response-poller';
 import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
-import { getGitStatus } from '@/lib/git-utils';
+import { getGitStatus } from '@/lib/git/git-utils';
 import { isPathSafe, resolveAndValidateRealPath } from '@/lib/security/path-validator';
 import path from 'path';
 

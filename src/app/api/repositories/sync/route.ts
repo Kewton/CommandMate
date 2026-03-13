@@ -6,7 +6,7 @@
 
 import { NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
-import { getRepositoryPaths, scanMultipleRepositories, syncWorktreesToDB } from '@/lib/worktrees';
+import { getRepositoryPaths, scanMultipleRepositories, syncWorktreesToDB } from '@/lib/git/worktrees';
 import { registerAndFilterRepositories } from '@/lib/db-repository';
 
 export async function POST() {

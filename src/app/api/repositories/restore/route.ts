@@ -14,7 +14,7 @@ import {
   validateRepositoryPath,
   restoreRepository,
 } from '@/lib/db-repository';
-import { scanWorktrees, syncWorktreesToDB } from '@/lib/worktrees';
+import { scanWorktrees, syncWorktreesToDB } from '@/lib/git/worktrees';
 import fs from 'fs';
 
 export async function PUT(request: NextRequest) {
