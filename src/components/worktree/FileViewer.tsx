@@ -144,6 +144,7 @@ function HtmlPreviewMobile({
           </table>
         ) : (
           <iframe
+            key={`${filePath}-${sandboxLevel}`}
             srcDoc={htmlContent}
             sandbox={SANDBOX_ATTRIBUTES[sandboxLevel]}
             title={`HTML Preview: ${filePath}`}
