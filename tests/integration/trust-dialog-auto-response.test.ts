@@ -36,7 +36,7 @@ import {
   CLAUDE_INIT_TIMEOUT,
   CLAUDE_INIT_POLL_INTERVAL,
   CLAUDE_POST_PROMPT_DELAY,
-} from '@/lib/claude-session';
+} from '@/lib/session/claude-session';
 import {
   CLAUDE_TRUST_DIALOG_PATTERN,
   CLAUDE_PROMPT_PATTERN,

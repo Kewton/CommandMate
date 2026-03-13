@@ -9,7 +9,7 @@
  */
 
 import type { CLIToolType } from './cli-tools/types';
-import { captureSessionOutput } from './cli-session';
+import { captureSessionOutput } from './session/cli-session';
 import { detectPrompt } from './detection/prompt-detector';
 import { resolveAutoAnswer } from './auto-yes-resolver';
 import { sendPromptAnswer } from './prompt-answer-sender';

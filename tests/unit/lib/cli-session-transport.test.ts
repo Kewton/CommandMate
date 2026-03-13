@@ -38,7 +38,7 @@ import {
   captureSessionOutputFresh,
   getSessionName,
   isSessionRunning,
-} from '@/lib/cli-session';
+} from '@/lib/session/cli-session';
 import { getOrFetchCapture, invalidateCache, setCachedCapture } from '@/lib/tmux/tmux-capture-cache';
 import { getPollingTmuxTransport } from '@/lib/tmux/polling-tmux-transport';
 

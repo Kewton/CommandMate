@@ -32,7 +32,7 @@ import {
 import { DEFAULT_AUTO_YES_DURATION } from '@/config/auto-yes-config';
 
 // Mock modules for pollAutoYes testing (Issue #161)
-vi.mock('@/lib/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', () => ({
   captureSessionOutput: vi.fn(),
 }));
 vi.mock('@/lib/tmux/tmux', () => ({
@@ -486,7 +486,7 @@ describe('auto-yes-manager', () => {
   // ==========================================================================
   describe('Issue #161: pollAutoYes thinking state skip', () => {
     it('should skip prompt detection when thinking state is detected', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { detectThinking } = await import('@/lib/detection/cli-patterns');
       const { detectPrompt } = await import('@/lib/detection/prompt-detector');
       const { sendKeys } = await import('@/lib/tmux/tmux');
@@ -524,7 +524,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should call detectPrompt when NOT in thinking state', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendSpecialKeys } = await import('@/lib/tmux/tmux');
 
       vi.useFakeTimers();
@@ -568,7 +568,7 @@ describe('auto-yes-manager', () => {
   // ==========================================================================
   describe('Issue #191: detectThinking windowing', () => {
     it('should detect prompt when stale thinking summary exists in early buffer lines (Issue #191)', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys } = await import('@/lib/tmux/tmux');
 
       vi.useFakeTimers();
@@ -620,7 +620,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should skip prompt detection when thinking pattern is within last 50 lines (Issue #191)', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys } = await import('@/lib/tmux/tmux');
 
       vi.useFakeTimers();
@@ -716,7 +716,7 @@ describe('auto-yes-manager', () => {
   // ==========================================================================
   describe('Issue #193: Claude Code cursor-based navigation in pollAutoYes', () => {
     it('should call sendSpecialKeys for Claude multiple_choice prompt (not sendKeys)', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux/tmux');
 
       vi.useFakeTimers();
@@ -757,7 +757,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should call sendKeys (not sendSpecialKeys) for Claude yes/no prompt', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux/tmux');
 
       vi.useFakeTimers();
@@ -795,7 +795,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should call sendKeys (not sendSpecialKeys) for non-Claude (codex) multiple_choice prompt', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux/tmux');
 
       vi.useFakeTimers();
@@ -831,7 +831,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should calculate correct Down arrow offset (default=1, target=3 -> 2x Down + Enter)', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux/tmux');
       const autoYesResolver = await import('@/lib/auto-yes-resolver');
 
@@ -874,7 +874,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should calculate correct Up arrow offset (default=3, target=1 -> 2x Up + Enter)', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux/tmux');
       const autoYesResolver = await import('@/lib/auto-yes-resolver');
 
@@ -917,7 +917,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should send just Enter when default=target (offset=0)', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux/tmux');
       const autoYesResolver = await import('@/lib/auto-yes-resolver');
 
@@ -965,7 +965,7 @@ describe('auto-yes-manager', () => {
   // ==========================================================================
   describe('Issue #306: pollAutoYes - duplicate prevention', () => {
     it('should not send duplicate response for same prompt', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys } = await import('@/lib/tmux/tmux');
 
       vi.useFakeTimers();
@@ -1000,7 +1000,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should reset lastAnsweredPromptKey when no prompt detected', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys } = await import('@/lib/tmux/tmux');
 
       vi.useFakeTimers();
@@ -1038,7 +1038,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should skip response when same promptKey detected consecutively without reset (F009)', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys } = await import('@/lib/tmux/tmux');
 
       vi.useFakeTimers();
@@ -1081,7 +1081,7 @@ describe('auto-yes-manager', () => {
 
   describe('Issue #306: pollAutoYes - cooldown', () => {
     it('should use cooldown interval after successful response', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys } = await import('@/lib/tmux/tmux');
 
       vi.useFakeTimers();
@@ -1129,7 +1129,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should use default interval when no response sent', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
 
       vi.useFakeTimers();
       vi.setSystemTime(Date.now());
@@ -1437,7 +1437,7 @@ describe('auto-yes-manager', () => {
   // ==========================================================================
   describe('Issue #323: captureAndCleanOutput', () => {
     it('should strip ANSI codes from captured output', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       vi.mocked(captureSessionOutput).mockReset();
 
       // Mock: return output with ANSI escape codes
@@ -1454,7 +1454,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should propagate errors from captureSessionOutput', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       vi.mocked(captureSessionOutput).mockReset();
 
       vi.mocked(captureSessionOutput).mockRejectedValue(new Error('tmux session not found'));
@@ -1465,7 +1465,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should return empty string for empty output', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       vi.mocked(captureSessionOutput).mockReset();
 
       vi.mocked(captureSessionOutput).mockResolvedValue('');
@@ -1755,7 +1755,7 @@ describe('auto-yes-manager', () => {
 
   describe('Issue #314: pollAutoYes with checkStopCondition (delta-based)', () => {
     it('should skip stop condition check on first poll (baseline establishment)', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys } = await import('@/lib/tmux/tmux');
 
       vi.useFakeTimers();
@@ -1788,7 +1788,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should stop polling when NEW output matches stop pattern on second poll', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys } = await import('@/lib/tmux/tmux');
 
       vi.useFakeTimers();
@@ -1826,7 +1826,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should not trigger stop on pre-existing content even after multiple polls', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys } = await import('@/lib/tmux/tmux');
 
       vi.useFakeTimers();
@@ -1859,7 +1859,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should continue polling when stop condition does not match', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys } = await import('@/lib/tmux/tmux');
 
       vi.useFakeTimers();
@@ -1893,7 +1893,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should reset baseline when buffer shrinks', async () => {
-      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys } = await import('@/lib/tmux/tmux');
 
       vi.useFakeTimers();

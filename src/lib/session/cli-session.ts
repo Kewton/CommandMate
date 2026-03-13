@@ -11,18 +11,18 @@
  * - captureSessionOutputFresh() bypasses cache for prompt-response verification
  */
 
-import { CLIToolManager } from './cli-tools/manager';
-import type { CLIToolType } from './cli-tools/types';
-import { createLogger } from './logger';
-import type { SessionTransport } from './tmux/session-transport';
-import { getPollingTmuxTransport } from './tmux/polling-tmux-transport';
+import { CLIToolManager } from '@/lib/cli-tools/manager';
+import type { CLIToolType } from '@/lib/cli-tools/types';
+import { createLogger } from '@/lib/logger';
+import type { SessionTransport } from '@/lib/tmux/session-transport';
+import { getPollingTmuxTransport } from '@/lib/tmux/polling-tmux-transport';
 import {
   getOrFetchCapture,
   setCachedCapture,
   invalidateCache,
   sliceOutput,
   CACHE_MAX_CAPTURE_LINES,
-} from './tmux/tmux-capture-cache';
+} from '@/lib/tmux/tmux-capture-cache';
 
 const logger = createLogger('cli-session');
 

@@ -68,7 +68,7 @@ import {
   CLAUDE_PROMPT_WAIT_TIMEOUT,
   CLAUDE_PROMPT_POLL_INTERVAL,
   CLAUDE_SEND_PROMPT_WAIT_TIMEOUT,
-} from '@/lib/claude-session';
+} from '@/lib/session/claude-session';
 import { hasSession, createSession, sendKeys, capturePane, killSession, sendSpecialKey } from '@/lib/tmux/tmux';
 import {
   CLAUDE_PROMPT_PATTERN,

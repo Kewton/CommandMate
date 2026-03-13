@@ -14,7 +14,7 @@ import {
   MAX_MESSAGE_LENGTH,
   ALLOWED_CLI_TOOLS,
   getActiveProcesses,
-} from '../../../src/lib/claude-executor';
+} from '../../../src/lib/session/claude-executor';
 import { SENSITIVE_ENV_KEYS } from '../../../src/lib/security/env-sanitizer';
 
 describe('claude-executor', () => {

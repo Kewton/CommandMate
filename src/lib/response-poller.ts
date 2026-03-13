@@ -19,7 +19,7 @@
  * - OpenCode extraction stop conditions (OPENCODE_PROMPT_PATTERN, OPENCODE_PROMPT_AFTER_RESPONSE)
  */
 
-import { captureSessionOutput, isSessionRunning } from './cli-session';
+import { captureSessionOutput, isSessionRunning } from './session/cli-session';
 import { getDbInstance } from './db-instance';
 import {
   createMessage,

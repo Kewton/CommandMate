@@ -14,7 +14,7 @@ import type { GitStatus } from '@/types/models';
 import { isValidWorktreeId } from '@/lib/auto-yes-manager';
 import { validateSelectedAgentsInput } from '@/lib/selected-agents-validator';
 import { listSessions } from '@/lib/tmux/tmux';
-import { detectWorktreeSessionStatus } from '@/lib/worktree-status-helper';
+import { detectWorktreeSessionStatus } from '@/lib/session/worktree-status-helper';
 
 export async function GET(
   request: NextRequest,

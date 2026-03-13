@@ -50,7 +50,7 @@ import {
   CLAUDE_INIT_POLL_INTERVAL,
   CLAUDE_POST_PROMPT_DELAY,
   CLAUDE_INIT_TIMEOUT,
-} from '@/lib/claude-session';
+} from '@/lib/session/claude-session';
 import { hasSession, createSession, sendKeys, capturePane, killSession } from '@/lib/tmux/tmux';
 import {
   CLAUDE_SESSION_ERROR_PATTERNS,

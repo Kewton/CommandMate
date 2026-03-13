@@ -11,7 +11,7 @@ import { createMessage, getMessages, upsertWorktree } from '@/lib/db';
 import type { Worktree } from '@/types/models';
 
 // Mock CLI tool modules
-vi.mock('@/lib/claude-session', () => ({
+vi.mock('@/lib/session/claude-session', () => ({
   startClaudeSession: vi.fn(),
   isClaudeRunning: vi.fn(() => Promise.resolve(false)),
   sendMessageToClaude: vi.fn(),
@@ -119,7 +119,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
       expect(response.status).toBe(201);
 
       // Verify Claude session was used
-      const { startClaudeSession, sendMessageToClaude } = await import('@/lib/claude-session');
+      const { startClaudeSession, sendMessageToClaude } = await import('@/lib/session/claude-session');
       expect(startClaudeSession).toHaveBeenCalledWith({
         worktreeId: 'test-worktree',
         worktreePath: '/path/to/test',

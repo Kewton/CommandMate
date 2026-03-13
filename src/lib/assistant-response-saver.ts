@@ -14,7 +14,7 @@
  */
 
 import Database from 'better-sqlite3';
-import { captureSessionOutput } from './cli-session';
+import { captureSessionOutput } from './session/cli-session';
 import {
   createMessage,
   getSessionState,

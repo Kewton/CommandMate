@@ -12,7 +12,7 @@ import {
   sendMessageToClaude,
   stopClaudeSession,
   type ClaudeSessionOptions,
-} from '../claude-session';
+} from '../session/claude-session';
 
 /**
  * Claude Code CLI tool implementation

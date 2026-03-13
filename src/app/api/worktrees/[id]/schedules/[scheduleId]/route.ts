@@ -16,7 +16,7 @@ import {
   MAX_SCHEDULE_NAME_LENGTH,
   MAX_SCHEDULE_MESSAGE_LENGTH,
 } from '@/config/schedule-config';
-import { ALLOWED_CLI_TOOLS } from '@/lib/claude-executor';
+import { ALLOWED_CLI_TOOLS } from '@/lib/session/claude-executor';
 import { isValidCronExpression } from '@/config/cmate-constants';
 
 /**

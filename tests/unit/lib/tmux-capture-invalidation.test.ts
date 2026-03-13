@@ -95,7 +95,7 @@ vi.mock('@/lib/tmux/tmux-capture-cache', () => ({
 // Imports (after mocks)
 // =========================================================================
 
-import { sendMessageToClaude, stopClaudeSession } from '@/lib/claude-session';
+import { sendMessageToClaude, stopClaudeSession } from '@/lib/session/claude-session';
 import { CodexTool } from '@/lib/cli-tools/codex';
 import { GeminiTool } from '@/lib/cli-tools/gemini';
 import { OpenCodeTool } from '@/lib/cli-tools/opencode';

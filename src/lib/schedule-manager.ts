@@ -21,7 +21,7 @@ import { statSync } from 'fs';
 import path from 'path';
 import { Cron } from 'croner';
 import { readCmateFile, parseSchedulesSection } from './cmate-parser';
-import { executeClaudeCommand, getActiveProcesses, type ExecuteCommandOptions } from './claude-executor';
+import { executeClaudeCommand, getActiveProcesses, type ExecuteCommandOptions } from './session/claude-executor';
 import { CMATE_FILENAME } from '@/config/cmate-constants';
 import type { ScheduleEntry } from '@/types/cmate';
 

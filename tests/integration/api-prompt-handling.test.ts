@@ -45,7 +45,7 @@ vi.mock('@/lib/tmux/tmux', () => ({
 }));
 
 // Mock claude-session module
-vi.mock('@/lib/claude-session', () => ({
+vi.mock('@/lib/session/claude-session', () => ({
   getSessionName: vi.fn((worktreeId: string) => `mcbd-${worktreeId}`),
   isClaudeRunning: vi.fn().mockResolvedValue(true),
 }));

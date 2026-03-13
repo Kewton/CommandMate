@@ -10,16 +10,16 @@ import {
   capturePane,
   killSession,
   sendSpecialKey,
-} from './tmux/tmux';
+} from '@/lib/tmux/tmux';
 import {
   CLAUDE_PROMPT_PATTERN,
   CLAUDE_TRUST_DIALOG_PATTERN,
   CLAUDE_SESSION_ERROR_PATTERNS,
   CLAUDE_SESSION_ERROR_REGEX_PATTERNS,
   stripAnsi,
-} from './detection/cli-patterns';
-import { detectAndResendIfPastedText } from './pasted-text-helper';
-import { invalidateCache } from './tmux/tmux-capture-cache';
+} from '@/lib/detection/cli-patterns';
+import { detectAndResendIfPastedText } from '@/lib/pasted-text-helper';
+import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { access, constants } from 'fs/promises';

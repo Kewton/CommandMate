@@ -18,7 +18,7 @@ import {
 
 // Mock dependencies required by startAutoYesPolling
 import { vi } from 'vitest';
-vi.mock('@/lib/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', () => ({
   captureSessionOutput: vi.fn().mockResolvedValue(''),
 }));
 vi.mock('@/lib/detection/prompt-detector', () => ({

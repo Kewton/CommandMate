@@ -19,7 +19,7 @@ import {
 } from '../assistant-response-saver';
 
 // Mock cli-session module
-vi.mock('../cli-session', () => ({
+vi.mock('../session/cli-session', () => ({
   captureSessionOutput: vi.fn(),
   isSessionRunning: vi.fn(),
 }));
@@ -29,7 +29,7 @@ vi.mock('../ws-server', () => ({
   broadcastMessage: vi.fn(),
 }));
 
-import { captureSessionOutput } from '../cli-session';
+import { captureSessionOutput } from '../session/cli-session';
 import { broadcastMessage } from '../ws-server';
 
 const mockCaptureSessionOutput = vi.mocked(captureSessionOutput);

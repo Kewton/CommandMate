@@ -9,7 +9,7 @@ import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
-import { captureSessionOutputFresh } from '@/lib/cli-session';
+import { captureSessionOutputFresh } from '@/lib/session/cli-session';
 import { detectPrompt, type PromptDetectionResult } from '@/lib/detection/prompt-detector';
 import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/detection/cli-patterns';
 import { sendPromptAnswer } from '@/lib/prompt-answer-sender';

@@ -12,13 +12,13 @@
  * - Stale pending prompt cleanup
  */
 
-import { CLIToolManager } from './cli-tools/manager';
-import { CLI_TOOL_IDS, type CLIToolType } from './cli-tools/types';
+import { CLIToolManager } from '@/lib/cli-tools/manager';
+import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from './cli-session';
-import { detectSessionStatus } from './detection/status-detector';
-import { OPENCODE_PANE_HEIGHT } from './cli-tools/opencode';
+import { detectSessionStatus } from '@/lib/detection/status-detector';
+import { OPENCODE_PANE_HEIGHT } from '@/lib/cli-tools/opencode';
 import { isSessionHealthy } from './claude-session';
-import type { getMessages as GetMessagesFn, markPendingPromptsAsAnswered as MarkPendingFn } from './db';
+import type { getMessages as GetMessagesFn, markPendingPromptsAsAnswered as MarkPendingFn } from '@/lib/db';
 
 /** Per-CLI-tool session status */
 export interface CliToolSessionStatus {
@@ -55,7 +55,7 @@ export interface WorktreeSessionStatus {
 export async function detectWorktreeSessionStatus(
   worktreeId: string,
   sessionNameSet: Set<string>,
-  db: ReturnType<typeof import('./db-instance').getDbInstance>,
+  db: ReturnType<typeof import('@/lib/db/db-instance').getDbInstance>,
   getMessages: typeof GetMessagesFn,
   markPendingPromptsAsAnswered: typeof MarkPendingFn,
 ): Promise<WorktreeSessionStatus> {
