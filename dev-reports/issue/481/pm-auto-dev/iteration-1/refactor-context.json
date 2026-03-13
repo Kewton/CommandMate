@@ -1,0 +1,24 @@
+{
+  "issue_number": 481,
+  "refactor_targets": [
+    "src/lib/db/index.ts",
+    "src/lib/tmux/index.ts",
+    "src/lib/security/index.ts",
+    "src/lib/detection/index.ts",
+    "src/lib/session/index.ts",
+    "src/lib/polling/index.ts",
+    "src/lib/git/index.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "test_count": 4921,
+    "lint_errors": 0,
+    "tsc_errors": 0
+  },
+  "improvement_goals": [
+    "バレルエクスポートファイルの品質確認（不要なre-exportがないか）",
+    "security/index.ts の named export の完全性確認",
+    "移行後のimportパスの一貫性確認（@/lib/グループ名 形式が徹底されているか）",
+    "互換レイヤーファイルへのコメント追加（将来削除予定であることを明記）"
+  ]
+}
