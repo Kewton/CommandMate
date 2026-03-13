@@ -28,7 +28,7 @@ export type SlashCommandCategory =
 /**
  * Command source type (Issue #56)
  */
-export type SlashCommandSource = 'standard' | 'mcbd' | 'worktree' | 'skill';
+export type SlashCommandSource = 'standard' | 'mcbd' | 'worktree' | 'skill' | 'codex-skill';
 
 /**
  * Slash command definition
@@ -50,10 +50,13 @@ export interface SlashCommand {
   source?: SlashCommandSource;
   /**
    * CLI tools this command is available for (Issue #4)
-   * - undefined: available for ALL tools (backward compatible)
+   * - undefined: Claude Code only (backward compatible)
    * - ['claude']: Claude Code only
    * - ['codex']: Codex CLI only
    * - ['claude', 'codex']: both tools
+   *
+   * NOTE: undefined does NOT mean "all tools" — it means claude-only.
+   * See filterCommandsByCliTool() in command-merger.ts for the authoritative behavior.
    */
   cliTools?: CLIToolType[];
 }
