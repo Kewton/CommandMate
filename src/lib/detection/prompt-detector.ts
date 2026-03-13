@@ -375,6 +375,29 @@ const MAX_CONTINUATION_LINES = 5;
 const MAX_DEEP_INDENT_CONTINUATION_LINES = 12;
 
 /**
+ * Validates whether a new option number logically precedes the already-collected options.
+ * Prevents diff line numbers (e.g., Codex approval prompt file diffs with lines like
+ * "  1 +{", "  2 +  \"name\":...") from being collected as prompt options.
+ *
+ * When no options have been collected yet, any number is valid (first option).
+ * When options exist, the new number must be firstNumber-1 or firstNumber-2
+ * (matching isConsecutiveFromOne's single-gap tolerance).
+ *
+ * @param number - The candidate option number to prepend
+ * @param collectedOptions - Already-collected options array (unshift order: lowest first)
+ * @returns true if the number is a valid preceding option
+ */
+function isValidPrecedingOption(
+  number: number,
+  collectedOptions: ReadonlyArray<{ number: number }>
+): boolean {
+  if (collectedOptions.length === 0) return true;
+  const firstNumber = collectedOptions[0].number;
+  // Reject duplicates (number >= firstNumber) and large gaps (number < firstNumber - 2)
+  return number < firstNumber && number >= firstNumber - 2;
+}
+
+/**
  * Creates a "no prompt detected" result.
  * Centralizes the repeated pattern of returning isPrompt: false with trimmed content.
  *
@@ -771,7 +794,7 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
     const defaultMatch = line.match(DEFAULT_OPTION_PATTERN);
     if (defaultMatch) {
       const number = parseInt(defaultMatch[1], 10);
-      if (number <= 20) {
+      if (number <= 20 && isValidPrecedingOption(number, collectedOptions)) {
         const label = defaultMatch[2].trim();
         collectedOptions.unshift({ number, label, isDefault: true });
         continuationLineCount = 0;
@@ -787,6 +810,8 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
       // collapsed output matches as option 373). CLI prompts never exceed 20 options.
       if (number > 20) {
         // Treat as non-option line
+      } else if (!isValidPrecedingOption(number, collectedOptions)) {
+        // Treat as non-option line (e.g., diff line numbers from Codex approval prompts)
       } else {
         const label = normalMatch[2].trim();
         collectedOptions.unshift({ number, label, isDefault: false });
