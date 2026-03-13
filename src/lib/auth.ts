@@ -13,9 +13,6 @@ import crypto from 'crypto';
 
 // Import and re-export shared constants and functions from Edge Runtime-compatible config
 import { AUTH_COOKIE_NAME, AUTH_EXCLUDED_PATHS, parseDuration, computeExpireAt, DEFAULT_EXPIRE_DURATION_MS, isValidTokenHash } from '../config/auth-config';
-import { createLogger } from '@/lib/logger';
-
-const logger = createLogger('auth');
 export { AUTH_COOKIE_NAME, AUTH_EXCLUDED_PATHS, parseDuration, computeExpireAt, DEFAULT_EXPIRE_DURATION_MS, isValidTokenHash };
 
 /** Rate limiting configuration for brute-force protection */
@@ -42,7 +39,8 @@ const storedTokenHash: string | undefined = (() => {
   // Store validation result to avoid type predicate narrowing to 'never' in else branch
   const valid: boolean = isValidTokenHash(hash);
   if (!valid) {
-    logger.error('cmauthtokenhash-is-not');
+    // C001: Cannot use logger (CLI build compatibility) - use console.error
+    console.error('[auth] CM_AUTH_TOKEN_HASH is not a valid SHA-256 hash');
     return undefined;
   }
   return hash;
