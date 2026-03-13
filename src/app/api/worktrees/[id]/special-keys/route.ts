@@ -14,6 +14,9 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db-instance';
 import { hasSession, isAllowedSpecialKey, sendSpecialKeysAndInvalidate } from '@/lib/tmux';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/special-keys');
 
 /** Maximum number of keys per request to prevent abuse */
 const MAX_KEYS_LENGTH = 10;
@@ -98,7 +101,7 @@ export async function POST(
     return NextResponse.json({ success: true });
   } catch (error) {
     // Fixed-string error response [DR4-003] - no internal details exposed
-    console.error('Special keys API error:', error);
+    logger.error('special-keys-api-error:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to send special keys to terminal' },
       { status: 500 }

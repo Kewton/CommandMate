@@ -1,0 +1,72 @@
+{
+  "issue_number": 480,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "completed",
+  "applied_at": "2026-03-13",
+  "design_doc_path": "dev-reports/design/issue-480-console-log-logger-unification-design-policy.md",
+  "findings_applied": {
+    "must_fix": [
+      {
+        "id": "DS3-001",
+        "description": "影響テスト一覧に存在しないファイルが6件含まれている",
+        "action": "実在しない6ファイル（resource-cleanup.test.ts, assistant-response-saver.test.ts, session-cleanup.test.ts, codex.test.ts, gemini.test.ts, ws-server.test.ts）を削除",
+        "status": "applied"
+      },
+      {
+        "id": "DS3-002",
+        "description": "console spyを使用する5ファイルが一覧から漏れている",
+        "action": "5ファイル（tmux-capture-cache.test.ts, cmate-parser.test.ts, security.test.ts, auth-middleware.test.ts, prompt-detector-cache.test.ts）を追加。spy対象・行番号を実測値で記載",
+        "status": "applied"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "DS3-003",
+        "description": "logger.tsのEdge Runtime非対応を依存制約セクションに追記",
+        "action": "「依存制約」セクションを新設。Edge Runtime/クライアントコンポーネント/env.tsでのimport禁止を表形式で明記",
+        "status": "applied"
+      },
+      {
+        "id": "DS3-004",
+        "description": "Phase 1完了時にbuildチェックを追加",
+        "action": "Phase 1完了時確認コマンドに npm run build を追加",
+        "status": "applied"
+      },
+      {
+        "id": "DS3-005",
+        "description": "ESLint no-consoleルールの段階的有効化",
+        "action": "「ESLint no-console ルール段階的有効化」セクションを新設。Phase別の有効化スケジュールと設定例を記載",
+        "status": "applied"
+      },
+      {
+        "id": "DS3-006",
+        "description": "ログ出力形式変更の運用影響セクション追加",
+        "action": "「ログ出力形式の運用影響」セクションを新設。text/json形式の比較表、LOG_FORMAT設定、運用注意事項を記載",
+        "status": "applied"
+      },
+      {
+        "id": "DS3-007",
+        "description": "PR分割戦略の明記",
+        "action": "「PR分割戦略」セクションを新設。PR-A〜PR-Eの5分割とマージ順序を記載",
+        "status": "applied"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "DS3-009",
+        "description": "console.debug spyのテスト修正方針",
+        "action": "テスト修正方針セクションにtmux-capture-cache.test.tsのlogger.debugモック置換注記を追加",
+        "status": "applied"
+      }
+    ]
+  },
+  "summary": {
+    "must_fix_applied": 2,
+    "must_fix_total": 2,
+    "should_fix_applied": 5,
+    "should_fix_total": 5,
+    "nice_to_have_applied": 1,
+    "nice_to_have_total": 1
+  }
+}

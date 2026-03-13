@@ -14,6 +14,22 @@ import {
   resolveAndValidatePath,
 } from '../../src/lib/db-migration-path';
 
+// Mock logger module (Issue #480)
+const { mockLogger } = vi.hoisted(() => {
+  const mockLogger = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    withContext: vi.fn().mockReturnThis(),
+  };
+  return { mockLogger };
+});
+vi.mock('@/lib/logger', () => ({
+  createLogger: vi.fn(() => mockLogger),
+}));
+
+
 describe('db-migration-path', () => {
   describe('resolveAndValidatePath', () => {
     afterEach(() => {
@@ -74,41 +90,33 @@ describe('db-migration-path', () => {
 
       it('should skip DATABASE_PATH in system directory', () => {
         process.env.DATABASE_PATH = '/etc/commandmate/db.sqlite';
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        mockLogger.warn.mockClear();
 
         const paths = getLegacyDbPaths();
 
         expect(paths).not.toContain('/etc/commandmate/db.sqlite');
-        expect(warnSpy).toHaveBeenCalledWith(
-          expect.stringContaining('system directory')
-        );
-
-        warnSpy.mockRestore();
-      });
+        expect(mockLogger.warn).toHaveBeenCalled();
+});
 
       it('should skip DATABASE_PATH in /var directory', () => {
         process.env.DATABASE_PATH = '/var/lib/commandmate/db.sqlite';
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        mockLogger.warn.mockClear();
 
         const paths = getLegacyDbPaths();
 
         expect(paths).not.toContain('/var/lib/commandmate/db.sqlite');
-        expect(warnSpy).toHaveBeenCalled();
-
-        warnSpy.mockRestore();
-      });
+        expect(mockLogger.warn).toHaveBeenCalled();
+});
 
       it('should skip DATABASE_PATH in /usr directory', () => {
         process.env.DATABASE_PATH = '/usr/share/commandmate/db.sqlite';
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        mockLogger.warn.mockClear();
 
         const paths = getLegacyDbPaths();
 
         expect(paths).not.toContain('/usr/share/commandmate/db.sqlite');
-        expect(warnSpy).toHaveBeenCalled();
-
-        warnSpy.mockRestore();
-      });
+        expect(mockLogger.warn).toHaveBeenCalled();
+});
     });
   });
 

@@ -13,6 +13,9 @@ import { promisify } from 'util';
 import { NextResponse } from 'next/server';
 import type { GitStatus } from '@/types/models';
 import type { CommitInfo, ChangedFile } from '@/types/git';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('git-utils');
 
 const execFileAsync = promisify(execFile);
 
@@ -41,8 +44,8 @@ async function execGitCommand(
     return stdout.trim();
   } catch (error) {
     // Log error server-side only (no client exposure)
-    console.error(`[git-utils] Git command failed:`, {
-      args,
+    logger.error('git:command-failed', {
+      args: args.join(' '),
       error: error instanceof Error ? error.message : 'Unknown error',
     });
     return null;
@@ -170,8 +173,8 @@ async function execGitCommandTyped(
       throw new Error(combinedMsg.trim());
     }
     // Log and re-throw generic error
-    console.error(`[git-utils] Git command failed:`, {
-      args,
+    logger.error('git:command-failed', {
+      args: args.join(' '),
       error: err.message,
     });
     throw new Error('Failed to execute git command');
@@ -371,7 +374,7 @@ export function handleGitApiError(error: unknown, logPrefix: string): NextRespon
       { status: 504 }
     );
   }
-  console.error(`[${logPrefix}] Error:`, error);
+  logger.error('git:api-error', { prefix: logPrefix, error: error instanceof Error ? error.message : String(error) });
   return NextResponse.json(
     { error: 'Failed to execute git command' },
     { status: 500 }

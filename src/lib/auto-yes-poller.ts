@@ -18,6 +18,9 @@ import { stripAnsi, stripBoxDrawing, detectThinking, buildDetectPromptOptions } 
 import { generatePromptKey } from './prompt-key';
 import { getErrorMessage } from './errors';
 import { invalidateCache } from './tmux-capture-cache';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('auto-yes-poller');
 import { isValidWorktreeId } from './path-validator';
 import {
   getAutoYesState,
@@ -359,15 +362,15 @@ export async function detectAndRespondToPrompt(
     pollerState.lastAnsweredAt = Date.now();
 
     // Log success (without sensitive content)
-    console.info(`[Auto-Yes Poller] Sent response for worktree: ${worktreeId}`);
+    logger.info('poller:response-sent', { worktreeId });
 
     return 'responded';
-  } catch (error) {
+  } catch {
     // IC003: This catch handles errors from prompt detection/sending only.
     // incrementErrorCount is called here, and this function never throws,
     // preventing double incrementErrorCount in the outer pollAutoYes() catch.
     incrementErrorCount(worktreeId);
-    console.warn(`[Auto-Yes Poller] Error in detectAndRespondToPrompt for worktree ${worktreeId}: ${getErrorMessage(error)}`);
+    logger.warn('poller:detect-respond-error', { worktreeId });
     return 'error';
   }
 }
@@ -422,7 +425,7 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     // errors only. detectAndRespondToPrompt() catches its own errors and returns
     // 'error' instead of throwing (preventing double incrementErrorCount).
     incrementErrorCount(worktreeId);
-    console.warn(`[Auto-Yes Poller] Error for worktree ${worktreeId}: ${getErrorMessage(error)}`);
+    logger.warn('poller:poll-error', { worktreeId, error: getErrorMessage(error) });
   }
 
   // Schedule next poll (catch block fallthrough or other paths)
@@ -508,7 +511,7 @@ export function startAutoYesPolling(
     pollAutoYes(worktreeId, cliToolId);
   }, POLLING_INTERVAL_MS);
 
-  console.info(`[Auto-Yes Poller] Started for worktree: ${worktreeId}, cliTool: ${cliToolId}`);
+  logger.info('poller:started', { worktreeId, cliToolId });
   return { started: true };
 }
 
@@ -529,7 +532,7 @@ export function stopAutoYesPolling(worktreeId: string): void {
 
   // Remove state
   autoYesPollerStates.delete(worktreeId);
-  console.info(`[Auto-Yes Poller] Stopped for worktree: ${worktreeId}`);
+  logger.info('poller:stopped', { worktreeId });
 }
 
 /**
@@ -541,7 +544,7 @@ export function stopAllAutoYesPolling(): void {
     if (pollerState.timerId) {
       clearTimeout(pollerState.timerId);
     }
-    console.info(`[Auto-Yes Poller] Stopped for worktree: ${worktreeId} (shutdown)`);
+    logger.info('poller:stopped', { worktreeId, reason: 'shutdown' });
   }
   autoYesPollerStates.clear();
 }

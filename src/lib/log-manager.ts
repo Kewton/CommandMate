@@ -7,6 +7,9 @@ import fs from 'fs/promises';
 import path from 'path';
 import { format } from 'date-fns';
 import { getLogDir } from '@/config/log-config';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('log-manager');
 
 /**
  * Get log directory for a CLI tool
@@ -243,7 +246,7 @@ export async function cleanupOldLogs(days: number = 30): Promise<number> {
         }
       }
     } catch (error) {
-      console.error(`Error cleaning up old logs for ${toolId}:`, error);
+      logger.error('error-cleaning-up-old-logs-for-toolid:', { error: error instanceof Error ? error.message : String(error) });
     }
   }
 

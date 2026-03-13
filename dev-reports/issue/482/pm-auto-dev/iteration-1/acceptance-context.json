@@ -1,0 +1,20 @@
+{
+  "issue_number": 482,
+  "feature_summary": "TODO/FIXME マーカー解消（R-4）: コードベースの4箇所のTODO/FIXMEマーカーをコメント・JSDoc修正で解消",
+  "acceptance_criteria": [
+    "src/app/api/worktrees/[id]/slash-commands/route.ts のL33 TODOコメントが削除されていること",
+    "src/lib/cli-tools/opencode-config.ts のL217-218, L284-285 TODOコメントが削除されていること",
+    "src/lib/cli-tools/opencode-config.ts の ensureOpencodeConfig JSDocにfetchWithTimeoutのヒントが追記されていること",
+    "src/lib/cli-patterns.ts のJSDoc内 Issue #XXX が Issue #188 に置き換えられていること",
+    "npx tsc --noEmit でコンパイルエラーがないこと",
+    "npm run lint でリントエラーがないこと",
+    "既存テストが全パスすること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: route.ts L33付近にTODOコメントが残存しないことを確認",
+    "シナリオ2: opencode-config.ts にTODOコメントが残存しないことを確認",
+    "シナリオ3: cli-patterns.ts に Issue #XXX が残存しないことを確認",
+    "シナリオ4: ensureOpencodeConfig JSDocにfetchWithTimeoutの記述が追加されていることを確認",
+    "シナリオ5: tsc, lint, test:unit がすべてパスすること"
+  ]
+}

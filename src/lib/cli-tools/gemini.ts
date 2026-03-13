@@ -21,6 +21,9 @@ import {
 import { detectAndResendIfPastedText } from '../pasted-text-helper';
 import { invalidateCache } from '../tmux-capture-cache';
 import { GEMINI_PROMPT_PATTERN, stripAnsi } from '../cli-patterns';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('cli-tools/gemini');
 
 /**
  * Extract error message from unknown error type (DRY)
@@ -80,7 +83,7 @@ export class GeminiTool extends BaseCLITool {
     // Check if session already exists
     const exists = await hasSession(sessionName);
     if (exists) {
-      console.log(`Gemini session ${sessionName} already exists`);
+      logger.info('gemini-session-sessionname');
       return;
     }
 
@@ -105,7 +108,7 @@ export class GeminiTool extends BaseCLITool {
       // Handles trust dialog automatically if encountered
       await this.waitForReady(sessionName);
 
-      console.log(`✓ Started Gemini session: ${sessionName}`);
+      logger.info('started-gemini-session:sessionname');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start Gemini session: ${errorMessage}`);
@@ -128,7 +131,7 @@ export class GeminiTool extends BaseCLITool {
 
         // Check if interactive prompt is ready
         if (GEMINI_PROMPT_PATTERN.test(output)) {
-          console.log(`✓ Gemini prompt detected (attempt ${i + 1})`);
+          logger.info('gemini-prompt-detected');
           return;
         }
 
@@ -136,7 +139,7 @@ export class GeminiTool extends BaseCLITool {
         if (!trustDialogHandled && output.includes('Do you trust this folder?')) {
           await sendSpecialKey(sessionName, 'Enter');
           trustDialogHandled = true;
-          console.log('✓ Auto-trusted folder for Gemini session');
+          logger.info('auto-trusted-folder-for');
           // Continue polling for prompt after trust dialog
         }
       } catch {
@@ -144,7 +147,7 @@ export class GeminiTool extends BaseCLITool {
       }
       await new Promise((resolve) => setTimeout(resolve, GEMINI_POLL_INTERVAL_MS));
     }
-    console.log('⚠ Gemini prompt detection timed out after initialization');
+    logger.info('gemini-prompt-detection');
   }
 
   /**
@@ -166,7 +169,7 @@ export class GeminiTool extends BaseCLITool {
       }
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
-    console.log('⚠ Gemini prompt not detected before send - proceeding anyway');
+    logger.info('gemini-prompt-not');
   }
 
   /**
@@ -210,7 +213,7 @@ export class GeminiTool extends BaseCLITool {
       // Issue #405: Invalidate cache after sending message
       invalidateCache(sessionName);
 
-      console.log(`✓ Sent message to Gemini session: ${sessionName}`);
+      logger.info('sent-message-to-gemini-session:sessionna');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to send message to Gemini: ${errorMessage}`);
@@ -241,11 +244,10 @@ export class GeminiTool extends BaseCLITool {
       const killed = await killSession(sessionName);
 
       if (killed) {
-        console.log(`✓ Stopped Gemini session: ${sessionName}`);
+        logger.info('stopped-gemini-session:sessionname');
       }
     } catch (error: unknown) {
-      const errorMessage = getErrorMessage(error);
-      console.error(`Error stopping Gemini session: ${errorMessage}`);
+      logger.error('session:stop-failed', { error: getErrorMessage(error) });
       throw error;
     }
   }

@@ -1,0 +1,54 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 482,
+  "iteration": 1,
+  "apply_date": "2026-03-13",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "S1-001",
+        "status": "applied",
+        "change_summary": "概要文の「6箇所」を「4箇所」に修正"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S1-002",
+        "status": "applied",
+        "change_summary": "cli-patterns.ts:27の方針を明確化。git logで該当コミット（5ebd2ba）の関連PRを辿り正しいIssue番号を特定する手順を記載。特定できない場合はIssue番号参照を除去する方針を明記"
+      },
+      {
+        "id": "S1-003",
+        "status": "applied",
+        "change_summary": "slash-commands/route.tsの型統合方針を専用セクションとして追加。(A)共通ベース型定義と(B)統合不要判断の2つの選択肢を具体的に記載"
+      },
+      {
+        "id": "S1-004",
+        "status": "applied",
+        "change_summary": "opencode-config.tsのTODO方針を「TODOコメント2箇所を削除し、既存JSDoc（ensureOpencodeConfig関数内）に集約」の1つに絞った"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S1-005",
+        "status": "applied",
+        "change_summary": "受け入れ基準に「npx tsc --noEmit でコンパイルエラーがないことを確認」を追加"
+      },
+      {
+        "id": "S1-006",
+        "status": "applied",
+        "change_summary": "対象一覧に「種別」列を追加し、TODOマーカーとJSDoc内未解決参照を区別"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 6,
+    "applied": 6,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/482"
+  }
+}

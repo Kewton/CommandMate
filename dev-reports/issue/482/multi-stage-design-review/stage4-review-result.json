@@ -1,0 +1,83 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "issue_number": 482,
+  "review_date": "2026-03-13",
+  "security_analysis": {
+    "owasp_compliance": "compliant",
+    "risk_level": "none",
+    "sensitive_info_check": "passed",
+    "details": {
+      "owasp_a01_broken_access_control": "not_affected",
+      "owasp_a02_cryptographic_failures": "not_affected",
+      "owasp_a03_injection": "not_affected",
+      "owasp_a04_insecure_design": "not_affected",
+      "owasp_a05_security_misconfiguration": "not_affected",
+      "owasp_a06_vulnerable_components": "not_affected",
+      "owasp_a07_auth_failures": "not_affected",
+      "owasp_a08_software_data_integrity": "not_affected",
+      "owasp_a09_logging_monitoring": "not_affected",
+      "owasp_a10_ssrf": "not_affected"
+    }
+  },
+  "findings": [
+    {
+      "id": "S4-001",
+      "severity": "nice_to_have",
+      "category": "セキュリティ注釈の維持",
+      "title": "JSDoc追記内容にセキュリティ注釈タグの付与を推奨",
+      "description": "opencode-config.ts の ensureOpencodeConfig JSDoc に fetchWithTimeout ヒントを追記する際、既存のセキュリティ注釈体系（[SEC-XXX], [D4-XXX]）との整合性を保つことが望ましい。追記される内容自体はセキュリティリスクを生じないが、将来 fetchWithTimeout を実装する際にSSRF防御（[SEC-001]）やレスポンスサイズ制限（[D4-007]）の考慮が必要である旨を注記しておくと、セキュリティ注釈の連続性が維持される。",
+      "location": "src/lib/cli-tools/opencode-config.ts L340-342付近（JSDoc追記箇所）",
+      "recommendation": "追記行を以下のようにすることを検討: 'HTTP fetch logic (fetchWithTimeout) can be extracted to a shared helper (apply [SEC-001] SSRF and [D4-007] size limits).'",
+      "risk": "セキュリティ上のリスクはない。注釈の連続性に関するベストプラクティスの提案。"
+    }
+  ],
+  "checklist": {
+    "owasp_top10_compliance": {
+      "status": "passed",
+      "note": "変更はコメント・JSDocのみであり、OWASP Top 10のいずれのカテゴリにも該当するリスクを生じない"
+    },
+    "sensitive_info_in_comments": {
+      "status": "passed",
+      "note": "追記・修正されるコメント/JSDocに機密情報（API キー、パスワード、内部URL等）は含まれない"
+    },
+    "existing_security_measures_preserved": {
+      "status": "passed",
+      "note": "[SEC-001] SSRF防御、[SEC-005] JSON injection防御、[D4-003]/[D4-004]/[D4-005]/[D4-007] 各防御注釈はすべて変更対象外であり維持される"
+    },
+    "injection_risk_from_jsdoc": {
+      "status": "passed",
+      "note": "JSDocへの追記内容は純粋な英語テキスト（HTTP fetch logic (fetchWithTimeout) can be extracted to a shared helper）であり、コード実行やインジェクションのベクターにならない"
+    },
+    "security_annotation_maintenance": {
+      "status": "passed",
+      "note": "セキュリティ関連注釈（[SEC-001], [SEC-005], [D4-002]〜[D4-007]）はいずれも変更対象外。cli-patterns.ts の Issue #XXX -> #188 修正もセキュリティ注釈ではなくトレーサビリティ改善"
+    },
+    "todo_removal_does_not_lose_security_context": {
+      "status": "passed",
+      "note": "削除対象のTODOコメント3箇所はいずれもリファクタリング提案（fetchWithTimeout共通化、型統合検討）であり、セキュリティ対策のコメントではない。セキュリティ注釈（[SEC-XXX], [D4-XXX]）は一切削除されない"
+    }
+  },
+  "security_annotations_verified": {
+    "opencode_config_ts": {
+      "SEC-001_ssrf_prevention": "4箇所すべて変更対象外（L19, L26, L39, L50）",
+      "SEC-005_json_injection": "1箇所変更対象外（L279）",
+      "D4-003_model_pattern": "変更対象外（L37）",
+      "D4-004_path_traversal": "変更対象外（L163, L348）",
+      "D4-005_json_stringify": "変更対象外（L390）",
+      "D4-007_response_size": "変更対象外（L91, L235, L242, L252）",
+      "D4-002_non_fatal": "変更対象外（L259）"
+    },
+    "slash_commands_route_ts": {
+      "MF-1_path_validation": "変更対象外（L77）",
+      "SF-1_priority": "変更対象外（L101）"
+    }
+  },
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 1,
+    "total": 1
+  },
+  "conclusion": "Issue #482の設計方針はセキュリティ観点で問題なし。変更はコメント・JSDocのみであり、既存のセキュリティ対策（SSRF防御、パストラバーサル防御、JSONインジェクション防御、レスポンスサイズ制限、モデル名バリデーション）はすべて維持される。削除対象のTODOコメントにセキュリティ関連の注釈は含まれていない。唯一の提案として、JSDoc追記時にセキュリティ注釈タグの参照を含めることで注釈体系の連続性を保つことを推奨する（nice_to_have）。"
+}

@@ -12,6 +12,9 @@
 import { randomUUID } from 'crypto';
 import { executeClaudeCommand, type ExecuteCommandOptions } from './claude-executor';
 import type { ScheduleEntry } from '@/types/cmate';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('job-executor');
 
 // =============================================================================
 // Types
@@ -129,10 +132,10 @@ export function recoverRunningLogs(): void {
     ).run(now);
 
     if (result.changes > 0) {
-      console.warn(`[schedule-manager] Recovered ${result.changes} stale running execution(s) to failed status`);
+      logger.warn('execution:recovered-stale', { count: result.changes });
     }
   } catch (error) {
-    console.error('[schedule-manager] Failed to recover running logs:', error);
+    logger.error('execution:recover-failed', { error: error instanceof Error ? error.message : String(error) });
   }
 }
 
@@ -148,7 +151,7 @@ export function recoverRunningLogs(): void {
  */
 export async function executeSchedule(state: ScheduleState): Promise<void> {
   if (state.isExecuting) {
-    console.warn(`[schedule-manager] Skipping concurrent execution for schedule ${state.entry.name}`);
+    logger.warn('execution:skip-concurrent', { name: state.entry.name });
     return;
   }
 
@@ -181,11 +184,11 @@ export async function executeSchedule(state: ScheduleState): Promise<void> {
     updateExecutionLog(logId, result.status, result.output, result.exitCode);
     updateScheduleLastExecuted(state.scheduleId);
 
-    console.info(`[schedule-manager] Executed ${state.entry.name}: ${result.status}`);
+    logger.info('execution:completed', { name: state.entry.name, status: result.status });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     updateExecutionLog(logId, 'failed', errorMessage, null);
-    console.error(`[schedule-manager] Execution error for ${state.entry.name}:`, errorMessage);
+    logger.error('execution:failed', { name: state.entry.name, error: errorMessage });
   } finally {
     state.isExecuting = false;
   }

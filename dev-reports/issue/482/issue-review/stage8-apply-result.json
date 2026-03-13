@@ -1,0 +1,37 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 482,
+  "apply_date": "2026-03-13",
+  "applied_findings": [
+    {
+      "id": "S7-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "受け入れ基準の親Issue更新の記載を明確化。「6箇所→4箇所」という不正確な表現を削除し、「本Issueの4箇所を対処完了後、親Issue #475 のR-4行の残存件数を更新する（本Issue対処分を反映）」に修正"
+    },
+    {
+      "id": "S7-002",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "description": "cli-patterns.ts L27 の Issue #XXX を Issue #188 に特定・置換。対象一覧テーブルの方針欄、cli-patterns.ts修正方針セクションの見出し・本文・修正前後コード例すべてを更新"
+    }
+  ],
+  "skipped_findings": [],
+  "summary": {
+    "total_findings": 2,
+    "applied": 2,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/482"
+  },
+  "changes_summary": [
+    "Stage 7 をレビュー反映済みステージとしてNote行に追加",
+    "対象一覧テーブルのcli-patterns.ts行: 方針を「Issue #188 と特定済み。Issue #XXX を Issue #188 に置き換える」に更新",
+    "cli-patterns.ts修正方針セクション: 見出しを「Issue #188参照」に変更、本文にPR #210経由の特定経緯を記載、修正後コード例を Issue #188 に更新、「Issue番号が特定できない場合」のフォールバック方針を削除",
+    "受け入れ基準: 最終項目を「本Issueの4箇所を対処完了後、親Issue #475 のR-4行の残存件数を更新する（本Issue対処分を反映）」に修正",
+    "レビュー履歴セクションにイテレーション2（Stage 7）の対応内容を追記"
+  ]
+}

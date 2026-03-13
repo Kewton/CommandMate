@@ -28,6 +28,9 @@ import {
 } from './db-repository';
 import { scanWorktrees, syncWorktreesToDB } from './worktrees';
 import type { CloneError, CloneErrorCategory, CloneJobStatus } from '@/types/clone';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('clone-manager');
 
 /**
  * Clone manager configuration
@@ -202,7 +205,7 @@ export function resolveCustomTargetPath(
   } catch {
     // [S1-001] Log rejection for attack detection and debugging.
     // Use a fixed message string to avoid leaking rootDir from exception messages.
-    console.warn('[CloneManager] Invalid custom target path rejected');
+    logger.warn('invalid-custom-target');
     return null;
   }
 }
@@ -250,9 +253,7 @@ export class CloneManager {
     const worktreeBasePath = process.env.WORKTREE_BASE_PATH;
     if (worktreeBasePath) {
       if (!warnedWorktreeBasePath) {
-        console.warn(
-          '[DEPRECATED] WORKTREE_BASE_PATH is deprecated. Set CM_ROOT_DIR in your .env file instead.'
-        );
+        logger.warn('config:deprecated', { key: 'WORKTREE_BASE_PATH', replacement: 'CM_ROOT_DIR' });
         warnedWorktreeBasePath = true;
       }
       return path.resolve(worktreeBasePath);
@@ -390,7 +391,7 @@ export class CloneManager {
 
     // 7. Start clone in background (don't await)
     this.executeClone(job.id, cloneUrl, targetPath).catch((error) => {
-      console.error(`[CloneManager] Clone failed for job ${job.id}:`, error);
+      logger.error('clone-failed-for-job-jobid:', { error: error instanceof Error ? error.message : String(error) });
     });
 
     return {
@@ -531,10 +532,10 @@ export class CloneManager {
       const worktrees = await scanWorktrees(targetPath);
       if (worktrees.length > 0) {
         syncWorktreesToDB(this.db, worktrees);
-        console.log(`[CloneManager] Registered ${worktrees.length} worktree(s) for ${targetPath}`);
+        logger.info('registered-worktreeslength-worktrees');
       }
     } catch (error) {
-      console.error(`[CloneManager] Failed to scan worktrees for ${targetPath}:`, error);
+      logger.error('failed-to-scan-worktrees-for-targetpath:', { error: error instanceof Error ? error.message : String(error) });
       // Continue even if worktree scan fails - the repository is still registered
     }
 

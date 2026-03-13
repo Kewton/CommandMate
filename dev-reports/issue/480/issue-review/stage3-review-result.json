@@ -1,0 +1,78 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 480,
+  "review_date": "2026-03-13",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "must_fix",
+      "category": "実行環境",
+      "title": "logger.tsはクライアントコンポーネントでインポート不可",
+      "description": "logger.tsはenv.tsをインポートし、env.tsはdb-path-resolver.tsをインポートしている。db-path-resolver.tsはNode.js専用モジュール（path, os, cli/utils/install-context）に依存するため、'use client'指定のあるコンポーネントではlogger.tsをインポートできない。対象ファイル: src/components/Terminal.tsx（1件）、src/components/worktree/MessageList.tsx（1件）、src/hooks/useWebSocket.ts（1件）。これらはいずれも'use client'コンポーネント/フック。",
+      "suggestion": "クライアント用の軽量ロガー（例: src/lib/client-logger.ts）を別途作成し、サーバー専用の依存を持たないようにする。または、logger.tsの依存チェーンからNode.jsモジュールを分離し、クライアントでも動作可能にする。Issueの設計方針にクライアント/サーバー分離の考慮を明記すべき。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "must_fix",
+      "category": "テスト影響",
+      "title": "テストがconsole.logの出力文字列を直接検証している",
+      "description": "以下のテストはconsole.logの呼び出しや出力文字列を直接assertionしており、console.logをlogger経由に変更するとテストが失敗する。(1) tests/integration/trust-dialog-auto-response.test.ts:146行目 - consoleSpy.mock.callsでTrust dialog detectedを含む文字列を検証。(2) tests/unit/lib/schedule-manager.test.ts:136行目 - logSpyでAlready initializedを含む文字列を検証。(3) tests/unit/lib/schedule-manager.test.ts:372行目 - logSpyでInitializingを含む文字列を検証。",
+      "suggestion": "console.logをlogger経由に変更する際、対応するテストも同時に更新する必要がある。loggerをモック化してlogger.info/logger.debugの呼び出しを検証するか、loggerの出力先であるconsole.logのspy対象を維持するかを明確に決定し、Issueの受け入れ基準に「影響テストの修正」を追加すべき。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "should_fix",
+      "category": "テスト影響",
+      "title": "prompt-detector-cacheテストがconsole.logをloggerの内部実装として依存",
+      "description": "tests/unit/prompt-detector-cache.test.ts:25行目でvi.spyOn(console, 'log')をdebugSpyとして使用し、loggerの内部実装（logger内部でconsole.logを呼ぶ）に依存している。prompt-detectorは既にcreateLoggerを導入済みだが、テスト側がlogger経由ではなくconsole.logレベルでspyしている。このテストは変更後もlogger内部がconsole.logを使う限り動作するが、loggerの内部実装変更に脆弱。",
+      "suggestion": "テストをloggerのモック化に切り替えることを推奨。ただし現状のまま動作はするため、優先度は中。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "should_fix",
+      "category": "移行リスク",
+      "title": "db-migrations.ts（53件）の一括変更リスク",
+      "description": "db-migrations.tsはスキーママイグレーション処理に53件のconsole.logを含む。マイグレーション処理はアプリ起動の最初期に実行され、失敗するとアプリが起動できなくなる。loggerモジュール自体がenv.ts経由でDB関連モジュールを参照するため、マイグレーション実行時にloggerの初期化順序に問題が生じる可能性がある（循環依存リスク）。",
+      "suggestion": "db-migrations.tsは最優先でlogger移行の動作検証を行うべき。特にlogger.ts -> env.ts -> db-path-resolver.tsの依存チェーンがDB初期化前に安全に動作することを確認する。循環依存が発生する場合はdb-migrations.tsをlogger移行対象から除外するか、軽量なマイグレーション専用ロガーを用意する。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "should_fix",
+      "category": "移行リスク",
+      "title": "160件の一括変更による大規模PR・レビュー負荷",
+      "description": "35ファイル・約160件の変更を1つのPRで行うと、レビュー負荷が高くなりリグレッションの発見が困難になる。特にサーバーサイド（src/lib/）、APIルート（src/app/api/）、クライアントサイド（src/components/、src/hooks/）で環境が異なるため、一括変更は危険。",
+      "suggestion": "以下の段階的移行を推奨: Phase 1: 既にcreateLogger導入済みファイルの残存console.log解消（11ファイル）。Phase 2: src/lib/配下のサーバーサイドモジュール。Phase 3: src/app/api/配下のAPIルート。Phase 4: src/components/、src/hooks/のクライアントサイド（S3-001の解決後）。各フェーズで個別にテスト実行・CI確認を行う。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "should_fix",
+      "category": "依存関係",
+      "title": "logger.tsの依存チェーンが重い（env.ts -> db-path-resolver.ts -> cli/utils/）",
+      "description": "現在のlogger.tsはgetLogConfig()経由でenv.tsに依存し、env.tsはdb-path-resolver.tsとpath, osモジュールに依存する。ログ出力という基盤機能が、DB関連やCLIユーティリティに依存する設計は、Issue #480の大規模適用時に以下のリスクを生む: (1) クライアントコンポーネントで使用不可（S3-001）。(2) テスト時にモック対象が増加。(3) 循環依存リスク。",
+      "suggestion": "Issue #480のスコープ外だが関連として記録。logger.tsのgetLogConfig()をprocess.envから直接読み取る軽量実装に切り替えることで、依存チェーンを断ち切ることを検討すべき。"
+    },
+    {
+      "id": "S3-007",
+      "severity": "nice_to_have",
+      "category": "依存関係",
+      "title": "JSDocの@exampleブロック内のconsole.logは変更不要",
+      "description": "src/hooks/useFullscreen.ts、src/hooks/useSwipeGesture.ts、src/hooks/useWebSocket.ts、src/components/worktree/SlashCommandList.tsx、src/components/worktree/MarkdownEditor.tsx、src/components/worktree/TerminalDisplay.tsxのJSDocコメント内にconsole.logが記載されている（計8件）。これらは実行されるコードではなくドキュメント上の使用例。",
+      "suggestion": "Issueの対象スコープから明示的にJSDoc内のconsole.logを除外する記載を追加すると、実装時の判断が容易になる。grepでの件数カウントからも除外すべき。実際の実行コードとしてのconsole.logはsrc/hooks/useWebSocket.ts:71行目のみだが、これもJSDoc内。実行コードとしてはsrc/components/Terminal.tsx:171行目とsrc/components/worktree/MessageList.tsx:464行目のみ。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "nice_to_have",
+      "category": "運用",
+      "title": "ログレベル変更による運用時情報量の変化",
+      "description": "現在のconsole.logは常時出力されるが、logger経由に変更するとLOG_LEVELの設定によりdebugレベルのログが本番環境で出力されなくなる（本番デフォルトはinfo）。これは意図された動作だが、障害調査時にdebugレベルのログが必要な場合、環境変数の変更と再起動が必要。",
+      "suggestion": "運用ドキュメントにLOG_LEVELの変更方法と各レベルで出力される情報の一覧を追加することを推奨。特にclaude-session.ts（12件）やresponse-poller.ts（5件）のデバッグログは障害調査に有用なため、ログレベル切り替えの手順を明文化すべき。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 4,
+    "nice_to_have_count": 2,
+    "overall_quality": "fair"
+  }
+}

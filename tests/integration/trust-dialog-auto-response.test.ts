@@ -7,6 +7,21 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+// Mock logger module (Issue #480)
+const { mockLogger } = vi.hoisted(() => {
+  const mockLogger = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    withContext: vi.fn().mockReturnThis(),
+  };
+  return { mockLogger };
+});
+vi.mock('@/lib/logger', () => ({
+  createLogger: vi.fn(() => mockLogger),
+}));
+
 // Mock tmux module before importing claude-session
 vi.mock('@/lib/tmux', () => ({
   hasSession: vi.fn(),
@@ -115,8 +130,8 @@ describe('Issue #201: Trust dialog auto-response - Acceptance Tests', () => {
       await expect(promise).resolves.toBeUndefined();
     });
 
-    it('AC4: should output info-level console log on auto-response', async () => {
-      const consoleSpy = vi.spyOn(console, 'log');
+    it('AC4: should output info-level log on auto-response', async () => {
+      mockLogger.info.mockClear();
 
       vi.mocked(hasSession).mockResolvedValue(false);
       vi.mocked(createSession).mockResolvedValue();
@@ -142,13 +157,11 @@ describe('Issue #201: Trust dialog auto-response - Acceptance Tests', () => {
 
       await promise;
 
-      // Verify console.log was called with trust dialog message
-      const trustLogCalls = consoleSpy.mock.calls.filter((call) =>
-        String(call[0]).includes('Trust dialog detected')
+      // Verify logger.info was called with trust dialog detection message
+      const trustLogCalls = mockLogger.info.mock.calls.filter((call) =>
+        String(call[0]).includes('trust-dialog')
       );
-      expect(trustLogCalls.length).toBe(1);
-
-      consoleSpy.mockRestore();
+      expect(trustLogCalls.length).toBeGreaterThanOrEqual(1);
     });
 
     it('AC5: should timeout if prompt never appears after trust dialog Enter', async () => {

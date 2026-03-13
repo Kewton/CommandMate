@@ -10,6 +10,9 @@
 
 import { DEFAULT_AUTO_YES_DURATION, validateStopPattern, type AutoYesDuration, type AutoYesStopReason } from '@/config/auto-yes-config';
 import { isValidWorktreeId } from './path-validator';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('auto-yes-state');
 
 // Re-export from shared config for backward compatibility (Issue #314)
 export type { AutoYesStopReason } from '@/config/auto-yes-config';
@@ -215,7 +218,7 @@ export function checkStopCondition(
 
   const validation = validateStopPattern(autoYesState.stopPattern);
   if (!validation.valid) {
-    console.warn('[Auto-Yes] Invalid stop pattern, disabling', { worktreeId });
+    logger.warn('invalid-stop-pattern', { detail: String({ worktreeId }) });
     disableAutoYes(worktreeId);
     return false;
   }
@@ -226,7 +229,7 @@ export function checkStopCondition(
 
     if (matched === null) {
       // Execution failed - disable to prevent future errors
-      console.warn('[Auto-Yes] Stop condition check failed, disabling pattern', { worktreeId });
+      logger.warn('stop-condition-check', { detail: String({ worktreeId }) });
       disableAutoYes(worktreeId);
       return false;
     }
@@ -236,11 +239,11 @@ export function checkStopCondition(
       if (onStopMatched) {
         onStopMatched(worktreeId);
       }
-      console.warn('[Auto-Yes] Stop condition matched, auto-yes disabled', { worktreeId });
+      logger.warn('stop-condition-matched', { detail: String({ worktreeId }) });
       return true;
     }
   } catch {
-    console.warn('[Auto-Yes] Stop condition check error', { worktreeId });
+    logger.warn('stop-condition-check', { detail: String({ worktreeId }) });
   }
 
   return false;

@@ -1,0 +1,20 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘反映",
+  "issue_number": 482,
+  "applied_findings": [
+    {
+      "id": "C001",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "方針2の根拠を修正: 既存JSDocがdata-driven designについての記述であることを明確にし、fetchWithTimeoutの共通化ヒントをJSDocに集約して管理箇所を一元化するという趣旨に書き換えた"
+    },
+    {
+      "id": "C004",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "description": "実装チェックリストの親Issue更新項目に具体的な更新方法を追記: R-4行の残存件数を0件に書き換える手順（gh issue edit 475 またはGitHub Web UI）を明記した"
+    }
+  ],
+  "skipped_findings": []
+}

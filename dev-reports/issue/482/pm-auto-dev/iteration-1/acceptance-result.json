@@ -1,0 +1,41 @@
+{
+  "issue_number": 482,
+  "status": "passed",
+  "scenarios": [
+    {
+      "id": "S1",
+      "name": "TODO comment removal (route.ts)",
+      "status": "passed",
+      "details": "No TODO comments found in src/app/api/worktrees/[id]/slash-commands/route.ts. NOTE comment at L29-32 is preserved as expected (lines 29-31 contain the NOTE explaining the local interface vs api-client.ts distinction)."
+    },
+    {
+      "id": "S2",
+      "name": "TODO comment removal (opencode-config.ts)",
+      "status": "passed",
+      "details": "grep for TODO in src/lib/cli-tools/opencode-config.ts returned no matches. All TODO comments at former L217-218 and L284-285 have been removed."
+    },
+    {
+      "id": "S3",
+      "name": "Issue #XXX reference resolution (cli-patterns.ts)",
+      "status": "passed",
+      "details": "No 'Issue #XXX' found in src/lib/cli-patterns.ts. Line 27 now reads 'Alternative 2: \"esc to interrupt\" status bar text (Issue #188)' confirming the placeholder was replaced with the correct issue number."
+    },
+    {
+      "id": "S4",
+      "name": "JSDoc addition for fetchWithTimeout (opencode-config.ts)",
+      "status": "passed",
+      "details": "ensureOpencodeConfig JSDoc at line 339 contains 'HTTP fetch logic (fetchWithTimeout) can be extracted to a shared helper.' providing the refactoring hint as specified."
+    },
+    {
+      "id": "S5",
+      "name": "Quality checks (tsc, lint, test:unit)",
+      "status": "passed",
+      "details": "npx tsc --noEmit: no errors. npm run lint: no ESLint warnings or errors. npm run test:unit: 249 test files passed, 4921 tests passed (7 skipped)."
+    }
+  ],
+  "summary": {
+    "total": 5,
+    "passed": 5,
+    "failed": 0
+  }
+}

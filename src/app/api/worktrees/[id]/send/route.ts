@@ -23,6 +23,9 @@ import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
 import { getGitStatus } from '@/lib/git-utils';
 import { isPathSafe, resolveAndValidateRealPath } from '@/lib/path-validator';
 import path from 'path';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/send');
 
 /** Supported CLI tool IDs - derived from CLI_TOOL_IDS (Issue #368: DRY) */
 const VALID_CLI_TOOL_IDS: readonly CLIToolType[] = CLI_TOOL_IDS;
@@ -174,15 +177,15 @@ export async function POST(
             const gitStatus = await getGitStatus(worktree.path, null);
             if (gitStatus.currentBranch !== '(unknown)' && gitStatus.currentBranch !== '(detached HEAD)') {
               saveInitialBranch(db, params.id, gitStatus.currentBranch);
-              console.log(`[send] Saved initial branch for ${params.id}: ${gitStatus.currentBranch}`);
+              logger.info('saved-initial-branch-for:');
             }
           } catch (gitError) {
             // Log but don't fail - git status is non-critical
-            console.error(`[send] Failed to get/save initial branch:`, gitError);
+            logger.error('failed-to-getsave-initial-branch:', { error: gitError instanceof Error ? gitError.message : String(gitError) });
           }
         }
       } catch (error: unknown) {
-        console.error(`Failed to start ${cliTool.name} session:`, error);
+        logger.error('failed-to-start-session:', { error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json(
           { error: `Failed to start ${cliTool.name} session: ${getErrorMessage(error)}` },
           { status: 500 }
@@ -200,7 +203,7 @@ export async function POST(
       await savePendingAssistantResponse(db, params.id, cliToolId, userMessageTimestamp);
     } catch (error) {
       // Log but don't fail - user message should still be saved
-      console.error(`[send] Failed to save pending assistant response:`, error);
+      logger.error('failed-to-save-pending-assistant-response:', { error: error instanceof Error ? error.message : String(error) });
     }
 
     // Clean up orphaned user messages (Issue #379: duplicate message prevention)
@@ -219,7 +222,7 @@ export async function POST(
       }
     } catch (error) {
       // Log but don't fail - cleanup candidate discovery is best-effort
-      console.error(`[send] Failed to detect orphaned messages:`, error);
+      logger.error('failed-to-detect-orphaned-messages:', { error: error instanceof Error ? error.message : String(error) });
     }
 
     // Issue #474: Validate imagePath if provided
@@ -250,7 +253,7 @@ export async function POST(
         await cliTool.sendMessage(params.id, trimmedContent);
       }
     } catch (error: unknown) {
-      console.error(`Failed to send message to ${cliTool.name}:`, error);
+      logger.error('failed-to-send-message-to:', { error: error instanceof Error ? error.message : String(error) });
       return NextResponse.json(
         { error: `Failed to send message to ${cliTool.name}: ${getErrorMessage(error)}` },
         { status: 500 }
@@ -275,11 +278,11 @@ export async function POST(
       try {
         const deleted = deleteMessageById(db, orphanedMessageIdToDelete);
         if (deleted) {
-          console.log(`[send] Cleaned up orphaned user message ${orphanedMessageIdToDelete} for ${params.id} (${cliToolId})`);
+          logger.info('cleaned-up-orphaned-user');
         }
       } catch (error) {
         // Log but don't fail - cleanup is best-effort
-        console.error(`[send] Failed to clean up orphaned message ${orphanedMessageIdToDelete}:`, error);
+        logger.error('failed-to-clean-up-orphaned-message:', { error: error instanceof Error ? error.message : String(error) });
       }
     }
 
@@ -288,14 +291,14 @@ export async function POST(
 
     // Clear in-progress message ID (session state is managed by savePendingAssistantResponse)
     clearInProgressMessageId(db, params.id, cliToolId);
-    console.log(`✓ Cleared in-progress message for ${params.id} (${cliToolId})`);
+    logger.info('cleared-in-progress-message-for');
 
     // Start polling for CLI tool's response
     startPolling(params.id, cliToolId);
 
     return NextResponse.json(message, { status: 201 });
   } catch (error: unknown) {
-    console.error('Error sending message:', error);
+    logger.error('error-sending-message:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to send message' },
       { status: 500 }

@@ -7,6 +7,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById, getMemoById, updateMemo, deleteMemo } from '@/lib/db';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/memos');
 
 /** Maximum title length */
 const MAX_TITLE_LENGTH = 100;
@@ -75,7 +78,7 @@ export async function PUT(
 
     return NextResponse.json({ memo: updatedMemo }, { status: 200 });
   } catch (error) {
-    console.error('Error updating memo:', error);
+    logger.error('error-updating-memo:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to update memo' },
       { status: 500 }
@@ -117,7 +120,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {
-    console.error('Error deleting memo:', error);
+    logger.error('error-deleting-memo:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to delete memo' },
       { status: 500 }

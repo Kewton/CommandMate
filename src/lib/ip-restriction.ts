@@ -19,6 +19,9 @@
 // --- Internal constants (unexported) [S1-002] ---
 // Integrated into this module; no external references needed (YAGNI).
 
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('ip-restriction');
 const IPV4_MAPPED_IPV6_PREFIX = '::ffff:';
 const IPV4_PATTERN = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 const IPV4_CIDR_PATTERN = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/;
@@ -52,10 +55,7 @@ const allowedIpsEnv = process.env.CM_ALLOWED_IPS?.trim() || '';
 // and a warning is emitted to help operators detect configuration mistakes.
 const trustProxyEnv = process.env.CM_TRUST_PROXY?.trim() || '';
 if (trustProxyEnv !== '' && trustProxyEnv !== 'true' && trustProxyEnv !== 'false') {
-  console.warn(
-    `[IP-RESTRICTION] CM_TRUST_PROXY has unexpected value: "${trustProxyEnv}". ` +
-    'Only "true" (lowercase) enables proxy trust.'
-  );
+  logger.warn('config:trust-proxy-unexpected', { value: trustProxyEnv });
 }
 
 /** Whether CM_TRUST_PROXY is strictly 'true' */

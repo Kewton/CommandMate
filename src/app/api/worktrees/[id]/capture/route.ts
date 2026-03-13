@@ -17,6 +17,9 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db-instance';
 import { hasSession, capturePane } from '@/lib/tmux';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/capture');
 
 export async function POST(
   req: NextRequest,
@@ -72,7 +75,7 @@ export async function POST(
     return NextResponse.json({ output });
   } catch (error) {
     // Fixed-string error response (no internal details exposed to client)
-    console.error('Capture API error:', error);
+    logger.error('capture-api-error:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to capture terminal output' },
       { status: 500 }

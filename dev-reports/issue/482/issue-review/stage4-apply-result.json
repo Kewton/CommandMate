@@ -1,0 +1,48 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 482,
+  "apply_date": "2026-03-13",
+  "iteration": 1,
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "S3-001",
+        "status": "applied",
+        "change_summary": "型統合方針を(B)に確定。理由セクションを追加し、api-client.tsのSlashCommandsResponseを直接importしているモジュールが存在しないこと、2つの型が完全に独立していることを明記"
+      },
+      {
+        "id": "S3-003",
+        "status": "applied",
+        "change_summary": "cli-patterns.ts修正方針セクションを新設。Issue番号が特定できない場合の具体的な修正文言（Issue #XXX参照を削除しJSDoc説明文のみ残す）を修正前/修正後の例とともに明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S3-002",
+        "status": "applied",
+        "change_summary": "opencode-config.ts TODO削除の補足方針セクションを新設。既存JSDocにfetchWithTimeout共通化のヒントを1行追記する方針を明記"
+      },
+      {
+        "id": "S3-004",
+        "status": "skipped",
+        "reason": "テスト影響なしの確認情報であり、Issue本文への反映不要"
+      },
+      {
+        "id": "S3-005",
+        "status": "skipped",
+        "reason": "テスト影響なしの確認情報であり、Issue本文への反映不要"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 5,
+    "applied": 3,
+    "skipped": 2
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/482"
+  }
+}

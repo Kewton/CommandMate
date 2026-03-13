@@ -24,6 +24,9 @@ import { invalidateCache } from './tmux-capture-cache';
 import { getErrorMessage } from './errors';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('session-key-sender');
 
 const execAsync = promisify(exec);
 
@@ -152,7 +155,7 @@ export async function sendMessageToSession(
   // Issue #405: Invalidate cache after sending message
   invalidateCache(sessionName);
 
-  console.info(`[session-key-sender] Sent message to session: ${sessionName}`);
+  logger.info('sent-message-to-session', { sessionName });
 }
 
 // =============================================================================
@@ -185,12 +188,12 @@ export async function stopSession(sessionName: string): Promise<boolean> {
     const killed = await killSession(sessionName);
 
     if (killed) {
-      console.info(`[session-key-sender] Stopped session: ${sessionName}`);
+      logger.info('stopped-session', { sessionName });
     }
 
     return killed;
   } catch (error: unknown) {
-    console.error(`Error stopping Claude session: ${getErrorMessage(error)}`);
+    logger.error('session:stop-failed', { error: getErrorMessage(error) });
     return false;
   }
 }

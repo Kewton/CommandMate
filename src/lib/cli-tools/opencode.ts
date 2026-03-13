@@ -23,6 +23,9 @@ import { invalidateCache } from '../tmux-capture-cache';
 import { ensureOpencodeConfig } from './opencode-config';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('cli-tools/opencode');
 
 const execFileAsync = promisify(execFile);
 
@@ -91,7 +94,7 @@ export class OpenCodeTool extends BaseCLITool {
 
     const exists = await hasSession(sessionName);
     if (exists) {
-      console.log(`OpenCode session ${sessionName} already exists`);
+      logger.info('opencode-session-sessionname');
       return;
     }
 
@@ -126,7 +129,7 @@ export class OpenCodeTool extends BaseCLITool {
       // Wait for OpenCode to initialize (GPU model loading via Ollama)
       await new Promise((resolve) => setTimeout(resolve, OPENCODE_INIT_WAIT_MS));
 
-      console.log(`Started OpenCode session: ${sessionName}`);
+      logger.info('started-opencode-session:sessionname');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start OpenCode session: ${errorMessage}`);
@@ -171,7 +174,7 @@ export class OpenCodeTool extends BaseCLITool {
       // Issue #405: Invalidate cache after sending message
       invalidateCache(sessionName);
 
-      console.log(`Sent message to OpenCode session: ${sessionName}`);
+      logger.info('sent-message-to-opencode-session:session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to send message to OpenCode: ${errorMessage}`);
@@ -216,10 +219,9 @@ export class OpenCodeTool extends BaseCLITool {
       // Issue #405: Invalidate cache after session kill
       invalidateCache(sessionName);
 
-      console.log(`Stopped OpenCode session: ${sessionName}`);
+      logger.info('stopped-opencode-session:sessionname');
     } catch (error: unknown) {
-      const errorMessage = getErrorMessage(error);
-      console.error(`Error stopping OpenCode session: ${errorMessage}`);
+      logger.error('session:stop-failed', { error: getErrorMessage(error) });
       throw error;
     }
   }

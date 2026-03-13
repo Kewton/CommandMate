@@ -11,6 +11,9 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { startPolling } from '@/lib/response-poller';
 import { getAnswerInput } from '@/lib/prompt-detector';
 import { broadcastMessage } from '@/lib/ws-server';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/respond');
 
 /**
  * POST /api/worktrees/[id]/respond
@@ -147,14 +150,14 @@ export async function POST(
     try {
       // Send the answer (number or y/n)
       await sendKeys(sessionName, input, false);
-      console.log(`✓ Sent answer '${input}' to ${sessionName} (${cliTool.name})`);
+      logger.info('sent-answer-to');
 
       // Wait a moment for the input to be processed
       await new Promise(resolve => setTimeout(resolve, 100));
 
       // Send Enter
       await sendKeys(sessionName, '', true);
-      console.log(`✓ Sent Enter to ${sessionName}`);
+      logger.info('sent-enter-to');
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return NextResponse.json(
@@ -177,14 +180,14 @@ export async function POST(
     // Resume polling for CLI tool's next response
     startPolling(params.id, cliToolId);
 
-    console.log(`✓ Resumed polling for ${params.id} (${cliToolId})`);
+    logger.info('resumed-polling-for');
 
     return NextResponse.json({
       success: true,
       message: updatedMessage,
     });
   } catch (error: unknown) {
-    console.error('Failed to respond to prompt:', error);
+    logger.error('failed-to-respond-to-prompt:', { error: error instanceof Error ? error.message : String(error) });
     const errorMessage = error instanceof Error ? error.message : 'Internal server error';
     return NextResponse.json(
       { error: errorMessage },

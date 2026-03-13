@@ -31,6 +31,9 @@ import {
   recoverRunningLogs,
   type ScheduleState,
 } from './job-executor';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('schedule-manager');
 
 // Re-export for backward compatibility (public API preservation)
 export { batchUpsertSchedules } from './cron-parser';
@@ -195,7 +198,7 @@ async function syncSchedules(): Promise<void> {
           const scheduleId = scheduleIds[i];
 
           if (manager.schedules.size >= MAX_CONCURRENT_SCHEDULES) {
-            console.warn(`[schedule-manager] MAX_CONCURRENT_SCHEDULES (${MAX_CONCURRENT_SCHEDULES}) reached`);
+            logger.warn('schedule:max-concurrent-reached', { limit: MAX_CONCURRENT_SCHEDULES });
             return;
           }
 
@@ -232,13 +235,13 @@ async function syncSchedules(): Promise<void> {
             });
 
             manager.schedules.set(scheduleId, state);
-            console.log(`[schedule-manager] Scheduled ${entry.name} (${entry.cronExpression})`);
+            logger.info('schedule:created', { name: entry.name, cron: entry.cronExpression });
           } catch (cronError) {
-            console.warn(`[schedule-manager] Invalid cron for ${entry.name}:`, cronError);
+            logger.warn('schedule:invalid-cron', { name: entry.name, error: cronError instanceof Error ? cronError.message : String(cronError) });
           }
         }
       } catch (error) {
-        console.error(`[schedule-manager] Error syncing schedules for worktree ${worktree.id}:`, error);
+        logger.error('schedule:sync-failed', { worktreeId: worktree.id, error: error instanceof Error ? error.message : String(error) });
       }
     }
 
@@ -247,7 +250,7 @@ async function syncSchedules(): Promise<void> {
       if (!activeScheduleIds.has(scheduleId)) {
         state.cronJob.stop();
         manager.schedules.delete(scheduleId);
-        console.log(`[schedule-manager] Removed stale schedule ${state.entry.name}`);
+        logger.info('schedule:removed-stale', { name: state.entry.name });
       }
     }
 
@@ -273,11 +276,11 @@ export function initScheduleManager(): void {
   const manager = getManagerState();
 
   if (manager.initialized) {
-    console.log('[schedule-manager] Already initialized, skipping');
+    logger.debug('init:skip', { reason: 'already initialized' });
     return;
   }
 
-  console.log('[schedule-manager] Initializing...');
+  logger.info('init:start');
 
   // Recovery: mark stale running logs as failed
   recoverRunningLogs();
@@ -288,12 +291,12 @@ export function initScheduleManager(): void {
   // Start periodic sync timer (DJ-003: .catch for repeated execution safety)
   manager.timerId = setInterval(() => {
     void syncSchedules().catch(err =>
-      console.error('[schedule-manager] Unexpected sync error:', err)
+      logger.error('sync:unexpected-error', { error: err instanceof Error ? err.message : String(err) })
     );
   }, POLL_INTERVAL_MS);
 
   manager.initialized = true;
-  console.log(`[schedule-manager] Initialized with ${manager.schedules.size} schedule(s)`);
+  logger.info('init:completed', { scheduleCount: manager.schedules.size });
 }
 
 /**
@@ -336,7 +339,7 @@ export function stopAllSchedules(): void {
   activeProcesses.clear();
 
   manager.initialized = false;
-  console.log('[schedule-manager] All schedules stopped');
+  logger.info('stop:all-completed');
 }
 
 /**
@@ -374,12 +377,12 @@ export function stopScheduleForWorktree(worktreeId: string): void {
     if (row?.path) {
       manager.cmateFileCache.delete(row.path);
     }
-  } catch (error) {
+  } catch {
     // DB lookup failed - schedule stop already completed above (fallback)
-    console.warn(`[schedule-manager] Failed to resolve worktree path for cache cleanup (worktreeId: ${worktreeId}):`, error);
+    logger.warn('cache:cleanup-failed', { worktreeId });
   }
 
-  console.log(`[schedule-manager] Stopped schedules for worktree: ${worktreeId}`);
+  logger.info('stop:worktree', { worktreeId });
 }
 
 /**

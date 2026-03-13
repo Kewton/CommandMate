@@ -26,6 +26,9 @@ import {
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { access, constants } from 'fs/promises';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('claude-session');
 
 const execAsync = promisify(exec);
 
@@ -196,14 +199,14 @@ function isValidClaudePath(claudePath: string): boolean {
   // SEC-MF-001: Rejects shell metacharacters (;, |, &, $, `, newlines, spaces in dangerous positions, etc.)
   const SAFE_PATH_PATTERN = /^[/a-zA-Z0-9._-]+$/;
   if (!SAFE_PATH_PATTERN.test(claudePath)) {
-    console.log(`[claude-session] CLAUDE_PATH contains invalid characters, ignoring: ${claudePath.substring(0, 50)}`);
+    logger.info('claudepath-contains-invalid-characters-i');
     return false;
   }
 
   // (2) Path traversal prevention: reject ../ sequences
   // SEC-MF-001: Prevents path traversal attacks
   if (claudePath.includes('..')) {
-    console.log('[claude-session] CLAUDE_PATH contains path traversal sequence, ignoring');
+    logger.info('claudepath-contains-path');
     return false;
   }
 
@@ -230,7 +233,7 @@ async function getClaudePath(): Promise<string> {
         cachedClaudePath = envClaudePath;
         return cachedClaudePath;
       } catch {
-        console.log(`[claude-session] CLAUDE_PATH is not executable: ${envClaudePath}`);
+        logger.info('claudepath-is-not-executable:envclaudepa');
         // Fall through to fallback paths
       }
     }
@@ -384,7 +387,7 @@ export async function isSessionHealthy(sessionName: string): Promise<HealthCheck
 async function ensureHealthySession(sessionName: string): Promise<boolean> {
   const result = await isSessionHealthy(sessionName);
   if (!result.healthy) {
-    console.warn(`[health-check] Session ${sessionName} unhealthy: ${result.reason}`);
+    logger.warn('session-sessionname-unhealthy:resultreas');
     await killSession(sessionName);
     return false;
   }
@@ -467,7 +470,7 @@ export async function isClaudeRunning(worktreeId: string): Promise<boolean> {
   // S2-F001: await + extract .healthy to maintain boolean return type
   const result = await isSessionHealthy(sessionName);
   if (!result.healthy) {
-    console.warn(`[isClaudeRunning] Session ${sessionName} unhealthy: ${result.reason}`);
+    logger.warn('session-sessionname-unhealthy:resultreas');
     return false;
   }
   return true;
@@ -555,7 +558,7 @@ export async function startClaudeSession(
     // SF-S2-004: Health check on existing session
     const healthy = await ensureHealthySession(sessionName);
     if (healthy) {
-      console.log(`Claude session ${sessionName} already exists and is healthy`);
+      logger.info('claude-session-sessionname');
       return;
     }
     // If not healthy, ensureHealthySession() already killed the session.
@@ -600,7 +603,7 @@ export async function startClaudeSession(
         if (CLAUDE_PROMPT_PATTERN.test(cleanOutput)) {
           // Wait for stability after prompt detection (CONS-007, DOC-001)
           await new Promise((resolve) => setTimeout(resolve, CLAUDE_POST_PROMPT_DELAY));
-          console.log(`Claude initialized in ${Date.now() - startTime}ms`);
+          logger.info('claude-initialized-in');
           initialized = true;
           break;
         }
@@ -610,7 +613,7 @@ export async function startClaudeSession(
         if (!trustDialogHandled && CLAUDE_TRUST_DIALOG_PATTERN.test(cleanOutput)) {
           await sendKeys(sessionName, '', true);
           trustDialogHandled = true;
-          console.log('Trust dialog detected, sending Enter to confirm');
+          logger.info('trust-dialog-detected');
           // Continue polling to wait for prompt detection
         }
       } catch {
@@ -623,12 +626,12 @@ export async function startClaudeSession(
       throw new Error(`Claude initialization timeout (${CLAUDE_INIT_TIMEOUT}ms)`);
     }
 
-    console.log(`Started Claude session: ${sessionName}`);
+    logger.info('started-claude-session:sessionname');
   } catch (error: unknown) {
     // MF-S2-002: Clear cached path on all failures (harmless for non-path failures)
     clearCachedClaudePath();
     // SEC-SF-002: Log detailed error server-side, throw generic message to client
-    console.log(`[claude-session] Session start failed: ${getErrorMessage(error)}`);
+    logger.error('session:start-failed', { error: error instanceof Error ? error.message : String(error) });
     throw new Error('Failed to start Claude session');
   }
 }

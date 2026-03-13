@@ -25,6 +25,9 @@ import { cleanClaudeResponse, cleanGeminiResponse, cleanOpenCodeResponse } from 
 import { stripAnsi } from './cli-patterns';
 import type { CLIToolType } from './cli-tools/types';
 import type { ChatMessage } from '@/types/models';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('assistant-response-saver');
 
 /**
  * Skip patterns for Claude-specific UI elements
@@ -244,7 +247,7 @@ export async function savePendingAssistantResponse(
       output = await captureSessionOutput(worktreeId, cliToolId, SESSION_OUTPUT_BUFFER_SIZE);
     } catch {
       // Session not running or capture failed - return null without error
-      console.log(`[savePendingAssistantResponse] Failed to capture session output for ${worktreeId}`);
+      logger.info('failed-to-capture');
       return null;
     }
 
@@ -267,10 +270,7 @@ export async function savePendingAssistantResponse(
     const { bufferReset, reason } = detectBufferReset(currentLineCount, lastCapturedLine);
 
     if (bufferReset) {
-      console.log(
-        `[savePendingAssistantResponse] Buffer reset detected (${reason}): ` +
-        `current=${currentLineCount}, last=${lastCapturedLine}`
-      );
+      logger.info('buffer:reset-detected', { reason, currentLineCount, lastCapturedLine });
     }
 
     // 5. Determine effective last captured line
@@ -285,9 +285,7 @@ export async function savePendingAssistantResponse(
       // response-poller's dedup check can work correctly.
       if (currentLineCount < lastCapturedLine) {
         updateSessionState(db, worktreeId, cliToolId, currentLineCount);
-        console.log(
-          `[savePendingAssistantResponse] Corrected stale position (${lastCapturedLine} → ${currentLineCount})`
-        );
+        logger.info('position:corrected-stale', { from: lastCapturedLine, to: currentLineCount });
       }
       return null;
     }
@@ -309,9 +307,7 @@ export async function savePendingAssistantResponse(
     if (!cleanedResponse || cleanedResponse.trim() === '') {
       // Output exists but cleaned to empty - update position but don't save
       updateSessionState(db, worktreeId, cliToolId, currentLineCount);
-      console.log(
-        `[savePendingAssistantResponse] Cleaned response is empty, updating position to ${currentLineCount}`
-      );
+      logger.debug('response:empty-after-clean', { currentLineCount });
       return null;
     }
 
@@ -335,14 +331,12 @@ export async function savePendingAssistantResponse(
     // 12. Broadcast to WebSocket clients
     broadcastMessage('message', { worktreeId, message });
 
-    console.log(
-      `[savePendingAssistantResponse] Saved assistant response (lines ${lastCapturedLine}-${currentLineCount})`
-    );
+    logger.info('response:saved', { fromLine: lastCapturedLine, toLine: currentLineCount });
 
     return message;
   } catch (error) {
     // Log error but don't throw - user message should still be saved
-    console.error('[savePendingAssistantResponse] Error:', error);
+    logger.error('error:', { error: error instanceof Error ? error.message : String(error) });
     return null;
   }
 }

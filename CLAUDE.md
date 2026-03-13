@@ -122,7 +122,7 @@ src/
 └── types/         # 型定義
 
 tests/
-├── helpers/       # テスト共通ヘルパー（型ガード等）
+├── helpers/       # テスト共通ヘルパー（型ガード、loggerモック等）
 ├── unit/          # 単体テスト
 └── integration/   # 結合テスト
 ```

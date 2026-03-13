@@ -1,0 +1,50 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 480,
+  "apply_date": "2026-03-13",
+  "applied_findings": [
+    {
+      "id": "S7-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "受け入れ基準のテスト修正項目にloggerモジュールのvi.mock推奨方針を追記（console.log spyは非推奨と明記）"
+    },
+    {
+      "id": "S7-002",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "技術的考慮事項の「循環依存リスク」を「初期化順序の確認」に修正。logger.tsの依存チェーンにDB操作が含まれないため安全であることを明記"
+    },
+    {
+      "id": "S7-003",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "概要にconsole.error/console.warnを追記。受け入れ基準に対象スコープを明記。検証コマンドをconsole.log/error/warnの3種対応に更新"
+    },
+    {
+      "id": "S7-004",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "Phase 4の対応方針を簡略化。対象3件と少数のためconsole.log削除で対応、client-logger.tsは将来検討に変更"
+    },
+    {
+      "id": "S7-005",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "Phase 2/3/4に完了時確認コマンド（npm run lint && npx tsc --noEmit && npm run test:unit）を追記"
+    }
+  ],
+  "skipped_findings": [],
+  "summary": {
+    "total_findings": 5,
+    "applied": 5,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/480"
+  },
+  "status": "completed",
+  "issue_updated": true
+}

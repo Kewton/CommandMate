@@ -20,6 +20,9 @@ import { statSync } from 'fs';
 import path from 'path';
 import { CMATE_FILENAME } from '@/config/cmate-constants';
 import type { ScheduleEntry } from '@/types/cmate';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('cron-parser');
 
 // =============================================================================
 // Types
@@ -88,7 +91,7 @@ export function getCmateMtime(worktreePath: string): number | null {
       return null;
     }
     // Permission errors etc. - log and treat as no file (SEC4-004-note)
-    console.warn(`[schedule-manager] Failed to stat ${filePath}:`, error);
+    logger.warn('file:stat-failed', { filePath });
     return null;
   }
 }
@@ -107,7 +110,7 @@ export function getAllWorktrees(): WorktreeRow[] {
     const db = getLazyDbInstance();
     return db.prepare('SELECT id, path FROM worktrees').all() as WorktreeRow[];
   } catch (error) {
-    console.error('[schedule-manager] Failed to get worktrees:', error);
+    logger.error('worktree:fetch-failed', { error: error instanceof Error ? error.message : String(error) });
     return [];
   }
 }
@@ -230,9 +233,9 @@ export function disableStaleSchedules(
     }
 
     if (disabledCount > 0) {
-      console.info(`[schedule-manager] Disabled ${disabledCount} stale DB schedule(s)`);
+      logger.info('schedule:disabled-stale', { count: disabledCount });
     }
   } catch (error) {
-    console.error('[schedule-manager] Failed to disable stale schedules:', error);
+    logger.error('schedule:disable-stale-failed', { error: error instanceof Error ? error.message : String(error) });
   }
 }

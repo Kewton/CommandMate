@@ -42,6 +42,9 @@ import {
 } from '@/config/video-extensions';
 import { extname } from 'path';
 import { readFile, stat } from 'fs/promises';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/files');
 
 /**
  * [DRY] Centralized mapping of error codes to HTTP status codes
@@ -297,7 +300,7 @@ export async function GET(
       },
     });
   } catch (error: unknown) {
-    console.error('Error reading file:', error);
+    logger.error('error-reading-file:', { error: error instanceof Error ? error.message : String(error) });
     return createErrorResponse('INTERNAL_ERROR', 'Failed to read file');
   }
 }
@@ -351,7 +354,7 @@ export async function PUT(
       path: relativePath,
     });
   } catch (error: unknown) {
-    console.error('Error updating file:', error);
+    logger.error('error-updating-file:', { error: error instanceof Error ? error.message : String(error) });
     return createErrorResponse('INTERNAL_ERROR', 'Failed to update file');
   }
 }
@@ -404,7 +407,7 @@ export async function POST(
       { status: 201 }
     );
   } catch (error: unknown) {
-    console.error('Error creating file/directory:', error);
+    logger.error('error-creating-filedirectory:', { error: error instanceof Error ? error.message : String(error) });
     return createErrorResponse('INTERNAL_ERROR', 'Failed to create file/directory');
   }
 }
@@ -440,7 +443,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
-    console.error('Error deleting file/directory:', error);
+    logger.error('error-deleting-filedirectory:', { error: error instanceof Error ? error.message : String(error) });
     return createErrorResponse('INTERNAL_ERROR', 'Failed to delete file/directory');
   }
 }
@@ -511,7 +514,7 @@ export async function PATCH(
         return createErrorResponse('INVALID_REQUEST', 'Unknown action. Supported: "rename", "move"');
     }
   } catch (error: unknown) {
-    console.error('Error renaming file/directory:', error);
+    logger.error('error-renaming-filedirectory:', { error: error instanceof Error ? error.message : String(error) });
     return createErrorResponse('INTERNAL_ERROR', 'Failed to rename file/directory');
   }
 }

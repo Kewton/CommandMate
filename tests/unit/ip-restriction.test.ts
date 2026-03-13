@@ -15,6 +15,22 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
+// Mock logger module (Issue #480)
+const { mockLogger } = vi.hoisted(() => {
+  const mockLogger = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    withContext: vi.fn().mockReturnThis(),
+  };
+  return { mockLogger };
+});
+vi.mock('@/lib/logger', () => ({
+  createLogger: vi.fn(() => mockLogger),
+}));
+
+
 describe('IP Restriction Module', () => {
   const originalEnv = process.env;
 
@@ -362,42 +378,39 @@ describe('IP Restriction Module', () => {
   describe('CM_TRUST_PROXY value validation', () => {
     it('should warn on unexpected CM_TRUST_PROXY value', async () => {
       process.env.CM_TRUST_PROXY = 'TRUE';
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockLogger.warn.mockClear();
       await import('../../src/lib/ip-restriction');
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('CM_TRUST_PROXY has unexpected value')
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'config:trust-proxy-unexpected',
+        expect.objectContaining({ value: 'TRUE' })
       );
-      warnSpy.mockRestore();
-    });
+});
 
     it('should not warn for CM_TRUST_PROXY=true', async () => {
       process.env.CM_TRUST_PROXY = 'true';
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockLogger.warn.mockClear();
       await import('../../src/lib/ip-restriction');
-      expect(warnSpy).not.toHaveBeenCalledWith(
+      expect(mockLogger.warn).not.toHaveBeenCalledWith(
         expect.stringContaining('CM_TRUST_PROXY has unexpected value')
       );
-      warnSpy.mockRestore();
-    });
+});
 
     it('should not warn for CM_TRUST_PROXY=false', async () => {
       process.env.CM_TRUST_PROXY = 'false';
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockLogger.warn.mockClear();
       await import('../../src/lib/ip-restriction');
-      expect(warnSpy).not.toHaveBeenCalledWith(
+      expect(mockLogger.warn).not.toHaveBeenCalledWith(
         expect.stringContaining('CM_TRUST_PROXY has unexpected value')
       );
-      warnSpy.mockRestore();
-    });
+});
 
     it('should not warn when CM_TRUST_PROXY is not set', async () => {
       delete process.env.CM_TRUST_PROXY;
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockLogger.warn.mockClear();
       await import('../../src/lib/ip-restriction');
-      expect(warnSpy).not.toHaveBeenCalledWith(
+      expect(mockLogger.warn).not.toHaveBeenCalledWith(
         expect.stringContaining('CM_TRUST_PROXY has unexpected value')
       );
-      warnSpy.mockRestore();
-    });
+});
   });
 });

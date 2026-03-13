@@ -1,0 +1,19 @@
+{
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 482,
+  "applied_findings": [
+    {
+      "id": "S5-001",
+      "status": "applied",
+      "description": "受け入れ基準に「実装完了時に親Issue #475 のR-4行の残存件数（6箇所→4箇所）を更新する」を追加"
+    },
+    {
+      "id": "S5-002",
+      "status": "applied",
+      "description": "受け入れ基準に「npm run lint でリントエラーがないことを確認」を追加"
+    }
+  ],
+  "skipped_findings": [],
+  "updated_body": "> **Note**: このIssueは 2026-03-13 にレビュー結果（Stage 1, Stage 3, Stage 5）を反映して更新されました。\n> 詳細: dev-reports/issue/482/issue-review/\n\n## 親Issue\n\n- #475\n\n## 概要\n\nコードベースに残存する4箇所のTODO/FIXMEマーカーを対応または削除する。\n\n## 対象一覧\n\n| ファイル | 行 | 種別 | 内容 | 方針 |\n|---------|-----|------|------|------|\n| `src/app/api/worktrees/[id]/slash-commands/route.ts` | 33 | TODOマーカー | api-client.ts の SlashCommandsResponse との型統合検討 | 下記「型統合の方針」参照 |\n| `src/lib/cli-tools/opencode-config.ts` | 217 | TODOマーカー | 3rd provider追加時のHTTP fetchロジック共通化 | TODOコメントを削除し、既存JSDoc（ensureOpencodeConfig関数内）に集約。JSDocに `fetchWithTimeout` 共通化のヒントを1行追記する |\n| `src/lib/cli-tools/opencode-config.ts` | 284 | TODOマーカー | 同上（2箇所目） | 同上 |\n| `src/lib/cli-patterns.ts` | 27 | JSDoc内未解決参照 | `Issue #XXX` 未解決の参照 | git logで該当コミット（5ebd2ba）の関連PRを辿り正しいIssue番号を特定する。特定できない場合は下記「cli-patterns.ts修正方針」参照 |\n\n## 型統合の方針（slash-commands/route.ts:33）\n\n**方針(B)を採用: 統合不要と判断しTODOを削除する。**\n\n### 理由\n\n- route.ts の `SlashCommandsResponse`（`{ groups, sources, cliTool }`）と api-client.ts の `SlashCommandsResponse`（`{ groups }`のみ）は、異なるAPIエンドポイント（`/api/worktrees/[id]/slash-commands` と `/api/slash-commands`）に紐づいており、用途が異なる\n- 影響範囲調査の結果、api-client.ts の `SlashCommandsResponse` を型名で直接importしているモジュールは存在しない（`useSlashCommands.ts` は `handleApiError` のみimportし、レスポンスは `data.groups` として直接アクセスしている）\n- 2つの型は完全に独立しており、統合によるメリットがない\n- 方針(B)が最もリスクが低く、テストへの影響もゼロ\n\n### 対応内容\n\n- route.ts L33のTODOコメントを削除する\n- 型定義自体（ローカルの `SlashCommandsResponse`）はそのまま維持する\n\n## cli-patterns.ts修正方針（L27: Issue #XXX参照）\n\ngit logで該当コミット（5ebd2ba）の関連PRを辿り、正しいIssue番号を特定する。\n\n### Issue番号が特定できない場合の修正方針\n\n`Issue #XXX` 参照を削除し、JSDocの説明文のみ残す。\n\n修正前:\n```\nAlternative 2 (Issue #XXX): \"esc to interrupt\" status bar text\n```\n\n修正後:\n```\nAlternative 2: \"esc to interrupt\" status bar text\n```\n\n## opencode-config.ts TODO削除の補足方針\n\nTODOコメント（L217, L284）を削除し、既存JSDoc（ensureOpencodeConfig関数 L340-342）に集約する。\n\n既存JSDocには「If a 3rd provider is added, consider refactoring to a data-driven design (providerDefinitions array + loop)」という記載が既にあるが、TODOコメントに含まれる「HTTP fetchロジック共通化」という具体的な実装ヒントがカバーされていないため、JSDocに以下の1行を追記する:\n\n```\nHTTP fetch logic (fetchWithTimeout) can be extracted to a shared helper.\n```\n\n## 受け入れ基準\n\n- [ ] 対応可能なTODOは実装完了\n- [ ] 対応不要なものはコメント削除または理由を明記\n- [ ] 既存テストが全パス\n- [ ] `npx tsc --noEmit` でコンパイルエラーがないことを確認\n- [ ] `npm run lint` でリントエラーがないことを確認\n- [ ] 実装完了時に親Issue #475 のR-4行の残存件数（6箇所→4箇所）を更新する"
+}

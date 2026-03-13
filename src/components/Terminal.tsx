@@ -168,7 +168,6 @@ export function TerminalComponent({
     };
 
     ws.onclose = () => {
-      console.log('Terminal WebSocket disconnected');
       setConnectionStatus('disconnected');
       term.write('\x1b[33m⚠ Disconnected from terminal\x1b[0m\r\n');
       if (!isDisposed && reconnectTimerRef.current === null) {

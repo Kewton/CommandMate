@@ -11,6 +11,9 @@ import { sanitizeForExport } from '@/lib/log-export-sanitizer';
 import { withLogging } from '@/lib/api-logger';
 import fs from 'fs/promises';
 import path from 'path';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/logs');
 
 export const GET = withLogging<{ id: string; filename: string }>(async (
   request: NextRequest,
@@ -100,7 +103,7 @@ export const GET = withLogging<{ id: string; filename: string }>(async (
       { status: 200 }
     );
   } catch (error: unknown) {
-    console.error('Error reading log file:', error);
+    logger.error('error-reading-log-file:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to read log file' },
       { status: 500 }

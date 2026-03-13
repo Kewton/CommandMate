@@ -17,6 +17,22 @@ import {
   CACHE_MAX_CAPTURE_LINES,
 } from '@/lib/tmux-capture-cache';
 
+// Mock logger module (Issue #480)
+const { mockLogger } = vi.hoisted(() => {
+  const mockLogger = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    withContext: vi.fn().mockReturnThis(),
+  };
+  return { mockLogger };
+});
+vi.mock('@/lib/logger', () => ({
+  createLogger: vi.fn(() => mockLogger),
+}));
+
+
 describe('tmux-capture-cache', () => {
   beforeEach(() => {
     resetCacheForTesting();
@@ -230,13 +246,13 @@ describe('tmux-capture-cache', () => {
     });
 
     it('should log debug message [SEC4-006]', () => {
-      const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+      mockLogger.debug.mockClear();
       setCachedCapture('session-1', 'output', 100);
 
       invalidateCache('session-1');
 
-      expect(debugSpy).toHaveBeenCalledWith(
-        expect.stringContaining('invalidateCache'),
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'cache:invalidate',
         expect.objectContaining({ sessionName: 'session-1' })
       );
     });

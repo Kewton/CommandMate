@@ -19,6 +19,9 @@
  */
 
 /** Cache entry structure */
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('tmux-capture-cache');
 interface CacheEntry {
   /** Captured output (stored at max capture lines) */
   output: string;
@@ -187,7 +190,7 @@ export function invalidateCache(sessionName: string): void {
   cache.delete(sessionName);
 
   // [SEC4-006] Debug log for cache invalidation chain tracking
-  console.debug('invalidateCache:', { sessionName });
+  logger.debug('cache:invalidate', { sessionName });
 }
 
 // =========================================================================

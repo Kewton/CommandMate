@@ -10,27 +10,6 @@
 
 import { CLI_TOOL_IDS, type CLIToolType } from './cli-tools/types';
 
-/**
- * ANSI escape code pattern for log sanitization (R4-005)
- * Duplicated from cli-patterns.ts to avoid importing server-side logger chain
- */
-const ANSI_PATTERN = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\[[0-9;]*m/g;
-
-/**
- * Strip ANSI escape codes from a string
- */
-function stripAnsi(str: string): string {
-  return str.replace(ANSI_PATTERN, '');
-}
-
-/**
- * Sanitize raw DB value for safe console.warn output (R4-005)
- * Removes ANSI escapes, newlines, and truncates to 100 chars
- */
-function sanitizeRawForLog(raw: string): string {
-  return stripAnsi(raw).replace(/[\n\r]/g, ' ').substring(0, 100);
-}
-
 /** Minimum number of selected agents */
 export const MIN_SELECTED_AGENTS = 2;
 
@@ -80,17 +59,17 @@ export function parseSelectedAgents(raw: string | null): CLIToolType[] {
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
-      console.warn(`[selected-agents] Invalid format in DB, falling back to default: ${sanitizeRawForLog(raw)}`);
+      // invalid format - return default silently
       return DEFAULT_SELECTED_AGENTS;
     }
     const result = validateAgentsPair(parsed);
     if (!result.valid) {
-      console.warn(`[selected-agents] Invalid data in DB (${result.error}), falling back to default: ${sanitizeRawForLog(raw)}`);
+      // validation failed - return default silently
       return DEFAULT_SELECTED_AGENTS;
     }
     return result.value!;
   } catch {
-    console.warn(`[selected-agents] JSON parse error in DB, falling back to default: ${sanitizeRawForLog(raw)}`);
+    // JSON parse error - return default silently
     return DEFAULT_SELECTED_AGENTS;
   }
 }

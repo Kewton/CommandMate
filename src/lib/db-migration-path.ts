@@ -12,6 +12,9 @@ import fs from 'fs';
 import path from 'path';
 import { homedir } from 'os';
 import { isSystemDirectory } from '../config/system-directories';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('db-migration-path');
 
 /**
  * Migration result interface
@@ -51,16 +54,14 @@ export function resolveAndValidatePath(
 
     // Check if path is in a system directory
     if (isSystemDirectory(resolvedPath)) {
-      console.warn(
-        `[Security] ${description} points to system directory, skipping: ${resolvedPath}`
-      );
+      logger.warn('security:system-directory', { description, resolvedPath });
       return null;
     }
 
     return resolvedPath;
   } catch {
     // Failed to resolve path (broken symlink, etc.)
-    console.warn(`[Security] Failed to resolve ${description}: ${filePath}`);
+    logger.warn('path:resolve-failed', { description, filePath });
     return null;
   }
 }
@@ -90,12 +91,10 @@ export function getLegacyDbPaths(): string[] {
       if (!isSystemDirectory(resolvedPath)) {
         paths.push(envDbPath);
       } else {
-        console.warn(
-          `[Security] Skipping DATABASE_PATH in system directory: ${resolvedPath}`
-        );
+        logger.warn('security:database-path-system-dir', { resolvedPath });
       }
     } catch {
-      console.warn(`[Security] Invalid DATABASE_PATH: ${envDbPath}`);
+      logger.warn('config:invalid-database-path', { envDbPath });
     }
   }
 
@@ -161,10 +160,8 @@ export function migrateDbIfNeeded(targetPath: string): MigrationResult {
     // Copy database to new location
     fs.copyFileSync(resolvedLegacyPath, resolvedTargetPath);
 
-    console.log(
-      `[Migration] Database migrated from ${resolvedLegacyPath} to ${resolvedTargetPath}`
-    );
-    console.log(`[Migration] Backup created at ${backupPath}`);
+    logger.info('migration:database-migrated', { from: resolvedLegacyPath, to: resolvedTargetPath });
+    logger.info('migration:backup-created', { backupPath });
 
     return {
       migrated: true,

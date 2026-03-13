@@ -16,6 +16,9 @@ import {
 import { detectAndResendIfPastedText } from '../pasted-text-helper';
 import { invalidateCache } from '../tmux-capture-cache';
 import { CODEX_PROMPT_PATTERN, stripAnsi } from '../cli-patterns';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('cli-tools/codex');
 
 /**
  * Extract error message from unknown error type (DRY)
@@ -75,7 +78,7 @@ export class CodexTool extends BaseCLITool {
     // Check if session already exists
     const exists = await hasSession(sessionName);
     if (exists) {
-      console.log(`Codex session ${sessionName} already exists`);
+      logger.info('codex-session-sessionname');
       return;
     }
 
@@ -100,7 +103,7 @@ export class CodexTool extends BaseCLITool {
       // Handles trust dialog and update notification automatically
       await this.waitForReady(sessionName);
 
-      console.log(`✓ Started Codex session: ${sessionName}`);
+      logger.info('started-codex-session:sessionname');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start Codex session: ${errorMessage}`);
@@ -125,7 +128,7 @@ export class CodexTool extends BaseCLITool {
           // Verify it's the actual input prompt, not a prompt inside a dialog
           // by checking no trust/update dialog is still active
           if (!output.includes('Do you trust') && !output.includes('Press enter to continue')) {
-            console.log(`✓ Codex prompt detected (attempt ${i + 1})`);
+            logger.info('codex-prompt-detected');
             return;
           }
         }
@@ -136,7 +139,7 @@ export class CodexTool extends BaseCLITool {
         // triggering npm install which kills the Codex process.
         if (output.includes('Update') && output.includes('Skip')) {
           await sendKeys(sessionName, '2', true);
-          console.log('✓ Skipped Codex update notification');
+          logger.info('skipped-codex-update');
           await new Promise((resolve) => setTimeout(resolve, 500));
           continue;
         }
@@ -144,7 +147,7 @@ export class CodexTool extends BaseCLITool {
         // Handle "Press enter to continue" (after update skip or other notification)
         if (output.includes('Press enter to continue')) {
           await sendSpecialKey(sessionName, 'Enter');
-          console.log('✓ Dismissed Codex notification');
+          logger.info('dismissed-codex-notification');
           await new Promise((resolve) => setTimeout(resolve, 500));
           continue;
         }
@@ -154,7 +157,7 @@ export class CodexTool extends BaseCLITool {
         if (!trustDialogHandled && output.includes('Do you trust')) {
           await sendKeys(sessionName, '1', true);
           trustDialogHandled = true;
-          console.log('✓ Auto-trusted folder for Codex session');
+          logger.info('auto-trusted-folder-for');
           await new Promise((resolve) => setTimeout(resolve, 500));
           continue;
         }
@@ -163,7 +166,7 @@ export class CodexTool extends BaseCLITool {
       }
       await new Promise((resolve) => setTimeout(resolve, CODEX_POLL_INTERVAL_MS));
     }
-    console.log('⚠ Codex prompt detection timed out after initialization');
+    logger.info('codex-prompt-detection');
   }
 
   /**
@@ -185,7 +188,7 @@ export class CodexTool extends BaseCLITool {
       }
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
-    console.log('⚠ Codex prompt not detected before send - proceeding anyway');
+    logger.info('codex-prompt-not');
   }
 
   /**
@@ -230,7 +233,7 @@ export class CodexTool extends BaseCLITool {
       // Issue #405: Invalidate cache after sending message
       invalidateCache(sessionName);
 
-      console.log(`✓ Sent message to Codex session: ${sessionName}`);
+      logger.info('sent-message-to-codex-session:sessionnam');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to send message to Codex: ${errorMessage}`);
@@ -260,11 +263,10 @@ export class CodexTool extends BaseCLITool {
       const killed = await killSession(sessionName);
 
       if (killed) {
-        console.log(`✓ Stopped Codex session: ${sessionName}`);
+        logger.info('stopped-codex-session:sessionname');
       }
     } catch (error: unknown) {
-      const errorMessage = getErrorMessage(error);
-      console.error(`Error stopping Codex session: ${errorMessage}`);
+      logger.error('session:stop-failed', { error: getErrorMessage(error) });
       throw error;
     }
   }

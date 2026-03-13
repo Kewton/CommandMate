@@ -9,6 +9,9 @@ import { randomUUID } from 'crypto';
 import Database from 'better-sqlite3';
 import type { ChatMessage } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('chat-db');
 
 type ChatMessageRow = {
   id: string;
@@ -252,7 +255,7 @@ export function deleteAllMessages(
   `);
 
   stmt.run(worktreeId);
-  console.info(`[chat-db] Deleted all messages for worktree: ${worktreeId}`);
+  logger.info('deleted-all-messages', { worktreeId });
 }
 
 /**
@@ -301,7 +304,7 @@ export function deleteMessagesByCliTool(
   `);
 
   const result = stmt.run(worktreeId, cliTool);
-  console.info(`[chat-db] Deleted ${result.changes} messages for worktree: ${worktreeId}, cliTool: ${cliTool}`);
+  logger.info('deleted-messages-by-cli-tool', { worktreeId, cliTool, count: result.changes });
   return result.changes;
 }
 

@@ -1,0 +1,112 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "issue_number": 480,
+  "review_date": "2026-03-13",
+  "previous_findings_verification": {
+    "S1-001": {
+      "status": "resolved",
+      "note": "件数を「約160件」に更新済み。実測値159件（grep一致ベース）と合致。"
+    },
+    "S1-002": {
+      "status": "resolved",
+      "note": "「上位10以外のファイル」セクション追加済み。実測値43件/25ファイルとほぼ一致（Issue記載は約40件/25ファイル）。"
+    },
+    "S1-003": {
+      "status": "resolved",
+      "note": "対象スコープ「src/配下の全ファイル（src/cli/を除く）」を明記済み。hooks/components含むと明記。"
+    },
+    "S1-004": {
+      "status": "resolved",
+      "note": "logger使用例セクション追加済み。createLogger + logger.info/debug/warn/error の呼び出しパターンを記載。"
+    },
+    "S1-005": {
+      "status": "not_applicable",
+      "note": "CLAUDE.mdへのgemini.ts追記は本Issueのスコープ外。変更なしで問題なし。"
+    },
+    "S1-006": {
+      "status": "resolved",
+      "note": "「削除」方針をlogger.debug()移行に変更済み。LOG_LEVEL制御で管理する旨を明記。"
+    },
+    "S1-007": {
+      "status": "resolved",
+      "note": "受け入れ基準に「既にcreateLogger導入済みファイルの残存を優先解消」を追加済み。"
+    }
+  },
+  "findings": [
+    {
+      "id": "S5-001",
+      "severity": "should_fix",
+      "category": "正確性",
+      "title": "Phase 1の対象が実質ゼロ件",
+      "description": "Phase 1は「createLogger導入済みファイルの残存console.log解消」と定義されているが、実際にcreateLoggerを使用中かつconsole.logが残存するファイルは0件。createLogger導入済みファイル（cli-session.ts, prompt-detector.ts, cli-patterns.ts等8ファイル）は全てconsole.log=0件で既に完全移行済み。Phase 1は実質的に作業なしとなる。",
+      "location": "実装フェーズ - Phase 1",
+      "suggestion": "Phase 1の記述を「createLogger導入済みファイルのconsole.log残存がないことを確認（確認のみ）」に修正するか、Phase 1を削除してPhase 2からスタートする構成に変更する。",
+      "evidence": "createLogger使用ファイル8件（cli-session.ts, prompt-detector.ts, cli-patterns.ts, pasted-text-helper.ts, tmux-control-client.ts, tmux-control-registry.ts, api/interrupt/route.ts, api/search/route.ts）の全てでconsole.log=0件。"
+    },
+    {
+      "id": "S5-002",
+      "severity": "should_fix",
+      "category": "正確性",
+      "title": "「約160件」にJSDocコメント内の24件が含まれている",
+      "description": "grep -rn 'console.log'のマッチ数は159件だが、うち24件はJSDocコメント内（@exampleブロック等）。受け入れ基準で「JSDocコメント内のconsole.logは対象外」と明記されているため、実際の移行対象は約135件。さらにlogger.ts内部の1件も移行対象外。概要の「約160件」という数字は実作業量と乖離がある。",
+      "location": "概要セクション",
+      "suggestion": "「約160件（うちJSDocコメント内約24件、logger.ts内部1件を除く実対象は約135件）」のように内訳を追記するか、「実行コードとしてのconsole.log約135件」に修正する。",
+      "evidence": "JSDocコメント内: useSwipeGesture.ts(2), useFullscreen.ts(2), useWebSocket.ts(1), TerminalDisplay.tsx(1), SlashCommandList.tsx(1), MarkdownEditor.tsx(1), external-apps.ts(1), env.ts(3) 等計24件。logger.ts内部: 1件。"
+    },
+    {
+      "id": "S5-003",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "env.ts内のconsole.warnの取り扱いが未記載",
+      "description": "env.tsにはconsole.warn（非推奨警告）が2箇所あり（getEnvWithFallback:66行目、getDatabasePathWithDeprecationWarning:112行目）、さらにgetEnv内にもconsole.warn（セキュリティ警告、247行目）がある。Issueの上位10表にはenv.tsが含まれていないが、console.warnもlogger経由に統一すべきか方針が不明。loggerへの依存チェーンの起点であるenv.tsにloggerを導入すると循環依存になるため、特別な配慮が必要。",
+      "location": "対象スコープ / 技術的考慮事項",
+      "suggestion": "env.tsのconsole.warnについて、以下のいずれかを明記する: (a) env.tsはlogger.tsの依存元であるため対象外（循環依存回避）、(b) console.warnのみenv.tsに残留させる方針。",
+      "evidence": "logger.ts -> env.ts(getLogConfig) の依存関係により、env.ts内でcreateLoggerを使用すると循環依存が発生する。"
+    },
+    {
+      "id": "S5-004",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "上位10表のファイルパスに「src/lib/」接頭辞が省略されている",
+      "description": "上位10の表でファイル名が「db-migrations.ts」「claude-session.ts」等と記載されているが、正確なパスは「src/lib/db-migrations.ts」「src/lib/claude-session.ts」。cli-tools/配下のファイルも「cli-tools/codex.ts」ではなく「src/lib/cli-tools/codex.ts」。実装時にファイルを特定する際に混乱を避けるため、フルパスまたはsrc/lib/からの相対パスが望ましい。",
+      "location": "console.log多い順(上位10) テーブル",
+      "suggestion": "テーブルのファイル列を「src/lib/db-migrations.ts」形式に更新する。少なくとも表の注釈として「パスはsrc/lib/配下」と記載する。"
+    },
+    {
+      "id": "S5-005",
+      "severity": "nice_to_have",
+      "category": "明確性",
+      "title": "受け入れ基準の検証方法が暗黙的",
+      "description": "受け入れ基準「src/（src/cli/除く）のconsole.logをlogger経由に統一」の検証方法が明記されていない。grepコマンドでの確認が想定されるが、JSDoc除外やlogger.ts内部除外を含めた具体的な検証コマンド例があると、完了判定が客観的になる。",
+      "location": "受け入れ基準",
+      "suggestion": "検証コマンド例を追記: 例えば「grep -rn console.log src/ --include='*.ts' --include='*.tsx' | grep -v src/cli/ | grep -v logger.ts | grep -v ':\\s*\\*' で実行コード内の残存がゼロであること」。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2,
+    "overall_quality": "good"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/logger.ts",
+      "relevance": "統一先loggerモジュール。内部でconsole.log使用（移行対象外）"
+    },
+    {
+      "file": "src/lib/env.ts",
+      "relevance": "logger.tsの依存元。console.warn 3件あり、循環依存によりlogger導入不可"
+    },
+    {
+      "file": "src/lib/cli-session.ts",
+      "relevance": "createLogger導入済み+console.log=0件（Phase 1対象が空である根拠）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構成・モジュール一覧との整合性確認"
+    }
+  ]
+}

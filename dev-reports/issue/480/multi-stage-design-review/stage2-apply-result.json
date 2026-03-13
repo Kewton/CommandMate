@@ -1,0 +1,22 @@
+{
+  "stage": 2,
+  "issue_number": 480,
+  "applied_findings": [
+    "DS2-001",
+    "DS2-002",
+    "DS2-003",
+    "DS2-004",
+    "DS2-005",
+    "DS2-006",
+    "DS2-007",
+    "DS2-008",
+    "DS2-012"
+  ],
+  "skipped_findings": [
+    "DS2-009",
+    "DS2-010",
+    "DS2-011"
+  ],
+  "status": "completed",
+  "design_doc_updated": true
+}
