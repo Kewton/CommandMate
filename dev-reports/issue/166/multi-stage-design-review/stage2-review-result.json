@@ -1,0 +1,94 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 166,
+  "focus_area": "整合性",
+  "consistency_checks": [
+    {
+      "check": "APIルート: mergeCommandGroups(standardGroups, worktreeGroups) の実装確認",
+      "status": "ok",
+      "comment": "route.ts L104で mergeCommandGroups(standardGroups, worktreeGroups) を呼び出しており、設計書3.4のデータフロー記述と一致。standardGroupsが先に登録され、worktreeGroupsが上書きする（SF-1）ため、ローカル優先が正しく実現される。"
+    },
+    {
+      "check": "getSlashCommandGroups() basePath指定時の挙動",
+      "status": "ok",
+      "comment": "slash-commands.ts L333-338で basePath指定時はloadSlashCommands(basePath) + loadSkills(basePath) を呼び出し、キャッシュなしで都度読み込み。設計書3.4のbasePath指定時の設計と整合。設計書では codexLocalSkills = loadCodexSkills(basePath) の追加を提案しており、追加位置も適切。"
+    },
+    {
+      "check": "SlashCommandsResponse型へのsources.codexSkill追加の整合性",
+      "status": "ok",
+      "comment": "route.ts L36-45のSlashCommandsResponse interfaceはローカル型であり、sourcesオブジェクトにcodexSkillプロパティを追加する設計は後方互換性を損なわない。既存のstandard/worktree/mcbd/skillパターンに沿った自然な拡張。"
+    },
+    {
+      "check": "mergeCommandGroups() worktree優先仕様の確認",
+      "status": "ok",
+      "comment": "command-merger.ts L103-129: standardGroupsのコマンドを先にMapに登録し、worktreeGroupsのコマンドで上書き。commandMap.set()による後勝ちロジックでworktree優先が実現されている。設計書3.4 D1-003の記述と完全に一致。"
+    },
+    {
+      "check": "deduplicateByName() の優先度セマンティクス確認",
+      "status": "ok",
+      "comment": "slash-commands.ts L303-317: skills配列を先にMap登録、commands配列で上書き（commands優先）。設計書3.4の deduplicateByName([...claudeSkills, ...codexLocalSkills], commands) では、skills配列内ではcodexLocalSkillsがclaudeSkillsより後に来るため、同名の場合codexLocalSkillsが勝つ。さらにcommandsが最優先。優先度順: commands > codexLocalSkills > claudeSkills。設計意図と整合。"
+    },
+    {
+      "check": "cliTools JsDoc: 設計書 vs 型定義の記述",
+      "status": "issue",
+      "comment": "型定義(slash-commands.ts L51-58)のJSDocは 'undefined: available for ALL tools' と記述しているが、filterCommandsByCliTool() (command-merger.ts L193-195) の実装では undefined は claude-only として扱われる。設計書3.1はこの矛盾を正しく指摘しており、JSDoc修正の提案は妥当。これは設計書の問題ではなく既存コードのドキュメントバグ。"
+    },
+    {
+      "check": "D009コメント: 設計書 vs 現行コメント",
+      "status": "issue",
+      "comment": "slash-commands.ts L126-130のD009コメントは 'Skills currently do not set cliTools, making them available for all CLI tools' と記述しているが、filterCommandsByCliTool()はundefinedをclaude-onlyとして扱うため誤り。設計書3.5の修正案は正確で、修正が必要。"
+    },
+    {
+      "check": "設計書 決定6 vs 3.4 getSlashCommandGroups()キャッシュパスの矛盾",
+      "status": "issue",
+      "comment": "決定6(D1-004)では 'MCBD APIではCodexグローバルスキルキャッシュは不要' と記述しているが、3.4のコード例ではbasePath未指定時（MBCDパス）にもcodexSkillsCacheを読み込んでいる。設計書内で自己矛盾している。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "D2-001",
+      "severity": "must-fix",
+      "category": "整合性",
+      "title": "設計書内の自己矛盾: 決定6 vs セクション3.4のMCBDパスでのCodexスキル読み込み",
+      "description": "決定6（D1-004）では「MCBD APIではCodexグローバルスキルキャッシュは不要。worktree API経由でのみCodexスキルを返す」と明記しているが、セクション3.4のgetSlashCommandGroups()コード例では、basePath未指定時（=MBCDパス）にも codexSkillsCache を読み込み、deduplicateByNameに含めている。この2箇所が矛盾しており、実装者がどちらに従うべきか判断できない。",
+      "suggestion": "設計意図を明確にした上で、どちらかに統一すること。(A) 決定6に従いbasePath未指定パスからCodexスキル読み込みを除外する場合: セクション3.4のコード例からcodexSkillsCache関連コードを削除。(B) MBCDパスでもCodexグローバルスキルを含める場合: 決定6の記述を修正し、MCBD経由でもグローバルCodexスキルが返される旨を記載。推奨は(A) -- filterCommandsByCliTool()がcliTool未指定時はclaudeとして処理するため、MBCDパスにCodexスキルを含めてもフィルタで除外される。含める必然性が薄い。"
+    },
+    {
+      "id": "D2-002",
+      "severity": "should-fix",
+      "category": "整合性",
+      "title": "既存コードのJSDocバグ: cliToolsフィールドの 'undefined = ALL tools' 記述が実装と矛盾",
+      "description": "src/types/slash-commands.ts L52-53 のJSDocでは 'undefined: available for ALL tools (backward compatible)' と記述しているが、filterCommandsByCliTool() (command-merger.ts L193-195) の実装では !cmd.cliTools の場合 cliToolId === 'claude' のみtrueを返す。つまり undefined は claude-only であり、ALL tools ではない。設計書3.1はこの矛盾を正しく認識し修正を提案している。",
+      "suggestion": "設計書3.1のJSDoc修正案をそのまま実装すること。これはIssue #166の変更範囲として適切であり、既存のドキュメントバグを是正する好機である。"
+    },
+    {
+      "id": "D2-003",
+      "severity": "should-fix",
+      "category": "整合性",
+      "title": "既存D009コメントが実装と矛盾 -- filterCommandsByCliTool()の挙動と不一致",
+      "description": "slash-commands.ts L129-130 の D009コメントは 'Skills currently do not set cliTools, making them available for all CLI tools via filterCommandsByCliTool()' と記述しているが、filterCommandsByCliTool() は cliTools未設定のコマンドをclaude-onlyとして扱う。このコメントは誤解を招き、設計書3.5で修正が提案されている。",
+      "suggestion": "設計書3.5の修正案をそのまま適用すること。D009コメントを実装の実態に合わせて書き換える。"
+    },
+    {
+      "id": "D2-004",
+      "severity": "nice-to-have",
+      "category": "整合性",
+      "title": "parseSkillFile()のfilePath計算がprocess.cwd()基準 -- Codexグローバルスキルで不自然なパスになる",
+      "description": "parseSkillFile() (slash-commands.ts L163) は path.relative(process.cwd(), skillPath) でfilePathを計算する。loadCodexSkills()がグローバルスキル（~/.codex/skills/）を読み込む場合、cwd外のパスとなり '../../../.codex/skills/...' のような不自然な相対パスが生成される可能性がある。設計書ではこの点に言及がない。",
+      "suggestion": "loadCodexSkills()で返すSlashCommandのfilePathを、グローバルスキルの場合は絶対パスまたは ~ 表記にすることを検討。あるいはfilePathフィールドの用途がUI表示のみであれば、影響は軽微なため現状維持も許容。設計書にこの挙動についての注記を追加することを推奨。"
+    },
+    {
+      "id": "D2-005",
+      "severity": "nice-to-have",
+      "category": "整合性",
+      "title": "loadSlashCommands()のキャッシュ副作用 -- basePath指定時にグローバルキャッシュが上書きされる",
+      "description": "loadSlashCommands() (slash-commands.ts L230) は常に commandsCache = commands で上書きする。getSlashCommandGroups(basePath) 経由でbasePath指定時に呼ばれると、worktree固有のコマンドでグローバルキャッシュが上書きされる。設計書3.4のコード例では loadCodexSkills(basePath) を追加しているが、この既存のキャッシュ副作用については言及がない。",
+      "suggestion": "これはIssue #166以前から存在する問題で本Issueのスコープ外だが、設計書の「変更不要ファイル」セクションまたは注釈として既知の制約として記載しておくと、実装者の混乱を防げる。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 2,
+  "nice_to_have_count": 2,
+  "overall_assessment": "設計方針書は全体として既存コードベースとの整合性が高く、APIルートのmergeCommandGroups()によるworktree優先、deduplicateByName()のセマンティクス、filterCommandsByCliTool()のフィルタリング動作について正確に理解した上で設計されている。ただし1点、設計書内で決定6（MCBD APIではCodexスキル不要）とセクション3.4のコード例（MCBD パスでcodexSkillsCacheを読み込む）が自己矛盾しており、これはmust-fixとして修正が必要。また、設計書が正しく指摘している既存コードのJSDocバグ（cliTools undefined = ALL tools）とD009コメントの誤りは、本Issueの実装時に確実に修正すべきshould-fix事項である。"
+}

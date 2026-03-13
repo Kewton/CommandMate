@@ -1,0 +1,9 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘反映",
+  "issue_number": 166,
+  "applied_findings": ["D4-001", "D4-003"],
+  "skipped_findings": ["D4-002"],
+  "design_doc_updated": true,
+  "summary": "D4-001: セクション4のパストラバーサル防御にsymlink防御の制限事項（レキシカル検証のみ、fs.realpathSync()対応は別Issue）を追記。D4-003: セクション3.2の設計ポイントにreaddirSync()の例外伝播方針を追記。D4-002はスキップ。Stage 4レビューサマリーをセクション9に追加し、実装チェックリストにD4-001/D4-003の確認項目を追加。"
+}

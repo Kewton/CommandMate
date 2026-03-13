@@ -7,6 +7,7 @@
  */
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import matter from 'gray-matter';
 import type {
@@ -31,6 +32,9 @@ let commandsCache: SlashCommand[] | null = null;
  * Managed independently from commandsCache
  */
 let skillsCache: SlashCommand[] | null = null;
+
+/** Codex skills subdirectory path (Issue #166) */
+const CODEX_SKILLS_SUBDIR = path.join('.codex', 'skills');
 
 /** Skills subdirectory scan limit (Issue #343) */
 const MAX_SKILLS_COUNT = 100;
@@ -123,11 +127,10 @@ function parseCommandFile(filePath: string): SlashCommand | null {
 /**
  * Parse a skill file (SKILL.md) and extract metadata (Issue #343)
  *
- * [D009] Note on cliTools: SKILL.md may contain an `allowed-tools` frontmatter field,
- * which specifies which Claude Code tools the skill is allowed to use (e.g., Bash, Read).
- * This is distinct from the SlashCommand.cliTools field, which controls which CLI tools
- * (claude, codex, gemini) a command is displayed for in the selector UI. Skills currently
- * do not set cliTools, making them available for all CLI tools via filterCommandsByCliTool().
+ * [D009] Note on cliTools: .claude/skills/ skills do not set cliTools (left as undefined),
+ * which means filterCommandsByCliTool() treats them as claude-only (cliToolId === 'claude').
+ * Codex skills (.codex/skills/) set cliTools: ['codex'] explicitly in loadCodexSkills().
+ * See filterCommandsByCliTool() in command-merger.ts for the authoritative behavior.
  *
  * @param skillDirPath - Absolute path to the skill subdirectory
  * @param skillName - Directory name used as fallback for skill name
@@ -291,6 +294,65 @@ export async function loadSkills(basePath?: string): Promise<SlashCommand[]> {
 }
 
 /**
+ * Load Codex skills from .codex/skills/{name}/SKILL.md (Issue #166)
+ *
+ * Scans the Codex skills directory for subdirectories containing SKILL.md files.
+ * Each valid subdirectory is parsed as a skill command with source 'codex-skill'
+ * and cliTools set to ['codex'].
+ *
+ * Security measures:
+ * - Path traversal prevention (rejects ".." in directory names)
+ * - Resolved path validation (must be under skillsDir)
+ * - File size limit (MAX_SKILL_FILE_SIZE_BYTES) via parseSkillFile()
+ * - Skill count limit (MAX_SKILLS_COUNT)
+ *
+ * @param basePath - Optional base path. If not provided, uses os.homedir()
+ * @returns Promise resolving to array of SlashCommand objects
+ */
+export async function loadCodexSkills(basePath?: string): Promise<SlashCommand[]> {
+  const root = basePath ?? os.homedir();
+  const skillsDir = path.join(root, CODEX_SKILLS_SUBDIR);
+
+  if (!fs.existsSync(skillsDir)) {
+    return [];
+  }
+
+  const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
+  const skills: SlashCommand[] = [];
+
+  for (const entry of entries) {
+    if (skills.length >= MAX_SKILLS_COUNT) {
+      logger.warn('codex-skills-count-limit');
+      break;
+    }
+
+    if (!entry.isDirectory()) continue;
+
+    // Path traversal guard: reject entries containing ".."
+    if (entry.name.includes('..')) continue;
+
+    const resolvedPath = path.resolve(skillsDir, entry.name);
+
+    // Security: ensure resolved path is under skillsDir
+    if (!resolvedPath.startsWith(path.resolve(skillsDir) + path.sep)) continue;
+
+    const skill = parseSkillFile(resolvedPath, entry.name);
+    if (skill) {
+      skills.push({
+        ...skill,
+        source: 'codex-skill',
+        cliTools: ['codex'],
+      });
+    }
+  }
+
+  // Sort alphabetically by name
+  skills.sort((a, b) => a.name.localeCompare(b.name));
+
+  return skills;
+}
+
+/**
  * Deduplicate commands and skills by name (Issue #343)
  *
  * Skills are registered first, then commands override any skills with
@@ -333,7 +395,8 @@ export async function getSlashCommandGroups(basePath?: string): Promise<SlashCom
   if (basePath) {
     const commands = await loadSlashCommands(basePath);
     const skills = await loadSkills(basePath);
-    const deduplicated = deduplicateByName(skills, commands);
+    const codexLocalSkills = await loadCodexSkills(basePath);
+    const deduplicated = deduplicateByName([...skills, ...codexLocalSkills], commands);
     return groupByCategory(deduplicated);
   }
 

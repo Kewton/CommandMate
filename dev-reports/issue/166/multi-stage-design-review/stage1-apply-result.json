@@ -1,0 +1,53 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー指摘反映",
+  "issue_number": 166,
+  "applied_findings": ["D1-003", "D1-001", "D1-002", "D1-005", "D1-006", "D1-004"],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "summary": "Stage 1通常レビューの全6件の指摘事項を設計方針書に反映。Must Fix 1件（D1-003: deduplicateByName()のCodexローカル優先データフロー明記をセクション3.4に追記）、Should Fix 3件（D1-001: basePath非対称性のJSDoc注記をセクション3.2に追記、D1-002: 共通ヘルパー抽出推奨をセクション3.2に追記、D1-005: parseSkillFile()上書きパターン注記を決定5として追記）、Nice to Have 2件（D1-006: MAX_SKILLS_COUNT独立適用をセクション4に追記、D1-004: MCBD APIキャッシュ不要の設計決定を決定6として追記）。レビュー指摘反映サマリーセクション（セクション9）と実装チェックリストを新設。",
+  "changes": [
+    {
+      "finding_id": "D1-003",
+      "severity": "must-fix",
+      "section": "3.4",
+      "description": "worktree APIでのmergeCommandGroups()によるローカル優先統合のデータフローと、getSlashCommandGroups(basePath)指定時の挙動を明記"
+    },
+    {
+      "finding_id": "D1-001",
+      "severity": "should-fix",
+      "section": "3.2",
+      "description": "loadCodexSkills()のJSDocにbasePath未指定時のos.homedir()ベース挙動とloadSkills()との非対称性を注記"
+    },
+    {
+      "finding_id": "D1-002",
+      "severity": "should-fix",
+      "section": "3.2",
+      "description": "loadCodexSkills()とloadSkills()の共通スキャンロジックのscanSkillDirectory()への抽出推奨を記載（YAGNI保留）"
+    },
+    {
+      "finding_id": "D1-005",
+      "severity": "should-fix",
+      "section": "5",
+      "description": "parseSkillFile()のsource/cliToolsスプレッド上書きパターンとOCP拡張点を決定5として追記"
+    },
+    {
+      "finding_id": "D1-006",
+      "severity": "nice-to-have",
+      "section": "4",
+      "description": "MAX_SKILLS_COUNTがソース別に独立適用され合計最大300件となることを明記"
+    },
+    {
+      "finding_id": "D1-004",
+      "severity": "nice-to-have",
+      "section": "5",
+      "description": "MCBD APIではCodexグローバルスキルキャッシュ不要のYAGNI設計決定を決定6として追記"
+    }
+  ],
+  "new_sections": [
+    "セクション9: レビュー指摘反映サマリー（指摘一覧表 + 実装チェックリスト）"
+  ],
+  "section_renumbering": {
+    "旧セクション9（関連Issue）": "セクション10に変更"
+  }
+}

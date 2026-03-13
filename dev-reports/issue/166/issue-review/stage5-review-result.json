@@ -1,0 +1,122 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "issue_number": 166,
+  "review_type": "通常",
+  "review_date": "2026-03-14",
+  "previous_findings_addressed": [
+    {
+      "id": "MF-1",
+      "status": "addressed",
+      "comment": "背景セクションが「.claude/commands/*.mdおよび.claude/skills/のみ対応している（Skills対応は#343で実装済み）」に修正されている。事実と整合しており正確。"
+    },
+    {
+      "id": "MF-2",
+      "status": "addressed",
+      "comment": "「型定義の拡張」セクションが追加され、SlashCommandSourceへの'codex-skill'追加タスク、SlashCommandCategoryの新カテゴリ追加検討が記載されている。CATEGORY_LABELS/CATEGORY_ORDER/テストの3箇所連動更新の注意事項も追記済み。"
+    },
+    {
+      "id": "MF-3",
+      "status": "addressed",
+      "comment": "「セキュリティ対策」セクションが実装タスクに追加され、パストラバーサル防御、symlink防御、ファイルサイズ上限(64KB)、ファイル数上限(100)、safeParseFrontmatter()適用の5項目が記載されている。既存の定数名(MAX_SKILL_FILE_SIZE_BYTES, MAX_SKILLS_COUNT)も参照されている。"
+    },
+    {
+      "id": "IA-004",
+      "status": "addressed",
+      "comment": "「CLIツール別フィルタリング統合」セクション末尾に設計前提として明記されている。「既存の.claude/skills/スキルはcliToolsを設定しない（undefinedのまま）」「filterCommandsByCliTool()のデフォルト挙動により、cliToolsがundefinedのスキルはclaudeタブでのみ表示される」「CodexスキルにのみcliTools: ['codex']を明示的に自動設定する」の3点が記載済み。"
+    },
+    {
+      "id": "SF-1",
+      "status": "addressed",
+      "comment": "Custom Promptsを「非推奨 - 対象外」と明記し、Skillsのみを実装対象とする方針が記載されている。対応方針ブロックも追加済み。"
+    },
+    {
+      "id": "SF-2",
+      "status": "addressed",
+      "comment": "「CLIツール別フィルタリング統合」セクションにcliTools: ['codex']の自動設定とfilterCommandsByCliTool()による既存フィルタリング機構の統合が記載済み。"
+    },
+    {
+      "id": "SF-3",
+      "status": "addressed",
+      "comment": "「読み込みスコープ設計」セクションがテーブル形式で追加され、グローバル/ローカルの読み込みタイミング、キャッシュ戦略、同名スキル優先度(ローカル > グローバル)が記載済み。"
+    },
+    {
+      "id": "SF-4",
+      "status": "addressed",
+      "comment": "「受け入れ条件」セクション(7項目)と「テスト計画」セクション(Unit/Integration Test)が追加済み。受け入れ条件はチェックボックス形式で検証可能な形で記載されている。"
+    },
+    {
+      "id": "SF-5",
+      "status": "addressed",
+      "comment": "Skills仕様にディレクトリ構造(.codex/skills/{name}/SKILL.md)とフロントマターフィールド(name, description, allowed-tools)が明記され、parseSkillFile()の共通化検討も記載済み。"
+    },
+    {
+      "id": "IA-001",
+      "status": "addressed",
+      "comment": "「キャッシュ管理」セクションが実装タスクに追加され、clearCache()へのCodexスキルキャッシュクリアとgetCachedCommands()相当の関数検討が記載済み。"
+    },
+    {
+      "id": "IA-002",
+      "status": "addressed",
+      "comment": "「APIレスポンス型の更新」セクションが追加され、sources集計ロジックへの'codex-skill'追加と設計判断ポイント(skillに含めるか別プロパティにするか)が記載済み。"
+    },
+    {
+      "id": "IA-003",
+      "status": "addressed",
+      "comment": "「型定義の拡張」セクション内の注意事項としてCATEGORY_LABELS/CATEGORY_ORDER/テストの3箇所連動更新が記載済み。"
+    },
+    {
+      "id": "IA-006",
+      "status": "addressed",
+      "comment": "「Skills読込」セクションのグローバルスキル読込タスクに「os.homedir()を使用してホームディレクトリを解決する」と明記済み。"
+    },
+    {
+      "id": "IA-007",
+      "status": "addressed",
+      "comment": "Integration Test対象に「同名Codexスキルがグローバル・ローカル両方に存在する場合、ローカル版が優先されること」とdeduplicateByName()の呼び出し順序が明記済み。"
+    },
+    {
+      "id": "NTH-1",
+      "status": "addressed",
+      "comment": "関連Issueに「#343 .claude/skills/対応（設計参考 - loadSkills, parseSkillFile, セキュリティ対策の実装パターン）」が追加済み。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "S5-001",
+      "severity": "should-fix",
+      "category": "正確性",
+      "title": "D009コメントとfilterCommandsByCliTool()の実装が矛盾しており、Issue本文の設計前提と既存コードコメントの間に不整合がある",
+      "description": "Issue本文の設計前提では「cliToolsがundefinedのスキルはclaudeタブでのみ表示される」と正しく記載されているが、既存のソースコード(src/lib/slash-commands.ts:126-130)のD009コメントでは「Skills currently do not set cliTools, making them available for all CLI tools via filterCommandsByCliTool()」と記載されている。filterCommandsByCliTool()の実際の実装(command-merger.ts:193-194)ではcliTools未設定の場合cliToolId==='claude'のみtrueを返すため、D009コメントは事実と異なる。Issue #166の実装時にこのコメントを参照した開発者が混乱する可能性がある。",
+      "suggestion": "Issue #166の実装タスクまたは注意事項として、D009コメント(src/lib/slash-commands.ts:126-130)がfilterCommandsByCliTool()の実装と矛盾していることを付記し、実装時にD009コメントの修正も行うよう記載する。あるいは、事前にD009コメントの修正を別タスクとして実施してからIssue #166に着手する。"
+    },
+    {
+      "id": "S5-002",
+      "severity": "should-fix",
+      "category": "明確性",
+      "title": "Issueタイトルに「~/.codex/prompts/」が残っているが、Custom Promptsはスコープ外",
+      "description": "Issueタイトルが「feat: Codexカスタムコマンド読込対応（~/.codex/prompts/, .codex/skills/）」となっているが、Issue本文ではCustom Prompts(~/.codex/prompts/)は「非推奨 - 対象外」と明記されている。タイトルと本文の間に不整合があり、Issue一覧で見たときにスコープを誤解する可能性がある。",
+      "suggestion": "Issueタイトルを「feat: Codexカスタムスキル読込対応（.codex/skills/, ~/.codex/skills/）」等に修正し、対象範囲を正確に反映させる。"
+    },
+    {
+      "id": "S5-003",
+      "severity": "nice-to-have",
+      "category": "完全性",
+      "title": "参考リンクのCodex公式ドキュメントURLの有効性が未確認",
+      "description": "参考リンクとして3つのCodex公式ドキュメントURL(developers.openai.com/codex/...)が記載されているが、Codex CLIのドキュメント構成はリリースごとに変更される可能性がある。実装時にリンク切れでスキル仕様を参照できないリスクがある。",
+      "suggestion": "実装着手前にリンクの有効性を確認する。リンク切れの場合はCodexのGitHubリポジトリ(https://github.com/openai/codex)のREADMEやdocsを代替参照先として追記する。"
+    },
+    {
+      "id": "S5-004",
+      "severity": "nice-to-have",
+      "category": "完全性",
+      "title": "Custom Promptsの$1-$9引数プレースホルダの仕様記載が対象外機能としては詳細すぎる",
+      "description": "Custom Promptsセクションに引数仕様($1-$9、名前付きプレースホルダ)が詳細に記載されているが、この機能は「対象外」と明示されている。対象外機能の詳細仕様はIssueの読み手に不要な情報を提供し、スコープの理解を妨げる可能性がある。",
+      "suggestion": "Custom Promptsセクションの記載を最小限にする（配置場所と非推奨である旨のみ残し、詳細仕様は参考リンクに委ねる）。ただし、テキスト量を抑えるためにスキップしても問題ない。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 2,
+  "nice_to_have_count": 2,
+  "overall_assessment": "Stage 1-4の全指摘事項(must-fix 4件、should-fix 10件、nice-to-have 2件)が適切に反映されており、Issue #166は実装着手に十分な品質に達している。新たなmust-fix事項はなく、残るのはIssueタイトルとスコープの不整合(S5-002)、および既存コードのD009コメントとIssue設計前提の間の矛盾への言及(S5-001)の2件のshould-fixのみ。特にS5-002(タイトル修正)は5秒で対応可能であり、Issue一覧での視認性向上に直結する。全体として、型定義・セキュリティ・フィルタリング・キャッシュ・API型・テスト計画が網羅的に記載されており、実装者が迷わず着手できる状態にある。"
+}

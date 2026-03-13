@@ -29,7 +29,6 @@ vi.mock('@/lib/logger', () => ({
   createLogger: vi.fn(() => mockLogger),
 }));
 
-
 describe('SlashCommand Types', () => {
   describe('SlashCommand interface', () => {
     it('should have required properties', () => {
@@ -195,7 +194,6 @@ describe('getSlashCommandGroups', () => {
   });
 
   it('should integrate skills into command groups', async () => {
-    const fixturesPath = path.resolve(__dirname, '../fixtures');
     // Create a temporary test directory structure
     const testDir = path.resolve(__dirname, '../fixtures/test-skills-integration');
     const commandsDir = path.join(testDir, '.claude', 'commands');
@@ -444,7 +442,7 @@ describe('loadSkills', () => {
 
       expect(skills.length).toBeLessThanOrEqual(100);
       expect(mockLogger.warn).toHaveBeenCalled();
-} finally {
+    } finally {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
   });
@@ -465,7 +463,7 @@ describe('loadSkills', () => {
 
       expect(skills).toEqual([]);
       expect(mockLogger.warn).toHaveBeenCalled();
-} finally {
+    } finally {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
   });
@@ -721,6 +719,216 @@ describe('deduplicateByName', () => {
     // cmd-only should remain
     const cmdOnly = result.find((c) => c.name === 'cmd-only');
     expect(cmdOnly).toBeDefined();
+  });
+});
+
+describe('loadCodexSkills', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should return empty array when skills directory does not exist', async () => {
+    const nonExistentDir = path.resolve(__dirname, '../fixtures/nonexistent-codex-dir');
+    const { loadCodexSkills } = await import('@/lib/slash-commands');
+    const skills = await loadCodexSkills(nonExistentDir);
+
+    expect(skills).toEqual([]);
+  });
+
+  it('should load Codex skills with source codex-skill and cliTools codex', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-codex-skills');
+    const skillDir = path.join(testDir, '.codex', 'skills', 'my-codex-skill');
+    try {
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(skillDir, 'SKILL.md'),
+        '---\nname: my-codex-skill\ndescription: A Codex skill\n---\nBody'
+      );
+
+      const { loadCodexSkills } = await import('@/lib/slash-commands');
+      const skills = await loadCodexSkills(testDir);
+
+      expect(skills).toHaveLength(1);
+      expect(skills[0].name).toBe('my-codex-skill');
+      expect(skills[0].description).toBe('A Codex skill');
+      expect(skills[0].category).toBe('skill');
+      expect(skills[0].source).toBe('codex-skill');
+      expect(skills[0].cliTools).toEqual(['codex']);
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should use os.homedir() when basePath is not provided', async () => {
+    // We test by mocking os.homedir to a temp dir with .codex/skills
+    const testDir = path.resolve(__dirname, '../fixtures/test-codex-homedir');
+    const skillDir = path.join(testDir, '.codex', 'skills', 'home-skill');
+    try {
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(skillDir, 'SKILL.md'),
+        '---\nname: home-skill\ndescription: Home skill\n---\nBody'
+      );
+
+      // Mock os.homedir to return our test directory
+      vi.doMock('os', async () => {
+        const actual = await vi.importActual<typeof import('os')>('os');
+        return { ...actual, homedir: () => testDir };
+      });
+
+      const { loadCodexSkills } = await import('@/lib/slash-commands');
+      const skills = await loadCodexSkills();
+
+      expect(skills).toHaveLength(1);
+      expect(skills[0].name).toBe('home-skill');
+      expect(skills[0].source).toBe('codex-skill');
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should skip directories containing ".." (path traversal defense)', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-codex-dotdot');
+    const skillsDir = path.join(testDir, '.codex', 'skills');
+    try {
+      fs.mkdirSync(skillsDir, { recursive: true });
+      const badDir = path.join(skillsDir, '..evil');
+      fs.mkdirSync(badDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(badDir, 'SKILL.md'),
+        '---\nname: evil\ndescription: Malicious\n---\n'
+      );
+
+      const { loadCodexSkills } = await import('@/lib/slash-commands');
+      const skills = await loadCodexSkills(testDir);
+
+      const evilSkill = skills.find((s) => s.name === 'evil');
+      expect(evilSkill).toBeUndefined();
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should skip oversized SKILL.md files', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-codex-oversized');
+    const skillDir = path.join(testDir, '.codex', 'skills', 'big-skill');
+    try {
+      fs.mkdirSync(skillDir, { recursive: true });
+      const bigContent = '---\nname: big\ndescription: Big\n---\n' + 'x'.repeat(70000);
+      fs.writeFileSync(path.join(skillDir, 'SKILL.md'), bigContent);
+
+      mockLogger.warn.mockClear();
+
+      const { loadCodexSkills } = await import('@/lib/slash-commands');
+      const skills = await loadCodexSkills(testDir);
+
+      expect(skills).toEqual([]);
+      expect(mockLogger.warn).toHaveBeenCalled();
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should enforce MAX_SKILLS_COUNT limit', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-codex-max-skills');
+    const skillsDir = path.join(testDir, '.codex', 'skills');
+    try {
+      for (let i = 0; i < 102; i++) {
+        const dir = path.join(skillsDir, `skill-${String(i).padStart(3, '0')}`);
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(
+          path.join(dir, 'SKILL.md'),
+          `---\nname: skill-${i}\ndescription: Skill ${i}\n---\n`
+        );
+      }
+
+      mockLogger.warn.mockClear();
+
+      const { loadCodexSkills } = await import('@/lib/slash-commands');
+      const skills = await loadCodexSkills(testDir);
+
+      expect(skills.length).toBeLessThanOrEqual(100);
+      expect(mockLogger.warn).toHaveBeenCalled();
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should sort skills alphabetically by name', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-codex-sort');
+    const skillsDir = path.join(testDir, '.codex', 'skills');
+    try {
+      for (const name of ['zebra', 'alpha', 'middle']) {
+        const dir = path.join(skillsDir, name);
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(
+          path.join(dir, 'SKILL.md'),
+          `---\nname: ${name}\ndescription: Skill ${name}\n---\n`
+        );
+      }
+
+      const { loadCodexSkills } = await import('@/lib/slash-commands');
+      const skills = await loadCodexSkills(testDir);
+
+      expect(skills.map((s) => s.name)).toEqual(['alpha', 'middle', 'zebra']);
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('getSlashCommandGroups with Codex skills', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should include local Codex skills when basePath is provided', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-codex-groups');
+    const commandsDir = path.join(testDir, '.claude', 'commands');
+    const claudeSkillDir = path.join(testDir, '.claude', 'skills', 'claude-skill');
+    const codexSkillDir = path.join(testDir, '.codex', 'skills', 'codex-skill');
+
+    try {
+      fs.mkdirSync(commandsDir, { recursive: true });
+      fs.mkdirSync(claudeSkillDir, { recursive: true });
+      fs.mkdirSync(codexSkillDir, { recursive: true });
+
+      fs.writeFileSync(
+        path.join(commandsDir, 'test-cmd.md'),
+        '---\ndescription: Test command\n---\nContent'
+      );
+      fs.writeFileSync(
+        path.join(claudeSkillDir, 'SKILL.md'),
+        '---\nname: claude-skill\ndescription: Claude skill\n---\nContent'
+      );
+      fs.writeFileSync(
+        path.join(codexSkillDir, 'SKILL.md'),
+        '---\nname: codex-skill\ndescription: Codex skill\n---\nContent'
+      );
+
+      const { getSlashCommandGroups } = await import('@/lib/slash-commands');
+      const groups = await getSlashCommandGroups(testDir);
+
+      const allCommands = groups.flatMap((g) => g.commands);
+      const codexSkill = allCommands.find((c) => c.name === 'codex-skill');
+      expect(codexSkill).toBeDefined();
+      expect(codexSkill?.source).toBe('codex-skill');
+      expect(codexSkill?.cliTools).toEqual(['codex']);
+
+      const claudeSkill = allCommands.find((c) => c.name === 'claude-skill');
+      expect(claudeSkill).toBeDefined();
+      expect(claudeSkill?.source).toBe('skill');
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
   });
 });
 
