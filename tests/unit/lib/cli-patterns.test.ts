@@ -18,7 +18,7 @@ import {
   buildDetectPromptOptions,
   stripAnsi,
   stripBoxDrawing,
-} from '@/lib/cli-patterns';
+} from '@/lib/detection/cli-patterns';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 describe('cli-patterns', () => {

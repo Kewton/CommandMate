@@ -30,6 +30,9 @@ import {
   sanitizeContent,
   isValidCronExpression,
 } from '@/config/cmate-constants';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('cmate-parser');
 
 // Re-export shared constants for backward compatibility
 export {
@@ -202,16 +205,13 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
 
   for (const row of rows) {
     if (entries.length >= MAX_SCHEDULE_ENTRIES) {
-      console.warn(`[cmate-parser] Maximum schedule entries (${MAX_SCHEDULE_ENTRIES}) reached, skipping remaining`);
+      logger.warn('maximum-schedule-entries');
       break;
     }
 
     // Minimum required columns: Name, Cron, Message
     if (row.length < 3) {
-      console.warn(
-        '[cmate-parser] Skipping row with insufficient columns:',
-        row
-      );
+      logger.warn('parse:insufficient-columns', { columnCount: row.length });
       continue;
     }
 
@@ -220,26 +220,20 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
     // Validate name
     const sanitizedName = sanitizeMessageContent(name);
     if (!NAME_PATTERN.test(sanitizedName)) {
-      console.warn(
-        `[cmate-parser] Skipping entry with invalid name: "${sanitizedName}"`
-      );
+      logger.warn('parse:invalid-name', { name: sanitizedName });
       continue;
     }
 
     // Validate cron expression
     if (!isValidCronExpression(cronExpression)) {
-      console.warn(
-        `[cmate-parser] Skipping entry "${sanitizedName}" with invalid cron: "${cronExpression}"`
-      );
+      logger.warn('parse:invalid-cron', { name: sanitizedName, cron: cronExpression });
       continue;
     }
 
     // Sanitize message
     const sanitizedMessage = sanitizeMessageContent(message);
     if (!sanitizedMessage) {
-      console.warn(
-        `[cmate-parser] Skipping entry "${sanitizedName}" with empty message`
-      );
+      logger.warn('parse:empty-message', { name: sanitizedName });
       continue;
     }
 
@@ -252,9 +246,7 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
     // Parse and validate CLI tool ID [SEC-002]
     const resolvedCliToolId = cliToolId?.trim() || 'claude';
     if (!isCliToolType(resolvedCliToolId)) {
-      console.warn(
-        `[cmate-parser] Skipping entry "${sanitizedName}" with invalid CLI tool: "${resolvedCliToolId}"`
-      );
+      logger.warn('parse:invalid-cli-tool', { name: sanitizedName, cliToolId: resolvedCliToolId });
       continue;
     }
     const defaultPermission = DEFAULT_PERMISSIONS[resolvedCliToolId] ?? '';
@@ -271,9 +263,7 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
         // No permission flags for gemini/vibe-local; only empty string is valid
         allowedValues = [];
         if (permission) {
-          console.warn(
-            `[cmate-parser] Permission "${permission}" ignored for ${resolvedCliToolId} in entry "${sanitizedName}" (no permission flags supported)`
-          );
+          logger.warn('parse:permission-ignored', { name: sanitizedName, cliToolId: resolvedCliToolId, permission });
           permission = '';
         }
         break;
@@ -282,9 +272,7 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
         break;
     }
     if (allowedValues.length > 0 && permission && !allowedValues.includes(permission)) {
-      console.warn(
-        `[cmate-parser] Invalid permission "${permission}" for ${resolvedCliToolId} in entry "${sanitizedName}", using default "${defaultPermission}"`
-      );
+      logger.warn('parse:invalid-permission', { name: sanitizedName, cliToolId: resolvedCliToolId, permission, defaultPermission });
       permission = defaultPermission;
     }
 

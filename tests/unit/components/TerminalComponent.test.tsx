@@ -69,7 +69,7 @@ vi.mock('xterm-addon-web-links', () => ({
 
 vi.mock('xterm/css/xterm.css', () => ({}));
 
-vi.mock('@/lib/tmux-control-mode-flags', () => ({
+vi.mock('@/lib/tmux/tmux-control-mode-flags', () => ({
   isTmuxControlModeEnabledForClient: () => mockIsTmuxControlModeEnabledForClient(),
 }));
 

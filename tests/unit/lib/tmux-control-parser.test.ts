@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TmuxControlParser } from '@/lib/tmux-control-parser';
+import { TmuxControlParser } from '@/lib/tmux/tmux-control-parser';
 
 describe('TmuxControlParser', () => {
   it('should parse output lines', () => {

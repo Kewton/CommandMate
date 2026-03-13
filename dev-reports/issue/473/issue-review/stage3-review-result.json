@@ -1,0 +1,98 @@
+{
+  "issue_number": 473,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_date": "2026-03-11",
+  "summary": "影響範囲レビューを実施した結果、must_fix 1件、should_fix 3件、nice_to_have 2件の計6件の指摘を行う。最も重要な指摘は、status-detector.ts への選択リスト検出分岐追加が、既存の5つ全CLIツールのステータス検出優先順位に影響を与える可能性があり、特に OpenCode の既存検出ロジック（L202-263）との優先順位関係の明確化が必要である点。新規 special-keys API は既存の terminal API と同一の防御パターンを踏襲しており、セキュリティ影響は限定的。sendSpecialKeys() は ALLOWED_SPECIAL_KEYS ホワイトリストで保護済みのため、任意コマンド実行リスクは低い。パフォーマンス面では、選択リスト検出が既存のポーリングサイクル内で行われる設計のため、追加のポーリング負荷は発生しない。OpenCode 固有の実装が他CLIツールに影響しないことを確認した。",
+  "findings": [
+    {
+      "id": "F301",
+      "severity": "must_fix",
+      "category": "既存コンポーネントへの影響 - status-detector.ts",
+      "title": "選択リスト検出分岐の優先順位がステータス検出の既存優先順序に影響する",
+      "description": "status-detector.ts の detectSessionStatus() は厳密な優先順位（1.プロンプト検出 -> 2.thinking検出 -> 2.5.OpenCode固有検出 -> 3.入力プロンプト -> 4.時間ベース -> 5.デフォルト）で動作する。Issueでは「status-detector.ts に選択リスト状態を返す新しい検出分岐（reason: 'opencode_selection_list'）を追加」とあるが、この分岐をどの優先順位に挿入するかが未定義である。選択リストが表示されている状態は (a) プロンプト検出（priority 1）より高いのか、(b) OpenCode固有検出（priority 2.5）の一部なのか、(c) 独立した新規レベルなのか。優先順位を誤ると、選択リスト表示中にプロンプト検出が誤発火する、またはthinking検出と競合する可能性がある。特に、OpenCode の /models 実行後のTUI出力が既存の OPENCODE_PROMPT_PATTERN（Ask anything...）や OPENCODE_PROCESSING_INDICATOR（esc interrupt）にマッチしないことを確認する必要がある。",
+      "affected_components": [
+        "src/lib/status-detector.ts",
+        "src/app/api/worktrees/[id]/current-output/route.ts",
+        "src/lib/worktree-status-helper.ts",
+        "src/lib/response-poller.ts",
+        "src/lib/__tests__/status-detector.test.ts"
+      ],
+      "risk_level": "high",
+      "suggestion": "Issue本文の検出方法セクションに、detectSessionStatus() 内での選択リスト検出の優先順位を明記する。推奨: priority 2.5（OpenCode固有検出）ブロック内に、既存の processing_indicator チェックと response_complete チェックの間に挿入する。理由: (1) プロンプト検出（priority 1）は選択リスト表示中に発火すべきでないため、選択リスト検出はpromptDetectionの後に配置する、(2) OpenCode固有ブロック内に収めることで他CLIツールへの影響を完全に排除できる。また、新しい reason 値が StatusDetectionResult の status フィールドにどの値（'waiting', 'running', 'ready'）を返すかも明記すべき。'waiting' が妥当（UIがナビゲーションボタンを表示するトリガーになるため）。"
+    },
+    {
+      "id": "F302",
+      "severity": "should_fix",
+      "category": "新規 special-keys API の影響 - WorktreeDetailRefactored.tsx",
+      "title": "選択リスト検出状態のフロントエンドへの伝達方法が未定義",
+      "description": "current-output API（GET /api/worktrees/[id]/current-output）は detectSessionStatus() の結果を isRunning, isGenerating, isPromptWaiting, thinking の4つのブーリアンフラグとして返している（L104-120）。WorktreeDetailRefactored.tsx はこのレスポンスの CurrentOutputResponse 型を使用してUIを制御している。選択リスト検出状態を表すための新しいフラグ（例: isSelectionListActive）を current-output レスポンスに追加する必要があるが、Issueに記載がない。これは (1) current-output/route.ts のレスポンス形式変更、(2) CurrentOutputResponse 型の更新、(3) WorktreeDetailRefactored.tsx での状態管理追加という3層の変更を意味する。",
+      "affected_components": [
+        "src/app/api/worktrees/[id]/current-output/route.ts",
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/lib/worktree-status-helper.ts"
+      ],
+      "risk_level": "medium",
+      "suggestion": "Issue本文のフロントエンドセクションに、検出状態の伝達パスを明記する: (1) status-detector.ts の detectSessionStatus() が reason: 'opencode_selection_list' を返す、(2) current-output/route.ts がこのreasonを isSelectionListActive: true としてレスポンスに含める、(3) WorktreeDetailRefactored.tsx がこのフラグに基づいてナビゲーションボタンコンポーネントの表示/非表示を切り替える。"
+    },
+    {
+      "id": "F303",
+      "severity": "should_fix",
+      "category": "テスト影響範囲",
+      "title": "テスト対象ファイルと追加すべきテストケースの一覧が未記載",
+      "description": "Issue本文の受け入れ基準にはテスト要件が含まれていない。実際に影響を受けるテストファイルと追加すべきテストケースは多岐にわたる。(1) cli-patterns.test.ts: OPENCODE_SELECTION_LIST_PATTERN の正規表現テスト（正常系・異常系・他CLIツール出力での誤検知テスト）、(2) status-detector.test.ts: OpenCode選択リスト状態の検出テスト（新reason値の確認、他status値との優先順位テスト）、(3) terminal-route.test.ts 相当の新規 special-keys API テスト、(4) 既存の status-detector テストの回帰テスト（選択リストパターン追加後に Claude/Codex/Gemini/vibe-local の検出が変わらないことの確認）。特に (4) は誤検知リスク（F305参照）の防止に不可欠。",
+      "affected_components": [
+        "tests/unit/lib/cli-patterns.test.ts",
+        "src/lib/__tests__/status-detector.test.ts",
+        "tests/unit/terminal-route.test.ts"
+      ],
+      "risk_level": "medium",
+      "suggestion": "受け入れ基準に「テスト」セクションを新設し、以下を追加する: (1) OPENCODE_SELECTION_LIST_PATTERN の正規表現テスト（正常検出・非検出・エッジケース）、(2) detectSessionStatus() で opencode_selection_list reason の検出テスト、(3) 新規 special-keys API エンドポイントの正常系・エラー系テスト、(4) 他CLIツール（Claude/Codex/Gemini/vibe-local）の出力に対する誤検知防止テスト。"
+    },
+    {
+      "id": "F304",
+      "severity": "should_fix",
+      "category": "既存コンポーネントへの影響 - MessageInput.tsx",
+      "title": "MessageInput へのキーボードインターセプト追加による既存キーハンドリングとの衝突リスク",
+      "description": "MessageInput.tsx の handleKeyDown（L231-266）は現在 Escape（コマンドセレクタ閉じ）、Enter（送信/改行）、IME（keyCode 229）のキーハンドリングを実装している。Issueのフロントエンド仕様では「選択リスト検出時のみ矢印キーをインターセプト」とあるが、矢印キーのインターセプトを MessageInput 内で行うのか、親コンポーネント（WorktreeDetailRefactored）で行うのかが未定義。MessageInput 内で行う場合、isSelectionListActive のような追加プロパティが必要になり、MessageInputProps インターフェースの変更が発生する。また、textarea の矢印キーは通常カーソル移動に使用されるため、複数行入力時にテキスト内カーソル移動が阻害される可能性がある。",
+      "affected_components": [
+        "src/components/worktree/MessageInput.tsx",
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "risk_level": "medium",
+      "suggestion": "Issue本文にキーボードインターセプトの実装場所を明記する。推奨: MessageInput の外側（WorktreeDetailRefactored または新規の NavigationButtonsコンポーネント）でキーイベントをハンドリングし、MessageInput 自体は変更しない設計。理由: (1) MessageInput は汎用メッセージ入力コンポーネントであり、OpenCode固有のロジックを含めるべきでない（SRP）、(2) textarea のフォーカス中に矢印キーをインターセプトするとカーソル移動が壊れる。ナビゲーションボタン自体にフォーカスを当てて矢印キーをハンドリングする方が安全。"
+    },
+    {
+      "id": "F305",
+      "severity": "nice_to_have",
+      "category": "cli-patterns.ts への変更影響 - 誤検知リスク",
+      "title": "OPENCODE_SELECTION_LIST_PATTERN が他CLIツールの出力に誤検知するリスクの評価方針",
+      "description": "cli-patterns.ts に追加される OPENCODE_SELECTION_LIST_PATTERN は、status-detector.ts 内で cliToolId === 'opencode' の分岐内でのみ使用される設計（F301の推奨に従う場合）のため、他CLIツールのステータス検出に直接影響しない。ただし、getCliToolPatterns() の opencode ケースの skipPatterns に選択リストパターンを追加する場合、response-poller.ts のレスポンス抽出時に選択リスト関連行がスキップされる可能性がある。これは意図された動作だが、選択リスト操作後のレスポンス抽出に影響する可能性を認識しておくべき。",
+      "affected_components": [
+        "src/lib/cli-patterns.ts",
+        "src/lib/response-poller.ts"
+      ],
+      "risk_level": "low",
+      "suggestion": "実装時に、OPENCODE_SELECTION_LIST_PATTERN を OPENCODE_SKIP_PATTERNS に追加するかどうかを検討する旨を Issue に注記する。選択リスト表示中のキャプチャ出力には選択肢のテキストが含まれるが、これはレスポンスではないため skipPatterns に含めるのが適切。ただし、パターンが広すぎると正常なレスポンステキストまでスキップされるリスクがあるため、具体的なパターン確定後に判断する。"
+    },
+    {
+      "id": "F306",
+      "severity": "nice_to_have",
+      "category": "パフォーマンス影響",
+      "title": "選択リスト検出のパフォーマンスオーバーヘッドは既存ポーリングに包含される",
+      "description": "tmux-capture-cache.ts のキャッシュTTLは2秒、current-output のポーリング間隔はアクティブ時2秒/アイドル時5秒である。選択リスト検出は detectSessionStatus() 内の追加正規表現テストとして実装されるため、既存のポーリングサイクル内で実行される。追加のcapture-pane呼び出しは不要。ただし、選択リスト検出のために stripBoxDrawing() 済みの cleanOutput に対する追加の正規表現マッチングが発生する。OpenCode固有ブロック内でのみ実行されるため、他CLIツール使用時のオーバーヘッドはゼロ。現実的なパフォーマンス影響は無視できるレベルだが、パターンが複雑な正規表現（バックトラッキングが多い等）にならないよう注意が必要。",
+      "affected_components": [
+        "src/lib/status-detector.ts",
+        "src/lib/tmux-capture-cache.ts"
+      ],
+      "risk_level": "low",
+      "suggestion": "パフォーマンスに関する懸念は低い。実装時に正規表現パターンが O(n) で動作することを確認すれば十分。Issue への追記は不要。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 1,
+    "should_fix": 3,
+    "nice_to_have": 2,
+    "total": 6
+  }
+}

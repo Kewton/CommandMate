@@ -24,7 +24,7 @@ vi.mock('@/lib/db', () => ({
   })),
 }));
 
-vi.mock('@/lib/path-validator', () => ({
+vi.mock('@/lib/security/path-validator', () => ({
   isPathSafe: vi.fn(() => true),
   resolveAndValidateRealPath: vi.fn(() => true),
 }));

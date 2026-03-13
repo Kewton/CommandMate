@@ -4,9 +4,9 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { detectPrompt, getAnswerInput, resetDetectPromptCache } from '@/lib/prompt-detector';
-import type { DetectPromptOptions } from '@/lib/prompt-detector';
-import { stripBoxDrawing } from '@/lib/cli-patterns';
+import { detectPrompt, getAnswerInput, resetDetectPromptCache } from '@/lib/detection/prompt-detector';
+import type { DetectPromptOptions } from '@/lib/detection/prompt-detector';
+import { stripBoxDrawing } from '@/lib/detection/cli-patterns';
 import { isMultipleChoicePrompt, isYesNoPrompt } from '../helpers/prompt-type-guards';
 
 describe('Prompt Detector', () => {
@@ -647,7 +647,7 @@ Are you sure you want to continue? (yes/no)
   describe('Issue #161: Client-side thinking-prompt ordering', () => {
     it('should skip prompt detection when thinking is detected (client-side pattern)', async () => {
       // Import detectThinking to simulate the current-output/route.ts pattern
-      const { detectThinking } = await import('@/lib/cli-patterns');
+      const { detectThinking } = await import('@/lib/detection/cli-patterns');
 
       // Simulate output with thinking indicator AND a valid multiple_choice prompt
       // (e.g., old prompt still visible in tmux buffer while Claude is thinking)
@@ -674,7 +674,7 @@ Are you sure you want to continue? (yes/no)
     });
 
     it('should detect prompt when NOT thinking (client-side pattern)', async () => {
-      const { detectThinking } = await import('@/lib/cli-patterns');
+      const { detectThinking } = await import('@/lib/detection/cli-patterns');
 
       // Output with a valid prompt but NO thinking indicator
       const promptOutput = [
@@ -1532,21 +1532,21 @@ Are you sure you want to continue? (yes/no)
   // ==========================================================================
   describe('Issue #193: buildDetectPromptOptions', () => {
     it('should return requireDefaultIndicator: false for claude', async () => {
-      const { buildDetectPromptOptions } = await import('@/lib/cli-patterns');
+      const { buildDetectPromptOptions } = await import('@/lib/detection/cli-patterns');
       const result = buildDetectPromptOptions('claude');
 
       expect(result).toEqual({ requireDefaultIndicator: false });
     });
 
     it('should return undefined for codex', async () => {
-      const { buildDetectPromptOptions } = await import('@/lib/cli-patterns');
+      const { buildDetectPromptOptions } = await import('@/lib/detection/cli-patterns');
       const result = buildDetectPromptOptions('codex');
 
       expect(result).toBeUndefined();
     });
 
     it('should return undefined for gemini', async () => {
-      const { buildDetectPromptOptions } = await import('@/lib/cli-patterns');
+      const { buildDetectPromptOptions } = await import('@/lib/detection/cli-patterns');
       const result = buildDetectPromptOptions('gemini');
 
       expect(result).toBeUndefined();

@@ -1,0 +1,144 @@
+{
+  "issue_number": 480,
+  "status": "failed",
+  "test_cases": [
+    {
+      "scenario": "src/lib/ 配下にconsole.log/warn/errorの実行コードが残っていないこと（env.ts, logger.ts, JSDoc除く）",
+      "result": "failed",
+      "evidence": "src/lib/conversation-logger.ts:30 に console.error が残存: console.error('[recordClaudeConversation] Failed to create log file:', error);"
+    },
+    {
+      "scenario": "src/app/api/ 配下にconsole.log/warn/errorの実行コードが残っていないこと",
+      "result": "passed",
+      "evidence": "該当なし。全てlogger経由に統一済み"
+    },
+    {
+      "scenario": "src/components/, src/hooks/ にconsole.log/warnの実行コードが残っていないこと",
+      "result": "passed",
+      "evidence": "該当なし。console.log/warnは全て削除済み"
+    },
+    {
+      "scenario": "src/lib/env.ts にconsole.warnが3件存在すること（対象外）",
+      "result": "passed",
+      "evidence": "env.ts に console.warn が3件存在（行66, 112, 247）。意図通り保護されている"
+    },
+    {
+      "scenario": "src/cli/ 配下が変更されていないこと",
+      "result": "passed",
+      "evidence": "git log main..HEAD -- src/cli/ の結果が空。CLI出力は変更されていない"
+    },
+    {
+      "scenario": "tests/helpers/logger-mock.ts が存在すること",
+      "result": "passed",
+      "evidence": "ファイル存在確認済み（1482 bytes）"
+    },
+    {
+      "scenario": "npm run test:unit が全パスすること",
+      "result": "passed",
+      "evidence": "249 test files, 4921 tests passed, 7 skipped"
+    },
+    {
+      "scenario": "npm run lint がエラー0件であること",
+      "result": "passed",
+      "evidence": "No ESLint warnings or errors"
+    },
+    {
+      "scenario": "npx tsc --noEmit がエラー0件であること",
+      "result": "passed",
+      "evidence": "TypeScript コンパイルエラーなし（出力なし=成功）"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "src/（src/cli/ 除く）のconsole.log/error/warnがlogger経由に統一されている（env.ts除く）",
+      "verified": false,
+      "details": "src/lib/conversation-logger.ts:30 に console.error が1件残存。logger.error に変換が必要"
+    },
+    {
+      "criterion": "デバッグ用途のログはlogger.debug()に移行されている",
+      "verified": true,
+      "details": "確認済み"
+    },
+    {
+      "criterion": "CLI出力（src/cli/）が維持されている",
+      "verified": true,
+      "details": "src/cli/ に変更なし"
+    },
+    {
+      "criterion": "既存の全ユニットテスト（4921件）がパスしている",
+      "verified": true,
+      "details": "4921 tests passed"
+    },
+    {
+      "criterion": "影響テストがloggerモック方式に更新されている",
+      "verified": true,
+      "details": "tests/helpers/logger-mock.ts が存在"
+    },
+    {
+      "criterion": "JSDocコメント内のconsole.logは変更されていない",
+      "verified": true,
+      "details": "env.ts内のJSDocコメント（行151, 152, 213）は保護されている"
+    },
+    {
+      "criterion": "env.tsのconsole.warn（3件）は変更されていない",
+      "verified": true,
+      "details": "3件のconsole.warn（行66, 112, 247）が保護されている"
+    },
+    {
+      "criterion": "src/components/, src/hooks/のconsole.log/warnが削除されている（console.errorは残置）",
+      "verified": true,
+      "details": "console.log/warnの残存なし"
+    },
+    {
+      "criterion": "ESLintエラー0件",
+      "verified": true,
+      "details": "No ESLint warnings or errors"
+    },
+    {
+      "criterion": "TypeScriptエラー0件",
+      "verified": true,
+      "details": "コンパイルエラーなし"
+    }
+  ],
+  "criteria_results": [
+    {
+      "criterion": "console.log/error/warn のlogger統一",
+      "status": "fail",
+      "details": "src/lib/conversation-logger.ts:30 に console.error が1件残存"
+    },
+    {
+      "criterion": "env.ts保護（console.warn 3件維持）",
+      "status": "pass",
+      "details": "3件のconsole.warnが行66, 112, 247に存在"
+    },
+    {
+      "criterion": "CLI（src/cli/）未変更",
+      "status": "pass",
+      "details": "変更なし"
+    },
+    {
+      "criterion": "テストヘルパー存在",
+      "status": "pass",
+      "details": "tests/helpers/logger-mock.ts 存在"
+    },
+    {
+      "criterion": "ユニットテスト全パス",
+      "status": "pass",
+      "details": "4921 tests passed"
+    },
+    {
+      "criterion": "ESLint/TypeScriptエラー0件",
+      "status": "pass",
+      "details": "両方とも0件"
+    },
+    {
+      "criterion": "クライアントサイドconsole.log/warn削除",
+      "status": "pass",
+      "details": "src/components/, src/hooks/ に残存なし"
+    }
+  ],
+  "overall_pass": false,
+  "error": "受入条件の一部が満たされていません",
+  "message": "src/lib/conversation-logger.ts:30 の console.error を logger.error に変換してください",
+  "notes": "残存箇所: src/lib/conversation-logger.ts:30 - console.error('[recordClaudeConversation] Failed to create log file:', error); を logger.error() に変換する必要があります。それ以外の全条件はパスしています。"
+}

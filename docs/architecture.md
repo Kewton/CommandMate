@@ -390,7 +390,7 @@ HOOK_COMMAND="curl -X POST http://localhost:3000/api/hooks/claude-done \
 tmux send-keys -t "{sessionName}" "export CLAUDE_HOOKS_STOP='${HOOK_COMMAND}'" C-m
 tmux send-keys -t "{sessionName}" "claude" C-m
 ```
-- API から直接 tmux コマンドを叩くラッパーは src/lib/tmux.ts にまとめる。
+- API から直接 tmux コマンドを叩くラッパーは src/lib/tmux/tmux.ts にまとめる。
 
 ### 6.3 死活監視（任意強度）
 - シンプルな実装では「セッションの存在」のみチェック。
@@ -537,8 +537,8 @@ feature/foo
 
 **関連ファイル:**
 - `src/config/status-colors.ts` - ステータス色の一元管理
-- `src/lib/cli-patterns.ts` - CLIツール別パターン定義
-- `src/lib/prompt-detector.ts` - プロンプト検出
+- `src/lib/detection/cli-patterns.ts` - CLIツール別パターン定義
+- `src/lib/detection/prompt-detector.ts` - プロンプト検出
 - `src/types/sidebar.ts` - ステータス判定ロジック
 
 詳細は [ステータスインジケーター](./features/sidebar-status-indicator.md) を参照。

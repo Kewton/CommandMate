@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 // Mock response-poller before importing
-vi.mock('@/lib/response-poller', () => ({
+vi.mock('@/lib/polling/response-poller', () => ({
   stopPolling: vi.fn(),
 }));
 
@@ -18,7 +18,7 @@ import {
   cleanupMultipleWorktrees,
   type WorktreeCleanupResult,
 } from '@/lib/session-cleanup';
-import { stopPolling as stopResponsePolling } from '@/lib/response-poller';
+import { stopPolling as stopResponsePolling } from '@/lib/polling/response-poller';
 
 describe('Session Cleanup Utility', () => {
   beforeEach(() => {

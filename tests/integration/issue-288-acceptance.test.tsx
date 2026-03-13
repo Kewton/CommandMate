@@ -97,7 +97,7 @@ describe('Issue #288 Acceptance Tests: Free Input Mode prevents selector re-disp
         expect(worktreeApi.sendMessage).toHaveBeenCalledWith(
           'test-worktree',
           '/model gpt-4o',
-          'claude'
+          { cliToolId: 'claude' }
         );
       });
     });
@@ -167,7 +167,7 @@ describe('Issue #288 Acceptance Tests: Free Input Mode prevents selector re-disp
         expect(worktreeApi.sendMessage).toHaveBeenCalledWith(
           'test-worktree',
           '/model gpt-4o',
-          'claude'
+          { cliToolId: 'claude' }
         );
       });
     });
@@ -185,7 +185,7 @@ describe('Issue #288 Acceptance Tests: Free Input Mode prevents selector re-disp
         expect(worktreeApi.sendMessage).toHaveBeenCalledWith(
           'test-worktree',
           '/model gpt-4o',
-          'codex'
+          { cliToolId: 'codex' }
         );
       });
     });

@@ -1,0 +1,110 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 482,
+  "review_date": "2026-03-13",
+  "impact_analysis": {
+    "scope": "コメント・JSDoc修正のみ。ランタイムコード、型定義、エクスポートインターフェース、テストコードへの変更なし。影響範囲は極めて限定的。",
+    "risk_level": "low",
+    "affected_files": [
+      {
+        "file": "src/app/api/worktrees/[id]/slash-commands/route.ts",
+        "change_type": "comment_deletion",
+        "change_description": "L33のTODOコメント1行削除。型定義・ロジック変更なし。",
+        "dependents": [],
+        "impact": "none",
+        "notes": "SlashCommandsResponseはファイルローカルinterfaceであり、exportされていない。外部からのimportも存在しない。"
+      },
+      {
+        "file": "src/lib/cli-tools/opencode-config.ts",
+        "change_type": "comment_modification",
+        "change_description": "L217-218, L284-285のTODOコメント各2行削除。L340-342付近のJSDocに1行追記。",
+        "dependents": [
+          "src/lib/cli-tools/opencode.ts (ensureOpencodeConfig をimport)",
+          "tests/unit/cli-tools/opencode-config.test.ts (fetchOllamaModels, fetchLmStudioModels をimport)"
+        ],
+        "impact": "none",
+        "notes": "関数シグネチャ・戻り値型・エクスポート構造に変更なし。テストはコメントに依存しないため影響なし。"
+      },
+      {
+        "file": "src/lib/cli-patterns.ts",
+        "change_type": "comment_modification",
+        "change_description": "L27のJSDoc内 'Issue #XXX' を 'Issue #188' に修正。",
+        "dependents": [
+          "src/lib/response-poller.ts",
+          "src/lib/auto-yes-manager.ts",
+          "src/lib/assistant-response-saver.ts",
+          "src/lib/claude-session.ts",
+          "src/lib/claude-executor.ts",
+          "src/lib/pasted-text-helper.ts",
+          "src/lib/status-detector.ts",
+          "src/lib/cli-tools/codex.ts",
+          "src/lib/cli-tools/gemini.ts",
+          "src/app/api/worktrees/[id]/prompt-response/route.ts",
+          "src/lib/__tests__/cli-patterns.test.ts",
+          "tests/unit/lib/cli-patterns.test.ts"
+        ],
+        "impact": "none",
+        "notes": "JSDocコメント内のIssue番号修正のみ。CLAUDE_THINKING_PATTERNの正規表現定義は一切変更されない。依存モジュール12個はすべてexportされた定数・関数をimportしているが、コメント変更は影響しない。"
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "S3-F001",
+      "severity": "nice_to_have",
+      "category": "テスト網羅性",
+      "title": "コメント変更後のビルド検証チェックリストは適切",
+      "description": "設計方針書の実装チェックリストに 'npx tsc --noEmit', 'npm run lint', 'npm run test:unit' が含まれており、コメント変更が意図せず構文エラーやlint違反を引き起こしていないことを検証可能。追加テスト不要の判断は妥当。",
+      "recommendation": "対応不要。現行のチェックリストで十分。",
+      "affected_files": []
+    },
+    {
+      "id": "S3-F002",
+      "severity": "nice_to_have",
+      "category": "依存関係分析",
+      "title": "api-client.tsのSlashCommandsResponseは外部importなし（設計判断の根拠確認済み）",
+      "description": "設計方針書に記載された「api-client.ts の型を外部からimportしているモジュールは存在しない」という記述を検証した。Grepの結果、SlashCommandsResponseをimportしているファイルは存在せず、記述は正確である。型統合不要の判断（方針B）は妥当。",
+      "recommendation": "対応不要。",
+      "affected_files": [
+        "src/lib/api-client.ts"
+      ]
+    },
+    {
+      "id": "S3-F003",
+      "severity": "nice_to_have",
+      "category": "後方互換性",
+      "title": "全変更がコメント・JSDoc限定であり後方互換性の懸念なし",
+      "description": "3ファイル全ての変更がコメント・JSDoc修正に限定されている。TypeScriptコンパイル後のJavaScript出力に差分が生じないため、ランタイム動作への影響は物理的に不可能。APIレスポンス構造、型定義、関数シグネチャはすべて維持される。",
+      "recommendation": "対応不要。",
+      "affected_files": []
+    },
+    {
+      "id": "S3-F004",
+      "severity": "nice_to_have",
+      "category": "ロールバック計画",
+      "title": "ロールバックは単純なgit revertで完了可能",
+      "description": "全変更がコメント修正のみであるため、問題発生時は git revert で即座に元に戻せる。コンフリクトリスクも極めて低い。設計方針書にロールバック計画の明示的な記載はないが、変更の性質上不要と判断できる。",
+      "recommendation": "対応不要。ただし、設計方針書テンプレートにロールバック計画のセクションを追加することを将来的に検討してもよい。",
+      "affected_files": []
+    },
+    {
+      "id": "S3-F005",
+      "severity": "nice_to_have",
+      "category": "波及効果",
+      "title": "cli-patterns.tsの依存モジュール数（12個）に対する影響評価",
+      "description": "cli-patterns.tsは12個のモジュールから参照されており、プロジェクト内で依存度の高いモジュールである。しかし、今回の変更はJSDocコメント内のIssue番号修正（#XXX -> #188）のみであり、exportされるシンボル（CLAUDE_THINKING_PATTERN等）には一切変更がない。依存モジュールへの波及効果はゼロ。",
+      "recommendation": "対応不要。",
+      "affected_files": [
+        "src/lib/cli-patterns.ts"
+      ]
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 5,
+    "total": 5,
+    "overall_assessment": "影響範囲は極めて限定的であり、リスクはlow。全ての変更がコメント・JSDoc修正に閉じており、ランタイムコード・型定義・テストへの影響は皆無。設計方針書の影響分析は正確で、依存関係の記述も実コードベースと一致している。実装を進めて問題ない。"
+  }
+}

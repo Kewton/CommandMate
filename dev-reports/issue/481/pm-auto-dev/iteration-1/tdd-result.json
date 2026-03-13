@@ -1,0 +1,96 @@
+{
+  "issueNumber": 481,
+  "iteration": 1,
+  "status": "success",
+  "summary": "Completed src/lib directory reorganization (R-3) across 8 phases. Moved 36 files into 7 domain-specific subdirectories with barrel exports, updated all import paths, and verified each phase with tsc/lint/test:unit.",
+  "phases": [
+    {
+      "phase": 1,
+      "name": "db/ group",
+      "commit": "5c0e408",
+      "filesMoved": 6,
+      "description": "Moved db.ts, db-instance.ts, db-migrations.ts, db-path-resolver.ts, db-repository.ts, db-migration-path.ts to src/lib/db/ with barrel export and compatibility shims at old paths."
+    },
+    {
+      "phase": 2,
+      "name": "tmux/ group",
+      "commit": "32d72d6",
+      "filesMoved": 10,
+      "description": "Moved 10 tmux files + 3 transport files (from src/lib/transports/) to src/lib/tmux/. Eliminated transports/ directory entirely."
+    },
+    {
+      "phase": 3,
+      "name": "security/ group",
+      "commit": "29094f8",
+      "filesMoved": 6,
+      "description": "Moved auth.ts, ip-restriction.ts, path-validator.ts, env-sanitizer.ts, sanitize.ts, worktree-path-validator.ts to src/lib/security/ with named exports barrel."
+    },
+    {
+      "phase": 4,
+      "name": "detection/ group",
+      "commit": "0e01509",
+      "filesMoved": 4,
+      "description": "Moved status-detector.ts, prompt-detector.ts, cli-patterns.ts, prompt-key.ts to src/lib/detection/."
+    },
+    {
+      "phase": 5,
+      "name": "session/ group",
+      "commit": "7c0e9f8",
+      "filesMoved": 4,
+      "description": "Moved claude-session.ts, cli-session.ts, worktree-status-helper.ts, claude-executor.ts to src/lib/session/. session-cleanup.ts kept at root (Facade). Handled getSessionName collision with alias."
+    },
+    {
+      "phase": 6,
+      "name": "polling/ group",
+      "commit": "4cdd95e",
+      "filesMoved": 3,
+      "description": "Moved response-poller.ts, auto-yes-manager.ts, auto-yes-resolver.ts to src/lib/polling/."
+    },
+    {
+      "phase": 7,
+      "name": "git/ group",
+      "commit": "d975a14",
+      "filesMoved": 3,
+      "description": "Moved git-utils.ts, worktrees.ts, clone-manager.ts to src/lib/git/."
+    },
+    {
+      "phase": 8,
+      "name": "docs update",
+      "commit": "6512a47",
+      "filesMoved": 0,
+      "description": "Updated CLAUDE.md, module-reference.md, architecture.md module paths. Fixed auth.ts import for CLI build compatibility."
+    }
+  ],
+  "verification": {
+    "lint": "pass",
+    "tsc": "pass",
+    "testUnit": "pass",
+    "build": "pass",
+    "buildCli": "pass",
+    "testFiles": 249,
+    "testsPassed": 4921,
+    "testsSkipped": 7
+  },
+  "keyDecisions": [
+    "Used compatibility shims (re-export files at old paths) for db/ group to minimize consumer changes",
+    "Merged transports/ directory into tmux/ group (eliminated separate directory)",
+    "Used named exports (not export *) for security/ barrel to control public API surface",
+    "Handled getSessionName collision between claude-session.ts and cli-session.ts with alias in barrel",
+    "Kept session-cleanup.ts at lib root as Facade pattern (orchestrates across multiple groups)",
+    "Used relative import in auth.ts for config/auth-config to maintain CLI build compatibility (tsconfig.cli.json has no @ alias)"
+  ],
+  "filesChanged": {
+    "total": 71,
+    "inLibDirectory": true
+  },
+  "commits": [
+    "5c0e408 - Phase 1: db/ group",
+    "32d72d6 - Phase 2: tmux/ group",
+    "29094f8 - Phase 3: security/ group",
+    "0e01509 - Phase 4: detection/ group",
+    "7c0e9f8 - Phase 5: session/ group",
+    "4cdd95e - Phase 6: polling/ group",
+    "d975a14 - Phase 7: git/ group",
+    "6512a47 - Phase 8: docs update"
+  ]
+}

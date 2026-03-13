@@ -1,0 +1,44 @@
+{
+  "issue_number": 481,
+  "title": "refactor: src/lib ディレクトリ再整理（R-3）",
+  "acceptance_criteria": [
+    "外部からの参照（@/lib/xxx → @/lib/group/xxx または @/lib/group 経由）の一括更新完了",
+    "移動ファイル内部の相対importをグループ内は相対パス維持、グループ外は @/lib/ 形式に変換",
+    "__tests__/ 内の相対importパスを @/lib/group/xxx 形式に更新（6ファイル）",
+    "vi.mock() のモジュールパス更新方針を確定・実施",
+    "循環依存が発生しないこと（npx tsc --noEmit での確認）",
+    "既存テストが全パス（npm run test:unit）",
+    "npm run lint && npx tsc --noEmit がパス",
+    "npm run build:cli がパス",
+    "各新規サブディレクトリに index.ts（バレルエクスポート）を設置",
+    "transports/ ディレクトリの完全削除確認",
+    "ws-server.ts が auth.ts から必要関数を正しくimport していること",
+    "middleware.ts が ip-restriction.ts から直接パスで正しくimport していること",
+    "file-operations.ts が isPathSafe を正しくimport していること",
+    "CLAUDE.md のモジュール一覧を更新（約52箇所）",
+    "docs/module-reference.md のパス更新（約54箇所）",
+    "docs/architecture.md の更新（約6箇所）"
+  ],
+  "implementation_tasks": [
+    "Phase 1: db/ グループ移行（db.ts, db-instance.ts, db-migrations.ts, db-path-resolver.ts, db-repository.ts, db-migration-path.ts）+ index.ts + 互換レイヤー設置",
+    "Phase 2: tmux/ グループ移行（tmux.ts, tmux-capture-cache.ts, tmux-control-*.ts, control-mode-tmux-transport.ts, polling-tmux-transport.ts, session-transport.ts）+ transports/ 統合・削除",
+    "Phase 3: security/ グループ移行（auth.ts, ip-restriction.ts, path-validator.ts, env-sanitizer.ts, sanitize.ts, worktree-path-validator.ts）+ named export index.ts + middleware.ts 直接import更新",
+    "Phase 4: detection/ グループ移行（status-detector.ts, prompt-detector.ts, cli-patterns.ts, prompt-key.ts）",
+    "Phase 5: session/ グループ移行（claude-session.ts, cli-session.ts, worktree-status-helper.ts, claude-executor.ts）",
+    "Phase 6: polling/ グループ移行（response-poller.ts, auto-yes-manager.ts, auto-yes-resolver.ts）",
+    "Phase 7: git/ グループ移行（git-utils.ts, worktrees.ts, clone-manager.ts）",
+    "Phase 8: ドキュメント更新（CLAUDE.md, docs/module-reference.md, docs/architecture.md）"
+  ],
+  "design_doc_path": "dev-reports/design/issue-481-lib-restructure-design-policy.md",
+  "work_plan_path": "dev-reports/issue/481/work-plan.md",
+  "target_coverage": 80,
+  "notes": [
+    "これはファイル移動のみのリファクタリングです。ロジック変更は行いません",
+    "db.ts の移動と db/index.ts の作成は1コミットで原子的に実施すること（I001）",
+    "db-instance.ts 等は互換レイヤーファイルを設置して後方互換を維持する（I002）",
+    "security/index.ts は named export 方式。isWithinRoot(), generateToken(), hashToken() はバレルから除外",
+    "middleware.ts は @/lib/security バレル経由ではなく ./lib/security/ip-restriction を直接importすること",
+    "各グループ移行後に npm run lint && npx tsc --noEmit && npm run test:unit を実行して検証すること",
+    "session-cleanup.ts はルート残留（Facade）。session/ には含めないこと"
+  ]
+}

@@ -1,0 +1,86 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "issue_number": 480,
+  "review_date": "2026-03-13",
+  "findings": [
+    {
+      "id": "DS1-001",
+      "severity": "must_fix",
+      "category": "明確さ",
+      "title": "クライアントサイドのconsole.log/error/warn件数が大幅に過小評価されている",
+      "description": "設計方針書ではsrc/components/配下のconsole使用を「約2件」としているが、実際には18ファイル・35件のconsole.log/error/warnが存在する（JSDocコメント内を含めても約30件は実行コード）。また、src/hooks/配下も「0件（JSDocのみ）」とされているが、useAutoYes.tsとuseWebSocket.tsに実行コードとしてのconsole.error が計2件存在する。対象スコープの正確な把握なしに設計方針を策定すると、Phase 4の作業量見積もりと対応方針（単純削除）が実態と乖離する。",
+      "suggestion": "src/components/とsrc/hooks/配下のconsole使用を再調査し、件数と対応方針を更新する。特にconsole.errorについては、ErrorBoundary・fetch失敗・WebSocketエラー等のエラーハンドリングで使用されており、単純削除ではなく残置判断やclient-loggerの導入を検討すべき。最低限、JSDocコメント内/実行コード内の区別を明記した正確な一覧表を作成すること。",
+      "target": "## 対象スコープ および ### 3. クライアントサイド対応"
+    },
+    {
+      "id": "DS1-002",
+      "severity": "should_fix",
+      "category": "SRP",
+      "title": "db-migrations.tsの53件一括移行はレビュー負荷が高い",
+      "description": "db-migrations.tsの53件のconsole.log移行をPhase 2で一括実施する設計だが、このファイルだけで全体の約40%を占める。段階的移行によるレビュー負荷低減というフェーズ分割の目的と矛盾する。また、db-migrations.tsはマイグレーション各バージョンのup/down関数内にconsole.logが分散しており、変更差分が大きくレビューが困難になる。",
+      "suggestion": "Phase 2をさらにサブフェーズに分割し、db-migrations.ts（53件）を独立したPR/コミットとして分離することを検討する。または、db-migrations.tsのconsole.logはマイグレーション実行時のユーザー向け進捗表示としての側面があるため、これらが本当にlogger経由にすべきか（運用上の可読性低下がないか）を再評価する。",
+      "target": "### Phase 2: src/lib/ 配下のサーバーサイドモジュール"
+    },
+    {
+      "id": "DS1-003",
+      "severity": "should_fix",
+      "category": "YAGNI",
+      "title": "Phase 1（確認のみ）はフェーズとして不要",
+      "description": "Phase 1は「確認のみ、実作業不要」と明記されており、8ファイルが既に完全移行済みであることの確認だけが内容。これはフェーズとして管理する必要がなく、設計方針書の前提条件として記載すれば十分。フェーズ番号を付与することで、実装者が何らかの作業を期待する誤解を招く。",
+      "suggestion": "Phase 1の内容を「前提条件」または「現状確認」セクションに移動し、実作業を伴うフェーズ番号を2から始める形に再番号付けする（現Phase 2をPhase 1に、以下同様）。",
+      "target": "### Phase 1: createLogger導入済みファイルの確認（確認のみ、実作業不要）"
+    },
+    {
+      "id": "DS1-004",
+      "severity": "should_fix",
+      "category": "KISS",
+      "title": "action名の命名規則に具体的な対応表が不足",
+      "description": "action名の命名規則は '<動詞>:<対象>' と定義されているが、既存のconsole.logメッセージからlogger呼び出しへの変換時に実装者が判断に迷うケースがある。例えば、db-migrations.tsの「console.log('Running migration:', name)」は 'migration:run' か 'run:migration' か、「console.log('Schema version:', version)」は何になるか等、53件の変換で一貫性を保つのが難しい。",
+      "suggestion": "主要ファイル（特にdb-migrations.ts）について、代表的なconsole.logメッセージとそのlogger変換後のaction名の対応例を5-10件程度示す。また、動詞の推奨リスト（start, complete, fail, skip, detect, create, delete等）を定義して一貫性を担保する。",
+      "target": "### action 名の命名規則"
+    },
+    {
+      "id": "DS1-005",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "title": "テスト修正方針のloggerモックパターンを共通化すべき",
+      "description": "テスト修正方針でvi.mock('@/lib/logger')のパターンを示しているが、影響テストが2ファイルにまたがり、今後さらに増える可能性がある。各テストファイルで同じモックコードを繰り返すことはDRY原則に反する。",
+      "suggestion": "tests/helpers/にlogger-mock.tsのような共通モックヘルパーを用意し、テストファイルから再利用する設計を推奨パターンとして記載する。例: export function mockLogger() { ... } として、テストではimportして使う形にする。",
+      "target": "### 5. テスト修正方針"
+    },
+    {
+      "id": "DS1-006",
+      "severity": "nice_to_have",
+      "category": "OCP",
+      "title": "将来のクライアントサイドロガー拡張ポイントが不明確",
+      "description": "設計方針書ではクライアントサイドのconsole.logを「削除」としつつ「将来的にclient-logger.tsを検討」と記載しているが、その判断基準（何件以上になったら等）や、logger.tsのインターフェースとの互換性について言及がない。",
+      "suggestion": "client-logger.ts導入の判断基準（例: 実行コードとしてのクライアント側ログが5件以上になった場合）と、導入時にcreateLogger()と同じインターフェースを維持する方針を明記する。これにより将来の拡張時にコード変更を最小化できる。",
+      "target": "### 3. クライアントサイド対応"
+    },
+    {
+      "id": "DS1-007",
+      "severity": "must_fix",
+      "category": "明確さ",
+      "title": "クライアントサイドのconsole.errorを削除する方針は不適切",
+      "description": "DS1-001と関連するが、src/components/配下にはfetch失敗時やWebSocketエラー時のconsole.errorが多数存在する（WorktreeDetailRefactored.tsxだけで12件）。これらはデバッグに必要なエラーログであり、単純削除するとユーザーやデベロッパーがクライアントサイドのエラーを追跡できなくなる。設計方針書のPhase 4は「console.log 1件を削除」のみを対象としているが、console.errorの扱いが未定義。",
+      "suggestion": "クライアントサイドのconsole使用について3段階の方針を明確化する: (1) console.log（デバッグ用） -> 削除、(2) console.warn -> 削除またはclient-logger検討、(3) console.error（エラーハンドリング） -> 残置（正当なエラー報告として維持）。本Issueのスコープはあくまで「console.log整理」であり、正当なconsole.errorまで削除対象にしないことを明記する。",
+      "target": "### 3. クライアントサイド対応 および ## 対象スコープ"
+    },
+    {
+      "id": "DS1-008",
+      "severity": "nice_to_have",
+      "category": "フェーズ設計",
+      "title": "各フェーズの完了時確認コマンドにtest:integrationが含まれていない",
+      "description": "Phase 2, 3, 4の完了時確認はいずれも「npm run lint && npx tsc --noEmit && npm run test:unit」だが、影響テストにtests/integration/trust-dialog-auto-response.test.tsが含まれている。結合テストの確認がフェーズ完了基準から漏れている。",
+      "suggestion": "少なくともPhase 2の完了時確認に「npm run test:integration」を追加する。または最終フェーズの品質保証セクションで既にtest:integrationが含まれていることを各フェーズから参照する形にする。",
+      "target": "### Phase 2, Phase 3, Phase 4 の完了時確認"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 3,
+    "nice_to_have_count": 3,
+    "overall_quality": "fair"
+  }
+}

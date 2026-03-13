@@ -1,0 +1,103 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 481,
+  "review_focus": "通常",
+  "findings": [
+    {
+      "id": "F001",
+      "severity": "must_fix",
+      "category": "factual_error",
+      "description": "既存サブディレクトリ cli-tools/ のファイル数が誤っている。Issueでは7ファイルと記載されているが、実際は11ファイル（base.ts, claude.ts, codex.ts, gemini.ts, index.ts, manager.ts, opencode-config.ts, opencode.ts, types.ts, validation.ts, vibe-local.ts）。",
+      "current_text": "cli-tools/        # 既存: CLIツール抽象化 (7ファイル)",
+      "suggested_fix": "cli-tools/        # 既存: CLIツール抽象化 (11ファイル)"
+    },
+    {
+      "id": "F002",
+      "severity": "must_fix",
+      "category": "factual_error",
+      "description": "既存サブディレクトリ proxy/ のファイル数が誤っている。Issueでは2ファイルと記載されているが、実際は4ファイル（config.ts, handler.ts, index.ts, logger.ts）。",
+      "current_text": "proxy/            # 既存: プロキシ (2ファイル)",
+      "suggested_fix": "proxy/            # 既存: プロキシ (4ファイル)"
+    },
+    {
+      "id": "F003",
+      "severity": "must_fix",
+      "category": "factual_error",
+      "description": "既存サブディレクトリ external-apps/ のファイル数が誤っている。Issueでは1ファイルと記載されているが、実際は5ファイル（cache.ts, db.ts, index.ts, interfaces.ts, validation.ts）。",
+      "current_text": "external-apps/    # 既存: 外部アプリ (1ファイル)",
+      "suggested_fix": "external-apps/    # 既存: 外部アプリ (5ファイル)"
+    },
+    {
+      "id": "F004",
+      "severity": "must_fix",
+      "category": "missing_information",
+      "description": "既存サブディレクトリ transports/（2ファイル: control-mode-tmux-transport.ts, polling-tmux-transport.ts）が完全に未言及。tmux関連のトランスポート実装であるため、新規 tmux/ ディレクトリへの統合か現状維持かを明記する必要がある。また、__tests__/ ディレクトリも未言及。",
+      "current_text": "既存のサブディレクトリパターン（cli-tools/, proxy/, external-apps/）を拡張し",
+      "suggested_fix": "既存のサブディレクトリパターン（cli-tools/, proxy/, external-apps/, transports/）を拡張し、のように修正。transports/ の扱い方針（tmux/ への統合 or 現状維持）を明記すること。__tests__/ の扱いも記載すること。"
+    },
+    {
+      "id": "F005",
+      "severity": "must_fix",
+      "category": "missing_information",
+      "description": "「(残り) ユーティリティ系は現状維持」としているが、残りファイルは39ファイルにのぼる。72ファイル中33ファイルしか移動対象にならず、半数以上がルートに残留する。リファクタリングの目的であるファイル探索性改善の効果が限定的である。少なくとも残留ファイルの具体的リストを明示すべき。",
+      "current_text": "└── (残り)            # ユーティリティ系は現状維持",
+      "suggested_fix": "残留する39ファイルの一覧を明記する。または、追加のサブディレクトリ候補（例: logging/ (api-logger, logger, log-manager, log-export-sanitizer), file/ (file-operations, file-search, file-tree), conversation/ (conversation-grouper, conversation-logger, message-sync) 等）を検討・提示する。"
+    },
+    {
+      "id": "F006",
+      "severity": "should_fix",
+      "category": "clarity",
+      "description": "tmux/ サブディレクトリの対象ファイルが「tmux-control-*」とワイルドカードで記述されているが、具体的には5ファイル（tmux-control-client.ts, tmux-control-mode-flags.ts, tmux-control-mode-metrics.ts, tmux-control-parser.ts, tmux-control-registry.ts）が存在する。合計7ファイルとなるため具体的なファイル名を列挙すべき。",
+      "current_text": "tmux/             # 新規: tmux関連 (tmux.ts, tmux-capture-cache, tmux-control-*)",
+      "suggested_fix": "tmux/             # 新規: tmux関連 (7ファイル: tmux.ts, tmux-capture-cache.ts, tmux-control-client.ts, tmux-control-mode-flags.ts, tmux-control-mode-metrics.ts, tmux-control-parser.ts, tmux-control-registry.ts) + transports/ からの統合を検討"
+    },
+    {
+      "id": "F007",
+      "severity": "should_fix",
+      "category": "completeness",
+      "description": "worktree-status-helper.ts が session/ にも detection/ にも git/ にも割り当てられていない。このファイルは cli-session, status-detector, claude-session に依存しており、session/ または detection/ に含めるべき候補。同様に claude-executor.ts, claude-output.ts なども分類が必要。",
+      "current_text": "（割り当て対象として記載なし）",
+      "suggested_fix": "worktree-status-helper.ts を session/ に含めるか、残留ファイルとして明示する。claude-executor.ts, claude-output.ts もセッション関連として分類を検討する。"
+    },
+    {
+      "id": "F008",
+      "severity": "should_fix",
+      "category": "acceptance_criteria",
+      "description": "受け入れ基準に「循環依存が発生しないこと」とあるが、検証方法が不明確。循環依存の検出ツール（madge等）の使用やCIへの組み込みを明記すべき。また、リファクタリング前の循環依存の現状確認も前提条件として必要。",
+      "current_text": "- [ ] 循環依存が発生しないこと",
+      "suggested_fix": "- [ ] 循環依存が発生しないこと（madge等で検証、またはtsc --noEmitでの間接確認）\n- [ ] リファクタリング前後でimportグラフに循環が増加しないこと"
+    },
+    {
+      "id": "F009",
+      "severity": "should_fix",
+      "category": "acceptance_criteria",
+      "description": "受け入れ基準に「CLAUDE.md のモジュール一覧を更新」とあるが、他にも更新が必要なドキュメントがある可能性がある。docs/module-reference.md やdocs/architecture.md も更新対象として明記すべき。",
+      "current_text": "- [ ] CLAUDE.md のモジュール一覧を更新",
+      "suggested_fix": "- [ ] CLAUDE.md のモジュール一覧を更新\n- [ ] docs/module-reference.md のパス更新\n- [ ] docs/architecture.md の更新（該当する場合）"
+    },
+    {
+      "id": "F010",
+      "severity": "nice_to_have",
+      "category": "implementation_risk",
+      "description": "polling/ サブディレクトリに response-poller, auto-yes-manager, auto-yes-resolver の3ファイルが提案されているが、auto-yes-manager/resolver はポーリングよりも自動応答判定の責務が強い。ドメイン名として「polling」が適切かどうか検討の余地がある。",
+      "current_text": "polling/          # 新規: ポーリング (response-poller, auto-yes-manager, auto-yes-resolver)",
+      "suggested_fix": "auto-yes 系は別サブディレクトリ（例: auto-yes/）にするか、polling/ の説明を「ポーリング・自動応答」に変更する。"
+    },
+    {
+      "id": "F011",
+      "severity": "nice_to_have",
+      "category": "implementation_risk",
+      "description": "各新規サブディレクトリに index.ts（再エクスポートバレル）を設けるかどうかの方針が未記載。バレルエクスポートの有無はimportパス更新の方針（深いパス vs バレル経由）に大きく影響する。",
+      "current_text": "（記載なし）",
+      "suggested_fix": "バレルエクスポート（index.ts）の方針を明記する。例: 「各サブディレクトリに index.ts を設置し、外部からは index.ts 経由でimportする」または「直接ファイルパスでimportする」。"
+    }
+  ],
+  "summary": {
+    "must_fix": 5,
+    "should_fix": 4,
+    "nice_to_have": 2,
+    "total": 11
+  },
+  "overall_assessment": "Issue #481は src/lib ルートの72ファイル密集問題を解決するリファクタリング提案として方向性は妥当だが、以下の重大な問題がある。(1) 既存サブディレクトリのファイル数がすべて誤っている（cli-tools: 7→11, proxy: 2→4, external-apps: 1→5）。(2) 既存の transports/ ディレクトリが完全に未言及。(3) 移動対象は33ファイルにとどまり、39ファイル（過半数）がルートに残留するが、残留ファイルのリストが明示されていない。提案構成で移動対象となるのは全体の46%程度であり、ファイル探索性改善の効果が限定的である点は認識しておくべき。数値の正確性と残留ファイルの扱い方針の明確化が最低限必要。"
+}

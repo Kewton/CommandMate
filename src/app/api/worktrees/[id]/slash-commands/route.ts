@@ -19,9 +19,12 @@ import { getWorktreeById } from '@/lib/db';
 import { getSlashCommandGroups } from '@/lib/slash-commands';
 import { getStandardCommandGroups } from '@/lib/standard-commands';
 import { mergeCommandGroups, filterCommandsByCliTool } from '@/lib/command-merger';
-import { isValidWorktreePath } from '@/lib/worktree-path-validator';
+import { isValidWorktreePath } from '@/lib/security/worktree-path-validator';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import type { SlashCommandGroup } from '@/types/slash-commands';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/slash-commands');
 
 /**
  * Slash commands API response
@@ -30,7 +33,6 @@ import type { SlashCommandGroup } from '@/types/slash-commands';
  * A separate SlashCommandsResponse exists in api-client.ts for /api/slash-commands (MCBD).
  * The two types share the same name but have different structures (this one includes sources).
  */
-// TODO: api-client.ts の SlashCommandsResponse との型統合を検討する（sources フィールドの共有）
 interface SlashCommandsResponse {
   groups: ReturnType<typeof getStandardCommandGroups>;
   sources: {
@@ -76,7 +78,7 @@ export async function GET(
 
     // MF-1: Path validation to prevent traversal attacks
     if (!isValidWorktreePath(worktree.path)) {
-      console.error(`[slash-commands API] Invalid worktree path detected: ${id}`);
+      logger.error('invalid-worktree-path-detected:');
       return NextResponse.json(
         { error: 'Invalid worktree configuration' },
         { status: 400 }
@@ -93,8 +95,8 @@ export async function GET(
     let worktreeGroups: SlashCommandGroup[] = [];
     try {
       worktreeGroups = await getSlashCommandGroups(worktree.path);
-    } catch (error) {
-      console.warn(`[slash-commands API] Could not load worktree commands: ${error}`);
+    } catch {
+      logger.warn('commands:load-failed');
       worktreeGroups = [];
     }
 
@@ -121,7 +123,7 @@ export async function GET(
       cliTool,
     });
   } catch (error) {
-    console.error('[slash-commands API] Error:', error);
+    logger.error('error:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to load slash commands' },
       { status: 500 }

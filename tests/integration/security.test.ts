@@ -50,6 +50,21 @@ vi.mock('@/lib/db-instance', () => {
   };
 });
 
+// Mock logger module (Issue #480)
+const { mockLogger } = vi.hoisted(() => {
+  const mockLogger = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    withContext: vi.fn().mockReturnThis(),
+  };
+  return { mockLogger };
+});
+vi.mock('@/lib/logger', () => ({
+  createLogger: vi.fn(() => mockLogger),
+}));
+
 describe('Security Tests', () => {
   let db: Database.Database;
   let testDir: string;
@@ -228,13 +243,13 @@ describe('Security Tests', () => {
     });
 
     it('should warn on control characters but allow', () => {
-      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       const result = validateContent('.md', 'Hello\x01World');
       expect(result.valid).toBe(true);
-      expect(consoleSpy).toHaveBeenCalledWith('Content contains control characters');
+      expect(warnSpy).toHaveBeenCalledWith('Content contains control characters');
 
-      consoleSpy.mockRestore();
+      warnSpy.mockRestore();
     });
 
     it('should accept normal content', () => {

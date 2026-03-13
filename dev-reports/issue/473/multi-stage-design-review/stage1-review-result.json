@@ -1,0 +1,79 @@
+{
+  "issue_number": 473,
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "review_date": "2026-03-12",
+  "design_doc_path": "dev-reports/design/issue-473-opencode-tui-navigation-design-policy.md",
+  "summary": "設計方針書はSOLID/KISS/YAGNI/DRY原則に概ね準拠しており、既存アーキテクチャとの整合性も高い。特にSRP（NavigationButtonsの独立コンポーネント化）、OCP（cli-patternsの拡張）、DRY（ALLOWED_SPECIAL_KEYSのexport再利用、current-output APIの既存ポーリング活用）は適切に設計されている。主な改善点として、special-keys APIのバリデーションロジックにおける既存terminal APIとの共通化検討（DRY）、NavigationButtonsコンポーネントのキー送信ロジック分離（SRP強化）、およびsendSpecialKeys後のinvalidateCache呼び出しパターンの一元化が挙げられる。重大な設計原則違反は検出されなかった。",
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "category": "DRY",
+      "title": "special-keys APIとterminal APIのバリデーションロジック重複",
+      "description": "設計方針書のセクション4.2およびセクション8.1に記載されたspecial-keys APIの4層防御（cliToolIdバリデーション、DB存在確認、セッション確認、エラーレスポンス形式）は、既存terminal/route.tsの実装と構造的にほぼ同一である。両エンドポイントは(1) isCliToolType()チェック、(2) getWorktreeById()確認、(3) hasSession()確認、(4) invalidateCache()呼び出しという同一のパイプラインを持つ。設計方針書ではこの重複について言及がなく、コピー&ペーストによる実装が想定される。",
+      "location": "セクション4.2 APIパターン、セクション8.1 special-keys APIの防御",
+      "suggestion": "共通のバリデーション・セッション解決ユーティリティ関数（例: resolveSessionOrError(req, params)）の抽出を設計方針書に記載することを推奨する。現時点ではエンドポイント数が2つのため緊急ではないが、将来のエンドポイント追加（3つ目以降）の際にリファクタリングすべき旨をトレードオフセクションに明記するとよい。"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "nice_to_have",
+      "category": "SRP",
+      "title": "NavigationButtonsコンポーネントのAPI呼び出し責務",
+      "description": "セクション7.1のNavigationButtonsコンポーネントは、UIボタン表示とAPI呼び出し（POST /special-keys）の両方の責務を暗黙的に持つ設計となっている。propsにworktreeIdとcliToolIdを受け取り、内部でfetch呼び出しを行うことが想定されるが、この責務分離について設計方針書では明示されていない。現行のMessageInputコンポーネントも同様にAPI呼び出しを内包しているため、プロジェクト内の既存パターンとは一致するが、テスタビリティの観点からはコールバック経由の方が優れる。",
+      "location": "セクション7.1 NavigationButtonsコンポーネント",
+      "suggestion": "NavigationButtonsにonKeyPress(key: string)コールバックpropsを追加し、API呼び出しロジックを親コンポーネント（WorktreeDetailRefactored）またはカスタムフック（useSpecialKeys）に分離する選択肢を検討として記載するとよい。ただし既存パターンとの一貫性を優先する場合は現設計のままでもよい。"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "should_fix",
+      "category": "DRY",
+      "title": "sendSpecialKeys + invalidateCache呼び出しパターンの分散",
+      "description": "設計方針書セクション9.2および関連するIssueの記載（F704対応）で、sendSpecialKeys()後にinvalidateCache()を呼ぶパターンが2箇所に分散すること（prompt-answer-sender.tsとspecial-keys/route.ts）が認識されている。設計方針書では「現時点では許容範囲」「将来ファサード関数を検討」と記載されているが、既にterminal/route.tsでもsendKeys() + invalidateCache()の同一パターンが存在しており、実質3箇所に同一パターンが分散する。",
+      "location": "セクション9.2 キャッシュ無効化、セクション12 設計上の決定事項（F704対応）",
+      "suggestion": "tmux.tsにsendSpecialKeysAndInvalidate(sessionName, keys)のような薄いラッパー関数を最初から用意する方針を設計方針書に記載することを推奨する。sendKeys + invalidateCacheのパターンも含めると既に3箇所の重複があり、「将来検討」ではなく初期実装時に対応する閾値に達している。"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "nice_to_have",
+      "category": "OCP（開放閉鎖原則）",
+      "title": "選択リスト検出の将来拡張性に関する設計指針不足",
+      "description": "セクション4.1ではStrategy パターンの拡張として検出パターンをcli-patterns.tsに追加する方針が示されているが、将来他のCLIツール（例: Codex、Gemini）でも類似のTUI選択リストが導入された場合の拡張パスが設計方針書に記載されていない。Issueのスコープ外セクションでは「パターン追加のみで対応可能な構造とする」と記載されているが、設計方針書側にはこの拡張指針が反映されていない。",
+      "location": "セクション4.1 検出パターン（Strategy パターンの拡張）",
+      "suggestion": "status-detector.tsのOpenCode固有ブロック（priority 2.5）の構造を、将来的にcliToolIdごとの固有検出ブロック（priority 2.5.x）として一般化できる設計指針を記載するとよい。現時点ではOpenCode専用でよいが、拡張ポイントを設計方針書に明記しておくことで、将来の実装者が既存パターンを壊さずに拡張できる。"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "must_fix",
+      "category": "KISS",
+      "title": "OPENCODE_SELECTION_LIST_PATTERNが未確定のまま設計方針書が完成している",
+      "description": "設計方針書の根幹となる検出パターン（OPENCODE_SELECTION_LIST_PATTERN）が「前提作業後に確定」として未定義のまま残されている（セクション4.1、セクション6.3）。これにより、status-detector.tsへの挿入位置の妥当性（priority 2.5内のC位置）、他パターンとの競合リスク、OPENCODE_SKIP_PATTERNSへの追加判断（F305）が全て検証不可能な状態である。設計方針書としてのレビュー可能性が低下している。",
+      "location": "セクション4.1 検出パターン、セクション6.3 前提作業",
+      "suggestion": "設計方針書に「パターン確定後のレビューチェックポイント」を明示的に追加する。具体的には: (1) 確定したパターンが既存のOPENCODE_PROCESSING_INDICATOR、OPENCODE_PROMPT_PATTERN等と重複しないことの確認手順、(2) 他CLIツール出力（Claude/Codex/Gemini/vibe-local）との誤検知テスト項目、(3) OPENCODE_SKIP_PATTERNSへの追加判断基準を事前に定義しておく。パターン未確定自体はやむを得ないが、確定後の検証プロセスは設計段階で定義可能であり、定義すべきである。"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "title": "MAX_KEYS_LENGTH = 10の根拠不足",
+      "description": "セクション8.1でkeys配列の最大長制限を10と定義しているが、実際のユースケース（Up/Down/Enter/Escapeの単一キー送信）では最大でも1-2キーしか送信されない。10という値の選定根拠が設計方針書に記載されていない。過度に大きな上限はDoS保護の意味が薄れ、過度に小さいと将来の拡張を阻害する。",
+      "location": "セクション8.1 special-keys APIの防御、配列長制限",
+      "suggestion": "MAX_KEYS_LENGTHの値の根拠（例: 「将来的に複合キー操作シーケンスに対応するため余裕を持たせた」等）を設計方針書に記載する。また、現実的なユースケースが1-2キーであることを踏まえ、値を5程度に引き下げる検討も有意義。レスポンス時間特性（keys配列長 x 100ms）を考慮すると、10キーで1秒のレスポンス時間は許容範囲を超える可能性がある。"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "should_fix",
+      "category": "SOLID（ISP: インターフェース分離原則）",
+      "title": "current-output APIレスポンスの肥大化傾向",
+      "description": "セクション5.2でcurrent-output APIレスポンスにisSelectionListActiveフラグを追加する方針が示されている。既存のレスポンスには既にisRunning, isGenerating, isPromptWaiting, thinking, autoYes等の多数のフラグが含まれており（current-output/route.ts参照）、今回の追加で6番目のステータスフラグとなる。ISP（インターフェース分離原則）の観点から、クライアントが必要としない情報まで常に送信される設計になりつつある。",
+      "location": "セクション5.2 既存変更: GET /api/worktrees/[id]/current-output",
+      "suggestion": "現時点では許容範囲だが、設計方針書のトレードオフセクションに「current-output APIレスポンスのフィールド数が増加傾向にあり、将来的にレスポンス分割やGraphQL的な選択的取得を検討する閾値（例: 10フラグ超過時）」を記載しておく。これにより、次回以降のフラグ追加時に設計判断の基準が明確になる。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 1,
+    "should_fix": 3,
+    "nice_to_have": 3,
+    "total": 7
+  }
+}

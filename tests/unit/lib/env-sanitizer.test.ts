@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   SENSITIVE_ENV_KEYS,
   sanitizeEnvForChildProcess,
-} from '../../../src/lib/env-sanitizer';
+} from '../../../src/lib/security/env-sanitizer';
 
 describe('env-sanitizer', () => {
   const originalEnv = { ...process.env };

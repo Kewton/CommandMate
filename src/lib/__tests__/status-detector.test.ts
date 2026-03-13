@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { detectSessionStatus } from '../status-detector';
+import { detectSessionStatus } from '@/lib/detection/status-detector';
 
 describe('status-detector', () => {
   describe('detectSessionStatus', () => {

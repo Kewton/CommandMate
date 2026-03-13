@@ -1,0 +1,163 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "issue_number": 481,
+  "review_focus": "通常",
+  "review_date": "2026-03-13",
+  "previous_findings_check": [
+    {
+      "finding_id": "F001",
+      "original_severity": "must_fix",
+      "status": "resolved",
+      "note": "cli-tools/ のファイル数が11ファイルに修正され、具体的なファイル名も列挙されている。実ファイル数と一致を確認済み。"
+    },
+    {
+      "finding_id": "F002",
+      "original_severity": "must_fix",
+      "status": "resolved",
+      "note": "proxy/ のファイル数が4ファイルに修正済み。実ファイル数と一致を確認済み。"
+    },
+    {
+      "finding_id": "F003",
+      "original_severity": "must_fix",
+      "status": "resolved",
+      "note": "external-apps/ のファイル数が5ファイルに修正済み。実ファイル数と一致を確認済み。"
+    },
+    {
+      "finding_id": "F004",
+      "original_severity": "must_fix",
+      "status": "resolved",
+      "note": "transports/ ディレクトリ（2ファイル）が明記され、tmux/への統合方針（案A/案B）も具体的影響差分付きで記載されている。__tests__/ の扱いも注記セクションで記載済み。"
+    },
+    {
+      "finding_id": "F005",
+      "original_severity": "must_fix",
+      "status": "resolved",
+      "note": "ルート残留ファイル37件の具体リストが追記されている。実際のファイル一覧と完全一致を確認済み（72 - 35 = 37）。追加サブディレクトリ候補（logging/, file/, conversation/）も将来検討として提示されている。"
+    },
+    {
+      "finding_id": "F006",
+      "original_severity": "should_fix",
+      "status": "resolved",
+      "note": "tmux/ の対象7ファイルが具体的に列挙されている。実ファイル名と一致を確認済み。"
+    },
+    {
+      "finding_id": "F007",
+      "original_severity": "should_fix",
+      "status": "resolved",
+      "note": "worktree-status-helper.ts と claude-executor.ts が session/ に分類追加されている。claude-output.ts はパーシングユーティリティであり残留は妥当。"
+    },
+    {
+      "finding_id": "F008",
+      "original_severity": "should_fix",
+      "status": "resolved",
+      "note": "循環依存チェックの受け入れ基準が「npx tsc --noEmit での間接確認、または madge 等の専用ツールで検証」「リファクタリング前後でimportグラフに循環が増加しないこと」の2項目に明確化されている。"
+    },
+    {
+      "finding_id": "F009",
+      "original_severity": "should_fix",
+      "status": "resolved",
+      "note": "ドキュメント更新の受け入れ基準に CLAUDE.md（約52箇所）、docs/module-reference.md（約54箇所）、docs/architecture.md（約6箇所）が具体的な更新箇所数付きで記載されている。"
+    },
+    {
+      "finding_id": "F010",
+      "original_severity": "nice_to_have",
+      "status": "resolved",
+      "note": "polling/ の説明が「ポーリング・自動応答」に変更されており、凝集度に関する将来的な再編の注釈も追記されている。"
+    },
+    {
+      "finding_id": "F011",
+      "original_severity": "nice_to_have",
+      "status": "resolved",
+      "note": "バレルエクスポート（index.ts）方針セクションが追加されている。既存パターン（cli-tools/, proxy/, external-apps/）との一貫性も明記されている。受け入れ基準にもバレルエクスポート設置の項目が追加済み。"
+    },
+    {
+      "finding_id": "F101",
+      "original_severity": "must_fix",
+      "status": "resolved",
+      "note": "影響規模セクションが追加され、35ファイル移動・約696行import更新・約100ソースファイル・約99テストファイル・lib内テスト6ファイルの影響が明記されている。段階的移行戦略と推奨移行順序も記載済み。"
+    },
+    {
+      "finding_id": "F102",
+      "original_severity": "must_fix",
+      "status": "resolved",
+      "note": "グループ間依存関係セクションが追加され、依存方向の図・具体的依存テーブル・推奨移行順序が明記されている。一方向依存であり循環依存リスクが低いことも記載済み。"
+    },
+    {
+      "finding_id": "F103",
+      "original_severity": "must_fix",
+      "status": "resolved",
+      "note": "受け入れ基準のimportパス更新が4項目（外部参照・内部相対パス・__tests__パス・vi.mock()パス）に細分化されている。"
+    },
+    {
+      "finding_id": "F104",
+      "original_severity": "should_fix",
+      "status": "resolved",
+      "note": "db/ グループの後方互換性戦略が専用セクションで記載されている。@/lib/db パスの維持方法（db/index.tsでの再エクスポート）が明示されている。"
+    },
+    {
+      "finding_id": "F105",
+      "original_severity": "should_fix",
+      "status": "resolved",
+      "note": "__tests__/ の注記セクションが追加され、影響ファイル6件（worktrees-sync, db-migrations-v10, db-memo, assistant-response-saver, status-detector, cli-patterns）が列挙されている。実際の影響ファイルと一致を確認済み。"
+    },
+    {
+      "finding_id": "F106",
+      "original_severity": "should_fix",
+      "status": "resolved",
+      "note": "transports/ 案A/案Bの具体的影響差分が追記されている。"
+    },
+    {
+      "finding_id": "F107",
+      "original_severity": "should_fix",
+      "status": "resolved",
+      "note": "ドキュメント更新の影響規模（CLAUDE.md: 52箇所、module-reference.md: 54箇所、architecture.md: 6箇所）が影響規模テーブルと受け入れ基準の両方に記載されている。"
+    },
+    {
+      "finding_id": "F108",
+      "original_severity": "should_fix",
+      "status": "resolved",
+      "note": "vi.mock() のモジュールパス更新方針が受け入れ基準に追記されている。バレルエクスポートで旧パスを維持する場合の注記も含まれている。"
+    },
+    {
+      "finding_id": "F109",
+      "original_severity": "nice_to_have",
+      "status": "resolved",
+      "note": "polling/ グループに凝集度に関する注釈が追記されている。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F201",
+      "severity": "nice_to_have",
+      "category": "clarity",
+      "description": "影響規模テーブルで「影響を受けるlib内テスト」が「src/lib/__tests__/ 9ファイル中6ファイル」と記載されているが、__tests__注記セクションの方では影響6ファイルの具体名のみ記載で「9ファイル中」の情報がない。情報の一貫性のため、注記セクションにも9ファイル中6ファイルが影響する旨を明記するとより分かりやすい。",
+      "current_text": "__tests__/ の注記セクションに「影響ファイル: worktrees-sync.test.ts, ...」のみ",
+      "suggested_fix": "注記セクションの冒頭に「9ファイル中6ファイルが移動対象ファイルへの相対importを持つため更新が必要:」のように追記する。"
+    },
+    {
+      "id": "F202",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "description": "推奨移行順序で db/ が最初に挙げられ「他グループへの依存がなく独立している」と記載されているが、db/ 内のファイル間依存（例: db-instance -> db, db-repository -> db-instance 等）の簡単な説明があると、グループ内の凝集度の高さをより明確に示せる。",
+      "current_text": "1. **db/** - 最もimport参照が多い（db-instance: 46ファイル、db: 36ファイル）が、他グループへの依存がなく独立している",
+      "suggested_fix": "必須ではないが、db/ 内部の依存構造（db-repository -> db-instance -> db の方向等）を簡潔に補足すると、独立性の根拠がより明確になる。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 2,
+    "total": 2
+  },
+  "overall_assessment": "Issue #481は4回のレビュー・修正イテレーション（Stage 1-4）を経て、実装計画として十分な品質に達している。Stage 1の全11件の指摘（must_fix: 5, should_fix: 4, nice_to_have: 2）およびStage 3の全9件の指摘（must_fix: 3, should_fix: 5, nice_to_have: 1）が全て適切に反映されている。特に以下の点が優れている: (1) 既存サブディレクトリのファイル数が全て正確に修正されている（実ファイルとの一致を確認済み）、(2) 影響規模が定量的に記載されており（35ファイル移動、696行import更新、100+99ファイル影響）、作業見積もりの根拠として十分、(3) グループ間依存関係の分析と推奨移行順序が明確で、循環依存リスクが低いことが論理的に説明されている、(4) db/ の後方互換性戦略やバレルエクスポート方針など、実装時の判断ポイントが具体的に記載されている、(5) 受け入れ基準が4カテゴリ11項目に細分化されており、検証可能な形になっている。残る2件のnice_to_have指摘は軽微な記述改善であり、対応は任意。本Issueは実装着手可能な状態にある。",
+  "code_references": [
+    { "file": "src/lib/", "relevance": "リファクタリング対象ディレクトリ（72ファイル）" },
+    { "file": "src/lib/__tests__/", "relevance": "影響を受けるテストディレクトリ（9ファイル中6ファイル）" }
+  ],
+  "doc_references": [
+    { "file": "CLAUDE.md", "relevance": "約52箇所のパス参照更新が必要" },
+    { "file": "docs/module-reference.md", "relevance": "約54箇所のパス参照更新が必要" },
+    { "file": "docs/architecture.md", "relevance": "約6箇所のパス参照更新が必要" }
+  ]
+}

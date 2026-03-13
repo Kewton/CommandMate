@@ -17,7 +17,7 @@ import {
   killSession,
   ensureSession,
   SPECIAL_KEY_VALUES,
-} from '@/lib/tmux';
+} from '@/lib/tmux/tmux';
 
 // Mock child_process execFile (Issue #393: exec -> execFile migration)
 vi.mock('child_process', () => ({

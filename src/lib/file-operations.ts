@@ -12,7 +12,7 @@
 import { readFile, writeFile, mkdir, rm, rename, stat, readdir } from 'fs/promises';
 import { existsSync, realpathSync, statSync } from 'fs';
 import { join, extname, dirname, basename, sep, resolve } from 'path';
-import { isPathSafe, resolveAndValidateRealPath } from './path-validator';
+import { isPathSafe, resolveAndValidateRealPath } from './security/path-validator';
 import { isEditableExtension } from '@/config/editable-extensions';
 import { DELETE_SAFETY_CONFIG, isProtectedDirectory } from '@/config/file-operations';
 

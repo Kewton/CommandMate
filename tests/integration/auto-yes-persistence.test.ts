@@ -29,7 +29,7 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
   test('should persist auto-yes state after module reload', async () => {
     // 1. Initial module load - set state
     const { setAutoYesEnabled, getAutoYesState, clearAllAutoYesStates, clearAllPollerStates } =
-      await import('@/lib/auto-yes-manager');
+      await import('@/lib/polling/auto-yes-manager');
 
     // Clear any existing state
     clearAllAutoYesStates();
@@ -47,7 +47,7 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
 
     // 3. Reimport the module
     const { getAutoYesState: getAutoYesStateAfter } =
-      await import('@/lib/auto-yes-manager');
+      await import('@/lib/polling/auto-yes-manager');
 
     // 4. Verify state persists after reload
     const stateAfterReload = getAutoYesStateAfter('test-worktree-reload');
@@ -63,7 +63,7 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
       clearAllAutoYesStates,
       clearAllPollerStates,
       stopAllAutoYesPolling,
-    } = await import('@/lib/auto-yes-manager');
+    } = await import('@/lib/polling/auto-yes-manager');
 
     // Clear any existing state
     clearAllAutoYesStates();
@@ -80,7 +80,7 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
 
     // 3. Reimport the module
     const { getActivePollerCount: getActivePollerCountAfter, stopAllAutoYesPolling: stopAllAfter } =
-      await import('@/lib/auto-yes-manager');
+      await import('@/lib/polling/auto-yes-manager');
 
     // 4. Verify poller state persists
     expect(getActivePollerCountAfter()).toBe(1);
@@ -92,7 +92,7 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
   test('should use same globalThis Map instance across module reloads', async () => {
     // 1. Initial module load
     const { setAutoYesEnabled, clearAllAutoYesStates, clearAllPollerStates } =
-      await import('@/lib/auto-yes-manager');
+      await import('@/lib/polling/auto-yes-manager');
 
     // Clear any existing state
     clearAllAutoYesStates();
@@ -107,7 +107,7 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
     vi.resetModules();
 
     // 3. Reimport and access state
-    await import('@/lib/auto-yes-manager');
+    await import('@/lib/polling/auto-yes-manager');
 
     // 4. Verify same Map instance is used
     const mapRefAfter = globalThis.__autoYesStates;
@@ -117,7 +117,7 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
   test('should correctly clear state after module reload', async () => {
     // 1. Initial module load - set state
     const { setAutoYesEnabled, clearAllAutoYesStates, clearAllPollerStates } =
-      await import('@/lib/auto-yes-manager');
+      await import('@/lib/polling/auto-yes-manager');
 
     clearAllAutoYesStates();
     clearAllPollerStates();
@@ -130,7 +130,7 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
 
     // 3. Reimport and clear
     const { clearAllAutoYesStates: clearAfter, getAutoYesState: getAfter } =
-      await import('@/lib/auto-yes-manager');
+      await import('@/lib/polling/auto-yes-manager');
 
     clearAfter();
 
@@ -145,7 +145,7 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
     expect(globalThis.__autoYesPollerStates).toBeUndefined();
 
     // Import module
-    await import('@/lib/auto-yes-manager');
+    await import('@/lib/polling/auto-yes-manager');
 
     // Verify Maps are initialized
     expect(globalThis.__autoYesStates).toBeInstanceOf(Map);
@@ -156,7 +156,7 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
   test('should persist 3-hour duration in-memory state after module reload', async () => {
     // 1. Initial module load - set state with custom 3-hour duration
     const { setAutoYesEnabled, getAutoYesState, clearAllAutoYesStates, clearAllPollerStates } =
-      await import('@/lib/auto-yes-manager');
+      await import('@/lib/polling/auto-yes-manager');
 
     // Clear any existing state
     clearAllAutoYesStates();
@@ -175,7 +175,7 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
 
     // 3. Reimport the module
     const { getAutoYesState: getAutoYesStateAfter } =
-      await import('@/lib/auto-yes-manager');
+      await import('@/lib/polling/auto-yes-manager');
 
     // 4. Verify state persists with correct expiresAt after reload
     const stateAfterReload = getAutoYesStateAfter('test-duration-reload');

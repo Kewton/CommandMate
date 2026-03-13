@@ -1,0 +1,79 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー反映",
+  "issue_number": 481,
+  "applied_at": "2026-03-13",
+  "target_file": "dev-reports/design/issue-481-lib-restructure-design-policy.md",
+  "applied_findings": [
+    {
+      "id": "I001",
+      "severity": "must_fix",
+      "status": "applied",
+      "action": "セクション3に「db/ 移行の原子性」サブセクションを新設。db.ts の移動と db/index.ts の作成を1コミットで原子的に実施する手順を4ステップで明記。moduleResolution: bundler でのファイル優先問題を説明。"
+    },
+    {
+      "id": "I002",
+      "severity": "must_fix",
+      "status": "applied",
+      "action": "セクション3に「db-instance.ts の個別importパス移行方針」サブセクションを新設。互換レイヤーファイル（旧パスに再エクスポート）を残す方針を採用。db-instance.ts(48箇所), db-migrations.ts(34箇所)等の具体的な影響数を明記。"
+    },
+    {
+      "id": "I003",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "action": "対応不要。__tests__/ のファイル数精度はC006と同様に実装時にimport分析で確定する方針。Stage 3サマリーに記載。"
+    },
+    {
+      "id": "I004",
+      "severity": "should_fix",
+      "status": "applied",
+      "action": "セクション6の受け入れ基準「テスト・ビルド」に `npm run build:cli` がパスする項目を追加。"
+    },
+    {
+      "id": "I005",
+      "severity": "should_fix",
+      "status": "applied",
+      "action": "セクション3の transports/ 統合方針に「transports/ 参照の更新対象」サブセクションを追加。ws-server.ts, cli-session.ts, テスト2件の計4ファイルの現在のimportと更新後のパスを表形式で明記。"
+    },
+    {
+      "id": "I006",
+      "severity": "should_fix",
+      "status": "applied",
+      "action": "セクション3に「middleware.ts の Edge Runtime 対応」サブセクションを新設。middleware.ts では security/ バレル経由ではなく直接import形式（./lib/security/ip-restriction）を使用する方針を明記。"
+    },
+    {
+      "id": "I007",
+      "severity": "should_fix",
+      "status": "applied",
+      "action": "セクション7にロールバック計画を新設。グループ単位の独立コミット粒度、git revert による個別ロールバック手順、逆順ロールバック方針、前提条件を記載。"
+    },
+    {
+      "id": "I008",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "action": "対応不要。hooks/contexts への影響は限定的で正しく見積もられている。Stage 3サマリーに記載。"
+    },
+    {
+      "id": "I009",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "action": "対応不要。components への影響は限定的で正しく見積もられている。Stage 3サマリーに記載。"
+    }
+  ],
+  "summary": {
+    "total_findings": 9,
+    "applied": 6,
+    "skipped": 3,
+    "must_fix_applied": 2,
+    "must_fix_total": 2,
+    "should_fix_applied": 4,
+    "should_fix_total": 4,
+    "nice_to_have_skipped": 3
+  },
+  "structural_changes": [
+    "セクション番号を再採番（旧8を9、旧9を10、旧10を11に変更）",
+    "セクション7にロールバック計画を新設",
+    "セクション12にStage 3レビュー指摘反映サマリーを追加",
+    "関連ファイルにStage 3のレビュー結果・反映結果リンクを追加"
+  ]
+}

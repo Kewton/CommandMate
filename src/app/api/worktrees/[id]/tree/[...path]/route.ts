@@ -13,7 +13,10 @@ import {
   createWorktreeNotFoundError,
   createAccessDeniedError,
 } from '@/lib/file-tree';
-import { isPathSafe, resolveAndValidateRealPath } from '@/lib/path-validator';
+import { isPathSafe, resolveAndValidateRealPath } from '@/lib/security/path-validator';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/tree');
 
 /**
  * Decode a URL-encoded path segment safely
@@ -94,7 +97,7 @@ export async function GET(
 
     return NextResponse.json(result);
   } catch (error: unknown) {
-    console.error('Error reading directory:', error);
+    logger.error('error-reading-directory:', { error: error instanceof Error ? error.message : String(error) });
 
     const errorResponse = parseDirectoryError(error);
     return NextResponse.json(

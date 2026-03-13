@@ -6,12 +6,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock response-poller
-vi.mock('@/lib/response-poller', () => ({
+vi.mock('@/lib/polling/response-poller', () => ({
   stopPolling: vi.fn(),
 }));
 
 // Mock auto-yes-manager
-vi.mock('@/lib/auto-yes-manager', () => ({
+vi.mock('@/lib/polling/auto-yes-manager', () => ({
   stopAutoYesPolling: vi.fn(),
   deleteAutoYesState: vi.fn().mockReturnValue(true),
 }));
@@ -23,7 +23,7 @@ vi.mock('@/lib/schedule-manager', () => ({
 }));
 
 import { cleanupWorktreeSessions } from '@/lib/session-cleanup';
-import { stopAutoYesPolling, deleteAutoYesState } from '@/lib/auto-yes-manager';
+import { stopAutoYesPolling, deleteAutoYesState } from '@/lib/polling/auto-yes-manager';
 import { stopScheduleForWorktree, stopAllSchedules } from '@/lib/schedule-manager';
 
 describe('Session Cleanup - Issue #404 Changes', () => {

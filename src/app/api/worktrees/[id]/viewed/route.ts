@@ -7,6 +7,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById, updateLastViewedAt } from '@/lib/db';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/viewed');
 
 export async function PATCH(
   request: NextRequest,
@@ -29,11 +32,11 @@ export async function PATCH(
     updateLastViewedAt(db, params.id, viewedAt);
 
     // SF2: Log the viewed update
-    console.log(`[viewed] Marked worktree ${params.id} as viewed at ${viewedAt.toISOString()}`);
+    logger.info('marked-worktree-as-viewed');
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {
-    console.error('Error updating viewed status:', error);
+    logger.error('error-updating-viewed-status:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to update viewed status' },
       { status: 500 }

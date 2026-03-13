@@ -18,8 +18,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
-import { normalize, extname } from 'path';
-import { isPathSafe, resolveAndValidateRealPath } from '@/lib/path-validator';
+import { normalize, extname, resolve } from 'path';
+import { mkdirSync, existsSync } from 'fs';
+import { isPathSafe, resolveAndValidateRealPath } from '@/lib/security/path-validator';
 import {
   writeBinaryFile,
   isValidNewName,
@@ -33,6 +34,9 @@ import {
   isYamlSafe,
   isJsonValid,
 } from '@/config/uploadable-extensions';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/upload');
 
 /**
  * [DRY] Centralized mapping of error codes to HTTP status codes
@@ -113,6 +117,19 @@ export async function POST(
     // Validate target directory path
     const targetDir = params.path.join('/');
     const normalizedDir = normalize(targetDir);
+
+    // [S3-S2] Auto-create .commandmate/attachments/ directory if needed
+    if (normalizedDir.startsWith('.commandmate/attachments') || normalizedDir === '.commandmate/attachments') {
+      const fullDir = resolve(worktree.path, normalizedDir);
+      if (!existsSync(fullDir)) {
+        try {
+          mkdirSync(fullDir, { recursive: true });
+        } catch (mkdirError) {
+          logger.error('failed-to-create-attachments-directory:', { error: mkdirError instanceof Error ? mkdirError.message : String(mkdirError) });
+          return createUploadErrorResponse('INTERNAL_ERROR', 'Failed to create upload directory');
+        }
+      }
+    }
 
     if (!isPathSafe(normalizedDir, worktree.path)) {
       return createUploadErrorResponse('INVALID_PATH', 'Invalid file path');
@@ -209,7 +226,7 @@ export async function POST(
       { status: 201 }
     );
   } catch (error: unknown) {
-    console.error('Error uploading file:', error);
+    logger.error('error-uploading-file:', { error: error instanceof Error ? error.message : String(error) });
     return createUploadErrorResponse('INTERNAL_ERROR', 'Failed to upload file');
   }
 }

@@ -1,0 +1,54 @@
+{
+  "issue_number": 479,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "reviewed_at": "2026-03-13",
+  "summary": "前回のレビュー（通常1回目: must_fix 2件、影響範囲1回目: must_fix 1件）で指摘された全3件のmust_fixは適切に反映されている。Issue全体として、行数の正確性、分割案の具体性、バレルファイル戦略、実施フェーズ、テスト戦略が充実しており、実装可能な状態に達している。新規のmust_fixは発見されなかった。should_fix 2件とnice_to_have 1件の軽微な改善提案がある。",
+  "previous_findings_addressed": [
+    {
+      "id": "F001",
+      "addressed": true,
+      "notes": "WorktreeDetailRefactored.tsxの目標行数が「メインファイル800行以下、分割後ファイル各500行以下」に再設定され、4段階の具体的分割計画（内部コンポーネント抽出、カスタムhook抽出、レイアウト分離、ユーティリティ分離）と分割後ファイル名が明記されている。現在の2,709行から800行以下への削減は実現可能な目標である。"
+    },
+    {
+      "id": "F002",
+      "addressed": true,
+      "notes": "db.tsのバレルファイル戦略が詳細に記載されている。段階的アプローチ（ドメイン別分割 -> バレル維持 -> 将来的廃止）が明確で、消費者数（API 37、lib 13、テスト37）も正確に記載。ツリーシェイキング改善のメリットも追記済み。「公開APIの変更なし」の受け入れ基準との整合が取れている。"
+    },
+    {
+      "id": "I001",
+      "addressed": true,
+      "notes": "isValidWorktreeIdのpath-validator.tsへの移動方針が明記されている。実コードを確認した結果、isValidWorktreeIdは11のAPIルート（prompt-response, execution-logs x2, auto-yes, current-output, route, git/log, git/diff, git/show, schedules x2）からimportされており、Issueの記載と一致。path-validator.tsは現在237行で4つのexport関数を持ち、汎用バリデーションモジュールとして適切な移動先である。受け入れ基準にも移動確認の項目が追加済み。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F2-001",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "R-3（Issue #481）のディレクトリ構成案とdb.tsバレルファイル戦略の整合性に潜在的課題がある",
+      "description": "Issue #481（R-3）ではdb.tsを含むDB関連ファイルをsrc/lib/db/ディレクトリに移動する提案がある。本Issue（R-1）ではdb.tsをバレルファイルとして残す戦略を取る。R-1完了後にR-3を実施する場合、バレルファイルのパスがsrc/lib/db.tsからsrc/lib/db/index.tsに変わる可能性がある。Issueの「R-3との関係」セクションでは「バレルの移動のみで対応可能」と記載されているが、db.tsからdb/index.tsへのパス変更は消費者のimportパス（@/lib/db）がディレクトリインデックス解決に依存するため、TypeScriptのmoduleResolution設定によっては追加対応が必要になる可能性がある。",
+      "suggestion": "R-3との関係セクションに、db.tsをsrc/lib/db/index.tsに移動した場合もTypeScriptのモジュール解決により@/lib/dbのimportパスが維持されることを補足するか、R-3実施時のimportパス互換性確認を注意事項として追記する。"
+    },
+    {
+      "id": "F2-002",
+      "severity": "should_fix",
+      "category": "明確性",
+      "title": "Phase 2のauto-yes-manager.ts分割案の詳細度がPhase 3の他ファイルと比べて不足",
+      "description": "response-poller.tsには4ファイル分割の詳細設計（各ファイルの責務、具体的な関数配置、モジュールレベル状態の管理、テストファイル対応表）が記載されているが、auto-yes-manager.tsの分割案は「ポーリングと状態管理の分離 + isValidWorktreeId移動」の概要のみで、具体的な分割後ファイル名や関数配置が記載されていない。auto-yes-manager.tsは866行で、isValidWorktreeIdの移動だけでは大幅な行数削減にはならず、ポーリングと状態管理をどう分割するかが不明確。",
+      "suggestion": "auto-yes-manager.tsの詳細分割設計セクションに、分割後のファイル名案（例：auto-yes-poller.ts, auto-yes-state.ts）と主要関数の配置先を追記する。Phase 3ほど詳細でなくとも、実装者が方針を理解できるレベルの情報があると良い。"
+    },
+    {
+      "id": "F2-003",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "Phase 1対象ファイル（MarkdownEditor, FileTreeView, schedule-manager）の分割後ファイル名案が未記載",
+      "description": "WorktreeDetailRefactored.tsx、db.ts、response-poller.ts、auto-yes-manager.tsには分割後の具体的ファイル名や方針が記載されているが、Phase 1対象の3ファイル（MarkdownEditor.tsx: ツールバー・プレビュー・エディタの分離、FileTreeView.tsx: ツリーノード・コンテキストメニューの分離、schedule-manager.ts: cron解析とジョブ実行の分離）は対象ファイル表の分割案のみで、具体的なファイル名が記載されていない。Phase 1は最初に着手するため、ある程度の詳細があると着手しやすい。",
+      "suggestion": "Phase 1対象ファイルの分割後ファイル名案を対象ファイル表またはセクションに追記する。例：MarkdownEditor.tsx -> MarkdownEditor.tsx + MarkdownToolbar.tsx + MarkdownPreview.tsx、FileTreeView.tsx -> FileTreeView.tsx + TreeNode.tsx + TreeContextMenu.tsx、schedule-manager.ts -> schedule-manager.ts + cron-parser.ts + job-executor.ts。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 2,
+  "nice_to_have_count": 1,
+  "overall_assessment": "Issue #479は2回の通常レビューと1回の影響範囲レビューを経て、実装可能な品質に達している。前回指摘された3件のmust_fix（WorktreeDetailRefactored.tsxの目標行数再設定、db.tsのバレルファイル戦略、isValidWorktreeIdの再配置方針）は全て適切に反映されている。行数は全て正確（実コードと一致）、分割案は具体的かつ実現可能、バレルファイル戦略により既存消費者への影響が最小化され、テスト戦略とフェーズ分けも妥当である。残る指摘はshould_fix 2件（R-3との整合性補足、auto-yes-manager.tsの詳細化）とnice_to_have 1件（Phase 1ファイル名案）であり、いずれも実装を妨げるものではない。本Issueは実装着手可能と判断する。"
+}

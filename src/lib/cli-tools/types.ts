@@ -183,6 +183,36 @@ export function isValidVibeLocalContextWindow(value: unknown): value is number {
 export const OLLAMA_MODEL_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/;
 
 /**
+ * Image-capable CLI tool interface (ISP compliant)
+ * Issue #474: Extends ICLITool with image sending capability
+ * [S1-M1] Separated from ICLITool to follow Interface Segregation Principle
+ */
+export interface IImageCapableCLITool extends ICLITool {
+  /** Returns true to indicate image support */
+  supportsImage(): true;
+  /**
+   * Send a message with an attached image
+   * @param worktreeId - Worktree ID
+   * @param message - Message text
+   * @param imagePath - Absolute path to the image file
+   */
+  sendMessageWithImage(worktreeId: string, message: string, imagePath: string): Promise<void>;
+}
+
+/**
+ * Type guard to check if a CLI tool supports image sending
+ * Issue #474: Used by send/route.ts to determine sending strategy
+ *
+ * @param tool - CLI tool instance to check
+ * @returns True if the tool implements IImageCapableCLITool
+ */
+export function isImageCapableCLITool(tool: ICLITool): tool is IImageCapableCLITool {
+  const candidate = tool as IImageCapableCLITool;
+  return typeof candidate.supportsImage === 'function'
+    && candidate.supportsImage() === true;
+}
+
+/**
  * CLIツール情報
  */
 export interface CLIToolInfo {

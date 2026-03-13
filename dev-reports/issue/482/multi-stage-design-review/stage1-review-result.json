@@ -1,0 +1,84 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "issue_number": 482,
+  "review_date": "2026-03-13",
+  "focus_area": "設計原則",
+  "status": "approved",
+  "score": 5,
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "nice_to_have",
+      "category": "設計原則 - DRY",
+      "description": "opencode-config.ts の fetchOllamaModels() と fetchLmStudioModels() は HTTP fetch, timeout, response size check, JSON parse, model validation という同一のフローを持つ。設計方針書では TODOコメント削除とJSDoc集約のみを行い、共通化は3つ目のprovider追加時に実施する方針となっている。現時点ではproviderが2つのみであり、共通化のコスト対効果が低い。",
+      "suggestion": "現方針（KISS優先、3つ目のprovider追加を共通化トリガーとする）は妥当。JSDocへの集約により将来の開発者への情報伝達が保たれる。変更不要。"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "nice_to_have",
+      "category": "設計原則 - 設計方針書の完全性",
+      "description": "方針2の対応内容で「ensureOpencodeConfig のJSDocに1行追記」とあるが、追記する文面 'HTTP fetch logic (fetchWithTimeout) can be extracted to a shared helper.' が英語で記述されている。既存のJSDoc（L340-342）も英語で書かれており整合的だが、追記位置が L340-342付近 と曖昧。",
+      "suggestion": "実装チェックリストには正確な追記位置の目安（例: L342の直後）を明記すると実装者の迷いが減る。ただし本件はコメント変更のみであり影響は軽微。"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "nice_to_have",
+      "category": "設計原則 - 一貫性",
+      "description": "方針1で slash-commands/route.ts の NOTE コメント（L29-32）を維持する判断がなされている。L29-32は型が独立している理由を説明しており、TODOコメント削除後も文脈として有用。NOTE維持は設計として適切。",
+      "suggestion": "変更不要。NOTE維持の判断は正しい。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 3,
+    "total": 3
+  },
+  "design_principles_checklist": {
+    "single_responsibility": {
+      "status": "pass",
+      "comment": "各方針が単一のTODO/FIXMEに対応しており、変更がコメント・JSDocに限定されている。SRP違反なし。"
+    },
+    "open_closed": {
+      "status": "pass",
+      "comment": "型定義やAPIの振る舞いに変更なし。拡張ポイント（3つ目のprovider追加時のリファクタリング）がJSDocに記録される。"
+    },
+    "liskov_substitution": {
+      "status": "not_applicable",
+      "comment": "コメント変更のみのため該当なし。"
+    },
+    "interface_segregation": {
+      "status": "not_applicable",
+      "comment": "インターフェース変更なし。"
+    },
+    "dependency_inversion": {
+      "status": "not_applicable",
+      "comment": "依存関係の変更なし。"
+    },
+    "kiss": {
+      "status": "pass",
+      "comment": "最小限の変更でTODOマーカーを解消。早期最適化を避けている。方針Bの型統合不要判断もKISS原則に合致。"
+    },
+    "yagni": {
+      "status": "pass",
+      "comment": "方針1で型統合を行わない判断はYAGNI原則に完全に合致。現時点で不要な抽象化を導入しない。"
+    },
+    "dry": {
+      "status": "pass",
+      "comment": "方針2でTODOコメントの重複（L217とL284に同一文面）をJSDocに集約しDRY原則を満たす。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-482-todo-fixme-cleanup-design-policy.md",
+    "src/app/api/worktrees/[id]/slash-commands/route.ts",
+    "src/lib/cli-tools/opencode-config.ts",
+    "src/lib/cli-patterns.ts"
+  ],
+  "timestamp": "2026-03-13T00:00:00Z"
+}

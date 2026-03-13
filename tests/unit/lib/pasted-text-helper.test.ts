@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock tmux module
-vi.mock('@/lib/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', () => ({
   capturePane: vi.fn(),
   sendKeys: vi.fn(),
 }));
@@ -30,7 +30,7 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { detectAndResendIfPastedText } from '@/lib/pasted-text-helper';
-import { capturePane, sendKeys } from '@/lib/tmux';
+import { capturePane, sendKeys } from '@/lib/tmux/tmux';
 
 const TEST_SESSION_NAME = 'mcbd-claude-test-worktree';
 

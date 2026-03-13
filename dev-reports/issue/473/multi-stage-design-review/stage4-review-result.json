@@ -1,0 +1,127 @@
+{
+  "issue_number": 473,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "review_date": "2026-03-12",
+  "summary": "設計方針書のセキュリティ設計（セクション8）は、既存terminal/route.tsのIssue #393セキュリティハードニングと同等の4層防御を正しく踏襲している。OWASP Top 10の主要カテゴリに対して概ね適切な防御が設計されているが、must_fix 1件（レート制限の欠如）、should_fix 3件（JSONパース例外、エラーレスポンスの情報漏洩パターン統一、keys配列要素の型検証）、nice_to_have 2件を検出した。特にレート制限はDoS耐性の基本であり、設計段階で方針を明示すべきである。",
+  "findings": [
+    {
+      "id": "DR4-001",
+      "severity": "must_fix",
+      "category": "DoS防止 / レート制限",
+      "title": "special-keys APIにレート制限の設計が欠如している",
+      "description": "設計方針書セクション8.1では配列長制限（MAX_KEYS_LENGTH=10）をDoS防止策として挙げているが、リクエスト頻度に対するレート制限が設計されていない。keys配列長が最大10でSPECIAL_KEY_DELAY_MSが100msの場合、1リクエストあたり最大約1秒の処理時間となる。攻撃者が認証を突破した場合（またはCM_AUTH_TOKEN_HASHが未設定の環境で）、高頻度リクエストにより大量のtmux send-keysプロセスが同時実行され、サーバーリソースを圧迫する可能性がある。既存のterminal/route.tsにも同様の制限がないが、special-keysはキー間にdelayがあるためリクエスト処理時間が長く、同時接続による影響がより大きい。",
+      "owasp_reference": "A05:2021 Security Misconfiguration",
+      "risk_level": "medium",
+      "suggestion": "以下のいずれかの方針を設計に追記すること: (1) インメモリのシンプルなレート制限（worktreeId単位で直近N秒以内のリクエスト数をカウントし、閾値超過で429を返す）。(2) 同一worktreeIdに対するspecial-keysリクエストの同時実行数を1に制限するセマフォ（既存clone-manager.tsの排他制御パターンを参考）。(3) terminal/route.tsと同様にレート制限なしとし、その判断理由（認証+IP制限で十分等）を設計書に明記する。方針(3)を選択する場合でも、設計上の意図的判断として記録すること。"
+    },
+    {
+      "id": "DR4-002",
+      "severity": "should_fix",
+      "category": "入力バリデーション / 例外処理",
+      "title": "req.json()のJSONパースエラー時に500が返る設計",
+      "description": "設計方針書セクション4.2のAPIパターンでは、req.json()のパース失敗時の処理が明記されていない。不正なJSONボディ（例: Content-Type: application/jsonだが本文がHTMLやバイナリ）を送信した場合、req.json()がSyntaxErrorをスローし、外側のtry-catchで500エラーとして処理される。これは本来400 Bad Requestで返すべきケースであり、500レスポンスは監視システムの誤報やサーバー側のエラーログ汚染を招く。既存terminal/route.tsにも同じ問題があるが、新規APIでは改善の機会がある。",
+      "owasp_reference": "A03:2021 Injection",
+      "risk_level": "low",
+      "suggestion": "req.json()をtry-catchで囲み、JSONパースエラー時は400 Bad Requestを返す設計を追加する。例: try { body = await req.json(); } catch { return NextResponse.json({ error: 'Invalid request body' }, { status: 400 }); } これはterminal/route.tsの既存パターンからの改善となる。"
+    },
+    {
+      "id": "DR4-003",
+      "severity": "should_fix",
+      "category": "情報漏洩 / エラーレスポンス",
+      "title": "404エラーレスポンスのメッセージパターンがterminal/route.tsと異なる可能性",
+      "description": "terminal/route.tsのセキュリティハードニング（Issue #393, D1-007）では固定文字列エラーレスポンスを使用している。設計方針書セクション5.1のエラーレスポンス定義では 'Worktree not found' と 'Session not found...' が記載されているが、current-output/route.tsでは `Worktree '${params.id}' not found` のようにparams.idをエラーメッセージに含めるパターンが多数存在する（grep結果で23箇所確認）。special-keys APIの実装時にどちらのパターンに従うかで一貫性が損なわれる可能性がある。terminal/route.tsの固定文字列パターン（params.idを含めない）がセキュリティ観点では望ましい。",
+      "owasp_reference": "A01:2021 Broken Access Control",
+      "risk_level": "low",
+      "suggestion": "設計方針書のエラーレスポンス定義に、terminal/route.tsのD1-007パターン（固定文字列、内部情報非開示）に従うことを明記する。具体的には、エラーメッセージにparams.idやcliToolIdの値を含めない。設計書セクション8.1の防御層一覧に 'エラーレスポンス: 固定文字列（D1-007踏襲）' を追加する。"
+    },
+    {
+      "id": "DR4-004",
+      "severity": "should_fix",
+      "category": "入力バリデーション / 型安全性",
+      "title": "keys配列の各要素に対する型検証が不十分な設計",
+      "description": "設計方針書セクション8.1ではisAllowedSpecialKey()によるホワイトリスト検証を記載しているが、keys配列自体の型検証（Array.isArray()チェック、各要素がstring型であることの検証）が明記されていない。req.json()で取得したkeysが配列でない場合や、配列内にnumber/object/null等の非string要素が混在する場合のバリデーションが設計から漏れている。isAllowedSpecialKey()はstring型を前提としているため、非string値が渡されるとSet.has()での型変換による予期しない動作が発生する可能性がある。",
+      "owasp_reference": "A03:2021 Injection",
+      "risk_level": "low",
+      "suggestion": "セクション4.2のバリデーションパイプラインに以下を追加する: (1) Array.isArray(keys)チェック、(2) keys.every(k => typeof k === 'string')チェック、(3) keys.length === 0の場合の処理（空配列は400で拒否するか200で即座に成功を返すか決定）。terminal/route.tsのcommandバリデーション（typeof command !== 'string'）と同等の防御深度を確保する。"
+    },
+    {
+      "id": "DR4-005",
+      "severity": "nice_to_have",
+      "category": "認証/認可 / エンドポイント保護",
+      "title": "special-keys APIのmiddleware.tsによる自動保護の確認記録",
+      "description": "設計方針書セクション8.1では認証がmiddleware.tsにより自動適用されると記載している。middleware.tsのmatcherパターン '/((?!_next/|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)' を確認した結果、/api/worktrees/[id]/special-keys パスはmatcherに含まれ、AUTH_EXCLUDED_PATHSにも含まれないため、認証保護は正しく適用される。IP制限も同様に適用される。この確認結果は設計書に記録しておくと、将来のレビューで再確認が不要になる。",
+      "owasp_reference": "A07:2021 Identification and Authentication Failures",
+      "risk_level": "low",
+      "suggestion": "セクション8.1の認証行に 'middleware.ts matcherパターンによる自動適用を確認済み（Stage 4レビュー）' の注記を追加する。"
+    },
+    {
+      "id": "DR4-006",
+      "severity": "nice_to_have",
+      "category": "XSS / フロントエンド",
+      "title": "NavigationButtonsコンポーネントのXSSリスク評価",
+      "description": "設計方針書セクション7.1のNavigationButtonsコンポーネントは、propsとしてworktreeId（string）とcliToolId（CLIToolType）を受け取る。これらの値はAPIレスポンスから取得されるが、Reactの標準的なJSXレンダリング（{}内のテキスト出力）は自動的にHTMLエスケープされるため、直接的なXSSリスクは低い。ボタンラベル（▲, ▼, Enter, Esc）はハードコード文字列であり、ユーザー入力由来ではない。ただし、worktreeIdやcliToolIdをdangerouslySetInnerHTMLやDOM直接操作で使用しないことが前提条件となる。",
+      "owasp_reference": "A03:2021 Injection (XSS)",
+      "risk_level": "low",
+      "suggestion": "実装時にNavigationButtonsコンポーネント内でdangerouslySetInnerHTMLを使用しないことを確認する。worktreeIdをHTMLに直接レンダリングする必要がある場合（デバッグ表示等）はReactのJSX自動エスケープに依存し、DOM API直接操作を避ける。"
+    }
+  ],
+  "security_checklist": {
+    "A01_broken_access_control": {
+      "status": "pass",
+      "note": "middleware.ts認証 + IP制限による保護。DB存在確認 + セッション確認の4層防御。固定文字列エラーレスポンスの徹底を推奨（DR4-003）。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "note": "本Issue範囲に暗号処理は含まれない。"
+    },
+    "A03_injection": {
+      "status": "pass_with_conditions",
+      "note": "tmuxコマンドインジェクションはexecFile()（シェル解釈なし）+ NAVIGATION_KEY_VALUESホワイトリストで防御。JSONパースエラーの適切な処理（DR4-002）とkeys配列要素の型検証（DR4-004）を追加すること。"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "note": "既存terminal/route.tsのセキュリティハードニングパターンを踏襲した設計。as const + 型ガード関数によるimmutability保証。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "conditional",
+      "note": "レート制限の方針が未定義（DR4-001）。MAX_KEYS_LENGTH=10による配列長制限は存在するが、リクエスト頻度制限が必要か判断を明記すべき。"
+    },
+    "A06_vulnerable_components": {
+      "status": "not_applicable",
+      "note": "新規外部依存は追加されない。"
+    },
+    "A07_authentication_failures": {
+      "status": "pass",
+      "note": "middleware.tsのmatcherパターンにより自動保護される。AUTH_EXCLUDED_PATHSに含まれないことを確認済み。"
+    },
+    "A08_data_integrity_failures": {
+      "status": "pass",
+      "note": "NAVIGATION_KEY_VALUESのas const定義によりランタイム改ざんを防止。"
+    },
+    "A09_logging_monitoring": {
+      "status": "pass",
+      "note": "DR3-006（Stage 3）でterminal/route.tsパターン踏襲が暗黙の方針として確認済み。console.errorでサーバーサイドログを出力し、クライアントには固定文字列を返す。"
+    },
+    "A10_ssrf": {
+      "status": "not_applicable",
+      "note": "本Issue範囲に外部HTTPリクエストは含まれない。"
+    }
+  },
+  "existing_security_comparison": {
+    "terminal_route_parity": {
+      "D1-001_cliToolId_validation": "設計済み（セクション8.1）",
+      "D1-002_db_existence_check": "設計済み（セクション8.1）",
+      "D1-003_session_name_derivation": "設計済み（CLIToolManager経由、セクション4.2）",
+      "D1-004_no_auto_creation": "設計済み（hasSession確認、セクション4.2）",
+      "D1-006_dos_protection": "部分的（MAX_KEYS_LENGTH=10は設計済み、リクエスト頻度制限は未定義）",
+      "D1-007_fixed_error_responses": "設計済み（セクション5.1）ただしパターン一貫性に注意（DR4-003）"
+    }
+  },
+  "statistics": {
+    "must_fix": 1,
+    "should_fix": 3,
+    "nice_to_have": 2,
+    "total": 6
+  }
+}

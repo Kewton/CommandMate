@@ -1,0 +1,77 @@
+{
+  "issue_number": 479,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "reviewed_at": "2026-03-13",
+  "design_doc": "dev-reports/design/issue-479-large-file-split-design-policy.md",
+  "summary": "設計方針書の整合性レビューを実施。行数・ファイル名は概ね正確だが、db.ts分割のupdateWorktreeLinkの配置誤りや、claude-session.tsの詳細設計セクション欠落など、実装時に混乱を招く可能性のある不整合が複数検出された。受け入れ基準との整合性については、isValidWorktreeId移動が公開APIの変更なし基準の例外であることの明記がやや不足している。",
+  "findings": [
+    {
+      "id": "D2-001",
+      "severity": "should_fix",
+      "category": "設計書-コード整合",
+      "title": "updateWorktreeLinkがsession-db.tsに誤配置",
+      "description": "セクション4-1のテーブルで、updateWorktreeLinkがsession-db.tsの主要関数として記載されている。しかし実際のコードを見ると、updateWorktreeLinkはworktreesテーブルのlink列を更新する関数であり、セッション状態管理とは無関係。worktree-db.tsに配置すべきである。",
+      "location": "セクション4-1 db.ts分割設計 - session-db.ts行",
+      "suggestion": "updateWorktreeLinkをsession-db.tsの主要関数リストからworktree-db.tsに移動する。worktree-db.tsの行数目標も併せて調整（~450行 -> ~470行程度、session-db.tsは~180行程度に減少）。"
+    },
+    {
+      "id": "D2-002",
+      "severity": "should_fix",
+      "category": "設計書内整合",
+      "title": "claude-session.ts分割の詳細設計セクションが欠落",
+      "description": "Mermaidダイアグラム（セクション2）ではclaude-session.ts(838行)をclaude-session.tsとsession-key-sender.tsに分割する設計が示されているが、セクション4には4-1から4-5までしかなく、claude-session.tsの詳細設計セクション（4-6相当）が存在しない。また、sendKeysとsendSpecialKeyは実際にはtmux.tsからimportされている外部関数であり、claude-session.ts内部のキー送信ロジックとして抽出可能な部分の具体的な特定がない。",
+      "location": "セクション2 Mermaidダイアグラム vs セクション4 詳細設計",
+      "suggestion": "セクション4-6としてclaude-session.ts分割設計を追加し、session-key-sender.tsに抽出する具体的な関数群と行数目標を明記する。もしくはsendKeys/sendSpecialKeyがtmux.tsの関数であることを踏まえ、分割方針を再検討する。"
+    },
+    {
+      "id": "D2-003",
+      "severity": "nice_to_have",
+      "category": "設計書-コード整合",
+      "title": "response-poller.tsの消費者数が実態と不一致",
+      "description": "セクション8のフェーズ表でPhase 3の消費者数が「87、11」と記載されている。db.tsの消費者数は実測で約91（テスト含む）で概ね整合するが、response-poller.tsの消費者数は実測13件（src内6件+テスト7件）であり、11とは一致しない。",
+      "location": "セクション8 実施フェーズ - Phase 3行",
+      "suggestion": "response-poller.tsの消費者数を13に修正する。あるいは計測基準（src内のみか、テスト含むか）を明記する。"
+    },
+    {
+      "id": "D2-004",
+      "severity": "nice_to_have",
+      "category": "設計書-コード整合",
+      "title": "extractResponseが非公開関数だがresponse-extractor.tsの主要関数として記載",
+      "description": "セクション4-2でresponse-extractor.tsの主要関数としてextractResponseが記載されているが、実際のコードではextractResponseはexportされていない内部関数（function extractResponse、行695）である。分割時にexportに変更する意図であれば問題ないが、公開APIの変更なしという受け入れ基準との関係を明確にすべき。",
+      "location": "セクション4-2 response-poller.ts分割設計",
+      "suggestion": "response-extractor.tsのextractResponseはモジュール内部の公開（response-poller.tsバレルからはre-exportしない）であることを明記し、外部公開APIに変更がないことを補足する。"
+    },
+    {
+      "id": "D2-005",
+      "severity": "nice_to_have",
+      "category": "受け入れ基準整合",
+      "title": "isValidWorktreeId移動と公開APIの変更なし基準の関係が曖昧",
+      "description": "受け入れ基準セクション12に「公開APIの変更なし（バレルファイルによるre-exportでimportパス維持）」とある一方で、同じセクション12に「isValidWorktreeIdがpath-validator.tsに移動されていること」とあり、セクション4-3ではre-exportを行わず直接import変更する方針が明記されている。これはバレルファイル戦略の例外であり、受け入れ基準の記述に矛盾がある。",
+      "location": "セクション12 受け入れ基準",
+      "suggestion": "受け入れ基準の公開APIの変更なし項目に「ただしisValidWorktreeIdのimportパス変更は例外（セクション4-3参照）」と注記を追加する。"
+    },
+    {
+      "id": "D2-006",
+      "severity": "nice_to_have",
+      "category": "設計書内整合",
+      "title": "schedule-manager.tsとMarkdownEditor.tsx、FileTreeView.tsxの詳細設計セクション欠落",
+      "description": "Mermaidダイアグラム（セクション2）のPhase 1でschedule-manager.ts、MarkdownEditor.tsx、FileTreeView.tsxの分割方針が図示されているが、セクション4の詳細設計にこれらの記載がない。Phase 1は低リスクとされているが、cron-parser.ts/job-executor.ts等の具体的な関数配置が不明。",
+      "location": "セクション2 Mermaidダイアグラム vs セクション4 詳細設計",
+      "suggestion": "少なくともPhase 1の各ファイルについて、主要関数の分割先と行数目標を簡潔に記載するセクション（4-6, 4-7, 4-8等）を追加する。低リスクであっても実装時の指針として有用。"
+    },
+    {
+      "id": "D2-007",
+      "severity": "nice_to_have",
+      "category": "CLAUDE.md整合",
+      "title": "CLAUDE.mdのpath-validator.tsモジュール説明にisValidWorktreeId未記載",
+      "description": "CLAUDE.mdの主要モジュール一覧でpath-validator.tsは「パスバリデーション・symlink防御」と記載されているが、isValidWorktreeIdの移動後はこの説明を更新する必要がある。設計方針書セクション10でCLAUDE.md更新方針が言及されているが、path-validator.tsの説明更新については触れていない。",
+      "location": "セクション10 CLAUDE.md更新方針",
+      "suggestion": "セクション10にpath-validator.tsの説明更新（isValidWorktreeId追加）も更新対象として明記する。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 2,
+  "nice_to_have_count": 5,
+  "overall_assessment": "設計方針書は全体として高品質であり、行数やファイル名の大半が実コードと整合している。must_fixレベルの致命的な矛盾はない。should_fixが2件（updateWorktreeLinkの配置誤りとclaude-session.ts詳細設計の欠落）あるが、いずれも実装前に修正可能な範囲である。受け入れ基準とisValidWorktreeId移動の関係など、例外事項の明記を強化することで、実装者の混乱を防げる。"
+}

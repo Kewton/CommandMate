@@ -11,7 +11,7 @@ import { upsertWorktree, createMessage } from '@/lib/db';
 import type { Worktree, ChatMessage } from '@/types/models';
 
 // Mock tmux
-vi.mock('@/lib/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', () => ({
   sendKeys: vi.fn(() => Promise.resolve()),
 }));
 
@@ -113,7 +113,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
       expect(response.status).toBe(200);
 
       // Verify tmux sendKeys was called with correct session name
-      const { sendKeys } = await import('@/lib/tmux');
+      const { sendKeys } = await import('@/lib/tmux/tmux');
       expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-claude-test', 'y', true);
     });
   });
@@ -164,7 +164,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
       expect(response.status).toBe(200);
 
       // Verify tmux sendKeys was called with correct session name
-      const { sendKeys } = await import('@/lib/tmux');
+      const { sendKeys } = await import('@/lib/tmux/tmux');
       expect(sendKeys).toHaveBeenCalledWith('mcbd-codex-codex-test', '1', true);
     });
   });
@@ -212,7 +212,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
       expect(response.status).toBe(200);
 
       // Verify tmux sendKeys was called with correct session name
-      const { sendKeys } = await import('@/lib/tmux');
+      const { sendKeys } = await import('@/lib/tmux/tmux');
       expect(sendKeys).toHaveBeenCalledWith('mcbd-gemini-gemini-test', 'n', true);
     });
   });

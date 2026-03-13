@@ -1,0 +1,14 @@
+{
+  "issue_number": 479,
+  "stage": 3,
+  "applied_findings": ["D3-001", "D3-002", "D3-003", "D3-004"],
+  "skipped_findings": [],
+  "changes_made": [
+    "セクション7に「vi.mockバレル互換性検証計画」を新設。vi.mock使用テストファイルの一覧（20件以上）と各Phase完了時の検証手順・タイミングを明記（D3-001対応）",
+    "セクション8に「ファサードモジュールへの波及影響」を新設。session-cleanup.tsとresource-cleanup.tsが各フェーズで受ける影響と確認事項を表形式で整理。resource-cleanup.tsのgetAutoYesStatesForCleanup等の内部状態アクセスについても記載（D3-002対応）",
+    "セクション4-3に「globalThis状態の実装方針」を追記。キー名の不変性（__autoYesStates、__autoYesPollerStates）、??=によるlazy初期化パターンの維持、モジュール初期化順序の安全性を明記（D3-003対応）",
+    "セクション4-2のモジュールレベル状態の配置に追記。モジュールスコープ変数（非globalThis）の分割後挙動、モジュールキャッシュによるシングルトン性維持、ホットリロード時の挙動、auto-yes-manager.tsのglobalThisパターンとの設計判断の違いを明記（D3-004対応）",
+    "セクション13にStage 3レビュー指摘反映サマリーと実装チェックリスト（8項目）を追加"
+  ],
+  "updated_at": "2026-03-13"
+}

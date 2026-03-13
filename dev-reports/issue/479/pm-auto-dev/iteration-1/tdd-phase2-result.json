@@ -1,0 +1,113 @@
+{
+  "phase": 2,
+  "status": "completed",
+  "timestamp": "2026-03-13T10:30:00Z",
+  "summary": "Phase 2: Large file splitting completed. 5 tasks executed in order 2.2, 2.1, 2.4, 2.3, 2.5.",
+  "tasks": [
+    {
+      "id": "2.2",
+      "description": "Move isValidWorktreeId from auto-yes-manager.ts to path-validator.ts",
+      "status": "completed",
+      "files_created": [],
+      "files_modified": [
+        "src/lib/path-validator.ts",
+        "src/lib/auto-yes-manager.ts",
+        "src/app/api/worktrees/[id]/auto-yes/route.ts",
+        "src/app/api/worktrees/[id]/route.ts",
+        "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "src/app/api/worktrees/[id]/execution-logs/route.ts",
+        "src/app/api/worktrees/[id]/execution-logs/[logId]/route.ts",
+        "src/app/api/worktrees/[id]/schedules/route.ts",
+        "src/app/api/worktrees/[id]/schedules/[scheduleId]/route.ts",
+        "src/app/api/worktrees/[id]/git/log/route.ts",
+        "src/app/api/worktrees/[id]/git/diff/route.ts",
+        "src/app/api/worktrees/[id]/git/show/[commitHash]/route.ts",
+        "src/app/api/worktrees/[id]/current-output/route.ts",
+        "tests/unit/lib/auto-yes-manager.test.ts",
+        "tests/unit/auto-yes-manager-cleanup.test.ts",
+        "tests/unit/api/git-diff.test.ts",
+        "tests/unit/api/git-log.test.ts",
+        "tests/unit/api/git-show.test.ts"
+      ],
+      "notes": "isValidWorktreeId and WORKTREE_ID_PATTERN moved to path-validator.ts. All 12 API route files and test files updated to import from new location. auto-yes-manager.ts imports from path-validator internally."
+    },
+    {
+      "id": "2.1",
+      "description": "Extract getAnswerInput from prompt-detector.ts to prompt-answer-input.ts",
+      "status": "completed",
+      "files_created": [
+        "src/lib/prompt-answer-input.ts"
+      ],
+      "files_modified": [
+        "src/lib/prompt-detector.ts"
+      ],
+      "notes": "getAnswerInput (48 lines) extracted. prompt-detector.ts re-exports via 'export { getAnswerInput } from ./prompt-answer-input'. Reduced prompt-detector.ts from 965 to 926 lines."
+    },
+    {
+      "id": "2.4",
+      "description": "Split claude-session.ts: extract key-sending to session-key-sender.ts",
+      "status": "completed",
+      "files_created": [
+        "src/lib/session-key-sender.ts"
+      ],
+      "files_modified": [
+        "src/lib/claude-session.ts"
+      ],
+      "notes": "Extracted sanitizeSessionEnvironment, waitForPrompt, sendMessageToSession, stopSession (207 lines). claude-session.ts delegates to session-key-sender.ts internally. One-way dependency: session-key-sender.ts -> tmux.ts. claude-session.ts reduced from 838 to 737 lines."
+    },
+    {
+      "id": "2.3",
+      "description": "Split auto-yes-manager.ts into auto-yes-state.ts + auto-yes-poller.ts + barrel",
+      "status": "completed",
+      "files_created": [
+        "src/lib/auto-yes-state.ts",
+        "src/lib/auto-yes-poller.ts"
+      ],
+      "files_modified": [
+        "src/lib/auto-yes-manager.ts",
+        "src/app/api/worktrees/[id]/auto-yes/route.ts"
+      ],
+      "notes": "auto-yes-manager.ts (853 lines) split into: auto-yes-state.ts (342 lines, state management + stop conditions + constants), auto-yes-poller.ts (558 lines, polling logic), auto-yes-manager.ts (56 lines, barrel with explicit named re-exports). checkStopCondition uses callback parameter to avoid circular dependency with stopAutoYesPolling. auto-yes/route.ts isValidWorktreeId import fixed to path-validator."
+    },
+    {
+      "id": "2.5",
+      "description": "Split WorktreeDetailRefactored.tsx: extract sub-components",
+      "status": "completed",
+      "files_created": [
+        "src/components/worktree/WorktreeDetailSubComponents.tsx"
+      ],
+      "files_modified": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "notes": "7 memo sub-components (WorktreeInfoFields, DesktopHeader, InfoModal, LoadingIndicator, ErrorDisplay, MobileInfoContent, MobileContent), useDescriptionEditor hook, and helper functions (deriveWorktreeStatus, parseMessageTimestamps) extracted to WorktreeDetailSubComponents.tsx (909 lines). Main file reduced from 2709 to 1839 lines (32% reduction)."
+    }
+  ],
+  "metrics": {
+    "tests_total": 4921,
+    "tests_passed": 4921,
+    "tests_skipped": 7,
+    "test_files": 249,
+    "typescript_errors": 0,
+    "eslint_errors": 0,
+    "new_files": 5,
+    "modified_files": 21
+  },
+  "line_counts": {
+    "claude-session.ts": { "before": 838, "after": 737 },
+    "session-key-sender.ts": { "new": 207 },
+    "auto-yes-manager.ts": { "before": 853, "after": 56 },
+    "auto-yes-state.ts": { "new": 342 },
+    "auto-yes-poller.ts": { "new": 558 },
+    "prompt-detector.ts": { "before": 965, "after": 926 },
+    "prompt-answer-input.ts": { "new": 48 },
+    "WorktreeDetailRefactored.tsx": { "before": 2709, "after": 1839 },
+    "WorktreeDetailSubComponents.tsx": { "new": 909 }
+  },
+  "constraints_verified": {
+    "no_public_api_changes": true,
+    "export_star_prohibited": true,
+    "all_tests_pass": true,
+    "type_errors_zero": true,
+    "eslint_errors_zero": true
+  }
+}

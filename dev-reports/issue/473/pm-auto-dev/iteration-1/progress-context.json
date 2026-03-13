@@ -1,0 +1,37 @@
+{
+  "issue_number": 473,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "tests_added": 43,
+      "tests_total_passed": 4900,
+      "tests_failed": 0,
+      "typescript_errors": 0,
+      "eslint_errors": 0,
+      "tasks_completed": "7/7"
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_passed": "10/10",
+      "design_compliance": "20/20",
+      "test_scenarios_passed": "13/13"
+    },
+    "refactor": {
+      "status": "success",
+      "improvements": [
+        "未使用ref（terminalRef）の削除",
+        "reason文字列のSTATUS_REASON定数への統一",
+        "JSDocコメントの明確化"
+      ]
+    },
+    "documentation": {
+      "status": "success",
+      "updated_files": ["CLAUDE.md"],
+      "additions": [
+        "special-keys/route.ts モジュールエントリ追加",
+        "NavigationButtons.tsx モジュールエントリ追加"
+      ]
+    }
+  }
+}

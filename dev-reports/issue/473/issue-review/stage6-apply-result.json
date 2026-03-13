@@ -1,0 +1,43 @@
+{
+  "issue_number": 473,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "applied_findings": ["F501", "F502", "F503"],
+  "skipped_findings": [],
+  "github_updated": true,
+  "applied_details": [
+    {
+      "id": "F501",
+      "severity": "should_fix",
+      "title": "special-keys API のレスポンス形式が未定義",
+      "changes": [
+        "エンドポイント設計セクションに「レスポンス形式（F501対応）」サブセクションを新設",
+        "HTTPステータスコード（200/400/404/500）とレスポンスボディの対応表を追加",
+        "「レスポンス時間の特性」セクションを追加（SPECIAL_KEY_DELAY_MS 100ms、keys配列長に比例、通常操作は200ms以下）",
+        "受け入れ基準に「レスポンス形式が terminal API に準拠している」チェック項目を追加"
+      ]
+    },
+    {
+      "id": "F502",
+      "severity": "should_fix",
+      "title": "検出分岐の優先順位図が実コードの priority 2.5 ブロック内部構造と齟齬がある",
+      "changes": [
+        "優先順位図のセクションタイトルに「F502修正済み」を追記",
+        "priority 2.5 ブロック内の分岐を (A) processing_indicator -> (B) thinking（contentThinkingWindow / detectThinking()） -> (C) selection_list（新規） -> (D) response_complete の4分岐に修正",
+        "設計根拠に「thinking チェック（B）の後に配置する: 選択リスト表示中は OpenCode の Thinking: パターンが表示されないため」を追加",
+        "受け入れ基準の検出セクションに「thinking チェックの後」の配置条件を追記"
+      ]
+    },
+    {
+      "id": "F503",
+      "severity": "nice_to_have",
+      "title": "special-keys API での invalidateCache() 呼び出しが未記載",
+      "changes": [
+        "エンドポイント設計の「処理」項目に invalidateCache(sessionName) 呼び出しを追記",
+        "「キャッシュ無効化（F503対応）」サブセクションを新設（Issue #405 パターン踏襲、TTL 2秒遅延の説明）",
+        "受け入れ基準に「sendSpecialKeys() 後に invalidateCache(sessionName) が呼び出される」チェック項目を追加"
+      ]
+    }
+  ],
+  "summary": "Stage 5 レビューの3件（F501: should_fix, F502: should_fix, F503: nice_to_have）を全て GitHub Issue #473 に反映した。F501 では special-keys API のレスポンス形式（HTTPステータスコード・ボディ対応表）とレスポンス時間特性を明記した。F502 では優先順位図に thinking チェック（分岐B）を追加し、4分岐構造（A-D）として実コードとの整合性を確保した。F503 では sendSpecialKeys() 後の invalidateCache() 呼び出しをエンドポイント設計と受け入れ基準の両方に追記した。"
+}

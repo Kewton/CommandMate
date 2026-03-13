@@ -1,0 +1,48 @@
+{
+  "issue_number": 479,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "iteration": 2,
+  "apply_date": "2026-03-13",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "F2-001",
+        "status": "applied",
+        "change_summary": "R-3との関係セクションに、db.tsをsrc/lib/db/index.tsに移動した場合のTypeScriptモジュール解決（moduleResolution設定）によるimportパス互換性の補足と、R-3実施時の検証注意事項を追記"
+      },
+      {
+        "id": "F2-002",
+        "status": "applied",
+        "change_summary": "auto-yes-manager.tsの詳細分割設計セクションを新規追加。3ファイル分割案（auto-yes-manager.ts + auto-yes-poller.ts + auto-yes-state.ts）と各ファイルの責務・主要関数配置先を明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F2-003",
+        "status": "applied",
+        "change_summary": "Phase 1対象ファイル（MarkdownEditor, FileTreeView, schedule-manager）の分割後ファイル名案を詳細分割設計セクションおよび実施フェーズセクションの両方に追記"
+      }
+    ]
+  },
+  "skipped_findings": [],
+  "changes_made": [
+    "R-3との関係セクションにimportパス互換性の補足（TypeScript moduleResolution設定との整合性確認の注意事項）を追記",
+    "auto-yes-manager.tsの詳細分割設計セクションを新規追加（auto-yes-poller.ts, auto-yes-state.tsへの3ファイル分割案）",
+    "Phase 1対象ファイルの分割後ファイル名セクションを新規追加（MarkdownToolbar.tsx, MarkdownPreview.tsx, TreeNode.tsx, TreeContextMenu.tsx, cron-parser.ts, job-executor.ts）",
+    "実施フェーズのPhase 1にファイル名の対応関係を追記",
+    "対象ファイル表のMarkdownEditor, FileTreeView, schedule-managerに「後述」リンクを追加",
+    "レビュー履歴にイテレーション3（通常レビュー2回目）の反映内容を追記"
+  ],
+  "summary": {
+    "total_findings": 3,
+    "applied": 3,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/479"
+  },
+  "updated_at": "2026-03-13"
+}

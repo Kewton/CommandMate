@@ -35,6 +35,7 @@ import {
 vi.mock('@/lib/api-client', () => ({
   worktreeApi: {
     sendMessage: vi.fn().mockResolvedValue({}),
+    uploadImageFile: vi.fn().mockResolvedValue({ path: '.commandmate/attachments/test.png' }),
   },
   handleApiError: vi.fn((err: Error) => err?.message || 'Unknown error'),
 }));
@@ -116,7 +117,7 @@ describe('MessageInput', () => {
         expect(worktreeApi.sendMessage).toHaveBeenCalledWith(
           'test-worktree',
           'Hello world',
-          'claude'
+          { cliToolId: 'claude' }
         );
       });
     });
@@ -168,7 +169,7 @@ describe('MessageInput', () => {
         expect(worktreeApi.sendMessage).toHaveBeenCalledWith(
           'test-worktree',
           'Hello from mobile',
-          'claude'
+          { cliToolId: 'claude' }
         );
       });
     });
@@ -274,7 +275,7 @@ describe('MessageInput', () => {
         expect(worktreeApi.sendMessage).toHaveBeenCalledWith(
           'test-worktree',
           'Hello',
-          'claude'
+          { cliToolId: 'claude' }
         );
       });
 
@@ -343,7 +344,7 @@ describe('MessageInput', () => {
           expect(worktreeApi.sendMessage).toHaveBeenCalledWith(
             'test-worktree',
             '/model gpt-4o',
-            'claude'
+            { cliToolId: 'claude' }
           );
         });
       });
@@ -423,7 +424,7 @@ describe('MessageInput', () => {
           expect(worktreeApi.sendMessage).toHaveBeenCalledWith(
             'test-worktree',
             '/compact',
-            'claude'
+            { cliToolId: 'claude' }
           );
         });
       });
@@ -528,7 +529,7 @@ describe('MessageInput', () => {
         expect(worktreeApi.sendMessage).toHaveBeenCalledWith(
           'test-worktree',
           'Test message',
-          'claude'
+          { cliToolId: 'claude' }
         );
       });
     });

@@ -1,0 +1,119 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "issue_number": 481,
+  "review_focus": "影響範囲",
+  "review_date": "2026-03-13",
+  "previous_findings_check": [
+    {
+      "finding_id": "F101",
+      "original_severity": "must_fix",
+      "status": "resolved",
+      "note": "影響規模セクションが追加されている。35ファイル移動、約696行import更新、約100ソースファイル、約99テストファイル、lib内テスト9ファイル中6ファイルの影響が影響規模テーブルで定量的に記載されている。段階的移行戦略と推奨移行順序（db -> tmux -> security -> detection -> session -> polling -> git）も明記済み。"
+    },
+    {
+      "finding_id": "F102",
+      "original_severity": "must_fix",
+      "status": "resolved",
+      "note": "グループ間依存関係セクションが追加されている。依存方向のASCII図、具体的依存テーブル（From/To/Via/依存ファイル）、一方向依存であり循環依存リスクが低い旨の記載がある。推奨移行順序も依存方向に基づいて論理的に定義されている。"
+    },
+    {
+      "finding_id": "F103",
+      "original_severity": "must_fix",
+      "status": "resolved",
+      "note": "受け入れ基準のimportパス更新が4項目に細分化されている: (1) 外部参照の一括更新、(2) 内部相対importの変換ルール（同一グループ内は相対維持、グループ外は@/lib/形式）、(3) __tests__内の相対importパス更新（6ファイル）、(4) vi.mock()パス更新方針。"
+    },
+    {
+      "finding_id": "F104",
+      "original_severity": "should_fix",
+      "status": "resolved",
+      "note": "db/ グループの後方互換性セクションが追加されている。@/lib/db でdb.tsを参照する36箇所のimportについて、db/index.tsでの再エクスポートにより変更不要になる戦略が明示されている。"
+    },
+    {
+      "finding_id": "F105",
+      "original_severity": "should_fix",
+      "status": "resolved",
+      "note": "__tests__/ の注記セクションが追加されている。「9ファイル中6ファイルが移動対象ファイルへの相対importを持つため更新が必要」と記載され、6ファイルの具体名が列挙されている。実際のファイル一覧と一致を確認済み。"
+    },
+    {
+      "finding_id": "F106",
+      "original_severity": "should_fix",
+      "status": "resolved",
+      "note": "transports/ 案A（tmux統合）と案B（現状維持）の具体的影響差分が追記されている。案A: cli-session.ts, ws-server.ts + テスト4ファイル影響、案B: transports/内3ファイルの相対パス変更。"
+    },
+    {
+      "finding_id": "F107",
+      "original_severity": "should_fix",
+      "status": "resolved",
+      "note": "ドキュメント更新の影響規模が影響規模テーブルと受け入れ基準の両方に記載されている（CLAUDE.md: 52箇所、module-reference.md: 54箇所、architecture.md: 6箇所）。"
+    },
+    {
+      "finding_id": "F108",
+      "original_severity": "should_fix",
+      "status": "resolved",
+      "note": "vi.mock()のモジュールパス更新方針が受け入れ基準に追記されている。バレルエクスポートで旧パスを維持する場合はmock対象パスの変更は不要だが方針を明確にする旨が記載されている。"
+    },
+    {
+      "finding_id": "F109",
+      "original_severity": "nice_to_have",
+      "status": "resolved",
+      "note": "polling/ グループに「session/, detection/, cli-tools/ への外部依存が多い。凝集度向上のため将来的なグループ再編を検討可能」の注釈が追記されている。"
+    },
+    {
+      "finding_id": "F201",
+      "original_severity": "nice_to_have",
+      "status": "resolved",
+      "note": "__tests__/ 注記セクションが「ディレクトリ位置は現状維持だが、9ファイル中6ファイルが移動対象ファイルへの相対importを持つため更新が必要」に更新されており、影響規模テーブルとの一貫性が確保されている。"
+    },
+    {
+      "finding_id": "F202",
+      "original_severity": "nice_to_have",
+      "status": "resolved",
+      "note": "推奨移行順序のdb/説明に「内部依存構造: db-repository -> db-instance -> db の一方向依存であり、グループ内の凝集度が高い」が追記されている。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F301",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "description": "tests/ディレクトリのvi.mock()呼び出しの影響規模が定量化されていない。実測では、移動対象ファイルを参照するvi.mock()が約93箇所（47ファイル）に存在する。受け入れ基準にvi.mock()更新の方針は記載されているが、バレルエクスポートで旧パスを維持しない場合の作業規模が不明瞭。影響規模テーブルに「tests/内のvi.mock()パス: 約93箇所（47ファイル）」を追記すると、バレルエクスポート戦略の採否判断に役立つ。",
+      "current_text": "受け入れ基準: vi.mock() のモジュールパス指定も @/lib/group/xxx に更新すること（バレルエクスポートで旧パスを維持する場合はmock対象パスの変更は不要だが、方針を明確にすること）",
+      "suggested_fix": "影響規模テーブルに行を追加: 「tests/内のvi.mock()パス更新 | 約93箇所（47ファイル）※バレルエクスポートで旧パス維持の場合は不要」。これにより、バレルエクスポート戦略を採用するか否かの判断材料が明確になる。"
+    },
+    {
+      "id": "F302",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "description": "src/lib/__tests__/assistant-response-saver.test.tsにはvi.mock('../cli-session')という相対パスでのmock定義がある。__tests__注記セクションでは相対importパスの更新対象ファイルに含まれているが、vi.mock()の相対パスも同様に更新が必要であることが明示されていない。受け入れ基準のvi.mock()項目はtests/ディレクトリを想定した記述であり、src/lib/__tests__/内の相対パスvi.mock()は暗黙的にしかカバーされていない。",
+      "current_text": "__tests__/ の注記: 相対importパス（../db, ../db-migrations, ../cli-session, ../status-detector, ../cli-patterns 等）は @/lib/group/xxx 形式に更新する",
+      "suggested_fix": "__tests__/ の注記に「vi.mock()の相対パス指定（../cli-session等）も同様に更新が必要」と一文追記する。ただし、実装者がimport文とvi.mock()を同時に更新することは自然なワークフローであるため、対応は任意。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 2,
+    "total": 2
+  },
+  "overall_assessment": "前回の影響範囲レビュー（Stage 3）で指摘した9件の指摘事項（must_fix: 3, should_fix: 5, nice_to_have: 1）および通常レビュー2回目（Stage 5）の2件のnice_to_have指摘が全て適切に反映されている。更新後のIssueは影響範囲の観点から十分な情報を提供しており、実装者が迷わず作業できるレベルに達している。具体的には、(1) 影響規模が定量的に記載されている、(2) グループ間依存関係と推奨移行順序が論理的に整理されている、(3) 受け入れ基準が検証可能な形で細分化されている、(4) db/グループの後方互換性戦略やtransports/の案A/B比較など実装判断ポイントが具体的に記載されている。新規指摘2件はいずれもnice_to_haveであり、vi.mock()の影響規模の定量化に関する補足情報に過ぎない。本Issueは実装着手可能な状態にある。",
+  "impact_metrics": {
+    "files_to_move": 35,
+    "import_lines_to_update": 696,
+    "source_files_affected": 100,
+    "test_files_affected": 99,
+    "lib_test_files_affected": 6,
+    "vi_mock_calls_affected": 93,
+    "vi_mock_files_affected": 47,
+    "doc_path_references": {
+      "CLAUDE.md": 52,
+      "module-reference.md": 54,
+      "architecture.md": 6
+    }
+  },
+  "code_references": [
+    { "file": "src/lib/__tests__/assistant-response-saver.test.ts", "relevance": "vi.mock('../cli-session')という相対パスmock定義を持つ唯一のlib内テストファイル" },
+    { "file": "tests/", "relevance": "約47ファイルに移動対象ファイルを参照するvi.mock()が約93箇所存在" }
+  ],
+  "doc_references": []
+}

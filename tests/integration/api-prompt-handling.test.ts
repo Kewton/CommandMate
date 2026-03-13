@@ -39,13 +39,13 @@ vi.mock('@/lib/db-instance', () => {
 });
 
 // Mock tmux module
-vi.mock('@/lib/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', () => ({
   sendKeys: vi.fn().mockResolvedValue(undefined),
   isClaudeRunning: vi.fn().mockResolvedValue(true),
 }));
 
 // Mock claude-session module
-vi.mock('@/lib/claude-session', () => ({
+vi.mock('@/lib/session/claude-session', () => ({
   getSessionName: vi.fn((worktreeId: string) => `mcbd-${worktreeId}`),
   isClaudeRunning: vi.fn().mockResolvedValue(true),
 }));
@@ -169,7 +169,7 @@ describe('POST /api/worktrees/:id/respond', () => {
     });
 
     it('should send "y" to tmux when answering yes', async () => {
-      const { sendKeys } = await import('@/lib/tmux');
+      const { sendKeys } = await import('@/lib/tmux/tmux');
 
       const message = createMessage(db, {
         worktreeId: 'test-worktree',
@@ -200,7 +200,7 @@ describe('POST /api/worktrees/:id/respond', () => {
     });
 
     it('should send "n" to tmux when answering no', async () => {
-      const { sendKeys } = await import('@/lib/tmux');
+      const { sendKeys } = await import('@/lib/tmux/tmux');
 
       const message = createMessage(db, {
         worktreeId: 'test-worktree',

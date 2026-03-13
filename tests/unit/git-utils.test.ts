@@ -29,7 +29,7 @@ describe('git-utils', () => {
 
     it('should return correct GitStatus structure', async () => {
       // Mock the entire module to test contract
-      vi.doMock('@/lib/git-utils', () => ({
+      vi.doMock('@/lib/git/git-utils', () => ({
         getGitStatus: vi.fn().mockResolvedValue({
           currentBranch: 'feature/test-branch',
           initialBranch: 'main',
@@ -39,7 +39,7 @@ describe('git-utils', () => {
         }),
       }));
 
-      const { getGitStatus } = await import('@/lib/git-utils');
+      const { getGitStatus } = await import('@/lib/git/git-utils');
       const result = await getGitStatus('/path/to/worktree', 'main');
 
       expect(result).toEqual({
@@ -50,11 +50,11 @@ describe('git-utils', () => {
         isDirty: false,
       });
 
-      vi.doUnmock('@/lib/git-utils');
+      vi.doUnmock('@/lib/git/git-utils');
     });
 
     it('should have isBranchMismatch=false when branches match', async () => {
-      vi.doMock('@/lib/git-utils', () => ({
+      vi.doMock('@/lib/git/git-utils', () => ({
         getGitStatus: vi.fn().mockResolvedValue({
           currentBranch: 'main',
           initialBranch: 'main',
@@ -64,18 +64,18 @@ describe('git-utils', () => {
         }),
       }));
 
-      const { getGitStatus } = await import('@/lib/git-utils');
+      const { getGitStatus } = await import('@/lib/git/git-utils');
       const result = await getGitStatus('/path/to/worktree', 'main');
 
       expect(result.currentBranch).toBe('main');
       expect(result.initialBranch).toBe('main');
       expect(result.isBranchMismatch).toBe(false);
 
-      vi.doUnmock('@/lib/git-utils');
+      vi.doUnmock('@/lib/git/git-utils');
     });
 
     it('should handle detached HEAD state', async () => {
-      vi.doMock('@/lib/git-utils', () => ({
+      vi.doMock('@/lib/git/git-utils', () => ({
         getGitStatus: vi.fn().mockResolvedValue({
           currentBranch: '(detached HEAD)',
           initialBranch: 'main',
@@ -85,17 +85,17 @@ describe('git-utils', () => {
         }),
       }));
 
-      const { getGitStatus } = await import('@/lib/git-utils');
+      const { getGitStatus } = await import('@/lib/git/git-utils');
       const result = await getGitStatus('/path/to/worktree', 'main');
 
       expect(result.currentBranch).toBe('(detached HEAD)');
       expect(result.isBranchMismatch).toBe(false);
 
-      vi.doUnmock('@/lib/git-utils');
+      vi.doUnmock('@/lib/git/git-utils');
     });
 
     it('should return (unknown) on error', async () => {
-      vi.doMock('@/lib/git-utils', () => ({
+      vi.doMock('@/lib/git/git-utils', () => ({
         getGitStatus: vi.fn().mockResolvedValue({
           currentBranch: '(unknown)',
           initialBranch: 'main',
@@ -105,17 +105,17 @@ describe('git-utils', () => {
         }),
       }));
 
-      const { getGitStatus } = await import('@/lib/git-utils');
+      const { getGitStatus } = await import('@/lib/git/git-utils');
       const result = await getGitStatus('/path/to/worktree', 'main');
 
       expect(result.currentBranch).toBe('(unknown)');
       expect(result.isBranchMismatch).toBe(false);
 
-      vi.doUnmock('@/lib/git-utils');
+      vi.doUnmock('@/lib/git/git-utils');
     });
 
     it('should detect dirty working directory', async () => {
-      vi.doMock('@/lib/git-utils', () => ({
+      vi.doMock('@/lib/git/git-utils', () => ({
         getGitStatus: vi.fn().mockResolvedValue({
           currentBranch: 'main',
           initialBranch: 'main',
@@ -125,16 +125,16 @@ describe('git-utils', () => {
         }),
       }));
 
-      const { getGitStatus } = await import('@/lib/git-utils');
+      const { getGitStatus } = await import('@/lib/git/git-utils');
       const result = await getGitStatus('/path/to/worktree', 'main');
 
       expect(result.isDirty).toBe(true);
 
-      vi.doUnmock('@/lib/git-utils');
+      vi.doUnmock('@/lib/git/git-utils');
     });
 
     it('should handle null initialBranch', async () => {
-      vi.doMock('@/lib/git-utils', () => ({
+      vi.doMock('@/lib/git/git-utils', () => ({
         getGitStatus: vi.fn().mockResolvedValue({
           currentBranch: 'feature/new-branch',
           initialBranch: null,
@@ -144,13 +144,13 @@ describe('git-utils', () => {
         }),
       }));
 
-      const { getGitStatus } = await import('@/lib/git-utils');
+      const { getGitStatus } = await import('@/lib/git/git-utils');
       const result = await getGitStatus('/path/to/worktree', null);
 
       expect(result.initialBranch).toBeNull();
       expect(result.isBranchMismatch).toBe(false);
 
-      vi.doUnmock('@/lib/git-utils');
+      vi.doUnmock('@/lib/git/git-utils');
     });
   });
 

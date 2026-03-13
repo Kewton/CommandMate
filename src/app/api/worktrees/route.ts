@@ -10,8 +10,11 @@ import { NextRequest, NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktrees, getRepositories, getMessages, markPendingPromptsAsAnswered } from '@/lib/db';
-import { listSessions } from '@/lib/tmux';
-import { detectWorktreeSessionStatus } from '@/lib/worktree-status-helper';
+import { listSessions } from '@/lib/tmux/tmux';
+import { detectWorktreeSessionStatus } from '@/lib/session/worktree-status-helper';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/worktrees');
 
 export async function GET(request: NextRequest) {
   try {
@@ -55,7 +58,7 @@ export async function GET(request: NextRequest) {
       { status: 200 }
     );
   } catch (error) {
-    console.error('Error fetching worktrees:', error);
+    logger.error('error-fetching-worktrees:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to fetch worktrees' },
       { status: 500 }

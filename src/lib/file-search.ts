@@ -13,7 +13,7 @@
 
 import { readdir, readFile, lstat } from 'fs/promises';
 import { join, relative, extname, basename } from 'path';
-import { isPathSafe } from './path-validator';
+import { isPathSafe } from './security/path-validator';
 import { isExcludedPattern, LIMITS } from './file-tree';
 import { isBinaryExtension, isBinaryContent } from '@/config/binary-extensions';
 import type { SearchResultItem } from '@/types/models';

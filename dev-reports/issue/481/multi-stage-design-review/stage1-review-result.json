@@ -1,0 +1,79 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "issue_number": 481,
+  "focus_area": "設計原則",
+  "findings": [
+    {
+      "id": "R001",
+      "severity": "should_fix",
+      "category": "単一責任原則（SRP）",
+      "description": "session/ グループに含まれる session-cleanup.ts は、response-poller（polling/）、auto-yes-manager（polling/）、schedule-manager（ルート残留）、tmux-capture-cache（tmux/）の4つの異なるグループに依存するFacadeであり、session管理そのものではなく「リソース解放の統合窓口」である。session/ の他のファイル（claude-session, cli-session等）とは責務の性質が異なる。",
+      "target": "設計方針書 セクション1: session/ グループ構成（session-cleanup.ts）",
+      "suggested_fix": "session-cleanup.ts はルート残留とするか、あるいは cleanup/ や lifecycle/ といった独立グループに配置することを検討する。session/ はセッションの「作成・操作・状態管理」に責務を限定し、「後片付け」は分離する。ただし、ファイル数が1つだけなのでルート残留が最もKISSに沿う。"
+    },
+    {
+      "id": "R002",
+      "severity": "should_fix",
+      "category": "単一責任原則（SRP）",
+      "description": "session-transport.ts はインターフェース定義（CaptureOptions, TransportCapabilities, TransportHandlers等の型）であり、cli-session.ts（session/内）と transports/（既存ディレクトリ）の両方から参照されている。session/ に配置すると、transports/ が session/ に依存する形となり、設計方針書のグループ間依存図にない `transports/ --> session/` の依存が発生する。",
+      "target": "設計方針書 セクション1: session/ グループ構成（session-transport.ts）および transports/ 統合方針",
+      "suggested_fix": "session-transport.ts は型定義のみのファイルであるため、(A) transports/ 配下に配置してsession/からimportする、(B) ルート残留とする、(C) transports/ を tmux/ に統合する案Aの採用時にまとめて tmux/ に配置する、のいずれかを方針書で明記する。transports/ 統合方針を「実装時判断」のまま残すのではなく、このファイルの配置問題と合わせて事前に決定すべきである。"
+    },
+    {
+      "id": "R003",
+      "severity": "should_fix",
+      "category": "KISS",
+      "description": "transports/ の統合方針が「実装時判断」として未確定のまま設計方針書に残されている。設計方針書の目的は実装前に判断基準を明確にすることであり、2択の判断を実装フェーズに先送りするのはリスクがある。特にR002で指摘した session-transport.ts の配置問題にも影響するため、方針の確定が必要。",
+      "target": "設計方針書 セクション3: transports/ の統合方針",
+      "suggested_fix": "transports/ 内のファイル（control-mode-tmux-transport.ts, polling-tmux-transport.ts）はいずれもtmux固有の実装であるため、案A（tmux/ に統合）を採用し、方針書に明記する。session-transport.ts の型定義も合わせて tmux/ に配置すれば、transports/ ディレクトリを完全に解消できる。"
+    },
+    {
+      "id": "R004",
+      "severity": "nice_to_have",
+      "category": "凝集度 / SRP",
+      "description": "polling/ グループの3ファイル（response-poller, auto-yes-manager, auto-yes-resolver）は「ポーリング」という技術的メカニズムでグルーピングされているが、実際の責務は異なる。response-pollerはCLIツール応答の監視、auto-yes-manager/resolverはユーザープロンプトへの自動応答管理であり、ドメインとしての凝集度は低い。ただし、auto-yes-manager が response-poller と類似のポーリングパターンを使い、同じ detection/ モジュールに依存しているため、技術的凝集としては合理的。",
+      "target": "設計方針書 セクション1: polling/ グループ構成",
+      "suggested_fix": "現状の構成で問題ないが、将来的にファイル数が増えた場合は「response-polling/」と「auto-yes/」への再分割を視野に入れる旨をトレードオフ欄に追記しておくとよい。"
+    },
+    {
+      "id": "R005",
+      "severity": "nice_to_have",
+      "category": "バレルエクスポート / ツリーシェイキング",
+      "description": "設計方針書ではバレルエクスポートのツリーシェイキング影響を「やや低下」と記載しているが、定量的な評価がない。Next.js 14のサーバーコンポーネント中心のアーキテクチャでは、サーバー側モジュール（db/, tmux/, session/等）はクライアントバンドルに含まれないため、実質的な影響は軽微と考えられる。ただし、security/auth.ts がミドルウェア（Edge Runtime）から使用される場合、バレルからの再エクスポートがEdge Runtimeバンドルサイズに影響する可能性がある。",
+      "target": "設計方針書 セクション5: トレードオフ（バレルエクスポート行）",
+      "suggested_fix": "トレードオフ欄に「サーバー側モジュールが大半のため実影響は軽微。Edge Runtime向けのsecurity/については直接importも許容する」旨を補足する。"
+    },
+    {
+      "id": "R006",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "description": "ルート残留37ファイルを「将来検討」として対象外にしている判断は適切である。72ファイル中35ファイル（49%）を整理するだけで十分な探索性向上が見込め、残りは自然にユーティリティ層として認識できる。ただし、37ファイルの中にもドメイン的にグループ化しやすいもの（log系: api-logger, log-manager, logger, log-export-sanitizer の4ファイルなど）が存在することを認識しておくべき。",
+      "target": "設計方針書 セクション5: ルート残留37ファイル",
+      "suggested_fix": "現状の判断で問題ない。備考として「将来のPhase 2候補: log系, conversation系, file系」程度のメモを追記しておくと次回検討時に有用。"
+    },
+    {
+      "id": "R007",
+      "severity": "nice_to_have",
+      "category": "開放閉鎖原則（OCP）",
+      "description": "新しいドメイングループを追加する際の手順やルールが設計方針書に明記されていない。バレルエクスポート、importパス規約、移行順序の決め方といったパターンは暗黙的に示されているが、将来の開発者がグループを追加する際のガイドラインがない。",
+      "target": "設計方針書全体",
+      "suggested_fix": "「新規グループ追加時のルール」セクションを追加し、(1) index.ts によるバレルエクスポート必須、(2) グループ間依存図の更新、(3) 依存の少ない順に移行、の3点を明記する。"
+    },
+    {
+      "id": "R008",
+      "severity": "nice_to_have",
+      "category": "DRY / 一貫性",
+      "description": "バレルエクスポートの例として db/index.ts のみが示されている。全7グループで同一パターンを適用する旨は読み取れるが、detection/ や session/ のように内部依存が複雑なグループでは、名前衝突（複数ファイルから同名のexportがある場合）の可能性がある。",
+      "target": "設計方針書 セクション2: バレルエクスポートパターン",
+      "suggested_fix": "「export * による名前衝突が発生した場合は、named re-export（export { foo as barFoo } from './bar'）で解決する」旨のルールを追記する。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 3,
+    "nice_to_have": 5,
+    "total": 8
+  },
+  "overall_assessment": "設計方針書はリファクタリングの目的（ファイル探索性向上とドメイン境界の明確化）に対して適切な構成を提案しており、段階的移行戦略やバレルエクスポートによる後方互換性維持といった実践的な配慮がなされている。ファイル数の算出（72ファイル中35ファイルを7グループに整理）も実態と一致しており、信頼性が高い。\n\n主要な改善点は3つある。(1) session-cleanup.ts のグループ配置の再考（Facadeパターンの責務が他のsessionファイルと異なる）、(2) session-transport.ts の配置問題（transports/ との依存関係）、(3) transports/ 統合方針の事前確定。いずれもmust_fixレベルではないが、実装時の判断迷いを減らすために設計方針書の段階で解決しておくことを推奨する。\n\nYAGNIの観点では、ルート残留37ファイルを対象外とした判断は妥当である。過度にグループ化を進めず、効果の高い7グループに絞っている点はKISSにも適合する。全体として設計品質は良好であり、should_fixの3件を反映すれば実装フェーズに進められる水準にある。"
+}

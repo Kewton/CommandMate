@@ -10,6 +10,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('cli-tools/opencode-config');
 
 // =============================================================================
 // Constants
@@ -214,8 +217,6 @@ function validateWorktreePath(worktreePath: string): string {
  * @returns Model map (key: model name, value: { name: display name })
  * @internal
  */
-// TODO: If a 3rd provider is added, extract common HTTP fetch logic
-// to fetchWithTimeout(url, timeoutMs, maxResponseSize): Promise<string | null>
 export async function fetchOllamaModels(): Promise<ProviderModels> {
   const models: ProviderModels = {};
   try {
@@ -228,21 +229,21 @@ export async function fetchOllamaModels(): Promise<ProviderModels> {
     });
 
     if (!response.ok) {
-      console.warn(`Ollama API returned status ${response.status}, skipping model fetch`);
+      logger.warn('ollama-api-returned');
       return {};
     }
 
     // [D4-007] Response size check
     const text = await response.text();
     if (text.length > MAX_OLLAMA_RESPONSE_SIZE) {
-      console.warn('Ollama API response too large, skipping model fetch');
+      logger.warn('ollama-api-response');
       return {};
     }
 
     // Parse and validate response structure [D4-007]
     const data = JSON.parse(text);
     if (!data || !Array.isArray(data.models)) {
-      console.warn('Invalid Ollama API response structure, skipping model fetch');
+      logger.warn('invalid-ollama-api');
       return {};
     }
 
@@ -258,9 +259,9 @@ export async function fetchOllamaModels(): Promise<ProviderModels> {
   } catch (error) {
     // Non-fatal: Ollama may not be running [D4-002]
     if (error instanceof Error && error.name === 'AbortError') {
-      console.warn('Ollama API timeout, skipping model fetch');
+      logger.warn('ollama-api-timeout');
     } else {
-      console.warn('Failed to fetch Ollama models, skipping model fetch');
+      logger.warn('failed-to-fetch');
     }
   }
   return models;
@@ -281,8 +282,6 @@ export async function fetchOllamaModels(): Promise<ProviderModels> {
  * @returns Model map (key: model id, value: { name: model id })
  * @internal
  */
-// TODO: If a 3rd provider is added, extract common HTTP fetch logic
-// to fetchWithTimeout(url, timeoutMs, maxResponseSize): Promise<string | null>
 export async function fetchLmStudioModels(): Promise<ProviderModels> {
   const models: ProviderModels = {};
   try {
@@ -295,19 +294,19 @@ export async function fetchLmStudioModels(): Promise<ProviderModels> {
     });
 
     if (!response.ok) {
-      console.warn(`LM Studio API returned status ${response.status}, skipping model fetch`);
+      logger.warn('lm-studio-api');
       return {};
     }
 
     const text = await response.text();
     if (text.length > MAX_LM_STUDIO_RESPONSE_SIZE) {
-      console.warn('LM Studio API response too large, skipping model fetch');
+      logger.warn('lm-studio-api');
       return {};
     }
 
     const data = JSON.parse(text);
     if (!data || !Array.isArray(data.data)) {
-      console.warn('Invalid LM Studio API response structure, skipping model fetch');
+      logger.warn('invalid-lm-studio');
       return {};
     }
 
@@ -319,9 +318,9 @@ export async function fetchLmStudioModels(): Promise<ProviderModels> {
     }
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      console.warn('LM Studio API timeout, skipping model fetch');
+      logger.warn('lm-studio-api');
     } else {
-      console.warn('Failed to fetch LM Studio models, skipping model fetch');
+      logger.warn('failed-to-fetch');
     }
   }
   return models;
@@ -340,6 +339,7 @@ export async function fetchLmStudioModels(): Promise<ProviderModels> {
  * Provider configuration is built dynamically: only providers with models are included.
  * If a 3rd provider is added, consider refactoring to a data-driven design
  * (providerDefinitions array + loop) instead of inline if-branches. [KISS]
+ * HTTP fetch logic (fetchWithTimeout) can be extracted to a shared helper.
  *
  * @param worktreePath - Worktree directory path (from DB)
  * @internal
@@ -405,6 +405,6 @@ export async function ensureOpencodeConfig(worktreePath: string): Promise<void> 
       return;
     }
     // Non-fatal: write failure should not prevent session start
-    console.warn(`Failed to write opencode.json: ${error instanceof Error ? error.message : String(error)}`);
+    logger.warn('failed-to-write-opencodejson:error-insta');
   }
 }

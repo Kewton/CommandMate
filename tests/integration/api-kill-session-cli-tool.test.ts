@@ -11,7 +11,7 @@ import { upsertWorktree } from '@/lib/db';
 import type { Worktree } from '@/types/models';
 
 // Mock tmux
-vi.mock('@/lib/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', () => ({
   killSession: vi.fn(() => Promise.resolve(true)),
   hasSession: vi.fn(() => Promise.resolve(true)),
 }));
@@ -99,7 +99,7 @@ describe('POST /api/worktrees/:id/kill-session - CLI Tool Support', () => {
       expect(response.status).toBe(200);
 
       // Verify tmux killSession was called with correct session name
-      const { killSession: killSessionMock } = await import('@/lib/tmux');
+      const { killSession: killSessionMock } = await import('@/lib/tmux/tmux');
       expect(killSessionMock).toHaveBeenCalledWith('mcbd-claude-claude-test');
     });
   });
@@ -132,7 +132,7 @@ describe('POST /api/worktrees/:id/kill-session - CLI Tool Support', () => {
       expect(response.status).toBe(200);
 
       // Verify tmux killSession was called with correct session name
-      const { killSession: killSessionMock } = await import('@/lib/tmux');
+      const { killSession: killSessionMock } = await import('@/lib/tmux/tmux');
       expect(killSessionMock).toHaveBeenCalledWith('mcbd-codex-codex-test');
     });
   });
@@ -165,7 +165,7 @@ describe('POST /api/worktrees/:id/kill-session - CLI Tool Support', () => {
       expect(response.status).toBe(200);
 
       // Verify tmux killSession was called with correct session name
-      const { killSession: killSessionMock } = await import('@/lib/tmux');
+      const { killSession: killSessionMock } = await import('@/lib/tmux/tmux');
       expect(killSessionMock).toHaveBeenCalledWith('mcbd-gemini-gemini-test');
     });
   });

@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { isValidWorktreePath } from '@/lib/worktree-path-validator';
+import { isValidWorktreePath } from '@/lib/security/worktree-path-validator';
 
 describe('isValidWorktreePath', () => {
   const originalEnv = process.env;
@@ -65,7 +65,7 @@ describe('isValidWorktreePath', () => {
       process.env.ALLOWED_WORKTREE_PATHS = '/custom/path,/another/allowed';
 
       // Need to reimport to pick up new env value
-      const { isValidWorktreePath: validator } = await import('@/lib/worktree-path-validator');
+      const { isValidWorktreePath: validator } = await import('@/lib/security/worktree-path-validator');
 
       expect(validator('/custom/path/project')).toBe(true);
       expect(validator('/another/allowed/repo')).toBe(true);

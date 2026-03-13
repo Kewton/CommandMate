@@ -1,0 +1,47 @@
+{
+  "issue_number": 473,
+  "status": "success",
+  "tasks_completed": [
+    "Task 1.1: tmux.ts - NAVIGATION_KEY_VALUES, NavigationKey, isAllowedSpecialKey(), sendSpecialKeysAndInvalidate()",
+    "Task 1.2: cli-patterns.ts - OPENCODE_SELECTION_LIST_PATTERN placeholder",
+    "Task 1.3: status-detector.ts - STATUS_REASON constants + selection_list detection (priority C)",
+    "Task 1.4: special-keys/route.ts - New API endpoint with 6-layer defense",
+    "Task 1.5: current-output/route.ts - isSelectionListActive flag",
+    "Task 3.1: NavigationButtons.tsx - Up/Down/Enter/Escape buttons",
+    "Task 3.2: WorktreeDetailRefactored.tsx - isSelectionListActive state + conditional NavigationButtons"
+  ],
+  "tasks_remaining": [],
+  "test_results": {
+    "passed": 4900,
+    "failed": 0,
+    "skipped": 7,
+    "total": 4907,
+    "new_tests": 43,
+    "test_files": 247
+  },
+  "type_check": "pass",
+  "lint": "pass",
+  "coverage": 80,
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/lib/tmux.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/status-detector.ts",
+    "src/app/api/worktrees/[id]/special-keys/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/components/worktree/NavigationButtons.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/tmux-navigation.test.ts",
+    "tests/unit/cli-patterns-selection.test.ts",
+    "tests/unit/status-detector-selection.test.ts",
+    "tests/unit/special-keys-route.test.ts"
+  ],
+  "commits": [
+    "7853ec8: feat(opencode): add TUI selection list navigation support"
+  ],
+  "notes": "All 7 tasks completed. OPENCODE_SELECTION_LIST_PATTERN is a placeholder (matches > prefix items and filter: input). Pattern to be refined after capture-pane output samples are collected. Existing SPECIAL_KEY_VALUES and sendSpecialKeys() unchanged. No regressions in existing 4900 tests.",
+  "message": "TDD implementation complete. 43 new tests added, all 4900 tests pass. TypeScript 0 errors, ESLint 0 errors."
+}

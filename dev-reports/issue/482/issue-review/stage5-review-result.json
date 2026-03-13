@@ -1,0 +1,90 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "issue_number": 482,
+  "review_date": "2026-03-13",
+  "previous_findings_check": [
+    {
+      "id": "S1-001",
+      "status": "resolved",
+      "comment": "概要文が「4箇所のTODO/FIXMEマーカー」に修正されており、対象一覧の4件と一致している。"
+    },
+    {
+      "id": "S1-002",
+      "status": "resolved",
+      "comment": "cli-patterns.ts修正方針セクションが追加され、git logで該当コミット（5ebd2ba）の関連PRを辿る手順が明記されている。特定できない場合のフォールバック（Issue #XXX参照を削除し説明文のみ残す）も明確。"
+    },
+    {
+      "id": "S1-003",
+      "status": "resolved",
+      "comment": "方針(B)（統合不要と判断しTODOを削除する）が採用され、理由が3点記載されている。route.tsとapi-client.tsのSlashCommandsResponseが異なるAPIエンドポイントに紐づいている点、api-client.tsの型を直接importしているモジュールが存在しない点が根拠として示されており、技術的に妥当。"
+    },
+    {
+      "id": "S1-004",
+      "status": "resolved",
+      "comment": "方針が1つに絞られた。TODOコメント（L217, L284）を削除し、ensureOpencodeConfig関数のJSDocに集約する方針が明記。追記内容（fetchWithTimeout共通化のヒント1行）も具体的。"
+    },
+    {
+      "id": "S1-005",
+      "status": "resolved",
+      "comment": "受け入れ基準に「npx tsc --noEmit でコンパイルエラーがないことを確認」が追加されている。"
+    },
+    {
+      "id": "S1-006",
+      "status": "resolved",
+      "comment": "対象一覧に「種別」列が追加され、TODOマーカーとJSDoc内未解決参照が区別されている。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "S5-001",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "location": "親Issue #475 との整合性",
+      "description": "親Issue #475のR-4サマリに「残存する6箇所のTODO/FIXMEマーカー」と記載されたままである。本Issue #482では「4箇所」に修正済みだが、親Issueとの間に件数の不一致が残っている。",
+      "suggestion": "本Issue #482の実装完了時に、親Issue #475のR-4行も「4箇所」に修正するか、「詳細は#482を参照」と追記することを推奨する。必須ではないが、トレーサビリティの観点で望ましい。"
+    },
+    {
+      "id": "S5-002",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "location": "受け入れ基準",
+      "description": "受け入れ基準に npm run lint の実行が含まれていない。親Issue #475の実施方針では「npm run lint && npx tsc --noEmit && npm run test:unit」の3点が品質担保として挙げられている。本Issueではtsc --noEmitとテストパスは含まれているが、lint確認が明示されていない。",
+      "suggestion": "受け入れ基準に「npm run lint でエラーがないこと」を追加する。TODOコメント削除やJSDoc修正はlintに影響しない可能性が高いが、親Issueの品質担保方針との整合性のため明示が望ましい。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 2,
+    "total": 2
+  },
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/slash-commands/route.ts",
+      "line": 33,
+      "relevance": "TODOコメント削除対象。方針(B)の根拠をソースで確認済み。"
+    },
+    {
+      "file": "src/lib/cli-tools/opencode-config.ts",
+      "lines": [217, 284, 340],
+      "relevance": "TODOコメント削除対象（L217, L284）およびJSDoc集約先（L340付近）"
+    },
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "line": 27,
+      "relevance": "Issue #XXX未解決参照。commit 5ebd2baで導入されたことを確認済み。"
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "line": 437,
+      "relevance": "SlashCommandsResponse型（groupsのみ）。route.tsの型と独立していることを確認済み。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュール一覧との整合性確認"
+    }
+  ]
+}

@@ -1,0 +1,104 @@
+{
+  "issue_number": 473,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_date": "2026-03-12",
+  "previous_findings_resolved": [
+    {
+      "id": "F001",
+      "resolved": true,
+      "comment": "「新規APIは不要」の誤記述が削除され、新規エンドポイント POST /api/worktrees/[id]/special-keys の設計がリクエストボディ形式・セキュリティ要件を含めて追加されている。sendKeys と sendSpecialKeys の動作の違い（文字列送信 vs tmux特殊キー送信）も正確に記述されている。"
+    },
+    {
+      "id": "F002",
+      "resolved": true,
+      "comment": "prompt-response API の説明に「Claude の multiple_choice プロンプト専用であり OpenCode TUI ナビゲーションには適用不可」の注記が追加されている。isClaudeMultiChoice の判定条件（cliToolId === 'claude' かつ promptData?.type === 'multiple_choice'）も正確に明記されている。"
+    },
+    {
+      "id": "F003",
+      "resolved": true,
+      "comment": "cli-patterns.ts への OPENCODE_SELECTION_LIST_PATTERN 新規定義の必要性が [要対応] タグ付きで明記されている。status-detector.ts への検出分岐追加（reason: 'opencode_selection_list'）、前提作業としての tmux capture-pane サンプル取得フェーズも記載されている。"
+    },
+    {
+      "id": "F004",
+      "resolved": true,
+      "comment": "受け入れ基準に「バックエンド（新規 special-keys API）」セクションが新設され、Up/Down/Enter/Escape キー送信、ALLOWED_SPECIAL_KEYS バリデーション、セッション不存在エラー、セキュリティ要件実装の4項目が追加されている。"
+    },
+    {
+      "id": "F005",
+      "resolved": true,
+      "comment": "セキュリティ要件として5項目（keys配列最大長制限、isCliToolType、DB存在確認、セッション確認、ALLOWED_SPECIAL_KEYSホワイトリスト二重チェック）が明記されている。既存 terminal API の4層防御（Issue #393）との対応関係も記載されている。"
+    },
+    {
+      "id": "F006",
+      "resolved": true,
+      "comment": "[前提作業] として OpenCode /models, /providers 等の tmux capture-pane 出力サンプル取得とパターン確定フェーズの必要性が明記されている。具体的パターンが未確定であることを Issue 自体が認識している点は適切。"
+    },
+    {
+      "id": "F007",
+      "resolved": true,
+      "comment": "NavigationButtons コンポーネントによるフォーカス管理方針が記載されている。受け入れ基準に「既存のページスクロールやテキスト入力に影響しないこと」が追加されている。ボタンにフォーカスを当てた状態で矢印キーを受け付ける設計が明記されており、textarea との競合回避が考慮されている。"
+    },
+    {
+      "id": "F008",
+      "resolved": true,
+      "comment": "スコープ外セクションおよびエンドポイント設計の「設計方針」に CLI ツール非依存の汎用設計方針が追記されている。「将来他ツールへの拡張時はパターン追加のみで対応可能な構造」という方針が明確。"
+    },
+    {
+      "id": "F301",
+      "resolved": true,
+      "comment": "検出分岐の優先順位が図付きで明記されている。priority 2.5 OpenCode固有ブロック内への配置、設計根拠（3点）、返却値（status: 'waiting', reason: 'opencode_selection_list'）が定義されている。既存パターンとの競合確認事項（OPENCODE_PROMPT_PATTERN、OPENCODE_PROCESSING_INDICATOR との非マッチ確認）も記載されている。"
+    },
+    {
+      "id": "F302",
+      "resolved": true,
+      "comment": "フロントエンドセクションに3層伝達パス（status-detector.ts -> current-output/route.ts -> WorktreeDetailRefactored.tsx）が明記されている。CurrentOutputResponse 型への isSelectionListActive: boolean フィールド追加と変更対象ファイル一覧も記載されている。"
+    },
+    {
+      "id": "F303",
+      "resolved": true,
+      "comment": "受け入れ基準に「テスト」セクションが新設され、パターン正規表現テスト、検出テスト、APIテスト、誤検知防止回帰テスト、既存テスト回帰テストの5項目が追加されている。"
+    },
+    {
+      "id": "F304",
+      "resolved": true,
+      "comment": "矢印キーインターセプトの実装場所が専用セクション（F304対応）として記載されている。MessageInput 外側（NavigationButtons コンポーネント）でのハンドリング方針、SRP・カーソル移動保護・フォーカス管理の3理由、MessageInput の handleKeyDown/props への変更不要が明記されている。受け入れ基準にも「MessageInput.tsxに変更が不要であること」が追加されている。"
+    }
+  ],
+  "summary": "Stage 1-4 の全12件の指摘（must_fix 4件、should_fix 6件、nice_to_have 2件）が全て適切に反映されていることを確認した。Issue 全体の品質は大幅に向上しており、新規 special-keys API 設計、検出ロジック優先順位、フロントエンド状態伝達パス、テスト要件、セキュリティ要件が網羅的に記載されている。2回目の通常レビューとして新規の観点で精査した結果、must_fix 0件、should_fix 2件、nice_to_have 1件の計3件の指摘を行う。F502 の優先順位図の記載は実コードとの齟齬があるため修正が望ましいが、実装に着手不可能なレベルではない。Issue は実装着手可能な品質に達している。",
+  "findings": [
+    {
+      "id": "F501",
+      "severity": "should_fix",
+      "category": "設計の完全性",
+      "title": "special-keys API のレスポンス形式が未定義",
+      "description": "新規 special-keys エンドポイントのリクエストボディ（{ cliToolId: string, keys: string[] }）は明記されているが、正常系・異常系のレスポンス形式が未定義である。既存の terminal API（route.ts）は正常時 { success: true }（200）、パラメータ不正時 { error: 'Invalid cliToolId parameter' }（400）、worktree 不存在時 { error: 'Worktree not found' }（404）、セッション不存在時 { error: 'Session not found...' }（404）、内部エラー時 { error: 'Failed to send command to terminal' }（500）を返している。新規エンドポイントも同等のレスポンス形式を踏襲するなら、その旨を Issue に明記すべき。また、sendSpecialKeys() は各キー間に SPECIAL_KEY_DELAY_MS（100ms）のディレイを持つため、keys 配列の最大長10キーの場合レスポンス時間は約1秒となる。フロントエンド側のタイムアウト設定に影響する可能性があるため、この特性を記載しておくと実装時の考慮漏れを防げる。",
+      "location": "Issue本文 > バックエンド: 新規 special-keys エンドポイント",
+      "suggestion": "エンドポイント設計に以下を追記する: (1) レスポンス形式は既存 terminal API に準拠（正常: { success: true }, エラー: { error: string }）、(2) HTTPステータスコード: 200（成功）、400（バリデーションエラー）、404（worktree/セッション不存在）、500（内部エラー）、(3) 実装上の注意: sendSpecialKeys() は各キー間に100msディレイがあるため、keys配列の長さに比例したレスポンス時間（最大約1秒）となる。"
+    },
+    {
+      "id": "F502",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "検出分岐の優先順位図が実コードの priority 2.5 ブロック内部構造と齟齬がある",
+      "description": "Issue の優先順位図では priority 2.5 OpenCode 固有ブロック内を「processing_indicator -> selection_list（新規）-> response_complete」の3分岐で記載しているが、実際の status-detector.ts（L202-263）の OpenCode ブロック内には (A) processing_indicator チェック（L204）、(B) detectThinking() による thinking チェック（L240）、(C) OPENCODE_RESPONSE_COMPLETE チェック（L254）の3分岐が存在する。Issue の図は分岐B（thinking チェック）を省略しており、selection_list の正確な挿入位置が不明瞭になっている。選択リスト表示中に thinking パターン（'Thinking:'）が表示されることは通常ないため、selection_list は thinking チェック（B）の後に配置するのが妥当だが、Issue にはその根拠が記載されていない。",
+      "location": "Issue本文 > 検出分岐の優先順位（F301対応）",
+      "suggestion": "優先順位図を実コード構造に合わせて修正する: priority 2.5 OpenCode固有ブロック内の順序を (A) processing_indicator -> (B) thinking（contentThinkingWindow） -> (C) selection_list（新規）-> (D) response_complete と明記する。設計根拠に「選択リスト表示中は OpenCode の Thinking: パターンが表示されないため、thinking チェックの後に配置する」を追加する。"
+    },
+    {
+      "id": "F503",
+      "severity": "nice_to_have",
+      "category": "実装パターンの一貫性",
+      "title": "special-keys API での invalidateCache() 呼び出しが未記載",
+      "description": "既存の terminal API（route.ts L82）は sendKeys() 後に invalidateCache(sessionName) を呼び出して tmux-capture-cache のキャッシュを無効化している（Issue #405 対応）。新規 special-keys API も sendSpecialKeys() でキーを送信した後、tmux の画面状態が変化するため、同様にキャッシュ無効化が必要と考えられる。invalidateCache() を呼ばない場合、キー送信後のポーリングで古いキャプチャ出力が返され、選択リストの表示更新が tmux-capture-cache の TTL（2秒）分だけ遅延する。選択リストのナビゲーション操作ではレスポンシブな画面更新が期待されるため、この遅延はUXに影響する。",
+      "location": "Issue本文 > バックエンド: 新規 special-keys エンドポイント",
+      "suggestion": "エンドポイント設計のセキュリティ要件リストまたは処理フローの説明に、sendSpecialKeys() 呼び出し後の invalidateCache(sessionName) を含める旨を追記する。既存 terminal API の Issue #405 パターンを踏襲する形で記載するとよい。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 0,
+    "should_fix": 2,
+    "nice_to_have": 1,
+    "total": 3
+  }
+}

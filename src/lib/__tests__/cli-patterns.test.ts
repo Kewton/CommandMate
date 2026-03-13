@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { CLAUDE_PROMPT_PATTERN, CLAUDE_THINKING_PATTERN, CLAUDE_TRUST_DIALOG_PATTERN, detectThinking, getCliToolPatterns } from '../cli-patterns';
+import { CLAUDE_PROMPT_PATTERN, CLAUDE_THINKING_PATTERN, CLAUDE_TRUST_DIALOG_PATTERN, detectThinking, getCliToolPatterns } from '@/lib/detection/cli-patterns';
 
 describe('cli-patterns', () => {
   describe('CLAUDE_PROMPT_PATTERN', () => {

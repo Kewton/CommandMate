@@ -1,0 +1,16 @@
+{
+  "issue_number": 482,
+  "refactor_targets": [
+    "src/app/api/worktrees/[id]/slash-commands/route.ts",
+    "src/lib/cli-tools/opencode-config.ts",
+    "src/lib/cli-patterns.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0
+  },
+  "improvement_goals": [
+    "変更されたファイルのコードスタイルがプロジェクト規約に準拠していることを確認",
+    "コメント・JSDocが適切に整形されていることを確認"
+  ],
+  "notes": "本Issueの変更はコメント・JSDoc修正のみのため、リファクタリングは最小限（コードスタイル確認のみ）"
+}

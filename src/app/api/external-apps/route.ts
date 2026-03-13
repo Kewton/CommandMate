@@ -18,6 +18,9 @@ import {
 import { getExternalAppCache } from '@/lib/external-apps/cache';
 import { validateCreateInput } from '@/lib/external-apps/validation';
 import type { CreateExternalAppInput } from '@/types/external-apps';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/external-apps');
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic';
@@ -33,7 +36,7 @@ export async function GET() {
 
     return NextResponse.json({ apps }, { status: 200 });
   } catch (error) {
-    console.error('Error fetching external apps:', error);
+    logger.error('error-fetching-external-apps:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to fetch external apps' },
       { status: 500 }
@@ -106,7 +109,7 @@ export async function POST(request: Request) {
       throw dbError;
     }
   } catch (error) {
-    console.error('Error creating external app:', error);
+    logger.error('error-creating-external-app:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to create external app' },
       { status: 500 }

@@ -1,0 +1,14 @@
+{
+  "issue_number": 479,
+  "stage": 4,
+  "applied_findings": ["D4-001", "D4-002"],
+  "skipped_findings": [],
+  "changes_made": [
+    "セクション2のバレルファイル戦略に「export *を使用せず明示的な名前付きre-exportを使用する」方針を追記し、コード例をexport *から名前付きre-exportに変更（D4-001）",
+    "セクション4-3のauto-yes-manager.ts分割設計に「バレルファイルのre-export方針」を追記し、@internal関数をバレルからre-exportしない方針と具体例を明記（D4-001）",
+    "セクション4-3のisValidWorktreeId移動方針に「WORKTREE_ID_PATTERN定数もpath-validator.tsに移動する」を追記し、循環依存回避とセキュリティ監査容易化の根拠を明記（D4-002）",
+    "セクション5のセキュリティ設計に「バリデーション定数の集約」項目を追記（D4-002）",
+    "セクション13にStage 4レビュー指摘反映サマリーと実装チェックリスト（6項目）を追記"
+  ],
+  "updated_at": "2026-03-13"
+}

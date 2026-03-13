@@ -1,0 +1,59 @@
+{
+  "issue_number": 479,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "reviewed_at": "2026-03-13",
+  "design_doc": "dev-reports/design/issue-479-large-file-split-design-policy.md",
+  "summary": "本設計方針書は内部リファクタリング（ファイル分割）を対象としており、新たな外部インターフェースやデータフローの追加は行わない。セキュリティ上の重大なリスクは検出されなかった。ただし、バレルファイルのexport *パターンによる内部関数の意図しない公開、isValidWorktreeId移動時のバリデーションカバレッジの一時的な欠落リスク、WORKTREE_ID_PATTERNの移動先設計の3点について改善提案がある。",
+  "findings": [
+    {
+      "id": "D4-001",
+      "severity": "should_fix",
+      "category": "API公開",
+      "title": "バレルファイルのexport *によるinternal関数の意図しない公開範囲拡大",
+      "description": "auto-yes-manager.tsには@internalアノテーション付きの関数が10個以上存在する（pollAutoYes, captureAndStrip, detectAndResolve, scheduleNextPoll等）。設計方針書セクション4-3ではauto-yes-manager.tsをバレルファイルとし、分割後のモジュールをre-exportする方針だが、export *パターンを使用した場合、分割後のauto-yes-poller.tsやauto-yes-state.tsからexportされた@internal関数がバレル経由で全て公開APIとなる。現在のauto-yes-manager.tsでは単一ファイル内のexportなので影響は限定的だが、分割後にexport *を使用するとサブモジュールの全exportが外部に漏れるリスクがある。",
+      "location": "セクション4-3 auto-yes-manager.ts分割設計、セクション2 バレルファイル戦略",
+      "suggestion": "バレルファイル（auto-yes-manager.ts）ではexport *ではなく、明示的な名前付きre-exportを使用する。具体的にはpublic APIのみを列挙してre-exportし、@internal関数はバレルファイルからは再公開しない。db.tsのバレルファイルについてもテスト以外の消費者が参照する関数のみをre-exportする方針を設計方針書に明記すること。例: export { startAutoYesPolling, stopAutoYesPolling, getAutoYesState, ... } from './auto-yes-poller'; のように列挙形式にする。"
+    },
+    {
+      "id": "D4-002",
+      "severity": "should_fix",
+      "category": "バリデーション",
+      "title": "isValidWorktreeId移動時にWORKTREE_ID_PATTERNも同時移動する設計が未明記",
+      "description": "isValidWorktreeIdはWORKTREE_ID_PATTERN（/^[a-zA-Z0-9_-]+$/）に依存している。設計方針書セクション4-3ではisValidWorktreeIdをpath-validator.tsに移動する方針だが、WORKTREE_ID_PATTERNの移動については明記されていない。WORKTREE_ID_PATTERNがauto-yes-manager.tsに残る場合、path-validator.tsからauto-yes-manager.tsへの逆方向依存が発生し、循環依存のリスクがある。また、パスバリデーション定数がauto-yes-managerに残ること自体がセキュリティ関連コードの分散につながる。",
+      "location": "セクション4-3 isValidWorktreeIdの移動",
+      "suggestion": "WORKTREE_ID_PATTERNもisValidWorktreeIdと共にpath-validator.tsに移動する方針を明記する。これによりパスバリデーション関連のロジックがpath-validator.tsに集約され、セキュリティ監査の容易さが向上する。設計方針書セクション5にもこの点を追記すること。"
+    },
+    {
+      "id": "D4-003",
+      "severity": "nice_to_have",
+      "category": "バリデーション",
+      "title": "isValidWorktreeId移動のアトミック性に関する注意事項の欠如",
+      "description": "設計方針書では11のAPIルートのimportパスを一括変更する方針だが、Phase 2でauto-yes-manager.tsから関数を移動しつつ、同時にAPIルートのimportパスを変更する必要がある。中間状態（関数は移動済みだがimportパスは未更新）ではコンパイルエラーとなり、この状態でデプロイされるリスクは低いものの、開発中に他のブランチとのマージで不整合が生じる可能性がある。",
+      "location": "セクション4-3 importパス変更方針（D1-006対応）",
+      "suggestion": "isValidWorktreeIdの移動と11のAPIルートのimportパス変更は同一コミットで実施すること、という注意事項を実装チェックリストに追記することを推奨する。TypeScriptコンパイラが未解決importをエラーとするため実害は起きにくいが、明示的に記載しておくことで実装時の安全性が向上する。"
+    },
+    {
+      "id": "D4-004",
+      "severity": "nice_to_have",
+      "category": "状態管理",
+      "title": "globalThis状態の分割時における競合状態リスクの明示的排除記述",
+      "description": "設計方針書セクション4-3ではglobalThis.__autoYesStatesと__autoYesPollerStatesのキー名不変性とlazy初期化パターンを記載しているが、Node.jsシングルスレッド環境であるため競合状態は発生しないという前提が明記されていない。レビュアーや将来の開発者が並行性の問題を懸念する可能性がある。",
+      "location": "セクション4-3 globalThis状態の実装方針（D3-003対応）",
+      "suggestion": "Node.jsのイベントループがシングルスレッドであるため、globalThis上のMap操作に競合状態は発生しない旨を一文追記することを検討する。これは既存の挙動の確認であり、必須ではないが設計判断の根拠として有用。"
+    },
+    {
+      "id": "D4-005",
+      "severity": "nice_to_have",
+      "category": "OWASP",
+      "title": "db.ts分割時のSQLインジェクション防御パターンの維持確認が未記載",
+      "description": "db.ts（1,403行）の分割では、SQLクエリを含む関数がworktree-db.ts、chat-db.ts、session-db.ts、memo-db.tsに分散する。現在のdb.tsではbetter-sqlite3のプリペアドステートメントを使用してSQLインジェクションを防御しているが、分割作業中にプリペアドステートメントのパターンが崩れないことを検証する基準が受け入れ基準に含まれていない。",
+      "location": "セクション12 受け入れ基準、セクション5 セキュリティ設計",
+      "suggestion": "受け入れ基準またはセキュリティ設計セクションに「分割後の各DBモジュールでプリペアドステートメントのパターンが維持されていることを確認する」という項目を追加することを検討する。実際にはリファクタリングのみでロジック変更は行わないため、既存テストのパスで十分にカバーされるが、明示的な記載はセキュリティ意識の維持に有用。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 2,
+  "nice_to_have_count": 3,
+  "overall_assessment": "本設計方針書は内部リファクタリング（ファイル分割）のみを扱っており、新たな入力経路やデータフロー、認証/認可の変更を含まない。OWASP Top 10の観点では、既存のセキュリティ防御（isValidWorktreeIdによるインジェクション防御、better-sqlite3プリペアドステートメント、path-validator.tsのパストラバーサル防御）を維持する方針が適切に設計されている。主な改善点は、(1) バレルファイルのexport *パターンによる@internal関数の意図しない公開リスク（D4-001）と、(2) WORKTREE_ID_PATTERNの移動先の明記（D4-002）の2点。いずれもmust_fixレベルではなく、設計方針の補足で対応可能。全体としてセキュリティリスクは低く、conditionally_approvedとする。"
+}

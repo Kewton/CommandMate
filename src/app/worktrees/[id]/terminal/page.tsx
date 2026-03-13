@@ -9,7 +9,7 @@ import React, { useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { ArrowLeft, Terminal, Monitor, Code, Loader2 } from 'lucide-react';
-import { isTmuxControlModeEnabledForClient } from '@/lib/tmux-control-mode-flags';
+import { isTmuxControlModeEnabledForClient } from '@/lib/tmux/tmux-control-mode-flags';
 
 /**
  * Dynamic import of TerminalComponent with SSR disabled.

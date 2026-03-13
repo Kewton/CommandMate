@@ -16,8 +16,8 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { detectSessionStatus } from '@/lib/status-detector';
-import { resetDetectPromptCache } from '@/lib/prompt-detector';
+import { detectSessionStatus } from '@/lib/detection/status-detector';
+import { resetDetectPromptCache } from '@/lib/detection/prompt-detector';
 
 // Named constants for Unicode characters used in tmux output simulation.
 // These match the actual characters produced by Claude CLI and detected by cli-patterns.ts.

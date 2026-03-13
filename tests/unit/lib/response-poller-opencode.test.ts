@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 import {
   isOpenCodeComplete,
   cleanOpenCodeResponse,
-} from '@/lib/response-poller';
+} from '@/lib/polling/response-poller';
 import {
   OPENCODE_PROMPT_PATTERN,
   OPENCODE_PROMPT_AFTER_RESPONSE,
@@ -17,7 +17,7 @@ import {
   OPENCODE_PROCESSING_INDICATOR,
   OPENCODE_SEPARATOR_PATTERN,
   OPENCODE_SKIP_PATTERNS,
-} from '@/lib/cli-patterns';
+} from '@/lib/detection/cli-patterns';
 
 describe('response-poller OpenCode integration', () => {
   describe('isOpenCodeComplete()', () => {

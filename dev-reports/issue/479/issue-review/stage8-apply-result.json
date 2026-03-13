@@ -1,0 +1,41 @@
+{
+  "issue_number": 479,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "iteration": 2,
+  "apply_date": "2026-03-13",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "I2-001",
+        "status": "applied",
+        "change_summary": "auto-yes-manager.tsの詳細分割設計セクションに「globalThis状態の分割配置」サブセクションを追加。__autoYesStates -> auto-yes-state.ts、__autoYesPollerStates -> auto-yes-poller.tsの配置と、auto-yes-poller.ts -> auto-yes-state.tsへの一方向依存パターンを明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "I2-002",
+        "status": "applied",
+        "change_summary": "auto-yes-manager.tsの詳細分割設計セクションに「テストファイル対応表」を追加。8ファイル（unit 7 + integration 1）の分割後の対応先をresponse-poller.tsと同様のテーブル形式で記載"
+      }
+    ]
+  },
+  "skipped_findings": [],
+  "changes_made": [
+    "auto-yes-manager.tsセクションに「globalThis状態の分割配置」サブセクションを追加（__autoYesStates/auto-yes-state.ts、__autoYesPollerStates/auto-yes-poller.ts、モジュール間依存の説明）",
+    "auto-yes-manager.tsセクションに「テストファイル対応表」を追加（8テストファイルの分割後対応先）",
+    "レビュー履歴にイテレーション4（影響範囲レビュー2回目）のエントリを追加",
+    "Issueヘッダーのレビュー反映ノートを更新（影響範囲レビュー2回目含む）"
+  ],
+  "summary": {
+    "total_findings": 2,
+    "applied": 2,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/479"
+  },
+  "updated_at": "2026-03-13"
+}

@@ -1,0 +1,178 @@
+{
+  "issue_number": 479,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "reviewed_at": "2026-03-13",
+  "summary": "影響範囲分析の結果、db.tsは50箇所（API 37 + lib 13）の消費者を持ち最もインパクトが大きいが、バレルファイル戦略により安全に対応可能。response-poller.tsは6消費者+5テストファイルで影響は限定的だが、clean関数のみをimportするassistant-response-saver.tsの存在が分割案の妥当性を裏付ける。auto-yes-manager.tsのisValidWorktreeId関数が11のAPIルートからimportされておりクロスカッティング関心事として分割時に注意が必要。テストファイルは合計56ファイル以上が影響を受ける可能性があり、バレルファイル未対応のモジュールでは更新コストが高い。",
+  "findings": [
+    {
+      "id": "I001",
+      "severity": "must_fix",
+      "category": "依存関係",
+      "title": "auto-yes-manager.tsのisValidWorktreeIdが11のAPIルートで使用されており、分割時の配置に注意が必要",
+      "description": "auto-yes-manager.tsからexportされているisValidWorktreeIdは、auto-yes機能とは無関係の汎用バリデーション関数であるにもかかわらず、git/log, git/diff, git/show, execution-logs, schedules, route, prompt-response等の11のAPIルートからimportされている。auto-yes-manager.tsを「ポーリングと状態管理」に分割する際、isValidWorktreeIdの配置先を誤ると、意図しない依存関係が生じる。現在のIssueの分割案にはこの関数の扱いが明記されていない。",
+      "affected_files": [
+        "src/lib/auto-yes-manager.ts",
+        "src/app/api/worktrees/[id]/route.ts",
+        "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "src/app/api/worktrees/[id]/schedules/route.ts",
+        "src/app/api/worktrees/[id]/schedules/[scheduleId]/route.ts",
+        "src/app/api/worktrees/[id]/execution-logs/route.ts",
+        "src/app/api/worktrees/[id]/execution-logs/[logId]/route.ts",
+        "src/app/api/worktrees/[id]/current-output/route.ts",
+        "src/app/api/worktrees/[id]/git/log/route.ts",
+        "src/app/api/worktrees/[id]/git/diff/route.ts",
+        "src/app/api/worktrees/[id]/git/show/[commitHash]/route.ts"
+      ],
+      "suggestion": "isValidWorktreeIdはauto-yes-managerの責務ではなく汎用バリデーションであるため、分割時にpath-validator.tsまたは新規のworktree-validator.tsに移動すべき。バレルファイル戦略（auto-yes-manager.tsからのre-export）を一時的に適用するか、11ファイルのimportパスを一括変更するかを明記する必要がある。"
+    },
+    {
+      "id": "I002",
+      "severity": "should_fix",
+      "category": "テスト",
+      "title": "db.tsのテストファイルが34ファイル（unit）+3ファイル（lib内テスト）で合計37ファイルに影響するが、バレルファイル戦略でカバーされないケースがある",
+      "description": "tests/unit配下に34ファイル、src/lib/__tests__配下に3ファイルの合計37テストファイルがdb.tsからimportしている。バレルファイル戦略によりimportパスの変更は不要だが、テスト内でのモック設定（vi.mock('@/lib/db', ...)）はバレルファイル経由でも動作するものの、個別モジュールのモックが必要になるケースが発生しうる。例えば、worktree-db.tsの関数のみをモックし、chat-db.tsの関数は実装を使うといったケースでは、バレルファイル全体をモックする現在のパターンでは対応できない。",
+      "affected_files": [
+        "tests/unit/db.test.ts",
+        "tests/unit/db-repository-delete.test.ts",
+        "tests/unit/db-viewed-tracking.test.ts",
+        "tests/unit/db-delete-messages-by-cli-tool.test.ts",
+        "tests/unit/db-initial-branch.test.ts",
+        "tests/integration/api-worktrees.test.ts",
+        "tests/integration/api-messages.test.ts",
+        "src/lib/__tests__/assistant-response-saver.test.ts",
+        "src/lib/__tests__/db-memo.test.ts",
+        "src/lib/__tests__/worktrees-sync.test.ts"
+      ],
+      "suggestion": "テスト戦略に「バレルファイル経由のモックは既存テストの動作を維持するが、将来的に個別モジュール単位のモックが可能になることをメリットとして明記」を追加する。また、分割後のテストファイルの対応方針（モックパターンの段階的移行）を記載すべき。"
+    },
+    {
+      "id": "I003",
+      "severity": "should_fix",
+      "category": "依存関係",
+      "title": "response-poller.ts分割後のimport先が消費者ごとに異なるモジュールを指すため、バレルファイルなしでは6ファイル+5テストのimport変更が必要",
+      "description": "response-poller.tsの消費者は用途別に異なる関数をimportしている：(1) startPolling: 3つのAPIルート、(2) stopPolling: session-cleanup.ts, cli-tools/manager.ts、(3) cleanXxxResponse: assistant-response-saver.ts、(4) TUI関連/resolveExtractionStartIndex: テストファイルのみ。Issueではresponse-poller.tsにバレルファイル戦略が明記されていない（db.tsのみ記載）。4ファイルに分割した場合、消費者は新しいモジュールパスに変更する必要がある。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/respond/route.ts",
+        "src/app/api/worktrees/[id]/start-polling/route.ts",
+        "src/app/api/worktrees/[id]/send/route.ts",
+        "src/lib/session-cleanup.ts",
+        "src/lib/cli-tools/manager.ts",
+        "src/lib/assistant-response-saver.ts",
+        "tests/unit/lib/response-poller.test.ts",
+        "tests/unit/lib/response-poller-opencode.test.ts",
+        "tests/unit/lib/response-poller-tui-accumulator.test.ts",
+        "tests/unit/lib/resolve-extraction-start-index.test.ts",
+        "tests/unit/session-cleanup.test.ts"
+      ],
+      "suggestion": "response-poller.tsにもバレルファイル戦略を適用するか、消費者数が少ない（11ファイル）ため直接importパスの変更で対応するかを明記する。後者の場合、Phase 3の作業量見積もりに11ファイルのimport変更を含める必要がある。"
+    },
+    {
+      "id": "I004",
+      "severity": "should_fix",
+      "category": "依存関係",
+      "title": "response-poller.tsがdb.tsの6関数をimportしており、同一Phase内での分割順序に注意が必要",
+      "description": "response-poller.tsはdb.tsから createMessage, getSessionState, updateSessionState, getWorktreeById, clearInProgressMessageId, markPendingPromptsAsAnswered の6関数をimportしている。両者はPhase 3（高リスク）に分類されているが、response-poller.tsの分割はdb.tsのimportパスに依存する。db.tsのバレルファイル戦略が先に完了していれば問題ないが、同時に分割すると作業が複雑化する。",
+      "affected_files": [
+        "src/lib/response-poller.ts",
+        "src/lib/db.ts"
+      ],
+      "suggestion": "Phase 3内の実施順序を明記する。db.tsのバレルファイル化を先行し、その後にresponse-poller.tsの分割を行うことで、response-poller.tsの分割時にはdb.tsのimportパスが安定している状態を保証する。"
+    },
+    {
+      "id": "I005",
+      "severity": "should_fix",
+      "category": "ランタイム",
+      "title": "response-poller.ts内部にモジュールレベル状態（Map）が存在し、分割時に状態管理の一貫性に注意が必要",
+      "description": "response-poller.tsにはactivePollers（Map）やTUI accumulatorの状態がモジュールレベル変数として存在する。4ファイルに分割した場合、これらの状態がどのモジュールに属するかが重要になる。特にtui-accumulator.tsに分割されるTUI関連のMapと、response-poller.tsに残るactivePollers Mapが、ポーリングのライフサイクル中に整合性を保つ必要がある（例：stopPolling時にTUI accumulatorもクリアする必要があるか）。",
+      "affected_files": [
+        "src/lib/response-poller.ts"
+      ],
+      "suggestion": "分割後のモジュール間での状態管理方針を明記する。特にstopPolling時のtui-accumulator清掃を、response-poller.tsからtui-accumulator.tsのclearTuiAccumulator()を呼ぶ形で維持するか確認し、分割設計に含める。"
+    },
+    {
+      "id": "I006",
+      "severity": "should_fix",
+      "category": "テスト",
+      "title": "response-poller.tsのテストファイルが既に機能別に分かれているが、分割後のテスト配置と一致するか確認が必要",
+      "description": "現在のテストは response-poller.test.ts（cleanClaudeResponse）、response-poller-opencode.test.ts（isOpenCodeComplete, cleanOpenCodeResponse）、response-poller-tui-accumulator.test.ts（TUI関連）、resolve-extraction-start-index.test.ts（resolveExtractionStartIndex）と既に機能別に分かれている。分割後のモジュール名と既存テストファイル名の対応を明確にし、テストのimportパス更新を効率化できる。",
+      "affected_files": [
+        "tests/unit/lib/response-poller.test.ts",
+        "tests/unit/lib/response-poller-opencode.test.ts",
+        "tests/unit/lib/response-poller-tui-accumulator.test.ts",
+        "tests/unit/lib/resolve-extraction-start-index.test.ts"
+      ],
+      "suggestion": "テスト戦略に以下の対応表を追記：response-poller.test.ts -> response-cleaner.test.tsへリネーム（テスト対象がclean関数のため）、response-poller-opencode.test.ts -> response-cleaner-opencode.test.ts + response-extractor-opencode.test.tsに分割、response-poller-tui-accumulator.test.ts -> tui-accumulator.test.tsへリネーム、resolve-extraction-start-index.test.ts -> response-extractor.test.tsへリネーム。"
+    },
+    {
+      "id": "I007",
+      "severity": "nice_to_have",
+      "category": "CI/CD",
+      "title": "Phase間でのCI確認が受け入れ基準に記載されているが、Phaseごとのブランチ/PR戦略が未定義",
+      "description": "テスト戦略に「各Phase完了時にnpm run test:unit && npm run lint && npx tsc --noEmitを実行」と記載されているが、3つのPhaseを1つのPRで行うのか、Phase別にPRを分けるのかが不明。1つのPRで全Phase実施するとレビュー負荷が高く、ロールバックも困難。",
+      "affected_files": [],
+      "suggestion": "Phase別にPR（またはコミット）を分ける方針を推奨。特にPhase 3は高リスクのため独立PRが望ましい。"
+    },
+    {
+      "id": "I008",
+      "severity": "nice_to_have",
+      "category": "ランタイム",
+      "title": "バンドルサイズへの影響は軽微だが、ツリーシェイキングの改善が期待できることを明記すべき",
+      "description": "db.tsを分割した場合、各APIルートは必要なドメインモジュールのみをimportできるようになり、Next.jsのサーバーサイドバンドルでのツリーシェイキングが改善される可能性がある。現状はバレルファイル戦略により全関数がre-exportされるため即座の効果はないが、将来的な直接import移行時にメリットがある。",
+      "affected_files": [
+        "src/lib/db.ts"
+      ],
+      "suggestion": "バレルファイル戦略の将来的廃止によるツリーシェイキング改善をリファクタリングのメリットとして記載すると、分割の動機がより明確になる。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 5,
+  "nice_to_have_count": 2,
+  "impact_summary": {
+    "db_ts": {
+      "api_consumers": 37,
+      "lib_consumers": 13,
+      "test_consumers": 37,
+      "total_exports": 43,
+      "barrel_strategy": true,
+      "risk": "高（消費者数最多だがバレルで軽減可能）"
+    },
+    "response_poller_ts": {
+      "api_consumers": 3,
+      "lib_consumers": 3,
+      "test_consumers": 5,
+      "total_exports": 15,
+      "barrel_strategy": "未記載（要判断）",
+      "risk": "中（消費者は限定的だが4分割のためimport変更が複雑）"
+    },
+    "auto_yes_manager_ts": {
+      "api_consumers": 11,
+      "lib_consumers": 2,
+      "test_consumers": 7,
+      "cross_cutting_function": "isValidWorktreeId（11 APIルート）",
+      "risk": "中（isValidWorktreeIdの配置先が要検討）"
+    },
+    "worktree_detail_refactored_tsx": {
+      "consumers": 1,
+      "risk": "低（消費者が1ファイルのみ）"
+    },
+    "prompt_detector_ts": {
+      "consumers": 6,
+      "test_consumers": 6,
+      "risk": "低〜中"
+    },
+    "claude_session_ts": {
+      "consumers": 3,
+      "test_consumers": 4,
+      "risk": "低"
+    },
+    "schedule_manager_ts": {
+      "consumers": 2,
+      "test_consumers": 4,
+      "risk": "低"
+    }
+  },
+  "overall_assessment": "影響範囲分析により、Issueの段階的フェーズ分類（Phase 1-3）の妥当性が確認された。db.ts（50消費者）とresponse-poller.ts（11消費者+テスト）がPhase 3に分類されている判断は正しい。主要な追加対応として、(1) auto-yes-manager.tsのisValidWorktreeIdの再配置問題（must_fix）、(2) response-poller.tsのバレルファイル戦略の要否判断（should_fix）、(3) Phase 3内のdb.ts→response-poller.tsの実施順序明記（should_fix）の3点を反映すべき。テストへの影響はバレルファイル戦略により大幅に軽減されるが、response-poller.tsのテストは既に機能別に分かれており、分割後のリネーム/再配置対応表を追加すると実装時の混乱を防げる。"
+}

@@ -1,0 +1,87 @@
+{
+  "issue_number": 473,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_date": "2026-03-11",
+  "summary": "Issue #473の通常レビューを実施した。仮説検証で判明した「新規APIは不要」という誤りを中心に、バックエンド設計の不備、検出パターンの未定義、受け入れ基準の不足など、合計8件の指摘を行う。must_fix 3件はいずれも実装設計に直接影響するため、Issue本文の修正が必要である。",
+  "findings": [
+    {
+      "id": "F001",
+      "severity": "must_fix",
+      "category": "技術的正確性",
+      "title": "「新規APIは不要」の記述が誤り - sendSpecialKeys用の新規エンドポイントが必要",
+      "description": "Issue本文に「新規APIは不要で、既存のspecial key送信インフラを流用可能」と記載されているが、これは事実と異なる。terminal API（POST /api/worktrees/[id]/terminal）は sendKeys() のみを使用しており、tmux特殊キー（Up/Down等のアロー）を送信する sendSpecialKeys() は呼び出されない。sendKeys(session, 'Up') は文字列 'Up' をテキストとして送信するだけで、tmuxの矢印上キーとは全く異なる動作をする。prompt-response API は sendPromptAnswer() を経由するが、isClaudeMultiChoice 判定（cliToolId === 'claude' && promptData?.type === 'multiple_choice'）を通過しない限り sendSpecialKeys() は呼ばれず、OpenCode TUI ナビゲーションには使用不可。",
+      "location": "Issue本文 > 提案する解決策 > バックエンド セクション",
+      "suggestion": "「新規APIは不要」を削除し、新規エンドポイント（例: POST /api/worktrees/[id]/special-keys）の設計を追加する。エンドポイントは { cliToolId: string, keys: string[] } を受け取り、バリデーション後に sendSpecialKeys(sessionName, keys) を呼び出す設計とする。セキュリティ面では既存の ALLOWED_SPECIAL_KEYS セットによるホワイトリスト検証が tmux.ts 側で行われるため、同等の保護が得られる。"
+    },
+    {
+      "id": "F002",
+      "severity": "must_fix",
+      "category": "技術的正確性",
+      "title": "prompt-response API の sendSpecialKeys 活用がフォールバックにならない旨の明記不足",
+      "description": "Issue本文の「技術的な参考情報 > 既存のAPI」セクションで prompt-response API が「sendSpecialKeysで矢印キー対応済み」と記載されているが、これは Claude の multiple_choice プロンプト専用ロジックである。prompt-answer-sender.ts の isClaudeMultiChoice 判定（L50-52）により cliToolId === 'claude' かつ promptData?.type === 'multiple_choice' かつ answer が数値文字列の場合のみ sendSpecialKeys() が呼ばれる。OpenCode の TUI 選択リストナビゲーションでは、この条件を満たさないため sendSpecialKeys は呼ばれない。この記述は読者に既存APIの流用が可能であるという誤った印象を与える。",
+      "location": "Issue本文 > 技術的な参考情報 > 既存のAPI セクション",
+      "suggestion": "prompt-response API の説明に「ただし Claude の multiple_choice プロンプト専用であり、OpenCode TUI ナビゲーションには適用不可」という注記を追加する。または、既存APIセクションから prompt-response の矢印キー対応の記述を削除し、新規エンドポイント設計セクションに統合する。"
+    },
+    {
+      "id": "F003",
+      "severity": "must_fix",
+      "category": "検出パターン設計",
+      "title": "OpenCode TUI選択リストの検出パターンが cli-patterns.ts に未定義であることの明記不足",
+      "description": "Issue本文では「tmux capture-paneの出力からOpenCode特有のTUI選択リストパターンを検出」と記載し、検出方法の案として3項目を挙げているが、cli-patterns.ts の現行実装には OpenCode のファジー検索付き選択リストに対応するパターンが一切存在しない。現在定義されている OpenCode 関連パターンは OPENCODE_PROMPT_PATTERN（Ask anything...）、OPENCODE_THINKING_PATTERN（Thinking:）、OPENCODE_PROCESSING_INDICATOR（esc interrupt）、OPENCODE_RESPONSE_COMPLETE のみ。status-detector.ts の OpenCode 専用ロジック（L202-263）も処理中/完了の検出のみで、選択リスト状態の検出は未実装。新規パターン定義が必要であることを Issue に明記すべき。",
+      "location": "Issue本文 > 提案する解決策 > 検出方法（案）",
+      "suggestion": "検出方法セクションに以下を追加する: (1) cli-patterns.ts に OPENCODE_SELECTION_LIST_PATTERN（仮称）を新規定義する必要がある旨、(2) 実際の OpenCode /models 等の TUI 出力をキャプチャしてパターンを確定する作業が前提となる旨、(3) status-detector.ts に選択リスト状態を返す新しい検出分岐（例: reason: 'opencode_selection_list'）を追加する設計。"
+    },
+    {
+      "id": "F004",
+      "severity": "should_fix",
+      "category": "受け入れ基準",
+      "title": "新規APIエンドポイントに関する受け入れ基準が欠落",
+      "description": "受け入れ基準にはフロントエンド側の検出・表示・操作に関する項目は揃っているが、バックエンドの新規APIエンドポイント（sendSpecialKeys用）に関する受け入れ基準が存在しない。F001で指摘した通り新規APIが必要であるため、そのエンドポイントの動作確認に関する基準を追加すべき。",
+      "location": "Issue本文 > 受け入れ基準",
+      "suggestion": "以下の受け入れ基準を追加する: (1) 新規 special-keys API エンドポイントが Up/Down/Enter/Escape キーを tmux セッションに送信できる、(2) 不正なキー名（ALLOWED_SPECIAL_KEYS に含まれないもの）が拒否される、(3) 存在しないセッションに対するリクエストが適切なエラーを返す。"
+    },
+    {
+      "id": "F005",
+      "severity": "should_fix",
+      "category": "セキュリティ設計",
+      "title": "新規 special-keys エンドポイントのセキュリティ設計が未記載",
+      "description": "新規エンドポイントの追加が必要であるにもかかわらず、セキュリティ面の設計（入力バリデーション、レート制限、キー名ホワイトリスト検証等）が Issue に記載されていない。既存の terminal API は MAX_COMMAND_LENGTH（10000文字）による DoS 保護、isCliToolType() バリデーション、getWorktreeById() による DB 存在確認、hasSession() によるセッション確認の4層防御を実装している（Issue #393 セキュリティハードニング）。新規エンドポイントも同等の防御が必要。",
+      "location": "Issue本文全体（セキュリティ設計セクションが存在しない）",
+      "suggestion": "新規エンドポイント設計に以下のセキュリティ要件を明記する: (1) keys 配列の最大長制限（例: 10キー）、(2) isCliToolType() バリデーション、(3) getWorktreeById() DB 存在確認、(4) hasSession() セッション確認、(5) ALLOWED_SPECIAL_KEYS によるホワイトリスト検証（tmux.ts 側で既に実装済みだが、エンドポイント側でも二重チェック推奨）。"
+    },
+    {
+      "id": "F006",
+      "severity": "should_fix",
+      "category": "要件の明確さ",
+      "title": "OpenCode TUI選択リストの具体的な出力パターンが未定義",
+      "description": "Issue本文では検出方法の案として「ハイライト行のパターン」「リスト項目の連続パターン」「検索入力バーの存在」を挙げているが、実際の OpenCode /models 等のコマンド実行時の tmux capture-pane 出力例が一切記載されていない。cli-patterns.ts に既存の OpenCode パターン（OPENCODE_PROMPT_PATTERN 等）は全て具体的な文字列パターンに基づいて定義されており、同様の具体性が必要。パターンが確定していないと実装時の試行錯誤が増え、検出精度の問題が発生するリスクがある。",
+      "location": "Issue本文 > 提案する解決策 > 検出方法（案）",
+      "suggestion": "実装前の準備タスクとして、OpenCode /models, /providers 等を実行した際の tmux capture-pane 出力のサンプルを取得し、Issue本文またはコメントに貼り付ける。そのサンプルに基づいて具体的な正規表現パターンの設計を行うフェーズを設ける。"
+    },
+    {
+      "id": "F007",
+      "severity": "nice_to_have",
+      "category": "受け入れ基準",
+      "title": "キーボードショートカットの具体的なキーバインド定義が未記載",
+      "description": "Issue本文に「PC: ボタンクリック + キーボードショートカット（矢印キー直接送信）」と記載されているが、具体的にどのキーバインドでどの操作をトリガーするかが明確でない。特に、矢印キーを「直接送信」する場合、ブラウザのデフォルトスクロール動作との競合、textarea へのフォーカス状態との相互作用を考慮する必要がある。",
+      "location": "Issue本文 > 提案する解決策 > フロントエンド セクション",
+      "suggestion": "キーボードショートカットの仕様を具体化する: (1) 選択リスト検出時のみ矢印キーがインターセプトされるか、(2) 特定のモディファイアキー（Ctrl/Alt等）との組み合わせか、(3) フォーカス管理の方針（メッセージ入力欄とナビゲーションボタンのフォーカス切り替え）。受け入れ基準に「既存のページスクロールやテキスト入力に影響しないこと」を追加することを推奨。"
+    },
+    {
+      "id": "F008",
+      "severity": "nice_to_have",
+      "category": "将来の拡張性",
+      "title": "他CLIツールのTUI選択リストへの汎用化に関する設計方針の整理",
+      "description": "スコープ外セクションに「他のTUI型CLIツールへの汎用化は将来Issue」と記載されているが、新規 special-keys エンドポイントの設計自体は CLI ツール非依存（cliToolId + keys を受け取る汎用設計）にできる。検出パターンのみが OpenCode 固有であるという分離を明確にしておくと、将来の拡張が容易になる。",
+      "location": "Issue本文 > スコープ外",
+      "suggestion": "スコープ外セクションに「新規 special-keys エンドポイントは CLI ツール非依存の汎用設計とする。検出ロジックのみ OpenCode 固有とし、将来他ツールへの拡張時はパターン追加のみで対応可能な構造とする」という設計方針を追記する。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 3,
+    "should_fix": 3,
+    "nice_to_have": 2,
+    "total": 8
+  }
+}

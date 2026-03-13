@@ -38,10 +38,10 @@ import {
   getRepositoryPaths,
   scanMultipleRepositories,
   syncWorktreesToDB
-} from './src/lib/worktrees';
+} from './src/lib/git/worktrees';
 import { getDbInstance } from './src/lib/db-instance';
-import { stopAllPolling } from './src/lib/response-poller';
-import { stopAllAutoYesPolling } from './src/lib/auto-yes-manager';
+import { stopAllPolling } from './src/lib/polling/response-poller';
+import { stopAllAutoYesPolling } from './src/lib/polling/auto-yes-manager';
 import { initScheduleManager, stopAllSchedules } from './src/lib/schedule-manager';
 import { initResourceCleanup, stopResourceCleanup } from './src/lib/resource-cleanup';
 import { runMigrations } from './src/lib/db-migrations';

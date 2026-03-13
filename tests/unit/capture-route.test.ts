@@ -30,14 +30,14 @@ vi.mock('@/lib/db', () => ({
   getWorktreeById: vi.fn(),
 }));
 
-vi.mock('@/lib/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn(),
   capturePane: vi.fn(),
 }));
 
 import { POST } from '@/app/api/worktrees/[id]/capture/route';
 import { getWorktreeById } from '@/lib/db';
-import { hasSession, capturePane } from '@/lib/tmux';
+import { hasSession, capturePane } from '@/lib/tmux/tmux';
 import { isCliToolType } from '@/lib/cli-tools/types';
 
 function createRequest(body: Record<string, unknown>): NextRequest {

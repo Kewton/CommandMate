@@ -25,7 +25,7 @@ describe('WebSocket Authentication', () => {
   });
 
   it('should verify auth module exports parseCookies for WS usage', async () => {
-    const { parseCookies, AUTH_COOKIE_NAME } = await import('@/lib/auth');
+    const { parseCookies, AUTH_COOKIE_NAME } = await import('@/lib/security/auth');
     // Simulate WebSocket upgrade request cookie header
     const cookieHeader = `${AUTH_COOKIE_NAME}=test-token-value; other=data`;
     const cookies = parseCookies(cookieHeader);
@@ -33,7 +33,7 @@ describe('WebSocket Authentication', () => {
   });
 
   it('should verify token from parsed cookie header', async () => {
-    const { generateToken, hashToken, parseCookies, AUTH_COOKIE_NAME } = await import('@/lib/auth');
+    const { generateToken, hashToken, parseCookies, AUTH_COOKIE_NAME } = await import('@/lib/security/auth');
     const token = generateToken();
     const hash = hashToken(token);
 
@@ -41,7 +41,7 @@ describe('WebSocket Authentication', () => {
     vi.resetModules();
     process.env.CM_AUTH_TOKEN_HASH = hash;
 
-    const auth = await import('@/lib/auth');
+    const auth = await import('@/lib/security/auth');
     const cookieHeader = `${auth.AUTH_COOKIE_NAME}=${token}`;
     const cookies = auth.parseCookies(cookieHeader);
     const wsToken = cookies[auth.AUTH_COOKIE_NAME];
@@ -50,14 +50,14 @@ describe('WebSocket Authentication', () => {
   });
 
   it('should reject invalid token from cookie header', async () => {
-    const { hashToken } = await import('@/lib/auth');
+    const { hashToken } = await import('@/lib/security/auth');
     const hash = hashToken('real-token');
 
     process.env.CM_AUTH_TOKEN_HASH = hash;
     vi.resetModules();
     process.env.CM_AUTH_TOKEN_HASH = hash;
 
-    const auth = await import('@/lib/auth');
+    const auth = await import('@/lib/security/auth');
     const cookieHeader = `${auth.AUTH_COOKIE_NAME}=wrong-token`;
     const cookies = auth.parseCookies(cookieHeader);
     const wsToken = cookies[auth.AUTH_COOKIE_NAME];
@@ -69,20 +69,20 @@ describe('WebSocket Authentication', () => {
     delete process.env.CM_AUTH_TOKEN_HASH;
     vi.resetModules();
 
-    const auth = await import('@/lib/auth');
+    const auth = await import('@/lib/security/auth');
     expect(auth.isAuthEnabled()).toBe(false);
     // When auth is disabled, ws-server should skip authentication
   });
 
   it('should reject when cookie header is missing', async () => {
-    const { hashToken } = await import('@/lib/auth');
+    const { hashToken } = await import('@/lib/security/auth');
     const hash = hashToken('some-token');
 
     process.env.CM_AUTH_TOKEN_HASH = hash;
     vi.resetModules();
     process.env.CM_AUTH_TOKEN_HASH = hash;
 
-    const auth = await import('@/lib/auth');
+    const auth = await import('@/lib/security/auth');
     // Empty cookie header
     const cookies = auth.parseCookies('');
     const wsToken = cookies[auth.AUTH_COOKIE_NAME];

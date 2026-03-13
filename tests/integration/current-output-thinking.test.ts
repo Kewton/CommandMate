@@ -16,8 +16,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { detectSessionStatus } from '@/lib/status-detector';
-import { CLAUDE_THINKING_PATTERN, stripAnsi } from '@/lib/cli-patterns';
+import { detectSessionStatus } from '@/lib/detection/status-detector';
+import { CLAUDE_THINKING_PATTERN, stripAnsi } from '@/lib/detection/cli-patterns';
 
 // Named constants for Unicode characters used in tmux output simulation
 const SPINNER = '\u2733';        // ✳ - Claude spinner character

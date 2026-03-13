@@ -1,0 +1,49 @@
+{
+  "issue_number": 474,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "coverage": 80,
+      "tests_total": 4921,
+      "tests_passed": 4921,
+      "implemented_files": [
+        "src/config/image-extensions.ts",
+        "src/lib/cli-tools/types.ts",
+        "src/lib/cli-tools/index.ts",
+        "src/lib/cli-tools/claude.ts",
+        "src/app/api/worktrees/[id]/send/route.ts",
+        "src/app/api/worktrees/[id]/upload/[...path]/route.ts",
+        "src/lib/api-client.ts",
+        "src/hooks/useImageAttachment.ts",
+        "src/components/worktree/MessageInput.tsx"
+      ]
+    },
+    "acceptance": {
+      "status": "passed",
+      "scenarios_total": 10,
+      "scenarios_passed": 10
+    },
+    "refactor": {
+      "status": "success",
+      "improvements": [
+        "validateImagePath()関数を抽出（SRP準拠）",
+        "ATTACHABLE_IMAGE_ACCEPTのDRY違反修正",
+        "isImageCapableCLITool型ガードの簡略化"
+      ]
+    },
+    "docs": {
+      "status": "updated",
+      "updated_files": [
+        "docs/implementation-history.md",
+        "CLAUDE.md"
+      ]
+    }
+  },
+  "quality_checks": {
+    "lint": "pass",
+    "typescript": "pass",
+    "unit_tests": "pass",
+    "build": "pass"
+  }
+}

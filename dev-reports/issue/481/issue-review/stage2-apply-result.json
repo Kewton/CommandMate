@@ -1,0 +1,82 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 481,
+  "iteration": 1,
+  "apply_date": "2026-03-13",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "F001",
+        "status": "applied",
+        "change_summary": "cli-tools/ のファイル数を 7 → 11 に修正し、全11ファイル名を列挙"
+      },
+      {
+        "id": "F002",
+        "status": "applied",
+        "change_summary": "proxy/ のファイル数を 2 → 4 に修正（config, handler, index, logger）"
+      },
+      {
+        "id": "F003",
+        "status": "applied",
+        "change_summary": "external-apps/ のファイル数を 1 → 5 に修正（cache, db, index, interfaces, validation）"
+      },
+      {
+        "id": "F004",
+        "status": "applied",
+        "change_summary": "transports/ ディレクトリ（2ファイル）を既存サブディレクトリとして追記。tmux/ への統合方針（案A/案B）を明記。__tests__/ も記載追加。"
+      },
+      {
+        "id": "F005",
+        "status": "applied",
+        "change_summary": "ルート残留ファイル37件の具体リストをカテゴリ別に明記。追加サブディレクトリ候補（logging/, file/, conversation/）を将来検討として提示。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "F006",
+        "status": "applied",
+        "change_summary": "tmux/ の対象ファイルをワイルドカードから具体的な7ファイル名に変更"
+      },
+      {
+        "id": "F007",
+        "status": "applied",
+        "change_summary": "worktree-status-helper.ts と claude-executor.ts を session/ に分類追加（4→6ファイル）"
+      },
+      {
+        "id": "F008",
+        "status": "applied",
+        "change_summary": "循環依存の検証方法として madge/tsc --noEmit を明記。リファクタリング前後の比較条件を追加。"
+      },
+      {
+        "id": "F009",
+        "status": "applied",
+        "change_summary": "受け入れ基準に docs/module-reference.md と docs/architecture.md の更新を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F010",
+        "status": "applied",
+        "change_summary": "polling/ の説明を「ポーリング」から「ポーリング・自動応答」に変更"
+      },
+      {
+        "id": "F011",
+        "status": "applied",
+        "change_summary": "バレルエクスポート（index.ts）方針セクションを新規追加。受け入れ基準にも index.ts 設置の項目を追加。"
+      }
+    ]
+  },
+  "skipped_findings": [],
+  "summary": {
+    "total_findings": 11,
+    "applied": 11,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/481"
+  },
+  "issue_updated": true,
+  "changes_summary": "全11件の指摘事項（must_fix: 5件、should_fix: 4件、nice_to_have: 2件）をすべてIssueに反映。主な変更: (1) 既存サブディレクトリのファイル数を実態に合わせて修正、(2) transports/ と __tests__/ の記載追加、(3) ルート残留37ファイルの具体リスト追記、(4) tmux/ の対象ファイル具体化、(5) 循環依存検証方法の明確化、(6) ドキュメント更新対象の追加、(7) バレルエクスポート方針の明記。"
+}

@@ -1,0 +1,24 @@
+{
+  "issue_number": 482,
+  "acceptance_criteria": [
+    "対応可能なTODOは実装完了",
+    "対応不要なものはコメント削除または理由を明記",
+    "既存テストが全パス",
+    "npx tsc --noEmit でコンパイルエラーがないことを確認",
+    "npm run lint でリントエラーがないことを確認"
+  ],
+  "implementation_tasks": [
+    "src/app/api/worktrees/[id]/slash-commands/route.ts L33のTODOコメント1行を削除する（L29-32のNOTEコメントは維持）",
+    "src/lib/cli-tools/opencode-config.ts L217-218のTODOコメント（2行）を削除する",
+    "src/lib/cli-tools/opencode-config.ts L284-285のTODOコメント（2行）を削除する",
+    "src/lib/cli-tools/opencode-config.ts のensureOpencodeConfig関数JSDoc（L340-342付近）に「HTTP fetch logic (fetchWithTimeout) can be extracted to a shared helper.」の1行を追記する",
+    "src/lib/cli-patterns.ts L27の「Issue #XXX」を「Issue #188」に置き換える"
+  ],
+  "target_coverage": 80,
+  "notes": {
+    "type": "refactoring",
+    "scope": "comment_only",
+    "risk": "none",
+    "description": "全変更はコメント・JSDoc修正のみ。ソースコードのロジック変更なし。新規テスト不要。"
+  }
+}

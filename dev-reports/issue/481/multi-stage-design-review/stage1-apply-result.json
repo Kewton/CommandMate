@@ -1,0 +1,49 @@
+{
+  "stage": 1,
+  "applied_findings": [
+    {
+      "id": "R001",
+      "severity": "should_fix",
+      "action": "session-cleanup.ts を session/ グループから除外し、ルート残留に変更。ディレクトリツリー、移行順序テーブル（session/ 6->4ファイル）を更新。"
+    },
+    {
+      "id": "R002",
+      "severity": "should_fix",
+      "action": "session-transport.ts を session/ グループから除外。ルート残留とし、transports/ 統合時（R003）に tmux/ へ移動する方針をディレクトリツリーおよび統合方針セクションに明記。"
+    },
+    {
+      "id": "R003",
+      "severity": "should_fix",
+      "action": "transports/ 統合方針を「実装時判断」から「案A: tmux/ に統合」に確定。tmux/ のファイル数を 7->10 に更新。トレードオフテーブル、依存関係図、移行順序テーブルを更新。"
+    },
+    {
+      "id": "R005",
+      "severity": "nice_to_have",
+      "action": "トレードオフテーブルのバレルエクスポート行に「サーバー側モジュールが大半のため実影響は軽微。Edge Runtime向け security/ については直接importも許容する」を補足。"
+    },
+    {
+      "id": "R007",
+      "severity": "nice_to_have",
+      "action": "セクション8「新規グループ追加時のガイドライン」を新設。バレルエクスポート必須、依存図更新、依存の少ない順に移行、名前衝突時の対処（R008含む）の4点を明記。"
+    },
+    {
+      "id": "R008",
+      "severity": "nice_to_have",
+      "action": "セクション8のガイドライン内に名前衝突時の named re-export ルールを追記。"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "R004",
+      "severity": "nice_to_have",
+      "reason": "現状の polling/ 構成で問題なし。レビュー指摘サマリーに将来の再分割検討について記載済み。設計方針書への構造変更は不要。"
+    },
+    {
+      "id": "R006",
+      "severity": "nice_to_have",
+      "reason": "ルート残留37ファイルの扱いは現状維持で妥当。レビュー指摘サマリーに将来Phase 2候補として記載済み。設計方針書への構造変更は不要。"
+    }
+  ],
+  "design_doc_updated": true,
+  "summary": "should_fix 3件（R001, R002, R003）を全て反映。session-cleanup.ts と session-transport.ts を session/ から除外しルート残留に変更、transports/ 統合方針を案A（tmux/ に統合）で確定。nice_to_have は R005（Edge Runtime影響補足）、R007/R008（新規グループ追加ガイドライン）を反映。R004, R006 は設計方針書の構造変更が不要のためレビューサマリーへの記載のみとした。セクション8（ガイドライン）およびセクション9（レビュー指摘反映サマリー）を新設。"
+}

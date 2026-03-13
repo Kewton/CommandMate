@@ -1,0 +1,27 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 481,
+  "apply_date": "2026-03-13",
+  "applied_findings": [
+    {
+      "id": "F301",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "影響規模テーブルに「tests/内のvi.mock()パス更新 | 約93箇所（47ファイル）※バレルエクスポートで旧パス維持の場合は不要」の行を追加"
+    },
+    {
+      "id": "F302",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "__tests__/ 注記セクションに「vi.mock()の相対パス指定（../cli-session等）も同様に更新が必要」を追記"
+    }
+  ],
+  "skipped_findings": [],
+  "issue_updated": true,
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/481"
+  },
+  "summary": "Stage 7（影響範囲レビュー2回目）のnice_to_have指摘2件を反映。F301: vi.mock()の影響規模（約93箇所/47ファイル）を影響規模テーブルに追加し、バレルエクスポート戦略の採否判断材料を明確化。F302: __tests__/注記セクションにvi.mock()の相対パスも更新対象であることを明記。レビュー履歴にイテレーション4を追加。全8ステージのレビューサイクルが完了し、Issueは実装着手可能な状態。"
+}

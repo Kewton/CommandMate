@@ -3,7 +3,7 @@ import {
   isTmuxControlModeEnabled,
   isTmuxControlModeEnabledForClient,
   isTmuxControlModeTerminalPageOnly,
-} from '@/lib/tmux-control-mode-flags';
+} from '@/lib/tmux/tmux-control-mode-flags';
 
 describe('tmux-control-mode-flags', () => {
   it('should read server enable flag', () => {

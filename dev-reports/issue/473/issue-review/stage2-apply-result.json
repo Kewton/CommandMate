@@ -1,0 +1,63 @@
+{
+  "issue_number": 473,
+  "stage": 2,
+  "iteration": 1,
+  "apply_date": "2026-03-11",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "F001",
+        "status": "applied",
+        "change_summary": "「新規APIは不要」の記述を削除し、新規エンドポイント POST /api/worktrees/[id]/special-keys の設計セクションを追加。sendKeys と sendSpecialKeys の違いを明記。セキュリティ要件（5層防御）も記載。"
+      },
+      {
+        "id": "F002",
+        "status": "applied",
+        "change_summary": "既存APIセクションの prompt-response API の説明に、Claude の multiple_choice プロンプト専用であり OpenCode TUI ナビゲーションには適用不可である旨の詳細注記を追加。isClaudeMultiChoice 判定条件も明記。"
+      },
+      {
+        "id": "F003",
+        "status": "applied",
+        "change_summary": "検出方法セクションに cli-patterns.ts への OPENCODE_SELECTION_LIST_PATTERN 新規定義の必要性、status-detector.ts への選択リスト検出分岐追加、実装前の tmux capture-pane 出力サンプル取得フェーズの必要性を追記。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "F004",
+        "status": "applied",
+        "change_summary": "受け入れ基準に「バックエンド（新規 special-keys API）」セクションを新設し、エンドポイントの動作確認・バリデーション・エラーハンドリング・セキュリティ要件の4項目を追加。"
+      },
+      {
+        "id": "F005",
+        "status": "applied",
+        "change_summary": "バックエンドセクションにセキュリティ要件（keys配列最大長制限、isCliToolType検証、DB存在確認、セッション確認、ALLOWED_SPECIAL_KEYSホワイトリスト二重チェック）を明記。"
+      },
+      {
+        "id": "F006",
+        "status": "applied",
+        "change_summary": "検出方法セクションに「前提作業」として OpenCode /models, /providers 実行時の tmux capture-pane 出力サンプル取得とパターン確定フェーズの必要性を追記。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F007",
+        "status": "applied",
+        "change_summary": "フロントエンドセクションにキーボードショートカットの方針（選択リスト検出時のみインターセプト、非検出時はデフォルト動作維持）を追記。受け入れ基準に「既存のページスクロールやテキスト入力に影響しないこと」を追加。"
+      },
+      {
+        "id": "F008",
+        "status": "applied",
+        "change_summary": "スコープ外セクションに新規 special-keys エンドポイントの CLI ツール非依存汎用設計方針を追記。バックエンドセクションの設計方針にも同様の記載を追加。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 8,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/473"
+  }
+}

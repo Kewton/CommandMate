@@ -1,0 +1,54 @@
+{
+  "issue_number": 480,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "completed",
+  "applied_at": "2026-03-13",
+  "design_doc_path": "dev-reports/design/issue-480-console-log-logger-unification-design-policy.md",
+  "findings_applied": {
+    "must_fix": [
+      {
+        "id": "SEC4-006",
+        "description": "data引数に含めてよい情報の基準を追記",
+        "action": "「セキュリティガイドライン」セクションを新設。data引数の情報基準表（認証情報禁止、worktreeId/ファイルパス許可、ユーザー入力はdebugのみ）を記載",
+        "status": "applied"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC4-001",
+        "description": "action引数は静的文字列のみ使用ルールを明記",
+        "action": "action名命名規則セクションに静的文字列リテラル限定ルールとNG/OKコード例を追記",
+        "status": "applied"
+      },
+      {
+        "id": "SEC4-002",
+        "description": "db-migrations.tsエラーログはerror.messageのみ記録、スタックはdebugレベルで分離",
+        "action": "db-migrations.ts変換例にerror.message/stack分離パターンと推奨コード例を追記",
+        "status": "applied"
+      },
+      {
+        "id": "SEC4-005",
+        "description": "クライアントサイドconsole.error残置の基準を追記",
+        "action": "「クライアントサイド console.error 残置基準」セクションを新設。messageフィールドのみ出力ルールとNG/OKコード例を記載",
+        "status": "applied"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "SEC4-003",
+        "description": "本番でCM_LOG_LEVEL=debug設定時の運用注意事項",
+        "action": "「本番環境の運用注意事項」セクションを新設。debugレベルの一時的使用限定と速やかな戻しを明記",
+        "status": "applied"
+      }
+    ]
+  },
+  "summary": {
+    "must_fix_applied": 1,
+    "must_fix_total": 1,
+    "should_fix_applied": 3,
+    "should_fix_total": 3,
+    "nice_to_have_applied": 1,
+    "nice_to_have_total": 1
+  }
+}

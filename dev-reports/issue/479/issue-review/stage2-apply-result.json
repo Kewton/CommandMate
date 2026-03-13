@@ -1,0 +1,64 @@
+{
+  "issue_number": 479,
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-03-13",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "F001",
+        "status": "applied",
+        "change_summary": "WorktreeDetailRefactored.tsxの目標行数をメインファイル800行以下に再設定し、4段階の具体的分割計画（内部コンポーネント抽出、カスタムhook抽出、レイアウト分離、ユーティリティ分離）と分割後ファイル名案を追記"
+      },
+      {
+        "id": "F002",
+        "status": "applied",
+        "change_summary": "db.ts分割にバレルファイル戦略を明記。db.tsをバレルとして残し全関数をre-exportする段階的アプローチを記載し、受け入れ基準の「公開APIの変更なし」と整合"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "F003",
+        "status": "applied",
+        "change_summary": "テスト戦略セクションを新規追加。既存テストのimport更新方針、循環依存チェック方法（madge）、テストカバレッジ確認手段を明記"
+      },
+      {
+        "id": "F004",
+        "status": "applied",
+        "change_summary": "実施フェーズを3段階（Phase 1: 低リスク、Phase 2: 中リスク、Phase 3: 高リスク）で明記し、各フェーズの対象ファイルを分類"
+      },
+      {
+        "id": "F005",
+        "status": "applied",
+        "change_summary": "response-poller.tsの分割案をexport構造に基づき4ファイル（response-poller, response-extractor, response-cleaner, tui-accumulator）に修正"
+      },
+      {
+        "id": "F006",
+        "status": "applied",
+        "change_summary": "R-3（Issue #481）との関係セクションを追加。バレルファイル戦略によりR-3でのディレクトリ再配置時の影響を最小化する方針を明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F007",
+        "status": "applied",
+        "change_summary": "主要ファイル（WorktreeDetailRefactored.tsx, response-poller.ts, db.ts）の分割後ファイル名案を詳細分割設計セクションに記載"
+      },
+      {
+        "id": "F008",
+        "status": "applied",
+        "change_summary": "受け入れ基準に「CLAUDE.mdの主要モジュール一覧が更新されていること」を追加"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 8,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/479"
+  }
+}

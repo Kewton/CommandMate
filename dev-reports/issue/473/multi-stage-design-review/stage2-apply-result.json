@@ -1,0 +1,23 @@
+{
+  "issue_number": 473,
+  "stage": 2,
+  "applied_findings": ["DR2-001", "DR2-002", "DR2-003", "DR2-004"],
+  "skipped_findings": ["DR2-005"],
+  "skipped_reasons": {
+    "DR2-005": "nice_to_have。選択リスト検出ウィンドウの明示はパターン確定後にセクション6.4チェックポイント内で決定するため、現時点では対応保留"
+  },
+  "design_doc_updated": true,
+  "updated_sections": [
+    "セクション2 レイヤー構成表: tmux.tsの変更内容をSPECIAL_KEY_VALUES as const配列+isAllowedSpecialKey()関数に修正 [DR2-004]",
+    "セクション4.2: keysバリデーションの記述をisAllowedSpecialKey()に更新 [DR2-004]",
+    "セクション5.2: reason文字列のtypoリスク対策方針を追記（定数化推奨、union literal型は将来検討） [DR2-003]",
+    "セクション8.1: セキュリティ防御表のキーホワイトリスト行をSPECIAL_KEY_VALUES+isAllowedSpecialKey()に更新 [DR2-004]",
+    "セクション8.2: ALLOWED_SPECIAL_KEYSのexport方式をas const配列+型ガード関数パターンに全面改訂 [DR2-004]",
+    "セクション9.2: sendKeys+invalidateCache（パターンA）とsendSpecialKeys+invalidateCache（パターンB）を区別し、ラッパー適用範囲を正確化 [DR2-002]",
+    "セクション10.1: tmux.tsの変更内容を詳細化 [DR2-004][DR1-003]",
+    "セクション12: current-output APIフラグカウントの定義基準を明確化（boolean型のみカウント、autoYesオブジェクト型は対象外、isComplete列挙追加） [DR2-001]",
+    "セクション14: Stage 2整合性レビュー反映記録テーブルを追加",
+    "セクション14: 実装チェックリストにStage 2項目（DR2-001〜DR2-004）を追加"
+  ],
+  "summary": "Stage 2整合性レビューの4件（must_fix 1件、should_fix 3件）を設計方針書に反映した。DR2-001ではcurrent-output APIのステータスフラグカウント定義をboolean型のみに厳格化しisCompleteの列挙漏れとautoYesのオブジェクト型除外を明記した。DR2-002ではsendKeys+invalidateCacheとsendSpecialKeys+invalidateCacheを別パターンとして区別しラッパー適用範囲を正確化した。DR2-003ではreason文字列のtypoリスク対策として定数化方針を追記した。DR2-004ではALLOWED_SPECIAL_KEYSのexport方式をas const配列+isAllowedSpecialKey()関数パターンに変更しimmutability保証を追加した。DR2-005（nice_to_have）はパターン確定後に決定するため対応保留とした。"
+}

@@ -1,0 +1,77 @@
+{
+  "issue_number": 479,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "reviewed_at": "2026-03-13",
+  "summary": "Issue #479は巨大ファイル分割のリファクタリングIssueであり、対象ファイルの行数は全て正確。分割案の方向性は妥当だが、WorktreeDetailRefactored.tsx（2709行）の500行以下目標は非現実的であり、具体的な分割設計・移行戦略・テスト戦略の記載が不足している。また、db.tsの分割は40以上のAPI消費者に影響するためリスクが高く、段階的アプローチの明記が必要。",
+  "findings": [
+    {
+      "id": "F001",
+      "severity": "must_fix",
+      "category": "正確性",
+      "title": "WorktreeDetailRefactored.tsx の500行以下目標は非現実的",
+      "description": "WorktreeDetailRefactored.tsxは2,709行で、既にmemo化された7つの内部コンポーネント（WorktreeInfoFields, DesktopHeader, InfoModal, LoadingIndicator, ErrorDisplay, MobileInfoContent, MobileContent）と、メインコンポーネント内に10以上のセクション（state, effects, callbacks, render等）が存在する。これを500行以下に分割するには最低6ファイルに分割する必要があるが、Issueの分割案は「デスクトップ/モバイルレイアウト分離、ポーリングロジックをhookに抽出」の2点のみで、500行以下達成には不十分。メインコンポーネント自体が1000行超のstate/effect/callbackを持ち、これらは密結合しているため、単純分割は困難。",
+      "suggestion": "目標行数を現実的に再設定する（例：メインファイル800行以下、分割後ファイル各500行以下）か、分割案をより具体的に記述する。具体的には、(1) 内部memo化コンポーネント7個を個別ファイルに抽出、(2) ポーリング・WebSocketロジックをカスタムhookに抽出、(3) デスクトップ/モバイルレイアウトの分離、(4) ユーティリティ関数の分離、の4段階を明記すべき。"
+    },
+    {
+      "id": "F002",
+      "severity": "must_fix",
+      "category": "不足情報",
+      "title": "db.tsの分割は大規模なimport変更を伴うがリスク評価がない",
+      "description": "db.tsは40以上のAPIルートおよびlibモジュールからimportされている（getWorktreeById, upsertWorktree, createMessage等）。「ドメイン別分割（worktree-db, chat-db, session-db）」に分割した場合、全消費者のimport文を変更する必要がある。Issueには「公開APIの変更なし」が受け入れ基準にあるが、import先のモジュールパスは変更されるため、事実上公開APIの変更に相当する。バレルファイル（index.ts）でre-exportする戦略の記載がない。",
+      "suggestion": "db.ts分割にはバレルファイル戦略を明記すべき。具体的には、(1) worktree-db.ts, chat-db.ts, session-db.ts, memo-db.ts等に分割、(2) db.tsをバレルファイルとして残し、全関数をre-export、(3) 将来的にバレルを廃止して直接importに移行、の段階的アプローチが必要。これにより「公開APIの変更なし」の受け入れ基準と整合する。"
+    },
+    {
+      "id": "F003",
+      "severity": "should_fix",
+      "category": "不足情報",
+      "title": "テスト戦略の具体的記載がない",
+      "description": "対象10ファイルには合計30以上のテストファイルが存在する（db.test.ts, response-poller.test.ts, prompt-detector.test.ts, claude-session.test.ts, schedule-manager.test.ts, auto-yes-manager.test.ts, WorktreeDetailRefactored.test.tsx, MarkdownEditor.test.tsx, FileTreeView.test.tsx等）。分割後にテストのimportパスも変更が必要になるが、テスト更新の方針が記載されていない。また、分割が正しく行われたことを検証する方法（例：循環依存チェック）が明記されていない。",
+      "suggestion": "テスト戦略セクションを追加し、(1) 既存テストのimport更新方針、(2) 分割後の循環依存チェック方法（madge等）、(3) テストカバレッジが低下しないことの確認手段を明記する。"
+    },
+    {
+      "id": "F004",
+      "severity": "should_fix",
+      "category": "優先順位",
+      "title": "分割対象の優先順位が未設定",
+      "description": "10ファイルの分割を一度に行うのはリスクが高い。ファイル間の依存関係の複雑さやテスト数が異なるため、段階的に実施すべきだが、Issueには実施順序の記載がない。特にdb.ts（40+消費者）とresponse-poller.ts（6消費者+多数のclean関数re-export）はインパクトが大きく、WorktreeDetailRefactored.tsx（UIコンポーネント）は比較的独立している。",
+      "suggestion": "実施フェーズを明記する。例：Phase 1: 低リスク（MarkdownEditor, FileTreeView, schedule-manager）、Phase 2: 中リスク（WorktreeDetailRefactored, prompt-detector, auto-yes-manager, claude-session）、Phase 3: 高リスク（db.ts, response-poller）。db-migrations.tsは低優先の判断に同意。"
+    },
+    {
+      "id": "F005",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "response-poller.tsの分割案がexport構造と不一致",
+      "description": "response-poller.tsの分割案は「ポーリング制御とレスポンス抽出を分離」だが、実際のexport構造を確認すると、(1) TUI accumulator関連（extractTuiContentLines, findOverlapIndex, initTuiAccumulator, accumulateTuiContent, getAccumulatedContent, clearTuiAccumulator）、(2) レスポンスクリーニング（cleanClaudeResponse, cleanGeminiResponse, cleanOpenCodeResponse）、(3) ポーリング制御（startPolling, stopPolling, stopAllPolling, getActivePollers）、(4) 判定ロジック（isOpenCodeComplete, resolveExtractionStartIndex）の4つの責務がある。2分割では不十分。",
+      "suggestion": "response-poller.tsは3-4ファイルへの分割を検討すべき：(1) response-poller.ts（ポーリング制御のみ）、(2) response-extractor.ts（extractResponse, resolveExtractionStartIndex等の抽出ロジック）、(3) response-cleaner.ts（cleanClaudeResponse, cleanGeminiResponse, cleanOpenCodeResponse）、(4) tui-accumulator.ts（TUI関連6関数）。特にclean関数群はassistant-response-saver.tsからimportされており、独立したモジュールとして適切。"
+    },
+    {
+      "id": "F006",
+      "severity": "should_fix",
+      "category": "不足情報",
+      "title": "Issue #481（R-3: src/lib再整理）との作業順序の依存関係が不明確",
+      "description": "親Issue #475によると、R-1（本Issue）とR-3（src/lib再整理）は「独立して実施可能、並行作業可」とされているが、db.tsの分割（R-1）とsrc/libの再整理（R-3）は同じディレクトリに影響し、コンフリクトが発生する可能性が高い。特にdb.tsをworktree-db.ts等に分割した後、R-3でsrc/lib/db/ディレクトリに移動するとなると二重の変更になる。",
+      "suggestion": "R-1とR-3の作業順序を明確化するか、db.ts分割についてはR-3と統合して一度に行うことを検討する旨を記載すべき。"
+    },
+    {
+      "id": "F007",
+      "severity": "nice_to_have",
+      "category": "不足情報",
+      "title": "分割後のファイル名案がない",
+      "description": "各ファイルの分割案は責務レベルでの記述のみで、具体的な分割後のファイル名が記載されていない。実装者によって命名が異なるリスクがある。",
+      "suggestion": "各ファイルについて、分割後のファイル名案を記載する。例：WorktreeDetailRefactored.tsx -> WorktreeDetailRefactored.tsx + WorktreeDesktopContent.tsx + WorktreeMobileContent.tsx + useWorktreePolling.ts + useWorktreeCallbacks.ts"
+    },
+    {
+      "id": "F008",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "CLAUDE.mdのモジュール一覧への反映方針がない",
+      "description": "CLAUDE.mdには主要モジュール一覧が詳細に記載されており、ファイル分割後にこの一覧も更新が必要。Issue本文にCLAUDE.md更新への言及がない。",
+      "suggestion": "受け入れ基準にCLAUDE.mdの主要モジュール一覧更新を追加する。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 4,
+  "nice_to_have_count": 2,
+  "overall_assessment": "Issue #479は技術的に正しい問題認識（巨大ファイルの存在、行数の正確さ）に基づいており、リファクタリングの方向性は妥当である。しかし、実装レベルの具体性が不足している。特に(1) WorktreeDetailRefactored.tsxの500行目標の非現実性、(2) db.tsの分割がもたらす大規模import変更のリスク評価不足が主要な課題。分割案を各ファイルについてより詳細化し、段階的実施計画とバレルファイル戦略を追加することで、安全かつ効果的なリファクタリングが可能になる。"
+}

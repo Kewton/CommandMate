@@ -1,0 +1,65 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー反映",
+  "issue_number": 481,
+  "applied_at": "2026-03-13",
+  "target_file": "dev-reports/design/issue-481-lib-restructure-design-policy.md",
+  "findings_applied": [
+    {
+      "id": "C001",
+      "severity": "must_fix",
+      "status": "applied",
+      "action": "セクション7の移動対象ファイル数を「35ファイル」から「36ファイル」に修正"
+    },
+    {
+      "id": "C002",
+      "severity": "must_fix",
+      "status": "applied",
+      "action": "セクション1の残留ファイル数を「残り37ファイル」から「残り38ファイル」に修正。セクション5のトレードオフ表も「38ファイル」に修正"
+    },
+    {
+      "id": "C003",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "action": "対応不要。tmux/統合後は両方tmux/経由となり実害なし"
+    },
+    {
+      "id": "C004",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "action": "対応不要。セクション1の構成図で正しくtmux/配下に記載済み"
+    },
+    {
+      "id": "C005",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "action": "セクション6の受け入れ基準に「transports/ ディレクトリの完全削除確認」を追加"
+    },
+    {
+      "id": "C006",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "action": "対応不要。実装時にimport分析で確定する"
+    },
+    {
+      "id": "C007",
+      "severity": "nice_to_have",
+      "status": "already_applied",
+      "action": "Stage 1対応時にセクション2のバレルエクスポート例に既に含まれていたため追加対応不要"
+    }
+  ],
+  "summary": {
+    "total": 7,
+    "applied": 3,
+    "already_applied": 1,
+    "skipped": 3
+  },
+  "changes_made": [
+    "セクション1: ルート残留ファイル数を37から38に修正",
+    "セクション5: トレードオフ表のルート残留ファイル数を37から38に修正",
+    "セクション6: transports/ ディレクトリの完全削除確認を受け入れ基準に追加",
+    "セクション7: 移動対象ファイル数を35から36に修正",
+    "セクション10: Stage 2 レビュー指摘反映サマリーを新設",
+    "関連ファイル: Stage 2 レビュー結果・反映結果のリンクを追加"
+  ]
+}

@@ -4,6 +4,22 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// Mock logger module (Issue #480)
+const { mockLogger } = vi.hoisted(() => {
+  const mockLogger = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    withContext: vi.fn().mockReturnThis(),
+  };
+  return { mockLogger };
+});
+vi.mock('@/lib/logger', () => ({
+  createLogger: vi.fn(() => mockLogger),
+}));
+
 import {
   parseCmateFile,
   parseSchedulesSection,
@@ -168,43 +184,41 @@ More text here.
     });
 
     it('should skip rows with insufficient columns', () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockLogger.warn.mockClear();
       const rows = [['only-name', '0 9 * * *']]; // Missing message
 
       const entries = parseSchedulesSection(rows);
       expect(entries).toHaveLength(0);
-      expect(warnSpy).toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalledWith('parse:insufficient-columns', expect.any(Object));
     });
 
     it('should skip entries with invalid name (NAME_PATTERN violation)', () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockLogger.warn.mockClear();
       const rows = [
         ['invalid<script>name', '0 9 * * *', 'hello'],
       ];
 
       const entries = parseSchedulesSection(rows);
       expect(entries).toHaveLength(0);
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('invalid name')
-      );
+      expect(mockLogger.warn).toHaveBeenCalledWith('parse:invalid-name', expect.any(Object));
     });
 
     it('should skip entries with invalid cron expression', () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockLogger.warn.mockClear();
       const rows = [['test', 'not-a-cron', 'hello']];
 
       const entries = parseSchedulesSection(rows);
       expect(entries).toHaveLength(0);
-      expect(warnSpy).toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalled();
     });
 
     it('should skip entries with empty message after sanitization', () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockLogger.warn.mockClear();
       const rows = [['test', '0 9 * * *', '']];
 
       const entries = parseSchedulesSection(rows);
       expect(entries).toHaveLength(0);
-      expect(warnSpy).toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalled();
     });
 
     it('should accept Japanese names', () => {
@@ -218,7 +232,7 @@ More text here.
     });
 
     it('should enforce MAX_SCHEDULE_ENTRIES limit', () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockLogger.warn.mockClear();
       const rows = Array.from({ length: MAX_SCHEDULE_ENTRIES + 5 }, (_, i) => [
         `schedule-${i}`,
         '0 9 * * *',
@@ -227,9 +241,7 @@ More text here.
 
       const entries = parseSchedulesSection(rows);
       expect(entries).toHaveLength(MAX_SCHEDULE_ENTRIES);
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Maximum schedule entries')
-      );
+      expect(mockLogger.warn).toHaveBeenCalledWith('maximum-schedule-entries');
     });
   });
 

@@ -7,7 +7,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import type { ICLITool, CLIToolType } from './types';
 import { validateSessionName } from './validation';
-import { sendSpecialKey } from '../tmux';
+import { sendSpecialKey } from '../tmux/tmux';
 
 const execAsync = promisify(exec);
 

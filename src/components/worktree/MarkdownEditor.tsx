@@ -1,5 +1,6 @@
 /**
  * MarkdownEditor Component
+ * Issue #479: Split into MarkdownEditor.tsx + MarkdownToolbar.tsx + MarkdownPreview.tsx
  *
  * A markdown editor with live preview, supporting:
  * - Split/Editor-only/Preview-only view modes
@@ -29,17 +30,19 @@ import React, {
   useRef,
 } from 'react';
 import { createPortal } from 'react-dom';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeSanitize from 'rehype-sanitize';
-import rehypeHighlight from 'rehype-highlight';
-import 'highlight.js/styles/github-dark.css';
-import { Save, X, Columns, FileText, Eye, AlertTriangle, Maximize2, Minimize2, Copy, Check } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import { debounce } from '@/lib/utils';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { ToastContainer, useToast } from '@/components/common/Toast';
 import { PaneResizer } from '@/components/worktree/PaneResizer';
-import { MermaidCodeBlock } from '@/components/worktree/MermaidCodeBlock';
+import { MarkdownToolbar } from '@/components/worktree/MarkdownToolbar';
+import {
+  MarkdownPreview,
+  MobileTabBar,
+  MaximizeHint,
+  LargeFileWarning,
+  type MobileTab,
+} from '@/components/worktree/MarkdownPreview';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useFullscreen } from '@/hooks/useFullscreen';
 import { useLocalStorageState } from '@/hooks/useLocalStorageState';
@@ -48,7 +51,6 @@ import { useSwipeGesture } from '@/hooks/useSwipeGesture';
 import { useVirtualKeyboard } from '@/hooks/useVirtualKeyboard';
 import { Z_INDEX } from '@/config/z-index';
 import type { EditorProps, ViewMode } from '@/types/markdown-editor';
-import type { Components } from 'react-markdown';
 import {
   VIEW_MODE_STRATEGIES,
   LOCAL_STORAGE_KEY,
@@ -64,11 +66,6 @@ import {
   isValidSplitRatio,
   isValidBoolean,
 } from '@/types/markdown-editor';
-
-/**
- * Mobile tab type for portrait mode
- */
-type MobileTab = 'editor' | 'preview';
 
 /**
  * Validate and parse view mode from storage
@@ -577,11 +574,6 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   }, [isMaximized, isFallbackMode]);
 
   // Calculate container style for z-index when maximized
-  // Issue #104: z-index must be set for ALL maximized states, not just fallback mode.
-  // On iPad Chrome landscape, Fullscreen API works (isFallbackMode=false), but we still
-  // need z-index to ensure the editor appears above other UI elements like terminal tabs.
-  // Note: containerClasses only applies `fixed inset-0` in fallback mode, as Fullscreen API
-  // handles positioning natively. However, z-index is needed in BOTH modes.
   const containerStyle = useMemo(() => {
     if (isMaximized) {
       return { zIndex: Z_INDEX.MAXIMIZED_EDITOR };
@@ -612,34 +604,6 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     }
     return undefined;
   }, [isKeyboardVisible, keyboardHeight]);
-
-  // Memoized ReactMarkdown components configuration (DRY principle)
-  const markdownComponents: Partial<Components> = useMemo(
-    () => ({
-      code: MermaidCodeBlock, // [Issue #100] mermaid diagram support
-    }),
-    []
-  );
-
-  /**
-   * Memoized ReactMarkdown element to avoid duplication (DRY principle)
-   * Used in both mobile and desktop preview panes
-   */
-  const markdownPreview = useMemo(
-    () => (
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[
-          rehypeSanitize, // [SEC-MF-001] XSS protection
-          rehypeHighlight,
-        ]}
-        components={markdownComponents}
-      >
-        {previewContent}
-      </ReactMarkdown>
-    ),
-    [previewContent, markdownComponents]
-  );
 
   // Render loading state
   if (isLoading) {
@@ -694,208 +658,36 @@ export const MarkdownEditor = memo(function MarkdownEditor({
       role={isMaximized && isFallbackMode ? 'dialog' : undefined}
       aria-modal={isMaximized && isFallbackMode ? 'true' : undefined}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-        {/* File path and dirty indicator */}
-        <div className="flex items-center gap-2 min-w-0 flex-shrink">
-          <FileText className="h-4 w-4 text-gray-500 dark:text-gray-400 flex-shrink-0" />
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">{filePath}</span>
-          {isDirty && (
-            <span
-              data-testid="dirty-indicator"
-              className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-300 flex-shrink-0"
-            >
-              Unsaved
-            </span>
-          )}
-        </div>
-
-        {/* Controls */}
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {/* View mode buttons - hide on mobile portrait with split mode */}
-          {!showMobileTabs && (
-            <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
-              <button
-                data-testid="view-mode-split"
-                aria-pressed={viewMode === 'split'}
-                onClick={() => handleViewModeChange('split')}
-                className={`p-1.5 rounded ${
-                  viewMode === 'split'
-                    ? 'bg-white dark:bg-gray-600 shadow-sm text-cyan-600 dark:text-cyan-400'
-                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
-                }`}
-                title="Split view"
-              >
-                <Columns className="h-4 w-4" />
-              </button>
-              <button
-                data-testid="view-mode-editor"
-                aria-pressed={viewMode === 'editor'}
-                onClick={() => handleViewModeChange('editor')}
-                className={`p-1.5 rounded ${
-                  viewMode === 'editor'
-                    ? 'bg-white dark:bg-gray-600 shadow-sm text-cyan-600 dark:text-cyan-400'
-                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
-                }`}
-                title="Editor only"
-              >
-                <FileText className="h-4 w-4" />
-              </button>
-              <button
-                data-testid="view-mode-preview"
-                aria-pressed={viewMode === 'preview'}
-                onClick={() => handleViewModeChange('preview')}
-                className={`p-1.5 rounded ${
-                  viewMode === 'preview'
-                    ? 'bg-white dark:bg-gray-600 shadow-sm text-cyan-600 dark:text-cyan-400'
-                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
-                }`}
-                title="Preview only"
-              >
-                <Eye className="h-4 w-4" />
-              </button>
-            </div>
-          )}
-
-          {/* Copy content button */}
-          <button
-            data-testid="copy-content-button"
-            onClick={handleCopy}
-            className={`p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded ${
-              copied ? 'text-green-500' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
-            }`}
-            title="Copy content"
-          >
-            {copied ? (
-              <Check className="h-4 w-4" />
-            ) : (
-              <Copy className="h-4 w-4" />
-            )}
-          </button>
-
-          {/* Maximize button */}
-          <button
-            data-testid="maximize-button"
-            onClick={toggleFullscreen}
-            className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
-            title={isMaximized ? 'Exit fullscreen (ESC)' : 'Enter fullscreen (Ctrl+Shift+F)'}
-            aria-pressed={isMaximized}
-          >
-            {isMaximized ? (
-              <Minimize2 className="h-4 w-4" />
-            ) : (
-              <Maximize2 className="h-4 w-4" />
-            )}
-          </button>
-
-          {/* Auto-save toggle */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-gray-500 dark:text-gray-400">Auto</span>
-            <button
-              data-testid="auto-save-toggle"
-              role="switch"
-              aria-checked={isAutoSaveEnabled}
-              onClick={() => handleAutoSaveToggle(!isAutoSaveEnabled)}
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                isAutoSaveEnabled ? 'bg-cyan-600' : 'bg-gray-300 dark:bg-gray-600'
-              }`}
-            >
-              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                isAutoSaveEnabled ? 'translate-x-4' : 'translate-x-0.5'
-              }`} />
-            </button>
-          </div>
-
-          {/* Save button OR auto-save indicator */}
-          {isAutoSaveEnabled ? (
-            <span data-testid="auto-save-indicator" className="text-sm text-gray-500 dark:text-gray-400">
-              {isAutoSaving ? 'Saving...' : isDirty ? '' : 'Saved'}
-            </span>
-          ) : (
-            <button
-              data-testid="save-button"
-              onClick={saveContent}
-              disabled={!isDirty || isSaving}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                isDirty && !isSaving
-                  ? 'bg-cyan-600 text-white hover:bg-cyan-700'
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
-              }`}
-            >
-              <Save className="h-4 w-4" />
-              {isSaving ? 'Saving...' : 'Save'}
-            </button>
-          )}
-
-          {/* Close button */}
-          {onClose && (
-            <button
-              data-testid="close-button"
-              onClick={handleClose}
-              className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
-              title="Close"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
-        </div>
-      </div>
+      {/* Header/Toolbar */}
+      <MarkdownToolbar
+        filePath={filePath}
+        isDirty={isDirty}
+        viewMode={viewMode}
+        onViewModeChange={handleViewModeChange}
+        showMobileTabs={showMobileTabs}
+        copied={copied}
+        onCopy={handleCopy}
+        isMaximized={isMaximized}
+        onToggleFullscreen={toggleFullscreen}
+        isAutoSaveEnabled={isAutoSaveEnabled}
+        onAutoSaveToggle={handleAutoSaveToggle}
+        isAutoSaving={isAutoSaving}
+        isSaving={isSaving}
+        onSave={saveContent}
+        onClose={onClose ? handleClose : undefined}
+      />
 
       {/* ESC hint when maximized */}
-      {isMaximized && (
-        <div
-          data-testid="maximize-hint"
-          className="flex items-center justify-center px-4 py-1 bg-gray-800 text-gray-300 text-xs"
-        >
-          Press ESC to exit fullscreen {isMobile && '(or swipe down)'}
-        </div>
-      )}
+      {isMaximized && <MaximizeHint isMobile={isMobile} />}
 
       {/* Large file warning */}
       {showLargeFileWarning && (
-        <div
-          data-testid="large-file-warning"
-          className="flex items-center gap-2 px-4 py-2 bg-yellow-50 dark:bg-yellow-900/30 border-b border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-300 text-sm"
-        >
-          <AlertTriangle className="h-4 w-4" />
-          Large file: Performance may be affected.
-          <button
-            onClick={() => setShowLargeFileWarning(false)}
-            className="ml-auto text-yellow-600 hover:text-yellow-800"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
+        <LargeFileWarning onDismiss={() => setShowLargeFileWarning(false)} />
       )}
 
       {/* Mobile tab bar (portrait mode with split view) */}
       {showMobileTabs && (
-        <div className="flex border-b border-gray-200 dark:border-gray-700">
-          <button
-            data-testid="mobile-tab-editor"
-            onClick={() => setMobileTab('editor')}
-            className={`flex-1 py-2 text-sm font-medium ${
-              mobileTab === 'editor'
-                ? 'text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400'
-                : 'text-gray-500 dark:text-gray-400'
-            }`}
-          >
-            <FileText className="h-4 w-4 inline-block mr-1" />
-            Editor
-          </button>
-          <button
-            data-testid="mobile-tab-preview"
-            onClick={() => setMobileTab('preview')}
-            className={`flex-1 py-2 text-sm font-medium ${
-              mobileTab === 'preview'
-                ? 'text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400'
-                : 'text-gray-500 dark:text-gray-400'
-            }`}
-          >
-            <Eye className="h-4 w-4 inline-block mr-1" />
-            Preview
-          </button>
-        </div>
+        <MobileTabBar mobileTab={mobileTab} onTabChange={setMobileTab} />
       )}
 
       {/* Main content area */}
@@ -989,7 +781,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
                 data-testid="markdown-preview"
                 className="flex-1 p-4 overflow-y-auto prose prose-sm dark:prose-invert max-w-none"
               >
-                {markdownPreview}
+                <MarkdownPreview content={previewContent} />
               </div>
             </div>
           )
@@ -1006,7 +798,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
               data-testid="markdown-preview"
               className="flex-1 p-4 overflow-y-auto prose prose-sm dark:prose-invert max-w-none"
             >
-              {markdownPreview}
+              <MarkdownPreview content={previewContent} />
             </div>
           </div>
         )}

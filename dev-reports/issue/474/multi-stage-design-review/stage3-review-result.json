@@ -1,0 +1,129 @@
+{
+  "issue_number": 474,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_summary": "設計方針書に記載されたファイル変更の波及効果を分析した結果、設計書が見落としている影響範囲として、テストファイル10箇所以上での sendMessage 呼び出しアサーション更新、cli-tools/index.ts のエクスポート不足（IImageCapableCLITool, isImageCapableCLITool が未記載）、send/route.ts での body.content と trimmedContent の使い分け不整合リスク、upload API の isPathSafe が .commandmate/ 相対パスで正常動作するか検証が必要、の4点を主要な影響箇所として特定した。破壊的変更のリスクは sendMessage シグネチャ変更がテスト9箇所のアサーションに波及する点が最大で、一括置換の漏れによるテスト失敗が懸念される。uploadable-extensions.ts は png/jpg/jpeg/gif/webp を既に含んでおり、設計書の前提条件は満たされている。",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "S3-M1",
+        "title": "sendMessage シグネチャ変更によるテストファイル大量更新の漏れリスク",
+        "description": "api-client.ts の sendMessage を位置引数からオブジェクト形式に変更する場合、以下のテストファイルで worktreeApi.sendMessage の呼び出しアサーション (toHaveBeenCalledWith) を全て更新する必要がある。設計書の実装順序 Step 7 では MessageInput.tsx の1箇所のみ言及しているが、テスト側の影響が未記載。",
+        "affected_files": [
+          "tests/unit/components/worktree/MessageInput.test.tsx (9箇所: L116, L168, L274, L343, L423, L528 等)",
+          "tests/integration/issue-288-acceptance.test.tsx (3箇所: L97, L167, L185)",
+          "tests/helpers/message-input-test-utils.ts (モック定義の更新が必要な可能性)"
+        ],
+        "recommendation": "設計書の実装順序 Step 7 に「テストファイルの sendMessage アサーションを新シグネチャ (id, content, { cliToolId }) 形式に一括更新」を追記すること。全テストで expect(worktreeApi.sendMessage).toHaveBeenCalledWith('id', 'content', 'claude') を expect(worktreeApi.sendMessage).toHaveBeenCalledWith('id', 'content', { cliToolId: 'claude' }) に変更する。"
+      },
+      {
+        "id": "S3-M2",
+        "title": "cli-tools/index.ts への IImageCapableCLITool エクスポート追加が未記載",
+        "description": "src/lib/cli-tools/index.ts は types.ts から CLIToolType, ICLITool, CLIToolInfo のみをエクスポートしている。新たに追加する IImageCapableCLITool インターフェースと isImageCapableCLITool 型ガード関数を index.ts のエクスポートに追加しないと、send/route.ts 等で types.ts から直接インポートする必要があり、モジュールの公開APIが不統一になる。",
+        "affected_files": [
+          "src/lib/cli-tools/index.ts"
+        ],
+        "recommendation": "設計書の実装順序 Step 2 に「cli-tools/index.ts のエクスポートに IImageCapableCLITool と isImageCapableCLITool を追加」を明記すること。send/route.ts では '@/lib/cli-tools/types' から直接インポートするか、'@/lib/cli-tools' からインポートするかの方針も統一すること。"
+      },
+      {
+        "id": "S3-M3",
+        "title": "send/route.ts の body.content vs trimmedContent 使い分けに注意",
+        "description": "現在の send/route.ts は L61 で trimmedContent を作成してバリデーションに使用しているが、L161 で cliTool.sendMessage(params.id, body.content) と未トリムの body.content を送信している。設計書のコード例でも body.content を使用している。画像パス付きフォールバック時に body.content を使うと、先頭/末尾の空白がそのまま送信される。これは既存の挙動だが、imagePath 付きメッセージでは意図しない空白が [添付画像: path] の前に入るリスクがある。",
+        "affected_files": [
+          "src/app/api/worktrees/[id]/send/route.ts"
+        ],
+        "recommendation": "設計書のコード例で body.content を trimmedContent に統一するか、現行の挙動を維持する理由を明記すること。特にフォールバック時の `${body.content}\\n\\n[添付画像: path]` では trimmedContent の使用を推奨する。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S3-S1",
+        "title": "integration テスト api-send-cli-tool.test.ts のモッククラス更新が必要",
+        "description": "tests/integration/api-send-cli-tool.test.ts では CodexTool, GeminiTool をモッククラスとしてインライン定義している (L21-46)。IImageCapableCLITool を実装する CLIツールがある場合、このモッククラスにも supportsImage / sendMessageWithImage メソッドの追加が必要になる可能性がある。また L268 で vi.spyOn(tool, 'sendMessage') を使用しており、imagePath 付きテストケースの追加時にモック構造の変更が必要。",
+        "affected_files": [
+          "tests/integration/api-send-cli-tool.test.ts"
+        ],
+        "recommendation": "send/route.ts の imagePath 対応に伴い、api-send-cli-tool.test.ts にも imagePath 付きリクエストのテストケースを追加し、isImageCapableCLITool 型ガードの分岐（ネイティブ送信/フォールバック両方）をカバーすること。"
+      },
+      {
+        "id": "S3-S2",
+        "title": "upload API の .commandmate/attachments/ パスが isPathSafe を通過するか未検証",
+        "description": "upload/route.ts は params.path (URL パスセグメント) を join して isPathSafe(normalizedDir, worktree.path) で検証する。.commandmate/attachments/ は worktree.path 配下の相対パスなので isPathSafe は通過するはずだが、.commandmate がドットファイルであることや、ディレクトリが存在しない場合の resolveAndValidateRealPath の挙動（存在しないパスの祖先を辿る）に注意が必要。特に初回アップロード時に .commandmate/attachments/ ディレクトリが存在しない場合、resolveAndValidateRealPath は祖先ディレクトリ (worktree root) まで辿って検証するため動作するが、writeBinaryFile がディレクトリを自動作成するか確認が必要。",
+        "affected_files": [
+          "src/app/api/worktrees/[id]/upload/[...path]/route.ts",
+          "src/lib/file-operations.ts"
+        ],
+        "recommendation": "実装時に以下を確認すること: (1) writeBinaryFile が中間ディレクトリを自動作成するか、(2) しない場合は upload 前に .commandmate/attachments/ ディレクトリを mkdirSync({ recursive: true }) で作成するロジックが必要。設計書に .commandmate/attachments/ ディレクトリの自動作成に関する記述を追加すること。"
+      },
+      {
+        "id": "S3-S3",
+        "title": "cli-tools/index.ts に VibeLocalTool と OpenCodeTool のエクスポートが不足",
+        "description": "現在 src/lib/cli-tools/index.ts は ClaudeTool, CodexTool, GeminiTool のみエクスポートしており、VibeLocalTool と OpenCodeTool はエクスポートされていない。IImageCapableCLITool の実装対象を判断する上で、全 CLIツールクラスのエクスポートが統一されていない状態は混乱を招く。これは Issue #474 以前からの既存の不整合だが、画像対応ツールの実装作業中に顕在化する可能性が高い。",
+        "affected_files": [
+          "src/lib/cli-tools/index.ts"
+        ],
+        "recommendation": "Issue #474 の実装スコープに含めるかは任意だが、少なくとも IImageCapableCLITool を実装するツールクラスは index.ts からエクスポートされていることを確認すること。"
+      },
+      {
+        "id": "S3-S4",
+        "title": "CLIToolManager.getTool() の戻り値型が ICLITool のため isImageCapableCLITool 型ガードが必要",
+        "description": "send/route.ts は CLIToolManager.getInstance().getTool(cliToolId) で ICLITool を取得する。設計書の isImageCapableCLITool 型ガードはこの戻り値に対して使用されるが、CLIToolManager の型定義 (tools: Map<CLIToolType, ICLITool>) は変更不要であることを確認した。ただし、getTool() の戻り値が ICLITool のままで正しいか、将来的に IImageCapableCLITool を返す必要がないかの判断が設計書に明記されていない。",
+        "affected_files": [
+          "src/lib/cli-tools/manager.ts"
+        ],
+        "recommendation": "設計書に「CLIToolManager の型定義は変更しない。getTool() は ICLITool を返し、呼び出し側で isImageCapableCLITool 型ガードを使用する」旨を明記すること。これにより LSP (リスコフの置換原則) への準拠が明確になる。"
+      },
+      {
+        "id": "S3-S5",
+        "title": "send/route.ts の imagePath バリデーション後の path.resolve で絶対パス構築時のセキュリティ確認",
+        "description": "設計書では isPathSafe + resolveAndValidateRealPath の後に path.resolve(worktreePath, body.imagePath) で絶対パスを構築する。しかし send/route.ts の現行コードでは worktree.path を使用している (L101 等)。設計書のコード例で worktreePath と記載しているが、実際の変数名は worktree.path であるため、コピペ時の不整合に注意が必要。",
+        "affected_files": [
+          "src/app/api/worktrees/[id]/send/route.ts"
+        ],
+        "recommendation": "設計書のコード例で使用する変数名を実際の route.ts の変数名 (worktree.path) に合わせるか、worktreePath という変数にエイリアスすることを明記すること。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S3-N1",
+        "title": "types.test.ts の ICLITool モックオブジェクト更新",
+        "description": "tests/unit/cli-tools/types.test.ts (L27-38) で ICLITool のモックオブジェクトを定義してインターフェース確認を行っている。IImageCapableCLITool 追加に伴い、この型テストに IImageCapableCLITool のテストケースを追加することが望ましい。",
+        "affected_files": [
+          "tests/unit/cli-tools/types.test.ts"
+        ],
+        "recommendation": "IImageCapableCLITool インターフェースの型テスト (supportsImage, sendMessageWithImage のモック確認) を追加すること。"
+      },
+      {
+        "id": "S3-N2",
+        "title": "uploadable-extensions.ts の画像形式確認完了（問題なし）",
+        "description": "設計書の [S2-S3] で指摘された uploadable-extensions.ts の画像形式確認を実施した。UPLOADABLE_EXTENSION_VALIDATORS には .png, .jpg, .jpeg, .gif, .webp が全て含まれており、magic bytes 検証も定義済み。SVG は SEC-002 で除外済み。設計書の前提条件は満たされている。",
+        "affected_files": [
+          "src/config/uploadable-extensions.ts"
+        ],
+        "recommendation": "対応不要。既存の uploadable-extensions.ts は画像添付に必要な全拡張子をサポートしている。"
+      },
+      {
+        "id": "S3-N3",
+        "title": ".gitignore 自動追加のタイミングと実装箇所が未特定",
+        "description": "設計書では各 worktree の .gitignore に '.commandmate/attachments/' を自動追加する方針だが、この処理をどのタイミング (初回アップロード時 / セッション開始時 / CLI init 時) で、どのモジュールで実行するかが未記載。",
+        "affected_files": [],
+        "recommendation": "実装時に .gitignore 追加のタイミングと担当モジュールを決定すること。初回アップロード時に .gitignore を確認・追記するアプローチが最もシンプル。"
+      },
+      {
+        "id": "S3-N4",
+        "title": "image-extensions.ts の IMAGE_EXTENSIONS に SVG が含まれる点と ATTACHABLE_IMAGE_EXTENSIONS の整合性",
+        "description": "IMAGE_EXTENSIONS は .svg を含む6拡張子。設計書では ATTACHABLE_IMAGE_EXTENSIONS = IMAGE_EXTENSIONS.filter(ext => ext !== '.svg') で SVG を除外する。この filter 式は IMAGE_EXTENSIONS の内容に依存するため、将来 IMAGE_EXTENSIONS に新しい形式が追加された場合は自動的に ATTACHABLE_IMAGE_EXTENSIONS にも含まれる。これは意図通りの挙動だが、ドキュメント化しておくと良い。",
+        "affected_files": [
+          "src/config/image-extensions.ts"
+        ],
+        "recommendation": "ATTACHABLE_IMAGE_EXTENSIONS の JSDoc に「IMAGE_EXTENSIONS から SVG を除外した派生定数。IMAGE_EXTENSIONS に新形式が追加されると自動的に含まれる」旨を記載すること。"
+      }
+    ]
+  },
+  "total_findings": {
+    "must_fix": 3,
+    "should_fix": 5,
+    "nice_to_have": 4
+  }
+}

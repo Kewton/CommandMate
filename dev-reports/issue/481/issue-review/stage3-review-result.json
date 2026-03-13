@@ -1,0 +1,130 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 481,
+  "review_focus": "影響範囲",
+  "review_date": "2026-03-13",
+  "findings": [
+    {
+      "id": "F101",
+      "severity": "must_fix",
+      "category": "impact_scope",
+      "description": "importパス変更の総規模が未記載。35ファイル移動で約696行のimport文を更新する必要があり、src/app/api/以下だけで約100ファイル、tests/以下で約99ファイルが影響を受ける。この規模感をIssueに記載し、段階的移行戦略（バレルexport先行設置によるimportパス安定化）を明記すべき。",
+      "current_text": "受け入れ基準に「importパスの一括更新」とあるのみで、規模や戦略の記載なし",
+      "suggested_fix": "## 影響規模 セクションを追加し、以下を記載:\n- 移動対象: 35ファイル（6グループ）\n- 更新が必要なimport行: 約696行\n- 影響を受けるソースファイル: src/app/api/等 約100ファイル\n- 影響を受けるテストファイル: tests/ 約99ファイル、src/lib/__tests__/ 9ファイル\n- 推奨戦略: グループ単位で段階移行（db -> tmux -> security -> detection -> session -> polling -> git の順）"
+    },
+    {
+      "id": "F102",
+      "severity": "must_fix",
+      "category": "impact_scope",
+      "description": "グループ間の高密度な相互依存が未分析。polling/ -> session/(cli-session), polling/ -> detection/(prompt-detector, cli-patterns, prompt-key), session/ -> detection/(status-detector), session/ -> tmux/ の依存が存在する。バレルエクスポート経由にしても循環依存リスクがある。特にpolling/はsession/とdetection/の両方に依存し、session/もdetection/とtmux/に依存するため、移行順序を誤ると循環参照が発生する可能性がある。",
+      "current_text": "循環依存の検証方法（madge/tsc --noEmit）は記載あるが、既知の依存関係グラフが未記載",
+      "suggested_fix": "## グループ間依存関係 セクションを追加:\n- polling/ -> session/ (cli-session): response-poller, auto-yes-manager\n- polling/ -> detection/ (prompt-detector, cli-patterns, prompt-key): response-poller, auto-yes-manager\n- session/ -> detection/ (status-detector): claude-session, worktree-status-helper, claude-executor\n- session/ -> tmux/ (tmux, tmux-capture-cache): claude-session, cli-session, session-cleanup, worktree-status-helper\n- transports/ -> tmux/ (tmux, tmux-control-mode-metrics, tmux-control-registry): control-mode-tmux-transport\n\n依存方向は一方向（polling -> session -> detection/tmux）であり、循環は発生しないが、移行順序はtmux -> detection -> session -> polling の順が安全。"
+    },
+    {
+      "id": "F103",
+      "severity": "must_fix",
+      "category": "impact_scope",
+      "description": "移動対象ファイル内部の相対importパス（./xxx）も全て更新が必要だが、受け入れ基準の「importパスの一括更新」が外部参照のみを指すのか内部相対パスも含むのか不明。response-poller.tsは10件、auto-yes-manager.tsは12件の相対importを持ち、移動後はこれらがグループ外ファイルへの参照になるため @/lib/xxx 形式に変換が必要。",
+      "current_text": "受け入れ基準: importパスの一括更新",
+      "suggested_fix": "受け入れ基準を明確化:\n- [ ] 外部からの参照（@/lib/xxx → @/lib/group/xxx または @/lib/group 経由）の一括更新\n- [ ] 移動ファイル内部の相対import（./xxx）を、同一グループ内は相対パス維持、グループ外は @/lib/ パス形式に変換"
+    },
+    {
+      "id": "F104",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "description": "db-instance とdb（db.ts）は最もimport参照が多い（db-instance: 46ファイル、db: 36ファイル）。バレルエクスポート（@/lib/db）経由に一本化すれば既存importパスとの衝突リスクがある。現在 @/lib/db' で db.ts を直接importしているコードが36ファイルあり、db/ ディレクトリ作成後は @/lib/db がディレクトリを指すようになるため、@/lib/db/index.ts のバレルエクスポートで同名のexportを提供する必要がある。",
+      "current_text": "バレルエクスポート（index.ts）方針セクションに一般方針のみ記載",
+      "suggested_fix": "db/ グループについて特記事項を追加: 現在 @/lib/db でdb.tsを参照しているimportが36箇所あるため、db/index.ts でdb.tsの全exportを再エクスポートすれば、外部からの @/lib/db importは変更不要になる可能性がある。この戦略を明示的に記載すること。"
+    },
+    {
+      "id": "F105",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "description": "src/lib/__tests__/ ディレクトリのテストファイルは相対パス（../xxx）で移動対象ファイルをimportしている。Issue本文では__tests__は「現状維持」だが、親ディレクトリの移動対象ファイルへの相対パスが変わるため、9ファイル中少なくとも6ファイルのimportパス修正が必要。",
+      "current_text": "__tests__/ (9ファイル) ※現状維持",
+      "suggested_fix": "__tests__/ の注釈に追記: 「ディレクトリ位置は現状維持だが、移動対象ファイルへの相対importパス（../db, ../db-migrations, ../cli-session, ../status-detector, ../cli-patterns等）は @/lib/group/xxx 形式に更新が必要。影響ファイル: worktrees-sync.test.ts, db-migrations-v10.test.ts, db-memo.test.ts, assistant-response-saver.test.ts, status-detector.test.ts, cli-patterns.test.ts」"
+    },
+    {
+      "id": "F106",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "description": "transports/ の扱いについて案A/案Bを提示しているが、実際の依存分析では transports/ -> tmux/ の一方向依存のみで逆方向はない。tmux/への統合（案A）の場合、cli-session.ts と ws-server.ts のimportパス変更が発生し、テスト4ファイルも影響する。現状維持（案B）の場合、transports/ 内の相対importパス3件（../tmux, ../tmux-control-mode-metrics, ../tmux-control-registry）がサブディレクトリ跨ぎの相対パスに変わる。",
+      "current_text": "案A/案Bの記載はあるが、具体的な影響差分が未記載",
+      "suggested_fix": "各案の具体的影響を追記:\n- 案A(統合): cli-session.ts, ws-server.ts + テスト4ファイルのimportパス変更。transports/index.ts は不要になる\n- 案B(現状維持): transports/内3ファイルの相対パスを ../tmux/xxx に変更。transports/にindex.tsを新設するか検討"
+    },
+    {
+      "id": "F107",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "description": "CLAUDE.mdのモジュール一覧に52箇所、docs/module-reference.mdに54箇所、docs/architecture.mdに6箇所のsrc/lib/パス参照がある。受け入れ基準にCLAUDE.mdとdocs/module-reference.md、docs/architecture.mdの更新は記載されているが、具体的な更新箇所数が不明。",
+      "current_text": "受け入れ基準にドキュメント更新3件を記載",
+      "suggested_fix": "ドキュメント更新の影響規模を明記:\n- CLAUDE.md: 約52箇所のパス参照更新\n- docs/module-reference.md: 約54箇所のパス参照更新\n- docs/architecture.md: 約6箇所のパス参照更新（該当する場合）"
+    },
+    {
+      "id": "F108",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "description": "vitest.config.ts のパスエイリアス設定（@: ./src）はディレクトリ構造変更後もそのまま動作するが、テストファイルのmockパスやvi.mock()呼び出しで @/lib/xxx を使用している箇所も全て更新が必要。tests/以下99ファイルへの影響はimport文だけでなくmock定義も含む可能性がある。",
+      "current_text": "受け入れ基準: 既存テストが全パス",
+      "suggested_fix": "受け入れ基準に追記: vi.mock() のモジュールパス指定も @/lib/group/xxx に更新すること。バレルエクスポートで旧パスを維持する場合はmock対象パスの変更は不要だが、方針を明確にすること。"
+    },
+    {
+      "id": "F109",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "description": "auto-yes-manager.ts（11ファイルからimport、内部12件の相対import）と response-poller.ts（3ファイルからimport、内部10件の相対import）はグループ外への依存が非常に多い。polling/ グループの凝集度が低く、session/やdetection/への依存が支配的。将来的にpolling/の位置づけを再検討する余地がある。",
+      "current_text": "polling/ の説明: ポーリング・自動応答 (3ファイル)",
+      "suggested_fix": "polling/ グループの注釈に「session/, detection/, cli-tools/ への外部依存が多い。凝集度向上のため将来的なグループ再編を検討可能」と追記。"
+    }
+  ],
+  "summary": {
+    "must_fix": 3,
+    "should_fix": 5,
+    "nice_to_have": 1,
+    "total": 9
+  },
+  "overall_assessment": "Issue #481は35ファイルの移動を伴う大規模リファクタリングであり、約696行のimport更新、src/app/api/等約100ファイル・tests/約99ファイルへの波及が発生する。グループ間の依存関係分析では循環依存リスクは低い（一方向依存: tmux <- session <- polling, detection <- session/polling）が、移行順序と段階的実施戦略の明記が不足している。バレルエクスポートによるimportパス安定化戦略は妥当だが、db/グループの既存パス衝突リスクや__tests__の相対パス更新など、具体的な影響箇所の記載を補強する必要がある。",
+  "impact_metrics": {
+    "files_to_move": 35,
+    "import_lines_to_update": 696,
+    "source_files_affected": 100,
+    "test_files_affected": 99,
+    "lib_test_files_affected": 9,
+    "doc_path_references": {
+      "CLAUDE.md": 52,
+      "module-reference.md": 54,
+      "architecture.md": 6
+    },
+    "cross_group_dependencies": [
+      { "from": "polling", "to": "session", "via": "cli-session", "files": ["response-poller", "auto-yes-manager"] },
+      { "from": "polling", "to": "detection", "via": "prompt-detector,cli-patterns,prompt-key", "files": ["response-poller", "auto-yes-manager"] },
+      { "from": "session", "to": "detection", "via": "status-detector", "files": ["claude-session", "worktree-status-helper", "claude-executor"] },
+      { "from": "session", "to": "tmux", "via": "tmux,tmux-capture-cache", "files": ["claude-session", "cli-session", "session-cleanup", "worktree-status-helper"] },
+      { "from": "transports", "to": "tmux", "via": "tmux,tmux-control-mode-metrics,tmux-control-registry", "files": ["control-mode-tmux-transport"] }
+    ],
+    "high_impact_files": [
+      { "file": "db-instance", "external_importers": 46 },
+      { "file": "db", "external_importers": 36 },
+      { "file": "auto-yes-manager", "external_importers": 11 },
+      { "file": "tmux", "external_importers": 8 },
+      { "file": "path-validator", "external_importers": 6 },
+      { "file": "git-utils", "external_importers": 5 }
+    ]
+  },
+  "code_references": [
+    { "file": "src/lib/response-poller.ts", "relevance": "10件の相対import、polling/移動時にグループ外参照が多数発生" },
+    { "file": "src/lib/auto-yes-manager.ts", "relevance": "12件の相対import、polling/移動時にグループ外参照が多数発生" },
+    { "file": "src/lib/db-instance.ts", "relevance": "46ファイルから参照、最もimport数が多い移動対象" },
+    { "file": "src/lib/db.ts", "relevance": "36ファイルから参照、db/ディレクトリとの名前衝突リスク" },
+    { "file": "src/lib/worktree-status-helper.ts", "relevance": "7件の相対import、session/detection/tmux/cli-tools全てに依存" },
+    { "file": "src/lib/transports/control-mode-tmux-transport.ts", "relevance": "tmux/内3ファイルへの依存、transports統合判断に影響" }
+  ],
+  "doc_references": [
+    { "file": "CLAUDE.md", "relevance": "52箇所のsrc/lib/パス参照更新が必要" },
+    { "file": "docs/module-reference.md", "relevance": "54箇所のパス参照更新が必要" },
+    { "file": "docs/architecture.md", "relevance": "6箇所のパス参照更新が必要" },
+    { "file": "vitest.config.ts", "relevance": "パスエイリアス設定は変更不要だが、テストのmockパスに波及" },
+    { "file": "tsconfig.json", "relevance": "@/* エイリアスは変更不要" }
+  ]
+}

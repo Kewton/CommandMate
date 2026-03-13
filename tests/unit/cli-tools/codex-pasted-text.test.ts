@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock tmux module
 // Issue #393: Added sendSpecialKey and sendSpecialKeys (codex.ts no longer uses child_process directly)
-vi.mock('@/lib/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn(),
   createSession: vi.fn(),
   sendKeys: vi.fn(),
@@ -34,7 +34,7 @@ vi.mock('@/lib/cli-tools/validation', () => ({
 }));
 
 import { CodexTool } from '@/lib/cli-tools/codex';
-import { hasSession, sendKeys, sendSpecialKey, capturePane } from '@/lib/tmux';
+import { hasSession, sendKeys, sendSpecialKey, capturePane } from '@/lib/tmux/tmux';
 import { detectAndResendIfPastedText } from '@/lib/pasted-text-helper';
 
 const TEST_WORKTREE_ID = 'test-worktree';

@@ -16,6 +16,21 @@ import {
 } from '../../../src/lib/schedule-manager';
 import { getDbInstance } from '../../../src/lib/db-instance';
 
+// Mock logger module (Issue #480)
+const { mockLogger } = vi.hoisted(() => {
+  const mockLogger = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    withContext: vi.fn().mockReturnThis(),
+  };
+  return { mockLogger };
+});
+vi.mock('@/lib/logger', () => ({
+  createLogger: vi.fn(() => mockLogger),
+}));
+
 // Mock cmate-parser module (DJ-005: file-scope vi.mock for static imports)
 vi.mock('../../../src/lib/cmate-parser', () => ({
   readCmateFile: vi.fn().mockResolvedValue(null),
@@ -127,13 +142,12 @@ describe('schedule-manager', () => {
     });
 
     it('should not reinitialize if already initialized', () => {
-      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
       initScheduleManager();
+      mockLogger.debug.mockClear();
       initScheduleManager(); // Second call should be no-op
 
       expect(isScheduleManagerInitialized()).toBe(true);
-      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Already initialized'));
+      expect(mockLogger.debug).toHaveBeenCalledWith('init:skip', expect.any(Object));
     });
 
     it('should start with zero active schedules (no CMATE.md files)', () => {
@@ -364,14 +378,10 @@ describe('schedule-manager', () => {
       // We verify this indirectly by checking that initScheduleManager completes
       // without errors and the manager is initialized.
       // Detailed recovery behavior is tested through the SQL logic directly.
-      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
       initScheduleManager();
 
       expect(isScheduleManagerInitialized()).toBe(true);
-      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Initializing'));
-
-      logSpy.mockRestore();
+      expect(mockLogger.info).toHaveBeenCalledWith('init:start');
     });
 
     it('should recover running logs to failed status via direct DB test', () => {

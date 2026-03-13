@@ -17,10 +17,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById, createMessage, updateLastUserMessage, clearInProgressMessageId, saveInitialBranch, getInitialBranch, getMessages, deleteMessageById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
-import { startPolling } from '@/lib/response-poller';
+import { CLI_TOOL_IDS, isImageCapableCLITool, type CLIToolType } from '@/lib/cli-tools/types';
+import { startPolling } from '@/lib/polling/response-poller';
 import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
-import { getGitStatus } from '@/lib/git-utils';
+import { getGitStatus } from '@/lib/git/git-utils';
+import { isPathSafe, resolveAndValidateRealPath } from '@/lib/security/path-validator';
+import path from 'path';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/send');
 
 /** Supported CLI tool IDs - derived from CLI_TOOL_IDS (Issue #368: DRY) */
 const VALID_CLI_TOOL_IDS: readonly CLIToolType[] = CLI_TOOL_IDS;
@@ -31,6 +36,21 @@ const DEFAULT_CLI_TOOL: CLIToolType = 'claude';
 interface SendMessageRequest {
   content: string;
   cliToolId?: CLIToolType;  // Optional: override the worktree's default CLI tool
+  imagePath?: string;  // Issue #474: relative path within .commandmate/attachments/
+}
+
+/** [S4-M2] URL schemes that are not allowed in imagePath (SSRF prevention) */
+const DANGEROUS_SCHEMES = ['file://', 'http://', 'https://', 'ftp://', 'data:'];
+
+/** [S4-M1] Control character regex for CLI injection prevention */
+const CONTROL_CHAR_REGEX = /[\x00-\x1f\x7f]/;
+
+/**
+ * Helper function to create a JSON error response
+ * Issue #474: Centralized error response for imagePath validation
+ */
+function errorResponse(code: string, message: string, status: number) {
+  return NextResponse.json({ error: message, code }, { status });
 }
 
 /**
@@ -38,6 +58,55 @@ interface SendMessageRequest {
  */
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown error';
+}
+
+/**
+ * Validate and resolve imagePath to an absolute path
+ * Issue #474: Extracted from POST handler for SRP and readability
+ *
+ * Security validations:
+ * - [S4-M2] URL scheme rejection (SSRF prevention)
+ * - [S2-M2] Path traversal defense
+ * - [S2-M1] Symlink traversal defense
+ * - [S4-S4] Whitelist: must be within .commandmate/attachments/
+ * - [S4-M1] Control character check for CLI injection prevention
+ *
+ * @param imagePath - Relative image path from request body
+ * @param worktreePath - Absolute path of the worktree
+ * @returns Resolved absolute path on success, or NextResponse error
+ */
+function validateImagePath(
+  imagePath: string,
+  worktreePath: string
+): string | NextResponse {
+  // [S4-M2] URL scheme rejection (SSRF prevention)
+  if (DANGEROUS_SCHEMES.some(scheme => imagePath.startsWith(scheme))) {
+    return errorResponse('INVALID_PATH', 'URL schemes are not allowed in imagePath', 400);
+  }
+
+  // [S2-M2] Path traversal defense
+  if (!isPathSafe(imagePath, worktreePath)) {
+    return errorResponse('INVALID_PATH', 'Invalid image path', 400);
+  }
+
+  // [S2-M1] Symlink traversal defense
+  if (!resolveAndValidateRealPath(imagePath, worktreePath)) {
+    return errorResponse('INVALID_PATH', 'Invalid image path (symlink)', 400);
+  }
+
+  // [S4-S4] Whitelist: must be within .commandmate/attachments/
+  const ALLOWED_IMAGE_DIR = path.join(worktreePath, '.commandmate', 'attachments');
+  const resolvedPath = path.resolve(worktreePath, imagePath);
+  if (!resolvedPath.startsWith(ALLOWED_IMAGE_DIR + path.sep) && resolvedPath !== ALLOWED_IMAGE_DIR) {
+    return errorResponse('INVALID_PATH', 'imagePath must be within .commandmate/attachments/', 400);
+  }
+
+  // [S4-M1] Control character check for CLI injection prevention
+  if (CONTROL_CHAR_REGEX.test(resolvedPath)) {
+    return errorResponse('INVALID_PATH', 'Path contains control characters', 400);
+  }
+
+  return resolvedPath;
 }
 
 export async function POST(
@@ -108,15 +177,15 @@ export async function POST(
             const gitStatus = await getGitStatus(worktree.path, null);
             if (gitStatus.currentBranch !== '(unknown)' && gitStatus.currentBranch !== '(detached HEAD)') {
               saveInitialBranch(db, params.id, gitStatus.currentBranch);
-              console.log(`[send] Saved initial branch for ${params.id}: ${gitStatus.currentBranch}`);
+              logger.info('saved-initial-branch-for:');
             }
           } catch (gitError) {
             // Log but don't fail - git status is non-critical
-            console.error(`[send] Failed to get/save initial branch:`, gitError);
+            logger.error('failed-to-getsave-initial-branch:', { error: gitError instanceof Error ? gitError.message : String(gitError) });
           }
         }
       } catch (error: unknown) {
-        console.error(`Failed to start ${cliTool.name} session:`, error);
+        logger.error('failed-to-start-session:', { error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json(
           { error: `Failed to start ${cliTool.name} session: ${getErrorMessage(error)}` },
           { status: 500 }
@@ -134,7 +203,7 @@ export async function POST(
       await savePendingAssistantResponse(db, params.id, cliToolId, userMessageTimestamp);
     } catch (error) {
       // Log but don't fail - user message should still be saved
-      console.error(`[send] Failed to save pending assistant response:`, error);
+      logger.error('failed-to-save-pending-assistant-response:', { error: error instanceof Error ? error.message : String(error) });
     }
 
     // Clean up orphaned user messages (Issue #379: duplicate message prevention)
@@ -153,14 +222,38 @@ export async function POST(
       }
     } catch (error) {
       // Log but don't fail - cleanup candidate discovery is best-effort
-      console.error(`[send] Failed to detect orphaned messages:`, error);
+      logger.error('failed-to-detect-orphaned-messages:', { error: error instanceof Error ? error.message : String(error) });
+    }
+
+    // Issue #474: Validate imagePath if provided
+    let absoluteImagePath: string | undefined;
+    if (body.imagePath) {
+      const validationResult = validateImagePath(body.imagePath, worktree.path);
+      if (validationResult instanceof NextResponse) {
+        return validationResult;
+      }
+      absoluteImagePath = validationResult;
     }
 
     // Send message to CLI tool
     try {
-      await cliTool.sendMessage(params.id, body.content);
+      // Issue #474: Image-aware sending
+      if (absoluteImagePath) {
+        if (isImageCapableCLITool(cliTool)) {
+          // Image-capable tool: use native image sending
+          await cliTool.sendMessageWithImage(params.id, trimmedContent, absoluteImagePath);
+        } else {
+          // Fallback: embed path in message
+          const messageWithPath = trimmedContent
+            ? `${trimmedContent}\n\n[添付画像: ${absoluteImagePath}]`
+            : `[添付画像: ${absoluteImagePath}]`;
+          await cliTool.sendMessage(params.id, messageWithPath);
+        }
+      } else {
+        await cliTool.sendMessage(params.id, trimmedContent);
+      }
     } catch (error: unknown) {
-      console.error(`Failed to send message to ${cliTool.name}:`, error);
+      logger.error('failed-to-send-message-to:', { error: error instanceof Error ? error.message : String(error) });
       return NextResponse.json(
         { error: `Failed to send message to ${cliTool.name}: ${getErrorMessage(error)}` },
         { status: 500 }
@@ -169,10 +262,11 @@ export async function POST(
 
     // Create user message in database with CLI tool ID
     // Use the pre-generated timestamp for consistency
+    // [DRY] Use trimmedContent consistently (same value sent to CLI and used for orphan detection)
     const message = createMessage(db, {
       worktreeId: params.id,
       role: 'user',
-      content: body.content,
+      content: trimmedContent,
       messageType: 'normal',
       timestamp: userMessageTimestamp,
       cliToolId,
@@ -184,27 +278,27 @@ export async function POST(
       try {
         const deleted = deleteMessageById(db, orphanedMessageIdToDelete);
         if (deleted) {
-          console.log(`[send] Cleaned up orphaned user message ${orphanedMessageIdToDelete} for ${params.id} (${cliToolId})`);
+          logger.info('cleaned-up-orphaned-user');
         }
       } catch (error) {
         // Log but don't fail - cleanup is best-effort
-        console.error(`[send] Failed to clean up orphaned message ${orphanedMessageIdToDelete}:`, error);
+        logger.error('failed-to-clean-up-orphaned-message:', { error: error instanceof Error ? error.message : String(error) });
       }
     }
 
     // Update last user message for worktree
-    updateLastUserMessage(db, params.id, body.content, userMessageTimestamp);
+    updateLastUserMessage(db, params.id, trimmedContent, userMessageTimestamp);
 
     // Clear in-progress message ID (session state is managed by savePendingAssistantResponse)
     clearInProgressMessageId(db, params.id, cliToolId);
-    console.log(`✓ Cleared in-progress message for ${params.id} (${cliToolId})`);
+    logger.info('cleared-in-progress-message-for');
 
     // Start polling for CLI tool's response
     startPolling(params.id, cliToolId);
 
     return NextResponse.json(message, { status: 201 });
   } catch (error: unknown) {
-    console.error('Error sending message:', error);
+    logger.error('error-sending-message:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to send message' },
       { status: 500 }

@@ -1,0 +1,8 @@
+{
+  "issue_number": 473,
+  "stage": 1,
+  "applied_findings": ["DR1-005", "DR1-001", "DR1-003", "DR1-007"],
+  "skipped_findings": ["DR1-002", "DR1-004", "DR1-006"],
+  "design_doc_updated": true,
+  "summary": "must_fix 1件、should_fix 3件の指摘を設計方針書に反映。DR1-005: パターン確定後の検証プロセスをセクション6.4として新設（既存パターンとの非重複確認、他CLIツール誤検知テスト、SKIP_PATTERNS追加判断基準を定義）。DR1-001: セクション4.2にバリデーションロジック共通化方針とリファクタリング閾値（セッション操作系エンドポイント3つ以上でresolveSessionOrError抽出）を追記。DR1-003: セクション4.4を新設しsendSpecialKeysAndInvalidateラッパー関数の導入方針を記載、セクション9.2を改訂し3箇所の重複を明示。DR1-007: セクション12のトレードオフにcurrent-output APIレスポンスフラグ数の閾値テーブル（6以下:許容、7-10:精査、10超:分割検討）を追記。nice_to_have 3件（DR1-002, DR1-004, DR1-006）は対応保留とし、反映記録テーブルに理由を記載。セクション14にレビュー反映記録と実装チェックリスト（9項目）を新設。"
+}

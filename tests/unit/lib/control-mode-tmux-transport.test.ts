@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/lib/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn(),
   createSession: vi.fn(),
   sendKeys: vi.fn(),
@@ -9,8 +9,8 @@ vi.mock('@/lib/tmux', () => ({
   capturePane: vi.fn(),
 }));
 
-import { ControlModeTmuxTransport } from '@/lib/transports/control-mode-tmux-transport';
-import { capturePane, hasSession, sendKeys, sendSpecialKey } from '@/lib/tmux';
+import { ControlModeTmuxTransport } from '@/lib/tmux/control-mode-tmux-transport';
+import { capturePane, hasSession, sendKeys, sendSpecialKey } from '@/lib/tmux/tmux';
 
 describe('ControlModeTmuxTransport', () => {
   const registry = {

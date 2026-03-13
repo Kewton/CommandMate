@@ -21,7 +21,7 @@ vi.mock('@/lib/logger', () => ({
   }),
 }));
 
-vi.mock('@/lib/tmux-capture-cache', () => ({
+vi.mock('@/lib/tmux/tmux-capture-cache', () => ({
   getOrFetchCapture: vi.fn(),
   setCachedCapture: vi.fn(),
   invalidateCache: vi.fn(),
@@ -29,7 +29,7 @@ vi.mock('@/lib/tmux-capture-cache', () => ({
   CACHE_MAX_CAPTURE_LINES: 10000,
 }));
 
-vi.mock('@/lib/transports/polling-tmux-transport', () => ({
+vi.mock('@/lib/tmux/polling-tmux-transport', () => ({
   getPollingTmuxTransport: vi.fn(),
 }));
 
@@ -38,9 +38,9 @@ import {
   captureSessionOutputFresh,
   getSessionName,
   isSessionRunning,
-} from '@/lib/cli-session';
-import { getOrFetchCapture, invalidateCache, setCachedCapture } from '@/lib/tmux-capture-cache';
-import { getPollingTmuxTransport } from '@/lib/transports/polling-tmux-transport';
+} from '@/lib/session/cli-session';
+import { getOrFetchCapture, invalidateCache, setCachedCapture } from '@/lib/tmux/tmux-capture-cache';
+import { getPollingTmuxTransport } from '@/lib/tmux/polling-tmux-transport';
 
 describe('cli-session transport integration', () => {
   const mockTransport = {

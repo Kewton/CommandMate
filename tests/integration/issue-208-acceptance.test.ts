@@ -11,8 +11,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { detectPrompt } from '@/lib/prompt-detector';
-import type { DetectPromptOptions } from '@/lib/prompt-detector';
+import { detectPrompt } from '@/lib/detection/prompt-detector';
+import type { DetectPromptOptions } from '@/lib/detection/prompt-detector';
 import { isMultipleChoicePrompt } from '../helpers/prompt-type-guards';
 
 describe('Issue #208 Acceptance Test', () => {
@@ -228,7 +228,7 @@ describe('Issue #208 Acceptance Test', () => {
     });
 
     it('AC3-5: buildDetectPromptOptions returns correct values per tool', async () => {
-      const { buildDetectPromptOptions } = await import('@/lib/cli-patterns');
+      const { buildDetectPromptOptions } = await import('@/lib/detection/cli-patterns');
 
       // Claude: requireDefaultIndicator: false
       const claudeOpts = buildDetectPromptOptions('claude');
@@ -391,7 +391,7 @@ describe('Issue #208 Acceptance Test', () => {
     });
 
     it('AC5-12: Thinking-prompt ordering should prevent false positives', async () => {
-      const { detectThinking } = await import('@/lib/cli-patterns');
+      const { detectThinking } = await import('@/lib/detection/cli-patterns');
 
       const thinkingOutput = [
         '\u2733 Analyzing the code\u2026',

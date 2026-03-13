@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock tmux module before importing claude-session
 // Issue #393 (R3F002): Added sendSpecialKey for stopClaudeSession() C-d migration
-vi.mock('@/lib/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn(),
   createSession: vi.fn(),
   sendKeys: vi.fn(),
@@ -68,14 +68,14 @@ import {
   CLAUDE_PROMPT_WAIT_TIMEOUT,
   CLAUDE_PROMPT_POLL_INTERVAL,
   CLAUDE_SEND_PROMPT_WAIT_TIMEOUT,
-} from '@/lib/claude-session';
-import { hasSession, createSession, sendKeys, capturePane, killSession, sendSpecialKey } from '@/lib/tmux';
+} from '@/lib/session/claude-session';
+import { hasSession, createSession, sendKeys, capturePane, killSession, sendSpecialKey } from '@/lib/tmux/tmux';
 import {
   CLAUDE_PROMPT_PATTERN,
   CLAUDE_SEPARATOR_PATTERN,
   CLAUDE_SESSION_ERROR_PATTERNS,
   CLAUDE_SESSION_ERROR_REGEX_PATTERNS,
-} from '@/lib/cli-patterns';
+} from '@/lib/detection/cli-patterns';
 import { detectAndResendIfPastedText } from '@/lib/pasted-text-helper';
 
 // ----- Shared test constants (DRY) -----

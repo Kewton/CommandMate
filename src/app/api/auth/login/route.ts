@@ -13,7 +13,7 @@ import {
   createRateLimiter,
   buildAuthCookieOptions,
   DEFAULT_COOKIE_MAX_AGE_SECONDS,
-} from '@/lib/auth';
+} from '@/lib/security/auth';
 
 // Module-level rate limiter instance
 const rateLimiter = createRateLimiter();

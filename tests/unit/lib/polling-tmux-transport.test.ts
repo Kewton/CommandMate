@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SessionTransport } from '@/lib/session-transport';
+import type { SessionTransport } from '@/lib/tmux/session-transport';
 
-vi.mock('@/lib/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn(),
   createSession: vi.fn(),
   sendKeys: vi.fn(),
@@ -10,7 +10,7 @@ vi.mock('@/lib/tmux', () => ({
   killSession: vi.fn(),
 }));
 
-import { PollingTmuxTransport } from '@/lib/transports/polling-tmux-transport';
+import { PollingTmuxTransport } from '@/lib/tmux/polling-tmux-transport';
 import {
   capturePane,
   createSession,
@@ -18,7 +18,7 @@ import {
   killSession,
   sendKeys,
   sendSpecialKey,
-} from '@/lib/tmux';
+} from '@/lib/tmux/tmux';
 
 describe('PollingTmuxTransport', () => {
   let transport: PollingTmuxTransport;

@@ -1,0 +1,159 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 480,
+  "review_date": "2026-03-13",
+  "findings": [
+    {
+      "id": "DS2-001",
+      "severity": "must_fix",
+      "category": "件数の正確性",
+      "title": "src/lib/ 配下の件数が過小評価（約125件 → 実測223件）",
+      "description": "設計方針書では src/lib/ 配下を「約125件」と記載しているが、実測では db-migrations.ts の57件を含めて223件存在する。db-migrations.ts を除いても166件であり、「約125件」とは大きく乖離している。db-migrations.ts 単体も設計書記載の53件ではなく57件。",
+      "location": "設計方針書 - 対象スコープ表",
+      "actual_value": "src/lib/ 全体: 223件（db-migrations.ts: 57件、その他: 166件）",
+      "expected_value": "設計書記載: src/lib/ 約125件（db-migrations.ts: 53件含む）",
+      "recommendation": "実測値に基づいて対象スコープ表の件数を更新する。db-migrations.ts を57件に、src/lib/ 全体を約220件に修正。Phase 1テーブルの個別ファイル件数も実測値に更新する。"
+    },
+    {
+      "id": "DS2-002",
+      "severity": "must_fix",
+      "category": "件数の正確性",
+      "title": "src/app/api/ 配下の件数が過小評価（約15件 → 実測80件）",
+      "description": "設計方針書では src/app/api/ 配下を「約15件」と記載しているが、実測では80件存在する。5倍以上の乖離があり、Phase 2の作業量見積もりに大きく影響する。",
+      "location": "設計方針書 - 対象スコープ表",
+      "actual_value": "80件（40ファイル以上に分散）",
+      "expected_value": "設計書記載: 約15件",
+      "recommendation": "対象スコープ表を約80件に更新。Phase 2の作業量・レビュー計画を見直す。"
+    },
+    {
+      "id": "DS2-003",
+      "severity": "must_fix",
+      "category": "件数の正確性",
+      "title": "実移行対象合計が大幅に過小評価（約170件 → 実測338件）",
+      "description": "src/lib/ と src/app/api/ の件数乖離により、実移行対象合計も約170件ではなく約338件（db-migrations.ts 57 + lib残 166 + api 80 + components移行対象 約6件）。コンポーネントの console.error 残置分29件を除いても約309件。",
+      "location": "設計方針書 - 対象スコープ表",
+      "actual_value": "約338件（logger移行 + 削除対象の合計）",
+      "expected_value": "設計書記載: 約170件",
+      "recommendation": "実測値に基づいて合計を更新。作業見積もり・フェーズ計画も再検討する。"
+    },
+    {
+      "id": "DS2-004",
+      "severity": "should_fix",
+      "category": "ファイル一覧の正確性",
+      "title": "Phase 1の個別ファイル件数に複数の不一致",
+      "description": "Phase 1テーブルに記載された件数と実測値の比較: schedule-manager.ts（記載9件 → 実測21件）、claude-session.ts（記載12件 → 実測13件）、resource-cleanup.ts（記載6件 → 実測11件）、response-poller.ts（記載5件 → 実測8件）、assistant-response-saver.ts（記載5件 → 実測6件）、codex.ts（記載10件 → 実測11件）、gemini.ts（記載8件 → 実測9件）。特に schedule-manager.ts は2倍以上の乖離がある。",
+      "location": "設計方針書 - Phase 1テーブル",
+      "recommendation": "各ファイルの件数を実測値に更新する。"
+    },
+    {
+      "id": "DS2-005",
+      "severity": "should_fix",
+      "category": "ファイル一覧の正確性",
+      "title": "Phase 1テーブルに記載されていないファイルが多数存在",
+      "description": "Phase 1テーブルの「その他 src/lib/ 残ファイル: 約20」に含まれるはずのファイル群が実際には約80件分存在。主要な未記載ファイル: opencode-config.ts(11件), ws-server.ts(10件), cmate-parser.ts(8件), worktrees.ts(6件), db-migration-path.ts(6件), auto-yes-manager.ts(6件), clone-manager.ts(5件), vibe-local.ts(5件), opencode.ts(5件), slash-commands.ts(5件), session-cleanup.ts(5件), selected-agents-validator.ts(3件), path-validator.ts(3件), git-utils.ts(3件), db.ts(2件)等。",
+      "location": "設計方針書 - Phase 1テーブル",
+      "recommendation": "影響が大きいファイル（5件以上）は個別にテーブルに記載する。「その他」は約20件ではなく実測値に更新する。"
+    },
+    {
+      "id": "DS2-006",
+      "severity": "should_fix",
+      "category": "フェーズ分割の整合性",
+      "title": "src/hooks/ の「0件（JSDocのみ）」記載は不正確",
+      "description": "設計方針書では src/hooks/ を「0件（JSDocのみ）」と記載しているが、実際には実行コードとして console.error が2件存在する（useWebSocket.ts:124, useAutoYes.ts:103）。JSDocコメント内の console.log は5件。Phase 3の3段階方針ではconsole.errorは残置なので移行作業は不要だが、「0件」という記載は事実と異なる。",
+      "location": "設計方針書 - 対象スコープ表",
+      "actual_value": "実行コード console.error: 2件、JSDoc内 console.log: 5件",
+      "expected_value": "設計書記載: 0件（JSDocのみ）",
+      "recommendation": "「実行コード console.error 2件（残置対象）、JSDoc内 5件（対象外）」と正確に記載する。"
+    },
+    {
+      "id": "DS2-007",
+      "severity": "should_fix",
+      "category": "テスト影響の正確性",
+      "title": "影響テストの記載が不完全（2ファイルのみ → 実際は10ファイル以上）",
+      "description": "設計方針書では影響テストとして trust-dialog-auto-response.test.ts と schedule-manager.test.ts の2ファイルのみ記載しているが、src/lib/ のモジュールに関連する console spy を使用しているテストファイルは少なくとも以下が追加で存在: selected-agents-validator.test.ts(console.warn spy), ip-restriction.test.ts(console.warn spy x4), db-migration-path.test.ts(console.warn spy x3), clone-manager.test.ts(console.warn spy x4), cmate-parser.test.ts(console.warn spy x5), slash-commands.test.ts(console.warn spy x2), prompt-detector-cache.test.ts(console.log/warn spy), log-manager.test.ts(console.error spy), tmux-capture-cache.test.ts(console.debug spy), security.test.ts(console.warn spy), auth-middleware.test.ts(console.warn spy x3)。",
+      "location": "設計方針書 - テスト修正方針",
+      "recommendation": "影響テスト一覧を網羅的に記載する。console.log spy だけでなく console.warn/error spy も含めて一覧化する。"
+    },
+    {
+      "id": "DS2-008",
+      "severity": "should_fix",
+      "category": "テスト影響の正確性",
+      "title": "テストファイルの行番号が不正確",
+      "description": "trust-dialog-auto-response.test.ts の console spy は設計書記載の146行目ではなく119行目。schedule-manager.test.ts は設計書記載の136行目ではなく130行目、372行目ではなく367行目。",
+      "location": "設計方針書 - テスト修正方針",
+      "recommendation": "行番号を実測値に更新する。ただし行番号は変更されやすいため、テスト名（it/describe ブロック名）による特定も併記することを推奨する。"
+    },
+    {
+      "id": "DS2-009",
+      "severity": "nice_to_have",
+      "category": "logger.ts API仕様との整合性",
+      "title": "logger.ts の Logger インターフェースとモックパターンは正確",
+      "description": "設計方針書に記載されたcreateLogger API仕様（debug, info, warn, error, withContext）は実際の Logger インターフェース（logger.ts:59-66）と完全に一致している。テストモックパターンの createMockLogger() も正確にAPIを反映している。",
+      "location": "設計方針書 - 既存loggerモジュール仕様 / テスト修正方針",
+      "recommendation": "変更不要。正確に記載されている。"
+    },
+    {
+      "id": "DS2-010",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "env.ts の console.warn 件数は正確",
+      "description": "設計方針書では env.ts に console.warn が3件あり対象外と記載。実測でも実行コードとしての console.warn は3件（66行目、112行目、247行目）で正確。JSDoc内の console.log 1件（213行目）も含めると4件だが、JSDocは対象外なので問題なし。",
+      "location": "設計方針書 - 対象外の明示",
+      "recommendation": "変更不要。"
+    },
+    {
+      "id": "DS2-011",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "前提条件の既移行8ファイルは全て確認済み",
+      "description": "設計方針書に記載された createLogger 導入済み8ファイルについて、console.log/error/warn の残存が0件であることを確認した。前提条件の記載は正確。",
+      "location": "設計方針書 - 前提条件",
+      "recommendation": "変更不要。"
+    },
+    {
+      "id": "DS2-012",
+      "severity": "nice_to_have",
+      "category": "フェーズ分割の整合性",
+      "title": "src/components/ の内訳が参考になる",
+      "description": "src/components/ 35件の内訳は console.error: 29件、console.log: 5件、console.warn: 1件。Phase 3の3段階方針で削除対象となるのは console.log(5件) + console.warn(1件) = 6件のみで、大半の console.error(29件) は残置対象。これは設計方針と整合しているが、設計書に内訳を記載しておくと実装時の参考になる。",
+      "location": "設計方針書 - Phase 3",
+      "recommendation": "Phase 3セクションに console.log/warn/error の件数内訳を追記すると、作業量の見通しが立ちやすくなる。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 3,
+    "should_fix_count": 5,
+    "nice_to_have_count": 4,
+    "overall_quality": "fair",
+    "overall_assessment": "logger.ts API仕様の記載、対象外ファイルの明示、前提条件の検証は正確である。一方で件数に関する乖離が全体的に大きく、特に src/lib/ が約125件→実測223件、src/app/api/ が約15件→実測80件と、合計で実移行対象が約170件→約338件へ倍増する。Phase 1/2の作業量見積もりと影響テストの網羅性に直接影響するため、件数の更新が必須である。"
+  },
+  "verification_data": {
+    "db_migrations_console_count": 57,
+    "src_lib_console_count_excluding_logger_env": 223,
+    "src_app_api_console_count": 80,
+    "src_components_console_count": 35,
+    "src_components_console_error": 29,
+    "src_components_console_log": 5,
+    "src_components_console_warn": 1,
+    "src_hooks_executable_console_count": 2,
+    "src_hooks_jsdoc_console_count": 5,
+    "env_ts_console_warn_count": 3,
+    "total_migration_target": 338,
+    "test_files_with_console_spy": [
+      "tests/integration/trust-dialog-auto-response.test.ts (line 119, console.log)",
+      "tests/unit/lib/schedule-manager.test.ts (lines 130, 367, console.log)",
+      "tests/unit/selected-agents-validator.test.ts (line 80, console.warn)",
+      "tests/unit/ip-restriction.test.ts (lines 365/375/385/395, console.warn)",
+      "tests/unit/db-migration-path.test.ts (lines 77/91/103, console.warn)",
+      "tests/unit/lib/clone-manager.test.ts (lines 373/388/412/429, console.warn)",
+      "tests/unit/lib/cmate-parser.test.ts (lines 171/180/193/202/221, console.warn)",
+      "tests/unit/slash-commands.test.ts (lines 424/449, console.warn)",
+      "tests/unit/prompt-detector-cache.test.ts (lines 25/26, console.log/warn)",
+      "tests/unit/log-manager.test.ts (line 475, console.error)",
+      "tests/unit/lib/tmux-capture-cache.test.ts (line 233, console.debug)",
+      "tests/integration/security.test.ts (line 231, console.warn)",
+      "tests/integration/auth-middleware.test.ts (lines 252/262/272, console.warn)"
+    ]
+  }
+}

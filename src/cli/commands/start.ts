@@ -20,7 +20,7 @@ import { REVERSE_PROXY_WARNING } from '../config/security-messages';
 import { validateIssueNoResult } from '../utils/input-validators';
 import { PortAllocator } from '../utils/port-allocator';
 import { DbPathResolver } from '../utils/resource-resolvers';
-import { generateToken, hashToken, parseDuration } from '../../lib/auth';
+import { generateToken, hashToken, parseDuration } from '../../lib/security/auth';
 
 const logger = new CLILogger();
 

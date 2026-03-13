@@ -7,8 +7,8 @@
 import { NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
-import { isValidWorktreeId } from '@/lib/auto-yes-manager';
-import { getGitShow, handleGitApiError } from '@/lib/git-utils';
+import { isValidWorktreeId } from '@/lib/security/path-validator';
+import { getGitShow, handleGitApiError } from '@/lib/git/git-utils';
 import { COMMIT_HASH_PATTERN } from '@/types/git';
 
 export async function GET(

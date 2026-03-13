@@ -1,0 +1,62 @@
+{
+  "issue_number": 474,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "review_summary": "設計方針書はSOLID原則を意識した構成になっており、既存のStrategyパターン（BaseCLITool + ICLITool）を活用した拡張方針は適切である。しかし、ISP違反の懸念、YAGNI原則に対する曖昧さ、型安全性の不足、DRY原則の一部未達が確認された。must_fixレベルの問題が2件、should_fixレベルが3件、nice_to_haveが2件。",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "S1-M1",
+        "title": "ISP違反: ICLIToolインターフェースへの画像メソッド追加",
+        "description": "設計書ではICLIToolインターフェースにsupportsImage()とsendMessageWithImage()を直接追加する方針だが、これはInterface Segregation Principle（ISP）に違反する。現在ICLIToolを実装する全5ツール（claude, codex, gemini, vibe-local, opencode）のうち、画像送信をネイティブサポートするのは一部のみ。画像非対応のツールにもインターフェース契約として画像関連メソッドが強制される。設計書のセクション10で「既存メソッドは変更なし」と記載されているが、インターフェース自体にメソッドが追加されるため、全実装クラスに影響が及ぶ。",
+        "suggestion": "IImageCapableCLIToolのような別インターフェースを定義し、画像対応ツールのみが実装する設計にする。あるいは、BaseCLIToolのデフォルト実装で吸収する現在の方針を維持するなら、ICLIToolへの追加ではなくBaseCLIToolにのみメソッドを追加し、send/route.tsではinstanceofチェックまたはsupportsImageの型ガードで分岐する方式に変更する。"
+      },
+      {
+        "id": "S1-M2",
+        "title": "型安全性不足: imagePath の型定義がstring型のみ",
+        "description": "SendMessageRequestのimagePathがstring | undefinedのみで定義されている。.commandmate/attachments/配下のパスであることを型レベルで保証する仕組みがない。また、api-client.tsのsendMessage関数シグネチャにimagePath?: stringを追加する方針だが、既存の呼び出し元（MessageInput.tsx内のsubmitMessage等）への影響範囲が設計書に明記されていない。現在のsendMessageは3引数（id, content, cliToolId）だが、4引数目にimagePathを追加すると、オプション引数が増えてシグネチャが複雑になる。",
+        "suggestion": "sendMessageのオプション引数をオブジェクト形式に変更するか（例: sendMessage(id, content, options?: { cliToolId?: CLIToolType; imagePath?: string })）、imagePathにブランド型（Branded Type）またはテンプレートリテラル型（`.commandmate/attachments/${string}`）を適用して型安全性を強化する。少なくとも設計書にシグネチャ変更の影響範囲を記載すべき。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S1-S1",
+        "title": "YAGNI原則: CLIToolInfoへのsupportsImageプロパティ追加の時期尚早さ",
+        "description": "設計書ではCLIToolInfoインターフェースにsupportsImage: booleanを追加する方針。しかし、現在のUI設計では「supportsImage=falseでもフォールバックで送信するためUIは常に有効」と記載されている（セクション7）。CLIToolInfoにsupportsImageを追加しても、現時点ではUI表示の分岐（ツールチップ表示）にしか使用されない。実装段階で本当に必要かを再検討すべき。",
+        "suggestion": "CLIToolInfoへの追加は、実際にUIでの表示分岐が確定した段階で行う。まずはBaseCLIToolのsupportsImage()メソッドのみ実装し、CLIToolInfoの拡張は後回しにする。"
+      },
+      {
+        "id": "S1-S2",
+        "title": "SRP懸念: MessageInput.tsxへの画像状態管理の追加",
+        "description": "設計書ではMessageInput.tsxにattachedImage状態、fileInputRef、handleImageSelect関数を追加する方針。現在のMessageInput.tsxは既に348行あり、メッセージ入力・IME処理・スラッシュコマンド・下書き永続化など多くの責務を持つ。ここに画像選択・アップロード・プレビュー表示の責務を追加するとSRP違反が深刻化する。設計書セクション10では「MessageInputはUI管理のみ、送信ロジックはapi-client.tsに委譲」と記載しているが、画像アップロード処理（upload APIの呼び出し）はUI管理を超えた責務である。",
+        "suggestion": "画像添付のロジック（ファイル選択、バリデーション、アップロードAPI呼び出し、状態管理）をカスタムフック（useImageAttachment）に抽出する。MessageInput.tsxはフックから返されるUI要素やハンドラを利用するのみとする。"
+      },
+      {
+        "id": "S1-S3",
+        "title": "DRY懸念: image-extensions.tsとupload APIのバリデーション重複リスク",
+        "description": "設計書のセクション8で「uploadable-extensions.tsとの二重管理」をトレードオフとして明記しているが、具体的な解決策が示されていない。現在image-extensions.tsにはSVGを含む6つの拡張子が定義されているが、設計書セクション6ではSVGを除外している。つまり、upload APIで使用する際にIMAGE_EXTENSIONSからSVGをフィルタリングする追加ロジックが必要になり、設定ファイルの定義とバリデーション時の使用で差異が生まれる。",
+        "suggestion": "image-extensions.tsにIMAGE_EXTENSIONS_WITHOUT_SVGまたはATTACHABLE_IMAGE_EXTENSIONSのような定数を追加し、SVG除外済みのリストを提供する。これにより、upload APIやMessageInput.tsxのaccept属性で同一のソースを参照でき、DRY原則を維持できる。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S1-N1",
+        "title": "KISS原則: 2段階方式の失敗時リカバリが未定義",
+        "description": "2段階方式（upload後にsend）自体はシンプルだが、upload成功後にsendが失敗した場合のリカバリ（孤立ファイルの扱い、UI状態のリセット）が設計書に記載されていない。ユーザー視点では画像がアップロードされたのにメッセージが送信されない状態になる。設計書セクション8で「クリーンアップ未実装」をトレードオフとして認識しているが、エラーハンドリングの基本方針は記載すべき。",
+        "suggestion": "send失敗時のUI側の振る舞い（attachedImage状態を保持して再送可能にする、エラーメッセージ表示等）を設計書に追記する。ファイルクリーンアップはスコープ外のままでよいが、エラーハンドリングパスは明確にする。"
+      },
+      {
+        "id": "S1-N2",
+        "title": "LSP原則: sendMessageWithImageのオーバーライド契約の明確化不足",
+        "description": "設計書ではsendMessageWithImageをオーバーライドするサブクラスが「同じ契約を維持」と記載しているが、具体的な契約内容（例: imagePathが存在しないファイルの場合の振る舞い、Promise<void>が何をもって成功とするか）が明記されていない。特にClaude CLIの「--imageフラグまたはマークダウン記法」は調査中であり、オーバーライド実装の成功条件が不明確。",
+        "suggestion": "sendMessageWithImageのJSDocに事前条件（imagePath は存在するファイルであること、worktreePathからの相対パスでないこと等）と事後条件（tmuxセッションにコマンドが送信されていること）を明記する。"
+      }
+    ]
+  },
+  "total_findings": {
+    "must_fix": 2,
+    "should_fix": 3,
+    "nice_to_have": 2
+  }
+}

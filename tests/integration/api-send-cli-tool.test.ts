@@ -11,7 +11,7 @@ import { createMessage, getMessages, upsertWorktree } from '@/lib/db';
 import type { Worktree } from '@/types/models';
 
 // Mock CLI tool modules
-vi.mock('@/lib/claude-session', () => ({
+vi.mock('@/lib/session/claude-session', () => ({
   startClaudeSession: vi.fn(),
   isClaudeRunning: vi.fn(() => Promise.resolve(false)),
   sendMessageToClaude: vi.fn(),
@@ -119,7 +119,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
       expect(response.status).toBe(201);
 
       // Verify Claude session was used
-      const { startClaudeSession, sendMessageToClaude } = await import('@/lib/claude-session');
+      const { startClaudeSession, sendMessageToClaude } = await import('@/lib/session/claude-session');
       expect(startClaudeSession).toHaveBeenCalledWith({
         worktreeId: 'test-worktree',
         worktreePath: '/path/to/test',
@@ -212,6 +212,73 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
       expect(data).toHaveProperty('id');
       expect(data.content).toBe('Test gemini message');
       expect(data.role).toBe('user');
+    });
+  });
+
+  describe('Image path validation (Issue #474)', () => {
+    it('should reject URL schemes in imagePath (SSRF prevention)', async () => {
+      const worktree: Worktree = {
+        id: 'test-ssrf',
+        name: 'Test SSRF',
+        path: '/path/to/test',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'TestRepo',
+      };
+      upsertWorktree(db, worktree);
+
+      for (const scheme of ['file:///etc/passwd', 'http://evil.com', 'https://evil.com', 'ftp://evil.com', 'data:text/html,<script>']) {
+        const request = new Request('http://localhost:3000/api/worktrees/test-ssrf/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: 'Test', imagePath: scheme }),
+        });
+
+        const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-ssrf' } });
+        expect(response.status).toBe(400);
+        const data = await response.json();
+        expect(data.error).toContain('URL schemes are not allowed');
+      }
+    });
+
+    it('should reject path traversal in imagePath', async () => {
+      const worktree: Worktree = {
+        id: 'test-traversal',
+        name: 'Test Traversal',
+        path: '/path/to/test',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'TestRepo',
+      };
+      upsertWorktree(db, worktree);
+
+      const request = new Request('http://localhost:3000/api/worktrees/test-traversal/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'Test', imagePath: '../../../etc/passwd' }),
+      });
+
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-traversal' } });
+      expect(response.status).toBe(400);
+    });
+
+    it('should reject imagePath outside .commandmate/attachments/', async () => {
+      const worktree: Worktree = {
+        id: 'test-prefix',
+        name: 'Test Prefix',
+        path: '/path/to/test',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'TestRepo',
+      };
+      upsertWorktree(db, worktree);
+
+      const request = new Request('http://localhost:3000/api/worktrees/test-prefix/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'Test', imagePath: '.commandmate/other/xxx.png' }),
+      });
+
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-prefix' } });
+      // Path validation catches this as invalid (either symlink check or whitelist check)
+      expect(response.status).toBe(400);
     });
   });
 

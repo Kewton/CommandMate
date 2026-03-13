@@ -1,0 +1,181 @@
+{
+  "issue_number": 473,
+  "status": "passed",
+  "criteria_results": [
+    {
+      "criterion": "tmux.ts に NAVIGATION_KEY_VALUES, NavigationKey型, isAllowedSpecialKey(), sendSpecialKeysAndInvalidate() が export されている",
+      "status": "pass",
+      "details": "tmux.ts lines 486-517: NAVIGATION_KEY_VALUES as const array (6 keys), NavigationKey type, isAllowedSpecialKey() type guard, sendSpecialKeysAndInvalidate() wrapper all exported correctly."
+    },
+    {
+      "criterion": "cli-patterns.ts に OPENCODE_SELECTION_LIST_PATTERN が定義されている",
+      "status": "pass",
+      "details": "cli-patterns.ts line 211: OPENCODE_SELECTION_LIST_PATTERN = /^>\\s+\\S|^filter:\\s/m exported as placeholder pattern."
+    },
+    {
+      "criterion": "status-detector.ts の priority 2.5 ブロック内で selection_list 検出分岐が実装されている",
+      "status": "pass",
+      "details": "status-detector.ts lines 265-277: (C) selection_list detection inserted between (B) thinking and (D) response_complete within OpenCode priority 2.5 block. Uses STATUS_REASON.OPENCODE_SELECTION_LIST constant. Returns status='waiting', confidence='high', hasActivePrompt=false."
+    },
+    {
+      "criterion": "POST /api/worktrees/[id]/special-keys エンドポイントが多層防御で実装されている",
+      "status": "pass",
+      "details": "special-keys/route.ts: 6-layer defense implemented - (0) JSON parse [DR4-002], (1) cliToolId validation, (2) keys type validation [DR4-004], (3) keys content + MAX_KEYS_LENGTH=10, (4) DB check, (5) session check, (6) sendSpecialKeysAndInvalidate. All error responses use fixed strings [DR4-003]."
+    },
+    {
+      "criterion": "current-output API レスポンスに isSelectionListActive フラグが追加されている",
+      "status": "pass",
+      "details": "current-output/route.ts lines 96-97, 132: isSelectionListActive derived from statusResult using STATUS_REASON.OPENCODE_SELECTION_LIST constant [DR2-003]."
+    },
+    {
+      "criterion": "NavigationButtons コンポーネントが Up/Down/Enter/Escape ボタンを表示する",
+      "status": "pass",
+      "details": "NavigationButtons.tsx: 4 buttons (Up/Down/Enter/Escape) with min-w-[44px] min-h-[44px] touch targets, keyboard handling, role=toolbar, aria-labels. No dangerouslySetInnerHTML [DR4-006]."
+    },
+    {
+      "criterion": "WorktreeDetailRefactored.tsx が isSelectionListActive に基づいて NavigationButtons を条件付き表示する",
+      "status": "pass",
+      "details": "WorktreeDetailRefactored.tsx: CliStatus interface updated with isSelectionListActive [DR3-003], state tracked via useState (line 1068), updated from polling (line 1241), conditional rendering at desktop (line 2326) and mobile (line 2582)."
+    },
+    {
+      "criterion": "既存テストが全てパスする",
+      "status": "pass",
+      "details": "247 test files, 4900 tests passed, 7 skipped, 0 failed."
+    },
+    {
+      "criterion": "TypeScript型チェック・ESLintエラーが0件",
+      "status": "pass",
+      "details": "npx tsc --noEmit: 0 errors. npm run lint: No ESLint warnings or errors."
+    },
+    {
+      "criterion": "既存の他CLIツール（Claude/Codex/Gemini）の操作に影響を与えない",
+      "status": "pass",
+      "details": "Selection list detection is guarded by cliToolId === 'opencode' check in status-detector.ts. NAVIGATION_KEY_VALUES is separate from SPECIAL_KEY_VALUES [DR3-001]. Tests confirm Claude/Codex do not trigger selection_list reason."
+    }
+  ],
+  "static_analysis": {
+    "typescript": "pass",
+    "eslint": "pass"
+  },
+  "test_results": {
+    "passed": 4900,
+    "failed": 0,
+    "skipped": 7,
+    "total": 4907,
+    "new_test_files": 4,
+    "new_tests": 43
+  },
+  "design_compliance": {
+    "checklist_items_verified": 20,
+    "checklist_items_total": 20,
+    "details": [
+      "[DR3-001] NAVIGATION_KEY_VALUES separate from SPECIAL_KEY_VALUES - VERIFIED",
+      "[DR2-004] as const array + isAllowedSpecialKey() type guard pattern - VERIFIED",
+      "[DR1-003] sendSpecialKeysAndInvalidate() wrapper in tmux.ts - VERIFIED",
+      "[DR4-002] JSON parse defense with try-catch on req.json() - VERIFIED",
+      "[DR4-003] Fixed-string error responses, no params.id/cliToolId in messages - VERIFIED",
+      "[DR4-004] Array.isArray + typeof string + empty array checks on keys - VERIFIED",
+      "[DR2-003] STATUS_REASON constants shared between status-detector and current-output route - VERIFIED",
+      "[DR3-003] CliStatus interface updated with isSelectionListActive - VERIFIED",
+      "[DR1-001] Validation structure mirrors terminal/route.ts - VERIFIED",
+      "[DR1-007] Boolean status flag count at 6 (within threshold) - VERIFIED",
+      "[DR2-001] Flag count based on boolean status flags only - VERIFIED",
+      "[DR2-002] sendSpecialKeysAndInvalidate only wraps sendSpecialKeys+invalidateCache pattern - VERIFIED",
+      "[DR3-002] Regression tests for normal response, response_complete priority, and exclusivity - VERIFIED",
+      "[DR3-004] Selection list detection uses contentCheckWindow - VERIFIED",
+      "[DR3-005] prompt-answer-sender.ts not modified (scope boundary) - VERIFIED",
+      "[DR4-001] Rate limiting intentionally not implemented (documented) - VERIFIED",
+      "[DR4-005] middleware matcher auto-protects /api/worktrees/[id]/* paths - VERIFIED",
+      "[DR4-006] No dangerouslySetInnerHTML in NavigationButtons - VERIFIED",
+      "[DR1-005] Pattern non-overlap tests with existing OpenCode patterns - VERIFIED",
+      "[DR1-005] Other CLI tool non-interference tests (Claude, Codex) - VERIFIED"
+    ]
+  },
+  "test_cases": [
+    {
+      "scenario": "isAllowedSpecialKey('Up') が true を返す",
+      "result": "passed",
+      "evidence": "tmux-navigation.test.ts: isAllowedSpecialKey returns true for each NAVIGATION_KEY_VALUES entry"
+    },
+    {
+      "scenario": "isAllowedSpecialKey('InvalidKey') が false を返す",
+      "result": "passed",
+      "evidence": "tmux-navigation.test.ts: returns false for C-c, C-d, Left, Right, Space, empty string, arbitrary-key, rm -rf /"
+    },
+    {
+      "scenario": "OPENCODE_SELECTION_LIST_PATTERN がOpenCode選択リスト出力にマッチする",
+      "result": "passed",
+      "evidence": "cli-patterns-selection.test.ts: matches '> gpt-4o', '> claude-3.5-sonnet', 'filter: gpt'"
+    },
+    {
+      "scenario": "detectSessionStatus() で opencode_selection_list reason が返される",
+      "result": "passed",
+      "evidence": "status-detector-selection.test.ts: returns waiting/high/opencode_selection_list for selection list output"
+    },
+    {
+      "scenario": "detectSessionStatus() で他CLIツール出力に対してselection_listが返されない",
+      "result": "passed",
+      "evidence": "status-detector-selection.test.ts: Claude and Codex outputs do not trigger selection_list reason"
+    },
+    {
+      "scenario": "special-keys API に有効なキーを送信して200が返る",
+      "result": "passed",
+      "evidence": "special-keys-route.test.ts: 200 with {success: true} for valid keys ['Up'] and ['Down','Down','Enter']"
+    },
+    {
+      "scenario": "special-keys API に不正なキーを送信して400が返る",
+      "result": "passed",
+      "evidence": "special-keys-route.test.ts: 400 with 'Invalid special key' for disallowed keys like 'C-c'"
+    },
+    {
+      "scenario": "special-keys API に空配列を送信して400が返る",
+      "result": "passed",
+      "evidence": "special-keys-route.test.ts: 400 with 'Invalid keys parameter' for empty array"
+    },
+    {
+      "scenario": "special-keys API に10を超えるキーを送信して400が返る",
+      "result": "passed",
+      "evidence": "special-keys-route.test.ts: 400 for 11 keys, 200 for exactly 10 keys (boundary test)"
+    },
+    {
+      "scenario": "current-output API で isSelectionListActive が正しく設定される",
+      "result": "passed",
+      "evidence": "current-output/route.ts lines 96-97: isSelectionListActive derived from STATUS_REASON.OPENCODE_SELECTION_LIST constant"
+    },
+    {
+      "scenario": "npx tsc --noEmit が成功する",
+      "result": "passed",
+      "evidence": "TypeScript compilation completed with 0 errors"
+    },
+    {
+      "scenario": "npm run lint が成功する",
+      "result": "passed",
+      "evidence": "No ESLint warnings or errors"
+    },
+    {
+      "scenario": "npm run test:unit が全テストパスする",
+      "result": "passed",
+      "evidence": "247 test files, 4900 passed, 7 skipped, 0 failed"
+    }
+  ],
+  "acceptance_criteria_status": [
+    { "criterion": "NAVIGATION_KEY_VALUES, NavigationKey, isAllowedSpecialKey, sendSpecialKeysAndInvalidate exported from tmux.ts", "verified": true },
+    { "criterion": "OPENCODE_SELECTION_LIST_PATTERN defined in cli-patterns.ts", "verified": true },
+    { "criterion": "selection_list detection in priority 2.5 block of status-detector.ts", "verified": true },
+    { "criterion": "POST /api/worktrees/[id]/special-keys with multi-layer defense", "verified": true },
+    { "criterion": "isSelectionListActive flag in current-output API response", "verified": true },
+    { "criterion": "NavigationButtons component with Up/Down/Enter/Escape", "verified": true },
+    { "criterion": "Conditional NavigationButtons display in WorktreeDetailRefactored.tsx", "verified": true },
+    { "criterion": "All existing tests pass", "verified": true },
+    { "criterion": "TypeScript and ESLint: 0 errors", "verified": true },
+    { "criterion": "No impact on other CLI tools (Claude/Codex/Gemini)", "verified": true }
+  ],
+  "evidence_files": [
+    "tests/unit/tmux-navigation.test.ts",
+    "tests/unit/cli-patterns-selection.test.ts",
+    "tests/unit/status-detector-selection.test.ts",
+    "tests/unit/special-keys-route.test.ts"
+  ],
+  "notes": "All 10 acceptance criteria verified. All 13 test scenarios passed. Design policy compliance: 20/20 checklist items verified. 43 new tests across 4 test files. No regressions in existing 4900 tests. TypeScript 0 errors, ESLint 0 errors.",
+  "message": "All acceptance criteria are satisfied. Implementation is complete and design-compliant."
+}

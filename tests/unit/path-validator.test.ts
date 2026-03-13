@@ -11,7 +11,7 @@ import path from 'path';
 import { symlinkSync, mkdirSync } from 'fs';
 
 // Import path validator functions
-import { isPathSafe, validateWorktreePath, resolveAndValidateRealPath, isWithinRoot } from '@/lib/path-validator';
+import { isPathSafe, validateWorktreePath, resolveAndValidateRealPath, isWithinRoot } from '@/lib/security/path-validator';
 import {
   createSymlinkFixture,
   cleanupSymlinkFixture,

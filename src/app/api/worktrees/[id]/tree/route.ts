@@ -11,6 +11,9 @@ import {
   parseDirectoryError,
   createWorktreeNotFoundError,
 } from '@/lib/file-tree';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/tree');
 
 export async function GET(
   request: NextRequest,
@@ -34,7 +37,7 @@ export async function GET(
 
     return NextResponse.json(result);
   } catch (error: unknown) {
-    console.error('Error reading directory:', error);
+    logger.error('error-reading-directory:', { error: error instanceof Error ? error.message : String(error) });
 
     const errorResponse = parseDirectoryError(error);
     return NextResponse.json(

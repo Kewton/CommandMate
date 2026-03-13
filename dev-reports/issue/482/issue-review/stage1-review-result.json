@@ -1,0 +1,90 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 482,
+  "review_date": "2026-03-13",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "must_fix",
+      "category": "整合性",
+      "location": "概要文",
+      "description": "概要文に「6箇所のTODO/FIXMEマーカー」と記載されているが、対象一覧の表には4件しか記載されていない。実際にコードベースを検索した結果も4件（TODOコメント3件 + Issue #XXX参照1件）であり、「6箇所」は誤り。概要と表の件数が矛盾しており、実装者が混乱する恐れがある。",
+      "suggestion": "概要文を「コードベースに残存する4箇所のTODO/FIXMEマーカーを対応または削除する。」に修正する。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "should_fix",
+      "category": "明確性",
+      "location": "対象一覧 - src/lib/cli-patterns.ts:27",
+      "description": "方針が「正しいIssue番号に修正 or コメント削除」と2択で示されているが、正しいIssue番号の特定方法が明記されていない。git logの調査では、該当コメントはcommit 5ebd2ba（fix(status-detector): detect running status during Task execution）で導入されたが、対応するIssue番号がコミットメッセージに記載されていない。実装者が正しい番号を特定できない可能性がある。",
+      "suggestion": "Issue本文に調査方針を記載する。例: 「git log で該当コミットの関連PRを特定し、PR経由で正しいIssue番号を確認する。特定できない場合はコメントを削除またはIssue番号参照を除去する。」commit 5ebd2baの内容からは、Claude Code v2.xのステータスバー変更に関するものであるため、関連PRを辿って番号を確定させるのが望ましい。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "should_fix",
+      "category": "技術的妥当性",
+      "location": "対象一覧 - src/app/api/worktrees/[id]/slash-commands/route.ts:33",
+      "description": "方針が「型統合を実施」とされているが、2つのSlashCommandsResponseは構造が異なる。route.tsの型は{ groups, sources, cliTool }であり、api-client.tsの型は{ groups }のみ。これらは異なるAPIエンドポイント（/api/worktrees/[id]/slash-commands と /api/slash-commands）に紐づいており、単純な統合ではなくsources・cliToolフィールドの扱いを検討する必要がある。「型統合を実施」だけでは実装方針が不明確。",
+      "suggestion": "以下のいずれかの方針を明記する: (A) 共通ベース型を定義し、route.tsの型がそれを拡張する形にする（例: interface BaseSlashCommandsResponse { groups: SlashCommandGroup[] } + interface WorktreeSlashCommandsResponse extends BaseSlashCommandsResponse { sources: ...; cliTool: ... }）、(B) 2つの型は用途が異なるため統合不要と判断しTODOを削除する、(C) api-client.tsにもsourcesフィールドを追加して完全統合する。現状のコードではapi-client.tsのSlashCommandsResponseはMCBD（旧サービス名）向けの型であり、(A)または(B)が現実的。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "should_fix",
+      "category": "明確性",
+      "location": "対象一覧 - opencode-config.ts:217, 284",
+      "description": "方針が「コメント維持 or 共通化」と2択で示されているが、判断基準が不明確。「現時点で2 providerのみ」という状況は変わっていないため、どちらを選択すべきかの判断材料が足りない。コードベースにはKISS原則に基づくコメント（ensureOpencodeConfig関数のJSDoc内「If a 3rd provider is added, consider refactoring...」）が既に存在し、TODOコメントと内容が重複している点も考慮が必要。",
+      "suggestion": "方針を1つに絞る。推奨: TODOコメント2箇所を削除し、既にensureOpencodeConfig関数のJSDoc（行341-342付近）に記載されている「If a 3rd provider is added, consider refactoring to a data-driven design」のコメントに集約する。これにより重複が解消され、TODO/FIXMEマーカーとしての残留もなくなる。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "location": "受け入れ基準",
+      "description": "受け入れ基準に「既存テストが全パス」はあるが、リファクタリング（型統合等）に伴う新規テストの必要性について言及がない。型統合を実施する場合、型の互換性を確認するテストが必要になる可能性がある。",
+      "suggestion": "受け入れ基準に「型統合を実施した場合、コンパイルエラーがないことを確認（npx tsc --noEmit）」を追加する。既存テストだけでは型変更の影響を網羅できない場合があるため。"
+    },
+    {
+      "id": "S1-006",
+      "severity": "nice_to_have",
+      "category": "正確性",
+      "location": "対象一覧 - 「内容」列",
+      "description": "cli-patterns.ts:27 の内容が「Issue #XXX 未解決の参照」と記載されているが、これはTODO/FIXMEマーカーではなくJSDocコメント内の参照である。他の3件はすべてTODOコメントであり、種別が異なる。対象一覧の「内容」列で種別の違いが明確でない。",
+      "suggestion": "対象一覧に「種別」列を追加し、TODOコメントとJSDoc内参照を区別する。例: TODOマーカー / JSDoc内未解決参照。"
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 3,
+    "nice_to_have": 2,
+    "total": 6
+  },
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/slash-commands/route.ts",
+      "line": 33,
+      "relevance": "TODOコメント: api-client.tsとの型統合検討"
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "line": 437,
+      "relevance": "SlashCommandsResponse型定義（route.tsと構造が異なる）"
+    },
+    {
+      "file": "src/lib/cli-tools/opencode-config.ts",
+      "lines": [217, 284],
+      "relevance": "TODOコメント: 3rd provider追加時のHTTP fetchロジック共通化"
+    },
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "line": 27,
+      "relevance": "JSDocコメント内のIssue #XXX未解決参照"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュール一覧・コーディング規約の整合性確認"
+    }
+  ]
+}

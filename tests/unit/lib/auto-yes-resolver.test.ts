@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveAutoAnswer } from '@/lib/auto-yes-resolver';
+import { resolveAutoAnswer } from '@/lib/polling/auto-yes-resolver';
 import type { PromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
 
 describe('auto-yes-resolver', () => {

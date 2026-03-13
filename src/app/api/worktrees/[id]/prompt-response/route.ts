@@ -9,12 +9,15 @@ import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
-import { captureSessionOutputFresh } from '@/lib/cli-session';
-import { detectPrompt, type PromptDetectionResult } from '@/lib/prompt-detector';
-import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/cli-patterns';
+import { captureSessionOutputFresh } from '@/lib/session/cli-session';
+import { detectPrompt, type PromptDetectionResult } from '@/lib/detection/prompt-detector';
+import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/detection/cli-patterns';
 import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
-import { isValidWorktreeId } from '@/lib/auto-yes-manager';
+import { isValidWorktreeId } from '@/lib/security/path-validator';
 import type { PromptType } from '@/types/models';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/prompt-response');
 
 interface PromptResponseRequest {
   answer: string;
@@ -107,7 +110,7 @@ export async function POST(
       }
     } catch {
       // If capture fails, proceed with caution - don't block manual responses
-      console.warn('[prompt-response] Failed to verify prompt state, proceeding with send');
+      logger.warn('failed-to-verify-prompt');
     }
 
     // Send answer to tmux
@@ -135,7 +138,7 @@ export async function POST(
       answer,
     });
   } catch (error: unknown) {
-    console.error('Failed to respond to prompt:', error);
+    logger.error('failed-to-respond-to-prompt:', { error: error instanceof Error ? error.message : String(error) });
     const errorMessage = error instanceof Error ? error.message : 'Internal server error';
     return NextResponse.json(
       { error: errorMessage },

@@ -1,0 +1,132 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 481,
+  "focus_area": "影響範囲",
+  "reviewed_at": "2026-03-13",
+  "findings": [
+    {
+      "id": "I001",
+      "severity": "must_fix",
+      "category": "バレルエクスポートによるimport解決の競合",
+      "title": "db.ts と db/ ディレクトリの同時存在によるモジュール解決の曖昧性",
+      "description": "現在 src/lib/db.ts（1403行）が存在し、設計方針書では db/ ディレクトリを新規作成して db.ts をその中に移動する計画である。しかし、移行途中で src/lib/db.ts と src/lib/db/index.ts が同時に存在する場合、TypeScript の moduleResolution: 'bundler' ではファイル（db.ts）がディレクトリ（db/index.ts）より優先されるため、`import from '@/lib/db'` の解決先が変わらない。設計方針書では「@/lib/db -> db/index.ts の自動解決により既存36箇所のimportを変更不要」と記載しているが、db.ts を db/ 内に移動（リネーム）するステップが明示されていない。db.ts を削除またはリネームしないとバレルエクスポートは機能しない。",
+      "location": "設計方針書 セクション3「db/ の後方互換性維持」",
+      "recommendation": "移行手順に以下を明記すること: (1) db.ts を db/db.ts に移動する、(2) その時点で src/lib/db.ts は存在しなくなるため @/lib/db は db/index.ts に解決される。移行中に両方が存在する瞬間を作らないよう、1つのコミットで db.ts の移動と db/index.ts の作成を同時に行う手順を記載する。",
+      "affected_files": [
+        "src/lib/db.ts（移動元）",
+        "36箇所の import { ... } from '@/lib/db' を持つAPIルート",
+        "11箇所の vi.mock('@/lib/db') を持つテストファイル"
+      ]
+    },
+    {
+      "id": "I002",
+      "severity": "must_fix",
+      "category": "db-instance.ts の影響範囲が過少評価",
+      "title": "db-instance.ts を参照する48ファイルのimportパス更新が設計方針書に未記載",
+      "description": "設計方針書では db/ グループに db-instance.ts を含めているが、@/lib/db-instance を直接importしているAPIルートが48ファイル存在する。db/ のバレルエクスポート経由で `import { getDbInstance } from '@/lib/db'` に書き換える場合、48ファイルの更新が必要。バレルで後方互換性を維持するのは `@/lib/db` パスのみであり、`@/lib/db-instance` パスはバレルでは救えない。また vi.mock('@/lib/db-instance') が33箇所ある。セクション7の「更新が必要なimport行: 約696行」にこれらが正しく含まれているか検証が必要。",
+      "location": "設計方針書 セクション7「影響規模サマリー」",
+      "recommendation": "db-instance.ts, db-migrations.ts, db-path-resolver.ts, db-repository.ts, db-migration-path.ts の個別importパス更新数を明示すること。特に db-instance.ts の48ファイルは影響が最も大きく、バレルエクスポート経由への書き換えか、あるいは旧パスにリエクスポートファイルを残す（src/lib/db-instance.ts を `export * from './db/db-instance'` とする）互換レイヤーの検討が必要。",
+      "affected_files": [
+        "48箇所の import { getDbInstance } from '@/lib/db-instance'",
+        "33箇所の vi.mock('@/lib/db-instance')",
+        "34箇所の import from '@/lib/db-migrations'"
+      ]
+    },
+    {
+      "id": "I003",
+      "severity": "should_fix",
+      "category": "ドキュメント影響",
+      "title": "CLAUDE.md のモジュール一覧更新が設計書記載の52箇所より広範囲",
+      "description": "CLAUDE.md にはモジュール一覧テーブルに各モジュールのパスが記載されている。移動対象36ファイルに対応するパスの更新に加え、「ファイル構成」セクションのディレクトリツリー図、「主要モジュール一覧」のパス記載も更新が必要。docs/module-reference.md, docs/architecture.md も同様。設計方針書のセクション6（受け入れ基準）で「約52箇所」「約54箇所」「約6箇所」と記載されているが、実際にはこれに加え __tests__/ 内のテストファイルからの相対パス参照（9ファイル中7ファイルが移動対象モジュールを参照）の更新も必要。",
+      "location": "設計方針書 セクション6「ドキュメント更新」",
+      "recommendation": "受け入れ基準に「src/lib/__tests__/ 内の相対import更新（7ファイル）」を明確に追加すること。現在セクション6に「__tests__/ 内の相対importパスを更新（6ファイル）」とあるが、assistant-response-saver.test.ts を含めると7ファイルであり、数値を修正すること。",
+      "affected_files": [
+        "CLAUDE.md（モジュール一覧テーブル + ディレクトリツリー図）",
+        "docs/module-reference.md",
+        "docs/architecture.md",
+        "src/lib/__tests__/ 内の7テストファイル"
+      ]
+    },
+    {
+      "id": "I004",
+      "severity": "should_fix",
+      "category": "CLIモジュールへの影響",
+      "title": "src/cli/ は src/lib/ を直接参照していないが、間接的影響の確認が必要",
+      "description": "調査の結果、src/cli/ 配下のファイルは @/lib/ パスや相対パスで src/lib/ を参照していない。CLIモジュールは独立したビルド（npm run build:cli）を持つため、今回のリファクタリングの直接的影響は受けない。ただし、CLIモジュールのビルド設定（tsconfig やバンドラー設定）が src/lib/ のパスエイリアスを参照している場合は影響がある可能性がある。",
+      "location": "設計方針書 全体（CLI影響の言及なし）",
+      "recommendation": "CLIモジュールへの影響がないことを設計方針書に明記し、移行後に `npm run build:cli` が通ることを受け入れ基準に追加すること。",
+      "affected_files": []
+    },
+    {
+      "id": "I005",
+      "severity": "should_fix",
+      "category": "tmux/ 統合のimport更新",
+      "title": "transports/ を参照する4箇所のimport更新が必要",
+      "description": "transports/ ディレクトリを参照しているファイルは以下の4箇所: (1) src/lib/ws-server.ts が ./transports/control-mode-tmux-transport を参照、(2) src/lib/cli-session.ts が ./transports/polling-tmux-transport を参照、(3) tests/unit/lib/cli-session-transport.test.ts が vi.mock('@/lib/transports/polling-tmux-transport') を使用、(4) tests/unit/lib/ws-server-terminal.test.ts が vi.mock('@/lib/transports/control-mode-tmux-transport') を使用。設計方針書ではtransports/ 統合は記載されているが、これら具体的な4ファイルのパス更新の明示がない。",
+      "location": "設計方針書 セクション3「transports/ の統合方針」",
+      "recommendation": "transports/ 統合時に更新が必要な具体的ファイル4件を移行手順に明記すること。",
+      "affected_files": [
+        "src/lib/ws-server.ts",
+        "src/lib/cli-session.ts",
+        "tests/unit/lib/cli-session-transport.test.ts",
+        "tests/unit/lib/ws-server-terminal.test.ts"
+      ]
+    },
+    {
+      "id": "I006",
+      "severity": "should_fix",
+      "category": "Edge Runtime への影響",
+      "title": "middleware.ts の ip-restriction.ts 参照はsecurity/移行で更新が必要",
+      "description": "src/middleware.ts は `'./lib/ip-restriction'` という相対パスで ip-restriction.ts をimportしている。ip-restriction.ts が security/ に移動すると `'./lib/security/ip-restriction'` または `'./lib/security'` に変更が必要。middleware.ts は Edge Runtime で動作するため、バレルエクスポート（security/index.ts）を経由すると不要なモジュール（path-validator.ts 等のNode.js依存モジュール）がバンドルされる可能性がある。設計方針書のR005でEdge Runtime向け直接importを許容する旨の補足があるが、middleware.ts の具体的な更新方針は未記載。",
+      "location": "設計方針書 セクション5 トレードオフ表 R005",
+      "recommendation": "middleware.ts の ip-restriction import は `'./lib/security/ip-restriction'` の直接import形式とし、バレル経由にしないことを明記すること。security/index.ts でのre-exportにNode.js依存モジュール（path-validator等）が含まれる場合のEdge Runtime互換性を検証すること。",
+      "affected_files": [
+        "src/middleware.ts"
+      ]
+    },
+    {
+      "id": "I007",
+      "severity": "should_fix",
+      "category": "ロールバック計画",
+      "title": "設計方針書にロールバック計画が記載されていない",
+      "description": "設計方針書には段階的移行戦略とグループ単位の移行順序は記載されているが、移行中に問題が発生した場合のロールバック手順が記載されていない。36ファイルの移動と約696行のimport更新という大規模リファクタリングにおいて、各ステップでの差し戻し方法を事前に定義しておくことが重要。特にグループ移行が途中まで完了した状態での中断・差し戻しシナリオが考慮されていない。",
+      "location": "設計方針書 全体",
+      "recommendation": "以下のロールバック戦略を設計方針書に追加すること: (1) 各グループ移行はfeatureブランチ上の独立コミットとし、git revert で個別にロールバック可能にする。(2) 移行順序の逆順（polling -> session -> detection -> security -> tmux -> db）でロールバックする。(3) 各グループ移行後に必ずビルド・テストを通し、失敗時は即座にそのコミットをrevertする。",
+      "affected_files": []
+    },
+    {
+      "id": "I008",
+      "severity": "nice_to_have",
+      "category": "hooks/contexts への影響",
+      "title": "hooks/ と contexts/ からの移動対象モジュール参照は限定的",
+      "description": "src/hooks/ から移動対象モジュールを参照しているのは3箇所のみ: useAutoYes.ts が auto-yes-resolver と prompt-key を参照。src/contexts/ からの移動対象参照は0箇所。影響は限定的であり、設計方針書の影響規模サマリーの範囲内。",
+      "location": "設計方針書 セクション7",
+      "recommendation": "対応不要。影響は正しく見積もられている。",
+      "affected_files": [
+        "src/hooks/useAutoYes.ts（auto-yes-resolver, prompt-key）"
+      ]
+    },
+    {
+      "id": "I009",
+      "severity": "nice_to_have",
+      "category": "components への影響",
+      "title": "components/ からの移動対象モジュール参照は1箇所のみ",
+      "description": "src/components/ から移動対象グループのモジュールを直接参照しているのは TerminalDisplay.tsx の `@/lib/sanitize` と Terminal.tsx/terminal page の `@/lib/tmux-control-mode-flags` の計3箇所のみ。コンポーネント層はAPIクライアント（@/lib/api-client）やユーティリティ経由でアクセスしている設計のため、影響は限定的。",
+      "location": "設計方針書 セクション7",
+      "recommendation": "対応不要。影響は正しく見積もられている。",
+      "affected_files": [
+        "src/components/worktree/TerminalDisplay.tsx（@/lib/sanitize）",
+        "src/components/Terminal.tsx（@/lib/tmux-control-mode-flags）",
+        "src/app/worktrees/[id]/terminal/page.tsx（@/lib/tmux-control-mode-flags）"
+      ]
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 5,
+    "nice_to_have": 2,
+    "total": 9
+  },
+  "overall_assessment": "設計方針書はグループ分けと移行順序について適切に設計されているが、影響分析の観点から2つの重大な課題がある。第一に、db.ts と db/ ディレクトリの同時存在によるモジュール解決の競合リスクが未考慮であり、移行手順の具体化が必要。第二に、db-instance.ts を参照する48ファイル（+ vi.mock 33箇所）の更新方針が不明確であり、バレルエクスポートだけでは後方互換性を維持できない個別ファイルimportの対策が必要。CLIモジュールへの直接影響はなく、hooks/contexts/components への影響も限定的であることは確認できた。transports/ 参照は4箇所と明確に特定できている。ロールバック計画の欠如は大規模リファクタリングにおいて改善すべき点である。"
+}

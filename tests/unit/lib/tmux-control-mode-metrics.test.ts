@@ -7,7 +7,7 @@ import {
   resetTmuxControlModeMetrics,
   setTmuxControlActiveSessions,
   setTmuxControlSubscriberCount,
-} from '@/lib/tmux-control-mode-metrics';
+} from '@/lib/tmux/tmux-control-mode-metrics';
 
 describe('tmux-control-mode-metrics', () => {
   beforeEach(() => {

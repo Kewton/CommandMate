@@ -1,0 +1,97 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "issue_number": 481,
+  "focus_area": "セキュリティ",
+  "review_date": "2026-03-13",
+  "design_doc_path": "dev-reports/design/issue-481-lib-restructure-design-policy.md",
+  "findings": [
+    {
+      "id": "S001",
+      "severity": "should_fix",
+      "category": "バレルエクスポートによる内部関数の露出",
+      "title": "path-validator.ts の @internal 関数 isWithinRoot() がバレル経由で外部公開される",
+      "description": "path-validator.ts の isWithinRoot() は JSDoc で '@internal Exported for unit testing only' と明記されているが、security/index.ts が `export * from './path-validator'` を使用すると、isWithinRoot() が @/lib/security 経由で外部モジュールからも容易にアクセス可能になる。現在は path-validator.ts を直接 import するテストファイル1件のみが使用しているが、バレル公開により意図しない依存が生まれやすくなる。",
+      "recommendation": "security/index.ts では `export *` ではなく named export を使用し、isWithinRoot() をバレルから除外する。具体的には `export { isPathSafe, validateWorktreePath, resolveAndValidateRealPath } from './path-validator'` のように外部公開すべき関数のみを列挙する。テストファイルは直接パス `@/lib/security/path-validator` から import すれば引き続きアクセス可能。",
+      "affected_files": [
+        "src/lib/security/index.ts (新規作成予定)",
+        "src/lib/path-validator.ts"
+      ]
+    },
+    {
+      "id": "S002",
+      "severity": "should_fix",
+      "category": "バレルエクスポートによるセキュリティ関数の意図しない公開範囲拡大",
+      "title": "auth.ts の generateToken() / hashToken() がバレル経由で広く公開される",
+      "description": "auth.ts は generateToken(), hashToken(), verifyToken(), parseCookies(), createRateLimiter() など多数の関数をエクスポートしている。`export * from './auth'` でバレル化すると、これらが @/lib/security という汎用的なパスから容易にアクセスできるようになり、本来認証ロジック内でのみ使用すべき関数（generateToken, hashToken 等）が無関係なモジュールから呼び出されるリスクが増大する。",
+      "recommendation": "security/index.ts における auth.ts の再エクスポートでは、外部から必要な関数のみを named export する方針を検討する。少なくとも設計方針書のセクション9のガイドラインに「セキュリティグループについては export * ではなく明示的な named export を推奨する」旨を追記する。",
+      "affected_files": [
+        "src/lib/security/index.ts (新規作成予定)",
+        "src/lib/auth.ts"
+      ]
+    },
+    {
+      "id": "S003",
+      "severity": "nice_to_have",
+      "category": "Edge Runtime 互換性",
+      "title": "middleware.ts の Edge Runtime 対応方針は適切に記載されている",
+      "description": "設計方針書セクション3の I006 で、middleware.ts では security/index.ts バレル経由ではなく './lib/security/ip-restriction' の直接 import を使用する方針が明記されている。理由として path-validator.ts 等の Node.js 依存モジュール（fs, path）がバンドルされるリスクが正しく認識されている。この設計判断は適切である。",
+      "recommendation": "対応不要。ただし実装時に middleware.ts の import パスが正しく直接参照に更新されたことを確認するテスト項目を受け入れ基準に含めるとなお良い。",
+      "affected_files": [
+        "src/middleware.ts"
+      ]
+    },
+    {
+      "id": "S004",
+      "severity": "should_fix",
+      "category": "importパス変更によるセキュリティバイパスリスク",
+      "title": "セキュリティ関連 import の誤削除を検出する受け入れ基準が不十分",
+      "description": "設計方針書セクション6の受け入れ基準には npm run lint, tsc --noEmit, test:unit が含まれているが、セキュリティ関連 import が正しく接続されていることを明示的に検証する項目がない。例えば、file-operations.ts の isPathSafe import や ws-server.ts の verifyToken import が誤って削除された場合、TypeScript コンパイラエラーで検出できるケースが多いが、動的 import やオプショナルな使用パターンでは検出漏れの可能性がある。特に ws-server.ts は WebSocket 認証の要であり、auth 関連 import の欠落は認証バイパスに直結する。",
+      "recommendation": "受け入れ基準に以下を追加する: (1) ws-server.ts が auth.ts から verifyToken, isAuthEnabled, parseCookies, AUTH_COOKIE_NAME を正しく import していることの確認、(2) ws-server.ts が ip-restriction.ts から getAllowedRanges, isIpAllowed, isIpRestrictionEnabled, normalizeIp を正しく import していることの確認、(3) middleware.ts が ip-restriction.ts から必要な関数群を正しく import していることの確認。これらは既存テストでカバーされている可能性が高いが、明示的なチェック項目として記載する価値がある。",
+      "affected_files": [
+        "src/lib/ws-server.ts",
+        "src/middleware.ts",
+        "src/lib/file-operations.ts"
+      ]
+    },
+    {
+      "id": "S005",
+      "severity": "nice_to_have",
+      "category": "security/ グループの完全性",
+      "title": "security/ グループの構成ファイルは適切に選定されている",
+      "description": "設計方針書では security/ に auth.ts, ip-restriction.ts, path-validator.ts, env-sanitizer.ts, sanitize.ts, worktree-path-validator.ts の6ファイルを配置する方針となっている。これらはいずれもセキュリティ境界を担うモジュールであり、選定は妥当である。log-export-sanitizer.ts はセキュリティ関連だが、ログエクスポートという異なる責務を持ち、utils (escapeRegExp) や env モジュールへの依存があるためルート残留は合理的。",
+      "recommendation": "対応不要。現在の構成は適切。",
+      "affected_files": [
+        "src/lib/security/ (新規ディレクトリ)"
+      ]
+    },
+    {
+      "id": "S006",
+      "severity": "nice_to_have",
+      "category": "循環依存リスク",
+      "title": "security/ グループ内に循環依存リスクはない",
+      "description": "security/ に配置予定の6ファイルは相互に import し合っていない。auth.ts は ../config/auth-config のみに依存し、ip-restriction.ts は外部依存なし、path-validator.ts は Node.js 標準モジュール (path, fs) のみ、env-sanitizer.ts は外部依存なし、sanitize.ts は isomorphic-dompurify と ansi-to-html のみ、worktree-path-validator.ts は外部依存なし。バレルエクスポートによる循環依存の発生リスクは極めて低い。",
+      "recommendation": "対応不要。設計方針書の依存関係図で security/ が独立と記載されている点は正確。",
+      "affected_files": []
+    },
+    {
+      "id": "S007",
+      "severity": "nice_to_have",
+      "category": "バレルエクスポートによる名前衝突リスク",
+      "title": "security/ 内の export 名に重複はないが、sanitize.ts と env-sanitizer.ts の命名が紛らわしい",
+      "description": "sanitize.ts は sanitizeTerminalOutput, sanitizeUserInput, containsDangerousContent をエクスポートし、env-sanitizer.ts は SENSITIVE_ENV_KEYS, sanitizeEnvForChildProcess をエクスポートする。名前の重複はないが、'sanitize' というプレフィックスが2ファイルにまたがっている。export * で名前衝突は発生しないものの、利用者にとって混乱の元になりうる。",
+      "recommendation": "対応不要。技術的な問題はなく、既存の命名を維持することが KISS に沿う。",
+      "affected_files": [
+        "src/lib/sanitize.ts",
+        "src/lib/env-sanitizer.ts"
+      ]
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 3,
+    "nice_to_have": 4,
+    "total": 7
+  },
+  "overall_assessment": "設計方針書のセキュリティ設計は概ね適切である。security/ グループへの6ファイル集約は妥当であり、循環依存リスクもない。middleware.ts の Edge Runtime 直接 import 方針（I006）も正しく記載されている。主な改善点は3つの should_fix に集約される。(1) バレルエクスポートで `export *` を使用すると、@internal な isWithinRoot() や認証コアの generateToken()/hashToken() が意図せず広く公開される点。security/ グループについては明示的な named export を推奨する。(2) セキュリティ関連 import の正当性を検証する受け入れ基準が不足しており、特に ws-server.ts（WebSocket 認証）と middleware.ts（HTTP 認証・IP 制限）の import 接続が移行後も正しいことを明示的に確認すべき。must_fix レベルの問題は発見されなかった。ファイル移動のみのリファクタリングとしては、ロジック変更がないためセキュリティリスクは低いが、上記の点を考慮することでより堅牢な移行が実現できる。"
+}

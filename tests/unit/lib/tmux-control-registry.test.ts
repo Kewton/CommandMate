@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { TmuxControlRegistry } from '@/lib/tmux-control-registry';
+import { TmuxControlRegistry } from '@/lib/tmux/tmux-control-registry';
 
 describe('TmuxControlRegistry', () => {
   beforeEach(() => {

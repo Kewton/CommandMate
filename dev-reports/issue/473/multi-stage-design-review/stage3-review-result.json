@@ -1,0 +1,105 @@
+{
+  "issue_number": 473,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "review_date": "2026-03-12",
+  "summary": "設計方針書の影響範囲分析を実施した。全体として影響範囲は適切に限定されており、既存機能への回帰リスクは低い。ただし、tmux.tsにおけるSPECIAL_KEY_VALUESの名前衝突リスク、current-output APIレスポンス型定義の更新漏れリスク、status-detector.tsの優先順位(C)挿入位置に関する回帰テスト不足の3点について改善が必要である。",
+  "findings": [
+    {
+      "id": "DR3-001",
+      "severity": "must_fix",
+      "category": "既存機能への回帰リスク",
+      "title": "SPECIAL_KEY_VALUESのセマンティクス変更による既存importへの影響",
+      "description": "設計書セクション8.2では、tmux.tsの既存SPECIAL_KEY_VALUES（sendSpecialKey用: ['Escape', 'C-c', 'C-d', 'C-m', 'Enter']）を参照して新APIのバリデーションに使用する方針だが、このSPECIAL_KEY_VALUESはsendSpecialKey()（単一キー）用であり、sendSpecialKeys()（複数キー配列）で使うALLOWED_SPECIAL_KEYS（Set: Up, Down, Left, Right, Enter, Space, Tab, Escape, BSpace, DC）とは完全に異なるキーセットである。設計書のセクション8.2コード例で 'Up', 'Down', 'Tab', 'BTab' を含むas const配列をSPECIAL_KEY_VALUESとして定義しているが、これは既存のSPECIAL_KEY_VALUESを上書きすることになり、既存のsendSpecialKey()のSpecialKey型が破壊される。",
+      "affected_components": [
+        "src/lib/tmux.ts",
+        "src/lib/cli-tools/base.ts (sendSpecialKey import)",
+        "src/lib/transports/control-mode-tmux-transport.ts (sendSpecialKey import)"
+      ],
+      "risk_level": "high",
+      "suggestion": "新しいas const配列には別名を使用する（例: NAVIGATION_KEY_VALUES）。既存のSPECIAL_KEY_VALUES（sendSpecialKey用）はそのまま維持し、新規追加のisAllowedSpecialKey()関数はALLOWED_SPECIAL_KEYSの内部Setを参照する形にする。あるいは、設計書が意図するのがALLOWED_SPECIAL_KEYSのexport化であれば、SPECIAL_KEY_VALUESとは別名でexportすることを明記すべきである。"
+    },
+    {
+      "id": "DR3-002",
+      "severity": "should_fix",
+      "category": "テストカバレッジへの影響",
+      "title": "status-detector.ts priority 2.5内の(C) selection_list挿入位置の回帰テスト不足",
+      "description": "設計書セクション6.1では、priority 2.5ブロック内で(A) processing_indicator -> (B) thinking -> (C) selection_list -> (D) response_completeの順序で検出する方針である。既存のstatus-detector.test.tsにはOpenCode固有のpriority 2.5ブロックに対するテストが存在しない。(C)の挿入により、(B)と(D)の間に新しい分岐が入ることで、OpenCode出力の一部が誤って'waiting'と判定されるリスクがある。特に、選択リストパターンがOpenCodeの通常コンテンツ出力と誤マッチした場合、response_completeの検出に到達しなくなる。",
+      "affected_components": [
+        "src/lib/status-detector.ts",
+        "tests/unit/lib/status-detector.test.ts"
+      ],
+      "risk_level": "medium",
+      "suggestion": "テスト設計（セクション11.2）に以下を追加すべき: (1) OpenCode通常応答出力（選択リストなし）でselection_listが誤検知されないことの回帰テスト、(2) OpenCode response_complete出力が(C)をスキップして(D)に到達することの確認テスト、(3) priority 2.5ブロックの全4分岐(A)(B)(C)(D)の排他性テスト。"
+    },
+    {
+      "id": "DR3-003",
+      "severity": "should_fix",
+      "category": "既存機能への回帰リスク",
+      "title": "current-output APIレスポンス型定義のフロントエンド同期",
+      "description": "current-output/route.tsに isSelectionListActive フィールドを追加する設計だが、WorktreeDetailRefactored.tsxの110-121行目付近で定義されているCliStatusインターフェース（isRunning, isGenerating, isPromptWaiting, thinking等）にはこのフィールドが含まれていない。TypeScript型定義が共有型ファイルではなくコンポーネント内にインラインで定義されているため、APIレスポンスの変更がコンパイル時に検出されない。フロントエンド側で新フィールドを参照する際に型定義の更新を忘れるリスクがある。",
+      "affected_components": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/app/api/worktrees/[id]/current-output/route.ts"
+      ],
+      "risk_level": "medium",
+      "suggestion": "設計書セクション7.3に、WorktreeDetailRefactored.tsx内のCliStatusインターフェースにisSelectionListActiveフィールドを追加する変更を明記すべき。また、中期的にはcurrent-output APIのレスポンス型をsrc/types/に共通型として抽出し、API側とフロントエンド側の両方で参照する構成を推奨する。"
+    },
+    {
+      "id": "DR3-004",
+      "severity": "should_fix",
+      "category": "パフォーマンスへの影響",
+      "title": "selection_list検出がcontentCandidatesウィンドウ外で実行される設計の欠落",
+      "description": "設計書セクション6.1では priority 2.5 に (C) selection_list を追加する方針だが、既存の status-detector.ts の priority 2.5 ブロック（202-264行目）を見ると、(A) はlastLines（footer 15行）でチェックし、(B)(D) はcontentCandidatesウィンドウ（footer境界より上のコンテンツ領域）でチェックしている。選択リストがOpenCode TUIのどの領域に表示されるか（footer領域かコンテンツ領域か）によって検出ウィンドウが異なるが、設計書ではどのウィンドウで検出するかが明記されていない。誤ったウィンドウで検出すると、パターンマッチが失敗するか、不要な範囲をスキャンしてパフォーマンスが劣化する。",
+      "affected_components": [
+        "src/lib/status-detector.ts"
+      ],
+      "risk_level": "medium",
+      "suggestion": "設計書セクション6.1またはセクション6.4に、選択リストパターンの検出対象ウィンドウ（lastLines / contentCandidates / fullOutput）を明記する。前提作業（capture-paneサンプル取得）後にTUIレイアウト上の表示位置を確認し、適切なウィンドウを選定すること。"
+    },
+    {
+      "id": "DR3-005",
+      "severity": "should_fix",
+      "category": "既存機能への回帰リスク",
+      "title": "sendSpecialKeysAndInvalidate()ラッパー追加時のprompt-answer-sender.ts動作への影響",
+      "description": "設計書セクション9.2では、tmux.tsにsendSpecialKeysAndInvalidate()ラッパーを追加し、prompt-answer-sender.tsへの適用は本Issueスコープ外としている。この方針自体は適切だが、prompt-answer-sender.tsは現在sendSpecialKeys()とinvalidateCache()を別々にimportして使用しており（90行目、97行目、111行目）、将来のリファクタリング時にラッパーへ移行する際、prompt-answer-sender.ts固有のロジック（multi-select checkbox操作）でsendSpecialKeysの直後ではなく関数末尾でinvalidateCacheを呼んでいる点を見落とすリスクがある。",
+      "affected_components": [
+        "src/lib/prompt-answer-sender.ts",
+        "src/lib/tmux.ts"
+      ],
+      "risk_level": "low",
+      "suggestion": "設計書セクション9.2の適用方針に、prompt-answer-sender.tsでは sendSpecialKeys() が複数箇所（L90, L97）で呼ばれ invalidateCache() は関数末尾（L111）で一度だけ呼ばれるパターンであること、ラッパー適用時にはinvalidateCacheの二重呼び出しに注意が必要であることを注記として追加すべき。"
+    },
+    {
+      "id": "DR3-006",
+      "severity": "nice_to_have",
+      "category": "運用への影響",
+      "title": "special-keys APIのエラーレスポンスにおけるログ出力方針",
+      "description": "設計書セクション5.1ではspecial-keys APIのエラーレスポンスを定義しているが、terminal/route.ts（86行目）のようなconsole.errorによるサーバーサイドログ出力の方針が明記されていない。terminal/route.tsでは catch ブロックで 'Terminal API error:' をログ出力しているが、special-keys APIでも同様のログ出力パターンを踏襲すべきかどうかが不明確である。",
+      "affected_components": [
+        "src/app/api/worktrees/[id]/special-keys/route.ts (新規)"
+      ],
+      "risk_level": "low",
+      "suggestion": "設計書セクション4.2に、terminal/route.tsのエラーログパターン（catch内のconsole.error + 固定文字列エラーレスポンス）を踏襲する旨を明記する。"
+    },
+    {
+      "id": "DR3-007",
+      "severity": "nice_to_have",
+      "category": "テストカバレッジへの影響",
+      "title": "worktree-status-helper.tsへの波及テスト",
+      "description": "src/lib/worktree-status-helper.tsはdetectSessionStatus()をimportして使用している。status-detector.tsにselection_list検出を追加すると、worktree-status-helper.ts経由でサイドバーのステータス表示にも影響が及ぶ。設計書セクション6.2でstatus: 'waiting'を返す方針のため、サイドバーに「応答待ち」として表示されることになるが、テスト設計（セクション11）にworktree-status-helper.ts経由の統合テストが含まれていない。",
+      "affected_components": [
+        "src/lib/worktree-status-helper.ts",
+        "サイドバーUI（ステータス表示）"
+      ],
+      "risk_level": "low",
+      "suggestion": "テスト設計セクション11.2の回帰テストに、worktree-status-helper.ts経由でselection_list時に'waiting'ステータスが正しく伝播することの確認を追加することを推奨する。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 1,
+    "should_fix": 4,
+    "nice_to_have": 2,
+    "total": 7
+  }
+}

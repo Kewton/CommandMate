@@ -16,7 +16,7 @@ vi.mock('fs', () => ({
 }));
 
 // Mock auto-yes-manager
-vi.mock('@/lib/auto-yes-manager', () => ({
+vi.mock('@/lib/polling/auto-yes-manager', () => ({
   getAutoYesStateWorktreeIds: vi.fn().mockReturnValue([]),
   getAutoYesPollerWorktreeIds: vi.fn().mockReturnValue([]),
   deleteAutoYesState: vi.fn().mockReturnValue(true),
@@ -31,7 +31,7 @@ vi.mock('@/lib/schedule-manager', () => ({
 }));
 
 // Mock response-poller
-vi.mock('@/lib/response-poller', () => ({
+vi.mock('@/lib/polling/response-poller', () => ({
   getActivePollers: vi.fn().mockReturnValue([]),
   stopPolling: vi.fn(),
 }));
@@ -55,7 +55,7 @@ import {
   MCP_PROCESS_PATTERNS,
   MAX_PS_OUTPUT_BYTES,
 } from '@/lib/resource-cleanup';
-import { getAutoYesStateWorktreeIds, getAutoYesPollerWorktreeIds, deleteAutoYesState, stopAutoYesPolling } from '@/lib/auto-yes-manager';
+import { getAutoYesStateWorktreeIds, getAutoYesPollerWorktreeIds, deleteAutoYesState, stopAutoYesPolling } from '@/lib/polling/auto-yes-manager';
 import { stopScheduleForWorktree, getScheduleWorktreeIds } from '@/lib/schedule-manager';
 import { execFile } from 'child_process';
 import { existsSync } from 'fs';

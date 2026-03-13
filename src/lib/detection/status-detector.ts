@@ -1,0 +1,361 @@
+/**
+ * Session status detection for CLI tools.
+ * Issue #54: Improved status detection with confidence levels.
+ * Issue #188: Thinking indicator false detection fix (windowed detection).
+ *
+ * This module provides reliable session status detection by:
+ * 1. Checking for interactive prompts (yes/no, multiple choice)
+ * 2. Checking for thinking/processing indicators (windowed to last N lines)
+ * 3. Checking for input prompts (ready for user input)
+ * 4. Using time-based heuristics when patterns don't match
+ *
+ * Architecture note (Issue #408: SF-001 resolved):
+ * Previously, this module returned StatusDetectionResult without
+ * PromptDetectionResult (SF-001 tradeoff). Callers needing promptData
+ * had to call detectPrompt() separately, resulting in a controlled DRY violation.
+ *
+ * Issue #408 resolved this by adding a required promptDetection field to
+ * StatusDetectionResult. The SRP concern was mitigated by:
+ *   - Callers not needing promptData can simply ignore the field
+ *   - PromptDetectionResult being a stable type with low change frequency
+ *
+ * Future guideline (DR1-002): If PromptDetectionResult gains high-frequency
+ * changes or large structural modifications, consider re-evaluating this
+ * coupling via a minimal DTO/projection type.
+ */
+
+import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER } from './cli-patterns';
+import { detectPrompt } from './prompt-detector';
+import type { PromptDetectionResult } from './prompt-detector';
+import type { CLIToolType } from '@/lib/cli-tools/types';
+
+/**
+ * Session status types
+ */
+export type SessionStatus = 'idle' | 'ready' | 'running' | 'waiting';
+
+/**
+ * Status confidence levels
+ * - high: Pattern clearly detected
+ * - low: Heuristic-based determination
+ */
+export type StatusConfidence = 'high' | 'low';
+
+/**
+ * Status detection result
+ */
+export interface StatusDetectionResult {
+  /** Detected session status */
+  status: SessionStatus;
+  /** Confidence level of the detection */
+  confidence: StatusConfidence;
+  /** Reason for the detection (for debugging) */
+  reason: string;
+  /**
+   * Whether an active interactive prompt (y/n, multiple choice) was detected.
+   * Issue #235: Uses full output (detectPrompt's internal 50-line window)
+   * instead of STATUS_CHECK_LINE_COUNT (15) lines to support long prompts
+   * like AskUserQuestion format with option descriptions.
+   *
+   * Used by callers as the source of truth for isPromptWaiting (SF-004).
+   */
+  hasActivePrompt: boolean;
+
+  /**
+   * Issue #408: Prompt detection result from internal detectPrompt() call.
+   * Required field (DR1-001) - callers that need promptData can access it
+   * directly without a second detectPrompt() call.
+   * Required so that future return path additions are caught by the compiler
+   * (defense-in-depth).
+   *
+   * Contains the full PromptDetectionResult including:
+   * - isPrompt: boolean (always matches hasActivePrompt)
+   * - promptData?: PromptData (question, options, type etc.)
+   * - cleanContent: string
+   * - rawContent?: string (truncated, Issue #235)
+   *
+   * Design guarantee: When status === 'running' && reason === 'thinking_indicator',
+   * promptDetection.isPrompt is always false (prompt detection has higher priority
+   * than thinking detection in the internal priority order).
+   */
+  promptDetection: PromptDetectionResult;
+}
+
+/**
+ * Number of lines from the end to check for prompt and input indicators
+ * @constant
+ */
+const STATUS_CHECK_LINE_COUNT: number = 15;
+
+/**
+ * Number of lines from the end to check for thinking indicators.
+ * Thinking indicators (spinner + activity text) only appear in the most recent lines.
+ * A small window prevents completed thinking summaries (e.g., "Churned for 41s")
+ * in scrollback from being falsely detected as active thinking (Issue #188 root cause).
+ *
+ * SF-002 naming rationale: Named STATUS_THINKING_LINE_COUNT (not THINKING_CHECK_LINE_COUNT)
+ * to avoid naming collision with auto-yes-manager.ts. Three related constants exist:
+ *
+ * | Constant                          | Value | Module              | Purpose                          |
+ * |-----------------------------------|-------|---------------------|----------------------------------|
+ * | STATUS_THINKING_LINE_COUNT        |   5   | status-detector.ts  | UI status display (accuracy)     |
+ * | RESPONSE_THINKING_TAIL_LINE_COUNT |   5   | response-poller.ts  | Response extraction tail check   |
+ * | THINKING_CHECK_LINE_COUNT         |  50   | auto-yes-manager.ts | Auto-Yes safety (wider window)   |
+ *
+ * The UI constants (5) use a narrow window for precision. The Auto-Yes constant (50)
+ * uses a wider window that matches detectMultipleChoicePrompt's scan range, prioritizing
+ * safety over precision (Issue #191).
+ *
+ * @constant
+ */
+const STATUS_THINKING_LINE_COUNT: number = 5;
+
+/**
+ * Reason string constants for StatusDetectionResult.reason.
+ * Shared between status-detector.ts and current-output/route.ts to prevent typos (DR2-003).
+ */
+export const STATUS_REASON = {
+  PROMPT_DETECTED: 'prompt_detected',
+  THINKING_INDICATOR: 'thinking_indicator',
+  OPENCODE_PROCESSING_INDICATOR: 'opencode_processing_indicator',
+  OPENCODE_SELECTION_LIST: 'opencode_selection_list',
+  CLAUDE_SELECTION_LIST: 'claude_selection_list',
+  OPENCODE_RESPONSE_COMPLETE: 'opencode_response_complete',
+  INPUT_PROMPT: 'input_prompt',
+  NO_RECENT_OUTPUT: 'no_recent_output',
+  DEFAULT: 'default',
+} as const;
+
+/**
+ * Time threshold (in ms) for considering output as "stale"
+ * If no new output for this duration, assume processing is complete
+ * @constant
+ */
+const STALE_OUTPUT_THRESHOLD_MS: number = 5000;
+
+/**
+ * Detect session status with confidence level
+ *
+ * Priority order:
+ * 1. Interactive prompt (yes/no, multiple choice) -> waiting
+ * 2. Thinking indicator (spinner, progress) -> running
+ * 3. Input prompt (>, ❯, ›, $, %) -> ready
+ * 4. No recent output (>5s) -> ready (low confidence)
+ * 5. Default -> running (low confidence)
+ *
+ * @param output - Raw tmux output (including ANSI escape codes).
+ *                 This function handles ANSI stripping internally.
+ * @param cliToolId - CLI tool identifier for pattern selection (CLIToolType).
+ * @param lastOutputTimestamp - Optional timestamp (Date) for time-based heuristic.
+ * @returns Detection result with status, confidence, reason, hasActivePrompt, and promptDetection
+ */
+export function detectSessionStatus(
+  output: string,
+  cliToolId: CLIToolType,
+  lastOutputTimestamp?: Date
+): StatusDetectionResult {
+  // Strip ANSI codes and get last N lines for analysis
+  const cleanOutput = stripAnsi(output);
+  const lines = cleanOutput.split('\n');
+  // Strip trailing empty lines (tmux terminal padding) before windowing.
+  // tmux buffers often end with many empty padding lines that would otherwise
+  // fill the entire detection window, hiding the actual prompt/status content.
+  let lastNonEmptyIndex = lines.length - 1;
+  while (lastNonEmptyIndex >= 0 && lines[lastNonEmptyIndex].trim() === '') {
+    lastNonEmptyIndex--;
+  }
+  const contentLines = lines.slice(0, lastNonEmptyIndex + 1);
+  const lastLines = contentLines.slice(-STATUS_CHECK_LINE_COUNT).join('\n');
+  // DR-003: Separate thinking detection window (5 lines) from prompt detection window (15 lines)
+  const thinkingLines = contentLines.slice(-STATUS_THINKING_LINE_COUNT).join('\n');
+
+  // 1. Interactive prompt detection (highest priority)
+  // This includes yes/no prompts, multiple choice, and approval prompts
+  const promptOptions = buildDetectPromptOptions(cliToolId);
+  // Apply stripBoxDrawing() for Gemini CLI and OpenCode TUI compatibility:
+  // Gemini wraps prompts in box-drawing characters (╭╮╰╯│─) which prevent
+  // detectPrompt() from recognizing the prompt content.
+  // OpenCode TUI uses ┃ borders and █ scrollbar that need stripping.
+  // For OpenCode and Codex, use full cleanOutput instead of lastLines (15-line window)
+  // because their multiple-choice prompts with descriptions can exceed
+  // 15 lines. Codex approval prompts include long file lists that push the
+  // › indicator line outside the 15-line window. detectPrompt() applies its
+  // own 50-line window internally.
+  const promptInput = (cliToolId === 'opencode' || cliToolId === 'codex')
+    ? stripBoxDrawing(cleanOutput)
+    : stripBoxDrawing(lastLines);
+  const promptDetection = detectPrompt(promptInput, promptOptions);
+  if (promptDetection.isPrompt) {
+    return {
+      status: 'waiting',
+      confidence: 'high',
+      reason: 'prompt_detected',
+      hasActivePrompt: true,
+      promptDetection,
+    };
+  }
+
+  // 1.5. Claude CLI selection list detection
+  // Claude CLI's multi-select/checkbox prompts (e.g., AskUserQuestion with checkboxes)
+  // use arrow keys + Enter to navigate and toggle, not number input.
+  // The 15-line window may miss the question line, causing SEC-001a rejection above.
+  // Detect via the footer instruction pattern and show NavigationButtons instead of PromptPanel.
+  if (cliToolId === 'claude' && CLAUDE_SELECTION_LIST_FOOTER.test(lastLines)) {
+    return {
+      status: 'waiting',
+      confidence: 'high',
+      reason: STATUS_REASON.CLAUDE_SELECTION_LIST,
+      hasActivePrompt: false,
+      promptDetection,
+    };
+  }
+
+  // 2. Thinking indicator detection - STATUS_THINKING_LINE_COUNT window (narrower)
+  // CLI tool is actively processing (shows spinner, "Planning...", etc.)
+  if (detectThinking(cliToolId, thinkingLines)) {
+    return {
+      status: 'running',
+      confidence: 'high',
+      reason: 'thinking_indicator',
+      hasActivePrompt: false,
+      promptDetection,
+    };
+  }
+
+  // 2.5. OpenCode status detection (Issue #379)
+  // OpenCode TUI layout: content area (top) | empty padding (~150 lines) | footer status bar (~6 lines at bottom).
+  // Standard windowed checks (last N lines) only see footer/padding, never the content area.
+  //
+  // Detection strategy:
+  // A. "esc interrupt" in footer → actively processing (running)
+  // B. Find footer boundary via "ctrl+t" keybinding line, extract content above it, check for thinking → running
+  // C. Same content window, check for ▣ Build completion → ready
+  if (cliToolId === 'opencode') {
+    // A. Check footer for processing indicator ("esc interrupt" replaces "ctrl+t variants..." during processing)
+    if (OPENCODE_PROCESSING_INDICATOR.test(lastLines)) {
+      return {
+        status: 'running',
+        confidence: 'high',
+        reason: 'opencode_processing_indicator',
+        hasActivePrompt: false,
+        promptDetection,
+      };
+    }
+
+    // Extract content area by finding TUI footer boundary dynamically.
+    // Footer structure (bottom-up): keybinding hints ("ctrl+t variants..."),
+    // ╹▀▀ separator, model info bar ("Build GPT-5-mini GitHub Copilot"), ┃ padding.
+    // The keybinding line is the anchor; model bar is 2 lines above it.
+    // ┃ padding above the model bar becomes empty after stripBoxDrawing and is
+    // skipped by the lastNonEmpty search below.
+    const strippedForOpenCode = stripBoxDrawing(cleanOutput);
+    const ocLines = strippedForOpenCode.split('\n');
+    let footerBoundary = Math.max(0, ocLines.length - 7); // fallback: skip 7 lines
+    for (let i = ocLines.length - 1; i >= Math.max(0, ocLines.length - 10); i--) {
+      if (/ctrl\+[tp]/.test(ocLines[i])) {
+        // Exclude keybinding line (i), separator (i-1), and model info bar (i-2)
+        footerBoundary = Math.max(0, i - 2);
+        break;
+      }
+    }
+    const contentCandidates = ocLines.slice(0, footerBoundary);
+    let lastContentIdx = contentCandidates.length - 1;
+    while (lastContentIdx >= 0 && contentCandidates[lastContentIdx].trim() === '') {
+      lastContentIdx--;
+    }
+    if (lastContentIdx >= 0) {
+      // B. Check last few content lines for thinking indicators
+      const contentThinkingWindow = contentCandidates
+        .slice(Math.max(0, lastContentIdx - STATUS_THINKING_LINE_COUNT + 1), lastContentIdx + 1)
+        .join('\n');
+      if (detectThinking('opencode', contentThinkingWindow)) {
+        return {
+          status: 'running',
+          confidence: 'high',
+          reason: 'thinking_indicator',
+          hasActivePrompt: false,
+          promptDetection,
+        };
+      }
+
+      // C. Check content area for selection list (Issue #473: fuzzy-search list detection)
+      // Selection list header ("Select model"/"Select provider") may be far above the
+      // last content line when many items are listed, so check all content candidates.
+      const contentCheckWindow = contentCandidates
+        .slice(Math.max(0, lastContentIdx - STATUS_CHECK_LINE_COUNT + 1), lastContentIdx + 1)
+        .join('\n');
+      const fullContentText = contentCandidates.join('\n');
+      if (OPENCODE_SELECTION_LIST_PATTERN.test(fullContentText)) {
+        return {
+          status: 'waiting',
+          confidence: 'high',
+          reason: STATUS_REASON.OPENCODE_SELECTION_LIST,
+          hasActivePrompt: false,
+          promptDetection,
+        };
+      }
+
+      // D. Check last few content lines for completion marker (▣ Build · model · time)
+      if (OPENCODE_RESPONSE_COMPLETE.test(contentCheckWindow)) {
+        return {
+          status: 'ready',
+          confidence: 'high',
+          reason: STATUS_REASON.OPENCODE_RESPONSE_COMPLETE,
+          hasActivePrompt: false,
+          promptDetection,
+        };
+      }
+
+      // E. Check content area for prompt pattern (Issue #473: "Ask anything..." is in content area,
+      // not in lastLines, due to OpenCode TUI padding between content and footer)
+      const { promptPattern: ocPromptPattern } = getCliToolPatterns('opencode');
+      if (ocPromptPattern.test(contentCheckWindow)) {
+        return {
+          status: 'ready',
+          confidence: 'high',
+          reason: STATUS_REASON.PROMPT_DETECTED,
+          hasActivePrompt: true,
+          promptDetection,
+        };
+      }
+    }
+  }
+
+  // 3. Input prompt detection
+  // CLI tool is waiting for user input (shows >, ❯, ›, $, %, etc.)
+  const { promptPattern } = getCliToolPatterns(cliToolId);
+  if (promptPattern.test(lastLines)) {
+    return {
+      status: 'ready',
+      confidence: 'high',
+      reason: 'input_prompt',
+      hasActivePrompt: false,
+      promptDetection,
+    };
+  }
+
+  // 4. Time-based heuristic
+  // If no new output for >5 seconds, assume processing is complete
+  if (lastOutputTimestamp) {
+    const elapsed = Date.now() - lastOutputTimestamp.getTime();
+    if (elapsed > STALE_OUTPUT_THRESHOLD_MS) {
+      return {
+        status: 'ready',
+        confidence: 'low',
+        reason: 'no_recent_output',
+        hasActivePrompt: false,
+        promptDetection,
+      };
+    }
+  }
+
+  // 5. Default: assume running with low confidence
+  // This is a safe default when we cannot determine the state
+  return {
+    status: 'running',
+    confidence: 'low',
+    reason: 'default',
+    hasActivePrompt: false,
+    promptDetection,
+  };
+}

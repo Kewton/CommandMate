@@ -1,0 +1,81 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 481,
+  "apply_date": "2026-03-13",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "F101",
+        "status": "applied",
+        "change_summary": "影響規模セクションを新設。35ファイル移動・約696行import更新・約100ソースファイル・約99テストファイル影響の規模感と、段階的移行戦略（推奨移行順序: db -> tmux -> security -> detection -> session -> polling -> git）を明記"
+      },
+      {
+        "id": "F102",
+        "status": "applied",
+        "change_summary": "グループ間依存関係セクションを新設。依存方向図（ASCII）と具体的依存テーブル（From/To/Via/依存ファイル）を追加。一方向依存で循環リスクが低いことを明記"
+      },
+      {
+        "id": "F103",
+        "status": "applied",
+        "change_summary": "受け入れ基準のimportパス更新を4項目に細分化: (1)外部参照の一括更新、(2)移動ファイル内部の相対import変換方針、(3)__tests__の相対importパス更新、(4)vi.mock()のパス更新"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "F104",
+        "status": "applied",
+        "change_summary": "db/グループの後方互換性セクションを追加。@/lib/db パスでdb.tsを参照する36箇所について、db/index.tsでの再エクスポートによる移行コスト削減戦略を明記"
+      },
+      {
+        "id": "F105",
+        "status": "applied",
+        "change_summary": "__tests__ディレクトリの注記セクションを追加。相対importパス更新が必要な6ファイル（worktrees-sync.test.ts等）を具体的に列挙"
+      },
+      {
+        "id": "F106",
+        "status": "applied",
+        "change_summary": "transports/の案A/案Bに具体的影響差分を追記。案A: cli-session.ts, ws-server.ts+テスト4ファイル変更、案B: 内部3ファイルの相対パス変更"
+      },
+      {
+        "id": "F107",
+        "status": "applied",
+        "change_summary": "ドキュメント更新の影響規模を受け入れ基準に明記（CLAUDE.md: 約52箇所、module-reference.md: 約54箇所、architecture.md: 約6箇所）"
+      },
+      {
+        "id": "F108",
+        "status": "applied",
+        "change_summary": "vi.mock()のモジュールパス更新方針を受け入れ基準に追加。バレルエクスポートで旧パス維持の場合の判断基準も記載"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F109",
+        "status": "applied",
+        "change_summary": "polling/グループのサブディレクトリ構成に凝集度に関する注釈を追記（session/, detection/, cli-tools/への外部依存が多く、将来的なグループ再編を検討可能）"
+      }
+    ]
+  },
+  "skipped_findings": [],
+  "summary": {
+    "total_findings": 9,
+    "applied": 9,
+    "skipped": 0
+  },
+  "issue_updated": true,
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/481"
+  },
+  "key_changes": [
+    "影響規模セクション新設（importパス変更696行、ソース約100ファイル、テスト約99ファイル）",
+    "段階的移行戦略と推奨移行順序を追加（db -> tmux -> security -> detection -> session -> polling -> git）",
+    "グループ間依存関係セクション新設（依存方向図・テーブル・高影響ファイル一覧）",
+    "受け入れ基準を大幅に構造化（importパス更新4項目、循環依存2項目、テスト2項目、ドキュメント3項目、バレルエクスポート1項目）",
+    "db/グループの後方互換性戦略（@/lib/db パス維持）を追加",
+    "__tests__ディレクトリの影響ファイル6件を具体列挙",
+    "transports/ 案A/案Bの具体的影響差分を追記",
+    "ドキュメント更新箇所数を明記（合計約112箇所）",
+    "polling/グループの凝集度注釈を追記"
+  ]
+}

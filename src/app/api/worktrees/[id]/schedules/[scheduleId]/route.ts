@@ -10,14 +10,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
-import { isValidWorktreeId } from '@/lib/auto-yes-manager';
+import { isValidWorktreeId } from '@/lib/security/path-validator';
 import {
   isValidUuidV4,
   MAX_SCHEDULE_NAME_LENGTH,
   MAX_SCHEDULE_MESSAGE_LENGTH,
 } from '@/config/schedule-config';
-import { ALLOWED_CLI_TOOLS } from '@/lib/claude-executor';
+import { ALLOWED_CLI_TOOLS } from '@/lib/session/claude-executor';
 import { isValidCronExpression } from '@/config/cmate-constants';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/schedules');
 
 /**
  * GET /api/worktrees/:id/schedules/:scheduleId
@@ -50,7 +53,7 @@ export async function GET(
 
     return NextResponse.json({ schedule }, { status: 200 });
   } catch (error) {
-    console.error('Error fetching schedule:', error);
+    logger.error('error-fetching-schedule:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: 'Failed to fetch schedule' }, { status: 500 });
   }
 }
@@ -139,7 +142,7 @@ export async function PUT(
 
     return NextResponse.json({ schedule: updated }, { status: 200 });
   } catch (error) {
-    console.error('Error updating schedule:', error);
+    logger.error('error-updating-schedule:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: 'Failed to update schedule' }, { status: 500 });
   }
 }
@@ -175,7 +178,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {
-    console.error('Error deleting schedule:', error);
+    logger.error('error-deleting-schedule:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: 'Failed to delete schedule' }, { status: 500 });
   }
 }

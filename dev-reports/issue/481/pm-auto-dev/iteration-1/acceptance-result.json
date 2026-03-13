@@ -1,0 +1,55 @@
+{
+  "issue_number": 481,
+  "overall_status": "passed",
+  "scenarios": [
+    {
+      "id": "S1",
+      "name": "各サブディレクトリ存在確認",
+      "status": "passed",
+      "details": "db/, tmux/, security/, detection/, session/, polling/, git/ の全7ディレクトリに index.ts が存在することを確認"
+    },
+    {
+      "id": "S2",
+      "name": "transports/削除確認",
+      "status": "passed",
+      "details": "src/lib/transports/ ディレクトリが存在しないことを確認 (No such file or directory)"
+    },
+    {
+      "id": "S3",
+      "name": "lint確認",
+      "status": "passed",
+      "details": "npm run lint: No ESLint warnings or errors"
+    },
+    {
+      "id": "S4",
+      "name": "tsc確認",
+      "status": "passed",
+      "details": "npx tsc --noEmit: エラー出力なし (exit code 0)"
+    },
+    {
+      "id": "S5",
+      "name": "test:unit確認",
+      "status": "passed",
+      "details": "249 test files passed, 4921 tests passed, 7 skipped, 0 failed"
+    },
+    {
+      "id": "S6",
+      "name": "security named export確認",
+      "status": "passed",
+      "details": "security/index.ts はnamed export方式。isWithinRoot はバレルから除外 (@internal)、generateToken/hashToken も除外 (auth-internal) とコメントで明記"
+    },
+    {
+      "id": "S7",
+      "name": "middleware直接import確認",
+      "status": "passed",
+      "details": "middleware.ts line 18: import from './lib/security/ip-restriction' で直接importを確認"
+    },
+    {
+      "id": "S8",
+      "name": "CLAUDE.mdパス更新確認",
+      "status": "passed",
+      "details": "CLAUDE.md のモジュール一覧が src/lib/db/, src/lib/tmux/, src/lib/security/, src/lib/detection/, src/lib/session/, src/lib/polling/, src/lib/git/ の新パスに更新済み"
+    }
+  ],
+  "summary": "全8シナリオ合格。7つのドメイン別サブディレクトリが正しく作成され、transports/は削除済み。lint/tsc/unit testすべてパス。security barrel exportはnamed export方式でisWithinRoot/generateToken/hashTokenを除外。middleware.tsはip-restrictionを直接import。CLAUDE.mdのパスも更新済み。"
+}

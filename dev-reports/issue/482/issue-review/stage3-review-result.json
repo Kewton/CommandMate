@@ -1,0 +1,112 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 482,
+  "review_date": "2026-03-13",
+  "impact_analysis": {
+    "scope": "4つの変更対象はいずれもローカルスコープの変更であり、影響範囲は限定的。SlashCommandsResponse型は2つの独立したスコープ（api-client.tsのexport型とroute.tsのローカル型）に存在するが、api-client.tsのSlashCommandsResponseを直接importしているモジュールは存在しないため、方針(A)(B)いずれでも破壊的変更リスクは低い。opencode-config.tsのTODO削除は純粋なコメント変更。cli-patterns.tsのIssue #XXX修正もJSDocコメント変更のみ。",
+    "affected_files": [
+      "src/app/api/worktrees/[id]/slash-commands/route.ts",
+      "src/lib/api-client.ts",
+      "src/lib/cli-tools/opencode-config.ts",
+      "src/lib/cli-patterns.ts",
+      "src/hooks/useSlashCommands.ts",
+      "tests/integration/api-worktree-slash-commands.test.ts",
+      "tests/integration/api-slash-commands.test.ts",
+      "src/lib/__tests__/cli-patterns.test.ts",
+      "tests/unit/cli-tools/opencode-config.test.ts"
+    ]
+  },
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "location": "Issue本文: 型統合の方針セクション",
+      "description": "api-client.tsのSlashCommandsResponseを型名で直接importしているモジュールは存在しない（useSlashCommands.tsはhandleApiErrorのみimportし、fetch応答をdata.groupsとして直接アクセスしている）。そのため方針(A)で共通ベース型を導入しても型の利用者への影響はないが、方針(A)を選択した場合、共通型の配置場所（src/types/等）を明示する必要がある。Issueに配置場所の記載がない。",
+      "suggestion": "方針(A)を採用する場合、共通ベース型の配置先ファイル（例: src/types/slash-commands.ts）を明記する。ただし、調査の結果api-client.tsのSlashCommandsResponseは実質的にslashCommandApi.getAll()の戻り値型としてのみ使用されており、route.tsのローカル型とは完全に独立しているため、方針(B)「統合不要と判断しTODOを削除」が最もリスクが低い。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "location": "src/lib/cli-tools/opencode-config.ts:217, 284",
+      "description": "TODOコメント削除の方針は「JSDoc（ensureOpencodeConfig関数内）に集約」とされている。実際にensureOpencodeConfig関数のJSDoc（L340-342）には既に「If a 3rd provider is added, consider refactoring to a data-driven design (providerDefinitions array + loop)」という記載があり、TODOコメントのHTTP fetch共通化の意図と重複している。ただし、TODOの内容（fetchWithTimeoutの共通化）はJSDocの記載（data-driven design）と微妙に異なる粒度であるため、削除時にJSDocの内容で情報が完全にカバーされるか要確認。",
+      "suggestion": "ensureOpencodeConfig関数のJSDoc（L340-342）が既にリファクタリング方針を記述しているため、TODO削除で情報損失は最小限。ただし「fetchWithTimeout共通化」という具体的な実装ヒントも残したい場合は、既存JSDocに1行追記する（例: 「HTTP fetch logic can be extracted to a shared fetchWithTimeout helper」）。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "location": "src/lib/cli-patterns.ts:27",
+      "description": "Issue #XXXの参照はコミット5ebd2baで導入された。コミットメッセージ「fix(status-detector): detect running status during Task execution」にIssue番号の記載がなく、git logからPRを辿っても明確な関連Issueが特定できない。Issueの方針は「git logで該当コミットの関連PRを辿り正しいIssue番号を特定する。特定できない場合はIssue番号参照を除去する」であるが、特定できなかった場合の具体的な修正文言が未定義。",
+      "suggestion": "Issue番号が特定できない場合の修正案を明記する。例: 「Issue #XXXをコミットハッシュ参照（commit 5ebd2ba）に置き換える」または「Issue参照自体を削除し、JSDocの説明文のみ残す（例: 'Alternative 2: \"esc to interrupt\" status bar text'）」。後者が最もシンプルで推奨。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "nice_to_have",
+      "category": "テスト範囲",
+      "location": "tests/integration/api-worktree-slash-commands.test.ts",
+      "description": "方針(A)で共通ベース型を導入した場合、既存の統合テスト（api-worktree-slash-commands.test.ts）はレスポンス構造をdata.groups、data.sourcesとして直接検証しており、型のimportは行っていない。そのため型変更によるテスト破壊は発生しない。方針(B)のTODO削除のみの場合もテストへの影響はゼロ。",
+      "suggestion": "テスト影響なし。追加テストは不要。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "location": "src/lib/__tests__/cli-patterns.test.ts",
+      "description": "cli-patterns.tsのJSDocコメント修正（Issue #XXX参照の解消）は実行時の挙動に影響しないため、既存テスト（cli-patterns.test.ts:98-132 CLAUDE_THINKING_PATTERNテスト群）は影響を受けない。パターン定義自体（L33-36）は変更されないため、テストの追加・修正は不要。",
+      "suggestion": "テスト影響なし。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 2,
+    "nice_to_have": 3,
+    "total": 5
+  },
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/slash-commands/route.ts",
+      "relevance": "ローカルSlashCommandsResponse型定義（L34-43）とTODOコメント（L33）。変更対象。"
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "relevance": "exportされたSlashCommandsResponse型（L437-439）。slashCommandApi.getAll()で使用。型名を直接importしている外部モジュールなし。"
+    },
+    {
+      "file": "src/hooks/useSlashCommands.ts",
+      "relevance": "slash-commands APIの消費側。handleApiErrorのみimportし、レスポンスはdata.groupsとして直接アクセス。SlashCommandsResponse型のimportなし。"
+    },
+    {
+      "file": "src/app/api/slash-commands/route.ts",
+      "relevance": "MCBDエンドポイント。{ groups }のみ返却。api-client.tsのSlashCommandsResponseと対応。"
+    },
+    {
+      "file": "src/lib/cli-tools/opencode-config.ts",
+      "relevance": "TODOコメント2箇所（L217, L284）。ensureOpencodeConfig JSDoc（L340-342）に既存のリファクタリング指針あり。"
+    },
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "relevance": "Issue #XXX参照（L27）。コミット5ebd2baで導入。CLAUDE_THINKING_PATTERN定義のJSDoc内。"
+    },
+    {
+      "file": "tests/integration/api-worktree-slash-commands.test.ts",
+      "relevance": "slash-commands APIの統合テスト。型のimportなし、レスポンス構造を直接検証。"
+    },
+    {
+      "file": "src/lib/__tests__/cli-patterns.test.ts",
+      "relevance": "CLAUDE_THINKING_PATTERNのユニットテスト。JSDoc変更では影響なし。"
+    },
+    {
+      "file": "tests/unit/cli-tools/opencode-config.test.ts",
+      "relevance": "opencode-config.tsのユニットテスト。TODO削除（コメント変更のみ）では影響なし。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュールリファレンスにcli-patterns.ts、opencode-config.ts、slash-commands route.tsの記載あり。本Issue変更ではドキュメント更新不要。"
+    }
+  ]
+}

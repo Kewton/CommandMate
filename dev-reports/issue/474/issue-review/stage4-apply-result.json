@@ -1,0 +1,74 @@
+{
+  "issue_number": 474,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-03-12",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "「画像送信フロー」セクションを新設し、2段階方式（upload APIで.commandmate/attachments/に保存→send APIに画像パスを渡す）を明記。api-client.tsのContent-Type: application/jsonを維持できる設計判断を記載"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "影響範囲テーブルのsend/route.ts行を具体化: SendMessageRequest型にimagePath?: stringを追加、画像ありの場合sendMessageWithImageを呼び出す"
+      },
+      {
+        "id": "MF-3",
+        "status": "applied",
+        "change_summary": "フォールバック説明にpath-validator.tsのisPathSafe/resolveAndValidateRealPathによるパストラバーサル防御適用を追記。関連コンポーネントにもpath-validator.tsを追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "影響範囲に「既存テストファイル」テーブルを新設し、tests/unit/cli-tools/配下およびtests/unit/api/配下の更新必要性を記載"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "実装タスクに「.commandmate/attachments/を.gitignoreに追加する」タスクを追加"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "変更対象ファイル表にWorktreeDetailRefactored.tsxを追加（MessageInput呼び出し箇所への画像パラメータ追加）"
+      },
+      {
+        "id": "SF-5",
+        "status": "applied",
+        "change_summary": "SVGに関する受入条件を「image-extensions.tsの既存XSS対策バリデーションを経た上で添付対象とするか、今回のスコープ外とするかを実装時に判断する」に更新"
+      }
+    ],
+    "nice_to_have": []
+  },
+  "skipped_findings": ["SF-2", "NTH-1", "NTH-2", "NTH-3"],
+  "skip_reasons": {
+    "SF-2": "cli-tools/index.tsのエクスポート更新はインターフェース変更に伴い自動的に含まれるため、ユーザー指示の反映対象外",
+    "NTH-1": "ユーザー指示の反映対象外（Nice to Have）",
+    "NTH-2": "ユーザー指示の反映対象外（Nice to Have）",
+    "NTH-3": "ユーザー指示の反映対象外（Nice to Have）"
+  },
+  "summary": {
+    "total_findings": 11,
+    "applied": 7,
+    "skipped": 4
+  },
+  "updated_sections": [
+    "提案する解決策 - フォールバック（パストラバーサル防御追記）",
+    "提案する解決策 - 画像送信フロー（新設）",
+    "実装タスク（.gitignoreタスク追加）",
+    "受入条件（SVG記述更新）",
+    "影響範囲 - 変更対象ファイル（WorktreeDetailRefactored.tsx追加、send/route.ts具体化、api-client.ts補足追加）",
+    "影響範囲 - 既存テストファイル（新設）",
+    "影響範囲 - 関連コンポーネント（path-validator.ts追加）",
+    "レビュー履歴（Stage 3反映内容追加）"
+  ],
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/474"
+  }
+}

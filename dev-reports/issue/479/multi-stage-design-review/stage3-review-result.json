@@ -1,0 +1,86 @@
+{
+  "issue_number": 479,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "reviewed_at": "2026-03-13",
+  "design_doc": "dev-reports/design/issue-479-large-file-split-design-policy.md",
+  "summary": "影響範囲の観点でレビューを実施した。設計方針書はバレルファイル戦略によりdb.ts（消費者52+34件）やresponse-poller.ts（消費者11件）のimportパス変更を回避する方針が適切に設計されている。しかし、テストファイルのvi.mockパス更新の網羅性に不足があり、session-cleanup.tsやresource-cleanup.tsのような複数分割対象モジュールに依存するファサードモジュールへの波及影響が設計書で分析されていない。また、auto-yes-manager.tsのglobalThisパターン分割時の状態整合性リスクや、CLAUDE.md更新対象としてのpath-validator.ts記述更新が未特定である。ビルド影響については、バレルファイルによるツリーシェイキング阻害を認識しつつも本Issue範囲では適切な判断である。",
+  "findings": [
+    {
+      "id": "D3-001",
+      "severity": "should_fix",
+      "category": "テスト",
+      "title": "vi.mockパス更新が必要なテストファイルの網羅的特定が不完全",
+      "description": "設計方針書セクション7のテストファイル対応表はresponse-poller.tsとauto-yes-manager.tsについて記載があるが、session-cleanup-issue404.test.tsがvi.mock('@/lib/auto-yes-manager')を使用していること（設計書に記載あり）、resource-cleanup.test.tsがvi.mock('@/lib/auto-yes-manager')およびvi.mock('@/lib/response-poller')を使用していること（設計書に記載あり）は把握されている。しかし、db.tsをmockしているテストファイルが少なくとも20件以上（terminal-route.test.ts、special-keys-route.test.ts、capture-route.test.ts、git-show.test.ts、git-log.test.ts、git-diff.test.ts、tmux-capture-invalidation.test.ts、ws-server-terminal.test.ts、api-search.test.ts、api-worktree-slash-commands.test.ts、files-304.test.ts等）存在し、バレルファイル戦略によりimportパスは維持されるものの、vi.mockの内部で返却するモック関数が分割後のモジュール構造と不整合を起こす可能性について分析がない。",
+      "location": "セクション7. テスト戦略",
+      "suggestion": "vi.mock('@/lib/db')を使用している全テストファイル（実測20件以上）をリストアップし、バレルファイル経由のmockが分割後も正常に動作することを検証計画に含めること。特にvi.mockでreturn値に含まれる関数名が、分割後のサブモジュールに移動してもバレル経由で解決されることの確認手順を明記すべき。"
+    },
+    {
+      "id": "D3-002",
+      "severity": "should_fix",
+      "category": "依存関係",
+      "title": "session-cleanup.tsとresource-cleanup.tsへの波及影響が未分析",
+      "description": "session-cleanup.tsはresponse-poller.ts、auto-yes-manager.ts、schedule-manager.tsから関数をimportするファサードモジュールである。resource-cleanup.tsはauto-yes-manager.tsとschedule-manager.tsから関数をimportしている。これらのモジュールはPhase 2-3で分割される対象モジュールの消費者であり、バレルファイル戦略でimportパスは維持されるが、実装時にどのフェーズでどのimportが影響を受けるかの分析がない。特にresource-cleanup.tsはauto-yes-manager.tsの内部状態（autoYesStates、autoYesPollerStates）に直接アクセスするため、状態管理がauto-yes-state.tsに移動した際の影響が重要。",
+      "location": "セクション8. 実施フェーズ",
+      "suggestion": "session-cleanup.tsとresource-cleanup.tsを各フェーズの影響ファイルリストに追加すること。特にresource-cleanup.tsがauto-yes-manager.tsからimportしている関数（getAutoYesStatesForCleanup等）がどの分割先モジュールに配置されるかを明記すべき。"
+    },
+    {
+      "id": "D3-003",
+      "severity": "should_fix",
+      "category": "実行時",
+      "title": "auto-yes-manager.tsのglobalThisパターン分割時の状態整合性設計が不十分",
+      "description": "auto-yes-manager.tsにはglobalThis.__autoYesStatesとglobalThis.__autoYesPollerStatesという2つのglobalThisベースのMap状態がある。設計方針書セクション4-3ではこれらをauto-yes-state.ts（__autoYesStates）とauto-yes-poller.ts（__autoYesPollerStates）に分離する計画だが、globalThisの名前空間が変わらないことの明示的な保証がない。Next.jsのホットリロード時にモジュールが再評価された場合、globalThis参照は維持されるが、分割後のモジュール初期化順序によっては一方のMapが未初期化の状態でアクセスされるリスクがある。",
+      "location": "セクション4-3. auto-yes-manager.ts分割設計",
+      "suggestion": "globalThis.__autoYesStatesとglobalThis.__autoYesPollerStatesのキー名が分割前後で変わらないことを明記し、各分割モジュールでの初期化パターン（??= を使用したlazy初期化）が維持されることを設計書に記載すること。また、startAutoYesPolling()がauto-yes-state.tsの状態を参照する際のモジュール初期化順序についても言及すべき。"
+    },
+    {
+      "id": "D3-004",
+      "severity": "should_fix",
+      "category": "実行時",
+      "title": "response-poller.tsのモジュールレベルMap分割時のライフサイクル整合性が曖昧",
+      "description": "response-poller.tsにはactivePollers（Map）、pollingStartTimes（Map）、tuiResponseAccumulator（Map）の3つのモジュールレベル状態がある。設計方針書セクション4-2ではactivePollers/pollingStartTimesをresponse-poller.tsに、tuiResponseAccumulatorをtui-accumulator.tsに分離し、stopPolling()時にclearTuiAccumulator()を呼び出す設計としている。しかし、これらのMapがglobalThisではなくモジュールスコープの通常変数として定義されている点が重要であり、auto-yes-manager.tsのglobalThisパターンとは異なる。モジュール分割後、これらのMapが新しいモジュールスコープで正しく参照されることの確認が必要。",
+      "location": "セクション4-2. response-poller.ts分割設計 - モジュールレベル状態の配置",
+      "suggestion": "response-poller.tsのMap状態がglobalThisパターンを使用していないことを明記し、分割後の各モジュールで独立したモジュールスコープ変数として宣言されることを確認すること。もしホットリロード時の状態永続化が必要であれば、globalThisパターンへの移行を検討すべきか否かの判断も含めること。"
+    },
+    {
+      "id": "D3-005",
+      "severity": "nice_to_have",
+      "category": "ドキュメント",
+      "title": "CLAUDE.md更新対象にpath-validator.tsの説明更新が含まれていない",
+      "description": "設計方針書セクション10のCLAUDE.md更新方針では「分割前のモジュールエントリを削除し、分割後の新モジュールをIssue番号付きで追加」とあるが、path-validator.tsは分割対象ではなく既存モジュールへの関数追加である。isValidWorktreeIdの移動後、CLAUDE.mdのpath-validator.tsエントリの説明を更新する必要があるが、これが更新対象として明示されていない。Stage 2のD2-007でも指摘されているが、設計書への反映が確認できない。",
+      "location": "セクション10. CLAUDE.md更新方針",
+      "suggestion": "セクション10にpath-validator.tsの説明更新（isValidWorktreeId追加）を更新対象に含める旨を追記すること。また、auto-yes-manager.tsのCLAUDE.mdエントリからisValidWorktreeIdの記述を削除する必要がある点も明記すべき。"
+    },
+    {
+      "id": "D3-006",
+      "severity": "nice_to_have",
+      "category": "ドキュメント",
+      "title": "Phase 1分割対象のCLAUDE.md更新影響が未特定",
+      "description": "MarkdownEditor.tsx、FileTreeView.tsx、schedule-manager.tsの分割により、新たにMarkdownToolbar.tsx、MarkdownPreview.tsx、TreeNode.tsx、TreeContextMenu.tsx、cron-parser.ts、job-executor.tsが作成される。これらの新モジュールはCLAUDE.mdの主要モジュール一覧に追加が必要だが、Phase 1の具体的な追加エントリが特定されていない。",
+      "location": "セクション10. CLAUDE.md更新方針",
+      "suggestion": "各Phase完了時のCLAUDE.md更新内容を具体的に列挙するか、少なくとも各Phaseで追加/削除されるエントリ数の見積もりを記載すること。"
+    },
+    {
+      "id": "D3-007",
+      "severity": "nice_to_have",
+      "category": "ビルド",
+      "title": "Phase間でのビルド検証手順にバンドルサイズ比較が含まれていない",
+      "description": "セクション7の検証コマンドにはnpm run test:unit、npm run lint、npx tsc --noEmit、npx madge --circularが含まれるが、npm run buildが含まれていない。リファクタリングであるためバンドルサイズの大幅変動は想定されないが、バレルファイル戦略によるツリーシェイキング阻害が発生する可能性がある。各Phase完了時のビルド成功確認は受け入れ基準セクション12にnpm run lint && npx tsc --noEmitとして記載されているが、npm run buildの明示的な記載がない。",
+      "location": "セクション7. テスト戦略 - 検証コマンド、セクション12. 受け入れ基準",
+      "suggestion": "検証コマンドにnpm run buildを追加すること。受け入れ基準にもビルド成功を明示的に含めること。バンドルサイズの比較は必須ではないが、Phase 3完了時に分割前後のビルド出力サイズを記録しておくことを推奨する。"
+    },
+    {
+      "id": "D3-008",
+      "severity": "nice_to_have",
+      "category": "依存関係",
+      "title": "isValidWorktreeId移動の影響ファイル数が設計書と実測で不一致",
+      "description": "設計方針書セクション4-3では「11のAPIルート」からimportされていると記載しているが、実測では11のAPIルートファイルでisValidWorktreeIdを使用しており、この点は整合している。ただし、テストファイル側では5ファイル（auto-yes-manager.test.ts、auto-yes-manager-cleanup.test.ts、git-log.test.ts、git-diff.test.ts、git-show.test.ts）がimportパス変更の影響を受ける。設計書セクション7のテストファイル対応表ではgit系3ファイルのみ記載されており、auto-yes-manager.test.tsとauto-yes-manager-cleanup.test.tsのimportパス変更が漏れている。",
+      "location": "セクション7. テスト戦略 - auto-yes-manager.tsテストファイル対応表",
+      "suggestion": "auto-yes-manager.test.tsとauto-yes-manager-cleanup.test.tsのisValidWorktreeId import先変更をテストファイル対応表に追加すること。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 4,
+  "nice_to_have_count": 4,
+  "overall_assessment": "設計方針書の影響範囲分析は、バレルファイル戦略による消費者側importパス変更の回避という主要方針が妥当であり、高リスクモジュール（db.ts: 86消費者、auto-yes-manager.ts: 20消費者）への影響を最小化する設計となっている。一方で、(1) vi.mockパスの網羅的な影響分析、(2) ファサードモジュール（session-cleanup.ts、resource-cleanup.ts）への波及影響、(3) globalThisパターンとモジュールスコープ変数の分割時整合性、(4) CLAUDE.md更新対象の具体化という4つの領域で改善が必要である。must_fixレベルの致命的な欠落はなく、条件付き承認（conditionally_approved）とする。"
+}

@@ -9,6 +9,9 @@ import { NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getExternalAppById } from '@/lib/external-apps/db';
 import type { ExternalAppHealth } from '@/types/external-apps';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api/external-apps-health');
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic';
@@ -103,7 +106,7 @@ export async function GET(
 
     return NextResponse.json({ health }, { status: 200 });
   } catch (error) {
-    console.error('Error checking external app health:', error);
+    logger.error('error-checking-external-app-health:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to check external app health' },
       { status: 500 }

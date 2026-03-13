@@ -1,0 +1,31 @@
+{
+  "issue_number": 473,
+  "feature_summary": "OpenCode TUI選択リストのキーボードナビゲーション対応",
+  "acceptance_criteria": [
+    "tmux.ts に NAVIGATION_KEY_VALUES, NavigationKey型, isAllowedSpecialKey(), sendSpecialKeysAndInvalidate() が export されている",
+    "cli-patterns.ts に OPENCODE_SELECTION_LIST_PATTERN が定義されている",
+    "status-detector.ts の priority 2.5 ブロック内で selection_list 検出分岐が実装されている",
+    "POST /api/worktrees/[id]/special-keys エンドポイントが多層防御で実装されている",
+    "current-output API レスポンスに isSelectionListActive フラグが追加されている",
+    "NavigationButtons コンポーネントが Up/Down/Enter/Escape ボタンを表示する",
+    "WorktreeDetailRefactored.tsx が isSelectionListActive に基づいて NavigationButtons を条件付き表示する",
+    "既存テストが全てパスする",
+    "TypeScript型チェック・ESLintエラーが0件",
+    "既存の他CLIツール（Claude/Codex/Gemini）の操作に影響を与えない"
+  ],
+  "test_scenarios": [
+    "isAllowedSpecialKey('Up') が true を返す",
+    "isAllowedSpecialKey('InvalidKey') が false を返す",
+    "OPENCODE_SELECTION_LIST_PATTERN がOpenCode選択リスト出力にマッチする",
+    "detectSessionStatus() で opencode_selection_list reason が返される",
+    "detectSessionStatus() で他CLIツール出力に対してselection_listが返されない",
+    "special-keys API に有効なキーを送信して200が返る",
+    "special-keys API に不正なキーを送信して400が返る",
+    "special-keys API に空配列を送信して400が返る",
+    "special-keys API に10を超えるキーを送信して400が返る",
+    "current-output API で isSelectionListActive が正しく設定される",
+    "npx tsc --noEmit が成功する",
+    "npm run lint が成功する",
+    "npm run test:unit が全テストパスする"
+  ]
+}

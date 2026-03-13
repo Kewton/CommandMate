@@ -1,0 +1,95 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 482,
+  "review_date": "2026-03-13",
+  "findings": [
+    {
+      "id": "C001",
+      "severity": "should_fix",
+      "category": "設計方針書の記述と実際のコードの整合性",
+      "title": "方針2の根拠「L340-342に既に同趣旨の記述あり」が不正確",
+      "description": "設計方針書の方針2では、opencode-config.ts L217,284のTODOコメント削除の根拠として「ensureOpencodeConfig関数のJSDoc（L340-342）に既に同趣旨の記述あり」と記載している。しかし実際のJSDoc（L341-342）の内容は「data-driven design（providerDefinitions array + loop）への移行」であり、TODOコメントの内容「common HTTP fetch logicの抽出（fetchWithTimeout）」とは異なる最適化を指している。data-driven designはif分岐の統一、fetchWithTimeoutはHTTP通信ロジックの共通化であり、観点が異なる。",
+      "location": "設計方針書 方針2 根拠セクション",
+      "actual_code": "JSDoc L341-342: 'If a 3rd provider is added, consider refactoring to a data-driven design (providerDefinitions array + loop) instead of inline if-branches. [KISS]'",
+      "expected": "TODOコメント L217-218: '// TODO: If a 3rd provider is added, extract common HTTP fetch logic // to fetchWithTimeout(url, timeoutMs, maxResponseSize): Promise<string | null>'",
+      "suggestion": "根拠の記述を修正する。「既に同趣旨の記述あり」ではなく「3rd provider追加時の設計指針がJSDocに存在するため、fetchWithTimeoutの情報もJSDocに集約してコメントの管理箇所を一元化する」のような記述が正確。対応内容自体（TODOコメント削除 + JSDoc追記）は妥当であり変更不要。"
+    },
+    {
+      "id": "C002",
+      "severity": "nice_to_have",
+      "category": "設計方針書の記述と実際のコードの整合性",
+      "title": "方針3の行番号引用範囲「L25-27」がコード内容と微妙にずれている",
+      "description": "設計方針書の方針3「現状（L25-27）」のコード引用ブロックは3行（/**, Alternative 2行, Claude Code shows行）を含むが、実際のコードではL24が'/**'、L25が'Claude thinking pattern'、L26が'Matches spinner...'、L27が'Alternative 2: ...(Issue #XXX)'、L28が'Claude Code shows...'である。Issue #XXXはL27にあるという対象一覧の記載は正確だが、引用ブロックの行範囲表記がずれている。",
+      "location": "設計方針書 方針3 現状セクション",
+      "actual_code": "L24: '/**', L25: ' * Claude thinking pattern', L26: ' * Matches spinner...', L27: ' * Alternative 2: \"esc to interrupt\" status bar text (Issue #XXX)', L28: ' * Claude Code shows...'",
+      "expected": "引用範囲を「L24-28」または「L27」（Issue #XXXのある行のみ）と記載",
+      "suggestion": "引用範囲をL27単独またはL24-28に修正する。対象一覧でL27と正しく記載されているため、実装には影響しない。"
+    },
+    {
+      "id": "C003",
+      "severity": "nice_to_have",
+      "category": "方針の一貫性",
+      "title": "方針2のJSDoc追記内容と既存JSDocの記述粒度の不一致",
+      "description": "設計方針書では、ensureOpencodeConfigのJSDocに'HTTP fetch logic (fetchWithTimeout) can be extracted to a shared helper.'の1行を追記する方針だが、既存JSDoc（L341-342）はより具体的な記述（providerDefinitions array + loop、inline if-branchesへの言及）になっている。追記行も同程度の具体性（引数シグネチャ fetchWithTimeout(url, timeoutMs, maxResponseSize) の記述など）があると、既存JSDocとの粒度が統一される。",
+      "location": "設計方針書 方針2 対応内容",
+      "suggestion": "追記行を 'HTTP fetch logic can be extracted to a shared fetchWithTimeout(url, timeoutMs, maxResponseSize) helper.' のようにTODOコメントの情報量を維持した形にすることを検討する。ただし、現在の記述でも十分理解可能であり、必須ではない。"
+    },
+    {
+      "id": "C004",
+      "severity": "nice_to_have",
+      "category": "CLAUDE.mdとの整合性",
+      "title": "実装チェックリストに親Issue #475の更新が含まれているが設計方針書本文に詳細なし",
+      "description": "実装チェックリストの最終項目「親Issue #475 のR-4行の残存件数を更新」は、設計方針書の本文（方針1-3、アーキテクチャへの影響）のいずれにも詳細が記載されていない。CLAUDE.mdのコミットメッセージ規約に従えばchore scopeでの更新になるが、具体的な更新内容（何を何に変更するか）が明示されていない。",
+      "location": "設計方針書 セクション8 実装チェックリスト",
+      "suggestion": "親Issue #475のR-4行の残存件数をどのように更新するか（例: 4件 → 0件）を簡潔に記載する。または、本Issueの範囲外（親Issue側の管理事項）であることを明記する。"
+    }
+  ],
+  "verification_results": {
+    "line_number_accuracy": {
+      "slash_commands_route_L33": {
+        "status": "correct",
+        "detail": "L33に正確にTODOコメントが存在。内容も設計方針書の引用と一致。"
+      },
+      "opencode_config_L217": {
+        "status": "correct",
+        "detail": "L217-218にTODOコメントが存在。内容も設計方針書の引用と一致。"
+      },
+      "opencode_config_L284": {
+        "status": "correct",
+        "detail": "L284-285にTODOコメントが存在。内容も設計方針書の引用と一致。"
+      },
+      "opencode_config_L340_342_jsdoc": {
+        "status": "minor_discrepancy",
+        "detail": "JSDocはL334-346に存在。L340-342の記述は概ね正確だが、内容はfetchWithTimeoutではなくdata-driven design移行について。設計方針書の「同趣旨の記述」は不正確。"
+      },
+      "cli_patterns_L27": {
+        "status": "correct",
+        "detail": "L27に正確に'Issue #XXX'が存在。内容も一致。"
+      },
+      "cli_patterns_L25_27_quote": {
+        "status": "minor_discrepancy",
+        "detail": "引用ブロックの行範囲がL25-27とされているが、実際は/**がL24、Issue #XXXがL27、引用最終行がL28。"
+      }
+    },
+    "code_content_match": {
+      "todo_comment_content": "全4箇所のTODO/未解決マーカーの内容が設計方針書の引用と一致",
+      "type_definition": "SlashCommandsResponseの型定義（route.ts L34-43、api-client.ts L437-439）が設計方針書の記述と一致",
+      "note_comment": "route.ts L29-31のNOTEコメントが存在し、設計方針書の「維持する」方針と整合"
+    },
+    "policy_consistency": {
+      "status": "consistent",
+      "detail": "方針1-3の間に矛盾なし。実装チェックリストと方針の内容も整合。YAGNI/KISS/DRY原則の適用も一貫している。"
+    },
+    "claude_md_consistency": {
+      "status": "consistent",
+      "detail": "コメント・JSDocのみの変更であり、TypeScript strictモード、ESLint規約、テスト要件などのCLAUDE.md規約に影響なし。コミットメッセージ規約のrefactor typeも適切。"
+    }
+  },
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 1,
+    "nice_to_have": 3,
+    "total": 4
+  }
+}

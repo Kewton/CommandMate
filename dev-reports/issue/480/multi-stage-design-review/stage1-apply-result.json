@@ -1,0 +1,66 @@
+{
+  "stage": 1,
+  "issue_number": 480,
+  "applied_findings": [
+    "DS1-001",
+    "DS1-002",
+    "DS1-003",
+    "DS1-004",
+    "DS1-005",
+    "DS1-006",
+    "DS1-007",
+    "DS1-008"
+  ],
+  "skipped_findings": [],
+  "status": "completed",
+  "design_doc_updated": true,
+  "summary": {
+    "must_fix_applied": 2,
+    "should_fix_applied": 3,
+    "nice_to_have_applied": 3,
+    "total_applied": 8,
+    "total_skipped": 0
+  },
+  "changes": [
+    {
+      "id": "DS1-001",
+      "severity": "must_fix",
+      "description": "src/components/ の件数を約2件→約35件に更新。実移行対象合計を約170件に修正"
+    },
+    {
+      "id": "DS1-007",
+      "severity": "must_fix",
+      "description": "クライアントサイド対応を3段階方針に変更（log→削除、warn→削除、error→残置）"
+    },
+    {
+      "id": "DS1-002",
+      "severity": "should_fix",
+      "description": "db-migrations.ts（53件）の独立PR分離推奨を追記"
+    },
+    {
+      "id": "DS1-003",
+      "severity": "should_fix",
+      "description": "旧Phase 1を前提条件セクションに切り出し、フェーズをPhase 1-3に再番号付け"
+    },
+    {
+      "id": "DS1-004",
+      "severity": "should_fix",
+      "description": "action名の推奨動詞リストとdb-migrations.ts変換例5件を追加"
+    },
+    {
+      "id": "DS1-005",
+      "severity": "nice_to_have",
+      "description": "tests/helpers/logger-mock.ts 共通ヘルパー化の推奨を追記"
+    },
+    {
+      "id": "DS1-006",
+      "severity": "nice_to_have",
+      "description": "client-logger.ts導入判断基準（5件以上）とインターフェース互換性方針を明記"
+    },
+    {
+      "id": "DS1-008",
+      "severity": "nice_to_have",
+      "description": "Phase 1, 2の完了確認コマンドにtest:integrationを追加"
+    }
+  ]
+}

@@ -8,13 +8,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock tmux before importing the module under test
-vi.mock('@/lib/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', () => ({
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
-import { sendKeys, sendSpecialKeys } from '@/lib/tmux';
+import { sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 import type { PromptData } from '@/types/models';
 
 describe('sendPromptAnswer', () => {

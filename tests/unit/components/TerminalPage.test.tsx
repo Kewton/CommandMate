@@ -55,7 +55,7 @@ vi.mock('next/link', () => ({
   ),
 }));
 
-vi.mock('@/lib/tmux-control-mode-flags', () => ({
+vi.mock('@/lib/tmux/tmux-control-mode-flags', () => ({
   isTmuxControlModeEnabledForClient: () => mockIsTmuxControlModeEnabledForClient(),
 }));
 

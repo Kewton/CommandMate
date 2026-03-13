@@ -15,15 +15,12 @@ vi.mock('@/lib/db', () => ({
   getWorktreeById: vi.fn(),
 }));
 
-vi.mock('@/lib/auto-yes-manager', () => ({
+vi.mock('@/lib/security/path-validator', () => ({
   isValidWorktreeId: vi.fn(),
-}));
-
-vi.mock('@/lib/path-validator', () => ({
   isPathSafe: vi.fn(),
 }));
 
-vi.mock('@/lib/git-utils', async () => {
+vi.mock('@/lib/git/git-utils', async () => {
   const { NextResponse } = await import('next/server');
 
   class GitTimeoutError extends Error {
@@ -52,9 +49,8 @@ vi.mock('@/lib/git-utils', async () => {
 
 import { GET } from '@/app/api/worktrees/[id]/git/diff/route';
 import { getWorktreeById } from '@/lib/db';
-import { isValidWorktreeId } from '@/lib/auto-yes-manager';
-import { isPathSafe } from '@/lib/path-validator';
-import { getGitDiff, GitTimeoutError, GitNotRepoError } from '@/lib/git-utils';
+import { isValidWorktreeId, isPathSafe } from '@/lib/security/path-validator';
+import { getGitDiff, GitTimeoutError, GitNotRepoError } from '@/lib/git/git-utils';
 
 function createRequest(url: string): NextRequest {
   return new NextRequest(new URL(url, 'http://localhost:3000'));

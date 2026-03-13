@@ -1,0 +1,103 @@
+{
+  "issue_number": 479,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "reviewed_at": "2026-03-13",
+  "summary": "前回の影響範囲レビュー（Stage 3）で指摘された5件のshould_fixと1件のmust_fixは全て適切に反映されている。Stage 5-6で追加されたauto-yes-manager.tsの3ファイル分割（F2-002）、Phase 1ファイル名追加（F2-003）、R-3との整合性補足（F2-001）による新たな影響範囲上の問題は限定的。1件のshould_fixとして、auto-yes-manager.tsの3ファイル分割時のglobalThis状態の分離設計が未記載である点を指摘する。must_fixは発見されなかった。",
+  "previous_findings_addressed": [
+    {
+      "id": "I001",
+      "addressed": true,
+      "notes": "isValidWorktreeIdのpath-validator.tsへの移動方針が明記されている。実コード確認により、isValidWorktreeIdは12ファイル（auto-yes-manager.ts定義元 + 11のAPIルート: auto-yes, current-output, route, prompt-response, execution-logs x2, schedules x2, git/log, git/diff, git/show）からimportされていることを確認。path-validator.tsは237行・4つのexport関数を持つ汎用バリデーションモジュールであり、移動先として適切。受け入れ基準にも移動確認項目が追加済み。"
+    },
+    {
+      "id": "I002",
+      "addressed": true,
+      "notes": "テスト戦略にモックパターンの段階的移行方針が追記されている。バレルファイル経由のモックが既存テストの動作を維持しつつ、将来的に個別モジュール単位のモックが可能になることが明記済み。"
+    },
+    {
+      "id": "I003",
+      "addressed": true,
+      "notes": "response-poller.tsにバレルファイル戦略を適用する方針が追記されている。実コード確認により消費者6ファイル（API 3: start-polling, send, respond + lib 3: assistant-response-saver, session-cleanup, cli-tools/manager）を確認。Issueの記載と一致。"
+    },
+    {
+      "id": "I004",
+      "addressed": true,
+      "notes": "Phase 3内の実施順序（db.ts先行、response-poller.ts後続）が明記されている。response-poller.tsからdb.tsへの6関数依存も根拠として記載済み。"
+    },
+    {
+      "id": "I005",
+      "addressed": true,
+      "notes": "response-poller.ts内のactivePollers MapとTUI accumulator Mapの分割後配置が明記されている。stopPolling時のclearTuiAccumulator()呼び出しによる状態整合性維持も記載済み。"
+    },
+    {
+      "id": "I006",
+      "addressed": true,
+      "notes": "テストファイル対応表が追記されている。4つの既存テストファイルと分割後モジュールの対応が明確。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "I2-001",
+      "severity": "should_fix",
+      "category": "依存関係",
+      "title": "auto-yes-manager.tsの3ファイル分割時のglobalThis状態分離設計が未記載",
+      "description": "Stage 6でauto-yes-manager.tsの3ファイル分割案（auto-yes-manager.ts, auto-yes-poller.ts, auto-yes-state.ts）が追加されたが、globalThis上の2つのMap（__autoYesStates, __autoYesPollerStates）の分割後の配置が明記されていない。現在のコードではautoYesStatesとautoYesPollerStatesがそれぞれglobalThisパターンで宣言されている（L129-142）。auto-yes-state.tsに__autoYesStatesを、auto-yes-poller.tsに__autoYesPollerStatesを配置するのが自然だが、startAutoYesPolling()がautoYesStates（getAutoYesState経由）とautoYesPollerStatesの両方にアクセスしており、モジュール間の状態依存が発生する。response-poller.tsの分割では同様のモジュールレベル状態の配置設計がI005で指摘・反映されたため、auto-yes-manager.tsの分割にも同等の設計記載が必要。",
+      "affected_files": [
+        "src/lib/auto-yes-manager.ts"
+      ],
+      "suggestion": "auto-yes-manager.tsの詳細分割設計セクションに、globalThis上の2つのMap（__autoYesStates -> auto-yes-state.ts、__autoYesPollerStates -> auto-yes-poller.ts）の配置と、auto-yes-poller.tsからauto-yes-state.tsへの依存（getAutoYesState呼び出し）を明記する。response-poller.tsのI005反映と同様のパターンで記載すると整合的。"
+    },
+    {
+      "id": "I2-002",
+      "severity": "nice_to_have",
+      "category": "テスト",
+      "title": "auto-yes-manager.tsの3ファイル分割に伴うテストファイル対応表が未記載",
+      "description": "response-poller.tsの分割ではテストファイル対応表（I006）が追記されたが、auto-yes-manager.tsの3ファイル分割に対するテストファイル対応は未記載。現在auto-yes-manager関連のテストは8ファイル（unit: auto-yes-manager.test.ts, auto-yes-manager-cleanup.test.ts, session-cleanup-issue404.test.ts, resource-cleanup.test.ts, api/git-log.test.ts, api/git-diff.test.ts, api/git-show.test.ts、integration: auto-yes-persistence.test.ts）が存在する。分割後にどのテストファイルがどのモジュールに対応するかの対応表があると実装時の混乱を防げる。",
+      "affected_files": [
+        "tests/unit/lib/auto-yes-manager.test.ts",
+        "tests/unit/auto-yes-manager-cleanup.test.ts",
+        "tests/unit/session-cleanup-issue404.test.ts",
+        "tests/unit/resource-cleanup.test.ts",
+        "tests/unit/api/git-log.test.ts",
+        "tests/unit/api/git-diff.test.ts",
+        "tests/unit/api/git-show.test.ts",
+        "tests/integration/auto-yes-persistence.test.ts"
+      ],
+      "suggestion": "auto-yes-manager.tsの詳細分割設計セクションに、response-poller.tsと同様のテストファイル対応表を追記する。例：auto-yes-manager.test.ts -> ポーリング/状態管理テストを auto-yes-poller.test.ts + auto-yes-state.test.ts に分割、git-*.test.tsはisValidWorktreeIdのimport先をpath-validator.tsに更新。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 1,
+  "nice_to_have_count": 1,
+  "impact_summary": {
+    "auto_yes_manager_3file_split": {
+      "globalThis_states": 2,
+      "state_names": ["__autoYesStates", "__autoYesPollerStates"],
+      "cross_module_dependency": "startAutoYesPolling accesses both Maps",
+      "test_files_affected": 8,
+      "risk": "中（globalThis状態の分離設計が必要だが、response-poller.tsのI005と同パターンで対応可能）"
+    },
+    "phase1_file_names": {
+      "new_files_proposed": 6,
+      "files": ["MarkdownToolbar.tsx", "MarkdownPreview.tsx", "TreeNode.tsx", "TreeContextMenu.tsx", "cron-parser.ts", "job-executor.ts"],
+      "consumer_impact": "低（MarkdownEditorは直接import0件、FileTreeViewはWorktreeDetailRefactored.tsx1件のみ、schedule-managerは2ファイル）",
+      "risk": "低（消費者が限定的で独立性が高い）"
+    },
+    "r3_compatibility": {
+      "moduleResolution": "bundler",
+      "index_resolution": "@/lib/db -> src/lib/db/index.ts は bundler モードで正常解決",
+      "risk": "低（moduleResolution: bundler が確認済み、Issueの記載と整合）"
+    },
+    "isValidWorktreeId_migration": {
+      "source": "auto-yes-manager.ts",
+      "destination": "path-validator.ts (237 lines, 4 exports)",
+      "consumers_to_update": 11,
+      "barrel_re_export": "一時的にauto-yes-manager.tsからre-export",
+      "risk": "低（バレルre-exportで段階的移行可能）"
+    }
+  },
+  "overall_assessment": "2回目の影響範囲レビューにより、前回（Stage 3）の全6件の指摘が適切に反映されていることを確認した。Stage 5-6で追加された3つの変更（auto-yes-manager.ts 3ファイル分割、Phase 1ファイル名案、R-3整合性補足）についても、追加的な影響範囲上の重大な問題は発見されなかった。1件のshould_fixとして、auto-yes-manager.tsの3ファイル分割時のglobalThis状態分離設計の追記を推奨する（response-poller.tsのI005と同パターン）。R-3との互換性については、tsconfig.jsonのmoduleResolution: bundlerが確認でき、Issueの記載通りindex.ts解決が機能することを裏付けた。Phase 1対象ファイルの消費者数は限定的（MarkdownEditor 0件、FileTreeView 1件、schedule-manager 2件）であり、Phase 1の低リスク分類は妥当。Issue #479は影響範囲の観点から実装着手可能な状態にある。"
+}

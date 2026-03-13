@@ -14,7 +14,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock tmux module
 // capturePane returns a Claude prompt pattern so sendMessageToClaude doesn't wait
-vi.mock('@/lib/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn().mockResolvedValue(true),
   createSession: vi.fn().mockResolvedValue(undefined),
   sendKeys: vi.fn().mockResolvedValue(undefined),
@@ -78,7 +78,7 @@ vi.mock('@/lib/db', () => ({
 const invalidateCacheSpy = vi.fn();
 const clearAllCacheSpy = vi.fn();
 
-vi.mock('@/lib/tmux-capture-cache', () => ({
+vi.mock('@/lib/tmux/tmux-capture-cache', () => ({
   invalidateCache: (...args: unknown[]) => invalidateCacheSpy(...args),
   clearAllCache: (...args: unknown[]) => clearAllCacheSpy(...args),
   setCachedCapture: vi.fn(),
@@ -95,7 +95,7 @@ vi.mock('@/lib/tmux-capture-cache', () => ({
 // Imports (after mocks)
 // =========================================================================
 
-import { sendMessageToClaude, stopClaudeSession } from '@/lib/claude-session';
+import { sendMessageToClaude, stopClaudeSession } from '@/lib/session/claude-session';
 import { CodexTool } from '@/lib/cli-tools/codex';
 import { GeminiTool } from '@/lib/cli-tools/gemini';
 import { OpenCodeTool } from '@/lib/cli-tools/opencode';

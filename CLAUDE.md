@@ -118,11 +118,18 @@ src/
 ├── contexts/      # React Context
 ├── hooks/         # カスタムフック（useContextMenu等）
 ├── lib/           # ユーティリティ・ビジネスロジック
-│   └── cli-tools/ # CLIツール抽象化層
+│   ├── cli-tools/ # CLIツール抽象化層
+│   ├── db/        # データベース（Issue #481）
+│   ├── tmux/      # tmuxセッション管理・トランスポート（Issue #481）
+│   ├── security/  # 認証・IP制限・パス検証・サニタイズ（Issue #481）
+│   ├── detection/ # ステータス検出・プロンプト検出（Issue #481）
+│   ├── session/   # セッション管理・実行エンジン（Issue #481）
+│   ├── polling/   # ポーリング・Auto-Yes（Issue #481）
+│   └── git/       # Git操作・worktree管理・クローン（Issue #481）
 └── types/         # 型定義
 
 tests/
-├── helpers/       # テスト共通ヘルパー（型ガード等）
+├── helpers/       # テスト共通ヘルパー（型ガード、loggerモック等）
 ├── unit/          # 単体テスト
 └── integration/   # 結合テスト
 ```
@@ -134,52 +141,65 @@ tests/
 | モジュール | 役割 |
 |-----------|------|
 | `src/middleware.ts` | 認証ミドルウェア（Edge Runtime） |
-| `src/lib/auth.ts` | トークン認証コア |
-| `src/lib/ip-restriction.ts` | IP/CIDR制限 |
+| `src/lib/security/auth.ts` | トークン認証コア |
+| `src/lib/security/ip-restriction.ts` | IP/CIDR制限 |
 | `src/config/auth-config.ts` | 認証設定定数 |
 | `src/lib/env.ts` | 環境変数取得・フォールバック |
-| `src/lib/db-instance.ts` | DBインスタンス管理 |
-| `src/lib/db-path-resolver.ts` | DBパス解決 |
-| `src/lib/db-migration-path.ts` | DBマイグレーション |
-| `src/lib/db-repository.ts` | リポジトリDB操作 |
-| `src/lib/tmux.ts` | tmuxセッション管理基盤（execFile使用） |
-| `src/lib/tmux-capture-cache.ts` | tmux captureキャッシュ（TTL=2秒、singleflight） |
-| `src/lib/claude-session.ts` | Claude CLIセッション管理・ヘルスチェック |
-| `src/lib/status-detector.ts` | セッションステータス検出 |
-| `src/lib/worktree-status-helper.ts` | Worktreeセッションステータス一括検出 |
-| `src/lib/response-poller.ts` | レスポンスポーリング・thinking検出 |
-| `src/lib/prompt-detector.ts` | プロンプト検出（2パス方式） |
-| `src/lib/cli-patterns.ts` | CLIツール別パターン定義 |
-| `src/lib/auto-yes-manager.ts` | Auto-Yes状態管理・サーバー側ポーリング |
-| `src/lib/auto-yes-resolver.ts` | Auto-Yes自動応答判定 |
+| `src/lib/db/db-instance.ts` | DBインスタンス管理 |
+| `src/lib/db/db-path-resolver.ts` | DBパス解決 |
+| `src/lib/db/db-migration-path.ts` | DBマイグレーション |
+| `src/lib/db/db-repository.ts` | リポジトリDB操作 |
+| `src/lib/db/worktree-db.ts` | Worktree CRUD操作（Issue #479） |
+| `src/lib/db/chat-db.ts` | チャットメッセージCRUD操作（Issue #479） |
+| `src/lib/db/session-db.ts` | セッション状態管理（Issue #479） |
+| `src/lib/db/memo-db.ts` | メモ管理CRUD（Issue #479） |
+| `src/lib/tmux/tmux.ts` | tmuxセッション管理基盤（execFile使用） |
+| `src/lib/tmux/tmux-capture-cache.ts` | tmux captureキャッシュ（TTL=2秒、singleflight） |
+| `src/lib/session/claude-session.ts` | Claude CLIセッション管理・ヘルスチェック |
+| `src/lib/detection/status-detector.ts` | セッションステータス検出 |
+| `src/lib/session/worktree-status-helper.ts` | Worktreeセッションステータス一括検出 |
+| `src/lib/polling/response-poller.ts` | レスポンスポーリング・ポーリング制御バレルファイル（Issue #479） |
+| `src/lib/response-extractor.ts` | レスポンス抽出ロジック（resolveExtractionStartIndex, isOpenCodeComplete）（Issue #479） |
+| `src/lib/response-cleaner.ts` | CLIツール別レスポンスクリーニング（cleanClaudeResponse等）（Issue #479） |
+| `src/lib/tui-accumulator.ts` | TUIアキュムレータ状態管理（Issue #479） |
+| `src/lib/detection/prompt-detector.ts` | プロンプト検出（2パス方式） |
+| `src/lib/detection/cli-patterns.ts` | CLIツール別パターン定義 |
+| `src/lib/polling/auto-yes-manager.ts` | Auto-Yes状態管理・バレルファイル（Issue #479） |
+| `src/lib/auto-yes-poller.ts` | Auto-Yesポーリングループ本体（Issue #479） |
+| `src/lib/auto-yes-state.ts` | Auto-Yes状態管理・DB永続化連携（Issue #479） |
+| `src/lib/polling/auto-yes-resolver.ts` | Auto-Yes自動応答判定 |
 | `src/config/auto-yes-config.ts` | Auto-Yes設定定数・バリデーション |
 | `src/config/file-polling-config.ts` | ファイルポーリング定数（FILE_TREE_POLL_INTERVAL_MS, FILE_CONTENT_POLL_INTERVAL_MS）（Issue #469） |
-| `src/lib/prompt-key.ts` | promptKey重複排除ユーティリティ |
+| `src/lib/detection/prompt-key.ts` | promptKey重複排除ユーティリティ |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
-| `src/lib/cli-tools/types.ts` | CLIツール型定義（5ツール対応） |
+| `src/lib/cli-tools/types.ts` | CLIツール型定義（IImageCapableCLITool/isImageCapableCLITool追加）（Issue #474） |
 | `src/lib/cli-tools/codex.ts` | Codex CLIセッション管理 |
 | `src/lib/cli-tools/vibe-local.ts` | Vibe Local CLIツール |
 | `src/lib/cli-tools/opencode.ts` | OpenCode CLIツール |
 | `src/lib/cli-tools/opencode-config.ts` | OpenCode設定自動生成（Ollama/LM Studio） |
 | `src/lib/selected-agents-validator.ts` | エージェント選択バリデーション（2-4エージェント） |
-| `src/lib/claude-executor.ts` | CLI非インタラクティブ実行エンジン |
-| `src/lib/schedule-manager.ts` | cronベーススケジューラー |
+| `src/lib/session/claude-executor.ts` | CLI非インタラクティブ実行エンジン |
+| `src/lib/schedule-manager.ts` | スケジューラーメイン・ジョブ登録管理（Issue #409, Issue #479） |
+| `src/lib/cron-parser.ts` | CMATE.md mtime検出・スケジュール一括更新（Issue #479） |
+| `src/lib/job-executor.ts` | ジョブ実行エンジン・実行ログCRUD（Issue #479） |
 | `src/lib/cmate-parser.ts` | CMATE.md汎用パーサー |
 | `src/lib/session-cleanup.ts` | セッション/ポーラー/スケジューラー停止（Facade） |
+| `src/lib/session-key-sender.ts` | Claudeセッションキー送信ロジック（Issue #479） |
+| `src/lib/prompt-answer-input.ts` | プロンプト応答入力ロジック（getAnswerInput）（Issue #479） |
 | `src/lib/resource-cleanup.ts` | リソースリーク対策（孤立プロセス/Map検出） |
-| `src/lib/env-sanitizer.ts` | 環境変数サニタイズ |
+| `src/lib/security/env-sanitizer.ts` | 環境変数サニタイズ |
 | `src/lib/proxy/handler.ts` | HTTPプロキシハンドラ |
 | `src/lib/proxy/config.ts` | プロキシ設定定数 |
-| `src/lib/path-validator.ts` | パスバリデーション・symlink防御 |
+| `src/lib/security/path-validator.ts` | パスバリデーション・symlink防御 |
 | `src/lib/file-operations.ts` | ファイルCRUD操作（5層セキュリティ） |
-| `src/lib/clone-manager.ts` | クローン処理管理（排他制御） |
+| `src/lib/git/clone-manager.ts` | クローン処理管理（排他制御） |
 | `src/lib/version-checker.ts` | バージョンアップ通知 |
 | `src/lib/slash-commands.ts` | スラッシュコマンドローダー |
 | `src/lib/url-path-encoder.ts` | ファイルパスURLエンコード |
 | `src/lib/file-search.ts` | ファイル内容検索 |
 | `src/lib/terminal-highlight.ts` | CSS Custom Highlight API ラッパー（Issue #47）XSS安全なターミナルハイライト |
 | `src/lib/file-tree.ts` | ディレクトリツリー構造生成 |
-| `src/lib/git-utils.ts` | Git情報取得・コミット履歴/diff取得（Issue #447） |
+| `src/lib/git/git-utils.ts` | Git情報取得・コミット履歴/diff取得（Issue #447） |
 | `src/types/git.ts` | Git関連型定義（CommitInfo, ChangedFile, GitLogResponse等）（Issue #447） |
 | `src/lib/sidebar-utils.ts` | サイドバーソート・グループ化ユーティリティ（SortKey, SortDirection, ViewMode型, BranchGroup型, sortBranches(), groupBranches()）（Issue #449） |
 | `src/contexts/SidebarContext.tsx` | サイドバー状態管理Context（isOpen, sortKey, viewMode, localStorageパターン）（Issue #449） |
@@ -195,19 +215,24 @@ tests/
 | `src/components/worktree/WorktreeDetailRefactored.tsx` | Worktree詳細画面（メイン画面、ツリーポーリング対応）（Issue #469） |
 | `src/components/worktree/AgentSettingsPane.tsx` | エージェント選択UI |
 | `src/components/worktree/MessageInput.tsx` | メッセージ入力（下書き永続化対応） |
-| `src/components/worktree/MarkdownEditor.tsx` | マークダウンエディタ（auto-save対応） |
+| `src/components/worktree/MarkdownEditor.tsx` | マークダウンエディタメイン（Issue #479） |
 | `src/components/worktree/TerminalSearchBar.tsx` | ターミナル内テキスト検索バーUI（Issue #47）件数表示・前/次ナビ・Esc閉じ |
 | `src/components/worktree/FilePanelSplit.tsx` | ターミナル+ファイルパネル分割 |
 | `src/components/worktree/FilePanelTabs.tsx` | ファイルタブバーUI |
 | `src/components/worktree/FilePanelContent.tsx` | ファイルコンテンツ表示（ファイル内容ポーリング対応）（Issue #469） |
 | `src/components/worktree/FileViewer.tsx` | ファイルビューア |
 | `src/components/worktree/FileSearchBar.tsx` | ファイル検索バー共通コンポーネント（Issue #469） |
-| `src/components/worktree/FileTreeView.tsx` | ファイルツリー表示 |
+| `src/components/worktree/FileTreeView.tsx` | ファイルツリービュー（Issue #479） |
+| `src/components/worktree/TreeNode.tsx` | ファイルツリーノードコンポーネント（Issue #479） |
+| `src/components/worktree/TreeContextMenu.tsx` | ファイルツリーコンテキストメニュー（Issue #479） |
+| `src/components/worktree/MarkdownToolbar.tsx` | マークダウンエディタツールバーUI（Issue #479） |
+| `src/components/worktree/MarkdownPreview.tsx` | マークダウンプレビュー表示（Issue #479） |
 | `src/components/worktree/GitPane.tsx` | Gitタブ（コミット履歴・diff表示）（Issue #447） |
 | `src/hooks/useFilePolling.ts` | ポーリングライフサイクル管理（visibilitychange対応）（Issue #469） |
 | `src/hooks/useFileContentPolling.ts` | ファイル内容ポーリング（If-Modified-Since/304）（Issue #469） |
 | `src/hooks/useFileContentSearch.ts` | ファイル内容検索共通フック（Issue #469） |
 | `src/hooks/useFileTabs.ts` | タブ状態管理フック（isDirty管理対応）（Issue #469） |
+| `src/hooks/useImageAttachment.ts` | 画像添付カスタムフック（バリデーション・アップロード・状態管理・resetAfterSend）（Issue #474） |
 | `src/hooks/useAutoYes.ts` | Auto-Yesクライアント側フック |
 | `src/hooks/useFileSearch.ts` | 検索状態管理フック |
 | `src/hooks/useTerminalSearch.ts` | ターミナル内テキスト検索フック（Issue #47）debounce 300ms、最大500件、最小2文字 |
@@ -218,6 +243,8 @@ tests/
 | `src/app/api/worktrees/[id]/git/log/route.ts` | Gitコミット履歴取得API（Issue #447） |
 | `src/app/api/worktrees/[id]/git/show/[commitHash]/route.ts` | Gitコミット変更ファイル一覧API（Issue #447） |
 | `src/app/api/worktrees/[id]/git/diff/route.ts` | Gitファイルdiff取得API（Issue #447） |
+| `src/app/api/worktrees/[id]/special-keys/route.ts` | 特殊キー送信API（Up/Down/Enter/Escape、6層防御）（Issue #473） |
+| `src/components/worktree/NavigationButtons.tsx` | OpenCode TUI選択リストナビゲーションボタン（Issue #473） |
 
 ### CLIモジュール
 

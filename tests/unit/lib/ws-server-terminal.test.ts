@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import type { WebSocket } from 'ws';
-import { getTmuxControlModeMetrics, resetTmuxControlModeMetrics } from '@/lib/tmux-control-mode-metrics';
+import { getTmuxControlModeMetrics, resetTmuxControlModeMetrics } from '@/lib/tmux/tmux-control-mode-metrics';
 
 const mockGetWorktreeById = vi.fn();
 const mockGetTool = vi.fn();
@@ -32,11 +32,11 @@ vi.mock('@/lib/cli-tools/manager', () => ({
   },
 }));
 
-vi.mock('@/lib/tmux-control-mode-flags', () => ({
+vi.mock('@/lib/tmux/tmux-control-mode-flags', () => ({
   isTmuxControlModeEnabled: (...args: unknown[]) => mockIsTmuxControlModeEnabled(...args),
 }));
 
-vi.mock('@/lib/transports/control-mode-tmux-transport', () => ({
+vi.mock('@/lib/tmux/control-mode-tmux-transport', () => ({
   getControlModeTmuxTransport: () => ({
     subscribe: (...args: unknown[]) => mockSubscribe(...args),
     sendInput: (...args: unknown[]) => mockSendInput(...args),

@@ -1,0 +1,27 @@
+{
+  "issue_number": 473,
+  "acceptance_criteria": [
+    "tmux.ts に NAVIGATION_KEY_VALUES as const配列、NavigationKey型、isAllowedSpecialKey()関数、sendSpecialKeysAndInvalidate()ラッパーが export されている",
+    "cli-patterns.ts に OPENCODE_SELECTION_LIST_PATTERN が定義されている（プレースホルダーパターン可）",
+    "status-detector.ts の priority 2.5 ブロック内で selection_list 検出分岐が (B)thinking の後、(D)response_complete の前に挿入されている",
+    "POST /api/worktrees/[id]/special-keys エンドポイントが多層防御（JSONパース、型チェック、ホワイトリスト、DB確認、セッション確認）で実装されている",
+    "current-output API レスポンスに isSelectionListActive boolean フラグが追加されている",
+    "NavigationButtons コンポーネントが Up/Down/Enter/Escape ボタンを表示し、special-keys API を呼び出す",
+    "WorktreeDetailRefactored.tsx が isSelectionListActive に基づいて NavigationButtons を条件付き表示する",
+    "既存テストが全てパスする",
+    "TypeScript型チェック・ESLintエラーが0件"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: tmux.ts - NAVIGATION_KEY_VALUES export + isAllowedSpecialKey() + sendSpecialKeysAndInvalidate()",
+    "Task 1.2: cli-patterns.ts - OPENCODE_SELECTION_LIST_PATTERN 定義",
+    "Task 1.3: status-detector.ts - selection_list 検出分岐追加 + STATUS_REASON定数",
+    "Task 1.4: special-keys/route.ts - 新規APIエンドポイント",
+    "Task 1.5: current-output/route.ts - isSelectionListActive フラグ追加",
+    "Task 3.1: NavigationButtons.tsx - 新規UIコンポーネント",
+    "Task 3.2: WorktreeDetailRefactored.tsx - 表示制御"
+  ],
+  "design_doc_path": "dev-reports/design/issue-473-opencode-tui-navigation-design-policy.md",
+  "work_plan_path": "dev-reports/issue/473/work-plan.md",
+  "target_coverage": 80,
+  "notes": "OPENCODE_SELECTION_LIST_PATTERN は前提作業（capture-pane出力サンプル取得）未完了のため、合理的なプレースホルダーパターンで実装する。パターン確定後に更新する想定。"
+}

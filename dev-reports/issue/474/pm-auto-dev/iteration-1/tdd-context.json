@@ -1,0 +1,44 @@
+{
+  "issue_number": 474,
+  "acceptance_criteria": [
+    "画像対応CLIツールで画像ファイルを添付してメッセージ送信できること",
+    "CLIツール固有の画像送信方式がある場合はそれに準拠すること",
+    "固有方式がない場合はアップロードした画像のファイルパスをメッセージに含めて送信できること",
+    "画像非対応ツールでは添付ボタンが非表示または無効化されていること",
+    "対応画像形式（png, jpg, jpeg, gif, webp）のバリデーションが機能すること",
+    "画像ファイルサイズ上限（5MB）のバリデーションが機能すること",
+    "既存のメッセージ送信機能（テキストのみ）が壊れないこと",
+    "主要ロジックのユニットテストが追加されていること"
+  ],
+  "implementation_tasks": [
+    "Task 0.1: 各CLIツールの画像送信方式調査（Claude CLI: --imageフラグ/マークダウン、Codex CLI: 画像サポート有無、Gemini CLI: 画像サポート有無、OpenCode CLI: 画像サポート有無、Vibe Local: 非対応）",
+    "Task 1.1: src/config/image-extensions.ts にATTACHABLE_IMAGE_EXTENSIONS（SVG除外）とATTACHABLE_IMAGE_ACCEPT定数を追加",
+    "Task 1.2: src/lib/cli-tools/types.ts にIImageCapableCLITool extends ICLITool インターフェースとisImageCapableCLITool()型ガード関数を追加",
+    "Task 2.1: 画像対応CLIツールにIImageCapableCLIToolを実装（claude.ts等）",
+    "Task 2.2: src/app/api/worktrees/[id]/upload/[...path]/route.ts に.commandmate/attachments/パスを許可し、ディレクトリ自動作成を追加",
+    "Task 2.3: src/app/api/worktrees/[id]/send/route.ts にimagePath?パラメータを追加（バリデーション・型ガードによる振り分け含む）",
+    "Task 2.4: src/lib/api-client.ts のsendMessageをオブジェクト形式options?に変更し、uploadImageFileメソッドを追加",
+    "Task 3.1: src/hooks/useImageAttachment.ts カスタムフック実装（状態管理・バリデーション・アップロード）",
+    "Task 3.2: src/components/worktree/MessageInput.tsx に画像添付ボタン・ファイル名表示・削除ボタン・エラー表示を追加",
+    "Task 3.3: src/components/worktree/WorktreeDetailRefactored.tsx のMessageInput呼び出し箇所を更新",
+    "Task 3.4: 画像アップロード時に.commandmate/attachments/を.gitignoreに自動追記",
+    "Task 4.1: tests/unit/config/image-extensions-attachment.test.ts でATTACHABLE_IMAGE_EXTENSIONS定数のユニットテスト",
+    "Task 4.2: tests/unit/cli-tools/types.test.ts にisImageCapableCLITool()型ガードのユニットテストを追記",
+    "Task 4.3: tests/integration/api-send-cli-tool.test.ts にsend APIの画像パスバリデーションテストを追記",
+    "Task 4.4: tests/unit/components/MessageInput.test.tsx と tests/integration/issue-288-acceptance.test.tsx のsendMessageアサーションをオブジェクト形式に更新",
+    "Task 4.5: tests/unit/hooks/useImageAttachment.test.ts でuseImageAttachmentフックのユニットテスト"
+  ],
+  "design_policy_path": "dev-reports/design/issue-474-image-attachment-design-policy.md",
+  "work_plan_path": "dev-reports/issue/474/work-plan.md",
+  "target_coverage": 80,
+  "key_constraints": [
+    "IImageCapableCLITool は ICLITool を拡張するが、ICLITool を変更しない（ISP準拠）",
+    "uploadImageFile は fetchApi ラッパーを使わず fetch() を直接呼ぶ（Content-Type: multipart/form-data のため）",
+    "sendMessage の第3引数をオブジェクト形式 options?: { cliToolId?: string, imagePath?: string } に変更",
+    "画像ストレージパス: .commandmate/attachments/ のみ許可（ホワイトリスト）",
+    "SVG は ATTACHABLE_IMAGE_EXTENSIONS に含めない（XSS対策）",
+    "URLスキーム（file://, http://, data:等）を imagePath に指定した場合は拒否（SSRF対策）",
+    "パストラバーサル防御: isPathSafe() を使用",
+    "フォールバック時のCLIインジェクション対策: 制御文字チェック + プレフィックス検証"
+  ]
+}

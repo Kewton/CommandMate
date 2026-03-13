@@ -1,0 +1,8 @@
+{
+  "issue_number": 473,
+  "stage": 8,
+  "applied_findings": ["F701", "F702", "F703", "F704"],
+  "skipped_findings": [],
+  "github_updated": true,
+  "summary": "Stage 7の影響範囲レビュー（2回目）の指摘4件を全てIssue #473に反映した。F701: セキュリティ要件セクションに「ALLOWED_SPECIAL_KEYSのエクスポート方針」サブセクションを新設し、tmux.tsからexportしてroute.ts側で再利用するDRY原則に基づく推奨方針を明記。受け入れ基準にもALLOWED_SPECIAL_KEYSのexport確認項目を追加。F702: 「サイドバー表示への影響」サブセクションを新設し、選択リスト検出時にisWaitingForResponse:trueとなりサイドバーで応答待ち表示されること、hasActivePrompt:falseのためprompt cleanupは発動しないこと、将来hasActivePromptを変更する場合の注意点を明記。F703: バックエンドセクションに「認証ミドルウェア」注記を追加し、/api/worktrees/パス配下のためmiddleware.tsのmatcherで自動カバーされ追加設定不要である旨を明記。F704: 「sendSpecialKeys()呼び出しパターンに関する設計判断」注記を追加し、2つの呼び出しパスへの分散は責務が異なるため許容範囲と判断した旨を記録。Issueヘッダーの更新履歴もStage 7反映済みに更新。"
+}

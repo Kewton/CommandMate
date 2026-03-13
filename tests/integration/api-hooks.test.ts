@@ -39,7 +39,7 @@ vi.mock('@/lib/db-instance', () => {
 });
 
 // Mock tmux module
-vi.mock('@/lib/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', () => ({
   capturePane: vi.fn(),
 }));
 
@@ -74,7 +74,7 @@ describe('POST /api/hooks/claude-done', () => {
   });
 
   it('should capture tmux output and create Claude message', async () => {
-    const { capturePane } = await import('@/lib/tmux');
+    const { capturePane } = await import('@/lib/tmux/tmux');
 
     // Mock tmux output with log file info
     const mockOutput = `
@@ -122,7 +122,7 @@ Summary: Implemented the user authentication feature
   });
 
   it('should handle output without log file info', async () => {
-    const { capturePane } = await import('@/lib/tmux');
+    const { capturePane } = await import('@/lib/tmux/tmux');
 
     // Mock tmux output without log file separator
     const mockOutput = 'Some command output\nNo log info here';
@@ -154,7 +154,7 @@ Summary: Implemented the user authentication feature
   });
 
   it('should calculate lastCapturedLine correctly', async () => {
-    const { capturePane } = await import('@/lib/tmux');
+    const { capturePane } = await import('@/lib/tmux/tmux');
 
     const mockOutput = 'Line 1\nLine 2\nLine 3\nLine 4\nLine 5';
     vi.mocked(capturePane).mockResolvedValue(mockOutput);
@@ -227,7 +227,7 @@ Summary: Implemented the user authentication feature
   });
 
   it('should return 500 on database error', async () => {
-    const { capturePane } = await import('@/lib/tmux');
+    const { capturePane } = await import('@/lib/tmux/tmux');
     vi.mocked(capturePane).mockResolvedValue('Some output');
 
     db.close();
@@ -250,7 +250,7 @@ Summary: Implemented the user authentication feature
   });
 
   it('should handle tmux capture errors gracefully', async () => {
-    const { capturePane } = await import('@/lib/tmux');
+    const { capturePane } = await import('@/lib/tmux/tmux');
 
     // Mock tmux error (returns empty string on error)
     vi.mocked(capturePane).mockResolvedValue('');

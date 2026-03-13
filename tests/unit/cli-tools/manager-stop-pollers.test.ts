@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 
 // Mock response-poller
-vi.mock('@/lib/response-poller', () => ({
+vi.mock('@/lib/polling/response-poller', () => ({
   stopPolling: vi.fn(),
 }));
 
@@ -28,7 +28,7 @@ describe('CLIToolManager.stopPollers (T2.4 - MF1-001)', () => {
   });
 
   it('should stop response-poller for any CLI tool', async () => {
-    const { stopPolling } = await import('@/lib/response-poller');
+    const { stopPolling } = await import('@/lib/polling/response-poller');
 
     manager.stopPollers('test-worktree', 'codex');
 

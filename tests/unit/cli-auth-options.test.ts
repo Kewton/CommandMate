@@ -61,7 +61,7 @@ describe('CLI Auth Options', () => {
 
   describe('parseDuration validation for --auth-expire', () => {
     it('should accept valid durations', async () => {
-      const { parseDuration } = await import('@/lib/auth');
+      const { parseDuration } = await import('@/lib/security/auth');
       expect(parseDuration('1h')).toBe(3600000);
       expect(parseDuration('24h')).toBe(86400000);
       expect(parseDuration('7d')).toBe(604800000);
@@ -69,7 +69,7 @@ describe('CLI Auth Options', () => {
     });
 
     it('should reject invalid auth-expire values', async () => {
-      const { parseDuration } = await import('@/lib/auth');
+      const { parseDuration } = await import('@/lib/security/auth');
       expect(() => parseDuration('0h')).toThrow(); // Below minimum
       expect(() => parseDuration('31d')).toThrow(); // Above maximum
       expect(() => parseDuration('abc')).toThrow(); // Invalid format
@@ -79,7 +79,7 @@ describe('CLI Auth Options', () => {
 
   describe('Token generation for --auth', () => {
     it('should generate a valid token and hash pair', async () => {
-      const { generateToken, hashToken, verifyToken } = await import('@/lib/auth');
+      const { generateToken, hashToken, verifyToken } = await import('@/lib/security/auth');
       const token = generateToken();
       const hash = hashToken(token);
 
@@ -87,7 +87,7 @@ describe('CLI Auth Options', () => {
       process.env.CM_AUTH_TOKEN_HASH = hash;
       vi.resetModules();
       process.env.CM_AUTH_TOKEN_HASH = hash;
-      const auth = await import('@/lib/auth');
+      const auth = await import('@/lib/security/auth');
 
       expect(auth.verifyToken(token)).toBe(true);
       expect(token).toMatch(/^[0-9a-f]{64}$/);

@@ -1,0 +1,8 @@
+{
+  "issue_number": 473,
+  "stage": 3,
+  "applied_findings": ["DR3-001", "DR3-002", "DR3-003", "DR3-004", "DR3-005"],
+  "skipped_findings": ["DR3-006", "DR3-007"],
+  "design_doc_updated": true,
+  "summary": "Stage 3影響分析レビューの指摘5件を設計方針書に反映。DR3-001(must_fix): SPECIAL_KEY_VALUESとの名前衝突を回避するためNAVIGATION_KEY_VALUESに名称変更（セクション2,8.1,8.2,10.1）。DR3-002(should_fix): priority 2.5ブロックの回帰テスト3件をセクション11.2に追加。DR3-003(should_fix): CliStatusインターフェースへのisSelectionListActive追加をセクション7.3に明記。DR3-004(should_fix): selection_list検出ウィンドウの方針をセクション6.1に追記。DR3-005(should_fix): prompt-answer-sender.tsのinvalidateCache特殊パターンの注意事項をセクション9.2に追記。DR3-006,DR3-007(nice_to_have)は対応保留としセクション14の反映記録テーブルに記載。実装チェックリストにStage 3由来の8項目を追加。"
+}

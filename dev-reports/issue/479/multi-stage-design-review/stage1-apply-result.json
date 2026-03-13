@@ -1,0 +1,15 @@
+{
+  "issue_number": 479,
+  "stage": 1,
+  "applied_findings": ["D1-001", "D1-002", "D1-006"],
+  "skipped_findings": [],
+  "changes_made": [
+    "D1-001: セクション4-1のドメイン別責務分類テーブルからsession-db.tsのメモ管理関数（getMemosByWorktreeId, getMemoById, createMemo, updateMemo, deleteMemo, reorderMemos）を分離し、memo-db.tsとして独立行に記載。Mermaidダイアグラム（セクション2）との整合性を確保。",
+    "D1-002: セクション4-5を新設し、prompt-detector.tsの具体的な分割方針を記載。getAnswerInputをprompt-answer-input.tsに分離する方針と、Pass1/Pass2の結合度を考慮した800行以下の例外目標を明記。Mermaidダイアグラムにもprompt-answer-input.tsを追加。受け入れ基準（セクション12）にprompt-detector.tsの例外を反映。",
+    "D1-006: セクション4-3のisValidWorktreeId移動方針を更新。re-exportによる後方互換性維持ではなく、11のAPIルートのimportパスを本Issue内でpath-validator.tsへの直接importに一括変更する方針を明記。セクション5のセキュリティ設計もAPIルート変更ありに更新。"
+  ],
+  "updated_files": [
+    "dev-reports/design/issue-479-large-file-split-design-policy.md"
+  ],
+  "updated_at": "2026-03-13"
+}

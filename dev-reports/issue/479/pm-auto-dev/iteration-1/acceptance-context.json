@@ -1,0 +1,21 @@
+{
+  "issue_number": 479,
+  "feature_summary": "巨大ファイル分割（R-1）：300行超の上位10ファイルを責務ごとに分割",
+  "acceptance_criteria": [
+    "分割後の各ファイルが500行以下を目標（メインファイルは800行以下も許容）",
+    "既存テストが全パス（npm run test:unit）",
+    "公開APIの変更なし（バレルファイルによるre-exportでimportパス維持）",
+    "npm run lint && npx tsc --noEmit がパス",
+    "isValidWorktreeIdがpath-validator.tsに移動されていること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: npm run test:unit がすべてパスすること",
+    "シナリオ2: npx tsc --noEmit でTypeScriptエラーが0件であること",
+    "シナリオ3: npm run lint でESLintエラーが0件であること",
+    "シナリオ4: 分割後の各ファイルが目標行数以下であること（wc -lで確認）",
+    "シナリオ5: isValidWorktreeIdがpath-validator.tsに存在し、auto-yes-manager.tsからは削除されていること",
+    "シナリオ6: db.tsがバレルファイルとして機能していること（re-exportのみ）",
+    "シナリオ7: response-poller.tsがバレル+ポーリング制御として機能していること",
+    "シナリオ8: 新規作成ファイルが適切な責務を持つこと（cron-parser.ts, job-executor.ts, response-cleaner.ts等）"
+  ]
+}

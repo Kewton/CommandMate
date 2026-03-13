@@ -1,0 +1,99 @@
+{
+  "issue_number": 473,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "review_date": "2026-03-12",
+  "previous_findings_resolved": [
+    {
+      "id": "F301",
+      "resolved": true,
+      "comment": "Issue本文に検出分岐の優先順位セクションが追加され、priority 2.5 OpenCode固有ブロック内のthinkingチェック(B)の後、response_completeチェック(D)の前に挿入すると明記された。status: 'waiting', reason: 'opencode_selection_list' の返却値も記載済み。F502修正による設計根拠の追記も適切。"
+    },
+    {
+      "id": "F302",
+      "resolved": true,
+      "comment": "フロントエンドセクションに伝達パスが3層（status-detector -> current-output/route.ts -> WorktreeDetailRefactored）で明記された。isSelectionListActive フラグの追加、変更対象ファイル一覧も記載済み。"
+    },
+    {
+      "id": "F303",
+      "resolved": true,
+      "comment": "受け入れ基準に「テスト（F303対応）」セクションが新設され、cli-patterns.test.ts、status-detector.test.ts、special-keys API テスト、回帰テスト（他CLIツール誤検知・既存テストパス確認）の5項目が記載された。"
+    },
+    {
+      "id": "F304",
+      "resolved": true,
+      "comment": "矢印キーインターセプトの実装場所セクションが追加され、MessageInput外側（WorktreeDetailRefactored or NavigationButtons）で実装する方針が明記された。SRP/カーソル移動保護/フォーカス管理の3つの理由も記載。MessageInput変更不要が受け入れ基準にも反映済み。"
+    },
+    {
+      "id": "F305",
+      "resolved": true,
+      "comment": "Issue本文の「実装時の確認事項」にOPENCODE_SKIP_PATTERNSへの追加検討について注記が追加された（F305として明示参照）。パターン確定後に判断する旨が適切に記載されている。"
+    },
+    {
+      "id": "F306",
+      "resolved": true,
+      "comment": "パフォーマンス影響は低いという結論で、Issue追記不要と判断した。現行Issue記載内容（OpenCode固有ブロック内でのみ実行、既存ポーリングに包含）は正確。"
+    }
+  ],
+  "summary": "Stage 3で指摘した6件（F301-F306）は全て適切に反映されている。更新後のIssueに対する2回目の影響範囲レビューでは、should_fix 2件、nice_to_have 2件の計4件の新規指摘を行った。最も重要な指摘は、新規 special-keys API で sendSpecialKeys() のエラーハンドリングにおいて、ALLOWED_SPECIAL_KEYS バリデーション失敗時のエラーレスポンスが 400 なのか 500 なのかが未定義である点（F701）。tmux.ts の sendSpecialKeys() はバリデーション失敗時に throw するため、エンドポイント側で事前バリデーションを行わないと 500 として返却される。Issue のセキュリティ要件にはホワイトリスト二重チェック推奨とあるが、エンドポイント側でのバリデーション失敗ハンドリングの具体的なHTTPステータスコードが明示されていない。worktree-status-helper.ts への影響は、reason 値が 'opencode_selection_list' でも isWaitingForResponse: true と判定されるため既存ロジックに影響なし。認証ミドルウェアは /api/worktrees/ パス配下を自動的にカバーするため追加設定不要。全体として、Issueの品質は高く大きなリスクは認められない。",
+  "findings": [
+    {
+      "id": "F701",
+      "severity": "should_fix",
+      "category": "新規 special-keys API - エラーハンドリング詳細",
+      "title": "keys 配列内の不正キー名に対するHTTPステータスコードの明確化",
+      "description": "Issue のセキュリティ要件 (5) に「ALLOWED_SPECIAL_KEYS によるホワイトリスト検証（tmux.ts 側で既に実装済みだが、エンドポイント側でも二重チェック推奨）」と記載がある。tmux.ts の sendSpecialKeys() は不正キーに対して throw new Error('Invalid special key: ...') を投げる。エンドポイント側で事前バリデーションを行わない場合、このエラーは catch ブロックで 500 として返却される。一方、エンドポイント側で事前バリデーションを行う場合は 400 として返却すべき。Issue のレスポンス形式テーブルには「バリデーションエラー（不正なcliToolId、不正なキー名、keys配列超過）」として 400 が定義されているが、この事前バリデーションの具体的な実装方法（ALLOWED_SPECIAL_KEYS を tmux.ts からエクスポートするか、special-keys route.ts 側で独自のホワイトリストを定義するか）が未定義。tmux.ts では ALLOWED_SPECIAL_KEYS は const（非エクスポート）であるため、二重チェックを実装するには (a) tmux.ts から ALLOWED_SPECIAL_KEYS をエクスポートする、または (b) route.ts 側に別途ホワイトリストを定義する必要がある。(b) の場合、2つのホワイトリストの同期維持が必要になるDRY問題が発生する。",
+      "affected_components": [
+        "src/app/api/worktrees/[id]/special-keys/route.ts (新規)",
+        "src/lib/tmux.ts"
+      ],
+      "risk_level": "medium",
+      "suggestion": "Issue 本文のセキュリティ要件セクションに、ALLOWED_SPECIAL_KEYS のエクスポート方針を明記する。推奨: tmux.ts から ALLOWED_SPECIAL_KEYS を export して route.ts 側で再利用する（DRY原則）。これにより、route.ts 側で keys 配列の各要素を事前バリデーションし、不正なキー名は 400 で返却できる。alternative として「tmux.ts の throw を catch して 400 に変換する」方法もあるが、エラー原因の判別が難しいため推奨しない。"
+    },
+    {
+      "id": "F702",
+      "severity": "should_fix",
+      "category": "worktree-status-helper.ts への影響分析",
+      "title": "選択リスト検出時の isWaitingForResponse 判定が sidebar ステータスに影響する可能性",
+      "description": "worktree-status-helper.ts の detectWorktreeSessionStatus() は detectSessionStatus() の結果を使い、status === 'waiting' なら isWaitingForResponse: true とする（L92）。選択リスト検出時は status: 'waiting' が返るため、サイドバーの worktree ステータスが「応答待ち」と表示される。これは技術的に正しい（ユーザー操作を待っている状態）が、通常の「プロンプト応答待ち」とは意味が異なる。サイドバーで「応答待ち」アイコンが表示されることが意図された動作であることを確認すべき。また、isWaitingForResponse が true の場合、stale pending prompt cleanup ロジック（L96-103）が動作するが、hasActivePrompt は false のため markPendingPromptsAsAnswered は呼ばれない（statusResult.hasActivePrompt === false の分岐に入る）。この動作は正しいが、将来 'opencode_selection_list' reason に対して hasActivePrompt を true に設定した場合、意図しない prompt cleanup が発生するリスクがある。",
+      "affected_components": [
+        "src/lib/worktree-status-helper.ts",
+        "src/components/sidebar/"
+      ],
+      "risk_level": "medium",
+      "suggestion": "Issue 本文に、選択リスト検出時のサイドバー表示動作について注記を追加する。具体的には: (1) status: 'waiting' により isWaitingForResponse: true となり、サイドバーで応答待ちステータスが表示されること、(2) hasActivePrompt: false であるため prompt cleanup は発動しないこと、(3) これが意図された動作であることを明記する。将来 hasActivePrompt を変更する場合は prompt cleanup への影響を確認する旨の注意書きがあると安全。"
+    },
+    {
+      "id": "F703",
+      "severity": "nice_to_have",
+      "category": "認証ミドルウェアとの整合性",
+      "title": "新規 special-keys API は認証ミドルウェアで自動的に保護される",
+      "description": "middleware.ts の matcher パターン '/((?!_next/|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)' は /api/worktrees/[id]/special-keys にもマッチするため、認証保護は自動的に適用される。AUTH_EXCLUDED_PATHS にも含まれていない。IP制限も同様に適用される。セキュリティ面で追加の設定は不要。ただし、この点を「確認済み」として Issue に記載しておくと、実装時の確認コストが下がる。",
+      "affected_components": [
+        "src/middleware.ts",
+        "src/config/auth-config.ts"
+      ],
+      "risk_level": "low",
+      "suggestion": "Issue の関連ファイルテーブルまたはセキュリティ要件セクションに「認証ミドルウェア: /api/worktrees/ パス配下のため追加設定不要（middleware.ts の matcher で自動カバー）」と注記する。"
+    },
+    {
+      "id": "F704",
+      "severity": "nice_to_have",
+      "category": "prompt-answer-sender.ts との設計整合性",
+      "title": "sendSpecialKeys の呼び出しパターンが2箇所に分散する設計上の考慮",
+      "description": "現在、sendSpecialKeys() の呼び出しは prompt-answer-sender.ts のみ（prompt-response API / auto-yes-manager 経由）。新規 special-keys API を追加すると、sendSpecialKeys() の呼び出しが2つのパスに分散する: (1) prompt-answer-sender.ts（Claude multiple_choice 専用）、(2) special-keys/route.ts（汎用キーナビゲーション）。両者とも sendSpecialKeys() 後に invalidateCache() を呼ぶ必要があるが、このパターンの重複は prompt-answer-sender.ts が既に invalidateCache() を呼び出している（L111）のと同じ責務なので許容範囲。ただし、将来 sendSpecialKeys() 後に追加の共通処理が必要になった場合（例: ログ記録、メトリクス）、2箇所の修正が必要になる。現時点では過度な抽象化は不要だが、認識しておくべき設計上のポイント。",
+      "affected_components": [
+        "src/lib/prompt-answer-sender.ts",
+        "src/app/api/worktrees/[id]/special-keys/route.ts (新規)"
+      ],
+      "risk_level": "low",
+      "suggestion": "現時点ではアクション不要。Issue への追記も不要。将来 sendSpecialKeys() 後の共通処理が増えた場合に、tmux.ts 側にファサード関数を追加するリファクタリングを検討する。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 0,
+    "should_fix": 2,
+    "nice_to_have": 2,
+    "total": 4
+  }
+}

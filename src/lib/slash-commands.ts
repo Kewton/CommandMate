@@ -17,6 +17,9 @@ import type {
 import { COMMAND_CATEGORIES } from '@/types/slash-commands';
 import { groupByCategory } from '@/lib/command-merger';
 import { truncateString } from '@/lib/utils';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('slash-commands');
 
 /**
  * Cache for loaded commands
@@ -112,7 +115,7 @@ function parseCommandFile(filePath: string): SlashCommand | null {
       filePath: path.relative(process.cwd(), filePath),
     };
   } catch (error) {
-    console.error(`Error parsing command file ${filePath}:`, error);
+    logger.error('error-parsing-command-file-filepath:', { error: error instanceof Error ? error.message : String(error) });
     return null;
   }
 }
@@ -135,7 +138,7 @@ function parseSkillFile(skillDirPath: string, skillName: string): SlashCommand |
   try {
     const stat = fs.statSync(skillPath);
     if (stat.size > MAX_SKILL_FILE_SIZE_BYTES) {
-      console.warn(`Skipping oversized skill file (${stat.size} bytes): ${skillPath}`);
+      logger.warn('skipping-oversized-skill-file-statsize-b');
       return null;
     }
     const content = fs.readFileSync(skillPath, 'utf-8');
@@ -160,7 +163,7 @@ function parseSkillFile(skillDirPath: string, skillName: string): SlashCommand |
       filePath: path.relative(process.cwd(), skillPath),
     };
   } catch (error) {
-    console.error(`Error parsing skill file ${skillPath}:`, error);
+    logger.error('error-parsing-skill-file-skillpath:', { error: error instanceof Error ? error.message : String(error) });
     return null;
   }
 }
@@ -199,7 +202,7 @@ export async function loadSlashCommands(basePath?: string): Promise<SlashCommand
 
   // Check if directory exists
   if (!fs.existsSync(commandsDir)) {
-    console.warn(`Commands directory not found: ${commandsDir}`);
+    logger.warn('commands-directory-not-found:commandsdir');
     return [];
   }
 
@@ -261,7 +264,7 @@ export async function loadSkills(basePath?: string): Promise<SlashCommand[]> {
 
   for (const entry of entries) {
     if (skills.length >= MAX_SKILLS_COUNT) {
-      console.warn(`Skills count limit reached (${MAX_SKILLS_COUNT}). Remaining entries skipped.`);
+      logger.warn('skills-count-limit');
       break;
     }
 

@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../db-migrations';
 import { getWorktrees } from '../db';
-import { syncWorktreesToDB } from '../worktrees';
+import { syncWorktreesToDB } from '../git/worktrees';
 import type { Worktree } from '@/types/models';
 
 describe('syncWorktreesToDB', () => {

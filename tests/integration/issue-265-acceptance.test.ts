@@ -9,7 +9,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock tmux module
-vi.mock('@/lib/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn(),
   createSession: vi.fn(),
   sendKeys: vi.fn(),
@@ -50,12 +50,12 @@ import {
   CLAUDE_INIT_POLL_INTERVAL,
   CLAUDE_POST_PROMPT_DELAY,
   CLAUDE_INIT_TIMEOUT,
-} from '@/lib/claude-session';
-import { hasSession, createSession, sendKeys, capturePane, killSession } from '@/lib/tmux';
+} from '@/lib/session/claude-session';
+import { hasSession, createSession, sendKeys, capturePane, killSession } from '@/lib/tmux/tmux';
 import {
   CLAUDE_SESSION_ERROR_PATTERNS,
   CLAUDE_SESSION_ERROR_REGEX_PATTERNS,
-} from '@/lib/cli-patterns';
+} from '@/lib/detection/cli-patterns';
 
 const TEST_SESSION_OPTIONS = {
   worktreeId: 'test-worktree',

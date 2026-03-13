@@ -32,20 +32,20 @@ describe('auth module', () => {
 
   describe('generateToken', () => {
     it('should return a 64-character hex string', async () => {
-      const { generateToken } = await import('@/lib/auth');
+      const { generateToken } = await import('@/lib/security/auth');
       const token = generateToken();
       expect(token).toMatch(/^[0-9a-f]{64}$/);
     });
 
     it('should generate unique tokens on each call', async () => {
-      const { generateToken } = await import('@/lib/auth');
+      const { generateToken } = await import('@/lib/security/auth');
       const token1 = generateToken();
       const token2 = generateToken();
       expect(token1).not.toBe(token2);
     });
 
     it('should generate tokens with 32 bytes of entropy', async () => {
-      const { generateToken } = await import('@/lib/auth');
+      const { generateToken } = await import('@/lib/security/auth');
       const token = generateToken();
       // 32 bytes = 64 hex chars
       expect(token.length).toBe(64);
@@ -54,7 +54,7 @@ describe('auth module', () => {
 
   describe('hashToken', () => {
     it('should return a consistent SHA-256 hash for the same input', async () => {
-      const { hashToken } = await import('@/lib/auth');
+      const { hashToken } = await import('@/lib/security/auth');
       const token = 'test-token-value';
       const hash1 = hashToken(token);
       const hash2 = hashToken(token);
@@ -62,13 +62,13 @@ describe('auth module', () => {
     });
 
     it('should return a 64-character hex string (SHA-256)', async () => {
-      const { hashToken } = await import('@/lib/auth');
+      const { hashToken } = await import('@/lib/security/auth');
       const hash = hashToken('any-input');
       expect(hash).toMatch(/^[0-9a-f]{64}$/);
     });
 
     it('should produce different hashes for different inputs', async () => {
-      const { hashToken } = await import('@/lib/auth');
+      const { hashToken } = await import('@/lib/security/auth');
       const hash1 = hashToken('token-a');
       const hash2 = hashToken('token-b');
       expect(hash1).not.toBe(hash2);
@@ -77,7 +77,7 @@ describe('auth module', () => {
 
   describe('verifyToken', () => {
     it('should return true for a valid token with matching hash', async () => {
-      const { generateToken, hashToken, verifyToken } = await import('@/lib/auth');
+      const { generateToken, hashToken, verifyToken } = await import('@/lib/security/auth');
       const token = generateToken();
       const hash = hashToken(token);
       // Set up environment
@@ -86,31 +86,31 @@ describe('auth module', () => {
       // so we re-import)
       vi.resetModules();
       process.env.CM_AUTH_TOKEN_HASH = hash;
-      const authModule = await import('@/lib/auth');
+      const authModule = await import('@/lib/security/auth');
       expect(authModule.verifyToken(token)).toBe(true);
     });
 
     it('should return false for an invalid token', async () => {
-      const { generateToken, hashToken } = await import('@/lib/auth');
+      const { generateToken, hashToken } = await import('@/lib/security/auth');
       const token = generateToken();
       const hash = hashToken(token);
       process.env.CM_AUTH_TOKEN_HASH = hash;
       vi.resetModules();
       process.env.CM_AUTH_TOKEN_HASH = hash;
-      const authModule = await import('@/lib/auth');
+      const authModule = await import('@/lib/security/auth');
       expect(authModule.verifyToken('wrong-token-value-that-is-not-correct')).toBe(false);
     });
 
     it('should return false when CM_AUTH_TOKEN_HASH is not set', async () => {
       delete process.env.CM_AUTH_TOKEN_HASH;
       vi.resetModules();
-      const authModule = await import('@/lib/auth');
+      const authModule = await import('@/lib/security/auth');
       expect(authModule.verifyToken('any-token')).toBe(false);
     });
 
     it('should return false for an expired token', async () => {
       // Step 1: Generate token and hash with real Date.now
-      const { generateToken, hashToken } = await import('@/lib/auth');
+      const { generateToken, hashToken } = await import('@/lib/security/auth');
       const token = generateToken();
       const hash = hashToken(token);
 
@@ -124,7 +124,7 @@ describe('auth module', () => {
       process.env.CM_AUTH_EXPIRE = '1h';
 
       // Step 3: Import module - expireAt = baseTime + 1h (since Date.now() returns baseTime)
-      const authModule = await import('@/lib/auth');
+      const authModule = await import('@/lib/security/auth');
 
       // Step 4: Change mock to 2h later (past expiration)
       dateNowSpy.mockReturnValue(baseTime + 2 * 60 * 60 * 1000);
@@ -139,17 +139,17 @@ describe('auth module', () => {
       // Reading the actual source file to confirm the security constraint.
       const fs = await import('fs');
       const path = await import('path');
-      const authSourcePath = path.resolve(__dirname, '../../src/lib/auth.ts');
+      const authSourcePath = path.resolve(__dirname, '../../src/lib/security/auth.ts');
       const authSource = fs.readFileSync(authSourcePath, 'utf-8');
       expect(authSource).toContain('timingSafeEqual');
       // Also verify behavioral correctness
-      const { generateToken, hashToken } = await import('@/lib/auth');
+      const { generateToken, hashToken } = await import('@/lib/security/auth');
       const token = generateToken();
       const hash = hashToken(token);
       process.env.CM_AUTH_TOKEN_HASH = hash;
       vi.resetModules();
       process.env.CM_AUTH_TOKEN_HASH = hash;
-      const authModule = await import('@/lib/auth');
+      const authModule = await import('@/lib/security/auth');
       expect(authModule.verifyToken(token)).toBe(true);
       expect(authModule.verifyToken('a'.repeat(64))).toBe(false);
     });
@@ -157,34 +157,34 @@ describe('auth module', () => {
 
   describe('parseDuration', () => {
     it('should parse hours (e.g., "24h" -> 24 * 3600 * 1000 ms)', async () => {
-      const { parseDuration } = await import('@/lib/auth');
+      const { parseDuration } = await import('@/lib/security/auth');
       expect(parseDuration('24h')).toBe(24 * 60 * 60 * 1000);
     });
 
     it('should parse days (e.g., "7d" -> 7 * 86400 * 1000 ms)', async () => {
-      const { parseDuration } = await import('@/lib/auth');
+      const { parseDuration } = await import('@/lib/security/auth');
       expect(parseDuration('7d')).toBe(7 * 24 * 60 * 60 * 1000);
     });
 
     it('should parse minutes (e.g., "90m" -> 90 * 60 * 1000 ms)', async () => {
-      const { parseDuration } = await import('@/lib/auth');
+      const { parseDuration } = await import('@/lib/security/auth');
       expect(parseDuration('90m')).toBe(90 * 60 * 1000);
     });
 
     it('should enforce minimum duration of 1 hour', async () => {
-      const { parseDuration } = await import('@/lib/auth');
+      const { parseDuration } = await import('@/lib/security/auth');
       expect(() => parseDuration('30m')).toThrow();
       expect(() => parseDuration('59m')).toThrow();
     });
 
     it('should enforce maximum duration of 30 days', async () => {
-      const { parseDuration } = await import('@/lib/auth');
+      const { parseDuration } = await import('@/lib/security/auth');
       expect(() => parseDuration('31d')).toThrow();
       expect(() => parseDuration('721h')).toThrow();
     });
 
     it('should throw on invalid format', async () => {
-      const { parseDuration } = await import('@/lib/auth');
+      const { parseDuration } = await import('@/lib/security/auth');
       expect(() => parseDuration('abc')).toThrow();
       expect(() => parseDuration('')).toThrow();
       expect(() => parseDuration('24')).toThrow();
@@ -193,50 +193,50 @@ describe('auth module', () => {
     });
 
     it('should accept edge case: 1h (minimum)', async () => {
-      const { parseDuration } = await import('@/lib/auth');
+      const { parseDuration } = await import('@/lib/security/auth');
       expect(parseDuration('1h')).toBe(60 * 60 * 1000);
     });
 
     it('should accept edge case: 30d (maximum)', async () => {
-      const { parseDuration } = await import('@/lib/auth');
+      const { parseDuration } = await import('@/lib/security/auth');
       expect(parseDuration('30d')).toBe(30 * 24 * 60 * 60 * 1000);
     });
 
     it('should accept edge case: 60m (equals 1h minimum)', async () => {
-      const { parseDuration } = await import('@/lib/auth');
+      const { parseDuration } = await import('@/lib/security/auth');
       expect(parseDuration('60m')).toBe(60 * 60 * 1000);
     });
   });
 
   describe('parseCookies', () => {
     it('should parse a standard Cookie header', async () => {
-      const { parseCookies } = await import('@/lib/auth');
+      const { parseCookies } = await import('@/lib/security/auth');
       const result = parseCookies('name=value; session=abc123');
       expect(result).toEqual({ name: 'value', session: 'abc123' });
     });
 
     it('should handle empty string', async () => {
-      const { parseCookies } = await import('@/lib/auth');
+      const { parseCookies } = await import('@/lib/security/auth');
       const result = parseCookies('');
       expect(result).toEqual({});
     });
 
     it('should handle malformed cookies gracefully', async () => {
-      const { parseCookies } = await import('@/lib/auth');
+      const { parseCookies } = await import('@/lib/security/auth');
       const result = parseCookies('invalidcookie');
       expect(result).toBeDefined();
       expect(typeof result).toBe('object');
     });
 
     it('should handle cookies with special characters in values', async () => {
-      const { parseCookies } = await import('@/lib/auth');
+      const { parseCookies } = await import('@/lib/security/auth');
       const result = parseCookies('token=abc%3D123; path=/test');
       expect(result.token).toBe('abc%3D123');
       expect(result.path).toBe('/test');
     });
 
     it('should trim whitespace from names and values', async () => {
-      const { parseCookies } = await import('@/lib/auth');
+      const { parseCookies } = await import('@/lib/security/auth');
       const result = parseCookies('  name  =  value  ;  key  =  data  ');
       expect(result.name).toBe('value');
       expect(result.key).toBe('data');
@@ -249,14 +249,14 @@ describe('auth module', () => {
       process.env.CM_AUTH_TOKEN_HASH = validHash;
       vi.resetModules();
       process.env.CM_AUTH_TOKEN_HASH = validHash;
-      const { isAuthEnabled } = await import('@/lib/auth');
+      const { isAuthEnabled } = await import('@/lib/security/auth');
       expect(isAuthEnabled()).toBe(true);
     });
 
     it('should return false when CM_AUTH_TOKEN_HASH is not set', async () => {
       delete process.env.CM_AUTH_TOKEN_HASH;
       vi.resetModules();
-      const { isAuthEnabled } = await import('@/lib/auth');
+      const { isAuthEnabled } = await import('@/lib/security/auth');
       expect(isAuthEnabled()).toBe(false);
     });
 
@@ -264,7 +264,7 @@ describe('auth module', () => {
       process.env.CM_AUTH_TOKEN_HASH = '';
       vi.resetModules();
       process.env.CM_AUTH_TOKEN_HASH = '';
-      const { isAuthEnabled } = await import('@/lib/auth');
+      const { isAuthEnabled } = await import('@/lib/security/auth');
       expect(isAuthEnabled()).toBe(false);
     });
 
@@ -272,21 +272,21 @@ describe('auth module', () => {
       process.env.CM_AUTH_TOKEN_HASH = 'somehash';
       vi.resetModules();
       process.env.CM_AUTH_TOKEN_HASH = 'somehash';
-      const { isAuthEnabled } = await import('@/lib/auth');
+      const { isAuthEnabled } = await import('@/lib/security/auth');
       expect(isAuthEnabled()).toBe(false);
     });
   });
 
   describe('AUTH_COOKIE_NAME', () => {
     it('should be "cm_auth_token"', async () => {
-      const { AUTH_COOKIE_NAME } = await import('@/lib/auth');
+      const { AUTH_COOKIE_NAME } = await import('@/lib/security/auth');
       expect(AUTH_COOKIE_NAME).toBe('cm_auth_token');
     });
   });
 
   describe('AUTH_EXCLUDED_PATHS', () => {
     it('should contain login-related paths', async () => {
-      const { AUTH_EXCLUDED_PATHS } = await import('@/lib/auth');
+      const { AUTH_EXCLUDED_PATHS } = await import('@/lib/security/auth');
       expect(AUTH_EXCLUDED_PATHS).toContain('/login');
       expect(AUTH_EXCLUDED_PATHS).toContain('/api/auth/login');
       expect(AUTH_EXCLUDED_PATHS).toContain('/api/auth/logout');
@@ -301,7 +301,7 @@ describe('auth module', () => {
       vi.resetModules();
       process.env.CM_AUTH_TOKEN_HASH = 'hash';
       process.env.CM_AUTH_EXPIRE = '24h';
-      const authModule = await import('@/lib/auth');
+      const authModule = await import('@/lib/security/auth');
       const maxAge = authModule.getTokenMaxAge();
       // Should be approximately 24h in seconds (with small tolerance for execution time)
       expect(maxAge).toBeGreaterThan(0);
@@ -318,7 +318,7 @@ describe('auth module', () => {
       process.env.CM_AUTH_TOKEN_HASH = 'hash';
       process.env.CM_AUTH_EXPIRE = '1h';
       // Import with Date.now() = baseTime, so expireAt = baseTime + 1h
-      const authModule = await import('@/lib/auth');
+      const authModule = await import('@/lib/security/auth');
       // Now change Date.now() to 2h later => expired
       vi.spyOn(Date, 'now').mockReturnValue(baseTime + 2 * 60 * 60 * 1000);
       expect(authModule.getTokenMaxAge()).toBe(0);
@@ -330,7 +330,7 @@ describe('auth module', () => {
       delete process.env.CM_AUTH_EXPIRE;
       vi.resetModules();
       process.env.CM_AUTH_TOKEN_HASH = 'hash';
-      const authModule = await import('@/lib/auth');
+      const authModule = await import('@/lib/security/auth');
       const maxAge = authModule.getTokenMaxAge();
       // Default 24h = 86400 seconds
       expect(maxAge).toBeGreaterThan(86300);
@@ -340,7 +340,7 @@ describe('auth module', () => {
 
   describe('RATE_LIMIT_CONFIG', () => {
     it('should have correct default values', async () => {
-      const { RATE_LIMIT_CONFIG } = await import('@/lib/auth');
+      const { RATE_LIMIT_CONFIG } = await import('@/lib/security/auth');
       expect(RATE_LIMIT_CONFIG.maxAttempts).toBe(5);
       expect(RATE_LIMIT_CONFIG.lockoutDuration).toBe(15 * 60 * 1000);
       expect(RATE_LIMIT_CONFIG.cleanupInterval).toBe(60 * 60 * 1000);

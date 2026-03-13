@@ -1,0 +1,37 @@
+{
+  "issue_number": 479,
+  "refactor_targets": [
+    "src/lib/schedule-manager.ts",
+    "src/lib/cron-parser.ts",
+    "src/lib/job-executor.ts",
+    "src/components/worktree/FileTreeView.tsx",
+    "src/components/worktree/TreeNode.tsx",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/MarkdownToolbar.tsx",
+    "src/components/worktree/MarkdownPreview.tsx",
+    "src/lib/prompt-answer-input.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/auto-yes-poller.ts",
+    "src/lib/auto-yes-state.ts",
+    "src/lib/session-key-sender.ts",
+    "src/lib/response-extractor.ts",
+    "src/lib/response-cleaner.ts",
+    "src/lib/tui-accumulator.ts",
+    "src/lib/db/worktree-db.ts",
+    "src/lib/db/chat-db.ts",
+    "src/lib/db/session-db.ts",
+    "src/lib/db/memo-db.ts",
+    "src/lib/db.ts"
+  ],
+  "quality_metrics": {
+    "test_count": 4921,
+    "ts_errors": 0,
+    "lint_errors": 0
+  },
+  "improvement_goals": [
+    "未使用importの削除",
+    "console.log残留チェック",
+    "分割後ファイルのコメント/JSDoc整備",
+    "重複コードの確認"
+  ]
+}

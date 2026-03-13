@@ -1,0 +1,28 @@
+{
+  "issue_number": 473,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）- 影響範囲レビュー結果",
+  "applied_findings": ["F301", "F302", "F303", "F304"],
+  "skipped_findings": [],
+  "nice_to_have_noted": ["F305", "F306"],
+  "github_updated": true,
+  "applied_details": {
+    "F301": {
+      "severity": "must_fix",
+      "action": "検出方法セクションに「検出分岐の優先順位（F301対応）」サブセクションを新設。detectSessionStatus() 内の priority 2.5 OpenCode固有ブロックで processing_indicator と response_complete の間に挿入する方針を明記。返却値（status: 'waiting', reason: 'opencode_selection_list'）を定義。既存パターンとの衝突確認事項を記載。F305のskipPatterns検討事項も注記として追加。"
+    },
+    "F302": {
+      "severity": "should_fix",
+      "action": "フロントエンドセクションを「フロントエンド: 検出状態の伝達とUI表示（F302対応）」に改題・拡充。3層伝達パス（status-detector -> current-output API -> WorktreeDetailRefactored）を明記。CurrentOutputResponse型への isSelectionListActive フィールド追加、変更対象ファイル一覧を記載。関連ファイル表にcurrent-output/route.tsを追加。"
+    },
+    "F303": {
+      "severity": "should_fix",
+      "action": "受け入れ基準に「テスト（F303対応）」セクションを新設。cli-patterns.test.ts, status-detector.test.ts, special-keys APIテスト、他CLIツール誤検知防止の回帰テスト、既存テスト全パスの回帰テストの5項目を追加。"
+    },
+    "F304": {
+      "severity": "should_fix",
+      "action": "フロントエンドセクションに「矢印キーインターセプトの実装場所（F304対応）」サブセクションを新設。MessageInput外側（NavigationButtonsコンポーネント）でハンドリングする方針を明記。SRP・カーソル移動保護・フォーカス管理の3つの理由を記載。受け入れ基準に『MessageInput.tsxに変更が不要であること』を追加。関連ファイル表のMessageInput.tsxの役割を『変更不要』に更新。"
+    }
+  },
+  "summary": "Stage 3影響範囲レビューの must_fix 1件（F301: 検出分岐の優先順位明記）、should_fix 3件（F302: フロントエンドへの状態伝達パス、F303: テスト対象・回帰テスト、F304: 矢印キーインターセプト実装場所）を全てGitHub Issue #473に反映した。nice_to_have 2件（F305: skipPatterns検討、F306: パフォーマンス）はF305を注記として本文に含め、F306は追記不要と判断した。"
+}

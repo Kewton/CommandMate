@@ -9,7 +9,7 @@ import { CodexTool } from './codex';
 import { GeminiTool } from './gemini';
 import { VibeLocalTool } from './vibe-local';
 import { OpenCodeTool } from './opencode';
-import { stopPolling as stopResponsePolling } from '../response-poller';
+import { stopPolling as stopResponsePolling } from '../polling/response-poller';
 
 /**
  * CLI Tool Manager (Singleton)

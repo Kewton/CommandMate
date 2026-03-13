@@ -1,0 +1,65 @@
+{
+  "issue_number": 473,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "review_date": "2026-03-12",
+  "summary": "設計方針書は既存コードベースとの整合性が概ね良好だが、5件の指摘事項を検出した。ALLOWED_SPECIAL_KEYSのスコープ（現在非export）に関する記述は正確である。current-output APIのフラグ数カウントに誤りがあり、設計書の判定ロジック（statusResult.reason比較）が既存コードの構造と合致するか確認が必要。sendSpecialKeysAndInvalidateラッパーの分散箇所カウントに不正確さがある。",
+  "findings": [
+    {
+      "id": "DR2-001",
+      "severity": "must_fix",
+      "category": "current-output APIレスポンスフラグ数の整合性",
+      "title": "current-output APIのステータスフラグ数が設計書の記載と不一致",
+      "description": "設計書セクション12（DR1-007）では、isSelectionListActive追加後のフラグ数を「6個（isRunning, isGenerating, isPromptWaiting, thinking, autoYes, isSelectionListActive）」と記載している。しかし実際のcurrent-output/route.tsのレスポンスには、isRunning, isComplete, isGenerating, thinking, thinkingMessage, isPromptWaiting, promptData, autoYes, lastServerResponseTimestamp, content, fullOutput, realtimeSnippet, lineCount, lastCapturedLine, cliToolId が含まれている。ステータス的なフラグだけでも isRunning, isComplete, isGenerating, thinking, isPromptWaiting の5つがあり、autoYesはオブジェクト型である。設計書のフラグカウントの定義基準が曖昧であり、閾値判断の根拠として不十分。",
+      "location": "設計方針書 セクション12 DR1-007対応表",
+      "code_reference": "src/app/api/worktrees/[id]/current-output/route.ts L104-129",
+      "suggestion": "ステータスフラグの定義を明確にする。boolean型のステータスフラグのみをカウント対象とするならば、現状は isRunning, isComplete, isGenerating, thinking, isPromptWaiting の5つであり、isSelectionListActive追加で6つとなる。thinkingMessageやautoYes（オブジェクト）はカウント対象外であることを明記すべき。"
+    },
+    {
+      "id": "DR2-002",
+      "severity": "should_fix",
+      "category": "sendSpecialKeys+invalidateCache分散箇所の整合性",
+      "title": "sendSpecialKeys+invalidateCacheパターンの分散箇所カウントが不正確",
+      "description": "設計書セクション9.2では、sendSpecialKeys()+invalidateCache()の呼び出しパターンが「既に以下の3箇所に分散している」として、(1) terminal/route.ts - sendKeys()+invalidateCache()、(2) prompt-answer-sender.ts - sendSpecialKeys()+invalidateCache()、(3) special-keys/route.ts（本Issue新規）を挙げている。しかし(1)はsendKeys()であってsendSpecialKeys()ではない。sendSpecialKeys()+invalidateCacheの既存パターンはprompt-answer-sender.tsの1箇所のみである。terminal/route.tsのsendKeys()+invalidateCacheは異なるAPIであり、同じラッパーで統一するのは責務が異なる。",
+      "location": "設計方針書 セクション9.2",
+      "code_reference": "src/lib/prompt-answer-sender.ts L90,97,111、src/app/api/worktrees/[id]/terminal/route.ts L79,83",
+      "suggestion": "sendSpecialKeysAndInvalidate()ラッパーの対象を正確に記載する。sendKeys+invalidateCache（terminal/route.ts）とsendSpecialKeys+invalidateCache（prompt-answer-sender.ts, special-keys/route.ts）は別パターンとして扱い、ラッパー関数の適用範囲を明確に区別すべき。セクション9.2の「適用方針」内のsendKeysAndInvalidate()への言及は設計書内で一貫性が取れていない。"
+    },
+    {
+      "id": "DR2-003",
+      "severity": "should_fix",
+      "category": "isSelectionListActive判定ロジックの実装可能性",
+      "title": "current-output/route.tsでのisSelectionListActive判定がstatusResult.reasonに依存する設計の確認",
+      "description": "設計書セクション5.2では、isSelectionListActiveの判定を `statusResult.status === 'waiting' && statusResult.reason === 'opencode_selection_list'` としている。しかし、現在のcurrent-output/route.tsでは、statusResult.reasonを直接参照するパターンは使われていない（thinkingの判定では statusResult.status === 'running' && statusResult.reason === 'thinking_indicator' を使用している）。thinking以外にreason参照するのは初めてのパターンとなるが、StatusDetectionResultインターフェースにreasonフィールドはstring型で存在しており、技術的には問題ない。ただし、reason文字列がハードコードされる箇所が増えることで、typoリスクが高まる。",
+      "location": "設計方針書 セクション5.2",
+      "code_reference": "src/app/api/worktrees/[id]/current-output/route.ts L83、src/lib/status-detector.ts L53 (reason: string型)",
+      "suggestion": "reason値を定数化または文字列リテラル型のunionとしてStatusDetectionResult.reason型を厳格化することを検討する。例: type StatusReason = 'prompt_detected' | 'thinking_indicator' | 'opencode_processing_indicator' | 'opencode_response_complete' | 'opencode_selection_list' | 'input_prompt' | 'no_recent_output' | 'default'; 少なくとも、isSelectionListActive判定で使用するreason文字列は定数として定義し、status-detector.tsとcurrent-output/route.tsの両方で同じ定数を参照すべき。"
+    },
+    {
+      "id": "DR2-004",
+      "severity": "should_fix",
+      "category": "ALLOWED_SPECIAL_KEYSエクスポートの記述精度",
+      "title": "設計書のALLOWED_SPECIAL_KEYS記述が「exportのみ」としているが追加のexport文の影響を明記すべき",
+      "description": "設計書セクション2のレイヤー構成表で、tmux.tsの変更内容を「ALLOWED_SPECIAL_KEYS exportのみ」と記載している。現在のtmux.ts L236では `const ALLOWED_SPECIAL_KEYS = new Set([...])` と非exportで定義されている。これをexportに変更すること自体は正しい方針だが、ALLOWED_SPECIAL_KEYSはSet<string>型であり、外部からのmutable操作（add/delete/clear）が可能である。セキュリティ上の防御定数をmutableなSetとしてexportすることの安全性を考慮すべき。",
+      "location": "設計方針書 セクション2 レイヤー構成表、セクション8.2",
+      "code_reference": "src/lib/tmux.ts L236 `const ALLOWED_SPECIAL_KEYS = new Set([...])`",
+      "suggestion": "export時にObject.freeze()を適用するか、ReadonlySet型として公開する、または配列としてexportしてroute.ts側でSetを生成する方法を検討する。あるいは、tmux.tsにisAllowedSpecialKey(key: string): boolean関数を追加してSetを直接公開しない方法も有効。sendSpecialKeys()内部で既にバリデーションしているため、route.ts側の事前チェックには関数ベースのAPIが安全。"
+    },
+    {
+      "id": "DR2-005",
+      "severity": "nice_to_have",
+      "category": "OpenCode固有ブロック内の選択リスト検出位置の整合性",
+      "title": "設計書のpriority 2.5内の検出順序(A)(B)(C)(D)とコード実装の構造対応が明確",
+      "description": "設計書セクション6.1では、priority 2.5 OpenCode固有ブロック内の検出順序を (A) processing_indicator, (B) thinking, (C) selection_list(新規), (D) response_complete と定義している。実際のstatus-detector.ts L202-264のコード構造を確認すると、(A) OPENCODE_PROCESSING_INDICATOR.test(lastLines) → (B) detectThinking('opencode', contentThinkingWindow) → (D) OPENCODE_RESPONSE_COMPLETE.test(contentCheckWindow) の順で実装されており、(C)を(B)と(D)の間に挿入する設計は既存コード構造と整合している。ただし、(C)の検出対象ウィンドウ（contentCheckWindowかlastLinesか全体出力か）が設計書で明示されていない。",
+      "location": "設計方針書 セクション6.1, 6.2",
+      "code_reference": "src/lib/status-detector.ts L202-264",
+      "suggestion": "選択リスト検出で使用する出力ウィンドウ（contentCheckWindow, contentThinkingWindow, lastLines, cleanOutput等）を設計書に明記する。OpenCodeのTUIレイアウト（コンテンツ領域+パディング+フッター）を考慮すると、footerBoundary上のcontentCandidatesを使うのが既存パターンとの整合性が高い。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 1,
+    "should_fix": 3,
+    "nice_to_have": 1,
+    "total": 5
+  }
+}

@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { resolveExtractionStartIndex } from '@/lib/response-poller';
+import { resolveExtractionStartIndex } from '@/lib/polling/response-poller';
 
 /** Stub callback that always returns "not found" (-1). */
 const noPromptFound = () => -1;

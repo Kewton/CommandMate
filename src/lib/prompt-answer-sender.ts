@@ -6,10 +6,10 @@
  * the promptType/defaultOptionNumber fallback introduced in Bug1).
  */
 
-import { sendKeys, sendSpecialKeys } from './tmux';
+import { sendKeys, sendSpecialKeys } from './tmux/tmux';
 import type { CLIToolType } from './cli-tools/types';
 import type { PromptData, PromptType } from '@/types/models';
-import { invalidateCache } from './tmux-capture-cache';
+import { invalidateCache } from './tmux/tmux-capture-cache';
 
 /** Regex pattern to detect checkbox-style multi-select options */
 const CHECKBOX_OPTION_PATTERN = /^\[[ x]\] /;

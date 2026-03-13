@@ -1,0 +1,24 @@
+{
+  "issue_number": 473,
+  "refactor_targets": [
+    "src/lib/tmux.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/status-detector.ts",
+    "src/app/api/worktrees/[id]/special-keys/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/components/worktree/NavigationButtons.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "quality_metrics": {
+    "tests_passed": 4900,
+    "tests_failed": 0,
+    "typescript_errors": 0,
+    "eslint_errors": 0
+  },
+  "improvement_goals": [
+    "コードの可読性向上",
+    "重複コードの削除",
+    "既存パターンとの一貫性確保",
+    "不要なコメントの削除"
+  ]
+}

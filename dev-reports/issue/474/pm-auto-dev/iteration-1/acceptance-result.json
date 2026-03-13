@@ -1,0 +1,103 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "S1: Claude (image-capable) tool sends image via sendMessageWithImage",
+      "result": "passed",
+      "evidence": "ClaudeTool implements IImageCapableCLITool with supportsImage()=>true and sendMessageWithImage() appending markdown image reference. isImageCapableCLITool type guard returns true for ClaudeTool. Integration test api-send-cli-tool.test.ts confirms send route dispatches correctly."
+    },
+    {
+      "scenario": "S2: Non-image-capable tools use fallback path embedding",
+      "result": "passed",
+      "evidence": "send/route.ts lines 217-222: when imagePath is provided but tool lacks image support, message is sent as `${content}\\n\\n[attached image: ${absoluteImagePath}]`. CodexTool/GeminiTool do not implement supportsImage, so isImageCapableCLITool returns false (unit test types.test.ts line 65-80)."
+    },
+    {
+      "scenario": "S3: Supported image formats (png/jpg/jpeg/gif/webp) validated correctly",
+      "result": "passed",
+      "evidence": "ATTACHABLE_IMAGE_EXTENSIONS contains exactly [.png, .jpg, .jpeg, .gif, .webp]. Unit test image-extensions-attachment.test.ts (7 tests passed) verifies this."
+    },
+    {
+      "scenario": "S4: Unsupported format (svg) rejected by validation",
+      "result": "passed",
+      "evidence": "ATTACHABLE_IMAGE_EXTENSIONS explicitly filters out .svg. useImageAttachment hook validateFile() rejects files not in ATTACHABLE_IMAGE_EXTENSIONS. Unit test useImageAttachment.test.ts 'should reject unsupported file formats' confirms SVG rejection."
+    },
+    {
+      "scenario": "S5: Files exceeding 5MB size limit rejected",
+      "result": "passed",
+      "evidence": "IMAGE_MAX_SIZE_BYTES = 5*1024*1024. useImageAttachment hook validateFile() checks file.size > IMAGE_MAX_SIZE_BYTES. Unit test useImageAttachment.test.ts 'should reject files exceeding size limit' creates a file of IMAGE_MAX_SIZE_BYTES+1 and confirms rejection."
+    },
+    {
+      "scenario": "S6: Existing text-only sendMessage not broken",
+      "result": "passed",
+      "evidence": "sendMessage API signature changed 3rd arg from CLIToolType to options object {cliToolId?, imagePath?}. Without imagePath, send/route.ts line 223 calls cliTool.sendMessage(id, content) unchanged. Integration test 'should use claude tool by default' passes with text-only message. All 4921 unit tests pass."
+    },
+    {
+      "scenario": "S7: IImageCapableCLITool type guard functions correctly",
+      "result": "passed",
+      "evidence": "isImageCapableCLITool checks typeof supportsImage === 'function' && supportsImage() === true. Unit test types.test.ts verifies: returns true for image-capable mock, false for regular tool, false when supportsImage returns false. 4 dedicated test cases passed."
+    },
+    {
+      "scenario": "S8: Security validation (SSRF, path traversal, whitelist) functions correctly",
+      "result": "passed",
+      "evidence": "Integration test api-send-cli-tool.test.ts 'Image path validation (Issue #474)': rejects file://, http://, https://, ftp://, data: schemes (400); rejects ../../../etc/passwd traversal (400); rejects paths outside .commandmate/attachments/ (400). All 3 security tests passed."
+    },
+    {
+      "scenario": "S9: ATTACHABLE_IMAGE_EXTENSIONS does not contain SVG",
+      "result": "passed",
+      "evidence": "Unit test image-extensions-attachment.test.ts 'should not include .svg (XSS prevention)' explicitly asserts ATTACHABLE_IMAGE_EXTENSIONS does not contain '.svg'. Test passed."
+    },
+    {
+      "scenario": "S10: uploadImageFile uses FormData for upload",
+      "result": "passed",
+      "evidence": "api-client.ts uploadImageFile() creates FormData, appends file with timestamped filename, POSTs to /api/worktrees/${worktreeId}/upload/.commandmate/attachments. Upload API route at src/app/api/worktrees/[id]/upload/[...path]/route.ts handles multipart upload with auto-directory creation."
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "画像対応CLIツールで画像ファイルを添付してメッセージ送信できること",
+      "verified": true
+    },
+    {
+      "criterion": "CLIツール固有の画像送信方式がある場合はそれに準拠すること",
+      "verified": true
+    },
+    {
+      "criterion": "固有方式がない場合はアップロードした画像のファイルパスをメッセージに含めて送信できること",
+      "verified": true
+    },
+    {
+      "criterion": "画像非対応ツールでは添付ボタンが非表示または無効化されていること",
+      "verified": true
+    },
+    {
+      "criterion": "対応画像形式（png, jpg, jpeg, gif, webp）のバリデーションが機能すること",
+      "verified": true
+    },
+    {
+      "criterion": "画像ファイルサイズ上限（5MB）のバリデーションが機能すること",
+      "verified": true
+    },
+    {
+      "criterion": "既存のメッセージ送信機能（テキストのみ）が壊れないこと",
+      "verified": true
+    },
+    {
+      "criterion": "主要ロジックのユニットテストが追加されていること",
+      "verified": true
+    }
+  ],
+  "quality_checks": {
+    "unit_tests": "249 files, 4921 passed, 0 failed",
+    "integration_tests": "api-send-cli-tool.test.ts: 9 passed, 0 failed",
+    "typescript": "npx tsc --noEmit: 0 errors",
+    "eslint": "npm run lint: 0 warnings, 0 errors"
+  },
+  "evidence_files": [
+    "tests/unit/config/image-extensions-attachment.test.ts",
+    "tests/unit/cli-tools/types.test.ts",
+    "tests/unit/hooks/useImageAttachment.test.ts",
+    "tests/unit/components/worktree/MessageInput.test.tsx",
+    "tests/integration/api-send-cli-tool.test.ts"
+  ],
+  "message": "すべての受入条件を満たしています。全10テストシナリオがPASSED。ユニットテスト4921件全件パス、TypeScriptエラー0件、ESLintエラー0件。"
+}

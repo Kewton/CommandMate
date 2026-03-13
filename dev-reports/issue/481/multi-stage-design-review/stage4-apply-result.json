@@ -1,0 +1,67 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー反映",
+  "issue_number": 481,
+  "apply_date": "2026-03-13",
+  "design_doc_path": "dev-reports/design/issue-481-lib-restructure-design-policy.md",
+  "applied_findings": [
+    {
+      "id": "S001",
+      "severity": "should_fix",
+      "title": "path-validator.ts の @internal 関数 isWithinRoot() がバレル経由で外部公開される",
+      "action": "セクション2に「security/ グループのバレルエクスポート方針」を新設。security/index.ts では export * ではなく named export を使用し、isWithinRoot() をバレルから除外する方針を明記。テストファイルは直接パス @/lib/security/path-validator から import する旨を記載。",
+      "status": "applied"
+    },
+    {
+      "id": "S002",
+      "severity": "should_fix",
+      "title": "auth.ts の generateToken()/hashToken() がバレル経由で広く公開される",
+      "action": "セクション2の security/ バレル方針に auth.ts の外部公開関数を限定する named export 例を記載。セクション9のガイドラインに「セキュリティグループは named export を推奨」を追記。generateToken(), hashToken() を除外対象として明記。",
+      "status": "applied"
+    },
+    {
+      "id": "S004",
+      "severity": "should_fix",
+      "title": "セキュリティ関連 import の誤削除を検出する受け入れ基準が不十分",
+      "action": "セクション6の受け入れ基準に「セキュリティ関連importの接続確認」チェック項目を追加。ws-server.ts の auth/ip-restriction import、middleware.ts の ip-restriction import、file-operations.ts の isPathSafe import の確認項目を明記。",
+      "status": "applied"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "S003",
+      "severity": "nice_to_have",
+      "title": "middleware.ts の Edge Runtime 対応方針は適切",
+      "reason": "対応不要。I006で既に適切に記載済み。"
+    },
+    {
+      "id": "S005",
+      "severity": "nice_to_have",
+      "title": "security/ グループの構成ファイル選定は適切",
+      "reason": "対応不要。現在の構成は適切。"
+    },
+    {
+      "id": "S006",
+      "severity": "nice_to_have",
+      "title": "security/ グループ内に循環依存リスクはない",
+      "reason": "対応不要。設計方針書の記載は正確。"
+    },
+    {
+      "id": "S007",
+      "severity": "nice_to_have",
+      "title": "sanitize.ts と env-sanitizer.ts の命名が紛らわしい",
+      "reason": "対応不要。技術的問題なし、KISS に沿い既存命名を維持。"
+    }
+  ],
+  "changes_summary": {
+    "sections_modified": [
+      "セクション2: security/ グループのバレルエクスポート方針（named export）を新設",
+      "セクション6: セキュリティ関連importの接続確認チェック項目を追加",
+      "セクション9: セキュリティグループは named export 推奨のガイドラインを追記",
+      "セクション13: Stage 4 レビュー指摘反映サマリーを新設",
+      "関連ファイル: Stage 4 レビュー/反映結果へのリンクを追加"
+    ],
+    "total_applied": 3,
+    "total_skipped": 4
+  }
+}

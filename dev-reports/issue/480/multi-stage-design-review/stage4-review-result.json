@@ -1,0 +1,134 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "issue_number": 480,
+  "review_date": "2026-03-13",
+  "findings": [
+    {
+      "id": "SEC4-001",
+      "severity": "should_fix",
+      "category": "ログインジェクション",
+      "title": "action引数にユーザー入力が混入するリスクの防御方針が未記載",
+      "description": "設計方針書のaction名命名規則（セクション6）では 'verb:target' 形式を推奨しているが、実装者がaction引数にユーザー由来の値（ファイルパス、worktree名等）を直接渡してしまうケースへの防御が明示されていない。logger.tsのformatLogEntry()はaction文字列をそのままログ出力するため、改行文字やANSIエスケープシーケンスを含むaction文字列はログ偽装やログ解析ツールの誤動作を招く可能性がある。",
+      "recommendation": "設計方針書にaction引数のルールとして「action名は静的文字列のみ使用し、動的な値はdata引数に渡す」という制約を明記する。必要に応じてlogger.ts内でaction引数の改行・制御文字をサニタイズするバリデーションを追加することを推奨する。",
+      "affected_files": ["src/lib/logger.ts"],
+      "risk_level": "medium"
+    },
+    {
+      "id": "SEC4-002",
+      "severity": "should_fix",
+      "category": "センシティブデータ露出",
+      "title": "db-migrations.tsのエラーログにSQLエラー詳細が含まれるリスク",
+      "description": "設計方針書の変換例（セクション6）では console.error('Migration failed:', error) を logger.error('migration:failed', { error: String(error) }) に変換する方針だが、SQLiteのエラーメッセージにはテーブル構造やカラム名が含まれることがある。String(error)による変換ではスタックトレースも含まれる可能性があり、本番環境のログに内部スキーマ情報が露出するリスクがある。ただし、現在のlogger.tsのサニタイズ機構はSENSITIVE_KEY_PATTERNに 'error' キーが含まれないため、errorオブジェクトの中身はそのまま出力される（これは意図通りの設計だが、SQLエラー固有の懸念は残る）。",
+      "recommendation": "マイグレーションエラーのログ出力では error.message のみを記録し、スタックトレースはdebugレベルで別途出力する方式を検討する。例: logger.error('migration:failed', { error: error.message, migration: name }); logger.debug('migration:failed:stack', { stack: error.stack });",
+      "affected_files": ["src/lib/db-migrations.ts"],
+      "risk_level": "low"
+    },
+    {
+      "id": "SEC4-003",
+      "severity": "nice_to_have",
+      "category": "情報漏洩",
+      "title": "logger.debug()の本番環境出力抑制は適切に設計されている",
+      "description": "logger.tsのgetCurrentLogLevel()はenv.tsのgetLogConfig()から取得し、本番環境ではデフォルトで 'info' レベルとなる（env.ts 160行目: process.env.NODE_ENV === 'production' ? 'info' : 'debug'）。これによりdebugレベルのログは本番では出力されない。ただし、CM_LOG_LEVEL環境変数を明示的に 'debug' に設定すれば本番でもdebugログが出力される点は運用上の注意事項として設計方針書に記載があると望ましい。",
+      "recommendation": "設計方針書のトレードオフセクションまたは品質保証セクションに「本番環境でCM_LOG_LEVEL=debugを設定した場合、デバッグログが出力される。センシティブデータはsanitize()でフィルタリングされるが、デバッグ情報の量が増えるため本番での使用は一時的な調査目的に限定すること」という運用注意事項を追記する。",
+      "affected_files": ["src/lib/env.ts", "src/lib/logger.ts"],
+      "risk_level": "low"
+    },
+    {
+      "id": "SEC4-004",
+      "severity": "nice_to_have",
+      "category": "アクセスログ完全性",
+      "title": "api-logger.tsは既にlogger経由で実装済みのため移行リスクなし",
+      "description": "src/lib/api-logger.tsのwithLogging()は既にcreateLogger('api')を使用しており、console.logへの直接出力は含まれていない。本Issue #480の移行によってAPIアクセスログが欠落するリスクはない。ただし、api-logger.tsを使用していないAPIルート（約78件のconsole出力がある38ファイル）については、logger移行後もwithLogging()ラッパーの適用を別途検討する余地がある。",
+      "recommendation": "現時点では対応不要。将来的にAPIアクセスログの網羅性を高める場合、withLogging()ラッパーの全APIルートへの適用を検討する。",
+      "affected_files": ["src/lib/api-logger.ts"],
+      "risk_level": "low"
+    },
+    {
+      "id": "SEC4-005",
+      "severity": "should_fix",
+      "category": "console.errorの残置",
+      "title": "クライアントサイドconsole.errorにサーバーエラーレスポンスの詳細が含まれる箇所がある",
+      "description": "設計方針書Phase 3ではクライアントサイドのconsole.errorを残置する方針だが、一部のconsole.errorはサーバーからのエラーレスポンスボディをそのまま出力している。例えば InterruptButton.tsx:71 では errorData.error をconsole.errorに出力しており、サーバー側のエラーメッセージにDBパスや内部実装の詳細が含まれた場合、ブラウザのDevToolsを通じて情報が露出する。このアプリはローカル開発ツールのため影響は限定的だが、設計方針として残置する以上、何を残置してよいかの基準が必要。",
+      "recommendation": "console.error残置方針に「サーバーからのエラーレスポンスボディをそのまま出力するconsole.errorについては、表示するフィールドを限定する（例: error.messageのみ）か、開発環境限定の条件分岐を入れることを推奨する」という基準を追記する。",
+      "affected_files": [
+        "src/components/worktree/InterruptButton.tsx",
+        "src/components/worktree/MessageList.tsx",
+        "src/components/worktree/PromptPanel.tsx"
+      ],
+      "risk_level": "low"
+    },
+    {
+      "id": "SEC4-006",
+      "severity": "must_fix",
+      "category": "センシティブデータ露出",
+      "title": "APIルートのconsole.logにworktreeId等の内部IDが平文で出力されている",
+      "description": "src/app/api/ 配下のconsole.logの多く（約80件）にworktreeId、sessionName、cliToolId等の内部識別子が平文で含まれている。例: send/route.tsの 'Saved initial branch for ${params.id}: ${gitStatus.currentBranch}'。これらはlogger移行後もlogger.info()のdata引数として渡されることになるが、logger.tsのSENSITIVE_KEY_PATTERNにはworktreeIdやsessionNameは含まれておらず、サニタイズ対象外である。ローカル開発ツールのため実害は低いが、設計方針書には移行時のセンシティブデータ取り扱い方針（何をdataに含めてよいか）が明記されていない。",
+      "recommendation": "設計方針書のログレベル割り当て方針（セクション1）に「data引数に含めてよい情報の基準」を追記する。具体的には (1) 認証トークン・パスワードは絶対に含めない（logger.tsのsanitize()で自動マスク）、(2) ファイルパス・worktreeIdは運用ログとして許容、(3) ユーザー入力テキスト（メッセージ内容等）はdebugレベルのみ許容、といった基準を設ける。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/send/route.ts",
+        "src/app/api/worktrees/[id]/respond/route.ts",
+        "src/app/api/worktrees/[id]/kill-session/route.ts"
+      ],
+      "risk_level": "medium"
+    },
+    {
+      "id": "SEC4-007",
+      "severity": "nice_to_have",
+      "category": "db-migrations.tsのエラーログ",
+      "title": "マイグレーション失敗時のロールバック状態がログに記録されない設計",
+      "description": "db-migrations.tsのrunMigrations()では失敗時にconsole.error（移行後はlogger.error）でエラーメッセージを出力した後throw Errorするが、失敗したマイグレーションのトランザクション自動ロールバックが成功したかどうかはログに記録されない。SQLiteのトランザクションは例外時に自動ロールバックされるため実害はないが、運用上のデバッグ容易性の観点から、ロールバック成功/失敗のログがあると望ましい。",
+      "recommendation": "logger移行時に、catch節でlogger.error('migration:failed', { version, name, error: error.message, rolledBack: true }) のようにロールバック状態を明示するフィールドを追加することを推奨する。",
+      "affected_files": ["src/lib/db-migrations.ts"],
+      "risk_level": "low"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 3,
+    "overall_quality": "good"
+  },
+  "security_checklist": {
+    "sensitive_data_filtering": {
+      "status": "pass_with_notes",
+      "notes": "logger.tsのsanitize()はBearer token, password, secret, key, authパターンをカバー。ただしSQLエラー詳細やworktreeIdはサニタイズ対象外（SEC4-002, SEC4-006）"
+    },
+    "log_injection_prevention": {
+      "status": "needs_improvement",
+      "notes": "action引数に対するバリデーションが未実装（SEC4-001）"
+    },
+    "debug_log_production_suppression": {
+      "status": "pass",
+      "notes": "LOG_LEVELデフォルト値により本番ではdebugログ非出力。クライアント側はNODE_ENV !== 'development'で非出力"
+    },
+    "api_access_log_completeness": {
+      "status": "pass",
+      "notes": "api-logger.tsは既にlogger経由。移行によるログ欠落リスクなし"
+    },
+    "client_console_error_safety": {
+      "status": "pass_with_notes",
+      "notes": "残置方針は妥当だが、サーバーエラーレスポンスの詳細出力箇所あり（SEC4-005）"
+    },
+    "migration_error_logging": {
+      "status": "pass_with_notes",
+      "notes": "エラーメッセージは記録されるが、スタックトレース分離やロールバック状態記録が未考慮（SEC4-002, SEC4-007）"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-480-console-log-logger-unification-design-policy.md",
+    "src/lib/logger.ts",
+    "src/lib/env.ts",
+    "src/lib/db-migrations.ts",
+    "src/lib/api-logger.ts",
+    "src/lib/env-sanitizer.ts",
+    "src/components/ (console.error usage survey)",
+    "src/app/api/ (console.log usage survey)"
+  ],
+  "timestamp": "2026-03-13T00:00:00Z"
+}

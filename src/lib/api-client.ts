@@ -178,19 +178,60 @@ export const worktreeApi = {
 
   /**
    * Send a message to a worktree
+   * Issue #474: [S1-M2] Changed 3rd argument to options object for type safety
+   *
    * @param id - Worktree ID
    * @param content - Message content
-   * @param cliToolId - Optional CLI tool ID (claude, codex, gemini)
+   * @param options - Optional settings (cliToolId, imagePath)
    */
-  async sendMessage(id: string, content: string, cliToolId?: CLIToolType): Promise<{ success: boolean }> {
-    const body: { content: string; cliToolId?: string } = { content };
-    if (cliToolId) {
-      body.cliToolId = cliToolId;
+  async sendMessage(
+    id: string,
+    content: string,
+    options?: { cliToolId?: CLIToolType; imagePath?: string }
+  ): Promise<{ success: boolean }> {
+    const body: { content: string; cliToolId?: string; imagePath?: string } = { content };
+    if (options?.cliToolId) {
+      body.cliToolId = options.cliToolId;
+    }
+    if (options?.imagePath) {
+      body.imagePath = options.imagePath;
     }
     return fetchApi<{ success: boolean }>(`/api/worktrees/${id}/send`, {
       method: 'POST',
       body: JSON.stringify(body),
     });
+  },
+
+  /**
+   * Upload an image file for attachment
+   * Issue #474: [S2-M3] Uses fetch() directly (not fetchApi) for FormData/multipart support
+   *
+   * @param worktreeId - Worktree ID
+   * @param file - Image file to upload
+   * @returns Upload result with server-side path
+   */
+  async uploadImageFile(
+    worktreeId: string,
+    file: File
+  ): Promise<{ path: string }> {
+    const timestamp = Date.now();
+    const filename = `${timestamp}-${file.name}`;
+    const uploadPath = `.commandmate/attachments`;
+    const formData = new FormData();
+    formData.append('file', new File([file], filename, { type: file.type }));
+
+    const response = await fetch(`/api/worktrees/${worktreeId}/upload/${uploadPath}`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({})) as { error?: { message?: string } };
+      throw new Error(errorBody?.error?.message || `Upload failed (HTTP ${response.status})`);
+    }
+
+    const data = await response.json() as { path?: string; filename?: string };
+    return { path: data.path || `${uploadPath}/${filename}` };
   },
 
   /**

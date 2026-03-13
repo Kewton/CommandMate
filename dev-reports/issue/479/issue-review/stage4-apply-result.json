@@ -1,0 +1,80 @@
+{
+  "issue_number": 479,
+  "stage": 4,
+  "iteration": 2,
+  "apply_date": "2026-03-13",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "I001",
+        "status": "applied",
+        "change_summary": "auto-yes-manager.tsのisValidWorktreeIdをpath-validator.tsに移動する方針を明記。対象ファイル説明、詳細分割設計セクション、受け入れ基準に反映"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "I002",
+        "status": "applied",
+        "change_summary": "db.tsテスト影響37ファイルに対するモックパターンの段階的移行方針をテスト戦略に追記"
+      },
+      {
+        "id": "I003",
+        "status": "applied",
+        "change_summary": "response-poller.tsにバレルファイル戦略を適用する方針を追記。11ファイルのimportパス変更回避を明記"
+      },
+      {
+        "id": "I004",
+        "status": "applied",
+        "change_summary": "Phase 3内の実施順序を明記（db.ts先行、response-poller.ts後続）。6関数の依存関係を根拠として記載"
+      },
+      {
+        "id": "I005",
+        "status": "applied",
+        "change_summary": "response-poller.ts内モジュールレベル状態（activePollers Map、TUI accumulator Map）の分割後配置と整合性設計を追記"
+      },
+      {
+        "id": "I006",
+        "status": "applied",
+        "change_summary": "response-poller.tsのテストファイル対応表（リネーム/分割計画）を追記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "I007",
+        "status": "skipped",
+        "reason": "Phase別PR戦略は実装時の判断事項として認識にとどめた。Issueの受け入れ基準に含めると実装の柔軟性を損なうため"
+      },
+      {
+        "id": "I008",
+        "status": "applied",
+        "change_summary": "バレルファイル廃止後のツリーシェイキング改善メリットをdb.tsバレルファイル戦略セクションに追記"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 7,
+    "skipped": 1
+  },
+  "changes_made": [
+    "対象ファイル表のauto-yes-manager.ts説明にisValidWorktreeId移動を追記",
+    "対象ファイル表のresponse-poller.ts説明にバレルファイル戦略を追記",
+    "db.tsセクションに消費者数の具体値（API 37、lib 13、テスト37）を追記",
+    "db.tsセクションにツリーシェイキング改善メリットを追記",
+    "db.tsセクションにテスト影響の段階的移行方針を追記",
+    "response-poller.tsセクションにバレルファイル戦略を追記",
+    "response-poller.tsセクションにモジュールレベル状態の管理設計を追記",
+    "response-poller.tsセクションにテストファイル対応表を追記",
+    "auto-yes-manager.tsの詳細分割設計セクションを新規追加（isValidWorktreeId再配置方針）",
+    "Phase 3に実施順序（db.ts先行、response-poller.ts後続）と根拠を追記",
+    "テスト戦略に影響テスト56ファイル以上の記載とモックパターン段階的移行を追記",
+    "受け入れ基準にisValidWorktreeId移動の確認項目を追加",
+    "受け入れ基準のCLAUDE.md更新に補足説明を追加",
+    "レビュー履歴にイテレーション2（影響範囲レビュー）を追記"
+  ],
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/479"
+  },
+  "updated_at": "2026-03-13"
+}

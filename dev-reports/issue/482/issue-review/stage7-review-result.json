@@ -1,0 +1,89 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "issue_number": 482,
+  "review_date": "2026-03-13",
+  "previous_findings_check": [
+    {
+      "id": "S3-001",
+      "status": "resolved",
+      "comment": "方針(B)に確定済み。Issue本文に「方針(B)を採用: 統合不要と判断しTODOを削除する」「型定義自体（ローカルのSlashCommandsResponse）はそのまま維持する」と明記されている。前回指摘の「方針(A)の場合の共通型配置先が未定義」は方針(B)採用により不要となった。"
+    },
+    {
+      "id": "S3-002",
+      "status": "resolved",
+      "comment": "Issue本文に「opencode-config.ts TODO削除の補足方針」セクションが追加され、JSDocへの追記内容（\"HTTP fetch logic (fetchWithTimeout) can be extracted to a shared helper.\"）が具体的に明記されている。"
+    },
+    {
+      "id": "S3-003",
+      "status": "resolved",
+      "comment": "Issue本文に「cli-patterns.ts修正方針」セクションが追加され、「Issue番号が特定できない場合はIssue #XXX参照を削除し、JSDocの説明文のみ残す」と明記されている。なお、git log調査の結果、コミット5ebd2baはPR #210（feature/188-worktree）に含まれており、関連IssueはIssue #188（fix: 応答完了後もスピナーが表示され続ける）と特定可能。"
+    },
+    {
+      "id": "S3-004",
+      "status": "acknowledged",
+      "comment": "Nice to Haveとしてスキップ済み。テスト影響なしの評価は妥当。"
+    },
+    {
+      "id": "S3-005",
+      "status": "acknowledged",
+      "comment": "Nice to Haveとしてスキップ済み。テスト影響なしの評価は妥当。"
+    }
+  ],
+  "impact_analysis": {
+    "scope": "全4箇所の変更はコメント・JSDoc修正のみであり、実行時の挙動に影響を与えない。方針(B)確定によりroute.tsの型定義は維持されるため、APIレスポンス構造への影響もゼロ。破壊的変更なし。テスト破壊リスクなし。",
+    "affected_files": [
+      "src/app/api/worktrees/[id]/slash-commands/route.ts",
+      "src/lib/cli-tools/opencode-config.ts",
+      "src/lib/cli-patterns.ts"
+    ]
+  },
+  "findings": [
+    {
+      "id": "S7-001",
+      "severity": "should_fix",
+      "category": "整合性",
+      "location": "受け入れ基準: 親Issue更新の数値",
+      "description": "受け入れ基準に「親Issue #475 のR-4行の残存件数（6箇所→4箇所）を更新する」とあるが、Issue #482は4箇所のTODO/FIXMEマーカーを対象としている。全4箇所を解消した場合、残存件数は6-4=2箇所となるはずだが、記載では4箇所となっている。現在のコードベースを検索すると、対象のTODO/FIXMEマーカーは3箇所（route.ts:33, opencode-config.ts:217, opencode-config.ts:284）+ 1箇所のIssue #XXX参照（cli-patterns.ts:27）で合計4箇所であり、Issue本文の対象一覧と一致する。これらを全て解消すると残存は2箇所（6-4=2）が正しい。ただし、親Issue #475のR-4項目が「6箇所」として計上した元の内訳が不明であるため、元の6箇所のうち2箇所が既に他のIssueで解消済みの可能性もある。その場合は6→4の記載で正しい。",
+      "suggestion": "親Issue #475のR-4項目の元の6箇所の内訳を確認し、正確な残存件数を算出する。全4箇所を本Issueで解消する場合、残存件数の計算式を明記する（例:「元の6箇所のうち本Issueで4箇所を解消し残存2箇所」または「元の6箇所のうち2箇所は既に解消済み、本Issueで残り4箇所のうちN箇所を解消」）。"
+    },
+    {
+      "id": "S7-002",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "location": "cli-patterns.ts:27 Issue #XXX参照",
+      "description": "git log調査の結果、コミット5ebd2baはPR #210（ブランチ: feature/188-worktree）に含まれることが確認できた。関連IssueはIssue #188（fix: 応答完了後もスピナーが表示され続ける）と特定可能。Issue本文のフォールバック方針（参照を削除しJSDoc説明文のみ残す）は有効だが、Issue番号が特定できたため #188 に置き換える選択肢もある。",
+      "suggestion": "実装時にIssue #XXXを Issue #188 に置き換えることを推奨。ただし、JSDoc説明文のみ残すフォールバック方針も許容範囲であり、実装者の判断に委ねてよい。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 1,
+    "nice_to_have": 1,
+    "total": 2
+  },
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/slash-commands/route.ts",
+      "relevance": "TODOコメント（L33）削除対象。ローカルSlashCommandsResponse型（L34-43）は維持。"
+    },
+    {
+      "file": "src/lib/cli-tools/opencode-config.ts",
+      "relevance": "TODOコメント2箇所（L217, L284）削除対象。ensureOpencodeConfig JSDoc（L340-342）にfetchWithTimeoutヒント追記。"
+    },
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "relevance": "Issue #XXX参照（L27）修正対象。コミット5ebd2baはPR #210経由、関連Issue #188と特定。"
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "relevance": "SlashCommandsResponse型（L437-439）。方針(B)により変更不要。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュールリファレンス。本Issue変更ではドキュメント更新不要。"
+    }
+  ]
+}

@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { OpenCodeTool, OPENCODE_EXIT_COMMAND, OPENCODE_INIT_WAIT_MS, OPENCODE_PANE_HEIGHT } from '@/lib/cli-tools/opencode';
 
 // Mock tmux module
-vi.mock('@/lib/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn(),
   createSession: vi.fn(),
   sendKeys: vi.fn(),
@@ -45,7 +45,7 @@ import {
   sendKeys,
   sendSpecialKey,
   killSession,
-} from '@/lib/tmux';
+} from '@/lib/tmux/tmux';
 import { ensureOpencodeConfig } from '@/lib/cli-tools/opencode-config';
 import { detectAndResendIfPastedText } from '@/lib/pasted-text-helper';
 

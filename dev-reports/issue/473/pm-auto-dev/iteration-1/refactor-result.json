@@ -1,0 +1,30 @@
+{
+  "issue_number": 473,
+  "status": "success",
+  "changes_made": [
+    {
+      "file": "src/components/worktree/NavigationButtons.tsx",
+      "description": "Remove unused useRef import and containerRef variable (dead code removal)"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "description": "Replace string literal 'thinking_indicator' with STATUS_REASON.THINKING_INDICATOR constant for consistency with new STATUS_REASON pattern on line 97"
+    },
+    {
+      "file": "src/lib/tmux.ts",
+      "description": "Clarify isAllowedSpecialKey JSDoc to explain naming relationship with NAVIGATION_KEY_VALUES and special-keys API"
+    }
+  ],
+  "test_results": {
+    "passed": 4900,
+    "failed": 0,
+    "skipped": 7,
+    "total": 4907
+  },
+  "type_check": "pass",
+  "lint": "pass",
+  "commits": [
+    "0b4f8e5: refactor(opencode): clean up Issue #473 TUI navigation code"
+  ],
+  "notes": "Three minor improvements applied: (1) dead code removal in NavigationButtons.tsx (unused useRef/containerRef), (2) consistency improvement in current-output/route.ts replacing string literal with STATUS_REASON constant to match the pattern used by Issue #473 additions, (3) JSDoc clarification for isAllowedSpecialKey naming. All 4900 tests pass, TypeScript 0 errors, ESLint 0 errors. Broader STATUS_REASON constant migration for pre-existing string literals (prompt_detected, input_prompt, etc.) was intentionally deferred as it would affect 30+ test assertions outside the scope of Issue #473."
+}

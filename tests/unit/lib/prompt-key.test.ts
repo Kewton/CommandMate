@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { generatePromptKey } from '@/lib/prompt-key';
+import { generatePromptKey } from '@/lib/detection/prompt-key';
 
 describe('generatePromptKey', () => {
   it('should generate key from type and question', () => {

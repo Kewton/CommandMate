@@ -3,7 +3,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { CLIToolType, ICLITool, CLIToolInfo } from '@/lib/cli-tools/types';
+import type { CLIToolType, ICLITool, CLIToolInfo, IImageCapableCLITool } from '@/lib/cli-tools/types';
+import { isImageCapableCLITool } from '@/lib/cli-tools/types';
 
 describe('CLITool Types', () => {
   it('should have valid CLI tool types', () => {
@@ -40,6 +41,60 @@ describe('CLITool Types', () => {
     expect(mockTool.id).toBe('claude');
     expect(mockTool.name).toBe('Test Tool');
     expect(mockTool.command).toBe('test');
+  });
+
+  it('should identify image-capable tools with isImageCapableCLITool', () => {
+    const imageCapableTool: IImageCapableCLITool = {
+      id: 'claude',
+      name: 'Claude Code',
+      command: 'claude',
+      isInstalled: async () => true,
+      isRunning: async () => false,
+      startSession: async () => {},
+      sendMessage: async () => {},
+      killSession: async () => {},
+      getSessionName: () => 'test-session',
+      interrupt: async () => {},
+      supportsImage: () => true,
+      sendMessageWithImage: async () => {},
+    };
+
+    expect(isImageCapableCLITool(imageCapableTool)).toBe(true);
+  });
+
+  it('should return false for non-image-capable tools with isImageCapableCLITool', () => {
+    const regularTool: ICLITool = {
+      id: 'codex',
+      name: 'Codex CLI',
+      command: 'codex',
+      isInstalled: async () => true,
+      isRunning: async () => false,
+      startSession: async () => {},
+      sendMessage: async () => {},
+      killSession: async () => {},
+      getSessionName: () => 'test-session',
+      interrupt: async () => {},
+    };
+
+    expect(isImageCapableCLITool(regularTool)).toBe(false);
+  });
+
+  it('should return false when supportsImage returns false', () => {
+    const toolWithFalseSupport: ICLITool & { supportsImage: () => boolean } = {
+      id: 'codex',
+      name: 'Codex CLI',
+      command: 'codex',
+      isInstalled: async () => true,
+      isRunning: async () => false,
+      startSession: async () => {},
+      sendMessage: async () => {},
+      killSession: async () => {},
+      getSessionName: () => 'test-session',
+      interrupt: async () => {},
+      supportsImage: () => false as unknown as true,
+    };
+
+    expect(isImageCapableCLITool(toolWithFalseSupport as ICLITool)).toBe(false);
   });
 
   it('should define CLIToolInfo interface', () => {

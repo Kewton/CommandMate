@@ -21,6 +21,21 @@ vi.mock('fs/promises', () => ({
   },
 }));
 
+// Mock logger module (Issue #480)
+const { mockLogger } = vi.hoisted(() => {
+  const mockLogger = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    withContext: vi.fn().mockReturnThis(),
+  };
+  return { mockLogger };
+});
+vi.mock('@/lib/logger', () => ({
+  createLogger: vi.fn(() => mockLogger),
+}));
+
 // Mock date-fns format to return deterministic values
 vi.mock('date-fns', () => ({
   format: vi.fn((date: Date, pattern: string) => {
@@ -472,7 +487,7 @@ describe('log-manager', () => {
     it('should handle errors gracefully per tool directory', async () => {
       vi.mocked(fs.access).mockResolvedValue(undefined);
       vi.mocked(fs.readdir).mockRejectedValue(new Error('Permission denied'));
-      vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockLogger.error.mockClear();
 
       const deleted = await cleanupOldLogs(30);
 

@@ -1,0 +1,86 @@
+{
+  "issue_number": 479,
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "reviewed_at": "2026-03-13",
+  "design_doc": "dev-reports/design/issue-479-large-file-split-design-policy.md",
+  "summary": "設計方針書は全体的に堅実で、SOLID/KISS/YAGNI/DRY原則に概ね沿った設計となっている。バレルファイル戦略による後方互換性維持、段階的フェーズ実施によるリスク分散は評価できる。ただし、db.tsの分割における責務分類の混在（session-db.tsにメモ管理が含まれる）、prompt-detector.tsが965行で分割対象外となっている点、消費者数の不正確さなど、改善すべき点がある。",
+  "findings": [
+    {
+      "id": "D1-001",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "title": "session-db.tsの責務混在：セッション管理とメモ管理の同居",
+      "description": "設計方針書のセクション4-1で、session-db.tsにはセッション状態管理（getSessionState, updateSessionState等）とメモ管理（getMemosByWorktreeId, createMemo, updateMemo, deleteMemo, reorderMemos）が同居する計画になっている。これらは明確に異なるドメインであり、単一責任原則に反する。実際のdb.tsのエクスポートを確認すると、メモ関連は5関数存在し、十分に独立したドメインである。",
+      "location": "セクション4-1. db.ts分割設計 - ドメイン別責務分類テーブル",
+      "suggestion": "memo-db.tsを独立ファイルとして分割する。設計方針書にも既にmemo-db.tsがMermaidダイアグラム（セクション2）には記載されているが、セクション4-1の詳細設計テーブルではsession-db.tsに統合されている。ダイアグラムと詳細設計の整合性を取り、memo-db.tsを独立させること。"
+    },
+    {
+      "id": "D1-002",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "title": "prompt-detector.ts（965行）が分割対象から実質除外されている",
+      "description": "prompt-detector.tsは965行で300行超の分割対象ファイルであるにもかかわらず、Mermaidダイアグラムでは分割先が1つしか示されていない（PD1のみ）。Phase 2に記載されているが、実際には分割されない。3つのexport関数（detectPrompt, getAnswerInput, resetDetectPromptCache）があり、965行の大半は内部ロジックと思われるが、受け入れ基準の「各ファイル500行以下」を満たせない。",
+      "location": "セクション2. アーキテクチャ設計 Phase 2 / セクション12. 受け入れ基準",
+      "suggestion": "prompt-detector.tsの分割方針を明示するか、分割しない理由を設計方針書に明記すること。例えば、Pass1ロジックとPass2ロジックの分離、またはgetAnswerInputのような応答生成ロジックの分離が考えられる。分割しない場合は受け入れ基準の例外として記載すること。"
+    },
+    {
+      "id": "D1-003",
+      "severity": "nice_to_have",
+      "category": "設計整合性",
+      "title": "Mermaidダイアグラムと詳細設計の不整合（db.ts分割）",
+      "description": "セクション2のMermaidダイアグラムではdb.tsの分割先としてDB1(バレル)、DB2(worktree-db)、DB3(chat-db)、DB4(session-db)、DB5(memo-db)の5つが示されている。しかしセクション4-1の詳細設計テーブルではworktree-db.ts、chat-db.ts、session-db.ts、db.ts(バレル)の4つのみで、memo-db.tsが独立ファイルとして登場しない。ダイアグラムでは正しく分離されているが、詳細設計が追随していない。",
+      "location": "セクション2 Mermaidダイアグラム vs セクション4-1 詳細設計テーブル",
+      "suggestion": "Mermaidダイアグラムに合わせてセクション4-1のテーブルにmemo-db.tsを追加するか、ダイアグラムを修正して整合性を確保すること。"
+    },
+    {
+      "id": "D1-004",
+      "severity": "nice_to_have",
+      "category": "設計整合性",
+      "title": "消費者数の数値が実態と乖離している可能性",
+      "description": "設計方針書セクション8でdb.tsの消費者数を87、response-poller.tsを11と記載している。実際にソースコードを検索すると、db.tsのsrc/配下からのimportは約66ファイル、tests/配下を含めても87には達しない可能性がある（テストファイルの一部はdb-instanceやdb-repositoryなど別モジュールをimportしている）。消費者数は分割リスク判断の根拠となるため、正確であることが望ましい。",
+      "location": "セクション8. 実施フェーズ - 消費者数カラム",
+      "suggestion": "消費者数の算出方法を明記するか、再計測して正確な値に更新すること。特にsrc/内の直接消費者とtests/内の消費者を区別して記載するとリスク判断の精度が上がる。"
+    },
+    {
+      "id": "D1-005",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "title": "バレルファイル段階的廃止方針は本Issue範囲外であり記載が過剰",
+      "description": "セクション4-1の「バレルファイルの段階的廃止方針」で将来のツリーシェイキング恩恵に言及し、消費者を直接importに移行する計画を記載している。しかし、これは本Issue（R-1）の範囲外であり、YAGNIの観点から設計方針書に詳細に記載する必要性は低い。",
+      "location": "セクション4-1. バレルファイルの段階的廃止方針",
+      "suggestion": "将来の廃止方針は1文程度の簡潔な注記に留めるか、別途R-3やR-4の設計方針書で扱うことを明記すること。現在の記載自体は誤りではないが、本Issueのスコープを超える内容である。"
+    },
+    {
+      "id": "D1-006",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "title": "auto-yes-manager.tsの分割でisValidWorktreeIdのre-export依存が増える",
+      "description": "設計ではisValidWorktreeIdをpath-validator.tsに移動し、auto-yes-manager.tsからre-exportして後方互換性を維持する計画である。これは正しいアプローチだが、11のAPIルートがauto-yes-managerからisValidWorktreeIdをimportしている現状は、単一責任原則の違反が既に存在していることを示している。バレルファイル戦略でre-exportを維持するのは移行期として妥当だが、APIルート側のimportを直接path-validator.tsに変更する作業を本Issue内で実施すべきかどうかの判断基準が不明確である。",
+      "location": "セクション4-3. isValidWorktreeIdの移動",
+      "suggestion": "APIルート側のimportパス変更を本Issue範囲に含めるかどうかを明確にすること。11ファイルのimport変更は機械的な作業でリスクが低く、re-exportの負債を残さないため、本Issue内で完了させることを推奨する。"
+    },
+    {
+      "id": "D1-007",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "title": "db.ts内のmapChatMessage関数のような内部ヘルパーの配置方針が未記載",
+      "description": "db.tsにはmapChatMessageのような内部ヘルパー関数や型定義（ChatMessageRow）が存在する。分割時にこれらの共通型・ヘルパーをどのファイルに配置するかの方針が設計方針書に記載されていない。複数の分割ファイルから参照される可能性のある共通要素の扱いが不明確であり、DRY原則の観点から配置方針を決めておくべきである。",
+      "location": "セクション4-1全般",
+      "suggestion": "db/配下にtypes.tsやhelpers.tsといった共通ファイルを設けるか、各分割ファイルに内包するかの方針を明記すること。"
+    },
+    {
+      "id": "D1-008",
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "title": "WorktreeDetailRefactored.tsxの分割先が多すぎる可能性",
+      "description": "WorktreeDetailRefactored.tsx（2,709行）の分割で、メインコンポーネント + レイアウト2つ + 内部コンポーネント7つ + hooks 2つ = 合計12ファイルへの分割が計画されている。KISS原則の観点から、ファイル数が多すぎるとナビゲーションコストが増大する。特にLoadingIndicator.tsxやErrorDisplay.tsxのような汎用性の高い小さなコンポーネントはcomponents/common/に配置する方が自然である。",
+      "location": "セクション4-4. WorktreeDetailRefactored.tsx分割設計",
+      "suggestion": "LoadingIndicator.tsx、ErrorDisplay.tsxはsrc/components/common/に配置することを検討すること。また、MobileInfoContent.tsxとMobileContent.tsxの責務の違いが名前から不明確であるため、命名の見直しを推奨する。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 3,
+  "nice_to_have_count": 5,
+  "overall_assessment": "設計方針書は全体として質が高く、リファクタリングの基本方針であるバレルファイル戦略、段階的フェーズ実施、一方向依存の維持といった重要な設計判断が適切に行われている。SOLID原則への意識も見られる。主要な改善点として、(1) session-db.tsの責務混在とMermaidダイアグラムとの不整合の解消、(2) prompt-detector.tsの分割方針の明確化、(3) isValidWorktreeIdの移行範囲の明確化がある。これらはいずれも設計の論理的整合性に関わるものであり、実装前に解消しておくことで手戻りを防げる。総合的には条件付き承認（conditionally_approved）とする。"
+}

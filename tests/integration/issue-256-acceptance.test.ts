@@ -19,8 +19,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { detectPrompt } from '@/lib/prompt-detector';
-import type { DetectPromptOptions } from '@/lib/prompt-detector';
+import { detectPrompt } from '@/lib/detection/prompt-detector';
+import type { DetectPromptOptions } from '@/lib/detection/prompt-detector';
 import { isMultipleChoicePrompt } from '../helpers/prompt-type-guards';
 
 describe('Issue #256 Acceptance Test: Multiple choice prompt detection improvement', () => {

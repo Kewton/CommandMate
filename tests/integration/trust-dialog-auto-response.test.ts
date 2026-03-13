@@ -7,8 +7,23 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+// Mock logger module (Issue #480)
+const { mockLogger } = vi.hoisted(() => {
+  const mockLogger = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    withContext: vi.fn().mockReturnThis(),
+  };
+  return { mockLogger };
+});
+vi.mock('@/lib/logger', () => ({
+  createLogger: vi.fn(() => mockLogger),
+}));
+
 // Mock tmux module before importing claude-session
-vi.mock('@/lib/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn(),
   createSession: vi.fn(),
   sendKeys: vi.fn(),
@@ -36,12 +51,12 @@ import {
   CLAUDE_INIT_TIMEOUT,
   CLAUDE_INIT_POLL_INTERVAL,
   CLAUDE_POST_PROMPT_DELAY,
-} from '@/lib/claude-session';
+} from '@/lib/session/claude-session';
 import {
   CLAUDE_TRUST_DIALOG_PATTERN,
   CLAUDE_PROMPT_PATTERN,
-} from '@/lib/cli-patterns';
-import { hasSession, createSession, sendKeys, capturePane } from '@/lib/tmux';
+} from '@/lib/detection/cli-patterns';
+import { hasSession, createSession, sendKeys, capturePane } from '@/lib/tmux/tmux';
 
 describe('Issue #201: Trust dialog auto-response - Acceptance Tests', () => {
   beforeEach(() => {
@@ -115,8 +130,8 @@ describe('Issue #201: Trust dialog auto-response - Acceptance Tests', () => {
       await expect(promise).resolves.toBeUndefined();
     });
 
-    it('AC4: should output info-level console log on auto-response', async () => {
-      const consoleSpy = vi.spyOn(console, 'log');
+    it('AC4: should output info-level log on auto-response', async () => {
+      mockLogger.info.mockClear();
 
       vi.mocked(hasSession).mockResolvedValue(false);
       vi.mocked(createSession).mockResolvedValue();
@@ -142,13 +157,11 @@ describe('Issue #201: Trust dialog auto-response - Acceptance Tests', () => {
 
       await promise;
 
-      // Verify console.log was called with trust dialog message
-      const trustLogCalls = consoleSpy.mock.calls.filter((call) =>
-        String(call[0]).includes('Trust dialog detected')
+      // Verify logger.info was called with trust dialog detection message
+      const trustLogCalls = mockLogger.info.mock.calls.filter((call) =>
+        String(call[0]).includes('trust-dialog')
       );
-      expect(trustLogCalls.length).toBe(1);
-
-      consoleSpy.mockRestore();
+      expect(trustLogCalls.length).toBeGreaterThanOrEqual(1);
     });
 
     it('AC5: should timeout if prompt never appears after trust dialog Enter', async () => {

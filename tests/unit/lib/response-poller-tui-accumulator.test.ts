@@ -11,7 +11,7 @@ import {
   accumulateTuiContent,
   getAccumulatedContent,
   clearTuiAccumulator,
-} from '@/lib/response-poller';
+} from '@/lib/polling/response-poller';
 
 describe('TUI Response Accumulator', () => {
   const TEST_KEY = 'test-worktree:opencode';

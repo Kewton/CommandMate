@@ -1,0 +1,83 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 481,
+  "focus_area": "整合性",
+  "findings": [
+    {
+      "id": "C001",
+      "severity": "must_fix",
+      "category": "ファイル数の不整合",
+      "title": "移動対象ファイル合計が35ではなく36",
+      "description": "セクション7の影響規模サマリーで「移動対象ファイル: 35ファイル（7グループ）」と記載されているが、セクション3の移行順序表の各グループの移動ファイル数を合算すると db(6) + tmux(10) + security(6) + detection(4) + session(4) + polling(3) + git(3) = 36ファイルとなる。実際のファイルシステムでも36ファイルが確認できる。",
+      "location": "設計方針書 セクション7 影響規模サマリー",
+      "recommendation": "「移動対象ファイル」を「36ファイル（7グループ）」に修正する。",
+      "verified_against": "src/lib/ の実ファイル一覧との突合"
+    },
+    {
+      "id": "C002",
+      "severity": "must_fix",
+      "category": "ファイル数の不整合",
+      "title": "ルート残留ファイル数が37ではなく38",
+      "description": "セクション1のディレクトリ構成で「(残り37ファイル)」と記載されているが、実際のルート .ts ファイルは72個あり、ルートから移動するのは34個（tmux/への移動のうち2個はtransports/からの移動）であるため、72 - 34 = 38ファイルがルートに残留する。session-cleanup.ts のルート残留（R001）は既に反映済みで38に含まれている。",
+      "location": "設計方針書 セクション1 サブディレクトリ構成",
+      "recommendation": "「(残り37ファイル)」を「(残り38ファイル)」に修正する。",
+      "verified_against": "src/lib/*.ts のファイル数（72個）との突合"
+    },
+    {
+      "id": "C003",
+      "severity": "nice_to_have",
+      "category": "依存関係図の精度",
+      "title": "依存関係図にcli-session.tsからtransports/への直接依存が未記載",
+      "description": "セクション1の依存関係図で「session/ --> tmux/ (session-transport.ts の型参照)」とあるが、cli-session.ts は session-transport.ts の型だけでなく、transports/polling-tmux-transport.ts の getPollingTmuxTransport() も直接importしている。tmux/統合後は両方とも tmux/ からのimportになるため実害はないが、依存の理由として「型参照」だけでなく「実装の取得」も含まれる点を補足すると正確になる。",
+      "location": "設計方針書 セクション1 グループ間依存関係",
+      "recommendation": "「session/ --> tmux/ (session-transport.ts の型参照)」を「session/ --> tmux/ (SessionTransport型参照 + PollingTmuxTransport取得)」に修正する。",
+      "verified_against": "src/lib/cli-session.ts の import 文（行17-18）"
+    },
+    {
+      "id": "C004",
+      "severity": "nice_to_have",
+      "category": "記述の正確性",
+      "title": "session/のR002注記でsession-transport除外とあるが実際はtmux/への移動",
+      "description": "セクション3の移行順序表のsession/行に「R002でsession-transport除外」と記載されているが、R002の実際の対応はsession-transport.tsを「ルート残留」ではなく「transports/統合時にtmux/へ移動」である。セクション1の構成図では正しくtmux/配下に記載されているが、移行順序表の注記だけ読むと「除外＝どこにも配置しない」と誤解される可能性がある。",
+      "location": "設計方針書 セクション3 移行順序表 session/ 行",
+      "recommendation": "注記を「R002でsession-transport.tsはtmux/へ移動のため除外」に変更し、tmux/への配置が明確になるようにする。"
+    },
+    {
+      "id": "C005",
+      "severity": "nice_to_have",
+      "category": "受け入れ基準の整合性",
+      "title": "受け入れ基準にtransports/ディレクトリ削除の確認項目がない",
+      "description": "セクション3でtransports/を完全に解消する方針が明記されているが、セクション6の受け入れ基準チェックリストにtransports/ディレクトリが空になった後の削除確認項目がない。移行漏れ防止のため、transports/ディレクトリの削除を受け入れ基準に含めるべきである。",
+      "location": "設計方針書 セクション6 受け入れ基準チェックリスト",
+      "recommendation": "受け入れ基準に「transports/ ディレクトリの完全削除を確認」を追加する。"
+    },
+    {
+      "id": "C006",
+      "severity": "nice_to_have",
+      "category": "受け入れ基準の整合性",
+      "title": "受け入れ基準のテストファイルパス更新が6ファイルとあるが根拠が不明確",
+      "description": "セクション6で「__tests__/ 内の相対importパスを @/lib/group/xxx 形式に更新（6ファイル）」と記載されているが、__tests__/ には9ファイルが存在する。9ファイル中、移動対象グループのモジュールをimportしているファイルが6つという意味と推測されるが、明示されていないため検証が必要。",
+      "location": "設計方針書 セクション6 importパス更新",
+      "recommendation": "「6ファイル」の根拠（どの6ファイルが該当するか）を補足するか、実際のimport分析結果を記載する。"
+    },
+    {
+      "id": "C007",
+      "severity": "nice_to_have",
+      "category": "内部整合性",
+      "title": "db/のバレルエクスポート例にdb-migration-path.tsが含まれていない",
+      "description": "セクション2のバレルエクスポートパターン例（db/index.ts）では db, db-instance, db-migrations, db-path-resolver, db-repository の5モジュールを re-export しているが、セクション1のディレクトリ構成では db-migration-path.ts も db/ に含まれている。バレルエクスポート例に db-migration-path が欠落している。",
+      "location": "設計方針書 セクション2 バレルエクスポートパターン",
+      "recommendation": "db/index.ts の例に `export * from './db-migration-path'` を追加する。"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 0,
+    "nice_to_have": 5,
+    "total": 7
+  },
+  "overall_assessment": "設計方針書は Stage 1 レビュー指摘を適切に反映しており、全体構成・依存関係図・移行戦略の論理構造は整合している。ただし、ファイル数の集計に2箇所の算術的不整合（移動対象35→正しくは36、ルート残留37→正しくは38）があり、これらは実装時の移行漏れチェックに直接影響するため must_fix とした。その他、バレルエクスポート例の欠落や受け入れ基準の補強など5件の nice_to_have 指摘がある。全体としては設計の方向性に問題はなく、数値修正と受け入れ基準の補強で実装に進められる状態である。",
+  "reviewed_at": "2026-03-13",
+  "reviewer": "architecture-review-agent (Stage 2)"
+}

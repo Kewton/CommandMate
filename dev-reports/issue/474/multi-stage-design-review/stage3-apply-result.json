@@ -1,0 +1,20 @@
+{
+  "issue_number": 474,
+  "stage": 3,
+  "applied_findings": ["S3-M1", "S3-M2", "S3-M3", "S3-S2", "S3-S4", "S3-S5"],
+  "skipped_findings": ["S3-S1", "S3-S3"],
+  "skip_reasons": {
+    "S3-S1": "テスト詳細は実装時対応",
+    "S3-S3": "既存の不整合は別Issue対応"
+  },
+  "updated_sections": ["実装順序", "API設計", "セキュリティ設計", "設計パターン", "設計上の決定事項"],
+  "design_doc_updated": true,
+  "changes_summary": {
+    "S3-M1": "実装順序ステップ7にテスト更新要件（MessageInput.test.tsx 9箇所、issue-288-acceptance.test.tsx 3箇所）を追記",
+    "S3-M2": "実装順序ステップ2にcli-tools/index.tsへのエクスポート追加を追記",
+    "S3-M3": "設計パターン・API設計のコード例でbody.contentをtrimmedContentに統一",
+    "S3-S2": "API設計のupload APIセクションにディレクトリ自動作成（fs.mkdirSync recursive）を追記",
+    "S3-S4": "設計上の決定事項にCLIToolManager変更不要の注釈を追加",
+    "S3-S5": "セキュリティ設計・API設計のコード例でworktreePathをworktree.pathに修正"
+  }
+}
