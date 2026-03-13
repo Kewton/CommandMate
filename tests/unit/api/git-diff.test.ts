@@ -19,7 +19,7 @@ vi.mock('@/lib/auto-yes-manager', () => ({
   isValidWorktreeId: vi.fn(),
 }));
 
-vi.mock('@/lib/path-validator', () => ({
+vi.mock('@/lib/security/path-validator', () => ({
   isPathSafe: vi.fn(),
 }));
 
@@ -53,7 +53,7 @@ vi.mock('@/lib/git-utils', async () => {
 import { GET } from '@/app/api/worktrees/[id]/git/diff/route';
 import { getWorktreeById } from '@/lib/db';
 import { isValidWorktreeId } from '@/lib/auto-yes-manager';
-import { isPathSafe } from '@/lib/path-validator';
+import { isPathSafe } from '@/lib/security/path-validator';
 import { getGitDiff, GitTimeoutError, GitNotRepoError } from '@/lib/git-utils';
 
 function createRequest(url: string): NextRequest {

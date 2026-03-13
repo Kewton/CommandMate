@@ -12,7 +12,7 @@
 import crypto from 'crypto';
 
 // Import and re-export shared constants and functions from Edge Runtime-compatible config
-import { AUTH_COOKIE_NAME, AUTH_EXCLUDED_PATHS, parseDuration, computeExpireAt, DEFAULT_EXPIRE_DURATION_MS, isValidTokenHash } from '../config/auth-config';
+import { AUTH_COOKIE_NAME, AUTH_EXCLUDED_PATHS, parseDuration, computeExpireAt, DEFAULT_EXPIRE_DURATION_MS, isValidTokenHash } from '@/config/auth-config';
 export { AUTH_COOKIE_NAME, AUTH_EXCLUDED_PATHS, parseDuration, computeExpireAt, DEFAULT_EXPIRE_DURATION_MS, isValidTokenHash };
 
 /** Rate limiting configuration for brute-force protection */

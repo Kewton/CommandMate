@@ -8,7 +8,7 @@
 'use client';
 
 import React, { useEffect, useRef, useMemo, memo, useCallback } from 'react';
-import { sanitizeTerminalOutput } from '@/lib/sanitize';
+import { sanitizeTerminalOutput } from '@/lib/security/sanitize';
 import { useTerminalScroll } from '@/hooks/useTerminalScroll';
 import { useTerminalSearch } from '@/hooks/useTerminalSearch';
 import { TerminalSearchBar } from '@/components/worktree/TerminalSearchBar';

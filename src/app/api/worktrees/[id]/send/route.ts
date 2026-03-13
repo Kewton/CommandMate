@@ -21,7 +21,7 @@ import { CLI_TOOL_IDS, isImageCapableCLITool, type CLIToolType } from '@/lib/cli
 import { startPolling } from '@/lib/response-poller';
 import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
 import { getGitStatus } from '@/lib/git-utils';
-import { isPathSafe, resolveAndValidateRealPath } from '@/lib/path-validator';
+import { isPathSafe, resolveAndValidateRealPath } from '@/lib/security/path-validator';
 import path from 'path';
 
 /** Supported CLI tool IDs - derived from CLI_TOOL_IDS (Issue #368: DRY) */

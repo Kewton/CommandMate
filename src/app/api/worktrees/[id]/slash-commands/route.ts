@@ -19,7 +19,7 @@ import { getWorktreeById } from '@/lib/db';
 import { getSlashCommandGroups } from '@/lib/slash-commands';
 import { getStandardCommandGroups } from '@/lib/standard-commands';
 import { mergeCommandGroups, filterCommandsByCliTool } from '@/lib/command-merger';
-import { isValidWorktreePath } from '@/lib/worktree-path-validator';
+import { isValidWorktreePath } from '@/lib/security/worktree-path-validator';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import type { SlashCommandGroup } from '@/types/slash-commands';
 

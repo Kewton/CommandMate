@@ -13,7 +13,7 @@ import {
   createWorktreeNotFoundError,
   createAccessDeniedError,
 } from '@/lib/file-tree';
-import { isPathSafe, resolveAndValidateRealPath } from '@/lib/path-validator';
+import { isPathSafe, resolveAndValidateRealPath } from '@/lib/security/path-validator';
 
 /**
  * Decode a URL-encoded path segment safely

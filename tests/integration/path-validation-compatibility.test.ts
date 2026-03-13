@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { isPathSafe } from '@/lib/path-validator';
+import { isPathSafe } from '@/lib/security/path-validator';
 
 describe('isPathSafe compatibility with existing validation', () => {
   const worktreeRoot = '/home/user/projects/repo';

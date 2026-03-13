@@ -15,7 +15,7 @@ import { existsSync, mkdirSync } from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { UrlNormalizer } from './url-normalizer';
-import { validateWorktreePath } from './path-validator';
+import { validateWorktreePath } from './security/path-validator';
 import {
   createCloneJob as dbCreateCloneJob,
   getCloneJob,

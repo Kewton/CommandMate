@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { sanitizeTerminalOutput, sanitizeUserInput, containsDangerousContent } from '@/lib/sanitize';
+import { sanitizeTerminalOutput, sanitizeUserInput, containsDangerousContent } from '@/lib/security/sanitize';
 
 describe('sanitizeTerminalOutput', () => {
   describe('XSS攻撃ベクター対策（HTMLエスケープ）', () => {

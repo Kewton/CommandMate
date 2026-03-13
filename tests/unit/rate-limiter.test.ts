@@ -23,7 +23,7 @@ describe('Rate Limiter', () => {
   });
 
   it('should allow attempts below the limit', async () => {
-    const { createRateLimiter, RATE_LIMIT_CONFIG } = await import('@/lib/auth');
+    const { createRateLimiter, RATE_LIMIT_CONFIG } = await import('@/lib/security/auth');
     const limiter = createRateLimiter();
 
     for (let i = 0; i < RATE_LIMIT_CONFIG.maxAttempts - 1; i++) {
@@ -36,7 +36,7 @@ describe('Rate Limiter', () => {
   });
 
   it('should block after 5 failed attempts', async () => {
-    const { createRateLimiter } = await import('@/lib/auth');
+    const { createRateLimiter } = await import('@/lib/security/auth');
     const limiter = createRateLimiter();
 
     // Record 5 failures
@@ -52,7 +52,7 @@ describe('Rate Limiter', () => {
   });
 
   it('should return retryAfter in seconds when locked out', async () => {
-    const { createRateLimiter, RATE_LIMIT_CONFIG } = await import('@/lib/auth');
+    const { createRateLimiter, RATE_LIMIT_CONFIG } = await import('@/lib/security/auth');
     const limiter = createRateLimiter();
 
     for (let i = 0; i < RATE_LIMIT_CONFIG.maxAttempts; i++) {
@@ -69,7 +69,7 @@ describe('Rate Limiter', () => {
   });
 
   it('should reset counter on successful login', async () => {
-    const { createRateLimiter } = await import('@/lib/auth');
+    const { createRateLimiter } = await import('@/lib/security/auth');
     const limiter = createRateLimiter();
 
     // Record 4 failures
@@ -88,7 +88,7 @@ describe('Rate Limiter', () => {
   });
 
   it('should track different IPs independently', async () => {
-    const { createRateLimiter } = await import('@/lib/auth');
+    const { createRateLimiter } = await import('@/lib/security/auth');
     const limiter = createRateLimiter();
 
     // Lock out IP1
@@ -104,7 +104,7 @@ describe('Rate Limiter', () => {
   });
 
   it('should unlock after lockout duration expires', async () => {
-    const { createRateLimiter, RATE_LIMIT_CONFIG } = await import('@/lib/auth');
+    const { createRateLimiter, RATE_LIMIT_CONFIG } = await import('@/lib/security/auth');
     const limiter = createRateLimiter();
 
     // Lock out
@@ -123,7 +123,7 @@ describe('Rate Limiter', () => {
   });
 
   it('should cleanup expired entries on interval', async () => {
-    const { createRateLimiter, RATE_LIMIT_CONFIG } = await import('@/lib/auth');
+    const { createRateLimiter, RATE_LIMIT_CONFIG } = await import('@/lib/security/auth');
     const limiter = createRateLimiter();
 
     // Record some failures
@@ -141,7 +141,7 @@ describe('Rate Limiter', () => {
   });
 
   it('should have a destroy method that cleans up the interval', async () => {
-    const { createRateLimiter } = await import('@/lib/auth');
+    const { createRateLimiter } = await import('@/lib/security/auth');
     const limiter = createRateLimiter();
 
     // destroy should not throw

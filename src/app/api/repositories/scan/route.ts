@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { getDbInstance } from '@/lib/db-instance';
 import { scanWorktrees, syncWorktreesToDB } from '@/lib/worktrees';
-import { isPathSafe } from '@/lib/path-validator';
+import { isPathSafe } from '@/lib/security/path-validator';
 import { getEnv } from '@/lib/env';
 
 export async function POST(request: NextRequest) {

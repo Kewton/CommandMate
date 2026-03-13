@@ -14,7 +14,7 @@
  */
 
 import { execFile } from 'child_process';
-import { sanitizeEnvForChildProcess } from './env-sanitizer';
+import { sanitizeEnvForChildProcess } from './security/env-sanitizer';
 import { stripAnsi } from './cli-patterns';
 
 // =============================================================================

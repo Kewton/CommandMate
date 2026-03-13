@@ -20,7 +20,7 @@ import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { normalize, extname, resolve } from 'path';
 import { mkdirSync, existsSync } from 'fs';
-import { isPathSafe, resolveAndValidateRealPath } from '@/lib/path-validator';
+import { isPathSafe, resolveAndValidateRealPath } from '@/lib/security/path-validator';
 import {
   writeBinaryFile,
   isValidNewName,

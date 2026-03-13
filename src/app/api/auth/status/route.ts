@@ -10,7 +10,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { isAuthEnabled } from '@/lib/auth';
+import { isAuthEnabled } from '@/lib/security/auth';
 
 export const dynamic = 'force-dynamic';
 

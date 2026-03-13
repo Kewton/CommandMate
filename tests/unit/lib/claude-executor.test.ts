@@ -15,7 +15,7 @@ import {
   ALLOWED_CLI_TOOLS,
   getActiveProcesses,
 } from '../../../src/lib/claude-executor';
-import { SENSITIVE_ENV_KEYS } from '../../../src/lib/env-sanitizer';
+import { SENSITIVE_ENV_KEYS } from '../../../src/lib/security/env-sanitizer';
 
 describe('claude-executor', () => {
   beforeEach(() => {
