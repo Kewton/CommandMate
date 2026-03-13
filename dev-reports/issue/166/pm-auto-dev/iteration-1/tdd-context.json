@@ -1,0 +1,46 @@
+{
+  "issue_number": 166,
+  "title": "feat: Codexカスタムスキル読込対応（.codex/skills/, ~/.codex/skills/）",
+  "design_doc_path": "dev-reports/design/issue-166-codex-skills-loader-design-policy.md",
+  "work_plan_path": "dev-reports/issue/166/work-plan.md",
+  "acceptance_criteria": [
+    ".codex/skills/{name}/SKILL.md に配置したスキルがCodexタブで表示されること",
+    "~/.codex/skills/{name}/SKILL.md に配置したグローバルスキルがCodexタブで表示されること",
+    "Claudeタブでは表示されないこと（cliToolsフィルタリングが正しく動作）",
+    "存在しないディレクトリの場合にエラーが発生しないこと（空配列を返す）",
+    "パストラバーサル攻撃（../を含むパス）を防御できること",
+    "symlinkによるディレクトリ外へのアクセスを防御できること",
+    "ファイルサイズ・ファイル数の上限を超えた場合に安全にスキップされること"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: SlashCommandSource型に'codex-skill'追加、cliToolsフィールドJSDoc修正（src/types/slash-commands.ts）",
+    "Task 1.2: loadCodexSkills(basePath?)関数実装（src/lib/slash-commands.ts）- os.homedir()使用、parseSkillFile()共用、source:'codex-skill', cliTools:['codex']自動設定",
+    "Task 1.3: getSlashCommandGroups()拡張 - basePath指定時にloadCodexSkills(basePath)でローカルCodexスキル読込追加",
+    "Task 1.4: D009コメント修正（src/lib/slash-commands.ts:126-130）",
+    "Task 2.1: worktree APIルート更新 - loadCodexSkills()呼出でグローバルスキル取得、sources.codexSkill追加（src/app/api/worktrees/[id]/slash-commands/route.ts）"
+  ],
+  "key_design_decisions": [
+    "既存'skill'カテゴリ共用（新カテゴリ不要）、source:'codex-skill'で区別",
+    "parseSkillFile()をDRY原則で共用、スプレッドでsource/cliTools上書き",
+    "MCBDパス（basePath未指定）にはCodexスキル含めない（決定6: YAGNI）",
+    "グローバルCodexスキルはworktree APIルートで明示的にloadCodexSkills()呼出し",
+    "セキュリティ: 既存MAX_SKILL_FILE_SIZE_BYTES(64KB)、MAX_SKILLS_COUNT(100)共用"
+  ],
+  "target_coverage": 80,
+  "related_files": {
+    "modify": [
+      "src/types/slash-commands.ts",
+      "src/lib/slash-commands.ts",
+      "src/app/api/worktrees/[id]/slash-commands/route.ts"
+    ],
+    "test_add": [
+      "tests/unit/slash-commands.test.ts",
+      "tests/integration/api-worktree-slash-commands.test.ts"
+    ],
+    "no_change": [
+      "src/lib/command-merger.ts",
+      "src/app/api/slash-commands/route.ts",
+      "src/lib/cli-tools/types.ts"
+    ]
+  }
+}

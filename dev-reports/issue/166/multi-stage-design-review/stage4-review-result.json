@@ -1,0 +1,88 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "issue_number": 166,
+  "focus_area": "セキュリティ",
+  "security_checks": [
+    {
+      "check": "パストラバーサル防御: entry.name.includes('..')による防御",
+      "status": "ok",
+      "comment": "既存loadSkills()と同一パターン。Node.jsのfs.readdirSync()はOSレベルのディレクトリエントリ名を返すため、URLエンコード(%2F等)された文字列がentry.nameに現れることはない。'..'を含むディレクトリ名の拒否は十分な防御。"
+    },
+    {
+      "check": "パストラバーサル防御: resolvedPath.startsWith()による検証",
+      "status": "ok",
+      "comment": "path.resolve(skillsDir) + path.sepの結合により、'skills-evil'のようなプレフィックス一致攻撃も防止。既存loadSkills()と同一パターンで十分。"
+    },
+    {
+      "check": "symlink防御: fs.statSync()とfs.lstatSync()の使い分け",
+      "status": "warning",
+      "comment": "parseSkillFile()内のfs.statSync()はsymlinkを追跡する。しかしresolvedPath検証がpath.resolve()ベースであるため、symlink先がskillsDir外を指す場合でもresolvedPath自体はskillsDir内のパスとして通過しうる。ただし読み込まれるのはSKILL.mdのテキスト内容のみでコード実行はないため、実質的リスクは低い。既存loadSkills()も同一パターンで稼働中であり、既存コードとの一貫性は確保されている。path-validator.tsのresolveAndValidateRealPath()はrealpathSync()でsymlink解決後に検証しており、より堅牢だが、slash-commands.tsのスキルローダーは別の防御パターンを採用している。"
+    },
+    {
+      "check": "ファイル内容のサニタイズ: safeParseFrontmatter()",
+      "status": "ok",
+      "comment": "gray-matterのJavaScriptエンジンを明示的に無効化している。---js/---javascriptデリミタによるeval()攻撃を確実に防止。フォールバックのextractFrontmatterFields()もregexのみでYAMLパーサーを使わないため安全。"
+    },
+    {
+      "check": "SKILL.md body部分の悪意ある内容リスク",
+      "status": "ok",
+      "comment": "SKILL.mdのbody（フロントマター以外）は現在の設計では読み込まれない（name/descriptionのみ抽出）。仮にbody全体を読み込んだとしても、SlashCommand型のフィールドとして格納されるのはname/descriptionのみで、UIでの表示はReactのJSXエスケープにより保護される。XSSリスクは実質ゼロ。"
+    },
+    {
+      "check": "ホームディレクトリアクセス: os.homedir()の信頼性",
+      "status": "ok",
+      "comment": "os.homedir()はNode.jsランタイムがOSのHOME環境変数(Unix)/USERPROFILE(Windows)から解決する。サーバーサイドで実行されるため、クライアントから操作される経路はない。HOME環境変数が改ざんされている環境はそもそも全体的に侵害されているため、この関数レベルでの防御は不要。"
+    },
+    {
+      "check": "~/.codex/skills/の悪意ある内容リスク",
+      "status": "ok",
+      "comment": "読み込みはファイル内容のテキスト取得のみで、eval()/require()/import()等のコード実行パスは存在しない。safeParseFrontmatter()によりgray-matterのJSエンジンも無効化済み。ファイルサイズ制限(64KB)・件数制限(100)により、DoS攻撃のリスクも限定的。"
+    },
+    {
+      "check": "既存コード(loadSkills)との一貫性",
+      "status": "ok",
+      "comment": "loadCodexSkills()の設計はloadSkills()と同一のセキュリティパターンを踏襲: (1)'..'拒否、(2)resolvedPath検証、(3)parseSkillFile()共用(サイズ制限・safeParseFrontmatter)、(4)MAX_SKILLS_COUNT制限。一貫性は確保されている。"
+    },
+    {
+      "check": "ファイルサイズ/件数制限によるDoS防御",
+      "status": "ok",
+      "comment": "MAX_SKILL_FILE_SIZE_BYTES(64KB)とMAX_SKILLS_COUNT(100)が適用される。3ソース合計最大300件は許容範囲内（設計書D1-006で明記済み）。"
+    },
+    {
+      "check": "APIレスポンスでの情報漏洩",
+      "status": "ok",
+      "comment": "filePath（path.relative計算結果）がAPIレスポンスに含まれる可能性があるが、設計書D2-004でグローバルスキルのfilePathはデバッグ/ログ用途に限定すると明記。UIでのファイルパス表示には使用しない方針。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "D4-001",
+      "severity": "should-fix",
+      "category": "セキュリティ",
+      "title": "symlink防御がpath.resolve()ベースでありrealpathSync()を使用していない",
+      "description": "loadCodexSkills()のsymlink防御はpath.resolve(skillsDir, entry.name)で解決したパスがskillsDir配下であることを検証しているが、これはレキシカル(文字列)ベースの検証であり、実際のsymlinkターゲットを解決しない。skillsDir配下にシンボリックリンクが存在し、そのリンク先がskillsDir外のファイルを指している場合、resolvedPathはskillsDir内のパスとして検証を通過するが、fs.statSync()/fs.readFileSync()はsymlinkを追跡して外部ファイルを読み込む。ただし既存のloadSkills()も同一パターンであり、読み込まれるのはテキスト内容のみ（コード実行なし）であるため、実質的な攻撃面は限定的。",
+      "suggestion": "将来的な改善として、entry.isDirectory()の前にfs.lstatSync()でsymlinkかどうかを判定し、symlinkであればスキップするか、realpathSync()で解決後にstartsWith()検証を行うことを推奨。ただし既存loadSkills()との一貫性を優先し、Issue #166のスコープでは既存パターンを踏襲する判断は妥当。もし改善する場合はloadSkills()とloadCodexSkills()の両方を同時に修正すべき（別Issueとして切り出し推奨）。"
+    },
+    {
+      "id": "D4-002",
+      "severity": "nice-to-have",
+      "category": "セキュリティ",
+      "title": "グローバルスキルのfilePathがworktreeルートからの相対パスとして不自然なパスになる",
+      "description": "parseSkillFile()はpath.relative(process.cwd(), skillPath)でfilePathを計算する。グローバルスキル(~/.codex/skills/)の場合、CWDがworktreeルートであれば'../../.codex/skills/xxx/SKILL.md'のような'..'を含む相対パスが生成される。このfilePathがAPIレスポンスに含まれると、サーバー側のディレクトリ構造に関する情報が漏洩する可能性がある。",
+      "suggestion": "設計書D2-004で既にUIでの使用制限が明記されているため、追加対応として: (1) APIレスポンスのsources集計ではfilePathを使用しないことを確認、(2) 必要に応じてloadCodexSkills()内でfilePathを上書き（例: スキル名のみに簡略化）することを検討。"
+    },
+    {
+      "id": "D4-003",
+      "severity": "nice-to-have",
+      "category": "セキュリティ",
+      "title": "readdirSyncのエラーハンドリングが未記載",
+      "description": "loadCodexSkills()のfs.readdirSync()が権限エラー等で例外を投げた場合のハンドリングが設計書のコード例に含まれていない。既存loadSkills()も同様にtry-catchなしだが、APIルートの外側でcatchされるため実害はない。",
+      "suggestion": "既存パターンとの一貫性を考慮し、loadCodexSkills()にもtry-catchを追加してlogger.errorで記録し空配列を返すパターンを検討。ただしAPIルート側のcatch句で捕捉されるため必須ではない。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 1,
+  "nice_to_have_count": 2,
+  "overall_assessment": "設計書のセキュリティ設計は全体として堅実である。既存のloadSkills()実装で実績のあるセキュリティパターン（パストラバーサル防御、resolvedPath検証、safeParseFrontmatter()によるJSエンジン無効化、ファイルサイズ/件数制限）を忠実に踏襲しており、既存コードとの一貫性が確保されている。唯一のshould-fix（D4-001: symlink防御のレキシカルベース検証）は既存loadSkills()にも共通する課題であり、Issue #166単独での修正ではなく既存コードとの同時改善が適切。読み込み対象がテキストファイルのみでコード実行パスが存在しないことから、実質的な攻撃面は限定的であり、セキュリティ観点からIssue #166の設計は承認可能と判断する。"
+}

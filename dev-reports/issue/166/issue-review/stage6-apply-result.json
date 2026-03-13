@@ -1,0 +1,48 @@
+{
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 166,
+  "iteration": 2,
+  "apply_date": "2026-03-14",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "S5-001",
+        "status": "applied",
+        "change_summary": "「CLIツール別フィルタリング統合」セクションにD009コメント（src/lib/slash-commands.ts:126-130）とfilterCommandsByCliTool()実装の矛盾に関する注意事項ブロックを追記"
+      },
+      {
+        "id": "S5-002",
+        "status": "applied",
+        "change_summary": "Issueタイトルを「feat: Codexカスタムスキル読込対応（.codex/skills/, ~/.codex/skills/）」に修正し、スコープ外のCustom Prompts参照を除去"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S5-003",
+        "status": "skipped",
+        "reason": "テキスト肥大化リスク。参考リンクの有効性確認は実装着手時に行えばよい"
+      },
+      {
+        "id": "S5-004",
+        "status": "skipped",
+        "reason": "テキスト肥大化リスク。Custom Promptsの詳細仕様は対象外機能の背景理解に一定の価値がある"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 4,
+    "applied": 2,
+    "skipped": 2
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/166",
+    "changes": [
+      "タイトル修正: Custom Prompts参照を除去し、Skillsのみのスコープに合致するタイトルに変更",
+      "本文更新: CLIツール別フィルタリング統合セクションにD009コメント矛盾の注意事項を追記",
+      "レビュー履歴更新: Stage 5-6の反映内容を追記"
+    ]
+  }
+}

@@ -29,7 +29,6 @@ vi.mock('@/lib/logger', () => ({
   createLogger: vi.fn(() => mockLogger),
 }));
 
-
 describe('SlashCommand Types', () => {
   describe('SlashCommand interface', () => {
     it('should have required properties', () => {
@@ -195,7 +194,6 @@ describe('getSlashCommandGroups', () => {
   });
 
   it('should integrate skills into command groups', async () => {
-    const fixturesPath = path.resolve(__dirname, '../fixtures');
     // Create a temporary test directory structure
     const testDir = path.resolve(__dirname, '../fixtures/test-skills-integration');
     const commandsDir = path.join(testDir, '.claude', 'commands');
@@ -444,7 +442,7 @@ describe('loadSkills', () => {
 
       expect(skills.length).toBeLessThanOrEqual(100);
       expect(mockLogger.warn).toHaveBeenCalled();
-} finally {
+    } finally {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
   });
@@ -465,7 +463,7 @@ describe('loadSkills', () => {
 
       expect(skills).toEqual([]);
       expect(mockLogger.warn).toHaveBeenCalled();
-} finally {
+    } finally {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
   });

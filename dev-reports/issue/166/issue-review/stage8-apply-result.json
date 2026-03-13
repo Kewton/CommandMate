@@ -1,0 +1,14 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 166,
+  "applied_findings": ["IA2-001"],
+  "skipped_findings": ["IA2-002", "IA2-003"],
+  "skip_reasons": {
+    "IA2-002": "テキスト肥大化リスク",
+    "IA2-003": "テキスト肥大化リスク"
+  },
+  "github_update": "success",
+  "updated_issue_url": "https://github.com/Kewton/CommandMate/issues/166",
+  "summary": "IA2-001（cliToolsフィールドのJSDocコメント矛盾）を「CLIツール別フィルタリング統合」セクションに注意事項として追記。src/types/slash-commands.ts:53のJSDocコメント「undefined: available for ALL tools」がfilterCommandsByCliTool()実装と矛盾する点を明記し、D009コメント修正と合わせて更新するよう指示を記載。IA2-002/IA2-003はテキスト肥大化リスクのためスキップ。レビュー履歴にStage 7-8エントリを追加。"
+}

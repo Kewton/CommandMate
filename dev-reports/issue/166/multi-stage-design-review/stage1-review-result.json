@@ -1,0 +1,60 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "issue_number": 166,
+  "focus_area": "設計原則",
+  "findings": [
+    {
+      "id": "D1-001",
+      "severity": "should-fix",
+      "principle": "SRP",
+      "title": "loadCodexSkills()のbasePath有無によるグローバル/ローカル切替が暗黙的",
+      "description": "loadCodexSkills(basePath?)はbasePath未指定時にos.homedir()を使いグローバルスキルを読み込み、basePath指定時はローカルスキルを読み込む。1つの関数が2つの異なるスキルソース（グローバル vs ローカル）を処理しているが、既存のloadSkills()も同一パターンを採用しているため整合性は取れている。ただし、loadSkills()はbasePath未指定時にprocess.cwd()を使うのに対し、loadCodexSkills()はos.homedir()を使う点が非対称であり、呼び出し側で混乱を招く可能性がある。",
+      "suggestion": "関数のJSDocコメントで、loadSkills()のbasePath未指定時の挙動（process.cwd()ベース）とloadCodexSkills()のbasePath未指定時の挙動（os.homedir()ベース）の違いを明確にドキュメントすること。現在の設計書のJSDocは十分だが、実装時にgetSlashCommandGroups()内のコメントでも「loadCodexSkills()はbasePath有無でソースが変わる」ことを注記すべき。"
+    },
+    {
+      "id": "D1-002",
+      "severity": "should-fix",
+      "principle": "DRY",
+      "title": "loadCodexSkills()のディレクトリスキャンロジックがloadSkills()とほぼ同一",
+      "description": "loadCodexSkills()の実装コードはloadSkills()と90%以上同一である（fs.existsSync確認、readdirSync+withFileTypes、MAX_SKILLS_COUNT制限、isDirectory判定、パストラバーサル防御、resolvedPath検証、parseSkillFile呼び出し、ソート）。唯一の違いはskillsDir算出ロジックとsource/cliToolsの設定のみ。この重複はDRY違反にあたる。",
+      "suggestion": "共通のスキャンロジックを内部ヘルパー関数として抽出することを推奨する。例: scanSkillDirectory(skillsDir: string, overrides: Partial<SlashCommand>): Promise<SlashCommand[]> を作成し、loadSkills()とloadCodexSkills()の両方から呼び出す。overridesパラメータで{source: 'codex-skill', cliTools: ['codex']}等を渡す。ただし、コード量が小さいためKISS原則との兼ね合いで、コメントで「loadSkills()と同一パターン」と記載する最低限の対応でも許容される。"
+    },
+    {
+      "id": "D1-003",
+      "severity": "must-fix",
+      "principle": "DRY",
+      "title": "deduplicateByName()でのCodexローカル優先の実現方法が不明確",
+      "description": "設計書のgetSlashCommandGroups()ではbasePath指定時にdeduplicateByName([...claudeSkills, ...codexLocalSkills], commands)と記載されている。しかし、グローバルCodexスキルとローカルCodexスキルの重複排除はどこで行われるかが設計書に明示されていない。basePath指定時（worktree固有パス）、codexLocalSkillsはloadCodexSkills(basePath)で読み込まれるが、グローバルCodexスキル（~/.codex/skills/）は読み込まれない。つまり、worktree固有のコンテキストではグローバルCodexスキルが欠落する。一方、MCBD共通パス（basePath未指定）ではcodexSkillsCacheにグローバルのみ入り、ローカルは入らない。この設計は意図的かもしれないが、worktree APIルートではmergeCommandGroups(standardGroups, worktreeGroups)でマージされるため、MCBD側のグローバルCodexスキルとworktree側のローカルCodexスキルが正しく統合されるか確認が必要。",
+      "suggestion": "設計書に以下を明記すべき: (1) worktree APIルートではstandardGroups（MCBD経由、グローバルCodexスキル含む）とworktreeGroups（ローカルCodexスキル含む）がmergeCommandGroups()で統合されるため、グローバルとローカルの両方が取得される。(2) 同名スキルの優先度はmergeCommandGroups()の仕様（worktreeGroupsが後から登録されて上書き）によりローカル優先が保証される。この流れを設計書のセクション3.4で明示すること。"
+    },
+    {
+      "id": "D1-004",
+      "severity": "nice-to-have",
+      "principle": "YAGNI",
+      "title": "codexSkillsCacheの必要性の検証",
+      "description": "設計書ではcodexSkillsCacheをモジュールレベル変数として追加する設計だが、このキャッシュが利用されるのはgetSlashCommandGroups(basePath未指定)のパス、つまりMCBD APIからの呼び出し時のみ。MCBD APIでCodexスキルが表示される具体的なユースケースが設計書に記載されていない（MCBD APIはworktree非依存のコンテキストで使われる）。",
+      "suggestion": "MCBD APIでCodexグローバルスキルを表示する必要性を確認し、不要であればcodexSkillsCacheの追加とgetSlashCommandGroups()のbasePath未指定パスへのCodexスキル統合は省略できる（YAGNI）。必要であれば、ユースケースを設計書に追記すること。"
+    },
+    {
+      "id": "D1-005",
+      "severity": "should-fix",
+      "principle": "SOLID",
+      "title": "parseSkillFile()がsourceとcliToolsを設定しない設計の整合性",
+      "description": "parseSkillFile()は現在source: 'skill'をハードコードして返す（slash-commands.ts:162-163）。loadCodexSkills()ではparseSkillFile()の戻り値にスプレッドしてsource: 'codex-skill'とcliTools: ['codex']を上書きする設計。これ自体は動作するが、parseSkillFile()がsource: 'skill'を返した後にloadCodexSkills()がsource: 'codex-skill'で上書きする流れは、parseSkillFile()の戻り値が中間的で不完全な状態を持つことを意味する。OCP（開放閉鎖原則）の観点から、parseSkillFile()にオプショナルなoverridesパラメータを追加する方が拡張性が高い。",
+      "suggestion": "2つの選択肢がある: (A) 現状維持（スプレッド上書き）- シンプルでKISS寄り。(B) parseSkillFile()に第3引数としてPartial<SlashCommand>を受け取りマージして返す - OCP寄り。現時点ではCodexスキルのみの追加なので(A)で十分だが、将来的にさらに別ツールのスキル対応が必要になった場合は(B)へのリファクタリングを検討すること。設計書に「将来の拡張時にはparseSkillFile()のシグネチャ変更を検討」と注記することを推奨。"
+    },
+    {
+      "id": "D1-006",
+      "severity": "nice-to-have",
+      "principle": "KISS",
+      "title": "MAX_SKILLS_COUNTの共有がグローバル+ローカルの合計制限を曖昧にしている",
+      "description": "MAX_SKILLS_COUNT=100はloadSkills()とloadCodexSkills()でそれぞれ独立に適用される。結果としてClaude skills 100件 + Codex global skills 100件 + Codex local skills 100件 = 最大300件のスキルが読み込まれる可能性がある。これは意図した挙動かもしれないが、設計書には記載されていない。",
+      "suggestion": "設計書のセキュリティ設計セクション（セクション4）に、MAX_SKILLS_COUNTがソースごとに独立適用されることと、合計最大件数を明記すること。合計制限が必要であれば別途設計すること。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 3,
+  "nice_to_have_count": 2,
+  "overall_assessment": "設計方針書は全体的に高品質であり、Issue #343の既存パターンを適切に踏襲している。DRY原則に従ったparseSkillFile()の共用、filterCommandsByCliTool()による自動フィルタリング、既存カテゴリの共用（YAGNI）は適切な判断である。セキュリティ設計も既存の防御パターンを正しく踏襲している。主要な指摘は、worktree APIルートでのグローバル/ローカルCodexスキルの統合フローの明確化（D1-003）と、loadCodexSkills()とloadSkills()の重複コード抽出の検討（D1-002）である。D1-003はmergeCommandGroups()を通じた統合で解決される可能性が高いが、設計書にデータフローを明示すべき。"
+}

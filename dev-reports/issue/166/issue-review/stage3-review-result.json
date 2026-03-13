@@ -1,0 +1,160 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 166,
+  "review_type": "影響範囲",
+  "review_date": "2026-03-14",
+  "summary": "影響範囲は主にslash-commands周辺モジュールに限定されており、比較的安全な変更。ただし、SlashCommandSource型拡張の影響、グローバルキャッシュ設計、APIレスポンス型の整合性、filterCommandsByCliTool()のデフォルト挙動について要注意点あり。",
+  "impact_areas": [
+    {
+      "area": "型定義",
+      "files": ["src/types/slash-commands.ts"],
+      "impact_level": "medium",
+      "description": "SlashCommandSourceに'codex-skill'を追加する変更。現在この型はsrc/types/slash-commands.tsでのみ定義され、source比較はworktree slash-commands APIルートの1箇所のみ。型のunion拡張は後方互換性があるため破壊的変更なし。ただしAPIレスポンスのsources集計ロジックに'codex-skill'の集計追加が必要。"
+    },
+    {
+      "area": "キャッシュ",
+      "files": ["src/lib/slash-commands.ts"],
+      "impact_level": "high",
+      "description": "新規グローバルCodexスキルキャッシュの追加が必要。現在commandsCache/skillsCacheの2つが存在し、clearCache()で両方クリアされる。3つ目のキャッシュ追加時にclearCache()への追加漏れリスクあり。また、グローバルスキル(~/.codex/skills/)はアプリ起動時1回読込の設計だが、キャッシュ無効化タイミングの明確化が必要。"
+    },
+    {
+      "area": "APIルート",
+      "files": [
+        "src/app/api/worktrees/[id]/slash-commands/route.ts",
+        "src/app/api/slash-commands/route.ts"
+      ],
+      "impact_level": "medium",
+      "description": "worktree別APIルートのSlashCommandsResponse.sourcesにcodex-skillカウントの追加が必要。メインAPIルート(/api/slash-commands)は現在sourcesを返さないため影響は軽微だが、Codexスキルを含めるかの設計判断が必要。"
+    },
+    {
+      "area": "フィルタリング",
+      "files": ["src/lib/command-merger.ts"],
+      "impact_level": "high",
+      "description": "filterCommandsByCliTool()の現在の挙動: cliToolsがundefinedの場合はclaude-onlyとして扱う。IssueではCodexスキルにcliTools:['codex']を自動設定する設計。この挙動との整合性は取れているが、既存の.claude/skills/のスキル（source:'skill'）はcliToolsが未設定のため、現在claudeタブでのみ表示される。Codex側のスキルとの区別が型レベルで必要。"
+    },
+    {
+      "area": "テスト",
+      "files": [
+        "tests/unit/slash-commands.test.ts",
+        "tests/unit/lib/command-merger.test.ts",
+        "tests/integration/api-slash-commands.test.ts",
+        "tests/integration/api-worktree-slash-commands.test.ts"
+      ],
+      "impact_level": "medium",
+      "description": "既存テストへの破壊的変更はなし。新規テストの追加が必要: Codexスキル読込関数、グローバル/ローカル統合、cliToolsフィルタリング、セキュリティ対策。既存のloadSkillsテストパターンを参考にできる。"
+    },
+    {
+      "area": "UIコンポーネント",
+      "files": [
+        "src/components/worktree/SlashCommandList.tsx",
+        "src/components/worktree/SlashCommandSelector.tsx"
+      ],
+      "impact_level": "low",
+      "description": "UIコンポーネントはSlashCommandGroup/SlashCommand型を使用しており、新しいsource値やcategory値を特別扱いしていない。filterCommandsByCliTool()がAPI側で適用されるため、UI側の変更は不要。"
+    },
+    {
+      "area": "パフォーマンス",
+      "files": ["src/lib/slash-commands.ts"],
+      "impact_level": "low",
+      "description": "グローバルスキル(~/.codex/skills/)のファイルシステムアクセスは起動時1回+キャッシュの設計。既存のloadSkills()と同じパターンのため、パフォーマンス影響は軽微。MAX_SKILLS_COUNT=100の制限も適用される。"
+    },
+    {
+      "area": "OS互換性",
+      "files": ["src/lib/slash-commands.ts"],
+      "impact_level": "medium",
+      "description": "~/.codex/skills/のホームディレクトリ解決にos.homedir()またはprocess.env.HOMEの使用が必要。既存コードではsrc/lib/db/db-path-resolver.ts等でos.homedir()を使用しているパターンあり。Windows環境でのパスセパレータ(path.sep)への対応も必要。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "IA-001",
+      "severity": "should-fix",
+      "category": "キャッシュ",
+      "title": "Codexグローバルスキルキャッシュの設計とclearCache()への影響",
+      "description": "Issueではグローバルキャッシュの追加が言及されているが、clearCache()への追加やgetCachedCommands()相当の関数追加について明示的に記載されていない。現在clearCache()はcommandsCache/skillsCacheの2つをnullに設定している。3つ目のキャッシュ（codexSkillsCache等）を追加する場合、clearCache()への追加漏れは一般的なバグパターン。",
+      "affected_files": ["src/lib/slash-commands.ts"],
+      "suggestion": "実装タスクに「clearCache()にCodexスキルキャッシュのクリアを追加」を明記する。また、getCachedCommands()に相当するCodexスキル用のキャッシュ取得関数の要否も検討すべき。"
+    },
+    {
+      "id": "IA-002",
+      "severity": "should-fix",
+      "category": "API",
+      "title": "APIレスポンスのsources集計に'codex-skill'の追加が必要",
+      "description": "worktree別APIルート(src/app/api/worktrees/[id]/slash-commands/route.ts)のSlashCommandsResponseにsources.skillのカウントがあるが、codex-skillは別途カウントするのか、skillに含めるのかが不明。また、sourcesインターフェースの拡張（'codex-skill'プロパティ追加）が必要になる可能性がある。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/slash-commands/route.ts"
+      ],
+      "suggestion": "Issueの実装タスクにAPIレスポンス型の更新（sources集計ロジック）を追加する。codex-skillをsources.skillに含めるか、別プロパティ(sources['codex-skill'])にするかを設計判断として明記すべき。"
+    },
+    {
+      "id": "IA-003",
+      "severity": "should-fix",
+      "category": "型定義",
+      "title": "SlashCommandCategoryに新カテゴリを追加する場合のCATEGORY_ORDER/CATEGORY_LABELS連動",
+      "description": "Issueの実装タスクに「SlashCommandCategoryへの新カテゴリ追加要否を検討」とあるが、追加する場合はCATEGORY_LABELS(src/types/slash-commands.ts)とCATEGORY_ORDER(src/lib/command-merger.ts)の両方に追加が必要。追加漏れがあるとUI上でカテゴリラベルが表示されない、またはソート順が不正になる。",
+      "affected_files": [
+        "src/types/slash-commands.ts",
+        "src/lib/command-merger.ts"
+      ],
+      "suggestion": "新カテゴリ追加の場合、CATEGORY_LABELS・CATEGORY_ORDER・CATEGORY_ORDERのテスト(command-merger.test.ts)の3箇所を同時に更新する必要があることを注記として追加する。もしくは既存の'skill'カテゴリを共用し、source値で区別する設計も検討可能。"
+    },
+    {
+      "id": "IA-004",
+      "severity": "must-fix",
+      "category": "フィルタリング",
+      "title": "filterCommandsByCliTool()のデフォルト挙動と既存.claude/skills/スキルの扱い",
+      "description": "filterCommandsByCliTool()は、cliToolsがundefinedの場合にcliToolId==='claude'の場合のみ表示する（184-196行目）。つまり既存の.claude/skills/から読み込まれたスキル（cliToolsは未設定）はClaudeタブでのみ表示される。Issue #166でCodexスキルにcliTools:['codex']を設定する設計は正しいが、この挙動の前提がIssueに明記されていない。実装者が.claude/skills/のスキルにもcliToolsを付与しようとした場合、既存のClaudeスキル表示が壊れるリスクがある。",
+      "affected_files": [
+        "src/lib/command-merger.ts",
+        "src/lib/slash-commands.ts"
+      ],
+      "suggestion": "Issueに「既存の.claude/skills/スキルはcliToolsを設定しない（undefinedのまま）ため、Claudeタブのみに表示される（filterCommandsByCliTool()のデフォルト挙動による）。Codexスキルのみに明示的にcliTools:['codex']を設定する」という設計前提を明記する。"
+    },
+    {
+      "id": "IA-005",
+      "severity": "nice-to-have",
+      "category": "パフォーマンス",
+      "title": "グローバルスキル読込時のホームディレクトリ配下アクセスの考慮",
+      "description": "~/.codex/skills/のスキャンは起動時1回+キャッシュの設計であり、パフォーマンス影響は軽微。ただし、ホームディレクトリ配下にNFS等のリモートファイルシステムがマウントされている場合の遅延リスクや、権限エラー時の例外処理について考慮が必要。",
+      "affected_files": ["src/lib/slash-commands.ts"],
+      "suggestion": "既存のloadSkills()のエラーハンドリングパターン（.catch(() => [])）を踏襲すれば十分。ドキュメントとしてではなく、実装時にtry-catchを忘れないよう注意する程度で良い。"
+    },
+    {
+      "id": "IA-006",
+      "severity": "should-fix",
+      "category": "OS互換性",
+      "title": "ホームディレクトリ解決方法の明示",
+      "description": "Issueでは「~/.codex/skills/」と表記しているが、Node.jsでの~の解決方法（os.homedir()を使うかprocess.env.HOMEを使うか）が明記されていない。既存コード(db-path-resolver.ts等)ではos.homedir()が使われているが、Issueの実装タスクに使用するAPIを明記した方が実装のブレを防げる。",
+      "affected_files": ["src/lib/slash-commands.ts"],
+      "suggestion": "実装タスクの「グローバルスキル読込」セクションに「os.homedir()を使用してホームディレクトリを解決する（既存パターンに倣う）」を追記する。"
+    },
+    {
+      "id": "IA-007",
+      "severity": "should-fix",
+      "category": "テスト",
+      "title": "グローバル/ローカル重複排除のテスト設計が必要",
+      "description": "Issueでは「同名スキルの優先度: ローカル > グローバル（既存のdeduplicateByName()に倣う）」としているが、この場合deduplicateByName()の呼び出し順序が重要（globalを先に登録し、localで上書き）。テスト計画に「グローバルとローカルで同名スキルがある場合のローカル優先確認」を明示すべき。",
+      "affected_files": [
+        "tests/unit/slash-commands.test.ts"
+      ],
+      "suggestion": "テスト計画のIntegration Test対象に「同名Codexスキルがグローバル・ローカル両方に存在する場合、ローカル版が優先されること」を明記する。"
+    },
+    {
+      "id": "IA-008",
+      "severity": "nice-to-have",
+      "category": "API",
+      "title": "メインAPIルート(/api/slash-commands)でのCodexスキル扱い",
+      "description": "メインAPIルート(src/app/api/slash-commands/route.ts)はgetSlashCommandGroups()を呼び出すだけで、cliToolフィルタリングやsourcesカウントを行わない。Codexスキルがこのエンドポイントに含まれるかどうかの設計判断がIssueに記載されていない。現在のgetSlashCommandGroups()はbasePath未指定時にキャッシュを使用するため、Codexスキルを統合する場合は影響がある。",
+      "affected_files": [
+        "src/app/api/slash-commands/route.ts",
+        "src/lib/slash-commands.ts"
+      ],
+      "suggestion": "getSlashCommandGroups()のbasePath未指定時の挙動（MCBDコマンド+Claudeスキル）にCodexスキルを含めるかどうかを設計方針として明記する。通常はworktree別APIのみで使用されると想定するが、明確にしておくと良い。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 5,
+  "nice_to_have_count": 2,
+  "overall_assessment": "Issue #166の影響範囲は主にslash-commands周辺モジュール（src/lib/slash-commands.ts, src/types/slash-commands.ts, src/lib/command-merger.ts, worktree APIルート）に限定されており、UIコンポーネントへの影響は軽微。最も注意すべきはfilterCommandsByCliTool()のデフォルト挙動（cliTools未設定=Claude-only）と既存.claude/skills/スキルとの関係性の明示（IA-004）。キャッシュ設計、APIレスポンス型、CATEGORY連動の3点は実装時に見落としやすいため、Issueに明記することを推奨する。テストは既存パターン（loadSkillsテスト群）を参考にでき、新規テスト追加で対応可能。破壊的変更は発生しない見込み。"
+}

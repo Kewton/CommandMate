@@ -1,0 +1,78 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "issue_number": 166,
+  "review_type": "影響範囲",
+  "review_date": "2026-03-14",
+  "previous_findings_addressed": [
+    {
+      "id": "IA-001",
+      "status": "addressed",
+      "comment": "「キャッシュ管理」セクションが実装タスクに追加され、clearCache()へのCodexスキルキャッシュクリア処理追加とgetCachedCommands()相当の関数検討が明記されている。"
+    },
+    {
+      "id": "IA-002",
+      "status": "addressed",
+      "comment": "「APIレスポンス型の更新」セクションが追加され、worktree別APIルートのSlashCommandsResponse.sourcesへの'codex-skill'カウント追加と設計判断ポイント（skillに含めるか別プロパティにするか）が記載されている。"
+    },
+    {
+      "id": "IA-003",
+      "status": "addressed",
+      "comment": "「型定義の拡張」セクション内に注意事項としてCATEGORY_LABELS/CATEGORY_ORDER/テストの3箇所連動更新が記載済み。既存'skill'カテゴリ共用の代替案も言及されている。"
+    },
+    {
+      "id": "IA-004",
+      "status": "addressed",
+      "comment": "「CLIツール別フィルタリング統合」セクション末尾に設計前提が明記されている。既存.claude/skills/スキルはcliToolsをundefinedのまま維持しClaudeタブのみ表示、CodexスキルにのみcliTools:['codex']を設定する方針が記載済み。さらにD009コメントの矛盾についても注意事項として追記されている。"
+    },
+    {
+      "id": "IA-006",
+      "status": "addressed",
+      "comment": "「Skills読込」セクションのグローバルスキル読込タスクに「os.homedir()を使用してホームディレクトリを解決する（既存のdb-path-resolver.tsのパターンに倣う）」と明記済み。"
+    },
+    {
+      "id": "IA-007",
+      "status": "addressed",
+      "comment": "Integration Test対象に「同名Codexスキルがグローバル・ローカル両方に存在する場合、ローカル版が優先されること（deduplicateByName()の呼び出し順序: グローバルを先に登録し、ローカルで上書き）」が明記済み。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "IA2-001",
+      "severity": "should-fix",
+      "category": "型定義",
+      "title": "SlashCommand.cliToolsのJSDocコメントがfilterCommandsByCliTool()の実装と矛盾",
+      "description": "src/types/slash-commands.ts:53のJSDocコメントでは「undefined: available for ALL tools (backward compatible)」と記載されているが、filterCommandsByCliTool()の実装(command-merger.ts:193-194)ではcliToolsがundefinedの場合cliToolId==='claude'のみtrueを返す（Claude-only）。Issue本文の設計前提は正しく「cliToolsがundefinedのスキルはclaudeタブでのみ表示される」と記載されているが、既存の型定義ファイルのJSDocとの矛盾が未解決のまま残っている。D009コメントの矛盾はIssueに注意事項として追記されたが、SlashCommand型のJSDocコメントの矛盾は言及されていない。",
+      "affected_files": [
+        "src/types/slash-commands.ts"
+      ],
+      "suggestion": "Issue #166の実装タスクまたは注意事項に、src/types/slash-commands.ts:52-55のcliToolsフィールドJSDocコメントの修正（「undefined: available for ALL tools」を「undefined: Claude only (backward compatible)」に修正）を追加する。D009コメント修正と合わせて実施すると良い。"
+    },
+    {
+      "id": "IA2-002",
+      "severity": "nice-to-have",
+      "category": "キャッシュ",
+      "title": "getSlashCommandGroups()のbasePath指定時にCodexスキルが統合されるかの設計が未明確",
+      "description": "現在のgetSlashCommandGroups(basePath)はbasePath指定時にloadSlashCommands(basePath)とloadSkills(basePath)を呼び出し、deduplicateByName()で統合する。Issue #166でCodexスキル（.codex/skills/）を追加する場合、このbasePath指定時のフローにもCodexスキル読込を追加する必要がある。Issueの実装タスクでは「.codex/skills/{name}/SKILL.md からのローカルスキル読込（worktreeのbasePath基準）」と記載されているが、getSlashCommandGroups()への統合ポイントが明示されていない。実装時に既存パターンを見れば明らかではあるが、明記されていると迷わない。",
+      "affected_files": [
+        "src/lib/slash-commands.ts"
+      ],
+      "suggestion": "実装タスクの「Skills読込」セクションに「getSlashCommandGroups()内でloadCodexSkills(basePath)を呼び出し、既存のdeduplicateByName()フローに統合する」旨を追記する。ただし既存パターンから推測可能なため、nice-to-haveとする。"
+    },
+    {
+      "id": "IA2-003",
+      "severity": "nice-to-have",
+      "category": "テスト",
+      "title": "filterCommands()関数がcommandsCacheのみを検索する制約とCodexスキルの関係",
+      "description": "src/lib/slash-commands.tsのfilterCommands()関数はcommandsCacheのみを検索対象としている（skillsCacheは対象外、ファイルヘッダにNOTEコメントあり）。Codexスキル用のキャッシュを追加する場合、filterCommands()の検索対象にも含めるかの設計判断が必要。ただし、UIフィルタリングは通常filterCommandGroups()（command-merger.ts）経由で行われるため、影響は軽微。",
+      "affected_files": [
+        "src/lib/slash-commands.ts"
+      ],
+      "suggestion": "filterCommands()はレガシー的な位置づけの可能性があるため、Codexスキルキャッシュを追加しなくても問題ないと考えられる。実装時に判断すれば十分。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 1,
+  "nice_to_have_count": 2,
+  "overall_assessment": "Stage 3の影響範囲レビューで指摘した全6件（must-fix 1件 IA-004、should-fix 5件 IA-001/002/003/006/007）は全て適切にIssue本文に反映されている。Stage 5-6の通常レビュー2回目で追加されたD009コメント矛盾の注意事項も含め、Issue全体として影響範囲の記載は十分に充実している。新たに発見された問題は1件のshould-fix（IA2-001: SlashCommand型のcliToolsフィールドJSDocコメントとfilterCommandsByCliTool()実装の矛盾）と2件のnice-to-have。IA2-001はD009コメントの矛盾と同根の問題であり、D009コメント修正と合わせて対応すれば良い。破壊的変更のリスクは引き続き低く、影響範囲はslash-commands周辺モジュールに限定されている。Issue #166は影響範囲の観点から実装着手に十分な品質に達している。"
+}

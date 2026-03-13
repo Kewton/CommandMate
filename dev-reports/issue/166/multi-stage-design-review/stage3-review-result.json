@@ -1,0 +1,137 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 166,
+  "focus_area": "影響範囲",
+  "design_doc_path": "dev-reports/design/issue-166-codex-skills-loader-design-policy.md",
+  "reviewed_at": "2026-03-14",
+  "impact_areas": [
+    {
+      "area": "既存ユニットテスト (tests/unit/slash-commands.test.ts)",
+      "files": ["tests/unit/slash-commands.test.ts"],
+      "impact_level": "low",
+      "description": "既存テストは全て現行の関数シグネチャ・挙動に依存しており、設計変更の影響を受けない。loadSlashCommands(), loadSkills(), getSlashCommandGroups(), clearCache(), deduplicateByName() のいずれも既存シグネチャが変わらない。getSlashCommandGroups(basePath) の basePath 指定時に codexLocalSkills が追加されるが、既存テストは .codex/skills/ を含まないフィクスチャを使っているため結果は同一。clearCache() から codexSkillsCache を削除する変更も、そもそも現在 codexSkillsCache が存在しないため影響なし。"
+    },
+    {
+      "area": "既存統合テスト (tests/integration/api-worktree-slash-commands.test.ts)",
+      "files": ["tests/integration/api-worktree-slash-commands.test.ts"],
+      "impact_level": "medium",
+      "description": "APIレスポンスに sources.codexSkill プロパティが追加される。既存テスト(L93-94)は expect(data.sources).toHaveProperty('skill') でチェックしているが、codexSkill プロパティの存在はチェックしていないため、既存テストは壊れない。ただし、SlashCommandsResponse インターフェースの TypeScript 型が変更されるため、型チェック(npx tsc --noEmit)でテストファイルが型変更の影響を受ける可能性がある。テストファイルはAPIレスポンスをany型で受けているため実際には問題ない。"
+    },
+    {
+      "area": "APIルート (src/app/api/worktrees/[id]/slash-commands/route.ts)",
+      "files": ["src/app/api/worktrees/[id]/slash-commands/route.ts"],
+      "impact_level": "medium",
+      "description": "SlashCommandsResponse インターフェースに codexSkill プロパティ追加、集計ロジック追加が必要。getSlashCommandGroups(worktree.path) の戻り値に codex-skill ソースのコマンドが含まれるようになるため、filteredGroups/allFilteredCommands の計算結果が変わる。ただし既存の standard/worktree/skill のカウントロジックには影響なし。"
+    },
+    {
+      "area": "クライアント側フック (src/hooks/useSlashCommands.ts)",
+      "files": ["src/hooks/useSlashCommands.ts"],
+      "impact_level": "none",
+      "description": "クライアント側は data.groups のみを使用しており、data.sources は参照していない。sources.codexSkill の追加はクライアントに影響しない。groups 内のコマンドに source: 'codex-skill' が追加されるが、クライアント側で source プロパティを直接参照するUIコードは確認されないため、後方互換性は維持される。"
+    },
+    {
+      "area": "MCBD API (src/app/api/slash-commands/)",
+      "files": ["src/app/api/slash-commands/route.ts", "src/lib/api-client.ts"],
+      "impact_level": "none",
+      "description": "設計書の決定6により、MCBD APIではCodexスキルを含めない。getSlashCommandGroups() の basePath 未指定時パスは変更されないため、MCBD API側は完全に影響外。api-client.ts の SlashCommandsResponse 型も変更不要。"
+    },
+    {
+      "area": "グローバルキャッシュ (slash-commands.ts キャッシュ管理)",
+      "files": ["src/lib/slash-commands.ts"],
+      "impact_level": "low",
+      "description": "codexSkillsCache は設計上不要とされており(決定6)、既存の commandsCache/skillsCache には影響しない。loadCodexSkills() はキャッシュを使わず都度読み込みするため、D2-005(basePath指定時のグローバルキャッシュ上書きバグ)と同様の問題は発生しない。"
+    },
+    {
+      "area": "型定義 (src/types/slash-commands.ts)",
+      "files": ["src/types/slash-commands.ts"],
+      "impact_level": "low",
+      "description": "SlashCommandSource に 'codex-skill' を追加するのは union 型の拡張であり、既存コードに影響しない。CATEGORY_LABELS/CATEGORY_ORDER への変更は不要(決定1)。cliTools フィールドの JSDoc 修正は実行時の挙動に影響しない。"
+    },
+    {
+      "area": "OS互換性",
+      "files": ["src/lib/slash-commands.ts"],
+      "impact_level": "low",
+      "description": "os.homedir() は Node.js が Windows/macOS/Linux で一貫してホームディレクトリを返す標準API。path.join() もOS固有のパス区切り文字を正しく処理する。ただし、Windows環境での resolvedPath.startsWith(path.resolve(skillsDir) + path.sep) は path.sep が '\\' となるため、ケースインセンシティブなファイルシステムとの組み合わせで理論的には問題が起き得るが、loadSkills() でも同一パターンを使用しており、既知の問題として許容されている。"
+    },
+    {
+      "area": "パフォーマンス (起動時ファイルシステムアクセス)",
+      "files": ["src/lib/slash-commands.ts"],
+      "impact_level": "low",
+      "description": "loadCodexSkills() は worktree API 呼び出し時に実行され、アプリ起動時には実行されない。fs.existsSync() + fs.readdirSync() の同期I/Oが追加されるが、~/.codex/skills/ ディレクトリが存在しない場合は existsSync() の1回のみで終了する。存在する場合も MAX_SKILLS_COUNT=100 の上限があるため、影響は軽微。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "D3-001",
+      "severity": "should-fix",
+      "category": "影響範囲",
+      "title": "getSlashCommandGroups(basePath) でグローバルCodexスキルが読み込まれない設計上の欠落",
+      "description": "設計書セクション3.4では basePath 指定時に loadCodexSkills(basePath) でローカルスキルのみを読み込む。しかし、グローバルスキル(~/.codex/skills/)の読み込みがどこで行われるかが不明確。セクション3.4の「グローバルスキル（~/.codex/skills/）は standardGroups またはMCBD経由で取得される」という記述があるが、standardGroups は getStandardCommandGroups() から取得され、これは Codex スキルを含まない固定コマンドリストである。MCBD API も決定6により Codex スキルを含めない。結果として、グローバル Codex スキルがどこにも読み込まれないデータフローになっている。セクション3.4の表にも「グローバルスキルはworktree APIルートで別途loadCodexSkills()を直接呼び出して取得する設計も可」とあるが、具体的な実装指示がなく曖昧である。",
+      "affected_files": [
+        "src/lib/slash-commands.ts",
+        "src/app/api/worktrees/[id]/slash-commands/route.ts"
+      ],
+      "suggestion": "worktree API ルート(route.ts)で getSlashCommandGroups(basePath) 呼び出しに加えて、別途 loadCodexSkills() (basePath なし=グローバル)を明示的に呼び出し、worktreeGroups にマージする実装パスを設計書に明記すべき。具体的には route.ts 内で `const globalCodexSkills = await loadCodexSkills();` を呼び出し、worktreeGroups に統合するフローを追加する。あるいは getSlashCommandGroups(basePath) 内で basePath 指定時にもグローバルスキルを読み込むよう変更する。"
+    },
+    {
+      "id": "D3-002",
+      "severity": "should-fix",
+      "category": "影響範囲",
+      "title": "deduplicateByName() のローカル/グローバル優先順位が設計意図と逆転するリスク",
+      "description": "設計書セクション3.4では「Codex local skillsはグローバルskillsより後に渡すことで、ローカル優先を実現」と記載されている。しかし getSlashCommandGroups(basePath) の実装では `deduplicateByName([...claudeSkills, ...codexLocalSkills], commands)` となっており、deduplicateByName() の仕様は「skills が先に登録、commands で上書き」である。つまり skills 配列内での順序は後勝ちではなく、先に登録された方が残り、同名の後のものも登録されるが、最終的に commands で上書きされる。skills 配列内の同名エントリは Map の set により後勝ちになるため、[...claudeSkills, ...codexLocalSkills] の順序ではローカルCodexスキルが勝つ。この挙動自体は正しいが、グローバルCodexスキルがこの配列に含まれていない(D3-001参照)ため、ローカル優先の重複排除自体が発生しない。",
+      "affected_files": [
+        "src/lib/slash-commands.ts"
+      ],
+      "suggestion": "D3-001の解決と合わせて、グローバルCodexスキルが deduplicateByName() の skills 配列に含まれる場合の順序を明確にすべき。例: deduplicateByName([...claudeSkills, ...globalCodexSkills, ...localCodexSkills], commands) とすれば、ローカルがグローバルを上書きし、commands が最優先となる。"
+    },
+    {
+      "id": "D3-003",
+      "severity": "nice-to-have",
+      "category": "影響範囲",
+      "title": "cliTools フィールドの JSDoc 修正が filterCommandsByCliTool() の実装と正確に一致しない",
+      "description": "設計書セクション3.1の修正後JSDocでは「undefined: Claude Code only (backward compatible; filterCommandsByCliTool() treats undefined as claude-only)」と記載されている。実際の filterCommandsByCliTool() 実装(command-merger.ts L191-195)を確認すると、cmd.cliTools が undefined の場合は cliToolId === 'claude' の時のみ表示する仕様であり、設計書の記述と完全に一致している。しかし、現在の src/types/slash-commands.ts L53 では「undefined: available for ALL tools (backward compatible)」と記載されており、これは filterCommandsByCliTool() の実装と矛盾している。設計書の修正方針(D2-002)は正しいが、既存コードの JSDoc が誤っていることをチーム全体で認識しておく必要がある。",
+      "affected_files": [
+        "src/types/slash-commands.ts"
+      ],
+      "suggestion": "既にD2-002として設計書に記載済みだが、この修正はバグ修正に相当するため、Issue #166の実装時に確実に反映すること。既にこの誤った JSDoc を信頼して実装された他のコードがないか念のため確認すること。"
+    },
+    {
+      "id": "D3-004",
+      "severity": "nice-to-have",
+      "category": "影響範囲",
+      "title": "loadSlashCommands() の commandsCache グローバル上書き副作用が loadCodexSkills() にも波及しないことの確認",
+      "description": "現行の loadSlashCommands(basePath) は basePath 指定の有無に関わらず commandsCache をグローバルに上書きする(L230)。これは設計書のD2-005で「既知のバグ」として記載されている。loadCodexSkills() はキャッシュを使用しない設計のためこの問題は発生しないが、将来的にキャッシュを追加する場合は同様の問題が発生する可能性がある。",
+      "affected_files": [
+        "src/lib/slash-commands.ts"
+      ],
+      "suggestion": "loadCodexSkills() にキャッシュを追加する際は、basePath をキャッシュキーに含める設計とすること。現時点では対応不要(YAGNI)。"
+    },
+    {
+      "id": "D3-005",
+      "severity": "nice-to-have",
+      "category": "影響範囲",
+      "title": "統合テストの sources プロパティチェックが不十分",
+      "description": "既存の統合テスト(api-worktree-slash-commands.test.ts L93-94)では sources.skill の存在チェックのみ行っており、sources.codexSkill のチェックがない。新プロパティ追加後も既存テストは壊れないが、codexSkill プロパティの検証テストが設計書のテスト設計(セクション6)に記載されているため、テスト追加時に忘れないようにすべき。",
+      "affected_files": [
+        "tests/integration/api-worktree-slash-commands.test.ts"
+      ],
+      "suggestion": "設計書セクション6の統合テスト計画に従い、sources.codexSkill カウントの検証テストを追加すること。既存テストの修正は不要。"
+    },
+    {
+      "id": "D3-006",
+      "severity": "nice-to-have",
+      "category": "影響範囲",
+      "title": "parseSkillFile() の filePath が process.cwd() 相対で計算される件の影響確認",
+      "description": "設計書D2-004で指摘されているように、グローバルスキル(~/.codex/skills/)の filePath は path.relative(process.cwd(), skillPath) で計算されるため、'../../.codex/skills/xxx/SKILL.md' のような不自然なパスになる。現在の parseSkillFile() (L163) でこの計算が行われている。UIでは filePath を直接表示する箇所は確認されなかったが、ログ出力時にこのパスが表示される可能性がある。",
+      "affected_files": [
+        "src/lib/slash-commands.ts"
+      ],
+      "suggestion": "設計書の注記(D2-004)に従い、filePath はデバッグ/ログ用途のみに使用すること。UI表示に filePath を使う場合は、source が 'codex-skill' のときに特別な表示ロジックを検討すること。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 2,
+  "nice_to_have_count": 4,
+  "overall_assessment": "設計変更の既存コードベースへの影響は全体的に低く、後方互換性は維持されている。既存のユニットテスト・統合テストは新実装によって壊れることはない。SlashCommandSource 型への 'codex-skill' 追加は union 型の拡張であり、APIレスポンスの sources.codexSkill 追加も新プロパティ追加のため後方互換。クライアント側(useSlashCommands.ts)は sources プロパティを参照していないため影響なし。ただし、グローバルCodexスキル(~/.codex/skills/)の読み込みフローに設計上の欠落(D3-001)があり、現状の設計ではグローバルスキルがどこにも読み込まれないデータパスとなっている。これは should-fix として設計書への明確化が必要。キャッシュ管理はCodexスキルにはキャッシュを使用しない設計のため、既知のグローバルキャッシュ上書きバグ(D2-005)の影響は受けない。OS互換性・パフォーマンスへの影響は軽微。"
+}

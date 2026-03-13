@@ -1,0 +1,21 @@
+{
+  "issue_number": 166,
+  "refactor_targets": [
+    "src/lib/slash-commands.ts",
+    "src/app/api/worktrees/[id]/slash-commands/route.ts",
+    "src/types/slash-commands.ts",
+    "tests/unit/slash-commands.test.ts"
+  ],
+  "quality_metrics": {
+    "unit_tests_total": 4984,
+    "unit_tests_passed": 4984,
+    "type_check": "pass",
+    "lint": "pass"
+  },
+  "improvement_goals": [
+    "loadCodexSkills()とloadSkills()のスキャンロジック重複を検査（DRY原則）",
+    "不要なコードやコメントの削除",
+    "テストコードの品質確認",
+    "セキュリティ対策の網羅性確認"
+  ]
+}

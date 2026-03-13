@@ -1,0 +1,27 @@
+{
+  "issue_number": 166,
+  "feature_summary": "Codexカスタムスキル読込対応（.codex/skills/, ~/.codex/skills/）",
+  "acceptance_criteria": [
+    ".codex/skills/{name}/SKILL.md に配置したスキルがCodexタブで表示されること",
+    "~/.codex/skills/{name}/SKILL.md に配置したグローバルスキルがCodexタブで表示されること",
+    "Claudeタブでは表示されないこと（cliToolsフィルタリングが正しく動作）",
+    "存在しないディレクトリの場合にエラーが発生しないこと（空配列を返す）",
+    "パストラバーサル攻撃（../を含むパス）を防御できること",
+    "symlinkによるディレクトリ外へのアクセスを防御できること",
+    "ファイルサイズ・ファイル数の上限を超えた場合に安全にスキップされること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: loadCodexSkills()で.codex/skills/配下のSKILL.mdを読み込み、cliTools:['codex']とsource:'codex-skill'が設定される",
+    "シナリオ2: loadCodexSkills()のbasePath未指定時にos.homedir()が使用される",
+    "シナリオ3: filterCommandsByCliTool(groups,'codex')でCodexスキルのみ表示、'claude'で非表示",
+    "シナリオ4: 存在しないディレクトリで空配列が返る",
+    "シナリオ5: ..を含むディレクトリがスキップされる（パストラバーサル防御）",
+    "シナリオ6: 64KB超のSKILL.mdがスキップされる",
+    "シナリオ7: 100件超のスキルがスキップされる",
+    "シナリオ8: getSlashCommandGroups(basePath)でCodexローカルスキルが含まれる",
+    "シナリオ9: worktree APIルートでsources.codexSkillが正しくカウントされる",
+    "シナリオ10: SlashCommandSource型に'codex-skill'が存在する",
+    "シナリオ11: D009コメントが正確に修正されている",
+    "シナリオ12: cliToolsフィールドのJSDocが正確に修正されている"
+  ]
+}

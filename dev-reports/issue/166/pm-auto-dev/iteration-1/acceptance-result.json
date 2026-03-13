@@ -1,0 +1,86 @@
+{
+  "issue_number": 166,
+  "status": "passed",
+  "test_results": {
+    "unit_tests_pass": true,
+    "type_check_pass": true,
+    "lint_pass": true
+  },
+  "acceptance_criteria_results": [
+    {
+      "id": "AC-1",
+      "description": ".codex/skills/{name}/SKILL.md skills displayed in Codex tab via loadCodexSkills() with cliTools:['codex']",
+      "status": "passed",
+      "evidence": "loadCodexSkills() at line 312-353 of src/lib/slash-commands.ts sets source:'codex-skill' and cliTools:['codex'] on each parsed skill (lines 341-345). Test 'should load Codex skills with source codex-skill and cliTools codex' (line 744-766 of test file) verifies this."
+    },
+    {
+      "id": "AC-2",
+      "description": "~/.codex/skills/{name}/SKILL.md global skills use os.homedir() as default basePath",
+      "status": "passed",
+      "evidence": "loadCodexSkills() line 313: 'const root = basePath ?? os.homedir()' uses os.homedir() when no basePath provided. Test 'should use os.homedir() when basePath is not provided' (line 768-794) mocks os.homedir and verifies global skill loading."
+    },
+    {
+      "id": "AC-3",
+      "description": "Codex skills are hidden in Claude tab via filterCommandsByCliTool() filtering",
+      "status": "passed",
+      "evidence": "filterCommandsByCliTool() in command-merger.ts (line 184-199) filters by cliTools array: when cliTools is ['codex'], cliToolId==='claude' returns false. Codex skills set cliTools:['codex'], so they are excluded from Claude tab. Claude skills leave cliTools undefined, which maps to claude-only (line 193-194)."
+    },
+    {
+      "id": "AC-4",
+      "description": "Non-existent directory returns empty array without error",
+      "status": "passed",
+      "evidence": "loadCodexSkills() lines 316-318 check fs.existsSync and return [] if directory does not exist. Test 'should return empty array when skills directory does not exist' (line 736-742) verifies this."
+    },
+    {
+      "id": "AC-5",
+      "description": "Path traversal defense: directories containing '..' are skipped",
+      "status": "passed",
+      "evidence": "loadCodexSkills() line 331: 'if (entry.name.includes(\"..\")) continue' rejects path traversal entries. Test 'should skip directories containing \"..\"' (line 796-816) verifies ..evil directory is rejected."
+    },
+    {
+      "id": "AC-6",
+      "description": "Oversized SKILL.md files (>64KB) are skipped",
+      "status": "passed",
+      "evidence": "parseSkillFile() lines 142-146 check stat.size > MAX_SKILL_FILE_SIZE_BYTES (65536) and return null. Test 'should skip oversized SKILL.md files' (line 818-836) creates 70KB file and verifies it is skipped with warning logged."
+    },
+    {
+      "id": "AC-7",
+      "description": "Skills count limit (>100) enforced",
+      "status": "passed",
+      "evidence": "loadCodexSkills() lines 324-326 check skills.length >= MAX_SKILLS_COUNT (100) and break. Test 'should enforce MAX_SKILLS_COUNT limit' (line 838-861) creates 102 skills and verifies only <=100 are loaded."
+    },
+    {
+      "id": "AC-8",
+      "description": "getSlashCommandGroups(basePath) includes local Codex skills",
+      "status": "passed",
+      "evidence": "getSlashCommandGroups() line 398 calls loadCodexSkills(basePath) and line 399 merges codexLocalSkills with other skills. Test 'should include local Codex skills when basePath is provided' (line 895-934) verifies codex-skill appears with correct source and cliTools."
+    },
+    {
+      "id": "AC-9",
+      "description": "Worktree API route includes sources.codexSkill count",
+      "status": "passed",
+      "evidence": "route.ts line 43 declares codexSkill:number in SlashCommandsResponse.sources. Line 105 loads global Codex skills via loadCodexSkills(). Line 122 counts codex-skill sources. Line 131 returns filteredCodexSkillCount in response."
+    },
+    {
+      "id": "AC-10",
+      "description": "SlashCommandSource type includes 'codex-skill'",
+      "status": "passed",
+      "evidence": "src/types/slash-commands.ts line 31: \"export type SlashCommandSource = 'standard' | 'mcbd' | 'worktree' | 'skill' | 'codex-skill';\" includes 'codex-skill' as a valid source type."
+    },
+    {
+      "id": "AC-11",
+      "description": "D009 comment accurately documents cliTools behavior for .claude/skills vs .codex/skills",
+      "status": "passed",
+      "evidence": "parseSkillFile() JSDoc (lines 130-133) contains D009 comment: '.claude/skills/ skills do not set cliTools (left as undefined), which means filterCommandsByCliTool() treats them as claude-only. Codex skills (.codex/skills/) set cliTools: [\"codex\"] explicitly in loadCodexSkills(). See filterCommandsByCliTool() in command-merger.ts for the authoritative behavior.'"
+    },
+    {
+      "id": "AC-12",
+      "description": "cliTools field JSDoc accurately documents behavior including codex-only option",
+      "status": "passed",
+      "evidence": "src/types/slash-commands.ts lines 51-60: cliTools JSDoc lists all valid combinations including ['codex'] for Codex CLI only (line 55), and notes undefined means claude-only with reference to filterCommandsByCliTool()."
+    }
+  ],
+  "passed_count": 12,
+  "failed_count": 0,
+  "summary": "All 12 acceptance criteria passed. Unit tests (4984 passed, 7 skipped across 251 test files), TypeScript type check, and ESLint all pass cleanly. The implementation correctly adds Codex custom skill loading from .codex/skills/ with proper security measures (path traversal defense, file size limits, skill count limits), correct cliTools filtering, and accurate documentation."
+}

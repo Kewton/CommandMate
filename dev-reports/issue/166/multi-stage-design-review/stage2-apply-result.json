@@ -1,0 +1,9 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘反映",
+  "issue_number": 166,
+  "applied_findings": ["D2-001", "D2-002", "D2-003", "D2-004"],
+  "skipped_findings": ["D2-005"],
+  "design_doc_updated": true,
+  "summary": "D2-001(Must Fix): 決定6との自己矛盾を解消。セクション3.3からcodexSkillsCache変数の定義・clearCacheでのクリアを削除し、セクション3.4のgetSlashCommandGroups()からbasePath未指定時のCodexスキル読み込みを削除。スコープ別読み込み設計テーブルとデータフロー説明も整合性を確保。D2-002/D2-003(Should Fix): セクション3.1に既存コードドキュメントバグ修正のIssue #166実装スコープ追記を追加。D2-004(Nice to Have): セクション3.2の設計ポイントにグローバルスキルfilePathの用途制限注記を追加。D2-005はスコープ外のためスキップ。実装チェックリストにStage 2指摘項目6件を追加。"
+}
