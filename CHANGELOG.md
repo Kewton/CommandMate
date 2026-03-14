@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-03-14
+
+### Added
+- HTML file rendering in file panel with sandboxed iframe preview (Issue #490)
+  - `HtmlPreview` component with configurable sandbox levels
+  - HTML extension detection config
+- Insert-to-message from history and memo cards (Issue #485)
+  - Copy content directly into message input from ConversationPairCard and MemoCard
+- Codex custom skills loader from `.codex/skills/` directory (Issue #166)
+  - Codex custom prompts and `.system` skills support
+  - Slash command format utility
+
+### Fixed
+- Prompt detector: detect long confirmation prompts with commit messages
+- Prompt detector: prevent diff line numbers from corrupting Codex prompt detection
+- Status detector: detect Codex TUI idle prompt above padding gap
+- Codex: improve TUI status detection and prompt detection
+- HTML preview: force iframe re-mount on sandbox level change
+
 ## [0.4.7] - 2026-03-13
 
 ### Added
@@ -821,7 +840,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.4.7...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.4.8...HEAD
+[0.4.8]: https://github.com/Kewton/CommandMate/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/Kewton/CommandMate/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/Kewton/CommandMate/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/Kewton/CommandMate/compare/v0.4.4...v0.4.5
