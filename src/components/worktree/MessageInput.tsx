@@ -14,6 +14,7 @@ import { useSlashCommands } from '@/hooks/useSlashCommands';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useImageAttachment } from '@/hooks/useImageAttachment';
 import type { SlashCommand } from '@/types/slash-commands';
+import { getSlashCommandTrigger } from '@/lib/slash-command-format';
 
 export interface MessageInputProps {
   worktreeId: string;
@@ -196,7 +197,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
    * Handle slash command selection
    */
   const handleCommandSelect = useCallback((command: SlashCommand) => {
-    setMessage(`/${command.name} `);
+    setMessage(`${getSlashCommandTrigger(command)} `);
     setShowCommandSelector(false);
     textareaRef.current?.focus();
   }, []);

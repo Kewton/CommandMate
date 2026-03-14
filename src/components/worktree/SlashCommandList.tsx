@@ -8,6 +8,7 @@
 
 import React from 'react';
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
+import { getSlashCommandTrigger } from '@/lib/slash-command-format';
 
 export interface SlashCommandListProps {
   /** Command groups to display */
@@ -79,8 +80,13 @@ export function SlashCommandList({
                   }`}
                 >
                   <span className="text-cyan-600 dark:text-cyan-400 font-mono text-sm flex-shrink-0">
-                    /{command.name}
+                    {getSlashCommandTrigger(command)}
                   </span>
+                  {command.cliTools?.length === 1 && command.cliTools[0] === 'codex' && (
+                    <span className="mt-0.5 rounded border border-cyan-200 bg-cyan-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:border-cyan-800 dark:bg-cyan-950/40 dark:text-cyan-300">
+                      Codex
+                    </span>
+                  )}
                   <span className="text-gray-600 dark:text-gray-300 text-sm truncate">
                     {command.description}
                   </span>

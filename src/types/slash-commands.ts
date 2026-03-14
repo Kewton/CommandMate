@@ -36,6 +36,8 @@ export type SlashCommandSource = 'standard' | 'mcbd' | 'worktree' | 'skill' | 'c
 export interface SlashCommand {
   /** Command name (without leading '/') */
   name: string;
+  /** Command invocation format in the target CLI */
+  invocation?: 'slash' | 'codex-prompt';
   /** Command description from frontmatter */
   description: string;
   /** Command category for grouping */

@@ -41,6 +41,15 @@ describe('SlashCommandList', () => {
           model: 'opus',
           filePath: '.claude/commands/tdd-impl.md',
         },
+        {
+          name: 'github-insights',
+          invocation: 'codex-prompt',
+          description: 'Codex custom prompt',
+          category: 'development',
+          filePath: '.codex/prompts/github-insights.md',
+          source: 'codex-skill',
+          cliTools: ['codex'],
+        },
       ],
     },
   ];
@@ -69,6 +78,7 @@ describe('SlashCommandList', () => {
       expect(screen.getByText('/work-plan')).toBeInTheDocument();
       expect(screen.getByText('/issue-create')).toBeInTheDocument();
       expect(screen.getByText('/tdd-impl')).toBeInTheDocument();
+      expect(screen.getByText('/prompts:github-insights')).toBeInTheDocument();
     });
 
     it('should render command descriptions', () => {
@@ -76,6 +86,12 @@ describe('SlashCommandList', () => {
 
       expect(screen.getByText('Issue単位の具体的な作業計画立案')).toBeInTheDocument();
       expect(screen.getByText('テスト駆動開発で高品質コードを実装')).toBeInTheDocument();
+    });
+
+    it('should render Codex badge for codex-only commands', () => {
+      render(<SlashCommandList groups={mockGroups} onSelect={mockOnSelect} />);
+
+      expect(screen.getByText('Codex')).toBeInTheDocument();
     });
 
     it('should render empty state when no groups', () => {

@@ -881,6 +881,192 @@ describe('loadCodexSkills', () => {
   });
 });
 
+describe('loadCodexSkills .system subdirectory', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should load skills from .system/ subdirectory', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-codex-system');
+    const systemSkillDir = path.join(testDir, '.codex', 'skills', '.system', 'built-in-skill');
+    try {
+      fs.mkdirSync(systemSkillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(systemSkillDir, 'SKILL.md'),
+        '---\nname: built-in-skill\ndescription: A built-in Codex skill\n---\nBody'
+      );
+
+      const { loadCodexSkills } = await import('@/lib/slash-commands');
+      const skills = await loadCodexSkills(testDir);
+
+      expect(skills).toHaveLength(1);
+      expect(skills[0].name).toBe('built-in-skill');
+      expect(skills[0].source).toBe('codex-skill');
+      expect(skills[0].cliTools).toEqual(['codex']);
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should load both .system/ and top-level skills', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-codex-mixed');
+    const systemSkillDir = path.join(testDir, '.codex', 'skills', '.system', 'sys-skill');
+    const topSkillDir = path.join(testDir, '.codex', 'skills', 'user-skill');
+    try {
+      fs.mkdirSync(systemSkillDir, { recursive: true });
+      fs.mkdirSync(topSkillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(systemSkillDir, 'SKILL.md'),
+        '---\nname: sys-skill\ndescription: System skill\n---\n'
+      );
+      fs.writeFileSync(
+        path.join(topSkillDir, 'SKILL.md'),
+        '---\nname: user-skill\ndescription: User skill\n---\n'
+      );
+
+      const { loadCodexSkills } = await import('@/lib/slash-commands');
+      const skills = await loadCodexSkills(testDir);
+
+      expect(skills).toHaveLength(2);
+      expect(skills.map(s => s.name)).toEqual(['sys-skill', 'user-skill']);
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('loadCodexPrompts', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should return empty array when prompts directory does not exist', async () => {
+    const nonExistentDir = path.resolve(__dirname, '../fixtures/nonexistent-codex-prompts');
+    const { loadCodexPrompts } = await import('@/lib/slash-commands');
+    const prompts = await loadCodexPrompts(nonExistentDir);
+    expect(prompts).toEqual([]);
+  });
+
+  it('should load .md files from .codex/prompts/ with source codex-skill and cliTools codex', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-codex-prompts');
+    const promptsDir = path.join(testDir, '.codex', 'prompts');
+    try {
+      fs.mkdirSync(promptsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(promptsDir, 'my-prompt.md'),
+        '---\ndescription: A custom Codex prompt\n---\nPrompt body'
+      );
+
+      const { loadCodexPrompts } = await import('@/lib/slash-commands');
+      const prompts = await loadCodexPrompts(testDir);
+
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0].name).toBe('my-prompt');
+      expect(prompts[0].invocation).toBe('codex-prompt');
+      expect(prompts[0].description).toBe('A custom Codex prompt');
+      expect(prompts[0].category).toBe('skill');
+      expect(prompts[0].source).toBe('codex-skill');
+      expect(prompts[0].cliTools).toEqual(['codex']);
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should use os.homedir() when basePath is not provided', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-codex-prompts-home');
+    const promptsDir = path.join(testDir, '.codex', 'prompts');
+    try {
+      fs.mkdirSync(promptsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(promptsDir, 'home-prompt.md'),
+        '---\ndescription: Home prompt\n---\nBody'
+      );
+
+      vi.doMock('os', async () => {
+        const actual = await vi.importActual<typeof import('os')>('os');
+        return { ...actual, homedir: () => testDir };
+      });
+
+      const { loadCodexPrompts } = await import('@/lib/slash-commands');
+      const prompts = await loadCodexPrompts();
+
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0].name).toBe('home-prompt');
+      expect(prompts[0].source).toBe('codex-skill');
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should skip non-.md files', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-codex-prompts-filter');
+    const promptsDir = path.join(testDir, '.codex', 'prompts');
+    try {
+      fs.mkdirSync(promptsDir, { recursive: true });
+      fs.writeFileSync(path.join(promptsDir, 'valid.md'), '---\ndescription: Valid\n---\n');
+      fs.writeFileSync(path.join(promptsDir, 'invalid.txt'), 'Not a prompt');
+
+      const { loadCodexPrompts } = await import('@/lib/slash-commands');
+      const prompts = await loadCodexPrompts(testDir);
+
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0].name).toBe('valid');
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should skip oversized prompt files', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-codex-prompts-big');
+    const promptsDir = path.join(testDir, '.codex', 'prompts');
+    try {
+      fs.mkdirSync(promptsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(promptsDir, 'big.md'),
+        '---\ndescription: Big\n---\n' + 'x'.repeat(70000)
+      );
+
+      mockLogger.warn.mockClear();
+      const { loadCodexPrompts } = await import('@/lib/slash-commands');
+      const prompts = await loadCodexPrompts(testDir);
+
+      expect(prompts).toEqual([]);
+      expect(mockLogger.warn).toHaveBeenCalled();
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should sort prompts alphabetically by name', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-codex-prompts-sort');
+    const promptsDir = path.join(testDir, '.codex', 'prompts');
+    try {
+      fs.mkdirSync(promptsDir, { recursive: true });
+      for (const name of ['zebra', 'alpha', 'middle']) {
+        fs.writeFileSync(
+          path.join(promptsDir, `${name}.md`),
+          `---\ndescription: ${name}\n---\n`
+        );
+      }
+
+      const { loadCodexPrompts } = await import('@/lib/slash-commands');
+      const prompts = await loadCodexPrompts(testDir);
+
+      expect(prompts.map(p => p.name)).toEqual(['alpha', 'middle', 'zebra']);
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('getSlashCommandGroups with Codex skills', () => {
   beforeEach(() => {
     vi.resetModules();

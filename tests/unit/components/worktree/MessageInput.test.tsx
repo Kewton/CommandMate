@@ -11,6 +11,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MessageInput } from '@/components/worktree/MessageInput';
+import { useSlashCommands } from '@/hooks/useSlashCommands';
 import {
   mockCommandGroups,
   createDefaultProps,
@@ -62,6 +63,17 @@ describe('MessageInput', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockIsMobile = false;
+    vi.mocked(useSlashCommands).mockReturnValue({
+      groups: mockCommandGroups,
+      filteredGroups: mockCommandGroups,
+      allCommands: mockCommandGroups.flatMap(g => g.commands),
+      loading: false,
+      error: null,
+      filter: '',
+      setFilter: vi.fn(),
+      refresh: vi.fn(),
+      cliTool: 'claude',
+    });
   });
 
   afterEach(() => {
@@ -347,6 +359,44 @@ describe('MessageInput', () => {
             { cliToolId: 'claude' }
           );
         });
+      });
+
+      it('should insert Codex prompt using /prompts:<name> format when selected', async () => {
+        const codexGroups = [
+          {
+            category: 'skill' as const,
+            label: 'Skills',
+            commands: [
+              {
+                name: 'github-insights',
+                invocation: 'codex-prompt' as const,
+                description: 'Codex custom prompt',
+                category: 'skill' as const,
+                filePath: '.codex/prompts/github-insights.md',
+                source: 'codex-skill' as const,
+                cliTools: ['codex'] as ('codex')[],
+              },
+            ],
+          },
+        ];
+        vi.mocked(useSlashCommands).mockReturnValue({
+          groups: codexGroups,
+          filteredGroups: codexGroups,
+          allCommands: codexGroups.flatMap(g => g.commands),
+          loading: false,
+          error: null,
+          filter: '',
+          setFilter: vi.fn(),
+          refresh: vi.fn(),
+          cliTool: 'codex',
+        });
+
+        render(<MessageInput {...defaultProps} cliToolId="codex" />);
+
+        openSelector();
+        fireEvent.click(screen.getByText('/prompts:github-insights'));
+
+        expect(getTextarea()).toHaveValue('/prompts:github-insights ');
       });
 
       it('TC-3: should show selector again after clearing message in free input mode', () => {

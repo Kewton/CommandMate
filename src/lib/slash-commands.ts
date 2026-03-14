@@ -1,8 +1,12 @@
 /**
  * Slash Commands Loader
  *
- * Loads and parses slash commands from .claude/commands/ .md files
- * and skills from .claude/skills/ SKILL.md files (Issue #343)
+ * Loads and parses slash commands from:
+ * - .claude/commands/*.md (Claude commands)
+ * - .claude/skills/{name}/SKILL.md (Claude skills, Issue #343)
+ * - .codex/skills/{name}/SKILL.md (Codex skills, Issue #166)
+ * - .codex/prompts/*.md (Codex custom prompts, Issue #166)
+ *
  * Uses gray-matter for frontmatter parsing
  */
 
@@ -35,6 +39,9 @@ let skillsCache: SlashCommand[] | null = null;
 
 /** Codex skills subdirectory path (Issue #166) */
 const CODEX_SKILLS_SUBDIR = path.join('.codex', 'skills');
+
+/** Codex prompts subdirectory path (Issue #166) */
+const CODEX_PROMPTS_SUBDIR = path.join('.codex', 'prompts');
 
 /** Skills subdirectory scan limit (Issue #343) */
 const MAX_SKILLS_COUNT = 100;
@@ -236,75 +243,85 @@ export async function loadSlashCommands(basePath?: string): Promise<SlashCommand
 }
 
 /**
+ * Scan a directory for skill subdirectories, applying security guards.
+ *
+ * Shared by loadSkills() and loadCodexSkills() to avoid duplicating
+ * the traversal-prevention / resolved-path / count-limit logic.
+ *
+ * @param skillsDir - Root skills directory to scan
+ * @param overrides - Fields to spread onto each parsed skill (source, cliTools, etc.)
+ * @param warnTag - Logger tag for the count-limit warning
+ * @param expandSystem - If true, also scan .system/ subdirectory (Codex built-in skills)
+ * @returns Array of SlashCommand objects
+ */
+function scanSkillDirs(
+  skillsDir: string,
+  overrides: Partial<SlashCommand>,
+  warnTag: string,
+  expandSystem = false,
+): SlashCommand[] {
+  if (!fs.existsSync(skillsDir)) return [];
+
+  const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
+
+  // Collect directories to scan
+  const dirsToScan: { dir: string; name: string }[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name.includes('..')) continue;
+
+    if (expandSystem && entry.name === '.system') {
+      try {
+        const systemDir = path.join(skillsDir, '.system');
+        const systemEntries = fs.readdirSync(systemDir, { withFileTypes: true });
+        for (const sysEntry of systemEntries) {
+          if (!sysEntry.isDirectory()) continue;
+          if (sysEntry.name.includes('..')) continue;
+          dirsToScan.push({ dir: systemDir, name: sysEntry.name });
+        }
+      } catch {
+        // .system directory unreadable, skip silently
+      }
+    } else {
+      dirsToScan.push({ dir: skillsDir, name: entry.name });
+    }
+  }
+
+  const resolvedRoot = path.resolve(skillsDir) + path.sep;
+  const skills: SlashCommand[] = [];
+
+  for (const { dir, name } of dirsToScan) {
+    if (skills.length >= MAX_SKILLS_COUNT) {
+      logger.warn(warnTag);
+      break;
+    }
+    const resolvedPath = path.resolve(dir, name);
+    if (!resolvedPath.startsWith(resolvedRoot)) continue;
+
+    const skill = parseSkillFile(resolvedPath, name);
+    if (skill) {
+      skills.push({ ...skill, ...overrides });
+    }
+  }
+
+  skills.sort((a, b) => a.name.localeCompare(b.name));
+  return skills;
+}
+
+/**
  * Load all skills from .claude/skills/{name}/SKILL.md (Issue #343)
- *
- * Scans the skills directory for subdirectories containing SKILL.md files.
- * Each valid subdirectory is parsed as a skill command.
- *
- * NOTE: This function is declared async for consistency with loadSlashCommands(),
- * even though the current implementation uses synchronous fs operations.
- * This keeps the public API uniform and allows future migration to async I/O
- * without breaking callers.
- *
- * Security measures:
- * - Path traversal prevention (rejects ".." in directory names)
- * - Resolved path validation (must be under skillsDir)
- * - File size limit (MAX_SKILL_FILE_SIZE_BYTES)
- * - Skill count limit (MAX_SKILLS_COUNT)
- * - Name/description length limits
  *
  * @param basePath - Optional base path. If not provided, uses process.cwd()
  * @returns Promise resolving to array of SlashCommand objects
  */
 export async function loadSkills(basePath?: string): Promise<SlashCommand[]> {
-  const skillsDir = getSkillsDir(basePath);
-  if (!fs.existsSync(skillsDir)) {
-    return [];
-  }
-
-  const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
-  const skills: SlashCommand[] = [];
-
-  for (const entry of entries) {
-    if (skills.length >= MAX_SKILLS_COUNT) {
-      logger.warn('skills-count-limit');
-      break;
-    }
-
-    if (!entry.isDirectory()) continue;
-
-    // Path traversal guard: reject entries containing ".."
-    if (entry.name.includes('..')) continue;
-
-    const resolvedPath = path.resolve(skillsDir, entry.name);
-
-    // Security: ensure resolved path is under skillsDir
-    if (!resolvedPath.startsWith(path.resolve(skillsDir) + path.sep)) continue;
-
-    const skill = parseSkillFile(resolvedPath, entry.name);
-    if (skill) {
-      skills.push(skill);
-    }
-  }
-
-  // Sort alphabetically by name
-  skills.sort((a, b) => a.name.localeCompare(b.name));
-
-  return skills;
+  return scanSkillDirs(getSkillsDir(basePath), {}, 'skills-count-limit');
 }
 
 /**
  * Load Codex skills from .codex/skills/{name}/SKILL.md (Issue #166)
  *
- * Scans the Codex skills directory for subdirectories containing SKILL.md files.
- * Each valid subdirectory is parsed as a skill command with source 'codex-skill'
- * and cliTools set to ['codex'].
- *
- * Security measures:
- * - Path traversal prevention (rejects ".." in directory names)
- * - Resolved path validation (must be under skillsDir)
- * - File size limit (MAX_SKILL_FILE_SIZE_BYTES) via parseSkillFile()
- * - Skill count limit (MAX_SKILLS_COUNT)
+ * Also scans .system/ subdirectory for built-in Codex skills.
  *
  * @param basePath - Optional base path. If not provided, uses os.homedir()
  * @returns Promise resolving to array of SlashCommand objects
@@ -312,44 +329,87 @@ export async function loadSkills(basePath?: string): Promise<SlashCommand[]> {
 export async function loadCodexSkills(basePath?: string): Promise<SlashCommand[]> {
   const root = basePath ?? os.homedir();
   const skillsDir = path.join(root, CODEX_SKILLS_SUBDIR);
+  return scanSkillDirs(
+    skillsDir,
+    { source: 'codex-skill', cliTools: ['codex'] },
+    'codex-skills-count-limit',
+    true,
+  );
+}
 
-  if (!fs.existsSync(skillsDir)) {
+/**
+ * Parse a flat .md file as a Codex prompt command (Issue #166)
+ *
+ * Reuses the shared frontmatter parsing logic (safeParseFrontmatter /
+ * extractFrontmatterFields fallback) from parseSkillFile, but differs
+ * in that the file name (not a frontmatter `name` field) is the command name,
+ * and invocation is set to 'codex-prompt'.
+ */
+function parseCodexPromptFile(filePath: string): SlashCommand | null {
+  try {
+    const stat = fs.statSync(filePath);
+    if (stat.size > MAX_SKILL_FILE_SIZE_BYTES) {
+      logger.warn('skipping-oversized-codex-prompt-file');
+      return null;
+    }
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const fileName = path.basename(filePath, '.md');
+    let description = '';
+    try {
+      const { data: frontmatter } = safeParseFrontmatter(content);
+      description = frontmatter.description || '';
+    } catch {
+      description = extractFrontmatterFields(content).description || '';
+    }
+    return {
+      name: truncateString(fileName, MAX_SKILL_NAME_LENGTH),
+      invocation: 'codex-prompt',
+      description: truncateString(description, MAX_SKILL_DESCRIPTION_LENGTH),
+      category: 'skill',
+      source: 'codex-skill',
+      cliTools: ['codex'],
+      filePath: path.relative(process.cwd(), filePath),
+    };
+  } catch (error) {
+    logger.error('error-parsing-codex-prompt-file:', { error: error instanceof Error ? error.message : String(error) });
+    return null;
+  }
+}
+
+/**
+ * Load Codex custom prompts from .codex/prompts/*.md (Issue #166)
+ *
+ * @param basePath - Optional base path. If not provided, uses os.homedir()
+ * @returns Promise resolving to array of SlashCommand objects
+ */
+export async function loadCodexPrompts(basePath?: string): Promise<SlashCommand[]> {
+  const root = basePath ?? os.homedir();
+  const promptsDir = path.join(root, CODEX_PROMPTS_SUBDIR);
+
+  if (!fs.existsSync(promptsDir)) {
     return [];
   }
 
-  const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
-  const skills: SlashCommand[] = [];
+  const resolvedRoot = path.resolve(promptsDir) + path.sep;
+  const files = fs.readdirSync(promptsDir).filter(f => f.endsWith('.md'));
+  const prompts: SlashCommand[] = [];
 
-  for (const entry of entries) {
-    if (skills.length >= MAX_SKILLS_COUNT) {
-      logger.warn('codex-skills-count-limit');
+  for (const file of files) {
+    if (prompts.length >= MAX_SKILLS_COUNT) {
+      logger.warn('codex-prompts-count-limit');
       break;
     }
+    if (file.includes('..')) continue;
+    if (!path.resolve(promptsDir, file).startsWith(resolvedRoot)) continue;
 
-    if (!entry.isDirectory()) continue;
-
-    // Path traversal guard: reject entries containing ".."
-    if (entry.name.includes('..')) continue;
-
-    const resolvedPath = path.resolve(skillsDir, entry.name);
-
-    // Security: ensure resolved path is under skillsDir
-    if (!resolvedPath.startsWith(path.resolve(skillsDir) + path.sep)) continue;
-
-    const skill = parseSkillFile(resolvedPath, entry.name);
-    if (skill) {
-      skills.push({
-        ...skill,
-        source: 'codex-skill',
-        cliTools: ['codex'],
-      });
+    const prompt = parseCodexPromptFile(path.join(promptsDir, file));
+    if (prompt) {
+      prompts.push(prompt);
     }
   }
 
-  // Sort alphabetically by name
-  skills.sort((a, b) => a.name.localeCompare(b.name));
-
-  return skills;
+  prompts.sort((a, b) => a.name.localeCompare(b.name));
+  return prompts;
 }
 
 /**
@@ -396,7 +456,8 @@ export async function getSlashCommandGroups(basePath?: string): Promise<SlashCom
     const commands = await loadSlashCommands(basePath);
     const skills = await loadSkills(basePath);
     const codexLocalSkills = await loadCodexSkills(basePath);
-    const deduplicated = deduplicateByName([...skills, ...codexLocalSkills], commands);
+    const codexLocalPrompts = await loadCodexPrompts(basePath);
+    const deduplicated = deduplicateByName([...skills, ...codexLocalSkills, ...codexLocalPrompts], commands);
     return groupByCategory(deduplicated);
   }
 

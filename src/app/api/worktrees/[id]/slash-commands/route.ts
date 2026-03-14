@@ -16,7 +16,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
-import { getSlashCommandGroups, loadCodexSkills } from '@/lib/slash-commands';
+import { getSlashCommandGroups, loadCodexSkills, loadCodexPrompts } from '@/lib/slash-commands';
 import { getStandardCommandGroups } from '@/lib/standard-commands';
 import { mergeCommandGroups, filterCommandsByCliTool } from '@/lib/command-merger';
 import { isValidWorktreePath } from '@/lib/security/worktree-path-validator';
@@ -101,34 +101,37 @@ export async function GET(
       worktreeGroups = [];
     }
 
-    // Load global Codex skills from ~/.codex/skills/ (Issue #166)
+    // Load global Codex skills and prompts from ~/.codex/ (Issue #166)
     const globalCodexSkills = await loadCodexSkills().catch(() => []);
+    const globalCodexPrompts = await loadCodexPrompts().catch(() => []);
+    const allGlobalCodex = [...globalCodexSkills, ...globalCodexPrompts];
 
     // SF-1: Merge with worktree commands taking priority
-    // Include global Codex skills in worktree groups (local codex skills already included via getSlashCommandGroups)
-    const globalCodexGroups: SlashCommandGroup[] = globalCodexSkills.length > 0
-      ? [{ category: 'skill' as const, label: 'Skills', commands: globalCodexSkills }]
+    // Include global Codex skills/prompts in worktree groups (local ones already included via getSlashCommandGroups)
+    const globalCodexGroups: SlashCommandGroup[] = allGlobalCodex.length > 0
+      ? [{ category: 'skill' as const, label: 'Skills', commands: allGlobalCodex }]
       : [];
     const mergedGroups = mergeCommandGroups(standardGroups, [...worktreeGroups, ...globalCodexGroups]);
 
     // Issue #4: Filter by CLI tool
     const filteredGroups = filterCommandsByCliTool(mergedGroups, cliTool);
 
-    // Calculate source counts (after filtering) - DRY: flatMap once
-    const allFilteredCommands = filteredGroups.flatMap(g => g.commands);
-    const filteredStandardCount = allFilteredCommands.filter(cmd => cmd.source === 'standard').length;
-    const filteredWorktreeCount = allFilteredCommands.filter(cmd => cmd.source === 'worktree').length;
-    const filteredSkillCount = allFilteredCommands.filter(cmd => cmd.source === 'skill').length;
-    const filteredCodexSkillCount = allFilteredCommands.filter(cmd => cmd.source === 'codex-skill').length;
+    // Calculate source counts in a single pass
+    const sourceCounts = { standard: 0, worktree: 0, skill: 0, codexSkill: 0 };
+    for (const group of filteredGroups) {
+      for (const cmd of group.commands) {
+        if (cmd.source === 'standard') sourceCounts.standard++;
+        else if (cmd.source === 'worktree') sourceCounts.worktree++;
+        else if (cmd.source === 'skill') sourceCounts.skill++;
+        else if (cmd.source === 'codex-skill') sourceCounts.codexSkill++;
+      }
+    }
 
     return NextResponse.json({
       groups: filteredGroups,
       sources: {
-        standard: filteredStandardCount,
-        worktree: filteredWorktreeCount,
+        ...sourceCounts,
         mcbd: 0, // MCBD commands are loaded separately via /api/slash-commands
-        skill: filteredSkillCount, // Issue #343: Skills source count
-        codexSkill: filteredCodexSkillCount, // Issue #166: Codex skills source count
       },
       cliTool,
     });
