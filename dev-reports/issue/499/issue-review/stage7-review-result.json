@@ -1,0 +1,153 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "issue_number": 499,
+  "review_date": "2026-03-16",
+  "previous_findings_status": [
+    {
+      "id": "F3-001",
+      "title": "Item 3 (キャプチャ行数削減) が response-poller.ts に与える影響の未記載",
+      "status": "resolved",
+      "resolution": "Issue本文のItem 3に「キャッシュ影響」セクションが追加され、response-pollerとのキャッシュミス動作が正常であること・許容する旨が明記された。"
+    },
+    {
+      "id": "F3-002",
+      "title": "Item 5 の AutoYesStopReason 型拡張が UI 側の stopReason 判定に影響する",
+      "status": "resolved_with_concerns",
+      "resolution": "Issue本文のItem 5に「UI側の対応（必須）」セクションが追加され、WorktreeDetailRefactored.txのstopReason判定にconsecutive_errors分岐追加、i18n翻訳キー追加、warningレベル通知の設計が明記された。ただし、実装設計の詳細に新たな懸念がある（F7-001参照）。"
+    },
+    {
+      "id": "F3-003",
+      "title": "既存テストファイルへの影響が具体的に特定されていない",
+      "status": "resolved",
+      "resolution": "「影響を受けるテストファイル」セクションが関連ファイルに追加され、auto-yes-manager.test.ts, auto-yes-config.test.ts, auto-yes-persistence.test.ts, prompt-detector.test.tsが列挙された。"
+    },
+    {
+      "id": "F3-004",
+      "title": "Item 4 の detectPrompt オプショナル引数追加が response-poller.ts と status-detector.ts にも波及する",
+      "status": "resolved",
+      "resolution": "「スコープ」セクションがItem 4に追加され、本Issueのスコープはauto-yes-poller.tsのみ、他は別Issue検討の旨が明記された。"
+    },
+    {
+      "id": "F3-005",
+      "title": "Item 2 (Thinking 間隔延長) と Item 7 (冗長チェック除去) の組み合わせで期限切れ検出が遅延するリスク",
+      "status": "resolved",
+      "resolution": "Item 2の対策説明に「期限切れ検出の遅延も最大5秒に拡大するが、期限切れは分〜時間単位の設定であり、5秒の誤差は許容範囲」が追記された。"
+    },
+    {
+      "id": "F3-006",
+      "title": "Item 6 のキャッシュ TTL 変更(2秒->3秒)が current-output API のレスポンス鮮度に影響する",
+      "status": "resolved",
+      "resolution": "Item 6の影響範囲セクションにCACHE_TTL_MSの全利用箇所（auto-yes-poller, response-poller, current-output API, worktree-status-helper）への影響が網羅的に記載された。"
+    },
+    {
+      "id": "F3-007",
+      "title": "Item 3 で stopPattern 設定時に 5000行を維持する設計の根拠が不十分",
+      "status": "resolved",
+      "resolution": "Item 3に「stopPattern設定時の5000行維持」セクションが追加され、デルタ方式のベースラインリセット観点からの根拠が記載された。"
+    },
+    {
+      "id": "F3-008",
+      "title": "Item 1 (stripBoxDrawing 二重呼び出し除去) のテスト方法として spy ベースのテストを推奨",
+      "status": "resolved",
+      "resolution": "受入条件にvi.mock/spyベースの検証手法が具体的に記載された。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F7-001",
+      "severity": "should_fix",
+      "category": "波及効果",
+      "title": "Item 5のUI実装設計でstopReasonPending booleanからstopReason値保持への変更が既存のstop_pattern_matchedロジックにも影響する",
+      "description": "Issue本文のItem 5ではUI側の対応として「setStopReasonPendingのboolean管理ではなく、stopReasonの値自体をstateに保持し、Toast表示時にreasonに応じたメッセージ・スタイルを出し分ける」と記載されている。しかし現在のWorktreeDetailRefactored.tsx (L202) はstopReasonPending: booleanをstateとして管理しており、これをAutoYesStopReason | null型のstateに変更する場合、L391の条件分岐 (stopReason === 'stop_pattern_matched')、L784-787のuseEffect (stopReasonPendingのチェックとリセット)、L785のshowToast呼び出しの全てを変更する必要がある。この変更自体はItem 5の対応範囲内だが、stop_pattern_matchedの既存動作が意図せず変わらないことをテストで保証する必要がある。受入条件には'consecutive_errors'のテストのみ記載されており、'stop_pattern_matched'の既存動作が維持されることのリグレッションテストが明記されていない。",
+      "current": "受入条件: 'consecutive_errors' stopReasonがUI側で警告レベル(warning)として通知されることをテストで確認（'stop_pattern_matched'は情報レベル(info)であることも確認）",
+      "suggested": "受入条件に「'stop_pattern_matched'のstopReasonが従来通り情報レベル(info)のToastで表示され、既存のi18nキー('autoYes.stopPatternMatched')が使用されることをリグレッションテストで確認」を追加する。これにより、state管理方式の変更による既存動作の破壊を防止できる。",
+      "evidence": "src/components/worktree/WorktreeDetailRefactored.tsx L202: const [stopReasonPending, setStopReasonPending] = useState(false); -- boolean管理。L391: data.autoYes.stopReason === 'stop_pattern_matched' -- 完全一致判定。L785: showToast(tAutoYes('stopPatternMatched'), 'info') -- 現在のToast表示。"
+    },
+    {
+      "id": "F7-002",
+      "severity": "should_fix",
+      "category": "影響ファイル",
+      "title": "i18nロケールファイル(locales/en/autoYes.json, locales/ja/autoYes.json)が関連ファイルに記載されていない",
+      "description": "Issue本文のItem 5 UI側の対応(3)で「i18nに'autoYes.consecutiveErrorsStopped'等の翻訳キーを追加」と記載されているが、関連ファイルセクションの直接変更対象にも間接影響ファイルにもi18nロケールファイルが列挙されていない。実際に変更が必要なファイルは locales/en/autoYes.json と locales/ja/autoYes.json の2ファイルである。実装時にこれらのファイルの更新を見落とすリスクがある。",
+      "current": "関連ファイルのセクションにi18nロケールファイルが未記載",
+      "suggested": "関連ファイルの直接変更対象に 'locales/en/autoYes.json - Item 5のconsecutiveErrorsStopped翻訳キー追加' と 'locales/ja/autoYes.json - Item 5のconsecutiveErrorsStopped翻訳キー追加' を追加する。",
+      "evidence": "locales/en/autoYes.json: 現在25キーが定義されており、'stopPatternMatched'キー(L25)は存在するが'consecutiveErrorsStopped'は未定義。locales/ja/autoYes.json: 同様に'stopPatternMatched'(L25)のみで'consecutiveErrorsStopped'は未定義。"
+    },
+    {
+      "id": "F7-003",
+      "severity": "should_fix",
+      "category": "テスト影響",
+      "title": "auto-yes-resolver.test.tsとauto-yes-manager-cleanup.test.tsが影響テストファイルに含まれていない",
+      "description": "関連ファイルの「影響を受けるテストファイル」には4つのテストファイルが列挙されているが、Glob検索で確認したauto-yes関連テストファイルのうち、tests/unit/lib/auto-yes-resolver.test.ts と tests/unit/auto-yes-manager-cleanup.test.ts が含まれていない。auto-yes-resolver.test.ts はItem 5の連続エラー上限による自動停止がresolverの動作に影響しないことの確認に関連し、auto-yes-manager-cleanup.test.ts はポーラー状態クリーンアップが新しいstopReason値で正常に動作することの確認に関連する。影響が軽微な場合でも、テスト一覧に含めて「影響なし」と明示する方が実装時の見落としを防げる。",
+      "current": "影響を受けるテストファイル: auto-yes-manager.test.ts, auto-yes-config.test.ts, auto-yes-persistence.test.ts, prompt-detector.test.ts",
+      "suggested": "影響を受けるテストファイルに 'tests/unit/lib/auto-yes-resolver.test.ts - Item 5の連続エラー停止がresolver動作に影響しないことの確認' と 'tests/unit/auto-yes-manager-cleanup.test.ts - 新stopReason値でのクリーンアップ動作確認' を追加する。",
+      "evidence": "tests/unit/lib/auto-yes-resolver.test.ts: auto-yes-resolverのテスト。resolverはauto-yes-state.tsのgetAutoYesState()を使用しており、Item 5でdisableAutoYes()にconsecutive_errorsが渡される変更の間接影響を受ける。tests/unit/auto-yes-manager-cleanup.test.ts: クリーンアップ処理のテスト。clearAllPollerStates()等を検証しており、ポーラー状態の変更影響を受ける可能性がある。"
+    },
+    {
+      "id": "F7-004",
+      "severity": "nice_to_have",
+      "category": "後方互換性",
+      "title": "Item 5のconsecutive_errors自動停止で連続エラー閾値20回が現在のMAX_CONSECUTIVE_ERRORS(5)と異なる定数名になる可能性",
+      "description": "現在のコードではMAX_CONSECUTIVE_ERRORS = 5 (auto-yes-state.ts L331) が「バックオフ開始閾値」として使用されている。Item 5では連続エラー20回で自動停止する新たな閾値を追加する。Issue本文では新定数名が明示されていないが、既存のMAX_CONSECUTIVE_ERRORSとは意味が異なる（バックオフ開始 vs 自動停止）ため、命名の混乱を避けるための指針があると良い。例えば AUTO_STOP_ERROR_THRESHOLD = 20 のような明示的な命名が推奨される。",
+      "current": "閾値: 20回（根拠: backoff最大60秒 x 20回 = 20分）",
+      "suggested": "Item 5に定数名の推奨を追記する。例: 'AUTO_STOP_ERROR_THRESHOLD = 20 として auto-yes-config.ts に追加。既存のMAX_CONSECUTIVE_ERRORS(5)はバックオフ開始閾値、新定数は自動停止閾値として区別する'。",
+      "evidence": "src/lib/auto-yes-state.ts L330-331: /** Number of consecutive errors before applying backoff */ export const MAX_CONSECUTIVE_ERRORS = 5; -- 既存定数は「バックオフ開始閾値」。Item 5の20回は「自動停止閾値」であり、同名パターン(MAX_...)だと混乱する可能性がある。"
+    },
+    {
+      "id": "F7-005",
+      "severity": "nice_to_have",
+      "category": "副作用リスク",
+      "title": "Item 2のThinking検出時間隔延長とItem 3のキャプチャ行数削減の組み合わせでThinking検出の精度に影響する可能性",
+      "description": "Item 2ではThinking検出時にポーリング間隔を5秒に延長し、Item 3ではキャプチャ行数を300行に削減する。Thinking検出はcleanOutput.split('\\n').slice(-THINKING_CHECK_LINE_COUNT).join('\\n') (L405) で末尾50行を使用する。300行キャプチャでは十分だが、5秒間隔の間にThinkingが終了しプロンプトが表示された場合、次のポーリングでは300行の中にThinking表示が残っていない可能性がある（tmuxスクロールバッファの更新により）。この場合、Thinking検出がfalseとなり通常フローでプロンプト検出に進むため、機能的には問題ない。ただし、この動作パスが設計として意図されたものであることをコメントで明記するとコードの可読性が向上する。",
+      "current": "Item 2とItem 3が独立して記載されており、組み合わせ動作の説明がない",
+      "suggested": "Item 2の対策説明に「Thinking終了後はdetectThinking()がfalseを返し、通常のプロンプト検出フローに自動的に移行する。5秒間隔による検出遅延は最大5秒であり、Thinking→プロンプト表示の遷移を見逃すことはない」旨を追記する。",
+      "evidence": "src/lib/auto-yes-poller.ts L403-409: Thinking検出→scheduleNextPoll。L416-421: stopCondition→detectAndRespondToPrompt。Thinkingがfalseになれば自動的にプロンプト検出に進む設計。"
+    }
+  ],
+  "summary": {
+    "total_findings": 5,
+    "must_fix": 0,
+    "should_fix": 3,
+    "nice_to_have": 2,
+    "overall_quality": "very_good",
+    "key_observations": [
+      "Stage 3の全8件の指摘が適切に反映されており、Issue本文の品質は大幅に向上した。特にF3-002 (must_fix) のUI側consecutive_errorsハンドリングが詳細な実装設計とともに追記された点は高評価。",
+      "Stage 5のレビューでwarningレベル/infoレベルの通知区分が導入されたことで、ユーザー体験の設計が改善された。ただし、state管理方式の変更（boolean→AutoYesStopReason | null）に伴う既存動作のリグレッションテストが受入条件に不足している。",
+      "i18nロケールファイル（locales/en/autoYes.json, locales/ja/autoYes.json）が関連ファイルから漏れている点は実装時の見落としリスクとなる。",
+      "全体として、7項目の対策は影響範囲が適切に分析・記載されており、間接影響ファイル・テストファイルの列挙も十分に網羅的。新たなmust_fixレベルの問題は発見されず、Issue本文は実装開始可能な品質に達している。"
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "Item 5のUI側変更。L202 stopReasonPending state、L391 stopReason判定、L784-787 Toast表示useEffect。boolean→AutoYesStopReason | null への変更が必要"
+    },
+    {
+      "file": "locales/en/autoYes.json",
+      "relevance": "Item 5のconsecutiveErrorsStopped翻訳キー追加が必要。関連ファイルセクションに未記載"
+    },
+    {
+      "file": "locales/ja/autoYes.json",
+      "relevance": "Item 5のconsecutiveErrorsStopped翻訳キー追加が必要。関連ファイルセクションに未記載"
+    },
+    {
+      "file": "src/lib/auto-yes-state.ts",
+      "relevance": "L331 MAX_CONSECUTIVE_ERRORS(5) はバックオフ開始閾値。Item 5の自動停止閾値(20)とは別定数が必要"
+    },
+    {
+      "file": "src/config/auto-yes-config.ts",
+      "relevance": "L43 AutoYesStopReason型。consecutive_errors追加と新定数(AUTO_STOP_ERROR_THRESHOLD)追加の対象"
+    },
+    {
+      "file": "tests/unit/lib/auto-yes-resolver.test.ts",
+      "relevance": "影響テストファイルに未記載。Item 5の間接影響を受ける可能性"
+    },
+    {
+      "file": "tests/unit/auto-yes-manager-cleanup.test.ts",
+      "relevance": "影響テストファイルに未記載。クリーンアップ処理が新stopReason値で正常動作することの確認が必要"
+    }
+  ]
+}

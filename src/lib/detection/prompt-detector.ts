@@ -46,6 +46,19 @@ export interface DetectPromptOptions {
    * - Layer 4: Skip hasDefaultIndicator check, require only options.length >= 2
    */
   requireDefaultIndicator?: boolean;
+
+  /**
+   * Pre-computed lines from output.split('\n').
+   * When provided, detectPrompt() reuses these lines instead of performing
+   * a redundant split('\n') on the output string.
+   *
+   * Issue #499 Item 4: Performance optimization to avoid duplicate split operations
+   * when the caller has already split the output for other purposes.
+   *
+   * Note: This only applies to detectPrompt() itself. detectMultipleChoicePrompt()
+   * maintains its own independent split for function encapsulation (DR1-001).
+   */
+  precomputedLines?: string[];
 }
 
 /**
@@ -186,7 +199,8 @@ export function detectPrompt(output: string, options?: DetectPromptOptions): Pro
   // Reuse `lines` for both dedup check and yes/no pattern matching below.
   // detectMultipleChoicePrompt() has its own independent split() in its
   // own scope -- this is intentional function encapsulation [S1-004][S2-001].
-  const lines = output.split('\n');
+  // Issue #499 Item 4: Use precomputedLines when provided to avoid redundant split.
+  const lines = options?.precomputedLines ?? output.split('\n');
   const tailForDedup = lines.slice(-50).join('\n');
   const isDuplicate = tailForDedup === lastOutputTail;
 

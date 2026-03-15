@@ -14,7 +14,12 @@ import {
   formatTimeRemaining,
   validateStopPattern,
   MAX_STOP_PATTERN_LENGTH,
+  THINKING_POLLING_INTERVAL_MS,
+  REDUCED_CAPTURE_LINES,
+  FULL_CAPTURE_LINES,
+  AUTO_STOP_ERROR_THRESHOLD,
   type AutoYesDuration,
+  type AutoYesStopReason,
 } from '@/config/auto-yes-config';
 
 describe('auto-yes-config', () => {
@@ -269,6 +274,42 @@ describe('auto-yes-config', () => {
       // Error should be a fixed string, not containing the malicious input
       expect(result.error).not.toContain('<script>');
       expect(result.error).not.toContain('alert');
+    });
+  });
+
+  // ==========================================================================
+  // Issue #499: Performance improvement constants
+  // ==========================================================================
+
+  describe('Issue #499: Performance constants', () => {
+    it('THINKING_POLLING_INTERVAL_MS should be 5000', () => {
+      expect(THINKING_POLLING_INTERVAL_MS).toBe(5000);
+    });
+
+    it('REDUCED_CAPTURE_LINES should be 300', () => {
+      expect(REDUCED_CAPTURE_LINES).toBe(300);
+    });
+
+    it('FULL_CAPTURE_LINES should be 5000', () => {
+      expect(FULL_CAPTURE_LINES).toBe(5000);
+    });
+
+    it('AUTO_STOP_ERROR_THRESHOLD should be 20', () => {
+      expect(AUTO_STOP_ERROR_THRESHOLD).toBe(20);
+    });
+
+    it('AutoYesStopReason should include consecutive_errors', () => {
+      // Type-level check: this compiles only if consecutive_errors is valid
+      const reason: AutoYesStopReason = 'consecutive_errors';
+      expect(reason).toBe('consecutive_errors');
+    });
+
+    it('AutoYesStopReason should include all expected values', () => {
+      const reasons: AutoYesStopReason[] = ['expired', 'stop_pattern_matched', 'consecutive_errors'];
+      expect(reasons).toHaveLength(3);
+      expect(reasons).toContain('expired');
+      expect(reasons).toContain('stop_pattern_matched');
+      expect(reasons).toContain('consecutive_errors');
     });
   });
 });

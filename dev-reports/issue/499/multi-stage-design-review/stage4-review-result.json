@@ -1,0 +1,101 @@
+{
+  "issue_number": 499,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "review_date": "2026-03-16",
+  "reviewer": "architecture-review-agent",
+  "design_doc_path": "dev-reports/design/issue-499-auto-yes-polling-perf-design-policy.md",
+  "overall_assessment": "PASS",
+  "summary": "設計方針書のセキュリティ面は良好。OWASP Top 10の各カテゴリにおいて重大な脆弱性は検出されなかった。既存のセキュリティレイヤー（認証ミドルウェア、worktreeId検証、safe-regex2によるReDoS防止、パス検証）は変更なしで維持される。新規追加のconsecutive_errors stopReasonは固定リテラル文字列であり、UI側ではi18nキーマッピングのみのため、Injection/XSSリスクは存在しない。2件のconsider事項と1件のnice_to_have事項を指摘。",
+  "findings": [
+    {
+      "id": "SEC4-001",
+      "severity": "consider",
+      "category": "A05-Security-Misconfiguration",
+      "title": "CACHE_TTL_MS延長(2s->3s)による古いデータ表示の許容範囲確認",
+      "description": "Item 6でCACHE_TTL_MSを2000msから3000msに変更する。これにより全tmux captureキャッシュ利用箇所（auto-yes-poller, response-poller, current-output API, worktree-status-helper）で最大3秒の古いデータが返却される可能性がある。セキュリティ上の直接的な脆弱性ではないが、セッション状態（プロンプト検出結果やステータス）の反映遅延が1秒増加する。",
+      "recommendation": "設計方針書に記載のとおり、1秒の追加遅延は許容範囲内と判断する。ただし、セキュリティ関連のステータス変更（auto-yes無効化など）がキャッシュにより遅延してクライアントに反映される点は認識しておくべきである。invalidateCache()による即座のキャッシュ無効化は送信後に実行されるため、応答送信直後の状態反映には影響しない。対応不要。",
+      "affected_files": ["src/lib/tmux/tmux-capture-cache.ts"],
+      "owasp_category": "A05:2021-Security Misconfiguration"
+    },
+    {
+      "id": "SEC4-002",
+      "severity": "consider",
+      "category": "A04-Denial-of-Service",
+      "title": "AUTO_STOP_ERROR_THRESHOLD=20とThinking間隔5sのDoS考慮",
+      "description": "Item 5のAUTO_STOP_ERROR_THRESHOLD=20は、backoff付きで最大約20分間のエラー連続を許容する。Item 2のTHINKING_POLLING_INTERVAL_MS=5000は、Thinking状態検出時にポーリング間隔を5秒に延長する。これらの組み合わせにより、攻撃者がThinking状態を偽装できたとしても、既存のMAX_CONCURRENT_POLLERS=50制限により並列ポーラー数は制限されており、リソース消費は有界である。",
+      "recommendation": "既存のMAX_CONCURRENT_POLLERS制限とexponential backoff機構により、リソース枯渇のリスクは十分に制御されている。AUTO_STOP_ERROR_THRESHOLD=20は妥当な値であり、エラー閾値5回（代替案として検討済み）よりも一時的障害への耐性が高い。対応不要。",
+      "affected_files": ["src/lib/auto-yes-poller.ts", "src/config/auto-yes-config.ts"],
+      "owasp_category": "Denial of Service"
+    },
+    {
+      "id": "SEC4-003",
+      "severity": "nice_to_have",
+      "category": "A07-Data-Exposure",
+      "title": "stopReason API応答に内部状態名が含まれる点の確認",
+      "description": "current-output APIはautoYesState.stopReasonをそのままクライアントに返却する（route.ts L134）。新規追加のconsecutive_errorsはサーバー内部のエラーカウント閾値到達を示す文字列であり、サーバー内部実装の存在（エラーカウント機構）がクライアントに露出する。ただし、これは設計上意図的であり（UI通知のため）、具体的なエラー数やエラー内容は含まれない。",
+      "recommendation": "stopReason値は固定列挙型（expired | stop_pattern_matched | consecutive_errors）であり、サーバーの具体的な状態や機密情報は含まれない。情報露出は最小限であり、セキュリティリスクは低い。現状の設計で問題ない。",
+      "affected_files": ["src/app/api/worktrees/[id]/current-output/route.ts"],
+      "owasp_category": "A01:2021-Broken Access Control"
+    }
+  ],
+  "checklist": {
+    "A01_Broken_Access_Control": {
+      "status": "PASS",
+      "detail": "新規パラメータ（THINKING_POLLING_INTERVAL_MS, REDUCED_CAPTURE_LINES, AUTO_STOP_ERROR_THRESHOLD等）はすべてサーバーサイド定数であり、クライアントからの入力ではない。既存の認証ミドルウェア（src/middleware.ts）とisValidWorktreeId()によるアクセス制御は変更されない。startAutoYesPollingのisValidWorktreeId()ゲートウェイは維持される。"
+    },
+    "A02_Cryptographic_Failures": {
+      "status": "N/A",
+      "detail": "本設計変更に暗号関連の変更は含まれない。"
+    },
+    "A03_Injection": {
+      "status": "PASS",
+      "detail": "consecutive_errorsは固定リテラル文字列としてAutoYesStopReason型に追加される。ユーザー入力から生成される値ではなく、incrementErrorCount内部で閾値到達時にのみ設定される。UI側ではi18nキーへのマッピング（toast.warning(t('autoYes.consecutiveErrorsStopped'))）のみで、stopReason値自体はDOMに直接レンダリングされない。"
+    },
+    "A04_Insecure_Design": {
+      "status": "PASS",
+      "detail": "Item 7のvalidatePollingContext簡略化（isAutoYesExpired除去）は安全。getAutoYesState()内部でexpired時にdisableAutoYes()が呼ばれ、enabled=falseとなるため、直後のenabled checkで正しくフィルタされる。二重チェックの除去であり、セキュリティレベルの低下はない。"
+    },
+    "A05_Security_Misconfiguration": {
+      "status": "PASS_WITH_NOTE",
+      "detail": "CACHE_TTL_MS 2s->3s変更は許容範囲内の古いデータ表示リスク（SEC4-001参照）。detectPromptのprecomputedLinesオプショナル引数は既存動作を変更しない（undefinedで従来のsplit動作）。"
+    },
+    "A06_Vulnerable_Components": {
+      "status": "N/A",
+      "detail": "新規ライブラリ依存の追加なし。既存のsafe-regex2使用は維持。"
+    },
+    "A07_Identification_Authentication_Failures": {
+      "status": "N/A",
+      "detail": "認証機構に変更なし。"
+    },
+    "A08_Software_Data_Integrity_Failures": {
+      "status": "PASS",
+      "detail": "auto-yes-config.tsの新規定数はreadonly/constで定義され、実行時の改竄リスクはない。AutoYesStopReason型はTypeScriptのリテラルユニオン型により、不正な値の代入はコンパイル時に検出される。"
+    },
+    "A09_Security_Logging_Monitoring_Failures": {
+      "status": "PASS",
+      "detail": "incrementErrorCount内でのstopAutoYesPolling呼び出し時、既存のlogger.info('poller:stopped')によるログ記録が維持される。consecutive_errorsによる停止もログに記録される。"
+    },
+    "A10_SSRF": {
+      "status": "PASS",
+      "detail": "Item 3のキャプチャ行数削減（5000->300行、stopPattern未設定時）はcaptureSessionOutput()の引数変更のみ。captureSessionOutputはtmuxローカルプロセスへのアクセスであり、外部リクエストは発生しない。SSRF影響なし。"
+    },
+    "XSS": {
+      "status": "PASS",
+      "detail": "consecutive_errors文字列はUI側でi18n翻訳キーにマッピングされ（pendingStopReason === 'consecutive_errors'の厳密比較）、翻訳済みの固定文字列がtoast.warning()に渡される。ユーザー入力やサーバーからの動的文字列がDOMに直接挿入されることはない。"
+    },
+    "Race_Conditions": {
+      "status": "PASS",
+      "detail": "設計方針書IA-009に記載のとおり、incrementErrorCount内でstopAutoYesPolling()を呼んだ後、pollAutoYes()のcatchブロック後のscheduleNextPoll()がfallthrough実行される可能性がある。しかし、Node.jsシングルスレッド環境であり、scheduleNextPoll内のnullガード（pollerState未存在時のearly return）により安全にハンドルされる。"
+    },
+    "Input_Validation": {
+      "status": "PASS",
+      "detail": "新規定数（THINKING_POLLING_INTERVAL_MS=5000, REDUCED_CAPTURE_LINES=300, FULL_CAPTURE_LINES=5000, AUTO_STOP_ERROR_THRESHOLD=20）はすべてハードコードされたサーバーサイド定数であり、外部入力による変更は不可能。scheduleNextPollのfloor guard（Math.max(overrideInterval, POLLING_INTERVAL_MS)）により、ポーリング間隔が最小値を下回ることはない。"
+    }
+  },
+  "risk_assessment": {
+    "overall_risk": "LOW",
+    "rationale": "全変更はサーバーサイドの定数・ロジック変更に限定され、新たな外部入力経路の追加はない。既存のセキュリティレイヤー（認証、worktreeId検証、ReDoS防止、パス検証）はすべて維持される。UI変更はi18nキーベースの固定文字列表示のみ。"
+  }
+}

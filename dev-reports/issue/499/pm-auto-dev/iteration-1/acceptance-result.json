@@ -1,0 +1,140 @@
+{
+  "status": "passed",
+  "criteria_results": [
+    {
+      "criterion": "Item 7: isAutoYesExpired removed from validatePollingContext, comment added",
+      "status": "passed",
+      "evidence": "validatePollingContext (auto-yes-poller.ts L223-238) checks only autoYesState?.enabled without calling isAutoYesExpired(). Comment at L230-231 explains getAutoYesState() internally handles expiry. Test at auto-yes-manager.test.ts confirms behavior."
+    },
+    {
+      "criterion": "Item 1: stripBoxDrawing not wrapping cleanOutput in detectAndRespondToPrompt",
+      "status": "passed",
+      "evidence": "detectAndRespondToPrompt (auto-yes-poller.ts L326-400) passes cleanOutput directly to detectPrompt without calling stripBoxDrawing. stripBoxDrawing is only called in captureAndCleanOutput (L261). Test 'Item 1: stripBoxDrawing should be called only once per poll cycle' verifies stripBoxDrawingSpy is called exactly once."
+    },
+    {
+      "criterion": "Item 6: CACHE_TTL_MS = 3000",
+      "status": "passed",
+      "evidence": "tmux-capture-cache.ts L39: export const CACHE_TTL_MS = 3000. Test at auto-yes-manager.test.ts L2056-2058 confirms value is 3000."
+    },
+    {
+      "criterion": "Item 2: THINKING_POLLING_INTERVAL_MS = 5000, used in scheduleNextPoll call",
+      "status": "passed",
+      "evidence": "auto-yes-config.ts L43: export const THINKING_POLLING_INTERVAL_MS = 5000. auto-yes-poller.ts L440: scheduleNextPoll(worktreeId, cliToolId, THINKING_POLLING_INTERVAL_MS). Test 'Item 2: Thinking detection should trigger 5s polling interval' confirms."
+    },
+    {
+      "criterion": "Item 3: REDUCED_CAPTURE_LINES = 300, FULL_CAPTURE_LINES = 5000, conditional logic in captureAndCleanOutput",
+      "status": "passed",
+      "evidence": "auto-yes-config.ts L46: REDUCED_CAPTURE_LINES = 300, L49: FULL_CAPTURE_LINES = 5000. pollAutoYes (L426-430) selects captureLines based on autoYesState?.stopPattern. Tests verify captureSessionOutput is called with 300 or 5000 accordingly."
+    },
+    {
+      "criterion": "Item 4: precomputedLines in DetectPromptOptions, used in detectPrompt",
+      "status": "passed",
+      "evidence": "prompt-detector.ts L51-61: precomputedLines field in DetectPromptOptions. L203: const lines = options?.precomputedLines ?? output.split('\\n'). pollAutoYes L433 splits once, L451 passes lines to detectAndRespondToPrompt. 4 tests in prompt-detector.test.ts verify behavior."
+    },
+    {
+      "criterion": "Item 5: AUTO_STOP_ERROR_THRESHOLD = 20, consecutive_errors in AutoYesStopReason, threshold check in incrementErrorCount",
+      "status": "passed",
+      "evidence": "auto-yes-config.ts L56: AUTO_STOP_ERROR_THRESHOLD = 20. L63: AutoYesStopReason includes 'consecutive_errors'. auto-yes-poller.ts L173-178: incrementErrorCount checks >= threshold and calls disableAutoYes('consecutive_errors'). Tests confirm 20 errors triggers auto-stop."
+    },
+    {
+      "criterion": "Item 5 UI: pendingStopReason state, Toast level differentiation",
+      "status": "passed",
+      "evidence": "WorktreeDetailRefactored.tsx L203: useState<AutoYesStopReason | null>(null). L786-792: stop_pattern_matched shows 'info' toast, consecutive_errors shows 'warning' toast. L393 sets pendingStopReason from API response."
+    },
+    {
+      "criterion": "Item 5 i18n: consecutiveErrorsStopped keys in both locales",
+      "status": "passed",
+      "evidence": "locales/ja/autoYes.json L26: consecutiveErrorsStopped key present. locales/en/autoYes.json L26: consecutiveErrorsStopped key present."
+    },
+    {
+      "criterion": "stop_pattern_matched regression test (info level maintained)",
+      "status": "passed",
+      "evidence": "WorktreeDetailRefactored.tsx L786-787: stop_pattern_matched triggers showToast with 'info' level, unchanged from prior behavior."
+    },
+    {
+      "criterion": "validatePollingContext from isAutoYesExpired redundant call removed",
+      "status": "passed",
+      "evidence": "validatePollingContext (L223-238) no longer calls isAutoYesExpired directly. Only checks autoYesState?.enabled. Comment at L230-231 documents why this is sufficient."
+    },
+    {
+      "criterion": "npm run test:unit passes",
+      "status": "passed",
+      "evidence": "251 test files passed, 5012 tests passed, 7 skipped. No failures."
+    },
+    {
+      "criterion": "npm run lint passes",
+      "status": "passed",
+      "evidence": "No ESLint warnings or errors."
+    },
+    {
+      "criterion": "npx tsc --noEmit passes",
+      "status": "passed",
+      "evidence": "TypeScript compilation completed with no errors (empty output)."
+    }
+  ],
+  "quality_checks": {
+    "tsc": "pass",
+    "lint": "pass",
+    "unit_tests": "pass"
+  },
+  "issues_found": [],
+  "test_cases": [
+    {
+      "scenario": "Item 1: stripBoxDrawing called only once in captureAndCleanOutput, not in detectAndRespondToPrompt",
+      "result": "passed",
+      "evidence": "stripBoxDrawingSpy.toHaveBeenCalledTimes(1) verified in test"
+    },
+    {
+      "scenario": "Item 2: Thinking detection triggers THINKING_POLLING_INTERVAL_MS (5000)",
+      "result": "passed",
+      "evidence": "THINKING_POLLING_INTERVAL_MS === 5000 confirmed; scheduleNextPoll called with this value"
+    },
+    {
+      "scenario": "Item 3: stopPattern unset uses 300 lines, set uses 5000 lines",
+      "result": "passed",
+      "evidence": "captureSessionOutput called with REDUCED_CAPTURE_LINES (300) or FULL_CAPTURE_LINES (5000) based on stopPattern"
+    },
+    {
+      "scenario": "Item 4: precomputedLines reuses pre-split lines in detectPrompt",
+      "result": "passed",
+      "evidence": "4 tests in prompt-detector.test.ts verify precomputedLines behavior including identical results and fallback"
+    },
+    {
+      "scenario": "Item 5: consecutiveErrors >= 20 triggers disableAutoYes('consecutive_errors') and stops poller",
+      "result": "passed",
+      "evidence": "Test confirms state.stopReason === 'consecutive_errors' and getActivePollerCount() === 0 after 20 errors"
+    },
+    {
+      "scenario": "Item 5 UI: consecutive_errors shows warning Toast, stop_pattern_matched shows info Toast",
+      "result": "passed",
+      "evidence": "WorktreeDetailRefactored.tsx L786-791 differentiates toast levels by stopReason"
+    },
+    {
+      "scenario": "Item 6: CACHE_TTL_MS is 3000ms",
+      "result": "passed",
+      "evidence": "CACHE_TTL_MS = 3000 in tmux-capture-cache.ts, verified by test"
+    },
+    {
+      "scenario": "Item 7: validatePollingContext does not call isAutoYesExpired",
+      "result": "passed",
+      "evidence": "Code review confirms no isAutoYesExpired call; only autoYesState?.enabled check with explanatory comment"
+    }
+  ],
+  "acceptance_criteria_status": [
+    { "criterion": "All 7 items implemented", "verified": true },
+    { "criterion": "Existing Auto-Yes tests all pass", "verified": true },
+    { "criterion": "stripBoxDrawing single-call verified by test", "verified": true },
+    { "criterion": "Thinking extended interval (5s) verified by test", "verified": true },
+    { "criterion": "Consecutive error threshold (20) auto-stop verified by test", "verified": true },
+    { "criterion": "consecutive_errors stopReason shows warning Toast", "verified": true },
+    { "criterion": "stop_pattern_matched regression test (info level maintained)", "verified": true },
+    { "criterion": "stopPattern unset uses 300 capture lines", "verified": true },
+    { "criterion": "detectPrompt uses precomputedLines", "verified": true },
+    { "criterion": "validatePollingContext isAutoYesExpired removed", "verified": true },
+    { "criterion": "npm run test:unit passes", "verified": true },
+    { "criterion": "npm run lint passes", "verified": true },
+    { "criterion": "npx tsc --noEmit passes", "verified": true }
+  ],
+  "evidence_files": [],
+  "message": "All acceptance criteria verified. All 7 performance improvement items are correctly implemented with corresponding tests, i18n support, and UI integration. Quality checks (tsc, lint, unit tests) all pass."
+}

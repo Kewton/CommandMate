@@ -1,0 +1,102 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "focus_area": "通常",
+  "iteration": 1,
+  "issue_number": 499,
+  "findings": [
+    {
+      "id": "F1-001",
+      "severity": "should_fix",
+      "category": "正確性",
+      "title": "Item 3: キャプチャ行数削減の推奨値200行の根拠が不明確",
+      "description": "Issue本文ではstopPattern未設定時のキャプチャ行数を「200行程度」に削減すると記載しているが、プロンプト検出は末尾50行スキャン（prompt-detector.ts L758）であり、200行の根拠が示されていない。50行で十分な可能性もあれば、rawContent用の200行（RAW_CONTENT_MAX_LINES）が必要な可能性もある。実装時に正確な下限値を判断できるよう根拠を明記すべき。",
+      "current": "stopPatternが未設定の場合、キャプチャ行数を200行程度に削減する",
+      "suggested": "stopPatternが未設定の場合、キャプチャ行数を削減する。promptDetectorのスキャンウィンドウ(50行) + rawContentの最大行数(RAW_CONTENT_MAX_LINES=200行) + マージンを考慮し、300行程度を推奨する。根拠: detectMultipleChoicePrompt()は末尾50行をスキャンし、truncateRawContent()は最大200行を保持するため。",
+      "evidence": "prompt-detector.ts L758: scanStart = Math.max(0, effectiveEnd - 50), L76: RAW_CONTENT_MAX_LINES = 200"
+    },
+    {
+      "id": "F1-002",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "Item 2: Thinking検出時の推奨間隔(5-10秒)の根拠が未記載",
+      "description": "Thinking検出時専用の間隔として5-10秒を提案しているが、なぜその範囲が適切なのかの根拠が記載されていない。Thinkingの典型的な持続時間やユーザー体感への影響を踏まえた根拠があると実装判断が容易になる。",
+      "current": "Thinking検出時専用の間隔(5-10秒)をauto-yes-configに追加し、scheduleNextPollに渡す",
+      "suggested": "Thinking検出時専用の間隔をauto-yes-configに追加する。推奨値: 5秒（根拠: Thinkingは通常10-60秒継続し、その間プロンプトは出ない。5秒間隔であればThinking終了後の応答遅延は最大5秒に抑えられ、ユーザー体感への影響は軽微）。",
+      "evidence": "仮説検証レポートでも「具体的な推奨間隔(5-10秒)の根拠がIssueに記載されていない点は補足が望ましい」と指摘あり"
+    },
+    {
+      "id": "F1-003",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "Item 4: split改修のインターフェース変更範囲が不明確",
+      "description": "detectPrompt()のインターフェースを文字列から行配列を受け取る形に変更する提案だが、detectPrompt()はauto-yes-poller以外からも呼ばれている可能性がある。既存の呼び出し元への影響が未整理。",
+      "current": "pollAutoYes内で1回だけsplitし、行配列を下流の関数に渡すインターフェースに変更する",
+      "suggested": "detectPrompt()の既存インターフェース(string)は維持し、内部で分割済み行配列をキャッシュするか、オプショナルな第3引数として事前分割済み行配列を受け取れるようにする。これにより後方互換性を維持しつつ性能改善を実現する。",
+      "evidence": "detectPrompt()はprompt-detector.tsからexportされており、auto-yes-poller.ts L318以外の呼び出し元にも影響する可能性がある"
+    },
+    {
+      "id": "F1-004",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "Item 5: 連続エラー閾値(20回)の根拠と通知方法が未記載",
+      "description": "連続エラー20回で自動停止を提案しているが、20回の根拠が不明確。また「ユーザーに通知する」方法（ログのみか、UIへの通知か、stopReasonへの追加か）が未定義。",
+      "current": "連続エラーが閾値(例: 20回)を超えたらAuto-Yesを自動停止し、ユーザーに通知する",
+      "suggested": "連続エラーが閾値を超えたらAuto-Yesを自動停止する。閾値: 20回（根拠: backoff最大60秒 x 20回 = 20分。セッション破損時でも20分以内に停止する）。停止時はAutoYesStopReasonに'consecutive_errors'を追加し、disableAutoYes()経由でstopReasonを記録する。UIは既存のstopReason表示機構で通知される。",
+      "evidence": "auto-yes-config.ts L43: AutoYesStopReason = 'expired' | 'stop_pattern_matched' に新しいreason追加が必要"
+    },
+    {
+      "id": "F1-005",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "Item 6: キャッシュTTL変更による副作用の考慮が不足",
+      "description": "キャッシュTTLを2秒から3秒に変更する提案だが、通常のAPIキャプチャ（/api/worktrees/[id]/capture）へのデータ鮮度の影響が未考慮。TTL延長はキャッシュヒット率を上げるが、ターミナル表示の更新遅延も1秒増加する。",
+      "current": "キャッシュTTLを3秒に変更し、Auto-Yesポーリングと通常APIキャプチャの同時アクセス時にキャッシュヒットするようにする",
+      "suggested": "キャッシュTTLを3秒に変更する。ただし、通常のcaptureAPI利用時のターミナル表示更新遅延が最大3秒になる点を許容事項として明記する。現状2秒でも遅延は発生しており、1秒の増加はユーザー体感への影響は軽微と判断。",
+      "evidence": "仮説検証レポートでも「通常APIキャプチャへの影響」の確認を推奨"
+    },
+    {
+      "id": "F1-006",
+      "severity": "nice_to_have",
+      "category": "受入条件",
+      "title": "Item 3, 4, 6, 7の受入条件にテスト記載なし",
+      "description": "受入条件にはItem 1, 2, 5のテスト確認項目はあるが、Item 3（キャプチャ行数削減）、Item 4（split再利用）、Item 6（キャッシュTTL）、Item 7（冗長チェック除去）の個別テスト確認項目がない。既存テストのパスのみでは不十分な場合がある。",
+      "current": "受入条件に既存テストパスのみ記載（Item 3, 4, 6, 7は個別テストなし）",
+      "suggested": "以下の受入条件を追加: - [ ] stopPattern未設定時のキャプチャ行数が削減されていることをテストで確認 - [ ] detectPrompt内でsplit('\\n')が不要に重複実行されないことを確認（パフォーマンステスト or コードレビュー）",
+      "evidence": "受入条件セクションに7項目中3項目のみ個別テスト確認あり"
+    },
+    {
+      "id": "F1-007",
+      "severity": "nice_to_have",
+      "category": "明確性",
+      "title": "Item 1の対策案が二択で方針未決定",
+      "description": "stripBoxDrawingの二重呼び出し除去について「strip済みフラグを渡すか、detectPrompt側のstripBoxDrawing呼び出しを除去する」の二択が示されているが、どちらを推奨するか未決定。detectPrompt()が他の呼び出し元からも使われる場合、detectPrompt側の除去は危険な場合がある。",
+      "current": "detectAndRespondToPromptの呼び出し時にstrip済みフラグを渡すか、detectPrompt側のstripBoxDrawing呼び出しを除去する",
+      "suggested": "detectAndRespondToPrompt内のL318 `detectPrompt(stripBoxDrawing(cleanOutput), ...)` から `stripBoxDrawing()` 呼び出しを除去し、`detectPrompt(cleanOutput, ...)` に変更する。cleanOutputは既にcaptureAndCleanOutput()でstrip済みのため安全。detectPrompt()自体のインターフェースは変更不要。",
+      "evidence": "auto-yes-poller.ts L244: captureAndCleanOutput()がstripBoxDrawing適用済みの値を返す。L318はその戻り値を再度stripBoxDrawingに通している"
+    },
+    {
+      "id": "F1-008",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "関連ファイルにprompt-answer-sender.tsが未記載",
+      "description": "関連ファイル一覧にprompt-answer-sender.ts（旧: session-key-sender.ts相当）が含まれていない。Item 1の修正はdetectAndRespondToPrompt()内で行われ、このファイルのimportに間接的に関わる。影響は軽微だが完全性のために追加が望ましい。",
+      "current": "関連ファイル一覧に8ファイル記載",
+      "suggested": "関連ファイル一覧に `src/lib/prompt-answer-sender.ts` を追加（直接変更はないが、detectAndRespondToPrompt内で呼ばれる依存先として参照用）",
+      "evidence": "auto-yes-poller.ts L15: import { sendPromptAnswer } from './prompt-answer-sender'"
+    }
+  ],
+  "summary": {
+    "total_findings": 8,
+    "must_fix": 0,
+    "should_fix": 4,
+    "nice_to_have": 4,
+    "overall_quality": "good",
+    "key_observations": [
+      "全7項目の問題記述は技術的に正確であり、仮説検証結果とも一致している。ファイルパスや行番号も実コードと整合する。",
+      "should_fixの4件はいずれも実装判断を助けるための根拠や方針の補足であり、Issue自体の品質は高い。",
+      "受入条件は主要3項目をカバーしているが、残り4項目の個別テスト確認が省略されている。",
+      "Item 4のdetectPromptインターフェース変更は後方互換性への影響が最も大きく、実装時に慎重な設計が必要。"
+    ]
+  }
+}

@@ -198,8 +198,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const [isSelectionListActive, setIsSelectionListActive] = useState(false);
   // Issue #314: Track previous auto-yes enabled state for stop reason toast
   const prevAutoYesEnabledRef = useRef<boolean>(false);
-  // Issue #314: Pending stop reason toast (deferred until showToast is available)
-  const [stopReasonPending, setStopReasonPending] = useState(false);
+  // Issue #314 / #499 Item 5: Pending stop reason toast (deferred until showToast is available)
+  // Stores the actual stopReason value to determine toast level (info vs warning)
+  const [pendingStopReason, setPendingStopReason] = useState<AutoYesStopReason | null>(null);
   // Issue #368: Selected agents state (initialized from API, drives terminal header tabs)
   const [selectedAgents, setSelectedAgents] = useState<CLIToolType[]>(DEFAULT_SELECTED_AGENTS);
   // Ref to access latest selectedAgents inside fetchWorktree without adding to useCallback deps
@@ -387,9 +388,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         setAutoYesExpiresAt(data.autoYes.expiresAt);
         prevAutoYesEnabledRef.current = data.autoYes.enabled;
 
-        // Issue #314: Detect stop condition match (enabled -> disabled transition)
-        if (wasEnabled && !data.autoYes.enabled && data.autoYes.stopReason === 'stop_pattern_matched') {
-          setStopReasonPending(true);
+        // Issue #314 / #499 Item 5: Detect stop condition match or consecutive error (enabled -> disabled transition)
+        if (wasEnabled && !data.autoYes.enabled &&
+            (data.autoYes.stopReason === 'stop_pattern_matched' || data.autoYes.stopReason === 'consecutive_errors')) {
+          setPendingStopReason(data.autoYes.stopReason);
         }
       }
     } catch (err) {
@@ -779,13 +781,16 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     }
   }, [worktreeId, editorFilePath, fileTabs, tCommon, tError]);
 
-  // Issue #314: Show stop reason toast when pending (deferred from fetchCurrentOutput)
+  // Issue #314 / #499 Item 5: Show stop reason toast when pending (deferred from fetchCurrentOutput)
   useEffect(() => {
-    if (stopReasonPending) {
+    if (pendingStopReason === 'stop_pattern_matched') {
       showToast(tAutoYes('stopPatternMatched'), 'info');
-      setStopReasonPending(false);
+      setPendingStopReason(null);
+    } else if (pendingStopReason === 'consecutive_errors') {
+      showToast(tAutoYes('consecutiveErrorsStopped'), 'warning');
+      setPendingStopReason(null);
     }
-  }, [stopReasonPending, showToast, tAutoYes]);
+  }, [pendingStopReason, showToast, tAutoYes]);
 
   // [Issue #162] File operations hook (move dialog state management)
   const {

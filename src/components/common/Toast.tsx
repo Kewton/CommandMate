@@ -10,7 +10,7 @@
 'use client';
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { CheckCircle, XCircle, Info, X } from 'lucide-react';
+import { CheckCircle, XCircle, Info, AlertTriangle, X } from 'lucide-react';
 import { Z_INDEX } from '@/config/z-index';
 import type { ToastType, ToastItem } from '@/types/markdown-editor';
 
@@ -57,6 +57,13 @@ function getToastStyles(type: ToastType): {
         textColor: 'text-red-800',
         iconColor: 'text-red-500',
       };
+    case 'warning':
+      return {
+        bgColor: 'bg-amber-50',
+        borderColor: 'border-amber-200',
+        textColor: 'text-amber-800',
+        iconColor: 'text-amber-500',
+      };
     case 'info':
     default:
       return {
@@ -88,6 +95,13 @@ function ToastIcon({ type, iconColor }: { type: ToastType; iconColor: string }) 
         <XCircle
           className={iconClass}
           data-testid="toast-icon-error"
+        />
+      );
+    case 'warning':
+      return (
+        <AlertTriangle
+          className={iconClass}
+          data-testid="toast-icon-warning"
         />
       );
     case 'info':

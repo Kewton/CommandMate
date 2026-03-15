@@ -1,0 +1,21 @@
+{
+  "issue_number": 499,
+  "refactor_targets": [
+    "src/lib/auto-yes-poller.ts",
+    "src/config/auto-yes-config.ts",
+    "src/lib/detection/prompt-detector.ts",
+    "src/lib/tmux/tmux-capture-cache.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "quality_metrics": {
+    "tsc": "pass",
+    "lint": "pass",
+    "unit_tests": "5012 passed"
+  },
+  "improvement_goals": [
+    "コード品質の確認（不要な変更がないか）",
+    "テストの網羅性確認",
+    "重複コードの検出",
+    "命名規則の一貫性確認"
+  ]
+}
