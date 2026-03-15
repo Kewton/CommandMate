@@ -1,0 +1,34 @@
+{
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "iteration": 2,
+  "issue_number": 499,
+  "applied_findings": [
+    {
+      "finding_id": "F5-001",
+      "status": "applied",
+      "action_taken": "Item 5のUI側対応セクションに通知レベルの設計方針を追記。consecutive_errorsは警告レベル(warning)、stop_pattern_matchedは情報レベル(info)として区別する方式を明記。setStopReasonPendingのboolean管理ではなくstopReasonの値自体をstateに保持し、Toast表示時にreasonに応じたメッセージ・スタイルを出し分ける設計を記載。受入条件も警告レベル確認を含むよう更新。"
+    },
+    {
+      "finding_id": "F5-002",
+      "status": "applied",
+      "action_taken": "Item 3の根拠説明にTHINKING_CHECK_LINE_COUNT(50行, auto-yes-state.ts L345)を追加。300行の根拠が promptDetectorスキャンウィンドウ(50行) + THINKING_CHECK_LINE_COUNT(50行) + RAW_CONTENT_MAX_LINES(200行) + マージン として網羅的に記載されるよう更新。"
+    },
+    {
+      "finding_id": "F5-003",
+      "status": "applied",
+      "action_taken": "Item 4の対策説明に推奨シグネチャを追記。DetectPromptOptionsにprecomputedLines?: string[]を追加する方式を例示: detectPrompt(content: string, options?: DetectPromptOptions & { precomputedLines?: string[] })。既存のoptionsオブジェクトへの統合が自然であることを明記。"
+    },
+    {
+      "finding_id": "F5-004",
+      "status": "applied",
+      "action_taken": "受入条件にItem 7の個別確認項目を追加: validatePollingContextからisAutoYesExpired冗長呼び出しが除去され、コメントで理由が記載されていることをコードレビューで確認。"
+    }
+  ],
+  "summary": {
+    "total_findings": 4,
+    "applied": 4,
+    "skipped": 0,
+    "partial": 0
+  }
+}

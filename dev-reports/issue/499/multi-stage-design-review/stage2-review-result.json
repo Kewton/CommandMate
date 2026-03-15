@@ -1,0 +1,176 @@
+{
+  "issue_number": 499,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "IC-001",
+        "title": "incrementErrorCount関数シグネチャの不一致",
+        "description": "設計方針書 Item 5 (Section 3) では incrementErrorCount(worktreeId, pollerState) と2引数のシグネチャを記載しているが、実際のコード (auto-yes-poller.ts L161) は incrementErrorCount(worktreeId: string) の1引数で、内部で getPollerState(worktreeId) を呼んで pollerState を取得している。設計書のコード例をそのまま実装すると既存シグネチャとの不整合が発生する。",
+        "design_ref": "Section 3, Item 5, L214-222のコード例",
+        "actual_code_ref": "src/lib/auto-yes-poller.ts L161-167",
+        "recommendation": "設計書のコード例を実際のシグネチャ incrementErrorCount(worktreeId: string) に合わせて修正するか、実装時にシグネチャ変更を明記する"
+      },
+      {
+        "id": "IC-002",
+        "title": "scheduleNextPollのoverrideInterval引数が既に実装済み",
+        "description": "設計方針書 Item 2 (Section 3) では scheduleNextPoll に overrideInterval?: number 引数を「新規追加」する変更として記載しているが、実際のコード (auto-yes-poller.ts L441-444) には既に overrideInterval?: number パラメータが存在し、COOLDOWN_INTERVAL_MS での呼び出し (L420) も実装済みである。設計書は現状のコードを正確に反映していない。",
+        "design_ref": "Section 3, Item 2, scheduleNextPollの変更",
+        "actual_code_ref": "src/lib/auto-yes-poller.ts L441-454",
+        "recommendation": "設計書を修正し、overrideInterval引数は既存であることを明記する。Item 2の変更範囲はThinking検出時のscheduleNextPoll呼び出しにTHINKING_POLLING_INTERVAL_MSを渡す1行追加のみであることを正確に記載する"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IC-003",
+        "title": "AutoYesStopReason型の現状と変更の明示化不足",
+        "description": "設計方針書 Item 5 では AutoYesStopReason = 'expired' | 'stop_pattern_matched' | 'consecutive_errors' と3値を記載しているが、現在の auto-yes-config.ts L43 では 'expired' | 'stop_pattern_matched' の2値のみ。設計書には「追加」であることを明示すべきだが、現在の記載では既に3値が存在するかのように読める。",
+        "design_ref": "Section 3, Item 5",
+        "actual_code_ref": "src/config/auto-yes-config.ts L43",
+        "recommendation": "設計書に '// 既存: expired | stop_pattern_matched に consecutive_errors を追加' のように変更差分を明確にする"
+      },
+      {
+        "id": "IC-004",
+        "title": "WorktreeDetailRefactored.tsx の状態管理方式の不正確な記載",
+        "description": "設計方針書 Item 5 UI側変更では 'pendingStopReason' (useState<AutoYesStopReason | null>) への変更を記載しているが、現在の実装は 'stopReasonPending' (useState<boolean>) で、stopReason値ではなく真偽値のみ管理している。設計書はリネーム＋型変更を提案しているが、既存の変数名・型を正確に記述していない。",
+        "design_ref": "Section 3, Item 5, UI側変更",
+        "actual_code_ref": "src/components/worktree/WorktreeDetailRefactored.tsx L202, L391-393, L784-788",
+        "recommendation": "設計書に現在の実装 (stopReasonPending: boolean) を明記し、pendingStopReason: AutoYesStopReason | null への変更であることを差分として示す"
+      },
+      {
+        "id": "IC-005",
+        "title": "THINKING_CHECK_LINE_COUNTの定義元がアーキテクチャ図と不一致",
+        "description": "設計方針書のレイヤー図ではConfig LayerにAYC[auto-yes-config.ts]を配置し、Item 2の定数追加先もauto-yes-config.tsと記載している。しかしTHINKING_CHECK_LINE_COUNTは実際にはauto-yes-state.ts L345で定義・エクスポートされている。新たにTHINKING_POLLING_INTERVAL_MSをauto-yes-config.tsに追加する方針は理解できるが、既存定数の所在との不整合がある。",
+        "design_ref": "Section 2 レイヤー図, Section 3 Item 2",
+        "actual_code_ref": "src/lib/auto-yes-state.ts L345",
+        "recommendation": "レイヤー図にauto-yes-state.tsが定数も保持していることを注記するか、Item 2でTHINKING_POLLING_INTERVAL_MSの追加先を明確にする"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IC-006",
+        "title": "pollerStateの参照方式に関する設計方針書の前提整理",
+        "description": "設計方針書の複数箇所で pollerState を引数として渡す記載があるが(例: Item 1 detectAndRespondToPrompt呼び出し、Item 5 incrementErrorCount)、実際のコードではpollerStateをworktreeIdからgetPollerState()で取得する方式とpollerStateを直接渡す方式が混在している。detectAndRespondToPromptはpollerStateを引数で受け取る一方、incrementErrorCountはworktreeIdのみ受け取る。設計変更時にこの違いを認識する必要がある。",
+        "design_ref": "Section 3 各Item",
+        "actual_code_ref": "src/lib/auto-yes-poller.ts L161, L309-314",
+        "recommendation": "設計書全体でpollerState参照方式の前提を統一するか、各Itemで実際のシグネチャに合わせた記載にする"
+      },
+      {
+        "id": "IC-007",
+        "title": "ポーリングフロー図のscheduleNextPoll呼び出し位置の簡略化",
+        "description": "設計方針書 Section 2 のポーリングフロー図では scheduleNextPoll() が末尾1箇所のみ記載されているが、実際のコードでは L407(Thinking検出後), L420(responded後), L432(デフォルト) の3箇所でscheduleNextPollが呼ばれている。フロー図は簡略化されており、正確な制御フローを反映していない。",
+        "design_ref": "Section 2 既存ポーリングフロー",
+        "actual_code_ref": "src/lib/auto-yes-poller.ts L407, L420, L432",
+        "recommendation": "フロー図にscheduleNextPollの複数呼び出しパスを注記として追加する"
+      }
+    ]
+  },
+  "consistency_matrix": [
+    {
+      "item": "Item 1: stripBoxDrawing二重呼び出し",
+      "design_claim": "L318でstripBoxDrawing(cleanOutput)の二重呼び出しあり",
+      "actual": "L318: detectPrompt(stripBoxDrawing(cleanOutput), promptOptions) - 確認済み",
+      "match": true
+    },
+    {
+      "item": "Item 1: captureAndCleanOutput内strip",
+      "design_claim": "L244で既にstrip済み",
+      "actual": "L244: return stripBoxDrawing(stripAnsi(output)) - 確認済み",
+      "match": true
+    },
+    {
+      "item": "Item 2: scheduleNextPollシグネチャ変更",
+      "design_claim": "overrideInterval引数の新規追加が必要",
+      "actual": "L441-444: overrideInterval?: number は既に実装済み",
+      "match": false,
+      "severity": "must_fix"
+    },
+    {
+      "item": "Item 3: キャプチャ行数5000行",
+      "design_claim": "captureSessionOutput 5000行",
+      "actual": "L243: captureSessionOutput(worktreeId, cliToolId, 5000) - 確認済み",
+      "match": true
+    },
+    {
+      "item": "Item 4: DetectPromptOptionsインターフェース",
+      "design_claim": "requireDefaultIndicator存在、precomputedLines追加",
+      "actual": "prompt-detector.ts L37-49: requireDefaultIndicatorのみ存在 - 追加提案として正確",
+      "match": true
+    },
+    {
+      "item": "Item 4: detectPromptシグネチャ",
+      "design_claim": "detectPrompt(output: string, options?: DetectPromptOptions)",
+      "actual": "L184: 同一シグネチャ - 確認済み",
+      "match": true
+    },
+    {
+      "item": "Item 4: detectMultipleChoicePrompt内split",
+      "design_claim": "L747でoutput.split('\\n')実行",
+      "actual": "L747: const lines = output.split('\\n') - 確認済み",
+      "match": true
+    },
+    {
+      "item": "Item 5: AutoYesStopReason型",
+      "design_claim": "'expired' | 'stop_pattern_matched' | 'consecutive_errors'",
+      "actual": "L43: 'expired' | 'stop_pattern_matched' のみ(consecutive_errorsは未実装)",
+      "match": "partial",
+      "note": "設計が変更提案であることは理解できるが記載が曖昧"
+    },
+    {
+      "item": "Item 5: incrementErrorCountシグネチャ",
+      "design_claim": "incrementErrorCount(worktreeId, pollerState)",
+      "actual": "L161: incrementErrorCount(worktreeId: string) - 1引数",
+      "match": false,
+      "severity": "must_fix"
+    },
+    {
+      "item": "Item 5: catchブロック位置L368-374, L423-428",
+      "design_claim": "2箇所のcatchブロックからincrementErrorCount呼び出し",
+      "actual": "L368-374: detectAndRespondToPrompt内catch, L423-428: pollAutoYes外側catch - 確認済み",
+      "match": true
+    },
+    {
+      "item": "Item 6: CACHE_TTL_MS現在値",
+      "design_claim": "L39: CACHE_TTL_MS = 2000",
+      "actual": "tmux-capture-cache.ts L39: export const CACHE_TTL_MS = 2000 - 確認済み",
+      "match": true
+    },
+    {
+      "item": "Item 7: validatePollingContext条件式",
+      "design_claim": "L217: if (!autoYesState?.enabled || isAutoYesExpired(autoYesState))",
+      "actual": "L217: 同一条件式 - 確認済み",
+      "match": true
+    },
+    {
+      "item": "Item 5-UI: WorktreeDetailRefactored stopReason処理",
+      "design_claim": "L391付近でstopReason === 'stop_pattern_matched'のみ処理",
+      "actual": "L391: data.autoYes.stopReason === 'stop_pattern_matched' - 確認済み",
+      "match": true
+    },
+    {
+      "item": "globalThisパターン",
+      "design_claim": "Issue #153 globalThisパターン維持",
+      "actual": "auto-yes-poller.ts L73-80, auto-yes-state.ts L51-58: globalThis使用確認済み",
+      "match": true
+    }
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "src/lib/auto-yes-poller.ts",
+    "src/lib/auto-yes-state.ts",
+    "src/config/auto-yes-config.ts",
+    "src/lib/detection/prompt-detector.ts",
+    "src/lib/tmux/tmux-capture-cache.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/hooks/useAutoYes.ts"
+  ],
+  "timestamp": "2026-03-16T00:00:00Z"
+}

@@ -1,0 +1,29 @@
+{
+  "issue_number": 499,
+  "feature_summary": "Auto-Yes ポーリング性能改善（7項目）",
+  "acceptance_criteria": [
+    "全7項目の改善が実装されている",
+    "既存のAuto-Yes関連テストが全てパスする",
+    "stripBoxDrawingが1回のみ呼ばれることをテストで確認",
+    "Thinking検出時に延長間隔(5s)が使用されることをテストで確認",
+    "連続エラー上限(20回)での自動停止がテストで確認",
+    "consecutive_errors stopReasonがUI側で警告レベル(warning)として通知されること",
+    "stop_pattern_matchedのリグレッションテスト（info レベル維持）",
+    "stopPattern未設定時のキャプチャ行数が300行に削減されていること",
+    "detectPrompt内でprecomputedLinesが使用されること",
+    "validatePollingContextからisAutoYesExpired冗長呼び出しが除去されていること",
+    "npm run test:unit パス",
+    "npm run lint パス",
+    "npx tsc --noEmit パス"
+  ],
+  "test_scenarios": [
+    "Item 1: stripBoxDrawingがcaptureAndCleanOutput内で1回のみ呼ばれ、detectAndRespondToPrompt内では呼ばれない",
+    "Item 2: Thinking検出時にscheduleNextPollがTHINKING_POLLING_INTERVAL_MS(5000)で呼ばれる",
+    "Item 3: stopPattern未設定時にcaptureSessionOutputが300行で呼ばれ、設定時は5000行",
+    "Item 4: precomputedLinesがdetectPromptに渡された場合、内部のsplitがスキップされる",
+    "Item 5: consecutiveErrors >= 20でdisableAutoYes('consecutive_errors')が呼ばれ、ポーリングが停止する",
+    "Item 5 UI: pendingStopReason='consecutive_errors'でwarning Toast、'stop_pattern_matched'でinfo Toast",
+    "Item 6: CACHE_TTL_MSが3000msである",
+    "Item 7: validatePollingContextでisAutoYesExpiredが呼ばれない"
+  ]
+}

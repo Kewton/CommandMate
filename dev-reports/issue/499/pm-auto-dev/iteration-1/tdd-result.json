@@ -1,0 +1,46 @@
+{
+  "status": "success",
+  "items_implemented": [1, 2, 3, 4, 5, 6, 7],
+  "tests_added": [
+    "Item 1: stripBoxDrawing should be called only once per poll cycle",
+    "Item 2: Thinking detection should trigger 5s polling interval",
+    "Item 3: captureAndCleanOutput should use REDUCED_CAPTURE_LINES/FULL_CAPTURE_LINES",
+    "Item 3: REDUCED_CAPTURE_LINES should be 300 and FULL_CAPTURE_LINES should be 5000",
+    "Item 4: precomputedLines should produce identical results with and without",
+    "Item 4: precomputedLines with multiple choice prompt",
+    "Item 4: fall back to split when precomputedLines is not provided",
+    "Item 5: AUTO_STOP_ERROR_THRESHOLD should be 20",
+    "Item 5: 20 consecutive errors should trigger disableAutoYes with consecutive_errors",
+    "Item 5: AutoYesStopReason should include consecutive_errors",
+    "Item 5: AutoYesStopReason should include all expected values",
+    "Item 6: CACHE_TTL_MS should be 3000",
+    "Item 7: validatePollingContext should check enabled only",
+    "auto-yes-config: THINKING_POLLING_INTERVAL_MS, REDUCED_CAPTURE_LINES, FULL_CAPTURE_LINES, AUTO_STOP_ERROR_THRESHOLD constants"
+  ],
+  "tests_updated": [
+    "tmux-capture-cache.test.ts: CACHE_TTL_MS assertion 2000 -> 3000",
+    "tmux-capture-invalidation.test.ts: CACHE_TTL_MS mock value 2000 -> 3000"
+  ],
+  "files_modified": [
+    "src/config/auto-yes-config.ts",
+    "src/lib/auto-yes-poller.ts",
+    "src/lib/detection/prompt-detector.ts",
+    "src/lib/tmux/tmux-capture-cache.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/common/Toast.tsx",
+    "src/types/markdown-editor.ts",
+    "locales/ja/autoYes.json",
+    "locales/en/autoYes.json",
+    "tests/unit/config/auto-yes-config.test.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts",
+    "tests/unit/lib/tmux-capture-cache.test.ts",
+    "tests/unit/lib/tmux-capture-invalidation.test.ts",
+    "tests/unit/prompt-detector.test.ts"
+  ],
+  "quality_checks": {
+    "tsc": "pass",
+    "lint": "pass",
+    "unit_tests": "pass",
+    "test_count": "5012 passed, 7 skipped"
+  }
+}

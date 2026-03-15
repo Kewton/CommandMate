@@ -1,0 +1,30 @@
+{
+  "issue_number": 499,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘対応",
+  "apply_date": "2026-03-16",
+  "status": "completed",
+  "design_doc_path": "dev-reports/design/issue-499-auto-yes-polling-perf-design-policy.md",
+  "review_result_path": "dev-reports/issue/499/multi-stage-design-review/stage4-review-result.json",
+  "overall_assessment": "PASS",
+  "summary": "Stage 4セキュリティレビューの結果を設計方針書に反映。must_fix/should_fix指摘なし（0件）。consider 2件・nice_to_have 1件はすべて対応不要と判断し、記録として設計方針書に追記。",
+  "changes_applied": [
+    {
+      "section": "Section 6 (セキュリティ設計)",
+      "change": "OWASP Top 10セキュリティレビュー結果サマリーを追加。総合評価PASS、リスクレベルLOWであることを明記。",
+      "findings_addressed": []
+    },
+    {
+      "section": "Section 10 (レビュー指摘対応サマリー) - Stage 4",
+      "change": "Stage 4セキュリティレビューセクションを追加。SEC4-001, SEC4-002, SEC4-003の3件の指摘と対応方針（すべて対応不要）を記載。OWASP Top 10チェックリスト全項目の結果サマリーを追記。",
+      "findings_addressed": ["SEC4-001", "SEC4-002", "SEC4-003"]
+    }
+  ],
+  "findings_summary": {
+    "must_fix": { "total": 0, "applied": 0, "skipped": 0 },
+    "should_fix": { "total": 0, "applied": 0, "skipped": 0 },
+    "consider": { "total": 2, "applied": 2, "skipped": 0, "note": "All recorded as no-action-required in design policy" },
+    "nice_to_have": { "total": 1, "applied": 1, "skipped": 0, "note": "Recorded as no-action-required in design policy" }
+  },
+  "source_code_modified": false
+}

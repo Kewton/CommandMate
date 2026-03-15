@@ -1,0 +1,193 @@
+{
+  "issue_number": 499,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_date": "2026-03-16",
+  "design_doc_path": "dev-reports/design/issue-499-auto-yes-polling-perf-design-policy.md",
+  "overall_assessment": "PASS_WITH_FINDINGS",
+  "summary": "設計方針書の影響範囲分析は概ね正確。7件の改善Itemすべてについて主要な影響対象ファイルが特定されている。ただし、Item 5（連続エラー上限停止）において、barrel file re-export、current-output API route、useAutoYes hook、i18nファイルへの影響が設計方針書の本文で明示的に列挙されていない箇所がある。また、テストファイルリストに一部漏れがある。致命的な見落としはなく、実装時の注意事項として対応可能なレベル。",
+  "findings": [
+    {
+      "id": "IA-001",
+      "severity": "should_fix",
+      "category": "影響範囲漏れ",
+      "title": "Item 5: AutoYesStopReason型変更のbarrel file re-export影響が未記載",
+      "description": "auto-yes-config.tsのAutoYesStopReason型に'consecutive_errors'を追加する際、auto-yes-state.tsがre-export（L18: export type { AutoYesStopReason } from '@/config/auto-yes-config'）し、さらにauto-yes-manager.ts（barrel file）がauto-yes-state.tsからre-export（L15: export type { AutoYesStopReason } from '../auto-yes-state'）している。型定義の変更自体はTypeScriptの型チェックで自動伝播するため実装上の問題はないが、設計方針書Section 3 Item 5の影響範囲にbarrel fileの確認が必要である旨を記載すべき。",
+      "affected_files": [
+        "src/config/auto-yes-config.ts",
+        "src/lib/auto-yes-state.ts",
+        "src/lib/polling/auto-yes-manager.ts"
+      ],
+      "recommendation": "Item 5の影響範囲に「auto-yes-manager.ts（barrel file）: 既存re-exportにより自動伝播、変更不要」と明記し、実装時の確認漏れを防止する。"
+    },
+    {
+      "id": "IA-002",
+      "severity": "should_fix",
+      "category": "影響範囲漏れ",
+      "title": "Item 5: current-output APIルートのstopReason返却ロジックの影響が未記載",
+      "description": "src/app/api/worktrees/[id]/current-output/route.ts（L134）ではautoYesState?.stopReasonをそのままクライアントに返却している。'consecutive_errors'が追加されると、この値も自動的にクライアントに返される。設計方針書ではUI側（WorktreeDetailRefactored.tsx）の変更は記載されているが、APIルートが中間層として値を透過的に返却している事実が明示されていない。特に、クライアント側でstopReason === 'stop_pattern_matched'のみをハードコードチェックしている（L391）ため、'consecutive_errors'の処理追加漏れリスクがある。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/current-output/route.ts",
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "recommendation": "Item 5 UI側変更セクションに、current-output/route.tsは変更不要（stopReasonを透過的に返却するため）であることを明記。WorktreeDetailRefactored.tsxのL391の条件分岐に'consecutive_errors'ケースを追加する旨を設計方針書に明示する。"
+    },
+    {
+      "id": "IA-003",
+      "severity": "should_fix",
+      "category": "影響範囲漏れ",
+      "title": "Item 5: WorktreeDetailRefactored.tsxのstate型変更影響の詳細不足",
+      "description": "設計方針書ではstopReasonPending（boolean）をpendingStopReason（AutoYesStopReason | null）にリネーム+型変更すると記載している。実際のコード（L202）では'const [stopReasonPending, setStopReasonPending] = useState(false)'であり、これを変更するとL391のsetStopReasonPending(true)、L784のif (stopReasonPending)、L786のsetStopReasonPending(false)の3箇所すべてに影響する。設計方針書では条件分岐のロジック変更（L784付近）のみ記載しているが、L391でsetPendingStopReason(data.autoYes.stopReason)に変更が必要であることが不明確。",
+      "affected_files": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "recommendation": "Item 5 UI側変更セクションで、以下3箇所の変更を明示する：(1) L391: setStopReasonPending(true)をsetPendingStopReason(data.autoYes.stopReason)に変更、(2) L391の条件分岐にconsecutive_errorsを追加（stopReason === 'stop_pattern_matched' || stopReason === 'consecutive_errors'）、(3) L784-786のToast表示ロジックをstopReason値に応じた分岐に変更。"
+    },
+    {
+      "id": "IA-004",
+      "severity": "should_fix",
+      "category": "テスト漏れ",
+      "title": "Item 3: captureAndCleanOutputの引数変更に対するテストファイルが未特定",
+      "description": "Item 3ではcaptureAndCleanOutput()にcaptureLines引数を追加する。この関数はtests/unit/lib/auto-yes-manager.test.tsでテストされているが、設計方針書Section 5のテストファイルリストにItem 3に対応するテストファイルが明示されていない。",
+      "affected_files": [
+        "tests/unit/lib/auto-yes-manager.test.ts"
+      ],
+      "recommendation": "Section 5のテストファイルリストにItem 3のテスト対象としてtests/unit/lib/auto-yes-manager.test.tsを追加する。"
+    },
+    {
+      "id": "IA-005",
+      "severity": "should_fix",
+      "category": "テスト漏れ",
+      "title": "Item 6: CACHE_TTL_MS変更のテストファイルが未特定",
+      "description": "Item 6でCACHE_TTL_MSを2000から3000に変更すると、tests/unit/lib/tmux-capture-cache.test.ts内の定数値アサーション（L52: expect(CACHE_TTL_MS).toBe(2000)）およびtests/unit/lib/tmux-capture-invalidation.test.ts内のモック値（L89: CACHE_TTL_MS: 2000）が失敗する。設計方針書Section 5のテストファイルリストにこれらが含まれていない。",
+      "affected_files": [
+        "tests/unit/lib/tmux-capture-cache.test.ts",
+        "tests/unit/lib/tmux-capture-invalidation.test.ts"
+      ],
+      "recommendation": "Section 5のテストファイルリストにItem 6の影響テストとして上記2ファイルを追加する。"
+    },
+    {
+      "id": "IA-006",
+      "severity": "consider",
+      "category": "影響範囲確認",
+      "title": "Item 6: CACHE_TTL_MS変更のresponse-pollerおよびworktree-status-helperへの間接影響",
+      "description": "設計方針書Section 3 Item 6で「全tmux captureキャッシュ利用箇所（auto-yes-poller, response-poller, current-output API, worktree-status-helper）に影響するが、いずれも最大1秒の表示遅延増加のみ」と正しく記載されている。ただし、response-poller.ts（L602: captureSessionOutput(worktreeId, cliToolId, 10000)）は10000行でキャプチャしており、CACHE_MAX_CAPTURE_LINES（10000）と一致するためキャッシュヒットが期待できるが、auto-yes-pollerのItem 3で行数を300に変更すると、response-pollerとauto-yes-pollerが異なる行数でキャプチャする状況が生まれる。この場合、auto-yes-pollerの300行キャプチャ結果がキャッシュされても、response-pollerの10000行リクエストはキャッシュミスとなる（getCachedCaptureのL120: requestedLines > entry.capturedLinesチェック）。つまり、Item 3とItem 6の組み合わせにより、キャッシュヒット率向上効果がauto-yes-poller → response-poller方向では期待できない点を認識しておくべき。",
+      "affected_files": [
+        "src/lib/tmux/tmux-capture-cache.ts",
+        "src/lib/polling/response-poller.ts",
+        "src/lib/auto-yes-poller.ts"
+      ],
+      "recommendation": "設計方針書Section 8のトレードオフにItem 3とItem 6の相互作用を追記する。auto-yes-pollerが300行でキャッシュした結果はresponse-pollerの10000行リクエストではキャッシュミスとなるため、キャッシュTTL延長の効果は同一ポーラー内の連続リクエストに限定される。"
+    },
+    {
+      "id": "IA-007",
+      "severity": "consider",
+      "category": "影響範囲確認",
+      "title": "Item 5: useAutoYes hookへの間接影響",
+      "description": "useAutoYes.ts（クライアント側フック）は直接変更不要だが、AutoYesStopReasonの型拡張に伴い、useAutoYesが受け取るautoYesEnabled状態の遷移パターンが変わる。具体的には、consecutive_errorsによる自動停止時もautoYesEnabled: falseに遷移するが、useAutoYes hookはautoYesEnabled=falseでauto-responseを停止するため、動作上の問題はない。ただし、設計方針書にこの確認結果を記載しておくと実装時の安心感が増す。",
+      "affected_files": [
+        "src/hooks/useAutoYes.ts"
+      ],
+      "recommendation": "Item 5の影響範囲に「useAutoYes.ts: 変更不要。autoYesEnabled=falseで自動停止するため、新しいstopReasonによる影響なし」と明記する。"
+    },
+    {
+      "id": "IA-008",
+      "severity": "consider",
+      "category": "影響範囲確認",
+      "title": "Item 4: response-pollerおよびstatus-detectorのdetectPrompt呼び出しがスコープ外であることの確認",
+      "description": "設計方針書で「本Issueではauto-yes-poller.tsからの呼び出しのみ対応。他の呼び出し元（response-poller, status-detector）は別Issue」と明記されている。実際のコードを確認したところ、response-poller.ts（detectPromptWithOptions内部、L244）とstatus-detector.ts（L187）でdetectPromptが呼ばれており、これらはprecomputedLinesを渡していない。設計方針書の記載通り、既存呼び出し元への影響はオプショナル引数のため発生しない。この判断は妥当。",
+      "affected_files": [
+        "src/lib/polling/response-poller.ts",
+        "src/lib/detection/status-detector.ts"
+      ],
+      "recommendation": "対応不要。設計方針書の記載が正確であることを確認済み。"
+    },
+    {
+      "id": "IA-009",
+      "severity": "consider",
+      "category": "並行アクセス",
+      "title": "Item 5: incrementErrorCount内でのdisableAutoYes + stopAutoYesPolling呼び出しの競合リスク",
+      "description": "incrementErrorCountはpollAutoYes内の2つのcatchブロック（L372, L427）から呼ばれる。設計方針書ではincrementErrorCount内部に閾値チェックを集約する方針（DR1-002）を採用している。Node.jsはシングルスレッドのため、同一worktreeIdに対してpollAutoYesが同時に実行されることはなく、競合リスクはない。ただし、incrementErrorCount内でstopAutoYesPolling（timerId clearとMap.delete）を呼んだ後、呼び出し元のpollAutoYesがscheduleNextPollを呼ぶ可能性がある。L407（Thinking時）とL420（responded時）のscheduleNextPollはreturn前に呼ばれるためcatchブロック到達前に実行済みだが、L432のscheduleNextPollはcatchブロックのfallthrough後に実行される。incrementErrorCountでpollerStateを削除した後にL432のscheduleNextPollが呼ばれた場合、scheduleNextPoll内のgetPollerState()がundefinedを返してearly returnするため安全ではある。この防御的動作の確認を設計方針書に記載すべき。",
+      "affected_files": [
+        "src/lib/auto-yes-poller.ts"
+      ],
+      "recommendation": "Item 5にscheduleNextPoll内のnullガード（L447: if (!pollerState) return）がincrementErrorCount内でstopAutoYesPolling後のfallthrough呼び出しを安全にハンドルする旨を注記する。"
+    },
+    {
+      "id": "IA-010",
+      "severity": "consider",
+      "category": "テスト漏れ",
+      "title": "Item 1: stripBoxDrawing呼び出し回数テストの既存テストへの影響",
+      "description": "Item 1ではdetectAndRespondToPrompt内のstripBoxDrawing(cleanOutput)呼び出しを除去する。vi.spyでstripBoxDrawingの呼び出し回数を検証するテストを追加する際、既存のdetectAndRespondToPromptテスト（tests/unit/lib/auto-yes-manager.test.ts内）がstripBoxDrawingの呼び出し前提で動作していないか確認が必要。",
+      "affected_files": [
+        "tests/unit/lib/auto-yes-manager.test.ts"
+      ],
+      "recommendation": "実装時に既存テストのmock設定を確認し、stripBoxDrawingが2回→1回に減少することでテスト期待値の更新が必要かチェックする。"
+    },
+    {
+      "id": "IA-011",
+      "severity": "nice_to_have",
+      "category": "i18n",
+      "title": "Item 5: i18nファイルの影響箇所が設計方針書の影響テストファイルリストに未反映",
+      "description": "Item 5でlocales/ja/autoYes.jsonとlocales/en/autoYes.jsonに'consecutiveErrorsStopped'キーを追加する必要がある。設計方針書Section 3 Item 5にi18n追加のコード例は記載されているが、Section 5のテストファイルリストにi18nキーの存在確認テストが含まれていない。",
+      "affected_files": [
+        "locales/ja/autoYes.json",
+        "locales/en/autoYes.json"
+      ],
+      "recommendation": "i18nキーの存在はビルド時またはlint時に検出可能だが、テスト戦略に「i18nキーの存在確認」を追記すると網羅性が向上する。"
+    }
+  ],
+  "checklist": {
+    "missing_impact_targets": {
+      "status": "FINDINGS",
+      "details": "IA-001, IA-002, IA-003, IA-007で特定。主にItem 5の影響範囲でbarrel file、API route、useAutoYes hookの記載が不足。"
+    },
+    "barrel_file_reexport_impact": {
+      "status": "PASS",
+      "details": "auto-yes-manager.tsのre-exportは型レベルの変更（AutoYesStopReason）のみ。TypeScript型システムにより自動伝播するため、barrel file自体の変更は不要。新規export（THINKING_POLLING_INTERVAL_MS, REDUCED_CAPTURE_LINES, FULL_CAPTURE_LINES, AUTO_STOP_ERROR_THRESHOLD）はauto-yes-config.tsに追加され、auto-yes-poller.tsから直接importされるため、barrel fileへの追加は不要。"
+    },
+    "test_coverage_gaps": {
+      "status": "FINDINGS",
+      "details": "IA-004（Item 3テスト未特定）、IA-005（Item 6テスト未特定: tmux-capture-cache.test.ts, tmux-capture-invalidation.test.ts）、IA-010（Item 1既存テスト影響）、IA-011（i18nテスト未記載）。"
+    },
+    "runtime_behavior_changes": {
+      "status": "PASS",
+      "details": "Item 6のCACHE_TTL_MS変更（2000→3000）は全キャッシュ利用箇所に影響するが、最大1秒の表示遅延増加のみ。Item 3の行数削減（5000→300）はstopPattern未設定時のみ適用され、既存動作への破壊的変更はない。Item 5のconsecutive_errors停止はフェイルセーフ動作であり、既存の正常動作に影響しない。"
+    },
+    "concurrent_access": {
+      "status": "PASS_WITH_NOTE",
+      "details": "IA-009で特定。Node.jsシングルスレッド環境のため実際の競合リスクはないが、incrementErrorCount内でのstopAutoYesPolling呼び出し後のscheduleNextPoll fallthroughパスの安全性を確認済み（nullガードにより安全）。"
+    },
+    "configuration_propagation": {
+      "status": "PASS",
+      "details": "新規定数（THINKING_POLLING_INTERVAL_MS, REDUCED_CAPTURE_LINES, FULL_CAPTURE_LINES, AUTO_STOP_ERROR_THRESHOLD）はすべてauto-yes-config.tsに集約され、auto-yes-poller.tsから直接importする方式。既存の設定伝播パターンと一貫している。"
+    }
+  },
+  "risk_assessment": {
+    "overall_risk": "LOW",
+    "rationale": "設計方針書の影響範囲分析は主要なファイルを正確に特定しており、見落としは主にItem 5のUI/API層での詳細な変更箇所の列挙不足に限定される。TypeScript型システムとオプショナル引数の使用により、未記載の影響箇所もコンパイル時に検出可能。致命的な影響範囲の漏れはない。"
+  },
+  "recommendations": [
+    {
+      "priority": "high",
+      "action": "Item 5の影響範囲セクションを拡充し、WorktreeDetailRefactored.tsxの3箇所の変更（L202 state定義、L391 条件分岐、L784-786 Toast表示）を明示する",
+      "related_findings": ["IA-002", "IA-003"]
+    },
+    {
+      "priority": "high",
+      "action": "Section 5のテストファイルリストにItem 3（auto-yes-manager.test.ts）とItem 6（tmux-capture-cache.test.ts, tmux-capture-invalidation.test.ts）を追加する",
+      "related_findings": ["IA-004", "IA-005"]
+    },
+    {
+      "priority": "medium",
+      "action": "Item 3とItem 6の相互作用（キャッシュ行数不一致によるcross-pollerキャッシュミス）をSection 8トレードオフに追記する",
+      "related_findings": ["IA-006"]
+    },
+    {
+      "priority": "low",
+      "action": "Item 5の影響範囲に変更不要ファイル（useAutoYes.ts, current-output/route.ts, auto-yes-manager.ts barrel file）を明示的にリストし、実装者の確認工数を削減する",
+      "related_findings": ["IA-001", "IA-007"]
+    }
+  ]
+}
