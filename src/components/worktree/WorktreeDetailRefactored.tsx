@@ -131,6 +131,8 @@ interface CurrentOutputResponse {
   };
   /** Issue #501: Server-side auto-yes response timestamp for client duplicate prevention */
   lastServerResponseTimestamp?: number | null;
+  /** Issue #501: Whether server-side auto-yes poller is active */
+  serverPollerActive?: boolean;
 }
 
 // ============================================================================
@@ -198,6 +200,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const [autoYesExpiresAt, setAutoYesExpiresAt] = useState<number | null>(null);
   // Issue #501: Track last server-side auto-yes response timestamp for duplicate prevention
   const [lastServerResponseTimestamp, setLastServerResponseTimestamp] = useState<number | null>(null);
+  // Issue #501: Track whether server-side auto-yes poller is active
+  const [serverPollerActive, setServerPollerActive] = useState(false);
   // Issue #473: Track OpenCode TUI selection list state
   const [isSelectionListActive, setIsSelectionListActive] = useState(false);
   // Issue #314: Track previous auto-yes enabled state for stop reason toast
@@ -387,6 +391,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
       // Issue #501: Update last server response timestamp for useAutoYes duplicate prevention
       setLastServerResponseTimestamp(data.lastServerResponseTimestamp ?? null);
+      setServerPollerActive(data.serverPollerActive ?? false);
 
       // Update auto-yes state from server (Issue #314: stopReason tracking)
       if (data.autoYes) {
@@ -977,6 +982,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     promptData: state.prompt.data,
     autoYesEnabled,
     lastServerResponseTimestamp,
+    serverPollerActive,
   });
 
   /** Retry loading all data after error */

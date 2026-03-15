@@ -10,7 +10,7 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/session/cli-session';
 import { detectSessionStatus, STATUS_REASON } from '@/lib/detection/status-detector';
-import { getAutoYesState, getLastServerResponseTimestamp } from '@/lib/polling/auto-yes-manager';
+import { getAutoYesState, getLastServerResponseTimestamp, isPollerActive } from '@/lib/polling/auto-yes-manager';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { createLogger } from '@/lib/logger';
 
@@ -139,6 +139,8 @@ export async function GET(
       isSelectionListActive,
       // Issue #138: Server-side response timestamp for duplicate prevention
       lastServerResponseTimestamp,
+      // Issue #501: Whether server-side auto-yes poller is active for this worktree
+      serverPollerActive: isPollerActive(params.id),
     });
   } catch (error: unknown) {
     logger.error('error-getting-current-output:', { error: error instanceof Error ? error.message : String(error) });
