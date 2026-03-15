@@ -134,6 +134,17 @@ export function getLastServerResponseTimestamp(worktreeId: string): number | nul
 }
 
 /**
+ * Check if a server-side auto-yes poller is active for a worktree.
+ * Used by the client to skip client-side auto-response when the server is handling it.
+ *
+ * @param worktreeId - Worktree identifier
+ * @returns true if a poller is actively running for this worktree
+ */
+export function isPollerActive(worktreeId: string): boolean {
+  return autoYesPollerStates.has(worktreeId);
+}
+
+/**
  * Update the last server response timestamp.
  *
  * @param worktreeId - Worktree identifier

@@ -34,6 +34,8 @@ export interface UseAutoYesParams {
   autoYesEnabled: boolean;
   /** Last server-side response timestamp (Issue #138) */
   lastServerResponseTimestamp?: number | null;
+  /** Whether server-side auto-yes poller is active (Issue #501) */
+  serverPollerActive?: boolean;
 }
 
 /** Return value of useAutoYes hook */
@@ -58,6 +60,7 @@ export function useAutoYes({
   promptData,
   autoYesEnabled,
   lastServerResponseTimestamp,
+  serverPollerActive,
 }: UseAutoYesParams): UseAutoYesReturn {
   const lastAutoRespondedRef = useRef<string | null>(null);
   const [lastAutoResponse, setLastAutoResponse] = useState<string | null>(null);
@@ -71,11 +74,16 @@ export function useAutoYes({
 
     if (!promptData || !autoYesEnabled) return;
 
-    // Issue #138: Skip if server has responded recently (duplicate prevention)
+    // Issue #501: Skip client-side response entirely when server-side poller is active.
+    // The server poller handles all prompt responses; client responding would cause duplicates.
+    if (serverPollerActive) {
+      return;
+    }
+
+    // Issue #138: Skip if server has responded recently (duplicate prevention fallback)
     if (lastServerResponseTimestamp) {
       const timeSinceServerResponse = Date.now() - lastServerResponseTimestamp;
       if (timeSinceServerResponse < DUPLICATE_PREVENTION_WINDOW_MS) {
-        // Server responded within the last 3 seconds, skip client-side response
         return;
       }
     }
@@ -102,7 +110,7 @@ export function useAutoYes({
     }).catch((err) => {
       console.error('[useAutoYes] Failed to send auto-response:', err);
     });
-  }, [isPromptWaiting, promptData, autoYesEnabled, worktreeId, cliTool, lastServerResponseTimestamp]);
+  }, [isPromptWaiting, promptData, autoYesEnabled, worktreeId, cliTool, lastServerResponseTimestamp, serverPollerActive]);
 
   return { lastAutoResponse };
 }
