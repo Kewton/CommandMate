@@ -1,0 +1,82 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー 指摘事項対応",
+  "applied_findings": [
+    {
+      "id": "DR2-001",
+      "severity": "must_fix",
+      "status": "applied",
+      "action": "セクション3.1に CurrentOutputResponse型への具体的なフィールド追加仕様 (lastServerResponseTimestamp?: number | null) を明記",
+      "section": "3.1"
+    },
+    {
+      "id": "DR2-002",
+      "severity": "must_fix",
+      "status": "applied",
+      "action": "セクション3.1に fetchCurrentOutput()内でのuseState追加、setLastServerResponseTimestamp()呼び出し、useAutoYes引数追加の具体的なコード変更を明記",
+      "section": "3.1"
+    },
+    {
+      "id": "DR2-003",
+      "severity": "must_fix",
+      "status": "applied",
+      "action": "セクション3.2に startAutoYesPolling()のL492付近でのcliToolId比較ロジックと戻り値の具体的な実装差分を追記",
+      "section": "3.2"
+    },
+    {
+      "id": "DR2-004",
+      "severity": "should_fix",
+      "status": "applied",
+      "action": "セクション3.3に getLastServerResponseTimestamp()戻り値(number|null)をnew Date(timestamp)でDate型に変換する必要性を明記。nullの場合はundefinedを渡す旨を記載",
+      "section": "3.3"
+    },
+    {
+      "id": "DR2-005",
+      "severity": "should_fix",
+      "status": "applied",
+      "action": "セクション9のworktree-status-helper.ts変更内容にnew Date()変換の必要性を反映",
+      "section": "9"
+    },
+    {
+      "id": "DR2-006",
+      "severity": "should_fix",
+      "status": "applied",
+      "action": "セクション9のcurrent-output/route.ts変更内容にL111の値をnew Date()で変換しL86の第3引数に渡す具体的手順を記載",
+      "section": "9"
+    },
+    {
+      "id": "DR2-007",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "action": "セクション5に対策3によるステータス判定精度向上と返却値変化の可能性に関する注記を追加",
+      "section": "5"
+    },
+    {
+      "id": "DR2-008",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "action": "対応不要。設計書の記載は正確であることを確認済み",
+      "section": "3.3"
+    },
+    {
+      "id": "DR2-009",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "action": "対応不要。設計書の記載は正確であることを確認済み",
+      "section": "4"
+    },
+    {
+      "id": "DR2-010",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "action": "対応不要。設計書のimportパス記載は正確であることを確認済み",
+      "section": "9"
+    }
+  ],
+  "design_doc_updated": true,
+  "summary": {
+    "total": 10,
+    "applied": 7,
+    "skipped": 3
+  }
+}

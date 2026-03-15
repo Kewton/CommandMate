@@ -1,0 +1,104 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "review_date": "2026-03-16",
+  "findings": [
+    {
+      "id": "DR2-001",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "CurrentOutputResponse型にlastServerResponseTimestampフィールドが未定義",
+      "description": "設計書セクション3.1では「CurrentOutputResponse型 -> 型追加」と記載し、fetchCurrentOutput()でlastServerResponseTimestampをuseStateに保存するデータフローを記述している。しかし実際のCurrentOutputResponse型(WorktreeDetailRefactored.tsx L116-L132)にはlastServerResponseTimestampフィールドが存在しない。APIレスポンス(current-output/route.ts L139)では既にlastServerResponseTimestampを返却しているが、クライアント側の型定義に含まれていないため、TypeScriptの型チェックで値にアクセスできない。設計書はこの欠落を「対策1」として正しく認識しているが、変更内容として「型追加」と記載するだけでなく、具体的にどのフィールドを追加するか(lastServerResponseTimestamp: number | null)を明記すべきである。",
+      "location": "設計書セクション3.1 / src/components/worktree/WorktreeDetailRefactored.tsx L116-L132",
+      "recommendation": "設計書の対策1変更内容に、CurrentOutputResponse型への具体的なフィールド追加仕様を記載する: lastServerResponseTimestamp?: number | null"
+    },
+    {
+      "id": "DR2-002",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "useAutoYes呼び出しでlastServerResponseTimestampが渡されていない(設計書の前提と実装の乖離)",
+      "description": "設計書セクション4のデータフローでは「useAutoYes({ ..., lastServerResponseTimestamp }) に渡す」と記載。useAutoYes.ts(L24-L37)のUseAutoYesParams型は既にlastServerResponseTimestamp?: number | nullをオプショナルパラメータとして定義済み。しかし実際のuseAutoYes呼び出し(WorktreeDetailRefactored.tsx L961-L967)ではlastServerResponseTimestampを渡していない。設計書はこれを「対策1」で修正する前提だが、設計書の「間接影響(変更不要)」セクション(セクション9)にuseAutoYes.tsを「引数が正しく渡されるようになる」として列挙しており、useAutoYes.ts自体の変更は不要という記載と整合する。ただし、WorktreeDetailRefactored.tsxにuseState追加とuseAutoYes引数追加が必要であることが変更ファイル一覧には記載されているものの、fetchCurrentOutput内でdata.lastServerResponseTimestampをstateに保存するコードの追加が必要であることが具体的に記述されていない。",
+      "location": "設計書セクション4, セクション9 / src/components/worktree/WorktreeDetailRefactored.tsx L961-L967, L352-L398",
+      "recommendation": "設計書の対策1変更内容を、fetchCurrentOutput()内でのsetState呼び出し追加を含む具体的なコード変更箇所として明記する。例: fetchCurrentOutput内でdata.lastServerResponseTimestampをsetLastServerResponseTimestamp()で保存し、useAutoYes呼び出しにlastServerResponseTimestampを追加。"
+    },
+    {
+      "id": "DR2-003",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "startAutoYesPolling()の現在の実装は「毎回stop->create」であり、設計書の「Before」記述と一致するが冪等化の差分が不明確",
+      "description": "設計書セクション3.2では現在のstartAutoYesPolling()を「毎回破棄・再作成」と記載。実際のコード(auto-yes-poller.ts L486-L516)を確認すると、L492でexistingPollerがある場合にstopAutoYesPolling(worktreeId)を呼び出し、L497-L506で新規pollerStateを作成している。この「Before」の記述は正確である。しかし設計書の「After」で提案するcliToolId一致チェック(既存ポーラーあり && cliToolId一致 -> already_running)の具体的な実装箇所が不明確。L486-L494の間にcliToolId比較ロジックを挿入する必要があるが、設計書には行番号や具体的な変更差分が記載されていない。",
+      "location": "設計書セクション3.2 / src/lib/auto-yes-poller.ts L469-L516",
+      "recommendation": "設計書に対策2の具体的な実装差分を追記する。具体的には、L492のif (existingPoller)ブロック内でgetPollerState(worktreeId)?.cliToolIdとリクエストのcliToolIdを比較し、一致する場合は{started: true, reason: 'already_running'}を返却、不一致の場合のみstop->createとする。"
+    },
+    {
+      "id": "DR2-004",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "detectSessionStatus()の第3引数lastOutputTimestampの型はDateであり、lastServerResponseTimestamp(number)との型変換が未記載",
+      "description": "設計書セクション3.3では「detectSessionStatus()の既存オプショナルパラメータlastOutputTimestampを呼び出し側で活用する」と記載。実際のdetectSessionStatus()シグネチャ(status-detector.ts L152-L156)は lastOutputTimestamp?: Date (Date型)。一方、getLastServerResponseTimestamp()の戻り値(auto-yes-poller.ts L125-L128)はnumber | null (Date.now()のミリ秒値)。設計書のセマンティックギャップに関する議論(セクション3.3)は概念的な差異を扱っているが、実際のTypeScript型の不一致(number -> Date変換が必要)には言及していない。呼び出し側でnew Date(timestamp)による変換が必要。",
+      "location": "設計書セクション3.3 / src/lib/detection/status-detector.ts L152-L156, src/lib/auto-yes-poller.ts L125-L128",
+      "recommendation": "設計書に型変換の記述を追加する。具体的には、worktree-status-helper.tsおよびcurrent-output/route.tsでgetLastServerResponseTimestamp()の戻り値をnew Date(timestamp)で変換してからdetectSessionStatus()に渡す必要があることを明記する。"
+    },
+    {
+      "id": "DR2-005",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "worktree-status-helper.tsのdetectSessionStatus()呼び出しでlastOutputTimestampが未使用(現状確認)",
+      "description": "設計書セクション9の変更ファイル一覧では、worktree-status-helper.tsに「detectSessionStatus()にlastOutputTimestamp引数追加、auto-yes-managerからのimport追加」と記載。実際のworktree-status-helper.ts L91でのdetectSessionStatus()呼び出しはdetectSessionStatus(output, cliToolId)の2引数のみで、lastOutputTimestampを渡していない。これは設計書が「これから変更する」内容を記載しているため不整合ではなく、設計書の「変更内容」として正しいが、現状のworktree-status-helper.tsにはauto-yes-managerからのimportが存在しないことも確認済み。設計書はこの依存追加の影響を正しく分析している(セクション9「新規モジュール間依存」)。",
+      "location": "設計書セクション9 / src/lib/session/worktree-status-helper.ts L91",
+      "recommendation": "問題なし。設計書の記載は「変更予定」として正確。ただし、DR2-004で指摘した型変換(number -> Date)の必要性をworktree-status-helper.tsの変更内容にも反映すべき。"
+    },
+    {
+      "id": "DR2-006",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "current-output/route.tsのdetectSessionStatus()呼び出しでlastOutputTimestampが未使用(現状確認)",
+      "description": "設計書セクション9では、current-output/route.tsに「detectSessionStatus()にlastOutputTimestamp引数追加」(変更量: 極小)と記載。実際のcurrent-output/route.ts L86でのdetectSessionStatus()呼び出しはdetectSessionStatus(output, cliToolId)の2引数のみ。同ファイルL111でgetLastServerResponseTimestamp(params.id)を既に呼び出しているため、この値をdetectSessionStatus()の第3引数に渡すことは容易。設計書の変更内容は実装可能だが、DR2-004と同じく型変換(number | null -> Date | undefined)の記載が必要。",
+      "location": "設計書セクション9 / src/app/api/worktrees/[id]/current-output/route.ts L86, L111",
+      "recommendation": "設計書にcurrent-output/route.tsでの具体的な変更を明記する。L111で取得したlastServerResponseTimestampをnew Date()で変換し、L86のdetectSessionStatus()第3引数に渡す。nullの場合はundefinedを渡す。"
+    },
+    {
+      "id": "DR2-007",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "設計書の「API設計: 変更なし」記述と対策3の実質的なレスポンス値変更",
+      "description": "設計書セクション5「API設計: 変更なし」では「既存APIのレスポンス形式・エンドポイントに変更なし」と記載。しかし対策3でdetectSessionStatus()にlastOutputTimestampを渡すことにより、current-output APIのステータス判定結果(isPromptWaiting, thinking等の値)が変化する可能性がある。これは「APIの形式」の変更ではなく「返却値の精度向上」であるため厳密にはAPI形式変更ではないが、クライアントの挙動に影響を与えるため、注記として「ステータス判定結果の精度が向上し、返却値が変化する場合がある」と記載する方が正確。",
+      "location": "設計書セクション5",
+      "recommendation": "セクション5に「ステータス判定の精度向上により、同一出力に対するstatus/thinking/isPromptWaiting等の返却値が従来と異なる場合がある」という注記を追加する。"
+    },
+    {
+      "id": "DR2-008",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "STALE_OUTPUT_THRESHOLD_MS = 5000msの値は設計書と一致(確認済み)",
+      "description": "設計書セクション3.3でSTALE_OUTPUT_THRESHOLD_MS = 5000msと記載。status-detector.ts L134でconst STALE_OUTPUT_THRESHOLD_MS: number = 5000;と定義されており、完全に一致する。問題なし。",
+      "location": "設計書セクション3.3 / src/lib/detection/status-detector.ts L134",
+      "recommendation": "対応不要。設計書の記載は正確。"
+    },
+    {
+      "id": "DR2-009",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "AutoYesPollerState型の設計書記載とコードの一致確認(確認済み)",
+      "description": "設計書セクション4で言及されるAutoYesPollerState.lastServerResponseTimestampフィールドは、auto-yes-poller.ts L42-L59のAutoYesPollerState interfaceに定義されている(L52: lastServerResponseTimestamp: number | null)。cliToolIdフィールド(L46)も存在し、冪等化ロジックでの比較に使用可能。設計書の記載は正確。",
+      "location": "設計書セクション4 / src/lib/auto-yes-poller.ts L42-L59",
+      "recommendation": "対応不要。設計書の記載は正確。"
+    },
+    {
+      "id": "DR2-010",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "auto-yes-manager.tsバレルファイルからのgetLastServerResponseTimestamp再エクスポート確認(確認済み)",
+      "description": "設計書セクション9の新規モジュール間依存では、worktree-status-helper.tsがauto-yes-manager.tsからgetLastServerResponseTimestamp()をimportすると記載。auto-yes-manager.ts(バレルファイル)L48でgetLastServerResponseTimestampを再エクスポートしていることを確認。設計書のimportパス記載は正確。",
+      "location": "設計書セクション9 / src/lib/polling/auto-yes-manager.ts L48",
+      "recommendation": "対応不要。設計書の記載は正確。"
+    }
+  ],
+  "summary": {
+    "total_findings": 10,
+    "must_fix": 3,
+    "should_fix": 3,
+    "nice_to_have": 4
+  }
+}

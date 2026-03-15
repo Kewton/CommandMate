@@ -1,0 +1,98 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "focus_area": "通常",
+  "iteration": 2,
+  "review_date": "2026-03-16",
+  "previous_findings_status": [
+    {
+      "finding_id": "F1-001",
+      "status": "addressed",
+      "comment": "問題Bの行番号がL486-494（既存ポーラー破棄）、L496-506（新規作成）に修正されており、実際のauto-yes-poller.tsコードと一致することを確認。"
+    },
+    {
+      "finding_id": "F1-002",
+      "status": "addressed",
+      "comment": "対策3が全面改訂され、detectSessionStatus()の既存lastOutputTimestampパラメータ（L155）と時間ベースヒューリスティック（STALE_OUTPUT_THRESHOLD_MS = 5000ms、L404-417）を活用する方針に変更済み。問題Cの根本原因セクションにも既存機構の存在が追記されている。"
+    },
+    {
+      "finding_id": "F1-003",
+      "status": "addressed",
+      "comment": "対策3の変更対象ファイルがcurrent-output/route.ts（L86）とworktree-status-helper.ts（L91）の2ファイルに明確化済み。status-detector.ts自体の変更不要が明記されている。"
+    },
+    {
+      "finding_id": "F1-004",
+      "status": "addressed",
+      "comment": "対策2に「呼び出し側の影響」セクションが追加され、auto-yes/route.ts L170でのresult.started使用とalready_running時のハンドリング方針が明記されている。受入条件にもテスト項目が追加済み。"
+    },
+    {
+      "finding_id": "F1-005",
+      "status": "addressed",
+      "comment": "背景セクションにDUPLICATE_PREVENTION_WINDOW_MS = 3000の定義場所（useAutoYes.ts L36）と値が追記済み。"
+    },
+    {
+      "finding_id": "F1-006",
+      "status": "addressed",
+      "comment": "fetchCurrentOutput() L352-398、useAutoYes() L961-967に更新済み。実際のコードと一致することを確認。"
+    },
+    {
+      "finding_id": "F3-008",
+      "status": "addressed",
+      "comment": "対策1の変更内容が4ステップとして明確化済み。useCallback依存配列への影響なしの注記も含まれている。"
+    },
+    {
+      "finding_id": "F3-001",
+      "status": "addressed",
+      "comment": "対策3に「注意: getLastServerResponseTimestamp()のキー単位について」セクションが追加され、worktreeId単位での管理、CLIツール間干渉リスク、スコープ外判断が明記されている。"
+    },
+    {
+      "finding_id": "F3-002",
+      "status": "addressed",
+      "comment": "受入条件に「worktree-status-helper.tsの変更に対するユニットテストを追加する（既存テストファイルが存在しないため新規作成）」が追加済み。"
+    },
+    {
+      "finding_id": "F3-003",
+      "status": "addressed",
+      "comment": "「対策間の依存関係」セクションが新設され、対策2のポーラー再利用が対策3のタイムスタンプ保持の前提条件であることが明記されている。"
+    },
+    {
+      "finding_id": "F3-006",
+      "status": "addressed",
+      "comment": "session-cleanup.tsが間接影響ファイルセクションに追加済み。クリーンアップ後の再起動シナリオでの影響なしが注記されている。"
+    },
+    {
+      "finding_id": "F3-009",
+      "status": "addressed",
+      "comment": "resource-cleanup.tsが間接影響ファイルセクションに追加済み。getAutoYesPollerWorktreeIds()への影響なしが注記されている。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F5-001",
+      "severity": "nice_to_have",
+      "category": "accuracy",
+      "title": "問題Bの行番号範囲がやや不正確",
+      "description": "Issue本文では問題Bについて「既存ポーラーがあっても stopAutoYesPolling() で完全破棄（L486-494）」と記載しているが、L486は`const existingPoller = autoYesPollerStates.has(worktreeId)`であり、実際のstop処理はL491-494（if文内のstopAutoYesPolling呼び出し）である。L486-490は同時実行数チェック（DoS防御）であり、ポーラー破棄とは無関係。厳密にはL491-494が正確な範囲。",
+      "recommendation": "L486-494をL491-494に修正するか、または行番号を省略して「startAutoYesPolling()関数内の既存ポーラー停止処理」と記載する。影響は軽微であり、実装者が該当箇所を特定するのに支障はない。",
+      "affected_section": "## 根本原因 > 問題B"
+    },
+    {
+      "id": "F5-002",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "worktree-status-helper.tsでgetLastServerResponseTimestampのimport追加が必要であることが未言及",
+      "description": "対策3ではworktree-status-helper.tsでdetectSessionStatus()にlastOutputTimestampを渡すと記載されている。このためにはgetLastServerResponseTimestamp(worktreeId)を呼ぶ必要があるが、現在worktree-status-helper.tsにはこの関数のimportがない。新たにauto-yes-managerからのimport追加が必要になる。Issueにはこのimport追加の必要性が明示されていない。",
+      "recommendation": "対策3の変更内容に「worktree-status-helper.tsにgetLastServerResponseTimestampのimportを追加する」ことを明記する。ただし実装者にとっては自明であり、必須ではない。",
+      "affected_section": "## 対策一覧 > 対策3"
+    }
+  ],
+  "summary": {
+    "total_findings": 2,
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 2,
+    "previous_addressed": 12,
+    "previous_not_addressed": 0
+  },
+  "overall_assessment": "Issue #501は4段階のレビュー・修正サイクルを経て非常に高品質な状態に達している。全12件の既存指摘事項（Stage 1: 6件、Stage 3: 6件適用）が全て適切に対応されている。行番号は全て実際のコードと一致しており（L116-132, L352-398, L486-506, L961-967, L155, L404-417, L86, L91, L139, L170-174等）、根本原因分析、対策の依存関係、影響範囲の記述が正確かつ明確である。新たに発見された問題はnice_to_haveレベルの2件のみであり、実装に支障をきたすものではない。本Issueは実装着手可能な状態である。"
+}

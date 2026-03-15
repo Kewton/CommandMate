@@ -1,0 +1,63 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー 指摘事項対応",
+  "applied_findings": [
+    {
+      "id": "DR1-004",
+      "severity": "must_fix",
+      "action": "applied",
+      "description": "lastServerResponseTimestampをlastOutputTimestampとして渡す際のセマンティックギャップを文書化。近似の妥当性根拠（因果関係、時間差の許容範囲、判定の方向性）をセクション3.3に追加。",
+      "affected_section": "3.3 対策3: 既存機構活用パターン"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "should_fix",
+      "action": "applied",
+      "description": "worktree-status-helper.tsからauto-yes-managerへの新規import依存を「新規モジュール間依存」サブセクションとしてセクション9に明記。依存方向が意図的であることと、KISS原則に基づく直接import参照の判断根拠を文書化。",
+      "affected_section": "9. 変更ファイル一覧"
+    },
+    {
+      "id": "DR1-008",
+      "severity": "should_fix",
+      "action": "applied",
+      "description": "対策間の依存関係をセクション1（アーキテクチャ設計）とセクション4（データフロー設計）に追加。対策2がタイムスタンプ連続性の前提条件であることを図示・箇条書きで明記。",
+      "affected_section": "1. アーキテクチャ設計 / 4. データフロー設計"
+    },
+    {
+      "id": "DR1-001",
+      "severity": "nice_to_have",
+      "action": "skipped",
+      "description": "現時点では変更不要。レビューサマリセクション(セクション11)に記録。"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "nice_to_have",
+      "action": "skipped",
+      "description": "変更不要。レビューサマリセクション(セクション11)に記録。"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "nice_to_have",
+      "action": "skipped",
+      "description": "reasonフィールドは害がなく有用。レビューサマリセクション(セクション11)に記録。"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "nice_to_have",
+      "action": "skipped",
+      "description": "良い設計判断として記録。レビューサマリセクション(セクション11)に記録。"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "nice_to_have",
+      "action": "skipped",
+      "description": "2箇所の重複は許容範囲。レビューサマリセクション(セクション11)に記録。"
+    }
+  ],
+  "design_doc_updated": true,
+  "summary": {
+    "total": 8,
+    "applied": 3,
+    "skipped": 5
+  }
+}

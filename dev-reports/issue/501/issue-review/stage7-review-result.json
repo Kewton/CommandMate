@@ -1,0 +1,109 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "review_date": "2026-03-16",
+  "previous_findings_status": [
+    {
+      "id": "F3-001",
+      "title": "worktree-status-helper.ts で lastOutputTimestamp を渡す際のデータソース未特定",
+      "status": "addressed",
+      "evidence": "Issue の対策3に「注意: getLastServerResponseTimestamp() のキー単位について」セクションが追加され、worktreeId 単位であること、CLIツール間干渉リスク、スコープ外判断が明記されている"
+    },
+    {
+      "id": "F3-002",
+      "title": "worktree-status-helper.ts のテストファイルが存在しない",
+      "status": "addressed",
+      "evidence": "受入条件に「worktree-status-helper.ts の変更に対するユニットテストを追加する（既存テストファイルが存在しないため新規作成）」が追加されている"
+    },
+    {
+      "id": "F3-003",
+      "title": "対策2のポーラー再利用により対策3の lastServerResponseTimestamp の有効期間が延長される",
+      "status": "addressed",
+      "evidence": "「対策間の依存関係」セクションが追加され、対策2のポーラー再利用が対策3のタイムスタンプ保持の前提条件であることが明記されている"
+    },
+    {
+      "id": "F3-004",
+      "title": "セッション起動直後のポーラー開始タイミング",
+      "status": "not_addressed",
+      "evidence": "Issue にはセッション起動直後の baseline=0 問題に関する注記が追加されていない。ただし severity が should_fix であり、既存の問題が対策2で悪化するわけではないため、ドキュメントコメントでの対応で十分"
+    },
+    {
+      "id": "F3-005",
+      "title": "auto-yes API レスポンスの pollingStarted フィールドの意味変更",
+      "status": "addressed",
+      "evidence": "対策2の変更内容に「呼び出し側の影響」として auto-yes/route.ts L170 のハンドリング変更が必要であることが記載されている"
+    },
+    {
+      "id": "F3-006",
+      "title": "session-cleanup.ts への影響が未記載",
+      "status": "addressed",
+      "evidence": "間接影響ファイルに session-cleanup.ts が追加され、クリーンアップ後の再起動シナリオが正常動作することが注記されている"
+    },
+    {
+      "id": "F3-007",
+      "title": "useAutoYes テストで lastServerResponseTimestamp のテストケースが不足",
+      "status": "addressed",
+      "evidence": "受入条件に「サーバー応答後3秒以内にクライアントが同一プロンプトに応答しないことをテストで確認」が含まれている"
+    },
+    {
+      "id": "F3-008",
+      "title": "対策1で WorktreeDetailRefactored.tsx に lastServerResponseTimestamp の state 追加が必要",
+      "status": "addressed",
+      "evidence": "対策1の変更内容が4ステップとして明確化されている: (1) 型追加、(2) useState追加、(3) setState呼び出し、(4) useAutoYes引数追加"
+    },
+    {
+      "id": "F3-009",
+      "title": "resource-cleanup.ts への影響確認",
+      "status": "addressed",
+      "evidence": "間接影響ファイルに resource-cleanup.ts が追加され、対策2による影響がないことが注記されている"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F7-001",
+      "severity": "should_fix",
+      "category": "missing_impact",
+      "title": "StartPollingResult 型の拡張が明記されていない",
+      "description": "対策2では startAutoYesPolling() の戻り値に 'already_running' の reason を追加すると記載されているが、StartPollingResult 型（auto-yes-poller.ts L62-67）は現在 { started: boolean; reason?: string } であり、型自体の変更は不要（reason は既に string 型）。しかし、auto-yes-manager.ts のバレルファイルで StartPollingResult を re-export しており、auto-yes/route.ts は auto-yes-manager からこの型を間接的に利用している。対策2で started: true を返す方針にする場合は型変更不要だが、started: false + reason: 'already_running' を返す方針にする場合、auto-yes/route.ts L172 の warn ログが不要に出力される。Issue には「started: true を返すか、reason による分岐を追加するか」の2案が記載されているが、どちらを採用するかが未確定のまま。実装時の判断ブレを防ぐため、方針を確定させるべき。",
+      "recommendation": "対策2で already_running の場合は started: true を返す方針を推奨する。理由: (1) API レスポンスの pollingStarted の意味が変わらない、(2) auto-yes/route.ts の変更が最小限（warn ログの条件変更不要）、(3) クライアント側への影響ゼロ。Issueの対策2に「already_running の場合は started: true を返す」と明記する。",
+      "affected_section": "対策2"
+    },
+    {
+      "id": "F7-002",
+      "severity": "should_fix",
+      "category": "test_coverage",
+      "title": "auto-yes-poller.ts のポーラー再利用テストが既存テストファイルに必要",
+      "description": "tests/unit/lib/auto-yes-manager.test.ts に startAutoYesPolling のテストが存在するが、同一 cliToolId で再呼び出しした場合にポーラーが再作成されないことを検証するテストケースが必要。受入条件には「同一 cliToolId で startAutoYesPolling() を再呼び出ししてもポーラーが再作成されないことをテストで確認」とあるが、このテストを追加するファイルが明示されていない。既存の auto-yes-manager.test.ts に追加するのが自然だが、auto-yes-poller.ts に直接的なテストファイルは存在しない（auto-yes-manager.test.ts がバレルファイル経由でテストしている）。",
+      "recommendation": "受入条件に「tests/unit/lib/auto-yes-manager.test.ts にポーラー再利用テストケースを追加」と具体的なテストファイル名を明記する。",
+      "affected_section": "受入条件"
+    },
+    {
+      "id": "F7-003",
+      "severity": "nice_to_have",
+      "category": "edge_case",
+      "title": "対策2でcliToolIdが変わった場合の競合タイミング",
+      "description": "対策2では cliToolId が変わった場合のみポーラーを停止・再作成するとされている。しかし、ポーラー停止(stopAutoYesPolling)と新規作成の間にごく短い期間がある。この間に別のリクエスト（例: current-output API）が getLastServerResponseTimestamp() を呼ぶと、ポーラーが delete された状態のため null が返る。Node.js はシングルスレッドであるため、同期的に stop -> create が完了すればこの競合は発生しない。現在の startAutoYesPolling は同期的に autoYesPollerStates.set() まで実行するため、実際には問題にならない。",
+      "recommendation": "コードコメントで「stop -> create は同期的に実行されるため競合なし」と注記することを検討する。",
+      "affected_section": "対策2"
+    },
+    {
+      "id": "F7-004",
+      "severity": "nice_to_have",
+      "category": "missing_impact",
+      "title": "worktrees/route.ts と worktrees/[id]/route.ts が detectWorktreeSessionStatus の呼び出し元として未記載",
+      "description": "detectWorktreeSessionStatus() は worktree-status-helper.ts で定義され、src/app/api/worktrees/route.ts と src/app/api/worktrees/[id]/route.ts の2箇所から呼ばれている。対策3で worktree-status-helper.ts の detectSessionStatus() 呼び出しに lastOutputTimestamp を追加する場合、detectWorktreeSessionStatus の関数シグネチャ自体は変わらない（内部で getLastServerResponseTimestamp を呼ぶため）。ただし、これらの呼び出し元が間接的に影響を受ける（ステータス検出結果が変わる）ことが間接影響ファイルに記載されていない。",
+      "recommendation": "間接影響ファイルに worktrees/route.ts と worktrees/[id]/route.ts を追加し、detectWorktreeSessionStatus の内部変更により返却値のステータス判定が改善されることを注記する。",
+      "affected_section": "関連ファイル"
+    }
+  ],
+  "summary": {
+    "total_findings": 4,
+    "must_fix": 0,
+    "should_fix": 2,
+    "nice_to_have": 2,
+    "previous_addressed": 8,
+    "previous_not_addressed": 1
+  }
+}

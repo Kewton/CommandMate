@@ -1,0 +1,42 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "iteration": 2,
+  "applied_findings": [
+    {
+      "id": "F7-001",
+      "severity": "should_fix",
+      "title": "StartPollingResult 型の拡張が明記されていない",
+      "action": "applied",
+      "changes": "対策2の変更内容を更新: already_running の場合は started: true を返す方針を確定。呼び出し側の影響セクションも更新し、既存ハンドリングロジックの変更が不要であることを明記。"
+    },
+    {
+      "id": "F7-002",
+      "severity": "should_fix",
+      "title": "auto-yes-poller.ts のポーラー再利用テストが既存テストファイルに必要",
+      "action": "applied",
+      "changes": "受入条件の2項目（ポーラー再利用テスト、cliToolId変更テスト）にテストファイル名 tests/unit/lib/auto-yes-manager.test.ts を明記。"
+    },
+    {
+      "id": "F7-003",
+      "severity": "nice_to_have",
+      "title": "対策2でcliToolIdが変わった場合の競合タイミング",
+      "action": "applied",
+      "changes": "対策2に「注意: stop -> create の競合について」セクションを追加。Node.js シングルスレッドかつ同期実行により競合が発生しないことを注記。"
+    },
+    {
+      "id": "F7-004",
+      "severity": "nice_to_have",
+      "title": "worktrees/route.ts と worktrees/[id]/route.ts が detectWorktreeSessionStatus の呼び出し元として未記載",
+      "action": "applied",
+      "changes": "間接影響ファイルに worktrees/route.ts と worktrees/[id]/route.ts を追加。detectWorktreeSessionStatus の内部変更によりステータス判定結果が改善されることを注記。"
+    }
+  ],
+  "issue_updated": true,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/501",
+  "summary": {
+    "total_findings": 4,
+    "applied": 4,
+    "skipped": 0
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-03-16",
+  "findings": [
+    {
+      "id": "F1-001",
+      "severity": "should_fix",
+      "category": "accuracy",
+      "title": "問題Bの行番号が実際のコードと不一致",
+      "description": "Issue本文では auto-yes-poller.ts の行番号を L525-528（既存ポーラー破棄）、L531-540（新規作成）と記載しているが、実際のコードでは L486-494（既存ポーラー破棄）、L496-506（新規ポーラー作成）である。約40行のズレがある。",
+      "recommendation": "行番号を L486-494 および L496-506 に修正する。または、行番号を省略して関数名 startAutoYesPolling() のみで参照する方式に変更する。行番号はコード変更で容易にズレるため、後者を推奨。",
+      "affected_section": "## 根本原因 > 問題B"
+    },
+    {
+      "id": "F1-002",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "detectSessionStatus() の既存 lastOutputTimestamp パラメータが未言及",
+      "description": "対策3では status-detector.ts のステータス検出クールダウンを新規実装するかのように記載されているが、detectSessionStatus() は既に第3引数として lastOutputTimestamp?: Date パラメータを受け付けており（L155）、時間ベースヒューリスティック（STALE_OUTPUT_THRESHOLD_MS = 5000ms, L404-417）も実装済みである。current-output/route.ts L86 および worktree-status-helper.ts L91 でこのパラメータを渡していないだけで、機構自体は存在する。",
+      "recommendation": "対策3の記述を修正し、既存の lastOutputTimestamp パラメータを活用する方針を明記する。具体的には: (1) current-output/route.ts で detectSessionStatus() 呼び出し時に lastServerResponseTimestamp を Date に変換して渡す、(2) worktree-status-helper.ts でも同様に渡す。これにより新規のクールダウン機構を追加する必要がなくなり、実装範囲が縮小する。",
+      "affected_section": "## 対策一覧 > 対策3"
+    },
+    {
+      "id": "F1-003",
+      "severity": "should_fix",
+      "category": "clarity",
+      "title": "対策3の変更対象ファイルに曖昧な 'or' 表記がある",
+      "description": "対策3の変更対象ファイルが 'src/lib/detection/status-detector.ts or src/lib/session/worktree-status-helper.ts' と記載されており、どちらを変更するのか不明確である。関連ファイルセクションでも同じ曖昧さがある。",
+      "recommendation": "既存の lastOutputTimestamp パラメータ活用方針の場合、変更対象は呼び出し側の current-output/route.ts と worktree-status-helper.ts の2ファイルとなる。status-detector.ts 自体は変更不要。この点を明確にする。",
+      "affected_section": "## 対策一覧 > 対策3 および ## 関連ファイル"
+    },
+    {
+      "id": "F1-004",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "auto-yes API POST ハンドラの startAutoYesPolling 戻り値変更への影響記載が不足",
+      "description": "対策2で startAutoYesPolling() の戻り値に 'already_running' reason を追加すると記載されているが、auto-yes/route.ts L170 で result.started を使って pollingStarted を判定しており、この呼び出し側での影響（started が false で reason が 'already_running' の場合のハンドリング）が明確でない。",
+      "recommendation": "対策2の変更内容に、auto-yes/route.ts 側で already_running を正常系として扱うロジック変更を追記する。例: started: true を返すか、reason による分岐を追加する。",
+      "affected_section": "## 対策一覧 > 対策2"
+    },
+    {
+      "id": "F1-005",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "useAutoYes フック内の DUPLICATE_PREVENTION_WINDOW_MS 定数値が未記載",
+      "description": "Issue本文では '3秒ウィンドウ' と記載しているが、useAutoYes.ts 内の DUPLICATE_PREVENTION_WINDOW_MS の具体的な値への参照がない。実装確認では L77 で timeSinceServerResponse < DUPLICATE_PREVENTION_WINDOW_MS と比較しており、この定数の定義箇所を明記するとレビュアーの確認が容易になる。",
+      "recommendation": "背景セクションに DUPLICATE_PREVENTION_WINDOW_MS の定義場所と値（3000ms）を追記する。",
+      "affected_section": "## 背景"
+    },
+    {
+      "id": "F1-006",
+      "severity": "nice_to_have",
+      "category": "accuracy",
+      "title": "WorktreeDetailRefactored.tsx の行番号が微妙にずれる可能性",
+      "description": "Issue は CurrentOutputResponse 型を L116-132、fetchCurrentOutput() を L353-400、useAutoYes() 呼び出しを L966-972 と記載している。実際のコードでは CurrentOutputResponse は L116-132（一致）、fetchCurrentOutput は L352-398（1-2行ズレ）、useAutoYes は L961-967（5行ズレ）である。致命的ではないが正確性に影響する。",
+      "recommendation": "行番号の微小なズレは許容範囲だが、可能であれば最新のコードに合わせて更新する。",
+      "affected_section": "## 根本原因 > 問題A"
+    }
+  ],
+  "summary": {
+    "total_findings": 6,
+    "must_fix": 0,
+    "should_fix": 3,
+    "nice_to_have": 3
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "L116-132, L352-398, L961-967",
+      "relevance": "対策1の変更対象。CurrentOutputResponse型、fetchCurrentOutput関数、useAutoYes呼び出し"
+    },
+    {
+      "file": "src/lib/auto-yes-poller.ts",
+      "lines": "L486-506",
+      "relevance": "対策2の変更対象。startAutoYesPolling関数のポーラー破棄・再作成ロジック"
+    },
+    {
+      "file": "src/lib/detection/status-detector.ts",
+      "lines": "L152-156, L404-417",
+      "relevance": "対策3関連。detectSessionStatus関数の既存lastOutputTimestampパラメータと時間ベースヒューリスティック"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "lines": "L86, L111, L139",
+      "relevance": "detectSessionStatusの呼び出し元。lastServerResponseTimestampを返却済み"
+    },
+    {
+      "file": "src/lib/session/worktree-status-helper.ts",
+      "lines": "L91",
+      "relevance": "detectSessionStatusの呼び出し元。lastOutputTimestamp未使用"
+    },
+    {
+      "file": "src/hooks/useAutoYes.ts",
+      "lines": "L36, L54-61, L74-81",
+      "relevance": "対策1で正しく値が渡るようになる対象。フック自体は変更不要"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/auto-yes/route.ts",
+      "lines": "L160-177",
+      "relevance": "対策2のstartAutoYesPolling戻り値変更の影響を受ける"
+    }
+  ],
+  "overall_assessment": "Issue #501 は問題の分析が的確で、根本原因の特定も正確である。3つの問題（A: タイムスタンプ未伝播、B: ポーラー再作成、C: ステータス検出タイムラグ）の連鎖関係も明確に記述されている。主な改善点は: (1) 行番号のズレ修正、(2) 対策3で既存の detectSessionStatus() lastOutputTimestamp パラメータを活用する方針への変更、(3) 対策3の変更対象ファイルの明確化。Must Fix レベルの問題はなく、全体として高品質なIssueである。"
+}

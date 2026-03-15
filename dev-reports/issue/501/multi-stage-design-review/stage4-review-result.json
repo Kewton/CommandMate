@@ -1,0 +1,86 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "review_date": "2026-03-16",
+  "design_doc": "dev-reports/design/issue-501-auto-yes-dual-response-fix-design-policy.md",
+  "findings": [
+    {
+      "id": "SEC4-001",
+      "severity": "nice_to_have",
+      "category": "入力バリデーション",
+      "title": "lastServerResponseTimestamp の型チェックがクライアント側で未記載",
+      "description": "設計書セクション3.1で CurrentOutputResponse 型に lastServerResponseTimestamp?: number | null を追加し、fetchCurrentOutput() 内で setLastServerResponseTimestamp(data.lastServerResponseTimestamp ?? null) と保存する記述がある。APIレスポンスはサーバー側で getLastServerResponseTimestamp() (number | null を返す) から取得した値を JSON に含めるため、正規のサーバーからのレスポンスでは常に number | null となる。しかし、クライアント側で typeof チェックを行わない場合、中間者攻撃やプロキシ改竄により文字列等の不正な値が注入された場合に Date.now() - lastServerResponseTimestamp の比較が NaN となり、DUPLICATE_PREVENTION_WINDOW_MS チェックが常にスキップされる可能性がある。ただし、本アプリケーションは localhost/LAN 内での利用を想定しており、認証ミドルウェア (middleware.ts) でトークン認証が行われているため、実際のリスクは極めて低い。",
+      "recommendation": "実装時に typeof data.lastServerResponseTimestamp === 'number' のガード追加を検討する。必須ではない。",
+      "owasp_category": null,
+      "affected_files": ["src/components/worktree/WorktreeDetailRefactored.tsx"]
+    },
+    {
+      "id": "SEC4-002",
+      "severity": "nice_to_have",
+      "category": "ロジック安全性",
+      "title": "cliToolId 比較による冪等性チェックの安全性確認",
+      "description": "設計書セクション3.2の冪等性パターンでは、existingState?.cliToolId === cliToolId で文字列の厳密比較を行う。cliToolId は auto-yes/route.ts の isValidCliTool() で CLI_TOOL_IDS (readonly配列) に含まれるかをホワイトリストチェック済みであり、不正な値が渡されることはない。ポーラー状態の cliToolId もサーバー側で設定された値のみが保持される。したがって、比較がバイパスされるリスクはない。",
+      "recommendation": "対応不要。既存のバリデーションで十分。",
+      "owasp_category": null,
+      "affected_files": ["src/lib/auto-yes-poller.ts", "src/app/api/worktrees/[id]/auto-yes/route.ts"]
+    },
+    {
+      "id": "SEC4-003",
+      "severity": "nice_to_have",
+      "category": "リソース枯渇",
+      "title": "ポーラー冪等化によるリソース枯渇リスクの軽減確認",
+      "description": "設計書の対策2 (冪等起動パターン) により、同一 cliToolId での startAutoYesPolling() 再呼び出し時にポーラーの破棄・再作成が行われなくなる。既存の MAX_CONCURRENT_POLLERS 制限 (auto-yes-poller.ts L487) は引き続き有効であり、冪等化により不要なリソース消費が削減される。冪等化はリソース枯渇に対してむしろ改善方向であり、新たなリスクは生じない。",
+      "recommendation": "対応不要。既存の保護が維持されている。",
+      "owasp_category": null,
+      "affected_files": ["src/lib/auto-yes-poller.ts"]
+    },
+    {
+      "id": "SEC4-004",
+      "severity": "nice_to_have",
+      "category": "タイミング攻撃",
+      "title": "lastOutputTimestamp を利用したステータス検出のタイミング操作リスク",
+      "description": "設計書の対策3では、サーバー側の getLastServerResponseTimestamp() (Date.now() で記録されたミリ秒値) を detectSessionStatus() の lastOutputTimestamp に変換して渡す。この値はサーバー側のメモリ内 Map で管理されており、外部からの直接操作は不可能である。クライアントからのリクエストでタイムスタンプを操作する経路も存在しない (API は GET のみで、タイムスタンプを受け取るパラメータがない)。タイミング攻撃のベクタは存在しない。",
+      "recommendation": "対応不要。タイムスタンプはサーバー側で完全に管理されている。",
+      "owasp_category": null,
+      "affected_files": ["src/app/api/worktrees/[id]/current-output/route.ts", "src/lib/session/worktree-status-helper.ts"]
+    },
+    {
+      "id": "SEC4-005",
+      "severity": "nice_to_have",
+      "category": "情報露出",
+      "title": "lastServerResponseTimestamp のAPIレスポンスへの露出",
+      "description": "lastServerResponseTimestamp は既に current-output API レスポンスに含まれている (current-output/route.ts L139)。本設計での変更はクライアント側での利用 (型定義追加と useState 保存) であり、新たなデータ露出は発生しない。タイムスタンプ値自体は Date.now() のミリ秒値であり、サーバーの内部処理タイミング情報を含むが、Auto-Yes ポーラーがプロンプトに応答した時刻という限定的な情報であり、機密性は低い。認証済みユーザーのみがアクセス可能。",
+      "recommendation": "対応不要。既存のデータ露出範囲に変更なし。",
+      "owasp_category": null,
+      "affected_files": ["src/app/api/worktrees/[id]/current-output/route.ts"]
+    },
+    {
+      "id": "SEC4-006",
+      "severity": "nice_to_have",
+      "category": "tmuxインジェクション",
+      "title": "新規 tmux コマンドインジェクション経路の不在確認",
+      "description": "本設計の3つの対策はいずれも tmux コマンドの呼び出しパターンを変更しない。対策1はクライアント側の型定義と state 管理、対策2はサーバー側のポーラー起動ロジック (Map 操作のみ)、対策3は detectSessionStatus() への追加引数渡しである。既存の tmux capture/send-keys 呼び出しのサニタイズ機構に変更はなく、新規のインジェクション経路は生じない。",
+      "recommendation": "対応不要。tmux 呼び出しパターンに変更なし。",
+      "owasp_category": "A03:2021-Injection",
+      "affected_files": []
+    },
+    {
+      "id": "SEC4-007",
+      "severity": "nice_to_have",
+      "category": "認証・認可",
+      "title": "認証バイパスの不在確認",
+      "description": "本設計の変更は全て認証ミドルウェア (middleware.ts) の下流で動作する API ルートおよびクライアントフックに限定される。新規 API エンドポイントの追加はなく、既存エンドポイントのパラメータ追加もない。worktreeId のバリデーション (isValidWorktreeId) と cliToolId のホワイトリストチェック (isValidCliTool / isCliTool) は既存コードで実装済みであり、本設計はこれらを変更しない。",
+      "recommendation": "対応不要。認証・認可メカニズムに変更なし。",
+      "owasp_category": "A01:2021-Broken Access Control",
+      "affected_files": []
+    }
+  ],
+  "summary": {
+    "total_findings": 7,
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 7,
+    "overall_assessment": "セキュリティ上の重大な懸念なし。設計書セクション6の「影響なし」判断は妥当である。3つの対策はいずれもサーバー側メモリ内の状態管理とクライアント側の型定義補完に限定されており、入力バリデーション・認証・tmuxサニタイズ等の既存セキュリティ機構に変更を加えない。worktreeId/cliToolId のバリデーション、MAX_CONCURRENT_POLLERS によるリソース制限、認証ミドルウェアは全て既存のまま維持される。唯一の軽微な改善候補は、クライアント側での lastServerResponseTimestamp の typeof ガード追加 (SEC4-001) だが、認証済みアクセスのみであり優先度は低い。"
+  }
+}

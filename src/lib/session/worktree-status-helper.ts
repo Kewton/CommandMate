@@ -90,8 +90,8 @@ export async function detectWorktreeSessionStatus(
           const captureLines = cliToolId === 'opencode' ? OPENCODE_PANE_HEIGHT : 100;
           const output = await captureSessionOutput(worktreeId, cliToolId, captureLines);
           // Issue #501: Pass last server response timestamp for time-based heuristic
-          const ts = getLastServerResponseTimestamp(worktreeId);
-          const lastOutputTimestamp = ts ? new Date(ts) : undefined;
+          const lastServerResponseTs = getLastServerResponseTimestamp(worktreeId);
+          const lastOutputTimestamp = lastServerResponseTs ? new Date(lastServerResponseTs) : undefined;
           const statusResult = detectSessionStatus(output, cliToolId, lastOutputTimestamp);
           isWaitingForResponse = statusResult.status === 'waiting';
           isProcessing = statusResult.status === 'running';
