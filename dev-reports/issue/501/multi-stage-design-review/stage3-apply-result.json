@@ -1,0 +1,82 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー 指摘事項対応",
+  "applied_findings": [
+    {
+      "id": "DR3-001",
+      "severity": "must_fix",
+      "status": "applied",
+      "action": "セクション9の変更ファイル一覧のWorktreeDetailRefactored.tsxの変更内容に、CurrentOutputResponse interfaceへのlastServerResponseTimestamp?: number | null追加を明記",
+      "section": "セクション9"
+    },
+    {
+      "id": "DR3-002",
+      "severity": "must_fix",
+      "status": "applied",
+      "action": "セクション9の間接影響セクションのuseAutoYes.ts記述に、DUPLICATE_PREVENTION_WINDOW_MS(3秒)チェックがIssue #138以降事実上無効であり、対策1で初めて有効化される旨を明記",
+      "section": "セクション9"
+    },
+    {
+      "id": "DR3-003",
+      "severity": "should_fix",
+      "status": "applied",
+      "action": "セクション9のresource-cleanup.ts記述に、冪等化によりMap.has(worktreeId)がtrueを維持するため孤立検出ロジックに影響がない根拠を追記",
+      "section": "セクション9"
+    },
+    {
+      "id": "DR3-004",
+      "severity": "should_fix",
+      "status": "applied",
+      "action": "セクション9のworktrees/route.tsおよびworktrees/[id]/route.ts記述に、isProcessingフラグ変化とサイドバーステータスアイコン変化の具体的影響を明記",
+      "section": "セクション9"
+    },
+    {
+      "id": "DR3-005",
+      "severity": "should_fix",
+      "status": "applied",
+      "action": "セクション3.3にAuto-Yes未使用worktreeでの動作不変性(getLastServerResponseTimestamp()がnullを返しundefinedに変換されるため既存動作に変化なし)を明記",
+      "section": "セクション3.3"
+    },
+    {
+      "id": "DR3-006",
+      "severity": "should_fix",
+      "status": "applied",
+      "action": "セクション8に既知の制限事項サブセクションを新設し、cliToolId変更時のタイムスタンプリセットによる一時的な二重応答リスクを文書化",
+      "section": "セクション8"
+    },
+    {
+      "id": "DR3-007",
+      "severity": "should_fix",
+      "status": "applied",
+      "action": "セクション7にsetLastServerResponseTimestamp()の再レンダリング影響分析(値未変化時はReactがスキップするため実質的にプロンプト応答時のみ発生)を追記",
+      "section": "セクション7"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "DR3-008",
+      "severity": "nice_to_have",
+      "reason": "worktree-status-helper.tsのテストで同等ロジックがカバーされる。追加テストは任意"
+    },
+    {
+      "id": "DR3-009",
+      "severity": "nice_to_have",
+      "reason": "スコープ外事項に既に記載済み。再起動後はCLIセッション切断の可能性が高く実害は限定的"
+    },
+    {
+      "id": "DR3-010",
+      "severity": "nice_to_have",
+      "reason": "現状の記載で十分。追加対応不要"
+    }
+  ],
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-501-auto-yes-dual-response-fix-design-policy.md",
+  "summary": {
+    "total": 10,
+    "applied": 7,
+    "skipped": 3,
+    "must_fix_applied": 2,
+    "should_fix_applied": 5,
+    "nice_to_have_skipped": 3
+  }
+}

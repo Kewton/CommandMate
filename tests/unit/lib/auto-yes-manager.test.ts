@@ -27,6 +27,7 @@ import {
   DUPLICATE_RETRY_EXPIRY_MS,
   type AutoYesState,
   type AutoYesPollerState,
+  type StartPollingResult,
 } from '@/lib/polling/auto-yes-manager';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import {
@@ -1929,6 +1930,93 @@ describe('auto-yes-manager', () => {
       stopAutoYesPolling('wt-shrink');
       vi.mocked(captureSessionOutput).mockReset();
       vi.mocked(sendKeys).mockReset();
+    });
+  });
+
+  // ==========================================================================
+  // Issue #501: Poller Idempotency (Fix 2)
+  // ==========================================================================
+  describe('startAutoYesPolling idempotency (Issue #501)', () => {
+    it('should return already_running when same worktreeId + same cliToolId', () => {
+      setAutoYesEnabled('wt-idem', true, 3600000);
+      const first = startAutoYesPolling('wt-idem', 'claude');
+      expect(first.started).toBe(true);
+      expect(first.reason).toBeUndefined();
+      expect(getActivePollerCount()).toBe(1);
+
+      // Second call with same cliToolId should NOT recreate
+      const second: StartPollingResult = startAutoYesPolling('wt-idem', 'claude');
+      expect(second.started).toBe(true);
+      expect(second.reason).toBe('already_running');
+      expect(getActivePollerCount()).toBe(1);
+
+      stopAutoYesPolling('wt-idem');
+    });
+
+    it('should stop and recreate poller when cliToolId changes', () => {
+      setAutoYesEnabled('wt-change', true, 3600000);
+      const first = startAutoYesPolling('wt-change', 'claude');
+      expect(first.started).toBe(true);
+      expect(getActivePollerCount()).toBe(1);
+
+      // Second call with different cliToolId should recreate
+      const second = startAutoYesPolling('wt-change', 'codex');
+      expect(second.started).toBe(true);
+      expect(second.reason).toBeUndefined();
+      expect(getActivePollerCount()).toBe(1);
+
+      stopAutoYesPolling('wt-change');
+    });
+
+    it('should preserve poller state (lastAnsweredPromptKey, lastServerResponseTimestamp) on reuse', async () => {
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
+      const { sendKeys } = await import('@/lib/tmux/tmux');
+
+      vi.useFakeTimers();
+      vi.setSystemTime(Date.now());
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+
+      setAutoYesEnabled('wt-preserve', true, 3600000);
+      startAutoYesPolling('wt-preserve', 'claude');
+
+      // Simulate a poll that answers a prompt to set lastServerResponseTimestamp
+      vi.mocked(captureSessionOutput).mockResolvedValue('? Do you want to continue? (y/n)');
+      vi.mocked(sendKeys).mockResolvedValue();
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+
+      // Verify timestamp was set
+      const ts = getLastServerResponseTimestamp('wt-preserve');
+      expect(ts).toBeTypeOf('number');
+      expect(ts).not.toBeNull();
+
+      // Call startAutoYesPolling again with same cliToolId
+      const result = startAutoYesPolling('wt-preserve', 'claude');
+      expect(result.reason).toBe('already_running');
+
+      // Timestamp should be preserved (not reset)
+      const tsAfter = getLastServerResponseTimestamp('wt-preserve');
+      expect(tsAfter).toBe(ts);
+
+      stopAutoYesPolling('wt-preserve');
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+    });
+
+    it('should store cliToolId in AutoYesPollerState for comparison', () => {
+      setAutoYesEnabled('wt-cli-check', true, 3600000);
+      startAutoYesPolling('wt-cli-check', 'claude');
+
+      // The poller state should have the cliToolId accessible
+      // Verify by trying with same ID (already_running) vs different (recreated)
+      const sameTool = startAutoYesPolling('wt-cli-check', 'claude');
+      expect(sameTool.reason).toBe('already_running');
+
+      const diffTool = startAutoYesPolling('wt-cli-check', 'codex');
+      expect(diffTool.started).toBe(true);
+      expect(diffTool.reason).toBeUndefined();
+
+      stopAutoYesPolling('wt-cli-check');
     });
   });
 

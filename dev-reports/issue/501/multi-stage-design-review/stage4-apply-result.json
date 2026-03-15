@@ -1,0 +1,32 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー 指摘事項対応",
+  "apply_date": "2026-03-16",
+  "design_doc_path": "dev-reports/design/issue-501-auto-yes-dual-response-fix-design-policy.md",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have_documented": [
+      "SEC4-001",
+      "SEC4-002",
+      "SEC4-003",
+      "SEC4-004",
+      "SEC4-005",
+      "SEC4-006",
+      "SEC4-007"
+    ]
+  },
+  "changes_made": [
+    {
+      "section": "6. セキュリティ設計",
+      "change_type": "updated",
+      "description": "「影響なし」の簡潔な記述を、Stage 4セキュリティレビュー検証結果に基づく詳細なセキュリティ検証サマリに更新。6つのセキュリティ領域（入力バリデーション、認証・認可、tmuxインジェクション、リソース枯渇、情報露出、タイミング攻撃）の検証結果を表形式で記載。任意改善候補（SEC4-001）も記録"
+    },
+    {
+      "section": "14. レビュー指摘事項サマリ (Stage 4: セキュリティレビュー)",
+      "change_type": "added",
+      "description": "Stage 4セキュリティレビューの総合評価、重要度別件数サマリ、全7件のnice_to_have指摘一覧をトレーサビリティ確保のため追加"
+    }
+  ],
+  "summary": "全7件のセキュリティレビュー指摘はいずれもnice_to_haveであり、must_fix/should_fixはゼロ。セクション6をセキュリティ検証サマリに更新し、セクション14にStage 4レビュー指摘一覧を追加。設計書の「影響なし」判断がセキュリティレビューにより裏付けられた。"
+}

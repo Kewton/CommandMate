@@ -79,11 +79,16 @@ export async function GET(
     const newLines = lines.slice(Math.max(0, lastCapturedLine));
     const newContent = newLines.join('\n');
 
+    // Issue #501: Get last server response timestamp BEFORE status detection
+    // so it can be passed to detectSessionStatus() for time-based heuristic.
+    const lastServerResponseTimestamp = getLastServerResponseTimestamp(params.id);
+    const lastOutputTimestamp = lastServerResponseTimestamp ? new Date(lastServerResponseTimestamp) : undefined;
+
     // DR-001: Unified priority-based status detection via detectSessionStatus().
     // This replaced the inline thinking/prompt logic that had inconsistent priority
     // ordering (Issue #188 root cause: thinking detected on full output instead of
     // 5-line window, causing perpetual spinner when thinking summary was in scrollback).
-    const statusResult = detectSessionStatus(output, cliToolId);
+    const statusResult = detectSessionStatus(output, cliToolId, lastOutputTimestamp);
     const thinking = statusResult.status === 'running' && statusResult.reason === STATUS_REASON.THINKING_INDICATOR;
 
     // Issue #408: promptDetection is obtained from detectSessionStatus() return value.
@@ -106,9 +111,6 @@ export async function GET(
 
     // Get auto-yes state
     const autoYesState = getAutoYesState(params.id);
-
-    // Issue #138: Get last server response timestamp for duplicate prevention
-    const lastServerResponseTimestamp = getLastServerResponseTimestamp(params.id);
 
     return NextResponse.json({
       isRunning: true,

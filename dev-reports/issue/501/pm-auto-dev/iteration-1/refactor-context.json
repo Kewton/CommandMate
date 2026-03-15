@@ -1,0 +1,21 @@
+{
+  "issue_number": 501,
+  "refactor_targets": [
+    "src/lib/auto-yes-poller.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/lib/session/worktree-status-helper.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts",
+    "tests/unit/lib/worktree-status-helper.test.ts"
+  ],
+  "quality_metrics": {
+    "tests_passed": 5001,
+    "tsc_errors": 0,
+    "lint_errors": 0
+  },
+  "improvement_goals": [
+    "コードの明確性改善（変数名、コメント）",
+    "テストの可読性改善",
+    "不要な重複の削除"
+  ]
+}

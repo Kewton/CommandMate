@@ -1,0 +1,59 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "iteration": 1,
+  "applied_findings": [
+    {
+      "finding_id": "F3-008",
+      "status": "applied",
+      "description": "対策1の変更内容を「4ステップ」として明確化。(1) CurrentOutputResponse型にフィールド追加、(2) useState追加、(3) fetchCurrentOutput内でsetState、(4) useAutoYes呼び出しに引数追加。useCallback依存配列への影響なしの注記も追加。"
+    },
+    {
+      "finding_id": "F3-001",
+      "status": "applied",
+      "description": "対策3に「注意: getLastServerResponseTimestamp()のキー単位について」セクションを追加。worktreeId単位での管理であること、同一worktreeで複数CLIツールがアクティブな場合の干渉リスク、本Issueスコープ外とする判断を明記。"
+    },
+    {
+      "finding_id": "F3-002",
+      "status": "applied",
+      "description": "受入条件に「worktree-status-helper.ts の変更に対するユニットテストを追加する（既存テストファイルが存在しないため新規作成）」を追加。"
+    },
+    {
+      "finding_id": "F3-003",
+      "status": "applied",
+      "description": "「対策間の依存関係」セクションを「連鎖の流れ」の後に新設。対策2のポーラー再利用が対策3のタイムスタンプ保持の前提条件であることを明記。"
+    },
+    {
+      "finding_id": "F3-006",
+      "status": "applied",
+      "description": "session-cleanup.tsを間接影響ファイルセクションに追加。stopAutoYesPolling後の再起動シナリオで対策2の変更による影響がないことを注記。"
+    },
+    {
+      "finding_id": "F3-004",
+      "status": "skipped",
+      "description": "should_fixではなくnice_to_haveであり、既存の問題で対策2で悪化しないことが指摘で認められている。ドキュメントコメントレベルの対応は実装時に判断。"
+    },
+    {
+      "finding_id": "F3-005",
+      "status": "skipped",
+      "description": "nice_to_have。対策2の既存記載で方針（started: true を返すか、reason による分岐を追加するか）が既に言及されている。"
+    },
+    {
+      "finding_id": "F3-007",
+      "status": "skipped",
+      "description": "nice_to_have。受入条件に既に「サーバー応答後3秒以内にクライアントが同一プロンプトに応答しないことをテストで確認」があり、テスト追加は暗黙的にカバーされている。"
+    },
+    {
+      "finding_id": "F3-009",
+      "status": "applied",
+      "description": "resource-cleanup.tsを間接影響ファイルセクションに追加（nice_to_haveだがF3-006と同じセクションへの追加のため一括対応）。"
+    }
+  ],
+  "issue_updated": true,
+  "summary": {
+    "total_findings": 9,
+    "applied": 6,
+    "skipped": 3,
+    "partially_applied": 0
+  }
+}

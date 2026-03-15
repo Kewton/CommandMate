@@ -1,0 +1,44 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "iteration": 1,
+  "applied_findings": [
+    {
+      "finding_id": "F1-001",
+      "status": "applied",
+      "description": "問題Bの行番号を修正。L525-528/L531-540 → L486-494/L496-506 に更新。また、行番号への過度な依存を減らすため startAutoYesPolling() 関数名での参照を併記する形式に変更。"
+    },
+    {
+      "finding_id": "F1-002",
+      "status": "applied",
+      "description": "対策3を全面改訂。新規クールダウン機構の追加ではなく、detectSessionStatus() の既存 lastOutputTimestamp パラメータ（L155）と時間ベースヒューリスティック（STALE_OUTPUT_THRESHOLD_MS = 5000ms、L404-417）を活用する方針に変更。問題Cの根本原因セクションにも既存機構の存在を追記。"
+    },
+    {
+      "finding_id": "F1-003",
+      "status": "applied",
+      "description": "対策3の変更対象ファイルを明確化。曖昧な 'status-detector.ts or worktree-status-helper.ts' を、具体的に 'current-output/route.ts'（L86）と 'worktree-status-helper.ts'（L91）の2ファイルに変更。status-detector.ts は変更不要であることを明記。関連ファイルセクションも同様に更新。"
+    },
+    {
+      "finding_id": "F1-004",
+      "status": "applied",
+      "description": "対策2に「呼び出し側の影響」セクションを追加。auto-yes/route.ts L170 で result.started を使用している点と、already_running 時のハンドリング方針を明記。受入条件にもテスト項目を追加。関連ファイルの直接変更対象に auto-yes/route.ts を追加。"
+    },
+    {
+      "finding_id": "F1-005",
+      "status": "applied",
+      "description": "背景セクションに DUPLICATE_PREVENTION_WINDOW_MS の定義場所（useAutoYes.ts L36）と値（3000ms）を追記。"
+    },
+    {
+      "finding_id": "F1-006",
+      "status": "applied",
+      "description": "問題Aの行番号を最新コードに合わせて更新。fetchCurrentOutput() L353-400 → L352-398、useAutoYes() L966-972 → L961-967。"
+    }
+  ],
+  "issue_updated": true,
+  "summary": {
+    "total_findings": 6,
+    "applied": 6,
+    "skipped": 0,
+    "partially_applied": 0
+  }
+}
