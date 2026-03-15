@@ -46,7 +46,7 @@ import { initScheduleManager, stopAllSchedules } from './src/lib/schedule-manage
 import { initResourceCleanup, stopResourceCleanup } from './src/lib/resource-cleanup';
 import { runMigrations } from './src/lib/db-migrations';
 import { getEnvByKey } from './src/lib/env';
-import { registerAndFilterRepositories, resolveRepositoryPath } from './src/lib/db-repository';
+import { registerAndFilterRepositories, resolveRepositoryPath, getAllRepositories } from './src/lib/db-repository';
 import { getWorktreeIdsByRepository, deleteWorktreesByIds } from './src/lib/db';
 
 const dev = process.env.NODE_ENV !== 'production';
@@ -188,14 +188,23 @@ app.prepare().then(() => {
       // Get repository paths from environment variables
       const repositoryPaths = getRepositoryPaths();
 
-      if (repositoryPaths.length === 0) {
+      // Issue #490: Also include DB-registered repositories (e.g. cloned repos)
+      const dbRepositories = getAllRepositories(db);
+      const dbEnabledPaths = dbRepositories
+        .filter(r => r.enabled)
+        .map(r => r.path);
+
+      // Merge env paths and DB-registered paths (deduplicate)
+      const allPaths = [...new Set([...repositoryPaths, ...dbEnabledPaths])];
+
+      if (allPaths.length === 0) {
         console.warn('Warning: No repository paths configured');
         console.warn('Set WORKTREE_REPOS (comma-separated) or MCBD_ROOT_DIR');
         return;
       }
 
-      console.log(`Configured repositories: ${repositoryPaths.length}`);
-      repositoryPaths.forEach((path, i) => {
+      console.log(`Configured repositories: ${allPaths.length}`);
+      allPaths.forEach((path, i) => {
         console.log(`  ${i + 1}. ${path}`);
       });
 
@@ -203,7 +212,7 @@ app.prepare().then(() => {
       // registerAndFilterRepositories() encapsulates the ordering constraint:
       // registration MUST happen before filtering (see design policy Section 4)
       const { filteredPaths, excludedPaths, excludedCount } =
-        registerAndFilterRepositories(db, repositoryPaths);
+        registerAndFilterRepositories(db, allPaths);
       if (excludedCount > 0) {
         console.log(`Excluded repositories: ${excludedCount}, Active repositories: ${filteredPaths.length}`);
         // SF-SEC-003: Log excluded repository paths for audit/troubleshooting
