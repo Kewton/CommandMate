@@ -18,6 +18,7 @@ import { captureSessionOutput } from './cli-session';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
 import { OPENCODE_PANE_HEIGHT } from '@/lib/cli-tools/opencode';
 import { isSessionHealthy } from './claude-session';
+import { getLastServerResponseTimestamp } from '@/lib/polling/auto-yes-manager';
 import type { getMessages as GetMessagesFn, markPendingPromptsAsAnswered as MarkPendingFn } from '@/lib/db';
 
 /** Per-CLI-tool session status */
@@ -88,7 +89,10 @@ export async function detectWorktreeSessionStatus(
           // OpenCode TUI uses a 200-line pane; capture full pane to see content area
           const captureLines = cliToolId === 'opencode' ? OPENCODE_PANE_HEIGHT : 100;
           const output = await captureSessionOutput(worktreeId, cliToolId, captureLines);
-          const statusResult = detectSessionStatus(output, cliToolId);
+          // Issue #501: Pass last server response timestamp for time-based heuristic
+          const ts = getLastServerResponseTimestamp(worktreeId);
+          const lastOutputTimestamp = ts ? new Date(ts) : undefined;
+          const statusResult = detectSessionStatus(output, cliToolId, lastOutputTimestamp);
           isWaitingForResponse = statusResult.status === 'waiting';
           isProcessing = statusResult.status === 'running';
 

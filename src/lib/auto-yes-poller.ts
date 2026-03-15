@@ -483,13 +483,18 @@ export function startAutoYesPolling(
 
   // Check concurrent poller limit (DoS protection)
   // If this worktree already has a poller, don't count it toward the limit
-  const existingPoller = autoYesPollerStates.has(worktreeId);
-  if (!existingPoller && autoYesPollerStates.size >= MAX_CONCURRENT_POLLERS) {
+  const existingPollerState = getPollerState(worktreeId);
+  if (!existingPollerState && autoYesPollerStates.size >= MAX_CONCURRENT_POLLERS) {
     return { started: false, reason: 'max concurrent pollers reached' };
   }
 
-  // Stop existing poller if any
-  if (existingPoller) {
+  // Issue #501: Idempotency check - if existing poller has same cliToolId, reuse it
+  if (existingPollerState && existingPollerState.cliToolId === cliToolId) {
+    return { started: true, reason: 'already_running' };
+  }
+
+  // Stop existing poller if cliToolId changed
+  if (existingPollerState) {
     stopAutoYesPolling(worktreeId);
   }
 
