@@ -1,0 +1,101 @@
+{
+  "issue_number": 499,
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘対応",
+  "apply_date": "2026-03-16",
+  "design_doc_path": "dev-reports/design/issue-499-auto-yes-polling-perf-design-policy.md",
+  "status": "COMPLETED",
+  "applied_findings": [
+    {
+      "id": "IA-001",
+      "severity": "should_fix",
+      "title": "AutoYesStopReason型変更のbarrel file re-export影響が未記載",
+      "action_taken": "Item 5に変更不要ファイルセクションを追加。auto-yes-manager.ts（barrel file）とauto-yes-state.tsのre-exportチェーン（3段階: auto-yes-config.ts -> auto-yes-state.ts -> auto-yes-manager.ts）を明記し、TypeScript型システムによる自動伝播のため変更不要であることを記載。",
+      "section_modified": "Section 3 Item 5"
+    },
+    {
+      "id": "IA-002",
+      "severity": "should_fix",
+      "title": "current-output APIルートのstopReason返却ロジックの影響が未記載",
+      "action_taken": "Item 5に変更不要ファイルとしてcurrent-output/route.tsを追加。L134でautoYesState?.stopReasonを透過的に返却する中間層であり、consecutive_errors値も自動的に返却されるため変更不要であることを明記。",
+      "section_modified": "Section 3 Item 5"
+    },
+    {
+      "id": "IA-003",
+      "severity": "should_fix",
+      "title": "WorktreeDetailRefactored.tsxのstate型変更影響の詳細不足",
+      "action_taken": "Item 5 UI側変更セクションを全面的に書き直し。3箇所の変更を明示的に記載: (1) L202 state定義のリネーム+型変更、(2) L391 条件分岐にconsecutive_errorsを追加しsetPendingStopReason(data.autoYes.stopReason)に変更、(3) L784-786 Toast表示ロジックをstopReason値に応じた分岐に変更。",
+      "section_modified": "Section 3 Item 5"
+    },
+    {
+      "id": "IA-004",
+      "severity": "should_fix",
+      "title": "Item 3 captureAndCleanOutput引数変更のテストファイルが未特定",
+      "action_taken": "Section 5影響テストファイルリストのauto-yes-manager.test.tsエントリにItem 3を追加（Item 2, 5 -> Item 1, 2, 3, 5）。captureLines引数の検証が必要であることを明記。",
+      "section_modified": "Section 5"
+    },
+    {
+      "id": "IA-005",
+      "severity": "should_fix",
+      "title": "Item 6 CACHE_TTL_MS変更のテストファイルが未特定",
+      "action_taken": "Section 5影響テストファイルリストにtmux-capture-cache.test.ts（L52定数値アサーション更新）とtmux-capture-invalidation.test.ts（L89モック値更新）を追加。",
+      "section_modified": "Section 5"
+    },
+    {
+      "id": "IA-006",
+      "severity": "consider",
+      "title": "Item 3 + Item 6 キャッシュ行数不一致によるcross-pollerキャッシュミス",
+      "action_taken": "Section 8トレードオフテーブルに新行を追加。auto-yes-pollerの300行キャッシュがresponse-pollerの10000行リクエストではキャッシュミスとなる（requestedLines > capturedLinesチェック）ため、キャッシュTTL延長の効果が同一ポーラー内に限定されることを記載。",
+      "section_modified": "Section 8"
+    },
+    {
+      "id": "IA-007",
+      "severity": "consider",
+      "title": "useAutoYes hookへの間接影響",
+      "action_taken": "Item 5の変更不要ファイルセクションにuseAutoYes.tsを追加。autoYesEnabled=falseで自動停止するため新しいstopReasonによる影響がないことを明記。",
+      "section_modified": "Section 3 Item 5"
+    },
+    {
+      "id": "IA-008",
+      "severity": "consider",
+      "title": "response-poller/status-detectorのdetectPromptスコープ外確認",
+      "action_taken": "対応不要。設計方針書の既存記載（Item 4スコープ制限セクション）が正確であることがレビューで確認済み。Stage 3サマリーテーブルにのみ記録。",
+      "section_modified": "Section 10 Stage 3テーブル"
+    },
+    {
+      "id": "IA-009",
+      "severity": "consider",
+      "title": "incrementErrorCount内stopAutoYesPolling後のscheduleNextPoll競合リスク",
+      "action_taken": "Item 5にscheduleNextPollのnullガード安全性を注記するセクションを追加。stopAutoYesPolling後のfallthrough呼び出し時にscheduleNextPoll内のL447 nullガード（if (!pollerState) return）により安全にearly returnすることを明記。",
+      "section_modified": "Section 3 Item 5"
+    },
+    {
+      "id": "IA-010",
+      "severity": "consider",
+      "title": "stripBoxDrawing呼び出し回数テストの既存テストへの影響",
+      "action_taken": "Stage 3サマリーテーブルに実装時の確認事項として記録。既存テストのmock設定で呼び出し回数2回→1回の期待値更新が必要な可能性がある旨を記載。",
+      "section_modified": "Section 10 Stage 3テーブル"
+    },
+    {
+      "id": "IA-011",
+      "severity": "nice_to_have",
+      "title": "i18nファイルの影響箇所がテストファイルリストに未反映",
+      "action_taken": "Stage 3サマリーテーブルに記録。i18nキーの存在はビルド時/lint時に検出可能であるため、テストファイルリストへの追加は任意とした。",
+      "section_modified": "Section 10 Stage 3テーブル"
+    }
+  ],
+  "skipped_findings": [],
+  "sections_modified": [
+    "Section 3 Item 5 (影響範囲・変更不要ファイル・UI側変更詳細化・nullガード安全性)",
+    "Section 5 (影響テストファイルリスト拡充)",
+    "Section 8 (Item 3+6 キャッシュ相互作用トレードオフ追加)",
+    "Section 10 (Stage 3レビュー指摘対応サマリー追加)"
+  ],
+  "verification": {
+    "all_should_fix_applied": true,
+    "all_consider_applied": true,
+    "all_nice_to_have_applied": true,
+    "design_doc_only": true,
+    "no_source_code_modified": true
+  }
+}

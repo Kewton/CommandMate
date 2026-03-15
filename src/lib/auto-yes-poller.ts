@@ -18,13 +18,19 @@ import { stripAnsi, stripBoxDrawing, detectThinking, buildDetectPromptOptions } 
 import { generatePromptKey } from './detection/prompt-key';
 import { getErrorMessage } from './errors';
 import { invalidateCache } from './tmux/tmux-capture-cache';
+import {
+  THINKING_POLLING_INTERVAL_MS,
+  REDUCED_CAPTURE_LINES,
+  FULL_CAPTURE_LINES,
+  AUTO_STOP_ERROR_THRESHOLD,
+} from '@/config/auto-yes-config';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('auto-yes-poller');
 import { isValidWorktreeId } from './security/path-validator';
 import {
   getAutoYesState,
-  isAutoYesExpired,
+  disableAutoYes,
   checkStopCondition,
   calculateBackoffInterval,
   POLLING_INTERVAL_MS,
@@ -163,6 +169,13 @@ function incrementErrorCount(worktreeId: string): void {
   if (pollerState) {
     pollerState.consecutiveErrors++;
     pollerState.currentInterval = calculateBackoffInterval(pollerState.consecutiveErrors);
+
+    // Issue #499 Item 5: Auto-stop after consecutive error threshold.
+    // Centralized here (DR1-002) to avoid DRY violation across multiple catch blocks.
+    if (pollerState.consecutiveErrors >= AUTO_STOP_ERROR_THRESHOLD) {
+      disableAutoYes(worktreeId, 'consecutive_errors');
+      stopAutoYesPolling(worktreeId);
+    }
   }
 }
 
@@ -214,7 +227,9 @@ export function validatePollingContext(
   if (!pollerState) return 'stopped';
 
   const autoYesState = getAutoYesState(worktreeId);
-  if (!autoYesState?.enabled || isAutoYesExpired(autoYesState)) {
+  // Issue #499 Item 7: getAutoYesState() internally calls isAutoYesExpired() and
+  // disables auto-yes if expired, so checking enabled alone is sufficient.
+  if (!autoYesState?.enabled) {
     stopAutoYesPolling(worktreeId);
     return 'expired';
   }
@@ -235,12 +250,14 @@ export function validatePollingContext(
  */
 export async function captureAndCleanOutput(
   worktreeId: string,
-  cliToolId: CLIToolType
+  cliToolId: CLIToolType,
+  captureLines?: number
 ): Promise<string> {
-  // 5000 lines: matches the existing pollAutoYes() line limit (IC002).
+  // Issue #499 Item 3: Use provided captureLines or default to FULL_CAPTURE_LINES.
   // captureSessionOutput() default is 1000 lines, but tmux buffer capture
-  // requires 5000 to avoid truncating long outputs.
-  const output = await captureSessionOutput(worktreeId, cliToolId, 5000);
+  // requires more to avoid truncating long outputs.
+  const lines = captureLines ?? FULL_CAPTURE_LINES;
+  const output = await captureSessionOutput(worktreeId, cliToolId, lines);
   return stripBoxDrawing(stripAnsi(output));
 }
 
@@ -310,12 +327,19 @@ export async function detectAndRespondToPrompt(
   worktreeId: string,
   pollerState: AutoYesPollerState,
   cliToolId: CLIToolType,
-  cleanOutput: string
+  cleanOutput: string,
+  precomputedLines?: string[]
 ): Promise<'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'> {
   try {
     // 1. Detect prompt
     const promptOptions = buildDetectPromptOptions(cliToolId);
-    const promptDetection = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions);
+    // Issue #499 Item 1: cleanOutput is already stripped by captureAndCleanOutput()
+    // (which calls stripBoxDrawing in L244), so no need to strip again here.
+    // Issue #499 Item 4: Pass precomputedLines to avoid redundant split('\n')
+    const promptDetection = detectPrompt(cleanOutput, {
+      ...promptOptions,
+      ...(precomputedLines && { precomputedLines }),
+    });
 
     if (!promptDetection.isPrompt || !promptDetection.promptData) {
       // No prompt detected - reset lastAnsweredPromptKey (Issue #306)
@@ -398,13 +422,22 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
 
   try {
     // 2. Capture and clean output
-    const cleanOutput = await captureAndCleanOutput(worktreeId, cliToolId);
+    // Issue #499 Item 3: Reduce capture lines when stopPattern is not set
+    const autoYesState = getAutoYesState(worktreeId);
+    const captureLines = autoYesState?.stopPattern
+      ? FULL_CAPTURE_LINES
+      : REDUCED_CAPTURE_LINES;
+    const cleanOutput = await captureAndCleanOutput(worktreeId, cliToolId, captureLines);
+
+    // Issue #499 Item 4: Split once and reuse across Thinking check and prompt detection
+    const lines = cleanOutput.split('\n');
 
     // 3. Thinking check (inline - policy decision about window size)
     // Issue #161 Layer 1 / Issue #191: windowing applied to detectThinking()
-    const recentLines = cleanOutput.split('\n').slice(-THINKING_CHECK_LINE_COUNT).join('\n');
+    const recentLines = lines.slice(-THINKING_CHECK_LINE_COUNT).join('\n');
     if (detectThinking(cliToolId, recentLines)) {
-      scheduleNextPoll(worktreeId, cliToolId);
+      // Issue #499 Item 2: Use extended polling interval during Thinking state
+      scheduleNextPoll(worktreeId, cliToolId, THINKING_POLLING_INTERVAL_MS);
       return;
     }
 
@@ -414,7 +447,8 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     }
 
     // 5. Detect and respond to prompt
-    const result = await detectAndRespondToPrompt(worktreeId, pollerState!, cliToolId, cleanOutput);
+    // Issue #499 Item 4: Pass precomputed lines to avoid redundant split
+    const result = await detectAndRespondToPrompt(worktreeId, pollerState!, cliToolId, cleanOutput, lines);
     if (result === 'responded') {
       // Issue #306: Apply cooldown interval after successful response
       scheduleNextPoll(worktreeId, cliToolId, COOLDOWN_INTERVAL_MS);

@@ -1,0 +1,69 @@
+{
+  "issue_number": 499,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘対応",
+  "status": "completed",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "IC-001",
+        "title": "incrementErrorCount関数シグネチャの不一致",
+        "action": "Item 5のコード例を実際のシグネチャ incrementErrorCount(worktreeId: string) に修正。内部でgetPollerState(worktreeId)を呼ぶ方式であることを注記として追加",
+        "status": "applied"
+      },
+      {
+        "id": "IC-002",
+        "title": "scheduleNextPollのoverrideInterval引数が既に実装済み",
+        "action": "Item 2のscheduleNextPoll変更セクションを修正。overrideIntervalは既存パラメータであることを明記し、影響範囲をThinking検出時の呼び出し1行追加のみに修正",
+        "status": "applied"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IC-003",
+        "title": "AutoYesStopReason型の現状と変更の明示化不足",
+        "action": "Item 5のコード例に既存型（'expired' | 'stop_pattern_matched'）と追加値（'consecutive_errors'）の差分コメントを追加",
+        "status": "applied"
+      },
+      {
+        "id": "IC-004",
+        "title": "WorktreeDetailRefactored.tsxの状態管理方式の不正確な記載",
+        "action": "Item 5 UI側変更に現在の実装（stopReasonPending: boolean, L202）を明記し、pendingStopReason: AutoYesStopReason | null へのリネーム+型変更であることを記載",
+        "status": "applied"
+      },
+      {
+        "id": "IC-005",
+        "title": "THINKING_CHECK_LINE_COUNTの定義元がレイヤー図と不一致",
+        "action": "レイヤー図のmermaid内にauto-yes-state.tsが定数も保持していることの注記コメントを追加",
+        "status": "applied"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IC-006",
+        "title": "pollerStateの参照方式の前提整理",
+        "action": "ポーリングフロー図の後にpollerState参照方式（引数渡し vs getPollerState取得）の注記セクションを追加",
+        "status": "applied"
+      },
+      {
+        "id": "IC-007",
+        "title": "scheduleNextPoll呼び出し位置の簡略化",
+        "action": "フロー図のscheduleNextPoll行にL407,L420,L432の3箇所呼び出しである旨の注記を追加",
+        "status": "applied"
+      }
+    ]
+  },
+  "updated_files": [
+    "dev-reports/design/issue-499-auto-yes-polling-perf-design-policy.md"
+  ],
+  "updated_sections": [
+    "Section 2: レイヤー図（IC-005注記追加）",
+    "Section 2: ポーリングフロー図（IC-006, IC-007注記追加）",
+    "Section 3 Item 2: scheduleNextPoll変更（IC-002修正）",
+    "Section 3 Item 5: AutoYesStopReason型（IC-003明示化）",
+    "Section 3 Item 5: incrementErrorCountコード例（IC-001修正）",
+    "Section 3 Item 5: UI側変更（IC-004明示化）",
+    "Section 10: Stage 2レビュー対応サマリー追加"
+  ],
+  "timestamp": "2026-03-16T00:00:00Z"
+}

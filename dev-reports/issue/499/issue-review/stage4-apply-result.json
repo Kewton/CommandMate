@@ -1,0 +1,67 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "iteration": 1,
+  "issue_number": 499,
+  "apply_date": "2026-03-15",
+  "applied_findings": [
+    {
+      "finding_id": "F3-002",
+      "severity": "must_fix",
+      "status": "applied",
+      "action_taken": "Item 5にUI側の対応（必須）セクションを追加。WorktreeDetailRefactored.tsx L391のstopReason判定にconsecutive_errors分岐追加、i18n翻訳キー追加、current-output APIからの値伝播への対応を明記。受入条件にUI側テスト項目を追加。関連ファイルにWorktreeDetailRefactored.tsxとcurrent-output/route.tsを追加"
+    },
+    {
+      "finding_id": "F3-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "action_taken": "Item 3にキャッシュ影響の説明を追加。tmux-capture-cacheのcapturedLinesチェックにより300行キャッシュが5000行要求に対してキャッシュミスとなること、これが正常動作でありauto-yes-pollerのコスト削減が主目的のため許容する旨を追記"
+    },
+    {
+      "finding_id": "F3-003",
+      "severity": "should_fix",
+      "status": "applied",
+      "action_taken": "関連ファイルセクションに影響を受けるテストファイルのサブセクションを追加。auto-yes-manager.test.ts, auto-yes-config.test.ts, auto-yes-persistence.test.ts, prompt-detector.test.tsを列挙し、各テストがどのItemの変更で影響を受けるかを明記"
+    },
+    {
+      "finding_id": "F3-004",
+      "severity": "should_fix",
+      "status": "applied",
+      "action_taken": "Item 4にスコープの明確化を追加。本Issueのスコープはauto-yes-poller.tsのみ、response-poller.ts・status-detector.tsでの同様の最適化は別Issueとして検討する旨を追記"
+    },
+    {
+      "finding_id": "F3-005",
+      "severity": "should_fix",
+      "status": "applied",
+      "action_taken": "Item 2の対策説明に期限切れ検出遅延の許容根拠を追記。期限切れは分〜時間単位の設定であり5秒の誤差は許容範囲である旨を明記"
+    },
+    {
+      "finding_id": "F3-007",
+      "severity": "should_fix",
+      "status": "applied",
+      "action_taken": "Item 3にstopPattern設定時の5000行維持根拠を追加。デルタ方式はバッファ縮小時にベースラインをリセットするため、広いバッファによりstop patternの見落としリスクを低減する旨を追記"
+    },
+    {
+      "finding_id": "F3-006",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "action_taken": "Item 6に影響範囲の説明を追加。CACHE_TTL_MSの変更が全てのtmux captureキャッシュ利用箇所（auto-yes-poller, response-poller, current-output API, worktree-status-helper）に影響する旨を網羅的に記載"
+    },
+    {
+      "finding_id": "F3-008",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "action_taken": "受入条件のstripBoxDrawingテスト項目に具体的なテスト手法（vi.mock/spyベースの検証方法）を追記"
+    }
+  ],
+  "summary": {
+    "total_findings": 8,
+    "applied": 8,
+    "skipped": 0,
+    "partial": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/499"
+  }
+}

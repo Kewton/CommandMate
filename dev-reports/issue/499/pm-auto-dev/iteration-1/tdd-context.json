@@ -1,0 +1,31 @@
+{
+  "issue_number": 499,
+  "title": "perf: Auto-Yes ポーリング性能改善（7項目）",
+  "design_policy_path": "dev-reports/design/issue-499-auto-yes-polling-perf-design-policy.md",
+  "work_plan_path": "dev-reports/issue/499/work-plan.md",
+  "acceptance_criteria": [
+    "全7項目の改善が実装されている",
+    "既存のAuto-Yes関連テストが全てパスする",
+    "stripBoxDrawingが1回のみ呼ばれることをテストで確認",
+    "Thinking検出時に延長間隔が使用されることをテストで確認",
+    "連続エラー上限での自動停止がテストで確認",
+    "consecutive_errors stopReasonがUI側で警告レベル(warning)として通知されることをテストで確認",
+    "stop_pattern_matchedのリグレッションテスト",
+    "stopPattern未設定時のキャプチャ行数が削減されていることをテストで確認",
+    "detectPrompt内でprecomputedLinesが使用されることを確認",
+    "validatePollingContextからisAutoYesExpired冗長呼び出しが除去されていること",
+    "npm run test:unit パス",
+    "npm run lint パス",
+    "npx tsc --noEmit パス"
+  ],
+  "implementation_tasks": [
+    "Item 7: validatePollingContext冗長チェック除去 (auto-yes-poller.ts L217)",
+    "Item 1: stripBoxDrawing二重呼び出し除去 (auto-yes-poller.ts L318)",
+    "Item 6: キャッシュTTL変更 2000→3000 (tmux-capture-cache.ts L39)",
+    "Item 2: THINKING_POLLING_INTERVAL_MS=5000定数追加 (auto-yes-config.ts) + scheduleNextPoll呼び出し変更 (auto-yes-poller.ts L407)",
+    "Item 3: REDUCED_CAPTURE_LINES=300, FULL_CAPTURE_LINES=5000定数追加 (auto-yes-config.ts) + captureAndCleanOutput行数分岐 (auto-yes-poller.ts)",
+    "Item 4: DetectPromptOptionsにprecomputedLines追加 (prompt-detector.ts) + pollAutoYes内split再利用 (auto-yes-poller.ts)",
+    "Item 5: AUTO_STOP_ERROR_THRESHOLD=20定数 + AutoYesStopReason型拡張 (auto-yes-config.ts) + incrementErrorCount閾値チェック (auto-yes-poller.ts) + UI stopReason通知 (WorktreeDetailRefactored.tsx) + i18n (locales/)"
+  ],
+  "target_coverage": 80
+}

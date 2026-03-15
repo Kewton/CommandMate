@@ -1,0 +1,49 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "iteration": 2,
+  "issue_number": 499,
+  "applied_findings": [
+    {
+      "id": "F7-001",
+      "severity": "should_fix",
+      "title": "stop_pattern_matchedのリグレッションテスト追加",
+      "status": "applied",
+      "changes": "受入条件に「stop_pattern_matchedのstopReasonが従来通り情報レベル(info)のToastで表示され、既存のi18nキー(autoYes.stopPatternMatched)が使用されることをリグレッションテストで確認」を追加。state管理方式変更(boolean→AutoYesStopReason | null)による既存動作の破壊防止を明記。"
+    },
+    {
+      "id": "F7-002",
+      "severity": "should_fix",
+      "title": "i18nロケールファイルを関連ファイルに追加",
+      "status": "applied",
+      "changes": "関連ファイルの直接変更対象セクションに locales/en/autoYes.json と locales/ja/autoYes.json を追加。Item 5のconsecutiveErrorsStopped翻訳キー追加が必要である旨を記載。"
+    },
+    {
+      "id": "F7-003",
+      "severity": "should_fix",
+      "title": "不足テストファイルを影響テストファイルに追加",
+      "status": "applied",
+      "changes": "影響を受けるテストファイルセクションに tests/unit/lib/auto-yes-resolver.test.ts（Item 5の連続エラー停止がresolver動作に影響しないことの確認）と tests/unit/auto-yes-manager-cleanup.test.ts（新stopReason値でのクリーンアップ動作確認）を追加。"
+    },
+    {
+      "id": "F7-004",
+      "severity": "nice_to_have",
+      "title": "連続エラー閾値の定数命名ガイドライン",
+      "status": "applied",
+      "changes": "Item 5に「定数命名」セクションを追加。AUTO_STOP_ERROR_THRESHOLD = 20 としてauto-yes-config.tsに追加する方針を明記。既存のMAX_CONSECUTIVE_ERRORS(5)はバックオフ開始閾値であり意味が異なるため明示的に区別する命名とする旨を記載。関連ファイルのauto-yes-config.tsの説明にもAUTO_STOP_ERROR_THRESHOLD定数追加を追記。"
+    },
+    {
+      "id": "F7-005",
+      "severity": "nice_to_have",
+      "title": "Thinking+キャプチャ行数削減の組み合わせ動作の明記",
+      "status": "applied",
+      "changes": "Item 2に「Thinking終了時の動作」セクションを追加。detectThinking()がfalseを返し通常のプロンプト検出フローに自動的に移行すること、5秒間隔による検出遅延は最大5秒であること、Item 3のキャプチャ行数削減との組み合わせでも機能的に問題ないことを明記。"
+    }
+  ],
+  "summary": {
+    "total_findings": 5,
+    "applied": 5,
+    "skipped": 0,
+    "partial": 0
+  }
+}

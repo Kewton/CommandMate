@@ -2678,4 +2678,54 @@ Are you sure you want to continue? (yes/no)
       }
     });
   });
+
+  // ==========================================================================
+  // Issue #499 Item 4: precomputedLines support
+  // ==========================================================================
+
+  describe('Issue #499: precomputedLines', () => {
+    it('should use precomputedLines when provided instead of splitting output', () => {
+      const output = 'Do you want to proceed? (y/n)';
+      const precomputedLines = output.split('\n');
+
+      const result = detectPrompt(output, { precomputedLines });
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('yes_no');
+      expect(result.promptData?.question).toBe('Do you want to proceed?');
+    });
+
+    it('should produce identical results with and without precomputedLines', () => {
+      const output = 'Some context\nDo you want to continue? [Y/n]';
+      const lines = output.split('\n');
+
+      const resultWithout = detectPrompt(output);
+      const resultWith = detectPrompt(output, { precomputedLines: lines });
+
+      expect(resultWith.isPrompt).toBe(resultWithout.isPrompt);
+      expect(resultWith.promptData?.type).toBe(resultWithout.promptData?.type);
+      expect(resultWith.promptData?.question).toBe(resultWithout.promptData?.question);
+      expect(resultWith.cleanContent).toBe(resultWithout.cleanContent);
+    });
+
+    it('should fall back to split when precomputedLines is not provided', () => {
+      const output = 'No prompt here';
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(false);
+      expect(result.cleanContent).toBe('No prompt here');
+    });
+
+    it('should handle precomputedLines with multiple choice prompt', () => {
+      const output = 'Select an option:\n\u276F 1. Yes\n  2. No';
+      const precomputedLines = output.split('\n');
+
+      const result = detectPrompt(output, { precomputedLines });
+
+      expect(result.isPrompt).toBe(true);
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options.length).toBeGreaterThanOrEqual(2);
+      }
+    });
+  });
 });

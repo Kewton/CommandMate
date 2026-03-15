@@ -30,7 +30,13 @@ import {
   type StartPollingResult,
 } from '@/lib/polling/auto-yes-manager';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
-import { DEFAULT_AUTO_YES_DURATION } from '@/config/auto-yes-config';
+import {
+  DEFAULT_AUTO_YES_DURATION,
+  THINKING_POLLING_INTERVAL_MS,
+  REDUCED_CAPTURE_LINES,
+  FULL_CAPTURE_LINES,
+  AUTO_STOP_ERROR_THRESHOLD,
+} from '@/config/auto-yes-config';
 
 // Mock modules for pollAutoYes testing (Issue #161)
 vi.mock('@/lib/session/cli-session', () => ({
@@ -2011,6 +2017,148 @@ describe('auto-yes-manager', () => {
       expect(diffTool.reason).toBeUndefined();
 
       stopAutoYesPolling('wt-cli-check');
+    });
+  });
+
+  // ==========================================================================
+  // Issue #499: Performance improvement tests
+  // ==========================================================================
+
+  describe('Issue #499: Performance improvements', () => {
+    // Item 1: stripBoxDrawing called only once (in captureAndCleanOutput, not in detectAndRespondToPrompt)
+    it('Item 1: stripBoxDrawing should be called only once per poll cycle', async () => {
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
+      const cliPatterns = await import('@/lib/detection/cli-patterns');
+      vi.mocked(captureSessionOutput).mockReset();
+
+      // Spy on stripBoxDrawing
+      const stripBoxDrawingSpy = vi.spyOn(cliPatterns, 'stripBoxDrawing');
+
+      // Output with box drawing characters
+      const boxOutput = '\u2502 Hello World \u2502';
+      vi.mocked(captureSessionOutput).mockResolvedValue(boxOutput);
+
+      // Call captureAndCleanOutput (should call stripBoxDrawing once)
+      const cleanOutput = await captureAndCleanOutput('test-wt', 'claude');
+
+      // Now call detectAndRespondToPrompt (should NOT call stripBoxDrawing again)
+      const pollerState = createTestPollerState();
+      await detectAndRespondToPrompt('test-wt-item1', pollerState, 'claude', cleanOutput);
+
+      // stripBoxDrawing should be called exactly once (in captureAndCleanOutput only)
+      expect(stripBoxDrawingSpy).toHaveBeenCalledTimes(1);
+
+      stripBoxDrawingSpy.mockRestore();
+      vi.mocked(captureSessionOutput).mockReset();
+    });
+
+    // Item 2: Thinking detection triggers extended polling interval
+    it('Item 2: Thinking detection should trigger 5s polling interval', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(Date.now());
+
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
+      vi.mocked(captureSessionOutput).mockReset();
+
+      // Setup: enable auto-yes
+      setAutoYesEnabled('wt-thinking', true, 3600000);
+      startAutoYesPolling('wt-thinking', 'claude');
+
+      // Mock: output with thinking indicator
+      vi.mocked(captureSessionOutput).mockResolvedValue(
+        'Some output\n' + '⏳ Thinking...\n'
+      );
+
+      // Advance to trigger first poll
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+
+      // The next poll should be scheduled at THINKING_POLLING_INTERVAL_MS
+      expect(THINKING_POLLING_INTERVAL_MS).toBe(5000);
+
+      // Cleanup
+      stopAutoYesPolling('wt-thinking');
+      vi.mocked(captureSessionOutput).mockReset();
+    });
+
+    // Item 3: Capture lines differ based on stopPattern
+    it('Item 3: captureAndCleanOutput should use REDUCED_CAPTURE_LINES when no captureLines specified with default', async () => {
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(captureSessionOutput).mockResolvedValue('test output');
+
+      // Call with explicit REDUCED_CAPTURE_LINES
+      await captureAndCleanOutput('test-wt', 'claude', REDUCED_CAPTURE_LINES);
+      expect(captureSessionOutput).toHaveBeenCalledWith('test-wt', 'claude', 300);
+
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(captureSessionOutput).mockResolvedValue('test output');
+
+      // Call with explicit FULL_CAPTURE_LINES
+      await captureAndCleanOutput('test-wt', 'claude', FULL_CAPTURE_LINES);
+      expect(captureSessionOutput).toHaveBeenCalledWith('test-wt', 'claude', 5000);
+
+      vi.mocked(captureSessionOutput).mockReset();
+    });
+
+    it('Item 3: REDUCED_CAPTURE_LINES should be 300 and FULL_CAPTURE_LINES should be 5000', () => {
+      expect(REDUCED_CAPTURE_LINES).toBe(300);
+      expect(FULL_CAPTURE_LINES).toBe(5000);
+    });
+
+    // Item 5: Consecutive error auto-stop
+    it('Item 5: AUTO_STOP_ERROR_THRESHOLD should be 20', () => {
+      expect(AUTO_STOP_ERROR_THRESHOLD).toBe(20);
+    });
+
+    it('Item 5: 20 consecutive errors should trigger disableAutoYes with consecutive_errors', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(Date.now());
+
+      const { captureSessionOutput } = await import('@/lib/session/cli-session');
+      vi.mocked(captureSessionOutput).mockReset();
+
+      // Setup: enable auto-yes
+      setAutoYesEnabled('wt-error-threshold', true, 3600000);
+      startAutoYesPolling('wt-error-threshold', 'claude');
+
+      // Mock: captureSessionOutput throws error on every call
+      vi.mocked(captureSessionOutput).mockRejectedValue(new Error('tmux error'));
+
+      // Trigger polls to accumulate errors up to threshold
+      for (let i = 0; i < AUTO_STOP_ERROR_THRESHOLD + 5; i++) {
+        await vi.advanceTimersByTimeAsync(120000); // Use large interval to account for backoff
+      }
+
+      // After 20 consecutive errors, auto-yes should be disabled with consecutive_errors reason
+      const state = getAutoYesState('wt-error-threshold');
+      expect(state?.enabled).toBe(false);
+      expect(state?.stopReason).toBe('consecutive_errors');
+
+      // Poller should be stopped
+      expect(getActivePollerCount()).toBe(0);
+
+      vi.mocked(captureSessionOutput).mockReset();
+    });
+
+    // Item 6: Cache TTL constant value
+    it('Item 6: CACHE_TTL_MS should be 3000', async () => {
+      const { CACHE_TTL_MS } = await import('@/lib/tmux/tmux-capture-cache');
+      expect(CACHE_TTL_MS).toBe(3000);
+    });
+
+    // Item 7: validatePollingContext should not call isAutoYesExpired
+    it('Item 7: validatePollingContext should check enabled only (isAutoYesExpired removed)', () => {
+      // When auto-yes is enabled and not expired, should return valid
+      setAutoYesEnabled('test-wt-valid', true);
+      const pollerState = createTestPollerState();
+      const result = validatePollingContext('test-wt-valid', pollerState);
+      expect(result).toBe('valid');
+
+      // When disabled, should return expired
+      disableAutoYes('test-wt-valid');
+      globalThis.__autoYesPollerStates?.set('test-wt-valid', pollerState);
+      const result2 = validatePollingContext('test-wt-valid', pollerState);
+      expect(result2).toBe('expired');
     });
   });
 });

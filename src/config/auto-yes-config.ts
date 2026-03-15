@@ -36,11 +36,31 @@ export function isAllowedDuration(value: unknown): value is AutoYesDuration {
 }
 
 // =============================================================================
+// Polling Interval Constants (Issue #499)
+// =============================================================================
+
+/** Polling interval when Thinking state is detected (Issue #499 Item 2) */
+export const THINKING_POLLING_INTERVAL_MS = 5000;
+
+/** Reduced capture lines when stopPattern is not set (Issue #499 Item 3) */
+export const REDUCED_CAPTURE_LINES = 300;
+
+/** Full capture lines when stopPattern is set (Issue #499 Item 3) */
+export const FULL_CAPTURE_LINES = 5000;
+
+// =============================================================================
+// Error Threshold Constants (Issue #499)
+// =============================================================================
+
+/** Number of consecutive errors before auto-stopping auto-yes (Issue #499 Item 5) */
+export const AUTO_STOP_ERROR_THRESHOLD = 20;
+
+// =============================================================================
 // Stop Condition Types (Issue #314)
 // =============================================================================
 
 /** Reason why auto-yes was stopped (shared between server and client) */
-export type AutoYesStopReason = 'expired' | 'stop_pattern_matched';
+export type AutoYesStopReason = 'expired' | 'stop_pattern_matched' | 'consecutive_errors';
 
 // =============================================================================
 // Stop Pattern Validation (Issue #314)

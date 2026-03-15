@@ -1,0 +1,40 @@
+{
+  "stage": 1,
+  "applied_findings": [
+    {
+      "finding_id": "DR1-001",
+      "status": "applied",
+      "action_taken": "Item 4に「設計判断: detectMultipleChoicePrompt内部のsplit非伝播について」セクションを追加。関数カプセル化維持の意図を明記し、split削減効果の見積もりをSection 7で3回→2回に修正した。"
+    },
+    {
+      "finding_id": "DR1-002",
+      "status": "applied",
+      "action_taken": "Item 5の閾値チェック配置先をincrementErrorCount関数内部に統合する方針に変更。DRY原則と二重停止判定防止の理由を明記し、具体的なコード例を追加した。"
+    },
+    {
+      "finding_id": "DR1-003",
+      "status": "applied",
+      "action_taken": "Section 8トレードオフ表にprecomputedLinesとjoin再結合のオーバーヘッドに関する行を追加。detectThinkingのstring[]対応はスコープ外と明記した。"
+    },
+    {
+      "finding_id": "DR1-004",
+      "status": "applied",
+      "action_taken": "Section 8トレードオフ表のキャッシュTTL行に、backoff時やThinking時の効果限定性を追記した。"
+    },
+    {
+      "finding_id": "DR1-005",
+      "status": "applied",
+      "action_taken": "Item 3に将来の拡張性に関する注記を追加。パラメータ増加時のオプションオブジェクトへのリファクタリング指針を記載した。"
+    },
+    {
+      "finding_id": "DR1-006",
+      "status": "applied",
+      "action_taken": "Section 10のレビュー指摘対応サマリーに記載。既存のoverrideIntervalパターンとの一貫性が確認済みであり、設計変更は不要。"
+    }
+  ],
+  "summary": {
+    "total": 6,
+    "applied": 6,
+    "skipped": 0
+  }
+}
