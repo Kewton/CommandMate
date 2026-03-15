@@ -23,6 +23,7 @@
   "invalidRegexPattern": "Invalid regular expression pattern",
   "patternTooLong": "Pattern must be 500 characters or less",
   "stopPatternMatched": "Auto-Yes was automatically stopped because the stop condition was matched",
+  "consecutiveErrorsStopped": "Auto-Yes stopped due to consecutive errors",
   "regexTipsLabel": "Regex tips",
   "regexTipsTitle": "Regex Tips",
   "regexTipWordBoundary": "… match whole word only (prevents partial match)",

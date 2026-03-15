@@ -86,7 +86,7 @@ vi.mock('@/lib/tmux/tmux-capture-cache', () => ({
   getOrFetchCapture: vi.fn().mockImplementation(async (_name: string, _lines: number, fetchFn: () => Promise<string>) => fetchFn()),
   sliceOutput: vi.fn().mockImplementation((output: string) => output),
   resetCacheForTesting: vi.fn(),
-  CACHE_TTL_MS: 2000,
+  CACHE_TTL_MS: 3000,
   CACHE_MAX_ENTRIES: 100,
   CACHE_MAX_CAPTURE_LINES: 10000,
 }));

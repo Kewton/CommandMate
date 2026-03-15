@@ -98,7 +98,7 @@ export interface EditorProps {
 /**
  * Toast notification type
  */
-export type ToastType = 'success' | 'error' | 'info';
+export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
 /**
  * Toast notification item
