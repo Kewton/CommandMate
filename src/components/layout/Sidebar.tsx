@@ -18,7 +18,7 @@ import { LocaleSwitcher } from '@/components/common/LocaleSwitcher';
 import { ThemeToggle } from '@/components/common/ThemeToggle';
 import { LogoutButton } from '@/components/common/LogoutButton';
 import { toBranchItem } from '@/types/sidebar';
-import { sortBranches, groupBranches } from '@/lib/sidebar-utils';
+import { sortBranches, groupBranches, generateRepositoryColor } from '@/lib/sidebar-utils';
 import type { ViewMode } from '@/lib/sidebar-utils';
 
 // ============================================================================
@@ -289,6 +289,11 @@ function GroupHeader({
       "
     >
       <ChevronIcon isExpanded={isExpanded} />
+      <span
+        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+        style={{ backgroundColor: generateRepositoryColor(repositoryName) }}
+        aria-hidden="true"
+      />
       <GroupIcon />
       <span className="flex-1 text-left truncate">{repositoryName}</span>
       <span className="text-gray-500 font-normal">{branchCount}</span>

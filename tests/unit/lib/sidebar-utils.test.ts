@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import {
   sortBranches,
   groupBranches,
+  generateRepositoryColor,
   SortKey,
   SortDirection,
   STATUS_PRIORITY,
@@ -371,6 +372,57 @@ describe('sidebar-utils', () => {
       expect(result[0]).toHaveProperty('repositoryName');
       expect(result[0]).toHaveProperty('branches');
       expect(Array.isArray(result[0].branches)).toBe(true);
+    });
+  });
+
+  // ==========================================================================
+  // generateRepositoryColor
+  // ==========================================================================
+
+  describe('generateRepositoryColor', () => {
+    it('should return the same color for the same repository name (idempotency)', () => {
+      const color1 = generateRepositoryColor('my-repo');
+      const color2 = generateRepositoryColor('my-repo');
+      expect(color1).toBe(color2);
+    });
+
+    it('should return different hue values for different repository names', () => {
+      const color1 = generateRepositoryColor('repo-alpha');
+      const color2 = generateRepositoryColor('repo-beta');
+      const color3 = generateRepositoryColor('repo-gamma');
+      // At least two of three should differ
+      const unique = new Set([color1, color2, color3]);
+      expect(unique.size).toBeGreaterThanOrEqual(2);
+    });
+
+    it('should not throw for empty string and return valid HSL', () => {
+      expect(() => generateRepositoryColor('')).not.toThrow();
+      const color = generateRepositoryColor('');
+      expect(color).toMatch(/^hsl\(\d+, \d+%, \d+%\)$/);
+    });
+
+    it('should handle special characters (Japanese, symbols, spaces)', () => {
+      const japanese = generateRepositoryColor('テストリポジトリ');
+      const symbols = generateRepositoryColor('repo@#$%^&*');
+      const spaces = generateRepositoryColor('my cool repo');
+
+      expect(japanese).toMatch(/^hsl\(\d+, \d+%, \d+%\)$/);
+      expect(symbols).toMatch(/^hsl\(\d+, \d+%, \d+%\)$/);
+      expect(spaces).toMatch(/^hsl\(\d+, \d+%, \d+%\)$/);
+    });
+
+    it('should return value matching HSL format', () => {
+      const color = generateRepositoryColor('CommandMate');
+      expect(color).toMatch(/^hsl\(\d+, \d+%, \d+%\)$/);
+    });
+
+    it('should use consistent saturation and lightness values', () => {
+      const color = generateRepositoryColor('test-repo');
+      // Extract saturation and lightness
+      const match = color.match(/^hsl\(\d+, (\d+)%, (\d+)%\)$/);
+      expect(match).not.toBeNull();
+      expect(match![1]).toBe('65');
+      expect(match![2]).toBe('60');
     });
   });
 });
