@@ -1,0 +1,73 @@
+{
+  "issue_number": 506,
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘対応",
+  "status": "completed",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "IMPACT-001",
+        "title": "RepositoryManagerとの同時実行による競合状態が未分析",
+        "action": "セクション8に「RepositoryManagerとの同時実行」の項を新設。better-sqlite3の同期APIとNode.jsシングルスレッドモデルによるDB操作の逐次実行、UIレベルの同時実行の安全性根拠を記載",
+        "status": "applied"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IMPACT-002",
+        "title": "既存Sidebar.test.tsxのモック構成への影響が未分析",
+        "action": "セクション11に「既存テストへの影響」の項を新設。repositoryApiモック追加の必要性、ApiErrorクラスのインポート要件を明記",
+        "status": "applied"
+      },
+      {
+        "id": "IMPACT-003",
+        "title": "refreshWorktrees()による再レンダリング波及が未分析",
+        "action": "セクション8に「refreshWorktrees()による再レンダリング波及」の項を新設。既存ポーリングと同じ経路のため追加的悪化なしの根拠を明記",
+        "status": "applied"
+      },
+      {
+        "id": "IMPACT-004",
+        "title": "createPortalのSSR互換性が未分析",
+        "action": "セクション4のPortalパターンにSSR互換性の項を追加。mountedフラグパターンのコード例を記載",
+        "status": "applied"
+      },
+      {
+        "id": "IMPACT-005",
+        "title": "大量リポジトリ環境でのUX影響が未分析",
+        "action": "セクション8のタイムアウトにSidebar固有の運用上の注意点を追記",
+        "status": "applied"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IMPACT-006",
+        "title": "ポーリングサイクルとの重複fetch",
+        "action": "セクション8のポーリング競合に将来Issue（タイマーリセット最適化）を具体的に追記",
+        "status": "applied"
+      },
+      {
+        "id": "IMPACT-007",
+        "title": "E2Eテストへの影響",
+        "action": "セクション11に「E2Eテストへの影響」の項を新設",
+        "status": "applied"
+      },
+      {
+        "id": "IMPACT-008",
+        "title": "モバイルdrawer表示でのSyncButton配置",
+        "action": "実装チェックリストに確認項目として追加",
+        "status": "applied"
+      }
+    ]
+  },
+  "updated_files": [
+    "dev-reports/design/issue-506-sidebar-sync-button-design-policy.md"
+  ],
+  "sections_modified": [
+    "セクション4: Portalパターン（SSR互換性追記）",
+    "セクション8: パフォーマンス設計（RepositoryManager同時実行、再レンダリング波及、ポーリングタイマーリセット、運用上の注意点追記）",
+    "セクション11: テスト戦略（既存テスト影響、E2Eテスト影響追記）",
+    "セクション15: Stage 3レビュー指摘対応サマリー（新設）"
+  ],
+  "checklist_items_added": 6,
+  "timestamp": "2026-03-16T12:30:00Z"
+}

@@ -1,0 +1,182 @@
+{
+  "issue_number": 506,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "IMPACT-001",
+        "category": "影響範囲の欠落",
+        "title": "RepositoryManagerとの同時実行による競合状態が未分析",
+        "description": "page.tsx（ホーム画面）ではRepositoryManagerのhandleSyncRepositoriesとSidebarのSyncButtonが同時に利用可能。両者がrepositoryApi.sync()を同時に呼び出した場合、DB同期処理（syncWorktreesToDB）が並行実行される。設計書セクション8「ポーリング競合」ではポーリングとの競合のみ言及しているが、RepositoryManagerの同期ボタンとの競合は分析されていない。syncWorktreesToDBの内部がトランザクション保護されているかの確認と、同時実行時のUIフィードバック（一方がsyncing中に他方も開始できる問題）を設計書に追記すべき。",
+        "severity": "medium",
+        "affected_files": [
+          "src/components/layout/Sidebar.tsx",
+          "src/components/repository/RepositoryManager.tsx",
+          "src/app/api/repositories/sync/route.ts"
+        ],
+        "recommendation": "セクション8に「RepositoryManagerとの同時実行」の項を追加し、(1) サーバーサイドのDB操作がトランザクション保護されているか確認した結果を記載、(2) UIレベルでの同時実行が発生しても機能的に安全である根拠を記載すること。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IMPACT-002",
+        "category": "テスト影響の欠落",
+        "title": "既存Sidebar.test.tsxのモック構成への影響が未分析",
+        "description": "既存のSidebar.test.tsxはapi-clientのモックでworktreeApiのみをモックしている（repositoryApiはモック対象外）。SyncButton追加によりrepositoryApiのモックが必要になるが、既存テストが破損する可能性がある。具体的には、vi.mock('@/lib/api-client')でrepositoryApiを含めない場合、SyncButtonのhandleSync内のrepositoryApi.sync()が未定義となりテストがクラッシュする可能性がある。設計書セクション11では新規テストケースのみ記載しており、既存テストへの影響分析が不足している。",
+        "severity": "medium",
+        "affected_files": [
+          "tests/unit/components/layout/Sidebar.test.tsx"
+        ],
+        "recommendation": "セクション11に「既存テストへの影響」の項を追加し、(1) 既存モック定義にrepositoryApiを追加する必要があること、(2) ApiErrorクラスのモックまたはインポートが必要であることを明記すること。"
+      },
+      {
+        "id": "IMPACT-003",
+        "category": "パフォーマンス影響",
+        "title": "refreshWorktrees()がfetchWorktrees()を呼びSET_LOADINGをdispatchする影響が未分析",
+        "description": "WorktreeSelectionContext.tsxのrefreshWorktrees()は内部でfetchWorktrees()を呼び出すが、fetchWorktrees()はdispatch({type:'SET_LOADING', isLoading:true})を実行する。これによりContext全体のisLoadingがtrueになり、Contextを購読する全コンポーネント（Sidebar、page.tsx内のWorktreeList等）が再レンダリングされる。設計書セクション8ではSyncButton内部のmemo化による再レンダリング最適化のみ記載しているが、refreshWorktrees()経由のContext state変更がSidebar自身およびWorktreeListに波及する影響が分析されていない。",
+        "severity": "medium",
+        "affected_files": [
+          "src/contexts/WorktreeSelectionContext.tsx",
+          "src/components/layout/Sidebar.tsx"
+        ],
+        "recommendation": "セクション8のパフォーマンス設計に、refreshWorktrees()がContextのisLoadingをtrueに変更することによる再レンダリング波及を認識していることを追記すること。現行のポーリングでも同じ経路を通るため追加的な悪化はないが、その根拠を明示すべき。"
+      },
+      {
+        "id": "IMPACT-004",
+        "category": "影響範囲の欠落",
+        "title": "createPortalによるdocument.body直接参照のSSR互換性が未分析",
+        "description": "設計書セクション4のコード例でcreatePortal(...)のターゲットにdocument.bodyを直接記述しているが、Next.js 14のServer Componentsアーキテクチャにおいてdocument.bodyへの参照タイミングの考慮が不足している。Sidebar.tsxは'use client'宣言済みだが、初回レンダリング時（SSR/hydration）にdocument.bodyが利用不可となるケースへの対処（例：useEffect内でのPortal mount、または段階的アプローチで記載済みのPortalなし方式の優先）が設計書上で明示されていない。",
+        "severity": "low",
+        "affected_files": [
+          "src/components/layout/Sidebar.tsx"
+        ],
+        "recommendation": "セクション4のPortalパターンに、SSR時のdocument.body参照問題への対処方針を追記すること。段階的アプローチ（F-007）でPortalなしを優先する場合はその旨を明記し、Portal採用時はuseStateでmountedフラグを管理するパターンを示すこと。"
+      },
+      {
+        "id": "IMPACT-005",
+        "category": "運用への影響",
+        "title": "大量リポジトリ環境でのSync APIレスポンス時間のUX影響が未分析",
+        "description": "設計書セクション8で「大量リポジトリ環境では10秒超の可能性」と記載しているが、Sidebarは常に表示されるUIであり、RepositoryManagerのSettings画面と異なりユーザーが頻繁に操作するコンポーネントである。10秒間ボタンがdisabled状態になることのUX影響、および複数回連打された場合のisSyncingRefガードの動作確認が運用面で重要だが、設計書ではローディング表示のみの対策としている。",
+        "severity": "low",
+        "affected_files": [
+          "src/components/layout/Sidebar.tsx"
+        ],
+        "recommendation": "セクション8のタイムアウトに、Sidebarが高頻度アクセスUIであることを踏まえた運用上の注意点（ローディング表示で十分であること、AbortControllerは将来Issue）を明記すること。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IMPACT-006",
+        "category": "間接影響",
+        "title": "ポーリングサイクルとの重複fetch",
+        "description": "WorktreeSelectionContextのポーリング（2-10秒間隔）はsetTimeoutベースで動作しており、SyncButton実行直後にポーリングが走ると、refreshWorktrees()で取得した直後のデータを再度fetchする。設計書では「冪等のため安全」と正しく記載しているが、SyncButton成功後にポーリングタイマーをリセットする最適化について将来Issueとして明示的に記録することを推奨する。",
+        "severity": "low",
+        "affected_files": [
+          "src/contexts/WorktreeSelectionContext.tsx"
+        ],
+        "recommendation": "セクション8のポーリング競合に「将来Issue: SyncButton成功時にポーリングタイマーをリセットすることで不要なfetchを削減」と具体的に記載すること。"
+      },
+      {
+        "id": "IMPACT-007",
+        "category": "テスト影響",
+        "title": "E2Eテストへの影響",
+        "description": "新しいボタンがサイドバーヘッダーに追加されることで、既存のE2Eテスト（Playwright）でサイドバーヘッダーのレイアウトやクリックターゲットに依存するテストが影響を受ける可能性がある。設計書セクション11ではユニットテストのみ記載しておりE2Eテストへの影響に触れていない。",
+        "severity": "low",
+        "affected_files": [],
+        "recommendation": "セクション11にE2Eテストへの影響有無を確認する項目を追加すること。"
+      },
+      {
+        "id": "IMPACT-008",
+        "category": "間接影響",
+        "title": "モバイルレイアウトでのSyncButton配置",
+        "description": "AppShell.tsxではモバイル表示時にSidebarがdrawer（fixed + translate-x）として表示される。SyncButtonがヘッダーに追加されることで、モバイルdrawer内のヘッダースペースが圧迫される可能性がある。設計書セクション10の変更対象にはAppShell.tsxは含まれておらず変更は不要だが、モバイルでのレイアウト確認が必要。",
+        "severity": "low",
+        "affected_files": [
+          "src/components/layout/AppShell.tsx"
+        ],
+        "recommendation": "実装チェックリストに「モバイルdrawer表示でのSyncButtonレイアウト確認」を追加すること。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "impact_matrix": {
+    "direct_changes": [
+      {
+        "file": "src/components/layout/Sidebar.tsx",
+        "change": "SyncButtonインラインコンポーネント追加、import追加（repositoryApi, ApiError, useToast, ToastContainer, createPortal, useTranslations）",
+        "risk": "low",
+        "correctly_identified": true
+      },
+      {
+        "file": "tests/unit/components/layout/Sidebar.test.tsx",
+        "change": "repositoryApiモック追加、SyncButton関連テスト追加",
+        "risk": "medium",
+        "correctly_identified": true,
+        "note": "既存モック構成への影響が未分析（IMPACT-002）"
+      },
+      {
+        "file": "locales/en/common.json",
+        "change": "syncSuccess, syncError, syncAuthError, syncButtonLabelキー追加",
+        "risk": "low",
+        "correctly_identified": true
+      },
+      {
+        "file": "locales/ja/common.json",
+        "change": "syncSuccess, syncError, syncAuthError, syncButtonLabelキー追加",
+        "risk": "low",
+        "correctly_identified": true
+      }
+    ],
+    "indirect_impacts": [
+      {
+        "file": "src/contexts/WorktreeSelectionContext.tsx",
+        "impact": "refreshWorktrees()の呼び出しによるisLoading状態変更がContext購読コンポーネントに波及",
+        "risk": "low",
+        "identified_in_design": false,
+        "note": "IMPACT-003"
+      },
+      {
+        "file": "src/components/repository/RepositoryManager.tsx",
+        "impact": "同一APIエンドポイント（POST /api/repositories/sync）を使用。同時実行の可能性",
+        "risk": "low",
+        "identified_in_design": false,
+        "note": "IMPACT-001"
+      },
+      {
+        "file": "src/components/layout/AppShell.tsx",
+        "impact": "変更なし。ただしモバイルdrawer内のレイアウト影響確認が必要",
+        "risk": "low",
+        "identified_in_design": false,
+        "note": "IMPACT-008"
+      }
+    ],
+    "no_impact_confirmed": [
+      "src/app/api/repositories/sync/route.ts (サーバーサイド変更なし)",
+      "src/lib/api-client.ts (既存APIそのまま使用)",
+      "src/components/common/Toast.tsx (既存コンポーネントそのまま使用)",
+      "src/contexts/SidebarContext.tsx (変更なし)"
+    ]
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-506-sidebar-sync-button-design-policy.md",
+    "src/components/layout/Sidebar.tsx",
+    "src/components/layout/AppShell.tsx",
+    "src/contexts/WorktreeSelectionContext.tsx",
+    "src/components/common/Toast.tsx",
+    "src/lib/api-client.ts",
+    "src/components/repository/RepositoryManager.tsx",
+    "src/app/page.tsx",
+    "src/app/api/repositories/sync/route.ts",
+    "tests/unit/components/layout/Sidebar.test.tsx",
+    "locales/en/common.json"
+  ],
+  "timestamp": "2026-03-16T12:00:00Z"
+}

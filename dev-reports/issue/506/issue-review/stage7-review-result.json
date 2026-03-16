@@ -1,0 +1,161 @@
+{
+  "issue_number": 506,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "stage": 7,
+  "review_date": "2026-03-16",
+  "previous_review_summary": "Stage 3(影響範囲レビュー1回目)で6件の指摘。Stage 4で5件反映・1件スキップ。Stage 5(通常レビュー2回目)で4件の指摘。Stage 6で全4件反映。合計17件中16件反映済み",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 1,
+    "nice_to_have_count": 2
+  },
+  "previous_findings_verification": {
+    "status": "all_resolved",
+    "details": [
+      {
+        "original_id": "Stage3-MF-1",
+        "original_issue": "ToastContainerのstacking context問題",
+        "verification": "resolved",
+        "comment": "React Portal方式を第一候補とし段階的検証ステップ(Portal無し確認->Portal追加->AppShellフォールバック)を明記済み。Toast.tsx共通コンポーネントは修正しない方針も併記。受入条件に「Sidebar外(ビューポート基準)に正しく表示される」を追加済み。影響範囲の記載も適切"
+      },
+      {
+        "original_id": "Stage3-SF-1",
+        "original_issue": "useToastによるSidebar再レンダリング",
+        "verification": "resolved",
+        "comment": "SyncButton分離方針が設計判断・実装タスク・受入条件・テスト観点の4箇所に整合的に記載済み。テスト観点にrenderCountチェックも追加済み"
+      },
+      {
+        "original_id": "Stage3-SF-2",
+        "original_issue": "テスト観点の未記載",
+        "verification": "resolved",
+        "comment": "7項目のテスト観点が追加済み。repositoryApiモック追加、sync呼び出し、disabled状態、Toast表示、レンダリング確認を網羅"
+      },
+      {
+        "original_id": "Stage3-SF-3",
+        "original_issue": "既存ポーリングとの二重fetch競合",
+        "verification": "resolved",
+        "comment": "動作フローに冪等性に基づく許容方針を明記。関連コンポーネントのWorktreeSelectionContextに「変更なし」の注記も追加済み"
+      },
+      {
+        "original_id": "Stage3-NTH-2",
+        "original_issue": "アイコン方針の未記載",
+        "verification": "resolved",
+        "comment": "インラインSVG(既存Sidebarパターン準拠)で実装する方針を明記済み"
+      },
+      {
+        "original_id": "Stage5-SF-1",
+        "original_issue": "Toast対策の実装タスクが曖昧",
+        "verification": "resolved",
+        "comment": "React Portal方式を第一候補と明記し、SyncButton内でcreatePortalを使用する具体的手順を記載済み。段階的検証ステップも追加済み"
+      },
+      {
+        "original_id": "Stage5-SF-2",
+        "original_issue": "再レンダリング防止の検証方法が不明",
+        "verification": "resolved",
+        "comment": "テスト観点にReact DevTools Profiler/renderCountチェックを追加。受入条件も実装レベルで検証可能な表現に変更済み"
+      },
+      {
+        "original_id": "Stage5-NTH-1",
+        "original_issue": "401エラー時の挙動が未考慮",
+        "verification": "resolved",
+        "comment": "動作フローのエラーハンドリングに401認証エラーのケースを追加。WorktreeSelectionContextの既存処理との整合方針を記載済み"
+      },
+      {
+        "original_id": "Stage5-NTH-2",
+        "original_issue": "WorktreeSelectionContextが変更対象外であることが不明確",
+        "verification": "resolved",
+        "comment": "関連コンポーネントに「変更なし。refreshWorktrees()を呼び出すのみ」の注記を追加済み。Toast.tsxにも同様の注記あり"
+      }
+    ]
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト範囲",
+        "issue": "createPortalを使用するSyncButtonコンポーネントのテスト方法について、テスト観点セクションに考慮が不足している。createPortalでdocument.bodyにToastContainerをマウントする場合、Testing Library(jsdom環境)ではPortal先のDOMがテストコンテナ外に描画されるため、screen.getByTestId('toast-container')で検出できない可能性がある。Sidebar.test.tsxの既存のWrapper構成ではこの問題に遭遇する",
+        "location": "## テスト観点",
+        "recommendation": "テスト観点に「createPortalによるToastContainerはdocument.bodyに描画されるため、テスト時はscreen.getByTestId('toast-container')ではなくdocument.querySelector('[data-testid=\"toast-container\"]')を使用するか、testing-library/reactのwithin(document.body)を利用する」等のPortal対応テスト手法の注記を追加すべき。または、テスト環境ではPortalをスキップするモック戦略を検討する旨を記載すべき",
+        "evidence": "React Testing LibraryのFAQでは、createPortalで描画された要素はrenderが返すcontainer外に存在するため、screenクエリで見つからない場合がある。既存のSidebar.test.tsxはWrapper内にSidebarProviderとWorktreeSelectionProviderをネストしており(72-78行目)、Portal先のdocument.bodyへの検証はこの構成では想定されていない"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "影響ファイル",
+        "issue": "sync API(POST /api/repositories/sync)はscanMultipleRepositoriesでファイルシステムスキャンを実行する重い処理であるが、タイムアウトに関する記載がない。リポジトリ数が多い環境や低速なストレージでは同期処理が長時間化し、ユーザーがsync中であることを把握しにくくなる可能性がある",
+        "location": "## 動作フロー",
+        "recommendation": "同期処理の想定時間やタイムアウトに関する記載があるとよい。例えば「通常1-3秒程度で完了するが、リポジトリ数が多い場合は10秒以上かかる可能性がある」等の目安、またはfetchのAbortController等によるクライアント側タイムアウト制御の検討を記載するとなお良い。ただし、現状ローディング表示があるため致命的ではない",
+        "evidence": "sync APIの実装(route.ts)ではgetRepositoryPaths()、scanMultipleRepositories()、syncWorktreesToDB()を順次実行しており、リポジトリ数に比例して処理時間が増加する。Issueの動作フローにはローディング表示の記載はあるが、タイムアウトの考慮はない"
+      },
+      {
+        "id": "NTH-2",
+        "category": "破壊的変更",
+        "issue": "影響範囲の変更対象ファイルがSidebar.tsxのみとなっているが、SyncButtonコンポーネント分離の実装形態（同一ファイル内のインラインコンポーネントか、別ファイルか）が未記載。既存のSidebar.tsxはGroupHeader、ViewModeToggle、ChevronIcon等のインラインサブコンポーネントを同一ファイル内に定義しており(265-380行目)、SyncButtonも同一ファイル内に定義するのが既存パターンに沿っている",
+        "location": "## 影響範囲 / ## 実装タスク",
+        "recommendation": "SyncButtonをSidebar.tsx内のインラインコンポーネントとして定義するか、別ファイル(例: SyncButton.tsx)に分離するかを明記するとよい。既存パターン(GroupHeader等がインライン)に合わせてSidebar.tsx内に定義する場合、変更対象ファイルはSidebar.tsxのみで正確。別ファイルに分離する場合は影響範囲テーブルの更新が必要",
+        "evidence": "Sidebar.tsxの265-380行目にGroupHeader、ViewModeToggle、ChevronIcon、GroupIcon、FlatListIconの5つのインラインサブコンポーネントが定義されている。SyncButtonもこのパターンに従う場合、変更対象はSidebar.tsxのみで整合する"
+      }
+    ]
+  },
+  "impact_scope_verification": {
+    "affected_files_accuracy": "accurate",
+    "dependency_analysis": "complete",
+    "breaking_changes": "none",
+    "test_coverage": "adequate_with_minor_gap",
+    "details": {
+      "affected_files": "変更対象ファイルはSidebar.tsxのみ。Toast.tsx、AppShell.tsx、WorktreeSelectionContext.tsx、sync APIは変更なしと明記。正確",
+      "dependencies": "repositoryApiの新規import(api-client.ts)、useToast/ToastContainerの新規import(Toast.tsx)、createPortalの新規import(react-dom)が必要。Issueでは明示されていないがcreatePortalのimportは実装タスクから推測可能。依存関係の分析は十分",
+      "breaking_changes": "既存コンポーネント(Toast.tsx、WorktreeSelectionContext.tsx)は変更しない方針が明記されており、破壊的変更はない",
+      "test_coverage": "7項目のテスト観点が記載されており、機能テスト・パフォーマンステストの両面をカバー。ただしcreatePortal使用時のテスト手法について若干の補足が望ましい(SF-1)",
+      "migration_path": "新機能追加のため既存ユーザーへの影響なし。同期ボタンが追加されるのみ"
+    }
+  },
+  "overall_assessment": {
+    "quality": "excellent",
+    "readiness": "ready_for_implementation",
+    "comment": "前回の影響範囲レビュー(Stage 3)での指摘6件、およびStage 5の通常レビューでの指摘4件がすべて適切に反映されている。must_fix該当の指摘はなく、影響範囲の分析は網羅的かつ正確。変更対象(Sidebar.tsxのみ)と非変更対象(Toast.tsx、WorktreeSelectionContext.tsx、AppShell.tsx)の区別が明確で、実装者が迷う余地がほとんどない。残る1件のshould_fixはcreatePortal使用時のテスト手法に関するもので、実装着手には影響しない。Issueは実装可能な状態にある"
+  },
+  "code_references": [
+    {
+      "file": "src/components/layout/Sidebar.tsx",
+      "relevance": "変更対象。SyncButtonインラインコンポーネント追加先。既存のインラインサブコンポーネント(GroupHeader等)が265-380行目に定義"
+    },
+    {
+      "file": "src/components/common/Toast.tsx",
+      "relevance": "変更なし。useToast/ToastContainerをSyncButton内で使用。createPortalでdocument.bodyにマウント予定"
+    },
+    {
+      "file": "src/components/layout/AppShell.tsx",
+      "relevance": "変更なし。Sidebarのマウント先。fixed+translateによるstacking context生成元"
+    },
+    {
+      "file": "src/contexts/WorktreeSelectionContext.tsx",
+      "relevance": "変更なし。refreshWorktrees()を呼び出すのみ。既存ポーリング(2-10秒)との二重fetchは許容方針"
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "relevance": "変更なし。repositoryApi.sync()(353-363行目)をSyncButtonからimport"
+    },
+    {
+      "file": "src/config/z-index.ts",
+      "relevance": "変更なし。TOAST=60の定義。Portal使用時はviewport基準で表示されるため問題なし"
+    },
+    {
+      "file": "tests/unit/components/layout/Sidebar.test.tsx",
+      "relevance": "テスト拡張対象。repositoryApiモック追加・SyncButtonテスト追加が必要。createPortalのDOM検証手法に注意"
+    },
+    {
+      "file": "src/app/api/repositories/sync/route.ts",
+      "relevance": "変更なし。sync API実装。scanMultipleRepositories等の処理を含む"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構成の整合性確認。レイアウトコンポーネントは記載対象外"
+    }
+  ]
+}

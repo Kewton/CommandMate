@@ -1,0 +1,118 @@
+{
+  "issue_number": 506,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "CONS-001",
+        "title": "i18n名前空間 'sidebar' が存在しない",
+        "description": "設計書ではuseTranslations('sidebar')を使用しているが、既存のi18n設定(src/i18n.ts)にはsidebar名前空間が定義されておらず、localesディレクトリにもsidebar.jsonファイルが存在しない。既存の名前空間はcommon, worktree, autoYes, error, prompt, auth, scheduleの7つのみ。新たにsidebar名前空間を追加するか、既存の名前空間(commonまたはworktree)にキーを追加するかを明確にし、i18n.tsのimportとmessagesマッピングも更新する必要がある。",
+        "severity": "high",
+        "design_section": "セクション3 技術選定 / セクション4 設計パターン",
+        "actual_code": "src/i18n.ts: sidebar名前空間のimportなし、locales/en/sidebar.json・locales/ja/sidebar.json が存在しない",
+        "recommendation": "sidebar.jsonを新規作成してi18n.tsに追加するか、既存のcommon名前空間にsyncSuccess/syncError等のキーを追加する。いずれの場合も設計書の記載を実装と一致させること。"
+      },
+      {
+        "id": "CONS-002",
+        "title": "設計書記載のSyncButtonのprops設計がSidebar.tsxの既存パターンと不一致",
+        "description": "設計書ではSyncButtonがrefreshWorktreesをprops経由で受け取るmemo化コンポーネントとして定義されているが、Sidebar.tsxの既存インラインコンポーネント(GroupHeader, ViewModeToggle, ChevronIcon等)はいずれもmemoでラップされておらず、通常の関数コンポーネントとして定義されている。設計書はSyncButtonのみmemo()を適用する方針だが、これは既存パターンとの乖離がある。memo化自体は技術的に正当な判断だが、設計書セクション4の「既存パターンとの整合性」テーブルで「memo化: Sidebar全体がmemo → SyncButton内部もmemo」と記載しているのは誤解を招く。Sidebar全体はmemoだが、内部のインラインコンポーネントはmemoされていない。",
+        "severity": "medium",
+        "design_section": "セクション4 設計パターン - 既存パターンとの整合性テーブル",
+        "actual_code": "GroupHeader, ViewModeToggle, ChevronIcon等は全てfunction宣言でmemo未使用",
+        "recommendation": "設計書の整合性テーブルを「既存インラインコンポーネントはmemo未使用だが、SyncButtonはuseToast stateの伝播を防ぐためmemo化する」と正確に記載すること。memo化の技術的根拠(useToastによるstate変更の分離)も明記すると良い。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "CONS-003",
+        "title": "設計書のAPI呼び出し元の記載に不正確な記述",
+        "description": "設計書セクション4の整合性テーブルで「API呼び出し: WorktreeList: repositoryApi.sync() → 同じAPI使用」と記載しているが、WorktreeList.tsxではrepositoryApi.sync()は呼ばれていない。WorktreeListが使用しているのはrepositoryApi.getExcluded(), repositoryApi.restore(), repositoryApi.delete()である。repositoryApi.sync()を呼んでいるのはRepositoryManager.tsxである。",
+        "severity": "medium",
+        "design_section": "セクション4 既存パターンとの整合性テーブル",
+        "actual_code": "WorktreeList.tsx: repositoryApi.getExcluded/restore/deleteのみ使用。RepositoryManager.tsx: repositoryApi.sync()を使用。",
+        "recommendation": "テーブルの記載を「RepositoryManager: repositoryApi.sync()」に修正する。"
+      },
+      {
+        "id": "CONS-004",
+        "title": "refreshWorktrees()の戻り値型がPromise<void>として正確に認識されているか",
+        "description": "設計書のSyncButtonコード例でawait refreshWorktrees()を呼んでいるが、WorktreeSelectionContextのrefreshWorktrees()はfetchWorktrees()をawaitしており、fetchWorktrees()内でエラーが発生した場合はdispatchでerrorをセットするだけでthrowしない。つまりrefreshWorktrees()は常に正常完了する。設計書のtry-catchでcatchされるのはrepositoryApi.sync()のエラーのみであり、refreshWorktrees()のエラーは別途Context側で処理される。この振る舞いは設計書では明文化されていないが、実装上の整合性には問題ない。",
+        "severity": "low",
+        "design_section": "セクション4 設計パターン / セクション2 シーケンス図",
+        "actual_code": "WorktreeSelectionContext.refreshWorktrees() -> fetchWorktrees(): エラーはdispatch('SET_ERROR')で処理、throwしない",
+        "recommendation": "設計書に「refreshWorktrees()は内部でエラーをContextのerror stateに反映するため、SyncButton側でのcatch対象外」という注釈を追加するとよい。"
+      },
+      {
+        "id": "CONS-005",
+        "title": "SyncResponseインターフェースの定義位置が不明確",
+        "description": "設計書セクション5でSyncResponseインターフェースを定義しているが、実際のapi-client.tsではrepositoryApi.sync()の戻り値はインラインの型リテラルで定義されている(名前付きインターフェースではない)。設計書ではSyncResponseという名前のインターフェースとして記載しているが、これは実コードに存在しない型名である。",
+        "severity": "low",
+        "design_section": "セクション5 データモデル設計",
+        "actual_code": "repositoryApi.sync(): Promise<{ success: boolean; message: string; worktreeCount: number; repositoryCount: number; repositories: string[]; }>",
+        "recommendation": "設計書の型定義を「api-client.tsのインライン型リテラルに準拠」と明記するか、実装時に名前付き型を追加する場合はその旨を記載する。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "CONS-006",
+        "title": "Sidebar.tsx内の既存ハードコード文字列とのi18n一貫性",
+        "description": "設計書でスコープ外と明記済みだが、現在のSidebar.tsxには'Branches', 'Search branches...', 'No branches found', 'No branches available'等のハードコード英語文字列が存在する。SyncButtonのみi18n対応すると、同一ファイル内でi18n化された文字列と非i18n文字列が混在する。Stage 1レビュー(F-005)で既に認識済み。",
+        "severity": "low",
+        "design_section": "セクション3 技術選定",
+        "actual_code": "Sidebar.tsx L148: 'Branches', L162: 'Search branches...', L179: 'No branches found'等",
+        "recommendation": "将来Issueとしてサイドバー全体のi18n化を計画する。現時点では設計書に記載済みのため対応不要。"
+      },
+      {
+        "id": "CONS-007",
+        "title": "AppShellのtransform適用はtranslate-x-0/translate-x-fullによるものでtransformプロパティ直接指定ではない",
+        "description": "設計書セクション4でSidebarがposition: fixed + transformで配置されると記載しているが、実際のAppShell.tsxではtranslate-x-0/-translate-x-fullのTailwindクラスを使用している。CSS的にはtranslateXもtransformプロパティの一部であるため技術的には正確だが、表現として若干曖昧。また、デスクトップでisOpen=trueの場合はtranslate-x-0(=transform: translateX(0))となり、これがcontaining blockを生成するかはブラウザ実装依存。設計書の段階的アプローチ(F-007対応)が適切な判断。",
+        "severity": "low",
+        "design_section": "セクション4 Portalパターン",
+        "actual_code": "AppShell.tsx: translate-x-0 / -translate-x-full (Tailwind CSS transform)",
+        "recommendation": "現状の段階的アプローチで十分。実装時にstacking context問題の有無を実機確認すればよい。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "consistency_matrix": {
+    "design_vs_codebase": {
+      "status": "partially_consistent",
+      "gaps": [
+        "i18n sidebar名前空間の未定義(CONS-001)",
+        "インラインコンポーネントのmemoパターン記述の不正確さ(CONS-002)",
+        "repositoryApi.sync()の呼び出し元の誤記(CONS-003)"
+      ]
+    },
+    "internal_sections": {
+      "status": "consistent",
+      "notes": "セクション間の論理的整合性は概ね取れている。Stage 1レビュー指摘の反映も適切。"
+    },
+    "design_vs_issue": {
+      "status": "consistent",
+      "notes": "Issue #506の要件(サイドバーへの同期ボタン追加)に対して設計方針は適切にスコープされている。"
+    },
+    "design_vs_architecture": {
+      "status": "mostly_consistent",
+      "notes": "既存のレイヤー構成(プレゼンテーション/API/Context)に準拠。新規抽象化レイヤーの追加なし。"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-506-sidebar-sync-button-design-policy.md",
+    "src/components/layout/Sidebar.tsx",
+    "src/components/layout/AppShell.tsx",
+    "src/components/common/Toast.tsx",
+    "src/lib/api-client.ts",
+    "src/contexts/WorktreeSelectionContext.tsx",
+    "src/components/repository/RepositoryManager.tsx",
+    "src/components/worktree/WorktreeList.tsx",
+    "src/i18n.ts"
+  ],
+  "timestamp": "2026-03-16T12:00:00Z"
+}

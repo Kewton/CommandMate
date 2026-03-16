@@ -1,0 +1,107 @@
+{
+  "issue_number": 506,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "review_date": "2026-03-16",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "ToastContainerはposition: fixed(bottom-4 right-4)で配置されるが、Sidebar自体もposition: fixedでz-index: 30(Z_INDEX.SIDEBAR)の中に描画される。Toast(z-index: 60 = Z_INDEX.TOAST)はSidebarの子要素となるため、CSSのstacking contextの影響でToastがSidebarの外(メインコンテンツ領域)に正しく表示されない可能性がある。モバイルドロワー(z-50)内でも同様の問題が発生する",
+        "location": "## Toast通知の実装方針 / ## 影響範囲",
+        "recommendation": "ToastContainerをSidebar内部ではなくAppShell(またはその親)レベルに配置するか、React Portalを使ってdocument.bodyに直接マウントする方式を検討すべき。既存のToast利用箇所(MarkdownEditor, WorktreeDetailRefactored等)はメインコンテンツ領域内に配置されておりstacking contextの問題が発生しないが、fixedポジションのSidebar内に配置する場合は異なる",
+        "evidence": "src/config/z-index.tsでSIDEBAR=30, TOAST=60と定義。AppShell.tsxの101-114行目でSidebarは<aside>内にfixed+transform+z-indexで配置。ToastContainerのposition:fixedはSidebarのstacking context内に閉じ込められる可能性がある。CSSの仕様上、transformが適用された要素は新しいcontaining blockを生成するため、子要素のposition:fixedはviewportではなくその要素を基準とする"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "依存関係",
+        "issue": "Sidebar.tsxはmemo化されたコンポーネントだが、useToast hookのstate(toasts配列)が変更されるたびにmemoが無効化され再レンダリングが発生する。Sidebarは現在propsを受け取らないためmemoは常に有効だが、useToastの内部stateが追加されることでToast表示/非表示のたびにworktree一覧全体が再レンダリングされる",
+        "location": "## 主要な変更点",
+        "recommendation": "パフォーマンスへの影響は軽微と思われるが、以下の対策をIssueに記載すべき: (1) useToastをSidebar直下ではなく同期ボタンを含む小さなラッパーコンポーネントに分離してToast stateの変更が全体の再レンダリングを引き起こさないようにする、または(2) パフォーマンスへの影響が許容範囲であることを明記する",
+        "evidence": "Sidebar.tsxはmemo(function Sidebar())で定義(43行目)。memoはpropsの変更を検出するが、内部のuseState/useReducerの変更は常に再レンダリングを引き起こす。worktree一覧のuseMemoチェーンが再計算されるコストがある"
+      },
+      {
+        "id": "SF-2",
+        "category": "テスト範囲",
+        "issue": "既存のSidebar.test.tsxはapi-clientモックでworktreeApiのみをモックしており、repositoryApiのモックが含まれていない。同期ボタンのテストにはrepositoryApi.syncのモックが必要だが、テスト対象として明示されていない",
+        "location": "## 実装タスク",
+        "recommendation": "ユニットテストの具体的なテスト観点を記載すべき: (1) 同期ボタンクリックでrepositoryApi.sync()が呼ばれること、(2) sync成功後にrefreshWorktrees()が呼ばれること、(3) sync中はボタンがdisabledになること、(4) sync失敗時にエラーToastが表示されること、(5) 既存のSidebar.test.tsxのapi-clientモックにrepositoryApiを追加する必要があること",
+        "evidence": "tests/unit/components/layout/Sidebar.test.tsxの31-40行目でvi.mock('@/lib/api-client')はworktreeApiのみモック。repositoryApiの追加が必要"
+      },
+      {
+        "id": "SF-3",
+        "category": "依存関係",
+        "issue": "sync API(POST /api/repositories/sync)はリポジトリパスのスキャン、DB同期、worktree一覧の再取得を行う重い処理。WorktreeSelectionContextの既存ポーリング(2-10秒間隔)と同期ボタンのrefreshWorktrees()が同時に実行された場合、二重にworktreeApi.getAll()が呼ばれる可能性がある。機能的な問題はないが、不要なAPI呼び出しが発生する",
+        "location": "## 動作フロー",
+        "recommendation": "既存のポーリングとの競合について認識を記載すべき。対策としては(1) 許容する(二重fetchは冪等なので問題なし)、(2) refreshWorktrees呼び出し時にポーリングタイマーをリセットする、のいずれかの方針を明示",
+        "evidence": "WorktreeSelectionContext.tsx 233-271行目のポーリングはsetTimeoutベースで2-10秒間隔で実行。refreshWorktrees()(222-224行目)は同じfetchWorktreesを呼ぶため、タイミングによっては直後のポーリングと重複する"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント更新",
+        "issue": "CLAUDE.mdのモジュール一覧でSidebar.tsxの説明が更新されていない。同期ボタン機能が追加される場合、モジュール説明の更新が必要",
+        "location": "## 影響範囲",
+        "recommendation": "実装完了後にCLAUDE.mdのSidebar.tsx説明に「同期ボタン」の記載を追加する旨をタスクに含めるとよい。ただしCLAUDE.mdにはSidebar.tsxは直接記載されていないため、新規追加が必要かは任意",
+        "evidence": "CLAUDE.mdのモジュール一覧にSidebar.tsxの記載はないが、AppShell.tsxの記載もないため、レイアウトコンポーネントは記載対象外の可能性がある"
+      },
+      {
+        "id": "NTH-2",
+        "category": "移行考慮",
+        "issue": "lucide-reactアイコンの追加が必要になる可能性がある。既存のSidebar.tsxではインラインSVGを使用しているが、Toast.tsxではlucide-react(CheckCircle, XCircle等)を使用。同期ボタンのアイコン(回転矢印)にlucide-reactを使用する場合、Sidebar.tsxに新しい依存が追加される",
+        "location": "## 実装タスク",
+        "recommendation": "同期ボタンのアイコンをインラインSVG(既存Sidebarパターン)で実装するか、lucide-react(RefreshCw等)を使用するかの方針を明記するとよい。既存のSidebar.tsxはlucide-reactに依存していないため、追加は依存関係の変更となる",
+        "evidence": "Sidebar.tsxの既存アイコン(ChevronIcon, GroupIcon, FlatListIcon)はすべてインラインSVG(334-380行目)。Toast.tsxはlucide-reactからimport(13行目)"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/layout/Sidebar.tsx",
+      "relevance": "同期ボタン追加先。memo化コンポーネント。既存アイコンはインラインSVG"
+    },
+    {
+      "file": "src/components/layout/AppShell.tsx",
+      "relevance": "Sidebarのマウント先。fixed+transformによるstacking context生成"
+    },
+    {
+      "file": "src/components/common/Toast.tsx",
+      "relevance": "ToastContainer(position:fixed)のz-index=60。stacking context問題の対象"
+    },
+    {
+      "file": "src/config/z-index.ts",
+      "relevance": "SIDEBAR=30, TOAST=60の定義。stacking context問題の根拠"
+    },
+    {
+      "file": "src/contexts/WorktreeSelectionContext.tsx",
+      "relevance": "既存ポーリング(2-10秒)。refreshWorktrees()との競合可能性"
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "relevance": "repositoryApi.sync()の定義。Sidebar.tsxへの新規import"
+    },
+    {
+      "file": "tests/unit/components/layout/Sidebar.test.tsx",
+      "relevance": "既存テスト。repositoryApiモック未定義。テスト拡張が必要"
+    },
+    {
+      "file": "src/app/api/repositories/sync/route.ts",
+      "relevance": "sync APIの実装。スキャン+DB同期の重い処理"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュール一覧の更新検討"
+    }
+  ]
+}

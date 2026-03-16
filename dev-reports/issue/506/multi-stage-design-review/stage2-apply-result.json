@@ -1,0 +1,83 @@
+{
+  "issue_number": 506,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘対応",
+  "status": "completed",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "CONS-001",
+        "title": "i18n名前空間 'sidebar' が存在しない",
+        "status": "applied",
+        "changes": [
+          "セクション3: i18n選定をcommon名前空間に変更、既存7名前空間の情報を明記",
+          "セクション4: コード例のuseTranslations('sidebar')をuseTranslations('common')に修正",
+          "セクション10: 変更対象ファイルにlocales/en/common.json, locales/ja/common.jsonを追加"
+        ]
+      },
+      {
+        "id": "CONS-002",
+        "title": "設計書記載のSyncButtonのprops設計がSidebar.tsxの既存パターンと不一致",
+        "status": "applied",
+        "changes": [
+          "セクション4: 整合性テーブルのmemo化行を修正。既存インラインコンポーネントはmemo未使用であること、SyncButtonのmemo化はuseToastのstate変更波及防止が技術的根拠であることを明記"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "CONS-003",
+        "title": "設計書のAPI呼び出し元の記載に不正確な記述",
+        "status": "applied",
+        "changes": [
+          "セクション4: 整合性テーブルのAPI呼び出し行を「RepositoryManager: repositoryApi.sync()」に修正"
+        ]
+      },
+      {
+        "id": "CONS-004",
+        "title": "refreshWorktrees()の戻り値型がPromise<void>として正確に認識されているか",
+        "status": "applied",
+        "changes": [
+          "セクション2: シーケンス図にrefreshWorktrees()のエラーハンドリング振る舞いのNote追加",
+          "セクション4: コード例にrefreshWorktrees()がthrowしない旨のコメント追加"
+        ]
+      },
+      {
+        "id": "CONS-005",
+        "title": "SyncResponseインターフェースの定義位置が不明確",
+        "status": "applied",
+        "changes": [
+          "セクション5: 型定義にapi-client.tsのインライン型リテラルに準拠する旨のコメント追加"
+        ]
+      }
+    ],
+    "consider": [
+      {
+        "id": "CONS-006",
+        "title": "Sidebar.tsx内の既存ハードコード文字列とのi18n一貫性",
+        "status": "acknowledged",
+        "reason": "Stage 1 F-005で既に認識済み・スコープ外として記載済み"
+      },
+      {
+        "id": "CONS-007",
+        "title": "AppShellのtransform適用はtranslate-x-0/translate-x-fullによるもの",
+        "status": "applied",
+        "changes": [
+          "セクション4: Portalパターン説明をTailwind CSSクラス名に修正"
+        ]
+      }
+    ]
+  },
+  "updated_files": [
+    "dev-reports/design/issue-506-sidebar-sync-button-design-policy.md"
+  ],
+  "sections_modified": [
+    "セクション2 (シーケンス図 - refreshWorktrees注釈追加)",
+    "セクション3 (技術選定 - i18n名前空間をcommonに変更)",
+    "セクション4 (設計パターン - コード例修正、整合性テーブル修正、Portalパターン説明修正)",
+    "セクション5 (データモデル設計 - 型定義コメント追加)",
+    "セクション10 (変更対象ファイル - i18nファイル明記)",
+    "セクション14 (新規追加 - Stage 2レビュー指摘対応サマリー)"
+  ],
+  "timestamp": "2026-03-16T12:30:00Z"
+}

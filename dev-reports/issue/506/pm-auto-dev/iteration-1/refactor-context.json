@@ -1,0 +1,15 @@
+{
+  "issue_number": 506,
+  "refactor_targets": [
+    "src/components/layout/Sidebar.tsx",
+    "tests/unit/components/layout/Sidebar.test.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0
+  },
+  "improvement_goals": [
+    "SyncButtonコンポーネントのコード品質確認",
+    "テストの品質と網羅性の確認",
+    "SOLID原則への準拠確認"
+  ]
+}

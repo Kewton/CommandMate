@@ -1,0 +1,142 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "シナリオ1: サイドバーヘッダーに同期ボタンが表示される",
+      "result": "passed",
+      "evidence": "Sidebar.tsx line 155: <SyncButton refreshWorktrees={refreshWorktrees} /> がヘッダー内に配置。テスト 'should render sync button in sidebar header' PASSED"
+    },
+    {
+      "scenario": "シナリオ2: 同期ボタンクリックでrepositoryApi.sync()が呼ばれる",
+      "result": "passed",
+      "evidence": "Sidebar.tsx line 421: repositoryApi.sync()を呼び出し。テスト 'should call repositoryApi.sync() on click' PASSED"
+    },
+    {
+      "scenario": "シナリオ3: sync成功後にrefreshWorktrees()が呼ばれる",
+      "result": "passed",
+      "evidence": "Sidebar.tsx line 422: await refreshWorktrees()を呼び出し。テスト 'should call refreshWorktrees() after successful sync' PASSED"
+    },
+    {
+      "scenario": "シナリオ4: sync中はボタンがdisabledになる",
+      "result": "passed",
+      "evidence": "Sidebar.tsx line 445: disabled={isSyncing}。テスト 'should disable button during sync' PASSED"
+    },
+    {
+      "scenario": "シナリオ5: sync成功時に成功Toastが表示される",
+      "result": "passed",
+      "evidence": "Sidebar.tsx line 423-427: showToast(t('syncSuccess', { count: result.worktreeCount }), 'success', 3000)。テスト 'should show success toast on sync success' PASSED"
+    },
+    {
+      "scenario": "シナリオ6: sync失敗時にエラーToastが表示される",
+      "result": "passed",
+      "evidence": "Sidebar.tsx line 432: showToast(t('syncError'), 'error', 5000)。テスト 'should show error toast on sync failure' PASSED"
+    },
+    {
+      "scenario": "シナリオ7: 401エラー時に認証エラーToastが表示される",
+      "result": "passed",
+      "evidence": "Sidebar.tsx line 429-430: ApiError instance check with status 401 -> showToast(t('syncAuthError'))。テスト 'should handle 401 error with auth error toast' PASSED"
+    },
+    {
+      "scenario": "シナリオ8: npm run test:unit が全パスする",
+      "result": "passed",
+      "evidence": "252 test files passed, 5026 tests passed, 7 skipped. Sidebar.test.tsx: 37/37 passed"
+    },
+    {
+      "scenario": "シナリオ9: npm run lint がエラー0件",
+      "result": "passed",
+      "evidence": "next lint: No ESLint warnings or errors"
+    },
+    {
+      "scenario": "シナリオ10: npx tsc --noEmit がエラー0件",
+      "result": "passed",
+      "evidence": "tsc --noEmit completed with no output (no errors)"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "サイドバーヘッダーにブランチ同期ボタンが表示される",
+      "verified": true
+    },
+    {
+      "criterion": "同期ボタンをクリックすることで、sync APIが呼ばれ、worktree一覧が最新化される（手動同期）",
+      "verified": true
+    },
+    {
+      "criterion": "同期ボタンクリック後、新しく作成したworktreeがリロードなしでサイドバーに反映される",
+      "verified": true
+    },
+    {
+      "criterion": "同期中はローディング表示がされ、ボタンがdisabled状態となり連打できない",
+      "verified": true
+    },
+    {
+      "criterion": "同期成功/失敗時にToast通知でフィードバックが表示される",
+      "verified": true
+    },
+    {
+      "criterion": "モバイルドロワー内のサイドバーでも同期ボタンが正しく動作する",
+      "verified": true,
+      "note": "SyncButtonはSidebar内インラインコンポーネントであり、モバイルドロワーはAppShellがSidebarコンポーネントを再利用するため、同一のSyncButtonが動作する"
+    },
+    {
+      "criterion": "SyncButtonコンポーネントが分離され、useToastのstateスコープがSyncButton内に限定されている",
+      "verified": true
+    },
+    {
+      "criterion": "npm run test:unit パス",
+      "verified": true
+    },
+    {
+      "criterion": "npm run lint パス",
+      "verified": true
+    }
+  ],
+  "design_checklist_status": [
+    {
+      "item": "F-001: ToastContainerのpropは onClose={removeToast} を使用",
+      "verified": true
+    },
+    {
+      "item": "F-002: handleSyncのisSyncingガードはuseRefで管理、useCallback依存配列に含めない",
+      "verified": true
+    },
+    {
+      "item": "F-007: createPortalは実際にstacking context問題が発生する場合のみ導入(Portalなし方式を採用)",
+      "verified": true
+    },
+    {
+      "item": "F-005: i18nメッセージはSyncButton追加分のみ対応",
+      "verified": true
+    },
+    {
+      "item": "CONS-001: useTranslations('common')を使用、sidebar名前空間は不使用",
+      "verified": true
+    },
+    {
+      "item": "CONS-001: locales/en/common.json, locales/ja/common.jsonにsyncSuccess, syncError, syncAuthError, syncButtonLabelキー追加",
+      "verified": true
+    },
+    {
+      "item": "CONS-002: SyncButtonのmemo化はuseToastのstate変更波及防止目的",
+      "verified": true
+    },
+    {
+      "item": "CONS-004: refreshWorktrees()はthrowしない、catch対象はrepositoryApi.sync()のみ",
+      "verified": true
+    },
+    {
+      "item": "IMPACT-002: 既存Sidebar.test.tsxにrepositoryApi mockとApiErrorインポート追加",
+      "verified": true
+    },
+    {
+      "item": "SEC-001: SyncButton側catchではi18n固定メッセージ表示(サーバーエラーメッセージ非依存)",
+      "verified": true
+    },
+    {
+      "item": "SEC-004: SyncResponseのworktreeCountのみ使用、repositories配列非依存",
+      "verified": true
+    }
+  ],
+  "evidence_files": [],
+  "message": "すべての受入条件を満たしています。静的解析(tsc --noEmit, lint)はエラー0件、ユニットテスト252ファイル5026テスト全パス(Sidebar.test.tsx 37テスト全パス)、設計方針書の実装チェックリスト全項目を遵守しています。"
+}

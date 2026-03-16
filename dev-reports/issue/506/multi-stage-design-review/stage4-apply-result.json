@@ -1,0 +1,58 @@
+{
+  "issue_number": 506,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘対応",
+  "status": "completed",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "SEC-001",
+        "title": "sync APIの500エラーレスポンスで内部エラーメッセージがクライアントに露出する",
+        "status": "applied",
+        "applied_to": "セクション7（セキュリティ設計）に「エラーレスポンスの情報漏洩防止」の項を新設。セクション16の実装チェックリストに具体的な実装指針を追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-002",
+        "title": "CSRF保護メカニズムの具体的な説明が不足",
+        "status": "applied",
+        "applied_to": "セクション7のCSRF項目を全面修正。SameSite Cookie、Content-Type制約、同一オリジンポリシーの3層保護を正確に記載"
+      },
+      {
+        "id": "SEC-003",
+        "title": "SyncButton連打・自動化によるDoS的なリクエストへの設計上の考慮が不足",
+        "status": "applied",
+        "applied_to": "セクション7に「サーバーサイドレート制限」の項を新設。リスク認識と将来Issue化方針を明記"
+      },
+      {
+        "id": "SEC-004",
+        "title": "sync APIレスポンスのrepositories配列にファイルシステムパスが含まれる",
+        "status": "applied",
+        "applied_to": "セクション7に「レスポンスのパス情報」の項を新設。SyncButtonでの使用範囲と別Issue化検討を明記"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-005",
+        "title": "i18nメッセージテンプレートにおけるworktreeCount注入の安全性",
+        "status": "applied",
+        "applied_to": "セクション7のXSS項目を補強。数値型・二重保護を明記"
+      },
+      {
+        "id": "SEC-006",
+        "title": "認証無効時（CM_AUTH_TOKEN_HASH未設定）の動作についてセキュリティ設計での言及",
+        "status": "applied",
+        "applied_to": "セクション7の認証項目に認証無効環境での正常動作を補足記載"
+      }
+    ]
+  },
+  "updated_files": [
+    "dev-reports/design/issue-506-sidebar-sync-button-design-policy.md"
+  ],
+  "sections_modified": [
+    "セクション7（セキュリティ設計）- 全面改訂",
+    "セクション16（Stage 4 レビュー指摘対応サマリー）- 新設"
+  ],
+  "timestamp": "2026-03-16T12:30:00Z"
+}

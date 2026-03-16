@@ -1,0 +1,7 @@
+{
+  "issue_number": 506,
+  "review_result_path": "dev-reports/issue/506/multi-stage-design-review/stage2-review-result.json",
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘対応",
+  "target_doc": "dev-reports/design/issue-506-sidebar-sync-button-design-policy.md"
+}
