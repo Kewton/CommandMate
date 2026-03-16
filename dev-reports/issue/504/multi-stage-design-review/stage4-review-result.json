@@ -1,0 +1,114 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "issue_number": 504,
+  "review_date": "2026-03-16",
+  "design_doc_path": "dev-reports/design/issue-504-repository-color-dot-design-policy.md",
+  "findings": [
+    {
+      "id": "DR4-001",
+      "severity": "info",
+      "category": "XSS",
+      "title": "inline style={{ backgroundColor }} はXSSリスクなし",
+      "description": "設計書のstyle={{ backgroundColor: generateRepositoryColor(repositoryName) }}パターンについて検証した。generateRepositoryColor関数はhue値を hash % 360 で算出し、彩度・明度は固定定数であるため、返り値は常に hsl(<integer>, <integer>%, <integer>%) 形式の文字列となる。repositoryNameの内容に関わらず、HSL文字列に外部入力の文字列がそのまま埋め込まれることはない。ReactのstyleプロパティはCSSOMを通じて適用されるため、文字列がHTMLとして解釈されることもない。XSSリスクは存在しない。",
+      "recommendation": "対応不要。現在の設計で安全。",
+      "owasp_category": "A03:2021 Injection"
+    },
+    {
+      "id": "DR4-002",
+      "severity": "info",
+      "category": "入力検証",
+      "title": "repositoryNameの入力源は安全",
+      "description": "repositoryNameはpath.basename(repositoryPath)で生成される（src/lib/git/worktrees.ts:170）。これはローカルファイルシステムのディレクトリ名から取得されるため、外部ユーザー入力ではなくサーバーサイドで制御された値である。また、GroupHeaderコンポーネントではJSXの{repositoryName}としてテキストノードに挿入されるため、Reactが自動的にHTMLエスケープを行う。さらにgenerateRepositoryColor関数ではrepositoryNameはハッシュ計算の入力としてのみ使用され、出力HSL文字列には含まれない。",
+      "recommendation": "対応不要。入力源がサーバーサイドのファイルシステムパスであり、十分に安全。",
+      "owasp_category": "A03:2021 Injection"
+    },
+    {
+      "id": "DR4-003",
+      "severity": "info",
+      "category": "ハッシュ関数",
+      "title": "djb2ハッシュ関数に暗号学的悪用リスクなし",
+      "description": "simpleHash関数はdjb2系の軽量ハッシュで、色相値（0-359）の決定にのみ使用される。暗号学的用途（認証、署名、鍵導出等）には使用されていない。ハッシュ衝突が発生しても、同じ色のドットが表示されるだけであり、セキュリティ上の影響はゼロである。意図的な衝突攻撃を行ったとしても、攻撃者が得られるのは「2つのリポジトリが同じ色のドットを持つ」という結果のみであり、悪用価値がない。",
+      "recommendation": "対応不要。ハッシュ関数の用途が視覚的識別のみであり、セキュリティリスクは存在しない。",
+      "owasp_category": "A02:2021 Cryptographic Failures"
+    },
+    {
+      "id": "DR4-004",
+      "severity": "info",
+      "category": "インジェクション",
+      "title": "HSL文字列生成にインジェクションリスクなし",
+      "description": "HSL文字列はテンプレートリテラル hsl(${hue}, ${saturation}%, ${lightness}%) で生成される。hueはhash % 360の数値演算結果（number型）、saturation/lightnessは固定の数値定数である。3つの変数すべてがnumber型であり、文字列型の外部入力が混入する経路は存在しない。CSS injection（例: expression()やurl()の注入）の余地はない。",
+      "recommendation": "対応不要。全パラメータがnumber型であり安全。",
+      "owasp_category": "A03:2021 Injection"
+    },
+    {
+      "id": "DR4-005",
+      "severity": "info",
+      "category": "攻撃面",
+      "title": "新たな攻撃面の追加なし",
+      "description": "本変更はクライアントサイドの純粋な表示ロジックの追加であり、(1) 新規APIエンドポイントの追加なし、(2) 新規データベース操作の追加なし、(3) ユーザー入力を受け付ける新規フォーム/入力要素の追加なし、(4) 外部ライブラリの追加なし、(5) 認証・認可フローへの変更なし。攻撃面は増加しない。",
+      "recommendation": "対応不要。",
+      "owasp_category": "N/A"
+    },
+    {
+      "id": "DR4-006",
+      "severity": "nice_to_have",
+      "category": "防御的プログラミング",
+      "title": "generateRepositoryColorに対する入力バリデーションの明示的記載",
+      "description": "設計書のセキュリティ設計セクション（セクション5）では、DoSリスクについて「リポジトリ名はGit由来で実質的に長さ制限あり」と記載されているが、generateRepositoryColor関数自体に入力バリデーション（空文字チェック、長さ上限チェック等）を行うかどうかが明記されていない。テスト戦略セクションでは空文字テストケースが含まれており、空文字でもエラーなく動作する設計であることは読み取れるが、セキュリティ設計セクションでの明示的な言及があるとより明確になる。なお、実際のリスクは極めて低い（入力源がpath.basenameであるため）。",
+      "recommendation": "セクション5のリスク評価表に「入力バリデーション」行を追加し、「repositoryNameはpath.basename由来のサーバーサイド値であり、関数レベルの入力バリデーションは不要。空文字を含む任意の文字列で正常動作する」旨を記載することを検討する。",
+      "owasp_category": "A03:2021 Injection"
+    }
+  ],
+  "owasp_top10_compliance": {
+    "A01_Broken_Access_Control": {
+      "status": "not_applicable",
+      "note": "本変更はクライアントサイドの表示ロジックのみであり、アクセス制御に影響なし"
+    },
+    "A02_Cryptographic_Failures": {
+      "status": "pass",
+      "note": "ハッシュ関数は暗号学的用途ではなく視覚的識別目的のみ。適切な用途選択"
+    },
+    "A03_Injection": {
+      "status": "pass",
+      "note": "HSL文字列生成は数値演算のみで構成。外部入力の文字列注入経路なし。Reactの自動エスケープも有効"
+    },
+    "A04_Insecure_Design": {
+      "status": "pass",
+      "note": "純粋関数による決定論的な色生成。セキュリティ上の設計不備なし"
+    },
+    "A05_Security_Misconfiguration": {
+      "status": "not_applicable",
+      "note": "設定変更を伴わない"
+    },
+    "A06_Vulnerable_Components": {
+      "status": "pass",
+      "note": "外部ライブラリの追加なし"
+    },
+    "A07_Auth_Failures": {
+      "status": "not_applicable",
+      "note": "認証フローへの変更なし"
+    },
+    "A08_Data_Integrity_Failures": {
+      "status": "not_applicable",
+      "note": "データの永続化・シリアライゼーションに関する変更なし"
+    },
+    "A09_Logging_Failures": {
+      "status": "not_applicable",
+      "note": "ログ機構への変更なし"
+    },
+    "A10_SSRF": {
+      "status": "not_applicable",
+      "note": "サーバーサイドリクエストの追加なし"
+    }
+  },
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 1,
+    "info": 5,
+    "total": 6
+  },
+  "overall_assessment": "セキュリティリスクは極めて低い。本変更はクライアントサイドの純粋な表示ロジック追加であり、新たな攻撃面を導入しない。HSL色生成は数値演算のみで構成され、外部入力の注入経路が存在しない。OWASP Top 10の全カテゴリにおいて問題なし。"
+}

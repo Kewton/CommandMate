@@ -1,0 +1,17 @@
+{
+  "issue_number": 504,
+  "refactor_targets": [
+    "src/lib/sidebar-utils.ts",
+    "src/components/layout/Sidebar.tsx"
+  ],
+  "quality_metrics": {
+    "tests_passed": 5025,
+    "lint_errors": 0,
+    "tsc_errors": 0
+  },
+  "improvement_goals": [
+    "コード品質の確認・改善",
+    "SOLID原則準拠の確認",
+    "不要なコードの削除"
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "issue_number": 505,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー 指摘事項対応",
+  "apply_date": "2026-03-16",
+  "status": "completed",
+  "design_doc_path": "dev-reports/design/issue-505-file-link-navigation-design-policy.md",
+  "applied_findings": [
+    {
+      "id": "DR4-001",
+      "severity": "should_fix",
+      "title": "rehype-sanitize カスタムスキーマを許可リスト方式に変更",
+      "status": "applied",
+      "changes": [
+        "Section 4-2: カスタムスキーマの正規表現を拒否リスト方式から許可リスト方式に変更",
+        "Section 4-2: DR4-001 の変更理由と代替案（デフォルトスキーマ使用）を追記",
+        "Section 6-1: XSS防止テーブルの記述を更新",
+        "Section 8: 設計決定事項テーブルに許可リスト方式の項目を追加",
+        "Section 11: Should Fix チェックリストに DR4-001 を2項目追加（スキーマ変更 + テスト検証）"
+      ]
+    },
+    {
+      "id": "DR4-002",
+      "severity": "should_fix",
+      "title": "HtmlSourceViewer の dangerouslySetInnerHTML が postMessage href から到達不可であることの確認",
+      "status": "applied",
+      "changes": [
+        "Section 4-3: postMessage 受信側コードにコメント追記",
+        "Section 6-3: HtmlSourceViewer に関する注記を新規追加",
+        "Section 11: Should Fix チェックリストに DR4-002 を追加"
+      ]
+    },
+    {
+      "id": "DR4-003",
+      "severity": "should_fix",
+      "title": "handleLinkFromIframe の入力サニタイズ",
+      "status": "applied",
+      "changes": [
+        "Section 3-2: handleLinkFromIframe のコードサンプルに入力サニタイズ処理を追加",
+        "Section 8: 設計決定事項テーブルに入力サニタイズの項目を追加",
+        "Section 11: Should Fix チェックリストに DR4-003 を追加"
+      ]
+    },
+    {
+      "id": "DR4-004",
+      "severity": "nice_to_have",
+      "title": "postMessage リスナー登録タイミングの最適化",
+      "status": "applied",
+      "changes": [
+        "Section 7-1: イベントリスナー管理にリスナー登録タイミングの注記を追加",
+        "Section 11: Nice to Have チェックリストに DR4-004 を追加"
+      ]
+    },
+    {
+      "id": "DR4-005",
+      "severity": "nice_to_have",
+      "title": "onOpenFile 呼び出しへの debounce 追加",
+      "status": "applied",
+      "changes": [
+        "Section 7-1: イベントリスナー管理に debounce の注記を追加",
+        "Section 11: Nice to Have チェックリストに DR4-005 を追加"
+      ]
+    }
+  ],
+  "new_sections_added": [
+    "Section 15: レビュー指摘事項サマリー（Stage 4: セキュリティレビュー）"
+  ],
+  "sections_modified": [
+    "Section 3-2 (handleLinkFromIframe コードサンプル - DR4-003 入力サニタイズ追加)",
+    "Section 4-2 (rehype-sanitize カスタムスキーマ - DR4-001 許可リスト方式に変更)",
+    "Section 4-3 (postMessage 受信側 - DR4-002 コメント追記)",
+    "Section 6-1 (XSS防止テーブル - DR4-001 反映)",
+    "Section 6-3 (iframe セキュリティ - DR4-002 HtmlSourceViewer 注記追加)",
+    "Section 7-1 (イベントリスナー管理 - DR4-004, DR4-005 追加)",
+    "Section 8 (設計決定事項テーブル - DR4-001, DR4-003 追加)",
+    "Section 11 (実装チェックリスト - DR4-001~DR4-005 追加)"
+  ],
+  "summary": "Stage 4 セキュリティレビューの全5件（should_fix 3件 + nice_to_have 2件）を設計方針書に反映完了。主要な変更: (1) rehype-sanitize の拒否リスト方式を許可リスト方式に変更（DR4-001）、(2) HtmlSourceViewer の dangerouslySetInnerHTML への到達不可確認要件を追記（DR4-002）、(3) handleLinkFromIframe に入力サニタイズを追加（DR4-003）、(4) postMessage リスナータイミング最適化と onOpenFile debounce を Nice to Have として追記（DR4-004, DR4-005）。OWASP Top 10 2021 チェックリストをサマリーセクションに記載。"
+}

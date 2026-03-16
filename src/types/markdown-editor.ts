@@ -93,12 +93,17 @@ export interface EditorProps {
    * Used by file content polling to pause updates during editing
    */
   onDirtyChange?: (isDirty: boolean) => void;
+  /**
+   * Callback to open a file from a link click (Issue #505)
+   * Used by MarkdownPreview to navigate relative file links
+   */
+  onOpenFile?: (path: string) => void;
 }
 
 /**
  * Toast notification type
  */
-export type ToastType = 'success' | 'error' | 'info';
+export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
 /**
  * Toast notification item

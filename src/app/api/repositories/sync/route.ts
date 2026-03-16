@@ -2,12 +2,13 @@
  * API Route: POST /api/repositories/sync
  * Re-scans all configured repositories and syncs worktrees to database
  * Issue #190: Filter excluded repositories before scanning
+ * Issue #490: Include DB-registered repositories (e.g. cloned repos) in scan
  */
 
 import { NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getRepositoryPaths, scanMultipleRepositories, syncWorktreesToDB } from '@/lib/git/worktrees';
-import { registerAndFilterRepositories } from '@/lib/db-repository';
+import { registerAndFilterRepositories, getAllRepositories } from '@/lib/db-repository';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/repositories-sync');
@@ -17,18 +18,28 @@ export async function POST() {
     // Get configured repository paths from environment
     const repositoryPaths = getRepositoryPaths();
 
-    if (repositoryPaths.length === 0) {
+    const db = getDbInstance();
+
+    // Issue #490: Also include DB-registered repositories (e.g. cloned repos)
+    // These are not in WORKTREE_REPOS but were registered via git clone feature
+    const dbRepositories = getAllRepositories(db);
+    const dbEnabledPaths = dbRepositories
+      .filter(r => r.enabled)
+      .map(r => r.path);
+
+    // Merge env paths and DB-registered paths (deduplicate)
+    const allPaths = [...new Set([...repositoryPaths, ...dbEnabledPaths])];
+
+    if (allPaths.length === 0) {
       return NextResponse.json(
         { error: 'No repositories configured. Please set WORKTREE_REPOS or CM_ROOT_DIR environment variable.' },
         { status: 400 }
       );
     }
 
-    const db = getDbInstance();
-
     // Issue #190/#202: Register environment variable repositories and filter out excluded ones
     // registerAndFilterRepositories() encapsulates the ordering constraint
-    const { filteredPaths } = registerAndFilterRepositories(db, repositoryPaths);
+    const { filteredPaths } = registerAndFilterRepositories(db, allPaths);
 
     // Scan filtered repositories (excluded repos are skipped)
     const allWorktrees = await scanMultipleRepositories(filteredPaths);

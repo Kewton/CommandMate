@@ -45,6 +45,7 @@ export {
   getActivePollerCount,
   clearAllPollerStates,
   getLastServerResponseTimestamp,
+  isPollerActive,
   validatePollingContext,
   captureAndCleanOutput,
   processStopConditionDelta,

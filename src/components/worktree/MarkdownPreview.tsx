@@ -1,12 +1,14 @@
 /**
  * MarkdownPreview Component
  * Issue #479: Extracted from MarkdownEditor.tsx for single responsibility
+ * Issue #505: Link handling (relative file, external URL, anchor) [DR2-001]
  *
  * Renders markdown content as HTML with:
  * - GitHub Flavored Markdown (GFM) support
  * - Syntax highlighting (rehype-highlight)
- * - XSS protection (rehype-sanitize) [SEC-MF-001]
+ * - XSS protection (rehype-sanitize with allowlist) [SEC-MF-001, DR4-001]
  * - Mermaid diagram rendering [Issue #100]
+ * - Link click handling (relative -> onOpenFile, external -> window.open, anchor -> scroll)
  *
  * Also includes:
  * - Mobile tab bar component for portrait mode switching
@@ -18,7 +20,7 @@
 
 'use client';
 
-import React, { memo, useMemo } from 'react';
+import React, { memo, useMemo, useCallback, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
@@ -26,6 +28,7 @@ import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/github-dark.css';
 import { X, AlertTriangle, FileText, Eye } from 'lucide-react';
 import { MermaidCodeBlock } from '@/components/worktree/MermaidCodeBlock';
+import { classifyLink, resolveRelativePath, sanitizeHref, REHYPE_SANITIZE_SCHEMA } from '@/lib/link-utils';
 import type { Components } from 'react-markdown';
 
 // ============================================================================
@@ -38,6 +41,10 @@ export type MobileTab = 'editor' | 'preview';
 export interface MarkdownPreviewProps {
   /** Markdown content to render */
   content: string;
+  /** Callback to open a file from a relative link (Issue #505) */
+  onOpenFile?: (path: string) => void;
+  /** Current file path for resolving relative links (Issue #505) [DR3-009] */
+  currentFilePath?: string;
 }
 
 export interface MobileTabBarProps {
@@ -63,26 +70,95 @@ export interface LargeFileWarningProps {
 
 /**
  * Renders markdown content with GFM, syntax highlighting, XSS protection,
- * and Mermaid diagram support.
+ * Mermaid diagram support, and link click handling.
  */
 export const MarkdownPreview = memo(function MarkdownPreview({
   content,
+  onOpenFile,
+  currentFilePath,
 }: MarkdownPreviewProps) {
+  // Use refs to avoid re-creating handleLinkClick when props change.
+  // This prevents ReactMarkdown from rebuilding the entire DOM tree
+  // (which makes links unclickable due to constant element detach/reattach).
+  const onOpenFileRef = useRef(onOpenFile);
+  onOpenFileRef.current = onOpenFile;
+  const currentFilePathRef = useRef(currentFilePath);
+  currentFilePathRef.current = currentFilePath;
+
+  /**
+   * Handle link click based on link type. [DR1-002]
+   * Uses refs for onOpenFile/currentFilePath so the callback identity is stable.
+   */
+  const handleLinkClick = useCallback(
+    (e: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+      const sanitized = sanitizeHref(href);
+      if (!sanitized) return;
+
+      const linkType = classifyLink(sanitized);
+
+      switch (linkType) {
+        case 'anchor':
+          // Let browser handle anchor scroll
+          break;
+        case 'external':
+          e.preventDefault();
+          window.open(sanitized, '_blank', 'noopener,noreferrer');
+          break;
+        case 'relative': {
+          e.preventDefault();
+          const filePath = currentFilePathRef.current;
+          const openFile = onOpenFileRef.current;
+          if (filePath && openFile) {
+            const resolvedPath = resolveRelativePath(filePath, sanitized);
+            if (resolvedPath) {
+              openFile(resolvedPath);
+            }
+          }
+          break;
+        }
+      }
+    },
+    [],
+  );
+
   // Memoized ReactMarkdown components configuration (DRY principle)
+  // Empty deps: handleLinkClick identity is stable via refs above.
   const markdownComponents: Partial<Components> = useMemo(
     () => ({
       code: MermaidCodeBlock, // [Issue #100] mermaid diagram support
+      // [Issue #505] Custom link component for file navigation
+      a: ({ href, children, ...props }) => {
+        if (!href) {
+          return <a {...props}>{children}</a>;
+        }
+        return (
+          <a
+            {...props}
+            href={href}
+            onClick={(e) => handleLinkClick(e, href)}
+          >
+            {children}
+          </a>
+        );
+      },
     }),
-    []
+    [handleLinkClick],
+  );
+
+  // Memoize plugin arrays to prevent ReactMarkdown from re-rendering on every parent render.
+  // New array references cause ReactMarkdown to fully rebuild the DOM tree,
+  // which detaches link elements and makes them unclickable.
+  const remarkPlugins = useMemo(() => [remarkGfm], []);
+  const rehypePlugins = useMemo(
+    () => [[rehypeSanitize, REHYPE_SANITIZE_SCHEMA], rehypeHighlight],
+    [],
   );
 
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      rehypePlugins={[
-        rehypeSanitize, // [SEC-MF-001] XSS protection
-        rehypeHighlight,
-      ]}
+      remarkPlugins={remarkPlugins}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      rehypePlugins={rehypePlugins as any}
       components={markdownComponents}
     >
       {content}

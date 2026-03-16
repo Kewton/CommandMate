@@ -1,0 +1,85 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "issue_number": 499,
+  "review_date": "2026-03-16",
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "category": "DRY",
+      "title": "Item 4: detectMultipleChoicePrompt内部のsplit再利用が設計に含まれていない",
+      "description": "設計方針書ではdetectPromptにprecomputedLinesオプションを追加し、auto-yes-pollerからの呼び出しでsplit結果を再利用する方針が示されている。しかし、detectPrompt内部でdetectMultipleChoicePrompt(output, options)を呼び出しており(prompt-detector.ts L213)、detectMultipleChoicePromptは独自にoutput.split('\\n')を実行している(L747)。precomputedLinesをdetectPromptに渡しても、detectMultipleChoicePromptへの伝播方針が明示されていないため、split回数は2回(detectPrompt L189 + detectMultipleChoicePrompt L747)から1回(detectMultipleChoicePrompt L747のみ)にしか減らない。",
+      "current_design": "detectPromptのDetectPromptOptionsにprecomputedLines追加。detectMultipleChoicePrompt内部のsplitは「intentional function encapsulation [S1-004][S2-001]」として言及されているが、最適化対象から除外されている。",
+      "suggested_design": "detectMultipleChoicePromptにもprecomputedLinesを伝播するか、設計方針書でdropする理由(関数カプセル化の維持優先)を明示的に記載する。現在のコメント[S1-004][S2-001]が意図的な設計判断であることを方針書のItem 4に記載すれば、レビュア・実装者の混乱を防げる。",
+      "evidence": "prompt-detector.ts L189: detectPromptでsplit実行、L213: detectMultipleChoicePrompt呼び出し、L747: detectMultipleChoicePrompt内で再度split実行。設計方針書Section 3 Item 4には「detectMultipleChoicePrompt()は内部のprivate関数のため、内部でlinesを再利用するだけ（外部APIに影響なし）」とあるが、実際にはdetectMultipleChoicePromptは独自にoutput(string)を受け取りsplitしているため、lines再利用のためにはシグネチャ変更が必要。"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "should_fix",
+      "category": "SoC",
+      "title": "Item 5: auto-yes-config.tsへのAutoYesStopReason拡張とauto-yes-state.tsのre-export整合性",
+      "description": "設計方針書ではAutoYesStopReasonにconsecutive_errorsを追加するとしている。現在auto-yes-config.ts L43でAutoYesStopReasonが定義され、auto-yes-state.ts L18でre-exportされている。auto-yes-poller.tsはauto-yes-state.tsからimportしている。この依存チェーンは維持されるが、設計方針書ではdisableAutoYes(worktreeId, 'consecutive_errors')の呼び出し元がauto-yes-poller.ts内(エラーハンドリング部)であることが示されている。現在のincrementErrorCount(L161-167)はauto-yes-poller.ts内のprivate関数であり、閾値チェックロジックの配置先が明確でない。",
+      "current_design": "設計方針書Section 3 Item 5: auto-yes-poller.tsのエラーハンドリング部(L165付近)で閾値チェックを行い、disableAutoYes + stopAutoYesPollingを呼ぶ。",
+      "suggested_design": "閾値チェックをincrementErrorCount関数内に統合するか、pollAutoYesのcatchブロックに配置するかを明示する。現在のincrementErrorCountはエラー数増加とバックオフ計算のみの責務(SRP)を持つため、自動停止判定を含めるとSRP違反になる可能性がある。pollAutoYesのcatchブロック(L423-428)またはdetectAndRespondToPromptのcatchブロック(L368-374)のどちらに配置するかを明確にすべき。両方のcatchでincrementErrorCountが呼ばれるため、閾値チェック位置を誤ると二重停止判定のリスクがある。",
+      "evidence": "auto-yes-poller.ts L161-167: incrementErrorCount、L368-374: detectAndRespondToPrompt内catch、L423-428: pollAutoYes外側catch。IC003コメントで二重incrementErrorCount防止が既に考慮されているが、閾値チェック追加時の配置については設計方針書で未指定。"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "title": "Item 4: precomputedLinesとThinkingチェックでのjoin再結合の非効率",
+      "description": "設計方針書Section 3 Item 4では、pollAutoYes内で1回だけsplitし、Thinkingチェック時にlines.slice(-50).join('\\n')で再結合する方針が示されている。detectThinking()のシグネチャがstringを受け取るため、split後にjoinする必要がある。これはsplit最適化の効果を一部相殺する。",
+      "current_design": "現行: cleanOutput.split('\\n').slice(-50).join('\\n')でThinking検出。設計方針: 事前splitしたlinesからslice(-50).join('\\n')でThinking検出。",
+      "suggested_design": "現行コードとの差異が小さいため、この最適化の実効性を方針書のトレードオフセクションに追記することを推奨する。detectThinkingのシグネチャをstring[]対応にする案はスコープ外として明記するとよい。",
+      "evidence": "設計方針書Section 3 Item 4のauto-yes-poller.ts側コード例、auto-yes-poller.ts L405: 現行のsplit+slice+join。"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "title": "Item 6: キャッシュTTL変更は根本解決ではなく、効果が限定的",
+      "description": "キャッシュTTLを2秒から3秒に変更する方針は、ポーリング間隔との完全同期を崩すことでキャッシュヒット率を向上させる意図がある。しかし、auto-yes-pollerのポーリング間隔はbackoff時に2秒から最大60秒まで変動し、Thinking時は5秒になる(Item 2)。これらの変動間隔ではTTL=3秒でもキャッシュミスする場合がある。根本的にはキャッシュキーにcapturedLinesを含めるか、ポーリング間隔に連動したTTL設計が必要だが、それはオーバーエンジニアリングとなる。現在の方針は最小変更として適切だが、効果の限定性を設計方針書に明記すべき。",
+      "current_design": "CACHE_TTL_MS = 2000 を 3000 に変更。",
+      "suggested_design": "現在の方針を維持しつつ、トレードオフセクション(Section 8)に「TTL変更はポーリング間隔2秒の通常ケースでのみ効果が高い。backoff時やThinking時は効果が限定的」と追記する。",
+      "evidence": "tmux-capture-cache.ts L39、auto-yes-state.ts L311: POLLING_INTERVAL_MS=2000、設計方針書Section 3 Item 2: Thinking時5秒。"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "nice_to_have",
+      "category": "SOLID",
+      "title": "Item 3: captureAndCleanOutputの引数追加方式がOCPに軽微に抵触",
+      "description": "設計方針書では「引数でcaptureLinesを渡す方式（最小変更）」を採用している。captureAndCleanOutput()は現在worktreeIdとcliToolIdの2引数で、内部で5000をハードコードしている。captureLines引数を追加すると、将来的にさらなるキャプチャパラメータ(例: captureFrom位置)が必要になった場合に引数が増える。ただし、YAGNIの観点からは現時点で必要な引数のみ追加する方針は正しい。",
+      "current_design": "captureAndCleanOutput(worktreeId, cliToolId)にcaptureLines引数を追加。",
+      "suggested_design": "現在の方針で問題ない。将来的にパラメータが増える場合はオプションオブジェクトへのリファクタリングを検討する旨をコメントとして残す程度でよい。",
+      "evidence": "auto-yes-poller.ts L236-245: 現在のcaptureAndCleanOutputシグネチャ。設計方針書Section 3 Item 3。"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "title": "scheduleNextPollのoverrideInterval利用パターンの一貫性",
+      "description": "scheduleNextPollは既にoverrideIntervalパラメータを持っている(L441-444)。Item 2でThinking時にTHINKING_POLLING_INTERVAL_MSを渡す設計は、既存のCOOLDOWN_INTERVAL_MS(L420)パターンと一貫しており、DRY原則に沿っている。設計方針書のコード例でもこのパターンが正しく踏襲されている。特に問題なし。",
+      "current_design": "scheduleNextPoll(worktreeId, cliToolId, THINKING_POLLING_INTERVAL_MS)",
+      "suggested_design": "現在の設計で適切。",
+      "evidence": "auto-yes-poller.ts L420: 既存のCOOLDOWN_INTERVAL_MSパターン、L441-454: scheduleNextPoll実装。"
+    }
+  ],
+  "summary": {
+    "total_findings": 6,
+    "must_fix": 0,
+    "should_fix": 2,
+    "nice_to_have": 4,
+    "overall_quality": "good",
+    "key_observations": [
+      "設計方針書は全体として既存コードの構造を正確に把握しており、各改善項目の変更範囲と影響が適切に分析されている。",
+      "KISS原則: 7項目の改善はそれぞれ最小限の変更で実現する方針が貫かれており、過度な抽象化は避けられている。",
+      "YAGNI原則: Item 4のdetectPromptシグネチャ変更は後方互換性を維持するオプショナル引数方式を採用しており、不要な破壊的変更を避けている。",
+      "SRP原則: Issue #323で確立されたpollAutoYesのオーケストレータパターン(検証/キャプチャ/停止条件/検出応答の委譲)が維持されている。",
+      "DRY原則: detectMultipleChoicePrompt内部のsplit再利用が設計の盲点として残っている(DR1-001)。意図的な設計判断であれば方針書に明記すべき。",
+      "Item 5のエラー閾値チェック配置先がincrementErrorCountの呼び出し構造(2箇所のcatch)との関係で不明確(DR1-002)。実装時に二重判定を避けるため、配置先を明示すべき。",
+      "全体として既存のモジュール境界(poller/state/config/detection)の分離が尊重されており、設計原則への適合度は高い。"
+    ]
+  }
+}

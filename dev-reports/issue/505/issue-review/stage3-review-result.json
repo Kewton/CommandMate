@@ -1,0 +1,166 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "focus_area": "影響範囲",
+  "issue_number": 505,
+  "review_date": "2026-03-16",
+  "findings": [
+    {
+      "id": "F3-001",
+      "severity": "must_fix",
+      "category": "影響ファイル漏れ",
+      "title": "FilePanelSplit.tsx の onOpenFile props 伝播が影響範囲に未記載",
+      "description": "Issue のコールバック伝播経路には FilePanelSplit.tsx が明記されているが、影響範囲の変更対象ファイル表には記載がない。FilePanelSplit は FilePanelTabs に props を中継しているため、onOpenFile を MarkdownPreview まで伝播させるには FilePanelSplit.tsx の FilePanelSplitProps インターフェースと JSX に onOpenFile を追加する必要がある。現在の FilePanelSplitProps には onOpenFile が存在しない。",
+      "suggestion": "影響範囲の変更対象ファイル表に `src/components/worktree/FilePanelSplit.tsx` を追加し、変更内容として「onOpenFile コールバック props 追加・FilePanelTabs への伝播」と記載する。"
+    },
+    {
+      "id": "F3-002",
+      "severity": "must_fix",
+      "category": "影響ファイル漏れ",
+      "title": "FilePanelTabs.tsx の FilePanelTabsProps に onOpenFile 伝播が必要だが未記載",
+      "description": "FilePanelTabs.tsx の影響範囲は「ドロップダウンUI追加、タブ移動ロジック」のみ記載。しかし FilePanelTabs は FilePanelContent を描画しているため、onOpenFile コールバックを FilePanelContent に渡すには FilePanelTabsProps インターフェースにも onOpenFile を追加する必要がある。",
+      "suggestion": "FilePanelTabs.tsx の変更内容に「onOpenFile コールバック props 追加・FilePanelContent への伝播」を追記する。"
+    },
+    {
+      "id": "F3-003",
+      "severity": "must_fix",
+      "category": "影響ファイル漏れ",
+      "title": "FilePanelContent.tsx の FilePanelContentProps に onOpenFile 追加が必要",
+      "description": "Issue の変更対象ファイル表では FilePanelContent.tsx の変更内容が「リンクからのタブ追加コールバック連携」と記載されているが、具体的にどのように MarkdownEditor に伝播するかが曖昧。FilePanelContent は MarkdownEditor を dynamic import しており、EditorProps に onOpenFile がないため、EditorProps（src/types/markdown-editor.ts）の変更も必要。",
+      "suggestion": "影響範囲に `src/types/markdown-editor.ts` を追加し、EditorProps に `onOpenFile?: (path: string) => void` を追加する旨を記載する。"
+    },
+    {
+      "id": "F3-004",
+      "severity": "should_fix",
+      "category": "テスト範囲",
+      "title": "既存テスト useFileTabs.test.ts が MAX_FILE_TABS=5 前提でハードコードされている",
+      "description": "tests/unit/hooks/useFileTabs.test.ts は MAX_FILE_TABS を import して使用しているため、値の変更自体でテストが壊れることはない。しかし MOVE_TO_FRONT アクションのテストが新規に必要であり、Issue の実装タスクに「ユニットテスト追加」とあるが具体的なテスト対象が列挙されていない。",
+      "suggestion": "実装タスクのユニットテスト追加を具体化する: (1) MOVE_TO_FRONT reducer テスト、(2) ドロップダウン選択時の先頭移動テスト、(3) rehype-sanitize カスタムスキーマのテスト、(4) 相対パス解決・パストラバーサル防止のテスト、(5) postMessage origin 検証テスト。"
+    },
+    {
+      "id": "F3-005",
+      "severity": "should_fix",
+      "category": "テスト範囲",
+      "title": "FilePanelTabs.test.tsx がドロップダウン UI の新規描画をカバーしていない",
+      "description": "tests/unit/components/FilePanelTabs.test.tsx は現在全タブを横並びで表示する前提のテストのみ。タブが6個以上の場合のドロップダウン表示、アクティブタブの表示保証ロジックのテストが必要。",
+      "suggestion": "テスト計画に FilePanelTabs のドロップダウン UI テストケースを含める: (1) タブ5個以下ではドロップダウン非表示、(2) タブ6個以上でドロップダウン表示、(3) ドロップダウンからの選択でタブが先頭に移動、(4) アクティブタブが6番目以降でもタブバーに表示。"
+    },
+    {
+      "id": "F3-006",
+      "severity": "should_fix",
+      "category": "セキュリティ",
+      "title": "postMessage の origin 検証で null を期待するが sandbox iframe の origin 挙動の明確化が必要",
+      "description": "Issue には「postMessage の origin を null（sandbox iframe）として検証し、メッセージ形式をスキーマで検証する」と記載。sandbox 属性付き iframe からの postMessage は origin が 'null'（文字列）となる。しかし allow-scripts のみの sandbox では origin は文字列 'null' であり、これは他の sandbox iframe からのメッセージとも区別できない。メッセージスキーマ検証の具体的な形式（例: { type: 'link-click', href: string }）が定義されていない。",
+      "suggestion": "セキュリティ考慮事項に postMessage メッセージスキーマの具体的な型定義を追加する。例: `{ type: 'commandmate:link-click'; href: string }` のように namespace prefix を付与して、他の iframe や拡張機能からの偽メッセージを区別できるようにする。"
+    },
+    {
+      "id": "F3-007",
+      "severity": "should_fix",
+      "category": "破壊的変更",
+      "title": "MAX_FILE_TABS の変更が localStorage 復元に影響する可能性",
+      "description": "useFileTabs の RESTORE アクションは `action.paths.slice(0, MAX_FILE_TABS)` でタブ数を制限している。MAX_FILE_TABS を5から30に変更すると、既存ユーザーは影響を受けないが、将来 MAX_FILE_TABS を下げた場合に localStorage に30タブ保存されていると問題が生じる。また localStorage に大量のパスが保存されることでストレージ使用量が増加する。これは直接的な破壊的変更ではないが、localStorage 容量への影響を考慮すべき。",
+      "suggestion": "大きな問題ではないが、Nice to Have として localStorage のパス保存数に別途上限を設ける（例: 最大30パスまで保存）か、RESTORE時のスライス上限を MAX_FILE_TABS と連動させる現在の設計で十分であることを確認する旨を記載する。"
+    },
+    {
+      "id": "F3-008",
+      "severity": "should_fix",
+      "category": "依存関係",
+      "title": "MarkdownWithSearch コンポーネントへの onOpenFile 伝播が考慮されていない",
+      "description": "FilePanelContent.tsx 内の MarkdownWithSearch サブコンポーネントは MarkdownEditor を描画している。MarkdownWithSearch が検索モード中は CodeViewer を表示し、通常時は MarkdownEditor を表示する。onOpenFile は MarkdownEditor 経由で MarkdownPreview に渡す必要があるが、MarkdownWithSearch の props に onOpenFile を追加する変更が影響範囲に含まれていない。",
+      "suggestion": "FilePanelContent.tsx 内の MarkdownWithSearch サブコンポーネントにも onOpenFile props を追加する必要があることを影響範囲に明記する。同様に MarpEditorWithSlides サブコンポーネントにも同じ変更が必要。"
+    },
+    {
+      "id": "F3-009",
+      "severity": "should_fix",
+      "category": "影響ファイル漏れ",
+      "title": "HtmlPreview の HtmlIframePreview サブコンポーネントに postMessage スクリプト注入が必要",
+      "description": "Issue では HtmlPreview.tsx に postMessage 監視を追加するとあるが、iframe 内からリンククリックを検知するには、iframe の srcDoc HTML に postMessage を送信するスクリプトを注入する必要がある（interactive モードの場合）。現在の HtmlIframePreview は単純に srcDoc={htmlContent} をそのまま渡しているだけなので、リンククリックハンドラのスクリプトを htmlContent に追加する処理が必要。この実装詳細が Issue に不足している。",
+      "suggestion": "実装タスクに「HtmlIframePreview の srcDoc に対して、interactive モード時にリンククリックを検知する postMessage スクリプトを注入するロジック追加」を明記する。具体的には: (1) document.addEventListener('click') で a タグのクリックを検知、(2) e.preventDefault() で遷移を防止、(3) parent.postMessage で href を親に通知。"
+    },
+    {
+      "id": "F3-010",
+      "severity": "nice_to_have",
+      "category": "i18n",
+      "title": "Toast メッセージやエラー文言が英語ハードコードで i18n 未対応",
+      "description": "WorktreeDetailRefactored.tsx の Toast メッセージ「Maximum 5 file tabs. Close a tab first.」は英語ハードコードされている。Issue の変更でこのメッセージを更新する際、next-intl による翻訳対応の検討機会となる。ただし、既存コード全体で Toast メッセージは英語ハードコードが標準的なパターンのため、この Issue で対応する必要はない。",
+      "suggestion": "現時点では既存パターンに合わせて英語ハードコードで問題ない。将来の i18n 対応 Issue で一括対応する方が効率的。"
+    },
+    {
+      "id": "F3-011",
+      "severity": "nice_to_have",
+      "category": "パフォーマンス",
+      "title": "postMessage イベントリスナーのライフサイクル管理",
+      "description": "HtmlPreview に postMessage リスナーを追加する場合、コンポーネントのアンマウント時に確実に removeEventListener する必要がある。また、複数の HtmlPreview タブが同時に開かれている場合、window レベルの message イベントリスナーが重複する可能性がある。",
+      "suggestion": "useEffect のクリーンアップ関数で removeEventListener を確実に行い、イベントハンドラ内で対象の iframe を識別するロジック（例: event.source の比較）を含めることを推奨する。"
+    },
+    {
+      "id": "F3-012",
+      "severity": "nice_to_have",
+      "category": "モバイル対応",
+      "title": "モバイルビューでのリンククリック動作が未定義",
+      "description": "モバイルビューでは FileViewer と MobileContent を使用してファイルを表示する。モバイルの MarkdownEditor 内でリンクをクリックした場合の挙動（モバイル用のファイルビューアで開くべきか等）が Issue で言及されていない。デスクトップの fileTabs.openFile はモバイルでは使用されず、mobileFileViewerPath が使われている。",
+      "suggestion": "Issue のスコープとしてデスクトップのみを対象とすることを明示するか、モバイルでのリンククリック時は mobileFileViewerPath にセットする挙動も考慮する旨を記載する。"
+    }
+  ],
+  "summary": {
+    "must_fix": 3,
+    "should_fix": 6,
+    "nice_to_have": 3,
+    "total": 12
+  },
+  "code_references": [
+    {
+      "file": "src/hooks/useFileTabs.ts",
+      "relevance": "MAX_FILE_TABS 定数と MOVE_TO_FRONT アクション追加対象"
+    },
+    {
+      "file": "src/components/worktree/FilePanelTabs.tsx",
+      "relevance": "ドロップダウン UI 追加対象、onOpenFile 伝播対象"
+    },
+    {
+      "file": "src/components/worktree/FilePanelSplit.tsx",
+      "relevance": "onOpenFile コールバック伝播の中間層（影響範囲に未記載）"
+    },
+    {
+      "file": "src/components/worktree/FilePanelContent.tsx",
+      "relevance": "onOpenFile 伝播の中間層、MarkdownWithSearch/MarpEditorWithSlides への伝播"
+    },
+    {
+      "file": "src/components/worktree/MarkdownPreview.tsx",
+      "relevance": "rehype-sanitize スキーマ調整、a タグカスタムコンポーネント追加"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "relevance": "onOpenFile props 追加、MarkdownPreview への伝播"
+    },
+    {
+      "file": "src/components/worktree/HtmlPreview.tsx",
+      "relevance": "postMessage 監視追加、srcDoc へのスクリプト注入"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "onOpenFile コールバック起点、Toast メッセージ更新"
+    },
+    {
+      "file": "src/types/markdown-editor.ts",
+      "relevance": "EditorProps に onOpenFile 追加が必要（影響範囲に未記載）"
+    },
+    {
+      "file": "src/config/html-extensions.ts",
+      "relevance": "sandbox 属性の検討対象"
+    },
+    {
+      "file": "src/lib/security/path-validator.ts",
+      "relevance": "パストラバーサル防止の既存ロジック（活用対象）"
+    },
+    {
+      "file": "tests/unit/hooks/useFileTabs.test.ts",
+      "relevance": "MOVE_TO_FRONT テスト追加が必要"
+    },
+    {
+      "file": "tests/unit/components/FilePanelTabs.test.tsx",
+      "relevance": "ドロップダウン UI テスト追加が必要"
+    }
+  ],
+  "doc_references": []
+}

@@ -1,0 +1,106 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "focus_area": "通常",
+  "iteration": 2,
+  "issue_number": 499,
+  "review_date": "2026-03-15",
+  "findings": [
+    {
+      "id": "F5-001",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "Item 5: consecutive_errorsのUI表示設計方針が未定義",
+      "description": "Issue本文ではWorktreeDetailRefactored.tsx L391のstopReason判定に'consecutive_errors'分岐を追加するよう記載しているが、stop_pattern_matched（正常系停止）とconsecutive_errors（異常系停止）ではユーザーへの通知レベルが異なるべきである。現在の実装はsetStopReasonPendingというbooleanフラグを立てるのみで、reasonの種類に応じた異なるUI表示の設計方針が未定義。",
+      "current": "L391の`stopReason`判定に`'consecutive_errors'`分岐を追加",
+      "suggested": "L391付近のstopReason判定を拡張し、stopReasonの種類に応じてUI表示を分岐する設計を明記する。例: 'stop_pattern_matched'は情報通知(info level)、'consecutive_errors'は警告通知(warning level)として表示する。具体的にはsetStopReasonPendingの代わりに、stopReasonの値自体をstateに保持し、Toast表示時にreasonに応じたメッセージを出し分ける。",
+      "evidence": "WorktreeDetailRefactored.tsx L391: `data.autoYes.stopReason === 'stop_pattern_matched'` -- 現在はboolean的にpendingフラグを立てるだけだが、consecutive_errorsは異なるユーザー体験を要する"
+    },
+    {
+      "id": "F5-002",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "Item 3: キャプチャ行数300行の根拠にTHINKING_CHECK_LINE_COUNTが含まれていない",
+      "description": "Item 3ではstopPattern未設定時にキャプチャ行数を300行に削減する根拠として、promptDetectorのスキャンウィンドウ(50行)とRAW_CONTENT_MAX_LINES(200行)を列挙しているが、同じpollAutoYes内で使用されるTHINKING_CHECK_LINE_COUNT(auto-yes-state.ts L345で50と定義)が根拠に含まれていない。値は50行であり300行の範囲内のため機能的な問題はないが、根拠の網羅性のために追加が望ましい。",
+      "current": "promptDetectorのスキャンウィンドウ(50行) + rawContentの最大行数(RAW_CONTENT_MAX_LINES=200行) + マージンを考慮し、300行程度を推奨",
+      "suggested": "根拠にTHINKING_CHECK_LINE_COUNT(50行)を追加: 「promptDetectorのスキャンウィンドウ(50行) + THINKING_CHECK_LINE_COUNT(50行) + RAW_CONTENT_MAX_LINES(200行) + マージンを考慮し、300行程度を推奨」",
+      "evidence": "auto-yes-state.ts L345: THINKING_CHECK_LINE_COUNT = 50, auto-yes-poller.ts L405: cleanOutput.split('\\n').slice(-THINKING_CHECK_LINE_COUNT) -- 300行キャプチャでも50行チェックには十分だが、根拠として網羅すべき"
+    },
+    {
+      "id": "F5-003",
+      "severity": "nice_to_have",
+      "category": "明確性",
+      "title": "Item 4: オプショナル引数の具体的なシグネチャ案が未記載",
+      "description": "Item 4で「オプショナルな引数として事前分割済み行配列を受け取れるようにする」と記載しているが、具体的なシグネチャ案が示されていない。detectPromptの現在のシグネチャに対して、どの位置にどのような引数を追加するか（options内に含めるか、独立した引数とするか）が実装者の判断に委ねられている。",
+      "current": "オプショナルな引数として事前分割済み行配列を受け取れるようにする",
+      "suggested": "既存のoptions引数(DetectPromptOptions)にprecomputedLines?: string[]を追加する方式を推奨する。例: `detectPrompt(content: string, options?: DetectPromptOptions & { precomputedLines?: string[] })`。これによりシグネチャの変更が最小限で済む。",
+      "evidence": "auto-yes-poller.ts L317: `const promptOptions = buildDetectPromptOptions(cliToolId)` -- 既にoptionsオブジェクトを渡す仕組みがあるため、ここに統合するのが自然"
+    },
+    {
+      "id": "F5-004",
+      "severity": "nice_to_have",
+      "category": "受入条件",
+      "title": "Item 7の受入条件テスト項目が依然として個別に記載されていない",
+      "description": "Stage 1でF1-006として指摘されたItem 3, 4, 6, 7の受入条件不足のうち、Item 3とItem 4は追加されたが、Item 7（validatePollingContextの冗長チェック除去）の個別テスト確認項目がまだない。Item 7は冗長コードの除去であり既存テストのパスで十分かもしれないが、明示的に「validatePollingContextからisAutoYesExpired呼び出しが除去されていることをコードレビューで確認」と記載するとより明確になる。",
+      "current": "受入条件にItem 7の個別確認項目なし",
+      "suggested": "受入条件に追加: - [ ] validatePollingContextからisAutoYesExpired冗長呼び出しが除去され、コメントで理由が記載されていることをコードレビューで確認",
+      "evidence": "受入条件セクションにItem 1,2,3,4,5のテスト項目はあるが、Item 6,7は個別項目なし"
+    }
+  ],
+  "previous_findings_status": [
+    {
+      "finding_id": "F1-001",
+      "status": "addressed",
+      "notes": "Item 3のキャプチャ行数を300行に変更し、promptDetectorのスキャンウィンドウ(50行)、RAW_CONTENT_MAX_LINES(200行)、マージンを根拠として明記済み"
+    },
+    {
+      "finding_id": "F1-002",
+      "status": "addressed",
+      "notes": "Thinking間隔の推奨値を5秒に確定し、Thinking持続時間、応答遅延、期限切れ検出遅延の根拠を詳細に追記済み"
+    },
+    {
+      "finding_id": "F1-003",
+      "status": "addressed",
+      "notes": "detectPromptの既存インターフェース維持方針に変更し、オプショナル引数方式を明記。後方互換性の考慮を追記済み"
+    },
+    {
+      "finding_id": "F1-004",
+      "status": "addressed",
+      "notes": "連続エラー閾値20回の根拠（backoff 60s x 20 = 20分）、AutoYesStopReasonへのconsecutive_errors追加、disableAutoYes経由の記録方式を明記済み。さらにStage 3の指摘を受けてUI側のハンドリング要件も追加"
+    },
+    {
+      "finding_id": "F1-005",
+      "status": "addressed",
+      "notes": "キャッシュTTL変更時のターミナル表示更新遅延が最大3秒になる許容事項を明記済み。影響範囲も全利用箇所を列挙"
+    },
+    {
+      "finding_id": "F1-006",
+      "status": "partially_addressed",
+      "notes": "Item 3, 4の受入条件テスト項目は追加されたが、Item 6, 7の個別確認項目は依然として未記載。Item 6はキャッシュTTL値の確認が既存テストで担保される可能性はあるが、Item 7はコードレビュー確認として明記が望ましい"
+    },
+    {
+      "finding_id": "F1-007",
+      "status": "addressed",
+      "notes": "Item 1の対策案が具体的方針に確定。detectPrompt(stripBoxDrawing(cleanOutput))からstripBoxDrawing除去の方針を明記済み"
+    },
+    {
+      "finding_id": "F1-008",
+      "status": "addressed",
+      "notes": "関連ファイルにprompt-answer-sender.tsを追加済み"
+    }
+  ],
+  "summary": {
+    "total_findings": 4,
+    "must_fix": 0,
+    "should_fix": 1,
+    "nice_to_have": 3,
+    "overall_quality": "good",
+    "key_observations": [
+      "Stage 1の8件の指摘のうち7件が完全に対処され、1件が部分的に対処されている。Issue全体の品質は大幅に向上した。",
+      "ファイルパス、行番号、関数名はすべて実コードと整合しており、技術的な正確性は高い。",
+      "Stage 3（影響範囲レビュー）の指摘も適切に反映され、UI側のconsecutive_errorsハンドリング要件、キャッシュ影響、テスト影響ファイルが追加されている。",
+      "残る指摘は主に実装時の判断を助ける補足情報の追加であり、Issueとしての実装可能性は十分に確保されている。",
+      "レビュー履歴セクションが追加されており、過去の指摘と対応の追跡可能性が確保されている点は良い。"
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "issue_number": 501,
+  "feature_summary": "Auto-Yesサーバー/クライアント二重応答とポーラー再作成によるステータス不安定の修正",
+  "acceptance_criteria": [
+    "lastServerResponseTimestamp が CurrentOutputResponse 型に含まれている",
+    "fetchCurrentOutput() で lastServerResponseTimestamp がstateに保存されている",
+    "useAutoYes() に lastServerResponseTimestamp が渡されている",
+    "サーバー応答後3秒以内にクライアントが同一プロンプトに応答しないことをテストで確認",
+    "同一 cliToolId で startAutoYesPolling() を再呼び出ししてもポーラーが再作成されないことをテストで確認",
+    "cliToolId が変わった場合はポーラーが正しく再作成されることをテストで確認",
+    "already_running の場合に auto-yes/route.ts が正常応答を返すことをテストで確認",
+    "current-output/route.ts で detectSessionStatus() に lastOutputTimestamp が渡されていることを確認",
+    "worktree-status-helper.ts で detectSessionStatus() に lastOutputTimestamp が渡されていることを確認",
+    "worktree-status-helper.ts の変更に対するユニットテストを追加する（新規作成）",
+    "サーバー応答後のステータス検出で既存の時間ベースヒューリスティックが機能し、waitingがすぐに解消されることを確認",
+    "既存のAuto-Yes関連テストが全てパスする",
+    "npm run test:unit パス",
+    "npm run lint パス",
+    "npx tsc --noEmit パス"
+  ],
+  "test_scenarios": [
+    "シナリオ1: ポーラー冪等性 - 同一cliToolIdで再呼び出ししてもポーラー状態が保持される",
+    "シナリオ2: ポーラー再作成 - 異なるcliToolIdで呼び出すとポーラーが再作成される",
+    "シナリオ3: タイムスタンプ伝播 - APIレスポンスのlastServerResponseTimestampがクライアントに正しく渡される",
+    "シナリオ4: ステータス検出改善 - サーバー応答後にdetectSessionStatus()がlastOutputTimestampを受け取る",
+    "シナリオ5: 静的解析 - tsc/lint全パス"
+  ]
+}

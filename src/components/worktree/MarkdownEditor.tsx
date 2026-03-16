@@ -113,6 +113,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   initialViewMode,
   onMaximizedChange,
   onDirtyChange,
+  onOpenFile,
 }: EditorProps) {
   // State
   const [content, setContent] = useState('');
@@ -781,7 +782,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
                 data-testid="markdown-preview"
                 className="flex-1 p-4 overflow-y-auto prose prose-sm dark:prose-invert max-w-none"
               >
-                <MarkdownPreview content={previewContent} />
+                <MarkdownPreview content={previewContent} onOpenFile={onOpenFile} currentFilePath={filePath} />
               </div>
             </div>
           )
@@ -798,7 +799,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
               data-testid="markdown-preview"
               className="flex-1 p-4 overflow-y-auto prose prose-sm dark:prose-invert max-w-none"
             >
-              <MarkdownPreview content={previewContent} />
+              <MarkdownPreview content={previewContent} onOpenFile={onOpenFile} currentFilePath={filePath} />
             </div>
           </div>
         )}

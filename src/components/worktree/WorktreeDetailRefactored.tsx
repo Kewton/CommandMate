@@ -40,7 +40,7 @@ import { useFileSearch } from '@/hooks/useFileSearch';
 import { LeftPaneTabSwitcher, type LeftPaneTab } from '@/components/worktree/LeftPaneTabSwitcher';
 import { FileViewer } from '@/components/worktree/FileViewer';
 import { FilePanelSplit } from '@/components/worktree/FilePanelSplit';
-import { useFileTabs } from '@/hooks/useFileTabs';
+import { useFileTabs, MAX_FILE_TABS } from '@/hooks/useFileTabs';
 import { useFilePolling } from '@/hooks/useFilePolling';
 import { FILE_TREE_POLL_INTERVAL_MS } from '@/config/file-polling-config';
 
@@ -129,6 +129,10 @@ interface CurrentOutputResponse {
     expiresAt: number | null;
     stopReason?: AutoYesStopReason;
   };
+  /** Issue #501: Server-side auto-yes response timestamp for client duplicate prevention */
+  lastServerResponseTimestamp?: number | null;
+  /** Issue #501: Whether server-side auto-yes poller is active */
+  serverPollerActive?: boolean;
 }
 
 // ============================================================================
@@ -194,12 +198,17 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const [isEditorMaximized, setIsEditorMaximized] = useState(false);
   const [autoYesEnabled, setAutoYesEnabled] = useState(false);
   const [autoYesExpiresAt, setAutoYesExpiresAt] = useState<number | null>(null);
+  // Issue #501: Track last server-side auto-yes response timestamp for duplicate prevention
+  const [lastServerResponseTimestamp, setLastServerResponseTimestamp] = useState<number | null>(null);
+  // Issue #501: Track whether server-side auto-yes poller is active
+  const [serverPollerActive, setServerPollerActive] = useState(false);
   // Issue #473: Track OpenCode TUI selection list state
   const [isSelectionListActive, setIsSelectionListActive] = useState(false);
   // Issue #314: Track previous auto-yes enabled state for stop reason toast
   const prevAutoYesEnabledRef = useRef<boolean>(false);
-  // Issue #314: Pending stop reason toast (deferred until showToast is available)
-  const [stopReasonPending, setStopReasonPending] = useState(false);
+  // Issue #314 / #499 Item 5: Pending stop reason toast (deferred until showToast is available)
+  // Stores the actual stopReason value to determine toast level (info vs warning)
+  const [pendingStopReason, setPendingStopReason] = useState<AutoYesStopReason | null>(null);
   // Issue #368: Selected agents state (initialized from API, drives terminal header tabs)
   const [selectedAgents, setSelectedAgents] = useState<CLIToolType[]>(DEFAULT_SELECTED_AGENTS);
   // Ref to access latest selectedAgents inside fetchWorktree without adding to useCallback deps
@@ -380,6 +389,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       // Issue #473: Update selection list state from server
       setIsSelectionListActive(data.isSelectionListActive ?? false);
 
+      // Issue #501: Update last server response timestamp for useAutoYes duplicate prevention
+      setLastServerResponseTimestamp(data.lastServerResponseTimestamp ?? null);
+      setServerPollerActive(data.serverPollerActive ?? false);
+
       // Update auto-yes state from server (Issue #314: stopReason tracking)
       if (data.autoYes) {
         const wasEnabled = prevAutoYesEnabledRef.current;
@@ -387,9 +400,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         setAutoYesExpiresAt(data.autoYes.expiresAt);
         prevAutoYesEnabledRef.current = data.autoYes.enabled;
 
-        // Issue #314: Detect stop condition match (enabled -> disabled transition)
-        if (wasEnabled && !data.autoYes.enabled && data.autoYes.stopReason === 'stop_pattern_matched') {
-          setStopReasonPending(true);
+        // Issue #314 / #499 Item 5: Detect stop condition match or consecutive error (enabled -> disabled transition)
+        if (wasEnabled && !data.autoYes.enabled &&
+            (data.autoYes.stopReason === 'stop_pattern_matched' || data.autoYes.stopReason === 'consecutive_errors')) {
+          setPendingStopReason(data.autoYes.stopReason);
         }
       }
     } catch (err) {
@@ -452,6 +466,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Event Handlers
   // ========================================================================
 
+  /**
+   * Show Toast notification when tab limit is reached.
+   * [DR1-010, DR2-003] Dynamic message using MAX_FILE_TABS constant.
+   */
+  const showTabLimitToast = useCallback(() => {
+    showToast(`Maximum ${MAX_FILE_TABS} file tabs. Close a tab first.`, 'info');
+  }, [showToast]);
+
   /** Handle file path click in history pane */
   const handleFilePathClick = useCallback((path: string) => {
     if (isMobile) {
@@ -459,10 +481,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     } else {
       const result = fileTabs.openFile(path);
       if (result === 'limit_reached') {
-        showToast('Maximum 5 file tabs. Close a tab first.', 'info');
+        showTabLimitToast();
       }
     }
-  }, [isMobile, fileTabs, showToast]);
+  }, [isMobile, fileTabs, showTabLimitToast]);
 
   /**
    * Handle file select from FileTreeView
@@ -478,10 +500,21 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       // Desktop: open in file tab panel (including .md files for preview)
       const result = fileTabs.openFile(path);
       if (result === 'limit_reached') {
-        showToast('Maximum 5 file tabs. Close a tab first.', 'info');
+        showTabLimitToast();
       }
     }
-  }, [isMobile, fileTabs, showToast]);
+  }, [isMobile, fileTabs, showTabLimitToast]);
+
+  /**
+   * Handle opening a file from a link in MarkdownPreview/HtmlPreview (Issue #505).
+   * Opens the file as a new tab, or shows Toast if limit is reached.
+   */
+  const handleOpenFile = useCallback((path: string) => {
+    const result = fileTabs.openFile(path);
+    if (result === 'limit_reached') {
+      showTabLimitToast();
+    }
+  }, [fileTabs, showTabLimitToast]);
 
   /** Handle closing mobile FileViewer modal */
   const handleMobileFileViewerClose = useCallback(() => {
@@ -779,13 +812,16 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     }
   }, [worktreeId, editorFilePath, fileTabs, tCommon, tError]);
 
-  // Issue #314: Show stop reason toast when pending (deferred from fetchCurrentOutput)
+  // Issue #314 / #499 Item 5: Show stop reason toast when pending (deferred from fetchCurrentOutput)
   useEffect(() => {
-    if (stopReasonPending) {
+    if (pendingStopReason === 'stop_pattern_matched') {
       showToast(tAutoYes('stopPatternMatched'), 'info');
-      setStopReasonPending(false);
+      setPendingStopReason(null);
+    } else if (pendingStopReason === 'consecutive_errors') {
+      showToast(tAutoYes('consecutiveErrorsStopped'), 'warning');
+      setPendingStopReason(null);
     }
-  }, [stopReasonPending, showToast, tAutoYes]);
+  }, [pendingStopReason, showToast, tAutoYes]);
 
   // [Issue #162] File operations hook (move dialog state management)
   const {
@@ -964,6 +1000,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     isPromptWaiting: state.prompt.visible,
     promptData: state.prompt.data,
     autoYesEnabled,
+    lastServerResponseTimestamp,
+    serverPollerActive,
   });
 
   /** Retry loading all data after error */
@@ -1291,9 +1329,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         diffFilePath={diffFilePath}
         onCloseDiff={handleCloseDiff}
         onDirtyChange={handleDirtyChange}
+        onMoveToFront={fileTabs.moveToFront}
+        onOpenFile={handleOpenFile}
       />
     ),
-    [state.terminal.output, state.terminal.isActive, state.terminal.isThinking, state.terminal.autoScroll, handleAutoScrollChange, disableAutoFollow, terminalHeaderMemo, fileTabs.state, fileTabs.closeTab, fileTabs.activateTab, worktreeId, handleLoadContent, handleLoadError, handleSetLoading, handleFilePanelSave, diffContent, diffFilePath, handleCloseDiff, handleDirtyChange]
+    [state.terminal.output, state.terminal.isActive, state.terminal.isThinking, state.terminal.autoScroll, handleAutoScrollChange, disableAutoFollow, terminalHeaderMemo, fileTabs.state, fileTabs.closeTab, fileTabs.activateTab, worktreeId, handleLoadContent, handleLoadError, handleSetLoading, handleFilePanelSave, diffContent, diffFilePath, handleCloseDiff, handleDirtyChange, fileTabs.moveToFront, handleOpenFile]
   );
 
   /**

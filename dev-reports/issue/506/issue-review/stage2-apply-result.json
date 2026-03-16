@@ -1,0 +1,57 @@
+{
+  "issue_number": 506,
+  "iteration": 1,
+  "apply_date": "2026-03-16",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "Toast通知の実装方針を明記。Sidebar.tsx内にuseToast + ToastContainerを配置するローカルToast方式を採用することを「Toast通知の実装方針」セクションとして追加。既存パターン(MarkdownEditor, LogViewer等)との整合性を記載"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "syncAndRefreshの配置場所をWorktreeSelectionContextからSidebar.tsx内のローカルハンドラに変更。設計判断の理由を「設計判断: syncハンドラの配置場所」セクションとして明記。変更対象ファイルからWorktreeSelectionContext.tsxを削除"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "受入条件を「同期ボタンをクリックすることで」に修正し、手動同期であることを明示。「リロードなしで反映」の条件も「同期ボタンクリック後」を前置"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "モバイルドロワー内での同期ボタン動作確認を実装タスクと受入条件の両方に追加。AppShell.tsxでの描画を根拠として記載"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "同期中のボタンdisabled状態による連打防止を動作フロー・実装タスク・受入条件の3箇所に明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "背景セクションに「ホーム画面のRefreshボタンとの違い」サブセクションを追加。DB再取得のみ vs ファイルシステムスキャン+DB同期+再取得の違いを明記"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "i18n対応を実装タスクに追加。ボタンのaria-label、Toast成功/失敗メッセージの国際化対応(next-intl使用)を明記"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 7,
+    "applied": 7,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/506"
+  }
+}

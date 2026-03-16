@@ -1,0 +1,96 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "review_date": "2026-03-16",
+  "findings": [
+    {
+      "id": "F3-001",
+      "severity": "should_fix",
+      "category": "missing_impact",
+      "title": "worktree-status-helper.ts で lastOutputTimestamp を渡す際のデータソース未特定",
+      "description": "対策3では worktree-status-helper.ts L91 の detectSessionStatus() 呼び出しに lastOutputTimestamp を渡すと記載されているが、worktree-status-helper.ts は sidebar用の一括ステータス取得であり、getLastServerResponseTimestamp() を呼ぶには worktreeId が必要。現状のコードでは detectSessionStatus(output, cliToolId) と2引数で呼んでおり（L91）、lastServerResponseTimestamp はこのコンテキストでは auto-yes-poller の in-memory state に依存する。worktree-status-helper は全CLI_TOOL_IDS をループしており、getLastServerResponseTimestamp は worktreeId 単位（CLIツール単位ではない）で管理されている。同一 worktreeId で複数 CLI ツールがアクティブな場合、Claude のポーラータイムスタンプが Codex のステータス検出に影響する可能性がある。Issue にはこのCLIツール間の干渉リスクについて言及がない。",
+      "recommendation": "getLastServerResponseTimestamp が worktreeId 単位であることを明記し、CLIツールごとに異なるタイムスタンプが必要かどうかを検討するか、あるいは worktree-status-helper への lastOutputTimestamp 伝播は対策3のスコープ外とする判断を明記する。",
+      "affected_section": "対策3"
+    },
+    {
+      "id": "F3-002",
+      "severity": "should_fix",
+      "category": "test_coverage",
+      "title": "worktree-status-helper.ts のテストファイルが存在しない",
+      "description": "tests/ ディレクトリに worktree-status-helper のテストファイルが存在しない。対策3で detectSessionStatus() への引数追加を行う際、worktree-status-helper の挙動変更を検証するテストが必要になるが、受け入れ条件では「worktree-status-helper.ts で detectSessionStatus() に lastOutputTimestamp が渡されていることを確認」とのみ記載されており、テスト追加の要件が不明確。",
+      "recommendation": "受け入れ条件に「worktree-status-helper.ts の変更に対するユニットテストまたは結合テストを追加する」を明記する。あるいは、既存の integration/current-output-thinking.test.ts を拡張してカバーする方針を示す。",
+      "affected_section": "受入条件"
+    },
+    {
+      "id": "F3-003",
+      "severity": "should_fix",
+      "category": "cross_fix_interaction",
+      "title": "対策2のポーラー再利用により対策3の lastServerResponseTimestamp の有効期間が延長される",
+      "description": "対策2で同一cliToolIdのポーラーを再利用すると、lastServerResponseTimestamp が古い値のまま保持される。これは対策1（3秒ウィンドウ）には影響しない（3秒経過後は無視されるため）が、対策3の detectSessionStatus() に渡す lastOutputTimestamp（5秒閾値）には影響する可能性がある。ポーラーが応答を送信した直後に worktree をクリックしてステータスが再評価される場合、対策2のおかげでタイムスタンプが保持されているため対策3が正しく機能する。逆に、対策2がなければタイムスタンプがリセットされ対策3が無効化される。つまり対策2と対策3には暗黙の依存関係がある。",
+      "recommendation": "3つの対策間の依存関係を Issue の「連鎖の流れ」セクションまたは別途「対策間の依存関係」セクションに明記する。特に「対策2のポーラー再利用が対策3のタイムスタンプ保持の前提条件である」ことを記載する。",
+      "affected_section": "対策2, 対策3"
+    },
+    {
+      "id": "F3-004",
+      "severity": "should_fix",
+      "category": "edge_case",
+      "title": "セッション起動直後のポーラー開始タイミング",
+      "description": "auto-yes/route.ts の POST ハンドラは auto-yes 有効化時に startAutoYesPolling() を呼ぶ。対策2ではポーラーが既に動作中なら再作成しないが、セッション起動直後（tmux セッションがまだ完全に起動していない状態）でポーラーが開始された場合、captureSessionOutput() が空文字列を返す可能性がある。この場合 stopCheckBaselineLength が 0 に設定され、後続の全出力がdeltaとして扱われる。これは既存の問題であり対策2で悪化するわけではないが、ポーラー再利用時にもこの状態が引き継がれることを認識しておく必要がある。",
+      "recommendation": "対策2の「既存ポーラーをそのまま継続」の設計判断は正しいが、edge case として baseline が 0 の状態で再利用される場合の挙動を検討し、必要に応じてドキュメントコメントで注記する。",
+      "affected_section": "対策2"
+    },
+    {
+      "id": "F3-005",
+      "severity": "nice_to_have",
+      "category": "backward_compatibility",
+      "title": "auto-yes API レスポンスの pollingStarted フィールドの意味変更",
+      "description": "対策2では startAutoYesPolling() が already_running の場合に started: false を返す可能性がある。現在の auto-yes/route.ts L171 は result.started を pollingStarted にそのまま代入しており、L172 で !result.started の場合に warn ログを出力している。対策2で started: false + reason: 'already_running' が正常系になると、API レスポンスの pollingStarted: false が「ポーラーは動いているが新規起動はしていない」を意味するようになる。クライアント側で pollingStarted を参照している箇所がないか確認が必要。",
+      "recommendation": "Issue に記載されている通り、already_running の場合の auto-yes/route.ts のハンドリング変更方針（started: true を返すか、reason による分岐を追加するか）を確定させる。API レスポンスの pollingStarted の値が変わる場合、クライアント側への影響がないことを確認する（現状のコードではクライアント側で pollingStarted を使用していないことを確認済み）。",
+      "affected_section": "対策2"
+    },
+    {
+      "id": "F3-006",
+      "severity": "should_fix",
+      "category": "missing_impact",
+      "title": "session-cleanup.ts への影響が未記載",
+      "description": "session-cleanup.ts L115 で stopAutoYesPolling(worktreeId) を呼んでいる。対策2でポーラーの再作成ロジックが変わった場合、セッションクリーンアップ時の挙動に影響はないが、クリーンアップ後に同一worktreeIdで再度 startAutoYesPolling() が呼ばれた場合の挙動を明確にする必要がある。具体的には、クリーンアップで delete された後は「既存ポーラーなし」として正常に新規作成されるか。",
+      "recommendation": "session-cleanup.ts を「間接影響ファイル」セクションに追加し、クリーンアップ後の再起動シナリオが対策2の変更で問題ないことを確認する旨を記載する。",
+      "affected_section": "関連ファイル"
+    },
+    {
+      "id": "F3-007",
+      "severity": "nice_to_have",
+      "category": "test_coverage",
+      "title": "useAutoYes テストで lastServerResponseTimestamp のテストケースが不足",
+      "description": "tests/unit/hooks/useAutoYes.test.ts にはpromptType/defaultOptionNumber のテストが存在するが、lastServerResponseTimestamp による重複防止のテストケースが存在しない。対策1の受け入れ条件に「サーバー応答後3秒以内にクライアントが同一プロンプトに応答しないことをテストで確認」とあるが、この既存テストファイルへの追加が必要。",
+      "recommendation": "受け入れ条件を満たすため、useAutoYes.test.ts に lastServerResponseTimestamp が 3 秒以内の場合にfetchが呼ばれないテストケースを追加する計画を記載する。",
+      "affected_section": "受入条件"
+    },
+    {
+      "id": "F3-008",
+      "severity": "must_fix",
+      "category": "missing_impact",
+      "title": "対策1で WorktreeDetailRefactored.tsx に lastServerResponseTimestamp の state 追加が必要",
+      "description": "Issue では fetchCurrentOutput() 内で lastServerResponseTimestamp を state に保存すると記載されているが、具体的な state 変数の追加（useState）が必要であることが暗黙的。CurrentOutputResponse 型への追加、useState<number | null> の追加、fetchCurrentOutput 内での setState 呼び出し、useAutoYes への props 追加、の 4 箇所の変更が必要。特に fetchCurrentOutput の useCallback 依存配列への影響（state setter は安定参照なので影響なし）を含め、変更箇所が明確に列挙されていない。実装者が漏れなく対応できるよう、具体的な変更手順を明記すべき。",
+      "recommendation": "対策1の変更内容を以下の4ステップとして明確化する: (1) CurrentOutputResponse 型に lastServerResponseTimestamp?: number | null を追加、(2) useState<number | null>(null) で state 変数を追加、(3) fetchCurrentOutput 内で data.lastServerResponseTimestamp を setState、(4) useAutoYes の呼び出し（L961-967）に lastServerResponseTimestamp を渡す。",
+      "affected_section": "対策1"
+    },
+    {
+      "id": "F3-009",
+      "severity": "nice_to_have",
+      "category": "missing_impact",
+      "title": "resource-cleanup.ts への影響確認",
+      "description": "resource-cleanup.ts は getAutoYesPollerWorktreeIds() を使って孤立ポーラーを検出する。対策2でポーラーの生存期間が延びる（再作成されないため）ことで、孤立ポーラー検出ロジックに影響がないか確認が必要。stopAutoYesPolling() で delete されるロジックは変わらないため影響はないと思われるが、明示的な確認が望ましい。",
+      "recommendation": "resource-cleanup.ts を間接影響ファイルとして言及し、対策2による影響がないことを注記する。",
+      "affected_section": "関連ファイル"
+    }
+  ],
+  "summary": {
+    "total_findings": 9,
+    "must_fix": 1,
+    "should_fix": 4,
+    "nice_to_have": 4
+  }
+}

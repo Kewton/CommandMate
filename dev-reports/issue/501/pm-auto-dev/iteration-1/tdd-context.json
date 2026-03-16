@@ -1,0 +1,68 @@
+{
+  "issue_number": 501,
+  "issue_title": "fix: Auto-Yesサーバー/クライアント二重応答とポーラー再作成によるステータス不安定",
+  "design_doc_path": "dev-reports/design/issue-501-auto-yes-dual-response-fix-design-policy.md",
+  "work_plan_path": "dev-reports/issue/501/work-plan.md",
+  "acceptance_criteria": [
+    "lastServerResponseTimestamp が CurrentOutputResponse 型に含まれている",
+    "fetchCurrentOutput() で lastServerResponseTimestamp がstateに保存されている",
+    "useAutoYes() に lastServerResponseTimestamp が渡されている",
+    "サーバー応答後3秒以内にクライアントが同一プロンプトに応答しないことをテストで確認",
+    "同一 cliToolId で startAutoYesPolling() を再呼び出ししてもポーラーが再作成されないことをテストで確認",
+    "cliToolId が変わった場合はポーラーが正しく再作成されることをテストで確認",
+    "already_running の場合に auto-yes/route.ts が正常応答を返すことをテストで確認",
+    "current-output/route.ts で detectSessionStatus() に lastOutputTimestamp が渡されていることを確認",
+    "worktree-status-helper.ts で detectSessionStatus() に lastOutputTimestamp が渡されていることを確認",
+    "worktree-status-helper.ts の変更に対するユニットテストを追加する（新規作成）",
+    "サーバー応答後のステータス検出で既存の時間ベースヒューリスティックが機能し、waitingがすぐに解消されることを確認",
+    "既存のAuto-Yes関連テストが全てパスする",
+    "npm run test:unit パス",
+    "npm run lint パス",
+    "npx tsc --noEmit パス"
+  ],
+  "implementation_tasks": [
+    {
+      "id": "Task 1.1",
+      "phase": "対策2: ポーラー冪等化",
+      "description": "startAutoYesPolling() 冪等化テスト作成（Red）",
+      "file": "tests/unit/lib/auto-yes-manager.test.ts",
+      "details": "同一cliToolId再呼び出し→再作成されない、異なるcliToolId→stop→再作成、already_running戻り値、状態保持確認"
+    },
+    {
+      "id": "Task 1.2",
+      "phase": "対策2: ポーラー冪等化",
+      "description": "startAutoYesPolling() 冪等化実装（Green）",
+      "file": "src/lib/auto-yes-poller.ts",
+      "details": "既存ポーラーのcliToolId比較、同一なら既存継続でstarted:true/reason:already_running返却、異なる場合のみstop→create"
+    },
+    {
+      "id": "Task 2.1",
+      "phase": "対策1: クライアント伝播",
+      "description": "WorktreeDetailRefactored.tsx 型・状態追加",
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "details": "CurrentOutputResponse型追加、useState追加、fetchCurrentOutput内setState、useAutoYes引数追加"
+    },
+    {
+      "id": "Task 3.1",
+      "phase": "対策3: ステータス検出改善",
+      "description": "worktree-status-helper.ts テスト作成（Red）",
+      "file": "tests/unit/lib/worktree-status-helper.test.ts",
+      "details": "新規作成: lastOutputTimestamp引数渡しテスト、null時undefined渡し、Auto-Yes未使用時既存動作維持"
+    },
+    {
+      "id": "Task 3.2",
+      "phase": "対策3: ステータス検出改善",
+      "description": "current-output/route.ts ステータス検出改善",
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "details": "detectSessionStatus()にlastServerResponseTimestampをDate変換して第3引数に渡す"
+    },
+    {
+      "id": "Task 3.3",
+      "phase": "対策3: ステータス検出改善",
+      "description": "worktree-status-helper.ts ステータス検出改善",
+      "file": "src/lib/session/worktree-status-helper.ts",
+      "details": "auto-yes-managerからgetLastServerResponseTimestamp import追加、detectSessionStatus()にlastOutputTimestamp引数追加、number|null→Date|undefined変換"
+    }
+  ],
+  "target_coverage": 80
+}

@@ -6,15 +6,23 @@
  *
  * Issue #438: PC file display panel with tabs
  * Issue #469: isDirty indicator for unsaved edits
+ * Issue #505: Dropdown for 6+ tabs, onMoveToFront, onOpenFile passthrough
  */
 
 'use client';
 
-import React, { memo, useCallback } from 'react';
-import { X } from 'lucide-react';
+import React, { memo, useCallback, useState, useEffect, useRef } from 'react';
+import { X, ChevronDown } from 'lucide-react';
 import { FilePanelContent } from './FilePanelContent';
 import type { FileTab } from '@/hooks/useFileTabs';
 import type { FileContent } from '@/types/models';
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/** Number of tabs shown in the tab bar before overflow into dropdown */
+const VISIBLE_TAB_COUNT = 5;
 
 // ============================================================================
 // Types
@@ -41,6 +49,10 @@ export interface FilePanelTabsProps {
   onFileSaved?: (path: string) => void;
   /** Callback when isDirty state changes (Issue #469) */
   onDirtyChange?: (path: string, isDirty: boolean) => void;
+  /** Callback to move a tab to front (Issue #505, DR1-009) */
+  onMoveToFront?: (path: string) => void;
+  /** Callback to open a file from a link (Issue #505, DR2-009 passthrough) */
+  onOpenFile?: (path: string) => void;
 }
 
 // ============================================================================
@@ -112,6 +124,10 @@ const TabButton = memo(function TabButton({
 
 /**
  * FilePanelTabs - Tab bar and content area for the file panel.
+ *
+ * Shows first 5 tabs in the tab bar. When 6+ tabs are open, additional
+ * tabs are accessible via a dropdown menu. Dropdown selection dispatches
+ * MOVE_TO_FRONT to bring the selected tab to the front. [DR1-008, DR1-009]
  */
 export const FilePanelTabs = memo(function FilePanelTabs({
   tabs,
@@ -124,24 +140,88 @@ export const FilePanelTabs = memo(function FilePanelTabs({
   onSetLoading,
   onFileSaved,
   onDirtyChange,
+  onMoveToFront,
+  onOpenFile,
 }: FilePanelTabsProps) {
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
   const activeTab = activeIndex !== null && activeIndex >= 0 && activeIndex < tabs.length
     ? tabs[activeIndex]
     : null;
 
+  const visibleTabs = tabs.length > VISIBLE_TAB_COUNT ? tabs.slice(0, VISIBLE_TAB_COUNT) : tabs;
+  const overflowTabs = tabs.length > VISIBLE_TAB_COUNT ? tabs.slice(VISIBLE_TAB_COUNT) : [];
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [dropdownOpen]);
+
+  const handleDropdownSelect = useCallback((path: string) => {
+    setDropdownOpen(false);
+    onMoveToFront?.(path);
+  }, [onMoveToFront]);
+
+  const handleDropdownToggle = useCallback(() => {
+    setDropdownOpen(prev => !prev);
+  }, []);
+
   return (
     <div className="flex flex-col h-full">
       {/* Tab bar */}
-      <div className="flex border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-x-auto">
-        {tabs.map((tab, index) => (
-          <TabButton
-            key={tab.path}
-            tab={tab}
-            isActive={index === activeIndex}
-            onActivate={onActivate}
-            onClose={onClose}
-          />
-        ))}
+      <div className="flex border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 min-w-0">
+        <div className="flex min-w-0 overflow-hidden flex-1">
+          {visibleTabs.map((tab, index) => (
+            <TabButton
+              key={tab.path}
+              tab={tab}
+              isActive={index === activeIndex}
+              onActivate={onActivate}
+              onClose={onClose}
+            />
+          ))}
+        </div>
+        {/* Dropdown button for overflow tabs [DR1-008] */}
+        {overflowTabs.length > 0 && (
+          <div className="relative flex-shrink-0" ref={dropdownRef}>
+            <button
+              type="button"
+              data-testid="tab-dropdown-button"
+              onClick={handleDropdownToggle}
+              className="flex items-center gap-0.5 px-2 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 border-b-2 border-transparent transition-colors"
+            >
+              <ChevronDown className={`w-3 h-3 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
+              <span>+{overflowTabs.length}</span>
+            </button>
+            {dropdownOpen && (
+              <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg z-50 min-w-[200px] max-h-[300px] overflow-y-auto">
+                {overflowTabs.map(tab => (
+                  <button
+                    key={tab.path}
+                    type="button"
+                    data-testid={`tab-dropdown-item-${tab.path}`}
+                    onClick={() => handleDropdownSelect(tab.path)}
+                    className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 truncate"
+                    title={tab.path}
+                  >
+                    {tab.name}
+                    {tab.isDirty && (
+                      <span className="ml-1 w-2 h-2 inline-block rounded-full bg-amber-500" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Content area */}
@@ -156,6 +236,7 @@ export const FilePanelTabs = memo(function FilePanelTabs({
             onSetLoading={onSetLoading}
             onFileSaved={onFileSaved}
             onDirtyChange={onDirtyChange}
+            onOpenFile={onOpenFile}
           />
         )}
       </div>

@@ -1,0 +1,139 @@
+{
+  "issue_number": 506,
+  "stage": 1,
+  "stage_name": "設計原則レビュー",
+  "focus_area": "設計原則（SOLID/KISS/YAGNI/DRY準拠確認）",
+  "review_date": "2026-03-16",
+  "design_doc_path": "dev-reports/design/issue-506-sidebar-sync-button-design-policy.md",
+  "overall_assessment": "PASS_WITH_COMMENTS",
+  "summary": "設計方針は全体的に既存パターンに準拠しており、KISS/YAGNI原則を適切に意識した設計。ただし、ToastContainerのprop名不一致、SyncButtonの責務境界に関するSRP違反の懸念、useCallback依存配列の潜在的バグなど、実装前に修正すべき点がある。",
+  "findings": [
+    {
+      "id": "F-001",
+      "severity": "must_fix",
+      "principle": "正確性（実装整合性）",
+      "title": "ToastContainerのprop名が実際のAPIと不一致",
+      "description": "設計書のコード例（セクション4）では `<ToastContainer toasts={toasts} removeToast={removeToast} />` と記載しているが、実際のToastContainerコンポーネント（src/components/common/Toast.tsx）のpropは `onClose` である。既存のMarkdownEditor、LogViewer、WorktreeDetailRefactored等すべてが `onClose={removeToast}` で呼び出している。",
+      "location": "設計書セクション4 設計パターン、コード例107行目付近",
+      "recommendation": "設計書のコード例を `<ToastContainer toasts={toasts} onClose={removeToast} />` に修正する。",
+      "impact": "実装時にコンパイルエラーまたはToast閉じ機能が動作しない。"
+    },
+    {
+      "id": "F-002",
+      "severity": "must_fix",
+      "principle": "正確性（潜在バグ）",
+      "title": "useCallbackの依存配列にisSyncingを含めることで参照が不安定になる",
+      "description": "設計書のhandleSyncのuseCallback依存配列に `isSyncing` が含まれている。isSyncingはuseStateの値であり、変更のたびにhandleSyncの参照が変わる。memo化されたSyncButtonに渡すpropとしてはonClick内でsetIsSyncing経由のガード条件を使う方が適切。具体的には、isSyncingを依存配列から除外し、関数先頭のガードを `setIsSyncing(prev => { if (prev) return prev; ... })` パターンまたはuseRefで管理する方法を検討すべき。",
+      "location": "設計書セクション4 コード例92行目: `[isSyncing, refreshWorktrees, showToast, t]`",
+      "recommendation": "isSyncingのガードにuseRefを使用するか、handleSync内部でstate更新関数の条件分岐を使い、useCallbackの依存配列からisSyncingを除外する。",
+      "impact": "isSyncing状態変更のたびにhandleSyncが再生成され、memo化の効果が部分的に失われる。"
+    },
+    {
+      "id": "F-003",
+      "severity": "should_fix",
+      "principle": "SRP（Single Responsibility）",
+      "title": "SyncButtonが3つの責務を内包している",
+      "description": "設計書セクション12で「SyncButtonは単一責任（同期ボタンUI + ハンドラ + Toast）」と記述しているが、UI表示・API呼び出しロジック・Toast通知管理の3つは本来別の責務である。現時点の規模では過剰分離は不要だが、設計書の記述が『これらが単一責任である』と述べている点は原則の誤解を示唆する。",
+      "location": "設計書セクション12 制約条件",
+      "recommendation": "設計書の記述を「SyncButtonは同期操作に関連する責務をカプセル化する。現時点の規模ではさらなる分離は不要」に修正する。SRP違反を認識した上で意図的にまとめていることを明記する。",
+      "impact": "設計意図の誤解。将来のメンテナンス時に責務分離の判断基準が曖昧になる。"
+    },
+    {
+      "id": "F-004",
+      "severity": "should_fix",
+      "principle": "DRY（Don't Repeat Yourself）",
+      "title": "RepositoryManagerとSyncButtonで同期ロジックが重複する",
+      "description": "既存のRepositoryManager.tsx（162行目付近）に既にrepositoryApi.sync()を呼び出してisSyncing状態を管理するロジックが存在する。SyncButtonで同様のロジック（API呼び出し + ローディング状態管理 + エラーハンドリング）を再実装するとDRY違反になる。",
+      "location": "src/components/repository/RepositoryManager.tsx vs 設計書セクション4",
+      "recommendation": "同期ロジックをカスタムフック（useSyncRepositories）として抽出し、RepositoryManagerとSyncButton双方から利用する案を検討する。ただし、RepositoryManagerのエラーハンドリング（state変数によるエラー表示）とSyncButtonのエラーハンドリング（Toast表示）が異なるため、フック化する場合はコールバックパターンで差異を吸収する。YAGNI原則との兼ね合いで、この対応は将来Issueでも可。",
+      "impact": "同期ロジックの修正時に2箇所の変更が必要になる。"
+    },
+    {
+      "id": "F-005",
+      "severity": "should_fix",
+      "principle": "正確性（既存コードとの整合性）",
+      "title": "Sidebarが現在useTranslationsを使用していない",
+      "description": "設計書ではuseTranslations('sidebar')を使用してi18n対応する方針だが、現在のSidebar.tsxにはuseTranslationsのimportすら存在しない。ハードコードされた英語文字列（'Branches'、'Search branches...'等）が使われている。SyncButtonのみi18n化するとSidebar内で一貫性がなくなる。",
+      "location": "src/components/layout/Sidebar.tsx",
+      "recommendation": "SyncButtonのi18n化自体は正しい方向性だが、設計書に「既存のSidebar文字列は本Issueのスコープ外とし、SyncButton追加分のみi18n対応する」旨を明記する。または、Sidebar全体のi18n化を同時に行うかどうかを判断する。",
+      "impact": "同一コンポーネント内でi18n対応/非対応が混在する。"
+    },
+    {
+      "id": "F-006",
+      "severity": "nice_to_have",
+      "principle": "Open/Closed",
+      "title": "SyncButtonのアクション完了後の振る舞いが拡張しにくい",
+      "description": "現在の設計ではsync完了後にrefreshWorktrees()を呼ぶのみだが、将来的にポーリングタイマーリセットや他の後処理が必要になった場合、SyncButton内のhandleSyncを直接変更する必要がある。コールバック配列やイベント通知パターンを導入すれば拡張に対してオープンになるが、現時点ではYAGNI原則を優先してよい。",
+      "location": "設計書セクション4 handleSync関数",
+      "recommendation": "現時点では変更不要。将来ポーリングリセット等を追加する際にonSyncCompleteコールバックパターンへのリファクタリングを検討する。設計書のセクション8で言及されている通り別Issueで対応するのが適切。",
+      "impact": "軽微。現在のスコープでは問題なし。"
+    },
+    {
+      "id": "F-007",
+      "severity": "nice_to_have",
+      "principle": "KISS",
+      "title": "createPortalの必要性についてより詳細な検証が望ましい",
+      "description": "設計書ではstacking context問題を理由にcreatePortalを使用する方針だが、ToastContainerは既にfixed positioningとz-indexを使用しており、CSS仕様上transformによるcontaining block生成の影響を受けるのは正しいものの、z-indexの管理（Z_INDEX.TOAST）で解決できるケースもある。既存のMarkdownEditorやLogViewerではPortalなしでToastContainerを使用しており動作している。",
+      "location": "設計書セクション4 Portalパターン",
+      "recommendation": "まずPortalなしで実装を試み、実際にstacking context問題が発生した場合にPortalを導入する段階的アプローチを検討する。不要な複雑性を避けられる可能性がある。ただし、Sidebarのtransform配置が他コンポーネントと異なることが確認できればPortalは妥当。",
+      "impact": "テスト複雑性の増加（Portal先DOMの検証）。"
+    }
+  ],
+  "checklist": {
+    "single_responsibility": {
+      "status": "PASS_WITH_COMMENTS",
+      "note": "SyncButtonは3つの責務を含むが、現在の規模では許容範囲。設計書の記述は修正推奨（F-003）。"
+    },
+    "open_closed": {
+      "status": "PASS",
+      "note": "現スコープでは拡張性の問題なし。将来の拡張ポイントも設計書で言及済み。"
+    },
+    "liskov_substitution": {
+      "status": "N/A",
+      "note": "継承関係なし。"
+    },
+    "interface_segregation": {
+      "status": "PASS",
+      "note": "SyncButtonのprops（refreshWorktrees）は最小限で適切。"
+    },
+    "dependency_inversion": {
+      "status": "PASS",
+      "note": "repositoryApiを通じた抽象化が適切に利用されている。"
+    },
+    "kiss": {
+      "status": "PASS_WITH_COMMENTS",
+      "note": "全体的にシンプルだが、createPortalの必要性は要検証（F-007）。"
+    },
+    "yagni": {
+      "status": "PASS",
+      "note": "タイムアウト制御やポーリングリセットを明確にスコープ外としており適切。"
+    },
+    "dry": {
+      "status": "PASS_WITH_COMMENTS",
+      "note": "既存のuseToast/repositoryApi/refreshWorktreesを再利用しているが、RepositoryManagerとの同期ロジック重複あり（F-004）。"
+    }
+  },
+  "risk_assessment": {
+    "overall_risk": "LOW",
+    "risks": [
+      {
+        "category": "実装バグ",
+        "level": "MEDIUM",
+        "description": "ToastContainer prop名不一致（F-001）とuseCallback依存配列問題（F-002）は実装時にバグを引き起こす可能性がある。",
+        "mitigation": "設計書修正後に実装開始することで回避可能。"
+      },
+      {
+        "category": "保守性",
+        "level": "LOW",
+        "description": "同期ロジック重複（F-004）による保守コスト増加。",
+        "mitigation": "将来のリファクタリングIssueで対応可能。"
+      }
+    ]
+  },
+  "statistics": {
+    "total_findings": 7,
+    "must_fix": 2,
+    "should_fix": 3,
+    "nice_to_have": 2
+  }
+}

@@ -12,5 +12,9 @@
   "favorites": {
     "add": "Add to favorites",
     "remove": "Remove from favorites"
-  }
+  },
+  "syncSuccess": "Synced {count} worktrees",
+  "syncError": "Sync failed",
+  "syncAuthError": "Authentication error",
+  "syncButtonLabel": "Sync branches"
 }

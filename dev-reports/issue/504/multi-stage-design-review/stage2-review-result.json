@@ -1,0 +1,80 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "review_date": "2026-03-16",
+  "design_doc": "dev-reports/design/issue-504-repository-color-dot-design-policy.md",
+  "findings": [
+    {
+      "id": "DR2-001",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "useMemo保護に関する記述が不正確",
+      "description": "設計書セクション4「パフォーマンス設計」で「groupedBranchesはuseMemoで保護されており、不要な再計算は発生しない」と記載されている。groupedBranches配列自体はuseMemoで保護されているが、generateRepositoryColorはGroupHeaderコンポーネント内のJSXレンダリング中に呼ばれるため、useMemo保護の対象外である。GroupHeaderが再レンダリングされるたびにgenerateRepositoryColorが呼ばれる。リポジトリ数が少数であれば実害はないが、設計書の記述としては正確でない。",
+      "location": "設計書セクション4: パフォーマンス設計",
+      "recommendation": "「generateRepositoryColorはGroupHeader描画時に毎回呼び出されるが、計算コストが極めて低いため問題ない」という記述に修正する。あるいはuseMemoの保護範囲を正確に記載する。"
+    },
+    {
+      "id": "DR2-002",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "Sidebar.tsxのimport文への追加が変更ファイル一覧に未記載",
+      "description": "設計書セクション8の変更ファイル一覧でSidebar.tsxの変更量は「+5行程度」と見込まれているが、sidebar-utilsからのimport文にgenerateRepositoryColorを追加する必要がある。これ自体は+5行の見込みに含まれると解釈可能だが、import変更が必要な点を明示するとより正確になる。",
+      "location": "設計書セクション8: 実装計画",
+      "recommendation": "変更内容の説明に「import文にgenerateRepositoryColorを追加」を含めると明確になる。軽微な指摘であり対応は任意。"
+    },
+    {
+      "id": "DR2-003",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "インラインstyle属性によるbackgroundColorはコードベース初の使用パターン",
+      "description": "現在のsrc/components配下でstyle={{ backgroundColor: ... }}を使用しているコンポーネントは存在しない。CLIステータスドット（BranchListItem.tsx内のCliStatusDot）はTailwindクラス（config.className）で色を適用している。設計書では動的HSL値のためインラインスタイルが必要という判断をしており、その技術的理由は妥当だが、既存パターンからの逸脱であることを設計書で明示するとレビュアーの理解を助ける。",
+      "location": "設計書セクション3.2: スタイル適用方法",
+      "recommendation": "「既存のCLIステータスドットはTailwindクラスで色指定しているが、リポジトリ色は動的生成のためインラインスタイルを採用する」と既存パターンとの差異を明記する。"
+    },
+    {
+      "id": "DR2-004",
+      "severity": "info",
+      "category": "整合性",
+      "title": "GroupHeader/GroupIcon/ChevronIconの構造記述は正確",
+      "description": "設計書で記述されたGroupHeaderの現在のレイアウト「[Chevron] [GroupIcon] [RepoName...truncate] [Count]」はSidebar.tsxの実装（291-294行目）と完全に一致する。GroupHeaderはインラインサブコンポーネントとしてSidebar.tsx内に定義されており、ファイルパスも正確。",
+      "location": "設計書セクション2, 3.2",
+      "recommendation": "対応不要。正確に記述されている。"
+    },
+    {
+      "id": "DR2-005",
+      "severity": "info",
+      "category": "整合性",
+      "title": "CLIステータスドットの仕様記述は正確",
+      "description": "設計書セクション3.3のCLIステータスドットとの比較表で記載された「w-2 h-2 (8px)」「SIDEBAR_STATUS_CONFIGから取得」「BranchListItemのブランチ行」はBranchListItem.tsxの実装と一致。CliStatusDotコンポーネント（34-55行目）がw-2 h-2 rounded-full flex-shrink-0を使用していることを確認。",
+      "location": "設計書セクション3.3",
+      "recommendation": "対応不要。正確に記述されている。"
+    },
+    {
+      "id": "DR2-006",
+      "severity": "info",
+      "category": "整合性",
+      "title": "テスト戦略は既存テストパターンと整合",
+      "description": "設計書のテスト戦略（sidebar-utils.test.tsへの追加、describe/it構造、パターンマッチによる戻り値検証）は既存テストファイルのパターン（vitest使用、createBranchItemヘルパー、@/lib/sidebar-utilsからのimport）と整合している。テストファイルパスも正確。",
+      "location": "設計書セクション6",
+      "recommendation": "対応不要。既存パターンと整合している。"
+    },
+    {
+      "id": "DR2-007",
+      "severity": "info",
+      "category": "整合性",
+      "title": "sidebar-utils.tsの既存エクスポートとの整合性確認済み",
+      "description": "sidebar-utils.tsは現在sortBranches, groupBranches, SortKey, SortDirection, ViewMode, BranchGroup, STATUS_PRIORITYをエクスポートしている。generateRepositoryColorの追加はadditive changeであり既存のAPIに影響しない。Sidebar.tsxのimport文（21行目）にgenerateRepositoryColorを追加する必要がある。",
+      "location": "src/lib/sidebar-utils.ts",
+      "recommendation": "対応不要。additive changeで既存機能に影響なし。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 1,
+    "nice_to_have": 2,
+    "info": 4,
+    "total": 7
+  },
+  "overall_assessment": "設計方針書はコードベースの現状を高い精度で反映している。ファイルパス、コンポーネント名、CSSクラス名、レイアウト構造はすべて実装と一致。should_fixは1件（useMemo保護範囲の記述精度）のみで、設計の実現可能性に問題はない。提案されたGroupHeaderへの色ドット挿入は既存構造と互換性がある。"
+}

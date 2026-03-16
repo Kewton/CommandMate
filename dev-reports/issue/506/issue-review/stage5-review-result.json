@@ -1,0 +1,172 @@
+{
+  "issue_number": 506,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "review_date": "2026-03-16",
+  "previous_review_summary": "Stage 1(通常レビュー1回目)で7件の指摘、Stage 2で全7件反映済み。Stage 3(影響範囲レビュー1回目)で6件の指摘、Stage 4で5件反映・1件スキップ。合計13件の指摘のうち12件が反映済み",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 2
+  },
+  "previous_findings_verification": {
+    "status": "mostly_resolved",
+    "details": [
+      {
+        "original_id": "Stage1-MF-1",
+        "original_issue": "Toast通知の実装方針が不明確",
+        "verification": "resolved",
+        "comment": "ローカルToast方式(useToast + ToastContainer)が明記され、stacking context問題への対策(React Portal / AppShellレベル配置)も追加済み。SyncButtonコンポーネント分離によるmemo化対策も記載"
+      },
+      {
+        "original_id": "Stage1-SF-1",
+        "original_issue": "syncAndRefreshの配置場所が不適切",
+        "verification": "resolved",
+        "comment": "Sidebar.tsx内のローカルハンドラに変更済み。設計判断の理由も明記。WorktreeSelectionContext.tsxを変更対象から除外済み"
+      },
+      {
+        "original_id": "Stage1-SF-2",
+        "original_issue": "手動同期か自動同期か曖昧",
+        "verification": "resolved",
+        "comment": "受入条件に「同期ボタンをクリックすることで」を追加し、手動同期であることを明示済み"
+      },
+      {
+        "original_id": "Stage1-SF-3",
+        "original_issue": "モバイル対応の記載なし",
+        "verification": "resolved",
+        "comment": "実装タスクと受入条件の両方にモバイルドロワー内での動作確認を追加済み"
+      },
+      {
+        "original_id": "Stage1-SF-4",
+        "original_issue": "連打防止の未記載",
+        "verification": "resolved",
+        "comment": "動作フロー・実装タスク・受入条件の3箇所にdisabled状態による連打防止を明記済み"
+      },
+      {
+        "original_id": "Stage1-NTH-1",
+        "original_issue": "ホーム画面Refreshボタンとの違い未記載",
+        "verification": "resolved",
+        "comment": "背景セクションに詳細な比較を追加済み"
+      },
+      {
+        "original_id": "Stage1-NTH-2",
+        "original_issue": "i18n対応の未記載",
+        "verification": "resolved",
+        "comment": "実装タスクにaria-label、Toastメッセージのi18n対応を追加済み"
+      },
+      {
+        "original_id": "Stage3-MF-1",
+        "original_issue": "stacking context問題",
+        "verification": "resolved",
+        "comment": "React Portal方式またはAppShellレベル配置方式を詳細に記載済み。受入条件にもToastの正しい表示位置確認を追加済み"
+      },
+      {
+        "original_id": "Stage3-SF-1",
+        "original_issue": "useToastによるSidebar再レンダリング",
+        "verification": "resolved",
+        "comment": "SyncButtonコンポーネント分離方針を設計判断セクションと実装タスクに追加済み。受入条件にも不要な再レンダリング防止を追加済み"
+      },
+      {
+        "original_id": "Stage3-SF-2",
+        "original_issue": "テスト観点の未記載",
+        "verification": "resolved",
+        "comment": "テスト観点セクションを追加し、具体的な6項目を列挙済み"
+      },
+      {
+        "original_id": "Stage3-SF-3",
+        "original_issue": "既存ポーリングとの競合",
+        "verification": "resolved",
+        "comment": "動作フローセクションに二重fetch競合の認識と許容方針を明記済み"
+      },
+      {
+        "original_id": "Stage3-NTH-1",
+        "original_issue": "CLAUDE.mdモジュール一覧の更新",
+        "verification": "skipped_acceptable",
+        "comment": "レイアウトコンポーネントは記載対象外との判断でスキップ。妥当な判断"
+      },
+      {
+        "original_id": "Stage3-NTH-2",
+        "original_issue": "アイコン方針の未記載",
+        "verification": "resolved",
+        "comment": "インラインSVGパターン準拠の方針を明記済み"
+      }
+    ]
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "整合性",
+        "issue": "IssueではToast対策として「React Portal方式（推奨）」と「AppShellレベル配置方式」の2案を提示しているが、実装タスクの記載では「React Portalまたはレイアウトレベル配置で対応」と曖昧なまま。どちらを採用するかの判断基準や選定タイミングが不明確。また、React Portal方式を採用した場合、既存のToastContainer(Toast.tsx)を直接修正するのか、SyncButton内でcreatePortalでラップするのかが不明",
+        "location": "## 実装タスク - 5番目の項目",
+        "recommendation": "実装タスクで「React Portal方式を第一候補とし、SyncButton内でcreatePortalを使いToastContainerをdocument.bodyにマウントする」のように具体化するか、実装時の検証ステップとして「(1) Portal無しで表示位置確認 (2) 問題があればPortal追加」のように段階を明記すべき。Toast.tsx自体の修正は共通コンポーネントへの影響が大きいため避ける方針も併記が望ましい",
+        "evidence": "Issue本文の「Toast通知の実装方針」セクションでは「以下のいずれかの方式で対応する（実装時に検証の上選択）」と記載。しかし実装タスクでは判断基準が示されておらず、実装者が迷う可能性がある"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "受入条件に「useToastのstate変更がSidebar全体の不要な再レンダリングを引き起こさない」とあるが、この条件の検証方法が不明。React DevTools Profilerでの確認が必要だが、テスト観点セクションにはこの項目が含まれていない。自動テストで検証するのか手動確認なのかが曖昧",
+        "location": "## 受入条件 / ## テスト観点",
+        "recommendation": "テスト観点に「SyncButton内のuseToast state変更時にSidebar全体(branch-list)が再レンダリングされないことをReact DevTools ProfilerまたはrenderCountチェックで確認」を追加するか、受入条件を「SyncButtonコンポーネントを分離し、useToastのstateスコープがSyncButton内に限定されていること」のように実装レベルで検証可能な表現に変更すべき",
+        "evidence": "テスト観点セクションの6項目はすべて機能テスト（sync呼び出し、disabled状態、Toast表示）であり、パフォーマンス/レンダリングに関するテスト項目がない"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "sync API呼び出しのエラーハンドリングについて、ネットワークエラーとAPIエラー（4xx/5xx）の区別が未記載。repositoryApi.syncはfetchApiを経由するためApiErrorがthrowされるが、認証エラー(401)の場合の挙動（ログイン画面へのリダイレクト等）が考慮されていない",
+        "location": "## 動作フロー / ## テスト観点",
+        "recommendation": "sync API呼び出し時に401エラーが返された場合の挙動を記載するとよい。既存のWorktreeSelectionContextのポーリングでは401時にポーリングを停止する処理がある（WorktreeSelectionContext.tsx 252-254行目）ため、同期ボタンでも同様の考慮があると整合性が高い",
+        "evidence": "WorktreeSelectionContext.tsxの252-254行目: err instanceof ApiError && err.status === 401 の場合returnしてポーリング停止。同期ボタンのエラーハンドリングではこのケースが未考慮"
+      },
+      {
+        "id": "NTH-2",
+        "category": "明確性",
+        "issue": "「関連コンポーネント」セクションにWorktreeSelectionContextが記載されており「refreshWorktrees()との二重fetchは冪等のため許容」とあるが、影響範囲の「変更対象ファイル」はSidebar.tsxのみ。WorktreeSelectionContextは変更対象外であることを明確にする注記があるとよい",
+        "location": "## 影響範囲",
+        "recommendation": "関連コンポーネントのWorktreeSelectionContextの記載に「変更なし。refreshWorktrees()を呼び出すのみ」等の注記を追加すると、実装者がContextの変更が不要であることをより明確に理解できる",
+        "evidence": "変更対象ファイルテーブルにはSidebar.tsxのみが記載されているが、関連コンポーネント一覧にWorktreeSelectionContextが含まれているため、変更が必要と誤解される可能性がわずかにある"
+      }
+    ]
+  },
+  "overall_assessment": {
+    "quality": "good",
+    "readiness": "ready_for_implementation",
+    "comment": "前回のStage 1-4で指摘された全13件のうち12件が適切に反映されており、Issue全体の品質は大幅に向上している。must_fix該当の指摘は残っていない。Toast通知のstacking context対策、SyncButtonコンポーネント分離、テスト観点、既存ポーリングとの競合方針など、実装に必要な情報が網羅されている。残る2件のshould_fixはいずれも実装の判断余地に関するもので、実装着手に支障はない"
+  },
+  "code_references": [
+    {
+      "file": "src/components/layout/Sidebar.tsx",
+      "relevance": "同期ボタン追加先。memo化コンポーネント"
+    },
+    {
+      "file": "src/components/common/Toast.tsx",
+      "relevance": "ToastContainer(position:fixed)。共通コンポーネントのため直接修正は避けるべき"
+    },
+    {
+      "file": "src/contexts/WorktreeSelectionContext.tsx",
+      "relevance": "refreshWorktrees()提供元。変更不要。401エラー時のポーリング停止処理(252-254行目)が参考になる"
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "relevance": "repositoryApi.sync()の定義(353-363行目)。ApiErrorクラスの定義(30-38行目)"
+    },
+    {
+      "file": "src/components/layout/AppShell.tsx",
+      "relevance": "Sidebarのマウント先。translate-x-0/translate-x-fullによるtransformがstacking contextを生成"
+    },
+    {
+      "file": "tests/unit/components/layout/Sidebar.test.tsx",
+      "relevance": "既存テスト。repositoryApiモック追加が必要"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構成・モジュール一覧の整合性確認"
+    }
+  ]
+}

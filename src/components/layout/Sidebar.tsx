@@ -8,8 +8,9 @@
 
 'use client';
 
-import React, { memo, useState, useMemo, useCallback, useEffect } from 'react';
+import React, { memo, useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { useWorktreeSelection } from '@/contexts/WorktreeSelectionContext';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { BranchListItem } from '@/components/sidebar/BranchListItem';
@@ -17,8 +18,10 @@ import { SortSelector } from '@/components/sidebar/SortSelector';
 import { LocaleSwitcher } from '@/components/common/LocaleSwitcher';
 import { ThemeToggle } from '@/components/common/ThemeToggle';
 import { LogoutButton } from '@/components/common/LogoutButton';
+import { useToast, ToastContainer } from '@/components/common/Toast';
+import { repositoryApi, ApiError } from '@/lib/api-client';
 import { toBranchItem } from '@/types/sidebar';
-import { sortBranches, groupBranches } from '@/lib/sidebar-utils';
+import { sortBranches, groupBranches, generateRepositoryColor } from '@/lib/sidebar-utils';
 import type { ViewMode } from '@/lib/sidebar-utils';
 
 // ============================================================================
@@ -42,7 +45,7 @@ const SIDEBAR_GROUP_COLLAPSED_STORAGE_KEY = 'mcbd-sidebar-group-collapsed';
  */
 export const Sidebar = memo(function Sidebar() {
   const router = useRouter();
-  const { worktrees, selectedWorktreeId, selectWorktree } = useWorktreeSelection();
+  const { worktrees, selectedWorktreeId, selectWorktree, refreshWorktrees } = useWorktreeSelection();
   const { closeMobileDrawer, sortKey, sortDirection, viewMode, setViewMode } = useSidebarContext();
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -149,6 +152,7 @@ export const Sidebar = memo(function Sidebar() {
           <div className="flex items-center gap-1">
             <ViewModeToggle viewMode={viewMode} onToggle={setViewMode} />
             <SortSelector />
+            <SyncButton refreshWorktrees={refreshWorktrees} />
           </div>
         </div>
       </div>
@@ -233,22 +237,28 @@ export const Sidebar = memo(function Sidebar() {
 // Helper Functions
 // ============================================================================
 
+/** Maximum number of keys allowed in group collapsed state */
+const MAX_GROUP_COLLAPSED_KEYS = 100;
+
+/** Keys that are dangerous due to prototype pollution */
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 /**
  * Parse and validate group collapsed state from localStorage.
  * Includes prototype pollution protection and key limit.
+ *
+ * @internal Exported for unit testing only
  */
-function parseGroupCollapsed(raw: string): Record<string, boolean> {
+export function parseGroupCollapsed(raw: string): Record<string, boolean> {
   try {
     const parsed = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
-    const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-    const MAX_KEYS = 100;
     const safe: Record<string, boolean> = {};
     let count = 0;
     for (const [key, value] of Object.entries(parsed)) {
       if (DANGEROUS_KEYS.has(key)) continue;
       if (typeof value !== 'boolean') continue;
-      if (++count > MAX_KEYS) break;
+      if (++count > MAX_GROUP_COLLAPSED_KEYS) break;
       safe[key] = value;
     }
     return safe;
@@ -289,7 +299,7 @@ function GroupHeader({
       "
     >
       <ChevronIcon isExpanded={isExpanded} />
-      <GroupIcon />
+      <GroupIcon color={generateRepositoryColor(repositoryName)} />
       <span className="flex-1 text-left truncate">{repositoryName}</span>
       <span className="text-gray-500 font-normal">{branchCount}</span>
     </button>
@@ -345,15 +355,16 @@ function ChevronIcon({ isExpanded }: { isExpanded: boolean }) {
   );
 }
 
-/** Folder/group icon */
-function GroupIcon({ className = 'w-3 h-3' }: { className?: string }) {
+/** Folder/group icon with optional repository color */
+function GroupIcon({ className = 'w-3.5 h-3.5', color }: { className?: string; color?: string }) {
   return (
     <svg
-      className={className}
-      fill="none"
+      className={`${className} flex-shrink-0`}
       viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
+      fill={color ?? 'none'}
+      stroke={color ? 'none' : 'currentColor'}
+      strokeWidth={color ? 0 : 2}
+      aria-hidden="true"
     >
       <path
         strokeLinecap="round"
@@ -378,3 +389,75 @@ function FlatListIcon({ className = 'w-3 h-3' }: { className?: string }) {
     </svg>
   );
 }
+
+/** Sync (refresh) icon - rotating arrows */
+function SyncIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      className={`w-3 h-3 ${className}`}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={2}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M4 4v5h5M20 20v-5h-5M20.49 9A9 9 0 005.64 5.64L4 4m16 16l-1.64-1.64A9 9 0 014.51 15"
+      />
+    </svg>
+  );
+}
+
+/** Sync button with toast notifications */
+const SyncButton = memo(function SyncButton({
+  refreshWorktrees,
+}: {
+  refreshWorktrees: () => Promise<void>;
+}) {
+  const [isSyncing, setIsSyncing] = useState(false);
+  const isSyncingRef = useRef(false);
+  const { showToast, toasts, removeToast } = useToast();
+  const t = useTranslations('common');
+
+  const handleSync = useCallback(async () => {
+    if (isSyncingRef.current) return;
+    isSyncingRef.current = true;
+    setIsSyncing(true);
+    try {
+      const result = await repositoryApi.sync();
+      await refreshWorktrees();
+      showToast(
+        t('syncSuccess', { count: result.worktreeCount }),
+        'success',
+        3000
+      );
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        showToast(t('syncAuthError'), 'error', 5000);
+      } else {
+        showToast(t('syncError'), 'error', 5000);
+      }
+    } finally {
+      isSyncingRef.current = false;
+      setIsSyncing(false);
+    }
+  }, [refreshWorktrees, showToast, t]);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={handleSync}
+        disabled={isSyncing}
+        aria-label={t('syncButtonLabel')}
+        className="p-1 rounded text-gray-300 hover:text-white hover:bg-gray-700
+          focus:outline-none focus:ring-2 focus:ring-blue-500
+          disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      >
+        <SyncIcon className={isSyncing ? 'animate-spin' : ''} />
+      </button>
+      <ToastContainer toasts={toasts} onClose={removeToast} />
+    </>
+  );
+});

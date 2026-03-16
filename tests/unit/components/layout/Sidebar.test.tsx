@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import React from 'react';
-import { Sidebar } from '@/components/layout/Sidebar';
+import { Sidebar, parseGroupCollapsed } from '@/components/layout/Sidebar';
 import { SidebarProvider } from '@/contexts/SidebarContext';
 import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
 import type { Worktree } from '@/types/models';
@@ -36,10 +36,13 @@ vi.mock('@/lib/api-client', async (importOriginal) => {
       getAll: vi.fn(),
       getById: vi.fn(),
     },
+    repositoryApi: {
+      sync: vi.fn(),
+    },
   };
 });
 
-import { worktreeApi } from '@/lib/api-client';
+import { worktreeApi, repositoryApi, ApiError } from '@/lib/api-client';
 
 const mockWorktrees: Worktree[] = [
   {
@@ -676,6 +679,264 @@ describe('Sidebar', () => {
       // Should render without errors
       await waitFor(() => {
         expect(screen.getByTestId('sidebar')).toBeInTheDocument();
+      });
+    });
+
+    it('should parse valid group collapsed state', () => {
+      const result = parseGroupCollapsed(JSON.stringify({ RepoA: true, RepoB: false }));
+      expect(result).toEqual({ RepoA: true, RepoB: false });
+    });
+
+    it('should return empty object for invalid JSON', () => {
+      expect(parseGroupCollapsed('not-json')).toEqual({});
+    });
+
+    it('should return empty object for non-object values', () => {
+      expect(parseGroupCollapsed('"string"')).toEqual({});
+      expect(parseGroupCollapsed('123')).toEqual({});
+      expect(parseGroupCollapsed('null')).toEqual({});
+      expect(parseGroupCollapsed('[1,2,3]')).toEqual({});
+    });
+
+    it('should filter out dangerous prototype pollution keys', () => {
+      const input = JSON.stringify({
+        __proto__: true,
+        constructor: true,
+        prototype: true,
+        SafeKey: true,
+      });
+      const result = parseGroupCollapsed(input);
+      expect(result).toEqual({ SafeKey: true });
+      expect(result).not.toHaveProperty('__proto__');
+      expect(result).not.toHaveProperty('constructor');
+      expect(result).not.toHaveProperty('prototype');
+    });
+
+    it('should filter out non-boolean values', () => {
+      const input = JSON.stringify({
+        ValidTrue: true,
+        ValidFalse: false,
+        StringVal: 'true',
+        NumberVal: 1,
+        NullVal: null,
+        ObjectVal: {},
+      });
+      const result = parseGroupCollapsed(input);
+      expect(result).toEqual({ ValidTrue: true, ValidFalse: false });
+    });
+
+    it('should limit number of keys to prevent abuse', () => {
+      const largeObj: Record<string, boolean> = {};
+      for (let i = 0; i < 150; i++) {
+        largeObj[`key-${i}`] = true;
+      }
+      const result = parseGroupCollapsed(JSON.stringify(largeObj));
+      expect(Object.keys(result).length).toBe(100);
+    });
+  });
+
+  describe('SyncButton', () => {
+    beforeEach(() => {
+      (repositoryApi.sync as ReturnType<typeof vi.fn>).mockResolvedValue({
+        success: true,
+        message: 'Synced',
+        worktreeCount: 3,
+        repositoryCount: 1,
+        repositories: [],
+      });
+    });
+
+    it('should render sync button in sidebar header', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        // The mock useTranslations('common') returns 'common.syncButtonLabel' for t('syncButtonLabel')
+        expect(screen.getByLabelText('common.syncButtonLabel')).toBeInTheDocument();
+      });
+    });
+
+    it('should call repositoryApi.sync() on click', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('common.syncButtonLabel')).toBeInTheDocument();
+      });
+
+      const syncButton = screen.getByLabelText('common.syncButtonLabel');
+      fireEvent.click(syncButton);
+
+      await waitFor(() => {
+        expect(repositoryApi.sync).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it('should call refreshWorktrees() after successful sync', async () => {
+      // worktreeApi.getAll is called by refreshWorktrees via fetchWorktrees
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('common.syncButtonLabel')).toBeInTheDocument();
+      });
+
+      // Clear initial call count from mount
+      (worktreeApi.getAll as ReturnType<typeof vi.fn>).mockClear();
+
+      const syncButton = screen.getByLabelText('common.syncButtonLabel');
+      fireEvent.click(syncButton);
+
+      await waitFor(() => {
+        // refreshWorktrees calls worktreeApi.getAll internally
+        expect(worktreeApi.getAll).toHaveBeenCalled();
+      });
+    });
+
+    it('should disable button during sync', async () => {
+      // Make sync take some time
+      (repositoryApi.sync as ReturnType<typeof vi.fn>).mockImplementation(
+        () => new Promise((resolve) => setTimeout(() => resolve({
+          success: true,
+          message: 'Synced',
+          worktreeCount: 3,
+          repositoryCount: 1,
+          repositories: [],
+        }), 100))
+      );
+
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('common.syncButtonLabel')).toBeInTheDocument();
+      });
+
+      const syncButton = screen.getByLabelText('common.syncButtonLabel');
+      fireEvent.click(syncButton);
+
+      // Button should be disabled while syncing
+      expect(syncButton).toBeDisabled();
+
+      // Wait for sync to complete
+      await waitFor(() => {
+        expect(syncButton).not.toBeDisabled();
+      });
+    });
+
+    it('should show success toast on sync success', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('common.syncButtonLabel')).toBeInTheDocument();
+      });
+
+      const syncButton = screen.getByLabelText('common.syncButtonLabel');
+      fireEvent.click(syncButton);
+
+      await waitFor(() => {
+        // The mock useTranslations replaces {count} in the key string
+        // t('syncSuccess', { count: 3 }) => 'common.syncSuccess' with {count} replaced to '3'
+        expect(screen.getByText('common.syncSuccess')).toBeInTheDocument();
+      });
+    });
+
+    it('should show error toast on sync failure', async () => {
+      (repositoryApi.sync as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error('Network error')
+      );
+
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('common.syncButtonLabel')).toBeInTheDocument();
+      });
+
+      const syncButton = screen.getByLabelText('common.syncButtonLabel');
+      fireEvent.click(syncButton);
+
+      await waitFor(() => {
+        expect(screen.getByText('common.syncError')).toBeInTheDocument();
+      });
+    });
+
+    it('should prevent double-click from triggering multiple syncs', async () => {
+      // Make sync take some time to ensure overlap
+      (repositoryApi.sync as ReturnType<typeof vi.fn>).mockImplementation(
+        () => new Promise((resolve) => setTimeout(() => resolve({
+          success: true,
+          message: 'Synced',
+          worktreeCount: 3,
+          repositoryCount: 1,
+          repositories: [],
+        }), 200))
+      );
+
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('common.syncButtonLabel')).toBeInTheDocument();
+      });
+
+      const syncButton = screen.getByLabelText('common.syncButtonLabel');
+
+      // Click twice rapidly
+      fireEvent.click(syncButton);
+      fireEvent.click(syncButton);
+
+      // Wait for sync to complete
+      await waitFor(() => {
+        expect(syncButton).not.toBeDisabled();
+      });
+
+      // Should only have been called once due to isSyncingRef guard
+      expect(repositoryApi.sync).toHaveBeenCalledTimes(1);
+    });
+
+    it('should handle 401 error with auth error toast', async () => {
+      (repositoryApi.sync as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new ApiError('Unauthorized', 401)
+      );
+
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('common.syncButtonLabel')).toBeInTheDocument();
+      });
+
+      const syncButton = screen.getByLabelText('common.syncButtonLabel');
+      fireEvent.click(syncButton);
+
+      await waitFor(() => {
+        expect(screen.getByText('common.syncAuthError')).toBeInTheDocument();
       });
     });
   });

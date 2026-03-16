@@ -48,8 +48,8 @@ describe('tmux-capture-cache', () => {
   // =========================================================================
 
   describe('constants', () => {
-    it('should export CACHE_TTL_MS as 2000', () => {
-      expect(CACHE_TTL_MS).toBe(2000);
+    it('should export CACHE_TTL_MS as 3000 (Issue #499 Item 6)', () => {
+      expect(CACHE_TTL_MS).toBe(3000);
     });
 
     it('should export CACHE_MAX_ENTRIES as 100', () => {

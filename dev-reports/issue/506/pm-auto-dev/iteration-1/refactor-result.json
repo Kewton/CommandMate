@@ -1,0 +1,38 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 81.72,
+    "after_coverage": 94.62,
+    "before_branch_coverage": 73.43,
+    "after_branch_coverage": 89.06,
+    "before_function_coverage": 83.33,
+    "after_function_coverage": 86.66
+  },
+  "refactorings_applied": [
+    "Extract magic constants (MAX_GROUP_COLLAPSED_KEYS, DANGEROUS_KEYS) to module-level named constants",
+    "Export parseGroupCollapsed for direct unit testing with @internal annotation",
+    "Add 6 comprehensive unit tests for parseGroupCollapsed (valid input, invalid JSON, non-object values, prototype pollution, non-boolean filtering, key limit)",
+    "Add double-click prevention test for SyncButton (isSyncingRef guard verification)"
+  ],
+  "files_changed": [
+    "src/components/layout/Sidebar.tsx",
+    "tests/unit/components/layout/Sidebar.test.tsx"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "test_summary": {
+    "tests_before": 37,
+    "tests_after": 44,
+    "tests_added": 7,
+    "all_unit_tests_passed": true,
+    "total_unit_tests": 5033
+  },
+  "commits": [
+    "a957cec: refactor(sidebar): improve parseGroupCollapsed testability and add comprehensive tests"
+  ],
+  "message": "Refactoring complete. Sidebar.tsx line coverage improved from 81.72% to 94.62%. Extracted magic constants, exported parseGroupCollapsed for direct testing, added 7 new tests covering prototype pollution protection, input validation, key limits, and SyncButton double-click prevention."
+}

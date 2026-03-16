@@ -1,0 +1,55 @@
+{
+  "status": "success",
+  "coverage": 80,
+  "unit_tests": {
+    "total": 5008,
+    "passed": 5007,
+    "failed": 1,
+    "note": "1 pre-existing failure in git-utils.test.ts (unrelated to Issue #501)"
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "tasks_completed": [
+    "Task 1.1: startAutoYesPolling() idempotency tests (Red)",
+    "Task 1.2: startAutoYesPolling() idempotency implementation (Green)",
+    "Task 2.1: WorktreeDetailRefactored.tsx client timestamp propagation",
+    "Task 3.1: worktree-status-helper.test.ts new test file (Red)",
+    "Task 3.2: current-output/route.ts detectSessionStatus lastOutputTimestamp",
+    "Task 3.3: worktree-status-helper.ts detectSessionStatus lastOutputTimestamp"
+  ],
+  "tests_added": [
+    "tests/unit/lib/auto-yes-manager.test.ts: should return already_running when same worktreeId + same cliToolId",
+    "tests/unit/lib/auto-yes-manager.test.ts: should stop and recreate poller when cliToolId changes",
+    "tests/unit/lib/auto-yes-manager.test.ts: should preserve poller state on reuse",
+    "tests/unit/lib/auto-yes-manager.test.ts: should store cliToolId in AutoYesPollerState for comparison",
+    "tests/unit/lib/worktree-status-helper.test.ts: should pass lastOutputTimestamp as Date when timestamp exists",
+    "tests/unit/lib/worktree-status-helper.test.ts: should pass undefined when timestamp is null",
+    "tests/unit/lib/worktree-status-helper.test.ts: should not change behavior for worktrees without running sessions"
+  ],
+  "files_modified": [
+    "src/lib/auto-yes-poller.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/lib/session/worktree-status-helper.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts"
+  ],
+  "files_created": [
+    "tests/unit/lib/worktree-status-helper.test.ts"
+  ],
+  "test_results": {
+    "passed": 5007,
+    "failed": 1,
+    "total": 5008
+  },
+  "type_check": "pass",
+  "lint": "pass",
+  "commits": [
+    "50e6536: fix(auto-yes): prevent dual response and status instability"
+  ],
+  "issues": [
+    "1 pre-existing test failure in tests/unit/git-utils.test.ts (detached HEAD state test) - unrelated to Issue #501"
+  ],
+  "message": "TDD implementation complete. All 7 new tests pass. Fix 2 (poller idempotency), Fix 1 (client timestamp propagation), and Fix 3 (status detection improvement) implemented. TypeScript and ESLint pass cleanly."
+}

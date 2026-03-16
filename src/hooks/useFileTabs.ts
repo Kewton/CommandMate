@@ -16,8 +16,8 @@ import type { FileContent } from '@/types/models';
 // Constants
 // ============================================================================
 
-/** Maximum number of simultaneously open file tabs */
-export const MAX_FILE_TABS = 5;
+/** Maximum number of simultaneously open file tabs (Issue #505: increased from 5 to 30) */
+export const MAX_FILE_TABS = 30;
 
 /** localStorage key prefix for file tab persistence */
 const STORAGE_KEY_PREFIX = 'commandmate:file-tabs:';
@@ -67,7 +67,8 @@ export type FileTabsAction =
   | { type: 'RENAME_FILE'; oldPath: string; newPath: string }
   | { type: 'DELETE_FILE'; path: string }
   | { type: 'RESTORE'; paths: string[]; activePath: string | null }
-  | { type: 'SET_DIRTY'; path: string; isDirty: boolean };
+  | { type: 'SET_DIRTY'; path: string; isDirty: boolean }
+  | { type: 'MOVE_TO_FRONT'; path: string };
 
 // ============================================================================
 // Helper Functions
@@ -244,6 +245,14 @@ export function fileTabsReducer(state: FileTabsState, action: FileTabsAction): F
       return { ...state, tabs: newTabs };
     }
 
+    case 'MOVE_TO_FRONT': {
+      const index = state.tabs.findIndex(t => t.path === action.path);
+      if (index === -1 || index === 0) return state;
+      const tab = state.tabs[index];
+      const newTabs = [tab, ...state.tabs.filter((_, i) => i !== index)];
+      return { tabs: newTabs, activeIndex: 0 };
+    }
+
     default:
       return state;
   }
@@ -262,6 +271,8 @@ export interface UseFileTabsReturn {
   activateTab: (path: string) => void;
   onFileRenamed: (oldPath: string, newPath: string) => void;
   onFileDeleted: (path: string) => void;
+  /** Move a tab to the front (index 0) [DR1-003, DR2-007] */
+  moveToFront: (path: string) => void;
 }
 
 /** Read persisted tab data from localStorage */
@@ -366,5 +377,9 @@ export function useFileTabs(worktreeId: string): UseFileTabsReturn {
     dispatch({ type: 'DELETE_FILE', path });
   }, []);
 
-  return { state, dispatch, openFile, closeTab, activateTab, onFileRenamed, onFileDeleted };
+  const moveToFront = useCallback((path: string) => {
+    dispatch({ type: 'MOVE_TO_FRONT', path });
+  }, []);
+
+  return { state, dispatch, openFile, closeTab, activateTab, onFileRenamed, onFileDeleted, moveToFront };
 }

@@ -1,0 +1,86 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "review_date": "2026-03-16",
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "nice_to_have",
+      "category": "SOLID",
+      "title": "対策1のパイプライン補完がSRPに沿った適切な分離になっている",
+      "description": "対策1はCurrentOutputResponse型の追加、useState追加、fetchCurrentOutput内のsetState、useAutoYes引数追加の4ステップで構成されている。各ステップは型定義、状態管理、データフェッチ、フック連携と責務が明確に分かれており、WorktreeDetailRefactored.tsxの既存の責務構造を壊していない。ただし、CurrentOutputResponse型がコンポーネントファイル内(L116-132)にインライン定義されている点は、型が成長するにつれSRPの観点から分離を検討する余地がある。",
+      "recommendation": "現時点では変更不要。将来的にCurrentOutputResponse型のフィールドがさらに増加する場合、types/ディレクトリへの型定義移動を検討する。本Issueのスコープでは現状のインライン定義で問題ない。",
+      "affected_section": "3.1 対策1: パイプライン補完パターン"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "nice_to_have",
+      "category": "SOLID",
+      "title": "対策2の冪等化ロジックがOpen/Closed Principleに配慮されている",
+      "description": "startAutoYesPolling()の修正は、既存の関数シグネチャを変更せず、内部ロジックにcliToolId一致チェックを追加する形で設計されている。戻り値にreasonフィールドを追加する点もstarted:trueの意味を変えないため、既存の呼び出し側(auto-yes/route.ts)への影響が最小限。これはOCPに沿った拡張方法である。",
+      "recommendation": "特に変更不要。reasonフィールドの型定義を明示的にunion type(例: 'newly_started' | 'already_running' | 'restarted_with_new_cli')として定義すると、将来の拡張時に型安全性が向上する。",
+      "affected_section": "3.2 対策2: 冪等性パターン（Idempotent Start）"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "should_fix",
+      "category": "KISS",
+      "title": "対策3のworktree-status-helper.tsへの変更が暗黙的な依存を増やす",
+      "description": "worktree-status-helper.tsからauto-yes-managerのgetLastServerResponseTimestamp()をimportして使用する設計は、ステータス検出モジュールとAuto-Yesモジュール間に新しい依存関係を作る。現在worktree-status-helper.tsはdetection/status-detector.tsとtmux/session管理にのみ依存しているが、Auto-Yesの内部状態(lastServerResponseTimestamp)への依存が加わることで、モジュール間の結合度が上がる。status-detector.ts自体は変更不要でlastOutputTimestampパラメータを受け取るだけなので、問題はworktree-status-helper.tsの呼び出し側に集中している。",
+      "recommendation": "設計方針書のセクション9の変更ファイル一覧にworktree-status-helper.tsからauto-yes-managerへの新しいimport依存を明記し、この依存方向が意図的であることを文書化する。将来的にworktree-status-helper.tsの引数としてlastOutputTimestampを外部から注入するDI的アプローチも検討可能だが、現時点ではKISSの観点からimport直接参照で問題ない。",
+      "affected_section": "3.3 対策3: 既存機構活用パターン"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "must_fix",
+      "category": "KISS",
+      "title": "lastServerResponseTimestampとlastOutputTimestampの概念的な違いが設計書で不明瞭",
+      "description": "設計書内で2つの異なるタイムスタンプ概念が使われている。(1) lastServerResponseTimestamp: サーバーのAuto-Yesポーラーがプロンプトに応答した時刻(auto-yes-poller.tsのAutoYesPollerState内)。(2) lastOutputTimestamp: detectSessionStatus()の第3引数で、出力の最終更新時刻を示すパラメータ。対策3では前者を後者として渡す設計だが、これらは意味が異なる。「サーバーがプロンプトに応答した時刻」と「出力が最後に変更された時刻」は別の概念であり、status-detector.tsの時間ベースヒューリスティック(STALE_OUTPUT_THRESHOLD_MS=5000ms)は「出力が5秒以上更新されていなければready」という判定をしている。サーバー応答時刻をlastOutputTimestampとして渡すと、「サーバーが応答してから5秒経てばready」という意味になり、元の設計意図とは微妙にずれる。",
+      "recommendation": "設計書のセクション3.3またはセクション8に、lastServerResponseTimestampをlastOutputTimestampとして渡す際のセマンティクスの違いを明記する。具体的には「サーバーがプロンプトに応答した = tmuxバッファに新しい出力が発生した、と近似的にみなす」という設計判断の根拠と、この近似が妥当である理由(プロンプト応答送信後にtmuxバッファは実際に更新されるため)を記載する。",
+      "affected_section": "3.3 対策3: 既存機構活用パターン"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "title": "reasonフィールドの必要性の検討",
+      "description": "対策2で導入されるreasonフィールド('already_running'等)は、設計書によるとAPI側の変更最小化のために使われ、呼び出し元は区別不要としている。しかし「内部的に新規起動と再利用を区別可能」という目的でフィールドを追加するのは、現時点で消費者がいないフィールドを追加することになる。ログ出力で区別する目的であれば、startAutoYesPolling関数内のlogger.infoで直接出力すれば十分。",
+      "recommendation": "reasonフィールド自体は害がないので削除する必要はないが、設計書にreasonフィールドの主要な消費者(ログ出力、デバッグ)を明記する。テストでreasonを検証する場合は有用なので、テスト目的としても記載するとよい。",
+      "affected_section": "3.2 対策2: 冪等性パターン（Idempotent Start）"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "title": "不採用案の記載が適切でスコープ制御が明確",
+      "description": "WebSocket化、Redux導入、cliToolId単位のタイムスタンプ管理などの不採用案が明確に理由付きで記載されている。これはYAGNI原則に沿っており、過剰な抽象化を避ける良い判断である。特にcliToolId単位のタイムスタンプ管理をスコープ外として将来課題に記録している点は、必要最小限の実装方針として適切。",
+      "recommendation": "変更不要。良い設計判断として記録。",
+      "affected_section": "8. 設計上の決定事項とトレードオフ"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "title": "detectSessionStatus()への lastOutputTimestamp渡しが2箇所で重複パターン",
+      "description": "対策3ではcurrent-output/route.tsとworktree-status-helper.tsの2箇所でgetLastServerResponseTimestamp()を呼びDate変換してdetectSessionStatus()に渡すパターンが重複する。current-output/route.tsではL86付近、worktree-status-helper.tsではL91付近でほぼ同一のコード(getLastServerResponseTimestamp(worktreeId)取得 -> Date変換 -> detectSessionStatus第3引数渡し)が必要になる。",
+      "recommendation": "ヘルパー関数(例: getLastOutputTimestampAsDate(worktreeId))の抽出を検討する。ただし、2箇所のみの重複であり、無理に抽出するとKISSに反する可能性もあるため、実装時にコード量を見て判断すればよい。設計書には「2箇所で同一パターンが発生するが、コード量が小さいため関数抽出は任意」と記載すると明確になる。",
+      "affected_section": "9. 変更ファイル一覧"
+    },
+    {
+      "id": "DR1-008",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "title": "3つの対策間の依存関係が実装順序セクションのみに記載されている",
+      "description": "設計書のセクション10で実装順序として対策2->対策1->対策3の順序が理由付きで説明されている。しかし対策間の依存関係(対策2がなければ対策3のタイムスタンプ保持が無効化される)はIssue本文には記載があるが、設計方針書のアーキテクチャ設計セクション(セクション1)やデータフロー設計セクション(セクション4)には明示的に記載されていない。依存関係が実装順序の「理由」としてのみ記載されていると、レビュアーがセクション1-4を読んだ段階で各対策の独立性を誤解する可能性がある。",
+      "recommendation": "セクション1のアーキテクチャ設計またはセクション4のデータフロー設計に「対策間の依存関係」サブセクションを追加し、対策2(ポーラー冪等化)が対策3(ステータス検出改善)の前提条件であることを図示または箇条書きで明記する。",
+      "affected_section": "1. アーキテクチャ設計 / 10. 実装順序"
+    }
+  ],
+  "summary": {
+    "total_findings": 8,
+    "must_fix": 1,
+    "should_fix": 2,
+    "nice_to_have": 5
+  }
+}

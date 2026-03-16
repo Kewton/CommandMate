@@ -1,0 +1,139 @@
+{
+  "status": "passed",
+  "tsc_result": "pass",
+  "lint_result": "pass",
+  "test_result": {
+    "total": 5083,
+    "passed": 5075,
+    "failed": 1,
+    "skipped": 7,
+    "note": "1 failure is pre-existing git-utils.test.ts (getGitStatus dirty detection), unrelated to Issue #505"
+  },
+  "criteria_results": [
+    {
+      "criterion": "Markdownプレビュー内の相対パスリンクをクリックすると、対象ファイルが新しいタブで開く",
+      "status": "passed",
+      "evidence": "MarkdownPreview.tsx handleLinkClick dispatches onOpenFile with resolveRelativePath result for 'relative' links. Test MarkdownPreview.test.tsx confirms onOpenFile called with 'docs/readme.md' for './readme.md' link."
+    },
+    {
+      "criterion": "HTMLプレビュー内の相対パスリンクをクリックすると、対象ファイルが新しいタブで開く（interactiveモードのみ）",
+      "status": "passed",
+      "evidence": "HtmlPreview.tsx registers postMessage listener only when sandboxLevel==='interactive'. LINK_CLICK_SCRIPT injected into iframe intercepts clicks. handleLinkFromIframe resolves relative paths and calls onOpenFile. Test HtmlPreview.test.tsx confirms onOpenFile('docs/readme.md') called on postMessage."
+    },
+    {
+      "criterion": "外部URLリンクはブラウザの新しいタブで開く",
+      "status": "passed",
+      "evidence": "Both MarkdownPreview and HtmlPreview call window.open(sanitized, '_blank', 'noopener,noreferrer') for 'external' links. Tests confirm window.open called with correct args."
+    },
+    {
+      "criterion": "#で始まるアンカーリンクはタブを開かず、プレビュー内でスクロールする",
+      "status": "passed",
+      "evidence": "classifyLink returns 'anchor' for '#' prefixed hrefs. MarkdownPreview handleLinkClick 'anchor' case breaks without preventDefault (browser handles scroll). Test confirms onOpenFile not called for anchor links."
+    },
+    {
+      "criterion": "ファイルタブが6個以上の場合、先頭5タブがタブバーに表示され、残りはドロップダウンから選択可能",
+      "status": "passed",
+      "evidence": "FilePanelTabs.tsx VISIBLE_TAB_COUNT=5. visibleTabs=tabs.slice(0, 5), overflowTabs=tabs.slice(5). Dropdown button with ChevronDown and '+N' count renders when overflowTabs.length > 0."
+    },
+    {
+      "criterion": "ドロップダウンから選択したタブが先頭に移動する（MOVE_TO_FRONT）",
+      "status": "passed",
+      "evidence": "handleDropdownSelect calls onMoveToFront(path). useFileTabs MOVE_TO_FRONT reducer moves tab to index 0 and sets activeIndex=0."
+    },
+    {
+      "criterion": "タブバー内タブクリック時はタブ順序が変わらない（ACTIVATE_TAB）",
+      "status": "passed",
+      "evidence": "TabButton handleClick calls onActivate (ACTIVATE_TAB), not onMoveToFront. ACTIVATE_TAB reducer only changes activeIndex without reordering."
+    },
+    {
+      "criterion": "タブ上限30まで開ける",
+      "status": "passed",
+      "evidence": "useFileTabs.ts MAX_FILE_TABS=30 (line 20). OPEN_FILE reducer checks state.tabs.length >= MAX_FILE_TABS. openFile returns 'limit_reached' when at capacity."
+    },
+    {
+      "criterion": "タブ上限30到達時にリンクをクリックした場合、Toast通知でフィードバック",
+      "status": "passed",
+      "evidence": "WorktreeDetailRefactored.tsx handleOpenFile checks fileTabs.openFile result and calls showTabLimitToast() on 'limit_reached'. Same pattern in handleFileSelect and handleFilePathClick."
+    },
+    {
+      "criterion": "rehype-sanitizeが相対パスのhrefを除去しないこと",
+      "status": "passed",
+      "evidence": "REHYPE_SANITIZE_SCHEMA uses allowlist regex /^(?:#|mailto:|tel:|https?:\\/\\/|(?![a-zA-Z][a-zA-Z0-9+.-]*:))/ which allows relative paths. Test link-utils.test.ts confirms relative paths match. MarkdownPreview.test.tsx confirms href='./readme.md' preserved in rendered link."
+    },
+    {
+      "criterion": "postMessage受信時にorigin検証が行われる",
+      "status": "passed",
+      "evidence": "HtmlPreview.tsx handler checks event.origin !== 'null' and returns early. Test HtmlPreview.test.tsx confirms origin='https://evil.com' is rejected."
+    },
+    {
+      "criterion": "postMessageメッセージスキーマ（commandmate:link-click）の検証が行われる",
+      "status": "passed",
+      "evidence": "Handler validates data.type === 'commandmate:link-click' and typeof data.href === 'string'. Test confirms wrong type 'other-message' is ignored."
+    },
+    {
+      "criterion": "postMessageリスナーがコンポーネントアンマウント時にremoveEventListenerで解除される",
+      "status": "passed",
+      "evidence": "useEffect cleanup returns () => window.removeEventListener('message', handler). Test HtmlPreview.test.tsx 'should clean up listener on unmount' confirms removeEventListener called."
+    },
+    {
+      "criterion": "SafeモードではpostMessageリスナーが登録されないこと",
+      "status": "passed",
+      "evidence": "useEffect guard: if (sandboxLevel !== 'interactive') return. Test 'should not register listener in safe mode' confirms 0 message listeners in safe mode."
+    },
+    {
+      "criterion": "Toast メッセージはMAX_FILE_TABS定数を参照した動的メッセージであること",
+      "status": "passed",
+      "evidence": "showTabLimitToast uses template literal: `Maximum ${MAX_FILE_TABS} file tabs. Close a tab first.` with imported MAX_FILE_TABS constant."
+    },
+    {
+      "criterion": "npm run test:unit パス",
+      "status": "passed",
+      "evidence": "254 test files passed, 5075 tests passed. Only 1 pre-existing failure in git-utils.test.ts unrelated to Issue #505."
+    },
+    {
+      "criterion": "npm run lint パス",
+      "status": "passed",
+      "evidence": "ESLint output: 'No ESLint warnings or errors'"
+    }
+  ],
+  "design_policy_findings": [
+    {
+      "id": "DR1-001",
+      "description": "link-utils.ts shared module",
+      "status": "addressed",
+      "evidence": "src/lib/link-utils.ts created as shared module imported by both MarkdownPreview.tsx and HtmlPreview.tsx"
+    },
+    {
+      "id": "DR1-002",
+      "description": "classifyLink utility",
+      "status": "addressed",
+      "evidence": "classifyLink exported from link-utils.ts, classifies anchor/external/relative. Used in both MarkdownPreview and HtmlPreview."
+    },
+    {
+      "id": "DR1-005",
+      "description": "No includes('..') check, server-side defense",
+      "status": "addressed",
+      "evidence": "resolveRelativePath uses new URL() for path normalization. Comment explicitly states: '[DR1-005] new URL() resolves away .. so no includes(..) check needed.'"
+    },
+    {
+      "id": "DR1-010",
+      "description": "showTabLimitToast helper",
+      "status": "addressed",
+      "evidence": "showTabLimitToast callback in WorktreeDetailRefactored.tsx uses MAX_FILE_TABS in dynamic template literal message."
+    },
+    {
+      "id": "DR4-001",
+      "description": "Allowlist schema (not blocklist)",
+      "status": "addressed",
+      "evidence": "REHYPE_SANITIZE_SCHEMA uses allowlist regex that explicitly permits http, https, mailto, tel, anchors, and relative paths while rejecting all unknown schemes."
+    },
+    {
+      "id": "DR4-003",
+      "description": "sanitizeHref input validation",
+      "status": "addressed",
+      "evidence": "sanitizeHref validates max length 2048 and rejects control characters. Used in both MarkdownPreview (handleLinkClick) and HtmlPreview (handleLinkFromIframe)."
+    }
+  ],
+  "issues_found": [],
+  "overall_assessment": "All 17 acceptance criteria passed. TypeScript compilation, ESLint, and unit tests all pass (the single test failure is a pre-existing git-utils issue unrelated to #505). All 6 design policy findings (DR1-001, DR1-002, DR1-005, DR1-010, DR4-001, DR4-003) are properly addressed. The implementation correctly provides: (1) shared link-utils module with classifyLink, resolveRelativePath, sanitizeHref, and REHYPE_SANITIZE_SCHEMA; (2) MarkdownPreview link handling with relative/external/anchor classification; (3) HtmlPreview postMessage-based link handling with origin validation, schema validation, and safe-mode exclusion; (4) tab UI improvements with VISIBLE_TAB_COUNT=5 dropdown, MOVE_TO_FRONT reducer, MAX_FILE_TABS=30 limit with Toast feedback; (5) proper prop drilling of onOpenFile through FilePanelSplit -> FilePanelTabs -> FilePanelContent -> MarkdownEditor/HtmlPreview; (6) comprehensive test coverage across link-utils, MarkdownPreview, and HtmlPreview."
+}

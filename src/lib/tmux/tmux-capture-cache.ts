@@ -35,8 +35,8 @@ interface CacheEntry {
 // Constants
 // =========================================================================
 
-/** Cache TTL in milliseconds */
-export const CACHE_TTL_MS = 2000;
+/** Cache TTL in milliseconds (Issue #499 Item 6: extended from 2000 to 3000 for improved cache hit rate) */
+export const CACHE_TTL_MS = 3000;
 
 /** Maximum number of cache entries */
 export const CACHE_MAX_ENTRIES = 100;

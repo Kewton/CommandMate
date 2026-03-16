@@ -1,0 +1,26 @@
+{
+  "issue_number": 505,
+  "refactor_targets": [
+    "src/lib/link-utils.ts",
+    "src/hooks/useFileTabs.ts",
+    "src/components/worktree/FilePanelTabs.tsx",
+    "src/components/worktree/MarkdownPreview.tsx",
+    "src/components/worktree/HtmlPreview.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/FilePanelSplit.tsx",
+    "src/components/worktree/FilePanelContent.tsx",
+    "src/components/worktree/MarkdownEditor.tsx"
+  ],
+  "quality_metrics": {
+    "tsc_errors": 0,
+    "lint_errors": 0,
+    "test_passed": 5075,
+    "test_failed": 1
+  },
+  "improvement_goals": [
+    "コード品質の確認・改善（命名、型安全性）",
+    "不要なimportやコメントの整理",
+    "テストカバレッジの確認",
+    "設計方針書のMust Fix/Should Fix項目の最終確認"
+  ]
+}

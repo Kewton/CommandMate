@@ -1,0 +1,121 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_date": "2026-03-16",
+  "findings": [
+    {
+      "id": "DR3-001",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "CurrentOutputResponse型にlastServerResponseTimestamp未定義のため、fetchCurrentOutput内でdata.lastServerResponseTimestampにアクセスするとTypeScriptコンパイルエラー",
+      "description": "設計書セクション3.1はCurrentOutputResponse型へのフィールド追加を指示しているが、現在のWorktreeDetailRefactored.tsx L116-132のCurrentOutputResponse interfaceにはlastServerResponseTimestampが存在しない。fetchCurrentOutput() (L358) でdata.lastServerResponseTimestampを参照するためには、この型定義を先に更新しなければならない。設計書はこの変更を記述しているが、変更ファイル一覧(セクション9)の変更内容に '型追加' と記載しているだけで、具体的にCurrentOutputResponse interfaceへの追加であることの明示が弱い。実装者が型追加を見落とすリスクがある。",
+      "recommendation": "セクション9の変更内容に 'CurrentOutputResponse interfaceにlastServerResponseTimestamp?: number | null を追加' と明記する。",
+      "impact_scope": ["src/components/worktree/WorktreeDetailRefactored.tsx"],
+      "risk_level": "medium"
+    },
+    {
+      "id": "DR3-002",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "useAutoYes呼び出しにlastServerResponseTimestamp引数が渡されていない現状で、設計書がその影響範囲を過小評価",
+      "description": "現在のWorktreeDetailRefactored.tsx L961-967のuseAutoYes呼び出しにはlastServerResponseTimestampが渡されていない。useAutoYes.ts L36にはlastServerResponseTimestamp?が定義済みだが、オプショナルであるためコンパイルエラーにはならず、常にundefinedとして扱われている。つまり、useAutoYes内のL75-80のサーバー応答チェックは現状では常にスキップされており、クライアント側の二重応答防止は事実上無効である。設計書はこれを '対策1' として正しく記述しているが、間接影響セクション(セクション9)でuseAutoYes.tsを '引数が正しく渡されるようになる' としか記載しておらず、現在このチェックが完全に無効であるという重大な現状認識が明示されていない。",
+      "recommendation": "設計書の間接影響欄で、現状useAutoYesのDUPLICATE_PREVENTION_WINDOW_MS(3秒)チェックが事実上無効であり、対策1の実装によって初めて有効化されることを明記する。これはバグ修正の重要度を示す根拠情報となる。",
+      "impact_scope": ["src/hooks/useAutoYes.ts", "src/components/worktree/WorktreeDetailRefactored.tsx"],
+      "risk_level": "high"
+    },
+    {
+      "id": "DR3-003",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "対策2のポーラー冪等化がresource-cleanup.tsの孤立ポーラー検出に与える間接影響の分析不足",
+      "description": "resource-cleanup.ts L238のcleanupOrphanedMapEntries()はgetAutoYesPollerWorktreeIds()でポーラーMapのキーを取得し、DBに存在しないworktreeIdのポーラーをstopAutoYesPolling()で停止する。対策2の冪等化により、startAutoYesPolling()が既存ポーラーを破棄せずに再利用するケースが増える。これ自体はresource-cleanupの検出ロジックに影響しない(Mapのキーは変わらない)が、設計書がこの点を '影響なし' と断定するだけで、なぜ影響しないのかの根拠が示されていない。",
+      "recommendation": "間接影響セクションのresource-cleanup.tsの記述に、冪等化によりMap.has(worktreeId)がtrueを維持するため孤立検出ロジックに影響がないことを1行追記する。",
+      "impact_scope": ["src/lib/resource-cleanup.ts"],
+      "risk_level": "low"
+    },
+    {
+      "id": "DR3-004",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "対策3でdetectSessionStatusにlastOutputTimestampを渡すことで、worktrees/route.tsとworktrees/[id]/route.tsのステータス応答が変化する可能性の分析不足",
+      "description": "worktree-status-helper.ts L91のdetectSessionStatus(output, cliToolId)呼び出しに第3引数lastOutputTimestampが追加されると、detectSessionStatus内の時間ベースヒューリスティック(L406-417)が有効化される。これにより、従来status='running'(confidence=low)だった場合にstatus='ready'(confidence=low, reason='no_recent_output')に変化するケースが生じる。この変化はworktrees/route.ts(サイドバー一覧)とworktrees/[id]/route.ts(個別worktree)の両方のAPIレスポンスに波及する。設計書はセクション5で '判定精度の向上による値の変化' と注記しているが、具体的にどのAPI消費者がどう影響されるかの分析が不足している。サイドバーのisWaitingForResponseやisProcessingフラグが変化し、UIのアイコン表示が変わる可能性がある。",
+      "recommendation": "間接影響セクションのworktrees/route.tsおよびworktrees/[id]/route.tsの記述に、具体的にisProcessing=trueからfalseに変化するケースがあり、サイドバーのステータスアイコンが 'running' から 'idle/ready' に変わりうることを明記する。",
+      "impact_scope": [
+        "src/app/api/worktrees/route.ts",
+        "src/app/api/worktrees/[id]/route.ts",
+        "src/lib/session/worktree-status-helper.ts",
+        "src/lib/detection/status-detector.ts"
+      ],
+      "risk_level": "medium"
+    },
+    {
+      "id": "DR3-005",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "getLastServerResponseTimestamp()がnullを返すケース(Auto-Yes未使用時)での対策3の挙動が未分析",
+      "description": "Auto-Yesを一度も有効にしていないworktreeでは、autoYesPollerStatesにエントリがなく、getLastServerResponseTimestamp()はnullを返す。設計書セクション3.3ではnull時にundefinedを渡す変換を記述しており、detectSessionStatus()のデフォルト動作(時間ベースヒューリスティック無効)を維持する設計は正しい。しかし、worktree-status-helper.tsはすべてのworktreeに対して呼ばれるため、Auto-Yes未使用のworktree(大多数のケース)では従来と完全に同一の動作になることを明記すべき。Auto-Yes使用中のworktreeでのみ動作が変化するという条件分岐の境界が設計書で明確でない。",
+      "recommendation": "セクション3.3にAuto-Yes未使用(ポーラー未起動)worktreeでは、getLastServerResponseTimestamp()がnullを返し、undefinedに変換されるため、detectSessionStatus()の既存動作に一切の変化がないことを明記する。",
+      "impact_scope": ["src/lib/session/worktree-status-helper.ts"],
+      "risk_level": "low"
+    },
+    {
+      "id": "DR3-006",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "Auto-Yesの無効化→即時再有効化時のレース条件が対策2で解消されるが、cliToolId変更を伴う場合のタイムスタンプリセットが意図的である根拠が未記載",
+      "description": "ユーザーがAuto-Yesを無効にしてすぐ再有効化した場合、対策2により同一cliToolIdなら既存ポーラーが継続しタイムスタンプが保持される。しかし、cliToolIdを変更して再有効化した場合(例: claudeからcodexに切り替え)、設計書通りstop→新規作成となりタイムスタンプがnullにリセットされる。このリセットは適切(異なるCLIツールの応答タイムスタンプは意味がない)だが、その間の短時間にクライアント側の3秒ウィンドウチェックがスキップされ、一時的に二重応答が発生する可能性がある。これは実運用上は稀なケース(CLIツール切り替え自体が稀)だが、エッジケースとして設計書に記録すべき。",
+      "recommendation": "セクション8のトレードオフまたはスコープ外事項に、cliToolId変更時のタイムスタンプリセットによる一時的な二重応答リスクを記録する。対応不要だが、既知の制限事項として文書化しておく。",
+      "impact_scope": ["src/lib/auto-yes-poller.ts", "src/hooks/useAutoYes.ts"],
+      "risk_level": "low"
+    },
+    {
+      "id": "DR3-007",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "対策1のuseState追加によるWorktreeDetailRefactored再レンダリング影響の分析不足",
+      "description": "WorktreeDetailRefactored.tsxにuseState<number | null>(null)を追加し、fetchCurrentOutput()内でsetLastServerResponseTimestamp()を呼ぶ。このstateはポーリングごと(2秒間隔)に更新される可能性がある。しかし、サーバーのlastServerResponseTimestampはプロンプト応答時にのみ更新されるため、値が変化するのはAuto-Yesポーラーがプロンプトに応答したタイミングのみ。値が変わらない場合、Reactは再レンダリングをスキップする(同一primitive値のsetState)。したがって、パフォーマンスへの影響は実質的にない。設計書のパフォーマンスセクション(セクション7)にこの分析が欠けている。",
+      "recommendation": "セクション7に、新規useStateのsetLastServerResponseTimestamp()がポーリングごとに呼ばれるが、値が変化しない場合はReactがレンダリングをスキップするため、追加の再レンダリングコストは実質的にプロンプト応答時のみ発生する旨を追記する。",
+      "impact_scope": ["src/components/worktree/WorktreeDetailRefactored.tsx"],
+      "risk_level": "low"
+    },
+    {
+      "id": "DR3-008",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "テスト計画にcurrent-output/route.tsの変更に対するテストが欠けている",
+      "description": "設計書のテスト新規作成セクション(セクション9)では、auto-yes-manager.test.tsとworktree-status-helper.test.tsのみを列挙している。しかし、current-output/route.ts L86のdetectSessionStatus()呼び出しにもlastOutputTimestampを追加する変更がある。このAPIルートの変更に対する結合テストが計画されていない。worktree-status-helper.tsの変更はテストされるが、current-output/route.tsの同等の変更がテストから漏れるリスクがある。",
+      "recommendation": "テスト計画にcurrent-output/route.tsの変更に対するテスト(detectSessionStatusへの第3引数渡しの検証)を追加するか、既存テストでカバーされることを確認して記載する。",
+      "impact_scope": ["src/app/api/worktrees/[id]/current-output/route.ts"],
+      "risk_level": "low"
+    },
+    {
+      "id": "DR3-009",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "サーバー再起動時のポーラー状態消失とクライアント側への影響パスが未文書化",
+      "description": "設計書セクション8のスコープ外事項で 'ポーラー状態の永続化' に触れているが、具体的な影響パスの記述がない。サーバー再起動時: (1) globalThis MapがクリアされlastServerResponseTimestamp=null、(2) クライアントはfetchCurrentOutput経由でnullを受信、(3) useAutoYes内のサーバー応答チェックがスキップされる(nullなので)、(4) Auto-Yes再有効化でポーラーが新規作成される。この一連の流れで二重応答が一時的に発生しうるが、サーバー再起動後はCLIセッション自体も切断されている可能性が高く、実害は限定的。スコープ外だが、影響パスの文書化は有用。",
+      "recommendation": "スコープ外事項に、サーバー再起動時の具体的な影響パス(タイムスタンプ消失 -> クライアント側チェックスキップ -> 一時的な二重応答リスク)を1-2行追記する。",
+      "impact_scope": ["src/lib/auto-yes-poller.ts", "src/hooks/useAutoYes.ts", "src/components/worktree/WorktreeDetailRefactored.tsx"],
+      "risk_level": "low"
+    },
+    {
+      "id": "DR3-010",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "session-cleanup.tsのstopAutoYesPolling()がポーラーMapからエントリを削除するため、対策2の冪等化との相互作用が明確",
+      "description": "session-cleanup.ts L115のstopAutoYesPolling(worktreeId)はautoYesPollerStates.delete(worktreeId)を実行する(auto-yes-poller.ts L534)。クリーンアップ後にstartAutoYesPolling()が呼ばれると、Map内にエントリがないため新規作成される。対策2の冪等化はMap内にエントリが存在する場合のみ機能するため、cleanup→restart のフローでは冪等化は関与しない。この動作は正しく、設計書の間接影響で 'stopAutoYesPolling()の動作変更なし' と記載されている通りである。",
+      "recommendation": "現状の記載で十分。追加対応不要。",
+      "impact_scope": ["src/lib/session-cleanup.ts"],
+      "risk_level": "low"
+    }
+  ],
+  "summary": {
+    "total_findings": 10,
+    "must_fix": 2,
+    "should_fix": 5,
+    "nice_to_have": 3
+  },
+  "overall_assessment": "設計書は3つの対策の直接的な変更ファイルと変更内容を正確に記述しており、対策間の依存関係も明示されている。しかし、影響範囲の分析において、(1) 現状のuseAutoYesの二重応答防止が事実上無効であるという重大な現状認識の明示不足、(2) worktrees/route.tsおよびworktrees/[id]/route.ts経由のサイドバーステータス変化の具体的影響、(3) Auto-Yes未使用worktreeでの動作不変性の明記、の3点に改善余地がある。must_fixの2件はいずれも設計書の記述補強であり、実装方針自体の変更は不要。",
+  "design_doc_path": "dev-reports/design/issue-501-auto-yes-dual-response-fix-design-policy.md"
+}

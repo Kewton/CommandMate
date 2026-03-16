@@ -1,0 +1,79 @@
+{
+  "issue_number": 504,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "focus_area": "通常",
+  "review_date": "2026-03-16",
+  "previous_findings_status": [
+    {
+      "id": "F1-001",
+      "original_title": "Issueタイトルと本文の不一致",
+      "severity": "must_fix",
+      "status": "resolved",
+      "notes": "タイトルが「サイドバーのリポジトリグループヘッダーに色付きドットを追加」に修正され、本文の内容と完全に一致している。"
+    },
+    {
+      "id": "F1-002",
+      "original_title": "ダークモード/ライトモード対応タスクの実態との乖離",
+      "severity": "should_fix",
+      "status": "resolved",
+      "notes": "実装タスク3番目が「ダークテーマ背景（bg-gray-800/50等）上で視認性の高いHSL彩度・明度範囲を設定（現在のサイドバーはダークテーマ固定のため、ライトモード対応は不要）」に修正されており、現状のコードベースと正確に整合している。"
+    },
+    {
+      "id": "F1-003",
+      "original_title": "CLIステータスドットとの差別化基準が未定義",
+      "severity": "should_fix",
+      "status": "resolved",
+      "notes": "受入条件4番目に差別化方針が具体的に記載された。GroupHeaderのグループヘッダー行 vs BranchListItemのブランチ行という表示位置の違い、およびサイズ差（w-2.5 h-2.5 vs w-2 h-2）が明記されている。BranchListItem.tsxの実コードとも一致する。"
+    },
+    {
+      "id": "F1-004",
+      "original_title": "色生成ユーティリティの配置先が曖昧",
+      "severity": "should_fix",
+      "status": "resolved",
+      "notes": "変更対象ファイル表および実装タスクの両方で「src/lib/sidebar-utils.ts に追加」と明確化された。同ファイルの責務肥大化に当たらない旨の根拠も付記されている。"
+    },
+    {
+      "id": "F1-005",
+      "original_title": "アクセシビリティ（色覚多様性）への考慮が未記載",
+      "severity": "nice_to_have",
+      "status": "resolved",
+      "notes": "提案する解決策の主要な変更点に「色はあくまで補助的な識別手段であり、リポジトリ名テキストが常に表示されるため、色のみに依存しない設計とする」と明記された。"
+    },
+    {
+      "id": "F1-006",
+      "original_title": "フォルダアイコンの扱いが未定義",
+      "severity": "nice_to_have",
+      "status": "resolved",
+      "notes": "主要な変更点に「既存のフォルダアイコン GroupIcon の左に配置し、フォルダアイコンは維持する」と明記された。変更対象ファイル表にも「GroupIcon の左に配置」と記載され、一貫している。"
+    }
+  ],
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "F5-001",
+        "severity": "nice_to_have",
+        "category": "完全性",
+        "title": "モバイルドロワー確認の受入条件化",
+        "description": "「実装時の確認事項」セクションにモバイルドロワー幅（w-72=288px）でのレイアウト確認が記載されているが、これは受入条件には含まれていない。受入条件に含めなくても実装者が確認事項として認識できるため問題は小さいが、形式的には確認漏れのリスクがある。",
+        "location": "実装時の確認事項 vs 受入条件",
+        "suggestion": "現状の記載で実用上は十分。もし厳密に管理したい場合は、受入条件に「モバイルドロワー幅でGroupHeader要素が崩れないこと」を追加する。"
+      }
+    ]
+  },
+  "new_issues_check": {
+    "internal_consistency": "OK - タイトル、概要、提案する解決策、実装タスク、受入条件、影響範囲の全セクションが「色付きドット」で統一されている。GroupIconの左に配置する旨も複数箇所で一貫。",
+    "code_accuracy": "OK - Sidebar.tsx:291-293のGroupHeader内要素順序（ChevronIcon -> GroupIcon -> repositoryName -> branchCount）と整合しており、GroupIconの左にドットを追加する記述は正確。sidebar-utils.tsの現在の構成（174行、ソート・グループ化関数）とも整合。BranchListItemのCliStatusDot（w-2 h-2）のサイズ記述も正確。",
+    "completeness": "OK - パフォーマンスに関する設計ノート、SSR/ハイドレーション影響なしの確認、i18n影響なしの確認、既存export非破壊の確認が追加されており、十分な網羅性がある。",
+    "introduced_issues": "なし - 更新によって新たな矛盾や誤りは導入されていない。"
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 0,
+    "nice_to_have_count": 1,
+    "total": 1
+  },
+  "overall_assessment": "前回（Stage 1）で指摘した6件の全てが適切に対応されている。Issueは内部的に一貫しており、コードベースとの整合性も正確である。実装に必要な情報が十分に記載されており、レビュー合格と判断する。"
+}

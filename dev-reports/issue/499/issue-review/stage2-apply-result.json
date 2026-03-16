@@ -1,0 +1,54 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "iteration": 1,
+  "issue_number": 499,
+  "applied_findings": [
+    {
+      "finding_id": "F1-001",
+      "status": "applied",
+      "action_taken": "Item 3のキャプチャ行数を200行から300行に変更し、promptDetectorスキャンウィンドウ(50行)+RAW_CONTENT_MAX_LINES(200行)+マージンという根拠を明記した"
+    },
+    {
+      "finding_id": "F1-002",
+      "status": "applied",
+      "action_taken": "Item 2のThinking検出時間隔を5-10秒の範囲指定から推奨値5秒に確定し、Thinkingの典型的持続時間(10-60秒)と最大応答遅延(5秒)の根拠を追記した"
+    },
+    {
+      "finding_id": "F1-003",
+      "status": "applied",
+      "action_taken": "Item 4の対策を、既存インターフェース(string)維持+オプショナル引数で事前分割済み行配列を受け取る方式に変更し、後方互換性維持の方針と理由を明記した"
+    },
+    {
+      "finding_id": "F1-004",
+      "status": "applied",
+      "action_taken": "Item 5の連続エラー閾値20回の根拠(backoff最大60秒x20回=20分)を追記し、AutoYesStopReasonへの'consecutive_errors'追加とdisableAutoYes()経由の通知機構を明記した"
+    },
+    {
+      "finding_id": "F1-005",
+      "status": "applied",
+      "action_taken": "Item 6のキャッシュTTL変更時に通常captureAPI利用時のターミナル表示更新遅延が最大3秒になる許容事項を追記した"
+    },
+    {
+      "finding_id": "F1-006",
+      "status": "applied",
+      "action_taken": "受入条件にItem 3(stopPattern未設定時のキャプチャ行数削減テスト)とItem 4(detectPrompt内のsplit重複実行確認)のテスト項目を追加した"
+    },
+    {
+      "finding_id": "F1-007",
+      "status": "applied",
+      "action_taken": "Item 1の対策を二択から具体的な方針に確定: detectAndRespondToPrompt内のstripBoxDrawing()呼び出しを除去しdetectPrompt(cleanOutput, ...)に変更する方式に統一した"
+    },
+    {
+      "finding_id": "F1-008",
+      "status": "applied",
+      "action_taken": "関連ファイル一覧にsrc/lib/prompt-answer-sender.tsを参照用として追加した"
+    }
+  ],
+  "summary": {
+    "total_findings": 8,
+    "applied": 8,
+    "skipped": 0,
+    "partial": 0
+  }
+}

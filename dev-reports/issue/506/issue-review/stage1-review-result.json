@@ -1,0 +1,115 @@
+{
+  "issue_number": 506,
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-03-16",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "整合性",
+        "issue": "Issueでは「WorktreeSelectionContext.tsxにsyncAndRefresh関数を追加」と記載しているが、Sidebar.tsxはuseToastを使っておらず、ToastContainerも含まれていない。サイドバーはmemo化されたコンポーネントでありToast表示の仕組みがない。受入条件に「同期成功/失敗時にフィードバックが表示される」とあるが、Toast通知の実現方法が設計上不明確",
+        "location": "## 提案する解決策 / ## 実装タスク",
+        "recommendation": "Toast通知をサイドバーで使うための設計を明記すべき。選択肢: (1) Sidebar.tsx内にToastContainer+useToastを追加、(2) グローバルToast Contextを導入、(3) Toastではなくボタン上のインライン表示に限定。現状のToastはコンポーネントローカルであるため、どの方針をとるか明示が必要",
+        "evidence": "既存Toast利用箇所(MarkdownEditor, LogViewer, WorktreeDetailRefactored)はすべてコンポーネント内部でuseToast+ToastContainerを配置している。Sidebar.tsxにはこれらのimportが一切ない"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "WorktreeSelectionContextにsyncAndRefresh関数を追加する案だが、sync API呼び出し(repositoryApi.sync)はContextの責務範囲外の可能性がある。既存Contextはworktree一覧の取得・選択に限定されており、リポジトリ同期はrepositoryApiの責務",
+        "location": "## 主要な変更点",
+        "recommendation": "syncAndRefresh関数の配置場所を再検討すべき。(1) WorktreeSelectionContextに追加する場合、repositoryApiへの依存が増える。(2) Sidebar.tsx内のローカルハンドラとして実装し、sync後にrefreshWorktrees()を呼ぶ方が既存の責務分離と整合する。WorktreeList(ホーム画面)ではContext外でfetchWorktrees+repositoryApi.syncを呼んでいる",
+        "evidence": "WorktreeSelectionContext.tsxは現在worktreeApiのみをimportしており、repositoryApiの依存がない。WorktreeList.tsxやRepositoryManager.tsxでは個別にrepositoryApi.syncを呼んでいる"
+      },
+      {
+        "id": "SF-2",
+        "category": "明確性",
+        "issue": "受入条件「新しく作成したworktreeがリロードなしでサイドバーに反映される」は、ボタンクリック時の手動同期で実現されるのか、自動検知で実現されるのかが曖昧",
+        "location": "## 受入条件",
+        "recommendation": "「同期ボタンをクリックすることで」という条件を明示し、自動検知ではなく手動同期であることを明確にすべき",
+        "evidence": "背景・課題セクションでは「手動同期の手段が必要」と記載されており手動操作の意図は読み取れるが、受入条件の文言は自動同期とも解釈可能"
+      },
+      {
+        "id": "SF-3",
+        "category": "完全性",
+        "issue": "モバイル表示時のサイドバーにおける同期ボタンの扱いが未記載。AppShell.tsxではモバイルドロワーとデスクトップの両方でSidebarが使われている",
+        "location": "## 実装タスク",
+        "recommendation": "モバイルドロワー内でも同期ボタンが正しく動作・表示されることを実装タスクまたは受入条件に追加すべき",
+        "evidence": "AppShell.tsxの113行目でモバイル用にもSidebarコンポーネントが描画されている"
+      },
+      {
+        "id": "SF-4",
+        "category": "技術的妥当性",
+        "issue": "同期ボタンの連打防止(debounce/throttle)について未記載。POST /api/repositories/syncはリポジトリスキャンを伴うため重い処理の可能性がある",
+        "location": "## 実装タスク",
+        "recommendation": "同期中はボタンをdisabledにするか、最低限の連打防止策を実装タスクに明記すべき。ローディング表示中のdisabled状態は暗黙的に含まれる可能性はあるが、明示が望ましい",
+        "evidence": "WorktreeList.tsxのRefreshボタンは disabled={loading} で連打防止している(335行目)"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "既存のWorktreeList.tsx(ホーム画面)のRefreshボタンとの機能的な違い・関係性が未記載。ホームのRefreshは単純なworktree一覧再取得(sync APIは呼ばない)であるのに対し、今回はsync API+再取得",
+        "location": "## 背景・課題",
+        "recommendation": "ホーム画面のRefreshボタンとサイドバーの同期ボタンの違いを明記するとよい。ホームのRefreshはDB上のworktree一覧を再取得するだけだが、サイドバーの同期はファイルシステムの再スキャン+DB同期+一覧再取得を行う点が異なる",
+        "evidence": "WorktreeList.tsxのRefreshボタン(335行目)はfetchWorktrees()のみ呼び出し、repositoryApi.syncは呼ばない"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "i18n対応についての記載がない。プロジェクトはnext-intlを使用しており、ボタンのaria-labelやToastメッセージの国際化が必要になる可能性がある",
+        "location": "## 実装タスク",
+        "recommendation": "ボタンのツールチップ/aria-label、同期成功/失敗メッセージについてi18n対応の要否を記載するとよい",
+        "evidence": "CLAUDE.mdにsrc/i18n.tsが記載されており、LocaleSwitcherコンポーネントがSidebar.tsx内で使用されている"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/layout/Sidebar.tsx",
+      "relevance": "同期ボタン追加先のメインコンポーネント"
+    },
+    {
+      "file": "src/contexts/WorktreeSelectionContext.tsx",
+      "relevance": "syncAndRefresh関数の追加先として提案されているContext"
+    },
+    {
+      "file": "src/components/worktree/WorktreeList.tsx",
+      "relevance": "既存のRefreshボタン実装(整合性確認用)"
+    },
+    {
+      "file": "src/app/api/repositories/sync/route.ts",
+      "relevance": "同期APIエンドポイント(既存・変更なし)"
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "relevance": "repositoryApi.sync関数の定義(既存)"
+    },
+    {
+      "file": "src/components/common/Toast.tsx",
+      "relevance": "Toast通知コンポーネント・useToastフック"
+    },
+    {
+      "file": "src/components/layout/AppShell.tsx",
+      "relevance": "Sidebarの配置(デスクトップ+モバイルドロワー)"
+    },
+    {
+      "file": "src/contexts/SidebarContext.tsx",
+      "relevance": "サイドバー状態管理Context(現状syncに関する機能はない)"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構成・モジュール一覧の整合性確認"
+    }
+  ]
+}

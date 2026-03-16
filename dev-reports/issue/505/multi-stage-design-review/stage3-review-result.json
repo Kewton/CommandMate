@@ -1,0 +1,180 @@
+{
+  "issue_number": 505,
+  "review_stage": 3,
+  "review_type": "影響範囲 (Impact Analysis)",
+  "review_date": "2026-03-16",
+  "design_doc": "dev-reports/design/issue-505-file-link-navigation-design-policy.md",
+  "overall_assessment": "PASS_WITH_FINDINGS",
+  "summary": "The design policy document identifies the core affected files accurately. The callback drilling chain, security layers, and state management changes are well-documented. However, several downstream impact areas require additional attention: missing affected components (WorktreeDetailSubComponents), incomplete test impact analysis for existing tests, and browser compatibility considerations for new URL() with file:/// protocol.",
+  "findings": [
+    {
+      "id": "DR3-001",
+      "severity": "should_fix",
+      "category": "Missing Affected File",
+      "title": "WorktreeDetailSubComponents.tsx is missing from the affected files list",
+      "description": "WorktreeDetailSubComponents.tsx is imported and used by WorktreeDetailRefactored.tsx. Grep shows it receives onFilePathClick and onFileSelect callbacks (line 1717-1718 of WDR). Since WDR passes these callbacks to WorktreeDetailSubComponents (which renders the desktop content including FileTreeView and HistoryPane), the onOpenFile callback will also need to flow through this component if it serves as a routing layer for desktop content. The design doc's component flow diagram (Section 2) shows WDR -> FilePanelSplit directly, but WorktreeDetailSubComponents may be an intermediate layer that also needs the onOpenFile prop depending on how it delegates to FilePanelSplit.",
+      "suggestion": "Verify whether WorktreeDetailSubComponents.tsx acts as an intermediate layer between WorktreeDetailRefactored and FilePanelSplit. If it does, add it to Section 9 as an affected file with onOpenFile optional prop pass-through. If WDR renders FilePanelSplit directly in its JSX (bypassing WorktreeDetailSubComponents for the file panel), document this explicitly.",
+      "affected_files": ["src/components/worktree/WorktreeDetailSubComponents.tsx"]
+    },
+    {
+      "id": "DR3-002",
+      "severity": "should_fix",
+      "category": "Test Impact",
+      "title": "Existing useFileTabs.test.ts tests use MAX_FILE_TABS import - no breakage but RESTORE test needs review",
+      "description": "The existing test file imports MAX_FILE_TABS from useFileTabs and uses it dynamically (e.g., Array.from({ length: MAX_FILE_TABS })). Changing MAX_FILE_TABS from 5 to 30 will not break these tests syntactically. However, the RESTORE test creates tabs from persisted data and slices to MAX_FILE_TABS. With 30 as the limit, test execution time may increase slightly as more test fixtures are generated. More importantly, the existing limit_reached test (line 50) creates MAX_FILE_TABS tabs to verify the limit - with 30 tabs this test fixture becomes much larger but still functionally correct.",
+      "suggestion": "Add a note in the design doc that existing useFileTabs tests will remain valid after MAX_FILE_TABS change since they reference the constant dynamically. Consider adding a focused test for the specific value of 30 as a regression guard.",
+      "affected_files": ["tests/unit/hooks/useFileTabs.test.ts"]
+    },
+    {
+      "id": "DR3-003",
+      "severity": "should_fix",
+      "category": "Missing Affected File",
+      "title": "MarpEditorWithSlides in FilePanelContent.tsx needs onOpenFile for Editor mode",
+      "description": "The design doc mentions MarpEditorWithSlides in DR1-006 and DR2-006 as a nice-to-have consideration, but the actual code shows MarpEditorWithSlides passes props to MarkdownEditor in editor mode (line 396-401 of FilePanelContent.tsx). Since MarkdownEditor will receive onOpenFile as a new prop, MarpEditorWithSlides must also accept and forward this prop. The inline function definition of MarpEditorWithSlides (line 340-407) does not have onOpenFile in its parameter list. This is not merely a nice-to-have but a requirement for link navigation to work in MARP editor mode.",
+      "suggestion": "Promote DR2-006 from nice_to_have to should_fix. MarpEditorWithSlides is an inline component in FilePanelContent.tsx, so the type change is contained within that file, but it must forward onOpenFile to MarkdownEditor for the feature to work in MARP editor mode.",
+      "affected_files": ["src/components/worktree/FilePanelContent.tsx"]
+    },
+    {
+      "id": "DR3-004",
+      "severity": "nice_to_have",
+      "category": "Browser Compatibility",
+      "title": "new URL() with file:/// base may behave differently across browsers",
+      "description": "The resolveRelativePath function uses new URL(href, 'file:///') for path resolution. While this is a standard API, the file:/// protocol handling has subtle differences across browser engines. Safari may handle edge cases (empty paths, special characters in filenames) differently from Chrome/Firefox. The design doc correctly states this is a UX-level check with server-side validation as the security boundary, so the risk is low.",
+      "suggestion": "Add a test case for edge cases: paths with spaces, Unicode characters, and very long paths. Document that file:/// protocol is used purely for URL normalization and not for actual file system access.",
+      "affected_files": ["src/lib/link-utils.ts"]
+    },
+    {
+      "id": "DR3-005",
+      "severity": "should_fix",
+      "category": "State Management Impact",
+      "title": "localStorage data size increase from MAX_FILE_TABS 5 to 30 not explicitly bounded",
+      "description": "The design doc acknowledges localStorage impact is lightweight (Section 7-3) since only paths are stored. However, the current writePersistedTabs function stores all tab paths without an explicit limit. With MAX_FILE_TABS=30, up to 30 paths could be stored per worktree. If a user has many worktrees, the cumulative localStorage usage could grow. Each path is typically 50-200 bytes, so 30 paths per worktree is approximately 1.5-6KB per worktree - still well within localStorage limits (typically 5-10MB).",
+      "suggestion": "The current design is adequate. Add a brief note in the design doc confirming the math: 30 paths * ~200 bytes = ~6KB per worktree, well within localStorage limits. No code changes needed.",
+      "affected_files": ["src/hooks/useFileTabs.ts"]
+    },
+    {
+      "id": "DR3-006",
+      "severity": "should_fix",
+      "category": "Existing Test Impact",
+      "title": "FilePanelTabs.test.tsx mocks FilePanelContent - dropdown UI tests need mock updates",
+      "description": "The existing FilePanelTabs.test.tsx mocks FilePanelContent (line 16-22). The mock signature only destructures { tab } from props. After adding onOpenFile to FilePanelContent props and FilePanelTabs props, the mock in the test needs to be updated to accept the new optional prop. The tests themselves will not break because onOpenFile is optional, but the mock should reflect the updated interface for accuracy. Additionally, new tests for the dropdown UI are needed as specified in the design doc.",
+      "suggestion": "Update the FilePanelContent mock in FilePanelTabs.test.tsx to include onOpenFile in its destructured props. This ensures the mock correctly simulates the updated interface.",
+      "affected_files": ["tests/unit/components/FilePanelTabs.test.tsx"]
+    },
+    {
+      "id": "DR3-007",
+      "severity": "nice_to_have",
+      "category": "Accessibility Impact",
+      "title": "Dropdown menu keyboard navigation not specified",
+      "description": "The design doc describes a dropdown UI for tabs 6+ but does not specify keyboard navigation behavior. For accessibility compliance, the dropdown should support: Tab/Shift+Tab to move focus, Enter/Space to select, Escape to close, and arrow keys for navigation within the menu. The existing TabButton uses onClick handlers only.",
+      "suggestion": "Add accessibility requirements to Section 5-3: the dropdown menu should be keyboard navigable (Arrow keys, Enter, Escape). Consider using role='menu' and role='menuitem' ARIA attributes. This can be handled during implementation as a nice-to-have if time-constrained.",
+      "affected_files": ["src/components/worktree/FilePanelTabs.tsx"]
+    },
+    {
+      "id": "DR3-008",
+      "severity": "nice_to_have",
+      "category": "Build/Bundle Impact",
+      "title": "No new dependencies required - rehype-sanitize customization uses existing package",
+      "description": "The design doc correctly identifies that rehype-sanitize is already a dependency (version ^6.0.0 in package.json). The customization only changes the schema configuration, not adding new packages. The new link-utils.ts file adds zero external dependencies. No bundle size increase is expected beyond the minimal new code.",
+      "suggestion": "No action needed. This is a positive finding confirming zero dependency additions.",
+      "affected_files": []
+    },
+    {
+      "id": "DR3-009",
+      "severity": "should_fix",
+      "category": "Missing Impact Analysis",
+      "title": "MarkdownPreview is used in two locations within MarkdownEditor - both need currentFilePath",
+      "description": "The design doc correctly identifies this in DR2-002 as a should_fix. The actual code confirms MarkdownPreview is rendered at lines 784 and 801 of MarkdownEditor.tsx - once for mobile portrait mode (mobileTab === 'preview') and once for desktop/landscape. Both invocations currently only pass { content: previewContent }. Both need currentFilePath and onOpenFile. However, the design doc only addresses this at the MarkdownEditor level; MarkdownEditor itself needs to receive currentFilePath from its callers (FilePanelContent.tsx). Currently MarkdownEditor already has a filePath prop that can serve this purpose.",
+      "suggestion": "Confirm in the design doc that MarkdownEditor's existing filePath prop will be reused as currentFilePath for MarkdownPreview (no new prop needed on MarkdownEditor for this purpose, just pass filePath through as currentFilePath to MarkdownPreview).",
+      "affected_files": ["src/components/worktree/MarkdownEditor.tsx"]
+    },
+    {
+      "id": "DR3-010",
+      "severity": "nice_to_have",
+      "category": "Migration/Rollback",
+      "title": "Rollback considerations for MAX_FILE_TABS change",
+      "description": "If MAX_FILE_TABS is changed from 5 to 30 and users open 6+ tabs, the localStorage will persist paths for all open tabs. If the feature is later rolled back to MAX_FILE_TABS=5, the RESTORE action will slice to 5 (line 222: action.paths.slice(0, MAX_FILE_TABS)), so persisted data with >5 paths will be gracefully truncated. This is safe behavior. Similarly, the MOVE_TO_FRONT action type in persisted reducer actions would simply be ignored by older code since the reducer defaults to returning current state for unknown action types.",
+      "suggestion": "No action needed. The existing RESTORE slice logic provides safe forward/backward compatibility. This is a positive finding.",
+      "affected_files": []
+    }
+  ],
+  "checklist": {
+    "all_affected_files_identified": {
+      "status": "PARTIAL",
+      "notes": "Core files are correctly identified. WorktreeDetailSubComponents.tsx may need review (DR3-001). MarpEditorWithSlides inline component needs onOpenFile forwarding (DR3-003)."
+    },
+    "downstream_components_checked": {
+      "status": "PARTIAL",
+      "notes": "WorktreeDetailSubComponents.tsx needs verification as potential intermediate layer (DR3-001)."
+    },
+    "existing_tests_impact": {
+      "status": "PASS",
+      "notes": "Existing tests use MAX_FILE_TABS dynamically and will not break. FilePanelTabs.test.tsx mock needs minor update for new optional props (DR3-006)."
+    },
+    "existing_functionality_regression": {
+      "status": "PASS",
+      "notes": "All new props are optional. Callback drilling uses optional typing. No existing behavior is modified."
+    },
+    "state_management_impact": {
+      "status": "PASS",
+      "notes": "useReducer extended with MOVE_TO_FRONT action. localStorage impact is minimal (~6KB per worktree at max). RESTORE slicing ensures backward compatibility."
+    },
+    "api_impact": {
+      "status": "PASS",
+      "notes": "No backend API changes needed. File fetching uses existing /api/worktrees/[id]/files/ endpoint. Server-side path-validator.ts provides security boundary."
+    },
+    "build_bundle_impact": {
+      "status": "PASS",
+      "notes": "No new dependencies. New link-utils.ts is a small utility module. rehype-sanitize is already installed."
+    },
+    "accessibility_impact": {
+      "status": "PARTIAL",
+      "notes": "Dropdown menu keyboard navigation not specified (DR3-007). Link click handling preserves existing tab focus behavior."
+    },
+    "browser_compatibility": {
+      "status": "PASS",
+      "notes": "new URL() is widely supported. file:/// protocol for normalization is standard. postMessage API is universally available. Minor edge case concern noted (DR3-004)."
+    },
+    "migration_rollback": {
+      "status": "PASS",
+      "notes": "RESTORE slice ensures safe truncation on rollback. Optional props ensure backward compatibility. No database schema changes."
+    }
+  },
+  "risk_assessment": {
+    "overall_risk": "LOW",
+    "rationale": "The change is primarily additive - new optional props, new utility module, and reducer extension. All existing interfaces remain backward compatible. Security is layered correctly with server-side validation as the primary defense. The main risk area is the callback drilling depth (7 layers) which could be a maintenance burden but is consistent with existing patterns.",
+    "high_risk_areas": [],
+    "medium_risk_areas": [
+      "Callback drilling through 7 layers - any missed intermediate component will silently fail (props are optional)",
+      "MarpEditorWithSlides needs onOpenFile forwarding for editor mode to work correctly"
+    ],
+    "low_risk_areas": [
+      "MAX_FILE_TABS change from 5 to 30",
+      "localStorage data size increase",
+      "rehype-sanitize schema customization",
+      "new URL() browser compatibility"
+    ]
+  },
+  "recommendations": [
+    {
+      "priority": "should_fix",
+      "description": "Verify WorktreeDetailSubComponents.tsx role in the callback chain and add to affected files if needed (DR3-001)"
+    },
+    {
+      "priority": "should_fix",
+      "description": "Promote MarpEditorWithSlides onOpenFile forwarding from nice_to_have to should_fix (DR3-003)"
+    },
+    {
+      "priority": "should_fix",
+      "description": "Update FilePanelTabs.test.tsx mock to reflect new optional onOpenFile prop (DR3-006)"
+    },
+    {
+      "priority": "nice_to_have",
+      "description": "Add accessibility requirements for dropdown menu keyboard navigation (DR3-007)"
+    },
+    {
+      "priority": "nice_to_have",
+      "description": "Add edge case tests for resolveRelativePath with special characters (DR3-004)"
+    }
+  ]
+}

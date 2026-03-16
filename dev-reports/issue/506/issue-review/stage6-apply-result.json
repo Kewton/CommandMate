@@ -1,0 +1,43 @@
+{
+  "issue_number": 506,
+  "iteration": 3,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-03-16",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "Toast対策の実装タスクを具体化。React Portal方式を第一候補と明記し、SyncButton内でcreatePortalを使いToastContainerをdocument.bodyにマウントする方針を記載。段階的検証ステップ（Portal無し確認→Portal追加→AppShellフォールバック）を追加。Toast.tsx共通コンポーネント自体は修正しない方針を併記"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "テスト観点にレンダリング確認項目を追加（SyncButton内のuseToast state変更時にSidebar全体が再レンダリングされないことをReact DevTools ProfilerまたはrenderCountチェックで確認）。受入条件を「SyncButtonコンポーネントが分離され、useToastのstateスコープがSyncButton内に限定されていること」に変更し、実装レベルで検証可能な表現にした"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "動作フローセクションにエラーハンドリング詳細を追加。ネットワークエラー・APIエラー（4xx/5xx）・認証エラー（401）を分類し、401時はWorktreeSelectionContextの既存処理（ポーリング停止）と同様の方針でToast通知に留め再認証フローに委ねる方針を記載"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "関連コンポーネントのWorktreeSelectionContextの記載に「変更なし。refreshWorktrees()を呼び出すのみ」の注記を追加。併せてToast.txにも「共通コンポーネントのため直接修正は行わない」の注記を追加"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 4,
+    "applied": 4,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/506"
+  }
+}

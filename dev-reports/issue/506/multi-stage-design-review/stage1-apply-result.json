@@ -1,0 +1,69 @@
+{
+  "issue_number": 506,
+  "stage": 1,
+  "stage_name": "設計原則レビュー指摘対応",
+  "apply_date": "2026-03-16",
+  "status": "COMPLETED",
+  "target_doc": "dev-reports/design/issue-506-sidebar-sync-button-design-policy.md",
+  "applied_findings": [
+    {
+      "id": "F-001",
+      "severity": "must_fix",
+      "status": "applied",
+      "action": "セクション4のコード例でToastContainerのpropを removeToast から onClose={removeToast} に修正"
+    },
+    {
+      "id": "F-002",
+      "severity": "must_fix",
+      "status": "applied",
+      "action": "useRefでisSyncingを管理するパターンに変更。useCallback依存配列からisSyncingを除外"
+    },
+    {
+      "id": "F-003",
+      "severity": "should_fix",
+      "status": "applied",
+      "action": "セクション12のSOLID原則記述を修正。SRP違反を認識した上で意図的にまとめていることを明記"
+    },
+    {
+      "id": "F-004",
+      "severity": "should_fix",
+      "status": "applied",
+      "action": "セクション12のDRY原則記述にRepositoryManagerとの重複認識と将来的なフック共通化方針を追記"
+    },
+    {
+      "id": "F-005",
+      "severity": "should_fix",
+      "status": "applied",
+      "action": "セクション3のi18n選定理由に既存Sidebar文字列のi18n化はスコープ外である旨を明記"
+    },
+    {
+      "id": "F-006",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "action": "対応不要。現スコープで問題なく、セクション8で既に将来Issue化を言及済み"
+    },
+    {
+      "id": "F-007",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "action": "セクション4のPortalパターンに段階的アプローチ（まずPortalなしで確認）を追記"
+    }
+  ],
+  "summary": {
+    "total_findings": 7,
+    "applied": 6,
+    "skipped": 1,
+    "must_fix_applied": 2,
+    "must_fix_total": 2,
+    "should_fix_applied": 3,
+    "should_fix_total": 3,
+    "nice_to_have_applied": 1,
+    "nice_to_have_total": 2
+  },
+  "sections_modified": [
+    "セクション3 技術選定（i18nスコープ明記）",
+    "セクション4 設計パターン（ToastContainer prop修正、useRef導入、Portal段階的アプローチ追記）",
+    "セクション12 制約条件（SRP/DRY記述修正）",
+    "セクション13 新規追加（レビュー指摘対応サマリー + 実装チェックリスト）"
+  ]
+}
