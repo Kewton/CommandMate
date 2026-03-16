@@ -428,7 +428,9 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
   // 1. Validate context
   const pollerState = getPollerState(worktreeId);
   const contextResult = validatePollingContext(worktreeId, pollerState);
-  if (contextResult !== 'valid') return;
+  if (contextResult !== 'valid') {
+    return;
+  }
   // pollerState is guaranteed non-null after 'valid' check
 
   try {
@@ -443,27 +445,35 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     // Issue #499 Item 4: Split once and reuse across Thinking check and prompt detection
     const lines = cleanOutput.split('\n');
 
-    // 3. Thinking check (inline - policy decision about window size)
-    // Issue #161 Layer 1 / Issue #191: windowing applied to detectThinking()
-    const recentLines = lines.slice(-THINKING_CHECK_LINE_COUNT).join('\n');
-    if (detectThinking(cliToolId, recentLines)) {
-      // Issue #499 Item 2: Use extended polling interval during Thinking state
-      scheduleNextPoll(worktreeId, cliToolId, THINKING_POLLING_INTERVAL_MS);
-      return;
-    }
-
-    // 4. Stop condition delta check (Issue #314)
+    // 3. Stop condition delta check (Issue #314)
     if (processStopConditionDelta(worktreeId, pollerState!, cleanOutput)) {
       return;
     }
 
-    // 5. Detect and respond to prompt
+    // 4. Detect and respond to prompt (BEFORE thinking check)
+    // Prompt detection takes priority over thinking detection because
+    // "esc to interrupt" text from Claude Code's status bar can persist
+    // in the tmux capture buffer even after a prompt appears, causing
+    // false positive thinking detection that blocks auto-yes responses.
     // Issue #499 Item 4: Pass precomputed lines to avoid redundant split
     const result = await detectAndRespondToPrompt(worktreeId, pollerState!, cliToolId, cleanOutput, lines);
     if (result === 'responded') {
       // Issue #306: Apply cooldown interval after successful response
       scheduleNextPoll(worktreeId, cliToolId, COOLDOWN_INTERVAL_MS);
       return;
+    }
+
+    // 5. Thinking check (only when no prompt detected)
+    // Issue #161 Layer 1 / Issue #191: windowing applied to detectThinking()
+    // Moved after prompt detection to prevent "esc to interrupt" false positives
+    // from blocking auto-yes when a prompt is actually present.
+    if (result === 'no_prompt') {
+      const recentLines = lines.slice(-THINKING_CHECK_LINE_COUNT).join('\n');
+      if (detectThinking(cliToolId, recentLines)) {
+        // Issue #499 Item 2: Use extended polling interval during Thinking state
+        scheduleNextPoll(worktreeId, cliToolId, THINKING_POLLING_INTERVAL_MS);
+        return;
+      }
     }
   } catch (error) {
     // IC003: This catch handles captureAndCleanOutput() or processStopConditionDelta()
