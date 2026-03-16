@@ -20,6 +20,10 @@ import { PromptMessage } from './PromptMessage';
 import AnsiToHtml from 'ansi-to-html';
 import { getCliToolDisplayNameSafe } from '@/lib/cli-tools/types';
 
+// Module-level constants to prevent ReactMarkdown DOM rebuilds on re-render
+const REMARK_PLUGINS = [remarkGfm];
+const REHYPE_PLUGINS = [rehypeHighlight];
+
 export interface MessageListProps {
   messages: ChatMessage[];
   worktreeId: string;
@@ -81,8 +85,14 @@ const MessageBubble = React.memo(function MessageBubble({
     return convert.toHtml(text);
   };
 
+  // Use ref to stabilize onFilePathClick reference for markdownComponents.
+  // This prevents ReactMarkdown from rebuilding DOM when parent re-renders.
+  const onFilePathClickRef = useRef(onFilePathClick);
+  onFilePathClickRef.current = onFilePathClick;
+
   /**
-   * Memoized markdown components to prevent re-renders
+   * Memoized markdown components to prevent re-renders.
+   * Uses ref for onFilePathClick so deps are stable ([isUser] only).
    */
   const markdownComponents = useMemo<Components>(() => {
     /**
@@ -114,7 +124,7 @@ const MessageBubble = React.memo(function MessageBubble({
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              onFilePathClick(filePath);
+              onFilePathClickRef.current(filePath);
             }}
             className={`underline hover:no-underline font-mono transition-colors break-all inline ${
               isUser ? 'text-blue-100 hover:text-white' : 'text-blue-600 hover:text-blue-800'
@@ -163,7 +173,7 @@ const MessageBubble = React.memo(function MessageBubble({
     };
 
     return components;
-  }, [isUser, onFilePathClick]);
+  }, [isUser]);
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
@@ -200,8 +210,8 @@ const MessageBubble = React.memo(function MessageBubble({
                 />
               ) : (
                 <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  rehypePlugins={[rehypeHighlight]}
+                  remarkPlugins={REMARK_PLUGINS}
+                  rehypePlugins={REHYPE_PLUGINS}
                   components={markdownComponents}
                 >
                   {message.content}
