@@ -1,0 +1,33 @@
+{
+  "issue_number": 505,
+  "acceptance_criteria": [
+    "Markdownプレビュー内の相対パスリンクをクリックすると、対象ファイルが新しいタブで開く",
+    "HTMLプレビュー内の相対パスリンクをクリックすると、対象ファイルが新しいタブで開く（interactiveモードのみ）",
+    "外部URLリンクはブラウザの新しいタブで開く",
+    "#で始まるアンカーリンクはタブを開かず、プレビュー内でスクロールする",
+    "ファイルタブが6個以上の場合、先頭5タブがタブバーに表示され、残りはドロップダウンから選択可能",
+    "ドロップダウンから選択したタブが先頭に移動する（MOVE_TO_FRONT）",
+    "タブバー内タブクリック時はタブ順序が変わらない（ACTIVATE_TAB）",
+    "タブ上限30まで開ける",
+    "タブ上限30到達時にリンクをクリックした場合、Toast通知でフィードバック",
+    "rehype-sanitizeが相対パスのhrefを除去しないこと",
+    "postMessage受信時にorigin検証が行われる",
+    "postMessageメッセージスキーマ（commandmate:link-click）の検証が行われる",
+    "postMessageリスナーがコンポーネントアンマウント時にremoveEventListenerで解除される",
+    "npm run test:unit パス",
+    "npm run lint パス"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: src/lib/link-utils.ts 新規作成（classifyLink, resolveRelativePath, sanitizeHref, rehype-sanitizeアローリストスキーマ）",
+    "Task 1.2: useFileTabs.ts - MAX_FILE_TABS=30, MOVE_TO_FRONTアクション, moveToFrontメソッド",
+    "Task 2.1: FilePanelTabs.tsx - ドロップダウンUI, onOpenFile props",
+    "Task 3.1: EditorProps.onOpenFile追加, WorktreeDetailRefactored onOpenFile起点・showTabLimitToast",
+    "Task 3.2: 中間伝播層（WorktreeDetailSubComponents, FilePanelSplit, FilePanelContent）onOpenFile props",
+    "Task 3.3: MarkdownEditor onOpenFile + filePath伝播",
+    "Task 4.1: MarkdownPreview リンクハンドリング（カスタムaコンポーネント, rehype-sanitize, パス解決）",
+    "Task 4.2: HtmlPreview postMessage + script injection + onOpenFile"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-505-file-link-navigation-design-policy.md",
+  "work_plan_path": "dev-reports/issue/505/work-plan.md"
+}

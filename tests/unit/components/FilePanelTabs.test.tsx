@@ -12,10 +12,10 @@ import { FilePanelTabs } from '@/components/worktree/FilePanelTabs';
 import type { FileTab } from '@/hooks/useFileTabs';
 import type { FileContent } from '@/types/models';
 
-// Mock FilePanelContent
+// Mock FilePanelContent [DR3-006]
 vi.mock('@/components/worktree/FilePanelContent', () => ({
-  FilePanelContent: ({ tab }: { tab: FileTab }) => (
-    <div data-testid="file-panel-content" data-path={tab.path}>
+  FilePanelContent: ({ tab, onOpenFile }: { tab: FileTab; onOpenFile?: (path: string) => void }) => (
+    <div data-testid="file-panel-content" data-path={tab.path} data-has-on-open-file={!!onOpenFile}>
       Content: {tab.name}
     </div>
   ),
@@ -125,5 +125,59 @@ describe('FilePanelTabs', () => {
     );
     // Component should still render the container but with no tabs
     expect(container.querySelector('[data-testid^="file-tab-"]')).toBeNull();
+  });
+
+  // ============================================================================
+  // Dropdown UI Tests (Issue #505)
+  // ============================================================================
+
+  describe('dropdown for 6+ tabs', () => {
+    it('should not show dropdown when 5 or fewer tabs', () => {
+      const tabs = Array.from({ length: 5 }, (_, i) => createTab(`file${i}.ts`));
+      render(<FilePanelTabs tabs={tabs} activeIndex={0} {...defaultProps} />);
+
+      expect(screen.queryByTestId('tab-dropdown-button')).not.toBeInTheDocument();
+    });
+
+    it('should show dropdown button when 6+ tabs', () => {
+      const tabs = Array.from({ length: 7 }, (_, i) => createTab(`file${i}.ts`));
+      render(<FilePanelTabs tabs={tabs} activeIndex={0} {...defaultProps} />);
+
+      const dropdownButton = screen.getByTestId('tab-dropdown-button');
+      expect(dropdownButton).toBeInTheDocument();
+      expect(dropdownButton.textContent).toContain('+2');
+    });
+
+    it('should show only first 5 tabs in tab bar when 6+ tabs', () => {
+      const tabs = Array.from({ length: 8 }, (_, i) => createTab(`file${i}.ts`));
+      render(<FilePanelTabs tabs={tabs} activeIndex={0} {...defaultProps} />);
+
+      // First 5 tabs should be visible in the tab bar
+      for (let i = 0; i < 5; i++) {
+        expect(screen.getByTestId(`file-tab-file${i}.ts`)).toBeInTheDocument();
+      }
+      // 6th+ tabs should NOT be in the main tab bar but in dropdown
+      expect(screen.queryByTestId('file-tab-file5.ts')).not.toBeInTheDocument();
+    });
+
+    it('should call onMoveToFront when selecting from dropdown', () => {
+      const onMoveToFront = vi.fn();
+      const tabs = Array.from({ length: 7 }, (_, i) => createTab(`file${i}.ts`));
+      render(
+        <FilePanelTabs
+          tabs={tabs}
+          activeIndex={0}
+          {...defaultProps}
+          onMoveToFront={onMoveToFront}
+        />,
+      );
+
+      // Open dropdown
+      fireEvent.click(screen.getByTestId('tab-dropdown-button'));
+      // Select from dropdown
+      fireEvent.click(screen.getByTestId('tab-dropdown-item-file6.ts'));
+
+      expect(onMoveToFront).toHaveBeenCalledWith('file6.ts');
+    });
   });
 });

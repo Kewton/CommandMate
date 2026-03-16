@@ -1,0 +1,139 @@
+# Issue #505 整合性レビュー (Stage 2)
+
+**日付**: 2026-03-16
+**レビュー対象**: 設計方針書 `dev-reports/design/issue-505-file-link-navigation-design-policy.md`
+**レビュー焦点**: 整合性（設計方針書 / Issue / 現行コードベース間の一貫性）
+
+---
+
+## サマリー
+
+| 重要度 | 件数 |
+|--------|------|
+| must_fix | 1 |
+| should_fix | 6 |
+| nice_to_have | 3 |
+| **合計** | **10** |
+
+設計方針書は全体として Issue #505 の要件と現行コードベースの構造を正確に把握しており、大きな矛盾は見られない。Stage 1 レビュー（DR1-001 ~ DR1-010）の指摘事項が適切に反映されている。主要な指摘事項は以下の通り。
+
+---
+
+## 指摘事項一覧
+
+### DR2-001 [should_fix] MarkdownPreview の props インターフェース -- 責務変更の明示不足
+
+**カテゴリ**: 設計方針書 vs コードベース整合性
+
+現行の `MarkdownPreviewProps` は `{ content: string }` のみで、純粋な表示コンポーネントとして設計されている。設計方針書では `{ content, onOpenFile?, currentFilePath? }` への拡張を計画しているが、コンポーネントの責務が「純粋表示」から「イベントハンドリング含む表示」に変わることを設計方針書が明示的に認識していない。
+
+**推奨**: Section 2 レイヤー構成表で MarkdownPreview の責務を更新し、`memo` 化との相互作用を確認する記述を追加する。
+
+---
+
+### DR2-002 [should_fix] MarkdownEditor 内の MarkdownPreview 呼び出しが2箇所ある
+
+**カテゴリ**: 設計方針書 vs コードベース整合性
+
+設計方針書では `MarkdownEditor` に `onOpenFile` を追加し `MarkdownPreview` に伝播すると記載。現行コードでは `MarkdownEditor.tsx` 内で `MarkdownPreview` が2箇所（モバイル用とデスクトップ用、784行目付近と800行目付近）で呼び出されている。設計方針書はこの2箇所両方への変更を明示していない。
+
+**推奨**: 設計方針書に MarkdownEditor 内の MarkdownPreview 呼び出しが2箇所あり、両方に `onOpenFile` と `currentFilePath` を渡す必要があることを補足する。
+
+---
+
+### DR2-003 [must_fix] Toast メッセージ 'Maximum 5 file tabs' が MAX_FILE_TABS=30 変更と矛盾
+
+**カテゴリ**: 設計方針書 vs Issue vs コードベース整合性
+
+現行の `WorktreeDetailRefactored.tsx` の `handleFilePathClick`（476行目）と `handleFileSelect`（495行目）で `'Maximum 5 file tabs. Close a tab first.'` がハードコードされている。設計方針書は `MAX_FILE_TABS` を30に変更する計画であり、DR1-010 で `showTabLimitToast()` ヘルパーへの集約を既に指摘済み。
+
+**推奨**: 設計方針書の記載は現行コードの問題を正確に把握している。実装時に Toast メッセージが動的であることを検証するテストケースを追加することを推奨する。
+
+---
+
+### DR2-004 [should_fix] HtmlIframePreview の構造と設計方針書の Script Injection パターン
+
+**カテゴリ**: 設計方針書 vs コードベース整合性
+
+設計方針書 Section 3-3 の Script Injection パターンは「HtmlPreview がスクリプト注入済み htmlContent を HtmlIframePreview に渡す」設計。現行の `HtmlIframePreview` は `htmlContent` を `srcDoc` にそのまま設定しており、このインターフェースを変更せずに設計方針書の計画を実現可能（htmlContent の中身が変わるだけ）。safe モードではスクリプト注入しないことを明示すべき。
+
+**推奨**: Section 3-3 に safe モードではスクリプト注入をスキップすることを明記する（Section 6-3 に記載はあるが、セクション間の一貫性として補足）。
+
+---
+
+### DR2-005 [should_fix] MarkdownWithSearch がローカル関数である点と設計方針書の伝播経路
+
+**カテゴリ**: 設計方針書 vs コードベース整合性
+
+設計方針書の伝播経路で `MarkdownWithSearch` が中間コンポーネントとして記載されているが、実際には `FilePanelContent.tsx` 内の非 export ローカル関数（439行目）。設計方針書 Section 9 では FilePanelContent.tsx の変更内容として「内部サブコンポーネントへの伝播」と記載しており、この点は正確。ただし `MarkdownWithSearch` のインライン型定義に `onOpenFile` を追加する必要がある。
+
+**推奨**: 実装者がインライン型定義の変更を見落とさないよう、具体的な変更手順を補足する。
+
+---
+
+### DR2-006 [nice_to_have] MarpEditorWithSlides の MarkdownEditor 呼び出しで filePath が既に渡されている
+
+**カテゴリ**: 設計方針書 vs コードベース整合性
+
+DR1-006 の前提確認。現行コードで `MarpEditorWithSlides` は Editor モードで `MarkdownEditor` を `filePath={filePath}` で呼び出しており、`MarkdownEditor` に `onOpenFile` を追加すれば Editor モードでのリンクナビゲーションが自動的に機能する。Slides モードは `sandbox=""` のため対応不可。
+
+**推奨**: 追加の対応不要。MarpEditorWithSlides の props 型に `onOpenFile` を追加し MarkdownEditor に伝播する必要がある点を実装時に確認すること。
+
+---
+
+### DR2-007 [should_fix] UseFileTabsReturn に moveToFront メソッドが未定義
+
+**カテゴリ**: 設計方針書 vs コードベース整合性
+
+設計方針書 DR1-003 で `moveToFront` メソッドを `UseFileTabsReturn` に追加する注記がある。現行の `UseFileTabsReturn` には7メソッドが定義されており、`moveToFront` は存在しない。実装時に追加が必要。
+
+**推奨**: 設計方針書 Section 5-1 に `moveToFront` メソッドの具体的なコードサンプルを追加する。
+
+---
+
+### DR2-008 [nice_to_have] 設計方針書内の伝播階層数 '7階層' の数え方が不統一
+
+**カテゴリ**: 設計方針書内部の整合性
+
+Section 3-1 で「7階層」と記載しているが、WDR が起点か伝播かで数え方が揺れている。また DR1-004 で「中間コンポーネント4つ」と記載しているが、`MarkdownWithSearch` を含めると5つ。
+
+**推奨**: 「WDR を起点に6段階の props 伝播（中間パススルー5コンポーネント）」のように統一する。
+
+---
+
+### DR2-009 [should_fix] FilePanelTabs での onOpenFile の使用目的が不明確
+
+**カテゴリ**: 設計方針書 vs コードベース整合性
+
+FilePanelTabs が `onOpenFile` を受け取る際、ドロップダウンUI で使用するのか、純粋に `FilePanelContent` へのパススルーなのかが設計方針書で不明確。ドロップダウンからのタブ選択は `ACTIVATE_TAB`/`MOVE_TO_FRONT` で処理されるため、`onOpenFile` はパススルー目的のみと推定されるが、明記すべき。
+
+**推奨**: 設計方針書で FilePanelTabs は `onOpenFile` を FilePanelContent へ伝播するのみ（パススルー）であることを明記する。
+
+---
+
+### DR2-010 [nice_to_have] rehype-sanitize カスタムスキーマの記述粒度が Issue と設計方針書で異なる
+
+**カテゴリ**: Issue vs 設計方針書の整合性
+
+Issue F1-001 は「相対パスの href を許可」、設計方針書 Section 4-2 は「javascript: スキーム以外を許可」。意図は整合しているが表現が異なる。設計方針書の実装は外部URL の href も保持しており、外部URL を新しいタブで開く要件とも整合する。
+
+**推奨**: 実質的な矛盾ではないため対応は任意。Issue 側の記述をより正確にするなら「javascript: スキームのみブロック」と更新する。
+
+---
+
+## 整合性チェックリスト
+
+| チェック項目 | 結果 | 備考 |
+|-------------|------|------|
+| 設計方針書のセクション間で矛盾がないか | OK | DR2-008 で階層数の数え方に軽微な揺れあり |
+| 設計方針書と Issue の要件が整合しているか | OK | DR2-010 で表現レベルの差異あり（実質矛盾なし） |
+| 設計方針書の変更対象ファイルが正確か | OK | 全ファイルパスが実在し、構造が一致 |
+| Props インターフェースの記述が現行コードと整合するか | 要確認 | DR2-001, DR2-002 で MarkdownPreview/MarkdownEditor の変更が正確に反映されていることを確認 |
+| コンポーネント階層の記述が実際のコードと一致するか | OK | DR2-005, DR2-008 で軽微な不正確さあり |
+| 既存の型定義との整合性 | OK | EditorProps への onOpenFile 追加は妥当 |
+| セキュリティ設計がコードベースの既存パターンと整合するか | OK | path-validator.ts への委譲は既存パターンと一致 |
+| MAX_FILE_TABS 変更の影響が正確に把握されているか | OK | DR2-003 で Toast ハードコードの矛盾を確認（設計方針書は認識済み） |
+
+---
+
+*Generated by architecture-review-agent for Issue #505 Stage 2 (整合性レビュー)*

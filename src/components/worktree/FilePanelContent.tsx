@@ -77,6 +77,8 @@ export interface FilePanelContentProps {
   onFileSaved?: (path: string) => void;
   /** Callback when isDirty state changes (Issue #469: polling control) */
   onDirtyChange?: (path: string, isDirty: boolean) => void;
+  /** Callback to open a file from a link (Issue #505) */
+  onOpenFile?: (path: string) => void;
 }
 
 // ============================================================================
@@ -337,6 +339,7 @@ function MarpPreview({
 }
 
 /** MARP file with slides view + editor toggle */
+/** [DR3-003] onOpenFile forwarded to MarkdownEditor in Editor mode */
 function MarpEditorWithSlides({
   marpSlides,
   fileName,
@@ -347,6 +350,7 @@ function MarpEditorWithSlides({
   isMaximized,
   onToggleMaximize,
   onDirtyChange,
+  onOpenFile,
 }: {
   marpSlides: string[];
   fileName: string;
@@ -357,6 +361,7 @@ function MarpEditorWithSlides({
   isMaximized: boolean;
   onToggleMaximize: () => void;
   onDirtyChange?: (isDirty: boolean) => void;
+  onOpenFile?: (path: string) => void;
 }) {
   const [marpViewMode, setMarpViewMode] = useState<'slides' | 'editor'>('slides');
 
@@ -399,6 +404,7 @@ function MarpEditorWithSlides({
             onSave={onFileSaved}
             initialViewMode="split"
             onDirtyChange={onDirtyChange}
+            onOpenFile={onOpenFile}
           />
         )}
       </div>
@@ -435,8 +441,8 @@ function MaximizableWrapper({
   return <>{children}</>;
 }
 
-/** [Issue #47] Markdown editor with file content search (PC) */
-function MarkdownWithSearch({ tab, content, worktreeId, isMaximized, onToggleMaximize, onFileSaved, onDirtyChange }: { tab: FileTab; content: FileContent; worktreeId: string; isMaximized: boolean; onToggleMaximize: () => void; onFileSaved?: (path: string) => void; onDirtyChange?: (isDirty: boolean) => void }) {
+/** [Issue #47] Markdown editor with file content search (PC) [DR2-005] */
+function MarkdownWithSearch({ tab, content, worktreeId, isMaximized, onToggleMaximize, onFileSaved, onDirtyChange, onOpenFile }: { tab: FileTab; content: FileContent; worktreeId: string; isMaximized: boolean; onToggleMaximize: () => void; onFileSaved?: (path: string) => void; onDirtyChange?: (isDirty: boolean) => void; onOpenFile?: (path: string) => void }) {
   const search = useFileContentSearch(content.content);
 
   return (
@@ -471,6 +477,7 @@ function MarkdownWithSearch({ tab, content, worktreeId, isMaximized, onToggleMax
             onSave={onFileSaved}
             initialViewMode="preview"
             onDirtyChange={onDirtyChange}
+            onOpenFile={onOpenFile}
           />
         )}
       </div>
@@ -529,6 +536,7 @@ export const FilePanelContent = memo(function FilePanelContent({
   onSetLoading,
   onFileSaved,
   onDirtyChange,
+  onOpenFile,
 }: FilePanelContentProps) {
   const fetchingRef = useRef(false);
   const [marpSlides, setMarpSlides] = useState<string[] | null>(null);
@@ -536,6 +544,14 @@ export const FilePanelContent = memo(function FilePanelContent({
 
   // [Issue #469] File content polling for auto-update
   useFileContentPolling({ tab, worktreeId, onLoadContent });
+
+  // Wrap onDirtyChange to bind tab.path (DRY: used by HtmlPreview, MarpEditor, MarkdownEditor)
+  const handleDirtyChange = useMemo(
+    () => onDirtyChange
+      ? (isDirty: boolean) => onDirtyChange(tab.path, isDirty)
+      : undefined,
+    [onDirtyChange, tab.path],
+  );
 
   const toggleMaximize = useCallback(() => {
     setIsMaximized((prev) => !prev);
@@ -683,7 +699,8 @@ export const FilePanelContent = memo(function FilePanelContent({
               filePath={tab.path}
               htmlContent={content.content}
               onFileSaved={onFileSaved}
-              onDirtyChange={onDirtyChange ? (isDirty: boolean) => onDirtyChange(tab.path, isDirty) : undefined}
+              onDirtyChange={handleDirtyChange}
+              onOpenFile={onOpenFile}
             />
           </div>
         </div>
@@ -707,7 +724,8 @@ export const FilePanelContent = memo(function FilePanelContent({
               onFileSaved={onFileSaved}
               isMaximized={isMaximized}
               onToggleMaximize={toggleMaximize}
-              onDirtyChange={onDirtyChange ? (isDirty: boolean) => onDirtyChange(tab.path, isDirty) : undefined}
+              onDirtyChange={handleDirtyChange}
+              onOpenFile={onOpenFile}
             />
           ) : (
             <MarkdownWithSearch
@@ -717,7 +735,8 @@ export const FilePanelContent = memo(function FilePanelContent({
               isMaximized={isMaximized}
               onToggleMaximize={toggleMaximize}
               onFileSaved={onFileSaved}
-              onDirtyChange={onDirtyChange ? (isDirty: boolean) => onDirtyChange(tab.path, isDirty) : undefined}
+              onDirtyChange={handleDirtyChange}
+              onOpenFile={onOpenFile}
             />
           )}
         </div>

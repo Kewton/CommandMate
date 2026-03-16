@@ -269,6 +269,100 @@ describe('fileTabsReducer', () => {
   });
 
   // ============================================================================
+  // MOVE_TO_FRONT Tests (Issue #505)
+  // ============================================================================
+
+  describe('MOVE_TO_FRONT', () => {
+    it('should move tab to index 0', () => {
+      const stateWithTabs: FileTabsState = {
+        tabs: [
+          { path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false },
+          { path: 'b.ts', name: 'b.ts', content: null, loading: false, error: null, isDirty: false },
+          { path: 'c.ts', name: 'c.ts', content: null, loading: false, error: null, isDirty: false },
+        ],
+        activeIndex: 0,
+      };
+      const action: FileTabsAction = { type: 'MOVE_TO_FRONT', path: 'c.ts' };
+      const result = fileTabsReducer(stateWithTabs, action);
+
+      expect(result.tabs[0].path).toBe('c.ts');
+      expect(result.tabs[1].path).toBe('a.ts');
+      expect(result.tabs[2].path).toBe('b.ts');
+      expect(result.activeIndex).toBe(0);
+    });
+
+    it('should not change state when tab is already first', () => {
+      const stateWithTabs: FileTabsState = {
+        tabs: [
+          { path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false },
+          { path: 'b.ts', name: 'b.ts', content: null, loading: false, error: null, isDirty: false },
+        ],
+        activeIndex: 0,
+      };
+      const action: FileTabsAction = { type: 'MOVE_TO_FRONT', path: 'a.ts' };
+      const result = fileTabsReducer(stateWithTabs, action);
+
+      expect(result).toBe(stateWithTabs);
+    });
+
+    it('should not change state when path not found', () => {
+      const stateWithTabs: FileTabsState = {
+        tabs: [
+          { path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false },
+        ],
+        activeIndex: 0,
+      };
+      const action: FileTabsAction = { type: 'MOVE_TO_FRONT', path: 'nonexistent.ts' };
+      const result = fileTabsReducer(stateWithTabs, action);
+
+      expect(result).toBe(stateWithTabs);
+    });
+
+    it('should set activeIndex to 0 after moving', () => {
+      const stateWithTabs: FileTabsState = {
+        tabs: [
+          { path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false },
+          { path: 'b.ts', name: 'b.ts', content: null, loading: false, error: null, isDirty: false },
+          { path: 'c.ts', name: 'c.ts', content: null, loading: false, error: null, isDirty: false },
+        ],
+        activeIndex: 2,
+      };
+      const action: FileTabsAction = { type: 'MOVE_TO_FRONT', path: 'b.ts' };
+      const result = fileTabsReducer(stateWithTabs, action);
+
+      expect(result.activeIndex).toBe(0);
+    });
+  });
+
+  // ============================================================================
+  // MAX_FILE_TABS regression guard (Issue #505) [DR3-002]
+  // ============================================================================
+
+  describe('MAX_FILE_TABS constant', () => {
+    it('should be 30', () => {
+      expect(MAX_FILE_TABS).toBe(30);
+    });
+  });
+
+  describe('RESTORE with MAX_FILE_TABS=30', () => {
+    it('should restore up to 30 tabs', () => {
+      const paths = Array.from({ length: 30 }, (_, i) => `file${i}.ts`);
+      const action: FileTabsAction = { type: 'RESTORE', paths, activePath: 'file0.ts' };
+      const result = fileTabsReducer(initialState, action);
+
+      expect(result.tabs).toHaveLength(30);
+    });
+
+    it('should truncate if more than MAX_FILE_TABS paths are provided', () => {
+      const paths = Array.from({ length: 35 }, (_, i) => `file${i}.ts`);
+      const action: FileTabsAction = { type: 'RESTORE', paths, activePath: 'file0.ts' };
+      const result = fileTabsReducer(initialState, action);
+
+      expect(result.tabs).toHaveLength(MAX_FILE_TABS);
+    });
+  });
+
+  // ============================================================================
   // isDirty Tests (Issue #469)
   // ============================================================================
 
@@ -491,6 +585,25 @@ describe('useFileTabs', () => {
 
       expect(result.current.state.tabs).toHaveLength(0);
       expect(result.current.state.activeIndex).toBeNull();
+    });
+  });
+
+  describe('moveToFront', () => {
+    it('should move specified tab to front', () => {
+      const { result } = renderHook(() => useFileTabs('test-wt'));
+
+      act(() => {
+        result.current.openFile('a.ts');
+        result.current.openFile('b.ts');
+        result.current.openFile('c.ts');
+      });
+
+      act(() => {
+        result.current.moveToFront('c.ts');
+      });
+
+      expect(result.current.state.tabs[0].path).toBe('c.ts');
+      expect(result.current.state.activeIndex).toBe(0);
     });
   });
 });

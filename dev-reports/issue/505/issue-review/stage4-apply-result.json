@@ -1,0 +1,83 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 505,
+  "apply_date": "2026-03-16",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "F3-001",
+        "status": "applied",
+        "change_summary": "FilePanelSplit.tsx を変更対象ファイル表に追加。onOpenFile コールバック props 追加・FilePanelTabs への伝播を明記。実装タスクにも追加。"
+      },
+      {
+        "id": "F3-002",
+        "status": "applied",
+        "change_summary": "FilePanelTabs.tsx の変更内容に onOpenFile コールバック props 追加・FilePanelContent への伝播を追記。実装タスクにも追加。"
+      },
+      {
+        "id": "F3-003",
+        "status": "applied",
+        "change_summary": "src/types/markdown-editor.ts を変更対象ファイル表に追加。EditorProps に onOpenFile?: (path: string) => void を追加する旨を明記。実装タスクにも追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "F3-004",
+        "status": "applied",
+        "change_summary": "テスト計画セクションを新設し、useFileTabs.test.ts の具体的テストケース8項目を列挙。テスト対象ファイルも変更対象ファイル表に追加。"
+      },
+      {
+        "id": "F3-005",
+        "status": "applied",
+        "change_summary": "テスト計画セクションに FilePanelTabs.test.tsx の具体的テストケース4項目を列挙。テスト対象ファイルも変更対象ファイル表に追加。"
+      },
+      {
+        "id": "F3-006",
+        "status": "applied",
+        "change_summary": "postMessage メッセージスキーマセクションを新設。CommandMateLinkClickMessage 型定義を追加し、commandmate: namespace prefix による区別を明記。セキュリティ考慮事項にもスキーマ検証を追記。受入条件にスキーマ検証項目を追加。"
+      },
+      {
+        "id": "F3-007",
+        "status": "applied",
+        "change_summary": "現在の設計（RESTORE時のMAX_FILE_TABSスライス）で十分と判断。localStorage容量への重大な影響はないため、明示的な記載は省略し現行設計を維持。"
+      },
+      {
+        "id": "F3-008",
+        "status": "applied",
+        "change_summary": "FilePanelContent.tsx の変更内容に MarkdownWithSearch・MarpEditorWithSlides サブコンポーネントへの onOpenFile 伝播を明記。コールバック伝播経路図も更新。実装タスクにも追加。"
+      },
+      {
+        "id": "F3-009",
+        "status": "applied",
+        "change_summary": "HtmlIframePreview の srcDoc へのリンク検知スクリプト注入の具体的手順（addEventListener, preventDefault, postMessage）を提案する解決策と実装タスクの両方に追記。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F3-010",
+        "status": "skipped",
+        "reason": "既存パターンが英語ハードコードで統一されているため、この Issue での i18n 対応は不要。将来の一括対応が効率的。"
+      },
+      {
+        "id": "F3-011",
+        "status": "applied",
+        "change_summary": "useEffect クリーンアップでの removeEventListener と event.source による iframe 識別をセキュリティ考慮事項に追記。受入条件にもリスナー解除の項目を追加。"
+      },
+      {
+        "id": "F3-012",
+        "status": "applied",
+        "change_summary": "スコープとしてデスクトップビューのみを対象とすることを提案する解決策セクションと受入条件の両方に明記。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 12,
+    "applied": 11,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/505"
+  }
+}

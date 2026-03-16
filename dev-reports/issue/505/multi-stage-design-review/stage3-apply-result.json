@@ -1,0 +1,85 @@
+{
+  "issue_number": 505,
+  "stage": 3,
+  "stage_name": "Impact Analysis Review",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "DR3-001",
+        "item": "WorktreeDetailSubComponents.tsx missing from affected files list",
+        "sections_updated": ["Section 2 (component diagram + layer table)", "Section 9 (affected files)", "Section 11 (checklist)"],
+        "status": "reflected"
+      },
+      {
+        "id": "DR3-002",
+        "item": "Existing useFileTabs tests remain valid after MAX_FILE_TABS change",
+        "sections_updated": ["Section 9 (test files)", "Section 11 (nice_to_have note)"],
+        "status": "reflected"
+      },
+      {
+        "id": "DR3-003",
+        "item": "MarpEditorWithSlides must forward onOpenFile for Editor mode (promoted from nice_to_have)",
+        "sections_updated": ["Section 2 (design note)", "Section 9 (FilePanelContent entry)", "Section 10 (constraints)", "Section 11 (checklist)"],
+        "status": "reflected"
+      },
+      {
+        "id": "DR3-005",
+        "item": "localStorage data size confirmation (~6KB per worktree)",
+        "sections_updated": ["Section 7-3 (performance)", "Section 11 (nice_to_have note)"],
+        "status": "reflected"
+      },
+      {
+        "id": "DR3-006",
+        "item": "FilePanelTabs.test.tsx mock needs onOpenFile prop update",
+        "sections_updated": ["Section 9 (test files)", "Section 11 (checklist)"],
+        "status": "reflected"
+      },
+      {
+        "id": "DR3-009",
+        "item": "MarkdownEditor existing filePath prop reuse as currentFilePath",
+        "sections_updated": ["Section 9 (MarkdownEditor entry)", "Section 11 (checklist)"],
+        "status": "reflected"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "DR3-004",
+        "item": "Browser compatibility edge cases for new URL() with file:///",
+        "sections_updated": ["Section 11 (nice_to_have)"],
+        "status": "reflected"
+      },
+      {
+        "id": "DR3-007",
+        "item": "Dropdown menu keyboard navigation accessibility",
+        "sections_updated": ["Section 11 (nice_to_have)"],
+        "status": "reflected"
+      },
+      {
+        "id": "DR3-008",
+        "item": "No new dependencies required (positive finding)",
+        "sections_updated": ["Section 11 (nice_to_have)"],
+        "status": "reflected"
+      },
+      {
+        "id": "DR3-010",
+        "item": "Rollback safety for MAX_FILE_TABS change (positive finding)",
+        "sections_updated": ["Section 11 (nice_to_have)"],
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-505-file-link-navigation-design-policy.md",
+  "sections_updated": [
+    "Section 2 - Architecture (component diagram, layer table, design note)",
+    "Section 7-3 - Performance (localStorage math)",
+    "Section 9 - Affected Files (production + test)",
+    "Section 10 - Constraints (YAGNI update)",
+    "Section 11 - Implementation Checklist (should_fix + nice_to_have)",
+    "Section 14 - Stage 3 Review Findings Summary (new)"
+  ],
+  "timestamp": "2026-03-16T00:00:00Z"
+}

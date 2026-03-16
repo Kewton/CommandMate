@@ -49,6 +49,10 @@ export interface FilePanelSplitProps {
   onCloseDiff?: () => void;
   /** Callback when isDirty state changes (Issue #469) */
   onDirtyChange?: (path: string, isDirty: boolean) => void;
+  /** Callback to move a tab to front (Issue #505) */
+  onMoveToFront?: (path: string) => void;
+  /** Callback to open a file from a link (Issue #505) */
+  onOpenFile?: (path: string) => void;
 }
 
 // ============================================================================
@@ -89,6 +93,8 @@ export const FilePanelSplit = memo(function FilePanelSplit({
   diffFilePath,
   onCloseDiff,
   onDirtyChange,
+  onMoveToFront,
+  onOpenFile,
 }: FilePanelSplitProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [terminalWidth, setTerminalWidth] = useState(INITIAL_TERMINAL_WIDTH);
@@ -175,6 +181,8 @@ export const FilePanelSplit = memo(function FilePanelSplit({
             onSetLoading={onSetLoading}
             onFileSaved={onFileSaved}
             onDirtyChange={onDirtyChange}
+            onMoveToFront={onMoveToFront}
+            onOpenFile={onOpenFile}
           />
         )}
       </div>

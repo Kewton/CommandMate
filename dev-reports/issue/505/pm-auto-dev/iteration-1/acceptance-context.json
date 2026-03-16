@@ -1,0 +1,31 @@
+{
+  "issue_number": 505,
+  "feature_summary": "ファイル内リンクナビゲーション - Markdown/HTMLプレビュー内リンクからファイルタブを開く + タブUI改善",
+  "acceptance_criteria": [
+    "Markdownプレビュー内の相対パスリンクをクリックすると、対象ファイルが新しいタブで開く",
+    "HTMLプレビュー内の相対パスリンクをクリックすると、対象ファイルが新しいタブで開く（interactiveモードのみ）",
+    "外部URLリンクはブラウザの新しいタブで開く",
+    "#で始まるアンカーリンクはタブを開かず、プレビュー内でスクロールする",
+    "ファイルタブが6個以上の場合、先頭5タブがタブバーに表示され、残りはドロップダウンから選択可能",
+    "ドロップダウンから選択したタブが先頭に移動する（MOVE_TO_FRONT）",
+    "タブバー内タブクリック時はタブ順序が変わらない（ACTIVATE_TAB）",
+    "タブ上限30まで開ける",
+    "タブ上限30到達時にリンクをクリックした場合、Toast通知でフィードバック",
+    "rehype-sanitizeが相対パスのhrefを除去しないこと",
+    "postMessage受信時にorigin検証が行われる",
+    "postMessageメッセージスキーマ（commandmate:link-click）の検証が行われる",
+    "postMessageリスナーがコンポーネントアンマウント時にremoveEventListenerで解除される",
+    "SafeモードではpostMessageリスナーが登録されないこと",
+    "Toast メッセージはMAX_FILE_TABS定数を参照した動的メッセージであること",
+    "npm run test:unit パス",
+    "npm run lint パス"
+  ],
+  "test_scenarios": [
+    "link-utils: classifyLink/resolveRelativePath/sanitizeHref の全パターン",
+    "useFileTabs: MOVE_TO_FRONT reducer + moveToFront メソッド + MAX_FILE_TABS=30",
+    "FilePanelTabs: ドロップダウンUI表示・非表示・選択",
+    "MarkdownPreview: リンクハンドリング（相対パス/外部URL/アンカー/javascript:拒否）",
+    "HtmlPreview: postMessage統合テスト（受信/origin検証/スキーマ検証/クリーンアップ/safeモード）",
+    "静的解析: tsc + lint エラー0件"
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "status": "success",
+  "changes_made": [
+    {
+      "file": "src/components/worktree/FilePanelContent.tsx",
+      "description": "Extracted repeated onDirtyChange lambda wrapper into a single useMemo-based handleDirtyChange callback (DRY fix: 3 inline lambdas consolidated into 1 memoized function)"
+    }
+  ],
+  "quality_before": {
+    "tsc_errors": 0,
+    "lint_errors": 0,
+    "test_passed": 5075,
+    "test_failed": 1,
+    "notes": "Pre-existing failure in git-utils.test.ts (unrelated to Issue #505)"
+  },
+  "quality_after": {
+    "tsc_errors": 0,
+    "lint_errors": 0,
+    "test_passed": 5075,
+    "test_failed": 1,
+    "notes": "Same pre-existing failure. All Issue #505 related tests pass."
+  },
+  "tsc_result": "pass",
+  "lint_result": "pass",
+  "test_result": {
+    "total": 5083,
+    "passed": 5075,
+    "failed": 1,
+    "skipped": 7
+  },
+  "review_findings": {
+    "code_quality": "Good overall. Naming conventions consistent, type safety enforced, proper exports.",
+    "security": "sanitizeHref correctly validates max length and control chars. REHYPE_SANITIZE_SCHEMA allowlist properly rejects javascript:/data:/vbscript: schemes. postMessage origin validation checks event.origin === 'null' (sandbox iframe). LINK_CLICK_SCRIPT injection is scoped to interactive mode only.",
+    "design_policy_compliance": "DR1-001 through DR4-003 findings addressed: shared link-utils module (DR1-001/002), classifyLink + resolveRelativePath reuse (DR1-002), sanitizeHref for postMessage input (DR4-003), rehype-sanitize allowlist (DR4-001), interactive mode confirmation dialog (DR4-002), origin validation (DR1-007).",
+    "solid_kiss_dry": "One DRY violation fixed in FilePanelContent.tsx (3 identical onDirtyChange lambdas). No SOLID violations found. KISS principle followed throughout.",
+    "unused_imports": "None found in target files.",
+    "test_quality": "Good coverage: link-utils has edge cases for boundary values, control chars, protocol rejection. HtmlPreview tests cover postMessage origin validation, wrong type rejection, cleanup. MarkdownPreview tests cover relative/external/anchor link handling."
+  },
+  "message": "Refactoring complete. One DRY violation fixed in FilePanelContent.tsx. All quality checks pass. Code quality is good across all target files."
+}

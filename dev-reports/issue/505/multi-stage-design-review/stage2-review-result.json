@@ -1,0 +1,103 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "findings": [
+    {
+      "id": "DR2-001",
+      "severity": "should_fix",
+      "category": "consistency_design_vs_codebase",
+      "title": "MarkdownPreview の props インターフェースが設計方針書の記述と現行コードで不一致",
+      "description": "設計方針書 Section 2 のコンポーネント構成図では MarkdownPreview に onOpenFile + currentFilePath を渡す設計となっており、Section 9 でも MarkdownPreviewProps を { content, onOpenFile?, currentFilePath? } に拡張すると記載している。しかし現行の MarkdownPreviewProps は { content: string } のみであり、MarkdownPreview は memo 化された純粋な表示コンポーネントとして設計されている。設計方針書では MarkdownPreview の既存の props 構造に2つの optional props を追加すると述べているが、この変更により MarkdownPreview のコンポーネント特性が「純粋な表示」から「イベントハンドリングを含む表示」に変わる。この設計変更自体は妥当だが、設計方針書がこの責務変更を明示的に認識していない点が整合性上の問題である。",
+      "suggestion": "設計方針書の Section 2 レイヤー構成表で MarkdownPreview の責務を「Markdownレンダリング + リンクハンドリング」と更新し、MarkdownPreview の memo 化が onOpenFile/currentFilePath の変更時にも正しく動作することを設計上確認すべき。memo の依存に props 全体が含まれるため動作は正しいが、明示的な記述があると実装者が迷わない。",
+      "target": "設計方針書 Section 2 レイヤー構成, MarkdownPreview.tsx MarkdownPreviewProps"
+    },
+    {
+      "id": "DR2-002",
+      "severity": "should_fix",
+      "category": "consistency_design_vs_codebase",
+      "title": "MarkdownEditor の EditorProps に onOpenFile が未定義 -- 設計方針書の中間伝播が成立しない",
+      "description": "設計方針書 Section 9 では MarkdownEditor.tsx の変更内容として「onOpenFile + filePath伝播（optional）」を記載し、src/types/markdown-editor.ts の EditorProps に onOpenFile を追加すると述べている（F3-003）。しかし現行の EditorProps には onOpenFile フィールドが存在しない。設計方針書と Issue の両方でこの追加を前提としているが、現行 MarkdownEditor は MarkdownPreview を <MarkdownPreview content={previewContent} /> と content のみで呼び出している（MarkdownEditor.tsx 784行目付近）。設計方針書では EditorProps.filePath を currentFilePath として MarkdownPreview に渡す計画だが、現行コードでは MarkdownEditor は既に filePath を props として受け取っており、この点は整合性がある。",
+      "suggestion": "設計方針書の記載は正確であり、実装時に EditorProps への onOpenFile 追加が必要であることを明確にしている。ただし、MarkdownEditor 内の MarkdownPreview 呼び出し箇所が2箇所（モバイル用784行目付近とデスクトップ用800行目付近）あり、両方に onOpenFile と currentFilePath を渡す必要があることを設計方針書に明記すべき。",
+      "target": "設計方針書 Section 9 MarkdownEditor.tsx, src/types/markdown-editor.ts EditorProps"
+    },
+    {
+      "id": "DR2-003",
+      "severity": "must_fix",
+      "category": "consistency_design_vs_issue",
+      "title": "Toast メッセージのハードコード値 'Maximum 5 file tabs' が設計変更（MAX_FILE_TABS=30）と矛盾",
+      "description": "現行の WorktreeDetailRefactored.tsx では handleFilePathClick（476行目）と handleFileSelect（495行目）で 'Maximum 5 file tabs. Close a tab first.' というハードコードされた Toast メッセージを使用している。設計方針書では MAX_FILE_TABS を 5 から 30 に変更する計画であり（Section 5-1）、Issue の F7-003 でも「MAX_FILE_TABS 定数を参照した動的メッセージに変更」と明記されている。設計方針書 DR1-010 でも showTabLimitToast() ヘルパー関数への集約を指摘している。現行コードのハードコード値 '5' と設計方針書の MAX_FILE_TABS=30 の間に直接的な矛盾があり、実装時に必ず修正が必要。",
+      "suggestion": "この矛盾は設計方針書で既に認識されており（DR1-010、F7-003）、実装チェックリストにも含まれている。整合性レビューとしては、設計方針書の記載が現行コードの問題を正確に把握していることを確認した。追加の対応は不要だが、実装時のテストで Toast メッセージが動的であることを検証するテストケースを追加することを推奨する。",
+      "target": "WorktreeDetailRefactored.tsx handleFilePathClick/handleFileSelect, 設計方針書 Section 5-1, DR1-010"
+    },
+    {
+      "id": "DR2-004",
+      "severity": "should_fix",
+      "category": "consistency_design_vs_codebase",
+      "title": "HtmlPreview の HtmlIframePreview サブコンポーネントが設計方針書の記述と異なる構造",
+      "description": "設計方針書 Section 3-3 では HtmlPreview と HtmlIframePreview の責務分離を「HtmlPreview がスクリプト注入 + postMessage受信、HtmlIframePreview が純粋な表示」と定義している。現行コードを確認すると HtmlIframePreview は HtmlPreview.tsx 内のローカルサブコンポーネント（export されていない function）であり、props は { htmlContent, sandboxLevel, filePath } である。設計方針書の Script Injection パターン（Section 3-3）では HtmlPreview が「注入済み htmlContent」を HtmlIframePreview に渡すとあるが、現行の HtmlIframePreview は htmlContent をそのまま srcDoc に設定している。設計方針書の計画通り、HtmlPreview がスクリプト注入済みの htmlContent を HtmlIframePreview に渡す変更は、現行の HtmlIframePreview のインターフェースを変更せずに実現可能（htmlContent の内容が変わるだけ）であり、この点は整合性がある。",
+      "suggestion": "設計方針書の記載は現行コードの構造を正確に理解した上で書かれており、HtmlIframePreview のインターフェース変更が不要な設計は妥当。ただし、スクリプト注入を行うのは interactive モードのみであるため、safe モードの場合は htmlContent をそのまま渡すことを設計方針書に明示すべき（Section 3-3 では暗黙的だが Section 6-3 で別途記載あり、セクション間の整合性は取れている）。",
+      "target": "設計方針書 Section 3-3 Script Injection パターン, HtmlPreview.tsx HtmlIframePreview"
+    },
+    {
+      "id": "DR2-005",
+      "severity": "should_fix",
+      "category": "consistency_design_vs_codebase",
+      "title": "FilePanelContent 内の MarkdownWithSearch が設計方針書の伝播経路に含まれているが、現行コードではローカル関数",
+      "description": "設計方針書 Section 2 のコンポーネント構成図と Section 3-1 の伝播経路で MarkdownWithSearch が onOpenFile の中間伝播コンポーネントとして記載されている。現行コードを確認すると、MarkdownWithSearch は FilePanelContent.tsx 内のローカル関数コンポーネント（439行目）であり、export されていない。このコンポーネントの props に onOpenFile を追加するには、ローカル関数の引数型定義にフィールドを追加し、MarkdownEditor への伝播を実装する必要がある。設計方針書では MarkdownWithSearch がモジュールレベルのコンポーネントであるかのように記載されているが、実際にはファイル内ローカル関数であるため、変更は FilePanelContent.tsx 内で完結する。",
+      "suggestion": "設計方針書 Section 9 の変更対象ファイル一覧に MarkdownWithSearch の変更を FilePanelContent.tsx 内の変更として明記すべき。現在は FilePanelContent.tsx の変更内容に「内部サブコンポーネント（MarkdownWithSearch, MarpEditorWithSlides, HtmlPreview）への伝播」と記載されており、この点は正確。ただし、MarkdownWithSearch のインライン型定義（現在は inline object type）に onOpenFile を追加する必要があることを実装者が見落とさないよう、具体的な変更手順を補足することを推奨する。",
+      "target": "設計方針書 Section 2, Section 9, FilePanelContent.tsx MarkdownWithSearch"
+    },
+    {
+      "id": "DR2-006",
+      "severity": "nice_to_have",
+      "category": "consistency_design_vs_codebase",
+      "title": "MarpEditorWithSlides の MarkdownEditor 呼び出しで filePath が既に渡されている -- 設計方針書 DR1-006 の前提確認",
+      "description": "設計方針書 DR1-006 では「MarpEditorWithSlides への onOpenFile 伝播は不要の可能性」と注記している。現行コードを確認すると、MarpEditorWithSlides は Editor モードで MarkdownEditor を呼び出す際に filePath を props として渡している（FilePanelContent.tsx 398行目: filePath={filePath}）。設計方針書の通り、MarkdownEditor に onOpenFile を追加すれば MarpEditorWithSlides の Editor モードでもリンクナビゲーションが機能する。Slides モードは sandbox='' の iframe であり、スクリプト実行不可のためリンク対応は不可能。",
+      "suggestion": "設計方針書 DR1-006 の判断は現行コードと整合しており、追加の対応は不要。MarpEditorWithSlides への onOpenFile props 追加は、Editor モードで MarkdownEditor に渡す目的でのみ必要。この場合、MarpEditorWithSlides の props 型にも onOpenFile?: (path: string) => void を追加し、MarkdownEditor に伝播する必要がある点を実装時に確認すること。",
+      "target": "設計方針書 DR1-006, FilePanelContent.tsx MarpEditorWithSlides"
+    },
+    {
+      "id": "DR2-007",
+      "severity": "should_fix",
+      "category": "consistency_design_vs_codebase",
+      "title": "useFileTabs の UseFileTabsReturn に moveToFront メソッドが未定義 -- 設計方針書 DR1-003 との整合性",
+      "description": "設計方針書 Section 5-1 で MOVE_TO_FRONT reducer アクションの追加を計画し、DR1-003 で「moveToFront メソッドを openFile とは別メソッドとして UseFileTabsReturn に追加する」と注記している。現行の UseFileTabsReturn インターフェース（useFileTabs.ts 257-265行目）には state, dispatch, openFile, closeTab, activateTab, onFileRenamed, onFileDeleted の7メソッドがあり、moveToFront は存在しない。実装時に UseFileTabsReturn に moveToFront メソッドを追加し、dispatch({ type: 'MOVE_TO_FRONT', path }) をラップする必要がある。",
+      "suggestion": "設計方針書の記載と現行コードの差分は実装時の変更として正しく認識されている。ただし、設計方針書 Section 5-1 の reducer 拡張コードサンプルでは MOVE_TO_FRONT のケースのみ記載されており、UseFileTabsReturn への moveToFront メソッド追加のコードサンプルが不足している。実装チェックリスト（Section 11 Nice to Have DR1-003）にメソッド追加の具体的な実装を補足すること。",
+      "target": "設計方針書 Section 5-1, DR1-003, useFileTabs.ts UseFileTabsReturn"
+    },
+    {
+      "id": "DR2-008",
+      "severity": "nice_to_have",
+      "category": "consistency_within_design",
+      "title": "設計方針書内の伝播階層数の記述が一部不整合 -- Section 3-1 '7階層' vs コンポーネント構成図",
+      "description": "設計方針書 Section 3-1 で「onOpenFile コールバックをコンポーネントツリーの7階層を通じて伝播する」と記載している。コンポーネント構成図（Section 2）を数えると WDR -> FPS -> FPT -> FPC -> MWS -> ME -> MP の7コンポーネントだが、WDR は起点であり伝播ではないため、実際の伝播は6階層（FPS -> FPT -> FPC -> MWS -> ME -> MP）となる。また DR1-004 では「中間コンポーネント4つ（FilePanelSplit, FilePanelTabs, FilePanelContent, MarkdownEditor）が純粋なパススルー」と記載しているが、MarkdownWithSearch もパススルーに含めると5つになる。",
+      "suggestion": "「7階層」の数え方が起点を含むか含まないかで揺れている。設計方針書の記載を統一し、例えば「WDR を起点に6段階の props 伝播」または「WDR を含む7コンポーネントを通過」と明確にすべき。また、中間パススルーコンポーネントの列挙に MarkdownWithSearch を含めるべき（現行は4つと記載だが MarkdownWithSearch を加えると5つ）。これは実装には影響しないが、ドキュメントの正確性の問題。",
+      "target": "設計方針書 Section 3-1, DR1-004"
+    },
+    {
+      "id": "DR2-009",
+      "severity": "should_fix",
+      "category": "consistency_design_vs_codebase",
+      "title": "FilePanelSplit の props 型に onOpenFile が追加される際、FilePanelTabs への伝播方法が不明確",
+      "description": "設計方針書 Section 9 で FilePanelSplit.tsx に onOpenFile props を追加すると記載している。現行の FilePanelSplit は FilePanelTabs を呼び出す際に tabs, activeIndex, worktreeId, onClose, onActivate, onLoadContent, onLoadError, onSetLoading, onFileSaved, onDirtyChange の10個の props を渡している（FilePanelSplit.tsx 167-178行目）。onOpenFile を追加すると11個目の props となり、FilePanelTabs の FilePanelTabsProps にも onOpenFile を追加する必要がある。設計方針書では FilePanelSplit -> FilePanelTabs -> FilePanelContent の伝播を記載しているが、FilePanelTabs が onOpenFile を直接使用するのか（ドロップダウンUI で使用？）、純粋にパススルーするのかが不明確。",
+      "suggestion": "設計方針書を確認すると、FilePanelTabs は onOpenFile を FilePanelContent に伝播するためのパススルーと、ドロップダウンUI内での使用の両方が考えられる。ただし、ドロップダウンからのタブ選択は既に onActivate（ACTIVATE_TAB）や MOVE_TO_FRONT で処理されるため、FilePanelTabs での onOpenFile の使用目的は FilePanelContent への伝播のみ。この点を設計方針書で明確にすべき。",
+      "target": "設計方針書 Section 9, FilePanelSplit.tsx, FilePanelTabs.tsx"
+    },
+    {
+      "id": "DR2-010",
+      "severity": "nice_to_have",
+      "category": "consistency_design_vs_issue",
+      "title": "Issue と設計方針書で rehype-sanitize のカスタムスキーマ記述が微妙に異なる",
+      "description": "Issue F1-001 では「defaultSchema ベースでカスタムスキーマを作成し、相対パスの href を許可する設定を追加する」と記載。設計方針書 Section 4-2 では具体的なコードとして href に /^(?!javascript:).*$/ の正規表現フィルタを適用するスキーマを示している。Issue は「相対パスの href を許可」という機能要件レベルの記述であり、設計方針書は「javascript: スキーム以外を許可」という実装レベルの記述。両者は意図としては整合しているが、Issue の記述からは「全ての href を許可するのか、相対パスのみ許可するのか」が読み取りにくい。実際の設計方針書のスキーマは「相対パスを含む全ての非 javascript: href を許可」しており、外部URLの href も保持される。これは外部URL をブラウザの新しいタブで開く要件（Issue 提案する解決策 1.）とも整合する。",
+      "suggestion": "この差異は実質的な矛盾ではなく、設計方針書が Issue の要件をより具体的に実装レベルで定義したものであり問題ない。Issue 側の記述を「相対パスおよび外部URLの href を許可し、javascript: スキームのみブロックする」と更新すると、より正確になる。ただし、Issue の更新は必須ではない。",
+      "target": "Issue F1-001, 設計方針書 Section 4-2"
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 6,
+    "nice_to_have": 3,
+    "total": 10
+  }
+}

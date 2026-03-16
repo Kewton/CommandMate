@@ -1,0 +1,164 @@
+{
+  "issue_number": 505,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "review_date": "2026-03-16",
+  "design_doc_path": "dev-reports/design/issue-505-file-link-navigation-design-policy.md",
+  "overall_assessment": "PASS_WITH_RECOMMENDATIONS",
+  "risk_level": "MEDIUM",
+  "summary": "設計方針書のセキュリティ設計は全体的に堅牢。多層防御アプローチ（クライアント簡易チェック + サーバーサイド path-validator.ts）は適切。主要な懸念点は (1) rehype-sanitize カスタムスキーマの正規表現が data:/vbscript: 等の危険スキームを許可する、(2) postMessage origin='null' の限界が文書化済みだが追加の防御策が可能、(3) HtmlSourceViewer の dangerouslySetInnerHTML が highlight.js 出力に依存しており間接的XSSリスクがある。致命的な脆弱性はないが、3件の should_fix と2件の nice_to_have を推奨する。",
+  "findings": [
+    {
+      "id": "DR4-001",
+      "severity": "should_fix",
+      "category": "A03:2021-Injection / XSS",
+      "title": "rehype-sanitize カスタムスキーマが data: / vbscript: スキームを許可する",
+      "description": "設計方針書 Section 4-2 のカスタムスキーマでは href 属性に対して /^(?!javascript:).*$/ の正規表現を使用している。これは javascript: スキームのみをブロックするが、data:text/html や vbscript: など他の危険なスキームは許可される。data:text/html,<script>alert(1)</script> のような href がサニタイズを通過する可能性がある。",
+      "current_design": "['href', /^(?!javascript:).*$/] -- javascript: のみ拒否",
+      "recommendation": "拒否リスト方式ではなく許可リスト方式に変更する。http:, https:, mailto:, tel:, #（アンカー）、および相対パスのみを許可する正規表現に変更することを推奨。例: /^(?:#|mailto:|tel:|https?:\\/\\/|(?![a-zA-Z][a-zA-Z0-9+.-]*:))/。あるいは rehype-sanitize のデフォルトスキーマ（既に安全なプロトコルのみ許可）をそのまま使用し、href の追加カスタマイズを行わない方がより安全。",
+      "owasp_category": "A03:2021-Injection",
+      "affected_files": ["src/components/worktree/MarkdownPreview.tsx", "src/lib/link-utils.ts"]
+    },
+    {
+      "id": "DR4-002",
+      "severity": "should_fix",
+      "category": "A03:2021-Injection / XSS",
+      "title": "HtmlSourceViewer の dangerouslySetInnerHTML が highlight.js の出力に依存",
+      "description": "既存の HtmlSourceViewer (HtmlPreview.tsx line 74) は dangerouslySetInnerHTML={{ __html: lines[idx] }} を使用している。highlight.js は通常安全な出力を生成するが、highlight.js にXSSバグがあった場合にはそのまま伝播する。Issue #505 の変更自体はこのコードに触れないが、HtmlPreview に onOpenFile を追加する際に postMessage 経由で受け取った href が source view にレンダリングされる経路がないことを確認する必要がある。",
+      "current_design": "HtmlSourceViewer は htmlContent を highlight.js で処理後に dangerouslySetInnerHTML で表示",
+      "recommendation": "Issue #505 のスコープでは HtmlSourceViewer への変更は不要だが、postMessage 経由の href 値がソースビューに反映されないことを実装時に確認すること。中長期的には highlight.js 出力に対する DOMPurify サニタイズの追加を検討。",
+      "owasp_category": "A03:2021-Injection",
+      "affected_files": ["src/components/worktree/HtmlPreview.tsx"]
+    },
+    {
+      "id": "DR4-003",
+      "severity": "should_fix",
+      "category": "A01:2021-Broken Access Control / Open Redirect",
+      "title": "外部URL の window.open に対するプロトコル検証が不足",
+      "description": "設計方針書では classifyLink() が http:// または https:// で始まるリンクを 'external' と判定し、window.open(href, '_blank', 'noopener,noreferrer') で開く。しかし classifyLink() の判定前に href が javascript:void(0) や data: スキームでないことの検証がない。classifyLink は '#' でなく、http/https でもないものを全て 'relative' に分類するため、javascript: は 'relative' となり resolveRelativePath で処理されるが、window.open に渡ることはない。ただし、HtmlPreview の postMessage 経由では iframe 内の href が任意の値を取りうるため、handleLinkFromIframe 側で classifyLink に渡る前の入力バリデーション（最大長チェック等）を追加することを推奨する。",
+      "current_design": "classifyLink() で http/https を判定後、window.open で開く。それ以外は relative 扱い",
+      "recommendation": "handleLinkFromIframe で受け取る href に対して (1) 最大長チェック（例: 2048文字）、(2) 制御文字の排除、(3) null/undefined チェックを classifyLink 呼び出し前に行う。classifyLink 自体のロジックは現状で安全（javascript: は relative 扱いとなり resolveRelativePath で null 返却される）だが、入力サニタイズを追加することで防御を強化できる。",
+      "owasp_category": "A01:2021-Broken Access Control",
+      "affected_files": ["src/lib/link-utils.ts", "src/components/worktree/HtmlPreview.tsx"]
+    },
+    {
+      "id": "DR4-004",
+      "severity": "nice_to_have",
+      "category": "A05:2021-Security Misconfiguration / postMessage Security",
+      "title": "postMessage のメッセージ偽造に対する追加防御策",
+      "description": "設計方針書 Section 4-3 と DR1-007 で postMessage の origin='null' の限界と多層防御アプローチが詳細に文書化されている点は高く評価する。現状の設計（origin 検証 + namespace prefix + classifyLink + resolveRelativePath + サーバーサイド検証）は十分な防御層を提供している。追加防御として、iframe に注入するスクリプト内でランダムな nonce を生成し postMessage に含め、受信側で検証する方式を検討できるが、sandbox iframe では sessionStorage/crypto API の利用に制限があるため実装コストが高い。",
+      "current_design": "origin='null' + namespace prefix 'commandmate:link-click' + 多層防御",
+      "recommendation": "現状の多層防御で十分。追加の nonce 方式は実装コスト対効果が低いため不要。ただし、postMessage リスナーの登録タイミングを iframe のロード完了後に限定することで、iframe ロード前の競合メッセージを排除できる。useEffect の依存配列に iframe ref を追加することを検討。",
+      "owasp_category": "A05:2021-Security Misconfiguration",
+      "affected_files": ["src/components/worktree/HtmlPreview.tsx"]
+    },
+    {
+      "id": "DR4-005",
+      "severity": "nice_to_have",
+      "category": "A07:2021-Identification and Authentication Failures / DoS",
+      "title": "悪意のあるリンクによるリソース枯渇の可能性",
+      "description": "Markdown ファイル内に大量の相対パスリンクが含まれ、ユーザーが連続クリックした場合、各クリックが onOpenFile -> useFileTabs.openFile -> ファイル取得API呼び出しを発生させる。MAX_FILE_TABS=30 によりタブ数は制限されるが、ファイル取得API への連続リクエストに対するレート制限は設計に含まれていない。ただしこれはローカルツール（localhost）であり、外部からの攻撃対象ではないため、リスクは低い。",
+      "current_design": "MAX_FILE_TABS=30 でタブ数制限。API レート制限なし",
+      "recommendation": "ローカルツールのため即座の対応は不要。将来リモートアクセスを許可する場合には、ファイル取得APIにレート制限を追加すること。クライアントサイドでは onOpenFile の呼び出しに debounce（300ms程度）を追加することで UX 改善にもつながる。",
+      "owasp_category": "A07:2021-Identification and Authentication Failures",
+      "affected_files": ["src/hooks/useFileTabs.ts", "src/components/worktree/MarkdownPreview.tsx"]
+    }
+  ],
+  "security_checklist": {
+    "A01_Broken_Access_Control": {
+      "status": "PASS",
+      "notes": "パストラバーサル防止はサーバーサイド path-validator.ts（isPathSafe + resolveAndValidateRealPath）で堅牢に実装。symlink 防御も含む。クライアントサイドは UX 目的の簡易チェックと明記されており設計として適切。"
+    },
+    "A02_Cryptographic_Failures": {
+      "status": "NOT_APPLICABLE",
+      "notes": "Issue #505 の変更範囲に暗号化関連の処理は含まれない。"
+    },
+    "A03_Injection": {
+      "status": "PASS_WITH_RECOMMENDATIONS",
+      "notes": "rehype-sanitize のカスタムスキーマで javascript: のみ拒否するブロックリスト方式は不十分（DR4-001）。iframe sandbox による XSS 防御は適切。dangerouslySetInnerHTML の使用箇所は既存コードであり Issue #505 のスコープ外だが注意が必要（DR4-002）。"
+    },
+    "A04_Insecure_Design": {
+      "status": "PASS",
+      "notes": "多層防御アプローチ（クライアント簡易チェック + サーバーサイド検証）、sandbox iframe のセキュリティ境界、postMessage の trust-nothing 設計は適切。"
+    },
+    "A05_Security_Misconfiguration": {
+      "status": "PASS",
+      "notes": "iframe sandbox 属性は safe='' / interactive='allow-scripts' のみで allow-same-origin/allow-top-navigation を付与しない設計は正しい。CSP ヘッダーへの影響は限定的（既存の proxy モジュールで CSP 関連ヘッダーを除去している）。"
+    },
+    "A06_Vulnerable_Components": {
+      "status": "PASS",
+      "notes": "新規外部依存パッケージの追加なし（DR3-008 で確認済み）。rehype-sanitize, highlight.js は既存依存。"
+    },
+    "A07_Authentication_Failures": {
+      "status": "NOT_APPLICABLE",
+      "notes": "認証は既存の middleware.ts で処理。Issue #505 は認証に変更なし。"
+    },
+    "A08_Software_Integrity": {
+      "status": "PASS",
+      "notes": "iframe srcDoc への script injection は HtmlPreview が管理するハードコードされたスクリプトのみ。ユーザー入力がスクリプト内容に混入する経路はない。"
+    },
+    "A09_Logging_Monitoring": {
+      "status": "NOT_APPLICABLE",
+      "notes": "Issue #505 の変更範囲にログ・監視の変更は含まれない。path-validator.ts は既にセキュリティイベントのログを出力している。"
+    },
+    "A10_SSRF": {
+      "status": "PASS",
+      "notes": "外部URL は window.open でブラウザ側で開く設計であり、サーバーサイドでのフェッチは行わない。SSRF リスクなし。"
+    }
+  },
+  "path_traversal_analysis": {
+    "client_side": {
+      "function": "resolveRelativePath (src/lib/link-utils.ts)",
+      "mechanism": "new URL() による正規化 + 空パスチェック",
+      "is_security_boundary": false,
+      "notes": "設計方針書で明確に UX 目的の簡易フィルタと位置付けられている（DR1-005）。適切な設計判断。"
+    },
+    "server_side": {
+      "functions": ["isPathSafe", "resolveAndValidateRealPath"],
+      "file": "src/lib/security/path-validator.ts",
+      "is_security_boundary": true,
+      "coverage": [
+        "空パスチェック",
+        "null バイト検出",
+        "URL エンコーディングバイパス防止",
+        "パス正規化後の相対パス検証",
+        "symlink トラバーサル防止（realpathSync）",
+        "存在しないパスの祖先ディレクトリ検証",
+        "dangling symlink 検出"
+      ],
+      "notes": "path-validator.ts は包括的なパストラバーサル防止を提供。ファイル取得 API（src/app/api/worktrees/[id]/files/[...path]/route.ts）で使用されていることを確認済み。"
+    },
+    "gap_analysis": "クライアントサイドとサーバーサイドの間にギャップなし。onOpenFile -> useFileTabs.openFile -> ファイル取得API -> path-validator.ts の一貫したチェーンが存在する。"
+  },
+  "iframe_security_analysis": {
+    "sandbox_safe_mode": {
+      "attribute": "sandbox=\"\"",
+      "capabilities": "全機能無効化",
+      "link_support": false,
+      "risk": "NONE"
+    },
+    "sandbox_interactive_mode": {
+      "attribute": "sandbox=\"allow-scripts\"",
+      "capabilities": "スクリプト実行のみ許可",
+      "blocked": ["allow-same-origin", "allow-top-navigation", "allow-forms", "allow-popups"],
+      "link_support": true,
+      "risk": "LOW",
+      "notes": "allow-same-origin がないため DOM 直接アクセス不可。allow-top-navigation がないためページ遷移不可。allow-popups がないため popup も不可。スクリプトは postMessage 経由でのみ親と通信可能。"
+    },
+    "sandbox_escape_risk": "LOW - allow-same-origin を付与しないため、iframe 内のスクリプトが sandbox 属性を変更することは不可能。既知のブラウザ sandbox escape 脆弱性は Chrome/Firefox/Safari の最新版では修正済み。",
+    "clickjacking_risk": "NONE - iframe は srcDoc で表示しており外部サイトを埋め込んでいない。HtmlPreview 自体が clickjacking 対象になるリスクはローカルツールのため極めて低い。"
+  },
+  "recommendations_summary": {
+    "must_fix": [],
+    "should_fix": [
+      "DR4-001: rehype-sanitize カスタムスキーマを拒否リストから許可リスト方式に変更",
+      "DR4-002: postMessage href が HtmlSourceViewer に反映されないことの実装時確認",
+      "DR4-003: handleLinkFromIframe の入力に最大長・制御文字チェックを追加"
+    ],
+    "nice_to_have": [
+      "DR4-004: postMessage リスナー登録タイミングの最適化",
+      "DR4-005: onOpenFile 呼び出しへの debounce 追加"
+    ]
+  }
+}
