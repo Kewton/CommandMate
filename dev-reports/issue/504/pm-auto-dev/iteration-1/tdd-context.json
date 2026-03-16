@@ -1,0 +1,19 @@
+{
+  "issue_number": 504,
+  "acceptance_criteria": [
+    "リポジトリグループヘッダーのリポジトリ名の左に色付きドットが表示される",
+    "同じリポジトリ名からは常に同じ色が生成される",
+    "異なるリポジトリ名からは視覚的に区別可能な色が生成される",
+    "既存のCLIステータスドットと混同しないデザインであること（w-2.5 h-2.5、GroupHeader行に配置）",
+    "npm run test:unit パス",
+    "npm run lint パス"
+  ],
+  "implementation_tasks": [
+    "src/lib/sidebar-utils.ts に simpleHash（非エクスポート）と generateRepositoryColor（エクスポート）関数を追加。彩度・明度は名前付き定数（REPO_DOT_SATURATION, REPO_DOT_LIGHTNESS）で定義。HSL形式文字列を返す。",
+    "src/components/layout/Sidebar.tsx の GroupHeader に色付きドット要素を追加。ChevronIconの後、GroupIconの前に配置。w-2.5 h-2.5 rounded-full flex-shrink-0。style={{ backgroundColor: generateRepositoryColor(repositoryName) }}",
+    "tests/unit/lib/sidebar-utils.test.ts にテスト追加: 冪等性、異なる名前で異なるhue、空文字列、特殊文字、HSL形式チェック"
+  ],
+  "target_coverage": 80,
+  "design_doc_path": "dev-reports/design/issue-504-repository-color-dot-design-policy.md",
+  "work_plan_path": "dev-reports/issue/504/work-plan.md"
+}

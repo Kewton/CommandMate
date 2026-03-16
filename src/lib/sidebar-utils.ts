@@ -57,9 +57,39 @@ export const STATUS_PRIORITY: Record<BranchStatus, number> = {
   idle: 4,
 };
 
+/** Saturation value for repository color dots (%) */
+export const REPO_DOT_SATURATION = 65;
+
+/** Lightness value for repository color dots (%) */
+export const REPO_DOT_LIGHTNESS = 60;
+
 // ============================================================================
 // Functions
 // ============================================================================
+
+/**
+ * Simple hash function (djb2-like algorithm).
+ * Produces a numeric hash from a string input.
+ */
+function simpleHash(str: string): number {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash + str.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+/**
+ * Generate a deterministic HSL color string from a repository name.
+ * The same name always produces the same color.
+ *
+ * @param repositoryName - Repository name to generate color for
+ * @returns HSL color string, e.g. "hsl(210, 65%, 60%)"
+ */
+export function generateRepositoryColor(repositoryName: string): string {
+  const hue = simpleHash(repositoryName) % 360;
+  return `hsl(${hue}, ${REPO_DOT_SATURATION}%, ${REPO_DOT_LIGHTNESS}%)`;
+}
 
 /**
  * Sort branch items by the specified key and direction

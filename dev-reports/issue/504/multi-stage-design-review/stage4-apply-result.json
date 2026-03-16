@@ -1,0 +1,18 @@
+{
+  "stage": 4,
+  "applied_findings": [
+    {
+      "id": "DR4-006",
+      "severity": "nice_to_have",
+      "title": "generateRepositoryColorに対する入力バリデーションの明示的記載",
+      "action": "セクション5のリスク評価表に「入力バリデーション」行を追加。repositoryNameがpath.basename由来のサーバーサイド値であり、関数レベルの入力バリデーションは不要である旨を明記。セクション12にStage 4セキュリティレビュー指摘事項サマリー・OWASP準拠状況・実装チェックリストを追加"
+    }
+  ],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-504-repository-color-dot-design-policy.md",
+  "changes_summary": {
+    "section_5": "リスク評価表に「入力バリデーション：不要」行を追加（DR4-006）",
+    "section_12_new": "Stage 4セキュリティレビュー指摘事項サマリーを新規追加（対応済み1件、info 5件、OWASP Top 10準拠状況、セキュリティ総合評価、実装チェックリスト）"
+  }
+}

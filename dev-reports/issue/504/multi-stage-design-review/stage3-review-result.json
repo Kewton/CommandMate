@@ -1,0 +1,77 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "findings": [
+    {
+      "id": "DR3-001",
+      "severity": "should_fix",
+      "title": "Sidebar.test.tsxへの影響が変更ファイル一覧に未記載",
+      "description": "設計方針書のセクション8「変更ファイル一覧」には3ファイルのみ記載されているが、tests/unit/components/layout/Sidebar.test.tsxにはGroupHeaderのdata-testid='group-header'を参照するテストが7箇所存在する。GroupHeaderのレイアウト変更（色ドット要素追加）により、既存テストのスナップショットや構造的アサーションが影響を受ける可能性がある。直接的にテストが壊れる可能性は低い（テストはdata-testidベースでDOM構造に依存していない）が、変更影響範囲として認識し設計書に記載すべきである。",
+      "location": "設計方針書 セクション8 変更ファイル一覧",
+      "recommendation": "変更ファイル一覧にtests/unit/components/layout/Sidebar.test.tsxを「確認対象（変更不要の見込み）」として追記する。GroupHeaderの色ドット追加後にSidebar.test.tsxの全テストが引き続きパスすることを確認ステップに含める。"
+    },
+    {
+      "id": "DR3-002",
+      "severity": "should_fix",
+      "title": "モバイルドロワーでの色ドット表示に関する影響分析が不足",
+      "description": "AppShell.tsxのモバイルレイアウトでは、サイドバーはw-72（288px）の固定幅ドロワーとして表示される。GroupHeaderにはChevronIcon(w-3)、ColorDot(w-2.5)、GroupIcon(w-3)、repositoryName(truncate)、branchCount が横並びで配置される。設計書セクション6の手動確認項目に「モバイルドロワー幅でのレイアウト崩れなし」が記載されているが、セクション3.2のレイアウト仕様で具体的にモバイル幅288pxでの各要素の合計幅を検証していない。要素追加により長いリポジトリ名のtruncateが早期に発動する可能性があるが、これは機能上問題ないことを設計書で明確にすべき。",
+      "location": "設計方針書 セクション3.2 / セクション6",
+      "recommendation": "セクション3.2に、モバイルドロワー幅（288px）でのGroupHeader横並び要素のサイズ内訳（px-4パディング左右32px + Chevron 12px + ColorDot 10px + gap 8px + GroupIcon 12px + gap 8px + Count + リポジトリ名 = truncateで十分収まる）の簡易検証結果を追記する。"
+    },
+    {
+      "id": "DR3-003",
+      "severity": "nice_to_have",
+      "title": "SortSelector.tsxおよびSidebarContext.tsxの間接影響確認が未記載",
+      "description": "sidebar-utils.tsからimportしているファイルは、Sidebar.tsx以外にSortSelector.tsx（sidebar-utilsの型のみ使用）およびSidebarContext.tsx（SortKey, SortDirection, ViewMode型をimport）がある。今回の変更はadditive change（generateRepositoryColor関数の追加のみ）であり、既存エクスポートに影響しないためこれらのファイルへの実質的影響はない。しかし、影響分析の完全性のため、sidebar-utils.tsの全依存先を列挙し「影響なし」と明記することが望ましい。",
+      "location": "設計方針書 セクション2 依存関係 / セクション8 変更ファイル一覧",
+      "recommendation": "セクション2の依存関係またはセクション8に、sidebar-utils.tsをimportしている全ファイル（Sidebar.tsx, SortSelector.tsx, SidebarContext.tsx, sidebar-utils.test.ts）を列挙し、Sidebar.tsxとテスト以外は影響なし（既存APIの変更なし）と明記する。"
+    },
+    {
+      "id": "DR3-004",
+      "severity": "nice_to_have",
+      "title": "バンドルサイズへの影響評価が記載されていない",
+      "description": "generateRepositoryColor関数は純粋なTypeScript関数で外部依存なし、コード量は約20行程度。バンドルサイズへの影響は無視できるレベルだが、設計方針書にバンドルサイズ影響の評価が一切記載されていない。新規外部ライブラリの追加がないことは明記されているが、tree-shakingやコード分割への影響も含めて明示的に「影響なし」と述べるとレビュアーの確認コストが下がる。",
+      "location": "設計方針書 セクション4 パフォーマンス設計",
+      "recommendation": "セクション4に「バンドルサイズ影響: 約20行の純粋関数追加のみ。外部ライブラリ追加なし。sidebar-utils.tsはクライアントコンポーネント（Sidebar.tsx）から使用されるため既存のクライアントバンドルに含まれ、追加のコード分割影響なし。」と追記する。"
+    },
+    {
+      "id": "DR3-005",
+      "severity": "info",
+      "title": "後方互換性に問題なし",
+      "description": "今回の変更はすべてadditive changeである。sidebar-utils.tsへの新関数追加は既存エクスポート（sortBranches, groupBranches, SortKey, SortDirection, ViewMode, BranchGroup, STATUS_PRIORITY）に影響しない。Sidebar.tsxのGroupHeaderコンポーネントはファイル内ローカル関数であり外部エクスポートされていないため、内部レイアウト変更は外部への影響がない。APIやデータ構造の変更もなく、後方互換性の懸念はない。",
+      "location": "設計方針書全体",
+      "recommendation": "対応不要。後方互換性が維持されていることを確認済み。"
+    },
+    {
+      "id": "DR3-006",
+      "severity": "info",
+      "title": "既存機能の破壊リスクは極めて低い",
+      "description": "GroupHeaderへの色ドット追加は、(1)既存のDOM構造にspan要素を1つ追加するのみ、(2)既存テストはdata-testidベースのクエリを使用しており子要素の追加で壊れない、(3)flex layoutのためgap-2で自動的にスペーシングされる、(4)flex-shrink-0によりドットが縮小されない。これらにより既存機能の破壊リスクは極めて低い。",
+      "location": "設計方針書 セクション3.2",
+      "recommendation": "対応不要。既存機能破壊リスクが低いことを確認済み。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 2,
+    "nice_to_have": 2,
+    "info": 2,
+    "total": 6
+  },
+  "review_metadata": {
+    "reviewer": "architecture-review-agent",
+    "review_date": "2026-03-16",
+    "design_doc_version": "post-stage2",
+    "codebase_files_examined": [
+      "src/lib/sidebar-utils.ts",
+      "src/components/layout/Sidebar.tsx",
+      "src/components/layout/AppShell.tsx",
+      "src/contexts/SidebarContext.tsx",
+      "src/components/sidebar/SortSelector.tsx",
+      "src/components/sidebar/BranchListItem.tsx",
+      "tests/unit/lib/sidebar-utils.test.ts",
+      "tests/unit/components/layout/Sidebar.test.tsx"
+    ]
+  }
+}

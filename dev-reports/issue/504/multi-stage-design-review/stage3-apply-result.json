@@ -1,0 +1,44 @@
+{
+  "stage": 3,
+  "applied_findings": [
+    {
+      "id": "DR3-001",
+      "severity": "should_fix",
+      "title": "Sidebar.test.tsxへの影響が変更ファイル一覧に未記載",
+      "action": "セクション8の変更ファイル一覧にtests/unit/components/layout/Sidebar.test.tsxを「確認対象（変更不要の見込み）」として追記。実装チェックリストに全テストパス確認を追加"
+    },
+    {
+      "id": "DR3-002",
+      "severity": "should_fix",
+      "title": "モバイルドロワーでの色ドット表示に関する影響分析が不足",
+      "action": "セクション3.2にモバイルドロワー幅（288px）での各要素サイズ内訳テーブルと検証結果を追記。ColorDot追加による約18pxの幅減少は許容範囲と明記"
+    },
+    {
+      "id": "DR3-003",
+      "severity": "nice_to_have",
+      "title": "SortSelector.tsxおよびSidebarContext.tsxの間接影響確認が未記載",
+      "action": "セクション2の依存関係にsidebar-utils.tsの全依存先一覧テーブルを追加。各ファイルの依存内容と影響有無を明記"
+    },
+    {
+      "id": "DR3-004",
+      "severity": "nice_to_have",
+      "title": "バンドルサイズへの影響評価が記載されていない",
+      "action": "セクション4にバンドルサイズ影響サブセクションを追加。約20行の純粋関数・外部ライブラリなし・既存バンドルに含まれるため影響なしと明記"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "DR3-005",
+      "severity": "info",
+      "title": "後方互換性に問題なし",
+      "reason": "確認結果の記録のみ。設計書への変更不要"
+    },
+    {
+      "id": "DR3-006",
+      "severity": "info",
+      "title": "既存機能の破壊リスクは極めて低い",
+      "reason": "確認結果の記録のみ。設計書への変更不要"
+    }
+  ],
+  "design_doc_updated": true
+}

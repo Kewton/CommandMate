@@ -1,0 +1,54 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "category": "design_principle",
+      "title": "simpleHash関数のエクスポート可否とテスト可能性が未定義",
+      "description": "設計方針書ではgenerateRepositoryColorの公開APIのみ記載されているが、内部で使用するsimpleHash関数をエクスポートするかどうかが明記されていない。単一責任原則（SRP）の観点から、ハッシュ計算と色生成は異なる責務である。simpleHashが非公開の場合、ハッシュ関数単体のテストが困難になる。一方、現在のスコープではgenerateRepositoryColorのテストで間接的にカバーできるため、過度な分離はYAGNI違反になる。",
+      "suggestion": "simpleHashはモジュール内プライベート関数（非エクスポート）として実装し、テストはgenerateRepositoryColor経由の結合テストで行う方針を設計書に明記すること。将来的にハッシュ関数を他箇所で再利用する必要が生じた場合にのみエクスポートを検討する旨を記載する。"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "nice_to_have",
+      "category": "design_principle",
+      "title": "HSL文字列フォーマットがマジックナンバーを含む",
+      "description": "彩度65%、明度60%が設計書内で固定値として定義されているが、実装時にこれらがリテラル値としてコード内に埋め込まれる可能性がある。KISS原則に照らすと定数化は適切だが、DRY原則の観点からこれらの値が複数箇所に散在しないよう注意が必要。",
+      "suggestion": "彩度・明度の固定値を名前付き定数（例: REPO_DOT_SATURATION, REPO_DOT_LIGHTNESS）として定義する方針を設計書に追記すること。現状のスコープでは1箇所のみの使用なので、関数内定数で十分。"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "nice_to_have",
+      "category": "design_principle",
+      "title": "色衝突（ハッシュ衝突によるhue近接）への言及がない",
+      "description": "djb2ハッシュを360で剰余した場合、異なるリポジトリ名が近いhue値を生成する可能性がある。例えばhue差が10度以内の場合、人間には同じ色に見える。テストケースに「異なるリポジトリ名で異なるhue値」とあるが、実際にはハッシュ衝突やhue近接は確率的に発生しうる。これはKISS原則の範囲で許容可能な制約だが、設計上の制約として明記すべき。",
+      "suggestion": "設計書のトレードオフセクションに、hue近接による色の類似は許容する旨と、その理由（リポジトリ数が少数であること、完全な衝突回避は複雑性が大幅に増すこと）を明記する。テストケースの「異なるhue値」は「異なるハッシュ値から算出されたhue値」に表現を修正する。"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "should_fix",
+      "category": "design_principle",
+      "title": "ライトテーマ対応の除外判断が明示されていない",
+      "description": "設計書では「ダーク背景固定のため、一組の値で十分」と記載しているが、プロジェクトが将来的にライトテーマをサポートする可能性についての判断が不明確。YAGNI原則に基づきライトテーマ対応を現時点で実装しないのは正しいが、その除外判断を意識的に行ったことを明記すべき。",
+      "suggestion": "不採用にした代替案セクションまたはトレードオフセクションに「ライトテーマ対応: 現時点ではダーク背景固定のため対応しない。将来ライトテーマを導入する場合は、彩度・明度パラメータをテーマに応じて切り替える拡張が必要」と明記する。"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "nice_to_have",
+      "category": "design_principle",
+      "title": "GroupHeaderのプロパティ拡張に関する開放閉鎖原則への配慮",
+      "description": "GroupHeaderコンポーネントは現在4つのpropsをインラインの型リテラルで定義している。今回colorプロパティが追加されるが、設計書ではgenerateRepositoryColorをGroupHeader内部で直接呼び出すのか、親からpropsとして渡すのかが明確でない。開放閉鎖原則（OCP）の観点からは、GroupHeaderは表示に徹し、色の算出ロジックはGroupHeader外部（呼び出し側）で行うべき。",
+      "suggestion": "設計書に、generateRepositoryColorの呼び出し箇所を明記する。推奨は呼び出し側（Sidebar本体）でcolorを算出しGroupHeaderにpropsとして渡すパターン。ただし、現時点の実装規模ではGroupHeader内で直接呼び出しても実質的な問題はないため、KISSを優先してGroupHeader内部で呼び出す方式も許容と注記する。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 2,
+    "nice_to_have": 3,
+    "total": 5
+  },
+  "overall_assessment": "設計方針書は全体として高い品質を持ち、KISS/YAGNI原則に沿ったシンプルで適切なスコープの設計になっている。変更量が少なく（約65行）、影響範囲が明確に限定されている点は評価できる。新規依存ライブラリなし、純粋関数ベースの設計、既存ファイルへの追加という方針はすべて設計原則に合致している。指摘事項はいずれも設計書の記載の明確化に関するもので、設計自体の根本的な問題は見つからなかった。"
+}

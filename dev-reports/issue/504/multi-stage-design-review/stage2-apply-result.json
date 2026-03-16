@@ -1,0 +1,50 @@
+{
+  "stage": 2,
+  "applied_findings": [
+    {
+      "id": "DR2-001",
+      "severity": "should_fix",
+      "title": "useMemo保護に関する記述が不正確",
+      "action": "セクション4のパフォーマンス設計を修正。generateRepositoryColorはuseMemo保護対象外であり、GroupHeader再レンダリング時に毎回呼ばれるが計算コストが無視できるため問題ない旨を正確に記載。セクション3.1の設計判断表のメモ化行も合わせて修正"
+    },
+    {
+      "id": "DR2-002",
+      "severity": "nice_to_have",
+      "title": "Sidebar.tsxのimport文への追加が変更ファイル一覧に未記載",
+      "action": "セクション8の変更ファイル一覧にimport文へのgenerateRepositoryColor追加を明記"
+    },
+    {
+      "id": "DR2-003",
+      "severity": "nice_to_have",
+      "title": "インラインstyle属性によるbackgroundColorはコードベース初の使用パターン",
+      "action": "セクション3.2に既存CLIステータスドットとのスタイル適用方法の違いと、本パターン採用の技術的理由を追記"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "DR2-004",
+      "severity": "info",
+      "title": "GroupHeader/GroupIcon/ChevronIconの構造記述は正確",
+      "reason": "対応不要。正確に記述されていることの確認"
+    },
+    {
+      "id": "DR2-005",
+      "severity": "info",
+      "title": "CLIステータスドットの仕様記述は正確",
+      "reason": "対応不要。正確に記述されていることの確認"
+    },
+    {
+      "id": "DR2-006",
+      "severity": "info",
+      "title": "テスト戦略は既存テストパターンと整合",
+      "reason": "対応不要。既存パターンとの整合性確認"
+    },
+    {
+      "id": "DR2-007",
+      "severity": "info",
+      "title": "sidebar-utils.tsの既存エクスポートとの整合性確認済み",
+      "reason": "対応不要。additive changeで既存APIに影響なし"
+    }
+  ],
+  "design_doc_updated": true
+}

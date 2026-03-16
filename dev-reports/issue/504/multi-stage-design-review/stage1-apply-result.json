@@ -1,0 +1,37 @@
+{
+  "stage": 1,
+  "applied_findings": [
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "title": "simpleHash関数のエクスポート可否とテスト可能性",
+      "action": "セクション3.1にsimpleHashを非エクスポート（プライベート）とする方針を明記。テストはgenerateRepositoryColor経由で実施する旨を追記"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "should_fix",
+      "title": "ライトテーマ対応の除外判断",
+      "action": "セクション7の不採用代替案にライトテーマ非対応をYAGNI原則に基づく意識的決定として追記"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "nice_to_have",
+      "title": "HSL固定値のマジックナンバー",
+      "action": "セクション3.1の設計判断表に名前付き定数（REPO_DOT_SATURATION等）の使用方針を追記"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "nice_to_have",
+      "title": "色衝突（hue近接）への言及",
+      "action": "セクション7のトレードオフ表にhue近接の許容方針を追記。セクション6のテストケース記述を修正"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "nice_to_have",
+      "title": "GroupHeaderでのgenerateRepositoryColor呼び出し箇所",
+      "action": "セクション7のトレードオフ表にGroupHeader内部での直接呼び出し方針を追記"
+    }
+  ],
+  "skipped_findings": [],
+  "design_doc_updated": true
+}
