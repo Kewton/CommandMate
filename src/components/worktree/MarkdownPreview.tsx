@@ -20,7 +20,7 @@
 
 'use client';
 
-import React, { memo, useMemo, useCallback } from 'react';
+import React, { memo, useMemo, useCallback, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
@@ -77,11 +77,17 @@ export const MarkdownPreview = memo(function MarkdownPreview({
   onOpenFile,
   currentFilePath,
 }: MarkdownPreviewProps) {
+  // Use refs to avoid re-creating handleLinkClick when props change.
+  // This prevents ReactMarkdown from rebuilding the entire DOM tree
+  // (which makes links unclickable due to constant element detach/reattach).
+  const onOpenFileRef = useRef(onOpenFile);
+  onOpenFileRef.current = onOpenFile;
+  const currentFilePathRef = useRef(currentFilePath);
+  currentFilePathRef.current = currentFilePath;
+
   /**
    * Handle link click based on link type. [DR1-002]
-   * - relative: resolve path and call onOpenFile
-   * - external: open in new window
-   * - anchor: default browser scroll behavior
+   * Uses refs for onOpenFile/currentFilePath so the callback identity is stable.
    */
   const handleLinkClick = useCallback(
     (e: React.MouseEvent<HTMLAnchorElement>, href: string) => {
@@ -100,20 +106,23 @@ export const MarkdownPreview = memo(function MarkdownPreview({
           break;
         case 'relative': {
           e.preventDefault();
-          if (currentFilePath && onOpenFile) {
-            const resolvedPath = resolveRelativePath(currentFilePath, sanitized);
+          const filePath = currentFilePathRef.current;
+          const openFile = onOpenFileRef.current;
+          if (filePath && openFile) {
+            const resolvedPath = resolveRelativePath(filePath, sanitized);
             if (resolvedPath) {
-              onOpenFile(resolvedPath);
+              openFile(resolvedPath);
             }
           }
           break;
         }
       }
     },
-    [onOpenFile, currentFilePath],
+    [],
   );
 
   // Memoized ReactMarkdown components configuration (DRY principle)
+  // Empty deps: handleLinkClick identity is stable via refs above.
   const markdownComponents: Partial<Components> = useMemo(
     () => ({
       code: MermaidCodeBlock, // [Issue #100] mermaid diagram support
@@ -136,13 +145,20 @@ export const MarkdownPreview = memo(function MarkdownPreview({
     [handleLinkClick],
   );
 
+  // Memoize plugin arrays to prevent ReactMarkdown from re-rendering on every parent render.
+  // New array references cause ReactMarkdown to fully rebuild the DOM tree,
+  // which detaches link elements and makes them unclickable.
+  const remarkPlugins = useMemo(() => [remarkGfm], []);
+  const rehypePlugins = useMemo(
+    () => [[rehypeSanitize, REHYPE_SANITIZE_SCHEMA], rehypeHighlight],
+    [],
+  );
+
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      rehypePlugins={[
-        [rehypeSanitize, REHYPE_SANITIZE_SCHEMA],
-        rehypeHighlight,
-      ]}
+      remarkPlugins={remarkPlugins}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      rehypePlugins={rehypePlugins as any}
       components={markdownComponents}
     >
       {content}
