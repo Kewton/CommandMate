@@ -42,6 +42,27 @@ const MAX_MARP_CONTENT_LENGTH = 1_000_000;
  * [Issue #490] Mobile HTML preview with tab switching (Source/Preview)
  * No split view on mobile due to space constraints.
  */
+/**
+ * Script injected into interactive mode iframes (mobile) to intercept link clicks.
+ * External URLs are opened in a new browser tab via postMessage -> window.open.
+ */
+const MOBILE_LINK_CLICK_SCRIPT = `
+<script>
+document.addEventListener('click', function(e) {
+  var target = e.target;
+  while (target && target.tagName !== 'A') {
+    target = target.parentElement;
+  }
+  if (target && target.href) {
+    e.preventDefault();
+    parent.postMessage({
+      type: 'commandmate:link-click',
+      href: target.getAttribute('href')
+    }, '*');
+  }
+});
+</script>`;
+
 function HtmlPreviewMobile({
   htmlContent,
   filePath,
@@ -63,6 +84,36 @@ function HtmlPreviewMobile({
     }
     setSandboxLevel(newLevel);
   }, [filePath]);
+
+  // In interactive mode, inject link click script; in safe mode, pass as-is
+  const iframeSrcDoc = useMemo(() => {
+    if (sandboxLevel !== 'interactive') return htmlContent;
+    if (htmlContent.includes('</body>')) {
+      return htmlContent.replace('</body>', `${MOBILE_LINK_CLICK_SCRIPT}</body>`);
+    }
+    return htmlContent + MOBILE_LINK_CLICK_SCRIPT;
+  }, [htmlContent, sandboxLevel]);
+
+  // Listen for postMessage from iframe and open external links in new browser tab
+  useEffect(() => {
+    if (sandboxLevel !== 'interactive') return;
+
+    const handler = (event: MessageEvent) => {
+      if (event.origin !== 'null') return;
+      const data = event.data;
+      if (!data || typeof data !== 'object') return;
+      if (data.type !== 'commandmate:link-click') return;
+      if (typeof data.href !== 'string') return;
+
+      const href = data.href;
+      if (href.startsWith('http://') || href.startsWith('https://')) {
+        window.open(href, '_blank', 'noopener,noreferrer');
+      }
+    };
+
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, [sandboxLevel]);
 
   const highlightedHtml = useMemo(() => {
     try {
@@ -145,7 +196,7 @@ function HtmlPreviewMobile({
         ) : (
           <iframe
             key={`${filePath}-${sandboxLevel}`}
-            srcDoc={htmlContent}
+            srcDoc={iframeSrcDoc}
             sandbox={SANDBOX_ATTRIBUTES[sandboxLevel]}
             title={`HTML Preview: ${filePath}`}
             className="w-full h-full border-0 bg-white"
