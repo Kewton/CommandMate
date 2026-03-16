@@ -1,0 +1,45 @@
+{
+  "issue_number": 506,
+  "iteration": 2,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-03-16",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "createPortal使用時のテスト手法に関する注意事項をテスト観点セクションに追加。Portal先DOM検証方法（document.querySelector/within(document.body)の使用）、既存Wrapper構成での制約、テスト環境でのcreatePortalモック戦略の検討を記載。テスト影響セクションにもcreatePortal考慮の注記を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "sync API処理のタイムアウトに関する記載を動作フローセクションに追加。通常1-3秒、リポジトリ数次第で10秒以上の可能性を明記。ローディング表示で対応し、将来的なAbortController対応は別Issue検討とする方針を記載"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "SyncButtonの配置形態を設計判断セクションとして新規追加。Sidebar.tsx内のインラインコンポーネントとして定義し、既存のGroupHeader/ViewModeToggle等のパターンに準拠する方針を明記。実装タスクの記載も整合するよう更新。影響範囲テーブルにもインラインコンポーネントパターンの注記を追加"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 3,
+    "applied": 3,
+    "skipped": 0
+  },
+  "cumulative_summary": {
+    "total_iterations": 4,
+    "total_findings_all_stages": 20,
+    "total_applied": 19,
+    "total_skipped": 1,
+    "skipped_detail": "Stage3-NTH-1: CLAUDE.mdモジュール一覧はレイアウトコンポーネントを記載対象外"
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/506"
+  }
+}

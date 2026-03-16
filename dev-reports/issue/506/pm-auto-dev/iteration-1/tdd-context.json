@@ -1,0 +1,33 @@
+{
+  "issue_number": 506,
+  "acceptance_criteria": [
+    "サイドバーヘッダーにブランチ同期ボタンが表示される",
+    "同期ボタンをクリックすることで、sync APIが呼ばれ、worktree一覧が最新化される（手動同期）",
+    "同期ボタンクリック後、新しく作成したworktreeがリロードなしでサイドバーに反映される",
+    "同期中はローディング表示がされ、ボタンがdisabled状態となり連打できない",
+    "同期成功/失敗時にToast通知でフィードバックが表示される",
+    "モバイルドロワー内のサイドバーでも同期ボタンが正しく動作する",
+    "SyncButtonコンポーネントが分離され、useToastのstateスコープがSyncButton内に限定されている",
+    "npm run test:unit パス",
+    "npm run lint パス"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: locales/en/common.json と locales/ja/common.json にsyncSuccess, syncError, syncAuthError, syncButtonLabel キーを追加",
+    "Task 1.2: Sidebar.tsx内にSyncIcon SVGコンポーネント追加（インラインSVG回転矢印アイコン）",
+    "Task 1.2: Sidebar.tsx内にSyncButton memo化インラインコンポーネント追加（useRef isSyncingRef、useToast、useTranslations('common')、handleSync: repositoryApi.sync() → refreshWorktrees() → showToast）",
+    "Task 1.2: SidebarヘッダーのViewModeToggle・SortSelector横にSyncButton配置",
+    "Task 2.1: Sidebar.test.tsx にrepositoryApiモック追加、SyncButton関連テスト7ケース追加"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-506-sidebar-sync-button-design-policy.md",
+  "work_plan_path": "dev-reports/issue/506/work-plan.md",
+  "design_review_checklist": [
+    "ToastContainerのpropは onClose={removeToast} を使用（F-001）",
+    "isSyncingガードはuseRefで管理、useCallback依存配列に含めない（F-002）",
+    "createPortalは段階的に判断: まずPortalなし → 問題発生時にPortal導入（F-007）",
+    "i18nは useTranslations('common') を使用（CONS-001）",
+    "既存テストモックに repositoryApi: { sync: vi.fn() } 追加（IMPACT-002）",
+    "sync APIエラー時はi18n固定メッセージのみ表示（SEC-001）",
+    "SyncResponseのworktreeCountのみ使用、repositories配列に依存しない（SEC-004）"
+  ]
+}

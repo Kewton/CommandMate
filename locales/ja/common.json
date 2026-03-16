@@ -12,5 +12,9 @@
   "favorites": {
     "add": "お気に入りに追加",
     "remove": "お気に入りを解除"
-  }
+  },
+  "syncSuccess": "{count}件のworktreeを同期しました",
+  "syncError": "同期に失敗しました",
+  "syncAuthError": "認証エラー",
+  "syncButtonLabel": "ブランチを同期"
 }
