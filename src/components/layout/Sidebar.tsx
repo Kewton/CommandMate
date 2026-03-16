@@ -289,12 +289,7 @@ function GroupHeader({
       "
     >
       <ChevronIcon isExpanded={isExpanded} />
-      <span
-        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-        style={{ backgroundColor: generateRepositoryColor(repositoryName) }}
-        aria-hidden="true"
-      />
-      <GroupIcon />
+      <GroupIcon color={generateRepositoryColor(repositoryName)} />
       <span className="flex-1 text-left truncate">{repositoryName}</span>
       <span className="text-gray-500 font-normal">{branchCount}</span>
     </button>
@@ -350,15 +345,16 @@ function ChevronIcon({ isExpanded }: { isExpanded: boolean }) {
   );
 }
 
-/** Folder/group icon */
-function GroupIcon({ className = 'w-3 h-3' }: { className?: string }) {
+/** Folder/group icon with optional repository color */
+function GroupIcon({ className = 'w-3.5 h-3.5', color }: { className?: string; color?: string }) {
   return (
     <svg
-      className={className}
-      fill="none"
+      className={`${className} flex-shrink-0`}
       viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
+      fill={color ?? 'none'}
+      stroke={color ? 'none' : 'currentColor'}
+      strokeWidth={color ? 0 : 2}
+      aria-hidden="true"
     >
       <path
         strokeLinecap="round"
