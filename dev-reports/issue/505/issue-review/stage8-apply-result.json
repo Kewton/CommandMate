@@ -1,0 +1,48 @@
+{
+  "issue_number": 505,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "iteration": 2,
+  "apply_date": "2026-03-16",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "F7-001",
+        "status": "applied",
+        "change_summary": "HtmlPreview 内でスクリプト注入後に HtmlIframePreview に渡す責務分離を明確化。srcDoc スクリプト注入の記述、主要な変更点、実装タスク、コールバック伝播経路図、受入条件、セキュリティ考慮事項を更新"
+      },
+      {
+        "id": "F7-002",
+        "status": "applied",
+        "change_summary": "テスト計画に HtmlPreview.test.tsx セクションを新規追加（5テストケース: interactive モード受信、origin 検証、スキーマ検証、クリーンアップ、safe モード）。変更対象ファイル表にも追加"
+      },
+      {
+        "id": "F7-003",
+        "status": "applied",
+        "change_summary": "Toast メッセージ更新箇所を handleFilePathClick と handleFileSelect の2箇所と具体化。実装タスク、主要な変更点、受入条件、変更対象ファイル表を更新"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F7-004",
+        "status": "applied",
+        "change_summary": "クライアントサイドでのパス解決について Node.js path モジュール不使用の注記を追加。相対パス解決ルール、実装タスク、変更対象ファイル表、セキュリティ考慮事項を更新"
+      },
+      {
+        "id": "F7-005",
+        "status": "applied",
+        "change_summary": "onOpenFile コールバックが void を返す設計の理由と将来拡張の方針を提案する解決策セクションに追加"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 5,
+    "applied": 5,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/505"
+  }
+}

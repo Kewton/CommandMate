@@ -1,0 +1,103 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "title": "MarkdownPreview の Single Responsibility 違反 -- 4つの無関係なコンポーネントが同一ファイルに同居",
+      "description": "現在の MarkdownPreview.tsx には MarkdownPreview, MobileTabBar, MaximizeHint, LargeFileWarning の4つの独立したコンポーネントが含まれている。設計方針書では MarkdownPreview にリンクハンドラ、rehype-sanitize スキーマ調整、パス解決ユーティリティ関数を追加する計画だが、これにより同ファイルの責務がさらに膨張する。特に resolveRelativePath ユーティリティ関数は HtmlPreview でも共有する設計（DRY原則、設計方針書 Section 10）であるため、MarkdownPreview.tsx 内にインライン定義すると依存関係が不自然になる。",
+      "suggestion": "resolveRelativePath ユーティリティ関数は src/lib/ 配下（例: src/lib/resolve-relative-path.ts）に独立モジュールとして切り出し、MarkdownPreview と HtmlPreview の両方から import する設計を明示すべき。設計方針書の Section 4-1 にユーティリティの配置先を追記すること。",
+      "target": "設計方針書 Section 4-1 クライアントサイドパス解決, Section 10 制約条件 DRY原則"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "should_fix",
+      "category": "DRY",
+      "title": "handleLinkClick のリンク種別判定ロジックが MarkdownPreview と HtmlPreview で重複する設計",
+      "description": "設計方針書 Section 3-2 では MarkdownPreview 内に handleLinkClick 関数を定義し、アンカー/外部URL/相対パスの3種別を判定する。一方、HtmlPreview 側の handleLinkFromIframe (Section 4-3) でも postMessage 受信後に同様のリンク種別判定（外部URL判定、相対パス解決）を行う必要がある。設計方針書 Section 10 で DRY 原則として「パス解決ユーティリティは共有」と記載しているが、リンク種別判定ロジック自体の共有については言及がない。",
+      "suggestion": "リンク種別判定を含むユーティリティ関数（例: classifyLink(href): 'anchor' | 'external' | 'relative' と resolveRelativePath の組み合わせ）を共通モジュールとして切り出す設計を明示すること。handleLinkClick と handleLinkFromIframe の両方がこの共通ロジックを呼び出す形にする。",
+      "target": "設計方針書 Section 3-2 Strategy パターン, Section 10 DRY原則"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "nice_to_have",
+      "category": "SOLID",
+      "title": "useFileTabs の Open/Closed 原則 -- openFile の戻り値型が拡張しにくい",
+      "description": "現在の openFile メソッドは 'opened' | 'activated' | 'limit_reached' のユニオン型を返す。設計方針書で MOVE_TO_FRONT アクションが追加されるが、将来的にドロップダウン経由の操作で 'moved_to_front' など新しい結果が必要になった場合、戻り値型の拡張と呼び出し元の分岐ロジック修正が必要になる。ただし現時点の設計（F7-005: onOpenFile は void を返す）で実装上の問題にはならない。",
+      "suggestion": "現時点では openFile の戻り値は現行設計のままで問題ないが、UseFileTabsReturn に moveToFront メソッドを追加する際は openFile とは別メソッドとして定義し、既存の openFile の契約を変更しない設計とすること（実装タスクの useFileTabs.ts MOVE_TO_FRONT reducer で確認済み）。",
+      "target": "設計方針書 Section 5-1 useFileTabs reducer 拡張"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "should_fix",
+      "category": "KISS",
+      "title": "Callback Drilling 7階層の伝播がコンポーネント間の結合度を高めている",
+      "description": "設計方針書 Section 3-1 で認識されている通り、onOpenFile コールバックは WorktreeDetailRefactored -> FilePanelSplit -> FilePanelTabs -> FilePanelContent -> MarkdownWithSearch -> MarkdownEditor -> MarkdownPreview の7階層を伝播する。設計方針書では「既存パターンとの一貫性」を理由にこの方式を採用しているが、既存の onFileSaved/onDirtyChange は FilePanelContent までの5階層であり、MarkdownEditor/MarkdownPreview まで貫通するのは onOpenFile が初めてとなる。中間コンポーネント4つ（FilePanelSplit, FilePanelTabs, FilePanelContent, MarkdownEditor）が純粋なパススルーとなり、props の追加漏れがバグの温床になる。",
+      "suggestion": "現時点では YAGNI に基づき Callback Drilling のままとする判断は妥当だが、設計方針書に「今後 2つ以上の新規 callback が同じ経路を伝播する場合は FilePanel 専用の Context 導入を検討する」という将来の判断基準を明記すべき。また、中間コンポーネント4つの props 型に onOpenFile を追加する際、optional（?）にして後方互換を保つことを明示すること。",
+      "target": "設計方針書 Section 3-1 Callback Drilling パターン, Section 8 設計上の決定事項"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "must_fix",
+      "category": "KISS",
+      "title": "resolveRelativePath のパストラバーサルチェックが不十分 -- resolvedPath.includes('..') は誤検知の可能性",
+      "description": "設計方針書 Section 4-1 のクライアントサイドパス解決ユーティリティで、`resolvedPath.startsWith('/') && !resolvedPath.includes('..')` というチェックを行っている。しかし new URL() で解決済みのパスに '..' が残ることは通常ないため（URL API が正規化する）、このチェックは実質的に無意味であるか、逆に '..' を含む正当なファイル名（例: '..config.js'）を誤って拒否する可能性がある。また、resolvedPath が file:/// ベースで解決されるため、ワークツリールートの外に出るパスを適切に検出できない（ルートが '/' なので全てのパスが許可される）。",
+      "suggestion": "クライアントサイドのパストラバーサルチェックを見直すべき。(1) new URL() 解決後のパスに '..' は残らないため、includes('..') チェックは削除する。(2) 代わりに、resolvedPath が想定する基準ディレクトリ配下にあることを確認するチェック（例: 解決後パスが空文字でないこと、先頭スラッシュ除去後のパスが空でないこと）に変更する。(3) 設計方針書の記載通り、本格的なパストラバーサル防止はサーバーサイドの path-validator.ts に委ねる設計であることを再強調し、クライアントサイドは UX 目的の簡易チェック（明らかに不正なパスの早期フィルタ）と位置づけを明確にする。",
+      "target": "設計方針書 Section 4-1 クライアントサイドパス解決, Section 6-2 パストラバーサル防止"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "title": "MARP ファイルへの onOpenFile 伝播は現時点で不要の可能性",
+      "description": "設計方針書の変更対象ファイル一覧（Section 9）とコールバック伝播経路で MarpEditorWithSlides への onOpenFile 伝播が含まれている。しかし MARP ファイルのスライドビューは iframe sandbox='' で表示されており、リンクはクリックできない。Editor モードの場合は MarkdownEditor 経由で伝播するため MarpEditorWithSlides 自体への追加は不要かもしれない。",
+      "suggestion": "MarpEditorWithSlides が Editor モードで MarkdownEditor を使用する場合、MarkdownEditor に onOpenFile を渡せば自動的に MarkdownPreview まで届く。MarpEditorWithSlides 自体に onOpenFile props を追加する必要があるのは、Slides ビューモードでもリンク対応が必要な場合のみ。現時点では Slides ビューは sandbox='' で実行されるため不要。実装タスクでこの点を確認し、不要であれば MarpEditorWithSlides への伝播は実装しないこと。",
+      "target": "設計方針書 Section 2 コンポーネント構成図, Section 9 変更対象ファイル一覧"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "should_fix",
+      "category": "pattern",
+      "title": "postMessage の origin 検証 'null' 文字列は脆弱なセキュリティ境界",
+      "description": "設計方針書 Section 4-3 で postMessage の受信側が event.origin === 'null' を検証している。sandbox iframe からの origin は文字列 'null' だが、これは他の sandbox iframe（同ページ内の別コンポーネントや悪意のある拡張機能）からも同じ 'null' が送信される可能性がある。設計方針書では namespace prefix ('commandmate:link-click') で区別するとしているが、これは秘密情報ではないため偽装可能。",
+      "suggestion": "現在の設計（origin 'null' + namespace prefix + スキーマ検証）は sandbox iframe の制約上、実践的に十分なレベルである。ただし、設計方針書のセキュリティ設計セクション（Section 6）に「postMessage の origin='null' 検証は sandbox iframe の仕様上の制約であり、完全な送信元認証ではない。受信した href の値は一切信頼せず、resolveRelativePath によるパス解決とサーバーサイド path-validator.ts によるバリデーションで安全性を担保する」という注記を追加すべき。",
+      "target": "設計方針書 Section 4-3 postMessage セキュリティ設計, Section 6-1 XSS防止"
+    },
+    {
+      "id": "DR1-008",
+      "severity": "nice_to_have",
+      "category": "SOLID",
+      "title": "FilePanelTabs のドロップダウンUI追加による責務拡大",
+      "description": "設計方針書 Section 5-3 で FilePanelTabs にドロップダウンメニューUIを追加する計画がある。現在の FilePanelTabs はタブバー表示 + コンテンツエリアのシンプルなコンポーネントだが、ドロップダウンメニュー（開閉状態管理、外部クリック検知、タブの並べ替えロジック）が追加されると責務が肥大化する。",
+      "suggestion": "ドロップダウンメニュー部分を TabDropdownMenu のようなサブコンポーネントとして切り出すことを検討する。FilePanelTabs は「どのタブをタブバーに表示し、どれをドロップダウンに含めるか」のロジックのみ持ち、ドロップダウンの開閉UI・メニュー表示は TabDropdownMenu に委譲する。ただし、これは実装段階での判断で良く、設計方針書レベルでは「ドロップダウンUI部分はサブコンポーネント化を検討」と注記する程度で十分。",
+      "target": "設計方針書 Section 5-3 ドロップダウンUI"
+    },
+    {
+      "id": "DR1-009",
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "title": "先頭5タブ固定表示とアクティブタブ表示保証の相互作用が複雑",
+      "description": "設計方針書 Section 5-2, 5-3 で「先頭5タブをタブバーに表示」「アクティブタブが6番目以降でもタブバーに表示保証」という2つのルールがある。これにより表示ロジックが「先頭4タブ + アクティブタブ」または「アクティブタブを自動的に先頭に移動」の分岐が生じる。Issue 本文では「先頭4タブ＋アクティブタブ方式、またはアクティブタブを自動的に先頭に移動」と2案が併記されており、どちらを採用するか未確定。",
+      "suggestion": "設計方針書で採用方式を1つに確定すべき。推奨は「ドロップダウンから選択時に MOVE_TO_FRONT でタブを先頭に移動する」方式。これなら「先頭5タブ固定表示」ルールだけで済み、「アクティブタブが6番目以降にある」状態が（ドロップダウン選択直後を除いて）発生しない。設計方針書 Section 5-2 の ACTIVATE_TAB と MOVE_TO_FRONT の使い分け表でこの挙動は既に定義されているので、「先頭4タブ+アクティブタブ」方式は不要として削除する。",
+      "target": "設計方針書 Section 5-2, 5-3, Issue本文 F1-004"
+    },
+    {
+      "id": "DR1-010",
+      "severity": "should_fix",
+      "category": "DRY",
+      "title": "Toast メッセージの MAX_FILE_TABS 参照が2箇所に分散",
+      "description": "設計方針書（F7-003）で handleFilePathClick と handleFileSelect の2箇所で MAX_FILE_TABS を参照した動的 Toast メッセージを生成する計画がある。同じメッセージ生成ロジックが2箇所に存在することは DRY 原則に反する。",
+      "suggestion": "Toast メッセージ文字列を生成するヘルパー関数（例: getTabLimitMessage()）を定義し、handleFilePathClick と handleFileSelect の両方から呼び出す形にする。あるいは、openFile の戻り値が 'limit_reached' の場合の Toast 表示を1つの関数に集約し、handleFilePathClick と handleFileSelect がその関数を呼ぶ構造にする。",
+      "target": "設計方針書 Section 8, Issue本文 F7-003"
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 5,
+    "nice_to_have": 4,
+    "total": 10
+  }
+}

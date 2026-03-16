@@ -1,0 +1,100 @@
+{
+  "issue_number": 505,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "review_date": "2026-03-16",
+  "previous_findings_status": {
+    "stage3_findings": {
+      "F3-001": { "status": "addressed", "note": "FilePanelSplit.tsx が変更対象ファイル表に追加済み。onOpenFile コールバック props 追加・FilePanelTabs への伝播が明記されている" },
+      "F3-002": { "status": "addressed", "note": "FilePanelTabs.tsx の変更内容に onOpenFile コールバック props 追加・FilePanelContent への伝播が明記されている" },
+      "F3-003": { "status": "addressed", "note": "src/types/markdown-editor.ts の EditorProps に onOpenFile 追加が影響範囲・実装タスクに含まれている" },
+      "F3-004": { "status": "addressed", "note": "テスト計画セクションに useFileTabs.test.ts の具体的テストケースが10項目列挙されている" },
+      "F3-005": { "status": "addressed", "note": "FilePanelTabs.test.tsx のテストケースが4項目列挙されている" },
+      "F3-006": { "status": "addressed", "note": "postMessage メッセージスキーマが CommandMateLinkClickMessage 型定義として commandmate: prefix 付きで定義されている" },
+      "F3-007": { "status": "addressed", "note": "localStorage への影響は軽微として現在の設計を維持（Nice to Have 認識済み）" },
+      "F3-008": { "status": "addressed", "note": "MarkdownWithSearch・MarpEditorWithSlides への伝播が変更対象ファイル表・実装タスク・コールバック伝播経路図に含まれている" },
+      "F3-009": { "status": "addressed", "note": "srcDoc へのスクリプト注入が具体的な3段階の実装手順付きで記載されている" },
+      "F3-010": { "status": "addressed", "note": "既存パターンに合わせて英語ハードコードで対応" },
+      "F3-011": { "status": "addressed", "note": "useEffect クリーンアップで removeEventListener が受入条件・セキュリティ考慮事項に含まれている" },
+      "F3-012": { "status": "addressed", "note": "デスクトップビューのみを対象とすることがスコープに明記されている" }
+    },
+    "stage5_findings": {
+      "F5-001": { "status": "addressed", "note": "MarkdownPreview の props 拡張が { content, onOpenFile?, currentFilePath? } として明記。コールバック伝播経路にも currentFilePath の流れが記載されている" },
+      "F5-002": { "status": "addressed", "note": "HtmlPreview に onOpenFile コールバック props を追加する旨が変更対象ファイル表・実装タスク・コールバック伝播経路に含まれている" },
+      "F5-003": { "status": "addressed", "note": "rehype plugin 実行順序（sanitize -> highlight）の注意事項が実装タスクとテスト計画に含まれている" },
+      "F5-004": { "status": "addressed", "note": "ACTIVATE_TAB（タブバークリック）と MOVE_TO_FRONT（ドロップダウン選択）の使い分けが明確に記載。テスト計画にも対応テストケースが含まれている" },
+      "F5-005": { "status": "addressed", "note": "split モードでの postMessage リスナーは HtmlPreview コンポーネント単位で1つのみ登録する設計が明記されている" }
+    },
+    "all_addressed": true
+  },
+  "findings": [
+    {
+      "id": "F7-001",
+      "severity": "should_fix",
+      "category": "影響ファイル漏れ",
+      "title": "HtmlIframePreview サブコンポーネントへの onOpenFile・currentFilePath 伝播が明記されていない",
+      "description": "Issue のコールバック伝播経路では HtmlPreview.tsx に onOpenFile props を追加することが記載されているが、HtmlPreview 内部の HtmlIframePreview サブコンポーネントへの伝播設計が不明確。現在の HtmlIframePreview は { htmlContent, sandboxLevel, filePath } のみを受け取っている。postMessage のリスナーは HtmlPreview コンポーネント単位で登録するため HtmlIframePreview 自体には onOpenFile は不要だが、srcDoc にスクリプトを注入するのは HtmlIframePreview の責務なのか HtmlPreview の責務なのかが曖昧。現在のコードでは HtmlIframePreview が直接 srcDoc={htmlContent} を渡しているため、スクリプト注入の処理位置を明確にすべき。",
+      "suggestion": "実装タスクに「HtmlPreview コンポーネント内で htmlContent にスクリプトを注入した上で HtmlIframePreview に渡す」という設計方針を明記する。または HtmlIframePreview の props に injectLinkScript: boolean を追加して、サブコンポーネント側で注入する設計とする。いずれにせよ、実装者が迷わないよう責務分離を記載することが望ましい。"
+    },
+    {
+      "id": "F7-002",
+      "severity": "should_fix",
+      "category": "テスト範囲",
+      "title": "HtmlPreview の postMessage 統合テストが テスト計画に含まれていない",
+      "description": "テスト計画には useFileTabs.test.ts と FilePanelTabs.test.tsx のテストケースが列挙されているが、HtmlPreview.tsx 固有のテスト（postMessage 受信・origin 検証・スキーマ検証・useEffect クリーンアップ）に対する専用テストファイルの言及がない。postMessage の origin 検証テストと commandmate:link-click スキーマ検証テストは useFileTabs.test.ts に含まれているが、これらは HtmlPreview コンポーネントの統合テストとして別ファイル（例: tests/unit/components/HtmlPreview.test.tsx）で実施すべき内容。",
+      "suggestion": "テスト計画に HtmlPreview.test.tsx を追加し、以下のテストケースを含める: (1) interactive モードで postMessage 受信時に onOpenFile が呼ばれること、(2) origin が 'null' 以外の場合に onOpenFile が呼ばれないこと、(3) type が 'commandmate:link-click' 以外の場合に無視されること、(4) コンポーネントアンマウント時にリスナーが解除されること、(5) safe モードでは postMessage リスナーが登録されないこと。"
+    },
+    {
+      "id": "F7-003",
+      "severity": "should_fix",
+      "category": "影響ファイル漏れ",
+      "title": "WorktreeDetailRefactored の handleFilePathClick と handleFileSelect の Toast メッセージがハードコードで MAX_FILE_TABS と不一致",
+      "description": "現在の WorktreeDetailRefactored.tsx (行476, 494) では Toast メッセージが 'Maximum 5 file tabs. Close a tab first.' とハードコードされている。Issue では Toast メッセージの MAX_FILE_TABS 対応が実装タスクに含まれているが、handleFilePathClick と handleFileSelect の2箇所を変更する必要がある。Issue の実装タスクでは「Toast メッセージの MAX_FILE_TABS 対応」と1つにまとめられており、2箇所の変更が見落とされる可能性がある。",
+      "suggestion": "実装タスクの Toast メッセージ更新を「handleFilePathClick と handleFileSelect の2箇所で MAX_FILE_TABS 定数を参照した動的メッセージに変更」と具体化するか、Toast メッセージを定数化して一元管理することを推奨する。"
+    },
+    {
+      "id": "F7-004",
+      "severity": "nice_to_have",
+      "category": "依存関係",
+      "title": "MarkdownPreview の相対パス解決がクライアントサイドで実行される場合の path モジュール使用",
+      "description": "Issue では相対パス解決に path.resolve 等で正規化すると記載されているが、MarkdownPreview はクライアントサイド（ブラウザ）で実行される。Node.js の path モジュールはブラウザでは利用できないため、パス解決のユーティリティ関数を自前で実装するか、パストラバーサル検証をサーバーサイド API に委譲する必要がある。Issue の実装タスクではクライアントサイドでのパス解決とパストラバーサル防止が記載されているが、path-validator.ts はサーバーサイドのモジュールであり直接は使用できない。",
+      "suggestion": "実装タスクに「クライアントサイドで使用可能なパス解決ユーティリティ関数を作成する（new URL() や文字列操作ベース）か、既存の path-validator.ts のロジックをクライアントサイドで再利用可能な形に切り出す」旨を注記として追加することを推奨する。代替案として、ファイルオープン時の API 呼び出し（ファイル内容取得）でサーバーサイドのパスバリデーションが働くため、クライアントサイドでは基本的なパス正規化のみ行い、本格的なバリデーションはサーバーに委ねる設計も検討に値する。"
+    },
+    {
+      "id": "F7-005",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "OPEN_FILE reducer が limit_reached を返す際の挙動とリンククリック時の onOpenFile コールバックの関係",
+      "description": "MarkdownPreview の a タグカスタムコンポーネントから onOpenFile(resolvedPath) が呼ばれると、WorktreeDetailRefactored の handleFilePathClick 経由で fileTabs.openFile(path) が実行される。しかし onOpenFile コールバックは単に path を受け取るだけで、openFile の戻り値（'opened' | 'activated' | 'limit_reached'）を MarkdownPreview に返す手段がない。limit_reached の場合の Toast 表示は WorktreeDetailRefactored 側で行われるため問題ないが、将来的にリンクの見た目（成功/失敗のフィードバック）を変えたい場合にはコールバックの戻り値が必要になる。",
+      "suggestion": "現時点では onOpenFile が void を返す設計で問題ない。Toast による通知が WorktreeDetailRefactored 側で行われるため、ユーザーへのフィードバックは確保されている。将来的なニーズがあれば onOpenFile の戻り値型を拡張すればよい。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 3,
+    "nice_to_have": 2,
+    "total": 5
+  },
+  "previous_findings_addressed": true,
+  "code_references": [
+    {
+      "file": "src/components/worktree/HtmlPreview.tsx",
+      "relevance": "HtmlIframePreview サブコンポーネントの srcDoc スクリプト注入の責務分離が不明確（F7-001）。postMessage 統合テストの対象（F7-002）"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "handleFilePathClick(行474) と handleFileSelect(行493) の2箇所で Toast メッセージ 'Maximum 5 file tabs' がハードコードされている（F7-003）"
+    },
+    {
+      "file": "src/components/worktree/MarkdownPreview.tsx",
+      "relevance": "クライアントサイドでの相対パス解決が必要（F7-004）。path モジュールはブラウザで利用不可"
+    },
+    {
+      "file": "src/lib/security/path-validator.ts",
+      "relevance": "サーバーサイドのパスバリデーションモジュール。クライアントサイドでは直接利用不可（F7-004）"
+    }
+  ],
+  "doc_references": []
+}

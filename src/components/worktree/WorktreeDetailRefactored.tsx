@@ -40,7 +40,7 @@ import { useFileSearch } from '@/hooks/useFileSearch';
 import { LeftPaneTabSwitcher, type LeftPaneTab } from '@/components/worktree/LeftPaneTabSwitcher';
 import { FileViewer } from '@/components/worktree/FileViewer';
 import { FilePanelSplit } from '@/components/worktree/FilePanelSplit';
-import { useFileTabs } from '@/hooks/useFileTabs';
+import { useFileTabs, MAX_FILE_TABS } from '@/hooks/useFileTabs';
 import { useFilePolling } from '@/hooks/useFilePolling';
 import { FILE_TREE_POLL_INTERVAL_MS } from '@/config/file-polling-config';
 
@@ -466,6 +466,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Event Handlers
   // ========================================================================
 
+  /**
+   * Show Toast notification when tab limit is reached.
+   * [DR1-010, DR2-003] Dynamic message using MAX_FILE_TABS constant.
+   */
+  const showTabLimitToast = useCallback(() => {
+    showToast(`Maximum ${MAX_FILE_TABS} file tabs. Close a tab first.`, 'info');
+  }, [showToast]);
+
   /** Handle file path click in history pane */
   const handleFilePathClick = useCallback((path: string) => {
     if (isMobile) {
@@ -473,10 +481,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     } else {
       const result = fileTabs.openFile(path);
       if (result === 'limit_reached') {
-        showToast('Maximum 5 file tabs. Close a tab first.', 'info');
+        showTabLimitToast();
       }
     }
-  }, [isMobile, fileTabs, showToast]);
+  }, [isMobile, fileTabs, showTabLimitToast]);
 
   /**
    * Handle file select from FileTreeView
@@ -492,10 +500,21 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       // Desktop: open in file tab panel (including .md files for preview)
       const result = fileTabs.openFile(path);
       if (result === 'limit_reached') {
-        showToast('Maximum 5 file tabs. Close a tab first.', 'info');
+        showTabLimitToast();
       }
     }
-  }, [isMobile, fileTabs, showToast]);
+  }, [isMobile, fileTabs, showTabLimitToast]);
+
+  /**
+   * Handle opening a file from a link in MarkdownPreview/HtmlPreview (Issue #505).
+   * Opens the file as a new tab, or shows Toast if limit is reached.
+   */
+  const handleOpenFile = useCallback((path: string) => {
+    const result = fileTabs.openFile(path);
+    if (result === 'limit_reached') {
+      showTabLimitToast();
+    }
+  }, [fileTabs, showTabLimitToast]);
 
   /** Handle closing mobile FileViewer modal */
   const handleMobileFileViewerClose = useCallback(() => {
@@ -1310,9 +1329,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         diffFilePath={diffFilePath}
         onCloseDiff={handleCloseDiff}
         onDirtyChange={handleDirtyChange}
+        onMoveToFront={fileTabs.moveToFront}
+        onOpenFile={handleOpenFile}
       />
     ),
-    [state.terminal.output, state.terminal.isActive, state.terminal.isThinking, state.terminal.autoScroll, handleAutoScrollChange, disableAutoFollow, terminalHeaderMemo, fileTabs.state, fileTabs.closeTab, fileTabs.activateTab, worktreeId, handleLoadContent, handleLoadError, handleSetLoading, handleFilePanelSave, diffContent, diffFilePath, handleCloseDiff, handleDirtyChange]
+    [state.terminal.output, state.terminal.isActive, state.terminal.isThinking, state.terminal.autoScroll, handleAutoScrollChange, disableAutoFollow, terminalHeaderMemo, fileTabs.state, fileTabs.closeTab, fileTabs.activateTab, worktreeId, handleLoadContent, handleLoadError, handleSetLoading, handleFilePanelSave, diffContent, diffFilePath, handleCloseDiff, handleDirtyChange, fileTabs.moveToFront, handleOpenFile]
   );
 
   /**

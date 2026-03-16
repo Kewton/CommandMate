@@ -1,6 +1,7 @@
 /**
  * HtmlPreview Component
  * Issue #490: HTML file rendering in file panel
+ * Issue #505: Link navigation via postMessage (interactive mode)
  *
  * Provides source/preview/split view modes for HTML files with
  * sandbox level control (Safe/Interactive).
@@ -11,15 +12,43 @@
  * - Interactive mode: allow-scripts only (no allow-same-origin)
  * - DR4-001: No DOMPurify sanitization (iframe sandbox is the security boundary)
  * - DR4-002: Interactive mode requires user confirmation dialog
+ * - DR1-007: postMessage href is never trusted; validated via classifyLink + resolveRelativePath
+ * - DR4-003: Input sanitization (max length, control chars) on postMessage href
  */
 
 'use client';
 
-import React, { useState, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import type { SandboxLevel } from '@/config/html-extensions';
 import { SANDBOX_ATTRIBUTES } from '@/config/html-extensions';
+import { classifyLink, resolveRelativePath, sanitizeHref } from '@/lib/link-utils';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/**
+ * Script injected into interactive mode iframes to intercept link clicks
+ * and forward them via postMessage. [F7-001]
+ */
+const LINK_CLICK_SCRIPT = `
+<script>
+document.addEventListener('click', function(e) {
+  var target = e.target;
+  while (target && target.tagName !== 'A') {
+    target = target.parentElement;
+  }
+  if (target && target.href) {
+    e.preventDefault();
+    parent.postMessage({
+      type: 'commandmate:link-click',
+      href: target.getAttribute('href')
+    }, '*');
+  }
+});
+</script>`;
 
 // ============================================================================
 // Types
@@ -33,6 +62,8 @@ export interface HtmlPreviewProps {
   htmlContent: string;
   onFileSaved?: (path: string) => void;
   onDirtyChange?: (isDirty: boolean) => void;
+  /** Callback to open a file from a link (Issue #505) */
+  onOpenFile?: (path: string) => void;
 }
 
 // ============================================================================
@@ -119,10 +150,12 @@ function HtmlIframePreview({
  * - Split view: side-by-side source and preview (PC only)
  * - Safe/Interactive sandbox level toggle
  * - Interactive mode confirmation dialog (DR4-002)
+ * - Link click handling via postMessage (interactive mode only) [Issue #505]
  */
 export function HtmlPreview({
   filePath,
   htmlContent,
+  onOpenFile,
 }: HtmlPreviewProps) {
   const [viewMode, setViewMode] = useState<HtmlViewMode>('preview');
   const [sandboxLevel, setSandboxLevel] = useState<SandboxLevel>('safe');
@@ -141,6 +174,75 @@ export function HtmlPreview({
     }
     setSandboxLevel(newLevel);
   }, [filePath]);
+
+  /**
+   * Handle link click from iframe postMessage.
+   * [DR1-007] href from postMessage is never trusted.
+   * [DR4-003] Input sanitization before classification.
+   * [DR4-002] postMessage href does not reach HtmlSourceViewer's dangerouslySetInnerHTML.
+   */
+  const handleLinkFromIframe = useCallback((href: string) => {
+    if (!href || typeof href !== 'string') return;
+
+    const sanitized = sanitizeHref(href);
+    if (!sanitized) return;
+
+    const linkType = classifyLink(sanitized);
+
+    switch (linkType) {
+      case 'external':
+        window.open(sanitized, '_blank', 'noopener,noreferrer');
+        break;
+      case 'relative': {
+        const resolvedPath = resolveRelativePath(filePath, sanitized);
+        if (resolvedPath && onOpenFile) {
+          onOpenFile(resolvedPath);
+        }
+        break;
+      }
+      // anchor: ignored for iframe links
+    }
+  }, [filePath, onOpenFile]);
+
+  /**
+   * postMessage listener for interactive mode. [F3-011]
+   * Registers on interactive mode entry, cleans up on exit/unmount.
+   */
+  useEffect(() => {
+    if (sandboxLevel !== 'interactive') return;
+
+    const handler = (event: MessageEvent) => {
+      // [DR1-007] origin validation: sandbox iframe sends 'null' string
+      if (event.origin !== 'null') return;
+
+      // Schema validation
+      const data = event.data;
+      if (!data || typeof data !== 'object') return;
+      if (data.type !== 'commandmate:link-click') return;
+      if (typeof data.href !== 'string') return;
+
+      handleLinkFromIframe(data.href);
+    };
+
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, [sandboxLevel, handleLinkFromIframe]);
+
+  /**
+   * Prepare htmlContent for iframe.
+   * In interactive mode, inject link click script. [DR2-004]
+   * In safe mode, pass htmlContent as-is (no script injection).
+   */
+  const iframeContent = useMemo(() => {
+    if (sandboxLevel === 'interactive') {
+      // Inject script before </body> or at end
+      if (htmlContent.includes('</body>')) {
+        return htmlContent.replace('</body>', `${LINK_CLICK_SCRIPT}</body>`);
+      }
+      return htmlContent + LINK_CLICK_SCRIPT;
+    }
+    return htmlContent;
+  }, [htmlContent, sandboxLevel]);
 
   return (
     <div className="h-full flex flex-col" data-testid="html-preview">
@@ -192,7 +294,7 @@ export function HtmlPreview({
         )}
         {viewMode === 'preview' && (
           <HtmlIframePreview
-            htmlContent={htmlContent}
+            htmlContent={iframeContent}
             sandboxLevel={sandboxLevel}
             filePath={filePath}
           />
@@ -204,7 +306,7 @@ export function HtmlPreview({
             </div>
             <div className="w-1/2 overflow-hidden">
               <HtmlIframePreview
-                htmlContent={htmlContent}
+                htmlContent={iframeContent}
                 sandboxLevel={sandboxLevel}
                 filePath={filePath}
               />

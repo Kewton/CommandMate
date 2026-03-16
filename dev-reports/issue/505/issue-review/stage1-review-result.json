@@ -1,0 +1,127 @@
+{
+  "issue_number": 505,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-03-16",
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 4,
+    "nice_to_have": 2,
+    "total": 8
+  },
+  "findings": [
+    {
+      "id": "F1-001",
+      "severity": "must_fix",
+      "category": "技術的妥当性",
+      "title": "rehype-sanitize が a タグの href を除去する可能性",
+      "description": "MarkdownPreview.tsx は rehype-sanitize を使用しており（SEC-MF-001）、カスタム a タグコンポーネントを追加しても、rehype-sanitize がデフォルト設定で href 属性や特定のスキームを除去する可能性がある。rehype-sanitize のスキーマ設定を調整しないと、相対パスリンクが消失し、カスタムコンポーネントが正しく動作しない。",
+      "suggestion": "rehype-sanitize に渡すスキーマ（defaultSchema ベース）で a タグの href 属性が相対パスを許可するよう明示的に設定する必要がある。実装タスクに「rehype-sanitize スキーマの調整」を追加すべき。",
+      "location": "提案する解決策 > 1. ファイル内リンク対応 > Markdownプレビュー",
+      "evidence": "src/components/worktree/MarkdownPreview.tsx:83 で rehypeSanitize がデフォルトスキーマで使用されている"
+    },
+    {
+      "id": "F1-002",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "MarkdownPreview に onOpenFile コールバックを渡す経路が未定義",
+      "description": "現在の MarkdownPreview コンポーネントは content (string) のみを props として受け取り、ファイルタブを開くためのコールバックを持たない。a タグカスタムコンポーネントから fileTabs.openFile() を呼ぶには、MarkdownPreview -> MarkdownEditor -> FilePanelContent -> FilePanelTabs -> FilePanelSplit -> WorktreeDetailRefactored というコンポーネント階層全体にコールバックを伝播させる必要がある。Issue の変更対象ファイルにこの伝播経路のうち MarkdownEditor.tsx と WorktreeDetailRefactored.tsx が含まれていない。",
+      "suggestion": "変更対象ファイル一覧に MarkdownEditor.tsx と WorktreeDetailRefactored.tsx を追加し、コールバック伝播の設計を明記すべき。または Context API を使ってコールバックを渡す方法も検討可能。",
+      "location": "影響範囲 > 変更対象ファイル",
+      "evidence": "MarkdownPreview の props は { content: string } のみ（MarkdownPreview.tsx:38-41）。MarkdownEditor は MarkdownPreview を呼び出す（MarkdownEditor.tsx:784,801）が onOpenFile 的な props は存在しない"
+    },
+    {
+      "id": "F1-003",
+      "severity": "should_fix",
+      "category": "明確性",
+      "title": "タブ上限到達時のリンククリック動作が未定義",
+      "description": "タブ上限を30に引き上げても、30タブ開いた状態でリンクをクリックした際の動作が受入条件に含まれていない。現在の実装では openFile() が 'limit_reached' を返し、Toast でユーザーに通知するが、リンクから開く場合も同様の動作を期待するのか明確でない。",
+      "suggestion": "受入条件に「タブ上限到達時にリンクをクリックした場合のフィードバック（Toast通知等）」を追加するか、LRU方式で最も古いタブを自動的に閉じる動作を検討すべき。",
+      "location": "受入条件",
+      "evidence": "WorktreeDetailRefactored.tsx:474-477 で limit_reached 時に Toast を表示しているが、リンクからの呼び出し時の動作は未定義"
+    },
+    {
+      "id": "F1-004",
+      "severity": "should_fix",
+      "category": "明確性",
+      "title": "「先頭5タブ」の定義と移動ロジックの曖昧さ",
+      "description": "「常に先頭5タブをタブバーに表示」「ドロップダウンから選択したタブは先頭に移動」とあるが、「先頭」がインデックス0への挿入なのか、表示領域の左端5つなのか不明。また、アクティブタブが6番目以降にある場合にタブバーに表示されるのかも未定義。useFileTabs の reducer には MOVE_TO_FRONT のようなアクションが現在存在せず、新規追加が必要。",
+      "suggestion": "以下を明確にすべき: (1) ドロップダウン選択時にタブ配列のインデックス0に移動するのか、(2) アクティブタブは常にタブバーに表示するのか（4+アクティブ方式）、(3) useFileTabs の reducer に必要な新規アクションの定義。",
+      "location": "提案する解決策 > 2. タブUI改善",
+      "evidence": "useFileTabs.ts の FileTabsAction に移動系のアクションが存在しない"
+    },
+    {
+      "id": "F1-005",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "HTMLプレビューの postMessage セキュリティ考慮が不足",
+      "description": "HTMLプレビューで postMessage を使ってリンククリックを検知する提案だが、sandbox='allow-scripts' の場合のみ postMessage が使える。safe モード（sandbox=''）ではスクリプトが実行できないため、postMessage は使えない。safe モードでのリンク対応方法が明記されていない。また、postMessage の origin チェックやメッセージ形式の検証といったセキュリティ要件の記載がない。",
+      "suggestion": "safe モードと interactive モードそれぞれのリンク対応方式を明記すべき。safe モードでは対応不可であることを明示するか、sandbox 属性に 'allow-top-navigation-by-user-activation' を追加する方法を検討。postMessage 使用時は origin 検証・メッセージスキーマ検証の要件を追記すべき。",
+      "location": "提案する解決策 > 1. ファイル内リンク対応 > HTMLプレビュー",
+      "evidence": "HtmlPreview.tsx:53-56 で SANDBOX_ATTRIBUTES は { safe: '', interactive: 'allow-scripts' }。safe モードではスクリプト実行不可"
+    },
+    {
+      "id": "F1-006",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "相対パスの解決方法が未定義",
+      "description": "「相対パスリンクをファイルタブとして開く」とあるが、相対パスの基準ディレクトリをどのように決定するかが記載されていない。Markdown ファイルの格納ディレクトリを基準にするのか、worktree ルートを基準にするのか。また '../' を含むパスや './' の正規化、存在しないファイルへのリンクのエラーハンドリングも未定義。",
+      "suggestion": "以下を明記すべき: (1) 相対パス解決の基準ディレクトリ（現在表示中のファイルの所在ディレクトリが自然）、(2) パストラバーサル防止（worktree ルート外へのアクセス禁止）、(3) 存在しないファイルへのリンクの動作（エラー表示等）。",
+      "location": "提案する解決策 > 1. ファイル内リンク対応",
+      "evidence": "MarkdownPreview は content (string) のみ受け取り、現在のファイルパス情報を持たない"
+    },
+    {
+      "id": "F1-007",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "トースト通知メッセージのハードコード値更新",
+      "description": "WorktreeDetailRefactored.tsx:476 で 'Maximum 5 file tabs. Close a tab first.' というハードコードされたメッセージがある。MAX_FILE_TABS を30に変更した場合、このメッセージも更新が必要だが、変更対象ファイルに WorktreeDetailRefactored.tsx が含まれていない。",
+      "suggestion": "変更対象ファイルに WorktreeDetailRefactored.tsx を追加し、Toast メッセージの数値を MAX_FILE_TABS 定数から動的に生成するか、30に更新する。",
+      "location": "影響範囲 > 変更対象ファイル",
+      "evidence": "WorktreeDetailRefactored.tsx:476 'Maximum 5 file tabs. Close a tab first.'"
+    },
+    {
+      "id": "F1-008",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "アンカーリンクやフラグメント (#) への対応が未記載",
+      "description": "Markdown 内の見出しリンク（#section-name）やページ内アンカーへの対応が考慮されていない。同一ファイル内のアンカーリンクをクリックした場合に新しいタブを開くのではなく、スクロールさせる動作が自然だが、この区別の記載がない。",
+      "suggestion": "# で始まるリンクはページ内スクロールとして扱い、ファイルタブを開かないロジックを実装タスクに追加することを推奨。",
+      "location": "提案する解決策 > 1. ファイル内リンク対応",
+      "evidence": "Issue 本文に # リンクへの言及なし"
+    }
+  ],
+  "code_references": [
+    {
+      "file": "src/components/worktree/MarkdownPreview.tsx",
+      "relevance": "a タグカスタムコンポーネント追加対象。rehype-sanitize との相互作用が重要"
+    },
+    {
+      "file": "src/components/worktree/HtmlPreview.tsx",
+      "relevance": "postMessage 監視追加対象。sandbox 設定との整合性が必要"
+    },
+    {
+      "file": "src/hooks/useFileTabs.ts",
+      "relevance": "MAX_FILE_TABS 変更対象。reducer にタブ移動アクション追加が必要"
+    },
+    {
+      "file": "src/components/worktree/FilePanelTabs.tsx",
+      "relevance": "ドロップダウンUI追加対象"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "relevance": "MarkdownPreview にコールバックを渡す中間層（変更対象ファイルに未記載）"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "fileTabs.openFile コールバックの起点・Toast メッセージ更新（変更対象ファイルに未記載）"
+    },
+    {
+      "file": "src/config/html-extensions.ts",
+      "relevance": "SANDBOX_ATTRIBUTES 定義。sandbox レベルによる postMessage 可否に影響"
+    }
+  ],
+  "doc_references": []
+}

@@ -1,0 +1,57 @@
+{
+  "stage": 2,
+  "applied_findings": [
+    {
+      "id": "DR2-001",
+      "severity": "should_fix",
+      "action": "Updated Section 2 layer table to note MarkdownPreview responsibility shift from pure rendering to rendering + link handling. Added to Section 11 Should Fix checklist."
+    },
+    {
+      "id": "DR2-002",
+      "severity": "should_fix",
+      "action": "Updated Section 9 MarkdownEditor.tsx entry to note 2 MarkdownPreview call sites (mobile + desktop). Added to Section 11 Should Fix checklist."
+    },
+    {
+      "id": "DR2-003",
+      "severity": "must_fix",
+      "action": "Added to Section 11 Must Fix checklist with explicit instruction to replace hardcoded 'Maximum 5' with template literal referencing MAX_FILE_TABS constant, and to add test verification."
+    },
+    {
+      "id": "DR2-004",
+      "severity": "should_fix",
+      "action": "Added clarification to Section 3-3 that Safe mode skips script injection and passes htmlContent directly to HtmlIframePreview. Added to Section 11 Should Fix checklist."
+    },
+    {
+      "id": "DR2-005",
+      "severity": "should_fix",
+      "action": "Updated Section 9 FilePanelContent.tsx entry to note MarkdownWithSearch inline type needs onOpenFile. Added to Section 11 Should Fix checklist."
+    },
+    {
+      "id": "DR2-006",
+      "severity": "nice_to_have",
+      "action": "Added to Section 11 Nice to Have checklist noting MarpEditorWithSlides props type may need onOpenFile for Editor mode."
+    },
+    {
+      "id": "DR2-007",
+      "severity": "should_fix",
+      "action": "Added moveToFront method code sample to Section 5-1 after DR1-003 note. Added to Section 11 Should Fix checklist."
+    },
+    {
+      "id": "DR2-008",
+      "severity": "nice_to_have",
+      "action": "Added to Section 11 Nice to Have checklist noting propagation layer count and intermediate component count should be unified."
+    },
+    {
+      "id": "DR2-009",
+      "severity": "should_fix",
+      "action": "Updated Section 9 FilePanelTabs.tsx entry to clarify onOpenFile is pure passthrough. Added to Section 11 Should Fix checklist."
+    },
+    {
+      "id": "DR2-010",
+      "severity": "nice_to_have",
+      "action": "Added to Section 11 Nice to Have checklist as optional Issue description update."
+    }
+  ],
+  "skipped_findings": [],
+  "design_policy_updated": true
+}

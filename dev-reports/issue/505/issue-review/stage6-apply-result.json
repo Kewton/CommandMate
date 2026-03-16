@@ -1,0 +1,48 @@
+{
+  "issue_number": 505,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "iteration": 2,
+  "apply_date": "2026-03-16",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "F5-001",
+        "status": "applied",
+        "change_summary": "MarkdownPreview の props に currentFilePath を追加。MarkdownEditor から filePath を currentFilePath として伝播する経路を明記。コールバック伝播経路図・実装タスク・受入条件・変更対象ファイル表を更新"
+      },
+      {
+        "id": "F5-002",
+        "status": "applied",
+        "change_summary": "HtmlPreview に onOpenFile コールバック props を追加。FilePanelContent から HtmlPreview への伝播を明記。コールバック伝播経路図に HtmlPreview を追加。実装タスク・受入条件・変更対象ファイル表を更新"
+      },
+      {
+        "id": "F5-003",
+        "status": "applied",
+        "change_summary": "rehype plugin 実行順序（sanitize → highlight）の依存性を解決策・実装タスク・テスト計画・受入条件・セキュリティ考慮事項に注記。順序確認テストケースを追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F5-004",
+        "status": "applied",
+        "change_summary": "ACTIVATE_TAB（タブバークリック）と MOVE_TO_FRONT（ドロップダウン選択）の使い分けを明確化。タブUI改善セクション・実装タスク・受入条件・テスト計画・変更対象ファイル表に反映"
+      },
+      {
+        "id": "F5-005",
+        "status": "applied",
+        "change_summary": "split モードでの postMessage リスナーは HtmlPreview コンポーネント単位で1つのみ登録する設計を明記。event.source による個別 iframe 識別は不要とする判断を解決策・実装タスク・受入条件・セキュリティ考慮事項に反映"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 5,
+    "applied": 5,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/505"
+  }
+}

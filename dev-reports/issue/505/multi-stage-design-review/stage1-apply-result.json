@@ -1,0 +1,78 @@
+{
+  "stage": 1,
+  "applied_findings": [
+    {
+      "id": "DR1-005",
+      "severity": "must_fix",
+      "title": "resolveRelativePath の includes('..') チェック削除、簡易バリデーションに置換、サーバーサイドを主防御と明記",
+      "sections_updated": ["3-2", "4-1", "6-2", "8", "10", "11"]
+    },
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "title": "resolveRelativePath を src/lib/link-utils.ts に切り出し",
+      "sections_updated": ["2", "3-2", "4-1", "9", "10", "11"]
+    },
+    {
+      "id": "DR1-002",
+      "severity": "should_fix",
+      "title": "classifyLink() 共通ユーティリティを src/lib/link-utils.ts に追加",
+      "sections_updated": ["2", "3-2", "9", "10", "11"]
+    },
+    {
+      "id": "DR1-004",
+      "severity": "should_fix",
+      "title": "Callback Drilling の Context 移行判断基準を明記、onOpenFile を optional で定義",
+      "sections_updated": ["3-1", "8", "9", "11"]
+    },
+    {
+      "id": "DR1-007",
+      "severity": "should_fix",
+      "title": "postMessage の href 値を一切信頼しない設計を明記、多層防御の説明追加",
+      "sections_updated": ["4-3", "6-1", "8", "11"]
+    },
+    {
+      "id": "DR1-010",
+      "severity": "should_fix",
+      "title": "Toast メッセージを showTabLimitToast() ヘルパーに集約",
+      "sections_updated": ["2", "8", "9", "11"]
+    },
+    {
+      "id": "DR1-003",
+      "severity": "nice_to_have",
+      "title": "moveToFront を openFile と別メソッドとして定義する設計注記追加",
+      "sections_updated": ["5-1", "11"]
+    },
+    {
+      "id": "DR1-006",
+      "severity": "nice_to_have",
+      "title": "MarpEditorWithSlides への onOpenFile 伝播不要の可能性を注記、コンポーネント図から削除",
+      "sections_updated": ["2", "10", "11"]
+    },
+    {
+      "id": "DR1-008",
+      "severity": "nice_to_have",
+      "title": "ドロップダウンUI の TabDropdownMenu サブコンポーネント化検討を注記",
+      "sections_updated": ["5-3", "11"]
+    },
+    {
+      "id": "DR1-009",
+      "severity": "nice_to_have",
+      "title": "MOVE_TO_FRONT 方式に統一、先頭4タブ+アクティブタブ方式は不採用",
+      "sections_updated": ["5-2", "5-3", "8", "11"]
+    }
+  ],
+  "skipped_findings": [],
+  "design_policy_updated": true,
+  "new_sections_added": [
+    "Section 11: 実装チェックリスト",
+    "Section 12: レビュー指摘事項サマリー"
+  ],
+  "summary": {
+    "must_fix_applied": 1,
+    "should_fix_applied": 5,
+    "nice_to_have_applied": 4,
+    "skipped": 0,
+    "total_applied": 10
+  }
+}

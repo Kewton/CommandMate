@@ -1,0 +1,111 @@
+{
+  "issue_number": 505,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "focus_area": "通常",
+  "iteration": 2,
+  "review_date": "2026-03-16",
+  "previous_findings_status": {
+    "stage1_findings": {
+      "F1-001": { "status": "addressed", "note": "rehype-sanitize スキーマ調整がソリューション・実装タスク・受入条件すべてに記載されている" },
+      "F1-002": { "status": "addressed", "note": "MarkdownEditor.tsx と WorktreeDetailRefactored.tsx が変更対象ファイルに追加され、コールバック伝播経路が明記されている" },
+      "F1-003": { "status": "addressed", "note": "タブ上限30到達時の Toast 通知が受入条件に追加されている" },
+      "F1-004": { "status": "addressed", "note": "アクティブタブの表示保証・MOVE_TO_FRONT アクション追加が明記されている" },
+      "F1-005": { "status": "addressed", "note": "safe モードの制限・interactive モードの postMessage・origin 検証が明記されている" },
+      "F1-006": { "status": "addressed", "note": "相対パス解決ルールが基準ディレクトリ・正規化・パストラバーサル防止・存在しないファイルのハンドリングまで明記されている" },
+      "F1-007": { "status": "addressed", "note": "WorktreeDetailRefactored.tsx が変更対象に追加され、Toast メッセージ更新が実装タスクに含まれている" },
+      "F1-008": { "status": "addressed", "note": "アンカーリンク（#）のスクロール処理が受入条件に追加されている" }
+    },
+    "stage3_findings": {
+      "F3-001": { "status": "addressed", "note": "FilePanelSplit.tsx が変更対象ファイル表に追加されている" },
+      "F3-002": { "status": "addressed", "note": "FilePanelTabs.tsx の onOpenFile 伝播が変更内容に追記されている" },
+      "F3-003": { "status": "addressed", "note": "src/types/markdown-editor.ts の EditorProps に onOpenFile 追加が影響範囲に含まれている" },
+      "F3-004": { "status": "addressed", "note": "テスト計画セクションが追加され、useFileTabs.test.ts の具体的テストケースが列挙されている" },
+      "F3-005": { "status": "addressed", "note": "FilePanelTabs.test.tsx のテストケースが列挙されている" },
+      "F3-006": { "status": "addressed", "note": "postMessage メッセージスキーマが commandmate: prefix 付きで型定義されている" },
+      "F3-007": { "status": "addressed", "note": "localStorage への影響は大きな問題ではないとして現在の設計を維持" },
+      "F3-008": { "status": "addressed", "note": "MarkdownWithSearch・MarpEditorWithSlides への伝播が変更対象ファイル表と実装タスクに含まれている" },
+      "F3-009": { "status": "addressed", "note": "srcDoc へのスクリプト注入が具体的な実装手順（addEventListener, preventDefault, postMessage）付きで記載されている" },
+      "F3-010": { "status": "addressed", "note": "既存パターンに合わせて英語ハードコードで対応（Nice to Have として認識済み）" },
+      "F3-011": { "status": "addressed", "note": "useEffect クリーンアップと event.source による識別がセキュリティ考慮事項と受入条件に含まれている" },
+      "F3-012": { "status": "addressed", "note": "デスクトップビューのみを対象とすることがスコープに明記されている" }
+    },
+    "all_addressed": true
+  },
+  "findings": [
+    {
+      "id": "F5-001",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "MarkdownPreview に currentFilePath props が必要だが Issue の props 記載が onOpenFile のみ",
+      "description": "Issue ではMarkdownPreview に onOpenFile コールバックを渡すことが記載されているが、相対パスを解決するには「現在表示中のファイルのパス」情報も MarkdownPreview に渡す必要がある。現在の MarkdownPreviewProps は { content: string } のみであり、相対パスの基準ディレクトリを算出するためには currentFilePath (string) も追加しなければならない。コールバック伝播経路には onOpenFile のみ記載されており、currentFilePath の伝播が言及されていない。",
+      "suggestion": "コールバック伝播経路の記載に onOpenFile と並んで currentFilePath (string) の伝播を追加する。MarkdownPreview の props 拡張として { content: string; onOpenFile?: (path: string) => void; currentFilePath?: string } となることを明記すべき。なお、MarkdownEditor は既に filePath props を持っているため、MarkdownEditor -> MarkdownPreview への伝播は容易だが、Issue に明記されていないと実装時に見落とされる可能性がある。"
+    },
+    {
+      "id": "F5-002",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "HtmlPreview への onOpenFile コールバック伝播が変更対象ファイル表の変更内容に不足",
+      "description": "変更対象ファイル表の HtmlPreview.tsx の変更内容は「srcDoc へのリンク検知スクリプト注入、postMessage 監視、origin 検証・スキーマ検証、useEffect クリーンアップ」と記載されている。しかし、postMessage を受信した後にファイルタブを開くには HtmlPreview にも onOpenFile コールバックが必要。現在の HtmlPreviewProps には onOpenFile がなく、FilePanelContent から HtmlPreview に onOpenFile を伝播する記載が漏れている。",
+      "suggestion": "変更対象ファイル表の HtmlPreview.tsx の変更内容に「onOpenFile コールバック props 追加」を追記する。また HtmlPreviewProps に onOpenFile?: (path: string) => void を追加する旨を実装タスクに追加すべき。FilePanelContent.tsx の HTML レンダリング部分（content.isHtml ブロック）で HtmlPreview に onOpenFile を渡す変更も必要。"
+    },
+    {
+      "id": "F5-003",
+      "severity": "should_fix",
+      "category": "技術的妥当性",
+      "title": "rehype-sanitize の plugin 実行順序が rehypeHighlight との相互作用で問題を起こす可能性",
+      "description": "現在の MarkdownPreview では rehypePlugins が [rehypeSanitize, rehypeHighlight] の順で指定されている。rehype-sanitize が先に実行されるため、rehypeHighlight が追加する class 属性や span タグが sanitize でブロックされない（後から追加されるため）。Issue でカスタムスキーマを適用する場合、この順序関係を意識しないと、a タグの href が sanitize で除去されてからカスタムコンポーネントに渡される可能性がある。react-markdown の components は rehype 処理後の AST に適用されるため、rehype-sanitize のカスタムスキーマで href を許可すれば問題ないが、実装タスクにこの順序依存性への注意が含まれていない。",
+      "suggestion": "実装タスクの rehype-sanitize カスタムスキーマ作成タスクに、rehype plugin の実行順序（sanitize -> highlight）を確認し、a タグの href がサニタイズ後も保持されることをテストで検証する旨を注記として追加することを推奨する。"
+    },
+    {
+      "id": "F5-004",
+      "severity": "nice_to_have",
+      "category": "明確性",
+      "title": "OPEN_FILE reducer が limit_reached 時に state をそのまま返す設計と MOVE_TO_FRONT の関係",
+      "description": "現在の fileTabsReducer の OPEN_FILE ケースでは、既にタブが開かれている場合は activeIndex を変更するだけで、タブ配列の順序は変更しない。新たに MOVE_TO_FRONT アクションを追加するが、ドロップダウンからタブを選択した場合に ACTIVATE_TAB ではなく MOVE_TO_FRONT を dispatch する必要がある。Issue のテスト計画には「ドロップダウン選択時に MOVE_TO_FRONT が dispatch されること」が含まれているが、通常のタブクリックでは ACTIVATE_TAB を使い続けるのか、MOVE_TO_FRONT に統一するのかの区別が曖昧。",
+      "suggestion": "タブバー内の先頭5タブをクリックした場合は ACTIVATE_TAB（順序変更なし）、ドロップダウンからの選択時のみ MOVE_TO_FRONT（先頭移動）を使うという使い分けを明記すると実装者にとって明確になる。"
+    },
+    {
+      "id": "F5-005",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "split ビューモードでの HtmlIframePreview の postMessage リスナー重複の可能性",
+      "description": "HtmlPreview コンポーネントの split ビューモードでは HtmlIframePreview が2つレンダリングされる（左右に1つずつ）。この場合、window に登録する message イベントリスナーが1つであっても、2つの iframe からの postMessage をどちらの iframe 起点か区別する必要がある。Issue では event.source による識別が言及されているが、split モードでの具体的な挙動（両方の iframe からのクリックを処理すべきか等）は記載されていない。",
+      "suggestion": "split モードでは2つの HtmlIframePreview が同じ htmlContent を表示するため、どちらの iframe からのリンククリックも同じ結果になる。event.source の識別は不要で、単にメッセージスキーマの検証のみで十分という判断を明記するか、または HtmlPreview コンポーネント単位でリスナーを1つだけ登録する設計を記載すると良い。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 3,
+    "nice_to_have": 2,
+    "total": 5
+  },
+  "previous_findings_addressed": true,
+  "code_references": [
+    {
+      "file": "src/components/worktree/MarkdownPreview.tsx",
+      "relevance": "MarkdownPreviewProps が { content: string } のみ。currentFilePath と onOpenFile の追加が必要"
+    },
+    {
+      "file": "src/components/worktree/HtmlPreview.tsx",
+      "relevance": "HtmlPreviewProps に onOpenFile がない。postMessage 受信後のファイルオープンにコールバックが必要"
+    },
+    {
+      "file": "src/components/worktree/FilePanelContent.tsx",
+      "relevance": "HtmlPreview への onOpenFile 伝播が必要。現在は onFileSaved と onDirtyChange のみ渡している"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "relevance": "EditorProps の filePath を MarkdownPreview に currentFilePath として渡す中間層"
+    },
+    {
+      "file": "src/types/markdown-editor.ts",
+      "relevance": "EditorProps に onOpenFile 追加予定。現在は未定義"
+    },
+    {
+      "file": "src/hooks/useFileTabs.ts",
+      "relevance": "OPEN_FILE と MOVE_TO_FRONT の使い分けの設計確認対象"
+    }
+  ],
+  "doc_references": []
+}

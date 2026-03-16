@@ -196,6 +196,7 @@ tests/
 | `src/lib/git/clone-manager.ts` | クローン処理管理（排他制御） |
 | `src/lib/version-checker.ts` | バージョンアップ通知 |
 | `src/lib/slash-commands.ts` | スラッシュコマンドローダー（.claude/commands, .claude/skills, .codex/skills対応）（Issue #166） |
+| `src/lib/link-utils.ts` | リンク種別判定・相対パス解決・hrefサニタイズ（Issue #505） |
 | `src/lib/url-path-encoder.ts` | ファイルパスURLエンコード |
 | `src/lib/file-search.ts` | ファイル内容検索 |
 | `src/lib/terminal-highlight.ts` | CSS Custom Highlight API ラッパー（Issue #47）XSS安全なターミナルハイライト |
