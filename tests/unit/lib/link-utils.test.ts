@@ -46,11 +46,9 @@ describe('classifyLink', () => {
     expect(classifyLink('/docs/guide.md')).toBe('relative');
   });
 
-  it('should return "relative" for mailto: and tel: (not external)', () => {
-    // mailto: and tel: are not http/https, so classifyLink treats them as relative
-    // This is fine because sanitizeHref handles the protocol validation
-    expect(classifyLink('mailto:test@example.com')).toBe('relative');
-    expect(classifyLink('tel:+1234567890')).toBe('relative');
+  it('should return "external" for mailto: and tel: links', () => {
+    expect(classifyLink('mailto:test@example.com')).toBe('external');
+    expect(classifyLink('tel:+1234567890')).toBe('external');
   });
 });
 
