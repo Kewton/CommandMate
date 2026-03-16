@@ -35,7 +35,14 @@ export type LinkType = 'anchor' | 'external' | 'relative';
  */
 export function classifyLink(href: string): LinkType {
   if (href.startsWith('#')) return 'anchor';
-  if (href.startsWith('http://') || href.startsWith('https://')) return 'external';
+  if (
+    href.startsWith('http://') ||
+    href.startsWith('https://') ||
+    href.startsWith('mailto:') ||
+    href.startsWith('tel:')
+  ) {
+    return 'external';
+  }
   return 'relative';
 }
 
@@ -106,7 +113,11 @@ export const REHYPE_SANITIZE_SCHEMA = {
   attributes: {
     ...defaultSchema.attributes,
     a: [
-      ...(defaultSchema.attributes?.a ?? []),
+      // Keep all default 'a' attributes except bare 'href' (which allows any value)
+      ...(defaultSchema.attributes?.a ?? []).filter(
+        (attr) => attr !== 'href',
+      ),
+      // Replace with allowlist-filtered href [DR4-001]
       ['href', /^(?:#|mailto:|tel:|https?:\/\/|(?![a-zA-Z][a-zA-Z0-9+.-]*:))/],
     ],
   },

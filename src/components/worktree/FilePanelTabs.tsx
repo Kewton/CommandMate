@@ -11,7 +11,7 @@
 
 'use client';
 
-import React, { memo, useCallback, useState } from 'react';
+import React, { memo, useCallback, useState, useEffect, useRef } from 'react';
 import { X, ChevronDown } from 'lucide-react';
 import { FilePanelContent } from './FilePanelContent';
 import type { FileTab } from '@/hooks/useFileTabs';
@@ -144,6 +144,7 @@ export const FilePanelTabs = memo(function FilePanelTabs({
   onOpenFile,
 }: FilePanelTabsProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const activeTab = activeIndex !== null && activeIndex >= 0 && activeIndex < tabs.length
     ? tabs[activeIndex]
@@ -151,6 +152,18 @@ export const FilePanelTabs = memo(function FilePanelTabs({
 
   const visibleTabs = tabs.length > VISIBLE_TAB_COUNT ? tabs.slice(0, VISIBLE_TAB_COUNT) : tabs;
   const overflowTabs = tabs.length > VISIBLE_TAB_COUNT ? tabs.slice(VISIBLE_TAB_COUNT) : [];
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [dropdownOpen]);
 
   const handleDropdownSelect = useCallback((path: string) => {
     setDropdownOpen(false);
@@ -164,30 +177,32 @@ export const FilePanelTabs = memo(function FilePanelTabs({
   return (
     <div className="flex flex-col h-full">
       {/* Tab bar */}
-      <div className="flex border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-x-auto">
-        {visibleTabs.map((tab, index) => (
-          <TabButton
-            key={tab.path}
-            tab={tab}
-            isActive={index === activeIndex}
-            onActivate={onActivate}
-            onClose={onClose}
-          />
-        ))}
+      <div className="flex border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 min-w-0">
+        <div className="flex min-w-0 overflow-hidden flex-1">
+          {visibleTabs.map((tab, index) => (
+            <TabButton
+              key={tab.path}
+              tab={tab}
+              isActive={index === activeIndex}
+              onActivate={onActivate}
+              onClose={onClose}
+            />
+          ))}
+        </div>
         {/* Dropdown button for overflow tabs [DR1-008] */}
         {overflowTabs.length > 0 && (
-          <div className="relative flex-shrink-0">
+          <div className="relative flex-shrink-0" ref={dropdownRef}>
             <button
               type="button"
               data-testid="tab-dropdown-button"
               onClick={handleDropdownToggle}
-              className="flex items-center gap-0.5 px-2 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 border-b-2 border-transparent"
+              className="flex items-center gap-0.5 px-2 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 border-b-2 border-transparent transition-colors"
             >
-              <ChevronDown className="w-3 h-3" />
+              <ChevronDown className={`w-3 h-3 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
               <span>+{overflowTabs.length}</span>
             </button>
             {dropdownOpen && (
-              <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg z-50 min-w-[160px] max-h-[300px] overflow-y-auto">
+              <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg z-50 min-w-[200px] max-h-[300px] overflow-y-auto">
                 {overflowTabs.map(tab => (
                   <button
                     key={tab.path}

@@ -136,20 +136,13 @@ export const MarkdownPreview = memo(function MarkdownPreview({
     [handleLinkClick],
   );
 
-  // rehype plugins with custom sanitize schema [DR4-001]
-  const rehypePlugins = useMemo(
-    () => [
-      [rehypeSanitize, REHYPE_SANITIZE_SCHEMA] as const,
-      rehypeHighlight,
-    ],
-    [],
-  );
-
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      rehypePlugins={rehypePlugins as any}
+      rehypePlugins={[
+        [rehypeSanitize, REHYPE_SANITIZE_SCHEMA],
+        rehypeHighlight,
+      ]}
       components={markdownComponents}
     >
       {content}
