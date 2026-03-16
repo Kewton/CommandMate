@@ -202,7 +202,7 @@ tests/
 | `src/lib/file-tree.ts` | ディレクトリツリー構造生成 |
 | `src/lib/git/git-utils.ts` | Git情報取得・コミット履歴/diff取得（Issue #447） |
 | `src/types/git.ts` | Git関連型定義（CommitInfo, ChangedFile, GitLogResponse等）（Issue #447） |
-| `src/lib/sidebar-utils.ts` | サイドバーソート・グループ化ユーティリティ（SortKey, SortDirection, ViewMode型, BranchGroup型, sortBranches(), groupBranches()）（Issue #449） |
+| `src/lib/sidebar-utils.ts` | サイドバーソート・グループ化ユーティリティ（SortKey, SortDirection, ViewMode型, BranchGroup型, sortBranches(), groupBranches(), generateRepositoryColor()）（Issue #449, #504） |
 | `src/contexts/SidebarContext.tsx` | サイドバー状態管理Context（isOpen, sortKey, viewMode, localStorageパターン）（Issue #449） |
 | `src/lib/utils.ts` | 汎用ユーティリティ |
 | `src/lib/date-utils.ts` | 相対時刻フォーマット |

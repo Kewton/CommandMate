@@ -1,0 +1,101 @@
+{
+  "issue_number": 504,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "focus_area": "通常",
+  "review_date": "2026-03-16",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2,
+    "total": 6
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "F1-001",
+        "severity": "must_fix",
+        "category": "整合性",
+        "title": "Issueタイトルと本文の不一致",
+        "description": "Issueタイトルは「サイドバーのリポジトリに一意のアイコンを追加」となっているが、本文では「色付きドット」を追加する提案になっている。アイコンとドットは異なるUIパターンであり、実装者に混乱を招く可能性がある。",
+        "location": "Issueタイトル vs 本文「提案する解決策」セクション",
+        "suggestion": "タイトルを「サイドバーのリポジトリグループヘッダーに色付きドットを追加」に修正し、タイトルと本文の内容を一致させる。",
+        "evidence": "タイトル: 「一意のアイコンを追加」、本文: 「色付きドットとして表示する」"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "F1-002",
+        "severity": "should_fix",
+        "category": "明確性",
+        "title": "ダークモード/ライトモード対応タスクの実態との乖離",
+        "description": "実装タスクに「ダークモード/ライトモード両対応の色調整」が含まれているが、現在のSidebar.tsxはダークテーマ固定（bg-gray-800/50等のハードコード）であり、Tailwindのdark:クラスによる切り替えは使用されていない。ライトモード対応は本Issueのスコープ外である可能性が高い。",
+        "location": "実装タスク 3番目の項目",
+        "suggestion": "現状のサイドバーがダークテーマ固定であることを踏まえ、タスクを「ダークテーマ背景上で視認性の高いHSL彩度・明度範囲を設定」に修正するか、ライトモード対応が不要であることを明記する。",
+        "evidence": "Sidebar.tsx:282-288 bg-gray-800/50, hover:bg-gray-800 等、dark:プレフィックスなし。tailwind.config.jsでdarkMode: 'class'設定はあるが、Sidebarコンポーネントでは未使用。"
+      },
+      {
+        "id": "F1-003",
+        "severity": "should_fix",
+        "category": "明確性",
+        "title": "CLIステータスドットとの差別化基準が未定義",
+        "description": "受入条件に「既存のCLIステータスドットと混同しないデザインであること」とあるが、具体的な差別化基準（サイズ、位置、形状など）が示されていない。CLIステータスドットはw-2 h-2 rounded-fullであり、リポジトリ色ドットのサイズ指定がないと実装時に判断が分かれる。",
+        "location": "受入条件 4番目",
+        "suggestion": "差別化の方針を明記する。例: 「リポジトリ色ドットはw-2.5 h-2.5とし、CLIステータスドット(w-2 h-2)よりわずかに大きくする」または「リポジトリ色ドットはGroupHeaderのフォルダアイコンを置き換える形で表示し、位置の違いで区別する」等。",
+        "evidence": "BranchListItem.tsx:41,50 CliStatusDotは w-2 h-2 rounded-full を使用。GroupHeaderは別のコンテキスト（グループヘッダー行 vs ブランチ行）にあるため位置で区別可能だが、明示されていない。"
+      },
+      {
+        "id": "F1-004",
+        "severity": "should_fix",
+        "category": "完全性",
+        "title": "色生成ユーティリティの配置先が曖昧",
+        "description": "変更対象ファイルの表で「src/lib/sidebar-utils.ts（色生成ユーティリティ関数を追加（または新規ファイル））」と記載されており、配置先が確定していない。sidebar-utils.tsは現在ソート・グループ化に特化しており、色生成は別の関心事。",
+        "location": "影響範囲 > 変更対象ファイル",
+        "suggestion": "配置先を明確に決定する。推奨: sidebar-utils.tsに追加（同ファイルはサイドバーのユーティリティを集約する方針のため）。新規ファイルにする場合は src/lib/repository-color.ts 等のファイル名を明記する。",
+        "evidence": "sidebar-utils.tsは174行程度で、SortKey/ViewMode/BranchGroup型とsortBranches/groupBranches関数を含む。色生成関数（純粋関数1つ程度）であれば同ファイルに追加しても責務の肥大化は限定的。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F1-005",
+        "severity": "nice_to_have",
+        "category": "完全性",
+        "title": "アクセシビリティ（色覚多様性）への考慮が未記載",
+        "description": "色による識別のみに依存する設計は、色覚多様性を持つユーザーにとって識別が困難になる可能性がある。ただし、リポジトリ名テキストが併記されるため、色はあくまで補助的な識別手段であり、実用上の問題は限定的。",
+        "location": "提案する解決策セクション",
+        "suggestion": "色が補助的な識別手段であり、リポジトリ名テキストが常に表示されることを非機能要件として明記するとよい。"
+      },
+      {
+        "id": "F1-006",
+        "severity": "nice_to_have",
+        "category": "完全性",
+        "title": "フォルダアイコンの扱いが未定義",
+        "description": "現在GroupHeaderにはGroupIcon（フォルダSVG）が表示されている。色付きドットを追加する際に、フォルダアイコンを残すのか、置き換えるのかが明記されていない。",
+        "location": "提案する解決策 > 主要な変更点",
+        "suggestion": "「フォルダアイコンの左に色付きドットを追加する（アイコンは維持）」または「フォルダアイコンを色付きドットに置き換える」のいずれかを明記する。",
+        "evidence": "Sidebar.tsx:291-293 現在の順序: ChevronIcon -> GroupIcon -> repositoryName -> branchCount"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/layout/Sidebar.tsx",
+      "lines": "265-297, 349-365",
+      "relevance": "GroupHeaderコンポーネントとGroupIconコンポーネント（変更対象）"
+    },
+    {
+      "file": "src/lib/sidebar-utils.ts",
+      "relevance": "色生成ユーティリティ追加候補"
+    },
+    {
+      "file": "src/components/sidebar/BranchListItem.tsx",
+      "lines": "33-55",
+      "relevance": "CLIステータスドット（デザイン整合性参照）"
+    },
+    {
+      "file": "src/config/status-colors.ts",
+      "relevance": "既存のステータス色定義パターン（設計参照）"
+    }
+  ],
+  "doc_references": []
+}

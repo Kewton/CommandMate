@@ -1,0 +1,113 @@
+{
+  "issue_number": 504,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "review_date": "2026-03-16",
+  "findings": [
+    {
+      "id": "F3-001",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "色生成関数をuseMemoで囲む必要性をIssueに明記すべき",
+      "description": "GroupHeaderコンポーネントはgroupedBranches配列のmap内で呼ばれる。repositoryNameからの色生成関数（ハッシュ計算+HSL変換）自体は純粋関数で高速だが、GroupHeaderが再レンダリングされるたびに呼び出される。現状のSidebar実装ではgroupedBranchesがuseMemoで保護されているため頻繁な再計算は起きにくいが、実装時にuseMemoやコンポーネント外での事前計算を検討すべきことをIssueに記載しておくと安全。リポジトリ数が数十程度であれば実質的なパフォーマンス問題は発生しない。",
+      "suggestion": "Issueの実装タスクに「色生成は純粋関数であり、リポジトリ数が少ないためメモ化は不要だが、将来的にリポジトリ数が増加した場合はuseMemoでの最適化を検討」と注記を追加する。"
+    },
+    {
+      "id": "F3-002",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "既存テストファイル sidebar-utils.test.ts への追加テストが必要",
+      "description": "tests/unit/lib/sidebar-utils.test.ts が既に存在し、sortBranches/groupBranches のテストを含む。新しいgenerateRepositoryColor関数をsidebar-utils.tsに追加する場合、このテストファイルにテストケースを追加する必要がある。Issueでは「ユニットテスト追加」と記載されているが、具体的にどのテストファイルに追加するかが不明確。",
+      "suggestion": "Issueの実装タスクを「tests/unit/lib/sidebar-utils.test.ts にgenerateRepositoryColor関数のテストを追加」と具体化する。テストケースとして (1) 同一名で同一色、(2) 異なる名前で異なるhue値、(3) 空文字列やエッジケース を明記。"
+    },
+    {
+      "id": "F3-003",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "title": "モバイルドロワー表示での色付きドット視認性",
+      "description": "AppShell.tsxではモバイル表示時にSidebarコンポーネントをそのままドロワー内に配置している（w-72固定幅）。GroupHeaderはデスクトップ・モバイル共通であるため、色付きドットの追加は自動的にモバイルにも適用される。GroupHeaderのレイアウトは「flex items-center gap-2 px-4」で、既にChevronIcon(w-3 h-3) + GroupIcon(w-3 h-3)が横並びのところにw-2.5 h-2.5のドットが追加される。gap-2の間隔でw-72の幅に収まるが、4要素（chevron + dot + folder + text + count）の横並びになることを確認すべき。",
+      "suggestion": "実装時にモバイルドロワー幅（w-72=288px）でGroupHeader内の要素が窮屈にならないことを目視確認する旨をIssueに記載。特にリポジトリ名が長い場合のtruncate動作を確認。"
+    },
+    {
+      "id": "F3-004",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "title": "SSR/ハイドレーション問題はなし（確認済み）",
+      "description": "色生成関数はリポジトリ名（文字列）からの純粋な決定論的計算のため、サーバーとクライアントで同じ出力を生成する。Sidebar.tsxは'use client'ディレクティブ付きのクライアントコンポーネントであり、SSRハイドレーションミスマッチの懸念はない。また、inline styleでのHSL色指定はTailwindクラスではないため、PurgeCSS等の問題も発生しない。",
+      "suggestion": "対応不要。色生成関数がMath.randomやDate.now等の非決定論的値を使わないことだけ実装時に確認する。"
+    },
+    {
+      "id": "F3-005",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "title": "i18n影響なし（確認済み）",
+      "description": "色付きドットはテキスト要素を含まない純粋なビジュアル要素であり、next-intlによる国際化対応は不要。リポジトリ名はGitから取得される固有名詞のため翻訳対象外。aria-labelを付与する場合は英語固定で問題ない。",
+      "suggestion": "ドットにaria-label（例: 'Repository color indicator'）を付与する場合は、i18nキーの追加を検討してもよいが、優先度は低い。"
+    },
+    {
+      "id": "F3-006",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "title": "エクスポートへの影響は最小限",
+      "description": "sidebar-utils.tsから新しいgenerateRepositoryColor関数をexportすることになるが、sidebar-utils.tsをimportしているファイルは3つ（SidebarContext.tsx: 型のみ、SortSelector.tsx: 型のみ、Sidebar.tsx: 関数+型）。型のみのimportファイルは影響を受けない。Sidebar.tsxのみが新関数をimportする見込みで、破壊的変更はゼロ。",
+      "suggestion": "対応不要。既存のexportは変更せず、新しい関数を追加exportするだけのため後方互換性は維持される。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 2,
+    "nice_to_have": 4,
+    "total": 6
+  },
+  "code_references": [
+    {
+      "file": "src/components/layout/Sidebar.tsx",
+      "relevance": "GroupHeader変更対象。色付きドット追加箇所（line 265-297）"
+    },
+    {
+      "file": "src/lib/sidebar-utils.ts",
+      "relevance": "generateRepositoryColor関数の追加先"
+    },
+    {
+      "file": "src/components/sidebar/BranchListItem.tsx",
+      "relevance": "CLIステータスドット（w-2 h-2）のデザイン整合性参照"
+    },
+    {
+      "file": "src/components/sidebar/BranchStatusIndicator.tsx",
+      "relevance": "既存ステータスインジケーター（w-3 h-3）の参照"
+    },
+    {
+      "file": "tests/unit/lib/sidebar-utils.test.ts",
+      "relevance": "テスト追加先ファイル"
+    },
+    {
+      "file": "src/components/layout/AppShell.tsx",
+      "relevance": "モバイルドロワーでのSidebar利用確認"
+    },
+    {
+      "file": "src/contexts/SidebarContext.tsx",
+      "relevance": "sidebar-utils.tsの型import元（状態変更不要を確認済み）"
+    }
+  ],
+  "doc_references": [],
+  "impact_analysis": {
+    "directly_affected_files": [
+      "src/lib/sidebar-utils.ts",
+      "src/components/layout/Sidebar.tsx",
+      "tests/unit/lib/sidebar-utils.test.ts"
+    ],
+    "indirectly_affected_files": [],
+    "no_change_needed_but_verified": [
+      "src/contexts/SidebarContext.tsx",
+      "src/components/sidebar/BranchListItem.tsx",
+      "src/components/sidebar/BranchStatusIndicator.tsx",
+      "src/components/sidebar/SortSelector.tsx",
+      "src/components/layout/AppShell.tsx",
+      "src/components/mobile/MobileHeader.tsx"
+    ],
+    "breaking_changes": false,
+    "new_dependencies": false
+  }
+}

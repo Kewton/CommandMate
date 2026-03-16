@@ -1,0 +1,20 @@
+{
+  "issue_number": 504,
+  "feature_summary": "サイドバーのリポジトリグループヘッダーに色付きドットを追加",
+  "acceptance_criteria": [
+    "リポジトリグループヘッダーのリポジトリ名の左に色付きドットが表示される",
+    "同じリポジトリ名からは常に同じ色が生成される",
+    "異なるリポジトリ名からは視覚的に区別可能な色が生成される",
+    "既存のCLIステータスドットと混同しないデザインであること（w-2.5 h-2.5、GroupHeader行に配置）",
+    "npm run test:unit パス",
+    "npm run lint パス"
+  ],
+  "test_scenarios": [
+    "シナリオ1: generateRepositoryColor関数が同一入力に対して同一HSL文字列を返す",
+    "シナリオ2: generateRepositoryColor関数が異なる入力に対して異なるhue値のHSL文字列を返す",
+    "シナリオ3: GroupHeaderコンポーネントにcolor dot要素が追加されている（コード確認）",
+    "シナリオ4: color dotのサイズがw-2.5 h-2.5でCLIステータスドット(w-2 h-2)と異なる",
+    "シナリオ5: 全ユニットテストがパスする",
+    "シナリオ6: ESLint/TypeScriptチェックがパスする"
+  ]
+}
