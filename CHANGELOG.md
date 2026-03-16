@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.9] - 2026-03-16
+
+### Added
+- Sidebar: branch sync button to sidebar header (Issue #506)
+- Sidebar: colored folder icons for repository group headers (Issue #504)
+- File panel: in-file link navigation and tab UI improvements (Issue #505)
+- Mobile: open external links from HTML preview in new browser tab (Issue #505)
+
+### Fixed
+- Auto-Yes: prioritize prompt detection over thinking check
+- Auto-Yes: prevent dual response and status instability (Issue #501)
+- Auto-Yes: prevent client-side duplicate response when server poller is active
+- File panel: tab overflow, dropdown click, and link handling issues (Issue #505)
+- Markdown preview: stabilize DOM to make links clickable (Issue #505)
+- Message list: stabilize ReactMarkdown plugin arrays and callback refs
+- Sidebar: replace color dot with colored folder icon for repository identification
+- Sync: include DB-registered repositories in worktree sync
+
+### Performance
+- Auto-Yes: implement 7-item polling performance improvements (Issue #499)
+
+### Refactored
+- Sidebar: improve parseGroupCollapsed testability and add comprehensive tests
+
 ## [0.4.8] - 2026-03-14
 
 ### Added
@@ -840,7 +864,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.4.8...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.4.9...HEAD
+[0.4.9]: https://github.com/Kewton/CommandMate/compare/v0.4.8...v0.4.9
 [0.4.8]: https://github.com/Kewton/CommandMate/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/Kewton/CommandMate/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/Kewton/CommandMate/compare/v0.4.5...v0.4.6
