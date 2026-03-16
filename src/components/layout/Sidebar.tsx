@@ -237,22 +237,28 @@ export const Sidebar = memo(function Sidebar() {
 // Helper Functions
 // ============================================================================
 
+/** Maximum number of keys allowed in group collapsed state */
+const MAX_GROUP_COLLAPSED_KEYS = 100;
+
+/** Keys that are dangerous due to prototype pollution */
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 /**
  * Parse and validate group collapsed state from localStorage.
  * Includes prototype pollution protection and key limit.
+ *
+ * @internal Exported for unit testing only
  */
-function parseGroupCollapsed(raw: string): Record<string, boolean> {
+export function parseGroupCollapsed(raw: string): Record<string, boolean> {
   try {
     const parsed = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
-    const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-    const MAX_KEYS = 100;
     const safe: Record<string, boolean> = {};
     let count = 0;
     for (const [key, value] of Object.entries(parsed)) {
       if (DANGEROUS_KEYS.has(key)) continue;
       if (typeof value !== 'boolean') continue;
-      if (++count > MAX_KEYS) break;
+      if (++count > MAX_GROUP_COLLAPSED_KEYS) break;
       safe[key] = value;
     }
     return safe;

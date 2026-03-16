@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import React from 'react';
-import { Sidebar } from '@/components/layout/Sidebar';
+import { Sidebar, parseGroupCollapsed } from '@/components/layout/Sidebar';
 import { SidebarProvider } from '@/contexts/SidebarContext';
 import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
 import type { Worktree } from '@/types/models';
@@ -681,6 +681,58 @@ describe('Sidebar', () => {
         expect(screen.getByTestId('sidebar')).toBeInTheDocument();
       });
     });
+
+    it('should parse valid group collapsed state', () => {
+      const result = parseGroupCollapsed(JSON.stringify({ RepoA: true, RepoB: false }));
+      expect(result).toEqual({ RepoA: true, RepoB: false });
+    });
+
+    it('should return empty object for invalid JSON', () => {
+      expect(parseGroupCollapsed('not-json')).toEqual({});
+    });
+
+    it('should return empty object for non-object values', () => {
+      expect(parseGroupCollapsed('"string"')).toEqual({});
+      expect(parseGroupCollapsed('123')).toEqual({});
+      expect(parseGroupCollapsed('null')).toEqual({});
+      expect(parseGroupCollapsed('[1,2,3]')).toEqual({});
+    });
+
+    it('should filter out dangerous prototype pollution keys', () => {
+      const input = JSON.stringify({
+        __proto__: true,
+        constructor: true,
+        prototype: true,
+        SafeKey: true,
+      });
+      const result = parseGroupCollapsed(input);
+      expect(result).toEqual({ SafeKey: true });
+      expect(result).not.toHaveProperty('__proto__');
+      expect(result).not.toHaveProperty('constructor');
+      expect(result).not.toHaveProperty('prototype');
+    });
+
+    it('should filter out non-boolean values', () => {
+      const input = JSON.stringify({
+        ValidTrue: true,
+        ValidFalse: false,
+        StringVal: 'true',
+        NumberVal: 1,
+        NullVal: null,
+        ObjectVal: {},
+      });
+      const result = parseGroupCollapsed(input);
+      expect(result).toEqual({ ValidTrue: true, ValidFalse: false });
+    });
+
+    it('should limit number of keys to prevent abuse', () => {
+      const largeObj: Record<string, boolean> = {};
+      for (let i = 0; i < 150; i++) {
+        largeObj[`key-${i}`] = true;
+      }
+      const result = parseGroupCollapsed(JSON.stringify(largeObj));
+      expect(Object.keys(result).length).toBe(100);
+    });
   });
 
   describe('SyncButton', () => {
@@ -826,6 +878,43 @@ describe('Sidebar', () => {
       await waitFor(() => {
         expect(screen.getByText('common.syncError')).toBeInTheDocument();
       });
+    });
+
+    it('should prevent double-click from triggering multiple syncs', async () => {
+      // Make sync take some time to ensure overlap
+      (repositoryApi.sync as ReturnType<typeof vi.fn>).mockImplementation(
+        () => new Promise((resolve) => setTimeout(() => resolve({
+          success: true,
+          message: 'Synced',
+          worktreeCount: 3,
+          repositoryCount: 1,
+          repositories: [],
+        }), 200))
+      );
+
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('common.syncButtonLabel')).toBeInTheDocument();
+      });
+
+      const syncButton = screen.getByLabelText('common.syncButtonLabel');
+
+      // Click twice rapidly
+      fireEvent.click(syncButton);
+      fireEvent.click(syncButton);
+
+      // Wait for sync to complete
+      await waitFor(() => {
+        expect(syncButton).not.toBeDisabled();
+      });
+
+      // Should only have been called once due to isSyncingRef guard
+      expect(repositoryApi.sync).toHaveBeenCalledTimes(1);
     });
 
     it('should handle 401 error with auth error toast', async () => {
