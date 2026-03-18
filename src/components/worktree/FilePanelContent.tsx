@@ -608,11 +608,22 @@ export const FilePanelContent = memo(function FilePanelContent({
   }, [tab.content, tab.loading, tab.error, tab.path, worktreeId, onLoadContent, onLoadError, onSetLoading]);
 
   // Fetch MARP slides when content is loaded and is a MARP file
+  // Depend on content text (not object reference) to avoid re-fetching on polling updates
+  const contentText = tab.content?.content ?? null;
+  const contentExtension = tab.content?.extension ?? null;
   useEffect(() => {
-    setMarpSlides(null);
-    if (!tab.content || tab.content.extension !== 'md') return;
-    if (!MARP_FRONTMATTER_REGEX.test(tab.content.content)) return;
-    if (tab.content.content.length > MAX_MARP_CONTENT_LENGTH) return;
+    if (!contentText || contentExtension !== 'md') {
+      setMarpSlides(null);
+      return;
+    }
+    if (!MARP_FRONTMATTER_REGEX.test(contentText)) {
+      setMarpSlides(null);
+      return;
+    }
+    if (contentText.length > MAX_MARP_CONTENT_LENGTH) {
+      setMarpSlides(null);
+      return;
+    }
 
     let cancelled = false;
     const fetchMarpSlides = async () => {
@@ -622,7 +633,7 @@ export const FilePanelContent = memo(function FilePanelContent({
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ markdownContent: tab.content!.content }),
+            body: JSON.stringify({ markdownContent: contentText }),
           },
         );
         if (response.ok) {
@@ -640,7 +651,7 @@ export const FilePanelContent = memo(function FilePanelContent({
     return () => {
       cancelled = true;
     };
-  }, [tab.content, worktreeId]);
+  }, [contentText, contentExtension, worktreeId]);
 
   // Loading state
   if (tab.loading) {

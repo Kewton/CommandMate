@@ -1,0 +1,31 @@
+{
+  "issue_number": 518,
+  "refactor_targets": [
+    "src/middleware.ts",
+    "src/cli/commands/ls.ts",
+    "src/cli/commands/send.ts",
+    "src/cli/commands/wait.ts",
+    "src/cli/commands/respond.ts",
+    "src/cli/commands/capture.ts",
+    "src/cli/commands/auto-yes.ts",
+    "src/cli/utils/api-client.ts",
+    "src/cli/types/api-responses.ts",
+    "src/cli/types/index.ts",
+    "src/cli/config/duration-constants.ts",
+    "src/cli/config/cli-tool-ids.ts",
+    "src/cli/index.ts"
+  ],
+  "quality_metrics": {
+    "test_passed": 5187,
+    "test_failed": 0,
+    "tsc_errors": 0,
+    "lint_errors": 0
+  },
+  "improvement_goals": [
+    "Remove code duplication across command files",
+    "Ensure consistent error handling patterns",
+    "Verify SOLID principle adherence (especially SRP for ApiClient)",
+    "Check that all design policy checklist items are addressed",
+    "Ensure consistent --token warning and HTTP warning patterns"
+  ]
+}

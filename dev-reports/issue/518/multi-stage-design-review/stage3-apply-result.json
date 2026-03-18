@@ -1,0 +1,120 @@
+{
+  "issue_number": 518,
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "IA3-01",
+        "item": "middleware.ts Bearer token addition - Cookie-first verification order explicitly specified",
+        "section_updated": "Section 2-3, Section 7-1, Section 14 (must_fix checklist)",
+        "status": "reflected",
+        "changes": [
+          "Section 2-3: Rewrote auth flow to explicitly specify cookie-first verification order with 6 regression test scenarios",
+          "Section 7-1: Updated auth flow diagram to show cookie-first, bearer-fallback order with response branching",
+          "Section 14: Added 2 must_fix checklist items for cookie-first implementation and regression test scenarios"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IA3-02",
+        "item": "wait command polling interval vs cache TTL mismatch - changed from 3s to 5s",
+        "section_updated": "Section 8-1, Section 12",
+        "status": "reflected",
+        "changes": [
+          "Section 8-1: Changed polling interval from 3s to 5s with rationale for cache TTL alignment",
+          "Section 12: Added Phase 2 item for SSE/long-polling to eliminate polling"
+        ]
+      },
+      {
+        "id": "IA3-03",
+        "item": "API response type cross-validation tests elevated from nice_to_have to should_fix",
+        "section_updated": "Section 9-3, Section 10, Section 14",
+        "status": "reflected",
+        "changes": [
+          "Section 9-3: Elevated from recommended to required, added API response type validation guidance",
+          "Section 10: Added cross-validation.test.ts to new files list",
+          "Section 14: Added should_fix checklist item for cross-validation test creation"
+        ]
+      },
+      {
+        "id": "IA3-04",
+        "item": "Duration constant cross-validation test elevated from nice_to_have to should_fix",
+        "section_updated": "Section 9-3, Section 14",
+        "status": "reflected",
+        "changes": [
+          "Section 9-3: Elevated from recommended to required, specified parseDurationToMs output validation",
+          "Section 14: Added should_fix checklist item for Duration cross-validation"
+        ]
+      },
+      {
+        "id": "IA3-05",
+        "item": "mock-api.ts restoreFetch() cleanup mechanism added",
+        "section_updated": "Section 9-2, Section 14",
+        "status": "reflected",
+        "changes": [
+          "Section 9-2: Added restoreFetch() function to mock-api.ts specification with usage pattern",
+          "Section 14: Added should_fix checklist item for restoreFetch implementation"
+        ]
+      },
+      {
+        "id": "IA3-08",
+        "item": "Multiple CLI instances concurrent polling documentation and Phase 2 ETag plan",
+        "section_updated": "Section 8-2, Section 12, Section 14",
+        "status": "reflected",
+        "changes": [
+          "Section 8-2: Added concurrent polling limitation documentation with Phase 1 usage pattern",
+          "Section 12: Added Phase 2 item for ETag/If-None-Match conditional requests",
+          "Section 14: Added should_fix checklist item for help text documentation"
+        ]
+      },
+      {
+        "id": "IA3-09",
+        "item": "handleApiError HTTP 400, 429, network timeout error mappings added",
+        "section_updated": "Section 6-2, Section 14",
+        "status": "reflected",
+        "changes": [
+          "Section 6-2: Added HTTP 400 (CONFIG_ERROR), 429 (DEPENDENCY_ERROR), and fetch timeout (DEPENDENCY_ERROR) to error mapping table",
+          "Section 14: Added 2 should_fix checklist items for handleApiError extension and test cases"
+        ]
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "IA3-06",
+        "item": "No changes needed to bin/commandmate.js (positive finding)",
+        "section_updated": "Section 13 (Stage 3 summary)",
+        "status": "reflected"
+      },
+      {
+        "id": "IA3-07",
+        "item": "No naming conflicts with existing CLI commands (positive finding)",
+        "section_updated": "Section 13 (Stage 3 summary), Section 14 (nice_to_have checklist)",
+        "status": "reflected",
+        "changes": [
+          "Added nice_to_have checklist item for command group separation comment in index.ts"
+        ]
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-518-cli-base-commands-design-policy.md",
+  "sections_updated": [
+    "Section 2-3 (middleware Bearer auth - cookie-first order)",
+    "Section 6-2 (error handling strategy - HTTP 400/429/timeout)",
+    "Section 7-1 (auth flow diagram)",
+    "Section 8-1 (polling strategy - interval changed to 5s)",
+    "Section 8-2 (concurrent polling limitations)",
+    "Section 9-2 (fetchMock helper - restoreFetch)",
+    "Section 9-3 (cross-validation tests - elevated to required)",
+    "Section 10 (new files - cross-validation.test.ts)",
+    "Section 12 (Phase 2 - SSE, ETag)",
+    "Section 13 (Stage 3 review summary)",
+    "Section 14 (implementation checklist - Stage 3 items)",
+    "Section 15 (review history)"
+  ],
+  "timestamp": "2026-03-18T00:00:00Z"
+}

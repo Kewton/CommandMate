@@ -1,0 +1,80 @@
+{
+  "issue_number": 518,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "iteration": 1,
+  "apply_date": "2026-03-18",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "F3-01",
+        "status": "applied",
+        "change_summary": "「CLI コードの import 制約」セクションを共通仕様に新設。tsconfig.cli.json の paths が空であること、@/* エイリアス使用不可、相対パスで外部モジュールを参照するルールをコード例付きで明記。"
+      },
+      {
+        "id": "F3-02",
+        "status": "applied",
+        "change_summary": "「HTTP クライアントユーティリティ」セクションを共通仕様に新設。src/cli/utils/api-client.ts の設計方針（Node.js 組み込み fetch 使用、ベース URL 構築、認証ヘッダー付与、ECONNREFUSED/401/403/404/500 の共通エラーハンドリング、ApiClient クラスの概要）を記載。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "F3-03",
+        "status": "applied",
+        "change_summary": "ls コマンドに「エージェント種別のフィールドマッピング」を追加。GET /api/worktrees レスポンスの cliToolId フィールドを表示する旨を明記。受け入れ条件にも反映。"
+      },
+      {
+        "id": "F3-04",
+        "status": "applied",
+        "change_summary": "wait コマンドに「current-output API レスポンスフィールドと wait 終了条件のマッピング」表を追加。isRunning/isPromptWaiting/isGenerating/isComplete と終了コードの対応を明記。--on-prompt human 時の挙動も注記。"
+      },
+      {
+        "id": "F3-05",
+        "status": "applied",
+        "change_summary": "エントリポイントセクションを更新。program.addCommand() パターンの使用方針を明記し、createLsCommand()/createSendCommand() 等のコード例を追加。"
+      },
+      {
+        "id": "F3-06",
+        "status": "applied",
+        "change_summary": "wait コマンドの終了コードセクションに「WaitExitCode と ExitCode の関係」サブセクションを追加。wait 専用 enum であること、他コマンドは ExitCode を使用すること、値衝突の許容方針を明記。"
+      },
+      {
+        "id": "F3-07",
+        "status": "applied",
+        "change_summary": "send コマンドに「send API の副作用について」セクションを追加。セッション自動起動、pending response 保存、orphaned message クリーンアップ等の副作用一覧と、CLI からの利用時の期待動作を明記。"
+      },
+      {
+        "id": "F3-08",
+        "status": "applied",
+        "change_summary": "受け入れ条件の単体テスト項目を更新。global.fetch を vi.fn() でモックする方式と、tests/helpers/mock-api.ts 共通モックヘルパーの新設を明記。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F3-09",
+        "status": "applied",
+        "change_summary": "技術的な注意点に tmux-capture-cache（TTL=2秒）によるキャッシュ効果と、複数 worktree 同時 wait 時の Promise.all 並列実行方針を追記。"
+      },
+      {
+        "id": "F3-10",
+        "status": "applied",
+        "change_summary": "受け入れ条件に「npm run build:cli 実行時、外部型定義ファイルが dist/ に正しく出力されることを確認」を追加。"
+      },
+      {
+        "id": "F3-11",
+        "status": "applied",
+        "change_summary": "認証トークンの優先順位3（設定ファイル読み込み）を Phase 2 以降に延期する旨を明記。現在の init コマンドが .env のみ生成する事実と合わせて記載。"
+      }
+    ]
+  },
+  "skipped_findings": [],
+  "summary": {
+    "total_findings": 11,
+    "applied": 11,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/518"
+  }
+}

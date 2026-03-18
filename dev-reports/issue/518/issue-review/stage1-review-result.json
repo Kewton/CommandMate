@@ -1,0 +1,113 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "focus_area": "通常",
+  "iteration": 1,
+  "findings": [
+    {
+      "id": "F1-01",
+      "severity": "must_fix",
+      "category": "整合性（既存コードとの不一致）",
+      "title": "ls コマンドのステータス値が実装と不一致",
+      "description": "Issue では出力項目のステータスを 'idle/running/prompt' と記載しているが、実際の SessionStatus 型は 'idle' | 'ready' | 'running' | 'waiting' であり、'prompt' は存在しない。また GET /api/worktrees のレスポンスではステータスは isSessionRunning / isWaitingForResponse / isProcessing の3つのboolean値で返される。単一の文字列ステータスではない。",
+      "suggestion": "ステータス値を実装に合わせて 'idle/ready/running/waiting' に修正する。ls コマンドの実装では3つのboolean値からステータス文字列を導出するロジックの仕様を明記する（例: isWaitingForResponse=true -> 'waiting', isProcessing=true -> 'running', isSessionRunning=false -> 'idle', それ以外 -> 'ready'）。",
+      "location": "実装対象コマンド > 1. commandmate ls > 出力項目"
+    },
+    {
+      "id": "F1-02",
+      "severity": "must_fix",
+      "category": "整合性（既存コードとの不一致）",
+      "title": "wait コマンド exit 2 時の promptData 形式が実装と不一致",
+      "description": "Issue では exit 2 時の stdout JSON を {promptType, question, options: ['yes','no'], defaultOption} としているが、実際の PromptData 型は 'type'（'promptType' ではない）を使い、options は YesNoPromptData では ['yes','no'] だが MultipleChoicePromptData では {number, label, isDefault, requiresTextInput}[] のオブジェクト配列である。Issue の例は実装の型定義と一致していない。",
+      "suggestion": "exit 2 時の stdout JSON 仕様を実際の PromptData 型（BasePromptData + YesNoPromptData / MultipleChoicePromptData）に合わせて修正する。フィールド名を 'promptType' から 'type' に修正し、options の型をそれぞれ正しく記載する。",
+      "location": "実装対象コマンド > 3. commandmate wait > exit 2 時の stdout"
+    },
+    {
+      "id": "F1-03",
+      "severity": "must_fix",
+      "category": "整合性（既存コードとの不一致）",
+      "title": "Auto-Yes の duration 形式が API と不一致",
+      "description": "Issue では --duration オプションに '1h', '3h', '8h' などの人間可読文字列を指定する仕様だが、POST /api/worktrees/:id/auto-yes API は duration をミリ秒の数値（3600000, 10800000, 28800000）で受け取る。CLI 側で文字列からミリ秒への変換が必要だがその仕様が明記されていない。また ALLOWED_DURATIONS は3値のみでそれ以外はバリデーションエラーとなるため、任意の値は指定できない。",
+      "suggestion": "CLI で '1h' -> 3600000, '3h' -> 10800000, '8h' -> 28800000 への変換ロジックを実装する旨を明記する。指定可能な値が 1h/3h/8h の3つのみであることを --duration オプションの説明に追記する。",
+      "location": "実装対象コマンド > 2. commandmate send > オプション > --duration"
+    },
+    {
+      "id": "F1-04",
+      "severity": "should_fix",
+      "category": "整合性（既存コードとの不一致）",
+      "title": "ExitCode enum との衝突",
+      "description": "既存の CLI ExitCode enum は SUCCESS=0, DEPENDENCY_ERROR=1, CONFIG_ERROR=2, START_FAILED=3, STOP_FAILED=4, UNEXPECTED_ERROR=99 と定義されている。wait コマンドが提案する exit 1=エラー終了、exit 2=プロンプト検出、exit 3=LLM/ネットワークエラーは既存の enum 値と意味が異なる。同じ CLI ツール内で終了コードの意味が不統一になる。",
+      "suggestion": "wait コマンド用の終了コードを ExitCode enum に統合するか、wait コマンド固有の WaitExitCode enum を新設してドキュメントで区別を明確にする。既存コードと衝突しない値域（例: 10-19）を使うことも検討する。ただし exit 124 はタイムアウトの慣例（GNU timeout）に従っており適切。",
+      "location": "実装対象コマンド > 3. commandmate wait > 終了コード"
+    },
+    {
+      "id": "F1-05",
+      "severity": "should_fix",
+      "category": "仕様の不明確さ",
+      "title": "wait コマンドの exit 3（エラー検出）の実装仕様が不足",
+      "description": "Issue では exit 3 で LLM/ネットワークエラーを検出するとしているが、current-output API のレスポンスにはエラー種別やエラーメッセージのフィールドが存在しない。技術的な注意点に「エラーパターン検出はターミナル出力の文字列マッチで実装」と記載があるが、具体的なマッチパターン（rate_limit, network_error 等）の定義がない。",
+      "suggestion": "検出対象のエラーパターン文字列（例: 'Rate limit exceeded', 'Connection refused', 'API error' 等）を具体的に定義する。または Phase 1 では exit 3 をスコープ外にし、future work として明記する。",
+      "location": "実装対象コマンド > 3. commandmate wait > exit 3 時の stdout / 技術的な注意点"
+    },
+    {
+      "id": "F1-06",
+      "severity": "should_fix",
+      "category": "仕様の不明確さ",
+      "title": "認証トークンの扱いが未記載",
+      "description": "CommandMate サーバーは --auth オプションでトークン認証を有効化できる。CLI コマンドが REST API を呼び出す際の認証ヘッダー（Bearer トークン等）の取得・送信方法が Issue に記載されていない。認証有効時に CLI コマンドが動作しない可能性がある。",
+      "suggestion": "共通仕様 > サーバー接続セクションに認証対応を追加する。例: CM_AUTH_TOKEN 環境変数、または commandmate init 時に保存されるトークンファイルからの読み込み、--token <token> オプション等。",
+      "location": "共通仕様 > サーバー接続"
+    },
+    {
+      "id": "F1-07",
+      "severity": "should_fix",
+      "category": "整合性（既存コードとの不一致）",
+      "title": "respond ルートと prompt-response ルートの二重存在が未整理",
+      "description": "実装には /api/worktrees/:id/respond（messageId ベース、DB連携あり）と /api/worktrees/:id/prompt-response（軽量、DB不要）の2つのルートが存在する。Issue では respond コマンドが prompt-response を使う前提だが、2つのルートの使い分けや、respond ルートの今後の扱いについて言及がない。CLI から prompt-response を使う判断の根拠も記載されていない。",
+      "suggestion": "respond コマンドが prompt-response を使う理由（messageId 不要でCLIからの利用に適している等）を Issue 内に明記する。将来的に respond ルートの統合・廃止を検討する旨もあると良い。",
+      "location": "実装対象コマンド > 4. commandmate respond > 内部実装"
+    },
+    {
+      "id": "F1-08",
+      "severity": "should_fix",
+      "category": "仕様の不明確さ",
+      "title": "ls コマンドの --branch オプションの実装根拠が不明",
+      "description": "ls コマンドに --branch フィルターと --quiet（IDのみ出力）が定義されているが、GET /api/worktrees API にはブランチ名でのフィルタリングパラメータがない（repository フィルターのみ）。CLI 側でフィルタリングするのかAPI を拡張するのか不明。",
+      "suggestion": "CLI 側で全 worktree を取得後にブランチ名でフィルタリングする方式を明記する。またはAPIにブランチフィルターパラメータを追加する設計変更を Issue に含める。",
+      "location": "実装対象コマンド > 1. commandmate ls"
+    },
+    {
+      "id": "F1-09",
+      "severity": "should_fix",
+      "category": "仕様の不明確さ",
+      "title": "ls コマンドのステータス取得で N+1 API 呼び出しが発生する",
+      "description": "Issue では ls コマンドの内部実装として GET /api/worktrees でリスト取得 + GET /api/worktrees/:id/current-output でステータス取得と記載している。しかし GET /api/worktrees は既に detectWorktreeSessionStatus() を呼び出しており、isSessionRunning / isWaitingForResponse / isProcessing をレスポンスに含んでいる。current-output の追加呼び出しは冗長でN+1問題を引き起こす。",
+      "suggestion": "GET /api/worktrees のレスポンスに含まれるステータス情報のみで ls コマンドの表示を行う設計に修正する。current-output の呼び出しは不要とする。",
+      "location": "実装対象コマンド > 1. commandmate ls > 内部実装"
+    },
+    {
+      "id": "F1-10",
+      "severity": "nice_to_have",
+      "category": "受け入れ条件の妥当性",
+      "title": "wait --on-prompt human の受け入れテスト方法が不明",
+      "description": "受け入れ条件に 'commandmate wait --on-prompt human がプロンプト検出後もブロック継続し、UI応答後に解除される' があるが、これは UI 操作を含むため自動テストが困難。単体テストでカバーすべき範囲が不明確。",
+      "suggestion": "受け入れ条件に「モック API を使った単体テスト」と「手動確認シナリオ」を分けて記載する。",
+      "location": "受け入れ条件"
+    },
+    {
+      "id": "F1-11",
+      "severity": "nice_to_have",
+      "category": "仕様の不明確さ",
+      "title": "エントリポイント記述に小さな誤り",
+      "description": "Issue では 'bin/commandmate.js → dist/cli/index.ts' と記載しているが、実行時のパスは dist/cli/index.js（.ts ではなく .js）である。ビルド後の成果物はJavaScriptファイル。",
+      "suggestion": "'dist/cli/index.ts' を 'dist/cli/index.js' に修正する。",
+      "location": "エントリポイント"
+    }
+  ],
+  "summary": {
+    "must_fix": 3,
+    "should_fix": 6,
+    "nice_to_have": 2,
+    "total": 11
+  }
+}

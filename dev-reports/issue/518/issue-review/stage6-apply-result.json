@@ -1,0 +1,64 @@
+{
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "iteration": 2,
+  "applied_findings": [
+    {
+      "id": "F5-01",
+      "severity": "must_fix",
+      "status": "applied",
+      "change_summary": "isCompleteフィールドがisPromptWaitingと同値であることを重要注記として明記。マッピング表からisComplete===true→exit 0の誤った行を削除。正常完了条件をisRunning===false && isPromptWaiting===falseに修正。--on-prompt human時の待機条件も同様に修正。受け入れ条件にisCompleteを直接使用しない旨を追加。"
+    },
+    {
+      "id": "F5-02",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "exit 10時のJSON出力がPromptData型そのものではなくCLI独自の拡張形式（{ worktreeId: string } & PromptData）であることを明記。worktreeIdはPromptData型自体には含まれずCLI側で付与するフィールドであることを説明。受け入れ条件の記述も更新。"
+    },
+    {
+      "id": "F5-03",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "CLIコードのimport制約セクションにauto-yes-config.tsのsafe-regex2依存問題に関する注意を追加。CLI側でduration定数を独自定義する方針（src/cli/config/duration-constants.ts等）を明記。import例からauto-yes-configの行を削除。受け入れ条件のビルド確認対象からauto-yes-config.tsを除外。"
+    },
+    {
+      "id": "F5-04",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "lsコマンドの内部実装セクションにGET /api/worktreesレスポンス構造のサブセクションを追加。レスポンスがラッパーオブジェクト{ worktrees: Worktree[], repositories: Repository[] }であり、CLIはresponse.worktreesから取得する旨を明記。"
+    },
+    {
+      "id": "F5-05",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "sendコマンドの内部実装セクションにPOST /api/worktrees/:id/sendリクエストボディ形式を追加。contentフィールド（必須）とcliToolIdフィールド（省略可、--agentオプションのマッピング先）を明記。"
+    },
+    {
+      "id": "F5-06",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "respondコマンドの内部実装セクションにPOST /api/worktrees/:id/prompt-responseリクエストボディ形式を追加。answer, cliTool, promptType, defaultOptionNumberの各フィールドを説明。waitコマンドのexit 10出力から情報を透過的に渡す推奨利用フローも記載。"
+    },
+    {
+      "id": "F5-07",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "captureコマンドに--json出力フィールドのサブセクションを追加。出力対象フィールド（isRunning, content, realtimeSnippet, lineCount, isGenerating, isPromptWaiting, promptData, autoYes, thinking）をJSON例で明記。fullOutputは出力サイズの問題から除外する方針を記載。"
+    },
+    {
+      "id": "F5-08",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "auto-yesコマンドに--stop-patternオプションのサポートを明記。オプション一覧とコマンド例に--stop-pattern付きの利用例を追加。sendコマンドの--auto-yes --stop-patternと同等の機能をauto-yesコマンド単体でも提供する旨を記載。"
+    }
+  ],
+  "skipped_findings": [],
+  "summary": {
+    "applied": 8,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/518"
+  }
+}

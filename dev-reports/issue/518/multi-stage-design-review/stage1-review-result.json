@@ -1,0 +1,103 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "findings": [
+    {
+      "id": "DR1-01",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "title": "ApiClient class violates SRP by combining HTTP transport, authentication, and error handling",
+      "description": "The ApiClient class as designed in Section 4-2 handles three distinct concerns: (1) HTTP request construction and execution, (2) authentication token resolution from multiple sources (--token, CM_AUTH_TOKEN), and (3) error classification and user-facing message formatting (ECONNREFUSED, 401, 404, 500). The existing codebase follows a pattern where error handling and authentication are separate modules (e.g., src/lib/security/auth.ts for auth, src/middleware.ts for routing). Combining all three into one class makes unit testing harder -- you cannot test error message formatting without mocking fetch, and cannot test token resolution without constructing the full client.",
+      "suggestion": "Consider extracting token resolution into a small helper function (e.g., resolveAuthToken(options) in api-client.ts or a separate file) and keeping error classification as a separate function (e.g., handleApiError(error, status)). The ApiClient class itself should focus on HTTP request construction and delegation. This does not require new files -- even private functions within api-client.ts would improve testability. Add this to the design policy Section 4-2.",
+      "location": "Section 4-2: Facade パターン（API Client）"
+    },
+    {
+      "id": "DR1-02",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "title": "Output formatter Strategy pattern may violate Open/Closed Principle for commands with different output shapes",
+      "description": "Section 4-3 defines a generic formatOutput<T> function with three formatters (json, quiet, table). However, not all commands support all three formats -- for example, 'send' and 'respond' produce only success/error messages and have no meaningful 'quiet' or 'table' variant, while 'capture' without --json outputs plain text (not a table). The current design forces all commands into the same three-format pattern, which will lead to either empty/meaningless implementations for unsupported formats or runtime checks that defeat the purpose of the abstraction.",
+      "suggestion": "Clarify in the design policy that formatOutput is only used by commands that genuinely support multiple output modes (ls, capture). For commands like send, respond, and auto-yes, direct console output is sufficient and consistent with existing CLI patterns (see docs.ts and issue.ts which use console.log directly). Update Section 4-3 to list which commands use the formatter and which do not.",
+      "location": "Section 4-3: Strategy パターン（出力フォーマット）"
+    },
+    {
+      "id": "DR1-03",
+      "severity": "nice_to_have",
+      "category": "SOLID",
+      "title": "WaitExitCode and ExitCode enums create parallel type hierarchies without a unifying abstraction",
+      "description": "Section 5-1 introduces WaitExitCode as a separate const object alongside the existing ExitCode enum. The design policy explains the rationale (value collision avoidance) but does not address how process.exit() callers should choose between the two. The wait command internally needs to decide which exit code set to use based on context (API error vs wait-specific outcome), which splits the error handling logic. The existing codebase uses ExitCode consistently across all commands (issue.ts, docs.ts, start.ts).",
+      "suggestion": "Consider adding a brief note in Section 5-1 clarifying the decision tree: wait command uses WaitExitCode for wait-specific outcomes (SUCCESS, PROMPT_DETECTED, TIMEOUT) and falls through to ExitCode for infrastructure errors (ECONNREFUSED -> ExitCode.DEPENDENCY_ERROR, auth failure -> ExitCode.CONFIG_ERROR). This is already partially addressed in Section 11 but should be explicit in the type definition section.",
+      "location": "Section 5-1: CLI固有型定義"
+    },
+    {
+      "id": "DR1-04",
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "title": "output-formatter.ts as a separate file may be over-engineering for the current scope",
+      "description": "Section 10 lists src/cli/utils/output-formatter.ts as a new file. The formatter logic described in Section 4-3 is essentially a switch statement over three cases. Creating a dedicated utility file for this adds an import indirection. The existing CLI codebase keeps formatting inline within command handlers (see docs.ts lines 38-98 which format output directly). For Phase 1 with only 'ls' and 'capture --json' needing multi-format output, the overhead of a separate module may not be justified.",
+      "suggestion": "This is acceptable as-is if the team prefers the separation. Alternatively, the format logic could live as a helper function within ls.ts and be extracted only when a second command needs the same formatting logic (true YAGNI). Either approach is fine -- just ensure the design policy acknowledges this is a conscious choice rather than a requirement.",
+      "location": "Section 10: 実装ファイル一覧"
+    },
+    {
+      "id": "DR1-05",
+      "severity": "should_fix",
+      "category": "YAGNI",
+      "title": "ApiClient generic methods get<T> and post<T> imply a reusable library but Phase 1 has only 4 distinct API calls",
+      "description": "The ApiClient design in Section 4-2 uses generic type parameters (get<T>, post<T>) which suggests a general-purpose HTTP client. However, Phase 1 only calls 4 API endpoints (GET /api/worktrees, GET /api/worktrees/:id/current-output, POST /api/worktrees/:id/send, POST /api/worktrees/:id/auto-yes, POST /api/worktrees/:id/prompt-response). The generics add type safety but also complexity -- the caller must specify T at each call site, and there is no compile-time guarantee that T matches the actual API response shape.",
+      "suggestion": "The generic approach is reasonable for type safety and is a common pattern. However, consider adding typed wrapper methods for the actual endpoints used in Phase 1 (e.g., getWorktrees(), postSend(id, body), getCurrentOutput(id)) that encapsulate the path construction and return type. This would provide both type safety and discoverability. If this is deemed over-engineering for Phase 1, at minimum document the expected usage pattern (e.g., client.get<WorktreeListResponse>('/api/worktrees')) in the design policy.",
+      "location": "Section 4-2: Facade パターン（API Client）"
+    },
+    {
+      "id": "DR1-06",
+      "severity": "must_fix",
+      "category": "DRY",
+      "title": "API response types in src/cli/types/api-responses.ts duplicate server-side types without a migration path specification",
+      "description": "Section 5-2 defines WorktreeItem, CurrentOutputResponse, and WaitPromptOutput in CLI-specific types. The design policy acknowledges this as a DRY violation (Section 11) and mentions 'Phase 2 で共通化予定' but does not specify what the shared types would look like or where they would live. Without this, there is a risk that the CLI types drift from the actual API response shape during Phase 1 development. The existing codebase already has Worktree type in src/types/models.ts with different field names and structure than the proposed WorktreeItem.",
+      "suggestion": "Add a brief specification in Section 12 (Phase 2 検討事項) describing the target shared type location (e.g., src/types/api-contracts.ts) and which fields are authoritative (server-side types). For Phase 1, add a comment convention in the design policy requiring each CLI response type to reference the server-side source of truth (e.g., '// Mirrors: src/types/models.ts Worktree + session status fields'). This does not add code complexity but provides traceability.",
+      "location": "Section 5-2: API レスポンス型（CLI側定義） and Section 12"
+    },
+    {
+      "id": "DR1-07",
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "title": "Promise.all for multiple worktree wait may need error isolation that is not specified",
+      "description": "Section 8-2 shows Promise.all for parallel wait polling of multiple worktrees. Promise.all rejects immediately when any promise rejects, which means if one worktree encounters a network error, the wait for all other worktrees is aborted. This behavior may surprise users who expect independent monitoring. The design policy does not specify the desired behavior when one of N worktrees fails.",
+      "suggestion": "Specify in Section 8-2 whether the implementation should use Promise.all (fail-fast) or Promise.allSettled (independent). If fail-fast is intentional, document it explicitly. If independent monitoring is desired, switch to Promise.allSettled and define the exit code resolution strategy (e.g., first non-zero exit code wins, or report all results in JSON).",
+      "location": "Section 8-2: 複数 worktree 同時待機"
+    },
+    {
+      "id": "DR1-08",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "title": "Inconsistent command registration pattern: init/start/stop/status use inline definition while new commands use addCommand factory",
+      "description": "The existing CLI in src/cli/index.ts uses two patterns: inline program.command().action() for init/start/stop/status, and program.addCommand(createXxxCommand()) for issue/docs. The design policy (Section 4-1) correctly follows the addCommand factory pattern for new commands, which is consistent with issue/docs. However, the design policy does not acknowledge this inconsistency or explain why the new commands follow the factory pattern rather than the inline pattern. This matters because a future developer might use either pattern without understanding the rationale.",
+      "suggestion": "Add a brief note in Section 4-1 explaining why the factory pattern is chosen for the new commands (e.g., 'Follows the addCommand() pattern established by issue/docs commands in Issue #264, which supports subcommand nesting and keeps index.ts lean'). This is already implicit but making it explicit improves maintainability.",
+      "location": "Section 4-1: Factory パターン（コマンド生成）"
+    },
+    {
+      "id": "DR1-09",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "title": "Duration constants intentional DRY violation is well-documented but could use a lint guard",
+      "description": "Section 5-3 and Section 11 document the intentional DRY violation for duration constants (CLI-side DURATION_MAP vs server-side ALLOWED_DURATIONS). The values are simple (3 entries) and unlikely to change, but if they do change on the server side, the CLI side will silently become inconsistent. The design policy documents this risk but does not suggest a mitigation.",
+      "suggestion": "Consider adding a unit test that imports both the CLI duration constants and the server-side ALLOWED_DURATIONS (in the test environment where both are accessible) and asserts they are equivalent. This serves as a tripwire if either side changes. Add this suggestion to Section 9 (テスト設計) as an optional cross-validation test.",
+      "location": "Section 5-3: Duration 定数 and Section 11"
+    },
+    {
+      "id": "DR1-10",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "title": "Middleware Bearer token modification scope is underspecified for Dependency Inversion",
+      "description": "Section 2-3 describes adding Bearer token support to middleware.ts but the current middleware implementation (as seen in the codebase) only checks cookies and redirects to login page on failure. For API routes called by CLI, a redirect response is inappropriate -- the CLI needs a 401 JSON response, not a redirect. The design policy does not address this behavioral difference between browser requests (redirect to /login) and API requests (return 401 status).",
+      "suggestion": "Update Section 2-3 to specify that the middleware modification should: (1) extract Bearer token from Authorization header, (2) verify it using verifyTokenEdge(), (3) return NextResponse.next() on success, and (4) importantly, when authentication fails for requests with an Authorization header, return HTTP 401 instead of redirecting to /login. This distinction is critical for CLI usability. The current redirect behavior would cause the CLI's fetch to follow the redirect and receive HTML instead of a JSON error.",
+      "location": "Section 2-3: 前提実装: middleware.ts Bearer トークン対応"
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 5,
+    "nice_to_have": 4,
+    "total": 10
+  }
+}

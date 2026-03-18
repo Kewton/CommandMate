@@ -1,0 +1,7 @@
+{
+  "issue_number": 518,
+  "review_result_path": "dev-reports/issue/518/multi-stage-design-review/stage1-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-518-cli-base-commands-design-policy.md",
+  "stage": 1,
+  "stage_name": "通常レビュー指摘対応"
+}

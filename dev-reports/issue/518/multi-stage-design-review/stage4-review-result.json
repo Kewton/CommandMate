@@ -1,0 +1,164 @@
+{
+  "issue_number": 518,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "SEC4-01",
+        "owasp": "A04 Insecure Design",
+        "title": "--token フラグによるトークン漏洩リスク",
+        "description": "CLIの --token <token> オプションはプレーンテキストトークンをコマンドライン引数として受け取る。これにより ps aux、/proc/pid/cmdline、シェル履歴（.bash_history, .zsh_history）にトークンが記録される。設計書では CM_AUTH_TOKEN 環境変数を代替手段として提供しているが、--token が優先される設計であり、ユーザーが安全でない方法を選択するリスクが高い。",
+        "recommendation": "--token オプションのヘルプテキストに「環境変数 CM_AUTH_TOKEN の使用を推奨。--token はプロセスリストに露出する」旨の警告を明記すること。また、--token 使用時に stderr へ警告メッセージを出力することを検討すること。Phase 2 では設定ファイルからの読み込み（パーミッション 0600）を優先的に実装すべきである。",
+        "severity": "high"
+      },
+      {
+        "id": "SEC4-02",
+        "owasp": "A05 Security Misconfiguration",
+        "title": "デフォルト HTTP 通信におけるトークン平文送信",
+        "description": "ApiClient はデフォルトで http://localhost:{port} に接続し、Bearer トークンを Authorization ヘッダーに平文で送信する。localhost 通信であればネットワーク盗聴リスクは低いが、CM_PORT やベースURL をリモートサーバーに変更した場合、トークンが平文でネットワーク上を流れる。設計書にはこのリスクに関する記述がない。",
+        "recommendation": "ApiClient のコンストラクタで baseUrl が localhost/127.0.0.1/::1 以外の場合、かつ https:// でない場合に stderr へ警告を出力すること。ドキュメントにリモート接続時は HTTPS 必須である旨を明記すること。",
+        "severity": "high"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC4-03",
+        "owasp": "A01 Broken Access Control",
+        "title": "Bearer トークン認証は認証のみで認可がない",
+        "description": "設計書の認証フローは Bearer トークンの検証（認証）のみを行い、コマンド単位の認可制御がない。有効なトークンを持つ CLI ユーザーは全ての worktree に対して全操作（send, auto-yes, respond 等）が可能。Phase 1 の単一ユーザー/ローカル利用では許容範囲だが、Phase 2 以降でマルチユーザー対応する場合は認可レイヤーが必要になる。",
+        "recommendation": "Phase 1 ではドキュメントに「単一トークンによる全操作許可」の前提を明記すること。Phase 2 計画にスコープベースの認可（例: read-only トークン）を検討事項として追加すること。",
+        "severity": "medium"
+      },
+      {
+        "id": "SEC4-04",
+        "owasp": "A03 Injection",
+        "title": "worktree ID の URL パス構築における安全性確認",
+        "description": "ApiClient は worktree ID を URL パスに埋め込んで /api/worktrees/${id}/send 等のエンドポイントを構築する。設計書では isValidWorktreeId()（英数字+ハイフン+アンダースコアのみ）によるバリデーションが記載されているが、このバリデーションが CLI コマンド層で確実に実行されるタイミングが明確でない。バリデーション漏れがあった場合、パストラバーサル（例: ../admin）のリスクがある。",
+        "recommendation": "ApiClient の get/post メソッド内で、パスに含まれる worktree ID セグメントを encodeURIComponent() で処理するか、あるいは各コマンドの action ハンドラ冒頭で isValidWorktreeId() を必ず呼び出すガードパターンを設計書に明記すること。",
+        "severity": "medium"
+      },
+      {
+        "id": "SEC4-05",
+        "owasp": "A07 Identification and Authentication Failures",
+        "title": "CLI 経由の認証失敗に対するレート制限の適用確認",
+        "description": "サーバー側の auth.ts には createRateLimiter() が実装されており、IP ベースのレート制限（5回失敗で15分ロックアウト）が存在する。しかし、設計書の middleware.ts Bearer トークン認証フロー（Section 2-3）では、Bearer 認証失敗時にレートリミッターの recordFailure() が呼ばれる設計になっているか不明。middleware.ts は Edge Runtime であり、auth.ts のレートリミッター（Node.js ランタイム）を直接参照できない可能性がある。",
+        "recommendation": "middleware.ts の Bearer 認証失敗パスで、レートリミッターが適用されるかどうかを設計書で明確にすること。Edge Runtime 制約がある場合、API Route レベル（Node.js ランタイム）でのレート制限適用を検討すること。",
+        "severity": "medium"
+      },
+      {
+        "id": "SEC4-06",
+        "owasp": "A03 Injection",
+        "title": "--stop-pattern の ReDoS リスクに対する CLI 側バリデーション不足",
+        "description": "設計書の Section 7-2 では stop-pattern について「文字列（サーバー側で正規表現バリデーション）」と記載されている。サーバー側の auto-yes-config.ts では safe-regex2 による ReDoS 検出が実装されているが、CLI 側では stop-pattern をバリデーションせずにそのまま API に送信する設計になっている。サーバー側でバリデーションエラーが返された場合の CLI 側エラーハンドリングが設計書に記載されていない。",
+        "recommendation": "CLI 側で stop-pattern の長さチェック（MAX_STOP_PATTERN_LENGTH=500）を事前に行い、サーバーから 400 エラーが返された場合のエラーメッセージ表示を設計書に追記すること。可能であれば safe-regex2 の CLI 側での実行も検討すること（ただし依存追加とのトレードオフあり）。",
+        "severity": "medium"
+      },
+      {
+        "id": "SEC4-07",
+        "owasp": "A09 Security Logging and Monitoring Failures",
+        "title": "CLI リクエストのサーバー側ログ記録が未設計",
+        "description": "設計書には CLI からのリクエストに対するサーバー側のログ記録（成功/失敗の監査ログ）に関する設計がない。特に Bearer トークンによる認証成功/失敗、send コマンドによるエージェント操作、auto-yes の有効化/無効化といったセキュリティに影響するイベントのログ記録が欠如している。",
+        "recommendation": "Phase 1 では最低限、Bearer トークン認証失敗のログ記録（IP アドレス付き）を middleware.ts に追加すること。Phase 2 で CLI 操作の監査ログ（操作種別、worktree ID、タイムスタンプ）の導入を計画すること。",
+        "severity": "medium"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC4-08",
+        "owasp": "A02 Cryptographic Failures",
+        "title": "CM_AUTH_TOKEN 環境変数のプロセス間漏洩リスク",
+        "description": "環境変数はプロセスの /proc/pid/environ（Linux）から読み取り可能であり、同一ユーザーの別プロセスからアクセスできる。ローカル開発環境では低リスクだが、共有サーバー環境では懸念がある。",
+        "recommendation": "Phase 2 の設定ファイルベース認証では、ファイルパーミッション 0600 での保護を実装すること。"
+      },
+      {
+        "id": "SEC4-09",
+        "owasp": "A10 Server-Side Request Forgery",
+        "title": "ApiClient の baseUrl によるSSRFリスク",
+        "description": "ApiClient は CM_PORT 環境変数または --baseUrl オプション（設計書には明示されていないが baseUrl コンストラクタ引数が存在）でベース URL を構成する。攻撃者が環境変数を制御できる場合、内部サービスへのリクエストが可能になる。ただし CLI はローカルユーザーが実行するため、環境変数制御は自身のプロセスに限定される。",
+        "recommendation": "現状のローカル利用前提では低リスク。baseUrl を外部公開する場合は、許可ホストのホワイトリスト検証を追加すること。"
+      },
+      {
+        "id": "SEC4-10",
+        "owasp": "A06 Vulnerable and Outdated Components",
+        "title": "新規外部依存なし（ポジティブ所見）",
+        "description": "設計書では Node.js 18+ 組み込み fetch を使用し、新規外部依存を追加しない方針。これにより依存関係の脆弱性リスクが増大しない。safe-regex2 は既存依存であり、CLI ビルドスコープ外で使用される。",
+        "recommendation": "現状維持。CLI ビルドに safe-regex2 を含める場合はバンドルサイズへの影響を確認すること。"
+      },
+      {
+        "id": "SEC4-11",
+        "owasp": "A08 Software and Data Integrity Failures",
+        "title": "CLI ビルドパイプラインのサプライチェーンリスク",
+        "description": "CLI は tsconfig.cli.json でビルドされ、bin/commandmate.js がエントリポイントとなる。npm publish や配布時の整合性検証（署名、チェックサム）は設計書のスコープ外だが、Phase 2 以降で配布を拡大する場合は検討が必要。",
+        "recommendation": "Phase 2 以降で npm publish する場合、package-lock.json の固定と npm audit の CI 統合を確認すること。"
+      },
+      {
+        "id": "SEC4-12",
+        "owasp": "A03 Injection",
+        "title": "message 引数と answer 引数の入力サニタイズ",
+        "description": "send コマンドの message 引数と respond コマンドの answer 引数はユーザー入力として JSON ボディに格納される。JSON.stringify による自動エスケープが行われるため SQL/コマンドインジェクションのリスクは低い。ただし、サーバー側で tmux send-keys に渡される最終パスでのエスケープが正しく行われているか確認が必要。",
+        "recommendation": "既存の tmux.ts が execFile を使用していることを確認済み（シェルインジェクション防止）。追加対応は不要だが、message の最大長制限を CLI 側でも実施することを検討すること。"
+      }
+    ]
+  },
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "partial",
+      "detail": "認証は Bearer トークンで実装。認可（操作スコープ制限）は未実装だが Phase 1 の単一ユーザー前提では許容。worktree ID バリデーションは isValidWorktreeId() で対応。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "pass",
+      "detail": "トークンは SHA-256 ハッシュで保存。timing-safe comparison を使用。環境変数での保持はローカル利用前提で許容。"
+    },
+    "A03_injection": {
+      "status": "pass",
+      "detail": "CLI は HTTP リクエストのみ発行しシェルコマンド実行なし。ユーザー入力は JSON ボディに格納。worktree ID は英数字+ハイフン+アンダースコアに制限。stop-pattern はサーバー側で safe-regex2 による ReDoS 検出あり。"
+    },
+    "A04_insecure_design": {
+      "status": "warning",
+      "detail": "--token フラグによるトークンのプロセスリスト露出リスクあり。環境変数代替を推奨する設計だが、警告表示が未設計。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "warning",
+      "detail": "デフォルト HTTP 通信。localhost 利用前提では許容だが、リモート接続時の HTTPS 強制が未設計。"
+    },
+    "A06_vulnerable_components": {
+      "status": "pass",
+      "detail": "新規外部依存なし。Node.js 組み込み fetch を使用。"
+    },
+    "A07_auth_failures": {
+      "status": "partial",
+      "detail": "サーバー側にレートリミッター実装あり。middleware.ts（Edge Runtime）での Bearer 認証失敗時のレートリミッター適用が不明確。"
+    },
+    "A08_software_integrity": {
+      "status": "pass",
+      "detail": "CLI ビルドは既存パイプライン使用。新規サプライチェーンリスクなし。"
+    },
+    "A09_logging_monitoring": {
+      "status": "warning",
+      "detail": "CLI リクエストのサーバー側監査ログが未設計。Bearer 認証失敗のログ記録が明確でない。"
+    },
+    "A10_ssrf": {
+      "status": "pass",
+      "detail": "CLI はローカルユーザーが実行。baseUrl は環境変数で構成されるが、攻撃者による環境変数制御はローカル利用前提では低リスク。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "medium",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-518-cli-base-commands-design-policy.md",
+    "src/middleware.ts",
+    "src/lib/security/auth.ts",
+    "src/lib/security/ip-restriction.ts",
+    "src/config/auth-config.ts",
+    "src/lib/security/path-validator.ts",
+    "src/config/auto-yes-config.ts"
+  ],
+  "timestamp": "2026-03-18T00:00:00Z"
+}

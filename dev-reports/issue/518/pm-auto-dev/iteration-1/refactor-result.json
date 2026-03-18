@@ -1,0 +1,48 @@
+{
+  "status": "success",
+  "changes_made": [
+    "Extracted duplicated TOKEN_WARNING constant from 6 command files into shared src/cli/utils/command-helpers.ts",
+    "Extracted duplicated error handling catch block pattern into shared handleCommandError() function in command-helpers.ts",
+    "Fixed bug in send.ts: invalid agent error message was showing ALLOWED_DURATIONS instead of CLI_TOOL_IDS",
+    "Removed unused imports (ApiError, ExitCode) from command files where no longer needed after refactoring",
+    "Added tests for command-helpers.ts (TOKEN_WARNING constant, handleCommandError for ApiError/Error/non-Error/null)",
+    "Added test for send command agent validation error message correctness"
+  ],
+  "quality_after": {
+    "tsc": "pass",
+    "lint": "pass",
+    "test": "pass",
+    "build": "pass"
+  },
+  "quality_metrics": {
+    "test_passed_before": 5187,
+    "test_passed_after": 5193,
+    "test_failed": 0,
+    "tsc_errors": 0,
+    "lint_errors": 0
+  },
+  "refactorings_applied": [
+    "DRY: Extract TOKEN_WARNING constant to shared module (6 duplicates removed)",
+    "DRY: Extract handleCommandError() to shared module (6 duplicated catch blocks reduced to 1-line calls)",
+    "Bug fix: send.ts invalid agent error message now correctly shows CLI_TOOL_IDS instead of ALLOWED_DURATIONS",
+    "Clean imports: Removed unused ApiError and ExitCode imports from files that no longer reference them directly"
+  ],
+  "files_changed": [
+    "src/cli/utils/command-helpers.ts",
+    "src/cli/commands/ls.ts",
+    "src/cli/commands/send.ts",
+    "src/cli/commands/wait.ts",
+    "src/cli/commands/respond.ts",
+    "src/cli/commands/capture.ts",
+    "src/cli/commands/auto-yes.ts",
+    "tests/unit/cli/utils/command-helpers.test.ts",
+    "tests/unit/cli/commands/send.test.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "message": "Refactoring complete. Extracted shared TOKEN_WARNING and handleCommandError() to eliminate code duplication across 6 CLI command files. Fixed bug in send.ts agent validation error message. Added 6 new tests."
+}

@@ -142,6 +142,43 @@ Run separate servers per Issue/worktree with automatic port allocation.
 | `commandmate status --issue 123` | Check status for Issue #123 |
 | `commandmate status --all` | Check status for all servers |
 
+### Agent Operations
+
+Operate agent sessions from the CLI. See the [CLI Operations Guide](./docs/en/user-guide/cli-operations-guide.md) for details.
+
+| Command | Description |
+|---------|-------------|
+| `commandmate ls` | List worktrees with status (idle/ready/running/waiting) |
+| `commandmate ls --json` | JSON output (for agent consumption) |
+| `commandmate ls --quiet` | IDs only, one per line (for piping) |
+| `commandmate ls --branch feature/` | Filter by branch name prefix |
+| `commandmate send <id> "message"` | Send a message to an agent |
+| `commandmate send <id> "msg" --auto-yes` | Send with auto-yes enabled |
+| `commandmate send <id> "msg" --agent codex` | Send to a specific agent |
+| `commandmate wait <id> --timeout 300` | Wait for agent completion (exit 0) or prompt (exit 10) |
+| `commandmate wait <id> --on-prompt human` | Wait, let human respond to prompts via browser UI |
+| `commandmate respond <id> "yes"` | Respond to an agent's prompt |
+| `commandmate capture <id>` | Get current terminal output |
+| `commandmate capture <id> --json` | Get output with status info as JSON |
+| `commandmate auto-yes <id> --enable` | Enable auto-yes (default 1h) |
+| `commandmate auto-yes <id> --disable` | Disable auto-yes |
+
+**Typical workflow:**
+
+```bash
+WT=$(commandmate ls --branch feature/101 --quiet)
+commandmate send "$WT" "Implement Issue #101" --auto-yes
+commandmate wait "$WT" --timeout 600
+commandmate capture "$WT"
+```
+
+**For coding agents (Claude Code, Codex, etc.):** Have your agent run these commands to get the full guide and workflow samples:
+
+```bash
+commandmate docs --section agent-operations          # Full guide
+commandmate docs --section agent-operations-samples  # Workflow samples
+```
+
 ### GitHub Issue Management
 
 Requires [gh CLI](https://cli.github.com/) to be installed.

@@ -126,6 +126,7 @@ ls dev-reports/design/issue-{issue_number}-*-design-policy.md 2>/dev/null
 - 受入テスト
 - リファクタリング
 - ドキュメント更新
+- 実機受入テスト（UAT: `/uat` コマンド）
 - 進捗報告
 
 #### 4-2. 完了確認
