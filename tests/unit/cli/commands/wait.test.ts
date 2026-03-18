@@ -3,7 +3,7 @@
  * Issue #518, #520
  */
 
-import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mockFetchSequence, restoreFetch } from '../../../helpers/mock-api';
 import { WaitExitCode } from '../../../../src/cli/types';
 
