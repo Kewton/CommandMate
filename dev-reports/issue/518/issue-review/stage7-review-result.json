@@ -1,0 +1,203 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "review_date": "2026-03-18",
+  "previous_findings_status": [
+    {
+      "id": "F3-01",
+      "title": "tsconfig.cli.json の import 制約",
+      "status": "resolved",
+      "verification": "Issue に「CLI コードの import 制約」セクションが追加され、相対パス使用ルールがコード例付きで明記されている。auto-yes-config.ts の safe-regex2 依存問題も F5-03 で対処済み。"
+    },
+    {
+      "id": "F3-02",
+      "title": "HTTP クライアントユーティリティの不在",
+      "status": "resolved",
+      "verification": "「HTTP クライアントユーティリティ」セクションが新設され、api-client.ts の設計方針（Node.js fetch、ベース URL、認証ヘッダー、エラーハンドリング）が記載されている。ただし認証方式に新たな問題あり（F7-01 参照）。"
+    },
+    {
+      "id": "F3-03",
+      "title": "cliToolId フィールドマッピング",
+      "status": "resolved",
+      "verification": "ls コマンドにフィールドマッピングが明記されている。"
+    },
+    {
+      "id": "F3-04",
+      "title": "wait コマンドの終了条件マッピング",
+      "status": "resolved",
+      "verification": "current-output API レスポンスフィールドと wait 終了条件のマッピング表が追加されている。isComplete の注意事項も F5-01 で対処済み。"
+    },
+    {
+      "id": "F3-05",
+      "title": "program.addCommand() パターン",
+      "status": "resolved",
+      "verification": "エントリポイントセクションにパターンとコード例が明記されている。"
+    },
+    {
+      "id": "F3-06",
+      "title": "WaitExitCode と ExitCode の関係",
+      "status": "resolved",
+      "verification": "wait コマンドの終了コードセクションに関係と使い分け方針が明記されている。"
+    },
+    {
+      "id": "F3-07",
+      "title": "send API の副作用",
+      "status": "resolved",
+      "verification": "send コマンドに副作用一覧と CLI からの期待動作が明記されている。"
+    },
+    {
+      "id": "F3-08",
+      "title": "テストパターンの不足",
+      "status": "resolved",
+      "verification": "受け入れ条件に vi.fn() モック方式と mock-api.ts ヘルパー新設が明記されている。"
+    },
+    {
+      "id": "F3-09",
+      "title": "wait ポーリングの負荷",
+      "status": "resolved",
+      "verification": "技術的な注意点に tmux-capture-cache と Promise.all 方針が追記されている。"
+    },
+    {
+      "id": "F3-10",
+      "title": "build:cli の出力確認",
+      "status": "resolved",
+      "verification": "受け入れ条件に追加されている。F5-03 で auto-yes-config.ts を対象外とする修正も反映済み。"
+    },
+    {
+      "id": "F3-11",
+      "title": "設定ファイル読み込みの Phase 2 延期",
+      "status": "resolved",
+      "verification": "認証トークンセクションに Phase 2 延期が明記されている。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F7-01",
+      "severity": "must_fix",
+      "category": "impact_scope",
+      "title": "認証方式の不整合: Issue は Authorization: Bearer ヘッダーを記載しているが、既存の認証システムは Cookie ベースのみ",
+      "description": "Issue の「HTTP クライアントユーティリティ」セクションと「認証トークン」セクションでは、CLI が `Authorization: Bearer <token>` ヘッダーを全 API リクエストに付与する方式を記載している。しかし既存の認証システム（src/middleware.ts + src/lib/security/auth.ts）は完全に Cookie ベース（cm_auth_token cookie）であり、Authorization ヘッダーを読み取るコードは一切存在しない。middleware.ts は Cookie のみをチェックし、Bearer トークンが付与されたリクエストは認証失敗として /login にリダイレクトされる。CLI から API を呼ぶためには、(A) middleware.ts を修正して Authorization: Bearer ヘッダーも受け付けるようにするか、(B) CLI 側で先に /api/auth/login に POST してトークンを送信し、返された Set-Cookie を後続リクエストに付与する Cookie ベースの認証フローを使うか、いずれかの対応が必要。",
+      "affected_files": [
+        "src/middleware.ts",
+        "src/lib/security/auth.ts",
+        "src/config/auth-config.ts",
+        "src/app/api/auth/login/route.ts"
+      ],
+      "suggestion": "Issue の認証セクションを修正し、以下のいずれかの方針を明記する: (A) middleware.ts に Authorization: Bearer ヘッダーのサポートを追加する（推奨: CLI にとって自然なフロー。middleware.ts の verifyTokenEdge() に Bearer トークン抽出ロジックを追加し、Cookie OR Bearer のいずれかで認証成功とする）。この場合、影響ファイルに middleware.ts を追加する必要がある。(B) CLI 側で /api/auth/login に POST → Set-Cookie を取得 → 後続リクエストに Cookie ヘッダーを付与する方式。ただしこの方式は CLI としては不自然であり、fetch の credentials 設定も必要になる。方針 (A) が推奨。",
+      "location": "共通仕様 / 認証トークン、HTTP クライアントユーティリティ"
+    },
+    {
+      "id": "F7-02",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "既存 src/lib/api-client.ts との命名衝突に関する注意が不足",
+      "description": "Issue では新設ファイルとして `src/cli/utils/api-client.ts` を記載しているが、既にブラウザ UI 用の `src/lib/api-client.ts` が存在する。ファイルパスが異なるため技術的な衝突はないが、同名の api-client.ts が2つ存在することになり、開発者がインポート時に混同する可能性がある。特に IDE の自動インポート補完で誤ったファイルが選択されるリスクがある。また、既存の src/lib/api-client.ts には WorktreesResponse 型や ApiError クラスなど、CLI 側でも再利用可能な型定義が含まれている。",
+      "affected_files": [
+        "src/lib/api-client.ts",
+        "src/cli/utils/api-client.ts"
+      ],
+      "suggestion": "Issue に以下を追記: (1) 既存の src/lib/api-client.ts はブラウザ UI 用であり、相対パス URL（/api/worktrees）を使用するため CLI からは利用不可であることを注記する。(2) CLI 用の新設ファイルは src/cli/utils/api-client.ts とし、絶対 URL（http://localhost:3000/api/worktrees）を使用する。(3) WorktreesResponse 等の型定義は src/types/ に共通型として切り出すか、CLI 側で独自に定義するかの方針を明記する。"
+    },
+    {
+      "id": "F7-03",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "auto-yes API の POST リクエストボディに cliToolId が必要だが、Issue の auto-yes コマンドに --agent オプションの記載がない",
+      "description": "実際の POST /api/worktrees/:id/auto-yes API（src/app/api/worktrees/[id]/auto-yes/route.ts）は、リクエストボディに `cliToolId` フィールドを受け付ける（省略時は 'claude' がデフォルト）。このフィールドは startAutoYesPolling() の第2引数として渡され、どの CLI ツールのセッションをポーリングするかを決定する。Issue の auto-yes コマンドのオプション一覧には --enable, --disable, --duration, --stop-pattern のみが記載されており、--agent（cliToolId 指定）オプションがない。send コマンドの --auto-yes と組み合わせる場合は send の --agent が使われると推測できるが、auto-yes コマンド単体で使う場合に cliToolId をどう指定するかが不明。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/auto-yes/route.ts"
+      ],
+      "suggestion": "auto-yes コマンドのオプション一覧に `--agent <id>` オプションを追加する。send コマンドと同じく、省略時はサーバー側のデフォルト（claude）が使用される旨を記載する。コマンド例にも `commandmate auto-yes abc123 --enable --duration 3h --agent codex` のような例を追加する。"
+    },
+    {
+      "id": "F7-04",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "send コマンドの --auto-yes フローで auto-yes API に送る cliToolId と send API の cliToolId の整合性が未定義",
+      "description": "Issue の send コマンドの内部実装セクションでは、--auto-yes 指定時に `POST /api/worktrees/:id/auto-yes` -> `POST /api/worktrees/:id/send` の順で API を呼ぶと記載されている。--agent オプションで指定された cliToolId は send API の cliToolId フィールドに渡されるが、auto-yes API にも同じ cliToolId を渡す必要がある（auto-yes のポーリング対象エージェントを正しく設定するため）。この2つの API への cliToolId の同期が Issue に明記されていない。",
+      "affected_files": [
+        "src/cli/commands/send.ts"
+      ],
+      "suggestion": "send コマンドの内部実装セクションに「--auto-yes と --agent を同時に指定した場合、auto-yes API と send API の両方に同じ cliToolId を送信する」旨を明記する。"
+    },
+    {
+      "id": "F7-05",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "respond コマンドの --agent オプションが未記載だが API は cliTool フィールドを受け付ける",
+      "description": "POST /api/worktrees/:id/prompt-response API は `cliTool` フィールドを受け付けるが、Issue の respond コマンドには --agent オプションの記載がない。respond コマンドのリクエストボディの説明では `cliTool` フィールドが「省略可」と記載されているが、CLI からの指定方法が不明。wait コマンドの exit 10 出力にも cliToolId は含まれていないため、respond コマンドでエージェント種別を伝達する手段がない。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/prompt-response/route.ts"
+      ],
+      "suggestion": "以下のいずれかを追記: (A) respond コマンドに `--agent <id>` オプションを追加する。(B) wait コマンドの exit 10 出力に cliToolId フィールドを含めるよう拡張し、respond コマンドに透過的に渡せるようにする（推奨: wait の JSON 出力の拡張形式に cliToolId を追加）。"
+    },
+    {
+      "id": "F7-06",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "capture コマンドに --agent オプションの記載がないが API は cliTool クエリパラメータを受け付ける",
+      "description": "GET /api/worktrees/:id/current-output API は `?cliTool=codex` のようなクエリパラメータで対象エージェントを切り替え可能（src/app/api/worktrees/[id]/current-output/route.ts の isCliTool(cliToolParam) 処理）。しかし Issue の capture コマンドには --agent オプションの記載がなく、デフォルトの CLI ツール（worktree の cliToolId）のみが使われることになる。複数エージェントが動作する worktree で特定エージェントの出力を取得したい場合に対応できない。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/current-output/route.ts"
+      ],
+      "suggestion": "capture コマンドに `--agent <id>` オプションを追加する。send, auto-yes と同様のパターンで、省略時は worktree のデフォルト cliToolId が使用される旨を記載する。"
+    },
+    {
+      "id": "F7-07",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "title": "wait コマンドの exit 10 JSON 出力に cliToolId フィールドがない",
+      "description": "wait コマンドの exit 10 時の JSON 出力は `{ worktreeId } & PromptData` 形式と定義されているが、current-output API のレスポンスに含まれる cliToolId が JSON 出力に含まれていない。respond コマンドへの透過的な情報伝達を考慮すると、exit 10 の JSON 出力にも cliToolId を含めるべき。これにより `wait -> respond` のパイプライン利用時に、エージェント種別を自動的に伝播できる。",
+      "affected_files": [],
+      "suggestion": "wait コマンドの exit 10 JSON 出力の拡張形式を `{ worktreeId: string, cliToolId: string } & PromptData` に変更する。cliToolId は current-output API レスポンスの cliToolId フィールドから取得する。"
+    },
+    {
+      "id": "F7-08",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "title": "ls コマンドの --quiet オプションで出力される「IDのみ」の形式が未定義",
+      "description": "Issue の ls コマンド例に `commandmate ls --branch feature/101 --quiet  # IDのみ出力` とあるが、具体的な出力形式（1行1ID、スペース区切り、改行区切り等）が明記されていない。シェルスクリプトやパイプラインで使用する際に、出力形式が重要になる。",
+      "affected_files": [],
+      "suggestion": "ls --quiet の出力形式を明記する。例: 「1行に1つのworktree IDを出力し、末尾に改行を付与する（xargs 等と連携可能）」"
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 5,
+    "nice_to_have": 2,
+    "total": 8
+  },
+  "code_references": [
+    {
+      "file": "src/middleware.ts",
+      "relevance": "認証ミドルウェア。Cookie ベースのみで Authorization: Bearer ヘッダー未対応"
+    },
+    {
+      "file": "src/lib/security/auth.ts",
+      "relevance": "トークン認証コア。verifyToken() は存在するが、HTTP ヘッダーからのトークン抽出はなし"
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "relevance": "既存のブラウザ UI 用 API クライアント。CLI 用 api-client.ts との命名衝突に注意"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/auto-yes/route.ts",
+      "relevance": "auto-yes API。cliToolId フィールドを受け付けるが Issue の auto-yes コマンドに --agent 未記載"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "relevance": "current-output API。cliTool クエリパラメータ対応だが capture コマンドに --agent 未記載"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "relevance": "prompt-response API。cliTool フィールド対応だが respond コマンドに --agent 未記載"
+    },
+    {
+      "file": "src/app/api/auth/login/route.ts",
+      "relevance": "ログイン API。Cookie を Set するフロー。CLI の Bearer 認証と非互換"
+    }
+  ],
+  "doc_references": []
+}

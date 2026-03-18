@@ -1,0 +1,134 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "findings": [
+    {
+      "id": "DR2-01",
+      "severity": "must_fix",
+      "category": "consistency",
+      "title": "ExitCode.DEPENDENCY_ERROR の値が設計書と実装で不一致",
+      "description": "設計書 Section 6-2 ではエラーハンドリング戦略の表で ExitCode.DEPENDENCY_ERROR を値 1 と記載しているが、実際の src/cli/types/index.ts の enum では DEPENDENCY_ERROR = 1 で一致している。しかし、設計書は ExitCode.CONFIG_ERROR を 2 としており、実装も 2 で一致する。問題は設計書の Section 11 表で『wait の exit code を 10 番台に配置 → 既存 ExitCode enum との衝突回避』と記載しているが、実際に ExitCode enum には START_FAILED = 3, STOP_FAILED = 4, UNEXPECTED_ERROR = 99 があり、WaitExitCode.PROMPT_DETECTED = 10 は衝突しないものの、WaitExitCode.ERROR = 1 は ExitCode.DEPENDENCY_ERROR = 1 と完全に衝突する。設計書の WaitExitCode 定義に ERROR: 1 があるが、これは ExitCode.DEPENDENCY_ERROR と同値であり、wait コマンドのエラー判定時にどちらの終了コードか区別できない。",
+      "actual_code": "ExitCode: SUCCESS=0, DEPENDENCY_ERROR=1, CONFIG_ERROR=2, START_FAILED=3, STOP_FAILED=4, UNEXPECTED_ERROR=99",
+      "design_claim": "WaitExitCode: SUCCESS=0, ERROR=1, PROMPT_DETECTED=10, TIMEOUT=124 -- Section 5-1 の DR1-03 では 'インフラエラーは ExitCode を使用、wait 固有結果は WaitExitCode を使用' と記載",
+      "suggestion": "WaitExitCode.ERROR = 1 を削除するか、ExitCode を直接使うことを明記する。DR1-03 の判定ツリーに従えば、wait コマンドのインフラエラーは ExitCode を使い、wait 固有結果のみ WaitExitCode を使うので、WaitExitCode に ERROR は不要。WaitExitCode を { SUCCESS: 0, PROMPT_DETECTED: 10, TIMEOUT: 124 } のみに絞り、エラー系は ExitCode を使うと明記する。"
+    },
+    {
+      "id": "DR2-02",
+      "severity": "must_fix",
+      "category": "consistency",
+      "title": "auto-yes API の duration パラメータ: CLI設計は文字列、サーバー実装は数値",
+      "description": "設計書 Section 5-3 では CLI 側 DURATION_MAP を { '1h': 3600000, '3h': 10800000, '8h': 28800000 } と定義し、CLI の SendOptions/AutoYesOptions で duration を string 型 ('1h'|'3h'|'8h') としている。しかし、サーバー側の auto-yes API (route.ts POST) は body.duration を数値型で受け取り、isAllowedDuration() で 3600000|10800000|28800000 のいずれかをチェックする。設計書は CLI が duration 文字列をミリ秒に変換してから API に送信することを暗黙に想定しているが、ApiClient の post メソッドのコード例 (Section 4-2) では client.post<void>('/api/worktrees/${id}/auto-yes', { enabled, duration }) と記載しており、変換の必要性が明記されていない。",
+      "actual_code": "auto-yes route.ts: if (!isAllowedDuration(body.duration)) return 400; -- isAllowedDuration checks typeof value === 'number' && ALLOWED_DURATIONS.includes(value) where ALLOWED_DURATIONS = [3600000, 10800000, 28800000]",
+      "design_claim": "Section 5-3: DURATION_MAP = { '1h': 3600000, '3h': 10800000, '8h': 28800000 }; Section 4-2: client.post<void>('/auto-yes', { enabled, duration }) -- duration type unclear in API call context",
+      "suggestion": "設計書の auto-yes コマンド実装仕様に、CLI がユーザーから受け取った文字列 duration ('1h' 等) を parseDurationToMs() でミリ秒数値に変換してから API に送信することを明記する。また、Section 4-2 の post 例を client.post<void>('/auto-yes', { enabled, duration: parseDurationToMs(options.duration) }) のように変換を含む形に修正する。"
+    },
+    {
+      "id": "DR2-03",
+      "severity": "must_fix",
+      "category": "consistency",
+      "title": "CurrentOutputResponse 型とサーバー実際のレスポンスフィールドの不一致",
+      "description": "設計書 Section 5-2 の CurrentOutputResponse には content, realtimeSnippet, lineCount, isRunning, isComplete, isPromptWaiting, isGenerating, thinking, promptData, autoYes, cliToolId の11フィールドが定義されている。しかし実際の current-output route.ts は追加で fullOutput, lastCapturedLine, thinkingMessage, isSelectionListActive, lastServerResponseTimestamp, serverPollerActive の6フィールドを返している。wait コマンドの完了判定に影響する可能性があるフィールド (isSelectionListActive, lastServerResponseTimestamp) が設計書の型定義に含まれていない。",
+      "actual_code": "current-output route.ts returns: { isRunning, cliToolId, content, fullOutput, realtimeSnippet, lineCount, lastCapturedLine, isComplete, isGenerating, thinking, thinkingMessage, isPromptWaiting, promptData, autoYes: { enabled, expiresAt, stopReason }, isSelectionListActive, lastServerResponseTimestamp, serverPollerActive }",
+      "design_claim": "Section 5-2 CurrentOutputResponse: { isRunning, isComplete, isPromptWaiting, isGenerating, content, realtimeSnippet, lineCount, promptData, autoYes: { enabled }, thinking, cliToolId }",
+      "suggestion": "CurrentOutputResponse 型定義に不足フィールドを追加する: fullOutput (string), lastCapturedLine (number), thinkingMessage (string|null), isSelectionListActive (boolean), lastServerResponseTimestamp (number|null), serverPollerActive (boolean)。また autoYes の型を { enabled: boolean } から { enabled: boolean; expiresAt: number|null; stopReason?: string } に更新する。CLI が使用しないフィールドは optional にしても良いが、型としてはサーバーの実態を正確に反映すべき。"
+    },
+    {
+      "id": "DR2-04",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "middleware.ts の Bearer トークン対応が未実装: 設計書の前提と実装の乖離",
+      "description": "設計書 Section 2-3 では middleware.ts に Bearer トークン認証サポートを追加することを前提としている (Authorization: Bearer ヘッダー抽出 + 認証失敗時の CLI/ブラウザ分岐)。しかし、現在の middleware.ts には Cookie 認証のみが実装されており、Authorization ヘッダーのチェックロジックは存在しない。設計書ではこの変更を '前提実装' と位置付けており、CLI コマンド群の全てが Bearer 認証に依存する。設計書に変更の詳細仕様は記載済みだが、これが未実装であることへの注意喚起が必要。",
+      "actual_code": "middleware.ts: Cookie check only (line 111-113: const tokenCookie = request.cookies.get(AUTH_COOKIE_NAME); if (tokenCookie && await verifyTokenEdge(tokenCookie.value)) return next(); -- no Authorization header handling). Auth failure always redirects to /login.",
+      "design_claim": "Section 2-3: 'verifyTokenEdge() へ Authorization: Bearer ヘッダー抽出ロジックを追加する。Cookie OR Bearer のいずれかで認証成功とする。' + DR1-10: CLI リクエスト (Authorization ヘッダーあり) には 401 JSON, ブラウザには /login リダイレクト",
+      "suggestion": "設計書は正確に記述されている。これは実装タスクとして Issue #518 のスコープ内で対応が必要な前提変更。設計書に '実装順序: middleware.ts の Bearer 対応を最初に実装すること' という注記を追加し、実装チェックリスト (Section 14) にも個別項目として明記することを推奨する。"
+    },
+    {
+      "id": "DR2-05",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "send API のリクエスト/レスポンス形状が設計書と実装で不一致",
+      "description": "設計書 Section 4-2 では client.post<void>('/api/worktrees/${id}/send', { message }) と記載しており、リクエストボディのキーが 'message' となっている。しかし実際の send route.ts は body.content をキーとしてメッセージを受け取り (SendMessageRequest.content)、レスポンスは void ではなく 201 ステータスで message オブジェクト (ChatMessage) を返す。また、send API は cliToolId と imagePath も受け付けるが、設計書の send コマンドの SendOptions には agent (cliToolId に対応) はあるが imagePath への言及がない。",
+      "actual_code": "send/route.ts: body.content (not body.message); returns NextResponse.json(message, { status: 201 }) with full ChatMessage object",
+      "design_claim": "Section 4-2: client.post<void>('/api/worktrees/${id}/send', { message }) -- void return type, 'message' key",
+      "suggestion": "設計書の ApiClient 使用例を client.post<ChatMessage>('/api/worktrees/${id}/send', { content: message, cliToolId: agent }) に修正する。CLI コマンドが ChatMessage レスポンスを使用しない場合でも、型安全性のために正確な型を指定すべき。また SendOptions.agent が API の cliToolId にマッピングされることを明記する。"
+    },
+    {
+      "id": "DR2-06",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "prompt-response API のリクエスト形状が設計書に未記載",
+      "description": "設計書 Section 4-2 では client.post<void>('/api/worktrees/${id}/prompt-response', { answer }) と記載しているが、実際の prompt-response route.ts は answer に加えて cliTool, promptType, defaultOptionNumber のオプションパラメータを受け付ける。特に cliTool パラメータは respond コマンドの --agent オプションに対応するはずだが、API 呼び出し例に含まれていない。また、レスポンスは void ではなく { success: boolean, answer: string, reason?: string } を返す。",
+      "actual_code": "prompt-response/route.ts: PromptResponseRequest { answer: string; cliTool?: string; promptType?: PromptType; defaultOptionNumber?: number }; Returns { success: true, answer } or { success: false, reason: 'prompt_no_longer_active', answer }",
+      "design_claim": "Section 4-2: client.post<void>('/api/worktrees/${id}/prompt-response', { answer })",
+      "suggestion": "設計書の post 例を client.post<PromptResponseResult>('/api/worktrees/${id}/prompt-response', { answer, cliTool: agent }) に修正する。PromptResponseResult 型を api-responses.ts に追加する: { success: boolean; answer: string; reason?: string }。respond コマンドは success: false 時に reason を検査し、'prompt_no_longer_active' の場合はユーザーに通知してリトライを促すべき。"
+    },
+    {
+      "id": "DR2-07",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "tsconfig.cli.json の paths が空で @/* エイリアスなし: cli-tools/types.ts のインポート不可",
+      "description": "設計書 Section 7-2 では agent バリデーションに CLI_TOOL_IDS / isCliToolType() を使用し、'CLI側で isCliToolType() 相対インポート' と記載している。実際の tsconfig.cli.json は paths: {} (空) で include: ['src/cli/**/*'] のみ。これは src/lib/cli-tools/types.ts が CLI ビルドの include 範囲外であることを意味する。設計書は '相対インポート' と記載しているが、tsconfig.cli.json の include に含まれないファイルへの相対インポートは TypeScript コンパイル時にエラーになる可能性がある。",
+      "actual_code": "tsconfig.cli.json: { include: ['src/cli/**/*'], compilerOptions: { paths: {} } } -- src/lib/cli-tools/types.ts is outside include scope",
+      "design_claim": "Section 7-2: 'agent | CLI_TOOL_IDS に含まれる値 (CLI側で isCliToolType() 相対インポート)'. Section 3 不採用案: '@/* パスエイリアス | tsconfig.cli.json が未対応。相対パスで統一'",
+      "suggestion": "2つの選択肢を設計書に明記する: (A) tsconfig.cli.json の include に 'src/lib/cli-tools/types.ts' を追加する (最小限のスコープ拡張)、(B) CLI_TOOL_IDS と isCliToolType のサブセットを src/cli/config/ に複製し、DR1-09 同様のクロスバリデーションテストで同期を保証する。現在の設計書は相対インポートの実現可能性について検証が不足している。"
+    },
+    {
+      "id": "DR2-08",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "WorktreeItem 型に branch フィールドがあるが、サーバーの Worktree 型には branch がない",
+      "description": "設計書 Section 5-2 の WorktreeItem は id, branch, cliToolId, isSessionRunning, isWaitingForResponse, isProcessing を定義している。しかし src/types/models.ts の Worktree 型には 'branch' フィールドが存在しない。Worktree 型には 'name' (表示名、例: 'feature/foo') が存在し、これがブランチ名に相当する可能性があるが、フィールド名が異なる。ls コマンドがブランチ名でフィルタリング (--branch オプション) する場合、マッピングが不正確になる。",
+      "actual_code": "src/types/models.ts Worktree: { id: string, name: string, path: string, repositoryPath: string, repositoryName: string, ... } -- no 'branch' field",
+      "design_claim": "Section 5-2 WorktreeItem: { id: string, branch: string, ... }; Section 4-1 LsOptions: { branch?: string } for filtering",
+      "suggestion": "WorktreeItem.branch を WorktreeItem.name に変更するか、サーバーレスポンスの name フィールドが branch 相当であることをコメントで明記する。ls コマンドの --branch フィルタは worktree.name に対してプレフィックスマッチを行うことを明記する。"
+    },
+    {
+      "id": "DR2-09",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "WorktreeListResponse の worktrees 配列要素に session status フィールドが含まれることが未記載",
+      "description": "設計書の WorktreeItem は isSessionRunning, isWaitingForResponse, isProcessing を含むが、実際のサーバーレスポンスではこれらに加えて sessionStatusByCli (Partial<Record<CLIToolType, { isRunning, isWaitingForResponse, isProcessing }>>) も返す。ls コマンドが特定の agent でフィルタリングする際、sessionStatusByCli を参照する必要があるが、設計書の WorktreeItem にはこのフィールドがない。",
+      "actual_code": "worktrees/route.ts: returns { ...worktree, ...status } where status includes sessionStatusByCli from detectWorktreeSessionStatus()",
+      "design_claim": "Section 5-2 WorktreeItem: only top-level isSessionRunning, isWaitingForResponse, isProcessing",
+      "suggestion": "WorktreeItem に sessionStatusByCli?: Partial<Record<string, { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean }>> を追加する。agent フィルタ時に特定 CLI ツールのステータスを参照できるようにする。"
+    },
+    {
+      "id": "DR2-10",
+      "severity": "nice_to_have",
+      "category": "consistency",
+      "title": "既存 CLI コマンドの2パターン混在に関する設計書の記載精度",
+      "description": "設計書 DR1-08 では init/start/stop/status がインライン pattern、issue/docs が addCommand() factory pattern と記載している。これは src/cli/index.ts の実装と正確に一致する。ただし、start.ts は export async function startCommand() を export しており、createStartCommand() factory ではない。設計書は新規コマンドを factory pattern に統一する方針だが、既存コマンドの startCommand は直接関数 export であり、issue.ts の createIssueCommand() とはシグネチャが異なることが分かる。設計書の方針は正しいが、既存パターンとの対比をもう少し明確にすると実装者の理解が深まる。",
+      "actual_code": "start.ts: export async function startCommand(options: StartOptions): Promise<void>; issue.ts: export function createIssueCommand(): Command",
+      "design_claim": "DR1-08: '新規6コマンドは後者のファクトリパターン (createXxxCommand()) に統一する'",
+      "suggestion": "設計書に既存パターンの具体的なコード例 (startCommand() vs createIssueCommand()) を添えて、新規コマンドが createXxxCommand(): Command 形式で統一されることをより明確にする。"
+    },
+    {
+      "id": "DR2-11",
+      "severity": "nice_to_have",
+      "category": "consistency",
+      "title": "send API の endpoint パスに /send を使用しているが、実際のリクエストボディキーは content",
+      "description": "設計書 Section 6-1 の API マッピング表で send コマンドは POST /api/worktrees/:id/send と記載されている。これは実装と一致する。ただし、実際の send API は session が running でない場合に自動的にセッションを開始する副作用がある。CLI の send コマンドがこの副作用に依存するか、事前にセッション起動をチェックするかの設計が不明。",
+      "actual_code": "send/route.ts: if (!running) { await cliTool.startSession(params.id, worktree.path); ... }",
+      "design_claim": "Section 6-1 shows send as simple POST, no mention of auto-session-start behavior",
+      "suggestion": "send コマンドの仕様に、API がセッション未起動時に自動起動する動作を明記する。CLI 側で事前チェックが不要であることを確認する注記を追加する。"
+    },
+    {
+      "id": "DR2-12",
+      "severity": "nice_to_have",
+      "category": "consistency",
+      "title": "auto-yes API の cliToolId パラメータが設計書のコマンドオプションと異なる命名",
+      "description": "設計書の AutoYesOptions には agent フィールドがあり、auto-yes route.ts は body.cliToolId を受け取る。設計書は CLI の --agent オプションが API の cliToolId にマッピングされることを暗黙に想定しているが、このマッピングが明示されていない。同様の問題が send と respond にも存在する。",
+      "actual_code": "auto-yes/route.ts: const cliToolId: CLIToolType = isValidCliTool(body.cliToolId) ? body.cliToolId : 'claude'",
+      "design_claim": "Section 5-1 AutoYesOptions: { agent?: string, ... }",
+      "suggestion": "設計書に CLI オプション名と API ボディキーの対応表を追加する: --agent -> cliToolId (send, respond, auto-yes, capture 共通)。"
+    }
+  ],
+  "summary": {
+    "must_fix": 3,
+    "should_fix": 6,
+    "nice_to_have": 3,
+    "total": 12
+  },
+  "timestamp": "2026-03-18T00:00:00Z"
+}

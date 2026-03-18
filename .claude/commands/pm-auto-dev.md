@@ -48,7 +48,8 @@ Issue開発（TDD実装 → 受入テスト → リファクタリング → 進
 - [ ] Phase 3: 受入テスト
 - [ ] Phase 4: リファクタリング
 - [ ] Phase 5: ドキュメント最新化
-- [ ] Phase 6: 進捗報告
+- [ ] Phase 6: 実機受入テスト（UAT）
+- [ ] Phase 7: 進捗報告
 ```
 
 ---
@@ -221,7 +222,29 @@ Output file: dev-reports/issue/{issue_number}/pm-auto-dev/iteration-1/refactor-r
 
 ---
 
-### Phase 6: 進捗報告
+### Phase 6: 実機受入テスト（UAT）
+
+ドキュメント最新化後、実機環境での受入テストを実施する。
+
+`/uat` コマンドを実行：
+
+```
+/uat {issue_number}
+```
+
+**このフェーズで行われること**:
+- Issueの受入条件に基づくテスト計画立案
+- テスト計画のレビュー（2回）
+- テスト環境セットアップ（ポート3010〜3030で自動検出）
+- 実機での全テストケース実行
+- HTML形式のテスト報告書作成
+- テスト環境停止
+
+**出力ファイル**: `dev-reports/issue/{issue_number}/uat/acceptance-test-report.html`
+
+---
+
+### Phase 7: 進捗報告
 
 #### 6-1. 進捗レポートコンテキストファイル作成
 
@@ -272,6 +295,12 @@ dev-reports/issue/{issue_number}/
         ├── refactor-result.json
         ├── progress-context.json
         └── progress-report.md
+    uat/
+        ├── test-plan.md
+        ├── review-1.md
+        ├── review-2.md
+        ├── test-results.json
+        └── acceptance-test-report.html
 ```
 
 ---
@@ -285,7 +314,8 @@ dev-reports/issue/{issue_number}/
 - Phase 3: 受入テスト成功（全シナリオ合格）
 - Phase 4: リファクタリング完了
 - Phase 5: 関連ドキュメントの最新化完了
-- Phase 6: 進捗レポート作成完了
+- Phase 6: 実機受入テスト完了（HTMLレポート作成済み、テスト環境停止済み）
+- Phase 7: 進捗レポート作成完了
 
 ---
 
@@ -313,7 +343,11 @@ Phase 4: リファクタリング成功
 Phase 5: ドキュメント最新化完了
   - 更新: README.md, CLAUDE.md
 
-Phase 6: 進捗レポート作成完了
+Phase 6: 実機受入テスト完了
+  - テスト: 12/12 PASS
+  - 報告書: dev-reports/issue/166/uat/acceptance-test-report.html
+
+Phase 7: 進捗レポート作成完了
 
 Issue #166 の開発が完了しました！
 ```

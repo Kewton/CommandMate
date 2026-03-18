@@ -1,0 +1,93 @@
+{
+  "issue_number": 518,
+  "stage": 1,
+  "stage_name": "設計原則レビュー指摘対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "DR1-06",
+        "item": "APIレスポンス型のトレーサビリティ規約・Phase 2 移行パス仕様追加",
+        "section_updated": "Section 5-2, Section 12",
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "DR1-01",
+        "item": "ApiClient責務分離（resolveAuthToken, handleApiError関数抽出）",
+        "section_updated": "Section 4-2",
+        "status": "reflected"
+      },
+      {
+        "id": "DR1-02",
+        "item": "出力フォーマッター適用対象コマンドの明確化（ls, captureのみ）",
+        "section_updated": "Section 4-3",
+        "status": "reflected"
+      },
+      {
+        "id": "DR1-05",
+        "item": "ジェネリックget/postメソッドの使用パターン文書化",
+        "section_updated": "Section 4-2, Section 12",
+        "status": "reflected"
+      },
+      {
+        "id": "DR1-08",
+        "item": "addCommand()パターン選択の根拠追記",
+        "section_updated": "Section 4-1",
+        "status": "reflected"
+      },
+      {
+        "id": "DR1-10",
+        "item": "middleware認証失敗時のCLI向け401 JSONレスポンス分岐仕様",
+        "section_updated": "Section 2-3",
+        "status": "reflected"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "DR1-03",
+        "item": "ExitCode/WaitExitCode使い分け判定ツリー",
+        "section_updated": "Section 5-1",
+        "status": "reflected"
+      },
+      {
+        "id": "DR1-04",
+        "item": "output-formatter.tsのYAGNI考慮注記",
+        "section_updated": "Section 10",
+        "status": "reflected"
+      },
+      {
+        "id": "DR1-07",
+        "item": "Promise.allSettledによるエラー分離方針",
+        "section_updated": "Section 8-2",
+        "status": "reflected"
+      },
+      {
+        "id": "DR1-09",
+        "item": "Duration定数クロスバリデーションテスト推奨",
+        "section_updated": "Section 9-3",
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-518-cli-base-commands-design-policy.md",
+  "sections_updated": [
+    "Section 2-3 (middleware Bearer対応)",
+    "Section 4-1 (Factoryパターン)",
+    "Section 4-2 (Facadeパターン/API Client)",
+    "Section 4-3 (Strategyパターン/出力フォーマット)",
+    "Section 5-1 (CLI固有型定義)",
+    "Section 5-2 (APIレスポンス型)",
+    "Section 8-2 (複数worktree同時待機)",
+    "Section 9-3 (クロスバリデーションテスト - 新規)",
+    "Section 10 (実装ファイル一覧)",
+    "Section 12 (Phase 2検討事項)",
+    "Section 13 (レビュー指摘事項サマリー - 新規)",
+    "Section 14 (実装チェックリスト - 新規)",
+    "Section 15 (レビュー履歴 - 新規)"
+  ],
+  "timestamp": "2026-03-18T00:00:00Z"
+}

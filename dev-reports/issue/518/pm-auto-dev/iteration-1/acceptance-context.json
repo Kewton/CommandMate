@@ -1,0 +1,39 @@
+{
+  "issue_number": 518,
+  "feature_summary": "CLI基盤コマンドの実装（ls / send / wait / respond / capture / auto-yes）",
+  "acceptance_criteria": [
+    "src/middleware.ts が Authorization: Bearer ヘッダーによる認証をサポート（Cookie OR Bearer）",
+    "commandmate ls が worktree 一覧を3フォーマットで出力（table/json/quiet）",
+    "commandmate ls --quiet が1行1IDの改行区切りで出力",
+    "commandmate send がメッセージ送信 + Auto-Yes 有効化できる",
+    "commandmate send --auto-yes --agent 指定時に auto-yes API と send API の両方に同じ cliToolId が送信される",
+    "commandmate wait がブロッキング待機し、完了/プロンプト/タイムアウトを正しい終了コードで返す",
+    "commandmate wait の正常完了判定が isRunning===false && isPromptWaiting===false",
+    "commandmate wait のプロンプト検出時、{ worktreeId, cliToolId } & PromptData のJSONをstdoutに出力",
+    "commandmate wait --on-prompt human がプロンプト検出後もブロック継続",
+    "commandmate respond がプロンプトに応答できる（yes/no, 番号選択, テキスト）",
+    "commandmate respond --agent でエージェント種別を指定できる",
+    "commandmate capture が最新出力を取得できる",
+    "commandmate capture --json が定義済みフィールド（fullOutput除外）でJSON出力",
+    "commandmate capture --agent で特定エージェントの出力を取得できる",
+    "commandmate auto-yes が個別に Auto-Yes を制御できる（--stop-pattern 対応含む）",
+    "commandmate auto-yes --agent でエージェント種別を指定できる",
+    "全コマンドが --json / --quiet フォーマットに対応",
+    "サーバー未起動時に適切なエラーメッセージを表示",
+    "認証有効サーバーに対して --token または CM_AUTH_TOKEN で認証できる",
+    "既存の commandmate start / stop / status と共存",
+    "npm run build:cli でビルドでき、node bin/commandmate.js で実行可能",
+    "単体テスト（vitest）で主要パスをカバー"
+  ],
+  "test_scenarios": [
+    "middleware: Cookie認証成功、Bearer認証成功、Cookie+Bearer両方ありでCookie優先、無効Cookie+有効BearerでBearer成功、認証情報なしでリダイレクト、無効Bearerのみで401 JSON",
+    "ls: テーブル出力、JSON出力、quiet出力、--branch前方一致フィルタ",
+    "send: メッセージ送信、--auto-yes付き送信、--agent指定、--duration指定（1h/3h/8h）、--stop-pattern指定",
+    "wait: 正常完了（exit 0）、プロンプト検出（exit 10 + JSON出力）、タイムアウト（exit 124）、--on-prompt human、複数ID同時待機",
+    "respond: yes/no応答、番号選択、テキスト入力、--agent指定",
+    "capture: テキスト出力、JSON出力（fullOutput除外）、--agent指定",
+    "auto-yes: --enable + --duration、--disable、--stop-pattern、--agent指定",
+    "共通: --token認証、CM_AUTH_TOKEN認証、サーバー未起動時エラー、worktree ID不正時エラー",
+    "ビルド: npm run build:cli成功、型チェック成功、lint成功"
+  ]
+}

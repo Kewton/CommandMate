@@ -107,13 +107,36 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check for auth cookie
+  // [IA3-01] Cookie-first verification order: Cookie check MUST come first
+  // to preserve existing browser auth. Bearer is fallback only.
+
+  // Step A: Cookie check (existing browser flow)
   const tokenCookie = request.cookies.get(AUTH_COOKIE_NAME);
   if (tokenCookie && (await verifyTokenEdge(tokenCookie.value))) {
     return NextResponse.next();
   }
 
-  // Redirect to login page
+  // Step B: Bearer token check (CLI fallback) [Issue #518]
+  const authHeader = request.headers.get('authorization');
+  if (authHeader?.startsWith('Bearer ')) {
+    const bearerToken = authHeader.slice(7);
+    if (bearerToken && (await verifyTokenEdge(bearerToken))) {
+      return NextResponse.next();
+    }
+    // [SEC4-07] Log Bearer auth failure with IP
+    const clientIp = getClientIp(request.headers);
+    const safeIp = clientIp ? normalizeIp(clientIp).substring(0, 45) : 'unknown';
+    console.warn(`[AUTH] Bearer token auth failed from IP: ${safeIp}`);
+  }
+
+  // Step C: Auth failure response branching [DR1-10]
+  // CLI requests (with Authorization header) get 401 JSON
+  // Browser requests (no Authorization header) get /login redirect
+  if (authHeader) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Redirect to login page (browser flow)
   const loginUrl = request.nextUrl.clone();
   loginUrl.pathname = '/login';
   return NextResponse.redirect(loginUrl);

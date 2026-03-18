@@ -105,7 +105,7 @@ src/
 │   └── api/       # APIルート
 ├── cli/           # CLIモジュール（Issue #96）
 │   ├── index.ts       # CLIメインロジック（commander設定）
-│   ├── commands/      # サブコマンド（init, start, stop, status）
+│   ├── commands/      # サブコマンド（init, start, stop, status, ls, send, wait, respond, capture, auto-yes）
 │   ├── utils/         # 依存チェック、環境設定、デーモン管理
 │   ├── config/        # 依存関係定義
 │   └── types/         # CLI共通型定義（ExitCode enum）
@@ -254,6 +254,11 @@ tests/
 | `src/app/api/worktrees/[id]/git/diff/route.ts` | Gitファイルdiff取得API（Issue #447） |
 | `src/app/api/worktrees/[id]/special-keys/route.ts` | 特殊キー送信API（Up/Down/Enter/Escape、6層防御）（Issue #473） |
 | `src/components/worktree/NavigationButtons.tsx` | OpenCode TUI選択リストナビゲーションボタン（Issue #473） |
+| `src/cli/utils/api-client.ts` | CLI用HTTPクライアント（認証トークン解決・エラー分類・ApiClient/ApiError）（Issue #518） |
+| `src/cli/utils/command-helpers.ts` | CLI共通ヘルパー（TOKEN_WARNING定数・handleCommandError統一エラーハンドラ）（Issue #518） |
+| `src/cli/types/api-responses.ts` | CLI側APIレスポンス型定義（WorktreeListResponse, CurrentOutputResponse, PromptResponseResult等）（Issue #518） |
+| `src/cli/config/duration-constants.ts` | CLI側duration定数（DURATION_MAP, parseDurationToMs）（Issue #518） |
+| `src/cli/config/cli-tool-ids.ts` | CLI側ツールID定義（CLI_TOOL_IDS, isCliToolId）（Issue #518） |
 
 ### CLIモジュール
 
@@ -266,8 +271,16 @@ tests/
 | `src/cli/commands/status.ts` | statusコマンド（--all対応） |
 | `src/cli/commands/issue.ts` | issueコマンド（gh CLI連携） |
 | `src/cli/commands/docs.ts` | docsコマンド |
-| `src/cli/utils/` | preflight, env-setup, daemon, pid-manager, port-allocator 等 |
+| `src/cli/commands/ls.ts` | lsコマンド（worktree一覧表示、--json/--quiet/--branch対応）（Issue #518） |
+| `src/cli/commands/send.ts` | sendコマンド（エージェントへのメッセージ送信、--auto-yes/--agent対応）（Issue #518） |
+| `src/cli/commands/wait.ts` | waitコマンド（エージェント完了/プロンプト検出待機、--timeout/--stall-timeout/--on-prompt対応）（Issue #518） |
+| `src/cli/commands/respond.ts` | respondコマンド（エージェントプロンプトへの応答、--agent対応）（Issue #518） |
+| `src/cli/commands/capture.ts` | captureコマンド（ターミナル出力取得、--json/--agent対応）（Issue #518） |
+| `src/cli/commands/auto-yes.ts` | auto-yesコマンド（Auto-Yes制御、--enable/--disable/--duration/--stop-pattern対応）（Issue #518） |
+| `src/cli/utils/` | preflight, env-setup, daemon, pid-manager, port-allocator, api-client, command-helpers 等 |
+| `src/cli/config/` | 依存関係定義、duration-constants, cli-tool-ids |
 | `src/cli/types/index.ts` | CLI共通型定義 |
+| `src/cli/types/api-responses.ts` | CLI側APIレスポンス型定義（Issue #518） |
 
 ---
 
@@ -365,6 +378,40 @@ commandmate start --issue 135 --port 3135  # 特定ポートで起動
 commandmate stop --issue 135               # Issue #135用サーバー停止
 commandmate status --issue 135             # Issue #135用サーバー状態確認
 commandmate status --all                   # 全サーバー状態確認
+
+# Worktree操作コマンド（Issue #518）
+commandmate ls                             # worktree一覧表示
+commandmate ls --json                      # JSON形式で出力
+commandmate ls --quiet                     # IDのみ出力（1行1ID）
+commandmate ls --branch feature/           # ブランチ名プレフィックスでフィルタ
+
+# メッセージ送信
+commandmate send <worktree-id> "メッセージ"                    # エージェントにメッセージ送信
+commandmate send <worktree-id> "メッセージ" --agent claude     # エージェント指定
+commandmate send <worktree-id> "メッセージ" --auto-yes         # Auto-Yes有効化して送信
+commandmate send <worktree-id> "メッセージ" --auto-yes --duration 3h  # Auto-Yes時間指定
+
+# 完了待機
+commandmate wait <worktree-id>                                 # エージェント完了まで待機
+commandmate wait <worktree-id> --timeout 300                   # 300秒でタイムアウト（exit 124）
+commandmate wait <worktree-id> --stall-timeout 60              # 60秒出力変化なしでタイムアウト
+commandmate wait <worktree-id> --on-prompt human               # プロンプト検出時も待機継続
+commandmate wait <id1> <id2>                                   # 複数worktree同時待機
+
+# プロンプト応答
+commandmate respond <worktree-id> "yes"                        # プロンプトに応答
+commandmate respond <worktree-id> "yes" --agent claude         # エージェント指定
+
+# ターミナル出力取得
+commandmate capture <worktree-id>                              # ターミナル出力をテキストで取得
+commandmate capture <worktree-id> --json                       # JSON形式で取得
+commandmate capture <worktree-id> --agent codex                # エージェント指定
+
+# Auto-Yes制御
+commandmate auto-yes <worktree-id> --enable                    # Auto-Yes有効化（デフォルト1h）
+commandmate auto-yes <worktree-id> --enable --duration 3h      # 時間指定（1h, 3h, 8h）
+commandmate auto-yes <worktree-id> --enable --stop-pattern "error"  # 停止パターン指定
+commandmate auto-yes <worktree-id> --disable                   # Auto-Yes無効化
 ```
 
 ---
@@ -385,6 +432,7 @@ commandmate status --all                   # 全サーバー状態確認
 | `/bug-fix` | バグ修正ワークフロー |
 | `/refactoring` | リファクタリング実行 |
 | `/acceptance-test` | 受け入れテスト |
+| `/uat` | 実機受入テスト（UAT）計画・レビュー・実行・報告 |
 | `/issue-create` | Issue一括作成 |
 | `/issue-enhance` | Issueの対話的補完（不足情報をユーザーに質問して補完） |
 | `/issue-split` | Issue分割計画 |
