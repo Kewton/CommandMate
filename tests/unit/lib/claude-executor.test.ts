@@ -37,8 +37,8 @@ describe('claude-executor', () => {
       expect(MAX_STORED_OUTPUT_SIZE).toBe(100 * 1024);
     });
 
-    it('should have EXECUTION_TIMEOUT_MS = 5 minutes', () => {
-      expect(EXECUTION_TIMEOUT_MS).toBe(5 * 60 * 1000);
+    it('should have EXECUTION_TIMEOUT_MS = 15 minutes', () => {
+      expect(EXECUTION_TIMEOUT_MS).toBe(15 * 60 * 1000);
     });
 
     it('should have MAX_MESSAGE_LENGTH = 10000', () => {
