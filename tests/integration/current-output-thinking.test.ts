@@ -56,6 +56,8 @@ describe('Issue #188: current-output thinking integration', () => {
       expect(result.status).toBe('ready');
       expect(result.reason).toBe('input_prompt');
       expect(result.hasActivePrompt).toBe(false);
+      // Issue #520 [IA3-04]: Verify sessionStatus field availability for CLI wait command
+      expect(result.status).toBeDefined();
     });
 
     it('should derive thinking=false when thinking summary is outside 5-line window', () => {

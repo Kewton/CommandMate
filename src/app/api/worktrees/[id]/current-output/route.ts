@@ -61,6 +61,9 @@ export async function GET(
           content: '',
           lineCount: 0,
           cliToolId,
+          // Issue #520: Session status for CLI wait command completion detection
+          sessionStatus: 'idle' as const,
+          sessionStatusReason: 'session_not_running',
         },
         { status: 200 }
       );
@@ -115,6 +118,9 @@ export async function GET(
     return NextResponse.json({
       isRunning: true,
       cliToolId,
+      // Issue #520: Session status for CLI wait command completion detection
+      sessionStatus: statusResult.status,
+      sessionStatusReason: statusResult.reason,
       content: newContent,
       fullOutput: output,
       realtimeSnippet,

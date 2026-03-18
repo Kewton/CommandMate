@@ -47,12 +47,16 @@ export interface CurrentOutputResponse {
     expiresAt: number | null;
     stopReason?: string;
   };
-  thinking: string;
+  thinking: boolean;
   thinkingMessage: string | null;
   cliToolId?: string;
   isSelectionListActive: boolean;
   lastServerResponseTimestamp: number | null;
   serverPollerActive: boolean;
+  /** Issue #520: Session status from detectSessionStatus() */
+  sessionStatus?: 'idle' | 'ready' | 'running' | 'waiting';
+  /** Issue #520: Reason string from detectSessionStatus() or 'session_not_running' */
+  sessionStatusReason?: string;
 }
 
 // Mirrors: src/types/models.ts BasePromptData (subset for CLI output)

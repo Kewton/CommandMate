@@ -84,14 +84,17 @@ async function pollWorktree(
         return { exitCode: WaitExitCode.PROMPT_DETECTED, output: promptOutput };
       }
 
-      // Completion check: isRunning===false && isPromptWaiting===false
-      if (!data.isRunning && !data.isPromptWaiting) {
+      // Completion check [DR1-04]:
+      // Path A: tmux session not running (session terminated or not started)
+      // Path B: agent completed task (sessionStatus === 'ready', input prompt detected)
+      // Both indicate "no more work in progress" from wait command's perspective
+      if (!data.isRunning || data.sessionStatus === 'ready') {
         console.error(`Completed: ${worktreeId}`);
         return { exitCode: WaitExitCode.SUCCESS };
       }
 
-      // Progress indicator on stderr
-      console.error(`Waiting: ${worktreeId} (running=${data.isRunning}, prompt=${data.isPromptWaiting})`);
+      // Progress indicator on stderr [DR1-05]
+      console.error(`Waiting: ${worktreeId} (status=${data.sessionStatus}, running=${data.isRunning}, prompt=${data.isPromptWaiting})`);
     } catch (error) {
       if (error instanceof ApiError) {
         throw error;
