@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.10] - 2026-03-19
+
+### Added
+- CLI: implement base commands for agent orchestration — ls, send, wait, respond, capture, auto-yes (Issue #518)
+- CLI: add sessionStatus to wait completion detection (Issue #520)
+- Docs: CLI operations guide (Japanese and English)
+
+### Fixed
+- MARP: prevent slide reset on file content polling
+- CLI: improve timeout and elapsed time display
+
 ## [0.4.9] - 2026-03-16
 
 ### Added
