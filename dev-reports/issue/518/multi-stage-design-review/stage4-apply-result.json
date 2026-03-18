@@ -1,0 +1,95 @@
+{
+  "issue_number": 518,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘対応",
+  "status": "completed",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "SEC4-01",
+        "title": "--token フラグによるトークン漏洩リスク",
+        "action": "Section 7-1 に stderr 警告出力とヘルプテキスト警告の設計を追加。Phase 2 の設定ファイルベース認証を Section 12 に追加。実装チェックリストに3項目追加。",
+        "sections_updated": ["7-1", "12", "14 (must_fix)"]
+      },
+      {
+        "id": "SEC4-02",
+        "title": "HTTP 通信におけるトークン平文送信",
+        "action": "Section 7-1 に ApiClient コンストラクタでの非 localhost HTTP 警告の設計を追加。実装チェックリストに1項目追加。",
+        "sections_updated": ["7-1", "14 (must_fix)"]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC4-03",
+        "title": "Bearer トークン認証は認証のみで認可がない",
+        "action": "新規 Section 7-4 に Phase 1 の認可モデル前提と制限事項を文書化。Phase 2 のスコープベース認可を Section 12 に追加。",
+        "sections_updated": ["7-4 (新規)", "12", "14 (should_fix)"]
+      },
+      {
+        "id": "SEC4-04",
+        "title": "worktree ID の URL パス構築における安全性確認",
+        "action": "Section 7-2 の worktree ID バリデーション行に encodeURIComponent / isValidWorktreeId ガードパターンを追記。",
+        "sections_updated": ["7-2", "14 (should_fix)"]
+      },
+      {
+        "id": "SEC4-05",
+        "title": "CLI 経由の認証失敗に対するレート制限の適用確認",
+        "action": "Section 7-4 に Bearer 認証失敗時のレートリミッター適用確認事項を追加。Edge Runtime 制約の考慮を明記。",
+        "sections_updated": ["7-4", "14 (should_fix)"]
+      },
+      {
+        "id": "SEC4-06",
+        "title": "--stop-pattern の ReDoS リスクに対する CLI 側バリデーション不足",
+        "action": "Section 7-2 の stop-pattern バリデーションに MAX_STOP_PATTERN_LENGTH=500 の事前チェックとサーバー 400 エラーハンドリングを追記。",
+        "sections_updated": ["7-2", "14 (should_fix)"]
+      },
+      {
+        "id": "SEC4-07",
+        "title": "CLI リクエストのサーバー側ログ記録が未設計",
+        "action": "新規 Section 7-5 に Phase 1 の最低限の監査ログ（認証失敗ログ）と Phase 2 の監査ログ計画を追加。",
+        "sections_updated": ["7-5 (新規)", "12", "14 (should_fix)"]
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC4-08",
+        "title": "CM_AUTH_TOKEN 環境変数のプロセス間漏洩リスク",
+        "action": "Section 12 の Phase 2 検討事項に設定ファイルベース認証（パーミッション 0600）を追加。nice_to_have チェックリストに追加。",
+        "sections_updated": ["12", "14 (nice_to_have)"]
+      },
+      {
+        "id": "SEC4-09",
+        "title": "ApiClient の baseUrl による SSRF リスク",
+        "action": "Section 12 に baseUrl ホワイトリスト検証を追加。nice_to_have チェックリストに追加。",
+        "sections_updated": ["12", "14 (nice_to_have)"]
+      },
+      {
+        "id": "SEC4-10",
+        "title": "新規外部依存なし（ポジティブ所見）",
+        "action": "レビューサマリーテーブルに確認済みとして記録。追加対応不要。",
+        "sections_updated": ["13"]
+      },
+      {
+        "id": "SEC4-11",
+        "title": "CLI ビルドパイプラインのサプライチェーンリスク",
+        "action": "Section 12 に npm publish 時のサプライチェーン対策を追加。",
+        "sections_updated": ["12"]
+      },
+      {
+        "id": "SEC4-12",
+        "title": "message / answer 引数の入力サニタイズ",
+        "action": "既存対策（execFile 使用）で十分と確認。message 最大長制限を nice_to_have チェックリストに追加。",
+        "sections_updated": ["14 (nice_to_have)"]
+      }
+    ]
+  },
+  "design_doc_updated": "dev-reports/design/issue-518-cli-base-commands-design-policy.md",
+  "sections_added": ["7-4 (認証・認可の前提と制限事項)", "7-5 (監査ログ)"],
+  "sections_modified": ["7-1", "7-2", "12", "13", "14", "15"],
+  "checklist_items_added": {
+    "must_fix": 3,
+    "should_fix": 6,
+    "nice_to_have": 3
+  },
+  "timestamp": "2026-03-18T00:00:00Z"
+}

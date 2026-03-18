@@ -1,0 +1,110 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "focus_area": "通常",
+  "iteration": 2,
+  "previous_findings_status": [
+    {"id": "F1-01", "status": "resolved"},
+    {"id": "F1-02", "status": "resolved"},
+    {"id": "F1-03", "status": "resolved"},
+    {"id": "F1-04", "status": "resolved"},
+    {"id": "F1-05", "status": "resolved"},
+    {"id": "F1-06", "status": "resolved"},
+    {"id": "F1-07", "status": "resolved"},
+    {"id": "F1-08", "status": "resolved"},
+    {"id": "F1-09", "status": "resolved"},
+    {"id": "F1-10", "status": "resolved"},
+    {"id": "F1-11", "status": "resolved"},
+    {"id": "F3-01", "status": "resolved"},
+    {"id": "F3-02", "status": "resolved"},
+    {"id": "F3-03", "status": "resolved"},
+    {"id": "F3-04", "status": "resolved"},
+    {"id": "F3-05", "status": "resolved"},
+    {"id": "F3-06", "status": "resolved"},
+    {"id": "F3-07", "status": "resolved"},
+    {"id": "F3-08", "status": "resolved"},
+    {"id": "F3-09", "status": "resolved"},
+    {"id": "F3-10", "status": "resolved"},
+    {"id": "F3-11", "status": "resolved"}
+  ],
+  "findings": [
+    {
+      "id": "F5-01",
+      "severity": "must_fix",
+      "category": "整合性（実装との不一致）",
+      "title": "wait コマンドの isComplete フィールド解釈が実際の API 実装と矛盾",
+      "description": "Issue の「current-output API レスポンスフィールドと wait 終了条件のマッピング」表では `isComplete === true` を「処理完了として終了 → exit 0 (SUCCESS)」と記載しているが、実際の current-output API 実装（route.ts 124行目）では `isComplete: isPromptWaiting` と定義されている。つまり `isComplete` は「プロンプトが検出された」ことを意味し、「処理が正常完了した」こととは異なる。wait コマンドが `isComplete === true` を exit 0 で処理すると、プロンプト検出時にも exit 0 を返してしまい、exit 10 (PROMPT_DETECTED) と矛盾する動作になる。",
+      "suggestion": "マッピング表から `isComplete` の行を削除するか、`isComplete` が `isPromptWaiting` と同義であることを注記した上で wait の終了判定ロジックを修正する。正常完了の判定は `isRunning === false`（セッション終了）のみで行い、`isComplete` は使用しない設計にするのが安全。あるいは `isComplete` を信頼せず、`isRunning === false && !isPromptWaiting` を正常完了条件とする。",
+      "location": "実装対象コマンド > 3. commandmate wait > current-output API レスポンスフィールドと wait 終了条件のマッピング"
+    },
+    {
+      "id": "F5-02",
+      "severity": "should_fix",
+      "category": "整合性（実装との不一致）",
+      "title": "exit 10 時の stdout JSON に worktreeId フィールドがあるが PromptData 型に存在しない",
+      "description": "Issue では exit 10 時の stdout JSON 例に `worktreeId` フィールドが含まれており、「PromptData 型に準拠した形式で出力する」と記載している。しかし実際の PromptData 型（src/types/models.ts）には `worktreeId` フィールドは定義されていない。BasePromptData は type, question, status, answer, answeredAt, instructionText のみ。CLI が独自に worktreeId を付加するならば、「PromptData 型に準拠」という記述は不正確。",
+      "suggestion": "JSON 出力が「PromptData 型を拡張した CLI 独自の出力形式」であることを明記する。例えば `{ worktreeId: string } & PromptData` のような型を CLI 側で定義する旨を記載するか、worktreeId フィールドを JSON 例から削除して純粋な PromptData 型準拠にする。前者のほうが CLI 利用者にとって有用。",
+      "location": "実装対象コマンド > 3. commandmate wait > exit 10 時の stdout（JSON）"
+    },
+    {
+      "id": "F5-03",
+      "severity": "should_fix",
+      "category": "整合性（実装との不一致）",
+      "title": "auto-yes-config.ts を CLI から import すると safe-regex2 依存が発生する",
+      "description": "Issue の「CLI コードの import 制約」セクションで `import { ALLOWED_DURATIONS } from '../../config/auto-yes-config'` を例示しているが、auto-yes-config.ts はトップレベルで `import safeRegex from 'safe-regex2'` を行っている。CLI ビルド（tsconfig.cli.json）でこのファイルをコンパイル対象に含めると、safe-regex2 のインポートも含まれる。CLI の実行時にこの依存が node_modules に存在しない環境ではランタイムエラーが発生する可能性がある。",
+      "suggestion": "以下のいずれかを検討する: (1) ALLOWED_DURATIONS と isAllowedDuration を別ファイル（例: src/config/auto-yes-constants.ts）に分離し、safe-regex2 への依存を持つ validateStopPattern とは独立させる。(2) CLI 側で独自に duration 定数を定義する（DRY 違反だが依存を断てる）。(3) safe-regex2 が devDependencies ではなく dependencies に含まれていることを確認し、CLI パッケージでも利用可能であることを保証する。Issue に方針を明記すべき。",
+      "location": "共通仕様 > CLI コードの import 制約"
+    },
+    {
+      "id": "F5-04",
+      "severity": "should_fix",
+      "category": "仕様の不明確さ",
+      "title": "GET /api/worktrees レスポンス構造が worktrees 配列のラッパーであることが未記載",
+      "description": "Issue では ls コマンドの内部実装で GET /api/worktrees を呼び出すと記載しているが、実際の API レスポンスは `{ worktrees: [...], repositories: [...] }` というラッパーオブジェクトである。CLI が直接配列を受け取る前提で実装すると、レスポンスパースに失敗する。",
+      "suggestion": "ls コマンドの内部実装セクションに、GET /api/worktrees のレスポンス構造が `{ worktrees: Worktree[], repositories: Repository[] }` であり、CLI は `response.worktrees` からリストを取得する旨を明記する。",
+      "location": "実装対象コマンド > 1. commandmate ls > 内部実装"
+    },
+    {
+      "id": "F5-05",
+      "severity": "should_fix",
+      "category": "仕様の不明確さ",
+      "title": "send コマンドの API リクエストボディの形式が未記載",
+      "description": "send コマンドの内部実装で POST /api/worktrees/:id/send を呼び出すと記載されているが、リクエストボディの形式（`{ content: string, cliToolId?: string }`）が明記されていない。実装者はソースコードを読まないとリクエスト形式がわからない。",
+      "suggestion": "send コマンドの内部実装セクションに、POST /api/worktrees/:id/send のリクエストボディ形式 `{ content: string, cliToolId?: CLIToolType }` を明記する。--agent オプションの値が cliToolId フィールドにマッピングされることも記載する。",
+      "location": "実装対象コマンド > 2. commandmate send > 内部実装"
+    },
+    {
+      "id": "F5-06",
+      "severity": "should_fix",
+      "category": "仕様の不明確さ",
+      "title": "respond コマンドの API リクエストボディの形式が未記載",
+      "description": "respond コマンドの内部実装で POST /api/worktrees/:id/prompt-response を使用するとあるが、リクエストボディの形式が記載されていない。実際の API は `{ answer: string, cliTool?: string, promptType?: PromptType, defaultOptionNumber?: number }` を受け付ける。特に cliTool パラメータはオプショナルであり、respond コマンドに --agent のようなオプションが必要かどうかが不明。",
+      "suggestion": "respond コマンドの内部実装セクションに、POST /api/worktrees/:id/prompt-response のリクエストボディ形式を明記する。promptType と defaultOptionNumber は wait コマンドの exit 10 出力から取得可能であり、respond コマンドがそれらを透過的に渡すフローを記載すると実装者に有用。",
+      "location": "実装対象コマンド > 4. commandmate respond > 内部実装"
+    },
+    {
+      "id": "F5-07",
+      "severity": "nice_to_have",
+      "category": "受け入れ条件の妥当性",
+      "title": "capture コマンドの --json 出力形式が未定義",
+      "description": "capture コマンドに --json オプションがあると記載されているが、JSON 出力時のフィールド構成が定義されていない。current-output API のレスポンスは多数のフィールド（isRunning, content, fullOutput, realtimeSnippet, lineCount, isComplete, isGenerating, thinking, isPromptWaiting, promptData, autoYes, isSelectionListActive 等）を含む。CLI がそのまま全フィールドを出力するのか、選別するのかが不明。",
+      "suggestion": "capture --json の出力フィールドを定義する。最低限必要なフィールド（isRunning, content, isPromptWaiting, isGenerating, promptData 等）を明記し、fullOutput のような大きなフィールドの扱い（含める/除外する）を決定する。",
+      "location": "実装対象コマンド > 5. commandmate capture"
+    },
+    {
+      "id": "F5-08",
+      "severity": "nice_to_have",
+      "category": "記載内容の正確性",
+      "title": "auto-yes コマンドに --enable/--disable 以外の使い方の説明が不足",
+      "description": "auto-yes コマンドの例では --enable と --disable の2パターンのみ示されているが、POST /api/worktrees/:id/auto-yes は enabled (boolean) と duration, stopPattern, cliToolId を受け付ける。--stop-pattern オプションは send コマンドにのみ記載されており、auto-yes コマンド単体での --stop-pattern サポート有無が不明。",
+      "suggestion": "auto-yes コマンドの使用例に --stop-pattern オプションの対応有無を明記する。send の --auto-yes --stop-pattern と auto-yes --enable --stop-pattern の両方で指定可能であることが望ましい。",
+      "location": "実装対象コマンド > 6. commandmate auto-yes"
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 5,
+    "nice_to_have": 2,
+    "total": 8
+  }
+}

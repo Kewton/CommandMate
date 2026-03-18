@@ -1,0 +1,154 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "findings": [
+    {
+      "id": "F3-01",
+      "severity": "must_fix",
+      "category": "impact_scope",
+      "title": "tsconfig.cli.json の include 範囲が新コマンドの外部型依存をカバーしない",
+      "description": "tsconfig.cli.json の include は `src/cli/**/*` のみ。新コマンドは `src/types/models.ts` の PromptData 型や `src/config/auto-yes-config.ts` の ALLOWED_DURATIONS を参照する必要がある。既存コードでは `src/cli/commands/start.ts` が `../../lib/security/auth` を相対パスでインポートしており、TypeScript は依存先を自動的にコンパイルするが、`paths` マッピング（`@/*`）は tsconfig.cli.json では空オブジェクトに設定されているため、`@/types/models` のようなパスエイリアスは使用できない。新コマンドが多数の外部モジュールを参照する場合、全て相対パスで書く必要があり、保守性が低下する。tsconfig.cli.json の paths に `@/*` マッピングを追加するか、include に必要なパスを追加することを検討すべき。",
+      "affected_files": [
+        "tsconfig.cli.json",
+        "tsconfig.base.json",
+        "src/types/models.ts",
+        "src/config/auto-yes-config.ts"
+      ],
+      "suggestion": "tsconfig.cli.json の paths に `\"@/*\": [\"./src/*\"]` を追加する。ただし、ビルド出力時のパス解決には tsc-alias 等の追加設定が必要になる可能性がある（tsconfig.server.json が既に tsc-alias を使用しているパターンを参考にする）。あるいは既存パターンに合わせて相対パスを使用するが、その場合 Issue に「外部型は相対パスで参照する」ルールを明記すべき。",
+      "location": "技術的な注意点 / エントリポイント"
+    },
+    {
+      "id": "F3-02",
+      "severity": "must_fix",
+      "category": "impact_scope",
+      "title": "CLI から REST API を呼ぶ HTTP クライアントユーティリティが存在しない",
+      "description": "既存の CLI コマンド（init, start, stop, status）は全てローカルプロセス管理（PID ファイル、daemon 操作）で完結しており、HTTP リクエストを送信するコードは一切存在しない。新コマンド群（ls, send, wait, respond, capture, auto-yes）は全て REST API 呼び出しが必要であり、これは CLI モジュールにとって全く新しいパターンとなる。Issue では HTTP クライアントの実装方針（Node.js 組み込み fetch vs 外部ライブラリ）、共通エラーハンドリング（接続拒否、タイムアウト、認証エラー）、ベース URL 構築ロジックの設計について言及がない。",
+      "affected_files": [
+        "src/cli/utils/",
+        "package.json"
+      ],
+      "suggestion": "Issue に HTTP クライアントユーティリティの設計セクションを追加する。具体的には: (1) Node.js 18+ 組み込み fetch を使用するか外部ライブラリを使用するか明記、(2) `src/cli/utils/api-client.ts` のような共通モジュールを新設し、ベース URL 構築・認証ヘッダー付与・エラーハンドリングを一元化する設計方針を記載、(3) サーバー接続不能時のエラーメッセージ（ECONNREFUSED 等）の統一方針を記載。",
+      "location": "共通仕様 / サーバー接続"
+    },
+    {
+      "id": "F3-03",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "GET /api/worktrees レスポンスに cliToolId（エージェント種別）が含まれるか未確認",
+      "description": "Issue の `commandmate ls` の出力項目に「エージェント種別」が含まれているが、GET /api/worktrees の実際のレスポンスを確認すると、worktree オブジェクトに `cliToolId` フィールドが含まれるかは DB スキーマ（worktrees テーブルの cliToolId カラム）に依存する。現在の API レスポンスは `...worktree` スプレッドで DB の全フィールドを返すため含まれるはずだが、Issue にはこのフィールドのマッピングについて明記がない。実装時に「エージェント種別」がどのフィールドに対応するか曖昧になる可能性がある。",
+      "affected_files": [
+        "src/app/api/worktrees/route.ts",
+        "src/lib/db/worktree-db.ts"
+      ],
+      "suggestion": "Issue の `commandmate ls` セクションに、API レスポンスの `cliToolId` フィールドを「エージェント種別」として表示する旨を明記する。また、sessionStatusByCli を使えば各 CLI ツール毎のセッション状態も取得可能だが、ls コマンドでどこまで表示するかの方針も記載すべき。",
+      "location": "実装対象コマンド / 1. commandmate ls"
+    },
+    {
+      "id": "F3-04",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "wait コマンドの current-output ポーリングがステータス導出ロジックと不整合",
+      "description": "Issue では `commandmate ls` のステータスは `GET /api/worktrees` の `isSessionRunning / isWaitingForResponse / isProcessing` から導出する。一方、`commandmate wait` は `GET /api/worktrees/:id/current-output` をポーリングする。current-output API のレスポンスには `isRunning`, `isComplete`, `isPromptWaiting`, `isGenerating` 等のフィールドがあるが、`isWaitingForResponse` / `isProcessing` は直接含まれない。wait コマンドの完了判定は current-output のどのフィールドを使うのか、特に「idle 状態（セッション停止）」の検出をどうするか（`isRunning: false` を使うのか）について明確にすべき。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/current-output/route.ts"
+      ],
+      "suggestion": "Issue の wait コマンドセクションに、current-output API レスポンスの具体的なフィールドと wait 終了条件のマッピングを記載する。例: `isRunning === false` -> exit 0 (SUCCESS/idle), `isPromptWaiting === true` -> exit 10 (PROMPT_DETECTED), `isGenerating === true` -> 継続ポーリング。",
+      "location": "実装対象コマンド / 3. commandmate wait"
+    },
+    {
+      "id": "F3-05",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "src/cli/index.ts への6コマンド追加によるファイル肥大化",
+      "description": "現在の src/cli/index.ts は117行で6コマンドを定義している。新たに6コマンド（ls, send, wait, respond, capture, auto-yes）を追加すると、特に send と wait はオプションが多く、ファイルサイズが倍増する見込み。既存の issue/docs コマンドは `program.addCommand(createXxxCommand())` パターンを使っており、新コマンドも同パターンで追加すればファイルの肥大化を抑制できるが、Issue ではどちらのパターンを使うか明記されていない。",
+      "affected_files": [
+        "src/cli/index.ts"
+      ],
+      "suggestion": "Issue のエントリポイントセクションに、新コマンドは `program.addCommand()` パターン（issue/docs と同じ）で追加する方針を明記する。各コマンドファイル内で `new Command()` を作成して export する形式を推奨。",
+      "location": "共通仕様 / エントリポイント"
+    },
+    {
+      "id": "F3-06",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "WaitExitCode と既存 ExitCode の統合方針が不明確",
+      "description": "Issue では `WaitExitCode` enum を新設するとあるが、src/cli/types/index.ts の既存 `ExitCode` enum との関係が曖昧。特に WaitExitCode.SUCCESS (0) と ExitCode.SUCCESS (0)、WaitExitCode.ERROR (1) と ExitCode.DEPENDENCY_ERROR (1) が同じ値だが異なる意味を持つ。他の新コマンド（ls, send, respond, capture, auto-yes）はどちらの enum を使うのかも不明。",
+      "affected_files": [
+        "src/cli/types/index.ts"
+      ],
+      "suggestion": "Issue に以下を明記: (1) WaitExitCode は wait コマンド専用、他の新コマンドは既存 ExitCode を使用する。(2) WaitExitCode.ERROR (1) は汎用エラーとして ExitCode.DEPENDENCY_ERROR (1) とは意味的に異なるが、値の衝突は許容する（wait コマンドのコンテキストでのみ解釈される）。(3) 新しい共通エラーコード（例: サーバー接続エラー）が必要な場合は ExitCode enum に追加する。",
+      "location": "実装対象コマンド / 3. commandmate wait / 終了コード"
+    },
+    {
+      "id": "F3-07",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "send コマンドが呼ぶ POST /api/worktrees/:id/send API の副作用が大きい",
+      "description": "CLI の send コマンドは `POST /api/worktrees/:id/send` を呼ぶが、このAPIはメッセージ送信だけでなく、(1) セッション未起動時の自動起動、(2) pending assistant response の保存、(3) orphaned message のクリーンアップ、(4) ポーリング開始、(5) initial branch の保存 など多くの副作用を持つ。CLI からの呼び出しでこれらの副作用が全て適切に動作するか（特にポーリング開始はサーバー側で行われるため問題ないが）、Issue で確認すべき。また、セッション自動起動を CLI 側で制御したい場合（例: セッションが起動していない場合はエラーにしたい場合）のオプションがない。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/send/route.ts"
+      ],
+      "suggestion": "Issue の send コマンドセクションに、API の副作用（特にセッション自動起動）について言及し、CLI から呼ぶ際の期待動作を明記する。セッション未起動時にエラーにするか自動起動するかは現行 API の動作に委ねるが、その旨を明記することで実装者の混乱を防ぐ。",
+      "location": "実装対象コマンド / 2. commandmate send"
+    },
+    {
+      "id": "F3-08",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "テストパターンの不足: 既存 CLI テストは外部プロセス/ファイル操作のモックが中心で HTTP モックパターンがない",
+      "description": "既存の CLI テスト（tests/unit/cli/）を確認すると、daemon.test.ts, pid-manager.test.ts, env-setup.test.ts 等はファイルシステムやプロセス操作のモックが中心。新コマンドのテストには HTTP リクエストのモック（fetch mock）が必要だが、プロジェクト内にそのパターンが確立されていない。vitest の vi.fn() で fetch をモックするか、msw (Mock Service Worker) を導入するかなど、テスト戦略を決める必要がある。",
+      "affected_files": [
+        "tests/unit/cli/"
+      ],
+      "suggestion": "Issue の受け入れ条件「単体テスト（vitest）で主要パスをカバー」に、テスト戦略の方針を追記する。具体的には: (1) global.fetch を vi.fn() でモックする方式を推奨（外部依存不要）、(2) 共通のモックヘルパー（例: tests/helpers/mock-api.ts）を新設して fetch レスポンスを生成する。",
+      "location": "受け入れ条件"
+    },
+    {
+      "id": "F3-09",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "title": "wait コマンドの 3-5 秒ポーリングがサーバーの tmux capture-pane に追加負荷をかける",
+      "description": "wait コマンドは current-output API を 3-5 秒間隔でポーリングする。この API は内部で tmux capture-pane を実行し、detectSessionStatus() で出力を解析する。複数の worktree を同時に wait する場合（`commandmate wait abc123 def456`）、ポーリング頻度が倍増する。さらにブラウザ UI も同じ API を定期的に呼んでいる場合、サーバー負荷が増加する可能性がある。ただし tmux-capture-cache.ts に TTL=2 秒のキャッシュがあるため、影響は限定的。",
+      "affected_files": [
+        "src/lib/tmux/tmux-capture-cache.ts",
+        "src/app/api/worktrees/[id]/current-output/route.ts"
+      ],
+      "suggestion": "Issue の技術的な注意点に「tmux-capture-cache (TTL=2s) により同一 worktree への重複キャプチャは最小化される」旨を記載し、複数 worktree 同時 wait 時のポーリングはシーケンシャルではなく Promise.all で並列実行する方針を追記する。",
+      "location": "技術的な注意点"
+    },
+    {
+      "id": "F3-10",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "title": "package.json の files フィールドに新コマンドファイルのビルド出力が含まれるか確認",
+      "description": "package.json の files フィールドには `dist/` が含まれており、`npm run build:cli` の出力先は tsconfig.cli.json の outDir `./dist` であるため、新コマンドファイルは `dist/cli/commands/` 配下にビルドされ、npm パッケージに含まれる。直接的な問題はないが、新コマンドが外部モジュール（src/types/, src/config/）を相対パスで参照する場合、それらも dist/ 配下に出力される必要がある。",
+      "affected_files": [
+        "package.json",
+        "tsconfig.cli.json"
+      ],
+      "suggestion": "実装時に `npm run build:cli` を実行し、必要な外部型定義ファイル（models.ts, auto-yes-config.ts 等）が dist/ に正しく出力されることを確認するテスト手順を受け入れ条件に追加する。",
+      "location": "受け入れ条件"
+    },
+    {
+      "id": "F3-11",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "title": "認証トークンの設定ファイル読み込み（優先順位3）の実装影響",
+      "description": "Issue の認証トークン取得方法の優先順位3に「commandmate init 時に保存される設定ファイル（.commandmate/config.json 等）からの読み込み」とあるが、現在の init コマンドは .env ファイルの生成のみを行い、.commandmate/config.json の生成は行っていない。この機能を実装するには init コマンドの変更も必要になる可能性がある。Phase 1 では優先順位 1, 2（--token オプションと環境変数）のみ実装し、設定ファイルは Phase 2 以降に延期するのが現実的。",
+      "affected_files": [
+        "src/cli/commands/init.ts",
+        "src/cli/utils/env-setup.ts"
+      ],
+      "suggestion": "Issue の認証トークンセクションで、優先順位3の設定ファイル読み込みを Phase 1 のスコープ内に含めるか明確にする。Phase 1 では `--token` と `CM_AUTH_TOKEN` のみとし、設定ファイルは将来の拡張として注記することを推奨。",
+      "location": "共通仕様 / 認証トークン"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 6,
+    "nice_to_have": 3,
+    "total": 11
+  }
+}

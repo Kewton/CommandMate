@@ -1,0 +1,226 @@
+{
+  "issue_number": 518,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_date": "2026-03-18",
+  "design_doc": "dev-reports/design/issue-518-cli-base-commands-design-policy.md",
+  "overall_risk": "medium",
+  "summary": "Issue #518 introduces 6 new CLI commands and a Bearer token auth extension to middleware.ts. The impact scope is well-contained within the CLI module boundary (src/cli/) with only 2 cross-cutting changes (middleware.ts, auth.ts). Key risks center on middleware regression for browser auth, polling load from the wait command, and DRY violations in type definitions that may drift over time.",
+  "findings": [
+    {
+      "id": "IA3-01",
+      "severity": "must_fix",
+      "category": "middleware_regression",
+      "title": "middleware.ts Bearer token addition may break existing browser auth if conditional branching is incorrect",
+      "description": "The current middleware.ts (lines 110-119) follows a linear flow: check cookie -> if fail, redirect to /login. The design adds Bearer token extraction with a response-type branching (401 JSON for CLI vs redirect for browser). If the implementation checks Bearer BEFORE cookie, a browser request that has both a cookie and an Authorization header (e.g., from a browser extension or fetch call with credentials) could receive a 401 JSON instead of a redirect. The design document specifies checking Authorization header presence to decide the error response format, but does not specify the order of token verification (cookie first vs Bearer first).",
+      "affected_files": ["src/middleware.ts"],
+      "recommendation": "Explicitly specify in the design that cookie verification is attempted FIRST (preserving existing behavior), and Bearer is only checked as a fallback when no valid cookie is present. The error response branching should be: (1) Check cookie -> success -> next(), (2) Check Bearer -> success -> next(), (3) Failure response: if Authorization header present -> 401 JSON, else -> redirect. This matches the current code structure (cookie check at line 111-114, redirect at 117-119) and minimizes regression risk.",
+      "risk_level": "high"
+    },
+    {
+      "id": "IA3-02",
+      "severity": "should_fix",
+      "category": "api_load",
+      "title": "wait command 3-second polling adds sustained load to current-output API",
+      "description": "The wait command polls GET /api/worktrees/:id/current-output every 3 seconds. This endpoint (current-output/route.ts) performs: (1) DB lookup for worktree, (2) DB lookup for session state, (3) tmux capture (10000 lines), (4) status detection with regex pattern matching, (5) auto-yes state lookup. The existing tmux-capture-cache (TTL=2s) helps, but with 3s polling the cache hit rate is approximately 0% (each poll arrives after cache expiry). Multiple CLI instances polling the same worktree will each miss the cache. With Promise.allSettled for multi-worktree wait, N worktrees means N parallel polling streams.",
+      "affected_files": ["src/app/api/worktrees/[id]/current-output/route.ts"],
+      "recommendation": "Consider increasing the polling interval to 5 seconds (matching the tmux-capture-cache TTL=2s would give some overlap with a 4s interval). Alternatively, document a recommended maximum concurrent wait count. For Phase 2, consider a server-sent events (SSE) or WebSocket-based notification to eliminate polling entirely.",
+      "risk_level": "medium"
+    },
+    {
+      "id": "IA3-03",
+      "severity": "should_fix",
+      "category": "build_impact",
+      "title": "tsconfig.cli.json include scope prevents importing server-side types",
+      "description": "tsconfig.cli.json includes only 'src/cli/**/*'. The design creates CLI-side type duplicates (api-responses.ts) to avoid build scope issues, but this creates 6+ duplicated type definitions that can drift from server-side sources. DR2-07 identifies the CLI_TOOL_IDS import problem but the same issue applies to all shared types. The design acknowledges this as a Phase 2 item, but during Phase 1 development, any server-side API change will silently break CLI type assumptions.",
+      "affected_files": ["tsconfig.cli.json", "src/cli/types/api-responses.ts"],
+      "recommendation": "Implement the cross-validation test (DR1-09 pattern) not only for Duration constants but also for the shape of CurrentOutputResponse and WorktreeListResponse. A test file under tests/ (which is outside the CLI build scope but can import both) should verify key fields exist in both CLI and server type definitions. This provides a compile-time safety net during Phase 1.",
+      "risk_level": "medium"
+    },
+    {
+      "id": "IA3-04",
+      "severity": "should_fix",
+      "category": "dependency_impact",
+      "title": "No new npm dependencies confirmed, but safe-regex2 avoidance creates Duration constant duplication",
+      "description": "The design correctly avoids adding new npm packages (uses Node.js built-in fetch). However, the Duration constant duplication (CLI: DURATION_MAP with string keys '1h','3h','8h' vs Server: ALLOWED_DURATIONS as number array [3600000,10800000,28800000]) uses different representations. The CLI's parseDurationToMs() converts strings to milliseconds, while the server's auto-yes-config.ts stores raw millisecond values. The server also has isAllowedDuration() type guard that validates against the number array. If a new duration value is added to one side but not the other, the system will accept the value on one side and reject it on the other.",
+      "affected_files": ["src/cli/config/duration-constants.ts", "src/config/auto-yes-config.ts"],
+      "recommendation": "The DR1-09 cross-validation test is critical here. Ensure the test verifies that the OUTPUT values of parseDurationToMs() for all keys in DURATION_MAP exactly match ALLOWED_DURATIONS from auto-yes-config.ts. Mark this test as must-have rather than nice-to-have.",
+      "risk_level": "medium"
+    },
+    {
+      "id": "IA3-05",
+      "severity": "should_fix",
+      "category": "test_infrastructure",
+      "title": "New mock-api.ts helper may conflict with existing global.fetch assumptions in test suite",
+      "description": "The proposed tests/helpers/mock-api.ts sets global.fetch via vi.fn().mockResolvedValue(). Existing test helpers (logger-mock.ts, prompt-type-guards.ts, symlink-test-fixtures.ts, message-input-test-utils.ts) do not touch global.fetch. However, if any existing or future test file also mocks global.fetch without proper cleanup, tests may interfere with each other. The mock-api.ts helper does not include an afterEach cleanup/restore mechanism.",
+      "affected_files": ["tests/helpers/mock-api.ts"],
+      "recommendation": "Add a restoreFetch() helper or use vi.restoreAllMocks() pattern. Consider wrapping the mock setup in a beforeEach/afterEach pattern that saves and restores the original global.fetch. Document that CLI command tests should call restoreFetch() in afterEach.",
+      "risk_level": "low"
+    },
+    {
+      "id": "IA3-06",
+      "severity": "nice_to_have",
+      "category": "binary_entry_point",
+      "title": "No changes needed to bin/commandmate.js or package.json bin field",
+      "description": "The bin/commandmate.js entry point simply requires dist/cli/index.js. Since the new commands are registered via addCommand() in src/cli/index.ts, no changes to the binary entry point or package.json bin field are needed. The 6 new commands will be available after build:cli without any configuration changes. This is a positive finding - the existing architecture supports extension cleanly.",
+      "affected_files": ["bin/commandmate.js", "package.json"],
+      "recommendation": "No action needed. Verified that the existing entry point mechanism supports the planned changes.",
+      "risk_level": "none"
+    },
+    {
+      "id": "IA3-07",
+      "severity": "nice_to_have",
+      "category": "command_conflict",
+      "title": "No naming conflicts with existing CLI commands",
+      "description": "Existing commands are: init, start, stop, status, issue, docs. New commands are: ls, send, wait, respond, capture, auto-yes. There are no naming collisions. The new commands use the addCommand() factory pattern (like issue/docs) while existing init/start/stop/status use inline registration. Both patterns coexist in index.ts without conflict.",
+      "affected_files": ["src/cli/index.ts"],
+      "recommendation": "No action needed. Consider adding a comment block in index.ts separating the two groups of commands (infrastructure commands vs agent orchestration commands) for readability.",
+      "risk_level": "none"
+    },
+    {
+      "id": "IA3-08",
+      "severity": "should_fix",
+      "category": "concurrent_polling",
+      "title": "Multiple CLI instances polling the same worktree lack coordination",
+      "description": "When multiple CLI processes run 'commandmate wait <id>' for the same worktree, each independently polls current-output every 3 seconds. The tmux-capture-cache (TTL=2s) in tmux-capture-cache.ts uses a singleflight pattern for concurrent requests within the same Node.js process, but CLI requests come from separate processes via HTTP, so each request triggers a fresh cache lookup. With N concurrent CLI watchers, the server handles N requests per 3-second interval for the same worktree. The design's Promise.allSettled section (8-2) addresses multiple worktrees from a single CLI instance, but not multiple CLI instances.",
+      "affected_files": ["src/lib/tmux/tmux-capture-cache.ts", "src/app/api/worktrees/[id]/current-output/route.ts"],
+      "recommendation": "Document the expected usage pattern (typically 1 CLI per worktree). For Phase 2, consider adding an If-None-Match/ETag or Last-Modified header to the current-output response to allow conditional requests, reducing processing for unchanged output.",
+      "risk_level": "low"
+    },
+    {
+      "id": "IA3-09",
+      "severity": "should_fix",
+      "category": "error_propagation",
+      "title": "Error-to-exit-code mapping needs explicit coverage for all HTTP status codes",
+      "description": "The design (Section 6-2) maps ECONNREFUSED to ExitCode.DEPENDENCY_ERROR(1), 401/403 to CONFIG_ERROR(2), 404 and 500 to UNEXPECTED_ERROR(99). However, the handleApiError() function specification does not cover: (a) HTTP 400 (bad request, returned by current-output for invalid worktree ID format), (b) HTTP 429 (rate limiting from the rate limiter in auth.ts), (c) network timeouts (different from ECONNREFUSED). These edge cases could result in unhelpful error messages or incorrect exit codes.",
+      "affected_files": ["src/cli/utils/api-client.ts"],
+      "recommendation": "Extend the handleApiError() specification to handle 400 (input validation error, exit CONFIG_ERROR), 429 (rate limited, exit DEPENDENCY_ERROR with retry message), and fetch timeout/abort errors (exit DEPENDENCY_ERROR). Add test cases for each.",
+      "risk_level": "medium"
+    }
+  ],
+  "impact_matrix": {
+    "modified_files": [
+      {
+        "file": "src/middleware.ts",
+        "change_type": "modify",
+        "impact": "high",
+        "description": "Adding Bearer token auth support and response branching. Affects all authenticated requests."
+      },
+      {
+        "file": "src/cli/index.ts",
+        "change_type": "modify",
+        "impact": "low",
+        "description": "Adding 6 addCommand() registrations. Purely additive, no existing behavior changed."
+      },
+      {
+        "file": "src/cli/types/index.ts",
+        "change_type": "modify",
+        "impact": "low",
+        "description": "Adding WaitExitCode and option interfaces. No existing types modified."
+      },
+      {
+        "file": "src/lib/security/auth.ts",
+        "change_type": "modify",
+        "impact": "low",
+        "description": "Potentially adding Bearer token extraction helper. Existing functions unchanged."
+      }
+    ],
+    "new_files": [
+      "src/cli/commands/ls.ts",
+      "src/cli/commands/send.ts",
+      "src/cli/commands/wait.ts",
+      "src/cli/commands/respond.ts",
+      "src/cli/commands/capture.ts",
+      "src/cli/commands/auto-yes.ts",
+      "src/cli/utils/api-client.ts",
+      "src/cli/utils/output-formatter.ts",
+      "src/cli/config/duration-constants.ts",
+      "src/cli/types/api-responses.ts",
+      "tests/helpers/mock-api.ts",
+      "tests/unit/cli/commands/ls.test.ts",
+      "tests/unit/cli/commands/send.test.ts",
+      "tests/unit/cli/commands/wait.test.ts",
+      "tests/unit/cli/commands/respond.test.ts",
+      "tests/unit/cli/commands/capture.test.ts",
+      "tests/unit/cli/commands/auto-yes.test.ts",
+      "tests/unit/cli/utils/api-client.test.ts",
+      "tests/unit/cli/config/duration-constants.test.ts"
+    ],
+    "indirectly_affected": [
+      {
+        "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+        "reason": "New polling consumer (wait command) adds sustained load"
+      },
+      {
+        "file": "src/app/api/worktrees/route.ts",
+        "reason": "New consumer (ls command) but low-frequency access"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/send/route.ts",
+        "reason": "New consumer (send command)"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/auto-yes/route.ts",
+        "reason": "New consumer (auto-yes command, send --auto-yes)"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "reason": "New consumer (respond command)"
+      },
+      {
+        "file": "src/config/auto-yes-config.ts",
+        "reason": "Duration constants duplicated in CLI - values must stay in sync"
+      },
+      {
+        "file": "src/lib/tmux/tmux-capture-cache.ts",
+        "reason": "Increased cache pressure from CLI polling"
+      }
+    ]
+  },
+  "checklist": {
+    "middleware_bearer_regression": {
+      "status": "warning",
+      "detail": "Cookie-first verification order not explicitly specified in design"
+    },
+    "cli_build_no_breakage": {
+      "status": "pass",
+      "detail": "All new files are within src/cli/ scope, addCommand pattern is purely additive"
+    },
+    "api_load_acceptable": {
+      "status": "warning",
+      "detail": "3s polling interval with 2s cache TTL means near-zero cache hits"
+    },
+    "no_new_dependencies": {
+      "status": "pass",
+      "detail": "Confirmed: uses Node.js built-in fetch, commander (existing), vitest (existing)"
+    },
+    "test_helper_no_conflict": {
+      "status": "warning",
+      "detail": "mock-api.ts lacks cleanup mechanism for global.fetch restoration"
+    },
+    "package_json_no_change": {
+      "status": "pass",
+      "detail": "bin entry point and package.json require no changes"
+    },
+    "no_command_naming_conflict": {
+      "status": "pass",
+      "detail": "ls/send/wait/respond/capture/auto-yes do not conflict with init/start/stop/status/issue/docs"
+    },
+    "concurrent_polling_handled": {
+      "status": "warning",
+      "detail": "Multi-instance polling not coordinated; acceptable for Phase 1 with documentation"
+    },
+    "error_exit_code_coverage": {
+      "status": "warning",
+      "detail": "HTTP 400, 429, and network timeout not covered in handleApiError specification"
+    }
+  },
+  "risk_assessment": {
+    "overall": "medium",
+    "highest_risk_area": "middleware.ts modification - potential browser auth regression",
+    "mitigation": "Specify cookie-first verification order; add integration test for browser login flow after Bearer support",
+    "breaking_change_probability": "low",
+    "rollback_complexity": "low - changes are additive except middleware.ts"
+  }
+}

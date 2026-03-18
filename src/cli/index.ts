@@ -10,6 +10,13 @@ import { stopCommand } from './commands/stop';
 import { statusCommand } from './commands/status';
 import { createIssueCommand } from './commands/issue';
 import { createDocsCommand } from './commands/docs';
+// Issue #518: Agent orchestration commands
+import { createLsCommand } from './commands/ls';
+import { createSendCommand } from './commands/send';
+import { createWaitCommand } from './commands/wait';
+import { createRespondCommand } from './commands/respond';
+import { createCaptureCommand } from './commands/capture';
+import { createAutoYesCommand } from './commands/auto-yes';
 
 // Read version from package.json
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -103,6 +110,15 @@ program
 // Issue #264: issue/docs commands (addCommand pattern for subcommand support)
 program.addCommand(createIssueCommand());
 program.addCommand(createDocsCommand());
+
+// Issue #518: Agent orchestration commands [DR1-08] [IA3-07]
+// These commands enable CLI-based agent control for worktree operations.
+program.addCommand(createLsCommand());
+program.addCommand(createSendCommand());
+program.addCommand(createWaitCommand());
+program.addCommand(createRespondCommand());
+program.addCommand(createCaptureCommand());
+program.addCommand(createAutoYesCommand());
 
 // Issue #264: AI Tool Integration help section
 program.addHelpText('after', `

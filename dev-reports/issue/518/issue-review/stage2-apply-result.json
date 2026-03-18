@@ -1,0 +1,78 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "iteration": 1,
+  "applied_findings": [
+    {
+      "id": "F1-01",
+      "severity": "must_fix",
+      "title": "ls コマンドのステータス値が実装と不一致",
+      "action": "ステータス値を idle/ready/running/waiting に修正。GET /api/worktrees のboolean値（isSessionRunning/isWaitingForResponse/isProcessing）からの導出ロジックをテーブル形式で明記。"
+    },
+    {
+      "id": "F1-02",
+      "severity": "must_fix",
+      "title": "wait コマンド exit 2 時の promptData 形式が実装と不一致",
+      "action": "exit 10（変更後コード）時のJSON形式を PromptData 型に準拠。promptType → type に修正。YesNoPromptData と MultipleChoicePromptData の両方の例を記載。options をオブジェクト配列形式（number/label/isDefault/requiresTextInput）に修正。status フィールドを追加。"
+    },
+    {
+      "id": "F1-03",
+      "severity": "must_fix",
+      "title": "Auto-Yes の duration 形式が API と不一致",
+      "action": "--duration オプションの説明に、指定可能な値が 1h/3h/8h の3つのみであること、CLI側で人間可読文字列からミリ秒への変換を行うこと、ALLOWED_DURATIONS 制約に合致しない値はバリデーションエラーとすることを明記。"
+    },
+    {
+      "id": "F1-04",
+      "severity": "should_fix",
+      "title": "ExitCode enum との衝突",
+      "action": "wait コマンドの終了コードを既存 ExitCode enum と衝突しない値域に変更。プロンプト検出を exit 2 → exit 10 に変更。WaitExitCode enum の新設方針を明記。既存 ExitCode enum の値を参考として記載。"
+    },
+    {
+      "id": "F1-05",
+      "severity": "should_fix",
+      "title": "wait コマンドの exit 3（エラー検出）の実装仕様が不足",
+      "action": "exit 3（LLM/ネットワークエラー検出）を Phase 1 スコープ外とし、Phase 2 以降で具体的なマッチパターンを定義した上で実装する旨を注記として追加。終了コードテーブルから exit 3 行を削除。"
+    },
+    {
+      "id": "F1-06",
+      "severity": "should_fix",
+      "title": "認証トークンの扱いが未記載",
+      "action": "共通仕様に「認証トークン」セクションを新設。トークン取得の優先順位（--token > CM_AUTH_TOKEN > 設定ファイル）、送信方法（Authorization: Bearer ヘッダー）、認証エラー時のメッセージを明記。受け入れ条件にも認証テスト項目を追加。"
+    },
+    {
+      "id": "F1-07",
+      "severity": "should_fix",
+      "title": "respond ルートと prompt-response ルートの二重存在が未整理",
+      "action": "respond コマンドの内部実装に、prompt-response APIを使用する理由（messageId不要で軽量、CLIからのステートレスな利用に適している）を引用ブロックで追記。"
+    },
+    {
+      "id": "F1-08",
+      "severity": "should_fix",
+      "title": "ls コマンドの --branch オプションの実装根拠が不明",
+      "action": "--branch オプションの実装方式として「CLI側で全worktreeを取得後、ブランチ名で前方一致フィルタリング」を明記。API側にブランチフィルターが存在しない旨も注記。"
+    },
+    {
+      "id": "F1-09",
+      "severity": "should_fix",
+      "title": "ls コマンドのステータス取得で N+1 API 呼び出しが発生する",
+      "action": "内部実装を GET /api/worktrees のみに修正。current-output の個別呼び出しは不要であることを明記。detectWorktreeSessionStatus() が既にレスポンスに含まれている旨を説明。"
+    },
+    {
+      "id": "F1-10",
+      "severity": "nice_to_have",
+      "title": "wait --on-prompt human の受け入れテスト方法が不明",
+      "action": "受け入れ条件の該当項目に「手動確認シナリオ。モックAPIを使った自動テストも併せて実施する」を追記。"
+    },
+    {
+      "id": "F1-11",
+      "severity": "nice_to_have",
+      "title": "エントリポイント記述に小さな誤り",
+      "action": "dist/cli/index.ts → dist/cli/index.js に修正。"
+    }
+  ],
+  "skipped_findings": [],
+  "summary": {
+    "applied": 11,
+    "skipped": 0
+  }
+}

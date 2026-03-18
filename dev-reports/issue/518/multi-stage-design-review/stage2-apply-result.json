@@ -1,0 +1,102 @@
+{
+  "issue_number": 518,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "DR2-01",
+        "item": "WaitExitCode.ERROR=1 が ExitCode.DEPENDENCY_ERROR=1 と衝突 - ERROR を削除",
+        "section_updated": "Section 5-1",
+        "status": "reflected"
+      },
+      {
+        "id": "DR2-02",
+        "item": "auto-yes API の duration: parseDurationToMs() 変換手順を API 使用例に追加",
+        "section_updated": "Section 4-2, 6-1",
+        "status": "reflected"
+      },
+      {
+        "id": "DR2-03",
+        "item": "CurrentOutputResponse 型にサーバー実態の不足フィールド6件 + autoYes 完全型を追加",
+        "section_updated": "Section 5-2",
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "DR2-04",
+        "item": "middleware.ts Bearer 対応の実装順序注記を追加",
+        "section_updated": "Section 2-3",
+        "status": "reflected"
+      },
+      {
+        "id": "DR2-05",
+        "item": "send API リクエストキーを message から content に修正、レスポンス型を ChatMessage に更新",
+        "section_updated": "Section 4-2",
+        "status": "reflected"
+      },
+      {
+        "id": "DR2-06",
+        "item": "prompt-response API のリクエスト/レスポンス形状を修正、PromptResponseResult 型を追加",
+        "section_updated": "Section 4-2, 5-2",
+        "status": "reflected"
+      },
+      {
+        "id": "DR2-07",
+        "item": "isCliToolType() の CLI ビルドスコープ外インポート問題に対する2つの選択肢を明記",
+        "section_updated": "Section 7-2",
+        "status": "reflected"
+      },
+      {
+        "id": "DR2-08",
+        "item": "WorktreeItem.branch を WorktreeItem.name に修正（サーバー側 Worktree 型に合わせる）",
+        "section_updated": "Section 5-2",
+        "status": "reflected"
+      },
+      {
+        "id": "DR2-09",
+        "item": "WorktreeItem に sessionStatusByCli フィールドを追加",
+        "section_updated": "Section 5-2",
+        "status": "reflected"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "DR2-10",
+        "item": "ファクトリパターンと既存インラインパターンの対比を明確化",
+        "section_updated": "Section 4-1",
+        "status": "reflected"
+      },
+      {
+        "id": "DR2-11",
+        "item": "send API のセッション自動起動の副作用を明記",
+        "section_updated": "Section 6-1",
+        "status": "reflected"
+      },
+      {
+        "id": "DR2-12",
+        "item": "CLI オプション名と API ボディキーの対応表を追加",
+        "section_updated": "Section 6-1",
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-518-cli-base-commands-design-policy.md",
+  "sections_updated": [
+    "Section 2-3 (前提実装: 実装順序注記追加)",
+    "Section 4-1 (Factory パターン: 既存パターン対比追加)",
+    "Section 4-2 (API Client: 使用例を実サーバー仕様に修正)",
+    "Section 5-1 (WaitExitCode: ERROR 削除)",
+    "Section 5-2 (WorktreeItem: branch->name, sessionStatusByCli追加; CurrentOutputResponse: 6フィールド追加; PromptResponseResult 新規追加)",
+    "Section 6-1 (send自動起動注記、CLI-API キー対応表追加)",
+    "Section 7-2 (agent バリデーション: インポート方法の選択肢明記)",
+    "Section 13 (レビュー指摘事項サマリー: Stage 2 追加)",
+    "Section 14 (実装チェックリスト: DR2系項目追加)",
+    "Section 15 (レビュー履歴: Stage 2 追加)"
+  ],
+  "timestamp": "2026-03-18T00:00:00Z"
+}

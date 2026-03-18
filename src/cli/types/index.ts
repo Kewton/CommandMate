@@ -163,6 +163,66 @@ export interface EnvSetupOptions {
 }
 
 /**
+ * Wait command exit codes
+ * Issue #518: [DR2-01] ERROR: 1 removed (conflicts with ExitCode.DEPENDENCY_ERROR).
+ * Infrastructure errors use ExitCode; wait-specific results use WaitExitCode.
+ */
+export const WaitExitCode = {
+  SUCCESS: 0,
+  PROMPT_DETECTED: 10,
+  TIMEOUT: 124,
+} as const;
+export type WaitExitCode = typeof WaitExitCode[keyof typeof WaitExitCode];
+
+/** ls command options [Issue #518] */
+export interface LsOptions {
+  json?: boolean;
+  quiet?: boolean;
+  branch?: string;
+  token?: string;
+}
+
+/** send command options [Issue #518] */
+export interface SendOptions {
+  agent?: string;
+  autoYes?: boolean;
+  duration?: string;
+  stopPattern?: string;
+  token?: string;
+}
+
+/** wait command options [Issue #518] */
+export interface WaitOptions {
+  timeout?: number;
+  onPrompt?: 'agent' | 'human';
+  stallTimeout?: number;
+  token?: string;
+}
+
+/** respond command options [Issue #518] */
+export interface RespondOptions {
+  agent?: string;
+  token?: string;
+}
+
+/** capture command options [Issue #518] */
+export interface CaptureOptions {
+  json?: boolean;
+  agent?: string;
+  token?: string;
+}
+
+/** auto-yes command options [Issue #518] */
+export interface AutoYesOptions {
+  enable?: boolean;
+  disable?: boolean;
+  duration?: string;
+  stopPattern?: string;
+  agent?: string;
+  token?: string;
+}
+
+/**
  * Validation result
  */
 export interface ValidationResult {

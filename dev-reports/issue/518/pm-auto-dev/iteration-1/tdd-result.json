@@ -1,0 +1,60 @@
+{
+  "status": "success",
+  "tasks_completed": [
+    "Task 0.1: middleware.ts Bearer token auth support (Cookie-first, Bearer fallback, 401 JSON for CLI, /login redirect for browser, IP logging)",
+    "Task 1.1: CLI types (WaitExitCode, 6 Options interfaces, api-responses.ts with Mirrors comments)",
+    "Task 1.2: Duration constants (DURATION_MAP, ALLOWED_DURATIONS, parseDurationToMs)",
+    "Task 1.3: CLI_TOOL_IDS (Approach B: duplicate with cross-validation test)",
+    "Task 1.4: fetch mock helper (mockFetchResponse, mockFetchSequence, mockFetchError, restoreFetch)",
+    "Task 1.5: ApiClient (resolveAuthToken, handleApiError, get/post, SEC4-01 token warning, SEC4-02 HTTP warning, SEC4-04 ID validation)",
+    "Task 1.6: ApiClient tests (28 tests covering all error mappings, token resolution, HTTP warnings)",
+    "Task 2.1: ls command + tests (table/json/quiet output, --branch filter, status derivation)",
+    "Task 2.2: send command + tests (content key, --agent cliToolId, --auto-yes, --stop-pattern validation)",
+    "Task 2.3: wait command + tests (polling, exit 0/10/124, prompt JSON output, --on-prompt, Promise.allSettled)",
+    "Task 2.4: respond command + tests (prompt-response API, --agent as cliTool, failure reason handling)",
+    "Task 2.5: capture command + tests (plain text/JSON output, fullOutput exclusion, --agent query param)",
+    "Task 2.6: auto-yes command + tests (--enable/--disable, --duration ms conversion, --stop-pattern, --agent)",
+    "Task 3.1: Command registration in index.ts (6 addCommand() calls with comment separation)",
+    "Task 3.2: Cross-validation tests (duration constants, CLI_TOOL_IDS) + duration-constants tests"
+  ],
+  "tasks_failed": [],
+  "test_results": {
+    "passed": 465,
+    "failed": 0,
+    "skipped": 1,
+    "total": 466
+  },
+  "type_check": "pass",
+  "lint": "pass",
+  "build": "pass",
+  "files_created": [
+    "src/cli/types/api-responses.ts",
+    "src/cli/config/duration-constants.ts",
+    "src/cli/config/cli-tool-ids.ts",
+    "src/cli/utils/api-client.ts",
+    "src/cli/commands/ls.ts",
+    "src/cli/commands/send.ts",
+    "src/cli/commands/wait.ts",
+    "src/cli/commands/respond.ts",
+    "src/cli/commands/capture.ts",
+    "src/cli/commands/auto-yes.ts",
+    "tests/helpers/mock-api.ts",
+    "tests/unit/middleware-bearer.test.ts",
+    "tests/unit/cli/utils/api-client.test.ts",
+    "tests/unit/cli/commands/ls.test.ts",
+    "tests/unit/cli/commands/send.test.ts",
+    "tests/unit/cli/commands/wait.test.ts",
+    "tests/unit/cli/commands/respond.test.ts",
+    "tests/unit/cli/commands/capture.test.ts",
+    "tests/unit/cli/commands/auto-yes.test.ts",
+    "tests/unit/cli/config/duration-constants.test.ts",
+    "tests/unit/cli/config/cross-validation.test.ts"
+  ],
+  "files_modified": [
+    "src/middleware.ts",
+    "src/cli/types/index.ts",
+    "src/cli/index.ts"
+  ],
+  "coverage_note": "Coverage measurement requires full test suite run; all new code has tests.",
+  "message": "TDD implementation complete. All 15 tasks implemented: middleware Bearer auth, 6 CLI foundation modules, 6 commands, command registration, and cross-validation tests. 465 tests passing, 0 lint errors, 0 type errors in new code, CLI build successful."
+}

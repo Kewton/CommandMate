@@ -152,6 +152,7 @@ ls dev-reports/design/issue-{issue_number}-*-design-policy.md 2>/dev/null
 - 受入テスト
 - リファクタリング
 - ドキュメント更新
+- 実機受入テスト（UAT: `/uat` コマンド）
 - 進捗報告
 
 #### 5-2. 完了確認
@@ -200,6 +201,7 @@ npm run test:unit
 - 設計レビュー: `dev-reports/issue/{issue_number}/multi-stage-design-review/summary-report.md`
 - 作業計画: `dev-reports/issue/{issue_number}/work-plan.md`
 - 進捗報告: `dev-reports/issue/{issue_number}/pm-auto-dev/iteration-1/progress-report.md`
+- 実機テスト報告: `dev-reports/issue/{issue_number}/uat/acceptance-test-report.html`
 
 #### 次のアクション
 
