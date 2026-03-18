@@ -417,5 +417,6 @@ Codexタブ選択時に表示される専用コマンドです。
 ## 関連ドキュメント
 
 - [クイックスタートガイド](./quick-start.md) - 5分で始める開発フロー
+- [CLI操作ガイド](./cli-operations-guide.md) - CLI操作コマンド（ls, send, wait, capture等）の詳細
 - [リリースガイド](../release-guide.md) - リリース手順とスキル詳細
 - [CLAUDE.md](../../CLAUDE.md) - プロジェクトガイドライン

@@ -27,8 +27,8 @@ export const MAX_OUTPUT_SIZE = 1 * 1024 * 1024;
 /** Maximum output size stored in DB (100KB) */
 export const MAX_STORED_OUTPUT_SIZE = 100 * 1024;
 
-/** Execution timeout in milliseconds (5 minutes) */
-export const EXECUTION_TIMEOUT_MS = 5 * 60 * 1000;
+/** Execution timeout in milliseconds (15 minutes) */
+export const EXECUTION_TIMEOUT_MS = 15 * 60 * 1000;
 
 /** Maximum message length sent to claude -p */
 export const MAX_MESSAGE_LENGTH = 10000;

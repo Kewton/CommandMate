@@ -16,6 +16,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { AGENT_OPERATIONS_GUIDE, AGENT_OPERATIONS_SAMPLES } from '../docs/agent-operations';
 
 /**
  * Whitelist of available documentation sections.
@@ -32,6 +33,15 @@ const SECTION_MAP: Record<string, string> = {
   'cmate-schedules': 'docs/user-guide/cmate-schedules-guide.md',
   'architecture': 'docs/architecture.md',
   'readme': 'README.md',
+};
+
+/**
+ * Embedded documentation sections (available without docs/ directory).
+ * These are bundled in the CLI binary for npm package distribution.
+ */
+const EMBEDDED_SECTIONS: Record<string, string> = {
+  'agent-operations': AGENT_OPERATIONS_GUIDE,
+  'agent-operations-samples': AGENT_OPERATIONS_SAMPLES,
 };
 
 /**
@@ -67,26 +77,32 @@ function resolvePackageRoot(): string {
  * Get list of available documentation section names.
  */
 export function getAvailableSections(): string[] {
-  return Object.keys(SECTION_MAP);
+  return [...Object.keys(SECTION_MAP), ...Object.keys(EMBEDDED_SECTIONS)];
 }
 
 /**
- * Check if a section name is valid (exists in the whitelist).
+ * Check if a section name is valid (exists in the whitelist or embedded).
  */
 export function isValidSection(section: string): boolean {
-  return section in SECTION_MAP;
+  return section in SECTION_MAP || section in EMBEDDED_SECTIONS;
 }
 
 /**
  * Read the content of a documentation section.
+ * Checks embedded sections first (always available), then file-based sections.
  *
- * @param section - Section name (must be in SECTION_MAP whitelist)
+ * @param section - Section name (must be in SECTION_MAP or EMBEDDED_SECTIONS)
  * @throws Error if section is invalid or file cannot be read
  */
 export function readSection(section: string): string {
   if (!isValidSection(section)) {
     throw new Error(`Invalid section: ${section}`);
   }
+  // Embedded sections (bundled in CLI binary)
+  if (section in EMBEDDED_SECTIONS) {
+    return EMBEDDED_SECTIONS[section];
+  }
+  // File-based sections
   const packageRoot = resolvePackageRoot();
   const filePath = path.join(packageRoot, SECTION_MAP[section]);
   return fs.readFileSync(filePath, 'utf-8');
@@ -108,6 +124,7 @@ export function searchDocs(query: string): Array<{ section: string; matches: str
   const packageRoot = resolvePackageRoot();
   const lowerQuery = query.toLowerCase();
 
+  // Search file-based sections
   for (const [section, relativePath] of Object.entries(SECTION_MAP)) {
     const filePath = path.join(packageRoot, relativePath);
     try {
@@ -121,6 +138,17 @@ export function searchDocs(query: string): Array<{ section: string; matches: str
       }
     } catch {
       // File does not exist - skip
+    }
+  }
+
+  // Search embedded sections
+  for (const [section, content] of Object.entries(EMBEDDED_SECTIONS)) {
+    const lines = content.split('\n');
+    const matches = lines.filter(line =>
+      line.toLowerCase().includes(lowerQuery)
+    );
+    if (matches.length > 0) {
+      results.push({ section, matches });
     }
   }
 

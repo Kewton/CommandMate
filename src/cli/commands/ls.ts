@@ -25,7 +25,7 @@ function deriveStatus(wt: WorktreeItem): string {
 function formatTable(worktrees: WorktreeItem[]): string {
   if (worktrees.length === 0) return 'No worktrees found.';
 
-  const headers = ['ID', 'NAME', 'STATUS', 'AGENT'];
+  const headers = ['ID', 'NAME', 'STATUS', 'DEFAULT'];
   const rows = worktrees.map(wt => [
     wt.id,
     wt.name,

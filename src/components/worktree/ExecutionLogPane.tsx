@@ -66,6 +66,22 @@ function formatTimestamp(ts: number): string {
   return new Date(ts).toLocaleString();
 }
 
+/** Format duration between two timestamps in human-readable form */
+function formatDuration(startedAt: number, completedAt: number | null): string | null {
+  if (completedAt === null) return null;
+  const durationMs = completedAt - startedAt;
+  if (durationMs < 0) return null;
+
+  const totalSeconds = Math.floor(durationMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
+}
+
 /** Map execution log status to Tailwind CSS color classes */
 function getStatusColor(status: ExecutionLogStatus): string {
   switch (status) {
@@ -229,6 +245,9 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                     {formatTimestamp(log.started_at)}
+                    {formatDuration(log.started_at, log.completed_at) && (
+                      <span className="ml-2">({formatDuration(log.started_at, log.completed_at)})</span>
+                    )}
                     {log.exit_code !== null && <span className="ml-2">{t('exitCode')}: {log.exit_code}</span>}
                   </div>
                 </button>
