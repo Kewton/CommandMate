@@ -9,7 +9,7 @@
  */
 
 import { stopPolling as stopResponsePolling } from './polling/response-poller';
-import { stopAutoYesPolling, deleteAutoYesState } from './polling/auto-yes-manager';
+import { stopAutoYesPollingByWorktree, deleteAutoYesStateByWorktree } from './polling/auto-yes-manager';
 import { stopScheduleForWorktree } from './schedule-manager';
 import { clearAllCache } from './tmux/tmux-capture-cache';
 import { CLI_TOOL_IDS, type CLIToolType } from './cli-tools/types';
@@ -109,10 +109,10 @@ export async function cleanupWorktreeSessions(
     }
   }
 
-  // 2. Stop auto-yes-poller (Issue #138)
-  // Order: stopAutoYesPolling -> deleteAutoYesState -> stopScheduleForWorktree (Issue #404)
+  // 2. Stop auto-yes-poller for all agents (Issue #138, #525: byWorktree helper)
+  // Order: stopAutoYesPollingByWorktree -> deleteAutoYesStateByWorktree -> stopScheduleForWorktree (Issue #404)
   try {
-    stopAutoYesPolling(worktreeId);
+    stopAutoYesPollingByWorktree(worktreeId);
     result.pollersStopped.push('auto-yes-poller');
   } catch (error) {
     const errorMsg = `auto-yes-poller: ${getErrorMessage(error)}`;
@@ -120,9 +120,9 @@ export async function cleanupWorktreeSessions(
     logger.warn('logprefix-failed-to-stop-auto-yes-poller', { error: error instanceof Error ? error.message : String(error) });
   }
 
-  // 3. Delete auto-yes state (Issue #404: prevent memory leak)
+  // 3. Delete auto-yes state for all agents (Issue #404, #525: byWorktree helper)
   try {
-    deleteAutoYesState(worktreeId);
+    deleteAutoYesStateByWorktree(worktreeId);
     result.pollersStopped.push('auto-yes-state');
   } catch (error) {
     const errorMsg = `auto-yes-state: ${getErrorMessage(error)}`;

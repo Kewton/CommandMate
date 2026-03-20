@@ -51,6 +51,7 @@ vi.mock('@/lib/cli-tools/opencode', () => ({
 
 vi.mock('@/lib/polling/auto-yes-manager', () => ({
   getLastServerResponseTimestamp: vi.fn().mockReturnValue(null),
+  buildCompositeKey: vi.fn().mockImplementation((worktreeId: string, cliToolId: string) => `${worktreeId}:${cliToolId}`),
 }));
 
 import { detectWorktreeSessionStatus } from '@/lib/session/worktree-status-helper';

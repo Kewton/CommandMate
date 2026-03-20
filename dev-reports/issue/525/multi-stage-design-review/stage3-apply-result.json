@@ -1,0 +1,82 @@
+{
+  "issue_number": 525,
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘事項対応",
+  "status": "completed",
+  "target_doc": "dev-reports/design/issue-525-auto-yes-per-agent-design-policy.md",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "IA-MF-001",
+        "title": "incrementErrorCount内のdisableAutoYes/stopAutoYesPollingのcompositeKey未対応",
+        "action": "Section 4-2 に incrementErrorCount の変更前後コード例、compositeKey分解パターン、防御的nullチェックの注意事項を追加。実装チェックリストに4項目追加。実装順序Phase 2にステップ2-4として追加。",
+        "status": "applied"
+      },
+      {
+        "id": "IA-MF-002",
+        "title": "auto-yes-poller.ts内部関数群のキー変更の網羅的記述不足",
+        "action": "Section 4-2 に内部関数分類表（10関数）と設計原則（tmux操作要否による分類基準）を追加。実装チェックリストに7項目追加。実装順序Phase 2にステップ2-3として追加。",
+        "status": "applied"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IA-SF-001",
+        "title": "current-output/route.tsのgetAutoYesState呼び出しにcliToolId未記載",
+        "action": "Section 4-3 current-output コード例に [IA-SF-001] コメントを追加し、getAutoYesState の2引数必須を明示。実装チェックリストに1項目追加。",
+        "status": "applied"
+      },
+      {
+        "id": "IA-SF-002",
+        "title": "auto-yes/route.ts GET のcliToolId対応に伴うフロントエンド影響未記載",
+        "action": "Section 4-3 に [IA-SF-002] フロントエンド影響サブセクションを新設。useAutoYes.ts のGETリクエストURL変更と影響コンポーネント表を追加。実装チェックリストに2項目追加。",
+        "status": "applied"
+      },
+      {
+        "id": "IA-SF-003",
+        "title": "CLI sendコマンドのauto-yes連携における影響未記載",
+        "action": "Section 6 後方互換性表に send --auto-yes の互換性確認行を追加。実装チェックリストに1項目追加。",
+        "status": "applied"
+      },
+      {
+        "id": "IA-SF-004",
+        "title": "テスト戦略でauto-yes-manager.test.tsの更新が未記載",
+        "action": "Section 10 既存テスト更新リストに tests/unit/lib/auto-yes-manager.test.ts を追加（影響を受けるテスト関数名を注記）。実装チェックリストに1項目追加。実装順序Phase 2のステップ2-7に反映。",
+        "status": "applied"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IA-C-001",
+        "title": "非アクティブタブのauto-yes状態の視覚的フィードバック",
+        "action": "Stage 3 Consider項目詳細として記録。実装チェックリストのConsider対応に追加。",
+        "status": "recorded"
+      },
+      {
+        "id": "IA-C-002",
+        "title": "stopAllAutoYesPollingのcompositeKey対応（ログ出力）",
+        "action": "Stage 3 Consider項目詳細として記録。実装チェックリストのConsider対応に追加。",
+        "status": "recorded"
+      },
+      {
+        "id": "IA-C-003",
+        "title": "getActivePollerCount()のセマンティクス変更",
+        "action": "Stage 3 Consider項目詳細として記録。実装チェックリストのConsider対応に追加。",
+        "status": "recorded"
+      }
+    ]
+  },
+  "changes_summary": {
+    "sections_modified": [
+      "Section 4-2 (auto-yes-poller.ts): 内部関数群のcompositeKey対応方針表、incrementErrorCountの変更前後コード例を追加",
+      "Section 4-3 (API設計): GET API cliToolIdのフロントエンド影響サブセクション追加、current-output getAutoYesStateコメント追記",
+      "Section 6 (後方互換性): send --auto-yes の互換性確認行を追加",
+      "Section 10 (テスト戦略): auto-yes-manager.test.tsを既存テスト更新リストに追加",
+      "Section 11 (実装順序): Phase 2にステップ2-3, 2-4を追加、ステップ番号を再採番",
+      "Section 12 (レビュー履歴): Stage 3行を追加",
+      "Section 13 (レビュー指摘事項サマリー): Stage 3サマリー表とConsider項目詳細を追加",
+      "Section 14 (実装チェックリスト): Stage 3 Must Fix 11項目、Should Fix 5項目、Consider 3項目を追加"
+    ]
+  },
+  "timestamp": "2026-03-20T13:00:00Z"
+}

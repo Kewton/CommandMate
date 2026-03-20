@@ -1,0 +1,7 @@
+{
+  "issue_number": 525,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "design_doc_path": "dev-reports/design/issue-525-auto-yes-per-agent-design-policy.md"
+}

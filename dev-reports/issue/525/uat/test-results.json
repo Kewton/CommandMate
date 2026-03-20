@@ -1,0 +1,37 @@
+{
+  "issue_number": 525,
+  "test_date": "2026-03-20",
+  "environment": {
+    "port": 3010,
+    "branch": "feature/525-worktree",
+    "worktree_id": "myswiftagent-develop"
+  },
+  "results": [
+    {"id": "TC-001", "title": "POST auto-yes enable with cliToolId=claude", "status": "pass", "exit_code": 0},
+    {"id": "TC-002", "title": "Enable multiple agents simultaneously", "status": "pass", "exit_code": 0},
+    {"id": "TC-003", "title": "GET auto-yes with cliToolId filter", "status": "pass", "exit_code": 0},
+    {"id": "TC-004", "title": "GET auto-yes all agents map", "status": "pass", "exit_code": 0},
+    {"id": "TC-005", "title": "Disable claude only, codex remains", "status": "pass", "exit_code": 0},
+    {"id": "TC-006", "title": "Invalid cliToolId returns 400", "status": "pass", "exit_code": 0},
+    {"id": "TC-007", "title": "Default cliToolId is claude", "status": "pass", "exit_code": 0},
+    {"id": "TC-008", "title": "current-output per-agent autoYes", "status": "pass", "exit_code": 0, "evidence_note": "autoYes field present in running session response; minimal response for non-running sessions is expected behavior"},
+    {"id": "TC-009", "title": "Disable all agents without cliToolId", "status": "pass", "exit_code": 0, "evidence_note": "Fixed during UAT: disable without cliToolId now disables all agents"},
+    {"id": "TC-010", "title": "Individual stopPattern per agent", "status": "pass", "exit_code": 0},
+    {"id": "TC-011", "title": "Invalid worktreeId returns 400", "status": "pass", "exit_code": 0},
+    {"id": "TC-012", "title": "Static analysis (tsc + lint)", "status": "pass", "exit_code": 0}
+  ],
+  "summary": {
+    "total": 12,
+    "passed": 12,
+    "failed": 0,
+    "pass_rate": "100%"
+  },
+  "fixes_during_uat": [
+    {
+      "test_id": "TC-009",
+      "issue": "POST disable without cliToolId only disabled claude (default), codex remained enabled",
+      "fix": "Modified auto-yes/route.ts to disable all agents when cliToolId is not specified in disable request",
+      "file": "src/app/api/worktrees/[id]/auto-yes/route.ts"
+    }
+  ]
+}

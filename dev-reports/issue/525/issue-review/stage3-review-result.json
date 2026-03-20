@@ -1,0 +1,128 @@
+{
+  "issue_number": 525,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "review_date": "2026-03-20",
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "worktree-status-helper.ts が影響範囲に記載されていない。getLastServerResponseTimestamp(worktreeId)を呼び出しており（L93）、ポーラーのキーが複合キー化されると、worktreeId単体では正しいタイムスタンプを取得できなくなる。同一worktreeで複数エージェントのポーラーが稼働する場合、どのエージェントのタイムスタンプを使うかの設計が必要。",
+        "location": "## 影響範囲 > 変更対象ファイル",
+        "recommendation": "src/lib/session/worktree-status-helper.ts を影響範囲の変更対象に追加。detectWorktreeSessionStatus()内でcliToolId毎にgetLastServerResponseTimestamp()を呼び出す設計に変更するか、worktreeId指定で全エージェント中の最新タイムスタンプを返すヘルパーを追加する。",
+        "evidence": "src/lib/session/worktree-status-helper.ts L21: import { getLastServerResponseTimestamp } from '@/lib/polling/auto-yes-manager'; L93: const lastServerResponseTs = getLastServerResponseTimestamp(worktreeId); これはCLI_TOOL_IDS毎のループ内で呼ばれているが、引数はworktreeIdのみ。"
+      },
+      {
+        "id": "MF-2",
+        "category": "影響ファイル",
+        "issue": "current-output APIのisPollerActive(params.id)とgetLastServerResponseTimestamp(params.id)もworktreeId単体で呼び出しており、複合キー化後に正しく動作しない。Issueの実装タスクでは「autoYesレスポンスのエージェント毎対応」のみ記載されているが、serverPollerActiveとlastServerResponseTimestampもエージェント毎に返す必要がある。",
+        "location": "## 実装タスク > バックエンド > current-output API",
+        "recommendation": "current-output/route.ts の実装タスクを拡充し、(1) isPollerActive()をcliToolId指定で呼び出す、(2) getLastServerResponseTimestamp()をcliToolId指定で呼び出す、(3) serverPollerActiveとlastServerResponseTimestampをエージェント毎の値として返却する、の3点を明記。",
+        "evidence": "src/app/api/worktrees/[id]/current-output/route.ts L87: getLastServerResponseTimestamp(params.id) - worktreeIdのみ。L149: isPollerActive(params.id) - worktreeIdのみ。これらは既にcliToolIdクエリパラメータで特定エージェントのコンテキストで呼ばれているため、複合キーに対応するのが自然。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "破壊的変更",
+        "issue": "session-cleanup.tsのcleanupWorktreeSessions()がstopAutoYesPolling(worktreeId)とdeleteAutoYesState(worktreeId)を1回ずつ呼んでいるが、複合キー化後は同一worktreeIdに対して複数のエントリ（worktreeId:claude, worktreeId:codex等）が存在する。現在のコードでは全エージェント分のクリーンアップが行われない。",
+        "location": "## 影響範囲 > 変更対象ファイル > session-cleanup.ts",
+        "recommendation": "session-cleanup.tsの実装タスクに具体的な変更内容を記載: (1) stopAutoYesPolling()を全エージェント分呼び出すか、worktreeIdプレフィックスで一括停止するヘルパーを使用、(2) deleteAutoYesState()も同様。もしくはstopAutoYesPollingByWorktree(worktreeId)のような新APIの追加を検討。",
+        "evidence": "src/lib/session-cleanup.ts L114-121: stopAutoYesPolling(worktreeId) - 1回のみ呼出。L124-131: deleteAutoYesState(worktreeId) - 1回のみ呼出。複合キー化後はworktreeIdだけではMapから正しいエントリを特定できない。"
+      },
+      {
+        "id": "SF-2",
+        "category": "破壊的変更",
+        "issue": "resource-cleanup.tsのcleanupOrphanedMapEntries()がgetAutoYesStateWorktreeIds()とgetAutoYesPollerWorktreeIds()の返り値をDBのworktreeIdと比較して孤立エントリを削除している。複合キー化後はこれらの関数が複合キー（worktreeId:cliToolId）を返すため、DBのworktreeIdとの単純比較が動作しない。extractWorktreeId()ヘルパーの使用が必須だが、実装タスクでその具体的な使用箇所が不明確。",
+        "location": "## 実装タスク > バックエンド > resource-cleanup.ts",
+        "recommendation": "resource-cleanup.tsの実装タスクに具体的な変更を明記: (1) getAutoYesStateWorktreeIds()の返り値から複合キーを受け取り、extractWorktreeId()で分解してDBのworktreeIdと比較する、(2) deleteAutoYesState()に複合キーを渡す、(3) stopAutoYesPolling()に複合キーを渡す。",
+        "evidence": "src/lib/resource-cleanup.ts L229-235: autoYesStateIds(=getAutoYesStateWorktreeIds())をvalidWorktreeIds.has(worktreeId)でチェック。L238-243: autoYesPollerIdsも同様。複合キー化後はvalidWorktreeIds.has('worktreeId:claude')がfalseになり、有効なエントリが孤立エントリとして誤削除される。"
+      },
+      {
+        "id": "SF-3",
+        "category": "テスト範囲",
+        "issue": "テスト範囲にworktree-status-helper.test.tsとauto-yes-persistence.test.tsが含まれていない。worktree-status-helperはgetLastServerResponseTimestampの呼び出しが影響を受け、persistence testはglobalThisのMapキー構造が変わるため更新が必要。また既存の20ファイルのauto-yes関連テストのうち、複合キー化による影響を受けるものの特定がIssueに記載されていない。",
+        "location": "## 実装タスク > テスト",
+        "recommendation": "テストタスクに以下を追加: (1) tests/unit/lib/worktree-status-helper.test.ts - getLastServerResponseTimestamp呼び出しの複合キー対応テスト、(2) tests/integration/auto-yes-persistence.test.ts - globalThis永続化テストの複合キー対応、(3) tests/unit/auto-yes-manager-cleanup.test.ts - クリーンアップ処理の複合キー対応。",
+        "evidence": "tests/unit/lib/worktree-status-helper.test.ts, tests/integration/auto-yes-persistence.test.ts, tests/unit/auto-yes-manager-cleanup.test.ts, tests/unit/session-cleanup-issue404.test.ts, tests/unit/resource-cleanup.test.ts が全て複合キー化の影響を受ける。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント更新",
+        "issue": "CLI型定義 src/cli/types/api-responses.ts のCurrentOutputResponseにautoYesフィールドが単一オブジェクトとして定義されている（L45-49）。current-output APIのレスポンス形式がエージェント毎に変更される場合、この型定義も更新が必要だが、実装タスクに含まれていない。",
+        "location": "## 影響範囲 > 関連コンポーネント",
+        "recommendation": "src/cli/types/api-responses.ts を影響範囲の関連コンポーネントに追加。current-output APIのautoYesレスポンス設計方針に応じて、型定義の更新要否を判断する旨を記載。",
+        "evidence": "src/cli/types/api-responses.ts L45-49: autoYes: { enabled: boolean; expiresAt: number | null; stopReason?: string; } - 単一オブジェクト。L54: lastServerResponseTimestamp: number | null; L55: serverPollerActive: boolean; - これらもエージェント毎に変わる可能性あり。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "依存関係",
+        "issue": "auto-yes-poller.tsのincrementErrorCount()内（L187-189）でdisableAutoYes(worktreeId)とstopAutoYesPolling(worktreeId)がworktreeId単体で呼ばれている。複合キー化後はこれらも複合キーで呼ぶ必要があるが、pollAutoYes()の引数からworktreeIdとcliToolIdが既に利用可能なため、内部関数のキー生成方法の統一が重要。",
+        "location": "## 実装タスク > バックエンド > auto-yes-poller.ts",
+        "recommendation": "auto-yes-poller.ts内の全てのMap操作関数（getPollerState, stopAutoYesPolling, incrementErrorCount等）のキー生成を統一するユーティリティ関数（buildCompositeKey(worktreeId, cliToolId)等）の導入を検討。散在する文字列結合を防ぎ、キーフォーマットの一貫性を保証する。",
+        "evidence": "auto-yes-poller.ts内でworktreeIdをMapキーとして使用する箇所: L101(getPollerState), L132(getLastServerResponseTimestamp), L144(isPollerActive), L153-157(updateLastServerResponseTimestamp), L165-170(resetErrorCount), L178-191(incrementErrorCount), L567(autoYesPollerStates.set)。全箇所を複合キーに統一する必要がある。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/session/worktree-status-helper.ts",
+      "relevance": "Issue未記載の影響範囲。getLastServerResponseTimestamp(worktreeId)をcliToolId毎のループ内で呼び出しており、複合キー化の影響を直接受ける。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "relevance": "isPollerActive(params.id)とgetLastServerResponseTimestamp(params.id)がworktreeId単体で呼ばれており、serverPollerActiveとlastServerResponseTimestampもエージェント毎に対応が必要。"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "relevance": "stopAutoYesPolling()とdeleteAutoYesState()が1回ずつしか呼ばれておらず、複合キー化後は全エージェント分のクリーンアップが漏れる。"
+    },
+    {
+      "file": "src/lib/resource-cleanup.ts",
+      "relevance": "getAutoYesStateWorktreeIds()の返り値をDBのworktreeIdと比較するロジックが複合キー化後に破綻する。extractWorktreeId()の使用が必須。"
+    },
+    {
+      "file": "src/cli/types/api-responses.ts",
+      "relevance": "CurrentOutputResponseのautoYes型定義がcurrent-output APIのレスポンス変更に伴い更新が必要になる可能性。"
+    },
+    {
+      "file": "src/lib/auto-yes-poller.ts",
+      "relevance": "内部関数のMap操作が全てworktreeId単体をキーとしており、複合キーへの統一的な移行が必要。"
+    },
+    {
+      "file": "tests/unit/lib/worktree-status-helper.test.ts",
+      "relevance": "テスト範囲に未記載。getLastServerResponseTimestampのモック/テストが複合キー対応で更新必要。"
+    },
+    {
+      "file": "tests/integration/auto-yes-persistence.test.ts",
+      "relevance": "テスト範囲に未記載。globalThisのMapキー構造変更により更新必要。"
+    },
+    {
+      "file": "tests/unit/auto-yes-manager-cleanup.test.ts",
+      "relevance": "テスト範囲に未記載。クリーンアップロジックのテストが複合キー対応で更新必要。"
+    },
+    {
+      "file": "tests/unit/resource-cleanup.test.ts",
+      "relevance": "テスト範囲に未記載。孤立エントリ検出ロジックが複合キー対応で更新必要。"
+    },
+    {
+      "file": "tests/unit/session-cleanup-issue404.test.ts",
+      "relevance": "テスト範囲に未記載。全エージェント分のクリーンアップテストが必要。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュール一覧のauto-yes-state.ts/auto-yes-poller.ts説明の更新が必要。"
+    }
+  ]
+}
