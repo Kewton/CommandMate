@@ -11,7 +11,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
-import { getWorktreeById, deleteSessionState, deleteAllMessages, deleteMessagesByCliTool } from '@/lib/db';
+import { getWorktreeById, deleteSessionState, deleteAllMessages, deleteMessagesByCliTool, clearLastUserMessage } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { killSession } from '@/lib/tmux/tmux';
 import { broadcast } from '@/lib/ws-server';
@@ -89,14 +89,18 @@ export async function POST(
       );
     }
 
-    // Clear messages based on whether targeting specific CLI tool or all
+    // Archive messages based on whether targeting specific CLI tool or all
+    // Issue #168: Changed from physical delete to logical archive (archived=1)
     if (targetCliTool) {
-      // Issue #4: Delete only messages for the specific CLI tool
+      // Issue #4: Archive only messages for the specific CLI tool
       deleteMessagesByCliTool(db, params.id, targetCliTool);
     } else {
-      // Delete all messages (backward compatible)
+      // Archive all messages (backward compatible)
       deleteAllMessages(db, params.id);
     }
+
+    // Issue #168: Clear last_user_message after archiving to prevent stale sidebar data
+    clearLastUserMessage(db, params.id);
 
     // Broadcast session status change via WebSocket
     // Issue #4: Include cliTool in payload for targeted updates

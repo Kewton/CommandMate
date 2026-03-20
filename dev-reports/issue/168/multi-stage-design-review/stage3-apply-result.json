@@ -1,0 +1,87 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘対応",
+  "issue_number": 168,
+  "applied_findings": [
+    {
+      "id": "IA3-001",
+      "severity": "must_fix",
+      "title": "conversation-logger.ts の動作確認テスト追加",
+      "action": "セクション 11 テスト戦略の「変更不要だが動作確認が必要なテスト」一覧に conversation-logger.test.ts を追加。kill-session 後の recordClaudeConversation の動作確認テストケースを記載。セクション 13 影響なし確認済みファイルにも記載。変更ファイル一覧にも追加。"
+    },
+    {
+      "id": "IA3-002",
+      "severity": "must_fix",
+      "title": "src/lib/api-client.ts の getMessages に includeArchived パラメータ追加",
+      "action": "セクション 3.3 を新設し、ブラウザ側 api-client.ts の getMessages 関数変更を設計。includeArchived パラメータの追加と URLSearchParams への反映を記載。変更ファイル一覧に api-client.ts を追加。実装チェックリストにも追加。"
+    },
+    {
+      "id": "IA3-003",
+      "severity": "must_fix",
+      "title": "worktree-status-helper.ts モックテストシグネチャ更新",
+      "action": "セクション 11 テスト戦略の「変更不要だが動作確認が必要なテスト」一覧に worktree-status-helper.test.ts を追加。モック関数シグネチャのオプションオブジェクトパターン更新要件を記載。変更ファイル一覧にも追加。"
+    },
+    {
+      "id": "IA3-004",
+      "severity": "should_fix",
+      "title": "createMessage 引数型を Omit<ChatMessage, 'id' | 'archived'> に変更",
+      "action": "セクション 4.15 を新設し、createMessage の引数型変更を設計。Omit に 'archived' を追加する方針（推奨案B）を採用。影響を受けない呼び出し元（response-poller.ts, assistant-response-saver.ts, send/route.ts, claude-done/route.ts）を明記。変更ファイル一覧にも追加。"
+    },
+    {
+      "id": "IA3-005",
+      "severity": "should_fix",
+      "title": "データ蓄積に対するパージ/VACUUM戦略",
+      "action": "セクション 8 パフォーマンス設計に「データ蓄積とパージ戦略（将来考慮事項）」を追加。現時点では YAGNI で実装見送り。パージが必要になった場合の SQL パターン、実行タイミング、VACUUM の注意事項を備考として記載。"
+    },
+    {
+      "id": "IA3-006",
+      "severity": "should_fix",
+      "title": "session-cleanup.ts の影響分析記載",
+      "action": "セクション 13 「影響なし確認済みファイル」を新設し、session-cleanup.ts について cleanupWorktreeSessions がメッセージ削除を直接呼び出さないこと、ON DELETE CASCADE による間接的な物理削除が正しい動作であることを記載。"
+    },
+    {
+      "id": "IA3-007",
+      "severity": "should_fix",
+      "title": "response-poller.ts の kill-session 後の動作分析",
+      "action": "セクション 8 パフォーマンス設計に response-poller.ts の動作分析を追加。kill-session 後に archived=0 フィルタにより新セッションのメッセージのみが対象となり正常動作することを記載。セクション 13 にも記載。"
+    },
+    {
+      "id": "IA3-008",
+      "severity": "nice_to_have",
+      "title": "log-export-sanitizer.ts への影響なし確認",
+      "action": "セクション 13 「影響なし確認済みファイル」に記載。"
+    },
+    {
+      "id": "IA3-009",
+      "severity": "nice_to_have",
+      "title": "CLIモジュールへの影響なし確認",
+      "action": "セクション 13 「影響なし確認済みファイル」に記載。セクション 3.3 の注意書きでも CLI 側 api-client.ts が別モジュールであることを明記。"
+    },
+    {
+      "id": "IA3-010",
+      "severity": "nice_to_have",
+      "title": "auto-yes-poller.ts への影響なし確認",
+      "action": "セクション 13 「影響なし確認済みファイル」に記載。"
+    },
+    {
+      "id": "IA3-011",
+      "severity": "nice_to_have",
+      "title": "assistant-response-saver.ts の createMessage 呼び出し影響",
+      "action": "セクション 4.15 の IA3-004 対応で解消。セクション 13 にも記載。"
+    }
+  ],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-168-session-history-retention-design-policy.md",
+  "sections_modified": [
+    "Stage 3 レビュー指摘事項サマリー（新設）",
+    "3.3 ブラウザ側 api-client.ts の変更（新設）",
+    "4.15 createMessage の引数型変更（新設）",
+    "8. パフォーマンス設計（パージ戦略・response-poller分析追加）",
+    "11. テスト戦略（動作確認テスト追加）",
+    "12. 実装チェックリスト（Stage 3 項目追加）",
+    "13. 影響なし確認済みファイル（新設）",
+    "変更ファイル一覧（4ファイル追加）"
+  ],
+  "summary": "Stage 3 影響分析レビューの全11件の指摘事項を設計方針書に反映した。must_fix 3件（conversation-logger テスト追加、api-client.ts の includeArchived 対応、worktree-status-helper モックテスト更新）、should_fix 4件（createMessage 型変更、パージ戦略、session-cleanup 影響分析、response-poller 動作分析）、nice_to_have 4件（影響なし確認済みファイル記載）をすべて反映し、スキップした指摘事項はない。"
+}

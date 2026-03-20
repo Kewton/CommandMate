@@ -22,6 +22,7 @@ function createTestMessage(
     content: overrides.content || 'Test message',
     timestamp: overrides.timestamp || new Date(),
     messageType: overrides.messageType || 'normal',
+    archived: false,
     ...overrides,
   };
 }

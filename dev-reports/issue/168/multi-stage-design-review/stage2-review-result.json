@@ -1,0 +1,151 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 168,
+  "findings": [
+    {
+      "id": "CR2-001",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "getMessages の現行シグネチャが設計と異なる（位置パラメータ vs オプションオブジェクト）",
+      "description": "設計書 (セクション 4.1) では getMessages を GetMessagesOptions オプションオブジェクトパターンに変更するとしているが、現行コードは getMessages(db, worktreeId, before?, limit, cliToolId?) の位置パラメータ5個のシグネチャである。設計書はこれを変更後の姿として記述しているため整合しているが、呼び出し元が3箇所（messages/route.ts L57, send/route.ts L215, worktree-status-helper.ts L102）あり、全て位置パラメータで呼び出している。実装時にこれら全箇所の更新が必要である。",
+      "file": "src/lib/db/chat-db.ts",
+      "line": "172-200",
+      "recommendation": "設計書は変更後の姿を正しく記述している。実装時に3箇所の呼び出し元を確実にオプションオブジェクト形式に更新すること。特に send/route.ts の getMessages(db, params.id, undefined, 1, cliToolId) は {limit: 1, cliToolId} に変換が必要。"
+    },
+    {
+      "id": "CR2-002",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "ChatMessage 型に archived フィールドが存在しない",
+      "description": "設計書 (セクション 2) では ChatMessage に archived: boolean を required フィールドとして追加すると記述しているが、現行の src/types/models.ts の ChatMessage インターフェース (L181-204) には archived フィールドが存在しない。これは実装前の状態として正しいが、設計書が参照する型定義と現行コードの差分を明確に認識しておく必要がある。",
+      "file": "src/types/models.ts",
+      "line": "181-204",
+      "recommendation": "実装時に ChatMessage インターフェースに archived: boolean を追加すること。DR1-006 の通り optional ではなく required とすること。"
+    },
+    {
+      "id": "CR2-003",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "ChatMessageRow 型に archived フィールドが存在しない",
+      "description": "設計書 (セクション 2) では ChatMessageRow に archived: number を追加すると記述しているが、現行の chat-db.ts L16-28 の ChatMessageRow には archived フィールドがない。mapChatMessage 関数 (L30-44) にも archived のマッピングがない。",
+      "file": "src/lib/db/chat-db.ts",
+      "line": "16-44",
+      "recommendation": "実装時に ChatMessageRow に archived: number を追加し、mapChatMessage に archived: row.archived === 1 のマッピングを追加すること。"
+    },
+    {
+      "id": "CR2-004",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "init-db.ts の chat_messages テーブル定義に archived カラムが存在しない",
+      "description": "設計書 (セクション 10) では init-db.ts の CREATE TABLE 文に archived INTEGER DEFAULT 0 を追加すると記述しているが、現行の init-db.ts L33-48 には archived カラムがない。新規DB作成時にカラムが存在しないと、マイグレーションなしではアプリケーションが動作しない。",
+      "file": "src/lib/db/init-db.ts",
+      "line": "33-48",
+      "recommendation": "実装時に chat_messages テーブル定義に archived INTEGER DEFAULT 0 を追加し、idx_messages_archived インデックスも CREATE TABLE 群と併せて追加すること。"
+    },
+    {
+      "id": "CR2-005",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "clearLastUserMessage 関数が現行コードに存在しない",
+      "description": "設計書 (セクション 4.8) では chat-db.ts に clearLastUserMessage 関数を新規追加し、kill-session/route.ts から呼び出すとしているが、現行コードには存在しない。また、db.ts バレルファイル (L37-52) にもエクスポートが定義されていない。新規関数の追加であるため、バレルファイルへのエクスポート追加も必要。",
+      "file": "src/lib/db/chat-db.ts",
+      "line": "N/A (新規追加)",
+      "recommendation": "chat-db.ts に clearLastUserMessage を実装し、db.ts バレルファイルのエクスポートリストにも追加すること。"
+    },
+    {
+      "id": "CR2-006",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "deleteAllMessages の戻り値型が設計と異なる",
+      "description": "設計書 (セクション 4.7) では deleteAllMessages の戻り値を number (result.changes) としているが、現行コード (L248-259) の戻り値は void である。deleteMessagesByCliTool は既に number を返しているが、deleteAllMessages は void を返している。設計に合わせて戻り値を number に変更する必要がある。",
+      "file": "src/lib/db/chat-db.ts",
+      "line": "248-259",
+      "recommendation": "deleteAllMessages の戻り値型を void から number に変更し、result.changes を返すようにすること。呼び出し元 (kill-session/route.ts L98) では戻り値を使用していないため、非破壊的変更となる。"
+    },
+    {
+      "id": "CR2-007",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "HistoryPaneProps に showArchived / onShowArchivedChange が存在しない",
+      "description": "設計書 (セクション 5.4) では HistoryPaneProps に showArchived: boolean と onShowArchivedChange: (value: boolean) => void を追加するとしているが、現行の HistoryPane.tsx L35-50 にはこれらの props が存在しない。DR1-005 で指摘された状態オーナーシップの統一に関わる重要な変更。",
+      "file": "src/components/worktree/HistoryPane.tsx",
+      "line": "35-50",
+      "recommendation": "実装時に HistoryPaneProps にこれら2つの props を追加し、sticky ヘッダー部分にトグルUIを組み込むこと。"
+    },
+    {
+      "id": "CR2-008",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "HistoryPane のヘッダーがトグルUI無しのシンプル構造",
+      "description": "設計書 (セクション 5.1) では sticky ヘッダーに flex items-center justify-between レイアウトでトグルチェックボックスを配置する設計だが、現行の HistoryPane.tsx L258-260 のヘッダーは h3 テキストのみのシンプルな構造。justify-between が存在せず、トグル用のスペースも確保されていない。",
+      "file": "src/components/worktree/HistoryPane.tsx",
+      "line": "258-260",
+      "recommendation": "実装時にヘッダーのクラスに flex items-center justify-between を追加し、トグルUIを右側に配置すること。"
+    },
+    {
+      "id": "CR2-009",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "設計書のSELECT文に archived カラムが含まれているが現行コードにない",
+      "description": "設計書 (セクション 4.1, 4.3, 4.4) の SELECT 文には archived カラムが含まれているが、現行の getMessages (L180), getLastMessage (L231), getLastUserMessage (L210) の SELECT 文には archived カラムがない。実装時にこれら全てのSELECT文に archived を追加する必要がある。",
+      "file": "src/lib/db/chat-db.ts",
+      "line": "180, 210, 231",
+      "recommendation": "全ての SELECT 文に archived カラムを追加すること。getMessageById (L340) も同様に更新が必要だが、設計書では明示的に言及されていない点に注意。"
+    },
+    {
+      "id": "CR2-010",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "getMessageById が設計書で言及されていない",
+      "description": "chat-db.ts L335-352 の getMessageById 関数は設計書の変更対象関数一覧に含まれていない。この関数の SELECT 文にも archived カラムの追加が必要であり、ChatMessageRow にマッピングされるため archived フィールドがないと不整合が発生する。",
+      "file": "src/lib/db/chat-db.ts",
+      "line": "335-352",
+      "recommendation": "設計書に getMessageById の変更も明記するか、実装時に漏れなく archived カラムを SELECT 文に追加すること。"
+    },
+    {
+      "id": "CR2-011",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "CURRENT_SCHEMA_VERSION が 21 であることの確認（設計書の前提と一致）",
+      "description": "設計書 (セクション 10) では CURRENT_SCHEMA_VERSION を 21 から 22 に変更すると記述しており、現行コード (db-migrations.ts L14) の CURRENT_SCHEMA_VERSION = 21 と一致する。最新マイグレーションが version: 21 であることも確認済み。設計書の前提は正しい。",
+      "file": "src/lib/db/db-migrations.ts",
+      "line": "14",
+      "recommendation": "確認のみ。設計書の前提は正確である。"
+    },
+    {
+      "id": "CR2-012",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "kill-session/route.ts の行番号参照が正確",
+      "description": "設計書 (セクション 3.1) で 'L92-99相当' と記述された deleteMessagesByCliTool / deleteAllMessages の呼び出し箇所は、現行コードの L92-99 に正確に対応している。WebSocket broadcast (L103-109) の構造も設計書と一致する。",
+      "file": "src/app/api/worktrees/[id]/kill-session/route.ts",
+      "line": "92-109",
+      "recommendation": "確認のみ。行番号参照は正確である。"
+    },
+    {
+      "id": "CR2-013",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "worktree-db.ts のサブクエリ行番号参照が正確",
+      "description": "設計書 (セクション 4.12) で 'L93-94' と記述された getWorktrees のサブクエリ、および (セクション 4.13) で 'L208-209' と記述された getWorktreeById のサブクエリは、現行コードの行番号と正確に一致する。",
+      "file": "src/lib/db/worktree-db.ts",
+      "line": "93-94, 208-209",
+      "recommendation": "確認のみ。行番号参照は正確である。"
+    },
+    {
+      "id": "CR2-014",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "db.ts バレルファイルに GetMessagesOptions のエクスポートが必要",
+      "description": "設計書ではGetMessagesOptions インターフェースを chat-db.ts にエクスポート定義するが、db.ts バレルファイル (L37-52) のエクスポートリストには型エクスポートが含まれていない。外部モジュールが GetMessagesOptions を参照する場合、バレルファイルからのエクスポートが必要になる。",
+      "file": "src/lib/db/db.ts",
+      "line": "37-52",
+      "recommendation": "GetMessagesOptions をバレルファイルのエクスポートに追加すること。ただし、現行の呼び出し元3箇所は全て内部でパラメータを直接渡しているため、型のインポートが必要かどうかは実装時に判断すること。"
+    }
+  ],
+  "summary": "設計書と現行コードベースの整合性レビューを実施した。設計書は変更前後の差分を正確に記述しており、参照している行番号・関数名・マイグレーションバージョンは現行コードと一致する。主な指摘は、(1) getMessages のシグネチャ変更に伴う3箇所の呼び出し元更新の確認、(2) ChatMessage/ChatMessageRow 型への archived フィールド追加、(3) clearLastUserMessage 新規関数の追加とバレルファイルへの登録、(4) deleteAllMessages の戻り値型の不一致、(5) getMessageById が設計書の変更対象に含まれていない点の5項目である。設計書の行番号参照、マイグレーションバージョン前提、WebSocketペイロード構造はいずれも正確であり、設計の品質は高い。",
+  "must_fix_count": 5,
+  "should_fix_count": 5,
+  "nice_to_have_count": 4
+}

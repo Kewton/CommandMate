@@ -36,6 +36,8 @@ export async function GET(
     const before = beforeParam ? new Date(beforeParam) : undefined;
     const limit = limitParam ? parseInt(limitParam, 10) : 50;
     const cliToolId = cliToolParam as CLIToolType | undefined;
+    const includeArchivedParam = searchParams.get('includeArchived');
+    const includeArchived = includeArchivedParam === 'true';
 
     // Issue #368: Use CLI_TOOL_IDS instead of hardcoded array (DRY)
     if (cliToolId && !(CLI_TOOL_IDS as readonly string[]).includes(cliToolId)) {
@@ -54,7 +56,7 @@ export async function GET(
     }
 
     // Get messages with optional CLI tool filter
-    const messages = getMessages(db, params.id, before, limit, cliToolId);
+    const messages = getMessages(db, params.id, { before, limit, cliToolId, includeArchived });
 
     // Filter out messages with empty content (defensive programming)
     const validMessages = messages.filter((m) => m.content && m.content.trim() !== '');

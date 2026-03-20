@@ -1,0 +1,163 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 168,
+  "findings": [
+    {
+      "id": "IS3-001",
+      "severity": "must_fix",
+      "category": "impact_scope",
+      "description": "getLastAssistantMessageAt (chat-db.ts L68-85) がarchivedフィルタなしでMAX(timestamp)を取得している。archivedメッセージを含むと、サイドバーの未読トラッキング (Issue #31) が誤動作し、アーカイブ済みメッセージのtimestampが最新と判定されて未読バッジが消える等の問題が発生する。",
+      "affected_files": [
+        "src/lib/db/chat-db.ts"
+      ],
+      "suggestion": "getLastAssistantMessageAt のSQLに WHERE archived = 0 を追加する。この関数は未読判定のみに使用されるため、常にアクティブメッセージのみを対象にすべき。",
+      "evidence": "chat-db.ts L74: SELECT MAX(timestamp) as last_assistant_message_at FROM chat_messages WHERE worktree_id = ? AND role = 'assistant' -- archivedフィルタなし"
+    },
+    {
+      "id": "IS3-002",
+      "severity": "must_fix",
+      "category": "impact_scope",
+      "description": "worktree-db.ts の getWorktrees() (L93-94) と getWorktreeById() (L208-209) がサブクエリで chat_messages から last_assistant_message_at を取得しているが、archivedフィルタがない。このサブクエリはサイドバー表示の未読バッジに直接影響する。",
+      "affected_files": [
+        "src/lib/db/worktree-db.ts"
+      ],
+      "suggestion": "両サブクエリに AND archived = 0 (もしくは AND (archived IS NULL OR archived = 0) で後方互換) を追加する。",
+      "evidence": "worktree-db.ts L93: (SELECT MAX(timestamp) FROM chat_messages WHERE worktree_id = w.id AND role = 'assistant') as last_assistant_message_at"
+    },
+    {
+      "id": "IS3-003",
+      "severity": "must_fix",
+      "category": "impact_scope",
+      "description": "getLastMessagesByCliBatch (worktree-db.ts L23-75) がarchivedフィルタなしで最新ユーザーメッセージを取得している。サイドバーに表示される「最後のメッセージ」にアーカイブ済みメッセージが表示されてしまう。",
+      "affected_files": [
+        "src/lib/db/worktree-db.ts"
+      ],
+      "suggestion": "ranked_messages CTEのWHERE句に AND (archived IS NULL OR archived = 0) を追加する。",
+      "evidence": "worktree-db.ts L44-46: FROM chat_messages WHERE worktree_id IN (placeholders) AND role = 'user' -- archivedフィルタなし"
+    },
+    {
+      "id": "IS3-004",
+      "severity": "must_fix",
+      "category": "impact_scope",
+      "description": "getLastMessage (chat-db.ts L226-241) と getLastUserMessage (chat-db.ts L205-220) がarchivedフィルタなし。getLastMessage はsend APIでの重複メッセージ検出 (send/route.ts L215) とworktree-status-helper.ts (L102) のstale prompt検出に使用される。archivedメッセージが含まれると、送信済みメッセージの重複判定やプロンプト状態検出が誤動作する。",
+      "affected_files": [
+        "src/lib/db/chat-db.ts",
+        "src/app/api/worktrees/[id]/send/route.ts",
+        "src/lib/session/worktree-status-helper.ts"
+      ],
+      "suggestion": "getLastMessage と getLastUserMessage のSQLに WHERE archived = 0 を追加する。もしくは getMessages と同様に archived パラメータを追加してデフォルト false にする。",
+      "evidence": "chat-db.ts L232: FROM chat_messages WHERE worktree_id = ? ORDER BY timestamp DESC LIMIT 1 -- archivedメッセージも取得される"
+    },
+    {
+      "id": "IS3-005",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "description": "markPendingPromptsAsAnswered (chat-db.ts L376-420) がarchivedメッセージも対象にしてpending prompt検索を行う。既にアーカイブされたpromptメッセージのstatusを更新しても実害は少ないが、不要なDB操作が発生する。",
+      "affected_files": [
+        "src/lib/db/chat-db.ts"
+      ],
+      "suggestion": "markPendingPromptsAsAnswered のSELECT文にWHERE archived = 0 を追加して、アーカイブ済みメッセージを対象外にする。",
+      "evidence": "chat-db.ts L384-388: FROM chat_messages WHERE worktree_id = ? AND cli_tool_id = ? AND message_type = 'prompt' AND json_extract(prompt_data, '$.status') = 'pending'"
+    },
+    {
+      "id": "IS3-006",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "description": "conversation-logger.ts の recordClaudeConversation が getLastUserMessage を使用しており、archivedメッセージが混入すると、ログファイルに誤ったユーザーメッセージが記録される可能性がある。",
+      "affected_files": [
+        "src/lib/conversation-logger.ts"
+      ],
+      "suggestion": "getLastUserMessage にarchivedフィルタが追加されれば自動的に解決する (IS3-004の修正で連動)。",
+      "evidence": "conversation-logger.ts L24: const lastUserMessage = getLastUserMessage(db, worktreeId);"
+    },
+    {
+      "id": "IS3-007",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "description": "Issueの実装タスクでマイグレーションバージョンについて「既存22件の次の番号」と記載しているが、現在のCURRENT_SCHEMA_VERSIONは21 (db-migrations.ts L14)。実際のmigrations配列の最後のバージョン番号を確認してバージョン22を追加すべき。Issue本文の「22件」は件数を指しているのかバージョン番号を指しているのか曖昧。",
+      "affected_files": [
+        "src/lib/db/db-migrations.ts"
+      ],
+      "suggestion": "マイグレーションバージョン22としてarchivedカラム追加マイグレーションを追加し、CURRENT_SCHEMA_VERSIONを22にインクリメントする。Issue本文の「22件の次の番号」を「バージョン22」に修正して明確にする。",
+      "evidence": "db-migrations.ts L14: export const CURRENT_SCHEMA_VERSION = 21;"
+    },
+    {
+      "id": "IS3-008",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "description": "WebSocketブロードキャストのペイロード messagesCleared: true (kill-session/route.ts L107) の変更がIssue本文で言及されているが、UIクライアント側でこのイベントを受信してメッセージリストをクリアするロジックがある場合、archived方式に変更後もUIが全メッセージを空にしてしまう可能性がある。クライアント側のWebSocketハンドラの影響範囲が未検討。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/kill-session/route.ts",
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "suggestion": "WebSocketの messagesCleared: true を受信するクライアント側コンポーネントを特定し、archived方式に合わせてメッセージのリフレッシュ（再フェッチ）にロジックを変更する。",
+      "evidence": "kill-session/route.ts L107: messagesCleared: true -- クライアント側でこのフラグを受けてメッセージリストをクリアする可能性"
+    },
+    {
+      "id": "IS3-009",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "description": "既存テストへの影響が広範。tests/unit/db.test.ts (getMessages, getLastUserMessage)、tests/unit/db-delete-messages-by-cli-tool.test.ts (deleteMessagesByCliTool)、tests/integration/api-messages.test.ts、tests/integration/api-hooks.test.ts、tests/integration/api-send-cli-tool.test.ts がすべてメッセージ関連DB関数を使用しており、archivedパラメータ追加やdeleteをUPDATEに変更した際にテスト修正が必要。Issue本文にテスト修正タスクが明示されていない。",
+      "affected_files": [
+        "tests/unit/db.test.ts",
+        "tests/unit/db-delete-messages-by-cli-tool.test.ts",
+        "tests/integration/api-messages.test.ts",
+        "tests/integration/api-hooks.test.ts",
+        "tests/integration/api-send-cli-tool.test.ts"
+      ],
+      "suggestion": "実装タスクに「5. 既存テスト修正」セクションを追加し、影響を受けるテストファイルを明示する。特にdeleteMessagesByCliToolのテストは「削除後にメッセージが0件」という検証がarchivedフラグでは「archived=0のメッセージが0件」に変わる。",
+      "evidence": "db-delete-messages-by-cli-tool.test.ts L82-86: claudeMessages取得後に長さ0を検証しているが、archived方式ではgetMessages(archived=false)での検証に変更が必要"
+    },
+    {
+      "id": "IS3-010",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "description": "log-export-sanitizer.ts はメッセージ内容のサニタイズのみを行い、chat_messagesテーブルに直接アクセスしていないため、archived変更による直接的な影響はない。ただし、将来的にアーカイブメッセージをエクスポートする機能を追加する場合、includeArchivedフラグの考慮が必要。",
+      "affected_files": [
+        "src/lib/log-export-sanitizer.ts"
+      ],
+      "suggestion": "現時点では変更不要。将来のエクスポート機能追加時にarchivedメッセージの取り扱い方針を決定する。",
+      "evidence": "log-export-sanitizer.ts はchat_messagesを直接参照せず、文字列サニタイズのみ"
+    },
+    {
+      "id": "IS3-011",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "description": "session-cleanup.ts はメッセージ削除を直接行わない（tmuxセッション/ポーラー/スケジューラーの停止のみ）。kill-session APIルート側でメッセージ処理が行われるため、session-cleanup.ts自体への変更は不要。ただし、session-cleanup.tsがリポジトリ削除時に呼ばれる文脈（ON DELETE CASCADEでメッセージも物理削除）では、archivedメッセージも含めて削除されることを認識しておく必要がある。",
+      "affected_files": [
+        "src/lib/session-cleanup.ts"
+      ],
+      "suggestion": "現時点では変更不要。ON DELETE CASCADEによるworktree削除時の動作は、archivedメッセージも含めて全削除で問題ない。",
+      "evidence": "session-cleanup.ts にはDB操作なし。worktree-db.ts L555: 'Related data (chat_messages) will be automatically deleted via CASCADE'"
+    },
+    {
+      "id": "IS3-012",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "description": "CLIコマンド capture (src/cli/commands/capture.ts) はターミナル出力のみを取得し、DBメッセージには直接アクセスしないため影響なし。CLI api-client の getMessages も messages API経由のため、API側の修正で自動的に対応される。",
+      "affected_files": [
+        "src/lib/api-client.ts",
+        "src/cli/utils/api-client.ts"
+      ],
+      "suggestion": "API側でincludeArchivedクエリパラメータが追加された場合、クライアント側api-client.tsのgetMessagesメソッドにもオプション引数を追加する。",
+      "evidence": "api-client.ts L170-177: getMessages はAPI経由でメッセージ取得"
+    },
+    {
+      "id": "IS3-013",
+      "severity": "must_fix",
+      "category": "impact_scope",
+      "description": "マイグレーションで ALTER TABLE chat_messages ADD COLUMN archived INTEGER DEFAULT 0 を実行する際、既存データのarchivedカラムはDEFAULT 0になるが、既存のSQLクエリ群（getMessages以外の関数）が WHERE archived = 0 ではなく WHERE (archived IS NULL OR archived = 0) を使う必要があるかの検討が不足。SQLiteのALTER TABLE ADD COLUMNではDEFAULT値が適用されるため、既存行はarchivedが0になる。ただし、安全のためNULLも考慮したクエリにすべき。",
+      "affected_files": [
+        "src/lib/db/db-migrations.ts",
+        "src/lib/db/chat-db.ts"
+      ],
+      "suggestion": "SQLiteのALTER TABLE ADD COLUMN ... DEFAULT 0の動作を確認し、既存行がNULLではなく0で埋まることを確認する。マイグレーション後に UPDATE chat_messages SET archived = 0 WHERE archived IS NULL を実行するか、全クエリで (archived IS NULL OR archived = 0) を使うかの方針を決定する。SQLite公式ドキュメントによるとDEFAULT値が指定されていれば既存行にもその値が適用されるため、WHERE archived = 0 で問題ないが、マイグレーション内でのUPDATE文追加が安全策として推奨。",
+      "evidence": "SQLite ALTER TABLE ADD COLUMN with DEFAULT: https://www.sqlite.org/lang_altertable.html - 'The default value of each new column is NULL' when DEFAULT is specified as a non-NULL constant, the default is used for existing rows"
+    }
+  ],
+  "summary": "影響範囲レビューの結果、must_fix 5件、should_fix 5件、nice_to_have 3件の指摘を検出した。最も重要な発見は、Issue本文がgetMessages関数のarchivedパラメータ追加のみに言及しているが、実際にはchat_messagesテーブルを参照するDB関数が他に多数存在し（getLastAssistantMessageAt, getLastMessage, getLastUserMessage, getLastMessagesByCliBatch, markPendingPromptsAsAnswered、worktree-db.tsのサブクエリ2箇所）、これらすべてにarchivedフィルタを追加しないと、未読トラッキング・サイドバー表示・stale prompt検出・重複メッセージ判定が誤動作する。また、既存テスト5ファイルへの影響が実装タスクに含まれていない点、WebSocketクライアント側のmessagesClearedハンドラの影響範囲が未検討な点も重要。",
+  "must_fix_count": 5,
+  "should_fix_count": 5,
+  "nice_to_have_count": 3
+}

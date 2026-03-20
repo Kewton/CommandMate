@@ -1,0 +1,47 @@
+{
+  "issue_number": 168,
+  "status": "success",
+  "tests_passed": 5272,
+  "tests_failed": 0,
+  "tsc_errors": 0,
+  "lint_errors": 0,
+  "coverage": null,
+  "unit_tests": {
+    "total": 5279,
+    "passed": 5272,
+    "failed": 0,
+    "skipped": 7
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/lib/db/db-migrations.ts",
+    "src/lib/db/init-db.ts",
+    "src/lib/db/chat-db.ts",
+    "src/lib/db/worktree-db.ts",
+    "src/lib/db/db.ts",
+    "src/types/models.ts",
+    "src/app/api/worktrees/[id]/messages/route.ts",
+    "src/app/api/worktrees/[id]/send/route.ts",
+    "src/app/api/worktrees/[id]/kill-session/route.ts",
+    "src/lib/session/worktree-status-helper.ts",
+    "src/lib/api-client.ts",
+    "src/components/worktree/HistoryPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/WorktreeDetailSubComponents.tsx",
+    "tests/unit/db.test.ts",
+    "tests/unit/db-delete-messages-by-cli-tool.test.ts",
+    "tests/unit/lib/db-migrations.test.ts",
+    "tests/integration/api-send-cli-tool.test.ts"
+  ],
+  "files_created": [
+    "tests/unit/db-archived-messages.test.ts"
+  ],
+  "commits": [
+    "768853c: feat(session-history): retain message history after session clear"
+  ],
+  "summary": "Implemented Issue #168 session history retention using TDD approach. Key changes: (1) DB migration v22 adds archived column to chat_messages with composite index. (2) deleteAllMessages and deleteMessagesByCliTool changed from physical DELETE to logical UPDATE archived=1, with function names preserved for backward compatibility. (3) ACTIVE_FILTER constant ensures consistent archived=0 filtering across all read queries. (4) getMessages refactored to options object pattern with includeArchived parameter. (5) clearLastUserMessage added for sidebar cleanup. (6) kill-session API updated to call clearLastUserMessage after archiving. (7) messages API accepts includeArchived query parameter. (8) HistoryPane UI adds toggle checkbox with localStorage persistence and opacity-60 for archived messages. All 5272 unit tests pass, 0 lint errors, 0 new TypeScript errors.",
+  "message": "TDD implementation complete. All acceptance criteria addressed: session history retained after clear, showArchived toggle with localStorage, archived messages visually distinct, sidebar unaffected, existing tests updated and passing."
+}

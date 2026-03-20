@@ -24,6 +24,7 @@ function createTestMessage(
     content,
     timestamp,
     messageType: 'normal',
+    archived: false,
   };
 }
 

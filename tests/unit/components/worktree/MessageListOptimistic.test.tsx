@@ -17,6 +17,7 @@ describe('MessageList Optimistic Update', () => {
           content: 'Do you want to proceed?',
           timestamp: new Date(),
           messageType: 'prompt',
+          archived: false,
           promptData: {
             type: 'yes_no',
             question: 'Do you want to proceed?',
@@ -60,6 +61,7 @@ describe('MessageList Optimistic Update', () => {
         summary: 'Summary',
         timestamp: new Date('2024-01-01'),
         messageType: 'prompt',
+        archived: false,
         logFileName: 'log.txt',
         cliToolId: 'claude',
         promptData: {
@@ -104,6 +106,7 @@ describe('MessageList Optimistic Update', () => {
           content: 'msg1',
           timestamp: new Date(),
           messageType: 'prompt',
+          archived: false,
           promptData: {
             type: 'yes_no',
             question: 'Confirm?',
@@ -188,6 +191,7 @@ describe('MessageBubble memoization', () => {
         content: 'Hello',
         timestamp: new Date(),
         messageType: 'prompt',
+        archived: false,
         promptData: {
           type: 'yes_no',
           question: 'Confirm?',
@@ -203,6 +207,7 @@ describe('MessageBubble memoization', () => {
         content: 'Hello',
         timestamp: new Date(), // Different timestamp, but not compared
         messageType: 'prompt',
+        archived: false,
         promptData: {
           type: 'yes_no',
           question: 'Confirm?',
@@ -232,6 +237,7 @@ describe('MessageBubble memoization', () => {
         content: 'Hello',
         timestamp: new Date(),
         messageType: 'prompt',
+        archived: false,
         promptData: {
           type: 'yes_no',
           question: 'Confirm?',
@@ -247,6 +253,7 @@ describe('MessageBubble memoization', () => {
         content: 'Hello',
         timestamp: new Date(),
         messageType: 'prompt',
+        archived: false,
         promptData: {
           type: 'yes_no',
           question: 'Confirm?',
@@ -277,6 +284,7 @@ describe('MessageBubble memoization', () => {
         content: 'Hello',
         timestamp: new Date(),
         messageType: 'prompt',
+        archived: false,
         promptData: {
           type: 'yes_no',
           question: 'Confirm?',
@@ -293,6 +301,7 @@ describe('MessageBubble memoization', () => {
         content: 'Hello',
         timestamp: new Date(),
         messageType: 'prompt',
+        archived: false,
         promptData: {
           type: 'yes_no',
           question: 'Confirm?',
@@ -323,6 +332,7 @@ describe('MessageBubble memoization', () => {
         content: 'Hello',
         timestamp: new Date(),
         messageType: 'normal',
+        archived: false,
       };
 
       const nextMessage: ChatMessage = {
@@ -332,6 +342,7 @@ describe('MessageBubble memoization', () => {
         content: 'Hello World', // Changed
         timestamp: new Date(),
         messageType: 'normal',
+        archived: false,
       };
 
       // Custom comparison function
@@ -355,6 +366,7 @@ describe('MessageBubble memoization', () => {
         content: 'Hello',
         timestamp: new Date(),
         messageType: 'normal',
+        archived: false,
       };
 
       const nextMessage: ChatMessage = {
@@ -364,6 +376,7 @@ describe('MessageBubble memoization', () => {
         content: 'Hello',
         timestamp: new Date(),
         messageType: 'normal',
+        archived: false,
       };
 
       // Custom comparison function
@@ -388,6 +401,7 @@ describe('MessageBubble memoization', () => {
         content: 'Hello',
         timestamp: new Date(),
         messageType: 'normal',
+        archived: false,
       };
 
       const nextMessage: ChatMessage = {
@@ -397,6 +411,7 @@ describe('MessageBubble memoization', () => {
         content: 'Hello',
         timestamp: new Date(),
         messageType: 'normal',
+        archived: false,
       };
 
       const areEqual = (prev: ChatMessage, next: ChatMessage): boolean => {
@@ -419,6 +434,7 @@ describe('MessageBubble memoization', () => {
         content: 'Hello',
         timestamp: new Date(),
         messageType: 'normal',
+        archived: false,
         // No promptData
       };
 
@@ -429,6 +445,7 @@ describe('MessageBubble memoization', () => {
         content: 'Hello',
         timestamp: new Date(),
         messageType: 'prompt',
+        archived: false,
         promptData: {
           type: 'yes_no',
           question: 'Confirm?',
@@ -461,6 +478,7 @@ describe('Optimistic Update - Multiple Choice prompts', () => {
       content: 'Select an option',
       timestamp: new Date(),
       messageType: 'prompt',
+      archived: false,
       promptData: {
         type: 'multiple_choice',
         question: 'Choose one',
@@ -497,6 +515,7 @@ describe('Optimistic Update - Multiple Choice prompts', () => {
       content: 'Select an option',
       timestamp: new Date(),
       messageType: 'prompt',
+      archived: false,
       promptData: {
         type: 'multiple_choice',
         question: 'Choose one',
@@ -637,6 +656,7 @@ describe('Optimistic Update - Error scenarios', () => {
         content: 'Normal message without prompt',
         timestamp: new Date(),
         messageType: 'normal',
+        archived: false,
         // No promptData
       },
     ];
@@ -659,6 +679,7 @@ describe('Optimistic Update - Error scenarios', () => {
         content: 'msg1',
         timestamp: new Date(),
         messageType: 'prompt',
+        archived: false,
         promptData: {
           type: 'yes_no',
           question: 'Confirm?',
@@ -686,6 +707,7 @@ describe('Optimistic Update - Error scenarios', () => {
         content: 'msg1',
         timestamp: new Date(),
         messageType: 'prompt',
+        archived: false,
         promptData: {
           type: 'yes_no',
           question: 'Confirm?',

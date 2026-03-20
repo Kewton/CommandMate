@@ -33,8 +33,8 @@ describe('db-migrations', () => {
   });
 
   describe('CURRENT_SCHEMA_VERSION', () => {
-    it('should be 21 after Migration #21', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(21);
+    it('should be 22 after Migration #22', () => {
+      expect(CURRENT_SCHEMA_VERSION).toBe(22);
     });
   });
 
@@ -353,6 +353,49 @@ describe('db-migrations', () => {
     });
   });
 
+  describe('Migration #22: add-archived-column-to-chat-messages', () => {
+    beforeEach(() => {
+      runMigrations(db);
+    });
+
+    it('should add archived column to chat_messages table', () => {
+      const columns = db.prepare("PRAGMA table_info('chat_messages')").all() as Array<{
+        name: string;
+        type: string;
+        notnull: number;
+        dflt_value: string | null;
+      }>;
+
+      const archivedColumn = columns.find(col => col.name === 'archived');
+      expect(archivedColumn).toBeDefined();
+      expect(archivedColumn?.type).toBe('INTEGER');
+      expect(archivedColumn?.dflt_value).toBe('0');
+    });
+
+    it('should create composite index idx_messages_archived', () => {
+      const indexes = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='chat_messages'"
+      ).all() as Array<{ name: string }>;
+
+      const archivedIndex = indexes.find(idx => idx.name === 'idx_messages_archived');
+      expect(archivedIndex).toBeDefined();
+    });
+
+    it('should default existing messages to archived = 0', () => {
+      const now = Date.now();
+      db.prepare(`INSERT INTO worktrees (id, name, path, updated_at) VALUES (?, ?, ?, ?)`).run(
+        'wt-archived-test', 'test-wt', '/tmp/test', now
+      );
+      db.prepare(`
+        INSERT INTO chat_messages (id, worktree_id, role, content, timestamp)
+        VALUES (?, ?, ?, ?, ?)
+      `).run('msg-archived-test', 'wt-archived-test', 'user', 'hello', now);
+
+      const msg = db.prepare('SELECT archived FROM chat_messages WHERE id = ?').get('msg-archived-test') as { archived: number };
+      expect(msg.archived).toBe(0);
+    });
+  });
+
   describe('CASCADE delete tests (with PRAGMA foreign_keys = ON)', () => {
     beforeEach(() => {
       runMigrations(db);
@@ -452,7 +495,7 @@ describe('db-migrations', () => {
   describe('rollbackMigrations', () => {
     it('should rollback Migration #17 and remove schedule tables', () => {
       runMigrations(db);
-      expect(getCurrentVersion(db)).toBe(21);
+      expect(getCurrentVersion(db)).toBe(22);
 
       rollbackMigrations(db, 16);
       expect(getCurrentVersion(db)).toBe(16);
@@ -465,7 +508,7 @@ describe('db-migrations', () => {
 
     it('should rollback Migration #16 and remove issue_no column', () => {
       runMigrations(db);
-      expect(getCurrentVersion(db)).toBe(21);
+      expect(getCurrentVersion(db)).toBe(22);
 
       rollbackMigrations(db, 15);
       expect(getCurrentVersion(db)).toBe(15);

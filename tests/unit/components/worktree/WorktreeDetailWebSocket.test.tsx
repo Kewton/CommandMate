@@ -20,6 +20,7 @@ describe('WorktreeDetail WebSocket message handling', () => {
           content: 'msg1',
           timestamp: new Date(),
           messageType: 'prompt',
+          archived: false,
           promptData: {
             type: 'yes_no',
             question: 'Confirm?',
@@ -34,6 +35,7 @@ describe('WorktreeDetail WebSocket message handling', () => {
           content: 'msg2',
           timestamp: new Date(),
           messageType: 'normal',
+          archived: false,
         },
       ];
 
@@ -44,6 +46,7 @@ describe('WorktreeDetail WebSocket message handling', () => {
         content: 'msg1',
         timestamp: new Date(),
         messageType: 'prompt',
+        archived: false,
         promptData: {
           type: 'yes_no',
           question: 'Confirm?',
@@ -73,6 +76,7 @@ describe('WorktreeDetail WebSocket message handling', () => {
           content: 'msg1',
           timestamp: new Date(),
           messageType: 'normal',
+          archived: false,
         },
       ];
 
@@ -83,6 +87,7 @@ describe('WorktreeDetail WebSocket message handling', () => {
         content: 'msg1',
         timestamp: new Date(),
         messageType: 'normal',
+        archived: false,
       };
 
       // Simulate handleMessageUpdate logic
@@ -117,6 +122,7 @@ describe('WorktreeDetail WebSocket message handling', () => {
           content: 'msg1',
           timestamp: new Date(),
           messageType: 'normal',
+          archived: false,
         },
       ];
 
@@ -127,6 +133,7 @@ describe('WorktreeDetail WebSocket message handling', () => {
         content: 'msg2',
         timestamp: new Date(),
         messageType: 'normal',
+        archived: false,
       };
 
       // Simulate handleNewMessage logic with duplicate check
@@ -146,6 +153,7 @@ describe('WorktreeDetail WebSocket message handling', () => {
           content: 'msg1',
           timestamp: new Date(),
           messageType: 'normal',
+          archived: false,
         },
       ];
 
@@ -156,6 +164,7 @@ describe('WorktreeDetail WebSocket message handling', () => {
         content: 'msg1 updated',
         timestamp: new Date(),
         messageType: 'normal',
+        archived: false,
       };
 
       // Simulate handleNewMessage logic with duplicate check
@@ -200,6 +209,7 @@ describe('WorktreeDetail WebSocket message handling', () => {
           content: 'test',
           timestamp: new Date(),
           messageType: 'normal',
+          archived: false,
         },
       };
 
@@ -236,6 +246,7 @@ describe('WorktreeDetail WebSocket message handling', () => {
           content: 'test',
           timestamp: new Date(),
           messageType: 'normal',
+          archived: false,
         },
       };
 
@@ -291,6 +302,7 @@ describe('isChatPayload type guard', () => {
         content: 'test',
         timestamp: new Date(),
         messageType: 'normal',
+        archived: false,
       },
     };
 
@@ -313,6 +325,7 @@ describe('isChatPayload type guard', () => {
         content: 'test',
         timestamp: new Date(),
         messageType: 'normal',
+        archived: false,
       },
     };
 
@@ -406,6 +419,7 @@ describe('handleMessageUpdate edge cases', () => {
       content: 'msg1',
       timestamp: new Date(),
       messageType: 'normal',
+      archived: false,
     };
 
     const result = initialMessages.map((msg) =>
@@ -424,6 +438,7 @@ describe('handleMessageUpdate edge cases', () => {
         content: 'claude msg',
         timestamp: new Date(),
         messageType: 'normal',
+        archived: false,
         cliToolId: 'claude',
       },
       {
@@ -433,6 +448,7 @@ describe('handleMessageUpdate edge cases', () => {
         content: 'codex msg',
         timestamp: new Date(),
         messageType: 'normal',
+        archived: false,
         cliToolId: 'codex',
       },
     ];
@@ -444,6 +460,7 @@ describe('handleMessageUpdate edge cases', () => {
       content: 'updated claude msg',
       timestamp: new Date(),
       messageType: 'normal',
+      archived: false,
       cliToolId: 'claude',
     };
 
@@ -464,6 +481,7 @@ describe('handleMessageUpdate edge cases', () => {
         content: 'Choose an option',
         timestamp: new Date(),
         messageType: 'prompt',
+        archived: false,
         promptData: {
           type: 'multiple_choice',
           question: 'Select one',
@@ -510,6 +528,7 @@ describe('handleNewMessage edge cases', () => {
       content: 'first msg',
       timestamp: new Date(),
       messageType: 'normal',
+      archived: false,
     };
 
     const isDuplicate = initialMessages.some((msg) => msg.id === newMessage.id);
@@ -528,6 +547,7 @@ describe('handleNewMessage edge cases', () => {
         content: 'msg1',
         timestamp: new Date('2024-01-01'),
         messageType: 'normal',
+        archived: false,
       },
       {
         id: '2',
@@ -536,6 +556,7 @@ describe('handleNewMessage edge cases', () => {
         content: 'msg2',
         timestamp: new Date('2024-01-02'),
         messageType: 'normal',
+        archived: false,
       },
     ];
 
@@ -546,6 +567,7 @@ describe('handleNewMessage edge cases', () => {
       content: 'msg3',
       timestamp: new Date('2024-01-03'),
       messageType: 'normal',
+      archived: false,
     };
 
     const isDuplicate = initialMessages.some((msg) => msg.id === newMessage.id);
@@ -567,6 +589,7 @@ describe('handleNewMessage edge cases', () => {
       content: 'logged msg',
       timestamp: new Date(),
       messageType: 'normal',
+      archived: false,
       logFileName: 'log-2024-01-01.txt',
     };
 

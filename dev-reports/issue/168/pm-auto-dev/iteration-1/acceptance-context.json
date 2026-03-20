@@ -1,0 +1,30 @@
+{
+  "issue_number": 168,
+  "feature_summary": "セッションをクリアしても履歴はクリアして欲しく無い - セッション履歴保持機能",
+  "acceptance_criteria": [
+    "セッションクリア後も過去のメッセージ履歴が閲覧可能",
+    "新セッション開始時は過去メッセージが非表示（デフォルト）",
+    "過去履歴の表示/非表示を切り替えられる",
+    "既存のセッション管理機能に影響がない",
+    "既存メッセージ（archived未設定）が正常に表示される（マイグレーション互換性）",
+    "サイドバーの未読バッジがアーカイブ済みメッセージに影響されない",
+    "サイドバーの最後のメッセージ表示がアーカイブ済みメッセージに影響されない",
+    "send APIの重複メッセージ検出がアーカイブ済みメッセージに影響されない",
+    "stale prompt検出がアーカイブ済みメッセージに影響されない",
+    "既存テストがarchived方式に対応して全パス",
+    "cliTool未指定でのセッション終了時もメッセージが論理削除される",
+    "kill-session後、サイドバーのlast_user_messageがクリアされる"
+  ],
+  "test_scenarios": [
+    "シナリオ1: kill-session後にメッセージがarchivedフラグで論理削除される（物理削除されない）",
+    "シナリオ2: getMessagesがデフォルトでarchived=0のメッセージのみ返す",
+    "シナリオ3: getMessagesにincludeArchived=trueを指定するとアーカイブ済みメッセージも返す",
+    "シナリオ4: getLastMessage/getLastUserMessage/getLastAssistantMessageAtがアーカイブ済みを除外する",
+    "シナリオ5: markPendingPromptsAsAnsweredがアーカイブ済みpromptに影響しない",
+    "シナリオ6: clearLastUserMessageがworktreesのlast_user_messageをNULLにする",
+    "シナリオ7: DBマイグレーションv22が正常に適用される",
+    "シナリオ8: 既存テストが全パスする",
+    "シナリオ9: TypeScript型チェックがパスする",
+    "シナリオ10: ESLintがパスする"
+  ]
+}

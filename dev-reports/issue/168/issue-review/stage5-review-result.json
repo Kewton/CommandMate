@@ -1,0 +1,86 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "issue_number": 168,
+  "previous_findings_status": [
+    {
+      "id": "F1-DESIGN-AMBIGUITY",
+      "original_severity": "must_fix",
+      "status": "resolved",
+      "verification": "Issue本文で 'archived（論理削除フラグ）方式を採用' と明記。設計判断の根拠も記載されている。'session_idまたは' は完全に削除済み。"
+    },
+    {
+      "id": "F2-MIGRATION-TASK-INCOMPLETE",
+      "original_severity": "should_fix",
+      "status": "resolved",
+      "verification": "マイグレーションタスクが5項目に具体化されている。ALTER TABLE ADD COLUMN、DEFAULT 0、NULL安全策のUPDATE文、CURRENT_SCHEMA_VERSIONのインクリメント先（22）、複合インデックス追加が全て記載済み。"
+    },
+    {
+      "id": "F3-GETMESSAGES-IMPACT",
+      "original_severity": "should_fix",
+      "status": "resolved",
+      "verification": "実装タスク3で8関数のarchivedフィルタ追加が個別にリストアップされている。実装タスク4でAPI修正（includeArchivedクエリパラメータ）も記載済み。影響範囲セクションにDB関数一覧テーブルが追加されている。"
+    },
+    {
+      "id": "F4-UI-TOGGLE-UNDERSPECIFIED",
+      "original_severity": "should_fix",
+      "status": "resolved",
+      "verification": "実装タスク6でHistoryPaneヘッダー配置、localStorage永続化、視覚的区別が明記されている。"
+    },
+    {
+      "id": "F5-ACCEPTANCE-NO-DATA-GROWTH",
+      "original_severity": "nice_to_have",
+      "status": "resolved",
+      "verification": "'将来の検討事項' セクションに保持期間上限、一括削除UI/API、パフォーマンス劣化対応方針が記載されている。"
+    },
+    {
+      "id": "F6-WEBSOCKET-BROADCAST",
+      "original_severity": "nice_to_have",
+      "status": "resolved",
+      "verification": "実装タスク2にWebSocketペイロードの messagesArchived 変更とクライアント側ハンドラの修正が含まれている。影響範囲セクションにもWebSocketクライアント側の影響が記載されている。"
+    },
+    {
+      "id": "F7-ALTERNATIVE-UNEXPLORED",
+      "original_severity": "nice_to_have",
+      "status": "resolved",
+      "verification": "代替案に '#11のステータス次第' という注記が追加されている。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F5-1-DELETE-ALL-MESSAGES-MISSING",
+      "severity": "must_fix",
+      "category": "実装タスクの完全性",
+      "description": "実装タスク2で 'deleteMessagesByCliTool を論理削除に変更' と記載しているが、kill-session APIにはもう一つの削除パス deleteAllMessages（cliTool未指定時に呼ばれる、route.ts L98）が存在する。このパスも論理削除に変更しないと、cliTool未指定でセッション終了した場合にメッセージが物理削除されてしまう。",
+      "suggestion": "実装タスク2に 'deleteAllMessages関数も同様にUPDATE chat_messages SET archived=1 に変更' を追加する。また、chat-db.ts内の deleteAllMessages 関数（L248）も影響範囲テーブルに追加すべき。",
+      "evidence": "src/app/api/worktrees/[id]/kill-session/route.ts L92-99: targetCliToolがある場合はdeleteMessagesByCliTool、ない場合はdeleteAllMessagesを呼ぶ分岐。現在のIssueは前者のみ言及。"
+    },
+    {
+      "id": "F5-2-WEBSOCKET-CLIENT-OVERCLAIMED",
+      "severity": "nice_to_have",
+      "category": "記載内容の正しさ",
+      "description": "影響範囲セクションに 'クライアント側（WorktreeDetailRefactored.tsx）でこのイベントを受信してメッセージリストをクリアするロジックがある場合' と記載されているが、実際にはクライアント側で messagesCleared を参照するコードは存在しない。messagesCleared は useWebSocket.ts の SessionStatusPayload 型定義に含まれるだけで、WorktreeList.tsx の WebSocket ハンドラは isRunning のみを使用している。影響範囲の記述は正確性を欠く。",
+      "suggestion": "'WorktreeDetailRefactored.tsx' の参照を削除し、'useWebSocket.ts の SessionStatusPayload 型定義の messagesCleared フィールドを messagesArchived に変更する。現時点でクライアント側にmessagesCleared を読み取るロジックはないが、型の意味的一貫性のために変更が望ましい' に修正する。",
+      "evidence": "grep結果: messagesCleared は src/hooks/useWebSocket.ts:17 と src/app/api/worktrees/[id]/kill-session/route.ts:107 の2箇所のみ。src/components 配下に messagesCleared の参照なし。"
+    },
+    {
+      "id": "F5-3-MIGRATION-VERSION-ACCURACY",
+      "severity": "nice_to_have",
+      "category": "記載内容の正しさ",
+      "description": "実装タスク1に 'CURRENT_SCHEMA_VERSION を22にインクリメント（現在のバージョンは21）' と記載されている。現在のコードベースで確認したところ CURRENT_SCHEMA_VERSION = 21 であり正確。ただし、本Issueの実装開始までに他のIssueでマイグレーションが追加される可能性があるため、'現在のバージョンは21' という具体的な数値は実装時に陳腐化するリスクがある。",
+      "suggestion": "'CURRENT_SCHEMA_VERSION を1インクリメント（実装時点のバージョン+1）' という相対的な記述に変更することで、実装タイミングに依存しない記述にできる。軽微な問題であり、実装者が適宜対応すれば問題ない。",
+      "evidence": "src/lib/db/db-migrations.ts L14: export const CURRENT_SCHEMA_VERSION = 21;"
+    },
+    {
+      "id": "F5-4-SQLITE-ALTER-TABLE-DEFAULT",
+      "severity": "nice_to_have",
+      "category": "記載内容の正しさ",
+      "description": "実装タスク1に 'SQLiteのALTER TABLE ADD COLUMNはDEFAULT指定時にも既存行がNULLになる場合の安全策' としてUPDATE文を実行すると記載。SQLite 3.37.0以降ではALTER TABLE ADD COLUMNでDEFAULT指定があれば既存行に対してもデフォルト値が適用される。ただし、CommandMateが使用するbetter-sqlite3のバンドルSQLiteバージョンによっては古い挙動の可能性があるため、安全策としてUPDATE文を入れるのは妥当な判断。この注記自体は問題ない。",
+      "suggestion": "記載のままで問題なし。防御的な実装方針として適切。"
+    }
+  ],
+  "summary": "Stage 1で検出された7件の指摘（must_fix 1件、should_fix 3件、nice_to_have 3件）は全て適切に解決されている。Issueは大幅に拡充され、archived方式の採用が明確になり、影響範囲のDB関数一覧、テスト修正タスク、受入条件も充実した。新たに検出された問題はmust_fix 1件: deleteAllMessages関数の論理削除変更が漏れている点。これはkill-session APIの2つの削除パスのうち1つ（cliTool未指定時）が実装タスクに含まれていないという具体的な漏れであり、修正が必要。その他は記述の正確性に関する軽微な指摘のみ。全体として、実装に着手可能なレベルの具体性と網羅性を備えた良質なIssueになっている。",
+  "must_fix_count": 1,
+  "should_fix_count": 0,
+  "nice_to_have_count": 3
+}

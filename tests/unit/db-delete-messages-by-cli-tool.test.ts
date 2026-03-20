@@ -79,11 +79,11 @@ describe('deleteMessagesByCliTool (T4.2 - MF3-001)', () => {
     expect(deletedCount).toBe(2);
 
     // Verify Claude messages are deleted
-    const claudeMessages = getMessages(db, testWorktreeId, undefined, 50, 'claude');
+    const claudeMessages = getMessages(db, testWorktreeId, { limit: 50, cliToolId: 'claude' });
     expect(claudeMessages).toHaveLength(0);
 
     // Verify Codex messages still exist
-    const codexMessages = getMessages(db, testWorktreeId, undefined, 50, 'codex');
+    const codexMessages = getMessages(db, testWorktreeId, { limit: 50, cliToolId: 'codex' });
     expect(codexMessages).toHaveLength(2);
   });
 
@@ -143,11 +143,11 @@ describe('deleteMessagesByCliTool (T4.2 - MF3-001)', () => {
     deleteMessagesByCliTool(db, testWorktreeId, 'claude');
 
     // Verify worktree 1 messages are deleted
-    const worktree1Messages = getMessages(db, testWorktreeId, undefined, 50, 'claude');
+    const worktree1Messages = getMessages(db, testWorktreeId, { limit: 50, cliToolId: 'claude' });
     expect(worktree1Messages).toHaveLength(0);
 
     // Verify worktree 2 messages still exist
-    const worktree2Messages = getMessages(db, 'test-worktree-2', undefined, 50, 'claude');
+    const worktree2Messages = getMessages(db, 'test-worktree-2', { limit: 50, cliToolId: 'claude' });
     expect(worktree2Messages).toHaveLength(1);
   });
 });

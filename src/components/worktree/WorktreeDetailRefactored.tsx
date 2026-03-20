@@ -268,6 +268,21 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // [Issue #447] History sub-tab: 'message' (default) or 'git'
   const [historySubTab, setHistorySubTab] = useState<'message' | 'git'>('message');
 
+  // Issue #168: showArchived toggle state with localStorage persistence
+  const [showArchived, setShowArchived] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('commandmate:showArchived') === 'true';
+  });
+  const handleShowArchivedChange = useCallback((show: boolean) => {
+    setShowArchived(show);
+    localStorage.setItem('commandmate:showArchived', String(show));
+  }, []);
+  // Ref for showArchived to avoid callback recreation
+  const showArchivedRef = useRef(showArchived);
+  useEffect(() => {
+    showArchivedRef.current = showArchived;
+  }, [showArchived]);
+
   // TODO: [D1-001] pendingInsertText の状態管理を useTextInsertion カスタムフックに抽出する（技術的負債）
   // [Issue #485] State for inserting text from history/memo into message input
   const [pendingInsertText, setPendingInsertText] = useState<string | null>(null);
@@ -348,7 +363,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Issue #4: Use ref for activeCliTab to avoid callback recreation on tab switch
   const fetchMessages = useCallback(async (): Promise<void> => {
     try {
-      const response = await fetch(`/api/worktrees/${worktreeId}/messages?cliTool=${activeCliTabRef.current}`);
+      const params = new URLSearchParams({ cliTool: activeCliTabRef.current });
+      if (showArchivedRef.current) {
+        params.set('includeArchived', 'true');
+      }
+      const response = await fetch(`/api/worktrees/${worktreeId}/messages?${params.toString()}`);
       if (!response.ok) {
         throw new Error(`Failed to fetch messages: ${response.status}`);
       }
@@ -466,6 +485,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       void fetchCurrentOutput();
     }
   }, [activeCliTab, actions, fetchMessages, fetchCurrentOutput]);
+
+  // Issue #168: Re-fetch messages when showArchived toggle changes
+  useEffect(() => {
+    void fetchMessages();
+  }, [showArchived, fetchMessages]);
 
   // Toast state for notifications (moved before event handlers that reference showToast)
   const { toasts, showToast, removeToast } = useToast();
@@ -1400,6 +1424,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   className="flex-1 min-h-0"
                   showToast={showToast}
                   onInsertToMessage={handleInsertToMessage}
+                  showArchived={showArchived}
+                  onShowArchivedChange={handleShowArchivedChange}
                 />
               )}
               {historySubTab === 'git' && (
@@ -1465,7 +1491,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         </div>
       </div>
     ),
-    [leftPaneTab, handleLeftPaneTabChange, historySubTab, state.messages, worktreeId, handleFilePathClick, showToast, fileSearch.query, fileSearch.mode, fileSearch.isSearching, fileSearch.error, fileSearch.setQuery, fileSearch.setMode, fileSearch.clearSearch, fileSearch.results?.results, handleFileSelect, handleNewFile, handleNewDirectory, handleRename, handleDelete, handleUpload, handleMove, handleCmateSetup, fileTreeRefresh, selectedAgents, handleSelectedAgentsChange, vibeLocalModel, handleVibeLocalModelChange, vibeLocalContextWindow, handleVibeLocalContextWindowChange, handleDiffSelect, handleInsertToMessage]
+    [leftPaneTab, handleLeftPaneTabChange, historySubTab, state.messages, worktreeId, handleFilePathClick, showToast, fileSearch.query, fileSearch.mode, fileSearch.isSearching, fileSearch.error, fileSearch.setQuery, fileSearch.setMode, fileSearch.clearSearch, fileSearch.results?.results, handleFileSelect, handleNewFile, handleNewDirectory, handleRename, handleDelete, handleUpload, handleMove, handleCmateSetup, fileTreeRefresh, selectedAgents, handleSelectedAgentsChange, vibeLocalModel, handleVibeLocalModelChange, vibeLocalContextWindow, handleVibeLocalContextWindowChange, handleDiffSelect, handleInsertToMessage, showArchived, handleShowArchivedChange]
   );
 
   // ========================================================================
@@ -1772,6 +1798,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onHistorySubTabChange={setHistorySubTab}
             onDiffSelect={handleDiffSelect}
             onInsertToMessage={handleInsertToMessage}
+            showArchived={showArchived}
+            onShowArchivedChange={handleShowArchivedChange}
           />
         </main>
 

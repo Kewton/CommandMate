@@ -1,0 +1,119 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 168,
+  "findings": [
+    {
+      "id": "IA3-001",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "conversation-logger.ts の getLastUserMessage がアーカイブ済みメッセージを返す可能性",
+      "description": "src/lib/conversation-logger.ts は getLastUserMessage(db, worktreeId) を呼び出してClaude応答をログに記録する。設計書ではgetLastUserMessageにACTIVE_FILTERを追加する計画だが、conversation-logger.tsは変更ファイル一覧に含まれていない。getLastUserMessageのシグネチャ変更自体は内部実装変更のみであるため呼び出し元の修正は不要だが、動作確認は必要。kill-session後にgetLastUserMessageがnullを返すようになることで、conversation-loggerのログ記録がスキップされる。これは正しい動作だが、テスト戦略のセクション（セクション11）に conversation-logger.ts の動作確認テストが記載されていない。",
+      "affected_files": ["src/lib/conversation-logger.ts"],
+      "recommendation": "テスト戦略（セクション11）の「変更不要だが動作確認が必要なテスト」一覧にconversation-logger.tsの動作確認を追加する。kill-session後にrecordClaudeConversationがログを生成しないことを確認するテストケースを記載する。"
+    },
+    {
+      "id": "IA3-002",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "src/lib/api-client.ts のgetMessagesにincludeArchivedパラメータが未対応",
+      "description": "src/lib/api-client.ts（ブラウザ側APIクライアント）のgetMessages関数はcliToolパラメータのみを受け取る。設計書ではmessages/route.tsにincludeArchivedクエリパラメータを追加するが、api-client.tsの更新が変更ファイル一覧に含まれていない。WorktreeDetailRefactored.tsxがmessages APIを呼び出す際にincludeArchivedパラメータを渡す必要があるが、このクライアント関数を通じて呼び出す場合、includeArchivedが送信されない。",
+      "affected_files": ["src/lib/api-client.ts"],
+      "recommendation": "src/lib/api-client.tsのgetMessages関数にincludeArchived?: booleanパラメータを追加し、trueの場合にURLSearchParamsに'includeArchived=true'を追加する。変更ファイル一覧にapi-client.tsを追加する。WorktreeDetailRefactored.tsxがapi-client.tsを経由してmessages APIを呼び出しているかどうかを確認し、直接fetch呼び出しの場合はこの指摘の優先度を下げてよい。"
+    },
+    {
+      "id": "IA3-003",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "worktree-status-helper.tsのgetMessages呼び出しが型インポート方式で間接参照されている",
+      "description": "src/lib/session/worktree-status-helper.tsはgetMessagesをtypeofインポート（import type { getMessages as GetMessagesFn }）として参照し、関数パラメータとして受け取る（DI方式）。現行の呼び出しはgetMessages(db, worktreeId, undefined, 10, cliToolId)という位置パラメータ形式。設計書のCR2-001でオプションオブジェクト形式への変更が記載されているが、このDIパターンの型定義（typeof GetMessagesFn）がオプションオブジェクト形式に追随することを明示的に記載する必要がある。型がtypeofで推論されるため、chat-db.tsのシグネチャ変更で自動的に追随するが、テスト内のモック関数のシグネチャも更新が必要。",
+      "affected_files": [
+        "src/lib/session/worktree-status-helper.ts",
+        "tests/unit/lib/worktree-status-helper.test.ts"
+      ],
+      "recommendation": "worktree-status-helper.tsのモックテストにおいて、getMessagesのモック関数シグネチャをオプションオブジェクトパターンに合わせて更新する必要があることを実装チェックリストに追記する。"
+    },
+    {
+      "id": "IA3-004",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "createMessage関数にarchived フィールドの考慮が不足",
+      "description": "ChatMessage型にarchived: booleanを追加する設計だが、createMessage関数はOmit<ChatMessage, 'id'>を引数に取る。archivedがrequiredになると、createMessageの全呼び出し元（response-poller.ts, assistant-response-saver.ts, send/route.ts, claude-done/route.ts）でarchived: falseを明示的に渡す必要がある。INSERT文にもarchivedカラムの追加が必要。ただしDEFAULT 0が設定されるため、SQL側は省略可能だが、TypeScriptの型チェックでコンパイルエラーが発生する。",
+      "affected_files": [
+        "src/lib/db/chat-db.ts",
+        "src/lib/polling/response-poller.ts",
+        "src/lib/assistant-response-saver.ts",
+        "src/app/api/worktrees/[id]/send/route.ts",
+        "src/app/api/hooks/claude-done/route.ts"
+      ],
+      "recommendation": "以下のいずれかの対応を設計書に追記する: (A) ChatMessage型のarchivedをoptional（archived?: boolean）にする（ただしDR1-006と矛盾）、(B) createMessage関数のパラメータ型をOmit<ChatMessage, 'id' | 'archived'>に変更する（推奨）、(C) 全呼び出し元でarchived: falseを明示的に渡す。推奨は(B)で、createMessageの引数型定義を変更するだけで全呼び出し元の変更が不要になる。"
+    },
+    {
+      "id": "IA3-005",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "データ蓄積に対するパージ/VACUUM戦略が未定義",
+      "description": "物理削除から論理削除への変更により、chat_messagesテーブルのデータは無限に蓄積される。頻繁にセッションをkill/再作成するワークフローでは、メッセージ数が急速に増加する。設計書セクション8ではインデックス戦略を定義しているが、古いアーカイブメッセージのパージ（物理削除）戦略やSQLite VACUUMの実行タイミングが定義されていない。セクション9ではsession_id方式との比較で「将来の拡張」に言及しているが、データ増加への具体的な対策は記載されていない。",
+      "affected_files": [],
+      "recommendation": "以下を設計書に追記する: (1) 将来的なパージ方針（例: 30日以上前のアーカイブメッセージを定期的に物理削除するオプション機能）を設計上の考慮事項として記載する。(2) 現時点ではパージ機能は実装しない（YAGNI）が、パージが必要になった場合の設計方針（DELETE FROM chat_messages WHERE archived = 1 AND timestamp < ?）を備考として記載する。(3) SQLite VACUUMの必要性を評価する注記を追加する。"
+    },
+    {
+      "id": "IA3-006",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "session-cleanup.ts への影響分析が記載されていない",
+      "description": "設計書の変更ファイル一覧にsession-cleanup.tsが含まれていない。session-cleanup.tsのsyncWorktreesAndCleanup関数はworktree削除時にcleanupMultipleWorktreesを呼び出すが、メッセージの削除はON DELETE CASCADEで処理されるため直接影響はない。しかし、cleanupWorktreeSessionsの動作フロー（kill session -> stop pollers）において、kill-session APIが物理削除から論理削除に変わることの間接的影響が設計書で分析されていない。結論として影響はないが、影響分析として明示的に記載すべき。",
+      "affected_files": ["src/lib/session-cleanup.ts"],
+      "recommendation": "設計書に「影響なし確認済みファイル」セクションを追加し、session-cleanup.tsについて以下を記載する: (1) cleanupWorktreeSessionsはmessage削除を直接呼び出さない（kill-session APIが処理）、(2) syncWorktreesAndCleanupはON DELETE CASCADEにより間接的にメッセージが物理削除される（これは正しい動作：worktree自体が削除される場合はアーカイブも不要）。"
+    },
+    {
+      "id": "IA3-007",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "response-poller.tsの暗黙的なgetLastMessage依存が未分析",
+      "description": "response-poller.tsはchat-db.tsからcreateMessage, markPendingPromptsAsAnsweredをインポートしているが、getLastMessageは直接使用していない（response-poller.tsのGrep結果で確認）。ただし、response-poller.tsはcreateMessage経由で新しいメッセージを作成しており、kill-session後のシナリオ（アーカイブ済みメッセージのみ存在する状態）でのポーリング動作が正しく機能するかの分析が設計書に記載されていない。",
+      "affected_files": ["src/lib/polling/response-poller.ts"],
+      "recommendation": "設計書のパフォーマンス設計セクションまたは影響分析セクションに、response-poller.tsの動作シナリオを追記する: kill-session後にポーリングが再開された場合、archived=0のメッセージのみが参照されるため、新セッションのメッセージのみが対象となり正常に動作する。"
+    },
+    {
+      "id": "IA3-008",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "log-export-sanitizer.tsへの影響は確認済みだが明記されていない",
+      "description": "log-export-sanitizer.tsはchat_messagesやDB関数に一切依存しておらず、文字列パターンマッチングのみを行うユーティリティである。本変更の影響は受けない。",
+      "affected_files": ["src/lib/log-export-sanitizer.ts"],
+      "recommendation": "設計書の影響分析に「影響なし」として一言記載すると、レビュー時の確認が不要になる。"
+    },
+    {
+      "id": "IA3-009",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "CLIモジュール（src/cli/）への影響分析が記載されていない",
+      "description": "CLIコマンド（capture, send, wait, respond, auto-yes, ls）はHTTP API経由でサーバーと通信するため、DB関数の変更の直接的な影響は受けない。ただし、captureコマンドやsendコマンドがmessages APIを間接的に利用する可能性がある。調査の結果、CLIのapi-client.ts（src/cli/utils/api-client.ts）はサーバー側のapi-client.ts（src/lib/api-client.ts）とは別モジュールであり、messages APIを直接呼び出していない。CLIモジュールへの影響はない。",
+      "affected_files": [],
+      "recommendation": "設計書に「CLIモジュール（src/cli/）: HTTP API経由のため直接影響なし」と明記する。"
+    },
+    {
+      "id": "IA3-010",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "auto-yes-poller.tsへの影響確認が未記載",
+      "description": "auto-yes-poller.tsはchat_messagesを直接参照せず、プロンプト検出とキー送信のみを行う。本変更の影響は受けない。",
+      "affected_files": ["src/lib/auto-yes-poller.ts"],
+      "recommendation": "設計書の影響分析に「影響なし」として記載する。"
+    },
+    {
+      "id": "IA3-011",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "assistant-response-saver.tsのcreateMessage呼び出しへの影響",
+      "description": "src/lib/assistant-response-saver.tsはcreateMessageを呼び出してアシスタント応答を保存する。IA3-004で指摘したcreateMessageの型変更（Omit<ChatMessage, 'id' | 'archived'>推奨）が反映されれば、このファイルの変更は不要。ただし変更ファイル一覧に記載されていない。",
+      "affected_files": ["src/lib/assistant-response-saver.ts"],
+      "recommendation": "IA3-004の対応方針に応じて、変更ファイル一覧への追加要否を判断する。"
+    }
+  ],
+  "summary": "影響分析レビューでは、設計書の変更ファイル一覧に含まれていない間接的な影響箇所を11件検出した。最も重要な指摘は3件: (1) conversation-logger.tsの動作確認テストの欠落(IA3-001)、(2) ブラウザ側api-client.tsのincludeArchivedパラメータ未対応(IA3-002)、(3) createMessage関数のOmit型にarchivedを含める必要性(IA3-004)。特にIA3-002はUI側でアーカイブ表示トグルが動作しない可能性があり、IA3-004はTypeScriptコンパイルエラーを引き起こす。session-cleanup.ts、response-poller.ts、auto-yes-poller.ts、log-export-sanitizer.ts、CLIモジュールについては直接影響がないことを確認したが、設計書に明示的な影響分析記載がないためshould_fix/nice_to_haveとして指摘した。データ蓄積に対するパージ戦略の欠如(IA3-005)も長期運用における重要な考慮事項である。",
+  "must_fix_count": 3,
+  "should_fix_count": 4,
+  "nice_to_have_count": 4
+}

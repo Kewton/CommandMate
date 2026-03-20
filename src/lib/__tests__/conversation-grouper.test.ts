@@ -37,6 +37,7 @@ function createMessage(
     content,
     timestamp,
     messageType: 'normal',
+    archived: false,
   };
 }
 

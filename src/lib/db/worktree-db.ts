@@ -9,6 +9,7 @@ import Database from 'better-sqlite3';
 import type { Worktree } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { parseSelectedAgents } from '@/lib/selected-agents-validator';
+import { ACTIVE_FILTER } from './chat-db';
 
 /**
  * Get latest user message per CLI tool for multiple worktrees (batch query)
@@ -44,6 +45,7 @@ function getLastMessagesByCliBatch(
       FROM chat_messages
       WHERE worktree_id IN (${placeholders})
         AND role = 'user'
+        ${ACTIVE_FILTER}
     )
     SELECT worktree_id, cli_tool_id, content
     FROM ranked_messages
@@ -91,7 +93,7 @@ export function getWorktrees(
       w.updated_at, w.favorite, w.status, w.link, w.cli_tool_id, w.last_viewed_at,
       w.selected_agents, w.vibe_local_model, w.vibe_local_context_window,
       (SELECT MAX(timestamp) FROM chat_messages
-       WHERE worktree_id = w.id AND role = 'assistant') as last_assistant_message_at
+       WHERE worktree_id = w.id AND role = 'assistant' ${ACTIVE_FILTER}) as last_assistant_message_at
     FROM worktrees w
   `;
 
@@ -206,7 +208,7 @@ export function getWorktreeById(
       w.updated_at, w.favorite, w.status, w.link, w.cli_tool_id, w.last_viewed_at,
       w.selected_agents, w.vibe_local_model, w.vibe_local_context_window,
       (SELECT MAX(timestamp) FROM chat_messages
-       WHERE worktree_id = w.id AND role = 'assistant') as last_assistant_message_at
+       WHERE worktree_id = w.id AND role = 'assistant' ${ACTIVE_FILTER}) as last_assistant_message_at
     FROM worktrees w
     WHERE w.id = ?
   `);

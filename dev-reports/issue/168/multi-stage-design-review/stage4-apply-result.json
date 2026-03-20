@@ -1,0 +1,75 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘対応",
+  "issue_number": 168,
+  "applied_findings": [
+    {
+      "id": "SEC4-007",
+      "severity": "must_fix",
+      "title": "ACTIVE_FILTER 定数のテストカバレッジ確保",
+      "action": "テスト戦略セクション11に ACTIVE_FILTER 定数値検証テストケースを追加。実装チェックリストセクション12に must_fix 項目として追加。変更ファイル一覧に tests/unit/db.test.ts を追加。"
+    },
+    {
+      "id": "SEC4-001",
+      "severity": "should_fix",
+      "title": "includeArchived 非正規値テストケース追加",
+      "action": "テスト戦略セクション11に非正規値（'TRUE', '1', 'yes', null）のテストケースを追加。実装チェックリストセクション12に should_fix 項目として追加。変更ファイル一覧に tests/integration/api-messages.test.ts を追加。"
+    },
+    {
+      "id": "SEC4-003",
+      "severity": "should_fix",
+      "title": "論理削除によるデータ保持のプライバシー通知",
+      "action": "セクション5.6としてUI通知設計を新設。セクション7にデータ保持とプライバシーのサブセクションを追加。実装チェックリストセクション12に should_fix 項目として追加。変更ファイル一覧に HistoryPane.tsx のSEC4-003対応を追加。"
+    },
+    {
+      "id": "SEC4-006",
+      "severity": "should_fix",
+      "title": "localStorage storageイベントリスナーの厳密比較維持",
+      "action": "セクション5.2に将来のstorageイベントリスナー追加時の注意事項として注記を追加。実装チェックリストセクション12に should_fix 項目として記録。"
+    },
+    {
+      "id": "SEC4-009",
+      "severity": "should_fix",
+      "title": "404エラーレスポンスのworktree ID露出（既存問題）",
+      "action": "セクション7に既存課題として記録。Issue #168 範囲外のため対応不要だが、将来検討事項として注記。実装チェックリストに記録のみ追加。"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "SEC4-002",
+      "severity": "nice_to_have",
+      "title": "アクセス制御は既存認証ミドルウェアで保護済み",
+      "reason": "対応不要 - 適切に設計済みとレビューで確認。Stage 4 サマリーテーブルに記録済み。"
+    },
+    {
+      "id": "SEC4-004",
+      "severity": "nice_to_have",
+      "title": "Mass Assignment防止はOmit型で適切に設計済み",
+      "reason": "対応不要 - 適切に設計済みとレビューで確認。Stage 4 サマリーテーブルに記録済み。"
+    },
+    {
+      "id": "SEC4-005",
+      "severity": "nice_to_have",
+      "title": "エラーメッセージにアーカイブ情報漏洩なし",
+      "reason": "対応不要 - 適切に設計済みとレビューで確認。Stage 4 サマリーテーブルに記録済み。"
+    },
+    {
+      "id": "SEC4-008",
+      "severity": "nice_to_have",
+      "title": "ON DELETE CASCADEによる物理削除は適切",
+      "reason": "対応不要 - 適切に設計済みとレビューで確認。Stage 4 サマリーテーブルに記録済み。"
+    }
+  ],
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-168-session-history-retention-design-policy.md",
+  "sections_modified": [
+    "Stage 4 レビュー指摘事項サマリー（新規セクション追加）",
+    "OWASP Top 10 カバレッジ（新規サブセクション追加）",
+    "5.2 localStorage永続化（SEC4-006 注記追加）",
+    "5.6 アーカイブデータ保持に関するユーザー通知（新規サブセクション追加）",
+    "7. セキュリティ設計（SEC4-003 データ保持・プライバシー、SEC4-009 既存課題を追加）",
+    "11. テスト戦略（SEC4-007, SEC4-001 テストケース追加）",
+    "12. 実装チェックリスト（Stage 4 must_fix/should_fix 項目追加）",
+    "変更ファイル一覧（SEC4-007, SEC4-001, SEC4-003 対応ファイル追加）"
+  ]
+}
