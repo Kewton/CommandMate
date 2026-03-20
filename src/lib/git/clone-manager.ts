@@ -26,7 +26,8 @@ import {
   type CloneJobDB,
   type Repository,
 } from '@/lib/db/db-repository';
-import { scanWorktrees, syncWorktreesToDB } from './worktrees';
+import { scanWorktrees } from './worktrees';
+import { syncWorktreesAndCleanup } from '@/lib/session-cleanup';
 import type { CloneError, CloneErrorCategory, CloneJobStatus } from '@/types/clone';
 import { createLogger } from '@/lib/logger';
 
@@ -391,7 +392,7 @@ export class CloneManager {
 
     // 7. Start clone in background (don't await)
     this.executeClone(job.id, cloneUrl, targetPath).catch((error) => {
-      logger.error('clone-failed-for-job-jobid:', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('clone:job-failed', { jobId: job.id, error: error instanceof Error ? error.message : String(error) });
     });
 
     return {
@@ -527,15 +528,19 @@ export class CloneManager {
       cloneSource: cloneSource as 'local' | 'https' | 'ssh',
     });
 
-    // Scan and register worktrees
+    // Issue #526: Scan and register worktrees with cleanup (MF-001, IA-MF-002)
     try {
       const worktrees = await scanWorktrees(targetPath);
       if (worktrees.length > 0) {
-        syncWorktreesToDB(this.db, worktrees);
-        logger.info('registered-worktreeslength-worktrees');
+        const { syncResult, cleanupWarnings } = await syncWorktreesAndCleanup(this.db, worktrees);
+        logger.info('clone:worktrees-registered', { count: worktrees.length, upserted: syncResult.upsertedCount });
+        if (cleanupWarnings.length > 0) {
+          logger.warn('clone:cleanup-warnings', { cleanupWarnings });
+        }
       }
     } catch (error) {
-      logger.error('failed-to-scan-worktrees-for-targetpath:', { error: error instanceof Error ? error.message : String(error) });
+      // IA-MF-002: syncWorktreesAndCleanup failure should not break clone success
+      logger.error('clone:worktree-scan-failed', { targetPath, error: error instanceof Error ? error.message : String(error) });
       // Continue even if worktree scan fails - the repository is still registered
     }
 

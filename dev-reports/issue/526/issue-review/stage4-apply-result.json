@@ -1,0 +1,59 @@
+{
+  "issue_number": 526,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-03-20",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "server.ts の excludedPaths 削除処理(L225-232)を影響範囲テーブルに追加。受け入れ基準に server.ts excludedPaths 削除処理のクリーンアップ要件を追加。修正方針の呼び出し元一覧にも server.ts excludedPaths 行を追加し、syncWorktreesToDB() 経由ではないため別途対応が必要である旨を注記。"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "全呼び出し元（sync/route.ts, scan/route.ts, restore/route.ts, clone-manager.ts, server.ts:239, server.ts:225-232）の方針(A)/(B)それぞれの具体的修正内容を一覧テーブルとして追加。全呼び出し元がasyncコンテキスト内にあり方針(A)が技術的に全箇所適用可能であることを明記。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "方針(B)が責務分離の観点で推奨である旨の設計ノートを追加。worktrees.tsの現在のimport一覧と、方針(A)で追加される依存の具体的内容を記載。方針テーブルにも責務の越境に関するトレードオフを追記。"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "テスト方針に3項目追加: (5) server.ts初期化処理は共通関数抽出でテスト可能化、(6) clone-manager.tsはexecuteClone()経由のインテグレーションテスト、(7) 方針(B)採用時の呼び出し元テストでdeletedIdsに対するcleanupMultipleWorktrees呼び出し検証。"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "大量削除時のパフォーマンス影響分析セクションを追加。最悪ケース試算（47 worktrees * 5 CLI tools * 5秒 = 約20分）と3つの対策方針（hasSession先行確認、Promise.all並列実行、タイムアウト上限設定）を記載。受け入れ基準にパフォーマンス要件を追加。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "killSessionFnの供給方法の詳細は実装フェーズで決定する設計詳細のため、Issue本文では方針(B)推奨の記載で十分と判断"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "JSDocへの変更理由記録は実装時のコーディング規約として対応すべき内容であり、Issue本文への記載は不要と判断"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 7,
+    "applied": 5,
+    "skipped": 2
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/526"
+  }
+}

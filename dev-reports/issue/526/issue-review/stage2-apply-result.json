@@ -1,0 +1,53 @@
+{
+  "issue_number": 526,
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-03-20",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "修正方針セクションに「設計判断: sync/asyncの整合性」サブセクションを追加。syncWorktreesToDB()が同期関数である点と、3つの実装選択肢(A/B/C)およびそれぞれのトレードオフを明記。"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "「受け入れ基準」セクションを新規追加。7項目のチェックリスト形式で、各APIルートでのクリーンアップ検証、孤立セッション確認、エラーハンドリング、既存機能への影響確認を記載。"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "「影響」セクションを拡張。sync/route.tsのみだったテーブルに scan/route.ts、restore/route.ts、clone-manager.ts を追加し、全4箇所の呼び出し元を明示。「関連ファイル」セクションにも3ファイルを追加。"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "「テスト方針」セクションを新規追加。既存テスト拡張、モックテスト、エラーハンドリングテスト、呼び出し元テストの4項目を記載。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "再現手順の認証ヘッダー補足は軽微な改善であり、本質的な情報不足ではないため省略。"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "Anvilプロジェクトへのリンク追加は外部参照であり、Issue理解に必須ではないため省略。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 6,
+    "applied": 4,
+    "skipped": 2
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/526"
+  }
+}

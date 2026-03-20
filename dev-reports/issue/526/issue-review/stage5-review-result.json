@@ -1,0 +1,137 @@
+{
+  "issue_number": 526,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "review_date": "2026-03-20",
+  "previous_findings_verification": {
+    "stage1_findings": {
+      "SF-1": {
+        "status": "resolved",
+        "verification": "修正方針セクションに「設計判断: sync/asyncの整合性」サブセクションが追加され、3つの選択肢(A/B/C)とトレードオフが明記されている。syncWorktreesToDB()が同期関数(void)である点と、各選択肢の呼び出し元への影響も記載済み。"
+      },
+      "SF-2": {
+        "status": "resolved",
+        "verification": "「受け入れ基準」セクションが追加され、9項目のチェックリスト形式で記載。sync/scan/restore/clone-manager/server.tsの各呼び出し元でのクリーンアップ検証、孤立セッション確認、エラーハンドリング、パフォーマンス要件を網羅。"
+      },
+      "SF-3": {
+        "status": "resolved",
+        "verification": "「影響」セクションのテーブルにsync/scan/restore/clone-manager/server.tsの全6行を記載。syncWorktreesToDB()経由の5箇所とserver.tsのexcludedPaths直接呼び出しを区別して明記。"
+      },
+      "SF-4": {
+        "status": "resolved",
+        "verification": "「テスト方針」セクションに7項目を記載。既存テスト拡張、モックテスト、エラーハンドリングテスト、呼び出し元テスト、server.ts初期化処理テスト、clone-manager.tsテスト、方針(B)採用時テストを網羅。"
+      }
+    },
+    "stage3_findings": {
+      "MF-1": {
+        "status": "resolved",
+        "verification": "server.tsのexcludedPaths削除処理を影響範囲テーブルに追加済み。修正方針の呼び出し元一覧にもserver.ts:225-232行を記載し、syncWorktreesToDB()経由ではないため別途対応が必要である旨を注記済み。受け入れ基準にも対応項目を追加済み。"
+      },
+      "MF-2": {
+        "status": "resolved",
+        "verification": "全呼び出し元の方針(A)/(B)の具体的修正内容を一覧テーブルとして追加済み。全呼び出し元がasyncコンテキスト内にある旨も明記。server.ts:225-232のexcludedPaths処理がsyncWorktreesToDB()経由ではない点も注意書きとして記載済み。"
+      },
+      "SF-1": {
+        "status": "resolved",
+        "verification": "設計ノートとして方針(B)が責務分離の観点で推奨である旨を追記済み。worktrees.tsの現在のimport一覧と、方針(A)で追加される依存の詳細も記載。"
+      },
+      "SF-2": {
+        "status": "resolved",
+        "verification": "テスト方針に3項目追加済み: server.ts初期化処理の共通関数抽出、clone-manager.tsのexecuteClone()経由テスト、方針(B)時の呼び出し元テスト。"
+      },
+      "SF-3": {
+        "status": "resolved",
+        "verification": "大量削除時のパフォーマンス影響分析セクションを追加済み。最悪ケース試算と3つの対策方針を記載。受け入れ基準にパフォーマンス要件も追加済み。"
+      }
+    }
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 0,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "受け入れ基準の「大量worktree削除時にsync処理が実用的な時間内に完了すること（パフォーマンス対策の実装）」について、「実用的な時間」の具体的な数値基準が未定義。パフォーマンス考慮セクションでは最悪ケース20分の試算があるが、受け入れ基準として何秒/何分以内が合格ラインなのかが不明確。",
+        "location": "受け入れ基準 最終項目",
+        "recommendation": "「例: 50件のworktree削除で60秒以内」など、テスト可能な閾値を記載するか、「パフォーマンス対策（hasSession先行確認、並列実行等）が実装されていること」という実装要件に置き換える。実装時に検討すれば十分なレベルの指摘であり、Issue記載としては現状でも許容範囲。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "明確性",
+        "issue": "修正方針で「推奨」と記載されている方針(B)について、最終的にどの方針を採用するかの決定プロセスが未記載。Issue担当者が実装時に判断するのか、実装前にチームで議論するのかが不明。",
+        "location": "修正方針 セクション",
+        "recommendation": "「実装時に担当者が最終判断する」等、意思決定のタイミングを明記するか、方針(B)を正式な決定事項として記載する。ただし推奨方針が明示されているため、実装上の支障にはならない。"
+      }
+    ]
+  },
+  "overall_assessment": {
+    "quality": "high",
+    "readiness": "ready_for_implementation",
+    "comment": "Stage 1-4のレビュー指摘（Stage 1: Should Fix 4件、Stage 3: Must Fix 2件 + Should Fix 3件）はすべて適切に反映されている。Issue本文は問題の原因、影響範囲（全6箇所の呼び出し元を網羅）、修正方針（3選択肢のトレードオフ比較、呼び出し元ごとの具体的修正内容）、受け入れ基準（9項目）、テスト方針（7項目）を包括的に記載しており、実装に必要な情報が十分に揃っている。コードベースとの整合性についても、行番号、関数シグネチャ、定数値（DEFAULT_TIMEOUT=5000ms、CLI_TOOL_IDS=5種類）等がすべて実際のコードと一致していることを確認した。残存する2件のNice to Have指摘はいずれも軽微であり、実装着手を妨げるものではない。"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/git/worktrees.ts",
+      "lines": "265-308",
+      "relevance": "修正対象: syncWorktreesToDB()。Issue記載のコードスニペット（L290-306の削除ロジック）と実際のコードが一致することを確認。"
+    },
+    {
+      "file": "src/lib/git/clone-manager.ts",
+      "lines": "513-540",
+      "relevance": "onCloneSuccess()内のsyncWorktreesToDB()呼び出し（L534）。privateアクセス修飾子が付与されていることを確認（L513: private async onCloneSuccess）。"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "lines": "153-174",
+      "relevance": "cleanupMultipleWorktrees()の逐次処理実装（forループ L160-161）。Issue記載のパフォーマンス懸念と一致。"
+    },
+    {
+      "file": "src/lib/tmux/tmux.ts",
+      "lines": "15",
+      "relevance": "DEFAULT_TIMEOUT=5000。Issue記載の値と一致。"
+    },
+    {
+      "file": "server.ts",
+      "lines": "225-232, 239",
+      "relevance": "excludedPaths削除処理（L225-232: deleteWorktreesByIds直接呼び出し）とsyncWorktreesToDB()呼び出し（L239）。Issue記載の行番号と一致。"
+    },
+    {
+      "file": "src/app/api/repositories/sync/route.ts",
+      "lines": "48",
+      "relevance": "syncWorktreesToDB()呼び出し。Issue記載の行番号と一致。"
+    },
+    {
+      "file": "src/app/api/repositories/scan/route.ts",
+      "lines": "53",
+      "relevance": "syncWorktreesToDB()呼び出し。Issue記載の行番号と一致。"
+    },
+    {
+      "file": "src/app/api/repositories/restore/route.ts",
+      "lines": "61",
+      "relevance": "syncWorktreesToDB()呼び出し。Issue記載の行番号と一致。"
+    },
+    {
+      "file": "src/lib/cli-tools/types.ts",
+      "lines": "10",
+      "relevance": "CLI_TOOL_IDS = ['claude', 'codex', 'gemini', 'vibe-local', 'opencode']（5種類）。Issue記載と一致。"
+    },
+    {
+      "file": "src/app/api/repositories/route.ts",
+      "lines": "30-44",
+      "relevance": "正しく実装済みのkillWorktreeSession()パターン。Issue記載の参考実装と一致。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構造およびモジュール一覧の整合性確認。"
+    }
+  ]
+}

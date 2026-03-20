@@ -1,0 +1,25 @@
+{
+  "issue_number": 526,
+  "refactor_targets": [
+    "src/lib/session-cleanup.ts",
+    "src/lib/git/worktrees.ts",
+    "src/app/api/repositories/sync/route.ts",
+    "src/app/api/repositories/scan/route.ts",
+    "src/app/api/repositories/restore/route.ts",
+    "src/app/api/repositories/route.ts",
+    "src/lib/git/clone-manager.ts",
+    "server.ts"
+  ],
+  "quality_metrics": {
+    "unit_tests_passed": 5209,
+    "acceptance_criteria_passed": "9/9",
+    "type_errors": 0,
+    "lint_errors": 0
+  },
+  "improvement_goals": [
+    "コード品質の確認と改善",
+    "不要なコメントや冗長なコードの削除",
+    "エラーハンドリングの一貫性確認",
+    "テストカバレッジの確認"
+  ]
+}

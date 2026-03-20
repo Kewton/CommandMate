@@ -23,7 +23,7 @@ describe('syncWorktreesToDB', () => {
     testDb.close();
   });
 
-  it('should add new worktrees to DB', () => {
+  it('should add new worktrees to DB and return upsertedCount', () => {
     const worktrees: Worktree[] = [
       {
         id: 'repo-main',
@@ -41,11 +41,15 @@ describe('syncWorktreesToDB', () => {
       },
     ];
 
-    syncWorktreesToDB(testDb, worktrees);
+    const result = syncWorktreesToDB(testDb, worktrees);
 
     const dbWorktrees = getWorktrees(testDb);
     expect(dbWorktrees).toHaveLength(2);
     expect(dbWorktrees.map(w => w.id).sort()).toEqual(['repo-feature-1', 'repo-main']);
+
+    // Issue #526: Verify SyncResult
+    expect(result.deletedIds).toEqual([]);
+    expect(result.upsertedCount).toBe(2);
   });
 
   it('should update existing worktrees in DB', () => {
@@ -79,7 +83,7 @@ describe('syncWorktreesToDB', () => {
     expect(dbWorktrees[0].description).toBe('Updated description');
   });
 
-  it('should remove deleted worktrees from DB', () => {
+  it('should remove deleted worktrees from DB and return deletedIds', () => {
     // Initial state: 3 worktrees
     const initialWorktrees: Worktree[] = [
       {
@@ -127,12 +131,17 @@ describe('syncWorktreesToDB', () => {
         repositoryName: 'repo',
       },
     ];
-    syncWorktreesToDB(testDb, afterCleanup);
+    const result = syncWorktreesToDB(testDb, afterCleanup);
 
     // Verify deleted worktree is removed
     dbWorktrees = getWorktrees(testDb);
     expect(dbWorktrees).toHaveLength(2);
     expect(dbWorktrees.map(w => w.id).sort()).toEqual(['repo-feature-1', 'repo-main']);
+
+    // Issue #526: Verify SyncResult contains deletedIds
+    expect(result.deletedIds).toContain('repo-feature-2');
+    expect(result.deletedIds).toHaveLength(1);
+    expect(result.upsertedCount).toBe(2);
   });
 
   it('should only remove worktrees from the same repository', () => {
@@ -185,7 +194,7 @@ describe('syncWorktreesToDB', () => {
     expect(dbWorktrees.map(w => w.id).sort()).toEqual(['repo1-main', 'repo2-main']);
   });
 
-  it('should handle empty worktree list gracefully', () => {
+  it('should handle empty worktree list gracefully and return empty SyncResult', () => {
     // Initial state: 2 worktrees
     const initialWorktrees: Worktree[] = [
       {
@@ -206,10 +215,13 @@ describe('syncWorktreesToDB', () => {
     syncWorktreesToDB(testDb, initialWorktrees);
 
     // Sync with empty list
-    syncWorktreesToDB(testDb, []);
+    const result = syncWorktreesToDB(testDb, []);
 
     // DB should remain unchanged (no repository to clean up)
     const dbWorktrees = getWorktrees(testDb);
     expect(dbWorktrees).toHaveLength(2);
+
+    // Issue #526: Verify empty SyncResult
+    expect(result).toEqual({ deletedIds: [], upsertedCount: 0 });
   });
 });

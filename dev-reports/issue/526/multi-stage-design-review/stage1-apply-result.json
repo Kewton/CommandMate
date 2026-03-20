@@ -1,0 +1,105 @@
+{
+  "issue_number": 526,
+  "stage": 1,
+  "stage_name": "通常レビュー指摘対応",
+  "status": "completed",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "title": "クリーンアップ呼び出しパターンの重複（DRY違反）",
+        "status": "applied",
+        "actions": [
+          "Section 3に syncWorktreesAndCleanup() ヘルパー関数の設計追加（注記として）",
+          "Section 4-3, 4-4, 4-5, 4-6, 4-7 のコード例をヘルパー関数使用に更新",
+          "Section 8 の決定事項テーブルに syncWorktreesAndCleanup() 導入を追加",
+          "Section 10 の実装順序にヘルパー関数追加ステップを挿入",
+          "Section 11 に詳細な対応方針とコード例を記載",
+          "Section 12 に実装チェックリストを追加"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "title": "SyncResult型の配置場所の検討",
+        "status": "applied",
+        "actions": [
+          "Section 10 の実装順序に TODO コメント追加の指示を追加",
+          "Section 11 に対応方針を記載",
+          "Section 12 のチェックリストに含む"
+        ]
+      },
+      {
+        "id": "SF-002",
+        "title": "excludedPaths処理とsync処理のクリーンアップ順序不一致",
+        "status": "applied",
+        "actions": [
+          "Section 3 に順序不一致の理由を注記として追加",
+          "Section 4-7 のコード例にコメントで順序の理由を明記",
+          "Section 8 の決定事項テーブルに順序維持の決定を追加",
+          "Section 10 の実装順序に順序の理由コメント明記を追加",
+          "Section 11 に詳細な対応方針を記載"
+        ]
+      },
+      {
+        "id": "SF-003",
+        "title": "cleanupMultipleWorktrees の並列化変更の影響範囲",
+        "status": "applied",
+        "actions": [
+          "Section 6 に影響範囲の全呼び出し元リストと安全性根拠を追加",
+          "Section 8 の決定事項テーブルに安全性根拠明記済みの注記を追加",
+          "Section 11 に詳細な対応方針を記載"
+        ]
+      },
+      {
+        "id": "SF-004",
+        "title": "killWorktreeSession の isRunning() 非同期性",
+        "status": "applied",
+        "actions": [
+          "Section 3 のコード例に await を追加し SF-004 コメントを付与",
+          "Section 10 の実装順序に isRunning() の await 使用指示を追加",
+          "Section 11 に修正後のコード例を記載"
+        ]
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "title": "upsertedCount フィールドの必要性",
+        "status": "recorded",
+        "actions": ["Section 11 の Consider テーブルに記録"]
+      },
+      {
+        "id": "C-002",
+        "title": "全体タイムアウトの実装方針が未詳細",
+        "status": "recorded",
+        "actions": [
+          "Section 6 に Step 7 で別途設計する旨を追記",
+          "Section 11 の Consider テーブルに記録"
+        ]
+      },
+      {
+        "id": "C-003",
+        "title": "cleanupWarnings フィールドの一貫性",
+        "status": "recorded",
+        "actions": ["Section 11 の Consider テーブルに記録（MF-001対応で自然解決する旨を記載）"]
+      }
+    ]
+  },
+  "updated_files": [
+    "dev-reports/design/issue-526-sync-tmux-cleanup-design-policy.md"
+  ],
+  "new_sections_added": [
+    "Section 11: Stage 1 レビュー指摘事項と対応方針",
+    "Section 12: 実装チェックリスト（Stage 1 レビュー反映後）"
+  ],
+  "existing_sections_updated": [
+    "Section 3: killWorktreeSession コード例に await 追加 + 順序不一致の注記追加",
+    "Section 4-3~4-7: syncWorktreesAndCleanup ヘルパー関数使用に更新",
+    "Section 6: 並列化の影響範囲・安全性根拠・タイムアウト方針を追加",
+    "Section 8: 決定事項テーブルにMF-001/SF-002/SF-003の決定を追加",
+    "Section 10: 実装順序をレビュー指摘反映後に更新（8→10ステップ）"
+  ],
+  "timestamp": "2026-03-20T00:00:00Z"
+}

@@ -1,0 +1,39 @@
+{
+  "issue_number": 526,
+  "issue_title": "bug: syncWorktreesToDB()でworktree削除時にtmuxセッションがクリーンアップされない",
+  "design_policy_path": "dev-reports/design/issue-526-sync-tmux-cleanup-design-policy.md",
+  "work_plan_path": "dev-reports/issue/526/work-plan.md",
+  "acceptance_criteria": [
+    "POST /api/repositories/sync 実行時に、DBから削除されるworktreeの対応tmuxセッションがkillされること",
+    "POST /api/repositories/scan 実行時にも同様にtmuxセッションがクリーンアップされること",
+    "POST /api/repositories/restore 実行時にも同様にtmuxセッションがクリーンアップされること",
+    "clone-manager.ts 経由の同期でも同様にクリーンアップされること",
+    "server.ts の excludedPaths 削除処理でも同様にtmuxセッションがクリーンアップされること",
+    "tmux list-sessions に孤立セッションが残らないこと",
+    "セッションkill失敗時にsync処理自体は成功すること（部分的成功を許容）",
+    "既存のリポジトリ削除（DELETE /api/repositories）の動作に影響がないこと",
+    "パフォーマンス対策が実装されていること（hasSession先行確認、並列実行等）"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: SyncResult型定義とsyncWorktreesToDB()戻り値変更 (src/lib/git/worktrees.ts)",
+    "Task 1.2: killWorktreeSession()共通化 (src/lib/session-cleanup.ts)",
+    "Task 1.3: syncWorktreesAndCleanup()ヘルパー関数追加 (src/lib/session-cleanup.ts) - DRY違反解消、cleanupWarningsサニタイズ",
+    "Task 2.1: sync/route.ts更新 - syncWorktreesAndCleanup()使用",
+    "Task 2.2: scan/route.ts更新 - syncWorktreesAndCleanup()使用",
+    "Task 2.3: restore/route.ts更新 - syncWorktreesAndCleanup()使用",
+    "Task 2.4: clone-manager.ts更新 - syncWorktreesAndCleanup()使用、エラーハンドリング(try-catch吸収)",
+    "Task 2.5: server.ts更新 - excludedPaths(cleanup→delete順序)、sync処理(ヘルパー使用)",
+    "Task 2.6: repositories/route.tsローカルkillWorktreeSession()を共通関数に置換",
+    "Task 3.1: cleanupMultipleWorktrees()並列化 (Promise.allSettled)"
+  ],
+  "target_coverage": 80,
+  "key_design_decisions": [
+    "方針(B)採用: syncWorktreesToDB()はdeletedIdsを返し、呼び出し元でクリーンアップ",
+    "syncWorktreesAndCleanup()ヘルパーでDRY違反解消(MF-001)",
+    "killWorktreeSession()はtry-catchパターン(getTool()がthrow)(MF-C01)",
+    "isRunning()にawaitを正しく使用(SF-004)",
+    "cleanupWarningsをAPIレスポンスでサニタイズ(SEC-MF-001)",
+    "excludedPaths処理はcleanup→delete順序、sync処理はdelete→cleanup順序(SF-002)",
+    "並列実行はPromise.allSettled()使用、安全性確認済み(SF-003)"
+  ]
+}

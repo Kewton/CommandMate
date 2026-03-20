@@ -1,0 +1,165 @@
+{
+  "issue_number": 526,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-C01",
+        "title": "killWorktreeSession() の getTool() 戻り値のnullチェックが実装と不整合",
+        "description": "設計方針書Section 3およびSection 11(SF-004対応)のkillWorktreeSession()コード例では `const tool = manager.getTool(cliToolId); if (!tool) return false;` としてnullチェックを行っている。しかし、CLIToolManager.getTool()の実装(src/lib/cli-tools/manager.ts L61-65)ではツールが見つからない場合にnullを返さず、Error をthrowする。一方、既存のrepositories/route.ts L30-44のローカル実装では `const cliTool = manager.getTool(cliToolId)` をnullチェックなしで直接使用している。設計書のコード例はtry-catchでラップするか、getTool()がthrowする前提でnullチェックを除去すべき。",
+        "severity": "high",
+        "design_section": "Section 3, Section 11 (SF-004)",
+        "actual_code_location": "src/lib/cli-tools/manager.ts L61-65, src/app/api/repositories/route.ts L30-44",
+        "recommendation": "設計書のkillWorktreeSession()コード例を修正する。(1) `if (!tool) return false;` を削除してgetTool()がthrowする前提にするか、(2) try-catchで囲んでError時にfalseを返すパターンにする。既存のrepositories/route.tsの実装パターンに合わせるなら(1)が適切。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-C01",
+        "title": "syncWorktreesToDB()の空配列時の早期リターンがSyncResult未返却",
+        "description": "設計方針書Section 4-1のコード例では戻り値をSyncResultに変更するが、現在のsyncWorktreesToDB()実装(src/lib/git/worktrees.ts L269-272)では `worktrees.length === 0` の場合に `return;` で早期リターンしている。SyncResult型に変更後、この早期リターンでも `{ deletedIds: [], upsertedCount: 0 }` を返す必要があるが、設計書のコード例にはこのケースの記載がない。",
+        "severity": "medium",
+        "design_section": "Section 4-1",
+        "actual_code_location": "src/lib/git/worktrees.ts L269-272",
+        "recommendation": "設計書のコード例に `if (worktrees.length === 0) return { deletedIds: [], upsertedCount: 0 };` を明記する。"
+      },
+      {
+        "id": "SF-C02",
+        "title": "cleanupMultipleWorktrees()のwarningsフィールドに対する不要なnullish coalescing",
+        "description": "設計方針書Section 11(MF-001対応)のsyncWorktreesAndCleanup()コード例で `cleanupResult.warnings ?? []` としているが、CleanupResult型(src/lib/session-cleanup.ts L40-45)のwarningsは `string[]` 型であり、undefinedになることはない。`?? []` は不要。",
+        "severity": "low",
+        "design_section": "Section 11 (MF-001対応)",
+        "actual_code_location": "src/lib/session-cleanup.ts L40-45",
+        "recommendation": "コード例を `cleanupWarnings = cleanupResult.warnings;` に修正する。実害はないが、型の理解が不正確であるという印象を与える。"
+      },
+      {
+        "id": "SF-C03",
+        "title": "server.ts excludedPaths処理の行番号が不正確",
+        "description": "設計方針書Section 4-7ではexcludedPaths削除処理の位置を「L225-232」としているが、実際のserver.ts L225-232は excludedPaths のログ出力とworktree削除のforループ部分(L225-232)に対応する。クリーンアップ対象の具体的なコード(deleteWorktreesByIds呼び出し)はL229が正確。設計書の行番号は概ね正確だが、修正対象の正確な範囲を示すべき。",
+        "severity": "low",
+        "design_section": "Section 4-7",
+        "actual_code_location": "server.ts L225-232",
+        "recommendation": "行番号は参考情報として許容できるが、将来的にコード変更により行番号がずれるため、コードのコンテキスト(関数名やコメント等)で特定する方が安定する。"
+      },
+      {
+        "id": "SF-C04",
+        "title": "worktrees.tsのimportリストにexecの種類が未明記",
+        "description": "設計方針書Section 3では worktrees.ts の現在のimportを `child_process, util, path, ...` と記載しているが、child_processからのimportが `exec` であることが明記されていない。tmux.tsの `execFile` との対比で `exec` を使用していることは責務の違い(git worktree listの実行)を示す重要な情報。設計書のセキュリティ考慮(Section 9)で「killSession()はexecFileを使用」と記載があるため、worktrees.ts側がexecを使用している点も補足すべき。",
+        "severity": "low",
+        "design_section": "Section 3, Section 9",
+        "actual_code_location": "src/lib/git/worktrees.ts L6",
+        "recommendation": "本Issue #526の変更範囲ではworktrees.tsのexec使用箇所は変更しないため、影響は小さい。ただし、セキュリティ考慮セクションに「worktrees.tsのexec使用はsyncWorktreesToDB()の変更範囲外であり、本修正で新たなリスクは追加されない」旨を補足するとより明確になる。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-C01",
+        "title": "syncWorktreesAndCleanup()のsession-cleanup.tsへの配置によるworktrees.tsへの逆依存",
+        "description": "設計方針書Section 8(MF-001)で「session-cleanup.tsがworktrees.tsに依存（syncWorktreesToDBのimport）」とトレードオフとして記載されている。これは正確に認識されているが、現在のsession-cleanup.tsのimportは全てpolling/auto-yes/schedule/tmux/cli-tools系であり、git/worktrees系への依存は新規パターンとなる。依存の方向としてはビジネスロジック層内の水平依存であり問題ないが、将来的に循環依存のリスクが生まれないか注意が必要。",
+        "severity": "low",
+        "design_section": "Section 8, Section 11",
+        "recommendation": "現状の規模では問題ない。ただし、もしworktrees.tsが将来session-cleanup.tsに依存するようなケースが生まれた場合は循環依存となるため、その時点でヘルパー関数を別ファイルに分離することを検討する。"
+      },
+      {
+        "id": "C-C02",
+        "title": "clone-manager.tsのonCloneSuccess()がprivateメソッドである点",
+        "description": "設計方針書Section 4-6ではclone-manager.tsのonCloneSuccess()内での変更を記載しているが、onCloneSuccess()はprivateメソッド(L513)である。syncWorktreesAndCleanup()はasync関数であるため、onCloneSuccess()内での呼び出しは問題ないが、onCloneSuccess()の現在の実装ではsyncWorktreesToDB()を同期的に呼び出しており、asyncメソッドであるにもかかわらずawaitは使用されていない。syncWorktreesAndCleanup()に置換する場合はawaitが必要になる。",
+        "severity": "low",
+        "design_section": "Section 4-6",
+        "actual_code_location": "src/lib/git/clone-manager.ts L513, L534",
+        "recommendation": "onCloneSuccess()は既にasyncメソッドなのでawaitの追加に問題はない。実装時にawaitの追加を忘れないようチェックリストに明記する。"
+      },
+      {
+        "id": "C-C03",
+        "title": "設計書内セクション間の「4箇所」と「5箇所以上」の不一致",
+        "description": "Section 8のkillWorktreeSession共通化の説明では「4箇所で同一パターン使用」としているが、現在killWorktreeSessionのローカル定義はrepositories/route.ts の1箇所のみ。設計書で「4箇所」と記載されている根拠が不明。新規追加先を含めての数であれば、その旨を明記すべき。",
+        "severity": "low",
+        "design_section": "Section 8",
+        "recommendation": "「4箇所」の内訳を明記する。現在1箇所(repositories/route.ts) + 新規呼び出し元(syncWorktreesAndCleanup経由、server.ts excludedPaths処理等)を合わせた数であることを補足する。"
+      }
+    ]
+  },
+  "consistency_check": {
+    "design_vs_implementation": {
+      "syncWorktreesToDB_signature": {
+        "design": "function syncWorktreesToDB(db: Database.Database, worktrees: Worktree[]): void",
+        "actual": "export function syncWorktreesToDB(db: Database.Database, worktrees: Worktree[]): void (L265-268)",
+        "consistent": true
+      },
+      "killWorktreeSession_location": {
+        "design": "repositories/route.ts:30-44",
+        "actual": "repositories/route.ts L30-44",
+        "consistent": true
+      },
+      "killSession_uses_execFile": {
+        "design": "killSession() は execFile を使用",
+        "actual": "tmux.ts L6: import { execFile } from 'child_process', L372: killSession uses execFileAsync",
+        "consistent": true
+      },
+      "isRunning_is_async": {
+        "design": "isRunning() は非同期 (SF-004で修正済み)",
+        "actual": "ICLITool.isRunning(): Promise<boolean> (cli-tools/types.ts L42)",
+        "consistent": true
+      },
+      "cleanupMultipleWorktrees_structure": {
+        "design": "forループで逐次実行、warningsを収集",
+        "actual": "session-cleanup.ts L160-173: forループ逐次実行、warnings string[]に収集",
+        "consistent": true
+      },
+      "getTool_null_check": {
+        "design": "if (!tool) return false (null check)",
+        "actual": "getTool() throws Error if not found (manager.ts L63-64)",
+        "consistent": false,
+        "note": "MF-C01として指摘"
+      },
+      "worktrees_ts_imports": {
+        "design": "child_process, util, path, @/types/models, better-sqlite3, @/lib/db, @/lib/env, @/lib/logger",
+        "actual": "exec from child_process, promisify from util, path, Worktree from @/types/models, Database from better-sqlite3, {upsertWorktree, getWorktreeIdsByRepository, deleteWorktreesByIds} from @/lib/db, {getEnvByKey} from @/lib/env, {createLogger} from @/lib/logger",
+        "consistent": true
+      },
+      "CLI_TOOL_IDS_count": {
+        "design": "5 CLI tools (Performance section)",
+        "actual": "CLI_TOOL_IDS = ['claude', 'codex', 'gemini', 'vibe-local', 'opencode'] (5 items)",
+        "consistent": true
+      }
+    },
+    "internal_consistency": {
+      "sync_order_explanation": {
+        "section_2_vs_section_11": "Section 2 mentions delete -> cleanup for sync, Section 11 (SF-002) provides detailed justification. Consistent.",
+        "consistent": true
+      },
+      "helper_function_usage": {
+        "section_4_vs_section_11": "Section 4-3 through 4-7 updated to use syncWorktreesAndCleanup(), consistent with MF-001 response in Section 11.",
+        "consistent": true
+      },
+      "implementation_checklist_vs_sections": {
+        "section_12_vs_sections_4_10": "Checklist items in Section 12 correspond to changes described in Sections 4 and 10. Consistent.",
+        "consistent": true
+      }
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-526-sync-tmux-cleanup-design-policy.md",
+    "src/lib/git/worktrees.ts",
+    "src/lib/session-cleanup.ts",
+    "src/app/api/repositories/route.ts",
+    "src/app/api/repositories/sync/route.ts",
+    "src/app/api/repositories/scan/route.ts",
+    "src/app/api/repositories/restore/route.ts",
+    "src/lib/git/clone-manager.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/cli-tools/manager.ts",
+    "src/lib/tmux/tmux.ts",
+    "server.ts"
+  ],
+  "timestamp": "2026-03-20T00:00:00Z"
+}

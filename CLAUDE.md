@@ -184,7 +184,7 @@ tests/
 | `src/lib/cron-parser.ts` | CMATE.md mtime検出・スケジュール一括更新（Issue #479） |
 | `src/lib/job-executor.ts` | ジョブ実行エンジン・実行ログCRUD（Issue #479） |
 | `src/lib/cmate-parser.ts` | CMATE.md汎用パーサー |
-| `src/lib/session-cleanup.ts` | セッション/ポーラー/スケジューラー停止（Facade） |
+| `src/lib/session-cleanup.ts` | セッション/ポーラー/スケジューラー停止（Facade）、killWorktreeSession共通化、syncWorktreesAndCleanup（Issue #526） |
 | `src/lib/session-key-sender.ts` | Claudeセッションキー送信ロジック（Issue #479） |
 | `src/lib/prompt-answer-input.ts` | プロンプト応答入力ロジック（getAnswerInput）（Issue #479） |
 | `src/lib/resource-cleanup.ts` | リソースリーク対策（孤立プロセス/Map検出） |
