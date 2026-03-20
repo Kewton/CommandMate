@@ -1,6 +1,6 @@
 ---
 name: release
-description: "Create a new release with version bump, CHANGELOG update, Git tag, and GitHub Release. Use when releasing a new version of the project."
+description: "git worktree + commandmatedev でリリースを自動実行"
 disable-model-invocation: true
 allowed-tools: "Bash, Read, Edit, Write"
 argument-hint: "[version-type] (major|minor|patch) or [version] (e.g., 1.2.3)"
@@ -8,136 +8,236 @@ argument-hint: "[version-type] (major|minor|patch) or [version] (e.g., 1.2.3)"
 
 # リリーススキル
 
-新しいバージョンをリリースします。バージョン更新、CHANGELOG更新、Gitタグ作成、GitHub Releases作成を自動化します。
+git worktree 環境を作成し、commandmatedev 経由でエージェントにリリース準備を委譲、完了後にマージ・タグ・push を実行してリリースを完了するスキルです。
 
 ## 使用方法
 
 ```bash
-/release patch      # パッチバージョンアップ (0.1.0 → 0.1.1)
-/release minor      # マイナーバージョンアップ (0.1.0 → 0.2.0)
-/release major      # メジャーバージョンアップ (0.1.0 → v1.0.0)
+/release patch      # パッチバージョンアップ (0.4.9 → 0.4.10)
+/release minor      # マイナーバージョンアップ (0.4.9 → 0.5.0)
+/release major      # メジャーバージョンアップ (0.4.9 → 1.0.0)
 /release 1.0.0      # 直接バージョン指定
 ```
 
-## 実行手順
+## 前提条件
 
-### 1. 事前チェック
+- `main` ブランチが最新であること
+- commandmatedev サーバが起動していること
+- `npm run lint && npx tsc --noEmit && npm run test:unit && npm run build` が通る状態であること
 
-以下を確認してください：
+## 実行内容
+
+あなたはリリースマネージャーです。以下の3フェーズでリリースを実行してください。
+
+---
+
+### Phase 1: worktree 作成 & 登録確認
+
+#### 1-1. commandmatedev サーバ疎通確認
 
 ```bash
-# 現在のブランチがmainであることを確認
-git branch --show-current
-
-# 未コミットの変更がないことを確認
-git status
-
-# リモートと同期していることを確認
-git fetch origin
-git status
+commandmatedev ls 2>&1
 ```
 
-**エラーケースの対応:**
-
-| 状況 | 対応 |
-|------|------|
-| mainブランチでない | `git checkout main` を実行 |
-| 未コミットの変更がある | コミットまたはスタッシュを促す |
-| リモートと差分がある | `git pull origin main` を促す |
-
-### 2. 現在のバージョン取得
-
-```bash
-# package.jsonからバージョンを取得
-current_version=$(node -p "require('./package.json').version")
-echo "Current version: $current_version"
+失敗した場合はエラーメッセージを表示して中断：
+```
+Error: commandmatedev server is not running.
+Run `commandmatedev start --daemon` first.
 ```
 
-### 3. 新バージョンの計算
-
-引数に基づいて新バージョンを計算します：
-
-- `patch`: PATCH部分を+1 (例: 0.1.0 → 0.1.1)
-- `minor`: MINOR部分を+1、PATCHを0に (例: 0.1.1 → 0.2.0)
-- `major`: MAJOR部分を+1、MINOR/PATCHを0に (例: 0.2.0 → 1.0.0)
-- 直接指定: 指定されたバージョンをそのまま使用
-
-### 4. タグ存在チェック
+#### 1-2. 現在バージョンの取得 & 次バージョン計算
 
 ```bash
-# タグが既に存在しないことを確認
-if git rev-parse "v$new_version" >/dev/null 2>&1; then
-  echo "Error: Tag v$new_version already exists"
-  exit 1
-fi
+CURRENT_VERSION=$(node -p "require('./package.json').version")
 ```
 
-### 5. package.json更新
+引数（patch/minor/major）に応じて次バージョンを計算する。
+
+セマンティックバージョニングのルール：
+- `patch`: `0.4.9` → `0.4.10`
+- `minor`: `0.4.9` → `0.5.0`
+- `major`: `0.4.9` → `1.0.0`
+
+計算結果を `NEXT_VERSION` 変数に格納する。
+
+#### 1-3. main ブランチを最新化
 
 ```bash
-# package.jsonのversionを更新
-# Editツールを使用して "version": "x.y.z" を "version": "新バージョン" に変更
+git checkout main
+git pull origin main
 ```
 
-### 6. package-lock.json更新
+#### 1-4. release ブランチ & worktree 作成
 
 ```bash
-npm install --package-lock-only
+RELEASE_BRANCH="release/v${NEXT_VERSION}"
+WORKTREE_DIR="../commandmate-release-v${NEXT_VERSION}"
+git worktree add -b "$RELEASE_BRANCH" "$WORKTREE_DIR" main
 ```
 
-### 7. CHANGELOG.md更新
-
-1. `[Unreleased]`セクションが空でないことを確認
-2. `[Unreleased]`の下に新バージョンセクションを追加
-3. 日付を`YYYY-MM-DD`形式で追記
-
-**注意:** `[Unreleased]`セクションが空の場合は警告を表示し、続行するか確認します。
-
-### 8. コミット作成
+worktree内で依存関係をインストール:
 
 ```bash
-git add package.json package-lock.json CHANGELOG.md
-git commit -m "chore: release v$new_version"
+cd "$WORKTREE_DIR" && npm install
 ```
 
-### 9. タグ作成・プッシュ
+#### 1-5. worktree 登録確認
+
+worktree が commandmatedev に認識されるまで待つ。認識されない場合はリポジトリ同期を実行する。
 
 ```bash
-git tag "v$new_version"
+# 同期を試行
+curl -s -X POST http://localhost:3000/api/repositories/sync
+
+# 登録確認
+commandmatedev ls --branch "release/v${NEXT_VERSION}" --quiet
+```
+
+WT ID を取得できない場合は、ユーザーに commandmatedev のブラウザ UI で worktree を確認するよう案内する。
+
+---
+
+### Phase 2: エージェントによるリリース準備
+
+#### 2-1. リリースタスクをエージェントに送信
+
+```bash
+WT=$(commandmatedev ls --branch "release/v${NEXT_VERSION}" --quiet)
+```
+
+以下のプロンプトを送信する：
+
+```bash
+commandmatedev send "$WT" "v${NEXT_VERSION} のリリース準備を実行してください。
+
+以下の手順を順番に実行してください：
+
+1. package.json の version を \"${NEXT_VERSION}\" に更新
+2. npm install --package-lock-only で package-lock.json を更新
+3. git log でmainの直近の変更内容を確認し、CHANGELOG.md に v${NEXT_VERSION} のエントリを追加
+   - feat, fix, refactor, docs 等のカテゴリ別に整理
+   - 既存のCHANGELOGのフォーマットに合わせる
+4. 以下の品質チェックを実行し、全てパスすることを確認：
+   - npm run lint
+   - npx tsc --noEmit
+   - npm run test:unit
+   - npm run build
+5. 全パスしたら以下でコミット：
+   git add package.json package-lock.json CHANGELOG.md
+   git commit -m 'chore: release v${NEXT_VERSION}'
+6. 失敗した場合は修正してリトライ
+
+完了したら「リリース準備完了」と報告してください。" \
+  --auto-yes --duration 1h
+```
+
+#### 2-2. 完了待ち
+
+```bash
+commandmatedev wait "$WT" --timeout 600 --on-prompt agent
+```
+
+**exit code による分岐:**
+
+| exit code | 状況 | 対応 |
+|---|---|---|
+| `0` | 完了 | Phase 3 に進む |
+| `10` | プロンプト検知 | `commandmatedev capture "$WT" --json` で内容確認し、ユーザーに判断を委ねる |
+| `124` | タイムアウト | `commandmatedev capture "$WT"` で状況確認し、ユーザーに報告 |
+
+#### 2-3. 結果確認
+
+```bash
+commandmatedev capture "$WT"
+```
+
+出力を確認し、コミットが完了しているか検証する。コミットが確認できない場合はユーザーに報告して中断する。
+
+---
+
+### Phase 3: マージ & タグ & push
+
+#### 3-1. main にマージ
+
+```bash
+git checkout main
+git merge "release/v${NEXT_VERSION}" --no-ff -m "release: v${NEXT_VERSION}"
+```
+
+#### 3-2. タグ打ち
+
+```bash
+git tag -a "v${NEXT_VERSION}" -m "v${NEXT_VERSION}"
+```
+
+#### 3-3. push（main + タグ）
+
+```bash
 git push origin main
-git push origin "v$new_version"
+git push origin "v${NEXT_VERSION}"
 ```
 
-### 10. GitHub Releases作成
+#### 3-4. develop に逆マージ
 
 ```bash
-gh release create "v$new_version" --title "v$new_version" --generate-notes
+git checkout develop
+git pull origin develop
+git merge main --no-ff -m "chore: merge release v${NEXT_VERSION} to develop"
+git push origin develop
 ```
 
-## 完了確認
-
-リリース完了後、以下を確認します：
+#### 3-5. GitHub Releases 作成
 
 ```bash
-# タグ一覧
-git tag -l
-
-# 最新タグ
-git describe --tags --abbrev=0
-
-# GitHub Releases
-gh release list
+gh release create "v${NEXT_VERSION}" --title "v${NEXT_VERSION}" --generate-notes
 ```
 
-## エラーハンドリング
+#### 3-6. worktree クリーンアップ
 
-| エラーケース | 対応 |
-|-------------|------|
-| 未コミットの変更がある | エラー表示し、コミットまたはスタッシュを促す |
-| リモートとの差分がある | `git pull`を促す |
+```bash
+git worktree remove "$WORKTREE_DIR"
+git branch -d "$RELEASE_BRANCH"
+```
+
+#### 3-7. CommandMate 同期
+
+```bash
+curl -s -X POST http://localhost:3000/api/repositories/sync
+```
+
+---
+
+## 完了報告
+
+以下の形式で報告する：
+
+```
+Release v${NEXT_VERSION} completed!
+
+  Tag:      v${NEXT_VERSION}
+  Release:  https://github.com/Kewton/CommandMate/releases/tag/v${NEXT_VERSION}
+
+  Worktree: cleaned up
+  Branches: main ✓, develop ✓ (synced)
+```
+
+## エラー時の対応
+
+| エラー | 対応 |
+|---|---|
+| commandmatedev サーバ未起動 | `commandmatedev start --daemon` を案内して中断 |
+| worktree が登録されない | ブラウザ UI での確認を案内 |
+| エージェントがタイムアウト | `commandmatedev capture` で状況確認し報告 |
+| 品質チェック失敗 | エージェントが自動修正を試みる。3回失敗で中断 |
+| マージコンフリクト | ユーザーに手動解消を依頼 |
 | タグが既に存在する | エラー表示し、別バージョンの指定を促す |
-| CHANGELOG.mdが存在しない | 新規作成するか確認 |
-| [Unreleased]セクションが空 | 警告を表示し、続行するか確認 |
+
+## 安全ガード
+
+- main ブランチ以外からのリリースは拒否
+- worktree 作成前に既存の同名 worktree がないか確認
+- タグが既に存在する場合は中断
+- Phase 3 に進む前にエージェントのコミットを検証
 
 ## 参考
 
