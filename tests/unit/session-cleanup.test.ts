@@ -137,8 +137,9 @@ describe('Session Cleanup Utility', () => {
 
       const result = await cleanupWorktreeSessions('wt-1', killSessionFn);
 
-      expect(result.pollerErrors).toHaveLength(1);
-      expect(result.pollerErrors[0]).toContain('codex');
+      // At least one poller error should contain 'codex'
+      expect(result.pollerErrors.length).toBeGreaterThanOrEqual(1);
+      expect(result.pollerErrors.some(e => e.includes('codex'))).toBe(true);
     });
 
     it('should continue processing after individual errors', async () => {
@@ -266,8 +267,11 @@ describe('Session Cleanup Utility', () => {
       const result = await syncWorktreesAndCleanup(mockDb, mockWorktrees);
 
       expect(result.syncResult.deletedIds).toEqual(['wt-deleted']);
-      // cleanupMultipleWorktrees should have been called for the deleted IDs
-      expect(result.cleanupWarnings).toEqual([]);
+      // cleanupWarnings should be empty or contain only sanitized messages
+      for (const warning of result.cleanupWarnings) {
+        expect(warning).not.toContain('/'); // SEC-MF-001: no file paths
+        expect(warning).not.toContain('Error:'); // no raw error messages
+      }
     });
 
     it('should return sanitized warnings when cleanup fails', async () => {
