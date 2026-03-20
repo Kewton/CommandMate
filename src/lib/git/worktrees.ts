@@ -17,7 +17,6 @@ const logger = createLogger('worktrees');
 /**
  * Result of syncing worktrees to database
  * Issue #526: Returns deletedIds for tmux session cleanup
- * TODO: Consider moving to types/ directory in a future refactor (SF-001)
  */
 export interface SyncResult {
   /** IDs of worktrees that were deleted from the database */
@@ -197,13 +196,13 @@ export async function scanWorktrees(rootDir: string): Promise<Worktree[]> {
         const isDangerous = dangerousPaths.some(danger => wt.path.startsWith(danger));
 
         if (isDangerous) {
-          logger.warn('skipping-potentially-unsafe-worktree-pat');
+          logger.warn('worktree:unsafe-path-skipped', { path: wt.path });
           return false;
         }
 
         // Check for path traversal attempts in the path itself
         if (wt.path.includes('\x00') || wt.path.includes('..')) {
-          logger.warn('skipping-path-with-potentially-malicious');
+          logger.warn('worktree:malicious-path-skipped', { path: wt.path });
           return false;
         }
 
@@ -244,12 +243,12 @@ export async function scanMultipleRepositories(
 
   for (const repoPath of repositoryPaths) {
     try {
-      logger.info('scanning-repository:repopath');
+      logger.info('repository:scan-start', { repoPath });
       const worktrees = await scanWorktrees(repoPath);
       allWorktrees.push(...worktrees);
-      logger.info('found-worktreeslength-worktrees');
-    } catch (_error) {
-      logger.error('error-scanning-repository-repopath:', { error: _error instanceof Error ? _error.message : String(_error) });
+      logger.info('repository:scan-complete', { repoPath, worktreeCount: worktrees.length });
+    } catch (error) {
+      logger.error('repository:scan-failed', { repoPath, error: error instanceof Error ? error.message : String(error) });
       // Continue with other repositories even if one fails
     }
   }

@@ -64,7 +64,7 @@ export async function POST() {
       { status: 200 }
     );
   } catch (error: unknown) {
-    logger.error('error-syncing-repositories:', { error: error instanceof Error ? error.message : String(error) });
+    logger.error('repositories:sync-failed', { error: error instanceof Error ? error.message : String(error) });
     const errorMessage = error instanceof Error ? error.message : 'Failed to sync repositories';
     return NextResponse.json(
       { error: errorMessage },

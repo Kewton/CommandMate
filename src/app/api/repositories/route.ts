@@ -76,7 +76,7 @@ export async function DELETE(request: NextRequest) {
         logger.info('session:killed', { worktreeId: result.worktreeId, sessions: result.sessionsKilled });
       }
       if (result.sessionErrors.length > 0) {
-        logger.warn('session-kill-errors-for:');
+        logger.warn('session:kill-errors', { worktreeId: result.worktreeId, errors: result.sessionErrors });
       }
     }
 
@@ -90,7 +90,7 @@ export async function DELETE(request: NextRequest) {
       deletedCount = deleteResult.deletedCount;
       logger.info('repository:deleted', { repositoryPath, deletedCount });
     } catch (error) {
-      logger.error('database-deletion-failed-for:', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('repository:db-delete-failed', { repositoryPath, error: error instanceof Error ? error.message : String(error) });
       return NextResponse.json(
         { success: false, error: 'Database deletion failed' },
         { status: 500 }
@@ -126,7 +126,7 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json(response, { status: 200 });
   } catch (error: unknown) {
-    logger.error('unexpected-error:', { error: error instanceof Error ? error.message : String(error) });
+    logger.error('repository:delete-failed', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { success: false, error: 'Failed to delete repository' },
       { status: 500 }

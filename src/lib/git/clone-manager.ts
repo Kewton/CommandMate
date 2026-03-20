@@ -392,7 +392,7 @@ export class CloneManager {
 
     // 7. Start clone in background (don't await)
     this.executeClone(job.id, cloneUrl, targetPath).catch((error) => {
-      logger.error('clone-failed-for-job-jobid:', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('clone:job-failed', { jobId: job.id, error: error instanceof Error ? error.message : String(error) });
     });
 
     return {
@@ -540,7 +540,7 @@ export class CloneManager {
       }
     } catch (error) {
       // IA-MF-002: syncWorktreesAndCleanup failure should not break clone success
-      logger.error('failed-to-scan-worktrees-for-targetpath:', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('clone:worktree-scan-failed', { targetPath, error: error instanceof Error ? error.message : String(error) });
       // Continue even if worktree scan fails - the repository is still registered
     }
 

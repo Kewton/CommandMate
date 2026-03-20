@@ -75,7 +75,7 @@ export async function PUT(request: NextRequest) {
     });
   } catch (error: unknown) {
     // SEC-SF-003: Fixed error message - do not expose internal details
-    logger.error('error:', { error: error instanceof Error ? error.message : String(error) });
+    logger.error('repository:restore-failed', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { success: false, error: 'Failed to restore repository' },
       { status: 500 }

@@ -54,8 +54,6 @@ export interface CleanupResult {
  */
 type KillSessionFn = (worktreeId: string, cliToolId: CLIToolType) => Promise<boolean>;
 
-
-
 /**
  * Clean up all CLI tool sessions and pollers for a single worktree
  *
@@ -110,7 +108,7 @@ export async function cleanupWorktreeSessions(
     } catch (error) {
       const errorMsg = `response-poller:${cliToolId}: ${getErrorMessage(error)}`;
       result.pollerErrors.push(errorMsg);
-      logger.warn('logprefix-failed-to-stop-response-poller', { error: error instanceof Error ? error.message : String(error) });
+      logger.warn('response-poller:stop-failed', { worktreeId, cliToolId, error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -122,7 +120,7 @@ export async function cleanupWorktreeSessions(
   } catch (error) {
     const errorMsg = `auto-yes-poller: ${getErrorMessage(error)}`;
     result.pollerErrors.push(errorMsg);
-    logger.warn('logprefix-failed-to-stop-auto-yes-poller', { error: error instanceof Error ? error.message : String(error) });
+    logger.warn('auto-yes-poller:stop-failed', { worktreeId, error: error instanceof Error ? error.message : String(error) });
   }
 
   // 3. Delete auto-yes state (Issue #404: prevent memory leak)
@@ -132,7 +130,7 @@ export async function cleanupWorktreeSessions(
   } catch (error) {
     const errorMsg = `auto-yes-state: ${getErrorMessage(error)}`;
     result.pollerErrors.push(errorMsg);
-    logger.warn('logprefix-failed-to-delete-auto-yes-stat', { error: error instanceof Error ? error.message : String(error) });
+    logger.warn('auto-yes-state:delete-failed', { worktreeId, error: error instanceof Error ? error.message : String(error) });
   }
 
   // 4. Stop schedules for this worktree (Issue #404: replaces stopAllSchedules)
@@ -142,7 +140,7 @@ export async function cleanupWorktreeSessions(
   } catch (error) {
     const errorMsg = `schedule-manager: ${getErrorMessage(error)}`;
     result.pollerErrors.push(errorMsg);
-    logger.warn('logprefix-failed-to-stop-schedule-manage', { error: error instanceof Error ? error.message : String(error) });
+    logger.warn('schedule-manager:stop-failed', { worktreeId, error: error instanceof Error ? error.message : String(error) });
   }
 
   return result;

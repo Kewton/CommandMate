@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
       { status: 200 }
     );
   } catch (error: unknown) {
-    logger.error('error-scanning-repository:', { error: error instanceof Error ? error.message : String(error) });
+    logger.error('repository:scan-failed', { error: error instanceof Error ? error.message : String(error) });
     const errorMessage = error instanceof Error ? error.message : 'Failed to scan repository';
     return NextResponse.json(
       { error: errorMessage },
