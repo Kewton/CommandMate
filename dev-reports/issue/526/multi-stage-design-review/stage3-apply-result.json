@@ -1,0 +1,87 @@
+{
+  "issue_number": 526,
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "IA-MF-001",
+        "item": "server.ts から session-cleanup.ts への新規依存がレイヤー構成図に未反映",
+        "section_updated": "Section 2 レイヤー構成, Section 12 Step 4 チェックリスト",
+        "status": "reflected"
+      },
+      {
+        "id": "IA-MF-002",
+        "item": "clone-manager.ts の onCloneSuccess() でのエラーハンドリング方針が未定義",
+        "section_updated": "Section 4-6, Section 12 Step 4 チェックリスト",
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IA-SF-001",
+        "item": "既存テスト5件への影響が未詳細",
+        "section_updated": "Section 7, Section 12 Step 6 チェックリスト",
+        "status": "reflected"
+      },
+      {
+        "id": "IA-SF-002",
+        "item": "cleanupMultipleWorktrees() 並列化による既存テストの挙動変化",
+        "section_updated": "Section 7, Section 12 Step 6.5 チェックリスト",
+        "status": "reflected"
+      },
+      {
+        "id": "IA-SF-003",
+        "item": "integration テストのモックに killWorktreeSession の追加が必要",
+        "section_updated": "Section 7, Section 12 Step 6 チェックリスト",
+        "status": "reflected"
+      },
+      {
+        "id": "IA-SF-004",
+        "item": "sync/scan/restore の各 API レスポンスフォーマット変更の後方互換性",
+        "section_updated": "Section 5, Section 12 Step 4 チェックリスト",
+        "status": "reflected"
+      },
+      {
+        "id": "IA-SF-005",
+        "item": "session-cleanup.ts から worktrees.ts への新規水平依存の循環依存検出方法が未定義",
+        "section_updated": "Section 13 C-C01",
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IA-C-001",
+        "item": "gracefulShutdown 内でのクリーンアップとの競合可能性",
+        "section_updated": "Section 14 Consider",
+        "status": "noted"
+      },
+      {
+        "id": "IA-C-002",
+        "item": "CI/CD パイプラインへの影響は最小限",
+        "section_updated": "Section 14 Consider",
+        "status": "noted"
+      },
+      {
+        "id": "IA-C-003",
+        "item": "killWorktreeSession 置換時のエラーログ出力内容の変化",
+        "section_updated": "Section 14 Consider",
+        "status": "noted"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-526-sync-tmux-cleanup-design-policy.md",
+  "sections_updated": [
+    "Section 2 レイヤー構成（IA-MF-001: server.ts -> session-cleanup.ts 依存追記）",
+    "Section 4-6 clone-manager.ts（IA-MF-002: エラーハンドリング方針追加）",
+    "Section 5 エラーレスポンスの拡張（IA-SF-004: 3 API ルートのレスポンス形式明記）",
+    "Section 7 テスト設計（IA-SF-001, IA-SF-002, IA-SF-003: 既存テスト変更詳細追加）",
+    "Section 12 実装チェックリスト（Step 4, Step 6, Step 6.5 更新）",
+    "Section 13 C-C01（IA-SF-005: 循環依存検出手段追記）",
+    "Section 14 Stage 3 レビュー指摘事項と対応方針（新規セクション）"
+  ],
+  "timestamp": "2026-03-20T12:30:00Z"
+}

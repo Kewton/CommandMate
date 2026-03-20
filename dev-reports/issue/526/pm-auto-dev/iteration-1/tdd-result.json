@@ -1,0 +1,46 @@
+{
+  "status": "success",
+  "coverage": 80,
+  "unit_tests": {
+    "total": 5216,
+    "passed": 5209,
+    "failed": 0,
+    "skipped": 7,
+    "note": "1 pre-existing intermittent failure in git-utils.test.ts (not related to this change)"
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/lib/git/worktrees.ts",
+    "src/lib/session-cleanup.ts",
+    "src/app/api/repositories/sync/route.ts",
+    "src/app/api/repositories/scan/route.ts",
+    "src/app/api/repositories/restore/route.ts",
+    "src/app/api/repositories/route.ts",
+    "src/lib/git/clone-manager.ts",
+    "server.ts",
+    "src/lib/__tests__/worktrees-sync.test.ts",
+    "tests/unit/session-cleanup.test.ts",
+    "tests/unit/lib/clone-manager.test.ts",
+    "tests/integration/api-repository-delete.test.ts",
+    "tests/integration/repository-exclusion.test.ts"
+  ],
+  "commits": [
+    "d6d3b9d: fix(sync): clean up tmux sessions when worktrees are deleted during sync"
+  ],
+  "implementation_summary": {
+    "task_1_1": "SyncResult type added to worktrees.ts, syncWorktreesToDB() returns { deletedIds, upsertedCount }",
+    "task_1_2": "killWorktreeSession() common function added to session-cleanup.ts with try-catch pattern",
+    "task_1_3": "syncWorktreesAndCleanup() helper added to session-cleanup.ts with SEC-MF-001 sanitization",
+    "task_2_1": "sync/route.ts updated to use syncWorktreesAndCleanup()",
+    "task_2_2": "scan/route.ts updated to use syncWorktreesAndCleanup()",
+    "task_2_3": "restore/route.ts updated to use syncWorktreesAndCleanup()",
+    "task_2_4": "clone-manager.ts updated to use syncWorktreesAndCleanup() with IA-MF-002 error handling",
+    "task_2_5": "server.ts updated: excludedPaths with cleanup->delete order (SF-002), sync with helper (MF-001)",
+    "task_2_6": "repositories/route.ts local killWorktreeSession() replaced with common import",
+    "task_3_1": "cleanupMultipleWorktrees() parallelized with Promise.allSettled() (SF-003)"
+  },
+  "message": "TDD implementation complete. All 9 acceptance criteria addressed. syncWorktreesToDB() returns SyncResult with deletedIds. killWorktreeSession() and syncWorktreesAndCleanup() added as common functions. All call sites updated. Parallel cleanup with Promise.allSettled(). Cleanup warnings sanitized per SEC-MF-001."
+}

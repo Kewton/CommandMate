@@ -1,0 +1,193 @@
+{
+  "issue_number": 526,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "review_date": "2026-03-20",
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "server.ts の excludedPaths 削除処理(L225-232)でも deleteWorktreesByIds() を直接呼び出しており、tmuxセッションのクリーンアップが欠落している。Issue本文の影響範囲テーブルに server.ts が含まれていない。",
+        "location": "server.ts:225-232",
+        "recommendation": "影響範囲テーブルに server.ts の excludedPaths 削除処理を追加する。修正方針でもこの箇所への対応方法を明記すること。server.ts はサーバー起動時の初期化処理であり、syncWorktreesToDB() 経由ではなく deleteWorktreesByIds() を直接呼んでいるため、修正方針(A)/(B)どちらを選んでもこの箇所は別途対応が必要。",
+        "evidence": "server.ts:225-232 で getWorktreeIdsByRepository() + deleteWorktreesByIds() を直接呼び出しており、syncWorktreesToDB() を経由していない。tmuxセッションクリーンアップの呼び出しなし。"
+      },
+      {
+        "id": "MF-2",
+        "category": "破壊的変更",
+        "issue": "修正方針(A)を選択した場合、syncWorktreesToDB() のシグネチャが void から Promise<void> (または Promise<string[]>) に変わる。これは5箇所の呼び出し元すべてに await 追加が必要な破壊的変更であり、呼び出し元の一部は同期コンテキスト(server.ts の初期化ブロック)で使用されている。修正方針(B)を選択した場合も戻り値が void から string[] に変わるため、呼び出し元すべてで戻り値のハンドリングが必要。いずれの方針でも全呼び出し元の修正が必須である点が Issueに明記されていない。",
+        "location": "修正方針 セクション",
+        "recommendation": "各修正方針について、全呼び出し元(sync/route.ts, scan/route.ts, restore/route.ts, clone-manager.ts, server.ts)での具体的な修正内容を一覧化すること。特に server.ts は async 関数内で呼ばれているため方針(A)は適用可能だが、clone-manager.ts の onCloneSuccess() も async なので方針(A)は技術的に全箇所で適用可能であることを確認済みと明記すべき。",
+        "evidence": "syncWorktreesToDB() の現在のシグネチャは (db: Database.Database, worktrees: Worktree[]): void (worktrees.ts:265-268)。呼び出し元: sync/route.ts:48, scan/route.ts:53, restore/route.ts:61, clone-manager.ts:534, server.ts:239。全箇所が async コンテキスト内。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "依存関係",
+        "issue": "syncWorktreesToDB() に tmux クリーンアップ機能を追加する場合、worktrees.ts モジュールが session-cleanup.ts と tmux.ts に新たに依存することになる。現在 worktrees.ts は純粋な Git + DB 操作モジュールであり、tmux/セッション管理への依存は責務の越境になる可能性がある。修正方針(A)を選択する場合のモジュール依存方向の変化について Issue で言及がない。",
+        "location": "修正方針 セクション",
+        "recommendation": "方針(A)を採用する場合: worktrees.ts が session-cleanup.ts に依存することの是非を設計判断として明記する。方針(B)(削除対象IDを返し呼び出し元でクリーンアップ)の場合はこの問題を回避できる。方針(B)は責務分離の観点で優位であることを Issue に追記することを推奨。",
+        "evidence": "worktrees.ts の現在の import: child_process, util, path, @/types/models, better-sqlite3, @/lib/db, @/lib/env, @/lib/logger。tmux/session 関連の import は一切なし。"
+      },
+      {
+        "id": "SF-2",
+        "category": "テスト範囲",
+        "issue": "Issue のテスト方針に「呼び出し元テスト」が含まれているが、具体的なテスト対象が不十分。(1) server.ts の初期化時の excludedPaths 削除に対するテストが言及されていない。(2) clone-manager.ts の onCloneSuccess() は private メソッドであり、テストアプローチ(executeClone 経由のインテグレーションテスト or リファクタリングによるテスト可能化)の記載がない。",
+        "location": "テスト方針 セクション",
+        "recommendation": "テスト方針に以下を追加: (1) server.ts の初期化処理は直接テスト困難なため、共通化した関数を抽出してテスト可能にする案の検討。(2) clone-manager.ts は executeClone() + onCloneSuccess() の一連の処理をモックテストで検証する方針を明記。(3) 方針(B)の場合、各 API ルートで返された deletedIds に対して cleanupMultipleWorktrees() が呼ばれることを個別に検証するテストケースが必要。",
+        "evidence": "clone-manager.ts:513 の onCloneSuccess() は private メソッド。server.ts の初期化処理(L195-244)はモジュールレベルの処理で直接的な単体テストが困難。"
+      },
+      {
+        "id": "SF-3",
+        "category": "破壊的変更",
+        "issue": "エラーハンドリング方針として「セッションkill失敗時にsync処理自体は成功すること」が受け入れ基準にあるが、tmux kill-session のタイムアウト(tmux.ts の DEFAULT_TIMEOUT = 5000ms)が sync 処理全体の応答時間に与える影響の分析が欠如している。47件のworktreeが一括削除される場合、最悪ケースで 47 worktrees * 5 CLI tools * 5秒 = 約20分のタイムアウト待ちが発生し得る。",
+        "location": "受け入れ基準 / 修正方針 セクション",
+        "recommendation": "大量削除時のパフォーマンス影響を Issue に明記し、対策方針を検討すること。例: (1) killSession() の並列実行(Promise.all)、(2) セッション存在確認(hasSession)を先に行い存在するもののみ kill、(3) タイムアウト上限の設定。DELETE /api/repositories の既存実装(route.ts)は cleanupMultipleWorktrees() で逐次処理しているため同じ潜在リスクがあるが、sync は日常的に呼ばれる操作のため影響がより大きい。",
+        "evidence": "tmux.ts:15 の DEFAULT_TIMEOUT = 5000ms。CLI_TOOL_IDS は 5種類(claude, codex, gemini, vibe-local, opencode)。cleanupMultipleWorktrees() は逐次処理(session-cleanup.ts:160-161 の for ループ)。発見経緯の47件worktree削除ケースで最悪 47 * 5 * 5 = 1175秒。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "依存関係",
+        "issue": "cleanupWorktreeSessions() は killSessionFn を引数で受け取る設計(依存性注入パターン)であり、呼び出し元が CLIToolManager.getInstance() を使って killWorktreeSession 関数を構築する必要がある。syncWorktreesToDB() 内でこれを行う場合、CLIToolManager への依存も追加される。",
+        "location": "修正方針 セクション",
+        "recommendation": "方針(A)を採用する場合の killSessionFn の供給方法を明記する。選択肢: (i) syncWorktreesToDB() の引数に killSessionFn をオプショナルパラメータとして追加、(ii) worktrees.ts 内に killWorktreeSession のデフォルト実装を持つ。(i)の場合テスト時にモック注入が容易になるため推奨。",
+        "evidence": "session-cleanup.ts:50 の KillSessionFn 型定義。repositories/route.ts:30-44 の killWorktreeSession() 実装パターン。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "移行考慮",
+        "issue": "syncWorktreesToDB() のシグネチャ変更は、外部から直接呼び出しているコードには破壊的変更となるが、現在のコードベースでは全呼び出し元が内部モジュールであるため外部向けの移行パスは不要。ただし、将来的にプラグインAPIやCLIからの直接呼び出しが追加された場合に備え、変更意図をJSDocに記録しておくことが望ましい。",
+        "location": "修正方針 セクション",
+        "recommendation": "syncWorktreesToDB() の JSDoc に変更理由(Issue #526)と、戻り値の意味(削除されたworktree ID配列)を記録する。",
+        "evidence": "現在の呼び出し元5箇所はすべて内部モジュール。外部公開APIとしてのエクスポートはない。"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "directly_affected_files": [
+      {
+        "file": "src/lib/git/worktrees.ts",
+        "change_type": "modify",
+        "description": "syncWorktreesToDB() のシグネチャ変更(async化 or 戻り値追加)およびtmuxクリーンアップロジック追加"
+      },
+      {
+        "file": "src/app/api/repositories/sync/route.ts",
+        "change_type": "modify",
+        "description": "syncWorktreesToDB() 呼び出しに await 追加、または戻り値(deletedIds)を受けてクリーンアップ実行"
+      },
+      {
+        "file": "src/app/api/repositories/scan/route.ts",
+        "change_type": "modify",
+        "description": "同上"
+      },
+      {
+        "file": "src/app/api/repositories/restore/route.ts",
+        "change_type": "modify",
+        "description": "同上"
+      },
+      {
+        "file": "src/lib/git/clone-manager.ts",
+        "change_type": "modify",
+        "description": "onCloneSuccess() 内の syncWorktreesToDB() 呼び出しに await 追加、または戻り値ハンドリング追加"
+      },
+      {
+        "file": "server.ts",
+        "change_type": "modify",
+        "description": "syncWorktreesToDB() 呼び出し修正 + excludedPaths 削除処理(L225-232)にtmuxクリーンアップ追加"
+      }
+    ],
+    "indirectly_affected_files": [
+      {
+        "file": "src/lib/session-cleanup.ts",
+        "change_type": "none",
+        "description": "既存のcleanupMultipleWorktrees()を利用するが、変更は不要"
+      },
+      {
+        "file": "src/lib/tmux/tmux.ts",
+        "change_type": "none",
+        "description": "既存のkillSession()を利用するが、変更は不要"
+      },
+      {
+        "file": "src/lib/cli-tools/manager.ts",
+        "change_type": "none",
+        "description": "killWorktreeSession パターンで利用。方針(A)の場合は worktrees.ts から参照される可能性"
+      }
+    ],
+    "test_files_to_update": [
+      {
+        "file": "src/lib/__tests__/worktrees-sync.test.ts",
+        "description": "tmuxクリーンアップのモックテスト追加が必須"
+      }
+    ],
+    "no_breaking_changes_for_external_consumers": true,
+    "concurrent_access_risks": [
+      {
+        "scenario": "複数のAPIエンドポイント(sync, scan)が同時に呼ばれた場合、syncWorktreesToDB()が並行実行され、同一worktreeに対してDB削除とtmux killが重複実行される可能性がある",
+        "severity": "low",
+        "mitigation": "killSession()は冪等(セッション不在時はfalseを返す)。deleteWorktreesByIds()もSQLite単一ライターモデルにより直列化される。実害は低いが、ログにエラーが出る可能性がある。"
+      },
+      {
+        "scenario": "syncWorktreesToDB()でDB削除した後、tmux killの前にユーザーがUI経由で同じworktreeにアクセスした場合、DBに存在しないworktreeへのアクセスとなる",
+        "severity": "low",
+        "mitigation": "DB削除が先行しtmux killが後続するため、UI上はworktreeが消えた状態で正常。tmuxセッションは裏で残るが、直後にkillされる。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/git/worktrees.ts",
+      "lines": "265-308",
+      "relevance": "修正対象: syncWorktreesToDB()。現在は同期関数でtmuxクリーンアップなし。"
+    },
+    {
+      "file": "server.ts",
+      "lines": "225-232, 239",
+      "relevance": "Issueに未記載の影響箇所: excludedPaths の deleteWorktreesByIds() 直接呼び出しでもtmuxリーク発生。"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "lines": "71-174",
+      "relevance": "既存インフラ: cleanupWorktreeSessions() / cleanupMultipleWorktrees()。逐次処理のためパフォーマンス影響あり。"
+    },
+    {
+      "file": "src/lib/tmux/tmux.ts",
+      "lines": "15, 372-387",
+      "relevance": "DEFAULT_TIMEOUT=5000ms, killSession()の実装。タイムアウト時の応答時間に影響。"
+    },
+    {
+      "file": "src/app/api/repositories/route.ts",
+      "lines": "30-44, 60-160",
+      "relevance": "正しく実装済みの参考: killWorktreeSession() + cleanupMultipleWorktrees() パターン。"
+    },
+    {
+      "file": "src/lib/git/clone-manager.ts",
+      "lines": "513-549",
+      "relevance": "呼び出し元: onCloneSuccess() は private メソッド。テスト方法の検討が必要。"
+    },
+    {
+      "file": "src/lib/__tests__/worktrees-sync.test.ts",
+      "relevance": "既存テスト: DB操作のみ。tmuxクリーンアップの検証テスト追加が必要。"
+    },
+    {
+      "file": "src/lib/cli-tools/types.ts",
+      "lines": "10",
+      "relevance": "CLI_TOOL_IDS = 5種類。大量削除時のパフォーマンス影響の基数。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュール依存関係の確認。worktrees.ts が session-cleanup.ts に依存することの影響評価。"
+    }
+  ]
+}

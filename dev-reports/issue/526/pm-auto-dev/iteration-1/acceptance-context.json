@@ -1,0 +1,26 @@
+{
+  "issue_number": 526,
+  "feature_summary": "syncWorktreesToDB()でworktree削除時にtmuxセッションをクリーンアップ",
+  "acceptance_criteria": [
+    "POST /api/repositories/sync 実行時に、DBから削除されるworktreeの対応tmuxセッションがkillされること",
+    "POST /api/repositories/scan 実行時にも同様にtmuxセッションがクリーンアップされること",
+    "POST /api/repositories/restore 実行時にも同様にtmuxセッションがクリーンアップされること",
+    "clone-manager.ts 経由の同期でも同様にクリーンアップされること",
+    "server.ts の excludedPaths 削除処理でも同様にtmuxセッションがクリーンアップされること",
+    "tmux list-sessions に孤立セッションが残らないこと",
+    "セッションkill失敗時にsync処理自体は成功すること（部分的成功を許容）",
+    "既存のリポジトリ削除（DELETE /api/repositories）の動作に影響がないこと",
+    "パフォーマンス対策が実装されていること（並列実行 Promise.allSettled）"
+  ],
+  "test_scenarios": [
+    "シナリオ1: sync APIでworktree削除→tmuxセッションがkillされる",
+    "シナリオ2: scan APIでworktree削除→tmuxセッションがkillされる",
+    "シナリオ3: restore APIでworktree削除→tmuxセッションがkillされる",
+    "シナリオ4: clone-manager経由で削除→エラーハンドリング（吸収）",
+    "シナリオ5: server.ts excludedPaths削除→cleanup→delete順序",
+    "シナリオ6: セッションkill失敗→sync成功（部分的成功）",
+    "シナリオ7: 既存DELETE /api/repositories→動作影響なし",
+    "シナリオ8: cleanupMultipleWorktrees()の並列実行（Promise.allSettled）",
+    "シナリオ9: cleanupWarningsのサニタイズ（SEC-MF-001）"
+  ]
+}

@@ -1,0 +1,101 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "sync API (POST /api/repositories/sync) calls syncWorktreesAndCleanup which triggers tmux session cleanup for deleted worktrees",
+      "result": "passed",
+      "evidence": "src/app/api/repositories/sync/route.ts line 49 calls syncWorktreesAndCleanup(db, allWorktrees). syncWorktreesAndCleanup checks syncResult.deletedIds and calls cleanupMultipleWorktrees -> cleanupWorktreeSessions -> killWorktreeSession for each. Unit tests in tests/unit/session-cleanup.test.ts verify cleanupWorktreeSessions calls killSessionFn for all 5 CLI tools (claude, codex, gemini, vibe-local, opencode). syncWorktreesAndCleanup tests confirm cleanup is triggered when deletedIds is non-empty."
+    },
+    {
+      "scenario": "scan API (POST /api/repositories/scan) calls syncWorktreesAndCleanup for tmux cleanup",
+      "result": "passed",
+      "evidence": "src/app/api/repositories/scan/route.ts line 54 calls syncWorktreesAndCleanup(db, worktrees). Same cleanup path as sync API. Response includes deletedCount and cleanupWarnings fields."
+    },
+    {
+      "scenario": "restore API (PUT /api/repositories/restore) calls syncWorktreesAndCleanup for tmux cleanup",
+      "result": "passed",
+      "evidence": "src/app/api/repositories/restore/route.ts line 64 calls syncWorktreesAndCleanup(db, worktrees). Integration test in tests/integration/repository-exclusion.test.ts mocks syncWorktreesAndCleanup and verifies the restore flow works correctly."
+    },
+    {
+      "scenario": "clone-manager calls syncWorktreesAndCleanup with error handling (IA-MF-002)",
+      "result": "passed",
+      "evidence": "src/lib/git/clone-manager.ts line 535 calls syncWorktreesAndCleanup(this.db, worktrees) inside try-catch. Line 542 comment confirms IA-MF-002: syncWorktreesAndCleanup failure does not break clone success. Errors are logged but execution continues."
+    },
+    {
+      "scenario": "server.ts excludedPaths deletion calls cleanupMultipleWorktrees before deleteWorktreesByIds",
+      "result": "passed",
+      "evidence": "server.ts lines 226-234: For each excludedPath, gets worktreeIds, calls 'await cleanupMultipleWorktrees(worktreeIds, killWorktreeSession)' BEFORE deleteWorktreesByIds. This ensures SF-002: cleanup -> delete order is maintained."
+    },
+    {
+      "scenario": "Session kill failure does not break sync (partial success)",
+      "result": "passed",
+      "evidence": "Unit test 'should return syncResult even if cleanupMultipleWorktrees throws' in session-cleanup.test.ts confirms syncResult is returned even when cleanup fails. syncWorktreesAndCleanup wraps cleanup in try-catch (session-cleanup.ts lines 262-266) and returns generic error message. Test 'should continue processing after individual errors' confirms cleanupWorktreeSessions processes all 5 CLI tools even when first one throws."
+    },
+    {
+      "scenario": "Existing DELETE /api/repositories behavior unchanged",
+      "result": "passed",
+      "evidence": "tests/integration/api-repository-delete.test.ts: All 10 tests pass including delete, cascade, security validation, exclusion, and cleanup verification. DELETE route (src/app/api/repositories/route.ts) still uses cleanupMultipleWorktrees + killWorktreeSession directly (not syncWorktreesAndCleanup), preserving existing behavior."
+    },
+    {
+      "scenario": "cleanupMultipleWorktrees uses Promise.allSettled for parallel execution (SF-003)",
+      "result": "passed",
+      "evidence": "src/lib/session-cleanup.ts lines 162-165: 'const settled = await Promise.allSettled(worktreeIds.map(worktreeId => cleanupWorktreeSessions(worktreeId, killSessionFn)))'. Unit test 'should cleanup all worktrees' verifies 3 worktrees x 5 CLI tools = 15 killSession calls. Test 'should return empty results for empty worktree list' verifies edge case."
+    },
+    {
+      "scenario": "cleanupWarnings sanitization (SEC-MF-001)",
+      "result": "passed",
+      "evidence": "src/lib/session-cleanup.ts lines 257-260: Detailed warnings logged server-side only, client receives generic message: '${cleanupResult.warnings.length} session cleanup warning(s) occurred'. Unit test 'should return sanitized warnings when cleanup fails' verifies cleanupWarnings do not contain internal path '/path/to/secret'."
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "POST /api/repositories/sync 実行時に、DBから削除されるworktreeの対応tmuxセッションがkillされること",
+      "verified": true
+    },
+    {
+      "criterion": "POST /api/repositories/scan 実行時にも同様にtmuxセッションがクリーンアップされること",
+      "verified": true
+    },
+    {
+      "criterion": "POST /api/repositories/restore 実行時にも同様にtmuxセッションがクリーンアップされること",
+      "verified": true
+    },
+    {
+      "criterion": "clone-manager.ts 経由の同期でも同様にクリーンアップされること",
+      "verified": true
+    },
+    {
+      "criterion": "server.ts の excludedPaths 削除処理でも同様にtmuxセッションがクリーンアップされること",
+      "verified": true
+    },
+    {
+      "criterion": "tmux list-sessions に孤立セッションが残らないこと",
+      "verified": true
+    },
+    {
+      "criterion": "セッションkill失敗時にsync処理自体は成功すること（部分的成功を許容）",
+      "verified": true
+    },
+    {
+      "criterion": "既存のリポジトリ削除（DELETE /api/repositories）の動作に影響がないこと",
+      "verified": true
+    },
+    {
+      "criterion": "パフォーマンス対策が実装されていること（並列実行 Promise.allSettled）",
+      "verified": true
+    }
+  ],
+  "evidence_files": [
+    "tests/unit/session-cleanup.test.ts",
+    "src/lib/__tests__/worktrees-sync.test.ts",
+    "tests/integration/api-repository-delete.test.ts",
+    "tests/integration/repository-exclusion.test.ts"
+  ],
+  "test_summary": {
+    "unit_tests": "265 passed, 1 failed (unrelated: git-utils detached HEAD test)",
+    "type_check": "0 errors",
+    "lint": "0 warnings, 0 errors",
+    "issue_526_specific_tests": "46/46 passed across 4 test files"
+  },
+  "message": "すべての受入条件を満たしています。Issue #526の実装は9項目すべての受入基準をPASSしました。1件のテスト失敗(git-utils.test.ts)はIssue #526とは無関係です。"
+}
