@@ -1,6 +1,7 @@
 /**
  * Auto-Yes Manager cleanup function tests
  * Issue #404: Resource leak prevention - deleteAutoYesState and worktree ID accessors
+ * Issue #525: Updated for composite key migration
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -13,6 +14,7 @@ import {
   deleteAutoYesState,
   getAutoYesStateWorktreeIds,
   getAutoYesPollerWorktreeIds,
+  buildCompositeKey,
 } from '@/lib/polling/auto-yes-manager';
 
 // Mock dependencies required by startAutoYesPolling
@@ -39,7 +41,7 @@ vi.mock('@/lib/cli-tools/manager', () => ({
   },
 }));
 
-describe('Auto-Yes Manager Cleanup Functions (Issue #404)', () => {
+describe('Auto-Yes Manager Cleanup Functions (Issue #404, #525)', () => {
   beforeEach(() => {
     clearAllAutoYesStates();
     clearAllPollerStates();
@@ -48,84 +50,85 @@ describe('Auto-Yes Manager Cleanup Functions (Issue #404)', () => {
   describe('deleteAutoYesState', () => {
     it('should delete an existing autoYesState entry and return true', () => {
       // Arrange: set up an auto-yes state
-      setAutoYesEnabled('wt-valid-1', true);
-      expect(getAutoYesState('wt-valid-1')).not.toBeNull();
+      setAutoYesEnabled('wt-valid-1', 'claude', true);
+      expect(getAutoYesState('wt-valid-1', 'claude')).not.toBeNull();
 
       // Act
-      const result = deleteAutoYesState('wt-valid-1');
+      const compositeKey = buildCompositeKey('wt-valid-1', 'claude');
+      const result = deleteAutoYesState(compositeKey);
 
       // Assert
       expect(result).toBe(true);
-      expect(getAutoYesState('wt-valid-1')).toBeNull();
+      expect(getAutoYesState('wt-valid-1', 'claude')).toBeNull();
     });
 
-    it('should return true when deleting a non-existent worktree ID (no-op)', () => {
-      // Act: delete a worktree that doesn't exist in the map
-      const result = deleteAutoYesState('wt-nonexistent');
-
-      // Assert: should still return true since ID is valid
+    it('should return true when deleting a non-existent composite key (no-op)', () => {
+      const compositeKey = buildCompositeKey('wt-nonexistent', 'claude');
+      const result = deleteAutoYesState(compositeKey);
       expect(result).toBe(true);
     });
 
-    it('should return false for an invalid worktree ID [SEC-404-001]', () => {
-      // Act: try with invalid IDs
+    it('should return false for an invalid composite key [SEC-404-001]', () => {
       expect(deleteAutoYesState('')).toBe(false);
-      expect(deleteAutoYesState('../traversal')).toBe(false);
-      expect(deleteAutoYesState('has spaces')).toBe(false);
-      expect(deleteAutoYesState('special!chars')).toBe(false);
+      expect(deleteAutoYesState('../traversal:claude')).toBe(false);
+      expect(deleteAutoYesState('has spaces:claude')).toBe(false);
+      expect(deleteAutoYesState('special!chars:claude')).toBe(false);
+    });
+
+    it('should return false for composite key with invalid cliToolId', () => {
+      expect(deleteAutoYesState('wt-1:invalid')).toBe(false);
     });
 
     it('should not affect autoYesPollerStates when deleting autoYesState', () => {
       // Arrange: set up both state and poller
-      setAutoYesEnabled('wt-both', true);
+      setAutoYesEnabled('wt-both', 'claude', true);
       startAutoYesPolling('wt-both', 'claude');
 
       // Verify poller is active
-      expect(getAutoYesPollerWorktreeIds()).toContain('wt-both');
+      expect(getAutoYesPollerWorktreeIds()).toContain('wt-both:claude');
 
       // Act: delete only the auto-yes state
-      deleteAutoYesState('wt-both');
+      deleteAutoYesState(buildCompositeKey('wt-both', 'claude'));
 
       // Assert: poller should still be present
-      expect(getAutoYesPollerWorktreeIds()).toContain('wt-both');
+      expect(getAutoYesPollerWorktreeIds()).toContain('wt-both:claude');
     });
   });
 
-  describe('getAutoYesStateWorktreeIds', () => {
+  describe('getAutoYesStateWorktreeIds (returns composite keys)', () => {
     it('should return empty array when no states exist', () => {
       expect(getAutoYesStateWorktreeIds()).toEqual([]);
     });
 
-    it('should return correct worktree IDs', () => {
-      setAutoYesEnabled('wt-a', true);
-      setAutoYesEnabled('wt-b', true);
-      setAutoYesEnabled('wt-c', true);
+    it('should return correct composite keys', () => {
+      setAutoYesEnabled('wt-a', 'claude', true);
+      setAutoYesEnabled('wt-b', 'codex', true);
+      setAutoYesEnabled('wt-c', 'claude', true);
 
       const ids = getAutoYesStateWorktreeIds();
       expect(ids).toHaveLength(3);
-      expect(ids).toContain('wt-a');
-      expect(ids).toContain('wt-b');
-      expect(ids).toContain('wt-c');
+      expect(ids).toContain('wt-a:claude');
+      expect(ids).toContain('wt-b:codex');
+      expect(ids).toContain('wt-c:claude');
     });
   });
 
-  describe('getAutoYesPollerWorktreeIds', () => {
+  describe('getAutoYesPollerWorktreeIds (returns composite keys)', () => {
     it('should return empty array when no pollers exist', () => {
       expect(getAutoYesPollerWorktreeIds()).toEqual([]);
     });
 
-    it('should return correct worktree IDs for active pollers', () => {
-      // Set up auto-yes states first (required for starting pollers)
-      setAutoYesEnabled('wt-p1', true);
-      setAutoYesEnabled('wt-p2', true);
+    it('should return correct composite keys for active pollers', () => {
+      setAutoYesEnabled('wt-p1', 'claude', true);
+      setAutoYesEnabled('wt-p2', 'codex', true);
 
       startAutoYesPolling('wt-p1', 'claude');
       startAutoYesPolling('wt-p2', 'codex');
 
       const ids = getAutoYesPollerWorktreeIds();
       expect(ids).toHaveLength(2);
-      expect(ids).toContain('wt-p1');
-      expect(ids).toContain('wt-p2');
+      expect(ids).toContain('wt-p1:claude');
+      expect(ids).toContain('wt-p2:codex');
     });
   });
 });

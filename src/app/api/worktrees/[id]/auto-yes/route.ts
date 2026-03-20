@@ -13,6 +13,9 @@ import {
   setAutoYesEnabled,
   startAutoYesPolling,
   stopAutoYesPolling,
+  stopAutoYesPollingByWorktree,
+  buildCompositeKey,
+  getCompositeKeysByWorktree,
   type AutoYesState,
 } from '@/lib/polling/auto-yes-manager';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
@@ -72,15 +75,53 @@ function isValidCliTool(cliToolId: string | undefined): cliToolId is CLIToolType
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
+    // [SEC4-SF-003] Validate worktree ID format
+    if (!isValidWorktreeId(params.id)) {
+      return NextResponse.json(
+        { error: 'Invalid worktree ID format' },
+        { status: 400 }
+      );
+    }
+
     const notFound = validateWorktreeExists(params.id);
     if (notFound) return notFound;
 
-    const state = getAutoYesState(params.id);
-    return NextResponse.json(buildAutoYesResponse(state));
+    // Issue #525: cliToolId query parameter support
+    const url = new URL(request.url);
+    const cliToolIdParam = url.searchParams.get('cliToolId');
+
+    if (cliToolIdParam) {
+      // Single agent query
+      if (!isValidCliTool(cliToolIdParam)) {
+        return NextResponse.json(
+          { error: 'Invalid cliToolId' },
+          { status: 400 }
+        );
+      }
+      const state = getAutoYesState(params.id, cliToolIdParam);
+      return NextResponse.json(buildAutoYesResponse(state));
+    }
+
+    // No cliToolId: return map of all agents
+    const compositeKeys = getCompositeKeysByWorktree(params.id);
+    const agentStates: Record<string, ReturnType<typeof buildAutoYesResponse>> = {};
+    for (const key of compositeKeys) {
+      const parts = key.split(':');
+      const agentId = parts.slice(1).join(':');
+      const state = getAutoYesState(params.id, agentId as CLIToolType);
+      agentStates[agentId] = buildAutoYesResponse(state);
+    }
+
+    // For backward compatibility, also include top-level fields from default agent
+    const defaultState = getAutoYesState(params.id, 'claude');
+    return NextResponse.json({
+      ...buildAutoYesResponse(defaultState),
+      agents: agentStates,
+    });
   } catch (error: unknown) {
     logger.error('error-getting-auto-yes-state:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
@@ -152,19 +193,24 @@ export async function POST(
       }
     }
 
-    // Validate cliToolId if provided (default: 'claude')
-    const cliToolId: CLIToolType = isValidCliTool(body.cliToolId)
-      ? body.cliToolId
-      : 'claude';
+    // [SEC4-SF-002] Validate cliToolId: reject invalid values (no fallback)
+    if (body.cliToolId !== undefined && !isValidCliTool(body.cliToolId)) {
+      return NextResponse.json(
+        { error: 'Invalid cliToolId' },
+        { status: 400 }
+      );
+    }
+    const cliToolId: CLIToolType = body.cliToolId ?? 'claude';
 
     const state = setAutoYesEnabled(
       params.id,
+      cliToolId,
       body.enabled,
       body.enabled ? duration : undefined,
       body.enabled ? stopPattern : undefined
     );
 
-    // Issue #138: Start or stop server-side polling
+    // Issue #138, #525: Start or stop server-side polling
     let pollingStarted = false;
     if (body.enabled) {
       const result = startAutoYesPolling(params.id, cliToolId);
@@ -173,7 +219,13 @@ export async function POST(
         logger.warn('polling-not-started:');
       }
     } else {
-      stopAutoYesPolling(params.id);
+      // Issue #525: cliToolId specified -> stop individual; not specified -> stop all
+      if (body.cliToolId) {
+        const compositeKey = buildCompositeKey(params.id, cliToolId);
+        stopAutoYesPolling(compositeKey);
+      } else {
+        stopAutoYesPollingByWorktree(params.id);
+      }
     }
 
     return NextResponse.json(buildAutoYesResponse(state, pollingStarted));

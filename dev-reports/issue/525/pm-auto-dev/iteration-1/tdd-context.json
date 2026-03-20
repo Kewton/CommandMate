@@ -1,0 +1,23 @@
+{
+  "issue_number": 525,
+  "acceptance_criteria": [
+    "UIから各エージェント毎にauto-yesを独立してON/OFFできる",
+    "どのエージェントでauto-yesが有効か、残り時間も含めて一目で分かる",
+    "CLIからの設定変更（commandmate auto-yes --agent claude）がUIにリアルタイム反映される",
+    "UIからの設定変更がCLIの commandmate capture --json のautoYesフィールドに反映される",
+    "複数エージェント（例: Claude + Codex）で同時にauto-yesを有効化でき、期間・停止条件を個別設定可能",
+    "既存のauto-yes動作（単一エージェント利用時）に影響がない",
+    "確認ダイアログに対象エージェント名が表示される",
+    "セッション停止・リソースクリーンアップ時に全エージェント分のauto-yes状態が正しくクリーンアップされる"
+  ],
+  "implementation_tasks": [
+    "Phase 1: auto-yes-state.ts - 複合キーヘルパー(buildCompositeKey/extractWorktreeId/extractCliToolId)、Mapキー複合キー化、関数シグネチャ変更(setAutoYesEnabled/getAutoYesState/disableAutoYes/deleteAutoYesState/checkStopCondition)、byWorktreeヘルパー、barrel更新",
+    "Phase 2: auto-yes-poller.ts - Mapキー複合キー化、内部関数のキー統一、byWorktreeヘルパー(stopAutoYesPollingByWorktree/isAnyPollerActiveForWorktree)、incrementErrorCountのcompositeKey対応、barrel更新",
+    "Phase 3: API層 - auto-yes/route.ts GET(cliToolIdクエリパラメータ、_request→request変更、isValidWorktreeIdバリデーション追加)、POST(setAutoYesEnabledにcliToolId渡し、不正cliToolIdで400エラー、disable時の分岐)、current-output/route.ts(cliToolバリデーション、compositeKey対応)",
+    "Phase 4: クリーンアップ - session-cleanup.ts(byWorktreeヘルパー使用)、resource-cleanup.ts(extractWorktreeIdでDB照合、バリデーション追加)、worktree-status-helper.ts(compositeKey対応)",
+    "Phase 5: フロントエンド - AutoYesToggle.tsx(エージェント名表示)、AutoYesConfirmDialog.tsx(エージェント名表示)、WorktreeDetailRefactored.tsx(エージェント毎状態管理)、useAutoYes.ts(cliToolIdクエリパラメータ付与)"
+  ],
+  "target_coverage": 80,
+  "design_doc_path": "dev-reports/design/issue-525-auto-yes-per-agent-design-policy.md",
+  "work_plan_path": "dev-reports/issue/525/work-plan.md"
+}

@@ -20,7 +20,9 @@ import {
   getAutoYesPollerWorktreeIds,
   deleteAutoYesState,
   stopAutoYesPolling,
+  extractWorktreeId,
 } from './polling/auto-yes-manager';
+import { isValidWorktreeId } from './security/path-validator';
 import { stopScheduleForWorktree, getScheduleWorktreeIds } from './schedule-manager';
 import { getDbInstance } from './db-instance';
 import { createLogger } from '@/lib/logger';
@@ -225,21 +227,29 @@ export function cleanupOrphanedMapEntries(): CleanupMapResult {
     return result;
   }
 
-  // Cleanup autoYesStates
-  const autoYesStateIds = getAutoYesStateWorktreeIds();
-  for (const worktreeId of autoYesStateIds) {
+  // Cleanup autoYesStates (Issue #525: composite keys)
+  const autoYesStateKeys = getAutoYesStateWorktreeIds();
+  for (const compositeKey of autoYesStateKeys) {
+    const worktreeId = extractWorktreeId(compositeKey);
+    // [SEC4-MF-001] Validate extracted worktreeId
+    if (!isValidWorktreeId(worktreeId)) {
+      deleteAutoYesState(compositeKey);
+      result.deletedAutoYesStateIds.push(compositeKey);
+      continue;
+    }
     if (!validWorktreeIds.has(worktreeId)) {
-      deleteAutoYesState(worktreeId);
-      result.deletedAutoYesStateIds.push(worktreeId);
+      deleteAutoYesState(compositeKey);
+      result.deletedAutoYesStateIds.push(compositeKey);
     }
   }
 
-  // Cleanup autoYesPollerStates
-  const autoYesPollerIds = getAutoYesPollerWorktreeIds();
-  for (const worktreeId of autoYesPollerIds) {
-    if (!validWorktreeIds.has(worktreeId)) {
-      stopAutoYesPolling(worktreeId);
-      result.deletedAutoYesPollerIds.push(worktreeId);
+  // Cleanup autoYesPollerStates (Issue #525: composite keys)
+  const autoYesPollerKeys = getAutoYesPollerWorktreeIds();
+  for (const compositeKey of autoYesPollerKeys) {
+    const worktreeId = extractWorktreeId(compositeKey);
+    if (!isValidWorktreeId(worktreeId) || !validWorktreeIds.has(worktreeId)) {
+      stopAutoYesPolling(compositeKey);
+      result.deletedAutoYesPollerIds.push(compositeKey);
     }
   }
 

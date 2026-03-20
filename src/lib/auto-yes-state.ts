@@ -1,18 +1,75 @@
 /**
- * Auto-Yes State Management - In-memory state for auto-yes mode per worktree.
+ * Auto-Yes State Management - In-memory state for auto-yes mode per worktree/agent.
  *
  * Extracted from auto-yes-manager.ts (Issue #479) to separate state management
  * from polling logic.
  *
- * Dependencies: path-validator.ts, auto-yes-config (one-way dependency).
+ * Issue #525: Composite key migration (worktreeId:cliToolId) for per-agent auto-yes.
+ *
+ * Dependencies: path-validator.ts, auto-yes-config, cli-tools/types (one-way dependency).
  * auto-yes-poller.ts -> auto-yes-state.ts -> path-validator.ts
  */
 
 import { DEFAULT_AUTO_YES_DURATION, validateStopPattern, type AutoYesDuration, type AutoYesStopReason } from '@/config/auto-yes-config';
 import { isValidWorktreeId } from './security/path-validator';
+import { isCliToolType, type CLIToolType } from './cli-tools/types';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('auto-yes-state');
+
+// =============================================================================
+// Composite Key Helpers (Issue #525: per-agent auto-yes)
+// =============================================================================
+
+/** [SF-002] Separator for composite key: "worktreeId:cliToolId" */
+export const COMPOSITE_KEY_SEPARATOR = ':' as const;
+
+/**
+ * Build a composite key from worktreeId and cliToolId.
+ *
+ * @precondition worktreeId must not contain COMPOSITE_KEY_SEPARATOR (':').
+ *   This precondition is guaranteed by isValidWorktreeId() which restricts
+ *   to alphanumeric + hyphens + underscores. If isValidWorktreeId() allowed
+ *   characters change, this function must be reviewed.
+ *
+ * [SEC4-SF-004] Defensive assertion: throws if worktreeId contains separator.
+ *
+ * @param worktreeId - Worktree identifier
+ * @param cliToolId - CLI tool type
+ * @returns Composite key string "worktreeId:cliToolId"
+ */
+export function buildCompositeKey(worktreeId: string, cliToolId: CLIToolType): string {
+  if (worktreeId.includes(COMPOSITE_KEY_SEPARATOR)) {
+    throw new Error(`worktreeId must not contain '${COMPOSITE_KEY_SEPARATOR}': ${worktreeId}`);
+  }
+  return `${worktreeId}${COMPOSITE_KEY_SEPARATOR}${cliToolId}`;
+}
+
+/**
+ * Extract worktreeId from a composite key.
+ * Uses lastIndexOf for safety (cliToolId may contain hyphens but not colons).
+ *
+ * @param compositeKey - Composite key string
+ * @returns worktreeId portion, or the full string if no separator found
+ */
+export function extractWorktreeId(compositeKey: string): string {
+  const lastIndex = compositeKey.lastIndexOf(COMPOSITE_KEY_SEPARATOR);
+  return lastIndex === -1 ? compositeKey : compositeKey.substring(0, lastIndex);
+}
+
+/**
+ * Extract cliToolId from a composite key.
+ * Validates the extracted value against known CLI tool IDs.
+ *
+ * @param compositeKey - Composite key string
+ * @returns CLIToolType if valid, null otherwise
+ */
+export function extractCliToolId(compositeKey: string): CLIToolType | null {
+  const lastIndex = compositeKey.lastIndexOf(COMPOSITE_KEY_SEPARATOR);
+  if (lastIndex === -1) return null;
+  const cliToolId = compositeKey.substring(lastIndex + 1);
+  return isCliToolType(cliToolId) ? cliToolId : null;
+}
 
 // Re-export from shared config for backward compatibility (Issue #314)
 export type { AutoYesStopReason } from '@/config/auto-yes-config';
@@ -38,15 +95,7 @@ export interface AutoYesState {
 /**
  * globalThis pattern for hot reload persistence (Issue #153)
  *
- * Problem: Next.js hot reload or worker restart resets module-scoped variables,
- * causing UI and background state inconsistency.
- *
- * Solution: Use globalThis to persist state. globalThis is unique per process
- * and persists even when modules are reloaded.
- *
- * Limitation: In multi-process environments (cluster mode, etc.), each process
- * has its own state. CommandMate is designed for single-process operation,
- * so this limitation is acceptable.
+ * Issue #525: Map key changed from worktreeId to compositeKey (worktreeId:cliToolId).
  */
 declare global {
   // eslint-disable-next-line no-var
@@ -73,41 +122,53 @@ export function isAutoYesExpired(state: AutoYesState): boolean {
 }
 
 // =============================================================================
-// Auto-Yes State Management
+// Auto-Yes State Management (Issue #525: compositeKey-based)
 // =============================================================================
 
 /**
- * Get the auto-yes state for a worktree.
+ * Get the auto-yes state for a worktree and CLI tool.
  * Returns null if no state exists. If expired, auto-disables and returns the disabled state.
  *
+ * Issue #525: Changed from (worktreeId) to (worktreeId, cliToolId).
+ *
  * @param worktreeId - Worktree identifier
+ * @param cliToolId - CLI tool type (default: 'claude')
  * @returns Current auto-yes state, or null if no state exists
  */
-export function getAutoYesState(worktreeId: string): AutoYesState | null {
-  const state = autoYesStates.get(worktreeId);
+export function getAutoYesState(worktreeId: string, cliToolId: CLIToolType = 'claude'): AutoYesState | null {
+  const key = buildCompositeKey(worktreeId, cliToolId);
+  const state = autoYesStates.get(key);
   if (!state) return null;
 
   // Auto-disable if expired (Issue #314: delegate to disableAutoYes)
   if (isAutoYesExpired(state)) {
-    return disableAutoYes(worktreeId, 'expired');
+    return disableAutoYes(worktreeId, cliToolId, 'expired');
   }
 
   return state;
 }
 
 /**
- * Set the auto-yes enabled state for a worktree
+ * Set the auto-yes enabled state for a worktree and CLI tool.
+ *
+ * Issue #525: Changed from (worktreeId, enabled, duration?, stopPattern?) to
+ * (worktreeId, cliToolId, enabled, duration?, stopPattern?).
+ *
+ * @param worktreeId - Worktree identifier
+ * @param cliToolId - CLI tool type
+ * @param enabled - Whether to enable or disable auto-yes
  * @param duration - Optional duration in milliseconds (must be an ALLOWED_DURATIONS value).
  *                   Defaults to DEFAULT_AUTO_YES_DURATION (1 hour) when omitted.
  * @param stopPattern - Optional regex pattern for stop condition (Issue #314).
- *                      When terminal output matches this pattern, auto-yes is automatically disabled.
  */
 export function setAutoYesEnabled(
   worktreeId: string,
+  cliToolId: CLIToolType,
   enabled: boolean,
   duration?: AutoYesDuration,
   stopPattern?: string
 ): AutoYesState {
+  const key = buildCompositeKey(worktreeId, cliToolId);
   if (enabled) {
     const now = Date.now();
     const effectiveDuration = duration ?? DEFAULT_AUTO_YES_DURATION;
@@ -117,29 +178,33 @@ export function setAutoYesEnabled(
       expiresAt: now + effectiveDuration,
       stopPattern,
     };
-    autoYesStates.set(worktreeId, state);
+    autoYesStates.set(key, state);
     return state;
   } else {
     // Issue #314: Delegate disable path to disableAutoYes()
-    return disableAutoYes(worktreeId);
+    return disableAutoYes(worktreeId, cliToolId);
   }
 }
 
 /**
- * Disable auto-yes for a worktree with an optional reason.
+ * Disable auto-yes for a worktree and CLI tool with an optional reason.
  * Preserves existing state fields (enabledAt, expiresAt, stopPattern) for inspection.
  *
  * Issue #314: Centralized disable logic for expiration, stop pattern match, and manual disable.
+ * Issue #525: Changed from (worktreeId, reason?) to (worktreeId, cliToolId, reason?).
  *
  * @param worktreeId - Worktree identifier
+ * @param cliToolId - CLI tool type (default: 'claude')
  * @param reason - Optional reason for disabling ('expired' | 'stop_pattern_matched')
  * @returns Updated auto-yes state
  */
 export function disableAutoYes(
   worktreeId: string,
+  cliToolId: CLIToolType = 'claude',
   reason?: AutoYesStopReason
 ): AutoYesState {
-  const existing = autoYesStates.get(worktreeId);
+  const key = buildCompositeKey(worktreeId, cliToolId);
+  const existing = autoYesStates.get(key);
   const state: AutoYesState = {
     enabled: false,
     enabledAt: existing?.enabledAt ?? 0,
@@ -147,7 +212,7 @@ export function disableAutoYes(
     stopPattern: existing?.stopPattern,
     stopReason: reason,
   };
-  autoYesStates.set(worktreeId, state);
+  autoYesStates.set(key, state);
   return state;
 }
 
@@ -166,11 +231,6 @@ export function clearAllAutoYesStates(): void {
 /**
  * Execute a regex test with timeout protection.
  * Uses synchronous execution with safe-regex2 pre-validation as the primary defense.
- *
- * Note: Node.js is single-threaded, so true async timeout requires Worker threads.
- * The safe-regex2 pre-validation in validateStopPattern() prevents catastrophic
- * backtracking patterns from reaching this function. The timeoutMs parameter is
- * reserved for future Worker thread implementation.
  *
  * @internal Exported for testing purposes only.
  * @param regex - Pre-compiled RegExp to test
@@ -193,33 +253,33 @@ export function executeRegexWithTimeout(
 
 /**
  * Check if the terminal output matches the stop condition pattern.
- * If matched, disables auto-yes for the worktree.
+ * If matched, disables auto-yes for the worktree/agent.
  *
- * Note: This function disables auto-yes state but does NOT stop polling.
- * The caller (auto-yes-poller.ts) is responsible for stopping polling when
- * this function returns true.
- *
- * Security: Pattern is re-validated before execution to handle cases where
- * a previously valid pattern becomes invalid (e.g., state corruption).
+ * Issue #525: Changed from (worktreeId, ...) to (compositeKey, ...).
+ * [MF-001] compositeKey is validated by extracting worktreeId and cliToolId.
  *
  * @internal Exported for testing purposes only.
- * @param worktreeId - Worktree identifier
+ * @param compositeKey - Composite key (worktreeId:cliToolId)
  * @param cleanOutput - ANSI-stripped terminal output to check
- * @param onStopMatched - Optional callback invoked when stop condition matches (for poller cleanup)
+ * @param onStopMatched - Optional callback invoked with compositeKey when stop condition matches
  * @returns true if stop condition matched and auto-yes was disabled
  */
 export function checkStopCondition(
-  worktreeId: string,
+  compositeKey: string,
   cleanOutput: string,
-  onStopMatched?: (worktreeId: string) => void
+  onStopMatched?: (compositeKey: string) => void
 ): boolean {
-  const autoYesState = getAutoYesState(worktreeId);
+  const worktreeId = extractWorktreeId(compositeKey);
+  const cliToolId = extractCliToolId(compositeKey);
+  if (!cliToolId) return false;
+
+  const autoYesState = getAutoYesState(worktreeId, cliToolId);
   if (!autoYesState?.stopPattern) return false;
 
   const validation = validateStopPattern(autoYesState.stopPattern);
   if (!validation.valid) {
-    logger.warn('invalid-stop-pattern', { detail: String({ worktreeId }) });
-    disableAutoYes(worktreeId);
+    logger.warn('invalid-stop-pattern', { detail: String({ compositeKey }) });
+    disableAutoYes(worktreeId, cliToolId);
     return false;
   }
 
@@ -229,21 +289,21 @@ export function checkStopCondition(
 
     if (matched === null) {
       // Execution failed - disable to prevent future errors
-      logger.warn('stop-condition-check', { detail: String({ worktreeId }) });
-      disableAutoYes(worktreeId);
+      logger.warn('stop-condition-check', { detail: String({ compositeKey }) });
+      disableAutoYes(worktreeId, cliToolId);
       return false;
     }
 
     if (matched) {
-      disableAutoYes(worktreeId, 'stop_pattern_matched');
+      disableAutoYes(worktreeId, cliToolId, 'stop_pattern_matched');
       if (onStopMatched) {
-        onStopMatched(worktreeId);
+        onStopMatched(compositeKey);
       }
-      logger.warn('stop-condition-matched', { detail: String({ worktreeId }) });
+      logger.warn('stop-condition-matched', { detail: String({ compositeKey }) });
       return true;
     }
   } catch {
-    logger.warn('stop-condition-check', { detail: String({ worktreeId }) });
+    logger.warn('stop-condition-check', { detail: String({ compositeKey }) });
   }
 
   return false;
@@ -254,31 +314,66 @@ export function checkStopCondition(
 // =============================================================================
 
 /**
- * Delete the auto-yes state for a worktree.
+ * Delete the auto-yes state by composite key.
  * Used during worktree deletion to prevent memory leaks in the autoYesStates Map.
  *
- * [SEC-404-001] Validates worktreeId before deletion.
+ * Issue #525: Changed from (worktreeId) to (compositeKey).
+ * [MF-001] Validates compositeKey by extracting and checking worktreeId and cliToolId.
  *
- * @param worktreeId - Worktree identifier (must pass isValidWorktreeId)
- * @returns true if worktreeId was valid (deletion attempted), false if invalid
+ * @param compositeKey - Composite key (worktreeId:cliToolId)
+ * @returns true if compositeKey was valid (deletion attempted), false if invalid
  */
-export function deleteAutoYesState(worktreeId: string): boolean {
+export function deleteAutoYesState(compositeKey: string): boolean {
+  const worktreeId = extractWorktreeId(compositeKey);
   if (!isValidWorktreeId(worktreeId)) {
     return false;
   }
-  autoYesStates.delete(worktreeId);
+  const cliToolId = extractCliToolId(compositeKey);
+  if (!cliToolId) {
+    return false;
+  }
+  autoYesStates.delete(compositeKey);
   return true;
 }
 
 /**
- * Get all worktree IDs that have auto-yes state entries.
+ * Get all composite keys that have auto-yes state entries.
  * Used by periodic resource cleanup to detect orphaned entries.
  *
+ * Issue #525: Returns composite keys instead of worktree IDs.
+ *
  * @internal Exported for resource-cleanup and testing purposes.
- * @returns Array of worktree IDs present in the autoYesStates Map
+ * @returns Array of composite keys present in the autoYesStates Map
  */
 export function getAutoYesStateWorktreeIds(): string[] {
   return Array.from(autoYesStates.keys());
+}
+
+// =============================================================================
+// byWorktree Helpers (Issue #525)
+// =============================================================================
+
+/**
+ * Get all composite keys for a given worktreeId.
+ *
+ * @param worktreeId - Worktree identifier
+ * @returns Array of composite keys belonging to this worktree
+ */
+export function getCompositeKeysByWorktree(worktreeId: string): string[] {
+  return Array.from(autoYesStates.keys())
+    .filter(key => extractWorktreeId(key) === worktreeId);
+}
+
+/**
+ * Delete all auto-yes states for a given worktreeId (all agents).
+ *
+ * @param worktreeId - Worktree identifier
+ * @returns Number of states deleted
+ */
+export function deleteAutoYesStateByWorktree(worktreeId: string): number {
+  const keys = getCompositeKeysByWorktree(worktreeId);
+  keys.forEach(key => autoYesStates.delete(key));
+  return keys.length;
 }
 
 /**
@@ -315,12 +410,6 @@ export const COOLDOWN_INTERVAL_MS = 5000;
 
 /**
  * Duplicate prompt retry expiry in milliseconds (10 seconds).
- * After sending a response, if the same promptKey persists beyond this window,
- * the poller retries sending instead of permanently skipping as a duplicate.
- * This handles:
- * - Consecutive identical prompts (e.g., repeated "Approve?") where the
- *   5-second cooldown causes the poller to miss the "no prompt" state
- * - Silently failed keystrokes where the prompt remains unchanged
  */
 export const DUPLICATE_RETRY_EXPIRY_MS = 10000;
 
@@ -335,11 +424,5 @@ export const MAX_CONCURRENT_POLLERS = 50;
 
 /**
  * Number of lines from the end to check for thinking indicators (Issue #191)
- * Matches detectPrompt()'s multiple_choice scan range (50 lines in prompt-detector.ts)
- * to ensure Issue #161 Layer 1 defense covers the same scope as prompt detection.
- *
- * IMPORTANT: This value is semantically coupled to the hardcoded 50 in
- * prompt-detector.ts detectMultipleChoicePrompt() (L268: Math.max(0, lines.length - 50)).
- * See SF-001 in Stage 1 review. A cross-reference test validates this coupling.
  */
 export const THINKING_CHECK_LINE_COUNT = 50;

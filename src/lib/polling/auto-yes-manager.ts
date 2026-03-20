@@ -4,6 +4,8 @@
  * Issue #479: Split into auto-yes-state.ts (state management) and
  * auto-yes-poller.ts (polling logic) for SRP compliance.
  *
+ * Issue #525: Added composite key helpers and byWorktree helpers.
+ *
  * This barrel file re-exports all public APIs to maintain backward compatibility.
  * No `export *` - all exports are explicitly named (Issue #479 constraint).
  */
@@ -16,6 +18,13 @@ export type { AutoYesStopReason } from '../auto-yes-state';
 export type { AutoYesState } from '../auto-yes-state';
 
 export {
+  // Composite key helpers (Issue #525)
+  COMPOSITE_KEY_SEPARATOR,
+  buildCompositeKey,
+  extractWorktreeId,
+  extractCliToolId,
+
+  // State management
   isAutoYesExpired,
   getAutoYesState,
   setAutoYesEnabled,
@@ -25,6 +34,12 @@ export {
   checkStopCondition,
   deleteAutoYesState,
   getAutoYesStateWorktreeIds,
+
+  // byWorktree helpers (Issue #525)
+  getCompositeKeysByWorktree,
+  deleteAutoYesStateByWorktree,
+
+  // Constants
   calculateBackoffInterval,
   POLLING_INTERVAL_MS,
   COOLDOWN_INTERVAL_MS,
@@ -54,4 +69,7 @@ export {
   stopAutoYesPolling,
   stopAllAutoYesPolling,
   getAutoYesPollerWorktreeIds,
+  // byWorktree helpers (Issue #525)
+  stopAutoYesPollingByWorktree,
+  isAnyPollerActiveForWorktree,
 } from '../auto-yes-poller';

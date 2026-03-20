@@ -15,12 +15,16 @@ vi.mock('fs', () => ({
   existsSync: vi.fn().mockReturnValue(false),
 }));
 
-// Mock auto-yes-manager
+// Mock auto-yes-manager (Issue #525: includes extractWorktreeId)
 vi.mock('@/lib/polling/auto-yes-manager', () => ({
   getAutoYesStateWorktreeIds: vi.fn().mockReturnValue([]),
   getAutoYesPollerWorktreeIds: vi.fn().mockReturnValue([]),
   deleteAutoYesState: vi.fn().mockReturnValue(true),
   stopAutoYesPolling: vi.fn(),
+  extractWorktreeId: vi.fn().mockImplementation((compositeKey: string) => {
+    const lastIndex = compositeKey.lastIndexOf(':');
+    return lastIndex === -1 ? compositeKey : compositeKey.substring(0, lastIndex);
+  }),
 }));
 
 // Mock schedule-manager
@@ -55,7 +59,7 @@ import {
   MCP_PROCESS_PATTERNS,
   MAX_PS_OUTPUT_BYTES,
 } from '@/lib/resource-cleanup';
-import { getAutoYesStateWorktreeIds, getAutoYesPollerWorktreeIds, deleteAutoYesState, stopAutoYesPolling } from '@/lib/polling/auto-yes-manager';
+import { getAutoYesStateWorktreeIds, getAutoYesPollerWorktreeIds, deleteAutoYesState, stopAutoYesPolling, extractWorktreeId } from '@/lib/polling/auto-yes-manager';
 import { stopScheduleForWorktree, getScheduleWorktreeIds } from '@/lib/schedule-manager';
 import { execFile } from 'child_process';
 import { existsSync } from 'fs';
@@ -123,9 +127,9 @@ describe('Resource Cleanup (Issue #404)', () => {
   });
 
   describe('cleanupOrphanedMapEntries', () => {
-    it('should detect and remove orphaned entries from autoYesStates', () => {
-      // Arrange: auto-yes state for worktree 'wt-orphan' (not in DB)
-      vi.mocked(getAutoYesStateWorktreeIds).mockReturnValue(['wt-orphan', 'wt-valid']);
+    it('should detect and remove orphaned entries from autoYesStates (composite keys)', () => {
+      // Arrange: auto-yes state for worktree 'wt-orphan' (not in DB) using composite keys
+      vi.mocked(getAutoYesStateWorktreeIds).mockReturnValue(['wt-orphan:claude', 'wt-valid:claude']);
       vi.mocked(getAutoYesPollerWorktreeIds).mockReturnValue([]);
       // DB returns only 'wt-valid'
       mockDbAll.mockReturnValue([{ id: 'wt-valid' }]);
@@ -134,26 +138,26 @@ describe('Resource Cleanup (Issue #404)', () => {
       const result = cleanupOrphanedMapEntries();
 
       // Assert
-      expect(deleteAutoYesState).toHaveBeenCalledWith('wt-orphan');
-      expect(deleteAutoYesState).not.toHaveBeenCalledWith('wt-valid');
-      expect(result.deletedAutoYesStateIds).toContain('wt-orphan');
-      expect(result.deletedAutoYesStateIds).not.toContain('wt-valid');
+      expect(deleteAutoYesState).toHaveBeenCalledWith('wt-orphan:claude');
+      expect(deleteAutoYesState).not.toHaveBeenCalledWith('wt-valid:claude');
+      expect(result.deletedAutoYesStateIds).toContain('wt-orphan:claude');
+      expect(result.deletedAutoYesStateIds).not.toContain('wt-valid:claude');
     });
 
-    it('should detect and remove orphaned entries from autoYesPollerStates', () => {
+    it('should detect and remove orphaned entries from autoYesPollerStates (composite keys)', () => {
       vi.mocked(getAutoYesStateWorktreeIds).mockReturnValue([]);
-      vi.mocked(getAutoYesPollerWorktreeIds).mockReturnValue(['wt-orphan-poller', 'wt-valid']);
+      vi.mocked(getAutoYesPollerWorktreeIds).mockReturnValue(['wt-orphan-poller:claude', 'wt-valid:codex']);
       mockDbAll.mockReturnValue([{ id: 'wt-valid' }]);
 
       const result = cleanupOrphanedMapEntries();
 
-      expect(stopAutoYesPolling).toHaveBeenCalledWith('wt-orphan-poller');
-      expect(result.deletedAutoYesPollerIds).toContain('wt-orphan-poller');
+      expect(stopAutoYesPolling).toHaveBeenCalledWith('wt-orphan-poller:claude');
+      expect(result.deletedAutoYesPollerIds).toContain('wt-orphan-poller:claude');
     });
 
     it('should not delete entries for valid worktrees', () => {
-      vi.mocked(getAutoYesStateWorktreeIds).mockReturnValue(['wt-valid-1', 'wt-valid-2']);
-      vi.mocked(getAutoYesPollerWorktreeIds).mockReturnValue(['wt-valid-1']);
+      vi.mocked(getAutoYesStateWorktreeIds).mockReturnValue(['wt-valid-1:claude', 'wt-valid-2:codex']);
+      vi.mocked(getAutoYesPollerWorktreeIds).mockReturnValue(['wt-valid-1:claude']);
       mockDbAll.mockReturnValue([{ id: 'wt-valid-1' }, { id: 'wt-valid-2' }]);
 
       const result = cleanupOrphanedMapEntries();

@@ -75,7 +75,7 @@ describe('auto-yes-manager', () => {
       const now = 1700000000000;
       vi.setSystemTime(now);
 
-      const state = setAutoYesEnabled('wt-1', true);
+      const state = setAutoYesEnabled('wt-1', 'claude', true);
 
       expect(state.enabled).toBe(true);
       expect(state.enabledAt).toBe(now);
@@ -87,7 +87,7 @@ describe('auto-yes-manager', () => {
       const now = 1700000000000;
       vi.setSystemTime(now);
 
-      const state = setAutoYesEnabled('wt-1', true, 10800000);
+      const state = setAutoYesEnabled('wt-1', 'claude', true, 10800000);
 
       expect(state.enabled).toBe(true);
       expect(state.enabledAt).toBe(now);
@@ -99,7 +99,7 @@ describe('auto-yes-manager', () => {
       const now = 1700000000000;
       vi.setSystemTime(now);
 
-      const state = setAutoYesEnabled('wt-1', true, 28800000);
+      const state = setAutoYesEnabled('wt-1', 'claude', true, 28800000);
 
       expect(state.enabled).toBe(true);
       expect(state.enabledAt).toBe(now);
@@ -111,20 +111,20 @@ describe('auto-yes-manager', () => {
       const now = 1700000000000;
       vi.setSystemTime(now);
 
-      const state = setAutoYesEnabled('wt-1', true);
+      const state = setAutoYesEnabled('wt-1', 'claude', true);
 
       expect(state.expiresAt).toBe(now + 3600000);
     });
 
     it('should disable auto-yes', () => {
-      setAutoYesEnabled('wt-1', true);
-      const state = setAutoYesEnabled('wt-1', false);
+      setAutoYesEnabled('wt-1', 'claude', true);
+      const state = setAutoYesEnabled('wt-1', 'claude', false);
 
       expect(state.enabled).toBe(false);
     });
 
     it('should disable auto-yes even when no prior state exists', () => {
-      const state = setAutoYesEnabled('wt-new', false);
+      const state = setAutoYesEnabled('wt-new', 'claude', false);
 
       expect(state.enabled).toBe(false);
       expect(state.enabledAt).toBe(0);
@@ -147,12 +147,12 @@ describe('auto-yes-manager', () => {
 
   describe('getAutoYesState', () => {
     it('should return null when no state exists', () => {
-      expect(getAutoYesState('nonexistent')).toBeNull();
+      expect(getAutoYesState('nonexistent', 'claude')).toBeNull();
     });
 
     it('should return the state when enabled', () => {
-      setAutoYesEnabled('wt-1', true);
-      const state = getAutoYesState('wt-1');
+      setAutoYesEnabled('wt-1', 'claude', true);
+      const state = getAutoYesState('wt-1', 'claude');
 
       expect(state).not.toBeNull();
       expect(state!.enabled).toBe(true);
@@ -163,12 +163,12 @@ describe('auto-yes-manager', () => {
       const now = 1700000000000;
       vi.setSystemTime(now);
 
-      setAutoYesEnabled('wt-1', true);
+      setAutoYesEnabled('wt-1', 'claude', true);
 
       // Advance past expiration
       vi.setSystemTime(now + 3600001);
 
-      const state = getAutoYesState('wt-1');
+      const state = getAutoYesState('wt-1', 'claude');
       expect(state).not.toBeNull();
       expect(state!.enabled).toBe(false);
     });
@@ -178,12 +178,12 @@ describe('auto-yes-manager', () => {
       const now = 1700000000000;
       vi.setSystemTime(now);
 
-      setAutoYesEnabled('wt-1', true);
+      setAutoYesEnabled('wt-1', 'claude', true);
 
       // Advance but not past expiration
       vi.setSystemTime(now + 3599999);
 
-      const state = getAutoYesState('wt-1');
+      const state = getAutoYesState('wt-1', 'claude');
       expect(state!.enabled).toBe(true);
     });
   });
@@ -229,13 +229,13 @@ describe('auto-yes-manager', () => {
 
   describe('clearAllAutoYesStates', () => {
     it('should clear all states', () => {
-      setAutoYesEnabled('wt-1', true);
-      setAutoYesEnabled('wt-2', true);
+      setAutoYesEnabled('wt-1', 'claude', true);
+      setAutoYesEnabled('wt-2', 'claude', true);
 
       clearAllAutoYesStates();
 
-      expect(getAutoYesState('wt-1')).toBeNull();
-      expect(getAutoYesState('wt-2')).toBeNull();
+      expect(getAutoYesState('wt-1', 'claude')).toBeNull();
+      expect(getAutoYesState('wt-2', 'claude')).toBeNull();
     });
   });
 
@@ -297,14 +297,14 @@ describe('auto-yes-manager', () => {
     });
 
     it('should start polling when auto-yes is enabled', () => {
-      setAutoYesEnabled('wt-1', true);
+      setAutoYesEnabled('wt-1', 'claude', true);
       const result = startAutoYesPolling('wt-1', 'claude');
       expect(result.started).toBe(true);
       expect(getActivePollerCount()).toBe(1);
     });
 
     it('should stop existing poller before starting new one', () => {
-      setAutoYesEnabled('wt-1', true);
+      setAutoYesEnabled('wt-1', 'claude', true);
       startAutoYesPolling('wt-1', 'claude');
       expect(getActivePollerCount()).toBe(1);
 
@@ -314,7 +314,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should reject invalid worktree ID', () => {
-      setAutoYesEnabled('invalid/id', true);
+      setAutoYesEnabled('invalid/id', 'claude', true);
       const result = startAutoYesPolling('invalid/id', 'claude');
       expect(result.started).toBe(false);
       expect(result.reason).toBe('invalid worktree ID');
@@ -323,14 +323,14 @@ describe('auto-yes-manager', () => {
     it('should enforce MAX_CONCURRENT_POLLERS limit', () => {
       // Enable and start 50 pollers
       for (let i = 0; i < MAX_CONCURRENT_POLLERS; i++) {
-        setAutoYesEnabled(`wt-${i}`, true);
+        setAutoYesEnabled(`wt-${i}`, 'claude', true);
         const result = startAutoYesPolling(`wt-${i}`, 'claude');
         expect(result.started).toBe(true);
       }
       expect(getActivePollerCount()).toBe(MAX_CONCURRENT_POLLERS);
 
       // 51st should fail
-      setAutoYesEnabled('wt-overflow', true);
+      setAutoYesEnabled('wt-overflow', 'claude', true);
       const result = startAutoYesPolling('wt-overflow', 'claude');
       expect(result.started).toBe(false);
       expect(result.reason).toBe('max concurrent pollers reached');
@@ -339,17 +339,17 @@ describe('auto-yes-manager', () => {
 
   describe('stopAutoYesPolling', () => {
     it('should stop an active poller', () => {
-      setAutoYesEnabled('wt-1', true);
+      setAutoYesEnabled('wt-1', 'claude', true);
       startAutoYesPolling('wt-1', 'claude');
       expect(getActivePollerCount()).toBe(1);
 
-      stopAutoYesPolling('wt-1');
+      stopAutoYesPolling('wt-1:claude');
       expect(getActivePollerCount()).toBe(0);
     });
 
     it('should handle non-existent poller gracefully', () => {
       // Should not throw
-      expect(() => stopAutoYesPolling('nonexistent')).not.toThrow();
+      expect(() => stopAutoYesPolling('nonexistent:claude')).not.toThrow();
     });
   });
 
@@ -357,7 +357,7 @@ describe('auto-yes-manager', () => {
     it('should stop all active pollers', () => {
       // Start multiple pollers
       for (let i = 0; i < 5; i++) {
-        setAutoYesEnabled(`wt-${i}`, true);
+        setAutoYesEnabled(`wt-${i}`, 'claude', true);
         startAutoYesPolling(`wt-${i}`, 'claude');
       }
       expect(getActivePollerCount()).toBe(5);
@@ -373,30 +373,30 @@ describe('auto-yes-manager', () => {
 
   describe('getLastServerResponseTimestamp', () => {
     it('should return null when no poller state exists', () => {
-      expect(getLastServerResponseTimestamp('nonexistent')).toBeNull();
+      expect(getLastServerResponseTimestamp('nonexistent:claude')).toBeNull();
     });
 
     it('should return null when poller exists but no response sent', () => {
-      setAutoYesEnabled('wt-1', true);
+      setAutoYesEnabled('wt-1', 'claude', true);
       startAutoYesPolling('wt-1', 'claude');
-      expect(getLastServerResponseTimestamp('wt-1')).toBeNull();
+      expect(getLastServerResponseTimestamp('wt-1:claude')).toBeNull();
     });
   });
 
   describe('Poller State Management', () => {
     it('should track error counts correctly', () => {
       vi.useFakeTimers();
-      setAutoYesEnabled('wt-1', true);
+      setAutoYesEnabled('wt-1', 'claude', true);
       startAutoYesPolling('wt-1', 'claude');
       // Poller state is internal, tested through behavior
       expect(getActivePollerCount()).toBe(1);
     });
 
     it('should clear poller state on stop', () => {
-      setAutoYesEnabled('wt-1', true);
+      setAutoYesEnabled('wt-1', 'claude', true);
       startAutoYesPolling('wt-1', 'claude');
-      stopAutoYesPolling('wt-1');
-      expect(getLastServerResponseTimestamp('wt-1')).toBeNull();
+      stopAutoYesPolling('wt-1:claude');
+      expect(getLastServerResponseTimestamp('wt-1:claude')).toBeNull();
     });
   });
 
@@ -431,26 +431,26 @@ describe('auto-yes-manager', () => {
     });
 
     it('should store state in globalThis.__autoYesStates', () => {
-      setAutoYesEnabled('test-worktree', true);
+      setAutoYesEnabled('test-worktree', 'claude', true);
 
       // State should be stored in globalThis
       expect(globalThis.__autoYesStates).toBeInstanceOf(Map);
-      expect(globalThis.__autoYesStates?.has('test-worktree')).toBe(true);
-      expect(globalThis.__autoYesStates?.get('test-worktree')?.enabled).toBe(true);
+      expect(globalThis.__autoYesStates?.has('test-worktree:claude')).toBe(true);
+      expect(globalThis.__autoYesStates?.get('test-worktree:claude')?.enabled).toBe(true);
     });
 
     it('should store poller state in globalThis.__autoYesPollerStates', () => {
-      setAutoYesEnabled('test-worktree-2', true);
+      setAutoYesEnabled('test-worktree-2', 'claude', true);
       startAutoYesPolling('test-worktree-2', 'claude');
 
       // Poller state should be stored in globalThis
       expect(globalThis.__autoYesPollerStates).toBeInstanceOf(Map);
-      expect(globalThis.__autoYesPollerStates?.has('test-worktree-2')).toBe(true);
+      expect(globalThis.__autoYesPollerStates?.has('test-worktree-2:claude')).toBe(true);
     });
 
     it('should clear globalThis.__autoYesStates when clearAllAutoYesStates is called', () => {
-      setAutoYesEnabled('test-worktree-3', true);
-      expect(globalThis.__autoYesStates?.has('test-worktree-3')).toBe(true);
+      setAutoYesEnabled('test-worktree-3', 'claude', true);
+      expect(globalThis.__autoYesStates?.has('test-worktree-3:claude')).toBe(true);
 
       clearAllAutoYesStates();
 
@@ -460,9 +460,9 @@ describe('auto-yes-manager', () => {
     });
 
     it('should clear globalThis.__autoYesPollerStates when clearAllPollerStates is called', () => {
-      setAutoYesEnabled('test-worktree-4', true);
+      setAutoYesEnabled('test-worktree-4', 'claude', true);
       startAutoYesPolling('test-worktree-4', 'claude');
-      expect(globalThis.__autoYesPollerStates?.has('test-worktree-4')).toBe(true);
+      expect(globalThis.__autoYesPollerStates?.has('test-worktree-4:claude')).toBe(true);
 
       clearAllPollerStates();
 
@@ -473,13 +473,13 @@ describe('auto-yes-manager', () => {
 
     it('should maintain state reference after module access', () => {
       // Set state
-      setAutoYesEnabled('persistence-test', true);
+      setAutoYesEnabled('persistence-test', 'claude', true);
 
       // Get reference to globalThis state
       const statesRef = globalThis.__autoYesStates;
 
       // Access state through exported function
-      const state = getAutoYesState('persistence-test');
+      const state = getAutoYesState('persistence-test', 'claude');
 
       // References should be the same
       expect(statesRef).toBe(globalThis.__autoYesStates);
@@ -503,7 +503,7 @@ describe('auto-yes-manager', () => {
       vi.setSystemTime(now);
 
       // Setup: enable auto-yes and start polling
-      setAutoYesEnabled('wt-thinking', true);
+      setAutoYesEnabled('wt-thinking', 'claude', true);
       startAutoYesPolling('wt-thinking', 'claude');
 
       // Mock: captureSessionOutput returns thinking output with numbered list
@@ -526,7 +526,7 @@ describe('auto-yes-manager', () => {
       expect(sendKeys).not.toHaveBeenCalled();
 
       // Cleanup
-      stopAutoYesPolling('wt-thinking');
+      stopAutoYesPolling('wt-thinking:claude');
       vi.mocked(captureSessionOutput).mockReset();
     });
 
@@ -539,7 +539,7 @@ describe('auto-yes-manager', () => {
       vi.setSystemTime(now);
 
       // Setup: enable auto-yes and start polling
-      setAutoYesEnabled('wt-normal', true);
+      setAutoYesEnabled('wt-normal', 'claude', true);
       startAutoYesPolling('wt-normal', 'claude');
 
       // Mock: captureSessionOutput returns a valid multiple_choice prompt
@@ -561,7 +561,7 @@ describe('auto-yes-manager', () => {
       expect(sendSpecialKeys).toHaveBeenCalled();
 
       // Cleanup
-      stopAutoYesPolling('wt-normal');
+      stopAutoYesPolling('wt-normal:claude');
       vi.mocked(captureSessionOutput).mockReset();
       vi.mocked(sendSpecialKeys).mockReset();
     });
@@ -583,7 +583,7 @@ describe('auto-yes-manager', () => {
       vi.setSystemTime(now);
 
       // Setup: enable auto-yes and start polling
-      setAutoYesEnabled('wt-stale-thinking', true);
+      setAutoYesEnabled('wt-stale-thinking', 'claude', true);
       startAutoYesPolling('wt-stale-thinking', 'claude');
 
       // 5000-line buffer:
@@ -621,7 +621,7 @@ describe('auto-yes-manager', () => {
       expect(sendKeys).toHaveBeenCalled();
 
       // Cleanup
-      stopAutoYesPolling('wt-stale-thinking');
+      stopAutoYesPolling('wt-stale-thinking:claude');
       vi.mocked(captureSessionOutput).mockReset();
       vi.mocked(sendKeys).mockReset();
     });
@@ -635,7 +635,7 @@ describe('auto-yes-manager', () => {
       vi.setSystemTime(now);
 
       // Setup: enable auto-yes and start polling
-      setAutoYesEnabled('wt-recent-thinking', true);
+      setAutoYesEnabled('wt-recent-thinking', 'claude', true);
       startAutoYesPolling('wt-recent-thinking', 'claude');
 
       // 5000-line buffer with thinking pattern within last 50 lines:
@@ -660,7 +660,7 @@ describe('auto-yes-manager', () => {
       expect(sendKeys).not.toHaveBeenCalled();
 
       // Cleanup
-      stopAutoYesPolling('wt-recent-thinking');
+      stopAutoYesPolling('wt-recent-thinking:claude');
       vi.mocked(captureSessionOutput).mockReset();
     });
 
@@ -736,7 +736,7 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendSpecialKeys).mockReset();
 
       // Setup
-      setAutoYesEnabled('wt-mc-claude', true);
+      setAutoYesEnabled('wt-mc-claude', 'claude', true);
       startAutoYesPolling('wt-mc-claude', 'claude');
 
       // Mock: captureSessionOutput returns a multiple_choice prompt with default on option 1
@@ -760,7 +760,7 @@ describe('auto-yes-manager', () => {
       expect(sendKeys).not.toHaveBeenCalled();
 
       // Cleanup
-      stopAutoYesPolling('wt-mc-claude');
+      stopAutoYesPolling('wt-mc-claude:claude');
     });
 
     it('should call sendKeys (not sendSpecialKeys) for Claude yes/no prompt', async () => {
@@ -777,7 +777,7 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendSpecialKeys).mockReset();
 
       // Setup
-      setAutoYesEnabled('wt-yn', true);
+      setAutoYesEnabled('wt-yn', 'claude', true);
       startAutoYesPolling('wt-yn', 'claude');
 
       // Mock: captureSessionOutput returns a yes/no prompt
@@ -798,7 +798,7 @@ describe('auto-yes-manager', () => {
       expect(sendSpecialKeys).not.toHaveBeenCalled();
 
       // Cleanup
-      stopAutoYesPolling('wt-yn');
+      stopAutoYesPolling('wt-yn:claude');
     });
 
     it('should call sendKeys (not sendSpecialKeys) for non-Claude (codex) multiple_choice prompt', async () => {
@@ -815,7 +815,7 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendSpecialKeys).mockReset();
 
       // Setup: use 'codex' CLI tool
-      setAutoYesEnabled('wt-codex-mc', true);
+      setAutoYesEnabled('wt-codex-mc', 'codex', true);
       startAutoYesPolling('wt-codex-mc', 'codex');
 
       // Mock: captureSessionOutput returns a multiple_choice prompt
@@ -834,7 +834,7 @@ describe('auto-yes-manager', () => {
       expect(sendSpecialKeys).not.toHaveBeenCalled();
 
       // Cleanup
-      stopAutoYesPolling('wt-codex-mc');
+      stopAutoYesPolling('wt-codex-mc:codex');
     });
 
     it('should calculate correct Down arrow offset (default=1, target=3 -> 2x Down + Enter)', async () => {
@@ -852,7 +852,7 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendSpecialKeys).mockReset();
 
       // Setup
-      setAutoYesEnabled('wt-offset-down', true);
+      setAutoYesEnabled('wt-offset-down', 'claude', true);
       startAutoYesPolling('wt-offset-down', 'claude');
 
       // Mock: multiple_choice prompt with default on option 1
@@ -876,7 +876,7 @@ describe('auto-yes-manager', () => {
       expect(sendKeys).not.toHaveBeenCalled();
 
       // Cleanup
-      stopAutoYesPolling('wt-offset-down');
+      stopAutoYesPolling('wt-offset-down:claude');
       vi.mocked(autoYesResolver.resolveAutoAnswer).mockRestore();
     });
 
@@ -895,7 +895,7 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendSpecialKeys).mockReset();
 
       // Setup
-      setAutoYesEnabled('wt-offset-up', true);
+      setAutoYesEnabled('wt-offset-up', 'claude', true);
       startAutoYesPolling('wt-offset-up', 'claude');
 
       // Mock: multiple_choice prompt with default on option 3 (cursor indicator on 3)
@@ -919,7 +919,7 @@ describe('auto-yes-manager', () => {
       expect(sendKeys).not.toHaveBeenCalled();
 
       // Cleanup
-      stopAutoYesPolling('wt-offset-up');
+      stopAutoYesPolling('wt-offset-up:claude');
       vi.mocked(autoYesResolver.resolveAutoAnswer).mockRestore();
     });
 
@@ -938,7 +938,7 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendSpecialKeys).mockReset();
 
       // Setup
-      setAutoYesEnabled('wt-offset-zero', true);
+      setAutoYesEnabled('wt-offset-zero', 'claude', true);
       startAutoYesPolling('wt-offset-zero', 'claude');
 
       // Mock: multiple_choice prompt with default on option 2
@@ -962,7 +962,7 @@ describe('auto-yes-manager', () => {
       expect(sendKeys).not.toHaveBeenCalled();
 
       // Cleanup
-      stopAutoYesPolling('wt-offset-zero');
+      stopAutoYesPolling('wt-offset-zero:claude');
       vi.mocked(autoYesResolver.resolveAutoAnswer).mockRestore();
     });
   });
@@ -982,7 +982,7 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendKeys).mockReset();
 
       // Setup
-      setAutoYesEnabled('wt-dup', true);
+      setAutoYesEnabled('wt-dup', 'claude', true);
       startAutoYesPolling('wt-dup', 'claude');
 
       // Mock: same yes/no prompt every time
@@ -1001,7 +1001,7 @@ describe('auto-yes-manager', () => {
       expect(sendKeys).not.toHaveBeenCalled();
 
       // Cleanup
-      stopAutoYesPolling('wt-dup');
+      stopAutoYesPolling('wt-dup:claude');
       vi.mocked(captureSessionOutput).mockReset();
       vi.mocked(sendKeys).mockReset();
     });
@@ -1017,7 +1017,7 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendKeys).mockReset();
 
       // Setup
-      setAutoYesEnabled('wt-reset', true);
+      setAutoYesEnabled('wt-reset', 'claude', true);
       startAutoYesPolling('wt-reset', 'claude');
 
       // First poll - prompt detected, responds
@@ -1039,7 +1039,7 @@ describe('auto-yes-manager', () => {
       expect(sendKeys).toHaveBeenCalled();
 
       // Cleanup
-      stopAutoYesPolling('wt-reset');
+      stopAutoYesPolling('wt-reset:claude');
       vi.mocked(captureSessionOutput).mockReset();
       vi.mocked(sendKeys).mockReset();
     });
@@ -1055,7 +1055,7 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendKeys).mockReset();
 
       // Setup
-      setAutoYesEnabled('wt-f009', true);
+      setAutoYesEnabled('wt-f009', 'claude', true);
       startAutoYesPolling('wt-f009', 'claude');
 
       // Same prompt every time (no non-prompt phase in between)
@@ -1080,7 +1080,7 @@ describe('auto-yes-manager', () => {
       expect(sendKeys).not.toHaveBeenCalled();
 
       // Cleanup
-      stopAutoYesPolling('wt-f009');
+      stopAutoYesPolling('wt-f009:claude');
       vi.mocked(captureSessionOutput).mockReset();
       vi.mocked(sendKeys).mockReset();
     });
@@ -1098,7 +1098,7 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendKeys).mockReset();
 
       // Setup
-      setAutoYesEnabled('wt-cool', true);
+      setAutoYesEnabled('wt-cool', 'claude', true);
       startAutoYesPolling('wt-cool', 'claude');
 
       // First poll - prompt detected, responds
@@ -1130,7 +1130,7 @@ describe('auto-yes-manager', () => {
       expect(callsAfterCooldown).toBeGreaterThan(0);
 
       // Cleanup
-      stopAutoYesPolling('wt-cool');
+      stopAutoYesPolling('wt-cool:claude');
       vi.mocked(captureSessionOutput).mockReset();
       vi.mocked(sendKeys).mockReset();
     });
@@ -1144,7 +1144,7 @@ describe('auto-yes-manager', () => {
       vi.mocked(captureSessionOutput).mockReset();
 
       // Setup
-      setAutoYesEnabled('wt-default-int', true);
+      setAutoYesEnabled('wt-default-int', 'claude', true);
       startAutoYesPolling('wt-default-int', 'claude');
 
       // No prompt detected
@@ -1161,23 +1161,23 @@ describe('auto-yes-manager', () => {
       expect(vi.mocked(captureSessionOutput).mock.calls.length).toBe(1);
 
       // Cleanup
-      stopAutoYesPolling('wt-default-int');
+      stopAutoYesPolling('wt-default-int:claude');
       vi.mocked(captureSessionOutput).mockReset();
     });
   });
 
   describe('Issue #306: startAutoYesPolling - initialization', () => {
     it('should initialize lastAnsweredPromptKey as null', () => {
-      setAutoYesEnabled('wt-init', true);
+      setAutoYesEnabled('wt-init', 'claude', true);
       startAutoYesPolling('wt-init', 'claude');
 
       // Access poller state through globalThis
-      const pollerState = globalThis.__autoYesPollerStates?.get('wt-init');
+      const pollerState = globalThis.__autoYesPollerStates?.get('wt-init:claude');
       expect(pollerState).toBeDefined();
       expect(pollerState?.lastAnsweredPromptKey).toBeNull();
 
       // Cleanup
-      stopAutoYesPolling('wt-init');
+      stopAutoYesPolling('wt-init:claude');
     });
   });
 
@@ -1195,14 +1195,14 @@ describe('auto-yes-manager', () => {
       vi.useFakeTimers();
       vi.setSystemTime(1700000000000);
 
-      const state = setAutoYesEnabled('wt-sp', true, 3600000, 'error|fatal');
+      const state = setAutoYesEnabled('wt-sp', 'claude', true, 3600000, 'error|fatal');
 
       expect(state.enabled).toBe(true);
       expect(state.stopPattern).toBe('error|fatal');
     });
 
     it('should store undefined stopPattern when not provided', () => {
-      const state = setAutoYesEnabled('wt-no-sp', true, 3600000);
+      const state = setAutoYesEnabled('wt-no-sp', 'claude', true, 3600000);
 
       expect(state.enabled).toBe(true);
       expect(state.stopPattern).toBeUndefined();
@@ -1210,11 +1210,11 @@ describe('auto-yes-manager', () => {
 
     it('should clear stopPattern and stopReason on re-enable', () => {
       // First enable with stopPattern
-      setAutoYesEnabled('wt-re', true, 3600000, 'error');
+      setAutoYesEnabled('wt-re', 'claude', true, 3600000, 'error');
       // Disable with reason
-      disableAutoYes('wt-re', 'stop_pattern_matched');
+      disableAutoYes('wt-re', 'claude', 'stop_pattern_matched');
       // Re-enable without stopPattern
-      const state = setAutoYesEnabled('wt-re', true, 3600000);
+      const state = setAutoYesEnabled('wt-re', 'claude', true, 3600000);
 
       expect(state.enabled).toBe(true);
       expect(state.stopPattern).toBeUndefined();
@@ -1224,8 +1224,8 @@ describe('auto-yes-manager', () => {
 
   describe('Issue #314: disableAutoYes', () => {
     it('should disable auto-yes without reason', () => {
-      setAutoYesEnabled('wt-d1', true, 3600000, 'test-pattern');
-      const state = disableAutoYes('wt-d1');
+      setAutoYesEnabled('wt-d1', 'claude', true, 3600000, 'test-pattern');
+      const state = disableAutoYes('wt-d1', 'claude');
 
       expect(state.enabled).toBe(false);
       expect(state.stopReason).toBeUndefined();
@@ -1233,8 +1233,8 @@ describe('auto-yes-manager', () => {
     });
 
     it('should disable with stop_pattern_matched reason', () => {
-      setAutoYesEnabled('wt-d2', true, 3600000, 'test-pattern');
-      const state = disableAutoYes('wt-d2', 'stop_pattern_matched');
+      setAutoYesEnabled('wt-d2', 'claude', true, 3600000, 'test-pattern');
+      const state = disableAutoYes('wt-d2', 'claude', 'stop_pattern_matched');
 
       expect(state.enabled).toBe(false);
       expect(state.stopReason).toBe('stop_pattern_matched');
@@ -1242,8 +1242,8 @@ describe('auto-yes-manager', () => {
     });
 
     it('should disable with expired reason', () => {
-      setAutoYesEnabled('wt-d3', true, 3600000);
-      const state = disableAutoYes('wt-d3', 'expired');
+      setAutoYesEnabled('wt-d3', 'claude', true, 3600000);
+      const state = disableAutoYes('wt-d3', 'claude', 'expired');
 
       expect(state.enabled).toBe(false);
       expect(state.stopReason).toBe('expired');
@@ -1253,15 +1253,15 @@ describe('auto-yes-manager', () => {
       vi.useFakeTimers();
       vi.setSystemTime(1700000000000);
 
-      setAutoYesEnabled('wt-d4', true, 3600000);
-      const state = disableAutoYes('wt-d4', 'expired');
+      setAutoYesEnabled('wt-d4', 'claude', true, 3600000);
+      const state = disableAutoYes('wt-d4', 'claude', 'expired');
 
       expect(state.enabledAt).toBe(1700000000000);
       expect(state.expiresAt).toBe(1700000000000 + 3600000);
     });
 
     it('should handle non-existent worktree gracefully', () => {
-      const state = disableAutoYes('wt-nonexistent');
+      const state = disableAutoYes('wt-nonexistent', 'claude');
 
       expect(state.enabled).toBe(false);
       expect(state.enabledAt).toBe(0);
@@ -1274,12 +1274,12 @@ describe('auto-yes-manager', () => {
       vi.useFakeTimers();
       vi.setSystemTime(1700000000000);
 
-      setAutoYesEnabled('wt-exp', true, 3600000);
+      setAutoYesEnabled('wt-exp', 'claude', true, 3600000);
 
       // Advance past expiration
       vi.setSystemTime(1700000000000 + 3600001);
 
-      const state = getAutoYesState('wt-exp');
+      const state = getAutoYesState('wt-exp', 'claude');
       expect(state).not.toBeNull();
       expect(state!.enabled).toBe(false);
       expect(state!.stopReason).toBe('expired');
@@ -1311,45 +1311,45 @@ describe('auto-yes-manager', () => {
 
   describe('Issue #314: checkStopCondition', () => {
     it('should return false when no stopPattern is set', () => {
-      setAutoYesEnabled('wt-cs1', true, 3600000);
-      const result = checkStopCondition('wt-cs1', 'some output');
+      setAutoYesEnabled('wt-cs1', 'claude', true, 3600000);
+      const result = checkStopCondition('wt-cs1:claude', 'some output');
       expect(result).toBe(false);
     });
 
     it('should return true when output matches stop pattern', () => {
-      setAutoYesEnabled('wt-cs2', true, 3600000, 'error|fatal');
-      const result = checkStopCondition('wt-cs2', 'a fatal error occurred');
+      setAutoYesEnabled('wt-cs2', 'claude', true, 3600000, 'error|fatal');
+      const result = checkStopCondition('wt-cs2:claude', 'a fatal error occurred');
       expect(result).toBe(true);
 
       // Verify auto-yes was disabled
-      const state = getAutoYesState('wt-cs2');
+      const state = getAutoYesState('wt-cs2', 'claude');
       expect(state?.enabled).toBe(false);
       expect(state?.stopReason).toBe('stop_pattern_matched');
     });
 
     it('should return false when output does not match stop pattern', () => {
-      setAutoYesEnabled('wt-cs3', true, 3600000, 'error|fatal');
-      const result = checkStopCondition('wt-cs3', 'all good here');
+      setAutoYesEnabled('wt-cs3', 'claude', true, 3600000, 'error|fatal');
+      const result = checkStopCondition('wt-cs3:claude', 'all good here');
       expect(result).toBe(false);
 
       // Verify auto-yes is still enabled
-      const state = getAutoYesState('wt-cs3');
+      const state = getAutoYesState('wt-cs3', 'claude');
       expect(state?.enabled).toBe(true);
     });
 
     it('should return false when worktree has no state', () => {
-      const result = checkStopCondition('wt-nonexistent', 'some output');
+      const result = checkStopCondition('wt-nonexistent:claude', 'some output');
       expect(result).toBe(false);
     });
 
     it('should disable and return false for invalid stop pattern', () => {
       // Directly set a state with invalid pattern
-      setAutoYesEnabled('wt-cs4', true, 3600000, '[invalid');
-      const result = checkStopCondition('wt-cs4', 'test');
+      setAutoYesEnabled('wt-cs4', 'claude', true, 3600000, '[invalid');
+      const result = checkStopCondition('wt-cs4:claude', 'test');
       expect(result).toBe(false);
 
       // Verify auto-yes was disabled (invalid pattern detected)
-      const state = getAutoYesState('wt-cs4');
+      const state = getAutoYesState('wt-cs4', 'claude');
       expect(state?.enabled).toBe(false);
     });
   });
@@ -1384,33 +1384,33 @@ describe('auto-yes-manager', () => {
   // ==========================================================================
   describe('Issue #323: validatePollingContext', () => {
     it('should return stopped when pollerState is undefined', () => {
-      const result = validatePollingContext('test-wt', undefined);
+      const result = validatePollingContext('test-wt:claude', undefined);
       expect(result).toBe('stopped');
     });
 
     it('should return expired when auto-yes is disabled', () => {
       // Setup: enable then disable auto-yes to create a disabled state
-      setAutoYesEnabled('test-wt-exp', true);
-      disableAutoYes('test-wt-exp', 'expired');
+      setAutoYesEnabled('test-wt-exp', 'claude', true);
+      disableAutoYes('test-wt-exp', 'claude', 'expired');
       const pollerState = createTestPollerState();
 
       // Need to register poller state in globalThis for stopAutoYesPolling to work
-      globalThis.__autoYesPollerStates?.set('test-wt-exp', pollerState);
+      globalThis.__autoYesPollerStates?.set('test-wt-exp:claude', pollerState);
 
-      const result = validatePollingContext('test-wt-exp', pollerState);
+      const result = validatePollingContext('test-wt-exp:claude', pollerState);
       expect(result).toBe('expired');
     });
 
     it('should return expired when auto-yes state does not exist', () => {
       // No auto-yes state set for this worktree
       const pollerState = createTestPollerState();
-      globalThis.__autoYesPollerStates?.set('test-wt-none', pollerState);
+      globalThis.__autoYesPollerStates?.set('test-wt-none:claude', pollerState);
 
-      const result = validatePollingContext('test-wt-none', pollerState);
+      const result = validatePollingContext('test-wt-none:claude', pollerState);
       expect(result).toBe('expired');
 
       // Cleanup
-      globalThis.__autoYesPollerStates?.delete('test-wt-none');
+      globalThis.__autoYesPollerStates?.delete('test-wt-none:claude');
     });
 
     it('should return expired when auto-yes has expired', () => {
@@ -1418,23 +1418,23 @@ describe('auto-yes-manager', () => {
       const now = 1700000000000;
       vi.setSystemTime(now);
 
-      setAutoYesEnabled('test-wt-timeout', true, 3600000);
+      setAutoYesEnabled('test-wt-timeout', 'claude', true, 3600000);
 
       // Advance past expiration
       vi.setSystemTime(now + 3600001);
 
       const pollerState = createTestPollerState();
-      globalThis.__autoYesPollerStates?.set('test-wt-timeout', pollerState);
+      globalThis.__autoYesPollerStates?.set('test-wt-timeout:claude', pollerState);
 
-      const result = validatePollingContext('test-wt-timeout', pollerState);
+      const result = validatePollingContext('test-wt-timeout:claude', pollerState);
       expect(result).toBe('expired');
     });
 
     it('should return valid when context is OK', () => {
-      setAutoYesEnabled('test-wt-ok', true);
+      setAutoYesEnabled('test-wt-ok', 'claude', true);
       const pollerState = createTestPollerState();
 
-      const result = validatePollingContext('test-wt-ok', pollerState);
+      const result = validatePollingContext('test-wt-ok:claude', pollerState);
       expect(result).toBe('valid');
     });
   });
@@ -1490,23 +1490,23 @@ describe('auto-yes-manager', () => {
   describe('Issue #323: processStopConditionDelta', () => {
     it('should set baseline on first call (stopCheckBaselineLength === -1)', () => {
       const pollerState = createTestPollerState({ stopCheckBaselineLength: -1 });
-      setAutoYesEnabled('test-wt-delta', true, 3600000, 'error|fatal');
+      setAutoYesEnabled('test-wt-delta', 'claude', true, 3600000, 'error|fatal');
 
-      const result = processStopConditionDelta('test-wt-delta', pollerState, 'output text');
+      const result = processStopConditionDelta('test-wt-delta:claude', pollerState, 'output text');
 
       expect(result).toBe(false);
       expect(pollerState.stopCheckBaselineLength).toBe('output text'.length);
     });
 
     it('should check delta when output grows and pattern does not match', () => {
-      setAutoYesEnabled('test-wt-grow', true, 3600000, 'fatal error');
+      setAutoYesEnabled('test-wt-grow', 'claude', true, 3600000, 'fatal error');
 
       const pollerState = createTestPollerState({
         stopCheckBaselineLength: 'initial output'.length,
       });
 
       const result = processStopConditionDelta(
-        'test-wt-grow',
+        'test-wt-grow:claude',
         pollerState,
         'initial output plus new safe content'
       );
@@ -1516,15 +1516,15 @@ describe('auto-yes-manager', () => {
     });
 
     it('should return true when delta matches stop pattern', () => {
-      setAutoYesEnabled('test-wt-match', true, 3600000, 'fatal error');
+      setAutoYesEnabled('test-wt-match', 'claude', true, 3600000, 'fatal error');
       // Also register poller state in globalThis so stopAutoYesPolling works inside checkStopCondition
       const pollerState = createTestPollerState({
         stopCheckBaselineLength: 'initial output'.length,
       });
-      globalThis.__autoYesPollerStates?.set('test-wt-match', pollerState);
+      globalThis.__autoYesPollerStates?.set('test-wt-match:claude', pollerState);
 
       const result = processStopConditionDelta(
-        'test-wt-match',
+        'test-wt-match:claude',
         pollerState,
         'initial output\nA fatal error has occurred'
       );
@@ -1532,22 +1532,22 @@ describe('auto-yes-manager', () => {
       expect(result).toBe(true);
 
       // Verify auto-yes was disabled
-      const state = getAutoYesState('test-wt-match');
+      const state = getAutoYesState('test-wt-match', 'claude');
       expect(state?.enabled).toBe(false);
       expect(state?.stopReason).toBe('stop_pattern_matched');
 
       // Cleanup
-      globalThis.__autoYesPollerStates?.delete('test-wt-match');
+      globalThis.__autoYesPollerStates?.delete('test-wt-match:claude');
     });
 
     it('should reset baseline when output shrinks', () => {
       const pollerState = createTestPollerState({
         stopCheckBaselineLength: 1000,
       });
-      setAutoYesEnabled('test-wt-shrink', true, 3600000, 'error');
+      setAutoYesEnabled('test-wt-shrink', 'claude', true, 3600000, 'error');
 
       const result = processStopConditionDelta(
-        'test-wt-shrink',
+        'test-wt-shrink:claude',
         pollerState,
         'short'
       );
@@ -1561,10 +1561,10 @@ describe('auto-yes-manager', () => {
       const pollerState = createTestPollerState({
         stopCheckBaselineLength: output.length,
       });
-      setAutoYesEnabled('test-wt-same', true, 3600000, 'error');
+      setAutoYesEnabled('test-wt-same', 'claude', true, 3600000, 'error');
 
       const result = processStopConditionDelta(
-        'test-wt-same',
+        'test-wt-same:claude',
         pollerState,
         output
       );
@@ -1575,14 +1575,14 @@ describe('auto-yes-manager', () => {
     });
 
     it('should return false when no stop pattern is configured', () => {
-      setAutoYesEnabled('test-wt-nopattern', true, 3600000); // no stop pattern
+      setAutoYesEnabled('test-wt-nopattern', 'claude', true, 3600000); // no stop pattern
 
       const pollerState = createTestPollerState({
         stopCheckBaselineLength: 'initial'.length,
       });
 
       const result = processStopConditionDelta(
-        'test-wt-nopattern',
+        'test-wt-nopattern:claude',
         pollerState,
         'initial plus new content with error and fatal'
       );
@@ -1634,12 +1634,12 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendKeys).mockReset();
       vi.mocked(sendKeys).mockResolvedValue(undefined);
 
-      setAutoYesEnabled('test-wt-retry', true);
+      setAutoYesEnabled('test-wt-retry', 'claude', true);
       const pollerState = createTestPollerState({
         lastAnsweredPromptKey: 'yes_no:Do you want to proceed?',
         lastAnsweredAt: Date.now() - DUPLICATE_RETRY_EXPIRY_MS - 1, // expired
       });
-      globalThis.__autoYesPollerStates?.set('test-wt-retry', pollerState);
+      globalThis.__autoYesPollerStates?.set('test-wt-retry:claude', pollerState);
 
       const promptOutput = 'Do you want to proceed? (y/n)';
 
@@ -1654,7 +1654,7 @@ describe('auto-yes-manager', () => {
       expect(sendKeys).toHaveBeenCalled();
 
       // Cleanup
-      globalThis.__autoYesPollerStates?.delete('test-wt-retry');
+      globalThis.__autoYesPollerStates?.delete('test-wt-retry:claude');
       vi.mocked(sendKeys).mockReset();
     });
 
@@ -1663,10 +1663,10 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendKeys).mockReset();
       vi.mocked(sendKeys).mockResolvedValue(undefined);
 
-      setAutoYesEnabled('test-wt-respond', true);
+      setAutoYesEnabled('test-wt-respond', 'claude', true);
       const pollerState = createTestPollerState();
       // Register poller state for updateLastServerResponseTimestamp/resetErrorCount
-      globalThis.__autoYesPollerStates?.set('test-wt-respond', pollerState);
+      globalThis.__autoYesPollerStates?.set('test-wt-respond:claude', pollerState);
 
       const promptOutput = 'Do you want to proceed? (y/n)';
 
@@ -1683,7 +1683,7 @@ describe('auto-yes-manager', () => {
       expect(sendKeys).toHaveBeenCalled();
 
       // Cleanup
-      globalThis.__autoYesPollerStates?.delete('test-wt-respond');
+      globalThis.__autoYesPollerStates?.delete('test-wt-respond:claude');
       vi.mocked(sendKeys).mockReset();
     });
 
@@ -1692,9 +1692,9 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendSpecialKeys).mockReset();
       vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);
 
-      setAutoYesEnabled('test-wt-mc-respond', true);
+      setAutoYesEnabled('test-wt-mc-respond', 'claude', true);
       const pollerState = createTestPollerState();
-      globalThis.__autoYesPollerStates?.set('test-wt-mc-respond', pollerState);
+      globalThis.__autoYesPollerStates?.set('test-wt-mc-respond:claude', pollerState);
 
       const promptOutput = 'Select an option:\n\u276F 1. Yes\n  2. No';
 
@@ -1710,7 +1710,7 @@ describe('auto-yes-manager', () => {
       expect(sendSpecialKeys).toHaveBeenCalled();
 
       // Cleanup
-      globalThis.__autoYesPollerStates?.delete('test-wt-mc-respond');
+      globalThis.__autoYesPollerStates?.delete('test-wt-mc-respond:claude');
       vi.mocked(sendSpecialKeys).mockReset();
     });
 
@@ -1719,9 +1719,9 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendKeys).mockReset();
       vi.mocked(sendKeys).mockRejectedValue(new Error('tmux send failed'));
 
-      setAutoYesEnabled('test-wt-err', true);
+      setAutoYesEnabled('test-wt-err', 'claude', true);
       const pollerState = createTestPollerState({ consecutiveErrors: 0 });
-      globalThis.__autoYesPollerStates?.set('test-wt-err', pollerState);
+      globalThis.__autoYesPollerStates?.set('test-wt-err:claude', pollerState);
 
       const promptOutput = 'Do you want to proceed? (y/n)';
 
@@ -1737,7 +1737,7 @@ describe('auto-yes-manager', () => {
       expect(pollerState.consecutiveErrors).toBe(1);
 
       // Cleanup
-      globalThis.__autoYesPollerStates?.delete('test-wt-err');
+      globalThis.__autoYesPollerStates?.delete('test-wt-err:claude');
       vi.mocked(sendKeys).mockReset();
     });
 
@@ -1772,7 +1772,7 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendKeys).mockReset();
 
       // Setup: enable auto-yes with stop pattern
-      setAutoYesEnabled('wt-baseline', true, 3600000, 'fatal error');
+      setAutoYesEnabled('wt-baseline', 'claude', true, 3600000, 'fatal error');
       startAutoYesPolling('wt-baseline', 'claude');
 
       // Mock: output that matches the stop pattern (pre-existing content)
@@ -1782,14 +1782,14 @@ describe('auto-yes-manager', () => {
       await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
 
       // Verify: auto-yes is STILL enabled (first poll sets baseline, skips stop check)
-      const state = getAutoYesState('wt-baseline');
+      const state = getAutoYesState('wt-baseline', 'claude');
       expect(state?.enabled).toBe(true);
 
       // Verify: poller is still active
       expect(getActivePollerCount()).toBe(1);
 
       // Cleanup
-      stopAutoYesPolling('wt-baseline');
+      stopAutoYesPolling('wt-baseline:claude');
       vi.mocked(captureSessionOutput).mockReset();
       vi.mocked(sendKeys).mockReset();
     });
@@ -1805,7 +1805,7 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendKeys).mockReset();
 
       // Setup: enable auto-yes with stop pattern
-      setAutoYesEnabled('wt-stop-poll', true, 3600000, 'fatal error');
+      setAutoYesEnabled('wt-stop-poll', 'claude', true, 3600000, 'fatal error');
       startAutoYesPolling('wt-stop-poll', 'claude');
 
       // First poll: initial output (no match - establishes baseline)
@@ -1820,7 +1820,7 @@ describe('auto-yes-manager', () => {
       expect(sendKeys).not.toHaveBeenCalled();
 
       // Verify: auto-yes was disabled with stop_pattern_matched reason
-      const state = getAutoYesState('wt-stop-poll');
+      const state = getAutoYesState('wt-stop-poll', 'claude');
       expect(state?.enabled).toBe(false);
       expect(state?.stopReason).toBe('stop_pattern_matched');
 
@@ -1843,7 +1843,7 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendKeys).mockReset();
 
       // Setup: enable auto-yes with stop pattern
-      setAutoYesEnabled('wt-no-false', true, 3600000, 'kewton');
+      setAutoYesEnabled('wt-no-false', 'claude', true, 3600000, 'kewton');
       startAutoYesPolling('wt-no-false', 'claude');
 
       // First poll: output contains "kewton" (pre-existing, e.g. shell prompt)
@@ -1855,12 +1855,12 @@ describe('auto-yes-manager', () => {
       await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
 
       // Verify: auto-yes is still enabled (no false trigger from pre-existing content)
-      const state = getAutoYesState('wt-no-false');
+      const state = getAutoYesState('wt-no-false', 'claude');
       expect(state?.enabled).toBe(true);
       expect(getActivePollerCount()).toBe(1);
 
       // Cleanup
-      stopAutoYesPolling('wt-no-false');
+      stopAutoYesPolling('wt-no-false:claude');
       vi.mocked(captureSessionOutput).mockReset();
       vi.mocked(sendKeys).mockReset();
     });
@@ -1876,7 +1876,7 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendKeys).mockReset();
 
       // Setup: enable auto-yes with stop pattern
-      setAutoYesEnabled('wt-no-stop', true, 3600000, 'fatal error');
+      setAutoYesEnabled('wt-no-stop', 'claude', true, 3600000, 'fatal error');
       startAutoYesPolling('wt-no-stop', 'claude');
 
       // Mock: output that does NOT match the stop pattern, with a yes/no prompt
@@ -1890,11 +1890,11 @@ describe('auto-yes-manager', () => {
       expect(sendKeys).toHaveBeenCalled();
 
       // Verify: auto-yes is still enabled
-      const state = getAutoYesState('wt-no-stop');
+      const state = getAutoYesState('wt-no-stop', 'claude');
       expect(state?.enabled).toBe(true);
 
       // Cleanup
-      stopAutoYesPolling('wt-no-stop');
+      stopAutoYesPolling('wt-no-stop:claude');
       vi.mocked(captureSessionOutput).mockReset();
       vi.mocked(sendKeys).mockReset();
     });
@@ -1910,7 +1910,7 @@ describe('auto-yes-manager', () => {
       vi.mocked(sendKeys).mockReset();
 
       // Setup: enable auto-yes with stop pattern
-      setAutoYesEnabled('wt-shrink', true, 3600000, 'fatal error');
+      setAutoYesEnabled('wt-shrink', 'claude', true, 3600000, 'fatal error');
       startAutoYesPolling('wt-shrink', 'claude');
 
       // First poll: long output (baseline)
@@ -1922,12 +1922,12 @@ describe('auto-yes-manager', () => {
       await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
 
       // Verify: auto-yes is still enabled (buffer shrink handled gracefully)
-      const state = getAutoYesState('wt-shrink');
+      const state = getAutoYesState('wt-shrink', 'claude');
       expect(state?.enabled).toBe(true);
       expect(getActivePollerCount()).toBe(1);
 
       // Cleanup
-      stopAutoYesPolling('wt-shrink');
+      stopAutoYesPolling('wt-shrink:claude');
       vi.mocked(captureSessionOutput).mockReset();
       vi.mocked(sendKeys).mockReset();
     });
@@ -1938,7 +1938,7 @@ describe('auto-yes-manager', () => {
   // ==========================================================================
   describe('startAutoYesPolling idempotency (Issue #501)', () => {
     it('should return already_running when same worktreeId + same cliToolId', () => {
-      setAutoYesEnabled('wt-idem', true, 3600000);
+      setAutoYesEnabled('wt-idem', 'claude', true, 3600000);
       const first = startAutoYesPolling('wt-idem', 'claude');
       expect(first.started).toBe(true);
       expect(first.reason).toBeUndefined();
@@ -1950,22 +1950,24 @@ describe('auto-yes-manager', () => {
       expect(second.reason).toBe('already_running');
       expect(getActivePollerCount()).toBe(1);
 
-      stopAutoYesPolling('wt-idem');
+      stopAutoYesPolling('wt-idem:claude');
     });
 
-    it('should stop and recreate poller when cliToolId changes', () => {
-      setAutoYesEnabled('wt-change', true, 3600000);
+    it('should allow separate pollers per cliToolId (Issue #525)', () => {
+      setAutoYesEnabled('wt-change', 'claude', true, 3600000);
+      setAutoYesEnabled('wt-change', 'codex', true, 3600000);
       const first = startAutoYesPolling('wt-change', 'claude');
       expect(first.started).toBe(true);
       expect(getActivePollerCount()).toBe(1);
 
-      // Second call with different cliToolId should recreate
+      // Second call with different cliToolId should create a separate poller
       const second = startAutoYesPolling('wt-change', 'codex');
       expect(second.started).toBe(true);
       expect(second.reason).toBeUndefined();
-      expect(getActivePollerCount()).toBe(1);
+      expect(getActivePollerCount()).toBe(2);
 
-      stopAutoYesPolling('wt-change');
+      stopAutoYesPolling('wt-change:claude');
+      stopAutoYesPolling('wt-change:codex');
     });
 
     it('should preserve poller state (lastAnsweredPromptKey, lastServerResponseTimestamp) on reuse', async () => {
@@ -1977,7 +1979,7 @@ describe('auto-yes-manager', () => {
       vi.mocked(captureSessionOutput).mockReset();
       vi.mocked(sendKeys).mockReset();
 
-      setAutoYesEnabled('wt-preserve', true, 3600000);
+      setAutoYesEnabled('wt-preserve', 'claude', true, 3600000);
       startAutoYesPolling('wt-preserve', 'claude');
 
       // Simulate a poll that answers a prompt to set lastServerResponseTimestamp
@@ -1986,7 +1988,7 @@ describe('auto-yes-manager', () => {
       await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
 
       // Verify timestamp was set
-      const ts = getLastServerResponseTimestamp('wt-preserve');
+      const ts = getLastServerResponseTimestamp('wt-preserve:claude');
       expect(ts).toBeTypeOf('number');
       expect(ts).not.toBeNull();
 
@@ -1995,20 +1997,21 @@ describe('auto-yes-manager', () => {
       expect(result.reason).toBe('already_running');
 
       // Timestamp should be preserved (not reset)
-      const tsAfter = getLastServerResponseTimestamp('wt-preserve');
+      const tsAfter = getLastServerResponseTimestamp('wt-preserve:claude');
       expect(tsAfter).toBe(ts);
 
-      stopAutoYesPolling('wt-preserve');
+      stopAutoYesPolling('wt-preserve:claude');
       vi.mocked(captureSessionOutput).mockReset();
       vi.mocked(sendKeys).mockReset();
     });
 
     it('should store cliToolId in AutoYesPollerState for comparison', () => {
-      setAutoYesEnabled('wt-cli-check', true, 3600000);
+      setAutoYesEnabled('wt-cli-check', 'claude', true, 3600000);
+      setAutoYesEnabled('wt-cli-check', 'codex', true, 3600000);
       startAutoYesPolling('wt-cli-check', 'claude');
 
       // The poller state should have the cliToolId accessible
-      // Verify by trying with same ID (already_running) vs different (recreated)
+      // Verify by trying with same ID (already_running) vs different (new poller)
       const sameTool = startAutoYesPolling('wt-cli-check', 'claude');
       expect(sameTool.reason).toBe('already_running');
 
@@ -2016,7 +2019,8 @@ describe('auto-yes-manager', () => {
       expect(diffTool.started).toBe(true);
       expect(diffTool.reason).toBeUndefined();
 
-      stopAutoYesPolling('wt-cli-check');
+      stopAutoYesPolling('wt-cli-check:claude');
+      stopAutoYesPolling('wt-cli-check:codex');
     });
   });
 
@@ -2061,7 +2065,7 @@ describe('auto-yes-manager', () => {
       vi.mocked(captureSessionOutput).mockReset();
 
       // Setup: enable auto-yes
-      setAutoYesEnabled('wt-thinking', true, 3600000);
+      setAutoYesEnabled('wt-thinking', 'claude', true, 3600000);
       startAutoYesPolling('wt-thinking', 'claude');
 
       // Mock: output with thinking indicator
@@ -2076,7 +2080,7 @@ describe('auto-yes-manager', () => {
       expect(THINKING_POLLING_INTERVAL_MS).toBe(5000);
 
       // Cleanup
-      stopAutoYesPolling('wt-thinking');
+      stopAutoYesPolling('wt-thinking:claude');
       vi.mocked(captureSessionOutput).mockReset();
     });
 
@@ -2118,7 +2122,7 @@ describe('auto-yes-manager', () => {
       vi.mocked(captureSessionOutput).mockReset();
 
       // Setup: enable auto-yes
-      setAutoYesEnabled('wt-error-threshold', true, 3600000);
+      setAutoYesEnabled('wt-error-threshold', 'claude', true, 3600000);
       startAutoYesPolling('wt-error-threshold', 'claude');
 
       // Mock: captureSessionOutput throws error on every call
@@ -2130,7 +2134,7 @@ describe('auto-yes-manager', () => {
       }
 
       // After 20 consecutive errors, auto-yes should be disabled with consecutive_errors reason
-      const state = getAutoYesState('wt-error-threshold');
+      const state = getAutoYesState('wt-error-threshold', 'claude');
       expect(state?.enabled).toBe(false);
       expect(state?.stopReason).toBe('consecutive_errors');
 
@@ -2149,15 +2153,15 @@ describe('auto-yes-manager', () => {
     // Item 7: validatePollingContext should not call isAutoYesExpired
     it('Item 7: validatePollingContext should check enabled only (isAutoYesExpired removed)', () => {
       // When auto-yes is enabled and not expired, should return valid
-      setAutoYesEnabled('test-wt-valid', true);
+      setAutoYesEnabled('test-wt-valid', 'claude', true);
       const pollerState = createTestPollerState();
-      const result = validatePollingContext('test-wt-valid', pollerState);
+      const result = validatePollingContext('test-wt-valid:claude', pollerState);
       expect(result).toBe('valid');
 
       // When disabled, should return expired
-      disableAutoYes('test-wt-valid');
-      globalThis.__autoYesPollerStates?.set('test-wt-valid', pollerState);
-      const result2 = validatePollingContext('test-wt-valid', pollerState);
+      disableAutoYes('test-wt-valid', 'claude');
+      globalThis.__autoYesPollerStates?.set('test-wt-valid:claude', pollerState);
+      const result2 = validatePollingContext('test-wt-valid:claude', pollerState);
       expect(result2).toBe('expired');
     });
   });
