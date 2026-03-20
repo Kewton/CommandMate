@@ -16,8 +16,8 @@
 import { execFile } from 'child_process';
 import { existsSync } from 'fs';
 import {
-  getAutoYesStateWorktreeIds,
-  getAutoYesPollerWorktreeIds,
+  getAutoYesStateCompositeKeys,
+  getAutoYesPollerCompositeKeys,
   deleteAutoYesState,
   stopAutoYesPolling,
   extractWorktreeId,
@@ -228,7 +228,7 @@ export function cleanupOrphanedMapEntries(): CleanupMapResult {
   }
 
   // Cleanup autoYesStates (Issue #525: composite keys)
-  const autoYesStateKeys = getAutoYesStateWorktreeIds();
+  const autoYesStateKeys = getAutoYesStateCompositeKeys();
   for (const compositeKey of autoYesStateKeys) {
     const worktreeId = extractWorktreeId(compositeKey);
     // [SEC4-MF-001] Validate extracted worktreeId
@@ -244,7 +244,7 @@ export function cleanupOrphanedMapEntries(): CleanupMapResult {
   }
 
   // Cleanup autoYesPollerStates (Issue #525: composite keys)
-  const autoYesPollerKeys = getAutoYesPollerWorktreeIds();
+  const autoYesPollerKeys = getAutoYesPollerCompositeKeys();
   for (const compositeKey of autoYesPollerKeys) {
     const worktreeId = extractWorktreeId(compositeKey);
     if (!isValidWorktreeId(worktreeId) || !validWorktreeIds.has(worktreeId)) {

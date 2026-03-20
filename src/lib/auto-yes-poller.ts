@@ -34,6 +34,7 @@ import {
   buildCompositeKey,
   extractWorktreeId,
   extractCliToolId,
+  filterCompositeKeysByWorktree,
   getAutoYesState,
   disableAutoYes,
   checkStopCondition,
@@ -552,13 +553,18 @@ export function stopAllAutoYesPolling(): void {
 /**
  * Get all composite keys that have active auto-yes poller entries.
  *
- * Issue #525: Returns composite keys instead of worktree IDs.
+ * Issue #525: Returns composite keys (worktreeId:cliToolId).
  *
  * @returns Array of composite keys present in the autoYesPollerStates Map
  */
-export function getAutoYesPollerWorktreeIds(): string[] {
+export function getAutoYesPollerCompositeKeys(): string[] {
   return Array.from(autoYesPollerStates.keys());
 }
+
+/**
+ * @deprecated Use getAutoYesPollerCompositeKeys() instead. Renamed for clarity (Issue #525).
+ */
+export const getAutoYesPollerWorktreeIds = getAutoYesPollerCompositeKeys;
 
 // =============================================================================
 // byWorktree Helpers (Issue #525)
@@ -566,23 +572,28 @@ export function getAutoYesPollerWorktreeIds(): string[] {
 
 /**
  * Stop all auto-yes polling for a given worktreeId (all agents).
- * [SF-001]
+ * [SF-001] Uses shared filterCompositeKeysByWorktree (DRY).
  *
  * @param worktreeId - Worktree identifier
  */
 export function stopAutoYesPollingByWorktree(worktreeId: string): void {
-  const pollerKeys = Array.from(autoYesPollerStates.keys())
-    .filter(key => extractWorktreeId(key) === worktreeId);
+  const pollerKeys = filterCompositeKeysByWorktree(
+    Array.from(autoYesPollerStates.keys()),
+    worktreeId
+  );
   pollerKeys.forEach(key => stopAutoYesPolling(key));
 }
 
 /**
  * Check if any auto-yes poller is active for a given worktreeId.
+ * Uses shared filterCompositeKeysByWorktree (DRY).
  *
  * @param worktreeId - Worktree identifier
  * @returns true if any poller is active for this worktree
  */
 export function isAnyPollerActiveForWorktree(worktreeId: string): boolean {
-  return Array.from(autoYesPollerStates.keys())
-    .some(key => extractWorktreeId(key) === worktreeId);
+  return filterCompositeKeysByWorktree(
+    Array.from(autoYesPollerStates.keys()),
+    worktreeId
+  ).length > 0;
 }

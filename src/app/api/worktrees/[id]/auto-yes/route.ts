@@ -16,6 +16,7 @@ import {
   stopAutoYesPollingByWorktree,
   buildCompositeKey,
   getCompositeKeysByWorktree,
+  extractCliToolId,
   type AutoYesState,
 } from '@/lib/polling/auto-yes-manager';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
@@ -110,9 +111,9 @@ export async function GET(
     const compositeKeys = getCompositeKeysByWorktree(params.id);
     const agentStates: Record<string, ReturnType<typeof buildAutoYesResponse>> = {};
     for (const key of compositeKeys) {
-      const parts = key.split(':');
-      const agentId = parts.slice(1).join(':');
-      const state = getAutoYesState(params.id, agentId as CLIToolType);
+      const agentId = extractCliToolId(key);
+      if (!agentId) continue;
+      const state = getAutoYesState(params.id, agentId);
       agentStates[agentId] = buildAutoYesResponse(state);
     }
 

@@ -340,18 +340,35 @@ export function deleteAutoYesState(compositeKey: string): boolean {
  * Get all composite keys that have auto-yes state entries.
  * Used by periodic resource cleanup to detect orphaned entries.
  *
- * Issue #525: Returns composite keys instead of worktree IDs.
+ * Issue #525: Returns composite keys (worktreeId:cliToolId).
  *
  * @internal Exported for resource-cleanup and testing purposes.
  * @returns Array of composite keys present in the autoYesStates Map
  */
-export function getAutoYesStateWorktreeIds(): string[] {
+export function getAutoYesStateCompositeKeys(): string[] {
   return Array.from(autoYesStates.keys());
 }
+
+/**
+ * @deprecated Use getAutoYesStateCompositeKeys() instead. Renamed for clarity (Issue #525).
+ */
+export const getAutoYesStateWorktreeIds = getAutoYesStateCompositeKeys;
 
 // =============================================================================
 // byWorktree Helpers (Issue #525)
 // =============================================================================
+
+/**
+ * Filter an array of composite keys to those belonging to a given worktreeId.
+ * Shared utility to avoid duplicating the extractWorktreeId filter pattern (DRY).
+ *
+ * @param compositeKeys - Array of composite keys to filter
+ * @param worktreeId - Worktree identifier to match
+ * @returns Filtered array of composite keys belonging to this worktree
+ */
+export function filterCompositeKeysByWorktree(compositeKeys: string[], worktreeId: string): string[] {
+  return compositeKeys.filter(key => extractWorktreeId(key) === worktreeId);
+}
 
 /**
  * Get all composite keys for a given worktreeId.
@@ -360,8 +377,7 @@ export function getAutoYesStateWorktreeIds(): string[] {
  * @returns Array of composite keys belonging to this worktree
  */
 export function getCompositeKeysByWorktree(worktreeId: string): string[] {
-  return Array.from(autoYesStates.keys())
-    .filter(key => extractWorktreeId(key) === worktreeId);
+  return filterCompositeKeysByWorktree(Array.from(autoYesStates.keys()), worktreeId);
 }
 
 /**

@@ -33,9 +33,11 @@ export {
   executeRegexWithTimeout,
   checkStopCondition,
   deleteAutoYesState,
+  getAutoYesStateCompositeKeys,
   getAutoYesStateWorktreeIds,
 
   // byWorktree helpers (Issue #525)
+  filterCompositeKeysByWorktree,
   getCompositeKeysByWorktree,
   deleteAutoYesStateByWorktree,
 
@@ -68,6 +70,7 @@ export {
   startAutoYesPolling,
   stopAutoYesPolling,
   stopAllAutoYesPolling,
+  getAutoYesPollerCompositeKeys,
   getAutoYesPollerWorktreeIds,
   // byWorktree helpers (Issue #525)
   stopAutoYesPollingByWorktree,
