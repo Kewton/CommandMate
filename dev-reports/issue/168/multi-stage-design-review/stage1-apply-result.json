@@ -1,0 +1,60 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー指摘対応",
+  "issue_number": 168,
+  "applied_findings": [
+    {
+      "id": "DR1-005",
+      "severity": "must_fix",
+      "category": "SOLID",
+      "action": "showArchived 状態オーナーシップを親コンポーネント（WorktreeDetailRefactored.tsx）に統一。HistoryPane は props 経由で showArchived / onShowArchivedChange を受け取る形に変更。データフロー図を追加。セクション 1, 5.1, 5.2, 5.4, 5.5 を更新。実装チェックリストに追加。"
+    },
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "action": "getMessages の6個の位置パラメータを GetMessagesOptions インターフェースによるオプションオブジェクトパターンに変更。セクション 3.2, 4.1 を更新。テスト戦略にオプションオブジェクト対応を追加。実装チェックリストに追加。"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "should_fix",
+      "category": "KISS",
+      "action": "deleteMessagesByCliTool / deleteAllMessages の関数名を維持し内部実装のみ論理削除に変更。JSDocで論理削除を明示。WebSocket ペイロードの messagesCleared フィールド名も維持。セクション 1, 3.1, 4.6, 4.7, 6, 9 を更新。実装チェックリストに追加。"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "should_fix",
+      "category": "KISS",
+      "action": "ChatMessage.archived を optional (archived?: boolean) から required (archived: boolean) に変更。セクション 2 を更新。テスト戦略に型検証テストケースを追加。実装チェックリストに追加。"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "action": "ACTIVE_FILTER 定数をモジュールレベルで定義し、全SQLクエリで共通参照する設計に変更。セクション 1, 4 の冒頭に定数定義を追加。セクション 4.2-4.7 のクエリで ACTIVE_FILTER を使用。実装チェックリストに追加。"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "action": "down マイグレーションを no-op コメントに簡略化。テーブル再作成ロジックを除去。セクション 10 を更新。実装チェックリストに追加。"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "action": "セパレータUI（hasArchivedBoundary）を初回リリースから除外。opacity-60 のみでアーカイブメッセージを区別する設計に簡略化。セクション 5.3 を更新。実装チェックリストに追加。"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "DR1-008",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "reason": "init-db.ts とマイグレーションのスキーマ重複は既存プロジェクト規約に従ったものであり、現時点での変更は不要。設計方針書に記録のみ追加。"
+    }
+  ],
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-168-session-history-retention-design-policy.md",
+  "changes_summary": "全8件の指摘のうち7件を設計方針書に反映、1件（DR1-008）は記録のみ。主要な変更: (1) showArchived 状態オーナーシップの明確化、(2) getMessages のオプションオブジェクトパターン採用、(3) 関数名・WebSocketフィールド名の維持、(4) ChatMessage.archived の required 化、(5) ACTIVE_FILTER 定数の導入、(6) down マイグレーション簡略化、(7) セパレータUI省略。セクション12に実装チェックリストを新設。"
+}

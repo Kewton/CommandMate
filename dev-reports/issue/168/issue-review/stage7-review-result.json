@@ -1,0 +1,161 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "issue_number": 168,
+  "previous_findings_status": [
+    {
+      "id": "IS3-001",
+      "description": "getLastAssistantMessageAt にarchivedフィルタがない",
+      "status": "addressed",
+      "evidence": "Issue本文の「DB関数のarchivedフィルタ追加」セクション、タスク3に getLastAssistantMessageAt のSQLに WHERE archived = 0 追加が明記されている"
+    },
+    {
+      "id": "IS3-002",
+      "description": "getWorktrees/getWorktreeById のサブクエリにarchivedフィルタがない",
+      "status": "addressed",
+      "evidence": "Issue本文のタスク3に getWorktrees と getWorktreeById のサブクエリに AND archived = 0 追加が明記されている"
+    },
+    {
+      "id": "IS3-003",
+      "description": "getLastMessagesByCliBatch にarchivedフィルタがない",
+      "status": "addressed",
+      "evidence": "Issue本文のタスク3に getLastMessagesByCliBatch のranked_messages CTEに AND archived = 0 追加が明記されている"
+    },
+    {
+      "id": "IS3-004",
+      "description": "getLastMessage/getLastUserMessage にarchivedフィルタがない",
+      "status": "addressed",
+      "evidence": "Issue本文のタスク3に両関数のSQLに WHERE archived = 0 追加が明記されている"
+    },
+    {
+      "id": "IS3-005",
+      "description": "markPendingPromptsAsAnswered がarchivedメッセージも対象にする",
+      "status": "addressed",
+      "evidence": "Issue本文のタスク3に markPendingPromptsAsAnswered のSELECT文に AND archived = 0 追加が明記されている"
+    },
+    {
+      "id": "IS3-006",
+      "description": "conversation-logger.ts が getLastUserMessage 経由で影響を受ける",
+      "status": "addressed",
+      "evidence": "IS3-004の修正（getLastUserMessage へのarchivedフィルタ追加）で自動的に解決される。Issue本文のDB関数一覧にも getLastUserMessage の影響として conversation-logger が記載されている"
+    },
+    {
+      "id": "IS3-007",
+      "description": "マイグレーションバージョンの記述が曖昧",
+      "status": "addressed",
+      "evidence": "Issue本文のタスク1に「CURRENT_SCHEMA_VERSIONを1インクリメント（実装時点のバージョン+1）」と相対的な記述に変更済み"
+    },
+    {
+      "id": "IS3-008",
+      "description": "WebSocketクライアント側の messagesCleared ハンドラの影響が未検討",
+      "status": "addressed",
+      "evidence": "Issue本文の「WebSocketクライアント側の影響」セクションに、useWebSocket.ts の SessionStatusPayload 型定義に含まれるのみでハンドラは isRunning のみ使用という調査結果が記載。messagesArchived への変更方針も明記"
+    },
+    {
+      "id": "IS3-009",
+      "description": "既存テストへの影響が実装タスクに含まれていない",
+      "status": "addressed",
+      "evidence": "Issue本文にタスク5「既存テスト修正」セクションが追加され、影響を受ける5つのテストファイルと修正内容が明記されている"
+    },
+    {
+      "id": "IS3-010",
+      "description": "log-export-sanitizer.ts の将来的な影響",
+      "status": "addressed",
+      "evidence": "Issue本文の「将来の検討事項」セクションに「エクスポート機能（#11）追加時のarchivedメッセージ取り扱い方針」として記載されている"
+    },
+    {
+      "id": "IS3-011",
+      "description": "session-cleanup.ts はDB操作を行わないため変更不要",
+      "status": "addressed",
+      "evidence": "コード確認済み。session-cleanup.ts はtmuxセッション/ポーラー/スケジューラーの停止のみで、chat_messagesへの直接アクセスなし。ON DELETE CASCADEによるworktree削除時はarchivedメッセージも含めて全削除で正しい動作"
+    },
+    {
+      "id": "IS3-012",
+      "description": "CLIコマンド capture/send/wait はAPI経由のため直接影響なし",
+      "status": "addressed",
+      "evidence": "CLI commands (src/cli/) にはgetMessages等のDB関数の直接呼び出しなし（grep確認済み）。API経由のため、サーバー側修正で自動対応。将来の検討事項にCLI api-clientへのincludeArchivedオプション追加が記載済み"
+    },
+    {
+      "id": "IS3-013",
+      "description": "マイグレーション時の既存行のarchivedカラムNULL問題",
+      "status": "addressed",
+      "evidence": "Issue本文のタスク1に「UPDATE chat_messages SET archived = 0 WHERE archived IS NULL を実行（安全策）」が明記されている"
+    }
+  ],
+  "findings": [
+    {
+      "id": "IS7-001",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "description": "worktrees.last_user_message / last_user_message_at のデノーマライズフィールドがセッションアーカイブ後も古い値を保持する。セッションをkillしてメッセージをarchived=1にした後、新セッションでメッセージを送信するまで、サイドバーにはアーカイブされたセッションの最後のユーザーメッセージが表示され続ける。物理削除時も同じ問題があったが、archived方式ではメッセージがDB上に残っているため、より紛らわしい状態になる可能性がある。",
+      "affected_files": [
+        "src/lib/db/chat-db.ts",
+        "src/app/api/worktrees/[id]/kill-session/route.ts"
+      ],
+      "suggestion": "kill-session APIでメッセージをアーカイブした後、worktrees.last_user_message と last_user_message_at をNULLにクリアする（または非アーカイブの最新ユーザーメッセージで再計算する）処理を追加する。現行の物理削除でもクリアされていないため、既存動作と同等のリスクではあるが、タスクに明記しておくと実装時に判断しやすい。",
+      "evidence": "kill-session/route.ts L92-99でdeleteAllMessages/deleteMessagesByCliToolを呼ぶが、worktrees.last_user_messageはクリアされない。chat-db.ts L314-330のupdateLastUserMessageはcreateMessage時のみ呼ばれる"
+    },
+    {
+      "id": "IS7-002",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "description": "テスト影響範囲に db-repository-delete.test.ts と api-repository-delete.test.ts が含まれていない。両テストはON DELETE CASCADEによるchat_messages削除を直接検証しており（SELECT * FROM chat_messages WHERE worktree_id = ?）、archivedカラム追加後もCASCADE削除が正常に動作することを確認するテストとして重要。カラム追加だけであれば既存テストはそのまま通るが、テスト影響範囲の網羅性の観点で記載すべき。",
+      "affected_files": [
+        "tests/unit/db-repository-delete.test.ts",
+        "tests/integration/api-repository-delete.test.ts"
+      ],
+      "suggestion": "タスク5の既存テスト修正セクションに上記2ファイルを追加し、「archivedカラム追加後もON DELETE CASCADEが正常動作することを確認（変更不要だが検証対象として認識）」と記載する。",
+      "evidence": "db-repository-delete.test.ts L195: SELECT * FROM chat_messages WHERE worktree_id = ?; api-repository-delete.test.ts L285: 同様のクエリ"
+    },
+    {
+      "id": "IS7-003",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "description": "テスト影響範囲に db-migrations.test.ts が含まれていない。このテストはchat_messagesテーブルのCASCADE削除テスト（L435-447）やスキーマ検証を含んでおり、新しいマイグレーション（バージョン22でarchivedカラム追加）のテストケースを追加する場所として重要。",
+      "affected_files": [
+        "tests/unit/lib/db-migrations.test.ts"
+      ],
+      "suggestion": "タスク5にdb-migrations.test.tsを追加し、マイグレーションバージョン22のテストケース（archivedカラムの存在確認、デフォルト値確認、インデックス確認）を記載する。",
+      "evidence": "db-migrations.test.ts L435: 'should CASCADE delete chat_messages when worktree is deleted'; L503: スキーマテーブル一覧検証"
+    },
+    {
+      "id": "IS7-004",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "description": "db-viewed-tracking.test.ts がchat_messagesのインデックス検証を含んでいる（L42）。タスク1で複合インデックス idx_messages_archived (worktree_id, archived, timestamp DESC) を追加する予定だが、このインデックスの検証をどのテストで行うかが不明確。",
+      "affected_files": [
+        "tests/unit/db-viewed-tracking.test.ts"
+      ],
+      "suggestion": "db-migrations.test.ts または db-viewed-tracking.test.ts に idx_messages_archived インデックスの存在確認テストを追加する。",
+      "evidence": "db-viewed-tracking.test.ts L42: 'should have index for chat_messages assistant queries'"
+    },
+    {
+      "id": "IS7-005",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "description": "deleteMessageById (chat-db.ts L270-281) がsend/route.ts L279で孤立メッセージのクリーンアップに使用されている。この関数は特定のメッセージIDで物理削除を行うが、archived方式導入後の方針が不明確。orphanedメッセージのクリーンアップは論理削除ではなく物理削除のままで問題ないと思われるが（再送時の重複メッセージは履歴として保持する価値がない）、方針をIssue本文に明記しておくと実装時に迷わない。",
+      "affected_files": [
+        "src/lib/db/chat-db.ts",
+        "src/app/api/worktrees/[id]/send/route.ts"
+      ],
+      "suggestion": "Issue本文の影響範囲セクションに「deleteMessageById は孤立メッセージの物理削除に使用されており、archived方式導入後も物理削除のまま（orphanedメッセージは履歴保持不要）」と方針を明記する。",
+      "evidence": "send/route.ts L279: deleteMessageById(db, orphanedMessageIdToDelete) - 再送時の孤立ユーザーメッセージ削除"
+    },
+    {
+      "id": "IS7-006",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "description": "response-poller.ts (L625, L726) と worktree-status-helper.ts (L102, L107) がgetMessages/markPendingPromptsAsAnsweredを使用しているが、Issue本文の影響範囲セクションのDB関数一覧テーブルに呼び出し元としての記載がない。DB関数自体のフィルタ追加はタスク3でカバーされているため実装には影響ないが、影響範囲の可視化としてはこれらの呼び出し元も記載があるとより完全。",
+      "affected_files": [
+        "src/lib/polling/response-poller.ts",
+        "src/lib/session/worktree-status-helper.ts"
+      ],
+      "suggestion": "影響範囲セクションのDB関数一覧テーブルの「影響」列に、各関数の主要呼び出し元を追記する（例: getMessages の影響列に「response-poller.ts, worktree-status-helper.ts でも使用」）。",
+      "evidence": "response-poller.ts L625,L726: markPendingPromptsAsAnswered; worktree-status-helper.ts L102: getMessages, L107: markPendingPromptsAsAnswered"
+    }
+  ],
+  "summary": "Stage 3で検出された全13件の指摘は全てIssue本文に適切に反映されている。2回目の影響範囲レビューでは、should_fix 3件、nice_to_have 3件の追加指摘を検出した。最も重要な発見は、(1) worktrees.last_user_message デノーマライズフィールドがアーカイブ後にクリアされない点（IS7-001）、(2) テスト影響範囲にdb-repository-delete.test.ts, api-repository-delete.test.ts, db-migrations.test.ts の3ファイルが含まれていない点（IS7-002, IS7-003）。must_fix レベルの見落としはなく、Issueの影響範囲分析は十分に網羅的である。session-cleanup.ts, response-poller.ts, auto-yes-poller.ts, CLIコマンド群はいずれもchat_messagesに直接アクセスしておらず、Issue本文の評価通り変更不要であることを確認した。ON DELETE CASCADEはworktree削除時にarchivedメッセージも含めて全行を物理削除するため、正しく動作する。",
+  "must_fix_count": 0,
+  "should_fix_count": 3,
+  "nice_to_have_count": 3
+}

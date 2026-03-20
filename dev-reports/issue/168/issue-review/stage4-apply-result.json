@@ -1,0 +1,25 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 168,
+  "applied_findings": [
+    "IS3-001",
+    "IS3-002",
+    "IS3-003",
+    "IS3-004",
+    "IS3-005",
+    "IS3-006",
+    "IS3-007",
+    "IS3-008",
+    "IS3-009",
+    "IS3-010",
+    "IS3-011",
+    "IS3-012",
+    "IS3-013"
+  ],
+  "skipped_findings": [],
+  "must_fix_applied": 5,
+  "should_fix_applied": 5,
+  "nice_to_have_applied": 3,
+  "issue_updated": true
+}

@@ -1,0 +1,21 @@
+{
+  "issue_number": 168,
+  "refactor_targets": [
+    "src/lib/db/chat-db.ts",
+    "src/lib/db/worktree-db.ts",
+    "src/app/api/worktrees/[id]/kill-session/route.ts",
+    "src/components/worktree/HistoryPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "quality_metrics": {
+    "tsc_errors": 0,
+    "lint_errors": 0,
+    "tests_passed": 5272,
+    "tests_failed": 0
+  },
+  "improvement_goals": [
+    "ACTIVE_FILTER定数の一貫した使用を確認",
+    "重複コードの削除",
+    "コードの可読性向上"
+  ]
+}

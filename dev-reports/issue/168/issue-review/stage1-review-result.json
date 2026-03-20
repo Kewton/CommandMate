@@ -1,0 +1,67 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 168,
+  "findings": [
+    {
+      "id": "F1-DESIGN-AMBIGUITY",
+      "severity": "must_fix",
+      "category": "要件の明確さ",
+      "description": "Issueの実装タスクで 'session_idまたはarchivedカラムを追加' と記載されているが、2つの方式は設計が根本的に異なる。session_id方式はセッション単位でメッセージをグルーピングし、archived方式は論理削除フラグで表示/非表示を切り替える。どちらを採用するかで実装範囲・DB設計・APIインタフェースが大きく変わるため、Issueで方針を確定すべき。",
+      "suggestion": "archived（論理削除フラグ）方式を推奨。理由: (1) session_id方式はセッション採番ロジック・session管理テーブルの追加が必要で複雑度が高い、(2) Issueの提案する解決策本文が 'archivedフラグ' を明記しており一貫性がある、(3) 既存のgetMessages関数にWHERE条件を1つ追加するだけで対応可能。Issueの実装タスクから 'session_idまたは' を削除し、'archivedカラムを追加' に確定することを推奨。",
+      "evidence": "Issue本文: '1. セッションクリア時にメッセージを物理削除ではなく論理削除（archived フラグ）にする' と記載しつつ、実装タスクでは 'session_idまたはarchivedカラムを追加' と両方を列挙。方針が未確定。"
+    },
+    {
+      "id": "F2-MIGRATION-TASK-INCOMPLETE",
+      "severity": "should_fix",
+      "category": "実装タスクの完全性",
+      "description": "実装タスクに 'DBマイグレーション' とあるが、具体的な内容が不足。既存のdb-migrations.tsには既に22個のマイグレーションが存在し、番号の振り方・既存データの扱い（既存メッセージのarchivedデフォルト値）を明記すべき。",
+      "suggestion": "マイグレーションタスクを以下に具体化: (1) chat_messagesテーブルにarchived INTEGER DEFAULT 0カラムをALTER TABLE ADDで追加、(2) 既存メッセージはarchived=0（現行セッションとして表示）、(3) db-migrations.tsのMIGRATION_VERSION定数をインクリメント、(4) インデックス idx_messages_archived を追加（worktree_id, archived, timestamp DESC）。",
+      "evidence": "src/lib/db/db-migrations.ts に既存マイグレーション22件。MIGRATION_VERSION定数でバージョン管理。ALTER TABLE ADD COLUMN パターンが多数使われている（例: migration 4, 5, 6, 7, 10, 14, 15, 16, 19, 20）。"
+    },
+    {
+      "id": "F3-GETMESSAGES-IMPACT",
+      "severity": "should_fix",
+      "category": "実装タスクの完全性",
+      "description": "kill-session APIの修正だけでなく、getMessages関数の修正も必要。現状getMessagesはarchivedフィルタ条件がないため、アーカイブされたメッセージも通常表示に含まれてしまう。受入条件の '新セッション開始時は過去メッセージが非表示（デフォルト）' を実現するには、getMessagesにarchivedフィルタを追加し、messages APIにクエリパラメータを追加する必要がある。",
+      "suggestion": "実装タスクに以下を追加: (1) getMessages関数にarchived?: booleanパラメータ追加（デフォルトfalse=非アーカイブのみ）、(2) /api/worktrees/[id]/messages APIにincludeArchivedクエリパラメータ追加、(3) getMessages呼び出し元（worktrees/route.ts, worktrees/[id]/route.ts, send/route.ts）の影響確認。",
+      "evidence": "src/lib/db/chat-db.ts:172-200 getMessages関数は現在worktree_id, before, limit, cliToolIdでフィルタ。archivedの条件なし。src/app/api/worktrees/[id]/messages/route.ts:57でgetMessagesを呼び出し。"
+    },
+    {
+      "id": "F4-UI-TOGGLE-UNDERSPECIFIED",
+      "severity": "should_fix",
+      "category": "要件の明確さ",
+      "description": "UI実装タスク '過去セッション履歴の表示/非表示トグル' の配置場所・UXが未指定。既存のHistoryPaneコンポーネントにトグルを追加するのか、別のUIパターンか不明。また、トグル状態の永続化（リロード後も維持）についても言及がない。",
+      "suggestion": "以下を明確化: (1) トグルはHistoryPaneヘッダー（sticky部分、line 258-260）に配置、(2) トグル状態はlocalStorageで永続化（既存のSidebarContext.tsxでlocalStorageパターンが使われている）、(3) アーカイブメッセージは視覚的に区別（例: 背景色の変更やセパレータ）。",
+      "evidence": "src/components/worktree/HistoryPane.tsx:258-260 sticky header部分が既に存在。src/contexts/SidebarContext.tsx でlocalStorageパターンの実績あり。"
+    },
+    {
+      "id": "F5-ACCEPTANCE-NO-DATA-GROWTH",
+      "severity": "nice_to_have",
+      "category": "受け入れ条件の妥当性",
+      "description": "論理削除方式ではメッセージが蓄積し続ける。長期間使用時のDBサイズ増大やクエリ性能への影響について、受入条件や考慮事項に言及がない。",
+      "suggestion": "以下のいずれかを検討事項として追加: (1) アーカイブメッセージの保持期間上限（例: 90日以上前は物理削除）、(2) アーカイブメッセージの一括削除UI/API、(3) パフォーマンス劣化が問題になった場合の対応方針。当面はインデックス追加で十分だが、将来の方針をIssueに記載しておくと良い。",
+      "evidence": "SQLiteベースのローカルDB。chat_messagesテーブルにはインデックスが4つ存在（init-db.ts:51-69）。archivedカラム追加時にインデックスも追加すれば当面の性能は問題ないが、長期的な蓄積の方針は未記載。"
+    },
+    {
+      "id": "F6-WEBSOCKET-BROADCAST",
+      "severity": "nice_to_have",
+      "category": "実装タスクの完全性",
+      "description": "kill-session APIのWebSocketブロードキャストペイロードに messagesCleared: true が含まれている（route.ts:107）。論理削除に変更した場合、このフラグの意味が変わる（実際にはクリアされずアーカイブされる）。フロントエンドがこのフラグでメッセージリストをクリアしている場合、UI側の対応も必要。",
+      "suggestion": "実装タスクに以下を追加: (1) broadcast ペイロードの messagesCleared を messagesArchived に変更するか、フラグの意味を再定義、(2) フロントエンドでのWebSocketイベントハンドラの確認・修正。",
+      "evidence": "src/app/api/worktrees/[id]/kill-session/route.ts:103-109 broadcast payload に messagesCleared: true を含む。"
+    },
+    {
+      "id": "F7-ALTERNATIVE-UNEXPLORED",
+      "severity": "nice_to_have",
+      "category": "記載内容の正しさ",
+      "description": "代替案に 'セッション終了前に自動でログファイルにエクスポート（#11のログエクスポート機能と連携）' が記載されているが、Issue #11の現状（オープン/クローズ/実装済み）への参照がなく、連携可能性の根拠が不明。",
+      "suggestion": "代替案を記載する場合は、Issue #11の現状ステータスを確認し、連携の実現可能性を補足するか、代替案セクションを削除して本案（archived方式）に集中する。",
+      "evidence": "Issue本文: 'セッション終了前に自動でログファイルにエクスポート（#11のログエクスポート機能と連携）'"
+    }
+  ],
+  "summary": "Issue #168の技術的な前提（メッセージ物理削除の現状、スキーマにarchived/session_idカラムが存在しないこと）は仮説検証で全てConfirmedされており正確。ただし、実装方針が 'session_idまたはarchived' と未確定のままであること（F1）が最大の問題。archived方式で確定した上で、getMessages関数への影響（F3）、マイグレーション詳細（F2）、UIトグルの具体仕様（F4）を明確化する必要がある。全体として、課題認識と大枠の方針は妥当だが、実装に着手可能なレベルの具体性がまだ不足している。",
+  "must_fix_count": 1,
+  "should_fix_count": 3,
+  "nice_to_have_count": 3
+}

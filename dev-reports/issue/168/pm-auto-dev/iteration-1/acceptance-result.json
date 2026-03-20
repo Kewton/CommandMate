@@ -1,0 +1,130 @@
+{
+  "issue_number": 168,
+  "status": "failed",
+  "criteria_results": [
+    {
+      "criterion": "セッションクリア後も過去のメッセージ履歴が閲覧可能",
+      "status": "passed",
+      "evidence": "deleteAllMessages and deleteMessagesByCliTool in chat-db.ts now perform UPDATE SET archived=1 instead of DELETE. getMessages supports includeArchived option. HistoryPane has showArchived toggle."
+    },
+    {
+      "criterion": "新セッション開始時は過去メッセージが非表示（デフォルト）",
+      "status": "passed",
+      "evidence": "getMessages defaults includeArchived=false, applying ACTIVE_FILTER ('AND archived = 0'). WorktreeDetailRefactored initializes showArchived from localStorage, defaulting to false."
+    },
+    {
+      "criterion": "過去履歴の表示/非表示を切り替えられる",
+      "status": "passed",
+      "evidence": "HistoryPane.tsx has checkbox toggle (line 276) with showArchived prop. WorktreeDetailRefactored.tsx manages showArchived state (line 272) with localStorage persistence. Re-fetch triggered on toggle change (line 492)."
+    },
+    {
+      "criterion": "既存のセッション管理機能に影響がない",
+      "status": "passed",
+      "evidence": "session-cleanup.ts is unchanged. kill-session/route.ts correctly calls archive functions then clearLastUserMessage. Function names maintained for backward compatibility (DR1-003)."
+    },
+    {
+      "criterion": "既存メッセージ（archived未設定）が正常に表示される（マイグレーション互換性）",
+      "status": "passed",
+      "evidence": "Migration v22 sets existing rows to archived=0 ('UPDATE chat_messages SET archived = 0 WHERE archived IS NULL'). Column DEFAULT is 0. mapChatMessage maps archived: row.archived === 1."
+    },
+    {
+      "criterion": "サイドバーの未読バッジがアーカイブ済みメッセージに影響されない",
+      "status": "passed",
+      "evidence": "getLastAssistantMessageAt uses ACTIVE_FILTER (chat-db.ts line 88), excluding archived messages from unread badge calculation."
+    },
+    {
+      "criterion": "サイドバーの最後のメッセージ表示がアーカイブ済みメッセージに影響されない",
+      "status": "passed",
+      "evidence": "getLastMessage and getLastUserMessage both use ACTIVE_FILTER (chat-db.ts lines 230, 251). clearLastUserMessage is called after archiving in kill-session route (line 103)."
+    },
+    {
+      "criterion": "send APIの重複メッセージ検出がアーカイブ済みメッセージに影響されない",
+      "status": "passed",
+      "evidence": "getLastUserMessage uses ACTIVE_FILTER, so archived messages are excluded from duplicate detection logic."
+    },
+    {
+      "criterion": "stale prompt検出がアーカイブ済みメッセージに影響されない",
+      "status": "passed",
+      "evidence": "markPendingPromptsAsAnswered uses ACTIVE_FILTER (chat-db.ts line 435), only processing non-archived pending prompts."
+    },
+    {
+      "criterion": "既存テストがarchived方式に対応して全パス",
+      "status": "failed",
+      "evidence": "TypeScript compilation fails with 63 errors. Test files (WorktreeDetailWebSocket.test.tsx, useWorktreeUIState.test.ts, message-sync.test.ts) create ChatMessage objects without the required 'archived' field. Unit tests pass at runtime (5272 passed, 7 skipped) because Vitest does not enforce TS types, but tsc --noEmit fails."
+    },
+    {
+      "criterion": "cliTool未指定でのセッション終了時もメッセージが論理削除される",
+      "status": "passed",
+      "evidence": "kill-session/route.ts line 97-100: when targetCliTool is falsy, deleteAllMessages is called which performs UPDATE SET archived=1."
+    },
+    {
+      "criterion": "kill-session後、サイドバーのlast_user_messageがクリアされる",
+      "status": "passed",
+      "evidence": "kill-session/route.ts line 103: clearLastUserMessage(db, params.id) is called unconditionally after archiving messages. clearLastUserMessage sets last_user_message and last_user_message_at to NULL (chat-db.ts line 368-376)."
+    }
+  ],
+  "quality_checks": {
+    "tsc": "fail",
+    "lint": "pass",
+    "unit_tests": {
+      "passed": 5272,
+      "failed": 0,
+      "skipped": 7,
+      "note": "1 flaky test (git-utils.test.ts) failed intermittently but is pre-existing and unrelated to Issue #168. Second run: 269/269 test files passed."
+    }
+  },
+  "test_scenarios": [
+    {
+      "scenario": "シナリオ1: kill-session後にメッセージがarchivedフラグで論理削除される（物理削除されない）",
+      "result": "passed",
+      "evidence": "deleteAllMessages and deleteMessagesByCliTool use UPDATE SET archived=1 instead of DELETE (chat-db.ts lines 275-283, 328-336)"
+    },
+    {
+      "scenario": "シナリオ2: getMessagesがデフォルトでarchived=0のメッセージのみ返す",
+      "result": "passed",
+      "evidence": "getMessages defaults includeArchived=false and appends ACTIVE_FILTER (chat-db.ts line 201-203)"
+    },
+    {
+      "scenario": "シナリオ3: getMessagesにincludeArchived=trueを指定するとアーカイブ済みメッセージも返す",
+      "result": "passed",
+      "evidence": "When includeArchived=true, ACTIVE_FILTER is not appended (chat-db.ts line 201 condition). Messages API passes param through (messages/route.ts line 59)"
+    },
+    {
+      "scenario": "シナリオ4: getLastMessage/getLastUserMessage/getLastAssistantMessageAtがアーカイブ済みを除外する",
+      "result": "passed",
+      "evidence": "All three functions use ACTIVE_FILTER: getLastAssistantMessageAt (line 88), getLastUserMessage (line 230), getLastMessage (line 251)"
+    },
+    {
+      "scenario": "シナリオ5: markPendingPromptsAsAnsweredがアーカイブ済みpromptに影響しない",
+      "result": "passed",
+      "evidence": "markPendingPromptsAsAnswered SELECT query includes ACTIVE_FILTER (chat-db.ts line 435)"
+    },
+    {
+      "scenario": "シナリオ6: clearLastUserMessageがworktreesのlast_user_messageをNULLにする",
+      "result": "passed",
+      "evidence": "clearLastUserMessage sets last_user_message=NULL and last_user_message_at=NULL (chat-db.ts lines 368-376). Called from kill-session route (line 103)"
+    },
+    {
+      "scenario": "シナリオ7: DBマイグレーションv22が正常に適用される",
+      "result": "passed",
+      "evidence": "Migration v22 'add-archived-column-to-chat-messages' exists in db-migrations.ts (line 985). Adds archived column (DEFAULT 0), backfills NULLs, creates composite index idx_messages_archived(worktree_id, archived, timestamp DESC)"
+    },
+    {
+      "scenario": "シナリオ8: 既存テストが全パスする",
+      "result": "passed",
+      "evidence": "Unit tests: 5272 passed, 0 failed, 7 skipped (269 test files). 1 flaky pre-existing test (git-utils) passed on retry."
+    },
+    {
+      "scenario": "シナリオ9: TypeScript型チェックがパスする",
+      "result": "failed",
+      "evidence": "63 TypeScript errors: test files missing required 'archived' property on ChatMessage objects (WorktreeDetailWebSocket.test.tsx: 17 errors, useWorktreeUIState.test.ts: 3 errors, message-sync.test.ts: 3 errors, plus others). All errors are 'Property archived is missing in type ... but required in type ChatMessage'."
+    },
+    {
+      "scenario": "シナリオ10: ESLintがパスする",
+      "result": "passed",
+      "evidence": "npm run lint: 'No ESLint warnings or errors'"
+    }
+  ],
+  "summary": "11 out of 12 acceptance criteria passed. 9 out of 10 test scenarios passed. The core feature implementation (logical deletion via archived flag, migration v22, ACTIVE_FILTER, clearLastUserMessage, HistoryPane toggle UI) is complete and correct. However, TypeScript compilation fails with 63 errors because test files were not updated to include the required 'archived' field on ChatMessage objects. The fix is straightforward: add 'archived: false' (or 'archived: true' where appropriate) to all ChatMessage object literals in test files. ESLint passes. Unit tests pass at runtime (5272/5272).",
+  "action_required": "Add 'archived: false' to all ChatMessage object literals in test files: WorktreeDetailWebSocket.test.tsx, useWorktreeUIState.test.ts, message-sync.test.ts, and any other affected test files. Then verify npx tsc --noEmit passes."
+}

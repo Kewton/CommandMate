@@ -1,0 +1,31 @@
+{
+  "issue_number": 168,
+  "issue_title": "セッションをクリアしても履歴はクリアして欲しく無い",
+  "design_policy_path": "dev-reports/design/issue-168-session-history-retention-design-policy.md",
+  "work_plan_path": "dev-reports/issue/168/work-plan.md",
+  "acceptance_criteria": [
+    "セッションクリア後も過去のメッセージ履歴が閲覧可能",
+    "新セッション開始時は過去メッセージが非表示（デフォルト）",
+    "過去履歴の表示/非表示を切り替えられる",
+    "既存のセッション管理機能に影響がない",
+    "既存メッセージ（archived未設定）が正常に表示される（マイグレーション互換性）",
+    "サイドバーの未読バッジがアーカイブ済みメッセージに影響されない",
+    "サイドバーの最後のメッセージ表示がアーカイブ済みメッセージに影響されない",
+    "send APIの重複メッセージ検出がアーカイブ済みメッセージに影響されない",
+    "stale prompt検出がアーカイブ済みメッセージに影響されない",
+    "既存テストがarchived方式に対応して全パス",
+    "cliTool未指定でのセッション終了時もメッセージが論理削除される",
+    "kill-session後、サイドバーのlast_user_messageがクリアされる"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: DBマイグレーション追加（v22, archived INTEGER DEFAULT 0, idx_messages_archived）",
+    "Task 1.2: 型定義更新（ChatMessageRow.archived, ChatMessage.archived, GetMessagesOptions, createMessage引数型）",
+    "Task 1.3: ACTIVE_FILTER定数とDB関数更新（getMessages options化, 全関数にarchivedフィルタ, delete→UPDATE, clearLastUserMessage新規）",
+    "Task 1.4: バレルファイル・呼び出し元更新（db.ts exports, messages/route.ts, send/route.ts, worktree-status-helper.ts）",
+    "Task 2.1: kill-session API（clearLastUserMessage呼び出し追加）",
+    "Task 2.2: ブラウザ側APIクライアント（api-client.ts includeArchived追加）",
+    "Task 3.1: WorktreeDetailRefactored（showArchived state, localStorage永続化）",
+    "Task 3.2: HistoryPane（トグルUI, archived メッセージ opacity-60）"
+  ],
+  "target_coverage": 80
+}
