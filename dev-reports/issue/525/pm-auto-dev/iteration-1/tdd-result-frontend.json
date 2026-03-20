@@ -1,0 +1,30 @@
+{
+  "status": "success",
+  "coverage": 100.0,
+  "unit_tests": {
+    "total": 5247,
+    "passed": 5247,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/components/worktree/AutoYesToggle.tsx",
+    "tests/unit/components/worktree/AutoYesToggle.test.tsx",
+    "tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx"
+  ],
+  "commits": [],
+  "message": "Issue #525 frontend TDD implementation complete. AutoYesToggle now shows agent name indicator regardless of enabled/disabled state (previously only shown when enabled). Added 8 new test cases: 4 for AutoYesToggle per-agent display and 4 for AutoYesConfirmDialog per-agent display. All existing backend integration (WorktreeDetailRefactored passing activeCliTab, useAutoYes receiving cliTool, auto-yes API with cliToolId) was already in place. ESLint 0 errors, TypeScript 0 errors.",
+  "summary": {
+    "frontend_changes": {
+      "AutoYesToggle.tsx": "Changed agent name indicator from 'enabled && cliToolName' to 'cliToolName' condition, so the target agent is always visible in the toggle label regardless of enabled state",
+      "AutoYesConfirmDialog.tsx": "No code changes needed - already supports cliToolName for enableTitleWithTool and appliesOnlyToCurrent i18n keys",
+      "WorktreeDetailRefactored.tsx": "No code changes needed - already passes activeCliTab as cliToolId to auto-yes POST API and as cliTool to useAutoYes hook",
+      "useAutoYes.ts": "No code changes needed - auto-yes state is received from current-output polling which already uses per-agent compositeKey"
+    },
+    "new_tests": 8,
+    "existing_tests_preserved": true
+  }
+}

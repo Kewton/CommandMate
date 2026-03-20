@@ -203,17 +203,17 @@ export async function POST(
     }
     const cliToolId: CLIToolType = body.cliToolId ?? 'claude';
 
-    const state = setAutoYesEnabled(
-      params.id,
-      cliToolId,
-      body.enabled,
-      body.enabled ? duration : undefined,
-      body.enabled ? stopPattern : undefined
-    );
-
     // Issue #138, #525: Start or stop server-side polling
     let pollingStarted = false;
+    let state;
     if (body.enabled) {
+      state = setAutoYesEnabled(
+        params.id,
+        cliToolId,
+        true,
+        duration,
+        stopPattern
+      );
       const result = startAutoYesPolling(params.id, cliToolId);
       pollingStarted = result.started;
       if (!result.started) {
@@ -222,10 +222,20 @@ export async function POST(
     } else {
       // Issue #525: cliToolId specified -> stop individual; not specified -> stop all
       if (body.cliToolId) {
+        state = setAutoYesEnabled(params.id, cliToolId, false);
         const compositeKey = buildCompositeKey(params.id, cliToolId);
         stopAutoYesPolling(compositeKey);
       } else {
+        // Disable all agents for this worktree
+        const keys = getCompositeKeysByWorktree(params.id);
+        for (const key of keys) {
+          const toolId = extractCliToolId(key);
+          if (toolId) {
+            setAutoYesEnabled(params.id, toolId, false);
+          }
+        }
         stopAutoYesPollingByWorktree(params.id);
+        state = { enabled: false, enabledAt: 0, expiresAt: 0 };
       }
     }
 

@@ -29,7 +29,7 @@
     "tests/unit/lib/worktree-status-helper.test.ts",
     "tests/integration/auto-yes-persistence.test.ts"
   ],
-  "commits": [],
+  "commits": ["c7f0047: feat(auto-yes): implement per-agent composite key migration (#525)"],
   "message": "TDD implementation complete for Issue #525 Phases 1-4. Composite key migration (worktreeId:cliToolId) applied to auto-yes-state.ts, auto-yes-poller.ts, auto-yes-manager.ts barrel, API routes (auto-yes, current-output), session-cleanup.ts, resource-cleanup.ts, worktree-status-helper.ts. All 5239 unit tests pass, 0 ESLint errors, 0 TypeScript errors. Frontend Phase 5 not included in this iteration as it requires no backend test changes.",
   "phases_completed": [
     "Phase 1: auto-yes-state.ts - composite key helpers, function signature changes, byWorktree helpers, barrel update",

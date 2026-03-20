@@ -143,6 +143,31 @@ describe('AutoYesConfirmDialog', () => {
   });
 
   // ==========================================================================
+  // Issue #525: Per-agent Auto-Yes display
+  // ==========================================================================
+  describe('Issue #525: Per-agent display', () => {
+    it('should show tool-specific title when cliToolName is provided', () => {
+      render(<AutoYesConfirmDialog {...defaultProps} cliToolName="Claude" />);
+      expect(screen.getByText(/autoYes\.enableTitleWithTool/)).toBeDefined();
+    });
+
+    it('should show generic title when cliToolName is not provided', () => {
+      render(<AutoYesConfirmDialog {...defaultProps} />);
+      expect(screen.getByText('autoYes.enableTitle')).toBeDefined();
+    });
+
+    it('should show tool-specific scope message when cliToolName is provided', () => {
+      render(<AutoYesConfirmDialog {...defaultProps} cliToolName="Claude" />);
+      expect(screen.getByText(/autoYes\.appliesOnlyToCurrent/)).toBeDefined();
+    });
+
+    it('should not show scope message when cliToolName is not provided', () => {
+      render(<AutoYesConfirmDialog {...defaultProps} />);
+      expect(screen.queryByText(/autoYes\.appliesOnlyToCurrent/)).toBeNull();
+    });
+  });
+
+  // ==========================================================================
   // Issue #314: Stop Pattern Tests
   // ==========================================================================
   describe('Stop Pattern (Issue #314)', () => {

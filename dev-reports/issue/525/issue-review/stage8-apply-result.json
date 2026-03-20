@@ -1,0 +1,42 @@
+{
+  "issue_number": 525,
+  "iteration": 2,
+  "stage": 8,
+  "apply_date": "2026-03-20",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "実装タスクのバックエンドセクション冒頭に依存関係の注記ブロックを追加。auto-yes-state.tsの複合キー化・setAutoYesEnabled()シグネチャ変更がauto-yes/route.ts等の先行タスクであることを明示。POST enable時タスクにも前提条件を括弧書きで追記。"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "auto-yes/route.ts GETハンドラの実装タスクに「_requestパラメータをrequestに変更してURLからクエリパラメータを取得する修正が必要」という具体的修正点を追記。影響範囲テーブルのauto-yes/route.ts行にも「_requestをrequestに変更してクエリパラメータ取得」を追加。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "buildCompositeKey()の具体的関数シグネチャ・配置場所の明記は実装の詳細レベルであり、既にextractWorktreeId()は記載済み。実装時に対になるbuild関数を自然に追加できるため、Issueへの追記は不要と判断。"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "テストファイルパスの統一（前半5件へのパス追記）はNice to Haveレベル。新規テストファイルの配置先は実装時にプロジェクト構造から自明であり、Issueの可読性を損なわないため省略。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 4,
+    "applied": 2,
+    "skipped": 2
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/525"
+  }
+}

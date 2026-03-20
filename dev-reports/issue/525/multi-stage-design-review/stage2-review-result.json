@@ -1,0 +1,107 @@
+{
+  "issue_number": 525,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "CS-MF-001",
+        "title": "setAutoYesEnabled のシグネチャ変更と auto-yes/route.ts POST での呼び出しの不整合",
+        "description": "設計方針書 Section 4-1 では setAutoYesEnabled の第2引数に cliToolId を追加する設計だが、Section 4-3 の POST コード例（L160-165）では setAutoYesEnabled(params.id, body.enabled, ...) と cliToolId を渡していない。既存実装（auto-yes/route.ts L160-165）の呼び出しパターンと設計方針書の関数シグネチャ変更表が矛盾している。POST コード例を setAutoYesEnabled(params.id, cliToolId, body.enabled, ...) に修正すべき。",
+        "severity": "high",
+        "location": "設計方針書 Section 4-3 POST コード例"
+      },
+      {
+        "id": "CS-MF-002",
+        "title": "checkStopCondition の onStopMatched コールバックシグネチャの矛盾",
+        "description": "設計方針書 Section 4-1 では checkStopCondition の引数が (compositeKey, cleanOutput, onStopMatched?) に変更される。しかし既存実装の auto-yes-poller.ts L308 では checkStopCondition(worktreeId, newContent, stopAutoYesPolling) と呼び出しており、onStopMatched コールバックの型は (worktreeId: string) => void である。compositeKey 化後、processStopConditionDelta から渡す onStopMatched は stopAutoYesPolling(compositeKey) を呼ぶ必要があるが、stopAutoYesPolling の引数も compositeKey に変更される設計（Section 4-2）であるため、コールバックの引数型を (compositeKey: string) => void に変更する必要がある。この変更が設計方針書の Section 4-1 checkStopCondition シグネチャ表に明記されていない。",
+        "severity": "high",
+        "location": "設計方針書 Section 4-1 関数シグネチャ変更表、Section 4-2"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "CS-SF-001",
+        "title": "startAutoYesPolling のIdempotencyチェック設計と既存実装の差異",
+        "description": "設計方針書 Section 4-2 の startAutoYesPolling コード例では、既存ポーラーの timerId 存在チェックで idempotency を判定している（existing?.timerId）。しかし既存実装（auto-yes-poller.ts L541-549）では existingPollerState.cliToolId === cliToolId で同一エージェントかどうかを確認し、異なる場合は停止して再作成する設計になっている。設計方針書では compositeKey に cliToolId が含まれるため、同じ compositeKey のポーラーが既に存在すれば必然的に同じ cliToolId だが、コード例が既存の idempotency ロジック（cliToolId 比較、既存ポーラー停止）を反映していない。",
+        "severity": "medium",
+        "location": "設計方針書 Section 4-2 startAutoYesPolling コード例"
+      },
+      {
+        "id": "CS-SF-002",
+        "title": "current-output/route.ts で getAutoYesState 呼び出しの cliToolId 引数が設計方針書に欠落",
+        "description": "設計方針書 Section 4-3 の current-output コード例では getAutoYesState(params.id, cliTool) と2引数で呼んでいるが、既存実装（current-output/route.ts L116）では getAutoYesState(params.id) と1引数で呼んでいる。設計方針書 Section 4-1 で getAutoYesState のシグネチャが (worktreeId, cliToolId) に変更される点は関数シグネチャ変更表に記載があるが、Section 4-3 のコード例では cliTool パラメータの取得・バリデーション処理の流れが不完全（cliTool 変数が文字列のまま CLIToolType 型に変換されるコードが省略されている）。",
+        "severity": "medium",
+        "location": "設計方針書 Section 4-3 current-output コード例"
+      },
+      {
+        "id": "CS-SF-003",
+        "title": "CLIToolType の数が設計方針書の「最大4」と既存実装の5ツールで不一致",
+        "description": "設計方針書 Section 8 で「ポーラー数/worktree: 最大4（CLIToolType数）」と記載しているが、既存実装の CLI_TOOL_IDS は ['claude', 'codex', 'gemini', 'vibe-local', 'opencode'] の5ツールである。MAX_CONCURRENT_POLLERS の上限到達計算（12-13 worktrees）も4ベースで算出されているため、5ツールでは10 worktrees で上限に到達する。",
+        "severity": "medium",
+        "location": "設計方針書 Section 8 パフォーマンス設計"
+      },
+      {
+        "id": "CS-SF-004",
+        "title": "session-cleanup.ts の既存実装と設計方針書の乖離",
+        "description": "設計方針書 Section 4-4 では session-cleanup.ts で stopAutoYesPollingByWorktree(worktreeId) と deleteAutoYesStateByWorktree(worktreeId) を呼び出す設計だが、既存実装（session-cleanup.ts L115, L125）では stopAutoYesPolling(worktreeId) と deleteAutoYesState(worktreeId) を個別に1回ずつ呼んでいる。設計方針書は byWorktree ヘルパーへの置き換えを明記しているものの、既存のfor文（CLI_TOOL_IDS ループ L87）内に auto-yes 停止処理を移動する代替案との比較検討が記載されていない。",
+        "severity": "medium",
+        "location": "設計方針書 Section 4-4"
+      }
+    ],
+    "consider": [
+      {
+        "id": "CS-C-001",
+        "title": "isValidCliTool 関数の重複定義",
+        "description": "設計方針書で参照される isValidCliTool() は、auto-yes/route.ts 内にローカル定義（L69-72）として存在する。一方、cli-tools/types.ts には isCliToolType() が同等の機能で定義されている。設計方針書 Section 3 で extractCliToolId 内で isValidCliTool を呼ぶ設計だが、どちらの関数を使うか明記されていない。実装時に isCliToolType を統一的に使用することを推奨する。",
+        "severity": "low",
+        "location": "設計方針書 Section 3"
+      },
+      {
+        "id": "CS-C-002",
+        "title": "disableAutoYes のシグネチャ変更が不完全",
+        "description": "設計方針書 Section 4-1 の関数シグネチャ変更表では disableAutoYes が (worktreeId, cliToolId, reason?) に変更されるが、既存実装では disableAutoYes は auto-yes-state.ts 内部の getAutoYesState や setAutoYesEnabled の else 分岐からも呼ばれている。これらの内部呼び出し箇所でも cliToolId を渡す必要があるが、設計方針書にはこの内部依存の修正について言及がない。",
+        "severity": "low",
+        "location": "設計方針書 Section 4-1"
+      },
+      {
+        "id": "CS-C-003",
+        "title": "processStopConditionDelta での compositeKey 渡し方の明示がない",
+        "description": "設計方針書では auto-yes-poller.ts の processStopConditionDelta が worktreeId を引数に取る設計のまま記載されているが、checkStopCondition が compositeKey を受け取る設計に変更されるため、processStopConditionDelta の引数も compositeKey に変更するか、内部で buildCompositeKey する必要がある。この変更が設計方針書に明記されていない。",
+        "severity": "low",
+        "location": "設計方針書 Section 4-2"
+      },
+      {
+        "id": "CS-C-004",
+        "title": "worktree-status-helper.ts の getLastServerResponseTimestamp 呼び出し方が不明確",
+        "description": "設計方針書 Section 4-5 では cliToolId 毎ループ内で buildCompositeKey(worktreeId, cliToolId) を使って getLastServerResponseTimestamp(compositeKey) を呼ぶ設計だが、既存実装（worktree-status-helper.ts L93）では cliToolId 毎ループの外で getLastServerResponseTimestamp(worktreeId) を1回だけ呼んでいる。既存実装のループ構造と設計方針書のループ構造が異なるため、実装時に混乱する可能性がある。",
+        "severity": "low",
+        "location": "設計方針書 Section 4-5"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-525-auto-yes-per-agent-design-policy.md",
+    "src/lib/auto-yes-state.ts",
+    "src/lib/auto-yes-poller.ts",
+    "src/lib/polling/auto-yes-manager.ts",
+    "src/lib/polling/auto-yes-resolver.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/resource-cleanup.ts",
+    "src/lib/session/worktree-status-helper.ts",
+    "src/hooks/useAutoYes.ts",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/cli/commands/auto-yes.ts"
+  ],
+  "timestamp": "2026-03-20T12:00:00Z"
+}

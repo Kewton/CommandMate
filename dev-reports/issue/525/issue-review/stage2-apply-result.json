@@ -1,0 +1,64 @@
+{
+  "issue_number": 525,
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-03-20",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "背景・課題セクションの「単一トグル」表現を修正。ポーラー側はcliToolIdを保持するが状態側は保持しない非対称設計であることを正確に記載。"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "「API設計方針」セクションを新設し、GET /auto-yes APIのcliToolIdクエリパラメータ対応と、current-output APIのautoYesフィールドのエージェント毎対応の設計方針を明記。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "resource-cleanup.tsとsession-cleanup.tsを影響範囲の変更対象ファイル表に追加。実装タスクにも複合キー化に伴うクリーンアップ処理修正タスクを追加。ヘルパー関数（extractWorktreeId）の必要性も記載。"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "checkStopCondition()のonStopMatchedコールバックシグネチャ変更と、auto-yes-poller.ts L308の呼び出し元修正を実装タスクに追加。"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "既存実装の活用ポイントにsetAutoYesEnabled()へのcliToolId未渡しのギャップを明記。「このギャップの解消が本Issueの主要タスクの一つ」と補足。"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "バックエンドの変更セクションにMAX_CONCURRENT_POLLERS制限の見直し要否と複数ポーラー同時稼働時のリソース影響について記載。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "「スコープ外」セクションを新設し、DB永続化は本Issueのスコープ外であることを明記。複数エージェント同時制御での影響拡大可能性にも言及。"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "既存のAutoYesConfirmDialogが既にcliToolNameプロパティでエージェント名を表示しており、現時点で新規翻訳キーの必要性が明確でないため。実装時に必要と判明した場合に対応する。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 7,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/525"
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "issue_number": 525,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "principle": "SRP",
+        "title": "deleteAutoYesState の責務変更によるセキュリティバリデーション欠落リスク",
+        "description": "現行の deleteAutoYesState(worktreeId) は isValidWorktreeId() によるバリデーションを行っている。設計書では引数を compositeKey に変更するが、compositeKey は worktreeId:cliToolId 形式のため isValidWorktreeId() バリデーションが通らなくなる。バリデーション戦略の明記が必要。",
+        "recommendation": "deleteAutoYesState(compositeKey) において、extractWorktreeId() で抽出した worktreeId に対して isValidWorktreeId() を適用するか、compositeKey 全体に対する専用バリデーション関数を新設する。設計書 Section 4-1 に明記すべき。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "principle": "DRY",
+        "title": "byWorktree ヘルパーの重複実装リスク",
+        "description": "auto-yes-state.ts に getCompositeKeysByWorktree / deleteAutoYesStateByWorktree を追加し、auto-yes-poller.ts にも stopAutoYesPollingByWorktree / isAnyPollerActiveForWorktree / getLatestServerResponseTimestampForWorktree を追加する設計。byWorktree フィルタリングのパターン（keys().filter(extractWorktreeId match)）が両モジュールで重複する。",
+        "recommendation": "byWorktree フィルタリングのジェネリック関数を共有ユーティリティとして抽出するか、少なくとも auto-yes-state.ts の getCompositeKeysByWorktree を auto-yes-poller.ts から再利用する設計を明記する。"
+      },
+      {
+        "id": "SF-002",
+        "principle": "OCP",
+        "title": "compositeKey 形式のハードコーディング",
+        "description": "複合キー形式 worktreeId:cliToolId がヘルパー関数内に文字列操作としてハードコーディングされる。将来的にキー構成要素が追加された場合（例: セッションID）、build/extract の両関数と全てのフィルタリングロジックを修正する必要がある。",
+        "recommendation": "CompositeKey の構造を型レベルで定義し、SEPARATOR 定数を導入する。現状の設計でも問題ないが、将来の拡張性のために区切り文字を定数化することを推奨。YAGNI との兼ね合いで優先度は中程度。"
+      },
+      {
+        "id": "SF-003",
+        "principle": "SRP",
+        "title": "auto-yes-state.ts への複合キーヘルパー配置",
+        "description": "buildCompositeKey / extractWorktreeId / extractCliToolId は auto-yes-state.ts 以外のモジュール（poller, cleanup, resource-cleanup）からも使用されるユーティリティであり、状態管理モジュールの責務を超えている。",
+        "recommendation": "複合キーヘルパー関数群を独立した auto-yes-key.ts 等に分離することを検討する。ただし、現在のファイルサイズと利用箇所を考慮すると auto-yes-state.ts に置くのも実用的な判断。実装時に判断するレベルの指摘。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "principle": "KISS",
+        "title": "getAutoYesStateWorktreeIds の返り値セマンティクス変更",
+        "description": "関数名が getAutoYesStateWorktreeIds のまま返り値が複合キー配列に変化する。呼び出し元に意図しない誤用を招くリスクがある。",
+        "recommendation": "関数名を getAutoYesStateCompositeKeys() に変更するか、JSDoc に返り値が複合キーであることを明記する。同様に getAutoYesPollerWorktreeIds も名前変更を検討。"
+      },
+      {
+        "id": "C-002",
+        "principle": "YAGNI",
+        "title": "getLatestServerResponseTimestampForWorktree の必要性",
+        "description": "auto-yes-poller.ts に追加予定の getLatestServerResponseTimestampForWorktree は、全エージェント中の最新タイムスタンプを返す関数だが、現在の設計書で具体的な使用箇所が明示されていない。",
+        "recommendation": "実装時に実際に必要となるまで追加を遅延させることを検討。必要性が確認できた段階で追加する。"
+      },
+      {
+        "id": "C-003",
+        "principle": "KISS",
+        "title": "GET API の二重レスポンス形式",
+        "description": "GET /api/worktrees/:id/auto-yes が cliToolId 指定時は単一オブジェクト、省略時はマップ形式を返す二重レスポンス形式。クライアント側でレスポンス型の分岐処理が必要になる。",
+        "recommendation": "常にマップ形式で返却し、cliToolId 指定時は該当エージェントのみを含むマップを返す統一設計も検討に値する。ただし後方互換性の観点から現設計も妥当。"
+      },
+      {
+        "id": "C-004",
+        "principle": "DRY",
+        "title": "barrel ファイル (auto-yes-manager.ts) の更新コスト",
+        "description": "新規追加関数（buildCompositeKey, extractWorktreeId, byWorktree系ヘルパー等）が多数あり、barrel ファイルの re-export リストも対応して更新が必要。設計書に barrel 更新の言及がない。",
+        "recommendation": "Section 11 の実装順序に barrel ファイル更新のステップを追加する。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "medium",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-525-auto-yes-per-agent-design-policy.md",
+    "src/lib/auto-yes-state.ts",
+    "src/lib/auto-yes-poller.ts",
+    "src/lib/polling/auto-yes-manager.ts",
+    "src/config/auto-yes-config.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/resource-cleanup.ts"
+  ],
+  "timestamp": "2026-03-20T00:00:00Z"
+}

@@ -164,9 +164,9 @@ tests/
 | `src/lib/tui-accumulator.ts` | TUIアキュムレータ状態管理（Issue #479） |
 | `src/lib/detection/prompt-detector.ts` | プロンプト検出（2パス方式） |
 | `src/lib/detection/cli-patterns.ts` | CLIツール別パターン定義 |
-| `src/lib/polling/auto-yes-manager.ts` | Auto-Yes状態管理・バレルファイル（Issue #479） |
-| `src/lib/auto-yes-poller.ts` | Auto-Yesポーリングループ本体（Issue #479） |
-| `src/lib/auto-yes-state.ts` | Auto-Yes状態管理・DB永続化連携（Issue #479） |
+| `src/lib/polling/auto-yes-manager.ts` | Auto-Yes状態管理・バレルファイル・複合キーヘルパー（Issue #479, #525） |
+| `src/lib/auto-yes-poller.ts` | Auto-Yesポーリングループ本体・複合キー対応（Issue #479, #525） |
+| `src/lib/auto-yes-state.ts` | Auto-Yes状態管理・複合キーヘルパー（Issue #479, #525） |
 | `src/lib/polling/auto-yes-resolver.ts` | Auto-Yes自動応答判定 |
 | `src/config/auto-yes-config.ts` | Auto-Yes設定定数・バリデーション |
 | `src/config/html-extensions.ts` | HTML拡張子定義・判定関数・SandboxLevel型・SANDBOX_ATTRIBUTES（Issue #490） |

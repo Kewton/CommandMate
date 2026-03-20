@@ -1,0 +1,83 @@
+{
+  "issue_number": 525,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "stage": 7,
+  "review_date": "2026-03-20",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 2
+  },
+  "previous_review_reflection": {
+    "stage3_MF1_resolved": true,
+    "stage3_MF1_detail": "worktree-status-helper.tsが影響範囲の変更対象ファイルテーブルに追加済み。実装タスクにもgetLastServerResponseTimestamp()の複合キー対応修正が明記されている。",
+    "stage3_MF2_resolved": true,
+    "stage3_MF2_detail": "current-output/route.tsの実装タスクが拡充済み。isPollerActive()・getLastServerResponseTimestamp()のcliToolId指定呼び出し、serverPollerActive・lastServerResponseTimestampのエージェント毎返却が全て明記されている。",
+    "stage3_SF1_resolved": true,
+    "stage3_SF1_detail": "session-cleanup.tsの実装タスクに全エージェント分クリーンアップの具体的設計方針（stopAutoYesPollingByWorktree等の一括停止ヘルパー導入検討）が追記済み。",
+    "stage3_SF2_resolved": true,
+    "stage3_SF2_detail": "resource-cleanup.tsの実装タスクにextractWorktreeId()を用いた複合キー分解・DB比較の具体的手順が追記済み。",
+    "stage3_SF3_resolved": true,
+    "stage3_SF3_detail": "テストタスクに5件の既存テストファイル更新が追加済み（worktree-status-helper, auto-yes-persistence, auto-yes-manager-cleanup, session-cleanup-issue404, resource-cleanup）。",
+    "stage3_NTH1_resolved": true,
+    "stage3_NTH1_detail": "src/cli/types/api-responses.tsが関連コンポーネントに追加済み。型変更不要の方針も明記されている。",
+    "stage3_NTH2_partially_resolved": true,
+    "stage3_NTH2_detail": "auto-yes-poller.tsの実装タスクに全内部Map操作関数のキー統一が明記済み。ただしbuildCompositeKey()等のユーティリティ関数名は具体化されていない（auto-yes-state.tsのextractWorktreeId()との対になるbuild関数）。"
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "影響ファイル",
+        "issue": "auto-yes/route.ts POST handler（L160）でsetAutoYesEnabled(params.id, ...)を呼んでいるが、cliToolIdは別変数（L156）で取得しているにもかかわらずsetAutoYesEnabled()には渡していない。Issueの実装タスクには「POST enable時にsetAutoYesEnabled()へcliToolIdを渡すよう修正」と記載されているが、現在のsetAutoYesEnabled()のシグネチャ（worktreeId, enabled, duration?, stopPattern?）にcliToolIdパラメータが含まれていない。実装タスクの「setAutoYesEnabled()にcliToolIdパラメータを追加」タスクと「POST enable時にcliToolIdを渡す」タスクの実行順序の依存関係が暗黙的であり、明示的にすべき。",
+        "location": "## 実装タスク > バックエンド",
+        "recommendation": "auto-yes-state.tsの「setAutoYesEnabled()にcliToolIdパラメータ追加」タスクが先行依存であることを注記するか、タスクの実行順序を明示的にリストの並び順で示す。現状の並び順は正しい（auto-yes-state.tsが先）が、複数開発者が並行作業する場合の依存関係の明確化が望ましい。",
+        "evidence": "auto-yes/route.ts L156: const cliToolId = isValidCliTool(body.cliToolId) ? body.cliToolId : 'claude'; L160-165: setAutoYesEnabled(params.id, body.enabled, ...) - cliToolIdが渡されていない。auto-yes-state.ts L105-110: setAutoYesEnabled(worktreeId, enabled, duration?, stopPattern?) - cliToolIdパラメータなし。"
+      },
+      {
+        "id": "SF-2",
+        "category": "影響ファイル",
+        "issue": "auto-yes/route.ts GET handler（L82）でgetAutoYesState(params.id)をworktreeId単体で呼んでいる。Issueの実装タスクには「GET時にcliToolIdクエリパラメータ対応」と記載されているが、GET handlerのrequestパラメータが_request（アンダースコアプレフィックス＝未使用）となっており、クエリパラメータを取得するにはこの変更も必要。些細な点だが、レビュー時に見落としやすいポイントである。",
+        "location": "## 実装タスク > バックエンド > auto-yes/route.ts",
+        "recommendation": "auto-yes/route.ts GETの実装タスクに「_requestをrequestに変更し、URLからcliToolIdクエリパラメータを取得する」という具体的な修正点を追記すると実装者にとってわかりやすい。ただし、これは実装の詳細レベルであり、Issue記載としてはオプション。",
+        "evidence": "auto-yes/route.ts L74-75: export async function GET(_request: NextRequest, ...) - _request（未使用マーク）。cliToolIdクエリパラメータを取得するにはnew URL(_request.url).searchParams.get('cliToolId')が必要で、_requestのアンダースコアを外す変更が伴う。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "依存関係",
+        "issue": "複合キーの生成関数（buildCompositeKey等）と分解関数（extractWorktreeId）がauto-yes-state.tsに配置される想定だが、auto-yes-poller.tsの全Map操作関数も同じキー生成ロジックを使う必要がある。キー生成・分解のユーティリティ関数の配置場所（auto-yes-state.ts内か、独立ユーティリティか）と命名規則がIssueで明示されていない。実装者間のキーフォーマット不一致を防ぐために、具体的な関数シグネチャを記載するとよい。",
+        "location": "## 実装タスク > バックエンド > auto-yes-state.ts",
+        "recommendation": "例: buildCompositeKey(worktreeId: string, cliToolId: CLIToolType): string と extractWorktreeId(compositeKey: string): string をauto-yes-state.tsにエクスポート関数として定義し、auto-yes-poller.tsおよびresource-cleanup.tsから使用する設計を明記。セパレータは ':' でcliToolIdにコロンが含まれないことをCLI_TOOL_IDSの定義から保証。",
+        "evidence": "現在のIssueには extractWorktreeId(compositeKey) への言及はあるが、対になるbuild関数の名前・シグネチャ・配置場所が未記載。auto-yes-poller.ts内のL567: autoYesPollerStates.set(worktreeId, pollerState) を autoYesPollerStates.set(buildCompositeKey(worktreeId, cliToolId), pollerState) に変更する際、関数のインポート元が明確である必要がある。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "テスト範囲",
+        "issue": "auto-yes/route.ts自体のテストファイルがテストタスクに含まれていない。「単体テスト: API route のエージェント指定レスポンス」「単体テスト: API route POST disable時のcliToolId指定/未指定の分岐テスト」は記載されているが、具体的なテストファイルパスが示されていない。他のテスト項目は具体的なファイルパスが記載されており、粒度が不統一。",
+        "location": "## 実装タスク > テスト",
+        "recommendation": "API routeテストのファイルパスを明記。例: tests/unit/api/auto-yes-route.test.ts または既存のテストファイルがあればそのパスを記載。",
+        "evidence": "テストタスクの後半5件は具体的ファイルパス付き（例: tests/unit/lib/worktree-status-helper.test.ts）だが、前半5件はファイルパスなし。実装者がテストファイルの新規作成か既存更新かを判断する材料として、パスの明記が望ましい。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/auto-yes/route.ts",
+      "relevance": "L160: setAutoYesEnabled()へのcliToolId未渡し（実装タスクの先行依存関係）。L74: GET handlerの_request未使用パラメータ（クエリパラメータ取得のために変更が必要）。"
+    },
+    {
+      "file": "src/lib/auto-yes-state.ts",
+      "relevance": "L105: setAutoYesEnabled()のシグネチャにcliToolIdがない。extractWorktreeId()とbuildCompositeKey()の配置先。"
+    },
+    {
+      "file": "src/lib/auto-yes-poller.ts",
+      "relevance": "L567: autoYesPollerStates.set()のキー生成。buildCompositeKey()の使用箇所。"
+    }
+  ],
+  "doc_references": [],
+  "overall_assessment": "Stage 3の影響範囲レビューで指摘した全6件（MF-1, MF-2, SF-1, SF-2, SF-3, NTH-1）が適切にIssue本文に反映されている。worktree-status-helper.ts、current-output/route.ts、session-cleanup.ts、resource-cleanup.tsの影響範囲追加、テストファイル5件の追加が確認できた。Stage 5-6の通常レビュー2回目でcurrent-output APIのレスポンス設計方針も確定し、後方互換性の懸念も解消されている。残存する指摘はShould Fix 2件（タスク間の依存関係の明示化、GETハンドラの実装詳細）とNice to Have 2件（キー生成ユーティリティの具体化、テストファイルパスの統一）であり、いずれも実装に支障をきたすレベルではない。Issueの影響範囲分析は十分に網羅的であると評価する。"
+}

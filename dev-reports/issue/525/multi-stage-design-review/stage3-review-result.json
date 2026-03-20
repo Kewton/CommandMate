@@ -1,0 +1,135 @@
+{
+  "issue_number": 525,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "IA-MF-001",
+        "title": "incrementErrorCount内のdisableAutoYes/stopAutoYesPolling呼び出しのcompositeKey未対応",
+        "description": "auto-yes-poller.ts L187-188 の incrementErrorCount() 内で disableAutoYes(worktreeId, 'consecutive_errors') および stopAutoYesPolling(worktreeId) が呼ばれている。compositeKey化後はこれらの引数も compositeKey ベースに変更する必要があるが、設計方針書にこの箇所の変更が明記されていない。processStopConditionDelta は CS-MF-002 で言及されているが、incrementErrorCount は言及がない。",
+        "affected_file": "src/lib/auto-yes-poller.ts",
+        "risk": "high",
+        "recommendation": "設計方針書 Section 4-2 に incrementErrorCount の引数変更（worktreeId -> compositeKey）を追記し、内部の disableAutoYes / stopAutoYesPolling 呼び出しも compositeKey 分解パターンに対応させる記述を追加すること"
+      },
+      {
+        "id": "IA-MF-002",
+        "title": "auto-yes-poller.ts 内部関数群のキー変更の網羅的記述不足",
+        "description": "pollAutoYes, scheduleNextPoll, validatePollingContext, captureAndCleanOutput, detectAndRespondToPrompt, updateLastServerResponseTimestamp, resetErrorCount, incrementErrorCount, getPollerState, isDuplicatePrompt の全てが現在 worktreeId をキーとしてpollerStatesを操作している。設計方針書では公開APIの変更は記述されているが、これら内部関数の worktreeId 引数を compositeKey に変更する影響が包括的に記述されていない。特に pollAutoYes と scheduleNextPoll が worktreeId と cliToolId を別引数で受け取る現行構造の変更方針が不明確。",
+        "affected_file": "src/lib/auto-yes-poller.ts",
+        "risk": "high",
+        "recommendation": "内部関数の引数変更方針を明示すること。推奨: pollAutoYes/scheduleNextPoll は引き続き (worktreeId, cliToolId) を受け取り内部で buildCompositeKey する方式が自然。getPollerState/updateLastServerResponseTimestamp/resetErrorCount/incrementErrorCount は compositeKey を直接受け取る方式に統一する"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IA-SF-001",
+        "title": "current-output/route.ts の getAutoYesState 呼び出しが worktreeId のみで cliToolId なし",
+        "description": "設計方針書 Section 4-3 で current-output/route.ts の compositeKey 対応は記述されているが、L116 の getAutoYesState(params.id) 呼び出しについて cliToolId を追加する変更指示が明示されていない。isPollerActive と getLastServerResponseTimestamp は compositeKey 化の記載があるが、getAutoYesState の呼び出し修正が抜けている。",
+        "affected_file": "src/app/api/worktrees/[id]/current-output/route.ts",
+        "risk": "medium",
+        "recommendation": "Section 4-3 の current-output コード例に getAutoYesState(params.id, cliTool) の変更を明示的に含めること"
+      },
+      {
+        "id": "IA-SF-002",
+        "title": "auto-yes/route.ts GET の cliToolId 対応が設計書と現行実装で乖離",
+        "description": "設計方針書では GET で request.nextUrl.searchParams.get('cliToolId') を読む設計だが、現行実装では GET の第1引数が _request（未使用）となっている。設計書には _request -> request への変更が記載されているが、auto-yes/route.ts GET で cliToolId パラメータを受け取る変更の影響として、フロントエンド側（useAutoYes または WorktreeDetailRefactored）から GET リクエスト時に cliToolId クエリパラメータを付与する必要がある点が波及影響として記載されていない。",
+        "affected_file": "src/app/api/worktrees/[id]/auto-yes/route.ts",
+        "risk": "medium",
+        "recommendation": "GET API の cliToolId パラメータ追加に伴うフロントエンド側の呼び出し変更箇所を影響範囲として明記すること。現在 auto-yes/route.ts GET を呼び出しているフロントエンドコンポーネントの特定と変更方針を追記"
+      },
+      {
+        "id": "IA-SF-003",
+        "title": "CLI send コマンドの auto-yes 連携における影響未記載",
+        "description": "src/cli/commands/send.ts の --auto-yes オプションは auto-yes API の POST を呼び出す際に body.cliToolId を設定している。API側の setAutoYesEnabled シグネチャ変更に伴い、API内部で cliToolId を第2引数として渡す変更が必要だが、CLI側からのリクエストボディは変更不要であることの確認が設計方針書に明記されていない。後方互換性 Section 6 で CLI auto-yes --agent は言及されているが、send --auto-yes の互換性確認が欠落している。",
+        "affected_file": "src/cli/commands/send.ts",
+        "risk": "low",
+        "recommendation": "Section 6 の後方互換性表に send --auto-yes コマンドの互換性確認を追記"
+      },
+      {
+        "id": "IA-SF-004",
+        "title": "テスト戦略で auto-yes-poller.ts の内部関数テスト更新が不足",
+        "description": "設計方針書 Section 10 の既存テスト更新リストに tests/unit/lib/auto-yes-manager.test.ts が含まれていない。このファイルには validatePollingContext, captureAndCleanOutput, processStopConditionDelta, detectAndRespondToPrompt のテストが含まれており、compositeKey 化で全て影響を受ける。",
+        "affected_file": "tests/unit/lib/auto-yes-manager.test.ts",
+        "risk": "medium",
+        "recommendation": "Section 10 の既存テスト更新リストに tests/unit/lib/auto-yes-manager.test.ts を追加すること"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IA-C-001",
+        "title": "WorktreeDetailRefactored.tsx の autoYes 状態管理がアクティブタブと連動する場合の表示整合性",
+        "description": "設計方針書ではアクティブタブの cliToolId に紐づく auto-yes 状態を表示する設計だが、非アクティブタブでの auto-yes 有効/無効状態の視覚的フィードバック（例: タブにインジケータ表示）については言及がない。ユーザーがタブを切り替えないと他エージェントの auto-yes 状態を確認できない。",
+        "affected_file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "risk": "low",
+        "recommendation": "UX検討事項として記録。将来的にタブにauto-yes状態バッジを表示する拡張を検討"
+      },
+      {
+        "id": "IA-C-002",
+        "title": "stopAllAutoYesPolling のcompositeKey対応",
+        "description": "auto-yes-poller.ts の stopAllAutoYesPolling() は全エントリをイテレートして停止するため、キーが compositeKey に変わっても動作自体は変わらないが、ログ出力で worktreeId として compositeKey が表示される。設計方針書にこの関数の変更要否が明記されていない。",
+        "affected_file": "src/lib/auto-yes-poller.ts",
+        "risk": "low",
+        "recommendation": "ログ出力の可読性のため、stopAllAutoYesPolling のログで extractWorktreeId を使って worktreeId を表示するか検討"
+      },
+      {
+        "id": "IA-C-003",
+        "title": "getActivePollerCount() のセマンティクス変更",
+        "description": "現行の getActivePollerCount() は autoYesPollerStates.size を返す。compositeKey 化後は同一 worktree に複数エントリが存在しうるため、この値の意味が 'worktree数' から 'agent単位のポーラー数' に変わる。MAX_CONCURRENT_POLLERS との比較に使われているため意図通りだが、呼び出し側が 'worktree数' として解釈している箇所がないか確認が必要。",
+        "affected_file": "src/lib/auto-yes-poller.ts",
+        "risk": "low",
+        "recommendation": "getActivePollerCount() の JSDoc を更新し、返り値がエージェント単位のポーラー数であることを明記"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "impact_analysis": {
+    "direct_changes": [
+      "src/lib/auto-yes-state.ts",
+      "src/lib/auto-yes-poller.ts",
+      "src/lib/polling/auto-yes-manager.ts",
+      "src/app/api/worktrees/[id]/auto-yes/route.ts",
+      "src/app/api/worktrees/[id]/current-output/route.ts",
+      "src/lib/session-cleanup.ts",
+      "src/lib/resource-cleanup.ts",
+      "src/lib/session/worktree-status-helper.ts",
+      "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "src/hooks/useAutoYes.ts"
+    ],
+    "indirect_impacts": [
+      "src/cli/commands/auto-yes.ts",
+      "src/cli/commands/send.ts"
+    ],
+    "test_files_requiring_update": [
+      "tests/unit/lib/auto-yes-manager.test.ts",
+      "tests/unit/auto-yes-manager-cleanup.test.ts",
+      "tests/unit/session-cleanup-issue404.test.ts",
+      "tests/unit/resource-cleanup.test.ts",
+      "tests/unit/lib/worktree-status-helper.test.ts",
+      "tests/integration/auto-yes-persistence.test.ts"
+    ]
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-525-auto-yes-per-agent-design-policy.md",
+    "src/lib/auto-yes-state.ts",
+    "src/lib/auto-yes-poller.ts",
+    "src/lib/polling/auto-yes-manager.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/resource-cleanup.ts",
+    "src/lib/session/worktree-status-helper.ts",
+    "src/hooks/useAutoYes.ts",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/cli/commands/auto-yes.ts",
+    "src/cli/commands/send.ts"
+  ],
+  "timestamp": "2026-03-20T12:50:00Z"
+}

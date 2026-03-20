@@ -1,0 +1,66 @@
+{
+  "issue_number": 525,
+  "iteration": 2,
+  "stage": 6,
+  "apply_date": "2026-03-20",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "current-output APIのautoYesレスポンス形式をcliToolクエリパラメータ絞り込み方式に一本化。API設計方針セクションからマップ形式の選択肢を削除し、単一オブジェクト形式を維持する方針を明記。実装タスク・影響範囲テーブル・関連コンポーネント（api-responses.ts）の記述も型変更不要に統一"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "auto-yes/route.ts POST disable時のstopAutoYesPolling()複合キー対応タスクを追加。API設計方針セクションにPOST disable時の分岐ロジック（cliToolId指定時は該当エージェントのみ停止、未指定時は全エージェント一括停止）を明記。実装タスク・影響範囲テーブル・テストタスクにも反映"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "受入条件の検証手順詳細化は実装時のテスト設計で対応可能なレベルのため、今回はスキップ"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "incrementErrorCount()は既にSF-2およびバックエンド実装タスクの全内部Map操作関数統一タスクに包含されているが、NTH-2の指摘に基づき独立したサブタスク・テストタスクとして明示的に追加済み（SF-2対応の一環として反映）"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 4,
+    "applied": 2,
+    "skipped": 2
+  },
+  "changes_detail": {
+    "api_design_section": [
+      "current-output APIの記述をcliToolパラメータ絞り込み方式に一本化（マップ形式の選択肢を削除）",
+      "POST disable時の分岐ロジックを新規追加"
+    ],
+    "implementation_tasks": [
+      "auto-yes-poller.ts: incrementErrorCount()内のdisableAutoYes/stopAutoYesPolling複合キー対応タスクを追加",
+      "auto-yes/route.ts: POST enable時とPOST disable時を分離して記述。disable時のcliToolId指定/未指定の分岐を明記",
+      "current-output/route.ts: autoYesレスポンスタスクの記述を単一オブジェクト形式維持に更新"
+    ],
+    "test_tasks": [
+      "incrementErrorCount()複合キー対応のテストタスクを追加",
+      "POST disable時のcliToolId指定/未指定の分岐テストを追加"
+    ],
+    "impact_scope": [
+      "auto-yes-poller.ts: incrementErrorCount()内の自動停止パス修正を追記",
+      "auto-yes/route.ts: POST disable時stopAutoYesPolling複合キー対応を追記",
+      "current-output/route.ts: 型変更なしを明記",
+      "api-responses.ts: 型変更不要に注記を更新"
+    ],
+    "review_history": [
+      "Stage 5-6セクションを追加（SF-1, SF-2の反映内容を記載）"
+    ]
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/525"
+  }
+}

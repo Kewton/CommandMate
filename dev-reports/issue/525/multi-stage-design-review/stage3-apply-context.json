@@ -1,0 +1,7 @@
+{
+  "issue_number": 525,
+  "review_result_path": "dev-reports/issue/525/multi-stage-design-review/stage3-review-result.json",
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘事項対応",
+  "target_doc": "dev-reports/design/issue-525-auto-yes-per-agent-design-policy.md"
+}

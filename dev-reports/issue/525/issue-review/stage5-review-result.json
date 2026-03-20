@@ -1,0 +1,89 @@
+{
+  "issue_number": 525,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "review_date": "2026-03-20",
+  "previous_review_reflection": {
+    "stage1_must_fix": {
+      "MF-1": "RESOLVED - 背景説明を非対称設計の記述に修正済み",
+      "MF-2": "RESOLVED - API設計方針セクションを追加し、GET/current-output両方の設計を明記"
+    },
+    "stage1_should_fix": {
+      "SF-1": "RESOLVED - resource-cleanup.ts/session-cleanup.tsを影響範囲に追加済み",
+      "SF-2": "RESOLVED - checkStopCondition()コールバック変更を実装タスクに追加済み",
+      "SF-3": "RESOLVED - 既存実装の活用ポイントにAPIとsetAutoYesEnabled()のギャップを明記済み",
+      "SF-4": "RESOLVED - MAX_CONCURRENT_POLLERS制限のリソース影響を記載済み"
+    },
+    "stage1_nice_to_have": {
+      "NTH-1": "RESOLVED - スコープ外セクションでDB永続化について言及済み",
+      "NTH-2": "NOT_ADDRESSED - i18n変更への言及なし（軽微のため許容範囲）"
+    }
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "明確性",
+        "issue": "current-output APIのautoYesレスポンス形式変更について、2つの選択肢（マップ形式 vs cliToolIdパラメータで絞り込み）が併記されているが、どちらを採用するか決定されていない。方式によってCLI側（capture --json出力）の後方互換性への影響が異なる。マップ形式に変更するとCurrentOutputResponse.autoYesの型が破壊的変更になり、cliToolIdパラメータ絞り込み方式なら後方互換を維持できる。",
+        "location": "## 提案する解決策 > API設計方針 > current-output",
+        "recommendation": "cliToolIdクエリパラメータで該当エージェントの状態のみを返却する方式を推奨。この方式であればautoYesフィールドの形状は現行と同じ（単一オブジェクト）を維持でき、CLI capture --jsonの後方互換性を保てる。方針を1つに絞って明記することを推奨。",
+        "evidence": "src/cli/types/api-responses.ts L45-49: CurrentOutputResponse.autoYesは{ enabled, expiresAt, stopReason }の単一オブジェクト。src/cli/commands/capture.ts L17-21: formatJson()でautoYesを含むレスポンスをそのままJSON出力。current-output APIは既にcliToolクエリパラメータを受け取っており（route.ts L49-50）、autoYes状態もcliToolに連動させるのが自然。"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "auto-yes/route.ts POST時にstopAutoYesPolling(params.id)を呼んでいる箇所（L176）も複合キー化の影響を受ける。disabled時に正しいポーラーを停止するためにcliToolIdが必要だが、このdisableパスでのcliToolId解決ロジックが実装タスクに記載されていない。現在はbody.cliToolIdがdisable時にも利用可能だが、明示的に記載すべき。",
+        "location": "## 実装タスク > バックエンド > auto-yes/route.ts",
+        "recommendation": "POST disable時のstopAutoYesPolling()呼び出しを複合キー対応に修正するタスクを追加。具体的には: (1) body.cliToolIdが指定されている場合は該当エージェントのポーラーのみ停止、(2) 未指定時はworktreeIdプレフィックスで全エージェントのポーラーを停止。",
+        "evidence": "auto-yes/route.ts L175-177: else { stopAutoYesPolling(params.id); } -- 現行コードはworktreeId単体でstopAutoYesPollingを呼んでいる。複合キー化後はcliToolIdを含めた複合キーが必要。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "受入条件「UIからの設定変更がCLIのcommandmate capture --jsonのautoYesフィールドに反映される」は、current-output APIのautoYesレスポンス形式が変わった場合にCLI側の型定義更新が必要。関連コンポーネントにapi-responses.tsの注記はあるが、受入条件の検証手順としてCLI側の動作確認も明記するとテスト漏れを防げる。",
+        "location": "## 受入条件",
+        "recommendation": "受入条件に「capture --json出力のautoYesフィールドが要求したcliToolIdのエージェントの状態を正しく返すこと」と具体的なCLI側検証を追記。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "auto-yes-poller.ts内のincrementErrorCount()（L187-188）がdisableAutoYes(worktreeId)とstopAutoYesPolling(worktreeId)を呼んでいる。実装タスクの「全内部Map操作関数のキーを複合キーに統一」に包含されるが、エラー時の自動停止という重要な動作パスなので明示的に言及があると実装ミスを防げる。",
+        "location": "## 実装タスク > バックエンド > auto-yes-poller.ts",
+        "recommendation": "incrementErrorCount()内のdisableAutoYes/stopAutoYesPolling呼び出しの複合キー対応を明示的なサブタスクとして追記。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/auto-yes/route.ts",
+      "relevance": "L175-177: POST disable時のstopAutoYesPolling(params.id)が複合キー対応の明示的記載なし"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "relevance": "L49-50: 既にcliToolクエリパラメータを受け取っている。L139-143: autoYesフィールドは単一オブジェクト形式。"
+    },
+    {
+      "file": "src/cli/types/api-responses.ts",
+      "relevance": "L45-49: CurrentOutputResponse.autoYesの型定義。レスポンス形式変更で後方互換性に影響。"
+    },
+    {
+      "file": "src/cli/commands/capture.ts",
+      "relevance": "L17-21: formatJson()がautoYesフィールドをそのまま出力。形式変更の影響を受ける。"
+    },
+    {
+      "file": "src/lib/auto-yes-poller.ts",
+      "relevance": "L187-188: incrementErrorCount()内のdisableAutoYes/stopAutoYesPolling呼び出し"
+    }
+  ],
+  "doc_references": [],
+  "overall_assessment": "Stage 1の指摘事項（Must Fix 2件、Should Fix 4件）は全て適切に反映されており、Issue内容は大幅に改善されている。残存する指摘はShould Fix 2件（API設計方針の曖昧さ、disable時のポーラー停止タスク欠落）とNice to Have 2件で、いずれも実装時の詳細設計で解決可能なレベル。Must Fix該当はゼロのため、Issue内容は実装着手可能な品質に達している。"
+}
