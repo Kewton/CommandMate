@@ -196,8 +196,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const [editorFilePath, setEditorFilePath] = useState<string | null>(null);
   // Issue #104: Track editor maximized state to disable Modal close handlers
   const [isEditorMaximized, setIsEditorMaximized] = useState(false);
-  const [autoYesEnabled, setAutoYesEnabled] = useState(false);
-  const [autoYesExpiresAt, setAutoYesExpiresAt] = useState<number | null>(null);
+  // Issue #525: Per-agent auto-yes state management
+  const [autoYesStateMap, setAutoYesStateMap] = useState<Map<string, { enabled: boolean; expiresAt: number | null }>>(new Map());
   // Issue #501: Track last server-side auto-yes response timestamp for duplicate prevention
   const [lastServerResponseTimestamp, setLastServerResponseTimestamp] = useState<number | null>(null);
   // Issue #501: Track whether server-side auto-yes poller is active
@@ -238,6 +238,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Issue #4: Ref to avoid polling callback recreation on tab switch
   const activeCliTabRef = useRef<CLIToolType>(activeCliTab);
   activeCliTabRef.current = activeCliTab;
+  // Issue #525: Derive active agent's auto-yes state from per-agent map
+  const autoYesEnabled = autoYesStateMap.get(activeCliTab)?.enabled ?? false;
+  const autoYesExpiresAt = autoYesStateMap.get(activeCliTab)?.expiresAt ?? null;
   // Trigger to refresh FileTreeView after file operations
   const [fileTreeRefresh, setFileTreeRefresh] = useState(0);
 
@@ -393,12 +396,17 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       setLastServerResponseTimestamp(data.lastServerResponseTimestamp ?? null);
       setServerPollerActive(data.serverPollerActive ?? false);
 
-      // Update auto-yes state from server (Issue #314: stopReason tracking)
+      // Update auto-yes state from server (Issue #314: stopReason tracking, Issue #525: per-agent)
       if (data.autoYes) {
+        const currentCliTool = activeCliTabRef.current;
         const wasEnabled = prevAutoYesEnabledRef.current;
-        setAutoYesEnabled(data.autoYes.enabled);
-        setAutoYesExpiresAt(data.autoYes.expiresAt);
-        prevAutoYesEnabledRef.current = data.autoYes.enabled;
+        const autoYes = data.autoYes;
+        setAutoYesStateMap(prev => {
+          const next = new Map(prev);
+          next.set(currentCliTool, { enabled: autoYes.enabled, expiresAt: autoYes.expiresAt });
+          return next;
+        });
+        prevAutoYesEnabledRef.current = autoYes.enabled;
 
         // Issue #314 / #499 Item 5: Detect stop condition match or consecutive error (enabled -> disabled transition)
         if (wasEnabled && !data.autoYes.enabled &&
@@ -652,8 +660,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       });
       if (response.ok) {
         const data = await response.json();
-        setAutoYesEnabled(data.enabled);
-        setAutoYesExpiresAt(data.expiresAt);
+        // Issue #525: Store per-agent state
+        setAutoYesStateMap(prev => {
+          const next = new Map(prev);
+          next.set(activeCliTab, { enabled: data.enabled, expiresAt: data.expiresAt });
+          return next;
+        });
         prevAutoYesEnabledRef.current = data.enabled;
       }
     } catch (err) {
