@@ -166,11 +166,15 @@ export const worktreeApi = {
 
   /**
    * Get messages for a worktree, optionally filtered by CLI tool
+   * Issue #168: Added includeArchived parameter for session history retention
    */
-  async getMessages(id: string, cliTool?: CLIToolType): Promise<ChatMessage[]> {
+  async getMessages(id: string, cliTool?: CLIToolType, includeArchived?: boolean): Promise<ChatMessage[]> {
     const params = new URLSearchParams();
     if (cliTool) {
       params.append('cliTool', cliTool);
+    }
+    if (includeArchived) {
+      params.append('includeArchived', 'true');
     }
     const url = `/api/worktrees/${id}/messages${params.toString() ? `?${params.toString()}` : ''}`;
     return fetchApi<ChatMessage[]>(url);

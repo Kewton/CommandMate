@@ -295,6 +295,8 @@ describe('Database Operations', () => {
         expect(messages[0].content).toBe('Third'); // Most recent first
         expect(messages[1].content).toBe('Second');
         expect(messages[2].content).toBe('First');
+        // Issue #168: Verify archived field is present
+        expect(messages[0].archived).toBe(false);
       });
 
       it('should support pagination with before parameter', () => {
@@ -327,7 +329,7 @@ describe('Database Operations', () => {
         });
 
         // Get messages before time3
-        const messages = getMessages(testDb, 'main', time3);
+        const messages = getMessages(testDb, 'main', { before: time3 });
 
         expect(messages).toHaveLength(2);
         expect(messages[0].content).toBe('Second');
@@ -345,7 +347,7 @@ describe('Database Operations', () => {
           });
         }
 
-        const messages = getMessages(testDb, 'main', undefined, 5);
+        const messages = getMessages(testDb, 'main', { limit: 5 });
 
         expect(messages).toHaveLength(5);
       });

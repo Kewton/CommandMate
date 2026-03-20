@@ -42,6 +42,7 @@ export function initDatabase(db: Database.Database): void {
       message_type TEXT DEFAULT 'normal',
       prompt_data TEXT,
       cli_tool_id TEXT DEFAULT 'claude',
+      archived INTEGER DEFAULT 0,
 
       FOREIGN KEY (worktree_id) REFERENCES worktrees(id) ON DELETE CASCADE
     );
@@ -66,6 +67,11 @@ export function initDatabase(db: Database.Database): void {
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_messages_cli_tool
     ON chat_messages(worktree_id, cli_tool_id, timestamp DESC);
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_messages_archived
+    ON chat_messages(worktree_id, archived, timestamp DESC);
   `);
 
   // Create session_states table

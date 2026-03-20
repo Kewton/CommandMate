@@ -13,6 +13,17 @@ import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('chat-db');
 
+/** Active (non-archived) message filter clause. Single point of change for archived filtering. */
+export const ACTIVE_FILTER = 'AND archived = 0';
+
+/** Options for getMessages query */
+export interface GetMessagesOptions {
+  before?: Date;
+  limit?: number;
+  cliToolId?: CLIToolType;
+  includeArchived?: boolean;
+}
+
 type ChatMessageRow = {
   id: string;
   worktree_id: string;
@@ -25,6 +36,7 @@ type ChatMessageRow = {
   message_type: string | null;
   prompt_data: string | null;
   cli_tool_id: string | null;
+  archived: number;
 };
 
 function mapChatMessage(row: ChatMessageRow): ChatMessage {
@@ -40,6 +52,7 @@ function mapChatMessage(row: ChatMessageRow): ChatMessage {
     messageType: (row.message_type as 'normal' | 'prompt') || 'normal',
     promptData: row.prompt_data ? JSON.parse(row.prompt_data) : undefined,
     cliToolId: (row.cli_tool_id as CLIToolType | null) ?? 'claude',
+    archived: row.archived === 1,
   };
 }
 
@@ -72,7 +85,7 @@ export function getLastAssistantMessageAt(
   const stmt = db.prepare(`
     SELECT MAX(timestamp) as last_assistant_message_at
     FROM chat_messages
-    WHERE worktree_id = ? AND role = 'assistant'
+    WHERE worktree_id = ? AND role = 'assistant' ${ACTIVE_FILTER}
   `);
 
   const row = stmt.get(worktreeId) as { last_assistant_message_at: number | null } | undefined;
@@ -89,7 +102,7 @@ export function getLastAssistantMessageAt(
  */
 export function createMessage(
   db: Database.Database,
-  message: Omit<ChatMessage, 'id'>
+  message: Omit<ChatMessage, 'id' | 'archived'>
 ): ChatMessage {
   const id = randomUUID();
 
@@ -121,7 +134,7 @@ export function createMessage(
     updateLastUserMessage(db, message.worktreeId, message.content, message.timestamp);
   }
 
-  return { id, ...message };
+  return { id, ...message, archived: false };
 }
 
 /**
@@ -172,17 +185,22 @@ export function updateMessageContent(
 export function getMessages(
   db: Database.Database,
   worktreeId: string,
-  before?: Date,
-  limit: number = 50,
-  cliToolId?: CLIToolType
+  options: GetMessagesOptions = {}
 ): ChatMessage[] {
+  const { before, limit = 50, cliToolId, includeArchived = false } = options;
+
   let query = `
-    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, archived
     FROM chat_messages
     WHERE worktree_id = ? AND (? IS NULL OR timestamp < ?)
   `;
 
   const params: (string | number | null)[] = [worktreeId, before?.getTime() || null, before?.getTime() || null];
+
+  // archived filter (default: non-archived only)
+  if (!includeArchived) {
+    query += ` ${ACTIVE_FILTER}`;
+  }
 
   // Add CLI tool filter if specified
   if (cliToolId) {
@@ -207,9 +225,9 @@ export function getLastUserMessage(
   worktreeId: string
 ): ChatMessage | null {
   const stmt = db.prepare(`
-    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, archived
     FROM chat_messages
-    WHERE worktree_id = ? AND role = 'user'
+    WHERE worktree_id = ? AND role = 'user' ${ACTIVE_FILTER}
     ORDER BY timestamp DESC
     LIMIT 1
   `);
@@ -228,9 +246,9 @@ export function getLastMessage(
   worktreeId: string
 ): ChatMessage | null {
   const stmt = db.prepare(`
-    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, archived
     FROM chat_messages
-    WHERE worktree_id = ?
+    WHERE worktree_id = ? ${ACTIVE_FILTER}
     ORDER BY timestamp DESC
     LIMIT 1
   `);
@@ -241,21 +259,28 @@ export function getLastMessage(
 }
 
 /**
- * Delete all messages for a worktree
- * Used when killing a session to clear message history
+ * Archive all active messages for a worktree (logical deletion)
+ * Used when killing a session to clear message history while retaining for future viewing.
  * Note: Log files are preserved for historical reference
+ *
+ * Issue #168: Changed from physical DELETE to logical UPDATE (archived=1)
+ * Function name maintained for backward compatibility (DR1-003)
+ *
+ * @returns Number of archived messages
  */
 export function deleteAllMessages(
   db: Database.Database,
   worktreeId: string
-): void {
+): number {
   const stmt = db.prepare(`
-    DELETE FROM chat_messages
-    WHERE worktree_id = ?
+    UPDATE chat_messages
+    SET archived = 1
+    WHERE worktree_id = ? ${ACTIVE_FILTER}
   `);
 
-  stmt.run(worktreeId);
-  logger.info('deleted-all-messages', { worktreeId });
+  const result = stmt.run(worktreeId);
+  logger.info('archived-all-messages', { worktreeId, count: result.changes });
+  return result.changes;
 }
 
 /**
@@ -281,17 +306,19 @@ export function deleteMessageById(
 }
 
 /**
- * Delete messages for a specific CLI tool in a worktree
+ * Archive messages for a specific CLI tool in a worktree (logical deletion)
  * Issue #4: T4.2 - Individual CLI tool session termination (MF3-001)
+ * Issue #168: Changed from physical DELETE to logical UPDATE (archived=1)
  *
- * Used when killing only a specific CLI tool's session to clear its message history
+ * Used when killing only a specific CLI tool's session to archive its message history
  * while preserving messages from other CLI tools.
  * Note: Log files are preserved for historical reference
+ * Function name maintained for backward compatibility (DR1-003)
  *
  * @param db - Database instance
  * @param worktreeId - Worktree ID
- * @param cliTool - CLI tool ID to delete messages for
- * @returns Number of deleted messages
+ * @param cliTool - CLI tool ID to archive messages for
+ * @returns Number of archived messages
  */
 export function deleteMessagesByCliTool(
   db: Database.Database,
@@ -299,12 +326,13 @@ export function deleteMessagesByCliTool(
   cliTool: CLIToolType
 ): number {
   const stmt = db.prepare(`
-    DELETE FROM chat_messages
-    WHERE worktree_id = ? AND cli_tool_id = ?
+    UPDATE chat_messages
+    SET archived = 1
+    WHERE worktree_id = ? AND cli_tool_id = ? ${ACTIVE_FILTER}
   `);
 
   const result = stmt.run(worktreeId, cliTool);
-  logger.info('deleted-messages-by-cli-tool', { worktreeId, cliTool, count: result.changes });
+  logger.info('archived-messages-by-cli-tool', { worktreeId, cliTool, count: result.changes });
   return result.changes;
 }
 
@@ -330,6 +358,24 @@ export function updateLastUserMessage(
 }
 
 /**
+ * Clear worktree's last user message fields
+ * Issue #168: Called after archiving messages to prevent stale data in sidebar
+ */
+export function clearLastUserMessage(
+  db: Database.Database,
+  worktreeId: string
+): void {
+  const stmt = db.prepare(`
+    UPDATE worktrees
+    SET last_user_message = NULL,
+        last_user_message_at = NULL
+    WHERE id = ?
+  `);
+
+  stmt.run(worktreeId);
+}
+
+/**
  * Get message by ID
  */
 export function getMessageById(
@@ -337,7 +383,7 @@ export function getMessageById(
   messageId: string
 ): ChatMessage | null {
   const stmt = db.prepare(`
-    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, archived
     FROM chat_messages
     WHERE id = ?
   `);
@@ -386,6 +432,7 @@ export function markPendingPromptsAsAnswered(
       AND cli_tool_id = ?
       AND message_type = 'prompt'
       AND json_extract(prompt_data, '$.status') = 'pending'
+      ${ACTIVE_FILTER}
     ORDER BY timestamp DESC
   `);
 

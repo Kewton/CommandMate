@@ -350,7 +350,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
 
       expect(response.status).toBe(500);
 
-      const messages = getMessages(db, 'test-send-failure', undefined, 10, 'codex');
+      const messages = getMessages(db, 'test-send-failure', { limit: 10, cliToolId: 'codex' });
       expect(messages).toHaveLength(1);
       expect(messages[0].id).toBe(originalMessage.id);
       expect(messages[0].content).toBe('Retry me');

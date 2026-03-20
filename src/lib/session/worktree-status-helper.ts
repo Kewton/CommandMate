@@ -99,7 +99,7 @@ export async function detectWorktreeSessionStatus(
 
           // Clean up stale pending prompts if no prompt is showing
           if (!statusResult.hasActivePrompt) {
-            const messages = getMessages(db, worktreeId, undefined, 10, cliToolId);
+            const messages = getMessages(db, worktreeId, { limit: 10, cliToolId });
             const hasPendingPrompt = messages.some(
               msg => msg.messageType === 'prompt' && msg.promptData?.status !== 'answered'
             );

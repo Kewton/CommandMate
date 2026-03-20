@@ -201,6 +201,8 @@ export interface ChatMessage {
   promptData?: PromptData;
   /** CLI tool type (claude, codex, gemini, vibe-local) - defaults to 'claude' */
   cliToolId?: CLIToolType;
+  /** Whether this message is archived (from a previous session) */
+  archived: boolean;
 }
 
 /**
