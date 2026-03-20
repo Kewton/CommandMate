@@ -37,7 +37,6 @@ import { setupWebSocket, closeWebSocket } from './src/lib/ws-server';
 import {
   getRepositoryPaths,
   scanMultipleRepositories,
-  syncWorktreesToDB
 } from './src/lib/git/worktrees';
 import { getDbInstance } from './src/lib/db-instance';
 import { stopAllPolling } from './src/lib/polling/response-poller';
@@ -48,6 +47,7 @@ import { runMigrations } from './src/lib/db-migrations';
 import { getEnvByKey } from './src/lib/env';
 import { registerAndFilterRepositories, resolveRepositoryPath, getAllRepositories } from './src/lib/db-repository';
 import { getWorktreeIdsByRepository, deleteWorktreesByIds } from './src/lib/db';
+import { cleanupMultipleWorktrees, killWorktreeSession, syncWorktreesAndCleanup } from './src/lib/session-cleanup';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = getEnvByKey('CM_BIND') || '127.0.0.1';
@@ -220,12 +220,15 @@ app.prepare().then(() => {
           console.log(`  [excluded] ${p}`);
         });
 
-        // Issue #202: Remove worktrees of excluded repositories from DB
-        // Without this, worktree records remain in DB and appear in the UI
+        // Issue #202/#526: Remove worktrees of excluded repositories from DB
+        // SF-002: cleanup -> delete order for excluded repositories
+        // Sessions must be stopped before DB records are removed
         for (const excludedPath of excludedPaths) {
           const resolvedPath = resolveRepositoryPath(excludedPath);
           const worktreeIds = getWorktreeIdsByRepository(db, resolvedPath);
           if (worktreeIds.length > 0) {
+            // Issue #526: Clean up tmux sessions before deleting from DB
+            await cleanupMultipleWorktrees(worktreeIds, killWorktreeSession);
             const result = deleteWorktreesByIds(db, worktreeIds);
             console.log(`  Removed ${result.deletedCount} worktree(s) from excluded repository: ${resolvedPath}`);
           }
@@ -235,8 +238,14 @@ app.prepare().then(() => {
       // Scan filtered repositories (excluded repos are skipped)
       const worktrees = await scanMultipleRepositories(filteredPaths);
 
-      // Sync to database
-      syncWorktreesToDB(db, worktrees);
+      // Issue #526: Sync to database with cleanup (MF-001)
+      const { syncResult, cleanupWarnings } = await syncWorktreesAndCleanup(db, worktrees);
+      if (cleanupWarnings.length > 0) {
+        console.warn(`Sync cleanup warnings: ${cleanupWarnings.join(', ')}`);
+      }
+      if (syncResult.deletedIds.length > 0) {
+        console.log(`Cleaned up ${syncResult.deletedIds.length} deleted worktree(s)`);
+      }
 
       console.log(`Total: ${worktrees.length} worktree(s) synced to database`);
     } catch (error) {

@@ -35,6 +35,11 @@ vi.mock('@/lib/session-cleanup', () => ({
     results: [],
     warnings: [],
   }),
+  killWorktreeSession: vi.fn().mockResolvedValue(false),
+  syncWorktreesAndCleanup: vi.fn().mockResolvedValue({
+    syncResult: { deletedIds: [], upsertedCount: 0 },
+    cleanupWarnings: [],
+  }),
 }));
 
 // Mock ws-server

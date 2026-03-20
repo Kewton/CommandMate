@@ -15,6 +15,18 @@ import { createLogger } from '@/lib/logger';
 const logger = createLogger('worktrees');
 
 /**
+ * Result of syncing worktrees to database
+ * Issue #526: Returns deletedIds for tmux session cleanup
+ * TODO: Consider moving to types/ directory in a future refactor (SF-001)
+ */
+export interface SyncResult {
+  /** IDs of worktrees that were deleted from the database */
+  deletedIds: string[];
+  /** Number of worktrees that were upserted */
+  upsertedCount: number;
+}
+
+/**
  * Parsed worktree information from git
  */
 interface ParsedWorktree {
@@ -265,11 +277,15 @@ export async function scanMultipleRepositories(
 export function syncWorktreesToDB(
   db: Database.Database,
   worktrees: Worktree[]
-): void {
+): SyncResult {
   // If no worktrees provided, do nothing (avoid accidentally deleting all data)
+  // SF-C01: Return empty SyncResult instead of void
   if (worktrees.length === 0) {
-    return;
+    return { deletedIds: [], upsertedCount: 0 };
   }
+
+  const allDeletedIds: string[] = [];
+  let upsertedCount = 0;
 
   // Group worktrees by repository path
   const worktreesByRepo = new Map<string, Worktree[]>();
@@ -297,12 +313,16 @@ export function syncWorktreesToDB(
     // Delete removed worktrees from DB
     if (deletedIds.length > 0) {
       const result = deleteWorktreesByIds(db, deletedIds);
+      allDeletedIds.push(...deletedIds);
       logger.info('worktree:cleanup', { deletedCount: result.deletedCount });
     }
 
     // Upsert current worktrees
     for (const worktree of repoWorktrees) {
       upsertWorktree(db, worktree);
+      upsertedCount++;
     }
   }
+
+  return { deletedIds: allDeletedIds, upsertedCount };
 }

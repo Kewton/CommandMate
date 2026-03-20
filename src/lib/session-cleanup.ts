@@ -15,6 +15,11 @@ import { clearAllCache } from './tmux/tmux-capture-cache';
 import { CLI_TOOL_IDS, type CLIToolType } from './cli-tools/types';
 import { getErrorMessage } from './errors';
 import { createLogger } from '@/lib/logger';
+import { CLIToolManager } from './cli-tools/manager';
+import { killSession } from './tmux/tmux';
+import { syncWorktreesToDB, type SyncResult } from './git/worktrees';
+import type { Worktree } from '@/types/models';
+import type Database from 'better-sqlite3';
 
 const logger = createLogger('session-cleanup');
 
@@ -154,21 +159,112 @@ export async function cleanupMultipleWorktrees(
   worktreeIds: string[],
   killSessionFn: KillSessionFn
 ): Promise<CleanupResult> {
+  // Issue #526 / SF-003: Parallel execution with Promise.allSettled
+  const settled = await Promise.allSettled(
+    worktreeIds.map(worktreeId => cleanupWorktreeSessions(worktreeId, killSessionFn))
+  );
+
   const results: WorktreeCleanupResult[] = [];
   const warnings: string[] = [];
 
-  for (const worktreeId of worktreeIds) {
-    const result = await cleanupWorktreeSessions(worktreeId, killSessionFn);
-    results.push(result);
+  for (let i = 0; i < settled.length; i++) {
+    const outcome = settled[i];
+    const worktreeId = worktreeIds[i];
 
-    // Collect warnings from errors
-    for (const error of result.sessionErrors) {
-      warnings.push(`Session kill error (${worktreeId}): ${error}`);
-    }
-    for (const error of result.pollerErrors) {
-      warnings.push(`Poller stop error (${worktreeId}): ${error}`);
+    if (outcome.status === 'fulfilled') {
+      const result = outcome.value;
+      results.push(result);
+
+      // Collect warnings from errors
+      for (const error of result.sessionErrors) {
+        warnings.push(`Session kill error (${worktreeId}): ${error}`);
+      }
+      for (const error of result.pollerErrors) {
+        warnings.push(`Poller stop error (${worktreeId}): ${error}`);
+      }
+    } else {
+      // Unexpected rejection from cleanupWorktreeSessions
+      warnings.push(`Cleanup failed (${worktreeId}): ${getErrorMessage(outcome.reason)}`);
     }
   }
 
   return { results, warnings };
+}
+
+/**
+ * Kill a CLI tool session for a worktree
+ * Issue #526: Common function extracted from repositories/route.ts
+ *
+ * MF-C01: getTool() throws Error if tool not found, wrapped in try-catch
+ * SF-004: isRunning() correctly awaited
+ *
+ * @param worktreeId - Worktree ID
+ * @param cliToolId - CLI tool type
+ * @returns true if session was killed, false otherwise
+ */
+export async function killWorktreeSession(
+  worktreeId: string,
+  cliToolId: CLIToolType
+): Promise<boolean> {
+  try {
+    const manager = CLIToolManager.getInstance();
+    const tool = manager.getTool(cliToolId); // throws Error if not found
+    if (!await tool.isRunning(worktreeId)) return false; // SF-004: await
+    const sessionName = tool.getSessionName(worktreeId);
+    return killSession(sessionName);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Result of syncWorktreesAndCleanup
+ */
+export interface SyncAndCleanupResult {
+  /** Result from syncWorktreesToDB */
+  syncResult: SyncResult;
+  /** Sanitized cleanup warnings (SEC-MF-001: generic messages only) */
+  cleanupWarnings: string[];
+}
+
+/**
+ * Sync worktrees to DB and clean up sessions for deleted worktrees
+ * Issue #526 / MF-001: DRY helper combining sync + cleanup
+ *
+ * SEC-MF-001: cleanupWarnings are sanitized - detailed errors logged server-side only,
+ * client-facing warnings contain only generic messages.
+ *
+ * @param db - Database instance
+ * @param worktrees - Array of worktrees to sync
+ * @returns SyncResult and sanitized cleanupWarnings
+ */
+export async function syncWorktreesAndCleanup(
+  db: Database.Database,
+  worktrees: Worktree[]
+): Promise<SyncAndCleanupResult> {
+  const syncResult = syncWorktreesToDB(db, worktrees);
+
+  let cleanupWarnings: string[] = [];
+
+  if (syncResult.deletedIds.length > 0) {
+    try {
+      const cleanupResult = await cleanupMultipleWorktrees(
+        syncResult.deletedIds,
+        killWorktreeSession
+      );
+
+      if (cleanupResult.warnings.length > 0) {
+        // SEC-MF-001: Log detailed warnings server-side only
+        logger.warn('sync:cleanup-warnings', { warnings: cleanupResult.warnings });
+        // Return sanitized generic message to client
+        cleanupWarnings = [`${cleanupResult.warnings.length} session cleanup warning(s) occurred`];
+      }
+    } catch (error) {
+      // Cleanup failure should not break sync
+      logger.error('sync:cleanup-failed', { error: getErrorMessage(error) });
+      cleanupWarnings = ['Session cleanup encountered an error'];
+    }
+  }
+
+  return { syncResult, cleanupWarnings };
 }

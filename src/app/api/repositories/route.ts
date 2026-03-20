@@ -12,36 +12,11 @@ import {
   deleteRepositoryWorktrees,
 } from '@/lib/db';
 import { validateRepositoryPath, disableRepository } from '@/lib/db-repository';
-import { cleanupMultipleWorktrees } from '@/lib/session-cleanup';
+import { cleanupMultipleWorktrees, killWorktreeSession } from '@/lib/session-cleanup';
 import { cleanupRooms, broadcastMessage } from '@/lib/ws-server';
-import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { killSession } from '@/lib/tmux/tmux';
-import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/repositories');
-
-
-
-/**
- * Kill a CLI tool session for a worktree
- * Used as the killSessionFn parameter for cleanupMultipleWorktrees
- */
-async function killWorktreeSession(
-  worktreeId: string,
-  cliToolId: CLIToolType
-): Promise<boolean> {
-  const manager = CLIToolManager.getInstance();
-  const cliTool = manager.getTool(cliToolId);
-  const isRunning = await cliTool.isRunning(worktreeId);
-
-  if (!isRunning) {
-    return false;
-  }
-
-  const sessionName = cliTool.getSessionName(worktreeId);
-  return killSession(sessionName);
-}
 
 /**
  * DELETE /api/repositories

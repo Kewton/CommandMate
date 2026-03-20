@@ -20,6 +20,14 @@ vi.mock('child_process', () => ({
   exec: vi.fn(),
 }));
 
+// Issue #526: Mock session-cleanup to prevent deep import chain
+vi.mock('@/lib/session-cleanup', () => ({
+  syncWorktreesAndCleanup: vi.fn().mockResolvedValue({
+    syncResult: { deletedIds: [], upsertedCount: 0 },
+    cleanupWarnings: [],
+  }),
+}));
+
 // Mock logger module (Issue #480)
 const { mockLogger } = vi.hoisted(() => {
   const mockLogger = {

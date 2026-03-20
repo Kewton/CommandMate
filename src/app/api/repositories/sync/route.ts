@@ -7,8 +7,9 @@
 
 import { NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
-import { getRepositoryPaths, scanMultipleRepositories, syncWorktreesToDB } from '@/lib/git/worktrees';
+import { getRepositoryPaths, scanMultipleRepositories } from '@/lib/git/worktrees';
 import { registerAndFilterRepositories, getAllRepositories } from '@/lib/db-repository';
+import { syncWorktreesAndCleanup } from '@/lib/session-cleanup';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/repositories-sync');
@@ -44,8 +45,8 @@ export async function POST() {
     // Scan filtered repositories (excluded repos are skipped)
     const allWorktrees = await scanMultipleRepositories(filteredPaths);
 
-    // Sync to database
-    syncWorktreesToDB(db, allWorktrees);
+    // Issue #526: Sync to database and clean up sessions for deleted worktrees
+    const { syncResult, cleanupWarnings } = await syncWorktreesAndCleanup(db, allWorktrees);
 
     // Get unique repository count
     const uniqueRepos = new Set(allWorktrees.map(wt => wt.repositoryPath));
@@ -57,6 +58,8 @@ export async function POST() {
         worktreeCount: allWorktrees.length,
         repositoryCount: uniqueRepos.size,
         repositories: Array.from(uniqueRepos),
+        deletedCount: syncResult.deletedIds.length,
+        cleanupWarnings,
       },
       { status: 200 }
     );

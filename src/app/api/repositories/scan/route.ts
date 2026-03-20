@@ -6,9 +6,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { getDbInstance } from '@/lib/db-instance';
-import { scanWorktrees, syncWorktreesToDB } from '@/lib/git/worktrees';
+import { scanWorktrees } from '@/lib/git/worktrees';
 import { isPathSafe } from '@/lib/security/path-validator';
 import { getEnv } from '@/lib/env';
+import { syncWorktreesAndCleanup } from '@/lib/session-cleanup';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/repositories-scan');
@@ -48,9 +49,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Sync to database
+    // Issue #526: Sync to database and clean up sessions for deleted worktrees
     const db = getDbInstance();
-    syncWorktreesToDB(db, worktrees);
+    const { syncResult, cleanupWarnings } = await syncWorktreesAndCleanup(db, worktrees);
 
     return NextResponse.json(
       {
@@ -59,6 +60,8 @@ export async function POST(request: NextRequest) {
         worktreeCount: worktrees.length,
         repositoryPath: worktrees[0].repositoryPath,
         repositoryName: worktrees[0].repositoryName,
+        deletedCount: syncResult.deletedIds.length,
+        cleanupWarnings,
       },
       { status: 200 }
     );
