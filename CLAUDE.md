@@ -149,8 +149,8 @@ tests/
 | `src/lib/db/db-path-resolver.ts` | DBパス解決 |
 | `src/lib/db/db-migration-path.ts` | DBマイグレーション |
 | `src/lib/db/db-repository.ts` | リポジトリDB操作 |
-| `src/lib/db/worktree-db.ts` | Worktree CRUD操作（Issue #479） |
-| `src/lib/db/chat-db.ts` | チャットメッセージCRUD操作（Issue #479） |
+| `src/lib/db/worktree-db.ts` | Worktree CRUD操作、archivedフィルタ対応（Issue #479, #168） |
+| `src/lib/db/chat-db.ts` | チャットメッセージCRUD操作、論理削除（archived）・GetMessagesOptions・ACTIVE_FILTER（Issue #479, #168） |
 | `src/lib/db/session-db.ts` | セッション状態管理（Issue #479） |
 | `src/lib/db/memo-db.ts` | メモ管理CRUD（Issue #479） |
 | `src/lib/tmux/tmux.ts` | tmuxセッション管理基盤（execFile使用） |

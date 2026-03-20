@@ -19,6 +19,7 @@ function createMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
     content: overrides.content ?? 'Test message',
     timestamp: overrides.timestamp ?? new Date('2024-01-01T10:00:00'),
     messageType: 'normal',
+    archived: false,
     ...overrides,
   };
 }
