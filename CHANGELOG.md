@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.11] - 2026-03-21
+
+### Added
+- Auto-Yes: per-agent composite key support for independent Auto-Yes control per agent (Issue #525)
+- Auto-Yes: per-agent UI controls with agent name display in AutoYesToggle
+- Session history: retain message history after session clear with archived toggle (Issue #168)
+  - Logical deletion (archived column) instead of physical DELETE
+  - `showArchived` toggle in HistoryPane with localStorage persistence
+- CLI: `/orchestrate` command for parallel issue development lifecycle
+- CLI: `/pr-merge-pipeline` command for PR creation through merge automation
+- CLI: `/uat-fix-loop` command for UAT failure repair cycle automation
+
+### Fixed
+- Sync: clean up orphaned tmux sessions when worktrees are deleted during sync (Issue #526)
+- Auto-Yes: separate per-agent auto-yes state in UI to avoid stale display on tab switch
+- Auto-Yes: fix disable-all to properly disable all agents (not just default claude)
+- Test: make session-cleanup tests resilient to mock reset timing in CI
+- bin/commandmate.js: add execute permission
+
+### Refactored
+- Logging: standardize logger action strings to `module:action` format
+- Auto-Yes: extract `filterCompositeKeysByWorktree` shared utility for DRY compliance
+- Auto-Yes: rename state/poller ID functions to `CompositeKeys` for naming clarity
+- Release skill: use git worktree + commandmatedev delegation
+
 ## [0.4.10] - 2026-03-19
 
 ### Added
