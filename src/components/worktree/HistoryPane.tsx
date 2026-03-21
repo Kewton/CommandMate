@@ -47,6 +47,10 @@ export interface HistoryPaneProps {
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
   /** Issue #485: Callback when a message is inserted into message input */
   onInsertToMessage?: (content: string) => void;
+  /** Issue #168: Whether archived messages are being shown */
+  showArchived?: boolean;
+  /** Issue #168: Callback when showArchived toggle changes */
+  onShowArchivedChange?: (show: boolean) => void;
 }
 
 // ============================================================================
@@ -151,6 +155,8 @@ export const HistoryPane = memo(function HistoryPane({
   className = '',
   showToast,
   onInsertToMessage,
+  showArchived = false,
+  onShowArchivedChange,
 }: HistoryPaneProps) {
   // worktreeId is kept in props for future use (e.g., filtering, fetching)
   // Using underscore prefix to indicate intentionally unused parameter
@@ -234,17 +240,23 @@ export const HistoryPane = memo(function HistoryPane({
     if (messages.length === 0) {
       return <EmptyState />;
     }
-    return pairs.map((pair) => (
-      <ConversationPairCard
-        key={pair.id}
-        pair={pair}
-        onFilePathClick={handleFilePathClick}
-        isExpanded={isExpanded(pair.id)}
-        onToggleExpand={createToggleHandler(pair.id)}
-        onCopy={handleCopy}
-        onInsertToMessage={onInsertToMessage}
-      />
-    ));
+    return pairs.map((pair) => {
+      // Issue #168: Check if any message in the pair is archived
+      const isArchived = pair.userMessage?.archived === true ||
+        pair.assistantMessages?.some(m => m.archived === true);
+      return (
+        <div key={pair.id} className={isArchived ? 'opacity-60' : ''}>
+          <ConversationPairCard
+            pair={pair}
+            onFilePathClick={handleFilePathClick}
+            isExpanded={isExpanded(pair.id)}
+            onToggleExpand={createToggleHandler(pair.id)}
+            onCopy={handleCopy}
+            onInsertToMessage={onInsertToMessage}
+          />
+        </div>
+      );
+    });
   };
 
   return (
@@ -255,8 +267,19 @@ export const HistoryPane = memo(function HistoryPane({
       className={containerClasses}
     >
       {/* Header */}
-      <div className="sticky top-0 bg-gray-900 border-b border-gray-700 px-4 py-2 z-10">
+      <div className="sticky top-0 bg-gray-900 border-b border-gray-700 px-4 py-2 z-10 flex items-center justify-between">
         <h3 className="text-sm font-medium text-gray-300">Message History</h3>
+        {onShowArchivedChange && (
+          <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => onShowArchivedChange(e.target.checked)}
+              className="rounded border-gray-600 bg-gray-800 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-0 h-3.5 w-3.5"
+            />
+            Show archived
+          </label>
+        )}
       </div>
 
       {/* Content */}

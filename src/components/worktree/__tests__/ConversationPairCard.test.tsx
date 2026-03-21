@@ -24,6 +24,7 @@ function createMessage(
     content,
     timestamp: new Date('2024-01-01T12:34:56'),
     messageType: 'normal',
+    archived: false,
   };
 }
 

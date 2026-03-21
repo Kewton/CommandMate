@@ -1,0 +1,79 @@
+{
+  "issue_number": 525,
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "item": "deleteAutoYesStateの責務変更によるセキュリティバリデーション欠落リスク",
+        "section_updated": "Section 4-1, Section 7, Section 14",
+        "status": "reflected",
+        "details": "compositeKey引数に対するバリデーション戦略をSection 4-1に追記。extractWorktreeId+isValidWorktreeIdによるバリデーション方針を明記。セキュリティ設計セクションにも参照を追加。実装チェックリストにアクション項目を追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "item": "byWorktreeヘルパーの重複実装リスク",
+        "section_updated": "Section 3, Section 11, Section 14",
+        "status": "reflected",
+        "details": "byWorktreeフィルタリングのDRY原則セクションを追加。推奨パターンA（直接使用）とパターンB（共通関数抽出）を明記。実装順序にも反映。"
+      },
+      {
+        "id": "SF-002",
+        "item": "compositeKey形式のハードコーディング",
+        "section_updated": "Section 3, Section 11, Section 14",
+        "status": "reflected",
+        "details": "COMPOSITE_KEY_SEPARATOR定数を導入。buildCompositeKey/extractWorktreeId/extractCliToolIdのコード例を定数使用に更新。実装順序Phase 1に定数定義ステップを追加。"
+      },
+      {
+        "id": "SF-003",
+        "item": "auto-yes-state.tsへの複合キーヘルパー配置",
+        "section_updated": "Section 3, Section 14",
+        "status": "reflected",
+        "details": "複合キーヘルパー関数の配置判断セクションを追加。判断基準（利用箇所数、ファイルサイズ）を明記。barrel経由のre-export統一方針を追加。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "item": "getAutoYesStateWorktreeIdsの返り値セマンティクス変更",
+        "section_updated": "Section 13, Section 14",
+        "status": "noted"
+      },
+      {
+        "id": "C-002",
+        "item": "getLatestServerResponseTimestampForWorktreeの必要性",
+        "section_updated": "Section 13, Section 14",
+        "status": "noted"
+      },
+      {
+        "id": "C-003",
+        "item": "GET APIの二重レスポンス形式",
+        "section_updated": "Section 13, Section 14",
+        "status": "noted"
+      },
+      {
+        "id": "C-004",
+        "item": "barrelファイル(auto-yes-manager.ts)の更新コスト",
+        "section_updated": "Section 11, Section 13, Section 14",
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-525-auto-yes-per-agent-design-policy.md",
+  "sections_updated": [
+    "Section 3 (複合キー設計) - SEPARATOR定数, SF-001/SF-003追記",
+    "Section 4-1 (auto-yes-state.ts) - MF-001バリデーション戦略追記",
+    "Section 7 (セキュリティ設計) - MF-001参照追記",
+    "Section 11 (実装順序) - barrel更新ステップ, バリデーション実装ステップ追加",
+    "Section 12 (レビュー履歴) - 新規追加",
+    "Section 13 (レビュー指摘事項サマリー) - 新規追加",
+    "Section 14 (実装チェックリスト) - 新規追加"
+  ],
+  "timestamp": "2026-03-20T00:00:00Z"
+}

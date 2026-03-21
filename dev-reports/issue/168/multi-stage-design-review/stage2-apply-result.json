@@ -1,0 +1,94 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘対応",
+  "issue_number": 168,
+  "applied_findings": [
+    {
+      "id": "CR2-001",
+      "severity": "must_fix",
+      "title": "getMessages の3箇所の呼び出し元更新リストを追加",
+      "action": "セクション 4.1 に具体的な呼び出し元ファイル・行番号・変換前後のコードを追記。実装チェックリストにも個別項目として追加。"
+    },
+    {
+      "id": "CR2-002",
+      "severity": "must_fix",
+      "title": "ChatMessage 型への archived フィールド追加",
+      "action": "セクション 2 で既に設計済みであることを確認。Stage 2 サマリーテーブルに記録。実装チェックリストに明示的項目として追加。"
+    },
+    {
+      "id": "CR2-003",
+      "severity": "must_fix",
+      "title": "ChatMessageRow 型への archived フィールド追加",
+      "action": "セクション 2 で既に設計済みであることを確認。Stage 2 サマリーテーブルに記録。実装チェックリストに明示的項目として追加。"
+    },
+    {
+      "id": "CR2-004",
+      "severity": "must_fix",
+      "title": "init-db.ts の CREATE TABLE に archived カラム追加",
+      "action": "セクション 10 で既に設計済みであることを確認。Stage 2 サマリーテーブルに記録。実装チェックリストに明示的項目として追加。"
+    },
+    {
+      "id": "CR2-005",
+      "severity": "must_fix",
+      "title": "clearLastUserMessage の db.ts バレルファイルへのエクスポート追加",
+      "action": "セクション 4.8 にバレルファイル更新の具体的なコード例を追記。変更ファイル一覧に db.ts を追加。実装チェックリストに明示的項目として追加。"
+    },
+    {
+      "id": "CR2-006",
+      "severity": "should_fix",
+      "title": "deleteAllMessages の戻り値型を void から number に変更",
+      "action": "セクション 4.7 に CR2-006 反映注記を追加。現行コードとの差分と非破壊的変更である旨を明記。実装チェックリストに項目追加。"
+    },
+    {
+      "id": "CR2-007",
+      "severity": "should_fix",
+      "title": "HistoryPaneProps に showArchived / onShowArchivedChange 追加",
+      "action": "セクション 5.4 で既に設計済みであることを確認。Stage 2 サマリーテーブルに記録。DR1-005 チェックリスト項目に (CR2-007) 参照を追加。"
+    },
+    {
+      "id": "CR2-008",
+      "severity": "should_fix",
+      "title": "HistoryPane ヘッダーに flex レイアウト追加",
+      "action": "セクション 5.1 で既に設計済みであることを確認。Stage 2 サマリーテーブルに記録。DR1-005 チェックリスト項目に (CR2-008) の具体的な指示を追加。"
+    },
+    {
+      "id": "CR2-009",
+      "severity": "should_fix",
+      "title": "全 SELECT 文に archived カラム追加",
+      "action": "セクション 4.1-4.4 で既に設計済みであることを確認。Stage 2 サマリーテーブルに記録。実装チェックリストに明示的項目として追加。"
+    },
+    {
+      "id": "CR2-010",
+      "severity": "should_fix",
+      "title": "getMessageById が設計書の変更対象に含まれていない",
+      "action": "新規セクション 4.14 を追加し、getMessageById の SELECT 文変更と ACTIVE_FILTER 非適用の設計を明記。変更ファイル一覧の chat-db.ts 説明に追記。実装チェックリストに項目追加。"
+    },
+    {
+      "id": "CR2-014",
+      "severity": "nice_to_have",
+      "title": "GetMessagesOptions のバレルファイルエクスポート",
+      "action": "セクション 4.1 に CR2-014 反映注記を追加。変更ファイル一覧に db.ts の型エクスポートを追記。実装チェックリストの nice_to_have に項目追加。"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "CR2-011",
+      "severity": "nice_to_have",
+      "title": "CURRENT_SCHEMA_VERSION = 21 の確認",
+      "reason": "確認のみの指摘であり、設計書の前提が正確であることが確認された。設計変更不要。Stage 2 サマリーテーブルに記録済み。"
+    },
+    {
+      "id": "CR2-012",
+      "severity": "nice_to_have",
+      "title": "kill-session/route.ts の行番号参照が正確",
+      "reason": "確認のみの指摘であり、設計書の記述が正確であることが確認された。設計変更不要。Stage 2 サマリーテーブルに記録済み。"
+    },
+    {
+      "id": "CR2-013",
+      "severity": "nice_to_have",
+      "title": "worktree-db.ts のサブクエリ行番号参照が正確",
+      "reason": "確認のみの指摘であり、設計書の記述が正確であることが確認された。設計変更不要。Stage 2 サマリーテーブルに記録済み。"
+    }
+  ],
+  "design_doc_updated": true
+}

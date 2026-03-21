@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UAT Report - Issue #525</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 960px; margin: 0 auto; padding: 20px; background: #f5f5f5; color: #333; }
+  h1 { color: #1a1a2e; border-bottom: 3px solid #16213e; padding-bottom: 10px; }
+  h2 { color: #16213e; margin-top: 30px; }
+  .summary { display: flex; gap: 20px; margin: 20px 0; }
+  .summary-card { background: white; border-radius: 8px; padding: 20px; flex: 1; box-shadow: 0 2px 4px rgba(0,0,0,0.1); text-align: center; }
+  .summary-card .number { font-size: 36px; font-weight: bold; }
+  .summary-card .label { color: #666; margin-top: 5px; }
+  .pass { color: #27ae60; }
+  .fail { color: #e74c3c; }
+  .info { color: #2980b9; }
+  table { width: 100%; border-collapse: collapse; margin: 15px 0; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+  th { background: #16213e; color: white; padding: 12px 15px; text-align: left; }
+  td { padding: 10px 15px; border-bottom: 1px solid #eee; }
+  tr:last-child td { border-bottom: none; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+  .badge-pass { background: #d4edda; color: #155724; }
+  .badge-fail { background: #f8d7da; color: #721c24; }
+  .test-detail { background: white; border-radius: 8px; padding: 20px; margin: 15px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+  .test-detail h3 { margin-top: 0; color: #16213e; }
+  .evidence { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px; padding: 12px; font-family: 'Courier New', monospace; font-size: 13px; white-space: pre-wrap; overflow-x: auto; }
+  .fix-note { background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; padding: 12px; margin: 10px 0; }
+  .meta { color: #666; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<h1>Issue #525 - UAT Report</h1>
+<p class="meta">Auto-Yes Enhancement: Per-Agent Independent Control</p>
+<p class="meta">Date: 2026-03-20 | Branch: feature/525-worktree | Port: 3010</p>
+
+<div class="summary">
+  <div class="summary-card">
+    <div class="number info">12</div>
+    <div class="label">Total Tests</div>
+  </div>
+  <div class="summary-card">
+    <div class="number pass">12</div>
+    <div class="label">Passed</div>
+  </div>
+  <div class="summary-card">
+    <div class="number fail">0</div>
+    <div class="label">Failed</div>
+  </div>
+  <div class="summary-card">
+    <div class="number pass">100%</div>
+    <div class="label">Pass Rate</div>
+  </div>
+</div>
+
+<h2>Acceptance Criteria Coverage</h2>
+<table>
+  <tr><th>#</th><th>Acceptance Criteria</th><th>Test Cases</th><th>Status</th></tr>
+  <tr><td>1</td><td>UI per-agent auto-yes ON/OFF</td><td>TC-001, TC-005, TC-009</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>2</td><td>Agent status + remaining time visible</td><td>TC-003, TC-004</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>3</td><td>CLI changes reflected in UI</td><td>TC-008</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>4</td><td>UI changes reflected in CLI capture</td><td>TC-008</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>5</td><td>Multiple agents with individual settings</td><td>TC-002, TC-010</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>6</td><td>Backward compatibility (single agent)</td><td>TC-007</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>7</td><td>Agent name in confirm dialog</td><td>Unit tests</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>8</td><td>Cleanup all agents on session stop</td><td>Unit tests</td><td><span class="badge badge-pass">PASS</span></td></tr>
+</table>
+
+<h2>Test Results</h2>
+<table>
+  <tr><th>ID</th><th>Test Case</th><th>Result</th></tr>
+  <tr><td>TC-001</td><td>POST auto-yes enable with cliToolId=claude</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>TC-002</td><td>Enable multiple agents simultaneously (claude + codex)</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>TC-003</td><td>GET auto-yes with cliToolId filter</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>TC-004</td><td>GET auto-yes all agents (map format)</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>TC-005</td><td>Disable claude only, codex remains enabled</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>TC-006</td><td>Invalid cliToolId returns 400 error</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>TC-007</td><td>Default cliToolId is claude (backward compat)</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>TC-008</td><td>current-output API per-agent autoYes state</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>TC-009</td><td>Disable all agents without cliToolId</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>TC-010</td><td>Individual stopPattern per agent</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>TC-011</td><td>Invalid worktreeId returns 400 error</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>TC-012</td><td>Static analysis (tsc + ESLint)</td><td><span class="badge badge-pass">PASS</span></td></tr>
+</table>
+
+<h2>Test Details</h2>
+
+<div class="test-detail">
+  <h3>TC-001: POST auto-yes enable with cliToolId=claude</h3>
+  <p><strong>Command:</strong></p>
+  <div class="evidence">curl -X POST http://localhost:3010/api/worktrees/myswiftagent-develop/auto-yes \
+  -H "Content-Type: application/json" \
+  -d '{"enabled":true,"duration":3600000,"cliToolId":"claude"}'</div>
+  <p><strong>Response (200 OK):</strong></p>
+  <div class="evidence">{"enabled":true,"expiresAt":1773985898428,"pollingStarted":true}</div>
+</div>
+
+<div class="test-detail">
+  <h3>TC-002: Enable multiple agents simultaneously</h3>
+  <p><strong>Commands:</strong></p>
+  <div class="evidence">POST .../auto-yes {"enabled":true,"duration":3600000,"cliToolId":"claude"}  -> 200 OK
+POST .../auto-yes {"enabled":true,"duration":10800000,"cliToolId":"codex"} -> 200 OK</div>
+  <p><strong>Result:</strong> Both agents enabled with different expiration times (claude: 1h, codex: 3h)</p>
+</div>
+
+<div class="test-detail">
+  <h3>TC-003: GET auto-yes with cliToolId filter</h3>
+  <div class="evidence">GET .../auto-yes?cliToolId=claude
+Response: {"enabled":true,"expiresAt":1773985898428}</div>
+</div>
+
+<div class="test-detail">
+  <h3>TC-004: GET auto-yes all agents (map format)</h3>
+  <div class="evidence">GET .../auto-yes
+Response: {"enabled":true,"expiresAt":...,"agents":{
+  "claude":{"enabled":true,"expiresAt":1773985973677},
+  "codex":{"enabled":true,"expiresAt":1773985973689}
+}}</div>
+</div>
+
+<div class="test-detail">
+  <h3>TC-005: Disable claude only, codex remains</h3>
+  <div class="evidence">POST .../auto-yes {"enabled":false,"cliToolId":"claude"} -> 200 OK
+GET .../auto-yes?cliToolId=claude -> {"enabled":false,"expiresAt":null}
+GET .../auto-yes?cliToolId=codex  -> {"enabled":true,"expiresAt":1773993103428}</div>
+</div>
+
+<div class="test-detail">
+  <h3>TC-006: Invalid cliToolId returns 400</h3>
+  <div class="evidence">POST .../auto-yes {"enabled":true,"duration":3600000,"cliToolId":"invalid_tool"}
+Response (400): {"error":"Invalid cliToolId"}</div>
+</div>
+
+<div class="test-detail">
+  <h3>TC-009: Disable all agents without cliToolId</h3>
+  <div class="fix-note">
+    <strong>Fix during UAT:</strong> Initial implementation only disabled the default agent (claude) when cliToolId was omitted. Fixed to disable all agents by iterating over composite keys.
+  </div>
+  <div class="evidence">Before: claude=enabled, codex=enabled
+POST .../auto-yes {"enabled":false} -> 200 OK
+After:  claude=disabled, codex=disabled</div>
+</div>
+
+<div class="test-detail">
+  <h3>TC-011: Invalid worktreeId returns 400</h3>
+  <div class="evidence">GET .../worktrees/invalid../auto-yes
+Response (400): {"error":"Invalid worktree ID format"}</div>
+</div>
+
+<h2>Fixes During UAT</h2>
+<table>
+  <tr><th>Test</th><th>Issue</th><th>Fix</th></tr>
+  <tr>
+    <td>TC-009</td>
+    <td>POST disable without cliToolId only disabled claude (default), codex remained enabled</td>
+    <td>Modified auto-yes/route.ts: disable without cliToolId now iterates all composite keys and disables all agents</td>
+  </tr>
+</table>
+
+<h2>Quality Checks</h2>
+<table>
+  <tr><th>Check</th><th>Result</th></tr>
+  <tr><td>TypeScript (tsc --noEmit)</td><td><span class="badge badge-pass">PASS</span> 0 errors</td></tr>
+  <tr><td>ESLint (npm run lint)</td><td><span class="badge badge-pass">PASS</span> 0 errors</td></tr>
+  <tr><td>Unit Tests (npm run test:unit)</td><td><span class="badge badge-pass">PASS</span> 5247/5247</td></tr>
+</table>
+
+<footer style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; color: #999; font-size: 12px;">
+  Generated by UAT command | Issue #525 | 2026-03-20
+</footer>
+
+</body>
+</html>

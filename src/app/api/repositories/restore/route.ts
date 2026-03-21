@@ -14,7 +14,8 @@ import {
   validateRepositoryPath,
   restoreRepository,
 } from '@/lib/db-repository';
-import { scanWorktrees, syncWorktreesToDB } from '@/lib/git/worktrees';
+import { scanWorktrees } from '@/lib/git/worktrees';
+import { syncWorktreesAndCleanup } from '@/lib/session-cleanup';
 import fs from 'fs';
 import { createLogger } from '@/lib/logger';
 
@@ -55,20 +56,26 @@ export async function PUT(request: NextRequest) {
       });
     }
 
-    // Auto-sync: scan worktrees and sync to DB (SEC-SF-005: TOCTOU risk acknowledged)
+    // Issue #526: Auto-sync with cleanup (SEC-SF-005: TOCTOU risk acknowledged)
     const worktrees = await scanWorktrees(resolvedPath);
+    let deletedCount = 0;
+    let cleanupWarnings: string[] = [];
     if (worktrees.length > 0) {
-      syncWorktreesToDB(db, worktrees);
+      const result = await syncWorktreesAndCleanup(db, worktrees);
+      deletedCount = result.syncResult.deletedIds.length;
+      cleanupWarnings = result.cleanupWarnings;
     }
 
     return NextResponse.json({
       success: true,
       worktreeCount: worktrees.length,
       message: `Repository restored with ${worktrees.length} worktree(s)`,
+      deletedCount,
+      cleanupWarnings,
     });
   } catch (error: unknown) {
     // SEC-SF-003: Fixed error message - do not expose internal details
-    logger.error('error:', { error: error instanceof Error ? error.message : String(error) });
+    logger.error('repository:restore-failed', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { success: false, error: 'Failed to restore repository' },
       { status: 500 }

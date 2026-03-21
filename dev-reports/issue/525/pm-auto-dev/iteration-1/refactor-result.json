@@ -1,0 +1,32 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "tests_passed_before": 5247,
+    "tests_passed_after": 5247,
+    "tests_failed": 0
+  },
+  "refactorings_applied": [
+    "DRY: Extract filterCompositeKeysByWorktree shared utility to eliminate duplicated byWorktree filtering pattern in auto-yes-poller.ts and auto-yes-state.ts",
+    "COMPOSITE_KEY_SEPARATOR consistency: Replace hardcoded key.split(':') with extractCliToolId in auto-yes API route",
+    "Naming clarity: Rename getAutoYesStateWorktreeIds to getAutoYesStateCompositeKeys and getAutoYesPollerWorktreeIds to getAutoYesPollerCompositeKeys (deprecated aliases retained)",
+    "Test updates: Update resource-cleanup.test.ts mock and imports to use new function names"
+  ],
+  "files_changed": [
+    "src/lib/auto-yes-state.ts",
+    "src/lib/auto-yes-poller.ts",
+    "src/lib/polling/auto-yes-manager.ts",
+    "src/lib/resource-cleanup.ts",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "tests/unit/resource-cleanup.test.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "commits": [
+    "522abd0: refactor(auto-yes): improve DRY compliance and naming clarity (#525)"
+  ],
+  "message": "Refactoring complete. DRY violation in byWorktree filtering pattern resolved via shared filterCompositeKeysByWorktree utility. Hardcoded separator usage replaced with extractCliToolId. Function names clarified to reflect composite key return type. All 5247 tests pass, 0 static analysis errors."
+}

@@ -1,0 +1,26 @@
+{
+  "issue_number": 525,
+  "refactor_targets": [
+    "src/lib/auto-yes-state.ts",
+    "src/lib/auto-yes-poller.ts",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/resource-cleanup.ts",
+    "src/lib/session/worktree-status-helper.ts",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/components/worktree/AutoYesConfirmDialog.tsx"
+  ],
+  "quality_metrics": {
+    "tests_passed": 5247,
+    "tests_failed": 0,
+    "lint_errors": 0,
+    "type_errors": 0
+  },
+  "improvement_goals": [
+    "DRY原則の遵守確認（byWorktreeパターンの重複排除）",
+    "COMPOSITE_KEY_SEPARATORの定数使用徹底",
+    "compositeKeyバリデーションの一貫性確認",
+    "不要なコードの削除"
+  ]
+}

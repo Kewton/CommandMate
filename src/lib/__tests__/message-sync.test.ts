@@ -28,6 +28,7 @@ function createTestMessage(
     content: `Test message ${id}`,
     timestamp,
     messageType: 'normal',
+    archived: false,
   };
 }
 
@@ -123,6 +124,7 @@ describe('message-sync', () => {
         role: 'user' as const,
         content: 'New message',
         messageType: 'normal' as const,
+        archived: false,
       };
 
       const result = addOptimisticMessage(messages, newMessage, 'temp-123');
@@ -139,6 +141,7 @@ describe('message-sync', () => {
         role: 'user' as const,
         content: 'New message',
         messageType: 'normal' as const,
+        archived: false,
       };
 
       const before = Date.now();
@@ -159,6 +162,7 @@ describe('message-sync', () => {
         role: 'user' as const,
         content: 'New message',
         messageType: 'normal' as const,
+        archived: false,
       };
 
       const result = addOptimisticMessage(messages, newMessage, 'temp-new');

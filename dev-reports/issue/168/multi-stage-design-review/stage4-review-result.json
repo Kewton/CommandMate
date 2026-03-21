@@ -1,0 +1,120 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "issue_number": 168,
+  "review_date": "2026-03-20",
+  "design_doc": "dev-reports/design/issue-168-session-history-retention-design-policy.md",
+  "findings": [
+    {
+      "id": "SEC4-001",
+      "severity": "should_fix",
+      "category": "入力バリデーション",
+      "owasp": "A03:2021 - Injection",
+      "title": "includeArchived パラメータの型チェックが暗黙的に安全だが、明示的なバリデーションログがない",
+      "description": "設計書では includeArchived パラメータを 'true' との厳密比較（=== 'true'）で処理する設計となっており、SQL Injection リスクはない。ユーザー入力は直接 SQL に埋め込まれず、固定文字列 'AND archived = 0' が条件分岐で付加されるのみ。ただし、不正な値（例: 'TRUE', '1', 'yes'）が渡された場合に意図通りの動作（false扱い）であることをAPIドキュメントまたはテストで明示すべき。",
+      "location": "src/app/api/worktrees/[id]/messages/route.ts (設計書セクション 3.2)",
+      "recommendation": "テストケースに 'TRUE', '1', 'yes' 等の非正規値が false として処理されることの検証を追加する。",
+      "design_status": "設計書セクション7で includeArchivedParam === 'true' の厳密比較を明記済み。テスト戦略に非正規値テストを追加推奨。"
+    },
+    {
+      "id": "SEC4-002",
+      "severity": "nice_to_have",
+      "category": "アクセス制御",
+      "owasp": "A01:2021 - Broken Access Control",
+      "title": "アーカイブメッセージへのアクセスは既存の認証ミドルウェアで適切に保護されている",
+      "description": "messages API（GET /api/worktrees/:id/messages）は middleware.ts のトークン認証を通過したリクエストのみ処理する。includeArchived パラメータの追加は新たな認証バイパスを生まない。worktree ID による絞り込みは既存の getWorktreeById チェックで担保されており、他のworktreeのメッセージにアクセスすることはできない。設計書セクション7の記述は正確である。",
+      "location": "src/middleware.ts, src/app/api/worktrees/[id]/messages/route.ts",
+      "recommendation": "現状の設計で十分。特段の対応不要。",
+      "design_status": "適切に設計済み"
+    },
+    {
+      "id": "SEC4-003",
+      "severity": "should_fix",
+      "category": "データ保持・プライバシー",
+      "owasp": "該当なし（プライバシー設計）",
+      "title": "論理削除によるデータ保持のプライバシー影響に関するユーザー通知が未設計",
+      "description": "現行のkill-sessionはメッセージを物理削除するため、ユーザーはセッション終了時にデータが消えることを期待している可能性がある。論理削除への変更により、ユーザーが削除したと思っているデータが実際にはDB内に残存する。セキュリティ上の直接的脅威ではないが、ユーザーの期待と実際の動作の乖離がある。特に機密情報（APIキー、パスワード等）を含むメッセージが保持される可能性がある。",
+      "location": "設計書セクション 7 (セキュリティ設計), セクション 8 (パージ戦略)",
+      "recommendation": "UIトグルの近くにアーカイブ済みメッセージが保持されている旨のツールチップまたは説明テキストを追加する。将来的にはユーザーがアーカイブを物理削除できる機能（パージ機能）の導入を検討する。設計書のIA3-005で言及されたパージ戦略と連動させることが望ましい。"
+    },
+    {
+      "id": "SEC4-004",
+      "severity": "nice_to_have",
+      "category": "Mass Assignment",
+      "owasp": "A08:2021 - Software and Data Integrity Failures",
+      "title": "archived フィールドの外部操作防止は設計上安全",
+      "description": "createMessage の引数型が Omit<ChatMessage, 'id' | 'archived'> に変更されるため（IA3-004）、API経由でarchivedフィールドを直接操作することはできない。INSERT文にもarchivedカラムを含めず、DEFAULT 0が適用される。また、archived値を変更するAPIエンドポイントはkill-session APIのみであり、これは認証済みリクエストのみ受け付ける。Mass Assignment攻撃のリスクは低い。",
+      "location": "設計書セクション 4.15 (createMessage), src/app/api/worktrees/[id]/kill-session/route.ts",
+      "recommendation": "現状の設計で十分。特段の対応不要。",
+      "design_status": "適切に設計済み"
+    },
+    {
+      "id": "SEC4-005",
+      "severity": "nice_to_have",
+      "category": "情報漏洩",
+      "owasp": "A04:2021 - Insecure Design",
+      "title": "エラーメッセージにアーカイブ関連の情報が漏洩しない設計になっている",
+      "description": "messages/route.ts のエラーレスポンスは 'Failed to fetch messages' という一般的なメッセージのみを返す（L70-72）。kill-session/route.ts も同様に一般的なエラーメッセージを使用している。includeArchived パラメータの有無によってエラーメッセージが変わることはない。情報漏洩のリスクはない。",
+      "location": "src/app/api/worktrees/[id]/messages/route.ts, src/app/api/worktrees/[id]/kill-session/route.ts",
+      "recommendation": "現状の設計で十分。",
+      "design_status": "適切に設計済み"
+    },
+    {
+      "id": "SEC4-006",
+      "severity": "should_fix",
+      "category": "XSS / localStorage",
+      "owasp": "A07:2021 - Cross-Site Scripting",
+      "title": "localStorage の showArchived トグル状態はXSSリスクが低いが、読み込み時の型チェックを厳格化すべき",
+      "description": "設計書セクション5.2で localStorage.getItem(STORAGE_KEY) === 'true' の厳密比較を使用しており、XSSで localStorage を改ざんされても Boolean 値として安全にパースされる（'true' 以外は全て false）。ただし、localStorage の値がXSS攻撃で 'true' に設定された場合、アーカイブメッセージが自動表示される。これは情報漏洩というよりUI操作の問題であり、セキュリティ上の影響は限定的。保存する値が単純なBoolean文字列であるため、JSON.parse による任意コード実行のリスクもない。",
+      "location": "設計書セクション 5.2 (localStorage永続化)",
+      "recommendation": "現在の === 'true' 比較で実質的に安全。try-catch で localStorage アクセスを保護する設計も既に含まれている。追加対策として、storageイベントリスナーで他タブからの変更を検知する場合は同様の厳密比較を適用すること。"
+    },
+    {
+      "id": "SEC4-007",
+      "severity": "must_fix",
+      "category": "SQL Injection",
+      "owasp": "A03:2021 - Injection",
+      "title": "ACTIVE_FILTER 定数の文字列連結はパラメータ化クエリではないが、リスクは制御された範囲に限定",
+      "description": "設計書では ACTIVE_FILTER = 'AND archived = 0' をSQL文字列に直接連結する方式を採用している。この定数はモジュールレベルで固定定義されており、ユーザー入力が混入する経路はない。しかし、文字列連結によるSQL構築はコードレビュー時の判断を難しくし、将来の変更時に脆弱性が混入するリスクがある。better-sqlite3 のパラメータバインディングと組み合わせる方式であるため、直接的なSQL Injectionリスクは現時点では存在しない。ただし、ACTIVE_FILTER の使用箇所が11箇所以上に及ぶため、定数値の誤変更が広範囲に影響する点を認識し、定数のテストカバレッジを確保すべき。",
+      "location": "設計書セクション 4 (DB関数設計), src/lib/db/chat-db.ts",
+      "recommendation": "ACTIVE_FILTER 定数が正しい値であることを検証する単体テストを追加する。例: expect(ACTIVE_FILTER).toBe('AND archived = 0')。これにより意図しない変更を検出できる。また、将来的にフィルタ条件が複雑化する場合は、クエリビルダーパターンへの移行を検討する。"
+    },
+    {
+      "id": "SEC4-008",
+      "severity": "nice_to_have",
+      "category": "データ保護",
+      "owasp": "A05:2021 - Security Misconfiguration",
+      "title": "ON DELETE CASCADE によるworktree削除時の物理削除は適切に設計されている",
+      "description": "設計書セクション7で明記されている通り、worktree削除時にはON DELETE CASCADEにより、アーカイブ済みメッセージを含む全メッセージが物理削除される。これにより、worktreeのライフサイクル終了時にデータが完全に消去される。適切な設計である。",
+      "location": "設計書セクション 7 (データ保護)",
+      "recommendation": "現状の設計で十分。",
+      "design_status": "適切に設計済み"
+    },
+    {
+      "id": "SEC4-009",
+      "severity": "should_fix",
+      "category": "情報漏洩",
+      "owasp": "A01:2021 - Broken Access Control",
+      "title": "404エラーレスポンスにworktree IDが含まれており、IDの存在確認に利用可能",
+      "description": "messages/route.ts L25 で `Worktree '${params.id}' not found` というエラーメッセージを返している。これは既存の問題であり Issue #168 固有ではないが、セキュリティレビューとして記録する。認証済みリクエストのみがこのエンドポイントに到達できるため、影響は限定的。",
+      "location": "src/app/api/worktrees/[id]/messages/route.ts L24-27",
+      "recommendation": "Issue #168 の範囲外。将来的にエラーメッセージを一般化することを検討（例: 'Resource not found'）。認証済みユーザーに対してはworktree IDの露出は許容範囲内。"
+    }
+  ],
+  "summary": "Issue #168 のセキュリティ設計は全体として適切である。主要なセキュリティ上の懸念点は以下の通り: (1) includeArchived パラメータは厳密比較('true' === 'true')で処理され、SQL Injectionリスクはない。(2) archived フィールドはcreateMessage の Omit 型で外部操作が防止されている。(3) 既存の認証ミドルウェアがアーカイブメッセージへのアクセスも保護する。(4) ACTIVE_FILTER の文字列連結はユーザー入力が混入する経路がなく安全。(5) localStorage の showArchived は Boolean 厳密比較で安全。唯一の must_fix は ACTIVE_FILTER 定数のテストカバレッジ確保であり、これは予防的措置である。should_fix として、論理削除によるデータ保持のプライバシー影響に関するユーザー通知と、非正規値パラメータのテスト追加を推奨する。OWASP Top 10 の各項目に対して重大な脆弱性は検出されなかった。",
+  "must_fix_count": 1,
+  "should_fix_count": 4,
+  "nice_to_have_count": 4,
+  "owasp_coverage": {
+    "A01_Broken_Access_Control": "検証済み - 既存の認証ミドルウェアで保護、worktree ID による絞り込み担保",
+    "A02_Cryptographic_Failures": "該当なし - 本変更で暗号処理の追加・変更なし",
+    "A03_Injection": "検証済み - パラメータバインディング使用、ACTIVE_FILTER は固定文字列",
+    "A04_Insecure_Design": "検証済み - エラーメッセージに機密情報を含まない",
+    "A05_Security_Misconfiguration": "検証済み - ON DELETE CASCADE によるデータライフサイクル管理",
+    "A06_Vulnerable_Components": "該当なし - 新規依存なし",
+    "A07_XSS": "検証済み - localStorage値の厳密比較、DOM操作なし",
+    "A08_Data_Integrity": "検証済み - Mass Assignment防止（Omit型）",
+    "A09_Logging_Monitoring": "既存ロガー使用 - 変更なし",
+    "A10_SSRF": "該当なし - 外部リクエスト生成なし"
+  }
+}

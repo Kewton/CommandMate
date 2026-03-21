@@ -24,6 +24,7 @@ function createPromptMessage(overrides: Partial<ChatMessage> = {}): ChatMessage 
       options: ['yes', 'no'],
       status: 'pending',
     },
+    archived: false,
     ...overrides,
   };
 }

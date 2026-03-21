@@ -10,7 +10,7 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/session/cli-session';
 import { detectSessionStatus, STATUS_REASON } from '@/lib/detection/status-detector';
-import { getAutoYesState, getLastServerResponseTimestamp, isPollerActive } from '@/lib/polling/auto-yes-manager';
+import { getAutoYesState, getLastServerResponseTimestamp, isPollerActive, buildCompositeKey } from '@/lib/polling/auto-yes-manager';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { createLogger } from '@/lib/logger';
 
@@ -82,9 +82,9 @@ export async function GET(
     const newLines = lines.slice(Math.max(0, lastCapturedLine));
     const newContent = newLines.join('\n');
 
-    // Issue #501: Get last server response timestamp BEFORE status detection
-    // so it can be passed to detectSessionStatus() for time-based heuristic.
-    const lastServerResponseTimestamp = getLastServerResponseTimestamp(params.id);
+    // Issue #501, #525: Get last server response timestamp using compositeKey
+    const compositeKey = buildCompositeKey(params.id, cliToolId);
+    const lastServerResponseTimestamp = getLastServerResponseTimestamp(compositeKey);
     const lastOutputTimestamp = lastServerResponseTimestamp ? new Date(lastServerResponseTimestamp) : undefined;
 
     // DR-001: Unified priority-based status detection via detectSessionStatus().
@@ -112,8 +112,8 @@ export async function GET(
     // Extract realtime snippet (last 100 lines for better context)
     const realtimeSnippet = lines.slice(-100).join('\n');
 
-    // Get auto-yes state
-    const autoYesState = getAutoYesState(params.id);
+    // Get auto-yes state (Issue #525: per-agent)
+    const autoYesState = getAutoYesState(params.id, cliToolId);
 
     return NextResponse.json({
       isRunning: true,
@@ -145,8 +145,8 @@ export async function GET(
       isSelectionListActive,
       // Issue #138: Server-side response timestamp for duplicate prevention
       lastServerResponseTimestamp,
-      // Issue #501: Whether server-side auto-yes poller is active for this worktree
-      serverPollerActive: isPollerActive(params.id),
+      // Issue #501, #525: Whether server-side auto-yes poller is active (per-agent)
+      serverPollerActive: isPollerActive(compositeKey),
     });
   } catch (error: unknown) {
     logger.error('error-getting-current-output:', { error: error instanceof Error ? error.message : String(error) });

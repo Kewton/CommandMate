@@ -1,0 +1,48 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 168,
+  "applied_findings": [
+    {
+      "id": "IS7-001",
+      "severity": "should_fix",
+      "description": "worktrees.last_user_message デノーマライズフィールドがセッションアーカイブ後も古い値を保持する",
+      "action": "影響範囲セクションに「worktrees.last_user_message のデノーマライズフィールド」サブセクションを新設。対応方針としてkill-session後にNULLクリアする処理を明記。タスク2にクリア処理のチェックボックスを追加。受入条件にlast_user_messageクリアの検証項目を追加。"
+    },
+    {
+      "id": "IS7-002",
+      "severity": "should_fix",
+      "description": "テスト影響範囲にdb-repository-delete.test.tsとapi-repository-delete.test.tsが含まれていない",
+      "action": "既存テストへの影響セクションに両ファイルを追加（ON DELETE CASCADE正常動作の確認、変更不要だが検証対象として認識）。タスク5にも両ファイルのチェックボックスを追加。"
+    },
+    {
+      "id": "IS7-003",
+      "severity": "should_fix",
+      "description": "テスト影響範囲にdb-migrations.test.tsが含まれていない",
+      "action": "既存テストへの影響セクションにdb-migrations.test.tsを追加（新マイグレーションバージョンのテストケース追加: archivedカラム存在確認、デフォルト値確認、idx_messages_archivedインデックス確認）。タスク5にもチェックボックスを追加。"
+    },
+    {
+      "id": "IS7-004",
+      "severity": "nice_to_have",
+      "description": "idx_messages_archivedインデックスの検証テスト場所が不明確",
+      "action": "db-migrations.test.tsのテストケース記述にidx_messages_archivedインデックス確認を明記（IS7-003の反映に含めて対応）。"
+    },
+    {
+      "id": "IS7-005",
+      "severity": "nice_to_have",
+      "description": "deleteMessageByIdがarchived方式導入後も物理削除のままで問題ないかの方針が不明確",
+      "action": "DB関数一覧テーブルにdeleteMessageByIdを追加し、orphanedメッセージは物理削除のまま（履歴保持不要）の方針を明記。"
+    },
+    {
+      "id": "IS7-006",
+      "severity": "nice_to_have",
+      "description": "DB関数一覧テーブルにresponse-poller.ts, worktree-status-helper.tsの呼び出し元情報がない",
+      "action": "getLastMessageとmarkPendingPromptsAsAnsweredの影響列に「response-poller.ts, worktree-status-helper.ts でも使用」を追記。"
+    }
+  ],
+  "skipped_findings": [],
+  "must_fix_applied": 0,
+  "should_fix_applied": 3,
+  "nice_to_have_applied": 3,
+  "issue_updated": true
+}

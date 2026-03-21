@@ -4,6 +4,8 @@
  * Extracted from auto-yes-manager.ts (Issue #479) to separate polling logic
  * from state management.
  *
+ * Issue #525: Composite key migration (worktreeId:cliToolId) for per-agent auto-yes.
+ *
  * Dependencies: auto-yes-state.ts (one-way dependency).
  * auto-yes-poller.ts -> auto-yes-state.ts
  */
@@ -29,6 +31,10 @@ import { createLogger } from '@/lib/logger';
 const logger = createLogger('auto-yes-poller');
 import { isValidWorktreeId } from './security/path-validator';
 import {
+  buildCompositeKey,
+  extractWorktreeId,
+  extractCliToolId,
+  filterCompositeKeysByWorktree,
   getAutoYesState,
   disableAutoYes,
   checkStopCondition,
@@ -44,7 +50,7 @@ import {
 // Poller Types
 // =============================================================================
 
-/** Poller state for a worktree (Issue #138) */
+/** Poller state for a worktree/agent (Issue #138, #525) */
 export interface AutoYesPollerState {
   /** setTimeout ID */
   timerId: ReturnType<typeof setTimeout> | null;
@@ -74,6 +80,7 @@ export interface StartPollingResult {
 
 // =============================================================================
 // In-memory State (globalThis for hot reload persistence - Issue #153)
+// Issue #525: Map key changed from worktreeId to compositeKey
 // =============================================================================
 
 declare global {
@@ -86,26 +93,21 @@ const autoYesPollerStates = globalThis.__autoYesPollerStates ??
   (globalThis.__autoYesPollerStates = new Map<string, AutoYesPollerState>());
 
 // =============================================================================
-// Poller State Accessors
+// Poller State Accessors (compositeKey-based)
 // =============================================================================
 
 /**
- * Get poller state for a worktree.
- * Returns undefined if no poller state exists.
+ * Get poller state by composite key.
  *
- * Issue #323: Introduced for consistency with getAutoYesState() accessor pattern (DR003).
- *
- * @param worktreeId - Worktree identifier
+ * @param compositeKey - Composite key (worktreeId:cliToolId)
  * @returns Poller state or undefined
  */
-function getPollerState(worktreeId: string): AutoYesPollerState | undefined {
-  return autoYesPollerStates.get(worktreeId);
+function getPollerState(compositeKey: string): AutoYesPollerState | undefined {
+  return autoYesPollerStates.get(compositeKey);
 }
 
 /**
  * Get the number of active pollers.
- *
- * @returns Count of currently active polling instances
  */
 export function getActivePollerCount(): number {
   return autoYesPollerStates.size;
@@ -122,36 +124,38 @@ export function clearAllPollerStates(): void {
 }
 
 /**
- * Get the last server response timestamp for a worktree.
- * Used by clients to prevent duplicate responses.
+ * Get the last server response timestamp for a composite key.
  *
- * @param worktreeId - Worktree identifier
+ * Issue #525: Changed from (worktreeId) to (compositeKey).
+ *
+ * @param compositeKey - Composite key (worktreeId:cliToolId)
  * @returns Timestamp (Date.now()) of the last server response, or null if none
  */
-export function getLastServerResponseTimestamp(worktreeId: string): number | null {
-  const pollerState = getPollerState(worktreeId);
+export function getLastServerResponseTimestamp(compositeKey: string): number | null {
+  const pollerState = getPollerState(compositeKey);
   return pollerState?.lastServerResponseTimestamp ?? null;
 }
 
 /**
- * Check if a server-side auto-yes poller is active for a worktree.
- * Used by the client to skip client-side auto-response when the server is handling it.
+ * Check if a server-side auto-yes poller is active for a composite key.
  *
- * @param worktreeId - Worktree identifier
- * @returns true if a poller is actively running for this worktree
+ * Issue #525: Changed from (worktreeId) to (compositeKey).
+ *
+ * @param compositeKey - Composite key (worktreeId:cliToolId)
+ * @returns true if a poller is actively running
  */
-export function isPollerActive(worktreeId: string): boolean {
-  return autoYesPollerStates.has(worktreeId);
+export function isPollerActive(compositeKey: string): boolean {
+  return autoYesPollerStates.has(compositeKey);
 }
 
 /**
  * Update the last server response timestamp.
  *
- * @param worktreeId - Worktree identifier
+ * @param compositeKey - Composite key
  * @param timestamp - Timestamp value (Date.now())
  */
-function updateLastServerResponseTimestamp(worktreeId: string, timestamp: number): void {
-  const pollerState = getPollerState(worktreeId);
+function updateLastServerResponseTimestamp(compositeKey: string, timestamp: number): void {
+  const pollerState = getPollerState(compositeKey);
   if (pollerState) {
     pollerState.lastServerResponseTimestamp = timestamp;
   }
@@ -160,10 +164,10 @@ function updateLastServerResponseTimestamp(worktreeId: string, timestamp: number
 /**
  * Reset error count for a poller and restore the default polling interval.
  *
- * @param worktreeId - Worktree identifier
+ * @param compositeKey - Composite key
  */
-function resetErrorCount(worktreeId: string): void {
-  const pollerState = getPollerState(worktreeId);
+function resetErrorCount(compositeKey: string): void {
+  const pollerState = getPollerState(compositeKey);
   if (pollerState) {
     pollerState.consecutiveErrors = 0;
     pollerState.currentInterval = POLLING_INTERVAL_MS;
@@ -172,34 +176,33 @@ function resetErrorCount(worktreeId: string): void {
 
 /**
  * Increment error count and apply backoff if the threshold is exceeded.
+ * [IA-MF-001] compositeKey-based: extracts worktreeId/cliToolId for disableAutoYes.
  *
- * @param worktreeId - Worktree identifier
+ * @param compositeKey - Composite key
  */
-function incrementErrorCount(worktreeId: string): void {
-  const pollerState = getPollerState(worktreeId);
+function incrementErrorCount(compositeKey: string): void {
+  const pollerState = getPollerState(compositeKey);
   if (pollerState) {
     pollerState.consecutiveErrors++;
     pollerState.currentInterval = calculateBackoffInterval(pollerState.consecutiveErrors);
 
     // Issue #499 Item 5: Auto-stop after consecutive error threshold.
-    // Centralized here (DR1-002) to avoid DRY violation across multiple catch blocks.
     if (pollerState.consecutiveErrors >= AUTO_STOP_ERROR_THRESHOLD) {
-      disableAutoYes(worktreeId, 'consecutive_errors');
-      stopAutoYesPolling(worktreeId);
+      const worktreeId = extractWorktreeId(compositeKey);
+      const cliToolId = extractCliToolId(compositeKey);
+      if (cliToolId) {
+        disableAutoYes(worktreeId, cliToolId, 'consecutive_errors');
+      }
+      stopAutoYesPolling(compositeKey);
     }
   }
 }
 
 /**
  * Check if the given prompt has already been answered recently.
- * Extracted from pollAutoYes() to reduce responsibility concentration (F005/SRP).
  *
- * Returns true only if the prompt key matches AND the response was sent within
- * DUPLICATE_RETRY_EXPIRY_MS. After the expiry window, the same promptKey is
- * retried to handle consecutive identical prompts or failed keystroke sends.
- *
- * @param pollerState - Current poller state containing the last answered prompt key
- * @param promptKey - Composite key of the current prompt (generated by generatePromptKey)
+ * @param pollerState - Current poller state
+ * @param promptKey - Composite key of the current prompt
  * @returns true if the prompt key matches and is within the retry expiry window
  */
 function isDuplicatePrompt(
@@ -219,29 +222,29 @@ function isDuplicatePrompt(
  * Validate that polling context is still valid.
  * Checks pollerState existence and auto-yes enabled state.
  *
- * @sideeffect When returning 'expired', calls stopAutoYesPolling() to clean up
- * the poller state. This side-effect is intentional - separating the check from
- * the cleanup would risk callers forgetting to call stopAutoYesPolling() (DR002).
+ * Issue #525: Changed from (worktreeId, pollerState) to (compositeKey, pollerState).
  *
  * @internal Exported for testing purposes only.
- * @precondition worktreeId is validated by isValidWorktreeId() in startAutoYesPolling()
- * gateway before being registered in globalThis Map. This function assumes worktreeId
- * has already passed that validation.
- * @param worktreeId - Worktree identifier
+ * @param compositeKey - Composite key (worktreeId:cliToolId)
  * @param pollerState - Current poller state (or undefined if not found)
  * @returns 'valid' | 'stopped' | 'expired'
  */
 export function validatePollingContext(
-  worktreeId: string,
+  compositeKey: string,
   pollerState: AutoYesPollerState | undefined
 ): 'valid' | 'stopped' | 'expired' {
   if (!pollerState) return 'stopped';
 
-  const autoYesState = getAutoYesState(worktreeId);
-  // Issue #499 Item 7: getAutoYesState() internally calls isAutoYesExpired() and
-  // disables auto-yes if expired, so checking enabled alone is sufficient.
+  const worktreeId = extractWorktreeId(compositeKey);
+  const cliToolId = extractCliToolId(compositeKey);
+  if (!cliToolId) {
+    stopAutoYesPolling(compositeKey);
+    return 'expired';
+  }
+
+  const autoYesState = getAutoYesState(worktreeId, cliToolId);
   if (!autoYesState?.enabled) {
-    stopAutoYesPolling(worktreeId);
+    stopAutoYesPolling(compositeKey);
     return 'expired';
   }
 
@@ -252,9 +255,6 @@ export function validatePollingContext(
  * Capture tmux session output and strip ANSI escape codes.
  *
  * @internal Exported for testing purposes only.
- * @precondition worktreeId is validated by isValidWorktreeId() in startAutoYesPolling()
- * gateway before being registered in globalThis Map. This function assumes worktreeId
- * has already passed that validation.
  * @param worktreeId - Worktree identifier
  * @param cliToolId - CLI tool type being polled
  * @returns Cleaned output string (ANSI stripped)
@@ -264,9 +264,6 @@ export async function captureAndCleanOutput(
   cliToolId: CLIToolType,
   captureLines?: number
 ): Promise<string> {
-  // Issue #499 Item 3: Use provided captureLines or default to FULL_CAPTURE_LINES.
-  // captureSessionOutput() default is 1000 lines, but tmux buffer capture
-  // requires more to avoid truncating long outputs.
   const lines = captureLines ?? FULL_CAPTURE_LINES;
   const output = await captureSessionOutput(worktreeId, cliToolId, lines);
   return stripBoxDrawing(stripAnsi(output));
@@ -274,60 +271,41 @@ export async function captureAndCleanOutput(
 
 /**
  * Process stop condition check using delta-based approach.
- * Manages baseline length, extracts new content, and delegates
- * pattern matching to existing checkStopCondition().
  *
- * Note: This is a higher-level function that internally calls
- * checkStopCondition() from auto-yes-state.ts for regex pattern matching.
+ * Issue #525: Changed from (worktreeId, ...) to (compositeKey, ...).
  *
  * @internal Exported for testing purposes only.
- * @precondition worktreeId is validated by isValidWorktreeId() in startAutoYesPolling()
- * gateway before being registered in globalThis Map. This function assumes worktreeId
- * has already passed that validation.
- * @param worktreeId - Worktree identifier
+ * @param compositeKey - Composite key (worktreeId:cliToolId)
  * @param pollerState - Current poller state (mutated: stopCheckBaselineLength updated)
  * @param cleanOutput - ANSI-stripped terminal output
  * @returns true if stop condition matched and auto-yes was disabled
  */
 export function processStopConditionDelta(
-  worktreeId: string,
+  compositeKey: string,
   pollerState: AutoYesPollerState,
   cleanOutput: string
 ): boolean {
   if (pollerState.stopCheckBaselineLength < 0) {
-    // First poll: set baseline, skip stop condition check
     pollerState.stopCheckBaselineLength = cleanOutput.length;
     return false;
   }
 
   const baseline = pollerState.stopCheckBaselineLength;
   if (cleanOutput.length > baseline) {
-    // Output grew: check only new content (delta)
     const newContent = cleanOutput.substring(baseline);
     pollerState.stopCheckBaselineLength = cleanOutput.length;
-    return checkStopCondition(worktreeId, newContent, stopAutoYesPolling);
+    return checkStopCondition(compositeKey, newContent, stopAutoYesPolling);
   } else if (cleanOutput.length < baseline) {
-    // Buffer shrank (old lines dropped from scrollback): reset baseline
     pollerState.stopCheckBaselineLength = cleanOutput.length;
   }
-  // If length unchanged: no new content, skip check
 
   return false;
 }
 
 /**
  * Detect prompt in terminal output, resolve auto-answer, and send response.
- * Handles the complete flow: detection -> duplicate check -> answer resolution ->
- * tmux send -> timestamp/error-count update -> promptKey recording.
- *
- * Note: Cooldown scheduling is NOT this function's responsibility.
- * The caller (pollAutoYes() orchestrator) determines scheduling interval
- * based on the return value ('responded' -> cooldown, others -> normal interval).
  *
  * @internal Exported for testing purposes only.
- * @precondition worktreeId is validated by isValidWorktreeId() in startAutoYesPolling()
- * gateway before being registered in globalThis Map. This function assumes worktreeId
- * has already passed that validation.
  * @param worktreeId - Worktree identifier
  * @param pollerState - Current poller state (mutated: lastAnsweredPromptKey updated)
  * @param cliToolId - CLI tool type
@@ -341,19 +319,16 @@ export async function detectAndRespondToPrompt(
   cleanOutput: string,
   precomputedLines?: string[]
 ): Promise<'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'> {
+  const compositeKey = buildCompositeKey(worktreeId, cliToolId);
   try {
     // 1. Detect prompt
     const promptOptions = buildDetectPromptOptions(cliToolId);
-    // Issue #499 Item 1: cleanOutput is already stripped by captureAndCleanOutput()
-    // (which calls stripBoxDrawing in L244), so no need to strip again here.
-    // Issue #499 Item 4: Pass precomputedLines to avoid redundant split('\n')
     const promptDetection = detectPrompt(cleanOutput, {
       ...promptOptions,
       ...(precomputedLines && { precomputedLines }),
     });
 
     if (!promptDetection.isPrompt || !promptDetection.promptData) {
-      // No prompt detected - reset lastAnsweredPromptKey (Issue #306)
       pollerState.lastAnsweredPromptKey = null;
       pollerState.lastAnsweredAt = null;
       return 'no_prompt';
@@ -384,124 +359,93 @@ export async function detectAndRespondToPrompt(
         promptData: promptDetection.promptData,
       });
     } finally {
-      // Issue #405: Ensure cache invalidation even if sendPromptAnswer throws
       invalidateCache(sessionName);
     }
 
     // 5. Update timestamp and reset error count
-    updateLastServerResponseTimestamp(worktreeId, Date.now());
-    resetErrorCount(worktreeId);
+    updateLastServerResponseTimestamp(compositeKey, Date.now());
+    resetErrorCount(compositeKey);
 
     // 6. Record answered prompt key and timestamp
     pollerState.lastAnsweredPromptKey = promptKey;
     pollerState.lastAnsweredAt = Date.now();
 
-    // Log success (without sensitive content)
-    logger.info('poller:response-sent', { worktreeId });
+    logger.info('poller:response-sent', { worktreeId, cliToolId });
 
     return 'responded';
   } catch {
-    // IC003: This catch handles errors from prompt detection/sending only.
-    // incrementErrorCount is called here, and this function never throws,
-    // preventing double incrementErrorCount in the outer pollAutoYes() catch.
-    incrementErrorCount(worktreeId);
-    logger.warn('poller:detect-respond-error', { worktreeId });
+    incrementErrorCount(compositeKey);
+    logger.warn('poller:detect-respond-error', { worktreeId, cliToolId });
     return 'error';
   }
 }
 
 /**
  * Internal polling function that recursively schedules itself via setTimeout.
- * Orchestrates the polling flow by delegating to extracted functions.
- *
- * Issue #323: Refactored from ~139 lines to ~30 lines as an orchestrator.
- * Each responsibility is delegated to a focused function:
- * - validatePollingContext(): Pre-condition checks
- * - captureAndCleanOutput(): tmux output capture + ANSI cleanup
- * - processStopConditionDelta(): Stop condition delta-based check
- * - detectAndRespondToPrompt(): Prompt detection + auto-response
  *
  * @param worktreeId - Worktree identifier
  * @param cliToolId - CLI tool type being polled
  */
 async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<void> {
+  const compositeKey = buildCompositeKey(worktreeId, cliToolId);
+
   // 1. Validate context
-  const pollerState = getPollerState(worktreeId);
-  const contextResult = validatePollingContext(worktreeId, pollerState);
+  const pollerState = getPollerState(compositeKey);
+  const contextResult = validatePollingContext(compositeKey, pollerState);
   if (contextResult !== 'valid') {
     return;
   }
-  // pollerState is guaranteed non-null after 'valid' check
 
   try {
     // 2. Capture and clean output
-    // Issue #499 Item 3: Reduce capture lines when stopPattern is not set
-    const autoYesState = getAutoYesState(worktreeId);
+    const autoYesState = getAutoYesState(worktreeId, cliToolId);
     const captureLines = autoYesState?.stopPattern
       ? FULL_CAPTURE_LINES
       : REDUCED_CAPTURE_LINES;
     const cleanOutput = await captureAndCleanOutput(worktreeId, cliToolId, captureLines);
 
-    // Issue #499 Item 4: Split once and reuse across Thinking check and prompt detection
     const lines = cleanOutput.split('\n');
 
     // 3. Stop condition delta check (Issue #314)
-    if (processStopConditionDelta(worktreeId, pollerState!, cleanOutput)) {
+    if (processStopConditionDelta(compositeKey, pollerState!, cleanOutput)) {
       return;
     }
 
-    // 4. Detect and respond to prompt (BEFORE thinking check)
-    // Prompt detection takes priority over thinking detection because
-    // "esc to interrupt" text from Claude Code's status bar can persist
-    // in the tmux capture buffer even after a prompt appears, causing
-    // false positive thinking detection that blocks auto-yes responses.
-    // Issue #499 Item 4: Pass precomputed lines to avoid redundant split
+    // 4. Detect and respond to prompt
     const result = await detectAndRespondToPrompt(worktreeId, pollerState!, cliToolId, cleanOutput, lines);
     if (result === 'responded') {
-      // Issue #306: Apply cooldown interval after successful response
       scheduleNextPoll(worktreeId, cliToolId, COOLDOWN_INTERVAL_MS);
       return;
     }
 
-    // 5. Thinking check (only when no prompt detected)
-    // Issue #161 Layer 1 / Issue #191: windowing applied to detectThinking()
-    // Moved after prompt detection to prevent "esc to interrupt" false positives
-    // from blocking auto-yes when a prompt is actually present.
+    // 5. Thinking check
     if (result === 'no_prompt') {
       const recentLines = lines.slice(-THINKING_CHECK_LINE_COUNT).join('\n');
       if (detectThinking(cliToolId, recentLines)) {
-        // Issue #499 Item 2: Use extended polling interval during Thinking state
         scheduleNextPoll(worktreeId, cliToolId, THINKING_POLLING_INTERVAL_MS);
         return;
       }
     }
   } catch (error) {
-    // IC003: This catch handles captureAndCleanOutput() or processStopConditionDelta()
-    // errors only. detectAndRespondToPrompt() catches its own errors and returns
-    // 'error' instead of throwing (preventing double incrementErrorCount).
-    incrementErrorCount(worktreeId);
-    logger.warn('poller:poll-error', { worktreeId, error: getErrorMessage(error) });
+    incrementErrorCount(compositeKey);
+    logger.warn('poller:poll-error', { worktreeId, cliToolId, error: getErrorMessage(error) });
   }
 
-  // Schedule next poll (catch block fallthrough or other paths)
   scheduleNextPoll(worktreeId, cliToolId);
 }
 
 /**
  * Schedule the next polling iteration
- * @param overrideInterval - Optional interval in milliseconds (S2-F009: type definition).
- *   When provided (e.g., COOLDOWN_INTERVAL_MS), overrides pollerState.currentInterval.
- *   Type: number | undefined (optional parameter).
  */
 function scheduleNextPoll(
   worktreeId: string,
   cliToolId: CLIToolType,
   overrideInterval?: number
 ): void {
-  const pollerState = getPollerState(worktreeId);
+  const compositeKey = buildCompositeKey(worktreeId, cliToolId);
+  const pollerState = getPollerState(compositeKey);
   if (!pollerState) return;
 
-  // S4-F003: Floor guard - polling interval must not be below POLLING_INTERVAL_MS
   const interval = Math.max(overrideInterval ?? pollerState.currentInterval, POLLING_INTERVAL_MS);
   pollerState.timerId = setTimeout(() => {
     pollAutoYes(worktreeId, cliToolId);
@@ -513,13 +457,11 @@ function scheduleNextPoll(
 // =============================================================================
 
 /**
- * Start server-side auto-yes polling for a worktree.
- * Validates the worktree ID, checks auto-yes state, enforces concurrent poller limits,
- * and begins the polling loop.
+ * Start server-side auto-yes polling for a worktree/agent.
  *
  * @param worktreeId - Worktree identifier (must match WORKTREE_ID_PATTERN)
  * @param cliToolId - CLI tool type to poll for
- * @returns Result indicating whether the poller was started, with reason if not
+ * @returns Result indicating whether the poller was started
  */
 export function startAutoYesPolling(
   worktreeId: string,
@@ -531,26 +473,27 @@ export function startAutoYesPolling(
   }
 
   // Check if auto-yes is enabled
-  const autoYesState = getAutoYesState(worktreeId);
+  const autoYesState = getAutoYesState(worktreeId, cliToolId);
   if (!autoYesState?.enabled) {
     return { started: false, reason: 'auto-yes not enabled' };
   }
 
+  const compositeKey = buildCompositeKey(worktreeId, cliToolId);
+
   // Check concurrent poller limit (DoS protection)
-  // If this worktree already has a poller, don't count it toward the limit
-  const existingPollerState = getPollerState(worktreeId);
+  const existingPollerState = getPollerState(compositeKey);
   if (!existingPollerState && autoYesPollerStates.size >= MAX_CONCURRENT_POLLERS) {
     return { started: false, reason: 'max concurrent pollers reached' };
   }
 
-  // Issue #501: Idempotency check - if existing poller has same cliToolId, reuse it
+  // Issue #501: Idempotency check
   if (existingPollerState && existingPollerState.cliToolId === cliToolId) {
     return { started: true, reason: 'already_running' };
   }
 
   // Stop existing poller if cliToolId changed
   if (existingPollerState) {
-    stopAutoYesPolling(worktreeId);
+    stopAutoYesPolling(compositeKey);
   }
 
   // Create new poller state
@@ -560,11 +503,11 @@ export function startAutoYesPolling(
     consecutiveErrors: 0,
     currentInterval: POLLING_INTERVAL_MS,
     lastServerResponseTimestamp: null,
-    lastAnsweredPromptKey: null,  // S2-F003: initialized to null
+    lastAnsweredPromptKey: null,
     lastAnsweredAt: null,
-    stopCheckBaselineLength: -1,  // Issue #314 fix: -1 = first poll (baseline not set)
+    stopCheckBaselineLength: -1,
   };
-  autoYesPollerStates.set(worktreeId, pollerState);
+  autoYesPollerStates.set(compositeKey, pollerState);
 
   // Start polling immediately
   pollerState.timerId = setTimeout(() => {
@@ -576,46 +519,81 @@ export function startAutoYesPolling(
 }
 
 /**
- * Stop server-side auto-yes polling for a worktree.
- * Clears the timer and removes the poller state.
+ * Stop server-side auto-yes polling by composite key.
  *
- * @param worktreeId - Worktree identifier
+ * Issue #525: Changed from (worktreeId) to (compositeKey).
+ *
+ * @param compositeKey - Composite key (worktreeId:cliToolId)
  */
-export function stopAutoYesPolling(worktreeId: string): void {
-  const pollerState = getPollerState(worktreeId);
+export function stopAutoYesPolling(compositeKey: string): void {
+  const pollerState = getPollerState(compositeKey);
   if (!pollerState) return;
 
-  // Clear timer
   if (pollerState.timerId) {
     clearTimeout(pollerState.timerId);
   }
 
-  // Remove state
-  autoYesPollerStates.delete(worktreeId);
-  logger.info('poller:stopped', { worktreeId });
+  autoYesPollerStates.delete(compositeKey);
+  logger.info('poller:stopped', { compositeKey });
 }
 
 /**
  * Stop all server-side auto-yes polling (graceful shutdown).
- * Clears all timers and removes all poller states.
  */
 export function stopAllAutoYesPolling(): void {
-  for (const [worktreeId, pollerState] of autoYesPollerStates.entries()) {
+  for (const [key, pollerState] of autoYesPollerStates.entries()) {
     if (pollerState.timerId) {
       clearTimeout(pollerState.timerId);
     }
-    logger.info('poller:stopped', { worktreeId, reason: 'shutdown' });
+    logger.info('poller:stopped', { compositeKey: key, reason: 'shutdown' });
   }
   autoYesPollerStates.clear();
 }
 
 /**
- * Get all worktree IDs that have active auto-yes poller entries.
- * Used by periodic resource cleanup to detect orphaned entries.
+ * Get all composite keys that have active auto-yes poller entries.
  *
- * @internal Exported for resource-cleanup and testing purposes.
- * @returns Array of worktree IDs present in the autoYesPollerStates Map
+ * Issue #525: Returns composite keys (worktreeId:cliToolId).
+ *
+ * @returns Array of composite keys present in the autoYesPollerStates Map
  */
-export function getAutoYesPollerWorktreeIds(): string[] {
+export function getAutoYesPollerCompositeKeys(): string[] {
   return Array.from(autoYesPollerStates.keys());
+}
+
+/**
+ * @deprecated Use getAutoYesPollerCompositeKeys() instead. Renamed for clarity (Issue #525).
+ */
+export const getAutoYesPollerWorktreeIds = getAutoYesPollerCompositeKeys;
+
+// =============================================================================
+// byWorktree Helpers (Issue #525)
+// =============================================================================
+
+/**
+ * Stop all auto-yes polling for a given worktreeId (all agents).
+ * [SF-001] Uses shared filterCompositeKeysByWorktree (DRY).
+ *
+ * @param worktreeId - Worktree identifier
+ */
+export function stopAutoYesPollingByWorktree(worktreeId: string): void {
+  const pollerKeys = filterCompositeKeysByWorktree(
+    Array.from(autoYesPollerStates.keys()),
+    worktreeId
+  );
+  pollerKeys.forEach(key => stopAutoYesPolling(key));
+}
+
+/**
+ * Check if any auto-yes poller is active for a given worktreeId.
+ * Uses shared filterCompositeKeysByWorktree (DRY).
+ *
+ * @param worktreeId - Worktree identifier
+ * @returns true if any poller is active for this worktree
+ */
+export function isAnyPollerActiveForWorktree(worktreeId: string): boolean {
+  return filterCompositeKeysByWorktree(
+    Array.from(autoYesPollerStates.keys()),
+    worktreeId
+  ).length > 0;
 }

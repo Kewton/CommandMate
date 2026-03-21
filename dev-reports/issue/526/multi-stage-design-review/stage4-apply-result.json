@@ -1,0 +1,87 @@
+{
+  "issue_number": 526,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘対応",
+  "status": "completed",
+  "target_doc": "dev-reports/design/issue-526-sync-tmux-cleanup-design-policy.md",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "SEC-MF-001",
+        "title": "cleanupWarnings のAPIレスポンスでのサニタイズ不足（情報漏洩）",
+        "status": "applied",
+        "applied_sections": [
+          "Section 9: セキュリティ考慮 - SEC-MF-001 項目追加およびサニタイズ実装方針サブセクション追加",
+          "Section 11: MF-001 syncWorktreesAndCleanup() コード例にサニタイズ処理を組み込み",
+          "Section 5: APIレスポンスフォーマットの cleanupWarnings 注釈にサニタイズ済みである旨を追記",
+          "Section 12: Step 3 チェックリストにサニタイズ実装項目を追加",
+          "Section 12: Step 8 セキュリティ確認チェックリストを新設",
+          "Section 15: Stage 4 レビュー指摘事項セクションを新設"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-SF-001",
+        "title": "worktrees.ts の exec 使用の技術的負債記録",
+        "status": "applied",
+        "applied_sections": [
+          "Section 9: セキュリティ考慮 - execFile移行推奨の技術的負債コメントを追記",
+          "Section 15: Stage 4 レビュー指摘事項セクション"
+        ]
+      },
+      {
+        "id": "SEC-SF-002",
+        "title": "並列実行時のリソース枯渇に対する同時実行数の明確化",
+        "status": "applied",
+        "applied_sections": [
+          "Section 9: セキュリティ考慮 - 最大同時実行数の制約とp-limit検討を追記",
+          "Section 12: Step 7 チェックリストに同時実行数制限の確認項目を追加",
+          "Section 15: Stage 4 レビュー指摘事項セクション"
+        ]
+      },
+      {
+        "id": "SEC-SF-003",
+        "title": "sync APIの並列呼び出し時のTOCTOU問題",
+        "status": "applied",
+        "applied_sections": [
+          "Section 9: セキュリティ考慮 - killSession冪等性による安全性の記載を追記",
+          "Section 12: Step 8 チェックリストに二重クリーンアップ安全性確認を追加",
+          "Section 15: Stage 4 レビュー指摘事項セクション"
+        ]
+      },
+      {
+        "id": "SEC-SF-004",
+        "title": "ログ出力における worktreeId のサニタイズ",
+        "status": "applied",
+        "applied_sections": [
+          "Section 9: セキュリティ考慮 - worktreeId文字種制約の確認とサニタイズを追記",
+          "Section 12: Step 8 チェックリストにworktreeId文字種確認を追加",
+          "Section 15: Stage 4 レビュー指摘事項セクション"
+        ]
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-C-001",
+        "title": "sync/scan/restore APIの認証はmiddleware.tsで保護されている",
+        "status": "recorded",
+        "note": "対応不要。Section 15 に記録"
+      },
+      {
+        "id": "SEC-C-002",
+        "title": "エラーレスポンスの500エラー時にerror.messageが露出している",
+        "status": "recorded",
+        "note": "本Issue範囲外。別途改善Issue起票を検討。Section 15 に記録"
+      },
+      {
+        "id": "SEC-C-003",
+        "title": "killSession() の execFile 使用は安全",
+        "status": "recorded",
+        "note": "対応不要。Section 15 に記録"
+      }
+    ]
+  },
+  "summary": "Stage 4 セキュリティレビューの全指摘事項を設計方針書に反映完了。Must Fix 1件（SEC-MF-001: cleanupWarningsサニタイズ）はsyncWorktreesAndCleanup()内でのサニタイズ処理として設計に組み込み済み。Should Fix 4件は全てSection 9およびチェックリストに反映済み。Consider 3件は参考情報として記録済み。",
+  "timestamp": "2026-03-20T12:30:00Z"
+}

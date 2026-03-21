@@ -120,8 +120,8 @@ export const AutoYesToggle = memo(function AutoYesToggle({
       </button>
       <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Auto Yes</span>
 
-      {/* Active CLI tool indicator */}
-      {enabled && cliToolName && (
+      {/* Active CLI tool indicator (Issue #525: show regardless of enabled state) */}
+      {cliToolName && (
         <span className="text-xs text-cyan-600 dark:text-cyan-400 font-medium" aria-label="Auto Yes target">
           ({getCliToolDisplayNameSafe(cliToolName, '')})
         </span>

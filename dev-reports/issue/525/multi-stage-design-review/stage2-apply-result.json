@@ -1,0 +1,76 @@
+{
+  "issue_number": 525,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘事項対応",
+  "status": "applied",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "CS-MF-001",
+        "title": "setAutoYesEnabled のシグネチャ変更と auto-yes/route.ts POST での呼び出しの不整合",
+        "action": "Section 4-3 POST コード例を完全なコード例に置き換え、cliToolId を第2引数として明示的に渡すよう修正。enable/disable両方の処理フローを記載。",
+        "sections_modified": ["4-3", "14"]
+      },
+      {
+        "id": "CS-MF-002",
+        "title": "checkStopCondition の onStopMatched コールバックシグネチャの矛盾",
+        "action": "Section 4-1 の関数シグネチャ変更表の直後に詳細注記を追加。onStopMatched コールバック型の変更前後、影響範囲（processStopConditionDelta, disableAutoYes連鎖）を明記。",
+        "sections_modified": ["4-1", "14"]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "CS-SF-001",
+        "title": "startAutoYesPolling のIdempotencyチェック設計と既存実装の差異",
+        "action": "Section 4-2 の startAutoYesPolling コード例に設計意図コメントを追加。compositeKey化によりcliToolId比較が不要になる理由、停止済みポーラーの削除処理を追記。",
+        "sections_modified": ["4-2", "14"]
+      },
+      {
+        "id": "CS-SF-002",
+        "title": "current-output/route.ts で cliTool バリデーション欠落",
+        "action": "Section 4-3 の current-output コード例に isCliToolType() によるバリデーション処理と400エラーレスポンスを追加。",
+        "sections_modified": ["4-3", "14"]
+      },
+      {
+        "id": "CS-SF-003",
+        "title": "CLIToolTypeの数が「最大4」ではなく「最大5」",
+        "action": "Section 8 のポーラー数/worktreeを「最大5」に修正、具体的なツール名（claude, codex, gemini, vibe-local, opencode）を列挙、上限到達計算を10 worktreesに修正。",
+        "sections_modified": ["8", "14"]
+      },
+      {
+        "id": "CS-SF-004",
+        "title": "session-cleanup.ts でのbyWorktreeヘルパーと既存ループの比較検討欠落",
+        "action": "Section 4-4 にアプローチA（byWorktreeヘルパー）とアプローチB（既存forループ内統合）の比較検討表と採用理由を追加。",
+        "sections_modified": ["4-4", "14"]
+      }
+    ],
+    "consider": [
+      {
+        "id": "CS-C-001",
+        "title": "isValidCliTool 関数の重複定義",
+        "action": "Stage 2 Consider詳細セクションに記録。Section 4-3 current-output コード例で isCliToolType() 使用を反映。",
+        "sections_modified": ["4-3", "13"]
+      },
+      {
+        "id": "CS-C-002",
+        "title": "disableAutoYes のシグネチャ変更が不完全",
+        "action": "Stage 2 Consider詳細セクションに記録。実装チェックリストに追加。",
+        "sections_modified": ["13", "14"]
+      },
+      {
+        "id": "CS-C-003",
+        "title": "processStopConditionDelta での compositeKey 渡し方の明示がない",
+        "action": "CS-MF-002の注記内で言及。Stage 2 Consider詳細セクションに記録。",
+        "sections_modified": ["4-1", "13", "14"]
+      },
+      {
+        "id": "CS-C-004",
+        "title": "worktree-status-helper.ts の getLastServerResponseTimestamp 呼び出し方が不明確",
+        "action": "Stage 2 Consider詳細セクションに記録。実装チェックリストに追加。",
+        "sections_modified": ["13", "14"]
+      }
+    ]
+  },
+  "updated_file": "dev-reports/design/issue-525-auto-yes-per-agent-design-policy.md",
+  "timestamp": "2026-03-20T12:30:00Z"
+}

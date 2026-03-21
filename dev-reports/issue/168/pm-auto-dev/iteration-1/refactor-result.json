@@ -1,0 +1,59 @@
+{
+  "issue_number": 168,
+  "status": "success",
+  "findings": [
+    {
+      "type": "consistency",
+      "severity": "medium",
+      "location": "src/lib/db/worktree-db.ts",
+      "description": "Three SQL subqueries used hardcoded 'AND archived = 0' instead of the ACTIVE_FILTER constant from chat-db.ts. This violates DRY and the single-point-of-change design documented in chat-db.ts.",
+      "action": "fixed"
+    },
+    {
+      "type": "design_review",
+      "severity": "low",
+      "location": "src/app/api/worktrees/[id]/kill-session/route.ts",
+      "description": "clearLastUserMessage is called unconditionally even when targeting a specific CLI tool (targetCliTool). If other CLI tools still have active messages, their last_user_message context is lost. However, since last_user_message is a worktree-level field (not per-tool), this is acceptable for now - clearing stale data is safer than showing incorrect data.",
+      "action": "noted"
+    },
+    {
+      "type": "code_quality",
+      "severity": "info",
+      "location": "src/lib/db/chat-db.ts",
+      "description": "ACTIVE_FILTER constant is well-designed and consistently used across all chat-db.ts queries. The deleteAllMessages function correctly uses ACTIVE_FILTER to avoid re-archiving already archived messages.",
+      "action": "no_change_needed"
+    },
+    {
+      "type": "code_quality",
+      "severity": "info",
+      "location": "tests/unit/db-archived-messages.test.ts",
+      "description": "Test suite is comprehensive with 15 tests covering all key scenarios: create, archive, filter, includeArchived, per-CLI-tool archiving, clearLastUserMessage, CASCADE deletion, and idempotent re-archiving.",
+      "action": "no_change_needed"
+    },
+    {
+      "type": "code_quality",
+      "severity": "info",
+      "location": "src/components/worktree/HistoryPane.tsx",
+      "description": "Toggle UI for showArchived is clean and follows the existing pattern. Conditional rendering via onShowArchivedChange guard is correct.",
+      "action": "no_change_needed"
+    }
+  ],
+  "changes_made": [
+    {
+      "file": "src/lib/db/worktree-db.ts",
+      "description": "Imported ACTIVE_FILTER from chat-db.ts and replaced 3 hardcoded 'AND archived = 0' with ${ACTIVE_FILTER} interpolation in getLastMessagesByCliBatch, getWorktrees, and getWorktreeById subqueries. This ensures a single point of change for the archived filter clause."
+    }
+  ],
+  "quality_checks": {
+    "tsc": "pass",
+    "lint": "pass",
+    "tests": "pass (1 pre-existing failure in git-utils.test.ts unrelated to Issue #168; all 15 db-archived-messages tests pass)"
+  },
+  "files_changed": [
+    "src/lib/db/worktree-db.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  }
+}

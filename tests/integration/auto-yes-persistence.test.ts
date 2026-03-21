@@ -36,10 +36,10 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
     clearAllPollerStates();
 
     // Set auto-yes enabled for a worktree
-    setAutoYesEnabled('test-worktree-reload', true);
+    setAutoYesEnabled('test-worktree-reload', 'claude', true);
 
     // Verify state is set
-    const stateBeforeReload = getAutoYesState('test-worktree-reload');
+    const stateBeforeReload = getAutoYesState('test-worktree-reload', 'claude');
     expect(stateBeforeReload?.enabled).toBe(true);
 
     // 2. Simulate module reload
@@ -50,7 +50,7 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
       await import('@/lib/polling/auto-yes-manager');
 
     // 4. Verify state persists after reload
-    const stateAfterReload = getAutoYesStateAfter('test-worktree-reload');
+    const stateAfterReload = getAutoYesStateAfter('test-worktree-reload', 'claude');
     expect(stateAfterReload?.enabled).toBe(true);
   });
 
@@ -70,7 +70,7 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
     clearAllPollerStates();
 
     // Enable auto-yes and start polling
-    setAutoYesEnabled('test-poller-reload', true);
+    setAutoYesEnabled('test-poller-reload', 'claude', true);
     const result = startAutoYesPolling('test-poller-reload', 'claude');
     expect(result.started).toBe(true);
     expect(getActivePollerCount()).toBe(1);
@@ -99,7 +99,7 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
     clearAllPollerStates();
 
     // Set state and capture globalThis reference
-    setAutoYesEnabled('test-reference', true);
+    setAutoYesEnabled('test-reference', 'claude', true);
     const mapRefBefore = globalThis.__autoYesStates;
     expect(mapRefBefore).toBeInstanceOf(Map);
 
@@ -122,8 +122,8 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
     clearAllAutoYesStates();
     clearAllPollerStates();
 
-    setAutoYesEnabled('test-clear-reload', true);
-    expect(globalThis.__autoYesStates?.has('test-clear-reload')).toBe(true);
+    setAutoYesEnabled('test-clear-reload', 'claude', true);
+    expect(globalThis.__autoYesStates?.has('test-clear-reload:claude')).toBe(true);
 
     // 2. Simulate module reload
     vi.resetModules();
@@ -135,7 +135,7 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
     clearAfter();
 
     // 4. Verify state is cleared
-    expect(getAfter('test-clear-reload')).toBeNull();
+    expect(getAfter('test-clear-reload', 'claude')).toBeNull();
     expect(globalThis.__autoYesStates?.size).toBe(0);
   });
 
@@ -163,7 +163,7 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
     clearAllPollerStates();
 
     // Set auto-yes enabled with 3-hour duration (10800000ms)
-    const stateBeforeReload = setAutoYesEnabled('test-duration-reload', true, 10800000);
+    const stateBeforeReload = setAutoYesEnabled('test-duration-reload', 'claude', true, 10800000);
     expect(stateBeforeReload.enabled).toBe(true);
     const expectedExpiresAt = stateBeforeReload.expiresAt;
 
@@ -178,7 +178,7 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
       await import('@/lib/polling/auto-yes-manager');
 
     // 4. Verify state persists with correct expiresAt after reload
-    const stateAfterReload = getAutoYesStateAfter('test-duration-reload');
+    const stateAfterReload = getAutoYesStateAfter('test-duration-reload', 'claude');
     expect(stateAfterReload?.enabled).toBe(true);
     expect(stateAfterReload?.expiresAt).toBe(expectedExpiresAt);
   });

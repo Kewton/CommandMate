@@ -46,10 +46,13 @@ export {
   deleteMessageById,
   deleteMessagesByCliTool,
   updateLastUserMessage,
+  clearLastUserMessage,
   getMessageById,
   updatePromptData,
   markPendingPromptsAsAnswered,
+  ACTIVE_FILTER,
 } from './chat-db';
+export type { GetMessagesOptions } from './chat-db';
 
 // session-db
 export {

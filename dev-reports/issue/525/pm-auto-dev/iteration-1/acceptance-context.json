@@ -1,0 +1,26 @@
+{
+  "issue_number": 525,
+  "feature_summary": "Auto-Yesエージェント毎独立制御 - 状態管理キーをworktreeIdからworktreeId:cliToolIdの複合キーに変更",
+  "acceptance_criteria": [
+    "UIから各エージェント毎にauto-yesを独立してON/OFFできる",
+    "どのエージェントでauto-yesが有効か、残り時間も含めて一目で分かる",
+    "CLIからの設定変更（commandmate auto-yes --agent claude）がUIにリアルタイム反映される",
+    "UIからの設定変更がCLIの commandmate capture --json のautoYesフィールドに反映される",
+    "複数エージェント（例: Claude + Codex）で同時にauto-yesを有効化でき、期間・停止条件を個別設定可能",
+    "既存のauto-yes動作（単一エージェント利用時）に影響がない",
+    "確認ダイアログに対象エージェント名が表示される",
+    "セッション停止・リソースクリーンアップ時に全エージェント分のauto-yes状態が正しくクリーンアップされる"
+  ],
+  "test_scenarios": [
+    "シナリオ1: buildCompositeKey/extractWorktreeId/extractCliToolIdが正しくキーを生成・分解できること",
+    "シナリオ2: 同一worktreeで異なるエージェント（claude + codex）に別々のauto-yes設定を保持できること",
+    "シナリオ3: エージェントA無効化時にエージェントBの設定が保持されること",
+    "シナリオ4: POST APIで不正cliToolIdが400エラーで拒否されること（フォールバックなし）",
+    "シナリオ5: GET APIでcliToolIdパラメータによるフィルタリングが正しく動作すること",
+    "シナリオ6: session-cleanup時に全エージェント分のauto-yes状態がクリーンアップされること",
+    "シナリオ7: resource-cleanup時にcompositeKeyからworktreeIdを正しく抽出してDB照合できること",
+    "シナリオ8: AutoYesToggleにエージェント名が表示されること",
+    "シナリオ9: AutoYesConfirmDialogに対象エージェント名が表示されること",
+    "シナリオ10: current-output APIがcliToolパラメータに対応するエージェントのauto-yes状態を返すこと"
+  ]
+}

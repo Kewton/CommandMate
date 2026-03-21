@@ -26,6 +26,7 @@ vi.mock('@/lib/session-cleanup', () => ({
     results: [],
     warnings: [],
   }),
+  killWorktreeSession: vi.fn().mockResolvedValue(false),
 }));
 
 // Mock ws-server

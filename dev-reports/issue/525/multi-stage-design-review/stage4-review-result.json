@@ -1,0 +1,154 @@
+{
+  "issue_number": 525,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "SEC4-MF-001",
+        "category": "A03:2021 Injection",
+        "title": "extractWorktreeId のフォールバック動作が未検証入力をそのまま返すリスク",
+        "description": "extractWorktreeId(compositeKey) はコロンが含まれない場合に元の文字列をそのまま返す。この戻り値が isValidWorktreeId() バリデーションなしに後続処理（DB照合等）に渡された場合、不正な文字列がworktreeIdとして扱われるリスクがある。設計方針書Section 4-1のMF-001ではdeleteAutoYesStateとcheckStopConditionについてバリデーション方針を定義しているが、extractWorktreeIdの戻り値を使用する全ての箇所（特にresource-cleanup.tsのcleanupOrphanedMapEntriesやstopAutoYesPollingByWorktree内部）でバリデーションが行われることが明示的に保証されていない。",
+        "recommendation": "extractWorktreeId の全使用箇所で、戻り値に対する isValidWorktreeId() チェックを必須とする設計ルールを明記するか、extractWorktreeId 自体にバリデーションを組み込み、不正な場合は例外をスローまたは空文字列を返す仕様に変更すること。特に resource-cleanup.ts の cleanupOrphanedMapEntries 内で extractWorktreeId の結果を DB 照合する前にバリデーションを行うことを設計方針書に追記すること。",
+        "owasp_category": "A03:2021 Injection",
+        "severity": "Medium"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC4-SF-001",
+        "category": "A04:2021 Insecure Design",
+        "title": "MAX_CONCURRENT_POLLERS=50 のリソース枯渇リスク再評価不足",
+        "description": "compositeKey化により同一worktreeで最大5ポーラーが同時稼働可能になる。MAX_CONCURRENT_POLLERS=50は全compositeKey合計で制御されるため、10 worktrees x 5 agents で上限到達する。しかし、設計方針書では「実運用では2エージェント同時が典型的」との記載のみで、悪意あるクライアントが全worktreeの全エージェントに対してauto-yesを有効化する攻撃シナリオの分析が不足している。認証済みクライアントが短時間に大量のPOSTリクエストを送信してポーラーを飽和させるDoSベクトルが存在する。",
+        "recommendation": "1) per-worktreeのポーラー上限（例: MAX_POLLERS_PER_WORKTREE=3）の導入を検討し設計方針書に記載すること。2) auto-yes POST APIエンドポイントに対するレート制限の必要性について明示的に検討結果を記載すること（既知の課題として過去のレビュー Issue #153, #225 でも指摘されている）。",
+        "owasp_category": "A04:2021 Insecure Design",
+        "severity": "Low"
+      },
+      {
+        "id": "SEC4-SF-002",
+        "category": "A01:2021 Broken Access Control",
+        "title": "POST APIでcliToolIdバリデーション失敗時のデフォルトフォールバックが暗黙的",
+        "description": "設計方針書Section 4-3のPOST APIで、body.cliToolIdが無効な値の場合に400エラーを返す設計になっているが、既存実装(route.ts L156-158)ではisValidCliToolがfalseの場合にデフォルト'claude'にフォールバックしている。設計方針書の設計（400エラー返却）と既存実装のフォールバック動作が異なる。不正なcliToolIdが暗黙的にclaudeエージェントとして処理されると、意図しないエージェントにauto-yesが有効化されるリスクがある。",
+        "recommendation": "設計方針書の400エラー返却方針を明確に採用し、既存のフォールバック動作を廃止することを実装チェックリストに追加すること。不正なcliToolIdは明示的に拒否し、クライアントに修正を求めるべきである。後方互換性のためcliToolId省略時のデフォルト'claude'は維持してよいが、不正値のフォールバックは許容しないこと。",
+        "owasp_category": "A01:2021 Broken Access Control",
+        "severity": "Medium"
+      },
+      {
+        "id": "SEC4-SF-003",
+        "category": "A05:2021 Security Misconfiguration",
+        "title": "GET APIのcliToolIdパラメータ省略時にバリデーションなしで全キーを走査",
+        "description": "設計方針書Section 4-3のGET APIで、cliToolIdパラメータ省略時にgetCompositeKeysByWorktree(params.id)を呼び出して全エージェントの状態をマップ形式で返却する。この際、params.idに対するisValidWorktreeId()バリデーションがGETハンドラ内に明示されていない（POSTには存在する）。既存実装でもGET側にはworktreeIdフォーマット検証がなく、validateWorktreeExists()によるDB存在チェックのみである。",
+        "recommendation": "GET APIハンドラの先頭にもisValidWorktreeId(params.id)バリデーションを追加する設計を明記すること。POST側と同等のセキュリティレベルをGET側にも適用すべきである。",
+        "owasp_category": "A05:2021 Security Misconfiguration",
+        "severity": "Low"
+      },
+      {
+        "id": "SEC4-SF-004",
+        "category": "A04:2021 Insecure Design",
+        "title": "compositeKey区切り文字':'に対するエスケープ戦略の欠如",
+        "description": "設計方針書Section 3で「worktreeIdにコロンが含まれる可能性は低い（isValidWorktreeId()で英数字+ハイフンに制限）」と記載し、lastIndexOfで最後のコロンで分割する設計としている。現時点では安全だが、将来worktreeIdのバリデーションルールが変更された場合にcompositeKeyの分解が破壊されるリスクがある。この依存関係が暗黙的であり、isValidWorktreeIdの変更時にcompositeKey設計への影響を認識できない可能性がある。",
+        "recommendation": "1) COMPOSITE_KEY_SEPARATORにコロンを使用する前提としてworktreeIdにコロンを含まないことが必須である旨をbuildCompositeKeyのJSDocに明記すること。2) buildCompositeKey内でworktreeIdにCOMPOSITE_KEY_SEPARATORが含まれていないことをアサーションで検証する防御的コードの追加を設計に盛り込むこと。",
+        "owasp_category": "A04:2021 Insecure Design",
+        "severity": "Low"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC4-C-001",
+        "category": "A09:2021 Security Logging and Monitoring Failures",
+        "title": "compositeKeyバリデーション失敗時のセキュリティログ出力",
+        "description": "MF-001で定義されたcompositeKeyバリデーション（deleteAutoYesState、checkStopCondition内）が失敗した場合、現設計ではfalse返却/早期リターンのみで、セキュリティログの出力について言及がない。バリデーション失敗は不正な入力の試行を示す可能性があり、監視の観点からログ記録が望ましい。",
+        "recommendation": "compositeKeyバリデーション失敗時にlogger.warnレベルでの記録を推奨。攻撃検知やデバッグに有用。"
+      },
+      {
+        "id": "SEC4-C-002",
+        "category": "A08:2021 Software and Data Integrity Failures",
+        "title": "byWorktreeヘルパーの線形走査によるタイミング攻撃の可能性",
+        "description": "getCompositeKeysByWorktree等のbyWorktreeヘルパーはMap全キーを線形走査してフィルタリングする。エントリ数が増加した場合、走査時間がエントリ数に比例し、理論的にはタイミングサイドチャネルとなりうる。ただし、本システムはローカルネットワーク内での使用が前提であり、MAX_CONCURRENT_POLLERS=50の制限によりエントリ数は有界であるため、実質的なリスクは極めて低い。",
+        "recommendation": "現時点で対応不要。MAX_CONCURRENT_POLLERS制限により実質的なリスクはない。"
+      },
+      {
+        "id": "SEC4-C-003",
+        "category": "A07:2021 Identification and Authentication Failures",
+        "title": "auto-yes APIエンドポイントのレート制限の継続検討",
+        "description": "Issue #153, #225のレビューでも指摘されているが、auto-yes POST APIにレート制限が存在しない。compositeKey化により攻撃面が拡大（worktree数 x agent数）するため、この既知の課題の重要性が相対的に増加する。ただし、認証ミドルウェアにより未認証リクエストは拒否されるため、リスクは認証済みクライアントからの攻撃に限定される。",
+        "recommendation": "将来のIssueとしてレート制限の導入を検討すること。本Issueのスコープ外とすることは妥当だが、リスク認識として設計方針書に記載を推奨。"
+      }
+    ]
+  },
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "pass_with_notes",
+      "notes": "worktreeIdバリデーション(isValidWorktreeId)とDB存在チェック(validateWorktreeExists)が維持される。cliToolIdホワイトリスト検証も実装。ただしGET APIにisValidWorktreeIdが欠落している点をSEC4-SF-003で指摘。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "pass",
+      "notes": "本変更にはデータ暗号化や機密情報の保存に関する変更はない。"
+    },
+    "A03_injection": {
+      "status": "conditional_pass",
+      "notes": "compositeKeyの生成・分解における入力バリデーションは設計されているが、extractWorktreeIdの全使用箇所でのバリデーション保証が不十分(SEC4-MF-001)。既存のtmuxコマンドサニタイズ、SQLパラメータバインディングは変更なし。"
+    },
+    "A04_insecure_design": {
+      "status": "pass_with_notes",
+      "notes": "MAX_CONCURRENT_POLLERS制限は維持されるが、per-worktree上限の欠如(SEC4-SF-001)とcompositeKey区切り文字の暗黙的依存(SEC4-SF-004)を指摘。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass_with_notes",
+      "notes": "GET APIのworktreeIdバリデーション欠落(SEC4-SF-003)を指摘。duration/stopPatternのバリデーションは維持。"
+    },
+    "A06_vulnerable_components": {
+      "status": "pass",
+      "notes": "本変更で新たな外部依存は追加されない。"
+    },
+    "A07_identification_authentication": {
+      "status": "pass",
+      "notes": "認証ミドルウェア(middleware.ts)は変更なし。全APIエンドポイントは認証保護下にある。"
+    },
+    "A08_data_integrity": {
+      "status": "pass",
+      "notes": "in-memory状態管理の整合性はcompositeKeyの一貫した使用で担保される。globalThisパターンは既存設計を維持。"
+    },
+    "A09_logging_monitoring": {
+      "status": "pass_with_notes",
+      "notes": "既存のlogger使用は維持。compositeKeyバリデーション失敗時のログ出力をSEC4-C-001で推奨。"
+    },
+    "A10_ssrf": {
+      "status": "not_applicable",
+      "notes": "本変更にSSRFに関連する外部リクエスト処理はない。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "security_summary": {
+    "existing_security_maintained": [
+      "worktreeId形式検証 (isValidWorktreeId)",
+      "durationホワイトリスト (isAllowedDuration)",
+      "stopPattern ReDoS防止 (validateStopPattern)",
+      "cliToolIdホワイトリスト検証",
+      "認証ミドルウェア (middleware.ts)",
+      "MAX_CONCURRENT_POLLERS=50 DoS防止",
+      "tmuxコマンドサニタイズ",
+      "指数バックオフ・1時間タイムアウト"
+    ],
+    "new_attack_vectors": [
+      "compositeKeyの不正な形式による分解処理の誤動作",
+      "攻撃面の拡大（worktree数 x agent数のポーラー生成）"
+    ],
+    "mitigations_in_design": [
+      "MF-001: compositeKeyバリデーション戦略（extractWorktreeId + isValidWorktreeId + extractCliToolId + isValidCliTool）",
+      "cliToolIdのホワイトリスト検証（isValidCliTool / isCliToolType）",
+      "MAX_CONCURRENT_POLLERS による全体上限制御"
+    ]
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-525-auto-yes-per-agent-design-policy.md"
+  ],
+  "timestamp": "2026-03-20T12:00:00Z"
+}

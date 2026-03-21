@@ -146,6 +146,63 @@ describe('AutoYesToggle', () => {
   });
 
   // ==========================================================================
+  // Issue #525: Per-agent Auto-Yes display
+  // ==========================================================================
+  describe('Issue #525: Per-agent display', () => {
+    it('should display agent name in label when cliToolName is provided and enabled', () => {
+      render(
+        <AutoYesToggle
+          {...defaultProps}
+          enabled={true}
+          expiresAt={Date.now() + 3600000}
+          cliToolName="claude"
+        />
+      );
+
+      const target = screen.getByLabelText('Auto Yes target');
+      expect(target.textContent).toContain('Claude');
+    });
+
+    it('should display agent name in label when cliToolName is provided and disabled', () => {
+      render(
+        <AutoYesToggle
+          {...defaultProps}
+          enabled={false}
+          cliToolName="claude"
+        />
+      );
+
+      const target = screen.getByLabelText('Auto Yes target');
+      expect(target.textContent).toContain('Claude');
+    });
+
+    it('should not display agent indicator when cliToolName is not provided', () => {
+      render(
+        <AutoYesToggle
+          {...defaultProps}
+          enabled={false}
+        />
+      );
+
+      expect(screen.queryByLabelText('Auto Yes target')).toBeNull();
+    });
+
+    it('should pass cliToolName to confirm dialog for per-agent title', () => {
+      render(
+        <AutoYesToggle
+          {...defaultProps}
+          enabled={false}
+          cliToolName="codex"
+        />
+      );
+      fireEvent.click(screen.getByRole('switch'));
+
+      // Dialog should show tool-specific title
+      expect(screen.getByText(/autoYes\.enableTitleWithTool/)).toBeDefined();
+    });
+  });
+
+  // ==========================================================================
   // Issue #314: stopPattern propagation tests
   // ==========================================================================
   describe('Issue #314: stopPattern propagation', () => {

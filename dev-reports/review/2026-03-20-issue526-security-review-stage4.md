@@ -1,0 +1,144 @@
+# Issue #526 セキュリティレビュー (Stage 4)
+
+## レビュー概要
+
+| 項目 | 内容 |
+|------|------|
+| Issue | #526 syncWorktreesToDB() tmuxセッションクリーンアップ |
+| ステージ | Stage 4: セキュリティレビュー |
+| フォーカス | OWASP Top 10 準拠確認 |
+| 判定 | 条件付き承認 (conditionally_approved) |
+| スコア | 4/5 |
+| レビュー日 | 2026-03-20 |
+
+---
+
+## エグゼクティブサマリー
+
+Issue #526 の設計方針書に対するセキュリティレビューを実施した。本設計は syncWorktreesToDB() の戻り値変更と、クリーンアップ処理の統合が主要な変更であり、新たなエンドポイントの追加や認証フローの変更は含まれない。全体として低リスクな設計だが、APIレスポンスへの内部情報露出について1件の Must Fix 指摘がある。
+
+---
+
+## OWASP Top 10 チェックリスト
+
+| OWASP カテゴリ | 判定 | 備考 |
+|---------------|------|------|
+| A01: Broken Access Control | PASS | sync/scan/restore APIはmiddleware.tsの認証で保護済み |
+| A02: Cryptographic Failures | N/A | 暗号処理の変更なし |
+| A03: Injection | 条件付きPASS | killSession()はexecFile使用で安全。worktrees.tsのexecは変更範囲外 |
+| A04: Insecure Design | 条件付きPASS | cleanupWarningsのAPIレスポンス露出に情報漏洩リスク (SEC-MF-001) |
+| A05: Security Misconfiguration | PASS | 設定変更なし |
+| A06: Vulnerable Components | N/A | 新規依存ライブラリの追加なし |
+| A07: Auth Failures | PASS | 認証フロー変更なし |
+| A08: Data Integrity | PASS | デシリアライゼーションリスクなし |
+| A09: Logging Failures | 条件付きPASS | ログ出力にworktreeId含まれるが外部制御困難 (SEC-SF-004) |
+| A10: SSRF | N/A | 外部リクエスト発行なし |
+
+---
+
+## セキュリティ観点別レビュー結果
+
+### 1. コマンドインジェクション
+
+**killSession() の execFile 使用**: 安全。`tmux.ts` L374 で `execFile('tmux', ['kill-session', '-t', sessionName])` を使用しており、引数は配列で渡されるためシェルインジェクションは発生しない。設計書 Section 9 の記載は正確である。
+
+**worktrees.ts の exec 使用**: 本 Issue の変更範囲外。`scanWorktrees()` で `exec('git worktree list', { cwd: rootDir })` を使用しているが、syncWorktreesToDB() の戻り値変更では exec 使用箇所に触れないため新たなリスクは追加されない。ただし技術的負債として認識すべき (SEC-SF-001)。
+
+**sessionName の生成元**: `tool.getSessionName(worktreeId)` で内部生成されるため、外部入力が直接 execFile の引数に渡されることはない。
+
+### 2. 認証/認可
+
+sync/scan/restore の各APIルートは `middleware.ts` の認証ミドルウェアで保護されている。確認事項:
+- `AUTH_EXCLUDED_PATHS` に `/api/repositories/sync`, `/api/repositories/scan`, `/api/repositories/restore` は含まれていない
+- CM_AUTH_TOKEN_HASH 設定時は Cookie または Bearer トークンによる認証が必須
+- IP制限も認証前に適用される
+
+本設計変更で認証/認可に関する新たなリスクは追加されない。
+
+### 3. DoS対策
+
+設計書 Section 6 で `cleanupMultipleWorktrees()` を `Promise.allSettled()` に変更する設計だが、最悪ケースでの同時実行数制限が未定義。47 worktrees を同時に処理する場合、各 worktree 内で5つの CLI ツールに対して isRunning() + killSession() を実行するため、瞬間的に多数の tmux プロセスが起動する可能性がある (SEC-SF-002)。
+
+### 4. 情報漏洩
+
+設計書 Section 5 (IA-SF-004) で sync/scan/restore の各APIレスポンスに `cleanupWarnings: string[]` フィールドを追加する設計がある。`session-cleanup.ts` のエラーメッセージ生成では `getErrorMessage(error)` が使用されており、内部エラーの詳細（パス、セッション名、スタックトレース）がwarningsに含まれる可能性がある。これがクライアントに返却されると情報漏洩となる (SEC-MF-001)。
+
+### 5. 競合状態
+
+sync API が並列に呼び出された場合、syncWorktreesToDB() のDB削除と cleanupMultipleWorktrees() の間に TOCTOU が発生する可能性があるが、killSession() の冪等性（存在しないセッションに対して false を返す）により実害は限定的 (SEC-SF-003)。
+
+### 6. ログインジェクション
+
+session-cleanup.ts のログ出力に worktreeId が含まれる。worktreeId は Git コマンドの出力から派生するため外部ユーザーが直接制御する値ではないが、ブランチ名由来の worktreeId に改行文字や制御文字が含まれた場合のサニタイズは logger 実装に依存する (SEC-SF-004)。
+
+---
+
+## 指摘事項
+
+### Must Fix (1件)
+
+#### SEC-MF-001: cleanupWarnings にファイルパスやセッション名が含まれ API レスポンスとして外部に露出する
+
+- **OWASP**: A01:2021 Broken Access Control / A04:2021 Insecure Design
+- **深刻度**: Medium
+- **該当箇所**: 設計書 Section 5 (IA-SF-004) の cleanupWarnings フィールド設計
+- **問題**: `session-cleanup.ts` L96-98 のエラーメッセージ生成で `getErrorMessage(error)` を使用しており、内部エラーのスタックトレースやファイルパス、tmuxセッション名（worktreeId と cliToolId を含む）が warnings に含まれる。これが API レスポンスとしてクライアントに返却される。
+- **対策**: API レスポンスに返す cleanupWarnings はサニタイズし、内部的なエラー詳細を除去する。例: 「N件のセッションクリーンアップに失敗しました」のような汎用メッセージに変換し、詳細はサーバーログのみに記録する。
+
+### Should Fix (4件)
+
+#### SEC-SF-001: worktrees.ts の exec 使用が技術的負債として未記録
+
+- **OWASP**: A03:2021 Injection
+- **深刻度**: Low
+- **該当箇所**: 設計書 Section 9 (SF-C04)
+- **対策**: 設計書に「worktrees.ts の exec 使用は将来的に execFile への移行を推奨する」旨の技術的負債コメントを追記する。本 Issue では対応不要。
+
+#### SEC-SF-002: 並列実行時のリソース枯渇に対する同時実行数制限が未定義
+
+- **OWASP**: DoS / Resource Exhaustion
+- **深刻度**: Medium
+- **該当箇所**: 設計書 Section 6 の Promise.allSettled() 導入
+- **対策**: 同時実行数を制限する設計（p-limit 等）を検討するか、最大同時実行数が worktreeIds.length に制限されることを明示する。
+
+#### SEC-SF-003: sync API の並列呼び出し時の TOCTOU 問題
+
+- **OWASP**: Race Condition / TOCTOU
+- **深刻度**: Low
+- **対策**: killSession() の冪等性により安全であることを Section 9 に追記する。
+
+#### SEC-SF-004: ログ出力に worktreeId が含まれるがサニタイズが未確認
+
+- **OWASP**: A09:2021 Security Logging and Monitoring Failures
+- **深刻度**: Low
+- **対策**: worktreeId の文字種制約を設計書に明記するか、logger 実装側での制御文字サニタイズを保証する。
+
+### Consider (3件)
+
+| ID | 内容 | 対策 |
+|----|------|------|
+| SEC-C-001 | sync/scan/restore API の認証は middleware.ts で保護済み | 対応不要 |
+| SEC-C-002 | 500エラー時の error.message 露出は既存問題（変更範囲外） | 別途改善 Issue の起票を検討 |
+| SEC-C-003 | killSession() の execFile 使用は安全 | 対応不要 |
+
+---
+
+## リスク評価
+
+| リスク種別 | レベル | 根拠 |
+|-----------|--------|------|
+| 技術的リスク | Low | 既存パターンの踏襲であり、新たな技術的複雑性は限定的 |
+| セキュリティリスク | Low | 新規エンドポイント追加なし、認証変更なし。情報漏洩リスクは SEC-MF-001 で対処可能 |
+| 運用リスク | Low | クリーンアップ失敗時も部分的成功を許容し、次回 sync で再試行可能 |
+
+---
+
+## 承認条件
+
+SEC-MF-001（cleanupWarnings の情報漏洩対策）を設計書に反映した上で、実装に進むことを推奨する。
+
+---
+
+*Generated by architecture-review-agent for Issue #526*
+*Date: 2026-03-20*
+*Stage: 4 (Security Review)*

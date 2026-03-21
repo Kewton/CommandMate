@@ -205,6 +205,7 @@ describe('worktreeUIReducer', () => {
       content: 'Hello',
       timestamp: new Date(),
       messageType: 'normal',
+      archived: false,
     };
 
     it('should handle SET_MESSAGES action', () => {
@@ -274,6 +275,7 @@ describe('worktreeUIReducer', () => {
         content: 'Response',
         timestamp: new Date(),
         messageType: 'normal',
+        archived: false,
       };
       const action: WorktreeUIAction = { type: 'RESPONSE_RECEIVED', message };
       const result = worktreeUIReducer(initialState, action);
@@ -394,6 +396,7 @@ describe('useWorktreeUIState hook', () => {
       content: 'Response',
       timestamp: new Date(),
       messageType: 'normal',
+      archived: false,
     };
 
     act(() => {

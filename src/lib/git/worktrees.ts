@@ -15,6 +15,17 @@ import { createLogger } from '@/lib/logger';
 const logger = createLogger('worktrees');
 
 /**
+ * Result of syncing worktrees to database
+ * Issue #526: Returns deletedIds for tmux session cleanup
+ */
+export interface SyncResult {
+  /** IDs of worktrees that were deleted from the database */
+  deletedIds: string[];
+  /** Number of worktrees that were upserted */
+  upsertedCount: number;
+}
+
+/**
  * Parsed worktree information from git
  */
 interface ParsedWorktree {
@@ -185,13 +196,13 @@ export async function scanWorktrees(rootDir: string): Promise<Worktree[]> {
         const isDangerous = dangerousPaths.some(danger => wt.path.startsWith(danger));
 
         if (isDangerous) {
-          logger.warn('skipping-potentially-unsafe-worktree-pat');
+          logger.warn('worktree:unsafe-path-skipped', { path: wt.path });
           return false;
         }
 
         // Check for path traversal attempts in the path itself
         if (wt.path.includes('\x00') || wt.path.includes('..')) {
-          logger.warn('skipping-path-with-potentially-malicious');
+          logger.warn('worktree:malicious-path-skipped', { path: wt.path });
           return false;
         }
 
@@ -232,12 +243,12 @@ export async function scanMultipleRepositories(
 
   for (const repoPath of repositoryPaths) {
     try {
-      logger.info('scanning-repository:repopath');
+      logger.info('repository:scan-start', { repoPath });
       const worktrees = await scanWorktrees(repoPath);
       allWorktrees.push(...worktrees);
-      logger.info('found-worktreeslength-worktrees');
-    } catch (_error) {
-      logger.error('error-scanning-repository-repopath:', { error: _error instanceof Error ? _error.message : String(_error) });
+      logger.info('repository:scan-complete', { repoPath, worktreeCount: worktrees.length });
+    } catch (error) {
+      logger.error('repository:scan-failed', { repoPath, error: error instanceof Error ? error.message : String(error) });
       // Continue with other repositories even if one fails
     }
   }
@@ -265,11 +276,15 @@ export async function scanMultipleRepositories(
 export function syncWorktreesToDB(
   db: Database.Database,
   worktrees: Worktree[]
-): void {
+): SyncResult {
   // If no worktrees provided, do nothing (avoid accidentally deleting all data)
+  // SF-C01: Return empty SyncResult instead of void
   if (worktrees.length === 0) {
-    return;
+    return { deletedIds: [], upsertedCount: 0 };
   }
+
+  const allDeletedIds: string[] = [];
+  let upsertedCount = 0;
 
   // Group worktrees by repository path
   const worktreesByRepo = new Map<string, Worktree[]>();
@@ -297,12 +312,16 @@ export function syncWorktreesToDB(
     // Delete removed worktrees from DB
     if (deletedIds.length > 0) {
       const result = deleteWorktreesByIds(db, deletedIds);
+      allDeletedIds.push(...deletedIds);
       logger.info('worktree:cleanup', { deletedCount: result.deletedCount });
     }
 
     // Upsert current worktrees
     for (const worktree of repoWorktrees) {
       upsertWorktree(db, worktree);
+      upsertedCount++;
     }
   }
+
+  return { deletedIds: allDeletedIds, upsertedCount };
 }

@@ -149,8 +149,8 @@ tests/
 | `src/lib/db/db-path-resolver.ts` | DBパス解決 |
 | `src/lib/db/db-migration-path.ts` | DBマイグレーション |
 | `src/lib/db/db-repository.ts` | リポジトリDB操作 |
-| `src/lib/db/worktree-db.ts` | Worktree CRUD操作（Issue #479） |
-| `src/lib/db/chat-db.ts` | チャットメッセージCRUD操作（Issue #479） |
+| `src/lib/db/worktree-db.ts` | Worktree CRUD操作、archivedフィルタ対応（Issue #479, #168） |
+| `src/lib/db/chat-db.ts` | チャットメッセージCRUD操作、論理削除（archived）・GetMessagesOptions・ACTIVE_FILTER（Issue #479, #168） |
 | `src/lib/db/session-db.ts` | セッション状態管理（Issue #479） |
 | `src/lib/db/memo-db.ts` | メモ管理CRUD（Issue #479） |
 | `src/lib/tmux/tmux.ts` | tmuxセッション管理基盤（execFile使用） |
@@ -164,9 +164,9 @@ tests/
 | `src/lib/tui-accumulator.ts` | TUIアキュムレータ状態管理（Issue #479） |
 | `src/lib/detection/prompt-detector.ts` | プロンプト検出（2パス方式） |
 | `src/lib/detection/cli-patterns.ts` | CLIツール別パターン定義 |
-| `src/lib/polling/auto-yes-manager.ts` | Auto-Yes状態管理・バレルファイル（Issue #479） |
-| `src/lib/auto-yes-poller.ts` | Auto-Yesポーリングループ本体（Issue #479） |
-| `src/lib/auto-yes-state.ts` | Auto-Yes状態管理・DB永続化連携（Issue #479） |
+| `src/lib/polling/auto-yes-manager.ts` | Auto-Yes状態管理・バレルファイル・複合キーヘルパー（Issue #479, #525） |
+| `src/lib/auto-yes-poller.ts` | Auto-Yesポーリングループ本体・複合キー対応（Issue #479, #525） |
+| `src/lib/auto-yes-state.ts` | Auto-Yes状態管理・複合キーヘルパー（Issue #479, #525） |
 | `src/lib/polling/auto-yes-resolver.ts` | Auto-Yes自動応答判定 |
 | `src/config/auto-yes-config.ts` | Auto-Yes設定定数・バリデーション |
 | `src/config/html-extensions.ts` | HTML拡張子定義・判定関数・SandboxLevel型・SANDBOX_ATTRIBUTES（Issue #490） |
@@ -184,7 +184,7 @@ tests/
 | `src/lib/cron-parser.ts` | CMATE.md mtime検出・スケジュール一括更新（Issue #479） |
 | `src/lib/job-executor.ts` | ジョブ実行エンジン・実行ログCRUD（Issue #479） |
 | `src/lib/cmate-parser.ts` | CMATE.md汎用パーサー |
-| `src/lib/session-cleanup.ts` | セッション/ポーラー/スケジューラー停止（Facade） |
+| `src/lib/session-cleanup.ts` | セッション/ポーラー/スケジューラー停止（Facade）、killWorktreeSession共通化、syncWorktreesAndCleanup（Issue #526） |
 | `src/lib/session-key-sender.ts` | Claudeセッションキー送信ロジック（Issue #479） |
 | `src/lib/prompt-answer-input.ts` | プロンプト応答入力ロジック（getAnswerInput）（Issue #479） |
 | `src/lib/resource-cleanup.ts` | リソースリーク対策（孤立プロセス/Map検出） |

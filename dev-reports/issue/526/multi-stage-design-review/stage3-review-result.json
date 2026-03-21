@@ -1,0 +1,208 @@
+{
+  "issue_number": 526,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "IA-MF-001",
+        "title": "server.ts excludedPaths処理でセッションクリーンアップが未追加",
+        "description": "設計方針書 Section 4-7 では excludedPaths 処理に cleanup -> delete 順序でクリーンアップを追加する計画だが、現在の server.ts L225-231 では deleteWorktreesByIds() のみ呼んでおり、cleanupMultipleWorktrees() の呼び出しが追加される。しかし、server.ts には現在 session-cleanup.ts への import が存在しない。initializeWorktrees() は server.listen() のコールバック内で呼ばれる async 関数だが、excludedPaths 処理ループ内で await cleanupMultipleWorktrees() を呼ぶ場合、killWorktreeSession を引数として渡す必要がある。設計書では killWorktreeSession は session-cleanup.ts からエクスポートされる予定だが、server.ts への import 追加（session-cleanup, CLIToolManager, tmux/killSession 等の間接依存）が設計書の Section 3 レイヤー構成図に明記されていない。server.ts のインフラ層がビジネスロジック層の session-cleanup.ts に依存することの妥当性を明示すべき。",
+        "severity": "must_fix",
+        "affected_files": ["server.ts", "src/lib/session-cleanup.ts"],
+        "recommendation": "設計書 Section 3 のレイヤー構成図に server.ts から session-cleanup.ts への新規依存を明記し、server.ts の import セクションに追加が必要な具体的モジュール一覧（session-cleanup.ts の killWorktreeSession, cleanupMultipleWorktrees, syncWorktreesAndCleanup）を列挙すること。"
+      },
+      {
+        "id": "IA-MF-002",
+        "title": "clone-manager.ts の onCloneSuccess() が sync→async 化される影響の波及分析不足",
+        "description": "clone-manager.ts の onCloneSuccess() (L513-549) は既に async メソッドだが、syncWorktreesToDB() を syncWorktreesAndCleanup() に置換する場合、戻り値が void から Promise<{ syncResult, cleanupWarnings }> に変わる。onCloneSuccess() では syncWorktreesToDB() の戻り値を使用していないため await の追加のみで済むが、executeClone() 内の gitProcess.on('close') コールバック (L462) で await this.onCloneSuccess() を呼んでいる。Promise コンストラクタ内の async コールバックであり、onCloneSuccess() が reject した場合に Promise が正しく reject されるかの確認が設計書に不足している。現状の実装でも同じ構造だが、cleanupMultipleWorktrees() の追加によりエラー発生確率が上がるため、この点を設計書で明示的に扱うべき。",
+        "severity": "must_fix",
+        "affected_files": ["src/lib/git/clone-manager.ts"],
+        "recommendation": "Section 4-6 に onCloneSuccess() 内で syncWorktreesAndCleanup() を呼ぶ際のエラーハンドリングを明記すること。特に、cleanupMultipleWorktrees() の失敗が onCloneSuccess() 全体を reject させないことを保証する設計（try-catch でラップ、またはヘルパー関数内での吸収）を明確にすること。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IA-SF-001",
+        "title": "syncWorktreesToDB() の戻り値変更による既存テスト5件への影響が未詳細",
+        "description": "src/lib/__tests__/worktrees-sync.test.ts には5つのテストケースがあり、全てが syncWorktreesToDB() を呼んでいるが戻り値を検証していない（void 前提）。戻り値が SyncResult に変更されても既存テストはそのまま通る（戻り値を無視しているため）。しかし、設計書 Section 7 のテスト設計には「既存テスト拡張」と記載されている。具体的にどのテストケースを拡張するのか、新規テストケースとして追加するのかが明確でない。tests/unit/worktrees.test.ts L262-269 の syncWorktreesToDB テストも signature の存在確認のみであり、戻り値型の変更に対する更新が必要。",
+        "severity": "should_fix",
+        "affected_files": [
+          "src/lib/__tests__/worktrees-sync.test.ts",
+          "tests/unit/worktrees.test.ts"
+        ],
+        "recommendation": "Section 7 のテストケース一覧に、既存テストファイルごとの変更内容を列挙すること。例: worktrees-sync.test.ts の「should remove deleted worktrees from DB」テストに deletedIds の検証を追加、tests/unit/worktrees.test.ts の syncWorktreesToDB テストに戻り値型の検証を追加。"
+      },
+      {
+        "id": "IA-SF-002",
+        "title": "cleanupMultipleWorktrees() 並列化による既存テストの挙動変化",
+        "description": "tests/unit/session-cleanup.test.ts の cleanupMultipleWorktrees テスト（L120-152）は逐次実行を前提とした mockResolvedValueOnce チェーン（L133-136）を使用している。Promise.allSettled に変更すると、killSessionFn の呼び出し順序が保証されなくなり、mockResolvedValueOnce の戻り値の割り当てが意図と異なる可能性がある。特に L132-141 の「should aggregate all warnings」テストでは、最初の呼び出しが true、2番目が Error を throw する前提で書かれており、並列実行では呼び出し順序が変わりうる。",
+        "severity": "should_fix",
+        "affected_files": ["tests/unit/session-cleanup.test.ts"],
+        "recommendation": "Section 7 のテスト設計に、cleanupMultipleWorktrees() 並列化に伴い tests/unit/session-cleanup.test.ts の既存テストの修正が必要であることを明記すること。mockResolvedValueOnce の代わりに worktreeId に基づく条件分岐モックに書き換える必要がある。"
+      },
+      {
+        "id": "IA-SF-003",
+        "title": "integration テストの session-cleanup モックに killWorktreeSession の追加が必要",
+        "description": "tests/integration/api-repository-delete.test.ts と tests/integration/repository-exclusion.test.ts の両方で vi.mock('@/lib/session-cleanup') が使用されているが、現在は cleanupMultipleWorktrees のみモックしている。killWorktreeSession が session-cleanup.ts からエクスポートされると、repositories/route.ts の DELETE handler が import { killWorktreeSession } from '@/lib/session-cleanup' に変更される。この場合、既存の integration テストのモック定義に killWorktreeSession を追加しないとテストが失敗する。",
+        "severity": "should_fix",
+        "affected_files": [
+          "tests/integration/api-repository-delete.test.ts",
+          "tests/integration/repository-exclusion.test.ts"
+        ],
+        "recommendation": "Section 7 のテスト設計に、既存 integration テストのモック定義の更新が必要であることを明記すること。具体的には killWorktreeSession: vi.fn().mockResolvedValue(false) の追加。"
+      },
+      {
+        "id": "IA-SF-004",
+        "title": "sync/scan/restore の各 API レスポンスフォーマット変更の後方互換性",
+        "description": "設計書 Section 5 で sync API のレスポンスに cleanupWarnings フィールドを追加する計画がある。現在の sync/route.ts のレスポンス（L53-61）には success, message, worktreeCount, repositoryCount, repositories が含まれている。cleanupWarnings の追加自体は後方互換だが、deletedCount フィールドも追加予定（Section 5 のレスポンス例）。フロントエンドや CLI が sync API のレスポンスを消費している場合、新フィールドの追加が型エラーを引き起こす可能性がある。scan/route.ts と restore/route.ts についても同様のレスポンス変更が必要か明確でない。",
+        "severity": "should_fix",
+        "affected_files": [
+          "src/app/api/repositories/sync/route.ts",
+          "src/app/api/repositories/scan/route.ts",
+          "src/app/api/repositories/restore/route.ts"
+        ],
+        "recommendation": "Section 5 のエラーレスポンス拡張について、3つの API ルート（sync, scan, restore）それぞれのレスポンスフォーマット変更を明記すること。フロントエンド側の型定義（もし存在すれば）への影響も確認すること。"
+      },
+      {
+        "id": "IA-SF-005",
+        "title": "syncWorktreesAndCleanup() が session-cleanup.ts から worktrees.ts への新規水平依存を導入",
+        "description": "設計書 Section 11 の C-C01 で言及されているが、session-cleanup.ts が syncWorktreesToDB を worktrees.ts から import することは、現在存在しない新規の水平依存である。session-cleanup.ts は現在 polling/response-poller, polling/auto-yes-manager, schedule-manager, tmux/tmux-capture-cache, cli-tools/types に依存しており、git/worktrees への依存追加は異なるドメイン（git操作）への結合を意味する。C-C01 では「現状の規模では問題ない」と結論付けているが、将来 worktrees.ts が session-cleanup.ts の関数を利用するケースが生まれた場合に循環依存となるリスクの具体的な検出方法（ESLint ルール等）が未定義。",
+        "severity": "should_fix",
+        "affected_files": [
+          "src/lib/session-cleanup.ts",
+          "src/lib/git/worktrees.ts"
+        ],
+        "recommendation": "C-C01 の対応方針に加え、循環依存を早期検出するための具体的手段（eslint-plugin-import の no-cycle ルール導入、または CI での madge 実行等）を検討事項として記載すること。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IA-C-001",
+        "title": "gracefulShutdown 内でのクリーンアップとの競合可能性",
+        "description": "server.ts の gracefulShutdown() (L278-313) は stopAllPolling, stopAllAutoYesPolling, stopAllSchedules を呼ぶが、initializeWorktrees() 内の syncWorktreesAndCleanup() が実行中に SIGTERM を受信した場合、cleanupMultipleWorktrees() と gracefulShutdown() のクリーンアップが同時に実行される可能性がある。3秒のフォースイグジットタイムアウトにより、syncWorktreesAndCleanup() が完了する前にプロセスが終了する可能性がある。",
+        "affected_files": ["server.ts"],
+        "recommendation": "エッジケースとして認識し、必要に応じて initializeWorktrees の実行状態を追跡する仕組みを検討する。現時点では許容可能なリスク。"
+      },
+      {
+        "id": "IA-C-002",
+        "title": "CI/CDパイプラインへの影響は最小限",
+        "description": "本変更は新規ファイルの追加がなく（既存ファイルへの変更のみ）、新規依存パッケージの追加もない。TypeScript コンパイル、ESLint、Vitest の全てが既存の設定で動作する。ただし、syncWorktreesToDB() の戻り値変更は TypeScript の厳格モードで既存の呼び出し元が void を期待している場合にコンパイルエラーとなる可能性がある。実際にはどの呼び出し元も戻り値を使用していないため問題ないが、CI の tsc --noEmit チェックでは void -> SyncResult の変更は後方互換（戻り値を捨てることは TypeScript で許可されている）。",
+        "affected_files": [],
+        "recommendation": "CI パイプラインへの影響は軽微。特別な対応は不要。"
+      },
+      {
+        "id": "IA-C-003",
+        "title": "repositories/route.ts DELETE handler での killWorktreeSession 置換時の動作差異",
+        "description": "現在の repositories/route.ts L30-44 のローカル killWorktreeSession() は getTool() の結果に対して null チェックなしで直接 isRunning() を呼んでいる。設計書の共通化版は try-catch でラップする。この差異により、getTool() が throw した場合の挙動が変わる（現在: 未ハンドルで cleanupMultipleWorktrees の sessionErrors に記録、共通化後: catch で false を返し sessionErrors に記録されない）。cleanupMultipleWorktrees 側の catch も健在なので実質的な影響はないが、エラーログの出力内容が変わりうる。",
+        "affected_files": ["src/app/api/repositories/route.ts"],
+        "recommendation": "動作差異は軽微だが、共通化後のエラーログ出力内容の変化について認識しておくこと。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "impact_analysis": {
+    "direct_changes": [
+      {
+        "file": "src/lib/git/worktrees.ts",
+        "change": "syncWorktreesToDB() 戻り値を void -> SyncResult に変更",
+        "risk": "low"
+      },
+      {
+        "file": "src/lib/session-cleanup.ts",
+        "change": "killWorktreeSession() と syncWorktreesAndCleanup() を追加エクスポート",
+        "risk": "low"
+      },
+      {
+        "file": "src/app/api/repositories/route.ts",
+        "change": "ローカル killWorktreeSession を削除し共通化版に置換",
+        "risk": "low"
+      },
+      {
+        "file": "src/app/api/repositories/sync/route.ts",
+        "change": "syncWorktreesToDB() を syncWorktreesAndCleanup() に置換、async化",
+        "risk": "medium"
+      },
+      {
+        "file": "src/app/api/repositories/scan/route.ts",
+        "change": "syncWorktreesToDB() を syncWorktreesAndCleanup() に置換、async化",
+        "risk": "medium"
+      },
+      {
+        "file": "src/app/api/repositories/restore/route.ts",
+        "change": "syncWorktreesToDB() を syncWorktreesAndCleanup() に置換、async化",
+        "risk": "medium"
+      },
+      {
+        "file": "src/lib/git/clone-manager.ts",
+        "change": "onCloneSuccess() 内で syncWorktreesAndCleanup() に置換",
+        "risk": "medium"
+      },
+      {
+        "file": "server.ts",
+        "change": "sync処理: syncWorktreesAndCleanup() に置換、excludedPaths: cleanup追加",
+        "risk": "medium"
+      }
+    ],
+    "indirect_impacts": [
+      {
+        "file": "tests/unit/session-cleanup.test.ts",
+        "change": "cleanupMultipleWorktrees の並列化によりモック順序の前提が崩れる",
+        "risk": "medium"
+      },
+      {
+        "file": "tests/integration/api-repository-delete.test.ts",
+        "change": "session-cleanup モックに killWorktreeSession の追加が必要",
+        "risk": "medium"
+      },
+      {
+        "file": "tests/integration/repository-exclusion.test.ts",
+        "change": "session-cleanup モックに killWorktreeSession の追加が必要",
+        "risk": "medium"
+      },
+      {
+        "file": "src/lib/__tests__/worktrees-sync.test.ts",
+        "change": "既存テスト自体は通るが戻り値検証の拡張が望ましい",
+        "risk": "low"
+      },
+      {
+        "file": "tests/unit/worktrees.test.ts",
+        "change": "syncWorktreesToDB のシグネチャテストの更新が望ましい",
+        "risk": "low"
+      }
+    ],
+    "no_impact": [
+      "src/lib/db/ (DB層は変更なし)",
+      "src/lib/tmux/tmux.ts (既存のまま)",
+      "src/lib/cli-tools/manager.ts (既存のまま)",
+      "src/lib/polling/ (既存のまま)",
+      "src/components/ (フロントエンドUIコンポーネント)",
+      "src/cli/ (CLIモジュール - API経由で間接的に影響を受けるが、コード変更不要)"
+    ]
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-526-sync-tmux-cleanup-design-policy.md",
+    "src/lib/git/worktrees.ts",
+    "src/lib/session-cleanup.ts",
+    "src/app/api/repositories/route.ts",
+    "src/app/api/repositories/sync/route.ts",
+    "src/app/api/repositories/scan/route.ts",
+    "src/app/api/repositories/restore/route.ts",
+    "src/lib/git/clone-manager.ts",
+    "server.ts",
+    "src/lib/cli-tools/manager.ts",
+    "src/lib/__tests__/worktrees-sync.test.ts",
+    "tests/unit/worktrees.test.ts",
+    "tests/unit/session-cleanup.test.ts",
+    "tests/integration/api-repository-delete.test.ts",
+    "tests/integration/repository-exclusion.test.ts"
+  ],
+  "timestamp": "2026-03-20T12:00:00Z"
+}

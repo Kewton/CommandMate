@@ -1,0 +1,202 @@
+{
+  "issue_number": 526,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "stage": 7,
+  "review_date": "2026-03-20",
+  "previous_findings_verification": {
+    "stage3_MF-1": {
+      "status": "resolved",
+      "verification": "server.tsのexcludedPaths削除処理（L225-232）が影響範囲テーブルに追加済み。呼び出し元ごとの修正内容テーブルにも別行で記載され、syncWorktreesToDB()経由ではないため別途対応が必要である旨の注意書きも明記されている。受け入れ基準にも専用の項目が追加済み。"
+    },
+    "stage3_MF-2": {
+      "status": "resolved",
+      "verification": "全呼び出し元（5箇所 + server.ts excludedPaths）の方針(A)/(B)それぞれの具体的修正内容が一覧テーブルとして記載済み。全呼び出し元がasyncコンテキスト内にある旨も明記。server.ts:225-232がsyncWorktreesToDB()経由ではない点も注意書きとして記載済み。"
+    },
+    "stage3_SF-1": {
+      "status": "resolved",
+      "verification": "設計ノートに方針(B)が責務分離の観点で推奨である旨を明記済み。worktrees.tsの現在のimport一覧と、方針(A)で追加される依存も詳述。方針決定段落で実装担当者が最終判断する旨も追記済み。"
+    },
+    "stage3_SF-2": {
+      "status": "resolved",
+      "verification": "テスト方針に7項目を記載。server.ts初期化処理の共通関数抽出（項目5）、clone-manager.tsのexecuteClone()経由テスト（項目6）、方針(B)時の呼び出し元テスト（項目7）がすべて追加済み。"
+    },
+    "stage3_SF-3": {
+      "status": "resolved",
+      "verification": "大量削除時のパフォーマンス影響分析セクションが追加済み。最悪ケース試算（47 * 5 * 5秒 = 約20分）と3つの対策方針（hasSession先行確認、並列実行、タイムアウト上限）を記載。受け入れ基準にもパフォーマンス対策の具体的要件（hasSession先行確認、並列実行等による逐次タイムアウト回避）が追加済み。"
+    }
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 0,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "影響ファイル",
+        "issue": "パフォーマンス対策の「hasSession先行確認」について、既存のkillWorktreeSession()パターン（repositories/route.ts:30-44）では既にisRunning()チェック（内部でhasSession()を使用）を行っている。このパターンを踏襲すれば、hasSession先行確認は追加実装不要でkillSessionFnレベルで自然に実現される。Issue本文ではhasSession先行確認を「新規に実装すべき対策」として記載しているが、既存パターンの踏襲で自動的に解決される点を補足するとより正確になる。",
+        "location": "大量削除時のパフォーマンス考慮 セクション 項目1",
+        "recommendation": "「セッション存在確認を先行」の説明に、「既存のkillWorktreeSession()パターン（repositories/route.ts:30-44）ではisRunning()チェックが組み込まれており、このパターンを踏襲することで自然に実現される」旨を補足する。実装者が対策1を別途実装しようとして二重チェックにならないための情報として有用。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "テスト範囲",
+        "issue": "テスト方針の項目4「呼び出し元テスト」と項目7「方針(B)採用時の呼び出し元テスト」の関係が曖昧。方針(B)採用時は項目4が項目7で代替されるのか、両方必要なのかが不明確。",
+        "location": "テスト方針 セクション 項目4, 7",
+        "recommendation": "項目4と項目7の関係を明確化する。例: 「項目4は方針(A)の場合のテスト観点、項目7は方針(B)の場合のテスト観点」等。ただし実装担当者が方針決定後にテスト計画を具体化する想定であれば、現状でも実装上の支障はない。"
+      },
+      {
+        "id": "NTH-3",
+        "category": "影響ファイル",
+        "issue": "方針(B)を採用した場合、sync/route.ts, scan/route.ts, restore/route.tsの3つのAPIルートにkillWorktreeSession()関数の定義（またはインポート）が必要になる。現在この関数はrepositories/route.tsにローカル定義されており、共通化の検討が自然に発生する。影響ファイルの変更内容に「killWorktreeSession関数の共有化（新規ファイル作成 or 既存ファイルへの移動）」の可能性が言及されていない。",
+        "location": "呼び出し元ごとの具体的修正内容 テーブル",
+        "recommendation": "方針(B)の修正内容に、killWorktreeSession()を4箇所で利用するための共通化（例: session-cleanup.tsへの移動、または新規ユーティリティファイルの作成）を検討事項として追記する。実装時の設計判断に委ねても問題ないレベルの指摘。"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "directly_affected_files": [
+      {
+        "file": "src/lib/git/worktrees.ts",
+        "change_type": "modify",
+        "description": "syncWorktreesToDB()の戻り値変更（void -> string[]）。Issue記載と一致。",
+        "verified": true
+      },
+      {
+        "file": "src/app/api/repositories/sync/route.ts",
+        "change_type": "modify",
+        "description": "syncWorktreesToDB()の戻り値ハンドリング追加。L48で現在syncWorktreesToDB(db, allWorktrees)を呼び出し中。方針(B)ではdeletedIdsを受け取り、cleanupMultipleWorktrees()を追加呼び出し。",
+        "verified": true
+      },
+      {
+        "file": "src/app/api/repositories/scan/route.ts",
+        "change_type": "modify",
+        "description": "同上。L53で呼び出し中。",
+        "verified": true
+      },
+      {
+        "file": "src/app/api/repositories/restore/route.ts",
+        "change_type": "modify",
+        "description": "同上。L61で呼び出し中。",
+        "verified": true
+      },
+      {
+        "file": "src/lib/git/clone-manager.ts",
+        "change_type": "modify",
+        "description": "onCloneSuccess()内L534で呼び出し中。privateメソッド内のためテストアプローチに注意。",
+        "verified": true
+      },
+      {
+        "file": "server.ts",
+        "change_type": "modify",
+        "description": "L239のsyncWorktreesToDB()呼び出し + L225-232のexcludedPaths deleteWorktreesByIds()直接呼び出し。2箇所の修正が必要。",
+        "verified": true
+      }
+    ],
+    "indirectly_affected_files": [
+      {
+        "file": "src/lib/session-cleanup.ts",
+        "change_type": "none",
+        "description": "既存のcleanupMultipleWorktrees()を利用。変更不要。"
+      },
+      {
+        "file": "src/lib/tmux/tmux.ts",
+        "change_type": "none",
+        "description": "既存のkillSession()を利用。変更不要。"
+      },
+      {
+        "file": "src/lib/cli-tools/manager.ts",
+        "change_type": "none",
+        "description": "killWorktreeSessionパターンで利用。変更不要。"
+      },
+      {
+        "file": "src/app/api/repositories/route.ts",
+        "change_type": "potential_refactor",
+        "description": "方針(B)採用時、killWorktreeSession()関数の共通化に伴い、ローカル定義(L30-44)を共通モジュールに移動する可能性がある。"
+      }
+    ],
+    "test_files_to_update": [
+      {
+        "file": "src/lib/__tests__/worktrees-sync.test.ts",
+        "description": "syncWorktreesToDB()の戻り値テスト、tmuxクリーンアップモックテスト追加"
+      }
+    ],
+    "completeness_of_call_sites": {
+      "total_identified": 6,
+      "verified_in_codebase": 6,
+      "missing": 0,
+      "verification_method": "syncWorktreesToDB呼び出し5箇所 + deleteWorktreesByIds直接呼び出し1箇所（server.ts:225-232）をソースコードで確認。追加の呼び出し箇所は発見されなかった。"
+    },
+    "performance_analysis": {
+      "worst_case_valid": true,
+      "note": "最悪ケース試算（47 * 5 * 5秒 = 約20分）は逐次処理かつ全タイムアウトの場合の理論値。実際にはkillWorktreeSession()のisRunning()チェックで存在しないセッションは即座にスキップされるため、実稼働セッション数に依存する。47件削除ケースでも大半はセッション未起動のためisRunning()=falseで即リターンし、実際の処理時間は大幅に短縮される。Issue記載の試算は保守的で妥当。",
+      "mitigation_feasibility": {
+        "hasSession_precheck": "既存killWorktreeSession()パターンに組み込み済み（isRunning()チェック）。新規実装不要。",
+        "parallel_execution": "Promise.allでworktree単位の並列化は技術的に可能。cleanupMultipleWorktrees()のforループをPromise.allに変更するか、呼び出し元で並列化する。",
+        "timeout_cap": "sync処理全体にAbortControllerまたはPromise.raceでタイムアウトを設定可能。"
+      }
+    },
+    "error_handling_ripple_effect": {
+      "assessment": "低リスク",
+      "detail": "「セッションkill失敗時にsync処理自体は成功すること」という方針は、既存のcleanupWorktreeSessions()のtry-catchパターン（L89-99）と一致しており、既存のエラーハンドリングインフラをそのまま活用できる。方針(B)の場合、各呼び出し元でcleanupMultipleWorktrees()をtry-catchで囲み、失敗時もAPIレスポンスは成功として返す実装になる。これは既存のDELETE /api/repositoriesの実装パターン（warnings配列で部分的失敗を報告）と同じアプローチであり、新規の設計パターンは不要。"
+    },
+    "no_breaking_changes_for_external_consumers": true
+  },
+  "overall_assessment": {
+    "quality": "high",
+    "readiness": "ready_for_implementation",
+    "comment": "前回Stage 3の影響範囲レビューで指摘した全5件（Must Fix 2件 + Should Fix 3件）は適切に反映されている。Stage 5の通常レビュー2回目で指摘したNice to Have 2件もStage 6で反映済み。更新後のIssue内容について新たな影響範囲の問題は発見されなかった。呼び出し元6箇所の一覧は完全であり、パフォーマンス影響分析も妥当。方針(B)推奨時の各呼び出し元での修正は全箇所で技術的に実行可能であることをコードベースで確認した。残存する3件のNice to Have指摘はいずれも実装時に自然に解決される軽微な補足情報であり、実装着手を妨げるものではない。Issueは実装可能な品質に達している。"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/git/worktrees.ts",
+      "lines": "265-308",
+      "relevance": "修正対象: syncWorktreesToDB()。同期関数、void戻り値。Issue記載と一致。"
+    },
+    {
+      "file": "src/app/api/repositories/route.ts",
+      "lines": "30-44",
+      "relevance": "既存のkillWorktreeSession()パターン。isRunning()チェック組み込み済み。方針(B)採用時の共通化候補。"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "lines": "71-174",
+      "relevance": "cleanupWorktreeSessions() / cleanupMultipleWorktrees()。逐次処理(forループ L160)。エラーハンドリングはtry-catch(L89-99)で部分的失敗を許容。"
+    },
+    {
+      "file": "src/app/api/repositories/sync/route.ts",
+      "lines": "48",
+      "relevance": "呼び出し元。syncWorktreesToDB(db, allWorktrees)。Issue記載と一致。"
+    },
+    {
+      "file": "src/app/api/repositories/scan/route.ts",
+      "lines": "53",
+      "relevance": "呼び出し元。syncWorktreesToDB(db, worktrees)。Issue記載と一致。"
+    },
+    {
+      "file": "src/app/api/repositories/restore/route.ts",
+      "lines": "61",
+      "relevance": "呼び出し元。syncWorktreesToDB(db, worktrees)。Issue記載と一致。"
+    },
+    {
+      "file": "src/lib/git/clone-manager.ts",
+      "lines": "513-549",
+      "relevance": "呼び出し元。onCloneSuccess()内L534。privateメソッド。Issue記載と一致。"
+    },
+    {
+      "file": "server.ts",
+      "lines": "225-232, 239",
+      "relevance": "呼び出し元2箇所。L225-232はdeleteWorktreesByIds()直接呼び出し、L239はsyncWorktreesToDB()。Issue記載と一致。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュール依存関係の整合性確認。"
+    }
+  ]
+}

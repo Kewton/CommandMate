@@ -1,0 +1,111 @@
+{
+  "issue_number": 526,
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-03-20",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 4,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "技術的妥当性",
+        "issue": "syncWorktreesToDB()は同期関数(void)だが、cleanupWorktreeSessions()/cleanupMultipleWorktrees()は非同期関数(async)。修正方針で「syncWorktreesToDB()内でkillSession()/cleanupWorktreeSessions()を呼び出す」と記載されているが、同期関数から非同期関数を呼ぶにはsyncWorktreesToDB()をasyncに変更するか、呼び出し元(APIルート)で削除前にクリーンアップを挟むかの設計判断が必要。",
+        "location": "修正方針 セクション",
+        "recommendation": "修正の実装レイヤーを明記する。選択肢: (A) syncWorktreesToDB()をasyncに変更し内部でクリーンアップ呼び出し（4箇所の呼び出し元すべてにawait追加が必要）、(B) syncWorktreesToDB()に削除対象IDを返す戻り値を追加し、呼び出し元(APIルート)でクリーンアップを実行、(C) syncWorktreesToDB()内でkillSession()のみ同期的に呼び出す（cleanupWorktreeSessions()のフル機能は使えない）。",
+        "evidence": "syncWorktreesToDB()はvoidを返す同期関数(src/lib/git/worktrees.ts:265-268)。cleanupMultipleWorktrees()はPromise<CleanupResult>を返す非同期関数(src/lib/session-cleanup.ts:153-156)。呼び出し元は4箇所: sync/route.ts, scan/route.ts, restore/route.ts, clone-manager.ts。"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "受け入れ基準（Acceptance Criteria）が明示されていない。「期待される動作」セクションはあるが、テスト可能な受け入れ条件としてフォーマットされていない。",
+        "location": "Issue本文全体",
+        "recommendation": "以下のような受け入れ基準を追加: (1) POST /api/repositories/sync実行時に、DBから削除されるworktreeの対応tmuxセッションがkillされること、(2) tmux list-sessionsに孤立セッションが残らないこと、(3) セッションkill失敗時にsync処理自体は成功すること（部分的成功を許容）、(4) 既存のPOST /api/repositories/scan、restore、clone-manager経由の同期でも同様にクリーンアップされること。",
+        "evidence": "Issue本文に「期待される動作」はあるが、検証可能な受け入れ基準のリストがない。"
+      },
+      {
+        "id": "SF-3",
+        "category": "完全性",
+        "issue": "影響範囲がsync APIのみに限定されているが、syncWorktreesToDB()はscan/restore/clone-managerからも呼ばれている。これらの呼び出し元でも同じ問題が発生する可能性がある。",
+        "location": "影響 セクション / 関連ファイル セクション",
+        "recommendation": "以下の呼び出し元も影響範囲に追加: src/app/api/repositories/scan/route.ts、src/app/api/repositories/restore/route.ts、src/lib/git/clone-manager.ts。修正方針(B)の場合は各呼び出し元での対応が必要になる点を明記。",
+        "evidence": "grep結果: syncWorktreesToDB()はsrc/app/api/repositories/sync/route.ts:48, scan/route.ts:53, restore/route.ts:61, clone-manager.ts:534 の4箇所から呼ばれている。"
+      },
+      {
+        "id": "SF-4",
+        "category": "完全性",
+        "issue": "テスト方針が記載されていない。既存テスト(src/lib/__tests__/worktrees-sync.test.ts)はDB操作のみをテストしており、tmuxセッションクリーンアップの検証が必要。",
+        "location": "Issue本文全体",
+        "recommendation": "テスト方針を追加: (1) 既存worktrees-sync.test.tsにtmuxセッションクリーンアップのモックテストを追加、(2) cleanupMultipleWorktrees/killSessionのモックを用いて、削除対象IDに対してクリーンアップが呼ばれることを検証、(3) クリーンアップ失敗時にDB削除は成功することを検証。",
+        "evidence": "src/lib/__tests__/worktrees-sync.test.ts にはDB操作テストのみ存在。tmuxセッション削除の検証テストはない。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "再現手順でcurlコマンドのホスト/ポートがハードコードされている。認証トークンの指定も省略されている。",
+        "location": "再現手順 ステップ3",
+        "recommendation": "認証が有効な場合のヘッダー指定(Authorization)を補足するか、「認証無効環境での手順」と明記する。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "明確性",
+        "issue": "「発見経緯」にある47件のworktreeは有用な背景情報だが、関連Issueや具体的なリポジトリ情報へのリンクがない。",
+        "location": "発見経緯 セクション",
+        "recommendation": "Anvilプロジェクトへのリンクや、発見日時を追記するとトリアージに有用。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/git/worktrees.ts",
+      "lines": "265-308",
+      "relevance": "修正対象: syncWorktreesToDB()関数。同期関数でありtmuxクリーンアップが欠落。"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "lines": "71-174",
+      "relevance": "既存インフラ: cleanupWorktreeSessions()およびcleanupMultipleWorktrees()。非同期関数。"
+    },
+    {
+      "file": "src/app/api/repositories/route.ts",
+      "lines": "30-44, 80-109",
+      "relevance": "正しく実装済みの参考: killWorktreeSession()とcleanupMultipleWorktrees()の使用例。"
+    },
+    {
+      "file": "src/app/api/repositories/sync/route.ts",
+      "lines": "48",
+      "relevance": "syncWorktreesToDB()の呼び出し元（Issueに記載の再現パス）。"
+    },
+    {
+      "file": "src/app/api/repositories/scan/route.ts",
+      "lines": "53",
+      "relevance": "syncWorktreesToDB()の呼び出し元（Issueに未記載の影響範囲）。"
+    },
+    {
+      "file": "src/app/api/repositories/restore/route.ts",
+      "lines": "61",
+      "relevance": "syncWorktreesToDB()の呼び出し元（Issueに未記載の影響範囲）。"
+    },
+    {
+      "file": "src/lib/git/clone-manager.ts",
+      "lines": "534",
+      "relevance": "syncWorktreesToDB()の呼び出し元（Issueに未記載の影響範囲）。"
+    },
+    {
+      "file": "src/lib/__tests__/worktrees-sync.test.ts",
+      "relevance": "既存テスト: DB操作のみ。tmuxクリーンアップの検証なし。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構造およびモジュール一覧の整合性確認。"
+    }
+  ]
+}

@@ -1,0 +1,138 @@
+{
+  "issue_number": 526,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "principle": "DRY",
+        "title": "クリーンアップ呼び出しパターンの重複（5箇所以上）",
+        "description": "sync/route.ts, scan/route.ts, restore/route.ts, clone-manager.ts, server.ts の全箇所で同一の 'syncResult取得 -> deletedIds判定 -> cleanupMultipleWorktrees呼び出し' パターンが繰り返される。設計方針(B)の本質的なトレードオフだが、共通ヘルパー関数の導入で軽減すべき。",
+        "recommendation": "syncAndCleanup(db, worktrees, killWorktreeSession) のようなヘルパー関数を worktrees.ts または session-cleanup.ts に追加し、sync+cleanup の一連の処理を1箇所にまとめる。worktrees.ts の責務を越えないよう、session-cleanup.ts 側に配置するのが適切。",
+        "severity": "medium",
+        "affected_files": [
+          "src/app/api/repositories/sync/route.ts",
+          "src/app/api/repositories/scan/route.ts",
+          "src/app/api/repositories/restore/route.ts",
+          "src/lib/git/clone-manager.ts",
+          "server.ts"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "principle": "SRP",
+        "title": "SyncResult型の配置場所の検討",
+        "description": "SyncResult インターフェースを worktrees.ts に定義する設計だが、この型はセッションクリーンアップとの連携に使われる。worktrees.ts は Git+DB 同期の責務であり、クリーンアップ連携のための型定義がここに入ることで、間接的にクリーンアップ層への結合が生まれる。",
+        "recommendation": "SyncResult 自体は worktrees.ts の戻り値型として妥当だが、型定義は types/ ディレクトリへの配置も検討する。ただし現状の規模では worktrees.ts に置いても問題は小さい。将来の拡張時に注意。",
+        "severity": "low"
+      },
+      {
+        "id": "SF-002",
+        "principle": "SRP",
+        "title": "server.ts の excludedPaths 処理で deleteWorktreesByIds と cleanupMultipleWorktrees の呼び出し順序",
+        "description": "設計書 Section 4-7 では excludedPaths 処理で cleanup -> delete の順序だが、sync処理側では delete(syncWorktreesToDB内) -> cleanup の順序になる。処理順序が逆転している。cleanup が先の方が安全（セッションを先に停止してからDB削除）だが、sync処理側ではDB削除が syncWorktreesToDB 内部で行われるため cleanup は後になる。",
+        "recommendation": "この順序の不一致をドキュメントに明記すべき。sync処理側でDB削除後にcleanupが失敗しても次回syncで再試行可能という設計判断は妥当だが、設計書にその理由を記載すること。",
+        "severity": "medium"
+      },
+      {
+        "id": "SF-003",
+        "principle": "KISS",
+        "title": "cleanupMultipleWorktrees の並列化変更の影響範囲",
+        "description": "Section 6 で cleanupMultipleWorktrees 内部の for ループを Promise.allSettled に変更する提案がある。この変更は既存の repositories/route.ts (DELETE) でも使われている共通関数への変更であり、影響範囲が設計書で明示されていない。",
+        "recommendation": "並列化の変更は cleanupMultipleWorktrees の全呼び出し元に影響する。設計書に既存の DELETE /api/repositories ルートへの影響を明記し、並列実行による tmux 操作の競合リスク（設計書で「実用上は問題なし」とされている点）の根拠を補足すべき。",
+        "severity": "medium"
+      },
+      {
+        "id": "SF-004",
+        "principle": "OCP",
+        "title": "killWorktreeSession の共通化における拡張性",
+        "description": "killWorktreeSession を session-cleanup.ts に移動する際、現在の repositories/route.ts の実装では cliTool.isRunning() を await しているが、設計書のコード例では await がない。isRunning() が非同期関数かどうかの確認が必要。",
+        "recommendation": "設計書のコード例 (Section 3) で isRunning の戻り値型を明確にすること。現在の repositories/route.ts の実装では await が使われているため、共通化後も async/await パターンを維持すべき。",
+        "severity": "medium"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "principle": "YAGNI",
+        "title": "upsertedCount フィールドの必要性",
+        "description": "SyncResult に upsertedCount を含める設計だが、現時点で upsertedCount を使用する呼び出し元がない。deletedIds のみが必要。",
+        "recommendation": "YAGNI 原則に従い、upsertedCount は実際に使用するユースケースが発生するまで追加しないことを検討する。ただし、ログやレスポンスに含める可能性があるなら許容範囲。",
+        "severity": "low"
+      },
+      {
+        "id": "C-002",
+        "principle": "KISS",
+        "title": "全体タイムアウト（60秒）の実装方針が未詳細",
+        "description": "Section 6 で「全体タイムアウト: sync処理のクリーンアップに上限を設定（例: 60秒）」と記載されているが、具体的な実装方針（Promise.race パターン等）が示されていない。",
+        "recommendation": "タイムアウトの実装方針を具体化するか、Step 7（パフォーマンス改善）で別途設計することを明記する。",
+        "severity": "low"
+      },
+      {
+        "id": "C-003",
+        "principle": "DRY",
+        "title": "エラーレスポンスの cleanupWarnings フィールドの一貫性",
+        "description": "Section 5 で sync API のレスポンスに cleanupWarnings を追加する設計だが、scan/restore API でも同様のフィールドが必要になる。レスポンス型の共通化を検討すべき。",
+        "recommendation": "SyncApiResponse のような共通レスポンス型を定義するか、各APIで個別に対応するかの方針を明確にする。",
+        "severity": "low"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "medium"
+  },
+  "design_principles_checklist": {
+    "SRP": {
+      "status": "pass",
+      "note": "方針(B)採用により worktrees.ts の責務分離が維持されている。session-cleanup.ts への killWorktreeSession 共通化も既存のFacade責務の範囲内。"
+    },
+    "OCP": {
+      "status": "pass_with_note",
+      "note": "新しい CLI ツール追加時は CLI_TOOL_IDS に追加するだけで対応可能。ただし killWorktreeSession のコード例で isRunning の非同期性が不明確。"
+    },
+    "LSP": {
+      "status": "not_applicable",
+      "note": "継承関係を使用していないため該当なし。"
+    },
+    "ISP": {
+      "status": "pass",
+      "note": "KillSessionFn 型が適切に分離されており、呼び出し元は不要なインターフェースに依存しない。"
+    },
+    "DIP": {
+      "status": "pass",
+      "note": "cleanupMultipleWorktrees が killSessionFn を引数として受け取る設計は DIP に準拠。具象実装への直接依存を回避。"
+    },
+    "KISS": {
+      "status": "pass",
+      "note": "方針(B)は既存パターン踏襲であり、イベント駆動方式等の過剰な複雑性を回避している。ただし5箇所の重複は簡素化の余地あり。"
+    },
+    "YAGNI": {
+      "status": "pass_with_note",
+      "note": "upsertedCount の追加は現時点で不要な可能性がある。代替案との比較でイベント駆動を不採用とした判断は適切。"
+    },
+    "DRY": {
+      "status": "needs_improvement",
+      "note": "5箇所以上で同一のsync+cleanupパターンが繰り返される。共通ヘルパー関数の導入で改善可能。"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-526-sync-tmux-cleanup-design-policy.md",
+    "src/lib/git/worktrees.ts",
+    "src/lib/session-cleanup.ts",
+    "src/app/api/repositories/route.ts",
+    "src/app/api/repositories/sync/route.ts",
+    "src/app/api/repositories/scan/route.ts",
+    "src/app/api/repositories/restore/route.ts",
+    "src/lib/git/clone-manager.ts",
+    "server.ts"
+  ],
+  "timestamp": "2026-03-20T00:00:00Z"
+}

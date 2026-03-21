@@ -1,0 +1,71 @@
+{
+  "issue_number": 525,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘事項対応",
+  "status": "completed",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "SEC4-MF-001",
+        "title": "extractWorktreeIdのフォールバック動作が未検証入力をそのまま返すリスク",
+        "action": "Section 7にextractWorktreeIdの全使用箇所でのバリデーション必須ルールを追記。Section 4-4のresource-cleanup.tsコード例にisValidWorktreeIdバリデーションとlogger.warnログ出力を追加。Section 14にMust Fix実装チェックリストを追加。",
+        "sections_updated": ["Section 4-4", "Section 7", "Section 14"]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC4-SF-001",
+        "title": "MAX_CONCURRENT_POLLERS=50のリソース枯渇リスク再評価不足",
+        "action": "Section 8にper-worktreeポーラー上限の検討結果サブセクションを追加。per-worktree上限は導入しない判断とその理由、レート制限の将来課題について明記。",
+        "sections_updated": ["Section 8", "Section 14"]
+      },
+      {
+        "id": "SEC4-SF-002",
+        "title": "POST APIでcliToolIdバリデーション失敗時のデフォルトフォールバックが暗黙的",
+        "action": "Section 4-3 POST APIコード例に不正cliToolIdの明示的拒否方針を追記。Section 7にフォールバック廃止の設計方針を追加。既存実装のフォールバック動作廃止を明記。",
+        "sections_updated": ["Section 4-3", "Section 7", "Section 14"]
+      },
+      {
+        "id": "SEC4-SF-003",
+        "title": "GET APIのisValidWorktreeIdバリデーション追加",
+        "action": "Section 4-3 GET APIコード例の先頭にisValidWorktreeId(params.id)バリデーションを追加。Section 7にGET APIバリデーション方針を追記。",
+        "sections_updated": ["Section 4-3", "Section 7", "Section 14"]
+      },
+      {
+        "id": "SEC4-SF-004",
+        "title": "compositeKey区切り文字':'に対するエスケープ戦略の欠如",
+        "action": "Section 3の設計判断セクションを拡張し、buildCompositeKeyにworktreeIdのコロン不含アサーション検証コードとJSDocを追加。暗黙的依存のリスクと防御策を明記。",
+        "sections_updated": ["Section 3", "Section 7", "Section 14"]
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC4-C-001",
+        "title": "compositeKeyバリデーション失敗時のセキュリティログ出力",
+        "action": "Section 13にConsider項目として記録。SEC4-MF-001対応にlogger.warnログ出力を含めて反映済み。Section 14にConsiderチェックリスト項目追加。"
+      },
+      {
+        "id": "SEC4-C-002",
+        "title": "byWorktreeヘルパーの線形走査によるタイミング攻撃の可能性",
+        "action": "Section 13にConsider項目として記録。対応不要と判断。"
+      },
+      {
+        "id": "SEC4-C-003",
+        "title": "auto-yes APIエンドポイントのレート制限の継続検討",
+        "action": "Section 8のper-worktreeポーラー上限検討に将来課題として記載。Section 13にConsider項目として記録。"
+      }
+    ]
+  },
+  "updated_document": "dev-reports/design/issue-525-auto-yes-per-agent-design-policy.md",
+  "sections_updated": [
+    "Section 3 - 複合キー設計（SEC4-SF-004: buildCompositeKeyアサーション追加）",
+    "Section 4-3 - API設計（SEC4-SF-003: GET APIバリデーション追加、SEC4-SF-002: POST APIフォールバック廃止）",
+    "Section 4-4 - クリーンアップ設計（SEC4-MF-001: resource-cleanup.tsバリデーション追加）",
+    "Section 7 - セキュリティ設計（全指摘事項の方針追記）",
+    "Section 8 - パフォーマンス設計（SEC4-SF-001: per-worktreeポーラー上限検討）",
+    "Section 12 - レビュー履歴（Stage 4追加）",
+    "Section 13 - レビュー指摘事項サマリー（Stage 4全指摘事項、OWASP Top 10チェック結果追加）",
+    "Section 14 - 実装チェックリスト（Stage 4 Must Fix/Should Fix/Consider項目追加）"
+  ],
+  "timestamp": "2026-03-20T12:30:00Z"
+}

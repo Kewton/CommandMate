@@ -11,7 +11,7 @@ import { initDatabase } from './db';
  * Current schema version
  * Increment this when adding new migrations
  */
-export const CURRENT_SCHEMA_VERSION = 21;
+export const CURRENT_SCHEMA_VERSION = 22;
 
 /**
  * Migration definition
@@ -979,6 +979,35 @@ const migrations: Migration[] = [
     down: (db) => {
       db.exec('DROP INDEX IF EXISTS idx_scheduled_executions_worktree_enabled');
       console.log('✓ Dropped idx_scheduled_executions_worktree_enabled index');
+    }
+  },
+  {
+    version: 22,
+    name: 'add-archived-column-to-chat-messages',
+    up: (db) => {
+      // Issue #168: Add archived column for logical deletion (session history retention)
+      db.exec(`
+        ALTER TABLE chat_messages ADD COLUMN archived INTEGER DEFAULT 0;
+      `);
+
+      // Safety: ensure all existing rows have archived = 0
+      db.exec(`
+        UPDATE chat_messages SET archived = 0 WHERE archived IS NULL;
+      `);
+
+      // Composite index for primary query pattern (worktree_id + archived + timestamp DESC)
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_messages_archived
+          ON chat_messages(worktree_id, archived, timestamp DESC);
+      `);
+
+      console.log('✓ Added archived column to chat_messages table');
+      console.log('✓ Created composite index idx_messages_archived');
+    },
+    down: () => {
+      // No-op: SQLite does not support DROP COLUMN directly.
+      // The archived column is harmless if unused (DEFAULT 0).
+      console.log('No rollback for archived column (SQLite limitation)');
     }
   }
 ];

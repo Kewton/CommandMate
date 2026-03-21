@@ -12,36 +12,11 @@ import {
   deleteRepositoryWorktrees,
 } from '@/lib/db';
 import { validateRepositoryPath, disableRepository } from '@/lib/db-repository';
-import { cleanupMultipleWorktrees } from '@/lib/session-cleanup';
+import { cleanupMultipleWorktrees, killWorktreeSession } from '@/lib/session-cleanup';
 import { cleanupRooms, broadcastMessage } from '@/lib/ws-server';
-import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { killSession } from '@/lib/tmux/tmux';
-import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/repositories');
-
-
-
-/**
- * Kill a CLI tool session for a worktree
- * Used as the killSessionFn parameter for cleanupMultipleWorktrees
- */
-async function killWorktreeSession(
-  worktreeId: string,
-  cliToolId: CLIToolType
-): Promise<boolean> {
-  const manager = CLIToolManager.getInstance();
-  const cliTool = manager.getTool(cliToolId);
-  const isRunning = await cliTool.isRunning(worktreeId);
-
-  if (!isRunning) {
-    return false;
-  }
-
-  const sessionName = cliTool.getSessionName(worktreeId);
-  return killSession(sessionName);
-}
 
 /**
  * DELETE /api/repositories
@@ -101,7 +76,7 @@ export async function DELETE(request: NextRequest) {
         logger.info('session:killed', { worktreeId: result.worktreeId, sessions: result.sessionsKilled });
       }
       if (result.sessionErrors.length > 0) {
-        logger.warn('session-kill-errors-for:');
+        logger.warn('session:kill-errors', { worktreeId: result.worktreeId, errors: result.sessionErrors });
       }
     }
 
@@ -115,7 +90,7 @@ export async function DELETE(request: NextRequest) {
       deletedCount = deleteResult.deletedCount;
       logger.info('repository:deleted', { repositoryPath, deletedCount });
     } catch (error) {
-      logger.error('database-deletion-failed-for:', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('repository:db-delete-failed', { repositoryPath, error: error instanceof Error ? error.message : String(error) });
       return NextResponse.json(
         { success: false, error: 'Database deletion failed' },
         { status: 500 }
@@ -151,7 +126,7 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json(response, { status: 200 });
   } catch (error: unknown) {
-    logger.error('unexpected-error:', { error: error instanceof Error ? error.message : String(error) });
+    logger.error('repository:delete-failed', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { success: false, error: 'Failed to delete repository' },
       { status: 500 }

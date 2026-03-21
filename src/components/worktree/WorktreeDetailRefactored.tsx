@@ -196,8 +196,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const [editorFilePath, setEditorFilePath] = useState<string | null>(null);
   // Issue #104: Track editor maximized state to disable Modal close handlers
   const [isEditorMaximized, setIsEditorMaximized] = useState(false);
-  const [autoYesEnabled, setAutoYesEnabled] = useState(false);
-  const [autoYesExpiresAt, setAutoYesExpiresAt] = useState<number | null>(null);
+  // Issue #525: Per-agent auto-yes state management
+  const [autoYesStateMap, setAutoYesStateMap] = useState<Map<string, { enabled: boolean; expiresAt: number | null }>>(new Map());
   // Issue #501: Track last server-side auto-yes response timestamp for duplicate prevention
   const [lastServerResponseTimestamp, setLastServerResponseTimestamp] = useState<number | null>(null);
   // Issue #501: Track whether server-side auto-yes poller is active
@@ -238,6 +238,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Issue #4: Ref to avoid polling callback recreation on tab switch
   const activeCliTabRef = useRef<CLIToolType>(activeCliTab);
   activeCliTabRef.current = activeCliTab;
+  // Issue #525: Derive active agent's auto-yes state from per-agent map
+  const autoYesEnabled = autoYesStateMap.get(activeCliTab)?.enabled ?? false;
+  const autoYesExpiresAt = autoYesStateMap.get(activeCliTab)?.expiresAt ?? null;
   // Trigger to refresh FileTreeView after file operations
   const [fileTreeRefresh, setFileTreeRefresh] = useState(0);
 
@@ -264,6 +267,21 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
   // [Issue #447] History sub-tab: 'message' (default) or 'git'
   const [historySubTab, setHistorySubTab] = useState<'message' | 'git'>('message');
+
+  // Issue #168: showArchived toggle state with localStorage persistence
+  const [showArchived, setShowArchived] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('commandmate:showArchived') === 'true';
+  });
+  const handleShowArchivedChange = useCallback((show: boolean) => {
+    setShowArchived(show);
+    localStorage.setItem('commandmate:showArchived', String(show));
+  }, []);
+  // Ref for showArchived to avoid callback recreation
+  const showArchivedRef = useRef(showArchived);
+  useEffect(() => {
+    showArchivedRef.current = showArchived;
+  }, [showArchived]);
 
   // TODO: [D1-001] pendingInsertText の状態管理を useTextInsertion カスタムフックに抽出する（技術的負債）
   // [Issue #485] State for inserting text from history/memo into message input
@@ -345,7 +363,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Issue #4: Use ref for activeCliTab to avoid callback recreation on tab switch
   const fetchMessages = useCallback(async (): Promise<void> => {
     try {
-      const response = await fetch(`/api/worktrees/${worktreeId}/messages?cliTool=${activeCliTabRef.current}`);
+      const params = new URLSearchParams({ cliTool: activeCliTabRef.current });
+      if (showArchivedRef.current) {
+        params.set('includeArchived', 'true');
+      }
+      const response = await fetch(`/api/worktrees/${worktreeId}/messages?${params.toString()}`);
       if (!response.ok) {
         throw new Error(`Failed to fetch messages: ${response.status}`);
       }
@@ -393,12 +415,17 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       setLastServerResponseTimestamp(data.lastServerResponseTimestamp ?? null);
       setServerPollerActive(data.serverPollerActive ?? false);
 
-      // Update auto-yes state from server (Issue #314: stopReason tracking)
+      // Update auto-yes state from server (Issue #314: stopReason tracking, Issue #525: per-agent)
       if (data.autoYes) {
+        const currentCliTool = activeCliTabRef.current;
         const wasEnabled = prevAutoYesEnabledRef.current;
-        setAutoYesEnabled(data.autoYes.enabled);
-        setAutoYesExpiresAt(data.autoYes.expiresAt);
-        prevAutoYesEnabledRef.current = data.autoYes.enabled;
+        const autoYes = data.autoYes;
+        setAutoYesStateMap(prev => {
+          const next = new Map(prev);
+          next.set(currentCliTool, { enabled: autoYes.enabled, expiresAt: autoYes.expiresAt });
+          return next;
+        });
+        prevAutoYesEnabledRef.current = autoYes.enabled;
 
         // Issue #314 / #499 Item 5: Detect stop condition match or consecutive error (enabled -> disabled transition)
         if (wasEnabled && !data.autoYes.enabled &&
@@ -458,6 +485,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       void fetchCurrentOutput();
     }
   }, [activeCliTab, actions, fetchMessages, fetchCurrentOutput]);
+
+  // Issue #168: Re-fetch messages when showArchived toggle changes
+  useEffect(() => {
+    void fetchMessages();
+  }, [showArchived, fetchMessages]);
 
   // Toast state for notifications (moved before event handlers that reference showToast)
   const { toasts, showToast, removeToast } = useToast();
@@ -652,8 +684,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       });
       if (response.ok) {
         const data = await response.json();
-        setAutoYesEnabled(data.enabled);
-        setAutoYesExpiresAt(data.expiresAt);
+        // Issue #525: Store per-agent state
+        setAutoYesStateMap(prev => {
+          const next = new Map(prev);
+          next.set(activeCliTab, { enabled: data.enabled, expiresAt: data.expiresAt });
+          return next;
+        });
         prevAutoYesEnabledRef.current = data.enabled;
       }
     } catch (err) {
@@ -1388,6 +1424,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   className="flex-1 min-h-0"
                   showToast={showToast}
                   onInsertToMessage={handleInsertToMessage}
+                  showArchived={showArchived}
+                  onShowArchivedChange={handleShowArchivedChange}
                 />
               )}
               {historySubTab === 'git' && (
@@ -1453,7 +1491,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         </div>
       </div>
     ),
-    [leftPaneTab, handleLeftPaneTabChange, historySubTab, state.messages, worktreeId, handleFilePathClick, showToast, fileSearch.query, fileSearch.mode, fileSearch.isSearching, fileSearch.error, fileSearch.setQuery, fileSearch.setMode, fileSearch.clearSearch, fileSearch.results?.results, handleFileSelect, handleNewFile, handleNewDirectory, handleRename, handleDelete, handleUpload, handleMove, handleCmateSetup, fileTreeRefresh, selectedAgents, handleSelectedAgentsChange, vibeLocalModel, handleVibeLocalModelChange, vibeLocalContextWindow, handleVibeLocalContextWindowChange, handleDiffSelect, handleInsertToMessage]
+    [leftPaneTab, handleLeftPaneTabChange, historySubTab, state.messages, worktreeId, handleFilePathClick, showToast, fileSearch.query, fileSearch.mode, fileSearch.isSearching, fileSearch.error, fileSearch.setQuery, fileSearch.setMode, fileSearch.clearSearch, fileSearch.results?.results, handleFileSelect, handleNewFile, handleNewDirectory, handleRename, handleDelete, handleUpload, handleMove, handleCmateSetup, fileTreeRefresh, selectedAgents, handleSelectedAgentsChange, vibeLocalModel, handleVibeLocalModelChange, vibeLocalContextWindow, handleVibeLocalContextWindowChange, handleDiffSelect, handleInsertToMessage, showArchived, handleShowArchivedChange]
   );
 
   // ========================================================================
@@ -1760,6 +1798,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onHistorySubTabChange={setHistorySubTab}
             onDiffSelect={handleDiffSelect}
             onInsertToMessage={handleInsertToMessage}
+            showArchived={showArchived}
+            onShowArchivedChange={handleShowArchivedChange}
           />
         </main>
 

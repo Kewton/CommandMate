@@ -1,0 +1,75 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "issue_number": 168,
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "description": "getMessages function accumulates too many positional parameters (db, worktreeId, before, limit, cliToolId, includeArchived). With 6 positional parameters, callers must remember ordering and pass undefined/default values for unused parameters. This violates the Interface Segregation Principle and makes the API fragile.",
+      "suggestion": "Introduce an options object pattern: `getMessages(db, worktreeId, options?: { before?: Date; limit?: number; cliToolId?: CLIToolType; includeArchived?: boolean })`. This is a well-established TypeScript pattern that improves readability and makes future parameter additions non-breaking. The existing 5-parameter signature already borders on excessive; adding a 6th makes refactoring worthwhile.",
+      "affected_section": "4.1 getMessages の変更"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "description": "The `AND archived = 0` filter clause is repeated across 8+ SQL queries in chat-db.ts and worktree-db.ts (getMessages, getLastAssistantMessageAt, getLastMessage, getLastUserMessage, markPendingPromptsAsAnswered, getLastMessagesByCliBatch, getWorktrees subquery, getWorktreeById subquery). Each is a hand-written string fragment that must be maintained in sync.",
+      "suggestion": "Define a constant like `const ACTIVE_FILTER = 'AND archived = 0'` at the module level in chat-db.ts and reference it in all queries. This provides a single point of change if the filtering logic evolves (e.g., adding time-based expiration). For worktree-db.ts, import or define the same constant. This is a minor DRY improvement, not critical.",
+      "affected_section": "4. DB関数設計 (sections 4.1 through 4.13)"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "should_fix",
+      "category": "KISS",
+      "description": "The design renames delete functions to archive (deleteMessagesByCliTool -> archiveMessagesByCliTool, deleteAllMessages -> archiveAllMessages) and also renames the WebSocket payload field (messagesCleared -> messagesArchived). While function names should reflect behavior, these renames create unnecessary churn across imports, barrel files, test files, and type definitions. The WebSocket payload rename is especially low-value since the field is currently unused by any client logic.",
+      "suggestion": "Consider keeping the existing function names but changing only their internal implementation (UPDATE instead of DELETE). Add a JSDoc comment indicating the function performs logical deletion. This avoids import/export/test churn while still being semantically clear. Alternatively, if renaming is preferred, at minimum keep the WebSocket payload field as `messagesCleared` since no client reads it -- renaming an unused field adds risk for zero benefit.",
+      "affected_section": "9. 設計上の決定事項とトレードオフ - 関数リネーム, 6. WebSocket設計"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "description": "The migration includes a `down` function with a full table recreation strategy (backup table, drop, recreate, copy, drop backup, recreate indexes). Down migrations for SQLite ALTER TABLE ADD COLUMN are complex and error-prone. In practice, CommandMate has never executed a down migration in production, and the down function itself risks data loss if the backup/restore sequence fails mid-way.",
+      "suggestion": "Consider removing the `down` migration entirely or replacing it with a simple no-op comment explaining that the column can be safely ignored if unused. If the project convention requires down migrations, the current implementation is acceptable but should be tested thoroughly.",
+      "affected_section": "10. マイグレーション設計"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "must_fix",
+      "category": "SOLID",
+      "description": "The design places localStorage state management (showArchived toggle) inside HistoryPane.tsx but requires the parent component (WorktreeDetailRefactored.tsx) to pass the includeArchived parameter to the messages API. This splits the responsibility for a single feature across two components in an unclear way -- HistoryPane owns the toggle state but the parent must react to state changes to refetch messages with a different parameter. The data flow is not clearly defined in the design.",
+      "suggestion": "Clarify the state ownership explicitly: either (a) HistoryPane receives `showArchived` and `onShowArchivedChange` as props with the parent owning the state and API call, or (b) HistoryPane manages its own state AND its own messages fetch (custom hook). The current design hints at option (a) in section 5.5 but contradicts it in section 5.4 where it says 'HistoryPane 内部で管理'. Pick one approach and document the data flow clearly. Recommended: parent owns state, passes it down, and handles API calls -- this follows React's established lifting-state-up pattern.",
+      "affected_section": "5.4 HistoryPaneProps の変更, 5.5 親コンポーネントでの messages API 呼び出し変更"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "should_fix",
+      "category": "KISS",
+      "description": "The ChatMessage type adds `archived?: boolean` as optional. Making it optional means every consumer must handle the undefined case, and it is unclear whether undefined means 'not archived' or 'unknown'. Since every message from the database will always have the archived column after migration, there is no reason for it to be optional in the domain type.",
+      "suggestion": "Make `archived` a required field (`archived: boolean`) in the ChatMessage type. The mapChatMessage function already maps it deterministically (row.archived === 1). Keeping it optional creates ambiguity for downstream consumers.",
+      "affected_section": "2. データモデル設計 - ChatMessage 型"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "description": "Section 5.3 designs a visual separator between archived and current messages, including boundary detection logic (hasArchivedBoundary). This adds UI complexity for a feature that may rarely be used (most users will keep the toggle off). The opacity-60 styling alone would sufficiently distinguish archived messages without the separator logic.",
+      "suggestion": "Start with opacity-60 only. Add the separator in a follow-up if user feedback indicates confusion about which messages are from past sessions. This follows YAGNI -- build the minimal viable UI first.",
+      "affected_section": "5.3 アーカイブメッセージの視覚的区別"
+    },
+    {
+      "id": "DR1-008",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "description": "The design specifies updating both init-db.ts (for new DB creation) and db-migrations.ts (for existing DBs). The chat_messages table schema is now defined in two places that must be kept in sync. This is an existing pattern in the project so it is not a new issue, but worth noting.",
+      "suggestion": "No immediate action needed since this follows the existing project convention. For future consideration, the init-db.ts schema could be auto-generated from the migration chain to eliminate the duplication.",
+      "affected_section": "10. マイグレーション設計"
+    }
+  ],
+  "summary": "The design for Issue #168 is well-structured overall. The archived flag approach is the right choice for the stated requirements -- it is simpler than session_id and adequate for the binary active/archived distinction needed. The main concerns are: (1) unclear state ownership for the showArchived toggle between HistoryPane and its parent (must_fix), (2) growing positional parameter list in getMessages that should use an options object (should_fix), (3) unnecessary function/WebSocket renames that add churn without proportional benefit (should_fix), and (4) ChatMessage.archived being optional when it should be required (should_fix). The DRY and YAGNI findings are minor optimizations. The core architecture -- single boolean column, composite index, filter-by-default -- is sound and follows KISS principles well.",
+  "must_fix_count": 1,
+  "should_fix_count": 3,
+  "nice_to_have_count": 4
+}

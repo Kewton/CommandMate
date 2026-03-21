@@ -1,0 +1,139 @@
+{
+  "issue_number": 526,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー（OWASP Top 10準拠確認）",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "SEC-MF-001",
+        "category": "情報漏洩",
+        "title": "cleanupWarnings にファイルパスやセッション名が含まれAPIレスポンスとして外部に露出する",
+        "description": "設計方針書 Section 5（IA-SF-004）では sync/scan/restore の各APIレスポンスに cleanupWarnings: string[] フィールドを追加する設計である。session-cleanup.ts L96-98 のエラーメッセージ生成では getErrorMessage(error) を使用しており、内部エラーのスタックトレースやファイルパス、tmuxセッション名（worktreeIdとcliToolIdを含む）がwarningsに含まれる。これがAPIレスポンスとしてクライアントに返却されると、サーバー内部構造の情報漏洩となる。",
+        "owasp_category": "A01:2021 Broken Access Control / A04:2021 Insecure Design",
+        "severity": "medium",
+        "recommendation": "APIレスポンスに返す cleanupWarnings はサニタイズし、内部的なエラー詳細（パス、セッション名、スタックトレース）を除去する。例: 「N件のセッションクリーンアップに失敗しました」のような汎用メッセージに変換し、詳細はサーバーログのみに記録する。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-SF-001",
+        "category": "コマンドインジェクション",
+        "title": "worktrees.ts の exec 使用が変更範囲外であることの明記が不十分",
+        "description": "設計方針書 Section 9（SF-C04）で worktrees.ts が child_process の exec を使用していることを認識し変更範囲外と明記しているが、exec はシェル経由でコマンドを実行するため本質的にコマンドインジェクションリスクがある。scanWorktrees() の rootDir パラメータが exec の cwd オプションに渡されるため、直接的なインジェクションベクターではないものの、将来の変更で exec の引数にユーザー入力が含まれるリスクがある。本Issue の変更範囲では新たなリスクは追加されないが、exec を execFile に移行する技術的負債として記録すべき。",
+        "owasp_category": "A03:2021 Injection",
+        "severity": "low",
+        "recommendation": "設計書 Section 9 に「worktrees.ts の exec 使用は将来的に execFile への移行を推奨する」旨の技術的負債コメントを追記する。本 Issue の実装では対応不要。"
+      },
+      {
+        "id": "SEC-SF-002",
+        "category": "DoS対策",
+        "title": "並列実行時のリソース枯渇に対する同時実行数制限が未定義",
+        "description": "設計方針書 Section 6 で cleanupMultipleWorktrees() を Promise.allSettled() に変更する設計だが、最悪ケース（47 worktrees x 5 CLI tools = 235同時プロセス）でのリソース枯渇リスクへの対策が不十分。全体タイムアウト（60秒）は C-002 として検討事項に留まっている。大量の同時 tmux kill-session プロセスがOSレベルでプロセス数やファイルディスクリプタの上限に達する可能性がある。",
+        "owasp_category": "DoS / Resource Exhaustion",
+        "severity": "medium",
+        "recommendation": "Promise.allSettled() による無制限並列ではなく、同時実行数を制限する（例: p-limit ライブラリで concurrency=5 等）。または worktree 単位の並列（各 worktree 内の5ツールは逐次）とする現設計を明示し、最大同時実行数が worktreeIds.length に制限されることを設計書に記載する。"
+      },
+      {
+        "id": "SEC-SF-003",
+        "category": "競合状態",
+        "title": "sync APIの並列呼び出し時のTOCTOU問題",
+        "description": "sync/scan/restore の各APIルートで syncWorktreesAndCleanup() を呼び出す設計だが、複数リクエストが同時に到達した場合、syncWorktreesToDB() のDB削除とクリーンアップの間にTOCTOU（Time-of-Check-Time-of-Use）の競合が発生する可能性がある。具体的には、2つの sync リクエストが同時に同じ worktree の削除を検出し、二重にクリーンアップを実行する可能性がある。killSession() は冪等（存在しないセッションに対して false を返す）であるため実害は小さいが、warnings の重複や不整合なログが発生する。",
+        "owasp_category": "Race Condition / TOCTOU",
+        "severity": "low",
+        "recommendation": "killSession() の冪等性により実害は限定的であるため、現時点では設計書に「sync APIの並列呼び出し時は二重クリーンアップが発生しうるが、killSession() の冪等性により安全である」旨を Section 9 に追記する程度で十分。将来的にクリーンアップ処理が冪等でない操作を含む場合はミューテックス導入を検討する。"
+      },
+      {
+        "id": "SEC-SF-004",
+        "category": "ログインジェクション",
+        "title": "ログ出力にworktreeIdが含まれるがサニタイズが未確認",
+        "description": "session-cleanup.ts のログ出力（L93, L98等）に worktreeId が含まれる。worktreeId は syncWorktreesToDB() 内部で生成されGitコマンドの出力から派生するため、外部ユーザーが直接制御する値ではないが、ブランチ名由来のworktreeIdに改行文字や制御文字が含まれた場合、構造化ログの破壊やログインジェクションが発生する可能性がある。",
+        "owasp_category": "A09:2021 Security Logging and Monitoring Failures",
+        "severity": "low",
+        "recommendation": "logger.info/warn/error に渡すオブジェクトパラメータ内の文字列値について、改行・制御文字のサニタイズを logger 実装側で保証するか、設計書に worktreeId の文字種制約（英数字、ハイフン、スラッシュのみ等）を明記する。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-C-001",
+        "category": "認証/認可",
+        "title": "sync/scan/restore APIの認証はmiddleware.tsで保護されている",
+        "description": "sync/scan/restore の各APIルートはmiddleware.tsの認証ミドルウェアで保護されており、CM_AUTH_TOKEN_HASH が設定されている場合はCookie またはBearerトークンによる認証が必要。AUTH_EXCLUDED_PATHS に含まれていないことを確認済み。本設計変更で認証/認可に関する新たなリスクは追加されない。",
+        "recommendation": "対応不要。現状の認証設計で十分である。"
+      },
+      {
+        "id": "SEC-C-002",
+        "category": "セキュリティ設定",
+        "title": "エラーレスポンスの500エラー時にerror.messageが露出している",
+        "description": "sync/route.ts L65 で error.message がそのままレスポンスに含まれている。これは本 Issue #526 の変更範囲外の既存問題だが、syncWorktreesAndCleanup() の導入でエラーパスが増えるため、新たな内部情報が error.message 経由で露出する可能性がわずかに上がる。",
+        "recommendation": "本 Issue の範囲外として認識し、別途改善 Issue として起票を検討する。"
+      },
+      {
+        "id": "SEC-C-003",
+        "category": "コマンドインジェクション",
+        "title": "killSession() の execFile 使用は安全",
+        "description": "killSession() は execFile を使用しており、引数は配列で渡されるためシェルインジェクションは発生しない。sessionName は tool.getSessionName(worktreeId) で内部生成されるため、外部入力が直接渡されることはない。設計書 Section 9 の記載は正確である。",
+        "recommendation": "対応不要。現状の設計で安全である。"
+      }
+    ]
+  },
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "pass",
+      "note": "sync/scan/restore APIはmiddleware.tsの認証で保護されている。新たなエンドポイント追加なし。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "note": "本設計変更に暗号処理の変更なし。"
+    },
+    "A03_injection": {
+      "status": "conditional_pass",
+      "note": "killSession() は execFile で安全。worktrees.ts の exec は変更範囲外。新たなインジェクションリスクの追加なし。"
+    },
+    "A04_insecure_design": {
+      "status": "conditional_pass",
+      "note": "cleanupWarnings のAPIレスポンス露出に情報漏洩リスクあり（SEC-MF-001）。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass",
+      "note": "設定変更なし。"
+    },
+    "A06_vulnerable_components": {
+      "status": "not_applicable",
+      "note": "新規依存ライブラリの追加なし。"
+    },
+    "A07_auth_failures": {
+      "status": "pass",
+      "note": "認証フロー変更なし。"
+    },
+    "A08_data_integrity": {
+      "status": "pass",
+      "note": "新たなデシリアライゼーションや整合性リスクなし。"
+    },
+    "A09_logging_failures": {
+      "status": "conditional_pass",
+      "note": "ログ出力にworktreeIdが含まれるが、外部制御困難。ログインジェクションリスクは低い（SEC-SF-004）。"
+    },
+    "A10_ssrf": {
+      "status": "not_applicable",
+      "note": "外部リクエスト発行なし。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-526-sync-tmux-cleanup-design-policy.md",
+    "src/lib/session-cleanup.ts",
+    "src/lib/tmux/tmux.ts",
+    "src/lib/git/worktrees.ts",
+    "src/app/api/repositories/sync/route.ts",
+    "src/app/api/repositories/route.ts",
+    "src/middleware.ts"
+  ],
+  "timestamp": "2026-03-20T12:00:00Z"
+}

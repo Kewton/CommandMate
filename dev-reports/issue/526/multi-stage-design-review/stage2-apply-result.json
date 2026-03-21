@@ -1,0 +1,67 @@
+{
+  "issue_number": 526,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘対応",
+  "status": "completed",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-C01",
+        "title": "killWorktreeSession() の getTool() 戻り値のnullチェックが実装と不整合",
+        "action": "Section 3 および Section 11(SF-004) のコード例を try-catch パターンに修正。getTool() が Error を throw する前提とし、nullチェックを除去。実装チェックリスト Step 2 にも反映。",
+        "applied": true
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-C01",
+        "title": "syncWorktreesToDB() の空配列時の早期リターンが SyncResult 未返却",
+        "action": "Section 4-1 のコード例に空配列時の早期リターン `if (worktrees.length === 0) return { deletedIds: [], upsertedCount: 0 };` を追加。実装チェックリスト Step 2 にも反映。",
+        "applied": true
+      },
+      {
+        "id": "SF-C02",
+        "title": "cleanupMultipleWorktrees() の warnings フィールドに対する不要な nullish coalescing",
+        "action": "Section 11(MF-001対応) のコード例で `?? []` を除去し `cleanupResult.warnings` に修正。実装チェックリスト Step 3 にも反映。",
+        "applied": true
+      },
+      {
+        "id": "SF-C03",
+        "title": "server.ts excludedPaths 処理の行番号が不正確",
+        "action": "Section 4-7 の記述を行番号ではなくコードコンテキスト（initializeWorktrees() 内の excludedPaths ループ）で位置を特定する形に修正。実装チェックリスト Step 4 にも反映。",
+        "applied": true
+      },
+      {
+        "id": "SF-C04",
+        "title": "worktrees.ts の import リストに exec の種類が未明記",
+        "action": "Section 9（セキュリティ考慮）に worktrees.ts の exec 使用が変更範囲外であり新たなリスクは追加されない旨を補足。",
+        "applied": true
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-C01",
+        "title": "session-cleanup.ts から worktrees.ts への逆依存",
+        "action": "Section 13 の Consider 表に記録。現状問題なし、将来の循環依存リスクに注意。",
+        "applied": true
+      },
+      {
+        "id": "C-C02",
+        "title": "clone-manager.ts の onCloneSuccess() が async メソッドで await 必要",
+        "action": "実装チェックリスト Step 4 の clone-manager.ts 項目に await 追加の注意を明記。Section 13 の Consider 表にも記録。",
+        "applied": true
+      },
+      {
+        "id": "C-C03",
+        "title": "設計書内の「4箇所」の内訳が不明確",
+        "action": "Section 13 の Consider 表に記録。実装時に正確な箇所数を確認する方針。",
+        "applied": true
+      }
+    ]
+  },
+  "updated_files": [
+    "dev-reports/design/issue-526-sync-tmux-cleanup-design-policy.md"
+  ],
+  "summary": "Stage 2 整合性レビューの Must Fix 1件、Should Fix 4件、Consider 3件を全て設計方針書に反映。コード例の修正（MF-C01, SF-C01, SF-C02）、記述の改善（SF-C03, SF-C04）、実装チェックリストの更新、Stage 2 レビュー指摘事項セクション（Section 13）の追加を実施。",
+  "timestamp": "2026-03-20T00:00:00Z"
+}

@@ -1,0 +1,37 @@
+{
+  "issue_number": 526,
+  "iteration": 2,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-03-20",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "パフォーマンス対策1「セッション存在確認を先行」に、既存のkillWorktreeSession()パターン（repositories/route.ts:30-44）でisRunning()チェックが組み込まれており踏襲で自然に実現される旨を補足。二重チェック回避の注意書きも追加。"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "テスト方針の項目4に「方針(A)の場合」を明記し、方針(B)採用時は項目7で代替される旨を追記。項目7にも方針(A)採用時は項目4で代替される旨を追記。"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "呼び出し元ごとの具体的修正内容セクションに補足ブロックを追加。方針(B)採用時にkillWorktreeSession()が4箇所で必要となるため、session-cleanup.tsへの移動等の共通化を検討する旨を記載。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 3,
+    "applied": 3,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/526"
+  }
+}

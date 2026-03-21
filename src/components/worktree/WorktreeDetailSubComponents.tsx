@@ -746,6 +746,10 @@ interface MobileContentProps {
   onDiffSelect: (diff: string, filePath: string) => void;
   /** [Issue #485] Insert to message callback */
   onInsertToMessage?: (content: string) => void;
+  /** [Issue #168] Whether to show archived messages */
+  showArchived?: boolean;
+  /** [Issue #168] Callback when showArchived toggle changes */
+  onShowArchivedChange?: (show: boolean) => void;
 }
 
 /** Renders content based on active mobile tab */
@@ -783,6 +787,8 @@ export const MobileContent = memo(function MobileContent({
   onHistorySubTabChange,
   onDiffSelect,
   onInsertToMessage,
+  showArchived,
+  onShowArchivedChange,
 }: MobileContentProps) {
   switch (activeTab) {
     case 'terminal':
@@ -836,6 +842,8 @@ export const MobileContent = memo(function MobileContent({
                 className="flex-1 min-h-0"
                 showToast={showToast}
                 onInsertToMessage={onInsertToMessage}
+                showArchived={showArchived}
+                onShowArchivedChange={onShowArchivedChange}
               />
             </ErrorBoundary>
           ) : (

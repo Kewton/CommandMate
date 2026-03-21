@@ -1,0 +1,30 @@
+{
+  "issue_number": 526,
+  "test_date": "2026-03-20",
+  "environment": {
+    "port": 3010,
+    "branch": "feature/526-worktree"
+  },
+  "results": [
+    {"id": "TC-001", "title": "sync APIでworktree削除時にクリーンアップ", "status": "pass", "evidence_note": "sync APIレスポンスにdeletedCount, cleanupWarningsが含まれることを確認。削除対象なしの場合、deletedCount=0, cleanupWarnings=[]"},
+    {"id": "TC-002", "title": "sync APIレスポンスにcleanupWarnings含む", "status": "pass", "evidence_note": "実機確認: cleanupWarnings[]フィールドが存在"},
+    {"id": "TC-003", "title": "syncWorktreesToDB() SyncResult戻り値テスト", "status": "pass", "evidence_note": "5/5テストパス"},
+    {"id": "TC-004", "title": "killWorktreeSession()共通化テスト", "status": "pass", "evidence_note": "16/16テストパス（session-cleanup.test.ts全体）"},
+    {"id": "TC-005", "title": "syncWorktreesAndCleanup()ヘルパーテスト", "status": "pass", "evidence_note": "16/16テストパス（cleanup失敗時の部分成功含む）"},
+    {"id": "TC-006", "title": "cleanupMultipleWorktrees()並列化テスト", "status": "pass", "evidence_note": "Promise.allSettledテストパス"},
+    {"id": "TC-007", "title": "既存DELETE動作確認", "status": "pass", "evidence_note": "5209全テストパス、既存テスト影響なし"},
+    {"id": "TC-008", "title": "全体テスト", "status": "pass", "evidence_note": "5209 passed, 7 skipped (既知のスキップ)"},
+    {"id": "TC-009", "title": "TypeScript型チェック", "status": "pass", "evidence_note": "エラー0件"},
+    {"id": "TC-010", "title": "ESLintチェック", "status": "pass", "evidence_note": "No ESLint warnings or errors"},
+    {"id": "TC-011", "title": "ビルド成功確認", "status": "pass", "evidence_note": "npm run build 成功"},
+    {"id": "TC-012", "title": "scan APIクリーンアップ確認", "status": "pass", "evidence_note": "実機確認: deletedCount, cleanupWarningsフィールド存在"},
+    {"id": "TC-013", "title": "server.ts excludedPaths確認", "status": "pass", "evidence_note": "コードレビュー: cleanupMultipleWorktrees→deleteWorktreesByIds順序確認"},
+    {"id": "TC-014", "title": "clone-manager.tsエラーハンドリング確認", "status": "pass", "evidence_note": "コードレビュー: try-catchでエラー吸収、IA-MF-002コメント確認"}
+  ],
+  "summary": {
+    "total": 14,
+    "passed": 14,
+    "failed": 0,
+    "pass_rate": "100%"
+  }
+}

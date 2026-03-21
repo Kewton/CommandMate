@@ -212,7 +212,7 @@ export async function POST(
     // Remove it to prevent duplicates.
     let orphanedMessageIdToDelete: string | null = null;
     try {
-      const recentMessages = getMessages(db, params.id, undefined, 1, cliToolId);
+      const recentMessages = getMessages(db, params.id, { limit: 1, cliToolId });
       if (
         recentMessages.length > 0 &&
         recentMessages[0].role === 'user' &&

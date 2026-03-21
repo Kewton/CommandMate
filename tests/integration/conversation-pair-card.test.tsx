@@ -23,6 +23,7 @@ describe('ConversationPairCard', () => {
       content: 'Hello',
       timestamp: new Date('2024-01-01T12:00:00Z'),
       messageType: 'normal',
+      archived: false,
     },
     assistantMessages: [
       {
@@ -32,6 +33,7 @@ describe('ConversationPairCard', () => {
         content: 'Response',
         timestamp: new Date('2024-01-01T12:01:00Z'),
         messageType: 'normal',
+        archived: false,
       },
     ],
     ...overrides,
@@ -48,6 +50,7 @@ describe('ConversationPairCard', () => {
             content: 'This is a long response with potentially long words and URLs',
             timestamp: new Date('2024-01-01T12:01:00Z'),
             messageType: 'normal',
+            archived: false,
           },
         ],
       });
@@ -87,6 +90,7 @@ describe('ConversationPairCard', () => {
             content: `Check this file: ${longUrl}`,
             timestamp: new Date('2024-01-01T12:01:00Z'),
             messageType: 'normal',
+            archived: false,
           },
         ],
       });
@@ -119,6 +123,7 @@ describe('ConversationPairCard', () => {
             content: `Here is the code:\n${longCodeLine}`,
             timestamp: new Date('2024-01-01T12:01:00Z'),
             messageType: 'normal',
+            archived: false,
           },
         ],
       });
@@ -145,6 +150,7 @@ describe('ConversationPairCard', () => {
             content: mixedContent,
             timestamp: new Date('2024-01-01T12:01:00Z'),
             messageType: 'normal',
+            archived: false,
           },
         ],
       });

@@ -1,6 +1,7 @@
 /**
  * Session cleanup utility tests for Issue #404 changes
  * Issue #404: Verify call order and new function integration
+ * Issue #525: Updated for byWorktree helper migration
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -10,10 +11,10 @@ vi.mock('@/lib/polling/response-poller', () => ({
   stopPolling: vi.fn(),
 }));
 
-// Mock auto-yes-manager
+// Mock auto-yes-manager (Issue #525: byWorktree helpers)
 vi.mock('@/lib/polling/auto-yes-manager', () => ({
-  stopAutoYesPolling: vi.fn(),
-  deleteAutoYesState: vi.fn().mockReturnValue(true),
+  stopAutoYesPollingByWorktree: vi.fn(),
+  deleteAutoYesStateByWorktree: vi.fn().mockReturnValue(0),
 }));
 
 // Mock schedule-manager
@@ -23,23 +24,23 @@ vi.mock('@/lib/schedule-manager', () => ({
 }));
 
 import { cleanupWorktreeSessions } from '@/lib/session-cleanup';
-import { stopAutoYesPolling, deleteAutoYesState } from '@/lib/polling/auto-yes-manager';
+import { stopAutoYesPollingByWorktree, deleteAutoYesStateByWorktree } from '@/lib/polling/auto-yes-manager';
 import { stopScheduleForWorktree, stopAllSchedules } from '@/lib/schedule-manager';
 
-describe('Session Cleanup - Issue #404 Changes', () => {
+describe('Session Cleanup - Issue #404, #525 Changes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('should call stopAutoYesPolling -> deleteAutoYesState -> stopScheduleForWorktree in order', async () => {
+  it('should call stopAutoYesPollingByWorktree -> deleteAutoYesStateByWorktree -> stopScheduleForWorktree in order', async () => {
     const callOrder: string[] = [];
 
-    vi.mocked(stopAutoYesPolling).mockImplementation(() => {
-      callOrder.push('stopAutoYesPolling');
+    vi.mocked(stopAutoYesPollingByWorktree).mockImplementation(() => {
+      callOrder.push('stopAutoYesPollingByWorktree');
     });
-    vi.mocked(deleteAutoYesState).mockImplementation(() => {
-      callOrder.push('deleteAutoYesState');
-      return true;
+    vi.mocked(deleteAutoYesStateByWorktree).mockImplementation(() => {
+      callOrder.push('deleteAutoYesStateByWorktree');
+      return 0;
     });
     vi.mocked(stopScheduleForWorktree).mockImplementation(() => {
       callOrder.push('stopScheduleForWorktree');
@@ -49,13 +50,13 @@ describe('Session Cleanup - Issue #404 Changes', () => {
     await cleanupWorktreeSessions('wt-1', killSessionFn);
 
     // Verify all three functions were called
-    expect(stopAutoYesPolling).toHaveBeenCalledWith('wt-1');
-    expect(deleteAutoYesState).toHaveBeenCalledWith('wt-1');
+    expect(stopAutoYesPollingByWorktree).toHaveBeenCalledWith('wt-1');
+    expect(deleteAutoYesStateByWorktree).toHaveBeenCalledWith('wt-1');
     expect(stopScheduleForWorktree).toHaveBeenCalledWith('wt-1');
 
-    // Verify order: stopAutoYesPolling first, then deleteAutoYesState, then stopScheduleForWorktree
-    const ayPollingIdx = callOrder.indexOf('stopAutoYesPolling');
-    const ayDeleteIdx = callOrder.indexOf('deleteAutoYesState');
+    // Verify order
+    const ayPollingIdx = callOrder.indexOf('stopAutoYesPollingByWorktree');
+    const ayDeleteIdx = callOrder.indexOf('deleteAutoYesStateByWorktree');
     const schedIdx = callOrder.indexOf('stopScheduleForWorktree');
 
     expect(ayPollingIdx).toBeLessThan(ayDeleteIdx);
@@ -69,8 +70,8 @@ describe('Session Cleanup - Issue #404 Changes', () => {
     expect(stopAllSchedules).not.toHaveBeenCalled();
   });
 
-  it('should include deleteAutoYesState in pollersStopped on success', async () => {
-    vi.mocked(deleteAutoYesState).mockReturnValue(true);
+  it('should include deleteAutoYesStateByWorktree in pollersStopped on success', async () => {
+    vi.mocked(deleteAutoYesStateByWorktree).mockReturnValue(0);
     const killSessionFn = vi.fn().mockResolvedValue(true);
 
     const result = await cleanupWorktreeSessions('wt-1', killSessionFn);
@@ -86,8 +87,8 @@ describe('Session Cleanup - Issue #404 Changes', () => {
     expect(result.pollersStopped).toContain('schedule-manager');
   });
 
-  it('should collect errors from deleteAutoYesState', async () => {
-    vi.mocked(deleteAutoYesState).mockImplementation(() => {
+  it('should collect errors from deleteAutoYesStateByWorktree', async () => {
+    vi.mocked(deleteAutoYesStateByWorktree).mockImplementation(() => {
       throw new Error('Delete state failed');
     });
     const killSessionFn = vi.fn().mockResolvedValue(true);
