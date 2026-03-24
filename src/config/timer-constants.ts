@@ -50,6 +50,7 @@ export const TIMER_STATUS = {
   SENT: 'sent',
   FAILED: 'failed',
   CANCELLED: 'cancelled',
+  NO_SESSION: 'no_session',
 } as const;
 
 /** Timer status type (union of TIMER_STATUS values) */
