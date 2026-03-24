@@ -375,12 +375,27 @@ describe('timer-db', () => {
       expect(deleted).toBe(0);
     });
 
-    it('should handle boundary: exactly retentionDays old timer should NOT be deleted', () => {
-      // Timer created exactly 30 days ago should not be deleted (< not <=)
-      insertTimerWithAge('wt-1', 'sent', 30);
+    it('should handle boundary: timer slightly newer than retentionDays should NOT be deleted', () => {
+      // Use a fixed timestamp to avoid Date.now() drift between insert and cleanup
+      const now = Date.now();
+      const t = createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: 'boundary', delayMs: 300000 });
+      // Set created_at to exactly cutoff + 1ms (should NOT be deleted)
+      const cutoff = now - 30 * 24 * 60 * 60 * 1000;
+      db.prepare(`UPDATE timer_messages SET status = ?, created_at = ? WHERE id = ?`).run('sent', cutoff + 1, t.id);
 
       const deleted = cleanupOldTimers(db, 30);
       expect(deleted).toBe(0);
+    });
+
+    it('should delete timer older than retentionDays cutoff', () => {
+      const now = Date.now();
+      const t = createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: 'old', delayMs: 300000 });
+      // Set created_at to cutoff - 1ms (should be deleted)
+      const cutoff = now - 30 * 24 * 60 * 60 * 1000;
+      db.prepare(`UPDATE timer_messages SET status = ?, created_at = ? WHERE id = ?`).run('sent', cutoff - 1, t.id);
+
+      const deleted = cleanupOldTimers(db, 30);
+      expect(deleted).toBe(1);
     });
 
     it('should return 0 when no timers to clean', () => {

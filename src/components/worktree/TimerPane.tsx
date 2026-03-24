@@ -143,42 +143,40 @@ export const TimerPane = memo(function TimerPane({ worktreeId, selectedAgents }:
   // ==========================================================================
 
   useEffect(() => {
-    // Initial fetch
-    void fetchTimers();
-
-    // Start polling
-    pollingRef.current = setInterval(() => {
+    /** Start polling and countdown intervals, returning a cleanup function. */
+    function startIntervals(): () => void {
       void fetchTimers();
-    }, TIMER_LIST_POLL_INTERVAL_MS);
+      pollingRef.current = setInterval(() => {
+        void fetchTimers();
+      }, TIMER_LIST_POLL_INTERVAL_MS);
+      countdownRef.current = setInterval(() => {
+        setTick(prev => prev + 1);
+      }, 1000);
+      return stopIntervals;
+    }
 
-    // Countdown update (every 1 second)
-    countdownRef.current = setInterval(() => {
-      setTick(prev => prev + 1);
-    }, 1000);
+    /** Stop all active intervals. */
+    function stopIntervals(): void {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+      if (countdownRef.current) clearInterval(countdownRef.current);
+      pollingRef.current = null;
+      countdownRef.current = null;
+    }
 
-    // Visibility change handler
+    startIntervals();
+
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
-        if (pollingRef.current) clearInterval(pollingRef.current);
-        if (countdownRef.current) clearInterval(countdownRef.current);
-        pollingRef.current = null;
-        countdownRef.current = null;
+        stopIntervals();
       } else {
-        void fetchTimers();
-        pollingRef.current = setInterval(() => {
-          void fetchTimers();
-        }, TIMER_LIST_POLL_INTERVAL_MS);
-        countdownRef.current = setInterval(() => {
-          setTick(prev => prev + 1);
-        }, 1000);
+        startIntervals();
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-      if (countdownRef.current) clearInterval(countdownRef.current);
+      stopIntervals();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [fetchTimers]);
