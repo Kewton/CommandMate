@@ -11,6 +11,7 @@ import {
   DELAY_STEP_MS,
   TIMER_DELAYS,
   MAX_TIMERS_PER_WORKTREE,
+  MAX_TIMER_MESSAGE_LENGTH,
   TIMER_STATUS,
   TIMER_LIST_POLL_INTERVAL_MS,
   isValidTimerDelay,
@@ -64,6 +65,12 @@ describe('timer-constants', () => {
   describe('MAX_TIMERS_PER_WORKTREE', () => {
     it('should be 5', () => {
       expect(MAX_TIMERS_PER_WORKTREE).toBe(5);
+    });
+  });
+
+  describe('MAX_TIMER_MESSAGE_LENGTH', () => {
+    it('should be 10000', () => {
+      expect(MAX_TIMER_MESSAGE_LENGTH).toBe(10000);
     });
   });
 

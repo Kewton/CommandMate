@@ -33,7 +33,6 @@ const mockGetPendingTimers = vi.fn().mockReturnValue([]);
 const mockUpdateTimerStatus = vi.fn();
 const mockCancelTimer = vi.fn();
 const mockCancelTimersByWorktree = vi.fn().mockReturnValue(0);
-const mockGetTimersByWorktree = vi.fn().mockReturnValue([]);
 
 vi.mock('@/lib/db/timer-db', () => ({
   createTimer: (...args: unknown[]) => mockCreateTimer(...args),
@@ -42,7 +41,6 @@ vi.mock('@/lib/db/timer-db', () => ({
   updateTimerStatus: (...args: unknown[]) => mockUpdateTimerStatus(...args),
   cancelTimer: (...args: unknown[]) => mockCancelTimer(...args),
   cancelTimersByWorktree: (...args: unknown[]) => mockCancelTimersByWorktree(...args),
-  getTimersByWorktree: (...args: unknown[]) => mockGetTimersByWorktree(...args),
 }));
 
 // Mock tmux sendKeys
@@ -171,12 +169,8 @@ describe('timer-manager', () => {
   });
 
   describe('stopTimersForWorktree', () => {
-    it('should cancel all timers for a specific worktree', () => {
+    it('should cancel all timers for a specific worktree using in-memory map', () => {
       mockGetPendingTimers.mockReturnValueOnce([]);
-      mockGetTimersByWorktree.mockReturnValueOnce([
-        { id: 'timer-1', worktreeId: 'wt-1', status: 'pending' },
-        { id: 'timer-2', worktreeId: 'wt-1', status: 'pending' },
-      ]);
       initTimerManager();
 
       scheduleTimer('timer-1', 'wt-1', 300000);

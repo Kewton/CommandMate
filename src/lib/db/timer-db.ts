@@ -53,6 +53,13 @@ interface TimerMessageRow {
 }
 
 // =============================================================================
+// SQL Constants (DRY: single source for column list)
+// =============================================================================
+
+/** SELECT column list for timer_messages queries */
+const TIMER_COLUMNS = 'id, worktree_id, cli_tool_id, message, delay_ms, scheduled_send_time, status, created_at, sent_at';
+
+// =============================================================================
 // Row Mapping
 // =============================================================================
 
@@ -123,7 +130,7 @@ export function getTimersByWorktree(
   worktreeId: string
 ): TimerMessage[] {
   const stmt = db.prepare(`
-    SELECT id, worktree_id, cli_tool_id, message, delay_ms, scheduled_send_time, status, created_at, sent_at
+    SELECT ${TIMER_COLUMNS}
     FROM timer_messages
     WHERE worktree_id = ?
     ORDER BY created_at DESC
@@ -141,7 +148,7 @@ export function getTimerById(
   id: string
 ): TimerMessage | undefined {
   const stmt = db.prepare(`
-    SELECT id, worktree_id, cli_tool_id, message, delay_ms, scheduled_send_time, status, created_at, sent_at
+    SELECT ${TIMER_COLUMNS}
     FROM timer_messages
     WHERE id = ?
   `);
@@ -157,7 +164,7 @@ export function getPendingTimers(
   db: Database.Database
 ): TimerMessage[] {
   const stmt = db.prepare(`
-    SELECT id, worktree_id, cli_tool_id, message, delay_ms, scheduled_send_time, status, created_at, sent_at
+    SELECT ${TIMER_COLUMNS}
     FROM timer_messages
     WHERE status = 'pending'
     ORDER BY scheduled_send_time ASC

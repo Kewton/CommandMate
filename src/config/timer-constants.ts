@@ -36,6 +36,9 @@ export const TIMER_DELAYS: number[] = Array.from(
 /** Maximum number of pending timers per worktree */
 export const MAX_TIMERS_PER_WORKTREE = 5;
 
+/** Maximum timer message length (DoS protection, same as terminal/route.ts) [CON-C-002] */
+export const MAX_TIMER_MESSAGE_LENGTH = 10000;
+
 // =============================================================================
 // Timer Status
 // =============================================================================

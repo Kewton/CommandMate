@@ -18,6 +18,7 @@ import { useTranslations } from 'next-intl';
 import {
   TIMER_DELAYS,
   MAX_TIMERS_PER_WORKTREE,
+  MAX_TIMER_MESSAGE_LENGTH,
   TIMER_LIST_POLL_INTERVAL_MS,
 } from '@/config/timer-constants';
 import { formatTimeRemaining } from '@/config/auto-yes-config';
@@ -214,7 +215,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, cliToolId }: Time
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           placeholder={t('timer.message')}
-          maxLength={10000}
+          maxLength={MAX_TIMER_MESSAGE_LENGTH}
           rows={2}
           className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 resize-none focus:outline-none focus:ring-2 focus:ring-cyan-500"
         />

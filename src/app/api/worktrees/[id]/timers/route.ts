@@ -10,7 +10,7 @@
  * - [SEC-SF-002] worktreeId typeof/non-empty check + DB existence
  * - [SEC-SF-001] timerId UUID v4 validation (DELETE)
  * - [SEC-MF-001] Fixed-string error responses in catch blocks
- * - [CON-C-002] MAX_COMMAND_LENGTH as local constant
+ * - [CON-C-002] MAX_TIMER_MESSAGE_LENGTH from timer-constants.ts
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -23,15 +23,14 @@ import {
   getTimerById,
   getPendingTimerCountByWorktree,
 } from '@/lib/db/timer-db';
-import { isValidTimerDelay, MAX_TIMERS_PER_WORKTREE } from '@/config/timer-constants';
+import { isValidTimerDelay, MAX_TIMERS_PER_WORKTREE, MAX_TIMER_MESSAGE_LENGTH } from '@/config/timer-constants';
 import { isValidUuidV4 } from '@/config/schedule-config';
 import { scheduleTimer, cancelScheduledTimer } from '@/lib/timer-manager';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/timers');
 
-/** [CON-C-002] Local constant (same as terminal/route.ts) */
-const MAX_COMMAND_LENGTH = 10000;
+// MAX_TIMER_MESSAGE_LENGTH imported from timer-constants.ts [CON-C-002]
 
 /**
  * POST /api/worktrees/[id]/timers
@@ -67,7 +66,7 @@ export async function POST(
     if (!message || typeof message !== 'string' || message.trim().length === 0) {
       return NextResponse.json({ error: 'Invalid message' }, { status: 400 });
     }
-    if (message.length > MAX_COMMAND_LENGTH) {
+    if (message.length > MAX_TIMER_MESSAGE_LENGTH) {
       return NextResponse.json({ error: 'Invalid message' }, { status: 400 });
     }
 

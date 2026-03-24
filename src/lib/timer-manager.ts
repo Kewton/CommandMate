@@ -13,7 +13,6 @@ import {
   updateTimerStatus,
   cancelTimer,
   cancelTimersByWorktree,
-  getTimersByWorktree,
 } from './db/timer-db';
 import { sendKeys } from './tmux/tmux';
 import { CLIToolManager } from './cli-tools/manager';
@@ -181,22 +180,22 @@ export function cancelScheduledTimer(timerId: string): void {
 
 /**
  * Stop all timers for a worktree (session-cleanup integration).
+ * Uses in-memory timerWorktrees map to find timers (avoids redundant DB query).
  */
 export function stopTimersForWorktree(worktreeId: string): void {
   const state = getState();
   const db = getDbInstance();
 
-  // Find and clear timers for this worktree
-  const timersForWorktree = getTimersByWorktree(db, worktreeId)
-    .filter(t => t.status === 'pending');
-
-  for (const timer of timersForWorktree) {
-    const handle = state.timers.get(timer.id);
-    if (handle) {
-      clearTimeout(handle);
+  // Find timers for this worktree from in-memory map (no DB query needed)
+  for (const [timerId, wtId] of state.timerWorktrees) {
+    if (wtId === worktreeId) {
+      const handle = state.timers.get(timerId);
+      if (handle) {
+        clearTimeout(handle);
+      }
+      state.timers.delete(timerId);
+      state.timerWorktrees.delete(timerId);
     }
-    state.timers.delete(timer.id);
-    state.timerWorktrees.delete(timer.id);
   }
 
   // Batch cancel in DB
