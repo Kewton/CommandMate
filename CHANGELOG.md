@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.12] - 2026-03-24
+
+### Added
+- Timer: delayed message sending feature with configurable delay times (Issue #534)
+  - `timer-constants.ts` with dynamic delay generation
+  - `timer-db.ts` with full CRUD operations and cursor-based pagination
+  - `timer-manager.ts` with globalThis singleton and setTimeout management
+  - Timer API route (POST/GET/DELETE) with security validations
+  - `TimerPane.tsx` with countdown, polling, and visibilitychange support
+  - Timer sub-tab in NotesAndLogsPane
+- Timer: session check before timer execution with NO_SESSION status (Issue #539)
+  - `isRunning()` check to detect no-session state
+  - Session warning in POST API response and UI
+- Timer: history limit, pagination, and automatic cleanup (Issue #540)
+  - Cursor-based pagination with configurable limits
+  - Automatic cleanup of old timers on startup (30-day retention)
+  - Recovery of stuck sending timers
+  - "Load more" and "Clear history" UI controls
+
+### Fixed
+- Timer: add agent selector to TimerPane registration form (#538)
+- Timer: fix flaky cleanupOldTimers boundary test with fixed timestamps
+
+### Refactored
+- Timer: extract MAX_TIMER_MESSAGE_LENGTH and TIMER_COLUMNS constants for DRY compliance
+- Timer: optimize stopTimersForWorktree to use in-memory map instead of DB query
+- Timer: extract startIntervals/stopIntervals helpers in TimerPane to eliminate duplication
+
 ## [0.4.11] - 2026-03-21
 
 ### Added
