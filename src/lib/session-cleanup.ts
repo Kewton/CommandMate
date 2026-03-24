@@ -11,6 +11,7 @@
 import { stopPolling as stopResponsePolling } from './polling/response-poller';
 import { stopAutoYesPollingByWorktree, deleteAutoYesStateByWorktree } from './polling/auto-yes-manager';
 import { stopScheduleForWorktree } from './schedule-manager';
+import { stopTimersForWorktree } from './timer-manager';
 import { clearAllCache } from './tmux/tmux-capture-cache';
 import { CLI_TOOL_IDS, type CLIToolType } from './cli-tools/types';
 import { getErrorMessage } from './errors';
@@ -141,6 +142,16 @@ export async function cleanupWorktreeSessions(
     const errorMsg = `schedule-manager: ${getErrorMessage(error)}`;
     result.pollerErrors.push(errorMsg);
     logger.warn('schedule-manager:stop-failed', { worktreeId, error: error instanceof Error ? error.message : String(error) });
+  }
+
+  // 5. Stop timers for this worktree (Issue #534)
+  try {
+    stopTimersForWorktree(worktreeId);
+    result.pollersStopped.push('timer-manager');
+  } catch (error) {
+    const errorMsg = `timer-manager: ${getErrorMessage(error)}`;
+    result.pollerErrors.push(errorMsg);
+    logger.warn('timer-manager:stop-failed', { worktreeId, error: error instanceof Error ? error.message : String(error) });
   }
 
   return result;

@@ -23,6 +23,10 @@ vi.mock('@/lib/schedule-manager', () => ({
   stopScheduleForWorktree: vi.fn(),
 }));
 
+vi.mock('@/lib/timer-manager', () => ({
+  stopTimersForWorktree: vi.fn(),
+}));
+
 vi.mock('@/lib/tmux/tmux-capture-cache', () => ({
   clearAllCache: vi.fn(),
 }));

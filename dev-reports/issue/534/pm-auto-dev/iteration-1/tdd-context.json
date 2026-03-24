@@ -1,0 +1,39 @@
+{
+  "issue_number": 534,
+  "acceptance_criteria": [
+    "CMATEタブ内にTimerサブタブが表示される",
+    "エージェント選択 + メッセージ入力 + 時間選択でタイマーを登録できる",
+    "5分後〜8時間45分後まで5分単位で指定可能（300000ms〜31500000ms）",
+    "worktree単位で最大5つまで登録可能",
+    "カウントダウンがリアルタイムで表示される",
+    "タイマーをキャンセルできる",
+    "指定時間後にメッセージが自動送信される",
+    "送信失敗時はDBのstatusがfailedに更新される（リトライなし）",
+    "サーバー再起動後も未送信タイマーが復元される",
+    "サーバー再起動時、scheduled_send_timeが過去のタイマーは即座に送信される",
+    "worktree削除時・セッション停止時にタイマーが適切にキャンセルされる",
+    "timer-managerはglobalThisパターンでHot Reload耐性がある",
+    "タイマー登録時のバリデーション（空メッセージ拒否、最大長10000文字、エージェント必須）が動作する",
+    "server.tsの起動時にinitTimerManager()が呼ばれ、シャットダウン時にstopAllTimers()が呼ばれる",
+    "resource-cleanup.tsで孤立したtimer-managerエントリが検出・削除される",
+    "既存機能に影響がない（既存テストが通る）",
+    "モバイルでもmemoタブ経由でTimerサブタブにアクセスできる"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: src/config/timer-constants.ts - 定数定義（MIN/MAX/STEP、動的TIMER_DELAYS、isValidTimerDelay）",
+    "Task 1.2: src/lib/db/db-migrations.ts - v23マイグレーション（timer_messagesテーブル）",
+    "Task 1.3: src/lib/db/timer-db.ts - Timer CRUD操作モジュール",
+    "Task 1.4: src/lib/db/db.ts - バレルエクスポート追加",
+    "Task 2.1: src/lib/timer-manager.ts - タイマーマネージャー（globalThis、initTimerManager、stopAllTimers、executeTimer with CLIToolManager）",
+    "Task 3.1: src/app/api/worktrees/[id]/timers/route.ts - Timer CRUD API（POST/GET/DELETE）",
+    "Task 4.1: server.ts - initTimerManager/stopAllTimersライフサイクル統合",
+    "Task 4.2: src/lib/session-cleanup.ts - stopTimersForWorktree統合",
+    "Task 4.3: src/lib/resource-cleanup.ts - 孤立エントリ検出統合",
+    "Task 5.1: locales/en/schedule.json, locales/ja/schedule.json - i18n翻訳キー追加",
+    "Task 5.2: src/components/worktree/TimerPane.tsx - タイマーUI（登録フォーム、カウントダウン、キャンセル）",
+    "Task 5.3: src/components/worktree/NotesAndLogsPane.tsx - Timerサブタブ追加"
+  ],
+  "design_doc_path": "dev-reports/design/issue-534-timer-message-design-policy.md",
+  "work_plan_path": "dev-reports/issue/534/work-plan.md",
+  "target_coverage": 80
+}

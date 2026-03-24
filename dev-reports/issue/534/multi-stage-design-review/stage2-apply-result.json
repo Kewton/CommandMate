@@ -1,0 +1,66 @@
+{
+  "issue_number": 534,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘事項対応",
+  "status": "completed",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "CON-MF-001",
+        "title": "executeTimer内のCLIToolManager APIがコードベースの実際のAPIと不一致",
+        "action": "セクション3-3のコード例を CLIToolManager.getInstance().getTool() パターンに修正。DP-004コメントも正確な記述に更新",
+        "sections_modified": ["3-3"]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "CON-SF-001",
+        "title": "gracefulShutdown内のstopAllTimers()の挿入位置が既存パターンと不整合",
+        "action": "セクション10の停止順序をserver.tsの実際の行番号付きで正確に記述。stopAllTimers()の挿入位置を明確化",
+        "sections_modified": ["10"]
+      },
+      {
+        "id": "CON-SF-002",
+        "title": "GET APIのレスポンスにworktreeIdが含まれていない",
+        "action": "GET API仕様に意図的差異である旨のコメントを追記。パスパラメータから既知のため省略する設計判断を明文化",
+        "sections_modified": ["5"]
+      },
+      {
+        "id": "CON-SF-003",
+        "title": "resource-cleanup.tsへのtimer-manager統合方法が未記載",
+        "action": "セクション10にリソースクリーンアップ統合サブセクションを追加。getTimerWorktreeIds()アクセサ関数のexport、cleanupOrphanedMapEntries()への統合コード例、CleanupMapResult型拡張を記載。セクション9-3にアクセサ関数を追加。セクション7にも参照を追記",
+        "sections_modified": ["7", "9-3", "10"]
+      },
+      {
+        "id": "CON-SF-004",
+        "title": "cancelTimer()とDELETE APIのステータス遷移の整合性",
+        "action": "DELETE API仕様にpending以外のステータスへの要求時のResponse 409を追記",
+        "sections_modified": ["5"]
+      }
+    ],
+    "consider": [
+      {
+        "id": "CON-C-001",
+        "title": "i18n名前空間の選択根拠",
+        "action": "セクション11にschedule名前空間に追加する合理的理由（ファイル数抑制、timerプレフィックスで概念分離維持）を明記",
+        "sections_modified": ["11"]
+      },
+      {
+        "id": "CON-C-002",
+        "title": "MAX_COMMAND_LENGTHの定義場所",
+        "action": "セクション5バリデーション表にtimer APIルート内ローカル定数とする方針を明記",
+        "sections_modified": ["5"]
+      },
+      {
+        "id": "CON-C-003",
+        "title": "TimerPane.tsxのポーリング間隔が未定義",
+        "action": "セクション9-4にポーリング間隔10秒、楽観的UI更新方針、TIMER_LIST_POLL_INTERVAL_MS定数定義を追記",
+        "sections_modified": ["9-4"]
+      }
+    ]
+  },
+  "design_doc_path": "dev-reports/design/issue-534-timer-message-design-policy.md",
+  "sections_added": ["13. Stage 2 整合性レビュー指摘事項サマリー"],
+  "checklist_items_added": 11,
+  "timestamp": "2026-03-24T12:30:00Z"
+}

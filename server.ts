@@ -42,6 +42,7 @@ import { getDbInstance } from './src/lib/db-instance';
 import { stopAllPolling } from './src/lib/polling/response-poller';
 import { stopAllAutoYesPolling } from './src/lib/polling/auto-yes-manager';
 import { initScheduleManager, stopAllSchedules } from './src/lib/schedule-manager';
+import { initTimerManager, stopAllTimers } from './src/lib/timer-manager';
 import { initResourceCleanup, stopResourceCleanup } from './src/lib/resource-cleanup';
 import { runMigrations } from './src/lib/db-migrations';
 import { getEnvByKey } from './src/lib/env';
@@ -277,6 +278,9 @@ app.prepare().then(() => {
     // [S3-010] Initialize schedule manager AFTER worktrees are ready
     initScheduleManager();
 
+    // Issue #534: Initialize timer manager AFTER schedule manager
+    initTimerManager();
+
     // Issue #404: Initialize resource cleanup AFTER schedule manager
     initResourceCleanup();
   });
@@ -301,6 +305,9 @@ app.prepare().then(() => {
 
     // Issue #294: Stop all scheduled executions (SIGKILL fire-and-forget)
     stopAllSchedules();
+
+    // Issue #534: Stop all timer-based delayed messages
+    stopAllTimers();
 
     // Issue #404: Stop resource cleanup timer
     stopResourceCleanup();

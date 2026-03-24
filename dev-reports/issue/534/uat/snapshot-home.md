@@ -1,0 +1,2036 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - navigation "Branch navigation" [ref=e4]:
+        - generic [ref=e6]:
+          - heading "Branches" [level=2] [ref=e7]
+          - generic [ref=e8]:
+            - button "Switch to flat view" [ref=e9] [cursor=pointer]:
+              - img [ref=e10]
+            - generic [ref=e13]:
+              - button "Sort by Updated" [ref=e14] [cursor=pointer]:
+                - img [ref=e15]
+                - generic [ref=e17]: Updated
+              - button "Sort descending" [ref=e18] [cursor=pointer]:
+                - img [ref=e19]
+            - button "Sync branches" [ref=e21] [cursor=pointer]:
+              - img [ref=e22]
+        - textbox "Search branches..." [ref=e25]
+        - generic [ref=e26]:
+          - generic [ref=e27]:
+            - button "MyCodeBranchDesk 3" [expanded] [ref=e28] [cursor=pointer]:
+              - img [ref=e29]
+              - img [ref=e31]
+              - generic [ref=e33]: MyCodeBranchDesk
+              - generic [ref=e34]: "3"
+            - button "CLI tool status develop MyCodeBranchDesk" [ref=e35] [cursor=pointer]:
+              - generic [ref=e36]:
+                - generic "CLI tool status" [ref=e37]:
+                  - 'generic "Claude: Ready" [ref=e38]'
+                  - 'generic "Codex: Idle" [ref=e39]'
+                  - 'generic "Gemini: Idle" [ref=e40]'
+                - generic [ref=e41]:
+                  - paragraph [ref=e42]: develop
+                  - paragraph [ref=e43]: MyCodeBranchDesk
+            - button "CLI tool status feature/534-timer-message MyCodeBranchDesk" [ref=e44] [cursor=pointer]:
+              - generic [ref=e45]:
+                - generic "CLI tool status" [ref=e46]:
+                  - 'generic "Claude: Waiting for response" [ref=e2394]'
+                  - 'generic "Codex: Idle" [ref=e48]'
+                  - 'generic "Gemini: Idle" [ref=e49]'
+                - generic [ref=e50]:
+                  - paragraph [ref=e51]: feature/534-timer-message
+                  - paragraph [ref=e52]: MyCodeBranchDesk
+            - button "CLI tool status main MyCodeBranchDesk" [ref=e53] [cursor=pointer]:
+              - generic [ref=e54]:
+                - generic "CLI tool status" [ref=e55]:
+                  - 'generic "Claude: Ready" [ref=e56]'
+                  - 'generic "Codex: Idle" [ref=e57]'
+                  - 'generic "Gemini: Idle" [ref=e58]'
+                - generic [ref=e59]:
+                  - paragraph [ref=e60]: main
+                  - paragraph [ref=e61]: MyCodeBranchDesk
+          - generic [ref=e62]:
+            - button "MySwiftAgent 81" [expanded] [ref=e63] [cursor=pointer]:
+              - img [ref=e64]
+              - img [ref=e66]
+              - generic [ref=e68]: MySwiftAgent
+              - generic [ref=e69]: "81"
+            - button "CLI tool status develop MySwiftAgent" [ref=e70] [cursor=pointer]:
+              - generic [ref=e71]:
+                - generic "CLI tool status" [ref=e72]:
+                  - 'generic "Claude: Idle" [ref=e73]'
+                  - 'generic "Codex: Idle" [ref=e74]'
+                  - 'generic "Gemini: Idle" [ref=e75]'
+                - generic [ref=e76]:
+                  - paragraph [ref=e77]: develop
+                  - paragraph [ref=e78]: MySwiftAgent
+            - button "CLI tool status feature/issue/113 MySwiftAgent" [ref=e79] [cursor=pointer]:
+              - generic [ref=e80]:
+                - generic "CLI tool status" [ref=e81]:
+                  - 'generic "Claude: Idle" [ref=e82]'
+                  - 'generic "Codex: Idle" [ref=e83]'
+                  - 'generic "Gemini: Idle" [ref=e84]'
+                - generic [ref=e85]:
+                  - paragraph [ref=e86]: feature/issue/113
+                  - paragraph [ref=e87]: MySwiftAgent
+            - button "CLI tool status feature/issue/120 MySwiftAgent" [ref=e88] [cursor=pointer]:
+              - generic [ref=e89]:
+                - generic "CLI tool status" [ref=e90]:
+                  - 'generic "Claude: Idle" [ref=e91]'
+                  - 'generic "Codex: Idle" [ref=e92]'
+                  - 'generic "Gemini: Idle" [ref=e93]'
+                - generic [ref=e94]:
+                  - paragraph [ref=e95]: feature/issue/120
+                  - paragraph [ref=e96]: MySwiftAgent
+            - button "CLI tool status feature/issue/133 MySwiftAgent" [ref=e97] [cursor=pointer]:
+              - generic [ref=e98]:
+                - generic "CLI tool status" [ref=e99]:
+                  - 'generic "Claude: Idle" [ref=e100]'
+                  - 'generic "Codex: Idle" [ref=e101]'
+                  - 'generic "Gemini: Idle" [ref=e102]'
+                - generic [ref=e103]:
+                  - paragraph [ref=e104]: feature/issue/133
+                  - paragraph [ref=e105]: MySwiftAgent
+            - button "CLI tool status feature/issue/141 MySwiftAgent" [ref=e106] [cursor=pointer]:
+              - generic [ref=e107]:
+                - generic "CLI tool status" [ref=e108]:
+                  - 'generic "Claude: Idle" [ref=e109]'
+                  - 'generic "Codex: Idle" [ref=e110]'
+                  - 'generic "Gemini: Idle" [ref=e111]'
+                - generic [ref=e112]:
+                  - paragraph [ref=e113]: feature/issue/141
+                  - paragraph [ref=e114]: MySwiftAgent
+            - button "CLI tool status feature/issue/142 MySwiftAgent" [ref=e115] [cursor=pointer]:
+              - generic [ref=e116]:
+                - generic "CLI tool status" [ref=e117]:
+                  - 'generic "Claude: Idle" [ref=e118]'
+                  - 'generic "Codex: Idle" [ref=e119]'
+                  - 'generic "Gemini: Idle" [ref=e120]'
+                - generic [ref=e121]:
+                  - paragraph [ref=e122]: feature/issue/142
+                  - paragraph [ref=e123]: MySwiftAgent
+            - button "CLI tool status feature/issue/143 MySwiftAgent" [ref=e124] [cursor=pointer]:
+              - generic [ref=e125]:
+                - generic "CLI tool status" [ref=e126]:
+                  - 'generic "Claude: Idle" [ref=e127]'
+                  - 'generic "Codex: Idle" [ref=e128]'
+                  - 'generic "Gemini: Idle" [ref=e129]'
+                - generic [ref=e130]:
+                  - paragraph [ref=e131]: feature/issue/143
+                  - paragraph [ref=e132]: MySwiftAgent
+            - button "CLI tool status feature/issue/144 MySwiftAgent" [ref=e133] [cursor=pointer]:
+              - generic [ref=e134]:
+                - generic "CLI tool status" [ref=e135]:
+                  - 'generic "Claude: Idle" [ref=e136]'
+                  - 'generic "Codex: Idle" [ref=e137]'
+                  - 'generic "Gemini: Idle" [ref=e138]'
+                - generic [ref=e139]:
+                  - paragraph [ref=e140]: feature/issue/144
+                  - paragraph [ref=e141]: MySwiftAgent
+            - button "CLI tool status feature/issue/145 MySwiftAgent" [ref=e142] [cursor=pointer]:
+              - generic [ref=e143]:
+                - generic "CLI tool status" [ref=e144]:
+                  - 'generic "Claude: Idle" [ref=e145]'
+                  - 'generic "Codex: Idle" [ref=e146]'
+                  - 'generic "Gemini: Idle" [ref=e147]'
+                - generic [ref=e148]:
+                  - paragraph [ref=e149]: feature/issue/145
+                  - paragraph [ref=e150]: MySwiftAgent
+            - button "CLI tool status feature/issue/146 MySwiftAgent" [ref=e151] [cursor=pointer]:
+              - generic [ref=e152]:
+                - generic "CLI tool status" [ref=e153]:
+                  - 'generic "Claude: Idle" [ref=e154]'
+                  - 'generic "Codex: Idle" [ref=e155]'
+                  - 'generic "Gemini: Idle" [ref=e156]'
+                - generic [ref=e157]:
+                  - paragraph [ref=e158]: feature/issue/146
+                  - paragraph [ref=e159]: MySwiftAgent
+            - button "CLI tool status feature/issue/147 MySwiftAgent" [ref=e160] [cursor=pointer]:
+              - generic [ref=e161]:
+                - generic "CLI tool status" [ref=e162]:
+                  - 'generic "Claude: Idle" [ref=e163]'
+                  - 'generic "Codex: Idle" [ref=e164]'
+                  - 'generic "Gemini: Idle" [ref=e165]'
+                - generic [ref=e166]:
+                  - paragraph [ref=e167]: feature/issue/147
+                  - paragraph [ref=e168]: MySwiftAgent
+            - button "CLI tool status feature/issue/148 MySwiftAgent" [ref=e169] [cursor=pointer]:
+              - generic [ref=e170]:
+                - generic "CLI tool status" [ref=e171]:
+                  - 'generic "Claude: Idle" [ref=e172]'
+                  - 'generic "Codex: Idle" [ref=e173]'
+                  - 'generic "Gemini: Idle" [ref=e174]'
+                - generic [ref=e175]:
+                  - paragraph [ref=e176]: feature/issue/148
+                  - paragraph [ref=e177]: MySwiftAgent
+            - button "CLI tool status feature/issue/149 MySwiftAgent" [ref=e178] [cursor=pointer]:
+              - generic [ref=e179]:
+                - generic "CLI tool status" [ref=e180]:
+                  - 'generic "Claude: Idle" [ref=e181]'
+                  - 'generic "Codex: Idle" [ref=e182]'
+                  - 'generic "Gemini: Idle" [ref=e183]'
+                - generic [ref=e184]:
+                  - paragraph [ref=e185]: feature/issue/149
+                  - paragraph [ref=e186]: MySwiftAgent
+            - button "CLI tool status feature/issue/150 MySwiftAgent" [ref=e187] [cursor=pointer]:
+              - generic [ref=e188]:
+                - generic "CLI tool status" [ref=e189]:
+                  - 'generic "Claude: Idle" [ref=e190]'
+                  - 'generic "Codex: Idle" [ref=e191]'
+                  - 'generic "Gemini: Idle" [ref=e192]'
+                - generic [ref=e193]:
+                  - paragraph [ref=e194]: feature/issue/150
+                  - paragraph [ref=e195]: MySwiftAgent
+            - button "CLI tool status feature/issue/169 MySwiftAgent" [ref=e196] [cursor=pointer]:
+              - generic [ref=e197]:
+                - generic "CLI tool status" [ref=e198]:
+                  - 'generic "Claude: Idle" [ref=e199]'
+                  - 'generic "Codex: Idle" [ref=e200]'
+                  - 'generic "Gemini: Idle" [ref=e201]'
+                - generic [ref=e202]:
+                  - paragraph [ref=e203]: feature/issue/169
+                  - paragraph [ref=e204]: MySwiftAgent
+            - button "CLI tool status feature/issue/170 MySwiftAgent" [ref=e205] [cursor=pointer]:
+              - generic [ref=e206]:
+                - generic "CLI tool status" [ref=e207]:
+                  - 'generic "Claude: Idle" [ref=e208]'
+                  - 'generic "Codex: Idle" [ref=e209]'
+                  - 'generic "Gemini: Idle" [ref=e210]'
+                - generic [ref=e211]:
+                  - paragraph [ref=e212]: feature/issue/170
+                  - paragraph [ref=e213]: MySwiftAgent
+            - button "CLI tool status feature/issue/171 MySwiftAgent" [ref=e214] [cursor=pointer]:
+              - generic [ref=e215]:
+                - generic "CLI tool status" [ref=e216]:
+                  - 'generic "Claude: Idle" [ref=e217]'
+                  - 'generic "Codex: Idle" [ref=e218]'
+                  - 'generic "Gemini: Idle" [ref=e219]'
+                - generic [ref=e220]:
+                  - paragraph [ref=e221]: feature/issue/171
+                  - paragraph [ref=e222]: MySwiftAgent
+            - button "CLI tool status feature/issue/172 MySwiftAgent" [ref=e223] [cursor=pointer]:
+              - generic [ref=e224]:
+                - generic "CLI tool status" [ref=e225]:
+                  - 'generic "Claude: Idle" [ref=e226]'
+                  - 'generic "Codex: Idle" [ref=e227]'
+                  - 'generic "Gemini: Idle" [ref=e228]'
+                - generic [ref=e229]:
+                  - paragraph [ref=e230]: feature/issue/172
+                  - paragraph [ref=e231]: MySwiftAgent
+            - button "CLI tool status feature/issue/173 MySwiftAgent" [ref=e232] [cursor=pointer]:
+              - generic [ref=e233]:
+                - generic "CLI tool status" [ref=e234]:
+                  - 'generic "Claude: Idle" [ref=e235]'
+                  - 'generic "Codex: Idle" [ref=e236]'
+                  - 'generic "Gemini: Idle" [ref=e237]'
+                - generic [ref=e238]:
+                  - paragraph [ref=e239]: feature/issue/173
+                  - paragraph [ref=e240]: MySwiftAgent
+            - button "CLI tool status feature/issue/174 MySwiftAgent" [ref=e241] [cursor=pointer]:
+              - generic [ref=e242]:
+                - generic "CLI tool status" [ref=e243]:
+                  - 'generic "Claude: Idle" [ref=e244]'
+                  - 'generic "Codex: Idle" [ref=e245]'
+                  - 'generic "Gemini: Idle" [ref=e246]'
+                - generic [ref=e247]:
+                  - paragraph [ref=e248]: feature/issue/174
+                  - paragraph [ref=e249]: MySwiftAgent
+            - button "CLI tool status feature/issue/175 MySwiftAgent" [ref=e250] [cursor=pointer]:
+              - generic [ref=e251]:
+                - generic "CLI tool status" [ref=e252]:
+                  - 'generic "Claude: Idle" [ref=e253]'
+                  - 'generic "Codex: Idle" [ref=e254]'
+                  - 'generic "Gemini: Idle" [ref=e255]'
+                - generic [ref=e256]:
+                  - paragraph [ref=e257]: feature/issue/175
+                  - paragraph [ref=e258]: MySwiftAgent
+            - button "CLI tool status feature/issue/176 MySwiftAgent" [ref=e259] [cursor=pointer]:
+              - generic [ref=e260]:
+                - generic "CLI tool status" [ref=e261]:
+                  - 'generic "Claude: Idle" [ref=e262]'
+                  - 'generic "Codex: Idle" [ref=e263]'
+                  - 'generic "Gemini: Idle" [ref=e264]'
+                - generic [ref=e265]:
+                  - paragraph [ref=e266]: feature/issue/176
+                  - paragraph [ref=e267]: MySwiftAgent
+            - button "CLI tool status feature/issue/177 MySwiftAgent" [ref=e268] [cursor=pointer]:
+              - generic [ref=e269]:
+                - generic "CLI tool status" [ref=e270]:
+                  - 'generic "Claude: Idle" [ref=e271]'
+                  - 'generic "Codex: Idle" [ref=e272]'
+                  - 'generic "Gemini: Idle" [ref=e273]'
+                - generic [ref=e274]:
+                  - paragraph [ref=e275]: feature/issue/177
+                  - paragraph [ref=e276]: MySwiftAgent
+            - button "CLI tool status feature/issue/178 MySwiftAgent" [ref=e277] [cursor=pointer]:
+              - generic [ref=e278]:
+                - generic "CLI tool status" [ref=e279]:
+                  - 'generic "Claude: Idle" [ref=e280]'
+                  - 'generic "Codex: Idle" [ref=e281]'
+                  - 'generic "Gemini: Idle" [ref=e282]'
+                - generic [ref=e283]:
+                  - paragraph [ref=e284]: feature/issue/178
+                  - paragraph [ref=e285]: MySwiftAgent
+            - button "CLI tool status feature/issue/191 MySwiftAgent" [ref=e286] [cursor=pointer]:
+              - generic [ref=e287]:
+                - generic "CLI tool status" [ref=e288]:
+                  - 'generic "Claude: Idle" [ref=e289]'
+                  - 'generic "Codex: Idle" [ref=e290]'
+                  - 'generic "Gemini: Idle" [ref=e291]'
+                - generic [ref=e292]:
+                  - paragraph [ref=e293]: feature/issue/191
+                  - paragraph [ref=e294]: MySwiftAgent
+            - button "CLI tool status feature/issue/192 MySwiftAgent" [ref=e295] [cursor=pointer]:
+              - generic [ref=e296]:
+                - generic "CLI tool status" [ref=e297]:
+                  - 'generic "Claude: Idle" [ref=e298]'
+                  - 'generic "Codex: Idle" [ref=e299]'
+                  - 'generic "Gemini: Idle" [ref=e300]'
+                - generic [ref=e301]:
+                  - paragraph [ref=e302]: feature/issue/192
+                  - paragraph [ref=e303]: MySwiftAgent
+            - button "CLI tool status feature/issue/198 MySwiftAgent" [ref=e304] [cursor=pointer]:
+              - generic [ref=e305]:
+                - generic "CLI tool status" [ref=e306]:
+                  - 'generic "Claude: Idle" [ref=e307]'
+                  - 'generic "Codex: Idle" [ref=e308]'
+                  - 'generic "Gemini: Idle" [ref=e309]'
+                - generic [ref=e310]:
+                  - paragraph [ref=e311]: feature/issue/198
+                  - paragraph [ref=e312]: MySwiftAgent
+            - button "CLI tool status feature/issue/199 MySwiftAgent" [ref=e313] [cursor=pointer]:
+              - generic [ref=e314]:
+                - generic "CLI tool status" [ref=e315]:
+                  - 'generic "Claude: Idle" [ref=e316]'
+                  - 'generic "Codex: Idle" [ref=e317]'
+                  - 'generic "Gemini: Idle" [ref=e318]'
+                - generic [ref=e319]:
+                  - paragraph [ref=e320]: feature/issue/199
+                  - paragraph [ref=e321]: MySwiftAgent
+            - button "CLI tool status feature/issue/200 MySwiftAgent" [ref=e322] [cursor=pointer]:
+              - generic [ref=e323]:
+                - generic "CLI tool status" [ref=e324]:
+                  - 'generic "Claude: Idle" [ref=e325]'
+                  - 'generic "Codex: Idle" [ref=e326]'
+                  - 'generic "Gemini: Idle" [ref=e327]'
+                - generic [ref=e328]:
+                  - paragraph [ref=e329]: feature/issue/200
+                  - paragraph [ref=e330]: MySwiftAgent
+            - button "CLI tool status feature/issue/201 MySwiftAgent" [ref=e331] [cursor=pointer]:
+              - generic [ref=e332]:
+                - generic "CLI tool status" [ref=e333]:
+                  - 'generic "Claude: Idle" [ref=e334]'
+                  - 'generic "Codex: Idle" [ref=e335]'
+                  - 'generic "Gemini: Idle" [ref=e336]'
+                - generic [ref=e337]:
+                  - paragraph [ref=e338]: feature/issue/201
+                  - paragraph [ref=e339]: MySwiftAgent
+            - button "CLI tool status feature/issue/202 MySwiftAgent" [ref=e340] [cursor=pointer]:
+              - generic [ref=e341]:
+                - generic "CLI tool status" [ref=e342]:
+                  - 'generic "Claude: Idle" [ref=e343]'
+                  - 'generic "Codex: Idle" [ref=e344]'
+                  - 'generic "Gemini: Idle" [ref=e345]'
+                - generic [ref=e346]:
+                  - paragraph [ref=e347]: feature/issue/202
+                  - paragraph [ref=e348]: MySwiftAgent
+            - button "CLI tool status feature/issue/203 MySwiftAgent" [ref=e349] [cursor=pointer]:
+              - generic [ref=e350]:
+                - generic "CLI tool status" [ref=e351]:
+                  - 'generic "Claude: Idle" [ref=e352]'
+                  - 'generic "Codex: Idle" [ref=e353]'
+                  - 'generic "Gemini: Idle" [ref=e354]'
+                - generic [ref=e355]:
+                  - paragraph [ref=e356]: feature/issue/203
+                  - paragraph [ref=e357]: MySwiftAgent
+            - button "CLI tool status feature/issue/211 MySwiftAgent" [ref=e358] [cursor=pointer]:
+              - generic [ref=e359]:
+                - generic "CLI tool status" [ref=e360]:
+                  - 'generic "Claude: Idle" [ref=e361]'
+                  - 'generic "Codex: Idle" [ref=e362]'
+                  - 'generic "Gemini: Idle" [ref=e363]'
+                - generic [ref=e364]:
+                  - paragraph [ref=e365]: feature/issue/211
+                  - paragraph [ref=e366]: MySwiftAgent
+            - button "CLI tool status feature/issue/212 MySwiftAgent" [ref=e367] [cursor=pointer]:
+              - generic [ref=e368]:
+                - generic "CLI tool status" [ref=e369]:
+                  - 'generic "Claude: Idle" [ref=e370]'
+                  - 'generic "Codex: Idle" [ref=e371]'
+                  - 'generic "Gemini: Idle" [ref=e372]'
+                - generic [ref=e373]:
+                  - paragraph [ref=e374]: feature/issue/212
+                  - paragraph [ref=e375]: MySwiftAgent
+            - button "CLI tool status feature/issue/213 MySwiftAgent" [ref=e376] [cursor=pointer]:
+              - generic [ref=e377]:
+                - generic "CLI tool status" [ref=e378]:
+                  - 'generic "Claude: Idle" [ref=e379]'
+                  - 'generic "Codex: Idle" [ref=e380]'
+                  - 'generic "Gemini: Idle" [ref=e381]'
+                - generic [ref=e382]:
+                  - paragraph [ref=e383]: feature/issue/213
+                  - paragraph [ref=e384]: MySwiftAgent
+            - button "CLI tool status feature/issue/214 MySwiftAgent" [ref=e385] [cursor=pointer]:
+              - generic [ref=e386]:
+                - generic "CLI tool status" [ref=e387]:
+                  - 'generic "Claude: Idle" [ref=e388]'
+                  - 'generic "Codex: Idle" [ref=e389]'
+                  - 'generic "Gemini: Idle" [ref=e390]'
+                - generic [ref=e391]:
+                  - paragraph [ref=e392]: feature/issue/214
+                  - paragraph [ref=e393]: MySwiftAgent
+            - button "CLI tool status feature/issue/215 MySwiftAgent" [ref=e394] [cursor=pointer]:
+              - generic [ref=e395]:
+                - generic "CLI tool status" [ref=e396]:
+                  - 'generic "Claude: Idle" [ref=e397]'
+                  - 'generic "Codex: Idle" [ref=e398]'
+                  - 'generic "Gemini: Idle" [ref=e399]'
+                - generic [ref=e400]:
+                  - paragraph [ref=e401]: feature/issue/215
+                  - paragraph [ref=e402]: MySwiftAgent
+            - button "CLI tool status feature/issue/216 MySwiftAgent" [ref=e403] [cursor=pointer]:
+              - generic [ref=e404]:
+                - generic "CLI tool status" [ref=e405]:
+                  - 'generic "Claude: Idle" [ref=e406]'
+                  - 'generic "Codex: Idle" [ref=e407]'
+                  - 'generic "Gemini: Idle" [ref=e408]'
+                - generic [ref=e409]:
+                  - paragraph [ref=e410]: feature/issue/216
+                  - paragraph [ref=e411]: MySwiftAgent
+            - button "CLI tool status feature/issue/217 MySwiftAgent" [ref=e412] [cursor=pointer]:
+              - generic [ref=e413]:
+                - generic "CLI tool status" [ref=e414]:
+                  - 'generic "Claude: Idle" [ref=e415]'
+                  - 'generic "Codex: Idle" [ref=e416]'
+                  - 'generic "Gemini: Idle" [ref=e417]'
+                - generic [ref=e418]:
+                  - paragraph [ref=e419]: feature/issue/217
+                  - paragraph [ref=e420]: MySwiftAgent
+            - button "CLI tool status feature/issue/218 MySwiftAgent" [ref=e421] [cursor=pointer]:
+              - generic [ref=e422]:
+                - generic "CLI tool status" [ref=e423]:
+                  - 'generic "Claude: Idle" [ref=e424]'
+                  - 'generic "Codex: Idle" [ref=e425]'
+                  - 'generic "Gemini: Idle" [ref=e426]'
+                - generic [ref=e427]:
+                  - paragraph [ref=e428]: feature/issue/218
+                  - paragraph [ref=e429]: MySwiftAgent
+            - button "CLI tool status feature/issue/219 MySwiftAgent" [ref=e430] [cursor=pointer]:
+              - generic [ref=e431]:
+                - generic "CLI tool status" [ref=e432]:
+                  - 'generic "Claude: Idle" [ref=e433]'
+                  - 'generic "Codex: Idle" [ref=e434]'
+                  - 'generic "Gemini: Idle" [ref=e435]'
+                - generic [ref=e436]:
+                  - paragraph [ref=e437]: feature/issue/219
+                  - paragraph [ref=e438]: MySwiftAgent
+            - button "CLI tool status feature/issue/220 MySwiftAgent" [ref=e439] [cursor=pointer]:
+              - generic [ref=e440]:
+                - generic "CLI tool status" [ref=e441]:
+                  - 'generic "Claude: Idle" [ref=e442]'
+                  - 'generic "Codex: Idle" [ref=e443]'
+                  - 'generic "Gemini: Idle" [ref=e444]'
+                - generic [ref=e445]:
+                  - paragraph [ref=e446]: feature/issue/220
+                  - paragraph [ref=e447]: MySwiftAgent
+            - button "CLI tool status feature/issue/221 MySwiftAgent" [ref=e448] [cursor=pointer]:
+              - generic [ref=e449]:
+                - generic "CLI tool status" [ref=e450]:
+                  - 'generic "Claude: Idle" [ref=e451]'
+                  - 'generic "Codex: Idle" [ref=e452]'
+                  - 'generic "Gemini: Idle" [ref=e453]'
+                - generic [ref=e454]:
+                  - paragraph [ref=e455]: feature/issue/221
+                  - paragraph [ref=e456]: MySwiftAgent
+            - button "CLI tool status feature/issue/222 MySwiftAgent" [ref=e457] [cursor=pointer]:
+              - generic [ref=e458]:
+                - generic "CLI tool status" [ref=e459]:
+                  - 'generic "Claude: Idle" [ref=e460]'
+                  - 'generic "Codex: Idle" [ref=e461]'
+                  - 'generic "Gemini: Idle" [ref=e462]'
+                - generic [ref=e463]:
+                  - paragraph [ref=e464]: feature/issue/222
+                  - paragraph [ref=e465]: MySwiftAgent
+            - button "CLI tool status feature/issue/250 MySwiftAgent" [ref=e466] [cursor=pointer]:
+              - generic [ref=e467]:
+                - generic "CLI tool status" [ref=e468]:
+                  - 'generic "Claude: Idle" [ref=e469]'
+                  - 'generic "Codex: Idle" [ref=e470]'
+                  - 'generic "Gemini: Idle" [ref=e471]'
+                - generic [ref=e472]:
+                  - paragraph [ref=e473]: feature/issue/250
+                  - paragraph [ref=e474]: MySwiftAgent
+            - button "CLI tool status feature/issue/251 MySwiftAgent" [ref=e475] [cursor=pointer]:
+              - generic [ref=e476]:
+                - generic "CLI tool status" [ref=e477]:
+                  - 'generic "Claude: Idle" [ref=e478]'
+                  - 'generic "Codex: Idle" [ref=e479]'
+                  - 'generic "Gemini: Idle" [ref=e480]'
+                - generic [ref=e481]:
+                  - paragraph [ref=e482]: feature/issue/251
+                  - paragraph [ref=e483]: MySwiftAgent
+            - button "CLI tool status feature/issue/252 MySwiftAgent" [ref=e484] [cursor=pointer]:
+              - generic [ref=e485]:
+                - generic "CLI tool status" [ref=e486]:
+                  - 'generic "Claude: Idle" [ref=e487]'
+                  - 'generic "Codex: Idle" [ref=e488]'
+                  - 'generic "Gemini: Idle" [ref=e489]'
+                - generic [ref=e490]:
+                  - paragraph [ref=e491]: feature/issue/252
+                  - paragraph [ref=e492]: MySwiftAgent
+            - button "CLI tool status feature/issue/253 MySwiftAgent" [ref=e493] [cursor=pointer]:
+              - generic [ref=e494]:
+                - generic "CLI tool status" [ref=e495]:
+                  - 'generic "Claude: Idle" [ref=e496]'
+                  - 'generic "Codex: Idle" [ref=e497]'
+                  - 'generic "Gemini: Idle" [ref=e498]'
+                - generic [ref=e499]:
+                  - paragraph [ref=e500]: feature/issue/253
+                  - paragraph [ref=e501]: MySwiftAgent
+            - button "CLI tool status feature/issue/254 MySwiftAgent" [ref=e502] [cursor=pointer]:
+              - generic [ref=e503]:
+                - generic "CLI tool status" [ref=e504]:
+                  - 'generic "Claude: Idle" [ref=e505]'
+                  - 'generic "Codex: Idle" [ref=e506]'
+                  - 'generic "Gemini: Idle" [ref=e507]'
+                - generic [ref=e508]:
+                  - paragraph [ref=e509]: feature/issue/254
+                  - paragraph [ref=e510]: MySwiftAgent
+            - button "CLI tool status feature/issue/255 MySwiftAgent" [ref=e511] [cursor=pointer]:
+              - generic [ref=e512]:
+                - generic "CLI tool status" [ref=e513]:
+                  - 'generic "Claude: Idle" [ref=e514]'
+                  - 'generic "Codex: Idle" [ref=e515]'
+                  - 'generic "Gemini: Idle" [ref=e516]'
+                - generic [ref=e517]:
+                  - paragraph [ref=e518]: feature/issue/255
+                  - paragraph [ref=e519]: MySwiftAgent
+            - button "CLI tool status feature/issue/269 MySwiftAgent" [ref=e520] [cursor=pointer]:
+              - generic [ref=e521]:
+                - generic "CLI tool status" [ref=e522]:
+                  - 'generic "Claude: Idle" [ref=e523]'
+                  - 'generic "Codex: Idle" [ref=e524]'
+                  - 'generic "Gemini: Idle" [ref=e525]'
+                - generic [ref=e526]:
+                  - paragraph [ref=e527]: feature/issue/269
+                  - paragraph [ref=e528]: MySwiftAgent
+            - button "CLI tool status feature/issue/270 MySwiftAgent" [ref=e529] [cursor=pointer]:
+              - generic [ref=e530]:
+                - generic "CLI tool status" [ref=e531]:
+                  - 'generic "Claude: Idle" [ref=e532]'
+                  - 'generic "Codex: Idle" [ref=e533]'
+                  - 'generic "Gemini: Idle" [ref=e534]'
+                - generic [ref=e535]:
+                  - paragraph [ref=e536]: feature/issue/270
+                  - paragraph [ref=e537]: MySwiftAgent
+            - button "CLI tool status feature/issue/277 MySwiftAgent" [ref=e538] [cursor=pointer]:
+              - generic [ref=e539]:
+                - generic "CLI tool status" [ref=e540]:
+                  - 'generic "Claude: Idle" [ref=e541]'
+                  - 'generic "Codex: Idle" [ref=e542]'
+                  - 'generic "Gemini: Idle" [ref=e543]'
+                - generic [ref=e544]:
+                  - paragraph [ref=e545]: feature/issue/277
+                  - paragraph [ref=e546]: MySwiftAgent
+            - button "CLI tool status feature/issue/278 MySwiftAgent" [ref=e547] [cursor=pointer]:
+              - generic [ref=e548]:
+                - generic "CLI tool status" [ref=e549]:
+                  - 'generic "Claude: Idle" [ref=e550]'
+                  - 'generic "Codex: Idle" [ref=e551]'
+                  - 'generic "Gemini: Idle" [ref=e552]'
+                - generic [ref=e553]:
+                  - paragraph [ref=e554]: feature/issue/278
+                  - paragraph [ref=e555]: MySwiftAgent
+            - button "CLI tool status feature/issue/285 MySwiftAgent" [ref=e556] [cursor=pointer]:
+              - generic [ref=e557]:
+                - generic "CLI tool status" [ref=e558]:
+                  - 'generic "Claude: Idle" [ref=e559]'
+                  - 'generic "Codex: Idle" [ref=e560]'
+                  - 'generic "Gemini: Idle" [ref=e561]'
+                - generic [ref=e562]:
+                  - paragraph [ref=e563]: feature/issue/285
+                  - paragraph [ref=e564]: MySwiftAgent
+            - button "CLI tool status feature/issue/286 MySwiftAgent" [ref=e565] [cursor=pointer]:
+              - generic [ref=e566]:
+                - generic "CLI tool status" [ref=e567]:
+                  - 'generic "Claude: Idle" [ref=e568]'
+                  - 'generic "Codex: Idle" [ref=e569]'
+                  - 'generic "Gemini: Idle" [ref=e570]'
+                - generic [ref=e571]:
+                  - paragraph [ref=e572]: feature/issue/286
+                  - paragraph [ref=e573]: MySwiftAgent
+            - button "CLI tool status feature/issue/287 MySwiftAgent" [ref=e574] [cursor=pointer]:
+              - generic [ref=e575]:
+                - generic "CLI tool status" [ref=e576]:
+                  - 'generic "Claude: Idle" [ref=e577]'
+                  - 'generic "Codex: Idle" [ref=e578]'
+                  - 'generic "Gemini: Idle" [ref=e579]'
+                - generic [ref=e580]:
+                  - paragraph [ref=e581]: feature/issue/287
+                  - paragraph [ref=e582]: MySwiftAgent
+            - button "CLI tool status feature/issue/288 MySwiftAgent" [ref=e583] [cursor=pointer]:
+              - generic [ref=e584]:
+                - generic "CLI tool status" [ref=e585]:
+                  - 'generic "Claude: Idle" [ref=e586]'
+                  - 'generic "Codex: Idle" [ref=e587]'
+                  - 'generic "Gemini: Idle" [ref=e588]'
+                - generic [ref=e589]:
+                  - paragraph [ref=e590]: feature/issue/288
+                  - paragraph [ref=e591]: MySwiftAgent
+            - button "CLI tool status feature/issue/289 MySwiftAgent" [ref=e592] [cursor=pointer]:
+              - generic [ref=e593]:
+                - generic "CLI tool status" [ref=e594]:
+                  - 'generic "Claude: Idle" [ref=e595]'
+                  - 'generic "Codex: Idle" [ref=e596]'
+                  - 'generic "Gemini: Idle" [ref=e597]'
+                - generic [ref=e598]:
+                  - paragraph [ref=e599]: feature/issue/289
+                  - paragraph [ref=e600]: MySwiftAgent
+            - button "CLI tool status feature/issue/290 MySwiftAgent" [ref=e601] [cursor=pointer]:
+              - generic [ref=e602]:
+                - generic "CLI tool status" [ref=e603]:
+                  - 'generic "Claude: Idle" [ref=e604]'
+                  - 'generic "Codex: Idle" [ref=e605]'
+                  - 'generic "Gemini: Idle" [ref=e606]'
+                - generic [ref=e607]:
+                  - paragraph [ref=e608]: feature/issue/290
+                  - paragraph [ref=e609]: MySwiftAgent
+            - button "CLI tool status feature/issue/291 MySwiftAgent" [ref=e610] [cursor=pointer]:
+              - generic [ref=e611]:
+                - generic "CLI tool status" [ref=e612]:
+                  - 'generic "Claude: Idle" [ref=e613]'
+                  - 'generic "Codex: Idle" [ref=e614]'
+                  - 'generic "Gemini: Idle" [ref=e615]'
+                - generic [ref=e616]:
+                  - paragraph [ref=e617]: feature/issue/291
+                  - paragraph [ref=e618]: MySwiftAgent
+            - button "CLI tool status feature/issue/292 MySwiftAgent" [ref=e619] [cursor=pointer]:
+              - generic [ref=e620]:
+                - generic "CLI tool status" [ref=e621]:
+                  - 'generic "Claude: Idle" [ref=e622]'
+                  - 'generic "Codex: Idle" [ref=e623]'
+                  - 'generic "Gemini: Idle" [ref=e624]'
+                - generic [ref=e625]:
+                  - paragraph [ref=e626]: feature/issue/292
+                  - paragraph [ref=e627]: MySwiftAgent
+            - button "CLI tool status feature/issue/293 MySwiftAgent" [ref=e628] [cursor=pointer]:
+              - generic [ref=e629]:
+                - generic "CLI tool status" [ref=e630]:
+                  - 'generic "Claude: Idle" [ref=e631]'
+                  - 'generic "Codex: Idle" [ref=e632]'
+                  - 'generic "Gemini: Idle" [ref=e633]'
+                - generic [ref=e634]:
+                  - paragraph [ref=e635]: feature/issue/293
+                  - paragraph [ref=e636]: MySwiftAgent
+            - button "CLI tool status feature/issue/310 MySwiftAgent" [ref=e637] [cursor=pointer]:
+              - generic [ref=e638]:
+                - generic "CLI tool status" [ref=e639]:
+                  - 'generic "Claude: Idle" [ref=e640]'
+                  - 'generic "Codex: Idle" [ref=e641]'
+                  - 'generic "Gemini: Idle" [ref=e642]'
+                - generic [ref=e643]:
+                  - paragraph [ref=e644]: feature/issue/310
+                  - paragraph [ref=e645]: MySwiftAgent
+            - button "CLI tool status feature/issue/316 MySwiftAgent" [ref=e646] [cursor=pointer]:
+              - generic [ref=e647]:
+                - generic "CLI tool status" [ref=e648]:
+                  - 'generic "Claude: Idle" [ref=e649]'
+                  - 'generic "Codex: Idle" [ref=e650]'
+                  - 'generic "Gemini: Idle" [ref=e651]'
+                - generic [ref=e652]:
+                  - paragraph [ref=e653]: feature/issue/316
+                  - paragraph [ref=e654]: MySwiftAgent
+            - button "CLI tool status feature/issue/321 MySwiftAgent" [ref=e655] [cursor=pointer]:
+              - generic [ref=e656]:
+                - generic "CLI tool status" [ref=e657]:
+                  - 'generic "Claude: Idle" [ref=e658]'
+                  - 'generic "Codex: Idle" [ref=e659]'
+                  - 'generic "Gemini: Idle" [ref=e660]'
+                - generic [ref=e661]:
+                  - paragraph [ref=e662]: feature/issue/321
+                  - paragraph [ref=e663]: MySwiftAgent
+            - button "CLI tool status feature/issue/322 MySwiftAgent" [ref=e664] [cursor=pointer]:
+              - generic [ref=e665]:
+                - generic "CLI tool status" [ref=e666]:
+                  - 'generic "Claude: Idle" [ref=e667]'
+                  - 'generic "Codex: Idle" [ref=e668]'
+                  - 'generic "Gemini: Idle" [ref=e669]'
+                - generic [ref=e670]:
+                  - paragraph [ref=e671]: feature/issue/322
+                  - paragraph [ref=e672]: MySwiftAgent
+            - button "CLI tool status feature/issue/331 MySwiftAgent" [ref=e673] [cursor=pointer]:
+              - generic [ref=e674]:
+                - generic "CLI tool status" [ref=e675]:
+                  - 'generic "Claude: Idle" [ref=e676]'
+                  - 'generic "Codex: Idle" [ref=e677]'
+                  - 'generic "Gemini: Idle" [ref=e678]'
+                - generic [ref=e679]:
+                  - paragraph [ref=e680]: feature/issue/331
+                  - paragraph [ref=e681]: MySwiftAgent
+            - button "CLI tool status feature/issue/333 MySwiftAgent" [ref=e682] [cursor=pointer]:
+              - generic [ref=e683]:
+                - generic "CLI tool status" [ref=e684]:
+                  - 'generic "Claude: Idle" [ref=e685]'
+                  - 'generic "Codex: Idle" [ref=e686]'
+                  - 'generic "Gemini: Idle" [ref=e687]'
+                - generic [ref=e688]:
+                  - paragraph [ref=e689]: feature/issue/333
+                  - paragraph [ref=e690]: MySwiftAgent
+            - button "CLI tool status fix/issue/166 MySwiftAgent" [ref=e691] [cursor=pointer]:
+              - generic [ref=e692]:
+                - generic "CLI tool status" [ref=e693]:
+                  - 'generic "Claude: Idle" [ref=e694]'
+                  - 'generic "Codex: Idle" [ref=e695]'
+                  - 'generic "Gemini: Idle" [ref=e696]'
+                - generic [ref=e697]:
+                  - paragraph [ref=e698]: fix/issue/166
+                  - paragraph [ref=e699]: MySwiftAgent
+            - button "CLI tool status fix/issue/182 MySwiftAgent" [ref=e700] [cursor=pointer]:
+              - generic [ref=e701]:
+                - generic "CLI tool status" [ref=e702]:
+                  - 'generic "Claude: Idle" [ref=e703]'
+                  - 'generic "Codex: Idle" [ref=e704]'
+                  - 'generic "Gemini: Idle" [ref=e705]'
+                - generic [ref=e706]:
+                  - paragraph [ref=e707]: fix/issue/182
+                  - paragraph [ref=e708]: MySwiftAgent
+            - button "CLI tool status fix/issue/194 MySwiftAgent" [ref=e709] [cursor=pointer]:
+              - generic [ref=e710]:
+                - generic "CLI tool status" [ref=e711]:
+                  - 'generic "Claude: Idle" [ref=e712]'
+                  - 'generic "Codex: Idle" [ref=e713]'
+                  - 'generic "Gemini: Idle" [ref=e714]'
+                - generic [ref=e715]:
+                  - paragraph [ref=e716]: fix/issue/194
+                  - paragraph [ref=e717]: MySwiftAgent
+            - button "CLI tool status fix/issue/236 MySwiftAgent" [ref=e718] [cursor=pointer]:
+              - generic [ref=e719]:
+                - generic "CLI tool status" [ref=e720]:
+                  - 'generic "Claude: Idle" [ref=e721]'
+                  - 'generic "Codex: Idle" [ref=e722]'
+                  - 'generic "Gemini: Idle" [ref=e723]'
+                - generic [ref=e724]:
+                  - paragraph [ref=e725]: fix/issue/236
+                  - paragraph [ref=e726]: MySwiftAgent
+            - button "CLI tool status fix/issue/239 MySwiftAgent" [ref=e727] [cursor=pointer]:
+              - generic [ref=e728]:
+                - generic "CLI tool status" [ref=e729]:
+                  - 'generic "Claude: Idle" [ref=e730]'
+                  - 'generic "Codex: Idle" [ref=e731]'
+                  - 'generic "Gemini: Idle" [ref=e732]'
+                - generic [ref=e733]:
+                  - paragraph [ref=e734]: fix/issue/239
+                  - paragraph [ref=e735]: MySwiftAgent
+            - button "CLI tool status fix/issue/240 MySwiftAgent" [ref=e736] [cursor=pointer]:
+              - generic [ref=e737]:
+                - generic "CLI tool status" [ref=e738]:
+                  - 'generic "Claude: Idle" [ref=e739]'
+                  - 'generic "Codex: Idle" [ref=e740]'
+                  - 'generic "Gemini: Idle" [ref=e741]'
+                - generic [ref=e742]:
+                  - paragraph [ref=e743]: fix/issue/240
+                  - paragraph [ref=e744]: MySwiftAgent
+            - button "CLI tool status fix/issue/241 MySwiftAgent" [ref=e745] [cursor=pointer]:
+              - generic [ref=e746]:
+                - generic "CLI tool status" [ref=e747]:
+                  - 'generic "Claude: Idle" [ref=e748]'
+                  - 'generic "Codex: Idle" [ref=e749]'
+                  - 'generic "Gemini: Idle" [ref=e750]'
+                - generic [ref=e751]:
+                  - paragraph [ref=e752]: fix/issue/241
+                  - paragraph [ref=e753]: MySwiftAgent
+            - button "CLI tool status fix/issue/242 MySwiftAgent" [ref=e754] [cursor=pointer]:
+              - generic [ref=e755]:
+                - generic "CLI tool status" [ref=e756]:
+                  - 'generic "Claude: Idle" [ref=e757]'
+                  - 'generic "Codex: Idle" [ref=e758]'
+                  - 'generic "Gemini: Idle" [ref=e759]'
+                - generic [ref=e760]:
+                  - paragraph [ref=e761]: fix/issue/242
+                  - paragraph [ref=e762]: MySwiftAgent
+            - button "CLI tool status fix/issue/244 MySwiftAgent" [ref=e763] [cursor=pointer]:
+              - generic [ref=e764]:
+                - generic "CLI tool status" [ref=e765]:
+                  - 'generic "Claude: Idle" [ref=e766]'
+                  - 'generic "Codex: Idle" [ref=e767]'
+                  - 'generic "Gemini: Idle" [ref=e768]'
+                - generic [ref=e769]:
+                  - paragraph [ref=e770]: fix/issue/244
+                  - paragraph [ref=e771]: MySwiftAgent
+            - button "CLI tool status fix/issue/263 MySwiftAgent" [ref=e772] [cursor=pointer]:
+              - generic [ref=e773]:
+                - generic "CLI tool status" [ref=e774]:
+                  - 'generic "Claude: Idle" [ref=e775]'
+                  - 'generic "Codex: Idle" [ref=e776]'
+                  - 'generic "Gemini: Idle" [ref=e777]'
+                - generic [ref=e778]:
+                  - paragraph [ref=e779]: fix/issue/263
+                  - paragraph [ref=e780]: MySwiftAgent
+            - button "CLI tool status fix/issue/265 MySwiftAgent" [ref=e781] [cursor=pointer]:
+              - generic [ref=e782]:
+                - generic "CLI tool status" [ref=e783]:
+                  - 'generic "Claude: Idle" [ref=e784]'
+                  - 'generic "Codex: Idle" [ref=e785]'
+                  - 'generic "Gemini: Idle" [ref=e786]'
+                - generic [ref=e787]:
+                  - paragraph [ref=e788]: fix/issue/265
+                  - paragraph [ref=e789]: MySwiftAgent
+            - button "CLI tool status fix/issue/305 MySwiftAgent" [ref=e790] [cursor=pointer]:
+              - generic [ref=e791]:
+                - generic "CLI tool status" [ref=e792]:
+                  - 'generic "Claude: Idle" [ref=e793]'
+                  - 'generic "Codex: Idle" [ref=e794]'
+                  - 'generic "Gemini: Idle" [ref=e795]'
+                - generic [ref=e796]:
+                  - paragraph [ref=e797]: fix/issue/305
+                  - paragraph [ref=e798]: MySwiftAgent
+        - generic [ref=e800]:
+          - combobox "Language" [ref=e802]:
+            - option "English" [selected]
+            - option "日本語"
+          - button "Switch to light mode" [ref=e803] [cursor=pointer]:
+            - img [ref=e804]
+    - main [ref=e810]:
+      - generic [ref=e811]:
+        - generic [ref=e812]:
+          - heading "CommandMate" [level=1] [ref=e813]
+          - paragraph [ref=e814]:
+            - text: A local control plane for agent CLIs — orchestration and visibility on top of Claude Code, Codex, Gemini CLI, and more.
+            - text: CommandMate does not replace tmux, Git worktrees, or your terminal. It makes them easier to manage across sessions and worktrees.
+        - generic [ref=e817]:
+          - button "+ Add Repository" [ref=e818] [cursor=pointer]
+          - button "Sync All" [ref=e819] [cursor=pointer]
+        - generic [ref=e820]:
+          - generic [ref=e821]:
+            - generic [ref=e822]:
+              - generic [ref=e823]: 84 branches
+              - generic [ref=e824]: 2 repositories
+              - generic [ref=e825]: Live
+            - button "Refresh" [ref=e828] [cursor=pointer]
+          - textbox "Search worktrees..." [ref=e830]
+          - generic [ref=e831]:
+            - button "All (84)" [ref=e832] [cursor=pointer]
+            - generic [ref=e833]:
+              - button "MyCodeBranchDesk (3)" [ref=e834] [cursor=pointer]
+              - button "x" [ref=e835] [cursor=pointer]
+            - generic [ref=e836]:
+              - button "MySwiftAgent (81)" [ref=e837] [cursor=pointer]
+              - button "x" [ref=e838] [cursor=pointer]
+          - generic [ref=e839]:
+            - button "All" [ref=e840] [cursor=pointer]
+            - button "📝 ToDo" [ref=e841] [cursor=pointer]
+            - button "🚧 Doing" [ref=e842] [cursor=pointer]
+            - button "✅ Done" [ref=e843] [cursor=pointer]
+            - button "Not set" [ref=e844] [cursor=pointer]
+          - generic [ref=e845]:
+            - generic [ref=e846]: "Sort by:"
+            - button "⭐ Favorite" [ref=e847] [cursor=pointer]
+            - button "Name" [ref=e848] [cursor=pointer]
+            - button "Updated ↓" [ref=e849] [cursor=pointer]
+          - generic [ref=e850]:
+            - generic [ref=e851]:
+              - generic [ref=e852]:
+                - heading "MySwiftAgent" [level=3] [ref=e853]
+                - generic [ref=e854]: "81"
+              - generic [ref=e855]:
+                - link "develop Status Not set ToDo Doing Done" [ref=e856] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-develop
+                  - generic [ref=e857]:
+                    - heading "develop" [level=3] [ref=e860]:
+                      - button "Add to favorites" [ref=e861]:
+                        - img [ref=e862]
+                      - generic [ref=e864]: develop
+                    - generic [ref=e867]:
+                      - paragraph [ref=e868]: Status
+                      - generic [ref=e869]:
+                        - button "Not set" [ref=e870]
+                        - button "ToDo" [ref=e871]
+                        - button "Doing" [ref=e872]
+                        - button "Done" [ref=e873]
+                - link "feature/issue/113 Status Not set ToDo Doing Done" [ref=e874] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-113
+                  - generic [ref=e875]:
+                    - heading "feature/issue/113" [level=3] [ref=e878]:
+                      - button "Add to favorites" [ref=e879]:
+                        - img [ref=e880]
+                      - generic [ref=e882]: feature/issue/113
+                    - generic [ref=e885]:
+                      - paragraph [ref=e886]: Status
+                      - generic [ref=e887]:
+                        - button "Not set" [ref=e888]
+                        - button "ToDo" [ref=e889]
+                        - button "Doing" [ref=e890]
+                        - button "Done" [ref=e891]
+                - link "feature/issue/120 Status Not set ToDo Doing Done" [ref=e892] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-120
+                  - generic [ref=e893]:
+                    - heading "feature/issue/120" [level=3] [ref=e896]:
+                      - button "Add to favorites" [ref=e897]:
+                        - img [ref=e898]
+                      - generic [ref=e900]: feature/issue/120
+                    - generic [ref=e903]:
+                      - paragraph [ref=e904]: Status
+                      - generic [ref=e905]:
+                        - button "Not set" [ref=e906]
+                        - button "ToDo" [ref=e907]
+                        - button "Doing" [ref=e908]
+                        - button "Done" [ref=e909]
+                - link "feature/issue/133 Status Not set ToDo Doing Done" [ref=e910] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-133
+                  - generic [ref=e911]:
+                    - heading "feature/issue/133" [level=3] [ref=e914]:
+                      - button "Add to favorites" [ref=e915]:
+                        - img [ref=e916]
+                      - generic [ref=e918]: feature/issue/133
+                    - generic [ref=e921]:
+                      - paragraph [ref=e922]: Status
+                      - generic [ref=e923]:
+                        - button "Not set" [ref=e924]
+                        - button "ToDo" [ref=e925]
+                        - button "Doing" [ref=e926]
+                        - button "Done" [ref=e927]
+                - link "feature/issue/141 Status Not set ToDo Doing Done" [ref=e928] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-141
+                  - generic [ref=e929]:
+                    - heading "feature/issue/141" [level=3] [ref=e932]:
+                      - button "Add to favorites" [ref=e933]:
+                        - img [ref=e934]
+                      - generic [ref=e936]: feature/issue/141
+                    - generic [ref=e939]:
+                      - paragraph [ref=e940]: Status
+                      - generic [ref=e941]:
+                        - button "Not set" [ref=e942]
+                        - button "ToDo" [ref=e943]
+                        - button "Doing" [ref=e944]
+                        - button "Done" [ref=e945]
+                - link "feature/issue/142 Status Not set ToDo Doing Done" [ref=e946] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-142
+                  - generic [ref=e947]:
+                    - heading "feature/issue/142" [level=3] [ref=e950]:
+                      - button "Add to favorites" [ref=e951]:
+                        - img [ref=e952]
+                      - generic [ref=e954]: feature/issue/142
+                    - generic [ref=e957]:
+                      - paragraph [ref=e958]: Status
+                      - generic [ref=e959]:
+                        - button "Not set" [ref=e960]
+                        - button "ToDo" [ref=e961]
+                        - button "Doing" [ref=e962]
+                        - button "Done" [ref=e963]
+                - link "feature/issue/143 Status Not set ToDo Doing Done" [ref=e964] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-143
+                  - generic [ref=e965]:
+                    - heading "feature/issue/143" [level=3] [ref=e968]:
+                      - button "Add to favorites" [ref=e969]:
+                        - img [ref=e970]
+                      - generic [ref=e972]: feature/issue/143
+                    - generic [ref=e975]:
+                      - paragraph [ref=e976]: Status
+                      - generic [ref=e977]:
+                        - button "Not set" [ref=e978]
+                        - button "ToDo" [ref=e979]
+                        - button "Doing" [ref=e980]
+                        - button "Done" [ref=e981]
+                - link "feature/issue/144 Status Not set ToDo Doing Done" [ref=e982] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-144
+                  - generic [ref=e983]:
+                    - heading "feature/issue/144" [level=3] [ref=e986]:
+                      - button "Add to favorites" [ref=e987]:
+                        - img [ref=e988]
+                      - generic [ref=e990]: feature/issue/144
+                    - generic [ref=e993]:
+                      - paragraph [ref=e994]: Status
+                      - generic [ref=e995]:
+                        - button "Not set" [ref=e996]
+                        - button "ToDo" [ref=e997]
+                        - button "Doing" [ref=e998]
+                        - button "Done" [ref=e999]
+                - link "feature/issue/145 Status Not set ToDo Doing Done" [ref=e1000] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-145
+                  - generic [ref=e1001]:
+                    - heading "feature/issue/145" [level=3] [ref=e1004]:
+                      - button "Add to favorites" [ref=e1005]:
+                        - img [ref=e1006]
+                      - generic [ref=e1008]: feature/issue/145
+                    - generic [ref=e1011]:
+                      - paragraph [ref=e1012]: Status
+                      - generic [ref=e1013]:
+                        - button "Not set" [ref=e1014]
+                        - button "ToDo" [ref=e1015]
+                        - button "Doing" [ref=e1016]
+                        - button "Done" [ref=e1017]
+                - link "feature/issue/146 Status Not set ToDo Doing Done" [ref=e1018] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-146
+                  - generic [ref=e1019]:
+                    - heading "feature/issue/146" [level=3] [ref=e1022]:
+                      - button "Add to favorites" [ref=e1023]:
+                        - img [ref=e1024]
+                      - generic [ref=e1026]: feature/issue/146
+                    - generic [ref=e1029]:
+                      - paragraph [ref=e1030]: Status
+                      - generic [ref=e1031]:
+                        - button "Not set" [ref=e1032]
+                        - button "ToDo" [ref=e1033]
+                        - button "Doing" [ref=e1034]
+                        - button "Done" [ref=e1035]
+                - link "feature/issue/147 Status Not set ToDo Doing Done" [ref=e1036] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-147
+                  - generic [ref=e1037]:
+                    - heading "feature/issue/147" [level=3] [ref=e1040]:
+                      - button "Add to favorites" [ref=e1041]:
+                        - img [ref=e1042]
+                      - generic [ref=e1044]: feature/issue/147
+                    - generic [ref=e1047]:
+                      - paragraph [ref=e1048]: Status
+                      - generic [ref=e1049]:
+                        - button "Not set" [ref=e1050]
+                        - button "ToDo" [ref=e1051]
+                        - button "Doing" [ref=e1052]
+                        - button "Done" [ref=e1053]
+                - link "feature/issue/148 Status Not set ToDo Doing Done" [ref=e1054] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-148
+                  - generic [ref=e1055]:
+                    - heading "feature/issue/148" [level=3] [ref=e1058]:
+                      - button "Add to favorites" [ref=e1059]:
+                        - img [ref=e1060]
+                      - generic [ref=e1062]: feature/issue/148
+                    - generic [ref=e1065]:
+                      - paragraph [ref=e1066]: Status
+                      - generic [ref=e1067]:
+                        - button "Not set" [ref=e1068]
+                        - button "ToDo" [ref=e1069]
+                        - button "Doing" [ref=e1070]
+                        - button "Done" [ref=e1071]
+                - link "feature/issue/149 Status Not set ToDo Doing Done" [ref=e1072] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-149
+                  - generic [ref=e1073]:
+                    - heading "feature/issue/149" [level=3] [ref=e1076]:
+                      - button "Add to favorites" [ref=e1077]:
+                        - img [ref=e1078]
+                      - generic [ref=e1080]: feature/issue/149
+                    - generic [ref=e1083]:
+                      - paragraph [ref=e1084]: Status
+                      - generic [ref=e1085]:
+                        - button "Not set" [ref=e1086]
+                        - button "ToDo" [ref=e1087]
+                        - button "Doing" [ref=e1088]
+                        - button "Done" [ref=e1089]
+                - link "feature/issue/150 Status Not set ToDo Doing Done" [ref=e1090] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-150
+                  - generic [ref=e1091]:
+                    - heading "feature/issue/150" [level=3] [ref=e1094]:
+                      - button "Add to favorites" [ref=e1095]:
+                        - img [ref=e1096]
+                      - generic [ref=e1098]: feature/issue/150
+                    - generic [ref=e1101]:
+                      - paragraph [ref=e1102]: Status
+                      - generic [ref=e1103]:
+                        - button "Not set" [ref=e1104]
+                        - button "ToDo" [ref=e1105]
+                        - button "Doing" [ref=e1106]
+                        - button "Done" [ref=e1107]
+                - link "feature/issue/169 Status Not set ToDo Doing Done" [ref=e1108] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-169
+                  - generic [ref=e1109]:
+                    - heading "feature/issue/169" [level=3] [ref=e1112]:
+                      - button "Add to favorites" [ref=e1113]:
+                        - img [ref=e1114]
+                      - generic [ref=e1116]: feature/issue/169
+                    - generic [ref=e1119]:
+                      - paragraph [ref=e1120]: Status
+                      - generic [ref=e1121]:
+                        - button "Not set" [ref=e1122]
+                        - button "ToDo" [ref=e1123]
+                        - button "Doing" [ref=e1124]
+                        - button "Done" [ref=e1125]
+                - link "feature/issue/170 Status Not set ToDo Doing Done" [ref=e1126] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-170
+                  - generic [ref=e1127]:
+                    - heading "feature/issue/170" [level=3] [ref=e1130]:
+                      - button "Add to favorites" [ref=e1131]:
+                        - img [ref=e1132]
+                      - generic [ref=e1134]: feature/issue/170
+                    - generic [ref=e1137]:
+                      - paragraph [ref=e1138]: Status
+                      - generic [ref=e1139]:
+                        - button "Not set" [ref=e1140]
+                        - button "ToDo" [ref=e1141]
+                        - button "Doing" [ref=e1142]
+                        - button "Done" [ref=e1143]
+                - link "feature/issue/171 Status Not set ToDo Doing Done" [ref=e1144] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-171
+                  - generic [ref=e1145]:
+                    - heading "feature/issue/171" [level=3] [ref=e1148]:
+                      - button "Add to favorites" [ref=e1149]:
+                        - img [ref=e1150]
+                      - generic [ref=e1152]: feature/issue/171
+                    - generic [ref=e1155]:
+                      - paragraph [ref=e1156]: Status
+                      - generic [ref=e1157]:
+                        - button "Not set" [ref=e1158]
+                        - button "ToDo" [ref=e1159]
+                        - button "Doing" [ref=e1160]
+                        - button "Done" [ref=e1161]
+                - link "feature/issue/172 Status Not set ToDo Doing Done" [ref=e1162] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-172
+                  - generic [ref=e1163]:
+                    - heading "feature/issue/172" [level=3] [ref=e1166]:
+                      - button "Add to favorites" [ref=e1167]:
+                        - img [ref=e1168]
+                      - generic [ref=e1170]: feature/issue/172
+                    - generic [ref=e1173]:
+                      - paragraph [ref=e1174]: Status
+                      - generic [ref=e1175]:
+                        - button "Not set" [ref=e1176]
+                        - button "ToDo" [ref=e1177]
+                        - button "Doing" [ref=e1178]
+                        - button "Done" [ref=e1179]
+                - link "feature/issue/173 Status Not set ToDo Doing Done" [ref=e1180] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-173
+                  - generic [ref=e1181]:
+                    - heading "feature/issue/173" [level=3] [ref=e1184]:
+                      - button "Add to favorites" [ref=e1185]:
+                        - img [ref=e1186]
+                      - generic [ref=e1188]: feature/issue/173
+                    - generic [ref=e1191]:
+                      - paragraph [ref=e1192]: Status
+                      - generic [ref=e1193]:
+                        - button "Not set" [ref=e1194]
+                        - button "ToDo" [ref=e1195]
+                        - button "Doing" [ref=e1196]
+                        - button "Done" [ref=e1197]
+                - link "feature/issue/174 Status Not set ToDo Doing Done" [ref=e1198] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-174
+                  - generic [ref=e1199]:
+                    - heading "feature/issue/174" [level=3] [ref=e1202]:
+                      - button "Add to favorites" [ref=e1203]:
+                        - img [ref=e1204]
+                      - generic [ref=e1206]: feature/issue/174
+                    - generic [ref=e1209]:
+                      - paragraph [ref=e1210]: Status
+                      - generic [ref=e1211]:
+                        - button "Not set" [ref=e1212]
+                        - button "ToDo" [ref=e1213]
+                        - button "Doing" [ref=e1214]
+                        - button "Done" [ref=e1215]
+                - link "feature/issue/175 Status Not set ToDo Doing Done" [ref=e1216] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-175
+                  - generic [ref=e1217]:
+                    - heading "feature/issue/175" [level=3] [ref=e1220]:
+                      - button "Add to favorites" [ref=e1221]:
+                        - img [ref=e1222]
+                      - generic [ref=e1224]: feature/issue/175
+                    - generic [ref=e1227]:
+                      - paragraph [ref=e1228]: Status
+                      - generic [ref=e1229]:
+                        - button "Not set" [ref=e1230]
+                        - button "ToDo" [ref=e1231]
+                        - button "Doing" [ref=e1232]
+                        - button "Done" [ref=e1233]
+                - link "feature/issue/176 Status Not set ToDo Doing Done" [ref=e1234] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-176
+                  - generic [ref=e1235]:
+                    - heading "feature/issue/176" [level=3] [ref=e1238]:
+                      - button "Add to favorites" [ref=e1239]:
+                        - img [ref=e1240]
+                      - generic [ref=e1242]: feature/issue/176
+                    - generic [ref=e1245]:
+                      - paragraph [ref=e1246]: Status
+                      - generic [ref=e1247]:
+                        - button "Not set" [ref=e1248]
+                        - button "ToDo" [ref=e1249]
+                        - button "Doing" [ref=e1250]
+                        - button "Done" [ref=e1251]
+                - link "feature/issue/177 Status Not set ToDo Doing Done" [ref=e1252] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-177
+                  - generic [ref=e1253]:
+                    - heading "feature/issue/177" [level=3] [ref=e1256]:
+                      - button "Add to favorites" [ref=e1257]:
+                        - img [ref=e1258]
+                      - generic [ref=e1260]: feature/issue/177
+                    - generic [ref=e1263]:
+                      - paragraph [ref=e1264]: Status
+                      - generic [ref=e1265]:
+                        - button "Not set" [ref=e1266]
+                        - button "ToDo" [ref=e1267]
+                        - button "Doing" [ref=e1268]
+                        - button "Done" [ref=e1269]
+                - link "feature/issue/178 Status Not set ToDo Doing Done" [ref=e1270] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-178
+                  - generic [ref=e1271]:
+                    - heading "feature/issue/178" [level=3] [ref=e1274]:
+                      - button "Add to favorites" [ref=e1275]:
+                        - img [ref=e1276]
+                      - generic [ref=e1278]: feature/issue/178
+                    - generic [ref=e1281]:
+                      - paragraph [ref=e1282]: Status
+                      - generic [ref=e1283]:
+                        - button "Not set" [ref=e1284]
+                        - button "ToDo" [ref=e1285]
+                        - button "Doing" [ref=e1286]
+                        - button "Done" [ref=e1287]
+                - link "feature/issue/191 Status Not set ToDo Doing Done" [ref=e1288] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-191
+                  - generic [ref=e1289]:
+                    - heading "feature/issue/191" [level=3] [ref=e1292]:
+                      - button "Add to favorites" [ref=e1293]:
+                        - img [ref=e1294]
+                      - generic [ref=e1296]: feature/issue/191
+                    - generic [ref=e1299]:
+                      - paragraph [ref=e1300]: Status
+                      - generic [ref=e1301]:
+                        - button "Not set" [ref=e1302]
+                        - button "ToDo" [ref=e1303]
+                        - button "Doing" [ref=e1304]
+                        - button "Done" [ref=e1305]
+                - link "feature/issue/192 Status Not set ToDo Doing Done" [ref=e1306] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-192
+                  - generic [ref=e1307]:
+                    - heading "feature/issue/192" [level=3] [ref=e1310]:
+                      - button "Add to favorites" [ref=e1311]:
+                        - img [ref=e1312]
+                      - generic [ref=e1314]: feature/issue/192
+                    - generic [ref=e1317]:
+                      - paragraph [ref=e1318]: Status
+                      - generic [ref=e1319]:
+                        - button "Not set" [ref=e1320]
+                        - button "ToDo" [ref=e1321]
+                        - button "Doing" [ref=e1322]
+                        - button "Done" [ref=e1323]
+                - link "feature/issue/198 Status Not set ToDo Doing Done" [ref=e1324] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-198
+                  - generic [ref=e1325]:
+                    - heading "feature/issue/198" [level=3] [ref=e1328]:
+                      - button "Add to favorites" [ref=e1329]:
+                        - img [ref=e1330]
+                      - generic [ref=e1332]: feature/issue/198
+                    - generic [ref=e1335]:
+                      - paragraph [ref=e1336]: Status
+                      - generic [ref=e1337]:
+                        - button "Not set" [ref=e1338]
+                        - button "ToDo" [ref=e1339]
+                        - button "Doing" [ref=e1340]
+                        - button "Done" [ref=e1341]
+                - link "feature/issue/199 Status Not set ToDo Doing Done" [ref=e1342] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-199
+                  - generic [ref=e1343]:
+                    - heading "feature/issue/199" [level=3] [ref=e1346]:
+                      - button "Add to favorites" [ref=e1347]:
+                        - img [ref=e1348]
+                      - generic [ref=e1350]: feature/issue/199
+                    - generic [ref=e1353]:
+                      - paragraph [ref=e1354]: Status
+                      - generic [ref=e1355]:
+                        - button "Not set" [ref=e1356]
+                        - button "ToDo" [ref=e1357]
+                        - button "Doing" [ref=e1358]
+                        - button "Done" [ref=e1359]
+                - link "feature/issue/200 Status Not set ToDo Doing Done" [ref=e1360] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-200
+                  - generic [ref=e1361]:
+                    - heading "feature/issue/200" [level=3] [ref=e1364]:
+                      - button "Add to favorites" [ref=e1365]:
+                        - img [ref=e1366]
+                      - generic [ref=e1368]: feature/issue/200
+                    - generic [ref=e1371]:
+                      - paragraph [ref=e1372]: Status
+                      - generic [ref=e1373]:
+                        - button "Not set" [ref=e1374]
+                        - button "ToDo" [ref=e1375]
+                        - button "Doing" [ref=e1376]
+                        - button "Done" [ref=e1377]
+                - link "feature/issue/201 Status Not set ToDo Doing Done" [ref=e1378] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-201
+                  - generic [ref=e1379]:
+                    - heading "feature/issue/201" [level=3] [ref=e1382]:
+                      - button "Add to favorites" [ref=e1383]:
+                        - img [ref=e1384]
+                      - generic [ref=e1386]: feature/issue/201
+                    - generic [ref=e1389]:
+                      - paragraph [ref=e1390]: Status
+                      - generic [ref=e1391]:
+                        - button "Not set" [ref=e1392]
+                        - button "ToDo" [ref=e1393]
+                        - button "Doing" [ref=e1394]
+                        - button "Done" [ref=e1395]
+                - link "feature/issue/202 Status Not set ToDo Doing Done" [ref=e1396] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-202
+                  - generic [ref=e1397]:
+                    - heading "feature/issue/202" [level=3] [ref=e1400]:
+                      - button "Add to favorites" [ref=e1401]:
+                        - img [ref=e1402]
+                      - generic [ref=e1404]: feature/issue/202
+                    - generic [ref=e1407]:
+                      - paragraph [ref=e1408]: Status
+                      - generic [ref=e1409]:
+                        - button "Not set" [ref=e1410]
+                        - button "ToDo" [ref=e1411]
+                        - button "Doing" [ref=e1412]
+                        - button "Done" [ref=e1413]
+                - link "feature/issue/203 Status Not set ToDo Doing Done" [ref=e1414] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-203
+                  - generic [ref=e1415]:
+                    - heading "feature/issue/203" [level=3] [ref=e1418]:
+                      - button "Add to favorites" [ref=e1419]:
+                        - img [ref=e1420]
+                      - generic [ref=e1422]: feature/issue/203
+                    - generic [ref=e1425]:
+                      - paragraph [ref=e1426]: Status
+                      - generic [ref=e1427]:
+                        - button "Not set" [ref=e1428]
+                        - button "ToDo" [ref=e1429]
+                        - button "Doing" [ref=e1430]
+                        - button "Done" [ref=e1431]
+                - link "feature/issue/211 Status Not set ToDo Doing Done" [ref=e1432] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-211
+                  - generic [ref=e1433]:
+                    - heading "feature/issue/211" [level=3] [ref=e1436]:
+                      - button "Add to favorites" [ref=e1437]:
+                        - img [ref=e1438]
+                      - generic [ref=e1440]: feature/issue/211
+                    - generic [ref=e1443]:
+                      - paragraph [ref=e1444]: Status
+                      - generic [ref=e1445]:
+                        - button "Not set" [ref=e1446]
+                        - button "ToDo" [ref=e1447]
+                        - button "Doing" [ref=e1448]
+                        - button "Done" [ref=e1449]
+                - link "feature/issue/212 Status Not set ToDo Doing Done" [ref=e1450] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-212
+                  - generic [ref=e1451]:
+                    - heading "feature/issue/212" [level=3] [ref=e1454]:
+                      - button "Add to favorites" [ref=e1455]:
+                        - img [ref=e1456]
+                      - generic [ref=e1458]: feature/issue/212
+                    - generic [ref=e1461]:
+                      - paragraph [ref=e1462]: Status
+                      - generic [ref=e1463]:
+                        - button "Not set" [ref=e1464]
+                        - button "ToDo" [ref=e1465]
+                        - button "Doing" [ref=e1466]
+                        - button "Done" [ref=e1467]
+                - link "feature/issue/213 Status Not set ToDo Doing Done" [ref=e1468] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-213
+                  - generic [ref=e1469]:
+                    - heading "feature/issue/213" [level=3] [ref=e1472]:
+                      - button "Add to favorites" [ref=e1473]:
+                        - img [ref=e1474]
+                      - generic [ref=e1476]: feature/issue/213
+                    - generic [ref=e1479]:
+                      - paragraph [ref=e1480]: Status
+                      - generic [ref=e1481]:
+                        - button "Not set" [ref=e1482]
+                        - button "ToDo" [ref=e1483]
+                        - button "Doing" [ref=e1484]
+                        - button "Done" [ref=e1485]
+                - link "feature/issue/214 Status Not set ToDo Doing Done" [ref=e1486] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-214
+                  - generic [ref=e1487]:
+                    - heading "feature/issue/214" [level=3] [ref=e1490]:
+                      - button "Add to favorites" [ref=e1491]:
+                        - img [ref=e1492]
+                      - generic [ref=e1494]: feature/issue/214
+                    - generic [ref=e1497]:
+                      - paragraph [ref=e1498]: Status
+                      - generic [ref=e1499]:
+                        - button "Not set" [ref=e1500]
+                        - button "ToDo" [ref=e1501]
+                        - button "Doing" [ref=e1502]
+                        - button "Done" [ref=e1503]
+                - link "feature/issue/215 Status Not set ToDo Doing Done" [ref=e1504] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-215
+                  - generic [ref=e1505]:
+                    - heading "feature/issue/215" [level=3] [ref=e1508]:
+                      - button "Add to favorites" [ref=e1509]:
+                        - img [ref=e1510]
+                      - generic [ref=e1512]: feature/issue/215
+                    - generic [ref=e1515]:
+                      - paragraph [ref=e1516]: Status
+                      - generic [ref=e1517]:
+                        - button "Not set" [ref=e1518]
+                        - button "ToDo" [ref=e1519]
+                        - button "Doing" [ref=e1520]
+                        - button "Done" [ref=e1521]
+                - link "feature/issue/216 Status Not set ToDo Doing Done" [ref=e1522] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-216
+                  - generic [ref=e1523]:
+                    - heading "feature/issue/216" [level=3] [ref=e1526]:
+                      - button "Add to favorites" [ref=e1527]:
+                        - img [ref=e1528]
+                      - generic [ref=e1530]: feature/issue/216
+                    - generic [ref=e1533]:
+                      - paragraph [ref=e1534]: Status
+                      - generic [ref=e1535]:
+                        - button "Not set" [ref=e1536]
+                        - button "ToDo" [ref=e1537]
+                        - button "Doing" [ref=e1538]
+                        - button "Done" [ref=e1539]
+                - link "feature/issue/217 Status Not set ToDo Doing Done" [ref=e1540] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-217
+                  - generic [ref=e1541]:
+                    - heading "feature/issue/217" [level=3] [ref=e1544]:
+                      - button "Add to favorites" [ref=e1545]:
+                        - img [ref=e1546]
+                      - generic [ref=e1548]: feature/issue/217
+                    - generic [ref=e1551]:
+                      - paragraph [ref=e1552]: Status
+                      - generic [ref=e1553]:
+                        - button "Not set" [ref=e1554]
+                        - button "ToDo" [ref=e1555]
+                        - button "Doing" [ref=e1556]
+                        - button "Done" [ref=e1557]
+                - link "feature/issue/218 Status Not set ToDo Doing Done" [ref=e1558] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-218
+                  - generic [ref=e1559]:
+                    - heading "feature/issue/218" [level=3] [ref=e1562]:
+                      - button "Add to favorites" [ref=e1563]:
+                        - img [ref=e1564]
+                      - generic [ref=e1566]: feature/issue/218
+                    - generic [ref=e1569]:
+                      - paragraph [ref=e1570]: Status
+                      - generic [ref=e1571]:
+                        - button "Not set" [ref=e1572]
+                        - button "ToDo" [ref=e1573]
+                        - button "Doing" [ref=e1574]
+                        - button "Done" [ref=e1575]
+                - link "feature/issue/219 Status Not set ToDo Doing Done" [ref=e1576] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-219
+                  - generic [ref=e1577]:
+                    - heading "feature/issue/219" [level=3] [ref=e1580]:
+                      - button "Add to favorites" [ref=e1581]:
+                        - img [ref=e1582]
+                      - generic [ref=e1584]: feature/issue/219
+                    - generic [ref=e1587]:
+                      - paragraph [ref=e1588]: Status
+                      - generic [ref=e1589]:
+                        - button "Not set" [ref=e1590]
+                        - button "ToDo" [ref=e1591]
+                        - button "Doing" [ref=e1592]
+                        - button "Done" [ref=e1593]
+                - link "feature/issue/220 Status Not set ToDo Doing Done" [ref=e1594] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-220
+                  - generic [ref=e1595]:
+                    - heading "feature/issue/220" [level=3] [ref=e1598]:
+                      - button "Add to favorites" [ref=e1599]:
+                        - img [ref=e1600]
+                      - generic [ref=e1602]: feature/issue/220
+                    - generic [ref=e1605]:
+                      - paragraph [ref=e1606]: Status
+                      - generic [ref=e1607]:
+                        - button "Not set" [ref=e1608]
+                        - button "ToDo" [ref=e1609]
+                        - button "Doing" [ref=e1610]
+                        - button "Done" [ref=e1611]
+                - link "feature/issue/221 Status Not set ToDo Doing Done" [ref=e1612] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-221
+                  - generic [ref=e1613]:
+                    - heading "feature/issue/221" [level=3] [ref=e1616]:
+                      - button "Add to favorites" [ref=e1617]:
+                        - img [ref=e1618]
+                      - generic [ref=e1620]: feature/issue/221
+                    - generic [ref=e1623]:
+                      - paragraph [ref=e1624]: Status
+                      - generic [ref=e1625]:
+                        - button "Not set" [ref=e1626]
+                        - button "ToDo" [ref=e1627]
+                        - button "Doing" [ref=e1628]
+                        - button "Done" [ref=e1629]
+                - link "feature/issue/222 Status Not set ToDo Doing Done" [ref=e1630] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-222
+                  - generic [ref=e1631]:
+                    - heading "feature/issue/222" [level=3] [ref=e1634]:
+                      - button "Add to favorites" [ref=e1635]:
+                        - img [ref=e1636]
+                      - generic [ref=e1638]: feature/issue/222
+                    - generic [ref=e1641]:
+                      - paragraph [ref=e1642]: Status
+                      - generic [ref=e1643]:
+                        - button "Not set" [ref=e1644]
+                        - button "ToDo" [ref=e1645]
+                        - button "Doing" [ref=e1646]
+                        - button "Done" [ref=e1647]
+                - link "feature/issue/250 Status Not set ToDo Doing Done" [ref=e1648] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-250
+                  - generic [ref=e1649]:
+                    - heading "feature/issue/250" [level=3] [ref=e1652]:
+                      - button "Add to favorites" [ref=e1653]:
+                        - img [ref=e1654]
+                      - generic [ref=e1656]: feature/issue/250
+                    - generic [ref=e1659]:
+                      - paragraph [ref=e1660]: Status
+                      - generic [ref=e1661]:
+                        - button "Not set" [ref=e1662]
+                        - button "ToDo" [ref=e1663]
+                        - button "Doing" [ref=e1664]
+                        - button "Done" [ref=e1665]
+                - link "feature/issue/251 Status Not set ToDo Doing Done" [ref=e1666] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-251
+                  - generic [ref=e1667]:
+                    - heading "feature/issue/251" [level=3] [ref=e1670]:
+                      - button "Add to favorites" [ref=e1671]:
+                        - img [ref=e1672]
+                      - generic [ref=e1674]: feature/issue/251
+                    - generic [ref=e1677]:
+                      - paragraph [ref=e1678]: Status
+                      - generic [ref=e1679]:
+                        - button "Not set" [ref=e1680]
+                        - button "ToDo" [ref=e1681]
+                        - button "Doing" [ref=e1682]
+                        - button "Done" [ref=e1683]
+                - link "feature/issue/252 Status Not set ToDo Doing Done" [ref=e1684] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-252
+                  - generic [ref=e1685]:
+                    - heading "feature/issue/252" [level=3] [ref=e1688]:
+                      - button "Add to favorites" [ref=e1689]:
+                        - img [ref=e1690]
+                      - generic [ref=e1692]: feature/issue/252
+                    - generic [ref=e1695]:
+                      - paragraph [ref=e1696]: Status
+                      - generic [ref=e1697]:
+                        - button "Not set" [ref=e1698]
+                        - button "ToDo" [ref=e1699]
+                        - button "Doing" [ref=e1700]
+                        - button "Done" [ref=e1701]
+                - link "feature/issue/253 Status Not set ToDo Doing Done" [ref=e1702] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-253
+                  - generic [ref=e1703]:
+                    - heading "feature/issue/253" [level=3] [ref=e1706]:
+                      - button "Add to favorites" [ref=e1707]:
+                        - img [ref=e1708]
+                      - generic [ref=e1710]: feature/issue/253
+                    - generic [ref=e1713]:
+                      - paragraph [ref=e1714]: Status
+                      - generic [ref=e1715]:
+                        - button "Not set" [ref=e1716]
+                        - button "ToDo" [ref=e1717]
+                        - button "Doing" [ref=e1718]
+                        - button "Done" [ref=e1719]
+                - link "feature/issue/254 Status Not set ToDo Doing Done" [ref=e1720] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-254
+                  - generic [ref=e1721]:
+                    - heading "feature/issue/254" [level=3] [ref=e1724]:
+                      - button "Add to favorites" [ref=e1725]:
+                        - img [ref=e1726]
+                      - generic [ref=e1728]: feature/issue/254
+                    - generic [ref=e1731]:
+                      - paragraph [ref=e1732]: Status
+                      - generic [ref=e1733]:
+                        - button "Not set" [ref=e1734]
+                        - button "ToDo" [ref=e1735]
+                        - button "Doing" [ref=e1736]
+                        - button "Done" [ref=e1737]
+                - link "feature/issue/255 Status Not set ToDo Doing Done" [ref=e1738] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-255
+                  - generic [ref=e1739]:
+                    - heading "feature/issue/255" [level=3] [ref=e1742]:
+                      - button "Add to favorites" [ref=e1743]:
+                        - img [ref=e1744]
+                      - generic [ref=e1746]: feature/issue/255
+                    - generic [ref=e1749]:
+                      - paragraph [ref=e1750]: Status
+                      - generic [ref=e1751]:
+                        - button "Not set" [ref=e1752]
+                        - button "ToDo" [ref=e1753]
+                        - button "Doing" [ref=e1754]
+                        - button "Done" [ref=e1755]
+                - link "feature/issue/269 Status Not set ToDo Doing Done" [ref=e1756] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-269
+                  - generic [ref=e1757]:
+                    - heading "feature/issue/269" [level=3] [ref=e1760]:
+                      - button "Add to favorites" [ref=e1761]:
+                        - img [ref=e1762]
+                      - generic [ref=e1764]: feature/issue/269
+                    - generic [ref=e1767]:
+                      - paragraph [ref=e1768]: Status
+                      - generic [ref=e1769]:
+                        - button "Not set" [ref=e1770]
+                        - button "ToDo" [ref=e1771]
+                        - button "Doing" [ref=e1772]
+                        - button "Done" [ref=e1773]
+                - link "feature/issue/270 Status Not set ToDo Doing Done" [ref=e1774] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-270
+                  - generic [ref=e1775]:
+                    - heading "feature/issue/270" [level=3] [ref=e1778]:
+                      - button "Add to favorites" [ref=e1779]:
+                        - img [ref=e1780]
+                      - generic [ref=e1782]: feature/issue/270
+                    - generic [ref=e1785]:
+                      - paragraph [ref=e1786]: Status
+                      - generic [ref=e1787]:
+                        - button "Not set" [ref=e1788]
+                        - button "ToDo" [ref=e1789]
+                        - button "Doing" [ref=e1790]
+                        - button "Done" [ref=e1791]
+                - link "feature/issue/277 Status Not set ToDo Doing Done" [ref=e1792] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-277
+                  - generic [ref=e1793]:
+                    - heading "feature/issue/277" [level=3] [ref=e1796]:
+                      - button "Add to favorites" [ref=e1797]:
+                        - img [ref=e1798]
+                      - generic [ref=e1800]: feature/issue/277
+                    - generic [ref=e1803]:
+                      - paragraph [ref=e1804]: Status
+                      - generic [ref=e1805]:
+                        - button "Not set" [ref=e1806]
+                        - button "ToDo" [ref=e1807]
+                        - button "Doing" [ref=e1808]
+                        - button "Done" [ref=e1809]
+                - link "feature/issue/278 Status Not set ToDo Doing Done" [ref=e1810] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-278
+                  - generic [ref=e1811]:
+                    - heading "feature/issue/278" [level=3] [ref=e1814]:
+                      - button "Add to favorites" [ref=e1815]:
+                        - img [ref=e1816]
+                      - generic [ref=e1818]: feature/issue/278
+                    - generic [ref=e1821]:
+                      - paragraph [ref=e1822]: Status
+                      - generic [ref=e1823]:
+                        - button "Not set" [ref=e1824]
+                        - button "ToDo" [ref=e1825]
+                        - button "Doing" [ref=e1826]
+                        - button "Done" [ref=e1827]
+                - link "feature/issue/285 Status Not set ToDo Doing Done" [ref=e1828] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-285
+                  - generic [ref=e1829]:
+                    - heading "feature/issue/285" [level=3] [ref=e1832]:
+                      - button "Add to favorites" [ref=e1833]:
+                        - img [ref=e1834]
+                      - generic [ref=e1836]: feature/issue/285
+                    - generic [ref=e1839]:
+                      - paragraph [ref=e1840]: Status
+                      - generic [ref=e1841]:
+                        - button "Not set" [ref=e1842]
+                        - button "ToDo" [ref=e1843]
+                        - button "Doing" [ref=e1844]
+                        - button "Done" [ref=e1845]
+                - link "feature/issue/286 Status Not set ToDo Doing Done" [ref=e1846] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-286
+                  - generic [ref=e1847]:
+                    - heading "feature/issue/286" [level=3] [ref=e1850]:
+                      - button "Add to favorites" [ref=e1851]:
+                        - img [ref=e1852]
+                      - generic [ref=e1854]: feature/issue/286
+                    - generic [ref=e1857]:
+                      - paragraph [ref=e1858]: Status
+                      - generic [ref=e1859]:
+                        - button "Not set" [ref=e1860]
+                        - button "ToDo" [ref=e1861]
+                        - button "Doing" [ref=e1862]
+                        - button "Done" [ref=e1863]
+                - link "feature/issue/287 Status Not set ToDo Doing Done" [ref=e1864] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-287
+                  - generic [ref=e1865]:
+                    - heading "feature/issue/287" [level=3] [ref=e1868]:
+                      - button "Add to favorites" [ref=e1869]:
+                        - img [ref=e1870]
+                      - generic [ref=e1872]: feature/issue/287
+                    - generic [ref=e1875]:
+                      - paragraph [ref=e1876]: Status
+                      - generic [ref=e1877]:
+                        - button "Not set" [ref=e1878]
+                        - button "ToDo" [ref=e1879]
+                        - button "Doing" [ref=e1880]
+                        - button "Done" [ref=e1881]
+                - link "feature/issue/288 Status Not set ToDo Doing Done" [ref=e1882] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-288
+                  - generic [ref=e1883]:
+                    - heading "feature/issue/288" [level=3] [ref=e1886]:
+                      - button "Add to favorites" [ref=e1887]:
+                        - img [ref=e1888]
+                      - generic [ref=e1890]: feature/issue/288
+                    - generic [ref=e1893]:
+                      - paragraph [ref=e1894]: Status
+                      - generic [ref=e1895]:
+                        - button "Not set" [ref=e1896]
+                        - button "ToDo" [ref=e1897]
+                        - button "Doing" [ref=e1898]
+                        - button "Done" [ref=e1899]
+                - link "feature/issue/289 Status Not set ToDo Doing Done" [ref=e1900] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-289
+                  - generic [ref=e1901]:
+                    - heading "feature/issue/289" [level=3] [ref=e1904]:
+                      - button "Add to favorites" [ref=e1905]:
+                        - img [ref=e1906]
+                      - generic [ref=e1908]: feature/issue/289
+                    - generic [ref=e1911]:
+                      - paragraph [ref=e1912]: Status
+                      - generic [ref=e1913]:
+                        - button "Not set" [ref=e1914]
+                        - button "ToDo" [ref=e1915]
+                        - button "Doing" [ref=e1916]
+                        - button "Done" [ref=e1917]
+                - link "feature/issue/290 Status Not set ToDo Doing Done" [ref=e1918] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-290
+                  - generic [ref=e1919]:
+                    - heading "feature/issue/290" [level=3] [ref=e1922]:
+                      - button "Add to favorites" [ref=e1923]:
+                        - img [ref=e1924]
+                      - generic [ref=e1926]: feature/issue/290
+                    - generic [ref=e1929]:
+                      - paragraph [ref=e1930]: Status
+                      - generic [ref=e1931]:
+                        - button "Not set" [ref=e1932]
+                        - button "ToDo" [ref=e1933]
+                        - button "Doing" [ref=e1934]
+                        - button "Done" [ref=e1935]
+                - link "feature/issue/291 Status Not set ToDo Doing Done" [ref=e1936] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-291
+                  - generic [ref=e1937]:
+                    - heading "feature/issue/291" [level=3] [ref=e1940]:
+                      - button "Add to favorites" [ref=e1941]:
+                        - img [ref=e1942]
+                      - generic [ref=e1944]: feature/issue/291
+                    - generic [ref=e1947]:
+                      - paragraph [ref=e1948]: Status
+                      - generic [ref=e1949]:
+                        - button "Not set" [ref=e1950]
+                        - button "ToDo" [ref=e1951]
+                        - button "Doing" [ref=e1952]
+                        - button "Done" [ref=e1953]
+                - link "feature/issue/292 Status Not set ToDo Doing Done" [ref=e1954] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-292
+                  - generic [ref=e1955]:
+                    - heading "feature/issue/292" [level=3] [ref=e1958]:
+                      - button "Add to favorites" [ref=e1959]:
+                        - img [ref=e1960]
+                      - generic [ref=e1962]: feature/issue/292
+                    - generic [ref=e1965]:
+                      - paragraph [ref=e1966]: Status
+                      - generic [ref=e1967]:
+                        - button "Not set" [ref=e1968]
+                        - button "ToDo" [ref=e1969]
+                        - button "Doing" [ref=e1970]
+                        - button "Done" [ref=e1971]
+                - link "feature/issue/293 Status Not set ToDo Doing Done" [ref=e1972] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-293
+                  - generic [ref=e1973]:
+                    - heading "feature/issue/293" [level=3] [ref=e1976]:
+                      - button "Add to favorites" [ref=e1977]:
+                        - img [ref=e1978]
+                      - generic [ref=e1980]: feature/issue/293
+                    - generic [ref=e1983]:
+                      - paragraph [ref=e1984]: Status
+                      - generic [ref=e1985]:
+                        - button "Not set" [ref=e1986]
+                        - button "ToDo" [ref=e1987]
+                        - button "Doing" [ref=e1988]
+                        - button "Done" [ref=e1989]
+                - link "feature/issue/310 Status Not set ToDo Doing Done" [ref=e1990] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-310
+                  - generic [ref=e1991]:
+                    - heading "feature/issue/310" [level=3] [ref=e1994]:
+                      - button "Add to favorites" [ref=e1995]:
+                        - img [ref=e1996]
+                      - generic [ref=e1998]: feature/issue/310
+                    - generic [ref=e2001]:
+                      - paragraph [ref=e2002]: Status
+                      - generic [ref=e2003]:
+                        - button "Not set" [ref=e2004]
+                        - button "ToDo" [ref=e2005]
+                        - button "Doing" [ref=e2006]
+                        - button "Done" [ref=e2007]
+                - link "feature/issue/316 Status Not set ToDo Doing Done" [ref=e2008] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-316
+                  - generic [ref=e2009]:
+                    - heading "feature/issue/316" [level=3] [ref=e2012]:
+                      - button "Add to favorites" [ref=e2013]:
+                        - img [ref=e2014]
+                      - generic [ref=e2016]: feature/issue/316
+                    - generic [ref=e2019]:
+                      - paragraph [ref=e2020]: Status
+                      - generic [ref=e2021]:
+                        - button "Not set" [ref=e2022]
+                        - button "ToDo" [ref=e2023]
+                        - button "Doing" [ref=e2024]
+                        - button "Done" [ref=e2025]
+                - link "feature/issue/321 Status Not set ToDo Doing Done" [ref=e2026] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-321
+                  - generic [ref=e2027]:
+                    - heading "feature/issue/321" [level=3] [ref=e2030]:
+                      - button "Add to favorites" [ref=e2031]:
+                        - img [ref=e2032]
+                      - generic [ref=e2034]: feature/issue/321
+                    - generic [ref=e2037]:
+                      - paragraph [ref=e2038]: Status
+                      - generic [ref=e2039]:
+                        - button "Not set" [ref=e2040]
+                        - button "ToDo" [ref=e2041]
+                        - button "Doing" [ref=e2042]
+                        - button "Done" [ref=e2043]
+                - link "feature/issue/322 Status Not set ToDo Doing Done" [ref=e2044] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-322
+                  - generic [ref=e2045]:
+                    - heading "feature/issue/322" [level=3] [ref=e2048]:
+                      - button "Add to favorites" [ref=e2049]:
+                        - img [ref=e2050]
+                      - generic [ref=e2052]: feature/issue/322
+                    - generic [ref=e2055]:
+                      - paragraph [ref=e2056]: Status
+                      - generic [ref=e2057]:
+                        - button "Not set" [ref=e2058]
+                        - button "ToDo" [ref=e2059]
+                        - button "Doing" [ref=e2060]
+                        - button "Done" [ref=e2061]
+                - link "feature/issue/331 Status Not set ToDo Doing Done" [ref=e2062] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-331
+                  - generic [ref=e2063]:
+                    - heading "feature/issue/331" [level=3] [ref=e2066]:
+                      - button "Add to favorites" [ref=e2067]:
+                        - img [ref=e2068]
+                      - generic [ref=e2070]: feature/issue/331
+                    - generic [ref=e2073]:
+                      - paragraph [ref=e2074]: Status
+                      - generic [ref=e2075]:
+                        - button "Not set" [ref=e2076]
+                        - button "ToDo" [ref=e2077]
+                        - button "Doing" [ref=e2078]
+                        - button "Done" [ref=e2079]
+                - link "feature/issue/333 Status Not set ToDo Doing Done" [ref=e2080] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-feature-issue-333
+                  - generic [ref=e2081]:
+                    - heading "feature/issue/333" [level=3] [ref=e2084]:
+                      - button "Add to favorites" [ref=e2085]:
+                        - img [ref=e2086]
+                      - generic [ref=e2088]: feature/issue/333
+                    - generic [ref=e2091]:
+                      - paragraph [ref=e2092]: Status
+                      - generic [ref=e2093]:
+                        - button "Not set" [ref=e2094]
+                        - button "ToDo" [ref=e2095]
+                        - button "Doing" [ref=e2096]
+                        - button "Done" [ref=e2097]
+                - link "fix/issue/166 Status Not set ToDo Doing Done" [ref=e2098] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-fix-issue-166
+                  - generic [ref=e2099]:
+                    - heading "fix/issue/166" [level=3] [ref=e2102]:
+                      - button "Add to favorites" [ref=e2103]:
+                        - img [ref=e2104]
+                      - generic [ref=e2106]: fix/issue/166
+                    - generic [ref=e2109]:
+                      - paragraph [ref=e2110]: Status
+                      - generic [ref=e2111]:
+                        - button "Not set" [ref=e2112]
+                        - button "ToDo" [ref=e2113]
+                        - button "Doing" [ref=e2114]
+                        - button "Done" [ref=e2115]
+                - link "fix/issue/182 Status Not set ToDo Doing Done" [ref=e2116] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-fix-issue-182
+                  - generic [ref=e2117]:
+                    - heading "fix/issue/182" [level=3] [ref=e2120]:
+                      - button "Add to favorites" [ref=e2121]:
+                        - img [ref=e2122]
+                      - generic [ref=e2124]: fix/issue/182
+                    - generic [ref=e2127]:
+                      - paragraph [ref=e2128]: Status
+                      - generic [ref=e2129]:
+                        - button "Not set" [ref=e2130]
+                        - button "ToDo" [ref=e2131]
+                        - button "Doing" [ref=e2132]
+                        - button "Done" [ref=e2133]
+                - link "fix/issue/194 Status Not set ToDo Doing Done" [ref=e2134] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-fix-issue-194
+                  - generic [ref=e2135]:
+                    - heading "fix/issue/194" [level=3] [ref=e2138]:
+                      - button "Add to favorites" [ref=e2139]:
+                        - img [ref=e2140]
+                      - generic [ref=e2142]: fix/issue/194
+                    - generic [ref=e2145]:
+                      - paragraph [ref=e2146]: Status
+                      - generic [ref=e2147]:
+                        - button "Not set" [ref=e2148]
+                        - button "ToDo" [ref=e2149]
+                        - button "Doing" [ref=e2150]
+                        - button "Done" [ref=e2151]
+                - link "fix/issue/236 Status Not set ToDo Doing Done" [ref=e2152] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-fix-issue-236
+                  - generic [ref=e2153]:
+                    - heading "fix/issue/236" [level=3] [ref=e2156]:
+                      - button "Add to favorites" [ref=e2157]:
+                        - img [ref=e2158]
+                      - generic [ref=e2160]: fix/issue/236
+                    - generic [ref=e2163]:
+                      - paragraph [ref=e2164]: Status
+                      - generic [ref=e2165]:
+                        - button "Not set" [ref=e2166]
+                        - button "ToDo" [ref=e2167]
+                        - button "Doing" [ref=e2168]
+                        - button "Done" [ref=e2169]
+                - link "fix/issue/239 Status Not set ToDo Doing Done" [ref=e2170] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-fix-issue-239
+                  - generic [ref=e2171]:
+                    - heading "fix/issue/239" [level=3] [ref=e2174]:
+                      - button "Add to favorites" [ref=e2175]:
+                        - img [ref=e2176]
+                      - generic [ref=e2178]: fix/issue/239
+                    - generic [ref=e2181]:
+                      - paragraph [ref=e2182]: Status
+                      - generic [ref=e2183]:
+                        - button "Not set" [ref=e2184]
+                        - button "ToDo" [ref=e2185]
+                        - button "Doing" [ref=e2186]
+                        - button "Done" [ref=e2187]
+                - link "fix/issue/240 Status Not set ToDo Doing Done" [ref=e2188] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-fix-issue-240
+                  - generic [ref=e2189]:
+                    - heading "fix/issue/240" [level=3] [ref=e2192]:
+                      - button "Add to favorites" [ref=e2193]:
+                        - img [ref=e2194]
+                      - generic [ref=e2196]: fix/issue/240
+                    - generic [ref=e2199]:
+                      - paragraph [ref=e2200]: Status
+                      - generic [ref=e2201]:
+                        - button "Not set" [ref=e2202]
+                        - button "ToDo" [ref=e2203]
+                        - button "Doing" [ref=e2204]
+                        - button "Done" [ref=e2205]
+                - link "fix/issue/241 Status Not set ToDo Doing Done" [ref=e2206] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-fix-issue-241
+                  - generic [ref=e2207]:
+                    - heading "fix/issue/241" [level=3] [ref=e2210]:
+                      - button "Add to favorites" [ref=e2211]:
+                        - img [ref=e2212]
+                      - generic [ref=e2214]: fix/issue/241
+                    - generic [ref=e2217]:
+                      - paragraph [ref=e2218]: Status
+                      - generic [ref=e2219]:
+                        - button "Not set" [ref=e2220]
+                        - button "ToDo" [ref=e2221]
+                        - button "Doing" [ref=e2222]
+                        - button "Done" [ref=e2223]
+                - link "fix/issue/242 Status Not set ToDo Doing Done" [ref=e2224] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-fix-issue-242
+                  - generic [ref=e2225]:
+                    - heading "fix/issue/242" [level=3] [ref=e2228]:
+                      - button "Add to favorites" [ref=e2229]:
+                        - img [ref=e2230]
+                      - generic [ref=e2232]: fix/issue/242
+                    - generic [ref=e2235]:
+                      - paragraph [ref=e2236]: Status
+                      - generic [ref=e2237]:
+                        - button "Not set" [ref=e2238]
+                        - button "ToDo" [ref=e2239]
+                        - button "Doing" [ref=e2240]
+                        - button "Done" [ref=e2241]
+                - link "fix/issue/244 Status Not set ToDo Doing Done" [ref=e2242] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-fix-issue-244
+                  - generic [ref=e2243]:
+                    - heading "fix/issue/244" [level=3] [ref=e2246]:
+                      - button "Add to favorites" [ref=e2247]:
+                        - img [ref=e2248]
+                      - generic [ref=e2250]: fix/issue/244
+                    - generic [ref=e2253]:
+                      - paragraph [ref=e2254]: Status
+                      - generic [ref=e2255]:
+                        - button "Not set" [ref=e2256]
+                        - button "ToDo" [ref=e2257]
+                        - button "Doing" [ref=e2258]
+                        - button "Done" [ref=e2259]
+                - link "fix/issue/263 Status Not set ToDo Doing Done" [ref=e2260] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-fix-issue-263
+                  - generic [ref=e2261]:
+                    - heading "fix/issue/263" [level=3] [ref=e2264]:
+                      - button "Add to favorites" [ref=e2265]:
+                        - img [ref=e2266]
+                      - generic [ref=e2268]: fix/issue/263
+                    - generic [ref=e2271]:
+                      - paragraph [ref=e2272]: Status
+                      - generic [ref=e2273]:
+                        - button "Not set" [ref=e2274]
+                        - button "ToDo" [ref=e2275]
+                        - button "Doing" [ref=e2276]
+                        - button "Done" [ref=e2277]
+                - link "fix/issue/265 Status Not set ToDo Doing Done" [ref=e2278] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-fix-issue-265
+                  - generic [ref=e2279]:
+                    - heading "fix/issue/265" [level=3] [ref=e2282]:
+                      - button "Add to favorites" [ref=e2283]:
+                        - img [ref=e2284]
+                      - generic [ref=e2286]: fix/issue/265
+                    - generic [ref=e2289]:
+                      - paragraph [ref=e2290]: Status
+                      - generic [ref=e2291]:
+                        - button "Not set" [ref=e2292]
+                        - button "ToDo" [ref=e2293]
+                        - button "Doing" [ref=e2294]
+                        - button "Done" [ref=e2295]
+                - link "fix/issue/305 Status Not set ToDo Doing Done" [ref=e2296] [cursor=pointer]:
+                  - /url: /worktrees/myswiftagent-fix-issue-305
+                  - generic [ref=e2297]:
+                    - heading "fix/issue/305" [level=3] [ref=e2300]:
+                      - button "Add to favorites" [ref=e2301]:
+                        - img [ref=e2302]
+                      - generic [ref=e2304]: fix/issue/305
+                    - generic [ref=e2307]:
+                      - paragraph [ref=e2308]: Status
+                      - generic [ref=e2309]:
+                        - button "Not set" [ref=e2310]
+                        - button "ToDo" [ref=e2311]
+                        - button "Doing" [ref=e2312]
+                        - button "Done" [ref=e2313]
+            - generic [ref=e2314]:
+              - generic [ref=e2315]:
+                - heading "MyCodeBranchDesk" [level=3] [ref=e2316]
+                - generic [ref=e2317]: "3"
+              - generic [ref=e2318]:
+                - link "develop Response completed End Status Not set ToDo Doing Done" [ref=e2319] [cursor=pointer]:
+                  - /url: /worktrees/mycodebranchdesk-develop
+                  - generic [ref=e2320]:
+                    - generic [ref=e2322]:
+                      - heading "develop Response completed" [level=3] [ref=e2323]:
+                        - button "Add to favorites" [ref=e2324]:
+                          - img [ref=e2325]
+                        - generic [ref=e2327]: develop
+                        - generic [ref=e2328]: Response completed
+                      - button "End" [ref=e2330]
+                    - generic [ref=e2333]:
+                      - paragraph [ref=e2334]: Status
+                      - generic [ref=e2335]:
+                        - button "Not set" [ref=e2336]
+                        - button "ToDo" [ref=e2337]
+                        - button "Doing" [ref=e2338]
+                        - button "Done" [ref=e2339]
+                - link "feature/534-timer-message Response completed End Status Not set ToDo Doing Done" [ref=e2340] [cursor=pointer]:
+                  - /url: /worktrees/mycodebranchdesk-feature-534-timer-message
+                  - generic [ref=e2341]:
+                    - generic [ref=e2343]:
+                      - heading "feature/534-timer-message Response completed" [level=3] [ref=e2344]:
+                        - button "Add to favorites" [ref=e2345]:
+                          - img [ref=e2346]
+                        - generic [ref=e2348]: feature/534-timer-message
+                        - generic [ref=e2349]: Response completed
+                      - button "End" [ref=e2351]
+                    - generic [ref=e2354]:
+                      - paragraph [ref=e2355]: Status
+                      - generic [ref=e2356]:
+                        - button "Not set" [ref=e2357]
+                        - button "ToDo" [ref=e2358]
+                        - button "Doing" [ref=e2359]
+                        - button "Done" [ref=e2360]
+                - link "main Main Response completed End Status Not set ToDo Doing Done" [ref=e2361] [cursor=pointer]:
+                  - /url: /worktrees/mycodebranchdesk-main
+                  - generic [ref=e2362]:
+                    - generic [ref=e2364]:
+                      - heading "main Main Response completed" [level=3] [ref=e2365]:
+                        - button "Add to favorites" [ref=e2366]:
+                          - img [ref=e2367]
+                        - generic [ref=e2369]: main
+                        - generic [ref=e2370]: Main
+                        - generic [ref=e2371]: Response completed
+                      - button "End" [ref=e2373]
+                    - generic [ref=e2376]:
+                      - paragraph [ref=e2377]: Status
+                      - generic [ref=e2378]:
+                        - button "Not set" [ref=e2379]
+                        - button "ToDo" [ref=e2380]
+                        - button "Doing" [ref=e2381]
+                        - button "Done" [ref=e2382]
+        - generic [ref=e2384]:
+          - generic [ref=e2385]:
+            - heading "External Apps" [level=2] [ref=e2386]
+            - button "+ Add App" [ref=e2387] [cursor=pointer]
+          - generic [ref=e2389]:
+            - paragraph [ref=e2390]: No external apps registered yet.
+            - paragraph [ref=e2391]: Add an external app to proxy requests to other frontend applications.
+            - button "Add Your First App" [ref=e2392] [cursor=pointer]
+  - alert [ref=e2393]

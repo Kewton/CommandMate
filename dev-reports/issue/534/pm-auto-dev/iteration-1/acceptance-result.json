@@ -1,0 +1,153 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "タイマー登録: エージェント選択→メッセージ入力→時間選択→登録→一覧に表示",
+      "result": "passed",
+      "evidence": "TimerPane.tsx: 登録フォーム(agent+message+delay)あり、POST /api/worktrees/[id]/timers でDB登録+scheduleTimer、GET APIでタイマー一覧取得。timer-db.test.ts createTimer/getTimersByWorktree テスト全パス"
+    },
+    {
+      "scenario": "バリデーション: 空メッセージ/長文/未選択エージェントで登録拒否",
+      "result": "passed",
+      "evidence": "API route.ts: 空メッセージ(message.trim().length===0)、最大長10000文字(MAX_COMMAND_LENGTH)、エージェント(isCliToolType)チェック実装。400レスポンス返却確認"
+    },
+    {
+      "scenario": "上限チェック: 6個目のタイマー登録が拒否される",
+      "result": "passed",
+      "evidence": "API route.ts: getPendingTimerCountByWorktree >= MAX_TIMERS_PER_WORKTREE(5) で400返却。timer-constants.test.ts MAX_TIMERS_PER_WORKTREE===5 テストパス。timer-db.test.ts getPendingTimerCountByWorktree テストパス"
+    },
+    {
+      "scenario": "キャンセル: 登録済タイマーのキャンセルボタンでstatusがcancelledになる",
+      "result": "passed",
+      "evidence": "DELETE API: cancelScheduledTimer(clearTimeout+DB cancel)実装。timer-db.test.ts cancelTimer テスト(pending->cancelled, 非pendingは拒否)全パス。timer-manager.test.ts cancelScheduledTimer テストパス"
+    },
+    {
+      "scenario": "タイマー発火: setTimeout後にtmux sendKeysが呼ばれstatusがsentになる",
+      "result": "passed",
+      "evidence": "timer-manager.ts executeTimer: CLIToolManager.getTool→getSessionName→sendKeys→updateTimerStatus('sent')。timer-manager.test.ts 'should send message and update status on success' テストパス(vi.advanceTimersByTimeAsync使用)"
+    },
+    {
+      "scenario": "発火失敗: tmux接続不可時にstatusがfailedになる",
+      "result": "passed",
+      "evidence": "timer-manager.ts executeTimer catch: updateTimerStatus('failed')。timer-manager.test.ts 'should set status to failed on send error' テストパス(mockSendKeys.mockRejectedValueOnce)"
+    },
+    {
+      "scenario": "DB復元: サーバー再起動後にpendingタイマーが復元される",
+      "result": "passed",
+      "evidence": "timer-manager.ts initTimerManager: getPendingTimers→scheduleTimer(remaining delay)。server.ts: initTimerManager()呼び出し確認。timer-manager.test.ts 'should initialize and restore pending timers from DB' テストパス"
+    },
+    {
+      "scenario": "過去時刻復元: 過去のscheduled_send_timeのタイマーが即座送信される",
+      "result": "passed",
+      "evidence": "timer-manager.ts initTimerManager: Math.max(0, remaining)で過去時刻はdelay=0(即座実行)。コード確認済み"
+    },
+    {
+      "scenario": "session-cleanup: worktree削除時にタイマーがキャンセルされる",
+      "result": "passed",
+      "evidence": "session-cleanup.ts cleanupWorktreeSessions: stopTimersForWorktree(worktreeId)呼び出し確認(Step 5)。timer-manager.ts stopTimersForWorktree: clearTimeout+cancelTimersByWorktree。timer-manager.test.ts stopTimersForWorktree テストパス"
+    },
+    {
+      "scenario": "resource-cleanup: 孤立エントリが検出・削除される",
+      "result": "passed",
+      "evidence": "resource-cleanup.ts cleanupOrphanedMapEntries: getTimerWorktreeIds→validWorktreeIds比較→stopTimersForWorktree。CleanupMapResult.deletedTimerWorktreeIds追加済み"
+    },
+    {
+      "scenario": "既存テスト: session-cleanup, resource-cleanupの既存テストが全パス",
+      "result": "passed",
+      "evidence": "npm run test:unit: 272テストファイル全パス、5328テスト成功、0失敗"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "CMATEタブ内にTimerサブタブが表示される",
+      "verified": true,
+      "evidence": "NotesAndLogsPane.tsx: SubTab型に'timer'追加、SUB_TABS配列に{id:'timer',labelKey:'timerTab'}追加。locales/en/schedule.json,locales/ja/schedule.json にtimerTab/timer.*キー追加済み"
+    },
+    {
+      "criterion": "エージェント選択 + メッセージ入力 + 時間選択でタイマーを登録できる",
+      "verified": true,
+      "evidence": "TimerPane.tsx: textarea(message)+select(delay)+button(register)フォーム実装。POST APIでDB+setTimeout登録"
+    },
+    {
+      "criterion": "5分後〜8時間45分後まで5分単位で指定可能（300000ms〜31500000ms）",
+      "verified": true,
+      "evidence": "timer-constants.ts: MIN_DELAY_MS=300000, MAX_DELAY_MS=31500000, DELAY_STEP_MS=300000。TIMER_DELAYS=105要素。timer-constants.test.ts 全テストパス"
+    },
+    {
+      "criterion": "worktree単位で最大5つまで登録可能",
+      "verified": true,
+      "evidence": "MAX_TIMERS_PER_WORKTREE=5。API route.ts: getPendingTimerCountByWorktree >= 5 で400エラー。TimerPane.tsx: pendingCount >= MAX_TIMERS_PER_WORKTREE でUI無効化"
+    },
+    {
+      "criterion": "カウントダウンがリアルタイムで表示される",
+      "verified": true,
+      "evidence": "TimerPane.tsx: setInterval 1秒でsetTick(再レンダリング)、formatTimeRemaining(timer.scheduledSendTime)でカウントダウン表示"
+    },
+    {
+      "criterion": "タイマーをキャンセルできる",
+      "verified": true,
+      "evidence": "TimerPane.tsx: pending状態のタイマーにキャンセルボタン表示。DELETE API→cancelScheduledTimer(clearTimeout+DB status='cancelled')"
+    },
+    {
+      "criterion": "指定時間後にメッセージが自動送信される",
+      "verified": true,
+      "evidence": "timer-manager.ts executeTimer: setTimeout→sendKeys(sessionName, message, true)。テストで確認済み"
+    },
+    {
+      "criterion": "送信失敗時はDBのstatusがfailedに更新される",
+      "verified": true,
+      "evidence": "timer-manager.ts catch: updateTimerStatus(db, timerId, 'failed')。テストで確認済み"
+    },
+    {
+      "criterion": "サーバー再起動後も未送信タイマーが復元される",
+      "verified": true,
+      "evidence": "server.ts: initTimerManager()→getPendingTimers→scheduleTimer(Math.max(0, remaining))。テストで確認済み"
+    },
+    {
+      "criterion": "worktree削除時にタイマーが適切にキャンセルされる",
+      "verified": true,
+      "evidence": "session-cleanup.ts: stopTimersForWorktree呼び出し。clearTimeout+cancelTimersByWorktree(DB一括cancel)"
+    },
+    {
+      "criterion": "timer-managerはglobalThisパターンでHot Reload耐性がある",
+      "verified": true,
+      "evidence": "timer-manager.ts: declare global var __timerManagerState、getState()でglobalThisシングルトン確保"
+    },
+    {
+      "criterion": "バリデーション（空メッセージ拒否、最大長10000文字、エージェント必須）が動作する",
+      "verified": true,
+      "evidence": "API route.ts: message.trim().length===0→400、message.length>10000→400、!isCliToolType→400"
+    },
+    {
+      "criterion": "server.tsのライフサイクル統合（init/stop）が動作する",
+      "verified": true,
+      "evidence": "server.ts: initTimerManager()(initScheduleManager後)、stopAllTimers()(stopAllSchedules後)"
+    },
+    {
+      "criterion": "resource-cleanup.tsで孤立エントリが検出される",
+      "verified": true,
+      "evidence": "resource-cleanup.ts: getTimerWorktreeIds→DB worktreeIds比較→stopTimersForWorktree。CleanupMapResult.deletedTimerWorktreeIds追加"
+    },
+    {
+      "criterion": "既存テストが全パスする",
+      "verified": true,
+      "evidence": "npm run test:unit: 272ファイル全パス(5328テスト成功, 0失敗)。npx tsc --noEmit: エラーなし。npm run lint: エラー/警告なし"
+    },
+    {
+      "criterion": "モバイルでもmemoタブ経由でTimerサブタブにアクセスできる",
+      "verified": true,
+      "evidence": "WorktreeDetailSubComponents.tsx: MobileContent→NotesAndLogsPane使用。NotesAndLogsPane: SubTab定義に'timer'含む→TimerPaneレンダリング。モバイルからもmemoタブ経由でTimerサブタブにアクセス可能"
+    }
+  ],
+  "evidence_files": [
+    "tests/unit/config/timer-constants.test.ts",
+    "tests/unit/lib/db/timer-db.test.ts",
+    "tests/unit/lib/timer-manager.test.ts"
+  ],
+  "quality_checks": {
+    "typescript": "PASS - npx tsc --noEmit: no errors",
+    "eslint": "PASS - npm run lint: no warnings or errors",
+    "unit_tests": "PASS - 272 test files, 5328 tests passed, 0 failures, 7 skipped"
+  },
+  "message": "すべての受入条件を満たしています。16個の受入条件すべてがverified、11個のテストシナリオすべてがpassed。TypeScript型チェック・ESLint・ユニットテストすべてパス。"
+}

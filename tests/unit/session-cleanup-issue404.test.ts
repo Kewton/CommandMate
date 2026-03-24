@@ -23,6 +23,11 @@ vi.mock('@/lib/schedule-manager', () => ({
   stopAllSchedules: vi.fn(),
 }));
 
+// Mock timer-manager (Issue #534)
+vi.mock('@/lib/timer-manager', () => ({
+  stopTimersForWorktree: vi.fn(),
+}));
+
 import { cleanupWorktreeSessions } from '@/lib/session-cleanup';
 import { stopAutoYesPollingByWorktree, deleteAutoYesStateByWorktree } from '@/lib/polling/auto-yes-manager';
 import { stopScheduleForWorktree, stopAllSchedules } from '@/lib/schedule-manager';

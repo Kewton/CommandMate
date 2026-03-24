@@ -1,0 +1,76 @@
+{
+  "issue_number": 534,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘事項対応",
+  "status": "completed",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "SEC-MF-001",
+        "title": "APIハンドラのcatch句で固定文字列レスポンスを返す方針の明記",
+        "action": "セクション6に6-1サブセクションを新設。catch句パターンのコード例とterminal/route.ts踏襲の方針を記載",
+        "sections_updated": ["6-1"]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-SF-001",
+        "title": "DELETE APIのtimerIdにUUID形式バリデーション",
+        "action": "セクション5バリデーション表にtimerId行を追加。セクション6-2にisValidUuidV4()使用方針とコード例を追記",
+        "sections_updated": ["5", "6-2"]
+      },
+      {
+        "id": "SEC-SF-002",
+        "title": "worktreeIdパスパラメータのtypeofチェック・非空チェック",
+        "action": "セクション5バリデーション表のworktree行を更新。セクション6-3にtypeof/非空チェックのコード例を追記。セクション6セキュリティ設計表のworktree存在確認行を更新",
+        "sections_updated": ["5", "6", "6-3"]
+      },
+      {
+        "id": "SEC-SF-003",
+        "title": "DB復元時の過去時刻タイマー一括発火リスクのトレードオフ記載",
+        "action": "セクション8トレードオフ表の「過去時刻タイマー即座送信」行にリスク詳細とstaggering将来検討の方針を追記",
+        "sections_updated": ["8"]
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-C-001",
+        "title": "sendKeys経由のコマンドインジェクションリスクは既存対策で軽減済み",
+        "action": "セクション6セキュリティ設計表にexecFile使用の行を追加",
+        "sections_updated": ["6"]
+      },
+      {
+        "id": "SEC-C-002",
+        "title": "タイマー登録者とキャンセル操作者の認可チェック",
+        "action": "対応不要。シングルユーザー前提。Stage 4サマリーに将来検討事項として記録",
+        "sections_updated": ["15"]
+      },
+      {
+        "id": "SEC-C-003",
+        "title": "globalThis Mapの孤立エントリ検出は既存パターンで対策済み",
+        "action": "既存対策（セクション10 CON-SF-003）で対応済みであることを確認",
+        "sections_updated": ["15"]
+      },
+      {
+        "id": "SEC-C-004",
+        "title": "message内容のサニタイズ要否",
+        "action": "対応不要。ReactデフォルトエスケープとexecFileで防止済み",
+        "sections_updated": ["15"]
+      }
+    ]
+  },
+  "design_doc_updates": {
+    "file": "dev-reports/design/issue-534-timer-message-design-policy.md",
+    "sections_modified": [
+      "5 (バリデーション表にworktreeId、timerIdバリデーション追加)",
+      "6 (セキュリティ設計表にexecFile行追加、worktree存在確認行更新)",
+      "6-1 (新設: エラーレスポンス固定文字列パターン SEC-MF-001)",
+      "6-2 (新設: timerId UUID形式バリデーション SEC-SF-001)",
+      "6-3 (新設: worktreeIdパスパラメータバリデーション SEC-SF-002)",
+      "8 (トレードオフ表の過去時刻タイマー行にSEC-SF-003リスク詳細追記)",
+      "15 (新設: Stage 4セキュリティレビュー指摘事項サマリー)"
+    ]
+  },
+  "implementation_checklist_added": 6,
+  "timestamp": "2026-03-24T12:30:00Z"
+}

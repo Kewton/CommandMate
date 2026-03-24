@@ -1,0 +1,49 @@
+{
+  "issue_number": 534,
+  "iteration": 2,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-03-24",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "時間上限値の不整合を修正。「8時間50分」を「8時間45分」に統一（31500000ms = 525分 = 8時間45分）。概要、受入条件、実装タスクのtimer-constants.ts記述を全箇所修正。受入条件にはミリ秒値も併記（300000ms〜31500000ms）"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "タイマー発火時のエラーハンドリング方針を追加。setTimeoutコールバック内でtry/catchし、送信失敗時はDBのstatusをfailedに更新、リトライなし（job-executor.tsのexecuteSchedule()パターンに従う）。バックエンド設計、実装タスクのtimer-manager.ts、受入条件、テスト項目に反映"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "UIタブ表記を実際のi18nラベルに合わせて修正（「Notes | Logs | Agent | Timer」→「Notes | Schedules | Agent | Timer」）。Timerタブのi18nキー（timerTab: en='Timer', ja='タイマー'）をi18n対応タスクに明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "カウントダウン表示の実装方針を追記（クライアント側setInterval 1秒間隔、formatTimeRemaining()再利用可能）をTimerPane.tsxの実装タスクに反映"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "DELETE APIのルーティング方式を明記（?timerId=xxxクエリパラメータ方式、既存searchParamsパターンに従う）をTimer CRUD APIタスクに反映"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 5,
+    "applied": 5,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/534"
+  }
+}

@@ -1,0 +1,135 @@
+{
+  "issue_number": 534,
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-03-24",
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "整合性",
+        "issue": "session-cleanup.tsにタイマー停止処理の考慮が欠如している",
+        "location": "## 影響範囲 セクション",
+        "recommendation": "session-cleanup.tsを変更対象ファイルに追加し、killWorktreeSession時にタイマーをキャンセルする処理を明記すべき。worktree削除時やセッション停止時にタイマーが孤立し、存在しないworktreeへメッセージ送信が試行される問題が起きる。",
+        "evidence": "session-cleanup.tsは既にstopResponsePolling, stopAutoYesPollingByWorktree, stopScheduleForWorktreeを統合しており、timer-managerのクリーンアップも同様のパターンで統合が必要。"
+      },
+      {
+        "id": "MF-2",
+        "category": "技術的妥当性",
+        "issue": "サーバー再起動時のタイマー復元でsetTimeoutの精度問題が未考慮",
+        "location": "## 提案する解決策 > バックエンド",
+        "recommendation": "DBに scheduled_send_time（絶対時刻）を保存する設計は正しいが、再起動時に scheduled_send_time が過去の場合の処理（即座に送信 or 破棄）を受入条件に明記すべき。",
+        "evidence": "DBスキーマにscheduled_send_timeフィールドがあるが、再起動復元時のエッジケース仕様（過去時刻のタイマーの扱い）が記載されていない。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "整合性",
+        "issue": "delayed_messagesテーブルとscheduled_executionsテーブルの責務分離が不明確",
+        "location": "## 実装タスク > DBマイグレーション",
+        "recommendation": "scheduled_executions（cron定期実行）とdelayed_messages（ワンショットタイマー）の責務の違いをIssue本文に明記すべき。テーブル名もtimer_messagesやscheduled_one_shot_messagesのように、既存テーブルとの区別がつきやすい命名を検討すべき。",
+        "evidence": "scheduled_executionsテーブル（v17）はcron_expression列を持つ定期実行用。delayed_messagesはワンショット用で目的が異なるが、テーブル名だけでは区別しにくい。"
+      },
+      {
+        "id": "SF-2",
+        "category": "明確性",
+        "issue": "モバイル対応の実装方針が不明確",
+        "location": "## 実装タスク > モバイル対応",
+        "recommendation": "MobileTabBarのMobileTab型は 'terminal' | 'history' | 'files' | 'memo' | 'info' の5種で、タイマーはmemoタブ(=NotesAndLogsPane)のサブタブとしてアクセスする形になる。この階層構造をIssueに明記すべき。MobileTabBarに直接タブ追加する場合はTabConfig配列の拡張が必要で、既に5タブと多いためUI/UXへの影響も記載すべき。",
+        "evidence": "MobileTabBar.tsx: type MobileTab = 'terminal' | 'history' | 'files' | 'memo' | 'info' -- 既に5タブあり、直接追加するとモバイルでのタブ幅が狭くなる。"
+      },
+      {
+        "id": "SF-3",
+        "category": "完全性",
+        "issue": "i18n対応の具体的な追加先が未記載",
+        "location": "## 実装タスク > i18n対応",
+        "recommendation": "NotesAndLogsPaneはuseTranslations('schedule')を使用している。Timerタブのラベルやフォーム要素の翻訳キーをschedule名前空間に追加するか、新しい名前空間を作るかを明記すべき。新しい名前空間を追加する場合はi18n.tsのimport/merge処理も変更対象に含める必要がある。",
+        "evidence": "src/i18n.tsで7つの名前空間(common, worktree, autoYes, error, prompt, auth, schedule)をロードしている。NotesAndLogsPaneはschedule名前空間を使用。"
+      },
+      {
+        "id": "SF-4",
+        "category": "技術的妥当性",
+        "issue": "timer-manager.tsのglobalThisパターン使用に関する記載がない",
+        "location": "## 提案する解決策 > バックエンド",
+        "recommendation": "schedule-manager.tsやauto-yes-manager.tsと同様に、Next.jsのHot Reloadでタイマーが失われないよう globalThis パターンを使用する旨を設計に明記すべき。",
+        "evidence": "schedule-manager.tsはglobalThis.__scheduleManagerStatesでHot Reload永続化を行っている。timer-managerも同様の対策が必要。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "Issue #292（命令行列）との差分がより具体的であると良い",
+        "location": "## 概要",
+        "recommendation": "Issue #292は順序付きキュー（前の命令完了後に次を送信）、#534は時間指定のワンショット送信。両者の違いと#534で#292が不要になる理由（時間指定で十分カバーできる）をより明確に記載すると、読者の理解が深まる。",
+        "evidence": "Issue #292は「前の命令が完了（プロンプト待ち状態）したら次の命令を自動送信」であり、#534の「指定時間後にメッセージ送信」とはトリガー条件が異なる。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "タイマー登録時のバリデーション詳細があると良い",
+        "location": "## 実装タスク",
+        "recommendation": "メッセージの最大長（既存terminal APIのMAX_COMMAND_LENGTH=10000と合わせる）、空メッセージの拒否、エージェント未選択時の挙動などバリデーションルールの記載があると実装時の指針になる。",
+        "evidence": "terminal route.tsでMAX_COMMAND_LENGTH=10000の制限がある。タイマー登録時も同様の制限が必要。"
+      },
+      {
+        "id": "NTH-3",
+        "category": "完全性",
+        "issue": "タイマー送信後のステータス通知方法の記載があると良い",
+        "location": "## 受入条件",
+        "recommendation": "タイマーが発火してメッセージが送信された後、ユーザーにどのように通知するか（UIのステータス更新、Toast通知など）の記載があると完全性が高まる。",
+        "evidence": "受入条件には「指定時間後にメッセージが自動送信される」とあるが、送信成功/失敗のフィードバック方法は未記載。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/NotesAndLogsPane.tsx",
+      "relevance": "SUB_TABS配列にTimerタブを追加する対象。SubTab型の拡張が必要。"
+    },
+    {
+      "file": "src/lib/db/db-migrations.ts",
+      "relevance": "CURRENT_SCHEMA_VERSION=22。v23マイグレーション追加対象。"
+    },
+    {
+      "file": "src/lib/schedule-manager.ts",
+      "relevance": "globalThisパターン、ポーリング管理の参考実装。"
+    },
+    {
+      "file": "src/config/auto-yes-config.ts",
+      "relevance": "時間選択パターン（ALLOWED_DURATIONS）の参考。"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "relevance": "worktree削除時のリソースクリーンアップ。timer-managerの停止処理統合が必要。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/terminal/route.ts",
+      "relevance": "メッセージ送信に再利用するAPI。MAX_COMMAND_LENGTH=10000の制限あり。"
+    },
+    {
+      "file": "src/components/mobile/MobileTabBar.tsx",
+      "relevance": "MobileTab型定義。モバイルでのタイマーアクセス方法に影響。"
+    },
+    {
+      "file": "src/i18n.ts",
+      "relevance": "名前空間ロード処理。新規名前空間追加時は変更が必要。"
+    },
+    {
+      "file": "src/lib/db/db.ts",
+      "relevance": "バレルエクスポート。timer-db.tsのエクスポート追加が必要。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構造・モジュール一覧の整合性確認"
+    }
+  ]
+}

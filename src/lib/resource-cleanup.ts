@@ -24,6 +24,7 @@ import {
 } from './polling/auto-yes-manager';
 import { isValidWorktreeId } from './security/path-validator';
 import { stopScheduleForWorktree, getScheduleWorktreeIds } from './schedule-manager';
+import { stopTimersForWorktree, getTimerWorktreeIds } from './timer-manager';
 import { getDbInstance } from './db-instance';
 import { createLogger } from '@/lib/logger';
 
@@ -66,6 +67,8 @@ export interface CleanupMapResult {
   deletedAutoYesPollerIds: string[];
   /** Worktree IDs whose schedules were stopped */
   deletedScheduleWorktreeIds: string[];
+  /** Worktree IDs whose timers were stopped (Issue #534) */
+  deletedTimerWorktreeIds: string[];
 }
 
 // =============================================================================
@@ -219,6 +222,7 @@ export function cleanupOrphanedMapEntries(): CleanupMapResult {
     deletedAutoYesStateIds: [],
     deletedAutoYesPollerIds: [],
     deletedScheduleWorktreeIds: [],
+    deletedTimerWorktreeIds: [],
   };
 
   const validWorktreeIds = getDbWorktreeIds();
@@ -262,10 +266,20 @@ export function cleanupOrphanedMapEntries(): CleanupMapResult {
     }
   }
 
+  // Cleanup timer manager entries (Issue #534, CON-SF-003)
+  const timerWorktreeIds = getTimerWorktreeIds();
+  for (const worktreeId of timerWorktreeIds) {
+    if (!validWorktreeIds.has(worktreeId)) {
+      stopTimersForWorktree(worktreeId);
+      result.deletedTimerWorktreeIds.push(worktreeId);
+    }
+  }
+
   const totalDeleted =
     result.deletedAutoYesStateIds.length +
     result.deletedAutoYesPollerIds.length +
-    result.deletedScheduleWorktreeIds.length;
+    result.deletedScheduleWorktreeIds.length +
+    result.deletedTimerWorktreeIds.length;
 
   if (totalDeleted > 0) {
     logger.info('cleanup:orphaned-map-entries', {
@@ -273,6 +287,7 @@ export function cleanupOrphanedMapEntries(): CleanupMapResult {
       autoYesStates: result.deletedAutoYesStateIds.length,
       autoYesPollers: result.deletedAutoYesPollerIds.length,
       schedules: result.deletedScheduleWorktreeIds.length,
+      timers: result.deletedTimerWorktreeIds.length,
     });
   }
 
