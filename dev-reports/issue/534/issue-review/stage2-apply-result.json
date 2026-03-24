@@ -1,0 +1,67 @@
+{
+  "issue_number": 534,
+  "iteration": 1,
+  "apply_date": "2026-03-24",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "session-cleanup.tsを変更対象ファイルに追加。実装タスク・受入条件・影響範囲にworktree削除時/セッション停止時のタイマーキャンセル処理を明記"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "再起動復元時のエッジケース（scheduled_send_timeが過去の場合は即座に送信）をバックエンド設計・実装タスク・受入条件に追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "テーブル名をdelayed_messagesからtimer_messagesに変更。scheduled_executionsとの責務の違い（cron定期実行 vs ワンショット）を明記"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "モバイル対応方針を明確化: NotesAndLogsPane内サブタブとしてアクセス、MobileTabBarへの直接追加は行わない旨を記載"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "i18n対応は既存schedule名前空間に翻訳キーを追加する方針を明記（新規名前空間は作らない）"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "timer-manager.tsでglobalThisパターンを使用する旨をバックエンド設計・実装タスク・受入条件に明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "Issue #292との差分をより具体的に記載（順序付きキュー vs 時間指定ワンショット）"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "タイマー登録時のバリデーション詳細（空メッセージ拒否、MAX_COMMAND_LENGTH=10000、エージェント必須）を実装タスク・受入条件に追加"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "タイマー送信後のフィードバック（ステータス表示更新）をUI設計に追加"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 9,
+    "applied": 9,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/534"
+  }
+}

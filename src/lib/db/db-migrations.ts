@@ -11,7 +11,7 @@ import { initDatabase } from './db';
  * Current schema version
  * Increment this when adding new migrations
  */
-export const CURRENT_SCHEMA_VERSION = 22;
+export const CURRENT_SCHEMA_VERSION = 23;
 
 /**
  * Migration definition
@@ -1008,6 +1008,43 @@ const migrations: Migration[] = [
       // No-op: SQLite does not support DROP COLUMN directly.
       // The archived column is harmless if unused (DEFAULT 0).
       console.log('No rollback for archived column (SQLite limitation)');
+    }
+  },
+  {
+    version: 23,
+    name: 'add-timer-messages-table',
+    up: (db) => {
+      // Issue #534: Timer-based delayed message sending
+      db.exec(`
+        CREATE TABLE timer_messages (
+          id TEXT PRIMARY KEY,
+          worktree_id TEXT NOT NULL,
+          cli_tool_id TEXT NOT NULL,
+          message TEXT NOT NULL,
+          delay_ms INTEGER NOT NULL,
+          scheduled_send_time INTEGER NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+          sent_at INTEGER,
+          FOREIGN KEY (worktree_id) REFERENCES worktrees(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_timer_messages_worktree_status
+          ON timer_messages(worktree_id, status);
+
+        CREATE INDEX idx_timer_messages_status_scheduled
+          ON timer_messages(status, scheduled_send_time);
+      `);
+
+      console.log('Created timer_messages table with indexes');
+    },
+    down: (db) => {
+      // [IMP-SF-004] Rollback: drop indexes and table
+      db.exec(`
+        DROP INDEX IF EXISTS idx_timer_messages_status_scheduled;
+        DROP INDEX IF EXISTS idx_timer_messages_worktree_status;
+        DROP TABLE IF EXISTS timer_messages;
+      `);
     }
   }
 ];

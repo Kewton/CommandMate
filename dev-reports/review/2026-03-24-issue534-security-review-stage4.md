@@ -1,0 +1,150 @@
+# Issue #534 セキュリティレビュー (Stage 4)
+
+**レビュー日**: 2026-03-24
+**対象**: 指定時間後メッセージ送信 - 設計方針書
+**レビュー観点**: セキュリティ (OWASP Top 10準拠)
+**総合評価**: conditionally_approved (Score: 4/5)
+
+---
+
+## Executive Summary
+
+Issue #534の設計方針書をセキュリティ観点からレビューした。全体として既存のセキュリティパターン（middleware認証、isCliToolType検証、getWorktreeById存在確認、プリペアドステートメント、execFileによるshell injection防止）を適切に踏襲しており、新たな重大セキュリティリスクは検出されなかった。
+
+Must Fix 1件（APIエラーレスポンスの固定文字列化の明記）、Should Fix 3件（timerIdのUUID形式バリデーション明記、worktreeIdバリデーション明記、DB復元時の一括発火制御）を検出した。いずれも設計書の記述補強であり、アーキテクチャ変更は不要。
+
+---
+
+## OWASP Top 10 チェックリスト
+
+| # | カテゴリ | 判定 | 備考 |
+|---|---------|------|------|
+| A01 | Broken Access Control | PASS | 既存middleware認証、worktree存在確認、isCliToolType検証 |
+| A02 | Cryptographic Failures | N/A | 暗号化対象データなし |
+| A03 | Injection | PASS | SQLプリペアドステートメント、tmux execFileでshell injection防止 |
+| A04 | Insecure Design | PASS (要補記) | MAX_TIMERS/MAX_COMMAND_LENGTH/delayMsホワイトリスト。エラーメッセージ固定文字列化を要明記 |
+| A05 | Security Misconfiguration | PASS | 新規設定なし、既存設定継承 |
+| A06 | Vulnerable Components | PASS | 新規外部依存なし |
+| A07 | Authentication Failures | PASS | 既存middleware認証を継承 |
+| A08 | Software and Data Integrity | PASS | ステータス遷移定義済み |
+| A09 | Logging and Monitoring | PASS | logger.error/infoによるログ記録設計済み |
+| A10 | SSRF | N/A | 外部HTTP通信なし |
+
+---
+
+## 詳細所見
+
+### Must Fix (1件)
+
+#### SEC-MF-001: APIエラーレスポンスの固定文字列化が未明記
+
+**重要度**: Medium
+**カテゴリ**: エラーメッセージ情報漏洩 (A04)
+
+設計書セクション6のセキュリティ設計表に「エラーメッセージ: 固定文字列レスポンス / SEC-MF-001」と記載されているが、具体的にどのように実装するかの詳細がない。
+
+既存のterminal/route.ts（L89-94）では、catch句で`error.message`をクライアントに返さず、固定文字列 `'Failed to send command to terminal'` を返している。timer APIの各ハンドラ（POST/GET/DELETE）でも同様のパターンを適用すべきであるが、設計書のAPI設計セクション（セクション5）にはcatch句のエラーレスポンス形式が記載されていない。
+
+**対応案**: 設計書セクション5またはセクション6に、各APIハンドラのcatch句で以下のパターンを適用する旨を明記する:
+
+```typescript
+// 全ハンドラ共通のcatch句パターン（terminal/route.ts踏襲）
+catch (error) {
+  logger.error('timer-api-error:', { error: error instanceof Error ? error.message : String(error) });
+  return NextResponse.json(
+    { error: 'Internal server error' },  // 固定文字列
+    { status: 500 }
+  );
+}
+```
+
+---
+
+### Should Fix (3件)
+
+#### SEC-SF-001: DELETE APIのtimerIdに対するUUID形式バリデーション未記載
+
+**重要度**: Medium
+**カテゴリ**: 入力バリデーション (A03)
+
+設計書セクション6に「timerId検証: UUID形式チェック / 既存パターン」とあるが、DELETE APIのバリデーションフローにUUID検証ステップが明記されていない。
+
+コードベースには既に以下の既存パターンが存在する:
+
+- `src/config/schedule-config.ts` - `isValidUuidV4()` 関数、`UUID_V4_PATTERN` 正規表現
+- `src/app/api/worktrees/[id]/execution-logs/[logId]/route.ts` L33 - `isValidUuidV4(params.logId)` 使用例
+- `src/app/api/worktrees/[id]/schedules/[scheduleId]/route.ts` L36 - `isValidUuidV4(params.scheduleId)` 使用例
+
+**対応案**: 設計書セクション5のDELETE APIに以下のバリデーションステップを追加:
+
+```
+1. timerId: typeof string チェック + isValidUuidV4(timerId)
+2. 不正形式の場合: 400 { error: 'Invalid timer ID' }
+```
+
+#### SEC-SF-002: worktreeIdパスパラメータのバリデーション明記
+
+**重要度**: Low
+**カテゴリ**: 入力バリデーション (A01)
+
+URLパスパラメータ `[id]`（worktreeId）の形式バリデーションが設計書のバリデーション表に含まれていない。`getWorktreeById()` による存在確認で実質的にカバーされるが、セキュリティ設計書としてはパラメータの型チェック（typeof string、非空文字列）を明記することが望ましい。
+
+**対応案**: 設計書セクション5のバリデーション表に `worktreeId: パスパラメータ、typeof string + 非空 + getWorktreeById()存在確認` を追加。
+
+#### SEC-SF-003: DB復元時の過去時刻タイマー一括発火制御
+
+**重要度**: Low
+**カテゴリ**: DoS防止 (A04)
+
+設計書セクション8に「過去時刻タイマー即座送信」とあるが、サーバー再起動時に全worktreeのpendingタイマーが同時に発火するケースの負荷考慮が未記載。MAX_TIMERS=5/worktreeの制限があるため、worktree数 x 5の同時sendKeys実行が最大負荷となる。
+
+**対応案**: 実環境のworktree数を考慮すると実害は限定的であるが、initTimerManager()で復元タイマーを数秒間隔でstaggeringする方針の検討を推奨する。少なくとも、この点をトレードオフとして設計書に記載する。
+
+---
+
+### Consider (4件)
+
+#### SEC-C-001: sendKeysのshell injection防止がセキュリティ設計表に未記載
+
+tmux.tsの`sendKeys()`がexecFile()を使用しshell interpretationを経由しない点は、コード上のコメント（tmux.ts L216-217）で記録されているが、設計書セクション6のセキュリティ設計表には記載がない。セキュリティレビューの完全性向上のため追記を推奨する。
+
+#### SEC-C-002: マルチユーザー環境でのタイマー認可
+
+現在のシングルユーザー前提では問題ないが、将来マルチユーザー対応時にはタイマー登録者のみがキャンセル可能とする認可チェックが必要になる。
+
+#### SEC-C-003: globalThis Mapのリソースリーク対策
+
+resource-cleanup.ts（24h間隔）とsession-cleanup.ts（worktree削除時）の二重対策が設計済み。追加対策は不要。
+
+#### SEC-C-004: messageのXSSリスク
+
+GET APIでmessageがJSONレスポンスに含まれるが、クライアント側でReactのJSXレンダリングを通るため、デフォルトエスケープで保護される。追加のサニタイズは不要。
+
+---
+
+## リスク評価
+
+| リスク種別 | 内容 | 影響度 | 発生確率 | 対策優先度 |
+|-----------|------|-------|---------|-----------|
+| セキュリティ | APIエラーレスポンスによる内部情報漏洩 | Medium | Low | P2 |
+| セキュリティ | timerIdの不正形式によるDB操作異常 | Low | Low | P3 |
+| 技術的 | DB復元時の一括タイマー発火による負荷 | Low | Low | P3 |
+| 運用 | globalThis Map孤立エントリ | Low | Low | P3 (既存対策で十分) |
+
+---
+
+## 実装チェックリスト (Stage 4追加分)
+
+- [ ] [SEC-MF-001] `src/app/api/worktrees/[id]/timers/route.ts`: POST/GET/DELETE各ハンドラのcatch句で固定文字列エラーレスポンスを返す（terminal/route.tsパターン踏襲）
+- [ ] [SEC-SF-001] `src/app/api/worktrees/[id]/timers/route.ts`: DELETE handler内でisValidUuidV4(timerId)によるUUID形式バリデーションを実装する（schedule-config.tsからimport）
+- [ ] [SEC-SF-002] `src/app/api/worktrees/[id]/timers/route.ts`: worktreeIdパスパラメータのtypeof/非空チェックを実装する
+
+---
+
+## 承認ステータス
+
+**conditionally_approved** - SEC-MF-001の設計書への反映を条件として承認する。設計のセキュリティアーキテクチャは既存パターンを適切に踏襲しており、根本的な問題はない。
+
+---
+
+*Generated by architecture-review-agent for Issue #534 Stage 4*

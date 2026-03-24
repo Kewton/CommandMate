@@ -72,3 +72,19 @@ export {
   deleteMemo,
   reorderMemos,
 } from './memo-db';
+
+// timer-db (Issue #534, #540)
+export {
+  createTimer,
+  getTimersByWorktree,
+  getTimerById,
+  getPendingTimers,
+  updateTimerStatus,
+  cancelTimer,
+  cancelTimersByWorktree,
+  getPendingTimerCountByWorktree,
+  cleanupOldTimers,
+  clearTimerHistory,
+  recoverStuckSendingTimers,
+} from './timer-db';
+export type { TimerMessage, CreateTimerParams, GetTimerOptions } from './timer-db';

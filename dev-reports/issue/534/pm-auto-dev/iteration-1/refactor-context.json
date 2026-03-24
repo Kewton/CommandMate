@@ -1,0 +1,23 @@
+{
+  "issue_number": 534,
+  "refactor_targets": [
+    "src/config/timer-constants.ts",
+    "src/lib/db/timer-db.ts",
+    "src/lib/timer-manager.ts",
+    "src/app/api/worktrees/[id]/timers/route.ts",
+    "src/components/worktree/TimerPane.tsx",
+    "src/components/worktree/NotesAndLogsPane.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 99,
+    "tests_passed": 5328,
+    "tsc_errors": 0,
+    "lint_errors": 0
+  },
+  "improvement_goals": [
+    "コードの重複排除（DRY原則）",
+    "SOLID原則準拠の確認",
+    "不要な複雑さの除去（KISS原則）",
+    "既存パターンとの一貫性確認"
+  ]
+}

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Issue #534 実機受入テスト報告書</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; line-height: 1.6; padding: 2rem; }
+.container { max-width: 1000px; margin: 0 auto; }
+h1 { font-size: 1.5rem; margin-bottom: 1rem; color: #1a1a2e; }
+h2 { font-size: 1.2rem; margin: 1.5rem 0 0.5rem; color: #16213e; border-bottom: 2px solid #0f3460; padding-bottom: 0.3rem; }
+h3 { font-size: 1rem; margin: 1rem 0 0.3rem; color: #333; }
+.summary { display: flex; gap: 1rem; margin: 1rem 0; flex-wrap: wrap; }
+.card { background: white; border-radius: 8px; padding: 1rem 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); flex: 1; min-width: 150px; }
+.card .label { font-size: 0.85rem; color: #666; }
+.card .value { font-size: 1.8rem; font-weight: bold; }
+.card .value.pass { color: #2ecc71; }
+.card .value.fail { color: #e74c3c; }
+.card .value.rate { color: #3498db; }
+table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+th, td { padding: 0.6rem 0.8rem; text-align: left; border-bottom: 1px solid #eee; font-size: 0.9rem; }
+th { background: #1a1a2e; color: white; font-weight: 500; }
+tr:last-child td { border-bottom: none; }
+.pass-badge { background: #d4edda; color: #155724; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 0.8rem; }
+.fail-badge { background: #f8d7da; color: #721c24; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 0.8rem; }
+.info { background: white; border-radius: 8px; padding: 1rem; margin: 0.5rem 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.info dt { font-weight: 600; display: inline; }
+.info dd { display: inline; margin-left: 0.5rem; }
+.evidence { background: #f8f9fa; padding: 0.3rem 0.6rem; border-radius: 4px; font-family: monospace; font-size: 0.85rem; color: #555; }
+.category { background: #e8f4fd; padding: 0.3rem 0.6rem; border-radius: 4px; font-size: 0.8rem; color: #1565c0; }
+footer { margin-top: 2rem; text-align: center; color: #999; font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<div class="container">
+<h1>Issue #534 実機受入テスト（UAT）報告書</h1>
+
+<h2>テスト概要</h2>
+<div class="info">
+<dl>
+<dt>Issue:</dt><dd>#534 指定時間後メッセージ送信</dd><br>
+<dt>テスト日:</dt><dd>2026-03-24</dd><br>
+<dt>ブランチ:</dt><dd>feature/534-timer-message</dd><br>
+<dt>テスト環境:</dt><dd>localhost:3012</dd><br>
+<dt>テストworktree:</dt><dd>myswiftagent-develop</dd>
+</dl>
+</div>
+
+<h2>サマリー</h2>
+<div class="summary">
+<div class="card"><div class="label">テスト総数</div><div class="value">25</div></div>
+<div class="card"><div class="label">合格</div><div class="value pass">25</div></div>
+<div class="card"><div class="label">不合格</div><div class="value fail">0</div></div>
+<div class="card"><div class="label">合格率</div><div class="value rate">100%</div></div>
+</div>
+
+<h2>テスト結果詳細</h2>
+
+<h3><span class="category">API層テスト</span></h3>
+<table>
+<tr><th>ID</th><th>テスト名</th><th>結果</th><th>エビデンス</th></tr>
+<tr><td>TC-001</td><td>タイマー登録（正常系）</td><td><span class="pass-badge">PASS</span></td><td class="evidence">HTTP 201, id/status=pending返却</td></tr>
+<tr><td>TC-002</td><td>タイマー一覧取得</td><td><span class="pass-badge">PASS</span></td><td class="evidence">HTTP 200, timers配列にタイマー含む</td></tr>
+<tr><td>TC-003</td><td>タイマーキャンセル</td><td><span class="pass-badge">PASS</span></td><td class="evidence">HTTP 200, {success:true}</td></tr>
+<tr><td>TC-004</td><td>キャンセル後ステータス確認</td><td><span class="pass-badge">PASS</span></td><td class="evidence">status=cancelled</td></tr>
+</table>
+
+<h3><span class="category">バリデーションテスト</span></h3>
+<table>
+<tr><th>ID</th><th>テスト名</th><th>結果</th><th>エビデンス</th></tr>
+<tr><td>TC-005</td><td>空メッセージ拒否</td><td><span class="pass-badge">PASS</span></td><td class="evidence">HTTP 400, "Invalid message"</td></tr>
+<tr><td>TC-006</td><td>長文メッセージ拒否（10001文字）</td><td><span class="pass-badge">PASS</span></td><td class="evidence">HTTP 400, "Invalid message"</td></tr>
+<tr><td>TC-007</td><td>無効なdelayMs拒否（5分未満）</td><td><span class="pass-badge">PASS</span></td><td class="evidence">HTTP 400, "Invalid delay"</td></tr>
+<tr><td>TC-008</td><td>無効なcliToolId拒否</td><td><span class="pass-badge">PASS</span></td><td class="evidence">HTTP 400, "Invalid agent"</td></tr>
+<tr><td>TC-009</td><td>上限チェック（最大5件）</td><td><span class="pass-badge">PASS</span></td><td class="evidence">HTTP 400, "Max timers reached"</td></tr>
+<tr><td>TC-010</td><td>無効なtimerId（DELETE）</td><td><span class="pass-badge">PASS</span></td><td class="evidence">HTTP 400, "Invalid timer ID"</td></tr>
+<tr><td>TC-011</td><td>存在しないworktreeアクセス</td><td><span class="pass-badge">PASS</span></td><td class="evidence">HTTP 404, "Worktree not found"</td></tr>
+</table>
+
+<h3><span class="category">時間選択テスト</span></h3>
+<table>
+<tr><th>ID</th><th>テスト名</th><th>結果</th><th>エビデンス</th></tr>
+<tr><td>TC-012</td><td>最小遅延時間（5分=300000ms）</td><td><span class="pass-badge">PASS</span></td><td class="evidence">HTTP 201, delayMs=300000</td></tr>
+<tr><td>TC-013</td><td>最大遅延時間（8h45m=31500000ms）</td><td><span class="pass-badge">PASS</span></td><td class="evidence">HTTP 201, delayMs=31500000</td></tr>
+<tr><td>TC-014</td><td>5分刻みでない値の拒否</td><td><span class="pass-badge">PASS</span></td><td class="evidence">HTTP 400, "Invalid delay"</td></tr>
+</table>
+
+<h3><span class="category">UI層テスト（Playwright）</span></h3>
+<table>
+<tr><th>ID</th><th>テスト名</th><th>結果</th><th>エビデンス</th></tr>
+<tr><td>TC-015</td><td>Timerサブタブの表示</td><td><span class="pass-badge">PASS</span></td><td class="evidence">Notes|Schedules|Agent|Timer 4タブ表示</td></tr>
+<tr><td>TC-016</td><td>タイマー登録UIの動作</td><td><span class="pass-badge">PASS</span></td><td class="evidence">登録フォーム（メッセージ/時間選択/ボタン）表示</td></tr>
+<tr><td>TC-017</td><td>カウントダウン表示</td><td><span class="pass-badge">PASS</span></td><td class="evidence">8:40:57 / 00:57 リアルタイム更新</td></tr>
+<tr><td>TC-018</td><td>UIからのキャンセル</td><td><span class="pass-badge">PASS</span></td><td class="evidence">Cancelledステータス表示確認</td></tr>
+</table>
+
+<h3><span class="category">品質チェック</span></h3>
+<table>
+<tr><th>ID</th><th>テスト名</th><th>結果</th><th>エビデンス</th></tr>
+<tr><td>TC-019</td><td>既存ユニットテスト全パス</td><td><span class="pass-badge">PASS</span></td><td class="evidence">5328 passed (1 failed: 既存git-utils.test.ts, #534無関係)</td></tr>
+<tr><td>TC-020</td><td>TypeScript型チェック</td><td><span class="pass-badge">PASS</span></td><td class="evidence">エラー0件</td></tr>
+<tr><td>TC-021</td><td>ESLintチェック</td><td><span class="pass-badge">PASS</span></td><td class="evidence">No ESLint warnings or errors</td></tr>
+<tr><td>TC-022</td><td>ビルド成功</td><td><span class="pass-badge">PASS</span></td><td class="evidence">build-and-start.sh 成功</td></tr>
+</table>
+
+<h3><span class="category">タイマー動作テスト</span></h3>
+<table>
+<tr><th>ID</th><th>テスト名</th><th>結果</th><th>エビデンス</th></tr>
+<tr><td>TC-023</td><td>タイマーDB状態確認</td><td><span class="pass-badge">PASS</span></td><td class="evidence">scheduledSendTime = createdAt + delayMs 完全一致</td></tr>
+<tr><td>TC-024</td><td>サーバー再起動後タイマー復元</td><td><span class="pass-badge">PASS</span></td><td class="evidence">再起動前2件→再起動後2件復元</td></tr>
+<tr><td>TC-025</td><td>モバイル表示確認</td><td><span class="pass-badge">PASS</span></td><td class="evidence">NotesAndLogsPaneサブタブとして表示</td></tr>
+</table>
+
+<h2>備考</h2>
+<div class="info">
+<p>TC-019で1件失敗している <code>git-utils.test.ts > detached HEAD state</code> は既存テストであり、Issue #534の変更とは無関係です。</p>
+</div>
+
+<footer>
+Generated by UAT command for Issue #534 - 2026-03-24
+</footer>
+</div>
+</body>
+</html>

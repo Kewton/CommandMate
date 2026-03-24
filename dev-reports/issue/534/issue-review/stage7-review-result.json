@@ -1,0 +1,187 @@
+{
+  "issue_number": 534,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "stage": 7,
+  "review_date": "2026-03-24",
+  "previous_review_verification": {
+    "stage3_must_fix": [
+      {
+        "id": "MF-1",
+        "original_issue": "server.tsの初期化・シャットダウン処理にtimer-managerの統合が必要だが、変更対象ファイルに記載がない",
+        "status": "resolved",
+        "verification": "server.tsが変更対象ファイルに追加済み。「initTimerManager()/stopAllTimers()のライフサイクル統合（initScheduleManager/stopAllSchedulesの直後）」と明記。実装タスクにも個別タスクとして記載済み。"
+      },
+      {
+        "id": "MF-2",
+        "original_issue": "resource-cleanup.tsのcleanupOrphanedMapEntries()にtimer-managerのorphanedエントリ検出処理の追加が必要だが、変更対象ファイルに記載がない",
+        "status": "resolved",
+        "verification": "resource-cleanup.tsが変更対象ファイルに追加済み。「cleanupOrphanedMapEntries()にtimer-manager孤立エントリ検出追加、CleanupMapResult型拡張」と明記。実装タスクにもCleanupMapResult型にdeletedTimerWorktreeIdsフィールド追加が記載済み。"
+      }
+    ],
+    "stage3_should_fix": [
+      {
+        "id": "SF-1",
+        "original_issue": "テスト対象の具体的なファイル・シナリオが未特定",
+        "status": "resolved",
+        "verification": "ユニットテストの具体的なファイルとシナリオが詳細に記載済み。新規3ファイル（timer-manager.test.ts, timer-db.test.ts, timer-constants.test.ts）と既存2ファイルへの追加（session-cleanup.test.ts, resource-cleanup.test.ts）が明記されている。"
+      },
+      {
+        "id": "SF-2",
+        "original_issue": "timer-managerからTerminal APIへの依存方法が未明確で、循環依存のリスクがある",
+        "status": "resolved",
+        "verification": "「tmux sendKeysをsession-key-sender.tsまたはtmux.ts経由で直接呼び出す（HTTP経由ではなくsession-key-sender.ts/tmux.ts使用）」と明記。循環依存を避けるためTerminal API route内部のロジックは使わないことも明記済み。"
+      },
+      {
+        "id": "SF-3",
+        "original_issue": "CLAUDE.mdのモジュール一覧・影響範囲への追記が必要だが記載がない",
+        "status": "resolved",
+        "verification": "「ドキュメント対象ファイル」セクションにCLAUDE.mdとdocs/module-reference.mdが追加済み。実装タスクにも「ドキュメント更新」タスクとして記載済み。"
+      }
+    ],
+    "stage3_nice_to_have": [
+      {
+        "id": "NTH-1",
+        "original_issue": "NotesAndLogsPaneのSubTab型拡張が型安全性に影響する可能性",
+        "status": "resolved",
+        "verification": "Issue本文の関連コンポーネントセクションでSubTab型は内部型であることを前提としつつ、4タブ化によるUI幅の確認の必要性が記載済み。"
+      },
+      {
+        "id": "NTH-2",
+        "original_issue": "DBマイグレーションv23でのロールバック方針が未記載",
+        "status": "resolved",
+        "verification": "実装タスクのDBマイグレーションに「down関数（ロールバック用）にDROP TABLE timer_messagesを定義する（既存v1マイグレーションのパターンに従う）」と明記済み。"
+      }
+    ]
+  },
+  "stage5_stage6_impact_verification": {
+    "stage5_must_fix": [
+      {
+        "id": "S5-MF-1",
+        "original_issue": "時間範囲の上限値とミリ秒値に不整合がある",
+        "impact_assessment": "no_new_impact",
+        "verification": "8時間45分(31500000ms)に統一された。この修正はtimer-constants.tsの定数値のみに影響し、影響ファイルの追加は不要。"
+      }
+    ],
+    "stage5_should_fix": [
+      {
+        "id": "S5-SF-1",
+        "original_issue": "タイマー発火時のエラーハンドリング方針が未記載",
+        "impact_assessment": "no_new_impact",
+        "verification": "エラーハンドリング方針（try/catch + DB statusをfailed更新、リトライなし）がtimer-manager.tsの実装タスクに追加された。これは新規ファイルtimer-manager.ts内部の設計であり、影響ファイルの追加は不要。job-executor.tsのパターンに従う旨も記載済み。"
+      },
+      {
+        "id": "S5-SF-2",
+        "original_issue": "UIタブ表記と実際のi18nラベルの不一致",
+        "impact_assessment": "no_new_impact",
+        "verification": "「Notes | Schedules | Agent | Timer」に修正済み。timerTabのi18nキー追加先（locales/en/schedule.json, locales/ja/schedule.json）は既にStage 3で影響ファイルに含まれている。"
+      }
+    ],
+    "stage5_nice_to_have": [
+      {
+        "id": "S5-NTH-1",
+        "original_issue": "カウントダウン表示のポーリング方式について詳細があると良い",
+        "impact_assessment": "no_new_impact",
+        "verification": "クライアント側setInterval(1秒間隔)の記載がTimerPane.tsxの実装タスクに追加された。formatTimeRemaining()の再利用も記載済み。これはTimerPane.tsx内部の実装であり、影響ファイルの追加は不要。"
+      },
+      {
+        "id": "S5-NTH-2",
+        "original_issue": "Timer APIのルーティングパスに関する補足があると良い",
+        "impact_assessment": "no_new_impact",
+        "verification": "DELETEエンドポイントの?timerId=xxxクエリパラメータ方式が明記された。既存searchParamsパターンに従う方式であり、追加のルートファイル（/timers/[timerId]/route.ts）は不要。影響ファイルの追加は不要。"
+      }
+    ]
+  },
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 1,
+    "nice_to_have_count": 1
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "テスト範囲",
+        "issue": "テスト対象ファイルに記載されている既存テストファイルのパスが実際のファイル構造と一致しない",
+        "location": "## テスト対象ファイル、## 実装タスク > ユニットテスト",
+        "recommendation": "以下のテストファイルパスを実際の配置に合わせて修正すべき: (1) 'tests/unit/lib/session-cleanup.test.ts' は実際には 'tests/unit/session-cleanup.test.ts' と 'tests/unit/session-cleanup-issue404.test.ts' の2つが存在する。特に後者はcleanupWorktreeSessionsの呼び出し順序テスト(pollersStopped配列のcontainチェック)を含んでおり、timer-manager追加時に直接影響を受ける。(2) 'tests/unit/lib/resource-cleanup.test.ts' は実際には 'tests/unit/resource-cleanup.test.ts' に配置されている。パスが不正確だと実装者が既存テストを見つけられず、既存テストの更新漏れが発生する。",
+        "evidence": "Issueの実装タスクには 'tests/unit/lib/session-cleanup.test.ts（既存への追加）' と記載されているが、実際のファイルは tests/unit/session-cleanup.test.ts（Issue #69, #526用）と tests/unit/session-cleanup-issue404.test.ts（Issue #404, #525用）の2つ。後者のL73-87でpollersStopped配列のcontainテスト、L35-63で呼び出し順序テストが存在し、timer-managerのステップ追加で直接影響を受ける。resource-cleanup.test.tsも同様に tests/unit/resource-cleanup.test.ts が正しいパス。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "影響ファイル",
+        "issue": "session-cleanup-issue404.test.tsへの影響が未記載",
+        "location": "## テスト対象ファイル",
+        "recommendation": "tests/unit/session-cleanup-issue404.test.ts をテスト対象ファイルに追加すべき。このファイルはcleanupWorktreeSessionsの呼び出し順序テスト（stopAutoYesPollingByWorktree -> deleteAutoYesStateByWorktree -> stopScheduleForWorktreeの順序検証）を含んでおり、timer-managerのstopTimersForWorktreeステップ追加時に: (1) 新しいmockの追加（vi.mock timer-manager）が必要、(2) 呼び出し順序テストにstopTimersForWorktreeの位置を追加、(3) pollersStopped配列のcontainテストにtimer-managerエントリを追加。session-cleanup.test.ts（Issue #526用）にもvi.mock追加が必要だが、session-cleanup-issue404.test.tsの方が呼び出し順序テストの変更量が大きい。",
+        "evidence": "tests/unit/session-cleanup-issue404.test.ts L35-63: callOrder配列でstopAutoYesPollingByWorktree -> deleteAutoYesStateByWorktree -> stopScheduleForWorktreeの順序を検証。timer-managerのstopTimersForWorktreeがstopScheduleForWorktreeの直後に追加されるなら、callOrderの期待値とmockの追加が必要。L21-24: vi.mock('@/lib/schedule-manager')が存在し、同様にvi.mock('@/lib/timer-manager'または対応パス)の追加が必要。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "依存関係",
+        "issue": "timer-manager.tsからsession-key-sender.tsへの依存パスの明確化があると良い",
+        "location": "## 実装タスク > timer-manager.ts",
+        "recommendation": "session-key-sender.tsの現在のエクスポート関数はClaude CLIセッション固有のロジック（プロンプト待機、pasted text検知、CLAUDE_PROMPT_PATTERN）を含んでおり、タイマーメッセージの単純な送信用途には過剰な可能性がある。timer-managerが必要とするのはtmux sendKeysの呼び出しのみであるため、tmux.tsのsendKeys()を直接使う方がシンプルかつ依存が明確になる。session-key-sender.tsを使う場合、どの関数を利用するのか（sendCommand? sendMessageToSession?）を指定しておくと設計判断が容易になる。",
+        "evidence": "session-key-sender.ts L11-17: tmux.tsからhasSession, sendKeys, capturePane, killSession, sendSpecialKeyをimport。session-key-sender.tsの関数はCLAUDE_PROMPT_PATTERNやdetectAndResendIfPastedTextなどClaude固有のロジックを含む。一方、timer-managerが必要とするのは特定エージェントのtmuxセッションへのメッセージ送信（sendKeys + Enter）のみ。job-executor.tsはclaude-executor.ts経由でexecFileを使う方式で、tmux sendKeysとは異なるアプローチ。"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "previous_stage_findings_status": "all_resolved",
+    "stage5_stage6_new_impact": "none",
+    "remaining_concerns": [
+      {
+        "area": "テストファイルパスの正確性",
+        "severity": "must_fix",
+        "detail": "テスト対象ファイルのパスが実際のファイル構造と一致していない。実装時にテストファイルが見つからず、既存テストの更新漏れにつながるリスクがある。"
+      },
+      {
+        "area": "session-cleanup-issue404.test.tsの考慮漏れ",
+        "severity": "should_fix",
+        "detail": "session-cleanup関連のテストが2ファイルに分かれており、呼び出し順序テストを含むissue404用テストファイルへの影響が未記載。"
+      }
+    ],
+    "overall_impact_assessment": {
+      "new_files_count": 5,
+      "modified_files_count": 8,
+      "test_files_new": 3,
+      "test_files_modified": 3,
+      "doc_files_modified": 2,
+      "i18n_files_modified": 2,
+      "breaking_changes": false,
+      "risk_level": "medium",
+      "risk_justification": "前回の影響範囲レビュー(Stage 3)で指摘した重大な漏れ（server.ts、resource-cleanup.ts）は全て反映済み。Stage 5-6で追加された内容（エラーハンドリング、時間上限修正、i18nキー明記等）は全て既存の影響範囲内に収まっており、新たな影響ファイルの追加は不要。残る指摘はテストファイルパスの正確性とsession-cleanup-issue404.test.tsの考慮漏れのみ。"
+    }
+  },
+  "code_references": [
+    {
+      "file": "tests/unit/session-cleanup-issue404.test.ts",
+      "relevance": "cleanupWorktreeSessionsの呼び出し順序テスト（L35-63）とpollersStopped配列テスト（L73-87）がtimer-manager追加で直接影響を受ける"
+    },
+    {
+      "file": "tests/unit/session-cleanup.test.ts",
+      "relevance": "cleanupWorktreeSessions、killWorktreeSession、syncWorktreesAndCleanupのテスト。timer-manager用のvi.mock追加が必要"
+    },
+    {
+      "file": "tests/unit/resource-cleanup.test.ts",
+      "relevance": "cleanupOrphanedMapEntries()のテスト。timer-manager用のvi.mock追加とCleanupMapResult型拡張への対応が必要"
+    },
+    {
+      "file": "src/lib/session-key-sender.ts",
+      "relevance": "timer-managerのメッセージ送信候補。Claude固有ロジックを含むため、tmux.ts直接利用も要検討"
+    },
+    {
+      "file": "src/lib/tmux/tmux.ts",
+      "relevance": "sendKeys()関数がtimer-managerのメッセージ送信に最もシンプルな依存パス"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "主要モジュール一覧へのtimer関連モジュール追記（変更対象として記載済み）"
+    }
+  ]
+}

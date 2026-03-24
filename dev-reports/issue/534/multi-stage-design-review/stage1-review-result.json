@@ -1,0 +1,147 @@
+{
+  "issue_number": 534,
+  "stage": 1,
+  "stage_name": "設計原則レビュー",
+  "focus_area": "設計原則（SOLID, KISS, YAGNI, DRY）",
+  "design_doc": "dev-reports/design/issue-534-timer-message-design-policy.md",
+  "review_date": "2026-03-24",
+  "overall_assessment": "PASS_WITH_MINOR_FINDINGS",
+  "summary": "設計方針書は全体としてSOLID/KISS/YAGNI/DRY原則に良好に準拠している。既存パターン（schedule-manager, auto-yes-config, session-cleanup）との一貫性が高く、新規の抽象化も最小限に抑えられている。指摘事項は5件あるが、いずれもMinorまたはInfoレベルであり、設計の根本的な変更は不要。",
+  "checklist": [
+    {
+      "principle": "SRP (Single Responsibility Principle)",
+      "status": "PASS",
+      "detail": "timer-constants.ts（定数・型）、timer-db.ts（CRUD）、timer-manager.ts（setTimeout管理・ライフサイクル）、TimerPane.tsx（UI）と責務が明確に分離されている。job-executor.tsからの分離パターンと一致。"
+    },
+    {
+      "principle": "OCP (Open/Closed Principle)",
+      "status": "PASS",
+      "detail": "TIMER_DELAYS配列をホワイトリストとして外出しし、timer-constants.tsで管理。時間選択肢の追加はconstants変更のみで可能。TIMER_STATUS定数もas constで拡張可能な設計。"
+    },
+    {
+      "principle": "LSP (Liskov Substitution Principle)",
+      "status": "NOT_APPLICABLE",
+      "detail": "本設計にクラス継承やインターフェース実装の階層は含まれない。関数ベースのモジュール設計のため、LSPの直接的な適用対象なし。"
+    },
+    {
+      "principle": "ISP (Interface Segregation Principle)",
+      "status": "PASS",
+      "detail": "timer-manager.tsの公開APIが用途別に分割されている（initTimerManager, stopAllTimers, scheduleTimer, cancelScheduledTimer, stopTimersForWorktree, getActiveTimerCount）。各呼び出し元が必要な関数のみをimportできる。"
+    },
+    {
+      "principle": "DIP (Dependency Inversion Principle)",
+      "status": "PASS_WITH_NOTE",
+      "detail": "tmux.tsのsendKeysを直接呼び出す設計。HTTP経由を避けた合理的な判断だが、テスタビリティの観点からsendKeys関数をtimer-managerのexecuteTimerに注入可能にすることを検討してもよい。ただし既存のjob-executorも同様にclaude-executorを直接importしているため、プロジェクト全体の一貫性は保たれている。"
+    },
+    {
+      "principle": "KISS (Keep It Simple, Stupid)",
+      "status": "PASS",
+      "detail": "setTimeoutによるワンショット実行、クライアントsetIntervalによるカウントダウン、専用テーブルによるデータ管理。いずれも最もシンプルな技術選択。croner、SSE/WebSocketなどの過剰な技術を明確に排除している。リトライなし（ユーザー再登録で対処）の判断もKISSに合致。"
+    },
+    {
+      "principle": "YAGNI (You Aren't Gonna Need It)",
+      "status": "PASS",
+      "detail": "リトライ機構、WebSocket通知、タイマー編集機能、繰り返しタイマーなど、将来的に必要になる可能性のある機能を意図的に排除している。MobileTabBar非追加の判断もYAGNIに沿っている。"
+    },
+    {
+      "principle": "DRY (Don't Repeat Yourself)",
+      "status": "PASS_WITH_NOTE",
+      "detail": "formatTimeRemaining()の再利用、globalThisシングルトンパターンの踏襲、session-cleanupへのFacade統合など、既存コードの再利用が意識されている。ただしTIMER_DELAYS配列の5分刻み105個の値をハードコードする設計は、生成ロジックで代替可能（後述の指摘事項参照）。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "DP-001",
+      "severity": "Minor",
+      "category": "DRY",
+      "title": "TIMER_DELAYS配列のハードコード",
+      "description": "5分刻みで5分から8時間45分まで105個の値をas constでハードコードする設計。Array.from()等で生成するヘルパー関数を用意し、TIMER_DELAYSをその結果として定義する方が保守性が高い。",
+      "suggestion": "const TIMER_DELAYS = Array.from({ length: 105 }, (_, i) => (i + 1) * 5 * 60 * 1000) as const 相当の生成ロジックを検討。ただしas constとの併用が困難なため、ランタイムバリデーション関数isValidTimerDelayでMIN/MAX/STEP定数による範囲チェックに変更する案も有効。",
+      "location": "timer-constants.ts (Section 9-1)",
+      "priority": "Low"
+    },
+    {
+      "id": "DP-002",
+      "severity": "Info",
+      "category": "KISS",
+      "title": "timer-db.tsの配置場所の一貫性",
+      "description": "既存のDB操作モジュール（chat-db.ts, memo-db.ts, session-db.ts, worktree-db.ts）はすべてsrc/lib/db/ディレクトリ配下に配置されている。設計方針書ではtimer-db.tsの配置パスが明示されていないが、src/lib/db/timer-db.tsに配置すべき。",
+      "suggestion": "設計方針書のレイヤー構成表にフルパスを明記する（src/lib/db/timer-db.ts）。",
+      "location": "Section 1 レイヤー構成表",
+      "priority": "Low"
+    },
+    {
+      "id": "DP-003",
+      "severity": "Minor",
+      "category": "設計一貫性",
+      "title": "timer-manager.tsの配置パス",
+      "description": "既存のschedule-manager.tsはsrc/lib/直下に配置されている。timer-manager.tsも同様にsrc/lib/直下が妥当だが、明示されていない。また、timer-constants.tsもsrc/config/配下（auto-yes-config.tsと同レベル）が適切。",
+      "suggestion": "設計方針書にファイルパスを明記：timer-manager.ts -> src/lib/timer-manager.ts, timer-constants.ts -> src/config/timer-constants.ts",
+      "location": "Section 1 レイヤー構成表, Section 9",
+      "priority": "Low"
+    },
+    {
+      "id": "DP-004",
+      "severity": "Minor",
+      "category": "SRP / 設計一貫性",
+      "title": "executeTimer内のセッション名解決ロジックの不足",
+      "description": "設計方針書のexecuteTimer関数ではsendKeys(sessionName, timer.message, true)を呼び出しているが、sessionNameの取得方法が記載されていない。既存のjob-executor.tsではclaude-executorを経由してセッション名を解決している。tmux sendKeysに渡すセッション名はworktreeIdとcliToolIdから導出する必要があり、この変換ロジックの責務所在を明確にすべき。",
+      "suggestion": "CLIToolManager.getSessionName(worktreeId, cliToolId)等の既存ユーティリティを使用してセッション名を解決する旨を設計書に追記する。",
+      "location": "Section 3-3 (executeTimer関数)",
+      "priority": "Medium"
+    },
+    {
+      "id": "DP-005",
+      "severity": "Info",
+      "category": "YAGNI",
+      "title": "delay_msカラムの冗長性",
+      "description": "timer_messagesテーブルにdelay_msとscheduled_send_timeの両方を保持する設計。scheduled_send_time = created_at + delay_msの関係であるため、delay_msは冗長に見える。ただしUI表示で「15分後に送信」のような元の設定値を表示する用途があるため、実用上は妥当。",
+      "suggestion": "冗長性は認識した上で、UI表示目的であることをスキーマコメントに明記することを推奨。",
+      "location": "Section 4 データモデル設計",
+      "priority": "Low"
+    }
+  ],
+  "risk_assessment": {
+    "overall_risk": "Low",
+    "risks": [
+      {
+        "category": "保守性",
+        "level": "Low",
+        "description": "TIMER_DELAYSのハードコードは将来の変更時にミスを招く可能性があるが、isValidTimerDelay型ガードがあるため影響は限定的。"
+      },
+      {
+        "category": "テスタビリティ",
+        "level": "Low",
+        "description": "tmux.ts sendKeysへの直接依存はテスト時のモック化が必要だが、既存パターン（job-executor -> claude-executor）と同様のため、vitest.mockで対処可能。"
+      },
+      {
+        "category": "実装ミス",
+        "level": "Medium",
+        "description": "sessionName解決ロジックが設計書に未記載のため、実装時に誤った方法でセッション名を取得するリスクがある（DP-004）。"
+      }
+    ]
+  },
+  "recommendations": [
+    {
+      "priority": "Medium",
+      "description": "DP-004: executeTimer関数内でのtmuxセッション名解決方法を設計書に明記する。CLIToolManagerまたは既存のセッション名導出関数の使用を推奨。"
+    },
+    {
+      "priority": "Low",
+      "description": "DP-001: TIMER_DELAYS配列をハードコードではなく、MIN_DELAY_MS / MAX_DELAY_MS / DELAY_STEP_MS 定数から動的に生成するか、isValidTimerDelayを範囲チェック方式に変更する。"
+    },
+    {
+      "priority": "Low",
+      "description": "DP-002/DP-003: 設計方針書のレイヤー構成表にフルファイルパスを明記し、既存ディレクトリ構造との一貫性を確保する。"
+    }
+  ],
+  "consistency_with_existing_patterns": {
+    "globalThis_singleton": "CONSISTENT - schedule-manager.tsの__scheduleManagerStatesパターンと同一構造",
+    "session_cleanup_facade": "CONSISTENT - cleanupWorktreeSessions()への統合が既存のstopScheduleForWorktreeと同じパターン",
+    "error_handling": "CONSISTENT - job-executor.tsのtry-catch-finallyパターンを踏襲",
+    "constants_design": "CONSISTENT - auto-yes-config.tsのALLOWED_DURATIONS / isAllowedDuration()パターンと同一",
+    "db_module_pattern": "MOSTLY_CONSISTENT - CRUD関数エクスポートパターンはchat-db.ts等と一致するが、配置パスが未明記",
+    "api_route_pattern": "CONSISTENT - 既存の/api/worktrees/[id]/配下のルーティング規約に合致",
+    "resource_cleanup": "CONSISTENT - resource-cleanup.tsへの統合がschedule-manager同様の方式"
+  }
+}

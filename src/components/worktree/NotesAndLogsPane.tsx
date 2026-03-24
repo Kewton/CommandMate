@@ -15,14 +15,15 @@ import { useTranslations } from 'next-intl';
 import { MemoPane } from './MemoPane';
 import { ExecutionLogPane } from './ExecutionLogPane';
 import { AgentSettingsPane } from './AgentSettingsPane';
+import { TimerPane } from './TimerPane';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 // ============================================================================
 // Types
 // ============================================================================
 
-/** Issue #368: Extended with 'agent' sub-tab */
-type SubTab = 'notes' | 'logs' | 'agent';
+/** Issue #368: Extended with 'agent' sub-tab. Issue #534: Extended with 'timer' sub-tab */
+type SubTab = 'notes' | 'logs' | 'agent' | 'timer';
 
 /** Configuration for a sub-tab button */
 interface SubTabConfig {
@@ -62,6 +63,7 @@ const SUB_TABS: readonly SubTabConfig[] = [
   { id: 'notes', labelKey: 'notes' },
   { id: 'logs', labelKey: 'logs' },
   { id: 'agent', labelKey: 'agentTab' },
+  { id: 'timer', labelKey: 'timerTab' },
 ] as const;
 
 /** CSS class for the active sub-tab button */
@@ -129,6 +131,12 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
             vibeLocalContextWindow={vibeLocalContextWindow}
             onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
             maxAgents={maxAgents}
+          />
+        )}
+        {activeSubTab === 'timer' && (
+          <TimerPane
+            worktreeId={worktreeId}
+            selectedAgents={selectedAgents}
           />
         )}
       </div>

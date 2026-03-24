@@ -1,0 +1,120 @@
+{
+  "issue_number": 534,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "CON-MF-001",
+        "category": "設計書内部整合性",
+        "title": "executeTimer内のCLIToolManager APIがコードベースの実際のAPIと不一致",
+        "description": "設計書セクション3-3のexecuteTimer()コード例では `getCliTool(timer.cli_tool_id)` を使用しているが、実際のコードベースでは CLIToolManager.getInstance().getTool(cliToolId) というSingletonパターンでアクセスする。設計書内のDP-004コメントでは「CLIToolManager.getSessionName()に委譲」と記載しているが、getSessionName()はCLIToolManagerのメソッドではなくICLIToolインスタンスのメソッドである。",
+        "expected": "CLIToolManager.getInstance().getTool(cliToolId).getSessionName(worktreeId)",
+        "actual_in_design": "getCliTool(timer.cli_tool_id) / cliTool.getSessionName(timer.worktree_id)",
+        "impact": "実装時にAPI呼び出しの誤解が生じる可能性がある",
+        "recommendation": "executeTimerのコード例を terminal/route.ts と同じパターン（CLIToolManager.getInstance().getTool() + tool.getSessionName()）に修正する"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "CON-SF-001",
+        "category": "既存コードベースとの整合性",
+        "title": "gracefulShutdown内のstopAllTimers()の挿入位置が既存パターンと不整合",
+        "description": "設計書セクション10の停止順序ではstopAllTimers()をstopAllSchedules()の後、stopResourceCleanup()の前に配置しているが、実際のserver.ts gracefulShutdown()ではstopAllSchedules()の直後にstopResourceCleanup()があり、その後にcloseWebSocket()がある。設計書の順序(4. stopAllTimers -> 5. stopResourceCleanup -> 6. closeWebSocket)は実際のserver.ts(stopResourceCleanup -> closeWebSocket)と順番が一致しているが、closeWebSocketの位置が実装では stopResourceCleanup() より前にあるかのように見える記述がある。",
+        "expected": "server.tsの実際の順序: stopAllPolling -> stopAllAutoYesPolling -> stopAllSchedules -> stopResourceCleanup -> closeWebSocket",
+        "actual_in_design": "stopAllPolling -> stopAllAutoYesPolling -> stopAllSchedules -> stopAllTimers -> stopResourceCleanup -> closeWebSocket",
+        "impact": "Low - 実装時に正しい挿入箇所を確認すれば問題ないが、設計書の順序表記が実コードと微妙にずれている",
+        "recommendation": "設計書の停止順序をserver.tsの実際のコードと正確に対応させる。特にcloseWebSocket()の位置がserver.tsではstopResourceCleanup()の後であることを明記する"
+      },
+      {
+        "id": "CON-SF-002",
+        "category": "設計書内部整合性",
+        "title": "GET APIのレスポンスにworktreeIdが含まれていない",
+        "description": "POST APIのレスポンス(201)にはworktreeIdフィールドが含まれているが、GET APIのtimers配列要素にはworktreeIdが含まれていない。GET APIはパスパラメータ[id]でworktreeIdをフィルタするため厳密には不要だが、POST/GETのレスポンス構造の一貫性がない。",
+        "impact": "Low - クライアント側でworktreeIdはパスパラメータから既知であるため実害は少ない",
+        "recommendation": "意図的な差異であればAPIドキュメントにその旨を明記する。統一する場合はGET側にもworktreeIdを追加する"
+      },
+      {
+        "id": "CON-SF-003",
+        "category": "既存パターンとの整合性",
+        "title": "resource-cleanup.tsへのtimer-manager統合方法が未記載",
+        "description": "設計書セクション7のパフォーマンス設計で「24h間隔で孤立検出」と記載されているが、resource-cleanup.tsのcleanupOrphanedMapEntries()にtimer-managerのMap孤立検出をどう統合するかの詳細が未記載。resource-cleanup.tsは現在autoYesStates、autoYesPollers、scheduleManagerの3種のMap孤立検出を行っており、timer-managerも同じパターンで追加する必要がある。",
+        "impact": "Medium - 24h間隔の孤立検出がないと、worktree削除後にglobalThisのMapにエントリが残存するリスクがある",
+        "recommendation": "resource-cleanup.tsのcleanupOrphanedMapEntries()にtimer-manager用の孤立検出ロジック追加方針を明記する。getTimerWorktreeIds()のようなアクセサ関数のexportも設計に含める"
+      },
+      {
+        "id": "CON-SF-004",
+        "category": "設計書内部整合性",
+        "title": "timer-db.tsのcancelTimer()とDELETE APIのステータス遷移の整合性",
+        "description": "セクション4のステータス遷移図では pending -> cancelled (ユーザーキャンセル / worktree削除) と記載しているが、セクション9-2のcancelTimer()は戻り値がbooleanである一方、cancelTimersByWorktree()はnumberを返す。DELETE APIのResponse 404は「Timer not found」だが、既にcancelled/sent/failedのタイマーに対するDELETE操作時のレスポンスが未定義。",
+        "impact": "Low - 実装時の判断に委ねられるが、pendingでないタイマーのキャンセル要求時の挙動を明確にすべき",
+        "recommendation": "cancelTimer()がpendingステータス以外のタイマーに対して呼ばれた場合のレスポンス(404 or 400 or 409)を明記する"
+      }
+    ],
+    "consider": [
+      {
+        "id": "CON-C-001",
+        "category": "既存パターンとの整合性",
+        "title": "i18n名前空間の選択根拠",
+        "description": "設計書セクション11ではtimer関連のi18nキーをschedule名前空間に追加するとしているが、timerとschedule(cron定期実行)は機能的に異なる概念。既存のschedule名前空間はCMATE.mdベースの定期実行用であり、ワンショットタイマーを同じ名前空間に置くと概念の混在が起きる。",
+        "recommendation": "timer専用の名前空間を検討するか、schedule名前空間に追加する合理的理由（ファイル数の抑制等）を明記する"
+      },
+      {
+        "id": "CON-C-002",
+        "category": "既存パターンとの整合性",
+        "title": "MAX_COMMAND_LENGTHの定義場所",
+        "description": "設計書ではメッセージ長制限にMAX_COMMAND_LENGTH=10000を使用すると記載しているが、この定数は現在terminal/route.ts内にローカル定数として定義されている（exportされていない）。timer APIルートでも同じ値を使う場合、共有定数として抽出するか、各ルートでローカル定義するかの方針が未記載。",
+        "recommendation": "共通定数として src/config/ に抽出するか、ローカル定義で問題ないかの方針を明記する"
+      },
+      {
+        "id": "CON-C-003",
+        "category": "セクション間整合性",
+        "title": "TimerPane.tsxのポーリング間隔が未定義",
+        "description": "セクション9-4でTimerPane.tsxの内部状態にtimers(GET APIからポーリング)と記載しているが、ポーリング間隔が未定義。カウントダウンはクライアント側setInterval 1秒だが、タイマー一覧の同期頻度（新規タイマー追加や完了の反映）が不明。",
+        "recommendation": "GET APIのポーリング間隔を定数として定義する（例: 10秒、30秒など）。または楽観的UI更新（POST後即座にローカルstate更新）の方針を明記する"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "medium"
+  },
+  "consistency_matrix": {
+    "design_vs_codebase": {
+      "score": 4,
+      "details": "globalThisパターン、session-cleanup統合、DB操作モジュール配置など主要パターンは既存コードベースと整合している。CLIToolManager APIの呼び出し方法に不一致あり（CON-MF-001）"
+    },
+    "internal_sections": {
+      "score": 4,
+      "details": "データモデル、API、モジュール設計間の整合性は概ね良好。GET/POSTレスポンス構造の微差（CON-SF-002）、cancelTimer境界ケース（CON-SF-004）に軽微な不整合あり"
+    },
+    "design_vs_existing_patterns": {
+      "score": 4,
+      "details": "schedule-manager.ts、auto-yes-config.ts、resource-cleanup.tsの既存パターンを適切に踏襲。resource-cleanup統合の詳細（CON-SF-003）が不足"
+    },
+    "design_vs_server_lifecycle": {
+      "score": 4,
+      "details": "起動順序はserver.tsの実パターンと整合。停止順序の記述にcloseWebSocket位置の微妙なずれあり（CON-SF-001）"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-534-timer-message-design-policy.md",
+    "server.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/schedule-manager.ts",
+    "src/config/auto-yes-config.ts",
+    "src/lib/resource-cleanup.ts",
+    "src/lib/job-executor.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/cli-tools/manager.ts",
+    "src/lib/tmux/tmux.ts",
+    "src/app/api/worktrees/[id]/terminal/route.ts",
+    "src/lib/db/db-migrations.ts",
+    "src/components/worktree/NotesAndLogsPane.tsx"
+  ],
+  "timestamp": "2026-03-24T12:00:00Z"
+}
