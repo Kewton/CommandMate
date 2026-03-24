@@ -15,6 +15,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { isCliToolType } from '@/lib/cli-tools/types';
+import type { CLIToolType } from '@/lib/cli-tools/types';
+import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db-instance';
 import {
@@ -81,6 +83,18 @@ export async function POST(
       return NextResponse.json({ error: 'Max timers reached' }, { status: 400 });
     }
 
+    // [Issue #539] Check if session is running (warning only, do not block registration)
+    let warning: string | undefined;
+    try {
+      const cliTool = CLIToolManager.getInstance().getTool(cliToolId as CLIToolType);
+      const running = await cliTool.isRunning(id);
+      if (!running) {
+        warning = 'session_not_running';
+      }
+    } catch {
+      // Session check failure is non-fatal
+    }
+
     // Create timer in DB
     const timer = createTimer(db, {
       worktreeId: id,
@@ -102,6 +116,7 @@ export async function POST(
       scheduledSendTime: timer.scheduledSendTime,
       status: timer.status,
       createdAt: timer.createdAt,
+      ...(warning ? { warning } : {}),
     }, { status: 201 });
   } catch (error) {
     // [SEC-MF-001] Fixed-string error response
@@ -209,9 +224,9 @@ export async function DELETE(
       return NextResponse.json({ error: 'Invalid timer ID' }, { status: 400 });
     }
 
-    // Check timer exists
+    // Check timer exists and belongs to this worktree [SEC-001]
     const timer = getTimerById(db, timerId);
-    if (!timer) {
+    if (!timer || timer.worktreeId !== id) {
       return NextResponse.json({ error: 'Timer not found' }, { status: 404 });
     }
 

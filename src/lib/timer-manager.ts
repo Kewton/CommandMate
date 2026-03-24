@@ -20,7 +20,7 @@ import { sendKeys } from './tmux/tmux';
 import { CLIToolManager } from './cli-tools/manager';
 import { getDbInstance } from '@/lib/db-instance';
 import { createLogger } from '@/lib/logger';
-import { TIMER_CLEANUP_RETENTION_DAYS } from '@/config/timer-constants';
+import { TIMER_CLEANUP_RETENTION_DAYS, TIMER_STATUS } from '@/config/timer-constants';
 import type { CLIToolType } from './cli-tools/types';
 
 const logger = createLogger('timer-manager');
@@ -78,6 +78,15 @@ async function executeTimer(timerId: string): Promise<void> {
 
     // [DP-004/CON-MF-001] Resolve session name via CLIToolManager singleton
     const cliTool = CLIToolManager.getInstance().getTool(timer.cliToolId as CLIToolType);
+
+    // [Issue #539] Check if session is running before sending
+    const isRunning = await cliTool.isRunning(timer.worktreeId);
+    if (!isRunning) {
+      logger.warn('timer:no-session', { timerId, worktreeId: timer.worktreeId });
+      updateTimerStatus(db, timerId, TIMER_STATUS.NO_SESSION);
+      return;
+    }
+
     const sessionName = cliTool.getSessionName(timer.worktreeId);
 
     updateTimerStatus(db, timerId, 'sending');

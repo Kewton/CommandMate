@@ -72,6 +72,7 @@ function getStatusColor(status: string): string {
     case 'sent': return 'text-green-600 dark:text-green-400';
     case 'failed': return 'text-red-600 dark:text-red-400';
     case 'cancelled': return 'text-gray-500 dark:text-gray-400';
+    case 'no_session': return 'text-orange-600 dark:text-orange-400';
     default: return 'text-gray-600 dark:text-gray-400';
   }
 }
@@ -88,6 +89,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, selectedAgents }:
   const [selectedDelay, setSelectedDelay] = useState(TIMER_DELAYS[0]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+  const [warning, setWarning] = useState<string | null>(null);
   const [, setTick] = useState(0); // Force re-render for countdown
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -188,6 +190,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, selectedAgents }:
   const handleRegister = useCallback(async () => {
     if (!message.trim() || isSubmitting) return;
 
+    setWarning(null);
     setIsSubmitting(true);
     try {
       const res = await fetch(`/api/worktrees/${worktreeId}/timers`, {
@@ -201,6 +204,10 @@ export const TimerPane = memo(function TimerPane({ worktreeId, selectedAgents }:
       });
 
       if (res.ok) {
+        const data = await res.json();
+        if (data.warning === 'session_not_running') {
+          setWarning('session_not_running');
+        }
         setMessage('');
         void fetchTimers();
       }
@@ -308,6 +315,12 @@ export const TimerPane = memo(function TimerPane({ worktreeId, selectedAgents }:
         {pendingCount >= MAX_TIMERS_PER_WORKTREE && (
           <div className="text-xs text-amber-600 dark:text-amber-400">
             {t('timer.maxReached', { max: MAX_TIMERS_PER_WORKTREE })}
+          </div>
+        )}
+
+        {warning === 'session_not_running' && (
+          <div className="text-xs p-2 rounded bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-400">
+            {t('timer.sessionWarning')}
           </div>
         )}
       </div>

@@ -65,8 +65,10 @@
       "sending": "送信中",
       "sent": "送信済み",
       "failed": "失敗",
-      "cancelled": "キャンセル済み"
+      "cancelled": "キャンセル済み",
+      "no_session": "セッション未起動"
     },
+    "sessionWarning": "セッションが起動していません。タイマー実行時にセッションが起動していない場合、メッセージは送信されません。",
     "minutesShort": "{minutes}分",
     "hoursMinutesShort": "{hours}時間{minutes}分",
     "loadMore": "もっと見る",
