@@ -68,6 +68,10 @@
       "cancelled": "Cancelled"
     },
     "minutesShort": "{minutes}m",
-    "hoursMinutesShort": "{hours}h {minutes}m"
+    "hoursMinutesShort": "{hours}h {minutes}m",
+    "loadMore": "Load more",
+    "clearHistory": "Clear history",
+    "clearConfirm": "Delete all sent, failed, and cancelled timer history?",
+    "cleared": "History cleared ({count} items)"
   }
 }

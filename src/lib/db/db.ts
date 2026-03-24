@@ -73,7 +73,7 @@ export {
   reorderMemos,
 } from './memo-db';
 
-// timer-db (Issue #534)
+// timer-db (Issue #534, #540)
 export {
   createTimer,
   getTimersByWorktree,
@@ -83,5 +83,8 @@ export {
   cancelTimer,
   cancelTimersByWorktree,
   getPendingTimerCountByWorktree,
+  cleanupOldTimers,
+  clearTimerHistory,
+  recoverStuckSendingTimers,
 } from './timer-db';
-export type { TimerMessage, CreateTimerParams } from './timer-db';
+export type { TimerMessage, CreateTimerParams, GetTimerOptions } from './timer-db';

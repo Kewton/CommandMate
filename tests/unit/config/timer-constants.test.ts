@@ -14,6 +14,9 @@ import {
   MAX_TIMER_MESSAGE_LENGTH,
   TIMER_STATUS,
   TIMER_LIST_POLL_INTERVAL_MS,
+  DEFAULT_TIMER_HISTORY_LIMIT,
+  MAX_TIMER_QUERY_LIMIT,
+  TIMER_CLEANUP_RETENTION_DAYS,
   isValidTimerDelay,
   type TimerStatus,
 } from '@/config/timer-constants';
@@ -153,6 +156,25 @@ describe('timer-constants', () => {
     it('should accept valid timer status strings', () => {
       const statuses: TimerStatus[] = ['pending', 'sending', 'sent', 'failed', 'cancelled'];
       expect(statuses).toHaveLength(5);
+    });
+  });
+
+  // Issue #540: Timer history limit constants
+  describe('DEFAULT_TIMER_HISTORY_LIMIT', () => {
+    it('should be 50', () => {
+      expect(DEFAULT_TIMER_HISTORY_LIMIT).toBe(50);
+    });
+  });
+
+  describe('MAX_TIMER_QUERY_LIMIT', () => {
+    it('should be 100', () => {
+      expect(MAX_TIMER_QUERY_LIMIT).toBe(100);
+    });
+  });
+
+  describe('TIMER_CLEANUP_RETENTION_DAYS', () => {
+    it('should be 30', () => {
+      expect(TIMER_CLEANUP_RETENTION_DAYS).toBe(30);
     });
   });
 });

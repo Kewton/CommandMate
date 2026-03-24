@@ -36,6 +36,15 @@ export const TIMER_DELAYS: number[] = Array.from(
 /** Maximum number of pending timers per worktree */
 export const MAX_TIMERS_PER_WORKTREE = 5;
 
+/** Default number of timer history items to return (Issue #540) */
+export const DEFAULT_TIMER_HISTORY_LIMIT = 50;
+
+/** Maximum allowed limit for timer queries (DoS protection) (Issue #540) */
+export const MAX_TIMER_QUERY_LIMIT = 100;
+
+/** Number of days to retain non-pending timer records (Issue #540) */
+export const TIMER_CLEANUP_RETENTION_DAYS = 30;
+
 /** Maximum timer message length (DoS protection, same as terminal/route.ts) [CON-C-002] */
 export const MAX_TIMER_MESSAGE_LENGTH = 10000;
 

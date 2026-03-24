@@ -68,6 +68,10 @@
       "cancelled": "キャンセル済み"
     },
     "minutesShort": "{minutes}分",
-    "hoursMinutesShort": "{hours}時間{minutes}分"
+    "hoursMinutesShort": "{hours}時間{minutes}分",
+    "loadMore": "もっと見る",
+    "clearHistory": "履歴クリア",
+    "clearConfirm": "送信済み・失敗・キャンセル済みのタイマー履歴をすべて削除しますか？",
+    "cleared": "履歴を削除しました（{count}件）"
   }
 }

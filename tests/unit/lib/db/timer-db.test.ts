@@ -15,6 +15,9 @@ import {
   cancelTimer,
   cancelTimersByWorktree,
   getPendingTimerCountByWorktree,
+  cleanupOldTimers,
+  clearTimerHistory,
+  recoverStuckSendingTimers,
   type TimerMessage,
   type CreateTimerParams,
 } from '@/lib/db/timer-db';
@@ -262,6 +265,201 @@ describe('timer-db', () => {
 
       const count = getPendingTimerCountByWorktree(db, 'wt-1');
       expect(count).toBe(0);
+    });
+  });
+
+  // ==========================================================================
+  // Issue #540: Pagination and cleanup
+  // ==========================================================================
+
+  describe('getTimersByWorktree with options (Issue #540)', () => {
+    it('should return all timers when called without options (backward compatible)', () => {
+      for (let i = 0; i < 5; i++) {
+        createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: `msg-${i}`, delayMs: 300000 });
+      }
+
+      const timers = getTimersByWorktree(db, 'wt-1');
+      expect(timers).toHaveLength(5);
+    });
+
+    it('should return up to limit+1 items for hasMore detection', () => {
+      for (let i = 0; i < 5; i++) {
+        createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: `msg-${i}`, delayMs: 300000 });
+      }
+
+      // limit=3, DB fetches limit+1=4 for hasMore detection
+      const timers = getTimersByWorktree(db, 'wt-1', { limit: 3 });
+      expect(timers).toHaveLength(4); // limit+1 returned
+    });
+
+    it('should return limit+1 items when more exist (for hasMore detection)', () => {
+      for (let i = 0; i < 5; i++) {
+        createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: `msg-${i}`, delayMs: 300000 });
+      }
+
+      // limit=3, DB fetches limit+1=4, returns all 4 for hasMore detection
+      const timers = getTimersByWorktree(db, 'wt-1', { limit: 3 });
+      // The function returns up to limit+1 for caller to detect hasMore
+      // Based on design: "LIMIT limit+1 for hasMore detection"
+      // The caller (API route) will slice to limit and set hasMore
+      expect(timers.length).toBeLessThanOrEqual(4);
+    });
+
+    it('should filter by before cursor', () => {
+      const t1 = createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: 'first', delayMs: 300000 });
+      // Ensure different created_at by manipulating directly
+      const now = Date.now();
+      db.prepare(`UPDATE timer_messages SET created_at = ? WHERE id = ?`).run(now - 2000, t1.id);
+      const t2 = createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: 'second', delayMs: 300000 });
+      db.prepare(`UPDATE timer_messages SET created_at = ? WHERE id = ?`).run(now - 1000, t2.id);
+      const t3 = createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: 'third', delayMs: 300000 });
+      db.prepare(`UPDATE timer_messages SET created_at = ? WHERE id = ?`).run(now, t3.id);
+
+      // before = now - 500 should return t1 and t2 (created_at < now - 500)
+      const timers = getTimersByWorktree(db, 'wt-1', { before: now - 500 });
+      expect(timers).toHaveLength(2);
+      expect(timers[0].message).toBe('second'); // DESC order
+      expect(timers[1].message).toBe('first');
+    });
+
+    it('should combine before and limit options', () => {
+      const now = Date.now();
+      for (let i = 0; i < 5; i++) {
+        const t = createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: `msg-${i}`, delayMs: 300000 });
+        db.prepare(`UPDATE timer_messages SET created_at = ? WHERE id = ?`).run(now - (5 - i) * 1000, t.id);
+      }
+
+      // before = now, limit = 2 should return at most 3 (limit+1) items
+      const timers = getTimersByWorktree(db, 'wt-1', { before: now, limit: 2 });
+      expect(timers.length).toBeLessThanOrEqual(3);
+    });
+  });
+
+  describe('cleanupOldTimers (Issue #540)', () => {
+    function insertTimerWithAge(worktreeId: string, status: string, daysAgo: number): string {
+      const t = createTimer(db, { worktreeId, cliToolId: 'claude', message: `timer-${daysAgo}d`, delayMs: 300000 });
+      const createdAt = Date.now() - daysAgo * 24 * 60 * 60 * 1000;
+      db.prepare(`UPDATE timer_messages SET status = ?, created_at = ? WHERE id = ?`).run(status, createdAt, t.id);
+      return t.id;
+    }
+
+    it('should delete non-pending timers older than retentionDays', () => {
+      insertTimerWithAge('wt-1', 'sent', 31);
+      insertTimerWithAge('wt-1', 'failed', 35);
+      insertTimerWithAge('wt-1', 'cancelled', 40);
+      insertTimerWithAge('wt-1', 'sent', 10); // recent, should NOT be deleted
+
+      const deleted = cleanupOldTimers(db, 30);
+      expect(deleted).toBe(3);
+
+      const remaining = getTimersByWorktree(db, 'wt-1');
+      expect(remaining).toHaveLength(1);
+      expect(remaining[0].status).toBe('sent');
+    });
+
+    it('should NOT delete pending timers regardless of age', () => {
+      insertTimerWithAge('wt-1', 'pending', 60);
+
+      const deleted = cleanupOldTimers(db, 30);
+      expect(deleted).toBe(0);
+
+      const remaining = getTimersByWorktree(db, 'wt-1');
+      expect(remaining).toHaveLength(1);
+      expect(remaining[0].status).toBe('pending');
+    });
+
+    it('should NOT delete sending timers', () => {
+      insertTimerWithAge('wt-1', 'sending', 60);
+
+      const deleted = cleanupOldTimers(db, 30);
+      expect(deleted).toBe(0);
+    });
+
+    it('should handle boundary: exactly retentionDays old timer should NOT be deleted', () => {
+      // Timer created exactly 30 days ago should not be deleted (< not <=)
+      insertTimerWithAge('wt-1', 'sent', 30);
+
+      const deleted = cleanupOldTimers(db, 30);
+      expect(deleted).toBe(0);
+    });
+
+    it('should return 0 when no timers to clean', () => {
+      const deleted = cleanupOldTimers(db, 30);
+      expect(deleted).toBe(0);
+    });
+  });
+
+  describe('clearTimerHistory (Issue #540)', () => {
+    it('should delete all non-pending timers for a worktree', () => {
+      createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: 'A', delayMs: 300000 });
+      const t2 = createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: 'B', delayMs: 300000 });
+      updateTimerStatus(db, t2.id, 'sent', Date.now());
+      const t3 = createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: 'C', delayMs: 300000 });
+      updateTimerStatus(db, t3.id, 'failed');
+      const t4 = createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: 'D', delayMs: 300000 });
+      cancelTimer(db, t4.id);
+
+      const deleted = clearTimerHistory(db, 'wt-1');
+      expect(deleted).toBe(3); // sent, failed, cancelled
+
+      const remaining = getTimersByWorktree(db, 'wt-1');
+      expect(remaining).toHaveLength(1);
+      expect(remaining[0].status).toBe('pending');
+    });
+
+    it('should NOT affect other worktrees', () => {
+      const t1 = createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: 'A', delayMs: 300000 });
+      updateTimerStatus(db, t1.id, 'sent', Date.now());
+      const t2 = createTimer(db, { worktreeId: 'wt-2', cliToolId: 'claude', message: 'B', delayMs: 300000 });
+      updateTimerStatus(db, t2.id, 'sent', Date.now());
+
+      clearTimerHistory(db, 'wt-1');
+
+      const wt2Timers = getTimersByWorktree(db, 'wt-2');
+      expect(wt2Timers).toHaveLength(1);
+    });
+
+    it('should NOT delete pending timers', () => {
+      createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: 'pending', delayMs: 300000 });
+
+      const deleted = clearTimerHistory(db, 'wt-1');
+      expect(deleted).toBe(0);
+    });
+
+    it('should return 0 when no history to clear', () => {
+      const deleted = clearTimerHistory(db, 'wt-1');
+      expect(deleted).toBe(0);
+    });
+  });
+
+  describe('recoverStuckSendingTimers (Issue #540)', () => {
+    it('should change sending timers to failed', () => {
+      const t1 = createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: 'A', delayMs: 300000 });
+      updateTimerStatus(db, t1.id, 'sending');
+      const t2 = createTimer(db, { worktreeId: 'wt-2', cliToolId: 'claude', message: 'B', delayMs: 300000 });
+      updateTimerStatus(db, t2.id, 'sending');
+
+      const recovered = recoverStuckSendingTimers(db);
+      expect(recovered).toBe(2);
+
+      const timer1 = getTimerById(db, t1.id);
+      expect(timer1!.status).toBe('failed');
+      const timer2 = getTimerById(db, t2.id);
+      expect(timer2!.status).toBe('failed');
+    });
+
+    it('should NOT affect non-sending timers', () => {
+      createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: 'pending', delayMs: 300000 });
+      const t2 = createTimer(db, { worktreeId: 'wt-1', cliToolId: 'claude', message: 'sent', delayMs: 300000 });
+      updateTimerStatus(db, t2.id, 'sent', Date.now());
+
+      const recovered = recoverStuckSendingTimers(db);
+      expect(recovered).toBe(0);
+    });
+
+    it('should return 0 when no stuck timers', () => {
+      const recovered = recoverStuckSendingTimers(db);
+      expect(recovered).toBe(0);
     });
   });
 });

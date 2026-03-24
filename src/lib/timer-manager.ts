@@ -13,11 +13,14 @@ import {
   updateTimerStatus,
   cancelTimer,
   cancelTimersByWorktree,
+  cleanupOldTimers,
+  recoverStuckSendingTimers,
 } from './db/timer-db';
 import { sendKeys } from './tmux/tmux';
 import { CLIToolManager } from './cli-tools/manager';
 import { getDbInstance } from '@/lib/db-instance';
 import { createLogger } from '@/lib/logger';
+import { TIMER_CLEANUP_RETENTION_DAYS } from '@/config/timer-constants';
 import type { CLIToolType } from './cli-tools/types';
 
 const logger = createLogger('timer-manager');
@@ -111,6 +114,17 @@ export function initTimerManager(): void {
   if (state.initialized) return;
 
   const db = getDbInstance();
+
+  // Issue #540: Cleanup old timers and recover stuck sending timers on startup
+  const cleanedUp = cleanupOldTimers(db, TIMER_CLEANUP_RETENTION_DAYS);
+  const recovered = recoverStuckSendingTimers(db);
+  if (cleanedUp > 0) {
+    logger.info('timer-manager:cleanup', { deletedCount: cleanedUp });
+  }
+  if (recovered > 0) {
+    logger.info('timer-manager:recovery', { recoveredCount: recovered });
+  }
+
   const pendingTimers = getPendingTimers(db);
 
   for (const timer of pendingTimers) {
