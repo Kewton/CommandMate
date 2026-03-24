@@ -22,6 +22,8 @@ import {
   TIMER_LIST_POLL_INTERVAL_MS,
 } from '@/config/timer-constants';
 import { formatTimeRemaining } from '@/config/auto-yes-config';
+import type { CLIToolType } from '@/lib/cli-tools/types';
+import { getCliToolDisplayName } from '@/lib/cli-tools/types';
 
 // =============================================================================
 // Types
@@ -29,7 +31,8 @@ import { formatTimeRemaining } from '@/config/auto-yes-config';
 
 interface TimerPaneProps {
   worktreeId: string;
-  cliToolId: string;
+  /** Available agents for selection (from AgentSettingsPane) */
+  selectedAgents: CLIToolType[];
 }
 
 interface TimerItem {
@@ -76,10 +79,11 @@ function getStatusColor(status: string): string {
 // Component
 // =============================================================================
 
-export const TimerPane = memo(function TimerPane({ worktreeId, cliToolId }: TimerPaneProps) {
+export const TimerPane = memo(function TimerPane({ worktreeId, selectedAgents }: TimerPaneProps) {
   const t = useTranslations('schedule');
   const [timers, setTimers] = useState<TimerItem[]>([]);
   const [message, setMessage] = useState('');
+  const [selectedAgent, setSelectedAgent] = useState<CLIToolType>(selectedAgents[0] || 'claude');
   const [selectedDelay, setSelectedDelay] = useState(TIMER_DELAYS[0]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [, setTick] = useState(0); // Force re-render for countdown
@@ -161,7 +165,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, cliToolId }: Time
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          cliToolId,
+          cliToolId: selectedAgent,
           message: message.trim(),
           delayMs: selectedDelay,
         }),
@@ -176,7 +180,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, cliToolId }: Time
     } finally {
       setIsSubmitting(false);
     }
-  }, [worktreeId, cliToolId, message, selectedDelay, isSubmitting, fetchTimers]);
+  }, [worktreeId, selectedAgent, message, selectedDelay, isSubmitting, fetchTimers]);
 
   const handleCancel = useCallback(async (timerId: string) => {
     try {
@@ -209,6 +213,19 @@ export const TimerPane = memo(function TimerPane({ worktreeId, cliToolId }: Time
         <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
           {t('timer.title')}
         </div>
+
+        {/* Agent selector */}
+        <select
+          value={selectedAgent}
+          onChange={(e) => setSelectedAgent(e.target.value as CLIToolType)}
+          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+        >
+          {selectedAgents.map((agent) => (
+            <option key={agent} value={agent}>
+              {getCliToolDisplayName(agent)}
+            </option>
+          ))}
+        </select>
 
         {/* Message input */}
         <textarea
@@ -268,6 +285,9 @@ export const TimerPane = memo(function TimerPane({ worktreeId, cliToolId }: Time
                   {timer.message.length > 60 ? timer.message.slice(0, 60) + '...' : timer.message}
                 </div>
                 <div className="flex items-center gap-2 text-xs">
+                  <span className="text-cyan-600 dark:text-cyan-400 font-medium">
+                    {timer.cliToolId}
+                  </span>
                   <span className={getStatusColor(timer.status)}>
                     {t(`timer.status.${timer.status}`)}
                   </span>

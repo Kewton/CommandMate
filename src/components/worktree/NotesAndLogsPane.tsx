@@ -136,7 +136,7 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
         {activeSubTab === 'timer' && (
           <TimerPane
             worktreeId={worktreeId}
-            cliToolId={selectedAgents[0] || 'claude'}
+            selectedAgents={selectedAgents}
           />
         )}
       </div>
