@@ -153,6 +153,7 @@ tests/
 | `src/lib/db/chat-db.ts` | チャットメッセージCRUD操作、論理削除（archived）・GetMessagesOptions・ACTIVE_FILTER（Issue #479, #168） |
 | `src/lib/db/session-db.ts` | セッション状態管理（Issue #479） |
 | `src/lib/db/memo-db.ts` | メモ管理CRUD（Issue #479） |
+| `src/lib/db/timer-db.ts` | タイマーメッセージCRUD操作（Issue #534） |
 | `src/lib/tmux/tmux.ts` | tmuxセッション管理基盤（execFile使用） |
 | `src/lib/tmux/tmux-capture-cache.ts` | tmux captureキャッシュ（TTL=2秒、singleflight） |
 | `src/lib/session/claude-session.ts` | Claude CLIセッション管理・ヘルスチェック |
@@ -171,6 +172,7 @@ tests/
 | `src/config/auto-yes-config.ts` | Auto-Yes設定定数・バリデーション |
 | `src/config/html-extensions.ts` | HTML拡張子定義・判定関数・SandboxLevel型・SANDBOX_ATTRIBUTES（Issue #490） |
 | `src/config/file-polling-config.ts` | ファイルポーリング定数（FILE_TREE_POLL_INTERVAL_MS, FILE_CONTENT_POLL_INTERVAL_MS）（Issue #469） |
+| `src/config/timer-constants.ts` | タイマー定数定義（TIMER_DELAYS, MAX_TIMERS_PER_WORKTREE, TIMER_STATUS, isValidTimerDelay）（Issue #534） |
 | `src/lib/detection/prompt-key.ts` | promptKey重複排除ユーティリティ |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
 | `src/lib/cli-tools/types.ts` | CLIツール型定義（IImageCapableCLITool/isImageCapableCLITool追加）（Issue #474） |
@@ -180,6 +182,7 @@ tests/
 | `src/lib/cli-tools/opencode-config.ts` | OpenCode設定自動生成（Ollama/LM Studio） |
 | `src/lib/selected-agents-validator.ts` | エージェント選択バリデーション（2-4エージェント） |
 | `src/lib/session/claude-executor.ts` | CLI非インタラクティブ実行エンジン |
+| `src/lib/timer-manager.ts` | タイマーマネージャー（globalThis singleton、setTimeout管理、サーバー再起動リカバリ）（Issue #534） |
 | `src/lib/schedule-manager.ts` | スケジューラーメイン・ジョブ登録管理（Issue #409, Issue #479） |
 | `src/lib/cron-parser.ts` | CMATE.md mtime検出・スケジュール一括更新（Issue #479） |
 | `src/lib/job-executor.ts` | ジョブ実行エンジン・実行ログCRUD（Issue #479） |
@@ -237,6 +240,7 @@ tests/
 | `src/components/worktree/MarkdownToolbar.tsx` | マークダウンエディタツールバーUI（Issue #479） |
 | `src/components/worktree/MarkdownPreview.tsx` | マークダウンプレビュー表示（Issue #479） |
 | `src/components/worktree/GitPane.tsx` | Gitタブ（コミット履歴・diff表示）（Issue #447） |
+| `src/components/worktree/TimerPane.tsx` | タイマーUI（登録・カウントダウン・キャンセル、visibilitychange対応ポーリング）（Issue #534） |
 | `src/hooks/useFilePolling.ts` | ポーリングライフサイクル管理（visibilitychange対応）（Issue #469） |
 | `src/hooks/useFileContentPolling.ts` | ファイル内容ポーリング（If-Modified-Since/304）（Issue #469） |
 | `src/hooks/useFileContentSearch.ts` | ファイル内容検索共通フック（Issue #469） |

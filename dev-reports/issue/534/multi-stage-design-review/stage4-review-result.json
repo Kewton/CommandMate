@@ -1,0 +1,142 @@
+{
+  "issue_number": 534,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "SEC-MF-001",
+        "category": "エラーメッセージ情報漏洩",
+        "title": "executeTimer内のエラーメッセージにtimerIdが含まれる",
+        "description": "設計書セクション3-3のexecuteTimer内で、logger.error('timer:send-failed', { timerId, error: msg }) としているが、この内容がクライアントに漏洩しないことを保証する必要がある。executeTimerはサーバーサイドのsetTimeoutコールバックであるため直接クライアントに返されないが、API route内のcatch句で内部エラー詳細をクライアントに返さないよう、固定文字列レスポンスパターン（terminal/route.tsのD1-007と同様）を明確に設計書に記載すべきである。",
+        "severity": "Medium",
+        "recommendation": "POST/GET/DELETE各APIハンドラのcatch句で、error.messageをクライアントに返さず固定文字列（例: 'Internal server error'）を返す方針を設計書セクション5またはセクション6に明記する。terminal/route.tsの既存パターン（L89-94: 'Failed to send command to terminal'固定文字列）を踏襲する旨を記載すること。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-SF-001",
+        "category": "入力バリデーション",
+        "title": "timerId（DELETE API）のUUID形式バリデーションが設計書に未記載",
+        "description": "設計書セクション6のセキュリティ設計表に「timerId検証: UUID形式チェック」とあるが、具体的な実装方法が未記載。コードベースには既にschedule-config.tsにisValidUuidV4()関数とUUID_V4_PATTERNが存在する。DELETE APIのtimerId検証でこの既存関数を使用する旨を明記すべきである。",
+        "severity": "Medium",
+        "recommendation": "設計書セクション5のDELETE APIバリデーション、またはセクション6のセキュリティ設計表に、timerIdバリデーションとして `isValidUuidV4(timerId)` を使用し、不正な形式の場合は400を返す旨を明記する。既存パターン: execution-logs/[logId]/route.ts（L33）、schedules/[scheduleId]/route.ts（L36）。"
+      },
+      {
+        "id": "SEC-SF-002",
+        "category": "入力バリデーション",
+        "title": "worktreeIdパスパラメータのバリデーションが設計書に未記載",
+        "description": "URLパスパラメータ[id]（worktreeId）について、getWorktreeById()による存在確認は記載されているが、パスパラメータ自体の形式バリデーション（typeof/空文字チェック）が明記されていない。terminal/route.tsでは暗黙的にDB存在確認で処理しているが、明示的なバリデーションを記載することがセキュリティドキュメントとして望ましい。",
+        "severity": "Low",
+        "recommendation": "設計書セクション5のバリデーション表に、worktreeIdパスパラメータのtypeofチェックとgetWorktreeById()による存在確認を明記する。既存のterminal/route.tsパターンと同一で問題ないが、セキュリティ設計書としての明示性を高める。"
+      },
+      {
+        "id": "SEC-SF-003",
+        "category": "DoS防止",
+        "title": "timer-manager DB復元時の過去時刻タイマー即座実行の制御",
+        "description": "設計書セクション8に「過去時刻タイマー即座送信」とあるが、サーバー再起動時にDB上の全pendingタイマーが即座に発火すると、短時間に大量のsendKeysが実行される可能性がある。MAX_TIMERS=5/worktreeの制限はあるが、全worktree分のpendingタイマーが同時発火するケースは考慮が必要。",
+        "severity": "Low",
+        "recommendation": "initTimerManager()のDB復元処理で、過去時刻のタイマーを即座に全件発火するのではなく、数秒間隔でstaggering（段階的実行）する方針の検討を推奨する。ただし、MAX_TIMERS=5/worktreeの制限と、実環境でのworktree数を考慮すると実害は限定的であるため、Considerレベルでもよい。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-C-001",
+        "category": "コマンドインジェクション",
+        "title": "sendKeys経由のコマンドインジェクションリスクは既存対策で軽減済み",
+        "description": "メッセージがsendKeys()経由でtmuxに送信されるが、tmux.tsのsendKeys()はexecFile()を使用しており、shell interpretationを経由しない。設計書のセキュリティ設計ではこの点が明示されていないが、既存実装（tmux.ts L216-217のコメント: 'execFile() passes arguments directly without shell interpretation'）で対策済みである。",
+        "severity": "Info",
+        "recommendation": "設計書セクション6のセキュリティ設計表に、tmux sendKeysがexecFile()を使用しshell injectionリスクがない旨を追記すると、セキュリティレビューの完全性が向上する。"
+      },
+      {
+        "id": "SEC-C-002",
+        "category": "認証・認可",
+        "title": "タイマー登録者とキャンセル操作者の認可チェック",
+        "description": "現在の設計では、同一worktreeにアクセス可能な全ユーザーが任意のtimerIdをキャンセルできる。CommandMateがシングルユーザー前提のツールであるため問題にはならないが、将来マルチユーザー対応する場合は、タイマー登録者のみがキャンセル可能とする認可チェックが必要になる。",
+        "severity": "Info",
+        "recommendation": "現時点では対応不要。将来のマルチユーザー対応時の検討事項として記録する。"
+      },
+      {
+        "id": "SEC-C-003",
+        "category": "リソースリーク",
+        "title": "globalThis Mapの孤立エントリ検出は既存パターンで対策済み",
+        "description": "timer-managerのglobalThis Mapにおける孤立エントリは、resource-cleanup.tsの24h間隔クリーンアップで検出・削除される設計（CON-SF-003）。session-cleanup.tsのworktree削除時クリーンアップ（セクション10）と合わせて二重の対策が設計されている。",
+        "severity": "Info",
+        "recommendation": "現在の設計で十分。追加対策は不要。"
+      },
+      {
+        "id": "SEC-C-004",
+        "category": "入力バリデーション",
+        "title": "message内容のサニタイズ要否",
+        "description": "messageはtmux sendKeysを経由してターミナルに送信されるため、HTMLエスケープやXSS対策は不要（ブラウザDOMに直接挿入されない）。ただし、GET APIレスポンスでmessageがJSON内に返される際、クライアント側でReactのJSXレンダリングを通るため、React側のデフォルトエスケープで保護される。設計書にこの点の明記は必須ではないが、セキュリティ判断の根拠として有用。",
+        "severity": "Info",
+        "recommendation": "対応不要。Reactのデフォルトエスケープとtmux execFileの組み合わせにより、XSSとコマンドインジェクションの両方が防止される。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "owasp_top10_checklist": {
+    "A01_broken_access_control": {
+      "status": "pass",
+      "notes": "既存middleware認証、worktree存在確認（getWorktreeById）、isCliToolType検証で対策済み"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "notes": "タイマー機能では暗号化対象データなし"
+    },
+    "A03_injection": {
+      "status": "pass",
+      "notes": "SQLはプリペアドステートメント（既存パターン）。tmux sendKeysはexecFile使用でshell injection防止済み"
+    },
+    "A04_insecure_design": {
+      "status": "pass_with_notes",
+      "notes": "MAX_TIMERS=5、MAX_COMMAND_LENGTH=10000、delayMsホワイトリスト検証でDoS防止。エラーメッセージ固定文字列化が要明記（SEC-MF-001）"
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass",
+      "notes": "新規設定項目なし。既存の認証・IP制限設定を継承"
+    },
+    "A06_vulnerable_components": {
+      "status": "pass",
+      "notes": "新規外部依存なし。Node.js setTimeout、既存SQLite/tmux基盤を使用"
+    },
+    "A07_authentication_failures": {
+      "status": "pass",
+      "notes": "既存のmiddleware.ts認証を継承。新規認証ロジックなし"
+    },
+    "A08_software_data_integrity": {
+      "status": "pass",
+      "notes": "タイマーステータス遷移が定義済み（pending->sending->sent/failed、pending->cancelled）"
+    },
+    "A09_logging_monitoring": {
+      "status": "pass",
+      "notes": "logger.error/infoによるタイマー操作ログ記録が設計済み"
+    },
+    "A10_ssrf": {
+      "status": "not_applicable",
+      "notes": "タイマー機能は外部HTTP通信なし。tmux直接呼び出しのみ"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-534-timer-message-design-policy.md",
+    "src/app/api/worktrees/[id]/terminal/route.ts",
+    "src/middleware.ts",
+    "src/lib/tmux/tmux.ts",
+    "src/config/schedule-config.ts",
+    "src/app/api/worktrees/[id]/execution-logs/[logId]/route.ts",
+    "src/app/api/worktrees/[id]/schedules/[scheduleId]/route.ts"
+  ],
+  "implementation_checklist": [
+    "[SEC-MF-001] POST/GET/DELETE各APIハンドラのcatch句で固定文字列エラーレスポンスを返す（terminal/route.tsパターン踏襲）",
+    "[SEC-SF-001] DELETE APIでisValidUuidV4(timerId)によるUUID形式バリデーションを実装する",
+    "[SEC-SF-002] worktreeIdパスパラメータのtypeofチェックをバリデーション表に明記する"
+  ],
+  "timestamp": "2026-03-24T12:00:00Z"
+}

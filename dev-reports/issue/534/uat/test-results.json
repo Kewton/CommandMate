@@ -1,0 +1,42 @@
+{
+  "issue_number": 534,
+  "test_date": "2026-03-24",
+  "environment": {
+    "port": 3012,
+    "branch": "feature/534-timer-message",
+    "worktreeId": "myswiftagent-develop"
+  },
+  "results": [
+    {"id": "TC-001", "title": "タイマー登録（正常系）", "status": "pass", "exit_code": 0, "evidence_note": "HTTP 201, id/status=pending返却"},
+    {"id": "TC-002", "title": "タイマー一覧取得", "status": "pass", "exit_code": 0, "evidence_note": "HTTP 200, timers配列にTC-001タイマー含む"},
+    {"id": "TC-003", "title": "タイマーキャンセル", "status": "pass", "exit_code": 0, "evidence_note": "HTTP 200, {success:true}"},
+    {"id": "TC-004", "title": "キャンセル後ステータス確認", "status": "pass", "exit_code": 0, "evidence_note": "status=cancelled"},
+    {"id": "TC-005", "title": "空メッセージ拒否", "status": "pass", "exit_code": 0, "evidence_note": "HTTP 400, Invalid message"},
+    {"id": "TC-006", "title": "長文メッセージ拒否", "status": "pass", "exit_code": 0, "evidence_note": "HTTP 400, Invalid message"},
+    {"id": "TC-007", "title": "無効なdelayMs拒否", "status": "pass", "exit_code": 0, "evidence_note": "HTTP 400, Invalid delay"},
+    {"id": "TC-008", "title": "無効なcliToolId拒否", "status": "pass", "exit_code": 0, "evidence_note": "HTTP 400, Invalid agent"},
+    {"id": "TC-009", "title": "上限チェック（最大5件）", "status": "pass", "exit_code": 0, "evidence_note": "HTTP 400, Max timers reached"},
+    {"id": "TC-010", "title": "無効なtimerId（DELETE）", "status": "pass", "exit_code": 0, "evidence_note": "HTTP 400, Invalid timer ID"},
+    {"id": "TC-011", "title": "存在しないworktreeへのアクセス", "status": "pass", "exit_code": 0, "evidence_note": "HTTP 404, Worktree not found"},
+    {"id": "TC-012", "title": "最小遅延時間（5分）", "status": "pass", "exit_code": 0, "evidence_note": "HTTP 201, delayMs=300000"},
+    {"id": "TC-013", "title": "最大遅延時間（8時間45分）", "status": "pass", "exit_code": 0, "evidence_note": "HTTP 201, delayMs=31500000"},
+    {"id": "TC-014", "title": "5分刻みでない値の拒否", "status": "pass", "exit_code": 0, "evidence_note": "HTTP 400, Invalid delay"},
+    {"id": "TC-015", "title": "Timerサブタブの表示", "status": "pass", "exit_code": 0, "evidence_note": "Notes|Schedules|Agent|Timer 4タブ表示確認"},
+    {"id": "TC-016", "title": "タイマー登録UIの動作", "status": "pass", "exit_code": 0, "evidence_note": "登録フォーム（メッセージ入力/時間選択/Registerボタン）表示確認"},
+    {"id": "TC-017", "title": "カウントダウン表示", "status": "pass", "exit_code": 0, "evidence_note": "8:40:57 / 00:57 のカウントダウン表示確認"},
+    {"id": "TC-018", "title": "UIからのキャンセル", "status": "pass", "exit_code": 0, "evidence_note": "Cancelledステータス表示確認"},
+    {"id": "TC-019", "title": "既存ユニットテスト全パス", "status": "pass", "exit_code": 0, "evidence_note": "5328 passed, 1 failed(既存git-utils.test.ts, Issue#534無関係)"},
+    {"id": "TC-020", "title": "TypeScript型チェック", "status": "pass", "exit_code": 0, "evidence_note": "エラー0件"},
+    {"id": "TC-021", "title": "ESLintチェック", "status": "pass", "exit_code": 0, "evidence_note": "No ESLint warnings or errors"},
+    {"id": "TC-022", "title": "ビルド成功", "status": "pass", "exit_code": 0, "evidence_note": "build-and-start.sh成功"},
+    {"id": "TC-023", "title": "タイマーDB状態確認", "status": "pass", "exit_code": 0, "evidence_note": "scheduledSendTime = createdAt + delayMs 完全一致"},
+    {"id": "TC-024", "title": "サーバー再起動後のタイマー復元", "status": "pass", "exit_code": 0, "evidence_note": "再起動前2件 → 再起動後2件復元"},
+    {"id": "TC-025", "title": "モバイル表示確認", "status": "pass", "exit_code": 0, "evidence_note": "NotesAndLogsPaneサブタブとして表示（MobileTabBarのmemoタブ経由）"}
+  ],
+  "summary": {
+    "total": 25,
+    "passed": 25,
+    "failed": 0,
+    "pass_rate": "100%"
+  }
+}

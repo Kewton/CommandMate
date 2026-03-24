@@ -1,0 +1,306 @@
+{
+  "issue_number": 534,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_date": "2026-03-24",
+  "overall_result": "conditionally_approved",
+  "score": "4/5",
+  "summary": "タイマー機能追加による影響範囲は適切に把握・設計されている。既存パターン（schedule-manager, auto-yes-manager）を踏襲しており、波及効果は制御されている。ただし、いくつかの追加考慮事項がある。",
+  "findings": [
+    {
+      "id": "IMP-MF-001",
+      "severity": "Must Fix",
+      "category": "server.ts停止順序の影響",
+      "title": "stopAllTimers()の挿入位置がstopResourceCleanup()より前であることの競合リスク",
+      "description": "設計書ではstopAllTimers()をstopAllSchedules()とstopResourceCleanup()の間に挿入するが、stopResourceCleanup()内のcleanupOrphanedMapEntries()がtimer-managerのgetTimerWorktreeIds()を呼び出す設計になっている。gracefulShutdown時にstopAllTimers()が先にMap をクリアした後、stopResourceCleanup()の最終サイクル（initResourceCleanup内のsetIntervalが最後に発火する可能性）がgetTimerWorktreeIds()を呼ぶと空Setが返り実害はないが、initResourceCleanup()の初回runCleanupCycle()はvoid呼び出しで非同期実行されるため、タイミングによってはstopAllTimers()実行中にcleanupOrphanedMapEntriesが並行実行される可能性がある。stopAllTimers()内でMap操作のアトミック性を確保する必要がある。",
+      "affected_files": [
+        "server.ts",
+        "src/lib/timer-manager.ts",
+        "src/lib/resource-cleanup.ts"
+      ],
+      "recommendation": "stopAllTimers()はMap.clear()を同期的に実行し、個々のclearTimeout()はその後に行う設計とする。resource-cleanup側のgetTimerWorktreeIds()呼び出しが空Setを返しても安全であることを設計書に明記する。"
+    },
+    {
+      "id": "IMP-SF-001",
+      "severity": "Should Fix",
+      "category": "session-cleanup.ts変更の影響",
+      "title": "cleanupWorktreeSessions()へのstopTimersForWorktree追加による既存テストへの影響",
+      "description": "session-cleanup.tsのcleanupWorktreeSessions()にstopTimersForWorktree()呼び出しを追加すると、既存テストファイル tests/unit/session-cleanup.test.ts および tests/unit/session-cleanup-issue404.test.ts のモック設定に影響する。timer-managerのモックが不足するとimportエラーまたは未定義関数呼び出しが発生する。設計書にはテスト修正の影響範囲が明記されていない。",
+      "affected_files": [
+        "src/lib/session-cleanup.ts",
+        "tests/unit/session-cleanup.test.ts",
+        "tests/unit/session-cleanup-issue404.test.ts"
+      ],
+      "recommendation": "設計書に既存テストファイルの修正要件を明記する。具体的には、両テストファイルにvi.mock('@/lib/timer-manager')のモック定義を追加する必要がある。"
+    },
+    {
+      "id": "IMP-SF-002",
+      "severity": "Should Fix",
+      "category": "resource-cleanup.ts変更の影響",
+      "title": "CleanupMapResult型拡張による既存テストへの影響",
+      "description": "CleanupMapResult型にdeletedTimerWorktreeIds: string[]を追加すると、tests/unit/resource-cleanup.test.tsでCleanupMapResultを検証している既存テストケースが失敗する可能性がある。既存テストではresultオブジェクトに3つのプロパティのみを期待しているため、新プロパティの追加に伴いアサーションの更新が必要。",
+      "affected_files": [
+        "src/lib/resource-cleanup.ts",
+        "tests/unit/resource-cleanup.test.ts"
+      ],
+      "recommendation": "設計書にresource-cleanup.test.tsの修正要件を追記する。timer-managerのモック追加（getTimerWorktreeIds, stopTimersForWorktree）と、CleanupMapResult検証のアサーション更新が必要。"
+    },
+    {
+      "id": "IMP-SF-003",
+      "severity": "Should Fix",
+      "category": "NotesAndLogsPane UI影響",
+      "title": "4タブ化によるタブ幅・レスポンシブ対応の影響範囲",
+      "description": "NotesAndLogsPaneの現在の3タブ（notes, logs, agent）に'timer'タブを追加して4タブ化する。各タブはflex-1クラスで均等幅だが、4等分になるとモバイルでのタップ領域が狭くなる。現在のタブボタンはpx-3 py-2 text-smで、4等分時の最小幅が確保されているか検証が必要。また、SUB_TABS定数配列とSubTab型に'timer'を追加する必要があり、SubTabを参照しているhandleSubTabChange等にも型レベルの影響がある。",
+      "affected_files": [
+        "src/components/worktree/NotesAndLogsPane.tsx",
+        "tests/unit/components/worktree/NotesAndLogsPane.test.tsx"
+      ],
+      "recommendation": "設計書にタブ追加時のレスポンシブ検証要件を追記する。特にモバイルビュー（幅320px以下）での4タブ表示のユーザビリティテストを推奨。既存テストファイルNotesAndLogsPane.test.tsxの修正も必要。"
+    },
+    {
+      "id": "IMP-SF-004",
+      "severity": "Should Fix",
+      "category": "DBマイグレーション影響",
+      "title": "v23マイグレーション追加によるCURRENT_SCHEMA_VERSIONの更新影響",
+      "description": "現在のCURRENT_SCHEMA_VERSIONは22（db-migrations.ts L14）。v23マイグレーションを追加するにはCURRENT_SCHEMA_VERSIONを23に更新し、migrations配列にv23エントリを追加する必要がある。既存のDB環境ではマイグレーションが自動実行されるため後方互換性は保たれるが、マイグレーション失敗時のロールバック（down関数）の設計が設計書に記載されていない。",
+      "affected_files": [
+        "src/lib/db/db-migrations.ts"
+      ],
+      "recommendation": "設計書にv23マイグレーションのdown関数（DROP TABLE IF EXISTS timer_messages; DROP INDEX IF EXISTS ...）を明記する。また、FOREIGN KEY制約（ON DELETE CASCADE）がworktrees削除時にtimer_messagesも自動削除されることを設計書に明記する。"
+    },
+    {
+      "id": "IMP-C-001",
+      "severity": "Consider",
+      "category": "i18nファイル影響",
+      "title": "schedule.json拡張による他言語ファイルとの同期",
+      "description": "schedule.jsonに'timerTab'および'timer.*'キーを追加する。locales/en/schedule.jsonとlocales/ja/schedule.jsonの両方に追加が必要。設計書ではen側のキーのみ定義されており、ja側の翻訳が未定義。",
+      "affected_files": [
+        "locales/en/schedule.json",
+        "locales/ja/schedule.json"
+      ],
+      "recommendation": "設計書にja側のi18n翻訳テキストも併記する。"
+    },
+    {
+      "id": "IMP-C-002",
+      "severity": "Consider",
+      "category": "パフォーマンス影響",
+      "title": "TimerPane 10秒ポーリングによるAPI負荷",
+      "description": "TimerPaneで10秒間隔のGETポーリングを実施する設計だが、タイマータブが非表示（別タブ選択時）でもポーリングが継続するかどうかが不明。NotesAndLogsPaneは条件付きレンダリング（activeSubTab === 'timer'の時のみ）を使用しているため、非表示時はTimerPaneがアンマウントされポーリングは停止するが、タブ切替のたびにマウント/アンマウントが繰り返されるためuseEffect内のクリーンアップが正しく動作することが前提。",
+      "affected_files": [
+        "src/components/worktree/TimerPane.tsx",
+        "src/components/worktree/NotesAndLogsPane.tsx"
+      ],
+      "recommendation": "設計書にTimerPaneのポーリングライフサイクル（マウント時開始、アンマウント時クリーンアップ）を明記する。visibilitychange対応（ブラウザタブ非アクティブ時の停止）はuseFilePollingフックのパターンを参考にすると良い。"
+    },
+    {
+      "id": "IMP-C-003",
+      "severity": "Consider",
+      "category": "パフォーマンス影響",
+      "title": "setTimeoutの最大遅延値に関するNode.js制約",
+      "description": "Node.jsのsetTimeoutは最大約24.8日（2^31-1ミリ秒 = 2147483647ms）まで対応しており、設計書のMAX_DELAY_MS=31500000（約8.75時間）は十分に範囲内である。ただし、サーバー再起動後のDB復元処理で、scheduled_send_timeが過去になっているタイマーを即座送信する設計は明記されているが、MAX_TIMERS_PER_WORKTREE=5の上限チェックが復元時にも適用されるかが不明確。復元時は既にDBにpendingとして存在するため上限チェックは不要だが、新規登録APIとの整合性を明確にすべき。",
+      "affected_files": [
+        "src/lib/timer-manager.ts"
+      ],
+      "recommendation": "initTimerManager()のDB復元処理では上限チェックを行わない（既存のpendingレコードを全て復元する）ことを設計書に明記する。"
+    },
+    {
+      "id": "IMP-C-004",
+      "severity": "Consider",
+      "category": "MobileTabBar影響",
+      "title": "MobileTabBarにTimerタブを追加しない設計判断の影響",
+      "description": "設計書では「MobileTabBar非追加」を決定事項として記載しており、モバイルからはmemoタブ経由（NotesAndLogsPane内のtimerサブタブ）でアクセスする。MobileTabBar.tsxのMobileTab型は変更不要で影響なし。ただし、MobileTabBarの'memo'タブから遷移した場合にNotesAndLogsPaneのデフォルトサブタブが'notes'であるため、ユーザーがTimerにたどり着くまでに2タップ必要になる点は認識しておくべき。",
+      "affected_files": [
+        "src/components/mobile/MobileTabBar.tsx"
+      ],
+      "recommendation": "影響なし。現状の設計判断は妥当。将来的にTimerの利用頻度が高い場合は再検討。"
+    }
+  ],
+  "impact_matrix": {
+    "new_files": [
+      {
+        "path": "src/config/timer-constants.ts",
+        "impact": "低: 新規作成。他モジュールへの影響なし"
+      },
+      {
+        "path": "src/lib/db/timer-db.ts",
+        "impact": "低: 新規作成。db-migrations.tsからのスキーマ追加のみ"
+      },
+      {
+        "path": "src/lib/timer-manager.ts",
+        "impact": "中: 新規作成だがserver.ts, session-cleanup.ts, resource-cleanup.tsから参照される"
+      },
+      {
+        "path": "src/app/api/worktrees/[id]/timers/route.ts",
+        "impact": "低: 新規APIルート。既存ルートへの影響なし"
+      },
+      {
+        "path": "src/components/worktree/TimerPane.tsx",
+        "impact": "低: 新規コンポーネント。NotesAndLogsPaneからのみ参照"
+      }
+    ],
+    "modified_files": [
+      {
+        "path": "server.ts",
+        "impact": "中: import追加、initTimerManager()呼び出し追加（L278-281間）、gracefulShutdown内にstopAllTimers()追加（L303-306間）",
+        "lines_affected": "約4行追加"
+      },
+      {
+        "path": "src/lib/session-cleanup.ts",
+        "impact": "中: import追加、cleanupWorktreeSessions()内にstopTimersForWorktree()呼び出し追加（L137-144間）",
+        "lines_affected": "約8行追加"
+      },
+      {
+        "path": "src/lib/resource-cleanup.ts",
+        "impact": "中: import追加、CleanupMapResult型拡張、cleanupOrphanedMapEntries()内にtimer孤立検出ロジック追加",
+        "lines_affected": "約15行追加"
+      },
+      {
+        "path": "src/lib/db/db-migrations.ts",
+        "impact": "中: CURRENT_SCHEMA_VERSION 22→23、v23マイグレーション追加（CREATE TABLE, CREATE INDEX x2）",
+        "lines_affected": "約20行追加"
+      },
+      {
+        "path": "src/components/worktree/NotesAndLogsPane.tsx",
+        "impact": "中: SubTab型拡張、SUB_TABS配列追加、TimerPaneのimportとレンダリング追加",
+        "lines_affected": "約10行追加"
+      },
+      {
+        "path": "locales/en/schedule.json",
+        "impact": "低: timerTab, timer.*キー追加",
+        "lines_affected": "約15行追加"
+      },
+      {
+        "path": "locales/ja/schedule.json",
+        "impact": "低: timerTab, timer.*キー追加",
+        "lines_affected": "約15行追加"
+      }
+    ],
+    "test_files_affected": [
+      {
+        "path": "tests/unit/session-cleanup.test.ts",
+        "impact": "timer-managerモック追加が必要",
+        "action": "vi.mock追加 + 既存テストケースの検証更新"
+      },
+      {
+        "path": "tests/unit/session-cleanup-issue404.test.ts",
+        "impact": "timer-managerモック追加が必要",
+        "action": "vi.mock追加"
+      },
+      {
+        "path": "tests/unit/resource-cleanup.test.ts",
+        "impact": "timer-managerモック追加 + CleanupMapResult検証更新",
+        "action": "vi.mock追加 + アサーション更新"
+      },
+      {
+        "path": "tests/unit/components/worktree/NotesAndLogsPane.test.tsx",
+        "impact": "Timerタブの存在確認テスト追加",
+        "action": "新タブのレンダリングテスト追加"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "overall_risk": "Medium-Low",
+    "risk_factors": [
+      {
+        "factor": "既存テスト破損",
+        "risk_level": "Medium",
+        "mitigation": "session-cleanup, resource-cleanup, NotesAndLogsPaneの3テストファイルにモック追加が必要。設計書に明記すべき。"
+      },
+      {
+        "factor": "DBマイグレーション失敗",
+        "risk_level": "Low",
+        "mitigation": "FOREIGN KEY ON DELETE CASCADEとINDEX作成のみ。既存データへの影響なし。down関数でロールバック可能。"
+      },
+      {
+        "factor": "server.tsライフサイクル競合",
+        "risk_level": "Medium",
+        "mitigation": "stopAllTimers()とresource-cleanupの非同期実行のタイミング競合。Map操作の同期的実行で回避可能。"
+      },
+      {
+        "factor": "UIレグレッション",
+        "risk_level": "Low",
+        "mitigation": "NotesAndLogsPaneの4タブ化はflex-1均等幅。モバイルでの表示確認が必要。"
+      },
+      {
+        "factor": "メモリリーク",
+        "risk_level": "Low",
+        "mitigation": "globalThis Mapの孤立エントリはresource-cleanup.tsで24h間隔で検出・削除。MAX_TIMERS=5で上限あり。"
+      }
+    ]
+  },
+  "checklist": [
+    {
+      "item": "server.ts: initTimerManager()の起動順序（initScheduleManager後、initResourceCleanup前）",
+      "status": "approved",
+      "note": "既存パターンと整合"
+    },
+    {
+      "item": "server.ts: stopAllTimers()の停止順序（stopAllSchedules後、stopResourceCleanup前）",
+      "status": "approved_with_condition",
+      "note": "IMP-MF-001: resource-cleanupとの競合リスクを考慮したアトミック性確保が必要"
+    },
+    {
+      "item": "session-cleanup.ts: stopTimersForWorktree()の追加位置（stopScheduleForWorktree後）",
+      "status": "approved",
+      "note": "既存Facadeパターンに準拠"
+    },
+    {
+      "item": "resource-cleanup.ts: CleanupMapResult型拡張とcleanupOrphanedMapEntries()統合",
+      "status": "approved",
+      "note": "既存のschedule-manager孤立検出パターンと完全一致"
+    },
+    {
+      "item": "db-migrations.ts: v23マイグレーション（CREATE TABLE timer_messages + INDEX x2）",
+      "status": "approved_with_condition",
+      "note": "IMP-SF-004: down関数の追記を推奨"
+    },
+    {
+      "item": "NotesAndLogsPane.tsx: 4タブ化（timer追加）",
+      "status": "approved_with_condition",
+      "note": "IMP-SF-003: モバイルレスポンシブ確認が必要"
+    },
+    {
+      "item": "i18n: schedule.jsonへのtimer.*キー追加",
+      "status": "approved",
+      "note": "既存名前空間への追加で影響最小"
+    },
+    {
+      "item": "既存テストファイルへの影響",
+      "status": "needs_attention",
+      "note": "IMP-SF-001, IMP-SF-002: 3テストファイルのモック更新が設計書に未記載"
+    },
+    {
+      "item": "setTimeout/setInterval パフォーマンス影響",
+      "status": "approved",
+      "note": "MAX_TIMERS=5/worktreeで十分に制限。Node.jsのsetTimeout上限にも余裕あり"
+    },
+    {
+      "item": "TimerPaneポーリング（10秒間隔）のパフォーマンス影響",
+      "status": "approved",
+      "note": "アンマウント時にクリーンアップされる前提。visibilitychange対応は任意"
+    }
+  ],
+  "implementation_checklist_additions": [
+    {
+      "id": "IMP-MF-001",
+      "description": "src/lib/timer-manager.ts: stopAllTimers()内のMap.clear()を同期的に先行実行し、resource-cleanup並行実行時の安全性を確保する"
+    },
+    {
+      "id": "IMP-SF-001",
+      "description": "tests/unit/session-cleanup.test.ts, tests/unit/session-cleanup-issue404.test.ts: vi.mock('@/lib/timer-manager')を追加する"
+    },
+    {
+      "id": "IMP-SF-002",
+      "description": "tests/unit/resource-cleanup.test.ts: timer-managerモック追加とCleanupMapResult検証にdeletedTimerWorktreeIdsを追加する"
+    },
+    {
+      "id": "IMP-SF-003",
+      "description": "モバイル（320px幅）での4タブ表示のユーザビリティを実装時に確認する"
+    },
+    {
+      "id": "IMP-SF-004",
+      "description": "src/lib/db/db-migrations.ts: v23マイグレーションのdown関数（DROP TABLE, DROP INDEX）を実装する"
+    }
+  ]
+}

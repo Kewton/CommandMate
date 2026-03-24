@@ -1,0 +1,244 @@
+{
+  "issue_number": 534,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "review_date": "2026-03-24",
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "server.tsの初期化・シャットダウン処理にtimer-managerの統合が必要だが、変更対象ファイルに記載がない",
+        "location": "## 影響範囲 > 変更対象ファイル",
+        "recommendation": "server.tsを変更対象ファイルに追加すべき。具体的には: (1) サーバー起動時のinitTimerManager()呼び出し（initScheduleManager()の直後、L278付近）、(2) gracefulShutdown()内でのstopAllTimers()呼び出し（stopAllSchedules()の直後、L303付近）。schedule-managerと同じライフサイクルパターンに従う必要がある。",
+        "evidence": "server.ts L44: import { initScheduleManager, stopAllSchedules } from './src/lib/schedule-manager'; / L278: initScheduleManager(); / L303: stopAllSchedules(); -- timer-managerも同じパターンでinit/stopを統合しなければ、サーバー起動時にDBからの未送信タイマー復元が行われず、シャットダウン時にsetTimeoutが残留する。"
+      },
+      {
+        "id": "MF-2",
+        "category": "影響ファイル",
+        "issue": "resource-cleanup.tsのcleanupOrphanedMapEntries()にtimer-managerのorphanedエントリ検出処理の追加が必要だが、変更対象ファイルに記載がない",
+        "location": "## 影響範囲 > 変更対象ファイル",
+        "recommendation": "resource-cleanup.tsを変更対象ファイルに追加すべき。cleanupOrphanedMapEntries()はauto-yes-stateとschedule-managerのorphanedエントリを検出・削除しており、timer-managerのglobalThis Mapについても同様の孤立エントリ検出が必要。CleanupMapResult型にdeletedTimerWorktreeIdsフィールドの追加も必要。",
+        "evidence": "resource-cleanup.ts L217-280: cleanupOrphanedMapEntries()がautoYesStates, autoYesPollerStates, scheduleManagerのMapを検証し、DBに存在しないworktreeIdのエントリを削除している。timer-managerのglobalThis Mapも同じパターンで孤立検出が必要。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト範囲",
+        "issue": "テスト対象の具体的なファイル・シナリオが未特定",
+        "location": "## 実装タスク > ユニットテスト",
+        "recommendation": "以下のテストファイルを明記すべき: (1) tests/unit/lib/timer-manager.test.ts -- setTimeout登録/キャンセル/復元/globalThisパターン、(2) tests/unit/lib/db/timer-db.test.ts -- CRUD操作、(3) tests/unit/config/timer-constants.test.ts -- 定数バリデーション、(4) tests/unit/lib/session-cleanup.test.ts -- 既存テストにtimer-manager停止の検証を追加、(5) tests/unit/lib/resource-cleanup.test.ts -- 既存テストにtimer-managerのorphaned検出を追加。特にsession-cleanup.test.tsとresource-cleanup.test.tsは既存テストへの追加であり、既存テストの破壊がないことの確認が必要。",
+        "evidence": "tests/unit/lib/schedule-manager.test.ts（135行目にinitScheduleManagerテスト）やtests/unit/lib/session-cleanup.test.tsが存在し、同じパターンでtimer-managerのテストが必要。実装タスクに「ユニットテスト」とだけ記載されており、具体的なテストシナリオ・ファイルが不明。"
+      },
+      {
+        "id": "SF-2",
+        "category": "依存関係",
+        "issue": "timer-managerからTerminal APIへの依存方法が未明確で、循環依存のリスクがある",
+        "location": "## 提案する解決策 > バックエンド",
+        "recommendation": "timer-managerがメッセージ送信時に既存Terminal API（POST /api/worktrees/[id]/terminal）を「再利用」する方法を明確にすべき。(a) HTTP経由でlocalhostのAPIを呼ぶ方式か、(b) Terminal APIの内部ロジック（tmux sendKeys）を直接呼ぶ方式かで、依存関係と実装の複雑さが大きく異なる。schedule-managerのjob-executor.tsはclaude-executor.ts経由でexecFileを使う方式であり、timer-managerも同様にtmux sendKeysを直接呼ぶ方が依存が明確になる。",
+        "evidence": "src/app/api/worktrees/[id]/terminal/route.ts内のPOSTハンドラはNextRequest/NextResponseを使うAPI Routeであり、サーバー内部から直接呼ぶのは不自然。schedule-managerのjob-executor.tsはsrc/lib/session/claude-executor.tsのexecuteNonInteractive()を使用しており、timer-managerも内部モジュールを直接呼ぶパターンが適切。"
+      },
+      {
+        "id": "SF-3",
+        "category": "ドキュメント更新",
+        "issue": "CLAUDE.mdのモジュール一覧・影響範囲への追記が必要だが記載がない",
+        "location": "## 影響範囲",
+        "recommendation": "CLAUDE.mdの「主要モジュール一覧」にtimer-manager.ts, timer-db.ts, timer-constants.ts, TimerPane.tsxを追加すべき。また「CLIコマンド」セクションにtimer関連のCLIコマンド追加予定がないことも確認しておくとよい（本Issueのスコープ外であることの明示）。",
+        "evidence": "CLAUDE.mdに全主要モジュールが列挙されており（schedule-manager.ts, auto-yes-manager.ts等）、新規モジュール追加時はここへの反映が必要。未反映の場合、Claude Codeがコードベース理解時に新モジュールを認識できない。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "破壊的変更",
+        "issue": "NotesAndLogsPaneのSubTab型拡張が型安全性に影響する可能性",
+        "location": "## 影響範囲 > 関連コンポーネント",
+        "recommendation": "SubTab型に'timer'を追加する際、WorktreeDetailSubComponents.tsxでNotesAndLogsPaneを使用している箇所で型エラーが発生しないことを確認すべき。SubTab型はNotesAndLogsPane内部で閉じているため外部への型の破壊的変更はないが、SUB_TABSの要素増加によるタブ幅のUI確認（特に4タブになった場合の小画面での表示）は必要。",
+        "evidence": "NotesAndLogsPane.tsx L25: type SubTab = 'notes' | 'logs' | 'agent'; -- 内部型で外部exportはないため型の破壊的変更リスクは低い。ただしSUB_TABS配列が3->4要素に増えることでflex-1のタブ幅が25%になり、狭い画面でテキストが収まるかの確認が必要。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "移行考慮",
+        "issue": "DBマイグレーションv23でのロールバック方針が未記載",
+        "location": "## 実装タスク > DBマイグレーション",
+        "recommendation": "db-migrations.tsのMigration型はdown関数（ロールバック）をオプションで定義可能。timer_messagesテーブルのDROP TABLE文をdown関数に含めておくと、v23適用後に問題が発生した場合のロールバックが容易になる。",
+        "evidence": "db-migrations.ts L19-31: Migration型にdown?フィールドがあり、version 1のmigrationではDROP TABLE文が定義されている。v23のtimer_messagesテーブルにもdown関数を用意するのが望ましい。"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "directly_modified_files": [
+      {
+        "file": "src/components/worktree/NotesAndLogsPane.tsx",
+        "change": "SubTab型に'timer'追加、SUB_TABS配列にTimerタブ追加、TimerPaneのimportとレンダリング追加",
+        "risk": "low",
+        "reason": "SubTab型は内部型で外部依存なし。SUB_TABS配列の拡張は既存パターンの踏襲。"
+      },
+      {
+        "file": "src/lib/db/db-migrations.ts",
+        "change": "CURRENT_SCHEMA_VERSION=23、timer_messagesテーブルのCREATE TABLEマイグレーション追加",
+        "risk": "medium",
+        "reason": "スキーマバージョン変更は不可逆。マイグレーションのSQLにバグがあるとDB全体に影響。"
+      },
+      {
+        "file": "src/lib/db/db.ts",
+        "change": "timer-db.tsのエクスポート追加",
+        "risk": "low",
+        "reason": "バレルファイルへのexport追加のみ。既存エクスポートに影響なし。"
+      },
+      {
+        "file": "src/lib/session-cleanup.ts",
+        "change": "cleanupWorktreeSessions()にtimer-manager停止ステップ追加",
+        "risk": "medium",
+        "reason": "既存のクリーンアップフローに新しいステップを追加。エラーハンドリングパターンは既存と同一だが、import追加とpollersStopped/pollerErrors配列への影響がテストに波及。"
+      },
+      {
+        "file": "server.ts",
+        "change": "initTimerManager()/stopAllTimers()のimportと呼び出し追加（Issue未記載）",
+        "risk": "medium",
+        "reason": "サーバーの起動・停止ライフサイクルに直接影響。呼び出し順序を誤るとDB未初期化状態でのアクセスやタイマー残留が発生。"
+      },
+      {
+        "file": "src/lib/resource-cleanup.ts",
+        "change": "cleanupOrphanedMapEntries()にtimer-managerの孤立エントリ検出追加（Issue未記載）",
+        "risk": "low",
+        "reason": "既存パターンの踏襲。CleanupMapResult型への新フィールド追加が必要だがオプショナルにすれば後方互換。"
+      }
+    ],
+    "new_files": [
+      {
+        "file": "src/components/worktree/TimerPane.tsx",
+        "dependencies": ["timer-constants.ts", "Timer CRUD API", "cli-tools/types"],
+        "risk": "low"
+      },
+      {
+        "file": "src/lib/timer-manager.ts",
+        "dependencies": ["timer-db.ts", "db-instance.ts", "tmux/tmux.ts or session-key-sender.ts", "cli-tools/manager.ts"],
+        "risk": "high",
+        "reason": "globalThisパターン、setTimeout管理、DB復元、エラーハンドリングが複合的に絡む。循環依存・メモリリークのリスクあり。"
+      },
+      {
+        "file": "src/config/timer-constants.ts",
+        "dependencies": [],
+        "risk": "low"
+      },
+      {
+        "file": "src/lib/db/timer-db.ts",
+        "dependencies": ["better-sqlite3"],
+        "risk": "low"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/timers/route.ts",
+        "dependencies": ["timer-db.ts", "timer-manager.ts", "timer-constants.ts", "db-instance.ts", "cli-tools/types"],
+        "risk": "medium",
+        "reason": "認証・バリデーション・エラーハンドリングが必要。既存terminal/route.tsのパターンを踏襲すべき。"
+      }
+    ],
+    "indirectly_affected_files": [
+      {
+        "file": "src/components/worktree/WorktreeDetailSubComponents.tsx",
+        "impact": "NotesAndLogsPaneをimportしている。propsの変更はないため直接的な変更は不要だが、4タブ化によるUI変更の影響を受ける。",
+        "change_required": false
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "impact": "NotesAndLogsPaneの親コンポーネント。NotesAndLogsPaneのpropsに変更がなければ修正不要。",
+        "change_required": false
+      },
+      {
+        "file": "locales/en/schedule.json",
+        "impact": "Timerタブのラベル・フォーム要素の翻訳キー追加が必要。",
+        "change_required": true
+      },
+      {
+        "file": "locales/ja/schedule.json",
+        "impact": "同上。日本語翻訳の追加が必要。",
+        "change_required": true
+      },
+      {
+        "file": "src/components/mobile/MobileTabBar.tsx",
+        "impact": "直接変更なし。TimerはNotesAndLogsPane内のサブタブとしてmemoタブ経由でアクセス。MobileTab型の変更不要。",
+        "change_required": false
+      },
+      {
+        "file": "tests/unit/lib/session-cleanup.test.ts",
+        "impact": "cleanupWorktreeSessions()の動作にtimer-manager停止が追加されるため、既存テストのアサーションに影響する可能性。pollersStopped配列の要素数が変わる。",
+        "change_required": true
+      },
+      {
+        "file": "tests/unit/lib/resource-cleanup.test.ts",
+        "impact": "cleanupOrphanedMapEntries()の戻り値型が変わるため、既存テストのアサーションに影響する可能性。",
+        "change_required": true
+      }
+    ],
+    "performance_impact": {
+      "server_memory": "timer-managerのglobalThis Map: worktree単位で最大5エントリ x worktree数。schedule-managerと同等のメモリ使用量。MAX_TIMERS=5の上限があるため問題なし。",
+      "settimeout_count": "worktree単位で最大5つのsetTimeout。全worktree合計でも数十〜百程度。Node.jsのTimer上限に対して十分小さい。",
+      "db_queries": "タイマー登録/取得/削除でDB I/Oが発生。better-sqlite3の同期APIを使用すれば既存パターンと整合。",
+      "ui_polling": "カウントダウン表示のためにクライアント側でsetInterval(1秒間隔)が必要。タブが非アクティブの場合のvisibilitychange対応を検討すべき。"
+    }
+  },
+  "code_references": [
+    {
+      "file": "server.ts",
+      "relevance": "サーバー初期化(L278 initScheduleManager)・シャットダウン(L303 stopAllSchedules)にtimer-managerの統合が必要"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "relevance": "cleanupWorktreeSessions()にtimer-manager停止処理を追加する対象（L74-147）"
+    },
+    {
+      "file": "src/lib/resource-cleanup.ts",
+      "relevance": "cleanupOrphanedMapEntries()にtimer-managerの孤立エントリ検出を追加する対象（L217-280）"
+    },
+    {
+      "file": "src/lib/schedule-manager.ts",
+      "relevance": "globalThisパターン・initライフサイクル・stopForWorktreeの参考実装"
+    },
+    {
+      "file": "src/components/worktree/NotesAndLogsPane.tsx",
+      "relevance": "SubTab型とSUB_TABS配列の拡張対象"
+    },
+    {
+      "file": "src/lib/db/db-migrations.ts",
+      "relevance": "CURRENT_SCHEMA_VERSION=22。v23マイグレーション追加対象"
+    },
+    {
+      "file": "src/lib/db/db.ts",
+      "relevance": "バレルエクスポートにtimer-db.tsの関数追加が必要"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/terminal/route.ts",
+      "relevance": "メッセージ送信の参考実装（MAX_COMMAND_LENGTH, sendKeys使用パターン）"
+    },
+    {
+      "file": "src/config/auto-yes-config.ts",
+      "relevance": "formatTimeRemaining()をtimer-managerのカウントダウン表示で再利用可能"
+    },
+    {
+      "file": "locales/en/schedule.json",
+      "relevance": "Timerタブの翻訳キー追加先"
+    },
+    {
+      "file": "locales/ja/schedule.json",
+      "relevance": "Timerタブの翻訳キー追加先（日本語）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "主要モジュール一覧にtimer-manager.ts等の追記が必要"
+    },
+    {
+      "file": "docs/module-reference.md",
+      "relevance": "モジュールリファレンスに新規モジュールの追記が必要"
+    }
+  ]
+}

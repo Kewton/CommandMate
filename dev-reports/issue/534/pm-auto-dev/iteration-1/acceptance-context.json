@@ -1,0 +1,35 @@
+{
+  "issue_number": 534,
+  "feature_summary": "指定時間後メッセージ送信（CMATEタブにTimerサブタブ追加）",
+  "acceptance_criteria": [
+    "CMATEタブ内にTimerサブタブが表示される",
+    "エージェント選択 + メッセージ入力 + 時間選択でタイマーを登録できる",
+    "5分後〜8時間45分後まで5分単位で指定可能（300000ms〜31500000ms）",
+    "worktree単位で最大5つまで登録可能",
+    "カウントダウンがリアルタイムで表示される",
+    "タイマーをキャンセルできる",
+    "指定時間後にメッセージが自動送信される",
+    "送信失敗時はDBのstatusがfailedに更新される",
+    "サーバー再起動後も未送信タイマーが復元される",
+    "worktree削除時にタイマーが適切にキャンセルされる",
+    "timer-managerはglobalThisパターンでHot Reload耐性がある",
+    "バリデーション（空メッセージ拒否、最大長10000文字、エージェント必須）が動作する",
+    "server.tsのライフサイクル統合（init/stop）が動作する",
+    "resource-cleanup.tsで孤立エントリが検出される",
+    "既存テストが全パスする",
+    "モバイルでもmemoタブ経由でTimerサブタブにアクセスできる"
+  ],
+  "test_scenarios": [
+    "タイマー登録: エージェント選択→メッセージ入力→時間選択→登録→一覧に表示",
+    "バリデーション: 空メッセージ/長文/未選択エージェントで登録拒否",
+    "上限チェック: 6個目のタイマー登録が拒否される",
+    "キャンセル: 登録済タイマーのキャンセルボタンでstatusがcancelledになる",
+    "タイマー発火: setTimeout後にtmux sendKeysが呼ばれstatusがsentになる",
+    "発火失敗: tmux接続不可時にstatusがfailedになる",
+    "DB復元: サーバー再起動後にpendingタイマーが復元される",
+    "過去時刻復元: 過去のscheduled_send_timeのタイマーが即座送信される",
+    "session-cleanup: worktree削除時にタイマーがキャンセルされる",
+    "resource-cleanup: 孤立エントリが検出・削除される",
+    "既存テスト: session-cleanup, resource-cleanupの既存テストが全パス"
+  ]
+}

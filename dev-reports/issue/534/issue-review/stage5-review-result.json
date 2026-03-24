@@ -1,0 +1,130 @@
+{
+  "issue_number": 534,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "review_date": "2026-03-24",
+  "previous_review_verification": {
+    "stage1_must_fix": [
+      {
+        "id": "MF-1",
+        "original_issue": "session-cleanup.tsにタイマー停止処理の考慮が欠如している",
+        "status": "resolved",
+        "verification": "session-cleanup.tsが変更対象ファイルに追加され、実装タスクにkillWorktreeSession時のタイマーキャンセル処理が明記されている。受入条件にも「worktree削除時・セッション停止時にタイマーが適切にキャンセルされる」が追加済み。"
+      },
+      {
+        "id": "MF-2",
+        "original_issue": "サーバー再起動時のタイマー復元でsetTimeoutの精度問題が未考慮",
+        "status": "resolved",
+        "verification": "「再起動復元時のエッジケース: scheduled_send_timeが過去の場合は即座に送信を実行する（破棄しない）」が明記済み。受入条件にも「サーバー再起動時、scheduled_send_timeが過去のタイマーは即座に送信される」が追加済み。"
+      }
+    ],
+    "stage1_should_fix": [
+      {
+        "id": "SF-1",
+        "original_issue": "delayed_messagesテーブルとscheduled_executionsテーブルの責務分離が不明確",
+        "status": "resolved",
+        "verification": "テーブル名がtimer_messagesに変更済み。scheduled_executionsとの責務の違い（cron定期実行 vs ワンショット）が明記済み。"
+      },
+      {
+        "id": "SF-2",
+        "original_issue": "モバイル対応の実装方針が不明確",
+        "status": "resolved",
+        "verification": "「NotesAndLogsPane内のサブタブとしてアクセス（MobileTabBarのmemoタブ経由）。MobileTabBarへの直接タブ追加は行わない」が明記済み。"
+      },
+      {
+        "id": "SF-3",
+        "original_issue": "i18n対応の具体的な追加先が未記載",
+        "status": "resolved",
+        "verification": "「schedule名前空間にタイマー関連の翻訳キーを追加（NotesAndLogsPaneが既にuseTranslations('schedule')を使用しているため、新規名前空間は作らない）」が明記済み。"
+      },
+      {
+        "id": "SF-4",
+        "original_issue": "timer-manager.tsのglobalThisパターン使用に関する記載がない",
+        "status": "resolved",
+        "verification": "「timer-manager.tsはglobalThisパターンを使用し、Next.jsのHot Reloadでタイマーが失われないようにする（schedule-manager.tsやauto-yes-manager.tsと同様の方式）」が明記済み。受入条件にも追加済み。"
+      }
+    ]
+  },
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 2,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "正確性",
+        "issue": "時間範囲の上限値とミリ秒値に不整合がある",
+        "location": "複数箇所: 概要、受入条件、実装タスク > timer-constants.ts",
+        "recommendation": "「8時間50分」を「8時間45分」に修正するか、ミリ秒値を31800000msに修正する。5分単位の選択肢として、5分(300000ms)から開始し5分刻みで増加する場合、31500000ms = 525分 = 8時間45分、31800000ms = 530分 = 8時間50分。どちらを意図しているかを確認し、テキストとミリ秒値を一致させる必要がある。",
+        "evidence": "Issue本文の概要に「5分後から8時間50分後まで5分単位で指定可能」、受入条件にも「5分後〜8時間50分後まで5分単位で指定可能」と記載がある一方、実装タスクのtimer-constants.tsでは「300000ms〜31500000ms」と記載。31500000ms / 60000 = 525分 = 8時間45分であり、8時間50分(= 530分 = 31800000ms)とは5分のずれがある。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "timer-managerのタイマー発火時のエラーハンドリング方針が未記載",
+        "location": "## 提案する解決策 > バックエンド",
+        "recommendation": "setTimeoutのコールバック内でtmux sendKeysが失敗した場合（セッション未起動、tmux接続不可など）のエラーハンドリング方針を記載すべき。具体的には: (1) DBのstatusをfailedに更新する、(2) リトライするか否か（推奨: リトライなし、failedとして記録のみ）。job-executor.tsの既存パターン（executeScheduleでのtry/catch + status更新）を参考にできる。",
+        "evidence": "Issue本文に「タイマー送信後のフィードバック: ステータス表示の更新（sent/failed）で結果を通知」と記載があるが、失敗時のDB更新やリトライポリシーは未定義。job-executor.tsはexecuteSchedule()内でtry/catchし、成功時completed、失敗時failedをDBに記録する方式を採用している。"
+      },
+      {
+        "id": "SF-2",
+        "category": "整合性",
+        "issue": "UIタブ表記「Notes | Logs | Agent | Timer」と実際のタブラベルの不一致",
+        "location": "## 提案する解決策 > UI",
+        "recommendation": "Issueの「(Notes | Logs | Agent | Timer)」という表記は概念的な説明として問題ないが、実際のi18nラベルとの整合性を考慮すべき。現在のschedule.jsonではnotes='Notes'、logs='Schedules'（Logsではない）、agentTab='Agent'となっている。Timerタブのi18nキーをどうするか（例: timerTab='Timer'）を実装タスクのi18n対応に具体的に記載すると、実装時の混乱を防げる。",
+        "evidence": "locales/en/schedule.json: \"notes\": \"Notes\", \"logs\": \"Schedules\", \"agentTab\": \"Agent\"。Issueでは「Notes | Logs | Agent | Timer」と表記しているが、実際の「Logs」タブのラベルは「Schedules」。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "カウントダウン表示のポーリング方式について詳細があると良い",
+        "location": "## 実装タスク > TimerPane.tsx",
+        "recommendation": "カウントダウン表示にはクライアント側でsetInterval(1秒間隔)が必要。auto-yes-config.tsのformatTimeRemaining()関数をカウントダウン表示に再利用可能（Issue本文の関連コンポーネントセクションに言及あり）。また、タブが非アクティブ時のvisibilitychange対応（useFilePolling.tsと同様のパターン）についても言及があるとより完全。",
+        "evidence": "formatTimeRemaining()はsrc/config/auto-yes-config.ts L125に定義されており、expiresAtからの残り時間を「Xh Ym」形式でフォーマットする。useFilePolling.tsはvisibilitychangeイベントでポーリングの一時停止/再開を実装済み。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "Timer API のルーティングパスに関する補足があると良い",
+        "location": "## 実装タスク > Timer CRUD API",
+        "recommendation": "Timer APIのパスとして `POST/GET/DELETE /api/worktrees/[id]/timers` が記載されているが、Next.js App Routerでの具体的なファイルパス（src/app/api/worktrees/[id]/timers/route.ts）は影響範囲テーブルに記載済みで問題ない。DELETEエンドポイントで個別タイマーを削除する場合、`/api/worktrees/[id]/timers?timerId=xxx` のようにクエリパラメータで指定するのか、`/api/worktrees/[id]/timers/[timerId]` のように動的ルートにするのかを明記しておくと、ルーティング設計で迷わない。",
+        "evidence": "既存のterminal APIはsrc/app/api/worktrees/[id]/terminal/route.tsで単一ルートファイル。special-keysもsrc/app/api/worktrees/[id]/special-keys/route.tsで同様。個別リソース操作はクエリパラメータ（session-db等ではsearchParams）を使うパターンが一般的。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/config/auto-yes-config.ts",
+      "relevance": "formatTimeRemaining()関数（L125）がカウントダウン表示に再利用可能。ALLOWED_DURATIONSの設計パターンがtimer-constants.tsの参考になる。"
+    },
+    {
+      "file": "locales/en/schedule.json",
+      "relevance": "既存のタブラベル（notes='Notes', logs='Schedules', agentTab='Agent'）との整合性確認。Timerタブのi18nキー追加先。"
+    },
+    {
+      "file": "src/lib/job-executor.ts",
+      "relevance": "タイマー発火時のエラーハンドリングパターンの参考（executeScheduleでのtry/catch + DB status更新）。"
+    },
+    {
+      "file": "src/components/worktree/NotesAndLogsPane.tsx",
+      "relevance": "SUB_TABS配列（L61-65）とSubTab型（L25）の拡張対象。useTranslations('schedule')（L88）を使用。"
+    },
+    {
+      "file": "src/hooks/useFilePolling.ts",
+      "relevance": "visibilitychange対応パターンの参考実装（カウントダウンポーリングの一時停止/再開）。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構造・モジュール一覧の整合性確認"
+    }
+  ]
+}

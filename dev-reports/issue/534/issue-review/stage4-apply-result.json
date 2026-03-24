@@ -1,0 +1,59 @@
+{
+  "issue_number": 534,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "指摘事項反映（影響範囲レビュー）",
+  "apply_date": "2026-03-24",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "server.tsを変更対象ファイルに追加。バックエンド設計にサーバーライフサイクル統合（initTimerManager/stopAllTimers）を明記。実装タスクにserver.tsタスクを追加。受入条件にserver.tsのinit/stop呼び出し検証を追加"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "resource-cleanup.tsを変更対象ファイルに追加。バックエンド設計に孤立エントリ検出を明記。実装タスクにresource-cleanup.tsタスク（CleanupMapResult型拡張含む）を追加。受入条件に孤立エントリ検出・削除の検証を追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "ユニットテストタスクに具体的なテストファイル5件（新規3件+既存追加2件）とテストシナリオを明記。テスト対象ファイル一覧セクションを影響範囲に新設。既存テストへの影響（pollersStopped配列、CleanupMapResult型）について注意事項を記載"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "メッセージ送信方式をtmux sendKeys内部モジュール直接呼び出し（session-key-sender.ts/tmux.ts経由）に明確化。HTTP経由でTerminal APIを呼ばない方針を明記。job-executor.tsがclaude-executor.tsを直接呼ぶパターンとの類似性を記載"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "CLAUDE.mdとdocs/module-reference.mdのドキュメント更新タスクを実装タスクに追加。影響範囲にドキュメント対象ファイル一覧セクションを新設。CLIコマンド追加は本Issueスコープ外であることを明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "WorktreeDetailSubComponents.tsxの4タブ化UI幅確認について関連コンポーネントセクションに注記を追加"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "DBマイグレーションタスクにdown関数（DROP TABLE timer_messages）の定義を追加"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 7,
+    "applied": 7,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/534"
+  }
+}
