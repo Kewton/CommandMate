@@ -34,6 +34,12 @@ vi.mock('@/lib/schedule-manager', () => ({
   getScheduleWorktreeIds: vi.fn().mockReturnValue([]),
 }));
 
+// Mock timer-manager (Issue #534)
+vi.mock('@/lib/timer-manager', () => ({
+  stopTimersForWorktree: vi.fn(),
+  getTimerWorktreeIds: vi.fn().mockReturnValue(new Set()),
+}));
+
 // Mock response-poller
 vi.mock('@/lib/polling/response-poller', () => ({
   getActivePollers: vi.fn().mockReturnValue([]),

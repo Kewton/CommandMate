@@ -45,5 +45,29 @@
     "valid": "{count} schedule(s) validated successfully.",
     "errors": "{errorCount} validation error(s) found: {details}",
     "failed": "Failed to process CMATE.md."
+  },
+  "timerTab": "Timer",
+  "timer": {
+    "title": "Delayed Messages",
+    "agent": "Agent",
+    "message": "Message",
+    "delay": "Send After",
+    "register": "Register Timer",
+    "cancel": "Cancel",
+    "noTimers": "No timers registered.",
+    "maxReached": "Maximum {max} timers per worktree.",
+    "registerSuccess": "Timer registered.",
+    "registerError": "Failed to register timer.",
+    "cancelSuccess": "Timer cancelled.",
+    "cancelError": "Failed to cancel timer.",
+    "status": {
+      "pending": "Pending",
+      "sending": "Sending",
+      "sent": "Sent",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "minutesShort": "{minutes}m",
+    "hoursMinutesShort": "{hours}h {minutes}m"
   }
 }
