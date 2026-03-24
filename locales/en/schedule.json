@@ -65,8 +65,10 @@
       "sending": "Sending",
       "sent": "Sent",
       "failed": "Failed",
-      "cancelled": "Cancelled"
+      "cancelled": "Cancelled",
+      "no_session": "No Session"
     },
+    "sessionWarning": "Session is not running. If the session is not running when the timer fires, the message will not be sent.",
     "minutesShort": "{minutes}m",
     "hoursMinutesShort": "{hours}h {minutes}m"
   }

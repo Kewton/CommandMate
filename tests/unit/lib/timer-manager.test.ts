@@ -51,6 +51,7 @@ vi.mock('@/lib/tmux/tmux', () => ({
 
 // Mock CLIToolManager
 const mockGetTool = vi.fn();
+const mockIsRunning = vi.fn().mockResolvedValue(true);
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
     getInstance: vi.fn().mockReturnValue({
@@ -208,7 +209,7 @@ describe('timer-manager', () => {
   });
 
   describe('executeTimer (via setTimeout callback)', () => {
-    it('should send message and update status on success', async () => {
+    it('should send message and update status on success when session is running', async () => {
       const timerId = 'timer-exec-1';
       const timer = {
         id: timerId,
@@ -224,8 +225,10 @@ describe('timer-manager', () => {
 
       mockGetPendingTimers.mockReturnValueOnce([]);
       mockGetTimerById.mockReturnValue(timer);
+      mockIsRunning.mockResolvedValue(true);
       mockGetTool.mockReturnValue({
         getSessionName: vi.fn().mockReturnValue('session-wt-1'),
+        isRunning: mockIsRunning,
       });
 
       initTimerManager();
@@ -234,6 +237,7 @@ describe('timer-manager', () => {
       // Advance timers to trigger callback
       await vi.advanceTimersByTimeAsync(200);
 
+      expect(mockIsRunning).toHaveBeenCalledWith('wt-1');
       expect(mockUpdateTimerStatus).toHaveBeenCalledWith(
         expect.anything(),
         timerId,
@@ -248,7 +252,44 @@ describe('timer-manager', () => {
       );
     });
 
-    it('should set status to failed on send error', async () => {
+    it('should set status to no_session when session is not running', async () => {
+      const timerId = 'timer-nosession-1';
+      const timer = {
+        id: timerId,
+        worktreeId: 'wt-1',
+        cliToolId: 'claude',
+        message: 'Hello',
+        delayMs: 300000,
+        scheduledSendTime: Date.now() + 300000,
+        status: 'pending',
+        createdAt: Date.now(),
+        sentAt: null,
+      };
+
+      mockGetPendingTimers.mockReturnValueOnce([]);
+      mockGetTimerById.mockReturnValue(timer);
+      mockIsRunning.mockResolvedValue(false);
+      mockGetTool.mockReturnValue({
+        getSessionName: vi.fn().mockReturnValue('session-wt-1'),
+        isRunning: mockIsRunning,
+      });
+
+      initTimerManager();
+      scheduleTimer(timerId, 'wt-1', 100);
+
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(mockIsRunning).toHaveBeenCalledWith('wt-1');
+      expect(mockUpdateTimerStatus).toHaveBeenCalledWith(
+        expect.anything(),
+        timerId,
+        'no_session'
+      );
+      // Should NOT call sendKeys
+      expect(mockSendKeys).not.toHaveBeenCalled();
+    });
+
+    it('should set status to failed on send error when session is running', async () => {
       const timerId = 'timer-fail-1';
       const timer = {
         id: timerId,
@@ -264,8 +305,10 @@ describe('timer-manager', () => {
 
       mockGetPendingTimers.mockReturnValueOnce([]);
       mockGetTimerById.mockReturnValue(timer);
+      mockIsRunning.mockResolvedValue(true);
       mockGetTool.mockReturnValue({
         getSessionName: vi.fn().mockReturnValue('session-wt-1'),
+        isRunning: mockIsRunning,
       });
       mockSendKeys.mockRejectedValueOnce(new Error('tmux session not found'));
 
