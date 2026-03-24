@@ -20,6 +20,7 @@ import {
   MAX_TIMERS_PER_WORKTREE,
   MAX_TIMER_MESSAGE_LENGTH,
   TIMER_LIST_POLL_INTERVAL_MS,
+  DEFAULT_TIMER_HISTORY_LIMIT,
 } from '@/config/timer-constants';
 import { formatTimeRemaining } from '@/config/auto-yes-config';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -87,25 +88,55 @@ export const TimerPane = memo(function TimerPane({ worktreeId, selectedAgents }:
   const [selectedAgent, setSelectedAgent] = useState<CLIToolType>(selectedAgents[0] || 'claude');
   const [selectedDelay, setSelectedDelay] = useState(TIMER_DELAYS[0]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [warning, setWarning] = useState<string | null>(null);
   const [, setTick] = useState(0); // Force re-render for countdown
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastCreatedAtRef = useRef<number | null>(null);
 
   // ==========================================================================
   // Fetch timers
   // ==========================================================================
 
+  // [SF-002] fetchTimers: polling-only, depends only on worktreeId (Issue #540)
   const fetchTimers = useCallback(async () => {
     try {
       const res = await fetch(`/api/worktrees/${worktreeId}/timers`);
       if (res.ok) {
         const data = await res.json();
         setTimers(data.timers);
+        setHasMore(data.hasMore ?? false);
+        if (data.timers.length > 0) {
+          lastCreatedAtRef.current = data.timers[data.timers.length - 1].createdAt;
+        } else {
+          lastCreatedAtRef.current = null;
+        }
       }
     } catch {
       // Silently ignore fetch errors during polling
+    }
+  }, [worktreeId]);
+
+  // [SF-002] loadMoreTimers: on-demand, cursor-based (Issue #540)
+  const loadMoreTimers = useCallback(async () => {
+    if (lastCreatedAtRef.current == null) return;
+    try {
+      const params = new URLSearchParams();
+      params.set('before', String(lastCreatedAtRef.current));
+      params.set('limit', String(DEFAULT_TIMER_HISTORY_LIMIT));
+      const res = await fetch(`/api/worktrees/${worktreeId}/timers?${params}`);
+      if (res.ok) {
+        const data = await res.json();
+        setTimers(prev => [...prev, ...data.timers]);
+        setHasMore(data.hasMore ?? false);
+        if (data.timers.length > 0) {
+          lastCreatedAtRef.current = data.timers[data.timers.length - 1].createdAt;
+        }
+      }
+    } catch {
+      // Silently ignore fetch errors
     }
   }, [worktreeId]);
 
@@ -114,42 +145,40 @@ export const TimerPane = memo(function TimerPane({ worktreeId, selectedAgents }:
   // ==========================================================================
 
   useEffect(() => {
-    // Initial fetch
-    void fetchTimers();
-
-    // Start polling
-    pollingRef.current = setInterval(() => {
+    /** Start polling and countdown intervals, returning a cleanup function. */
+    function startIntervals(): () => void {
       void fetchTimers();
-    }, TIMER_LIST_POLL_INTERVAL_MS);
+      pollingRef.current = setInterval(() => {
+        void fetchTimers();
+      }, TIMER_LIST_POLL_INTERVAL_MS);
+      countdownRef.current = setInterval(() => {
+        setTick(prev => prev + 1);
+      }, 1000);
+      return stopIntervals;
+    }
 
-    // Countdown update (every 1 second)
-    countdownRef.current = setInterval(() => {
-      setTick(prev => prev + 1);
-    }, 1000);
+    /** Stop all active intervals. */
+    function stopIntervals(): void {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+      if (countdownRef.current) clearInterval(countdownRef.current);
+      pollingRef.current = null;
+      countdownRef.current = null;
+    }
 
-    // Visibility change handler
+    startIntervals();
+
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
-        if (pollingRef.current) clearInterval(pollingRef.current);
-        if (countdownRef.current) clearInterval(countdownRef.current);
-        pollingRef.current = null;
-        countdownRef.current = null;
+        stopIntervals();
       } else {
-        void fetchTimers();
-        pollingRef.current = setInterval(() => {
-          void fetchTimers();
-        }, TIMER_LIST_POLL_INTERVAL_MS);
-        countdownRef.current = setInterval(() => {
-          setTick(prev => prev + 1);
-        }, 1000);
+        startIntervals();
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-      if (countdownRef.current) clearInterval(countdownRef.current);
+      stopIntervals();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [fetchTimers]);
@@ -201,6 +230,21 @@ export const TimerPane = memo(function TimerPane({ worktreeId, selectedAgents }:
       // Error handled silently
     }
   }, [worktreeId, fetchTimers]);
+
+  // [CS-SF-003] Clear history with confirmation (Issue #540)
+  const handleClearHistory = useCallback(async () => {
+    if (!window.confirm(t('timer.clearConfirm'))) return;
+    try {
+      const res = await fetch(`/api/worktrees/${worktreeId}/timers/history`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        void fetchTimers();
+      }
+    } catch {
+      // Error handled silently
+    }
+  }, [worktreeId, fetchTimers, t]);
 
   // ==========================================================================
   // Derived state
@@ -326,6 +370,28 @@ export const TimerPane = memo(function TimerPane({ worktreeId, selectedAgents }:
               )}
             </div>
           ))}
+
+          {/* Load more button (Issue #540) */}
+          {hasMore && (
+            <button
+              type="button"
+              onClick={loadMoreTimers}
+              className="px-3 py-2 text-sm text-cyan-600 dark:text-cyan-400 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded-md transition-colors text-center"
+            >
+              {t('timer.loadMore')}
+            </button>
+          )}
+
+          {/* Clear history button (Issue #540) */}
+          {timers.some(t => t.status !== 'pending') && (
+            <button
+              type="button"
+              onClick={handleClearHistory}
+              className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors text-center"
+            >
+              {t('timer.clearHistory')}
+            </button>
+          )}
         </div>
       )}
     </div>

@@ -9,6 +9,7 @@
 import { randomUUID } from 'crypto';
 import type Database from 'better-sqlite3';
 import type { TimerStatus } from '@/config/timer-constants';
+import { DEFAULT_TIMER_HISTORY_LIMIT } from '@/config/timer-constants';
 
 // =============================================================================
 // Types
@@ -33,6 +34,14 @@ export interface CreateTimerParams {
   cliToolId: string;
   message: string;
   delayMs: number;
+}
+
+/** Options for getTimersByWorktree query (Issue #540) */
+export interface GetTimerOptions {
+  /** Cursor: return timers with created_at < before (millisecond timestamp) */
+  before?: number;
+  /** Maximum number of timers to return (default: DEFAULT_TIMER_HISTORY_LIMIT) */
+  limit?: number;
 }
 
 // =============================================================================
@@ -123,20 +132,30 @@ export function createTimer(
 }
 
 /**
- * Get all timers for a worktree (all statuses), ordered by created_at DESC.
+ * Get timers for a worktree (all statuses), ordered by created_at DESC.
+ * Issue #540: Supports optional pagination via GetTimerOptions.
+ * Returns up to limit+1 rows for hasMore detection by the caller.
  */
 export function getTimersByWorktree(
   db: Database.Database,
-  worktreeId: string
+  worktreeId: string,
+  options?: GetTimerOptions
 ): TimerMessage[] {
-  const stmt = db.prepare(`
-    SELECT ${TIMER_COLUMNS}
-    FROM timer_messages
-    WHERE worktree_id = ?
-    ORDER BY created_at DESC
-  `);
+  const { before, limit = DEFAULT_TIMER_HISTORY_LIMIT } = options ?? {};
 
-  const rows = stmt.all(worktreeId) as TimerMessageRow[];
+  let sql = `SELECT ${TIMER_COLUMNS} FROM timer_messages WHERE worktree_id = ?`;
+  const params: (string | number)[] = [worktreeId];
+
+  if (before !== undefined) {
+    sql += ` AND created_at < ?`;
+    params.push(before);
+  }
+
+  sql += ` ORDER BY created_at DESC LIMIT ?`;
+  params.push(limit + 1); // fetch limit+1 for hasMore detection
+
+  const stmt = db.prepare(sql);
+  const rows = stmt.all(...params) as TimerMessageRow[];
   return rows.map(mapRow);
 }
 
@@ -236,4 +255,59 @@ export function getPendingTimerCountByWorktree(
   `).get(worktreeId) as { count: number };
 
   return result.count;
+}
+
+// =============================================================================
+// Cleanup Operations (Issue #540)
+// =============================================================================
+
+/**
+ * Delete non-pending, non-sending timers older than retentionDays.
+ * [SF-001] Pure DB function for testability.
+ * @returns Number of deleted timers.
+ */
+export function cleanupOldTimers(
+  db: Database.Database,
+  retentionDays: number
+): number {
+  const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+  const result = db.prepare(`
+    DELETE FROM timer_messages
+    WHERE status NOT IN ('pending', 'sending')
+      AND created_at < ?
+  `).run(cutoff);
+
+  return result.changes;
+}
+
+/**
+ * Delete all non-pending timers for a worktree (manual clear).
+ * Pending timers are preserved.
+ * @returns Number of deleted timers.
+ */
+export function clearTimerHistory(
+  db: Database.Database,
+  worktreeId: string
+): number {
+  const result = db.prepare(`
+    DELETE FROM timer_messages
+    WHERE worktree_id = ?
+      AND status NOT IN ('pending', 'sending')
+  `).run(worktreeId);
+
+  return result.changes;
+}
+
+/**
+ * Recover stuck 'sending' timers to 'failed' (server crash recovery).
+ * @returns Number of recovered timers.
+ */
+export function recoverStuckSendingTimers(
+  db: Database.Database
+): number {
+  const result = db.prepare(`
+    UPDATE timer_messages SET status = 'failed' WHERE status = 'sending'
+  `).run();
+
+  return result.changes;
 }

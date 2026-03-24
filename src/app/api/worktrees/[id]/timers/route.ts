@@ -25,7 +25,7 @@ import {
   getTimerById,
   getPendingTimerCountByWorktree,
 } from '@/lib/db/timer-db';
-import { isValidTimerDelay, MAX_TIMERS_PER_WORKTREE, MAX_TIMER_MESSAGE_LENGTH } from '@/config/timer-constants';
+import { isValidTimerDelay, MAX_TIMERS_PER_WORKTREE, MAX_TIMER_MESSAGE_LENGTH, DEFAULT_TIMER_HISTORY_LIMIT, MAX_TIMER_QUERY_LIMIT } from '@/config/timer-constants';
 import { isValidUuidV4 } from '@/config/schedule-config';
 import { scheduleTimer, cancelScheduledTimer } from '@/lib/timer-manager';
 import { createLogger } from '@/lib/logger';
@@ -128,9 +128,10 @@ export async function POST(
 /**
  * GET /api/worktrees/[id]/timers
  * List timers for a worktree
+ * Issue #540: Supports before/limit query params for cursor-based pagination
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -147,7 +148,32 @@ export async function GET(
       return NextResponse.json({ error: 'Worktree not found' }, { status: 404 });
     }
 
-    const timers = getTimersByWorktree(db, id);
+    // [SEC-SF-001] Parse and validate before/limit query params (Issue #540)
+    const searchParams = req.nextUrl.searchParams;
+
+    let before: number | undefined;
+    const beforeStr = searchParams.get('before');
+    if (beforeStr != null) {
+      const parsed = parseInt(beforeStr, 10);
+      if (!isNaN(parsed) && parsed > 0 && Number.isSafeInteger(parsed)) {
+        before = parsed;
+      }
+    }
+
+    let limit = DEFAULT_TIMER_HISTORY_LIMIT;
+    const limitStr = searchParams.get('limit');
+    if (limitStr != null) {
+      const parsed = parseInt(limitStr, 10);
+      if (!isNaN(parsed) && parsed > 0 && Number.isSafeInteger(parsed)) {
+        limit = Math.min(parsed, MAX_TIMER_QUERY_LIMIT);
+      }
+    }
+
+    const allTimers = getTimersByWorktree(db, id, { before, limit });
+
+    // hasMore detection: if DB returned limit+1 items, there are more
+    const hasMore = allTimers.length > limit;
+    const timers = hasMore ? allTimers.slice(0, limit) : allTimers;
 
     // [CON-SF-002] Omit worktreeId from GET response (client already knows it)
     return NextResponse.json({
@@ -161,6 +187,7 @@ export async function GET(
         createdAt: t.createdAt,
         sentAt: t.sentAt,
       })),
+      hasMore,
     });
   } catch (error) {
     // [SEC-MF-001] Fixed-string error response
@@ -200,6 +227,11 @@ export async function DELETE(
     // Check timer exists and belongs to this worktree [SEC-001]
     const timer = getTimerById(db, timerId);
     if (!timer || timer.worktreeId !== id) {
+      return NextResponse.json({ error: 'Timer not found' }, { status: 404 });
+    }
+
+    // [SEC-MF-001] worktreeId ownership check (Issue #540)
+    if (timer.worktreeId !== id) {
       return NextResponse.json({ error: 'Timer not found' }, { status: 404 });
     }
 

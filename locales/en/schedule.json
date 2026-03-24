@@ -70,6 +70,10 @@
     },
     "sessionWarning": "Session is not running. If the session is not running when the timer fires, the message will not be sent.",
     "minutesShort": "{minutes}m",
-    "hoursMinutesShort": "{hours}h {minutes}m"
+    "hoursMinutesShort": "{hours}h {minutes}m",
+    "loadMore": "Load more",
+    "clearHistory": "Clear history",
+    "clearConfirm": "Delete all sent, failed, and cancelled timer history?",
+    "cleared": "History cleared ({count} items)"
   }
 }

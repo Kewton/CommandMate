@@ -70,6 +70,10 @@
     },
     "sessionWarning": "セッションが起動していません。タイマー実行時にセッションが起動していない場合、メッセージは送信されません。",
     "minutesShort": "{minutes}分",
-    "hoursMinutesShort": "{hours}時間{minutes}分"
+    "hoursMinutesShort": "{hours}時間{minutes}分",
+    "loadMore": "もっと見る",
+    "clearHistory": "履歴クリア",
+    "clearConfirm": "送信済み・失敗・キャンセル済みのタイマー履歴をすべて削除しますか？",
+    "cleared": "履歴を削除しました（{count}件）"
   }
 }
