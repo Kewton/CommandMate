@@ -181,7 +181,7 @@ export function detectSessionStatus(
   // can exceed 15 lines. Examples: Codex approval prompts with long file lists,
   // Claude "Yes, and don't ask again for: git commit -m ..." options that embed
   // full commit messages. detectPrompt() applies its own 50-line window internally.
-  const promptInput = (cliToolId === 'opencode' || cliToolId === 'codex' || cliToolId === 'claude')
+  const promptInput = (cliToolId === 'opencode' || cliToolId === 'codex' || cliToolId === 'claude' || cliToolId === 'copilot')
     ? stripBoxDrawing(cleanOutput)
     : stripBoxDrawing(lastLines);
   const promptDetection = detectPrompt(promptInput, promptOptions);

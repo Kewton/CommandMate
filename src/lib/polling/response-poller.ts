@@ -58,7 +58,7 @@ const logger = createLogger('response-poller');
 
 // Sub-module imports
 import { resolveExtractionStartIndex, isOpenCodeComplete } from '../response-extractor';
-import { cleanClaudeResponse, cleanGeminiResponse, cleanOpenCodeResponse } from '../response-cleaner';
+import { cleanClaudeResponse, cleanGeminiResponse, cleanOpenCodeResponse, cleanCopilotResponse } from '../response-cleaner';
 import {
   initTuiAccumulator,
   accumulateTuiContent,
@@ -76,7 +76,7 @@ import {
 export { resolveExtractionStartIndex, isOpenCodeComplete };
 
 // response-cleaner public API
-export { cleanClaudeResponse, cleanGeminiResponse, cleanOpenCodeResponse };
+export { cleanClaudeResponse, cleanGeminiResponse, cleanOpenCodeResponse, cleanCopilotResponse };
 
 // tui-accumulator public API (@internal functions, exported for test access)
 export {
@@ -341,7 +341,7 @@ function extractResponse(
   // Issue #372: Codex command confirmation prompts (> 1. Yes, proceed) match
   // CODEX_PROMPT_PATTERN, causing isCodexOrGeminiComplete to fire prematurely.
   // Early detection ensures prompt options are preserved in the extraction result.
-  if (cliToolId === 'claude' || cliToolId === 'codex') {
+  if (cliToolId === 'claude' || cliToolId === 'codex' || cliToolId === 'copilot') {
     const fullOutput = lines.join('\n');
     const promptDetection = detectPromptWithOptions(fullOutput, cliToolId);
 
@@ -369,7 +369,7 @@ function extractResponse(
   // - Gemini: Interactive REPL, detects > / > prompt
   // - Vibe-Local: Interactive REPL, detects > prompt
   // Claude: require both prompt and separator
-  const isCodexOrGeminiComplete = (cliToolId === 'codex' || cliToolId === 'gemini' || cliToolId === 'vibe-local') && hasPrompt && !isThinking;
+  const isCodexOrGeminiComplete = (cliToolId === 'codex' || cliToolId === 'gemini' || cliToolId === 'vibe-local' || cliToolId === 'copilot') && hasPrompt && !isThinking;
   const isClaudeComplete = cliToolId === 'claude' && hasPrompt && hasSeparator && !isThinking;
   // [D2-002] OpenCode completion: detected via Build summary line pattern (independent of prompt/separator)
   const isOpenCodeDone = cliToolId === 'opencode' && isOpenCodeComplete(cleanOutputToCheck);
@@ -698,6 +698,8 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
       cleanedResponse = cleanGeminiResponse(result.response);
     } else if (cliToolId === 'claude') {
       cleanedResponse = cleanClaudeResponse(result.response);
+    } else if (cliToolId === 'copilot') {
+      cleanedResponse = cleanCopilotResponse(result.response);
     } else if (cliToolId === 'opencode') {
       cleanedResponse = cleanOpenCodeResponse(result.response);
 

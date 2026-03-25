@@ -27,6 +27,7 @@ describe('CLI_TOOL_DISPLAY_NAMES', () => {
     expect(CLI_TOOL_DISPLAY_NAMES.gemini).toBe('Gemini');
     expect(CLI_TOOL_DISPLAY_NAMES['vibe-local']).toBe('Vibe Local');
     expect(CLI_TOOL_DISPLAY_NAMES.opencode).toBe('OpenCode');
+    expect(CLI_TOOL_DISPLAY_NAMES.copilot).toBe('Copilot');
   });
 });
 
@@ -49,6 +50,10 @@ describe('getCliToolDisplayName()', () => {
 
   it('should return correct display name for opencode', () => {
     expect(getCliToolDisplayName('opencode')).toBe('OpenCode');
+  });
+
+  it('should return correct display name for copilot', () => {
+    expect(getCliToolDisplayName('copilot')).toBe('Copilot');
   });
 
   it('should return a non-empty string for all CLI tool IDs', () => {
@@ -91,6 +96,7 @@ describe('getCliToolDisplayNameSafe()', () => {
     expect(getCliToolDisplayNameSafe('gemini')).toBe('Gemini');
     expect(getCliToolDisplayNameSafe('vibe-local')).toBe('Vibe Local');
     expect(getCliToolDisplayNameSafe('opencode')).toBe('OpenCode');
+    expect(getCliToolDisplayNameSafe('copilot')).toBe('Copilot');
   });
 
   it('should return default fallback for undefined', () => {

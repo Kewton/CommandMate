@@ -9,6 +9,7 @@ import { CodexTool } from './codex';
 import { GeminiTool } from './gemini';
 import { VibeLocalTool } from './vibe-local';
 import { OpenCodeTool } from './opencode';
+import { CopilotTool } from './copilot';
 import { stopPolling as stopResponsePolling } from '../polling/response-poller';
 
 /**
@@ -31,6 +32,7 @@ export class CLIToolManager {
     this.tools.set('gemini', new GeminiTool());
     this.tools.set('vibe-local', new VibeLocalTool());
     this.tools.set('opencode', new OpenCodeTool());
+    this.tools.set('copilot', new CopilotTool());
   }
 
   /**
