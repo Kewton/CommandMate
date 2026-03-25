@@ -1,0 +1,135 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "findings": [
+    {
+      "id": "SEC4-001",
+      "severity": "must_fix",
+      "category": "command_injection",
+      "owasp": "A03:2021 Injection",
+      "title": "base.ts の isInstalled() で exec() によるシェルインジェクションのリスク",
+      "description": "BaseCLITool.isInstalled() (base.ts line 29) は `exec(`which ${this.command}`)` を使用している。CopilotTool では command='gh' であるためこの箇所自体は安全だが、将来 command プロパティに不正な値が設定された場合にシェルインジェクションが成立する。さらに、設計方針書セクション 3-3 の isInstalled() オーバーライド実装でも `execAsync('which gh')` と `execAsync('gh extension list')` を exec (shell=true) で実行している。exec ではなく execFile を使用すべき。",
+      "location": "src/lib/cli-tools/base.ts:29, 設計方針書セクション 3-3",
+      "recommendation": "isInstalled() のオーバーライド実装では execFile('which', ['gh']) および execFile('gh', ['extension', 'list']) を使用する。base.ts の既存 exec 使用も技術的負債として記録する。",
+      "existing_mitigation": "command プロパティは readonly で、現時点ではハードコードされた安全な値のみ使用されている。"
+    },
+    {
+      "id": "SEC4-002",
+      "severity": "must_fix",
+      "category": "command_injection",
+      "owasp": "A03:2021 Injection",
+      "title": "ワンショットモデルの sendMessage() でシェルインジェクションのリスク",
+      "description": "設計方針書セクション 3-4 のワンショット実行モデルでは `sendKeys(sessionName, 'gh copilot suggest \"${escapeShellArg(message)}\"', true)` の形式でシェルコマンド文字列を構築している。escapeShellArg() は現時点でコードベースに存在せず新規実装が必要 (DR2-004)。この関数のエスケープ漏れがあるとコマンドインジェクションに直結する。tmux sendKeys は execFile 経由で引数を渡すためシェル展開は行われないが、tmux セッション内のシェルがコマンド文字列を解釈するため、`$(...)`, バッククォート, `; rm -rf /` 等の攻撃文字列が有効になる。",
+      "location": "設計方針書セクション 3-4, DR2-004",
+      "recommendation": "escapeShellArg() の実装要件を明確化する: (1) シングルクォートラッピング方式 (`'...'` + 内部シングルクォートのエスケープ) を推奨、(2) 実装後に以下のテストケースを必須とする: ダブルクォート, シングルクォート, バッククォート, $(), `; command`, 改行文字, null バイト。(3) メッセージ長上限を設ける（MAX_MESSAGE_LENGTH 相当）。あるいは、REPL モデル採用でこの経路を使わない場合は、設計書にワンショットモデル不採用と明記し、escapeShellArg() を実装しないこと。",
+      "existing_mitigation": "設計書で DR2-004 として認識済み。Phase 1 調査後に確定予定。"
+    },
+    {
+      "id": "SEC4-003",
+      "severity": "should_fix",
+      "category": "sensitive_data_exposure",
+      "owasp": "A02:2021 Cryptographic Failures / A01:2021 Broken Access Control",
+      "title": "GitHub 認証トークンの tmux capture 経由漏洩リスクの評価が不十分",
+      "description": "設計方針書セクション 6-2 では「tmuxセッション出力にはトークンは表示されない（ghの標準動作）」と記載しているが、根拠が薄い。gh copilot がエラー出力やデバッグモード (GH_DEBUG=1) でトークンを表示する可能性がある。tmux capture-pane の出力は capturePane() 経由で API レスポンスとしてクライアントに返され、さらに chat-db.ts に永続化される可能性がある。",
+      "location": "設計方針書セクション 6-2, src/lib/tmux/tmux.ts:capturePane()",
+      "recommendation": "(1) env-sanitizer.ts の SENSITIVE_ENV_KEYS に GH_DEBUG を追加し、子プロセスでデバッグモードが有効にならないよう防止する。(2) Phase 1 前提調査で gh copilot のエラー出力にトークン情報が含まれないことを実際に確認し、結果を Issue コメントに記録する。(3) 既存の log-export-sanitizer.ts の GITHUB_TOKEN パターンが capture 出力にも適用されることを確認する。",
+      "existing_mitigation": "env-sanitizer.ts が CM_AUTH_TOKEN_HASH 等のプロジェクト固有トークンを除去済み。log-export-sanitizer.ts が GITHUB_TOKEN パターンをサニタイズ対象に含む。"
+    },
+    {
+      "id": "SEC4-004",
+      "severity": "should_fix",
+      "category": "input_validation",
+      "owasp": "A03:2021 Injection",
+      "title": "ALLOWED_CLI_TOOLS と CLI_TOOL_IDS の二重管理による copilot 追加漏れリスク",
+      "description": "claude-executor.ts の ALLOWED_CLI_TOOLS (line 37) と types.ts の CLI_TOOL_IDS (line 10) が独立して管理されている。copilot を CLI_TOOL_IDS に追加しても ALLOWED_CLI_TOOLS に追加し忘れると、スケジュール実行で copilot が拒否される。逆に ALLOWED_CLI_TOOLS にのみ追加すると型チェックが効かない。",
+      "location": "src/lib/session/claude-executor.ts:37, src/lib/cli-tools/types.ts:10",
+      "recommendation": "設計書 DR2-002 の推奨通り、ALLOWED_CLI_TOOLS を CLI_TOOL_IDS から導出する (`new Set(CLI_TOOL_IDS)`)。スケジュール実行で一部ツールを除外する意図がある場合は、除外リスト方式 (`CLI_TOOL_IDS.filter(id => !EXCLUDED_TOOLS.has(id))`) に変更し、理由をコメントに明記する。",
+      "existing_mitigation": "設計書 DR2-002 で must_fix として認識済み。"
+    },
+    {
+      "id": "SEC4-005",
+      "severity": "should_fix",
+      "category": "command_injection",
+      "owasp": "A03:2021 Injection",
+      "title": "セッション名バリデーションがエラーメッセージに未検証入力を含む",
+      "description": "validation.ts の validateSessionName() (line 38) はバリデーション失敗時に `Invalid session name format: ${sessionName}` としてユーザー入力をそのままエラーメッセージに含めている。このエラーメッセージがログに出力される場合、ログインジェクション（制御文字、ANSI エスケープシーケンス）のリスクがある。",
+      "location": "src/lib/cli-tools/validation.ts:38",
+      "recommendation": "エラーメッセージに含めるセッション名を制限する（例: 先頭50文字に切り詰め、制御文字を除去）。または、エラーメッセージに入力値を含めず、呼び出し元でログ出力時にサニタイズする。",
+      "existing_mitigation": "バリデーション自体は正しく機能しており、不正なセッション名は拒否される。"
+    },
+    {
+      "id": "SEC4-006",
+      "severity": "nice_to_have",
+      "category": "session_injection",
+      "owasp": "A03:2021 Injection",
+      "title": "tmux セッション名のワイルドカード展開リスク",
+      "description": "tmux の -t オプションでセッション名を指定する際、tmux は内部的にセッション名の部分一致やワイルドカード展開を行う場合がある（tmux の -t はプレフィックスマッチを行う）。SESSION_NAME_PATTERN で制限されているため実用上のリスクは低いが、例えば 'mcbd-copilot-1' が 'mcbd-copilot-10', 'mcbd-copilot-100' にもマッチしうる。tmux の -t オプションに `=` プレフィックスを付けると完全一致になる。",
+      "location": "src/lib/tmux/tmux.ts (hasSession, sendKeys, capturePane, killSession)",
+      "recommendation": "tmux の -t オプションで完全一致を強制する場合は `=sessionName` 形式を使用する。現行のセッション名フォーマット (mcbd-{toolId}-{worktreeId}) が十分に一意であれば、現状維持でも許容される。",
+      "existing_mitigation": "セッション名フォーマットが mcbd-{toolId}-{worktreeId} で十分に一意。SESSION_NAME_PATTERN でワイルドカード文字は拒否済み。"
+    },
+    {
+      "id": "SEC4-007",
+      "severity": "nice_to_have",
+      "category": "defense_in_depth",
+      "owasp": "A03:2021 Injection",
+      "title": "execFile 使用の一貫性: base.ts の isInstalled() が exec を使用",
+      "description": "プロジェクト全体で execFile の使用が推進されている（claude-executor.ts のコメント「Uses execFile (not exec) to prevent shell injection」）が、base.ts line 6, 12, 29 で exec が使用されている。command プロパティが readonly ハードコード値であるため即座の脆弱性ではないが、防御の一貫性が欠ける。",
+      "location": "src/lib/cli-tools/base.ts:6,12,29",
+      "recommendation": "base.ts の isInstalled() を `execFileAsync('which', [this.command])` に変更する。CopilotTool のオーバーライド実装でも同様に execFile を使用する。",
+      "existing_mitigation": "command プロパティは abstract readonly で、サブクラスでハードコード値が設定される。"
+    },
+    {
+      "id": "SEC4-008",
+      "severity": "should_fix",
+      "category": "input_validation",
+      "owasp": "A03:2021 Injection",
+      "title": "buildCliArgs() の copilot ケースでメッセージが直接引数に渡される安全性確認",
+      "description": "設計方針書セクション 3-2 で buildCliArgs() に copilot ケース (`return ['copilot', 'suggest', message]`) を追加する。executeClaudeCommand() は execFile を使用するため、メッセージはシェル展開されずに gh コマンドの引数として直接渡され、コマンドインジェクションは成立しない。ただし getCommandForTool() が正しく 'gh' を返すことが前提であり、マッピングミスで 'copilot' がコマンド名として使われると execFile が別のバイナリを実行するリスクがある。",
+      "location": "設計方針書セクション 3-2, src/lib/session/claude-executor.ts:157",
+      "recommendation": "getCommandForTool() のユニットテストを追加し、copilot -> 'gh' のマッピングが正しいことを検証する。また、ALLOWED_CLI_TOOLS のホワイトリストチェック (line 140) が getCommandForTool() の前に実行されることを確認する。",
+      "existing_mitigation": "execFile はシェル展開を行わないため、引数としてのメッセージは安全。ALLOWED_CLI_TOOLS ホワイトリストが未知のツールIDを拒否する。"
+    },
+    {
+      "id": "SEC4-009",
+      "severity": "nice_to_have",
+      "category": "ssrf_prevention",
+      "owasp": "A10:2021 SSRF",
+      "title": "gh copilot による外部 API 呼び出しの SSRF リスク評価",
+      "description": "gh copilot は GitHub API を呼び出すが、これは gh CLI 自体が管理する外部通信であり、CommandMate が直接制御する外部 API 呼び出しではない。SSRF リスクは低いが、gh copilot がプロキシ設定 (HTTP_PROXY, HTTPS_PROXY) を継承する場合、環境変数経由で意図しないプロキシサーバーへの通信が行われる可能性がある。",
+      "location": "設計方針書セクション 6-2",
+      "recommendation": "現時点では対応不要。ただし、プロキシ環境での運用を想定する場合は、env-sanitizer.ts でプロキシ関連環境変数の扱いを明確化する。",
+      "existing_mitigation": "CommandMate 自体は新たな外部 API 呼び出しを追加しない。gh CLI が通信を管理する。"
+    },
+    {
+      "id": "SEC4-010",
+      "severity": "should_fix",
+      "category": "sensitive_data_exposure",
+      "owasp": "A02:2021 Cryptographic Failures",
+      "title": "env-sanitizer.ts に GH_TOKEN / GITHUB_TOKEN が含まれていない",
+      "description": "env-sanitizer.ts の SENSITIVE_ENV_KEYS には CM_* プレフィックスのプロジェクト固有変数のみが含まれている。gh copilot は GH_TOKEN または GITHUB_TOKEN 環境変数を使用して GitHub API にアクセスする。これらのトークンが子プロセスに継承されること自体は gh copilot の正常動作に必要だが、claude-executor.ts 経由で起動される他の CLI ツール（claude, codex 等）にもこれらのトークンが渡されている。",
+      "location": "src/lib/security/env-sanitizer.ts:19-28",
+      "recommendation": "GH_TOKEN / GITHUB_TOKEN の扱いを明確化する: (1) copilot 以外のツールには不要なので、ツール別の環境変数フィルタリングを検討する。(2) 即座の対応としては、設計書のセキュリティセクションに「GH_TOKEN は gh copilot の動作に必要なため意図的にサニタイズ対象外とする」旨をコメントとして明記する。",
+      "existing_mitigation": "GH_TOKEN を子プロセスに渡すこと自体は gh copilot の正常動作に必要であり、現時点で脆弱性ではない。"
+    }
+  ],
+  "summary": {
+    "total_findings": 10,
+    "must_fix": 2,
+    "should_fix": 5,
+    "nice_to_have": 3
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-545-copilot-cli-design-policy.md",
+    "src/lib/cli-tools/base.ts",
+    "src/lib/cli-tools/validation.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/session/claude-executor.ts",
+    "src/lib/tmux/tmux.ts",
+    "src/lib/security/env-sanitizer.ts",
+    "src/lib/security/path-validator.ts"
+  ],
+  "review_date": "2026-03-26",
+  "reviewer": "architecture-review-agent (stage4-security)"
+}

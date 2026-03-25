@@ -1,0 +1,103 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "focus_area": "通常",
+  "findings": [
+    {
+      "id": "F1-001",
+      "severity": "must_fix",
+      "category": "consistency",
+      "title": "D1-003 registry pattern migration threshold triggered",
+      "description": "cli-patterns.ts line 482 contains a documented migration trigger: 'Migration threshold: 6th tool addition triggers registry pattern migration [D1-003].' Adding copilot would be the 6th tool (after claude, codex, gemini, vibe-local, opencode). The issue does not mention this architectural migration requirement, which means the implementation plan is inconsistent with the existing codebase's documented architecture decisions.",
+      "suggestion": "The issue should explicitly address the D1-003 migration threshold. Either (a) include a task to migrate detectThinking/getCliToolPatterns/buildDetectPromptOptions to a CLIToolConfig registry pattern as part of this issue, or (b) document a deliberate decision to defer the migration with justification (e.g., 'copilot patterns are simple enough that the switch-case approach remains maintainable at 6 tools').",
+      "affected_section": "Implementation Tasks / Architecture"
+    },
+    {
+      "id": "F1-002",
+      "severity": "must_fix",
+      "category": "completeness",
+      "title": "Missing cli/config/cli-tool-ids.ts from implementation tasks",
+      "description": "The CLI module has its own copy of CLI_TOOL_IDS at src/cli/config/cli-tool-ids.ts (Issue #518: subset copy with cross-validation test). This file must also be updated when adding 'copilot' to CLI_TOOL_IDS. The cross-validation test (tests/unit/cli/config/cross-validation.test.ts) will fail if the CLI copy is not updated in sync with the server-side types.ts.",
+      "suggestion": "Add a task: 'src/cli/config/cli-tool-ids.ts: Add copilot to CLI_TOOL_IDS array'. The cross-validation test will automatically verify consistency, but the file must be explicitly listed as a change target.",
+      "affected_section": "Implementation Tasks"
+    },
+    {
+      "id": "F1-003",
+      "severity": "must_fix",
+      "category": "completeness",
+      "title": "Missing assistant-response-saver.ts and response-poller.ts from implementation tasks",
+      "description": "Response cleaning is dispatched via switch/if-else in two locations: (1) src/lib/assistant-response-saver.ts cleanCliResponse() function, and (2) src/lib/polling/response-poller.ts (lines 697-709). Both use explicit tool-specific branching. The issue lists response-cleaner.ts but not these two files that actually dispatch the cleaning functions. Without updating these dispatch points, copilot responses will fall through to the default case (plain trim) regardless of whether a cleanCopilotResponse function is created.",
+      "suggestion": "Add tasks for: (1) src/lib/assistant-response-saver.ts: Add copilot case in cleanCliResponse() switch statement. (2) src/lib/polling/response-poller.ts: Add copilot case in the response cleaning if-else chain.",
+      "affected_section": "Implementation Tasks / Affected Files"
+    },
+    {
+      "id": "F1-004",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "Missing index.ts export for CopilotTool",
+      "description": "The issue lists src/lib/cli-tools/index.ts as a change target, but the current index.ts only exports ClaudeTool, CodexTool, and GeminiTool (not VibeLocalTool or OpenCodeTool). The export pattern is inconsistent - some tools are exported from the barrel, some are not. The issue should clarify whether CopilotTool should follow the newer pattern (not exported from barrel) or the older pattern (exported).",
+      "suggestion": "Clarify in the implementation task whether CopilotTool should be exported from index.ts. For consistency with the current state where VibeLocalTool and OpenCodeTool are NOT exported from the barrel, CopilotTool likely should not be either. In that case, remove index.ts from the change list, or add a note that the export follows the same pattern as VibeLocalTool/OpenCodeTool.",
+      "affected_section": "Implementation Tasks"
+    },
+    {
+      "id": "F1-005",
+      "severity": "should_fix",
+      "category": "correctness",
+      "title": "IImageCapableCLITool claim needs verification",
+      "description": "The issue states copilot-cli supports image sending and that CopilotTool should implement IImageCapableCLITool. Currently only ClaudeTool implements this interface. The GitHub Copilot CLI (gh copilot) documentation and the linked page (https://github.com/features/copilot/cli) describe it as a terminal-based command suggestion tool, not an interactive coding agent. Image attachment capability for copilot-cli needs verification - if the CLI does not support image input, implementing IImageCapableCLITool would be incorrect and the acceptance criterion 'Can attach images for questions' should be removed.",
+      "suggestion": "Verify whether GitHub Copilot CLI actually supports image input. If it does not, remove IImageCapableCLITool from the CopilotTool implementation plan and remove the related acceptance criterion. If image support is confirmed, add a note documenting how images are sent (e.g., file path argument, base64 encoding).",
+      "affected_section": "Proposed Solution / Acceptance Criteria"
+    },
+    {
+      "id": "F1-006",
+      "severity": "should_fix",
+      "category": "correctness",
+      "title": "copilot CLI command and interactive mode needs clarification",
+      "description": "The issue assumes 'copilot' is the command name and that it has an interactive dialogue mode. GitHub Copilot CLI is typically invoked as 'gh copilot' (a gh CLI extension), not as a standalone 'copilot' command. The interactive mode described ('dialogue mode') may not exist in the standard gh copilot CLI, which typically provides 'gh copilot suggest' and 'gh copilot explain' subcommands that are not persistent REPL sessions. This affects BaseCLITool.command, isInstalled() (which checks), and startSession() implementation.",
+      "suggestion": "Clarify the exact CLI command (likely 'gh' with arguments 'copilot suggest' or similar, not 'copilot'). Verify whether the tool supports a persistent interactive REPL session like Claude/Codex/Gemini, or if it requires a different interaction model (one-shot commands). This fundamentally affects the architecture - if copilot is not REPL-based, the tmux session management approach may need adaptation.",
+      "affected_section": "Proposed Solution / Background"
+    },
+    {
+      "id": "F1-007",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "MAX_SELECTED_AGENTS consideration is vague",
+      "description": "The issue mentions 'MAX_SELECTED_AGENTS=4 may need review' but does not provide a clear decision. With 6 tools available, users selecting up to 4 out of 6 seems reasonable, but this should be an explicit decision rather than left as a consideration.",
+      "suggestion": "State explicitly: 'MAX_SELECTED_AGENTS remains at 4 (selecting 4 out of 6 available tools is sufficient)' or propose increasing it to 5 with justification. This avoids ambiguity during implementation.",
+      "affected_section": "Implementation Tasks / Related Components"
+    },
+    {
+      "id": "F1-008",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "Missing status-detector.ts tool-specific detection logic",
+      "description": "The status-detector.ts has extensive tool-specific detection blocks for opencode (lines 233-322) and codex (lines 330-389) that handle their unique TUI layouts. If copilot-cli has a TUI with a non-standard layout, similar tool-specific detection logic will be needed. The issue merely says 'add copilot case' without acknowledging the complexity of tool-specific TUI layout handling that may be required.",
+      "suggestion": "Add a prerequisite task: 'Analyze copilot-cli TUI layout to determine if tool-specific status detection logic is needed in status-detector.ts (similar to the OpenCode or Codex blocks).' Include expected terminal output samples in the issue for reference.",
+      "affected_section": "Implementation Tasks"
+    },
+    {
+      "id": "F1-009",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "Missing CLAUDE.md update task",
+      "description": "CLAUDE.md contains a comprehensive module reference table that lists all CLI tools and their files. Adding copilot-cli would require updating the CLI_TOOL_IDS comment in types.ts docstring ('claude, codex, gemini, vibe-local, opencode' -> add copilot), the module table, and the CLI commands section.",
+      "suggestion": "Add a task to update CLAUDE.md with the new copilot module references after implementation is complete.",
+      "affected_section": "Implementation Tasks"
+    },
+    {
+      "id": "F1-010",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "Missing slash-commands.ts consideration details",
+      "description": "The issue mentions slash-commands.ts as a 'related component' but does not explain what changes are needed. If copilot-cli has its own slash command format (different from .claude/commands), the loader may need updates. If it uses the same format, no changes are needed but this should be stated explicitly.",
+      "suggestion": "Clarify whether copilot-cli uses slash commands and if so, whether the existing slash-commands.ts loader can handle them without modification.",
+      "affected_section": "Related Components"
+    }
+  ],
+  "summary": {
+    "total_findings": 10,
+    "must_fix": 3,
+    "should_fix": 5,
+    "nice_to_have": 2
+  }
+}

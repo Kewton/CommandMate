@@ -239,6 +239,33 @@ export const OPENCODE_SKIP_PATTERNS: readonly RegExp[] = [
 ] as const;
 
 /**
+ * Copilot prompt pattern (Issue #545)
+ * Placeholder - to be updated after Phase 1 TUI investigation.
+ * GitHub Copilot CLI may show various prompt formats.
+ */
+export const COPILOT_PROMPT_PATTERN = /^[>❯]\s*$|^\?\s+/m;
+
+/**
+ * Copilot thinking/processing pattern (Issue #545)
+ * Placeholder - to be updated after Phase 1 TUI investigation.
+ */
+export const COPILOT_THINKING_PATTERN = /[\u2800-\u28FF]|Thinking|Generating|Processing/;
+
+/**
+ * Copilot separator pattern (Issue #545)
+ * Placeholder - to be updated after Phase 1 TUI investigation.
+ */
+export const COPILOT_SEPARATOR_PATTERN = /^─{10,}$/m;
+
+/**
+ * Copilot skip patterns for response cleaning (Issue #545)
+ * Placeholder patterns - to be refined after Phase 1 TUI investigation.
+ */
+export const COPILOT_SKIP_PATTERNS: readonly RegExp[] = [
+  PASTED_TEXT_PATTERN,
+] as const;
+
+/**
  * Vibe Local prompt pattern
  * vibe-local (vibe-coder) shows `ctx:N% ❯` prompt when waiting for user input.
  * The prompt line includes a context usage percentage prefix.
@@ -276,6 +303,9 @@ export function detectThinking(cliToolId: CLIToolType, content: string): boolean
       break;
     case 'opencode':
       result = OPENCODE_THINKING_PATTERN.test(content);
+      break;
+    case 'copilot':
+      result = COPILOT_THINKING_PATTERN.test(content);
       break;
     default:
       result = CLAUDE_THINKING_PATTERN.test(content);
@@ -380,6 +410,14 @@ export function getCliToolPatterns(cliToolId: CLIToolType): {
         skipPatterns: [...OPENCODE_SKIP_PATTERNS],
       };
 
+    case 'copilot':
+      return {
+        promptPattern: COPILOT_PROMPT_PATTERN,
+        separatorPattern: COPILOT_SEPARATOR_PATTERN,
+        thinkingPattern: COPILOT_THINKING_PATTERN,
+        skipPatterns: [...COPILOT_SKIP_PATTERNS],
+      };
+
     default:
       // Default to Claude patterns
       return getCliToolPatterns('claude');
@@ -476,10 +514,10 @@ export const CLAUDE_SESSION_ERROR_REGEX_PATTERNS: readonly RegExp[] = [
  * this function lives in cli-patterns.ts which already depends on CLIToolType.
  *
  * [Future extension memo (C-002)]
- * If CLI tool count grows significantly (currently 5), consider migrating
+ * If CLI tool count grows significantly (currently 6), consider migrating
  * to a CLIToolConfig registry pattern where tool-specific settings
  * (including promptDetectionOptions) are managed in a Record<CLIToolType, CLIToolConfig>.
- * Migration threshold: 6th tool addition triggers registry pattern migration [D1-003].
+ * Migration threshold: 7th tool addition triggers registry pattern migration [D1-003].
  *
  * @param cliToolId - CLI tool identifier
  * @returns DetectPromptOptions for the tool, or undefined for default behavior
@@ -493,6 +531,10 @@ export function buildDetectPromptOptions(
   // [D2-006] OpenCode prompt "Ask anything..." does not use standard indicators (> / ❯),
   // so requireDefaultIndicator must be false to avoid missing prompt detection.
   if (cliToolId === 'opencode') {
+    return { requireDefaultIndicator: false };
+  }
+  // [Issue #545] Copilot prompt pattern may not use standard indicators
+  if (cliToolId === 'copilot') {
     return { requireDefaultIndicator: false };
   }
   return undefined; // Default behavior (requireDefaultIndicator = true)

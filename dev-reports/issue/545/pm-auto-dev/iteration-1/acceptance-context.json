@@ -1,0 +1,30 @@
+{
+  "issue_number": 545,
+  "feature_summary": "Copilot-CLI対応 - CLIツール抽象化層にCopilotToolを追加",
+  "acceptance_criteria": [
+    "copilotがAIエージェント一覧に表示される",
+    "copilotセッションの起動・停止ができる",
+    "メッセージ送信・応答受信ができる",
+    "ステータス検出（idle/ready/running）が正しく動作する",
+    "Auto-Yes機能が動作する",
+    "既存エージェントに影響がない",
+    "CLI側のCLI_TOOL_IDSがサーバー側と同期している",
+    "yes/no選択プロンプトが検出・応答できる"
+  ],
+  "test_scenarios": [
+    "Scenario 1: CLI_TOOL_IDSに'copilot'が含まれ、CLIToolTypeとして使用可能",
+    "Scenario 2: CLI_TOOL_DISPLAY_NAMESで'copilot'→'Copilot'の表示名が取得可能",
+    "Scenario 3: CLIToolManagerから6ツール（claude,codex,gemini,vibe-local,opencode,copilot）が取得可能",
+    "Scenario 4: CopilotTool.isInstalled()がgh+copilot拡張の2段階確認を行う",
+    "Scenario 5: CopilotTool.getSessionName()が'mcbd-copilot-{worktreeId}'形式を返す",
+    "Scenario 6: claude-executor.tsのgetCommandForTool('copilot')が'gh'を返す",
+    "Scenario 7: buildCliArgs() copilotケースが正しい引数を返す",
+    "Scenario 8: ALLOWED_CLI_TOOLSがCLI_TOOL_IDSと同期している",
+    "Scenario 9: cli-patterns.tsでcopilotのパターンが取得可能",
+    "Scenario 10: response-cleaner.tsでcleanCopilotResponseが機能する",
+    "Scenario 11: log-manager.tsがCLI_TOOL_DISPLAY_NAMESから表示名を取得する",
+    "Scenario 12: 既存5ツールのテストがすべてパスする",
+    "Scenario 13: TypeScript/ESLint/Buildが全パスする",
+    "Scenario 14: CLI側とサーバー側のCLI_TOOL_IDSが同期している"
+  ]
+}

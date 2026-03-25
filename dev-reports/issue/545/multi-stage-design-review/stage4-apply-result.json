@@ -1,0 +1,86 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘対応",
+  "applied_findings": [
+    {
+      "id": "SEC4-001",
+      "severity": "must_fix",
+      "status": "applied",
+      "description": "isInstalled() のコード例を exec() から execFile() に置換。import パターンも execFile/execFileAsync に変更。base.ts の exec 使用を技術的負債として SEC4-007 に記録。",
+      "updated_sections": ["3-3", "6-3", "14 (Phase 2)"]
+    },
+    {
+      "id": "SEC4-002",
+      "severity": "must_fix",
+      "status": "applied",
+      "description": "escapeShellArg() の詳細な実装要件を追加: シングルクォートラッピング方式推奨、7種類の必須テストケース、メッセージ長上限、REPL モデル採用時の不要明記ルール。Phase 3 チェックリストに4項目追加。",
+      "updated_sections": ["3-4", "14 (Phase 3)"]
+    },
+    {
+      "id": "SEC4-003",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "GitHub 認証トークン漏洩リスクの詳細対策を記載。GH_DEBUG の SENSITIVE_ENV_KEYS 追加、Phase 1 でのエラー出力確認、log-export-sanitizer.ts のカバレッジ確認を必須対策として追加。Phase 1 および Phase 2 チェックリストに項目追加。",
+      "updated_sections": ["6-2", "14 (Phase 1)", "14 (Phase 2)"]
+    },
+    {
+      "id": "SEC4-004",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "DR2-002 (ALLOWED_CLI_TOOLS の CLI_TOOL_IDS からの導出) との統合で対応。セキュリティ観点からの二重管理リスクを 6-1 テーブルに追記し、チェックリスト項目にクロスリファレンス追加。",
+      "updated_sections": ["6-1", "14 (Phase 2)"]
+    },
+    {
+      "id": "SEC4-005",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "validateSessionName() エラーメッセージの未検証入力サニタイズ要件を追加。先頭50文字切り詰め + 制御文字除去の対策を記載。6-1 テーブルおよび Phase 2 チェックリストに項目追加。",
+      "updated_sections": ["6-1", "14 (Phase 2)"]
+    },
+    {
+      "id": "SEC4-006",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "description": "tmux セッション名のワイルドカード展開リスクを新セクション 6-3 に記録。現状維持で許容されることを明記。",
+      "updated_sections": ["6-3"]
+    },
+    {
+      "id": "SEC4-007",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "description": "base.ts の exec 使用の技術的負債を新セクション 6-3 に記録。CopilotTool では SEC4-001 に従い execFile 使用を明記。別 Issue での対応を推奨。",
+      "updated_sections": ["6-3"]
+    },
+    {
+      "id": "SEC4-008",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "buildCliArgs() copilot ケースの getCommandForTool() マッピング安全性確認を追加。必須テスト (getCommandForTool('copilot') === 'gh') を 6-1 テーブルおよび Phase 5 チェックリストに追加。",
+      "updated_sections": ["6-1", "14 (Phase 5)"]
+    },
+    {
+      "id": "SEC4-009",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "description": "gh copilot の外部 API 呼び出し SSRF リスク評価を新セクション 6-3 に記録。現時点で対応不要であることを明記。",
+      "updated_sections": ["6-3"]
+    },
+    {
+      "id": "SEC4-010",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "GH_TOKEN/GITHUB_TOKEN の環境変数管理方針を 6-2 に詳細記載。意図的にサニタイズ対象外とする旨のコード内コメント追加を Phase 2 チェックリストに追加。将来的なツール別フィルタリングを別 Issue として記録。",
+      "updated_sections": ["6-2", "14 (Phase 2)"]
+    }
+  ],
+  "summary": {
+    "total": 10,
+    "applied": 10,
+    "skipped": 0,
+    "partially_applied": 0
+  },
+  "design_policy_path": "dev-reports/design/issue-545-copilot-cli-design-policy.md",
+  "review_result_path": "dev-reports/issue/545/multi-stage-design-review/stage4-review-result.json",
+  "applied_date": "2026-03-26",
+  "applied_by": "apply-review-agent (stage4-security)"
+}

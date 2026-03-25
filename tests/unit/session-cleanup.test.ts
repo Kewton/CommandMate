@@ -78,13 +78,14 @@ describe('Session Cleanup Utility', () => {
 
       const result = await cleanupWorktreeSessions('wt-1', killSessionFn);
 
-      // Should call killSession for claude, codex, gemini, vibe-local, opencode
-      expect(killSessionFn).toHaveBeenCalledTimes(5);
+      // Should call killSession for claude, codex, gemini, vibe-local, opencode, copilot
+      expect(killSessionFn).toHaveBeenCalledTimes(6);
       expect(killSessionFn).toHaveBeenCalledWith('wt-1', 'claude');
       expect(killSessionFn).toHaveBeenCalledWith('wt-1', 'codex');
       expect(killSessionFn).toHaveBeenCalledWith('wt-1', 'gemini');
       expect(killSessionFn).toHaveBeenCalledWith('wt-1', 'vibe-local');
       expect(killSessionFn).toHaveBeenCalledWith('wt-1', 'opencode');
+      expect(killSessionFn).toHaveBeenCalledWith('wt-1', 'copilot');
     });
 
     it('should stop response-poller for all CLI tools', async () => {
@@ -93,12 +94,13 @@ describe('Session Cleanup Utility', () => {
       await cleanupWorktreeSessions('wt-1', killSessionFn);
 
       // Should call stopPolling for each tool
-      expect(stopResponsePolling).toHaveBeenCalledTimes(5);
+      expect(stopResponsePolling).toHaveBeenCalledTimes(6);
       expect(stopResponsePolling).toHaveBeenCalledWith('wt-1', 'claude');
       expect(stopResponsePolling).toHaveBeenCalledWith('wt-1', 'codex');
       expect(stopResponsePolling).toHaveBeenCalledWith('wt-1', 'gemini');
       expect(stopResponsePolling).toHaveBeenCalledWith('wt-1', 'vibe-local');
       expect(stopResponsePolling).toHaveBeenCalledWith('wt-1', 'opencode');
+      expect(stopResponsePolling).toHaveBeenCalledWith('wt-1', 'copilot');
     });
 
 
@@ -149,19 +151,17 @@ describe('Session Cleanup Utility', () => {
     it('should continue processing after individual errors', async () => {
       const killSessionFn = vi.fn()
         .mockRejectedValueOnce(new Error('Claude kill failed'))
-        .mockResolvedValueOnce(true)
-        .mockResolvedValueOnce(true)
-        .mockResolvedValueOnce(true)
-        .mockResolvedValueOnce(true);
+        .mockResolvedValue(true);
 
       const result = await cleanupWorktreeSessions('wt-1', killSessionFn);
 
-      // Should still have processed all tools despite first error
-      expect(killSessionFn).toHaveBeenCalledTimes(5);
+      // Should still have processed all 6 tools despite first error
+      expect(killSessionFn).toHaveBeenCalledTimes(6);
       expect(result.sessionsKilled).toContain('codex');
       expect(result.sessionsKilled).toContain('gemini');
       expect(result.sessionsKilled).toContain('vibe-local');
       expect(result.sessionsKilled).toContain('opencode');
+      expect(result.sessionsKilled).toContain('copilot');
     });
   });
 
@@ -173,8 +173,8 @@ describe('Session Cleanup Utility', () => {
       const result = await cleanupMultipleWorktrees(worktreeIds, killSessionFn);
 
       expect(result.results).toHaveLength(3);
-      // Each worktree should have 5 CLI tools killed
-      expect(killSessionFn).toHaveBeenCalledTimes(15); // 3 worktrees * 5 CLI tools
+      // Each worktree should have 6 CLI tools killed (claude, codex, gemini, vibe-local, opencode, copilot)
+      expect(killSessionFn).toHaveBeenCalledTimes(18); // 3 worktrees * 6 CLI tools
     });
 
     it('should aggregate all warnings', async () => {

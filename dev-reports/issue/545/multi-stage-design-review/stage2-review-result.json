@@ -1,0 +1,121 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "findings": [
+    {
+      "id": "DR2-001",
+      "severity": "must_fix",
+      "category": "code_consistency",
+      "title": "executeClaudeCommand() が cliToolId を直接コマンド名として execFile() に渡している事実の記載が不正確",
+      "description": "設計方針書セクション 3-2 では getCommandForTool() マッピング関数の導入を提案しているが、現在の claude-executor.ts (line 157-158) は `execFile(cliToolId, args, ...)` と cliToolId をそのままコマンド名として使用している。設計書は「cliToolIdを直接コマンド名として使用している」と正しく認識しているものの、copilot の場合 cliToolId='copilot' が execFile('copilot', ...) として実行されてしまい、'gh' コマンドとして実行されない。getCommandForTool() の導入は新規関数追加であり、既存コードの記述ではないため、実装チェックリストで明確に「新規実装」として区別すべき。",
+      "suggestion": "実装チェックリストで getCommandForTool() を「既存関数の修正」ではなく「新規ユーティリティ関数の追加」として明記し、execFile(cliToolId, ...) を execFile(getCommandForTool(cliToolId), ...) に変更するリファクタリングが必要であることを明示する。",
+      "affected_section": "3-2. コマンド形式の設計判断"
+    },
+    {
+      "id": "DR2-002",
+      "severity": "must_fix",
+      "category": "code_consistency",
+      "title": "ALLOWED_CLI_TOOLS は CLI_TOOL_IDS から導出されていないが、設計書の記述が曖昧",
+      "description": "設計方針書セクション 3-2 (DR1-009) では「推奨: ALLOWED_CLI_TOOLS を new Set(CLI_TOOL_IDS) から導出する」と記載しているが、現在の claude-executor.ts (line 37) では `new Set(['claude', 'codex', 'gemini', 'vibe-local', 'opencode'])` とハードコードされている。さらに、claude-executor.ts は CLI_TOOL_IDS を import していない。copilot 追加時に ALLOWED_CLI_TOOLS への追加を忘れるとスケジュール実行で copilot が拒否される。設計書は推奨方針を述べているが、これが必須対応であることを明確にすべき。",
+      "suggestion": "DR1-009 の対応を should_fix から must_fix に昇格させるか、最低限 copilot 追加時に ALLOWED_CLI_TOOLS と CLI_TOOL_IDS の同期を保証するテストケースの追加を実装チェックリストに含める。",
+      "affected_section": "3-2. コマンド形式の設計判断"
+    },
+    {
+      "id": "DR2-003",
+      "severity": "should_fix",
+      "category": "code_consistency",
+      "title": "getCliToolSkipPatterns() 関数は存在しない",
+      "description": "設計方針書セクション 9 の cli-patterns.ts への追加として `getCliToolSkipPatterns()` への copilot ケース追加を記載しているが、実際のコードベースには `getCliToolSkipPatterns()` という独立した関数は存在しない。skip patterns は `getCliToolPatterns()` の戻り値の `skipPatterns` プロパティとして返される。Issue 本文でも `getCliToolSkipPatterns` への追加が記載されている。",
+      "suggestion": "設計方針書と Issue の記述を「getCliToolPatterns() の skipPatterns プロパティに copilot パターンを追加」に修正する。",
+      "affected_section": "9. 検出パターン設計、10. ファイル変更一覧"
+    },
+    {
+      "id": "DR2-004",
+      "severity": "should_fix",
+      "category": "code_consistency",
+      "title": "escapeShellArg() 関数がコードベースに存在しない",
+      "description": "設計方針書セクション 3-4 のワンショット実行モデルコード例で `escapeShellArg(message)` を使用しているが、この関数はコードベースのどこにも定義されていない。ワンショットモデル採用時にはこの関数を新規実装する必要がある。",
+      "suggestion": "escapeShellArg() が新規実装であることを設計書に明記するか、tmux sendKeys 経由であればエスケープ不要であることを注記する。セクション 6-1 のセキュリティ設計で言及されている通り、採用モデルに応じて対応を確定すること。",
+      "affected_section": "3-4. ワンショット実行モデル"
+    },
+    {
+      "id": "DR2-005",
+      "severity": "should_fix",
+      "category": "code_consistency",
+      "title": "CopilotTool コード例の sendMessage() が既存ツールの実装パターンと不一致",
+      "description": "設計方針書セクション 3-1 の CopilotTool クラスのコード例では sendMessage() のシグネチャのみ記載されているが、DR1-010 で言及された既存ツールの sendMessage() 共通パターン（sendKeys -> wait -> Enter -> wait -> pastedText -> invalidateCache）が反映されていない。セクション 3-4 のワンショットモデルの sendMessage() も `invalidateCache(sessionName)` のみで、`detectAndResendIfPastedText()` の呼び出しが欠落している。Codex (codex.ts line 229) や Gemini の実装では `detectAndResendIfPastedText()` を呼んでいるのと不整合。",
+      "suggestion": "コード例を更新して既存ツールの sendMessage() パターンと整合させるか、ワンショットモデルでは pasted text 検出が不要な理由を明記する。",
+      "affected_section": "3-1. Strategyパターン、3-4. ワンショット実行モデル"
+    },
+    {
+      "id": "DR2-006",
+      "severity": "should_fix",
+      "category": "type_consistency",
+      "title": "ICLITool インターフェースの interrupt() メソッドが設計書の CopilotTool コード例に含まれていない",
+      "description": "types.ts の ICLITool インターフェースには `interrupt(worktreeId: string): Promise<void>` が定義されており、BaseCLITool にデフォルト実装がある（Escape キー送信）。設計書の CopilotTool コード例ではこのメソッドへの言及がない。BaseCLITool のデフォルト実装を継承する想定であれば問題ないが、copilot のインタラクションモデルによっては Escape キーでの中断が機能しない可能性がある。",
+      "suggestion": "interrupt() の動作確認を Phase 1 前提調査に含めるか、BaseCLITool のデフォルト実装を継承する旨を設計書に明記する。",
+      "affected_section": "3-1. Strategyパターン"
+    },
+    {
+      "id": "DR2-007",
+      "severity": "should_fix",
+      "category": "architecture_consistency",
+      "title": "CLIToolManager が Singleton パターンを使用している記述は正確だが、copilot 登録方法の具体例が不足",
+      "description": "設計方針書のアーキテクチャ図では CLIToolManager が全ツールを管理する構成を示しているが、manager.ts の実際のコード（コンストラクタ内でハードコードされた `this.tools.set()` 呼び出し、line 29-33）への追加方法が設計書に記載されていない。manager.ts の変更ファイル一覧には「CopilotTool初期化・登録」と記載があるものの、具体的なコード例（import 文と tools.set 呼び出し）がないため、VibeLocalTool/OpenCodeTool と同じパターンで追加すべきことが暗黙的。",
+      "suggestion": "manager.ts の変更内容として `import { CopilotTool } from './copilot'` と `this.tools.set('copilot', new CopilotTool())` の追加を明示するか、既存ツールの登録パターンへの参照を記載する。",
+      "affected_section": "10. ファイル変更一覧"
+    },
+    {
+      "id": "DR2-008",
+      "severity": "should_fix",
+      "category": "code_consistency",
+      "title": "buildDetectPromptOptions() の copilot 対応方針が不明確",
+      "description": "cli-patterns.ts の buildDetectPromptOptions() (line 487-499) は claude と opencode のみ `requireDefaultIndicator: false` を返し、他のツールは undefined を返す。copilot のプロンプトが標準インジケータ（> / ❯）を使用しない場合、requireDefaultIndicator の設定が必要になるが、設計書では Issue の Phase 3 タスクに `buildDetectPromptOptions()` への copilot ケース追加が含まれているものの、どの値を返すべきかの指針がない。",
+      "suggestion": "Phase 1 前提調査で copilot のプロンプトインジケータを確認し、buildDetectPromptOptions() の戻り値を決定する旨を前提調査タスクの完了条件に追加する。",
+      "affected_section": "9. 検出パターン設計"
+    },
+    {
+      "id": "DR2-009",
+      "severity": "nice_to_have",
+      "category": "doc_consistency",
+      "title": "設計書の getCliToolPatterns() コード例の戻り値型と実際の関数シグネチャは一致しているが、skipPatterns の型が微妙に異なる",
+      "description": "設計書セクション 9 の getCliToolPatterns() コード例では `skipPatterns` の型指定がないが、実際の関数 (cli-patterns.ts line 291-296) は `skipPatterns: RegExp[]` を返す。設計書のコード例で `COPILOT_SKIP_PATTERNS` の型が明示されていない。",
+      "suggestion": "コード例に `skipPatterns: COPILOT_SKIP_PATTERNS` として、COPILOT_SKIP_PATTERNS を `readonly RegExp[]` 型で定義する例を追加すると、OPENCODE_SKIP_PATTERNS (line 231) との整合性が取れる。",
+      "affected_section": "9. 検出パターン設計"
+    },
+    {
+      "id": "DR2-010",
+      "severity": "nice_to_have",
+      "category": "doc_consistency",
+      "title": "MAX_SELECTED_AGENTS=4 の記述は正確",
+      "description": "設計方針書のセクション 8 で MAX_SELECTED_AGENTS=4 維持と記載されており、selected-agents-validator.ts (line 17) の `MAX_SELECTED_AGENTS = 4` と一致している。Issue 本文でも同じ方針が記載されている。整合性に問題はないが、6 ツールから 4 選択の根拠（「十分なカバレッジ」）は UI 制約の観点からの説明が薄い。",
+      "suggestion": "モバイル表示制約（タブ幅等）を根拠として具体的に記載すると、将来の変更判断時に役立つ。",
+      "affected_section": "8. 設計上の決定事項とトレードオフ"
+    },
+    {
+      "id": "DR2-011",
+      "severity": "nice_to_have",
+      "category": "doc_consistency",
+      "title": "D1-003 レジストリパターン移行閾値のコード内コメント参照は正確",
+      "description": "設計方針書で言及されている D1-003 のコードコメント（cli-patterns.ts line 482）は実際にコードベースに存在し、「6th tool addition triggers registry pattern migration [D1-003]」と記載されている。設計書と実コードの整合性は取れている。",
+      "suggestion": "特に対応不要。確認のための記録。",
+      "affected_section": "8. 設計上の決定事項とトレードオフ"
+    },
+    {
+      "id": "DR2-012",
+      "severity": "should_fix",
+      "category": "code_consistency",
+      "title": "isInstalled() コード例で execAsync を使用しているが、BaseCLITool の import パスと異なる",
+      "description": "設計方針書セクション 3-3 の isInstalled() オーバーライド例では `await execAsync('which gh', ...)` と `await execAsync('gh extension list', ...)` を使用している。BaseCLITool (base.ts line 12) では `const execAsync = promisify(exec)` でローカル定義されているため、CopilotTool でも同じパターンで import する必要があるが、設計書のコード例では import 文が省略されている。既存ツール（codex.ts, gemini.ts）は BaseCLITool の isInstalled() を継承しオーバーライドしていないため、オーバーライドの先例がない。",
+      "suggestion": "copilot.ts のコード例に `import { exec } from 'child_process'; import { promisify } from 'util'; const execAsync = promisify(exec);` の import パターンを明記するか、BaseCLITool から protected メソッドとして execAsync を公開する設計を検討する。",
+      "affected_section": "3-3. isInstalled() のオーバーライド"
+    }
+  ],
+  "summary": {
+    "total_findings": 12,
+    "must_fix": 2,
+    "should_fix": 7,
+    "nice_to_have": 3
+  }
+}
