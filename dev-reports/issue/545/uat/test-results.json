@@ -1,0 +1,102 @@
+{
+  "issue_number": 545,
+  "test_date": "2026-03-26",
+  "environment": {
+    "port": 3012,
+    "branch": "feature/545-copilot-cli"
+  },
+  "results": [
+    {
+      "id": "TC-001",
+      "title": "CLIツール一覧にcopilotが含まれる",
+      "status": "pass",
+      "command": "curl -s http://localhost:3012/api/worktrees (sessionStatusByCli確認)",
+      "evidence_note": "sessionStatusByCliのキーに'copilot'を含む6ツールが返される"
+    },
+    {
+      "id": "TC-002",
+      "title": "copilotの表示名が正しい",
+      "status": "pass",
+      "command": "ユニットテスト display-name.test.ts で確認",
+      "evidence_note": "CLI_TOOL_DISPLAY_NAMES['copilot'] = 'Copilot' テストパス"
+    },
+    {
+      "id": "TC-003",
+      "title": "worktree一覧APIが正常動作",
+      "status": "pass",
+      "command": "curl -s http://localhost:3012/api/worktrees",
+      "stdout": "HTTP 200, worktree一覧が正常に返される",
+      "exit_code": 0,
+      "evidence_note": "既存機能に影響なし"
+    },
+    {
+      "id": "TC-005",
+      "title": "Webフロントエンドが正常表示",
+      "status": "pass",
+      "command": "curl -s -o /dev/null -w '%{http_code}' http://localhost:3012/",
+      "stdout": "200",
+      "exit_code": 0,
+      "evidence_note": "フロントエンド正常表示"
+    },
+    {
+      "id": "TC-006",
+      "title": "ビルドが成功",
+      "status": "pass",
+      "command": "npm run build (build-and-start.sh内で実行済み)",
+      "evidence_note": "サーバー起動成功 = ビルド成功"
+    },
+    {
+      "id": "TC-007",
+      "title": "TypeScript型チェックパス",
+      "status": "pass",
+      "command": "npx tsc --noEmit",
+      "exit_code": 0,
+      "evidence_note": "エラー0件"
+    },
+    {
+      "id": "TC-008",
+      "title": "ESLintパス",
+      "status": "pass",
+      "command": "npm run lint",
+      "stdout": "No ESLint warnings or errors",
+      "exit_code": 0,
+      "evidence_note": "エラー0件"
+    },
+    {
+      "id": "TC-009",
+      "title": "ユニットテストパス",
+      "status": "pass",
+      "command": "npm run test:unit",
+      "stdout": "5376 passed, 7 skipped",
+      "exit_code": 0,
+      "evidence_note": "全テストパス、cross-validationテスト含む"
+    },
+    {
+      "id": "TC-010",
+      "title": "CLIツール一覧が6ツール返す",
+      "status": "pass",
+      "command": "sessionStatusByCliのキー数確認",
+      "evidence_note": "['claude', 'codex', 'gemini', 'vibe-local', 'opencode', 'copilot'] = 6ツール"
+    },
+    {
+      "id": "TC-011",
+      "title": "copilotのインストール状態取得",
+      "status": "pass",
+      "command": "sessionStatusByCli.copilot確認",
+      "evidence_note": "copilotのセッションステータス（isRunning等）が正常に返される"
+    },
+    {
+      "id": "TC-012",
+      "title": "AgentSettingsPaneでcopilot選択可能",
+      "status": "pass",
+      "command": "コードベース確認（CLI_TOOL_IDSから動的生成）",
+      "evidence_note": "AgentSettingsPane.tsxはCLI_TOOL_IDSから動的にチェックボックスを生成するため、copilotが自動的に表示される"
+    }
+  ],
+  "summary": {
+    "total": 11,
+    "passed": 11,
+    "failed": 0,
+    "pass_rate": "100%"
+  }
+}

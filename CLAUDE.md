@@ -175,11 +175,12 @@ tests/
 | `src/config/timer-constants.ts` | タイマー定数定義（TIMER_DELAYS, MAX_TIMERS_PER_WORKTREE, TIMER_STATUS, isValidTimerDelay）（Issue #534） |
 | `src/lib/detection/prompt-key.ts` | promptKey重複排除ユーティリティ |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
-| `src/lib/cli-tools/types.ts` | CLIツール型定義（IImageCapableCLITool/isImageCapableCLITool追加）（Issue #474） |
+| `src/lib/cli-tools/types.ts` | CLIツール型定義（IImageCapableCLITool/isImageCapableCLITool追加）（Issue #474）（Issue #545: copilot追加、6ツール対応） |
 | `src/lib/cli-tools/codex.ts` | Codex CLIセッション管理 |
 | `src/lib/cli-tools/vibe-local.ts` | Vibe Local CLIツール |
 | `src/lib/cli-tools/opencode.ts` | OpenCode CLIツール |
 | `src/lib/cli-tools/opencode-config.ts` | OpenCode設定自動生成（Ollama/LM Studio） |
+| `src/lib/cli-tools/copilot.ts` | GitHub Copilot CLIセッション管理（Issue #545） |
 | `src/lib/selected-agents-validator.ts` | エージェント選択バリデーション（2-4エージェント） |
 | `src/lib/session/claude-executor.ts` | CLI非インタラクティブ実行エンジン |
 | `src/lib/timer-manager.ts` | タイマーマネージャー（globalThis singleton、setTimeout管理、サーバー再起動リカバリ）（Issue #534） |
@@ -262,7 +263,7 @@ tests/
 | `src/cli/utils/command-helpers.ts` | CLI共通ヘルパー（TOKEN_WARNING定数・handleCommandError統一エラーハンドラ）（Issue #518） |
 | `src/cli/types/api-responses.ts` | CLI側APIレスポンス型定義（WorktreeListResponse, CurrentOutputResponse, PromptResponseResult等）（Issue #518） |
 | `src/cli/config/duration-constants.ts` | CLI側duration定数（DURATION_MAP, parseDurationToMs）（Issue #518） |
-| `src/cli/config/cli-tool-ids.ts` | CLI側ツールID定義（CLI_TOOL_IDS, isCliToolId）（Issue #518） |
+| `src/cli/config/cli-tool-ids.ts` | CLI側ツールID定義（CLI_TOOL_IDS, isCliToolId、copilot含む6ツール）（Issue #518, #545） |
 
 ### CLIモジュール
 

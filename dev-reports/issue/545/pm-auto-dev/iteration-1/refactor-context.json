@@ -1,0 +1,22 @@
+{
+  "issue_number": 545,
+  "refactor_targets": [
+    "src/lib/cli-tools/copilot.ts",
+    "src/lib/session/claude-executor.ts",
+    "src/lib/log-manager.ts",
+    "src/lib/detection/cli-patterns.ts",
+    "src/lib/response-cleaner.ts",
+    "src/lib/polling/response-poller.ts"
+  ],
+  "quality_metrics": {
+    "typescript_errors": 0,
+    "lint_errors": 0,
+    "test_pass_count": 5375
+  },
+  "improvement_goals": [
+    "コードの重複削減（copilot.ts内）",
+    "型安全性の確認",
+    "セキュリティ対策の確認（execFile使用、エスケープ処理）",
+    "テストカバレッジの確認・改善"
+  ]
+}

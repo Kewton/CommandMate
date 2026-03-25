@@ -21,16 +21,10 @@ import {
 import { detectAndResendIfPastedText } from '../pasted-text-helper';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { COPILOT_PROMPT_PATTERN, stripAnsi } from '../detection/cli-patterns';
+import { getErrorMessage } from '@/lib/errors';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('cli-tools/copilot');
-
-/**
- * Extract error message from unknown error type (DRY)
- */
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /** Wait for Copilot CLI to initialize after launch */
 const COPILOT_INIT_WAIT_MS = 4000;

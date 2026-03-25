@@ -3,7 +3,7 @@
  * Issue #294: Executes CLI tool commands for scheduled executions
  * Issue #379: Added OpenCode support (opencode run)
  *
- * Supported tools: claude, codex, gemini, vibe-local, opencode
+ * Supported tools: claude, codex, gemini, vibe-local, opencode, copilot
  *
  * Security:
  * - Uses execFile (not exec) to prevent shell injection

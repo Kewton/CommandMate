@@ -1,0 +1,84 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘対応",
+  "applied_findings": [
+    {
+      "id": "IA3-001",
+      "severity": "must_fix",
+      "status": "applied",
+      "description": "log-manager.ts のツール名マッピングを CLI_TOOL_DISPLAY_NAMES import に置換する方針をセクション10の変更ファイル一覧に具体的修正内容として記載。Phase 4 チェックリストにも追加。"
+    },
+    {
+      "id": "IA3-002",
+      "severity": "must_fix",
+      "status": "applied",
+      "description": "log-manager.ts listLogs() の hardcoded ツールID リストを CLI_TOOL_IDS import に置換する方針をセクション10に記載。Phase 4 チェックリストにも追加。"
+    },
+    {
+      "id": "IA3-003",
+      "severity": "must_fix",
+      "status": "applied",
+      "description": "response-poller.ts の記載を大幅更新。20箇所以上の分岐ポイント個別精査の必要性、特に completion detection (line 372-375) での copilot 完了検出ロジック追加が必須であることを明記。Phase 3 チェックリストに2項目追加。"
+    },
+    {
+      "id": "IA3-004",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "cmate-validator.ts の記載を更新し、copilot の permission モデル対応の具体的な分岐ロジック検討を追記。Phase 1 調査項目と Phase 4 チェックリストに追加。"
+    },
+    {
+      "id": "IA3-005",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "セクション9 status-detector.ts に4つの tool-specific 分岐ポイント(line 184, 203, 233, 330)の詳細分析を追加。Phase 1 チェックリストに promptInput 判定方式と TUI 検出の調査項目を追加。"
+    },
+    {
+      "id": "IA3-006",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "セクション10の条件付き変更ファイルで response-extractor.ts の記載を詳細化。Phase 3 テストでの明示的検証をチェックリストに追加。テスト戦略にも追加。"
+    },
+    {
+      "id": "IA3-007",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "セクション10の assistant-response-saver.ts 記載を更新し、case 'copilot' 追加と cleanCopilotResponse の実装・re-export の詳細を明記。Phase 3 チェックリストに追加。"
+    },
+    {
+      "id": "IA3-008",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "テスト戦略セクション11の既存テスト更新リストを5件から15件に拡充。claude-executor.test.ts と cli-patterns.test.ts を必須、CLI コマンドテスト群と統合テスト群を推奨として追加。Phase 5 チェックリストにも4項目追加。"
+    },
+    {
+      "id": "IA3-009",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "セクション10の条件付き変更ファイルで prompt-answer-sender.ts の記載を詳細化（line 50 の Claude multi-choice 分岐）。Phase 1 チェックリストに調査項目を追加。"
+    },
+    {
+      "id": "IA3-010",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "description": "新規セクション16「ロールバック戦略」を追加。技術的手順、DB レコードの扱い（cliToolId='copilot' のフォールバック）、ロールバック影響の限定性を記載。"
+    },
+    {
+      "id": "IA3-011",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "description": "セクション10の条件付き変更ファイルで command-merger.ts の記載を詳細化（line 194 の claude 専用分岐）。Phase 1 チェックリストに判断項目を追加。"
+    },
+    {
+      "id": "IA3-012",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "description": "テスト戦略セクション11にスケジュール実行 API の copilot 受け入れ確認テストを追加。Phase 5 チェックリストにも追加。"
+    }
+  ],
+  "summary": {
+    "total": 12,
+    "applied": 12,
+    "skipped": 0,
+    "partially_applied": 0
+  }
+}

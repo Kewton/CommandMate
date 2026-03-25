@@ -1,0 +1,96 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘対応",
+  "applied_findings": [
+    {
+      "id": "DR2-001",
+      "severity": "must_fix",
+      "status": "applied",
+      "description": "getCommandForTool() を新規関数として明記し、executeClaudeCommand() の既存コード変更（execFile(cliToolId,...) -> execFile(getCommandForTool(cliToolId),...))を設計書に明示。実装チェックリストに2項目追加。",
+      "affected_sections": ["3-2", "14"]
+    },
+    {
+      "id": "DR2-002",
+      "severity": "must_fix",
+      "status": "applied",
+      "description": "DR1-009 を must_fix に昇格。ALLOWED_CLI_TOOLS の CLI_TOOL_IDS からの導出を必須対応として明記。import の必要性と具体的なハードコード箇所（line 37）を記載。実装チェックリストに反映。",
+      "affected_sections": ["3-2", "13", "14"]
+    },
+    {
+      "id": "DR2-003",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "getCliToolSkipPatterns() が存在しない旨の注記を追加。getCliToolPatterns() の skipPatterns プロパティへの追加として記述を修正。",
+      "affected_sections": ["9"]
+    },
+    {
+      "id": "DR2-004",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "escapeShellArg() が新規実装である旨を設計書に明記。tmux sendKeys 経由の場合の不要性も注記。実装チェックリストに反映。",
+      "affected_sections": ["3-4", "14"]
+    },
+    {
+      "id": "DR2-005",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "sendMessage() のコード例に detectAndResendIfPastedText() パターンの要否確認を追加。REPL モデルのコード例に既存パターンの手順を記載。実装チェックリストに反映。",
+      "affected_sections": ["3-1", "3-4", "14"]
+    },
+    {
+      "id": "DR2-006",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "interrupt() の BaseCLITool デフォルト実装継承を CopilotTool コード例に明記。Phase 1 前提調査にEscapeキー動作確認を追加。",
+      "affected_sections": ["3-1", "14"]
+    },
+    {
+      "id": "DR2-007",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "manager.ts の変更内容に具体的なコード例（import文とtools.set呼び出し）を追加。VibeLocalTool/OpenCodeToolと同じパターンへの参照を記載。",
+      "affected_sections": ["10", "14"]
+    },
+    {
+      "id": "DR2-008",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "buildDetectPromptOptions() の copilot 対応方針を検出パターン設計セクションに追加。Phase 1 前提調査タスクにプロンプトインジケータ確認と requireDefaultIndicator 戻り値の決定を追加。",
+      "affected_sections": ["9", "14"]
+    },
+    {
+      "id": "DR2-009",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "description": "COPILOT_SKIP_PATTERNS を readonly RegExp[] 型で定義するコード例を追加。OPENCODE_SKIP_PATTERNS との整合性を確保。",
+      "affected_sections": ["9"]
+    },
+    {
+      "id": "DR2-010",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "description": "MAX_SELECTED_AGENTS=4 の UI 制約根拠の追記。既存の説明で十分と判断しスキップ。",
+      "affected_sections": ["8"]
+    },
+    {
+      "id": "DR2-011",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "description": "D1-003 レジストリパターン移行閾値のコード内コメント確認。レビューで整合性確認済みのため対応不要。",
+      "affected_sections": ["8"]
+    },
+    {
+      "id": "DR2-012",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "isInstalled() オーバーライドの import パターン（exec, promisify, execAsync）をコード例に追加。BaseCLITool と同じパターンであることを明記。実装チェックリストに反映。",
+      "affected_sections": ["3-3", "14"]
+    }
+  ],
+  "summary": {
+    "total": 12,
+    "applied": 10,
+    "skipped": 2,
+    "partially_applied": 0
+  }
+}

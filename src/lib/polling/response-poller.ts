@@ -1,6 +1,6 @@
 /**
  * CLI Tool response polling - barrel file and polling control.
- * Periodically checks tmux sessions for CLI tool responses (Claude, Codex, Gemini, Vibe Local, OpenCode).
+ * Periodically checks tmux sessions for CLI tool responses (Claude, Codex, Gemini, Vibe Local, OpenCode, Copilot).
  *
  * Issue #479: Split into sub-modules for single-responsibility separation.
  * - response-extractor.ts: resolveExtractionStartIndex, isOpenCodeComplete

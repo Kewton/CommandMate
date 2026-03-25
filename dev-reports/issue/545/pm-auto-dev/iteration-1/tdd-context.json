@@ -1,0 +1,40 @@
+{
+  "issue_number": 545,
+  "acceptance_criteria": [
+    "copilotがAIエージェント一覧に表示される",
+    "copilotセッションの起動・停止ができる",
+    "メッセージ送信・応答受信ができる",
+    "ステータス検出（idle/ready/running）が正しく動作する",
+    "Auto-Yes機能が動作する",
+    "既存エージェントに影響がない",
+    "CLI側のCLI_TOOL_IDSがサーバー側と同期している（cross-validationテスト通過）",
+    "yes/no選択プロンプトが検出・応答できる"
+  ],
+  "implementation_tasks": [
+    "Task 2.1: src/lib/cli-tools/types.ts にCLI_TOOL_IDSとCLI_TOOL_DISPLAY_NAMESにcopilot追加。src/cli/config/cli-tool-ids.ts にも追加",
+    "Task 2.2: src/lib/cli-tools/copilot.ts 新規作成。BaseCLITool拡張、command='gh'、isInstalled()オーバーライド（execFile使用、gh + copilot拡張2段階確認）、isRunning/startSession/sendMessage/killSession実装",
+    "Task 2.3: src/lib/cli-tools/manager.ts にCopilotTool初期化・登録",
+    "Task 2.4: src/lib/session/claude-executor.ts にgetCommandForTool()新規関数追加、ALLOWED_CLI_TOOLSをCLI_TOOL_IDSから導出、buildCliArgs() copilotケース追加",
+    "Task 3.1: src/lib/detection/cli-patterns.ts にCOPILOT_PROMPT_PATTERN等追加、getCliToolPatterns/detectThinking/buildDetectPromptOptions copilotケース追加",
+    "Task 3.2: src/lib/detection/prompt-detector.ts copilotケース追加",
+    "Task 3.3: src/lib/detection/status-detector.ts copilotケース追加",
+    "Task 3.4: src/lib/response-cleaner.ts にcleanCopilotResponse追加",
+    "Task 3.5: src/lib/assistant-response-saver.ts cleanCliResponse() copilotケース追加",
+    "Task 3.6: src/lib/polling/response-poller.ts の全ディスパッチポイントにcopilotケース追加（特に完了検出は必須）",
+    "Task 4.1: src/lib/cmate-parser.ts / cmate-validator.ts copilotケース追加",
+    "Task 4.2: src/components/worktree/AgentSettingsPane.tsx copilot選択肢追加",
+    "Task 4.3: src/lib/log-manager.ts ツール名マッピングをCLI_TOOL_DISPLAY_NAMES/CLI_TOOL_IDSから導出に修正",
+    "Task 4.4: src/lib/security/env-sanitizer.ts GH_DEBUG追加",
+    "Task 5.1-5.3: ユニットテスト作成・既存テスト更新"
+  ],
+  "design_doc_path": "dev-reports/design/issue-545-copilot-cli-design-policy.md",
+  "work_plan_path": "dev-reports/issue/545/work-plan.md",
+  "target_coverage": 80,
+  "notes": [
+    "copilot-cliの前提調査（コマンド形式・インタラクションモデル・TUIレイアウト）は未完了。パターン定義はプレースホルダとして実装し、Phase 1調査完了後に確定する",
+    "command = 'gh' のため isInstalled() は execFile 使用でオーバーライド必須 [DR1-004][SEC4-001]",
+    "getCommandForTool() は新規関数として追加 [DR2-001]",
+    "ALLOWED_CLI_TOOLS は CLI_TOOL_IDS から導出 [DR2-002]",
+    "log-manager.ts のハードコードを CLI_TOOL_DISPLAY_NAMES/CLI_TOOL_IDS に置換 [IA3-001][IA3-002]"
+  ]
+}

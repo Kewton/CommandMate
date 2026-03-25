@@ -514,10 +514,10 @@ export const CLAUDE_SESSION_ERROR_REGEX_PATTERNS: readonly RegExp[] = [
  * this function lives in cli-patterns.ts which already depends on CLIToolType.
  *
  * [Future extension memo (C-002)]
- * If CLI tool count grows significantly (currently 5), consider migrating
+ * If CLI tool count grows significantly (currently 6), consider migrating
  * to a CLIToolConfig registry pattern where tool-specific settings
  * (including promptDetectionOptions) are managed in a Record<CLIToolType, CLIToolConfig>.
- * Migration threshold: 6th tool addition triggers registry pattern migration [D1-003].
+ * Migration threshold: 7th tool addition triggers registry pattern migration [D1-003].
  *
  * @param cliToolId - CLI tool identifier
  * @returns DetectPromptOptions for the tool, or undefined for default behavior

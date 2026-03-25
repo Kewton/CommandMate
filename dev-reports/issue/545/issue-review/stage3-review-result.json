@@ -1,0 +1,178 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "focus_area": "影響範囲",
+  "issue_number": 545,
+  "review_date": "2026-03-25",
+  "findings": [
+    {
+      "id": "F3-001",
+      "severity": "must_fix",
+      "category": "impact_scope",
+      "title": "claude-executor.ts の ALLOWED_CLI_TOOLS と buildCliArgs() が影響範囲に記載されていない",
+      "description": "src/lib/session/claude-executor.ts には ALLOWED_CLI_TOOLS（Set型のホワイトリスト）と buildCliArgs()（switch文によるツール別引数構築）がある。ALLOWED_CLI_TOOLS に 'copilot' を追加しないとスケジュール実行時に 'Invalid CLI tool' エラーとなる。buildCliArgs() にも copilot 用の case が必要。",
+      "suggestion": "影響範囲の変更対象ファイルテーブルに src/lib/session/claude-executor.ts を追加し、実装タスク Phase 2 または Phase 3 に以下を追加: (1) ALLOWED_CLI_TOOLS に 'copilot' 追加、(2) buildCliArgs() に copilot ケース追加（gh copilot suggest 等のサブコマンド形式に対応）",
+      "affected_files": ["src/lib/session/claude-executor.ts"]
+    },
+    {
+      "id": "F3-002",
+      "severity": "must_fix",
+      "category": "impact_scope",
+      "title": "response-poller.ts 内の複数の cliToolId 分岐ポイントが影響範囲に不足",
+      "description": "response-poller.ts は Issue で「レスポンスクリーニングif-elseチェーンにcopilotケース追加」と記載されているが、実際にはそれ以外にも複数の cliToolId 分岐がある: (1) extractResponse() 内の findRecentUserPromptIndex のツール別分岐（line 305-327）、(2) 早期プロンプト検出の claude/codex 分岐（line 344）、(3) isCodexOrGeminiComplete 等の完了判定ロジック（line 372-375）、(4) ツール別 stop condition（line 395-412）、(5) ツール別バナー検出（line 435-502）、(6) TUI accumulator の opencode 固有処理（line 605-608, 637, 697-708）。copilot がこれらのどの分岐に該当するか、前提調査後に決定が必要。",
+      "suggestion": "影響範囲の記載を「レスポンスクリーニングcopilotケース追加」から「extractResponse() の完了判定ロジック・stop condition・バナー検出・クリーニング処理にcopilotケースを追加」に具体化する。前提調査後、copilotがREPLモードかワンショットモードかにより影響範囲が大きく変わるため、その分岐を実装タスクに明記する。",
+      "affected_files": ["src/lib/polling/response-poller.ts"]
+    },
+    {
+      "id": "F3-003",
+      "severity": "must_fix",
+      "category": "impact_scope",
+      "title": "log-manager.ts のツール名マッピングが copilot 未対応",
+      "description": "src/lib/log-manager.ts の saveConversationLog() および appendToLog() 内に、cliToolId に基づくツール名のマッピングがハードコードされている（line 94, 104, 140）。現在 'claude'/'codex'/'Gemini CLI' のみ対応しており、copilot を追加しないと 'Gemini CLI' にフォールバックする不正な表示になる。",
+      "suggestion": "影響範囲に src/lib/log-manager.ts を追加。ツール名マッピングを CLI_TOOL_DISPLAY_NAMES を使うようリファクタリングするか、copilot ケースを追加する。",
+      "affected_files": ["src/lib/log-manager.ts"]
+    },
+    {
+      "id": "F3-004",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "cmate-parser.ts と cmate-validator.ts の switch 文に copilot ケースが必要",
+      "description": "src/lib/cmate-parser.ts（line 257-268）にはスケジュール実行のパーミッション検証で codex/gemini/vibe-local 別の switch がある。src/lib/cmate-validator.ts（line 252）にも codex 判定がある。copilot のパーミッション設定ポリシーを決定して追加が必要。",
+      "suggestion": "影響範囲に src/lib/cmate-parser.ts と src/lib/cmate-validator.ts を追加。copilot は gh CLI 拡張のため、パーミッションフラグは不要（gemini/vibe-local と同様の扱い）となる可能性が高い。",
+      "affected_files": ["src/lib/cmate-parser.ts", "src/lib/cmate-validator.ts"]
+    },
+    {
+      "id": "F3-005",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "worktree-status-helper.ts の opencode 固有 captureLines 分岐に copilot 検討が必要",
+      "description": "src/lib/session/worktree-status-helper.ts（line 90）で cliToolId === 'opencode' の場合に OPENCODE_PANE_HEIGHT（200行）でキャプチャし、それ以外は 100行を使用する。copilot の TUI レイアウトに応じて、同様の分岐が必要になる可能性がある。",
+      "suggestion": "影響範囲の「関連コンポーネント」セクションに src/lib/session/worktree-status-helper.ts を追加し、前提調査タスクの TUI レイアウト分析結果に基づいてキャプチャ行数を決定する旨を記載する。",
+      "affected_files": ["src/lib/session/worktree-status-helper.ts"]
+    },
+    {
+      "id": "F3-006",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "response-extractor.ts の resolveExtractionStartIndex に copilot の分岐検討が必要",
+      "description": "src/lib/response-extractor.ts の resolveExtractionStartIndex() は opencode と codex で個別の分岐を持つ5分岐の決定木になっている。copilot の TUI 形式に応じて専用分岐が必要になる可能性がある。",
+      "suggestion": "影響範囲に src/lib/response-extractor.ts を追加し、前提調査結果に基づく条件付きタスクとして記載する。",
+      "affected_files": ["src/lib/response-extractor.ts"]
+    },
+    {
+      "id": "F3-007",
+      "severity": "should_fix",
+      "category": "test_impact",
+      "title": "既存テストファイルへの影響が未記載",
+      "description": "以下のテストファイルが CLI_TOOL_IDS の変更で直接影響を受ける: (1) tests/unit/cli-tools/types-cli-tool-ids.test.ts - ツールID一覧テスト、(2) tests/unit/cli-tools/display-name.test.ts - 表示名テスト、(3) tests/unit/cli-tools/manager.test.ts - マネージャーテスト、(4) tests/unit/cli/config/cross-validation.test.ts - CLI/サーバー間整合性テスト（自動で通るが確認必要）、(5) tests/unit/components/worktree/AgentSettingsPane.test.tsx - UI テスト。これらは copilot 追加により更新が必要。",
+      "suggestion": "Phase 5 のテストタスクに「既存テストの更新」を追加し、影響を受けるテストファイル一覧を明記する。",
+      "affected_files": [
+        "tests/unit/cli-tools/types-cli-tool-ids.test.ts",
+        "tests/unit/cli-tools/display-name.test.ts",
+        "tests/unit/cli-tools/manager.test.ts",
+        "tests/unit/cli/config/cross-validation.test.ts",
+        "tests/unit/components/worktree/AgentSettingsPane.test.tsx"
+      ]
+    },
+    {
+      "id": "F3-008",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "assistant-response-saver.ts の savePendingAssistantResponse に opencode 固有のスキップロジックがある",
+      "description": "assistant-response-saver.ts の savePendingAssistantResponse()（line 236）には cliToolId === 'opencode' の場合に null を返す（TUI特性上、responsePollerが担当するため）ロジックがある。cleanCliResponse() の switch 文は Issue に記載されているが、savePendingAssistantResponse 内の opencode スキップ判定に copilot が同様の扱いを必要とするか検討が必要。",
+      "suggestion": "前提調査タスクのインタラクションモデル確認結果に基づき、copilot が full-screen TUI を使用する場合は savePendingAssistantResponse でも同様のスキップが必要になる旨を記載する。",
+      "affected_files": ["src/lib/assistant-response-saver.ts"]
+    },
+    {
+      "id": "F3-009",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "cli-patterns.ts の buildDetectPromptOptions() に copilot ケースが必要",
+      "description": "cli-patterns.ts の buildDetectPromptOptions()（line 487-498）は claude と opencode で requireDefaultIndicator: false を返す。copilot のプロンプト検出方式に応じて同様の設定が必要。また、getCliToolPatterns()（line 260-280）と getCliToolSkipPatterns()（line 310-400）にもツール別の switch 文がある。Issue では cli-patterns.ts への COPILOT_PROMPT_PATTERN 追加は記載されているが、これらの switch 文のケース追加が明示されていない。",
+      "suggestion": "Phase 3 のタスク「src/lib/detection/cli-patterns.ts: COPILOT_PROMPT_PATTERN, COPILOT_THINKING_PATTERN 追加」に「getCliToolPatterns(), getCliToolSkipPatterns(), buildDetectPromptOptions() への copilot ケース追加」を明記する。",
+      "affected_files": ["src/lib/detection/cli-patterns.ts"]
+    },
+    {
+      "id": "F3-010",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "job-executor.ts の vibe-local 固有 model パラメータ処理に copilot 対応が必要な可能性",
+      "description": "src/lib/job-executor.ts（line 172）では cliToolId === 'vibe-local' の場合にモデル名を渡す処理がある。copilot が同様のモデルパラメータを必要とするか検討が必要。gh copilot は GitHub 側でモデルを管理するため不要の可能性が高いが、明確化しておくべき。",
+      "suggestion": "影響範囲の関連コンポーネントに src/lib/job-executor.ts を追加し、copilot はモデルパラメータ不要である旨を注記する。",
+      "affected_files": ["src/lib/job-executor.ts"]
+    },
+    {
+      "id": "F3-011",
+      "severity": "nice_to_have",
+      "category": "i18n_impact",
+      "title": "i18n ファイルの具体的な変更内容が未記載",
+      "description": "Issue では「i18n対応（en/ja）」と記載されているが、具体的にどのキーを追加するか不明。locales/en/worktree.json と locales/ja/worktree.json の確認では、エージェント名のハードコードはなく、{tool} プレースホルダーで処理されている。CLI_TOOL_DISPLAY_NAMES に 'Copilot' を追加すれば i18n ファイルの変更は最小限（不要の可能性もある）。",
+      "suggestion": "i18n タスクの内容を具体化する。CLI_TOOL_DISPLAY_NAMES 追加で UI 表示は自動対応されるため、i18n ファイル自体の変更が必要なケースを特定する（例: copilot 固有のエラーメッセージやヘルプテキスト）。不要であれば Phase 4 から i18n タスクを削除または「CLI_TOOL_DISPLAY_NAMES で対応」に変更する。",
+      "affected_files": ["locales/en/worktree.json", "locales/ja/worktree.json"]
+    },
+    {
+      "id": "F3-012",
+      "severity": "nice_to_have",
+      "category": "config_impact",
+      "title": "docs/module-reference.md の更新が CLAUDE.md 以外に必要",
+      "description": "Issue では CLAUDE.md の更新タスクは記載されているが、docs/module-reference.md にも CLI_TOOL_IDS や CLI_TOOL_DISPLAY_NAMES への参照がある。copilot.ts の追加に伴い module-reference.md も更新が必要。",
+      "suggestion": "Phase 5 のドキュメントタスクに docs/module-reference.md の更新を追加する。",
+      "affected_files": ["docs/module-reference.md"]
+    },
+    {
+      "id": "F3-013",
+      "severity": "nice_to_have",
+      "category": "security",
+      "title": "gh copilot コマンドの execFile 呼び出し時のコマンド名考慮",
+      "description": "既存ツールは cliToolId をそのまま execFile のコマンド名として使用している（claude-executor.ts line 159）。copilot は 'gh' コマンドのサブコマンド（'gh copilot suggest'）であるため、command が 'copilot' ではなく 'gh' になる。BaseCLITool.command プロパティで対応可能だが、claude-executor.ts の executeClaudeCommand() では cliToolId を直接コマンド名として使用しており、copilot の場合は 'gh' を使う必要がある。",
+      "suggestion": "前提調査タスクの結果を踏まえ、claude-executor.ts で copilot のコマンド名を 'gh' として扱うロジックを追加するか、buildCliArgs() 内で対応する方針を明記する。CopilotTool.command = 'gh' とし、buildCliArgs で copilot ケースを実装する。",
+      "affected_files": ["src/lib/session/claude-executor.ts", "src/lib/cli-tools/copilot.ts"]
+    }
+  ],
+  "summary": {
+    "total_findings": 13,
+    "must_fix": 3,
+    "should_fix": 7,
+    "nice_to_have": 3
+  },
+  "code_references": [
+    {
+      "file": "src/lib/session/claude-executor.ts",
+      "relevance": "ALLOWED_CLI_TOOLS ホワイトリストと buildCliArgs() switch文が copilot 未対応"
+    },
+    {
+      "file": "src/lib/polling/response-poller.ts",
+      "relevance": "extractResponse() 内の複数の cliToolId 分岐ポイントが影響"
+    },
+    {
+      "file": "src/lib/log-manager.ts",
+      "relevance": "ハードコードされたツール名マッピングが copilot 未対応"
+    },
+    {
+      "file": "src/lib/cmate-parser.ts",
+      "relevance": "スケジュール実行パーミッション検証の switch 文"
+    },
+    {
+      "file": "src/lib/response-extractor.ts",
+      "relevance": "resolveExtractionStartIndex() の5分岐決定木"
+    },
+    {
+      "file": "src/lib/session/worktree-status-helper.ts",
+      "relevance": "opencode 固有の captureLines 分岐"
+    },
+    {
+      "file": "src/lib/detection/cli-patterns.ts",
+      "relevance": "getCliToolPatterns(), getCliToolSkipPatterns(), buildDetectPromptOptions() の switch 文"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "docs/module-reference.md",
+      "relevance": "copilot モジュールの追加に伴う更新"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュール参照テーブルの更新（Issue に記載済み）"
+    }
+  ]
+}
