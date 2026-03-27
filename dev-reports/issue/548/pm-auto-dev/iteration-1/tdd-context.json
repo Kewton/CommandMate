@@ -1,0 +1,16 @@
+{
+  "issue_number": 548,
+  "acceptance_criteria": [
+    "モバイルレイアウトのmainコンテナにoverflow-y-autoクラスが適用されていること",
+    "モバイルレイアウトのmainコンテナにpb-32クラスが存在しないこと（デッドコード除去）",
+    "モバイルレイアウトのmainコンテナにoverflow-hiddenクラスが存在しないこと",
+    "デスクトップレイアウトが変更されていないこと",
+    "全既存テストがパスすること",
+    "静的解析エラーが0件であること"
+  ],
+  "implementation_tasks": [
+    "WorktreeDetailRefactored.tsx L1762: className=\"flex-1 pb-32 overflow-hidden\" → className=\"flex-1 overflow-y-auto\" に変更"
+  ],
+  "target_coverage": 80,
+  "design_doc_path": "dev-reports/design/issue-548-mobile-file-list-design-policy.md"
+}

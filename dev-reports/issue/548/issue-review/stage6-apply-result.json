@@ -1,0 +1,43 @@
+{
+  "issue_number": 548,
+  "iteration": 2,
+  "stage": 6,
+  "apply_date": "2026-03-27",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "概要セクションと原因分析セクションを修正。「二重パディング合計256px+」の誤った記述を削除し、pb-32はinline styleに上書きされるデッドコードであること、主因はoverflow-hiddenによるスクロール抑制であることを明確化"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "影響範囲テーブルのHistoryPane行を「flex-1 min-h-0」から「overflow-y-auto (L119), flex-1 min-h-0 (L286)」に修正"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "修正方針セクションでoverflow-y-autoを推奨に変更し、横スクロールが不要である根拠（TerminalDisplayの先行パターン）と、FileTreeViewで長いファイルパスがある場合のoverflow-auto選択肢を明記"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "レビュー履歴セクションにStage 1通常レビューの反映内容（MF-1~3, SF-1~3の全6項目）を追記"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 4,
+    "applied": 4,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/548"
+  }
+}

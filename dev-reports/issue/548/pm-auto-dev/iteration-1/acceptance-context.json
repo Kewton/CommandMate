@@ -1,0 +1,20 @@
+{
+  "issue_number": 548,
+  "feature_summary": "スマホ版ファイル一覧のスクロール修正",
+  "acceptance_criteria": [
+    "モバイルレイアウトのmainコンテナにoverflow-y-autoクラスが適用されていること",
+    "モバイルレイアウトのmainコンテナにpb-32クラスが存在しないこと",
+    "モバイルレイアウトのmainコンテナにoverflow-hiddenクラスが存在しないこと",
+    "デスクトップレイアウトが変更されていないこと",
+    "全既存テストがパスすること",
+    "静的解析エラーが0件であること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: モバイルmainコンテナのCSSクラスにoverflow-y-autoが含まれる",
+    "シナリオ2: モバイルmainコンテナのCSSクラスにpb-32が含まれない",
+    "シナリオ3: モバイルmainコンテナのCSSクラスにoverflow-hiddenが含まれない",
+    "シナリオ4: デスクトップrender pathが変更されていない",
+    "シナリオ5: 全ユニットテストがパスする",
+    "シナリオ6: TypeScript型チェックがパスする"
+  ]
+}

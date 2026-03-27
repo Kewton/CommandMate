@@ -1,0 +1,63 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "シナリオ1: モバイルmainコンテナのCSSクラスにoverflow-y-autoが含まれる",
+      "result": "passed",
+      "evidence": "WorktreeDetailRefactored.tsx line 1762: className=\"flex-1 overflow-y-auto\" - overflow-y-auto class confirmed present"
+    },
+    {
+      "scenario": "シナリオ2: モバイルmainコンテナのCSSクラスにpb-32が含まれない",
+      "result": "passed",
+      "evidence": "WorktreeDetailRefactored.tsx line 1762: className=\"flex-1 overflow-y-auto\" - pb-32 class confirmed absent. paddingBottom is now handled via inline style with safe-area-inset-bottom (line 1764)"
+    },
+    {
+      "scenario": "シナリオ3: モバイルmainコンテナのCSSクラスにoverflow-hiddenが含まれない",
+      "result": "passed",
+      "evidence": "WorktreeDetailRefactored.tsx line 1762: className=\"flex-1 overflow-y-auto\" - overflow-hidden class confirmed absent"
+    },
+    {
+      "scenario": "シナリオ4: デスクトップrender pathが変更されていない",
+      "result": "passed",
+      "evidence": "WorktreeDetailRefactored.tsx line 1512: if (!isMobile) { return ( ... ) } - desktop layout uses separate render path, unchanged"
+    },
+    {
+      "scenario": "シナリオ5: 全ユニットテストがパスする",
+      "result": "passed",
+      "evidence": "npm run test:unit: 275 test files passed, 5380 tests passed, 0 failed, 7 skipped"
+    },
+    {
+      "scenario": "シナリオ6: TypeScript型チェックがパスする",
+      "result": "passed",
+      "evidence": "npx tsc --noEmit: completed with 0 errors"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "モバイルレイアウトのmainコンテナにoverflow-y-autoクラスが適用されていること",
+      "verified": true
+    },
+    {
+      "criterion": "モバイルレイアウトのmainコンテナにpb-32クラスが存在しないこと",
+      "verified": true
+    },
+    {
+      "criterion": "モバイルレイアウトのmainコンテナにoverflow-hiddenクラスが存在しないこと",
+      "verified": true
+    },
+    {
+      "criterion": "デスクトップレイアウトが変更されていないこと",
+      "verified": true
+    },
+    {
+      "criterion": "全既存テストがパスすること",
+      "verified": true
+    },
+    {
+      "criterion": "静的解析エラーが0件であること",
+      "verified": true
+    }
+  ],
+  "evidence_files": [],
+  "message": "すべての受入条件を満たしています。モバイルmainコンテナはoverflow-y-autoクラスが適用され、pb-32とoverflow-hiddenは除去されています。デスクトップレイアウトは未変更です。全275テストファイル(5380テスト)がパス、TypeScript型チェックとESLintも0エラーです。"
+}

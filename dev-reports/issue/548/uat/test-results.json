@@ -1,0 +1,26 @@
+{
+  "issue_number": 548,
+  "test_date": "2026-03-27",
+  "environment": {
+    "port": 3012,
+    "branch": "feature/548-mobile-file-list",
+    "viewport": "375x812 (iPhone 12)"
+  },
+  "results": [
+    {"id": "TC-001", "title": "overflow-y-auto適用確認", "status": "pass", "evidence_note": "L1762: className=\"flex-1 overflow-y-auto\""},
+    {"id": "TC-002", "title": "pb-32除去確認", "status": "pass", "evidence_note": "pb-32はclassNameに含まれない"},
+    {"id": "TC-003", "title": "overflow-hidden除去確認", "status": "pass", "evidence_note": "overflow-hiddenはclassNameに含まれない"},
+    {"id": "TC-004", "title": "デスクトップ非影響確認", "status": "pass", "evidence_note": "L1512: if (!isMobile) 分岐維持"},
+    {"id": "TC-005", "title": "ビルド成功確認", "status": "pass", "evidence_note": "npm run build 成功、サーバー起動済み"},
+    {"id": "TC-006", "title": "サーバー起動確認", "status": "pass", "evidence_note": "API /api/worktrees 正常レスポンス"},
+    {"id": "TC-007", "title": "モバイルページレンダリング確認", "status": "pass", "evidence_note": "375x812ビューポートでFilesタブ正常表示、32ディレクトリ+ファイル全表示、コンソールエラー0件"},
+    {"id": "TC-008", "title": "ユニットテスト全パス確認", "status": "pass", "evidence_note": "275ファイル、5380テスト全パス"},
+    {"id": "TC-009", "title": "型チェック・Lint確認", "status": "pass", "evidence_note": "tsc 0エラー、ESLint 0エラー"}
+  ],
+  "summary": {
+    "total": 9,
+    "passed": 9,
+    "failed": 0,
+    "pass_rate": "100%"
+  }
+}
