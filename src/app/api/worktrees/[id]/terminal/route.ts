@@ -78,14 +78,11 @@ export async function POST(
       );
     }
 
-    // For copilot: use sendMessage to handle slash commands with selection lists properly (#547)
-    // For other tools: use sendKeys directly (no prompt detection overhead)
-    if (cliToolId === 'copilot') {
-      await cliTool.sendMessage(params.id, command);
-    } else {
-      await sendKeys(sessionName, command);
-      invalidateCache(sessionName);
-    }
+    // Send command to tmux session via sendKeys (non-blocking for all tools)
+    await sendKeys(sessionName, command);
+
+    // Issue #405: Invalidate cache after sending command
+    invalidateCache(sessionName);
 
     return NextResponse.json({ success: true });
   } catch (error) {
