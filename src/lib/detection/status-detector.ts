@@ -183,6 +183,23 @@ export function detectSessionStatus(
   // DR-003: Separate thinking detection window (5 lines) from prompt detection window (15 lines)
   const thinkingLines = contentLines.slice(-STATUS_THINKING_LINE_COUNT).join('\n');
 
+  // 0. Copilot: thinking detection BEFORE prompt detection (Issue #547)
+  // Copilot CLI keeps the "❯" prompt visible even during processing,
+  // so prompt detection would always match first. Check thinking first for copilot.
+  // Uses last 15 lines (not 5) because copilot shows action log lines above prompt.
+  const copilotThinkingWindow = contentLines.slice(-STATUS_CHECK_LINE_COUNT).join('\n');
+  if (cliToolId === 'copilot' && detectThinking(cliToolId, copilotThinkingWindow)) {
+    const promptOptions = buildDetectPromptOptions(cliToolId);
+    const promptDetection = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions);
+    return {
+      status: 'running',
+      confidence: 'high',
+      reason: 'thinking_indicator',
+      hasActivePrompt: false,
+      promptDetection,
+    };
+  }
+
   // 1. Interactive prompt detection (highest priority)
   // This includes yes/no prompts, multiple choice, and approval prompts
   const promptOptions = buildDetectPromptOptions(cliToolId);

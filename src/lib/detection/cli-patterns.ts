@@ -249,9 +249,16 @@ export const COPILOT_PROMPT_PATTERN = /^[>❯]\s|^\?\s+/m;
 
 /**
  * Copilot thinking/processing pattern (Issue #545)
- * Placeholder - to be updated after Phase 1 TUI investigation.
+ * Copilot CLI shows various action indicators during processing:
+ *   - "Exploring repo (Esc to cancel · 2.3 KiB)"
+ *   - "Reasoning ■■■ medium"
+ *   - "... Thinking"
+ *   - Tool use: "● Read package.json" / "◉ Mapping structure (Esc to cancel · 8.4 KiB)"
+ * Note: "Esc to cancel" alone is not used because trust dialog footer also contains it.
+ * Instead, match the action pattern with parenthesized context: "(Esc to cancel ·"
+ * Braille spinner characters (U+2800-U+28FF) are also checked.
  */
-export const COPILOT_THINKING_PATTERN = /[\u2800-\u28FF]|Thinking|Generating|Processing/;
+export const COPILOT_THINKING_PATTERN = /[\u2800-\u28FF]|\(Esc to cancel|Reasoning\s+[■▪▮]|\.\.\.\s+Thinking|Generating|Processing/;
 
 /**
  * Copilot separator pattern (Issue #545)
@@ -261,19 +268,15 @@ export const COPILOT_SEPARATOR_PATTERN = /^─{10,}$/m;
 
 /**
  * Copilot CLI selection list pattern (Issue #547)
- * Detects Copilot CLI's interactive selection prompts that require
- * arrow key navigation (e.g., /model command's model picker).
+ * Detects Copilot CLI's interactive selection/navigation prompts:
+ *   - Model picker: "Search models..." / "Select Model"
+ *   - Trust dialog: "↑↓ to navigate · Enter to select · Esc to cancel"
+ *   - Other interactive lists with arrow key navigation
  *
- * Copilot CLI's selection list has these characteristics:
- *   - "❯" cursor prefix on the selected item
- *   - "Search models..." or "Search ..." prompt
- *   - "Select Model" header with item list
- *
- * Both branches are anchored or bounded to prevent ReDoS.
  * No /g flag (S4-5: would make test() stateful).
  * No nested quantifiers (SEC4-001: ReDoS safety).
  */
-export const COPILOT_SELECTION_LIST_PATTERN = /Search\s+\w+\.\.\.|Select\s+Model/m;
+export const COPILOT_SELECTION_LIST_PATTERN = /Search\s+\w+\.\.\.|Select\s+Model|to navigate.*Enter to select/m;
 
 /**
  * Copilot skip patterns for response cleaning (Issue #545)
