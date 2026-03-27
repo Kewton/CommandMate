@@ -24,7 +24,7 @@ import {
 } from '@/config/timer-constants';
 import { formatTimeRemaining } from '@/config/auto-yes-config';
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import { getCliToolDisplayName } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, getCliToolDisplayName } from '@/lib/cli-tools/types';
 
 // =============================================================================
 // Types
@@ -32,8 +32,8 @@ import { getCliToolDisplayName } from '@/lib/cli-tools/types';
 
 interface TimerPaneProps {
   worktreeId: string;
-  /** Available agents for selection (from AgentSettingsPane) */
-  selectedAgents: CLIToolType[];
+  /** @deprecated No longer used — CLI_TOOL_IDS is used directly */
+  selectedAgents?: CLIToolType[];
 }
 
 interface TimerItem {
@@ -81,11 +81,11 @@ function getStatusColor(status: string): string {
 // Component
 // =============================================================================
 
-export const TimerPane = memo(function TimerPane({ worktreeId, selectedAgents }: TimerPaneProps) {
+export const TimerPane = memo(function TimerPane({ worktreeId }: TimerPaneProps) {
   const t = useTranslations('schedule');
   const [timers, setTimers] = useState<TimerItem[]>([]);
   const [message, setMessage] = useState('');
-  const [selectedAgent, setSelectedAgent] = useState<CLIToolType>(selectedAgents[0] || 'claude');
+  const [selectedAgent, setSelectedAgent] = useState<CLIToolType>(CLI_TOOL_IDS[0]);
   const [selectedDelay, setSelectedDelay] = useState(TIMER_DELAYS[0]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -271,7 +271,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, selectedAgents }:
           onChange={(e) => setSelectedAgent(e.target.value as CLIToolType)}
           className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500"
         >
-          {selectedAgents.map((agent) => (
+          {CLI_TOOL_IDS.map((agent) => (
             <option key={agent} value={agent}>
               {getCliToolDisplayName(agent)}
             </option>
