@@ -5,9 +5,11 @@
  * Verifies that the mobile layout main container has correct CSS classes
  * for enabling vertical scrolling of file tree content.
  *
- * Since WorktreeDetailRefactored is a complex component with many dependencies,
- * we verify the source code contains the correct className for the mobile
- * main container element. This is a practical approach for CSS-only fixes.
+ * Approach: Source-level verification
+ * WorktreeDetailRefactored is a large component with many dependencies
+ * (contexts, hooks, API calls) that make full rendering impractical for
+ * a CSS-only fix. Instead, we parse the source to verify the <main>
+ * element wrapping <MobileContent> has the correct className.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -21,18 +23,24 @@ describe('WorktreeDetailRefactored mobile main container (Issue #548)', () => {
   );
   const source = fs.readFileSync(sourceFilePath, 'utf-8');
 
-  // Find the mobile main container className
-  // The pattern is: <main followed by className="..." in the mobile layout section
-  // The mobile layout is after the second `if (!isMobile)` desktop block (render section)
-  const parts = source.split('if (!isMobile)');
-  // parts[0] = before first occurrence, parts[1] = after first (useEffect), parts[2] = after second (render)
-  const mobileSection = parts[2];
+  // Locate the mobile layout section by finding the <main> element that
+  // directly precedes <MobileContent. This is more resilient than splitting
+  // on "if (!isMobile)" which depends on the exact number of occurrences.
+  const mobileContentIndex = source.indexOf('<MobileContent');
+  const sectionBeforeMobileContent = source.slice(0, mobileContentIndex);
 
-  // Extract the className of the <main element in the mobile section
-  const mainClassNameMatch = mobileSection?.match(
-    /<main\s+className="([^"]+)"/
-  );
-  const mainClassName = mainClassNameMatch?.[1] ?? '';
+  // Find the last <main className="..."> before <MobileContent
+  const mainMatches = [
+    ...sectionBeforeMobileContent.matchAll(/<main\s+className="([^"]+)"/g),
+  ];
+  const lastMainMatch = mainMatches.length > 0 ? mainMatches[mainMatches.length - 1] : null;
+  const mainClassName = lastMainMatch?.[1] ?? '';
+
+  it('should find the mobile <main> element wrapping MobileContent', () => {
+    expect(mobileContentIndex).toBeGreaterThan(-1);
+    expect(lastMainMatch).not.toBeNull();
+    expect(mainClassName.length).toBeGreaterThan(0);
+  });
 
   it('should have overflow-y-auto class for vertical scrolling', () => {
     expect(mainClassName).toContain('overflow-y-auto');
