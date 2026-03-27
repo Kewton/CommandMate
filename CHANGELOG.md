@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.13] - 2026-03-28
+
+### Added
+- Copilot: GitHub Copilot CLI tool support with gh-based command and 2-stage install check (Issue #545)
+  - CopilotTool class, CLI_TOOL_IDS/display names updated to 6 tools
+  - Copilot patterns, response cleaning, and completion detection
+  - GH_DEBUG added to env-sanitizer sensitive keys
+- Copilot: builtin slash commands (46 commands) and selection list detection (Issue #547)
+  - COPILOT_SELECTION_LIST_PATTERN for detecting selection UIs
+  - getCopilotBuiltinCommands() with 'builtin' source type
+  - SELECTION_LIST_REASONS Set for unified selection list handling
+- Worktree info: copy-to-clipboard for Path and Repository Path fields (Issue #552)
+- Mobile: default to preview tab in mobile markdown viewer (Issue #549)
+
+### Fixed
+- Copilot: delegate slash commands to sendMessage for prompt-aware execution (Issue #559)
+- Copilot: use sendKeys directly in terminal and send APIs to avoid waitForPrompt blocking
+- Copilot: fix prompt detection pattern to match "❯ " with trailing hint text
+- Copilot: improve thinking detection ("Esc to cancel") and selection list patterns
+- Copilot: prevent /model text leaking into selection list search field
+- Mobile: enable vertical scrolling on mobile file list (Issue #548)
+- Mobile: fix file list overflow hidden behind input bar with increased paddingBottom
+- Navigation: improve selection list button responsiveness with immediate refresh after key send
+
+### Refactored
+- Test: improve mobile overflow test robustness with MobileContent-anchored regex matching
+
 ## [0.4.12] - 2026-03-24
 
 ### Added
