@@ -1,16 +1,14 @@
 {
   "issue_number": 548,
   "refactor_targets": [
-    "src/components/worktree/WorktreeDetailRefactored.tsx"
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/worktree/WorktreeDetailRefactored-mobile-overflow.test.tsx"
   ],
   "quality_metrics": {
-    "tests_passed": 5380,
-    "tests_failed": 0,
-    "lint_errors": 0,
-    "type_errors": 0
+    "before_coverage": 80.0
   },
   "improvement_goals": [
-    "変更が最小限（CSS1行変更）のため、リファクタリング不要の可能性が高い",
-    "テストコードの品質確認"
+    "テストコードの品質確認・改善",
+    "変更箇所周辺のコード品質確認"
   ]
 }
