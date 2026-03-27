@@ -1,0 +1,95 @@
+{
+  "issue_number": 548,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "review_date": "2026-03-27",
+  "previous_findings_verification": {
+    "stage1_must_fix": {
+      "MF-1_repro_steps": "RESOLVED - Clear 4-step reproduction procedure now present",
+      "MF-2_expected_actual": "RESOLVED - Both sections filled with specific descriptions",
+      "MF-3_overview_text": "RESOLVED - Descriptive summary with root cause added"
+    },
+    "stage1_should_fix": {
+      "SF-1_root_cause": "RESOLVED - Detailed cause analysis section added with code references",
+      "SF-2_env_info": "RESOLVED - Environment section added (Android, mobile browser)",
+      "SF-3_acceptance_criteria": "RESOLVED - 7 testable acceptance criteria defined"
+    },
+    "stage3_must_fix": {
+      "MF-1_overflow_all_tabs": "RESOLVED - Impact expanded to all 5 tabs with per-tab detail table"
+    },
+    "stage3_should_fix": {
+      "SF-1_nav_buttons_padding": "RESOLVED - Clearance requirements documented in fix strategy",
+      "SF-2_css_tests": "RESOLVED - Test strategy section added with manual QA and recommended automation",
+      "SF-3_dark_mode_qa": "RESOLVED - Added to acceptance criteria and test plan"
+    }
+  },
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 1,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "正確性",
+        "issue": "二重パディングによる「合計256px+」という記述が技術的に不正確。inline styleとTailwindクラスは同一CSSプロパティ(padding-bottom)を対象としており、inline styleが常に優先されるため加算されない。pb-32は実質的にデッドコード。",
+        "location": "## 概要 セクション / ## 原因分析 > 根本原因 セクション",
+        "recommendation": "「二重適用(合計256px+)」を「pb-32(Tailwind)はinline styleに上書きされデッドコードとなっている。実効パディングはcalc(8rem + env(safe-area-inset-bottom))のみ。pb-32は無意味な記述であり削除すべき。」に修正する。根本原因の主因はoverflow-hiddenであり、パディングは副次的な整理対象として位置づけを変更すること。",
+        "evidence": "CSS仕様上、inline style(style属性)はclass由来のスタイルより常に高い詳細度を持つ。WorktreeDetailRefactored.tsx L1762-1765において、className='pb-32'(padding-bottom: 8rem)とstyle={{ paddingBottom: 'calc(8rem + ...)' }}は同一プロパティを指定しており、inline styleが勝つため合算は発生しない。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "正確性",
+        "issue": "影響範囲テーブルのHistoryPaneの「既存のoverflow設定」が「flex-1 min-h-0」と記載されているが、実際にはHistoryPane.tsx L119にoverflow-y-autoが存在する。flex-1 min-h-0はL286のコンテナ属性であり、overflow設定ではない。",
+        "location": "## 原因分析 > タブ別の影響詳細 テーブル",
+        "recommendation": "HistoryPaneの行を「overflow-y-auto (L119), flex-1 min-h-0 (L286)」に修正する。影響度の根拠もoverflowクラスの有無に基づいて見直すこと。",
+        "evidence": "src/components/worktree/HistoryPane.tsx L119: 'overflow-y-auto', L286: className='flex-1 p-4 min-h-0'"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "明確性",
+        "issue": "修正方針セクションで「overflow-autoに置き換える」と記載しているが、overflow-autoとoverflow-y-autoの使い分けの判断基準が不明確。水平方向のオーバーフローを許可する必要がないならoverflow-y-autoが適切。",
+        "location": "## 修正方針 > overflowの修正",
+        "recommendation": "overflow-y-autoを推奨し、横スクロールが不要であることを明記する。FileTreeViewのツリーノードが長いファイルパスで横方向に溢れる可能性がある場合はoverflow-autoも選択肢として残す。",
+        "evidence": "TerminalDisplay.tsx L161-162ではoverflow-y-autoとoverflow-x-hiddenを併用しており、プロジェクト内の他コンポーネントとの整合性からもoverflow-y-autoが望ましい"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "レビュー履歴セクションにStage 1(通常レビュー1回目)の反映記録がない。Stage 3のみ記載されている。",
+        "location": "## レビュー履歴 セクション",
+        "recommendation": "Stage 1通常レビューの反映内容(再現手順追加、期待/実際の動作追加、概要テキスト追加、原因分析追加、環境情報追加、受け入れ条件追加)も履歴に追記する。",
+        "evidence": "レビュー履歴セクションにはStage 3のみ記載されており、Stage 1での大幅な改善(MF-1~3, SF-1~3の全項目反映)が記録されていない"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "1761-1766",
+      "relevance": "バグの根本原因 - pb-32はinline styleに上書きされデッドコード、overflow-hiddenが主因"
+    },
+    {
+      "file": "src/components/worktree/HistoryPane.tsx",
+      "lines": "119, 286",
+      "relevance": "HistoryPaneのoverflow-y-auto(L119)とflex-1 min-h-0(L286)の実際の設定"
+    },
+    {
+      "file": "src/components/worktree/TerminalDisplay.tsx",
+      "lines": "161-162",
+      "relevance": "overflow-y-auto + overflow-x-hiddenのパターン参考"
+    },
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "lines": "448",
+      "relevance": "FileTreeViewのoverflow-auto設定"
+    }
+  ],
+  "doc_references": []
+}

@@ -1,0 +1,21 @@
+{
+  "status": "success",
+  "coverage": 80,
+  "unit_tests": {
+    "total": 5384,
+    "passed": 5384,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/worktree/WorktreeDetailRefactored-mobile-overflow.test.tsx"
+  ],
+  "commits": [
+    "b5858d26: fix(mobile): enable vertical scrolling on mobile main container"
+  ],
+  "message": "TDD implementation complete. Changed mobile main container className from 'flex-1 pb-32 overflow-hidden' to 'flex-1 overflow-y-auto'. All 275 test files pass (5380 tests + 4 new tests). ESLint and TypeScript checks clean."
+}

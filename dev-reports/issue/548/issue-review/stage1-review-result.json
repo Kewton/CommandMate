@@ -1,0 +1,101 @@
+{
+  "issue_number": 548,
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-03-27",
+  "summary": {
+    "must_fix_count": 3,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "完全性",
+        "issue": "再現手順が未記入 -- テンプレートの番号リスト(1. 2. 3.)が空のまま",
+        "location": "## 再現手順 セクション",
+        "recommendation": "以下の再現手順を追記: 1. モバイルブラウザでCommandMateにアクセス 2. 任意のWorktreeを選択 3. 下部タブバーで「files」タブをタップ 4. ファイル数が多いWorktreeでファイルツリー下部が切れて表示されないことを確認",
+        "evidence": "Issue本文の「## 再現手順」が空欄"
+      },
+      {
+        "id": "MF-2",
+        "category": "完全性",
+        "issue": "期待する動作と実際の動作が未記入",
+        "location": "## 期待する動作 / ## 実際の動作 セクション",
+        "recommendation": "期待する動作: 「ファイルツリー全体がスクロール可能で、全ファイル/ディレクトリが閲覧できる」 実際の動作: 「ファイルツリーの下部が画面外に隠れ、スクロールできないため全ファイルが表示されない」",
+        "evidence": "Issue本文の該当セクションが空欄"
+      },
+      {
+        "id": "MF-3",
+        "category": "正確性",
+        "issue": "概要セクションに説明文がなくスクリーンショットのみ -- 問題の性質が不明",
+        "location": "## 概要 セクション",
+        "recommendation": "概要に以下を追記: 「モバイル版のfilesタブでファイル一覧が途中までしか表示されず、下方向にスクロールできない。原因はmainコンテナのpb-32(Tailwind)とpaddingBottom inline styleの二重適用(合計256px+)、およびoverflow-hiddenによるスクロール抑制。」",
+        "evidence": "テンプレートのプレースホルダー「何が起きたか簡潔に記述してください。」がそのまま残っている"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "技術的妥当性",
+        "issue": "根本原因の分析が記載されていない -- 修正方針が定まらない",
+        "location": "Issue本文全体",
+        "recommendation": "原因分析セクションを追加し、以下の2点を明記: (1) WorktreeDetailRefactored.tsx L1762でTailwind pb-32とinline style paddingBottom: calc(8rem + env(safe-area-inset-bottom))が重複適用されている (2) 同行のoverflow-hiddenがFileTreeView(overflow-auto)のスクロールを阻害している",
+        "evidence": "WorktreeDetailRefactored.tsx L1762-1765 にて確認済み"
+      },
+      {
+        "id": "SF-2",
+        "category": "明確性",
+        "issue": "環境情報が未記入 -- モバイル固有バグの再現に端末・ブラウザ情報が必須",
+        "location": "## 環境 セクション",
+        "recommendation": "最低限、使用端末(機種名またはスクリーン解像度)とブラウザ(Chrome/Safari等)を記載。スクリーンショットのファイル名からAndroid端末と推測されるが明記すべき",
+        "evidence": "スクリーンショットファイル名 Screenshot_20260326-140917.png のアンダースコア形式はAndroidの標準命名"
+      },
+      {
+        "id": "SF-3",
+        "category": "受け入れ条件",
+        "issue": "受け入れ条件が定義されていない",
+        "location": "Issue本文(セクション不在)",
+        "recommendation": "受け入れ条件を追加: (1) モバイル表示でファイルツリー全体がスクロールにより閲覧可能であること (2) MobileTabBarやMessageInputと重ならずファイルツリーが表示されること (3) safe-area-inset-bottomが正しく考慮されていること (4) デスクトップ版のレイアウトに影響がないこと",
+        "evidence": "受け入れ条件セクションが存在しない"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "影響を受けるタブがfilesだけか他タブ(terminal, memo, history等)にも同じ問題があるかの記載がない",
+        "location": "Issue本文",
+        "recommendation": "他のモバイルタブ(terminal, memo, git等)で同様の表示切れが発生するか確認し、影響範囲をIssueに明記する。WorktreeDetailRefactored.tsx L1762のmainは全タブ共通の親要素であるため、他タブにも影響する可能性がある",
+        "evidence": "MobileContentコンポーネント(WorktreeDetailSubComponents.tsx L756)は全タブのコンテンツを切り替え表示しており、親mainのoverflow-hiddenは全タブに適用される"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "デスクトップ版のL1391にも同様のoverflow-hiddenが存在するが、問題が発生しない理由の考察がない",
+        "location": "Issue本文",
+        "recommendation": "デスクトップ版(L1391)ではflex-1 min-h-0 overflow-hiddenの組み合わせで正しく動作する理由(子要素が適切にmin-h-0を持つ等)を補足すると、修正時にデスクトップ版を壊すリスクを下げられる",
+        "evidence": "WorktreeDetailRefactored.tsx L1391: className=\"flex-1 min-h-0 overflow-hidden\""
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "1761-1766",
+      "relevance": "バグの根本原因 - mainコンテナの二重パディングとoverflow-hidden"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailSubComponents.tsx",
+      "lines": "756-893",
+      "relevance": "MobileContentコンポーネント - filesタブのFileTreeView配置"
+    },
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "lines": "448",
+      "relevance": "FileTreeViewのoverflow-autoが親のoverflow-hiddenで無効化される"
+    }
+  ],
+  "doc_references": []
+}
