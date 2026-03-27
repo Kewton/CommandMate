@@ -1,0 +1,115 @@
+{
+  "issue_number": 552,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "findings": [
+    {
+      "id": "IA3-001",
+      "severity": "nice_to_have",
+      "category": "影響範囲/テストカバレッジ",
+      "title": "No existing unit tests for WorktreeInfoFields - regression risk unaddressed",
+      "description": "WorktreeInfoFields has no existing unit tests (confirmed by file search). The design proposes a new test file for the copy feature only. However, there is no baseline test for the existing rendering behavior (Worktree name, Repository, Path, Status, Description fields). If the layout change (wrapping h2 in a flex container) inadvertently breaks existing styling or structure, there is no test to catch it. The proposed test plan covers the new copy functionality well but does not include a regression test for the existing field rendering.",
+      "recommendation": "Consider adding 1-2 baseline rendering assertions in the new test file to verify that the existing fields (worktree name, repository name, path text, status badge) still render correctly after the layout modification.",
+      "location": "Section 8 - Test Design",
+      "impact": "low"
+    },
+    {
+      "id": "IA3-002",
+      "severity": "nice_to_have",
+      "category": "影響範囲/新規import",
+      "title": "First lucide-react import in WorktreeDetailSubComponents.tsx - bundle impact negligible but worth noting",
+      "description": "WorktreeDetailSubComponents.tsx currently has zero lucide-react imports. Adding ClipboardCopy and Check icons introduces a new import dependency to this file. Since lucide-react is already used extensively elsewhere in the project (e.g., FileViewer.tsx, FilePanelContent.tsx), tree-shaking will handle this correctly and there is no meaningful bundle size increase. However, the design document does not explicitly acknowledge this is a new import path for this file.",
+      "recommendation": "No action required. This is informational - the bundle impact is negligible due to existing tree-shaking of lucide-react elsewhere in the project.",
+      "location": "Section 5-1 - import addition",
+      "impact": "negligible"
+    },
+    {
+      "id": "IA3-003",
+      "severity": "nice_to_have",
+      "category": "影響範囲/モバイル表示",
+      "title": "Copy button touch target may be small on mobile (w-3.5 = 14px icon in p-1 button)",
+      "description": "The design uses w-3.5 h-3.5 (14px) icons inside a p-1 (4px padding) button, resulting in roughly a 22x22px touch target. Apple's Human Interface Guidelines recommend 44x44pt minimum touch targets. On desktop this is fine as a hover-discoverable action. On mobile (MobileInfoContent), this same button will be rendered and may be difficult to tap accurately. The design correctly identifies that MobileInfoContent shares WorktreeInfoFields, but does not address the mobile touch target size difference.",
+      "recommendation": "Consider using a slightly larger touch target on mobile, e.g., p-2 (8px padding) which would yield ~30px, or adding min-w/min-h constraints. Alternatively, this can be deferred since the path text itself is already break-all and users can long-press to copy on mobile natively.",
+      "location": "Section 5-1 - UI pattern, Section 9 - Impact Summary",
+      "impact": "low"
+    },
+    {
+      "id": "IA3-004",
+      "severity": "should_fix",
+      "category": "影響範囲/タイマー競合",
+      "title": "Multiple rapid clicks do not clear previous timer before starting new one",
+      "description": "The handleCopyPath handler sets pathTimerRef.current = setTimeout(...) on each click. If a user clicks the copy button rapidly (e.g., double-click), the first setTimeout is orphaned because pathTimerRef.current is overwritten by the second call without clearing the first. The first timer will fire and set pathCopied to false while the user may expect the icon to remain as Check for the full 2 seconds from the last click. The useEffect cleanup only runs on unmount, not between clicks. This is a pre-existing pattern issue inherited from FileViewer.tsx, but since this design explicitly adds useRef for robustness (DR1-005), the rapid-click case should also be handled.",
+      "recommendation": "Add clearTimeout(pathTimerRef.current) at the beginning of handleCopyPath (and similarly for handleCopyRepoPath) before setting the new timeout. This ensures only the latest timer is active. Example: add `if (pathTimerRef.current) clearTimeout(pathTimerRef.current);` before the setTimeout assignment.",
+      "location": "Section 5-1 - Handler implementation",
+      "impact": "low"
+    },
+    {
+      "id": "IA3-005",
+      "severity": "nice_to_have",
+      "category": "影響範囲/レイアウト変更",
+      "title": "mb-1 removal from h2 when wrapping in flex container - subtle spacing change",
+      "description": "In the current code, the h2 element has className including 'mb-1'. In the proposed change, 'mb-1' is moved from the h2 to the parent flex div. This is correct behavior, but the design does not explicitly call out this CSS class migration. For the Repository field, the original h2 has 'mb-1' but in the changed version, 'mb-1' is on the wrapping flex div instead. The visual result should be identical, but this class relocation should be verified during implementation.",
+      "recommendation": "No action needed - the spacing behavior is preserved. This is noted for implementation awareness.",
+      "location": "Section 5-1 - Path/Repository field changes",
+      "impact": "negligible"
+    }
+  ],
+  "impact_assessment": {
+    "affected_files": {
+      "modified": [
+        "src/components/worktree/WorktreeDetailSubComponents.tsx"
+      ],
+      "new": [
+        "tests/unit/components/WorktreeInfoFields-copy.test.tsx"
+      ],
+      "deleted": [],
+      "indirectly_affected": []
+    },
+    "affected_components": {
+      "directly_modified": ["WorktreeInfoFields"],
+      "parent_components_unaffected": ["InfoModal", "MobileInfoContent", "MobileContent", "WorktreeDetailRefactored"],
+      "reasoning": "WorktreeInfoFields is wrapped in React.memo. New useState calls are internal to the memo boundary. Props interface (WorktreeInfoFieldsProps) is unchanged. Parent components pass the same props and receive no new callbacks. No re-render propagation to parents."
+    },
+    "api_impact": "none",
+    "database_impact": "none",
+    "cli_impact": "none",
+    "breaking_changes": "none - props interface unchanged, no exported API changes",
+    "desktop_mobile_parity": "Both desktop (InfoModal) and mobile (MobileInfoContent) use the shared WorktreeInfoFields component, so copy buttons appear in both contexts automatically. Verified by reading InfoModal (L554) and MobileInfoContent (L685) usage.",
+    "dependency_additions": "none - lucide-react and clipboard-utils are existing project dependencies"
+  },
+  "verification_results": {
+    "design_claim_single_file_change": {
+      "verified": true,
+      "evidence": "Grep for WorktreeInfoFields across src/ shows it is only defined and used in WorktreeDetailSubComponents.tsx. No other source files reference it."
+    },
+    "design_claim_no_props_change": {
+      "verified": true,
+      "evidence": "WorktreeInfoFieldsProps interface at L165-176 is not modified. New state (pathCopied, repoPathCopied) and handlers are internal to the component."
+    },
+    "design_claim_memo_boundary": {
+      "verified": true,
+      "evidence": "WorktreeInfoFields is exported as memo(function WorktreeInfoFields(...)) at L185. Internal useState does not trigger parent re-renders."
+    },
+    "design_claim_desktop_mobile_auto_reflect": {
+      "verified": true,
+      "evidence": "InfoModal (L554) and MobileInfoContent (L685) both render <WorktreeInfoFields> with identical props structure. Copy buttons will appear in both."
+    },
+    "design_claim_existing_imports": {
+      "verified": true,
+      "evidence": "useRef, useEffect, useState, useCallback, memo are all already imported at L14. Only ClipboardCopy, Check, and copyToClipboard need to be added."
+    },
+    "design_claim_line_numbers": {
+      "verified": true,
+      "evidence": "Repository field is at L203-208, Path field is at L210-214 - matches design document exactly."
+    }
+  },
+  "summary": "The design policy's impact analysis is accurate and thorough. The claim that only WorktreeDetailSubComponents.tsx needs modification is verified - WorktreeInfoFields is defined and consumed exclusively within this file. The React.memo boundary ensures no re-render propagation to parent components (InfoModal, MobileInfoContent). Desktop and mobile parity is automatically achieved through the shared component. One should_fix finding: the timer handlers should clear previous timers on rapid re-clicks to avoid orphaned timeouts, since the design already introduces useRef for robustness. Three nice_to_have findings cover minor gaps: mobile touch target size, lack of baseline regression tests, and CSS class migration awareness. Overall, this is a well-scoped, low-risk change with minimal blast radius.",
+  "statistics": {
+    "must_fix": 0,
+    "should_fix": 1,
+    "nice_to_have": 4,
+    "total": 5
+  },
+  "reviewed_at": "2026-03-27T00:00:00Z"
+}

@@ -1,0 +1,10 @@
+{
+  "issue_number": 552,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "focus_area": "影響範囲",
+  "skipped": true,
+  "skip_reason": "Stage 5 must_fix=0, should_fix=0. 2nd iteration impact review not needed.",
+  "findings": [],
+  "statistics": { "must_fix": 0, "should_fix": 0, "nice_to_have": 0, "total": 0 }
+}

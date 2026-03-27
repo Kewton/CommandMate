@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UAT Report - Issue #552</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5; color: #333; }
+  h1 { color: #1a1a2e; border-bottom: 3px solid #16213e; padding-bottom: 10px; }
+  h2 { color: #16213e; margin-top: 30px; }
+  .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 20px 0; }
+  .summary-card { background: white; border-radius: 8px; padding: 20px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+  .summary-card .number { font-size: 2em; font-weight: bold; }
+  .summary-card .label { color: #666; font-size: 0.9em; }
+  .pass { color: #27ae60; }
+  .fail { color: #e74c3c; }
+  .info-table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+  .info-table td { padding: 8px 12px; border-bottom: 1px solid #eee; }
+  .info-table td:first-child { font-weight: 600; width: 150px; color: #555; }
+  .test-case { background: white; border-radius: 8px; padding: 20px; margin: 15px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+  .test-case h3 { margin-top: 0; display: flex; align-items: center; gap: 10px; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.85em; font-weight: 600; }
+  .badge-pass { background: #d4edda; color: #155724; }
+  .badge-fail { background: #f8d7da; color: #721c24; }
+  .evidence { background: #f8f9fa; border-left: 3px solid #dee2e6; padding: 10px 15px; margin-top: 10px; font-size: 0.9em; color: #555; }
+  footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; color: #888; font-size: 0.85em; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>UAT Report - Issue #552</h1>
+<p>infoのPathをコピペするアイコンを追加してほしい</p>
+
+<h2>Test Overview</h2>
+<table class="info-table">
+  <tr><td>Issue</td><td>#552 - infoのPathをコピペするアイコンを追加してほしい</td></tr>
+  <tr><td>Test Date</td><td>2026-03-27</td></tr>
+  <tr><td>Branch</td><td>feature/552-info-path-copy</td></tr>
+  <tr><td>Environment</td><td>CommandMate Server (localhost:3012)</td></tr>
+  <tr><td>Test Worktree</td><td>myswiftagent-develop</td></tr>
+  <tr><td>Test Tool</td><td>Playwright (browser automation)</td></tr>
+</table>
+
+<h2>Summary</h2>
+<div class="summary">
+  <div class="summary-card"><div class="number">8</div><div class="label">Total Tests</div></div>
+  <div class="summary-card"><div class="number pass">8</div><div class="label">Passed</div></div>
+  <div class="summary-card"><div class="number fail">0</div><div class="label">Failed</div></div>
+  <div class="summary-card"><div class="number pass">100%</div><div class="label">Pass Rate</div></div>
+</div>
+
+<h2>Test Results</h2>
+
+<div class="test-case">
+  <h3><span class="badge badge-pass">PASS</span> TC-001: Pathフィールドにコピーアイコンが表示される</h3>
+  <p><strong>Acceptance Criteria:</strong> InfoモーダルのPathフィールド横にコピーアイコンが表示されること</p>
+  <p><strong>Operation:</strong> Worktree詳細画面でInfoボタンをクリックしてモーダルを開く</p>
+  <div class="evidence"><strong>Evidence:</strong> InfoモーダルのPathセクション内に button "Copy worktree path" (aria-label付き) が表示された。アイコン画像も正常にレンダリングされている。</div>
+</div>
+
+<div class="test-case">
+  <h3><span class="badge badge-pass">PASS</span> TC-002: Repository Pathフィールドにコピーアイコンが表示される</h3>
+  <p><strong>Acceptance Criteria:</strong> InfoモーダルのRepository Pathフィールド横にコピーアイコンが表示されること</p>
+  <p><strong>Operation:</strong> Infoモーダル内のRepositoryセクションを確認</p>
+  <div class="evidence"><strong>Evidence:</strong> Repositoryセクション内に button "Copy repository path" (aria-label付き) が表示された。RepositoryラベルとPathラベルの右側にそれぞれアイコンが配置されている。</div>
+</div>
+
+<div class="test-case">
+  <h3><span class="badge badge-pass">PASS</span> TC-003: Pathコピーが動作する</h3>
+  <p><strong>Acceptance Criteria:</strong> コピーアイコンクリックで対応するパスがクリップボードにコピーされること</p>
+  <p><strong>Operation:</strong> "Copy worktree path" ボタンをクリック</p>
+  <div class="evidence"><strong>Evidence:</strong> クリック後、ボタン内のアイコンがClipboardCopyからCheckアイコン(緑色)に切り替わった。これはcopyToClipboard()が成功し、setState(true)が実行されたことを示す。</div>
+</div>
+
+<div class="test-case">
+  <h3><span class="badge badge-pass">PASS</span> TC-004: Repository Pathコピーが動作する</h3>
+  <p><strong>Acceptance Criteria:</strong> コピーアイコンクリックで対応するパスがクリップボードにコピーされること</p>
+  <p><strong>Operation:</strong> "Copy repository path" ボタンをクリック</p>
+  <div class="evidence"><strong>Evidence:</strong> クリック後、ボタン内のアイコンがCheckアイコン(緑色)に切り替わった。コピー成功を確認。</div>
+</div>
+
+<div class="test-case">
+  <h3><span class="badge badge-pass">PASS</span> TC-005: コピー後のアイコンフィードバック（Path）</h3>
+  <p><strong>Acceptance Criteria:</strong> コピー成功時にCheckアイコンに切り替わり、2秒後にClipboardCopyアイコンに戻ること</p>
+  <p><strong>Operation:</strong> Pathコピーアイコンをクリックし、アイコン変化を観察</p>
+  <div class="evidence"><strong>Evidence:</strong> クリック直後にCheckアイコンに変化。約2秒後（Repository Pathコピー操作時のDOMスナップショットで確認）、PathアイコンはClipboardCopyアイコンに復帰していた。</div>
+</div>
+
+<div class="test-case">
+  <h3><span class="badge badge-pass">PASS</span> TC-006: コピー後のアイコンフィードバック（Repository Path）</h3>
+  <p><strong>Acceptance Criteria:</strong> コピー成功時にCheckアイコンに切り替わり、2秒後にClipboardCopyアイコンに戻ること</p>
+  <p><strong>Operation:</strong> Repository Pathコピーアイコンをクリックし、3秒待機後にDOMを確認</p>
+  <div class="evidence"><strong>Evidence:</strong> クリック直後にCheckアイコンに変化。3秒待機後のDOMスナップショットで、アイコンが元のClipboardCopyに復帰していることを確認。</div>
+</div>
+
+<div class="test-case">
+  <h3><span class="badge badge-pass">PASS</span> TC-007: アクセシビリティ属性の確認</h3>
+  <p><strong>Acceptance Criteria:</strong> アクセシビリティ属性が設定されていること</p>
+  <p><strong>Operation:</strong> DOMスナップショットでボタン要素の属性を検査</p>
+  <div class="evidence"><strong>Evidence:</strong> Pathボタン: aria-label="Copy worktree path" が確認された。Repository Pathボタン: aria-label="Copy repository path" が確認された。両ボタンともrole="button"として認識されている。</div>
+</div>
+
+<div class="test-case">
+  <h3><span class="badge badge-pass">PASS</span> TC-008: 既存機能への影響確認</h3>
+  <p><strong>Acceptance Criteria:</strong> 既存フィールドの表示・動作に変化がないこと</p>
+  <p><strong>Operation:</strong> Infoモーダル内の全フィールドを確認</p>
+  <div class="evidence"><strong>Evidence:</strong> 以下のフィールドが正常に表示: Worktree名(develop), Repository(MySwiftAgent), Path(/Users/maenokota/share/work/github_kewton/MySwiftAgent), Description(No description added yet), Version(v0.4.12), Feedback & Support(4リンク), Logs(Show/Hideボタン)。全て期待通りの表示。</div>
+</div>
+
+<footer>
+  Generated by UAT command for Issue #552 - 2026-03-27
+</footer>
+
+</body>
+</html>

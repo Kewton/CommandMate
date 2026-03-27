@@ -1,0 +1,55 @@
+{
+  "issue_number": 552,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "category": "DRY",
+      "title": "Copy button pattern is now duplicated across 3 files (4 instances total)",
+      "description": "The copy-to-clipboard button pattern (useState + useCallback + setTimeout + ClipboardCopy/Check icon toggle) already exists in FileViewer.tsx and FilePanelContent.tsx. This design adds a 3rd file with 2 more instances, bringing the total to 4 near-identical implementations. The design document explicitly states 'helper extraction is unnecessary, only 2 places' but this count ignores the 2 pre-existing instances in other files. At 4 instances the pattern crosses the threshold where a shared component would reduce maintenance burden.",
+      "recommendation": "Consider extracting a small CopyIconButton component (accepting value: string, aria-label: string, size?: string) into src/components/common/ or as a local helper in the same file. This keeps KISS intact (the component would be ~20 lines) while properly addressing DRY across the codebase. If extraction is deferred, add a TODO comment referencing the other locations so a future refactoring can consolidate them."
+    },
+    {
+      "id": "DR1-002",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "title": "handleCopyPath and handleCopyRepoPath are nearly identical",
+      "description": "The two handlers within WorktreeInfoFields differ only in the value copied and the state setter. This is a minor local duplication. With only 2 instances in the same component, it is acceptable, but a small generic helper could unify them.",
+      "recommendation": "Optionally create a local useCopyFeedback custom hook or a createCopyHandler factory function to reduce the two handlers to a single pattern. This is low priority given the small scope."
+    },
+    {
+      "id": "DR1-003",
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "title": "Silent failure on copy error is appropriate but could benefit from minimal logging",
+      "description": "The design specifies empty catch blocks (silent failure), which matches the existing FileViewer.tsx pattern and is acceptable for a non-critical UX action. However, completely swallowing errors makes debugging harder if users report that copy does not work.",
+      "recommendation": "Consider adding a single console.warn in development mode only (e.g., if (process.env.NODE_ENV === 'development') console.warn(...)), or leave as-is for consistency with the existing pattern. This is purely advisory."
+    },
+    {
+      "id": "DR1-004",
+      "severity": "nice_to_have",
+      "category": "SOLID/SRP",
+      "title": "WorktreeInfoFields is accumulating responsibilities",
+      "description": "WorktreeInfoFields already handles display of 8+ fields, description editing, logs toggling, and version/feedback sections. Adding clipboard state management (2 useState + 2 useCallback + 2 setTimeout) slightly increases its responsibility surface. This is not a problem today but is worth noting as a trend.",
+      "recommendation": "No action needed for this issue. If future issues add more interactive behaviors to this component, consider splitting it into smaller sub-components or extracting interactive field patterns."
+    },
+    {
+      "id": "DR1-005",
+      "severity": "must_fix",
+      "category": "KISS/Robustness",
+      "title": "setTimeout cleanup is missing on component unmount",
+      "description": "The design uses setTimeout(() => setState(false), 2000) without cleanup. If the user closes the InfoModal within 2 seconds of clicking copy, the setTimeout callback will attempt to call setState on an unmounted component. In React 18 strict mode this no longer throws a warning, but it is still a state update on an unmounted component. The existing FileViewer.tsx has the same issue, but FileViewer is typically long-lived whereas the InfoModal is frequently opened and closed.",
+      "recommendation": "Store the timeout ID in a ref and clear it in a useEffect cleanup function, or use a useRef flag to skip the setState if unmounted. Example: const timerRef = useRef<ReturnType<typeof setTimeout>>(); useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);. This is a small addition that prevents the edge case."
+    }
+  ],
+  "summary": "The design policy for Issue #552 is well-structured, appropriately scoped, and follows established patterns in the codebase. The KISS and YAGNI principles are generally well-applied -- the change is minimal and avoids over-engineering. The main concern is a DRY violation: the copy-button pattern now appears in 3 files (4 total instances), which warrants consideration of a shared component. A must-fix item is the missing setTimeout cleanup for modal unmount scenarios. Overall, the design is sound and the implementation risk is low.",
+  "statistics": {
+    "must_fix": 1,
+    "should_fix": 1,
+    "nice_to_have": 3,
+    "total": 5
+  }
+}
