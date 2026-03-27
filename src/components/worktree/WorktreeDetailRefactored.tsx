@@ -1759,9 +1759,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         </div>
 
         <main
-          className="flex-1 pb-32 overflow-hidden"
+          className="flex-1 overflow-y-auto"
           style={{
-            paddingBottom: 'calc(8rem + env(safe-area-inset-bottom, 0px))',
+            paddingBottom: 'calc(12rem + env(safe-area-inset-bottom, 0px))',
           }}
         >
           <MobileContent

@@ -1,0 +1,45 @@
+{
+  "issue_number": 552,
+  "stage": 2,
+  "applied_findings": [
+    {
+      "id": "CR2-004",
+      "severity": "must_fix",
+      "action": "Updated section 3 (tech selection table), section 4 heading source reference, section 10 decision table, and added future issue note. Changed 'FileViewer.tsx pattern complete adherence' to acknowledge FilePanelContent.tsx as the source of the useRef+useEffect cleanup pattern."
+    },
+    {
+      "id": "CR2-001",
+      "severity": "should_fix",
+      "action": "Corrected line number reference in section 4 heading from 'L270-279' to 'L271-279' (L270 is JSDoc comment line)."
+    },
+    {
+      "id": "CR2-002",
+      "severity": "nice_to_have",
+      "action": "Updated section 5-1 import section to clarify that useRef/useEffect are already imported at L14, and only ClipboardCopy/Check and copyToClipboard need new imports. Updated implementation checklist accordingly."
+    },
+    {
+      "id": "CR2-003",
+      "severity": "nice_to_have",
+      "action": "Added comment annotation to section 4 UI pattern noting that existing FileViewer.tsx lacks type='button', and section 5 adds it as an improvement."
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "CR2-005",
+      "severity": "nice_to_have",
+      "reason": "No action needed - consistency confirmed (line numbers match actual code)."
+    },
+    {
+      "id": "CR2-006",
+      "severity": "nice_to_have",
+      "reason": "No action needed - consistency confirmed (type properties match design references)."
+    },
+    {
+      "id": "CR2-007",
+      "severity": "nice_to_have",
+      "reason": "No action needed - consistency confirmed (component structure correctly identified)."
+    }
+  ],
+  "design_doc_updated": true,
+  "summary": "Applied 4 findings (1 must_fix, 1 should_fix, 2 nice_to_have) to the design policy. CR2-004 (must_fix): corrected pattern attribution from 'FileViewer.tsx complete adherence' to 'FileViewer.tsx/FilePanelContent.tsx pattern with cleanup from FilePanelContent.tsx'. CR2-001 (should_fix): fixed line number L270-279 to L271-279. CR2-002: clarified existing imports. CR2-003: annotated type='button' improvement. Added Stage 2 review findings summary section (section 12), renumbered implementation checklist to section 13, and recorded FileViewer.tsx cleanup gap as a future issue. 3 findings skipped as they confirmed consistency with no action needed."
+}

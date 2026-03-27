@@ -1,0 +1,62 @@
+{
+  "issue_number": 548,
+  "iteration": 1,
+  "apply_date": "2026-03-27",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "再現手順を4ステップで追記（モバイルブラウザアクセス→Worktree選択→filesタブ→表示切れ確認）"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "期待する動作（全ファイルがスクロールで閲覧可能）と実際の動作（下部が隠れスクロール不可）を追記"
+      },
+      {
+        "id": "MF-3",
+        "status": "applied",
+        "change_summary": "概要セクションに問題の説明文を追記（二重パディングとoverflow-hiddenによるスクロール抑制）"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "原因分析セクションを新設し、根本原因2点（二重パディング、overflow-hidden）と関連コード表、影響範囲を記載"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "環境セクションにAndroid端末・モバイルブラウザ情報を追記"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "受け入れ条件を4項目のチェックリストとして追加（スクロール可能、重なりなし、safe-area対応、デスクトップ影響なし）"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "原因分析の影響範囲セクションに他タブへの影響可能性を記載"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "デスクトップ版の詳細考察は修正時のPRで記載する方が適切と判断"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 7,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/548"
+  }
+}

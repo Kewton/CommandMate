@@ -1,0 +1,97 @@
+{
+  "issue_number": 548,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "review_date": "2026-03-27",
+  "design_doc": "dev-reports/design/issue-548-mobile-file-list-design-policy.md",
+  "overall_assessment": "PASS_WITH_MINOR_ISSUES",
+  "summary": "The design policy document is largely accurate. Line numbers, file paths, CSS classes, and the core fix logic are correct and consistent with the actual source code. Three inaccuracies were found in the impact analysis table and one minor naming issue.",
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "category": "整合性",
+        "location": "Section 6 - 全5モバイルタブへの影響 - info tab row",
+        "design_doc_line": 129,
+        "description": "Design doc states MobileInfoContent has overflow 'なし (none)' with impact '低 (low)'. Actual code at WorktreeDetailSubComponents.tsx L684 shows the component renders with 'overflow-y-auto h-full'. This means the info tab already has its own scroll container and is not dependent on the main container's overflow as the design doc claims.",
+        "actual_code": "className=\"p-4 space-y-4 overflow-y-auto h-full\"",
+        "expected_description": "MobileInfoContent has overflow-y-auto, impact is low because it already has its own scroll container",
+        "risk": "low",
+        "recommendation": "Update the impact analysis table row for 'info' tab: change '既存overflow' from 'なし' to 'overflow-y-auto', and update '期待される動作' to 'internal scroll continues, main scroll is not reached'."
+      },
+      {
+        "id": "SF-002",
+        "category": "整合性",
+        "location": "Section 6 - 全5モバイルタブへの影響 - terminal tab row",
+        "design_doc_line": 125,
+        "description": "Design doc states TerminalDisplay component name for the terminal tab. While TerminalDisplay does use overflow-y-auto (L161), the component is passed className='h-full' from MobileContent (WorktreeDetailSubComponents.tsx L804). The design doc's description is essentially correct but omits that TerminalDisplay also has overflow-x-hidden alongside overflow-y-auto, which is relevant for understanding scroll behavior.",
+        "risk": "low",
+        "recommendation": "Consider noting that TerminalDisplay uses 'overflow-y-auto overflow-x-hidden' rather than just 'overflow-y-auto' for completeness."
+      },
+      {
+        "id": "SF-003",
+        "category": "整合性",
+        "location": "Section 6 - 全5モバイルタブへの影響 - history tab row",
+        "design_doc_line": 126,
+        "description": "Design doc lists 'HistoryPane' as the component for the history tab. In reality, MobileContent wraps HistoryPane in a parent div with 'h-full flex flex-col' that also includes a sub-tab switcher (Message | Git) and conditionally renders either HistoryPane or GitPane. The overflow-y-auto is on HistoryPane itself (L119), but the parent wrapper div does not have overflow set. The description is not wrong but is incomplete.",
+        "risk": "low",
+        "recommendation": "Consider noting that the history tab actually renders a wrapper div containing a sub-tab bar plus HistoryPane/GitPane, and that the overflow-y-auto is on each sub-component rather than the tab-level wrapper."
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "category": "整合性",
+        "location": "Section 5 - 変更しないファイル",
+        "design_doc_line": 115,
+        "description": "Design doc lists 'SearchBar.tsx' in the 'unchanged files' table. While the file does exist at src/components/worktree/SearchBar.tsx, this is not a highly relevant file to call out. The FileSearchBar.tsx (used in desktop) is more commonly referenced in CLAUDE.md. This is not incorrect, just potentially confusing naming.",
+        "risk": "none",
+        "recommendation": "No action needed. The SearchBar.tsx reference is valid."
+      },
+      {
+        "id": "NTH-002",
+        "category": "整合性",
+        "location": "Section 6 - ネストスクロール挙動",
+        "design_doc_line": 138,
+        "description": "The nested scroll behavior description mentions 'children are height-constrained by flex-1 min-h-0'. This is accurate for FileTreeView (passed className='flex-1 min-h-0' at L889) and HistoryPane (passed className='flex-1 min-h-0' at L842), but TerminalDisplay is passed className='h-full' (L804) and NotesAndLogsPane is passed className='h-full' (L899). The constraint mechanism differs by tab.",
+        "risk": "none",
+        "recommendation": "For precision, note that the height constraint mechanism varies: some tabs use 'flex-1 min-h-0' while others use 'h-full'. Both achieve the same goal within the flex column layout."
+      }
+    ]
+  },
+  "verification_checklist": {
+    "line_numbers": {
+      "status": "PASS",
+      "details": "L1762 correctly references the main element with 'flex-1 pb-32 overflow-hidden'. L1512 correctly references the desktop render path branch."
+    },
+    "css_classes": {
+      "status": "PASS",
+      "details": "All CSS classes mentioned (flex-1, pb-32, overflow-hidden, overflow-y-auto, overflow-auto, z-30, z-40, sticky, fixed) are accurately referenced and match actual source code."
+    },
+    "component_names_and_paths": {
+      "status": "PASS",
+      "details": "WorktreeDetailRefactored.tsx, WorktreeDetailSubComponents.tsx, FileTreeView.tsx, MobileTabBar.tsx, SearchBar.tsx, TerminalDisplay, HistoryPane, NotesAndLogsPane, MobileInfoContent, MobileContent - all component names and file paths are correct."
+    },
+    "overflow_behavior_description": {
+      "status": "PASS",
+      "details": "The core analysis is correct: overflow-hidden on the main container prevents child components from scrolling. Changing to overflow-y-auto will enable vertical scrolling. The CSS spec behavior description is accurate - overflow-hidden clips content and prevents scroll, overflow-y-auto enables vertical scrolling when content overflows."
+    },
+    "tab_impact_analysis": {
+      "status": "PASS_WITH_NOTES",
+      "details": "4 of 5 tabs are accurately described. The info tab row incorrectly states overflow is 'none' when MobileInfoContent actually has overflow-y-auto. See SF-001."
+    },
+    "dead_code_claim": {
+      "status": "PASS",
+      "details": "pb-32 (padding-bottom: 8rem) is correctly identified as dead code because the inline style paddingBottom: calc(8rem + env(safe-area-inset-bottom)) always overrides it due to higher CSS specificity."
+    },
+    "desktop_non_impact": {
+      "status": "PASS",
+      "details": "Confirmed: desktop layout branches at L1512 with 'if (!isMobile)' and uses a completely separate render path. The mobile-specific main element at L1761 is only rendered in the mobile path."
+    }
+  },
+  "risk_assessment": {
+    "overall_risk": "low",
+    "notes": "The design policy is well-written and accurate. The inaccuracies found are in the impact analysis table documentation, not in the proposed fix itself. The core fix (overflow-hidden to overflow-y-auto, pb-32 removal) is correctly specified and the line number is accurate."
+  }
+}

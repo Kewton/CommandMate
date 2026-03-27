@@ -26,6 +26,8 @@ import { FeedbackSection } from '@/components/worktree/FeedbackSection';
 import { Modal } from '@/components/ui/Modal';
 import { worktreeApi } from '@/lib/api-client';
 import { truncateString } from '@/lib/utils';
+import { ClipboardCopy, Check } from 'lucide-react';
+import { copyToClipboard } from '@/lib/clipboard-utils';
 import { NotificationDot } from '@/components/common/NotificationDot';
 import { NotesAndLogsPane } from '@/components/worktree/NotesAndLogsPane';
 import { GitPane } from '@/components/worktree/GitPane';
@@ -192,6 +194,40 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
 }: WorktreeInfoFieldsProps) {
   const { isEditing, text, setText, isSaving, handleSave, handleCancel, startEditing } = descriptionEditor;
 
+  const [pathCopied, setPathCopied] = useState(false);
+  const [repoPathCopied, setRepoPathCopied] = useState(false);
+  const pathTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const repoPathTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    return () => {
+      if (pathTimerRef.current) clearTimeout(pathTimerRef.current);
+      if (repoPathTimerRef.current) clearTimeout(repoPathTimerRef.current);
+    };
+  }, []);
+
+  const handleCopyPath = useCallback(async () => {
+    try {
+      await copyToClipboard(worktree.path);
+      setPathCopied(true);
+      if (pathTimerRef.current) clearTimeout(pathTimerRef.current);
+      pathTimerRef.current = setTimeout(() => setPathCopied(false), 2000);
+    } catch {
+      // Silent failure
+    }
+  }, [worktree.path]);
+
+  const handleCopyRepoPath = useCallback(async () => {
+    try {
+      await copyToClipboard(worktree.repositoryPath);
+      setRepoPathCopied(true);
+      if (repoPathTimerRef.current) clearTimeout(repoPathTimerRef.current);
+      repoPathTimerRef.current = setTimeout(() => setRepoPathCopied(false), 2000);
+    } catch {
+      // Silent failure
+    }
+  }, [worktree.repositoryPath]);
+
   return (
     <>
       {/* Worktree Name */}
@@ -202,14 +238,44 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
 
       {/* Repository Info */}
       <div className={cardClassName}>
-        <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Repository</h2>
+        <div className="flex items-center gap-1.5 mb-1">
+          <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400">Repository</h2>
+          <button
+            type="button"
+            onClick={handleCopyRepoPath}
+            className="flex-shrink-0 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+            aria-label="Copy repository path"
+            title={repoPathCopied ? 'Copied!' : 'Copy repository path'}
+          >
+            {repoPathCopied ? (
+              <Check className="w-3.5 h-3.5 text-green-600" />
+            ) : (
+              <ClipboardCopy className="w-3.5 h-3.5" />
+            )}
+          </button>
+        </div>
         <p className="text-base text-gray-900 dark:text-gray-100">{worktree.repositoryName}</p>
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 break-all">{worktree.repositoryPath}</p>
       </div>
 
       {/* Path */}
       <div className={cardClassName}>
-        <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Path</h2>
+        <div className="flex items-center gap-1.5 mb-1">
+          <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400">Path</h2>
+          <button
+            type="button"
+            onClick={handleCopyPath}
+            className="flex-shrink-0 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+            aria-label="Copy worktree path"
+            title={pathCopied ? 'Copied!' : 'Copy path'}
+          >
+            {pathCopied ? (
+              <Check className="w-3.5 h-3.5 text-green-600" />
+            ) : (
+              <ClipboardCopy className="w-3.5 h-3.5" />
+            )}
+          </button>
+        </div>
         <p className="text-sm text-gray-700 dark:text-gray-300 break-all font-mono">{worktree.path}</p>
       </div>
 
@@ -861,7 +927,7 @@ export const MobileContent = memo(function MobileContent({
     case 'files':
       return (
         <ErrorBoundary componentName="FileTreeView">
-          <div className="h-full flex flex-col">
+          <div className="h-full flex flex-col overflow-hidden">
             {/* [Issue #21] Search Bar - Mobile */}
             <SearchBar
               query={fileSearch.query}

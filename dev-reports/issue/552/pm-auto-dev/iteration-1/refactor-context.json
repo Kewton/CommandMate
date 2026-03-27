@@ -1,0 +1,16 @@
+{
+  "issue_number": 552,
+  "refactor_targets": [
+    "src/components/worktree/WorktreeDetailSubComponents.tsx"
+  ],
+  "quality_metrics": {
+    "tests_passed": 5386,
+    "lint_errors": 0,
+    "type_errors": 0
+  },
+  "improvement_goals": [
+    "コードの可読性確認",
+    "既存パターン（FileViewer.tsx）との一貫性確認",
+    "不要なコードがないか確認"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "issue_number": 552,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー - 指摘事項対応",
+  "applied_findings": [],
+  "skipped_findings": [
+    {"id": "SEC4-001", "severity": "nice_to_have", "reason": "Informational confirmation, no action needed"},
+    {"id": "SEC4-002", "severity": "nice_to_have", "reason": "Informational confirmation, no action needed"},
+    {"id": "SEC4-003", "severity": "nice_to_have", "reason": "Informational confirmation, no action needed"},
+    {"id": "SEC4-004", "severity": "nice_to_have", "reason": "Informational confirmation, no action needed"},
+    {"id": "SEC4-005", "severity": "nice_to_have", "reason": "Informational confirmation, no action needed"}
+  ],
+  "design_doc_updated": false,
+  "summary": "Stage 4 security review found 0 must_fix and 0 should_fix. All 5 findings are informational confirmations of no security risk. No design policy update needed."
+}

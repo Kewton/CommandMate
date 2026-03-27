@@ -1,0 +1,33 @@
+{
+  "issue_number": 548,
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘対応",
+  "apply_date": "2026-03-27",
+  "status": "COMPLETED",
+  "target_doc": "dev-reports/design/issue-548-mobile-file-list-design-policy.md",
+  "applied_findings": [
+    {
+      "id": "IA-001",
+      "category": "影響範囲",
+      "title": "terminalタブの二重スクロール可能性の分析不足",
+      "action": "ネストスクロール挙動セクションに「各タブの高さ制約メカニズムと二重スクロール防止」テーブルを追加。各タブ（terminal, history, files, memo, info）の高さ制約方法と二重スクロールが発生しない根拠を明記した。",
+      "status": "APPLIED"
+    },
+    {
+      "id": "IA-002",
+      "category": "影響範囲",
+      "title": "MobilePromptSheetとの相互作用が分析対象外",
+      "action": "ネストスクロール挙動セクションに「動的オーバーレイコンポーネントへの影響」テーブルを追加。MobilePromptSheet、FileViewerモーダル、ToastContainerがfixed/absoluteポジションであり影響を受けないことを明記した。",
+      "status": "APPLIED"
+    },
+    {
+      "id": "IA-003",
+      "category": "テスト戦略",
+      "title": "ネストスクロール回帰のテスト手法が不十分",
+      "action": "手動QAセクションにタブ別スクロール確認手順テーブル（確認手順と合格基準）を追加。Playwrightによる自動回帰テスト（推奨）セクションを追加し、filesタブのスクロール到達、terminalタブの単一スクロール、タブ切り替え後のスクロール位置維持の3テストケースを定義した。",
+      "status": "APPLIED"
+    }
+  ],
+  "skipped_findings": [],
+  "summary": "Stage 3影響分析レビューの全3件のshould-fix指摘を設計方針書に反映完了。ネストスクロールの高さ制約メカニズム説明、動的オーバーレイコンポーネントの影響分析、テスト戦略の具体化を追加した。"
+}

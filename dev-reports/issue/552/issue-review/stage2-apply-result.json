@@ -1,0 +1,53 @@
+{
+  "issue_number": 552,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-03-27",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "F1-001",
+        "status": "applied",
+        "change_summary": "Issue本文を全面的に記載。概要・背景・課題・対象UI・提案する解決策・参考実装・補足情報を具体的に記述"
+      },
+      {
+        "id": "F1-002",
+        "status": "applied",
+        "change_summary": "受け入れ条件を6項目追加（コピーアイコン表示、クリップボードコピー動作、アイコン切替フィードバック、デスクトップ/モバイル対応、既存パターンとの一貫性）"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "F1-003",
+        "status": "applied",
+        "change_summary": "対象UIセクションを追加し「WorktreeDetailSubComponents.tsxのWorktreeInfoFieldsコンポーネント内」と明記"
+      },
+      {
+        "id": "F1-004",
+        "status": "applied",
+        "change_summary": "コピー対象スコープをPath（worktree.path）とRepository Path（worktree.repositoryPath）の両方と明記"
+      },
+      {
+        "id": "F1-005",
+        "status": "applied",
+        "change_summary": "FileViewer.tsxの既存パターンを参考実装として明記し、UIの一貫性を保つ方針を記載"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F1-006",
+        "status": "applied",
+        "change_summary": "コピー成功時のフィードバック仕様（ClipboardCopy -> Check、2秒後に復帰）を提案する解決策および受け入れ条件に記載"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 6,
+    "applied": 6,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/552"
+  }
+}

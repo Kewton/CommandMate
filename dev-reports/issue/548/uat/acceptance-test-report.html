@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Issue #548 実機受入テスト報告書</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 960px; margin: 0 auto; padding: 20px; background: #f5f5f5; color: #333; }
+  h1 { color: #1a56db; border-bottom: 3px solid #1a56db; padding-bottom: 10px; }
+  h2 { color: #374151; margin-top: 30px; }
+  .summary { display: flex; gap: 20px; margin: 20px 0; }
+  .summary-card { background: white; border-radius: 8px; padding: 20px; flex: 1; box-shadow: 0 1px 3px rgba(0,0,0,0.1); text-align: center; }
+  .summary-card .number { font-size: 2em; font-weight: bold; }
+  .summary-card.pass .number { color: #059669; }
+  .summary-card.fail .number { color: #dc2626; }
+  .summary-card.total .number { color: #1a56db; }
+  .summary-card.rate .number { color: #059669; }
+  table { width: 100%; border-collapse: collapse; margin: 15px 0; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  th { background: #374151; color: white; padding: 12px 15px; text-align: left; }
+  td { padding: 10px 15px; border-bottom: 1px solid #e5e7eb; }
+  tr:last-child td { border-bottom: none; }
+  .pass { color: #059669; font-weight: bold; }
+  .fail { color: #dc2626; font-weight: bold; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
+  .badge-pass { background: #d1fae5; color: #059669; }
+  .badge-fail { background: #fee2e2; color: #dc2626; }
+  .evidence { background: #f3f4f6; padding: 8px 12px; border-radius: 4px; font-family: monospace; font-size: 0.9em; margin-top: 5px; word-break: break-all; }
+  .info-table td:first-child { font-weight: bold; width: 180px; }
+  .criteria-table td:first-child { width: 40px; text-align: center; }
+  .criteria-table td:nth-child(3) { width: 120px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>Issue #548 実機受入テスト報告書</h1>
+
+<h2>テスト概要</h2>
+<table class="info-table">
+  <tr><td>Issue</td><td>#548 スマホ版にてファイル一覧がすべて表示されない</td></tr>
+  <tr><td>テスト日</td><td>2026-03-27</td></tr>
+  <tr><td>テスト環境</td><td>CommandMate サーバー (localhost:3012)</td></tr>
+  <tr><td>ブランチ</td><td>feature/548-mobile-file-list-v2</td></tr>
+  <tr><td>テストツール</td><td>Playwright (モバイル: 375x667, デスクトップ: 1280x720)</td></tr>
+  <tr><td>テスト方法</td><td>実機サーバーに対するPlaywright自動テスト + CSS評価</td></tr>
+</table>
+
+<h2>テスト結果サマリー</h2>
+<div class="summary">
+  <div class="summary-card total"><div class="number">14</div><div>テスト総数</div></div>
+  <div class="summary-card pass"><div class="number">14</div><div>合格</div></div>
+  <div class="summary-card fail"><div class="number">0</div><div>不合格</div></div>
+  <div class="summary-card rate"><div class="number">100%</div><div>合格率</div></div>
+</div>
+
+<h2>受入条件の検証結果</h2>
+<table class="criteria-table">
+  <tr><th>#</th><th>受入条件</th><th>結果</th><th>対応テストケース</th></tr>
+  <tr><td>1</td><td>モバイル表示でファイルツリー全体がスクロールにより閲覧可能</td><td><span class="badge badge-pass">PASS</span></td><td>TC-001, TC-002, TC-004, TC-013</td></tr>
+  <tr><td>2</td><td>全5タブでスクロールが正常に動作</td><td><span class="badge badge-pass">PASS</span></td><td>TC-004~TC-008</td></tr>
+  <tr><td>3</td><td>MobileTabBar/MessageInputと重ならない</td><td><span class="badge badge-pass">PASS</span></td><td>TC-010</td></tr>
+  <tr><td>4</td><td>NavigationButtons表示時にもコンテンツが隠れない</td><td><span class="badge badge-pass">PASS</span></td><td>TC-014</td></tr>
+  <tr><td>5</td><td>safe-area-inset-bottomが正しく考慮</td><td><span class="badge badge-pass">PASS</span></td><td>TC-009</td></tr>
+  <tr><td>6</td><td>デスクトップ版レイアウトに影響なし</td><td><span class="badge badge-pass">PASS</span></td><td>TC-011</td></tr>
+  <tr><td>7</td><td>ダークモードで固定要素の背景が不透明</td><td><span class="badge badge-pass">PASS</span></td><td>TC-012</td></tr>
+</table>
+
+<h2>テストケース詳細</h2>
+<table>
+  <tr><th>ID</th><th>テスト名</th><th>結果</th><th>エビデンス</th></tr>
+  <tr><td>TC-001</td><td>mainコンテナのoverflow-y-auto適用確認</td><td><span class="badge badge-pass">PASS</span></td><td><div class="evidence">className='flex-1 overflow-y-auto', computedStyle.overflowY='auto'</div></td></tr>
+  <tr><td>TC-002</td><td>overflow-hiddenが除去されていること</td><td><span class="badge badge-pass">PASS</span></td><td><div class="evidence">classNameにoverflow-hiddenを含まない</div></td></tr>
+  <tr><td>TC-003</td><td>pb-32デッドコード除去確認</td><td><span class="badge badge-pass">PASS</span></td><td><div class="evidence">className='flex-1 overflow-y-auto' - pb-32なし</div></td></tr>
+  <tr><td>TC-004</td><td>filesタブのスクロール動作確認</td><td><span class="badge badge-pass">PASS</span></td><td><div class="evidence">FileTreeView: scrollHeight=1345 > clientHeight=354 (42アイテム, overflow-auto適用)</div></td></tr>
+  <tr><td>TC-005</td><td>terminalタブの表示確認</td><td><span class="badge badge-pass">PASS</span></td><td><div class="evidence">hasContent=true, contentLength=42674</div></td></tr>
+  <tr><td>TC-006</td><td>historyタブの表示確認</td><td><span class="badge badge-pass">PASS</span></td><td><div class="evidence">hasContent=true, contentLength=42674</div></td></tr>
+  <tr><td>TC-007</td><td>CMATEタブの表示確認</td><td><span class="badge badge-pass">PASS</span></td><td><div class="evidence">hasContent=true, contentLength=42674</div></td></tr>
+  <tr><td>TC-008</td><td>infoタブの表示確認</td><td><span class="badge badge-pass">PASS</span></td><td><div class="evidence">hasContent=true, contentLength=42674</div></td></tr>
+  <tr><td>TC-009</td><td>paddingBottomにsafe-area-inset-bottom適用確認</td><td><span class="badge badge-pass">PASS</span></td><td><div class="evidence">inlineStyle='padding-bottom: calc(8rem + env(safe-area-inset-bottom, 0px));' computedPaddingBottom='128px'</div></td></tr>
+  <tr><td>TC-010</td><td>MobileTabBarの固定配置確認</td><td><span class="badge badge-pass">PASS</span></td><td><div class="evidence">position=fixed, bottom=0px, backgroundColor=rgb(17,24,39) (不透明)</div></td></tr>
+  <tr><td>TC-011</td><td>デスクトップレイアウト非影響確認</td><td><span class="badge badge-pass">PASS</span></td><td><div class="evidence">デスクトップは別のmain要素(flex-1 min-w-0 h-full overflow-hidden)を使用。モバイル用mainは非表示。MobileTabBarも非表示。</div></td></tr>
+  <tr><td>TC-012</td><td>ダークモードでの固定要素背景確認</td><td><span class="badge badge-pass">PASS</span></td><td><div class="evidence">MobileTabBar backgroundColor=rgb(17,24,39) - 完全不透明、透過なし</div></td></tr>
+  <tr><td>TC-013</td><td>ソースコード静的検証</td><td><span class="badge badge-pass">PASS</span></td><td><div class="evidence">WorktreeDetailRefactored.tsx L1762: className='flex-1 overflow-y-auto', L1764: paddingBottom calc with safe-area</div></td></tr>
+  <tr><td>TC-014</td><td>NavigationButtons表示時のパディング確認</td><td><span class="badge badge-pass">PASS</span></td><td><div class="evidence">paddingBottom=128px(8rem) - MobileTabBar(64px)+MessageInput(48-64px)+NavigationButtons(32px)=144-160px。safe-area追加で十分なクリアランス確保。</div></td></tr>
+</table>
+
+<h2>修正内容</h2>
+<table class="info-table">
+  <tr><td>対象ファイル</td><td>src/components/worktree/WorktreeDetailRefactored.tsx (L1762)</td></tr>
+  <tr><td>修正前</td><td><code>className="flex-1 pb-32 overflow-hidden"</code></td></tr>
+  <tr><td>修正後</td><td><code>className="flex-1 overflow-y-auto"</code></td></tr>
+  <tr><td>コミット</td><td>98101bbb: fix: enable vertical scrolling on mobile file list (#548) (#554)</td></tr>
+</table>
+
+<p style="color:#6b7280; margin-top:30px; text-align:center; font-size:0.9em;">Generated by PM Auto-Dev on 2026-03-27</p>
+</body>
+</html>

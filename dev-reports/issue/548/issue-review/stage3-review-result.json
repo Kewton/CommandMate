@@ -1,0 +1,109 @@
+{
+  "issue_number": 548,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "review_date": "2026-03-27",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "overflow-hidden removal affects ALL mobile tabs, not just files tab. The main container at L1762 wraps MobileContent which renders terminal, history, files, memo, and info tabs. Changing overflow from hidden to auto/visible will alter scroll behavior for every tab. TerminalDisplay (overflow-y-auto at its own level), HistoryPane (flex-1 min-h-0), NotesAndLogsPane (internal overflow-hidden at L117 of NotesAndLogsPane.tsx), and MobileInfoContent all rely on the parent establishing a bounded flex container. Removing overflow-hidden without setting overflow-auto could cause content to overflow the viewport behind MobileTabBar and MessageInput.",
+        "location": "src/components/worktree/WorktreeDetailRefactored.tsx L1761-1766",
+        "recommendation": "Replace overflow-hidden with overflow-auto (or overflow-y-auto) rather than simply removing it. This preserves the scrollable boundary while allowing child content to scroll. Verify that each tab's content still scrolls correctly within the main container after the change.",
+        "evidence": "MobileContent switch-case (WorktreeDetailSubComponents.tsx L793-921) renders 5 different tab contents all as children of this single main element. TerminalDisplay uses overflow-y-auto (TerminalDisplay.tsx L161), FileTreeView uses overflow-auto (FileTreeView.tsx L448), NotesAndLogsPane uses internal overflow-hidden (L117). All depend on the parent bounding box."
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "破壊的変更",
+        "issue": "Removing pb-32 while keeping only the inline paddingBottom style changes the effective padding from 256px+ to 128px+. The current padding is intentionally large to prevent content from being hidden behind the fixed-position MessageInput (bottom: calc(4rem + safe-area)) and MobileTabBar (fixed bottom-0, ~4rem height + safe-area). The required clearance is approximately 4rem (tab bar) + variable MessageInput height + safe-area. The inline paddingBottom of calc(8rem + safe-area) may be insufficient if MessageInput expands (e.g., multi-line input, NavigationButtons visible).",
+        "location": "src/components/worktree/WorktreeDetailRefactored.tsx L1762, L1807-1830, L1832-1838",
+        "recommendation": "Calculate the exact required bottom padding: MobileTabBar height (4rem) + MessageInput container height (variable, ~3-4rem) + safe-area. Consider using a CSS custom property or a more precise calc expression. Test with NavigationButtons visible (OpenCode TUI active) which adds additional height above MessageInput.",
+        "evidence": "MessageInput is fixed at bottom: calc(4rem + safe-area) (L1809). MobileTabBar is fixed at bottom:0 with pb-safe (MobileTabBar.tsx L150). NavigationButtons add ~2rem when isSelectionListActive (L1812-1818)."
+      },
+      {
+        "id": "SF-2",
+        "category": "テスト範囲",
+        "issue": "No existing unit tests verify mobile layout CSS properties (pb-32, overflow-hidden, paddingBottom). The fix could introduce regressions across all 5 mobile tabs without test coverage to catch them.",
+        "location": "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+        "recommendation": "Add visual regression or layout assertion tests for the mobile main container. At minimum, add tests that verify: (1) FileTreeView is scrollable when content exceeds viewport, (2) content does not overlap with MobileTabBar, (3) all 5 tabs render without content clipping. Consider a Playwright mobile viewport E2E test.",
+        "evidence": "Grep of tests/unit/components/WorktreeDetailRefactored.test.tsx shows zero matches for pb-32, overflow-hidden, MobileContent, or paddingBottom."
+      },
+      {
+        "id": "SF-3",
+        "category": "依存関係",
+        "issue": "Dark mode uses the same main container and identical CSS. The fix inherently applies to dark mode. However, the dark:bg-gray-900 backgrounds on fixed elements (MessageInput L1808, MobileTabBar L150) rely on being opaque to hide scrolled content beneath them. If overflow changes cause content to scroll behind these elements, the visual separation depends entirely on these background colors being opaque - which they are in both light and dark mode, so this is low risk but should be verified.",
+        "location": "src/components/worktree/WorktreeDetailRefactored.tsx L1808, src/components/mobile/MobileTabBar.tsx L150",
+        "recommendation": "Verify in dark mode that scrolled content does not show through the fixed MessageInput and MobileTabBar areas. No code change expected, but manual QA in dark mode is recommended.",
+        "evidence": "MessageInput wrapper: bg-white dark:bg-gray-900 (L1808). MobileTabBar: bg-white dark:bg-gray-900 (MobileTabBar.tsx L150). Both are opaque."
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント更新",
+        "issue": "The Issue does not mention impact on the SearchBar component within the files tab. The SearchBar (WorktreeDetailSubComponents.tsx L866-874) is a sibling of FileTreeView inside a flex column. Changing the parent overflow should not affect SearchBar directly since it is a shrink-0 element, but this should be noted in the Issue for completeness.",
+        "location": "Issue body, 影響範囲 section",
+        "recommendation": "Add a note to the Issue confirming that SearchBar positioning within the files tab is unaffected by the fix, to provide confidence during review.",
+        "evidence": "SearchBar and FileTreeView are inside a flex-col div (L864). SearchBar has no explicit shrink-0 but is a small fixed-height element that will not be affected by parent overflow changes."
+      },
+      {
+        "id": "NTH-2",
+        "category": "移行考慮",
+        "issue": "The fix is purely CSS with no API or data model changes. No migration path is needed for existing users. However, users on iOS Safari with the notch/Dynamic Island may experience different safe-area-inset-bottom values. The env(safe-area-inset-bottom) is already used correctly, so this is informational only.",
+        "location": "src/components/worktree/WorktreeDetailRefactored.tsx L1764",
+        "recommendation": "Test on iOS Safari (notch device) and Android Chrome to verify safe-area handling after the padding consolidation.",
+        "evidence": "env(safe-area-inset-bottom, 0px) with fallback is already correctly specified at L1764."
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "1761-1766, 1806-1838",
+      "relevance": "Primary fix target: main container CSS (L1762) and fixed-position MessageInput/MobileTabBar (L1806-1838)"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailSubComponents.tsx",
+      "lines": "755-921",
+      "relevance": "MobileContent component - all 5 tab contents rendered inside the affected main container"
+    },
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "lines": "443-449",
+      "relevance": "FileTreeView overflow-auto that is currently suppressed by parent overflow-hidden"
+    },
+    {
+      "file": "src/components/mobile/MobileTabBar.tsx",
+      "lines": "145-170",
+      "relevance": "Fixed bottom tab bar whose height determines required bottom padding"
+    },
+    {
+      "file": "src/components/worktree/NotesAndLogsPane.tsx",
+      "lines": "117",
+      "relevance": "Internal overflow-hidden that may interact with parent overflow changes"
+    },
+    {
+      "file": "src/components/worktree/TerminalDisplay.tsx",
+      "lines": "161-162",
+      "relevance": "Terminal overflow-y-auto that depends on parent bounding"
+    }
+  ],
+  "doc_references": [],
+  "impact_summary": {
+    "affected_tabs": ["terminal", "history", "files", "memo", "info"],
+    "desktop_impact": "None. Desktop layout uses a completely separate render path (L1512) and does not share the mobile main container.",
+    "breaking_changes": "None for APIs or data. CSS-only change affecting mobile layout for all 5 tabs.",
+    "safe_area_impact": "Low risk. env(safe-area-inset-bottom) is already correctly used. Consolidating to a single padding source should not change safe-area behavior.",
+    "dark_mode_impact": "No additional risk. Same CSS applies. Fixed elements have opaque backgrounds in both themes.",
+    "search_bar_impact": "No impact. SearchBar is inside a nested flex-col container within the files tab, not directly affected by parent overflow."
+  }
+}

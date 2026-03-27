@@ -1,0 +1,73 @@
+{
+  "issue_number": 548,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_date": "2026-03-27",
+  "overall_result": "PASS_WITH_MINOR_ISSUES",
+  "summary": "影響範囲分析は概ね正確だが、ネストスクロールの挙動分析にterminalタブとhistoryタブの二重スクロール問題への言及が不足。また、MobilePromptSheetやFileViewerモーダルなど動的要素との相互作用への分析が欠落している。テスト戦略は手動QAに依存しすぎており、ネストスクロールの回帰検出が弱い。",
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "IA-001",
+        "category": "影響範囲",
+        "title": "terminalタブの二重スクロール可能性の分析不足",
+        "description": "TerminalDisplayは内部でoverflow-y-autoを持ち、mainコンテナもoverflow-y-autoになる。TerminalDisplayにはclassName='h-full'が渡されるため、flex-1制約下でh-fullが正しく機能すれば内部スクロールのみになるが、コンテンツ量が高さを超えた場合にmainとTerminalDisplayの両方がスクロール可能になる二重スクロール（scroll chaining）の可能性がある。設計書はterminalタブの影響度を「中」としつつ「内部スクロール継続、mainのスクロールは到達しない」と断言しているが、その根拠（h-fullによる高さ制約がflex-1 mainの子として正しく機能する理由）が不明確。",
+        "recommendation": "設計書のネストスクロール挙動セクションに、各タブの高さ制約メカニズム（h-full, flex-1 min-h-0等）がどのように二重スクロールを防ぐかを明記する。特にterminalタブはh-fullのみで、min-h-0やflex-1を持たないため、overflow-y-autoのmain下で期待通りに動作する根拠を記載すべき。"
+      },
+      {
+        "id": "IA-002",
+        "category": "影響範囲",
+        "title": "MobilePromptSheetとの相互作用が分析対象外",
+        "description": "MobilePromptSheetは条件付きで表示されるオーバーレイコンポーネント（L1840-1849）。overflow-y-autoのmainコンテナ上でMobilePromptSheetが表示されたとき、背景のスクロールが可能かどうかの分析がない。現状はfixed/absoluteポジションであれば影響ないが、設計書で明示的に除外理由を述べるべき。",
+        "recommendation": "影響範囲分析に「動的表示コンポーネント」セクションを追加し、MobilePromptSheet、FileViewerモーダル、ToastContainerがmainのoverflow変更の影響を受けないことを明記する。"
+      },
+      {
+        "id": "IA-003",
+        "category": "テスト戦略",
+        "title": "ネストスクロール回帰のテスト手法が不十分",
+        "description": "テスト戦略のユニットテストでは「overflow-y-autoクラスが適用されていること」のみ検証しているが、CSSクラス存在確認だけでは実際のスクロール挙動の回帰を検出できない。手動QAの「全5タブのスクロール動作確認」は重要だが、自動化されていないため将来の回帰リスクがある。",
+        "recommendation": "手動QAチェックリストに各タブでの具体的な確認手順（ファイル20件以上のツリーでスクロール末尾到達確認、terminalタブでの長い出力での単一スクロール確認等）を追記する。E2Eテストが適用可能であれば、Playwrightでモバイルビューポートでのスクロール到達テストを追加することを推奨する。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "IA-004",
+        "category": "影響範囲",
+        "title": "overscroll-behaviorの明記",
+        "description": "ネストスクロール構造において、子要素のスクロールが端に達したときにmainのスクロールに伝播する（scroll chaining）可能性がある。CSS overscroll-behavior: contain を子要素に設定することで、意図しないスクロール伝播を防げる。",
+        "recommendation": "filesタブ以外のタブ（特にterminal, history）の子コンテナにoverscroll-behavior: containの適用を検討する旨をトレードオフセクションに記載する。現時点では必須ではないが、将来のUX改善として認識しておく価値がある。"
+      },
+      {
+        "id": "IA-005",
+        "category": "影響範囲",
+        "title": "landscape時のpaddingBottom占有率への追加分析",
+        "description": "設計書はlandscape時にpaddingBottom(8rem + safe-area)が約36%を占める可能性を認識しているが、overflow-y-autoへの変更によりこの領域もスクロール可能になる点のメリット/デメリットが未分析。overflow-hiddenでは表示領域がさらに狭くなっていたため、overflow-y-autoは改善方向ではある。",
+        "recommendation": "トレードオフセクションに、overflow-y-autoによりlandscape時でもpaddingBottom領域をスクロールで通過できるため、実質的な閲覧領域はoverflow-hiddenよりも改善される旨を追記する。"
+      },
+      {
+        "id": "IA-006",
+        "category": "影響範囲",
+        "title": "BranchMismatchAlert表示/非表示時のレイアウトシフト",
+        "description": "BranchMismatchAlertはmainタグの前（外側）に条件付きで表示される（L1677-1686）。mainのflex-1が残りの領域を占めるため、Alert表示時にmainの高さが減り、overflow-y-autoの閾値が変わる。これ自体は問題ではないが、設計書の影響範囲分析では言及されていない。",
+        "recommendation": "影響範囲分析のレイアウト構造図で、BranchMismatchAlertがmain外部のflex子要素であり、表示/非表示によりmainの利用可能高さが変動することを注記として追記する。"
+      }
+    ]
+  },
+  "review_checklist": {
+    "impact_scope_identified": true,
+    "all_affected_files_listed": true,
+    "all_affected_tabs_analyzed": true,
+    "desktop_non_impact_verified": true,
+    "nested_scroll_analysis": "partial",
+    "dynamic_elements_analysis": "missing",
+    "test_strategy_adequate": "partial",
+    "security_non_impact_confirmed": true,
+    "performance_non_impact_confirmed": true
+  },
+  "risk_assessment": {
+    "overall_risk": "LOW",
+    "rationale": "CSS-only変更であり、ロジック変更なし。主要リスクは他タブでのネストスクロール挙動だが、各タブがh-fullで高さ制約されているため深刻な問題は発生しにくい。MobilePromptSheet等の動的要素はfixed positionのため影響なし。"
+  }
+}

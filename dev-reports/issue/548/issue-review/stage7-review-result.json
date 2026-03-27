@@ -1,0 +1,105 @@
+{
+  "issue_number": 548,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "stage": 7,
+  "review_date": "2026-03-27",
+  "previous_findings_verification": {
+    "stage3_must_fix": {
+      "MF-1_overflow_all_tabs": "RESOLVED - Issue now documents all 5 tabs affected with per-tab impact table. Fix strategy correctly changed from 'remove overflow-hidden' to 'replace with overflow-y-auto'."
+    },
+    "stage3_should_fix": {
+      "SF-1_nav_buttons_padding": "RESOLVED - Clearance requirements (MobileTabBar 4rem, MessageInput 3-4rem, NavigationButtons 2rem) documented. inline paddingBottom calc(8rem + safe-area) analysis is correct.",
+      "SF-2_css_tests": "RESOLVED - Test strategy section added with manual QA checklist and recommended automation (Playwright E2E).",
+      "SF-3_dark_mode_qa": "RESOLVED - Added to both acceptance criteria and test plan."
+    },
+    "stage3_nice_to_have": {
+      "NTH-1_searchbar_impact": "RESOLVED - SearchBar impact explicitly noted as 'no impact' in the impact scope section.",
+      "NTH-2_ios_safari_safe_area": "RESOLVED - iOS Safari safe-area verification added to test plan."
+    },
+    "stage5_corrections_applied": {
+      "MF-1_dead_code_pb32": "RESOLVED - Issue now correctly identifies pb-32 as dead code (overridden by inline style), not as additive padding. Root cause correctly re-centered on overflow-hidden.",
+      "SF-1_history_pane_overflow": "RESOLVED - Table now shows 'overflow-y-auto (L119), flex-1 min-h-0 (L286)' for HistoryPane.",
+      "NTH-1_overflow_auto_vs_y_auto": "RESOLVED - Fix strategy now recommends overflow-y-auto as primary choice with overflow-auto as fallback for long file paths.",
+      "NTH-2_review_history_stage1": "RESOLVED - Stage 1, Stage 3, and Stage 5 review histories all documented."
+    }
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 1,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "影響ファイル",
+        "issue": "The Issue does not mention the potential for nested double-scrolling between the main container and child components. When overflow-y-auto is applied to the main container, and child components (TerminalDisplay, HistoryPane, MemoPane, FileTreeView) also have their own overflow-y-auto, there are two scrollable containers nested. In practice this works because child components use h-full or flex-1 min-h-0 to fill the parent exactly, so the inner scroll activates and the outer scroll does not. However, this assumes the paddingBottom on the main container does not cause the main container's content height to exceed its flex-allocated height. The current calc(8rem + safe-area) padding is applied to the main element itself, which means the child component (e.g., FileTreeView with h-full) plus the padding will exceed the flex-1 allocated height, causing the OUTER container to scroll rather than the inner. This is actually the desired behavior for this bug fix -- the main container scrolls to reveal content hidden behind fixed elements. But implementers should be aware that scroll will occur on the main container, not within FileTreeView itself.",
+        "location": "src/components/worktree/WorktreeDetailRefactored.tsx L1761-1766",
+        "recommendation": "Add a brief implementation note in the Issue clarifying that the scroll behavior shifts: with overflow-y-auto on main, the paddingBottom ensures the main container itself becomes scrollable (content + padding exceeds flex-1 height), which allows the last items to scroll above the fixed MessageInput/MobileTabBar. This is correct and expected. No code change in the Issue needed, but implementers should verify that the inner overflow-y-auto on child components still functions as expected for long content (e.g., long terminal output should still scroll within TerminalDisplay, not on the outer main).",
+        "evidence": "main element: flex-1 overflow-y-auto with paddingBottom calc(8rem + safe-area). Children like TerminalDisplay (h-full, overflow-y-auto) and FileTreeView (flex-1 min-h-0, overflow-auto). The paddingBottom on main creates a gap that makes main's content area taller than its flex allocation, enabling outer scroll. CSS spec: flex items with overflow != visible have min-height: 0 automatically, so flex-1 correctly constrains the main element to remaining space."
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "テスト範囲",
+        "issue": "The Issue does not mention landscape orientation or tablet/split-screen testing. On tablets or phones in landscape, the viewport height is significantly reduced, making the paddingBottom (8rem + safe-area = ~130-140px) a larger proportion of the visible area. This could cause excessive blank space at the bottom when scrolled to the end. Additionally, split-screen mode on Android reduces viewport height further.",
+        "location": "## テスト方針 セクション",
+        "recommendation": "Add landscape and tablet/split-screen to the manual QA checklist. Specifically: (1) Verify file list scrollability in landscape orientation, (2) Check that the bottom padding does not create excessive whitespace on tablets, (3) Test Android split-screen mode where viewport height is halved.",
+        "evidence": "paddingBottom calc(8rem + safe-area) is ~130px minimum. On a landscape phone with ~360px viewport height, this represents ~36% of the viewport, which is significant. Current QA checklist does not mention orientation or form factor variants."
+      },
+      {
+        "id": "NTH-2",
+        "category": "依存関係",
+        "issue": "The Issue's impact table lists the 'info' tab as 'low impact' because content quantity is small. However, MobileInfoContent is not shown in the code analysis, and if it lacks its own overflow handling, it would rely entirely on the main container's overflow-y-auto. This is actually fine and is the desired behavior, but the reasoning in the table ('content quantity is small') is fragile -- if info tab content grows in the future (e.g., more metadata fields), the overflow-y-auto on main will handle it correctly.",
+        "location": "## 原因分析 > タブ別の影響詳細 テーブル, info行",
+        "recommendation": "Consider updating the info tab impact description from 'low: content quantity is small' to 'low: relies on main container scroll, content currently fits viewport'. This more accurately describes the mechanism rather than making an assumption about content size.",
+        "evidence": "MobileInfoContent (WorktreeDetailSubComponents.tsx L911-916) is rendered without explicit className for scroll. It will inherit scroll from the main container's overflow-y-auto."
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "1661-1766, 1805-1838",
+      "relevance": "Main container (L1762 flex-1 pb-32 overflow-hidden) and fixed elements (MessageInput, MobileTabBar). Parent layout: h-full flex flex-col (L1667)."
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailSubComponents.tsx",
+      "lines": "756-921",
+      "relevance": "MobileContent component - all 5 tab cases. Each tab's scroll handling verified."
+    },
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "lines": "443-449",
+      "relevance": "FileTreeView overflow-auto - will work correctly when parent changes to overflow-y-auto."
+    },
+    {
+      "file": "src/components/worktree/NotesAndLogsPane.tsx",
+      "lines": "117",
+      "relevance": "Internal overflow-hidden on sub-tab content container. MemoPane (L119/L199) has its own overflow-y-auto inside."
+    },
+    {
+      "file": "src/components/worktree/HistoryPane.tsx",
+      "lines": "119-120",
+      "relevance": "overflow-y-auto and overflow-x-hidden - correctly documented in Issue after Stage 5 correction."
+    },
+    {
+      "file": "src/components/worktree/TerminalDisplay.tsx",
+      "lines": "161-162",
+      "relevance": "overflow-y-auto + overflow-x-hidden pattern, consistent with recommended fix approach."
+    }
+  ],
+  "doc_references": [],
+  "impact_summary": {
+    "all_previous_findings_addressed": true,
+    "root_cause_correctly_identified": true,
+    "fix_approach_validated": "overflow-hidden to overflow-y-auto is correct. CSS spec ensures flex items with overflow != visible have min-height: 0, so flex-1 will constrain the main element properly. No risk of unbounded growth.",
+    "desktop_impact": "None. Confirmed separate render path at L1512.",
+    "breaking_changes": "None. CSS-only change, no API or data model impact.",
+    "new_concerns": "SF-1 (nested scroll interaction awareness for implementers), NTH-1 (landscape/tablet/split-screen QA), NTH-2 (info tab impact rationale fragility)",
+    "overall_assessment": "The Issue is well-documented and comprehensive after 6 stages of review. All previous findings have been properly addressed. The corrected root cause (overflow-hidden as primary cause, pb-32 as dead code) is technically accurate. The fix approach (overflow-y-auto replacement) is sound and will not introduce unintended side effects. The remaining findings are minor awareness items rather than blockers."
+  }
+}

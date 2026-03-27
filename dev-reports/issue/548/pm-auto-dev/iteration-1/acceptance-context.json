@@ -1,0 +1,22 @@
+{
+  "issue_number": 548,
+  "feature_summary": "スマホ版にてファイル一覧がすべて表示されない - overflow-hiddenをoverflow-y-autoに変更、pb-32デッドコード削除",
+  "acceptance_criteria": [
+    "モバイル表示でファイルツリー全体がスクロールにより閲覧可能であること",
+    "全5タブ（terminal, history, files, memo, info）でスクロールが正常に動作すること",
+    "MobileTabBarやMessageInputと重ならずコンテンツが表示されること",
+    "NavigationButtons表示時にもコンテンツが隠れないこと",
+    "safe-area-inset-bottomが正しく考慮されていること",
+    "デスクトップ版のレイアウトに影響がないこと",
+    "ダークモードで固定要素（MessageInput, MobileTabBar）の背景がスクロールコンテンツを正しく隠すこと"
+  ],
+  "test_scenarios": [
+    "シナリオ1: WorktreeDetailRefactored.tsxのmainコンテナにoverflow-y-autoが適用されていること",
+    "シナリオ2: mainコンテナにoverflow-hiddenが含まれていないこと",
+    "シナリオ3: mainコンテナにデッドコードpb-32が含まれていないこと",
+    "シナリオ4: mainコンテナにflex-1が保持されていること",
+    "シナリオ5: inline styleのpaddingBottomにsafe-area-inset-bottomが含まれていること",
+    "シナリオ6: デスクトップレイアウト（L1512付近）が変更されていないこと",
+    "シナリオ7: FileTreeViewのoverflow-autoが保持されていること"
+  ]
+}

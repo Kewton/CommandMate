@@ -1,0 +1,14 @@
+{
+  "issue_number": 548,
+  "refactor_targets": [
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/worktree/WorktreeDetailRefactored-mobile-overflow.test.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0
+  },
+  "improvement_goals": [
+    "テストコードの品質確認・改善",
+    "変更箇所周辺のコード品質確認"
+  ]
+}

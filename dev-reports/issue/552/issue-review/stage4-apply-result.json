@@ -1,0 +1,51 @@
+{
+  "issue_number": 552,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "applied_findings": [
+    {
+      "id": "F3-001",
+      "title": "WorktreeInfoFieldsはmemoコンポーネントであり、新たなstate追加でリレンダリング範囲が変わる",
+      "action": "影響範囲セクションに「実装上の考慮点」としてReact.memo境界内でのuseState追加と再レンダリング伝播なしの説明を追記"
+    },
+    {
+      "id": "F3-002",
+      "title": "lucide-reactからのClipboardCopy/Checkアイコンの新規importが必要",
+      "action": "影響範囲セクションの「新規import追加」にlucide-reactのimport情報を明記"
+    },
+    {
+      "id": "F3-003",
+      "title": "clipboard-utilsのimport追加が必要",
+      "action": "影響範囲セクションの「新規import追加」にclipboard-utilsのimport情報を明記"
+    },
+    {
+      "id": "F3-004",
+      "title": "WorktreeInfoFieldsに対する直接の単体テストが存在しない",
+      "action": "受け入れ条件にテスト作成要件を追加し、独立した「テスト要件」セクションを新設して4つの具体的テスト項目を明記"
+    },
+    {
+      "id": "F3-005",
+      "title": "アクセシビリティ属性（aria-label, title）の追加が必要",
+      "action": "受け入れ条件にアクセシビリティ要件（aria-label, title属性）を具体的な値とともに追記"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "F3-006",
+      "title": "破壊的変更なし - WorktreeInfoFieldsPropsインターフェースは変更不要",
+      "reason": "nice_to_have - 対応不要の確認事項。影響範囲セクションの「影響なし」項目として反映済み"
+    },
+    {
+      "id": "F3-007",
+      "title": "APIルート・データレイヤーへの影響なし",
+      "reason": "nice_to_have - 対応不要の確認事項。影響範囲セクションの「影響なし」項目として反映済み"
+    },
+    {
+      "id": "F3-008",
+      "title": "ドキュメント更新は不要",
+      "reason": "nice_to_have - 対応不要の確認事項"
+    }
+  ],
+  "issue_updated": true,
+  "summary": "Issue #552にStage 3影響範囲レビューのshould_fix 5件を反映。主な追加内容: (1) 影響範囲セクション新設（変更対象ファイル、新規import、デスクトップ/モバイル対応、影響なし範囲、React.memo考慮点）、(2) アクセシビリティ要件を受け入れ条件に追加（aria-label, title属性の具体値）、(3) テスト要件セクション新設（4つの具体的テスト項目）、(4) レビュー履歴テーブル追加。nice_to_have 3件は独立セクションとしては追加せず、影響範囲セクション内に自然な形で統合した。"
+}

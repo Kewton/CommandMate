@@ -1,0 +1,102 @@
+{
+  "issue_number": 552,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "focus_area": "影響範囲",
+  "review_date": "2026-03-27",
+  "findings": [
+    {
+      "id": "F3-001",
+      "severity": "should_fix",
+      "category": "影響ファイル",
+      "title": "WorktreeInfoFieldsはmemoコンポーネントであり、新たなstate追加でリレンダリング範囲が変わる",
+      "description": "WorktreeInfoFieldsはReact.memoで最適化されているが、コピー状態管理（useState x2）を内部に追加すると、コピーアイコンクリック時にWorktreeInfoFields全体が再レンダリングされる。InfoModal（デスクトップ）とMobileInfoContent（モバイル）の両方に影響する。現状のpropsに変更はないため、親コンポーネント（InfoModal, MobileInfoContent）への影響は限定的。",
+      "recommendation": "WorktreeInfoFields内にuseState(false)を2つ追加する形で実装する。memo境界の内側での状態変更なので、親コンポーネントへの再レンダリング伝播はない。パフォーマンス的に問題ないことを確認すること。"
+    },
+    {
+      "id": "F3-002",
+      "severity": "should_fix",
+      "category": "依存関係",
+      "title": "lucide-reactからのClipboardCopy/Checkアイコンの新規importが必要",
+      "description": "WorktreeDetailSubComponents.tsxは現在lucide-reactをimportしていない。FileViewer.tsxでは既に { Copy, Check, Maximize2, Minimize2, ClipboardCopy, Pencil, Search, X } をimportしている。WorktreeDetailSubComponents.tsxに新たにlucide-reactの依存を追加する必要がある。",
+      "recommendation": "import { ClipboardCopy, Check } from 'lucide-react' を追加する。lucide-reactはプロジェクトの既存依存なので、package.jsonへの変更は不要。"
+    },
+    {
+      "id": "F3-003",
+      "severity": "should_fix",
+      "category": "依存関係",
+      "title": "clipboard-utilsのimport追加が必要",
+      "description": "WorktreeDetailSubComponents.tsxは現在clipboard-utilsをimportしていない。copyToClipboard関数のimportを追加する必要がある。clipboard-utils.tsはクライアントサイドコードであり、WorktreeDetailSubComponents.tsxも'use client'ディレクティブがあるので互換性に問題はない。",
+      "recommendation": "import { copyToClipboard } from '@/lib/clipboard-utils' を追加する。"
+    },
+    {
+      "id": "F3-004",
+      "severity": "should_fix",
+      "category": "テスト範囲",
+      "title": "WorktreeInfoFieldsに対する直接の単体テストが存在しない",
+      "description": "tests/unit/components/WorktreeDetailRefactored.test.tsx が存在するが、WorktreeInfoFieldsコンポーネントの個別テストは確認できなかった。コピー機能追加後、以下のテストが必要: (1) コピーアイコンの表示、(2) クリック時のcopyToClipboard呼び出し、(3) コピー成功後のCheckアイコン切替、(4) 2秒後のアイコン復帰。",
+      "recommendation": "WorktreeInfoFieldsのコピー機能に関する単体テストを作成する。clipboard-utilsは既にテスト(src/lib/__tests__/clipboard-utils.test.ts)が存在するので、コンポーネント側のテストに集中すればよい。"
+    },
+    {
+      "id": "F3-005",
+      "severity": "should_fix",
+      "category": "テスト範囲",
+      "title": "アクセシビリティ属性（aria-label, title）の追加が必要",
+      "description": "FileViewer.tsxの既存パターンでは aria-label='Copy file path' と title='Copy path' が設定されている。Issueの受け入れ条件にはアクセシビリティに関する記述がないが、既存パターンとの一貫性を保つために同様の属性が必要。2つのフィールド（Path, Repository Path）で異なるaria-labelを設定すべき。",
+      "recommendation": "PathフィールドにはΜaria-label='Copy worktree path'、Repository Pathフィールドにはaria-label='Copy repository path' を設定する。Issueの受け入れ条件にアクセシビリティ要件を明記することを推奨。"
+    },
+    {
+      "id": "F3-006",
+      "severity": "nice_to_have",
+      "category": "破壊的変更",
+      "title": "破壊的変更なし - WorktreeInfoFieldsPropsインターフェースは変更不要",
+      "description": "コピー機能はWorktreeInfoFields内部の状態として実装でき、propsインターフェースの変更は不要。したがってInfoModal, MobileInfoContent, MobileContentなどの親コンポーネントのコード変更は不要。破壊的変更のリスクはない。",
+      "recommendation": "特に対応不要。propsを追加しない内部実装として進めることを確認。"
+    },
+    {
+      "id": "F3-007",
+      "severity": "nice_to_have",
+      "category": "影響ファイル",
+      "title": "APIルート・データレイヤーへの影響なし",
+      "description": "この変更は純粋にフロントエンドのUI変更であり、APIルート（src/app/api/）やデータベースレイヤー（src/lib/db/）への影響は一切ない。copyToClipboardはブラウザのClipboard APIを使用するクライアントサイド処理のみ。",
+      "recommendation": "特に対応不要。"
+    },
+    {
+      "id": "F3-008",
+      "severity": "nice_to_have",
+      "category": "ドキュメント更新",
+      "title": "ドキュメント更新は不要",
+      "description": "UIの小規模な改善であり、アーキテクチャドキュメントやモジュールリファレンスの更新は不要。CLAUDE.mdのモジュール一覧にも既にWorktreeDetailSubComponents.tsxが記載されている。",
+      "recommendation": "特に対応不要。"
+    }
+  ],
+  "summary": "Issue #552は、WorktreeDetailSubComponents.tsx内のWorktreeInfoFieldsコンポーネントにコピーアイコンを追加する小規模なUI改善。変更対象ファイルは実質1ファイル（WorktreeDetailSubComponents.tsx）のみ。FileViewer.tsxの既存コピーパターン（ClipboardCopy/Check切替+2秒フィードバック+copyToClipboard）を踏襲する設計は妥当。破壊的変更なし、APIへの影響なし。主な考慮点は: (1) lucide-reactとclipboard-utilsの新規import追加、(2) memo内部のstate追加によるリレンダリング範囲、(3) アクセシビリティ属性の追加、(4) テストの作成。デスクトップ・モバイル両方で同じWorktreeInfoFieldsを使用しているため、1箇所の変更で両方に反映される。",
+  "statistics": {
+    "must_fix": 0,
+    "should_fix": 5,
+    "nice_to_have": 3,
+    "total": 8
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/WorktreeDetailSubComponents.tsx",
+      "relevance": "変更対象: WorktreeInfoFieldsコンポーネント（L185-330）にコピーアイコンを追加"
+    },
+    {
+      "file": "src/components/worktree/FileViewer.tsx",
+      "relevance": "参照パターン: handleCopyPath関数（L271-279）とrenderToolbar（L548-558）のコピーUI実装"
+    },
+    {
+      "file": "src/lib/clipboard-utils.ts",
+      "relevance": "依存: copyToClipboard関数を新たにimportして使用"
+    },
+    {
+      "file": "src/lib/__tests__/clipboard-utils.test.ts",
+      "relevance": "既存テスト: clipboard-utilsの単体テスト（変更不要）"
+    },
+    {
+      "file": "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+      "relevance": "関連テスト: WorktreeDetailのテスト（コピー機能のテスト追加を検討）"
+    }
+  ]
+}

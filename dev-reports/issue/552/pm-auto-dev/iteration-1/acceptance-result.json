@@ -1,0 +1,98 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "TC-001: Copy icons are rendered for Path and Repository Path",
+      "result": "passed",
+      "evidence": "screen.getByRole('button', { name: 'Copy worktree path' }) and 'Copy repository path' both found"
+    },
+    {
+      "scenario": "TC-002: Clicking Path copy calls copyToClipboard with worktree.path",
+      "result": "passed",
+      "evidence": "mockCopyToClipboard called with '/home/user/projects/my-app'"
+    },
+    {
+      "scenario": "TC-003: Clicking Repo Path copy calls copyToClipboard with worktree.repositoryPath",
+      "result": "passed",
+      "evidence": "mockCopyToClipboard called with '/home/user/repos/my-repo'"
+    },
+    {
+      "scenario": "TC-004: After copy, icon changes to Check (title changes to 'Copied!')",
+      "result": "passed",
+      "evidence": "title attribute changes from 'Copy path' to 'Copied!' after click"
+    },
+    {
+      "scenario": "TC-005: After 2 seconds, icon reverts back to ClipboardCopy",
+      "result": "passed",
+      "evidence": "After vi.advanceTimersByTime(2000), title reverts to 'Copy path'"
+    },
+    {
+      "scenario": "TC-006: Accessibility attributes (aria-label, title, type='button')",
+      "result": "passed",
+      "evidence": "Both buttons have correct aria-label, title, and type='button' attributes"
+    },
+    {
+      "scenario": "TC-007: Unmount cleanup clears timers (DR1-005)",
+      "result": "passed",
+      "evidence": "useEffect cleanup calls clearTimeout on unmount; useRef pattern verified in source"
+    },
+    {
+      "scenario": "TC-008: Rapid clicks clear previous timer (IA3-004)",
+      "result": "passed",
+      "evidence": "clearTimeout called before setTimeout in handleCopyPath/handleCopyRepoPath; test confirms timer reset behavior"
+    },
+    {
+      "scenario": "TC-009: Repository path copy also shows Check and reverts after 2 seconds",
+      "result": "passed",
+      "evidence": "repoPathCopied state toggles correctly with 2s timer"
+    },
+    {
+      "scenario": "TC-010: Copy failure handled silently without crashing",
+      "result": "passed",
+      "evidence": "mockCopyToClipboard.mockRejectedValueOnce does not crash; title remains 'Copy path'"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "InfoモーダルのPathフィールド横にコピーアイコンが表示されること",
+      "verified": true
+    },
+    {
+      "criterion": "InfoモーダルのRepository Pathフィールド横にコピーアイコンが表示されること",
+      "verified": true
+    },
+    {
+      "criterion": "コピーアイコンクリックで対応するパスがクリップボードにコピーされること",
+      "verified": true
+    },
+    {
+      "criterion": "コピー成功時にCheckアイコンに切り替わり、2秒後にClipboardCopyアイコンに戻ること",
+      "verified": true
+    },
+    {
+      "criterion": "デスクトップ・モバイル両方で正しく動作すること",
+      "verified": true
+    },
+    {
+      "criterion": "既存のFileViewer.tsxのコピーパターンと視覚的に一貫していること",
+      "verified": true
+    },
+    {
+      "criterion": "アクセシビリティ属性が設定されていること（aria-label, title）",
+      "verified": true
+    },
+    {
+      "criterion": "コピー機能の単体テストが作成されていること",
+      "verified": true
+    }
+  ],
+  "evidence_files": [
+    "tests/unit/components/WorktreeInfoFields-copy.test.tsx"
+  ],
+  "static_analysis": {
+    "tsc_noEmit": "passed (0 errors)",
+    "eslint": "passed (0 warnings, 0 errors)",
+    "unit_tests": "275 test files passed, 5386 tests passed, 7 skipped"
+  },
+  "message": "すべての受入条件を満たしています"
+}

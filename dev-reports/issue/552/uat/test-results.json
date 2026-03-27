@@ -1,0 +1,65 @@
+{
+  "issue_number": 552,
+  "test_date": "2026-03-27",
+  "environment": {
+    "port": 3012,
+    "branch": "feature/552-info-path-copy",
+    "worktree": "myswiftagent-develop"
+  },
+  "results": [
+    {
+      "id": "TC-001",
+      "title": "Pathフィールドにコピーアイコンが表示される",
+      "status": "pass",
+      "evidence_note": "InfoモーダルにPathセクション内にbutton 'Copy worktree path'が表示された"
+    },
+    {
+      "id": "TC-002",
+      "title": "Repository Pathフィールドにコピーアイコンが表示される",
+      "status": "pass",
+      "evidence_note": "InfoモーダルにRepositoryセクション内にbutton 'Copy repository path'が表示された"
+    },
+    {
+      "id": "TC-003",
+      "title": "Pathコピーが動作する",
+      "status": "pass",
+      "evidence_note": "Copy worktree pathボタンクリック後、アイコンがCheckアイコンに切り替わった（クリップボードへのコピー成功を示す）"
+    },
+    {
+      "id": "TC-004",
+      "title": "Repository Pathコピーが動作する",
+      "status": "pass",
+      "evidence_note": "Copy repository pathボタンクリック後、アイコンがCheckアイコンに切り替わった"
+    },
+    {
+      "id": "TC-005",
+      "title": "コピー後のアイコンフィードバック（Path）",
+      "status": "pass",
+      "evidence_note": "Pathコピー後にCheckアイコンに変化し、Repository Pathコピー操作時（約2秒後）には元のClipboardCopyアイコンに復帰していた"
+    },
+    {
+      "id": "TC-006",
+      "title": "コピー後のアイコンフィードバック（Repository Path）",
+      "status": "pass",
+      "evidence_note": "Repository Pathコピー後にCheckアイコンに変化し、3秒待機後に元のClipboardCopyアイコンに復帰していた"
+    },
+    {
+      "id": "TC-007",
+      "title": "アクセシビリティ属性の確認",
+      "status": "pass",
+      "evidence_note": "Pathボタン: aria-label='Copy worktree path', Repository Pathボタン: aria-label='Copy repository path' がDOMスナップショットで確認"
+    },
+    {
+      "id": "TC-008",
+      "title": "既存機能への影響確認",
+      "status": "pass",
+      "evidence_note": "Worktree名(develop), Repository(MySwiftAgent), Path, Description, Version(v0.4.12), Feedback & Support, Logsが全て正常表示"
+    }
+  ],
+  "summary": {
+    "total": 8,
+    "passed": 8,
+    "failed": 0,
+    "pass_rate": "100%"
+  }
+}
