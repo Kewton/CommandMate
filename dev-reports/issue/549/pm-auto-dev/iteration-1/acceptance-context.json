@@ -1,0 +1,24 @@
+{
+  "issue_number": 549,
+  "feature_summary": "スマホ版にてmarkdownファイル表示時、初期表示をビューワにする",
+  "acceptance_criteria": [
+    "モバイル（768px未満）でMarkdownファイルのMarkdownEditorを開いた際、Previewタブがデフォルトで選択されていること",
+    "モバイルでeditorタブへの切替が引き続き可能であること",
+    "PC版（デスクトップ）のMarkdownEditor動作に影響がないこと",
+    "モバイルでの初期表示がlocalStorageの既存viewMode設定に影響されないこと",
+    "MARPファイルの表示フローに影響がないこと",
+    "WorktreeDetailRefactored.tsxのモバイルModal経由でMarkdownEditorを開いた場合も、Previewタブがデフォルトで選択されること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: モバイルでMarkdownEditorを開く → previewタブが初期選択",
+    "シナリオ2: PC環境でMarkdownEditorを開く → editorが初期選択（既存動作維持）",
+    "シナリオ3: モバイルでlocalStorageにeditorが保存されている状態でMarkdownEditorを開く → previewが初期選択",
+    "シナリオ4: モバイルでpreview→editor切替が可能",
+    "シナリオ5: filePath変更後もユーザーのタブ選択が維持される"
+  ],
+  "changed_files": [
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/MarkdownEditor-mobile-default.test.tsx"
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "issue_number": 549,
+  "test_date": "2026-03-27",
+  "environment": {
+    "port": 3012,
+    "branch": "feature/549-mobile-markdown-viewer",
+    "viewport_mobile": { "width": 375, "height": 812 },
+    "viewport_desktop": { "width": 1280, "height": 800 }
+  },
+  "results": [
+    {
+      "id": "TC-001",
+      "title": "モバイルでMarkdownEditor → Previewタブデフォルト",
+      "status": "pass",
+      "evidence": "Previewタブ: hasCyan=true, hasBorderCyan=true / Editorタブ: hasCyan=false"
+    },
+    {
+      "id": "TC-002",
+      "title": "PCでMobileTabBar非表示",
+      "status": "pass",
+      "evidence": "mobileTabButtonsVisible=[], noMobileTabs=true"
+    },
+    {
+      "id": "TC-003",
+      "title": "モバイルでEditorタブ切替可能",
+      "status": "pass",
+      "evidence": "initialPreviewActive=true, editorSwitchWorked=true, textareaVisible=true"
+    },
+    {
+      "id": "TC-004",
+      "title": "useEffect配置確認",
+      "status": "pass",
+      "evidence": "MarkdownEditor.tsx line 153-157: useEffect([isMobile]), elseブランチなし"
+    },
+    {
+      "id": "TC-005",
+      "title": "initialViewMode='split'追加確認",
+      "status": "pass",
+      "evidence": "WorktreeDetailRefactored.tsx line 1875: initialViewMode=\"split\""
+    },
+    {
+      "id": "TC-006",
+      "title": "ユニットテスト全パス",
+      "status": "pass",
+      "evidence": "277 test files passed, 5422 tests passed, 0 failed"
+    },
+    {
+      "id": "TC-007",
+      "title": "静的解析パス",
+      "status": "pass",
+      "evidence": "TypeScript: 0 errors, ESLint: 0 warnings or errors"
+    }
+  ],
+  "summary": {
+    "total": 7,
+    "passed": 7,
+    "failed": 0,
+    "pass_rate": "100%"
+  }
+}

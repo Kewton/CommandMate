@@ -1,0 +1,90 @@
+{
+  "issue_number": 549,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_date": "2026-03-27",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 2
+  },
+  "previous_findings_status": {
+    "stage1_findings": {
+      "MF-1": "resolved - acceptance criteria added with 6 functional + 4 test requirements",
+      "SF-1": "resolved - current/target flow documented, method C selected",
+      "SF-2": "resolved - localStorage handling policy explicitly stated",
+      "SF-3": "resolved - mobileTab initial value documented in implementation approach",
+      "NTH-1": "resolved - MARP scope-out documented",
+      "NTH-2": "resolved - screenshot captions added"
+    },
+    "stage3_findings": {
+      "MF-1": "resolved - SSR hydration section with NG/OK patterns added",
+      "SF-1": "resolved - WorktreeDetailRefactored.tsx added to change targets with initialViewMode='split'",
+      "SF-2": "resolved - 4 test requirements added to acceptance criteria",
+      "SF-3": "resolved - FilePanelContent.tsx documented in unaffected files table",
+      "NTH-1": "resolved - tablet landscape noted in scope-out",
+      "NTH-2": "skipped - CLAUDE.md update deferred to post-implementation"
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "技術的妥当性",
+        "issue": "useEffectによるmobileTab切替時の一瞬のeditor表示フラッシュについて、Issueでは「MarkdownEditorはモーダルで開かれるため体感上の問題はない」と記載しているが、モーダルのopen animationとuseEffectの実行タイミングによっては、ユーザーにeditorタブが一瞬見える可能性がある。特にisMobileの初期値false -> true遷移とモーダルopen animationが競合する場合の挙動について、受け入れ条件に「初期表示時にeditorタブのちらつきが体感上問題ない程度であること」のような条件を追加するか、実装時にモーダルのopacity transition中にuseEffectが完了することを確認する方針を追記すべき",
+        "location": "技術的注意事項（SSR hydration対策）セクション",
+        "recommendation": "受け入れ条件に「モバイルでMarkdownEditorモーダル表示時、editorタブが一瞬ちらつかないこと（またはモーダルアニメーション中に切替が完了すること）」を追加するか、実装確認事項として注記する",
+        "evidence": "useIsMobile hookのuseEffectはマウント後に実行される。モーダルコンポーネント(WorktreeDetailRefactored.tsx:1861-1878)のopen animationタイミングとuseEffect実行が同一フレームで完了するかは実装依存。Issue本文では「体感上の問題はない」と断定しているが、検証観点として明示すべき"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "受け入れ条件のテスト要件に「WorktreeDetailRefactored.tsxのモバイルModal経由でinitialViewMode='split'が渡されること」のテストが含まれていない。実装アプローチのステップ4でinitialViewMode='split'を明示的に渡すことが記載されているが、これに対応するテスト要件がない",
+        "location": "受け入れ条件 - テスト要件セクション",
+        "recommendation": "テスト要件に「テスト: WorktreeDetailRefactored.tsxのモバイルMarkdownEditor Modal呼び出し時にinitialViewMode='split'が渡されていること（propsの検証）」を追加",
+        "evidence": "実装アプローチのステップ4に「WorktreeDetailRefactored.tsx のモバイルMarkdownEditor Modal呼び出し時に initialViewMode='split' を明示的に渡す」と記載があるが、テスト要件4項目にはこの変更を検証するテストが含まれていない"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "レビュー履歴セクションがStage 1とStage 3の反映内容のみ記載で、影響範囲レビュー反映(Stage 4)のサマリーが未記載",
+        "location": "レビュー履歴セクション",
+        "recommendation": "レビュー履歴に「イテレーション 1 - 影響範囲レビュー反映 (2026-03-27): 6件中5件反映、1件スキップ」のようなサマリーを追加すると、レビュートレーサビリティが向上する",
+        "evidence": "レビュー履歴セクションには「イテレーション 1 - 通常レビュー」と「イテレーション 1 - 影響範囲レビュー」の2つが記載されているが、反映結果（Stage 2, Stage 4）のサマリーが含まれていない"
+      },
+      {
+        "id": "NTH-2",
+        "category": "明確性",
+        "issue": "関連コード参照テーブルの行数参照（例: line 80-93, line 134, line 210-211）は実装変更により変動する可能性がある。参照情報として有用だが、実装時に行番号がずれた場合に混乱する可能性がある",
+        "location": "補足情報 - 関連コード参照セクション",
+        "recommendation": "行番号はあくまで参考値であることを注記するか、関数名・変数名ベースの参照に切り替える（例: 'getInitialViewMode関数' 'mobileTab useState' 等）",
+        "evidence": "補足情報テーブルに記載された行番号は現在のコードと一致しているが、他の変更やリファクタリングで容易にずれる"
+      }
+    ]
+  },
+  "overall_assessment": {
+    "quality": "high",
+    "readiness": "ready_for_implementation",
+    "description": "Issue #549は2回のレビューイテレーション（通常+影響範囲）を経て、高品質なIssue記述に改善された。受け入れ条件、技術的注意事項（SSR hydration）、影響範囲分析、テスト要件が網羅されており、実装に着手可能な状態。残りの指摘はshould_fix 2件とnice_to_have 2件のみで、いずれも実装を妨げる重大な問題ではない。"
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "relevance": "mobileTab初期値(line 134)、getInitialViewMode(line 80-93)、showMobileTabs条件(line 210-211)"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "モバイルMarkdownEditor Modal(line 1869-1875) -- initialViewMode未指定が変更対象"
+    },
+    {
+      "file": "src/hooks/useIsMobile.ts",
+      "relevance": "SSR hydration対策(line 55 useState false初期値)"
+    }
+  ],
+  "doc_references": []
+}

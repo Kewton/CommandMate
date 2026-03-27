@@ -1872,6 +1872,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 onClose={handleEditorClose}
                 onSave={handleEditorSave}
                 onMaximizedChange={setIsEditorMaximized}
+                initialViewMode="split"
               />
             </div>
           </Modal>

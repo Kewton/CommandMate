@@ -1,0 +1,43 @@
+{
+  "issue_number": 549,
+  "iteration": 2,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-03-27",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "受け入れ条件にモーダル表示時のeditorタブフラッシュ検証観点を追加。技術的注意事項セクションにもモーダルアニメーション中のuseEffect完了確認の実装時注意を追記"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "テスト要件に「WorktreeDetailRefactored.tsxのモバイルMarkdownEditor Modal呼び出し時にinitialViewMode='split'が渡されていること（propsの検証）」を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "レビュー履歴の各イテレーションに反映結果サマリー（Stage 2: 6件全て反映、Stage 4: 5件反映・1件スキップ）を追加"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "関連コード参照テーブルの冒頭に行番号が参考値であり実際の行番号がずれている可能性がある旨の注記を追加"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 4,
+    "applied": 4,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/549"
+  }
+}

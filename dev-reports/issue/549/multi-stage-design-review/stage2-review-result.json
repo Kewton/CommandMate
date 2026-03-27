@@ -1,0 +1,109 @@
+{
+  "issue_number": 549,
+  "stage": 2,
+  "stage_name": "整合性レビュー (Consistency Review)",
+  "review_date": "2026-03-27",
+  "status": "approved_with_findings",
+  "score": 4,
+  "max_score": 5,
+  "summary": "設計方針書はコードベースの現状を概ね正確に記述しているが、FilePanelContentの記述に不正確な点、テストモック戦略の不足、および行番号に関する軽微な不一致がある。",
+  "findings": [
+    {
+      "id": "MF-001",
+      "severity": "should_fix",
+      "category": "コードベース記述の正確性",
+      "title": "FilePanelContentのinitialViewMode記述が不正確",
+      "description": "設計方針書セクション2「変更しないファイル」にて「FilePanelContent.tsx - PC側パネル。既にinitialViewMode='preview'を渡している」と記載されているが、実際にはFilePanelContentには2箇所のMarkdownEditor呼び出しがある: (1) MarpRenderableMarkdownコンポーネント内（line 405）で initialViewMode='split'、(2) MarkdownWithSearchコンポーネント内（line 478）で initialViewMode='preview'。設計方針書の記述は後者のみを指しており不完全。",
+      "location": "設計方針書セクション2「変更しないファイル」テーブル",
+      "actual_code": "FilePanelContent.tsx: line 405 initialViewMode=\"split\", line 478 initialViewMode=\"preview\"",
+      "recommendation": "「FilePanelContent.tsx - PC側パネル。MarpRenderableMarkdown内でinitialViewMode='split'、MarkdownWithSearch内でinitialViewMode='preview'を渡している。いずれもPC側のため変更不要」と修正する。"
+    },
+    {
+      "id": "MF-002",
+      "severity": "should_fix",
+      "category": "テスト戦略の整合性",
+      "title": "useIsMobileモックにMOBILE_BREAKPOINTエクスポートが不足",
+      "description": "設計方針書セクション8のモック戦略では vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: vi.fn(() => true) })) と記載されているが、既存プロジェクトのテストパターンでは MOBILE_BREAKPOINT: 768 も併せてエクスポートしている（WorktreeDetailRefactored.test.tsx line 30-32、issue-266-acceptance.test.tsx line 35-37 など）。MOBILE_BREAKPOINTが不足すると、MarkdownEditor.tsxが直接importしていないため今回は問題にならないが、テスト間の一貫性が損なわれる。",
+      "location": "設計方針書セクション8「モック戦略」",
+      "actual_code": "既存パターン: vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: vi.fn(() => true), MOBILE_BREAKPOINT: 768 }))",
+      "recommendation": "モック戦略のコードサンプルを既存プロジェクトパターンに合わせて MOBILE_BREAKPOINT: 768 を含めるよう修正する。"
+    },
+    {
+      "id": "MF-003",
+      "severity": "nice_to_have",
+      "category": "行番号の正確性",
+      "title": "mobileTab state宣言の行番号が正確",
+      "description": "設計方針書セクション9で「mobileTab state宣言の直後（現在の134行目付近）」と記載。実際のMarkdownEditor.tsxではline 134にmobileTab stateが宣言されており、正確に一致している。WorktreeDetailRefactored.tsxの「1869行目付近」も実際のline 1869と一致。行番号の整合性は良好。",
+      "location": "設計方針書セクション9",
+      "actual_code": "MarkdownEditor.tsx line 134, WorktreeDetailRefactored.tsx line 1869",
+      "recommendation": "対応不要。行番号は正確。"
+    },
+    {
+      "id": "MF-004",
+      "severity": "nice_to_have",
+      "category": "コンポーネント関係図の正確性",
+      "title": "Desktop側のMarkdownEditor呼び出しパスが関係図に不足",
+      "description": "セクション2のコンポーネント関係図では Desktop側を「FilePanelContent -> MarkdownEditor (initialViewMode='preview')」としているが、実際にはFilePanelContent内に2つのパス（MarpRenderableMarkdown経由のsplitとMarkdownWithSearch経由のpreview）がある。また、Desktop Modal経由（WorktreeDetailRefactored line 1597）のMarkdownEditor呼び出しも関係図に含まれていない。",
+      "location": "設計方針書セクション2「コンポーネント関係図」",
+      "actual_code": "WorktreeDetailRefactored.tsx line 1597: Desktop Modal -> MarkdownEditor (no initialViewMode)",
+      "recommendation": "関係図にDesktop Modalパスを追加するか、「Desktop FilePanelContent内の呼び出しパスは簡略化」とコメントを付記する。今回の変更には直接影響しないためnice_to_have。"
+    },
+    {
+      "id": "MF-005",
+      "severity": "nice_to_have",
+      "category": "状態管理の整合性",
+      "title": "viewMode localStorage記述のキー名が正確",
+      "description": "設計方針書セクション4の状態管理テーブルでlocalStorageキーを「commandmate:md-editor-view-mode」と記載。実際のtypes/markdown-editor.ts line 192のLOCAL_STORAGE_KEY定数と一致している。getInitialViewMode関数のロジック（props優先 -> localStorage -> デフォルト'split'）も設計方針書の記述と一致。",
+      "location": "設計方針書セクション4",
+      "actual_code": "LOCAL_STORAGE_KEY = 'commandmate:md-editor-view-mode' (markdown-editor.ts line 192)",
+      "recommendation": "対応不要。正確に一致。"
+    }
+  ],
+  "checklist": {
+    "design_describes_current_codebase_accurately": {
+      "status": "partial",
+      "note": "FilePanelContentの記述が不完全（MF-001）、Desktop Modalパスが関係図に不足（MF-004）"
+    },
+    "line_numbers_and_function_names_match": {
+      "status": "pass",
+      "note": "mobileTab(line 134)、Mobile MarkdownEditor(line 1869)、getInitialViewMode、isValidViewMode等すべて一致"
+    },
+    "proposed_changes_consistent_with_existing_patterns": {
+      "status": "pass",
+      "note": "useEffectによる遅延初期化はuseIsMobileのSSR安全設計と整合。initialViewMode propの使用はFilePanelContentの既存パターンと一致"
+    },
+    "component_relationship_diagram_matches_reality": {
+      "status": "partial",
+      "note": "Mobile側は正確。Desktop側はFilePanelContent内の2パスとDesktop Modalパスが簡略化されている（MF-004）"
+    },
+    "state_management_approach_consistent": {
+      "status": "pass",
+      "note": "mobileTab stateはMarkdownEditor内のローカルstateとして適切。viewModeのlocalStorage永続化パターンも既存と整合"
+    },
+    "test_strategy_references_correct_apis_and_patterns": {
+      "status": "partial",
+      "note": "基本的なモック構造は正しいが、MOBILE_BREAKPOINTエクスポートが不足（MF-002）"
+    }
+  },
+  "risk_assessment": {
+    "overall_risk": "low",
+    "details": "変更スコープが2ファイルに限定されており、設計方針書の不正確な点もすべて「変更しないファイル」に関する記述の不完全さであり、実装品質に直接影響しない。テストモック戦略の不足（MF-002）は実装時に修正可能。"
+  },
+  "recommendations": [
+    {
+      "priority": "should_fix",
+      "action": "FilePanelContentの記述を正確化する（MF-001）",
+      "reason": "設計方針書を今後のリファクタリング時に参照する際に誤解を招く可能性がある"
+    },
+    {
+      "priority": "should_fix",
+      "action": "テストモック戦略にMOBILE_BREAKPOINTエクスポートを追加する（MF-002）",
+      "reason": "プロジェクト全体のテストパターン一貫性を維持するため"
+    },
+    {
+      "priority": "nice_to_have",
+      "action": "コンポーネント関係図にDesktop Modalパスを追記する（MF-004）",
+      "reason": "設計方針書の完全性向上のため"
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "issue_number": 549,
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘対応",
+  "apply_date": "2026-03-27",
+  "status": "completed",
+  "design_doc_path": "dev-reports/design/issue-549-mobile-markdown-viewer-design-policy.md",
+  "applied_findings": [
+    {
+      "id": "SF-001",
+      "severity": "should_fix",
+      "title": "isMobilePortrait がリサイズ/回転に対して非リアクティブ",
+      "action": "Stage 3 セクションに設計判断を追記（無害な残存状態として許容）。セクション 11 スコープ外の該当項目にも Stage 3 SF-001 の注記を追加。将来のリファクタリング可能性を記載。",
+      "applied": true
+    },
+    {
+      "id": "SF-002",
+      "severity": "should_fix",
+      "title": "既存テストファイル MarkdownEditor.test.tsx が useIsMobile をモックしていない",
+      "action": "Stage 3 セクションにスコープ付きモック戦略（describe ブロック内モック）を追記。テストコード構造のサンプルを追加。実装チェックリストにも反映。",
+      "applied": true
+    },
+    {
+      "id": "SF-003",
+      "severity": "should_fix",
+      "title": "Desktop Modal パスの DevTools エミュレーション時のエッジケース",
+      "action": "Stage 3 セクションに設計判断を追記（開発者向けエッジケースとして対応不要）。C-001 との関連を記載。",
+      "applied": true
+    },
+    {
+      "id": "NH-001",
+      "severity": "nice_to_have",
+      "title": "filePath 変更時の isLoading 状態と mobileTab の関係",
+      "action": "セクション 9 の注意点に isLoading 状態の補足を追記。Stage 3 セクションにも対応内容を記載。",
+      "applied": true
+    },
+    {
+      "id": "NH-002",
+      "severity": "nice_to_have",
+      "title": "useSwipeGesture / useVirtualKeyboard との相互作用",
+      "action": "セクション 7 に「モバイル固有フックとの相互作用」サブセクションを追加。useSwipeGesture と useVirtualKeyboard が mobileTab と独立であることを表形式で記載。Stage 3 セクションにも確認的記載を追加。",
+      "applied": true
+    }
+  ],
+  "design_doc_changes": [
+    {
+      "section": "セクション 7 (パフォーマンス設計)",
+      "change": "「モバイル固有フックとの相互作用」サブセクションを追加（NH-002）"
+    },
+    {
+      "section": "セクション 9 (実装方針 注意点)",
+      "change": "filePath 変更時の isLoading 状態に関する補足を追記（NH-001）"
+    },
+    {
+      "section": "セクション 10 (レビュー指摘事項と設計判断)",
+      "change": "Stage 3 影響分析レビューの全 5 件（SF-001, SF-002, SF-003, NH-001, NH-002）を追記"
+    },
+    {
+      "section": "セクション 10 (実装チェックリスト)",
+      "change": "Stage 3 指摘を反映したチェックリスト項目の更新（SF-002 モック戦略、SF-001 UAT 項目追加）"
+    },
+    {
+      "section": "セクション 11 (スコープ外)",
+      "change": "タブレットランドスケープモードの項目に isMobilePortrait 非リアクティブ性と mobileTab 残存状態の注記を追加（SF-001）"
+    }
+  ],
+  "source_code_modified": false,
+  "notes": "全 5 件の指摘事項を設計方針書に反映完了。should_fix 3 件は設計判断と根拠を明記、nice_to_have 2 件は該当セクションに補足情報を追記。ソースコード変更なし。"
+}

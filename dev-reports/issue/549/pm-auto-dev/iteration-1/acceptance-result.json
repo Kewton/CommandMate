@@ -1,0 +1,74 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "Scenario 1: Mobile opens MarkdownEditor -> preview tab is initially selected",
+      "result": "passed",
+      "evidence": "useEffect at lines 153-157 sets mobileTab to 'preview' when isMobile is true. Unit test 'should default to preview tab on mobile' confirms the preview tab has the active CSS class."
+    },
+    {
+      "scenario": "Scenario 2: PC opens MarkdownEditor -> editor is initially selected (existing behavior maintained)",
+      "result": "passed",
+      "evidence": "Unit test 'should keep editor as default tab on PC' confirms mobile tabs are not shown and the textarea is present. Desktop MarkdownEditor in WorktreeDetailRefactored.tsx (line 1597-1603) has no initialViewMode prop, preserving existing behavior."
+    },
+    {
+      "scenario": "Scenario 3: Mobile with localStorage set to editor -> preview is still initially selected",
+      "result": "passed",
+      "evidence": "Unit test 'should default to preview tab on mobile even when localStorage viewMode is editor' confirms that localStorage does not override the mobile default preview tab."
+    },
+    {
+      "scenario": "Scenario 4: Mobile preview->editor tab switching remains functional",
+      "result": "passed",
+      "evidence": "Unit test 'should not reset mobileTab when filePath changes' clicks the editor tab and verifies it becomes active, confirming tab switching works."
+    },
+    {
+      "scenario": "Scenario 5: filePath change does not reset user's tab selection",
+      "result": "passed",
+      "evidence": "Unit test 'should not reset mobileTab when filePath changes' switches to editor tab, rerenders with a different filePath, and confirms editor tab remains active. The useEffect dependency array is [isMobile] only, not including filePath."
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "Mobile (under 768px) MarkdownEditor defaults to Preview tab",
+      "verified": true
+    },
+    {
+      "criterion": "Mobile editor tab switching still works",
+      "verified": true
+    },
+    {
+      "criterion": "PC/Desktop MarkdownEditor behavior is not affected",
+      "verified": true
+    },
+    {
+      "criterion": "Mobile initial display is not affected by localStorage viewMode setting",
+      "verified": true
+    },
+    {
+      "criterion": "MARP file display flow is not affected",
+      "verified": true
+    },
+    {
+      "criterion": "WorktreeDetailRefactored.tsx mobile Modal MarkdownEditor also defaults to Preview tab",
+      "verified": true
+    }
+  ],
+  "verification_details": {
+    "typescript_check": "npx tsc --noEmit passed with no errors",
+    "eslint_check": "npm run lint passed with no warnings or errors",
+    "unit_tests": "276 test files passed, 5421 tests passed. 1 pre-existing failure in git-utils.test.ts (unrelated to Issue #549). New test file MarkdownEditor-mobile-default.test.tsx: all 4 tests passed.",
+    "code_review": {
+      "useEffect_placement": "Lines 153-157 in MarkdownEditor.tsx, immediately after mobileTab state declaration (line 134)",
+      "no_else_branch": "Only if(isMobile) block, no else",
+      "dependency_array": "[isMobile] only, filePath excluded",
+      "mobile_initialViewMode": "initialViewMode='split' added at line 1875 in WorktreeDetailRefactored.tsx (mobile Modal)",
+      "desktop_unchanged": "Desktop MarkdownEditor at line 1597-1603 has no initialViewMode prop"
+    }
+  },
+  "evidence_files": [
+    "tests/unit/components/MarkdownEditor-mobile-default.test.tsx",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "message": "All acceptance criteria are satisfied. The implementation correctly defaults the mobile MarkdownEditor to the preview tab via a useEffect with [isMobile] dependency, without affecting desktop behavior or being overridden by localStorage settings."
+}

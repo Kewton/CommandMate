@@ -1,0 +1,194 @@
+{
+  "issue_number": 549,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_date": "2026-03-27",
+  "overall_score": 4,
+  "status": "approved_with_findings",
+  "summary": "影響範囲の分析は概ね正確であり、変更対象ファイル（MarkdownEditor.tsx、WorktreeDetailRefactored.tsx）と変更しないファイルの判定は妥当。ただし、isMobilePortrait の非リアクティブ性に起因するエッジケースの記載不足、および既存テストファイルへの影響評価が不十分な点がある。",
+  "findings": [
+    {
+      "id": "SF-001",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "isMobilePortrait がリサイズ／回転に対して非リアクティブ",
+      "description": "MarkdownEditor.tsx line 210 の isMobilePortrait は `isMobile && window.innerHeight > window.innerWidth` で計算されるが、これはレンダリング時に一度だけ評価される派生値であり、useEffect や resize イベントリスナーに紐づいていない。useIsMobile hook は resize イベントで isMobile を更新するため isMobile の変化時に再レンダリングされるが、同じ viewport 幅のまま端末を回転させた場合（iPad等、768px境界付近）やデスクトップでブラウザウィンドウの高さだけ変えた場合は isMobile が変わらず isMobilePortrait が更新されない。この既存の制限が設計方針書のセクション 10（スコープ外）に「タブレットランドスケープモード」として言及されているが、提案する useEffect の mobileTab 初期化が isMobile の false->true 遷移にのみ依存しているため、portrait -> landscape 切替時に mobileTab が preview のまま残り、showMobileTabs が false になってデスクトップレイアウトに切り替わるが内部的には mobileTab='preview' が残存する。これは表示上は問題ないが、設計方針書にこの状態遷移の説明がない。",
+      "location": "設計方針書 セクション 3（設計判断とトレードオフ）、MarkdownEditor.tsx line 210",
+      "recommendation": "設計方針書のトレードオフ表に「portrait->landscape 切替時、showMobileTabs=false となるため mobileTab の値は表示に影響しない（無害な残存状態）」旨の注記を追加する。また、将来 isMobilePortrait をリアクティブにするリファクタリングの可能性を注記として残す。"
+    },
+    {
+      "id": "SF-002",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "既存テストファイル MarkdownEditor.test.tsx が useIsMobile をモックしていない",
+      "description": "tests/unit/components/MarkdownEditor.test.tsx は useIsMobile hook をモックしておらず、jsdom 環境では useIsMobile は常に false を返す（window.innerWidth が 0 のため）。設計方針書セクション 8 ではモック戦略を記載しているが、新規テストケースを追加する際に既存テストファイルへの影響（モック追加が必要になること）を明示していない。既存テストのモック設定に useIsMobile のモックを追加すると、他の既存テストケースに副作用を及ぼす可能性がある。",
+      "location": "設計方針書 セクション 8（テスト設計）、tests/unit/components/MarkdownEditor.test.tsx",
+      "recommendation": "設計方針書のテスト設計セクションに「既存の MarkdownEditor.test.tsx は useIsMobile をモックしていないため、新規モバイルテストケースは describe ブロック内でスコープ付きモックを使用するか、別テストファイルに分離する」旨を追記する。"
+    },
+    {
+      "id": "SF-003",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "Desktop Modal パスの MarkdownEditor にも initialViewMode 未指定の影響を明文化すべき",
+      "description": "WorktreeDetailRefactored.tsx line 1597 の Desktop Modal パスの MarkdownEditor は initialViewMode を指定しておらず、localStorage の値または 'split' がデフォルトになる。Stage 2 で Desktop Modal パスが関係図に追加されたが、設計方針書では「今回の useEffect は isMobile=false の場合は発火しないため影響なし」という暗黙の前提に依存している。Desktop でブラウザの DevTools でモバイルエミュレーションを使った場合、Desktop Modal パスから MarkdownEditor が開かれ、かつ isMobile=true となるケースが理論上ありうる。この場合 initialViewMode 未指定のため localStorage に 'editor' があると showMobileTabs=false となり、useEffect で mobileTab='preview' が設定されても MobileTabBar が表示されない。",
+      "location": "設計方針書 セクション 2（コンポーネント関係図）、WorktreeDetailRefactored.tsx line 1597",
+      "recommendation": "設計方針書の注記に「Desktop Modal パスは isMobile=false が前提であり、DevTools エミュレーション等で isMobile=true になった場合は initialViewMode 未指定により MobileTabBar が表示されない可能性がある。これは開発者向けエッジケースであり対応不要」と明記する。C-001 の対応（コメント追加）と併せて実装する。"
+    },
+    {
+      "id": "NH-001",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "useEffect の依存配列に isMobile のみで filePath 変更時のリセット有無が分かりにくい",
+      "description": "設計方針書セクション 9 で「filePath は依存配列に含めない（ユーザーのタブ選択を尊重）」と明記されており判断自体は妥当。ただし、loadContent は filePath が変わるたびに呼ばれ isLoading=true->false の遷移が発生する。この間に mobileTab の値がどうなるかのフローが設計方針書に明示されていない。実際には isLoading=true の間はローディング表示で mobileTab は参照されないため問題ないが、実装者向けの補足があると望ましい。",
+      "location": "設計方針書 セクション 9（実装方針 注意点）",
+      "recommendation": "セクション 9 の注意点に「filePath 変更時は loadContent が再実行され isLoading=true となるため、mobileTab の値に関わらずローディング表示が優先される」旨を補足する。"
+    },
+    {
+      "id": "NH-002",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "useSwipeGesture との相互作用が未記載",
+      "description": "MarkdownEditor.tsx line 190-198 で useSwipeGesture が使用されており、最大化モード時に下スワイプで最大化を解除する。モバイルで preview タブが初期表示された状態で最大化し、下スワイプすると最大化解除される。この動線は既存の動作であり新規変更の影響は受けないが、設計方針書の影響分析で他のモバイル固有フック（useSwipeGesture, useVirtualKeyboard）との相互作用が言及されていない。",
+      "location": "設計方針書 セクション 7（パフォーマンス設計）",
+      "recommendation": "セクション 7 または別途「モバイル固有フックとの相互作用」セクションで、useSwipeGesture と useVirtualKeyboard が今回の変更と独立であることを確認的に記載する。"
+    }
+  ],
+  "impact_analysis": {
+    "directly_affected_files": [
+      {
+        "path": "src/components/worktree/MarkdownEditor.tsx",
+        "change_type": "modify",
+        "description": "useEffect 追加（mobileTab 初期値設定）",
+        "verified": true
+      },
+      {
+        "path": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "change_type": "modify",
+        "description": "Mobile Modal の MarkdownEditor に initialViewMode='split' 追加",
+        "verified": true
+      }
+    ],
+    "indirectly_affected_files": [
+      {
+        "path": "tests/unit/components/MarkdownEditor.test.tsx",
+        "impact": "新規テストケース追加時に useIsMobile モック追加が必要。既存テストは jsdom の window.innerWidth=0 により isMobile=false 前提で動作しており影響なし。",
+        "verified": true
+      }
+    ],
+    "unaffected_files_verified": [
+      {
+        "path": "src/components/worktree/MarkdownPreview.tsx",
+        "reason": "MobileTabBar は props（mobileTab, onTabChange）を受け取るのみ。ロジック変更なし。",
+        "verified": true
+      },
+      {
+        "path": "src/components/worktree/FilePanelContent.tsx",
+        "reason": "MarpRenderableMarkdown(line 405: initialViewMode='split') と MarkdownWithSearch(line 478: initialViewMode='preview') の2つのパスがあるが、いずれもデスクトップ専用。useIsMobile=false のため useEffect は発火せず影響なし。",
+        "verified": true
+      },
+      {
+        "path": "src/hooks/useIsMobile.ts",
+        "reason": "既存ロジック変更なし。SSR 初期値 false、resize イベントリスナーの動作は維持。",
+        "verified": true
+      },
+      {
+        "path": "src/types/markdown-editor.ts",
+        "reason": "型定義・定数に変更なし。EditorProps に新規 prop 追加なし。",
+        "verified": true
+      },
+      {
+        "path": "src/hooks/useSwipeGesture.ts",
+        "reason": "最大化モード時の下スワイプ解除のみ。mobileTab 状態と独立。",
+        "verified": true
+      },
+      {
+        "path": "src/hooks/useVirtualKeyboard.ts",
+        "reason": "キーボード表示時の padding 調整のみ。mobileTab 状態と独立。",
+        "verified": true
+      }
+    ],
+    "hidden_dependencies": [
+      {
+        "description": "isMobilePortrait 変数は isMobile の変更でのみ再計算される（window の高さ/幅比較は resize リスナーに紐づいていない）。isMobile が true のまま orientation が変わるケースでは isMobilePortrait が古い値のまま残る可能性がある。",
+        "risk": "low",
+        "note": "既存の制限であり、今回の変更で悪化しない。showMobileTabs=false 時に mobileTab の値は表示に影響しないため実害なし。"
+      }
+    ],
+    "responsive_resize_edge_cases": [
+      {
+        "scenario": "Desktop -> Mobile (ブラウザリサイズ)",
+        "behavior": "isMobile が false->true に変化、useEffect 発火、mobileTab='preview' に設定される。initialViewMode が localStorage から復元されるが、getInitialViewMode は useState の初期化時にのみ呼ばれるため viewMode は変わらない。viewMode が 'split' なら showMobileTabs=true となり正常動作。viewMode が 'editor' や 'preview' の場合は showMobileTabs=false で mobileTab は無視される。",
+        "risk": "low"
+      },
+      {
+        "scenario": "Mobile -> Desktop (ブラウザリサイズ)",
+        "behavior": "isMobile が true->false に変化。useEffect の条件 `if (isMobile)` に該当しないため mobileTab は 'preview' のまま残存するが、showMobileTabs=false となるため表示に影響なし。",
+        "risk": "none"
+      },
+      {
+        "scenario": "Mobile Portrait -> Landscape (端末回転)",
+        "behavior": "useIsMobile の resize リスナーが発火し isMobile が再評価される。768px 以上の landscape なら isMobile=false、showMobileTabs=false。768px 未満の landscape なら isMobile=true だが innerHeight < innerWidth で isMobilePortrait=false、showMobileTabs=false。いずれも mobileTab は参照されない。",
+        "risk": "none"
+      }
+    ],
+    "context_usage_analysis": {
+      "FilePanelContent_context": {
+        "description": "デスクトップ専用。2つのパス（MarpRenderableMarkdown: split, MarkdownWithSearch: preview）とも initialViewMode を明示指定しており、今回の useEffect は isMobile=false のため発火しない。",
+        "impact": "none"
+      },
+      "desktop_modal_context": {
+        "description": "WorktreeDetailRefactored.tsx line 1597。initialViewMode 未指定で localStorage/デフォルト値が適用される。isMobile=false 前提のため useEffect 非発火。",
+        "impact": "none"
+      },
+      "mobile_modal_context": {
+        "description": "WorktreeDetailRefactored.tsx line 1869。今回 initialViewMode='split' を追加。useEffect により mobileTab='preview' に設定。MobileTabBar 表示でユーザーはタブ切替可能。",
+        "impact": "primary_target"
+      }
+    }
+  },
+  "checklist": {
+    "affected_components_identified": {
+      "status": "pass",
+      "note": "MarkdownEditor.tsx と WorktreeDetailRefactored.tsx が正しく特定されている"
+    },
+    "hidden_dependencies_covered": {
+      "status": "partial",
+      "note": "isMobilePortrait の非リアクティブ性は既存制限として認識されているが、設計方針書内での状態遷移フローの説明が不足（SF-001）"
+    },
+    "mobile_responsive_impact": {
+      "status": "pass",
+      "note": "Desktop/Mobile のレイアウト切替、portrait/landscape の動作は正しく分析されている"
+    },
+    "useEffect_rerender_risk": {
+      "status": "pass",
+      "note": "useEffect は isMobile 依存のみで1回発火。再レンダリングコストは微小。モーダルフラッシュ対策も isLoading ステートで担保。"
+    },
+    "test_impact_assessment": {
+      "status": "partial",
+      "note": "テストケース設計は妥当だが、既存テストファイルへの useIsMobile モック追加の影響が未記載（SF-002）"
+    },
+    "desktop_mobile_switching": {
+      "status": "pass",
+      "note": "resize 時の状態遷移は安全。mobileTab の残存値は showMobileTabs=false 時に無害。"
+    },
+    "multi_context_usage": {
+      "status": "pass",
+      "note": "FilePanelContent（2パス）、Desktop Modal、Mobile Modal の4つの MarkdownEditor 呼び出しパスが全て検証済み"
+    }
+  },
+  "recommendations": [
+    {
+      "priority": 1,
+      "action": "設計方針書のトレードオフ表に isMobilePortrait 非リアクティブ性と mobileTab 残存状態の説明を追記（SF-001）"
+    },
+    {
+      "priority": 2,
+      "action": "テスト設計セクションに既存テストファイルへのモック追加戦略を明記（SF-002）"
+    },
+    {
+      "priority": 3,
+      "action": "Desktop Modal パスの DevTools エミュレーション時のエッジケースを注記（SF-003）"
+    }
+  ]
+}

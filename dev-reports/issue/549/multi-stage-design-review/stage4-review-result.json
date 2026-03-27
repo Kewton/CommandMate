@@ -1,0 +1,87 @@
+{
+  "issue_number": 549,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "design_doc_path": "dev-reports/design/issue-549-mobile-markdown-viewer-design-policy.md",
+  "review_date": "2026-03-27",
+  "score": 5,
+  "max_score": 5,
+  "status": "approved",
+  "summary": "フロントエンドのみの変更（mobileTab初期値変更 + initialViewMode prop追加）であり、セキュリティ上の新規リスクは検出されなかった。XSS保護（rehype-sanitize）は変更スコープ外で維持される。OWASP Top 10の各項目について該当リスクなし。",
+  "findings": [
+    {
+      "id": "SEC-INFO-001",
+      "severity": "info",
+      "category": "XSS (A03:2021 Injection)",
+      "title": "rehype-sanitize によるXSS保護が維持されている",
+      "description": "MarkdownPreview.tsx で使用されている rehype-sanitize は REHYPE_SANITIZE_SCHEMA（link-utils.ts line 111-124）のallowlistベースで構成されており、href属性もプロトコルallowlistで制限されている。今回の変更はmobileTabの初期値とinitialViewMode propのみであり、MarkdownPreviewのレンダリングパイプライン（remarkGfm -> rehypeSanitize -> rehypeHighlight）には一切触れない。XSS保護は完全に維持される。",
+      "classification": "no_action_needed",
+      "files": ["src/components/worktree/MarkdownPreview.tsx", "src/lib/link-utils.ts"]
+    },
+    {
+      "id": "SEC-INFO-002",
+      "severity": "info",
+      "category": "Client-Side State Manipulation",
+      "title": "mobileTab stateはUIレンダリング制御のみで安全",
+      "description": "mobileTabはReactのuseStateで管理されるローカルstateであり、値は'editor'または'preview'のMobileTab型（ユニオン型）に制約される。この値はAPIリクエストやデータ永続化に使用されず、表示タブの切替にのみ影響する。攻撃者がDevTools等でstateを改ざんしても、表示が変わるだけでセキュリティへの影響はない。",
+      "classification": "no_action_needed",
+      "files": ["src/components/worktree/MarkdownEditor.tsx"]
+    },
+    {
+      "id": "SEC-INFO-003",
+      "severity": "info",
+      "category": "localStorage Security",
+      "title": "localStorage操作はgetInitialViewModeの既存ロジックに限定",
+      "description": "今回の変更でlocalStorageへの新規書き込み・読み取りは追加されない。getInitialViewMode関数（line 80-93）はinitialViewMode propが指定された場合にlocalStorage読み取りをスキップするため、モバイルModal経由（initialViewMode='split'指定）ではlocalStorageの値が使用されない。既存のisValidViewModeバリデーション（line 73-75）により、localStorageに不正な値が格納されていてもフォールバック値'split'が適用される。localStorage poisoning攻撃に対して耐性がある。",
+      "classification": "no_action_needed",
+      "files": ["src/components/worktree/MarkdownEditor.tsx"]
+    },
+    {
+      "id": "SEC-INFO-004",
+      "severity": "info",
+      "category": "useEffect Exploitation",
+      "title": "useEffectベースの遅延初期化に悪用経路なし",
+      "description": "追加されるuseEffectはisMobile（boolean）の変化に応じてsetMobileTab('preview')を呼ぶだけであり、外部入力やユーザー制御可能な値に依存しない。useIsMobile hookはwindow.innerWidthのみを参照し、ネットワーク通信やDOM操作を行わない。タイミング攻撃やレースコンディションの悪用経路は存在しない。",
+      "classification": "no_action_needed",
+      "files": ["src/components/worktree/MarkdownEditor.tsx", "src/hooks/useIsMobile.ts"]
+    },
+    {
+      "id": "SEC-INFO-005",
+      "severity": "info",
+      "category": "OWASP Top 10 Compliance",
+      "title": "OWASP Top 10全項目について新規リスクなし",
+      "description": "A01(Broken Access Control): 変更なし。A02(Cryptographic Failures): 該当なし。A03(Injection/XSS): rehype-sanitize維持。A04(Insecure Design): UIのみの安全な変更。A05(Security Misconfiguration): 設定変更なし。A06(Vulnerable Components): 新規依存なし。A07(Authentication Failures): 該当なし。A08(Software and Data Integrity): コンポーネントstate変更のみ。A09(Security Logging): 該当なし。A10(SSRF): サーバーサイド変更なし。",
+      "classification": "no_action_needed",
+      "files": []
+    }
+  ],
+  "must_fix": [],
+  "should_fix": [],
+  "nice_to_have": [],
+  "owasp_top10_assessment": {
+    "A01_Broken_Access_Control": "not_applicable",
+    "A02_Cryptographic_Failures": "not_applicable",
+    "A03_Injection": "pass - rehype-sanitize with allowlist schema maintained, no new user input vectors",
+    "A04_Insecure_Design": "pass - frontend-only UI tab default change, no data flow modification",
+    "A05_Security_Misconfiguration": "not_applicable",
+    "A06_Vulnerable_and_Outdated_Components": "pass - no new dependencies added",
+    "A07_Identification_and_Authentication_Failures": "not_applicable",
+    "A08_Software_and_Data_Integrity_Failures": "pass - component local state only, no persistence change",
+    "A09_Security_Logging_and_Monitoring_Failures": "not_applicable",
+    "A10_Server_Side_Request_Forgery": "not_applicable"
+  },
+  "risk_assessment": {
+    "overall_risk": "none",
+    "rationale": "This change is purely a UI-level default tab selection adjustment for mobile viewports. No new input vectors, no server-side changes, no new dependencies, no authentication/authorization changes. The existing XSS protection pipeline (rehype-sanitize) is completely outside the change scope and remains intact."
+  },
+  "recommendations": [],
+  "checklist": {
+    "xss_vectors_introduced": false,
+    "client_state_manipulation_risk": false,
+    "localStorage_security_impact": false,
+    "useEffect_exploitation_possible": false,
+    "owasp_top10_compliant": true,
+    "rehype_sanitize_intact": true
+  }
+}
