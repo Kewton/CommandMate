@@ -80,39 +80,33 @@ describe('COPILOT_SELECTION_LIST_PATTERN', () => {
     expect(COPILOT_SELECTION_LIST_PATTERN).toBeInstanceOf(RegExp);
   });
 
-  it('should match selection list indicators like "Use arrows to move"', () => {
-    expect(COPILOT_SELECTION_LIST_PATTERN.test('Use arrows to move, type to filter')).toBe(true);
+  it('should match "Search models..." prompt', () => {
+    expect(COPILOT_SELECTION_LIST_PATTERN.test('Search models...')).toBe(true);
   });
 
-  it('should match "Use arrow keys" variant', () => {
-    expect(COPILOT_SELECTION_LIST_PATTERN.test('Use arrow keys to navigate')).toBe(true);
+  it('should match "Search agents..." prompt', () => {
+    expect(COPILOT_SELECTION_LIST_PATTERN.test('Search agents...')).toBe(true);
   });
 
-  it('should match "Enter to select" inquirer footer (Claude-compatible)', () => {
-    expect(COPILOT_SELECTION_LIST_PATTERN.test('Enter to select · Tab/Arrow keys to navigate · Esc to cancel')).toBe(true);
+  it('should match "Select Model" header', () => {
+    expect(COPILOT_SELECTION_LIST_PATTERN.test('Select Model')).toBe(true);
   });
 
-  it('should match "Enter to select" with up/down variant', () => {
-    expect(COPILOT_SELECTION_LIST_PATTERN.test('Enter to select · ↑/↓ to navigate · Esc to cancel')).toBe(true);
-  });
-
-  it('should match in multiline content with inquirer style', () => {
-    const multiline = `
-? Select a model
-  gpt-4o
+  it('should match in multiline content with Search prompt', () => {
+    const multiline = `Select Model
+Search models...
+❯ gpt-4o
   gpt-4o-mini
-> claude-3.5-sonnet
-Use arrows to move, type to filter`;
+  claude-3.5-sonnet`;
     expect(COPILOT_SELECTION_LIST_PATTERN.test(multiline)).toBe(true);
   });
 
-  it('should match in multiline content with Enter to select style', () => {
+  it('should match in multiline content with Select Model header', () => {
     const multiline = `
-? Select a model
+Select Model
   gpt-4o
 ❯ gpt-4o-mini
-  claude-3.5-sonnet
-Enter to select · Tab/Arrow keys to navigate · Esc to cancel`;
+  claude-3.5-sonnet`;
     expect(COPILOT_SELECTION_LIST_PATTERN.test(multiline)).toBe(true);
   });
 

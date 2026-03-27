@@ -262,16 +262,16 @@ export const COPILOT_SEPARATOR_PATTERN = /^─{10,}$/m;
  * Detects Copilot CLI's interactive selection prompts that require
  * arrow key navigation (e.g., /model command's model picker).
  *
- * Copilot CLI uses @inquirer/prompts (same as Claude CLI), so selection lists
- * show footer instructions in two known formats:
- *   - inquirer style: "Use arrows to move, type to filter"
- *   - Claude-compatible: "Enter to select · Tab/Arrow keys to navigate · Esc to cancel"
+ * Copilot CLI's selection list has these characteristics:
+ *   - "❯" cursor prefix on the selected item
+ *   - "Search models..." or "Search ..." prompt
+ *   - "Select Model" header with item list
  *
  * Both branches are anchored or bounded to prevent ReDoS.
  * No /g flag (S4-5: would make test() stateful).
  * No nested quantifiers (SEC4-001: ReDoS safety).
  */
-export const COPILOT_SELECTION_LIST_PATTERN = /Use\s+arrow(?:s|\s+keys)\s+to\s+(?:move|navigate)|Enter\s+to\s+select\s+.*to\s+navigate/m;
+export const COPILOT_SELECTION_LIST_PATTERN = /Search\s+\w+\.\.\.|Select\s+Model/m;
 
 /**
  * Copilot skip patterns for response cleaning (Issue #545)
