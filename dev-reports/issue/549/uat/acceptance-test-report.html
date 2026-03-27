@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UAT Report - Issue #549</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; color: #333; }
+  .container { max-width: 900px; margin: 0 auto; background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+  h1 { color: #1a1a2e; border-bottom: 3px solid #0891b2; padding-bottom: 10px; }
+  h2 { color: #1a1a2e; margin-top: 30px; }
+  .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 20px 0; }
+  .summary-card { padding: 15px; border-radius: 8px; text-align: center; }
+  .summary-card .number { font-size: 2em; font-weight: bold; }
+  .summary-card .label { font-size: 0.9em; color: #666; }
+  .total { background: #e0f2fe; color: #0369a1; }
+  .passed { background: #dcfce7; color: #166534; }
+  .failed { background: #fef2f2; color: #991b1b; }
+  .rate { background: #f0fdf4; color: #15803d; }
+  table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+  th { background: #f8fafc; font-weight: 600; color: #374151; }
+  .pass { color: #166534; font-weight: bold; }
+  .fail { color: #991b1b; font-weight: bold; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
+  .badge-pass { background: #dcfce7; color: #166534; }
+  .badge-fail { background: #fef2f2; color: #991b1b; }
+  .evidence { background: #f8fafc; padding: 8px 12px; border-radius: 4px; font-family: monospace; font-size: 0.9em; margin-top: 5px; }
+  .meta { color: #6b7280; font-size: 0.9em; }
+  .footer { margin-top: 30px; padding-top: 15px; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 0.85em; text-align: center; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>UAT Report: Issue #549</h1>
+  <p class="meta">スマホ版にてmarkdownファイル表示時、初期表示をビューワにしてほしい</p>
+  <p class="meta">テスト日: 2026-03-27 | ブランチ: feature/549-mobile-markdown-viewer | ポート: 3012</p>
+
+  <div class="summary">
+    <div class="summary-card total"><div class="number">7</div><div class="label">Total</div></div>
+    <div class="summary-card passed"><div class="number">7</div><div class="label">Passed</div></div>
+    <div class="summary-card failed"><div class="number">0</div><div class="label">Failed</div></div>
+    <div class="summary-card rate"><div class="number">100%</div><div class="label">Pass Rate</div></div>
+  </div>
+
+  <h2>Test Results</h2>
+  <table>
+    <thead>
+      <tr><th>ID</th><th>Test Case</th><th>Result</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>TC-001</td>
+        <td>
+          <strong>モバイルでPreviewタブがデフォルト選択</strong><br>
+          <span class="meta">375x812 viewport, Playwright自動テスト</span>
+          <div class="evidence">Preview: hasCyan=true, border-cyan=true / Editor: hasCyan=false</div>
+        </td>
+        <td><span class="badge badge-pass">PASS</span></td>
+      </tr>
+      <tr>
+        <td>TC-002</td>
+        <td>
+          <strong>PCでMobileTabBar非表示</strong><br>
+          <span class="meta">1280x800 viewport</span>
+          <div class="evidence">mobileTabButtonsVisible=[], noMobileTabs=true</div>
+        </td>
+        <td><span class="badge badge-pass">PASS</span></td>
+      </tr>
+      <tr>
+        <td>TC-003</td>
+        <td>
+          <strong>モバイルでEditorタブ切替可能</strong><br>
+          <span class="meta">Preview初期選択 → Editorタブクリック → 切替成功</span>
+          <div class="evidence">initialPreviewActive=true, editorSwitchWorked=true, textareaVisible=true</div>
+        </td>
+        <td><span class="badge badge-pass">PASS</span></td>
+      </tr>
+      <tr>
+        <td>TC-004</td>
+        <td>
+          <strong>useEffect配置確認</strong><br>
+          <span class="meta">MarkdownEditor.tsx ソースコード検証</span>
+          <div class="evidence">Line 153-157: useEffect(() => { if (isMobile) setMobileTab('preview'); }, [isMobile]); elseブランチなし</div>
+        </td>
+        <td><span class="badge badge-pass">PASS</span></td>
+      </tr>
+      <tr>
+        <td>TC-005</td>
+        <td>
+          <strong>initialViewMode='split'追加確認</strong><br>
+          <span class="meta">WorktreeDetailRefactored.tsx ソースコード検証</span>
+          <div class="evidence">Line 1875: initialViewMode="split" (モバイルModal内MarkdownEditor)</div>
+        </td>
+        <td><span class="badge badge-pass">PASS</span></td>
+      </tr>
+      <tr>
+        <td>TC-006</td>
+        <td>
+          <strong>ユニットテスト全パス</strong><br>
+          <span class="meta">npm run test:unit</span>
+          <div class="evidence">277 test files passed, 5422 tests passed, 0 failed</div>
+        </td>
+        <td><span class="badge badge-pass">PASS</span></td>
+      </tr>
+      <tr>
+        <td>TC-007</td>
+        <td>
+          <strong>静的解析パス</strong><br>
+          <span class="meta">npx tsc --noEmit && npm run lint</span>
+          <div class="evidence">TypeScript: 0 errors / ESLint: No warnings or errors</div>
+        </td>
+        <td><span class="badge badge-pass">PASS</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Environment</h2>
+  <table>
+    <tr><td>Server Port</td><td>3012 (stopped)</td></tr>
+    <tr><td>Mobile Viewport</td><td>375 x 812 (iPhone style)</td></tr>
+    <tr><td>Desktop Viewport</td><td>1280 x 800</td></tr>
+    <tr><td>Test Worktree</td><td>myswiftagent-develop</td></tr>
+    <tr><td>Test File</td><td>README.md</td></tr>
+  </table>
+
+  <div class="footer">
+    Generated by /uat command | Issue #549 | 2026-03-27
+  </div>
+</div>
+</body>
+</html>

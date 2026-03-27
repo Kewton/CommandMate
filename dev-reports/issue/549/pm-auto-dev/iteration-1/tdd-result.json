@@ -1,0 +1,22 @@
+{
+  "status": "success",
+  "coverage": 100.0,
+  "unit_tests": {
+    "total": 5422,
+    "passed": 5422,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/MarkdownEditor-mobile-default.test.tsx"
+  ],
+  "commits": [
+    "a3178731: feat(mobile): default to preview tab in mobile markdown viewer"
+  ],
+  "message": "TDD implementation complete. Mobile markdown viewer now defaults to preview tab. All 5422 tests pass, ESLint and TypeScript checks clean."
+}

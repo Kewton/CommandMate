@@ -1,0 +1,116 @@
+{
+  "issue_number": 549,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "principle": "SRP (Single Responsibility)",
+        "title": "useEffect for mobileTab initialization adds a secondary responsibility to MarkdownEditor",
+        "description": "MarkdownEditor.tsx already manages editor content, view modes, saving, fullscreen, split ratio, auto-save, and more. Adding a useEffect that conditionally overrides mobileTab based on isMobile couples device-detection logic into the component body. While the change is small, MarkdownEditor is already a large component. Consider extracting a small custom hook (e.g., useInitialMobileTab) that encapsulates this logic to keep the component body focused on rendering.",
+        "severity": "should_fix",
+        "recommendation": "Extract useEffect into a dedicated hook like `useInitialMobileTab(isMobile)` that returns `[mobileTab, setMobileTab]`. This isolates the initialization concern and makes it independently testable without rendering the full MarkdownEditor."
+      },
+      {
+        "id": "SF-002",
+        "principle": "KISS",
+        "title": "The two-change approach (useEffect + initialViewMode) could be simplified to a single prop",
+        "description": "The design requires two coordinated changes: (1) a useEffect in MarkdownEditor to set mobileTab='preview', and (2) passing initialViewMode='split' from WorktreeDetailRefactored. These two changes are tightly coupled -- change 2 is required for change 1 to work because without viewMode='split', showMobileTabs is false and MobileTabBar is hidden. A simpler alternative would be a single new prop like `initialMobileTab` on MarkdownEditor, which would make the intent explicit and reduce the need to understand the internal viewMode/showMobileTabs interaction.",
+        "severity": "should_fix",
+        "recommendation": "Consider adding an `initialMobileTab?: MobileTab` prop to EditorProps. MarkdownEditor would use it as `useState<MobileTab>(initialMobileTab ?? 'editor')`, eliminating the useEffect entirely. The caller in WorktreeDetailRefactored would pass `initialMobileTab='preview' initialViewMode='split'`. This is more declarative and avoids the flash concern documented in section 7."
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "principle": "DRY",
+        "title": "Desktop MarkdownEditor in WorktreeDetailRefactored also lacks initialViewMode",
+        "description": "The desktop Modal MarkdownEditor at ~line 1597 does not pass initialViewMode either. Both the desktop and mobile Modal paths currently rely on getInitialViewMode() falling back to localStorage. The design only adds initialViewMode to the mobile path. While this is intentional (desktop uses localStorage preference), it creates an asymmetry that could confuse future maintainers. A brief code comment explaining the difference would help.",
+        "severity": "nice_to_have",
+        "recommendation": "Add a code comment on the desktop MarkdownEditor call explaining that initialViewMode is intentionally omitted to respect localStorage preference."
+      },
+      {
+        "id": "C-002",
+        "principle": "YAGNI",
+        "title": "filePath change behavior decision is documented but may need revisiting",
+        "description": "The design explicitly decides not to reset mobileTab on filePath change, preserving the user's tab choice. This is a reasonable YAGNI decision now, but should be validated with real user testing. The design document properly documents this as a trade-off, which is good.",
+        "severity": "nice_to_have",
+        "recommendation": "No action needed. The trade-off is well-documented. Confirm behavior during UAT."
+      },
+      {
+        "id": "C-003",
+        "principle": "Open/Closed",
+        "title": "getInitialViewMode function is not extensible for per-context defaults",
+        "description": "The current getInitialViewMode function supports prop override or localStorage fallback. The design works around this by combining initialViewMode='split' with a separate useEffect for mobileTab. If future requirements need different defaults per context (tablet, landscape, etc.), the function would need modification. This is acceptable for now under YAGNI.",
+        "severity": "nice_to_have",
+        "recommendation": "No immediate action. If mobile-specific initialization logic grows, consider a strategy pattern or configuration object for view mode initialization."
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "design_principles_checklist": {
+    "single_responsibility": {
+      "status": "pass_with_note",
+      "note": "MarkdownEditor is already a large component. The change is small but adds another concern. See SF-001."
+    },
+    "open_closed": {
+      "status": "pass",
+      "note": "No existing interfaces modified. New behavior added via existing prop (initialViewMode) and a new useEffect."
+    },
+    "liskov_substitution": {
+      "status": "not_applicable",
+      "note": "No class hierarchies or substitutable types involved."
+    },
+    "interface_segregation": {
+      "status": "pass",
+      "note": "EditorProps interface is not modified. initialViewMode is already an optional prop."
+    },
+    "dependency_inversion": {
+      "status": "pass",
+      "note": "useIsMobile hook provides abstraction over viewport detection."
+    },
+    "kiss": {
+      "status": "pass_with_note",
+      "note": "The solution is minimal (2 files, ~5 lines). The two-change coordination adds slight complexity. See SF-002."
+    },
+    "yagni": {
+      "status": "pass",
+      "note": "No over-engineering. Alternative approaches like mobile-specific localStorage key were correctly rejected."
+    },
+    "dry": {
+      "status": "pass",
+      "note": "No duplication introduced. Existing hooks and props are reused."
+    }
+  },
+  "test_strategy_assessment": {
+    "status": "adequate",
+    "coverage": [
+      "Mobile default preview tab",
+      "PC default unchanged",
+      "localStorage override prevention on mobile",
+      "filePath change tab retention",
+      "initialViewMode prop propagation"
+    ],
+    "gaps": [
+      "No test for the flash/flicker edge case (useEffect timing) -- though documented as acceptable",
+      "No integration test verifying the Modal + MarkdownEditor combination on mobile viewport"
+    ]
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-549-mobile-markdown-viewer-design-policy.md",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/types/markdown-editor.ts",
+    "src/components/worktree/FilePanelContent.tsx"
+  ],
+  "timestamp": "2026-03-27T00:00:00Z"
+}

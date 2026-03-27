@@ -1,0 +1,46 @@
+{
+  "issue_number": 549,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘対応",
+  "apply_date": "2026-03-27",
+  "status": "completed",
+  "design_doc_path": "dev-reports/design/issue-549-mobile-markdown-viewer-design-policy.md",
+  "applied_findings": [
+    {
+      "id": "MF-001",
+      "severity": "should_fix",
+      "title": "FilePanelContentのinitialViewMode記述が不正確",
+      "action": "セクション2「変更しないファイル」テーブルのFilePanelContent.tsx説明を修正。MarpRenderableMarkdown内のinitialViewMode='split'とMarkdownWithSearch内のinitialViewMode='preview'の2箇所を正確に記述。",
+      "section_updated": "セクション2, セクション10"
+    },
+    {
+      "id": "MF-002",
+      "severity": "should_fix",
+      "title": "useIsMobileモックにMOBILE_BREAKPOINTエクスポートが不足",
+      "action": "セクション8のモック戦略コードサンプルにMOBILE_BREAKPOINT: 768を追加。プロジェクト既存パターンとの一貫性を確保。",
+      "section_updated": "セクション8, セクション10"
+    },
+    {
+      "id": "MF-004",
+      "severity": "nice_to_have",
+      "title": "Desktop側のMarkdownEditor呼び出しパスが関係図に不足",
+      "action": "セクション2のコンポーネント関係図を拡張。Desktop FilePanelContent内の2つの呼び出しパス（MarpRenderableMarkdown, MarkdownWithSearch）およびDesktop Modalパス（line 1597）を追記。注記コメントも追加。",
+      "section_updated": "セクション2, セクション10"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "MF-003",
+      "severity": "nice_to_have",
+      "title": "mobileTab state宣言の行番号が正確",
+      "reason": "対応不要。レビューで正確性が確認された。"
+    },
+    {
+      "id": "MF-005",
+      "severity": "nice_to_have",
+      "title": "viewMode localStorage記述のキー名が正確",
+      "reason": "対応不要。レビューで正確性が確認された。"
+    }
+  ],
+  "summary": "Stage 2整合性レビューの全should_fix項目(2件)およびnice_to_have項目(1件)を設計方針書に反映完了。MF-003, MF-005は正確性確認のみのため対応不要。"
+}

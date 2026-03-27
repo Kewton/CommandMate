@@ -1,0 +1,94 @@
+{
+  "issue_number": 549,
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-03-27",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "完全性",
+        "issue": "受け入れ条件が未定義。Issueには「あるべき」姿のスクリーンショットのみで、具体的な受け入れ条件が記載されていない",
+        "location": "Issue本文全体",
+        "recommendation": "受け入れ条件を明記すべき。例: (1) モバイルでmarkdownファイルを選択した際、プレビュー表示が初期表示されること (2) エディタへの切替が可能であること (3) PC版の動作に影響がないこと (4) localStorageの既存viewMode設定との優先度が明確であること",
+        "evidence": "Issue本文の「背景・課題」「提案する解決策」「代替案」セクションがテンプレートのまま未記入"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "明確性",
+        "issue": "変更対象の画面フローが不明確。現在のモバイルフローはFileViewer(raw表示) -> Pencil tap -> MarkdownEditor(editor tab) -> Preview tabの3ステップだが、Issueでは2ステップと記載。どの段階を省略するかの仕様が曖昧",
+        "location": "Issue概要セクション",
+        "recommendation": "現在のフローと目標フローを明確にすべき。選択肢として (A) FileViewerを経由せずMarkdownEditorをpreviewモードで直接開く (B) FileViewer内でmarkdownをプレビューレンダリングする (C) MarkdownEditorのmobileTabデフォルトをpreviewに変更する、のいずれかを明記",
+        "evidence": "現在のコードでは handleFileSelect -> FileViewer modal -> pencil button -> MarkdownEditor(split mode, editor tab) という流れ。getInitialViewMode()はinitialViewModeが未指定の場合localStorageかsplitにフォールバックし、mobileTabは常に'editor'で初期化される"
+      },
+      {
+        "id": "SF-2",
+        "category": "技術的妥当性",
+        "issue": "localStorage永続化との競合に関する仕様が未定義。現在MarkdownEditorはlocalStorage(commandmate:md-editor-view-mode)にviewModeを保存し、次回開時に復元する。モバイルでpreview初期表示にする場合、localStorageの値をオーバーライドすべきか、localStorageの値を尊重すべきかが不明",
+        "location": "Issue本文（提案する解決策セクション未記入）",
+        "recommendation": "以下のいずれかの方針を明記: (A) モバイル時はlocalStorageを無視して常にpreview表示 (B) モバイル初回のみpreview、以降はユーザー選択をlocalStorageで保持 (C) モバイル専用のlocalStorageキーを使い分ける",
+        "evidence": "getInitialViewMode()関数(MarkdownEditor.tsx:80-93)でinitialViewModeがあればそれを使い、なければlocalStorageを参照する。現在のモバイルMarkdownEditor呼び出し(WorktreeDetailRefactored.tsx:1869)ではinitialViewModeが未指定"
+      },
+      {
+        "id": "SF-3",
+        "category": "明確性",
+        "issue": "MobileTabBar(editor/preview切替)のデフォルトタブに関する記載がない。viewModeがsplitの場合、モバイルではMobileTabBarが表示されmobileTabのデフォルトが'editor'になっている。previewを初期表示にする場合、このmobileTabのデフォルトも変更が必要",
+        "location": "Issue本文",
+        "recommendation": "mobileTab状態の初期値をpreviewにする要件を明記、もしくはviewMode自体をpreviewにしてMobileTabBarを非表示にする方針を記載",
+        "evidence": "MarkdownEditor.tsx:134でmobileTabが常に'editor'で初期化されている。showMobileTabsはisMobilePortrait && viewMode === 'split'の場合にtrueとなる(MarkdownEditor.tsx:211)"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "MARP markdownファイルの場合の動作仕様が未記載。現在FileViewerではMARPファイルはスライド表示されるが、MarkdownEditorを直接開く場合のMARPファイル取り扱いについて言及がない",
+        "location": "Issue本文",
+        "recommendation": "MARPファイルの場合は現在通りFileViewer経由のフローを維持する等、スコープの明確化を追記",
+        "evidence": "FileViewer.tsx:385-416でMARPフロントマター検出時にスライドレンダリングを行う既存ロジックがある"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "スクリーンショットの「現状」画像がFileViewerのraw表示画面を指しているように見えるが、テキストによる補足説明がない",
+        "location": "Issue概要セクション",
+        "recommendation": "スクリーンショットにキャプション/説明テキストを追加し、(1)どの画面のスクリーンショットか (2)何が問題なのか をテキストで明示",
+        "evidence": "Issue本文には画像リンクのみで、画面名やUIフローの説明テキストがない"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "relevance": "viewMode初期化ロジック(getInitialViewMode)、mobileTab初期値、showMobileTabs条件が変更対象"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "モバイルファイル選択フロー(handleFileSelect)とFileViewer/MarkdownEditor呼び出しが変更対象"
+    },
+    {
+      "file": "src/components/worktree/FileViewer.tsx",
+      "relevance": "現在のモバイルmarkdown表示とpencilボタン経由のエディタ遷移ロジック"
+    },
+    {
+      "file": "src/components/worktree/FilePanelContent.tsx",
+      "relevance": "デスクトップ版でinitialViewMode='preview'を渡している既存パターン(MarkdownWithSearch)"
+    },
+    {
+      "file": "src/types/markdown-editor.ts",
+      "relevance": "ViewMode型定義、LOCAL_STORAGE_KEY定数"
+    },
+    {
+      "file": "src/hooks/useIsMobile.ts",
+      "relevance": "モバイル判定ロジック(768px breakpoint)"
+    }
+  ],
+  "doc_references": []
+}

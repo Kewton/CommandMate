@@ -1,0 +1,125 @@
+{
+  "issue_number": 549,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "review_date": "2026-03-27",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 1,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト範囲",
+        "issue": "useEffectによるmobileTab切替時のfilePath変更シナリオがテスト要件に含まれていない",
+        "location": "受け入れ条件 - テスト要件セクション",
+        "recommendation": "useEffectの依存配列が[isMobile]のみの場合、MarkdownEditorのfilePath propsが変更されて再レンダーされても（同一モーダル内で別ファイルを開く場合）、mobileTabはリセットされない。ユーザーがeditorタブに切り替えた後に別のMarkdownファイルを開いた場合、editorタブのままになる。この挙動が意図的なのか、filePath変更時にもpreviewにリセットすべきかを明確にし、テスト要件に含めるべき。",
+        "evidence": "MarkdownEditor.tsx line 108-117: MarkdownEditorはmemo化されており、propsのfilePath変更で再レンダーされるが、useStateの初期値はリセットされない（Reactの仕様）。useEffectの依存配列に[isMobile]のみ入っている場合、filePath変更時にmobileTabは'preview'にリセットされない。WorktreeDetailRefactored.tsxのeditorFilePathが変更された場合、モーダルがそのまま再利用される可能性がある。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "影響ファイル",
+        "issue": "MarkdownPreview.tsxのMobileTabBarコンポーネントが影響なしテーブルに記載されているが、正確にはMobileTabBarではなくMarkdownPreview.tsxファイル自体が対象",
+        "location": "影響範囲 - 影響なしのファイル（確認済み）テーブル",
+        "recommendation": "影響なし理由の記述を「MobileTabBarコンポーネントはprops受取のみで初期値ロジックなし」から「MobileTabBarおよびMarkdownPreviewは外部からpropsを受け取るのみで、mobileTab初期値の決定ロジックを持たない。変更不要。」に微修正するとより正確。現状でも技術的に間違いではない。",
+        "evidence": "MarkdownPreview.tsxでexportされるMobileTabBarは mobileTab と onTabChange をpropsとして受け取るだけのコンポーネント。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "ドキュメント更新",
+        "issue": "推奨実装パターン（OKパターン）のuseEffect内でisMobile判定のみ行っているが、falseに戻った場合のeditorへの復帰は不要かの言及がない",
+        "location": "技術的注意事項（SSR hydration対策）セクション",
+        "recommendation": "OKパターンのuseEffectはisMobileがtrueの場合のみsetMobileTab('preview')を実行しているが、ウィンドウリサイズによりisMobileがfalseに変わった場合にmobileTabを'editor'に戻す処理が不要であることを注記するとよい。理由: isMobileがfalseの場合はshowMobileTabsもfalseとなりMobileTabBar自体が非表示になるため、mobileTabの値は無関係。実装者が不要なelseブランチを追加しないための参考情報となる。",
+        "evidence": "MarkdownEditor.tsx line 210-211: showMobileTabs = isMobilePortrait && viewMode === 'split' -- isMobileがfalseならisMobilePortraitもfalse、showMobileTabsもfalseとなりMobileTabBarは表示されない。"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "directly_affected_files": [
+      {
+        "file": "src/components/worktree/MarkdownEditor.tsx",
+        "change_type": "modify",
+        "description": "mobileTab初期値のロジック変更（useEffect追加でisMobile時にpreviewに設定）",
+        "verified": true
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "change_type": "modify",
+        "description": "モバイルMarkdownEditor Modal（line 1869-1875）にinitialViewMode='split'を明示的に渡す",
+        "verified": true
+      }
+    ],
+    "unaffected_files_verification": {
+      "src/components/worktree/MarkdownPreview.tsx": "verified - props受取のみ、初期値ロジックなし",
+      "src/components/worktree/FileViewer.tsx": "verified - Markdownのraw表示担当、mobileTab変更影響外",
+      "src/components/worktree/FilePanelContent.tsx": "verified - PC側パネル。initialViewMode='preview'でshowMobileTabsはfalse。今回の変更影響外",
+      "src/hooks/useIsMobile.ts": "verified - 変更不要。既存ロジックをそのまま利用",
+      "src/types/markdown-editor.ts": "verified - 型定義・定数に変更不要。MobileTab型はMarkdownPreview.tsxで定義されており影響なし",
+      "src/components/ui/Modal.tsx": "verified - CSS transitionのみ（transition-all, transition-opacity）。JavaScriptアニメーションなし。useEffectはCSS transitionと独立して同期的に実行されるため、editorタブフラッシュのリスクは低い"
+    },
+    "breaking_changes": false,
+    "ssr_hydration_analysis": {
+      "accuracy": "正確。useIsMobileがuseState(false)で初期化されuseEffectでクライアントサイド判定を行う実装が正しく記述されている",
+      "ng_pattern_accuracy": "正確。useStateの初期値はレンダー時に一度だけ評価されるため、isMobileが初回レンダーでfalseのままuseState(isMobile ? 'preview' : 'editor')は常にeditorとなる",
+      "ok_pattern_accuracy": "正確。useEffectはhydration完了後に実行されるため、SSRミスマッチを回避できる"
+    },
+    "edge_cases_analysis": {
+      "modal_animation_flash": "低リスク。Modal.tsxはCSS transition-allのみで、JSアニメーション（setTimeout等）を使っていない。useEffectはDOMコミット後に同期的にスケジュールされるため、CSSトランジション開始前または初期フレーム内で完了する可能性が高い。Issueの記述（モーダルアニメーション中にuseEffectが完了することを確認する）は妥当。",
+      "localstorage_editor_mode": "正しく対処済み。WorktreeDetailRefactored.tsxからinitialViewMode='split'を明示的に渡すことで、localStorageにeditorが保存されていてもviewMode=splitが保証され、showMobileTabsがtrueとなる。",
+      "tablet_landscape": "正しく対処済み。スコープ外セクションに注記あり。",
+      "marp_files": "正しく対処済み。スコープ外セクションに明記。",
+      "file_change_in_same_modal": "未対処（SF-1参照）。editorFilePath変更時のmobileTabリセット挙動が未定義。"
+    },
+    "test_coverage_assessment": {
+      "adequacy": "概ね十分だが1件追加推奨",
+      "covered": [
+        "モバイルでpreviewタブデフォルト選択",
+        "PCで変更なし",
+        "localStorage上書き耐性",
+        "useIsMobileモック設定",
+        "WorktreeDetailRefactored.tsxのinitialViewMode='split' props検証"
+      ],
+      "recommended_addition": "モバイルでeditorタブに切り替えた後、同一モーダル内でfilePathが変更された場合のmobileTab状態（SF-1）"
+    }
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "line": 134,
+      "relevance": "mobileTab初期値 -- 変更対象"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "lines": "108-117",
+      "relevance": "memo化されたコンポーネント -- filePath変更時のstate保持挙動に関連"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "lines": "210-211",
+      "relevance": "showMobileTabs条件 -- viewMode=splitかつisMobilePortraitで有効"
+    },
+    {
+      "file": "src/components/ui/Modal.tsx",
+      "lines": "96-98",
+      "relevance": "CSS transition-allのみ、JSアニメーションなし -- フラッシュリスク低"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "1869-1875",
+      "relevance": "MarkdownEditor Modal呼び出し -- initialViewMode未指定（変更対象）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "実装完了後にMarkdownEditorモジュール説明へのIssue #549反映"
+    }
+  ]
+}

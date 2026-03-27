@@ -1,0 +1,52 @@
+{
+  "issue_number": 549,
+  "iteration": 1,
+  "apply_date": "2026-03-27",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "受け入れ条件を5項目追加（モバイルpreviewデフォルト表示、editor切替可能、PC版影響なし、localStorage非依存、MARPファイル影響なし）"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "現在のフロー（3ステップ）と目標フロー（preview初期表示）を明確化。方針A/B/Cを比較し方針C（mobileTab初期値変更）を採用と明記"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "localStorage永続化との競合方針を明記: モバイル時はlocalStorageを無視して常にpreview表示、PC版は既存動作を維持"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "実装アプローチにmobileTab初期値をpreviewに変更する要件を明記。viewModeはsplitを維持しMobileTabBarの切替機能は保持"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "MARPファイルはスコープ外と明記（現在通りFileViewer経由のスライド表示を維持）"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "スクリーンショットにキャプション説明テキストを追加"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 6,
+    "applied": 6,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/549"
+  }
+}

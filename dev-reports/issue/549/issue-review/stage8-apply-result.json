@@ -1,0 +1,38 @@
+{
+  "issue_number": 549,
+  "iteration": 2,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-03-27",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "filePath変更時のmobileTab挙動を意図的な設計判断として新セクション「filePath変更時のmobileTab挙動について」を追加。テスト要件にfilePath変更時のmobileTab維持テストケースを追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "MarkdownPreview.tsxの影響なし理由を「MobileTabBarおよびMarkdownPreviewは外部からpropsを受け取るのみで、mobileTab初期値の決定ロジックを持たない。変更不要」に微修正"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "技術的注意事項セクションにisMobileがfalseに戻った場合のelseブランチ不要の注記を追加（showMobileTabsがfalseとなりMobileTabBar自体が非表示になるため）"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 3,
+    "applied": 3,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/549"
+  }
+}

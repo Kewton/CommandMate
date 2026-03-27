@@ -1,0 +1,153 @@
+{
+  "issue_number": 549,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_date": "2026-03-27",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "useIsMobile hookのSSR初期値(false)によるmobileTab初期化タイミング問題",
+        "location": "src/components/worktree/MarkdownEditor.tsx:134, src/hooks/useIsMobile.ts:55",
+        "recommendation": "useStateの初期値をisMobileに直接依存させるとSSR hydration時にfalseとなるため、useEffectでisMobile変化時にmobileTabを'preview'に設定する方式が必要。具体的には: (1) mobileTabの初期値は'editor'のまま、(2) useEffectでisMobile===trueかつ初回マウント時にsetMobileTab('preview')とする。Issueの実装アプローチにこの制約を明記すべき。",
+        "evidence": "useIsMobile.ts line 55: useState<boolean>(false) -- SSR対策でfalseから開始。MarkdownEditor.tsx line 134: useState<MobileTab>('editor') -- useStateの初期値はレンダー時に一度だけ評価されるため、isMobileがまだfalseの段階で初期値が確定する。単純に useState(isMobile ? 'preview' : 'editor') とすると常に'editor'になる。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "影響ファイル",
+        "issue": "変更対象ファイルにWorktreeDetailRefactored.tsxが必要な可能性の見落とし",
+        "location": "src/components/worktree/WorktreeDetailRefactored.tsx:1869-1875",
+        "recommendation": "モバイルのMarkdownEditor Modalではinitial ViewModeが未指定のため、localStorageの値またはデフォルト'split'が使われる。Issue本文で「モバイル時はlocalStorageのviewModeを無視」とあるが、これをMarkdownEditor内部で制御するか、WorktreeDetailRefactored.tsxからinitialViewMode='split'を明示的に渡すか、方針を明確にすべき。現在のコードではgetInitialViewModeがlocalStorageを読むため、PCでviewModeを'editor'に変更した場合にモバイルでもeditorモードになりMobileTabBarが非表示になるリスクがある。",
+        "evidence": "WorktreeDetailRefactored.tsx line 1869-1875: <MarkdownEditor worktreeId={worktreeId} filePath={editorFilePath} onClose={handleEditorClose} onSave={handleEditorSave} onMaximizedChange={setIsEditorMaximized} /> -- initialViewModeプロパティが渡されていない。getInitialViewMode()がlocalStorageから'editor'を読み込むと、viewModeが'editor'になりshowMobileTabsがfalseとなる。"
+      },
+      {
+        "id": "SF-2",
+        "category": "テスト範囲",
+        "issue": "既存テストにmobileTab初期値に関するテストケースがない",
+        "location": "tests/unit/components/MarkdownEditor.test.tsx",
+        "recommendation": "以下のテストケースを追加すべき: (1) モバイル環境でMarkdownEditorを開いた際にpreviewタブがデフォルト選択されること、(2) PC環境では変更なくeditorが初期表示されること、(3) モバイルでlocalStorageにviewModeが保存されていてもpreviewが初期表示されること。useIsMobileのモック設定も必要。",
+        "evidence": "MarkdownEditor.test.tsxにmobileTabまたはMobileTabに関するテストケースが存在しない（grep結果: 0件）。"
+      },
+      {
+        "id": "SF-3",
+        "category": "影響ファイル",
+        "issue": "FilePanelContent.tsx内のMarkdownWithSearchが既にinitialViewMode='preview'を渡している点との整合性",
+        "location": "src/components/worktree/FilePanelContent.tsx:478",
+        "recommendation": "PC版FilePanelContentではMarkdownWithSearchが initialViewMode='preview' を渡しており、これはviewModeを'preview'に設定する（showPreview=true, showEditor=false）。この場合showMobileTabsはfalseになる（viewMode !== 'split'のため）。モバイルでFilePanelContentパスが使われるケースがあるか確認し、影響を整理すべき。現状FilePanelContentはPC側のファイルタブパネル用なので直接の影響はないが、Issueの影響範囲分析に明記しておくとよい。",
+        "evidence": "FilePanelContent.tsx line 474-481: MarkdownWithSearch内で <MarkdownEditor ... initialViewMode='preview' .../>。showMobileTabs = isMobilePortrait && viewMode === 'split' なので、viewMode='preview'の場合はMobileTabBarが表示されない。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "移行考慮",
+        "issue": "タブレット端末（768px未満かつランドスケープ）での挙動が未定義",
+        "location": "src/components/worktree/MarkdownEditor.tsx:210-211",
+        "recommendation": "showMobileTabsはisMobilePortrait（isMobile && height > width）の場合のみ有効。タブレットのランドスケープモードではisMobileはtrue（768px未満）だがisMobilePortraitはfalseとなり、デスクトップレイアウト（split/editor/preview選択）が表示される。この場合mobileTabの変更は影響しないため問題ないが、タブレットユーザーへの影響がないことをIssueに注記するとよい。",
+        "evidence": "MarkdownEditor.tsx line 210: const isMobilePortrait = isMobile && typeof window !== 'undefined' && window.innerHeight > window.innerWidth;"
+      },
+      {
+        "id": "NTH-2",
+        "category": "ドキュメント更新",
+        "issue": "CLAUDE.mdのMarkdownEditor説明にmobileTab初期値変更の反映",
+        "location": "CLAUDE.md",
+        "recommendation": "実装完了後、CLAUDE.mdのMarkdownEditorモジュール説明に「モバイル時のmobileTab初期値をpreviewに変更（Issue #549）」を追記するとよい。",
+        "evidence": "CLAUDE.mdにMarkdownEditorの記載はあるが、モバイル固有の動作については未記載。"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "directly_affected_files": [
+      {
+        "file": "src/components/worktree/MarkdownEditor.tsx",
+        "change_type": "modify",
+        "description": "mobileTab初期値のロジック変更（useEffect追加でisMobile時にpreviewに設定）"
+      }
+    ],
+    "potentially_affected_files": [
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "change_type": "modify",
+        "description": "モバイルMarkdownEditor呼び出し時にinitialViewMode='split'の明示的渡しが推奨される"
+      }
+    ],
+    "unaffected_files": [
+      {
+        "file": "src/components/worktree/MarkdownPreview.tsx",
+        "reason": "MobileTabBarコンポーネントはprops受取のみで初期値ロジックなし"
+      },
+      {
+        "file": "src/components/worktree/FileViewer.tsx",
+        "reason": "FileViewerはMarkdownのraw表示とMARPスライド表示を担当。mobileTab変更はFileViewerに影響しない"
+      },
+      {
+        "file": "src/components/worktree/FilePanelContent.tsx",
+        "reason": "PC側のファイルタブパネル。MarkdownWithSearchが既にinitialViewMode='preview'を渡しており、今回の変更影響外"
+      },
+      {
+        "file": "src/hooks/useIsMobile.ts",
+        "reason": "変更不要。既存のモバイル判定ロジックをそのまま利用"
+      },
+      {
+        "file": "src/types/markdown-editor.ts",
+        "reason": "型定義・定数に変更不要"
+      }
+    ],
+    "breaking_changes": false,
+    "marp_impact": false,
+    "file_polling_impact": false,
+    "search_feature_impact": false
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "line": 134,
+      "relevance": "mobileTab初期値 -- 変更対象"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "lines": "210-211",
+      "relevance": "showMobileTabs条件 -- mobileTabが有効になる条件"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "lines": "80-93",
+      "relevance": "getInitialViewMode() -- localStorage読み込みロジック"
+    },
+    {
+      "file": "src/hooks/useIsMobile.ts",
+      "line": 55,
+      "relevance": "SSR hydration対策でfalse初期値"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "1869-1875",
+      "relevance": "モバイルMarkdownEditor Modal -- initialViewMode未指定"
+    },
+    {
+      "file": "src/components/worktree/FilePanelContent.tsx",
+      "line": 478,
+      "relevance": "PC版パスでinitialViewMode='preview'を既に渡している"
+    },
+    {
+      "file": "tests/unit/components/MarkdownEditor.test.tsx",
+      "relevance": "既存テスト -- mobileTab関連テストなし"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュールリファレンスへのIssue #549反映"
+    }
+  ]
+}
