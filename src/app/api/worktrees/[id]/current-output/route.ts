@@ -9,7 +9,7 @@ import { getWorktreeById, getSessionState } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/session/cli-session';
-import { detectSessionStatus, STATUS_REASON } from '@/lib/detection/status-detector';
+import { detectSessionStatus, STATUS_REASON, SELECTION_LIST_REASONS } from '@/lib/detection/status-detector';
 import { getAutoYesState, getLastServerResponseTimestamp, isPollerActive, buildCompositeKey } from '@/lib/polling/auto-yes-manager';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { createLogger } from '@/lib/logger';
@@ -106,8 +106,7 @@ export async function GET(
 
     // Issue #473: Selection list active flag for TUI navigation (OpenCode + Claude)
     const isSelectionListActive = statusResult.status === 'waiting'
-      && (statusResult.reason === STATUS_REASON.OPENCODE_SELECTION_LIST
-        || statusResult.reason === STATUS_REASON.CLAUDE_SELECTION_LIST);
+      && SELECTION_LIST_REASONS.has(statusResult.reason);
 
     // Extract realtime snippet (last 100 lines for better context)
     const realtimeSnippet = lines.slice(-100).join('\n');

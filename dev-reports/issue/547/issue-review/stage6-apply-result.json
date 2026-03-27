@@ -1,0 +1,13 @@
+{
+  "issue_number": 547,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "applied_findings": [],
+  "skipped_findings": ["F5-001", "F5-002"],
+  "skipped_reasons": {
+    "F5-001": "nice_to_have: 設計方針の優先度選定は設計レビューフェーズで決定するため、Issueレベルでは不要",
+    "F5-002": "nice_to_have: copilot.tsの変更内容は調査結果に依存するため現時点では具体化できない"
+  },
+  "issue_updated": false,
+  "summary": "Stage 5のnice_to_have 2件はスキップ。Must Fix/Should Fixなし、Issueの品質は十分。"
+}

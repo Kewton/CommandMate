@@ -1,0 +1,30 @@
+{
+  "issue_number": 547,
+  "title": "fix: Copilot CLIのデフォルトスラッシュコマンドと選択ウィンドウが動作しない",
+  "acceptance_criteria": [
+    "/ 入力時にCopilot CLIのスラッシュコマンド候補が表示される",
+    "/model 実行時の選択ウィンドウが検出・表示される（NavigationButtonsが表示される）",
+    "既存エージェント（Claude, OpenCode, Codex等）のスラッシュコマンドに影響がない",
+    "STATUS_REASON.COPILOT_SELECTION_LIST 定数が追加されている",
+    "current-output/route.ts の isSelectionListActive が Copilot 選択リストを含む",
+    "Copilotビルトインコマンドに cliTools: ['copilot'] が設定されている",
+    "新規追加パターンおよび検出ロジックの単体テストが追加されている"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: cli-patterns.tsにCOPILOT_SELECTION_LIST_PATTERNを新規追加",
+    "Task 1.2: slash-commands.tsにgetCopilotBuiltinCommands()追加、getSlashCommandGroups()の両ブランチに統合",
+    "Task 1.3: status-detector.tsにSTATUS_REASON.COPILOT_SELECTION_LIST追加、SELECTION_LIST_REASONS Set定数追加、detectSessionStatus()にStep 1.6検出分岐追加",
+    "Task 1.4: current-output/route.tsのOR条件をSELECTION_LIST_REASONS.has()に置換（Task 1.3と同一コミット）"
+  ],
+  "design_policy_path": "dev-reports/design/issue-547-copilot-slash-commands-design-policy.md",
+  "work_plan_path": "dev-reports/issue/547/work-plan.md",
+  "target_coverage": 80,
+  "design_constraints": [
+    "[DR1-004] SELECTION_LIST_REASONS Set定数でOR条件を置換",
+    "[DR2-001] getSlashCommandGroups()の両ブランチ（basePath/cache）でCopilotビルトイン統合",
+    "[DR2-004] cliToolId === 'copilot' ガード条件必須",
+    "[IA3-001] Set定数導入とOR条件置換を同一コミットで実施",
+    "[IA3-003] source: 'builtin' フィールド設定",
+    "[SEC4-001/002] ReDoS安全性検証、アンカー保持、/gフラグ不使用"
+  ]
+}

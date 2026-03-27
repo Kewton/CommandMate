@@ -1,0 +1,70 @@
+{
+  "issue_number": 547,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "principle": "DRY",
+      "title": "status-detector.ts のCopilot選択リスト検出がClaude選択リスト検出のコピーペーストになる懸念",
+      "description": "設計方針書 Section 3-3 では、Copilot選択リスト検出を Step 1.6 に配置し、Claude選択リスト検出（Step 1.5）と同じパターンで実装する方針としている。status-detector.ts の現在のClaude選択リスト検出（L199-211）は cliToolId === 'claude' のハードコードチェックを行っている。Copilotを同様に追加すると、ほぼ同一構造のif文が2つ並ぶことになり、DRY違反のリスクがある。将来的にGeminiやVibe-Localにも選択リスト検出が必要になった場合、同じパターンが増殖する。",
+      "suggestion": "Step 1.5 と Step 1.6 を統合し、CLIツール別の選択リストパターンをマッピング（例: Record<CLIToolType, RegExp | undefined>）で管理する方式を設計方針に明記すべき。具体的には cli-patterns.ts に getSelectionListPattern(cliToolId): RegExp | undefined 関数を追加し、status-detector.ts 側では1つの分岐で処理する。ただし現在は2ツール（Claude + Copilot）のみであり、YAGNI観点から過度な汎用化は不要。設計方針書に「3ツール目の選択リスト追加時にパターンマッピングへの移行を検討する」旨のトレードオフ記載を追加することを推奨する。"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "nice_to_have",
+      "principle": "SOLID",
+      "title": "detectThinking / getCliToolPatterns / buildDetectPromptOptions の switch 文拡張と OCP",
+      "description": "cli-patterns.ts の detectThinking()（L286-316）、getCliToolPatterns()（L321-425）、buildDetectPromptOptions()（L525-541）は全て switch 文でCLIツールを分岐している。Copilotは既にIssue #545で追加済みだが、設計方針書 Section 9 で言及されている D1-003原則（7ツール目でレジストリパターンへ移行）に対し、現状6ツールで既に各switch文のcase数が多い。これはOpen-Closed Principle（OCP）の観点から、新ツール追加のたびに複数ファイルの複数switch文を修正する必要がある構造的な問題である。",
+      "suggestion": "Issue #547 のスコープ外だが、設計方針書の制約条件（Section 9）に既にD1-003原則が記載されている点は適切。現時点での追加アクションは不要。ただし、設計方針書に「本Issue での変更によりswitch分岐が増える箇所」を明示的にリストアップしておくと、将来のレジストリ移行時の影響範囲特定が容易になる。"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "should_fix",
+      "principle": "KISS",
+      "title": "placeholderパターンの段階的更新方針に具体的な完了判定基準がない",
+      "description": "設計方針書 Section 4 では、既存のplaceholderパターン（COPILOT_PROMPT_PATTERN, COPILOT_THINKING_PATTERN, COPILOT_SEPARATOR_PATTERN）を「調査結果に基づき確認・更新」とし、新規の COPILOT_SELECTION_LIST_PATTERN は「調査結果に基づき定義」としている。しかし、TUI調査の完了判定基準（何をもってパターンが確定したとみなすか）が記載されていない。これにより、実装者がどの時点でplaceholderから本番パターンに切り替えるべきか判断に迷う可能性がある。",
+      "suggestion": "設計方針書 Section 7 の「1. TUI調査」ステップに以下の完了基準を追加する: (a) tmux capture-pane で少なくとも3つの状態（アイドル、処理中、選択ウィンドウ表示中）のスナップショットを取得すること、(b) 各パターンが正例に一致し負例に一致しないことをテストで確認すること、(c) パターンが確定できない場合は placeholderのまま残し、Issue本文にその旨を記録すること。"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "must_fix",
+      "principle": "DRY",
+      "title": "current-output/route.ts の isSelectionListActive 条件に Copilot を追加する際の OR 条件増殖",
+      "description": "設計方針書 Section 3-5 では isSelectionListActive の条件に STATUS_REASON.COPILOT_SELECTION_LIST を OR で追加する方針を示している。現在の実装（current-output/route.ts L108-110）は既に OPENCODE_SELECTION_LIST と CLAUDE_SELECTION_LIST の2条件で OR 結合されている。Copilot を追加すると3条件になり、将来ツールが増えるたびに OR 条件が増殖する。これは status_reason の値が「選択リストアクティブ」を意味するかどうかの判定であり、本来はセマンティックに管理すべきである。",
+      "suggestion": "STATUS_REASON にセット型の定数（例: SELECTION_LIST_REASONS = new Set([OPENCODE_SELECTION_LIST, CLAUDE_SELECTION_LIST, COPILOT_SELECTION_LIST])）を定義し、isSelectionListActive の判定を SELECTION_LIST_REASONS.has(statusResult.reason) とする。これにより新ツール追加時はSet定義に1行追加するだけで済む。設計方針書にこのアプローチを反映すべき。"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "nice_to_have",
+      "principle": "YAGNI",
+      "title": "getCopilotBuiltinCommands の category: 'standard-config' 設定の妥当性",
+      "description": "設計方針書 Section 3-1 のコード例で、/model コマンドの category を 'standard-config' としている。これは command-merger.ts の CATEGORY_ORDER に既存のカテゴリであり適切である。ただし、将来 Copilot のビルトインコマンドが増えた場合（例: /help, /clear など別カテゴリに属するもの）、各コマンドに適切なカテゴリを割り当てる判断が必要になる。",
+      "suggestion": "現時点では /model のみであり 'standard-config' は適切。設計方針書のコード例にコメントとして「category はコマンドの性質に応じて設定する。/model は設定変更系のため standard-config」と判断根拠を記載しておくと、将来の拡張時に一貫性を保てる。"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "should_fix",
+      "principle": "SOLID",
+      "title": "getSlashCommandGroups() へのビルトインコマンド統合方法が SRP に影響する可能性",
+      "description": "設計方針書 Section 3-1 では、getCopilotBuiltinCommands() を slash-commands.ts 内に定義し、getSlashCommandGroups() の deduplicateByName() に渡す方針としている。しかし、getSlashCommandGroups() は既に commandsCache / skillsCache / Codex skills / Codex prompts の4種類のソースを扱っており、ここにビルトインコマンドという5番目のソースが追加される。この関数の責務が「ファイルベースコマンド読み込み」から「全コマンドソースの集約」に拡大している。",
+      "suggestion": "getCopilotBuiltinCommands() の挿入自体は KISS 観点で妥当だが、設計方針書に以下を追記すべき: 「getSlashCommandGroups() のソース数が増加しているため、将来的に getAllCommandSources(): SlashCommand[][] のような集約関数への分離を検討する。現時点では5ソース以内のため、即時のリファクタリングは不要（YAGNI）。」"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "nice_to_have",
+      "principle": "DRY",
+      "title": "promptInput の cliToolId 条件分岐にCopilotが既に含まれている事実の設計書への記載漏れ",
+      "description": "status-detector.ts L184 で promptInput の条件分岐に copilot が既に含まれている（cliToolId === 'copilot'）。これは Issue #545 で追加されたものであり、設計方針書 Section 2 の変更対象レイヤーで status-detector.ts は「Copilot選択リスト検出分岐」のみ記載されているが、実際には promptInput の既存条件にも依存している。",
+      "suggestion": "設計方針書 Section 2 の status-detector.ts の変更内容に、「既存の promptInput 条件分岐に copilot は Issue #545 で追加済み（変更不要）」を明記し、依存関係を明確にする。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 3,
+    "total": 7
+  }
+}

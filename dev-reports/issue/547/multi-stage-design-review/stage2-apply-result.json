@@ -1,0 +1,8 @@
+{
+  "issue_number": 547,
+  "stage": 2,
+  "applied_findings": ["DR2-001", "DR2-002", "DR2-003", "DR2-004", "DR2-005", "DR2-006", "DR2-007"],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "summary": "Applied all 7 Stage 2 consistency review findings to the design policy document. DR2-001 (must_fix): Added explicit code examples showing Copilot builtins in both basePath and cache branches of getSlashCommandGroups(), with a note about the existing Codex asymmetry. DR2-002 (should_fix): Added explicit documentation of deduplicateByName() parameter position showing builtins in the first argument (lower priority). DR2-003 (should_fix): Changed SELECTION_LIST_REASONS to Set<string> and removed 'as const' assertion. DR2-004 (should_fix): Added cliToolId === 'copilot' guard condition requirement with code example for Step 1.6. DR2-005 (nice_to_have): Added note about filePath empty string validation for downstream consumers. DR2-006 (nice_to_have): Specified status-detector.ts as the definitive placement for SELECTION_LIST_REASONS. DR2-007 (nice_to_have): Added note confirming filterCommandsByCliTool() requires no changes."
+}

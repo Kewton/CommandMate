@@ -1,0 +1,63 @@
+{
+  "issue_number": 547,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "findings": [
+    {
+      "id": "DR2-001",
+      "severity": "must_fix",
+      "title": "getSlashCommandGroups() non-basePath branch does not include Codex skills/prompts or Copilot builtins",
+      "description": "The design states that getCopilotBuiltinCommands() should be integrated into getSlashCommandGroups() via deduplicateByName(). However, there are two branches in getSlashCommandGroups(): (1) the basePath branch (line 455-462) which loads commands, skills, codexLocalSkills, and codexLocalPrompts, and (2) the non-basePath (cache) branch (lines 464-473) which only loads commandsCache and skillsCache. The design does not specify which branch(es) should include Copilot builtin commands. If builtins are only added to the basePath branch, they will not appear when getSlashCommandGroups() is called without basePath (the common case for the default MCBD commands). The non-basePath branch also already lacks Codex skills/prompts, suggesting this may be an existing architectural asymmetry that the design should acknowledge.",
+      "suggestion": "Explicitly specify that getCopilotBuiltinCommands() must be included in BOTH branches of getSlashCommandGroups(). For the non-basePath branch, add Copilot builtins to the deduplicateByName() call alongside skillsCache. Example: deduplicateByName([...skillsCache, ...getCopilotBuiltinCommands()], commandsCache). Document the existing asymmetry with Codex skills/prompts as a known limitation or file a follow-up issue."
+    },
+    {
+      "id": "DR2-002",
+      "severity": "should_fix",
+      "title": "deduplicateByName() parameter ordering and Copilot builtin priority need explicit specification",
+      "description": "The design states 'deduplicateByName() にビルトインコマンドを skills と同列で渡す' and 'ユーザーコマンドが同名の場合はコマンド優先'. The deduplicateByName(skills, commands) function signature puts skills as first arg (lower priority) and commands as second arg (higher priority, overrides). If Copilot builtins are passed in the skills array (first arg), user-defined commands with the same name (e.g., a user /model command) will override them. This is the correct behavior per the design intent, but the design document does not explicitly show the parameter position in code. For implementers, this could be ambiguous.",
+      "suggestion": "Add an explicit code example showing the parameter position: deduplicateByName([...skills, ...codexLocalSkills, ...codexLocalPrompts, ...getCopilotBuiltinCommands()], commands). This makes the priority clear: user commands override Copilot builtins."
+    },
+    {
+      "id": "DR2-003",
+      "severity": "should_fix",
+      "title": "SELECTION_LIST_REASONS Set type compatibility with STATUS_REASON as const values",
+      "description": "The design proposes: new Set([STATUS_REASON.OPENCODE_SELECTION_LIST, STATUS_REASON.CLAUDE_SELECTION_LIST, STATUS_REASON.COPILOT_SELECTION_LIST] as const). The STATUS_REASON object is declared 'as const', so its values have literal string types (e.g., 'opencode_selection_list'). However, StatusDetectionResult.reason is typed as 'string' (line 53 of status-detector.ts), not as a STATUS_REASON value type. Set.has() with a plain string argument will work at runtime but the TypeScript typing may need a Set<string> rather than Set<'opencode_selection_list' | 'claude_selection_list' | ...> to avoid type narrowing issues. The 'as const' on the array passed to Set is unnecessary and potentially confusing.",
+      "suggestion": "Define SELECTION_LIST_REASONS as: const SELECTION_LIST_REASONS = new Set<string>([STATUS_REASON.OPENCODE_SELECTION_LIST, STATUS_REASON.CLAUDE_SELECTION_LIST, STATUS_REASON.COPILOT_SELECTION_LIST]); Remove the 'as const' assertion on the Set constructor argument. Alternatively, type the reason field in StatusDetectionResult as typeof STATUS_REASON[keyof typeof STATUS_REASON] | string for future type safety."
+    },
+    {
+      "id": "DR2-004",
+      "severity": "should_fix",
+      "title": "Design does not mention cliToolId guard for Copilot selection list detection in status-detector.ts",
+      "description": "In status-detector.ts, the Claude selection list detection (Step 1.5, line 203) uses 'cliToolId === \"claude\"' as a guard condition before testing the pattern. The design describes adding Step 1.6 for Copilot but does not explicitly mention the need for a 'cliToolId === \"copilot\"' guard. Without this guard, COPILOT_SELECTION_LIST_PATTERN could match output from other CLI tools, causing false positives. This is especially important because patterns are placeholders that may be overly broad.",
+      "suggestion": "Add explicit mention in Section 3-3 that Step 1.6 must include 'cliToolId === \"copilot\"' guard, consistent with the Claude Step 1.5 pattern: if (cliToolId === 'copilot' && COPILOT_SELECTION_LIST_PATTERN.test(lastLines)) { ... }"
+    },
+    {
+      "id": "DR2-005",
+      "severity": "nice_to_have",
+      "title": "filePath: '' for builtin commands is valid but may cause issues in downstream consumers",
+      "description": "The SlashCommand interface requires filePath as a non-optional string field. The design proposes filePath: '' for builtin commands. While this satisfies the type system, downstream code that uses filePath (e.g., path.relative(), fs.readFileSync(), or UI link generation) may behave unexpectedly with an empty string. For example, parseCommandFile() sets filePath via path.relative(), and UI components may render empty links.",
+      "suggestion": "Consider using a sentinel value like '(builtin)' or adding an 'isBuiltin?: boolean' field to SlashCommand to allow downstream consumers to distinguish builtin commands from file-based ones. Alternatively, verify that all filePath consumers handle empty strings gracefully."
+    },
+    {
+      "id": "DR2-006",
+      "severity": "nice_to_have",
+      "title": "SELECTION_LIST_REASONS placement location is ambiguous",
+      "description": "The design states 'status-detector.ts または適切な定数ファイルに定義' for the SELECTION_LIST_REASONS Set. Since it references STATUS_REASON (defined in status-detector.ts) and is consumed by current-output/route.ts, the placement needs to avoid circular dependencies. status-detector.ts already exports STATUS_REASON, so adding SELECTION_LIST_REASONS there is the most natural location.",
+      "suggestion": "Specify status-detector.ts as the definitive placement for SELECTION_LIST_REASONS, co-located with STATUS_REASON for cohesion and to avoid import complexity."
+    },
+    {
+      "id": "DR2-007",
+      "severity": "nice_to_have",
+      "title": "Design references command-merger.ts filterCommandsByCliTool but does not describe the interaction with Copilot builtins",
+      "description": "The test plan mentions verifying that filterCommandsByCliTool() correctly filters Copilot commands. Since Copilot builtins will have cliTools: ['copilot'], filterCommandsByCliTool() with cliToolId='copilot' should return them, and cliToolId='claude' should not. This works correctly with the existing implementation (line 191-197 of command-merger.ts). The design could explicitly confirm this expected behavior for clarity.",
+      "suggestion": "Add a brief note in Section 3-1 confirming that filterCommandsByCliTool() already handles cliTools: ['copilot'] correctly via the existing includes() check, requiring no changes to command-merger.ts."
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 3,
+    "total": 7
+  }
+}

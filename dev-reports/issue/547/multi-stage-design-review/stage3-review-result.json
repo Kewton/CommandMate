@@ -1,0 +1,120 @@
+{
+  "issue_number": 547,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "IA3-001",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "current-output/route.ts の isSelectionListActive OR条件がSELECTION_LIST_REASONS Set導入前提で未変換",
+      "description": "設計方針書(Section 3-5)では SELECTION_LIST_REASONS Set定数を status-detector.ts に導入し、current-output/route.ts で Set.has() に切り替える計画。しかし現在の current-output/route.ts (L108-110) は OR条件チェーンで OPENCODE_SELECTION_LIST と CLAUDE_SELECTION_LIST のみを判定している。実装時に COPILOT_SELECTION_LIST を追加する際、Set定数への移行とOR条件の削除を同時に行わないと、Set定数を定義したのにroute.tsで旧OR条件が残る不整合が生じる。実装チェックリスト[DR1-004]に 'OR条件を削除してSet.has()に置換する' ステップを明示的に追加すべき。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/current-output/route.ts",
+        "src/lib/detection/status-detector.ts"
+      ],
+      "recommendation": "実装手順を明確化: (1) status-detector.ts に SELECTION_LIST_REASONS Set定数を追加、(2) current-output/route.ts のL108-110のOR条件を SELECTION_LIST_REASONS.has(statusResult.reason) に置換。2ステップを1コミットで行う。"
+    },
+    {
+      "id": "IA3-002",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "CLI wait/capture コマンドが sessionStatusReason='copilot_selection_list' を想定していない",
+      "description": "src/cli/types/api-responses.ts (L59) で sessionStatusReason は string 型として定義されており、CLI wait コマンド (src/cli/commands/wait.ts) が sessionStatus === 'waiting' で待機完了判定を行っている場合、新たに copilot_selection_list reason で waiting が返されると、CLI wait がプロンプト待ちとして誤検知する可能性がある。wait コマンドの --on-prompt オプションの挙動を確認し、selection_list reason での waiting を適切にハンドリングできているか検証が必要。",
+      "affected_files": [
+        "src/cli/commands/wait.ts",
+        "src/cli/types/api-responses.ts"
+      ],
+      "recommendation": "wait コマンドの実装を確認し、sessionStatus === 'waiting' かつ reason が selection_list 系の場合の挙動を明確にする。必要に応じてドキュメントまたはテストを追加する。"
+    },
+    {
+      "id": "IA3-003",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "slash-commands API ルート (/api/worktrees/[id]/slash-commands) はビルトインコマンドを正しく配信するが、filePath:'' の影響確認が不十分",
+      "description": "worktree-specific slash-commands API route (src/app/api/worktrees/[id]/slash-commands/route.ts) は getSlashCommandGroups(worktree.path) を呼び出す (basePath分岐)。設計方針書のコード例通りに getCopilotBuiltinCommands() をbasePath分岐に含めれば、このAPIルートは自動的にCopilotビルトインを配信する。しかし source counts 計算 (L120-128) で、ビルトインコマンドは source が undefined (設計書で source を設定していない) のため、どのカウントにも含まれない。APIレスポンスの sources 情報が不正確になる。また /api/slash-commands (MCBD用、basePath なし) も同様に影響を受ける。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/slash-commands/route.ts",
+        "src/app/api/slash-commands/route.ts",
+        "src/lib/slash-commands.ts"
+      ],
+      "recommendation": "getCopilotBuiltinCommands() が返す SlashCommand に source: 'builtin' または source: 'copilot-builtin' を設定することを検討する。source counts のカテゴリに 'builtin' を追加するか、既存の 'standard' に含めるか判断する。"
+    },
+    {
+      "id": "IA3-004",
+      "severity": "should_fix",
+      "category": "テストカバレッジ",
+      "title": "既存テスト status-detector-selection.test.ts にCopilot選択リストケースが必要",
+      "description": "tests/unit/status-detector-selection.test.ts には OpenCode と Claude の選択リスト検出テストが存在する。Copilot Step 1.6 の追加時に同ファイルへテストケースを追加する計画は設計書 Section 5 に記載されているが、テストで STATUS_REASON.COPILOT_SELECTION_LIST 定数の存在確認 (L27-40 の既存パターンに追加) と、cliToolId !== 'copilot' の場合に COPILOT_SELECTION_LIST_PATTERN が誤マッチしないことの負例テストが必要。設計書のテスト設計に負例テストの記載がない。",
+      "affected_files": [
+        "tests/unit/status-detector-selection.test.ts"
+      ],
+      "recommendation": "テスト設計に以下を追加: (1) cliToolId='claude' で COPILOT_SELECTION_LIST_PATTERN にマッチする出力を与えた場合に copilot_selection_list にならないことの確認 (ガード条件テスト)。(2) STATUS_REASON constants テストに COPILOT_SELECTION_LIST を追加。"
+    },
+    {
+      "id": "IA3-005",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "response-poller.ts の Copilot 完了判定ロジックへの波及",
+      "description": "response-poller.ts (L369-373) では copilot の完了判定を isCodexOrGeminiComplete 条件 (hasPrompt && !isThinking) に含めている。本Issue で COPILOT_PROMPT_PATTERN や COPILOT_THINKING_PATTERN を placeholder から実パターンに更新する場合、response-poller の完了判定精度に直接影響する。パターン更新時に response-poller のテスト (response-poller 完了判定テスト) も合わせて確認・更新する必要がある。",
+      "affected_files": [
+        "src/lib/polling/response-poller.ts"
+      ],
+      "recommendation": "パターン更新時に response-poller の完了判定テストも同時に確認する。特に copilot の hasPrompt 判定が新パターンで正しく動作するか検証する。"
+    },
+    {
+      "id": "IA3-006",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "COPILOT_THINKING_PATTERN の広範マッチリスク",
+      "description": "現在の placeholder パターン /[\\u2800-\\u28FF]|Thinking|Generating|Processing/ は汎用的すぎる。'Thinking', 'Generating', 'Processing' は他CLIツールの応答テキストにも含まれうる文字列だが、detectThinking() は cliToolId で分岐しているため他ツールの判定には影響しない。ただし response-cleaner.ts の cleanCopilotResponse() は COPILOT_SKIP_PATTERNS のみを使用しており COPILOT_THINKING_PATTERN は skip 対象に含まれていないため、応答テキスト中に 'Thinking' が含まれても cleanCopilotResponse では除去されない (これは正しい動作)。リスクは低い。",
+      "affected_files": [
+        "src/lib/detection/cli-patterns.ts",
+        "src/lib/response-cleaner.ts"
+      ],
+      "recommendation": "TUI調査完了後にパターンを特化し、汎用文字列によるマッチを最小化する。"
+    },
+    {
+      "id": "IA3-007",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "WorktreeDetailRefactored.tsx の isSelectionListActive は API レスポンスから自動取得済み",
+      "description": "WorktreeDetailRefactored.tsx (L412) で data.isSelectionListActive をそのまま state に設定している。current-output API が SELECTION_LIST_REASONS.has() を使うように変更されれば、フロントエンド側の変更は不要。ただし NavigationButtons の表示条件 (L1546, L1812) が isSelectionListActive のみに依存しているため、Copilot 選択リスト検出が正しく isSelectionListActive=true を返せば UI は自動対応する。フロントエンド変更不要であることの確認は取れた。",
+      "affected_files": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "recommendation": "追加対応不要。設計方針書の 'プレゼンテーション層（変更なし）' の記載は正確である。"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 3,
+    "total": 7
+  },
+  "reviewed_files": [
+    "src/lib/slash-commands.ts",
+    "src/lib/detection/status-detector.ts",
+    "src/lib/detection/cli-patterns.ts",
+    "src/lib/command-merger.ts",
+    "src/lib/response-cleaner.ts",
+    "src/lib/polling/response-poller.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/app/api/worktrees/[id]/slash-commands/route.ts",
+    "src/app/api/slash-commands/route.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/cli/types/api-responses.ts",
+    "src/cli/commands/wait.ts",
+    "src/types/slash-commands.ts",
+    "tests/unit/status-detector-selection.test.ts"
+  ],
+  "timestamp": "2026-03-27T00:00:00Z"
+}

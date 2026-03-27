@@ -258,6 +258,20 @@ export const COPILOT_THINKING_PATTERN = /[\u2800-\u28FF]|Thinking|Generating|Pro
 export const COPILOT_SEPARATOR_PATTERN = /^─{10,}$/m;
 
 /**
+ * Copilot CLI selection list pattern (Issue #547)
+ * Detects Copilot CLI's interactive selection prompts that require
+ * arrow key navigation (e.g., /model command's model picker).
+ *
+ * Matches footer instruction lines commonly shown in CLI selection UIs:
+ *   "Use arrows to move, type to filter"
+ *   "Use arrow keys to navigate"
+ *
+ * No /g flag (S4-5: would make test() stateful).
+ * No nested quantifiers (SEC4-001: ReDoS safety).
+ */
+export const COPILOT_SELECTION_LIST_PATTERN = /Use\s+arrow(?:s|\s+keys)\s+to\s+(?:move|navigate)/m;
+
+/**
  * Copilot skip patterns for response cleaning (Issue #545)
  * Placeholder patterns - to be refined after Phase 1 TUI investigation.
  */

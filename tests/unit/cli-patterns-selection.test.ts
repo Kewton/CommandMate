@@ -12,6 +12,7 @@ import {
   OPENCODE_PROMPT_PATTERN,
   OPENCODE_THINKING_PATTERN,
   OPENCODE_RESPONSE_COMPLETE,
+  COPILOT_SELECTION_LIST_PATTERN,
 } from '@/lib/detection/cli-patterns';
 
 describe('OPENCODE_SELECTION_LIST_PATTERN', () => {
@@ -71,5 +72,47 @@ describe('OPENCODE_SELECTION_LIST_PATTERN', () => {
   it('should not match text containing "Select" in normal conversation', () => {
     expect(OPENCODE_SELECTION_LIST_PATTERN.test('Please select a file to edit')).toBe(false);
     expect(OPENCODE_SELECTION_LIST_PATTERN.test('I selected the model')).toBe(false);
+  });
+});
+
+describe('COPILOT_SELECTION_LIST_PATTERN', () => {
+  it('should be a RegExp', () => {
+    expect(COPILOT_SELECTION_LIST_PATTERN).toBeInstanceOf(RegExp);
+  });
+
+  it('should match selection list indicators like "Use arrows to move"', () => {
+    expect(COPILOT_SELECTION_LIST_PATTERN.test('Use arrows to move, type to filter')).toBe(true);
+  });
+
+  it('should match "Use arrow keys" variant', () => {
+    expect(COPILOT_SELECTION_LIST_PATTERN.test('Use arrow keys to navigate')).toBe(true);
+  });
+
+  it('should match in multiline content', () => {
+    const multiline = `
+? Select a model
+  gpt-4o
+  gpt-4o-mini
+> claude-3.5-sonnet
+Use arrows to move, type to filter`;
+    expect(COPILOT_SELECTION_LIST_PATTERN.test(multiline)).toBe(true);
+  });
+
+  it('should not match regular text output', () => {
+    expect(COPILOT_SELECTION_LIST_PATTERN.test('Hello, how can I help you?')).toBe(false);
+    expect(COPILOT_SELECTION_LIST_PATTERN.test('The code looks correct.')).toBe(false);
+  });
+
+  it('should not match thinking pattern text', () => {
+    expect(COPILOT_SELECTION_LIST_PATTERN.test('Thinking about your question...')).toBe(false);
+  });
+
+  it('should not match Claude CLI output patterns', () => {
+    expect(COPILOT_SELECTION_LIST_PATTERN.test('> ')).toBe(false);
+    expect(COPILOT_SELECTION_LIST_PATTERN.test('esc to interrupt')).toBe(false);
+  });
+
+  it('should not use the global flag (no /g)', () => {
+    expect(COPILOT_SELECTION_LIST_PATTERN.global).toBe(false);
   });
 });
