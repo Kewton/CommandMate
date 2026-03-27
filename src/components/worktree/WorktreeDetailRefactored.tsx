@@ -1548,6 +1548,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               <NavigationButtons
                 worktreeId={worktreeId}
                 cliToolId={activeCliTab}
+                onKeysSent={fetchCurrentOutput}
               />
             </div>
           )}
@@ -1814,6 +1815,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               <NavigationButtons
                 worktreeId={worktreeId}
                 cliToolId={activeCliTab}
+                onKeysSent={fetchCurrentOutput}
               />
             </div>
           )}
