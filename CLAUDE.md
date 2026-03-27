@@ -251,7 +251,7 @@ tests/
 | `src/hooks/useFileSearch.ts` | 検索状態管理フック |
 | `src/hooks/useTerminalSearch.ts` | ターミナル内テキスト検索フック（Issue #47）debounce 300ms、最大500件、最小2文字 |
 | `src/hooks/useFragmentLogin.ts` | フラグメントベース自動ログイン |
-| `src/app/api/worktrees/[id]/terminal/route.ts` | ターミナルコマンド送信API |
+| `src/app/api/worktrees/[id]/terminal/route.ts` | ターミナルコマンド送信API（Copilot全コマンドをsendMessage()に委譲）（Issue #559） |
 | `src/app/api/worktrees/[id]/capture/route.ts` | ターミナル出力キャプチャAPI |
 | `src/app/api/worktrees/[id]/marp-render/route.ts` | MARPスライドレンダリングAPI |
 | `src/app/api/worktrees/[id]/git/log/route.ts` | Gitコミット履歴取得API（Issue #447） |

@@ -78,6 +78,13 @@ export async function POST(
       );
     }
 
+    // Issue #559: Delegate all Copilot commands to sendMessage()
+    // sendMessage() handles prompt waiting and cache invalidation internally
+    if (cliToolId === 'copilot') {
+      await cliTool.sendMessage(params.id, command);
+      return NextResponse.json({ success: true });
+    }
+
     // Send command to tmux session via sendKeys (non-blocking for all tools)
     await sendKeys(sessionName, command);
 
