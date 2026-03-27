@@ -24,7 +24,7 @@
  * coupling via a minimal DTO/projection type.
  */
 
-import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, CODEX_PROMPT_PATTERN } from './cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
 import type { PromptDetectionResult } from './prompt-detector';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -120,11 +120,25 @@ export const STATUS_REASON = {
   OPENCODE_PROCESSING_INDICATOR: 'opencode_processing_indicator',
   OPENCODE_SELECTION_LIST: 'opencode_selection_list',
   CLAUDE_SELECTION_LIST: 'claude_selection_list',
+  COPILOT_SELECTION_LIST: 'copilot_selection_list',
   OPENCODE_RESPONSE_COMPLETE: 'opencode_response_complete',
   INPUT_PROMPT: 'input_prompt',
   NO_RECENT_OUTPUT: 'no_recent_output',
   DEFAULT: 'default',
 } as const;
+
+/**
+ * Set of STATUS_REASON values that indicate a selection list is active.
+ * Used by current-output/route.ts to determine if NavigationButtons should be shown.
+ * Replaces OR-chain approach for extensibility (DR1-004).
+ *
+ * @see STATUS_REASON
+ */
+export const SELECTION_LIST_REASONS = new Set<string>([
+  STATUS_REASON.OPENCODE_SELECTION_LIST,
+  STATUS_REASON.CLAUDE_SELECTION_LIST,
+  STATUS_REASON.COPILOT_SELECTION_LIST,
+]);
 
 /**
  * Time threshold (in ms) for considering output as "stale"
@@ -205,6 +219,20 @@ export function detectSessionStatus(
       status: 'waiting',
       confidence: 'high',
       reason: STATUS_REASON.CLAUDE_SELECTION_LIST,
+      hasActivePrompt: false,
+      promptDetection,
+    };
+  }
+
+  // 1.6. Copilot CLI selection list detection (Issue #547)
+  // Copilot CLI shows selection prompts (e.g., /model) with arrow key navigation.
+  // Detect via footer instruction pattern. cliToolId guard prevents false positives
+  // on other CLI tools (DR2-004).
+  if (cliToolId === 'copilot' && COPILOT_SELECTION_LIST_PATTERN.test(lastLines)) {
+    return {
+      status: 'waiting',
+      confidence: 'high',
+      reason: STATUS_REASON.COPILOT_SELECTION_LIST,
       hasActivePrompt: false,
       promptDetection,
     };

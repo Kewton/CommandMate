@@ -1141,3 +1141,43 @@ describe('clearCache', () => {
     expect(getCachedCommands()).toBeNull();
   });
 });
+
+describe('getCopilotBuiltinCommands', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('should return an array of Copilot builtin commands', async () => {
+    const { getCopilotBuiltinCommands } = await import('@/lib/slash-commands');
+    const commands = getCopilotBuiltinCommands();
+    expect(Array.isArray(commands)).toBe(true);
+    expect(commands.length).toBeGreaterThan(0);
+  });
+
+  it('should include /model command with correct properties', async () => {
+    const { getCopilotBuiltinCommands } = await import('@/lib/slash-commands');
+    const commands = getCopilotBuiltinCommands();
+    const modelCmd = commands.find(c => c.name === 'model');
+    expect(modelCmd).toBeDefined();
+    expect(modelCmd!.category).toBe('standard-config');
+    expect(modelCmd!.cliTools).toEqual(['copilot']);
+    expect(modelCmd!.source).toBe('builtin');
+    expect(modelCmd!.filePath).toBe('');
+  });
+
+  it('should set cliTools to ["copilot"] for all commands', async () => {
+    const { getCopilotBuiltinCommands } = await import('@/lib/slash-commands');
+    const commands = getCopilotBuiltinCommands();
+    for (const cmd of commands) {
+      expect(cmd.cliTools).toEqual(['copilot']);
+    }
+  });
+
+  it('should set source to "builtin" for all commands', async () => {
+    const { getCopilotBuiltinCommands } = await import('@/lib/slash-commands');
+    const commands = getCopilotBuiltinCommands();
+    for (const cmd of commands) {
+      expect(cmd.source).toBe('builtin');
+    }
+  });
+});
