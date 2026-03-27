@@ -1,0 +1,73 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "findings": [
+    {
+      "id": "F3-001",
+      "severity": "must_fix",
+      "category": "影響範囲の漏れ",
+      "title": "special-keys/route.ts も同じ問題を抱える可能性がある",
+      "description": "terminal/route.ts と同様に、special-keys/route.ts もCopilotの状態を確認せずにキーを送信する。Copilotが応答中にUp/Down/Enterなどの特殊キーが送信された場合、意図しない動作になる可能性がある。特に、選択リスト表示中にEnterキーが送信されるケースは正常だが、非プロンプト状態でのキー送信は予期しない副作用を生む。Issueの影響範囲テーブルにspecial-keys/route.tsが含まれていない。",
+      "recommendation": "special-keys/route.tsがCopilotスラッシュコマンド問題と同じ影響を受けるかどうかを明示的に分析し、影響範囲に含めるか「影響なし」として記載する。特殊キーはテキスト入力ではないため影響は限定的だが、明示的な判断が必要。"
+    },
+    {
+      "id": "F3-002",
+      "severity": "should_fix",
+      "category": "アプローチ間の副作用",
+      "title": "アプローチA/Cでterminal/route.tsにCopilot固有ロジックを追加する場合のスラッシュコマンド判定方法が未定義",
+      "description": "terminal/route.tsでスラッシュコマンドを検出するには、commandパラメータが'/'で始まるかの判定が必要。しかしCopilotTool.extractSlashCommand()はprivateメソッドであり外部からアクセスできない。また、getCopilotBuiltinCommands()で定義されたコマンド一覧（40以上）とSELECTION_LIST_COMMANDS（3つ）の関係も考慮が必要。全スラッシュコマンドにプロンプト待機が必要であり、SELECTION_LIST_COMMANDSだけではない。",
+      "recommendation": "CopilotToolにスラッシュコマンド判定用のpublicメソッド（例: isSlashCommand(message)）を追加するか、アプローチCのようにCopilotTool.sendMessage()に委譲する設計を推奨。terminal/route.tsに独自のスラッシュコマンド判定ロジックを実装すると、copilot.ts内のextractSlashCommand/SELECTION_LIST_COMMANDSとの二重管理になる。"
+    },
+    {
+      "id": "F3-003",
+      "severity": "should_fix",
+      "category": "タイムアウト挙動の波及影響",
+      "title": "waitForPromptのタイムアウト挙動変更がsendMessage経路にも影響する",
+      "description": "Issueでは「waitForPromptのタイムアウト時の処理」を修正対象としている。現行のCopilotTool.waitForPrompt()（copilot.ts:182-198）はタイムアウト後にログ出力のみで処理を継続する（throwしない）。これをエラーthrowに変更した場合、既存のsendMessage経路（/api/worktrees/:id/send -> CopilotTool.sendMessage()）の挙動も変化する。受入条件に「既存のsendMessage経路に影響がないこと」とあるが、waitForPromptの挙動変更はその経路にも影響する矛盾がある。",
+      "recommendation": "以下のいずれかを明確にする: (1) waitForPromptの挙動は変更せず、terminal/route.ts側で独自のタイムアウト処理を実装する。(2) waitForPromptの挙動を変更する場合、sendMessage経路のテストも更新し、受入条件を「既存のsendMessage経路の動作が意図的に変更される場合はその変更が適切であること」に修正する。"
+    },
+    {
+      "id": "F3-004",
+      "severity": "should_fix",
+      "category": "テスト影響範囲",
+      "title": "既存テストファイルの更新範囲がIssueに未記載",
+      "description": "以下の既存テストファイルが影響を受ける可能性がある: (1) tests/unit/terminal-route.test.ts - terminal/route.tsの変更に伴い更新が必要。現行テストのisCliToolTypeモックに'copilot'が含まれていない（claude/codex/gemini/vibe-local/opencodeのみ）。(2) tests/unit/cli-tools/copilot.test.ts - waitForPromptの挙動変更時に更新が必要。受入条件には「単体テストが追加されていること」とあるが、既存テストの更新についても言及すべき。",
+      "recommendation": "影響範囲テーブルに以下を追加: tests/unit/terminal-route.test.ts（isCliToolTypeモックにcopilot追加、Copilotスラッシュコマンド検出テスト追加）、tests/unit/cli-tools/copilot.test.ts（waitForPromptタイムアウト挙動テスト追加）。"
+    },
+    {
+      "id": "F3-005",
+      "severity": "nice_to_have",
+      "category": "他CLIツールへの影響",
+      "title": "他CLIツール（Claude等）でも同じ問題パターンが存在する可能性",
+      "description": "terminal/route.tsはCLIツール種別を問わずsendKeysで直接送信する。Claudeの場合、session-key-sender.tsのsendMessageToSession()にwaitForPromptが実装されているが、terminal API経由ではバイパスされる。現在Claudeでは「スラッシュコマンドがテキストとして処理される」問題はUI設計上発生しにくい（Claudeのスラッシュコマンドは通常send API経由）が、理論的には同じ問題が存在する。",
+      "recommendation": "本Issueのスコープ外として認識しつつ、将来的にterminal/route.tsの汎用的なプロンプト待機メカニズム（CLIツール共通）を検討するフォローアップIssueの作成を推奨。"
+    },
+    {
+      "id": "F3-006",
+      "severity": "should_fix",
+      "category": "エッジケース",
+      "title": "スラッシュコマンドの前後に空白がある場合の判定",
+      "description": "CopilotTool.extractSlashCommand()はmessage.trim()してから'/'始まりを判定する。terminal/route.tsのcommandパラメータにも同様のtrimが必要だが、現行のterminal/route.tsにはtrim処理がない。ユーザーが' /model'（先頭スペース付き）で送信した場合、スラッシュコマンドとして検出されない可能性がある。",
+      "recommendation": "アプローチA/Cいずれの場合も、スラッシュコマンド判定時にtrim処理を適用することをIssueの実装詳細に明記する。"
+    },
+    {
+      "id": "F3-007",
+      "severity": "nice_to_have",
+      "category": "パフォーマンス影響",
+      "title": "terminal/route.tsにプロンプト待機を追加した場合のレスポンス遅延",
+      "description": "現行のterminal/route.tsは即座にsendKeysを実行して応答する（同期的に高速）。アプローチA/Cでプロンプト待機を追加すると、最大15秒のブロッキングが発生する。Terminal APIは元々低遅延が期待されるAPIであり、この遅延がフロントエンドのUX（タイムアウト設定、ローディング表示等）に影響する可能性がある。",
+      "recommendation": "Terminal APIのクライアント側（フロントエンド）のHTTPタイムアウト設定を確認し、15秒以上に設定されているか検証する。また、プロンプト待機中であることをAPIレスポンスで示す（例: { success: true, waited: true, waitDurationMs: 3500 }）ことを検討。"
+    },
+    {
+      "id": "F3-008",
+      "severity": "must_fix",
+      "category": "スラッシュコマンドの範囲定義",
+      "title": "プロンプト待機が必要なスラッシュコマンドの範囲が未定義",
+      "description": "Issueでは'/model'を例として挙げているが、getCopilotBuiltinCommands()に定義された約40個のスラッシュコマンド全てが同じ問題を持つ。/help、/version、/clear等もCopilotが応答中ならテキストとして処理される。プロンプト待機が必要なのはSELECTION_LIST_COMMANDS（model/agent/theme）だけではなく、全てのスラッシュコマンドに必要。Issueの修正方針テーブルではこの点が暗黙的だが、明示されていない。",
+      "recommendation": "「全てのCopilotスラッシュコマンド（/で始まるコマンド）についてプロンプト待機が必要」であることをIssueに明記する。SELECTION_LIST_COMMANDSは追加の待機処理（選択リスト表示待ち）が必要なサブセットとして区別する。"
+    }
+  ],
+  "summary": "影響範囲レビューの結果、Issueの影響範囲分析は概ね正確だが、以下の8件の指摘を特定した。must_fix 2件: (1) special-keys/route.tsの影響分析の欠如、(2) プロンプト待機が必要なスラッシュコマンドの範囲が全コマンドであることの未定義。should_fix 4件: スラッシュコマンド判定ロジックの設計方針、waitForPromptタイムアウト変更のsendMessage経路への波及、テスト更新範囲の未記載、エッジケース（先頭空白付きコマンド）。nice_to_have 2件: 他CLIツールでの同様問題、レスポンス遅延のUX影響。特に重要なのは、Issueの修正方針でアプローチ間のトレードオフは適切に分析されているが、実装時に「全スラッシュコマンドにプロンプト待機が必要」という前提が明示されていない点と、waitForPromptの挙動変更がsendMessage経路に波及する点の整理が不十分な点である。"
+}

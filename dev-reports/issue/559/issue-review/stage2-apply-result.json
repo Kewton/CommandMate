@@ -1,0 +1,66 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "iteration": 1,
+  "issue_number": 559,
+  "apply_date": "2026-03-27",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "F1-001",
+        "status": "applied",
+        "change_summary": "根本原因セクションにsendMessage経路では既にwaitForPrompt()が実装済みであること、問題がTerminal API経由の場合のみ発生することを明記"
+      },
+      {
+        "id": "F1-002",
+        "status": "applied",
+        "change_summary": "再現手順を具体化し、対象経路がTerminal API経由であることを明示。補足として通常UI操作では問題が発生しないことを記載"
+      },
+      {
+        "id": "F1-003",
+        "status": "applied",
+        "change_summary": "受入条件セクションを新規追加。プロンプト待機、テキスト処理防止、タイムアウト挙動、既存経路への影響なし、単体テスト、CLAUDE.md更新の6項目をチェックリスト形式で記載"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "F1-004",
+        "status": "applied",
+        "change_summary": "修正方針セクションを新規追加。3つの候補アプローチ（terminal/route.tsでの待機追加、送信経路統一、CopilotToolへの委譲）をテーブル形式で列挙し、設計判断のポイントを記載"
+      },
+      {
+        "id": "F1-005",
+        "status": "applied",
+        "change_summary": "影響範囲セクションを新規追加。変更対象ファイル（terminal/route.ts、copilot.ts、cli-patterns.ts）と影響なし確認済み経路（CLI経路、他CLIツール）をテーブル形式で記載"
+      },
+      {
+        "id": "F1-006",
+        "status": "applied",
+        "change_summary": "waitForPromptタイムアウト時の期待動作セクションを新規追加。タイムアウト後の送信中止/続行、通知方法、既存挙動変更の要否を明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F1-007",
+        "status": "applied",
+        "change_summary": "受入条件にCLAUDE.mdのモジュール説明更新の項目を追加"
+      },
+      {
+        "id": "F1-008",
+        "status": "applied",
+        "change_summary": "関連Issueセクションに#558を追加"
+      }
+    ]
+  },
+  "skipped_findings": [],
+  "summary": {
+    "total_findings": 8,
+    "applied": 8,
+    "skipped": 0
+  },
+  "issue_updated": true,
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/559"
+  }
+}

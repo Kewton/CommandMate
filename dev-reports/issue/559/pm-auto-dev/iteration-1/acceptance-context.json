@@ -1,0 +1,19 @@
+{
+  "issue_number": 559,
+  "feature_summary": "Copilot CLIスラッシュコマンドがTerminal API経由でテキストとして処理される問題を修正",
+  "acceptance_criteria": [
+    "Terminal API経由でCopilotセッションに対してコマンドを送信した場合にcliTool.sendMessage()に委譲されること",
+    "Copilotが応答中に/modelを送信しても、テキストとして処理されないこと",
+    "既存のsendMessage経路の動作が変更されないこと",
+    "他CLIツール（claude, codex等）の動作に影響がないこと",
+    "単体テストが追加されていること",
+    "CLAUDE.mdのモジュール説明が更新されていること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: Copilotスラッシュコマンド('/model')がterminal API経由で送信された場合、sendMessage()に委譲される",
+    "シナリオ2: Copilot通常テキスト('hello')がterminal API経由で送信された場合も、sendMessage()に委譲される",
+    "シナリオ3: Claude等他ツールのコマンドは従来通りsendKeys()で処理される",
+    "シナリオ4: Copilot委譲パスでsendMessage()がエラーを投げた場合、500エラーが返される",
+    "シナリオ5: 既存テスト（5423件）が全てパスすること"
+  ]
+}

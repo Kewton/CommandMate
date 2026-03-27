@@ -1,0 +1,58 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "iteration": 1,
+  "applied_findings": [
+    {
+      "id": "F3-001",
+      "severity": "must_fix",
+      "title": "special-keys/route.ts も同じ問題を抱える可能性がある",
+      "action": "影響範囲テーブルに「special-keys/route.tsの影響分析」セクションを追加。特殊キーはテキスト入力ではないため本Issueのスコープ外（影響なし）と明記。"
+    },
+    {
+      "id": "F3-008",
+      "severity": "must_fix",
+      "title": "プロンプト待機が必要なスラッシュコマンドの範囲が未定義",
+      "action": "「プロンプト待機が必要なスラッシュコマンドの範囲」セクションを新設。全スラッシュコマンドにプロンプト待機が必要であること、SELECTION_LIST_COMMANDSは追加待機が必要なサブセットであることを明記。受入条件も「全ての/始まりコマンド」に更新。"
+    },
+    {
+      "id": "F3-002",
+      "severity": "should_fix",
+      "title": "スラッシュコマンド判定方法が未定義",
+      "action": "「スラッシュコマンド判定ロジックの設計方針」サブセクションを修正方針に追加。extractSlashCommandがprivateであること、二重管理のリスク、publicメソッド追加の推奨を明記。"
+    },
+    {
+      "id": "F3-003",
+      "severity": "should_fix",
+      "title": "waitForPromptのタイムアウト挙動変更がsendMessage経路にも影響する",
+      "action": "「waitForPrompt挙動変更時のsendMessage経路への波及」サブセクションを追加。2つの方針選択肢を明記。受入条件を「意図せず変更されないこと（挙動変更時はその変更が適切であること）」に修正。"
+    },
+    {
+      "id": "F3-004",
+      "severity": "should_fix",
+      "title": "既存テストファイルの更新範囲がIssueに未記載",
+      "action": "影響範囲テーブルにtests/unit/terminal-route.test.tsとtests/unit/cli-tools/copilot.test.tsを追加。受入条件に「新規テスト + 既存テストの更新」を明記。"
+    },
+    {
+      "id": "F3-006",
+      "severity": "should_fix",
+      "title": "スラッシュコマンドの前後に空白がある場合の判定",
+      "action": "スラッシュコマンド判定ロジックの設計方針セクションにtrim処理の必要性を明記。受入条件に「先頭空白付きスラッシュコマンドも正しく判定されること」を追加。"
+    },
+    {
+      "id": "F3-005",
+      "severity": "nice_to_have",
+      "title": "他CLIツールへの影響",
+      "action": "「フォローアップ候補」セクションを新設し、terminal/route.tsの汎用プロンプト待機メカニズム検討を記載。"
+    },
+    {
+      "id": "F3-007",
+      "severity": "nice_to_have",
+      "title": "terminal/route.tsにプロンプト待機追加時のレスポンス遅延",
+      "action": "「パフォーマンス考慮事項」セクションを新設。HTTPタイムアウト確認とAPIレスポンスでの待機情報返却を検討事項として記載。"
+    }
+  ],
+  "skipped_findings": [],
+  "issue_updated": true,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/559"
+}
