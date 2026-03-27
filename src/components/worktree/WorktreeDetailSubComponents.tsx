@@ -927,7 +927,7 @@ export const MobileContent = memo(function MobileContent({
     case 'files':
       return (
         <ErrorBoundary componentName="FileTreeView">
-          <div className="h-full flex flex-col">
+          <div className="h-full flex flex-col overflow-hidden">
             {/* [Issue #21] Search Bar - Mobile */}
             <SearchBar
               query={fileSearch.query}
