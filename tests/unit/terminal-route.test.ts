@@ -147,59 +147,38 @@ describe('POST /api/worktrees/[id]/terminal', () => {
     expect(json.error).not.toContain('internal tmux failure');
   });
 
-  // Issue #559: Copilot delegation tests
-  describe('Copilot delegation', () => {
-    it('should delegate slash commands to sendMessage for copilot', async () => {
+  // Issue #559: Copilot uses sendKeys directly (not sendMessage) to avoid waitForPrompt blocking
+  describe('Copilot sendKeys', () => {
+    it('should use sendKeys for copilot slash commands', async () => {
       const req = createRequest({ cliToolId: 'copilot', command: '/model' });
       const res = await POST(req, defaultParams);
       const json = await res.json();
 
       expect(res.status).toBe(200);
       expect(json.success).toBe(true);
-      expect(mockSendMessage).toHaveBeenCalledWith('wt-1', '/model');
-      expect(sendKeys).not.toHaveBeenCalled();
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-copilot-wt-1', '/model');
+      expect(mockSendMessage).not.toHaveBeenCalled();
     });
 
-    it('should delegate regular text to sendMessage for copilot', async () => {
+    it('should use sendKeys for copilot regular text', async () => {
       const req = createRequest({ cliToolId: 'copilot', command: 'hello world' });
       const res = await POST(req, defaultParams);
       const json = await res.json();
 
       expect(res.status).toBe(200);
       expect(json.success).toBe(true);
-      expect(mockSendMessage).toHaveBeenCalledWith('wt-1', 'hello world');
-      expect(sendKeys).not.toHaveBeenCalled();
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-copilot-wt-1', 'hello world');
+      expect(mockSendMessage).not.toHaveBeenCalled();
     });
 
-    it('should NOT delegate to sendMessage for non-copilot tools', async () => {
+    it('should use sendKeys for non-copilot tools too', async () => {
       const req = createRequest({ cliToolId: 'claude', command: '/model' });
       const res = await POST(req, defaultParams);
       const json = await res.json();
 
       expect(res.status).toBe(200);
       expect(json.success).toBe(true);
-      expect(mockSendMessage).not.toHaveBeenCalled();
       expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-wt-1', '/model');
-    });
-
-    it('should return 500 when copilot sendMessage throws', async () => {
-      mockSendMessage.mockRejectedValue(new Error('copilot sendMessage failure'));
-      const req = createRequest({ cliToolId: 'copilot', command: '/model' });
-      const res = await POST(req, defaultParams);
-      const json = await res.json();
-
-      expect(res.status).toBe(500);
-      expect(json.error).toBe('Failed to send command to terminal');
-      expect(json.error).not.toContain('copilot sendMessage failure');
-    });
-
-    it('should not call invalidateCache in copilot delegation path', async () => {
-      const req = createRequest({ cliToolId: 'copilot', command: '/model' });
-      await POST(req, defaultParams);
-
-      // sendMessage handles cache invalidation internally
-      // sendKeys should not be called, so invalidateCache for the sendKeys path is skipped
-      expect(sendKeys).not.toHaveBeenCalled();
     });
   });
 });

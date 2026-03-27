@@ -22,6 +22,8 @@ import { startPolling } from '@/lib/polling/response-poller';
 import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
 import { getGitStatus } from '@/lib/git/git-utils';
 import { isPathSafe, resolveAndValidateRealPath } from '@/lib/security/path-validator';
+import { sendKeys } from '@/lib/tmux/tmux';
+import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 import path from 'path';
 import { createLogger } from '@/lib/logger';
 
@@ -249,6 +251,11 @@ export async function POST(
             : `[添付画像: ${absoluteImagePath}]`;
           await cliTool.sendMessage(params.id, messageWithPath);
         }
+      } else if (cliToolId === 'copilot') {
+        // Copilot: use sendKeys directly to avoid waitForPrompt blocking (#559)
+        const sessionName = cliTool.getSessionName(params.id);
+        await sendKeys(sessionName, trimmedContent);
+        invalidateCache(sessionName);
       } else {
         await cliTool.sendMessage(params.id, trimmedContent);
       }
