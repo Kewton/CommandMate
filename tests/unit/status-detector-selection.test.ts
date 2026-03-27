@@ -175,11 +175,11 @@ describe('SELECTION_LIST_REASONS Set', () => {
 describe('detectSessionStatus - Copilot selection_list detection', () => {
   it('should detect Copilot selection list and return waiting status', () => {
     const output = [
-      '? Select a model',
-      '  gpt-4o',
+      'Select Model',
+      'Search models...',
+      '❯ gpt-4o',
       '  gpt-4o-mini',
-      '> claude-3.5-sonnet',
-      'Use arrows to move, type to filter',
+      '  claude-3.5-sonnet',
     ].join('\n');
 
     const result = detectSessionStatus(output, 'copilot');
@@ -193,9 +193,9 @@ describe('detectSessionStatus - Copilot selection_list detection', () => {
     // Even if the output contains Copilot selection list text,
     // with cliToolId='claude', it should NOT trigger copilot_selection_list
     const output = [
-      '? Select a model',
-      '  gpt-4o',
-      'Use arrows to move, type to filter',
+      'Select Model',
+      'Search models...',
+      '❯ gpt-4o',
     ].join('\n');
 
     const result = detectSessionStatus(output, 'claude');

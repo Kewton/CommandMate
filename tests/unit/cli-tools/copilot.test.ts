@@ -169,4 +169,26 @@ describe('CopilotTool', () => {
       expect(tool.command).toBe('gh');
     });
   });
+
+  describe('extractSlashCommand (via sendMessage behavior)', () => {
+    it('should recognize /model as a selection list command', () => {
+      // Access private method via any cast for testing
+      const extract = (tool as unknown as { extractSlashCommand(m: string): string | null }).extractSlashCommand;
+      expect(extract.call(tool, '/model')).toBe('model');
+      expect(extract.call(tool, '/agent')).toBe('agent');
+      expect(extract.call(tool, '/theme')).toBe('theme');
+    });
+
+    it('should return null for non-slash messages', () => {
+      const extract = (tool as unknown as { extractSlashCommand(m: string): string | null }).extractSlashCommand;
+      expect(extract.call(tool, 'hello world')).toBeNull();
+      expect(extract.call(tool, '')).toBeNull();
+    });
+
+    it('should extract command name from slash command with args', () => {
+      const extract = (tool as unknown as { extractSlashCommand(m: string): string | null }).extractSlashCommand;
+      expect(extract.call(tool, '/help commands')).toBe('help');
+      expect(extract.call(tool, '/compact  ')).toBe('compact');
+    });
+  });
 });
