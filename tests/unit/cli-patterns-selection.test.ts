@@ -88,13 +88,31 @@ describe('COPILOT_SELECTION_LIST_PATTERN', () => {
     expect(COPILOT_SELECTION_LIST_PATTERN.test('Use arrow keys to navigate')).toBe(true);
   });
 
-  it('should match in multiline content', () => {
+  it('should match "Enter to select" inquirer footer (Claude-compatible)', () => {
+    expect(COPILOT_SELECTION_LIST_PATTERN.test('Enter to select · Tab/Arrow keys to navigate · Esc to cancel')).toBe(true);
+  });
+
+  it('should match "Enter to select" with up/down variant', () => {
+    expect(COPILOT_SELECTION_LIST_PATTERN.test('Enter to select · ↑/↓ to navigate · Esc to cancel')).toBe(true);
+  });
+
+  it('should match in multiline content with inquirer style', () => {
     const multiline = `
 ? Select a model
   gpt-4o
   gpt-4o-mini
 > claude-3.5-sonnet
 Use arrows to move, type to filter`;
+    expect(COPILOT_SELECTION_LIST_PATTERN.test(multiline)).toBe(true);
+  });
+
+  it('should match in multiline content with Enter to select style', () => {
+    const multiline = `
+? Select a model
+  gpt-4o
+❯ gpt-4o-mini
+  claude-3.5-sonnet
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel`;
     expect(COPILOT_SELECTION_LIST_PATTERN.test(multiline)).toBe(true);
   });
 
@@ -107,7 +125,7 @@ Use arrows to move, type to filter`;
     expect(COPILOT_SELECTION_LIST_PATTERN.test('Thinking about your question...')).toBe(false);
   });
 
-  it('should not match Claude CLI output patterns', () => {
+  it('should not match non-selection CLI output patterns', () => {
     expect(COPILOT_SELECTION_LIST_PATTERN.test('> ')).toBe(false);
     expect(COPILOT_SELECTION_LIST_PATTERN.test('esc to interrupt')).toBe(false);
   });
