@@ -226,10 +226,12 @@ export function detectSessionStatus(
 
   // 1.6. Copilot CLI selection list detection (Issue #547)
   // Copilot CLI shows selection prompts (e.g., /model) with arrow key navigation.
-  // Uses cleanOutput instead of lastLines because model selection lists can exceed
-  // 15 lines, pushing "Select Model" / "Search models..." outside the lastLines window.
+  // Uses last 30 lines (not 15) because model selection lists can exceed 15 lines,
+  // but not full cleanOutput to avoid false positives from scrollback buffer
+  // (selection list text persists in tmux history after list is closed).
   // cliToolId guard prevents false positives on other CLI tools (DR2-004).
-  if (cliToolId === 'copilot' && COPILOT_SELECTION_LIST_PATTERN.test(cleanOutput)) {
+  const copilotSelectionWindow = contentLines.slice(-30).join('\n');
+  if (cliToolId === 'copilot' && COPILOT_SELECTION_LIST_PATTERN.test(copilotSelectionWindow)) {
     return {
       status: 'waiting',
       confidence: 'high',

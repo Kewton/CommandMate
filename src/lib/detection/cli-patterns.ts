@@ -240,10 +240,12 @@ export const OPENCODE_SKIP_PATTERNS: readonly RegExp[] = [
 
 /**
  * Copilot prompt pattern (Issue #545)
- * Placeholder - to be updated after Phase 1 TUI investigation.
- * GitHub Copilot CLI may show various prompt formats.
+ * Copilot CLI shows "❯" followed by cursor/text hint:
+ *   - "❯ [7m [0mType @ to mention files, # for issues/PRs, / for commands, or ? for"
+ *   - "❯ " (bare prompt)
+ * Also matches "? " prefix for question prompts.
  */
-export const COPILOT_PROMPT_PATTERN = /^[>❯]\s*$|^\?\s+/m;
+export const COPILOT_PROMPT_PATTERN = /^[>❯]\s|^\?\s+/m;
 
 /**
  * Copilot thinking/processing pattern (Issue #545)
