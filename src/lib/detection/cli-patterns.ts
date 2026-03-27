@@ -267,6 +267,7 @@ export const COPILOT_SEPARATOR_PATTERN = /^─{10,}$/m;
  *   - "Search models..." or "Search ..." prompt
  *   - "Select Model" header with item list
  *
+ * Both branches are anchored or bounded to prevent ReDoS.
  * No /g flag (S4-5: would make test() stateful).
  * No nested quantifiers (SEC4-001: ReDoS safety).
  */

@@ -20,7 +20,7 @@ import {
 } from '../tmux/tmux';
 import { detectAndResendIfPastedText } from '../pasted-text-helper';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
-import { COPILOT_PROMPT_PATTERN, stripAnsi } from '../detection/cli-patterns';
+import { COPILOT_PROMPT_PATTERN, COPILOT_SELECTION_LIST_PATTERN, stripAnsi } from '../detection/cli-patterns';
 import { getErrorMessage } from '@/lib/errors';
 import { createLogger } from '@/lib/logger';
 
@@ -37,6 +37,14 @@ const COPILOT_INIT_MAX_ATTEMPTS = 30;
 
 /** Timeout for waiting for prompt before sending a message */
 const COPILOT_PROMPT_WAIT_TIMEOUT_MS = 15000;
+
+/**
+ * Copilot CLI slash commands that trigger a selection list UI.
+ * These commands open an interactive picker after execution.
+ * When sending these, we must wait for the selection list to appear
+ * before allowing further input, to prevent text leaking into the search field.
+ */
+const SELECTION_LIST_COMMANDS = new Set(['model', 'agent', 'theme']);
 
 /**
  * Copilot CLI tool implementation
@@ -190,6 +198,41 @@ export class CopilotTool extends BaseCLITool {
   }
 
   /**
+   * Extract slash command name from a message (e.g., "/model" → "model").
+   * Returns null if the message is not a slash command.
+   */
+  private extractSlashCommand(message: string): string | null {
+    const trimmed = message.trim();
+    if (!trimmed.startsWith('/')) return null;
+    const match = trimmed.match(/^\/(\S+)/);
+    return match ? match[1] : null;
+  }
+
+  /**
+   * Wait for the selection list to appear after sending a selection list command.
+   * Polls the terminal output for COPILOT_SELECTION_LIST_PATTERN.
+   */
+  private async waitForSelectionList(sessionName: string): Promise<void> {
+    const maxWaitMs = 5000;
+    const pollInterval = 300;
+    const startTime = Date.now();
+    while (Date.now() - startTime < maxWaitMs) {
+      await new Promise((resolve) => setTimeout(resolve, pollInterval));
+      try {
+        const rawOutput = await capturePane(sessionName, 50);
+        const output = stripAnsi(rawOutput);
+        if (COPILOT_SELECTION_LIST_PATTERN.test(output)) {
+          logger.info('copilot-selection-list-detected');
+          return;
+        }
+      } catch {
+        // Capture may fail - continue polling
+      }
+    }
+    logger.info('copilot-selection-list-not-detected-timeout');
+  }
+
+  /**
    * Send a message to Copilot interactive session
    *
    * @param worktreeId - Worktree ID
@@ -209,6 +252,18 @@ export class CopilotTool extends BaseCLITool {
     try {
       // Verify Copilot is at prompt state before sending
       await this.waitForPrompt(sessionName);
+
+      // Check if this is a slash command that triggers a selection list
+      const slashCmd = this.extractSlashCommand(message);
+      if (slashCmd && SELECTION_LIST_COMMANDS.has(slashCmd)) {
+        // For selection list commands: send text + Enter, then wait for
+        // the selection list to appear. Do NOT send additional input after.
+        await sendKeys(sessionName, message, true);
+        await this.waitForSelectionList(sessionName);
+        invalidateCache(sessionName);
+        logger.info('sent-selection-list-command-to-copilot', { command: slashCmd });
+        return;
+      }
 
       // Send message to Copilot (without Enter)
       await sendKeys(sessionName, message, false);
