@@ -1,0 +1,72 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "category": "SRP (Single Responsibility Principle)",
+      "title": "terminal/route.ts にCopilot固有の分岐ロジックが追加される",
+      "description": "設計方針書のアプローチCでは、terminal/route.ts にCopilot固有の判定・委譲ロジック（cliToolId === 'copilot' && isSlashCommand）が直接記述される。これはterminal/route.tsの責務を「全ツール共通のsendKeys中継」から「Copilot固有のスラッシュコマンド判定を含むルーティング」に拡張しており、SRP違反のリスクがある。将来、他ツール（例: OpenCodeやGemini）にも同様の特殊処理が必要になった場合、route.tsに条件分岐が増殖する。",
+      "recommendation": "ICLIToolインターフェースに handleTerminalCommand(worktreeId: string, command: string): Promise<{handled: boolean}> のようなメソッドを追加し、各ツールが自身のターミナルコマンドを処理するか否かを判断する設計を検討する。ただし、現時点でCopilotのみの特殊処理であるため、設計方針書にこのトレードオフを明記し、2つ目のツール固有分岐が必要になった時点でリファクタリングする方針を記載すれば、現状のアプローチCでも許容可能。"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "nice_to_have",
+      "category": "OCP (Open/Closed Principle)",
+      "title": "ツール固有処理の拡張にterminal/route.tsの修正が必要",
+      "description": "アプローチCでは、新たなツールにスラッシュコマンド特殊処理が必要になった場合、terminal/route.tsを直接修正する必要がある。OCPの観点では、拡張に対してオープンで修正に対してクローズドであることが望ましい。ただし、現実的にはCopilot以外にこの特殊処理が必要なツールは存在せず、YAGNIの観点から過度な抽象化は不要。",
+      "recommendation": "設計方針書のセクション8「設計上の決定事項とトレードオフ」に、OCP違反のリスクを明示的に記載し、将来の拡張時にリファクタリングする旨を追記する。現時点では追加の抽象化は不要。"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "should_fix",
+      "category": "DRY (Don't Repeat Yourself)",
+      "title": "isSlashCommand()はextractSlashCommand()の単純ラッパーだが、スラッシュコマンド判定ロジックの二重定義リスクがある",
+      "description": "設計方針書ではisSlashCommand()をpublicメソッドとして新規追加し、extractSlashCommand()はprivateのまま維持する方針。isSlashCommand()の実装は extractSlashCommand(message) !== null の単純ラッパーであり、DRY原則自体は守られている。しかし、terminal/route.tsの委譲パスでは isSlashCommand() で判定した後に sendMessage() 内で再度 extractSlashCommand() が呼ばれるため、同じ文字列に対して2回パース処理が走る。パフォーマンス上は無視できるが、ロジックの冗長性がある。",
+      "recommendation": "sendMessage()が既にスラッシュコマンド判定を内包しているため、isSlashCommand()による事前判定は本質的に不要であることを設計方針書に明記する。terminal/route.tsではCopilot + '/'始まりの簡易判定（command.trim().startsWith('/')）で委譲するか、あるいはsendMessage()自体が通常メッセージとスラッシュコマンドの両方を正しく処理できるのだから、Copilotの場合は常にsendMessage()に委譲する方針も検討に値する。"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "must_fix",
+      "category": "KISS (Keep It Simple, Stupid)",
+      "title": "Copilotの通常メッセージもsendMessage()経由で送信可能なのに、terminal/route.tsで分岐する必要性の根拠が不十分",
+      "description": "設計方針書では、スラッシュコマンドの場合のみsendMessage()に委譲し、通常テキストは従来通りsendKeys()で送信する設計になっている。しかし、CopilotTool.sendMessage()は通常メッセージも正しく処理できる（waitForPrompt + sendKeys + detectAndResendIfPastedText）。通常メッセージをsendKeys()で直接送る場合、waitForPrompt()が行われないため、Copilotがプロンプト状態でないときにテキストが失われるリスクがある。スラッシュコマンドだけでなく通常メッセージにも同じ問題が潜在的に存在するのではないか。この分岐が本当に必要なのか、設計方針書で根拠が示されていない。",
+      "recommendation": "設計方針書に以下を明記する：(1) terminal/route.tsからの通常テキスト送信でもCopilotがプロンプト状態でない場合の挙動と、なぜそれが許容されるのかの根拠。(2) もし通常テキストでも同じ問題がある場合は、Copilotの場合は全てのコマンドをsendMessage()に委譲する設計に変更する。これにより分岐ロジックが単純化され（cliToolId === 'copilot'のみで委譲）、KISSにも適合する。"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "nice_to_have",
+      "category": "LSP (Liskov Substitution Principle)",
+      "title": "CopilotToolにisSlashCommand()を追加するとICLIToolとの互換性が非対称になる",
+      "description": "isSlashCommand()はCopilotTool固有のpublicメソッドであり、ICLIToolインターフェースには存在しない。terminal/route.tsではCopilotToolへの型キャスト（as CopilotTool）が必要になる。これはLSPの観点では、ICLITool型のインスタンスとして扱えない特殊処理の存在を意味する。ただし、設計方針書でも認識されており、実際のリスクは低い。",
+      "recommendation": "現状のアプローチで問題ないが、型キャストの箇所にはコメントで理由を明記し、将来ICLIToolインターフェースの拡張が必要になった場合の移行パスを設計方針書に記載する。"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "should_fix",
+      "category": "YAGNI (You Aren't Gonna Need It)",
+      "title": "isSlashCommand()メソッドの追加は本当に必要か",
+      "description": "設計方針書ではextractSlashCommand()をprivateのまま維持し、isSlashCommand()を新規publicメソッドとして追加する方針。しかし、DR1-004で指摘した通り、Copilotの場合は全コマンドをsendMessage()に委譲する設計にすれば、isSlashCommand()自体が不要になる可能性がある。また、isSlashCommand()が必要だとしても、判定ロジックは command.trim().startsWith('/') と同等であり、わざわざメソッドを追加する意義が薄い。",
+      "recommendation": "DR1-004の検討結果に応じて、isSlashCommand()の追加が本当に必要かを再評価する。Copilot全コマンドをsendMessage()に委譲する方針の場合、このメソッドは不要。スラッシュコマンドのみ委譲する方針を維持する場合でも、route.ts内でのインライン判定（command.trim().startsWith('/')）で十分であり、CopilotToolにメソッドを追加する必要性は低い。"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "nice_to_have",
+      "category": "設計パターン",
+      "title": "委譲パターンの選択は適切だが、代替案の評価が一部不足",
+      "description": "設計方針書はアプローチA/B/Cの3案を比較検討しており、アプローチC（委譲パターン）の選定理由は論理的に妥当。ただし、アプローチD（ICLIToolインターフェースにhandleTerminalCommand()を追加するStrategy的アプローチ）が検討されていない。また、アプローチCの変形として「Copilotの場合は全コマンドをsendMessage()に委譲する」案も検討されていない。",
+      "recommendation": "設計方針書のセクション2にアプローチDの簡易評価を追加し、現時点ではYAGNIの観点から不採用とした旨を記載する。また、アプローチCの変形（全コマンド委譲）も評価に含める。"
+    },
+    {
+      "id": "DR1-008",
+      "severity": "should_fix",
+      "category": "エラーハンドリング",
+      "title": "委譲パスでのinvalidateCache二重呼び出し防止の記述が不正確",
+      "description": "設計方針書のセクション3-2で「invalidateCache()は既存のL85で実行されるが、委譲パスではsendMessage()内でも呼ばれるため、早期returnで二重呼び出しを回避」と記述されている。実装コードを見ると、sendMessage()内のslashコマンドパス（L263）でinvalidateCache()が呼ばれ、通常メッセージパス（L286）でも呼ばれる。設計方針書のコード例では委譲パスでもinvalidateCache(sessionName)を呼んでおり、sendMessage()内のinvalidateCacheとは異なるsessionName解決方法を使用する可能性がある（sendMessage内はgetSessionName(worktreeId)、route.ts側はcliTool.getSessionName(params.id)）。",
+      "recommendation": "設計方針書のコード例から委譲パス内のinvalidateCache(sessionName)呼び出しを削除する。sendMessage()内で既にinvalidateCacheが呼ばれるため、route.ts側での追加呼び出しは不要であり、かえってキャッシュの整合性リスクを生む。または、sendMessage()が確実にinvalidateCacheを呼ぶことを前提条件として明記する。"
+    }
+  ],
+  "summary": "設計方針書全体としては、問題の分析・アプローチ比較・影響範囲の特定が丁寧に行われており、品質は高い。最も重要な指摘は DR1-004（must_fix）で、terminal/route.tsでスラッシュコマンドのみを委譲する設計の根拠が不十分である点。Copilotの通常メッセージもsendMessage()経由で送信可能であり、スラッシュコマンドだけでなく通常テキストでもwaitForPromptが必要な可能性がある。この点を検討した上で、全コマンド委譲に変更すれば、isSlashCommand()メソッドの追加も不要になり、設計が大幅に単純化される。should_fixレベルの指摘として、SRP違反リスク（DR1-001）、DRYの冗長性（DR1-003）、YAGNIの観点からのisSlashCommand()の必要性（DR1-006）、invalidateCache二重呼び出しの記述不正確さ（DR1-008）がある。nice_to_haveレベルではOCP・LSP・代替案評価の補足を推奨する。"
+}

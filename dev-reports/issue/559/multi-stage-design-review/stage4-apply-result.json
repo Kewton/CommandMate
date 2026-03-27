@@ -1,0 +1,62 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー - 指摘事項対応",
+  "applied_findings": [
+    {
+      "id": "SEC4-005",
+      "severity": "should_fix",
+      "title": "waitForPromptのブロッキングによるDoSリスク",
+      "action": "セクション7-4を新設し、DoSリスクの詳細・緩和要因・将来課題（排他制御のバックログ化）を明記"
+    },
+    {
+      "id": "SEC4-006",
+      "severity": "should_fix",
+      "title": "hasSession二重チェック間のTOCTOUリスク",
+      "action": "セクション7-5を新設し、IA3-004との関連含めセキュリティ観点での評価を記載。現時点対応不要と判断"
+    },
+    {
+      "id": "SEC4-001",
+      "severity": "nice_to_have",
+      "title": "sendMessage()経由のコマンドインジェクションリスクは低い",
+      "action": "セクション7-1に確認結果を記載"
+    },
+    {
+      "id": "SEC4-002",
+      "severity": "nice_to_have",
+      "title": "委譲パスでMAX_COMMAND_LENGTH検証が適用される",
+      "action": "セクション7-1に確認結果を記載"
+    },
+    {
+      "id": "SEC4-003",
+      "severity": "nice_to_have",
+      "title": "委譲パスの認証はミドルウェアで担保されている",
+      "action": "セクション7-2に確認結果を記載"
+    },
+    {
+      "id": "SEC4-004",
+      "severity": "nice_to_have",
+      "title": "エラーメッセージにセッション名が含まれる可能性",
+      "action": "セクション7-3に確認結果を記載"
+    },
+    {
+      "id": "SEC4-007",
+      "severity": "nice_to_have",
+      "title": "委譲パスで既存セキュリティチェックはバイパスされない",
+      "action": "セクション7-2に確認結果を記載"
+    },
+    {
+      "id": "SEC4-008",
+      "severity": "nice_to_have",
+      "title": "copilot.tsのログ出力にユーザー入力が部分的に含まれる",
+      "action": "セクション7-6に確認結果を記載"
+    }
+  ],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "changes_summary": {
+    "section_7": "セキュリティ考慮事項をサブセクション7-1〜7-6に拡充。コマンドインジェクション対策、認証・認可、情報露出対策、DoSリスク、レースコンディション、ログインジェクションの各観点を網羅的に記載",
+    "section_9": "Stage 4セキュリティレビュー指摘事項一覧（8件: should_fix 2件、nice_to_have 6件）を追加",
+    "section_10": "セキュリティ関連の確認項目2件を実装チェックリストに追加",
+    "update_date": "更新日をStage 4反映に更新"
+  }
+}

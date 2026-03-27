@@ -1,0 +1,52 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー - 指摘事項対応",
+  "applied_findings": [
+    {
+      "id": "IA3-001",
+      "severity": "must_fix",
+      "title": "terminal-route.test.ts mock does not include sendMessage on cliTool",
+      "action": "セクション5にCLIToolManager.getTool()モックへのsendMessage追加を前提条件として追記。実装チェックリストにも項目追加。"
+    },
+    {
+      "id": "IA3-002",
+      "severity": "should_fix",
+      "title": "respond/route.ts uses sendKeys directly for Copilot prompts - same pattern risk",
+      "action": "セクション4に既知の制限事項として記載。プロンプト状態での使用のためリスク低と評価し、将来的なフォローアップ項目として記録。"
+    },
+    {
+      "id": "IA3-003",
+      "severity": "nice_to_have",
+      "title": "Terminal API route has no frontend callers identified",
+      "action": "セクション4にTerminal APIの呼び出し元を明確化するセクションを追加。CLI/外部クライアントが主な呼び出し元であることを文書化。"
+    },
+    {
+      "id": "IA3-004",
+      "severity": "should_fix",
+      "title": "Double session existence check for copilot path",
+      "action": "セクション4の既知の制限事項に記載。実影響は極小のため現時点では対応不要。"
+    },
+    {
+      "id": "IA3-005",
+      "severity": "nice_to_have",
+      "title": "waitForPrompt timeout (15s) may exceed typical API response expectations",
+      "action": "セクション6にユーザー体感遅延の説明とフロントエンドHTTPタイムアウト確認結果を追記。"
+    },
+    {
+      "id": "IA3-006",
+      "severity": "nice_to_have",
+      "title": "WebSocket terminal_input path bypasses the fix entirely",
+      "action": "セクション4の既知の制限事項に記載。ターミナルウィジェット直接入力は別コードパスで問題なしと文書化。"
+    },
+    {
+      "id": "IA3-007",
+      "severity": "should_fix",
+      "title": "invalidateCache import becomes unused for copilot-only sessions",
+      "action": "セクション3-2のコード例にelse-pathのinvalidateCache残存を明示するコメント追記。設計書は既に正しく記載済みであることを確認。"
+    }
+  ],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-559-copilot-slash-cmd-fix-design-policy.md",
+  "summary": "全7件の指摘事項（must_fix: 1件、should_fix: 3件、nice_to_have: 3件）を設計方針書に反映。IA3-001のテストモック修正は実装チェックリストにも追加。IA3-003のTerminal API呼び出し元の明確化により、本修正がCLI/外部クライアント経由のコマンド送信を対象としていることを文書化。"
+}

@@ -1,0 +1,150 @@
+{
+  "issue_number": 559,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_date": "2026-03-27",
+  "reviewer": "architecture-review-agent",
+  "design_doc": "dev-reports/design/issue-559-copilot-slash-cmd-fix-design-policy.md",
+  "summary": "Impact scope analysis reveals the design document is largely accurate. The single-file change approach (terminal/route.ts only) is well-scoped. However, several hidden dependencies and edge cases were identified that warrant documentation or minor fixes.",
+  "findings": [
+    {
+      "id": "IA3-001",
+      "severity": "must_fix",
+      "category": "テスト整合性",
+      "title": "terminal-route.test.ts mock does not include sendMessage on cliTool",
+      "description": "The existing test mock for CLIToolManager.getTool() (L17-20) returns an object with only getSessionName(). After the change, the copilot path calls cliTool.sendMessage(), but the mock does not provide it. Tests for the copilot delegation path will need the mock to include sendMessage as a vi.fn(). The design doc mentions CR2-003 (adding copilot to isCliToolType mock) but does not mention the getTool mock also needs sendMessage.",
+      "affected_file": "tests/unit/terminal-route.test.ts",
+      "recommendation": "Update the CLIToolManager mock's getTool return value to include sendMessage: vi.fn() when cliToolId is copilot. Add this as an explicit item in the implementation checklist."
+    },
+    {
+      "id": "IA3-002",
+      "severity": "should_fix",
+      "category": "影響範囲の網羅性",
+      "title": "respond/route.ts uses sendKeys directly for Copilot prompts - same pattern risk",
+      "description": "The respond route (src/app/api/worktrees/[id]/respond/route.ts L150-159) sends answers to Copilot prompts via sendKeys() directly, without waitForPrompt(). If a Copilot prompt response is sent while Copilot is processing (race condition), the same text-loss issue could occur. The design doc does not mention this route in the impact analysis.",
+      "affected_file": "src/app/api/worktrees/[id]/respond/route.ts",
+      "recommendation": "Document this as a known limitation in the design doc section 4. The respond route handles prompt responses (y/n, numeric selection) which are typically short and sent when Copilot is already in prompt state, so the risk is lower. However, acknowledge this as a potential follow-up item."
+    },
+    {
+      "id": "IA3-003",
+      "severity": "nice_to_have",
+      "category": "影響範囲の正確性",
+      "title": "Terminal API route has no frontend callers identified",
+      "description": "The design doc's architecture diagram shows '[UI] Terminal direct input -> /api/worktrees/:id/terminal' but no frontend component calls this route via fetch. The Terminal component (src/components/Terminal.tsx) sends input via WebSocket (terminal_input message type) which goes through ws-server.ts handleTerminalInput -> control mode tmux transport, a completely separate path. The NavigationButtons component uses the special-keys route. The MessageInput component uses the /send route. It is unclear which UI path actually calls the terminal HTTP API route.",
+      "affected_file": "src/app/api/worktrees/[id]/terminal/route.ts",
+      "recommendation": "Clarify in the design doc which caller triggers the terminal API for Copilot. If the route is primarily used by external clients or the CLI, this should be documented. If no current caller sends Copilot commands through this route, the fix may not address the actual user-facing bug, and the real fix might need to be in ws-server.ts or the /send route instead."
+    },
+    {
+      "id": "IA3-004",
+      "severity": "should_fix",
+      "category": "セッション存在チェック重複",
+      "title": "Double session existence check for copilot path",
+      "description": "In the proposed flow, terminal/route.ts checks hasSession() at L73-79, then calls cliTool.sendMessage() which checks hasSession() again at copilot.ts L245-249. The first check returns 404 with 'Session not found', while the second throws an Error that gets caught by the route's catch block and returns 500 with 'Failed to send command to terminal'. If the session dies between the two checks, the user gets a 500 instead of the more informative 404.",
+      "affected_file": "src/app/api/worktrees/[id]/terminal/route.ts",
+      "recommendation": "This is a minor race condition with minimal practical impact. Document it as a known behavior. The route's initial hasSession check could be skipped for copilot if desired, but the current approach is acceptable."
+    },
+    {
+      "id": "IA3-005",
+      "severity": "nice_to_have",
+      "category": "パフォーマンス影響",
+      "title": "waitForPrompt timeout (15s) may exceed typical API response expectations",
+      "description": "The design doc acknowledges the 15-second waitForPrompt timeout in section 6 and notes that frontend HTTP timeout should be verified. The frontend api-client.ts uses native fetch with no explicit timeout or AbortController, so the browser default (typically 300s) applies. This is acceptable, but users may perceive the terminal command as 'hanging' for up to 15 seconds if Copilot is busy.",
+      "affected_file": "src/lib/cli-tools/copilot.ts",
+      "recommendation": "The design doc's note to verify frontend timeout is satisfied - no frontend timeout issue exists. Consider documenting that users may experience up to 15-second delays when sending commands to a busy Copilot session."
+    },
+    {
+      "id": "IA3-006",
+      "severity": "nice_to_have",
+      "category": "影響範囲の正確性",
+      "title": "WebSocket terminal_input path bypasses the fix entirely",
+      "description": "The Terminal component's direct keyboard input goes through WebSocket -> ws-server.ts handleTerminalInput -> ControlModeTmuxTransport.sendInput(), which is a completely separate code path from the terminal HTTP API route. Copilot commands typed directly in the xterm.js terminal widget will NOT benefit from the sendMessage delegation fix.",
+      "affected_file": "src/lib/ws-server.ts",
+      "recommendation": "Document this as a known limitation. The WebSocket terminal input path is designed for raw character-by-character terminal I/O (like a real terminal) and does not need message-level processing. Users typing slash commands directly in the terminal widget would be doing so in the raw terminal context where Copilot would already be at a prompt."
+    },
+    {
+      "id": "IA3-007",
+      "severity": "should_fix",
+      "category": "影響範囲の網羅性",
+      "title": "invalidateCache import becomes unused for copilot-only sessions",
+      "description": "If the terminal route delegates to sendMessage for copilot (which calls invalidateCache internally), the explicit invalidateCache call at L85 of terminal/route.ts only runs for non-copilot tools. The import of invalidateCache at L20 remains necessary for non-copilot tools, so no change is needed. However, the design doc should clarify that the existing invalidateCache call at L85 remains in the else-path and is NOT removed.",
+      "affected_file": "src/app/api/worktrees/[id]/terminal/route.ts",
+      "recommendation": "No code change needed. The design doc already states this correctly in section 3-2 ('Note: invalidateCache is called within sendMessage(), no need to call here'). The existing invalidateCache at L85 remains for non-copilot tools. This is verified correct."
+    }
+  ],
+  "impact_verification": {
+    "changed_files_accurate": true,
+    "changed_files_notes": "Only terminal/route.ts is modified. This is correct.",
+    "no_impact_claims_verified": {
+      "copilot.ts": {
+        "verified": true,
+        "notes": "sendMessage() already handles both slash commands and regular text. No changes needed."
+      },
+      "session-key-sender.ts": {
+        "verified": true,
+        "notes": "Only used by ClaudeTool.sendMessage(). No Copilot interaction."
+      },
+      "special-keys/route.ts": {
+        "verified": true,
+        "notes": "Handles special key events (Up/Down/Enter/Escape), not text commands."
+      },
+      "cli-patterns.ts": {
+        "verified": true,
+        "notes": "Pattern definitions only. Consumed by copilot.ts sendMessage() which is unchanged."
+      },
+      "other_cli_tools": {
+        "verified": true,
+        "notes": "cliToolId === 'copilot' guard ensures zero impact on claude, codex, gemini, vibe-local, opencode."
+      }
+    },
+    "hidden_dependencies_found": [
+      "respond/route.ts also sends commands to Copilot via sendKeys without waitForPrompt (IA3-002)",
+      "WebSocket terminal_input path (ws-server.ts) is a separate code path unaffected by this fix (IA3-006)",
+      "No frontend component appears to call the terminal HTTP API route directly (IA3-003)"
+    ]
+  },
+  "regression_risk": {
+    "overall": "low",
+    "details": "The change is well-isolated behind a cliToolId === 'copilot' guard. Non-copilot tools are completely unaffected. The main regression risk is if sendMessage() behaves differently from sendKeys() in subtle ways (e.g., sendEnter handling, error message format). The design doc addresses the sendEnter difference in CR2-005.",
+    "specific_risks": [
+      {
+        "risk": "Error response format change for copilot",
+        "probability": "low",
+        "impact": "low",
+        "details": "sendMessage() throws errors that are caught by the route's catch block, producing the same fixed-string 500 response. No format change."
+      },
+      {
+        "risk": "15-second timeout on normal copilot text entry",
+        "probability": "low",
+        "impact": "medium",
+        "details": "If Copilot is not at prompt state (e.g., generating a response), waitForPrompt will block for up to 15 seconds before proceeding with best-effort send. Previously sendKeys would execute immediately."
+      }
+    ]
+  },
+  "edge_cases_analyzed": {
+    "sendMessage_calling_sendKeys_with_different_args": {
+      "verified": true,
+      "details": "For regular text: sendKeys(sessionName, message, false) + sendSpecialKey('C-m'). For selection list commands: sendKeys(sessionName, message, true). Terminal route's existing sendKeys uses default sendEnter=true. The delegation correctly defers all sendEnter logic to sendMessage()."
+    },
+    "session_not_exists_in_delegation_path": {
+      "verified": true,
+      "details": "Terminal route checks hasSession() at L73. sendMessage() checks again at L245. Double check is redundant but safe. Race condition between checks would produce 500 instead of 404 (IA3-004)."
+    },
+    "empty_command_string": {
+      "verified": true,
+      "details": "Terminal route validates command is non-empty at L44. sendMessage() would receive a valid non-empty string."
+    },
+    "command_with_newlines": {
+      "verified": true,
+      "details": "sendMessage() handles newlines by checking message.includes('\\n') and calling detectAndResendIfPastedText(). This is an improvement over the current sendKeys direct path which does not handle pasted text."
+    }
+  },
+  "conclusion": {
+    "approval": "conditional",
+    "conditions": [
+      "IA3-001 (must_fix): Document that CLIToolManager mock in tests needs sendMessage method",
+      "IA3-003 (should_fix): Clarify which actual caller triggers the terminal API for Copilot"
+    ],
+    "overall_assessment": "The impact analysis in the design document is largely accurate. The single-file change approach is sound and well-guarded. The key concern is IA3-003: it is unclear which frontend or client component actually calls the terminal HTTP API route for Copilot commands, which could mean the fix does not address the user-facing issue if the actual entry point is elsewhere (e.g., WebSocket or /send route)."
+  }
+}

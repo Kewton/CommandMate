@@ -1,0 +1,100 @@
+{
+  "status": "passed",
+  "criteria_results": [
+    {
+      "criterion": "Terminal API経由でCopilotセッションに対してコマンドを送信した場合にcliTool.sendMessage()に委譲されること",
+      "status": "passed",
+      "evidence": "route.ts lines 82-85: cliToolId === 'copilot' の場合に cliTool.sendMessage(params.id, command) を呼び出し、sendKeys()をスキップしている。テスト 'should delegate slash commands to sendMessage for copilot' と 'should delegate regular text to sendMessage for copilot' が PASSED。"
+    },
+    {
+      "criterion": "Copilotが応答中に/modelを送信しても、テキストとして処理されないこと",
+      "status": "passed",
+      "evidence": "全Copilotコマンドが sendMessage() に委譲されるため、sendKeys() による生テキスト処理は発生しない。sendMessage() 内部で waitForPrompt() によりプロンプト待機後に送信される。テスト 'should delegate slash commands to sendMessage for copilot' で /model が sendMessage 経由であることを確認。"
+    },
+    {
+      "criterion": "既存のsendMessage経路の動作が変更されないこと",
+      "status": "passed",
+      "evidence": "copilot.ts に対する変更なし (git diff main -- src/lib/cli-tools/copilot.ts はファイル全体がnew fileであり Issue #545 由来)。sendMessage() のロジックは変更されていない。"
+    },
+    {
+      "criterion": "他CLIツール（claude, codex等）の動作に影響がないこと",
+      "status": "passed",
+      "evidence": "テスト 'should NOT delegate to sendMessage for non-copilot tools' が PASSED: claude で /model を送信した場合、sendKeys() が呼ばれ sendMessage() は呼ばれない。全5423テストが PASSED。"
+    },
+    {
+      "criterion": "単体テストが追加されていること",
+      "status": "passed",
+      "evidence": "tests/unit/terminal-route.test.ts に 'Copilot delegation' describe ブロック (5テストケース) が追加: slash command委譲、通常テキスト委譲、非Copilotツール非委譲、sendMessageエラー時500、invalidateCache非呼出。"
+    },
+    {
+      "criterion": "CLAUDE.mdのモジュール説明が更新されていること",
+      "status": "passed",
+      "evidence": "CLAUDE.md line 254: terminal/route.ts の説明が 'ターミナルコマンド送信API（Copilot全コマンドをsendMessage()に委譲）（Issue #559）' に更新済み。"
+    }
+  ],
+  "test_results": {
+    "total": 5423,
+    "passed": 5423,
+    "failed": 0,
+    "skipped": 7
+  },
+  "quality_checks": {
+    "tsc": "pass",
+    "lint": "pass"
+  },
+  "test_cases": [
+    {
+      "scenario": "シナリオ1: Copilotスラッシュコマンド('/model')がterminal API経由で送信された場合、sendMessage()に委譲される",
+      "result": "passed",
+      "evidence": "テスト 'should delegate slash commands to sendMessage for copilot': mockSendMessage が ('wt-1', '/model') で呼ばれ、sendKeys は呼ばれない。"
+    },
+    {
+      "scenario": "シナリオ2: Copilot通常テキスト('hello')がterminal API経由で送信された場合も、sendMessage()に委譲される",
+      "result": "passed",
+      "evidence": "テスト 'should delegate regular text to sendMessage for copilot': mockSendMessage が ('wt-1', 'hello world') で呼ばれ、sendKeys は呼ばれない。"
+    },
+    {
+      "scenario": "シナリオ3: Claude等他ツールのコマンドは従来通りsendKeys()で処理される",
+      "result": "passed",
+      "evidence": "テスト 'should NOT delegate to sendMessage for non-copilot tools': sendKeys が ('mcbd-claude-wt-1', '/model') で呼ばれ、mockSendMessage は呼ばれない。"
+    },
+    {
+      "scenario": "シナリオ4: Copilot委譲パスでsendMessage()がエラーを投げた場合、500エラーが返される",
+      "result": "passed",
+      "evidence": "テスト 'should return 500 when copilot sendMessage throws': status 500、固定文字列エラー 'Failed to send command to terminal'、内部エラーメッセージ非露出を確認。"
+    },
+    {
+      "scenario": "シナリオ5: 既存テスト（5423件）が全てパスすること",
+      "result": "passed",
+      "evidence": "npm run test:unit: 276 test files passed, 5423 tests passed, 0 failed, 7 skipped."
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "Terminal API経由でCopilotセッションに対してコマンドを送信した場合にcliTool.sendMessage()に委譲されること",
+      "verified": true
+    },
+    {
+      "criterion": "Copilotが応答中に/modelを送信しても、テキストとして処理されないこと",
+      "verified": true
+    },
+    {
+      "criterion": "既存のsendMessage経路の動作が変更されないこと",
+      "verified": true
+    },
+    {
+      "criterion": "他CLIツール（claude, codex等）の動作に影響がないこと",
+      "verified": true
+    },
+    {
+      "criterion": "単体テストが追加されていること",
+      "verified": true
+    },
+    {
+      "criterion": "CLAUDE.mdのモジュール説明が更新されていること",
+      "verified": true
+    }
+  ],
+  "evidence_files": [],
+  "message": "すべての受入条件を満たしています。全6受入条件がPASS、全5テストシナリオがPASS、品質チェック（tsc, lint）もPASSです。"
+}
