@@ -1,0 +1,55 @@
+{
+  "issue_number": 547,
+  "stage": 4,
+  "applied_findings": [
+    {
+      "id": "SEC4-001",
+      "severity": "should_fix",
+      "action": "Added ReDoS safety verification requirements for COPILOT_THINKING_PATTERN to Section 6 with specific checklist items (no nested quantifiers, no overlapping alternation branches, tool-based verification)"
+    },
+    {
+      "id": "SEC4-002",
+      "severity": "should_fix",
+      "action": "Added anchor preservation requirement for COPILOT_PROMPT_PATTERN to Section 6, emphasizing that ^ anchor must be maintained on pattern updates"
+    },
+    {
+      "id": "SEC4-008",
+      "severity": "should_fix",
+      "action": "Added trust boundary documentation for cliToolId guard condition to Section 6, linking to DR2-004 and IA3-004, with specific cross-tool safety risks documented"
+    },
+    {
+      "id": "SEC4-003",
+      "severity": "nice_to_have",
+      "action": "Added new pattern security checklist to Section 6 covering /g flag, nested quantifiers, stripAnsi preprocessing, and cliToolId guard"
+    },
+    {
+      "id": "SEC4-004",
+      "severity": "nice_to_have",
+      "action": "Added command injection safety note to Section 6 confirming hardcoded command safety and whitelist recommendation for future dynamic options"
+    },
+    {
+      "id": "SEC4-006",
+      "severity": "nice_to_have",
+      "action": "Added XSS protection note to Section 6 for future externalization of builtin command definitions"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "SEC4-005",
+      "severity": "nice_to_have",
+      "reason": "Existing pattern identical to all CLI tools; no Copilot-specific action needed. Noted in Stage 4 summary table."
+    },
+    {
+      "id": "SEC4-007",
+      "severity": "nice_to_have",
+      "reason": "Informational only - confirms ANSI_PATTERN /g flag does not violate S4-5 principle. No design policy change needed."
+    },
+    {
+      "id": "SEC4-009",
+      "severity": "nice_to_have",
+      "reason": "Informational only - confirms stripAnsi() preprocessing chain is consistent. No design policy change needed."
+    }
+  ],
+  "design_doc_updated": true,
+  "summary": "Applied all 3 should_fix findings (SEC4-001, SEC4-002, SEC4-008) and 3 relevant nice_to_have findings (SEC4-003, SEC4-004, SEC4-006) to the design policy document. Section 6 (Security) was expanded with ReDoS safety verification requirements, anchor preservation requirements, trust boundary documentation for cliToolId guard, a new pattern security checklist, command injection safety notes, and XSS protection guidance. Section 13 was added with the full Stage 4 review summary table and implementation checklist with 6 actionable items."
+}

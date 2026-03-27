@@ -1,0 +1,26 @@
+{
+  "issue_number": 547,
+  "test_date": "2026-03-27",
+  "environment": {
+    "port": 3013,
+    "branch": "feature/547-copilot-slash-commands"
+  },
+  "results": [
+    {"id": "TC-001", "title": "ビルド成功確認", "status": "pass", "evidence_note": "npm run build 成功（build-and-start.sh経由）"},
+    {"id": "TC-002", "title": "TypeScript型チェック", "status": "pass", "evidence_note": "npx tsc --noEmit exit code 0"},
+    {"id": "TC-003", "title": "ESLintチェック", "status": "pass", "evidence_note": "No ESLint warnings or errors"},
+    {"id": "TC-004", "title": "単体テスト全パス", "status": "pass", "evidence_note": "5396 passed, 7 skipped (274 test files)"},
+    {"id": "TC-005", "title": "スラッシュコマンドAPI Copilotビルトイン確認", "status": "pass", "evidence_note": "cliTool=copilot で name=model, cliTools=['copilot'], source=builtin 確認"},
+    {"id": "TC-006", "title": "既存Claude/Codexコマンド影響なし", "status": "pass", "evidence_note": "Claude: 36コマンド返却、model未混入"},
+    {"id": "TC-007", "title": "SELECTION_LIST_REASONS定数確認", "status": "pass", "evidence_note": "3ツール (opencode, claude, copilot) のreason確認"},
+    {"id": "TC-008", "title": "current-output/route.ts OR条件置換確認", "status": "pass", "evidence_note": "SELECTION_LIST_REASONS.has() 使用確認"},
+    {"id": "TC-009", "title": "getCopilotBuiltinCommands cliTools確認", "status": "pass", "evidence_note": "cliTools: ['copilot'] 確認"},
+    {"id": "TC-010", "title": "サーバー起動・基本動作確認", "status": "pass", "evidence_note": "localhost:3013/api/worktrees JSON応答確認"}
+  ],
+  "summary": {
+    "total": 10,
+    "passed": 10,
+    "failed": 0,
+    "pass_rate": "100%"
+  }
+}

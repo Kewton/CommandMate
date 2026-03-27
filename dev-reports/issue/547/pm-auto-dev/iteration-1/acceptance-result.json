@@ -1,0 +1,58 @@
+{
+  "issue_number": 547,
+  "status": "passed",
+  "criteria_results": [
+    {
+      "criterion": "getCopilotBuiltinCommands() exists with cliTools: ['copilot'], source: 'builtin', filePath: ''",
+      "status": "passed",
+      "evidence": "src/lib/slash-commands.ts lines 423-434: function returns array with /model command having cliTools: ['copilot'], source: 'builtin', filePath: '', category: 'standard-config'"
+    },
+    {
+      "criterion": "getSlashCommandGroups() includes getCopilotBuiltinCommands() in BOTH basePath and cache branches",
+      "status": "passed",
+      "evidence": "src/lib/slash-commands.ts line 481 (basePath branch): deduplicateByName([...skills, ...codexLocalSkills, ...codexLocalPrompts, ...getCopilotBuiltinCommands()], commands); line 493 (cache branch): deduplicateByName([...skillsCache, ...getCopilotBuiltinCommands()], commandsCache)"
+    },
+    {
+      "criterion": "COPILOT_SELECTION_LIST_PATTERN exported from cli-patterns.ts",
+      "status": "passed",
+      "evidence": "src/lib/detection/cli-patterns.ts lines 272: export const COPILOT_SELECTION_LIST_PATTERN = /Use\\s+arrow(?:s|\\s+keys)\\s+to\\s+(?:move|navigate)/m"
+    },
+    {
+      "criterion": "STATUS_REASON.COPILOT_SELECTION_LIST constant exists",
+      "status": "passed",
+      "evidence": "src/lib/detection/status-detector.ts line 123: COPILOT_SELECTION_LIST: 'copilot_selection_list'"
+    },
+    {
+      "criterion": "SELECTION_LIST_REASONS Set contains all 3 reasons (OpenCode, Claude, Copilot)",
+      "status": "passed",
+      "evidence": "src/lib/detection/status-detector.ts lines 137-141: SELECTION_LIST_REASONS = new Set([STATUS_REASON.OPENCODE_SELECTION_LIST, STATUS_REASON.CLAUDE_SELECTION_LIST, STATUS_REASON.COPILOT_SELECTION_LIST])"
+    },
+    {
+      "criterion": "detectSessionStatus() Step 1.6 has Copilot selection list detection with cliToolId === 'copilot' guard",
+      "status": "passed",
+      "evidence": "src/lib/detection/status-detector.ts lines 227-239: if (cliToolId === 'copilot' && COPILOT_SELECTION_LIST_PATTERN.test(lastLines)) returns waiting with reason STATUS_REASON.COPILOT_SELECTION_LIST"
+    },
+    {
+      "criterion": "current-output/route.ts uses SELECTION_LIST_REASONS.has() instead of OR-chain",
+      "status": "passed",
+      "evidence": "src/app/api/worktrees/[id]/current-output/route.ts line 12: imports SELECTION_LIST_REASONS; line 109: SELECTION_LIST_REASONS.has(statusResult.reason)"
+    },
+    {
+      "criterion": "Unit tests exist for Copilot-related functionality",
+      "status": "passed",
+      "evidence": "tests/unit/slash-commands.test.ts: describe('getCopilotBuiltinCommands') with 4 test cases (array return, /model properties, cliTools check, source check); tests/unit/status-detector-selection.test.ts: STATUS_REASON.COPILOT_SELECTION_LIST test, detectSessionStatus Copilot selection_list detection (3 tests: positive, negative cliToolId guard, normal response); tests/unit/cli-patterns-selection.test.ts: COPILOT_SELECTION_LIST_PATTERN tests"
+    },
+    {
+      "criterion": "Existing tests not broken",
+      "status": "passed",
+      "evidence": "274 test files passed, 5396 tests passed, 7 skipped, 0 failed"
+    }
+  ],
+  "quality_checks": {
+    "typescript": "pass",
+    "eslint": "pass",
+    "unit_tests": "pass",
+    "test_count": 5396
+  },
+  "summary": "All acceptance criteria for Issue #547 (Copilot CLI slash commands and selection window detection) are met. The implementation includes: (1) getCopilotBuiltinCommands() returning /model command with correct properties, (2) integration into both branches of getSlashCommandGroups(), (3) COPILOT_SELECTION_LIST_PATTERN for arrow-key navigation detection, (4) STATUS_REASON.COPILOT_SELECTION_LIST constant, (5) SELECTION_LIST_REASONS Set with all 3 tool reasons, (6) detectSessionStatus() Step 1.6 with cliToolId guard, (7) SELECTION_LIST_REASONS.has() in current-output/route.ts, and (8) comprehensive unit tests. All quality checks pass: TypeScript compilation (0 errors), ESLint (0 warnings/errors), and unit tests (5396 passed, 274 test files)."
+}

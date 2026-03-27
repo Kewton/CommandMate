@@ -1,0 +1,24 @@
+{
+  "issue_number": 547,
+  "feature_summary": "Copilot CLIのデフォルトスラッシュコマンドと選択ウィンドウ検出",
+  "acceptance_criteria": [
+    "/ 入力時にCopilot CLIのスラッシュコマンド候補が表示される",
+    "/model 実行時の選択ウィンドウが検出・表示される（NavigationButtonsが表示される）",
+    "既存エージェント（Claude, OpenCode, Codex等）のスラッシュコマンドに影響がない",
+    "STATUS_REASON.COPILOT_SELECTION_LIST 定数が追加されている",
+    "current-output/route.ts の isSelectionListActive が Copilot 選択リストを含む",
+    "Copilotビルトインコマンドに cliTools: ['copilot'] が設定されている",
+    "新規追加パターンおよび検出ロジックの単体テストが追加されている"
+  ],
+  "test_scenarios": [
+    "シナリオ1: getCopilotBuiltinCommands()がcliTools: ['copilot']を持つコマンドを返す",
+    "シナリオ2: getSlashCommandGroups()の結果にCopilotビルトインコマンドが含まれる",
+    "シナリオ3: COPILOT_SELECTION_LIST_PATTERNが選択リスト表示時にマッチする",
+    "シナリオ4: detectSessionStatus()がCopilot選択リスト表示時にwaitingを返す",
+    "シナリオ5: SELECTION_LIST_REASONS SetにCopilot含む3ツールのreasonが含まれる",
+    "シナリオ6: cliToolIdがcopilot以外の場合にCopilot選択リスト検出が発火しない",
+    "シナリオ7: current-output/route.tsのisSelectionListActiveがSELECTION_LIST_REASONS.has()を使用",
+    "シナリオ8: 既存OpenCode/Claude選択リストテストが影響を受けない",
+    "シナリオ9: npm run test:unit, npx tsc --noEmit, npm run lint が全パス"
+  ]
+}

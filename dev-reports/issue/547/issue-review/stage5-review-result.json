@@ -1,0 +1,159 @@
+{
+  "issue_number": 547,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "focus_area": "通常",
+  "review_date": "2026-03-27",
+  "previous_findings_status": [
+    {
+      "id": "F1-001",
+      "severity": "must_fix",
+      "title": "影響範囲テーブルにstatus-detector.tsが欠落している",
+      "addressed": true,
+      "notes": "影響範囲テーブルに status-detector.ts が追加されており、STATUS_REASON定数追加および detectSessionStatus() への検出分岐追加が明記されている。"
+    },
+    {
+      "id": "F1-002",
+      "severity": "should_fix",
+      "title": "Copilot CLIの実際のTUI出力パターンに関する調査情報が不足",
+      "addressed": true,
+      "notes": "「調査メモ: Copilot CLI TUI出力」セクションが追加され、実装前にtmux capture-pane出力を採取する必要がある旨と、OpenCode方式/Claude方式の比較観点が記載されている。さらに「追加調査項目」としてチェックリスト形式で具体的な調査項目が追記されている。"
+    },
+    {
+      "id": "F1-003",
+      "severity": "should_fix",
+      "title": "デフォルトスラッシュコマンドの定義方法に関する設計方針が未記載",
+      "addressed": true,
+      "notes": "「設計方針: デフォルトスラッシュコマンドの定義方法」セクションが追加され、3つのアプローチの比較、cliToolsフィールド設定の注意、ハードコードコマンドの挿入ポイント考慮事項が記載されている。"
+    },
+    {
+      "id": "F1-004",
+      "severity": "should_fix",
+      "title": "copilot.tsのパターン定義がplaceholder状態であることへの言及がない",
+      "addressed": true,
+      "notes": "概要セクションにIssue #545でplaceholderとして追加された経緯が明記され、関連Issueセクションに #545 がリンクされている。影響範囲テーブルのcli-patterns.tsにも「#545のplaceholderパターンを実態に基づき更新」と記載されている。"
+    },
+    {
+      "id": "F1-005",
+      "severity": "nice_to_have",
+      "title": "受け入れ条件にテストに関する項目がない",
+      "addressed": true,
+      "notes": "受入条件にテスト項目が追加されており、具体的なテストファイル名（cli-patterns-selection.test.ts, status-detector-selection.test.ts等）と内容が記載されている。"
+    },
+    {
+      "id": "F1-006",
+      "severity": "nice_to_have",
+      "title": "Copilotのデフォルトスラッシュコマンド一覧が未記載",
+      "addressed": false,
+      "notes": "/model 以外のCopilot CLIビルトインコマンドの一覧は依然として記載されていない。ただし調査メモの性質上、実装前調査で判明する事項であるため、軽微。"
+    },
+    {
+      "id": "F3-001",
+      "severity": "must_fix",
+      "title": "STATUS_REASON に Copilot 選択リスト用定数が必要",
+      "addressed": true,
+      "notes": "影響範囲テーブルのstatus-detector.ts行に「STATUS_REASON に COPILOT_SELECTION_LIST: 'copilot_selection_list' 定数を追加」が明記され、受入条件にも「STATUS_REASON.COPILOT_SELECTION_LIST 定数が追加されている」が含まれている。"
+    },
+    {
+      "id": "F3-002",
+      "severity": "must_fix",
+      "title": "status-detector.ts に Copilot 選択リスト検出ロジックが必要",
+      "addressed": true,
+      "notes": "影響範囲テーブルに detectSessionStatus() への検出分岐追加が記載され、調査メモにTUIレイアウト解析 or フッターパターンマッチの調査項目が追加されている。"
+    },
+    {
+      "id": "F3-003",
+      "severity": "should_fix",
+      "title": "current-output/route.ts が影響範囲に含まれていない",
+      "addressed": true,
+      "notes": "影響範囲テーブルに current-output/route.ts が追加され、isSelectionListActive の判定条件に STATUS_REASON.COPILOT_SELECTION_LIST を追加する変更が明記されている。受入条件にも該当項目がある。"
+    },
+    {
+      "id": "F3-004",
+      "severity": "should_fix",
+      "title": "response-cleaner.ts の cleanCopilotResponse() 更新が影響範囲に含まれていない",
+      "addressed": true,
+      "notes": "影響範囲テーブルに response-cleaner.ts が追加され、「調査結果に依存。変更不要の場合はその旨を実装PRに明記」と記載されている。"
+    },
+    {
+      "id": "F3-005",
+      "severity": "should_fix",
+      "title": "command-merger.ts filterCommandsByCliTool() でのCopilot コマンドフィルタリング",
+      "addressed": true,
+      "notes": "設計方針セクションにcliTools: ['copilot'] の明示的設定が必須である旨が記載され、受入条件にも「Copilotビルトインコマンドに cliTools: ['copilot'] が設定されている」が含まれている。"
+    },
+    {
+      "id": "F3-006",
+      "severity": "should_fix",
+      "title": "テスト範囲が具体的に特定されていない",
+      "addressed": true,
+      "notes": "受入条件に具体的なテストファイル名と内容が列挙されている。"
+    },
+    {
+      "id": "F3-007",
+      "severity": "nice_to_have",
+      "title": "slash-commands.ts のキャッシュ機構への影響",
+      "addressed": true,
+      "notes": "設計方針セクションに「ハードコードコマンドの挿入ポイント」サブセクションが追加され、deduplicateByName() の引数として含めるか filterCommandsByCliTool() の後に追加するかを設計時に明確にすべき旨が記載されている。"
+    },
+    {
+      "id": "F3-008",
+      "severity": "nice_to_have",
+      "title": "CLAUDE.md モジュールリファレンスの更新",
+      "addressed": true,
+      "notes": "レビュー履歴に「CLAUDE.md 更新は実装完了後に対応」と明記されている。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F5-001",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "設計方針でアプローチの推奨順位や選定基準が未記載",
+      "description": "設計方針セクションに3つのアプローチが列挙されているが、どの観点でどれを選ぶべきかの判断基準や推奨が記載されていない。Issueとしては「検討する」という表現にとどまっており、実装者の判断に委ねられている。ただし調査依存の部分もあるため、これ自体は大きな問題ではない。",
+      "suggestion": "可能であれば「Phase 1 TUI調査後に決定するが、コマンド数が少ない場合はアプローチ1（ハードコード）を推奨」等の基本方針を追記すると実装がスムーズになる。"
+    },
+    {
+      "id": "F5-002",
+      "severity": "nice_to_have",
+      "category": "consistency",
+      "title": "影響範囲テーブルのcopilot.ts変更内容が依然として曖昧",
+      "description": "影響範囲テーブルの copilot.ts の変更内容が「選択ウィンドウ対応」のみで、具体的に何を変更するかが不明確。Stage 1 (F1-001) で指摘した「copilot.ts自体への変更は限定的である可能性が高い」という点は解消されておらず、他の行（status-detector.ts, cli-patterns.ts等）と比較して記載粒度にばらつきがある。",
+      "suggestion": "copilot.ts に実際に変更が必要な場合は具体的な変更内容を記載する。変更不要の可能性がある場合は「調査結果に依存。変更不要の場合は影響範囲から除外する」と response-cleaner.ts と同様の記載にすると一貫性が保たれる。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 0,
+    "nice_to_have_count": 2,
+    "total": 2
+  },
+  "code_references": [
+    {
+      "file": "src/lib/detection/status-detector.ts",
+      "relevance": "STATUS_REASON定数定義 (L117-127) - COPILOT_SELECTION_LISTが未追加であることを確認"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "relevance": "isSelectionListActive判定 (L108-110) - Copilot条件が未追加であることを確認"
+    },
+    {
+      "file": "src/lib/detection/cli-patterns.ts",
+      "relevance": "Copilotパターン定義 (L242-266) - placeholderのまま残っていることを確認"
+    },
+    {
+      "file": "src/lib/slash-commands.ts",
+      "relevance": "ファイルベースコマンドローダー - ハードコードコマンド機構は未実装"
+    },
+    {
+      "file": "src/lib/cli-tools/copilot.ts",
+      "relevance": "Copilot CLIツール実装 - 変更内容が曖昧 (F5-002)"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュールリファレンス整合性確認"
+    }
+  ]
+}

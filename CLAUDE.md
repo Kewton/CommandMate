@@ -157,14 +157,14 @@ tests/
 | `src/lib/tmux/tmux.ts` | tmuxセッション管理基盤（execFile使用） |
 | `src/lib/tmux/tmux-capture-cache.ts` | tmux captureキャッシュ（TTL=2秒、singleflight） |
 | `src/lib/session/claude-session.ts` | Claude CLIセッション管理・ヘルスチェック |
-| `src/lib/detection/status-detector.ts` | セッションステータス検出 |
+| `src/lib/detection/status-detector.ts` | セッションステータス検出、SELECTION_LIST_REASONS Set定数（Issue #547） |
 | `src/lib/session/worktree-status-helper.ts` | Worktreeセッションステータス一括検出 |
 | `src/lib/polling/response-poller.ts` | レスポンスポーリング・ポーリング制御バレルファイル（Issue #479） |
 | `src/lib/response-extractor.ts` | レスポンス抽出ロジック（resolveExtractionStartIndex, isOpenCodeComplete）（Issue #479） |
 | `src/lib/response-cleaner.ts` | CLIツール別レスポンスクリーニング（cleanClaudeResponse等）（Issue #479） |
 | `src/lib/tui-accumulator.ts` | TUIアキュムレータ状態管理（Issue #479） |
 | `src/lib/detection/prompt-detector.ts` | プロンプト検出（2パス方式） |
-| `src/lib/detection/cli-patterns.ts` | CLIツール別パターン定義 |
+| `src/lib/detection/cli-patterns.ts` | CLIツール別パターン定義、COPILOT_SELECTION_LIST_PATTERN（Issue #547） |
 | `src/lib/polling/auto-yes-manager.ts` | Auto-Yes状態管理・バレルファイル・複合キーヘルパー（Issue #479, #525） |
 | `src/lib/auto-yes-poller.ts` | Auto-Yesポーリングループ本体・複合キー対応（Issue #479, #525） |
 | `src/lib/auto-yes-state.ts` | Auto-Yes状態管理・複合キーヘルパー（Issue #479, #525） |
@@ -199,7 +199,7 @@ tests/
 | `src/lib/file-operations.ts` | ファイルCRUD操作（5層セキュリティ） |
 | `src/lib/git/clone-manager.ts` | クローン処理管理（排他制御） |
 | `src/lib/version-checker.ts` | バージョンアップ通知 |
-| `src/lib/slash-commands.ts` | スラッシュコマンドローダー（.claude/commands, .claude/skills, .codex/skills対応）（Issue #166） |
+| `src/lib/slash-commands.ts` | スラッシュコマンドローダー（.claude/commands, .claude/skills, .codex/skills対応、getCopilotBuiltinCommands追加）（Issue #166, #547） |
 | `src/lib/link-utils.ts` | リンク種別判定・相対パス解決・hrefサニタイズ（Issue #505） |
 | `src/lib/url-path-encoder.ts` | ファイルパスURLエンコード |
 | `src/lib/file-search.ts` | ファイル内容検索 |

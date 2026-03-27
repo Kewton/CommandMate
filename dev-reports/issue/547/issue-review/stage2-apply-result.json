@@ -1,0 +1,53 @@
+{
+  "issue_number": 547,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-03-27",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "F1-001",
+        "status": "applied",
+        "change_summary": "影響範囲テーブルに src/lib/detection/status-detector.ts を追加し、変更内容を「Copilotの選択ウィンドウ検出ロジック追加（STATUS_REASON定数追加含む）」と記載"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "F1-002",
+        "status": "applied",
+        "change_summary": "「調査メモ: Copilot CLI TUI出力」セクションを追加し、実装前にtmux capture-pane出力の採取が必要である旨を記載"
+      },
+      {
+        "id": "F1-003",
+        "status": "applied",
+        "change_summary": "「設計方針: デフォルトスラッシュコマンドの定義方法」セクションを追加し、3つのアプローチ候補とcommand-merger.tsとの整合性確認を記載"
+      },
+      {
+        "id": "F1-004",
+        "status": "applied",
+        "change_summary": "概要にIssue #545のplaceholderパターンとの関係を明記。影響範囲テーブルのcli-patterns.tsの説明に「#545のplaceholderパターンを実態に基づき更新」を追加。関連Issueの#545説明を拡充"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F1-005",
+        "status": "applied",
+        "change_summary": "受入条件に「新規追加パターンおよび検出ロジックの単体テストが追加されている」を追加"
+      },
+      {
+        "id": "F1-006",
+        "status": "skipped",
+        "reason": "Copilot CLIの全デフォルトコマンド一覧は実機調査が必要であり、現時点で正確なリストを記載できないため。調査メモセクションで実装前の調査を促す形で対応済み"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 6,
+    "applied": 5,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/547"
+  }
+}
