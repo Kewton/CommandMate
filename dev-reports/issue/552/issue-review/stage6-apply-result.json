@@ -1,0 +1,20 @@
+{
+  "issue_number": 552,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "applied_findings": [],
+  "skipped_findings": [
+    {
+      "id": "F5-001",
+      "severity": "nice_to_have",
+      "reason": "Nice to have - not required for implementation"
+    },
+    {
+      "id": "F5-002",
+      "severity": "nice_to_have",
+      "reason": "Nice to have - not required for implementation"
+    }
+  ],
+  "issue_updated": false,
+  "summary": "Stage 5 had 0 must_fix and 0 should_fix findings. 2 nice_to_have items skipped. No issue update needed."
+}
