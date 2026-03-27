@@ -11,6 +11,7 @@ import {
   PASTED_TEXT_PATTERN,
   OPENCODE_SKIP_PATTERNS,
   OPENCODE_RESPONSE_COMPLETE,
+  COPILOT_SKIP_PATTERNS,
 } from './detection/cli-patterns';
 import { normalizeOpenCodeLine } from './tui-accumulator';
 
@@ -142,6 +143,32 @@ export function cleanGeminiResponse(response: string): string {
     if (skipPatterns.some(pattern => pattern.test(line))) {
       continue;
     }
+    cleanedLines.push(line);
+  }
+
+  return cleanedLines.join('\n').trim();
+}
+
+/**
+ * Clean Copilot response by removing shell prompts and TUI artifacts
+ * Issue #545: Placeholder implementation - to be refined after Phase 1 TUI investigation
+ *
+ * @param response - Raw Copilot response
+ * @returns Cleaned response
+ */
+export function cleanCopilotResponse(response: string): string {
+  const strippedResponse = stripAnsi(response);
+  const lines = strippedResponse.split('\n');
+  const cleanedLines: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // Skip lines matching any Copilot skip pattern
+    const shouldSkip = COPILOT_SKIP_PATTERNS.some(pattern => pattern.test(trimmed));
+    if (shouldSkip) continue;
+
     cleanedLines.push(line);
   }
 

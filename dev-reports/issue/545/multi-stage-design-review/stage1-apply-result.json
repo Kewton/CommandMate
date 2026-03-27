@@ -1,0 +1,62 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー指摘対応",
+  "applied_findings": [
+    {
+      "finding_id": "DR1-001",
+      "status": "applied",
+      "action_taken": "セクション3-2にgetCommandForTool()マッピング関数方式を記載。ハードコード条件分岐を排除し、OCP準拠のコマンド名解決方式に更新。"
+    },
+    {
+      "finding_id": "DR1-002",
+      "status": "applied",
+      "action_taken": "セクション8の設計決定事項にD1-003移行Issue作成をPRクローズ条件として明記。セクション14の実装チェックリストにも追加。"
+    },
+    {
+      "finding_id": "DR1-003",
+      "status": "applied",
+      "action_taken": "セクション3-1にDRY注記としてgetErrorMessage()重複の技術的負債(D1-002)を記録。copilot.tsでも同パターンを踏襲する方針を明記。"
+    },
+    {
+      "finding_id": "DR1-004",
+      "status": "applied",
+      "action_taken": "セクション3-3をmust_fixとしてマーク。LSP準拠要件を明記し、isInstalled()のオーバーライドをPhase 2必須チェック項目に昇格。3つの必須テストケースを追加。"
+    },
+    {
+      "finding_id": "DR1-005",
+      "status": "applied",
+      "action_taken": "セクション8の設計決定事項にPhase 1での画像サポート調査結果のIssueコメント記録とPhase 2開始前レビュー手順を追加。"
+    },
+    {
+      "finding_id": "DR1-006",
+      "status": "applied",
+      "action_taken": "セクション3-4に注意書きを追加。Phase 1前提調査完了後に不採用モデルを明示的にマークする運用を記載。"
+    },
+    {
+      "finding_id": "DR1-007",
+      "status": "applied",
+      "action_taken": "セクション10のresponse-poller.tsの記載を「全ディスパッチポイントにcopilotケース追加」から「確認対象ディスパッチポイント（前提調査結果に基づき変更要否を判断）」に変更。"
+    },
+    {
+      "finding_id": "DR1-008",
+      "status": "applied",
+      "action_taken": "セクション6-1にtmux sendKeys経路とシェル引数経路の2つのセキュリティ境界の区別を明記。セクション3-4にもセキュリティ境界の区別への参照を追加。"
+    },
+    {
+      "finding_id": "DR1-009",
+      "status": "applied",
+      "action_taken": "セクション3-2にALLOWED_CLI_TOOLSをCLI_TOOL_IDSから導出する推奨方針を追加。意図的分離の場合の代替案も記載。"
+    },
+    {
+      "finding_id": "DR1-010",
+      "status": "applied",
+      "action_taken": "セクション3-1にDRY注記としてsendMessage()共通パターン重複の技術的負債(D1-004)を記録。Template Methodパターン導入を別Issue計画とする方針を明記。"
+    }
+  ],
+  "summary": {
+    "total": 10,
+    "applied": 10,
+    "skipped": 0,
+    "partially_applied": 0
+  }
+}

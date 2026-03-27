@@ -8,6 +8,7 @@ import path from 'path';
 import { format } from 'date-fns';
 import { getLogDir } from '@/config/log-config';
 import { createLogger } from '@/lib/logger';
+import { CLI_TOOL_IDS, CLI_TOOL_DISPLAY_NAMES, isCliToolType } from '@/lib/cli-tools/types';
 
 const logger = createLogger('log-manager');
 
@@ -91,7 +92,7 @@ export async function createLog(
     logContent = await fs.readFile(logPath, 'utf-8');
   } catch {
     // File doesn't exist, create header
-    const toolName = cliToolId === 'claude' ? 'Claude Code' : cliToolId === 'codex' ? 'Codex CLI' : 'Gemini CLI';
+    const toolName = isCliToolType(cliToolId) ? CLI_TOOL_DISPLAY_NAMES[cliToolId] : cliToolId;
     logContent = `# ${toolName} Conversation Log: ${worktreeId}\n\n`;
     logContent += `Created: ${timestamp}\n\n`;
     logContent += `---\n\n`;
@@ -101,7 +102,8 @@ export async function createLog(
   logContent += `## Conversation at ${timestamp}\n\n`;
   logContent += `### User\n\n`;
   logContent += `${userMessage}\n\n`;
-  logContent += `### ${cliToolId === 'claude' ? 'Claude' : cliToolId === 'codex' ? 'Codex' : 'Gemini'}\n\n`;
+  const displayName = isCliToolType(cliToolId) ? CLI_TOOL_DISPLAY_NAMES[cliToolId] : cliToolId;
+  logContent += `### ${displayName}\n\n`;
   logContent += `${claudeResponse}\n\n`;
   logContent += `---\n\n`;
 
@@ -137,7 +139,7 @@ export async function appendToLog(
     logContent = await fs.readFile(logPath, 'utf-8');
   } catch {
     // File doesn't exist, create header
-    const toolName = cliToolId === 'claude' ? 'Claude Code' : cliToolId === 'codex' ? 'Codex CLI' : 'Gemini CLI';
+    const toolName = isCliToolType(cliToolId) ? CLI_TOOL_DISPLAY_NAMES[cliToolId] : cliToolId;
     logContent = `# ${toolName} Conversation Log: ${worktreeId}\n\n`;
     logContent += `Created: ${timestamp}\n\n`;
     logContent += `---\n\n`;
@@ -187,7 +189,7 @@ export async function readLog(worktreeId: string, cliToolId: string = 'claude'):
  * ```
  */
 export async function listLogs(worktreeId: string, cliToolId: string = 'all'): Promise<string[]> {
-  const toolIds = cliToolId === 'all' ? ['claude', 'codex', 'gemini'] : [cliToolId];
+  const toolIds = cliToolId === 'all' ? [...CLI_TOOL_IDS] : [cliToolId];
   const allLogFiles: string[] = [];
 
   for (const toolId of toolIds) {
@@ -221,7 +223,7 @@ export async function listLogs(worktreeId: string, cliToolId: string = 'all'): P
  * ```
  */
 export async function cleanupOldLogs(days: number = 30): Promise<number> {
-  const toolIds = ['claude', 'codex', 'gemini'];
+  const toolIds = [...CLI_TOOL_IDS];
   let totalDeletedCount = 0;
 
   const now = new Date();

@@ -1,0 +1,56 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー - 指摘事項対応",
+  "applied_findings": [
+    {
+      "id": "DR1-004",
+      "severity": "must_fix",
+      "title": "Copilotの通常メッセージもsendMessage()経由で送信可能なのに分岐する根拠が不十分",
+      "action": "設計を「スラッシュコマンドのみ委譲」から「全コマンド委譲」に変更。セクション2にアプローチC改として根拠を明記。修正後フロー図、選定理由表、選定根拠セクションを全面改訂。"
+    },
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "title": "terminal/route.tsにCopilot固有分岐が入るSRP違反リスク",
+      "action": "セクション3-3にSRP違反リスクの管理方針を新設。2つ目のツール固有分岐が必要になった時点でICLIToolインターフェース拡張によるリファクタリングを実施する方針を記載。"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "should_fix",
+      "title": "isSlashCommand()とextractSlashCommand()の二重パースリスク",
+      "action": "全コマンド委譲への設計変更により、isSlashCommand()自体が不要になり解消。セクション3-1で変更不要を明記。"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "should_fix",
+      "title": "isSlashCommand()メソッドの追加は本当に必要か",
+      "action": "全コマンド委譲への設計変更により、isSlashCommand()を追加しない方針に変更。セクション3-1、8の決定事項表に反映。変更ファイルからcopilot.tsを除外。"
+    },
+    {
+      "id": "DR1-008",
+      "severity": "should_fix",
+      "title": "委譲パスでのinvalidateCache二重呼び出し防止の記述が不正確",
+      "action": "セクション3-2のコード例から委譲パス内のinvalidateCache()呼び出しを削除。sendMessage()内の既存invalidateCacheに依存する方針をコメントとセクション8で明記。"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "nice_to_have",
+      "title": "ツール固有処理の拡張にterminal/route.tsの修正が必要（OCP違反）",
+      "action": "セクション8にOCP違反リスクの認識と将来のリファクタリング方針を追記。"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "nice_to_have",
+      "title": "CopilotToolにisSlashCommand()追加によるICLIToolとの非対称性",
+      "action": "isSlashCommand()は追加しなくなったが、型キャスト（as CopilotTool）は残るため、セクション8に将来の拡張パス（handleTerminalCommand?オプショナルメソッド）を記載。"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "nice_to_have",
+      "title": "委譲パターンの代替案評価が一部不足",
+      "action": "セクション2にアプローチD（ICLIToolにhandleTerminalCommand()追加）の評価を追加。アプローチC改（全コマンド委譲）の根拠セクションも新設。"
+    }
+  ],
+  "skipped_findings": [],
+  "design_doc_updated": true
+}

@@ -1,0 +1,47 @@
+{
+  "issue_number": 549,
+  "stage": 1,
+  "stage_name": "通常レビュー指摘対応",
+  "status": "completed",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "title": "useEffect for mobileTab initialization adds a secondary responsibility to MarkdownEditor",
+        "action": "acknowledged_and_kept",
+        "reason": "2-line useEffect does not warrant a dedicated hook. KISS/YAGNI justification documented. Re-evaluation trigger defined for when mobile-specific logic exceeds 3 locations.",
+        "design_policy_section": "10. レビュー指摘事項と設計判断 > SF-001"
+      },
+      {
+        "id": "SF-002",
+        "title": "The two-change approach could be simplified to a single prop",
+        "action": "acknowledged_and_kept",
+        "reason": "initialMobileTab prop does not solve SSR hydration issue (useIsMobile returns false initially). useEffect is still required regardless. Current approach keeps mobile logic encapsulated in MarkdownEditor.",
+        "design_policy_section": "10. レビュー指摘事項と設計判断 > SF-002"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "action": "adopted",
+        "reason": "Will add code comment to desktop Modal MarkdownEditor call explaining intentional omission of initialViewMode."
+      },
+      {
+        "id": "C-002",
+        "action": "acknowledged",
+        "reason": "Already documented in design policy section 3. Will validate during UAT."
+      },
+      {
+        "id": "C-003",
+        "action": "deferred",
+        "reason": "YAGNI. No action needed now."
+      }
+    ]
+  },
+  "updated_files": [
+    "dev-reports/design/issue-549-mobile-markdown-viewer-design-policy.md"
+  ],
+  "source_code_modified": false,
+  "timestamp": "2026-03-27T00:00:00Z"
+}

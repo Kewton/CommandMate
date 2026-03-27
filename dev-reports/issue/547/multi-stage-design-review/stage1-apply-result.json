@@ -1,0 +1,11 @@
+{
+  "issue_number": 547,
+  "stage": 1,
+  "applied_findings": ["DR1-004", "DR1-001", "DR1-003", "DR1-006", "DR1-005", "DR1-007"],
+  "skipped_findings": ["DR1-002"],
+  "skipped_reasons": {
+    "DR1-002": "D1-003原則（Section 9）で既にカバーされており、追加対応不要と判断"
+  },
+  "design_doc_updated": true,
+  "summary": "must_fix 1件（DR1-004: SELECTION_LIST_REASONS Set定数導入）をSection 3-5に反映。should_fix 3件（DR1-001: パターンマッピング移行トレードオフをSection 3-3に追記、DR1-003: TUI調査完了基準をSection 7に追加、DR1-006: getSlashCommandGroups分離検討をSection 3-1に追記）を反映。nice_to_have 2件（DR1-005: categoryコメント追記、DR1-007: promptInput依存明記）も追加反映。Section 10としてレビュー指摘サマリと実装チェックリストを新設。"
+}

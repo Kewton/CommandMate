@@ -1,0 +1,51 @@
+{
+  "issue_number": 547,
+  "stage": 3,
+  "applied_findings": [
+    {
+      "id": "IA3-001",
+      "severity": "must_fix",
+      "title": "SELECTION_LIST_REASONS Set導入とOR条件置換を同一コミットで実施する必要性",
+      "action": "Section 3-5にアトミック実装の要求を追記。Section 12に詳細な実装手順（2ステップ1コミット）を記載。実装チェックリストに2項目追加。"
+    },
+    {
+      "id": "IA3-002",
+      "severity": "should_fix",
+      "title": "CLI waitコマンドがcopilot_selection_list reasonでのwaitingを想定していない",
+      "action": "Section 12にIA3-002注記として挙動確認の要求を記載。実装チェックリストに2項目追加（検証＋ドキュメント/テスト追加）。"
+    },
+    {
+      "id": "IA3-003",
+      "severity": "should_fix",
+      "title": "getCopilotBuiltinCommands()にsourceフィールドが未設定",
+      "action": "Section 3-1のコード例にsource: 'builtin'を追加。Section 12にIA3-003注記を記載。実装チェックリストに2項目追加。"
+    },
+    {
+      "id": "IA3-004",
+      "severity": "should_fix",
+      "title": "cliToolIdガード条件の負例テストが未記載",
+      "action": "Section 5のテスト一覧に負例テスト2件を追加。Section 12にIA3-004注記を記載。実装チェックリストに2項目追加。"
+    }
+  ],
+  "skipped_findings": [],
+  "nice_to_have_noted": [
+    {
+      "id": "IA3-005",
+      "title": "response-poller.ts のCopilot完了判定への波及",
+      "action": "実装チェックリストにnice_to_haveとして1項目追加。"
+    },
+    {
+      "id": "IA3-006",
+      "title": "COPILOT_THINKING_PATTERN の広範マッチリスク",
+      "action": "Section 12のサマリ表に記載（cliToolIdガードで緩和済み）。追加対応なし。"
+    },
+    {
+      "id": "IA3-007",
+      "title": "WorktreeDetailRefactored.tsx のフロントエンド変更不要確認",
+      "action": "Section 12のサマリ表に記載。既存のSection 2の記載が正確であることを確認済み。追加対応なし。"
+    }
+  ],
+  "design_doc_updated": true,
+  "summary": "Stage 3影響分析レビューの全7件の指摘事項を設計方針書に反映。must_fix 1件（IA3-001: SELECTION_LIST_REASONS Set導入とOR条件置換のアトミック実装要求をSection 3-5とSection 12に追記）、should_fix 3件（IA3-002: CLI waitコマンドの挙動確認要求、IA3-003: sourceフィールド追加をコード例に反映、IA3-004: 負例テスト2件をSection 5に追加）を設計方針書に反映し、実装チェックリストに計9項目を追加。nice_to_have 3件はサマリ表に記載。",
+  "timestamp": "2026-03-27T00:00:00Z"
+}

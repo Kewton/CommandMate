@@ -1,0 +1,80 @@
+{
+  "issue_number": 552,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "focus_area": "通常",
+  "review_date": "2026-03-27",
+  "findings": [
+    {
+      "id": "F1-001",
+      "severity": "must_fix",
+      "category": "完全性",
+      "title": "Issue本文が未記入（テンプレートのプレースホルダーのみ）",
+      "description": "Issue本文の全セクション（概要、背景・課題、提案する解決策、代替案、補足情報）がテンプレートのプレースホルダーテキストのままであり、具体的な要件が一切記述されていない。タイトルの「infoのPathをコピペするアイコンを追加してほしい」のみが唯一の情報源となっている。",
+      "recommendation": "最低限、以下を記載すべき: (1) 概要: InfoモーダルのPath欄にクリップボードコピーアイコンを追加する (2) 背景: Pathを手動で選択・コピーする手間を省きたい (3) 提案する解決策: FileViewer.tsxの既存コピーパターン（ClipboardCopy/Checkアイコン切替、2秒フィードバック）を踏襲"
+    },
+    {
+      "id": "F1-002",
+      "severity": "must_fix",
+      "category": "受け入れ条件",
+      "title": "受け入れ条件が未定義",
+      "description": "受け入れ条件（Acceptance Criteria）が一切定義されていない。どの状態をもって完了とするか判断できない。",
+      "recommendation": "以下のような受け入れ条件を追加すべき: (1) InfoモーダルのPath欄横にコピーアイコンが表示されること (2) アイコンクリックでworktree.pathがクリップボードにコピーされること (3) コピー成功時にチェックアイコンに切り替わり2秒後に元に戻ること (4) デスクトップ・モバイル両方で動作すること"
+    },
+    {
+      "id": "F1-003",
+      "severity": "should_fix",
+      "category": "明確性",
+      "title": "「info」の指す対象が曖昧",
+      "description": "タイトルの「info」がInfoモーダルを指すのか、サイドバーの情報表示を指すのか、タイトルだけでは一意に特定できない。コードベース調査によりInfoModal内のWorktreeInfoFieldsコンポーネントのPath表示（L210-214）が対象と推定されるが、Issue本文に明記されていない。",
+      "recommendation": "Issue本文に対象UIの具体的な場所（例: 「Worktree詳細画面のInfoモーダル内のPathフィールド」）を明記する。スクリーンショットの添付も有効。"
+    },
+    {
+      "id": "F1-004",
+      "severity": "should_fix",
+      "category": "明確性",
+      "title": "コピー対象のスコープが不明確",
+      "description": "PathフィールドのみがコピーアイコンのTo対象なのか、Repository Pathなど他のフィールドにも適用すべきかが不明。WorktreeInfoFieldsにはrepositoryPath（L207）も同様に長いパスを表示しており、同じニーズがある可能性が高い。",
+      "recommendation": "コピーアイコンの適用範囲を明記する。Path（worktree.path）のみか、Repository Path（worktree.repositoryPath）も含むか。"
+    },
+    {
+      "id": "F1-005",
+      "severity": "should_fix",
+      "category": "技術的妥当性",
+      "title": "既存パターンとの整合性への言及がない",
+      "description": "プロジェクトにはFileViewer.tsx（L270-276）に既にパスコピー機能の実装パターンが存在する（copyToClipboard + ClipboardCopy/Checkアイコン切替 + 2秒タイマー）。このパターンを踏襲すべきだが、Issueに言及がない。",
+      "recommendation": "Issue本文にFileViewer.tsxの既存パターンを参照先として記載し、UIの一貫性を保つ方針を明記する。"
+    },
+    {
+      "id": "F1-006",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "コピー成功時のフィードバック仕様が未記載",
+      "description": "コピー成功時のユーザーフィードバック（アイコン変化、トースト通知、色変化など）が指定されていない。既存パターンではCheckアイコンへの2秒切替が使われている。",
+      "recommendation": "既存パターン（ClipboardCopy -> Check、2秒後に復帰）を踏襲する旨を記載するとよい。"
+    }
+  ],
+  "summary": "Issue #552はタイトルのみで要件が伝わるシンプルな機能追加だが、Issue本文がテンプレートのまま完全に未記入であり、受け入れ条件も未定義である。実装自体は既存パターン（FileViewer.tsxのcopyToClipboard + アイコン切替）を踏襲すれば技術的に容易だが、対象UIの明確化、コピー対象スコープの決定、受け入れ条件の追加が必要。",
+  "statistics": {
+    "must_fix": 2,
+    "should_fix": 3,
+    "nice_to_have": 1,
+    "total": 6
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/WorktreeDetailSubComponents.tsx",
+      "lines": "210-214",
+      "relevance": "Path表示の現在の実装（変更対象）"
+    },
+    {
+      "file": "src/components/worktree/FileViewer.tsx",
+      "lines": "270-276, 554-558",
+      "relevance": "既存のパスコピーパターン（参考実装）"
+    },
+    {
+      "file": "src/lib/clipboard-utils.ts",
+      "relevance": "copyToClipboardユーティリティ（再利用対象）"
+    }
+  ]
+}

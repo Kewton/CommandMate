@@ -260,7 +260,8 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
         break;
       case 'gemini':
       case 'vibe-local':
-        // No permission flags for gemini/vibe-local; only empty string is valid
+      case 'copilot':
+        // No permission flags for gemini/vibe-local/copilot; only empty string is valid
         allowedValues = [];
         if (permission) {
           logger.warn('parse:permission-ignored', { name: sanitizedName, cliToolId: resolvedCliToolId, permission });

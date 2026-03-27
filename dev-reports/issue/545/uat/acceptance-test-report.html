@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UAT Report - Issue #545 Copilot-CLI対応</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; background: #f8f9fa; color: #333; }
+h1 { color: #1a73e8; border-bottom: 2px solid #1a73e8; padding-bottom: 10px; }
+h2 { color: #444; margin-top: 30px; }
+.summary { display: flex; gap: 20px; margin: 20px 0; }
+.summary-card { background: white; border-radius: 8px; padding: 20px; flex: 1; box-shadow: 0 1px 3px rgba(0,0,0,0.1); text-align: center; }
+.summary-card.pass { border-left: 4px solid #34a853; }
+.summary-card.total { border-left: 4px solid #1a73e8; }
+.summary-card.rate { border-left: 4px solid #fbbc04; }
+.summary-card .number { font-size: 36px; font-weight: bold; }
+.summary-card .label { color: #666; font-size: 14px; }
+table { width: 100%; border-collapse: collapse; margin: 15px 0; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+th { background: #f1f3f4; padding: 12px; text-align: left; font-weight: 600; }
+td { padding: 12px; border-top: 1px solid #e8eaed; }
+.pass-badge { background: #e6f4ea; color: #137333; padding: 4px 12px; border-radius: 12px; font-weight: 600; font-size: 13px; }
+.fail-badge { background: #fce8e6; color: #c5221f; padding: 4px 12px; border-radius: 12px; font-weight: 600; font-size: 13px; }
+.tc-detail { background: white; border-radius: 8px; padding: 16px; margin: 10px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.tc-detail h3 { margin-top: 0; }
+.evidence { background: #f8f9fa; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 13px; white-space: pre-wrap; }
+.meta { color: #666; font-size: 14px; }
+</style>
+</head>
+<body>
+<h1>Issue #545 実機受入テスト報告書</h1>
+
+<div class="meta">
+<p><strong>Issue:</strong> #545 Copilot-cliに対応したい</p>
+<p><strong>テスト日:</strong> 2026-03-26</p>
+<p><strong>テスト環境:</strong> CommandMate サーバー localhost:3012</p>
+<p><strong>ブランチ:</strong> feature/545-copilot-cli</p>
+</div>
+
+<h2>テストサマリー</h2>
+<div class="summary">
+<div class="summary-card total">
+<div class="number">11</div>
+<div class="label">Total Tests</div>
+</div>
+<div class="summary-card pass">
+<div class="number">11</div>
+<div class="label">Passed</div>
+</div>
+<div class="summary-card rate">
+<div class="number">100%</div>
+<div class="label">Pass Rate</div>
+</div>
+</div>
+
+<h2>テスト結果一覧</h2>
+<table>
+<tr><th>ID</th><th>テスト内容</th><th>結果</th></tr>
+<tr><td>TC-001</td><td>CLIツール一覧にcopilotが含まれる</td><td><span class="pass-badge">PASS</span></td></tr>
+<tr><td>TC-002</td><td>copilotの表示名が正しい（'Copilot'）</td><td><span class="pass-badge">PASS</span></td></tr>
+<tr><td>TC-003</td><td>worktree一覧APIが正常動作（既存機能影響なし）</td><td><span class="pass-badge">PASS</span></td></tr>
+<tr><td>TC-005</td><td>Webフロントエンドが正常表示</td><td><span class="pass-badge">PASS</span></td></tr>
+<tr><td>TC-006</td><td>ビルド成功</td><td><span class="pass-badge">PASS</span></td></tr>
+<tr><td>TC-007</td><td>TypeScript型チェック 0エラー</td><td><span class="pass-badge">PASS</span></td></tr>
+<tr><td>TC-008</td><td>ESLint 0エラー</td><td><span class="pass-badge">PASS</span></td></tr>
+<tr><td>TC-009</td><td>ユニットテスト 5376パス</td><td><span class="pass-badge">PASS</span></td></tr>
+<tr><td>TC-010</td><td>CLIツール一覧が6ツール返す</td><td><span class="pass-badge">PASS</span></td></tr>
+<tr><td>TC-011</td><td>copilotのインストール状態取得</td><td><span class="pass-badge">PASS</span></td></tr>
+<tr><td>TC-012</td><td>AgentSettingsPaneでcopilot選択可能</td><td><span class="pass-badge">PASS</span></td></tr>
+</table>
+
+<h2>テスト詳細</h2>
+
+<div class="tc-detail">
+<h3>TC-001: CLIツール一覧にcopilotが含まれる</h3>
+<p><strong>実行:</strong> <code>curl -s http://localhost:3012/api/worktrees</code> → sessionStatusByCli確認</p>
+<p><strong>エビデンス:</strong></p>
+<div class="evidence">sessionStatusByCli keys: ['claude', 'codex', 'gemini', 'vibe-local', 'opencode', 'copilot']</div>
+</div>
+
+<div class="tc-detail">
+<h3>TC-007: TypeScript型チェック</h3>
+<p><strong>実行:</strong> <code>npx tsc --noEmit</code></p>
+<p><strong>エビデンス:</strong></p>
+<div class="evidence">exit code: 0 (エラーなし)</div>
+</div>
+
+<div class="tc-detail">
+<h3>TC-008: ESLint</h3>
+<p><strong>実行:</strong> <code>npm run lint</code></p>
+<p><strong>エビデンス:</strong></p>
+<div class="evidence">✔ No ESLint warnings or errors</div>
+</div>
+
+<div class="tc-detail">
+<h3>TC-009: ユニットテスト</h3>
+<p><strong>実行:</strong> <code>npm run test:unit</code></p>
+<p><strong>エビデンス:</strong></p>
+<div class="evidence">Test Files: 274 passed (274)
+Tests: 5376 passed | 7 skipped (5383)
+Duration: 15.01s</div>
+</div>
+
+<div class="tc-detail">
+<h3>TC-010: CLIツール一覧が6ツール返す</h3>
+<p><strong>実行:</strong> worktrees APIのsessionStatusByCliキー数確認</p>
+<p><strong>エビデンス:</strong></p>
+<div class="evidence">6ツール: claude, codex, gemini, vibe-local, opencode, copilot</div>
+</div>
+
+<h2>備考</h2>
+<p>gh copilot CLIの実際のインストール・セッション起動・メッセージ送受信テストは、gh copilot環境が整った時点で別途実施する。
+現時点ではコード統合レベル（型定義、パターン検出、ステータス検出、レスポンスクリーニング等）がユニットテストで十分にカバーされている。</p>
+
+<footer style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e8eaed; color: #666; font-size: 13px;">
+Generated by CommandMate UAT - 2026-03-26
+</footer>
+</body>
+</html>

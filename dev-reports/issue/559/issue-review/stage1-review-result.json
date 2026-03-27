@@ -1,0 +1,73 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "focus_area": "通常",
+  "iteration": 1,
+  "findings": [
+    {
+      "id": "F1-001",
+      "severity": "must_fix",
+      "category": "正確性・根本原因の特定",
+      "title": "根本原因セクションがterminal API経由の問題のみであることを明記すべき",
+      "description": "Issueの「根本原因」セクションでは「Terminal APIのsendKeysはCopilotの状態を確認せず即座に送信する」と記載されているが、通常のUI操作（MessageInput -> /api/worktrees/:id/send -> CopilotTool.sendMessage()）では既にwaitForPrompt()が実装されており、プロンプト待機が行われている。Issueの記述だと、全てのメッセージ送信経路に問題があるように読める。実際にはterminal API（/api/worktrees/:id/terminal）経由の場合のみ問題が発生する。仮説検証レポートでも「terminal API経由の場合のみ問題が発生する点を明確化すべき」と指摘されている。",
+      "recommendation": "根本原因セクションに以下を追記すべき: (1) sendMessage経路（/api/worktrees/:id/send -> CopilotTool.sendMessage()）では既にwaitForPrompt()が実装済みであること、(2) 問題が発生するのはterminal API（/api/worktrees/:id/terminal）経由でスラッシュコマンドを送信した場合のみであること。これにより修正対象の範囲が明確になる。"
+    },
+    {
+      "id": "F1-002",
+      "severity": "must_fix",
+      "category": "再現手順の正確性",
+      "title": "再現手順がどのUI操作・API経路で問題が起きるか不明",
+      "description": "再現手順では「Copilotに質問を送信 -> 応答中に/modelを送信」とあるが、通常のMessageInput UIで送信した場合は/api/worktrees/:id/send経由でCopilotTool.sendMessage()が呼ばれ、waitForPrompt()によりプロンプト状態まで待機される。この手順で本当に問題が再現するのか、それともterminal API直接呼び出し等の特定操作が必要なのかが不明確。仮説検証の結果、sendMessage経路では既にプロンプト待機が実装されているため、通常のUI操作では問題が再現しない可能性がある。",
+      "recommendation": "再現手順を具体化すべき: (1) どのUI操作（MessageInputの送信ボタン？別のUI？CLI？）で再現するか、(2) terminal API経由の場合はcurlコマンド等の具体例を示す、(3) sendMessage経路で再現するならwaitForPrompt()のタイムアウト（15秒）後に発生するのか等の条件を明記する。"
+    },
+    {
+      "id": "F1-003",
+      "severity": "must_fix",
+      "category": "受入条件の欠如",
+      "title": "受入条件（Acceptance Criteria）が記載されていない",
+      "description": "Issueには「期待する動作」の記載はあるが、実装完了を判定するための具体的な受入条件が定義されていない。関連Issue #547では詳細な受入条件チェックリストが記載されているが、本Issueにはそれがない。どの経路を修正すべきか、テストは必要か、既存機能への影響確認は必要か等が不明確。",
+      "recommendation": "以下の受入条件を追加すべき: (1) terminal API経由でCopilotスラッシュコマンドを送信した場合にプロンプト待機が行われること、(2) Copilotが応答中に/modelを送信しても、テキストとして処理されないこと、(3) 15秒のタイムアウト後の振る舞い（エラー返却 or 通知）が定義されていること、(4) 既存のsendMessage経路に影響がないこと、(5) 単体テストの追加。"
+    },
+    {
+      "id": "F1-004",
+      "severity": "should_fix",
+      "category": "修正方針の不足",
+      "title": "修正方針・実装アプローチが記載されていない",
+      "description": "Issueには問題の記述はあるが、修正方針が記載されていない。複数のアプローチが考えられる: (A) terminal/route.tsでCopilotのスラッシュコマンドを検出した場合にプロンプト待機を追加、(B) UIからのスラッシュコマンド送信をterminal APIではなくsend API経由に統一、(C) terminal APIにcliToolIdベースの分岐を追加しCopilotの場合はCopilotTool.sendMessage()に委譲。どのアプローチを採用するかの判断材料がIssueに不足している。",
+      "recommendation": "修正方針セクションを追加し、少なくとも以下を記載すべき: (1) 候補アプローチの列挙、(2) 推奨アプローチとその理由、(3) 影響範囲（terminal/route.ts、copilot.ts等）。terminal/route.tsは汎用的なキー送信APIであり、ここにCopilot固有のロジックを入れるべきかの設計判断が必要。"
+    },
+    {
+      "id": "F1-005",
+      "severity": "should_fix",
+      "category": "影響範囲の不足",
+      "title": "影響範囲テーブルが記載されていない",
+      "description": "関連Issue #547では影響範囲テーブルが詳細に記載されているが、本Issueにはない。terminal/route.ts、copilot.ts、cli-patterns.ts等のどのファイルに変更が入るか、CLIコマンド（commandmate send等）への影響の有無が不明確。",
+      "recommendation": "影響範囲セクションを追加し、変更対象ファイルと変更内容を明記すべき。特にCLI経路（commandmate send -> /api/worktrees/:id/send）は既にsendMessage()を使っているため影響がないことを確認して記載する。"
+    },
+    {
+      "id": "F1-006",
+      "severity": "should_fix",
+      "category": "waitForPromptのタイムアウト処理",
+      "title": "waitForPromptタイムアウト時の期待動作が未定義",
+      "description": "CopilotTool.waitForPrompt()は15秒のタイムアウトがあり、タイムアウト時はエラーをthrowせずログ出力のみで処理を継続する（copilot.ts:197）。つまり現行のsendMessage経路でも、15秒待って結局テキストとして送信される可能性がある。Issueの「期待する動作」で「プロンプト状態でない場合はユーザーに通知」とあるが、現行実装のタイムアウト挙動との整合性が不明確。",
+      "recommendation": "以下を明確にすべき: (1) waitForPromptのタイムアウト後の挙動（エラー返却してメッセージ送信を中止？それとも送信続行？）、(2) 「ユーザーに通知」の具体的な実現方法（APIエラーレスポンス？UI通知？）、(3) 既存のCopilotTool.sendMessage()のタイムアウト挙動を変更するかどうか。"
+    },
+    {
+      "id": "F1-007",
+      "severity": "nice_to_have",
+      "category": "ドキュメント整合性",
+      "title": "CLAUDE.mdのモジュール説明との整合性確認",
+      "description": "CLAUDE.mdにはterminal/route.tsが「ターミナルコマンド送信API」と記載されているが、このIssueで変更が入る場合はCopilot固有の挙動が追加されることになり、モジュール説明の更新が必要になる可能性がある。",
+      "recommendation": "実装完了後にCLAUDE.mdのモジュール一覧を確認し、必要に応じて更新する。Issue本文に「CLAUDE.md更新」の項目を受入条件に含めることを検討する。"
+    },
+    {
+      "id": "F1-008",
+      "severity": "nice_to_have",
+      "category": "関連Issue参照",
+      "title": "Issue #558への参照が不足",
+      "description": "直近のコミット履歴（63c4a0b5）にIssue #558が含まれており、Copilot CLIスラッシュコマンドと選択リスト処理に関する修正が行われている。本Issueとの関連性があるが、関連Issueセクションに#558が記載されていない。",
+      "recommendation": "関連Issueセクションに#558を追加し、#558での修正と本Issueの問題の差分を明確にする。"
+    }
+  ],
+  "summary": "Issue #559は問題の存在自体は妥当であるが、根本原因の分析と再現手順に重要な不正確さがある。最大の問題は、UIの通常メッセージ送信経路（/api/worktrees/:id/send -> CopilotTool.sendMessage()）では既にwaitForPrompt()が実装済みであり、問題がterminal API経由（/api/worktrees/:id/terminal）でのみ発生する可能性が高い点が明記されていないこと。受入条件・修正方針・影響範囲の記載も不足しており、実装者が適切な修正判断を行うための情報が十分でない。must_fix 3件、should_fix 3件、nice_to_have 2件の指摘事項がある。"
+}

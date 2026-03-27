@@ -12,6 +12,7 @@ import {
   OPENCODE_PROMPT_PATTERN,
   OPENCODE_THINKING_PATTERN,
   OPENCODE_RESPONSE_COMPLETE,
+  COPILOT_SELECTION_LIST_PATTERN,
 } from '@/lib/detection/cli-patterns';
 
 describe('OPENCODE_SELECTION_LIST_PATTERN', () => {
@@ -71,5 +72,59 @@ describe('OPENCODE_SELECTION_LIST_PATTERN', () => {
   it('should not match text containing "Select" in normal conversation', () => {
     expect(OPENCODE_SELECTION_LIST_PATTERN.test('Please select a file to edit')).toBe(false);
     expect(OPENCODE_SELECTION_LIST_PATTERN.test('I selected the model')).toBe(false);
+  });
+});
+
+describe('COPILOT_SELECTION_LIST_PATTERN', () => {
+  it('should be a RegExp', () => {
+    expect(COPILOT_SELECTION_LIST_PATTERN).toBeInstanceOf(RegExp);
+  });
+
+  it('should match "Search models..." prompt', () => {
+    expect(COPILOT_SELECTION_LIST_PATTERN.test('Search models...')).toBe(true);
+  });
+
+  it('should match "Search agents..." prompt', () => {
+    expect(COPILOT_SELECTION_LIST_PATTERN.test('Search agents...')).toBe(true);
+  });
+
+  it('should match "Select Model" header', () => {
+    expect(COPILOT_SELECTION_LIST_PATTERN.test('Select Model')).toBe(true);
+  });
+
+  it('should match in multiline content with Search prompt', () => {
+    const multiline = `Select Model
+Search models...
+❯ gpt-4o
+  gpt-4o-mini
+  claude-3.5-sonnet`;
+    expect(COPILOT_SELECTION_LIST_PATTERN.test(multiline)).toBe(true);
+  });
+
+  it('should match in multiline content with Select Model header', () => {
+    const multiline = `
+Select Model
+  gpt-4o
+❯ gpt-4o-mini
+  claude-3.5-sonnet`;
+    expect(COPILOT_SELECTION_LIST_PATTERN.test(multiline)).toBe(true);
+  });
+
+  it('should not match regular text output', () => {
+    expect(COPILOT_SELECTION_LIST_PATTERN.test('Hello, how can I help you?')).toBe(false);
+    expect(COPILOT_SELECTION_LIST_PATTERN.test('The code looks correct.')).toBe(false);
+  });
+
+  it('should not match thinking pattern text', () => {
+    expect(COPILOT_SELECTION_LIST_PATTERN.test('Thinking about your question...')).toBe(false);
+  });
+
+  it('should not match non-selection CLI output patterns', () => {
+    expect(COPILOT_SELECTION_LIST_PATTERN.test('> ')).toBe(false);
+    expect(COPILOT_SELECTION_LIST_PATTERN.test('esc to interrupt')).toBe(false);
+  });
+
+  it('should not use the global flag (no /g)', () => {
+    expect(COPILOT_SELECTION_LIST_PATTERN.global).toBe(false);
   });
 });

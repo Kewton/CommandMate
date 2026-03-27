@@ -1,0 +1,125 @@
+{
+  "issue_number": 559,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "review_date": "2026-03-27",
+  "design_doc": "dev-reports/design/issue-559-copilot-slash-cmd-fix-design-policy.md",
+  "status": "completed",
+  "summary": "設計書とコードベースの間に6件の不整合を検出。must_fix 1件、should_fix 3件、nice_to_have 2件。最重要の問題は、設計書がCopilotTool型キャストを必要としているが、ICLIToolインターフェースに既にsendMessage()が定義されているため不要である点。",
+  "findings": [
+    {
+      "id": "CR2-001",
+      "severity": "should_fix",
+      "category": "型整合性",
+      "title": "CopilotToolへの型キャストは不要 -- ICLIToolにsendMessage()が既に存在",
+      "description": "設計書セクション3-2のコード例では `manager.getTool('copilot') as CopilotTool` と型キャストしているが、ICLITool インターフェース (src/lib/cli-tools/types.ts L56) に既に `sendMessage(worktreeId: string, message: string): Promise<void>` が定義されている。そのため CopilotTool への型キャストは不要であり、getTool() の戻り値 ICLITool をそのまま使用して cliTool.sendMessage(params.id, command) を呼べる。",
+      "design_ref": "セクション3-2, セクション8 DR1-005",
+      "actual_code_ref": "src/lib/cli-tools/types.ts L56, src/lib/cli-tools/manager.ts L63",
+      "recommendation": "設計書のコード例を `const cliTool = manager.getTool(cliToolId); await cliTool.sendMessage(params.id, command);` に修正する。型キャスト不要のため、CopilotToolのimportも不要。セクション8のDR1-005(LSP非対称性)の記述も「sendMessage()はICLIToolに定義済みのため型キャスト不要」に更新すべき。",
+      "impact": "型キャストを残すと、不要なCopilotTool importが追加され、将来の保守性が低下する。また設計書のLSP違反の懸念(DR1-005)自体が解消される。"
+    },
+    {
+      "id": "CR2-002",
+      "severity": "should_fix",
+      "category": "コード例の正確性",
+      "title": "設計書のimport文が不要になる",
+      "description": "設計書セクション3-2で `import { CopilotTool } from '@/lib/cli-tools/copilot';` のimport追加を指示しているが、CR2-001の通りICLIToolのsendMessage()を使用すれば、このimportは不要。",
+      "design_ref": "セクション3-2 冒頭のimport指示",
+      "actual_code_ref": "src/app/api/worktrees/[id]/terminal/route.ts",
+      "recommendation": "CopilotTool importの指示を削除する。",
+      "impact": "不要なimportはバンドルサイズやモジュール結合度に軽微な影響を与える。"
+    },
+    {
+      "id": "CR2-003",
+      "severity": "must_fix",
+      "category": "テスト整合性",
+      "title": "既存テストのisCliToolTypeモックにcopilotが含まれていない",
+      "description": "tests/unit/terminal-route.test.ts L12のisCliToolTypeモックは ['claude', 'codex', 'gemini', 'vibe-local', 'opencode'] のみを許可しており、'copilot'が含まれていない。このまま実装してCopilot委譲テストを追加すると、cliToolId='copilot'が400エラーになり、テストが正しく機能しない。設計書はこの既存モックの修正について言及していない。",
+      "design_ref": "セクション5 テスト戦略",
+      "actual_code_ref": "tests/unit/terminal-route.test.ts L12",
+      "recommendation": "テスト戦略に「既存のisCliToolTypeモックにcopilotを追加する」手順を明記する。実装時にモックを修正しないとCopilot関連テストが全て失敗する。",
+      "impact": "テスト実装時に混乱を招き、デバッグ時間が無駄になる可能性が高い。"
+    },
+    {
+      "id": "CR2-004",
+      "severity": "should_fix",
+      "category": "コード例の正確性",
+      "title": "設計書のコード例でcliToolIdのcopilot判定だけでなく、他ツールもsendMessage可能な点が未考慮",
+      "description": "設計書はCopilotのみの特殊処理としてcliToolId === 'copilot'分岐を追加するが、実際にはICLIToolインターフェースの全ツールがsendMessage()を持つ。設計のアプローチD(handleTerminalCommand)への将来拡張パスの議論が、ICLIToolに既にsendMessage()が存在する事実を考慮していない。terminal/route.tsからsendMessage()を呼ぶことは、Copilot固有ではなく全ツールで可能な操作である。",
+      "design_ref": "セクション2 アプローチD評価, セクション8 将来の拡張パス",
+      "actual_code_ref": "src/lib/cli-tools/types.ts L56 ICLITool.sendMessage()",
+      "recommendation": "設計書に「ICLIToolに既にsendMessage()が定義されているため、将来他ツールでもterminal route経由のsendMessage委譲が必要になった場合、型キャストなしで拡張可能」という注記を追加する。handleTerminalCommand()パターンはsendMessage()と責務が重複する可能性がある点も明記すべき。",
+      "impact": "将来の設計判断に影響。過度な抽象化を避けるためにも、既存インターフェースの活用可能性を記録しておくべき。"
+    },
+    {
+      "id": "CR2-005",
+      "severity": "nice_to_have",
+      "category": "設計書の正確性",
+      "title": "sendKeys呼び出しのデフォルトsendEnterパラメータの未記載",
+      "description": "terminal/route.ts L82の `await sendKeys(sessionName, command)` はsendEnter引数を省略しており、デフォルトの `true` が適用される(つまりEnterキーが自動送信される)。一方、CopilotTool.sendMessage()内ではsendKeys呼び出し時にsendEnterを明示的に制御している(L261: true, L269: false)。設計書はこのsendEnter挙動の違いについて言及していない。",
+      "design_ref": "セクション3-2",
+      "actual_code_ref": "src/app/api/worktrees/[id]/terminal/route.ts L82, src/lib/tmux/tmux.ts L211-214, src/lib/cli-tools/copilot.ts L261,L269",
+      "recommendation": "設計書の影響範囲分析に、sendEnter挙動の違いについて簡潔に触れると、実装者の理解が深まる。ただし、sendMessage()に委譲する設計のため、terminal/route.ts側ではsendEnterの制御は不要。",
+      "impact": "実装には影響しないが、設計書の完全性向上に寄与する。"
+    },
+    {
+      "id": "CR2-006",
+      "severity": "nice_to_have",
+      "category": "設計書の正確性",
+      "title": "CLIToolManagerのgetToolメソッドのパラメータ名の不一致",
+      "description": "設計書セクション3-2のコード例では `manager.getTool('copilot')` とハードコードされた文字列を使用しているが、実際の分岐条件は `cliToolId === 'copilot'` であり、既にL69で `const cliTool = manager.getTool(cliToolId)` が呼ばれている。設計書のコード例は既存のcliTool変数を再利用するのではなく、別途getTool('copilot')を呼んでいる点が実際のコードパターンと整合しない。",
+      "design_ref": "セクション3-2 コード例",
+      "actual_code_ref": "src/app/api/worktrees/[id]/terminal/route.ts L68-69",
+      "recommendation": "コード例を既存の `cliTool` 変数を再利用する形に修正する: `await cliTool.sendMessage(params.id, command);`。CR2-001と合わせて対応すれば、追加のgetTool呼び出しもCopilotTool importも不要になり、変更がさらに最小化される。",
+      "impact": "コードの簡潔さと既存パターンとの一貫性が向上する。"
+    }
+  ],
+  "checklist": {
+    "design_reflects_codebase_structure": {
+      "status": "pass_with_findings",
+      "detail": "ファイルパス、モジュール構成は正確。ただしICLIToolインターフェースの既存sendMessage()メソッドの存在が考慮されておらず、不要な型キャストとimportが設計に含まれている(CR2-001, CR2-002)。"
+    },
+    "function_signatures_consistent": {
+      "status": "pass_with_findings",
+      "detail": "sendMessage(worktreeId, message)のシグネチャは正確。ただしCopilotTool固有ではなくICLIToolの共通メソッドである点が見落とされている(CR2-001)。getTool()の戻り値型がICLIToolである点も未反映(CR2-004)。"
+    },
+    "import_paths_correct": {
+      "status": "fail",
+      "detail": "設計書が指示する `import { CopilotTool } from '@/lib/cli-tools/copilot'` は不要(CR2-002)。既存のimportで十分。"
+    },
+    "code_example_matches_patterns": {
+      "status": "fail",
+      "detail": "設計書のコード例は既存コードパターンと整合しない。既存L69の `cliTool` 変数を再利用すべきだが、別途getTool('copilot')を呼んでいる(CR2-006)。"
+    },
+    "no_change_files_verified": {
+      "status": "pass",
+      "detail": "copilot.ts, session-key-sender.ts, special-keys/route.ts, cli-patterns.ts, 他CLIツールへの影響なしは正確。sendMessage()はICLIToolに定義済みであり、Copilotの実装変更は不要。"
+    },
+    "test_strategy_consistent": {
+      "status": "fail",
+      "detail": "テスト戦略は概ね正確だが、既存のisCliToolTypeモックにcopilotが含まれていない問題への対応が欠落している(CR2-003)。この修正なしではCopilot関連テストが全て失敗する。"
+    }
+  },
+  "risk_assessment": {
+    "overall_risk": "low",
+    "detail": "設計の基本方針(全コマンドsendMessage委譲)は正しく、実装への影響範囲も適切に限定されている。検出された不整合は全て設計書の修正で解決可能であり、アーキテクチャ上の根本的な問題はない。最大のリスクはCR2-003(テストモック不備)で、実装時のテスト失敗を引き起こす。"
+  },
+  "improvement_recommendations": [
+    {
+      "priority": 1,
+      "description": "CR2-001/CR2-002/CR2-006を統合対応: 設計書のコード例を、既存のcliTool変数とICLITool.sendMessage()を活用する形に簡素化する。CopilotTool importと型キャストを削除。",
+      "expected_benefit": "変更範囲の最小化、不要な型依存の排除、LSP違反懸念(DR1-005)の自然解消"
+    },
+    {
+      "priority": 2,
+      "description": "CR2-003対応: テスト戦略セクションに既存isCliToolTypeモックへのcopilot追加手順を明記する。",
+      "expected_benefit": "実装時のテスト失敗回避、開発効率の向上"
+    },
+    {
+      "priority": 3,
+      "description": "CR2-004対応: ICLIToolに既にsendMessage()が存在する事実を踏まえ、将来の拡張パス(セクション8)の記述を見直す。",
+      "expected_benefit": "将来のリファクタリング判断の精度向上"
+    }
+  ]
+}

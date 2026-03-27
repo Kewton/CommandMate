@@ -1,0 +1,63 @@
+{
+  "issue_number": 547,
+  "stage": 4,
+  "stage_name": "影響範囲レビュー反映",
+  "apply_date": "2026-03-27",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "F3-001",
+        "status": "applied",
+        "change_summary": "STATUS_REASON に COPILOT_SELECTION_LIST 定数追加を明記。current-output/route.ts を影響範囲表に追加し isSelectionListActive 判定条件の更新を記載。受入条件にも追加。"
+      },
+      {
+        "id": "F3-002",
+        "status": "applied",
+        "change_summary": "detectSessionStatus() の Copilot 選択リスト検出分岐追加を影響範囲表に詳細化。調査メモに検出アプローチ（OpenCode方式 vs Claude方式）の調査項目を追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "F3-003",
+        "status": "applied",
+        "change_summary": "current-output/route.ts を影響範囲表に追加。isSelectionListActive の条件に COPILOT_SELECTION_LIST を追加する変更を明記。"
+      },
+      {
+        "id": "F3-004",
+        "status": "applied",
+        "change_summary": "response-cleaner.ts を影響範囲表に追加。COPILOT_SKIP_PATTERNS の確認・更新が必要な場合の対応を明記（調査結果に依存する旨を記載）。"
+      },
+      {
+        "id": "F3-005",
+        "status": "applied",
+        "change_summary": "設計方針セクションに cliTools: ['copilot'] の設定が必須である旨を追加。filterCommandsByCliTool() の仕様（undefined = claude-only）との整合性を明記。受入条件にも追加。"
+      },
+      {
+        "id": "F3-006",
+        "status": "applied",
+        "change_summary": "受入条件のテスト要件を具体的なテストファイル名・テストケース内容で詳細化（cli-patterns-selection.test.ts, status-detector-selection.test.ts, slash-commands, response-cleaner）。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F3-007",
+        "status": "applied",
+        "change_summary": "設計方針セクションにハードコードコマンドの挿入ポイントとキャッシュ戦略に関する記載を追加。"
+      },
+      {
+        "id": "F3-008",
+        "status": "applied",
+        "change_summary": "レビュー履歴セクションに実装完了後のCLAUDE.md更新について記載。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 8,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/547"
+  }
+}

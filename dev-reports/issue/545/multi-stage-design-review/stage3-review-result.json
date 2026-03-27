@@ -1,0 +1,147 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "findings": [
+    {
+      "id": "IA3-001",
+      "severity": "must_fix",
+      "category": "missing_impact",
+      "title": "log-manager.ts のツール名マッピングが hardcoded で copilot 未対応",
+      "description": "log-manager.ts の3箇所(line 94, 104, 140)でツール名を if-else チェーンで解決しているが、claude/codex/gemini の3種のみ対応。copilot, vibe-local, opencode も未対応。設計書では「ツール名マッピング更新（CLI_TOOL_DISPLAY_NAMES利用リファクタ検討）」と記載があるが「検討」にとどまり、具体的対応が不明確。copilot 追加時に toolName が 'Gemini CLI' にフォールバックする。",
+      "location": "src/lib/log-manager.ts:94,104,140",
+      "recommendation": "CLI_TOOL_DISPLAY_NAMES を import して toolName 解決に使用するか、copilot ケースを明示的に追加する。設計書の Phase 4 チェックリストに具体的修正内容として記載すること。",
+      "design_doc_reference": "セクション 10 変更ファイル一覧"
+    },
+    {
+      "id": "IA3-002",
+      "severity": "must_fix",
+      "category": "missing_impact",
+      "title": "log-manager.ts listLogs() が claude/codex/gemini のみ hardcoded",
+      "description": "listLogs() (line 190) で cliToolId === 'all' の場合 ['claude', 'codex', 'gemini'] のみ列挙しており、copilot/vibe-local/opencode のログが 'all' 指定時に取得されない。copilot のログ出力自体は正常に動作するが、一覧表示から漏れる。",
+      "location": "src/lib/log-manager.ts:190",
+      "recommendation": "CLI_TOOL_IDS を import して 'all' ケースで使用する。または copilot 含む全ツールIDリストに更新する。",
+      "design_doc_reference": "セクション 10 変更ファイル一覧"
+    },
+    {
+      "id": "IA3-003",
+      "severity": "must_fix",
+      "category": "missing_impact",
+      "title": "response-poller.ts の cliToolId 分岐箇所が網羅的に分析されていない",
+      "description": "response-poller.ts には cliToolId による分岐が 20箇所以上存在する(line 295, 305, 307, 344, 372, 373, 375, 395, 401, 407, 435, 471, 489, 605, 637, 690, 697, 699, 701, 799)。設計書では「確認対象」として一括記載されているが、各分岐ポイントで copilot がどの既存パスに合流すべきか(codex/gemini パスか、default パスか)の判断が未記載。特に completion detection(line 372-375) で copilot は isCodexOrGeminiComplete/isClaudeComplete/isOpenCodeDone のいずれにも含まれず、完了検出が機能しない。",
+      "location": "src/lib/polling/response-poller.ts:372-375",
+      "recommendation": "response-poller.ts の各 cliToolId 分岐ポイントを個別にリストアップし、copilot の分類(REPL型なら codex/gemini 合流、ワンショットなら独自ロジック)を Phase 1 調査後に決定する旨を設計書に明記。特に completion detection は copilot 完了検出ロジックの追加が必須。",
+      "design_doc_reference": "セクション 10 response-poller.ts 行"
+    },
+    {
+      "id": "IA3-004",
+      "severity": "should_fix",
+      "category": "missing_impact",
+      "title": "cmate-validator.ts の permission バリデーションが copilot 未対応",
+      "description": "cmate-validator.ts (line 251-252) で cliToolId === 'codex' の場合のみ CODEX_SANDBOXES、それ以外は CLAUDE_PERMISSIONS を使用。copilot の permission モデルが Claude とも Codex とも異なる場合、不正なバリデーションとなる。設計書では「cmate-validator.ts: copilot対応」と記載があるが具体的な変更内容が不明。",
+      "location": "src/lib/cmate-validator.ts:250-252",
+      "recommendation": "copilot の permission モデルを Phase 1 で調査し、適切なバリデーションルールを決定。設計書に具体的な分岐ロジックを追記する。",
+      "design_doc_reference": "セクション 10 変更ファイル一覧"
+    },
+    {
+      "id": "IA3-005",
+      "severity": "should_fix",
+      "category": "missing_impact",
+      "title": "status-detector.ts の tool-specific 分岐で copilot の挙動が未定義",
+      "description": "status-detector.ts には以下の tool-specific 分岐が存在: (1) promptInput の全バッファ使用判定(line 184: opencode/codex/claude のみ), (2) Claude selection list 検出(line 203), (3) OpenCode TUI 検出(line 233), (4) Codex 特有検出(line 330)。copilot がこれらのどこに合流すべきか、または独自の検出が必要かが設計書に記載されていない。",
+      "location": "src/lib/detection/status-detector.ts:184,203,233,330",
+      "recommendation": "Phase 1 調査後に copilot の promptInput 判定(全バッファ or lastLines)を決定し、設計書セクション 9 に追記する。",
+      "design_doc_reference": "セクション 9 status-detector.ts への追加"
+    },
+    {
+      "id": "IA3-006",
+      "severity": "should_fix",
+      "category": "missing_impact",
+      "title": "response-extractor.ts の cliToolId 分岐で copilot が default パス未検証",
+      "description": "response-extractor.ts の resolveExtractionStartIndex() で opencode(line 88) と codex(line 103) に専用ロジックがあり、それ以外は汎用パスを通る。copilot がこの汎用パスで正しく動作するか検証が必要だが、設計書では「条件付き変更ファイル」として曖昧に記載。",
+      "location": "src/lib/response-extractor.ts:88,103",
+      "recommendation": "copilot のレスポンス抽出が汎用パスで機能することを Phase 3 テストで明示的に検証する項目をテスト戦略に追加する。",
+      "design_doc_reference": "セクション 10 変更ファイル（前提調査結果に依存）"
+    },
+    {
+      "id": "IA3-007",
+      "severity": "should_fix",
+      "category": "missing_impact",
+      "title": "assistant-response-saver.ts cleanCliResponse() に copilot ケース追加の詳細が不足",
+      "description": "cleanCliResponse() (line 193-207) の switch 文で copilot は default ケース(output.trim())にフォールバックする。設計書では「cleanCliResponse() copilotケース追加」と記載があるが、cleanCopilotResponse() を呼ぶ case 'copilot' の追加が必要。response-cleaner.ts での cleanCopilotResponse 実装とセットで記載すべき。",
+      "location": "src/lib/assistant-response-saver.ts:193-207",
+      "recommendation": "Phase 3 実装時に assistant-response-saver.ts の cleanCliResponse() に case 'copilot': return cleanCopilotResponse(output) を追加。response-poller.ts の re-export にも cleanCopilotResponse を追加する。",
+      "design_doc_reference": "セクション 10 変更ファイル（確定）"
+    },
+    {
+      "id": "IA3-008",
+      "severity": "should_fix",
+      "category": "missing_test_impact",
+      "title": "テスト更新対象の網羅性不足",
+      "description": "設計書のテスト戦略(セクション 11)では既存テスト更新として5ファイルを列挙しているが、以下のテストファイルが漏れている: (1) tests/unit/lib/claude-executor.test.ts (ALLOWED_CLI_TOOLS, buildCliArgs, getCommandForTool), (2) tests/unit/lib/cli-patterns.test.ts (copilot パターン追加), (3) tests/unit/lib/resolve-extraction-start-index.test.ts (copilot デフォルトパス), (4) tests/unit/cli/commands/send.test.ts (--agent copilot), (5) tests/unit/cli/commands/respond.test.ts (--agent copilot), (6) tests/unit/cli/commands/capture.test.ts (--agent copilot), (7) tests/unit/cli/commands/auto-yes.test.ts (--agent copilot), (8) tests/integration/api-send-cli-tool.test.ts, (9) tests/integration/api-respond-cli-tool.test.ts, (10) tests/integration/api-kill-session-cli-tool.test.ts。64ファイルが cliToolId/CLI_TOOL_IDS を参照しており、影響範囲が広い。",
+      "location": "テスト戦略セクション 11",
+      "recommendation": "テスト更新対象リストを拡充する。特に (1) claude-executor.test.ts と (2) cli-patterns.test.ts は必須。CLI コマンドテスト群はクロスバリデーションテストで間接的にカバーされるが、明示的に記載すべき。",
+      "design_doc_reference": "セクション 11 既存テスト更新"
+    },
+    {
+      "id": "IA3-009",
+      "severity": "should_fix",
+      "category": "missing_impact",
+      "title": "prompt-answer-sender.ts の Claude multi-choice 分岐が copilot に影響する可能性",
+      "description": "prompt-answer-sender.ts (line 50) で cliToolId === 'claude' の場合にマルチチョイスプロンプトの特別処理がある。copilot もインタラクティブプロンプトを持つ場合、この分岐ロジックの検討が必要だが、設計書の変更ファイル一覧に prompt-answer-sender.ts が含まれていない（条件付き変更にのみ記載）。",
+      "location": "src/lib/prompt-answer-sender.ts:50",
+      "recommendation": "Phase 1 で copilot のプロンプト応答方式を確認し、prompt-answer-sender.ts の変更要否を明確化する。",
+      "design_doc_reference": "セクション 10 変更ファイル（前提調査結果に依存）"
+    },
+    {
+      "id": "IA3-010",
+      "severity": "nice_to_have",
+      "category": "rollback_strategy",
+      "title": "ロールバック戦略が未記載",
+      "description": "copilot サポートに問題が発生した場合のロールバック手順が設計書に記載されていない。types.ts の CLI_TOOL_IDS から 'copilot' を削除するだけで TypeScript コンパイルエラーにより全変更箇所が検出されるため技術的には容易だが、DB に保存済みの cliToolId='copilot' データの扱い(既存 worktree レコード)が未検討。",
+      "location": "設計書全体",
+      "recommendation": "ロールバック時の手順を簡潔に記載する。特に DB レコードの cliToolId='copilot' を持つ worktree の扱い(表示エラー防止のための isCliToolType フォールバック)を検討する。",
+      "design_doc_reference": "新規セクション追加を推奨"
+    },
+    {
+      "id": "IA3-011",
+      "severity": "nice_to_have",
+      "category": "missing_impact",
+      "title": "command-merger.ts の claude 専用分岐",
+      "description": "command-merger.ts (line 194) で cliToolId === 'claude' の場合にのみ true を返す分岐がある。copilot がコマンドマージ機能をサポートするかは不明だが、設計書の変更ファイル一覧に条件付きで記載されており対応は適切。ただし Phase 1 で明示的に判断すべき。",
+      "location": "src/lib/command-merger.ts:194",
+      "recommendation": "Phase 1 チェックリストに command-merger.ts の copilot 対応要否判断を追加。",
+      "design_doc_reference": "セクション 10 変更ファイル（前提調査結果に依存）"
+    },
+    {
+      "id": "IA3-012",
+      "severity": "nice_to_have",
+      "category": "existing_behavior_safety",
+      "title": "既存ツールの動作への影響は限定的であることの確認",
+      "description": "CLI_TOOL_IDS への 'copilot' 追加は型導出により自動的に全バリデーションに反映される。既存の switch/case 文は default ケースを持つものが多く、copilot 追加による既存ツールの動作変更リスクは低い。ただし ALLOWED_CLI_TOOLS が CLI_TOOL_IDS から導出されるリファクタ(DR2-002)実施時、スケジュール実行 API で copilot が自動的に許可される点に注意。",
+      "location": "src/app/api/worktrees/[id]/schedules/route.ts:110",
+      "recommendation": "DR2-002 実施後、スケジュール実行 API が copilot を受け入れることを意図的に確認するテストを追加する。",
+      "design_doc_reference": "セクション 3-2 DR2-002"
+    }
+  ],
+  "summary": {
+    "total_findings": 12,
+    "must_fix": 3,
+    "should_fix": 6,
+    "nice_to_have": 3
+  },
+  "review_metadata": {
+    "reviewer": "architecture-review-agent",
+    "date": "2026-03-26",
+    "issue_number": 545,
+    "design_doc": "dev-reports/design/issue-545-copilot-cli-design-policy.md",
+    "codebase_search_summary": {
+      "files_with_cliToolId_references": 64,
+      "switch_case_on_cliToolId": 4,
+      "if_else_on_cliToolId": 30,
+      "CLI_TOOL_IDS_references": 25,
+      "cli_tools_imports": 55,
+      "test_files_affected": 64
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "issue_number": 549,
+  "acceptance_criteria": [
+    "モバイル（768px未満）でMarkdownファイルのMarkdownEditorを開いた際、Previewタブがデフォルトで選択されていること",
+    "モバイルでeditorタブへの切替が引き続き可能であること",
+    "PC版（デスクトップ）のMarkdownEditor動作に影響がないこと",
+    "モバイルでの初期表示がlocalStorageの既存viewMode設定に影響されないこと",
+    "MARPファイルの表示フローに影響がないこと",
+    "WorktreeDetailRefactored.tsxのモバイルModal経由でMarkdownEditorを開いた場合も、Previewタブがデフォルトで選択されること"
+  ],
+  "implementation_tasks": [
+    "MarkdownEditor.tsx: mobileTab stateの直後にuseEffectを追加。isMobileがtrueの場合にsetMobileTab('preview')を実行。依存配列は[isMobile]のみ",
+    "WorktreeDetailRefactored.tsx: モバイルレイアウトのMarkdownEditor呼び出し(line 1869付近)にinitialViewMode='split'を追加"
+  ],
+  "test_requirements": [
+    "モバイル環境（useIsMobile=true）でMarkdownEditorを開いた際にpreviewタブがデフォルト選択されること",
+    "PC環境（useIsMobile=false）ではeditorが初期表示のまま変更なしであること",
+    "モバイルでlocalStorageにviewMode='editor'が保存されていても、previewが初期表示されること",
+    "filePath変更時にmobileTabがリセットされないこと（意図的な挙動）",
+    "WorktreeDetailRefactored.tsxのモバイルMarkdownEditor Modal呼び出し時にinitialViewMode='split'が渡されていること"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-549-mobile-markdown-viewer-design-policy.md",
+  "work_plan_path": "dev-reports/issue/549/work-plan.md"
+}

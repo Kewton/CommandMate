@@ -1,0 +1,62 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "applied_findings": [
+    {
+      "finding_id": "F1-001",
+      "status": "applied",
+      "action_taken": "D1-003レジストリパターン移行閾値について背景・課題セクションとアーキテクチャ決定事項セクションに明記。本Issueでは延期し別Issueで対応する方針を決定・記載した。"
+    },
+    {
+      "finding_id": "F1-002",
+      "status": "applied",
+      "action_taken": "src/cli/config/cli-tool-ids.tsをPhase 2の実装タスクおよび変更対象ファイルテーブルに追加。cross-validationテストとの整合性が必須である旨を注記。受入条件にもCLI側同期の項目を追加。"
+    },
+    {
+      "finding_id": "F1-003",
+      "status": "applied",
+      "action_taken": "assistant-response-saver.tsとresponse-poller.tsをPhase 3の実装タスクおよび変更対象ファイルテーブルに追加。それぞれcleanCliResponse()のswitch文とレスポンスクリーニングif-elseチェーンへのcopilotケース追加を明記。"
+    },
+    {
+      "finding_id": "F1-004",
+      "status": "applied",
+      "action_taken": "index.tsのバレルエクスポートにはCopilotToolを追加しない方針を明記（VibeLocalTool/OpenCodeToolと同じパターン）。変更対象ファイルテーブルからindex.tsを削除し、Phase 2に注記を追加。"
+    },
+    {
+      "finding_id": "F1-005",
+      "status": "applied",
+      "action_taken": "IImageCapableCLIToolの実装を前提調査の結果に基づく条件付きに変更。概要から画像送信対応の記載を削除し、前提調査タスクに画像入力サポート確認を追加。受入条件の画像添付項目を条件付きに変更。"
+    },
+    {
+      "finding_id": "F1-006",
+      "status": "applied",
+      "action_taken": "概要に注意書きを追加し、gh copilotがgh CLI拡張であること、永続REPLではない可能性を明記。前提調査タスクにコマンド形式確認とインタラクションモデル確認を追加。Phase 1として実装前に調査を実施する構成に変更。"
+    },
+    {
+      "finding_id": "F1-007",
+      "status": "applied",
+      "action_taken": "MAX_SELECTED_AGENTS=4を維持する方針を明示的に決定。アーキテクチャ決定事項セクションに記載し、関連コンポーネントの記載を変更不要に更新。"
+    },
+    {
+      "finding_id": "F1-008",
+      "status": "applied",
+      "action_taken": "前提調査タスクにTUIレイアウト分析を追加。status-detector.tsの実装タスクにツール固有検出ブロックの必要性判断を含む注記を追加。プロンプト検出・ステータス検出セクションにもOpenCode/Codexブロックと同等の複雑さが必要になる可能性を明記。"
+    },
+    {
+      "finding_id": "F1-009",
+      "status": "applied",
+      "action_taken": "Phase 5にCLAUDE.mdモジュール参照テーブル更新タスクを追加。変更対象ファイルテーブルにもCLAUDE.mdを追加。"
+    },
+    {
+      "finding_id": "F1-010",
+      "status": "applied",
+      "action_taken": "アーキテクチャ決定事項セクションにslash-commands.tsの対応方針を明記（copilot-cliが独自形式を持つ場合のみ変更、既存ローダーで対応可能であれば変更不要）。関連コンポーネントの記載も更新。"
+    }
+  ],
+  "summary": {
+    "total": 10,
+    "applied": 10,
+    "skipped": 0,
+    "partially_applied": 0
+  }
+}

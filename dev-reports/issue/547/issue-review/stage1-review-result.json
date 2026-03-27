@@ -1,0 +1,91 @@
+{
+  "issue_number": 547,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "focus_area": "通常",
+  "review_date": "2026-03-27",
+  "findings": [
+    {
+      "id": "F1-001",
+      "severity": "must_fix",
+      "category": "accuracy",
+      "title": "影響範囲テーブルにstatus-detector.tsが欠落している",
+      "description": "Issue本文の影響範囲テーブルには `src/lib/cli-tools/copilot.ts` が記載されているが、選択ウィンドウ検出の主要な変更対象である `src/lib/detection/status-detector.ts` が含まれていない。仮説検証でも確認された通り、status-detector.ts はClaude（L198-211）やOpenCode（L281-296）と同様にCopilot用の選択リスト検出ロジックを追加する必要があるファイルである。一方で copilot.ts 自体への変更は限定的である可能性が高い。",
+      "suggestion": "影響範囲テーブルに `src/lib/detection/status-detector.ts` を追加し、変更内容を「Copilotの選択ウィンドウ検出ロジック追加（STATUS_REASON定数追加含む）」と記載する。また `copilot.ts` の変更内容をより具体的に記載するか、変更が不要であれば削除する。"
+    },
+    {
+      "id": "F1-002",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "Copilot CLIの実際のTUI出力パターンに関する調査情報が不足",
+      "description": "Issue本文では `/model` 実行時の選択ウィンドウについて言及しているが、Copilot CLIが実際にどのような形式で選択リストを表示するかの情報が記載されていない。cli-patterns.ts に追加するパターン（正規表現）を定義するには、実際のtmux capture-pane出力を把握する必要がある。OpenCode は `OPENCODE_SELECTION_LIST_PATTERN = /^\\s*(Select\\s+(model|provider)|Connect\\s+a\\s+provider)/m` のようにヘッダーテキストをマッチしており、Claude は `CLAUDE_SELECTION_LIST_FOOTER = /Enter\\s+to\\s+select\\s+.*to\\s+navigate/` のようにフッターテキストをマッチしている。Copilot CLIの選択リストがどちらの形式に近いか、あるいは独自形式かの情報が実装に必要。",
+      "suggestion": "再現手順に加え、Copilot CLIで `/model` を実行した際のターミナル出力サンプル（tmux capture-pane等による実際の文字列）をIssue本文に添付するか、設計ノートとして参照可能にする。"
+    },
+    {
+      "id": "F1-003",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "デフォルトスラッシュコマンドの定義方法に関する設計方針が未記載",
+      "description": "slash-commands.ts への変更として「Copilot CLIのデフォルトスラッシュコマンド定義追加」と記載されているが、具体的な実装アプローチが示されていない。現状の slash-commands.ts はファイルベースのコマンドローダーであり、ハードコードされたデフォルトコマンドを持つ仕組みがない。考えられるアプローチとして (1) slash-commands.ts にCopilot固有のビルトインコマンドをハードコードする (2) Copilot用コマンドディレクトリを追加する (3) CLIツール別のデフォルトコマンド定義機構を新設する、の3つが考えられる。command-merger.ts の filterCommandsByCliTool() も関連するため、設計判断が必要。",
+      "suggestion": "Issueに設計方針セクションを追加し、採用するアプローチを明記する。特にCopilotのビルトインコマンド一覧（/model以外にどのようなコマンドがあるか）と、それらをどのように定義・管理するかを記載する。"
+    },
+    {
+      "id": "F1-004",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "copilot.tsのパターン定義がplaceholder状態であることへの言及がない",
+      "description": "cli-patterns.ts のCopilot関連パターン（COPILOT_PROMPT_PATTERN, COPILOT_THINKING_PATTERN, COPILOT_SEPARATOR_PATTERN）は Issue #545 でplaceholderとして追加されており、コメントに「Placeholder - to be updated after Phase 1 TUI investigation」と記載されている（L243, L249, L255）。本Issue（#547）はまさにこのPlaceholder状態が引き起こす問題の修正であるが、Issue本文にはこの経緯への言及がなく、#545との関連が不明確。",
+      "suggestion": "Issue本文に「Issue #545 で追加されたplaceholderパターンの実態に基づく更新」である旨を記載し、#545 を関連Issueとしてリンクする。"
+    },
+    {
+      "id": "F1-005",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "受け入れ条件にテストに関する項目がない",
+      "description": "受け入れ条件は3つ記載されているが、テストコード（単体テスト）に関する条件が含まれていない。cli-patterns.ts や status-detector.ts の変更にはテストが伴うべきであり、特にパターンマッチの正確性を保証する単体テストは重要である。",
+      "suggestion": "受け入れ条件に「新規追加パターンおよび検出ロジックの単体テストが追加されている」を追加することを検討する。"
+    },
+    {
+      "id": "F1-006",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "Copilotのデフォルトスラッシュコマンド一覧が未記載",
+      "description": "Issue本文では `/model` のみが例示されているが、Copilot CLIが提供する全デフォルトスラッシュコマンドの一覧が記載されていない。実装範囲を正確に把握するために、対応すべきコマンドの完全なリストがあると望ましい。",
+      "suggestion": "`gh copilot` のヘルプや公式ドキュメントから利用可能なスラッシュコマンド一覧を調査し、Issue本文に記載する。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2,
+    "total": 6
+  },
+  "code_references": [
+    {
+      "file": "src/lib/slash-commands.ts",
+      "relevance": "スラッシュコマンドローダー - Copilotデフォルトコマンド定義の追加対象"
+    },
+    {
+      "file": "src/lib/detection/cli-patterns.ts",
+      "relevance": "CLIパターン定義 - Copilot選択ウィンドウパターン追加対象（L246-266がplaceholder状態）"
+    },
+    {
+      "file": "src/lib/detection/status-detector.ts",
+      "relevance": "ステータス検出 - Copilot選択リスト検出ロジック追加が必要（Issueの影響範囲テーブルに未記載）"
+    },
+    {
+      "file": "src/lib/cli-tools/copilot.ts",
+      "relevance": "Copilot CLIツール実装 - 選択ウィンドウ対応としてIssueに記載されているが変更は限定的"
+    },
+    {
+      "file": "src/lib/command-merger.ts",
+      "relevance": "コマンドフィルタリング - filterCommandsByCliTool()がCopilotのコマンド表示に関連"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構成・モジュール一覧の整合性確認"
+    }
+  ]
+}

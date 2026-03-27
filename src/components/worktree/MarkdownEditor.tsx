@@ -149,6 +149,13 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   // Mobile detection
   const isMobile = useIsMobile();
 
+  // Issue #549: Default to preview tab on mobile
+  useEffect(() => {
+    if (isMobile) {
+      setMobileTab('preview');
+    }
+  }, [isMobile]);
+
   // Virtual keyboard detection (for mobile)
   const { isKeyboardVisible, keyboardHeight } = useVirtualKeyboard();
 

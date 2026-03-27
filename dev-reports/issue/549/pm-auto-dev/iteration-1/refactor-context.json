@@ -1,0 +1,19 @@
+{
+  "issue_number": 549,
+  "refactor_targets": [
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/MarkdownEditor-mobile-default.test.tsx"
+  ],
+  "quality_metrics": {
+    "tests_passed": 5422,
+    "tests_failed": 0,
+    "tsc_errors": 0,
+    "lint_errors": 0
+  },
+  "improvement_goals": [
+    "変更が最小限で適切であることの確認",
+    "コードスタイルの一貫性確認",
+    "テストカバレッジの確認"
+  ]
+}

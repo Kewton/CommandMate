@@ -40,8 +40,12 @@ describe('env-sanitizer', () => {
       expect(SENSITIVE_ENV_KEYS).toContain('CM_DB_PATH');
     });
 
-    it('should have exactly 8 entries', () => {
-      expect(SENSITIVE_ENV_KEYS).toHaveLength(8);
+    it('should contain GH_DEBUG', () => {
+      expect(SENSITIVE_ENV_KEYS).toContain('GH_DEBUG');
+    });
+
+    it('should have exactly 9 entries', () => {
+      expect(SENSITIVE_ENV_KEYS).toHaveLength(9);
     });
   });
 

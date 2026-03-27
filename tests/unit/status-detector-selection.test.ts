@@ -5,8 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { detectSessionStatus } from '@/lib/detection/status-detector';
-import { STATUS_REASON } from '@/lib/detection/status-detector';
+import { detectSessionStatus, STATUS_REASON, SELECTION_LIST_REASONS } from '@/lib/detection/status-detector';
 
 // Helper: Build OpenCode TUI output with content area + footer
 // OpenCode TUI layout: content area (top) | empty padding | footer (ctrl+t/ctrl+p line)
@@ -143,5 +142,75 @@ describe('detectSessionStatus - OpenCode selection_list detection', () => {
     const output = '\u203A \nSome output';
     const result = detectSessionStatus(output, 'codex');
     expect(result.reason).not.toBe(STATUS_REASON.OPENCODE_SELECTION_LIST);
+  });
+});
+
+describe('STATUS_REASON - COPILOT_SELECTION_LIST', () => {
+  it('should export COPILOT_SELECTION_LIST constant', () => {
+    expect(STATUS_REASON.COPILOT_SELECTION_LIST).toBe('copilot_selection_list');
+  });
+});
+
+describe('SELECTION_LIST_REASONS Set', () => {
+  it('should be a Set', () => {
+    expect(SELECTION_LIST_REASONS).toBeInstanceOf(Set);
+  });
+
+  it('should contain all three selection list reasons', () => {
+    expect(SELECTION_LIST_REASONS.has(STATUS_REASON.OPENCODE_SELECTION_LIST)).toBe(true);
+    expect(SELECTION_LIST_REASONS.has(STATUS_REASON.CLAUDE_SELECTION_LIST)).toBe(true);
+    expect(SELECTION_LIST_REASONS.has(STATUS_REASON.COPILOT_SELECTION_LIST)).toBe(true);
+  });
+
+  it('should have exactly 3 entries', () => {
+    expect(SELECTION_LIST_REASONS.size).toBe(3);
+  });
+
+  it('should not contain unrelated reasons', () => {
+    expect(SELECTION_LIST_REASONS.has(STATUS_REASON.THINKING_INDICATOR)).toBe(false);
+    expect(SELECTION_LIST_REASONS.has(STATUS_REASON.PROMPT_DETECTED)).toBe(false);
+  });
+});
+
+describe('detectSessionStatus - Copilot selection_list detection', () => {
+  it('should detect Copilot selection list and return waiting status', () => {
+    const output = [
+      'Select Model',
+      'Search models...',
+      '❯ gpt-4o',
+      '  gpt-4o-mini',
+      '  claude-3.5-sonnet',
+    ].join('\n');
+
+    const result = detectSessionStatus(output, 'copilot');
+    expect(result.status).toBe('waiting');
+    expect(result.confidence).toBe('high');
+    expect(result.reason).toBe(STATUS_REASON.COPILOT_SELECTION_LIST);
+    expect(result.hasActivePrompt).toBe(false);
+  });
+
+  it('should NOT detect copilot_selection_list when cliToolId is claude (negative test)', () => {
+    // Even if the output contains Copilot selection list text,
+    // with cliToolId='claude', it should NOT trigger copilot_selection_list
+    const output = [
+      'Select Model',
+      'Search models...',
+      '❯ gpt-4o',
+    ].join('\n');
+
+    const result = detectSessionStatus(output, 'claude');
+    expect(result.reason).not.toBe(STATUS_REASON.COPILOT_SELECTION_LIST);
+  });
+
+  it('should NOT detect copilot_selection_list for normal Copilot response', () => {
+    const output = [
+      'Here is your code:',
+      '```typescript',
+      'console.log("hello");',
+      '```',
+    ].join('\n');
+
+    const result = detectSessionStatus(output, 'copilot');
+    expect(result.reason).not.toBe(STATUS_REASON.COPILOT_SELECTION_LIST);
   });
 });

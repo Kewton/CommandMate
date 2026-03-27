@@ -1,0 +1,22 @@
+{
+  "issue_number": 547,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "focus_area": "影響範囲",
+  "previous_findings_status": [
+    {"id": "F3-001", "addressed": true, "notes": "STATUS_REASON.COPILOT_SELECTION_LISTとcurrent-output/route.tsの更新が影響範囲テーブルに追加済み"},
+    {"id": "F3-002", "addressed": true, "notes": "detectSessionStatus()のCopilot検出ブランチが影響範囲テーブルに追加済み"},
+    {"id": "F3-003", "addressed": true, "notes": "current-output/route.tsが影響範囲テーブルに追加済み"},
+    {"id": "F3-004", "addressed": true, "notes": "response-cleaner.tsが影響範囲テーブルに追加済み"},
+    {"id": "F3-005", "addressed": true, "notes": "cliTools: ['copilot']要件が設計方針と受入条件に追加済み"},
+    {"id": "F3-006", "addressed": true, "notes": "テストカバレッジ要件が具体的なテストファイル名とケースで追加済み"}
+  ],
+  "findings": [],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 0,
+    "nice_to_have_count": 0,
+    "total": 0
+  },
+  "notes": "Stage 3の全指摘事項が正しく反映されており、影響範囲は十分に網羅されている。新規の影響範囲指摘なし。"
+}

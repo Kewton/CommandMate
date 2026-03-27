@@ -248,8 +248,11 @@ export function validateSchedulesSection(
       const trimmedPermission = permissionStr.trim();
       // Validate permission value against allowed values for the CLI tool
       const cliToolId = row[3]?.trim() || 'claude';
+      // copilot, gemini, vibe-local have no permission flags; skip validation
       const allowedValues: readonly string[] =
-        cliToolId === 'codex' ? CODEX_SANDBOXES : CLAUDE_PERMISSIONS;
+        cliToolId === 'codex' ? CODEX_SANDBOXES
+        : (cliToolId === 'copilot' || cliToolId === 'gemini' || cliToolId === 'vibe-local') ? []
+        : CLAUDE_PERMISSIONS;
       if (!allowedValues.includes(trimmedPermission)) {
         errors.push({
           row: i,

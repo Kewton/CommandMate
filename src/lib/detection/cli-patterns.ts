@@ -239,6 +239,54 @@ export const OPENCODE_SKIP_PATTERNS: readonly RegExp[] = [
 ] as const;
 
 /**
+ * Copilot prompt pattern (Issue #545)
+ * Copilot CLI shows "❯" followed by cursor/text hint:
+ *   - "❯ [7m [0mType @ to mention files, # for issues/PRs, / for commands, or ? for"
+ *   - "❯ " (bare prompt)
+ * Also matches "? " prefix for question prompts.
+ */
+export const COPILOT_PROMPT_PATTERN = /^[>❯]\s|^\?\s+/m;
+
+/**
+ * Copilot thinking/processing pattern (Issue #545)
+ * Copilot CLI shows various action indicators during processing:
+ *   - "Exploring repo (Esc to cancel · 2.3 KiB)"
+ *   - "Reasoning ■■■ medium"
+ *   - "... Thinking"
+ *   - Tool use: "● Read package.json" / "◉ Mapping structure (Esc to cancel · 8.4 KiB)"
+ * Note: "Esc to cancel" alone is not used because trust dialog footer also contains it.
+ * Instead, match the action pattern with parenthesized context: "(Esc to cancel ·"
+ * Braille spinner characters (U+2800-U+28FF) are also checked.
+ */
+export const COPILOT_THINKING_PATTERN = /[\u2800-\u28FF]|\(Esc to cancel|Reasoning\s+[■▪▮]|\.\.\.\s+Thinking|Generating|Processing/;
+
+/**
+ * Copilot separator pattern (Issue #545)
+ * Placeholder - to be updated after Phase 1 TUI investigation.
+ */
+export const COPILOT_SEPARATOR_PATTERN = /^─{10,}$/m;
+
+/**
+ * Copilot CLI selection list pattern (Issue #547)
+ * Detects Copilot CLI's interactive selection/navigation prompts:
+ *   - Model picker: "Search models..." / "Select Model"
+ *   - Trust dialog: "↑↓ to navigate · Enter to select · Esc to cancel"
+ *   - Other interactive lists with arrow key navigation
+ *
+ * No /g flag (S4-5: would make test() stateful).
+ * No nested quantifiers (SEC4-001: ReDoS safety).
+ */
+export const COPILOT_SELECTION_LIST_PATTERN = /Search\s+\w+\.\.\.|Select\s+Model|to navigate.*Enter to select/m;
+
+/**
+ * Copilot skip patterns for response cleaning (Issue #545)
+ * Placeholder patterns - to be refined after Phase 1 TUI investigation.
+ */
+export const COPILOT_SKIP_PATTERNS: readonly RegExp[] = [
+  PASTED_TEXT_PATTERN,
+] as const;
+
+/**
  * Vibe Local prompt pattern
  * vibe-local (vibe-coder) shows `ctx:N% ❯` prompt when waiting for user input.
  * The prompt line includes a context usage percentage prefix.
@@ -276,6 +324,9 @@ export function detectThinking(cliToolId: CLIToolType, content: string): boolean
       break;
     case 'opencode':
       result = OPENCODE_THINKING_PATTERN.test(content);
+      break;
+    case 'copilot':
+      result = COPILOT_THINKING_PATTERN.test(content);
       break;
     default:
       result = CLAUDE_THINKING_PATTERN.test(content);
@@ -380,6 +431,14 @@ export function getCliToolPatterns(cliToolId: CLIToolType): {
         skipPatterns: [...OPENCODE_SKIP_PATTERNS],
       };
 
+    case 'copilot':
+      return {
+        promptPattern: COPILOT_PROMPT_PATTERN,
+        separatorPattern: COPILOT_SEPARATOR_PATTERN,
+        thinkingPattern: COPILOT_THINKING_PATTERN,
+        skipPatterns: [...COPILOT_SKIP_PATTERNS],
+      };
+
     default:
       // Default to Claude patterns
       return getCliToolPatterns('claude');
@@ -476,10 +535,10 @@ export const CLAUDE_SESSION_ERROR_REGEX_PATTERNS: readonly RegExp[] = [
  * this function lives in cli-patterns.ts which already depends on CLIToolType.
  *
  * [Future extension memo (C-002)]
- * If CLI tool count grows significantly (currently 5), consider migrating
+ * If CLI tool count grows significantly (currently 6), consider migrating
  * to a CLIToolConfig registry pattern where tool-specific settings
  * (including promptDetectionOptions) are managed in a Record<CLIToolType, CLIToolConfig>.
- * Migration threshold: 6th tool addition triggers registry pattern migration [D1-003].
+ * Migration threshold: 7th tool addition triggers registry pattern migration [D1-003].
  *
  * @param cliToolId - CLI tool identifier
  * @returns DetectPromptOptions for the tool, or undefined for default behavior
@@ -493,6 +552,10 @@ export function buildDetectPromptOptions(
   // [D2-006] OpenCode prompt "Ask anything..." does not use standard indicators (> / ❯),
   // so requireDefaultIndicator must be false to avoid missing prompt detection.
   if (cliToolId === 'opencode') {
+    return { requireDefaultIndicator: false };
+  }
+  // [Issue #545] Copilot prompt pattern may not use standard indicators
+  if (cliToolId === 'copilot') {
     return { requireDefaultIndicator: false };
   }
   return undefined; // Default behavior (requireDefaultIndicator = true)

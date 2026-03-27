@@ -1,0 +1,11 @@
+{
+  "issue_number": 552,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "skipped": true,
+  "skip_reason": "Stage 7 skipped. No findings to apply.",
+  "applied_findings": [],
+  "skipped_findings": [],
+  "issue_updated": false,
+  "summary": "Skipped - Stage 7 was skipped due to no must_fix/should_fix in 2nd iteration."
+}

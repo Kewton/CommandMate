@@ -1,0 +1,41 @@
+{
+  "issue_number": 548,
+  "iteration": 2,
+  "stage": 8,
+  "apply_date": "2026-03-27",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "Added 'Implementation Note: Nested Scroll Behavior' subsection under overflow fix strategy, explaining that mainContainer scroll activates due to paddingBottom exceeding flex-1 allocation, and that child component internal scrolling continues to work as expected"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "Added 3 items to manual QA checklist: landscape orientation (with note that ~130px padding is ~36% of landscape viewport), tablet bottom padding check, and Android split-screen mode testing"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "Updated info tab impact description from 'low: content quantity is small' to 'low: relies on main container overflow-y-auto for scroll, content currently fits viewport'"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 3,
+    "applied": 3,
+    "skipped": 0
+  },
+  "review_history_updated": true,
+  "review_history_entries_added": [
+    "Stage 7 影響範囲レビュー2回目 (2026-03-27)"
+  ],
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/548"
+  }
+}

@@ -1,0 +1,113 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "principle": "Open/Closed Principle (OCP)",
+      "title": "claude-executor.ts の executeClaudeCommand() が cliToolId を直接コマンド名として使用しており、copilot では破綻する",
+      "description": "claude-executor.ts の line 157-159 で `execFile(cliToolId, args, ...)` としており、cliToolId をそのままコマンド名として使用している。copilot の場合は実際のコマンドが 'gh' であるため、`const commandName = cliToolId === 'copilot' ? 'gh' : cliToolId` という条件分岐が必要になる。これは OCP 違反であり、新しいツールを追加するたびに executeClaudeCommand() を修正する必要がある。設計方針書のセクション3-2ではこの問題を認識し条件分岐で解決する方針だが、ICLITool インターフェースに `getExecutableCommand(): string` のようなメソッドを追加するか、BaseCLITool.command プロパティを活用して `CLIToolManager.getInstance().getTool(cliToolId).command` で解決する方が OCP に準拠する。",
+      "suggestion": "executeClaudeCommand() 内でコマンド名を解決する際に、ハードコードの条件分岐ではなく CLIToolManager から command プロパティを取得する方式を検討する。ただし claude-executor.ts はスケジュール実行用の非インタラクティブモジュールであり CLIToolManager とは異なるライフサイクルを持つため、コマンド名解決用のシンプルなマッピング関数 (例: `getCommandForTool(cliToolId): string`) を buildCliArgs() の隣に配置するのが現実的。",
+      "affected_section": "3-2. コマンド形式の設計判断"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "principle": "Open/Closed Principle (OCP)",
+      "title": "cli-patterns.ts の switch-case 分岐が6つに増加し、レジストリパターン移行閾値を超過",
+      "description": "cli-patterns.ts の detectThinking() (line 259-286)、getCliToolPatterns() (line 291-387)、buildDetectPromptOptions() (line 487-499) はすべて switch-case で CLIToolType を分岐している。copilot 追加で6分岐になる。設計方針書のセクション D1-003 で「移行閾値到達だが延期」と明記しており、Issue 本文にも同様の方針がある。延期方針自体は合理的だが、設計方針書に別 Issue 番号やマイルストーンの記載がなく、技術的負債の追跡が曖昧になるリスクがある。",
+      "suggestion": "設計方針書に D1-003 移行の別 Issue 番号(作成予定であっても仮番号やTODOマーカー)を記載し、copilot 実装 PR のクローズ条件として移行 Issue の作成を含める。これにより技術的負債が確実に追跡される。",
+      "affected_section": "8. 設計上の決定事項とトレードオフ"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "principle": "Don't Repeat Yourself",
+      "title": "getErrorMessage() が4つの CLI ツールファイルに重複定義されており、copilot.ts で5つ目になる",
+      "description": "codex.ts, gemini.ts, vibe-local.ts, opencode.ts の各ファイルに同一の `function getErrorMessage(error: unknown): string` が定義されている。opencode.ts line 38 のコメントに '[D1-002] Future refactoring candidate' と記載があり、既知の技術的負債である。copilot.ts の追加でさらに重複が増える。",
+      "suggestion": "設計方針書のコスト見積もりの範囲外であれば、copilot.ts でも同じパターンを踏襲し、D1-002 リファクタリングの対象として記録する。ただし本 Issue での修正は YAGNI の観点からスコープ外とする判断は妥当。",
+      "affected_section": "3-1. Strategyパターン（既存拡張）"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "must_fix",
+      "category": "SOLID",
+      "principle": "Liskov Substitution Principle (LSP)",
+      "title": "CopilotTool の command='gh' が BaseCLITool.isInstalled() の契約を暗黙的に変更する",
+      "description": "BaseCLITool.isInstalled() は `which ${this.command}` で存在確認する (base.ts line 29)。CopilotTool で command='gh' とした場合、isInstalled() をオーバーライドしないと gh CLI の存在だけで copilot がインストール済みと誤判定される。設計方針書セクション 3-3 では isInstalled() のオーバーライドを計画しているが、LSP の観点からは BaseCLITool.isInstalled() の事後条件('戻り値 true ならばこのツールでセッション開始可能')が CopilotTool でも保証される必要がある。isInstalled() のオーバーライドを実装タスクの必須項目として明確化すべき。",
+      "suggestion": "設計方針書のセクション 3-3 の isInstalled() オーバーライドを Phase 2 コア実装タスクの必須チェック項目として明記する。また、テスト戦略セクションに 'gh がインストール済みだが copilot 拡張がない場合に false を返す' テストケースを追加する。",
+      "affected_section": "3-3. isInstalled() のオーバーライド"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "principle": "Interface Segregation Principle (ISP)",
+      "title": "IImageCapableCLITool の条件付き実装方針は適切だが、判断基準が曖昧",
+      "description": "設計方針書では IImageCapableCLITool の実装を '前提調査の結果に基づき判断' としている。ISP の観点からは、画像非対応なら IImageCapableCLITool を実装しないのが正しい設計であり、この方針は適切。ただし、判断のフローチャートが不明確で、調査結果の記録場所やレビューポイントが定義されていない。",
+      "suggestion": "前提調査タスクの Phase 1 に '画像サポート調査結果を Issue コメントに記録し、IImageCapableCLITool 実装要否の決定を Phase 2 開始前にレビュー' という手順を追加する。",
+      "affected_section": "8. 設計上の決定事項とトレードオフ"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "should_fix",
+      "category": "KISS",
+      "principle": "Keep It Simple, Stupid",
+      "title": "ワンショット実行モデル(セクション 3-4)と REPL モデルの両方を設計に含めている",
+      "description": "設計方針書のセクション 3-4 では 'copilot-cli が永続的な REPL をサポートしない場合' のワンショット実行モデルを記載し、セクション 3-1 では REPL 前提のコードを示している。前提調査が未完了の段階で両方のモデルを記載するのは妥当だが、実装時にどちらかに確定した段階で不要な方を設計方針書から削除する運用が必要。残したままだと実装者が混乱するリスクがある。",
+      "suggestion": "Phase 1 前提調査完了後に設計方針書を更新し、採用しなかったモデルのセクションを '不採用(理由: xxx)' として明示的にマークするか、折りたたみセクションに移動する。",
+      "affected_section": "3-4. ワンショット実行モデル（想定パターン）"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "principle": "You Aren't Gonna Need It",
+      "title": "response-poller.ts の変更対象が包括的すぎて YAGNI に抵触する可能性",
+      "description": "設計方針書および Issue 本文で response-poller.ts の変更対象として '完了判定ロジック・stop condition・バナー検出・クリーニング処理・findRecentUserPromptIndex・早期プロンプト検出・isCodexOrGeminiComplete・ツール別stop condition・ツール別バナー検出・TUI accumulator処理・isFullScreenTui 判定' の全ディスパッチポイントを列挙している。前提調査が完了していない段階ですべてのディスパッチポイントに copilot ケースが必要かは不明。列挙自体は影響範囲の洗い出しとして有用だが、'変更対象' と '確認対象' を区別すべき。",
+      "suggestion": "response-poller.ts の記載を '確認対象ディスパッチポイント(前提調査結果に基づき変更要否を判断)' として分類し直す。確実に変更が必要な箇所(getCliToolPatterns のケース追加等)と調査次第の箇所を区別する。",
+      "affected_section": "10. ファイル変更一覧"
+    },
+    {
+      "id": "DR1-008",
+      "severity": "nice_to_have",
+      "category": "SOLID",
+      "principle": "Single Responsibility Principle (SRP)",
+      "title": "CopilotTool クラスの責務は明確だが、sendMessage() のシェルインジェクション防止が CopilotTool の責務に含まれる点に注意",
+      "description": "設計方針書セクション 3-4 で 'シェルインジェクション防止のため、メッセージのエスケープ処理が必須' と記載されている。他のツール実装(gemini.ts, opencode.ts)では sendKeys() に直接メッセージを渡しており、エスケープ処理は tmux.ts の sendKeys() 側で行われている。CopilotTool でワンショット実行モデルを採用した場合、`gh copilot suggest \"${escapeShellArg(message)}\"` のようにシェル引数としてメッセージを構築する必要があり、sendKeys() の既存エスケープ処理とは異なる防御が必要になる。この責務の違いは設計方針書に明記すべき。",
+      "suggestion": "セクション 6-1 のセキュリティ設計に、ワンショット実行モデルの場合のシェル引数エスケープが sendKeys() の tmux エスケープとは別レイヤーの防御であることを明記する。既存の sendKeys() が tmux の send-keys コマンドに渡す際のエスケープと、シェルコマンド文字列としてのエスケープは異なるセキュリティ境界であることを区別する。",
+      "affected_section": "6. セキュリティ設計"
+    },
+    {
+      "id": "DR1-009",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "principle": "Dependency Inversion Principle (DIP)",
+      "title": "ALLOWED_CLI_TOOLS の Set が CLI_TOOL_IDS と二重管理になっている",
+      "description": "claude-executor.ts の ALLOWED_CLI_TOOLS (line 37) は `new Set(['claude', 'codex', 'gemini', 'vibe-local', 'opencode'])` としてハードコードされており、types.ts の CLI_TOOL_IDS と同じ値を二重管理している。copilot 追加時に両方を更新する必要がある。CLI_TOOL_IDS は 'single source of truth' として設計されている(types.ts line 8 のコメント)にもかかわらず、ALLOWED_CLI_TOOLS はそれを参照していない。",
+      "suggestion": "ALLOWED_CLI_TOOLS を `new Set(CLI_TOOL_IDS)` から導出するか、少なくとも copilot 追加時に同期漏れを防ぐためのテストを追加する。ただし claude-executor.ts がスケジュール実行専用であり、すべての CLIToolType をサポートするとは限らない(例: ワンショット実行非対応のツールがある可能性)ため、意図的な分離であれば設計方針書にその理由を明記する。",
+      "affected_section": "3-2. コマンド形式の設計判断"
+    },
+    {
+      "id": "DR1-010",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "principle": "Don't Repeat Yourself",
+      "title": "sendMessage() の共通パターン(sendKeys -> wait -> Enter -> wait -> pastedText -> invalidateCache)が5つのツール実装に重複",
+      "description": "gemini.ts の sendMessage() (line 181-221) と opencode.ts の sendMessage() (line 146-182) を比較すると、ほぼ同一のパターン(sendKeys without Enter -> wait -> C-m -> wait -> detectAndResendIfPastedText -> invalidateCache)が繰り返されている。opencode.ts line 141 のコメントにも '[D1-004] Same pattern as Codex/Gemini/VibeLocal (future Template Method candidate)' と記載されている。copilot.ts で6つ目の重複が発生する。",
+      "suggestion": "copilot 追加時点ではこの重複を許容し、D1-004 リファクタリング(Template Method パターン導入)を別 Issue で計画する。設計方針書にこの判断を明記する。",
+      "affected_section": "3-1. Strategyパターン（既存拡張）"
+    }
+  ],
+  "summary": {
+    "total_findings": 10,
+    "must_fix": 1,
+    "should_fix": 5,
+    "nice_to_have": 4
+  }
+}

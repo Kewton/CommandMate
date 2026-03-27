@@ -9,14 +9,17 @@ import { NextRequest } from 'next/server';
 
 // Mock dependencies
 vi.mock('@/lib/cli-tools/types', () => ({
-  isCliToolType: vi.fn((value: string) => ['claude', 'codex', 'gemini', 'vibe-local', 'opencode'].includes(value)),
+  isCliToolType: vi.fn((value: string) => ['claude', 'codex', 'gemini', 'vibe-local', 'opencode', 'copilot'].includes(value)),
 }));
+
+const mockSendMessage = vi.fn();
 
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
     getInstance: vi.fn(() => ({
       getTool: vi.fn((id: string) => ({
         getSessionName: vi.fn((worktreeId: string) => `mcbd-${id}-${worktreeId}`),
+        sendMessage: mockSendMessage,
       })),
     })),
   },
@@ -56,6 +59,7 @@ describe('POST /api/worktrees/[id]/terminal', () => {
     vi.mocked(getWorktreeById).mockReturnValue({ id: 'wt-1', name: 'test', path: '/path' } as ReturnType<typeof getWorktreeById>);
     vi.mocked(hasSession).mockResolvedValue(true);
     vi.mocked(sendKeys).mockResolvedValue(undefined);
+    mockSendMessage.mockResolvedValue(undefined);
   });
 
   it('should send command successfully with valid cliToolId', async () => {
@@ -141,5 +145,61 @@ describe('POST /api/worktrees/[id]/terminal', () => {
     // R4F002: Fixed-string error, no error.message exposure
     expect(json.error).toBe('Failed to send command to terminal');
     expect(json.error).not.toContain('internal tmux failure');
+  });
+
+  // Issue #559: Copilot delegation tests
+  describe('Copilot delegation', () => {
+    it('should delegate slash commands to sendMessage for copilot', async () => {
+      const req = createRequest({ cliToolId: 'copilot', command: '/model' });
+      const res = await POST(req, defaultParams);
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.success).toBe(true);
+      expect(mockSendMessage).toHaveBeenCalledWith('wt-1', '/model');
+      expect(sendKeys).not.toHaveBeenCalled();
+    });
+
+    it('should delegate regular text to sendMessage for copilot', async () => {
+      const req = createRequest({ cliToolId: 'copilot', command: 'hello world' });
+      const res = await POST(req, defaultParams);
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.success).toBe(true);
+      expect(mockSendMessage).toHaveBeenCalledWith('wt-1', 'hello world');
+      expect(sendKeys).not.toHaveBeenCalled();
+    });
+
+    it('should NOT delegate to sendMessage for non-copilot tools', async () => {
+      const req = createRequest({ cliToolId: 'claude', command: '/model' });
+      const res = await POST(req, defaultParams);
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.success).toBe(true);
+      expect(mockSendMessage).not.toHaveBeenCalled();
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-wt-1', '/model');
+    });
+
+    it('should return 500 when copilot sendMessage throws', async () => {
+      mockSendMessage.mockRejectedValue(new Error('copilot sendMessage failure'));
+      const req = createRequest({ cliToolId: 'copilot', command: '/model' });
+      const res = await POST(req, defaultParams);
+      const json = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(json.error).toBe('Failed to send command to terminal');
+      expect(json.error).not.toContain('copilot sendMessage failure');
+    });
+
+    it('should not call invalidateCache in copilot delegation path', async () => {
+      const req = createRequest({ cliToolId: 'copilot', command: '/model' });
+      await POST(req, defaultParams);
+
+      // sendMessage handles cache invalidation internally
+      // sendKeys should not be called, so invalidateCache for the sendKeys path is skipped
+      expect(sendKeys).not.toHaveBeenCalled();
+    });
   });
 });

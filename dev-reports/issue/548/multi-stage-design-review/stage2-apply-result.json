@@ -1,0 +1,27 @@
+{
+  "issue_number": 548,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘対応",
+  "apply_date": "2026-03-27",
+  "target_doc": "dev-reports/design/issue-548-mobile-file-list-design-policy.md",
+  "status": "completed",
+  "applied_findings": [
+    {
+      "id": "SF-001",
+      "status": "applied",
+      "description": "Updated info tab row: changed overflow from 'なし' to 'overflow-y-auto', updated expected behavior to note it has its own scroll container"
+    },
+    {
+      "id": "SF-002",
+      "status": "applied",
+      "description": "Updated terminal tab row: changed overflow from 'overflow-y-auto' to 'overflow-y-auto overflow-x-hidden' for completeness"
+    },
+    {
+      "id": "SF-003",
+      "status": "applied",
+      "description": "Updated history tab row: changed component description to reflect wrapper div with sub-tab switcher (Message/Git) and conditional HistoryPane/GitPane rendering, noted overflow-y-auto is on each sub-component"
+    }
+  ],
+  "skipped_findings": [],
+  "summary": "All 3 should-fix items from Stage 2 consistency review have been applied to the design policy document. The impact analysis table in Section 6 now accurately reflects the actual overflow properties and component structure for the info, terminal, and history tabs. A review finding summary section (Section 12) was added to the design policy for traceability."
+}

@@ -1141,3 +1141,78 @@ describe('clearCache', () => {
     expect(getCachedCommands()).toBeNull();
   });
 });
+
+describe('getCopilotBuiltinCommands', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('should return an array of Copilot builtin commands', async () => {
+    const { getCopilotBuiltinCommands } = await import('@/lib/slash-commands');
+    const commands = getCopilotBuiltinCommands();
+    expect(Array.isArray(commands)).toBe(true);
+    expect(commands.length).toBeGreaterThan(0);
+  });
+
+  it('should include /model command with correct properties', async () => {
+    const { getCopilotBuiltinCommands } = await import('@/lib/slash-commands');
+    const commands = getCopilotBuiltinCommands();
+    const modelCmd = commands.find(c => c.name === 'model');
+    expect(modelCmd).toBeDefined();
+    expect(modelCmd!.category).toBe('standard-config');
+    expect(modelCmd!.cliTools).toEqual(['copilot']);
+    expect(modelCmd!.source).toBe('builtin');
+    expect(modelCmd!.filePath).toBe('');
+  });
+
+  it('should set cliTools to ["copilot"] for all commands', async () => {
+    const { getCopilotBuiltinCommands } = await import('@/lib/slash-commands');
+    const commands = getCopilotBuiltinCommands();
+    for (const cmd of commands) {
+      expect(cmd.cliTools).toEqual(['copilot']);
+    }
+  });
+
+  it('should set source to "builtin" for all commands', async () => {
+    const { getCopilotBuiltinCommands } = await import('@/lib/slash-commands');
+    const commands = getCopilotBuiltinCommands();
+    for (const cmd of commands) {
+      expect(cmd.source).toBe('builtin');
+    }
+  });
+
+  it('should include all major Copilot CLI interactive commands', async () => {
+    const { getCopilotBuiltinCommands } = await import('@/lib/slash-commands');
+    const commands = getCopilotBuiltinCommands();
+    const names = commands.map(c => c.name);
+    // Models and subagents
+    expect(names).toContain('model');
+    expect(names).toContain('delegate');
+    expect(names).toContain('fleet');
+    expect(names).toContain('tasks');
+    // Agent environment
+    expect(names).toContain('agent');
+    expect(names).toContain('mcp');
+    // Code
+    expect(names).toContain('diff');
+    expect(names).toContain('pr');
+    expect(names).toContain('review');
+    // Session
+    expect(names).toContain('compact');
+    expect(names).toContain('clear');
+    expect(names).toContain('resume');
+    // Help
+    expect(names).toContain('help');
+    expect(names).toContain('version');
+    // Other
+    expect(names).toContain('plan');
+    expect(names).toContain('research');
+    expect(names).toContain('exit');
+  });
+
+  it('should have more than 40 commands covering all Copilot CLI categories', async () => {
+    const { getCopilotBuiltinCommands } = await import('@/lib/slash-commands');
+    const commands = getCopilotBuiltinCommands();
+    expect(commands.length).toBeGreaterThanOrEqual(40);
+  });
+});

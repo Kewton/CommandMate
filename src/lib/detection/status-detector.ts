@@ -24,7 +24,7 @@
  * coupling via a minimal DTO/projection type.
  */
 
-import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, CODEX_PROMPT_PATTERN } from './cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
 import type { PromptDetectionResult } from './prompt-detector';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -120,11 +120,25 @@ export const STATUS_REASON = {
   OPENCODE_PROCESSING_INDICATOR: 'opencode_processing_indicator',
   OPENCODE_SELECTION_LIST: 'opencode_selection_list',
   CLAUDE_SELECTION_LIST: 'claude_selection_list',
+  COPILOT_SELECTION_LIST: 'copilot_selection_list',
   OPENCODE_RESPONSE_COMPLETE: 'opencode_response_complete',
   INPUT_PROMPT: 'input_prompt',
   NO_RECENT_OUTPUT: 'no_recent_output',
   DEFAULT: 'default',
 } as const;
+
+/**
+ * Set of STATUS_REASON values that indicate a selection list is active.
+ * Used by current-output/route.ts to determine if NavigationButtons should be shown.
+ * Replaces OR-chain approach for extensibility (DR1-004).
+ *
+ * @see STATUS_REASON
+ */
+export const SELECTION_LIST_REASONS = new Set<string>([
+  STATUS_REASON.OPENCODE_SELECTION_LIST,
+  STATUS_REASON.CLAUDE_SELECTION_LIST,
+  STATUS_REASON.COPILOT_SELECTION_LIST,
+]);
 
 /**
  * Time threshold (in ms) for considering output as "stale"
@@ -169,6 +183,23 @@ export function detectSessionStatus(
   // DR-003: Separate thinking detection window (5 lines) from prompt detection window (15 lines)
   const thinkingLines = contentLines.slice(-STATUS_THINKING_LINE_COUNT).join('\n');
 
+  // 0. Copilot: thinking detection BEFORE prompt detection (Issue #547)
+  // Copilot CLI keeps the "❯" prompt visible even during processing,
+  // so prompt detection would always match first. Check thinking first for copilot.
+  // Uses last 15 lines (not 5) because copilot shows action log lines above prompt.
+  const copilotThinkingWindow = contentLines.slice(-STATUS_CHECK_LINE_COUNT).join('\n');
+  if (cliToolId === 'copilot' && detectThinking(cliToolId, copilotThinkingWindow)) {
+    const promptOptions = buildDetectPromptOptions(cliToolId);
+    const promptDetection = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions);
+    return {
+      status: 'running',
+      confidence: 'high',
+      reason: 'thinking_indicator',
+      hasActivePrompt: false,
+      promptDetection,
+    };
+  }
+
   // 1. Interactive prompt detection (highest priority)
   // This includes yes/no prompts, multiple choice, and approval prompts
   const promptOptions = buildDetectPromptOptions(cliToolId);
@@ -181,7 +212,7 @@ export function detectSessionStatus(
   // can exceed 15 lines. Examples: Codex approval prompts with long file lists,
   // Claude "Yes, and don't ask again for: git commit -m ..." options that embed
   // full commit messages. detectPrompt() applies its own 50-line window internally.
-  const promptInput = (cliToolId === 'opencode' || cliToolId === 'codex' || cliToolId === 'claude')
+  const promptInput = (cliToolId === 'opencode' || cliToolId === 'codex' || cliToolId === 'claude' || cliToolId === 'copilot')
     ? stripBoxDrawing(cleanOutput)
     : stripBoxDrawing(lastLines);
   const promptDetection = detectPrompt(promptInput, promptOptions);
@@ -205,6 +236,23 @@ export function detectSessionStatus(
       status: 'waiting',
       confidence: 'high',
       reason: STATUS_REASON.CLAUDE_SELECTION_LIST,
+      hasActivePrompt: false,
+      promptDetection,
+    };
+  }
+
+  // 1.6. Copilot CLI selection list detection (Issue #547)
+  // Copilot CLI shows selection prompts (e.g., /model) with arrow key navigation.
+  // Uses last 30 lines (not 15) because model selection lists can exceed 15 lines,
+  // but not full cleanOutput to avoid false positives from scrollback buffer
+  // (selection list text persists in tmux history after list is closed).
+  // cliToolId guard prevents false positives on other CLI tools (DR2-004).
+  const copilotSelectionWindow = contentLines.slice(-30).join('\n');
+  if (cliToolId === 'copilot' && COPILOT_SELECTION_LIST_PATTERN.test(copilotSelectionWindow)) {
+    return {
+      status: 'waiting',
+      confidence: 'high',
+      reason: STATUS_REASON.COPILOT_SELECTION_LIST,
       hasActivePrompt: false,
       promptDetection,
     };

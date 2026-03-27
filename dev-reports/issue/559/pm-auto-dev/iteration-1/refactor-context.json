@@ -1,0 +1,13 @@
+{
+  "issue_number": 559,
+  "refactor_targets": [
+    "src/app/api/worktrees/[id]/terminal/route.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 100
+  },
+  "improvement_goals": [
+    "コード品質の確認",
+    "不要なコメントやデッドコードがないこと確認"
+  ]
+}

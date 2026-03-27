@@ -1,0 +1,115 @@
+{
+  "issue_number": 547,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "review_date": "2026-03-27",
+  "findings": [
+    {
+      "id": "SEC4-001",
+      "severity": "should_fix",
+      "category": "ReDoS",
+      "title": "COPILOT_THINKING_PATTERN のブレイルレンジ + 交代パターンのReDoSリスク評価",
+      "description": "COPILOT_THINKING_PATTERN `/[\\u2800-\\u28FF]|Thinking|Generating|Processing/` は現状placeholderだが、文字クラスレンジ + 交代（alternation）のみでネストした量指定子がないため、ReDoSリスクは低い。ただし、placeholder更新時にネストした量指定子（例: `(a+)+` や `(a|b)*c*` 等）を導入しないよう、パターン確定時にReDoS安全性を再確認すること。",
+      "recommendation": "パターンをplaceholderから実パターンに更新する際、以下を確認する: (1) ネストした量指定子を使用していないこと (2) 交代パターンのブランチが互いに重複しないこと。可能であれば safe-regex や redos-detector 等のツールで検証する。",
+      "affected_files": ["src/lib/detection/cli-patterns.ts"],
+      "owasp_reference": null,
+      "design_doc_section": "Section 4, Section 6"
+    },
+    {
+      "id": "SEC4-002",
+      "severity": "should_fix",
+      "category": "ReDoS",
+      "title": "COPILOT_PROMPT_PATTERN の `^\\?\\s+` ブランチの安全性確認",
+      "description": "COPILOT_PROMPT_PATTERN `/^[>❯]\\s*$|^\\?\\s+/m` の第2ブランチ `^\\?\\s+` は `\\s+` を使用しているが、行頭アンカー `^` があるためバックトラッキングは制限される。ただし `\\s+` が長い空白文字列に対して線形時間で動作することを確認済み。現状は安全だが、パターン更新時に量指定子の組み合わせに注意すること。",
+      "recommendation": "パターン更新時に、`^` アンカーが維持されていることを確認する。アンカーなしで `\\s+` を使用する場合はReDoSリスクが上昇する。",
+      "affected_files": ["src/lib/detection/cli-patterns.ts"],
+      "owasp_reference": null,
+      "design_doc_section": "Section 4"
+    },
+    {
+      "id": "SEC4-003",
+      "severity": "nice_to_have",
+      "category": "パターン安全性",
+      "title": "COPILOT_SELECTION_LIST_PATTERN 未定義パターンのセキュリティガイドライン",
+      "description": "COPILOT_SELECTION_LIST_PATTERN は未定義（Section 4で placeholder）。実パターン定義時に以下のセキュリティ原則を遵守する必要がある: (1) /g フラグ禁止（S4-5） (2) ネストした量指定子禁止 (3) stripAnsi() 処理済み文字列に対してのみマッチ。設計書Section 6でこれらは言及されているが、具体的なパターン例がないため実装時の再確認が必要。",
+      "recommendation": "パターン確定時のセキュリティチェックリストを設計書に追記する: [ ] /g フラグ未使用、[ ] ネストした量指定子なし、[ ] stripAnsi()前処理確認、[ ] cliToolIdガード条件付き。",
+      "affected_files": ["src/lib/detection/cli-patterns.ts"],
+      "owasp_reference": null,
+      "design_doc_section": "Section 4, Section 6"
+    },
+    {
+      "id": "SEC4-004",
+      "severity": "nice_to_have",
+      "category": "コマンドインジェクション",
+      "title": "CopilotTool.startSession の `gh copilot` コマンド送信経路の安全性確認",
+      "description": "copilot.ts L132で `sendKeys(sessionName, 'gh copilot', true)` によりtmuxセッション内でコマンドを実行している。sendKeys()はexecFile()を使用しており、シェルインジェクションのリスクはない（tmux send-keysの引数として直接渡される）。送信される文字列 'gh copilot' はハードコードされており、外部入力を含まないため安全。既存の[SEC4-001]注記通り、isInstalled()もexecFile()を使用している。",
+      "recommendation": "現状の実装は安全。将来的にコマンドオプションを動的に構築する場合は、ホワイトリスト方式でオプションを制限すること。",
+      "affected_files": ["src/lib/cli-tools/copilot.ts"],
+      "owasp_reference": "A03:2021 Injection",
+      "design_doc_section": "Section 6"
+    },
+    {
+      "id": "SEC4-005",
+      "severity": "nice_to_have",
+      "category": "コマンドインジェクション",
+      "title": "sendMessage()のメッセージ内容がtmux send-keysを通過する際の安全性",
+      "description": "CopilotTool.sendMessage()はユーザー入力メッセージをtmux send-keysで送信する。tmux send-keysはexecFile()経由で呼ばれるためシェルインジェクションはないが、tmuxのキー解釈による意図しない制御シーケンス送信の可能性がある（例: 'C-c' のようなtmuxキー名がメッセージに含まれる場合）。ただし、tmux send-keysはリテラルモード（-l）なしでも通常テキストをそのまま送信するため、実質的なリスクは低い。これは既存の全CLIツール（Claude, Codex等）と同一のパターンであり、Copilot固有のリスクではない。",
+      "recommendation": "既存パターンと同一のためCopilot固有の対応は不要。全ツール共通の改善として、将来的に `send-keys -l`（リテラルモード）の使用を検討してもよい。",
+      "affected_files": ["src/lib/cli-tools/copilot.ts", "src/lib/tmux/tmux.ts"],
+      "owasp_reference": "A03:2021 Injection",
+      "design_doc_section": "Section 6"
+    },
+    {
+      "id": "SEC4-006",
+      "severity": "nice_to_have",
+      "category": "XSS",
+      "title": "ビルトインコマンドのハードコード定義によるXSSリスク排除の確認",
+      "description": "getCopilotBuiltinCommands()はハードコードされた値のみを返し、外部入力やファイル読み込みを行わない。name, description等のフィールドはコード内に直接定義されるため、XSSのリスクはない。safeParseFrontmatter() [S001]の保護対象外だが、そもそもfrontmatterパースを使用しないため問題ない。",
+      "recommendation": "現状は安全。将来ビルトインコマンドの定義を外部ファイルに移行する場合は、safeParseFrontmatter()と同等の保護を適用すること。",
+      "affected_files": ["src/lib/slash-commands.ts"],
+      "owasp_reference": "A03:2021 Injection (XSS)",
+      "design_doc_section": "Section 3-1, Section 6"
+    },
+    {
+      "id": "SEC4-007",
+      "severity": "nice_to_have",
+      "category": "パターン安全性",
+      "title": "ANSI_PATTERNの/gフラグ使用はstripAnsi()内部のreplace()用であり、test()には使用されない",
+      "description": "cli-patterns.ts L446の ANSI_PATTERN は `/g` フラグを使用しているが、これはString.replace()のグローバル置換専用であり、RegExp.test()には使用されない。S4-5原則（test()でのステートフル問題）には抵触しない。設計書で言及されている「/gフラグ禁止」はtest()使用パターンに限定されることを確認済み。",
+      "recommendation": "対応不要。既存のSEC-002注記で十分にカバーされている。",
+      "affected_files": ["src/lib/detection/cli-patterns.ts"],
+      "owasp_reference": null,
+      "design_doc_section": "Section 6"
+    },
+    {
+      "id": "SEC4-008",
+      "severity": "should_fix",
+      "category": "信頼境界",
+      "title": "cliToolIdガード条件がない場合のパターン誤マッチリスク（設計書で対応済み、実装時の確認必須）",
+      "description": "設計書[DR2-004]でStep 1.6に `cliToolId === 'copilot'` ガードが必須と明記されている。これはセキュリティ上も重要: COPILOT_SELECTION_LIST_PATTERNがplaceholder段階で広範にマッチする可能性があり、ガードなしでは他ツール（Claude, Codex等）のセッションステータスが誤検出される。誤検出により、ユーザーの意図しないNavigationButtons表示やwaitコマンドの早期終了が発生する可能性がある。",
+      "recommendation": "実装時に以下を必ず確認: (1) `cliToolId === 'copilot'` ガードがStep 1.6の条件に含まれていること (2) [IA3-004]の負例テスト（cliToolId='claude'でCopilotパターン入力時に誤検出しないこと）が実装されていること。",
+      "affected_files": ["src/lib/detection/status-detector.ts"],
+      "owasp_reference": "A01:2021 Broken Access Control (logic flaw)",
+      "design_doc_section": "Section 3-3, [DR2-004]"
+    },
+    {
+      "id": "SEC4-009",
+      "severity": "nice_to_have",
+      "category": "stripAnsi前処理",
+      "title": "Copilotパターンマッチ前のstripAnsi()適用の一貫性確認",
+      "description": "copilot.ts内のwaitForReady()とwaitForPrompt()ではcapturePane()の出力にstripAnsi()を適用してからCOPILOT_PROMPT_PATTERN.test()を呼んでいる（L155-158, L179-181）。status-detector.tsでも検出パイプラインの冒頭でstripAnsi()が適用されている。前処理チェーンは一貫しており、ANSIエスケープコードがパターンマッチを妨害するリスクはない。",
+      "recommendation": "対応不要。既存の前処理チェーンが正しく適用されていることを確認済み。",
+      "affected_files": ["src/lib/cli-tools/copilot.ts", "src/lib/detection/status-detector.ts"],
+      "owasp_reference": null,
+      "design_doc_section": "Section 6"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 3,
+    "nice_to_have_count": 6,
+    "total": 9
+  },
+  "overall_assessment": "Issue #547の設計方針書はセキュリティ面で適切に設計されている。主要なセキュリティリスク（コマンドインジェクション、XSS、ReDoS）は既存のアーキテクチャ（execFile使用、safeParseFrontmatter、S4-5原則等）によって緩和されている。should_fix項目3件はいずれもplaceholderパターンの実パターン更新時に確認すべき事項であり、現時点でのブロッカーではない。cliToolIdガード条件[DR2-004]は設計書で明記済みだが、実装時の確認が必須。全体として、既存のセキュリティフレームワーク（SEC-001, SEC-002, SEC4-001, S001, S4-5等）と整合しており、新たなセキュリティリスクの導入は最小限に抑えられている。"
+}

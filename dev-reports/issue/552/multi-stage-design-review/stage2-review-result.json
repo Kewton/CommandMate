@@ -1,0 +1,85 @@
+{
+  "issue_number": 552,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "findings": [
+    {
+      "id": "CR2-001",
+      "severity": "should_fix",
+      "category": "整合性/行番号精度",
+      "title": "FileViewer.tsx line number reference off by one",
+      "description": "設計書セクション4「既存パターンの踏襲」で参照されている行番号 'L270-279' は、実際にはL270がJSDocコメント行、L271-279がhandleCopyPath関数本体。L271-279が正確。同様に 'L548-558' はツールバーのコピーボタンUI部分だが、実際にはL548-558はbuttonのonClick属性からClipboardCopyアイコンまで。大きな乖離ではないが、将来のメンテナンス時に混乱を避けるため修正が望ましい。",
+      "location": "設計書セクション4 (L270-279, L548-558)",
+      "actual": "handleCopyPath: L271-279 (L270はJSDocコメント), ツールバーボタン: L548-558",
+      "recommendation": "行番号参照を 'L271-279' に修正するか、コメント行を含む旨を明記する"
+    },
+    {
+      "id": "CR2-002",
+      "severity": "nice_to_have",
+      "category": "整合性/import記述",
+      "title": "useRef and useEffect already imported in target file",
+      "description": "設計書セクション5-1「新規import追加」で `import { useRef, useEffect } from 'react'` を新規追加と記載しているが、WorktreeDetailSubComponents.tsx の L14 で既に `import React, { useEffect, useCallback, useState, memo, useRef } from 'react'` としてインポート済み。実際に新規追加が必要なのは `ClipboardCopy, Check` (lucide-react) と `copyToClipboard` (clipboard-utils) のみ。",
+      "location": "設計書セクション5-1「新規import追加」",
+      "actual": "WorktreeDetailSubComponents.tsx L14: useRef, useEffect は既にインポート済み",
+      "recommendation": "設計書のimportセクションを「既存importに追加」と「新規import」に分けて記載する。useRef/useEffectは既存importに含まれている旨を明記する"
+    },
+    {
+      "id": "CR2-003",
+      "severity": "nice_to_have",
+      "category": "整合性/参照パターン差異",
+      "title": "Design section 4 pattern lacks type='button' but section 5 includes it",
+      "description": "設計書セクション4の「UIパターン」コード例では <button> に `type=\"button\"` が記載されていないが、セクション5-1の実装コードでは `type=\"button\"` が含まれている。セクション4は既存FileViewer.tsxパターンを示しているが、FileViewer.tsx L548のボタンも実際には `type=\"button\"` を持っていない（暗黙のsubmit）。設計書セクション5で改善を加えたことは適切だが、セクション4との差異が明示されていない。",
+      "location": "設計書セクション4 UIパターン vs セクション5-1 変更後コード",
+      "actual": "FileViewer.tsx L548: <button onClick={handleCopyPath}> (type属性なし)",
+      "recommendation": "セクション4に注釈を追加し、セクション5で type='button' を追加した改善点を明記する"
+    },
+    {
+      "id": "CR2-004",
+      "severity": "must_fix",
+      "category": "整合性/既存パターン不一致",
+      "title": "FileViewer.tsx handleCopyPath lacks useRef cleanup (design claims pattern consistency)",
+      "description": "設計書はFileViewer.tsxの既存パターンを踏襲すると記載しつつ、DR1-005でuseRef+useEffectによるタイマークリーンアップを追加している。しかし、参照元のFileViewer.tsx自体はhandleCopyPath (L271-279) でsetTimeoutをuseRefに保持しておらず、クリーンアップも行っていない。一方でFilePanelContent.tsxはuseRef+cleanupパターンを使用している。設計書の「FileViewer.tsxパターン完全踏襲」という記述は不正確で、実際にはFilePanelContent.tsxの改良版パターンを踏襲している。",
+      "location": "設計書セクション10 決定事項テーブル「FileViewer.tsxパターン完全踏襲」",
+      "actual": "FileViewer.tsx: setTimeout without useRef cleanup. FilePanelContent.tsx: setTimeout with useRef + useEffect cleanup",
+      "recommendation": "設計書の記述を「FileViewer.tsx/FilePanelContent.tsxのコピーボタンパターンを踏襲し、タイマークリーンアップはFilePanelContent.tsxの改良版パターンに準拠」に修正する。FileViewer.tsxのタイマークリーンアップ不足も将来課題として記録することを推奨する"
+    },
+    {
+      "id": "CR2-005",
+      "severity": "nice_to_have",
+      "category": "整合性/変更前コード検証",
+      "title": "Line numbers in section 5 Path/Repository change match actual code exactly",
+      "description": "設計書セクション5-1の「Path フィールド変更（L210-214）」と「Repository Info フィールド変更（L203-208）」は実際のコードと完全に一致している。変更前コードの内容も正確。整合性問題なし。",
+      "location": "設計書セクション5-1",
+      "actual": "WorktreeDetailSubComponents.tsx L203-208 (Repository), L210-214 (Path) - 完全一致",
+      "recommendation": "対応不要（整合性確認済み）"
+    },
+    {
+      "id": "CR2-006",
+      "severity": "nice_to_have",
+      "category": "整合性/型検証",
+      "title": "Worktree type properties match design references",
+      "description": "設計書で参照している worktree.path (string), worktree.repositoryPath (string), worktree.repositoryName (string) は全て src/types/models.ts の Worktree インターフェースに定義済み。WorktreeInfoFieldsProps の worktree: Worktree 型も正確。clipboard-utils.ts の copyToClipboard(text: string): Promise<void> のAPIシグネチャも設計書の使用方法と一致。",
+      "location": "設計書セクション5-1 ハンドラ、src/types/models.ts",
+      "actual": "Worktree.path: string (L41), Worktree.repositoryPath: string (L43), copyToClipboard: (text: string) => Promise<void>",
+      "recommendation": "対応不要（整合性確認済み）"
+    },
+    {
+      "id": "CR2-007",
+      "severity": "nice_to_have",
+      "category": "整合性/コンポーネント構成",
+      "title": "WorktreeInfoFields is correctly identified as memo component shared by InfoModal and MobileInfoContent",
+      "description": "設計書セクション2のアーキテクチャ図で示されたコンポーネント階層（InfoModal -> WorktreeInfoFields, MobileInfoContent -> WorktreeInfoFields）は実際のコードと正確に一致。InfoModal (L526), MobileInfoContent (L649) の両方がWorktreeInfoFieldsを使用しており、変更が自動的にデスクトップ・モバイル両方に反映される設計も正確。",
+      "location": "設計書セクション2、セクション9",
+      "actual": "InfoModal L554, MobileInfoContent L685 で WorktreeInfoFields を使用",
+      "recommendation": "対応不要（整合性確認済み）"
+    }
+  ],
+  "summary": "設計方針書とコードベースの整合性を7項目にわたり検証した。全体として設計書の精度は高く、ファイルパス・コンポーネント構成・型定義・変更対象の行番号は正確に記述されている。must_fixが1件: FileViewer.tsxの既存パターンにはタイマークリーンアップが存在しないにもかかわらず「FileViewer.tsxパターン完全踏襲」と記載している点。実際のクリーンアップパターンはFilePanelContent.tsxに由来しており、設計書の参照元記述を修正すべきである。should_fixが1件: 行番号参照の微小なずれ。nice_to_haveが5件のうち3件は整合性確認済みで対応不要。",
+  "statistics": {
+    "must_fix": 1,
+    "should_fix": 1,
+    "nice_to_have": 5,
+    "total": 7
+  }
+}

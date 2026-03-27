@@ -113,7 +113,7 @@ describe('log-manager', () => {
       );
       expect(fs.writeFile).toHaveBeenCalledTimes(1);
       const writtenContent = vi.mocked(fs.writeFile).mock.calls[0][1] as string;
-      expect(writtenContent).toContain('# Claude Code Conversation Log: feature-foo');
+      expect(writtenContent).toContain('# Claude Conversation Log: feature-foo');
       expect(writtenContent).toContain('Created: 2025-01-20 10:30:00');
       expect(writtenContent).toContain('### User');
       expect(writtenContent).toContain('Hello Claude');
@@ -157,7 +157,7 @@ describe('log-manager', () => {
       await createLog('my-wt', 'msg', 'resp', 'codex');
 
       const writtenContent = vi.mocked(fs.writeFile).mock.calls[0][1] as string;
-      expect(writtenContent).toContain('# Codex CLI Conversation Log: my-wt');
+      expect(writtenContent).toContain('# Codex Conversation Log: my-wt');
       expect(writtenContent).toContain('### Codex');
     });
 
@@ -169,7 +169,7 @@ describe('log-manager', () => {
       await createLog('my-wt', 'msg', 'resp', 'gemini');
 
       const writtenContent = vi.mocked(fs.writeFile).mock.calls[0][1] as string;
-      expect(writtenContent).toContain('# Gemini CLI Conversation Log: my-wt');
+      expect(writtenContent).toContain('# Gemini Conversation Log: my-wt');
       expect(writtenContent).toContain('### Gemini');
     });
 
@@ -181,7 +181,7 @@ describe('log-manager', () => {
       await createLog('my-wt', 'msg', 'resp');
 
       const writtenContent = vi.mocked(fs.writeFile).mock.calls[0][1] as string;
-      expect(writtenContent).toContain('# Claude Code Conversation Log: my-wt');
+      expect(writtenContent).toContain('# Claude Conversation Log: my-wt');
     });
 
     it('should create log directory if it does not exist', async () => {
@@ -296,12 +296,12 @@ describe('log-manager', () => {
       vi.mocked(fs.readdir)
         .mockResolvedValueOnce(['wt-2025-01-20.md'] as unknown as Awaited<ReturnType<typeof fs.readdir>>)
         .mockResolvedValueOnce(['wt-2025-01-19.md'] as unknown as Awaited<ReturnType<typeof fs.readdir>>)
-        .mockResolvedValueOnce([] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
+        .mockResolvedValue([] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
 
       const result = await listLogs('wt', 'all');
 
-      // Should have called readdir for claude, codex, gemini
-      expect(fs.readdir).toHaveBeenCalledTimes(3);
+      // Should have called readdir for all CLI_TOOL_IDS (6 tools)
+      expect(fs.readdir).toHaveBeenCalledTimes(6);
       expect(result).toHaveLength(2);
     });
 
@@ -311,8 +311,8 @@ describe('log-manager', () => {
 
       await listLogs('wt');
 
-      // Should be called 3 times (claude, codex, gemini)
-      expect(fs.readdir).toHaveBeenCalledTimes(3);
+      // Should be called for all CLI_TOOL_IDS (6 tools)
+      expect(fs.readdir).toHaveBeenCalledTimes(6);
     });
 
     it('should return empty array when no log files match', async () => {
@@ -375,7 +375,7 @@ describe('log-manager', () => {
       await appendToLog('wt', 'First content', 'claude');
 
       const writtenContent = vi.mocked(fs.writeFile).mock.calls[0][1] as string;
-      expect(writtenContent).toContain('# Claude Code Conversation Log: wt');
+      expect(writtenContent).toContain('# Claude Conversation Log: wt');
       expect(writtenContent).toContain('Created: 2025-01-20 10:30:00');
       expect(writtenContent).toContain('First content');
     });
@@ -388,7 +388,7 @@ describe('log-manager', () => {
       await appendToLog('wt', 'content', 'codex');
 
       const writtenContent = vi.mocked(fs.writeFile).mock.calls[0][1] as string;
-      expect(writtenContent).toContain('# Codex CLI Conversation Log: wt');
+      expect(writtenContent).toContain('# Codex Conversation Log: wt');
     });
 
     it('should use correct tool name for gemini header', async () => {
@@ -399,7 +399,7 @@ describe('log-manager', () => {
       await appendToLog('wt', 'content', 'gemini');
 
       const writtenContent = vi.mocked(fs.writeFile).mock.calls[0][1] as string;
-      expect(writtenContent).toContain('# Gemini CLI Conversation Log: wt');
+      expect(writtenContent).toContain('# Gemini Conversation Log: wt');
     });
 
     it('should default to claude cliToolId', async () => {
@@ -410,7 +410,7 @@ describe('log-manager', () => {
       await appendToLog('wt', 'content');
 
       const writtenContent = vi.mocked(fs.writeFile).mock.calls[0][1] as string;
-      expect(writtenContent).toContain('# Claude Code Conversation Log: wt');
+      expect(writtenContent).toContain('# Claude Conversation Log: wt');
     });
 
     it('should ensure log directory exists before writing', async () => {
@@ -458,8 +458,8 @@ describe('log-manager', () => {
 
       await cleanupOldLogs(30);
 
-      // Should check claude, codex, gemini directories
-      expect(fs.readdir).toHaveBeenCalledTimes(3);
+      // Should check all CLI_TOOL_IDS directories (6 tools)
+      expect(fs.readdir).toHaveBeenCalledTimes(6);
     });
 
     it('should return 0 when no files to delete', async () => {

@@ -1,0 +1,54 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー - 指摘事項対応",
+  "applied_findings": [
+    {
+      "id": "CR2-001",
+      "severity": "should_fix",
+      "title": "CopilotToolへの型キャストは不要 -- ICLIToolにsendMessage()が既に存在",
+      "action": "セクション3-2のコード例を修正。CopilotTool importと型キャスト(as CopilotTool)を削除し、既存のcliTool変数(ICLITool型)のsendMessage()を直接使用する形に変更。設計判断の記述も更新。"
+    },
+    {
+      "id": "CR2-002",
+      "severity": "should_fix",
+      "title": "設計書のimport文が不要になる",
+      "action": "CR2-001と統合対応。import { CopilotTool } の指示をコメントで不要と明記し削除。"
+    },
+    {
+      "id": "CR2-003",
+      "severity": "must_fix",
+      "title": "既存テストのisCliToolTypeモックにcopilotが含まれていない",
+      "action": "セクション5テスト戦略に「前提条件: 既存モックの修正」サブセクションを追加。isCliToolTypeモックへのcopilot追加手順をコード例付きで明記。実装チェックリストにも対応項目を追加。"
+    },
+    {
+      "id": "CR2-004",
+      "severity": "should_fix",
+      "title": "ICLIToolの全ツールがsendMessage()を持つ点が未考慮",
+      "action": "セクション8の将来の拡張パスを全面更新。ICLIToolにsendMessage()が既存である事実を明記し、handleTerminalCommand()との責務重複の可能性について注記を追加。"
+    },
+    {
+      "id": "CR2-005",
+      "severity": "nice_to_have",
+      "title": "sendKeys呼び出しのデフォルトsendEnterパラメータの未記載",
+      "action": "セクション3-2の設計判断にsendEnter挙動の違いについて参考情報として追記。sendMessage()委譲によりterminal/route.ts側での制御が不要である点を明記。"
+    },
+    {
+      "id": "CR2-006",
+      "severity": "nice_to_have",
+      "title": "CLIToolManagerのgetToolメソッドの再呼び出しが不要",
+      "action": "CR2-001と統合対応。コード例を既存のcliTool変数を再利用する形に修正。manager.getTool('copilot')の追加呼び出しを削除。"
+    }
+  ],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-559-copilot-slash-cmd-fix-design-policy.md",
+  "changes_summary": [
+    "セクション2: アーキテクチャ図のCopilotTool参照をICLITool経由の表記に更新",
+    "セクション3-2: CopilotTool importと型キャストを削除、既存cliTool変数を使用するコード例に修正、sendEnter挙動の参考情報を追加",
+    "セクション5: isCliToolTypeモックへのcopilot追加の前提条件を追加、テストケース記述をcliTool.sendMessage()に統一",
+    "セクション8: 決定事項テーブルから型キャスト必要の記述を削除、将来の拡張パスをICLITool.sendMessage()活用を前提に全面更新",
+    "セクション9: Stage 2レビュー指摘事項サマリーテーブルを追加(CR2-001からCR2-006)",
+    "セクション10: 実装チェックリストにCopilotTool不使用確認とモック修正の項目を追加",
+    "更新日をStage 2対応に更新"
+  ]
+}

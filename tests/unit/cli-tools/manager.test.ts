@@ -57,6 +57,13 @@ describe('CLIToolManager', () => {
       expect(tool.command).toBe('opencode');
     });
 
+    it('should return CopilotTool for copilot', () => {
+      const tool = manager.getTool('copilot');
+      expect(tool.id).toBe('copilot');
+      expect(tool.name).toBe('Copilot');
+      expect(tool.command).toBe('gh');
+    });
+
     it('should return the same instance for the same tool type', () => {
       const tool1 = manager.getTool('claude');
       const tool2 = manager.getTool('claude');
@@ -65,9 +72,9 @@ describe('CLIToolManager', () => {
   });
 
   describe('getAllTools', () => {
-    it('should return all five tools', () => {
+    it('should return all six tools', () => {
       const tools = manager.getAllTools();
-      expect(tools).toHaveLength(5);
+      expect(tools).toHaveLength(6);
 
       const ids = tools.map(t => t.id);
       expect(ids).toContain('claude');
@@ -75,6 +82,7 @@ describe('CLIToolManager', () => {
       expect(ids).toContain('gemini');
       expect(ids).toContain('vibe-local');
       expect(ids).toContain('opencode');
+      expect(ids).toContain('copilot');
     });
 
     it('should return tools in consistent order', () => {
@@ -113,7 +121,7 @@ describe('CLIToolManager', () => {
     it('should return info for all tools', async () => {
       const allInfo = await manager.getAllToolsInfo();
 
-      expect(allInfo).toHaveLength(5);
+      expect(allInfo).toHaveLength(6);
 
       const ids = allInfo.map(info => info.id);
       expect(ids).toContain('claude');
@@ -121,6 +129,7 @@ describe('CLIToolManager', () => {
       expect(ids).toContain('gemini');
       expect(ids).toContain('vibe-local');
       expect(ids).toContain('opencode');
+      expect(ids).toContain('copilot');
     });
 
     it('should include installation status for each tool', async () => {

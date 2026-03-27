@@ -1,0 +1,39 @@
+{
+  "issue_number": 552,
+  "stage": 1,
+  "applied_findings": [
+    {
+      "id": "DR1-005",
+      "severity": "must_fix",
+      "title": "setTimeout cleanup is missing on component unmount",
+      "action": "Added useRef for timer IDs (pathTimerRef, repoPathTimerRef), useEffect cleanup to clearTimeout on unmount, updated handler code to store timer IDs in refs. Updated data flow diagram, import list, technology table, design decisions table, and test cases."
+    },
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "title": "Copy button pattern duplicated across 4 instances",
+      "action": "Updated DRY principle description to acknowledge 4 total instances across codebase. Added TODO comment pattern to handler code referencing FileViewer.tsx and FilePanelContent.tsx. Recorded future extraction candidate path (src/components/common/CopyIconButton.tsx). Updated design decisions table."
+    },
+    {
+      "id": "DR1-002",
+      "severity": "nice_to_have",
+      "title": "handleCopyPath and handleCopyRepoPath nearly identical",
+      "action": "Documented in review findings summary as acceptable local duplication. No design change needed."
+    },
+    {
+      "id": "DR1-003",
+      "severity": "nice_to_have",
+      "title": "Silent failure could benefit from minimal logging",
+      "action": "Documented in review findings summary. Maintaining consistency with existing FileViewer.tsx pattern."
+    },
+    {
+      "id": "DR1-004",
+      "severity": "nice_to_have",
+      "title": "WorktreeInfoFields accumulating responsibilities",
+      "action": "Documented in review findings summary as a future consideration."
+    }
+  ],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "summary": "All 5 findings from Stage 1 review have been reflected in the design policy document. The must_fix item (DR1-005: setTimeout cleanup) was fully integrated into the component design with useRef + useEffect cleanup pattern, including updated imports, data flow, handlers, technology table, design decisions, and test cases. The should_fix item (DR1-001: DRY) was addressed by updating the design principles, adding TODO comment guidance, and recording the future common component extraction path. All 3 nice_to_have items were documented in the review findings summary section with rationale for deferral. An implementation checklist (Section 12) was added with 7 actionable items."
+}

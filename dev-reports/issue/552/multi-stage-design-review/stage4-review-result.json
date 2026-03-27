@@ -1,0 +1,65 @@
+{
+  "issue_number": 552,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "findings": [
+    {
+      "id": "SEC4-001",
+      "severity": "nice_to_have",
+      "category": "セキュリティ/XSS",
+      "title": "Path values rendered as React text children - no XSS risk",
+      "description": "worktree.path and worktree.repositoryPath are rendered via JSX text interpolation ({worktree.path}), not via dangerouslySetInnerHTML. React automatically escapes text content, so there is no XSS vector even if path values contained HTML or script fragments. No dangerouslySetInnerHTML usage exists in WorktreeDetailSubComponents.tsx (verified: 0 occurrences). No action required.",
+      "location": "設計方針書 セクション5-1 (Path/Repository Path フィールド変更)",
+      "recommendation": "対応不要。現在の設計は安全。",
+      "owasp_category": "A03:2021 Injection (XSS)"
+    },
+    {
+      "id": "SEC4-002",
+      "severity": "nice_to_have",
+      "category": "セキュリティ/Clipboard API",
+      "title": "Clipboard write contains only local filesystem paths - no sensitive data exposure",
+      "description": "The copyToClipboard utility writes worktree.path and worktree.repositoryPath to the clipboard. These are local filesystem directory paths that the user already sees on screen in the Info modal. The Clipboard API (navigator.clipboard.writeText) requires user gesture and secure context (HTTPS/localhost). The fallback textarea method also requires user gesture (click handler). There is no risk of automatic or background clipboard writes. The data copied (filesystem paths) is not credentials, tokens, or PII - it is information the user explicitly requested to copy.",
+      "location": "設計方針書 セクション3 (技術選定) / src/lib/clipboard-utils.ts",
+      "recommendation": "対応不要。コピー対象は画面表示済みのファイルパスのみであり、機密情報の漏洩リスクなし。",
+      "owasp_category": "N/A"
+    },
+    {
+      "id": "SEC4-003",
+      "severity": "nice_to_have",
+      "category": "セキュリティ/Path Injection",
+      "title": "Clipboard content is output-only - no path traversal or injection risk",
+      "description": "The copy operation is strictly output (write to clipboard). The copied path value is never fed back into any file system operation, API call, or navigation within the application. Path traversal attacks require a path string to be used as input to a file/directory operation. Since the clipboard content is only consumed by the user (paste into terminal, editor, etc.), there is no application-level path traversal or injection risk.",
+      "location": "設計方針書 セクション2 (データフロー)",
+      "recommendation": "対応不要。パス値はユーザーへの出力のみであり、アプリケーション内で入力として再利用されない。",
+      "owasp_category": "A01:2021 Broken Access Control (Path Traversal)"
+    },
+    {
+      "id": "SEC4-004",
+      "severity": "nice_to_have",
+      "category": "セキュリティ/copyToClipboard utility",
+      "title": "copyToClipboard utility has appropriate input sanitization",
+      "description": "The existing copyToClipboard utility in clipboard-utils.ts includes: (1) empty/whitespace input guard (early return), (2) ANSI escape code stripping via stripAnsi() before writing to clipboard, (3) Clipboard API as primary method with textarea fallback, (4) textarea cleanup in finally block preventing DOM leaks. The ANSI stripping is relevant for terminal output copy scenarios but harmless for filesystem paths. The utility is well-designed for its purpose.",
+      "location": "src/lib/clipboard-utils.ts",
+      "recommendation": "対応不要。既存ユーティリティは適切な入力サニタイズを実装済み。",
+      "owasp_category": "N/A"
+    },
+    {
+      "id": "SEC4-005",
+      "severity": "nice_to_have",
+      "category": "セキュリティ/OWASP総合評価",
+      "title": "OWASP Top 10 overall assessment - minimal attack surface",
+      "description": "This change is a pure client-side UI enhancement that adds copy buttons to an existing read-only display. The OWASP Top 10 categories assessed: A01 Broken Access Control - N/A (no access control change), A02 Cryptographic Failures - N/A (no crypto), A03 Injection - No risk (React text escaping, no dangerouslySetInnerHTML), A04 Insecure Design - N/A (follows established patterns), A05 Security Misconfiguration - N/A (no config change), A06 Vulnerable Components - N/A (no new dependencies), A07 Auth Failures - N/A (no auth change), A08 Data Integrity - N/A (read-only operation), A09 Logging/Monitoring - N/A (client-side only), A10 SSRF - N/A (no server requests added). No security concerns identified.",
+      "location": "設計方針書 全体",
+      "recommendation": "対応不要。本変更のセキュリティ攻撃面は極めて限定的であり、OWASP Top 10のいずれのカテゴリにも該当するリスクは検出されなかった。",
+      "owasp_category": "OWASP Top 10 (総合)"
+    }
+  ],
+  "summary": "Issue #552のセキュリティレビューを完了した。本変更はInfoモーダル内のPathおよびRepository Pathフィールドにクリップボードコピーボタンを追加する純粋なクライアントサイドUI変更である。セキュリティ観点での分析結果: (1) XSSリスクなし - パス値はReact JSXテキスト補間で描画されておりdangerouslySetInnerHTMLは未使用、(2) クリップボードAPI経由の機密データ漏洩リスクなし - コピー対象は画面表示済みのファイルシステムパスのみ、(3) パストラバーサル/インジェクションリスクなし - コピーされた値はアプリケーション内で入力として再利用されない、(4) copyToClipboardユーティリティは空文字ガード・ANSIサニタイズ・DOM cleanup等の適切な防御を実装済み、(5) OWASP Top 10全カテゴリについて該当リスクなし。must_fixおよびshould_fixの指摘事項はゼロであり、設計方針書のセキュリティ品質は十分である。",
+  "statistics": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 5,
+    "total": 5
+  }
+}

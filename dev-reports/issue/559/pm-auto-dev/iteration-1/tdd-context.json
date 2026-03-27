@@ -1,0 +1,25 @@
+{
+  "issue_number": 559,
+  "acceptance_criteria": [
+    "Terminal API経由でCopilotセッションに対してコマンドを送信した場合にcliTool.sendMessage()に委譲されること",
+    "Copilotが応答中に/modelを送信しても、テキストとして処理されないこと（sendMessage内のwaitForPromptで待機）",
+    "既存のsendMessage経路（/api/worktrees/:id/send）の動作が変更されないこと",
+    "他CLIツール（claude, codex等）の動作に影響がないこと（sendKeysが従来通り使われること）",
+    "単体テストが追加されていること",
+    "CLAUDE.mdのモジュール説明が更新されていること"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: terminal/route.ts にCopilot委譲ロジック追加（cliToolId === 'copilot' の場合にcliTool.sendMessage()に委譲）",
+    "Task 2.1: 既存テストモック修正（isCliToolTypeモックにcopilot追加、getToolモックにsendMessage追加）",
+    "Task 2.2: Copilot委譲テスト追加（スラッシュコマンド、通常テキスト、他ツール非影響、エラーケース）",
+    "Task 3.1: CLAUDE.md更新（terminal/route.tsエントリにCopilot委譲ロジック追記）"
+  ],
+  "design_doc_path": "dev-reports/design/issue-559-copilot-slash-cmd-fix-design-policy.md",
+  "target_coverage": 80,
+  "key_design_decisions": [
+    "アプローチC改: Copilotの全コマンド（スラッシュ/通常テキスト両方）をsendMessage()に委譲",
+    "copilot.tsの変更は不要（sendMessage()は既に対応済み）",
+    "ICLIToolインターフェースにsendMessage()が定義済みのため型キャスト不要",
+    "invalidateCacheはsendMessage()内で呼ばれるため委譲パスでの追加呼び出しは不要"
+  ]
+}

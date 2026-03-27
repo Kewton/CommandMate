@@ -1,0 +1,62 @@
+{
+  "issue_number": 548,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-03-27",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "overflow-hidden削除ではなくoverflow-autoへの置き換えを修正方針として明記。影響範囲を全5モバイルタブ（terminal, history, files, memo, info）に拡大し、タブ別影響詳細テーブルを追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "修正方針セクションにNavigationButtons表示時のクリアランス要件を追記。必要なクリアランス構成（MobileTabBar 4rem + MessageInput 3-4rem + NavigationButtons 2rem）を明記"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "テスト方針セクションを新設。モバイルレイアウトCSS検証のユニットテスト不在を指摘し、推奨テスト項目を記載"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "ダークモード手動QAを受け入れ条件とテスト方針の両方に追記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "影響範囲セクションにSearchBarへの影響なしを明記"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "テスト方針にiOS Safari（ノッチ/Dynamic Island端末）でのsafe-area検証を追記"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 6,
+    "applied": 6,
+    "skipped": 0
+  },
+  "key_changes": [
+    "影響範囲セクションを全5タブに拡大し、タブ別影響詳細テーブルを追加",
+    "デスクトップ影響なし・固定位置要素への影響・SearchBar影響なしを明記",
+    "修正方針セクションを新設（overflow-auto置き換え、パディング一本化とクリアランス要件）",
+    "受け入れ条件を4項目から7項目に拡充",
+    "テスト方針セクションを新設（手動QA必須項目 + 自動テスト推奨項目）",
+    "レビュー履歴セクションを追加"
+  ],
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/548"
+  }
+}

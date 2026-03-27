@@ -1,0 +1,152 @@
+{
+  "issue_number": 559,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ (OWASP Top 10)",
+  "review_date": "2026-03-27",
+  "design_doc_path": "dev-reports/design/issue-559-copilot-slash-cmd-fix-design-policy.md",
+  "reviewed_files": [
+    "src/app/api/worktrees/[id]/terminal/route.ts",
+    "src/lib/cli-tools/copilot.ts",
+    "src/lib/tmux/tmux.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/cli-tools/base.ts",
+    "src/lib/cli-tools/validation.ts",
+    "src/middleware.ts"
+  ],
+  "overall_assessment": "PASS_WITH_OBSERVATIONS",
+  "summary": "設計方針に重大なセキュリティ脆弱性は検出されなかった。コマンドインジェクション対策（execFile使用、セッション名バリデーション）、認証ミドルウェア、入力長制限が適切に機能している。委譲パスで既存のセキュリティチェックがバイパスされることはない。軽微な改善点として、waitForPromptのDoSリスクとエラーメッセージ内のセッション名露出が挙げられる。",
+  "findings": [
+    {
+      "id": "SEC4-001",
+      "category": "コマンドインジェクション (A03:2021 Injection)",
+      "severity": "nice_to_have",
+      "title": "sendMessage()経由のコマンドインジェクションリスクは低い",
+      "description": "sendMessage()はsendKeys()を呼び出し、sendKeys()はexecFile('tmux', [...args])を使用している。execFileはシェルを介さずにプロセスを直接起動するため、シェルインジェクションのリスクはない。ユーザー入力（command）はtmux send-keysの引数として渡され、tmuxはこれをキーストロークとして解釈するためシェルコマンドとしては実行されない。さらに、セッション名はvalidateSessionName()で英数字・ハイフン・アンダースコアのみに制限されており、-tオプション経由のインジェクションも防止されている。",
+      "risk": "現在のexecFile使用により、シェルインジェクションリスクはなし。ただし将来のリファクタリングでexecFileがexecに変更されないよう注意が必要。",
+      "recommendation": "現状で問題なし。tmux.tsのexecFile使用をコメントやlintルールで保護することを検討。",
+      "owasp_category": "A03:2021 Injection"
+    },
+    {
+      "id": "SEC4-002",
+      "category": "入力バリデーション (A03:2021 Injection)",
+      "severity": "nice_to_have",
+      "title": "委譲パスでMAX_COMMAND_LENGTH検証が適用される",
+      "description": "terminal/route.tsのL50でcommand.length > MAX_COMMAND_LENGTH（10000文字）の検証がsendMessage()委譲の前に行われるため、大きなペイロードはCopilotTool.sendMessage()に到達しない。この順序は正しく、委譲によるバリデーションバイパスは発生しない。",
+      "risk": "なし。バリデーション順序が正しい。",
+      "recommendation": "現状で問題なし。",
+      "owasp_category": "A03:2021 Injection"
+    },
+    {
+      "id": "SEC4-003",
+      "category": "認証・認可 (A01:2021 Broken Access Control)",
+      "severity": "nice_to_have",
+      "title": "委譲パスの認証はミドルウェアで担保されている",
+      "description": "Terminal APIルート（/api/worktrees/:id/terminal）はNext.jsミドルウェア（middleware.ts）で認証が行われる。sendMessage()への委譲はルートハンドラ内部の処理変更であり、HTTPリクエスト処理の前段で認証済みのため、認証バイパスは発生しない。DB存在確認（getWorktreeById）とセッション存在確認（hasSession）も委譲前に実行される。",
+      "risk": "なし。認証レイヤーは委譲パスに影響されない。",
+      "recommendation": "現状で問題なし。",
+      "owasp_category": "A01:2021 Broken Access Control"
+    },
+    {
+      "id": "SEC4-004",
+      "category": "情報露出 (A01:2021 Broken Access Control)",
+      "severity": "nice_to_have",
+      "title": "エラーメッセージにセッション名が含まれる可能性",
+      "description": "CopilotTool.sendMessage()のL248でthrowされるエラーメッセージに`Copilot session ${sessionName} does not exist`とセッション名が含まれる。このエラーはterminal/route.tsのcatchブロック（L90）でlogger.errorに記録されるが、クライアントには固定文字列（'Failed to send command to terminal'）が返される。したがって、セッション名がクライアントに露出することはない。",
+      "risk": "クライアントへの情報露出なし。サーバーログにセッション名が記録されるが、これは運用上有用な情報であり問題なし。",
+      "recommendation": "現状で問題なし。terminal/route.tsの固定文字列エラーレスポンスパターン（D1-007）が正しく機能している。",
+      "owasp_category": "A01:2021 Broken Access Control"
+    },
+    {
+      "id": "SEC4-005",
+      "category": "DoS (A05:2021 Security Misconfiguration)",
+      "severity": "should_fix",
+      "title": "waitForPromptのブロッキングによるDoSリスク",
+      "description": "sendMessage()への委譲により、全てのCopilotコマンドでwaitForPrompt()が最大15秒ブロックする。攻撃者が認証済みの状態で短時間に多数のリクエストを送信した場合、サーバーのリクエスト処理スレッドが枯渇する可能性がある。Next.jsのサーバーレス関数はリクエストごとにasync実行されるが、同時実行数には上限がある。",
+      "risk": "認証済みユーザーによるDoS。認証が必要なため外部攻撃のリスクは低いが、正当なユーザーでも意図せず大量リクエストを送信する可能性がある。",
+      "recommendation": "設計方針書のセクション6に記載されている15秒タイムアウトは許容範囲だが、以下を検討すること: (1) 同一worktreeIdに対するCopilot sendMessage()の同時実行を1つに制限する排他制御（既にsendMessage経路で同様の問題が存在するため、本Issueのスコープ外として記録のみでも可）。(2) 設計方針書のセキュリティ考慮事項（セクション7）にwaitForPromptブロッキングのDoSリスクを明記する。",
+      "owasp_category": "A05:2021 Security Misconfiguration"
+    },
+    {
+      "id": "SEC4-006",
+      "category": "レースコンディション (A04:2021 Insecure Design)",
+      "severity": "should_fix",
+      "title": "hasSession二重チェック間のTOCTOUリスク（IA3-004の再確認）",
+      "description": "terminal/route.tsのL73でhasSession()チェック後、cliTool.sendMessage()内のL245で再度hasSession()チェックが行われる。2つのチェック間でセッションが終了した場合、copilot.tsのL248でエラーがthrowされ、terminal/route.tsのcatchブロックで500エラーが返される。設計方針書のIA3-004で既に認識されている。",
+      "risk": "低。セッション終了は通常ユーザーの明示的な操作によるものであり、2つのチェック間（ミリ秒単位）でセッションが終了する確率は極めて低い。発生した場合も500エラーが返されるのみで、セキュリティ上の影響はない。",
+      "recommendation": "設計方針書で既に認識済み（IA3-004）。現時点では対応不要だが、将来的にsendMessage()内のhasSession()チェックを省略し、tmux send-keysの戻り値エラーで検出するパターンへの移行を検討してもよい。",
+      "owasp_category": "A04:2021 Insecure Design"
+    },
+    {
+      "id": "SEC4-007",
+      "category": "セキュリティチェックバイパス (A01:2021 Broken Access Control)",
+      "severity": "nice_to_have",
+      "title": "委譲パスで既存セキュリティチェックはバイパスされない",
+      "description": "委譲前に以下の全てのチェックが実行される: (1) isCliToolType()によるcliToolIdバリデーション（L36）、(2) commandパラメータの型・存在チェック（L44）、(3) MAX_COMMAND_LENGTH制限（L50）、(4) DB worktree存在確認（L59）、(5) セッション存在確認（L73）。sendMessage()への委譲はL81以降で行われるため、全てのチェックを通過した後にのみ実行される。",
+      "risk": "なし。セキュリティチェックの順序が正しく保たれている。",
+      "recommendation": "現状で問題なし。",
+      "owasp_category": "A01:2021 Broken Access Control"
+    },
+    {
+      "id": "SEC4-008",
+      "category": "ログインジェクション (A09:2021 Security Logging and Monitoring Failures)",
+      "severity": "nice_to_have",
+      "title": "copilot.tsのログ出力にユーザー入力が部分的に含まれる",
+      "description": "copilot.tsのL264でslashCmdがログに記録される（{ command: slashCmd }）。slashCmdはextractSlashCommand()で正規表現/^\\/(\\S+)/でマッチした結果であり、空白を含まない文字列に限定される。ログインジェクション（改行やANSIエスケープ）のリスクは正規表現の\\S+制約により低い。",
+      "risk": "極めて低い。\\S+により改行文字は除外されるが、ANSIエスケープシーケンスは理論的に含まれる可能性がある。実用上はCopilotのスラッシュコマンド名にANSIシーケンスは使われない。",
+      "recommendation": "現状で問題なし。structuredログ（createLogger）を使用しているため、ログインジェクションのリスクは更に低減されている。",
+      "owasp_category": "A09:2021 Security Logging and Monitoring Failures"
+    }
+  ],
+  "checklist": {
+    "command_injection": {
+      "status": "PASS",
+      "detail": "execFile使用（シェル非経由）、セッション名バリデーション（英数字+ハイフン+アンダースコアのみ）により防止"
+    },
+    "input_validation": {
+      "status": "PASS",
+      "detail": "isCliToolType(), typeof/存在チェック, MAX_COMMAND_LENGTH(10000)が委譲前に適用"
+    },
+    "authentication": {
+      "status": "PASS",
+      "detail": "Next.jsミドルウェアでCookie/Bearer認証が全APIルートに適用。委譲はルートハンドラ内部の変更のみ"
+    },
+    "error_information_leakage": {
+      "status": "PASS",
+      "detail": "クライアントには固定文字列エラーメッセージのみ返却。内部エラーはサーバーログのみに記録"
+    },
+    "dos_risk": {
+      "status": "PASS_WITH_OBSERVATION",
+      "detail": "waitForPrompt 15秒ブロッキングは認証済みユーザーのみ。排他制御は未実装だが既存sendMessage経路と同等のリスク"
+    },
+    "race_conditions": {
+      "status": "PASS_WITH_OBSERVATION",
+      "detail": "hasSession二重チェックのTOCTOUは設計書で認識済み（IA3-004）。実影響は極小"
+    },
+    "security_check_bypass": {
+      "status": "PASS",
+      "detail": "全セキュリティチェック（認証、入力検証、DB確認、セッション確認）が委譲前に実行される"
+    }
+  },
+  "risk_assessment": {
+    "overall_risk": "LOW",
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 6,
+    "rationale": "重大なセキュリティ脆弱性は検出されなかった。should_fixの2件（DoSリスクの文書化、TOCTOUの認識）は既存アーキテクチャ全体に共通する課題であり、本Issueの変更で新たに導入されるものではない。"
+  },
+  "improvement_recommendations": [
+    {
+      "id": "REC-001",
+      "priority": "should_fix",
+      "title": "設計方針書セクション7にwaitForPromptのDoSリスクを追記",
+      "description": "セキュリティ考慮事項に、waitForPrompt()による最大15秒ブロッキングがDoSベクターとなりうる点と、認証により緩和されている点を明記する。"
+    },
+    {
+      "id": "REC-002",
+      "priority": "nice_to_have",
+      "title": "同一worktreeへの同時sendMessage排他制御の将来課題化",
+      "description": "本Issueのスコープ外として、同一worktreeIdに対するsendMessage()の同時実行を防ぐ排他制御をバックログに追加することを検討する。"
+    }
+  ]
+}

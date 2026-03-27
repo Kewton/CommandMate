@@ -1,0 +1,24 @@
+{
+  "issue_number": 548,
+  "acceptance_criteria": [
+    "モバイル表示でファイルツリー全体がスクロールにより閲覧可能であること",
+    "全5タブ（terminal, history, files, memo, info）でスクロールが正常に動作すること",
+    "MobileTabBarやMessageInputと重ならずコンテンツが表示されること",
+    "NavigationButtons表示時にもコンテンツが隠れないこと",
+    "safe-area-inset-bottomが正しく考慮されていること",
+    "デスクトップ版のレイアウトに影響がないこと",
+    "ダークモードで固定要素（MessageInput, MobileTabBar）の背景がスクロールコンテンツを正しく隠すこと"
+  ],
+  "implementation_tasks": [
+    "WorktreeDetailRefactored.tsx L1762付近のmainコンテナの overflow-hidden を overflow-y-auto に変更",
+    "同mainコンテナのデッドコード pb-32 を削除（inline style paddingBottomが優先されるため不要）"
+  ],
+  "target_coverage": 80,
+  "related_files": [
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/WorktreeDetailSubComponents.tsx",
+    "src/components/worktree/FileTreeView.tsx"
+  ],
+  "root_cause": "mainコンテナのoverflow-hiddenが子コンポーネントFileTreeViewのoverflow-autoを無効化し、ファイルツリーのスクロールを阻害。また pb-32 はinline styleのpaddingBottomと競合しデッドコードになっている",
+  "fix_strategy": "overflow-hidden を overflow-y-auto に置き換え（縦スクロール許可）、デッドコード pb-32 を削除"
+}

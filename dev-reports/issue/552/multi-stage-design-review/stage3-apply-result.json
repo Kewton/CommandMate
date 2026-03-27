@@ -1,0 +1,47 @@
+{
+  "issue_number": 552,
+  "stage": 3,
+  "applied_findings": [
+    {
+      "id": "IA3-004",
+      "severity": "should_fix",
+      "title": "Multiple rapid clicks do not clear previous timer before starting new one",
+      "action": "Added clearTimeout(timerRef.current) before setTimeout assignment in both handleCopyPath and handleCopyRepoPath handlers. Updated data flow diagram in Section 2. Added test case #8 for rapid-click timer conflict. Added implementation checklist item."
+    },
+    {
+      "id": "IA3-001",
+      "severity": "nice_to_have",
+      "title": "No existing unit tests for WorktreeInfoFields - regression risk",
+      "action": "Added recommended baseline rendering test case #9 to Section 8 test design. Added implementation checklist item as recommended."
+    },
+    {
+      "id": "IA3-002",
+      "severity": "nice_to_have",
+      "title": "First lucide-react import in WorktreeDetailSubComponents.tsx",
+      "action": "Documented as informational in Stage 3 review summary. No design change required."
+    },
+    {
+      "id": "IA3-003",
+      "severity": "nice_to_have",
+      "title": "Copy button touch target may be small on mobile",
+      "action": "Documented in Stage 3 review summary as future consideration. No design change for current scope."
+    },
+    {
+      "id": "IA3-005",
+      "severity": "nice_to_have",
+      "title": "mb-1 removal from h2 when wrapping in flex container",
+      "action": "Documented as implementation awareness note in Stage 3 review summary. No design change required."
+    }
+  ],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "updates_applied": [
+    "Section 2 (Data Flow): Added clearTimeout step before setTimeout assignment",
+    "Section 5-1 (Handler Implementation): Added clearTimeout(timerRef.current) before setTimeout in both handlers with IA3-004 comment",
+    "Section 8 (Test Design): Added test case #8 (rapid-click timer conflict) and #9 (baseline rendering)",
+    "Section 14 (NEW): Added Stage 3 impact analysis review findings summary with should_fix, nice_to_have, and verification results",
+    "Section 15 (Implementation Checklist): Added IA3-004 checklist item and IA3-001 recommended item",
+    "Footer: Added Stage 3 update timestamp"
+  ],
+  "summary": "Applied all 5 Stage 3 impact analysis review findings to the design policy document. The key change is IA3-004 (should_fix): added clearTimeout before setting new timeout in copy handlers to prevent orphaned timers on rapid clicks. This was reflected in the data flow diagram, handler implementation code, test cases, and implementation checklist. All 4 nice_to_have findings were documented in the new Stage 3 review summary section. The impact analysis verification results confirming single-file scope, unchanged props interface, memo boundary, and desktop/mobile parity were also added."
+}

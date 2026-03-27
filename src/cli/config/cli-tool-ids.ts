@@ -7,7 +7,7 @@
  */
 
 /** CLI tool IDs available for --agent option */
-export const CLI_TOOL_IDS = ['claude', 'codex', 'gemini', 'vibe-local', 'opencode'] as const;
+export const CLI_TOOL_IDS = ['claude', 'codex', 'gemini', 'vibe-local', 'opencode', 'copilot'] as const;
 
 export type CLIToolId = typeof CLI_TOOL_IDS[number];
 

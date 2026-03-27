@@ -1,0 +1,156 @@
+{
+  "issue_number": 559,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "review_date": "2026-03-27",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 1,
+    "nice_to_have_count": 2,
+    "previous_findings_status": "All 8 findings from Stage 3 have been addressed in the current Issue body."
+  },
+  "previous_findings_resolution": [
+    {
+      "id": "F3-001",
+      "severity": "must_fix",
+      "title": "special-keys/route.ts の影響分析の欠如",
+      "status": "resolved",
+      "evidence": "Issue本文に「special-keys/route.tsの影響分析」セクションが追加され、スコープ外（影響なし）と明確に判断・記載されている。特殊キーはテキスト入力ではないため影響は限定的との分析は、special-keys/route.tsのコード（isAllowedSpecialKeyによるキーホワイトリスト制限）と整合している。"
+    },
+    {
+      "id": "F3-008",
+      "severity": "must_fix",
+      "title": "プロンプト待機が必要なスラッシュコマンドの範囲が未定義",
+      "status": "resolved",
+      "evidence": "「プロンプト待機が必要なスラッシュコマンドの範囲」セクションが新設され、全スラッシュコマンドにプロンプト待機が必要であること、SELECTION_LIST_COMMANDSは追加待機が必要なサブセットであることが明確に記載されている。"
+    },
+    {
+      "id": "F3-002",
+      "severity": "should_fix",
+      "title": "スラッシュコマンド判定方法が未定義",
+      "status": "resolved",
+      "evidence": "「スラッシュコマンド判定ロジックの設計方針」サブセクションが追加され、extractSlashCommandがprivateであること、二重管理リスク、publicメソッド追加の推奨が記載されている。"
+    },
+    {
+      "id": "F3-003",
+      "severity": "should_fix",
+      "title": "waitForPromptのタイムアウト挙動変更がsendMessage経路にも影響する",
+      "status": "resolved",
+      "evidence": "「waitForPrompt挙動変更時のsendMessage経路への波及」サブセクションが追加され、2つの方針選択肢が明記されている。受入条件も「意図的に変更される場合はその変更が適切であること」に修正済み。"
+    },
+    {
+      "id": "F3-004",
+      "severity": "should_fix",
+      "title": "既存テストファイルの更新範囲がIssueに未記載",
+      "status": "resolved",
+      "evidence": "影響範囲テーブルにtests/unit/terminal-route.test.tsとtests/unit/cli-tools/copilot.test.tsが追加されている。terminal-route.test.tsについてはisCliToolTypeモックにcopilot追加の具体的な変更内容も記載。"
+    },
+    {
+      "id": "F3-006",
+      "severity": "should_fix",
+      "title": "スラッシュコマンドの前後に空白がある場合の判定",
+      "status": "resolved",
+      "evidence": "設計方針セクションにtrim処理の必要性が明記され、受入条件にも「先頭空白付きスラッシュコマンド（例: ' /model'）も正しく判定されること」が追加されている。"
+    },
+    {
+      "id": "F3-005",
+      "severity": "nice_to_have",
+      "title": "他CLIツールへの影響",
+      "status": "resolved",
+      "evidence": "「フォローアップ候補」セクションが追加され、terminal/route.tsの汎用的なプロンプト待機メカニズム（CLIツール共通）の検討が記載されている。"
+    },
+    {
+      "id": "F3-007",
+      "severity": "nice_to_have",
+      "title": "terminal/route.tsにプロンプト待機追加時のレスポンス遅延",
+      "status": "resolved",
+      "evidence": "「パフォーマンス考慮事項」セクションが追加され、フロントエンドHTTPタイムアウト設定の確認とAPIレスポンスでの待機情報返却が検討事項として記載されている。"
+    }
+  ],
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "F7-001",
+        "category": "影響範囲の精度",
+        "title": "cli-patterns.tsの影響範囲記載が「必要に応じて」と曖昧",
+        "description": "影響範囲テーブルでcli-patterns.tsの変更内容が「スラッシュコマンド判定パターン（必要に応じて）」と記載されている。しかし、アプローチCの委譲パターンを採用する場合、terminal/route.tsからCopilotTool.sendMessage()に委譲するため、cli-patterns.tsの変更は不要になる可能性が高い。一方、アプローチAの場合はterminal/route.tsでスラッシュコマンド判定が必要になるが、設計方針セクションで既にpublicメソッド追加をCopilotTool側に推奨しているため、cli-patterns.tsへのパターン追加は実際には不要。各アプローチ別にcli-patterns.tsの変更有無を明記すると、実装時の判断が容易になる。",
+        "location": "## 影響範囲 テーブル",
+        "recommendation": "cli-patterns.tsの行を「アプローチA: 不要（CopilotToolにpublicメソッド追加で対応）/ アプローチC: 不要（委譲のため）」のように具体化するか、テーブルから除外してアプローチ別の補足説明に移動する。",
+        "evidence": "現行のcli-patterns.tsにはスラッシュコマンド判定用のパターンは存在せず、COPILOT_PROMPT_PATTERN/COPILOT_THINKING_PATTERN等のステータス検出パターンのみ定義されている。スラッシュコマンド判定は/始まりの単純な文字列判定であり、正規表現パターンの追加は不要。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F7-002",
+        "category": "CLAUDE.md更新範囲",
+        "title": "受入条件のCLAUDE.md更新の具体的なスコープが未記載",
+        "description": "受入条件に「CLAUDE.mdのモジュール説明が必要に応じて更新されていること」とあるが、具体的にどのモジュールエントリの更新が想定されるかが明記されていない。copilot.tsのモジュール説明にpublicメソッド追加やwaitForPrompt挙動に関する記載の追加、またterminal/route.tsの説明にCopilot固有ロジックの存在を追記する等が考えられる。",
+        "location": "## 受入条件",
+        "recommendation": "「CLAUDE.mdのcopilot.tsエントリにpublicスラッシュコマンド判定メソッド追加を反映」等、想定される更新対象を1-2点例示する。",
+        "evidence": "CLAUDE.mdのcopilot.tsエントリは現在「GitHub Copilot CLIセッション管理（Issue #545）」のみ。terminal/route.tsエントリは「ターミナルコマンド送信API」のみ。"
+      },
+      {
+        "id": "F7-003",
+        "category": "エッジケース",
+        "title": "Copilotセッション未起動時にterminal/route.ts経由でスラッシュコマンドを送信した場合の挙動",
+        "description": "Issueは「Copilotセッションが稼働している」前提で記載されているが、terminal/route.tsの現行実装ではセッションの存在チェック（hasSession）のみで、CLIツール種別がCopilotであるかの特別な処理はない。セッションが存在するがCopilotが応答中でない通常状態（プロンプト表示中）の場合、プロンプト待機は即座に完了するため問題にならない。しかし、tmuxセッションは存在するがCopilotプロセスがクラッシュ等で停止している場合、waitForPromptが15秒フルにブロックした後にコマンドを送信する動作になる。このケースは既存のsendMessage経路でも同様の挙動であるため新たなリスクではないが、パフォーマンス考慮事項に含めると網羅的になる。",
+        "location": "## パフォーマンス考慮事項",
+        "recommendation": "パフォーマンス考慮事項に「Copilotプロセスが異常終了している場合も15秒のブロッキングが発生する（sendMessage経路と同様）」を補足として追記する。",
+        "evidence": "copilot.ts waitForPrompt()はCOPILOT_PROMPT_WAIT_TIMEOUT_MS(15000ms)のループ後にログ出力のみで処理継続する。プロセス異常終了時はプロンプトパターンが検出されないため、常にフルタイムアウトとなる。"
+      }
+    ]
+  },
+  "impact_scope_completeness": {
+    "files_covered": [
+      "src/app/api/worktrees/[id]/terminal/route.ts",
+      "src/lib/cli-tools/copilot.ts",
+      "src/lib/detection/cli-patterns.ts",
+      "tests/unit/terminal-route.test.ts",
+      "tests/unit/cli-tools/copilot.test.ts"
+    ],
+    "files_explicitly_excluded": [
+      "src/app/api/worktrees/[id]/special-keys/route.ts",
+      "src/app/api/worktrees/[id]/send/route.ts"
+    ],
+    "assessment": "影響範囲テーブルは適切に網羅されている。主要な変更対象ファイル（terminal/route.ts, copilot.ts）と関連テストファイルが含まれており、スコープ外のファイル（special-keys/route.ts, send/route.ts）についても明示的に除外理由が記載されている。cli-patterns.tsの「必要に応じて」という記載のみ曖昧さが残る（F7-001）。"
+  },
+  "test_coverage_assessment": {
+    "adequacy": "adequate",
+    "details": "テスト範囲は妥当。terminal-route.test.tsのisCliToolTypeモックへのcopilot追加、Copilotスラッシュコマンド検出テスト、copilot.test.tsのwaitForPromptタイムアウトテストが明記されている。受入条件にも「新規テスト + 既存テストの更新」が含まれている。",
+    "gaps": "統合テスト（terminal API -> CopilotTool.sendMessage委譲のE2Eフロー）についてはIssueのスコープ外として妥当な判断。"
+  },
+  "breaking_changes": {
+    "identified": false,
+    "details": "waitForPromptの挙動変更がsendMessage経路に波及するリスクは認識されており、2つの方針選択肢（変更しない/変更する場合のテスト更新）が明記されている。どちらの方針を選択しても、受入条件で既存経路への影響確認が求められているため、破壊的変更のリスクは適切に管理されている。"
+  },
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/terminal/route.ts",
+      "relevance": "主要な変更対象。sendKeys()直接呼び出しにCopilotスラッシュコマンド検出・委譲ロジックを追加する箇所。",
+      "line_range": "81-82"
+    },
+    {
+      "file": "src/lib/cli-tools/copilot.ts",
+      "relevance": "waitForPrompt(private, L182-198)とextractSlashCommand(private, L204-209)をpublic化または委譲経路として利用する対象。",
+      "line_range": "182-209"
+    },
+    {
+      "file": "tests/unit/terminal-route.test.ts",
+      "relevance": "isCliToolTypeモック（L12）にcopilotが未含のため更新必要。影響範囲テーブルの記載と合致。",
+      "line_range": "12"
+    },
+    {
+      "file": "src/lib/detection/cli-patterns.ts",
+      "relevance": "既存のCOPILOT_PROMPT_PATTERN等はステータス検出用であり、スラッシュコマンド判定パターンは不要（F7-001参照）。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "copilot.tsおよびterminal/route.tsのモジュール説明更新の可能性（F7-002参照）"
+    }
+  ]
+}

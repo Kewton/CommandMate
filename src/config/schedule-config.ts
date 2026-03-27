@@ -46,6 +46,7 @@ export const DEFAULT_PERMISSIONS: Record<string, string> = {
   codex: 'workspace-write',
   gemini: '',
   'vibe-local': '',
+  copilot: '',
 };
 
 // =============================================================================

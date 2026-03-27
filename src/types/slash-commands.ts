@@ -28,7 +28,7 @@ export type SlashCommandCategory =
 /**
  * Command source type (Issue #56)
  */
-export type SlashCommandSource = 'standard' | 'mcbd' | 'worktree' | 'skill' | 'codex-skill';
+export type SlashCommandSource = 'standard' | 'mcbd' | 'worktree' | 'skill' | 'codex-skill' | 'builtin';
 
 /**
  * Slash command definition

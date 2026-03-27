@@ -3,7 +3,7 @@
  * Issue #294: Executes CLI tool commands for scheduled executions
  * Issue #379: Added OpenCode support (opencode run)
  *
- * Supported tools: claude, codex, gemini, vibe-local, opencode
+ * Supported tools: claude, codex, gemini, vibe-local, opencode, copilot
  *
  * Security:
  * - Uses execFile (not exec) to prevent shell injection
@@ -16,6 +16,7 @@
 import { execFile } from 'child_process';
 import { sanitizeEnvForChildProcess } from '@/lib/security/env-sanitizer';
 import { stripAnsi } from '@/lib/detection/cli-patterns';
+import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
 
 // =============================================================================
 // Constants
@@ -33,8 +34,26 @@ export const EXECUTION_TIMEOUT_MS = 15 * 60 * 1000;
 /** Maximum message length sent to claude -p */
 export const MAX_MESSAGE_LENGTH = 10000;
 
-/** Allowed CLI tool identifiers for scheduled execution */
-export const ALLOWED_CLI_TOOLS = new Set(['claude', 'codex', 'gemini', 'vibe-local', 'opencode']);
+/** Allowed CLI tool identifiers for scheduled execution [DR2-002] derived from CLI_TOOL_IDS */
+export const ALLOWED_CLI_TOOLS: Set<string> = new Set(CLI_TOOL_IDS);
+
+/**
+ * Get the actual executable command for a CLI tool.
+ * Most tools use the tool ID as the command name, but some (like copilot)
+ * use a different base command (e.g., 'gh' for copilot).
+ * [DR2-001][SEC4-008]
+ *
+ * @param cliToolId - CLI tool identifier
+ * @returns Actual command to execute
+ */
+export function getCommandForTool(cliToolId: string): string {
+  switch (cliToolId) {
+    case 'copilot':
+      return 'gh';
+    default:
+      return cliToolId;
+  }
+}
 
 // =============================================================================
 // Types
@@ -113,6 +132,8 @@ export function buildCliArgs(message: string, cliToolId: string, permission?: st
         return ['run', '-m', `ollama/${options.model}`, message];
       }
       return ['run', message];
+    case 'copilot':
+      return ['copilot', '-p', message];
     case 'claude':
     default:
       return ['-p', message, '--output-format', 'text', '--permission-mode', permission ?? 'acceptEdits'];
@@ -154,8 +175,9 @@ export async function executeClaudeCommand(
   const args = buildCliArgs(truncatedMessage, cliToolId, permission, options);
 
   return new Promise<ExecutionResult>((resolve) => {
+    const command = getCommandForTool(cliToolId);
     const child = execFile(
-      cliToolId,
+      command,
       args,
       {
         cwd,

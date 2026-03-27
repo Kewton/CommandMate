@@ -25,6 +25,7 @@ export const SENSITIVE_ENV_KEYS = [
   'CM_ALLOWED_IPS',
   'CM_TRUST_PROXY',
   'CM_DB_PATH',
+  'GH_DEBUG',  // Issue #545: Prevent gh debug output in child processes [SEC4-003]
 ] as const;
 
 /**

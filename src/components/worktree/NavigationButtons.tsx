@@ -15,6 +15,8 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 export interface NavigationButtonsProps {
   worktreeId: string;
   cliToolId: CLIToolType;
+  /** Optional callback to trigger immediate terminal refresh after key send */
+  onKeysSent?: () => void;
 }
 
 /** Navigation button configuration */
@@ -25,7 +27,7 @@ const NAVIGATION_BUTTONS = [
   { key: 'Escape', label: 'Esc', ariaLabel: 'Escape' },
 ] as const;
 
-export function NavigationButtons({ worktreeId, cliToolId }: NavigationButtonsProps) {
+export function NavigationButtons({ worktreeId, cliToolId, onKeysSent }: NavigationButtonsProps) {
   const [activeKey, setActiveKey] = useState<string | null>(null);
 
   const sendKeys = useCallback((keys: string[]) => {
@@ -33,15 +35,20 @@ export function NavigationButtons({ worktreeId, cliToolId }: NavigationButtonsPr
     setActiveKey(keys[0]);
     setTimeout(() => setActiveKey(null), 150);
 
-    // Fire-and-forget: don't await the fetch to avoid perceived latency
+    // Send keys and trigger immediate refresh after a short delay for tmux to process
     fetch(`/api/worktrees/${encodeURIComponent(worktreeId)}/special-keys`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cliToolId, keys }),
+    }).then(() => {
+      // Trigger immediate terminal refresh after 100ms (allow tmux to process the key)
+      if (onKeysSent) {
+        setTimeout(onKeysSent, 100);
+      }
     }).catch((err) => {
       console.error('Failed to send special keys:', err);
     });
-  }, [worktreeId, cliToolId]);
+  }, [worktreeId, cliToolId, onKeysSent]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
     const keyMap: Record<string, string> = {

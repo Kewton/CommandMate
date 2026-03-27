@@ -1,0 +1,140 @@
+{
+  "issue_number": 552,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "focus_area": "通常",
+  "review_date": "2026-03-27",
+  "findings": [
+    {
+      "id": "F5-001",
+      "severity": "nice_to_have",
+      "category": "正確性",
+      "title": "FileViewer.tsxの参照行番号が実装と若干ズレている可能性",
+      "description": "Issueの参考実装セクションで「FileViewer.tsx（L270-276）」と記載されているが、実際のhandleCopyPath関数はL271-279に位置している。軽微な差異であり実装に影響はないが、正確性の観点から記載しておく。",
+      "recommendation": "行番号はコード変更で容易にズレるため、現状のまま問題ない。行番号への過度な依存は避け、関数名（handleCopyPath）での参照を推奨。"
+    },
+    {
+      "id": "F5-002",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "FileViewer.tsxのコピーボタンにはaria-labelとtitleで異なる文字列が使われている",
+      "description": "FileViewer.tsxではaria-label='Copy file path'とtitle='Copy path'が使われている。Issueの受け入れ条件ではaria-labelのみ指定されておりtitle属性にも言及があるが、具体的なtitle文字列は未指定。実装者が判断できる範囲ではあるが、明示しておくとより丁寧。",
+      "recommendation": "受け入れ条件に記載済みの「各ボタンにtitle属性も付与」で十分。具体的な文字列は実装者の裁量で問題ない。"
+    }
+  ],
+  "previous_findings_status": {
+    "stage1_findings": {
+      "addressed": 6,
+      "partially_addressed": 0,
+      "not_addressed": 0,
+      "details": [
+        {
+          "id": "F1-001",
+          "severity": "must_fix",
+          "title": "Issue本文が未記入",
+          "status": "addressed",
+          "evidence": "概要、背景・課題、提案する解決策、影響範囲、受け入れ条件、テスト要件、補足情報が全て具体的に記述されている"
+        },
+        {
+          "id": "F1-002",
+          "severity": "must_fix",
+          "title": "受け入れ条件が未定義",
+          "status": "addressed",
+          "evidence": "8項目の具体的な受け入れ条件がチェックリスト形式で記載されている（コピーアイコン表示、クリップボードコピー、アイコン切替、デスクトップ/モバイル対応、一貫性、アクセシビリティ、テスト）"
+        },
+        {
+          "id": "F1-003",
+          "severity": "should_fix",
+          "title": "「info」の指す対象が曖昧",
+          "status": "addressed",
+          "evidence": "概要に「Worktree詳細画面のInfoモーダル内のPathフィールド」、対象UIセクションに「WorktreeInfoFieldsコンポーネント内」と明記されている"
+        },
+        {
+          "id": "F1-004",
+          "severity": "should_fix",
+          "title": "コピー対象のスコープが不明確",
+          "status": "addressed",
+          "evidence": "対象UIセクションでPath（worktree.path）とRepository Path（worktree.repositoryPath）の両方が対象と明記されている"
+        },
+        {
+          "id": "F1-005",
+          "severity": "should_fix",
+          "title": "既存パターンとの整合性への言及がない",
+          "status": "addressed",
+          "evidence": "背景セクションでFileViewer.tsxのパターン（copyToClipboard + ClipboardCopy/Check + 2秒フィードバック）を踏襲する方針が明記。参考実装セクションで具体的なファイル・関数名が記載"
+        },
+        {
+          "id": "F1-006",
+          "severity": "nice_to_have",
+          "title": "コピー成功時のフィードバック仕様が未記載",
+          "status": "addressed",
+          "evidence": "提案する解決策のステップ3で「コピー成功時はCheckアイコンに切り替え、2秒後にClipboardCopyアイコンに復帰」と明記"
+        }
+      ]
+    },
+    "stage3_findings": {
+      "addressed": 5,
+      "partially_addressed": 0,
+      "not_addressed": 0,
+      "details": [
+        {
+          "id": "F3-001",
+          "severity": "should_fix",
+          "title": "memo内のstate追加によるリレンダリング範囲",
+          "status": "addressed",
+          "evidence": "影響範囲セクションの「実装上の考慮点」でReact.memoの内側にuseState x2を追加する設計と親への伝播がない旨が明記"
+        },
+        {
+          "id": "F3-002",
+          "severity": "should_fix",
+          "title": "lucide-reactの新規import追加",
+          "status": "addressed",
+          "evidence": "影響範囲セクションの「新規import追加」でClipboardCopy, Checkのimportとpackage.json変更不要が明記"
+        },
+        {
+          "id": "F3-003",
+          "severity": "should_fix",
+          "title": "clipboard-utilsのimport追加",
+          "status": "addressed",
+          "evidence": "影響範囲セクションの「新規import追加」でcopyToClipboardのimportが明記"
+        },
+        {
+          "id": "F3-004",
+          "severity": "should_fix",
+          "title": "単体テストが存在しない",
+          "status": "addressed",
+          "evidence": "テスト要件セクションで4項目の具体的なテストケース（アイコン表示、クリック時のcopyToClipboard呼出、Checkアイコン切替、2秒復帰）が記載"
+        },
+        {
+          "id": "F3-005",
+          "severity": "should_fix",
+          "title": "アクセシビリティ属性の追加",
+          "status": "addressed",
+          "evidence": "受け入れ条件でaria-label（Path: 'Copy worktree path', Repository Path: 'Copy repository path'）とtitle属性が明記"
+        }
+      ]
+    },
+    "total_addressed": 11,
+    "total_partially_addressed": 0,
+    "total_not_addressed": 0
+  },
+  "codebase_consistency_check": {
+    "target_file_exists": true,
+    "target_component_exists": true,
+    "reference_pattern_exists": true,
+    "clipboard_utils_exists": true,
+    "lucide_react_available": true,
+    "use_client_directive_present": true,
+    "worktree_path_field_location": "L210-214 matches issue description",
+    "repository_path_field_location": "L207 matches issue description",
+    "memo_wrapper_confirmed": true,
+    "issues_found": []
+  },
+  "summary": "Issue #552は前回のレビュー（Stage 1: 6件、Stage 3: 8件）の指摘を全て反映し、非常に良好な状態になっている。must_fix 2件およびshould_fix 8件は全て対処済み。Issue本文は概要・背景・解決策・影響範囲・受け入れ条件・テスト要件が網羅的に記述されており、コードベースとの整合性も確認済み。受け入れ条件は8項目あり全て具体的かつテスト可能。新たに発見された問題はnice_to_have 2件のみで、いずれも実装に影響のない軽微な事項。このIssueは実装着手可能な状態と判断する。",
+  "statistics": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 2,
+    "total": 2
+  }
+}
