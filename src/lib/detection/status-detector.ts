@@ -226,9 +226,10 @@ export function detectSessionStatus(
 
   // 1.6. Copilot CLI selection list detection (Issue #547)
   // Copilot CLI shows selection prompts (e.g., /model) with arrow key navigation.
-  // Detect via footer instruction pattern. cliToolId guard prevents false positives
-  // on other CLI tools (DR2-004).
-  if (cliToolId === 'copilot' && COPILOT_SELECTION_LIST_PATTERN.test(lastLines)) {
+  // Uses cleanOutput instead of lastLines because model selection lists can exceed
+  // 15 lines, pushing "Select Model" / "Search models..." outside the lastLines window.
+  // cliToolId guard prevents false positives on other CLI tools (DR2-004).
+  if (cliToolId === 'copilot' && COPILOT_SELECTION_LIST_PATTERN.test(cleanOutput)) {
     return {
       status: 'waiting',
       confidence: 'high',
