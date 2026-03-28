@@ -39,6 +39,43 @@ export class ApiError extends Error {
 }
 
 /**
+ * Safely parse a JSON response with content-type validation.
+ * Returns defaultValue if content-type is not application/json or parsing fails.
+ * Issue #573: Eliminates silent failures from unchecked .json() calls.
+ *
+ * Logging uses console.warn (not logger) because this is a client-side module
+ * imported by 'use client' components. Logger depends on Node.js-only modules.
+ * console.warn is guarded by NODE_ENV to avoid information leakage in production.
+ * content-type values are truncated to 100 chars to mitigate MITM injection.
+ */
+async function safeParseJson<T>(
+  response: Response,
+  defaultValue: T,
+  logContext: string,
+): Promise<T> {
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    if (process.env.NODE_ENV === 'development') {
+      const truncatedContentType = contentType.length > 100 ? contentType.slice(0, 100) + '...' : contentType;
+      console.warn(
+        `[api-client] ${logContext}: unexpected content-type: expected application/json, got ${truncatedContentType}`
+      );
+    }
+    return defaultValue;
+  }
+  try {
+    return await response.json() as T;
+  } catch {
+    if (process.env.NODE_ENV === 'development') {
+      console.warn(
+        `[api-client] ${logContext}: JSON parse error: status=${response.status}`
+      );
+    }
+    return defaultValue;
+  }
+}
+
+/**
  * Base fetch wrapper with error handling
  */
 async function fetchApi<T>(url: string, options?: RequestInit): Promise<T> {
@@ -59,9 +96,9 @@ async function fetchApi<T>(url: string, options?: RequestInit): Promise<T> {
     }
 
     if (!response.ok) {
-      const errorBody = contentType.includes('application/json')
-        ? await response.json().catch(() => ({})) as { error?: string }
-        : {} as { error?: string };
+      const errorBody = await safeParseJson<{ error?: string }>(
+        response, {}, 'error-body'
+      );
       throw new ApiError(
         errorBody.error || `HTTP error ${response.status}`,
         response.status,
@@ -230,11 +267,15 @@ export const worktreeApi = {
     });
 
     if (!response.ok) {
-      const errorBody = await response.json().catch(() => ({})) as { error?: { message?: string } };
+      const errorBody = await safeParseJson<{ error?: { message?: string } }>(
+        response, {}, 'error-body'
+      );
       throw new Error(errorBody?.error?.message || `Upload failed (HTTP ${response.status})`);
     }
 
-    const data = await response.json() as { path?: string; filename?: string };
+    const data = await safeParseJson<{ path?: string; filename?: string }>(
+      response, {}, 'response-body'
+    );
     return { path: data.path || `${uploadPath}/${filename}` };
   },
 

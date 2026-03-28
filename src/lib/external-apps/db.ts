@@ -13,12 +13,12 @@ import { randomUUID } from 'crypto';
 import type Database from 'better-sqlite3';
 import type {
   ExternalApp,
-  ExternalAppType,
   CreateExternalAppInput,
   UpdateExternalAppInput,
   WorktreeExternalApp,
   CreateWorktreeExternalAppInput,
 } from '@/types/external-apps';
+import { toValidAppType } from './validation';
 
 /**
  * Database error types for external apps operations
@@ -82,7 +82,7 @@ export function mapDbRowToExternalApp(row: DbExternalAppRow): ExternalApp {
     pathPrefix: row.path_prefix,
     targetPort: row.target_port,
     targetHost: row.target_host,
-    appType: row.app_type as ExternalAppType,
+    appType: toValidAppType(row.app_type),
     websocketEnabled: row.websocket_enabled === 1,
     websocketPathPattern: row.websocket_path_pattern ?? undefined,
     enabled: row.enabled === 1,
