@@ -1,9 +1,9 @@
 /**
  * File Operations Business Logic
  * [SF-001] Facade pattern for file operations
- * [SEC-SF-003] Rename path validation
- * [SEC-SF-004] Recursive delete safety
- * [SEC-SF-002] Error response without absolute paths
+ * [SEC-011] Rename path validation
+ * [SEC-012] Recursive delete safety
+ * [SEC-010] Error response without absolute paths
  *
  * This module provides a unified interface for file operations,
  * with security checks and proper error handling.
@@ -86,7 +86,7 @@ const ERROR_MESSAGES: Record<FileOperationErrorCode, string> = {
 
 /**
  * Create an error result
- * [SEC-SF-002] Does not include absolute paths
+ * [SEC-010] Does not include absolute paths
  * Exported for use in API routes
  *
  * @param code - Error code from FileOperationErrorCode
@@ -191,7 +191,7 @@ export interface ValidateNameOptions {
 
 /**
  * Validate a new file/directory name
- * [SEC-SF-003] Prevents directory traversal via rename
+ * [SEC-011] Prevents directory traversal via rename
  * [DRY-001] Unified filename validation for create and upload
  * [SEC-004] Enhanced validation for upload security
  *
@@ -390,7 +390,7 @@ async function countFilesRecursive(dirPath: string, depth: number = 0): Promise<
 
 /**
  * Delete a file or directory
- * [SEC-SF-004] Protected directory check and delete limit
+ * [SEC-012] Protected directory check and delete limit
  * [SEC-394] Includes symlink traversal validation via checkPathSafety
  *
  * @param worktreeRoot - Root directory of the worktree
@@ -461,7 +461,7 @@ export async function deleteFileOrDirectory(
 }
 
 /**
- * Common validation helper for file operations [MF-001]
+ * Common validation helper for file operations [SEC-013]
  *
  * Validates source path safety (via checkPathSafety) and existence.
  * [SEC-394] Includes symlink traversal validation via checkPathSafety
@@ -530,7 +530,7 @@ export async function moveFileOrDirectory(
   sourcePath: string,
   destinationDir: string
 ): Promise<FileOperationResult> {
-  // 1. Validate source using common helper [MF-001]
+  // 1. Validate source using common helper [SEC-013]
   const sourceValidation = validateFileOperation(worktreeRoot, sourcePath);
   if (!sourceValidation.success) {
     return sourceValidation.error;
@@ -563,7 +563,7 @@ export async function moveFileOrDirectory(
     return createErrorResult('INVALID_PATH');
   }
 
-  // 5. Protected directory check for destination [SF-S2-005]
+  // 5. Protected directory check for destination [SEC-014]
   if (destinationDir && isProtectedDirectory(destinationDir)) {
     return createErrorResult('PROTECTED_DIRECTORY');
   }
@@ -608,7 +608,7 @@ export async function moveFileOrDirectory(
     return createErrorResult('INVALID_PATH');
   }
 
-  // 11. Protected directory check for final destination path [SF-S2-005]
+  // 11. Protected directory check for final destination path [SEC-014]
   if (isProtectedDirectory(newRelativePath)) {
     return createErrorResult('PROTECTED_DIRECTORY');
   }
@@ -634,8 +634,8 @@ export async function moveFileOrDirectory(
 
 /**
  * Rename a file or directory
- * [SEC-SF-003] New name validation
- * [MF-001] Uses validateFileOperation() for common validation
+ * [SEC-011] New name validation
+ * [SEC-013] Uses validateFileOperation() for common validation
  *
  * @param worktreeRoot - Root directory of the worktree
  * @param relativePath - Relative path of the file/directory to rename
@@ -647,7 +647,7 @@ export async function renameFileOrDirectory(
   relativePath: string,
   newName: string
 ): Promise<FileOperationResult> {
-  // [MF-001] Use common validation helper for source path
+  // [SEC-013] Use common validation helper for source path
   const sourceValidation = validateFileOperation(worktreeRoot, relativePath);
   if (!sourceValidation.success) {
     return sourceValidation.error;

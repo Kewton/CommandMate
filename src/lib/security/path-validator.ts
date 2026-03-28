@@ -7,6 +7,7 @@
 import path from 'path';
 import { realpathSync, existsSync, lstatSync, readlinkSync } from 'fs';
 import { createLogger } from '@/lib/logger';
+import { logSecurityEvent } from './security-logger';
 
 const logger = createLogger('path-validator');
 
@@ -198,7 +199,7 @@ export function resolveAndValidateRealPath(targetPath: string, rootDir: string):
       const resolvedTarget = realpathSync(fullPath);
       const ok = isWithinRoot(resolvedTarget, resolvedRoot);
       if (!ok) {
-        logger.warn('security:symlink-rejected', { targetPath, resolvedTarget });
+        logSecurityEvent(logger, 'symlink-rejected', { targetPath, resolvedTarget });
       }
       return ok;
     } catch {
@@ -217,7 +218,7 @@ export function resolveAndValidateRealPath(targetPath: string, rootDir: string):
         const resolvedLinkTarget = path.resolve(path.dirname(fullPath), linkTarget);
         const ok = isWithinRoot(resolvedLinkTarget, resolvedRoot);
         if (!ok) {
-          logger.warn('security:dangling-symlink-rejected', { targetPath, resolvedLinkTarget });
+          logSecurityEvent(logger, 'dangling-symlink-rejected', { targetPath, resolvedLinkTarget });
         }
         return ok;
       } catch {
@@ -237,7 +238,7 @@ export function resolveAndValidateRealPath(targetPath: string, rootDir: string):
         const resolvedAncestor = realpathSync(currentPath);
         const ok = isWithinRoot(resolvedAncestor, resolvedRoot);
         if (!ok) {
-          logger.warn('security:symlink-ancestor-rejected', { currentPath, resolvedAncestor });
+          logSecurityEvent(logger, 'symlink-ancestor-rejected', { currentPath, resolvedAncestor });
         }
         return ok;
       } catch {
