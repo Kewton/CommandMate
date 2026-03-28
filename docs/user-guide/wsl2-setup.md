@@ -45,7 +45,39 @@ sudo apt update && sudo apt upgrade -y
 sudo apt install -y git tmux build-essential
 ```
 
+### Install GitHub CLI (gh)
+
+CommandMate's Issue連携機能に必要です:
+
+```bash
+# GitHub公式リポジトリを追加してインストール
+(type -p wget >/dev/null || (sudo apt update && sudo apt-get install wget -y)) \
+  && sudo mkdir -p -m 755 /etc/apt/keyrings \
+  && out=$(mktemp) && wget -nv -O$out https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+  && cat $out | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
+  && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+  && sudo apt update \
+  && sudo apt install gh -y
+
+# 確認
+gh --version
+
+# GitHubにログイン
+gh auth login
+```
+
 ### Install Node.js (v20+)
+
+> **Note:** Ubuntu's default `apt` repository ships an outdated Node.js.
+> If you already have an old version installed via `apt`, remove it first:
+>
+> ```bash
+> sudo apt remove -y nodejs npm
+> sudo apt autoremove -y
+> sudo rm -rf /usr/local/lib/node_modules
+> sudo rm -rf /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx
+> ```
 
 We recommend using [nvm](https://github.com/nvm-sh/nvm) for Node.js version management:
 
@@ -56,12 +88,12 @@ curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
 # Reload shell
 source ~/.bashrc
 
-# Install Node.js 20
-nvm install 20
-nvm use 20
+# Install latest LTS
+nvm install --lts
+nvm use --lts
 
-# Verify
-node -v   # v20.x.x
+# Verify (v22.x.x or later)
+node -v
 npm -v
 ```
 
@@ -154,10 +186,42 @@ tmux -V
 ### Node.js version too old
 
 ```bash
-nvm install 20
-nvm use 20
+# apt版が入っている場合は先に削除
+sudo apt remove -y nodejs npm && sudo apt autoremove -y
+
+# nvmで最新LTSをインストール
+nvm install --lts
+nvm use --lts
 node -v
 ```
+
+### better-sqlite3: NODE_MODULE_VERSION mismatch
+
+`npm install` 時と実行時でNode.jsのバージョンが異なると、以下のエラーが発生します:
+
+```
+was compiled against a different Node.js version using
+NODE_MODULE_VERSION 137. This version of Node.js requires
+NODE_MODULE_VERSION 115.
+```
+
+**原因:** `nvm` でNode.jsバージョンを切り替えた後、ネイティブモジュールが古いバージョン向けのまま残っている。
+
+**解決方法:**
+
+```bash
+# 現在のNodeバージョンを確認
+node -v
+
+# ネイティブモジュールを現在のバージョン向けにリビルド
+npm rebuild better-sqlite3
+
+# 再起動
+npx commandmate start
+```
+
+> **Tip:** `nvm` でバージョンを切り替えたら、必ず `npm rebuild better-sqlite3` を実行してください。
+> それでも解決しない場合は `rm -rf node_modules && npm install` で再インストールしてください。
 
 ### Port already in use
 
