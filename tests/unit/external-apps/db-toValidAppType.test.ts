@@ -4,8 +4,6 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { runMigrations } from '@/lib/db/db-migrations';
 import { mapDbRowToExternalApp } from '@/lib/external-apps/db';
 import type { DbExternalAppRow } from '@/lib/external-apps/db';
 
