@@ -276,7 +276,7 @@ export const COPILOT_SEPARATOR_PATTERN = /^─{10,}$/m;
  * No /g flag (S4-5: would make test() stateful).
  * No nested quantifiers (SEC4-001: ReDoS safety).
  */
-export const COPILOT_SELECTION_LIST_PATTERN = /Search\s+\w+\.\.\.|Select\s+Model|to navigate.*Enter to select/m;
+export const COPILOT_SELECTION_LIST_PATTERN = /Search\s+\w+\.\.\.|Select\s+Model|to (?:navigate|select).*Enter to (?:select|confirm)/m;
 
 /**
  * Copilot skip patterns for response cleaning (Issue #545)

@@ -85,7 +85,9 @@ export async function POST(
       // Copilot CLI auto-enters multi-line mode when text exceeds pane width.
       // In multi-line mode, C-m (bundled with text) adds a newline instead of
       // submitting. Sending Enter as a separate command after a delay works.
-      await sendKeys(sessionName, command, false);
+      // Replace newlines with spaces to prevent Copilot CLI multi-line mode
+      const copilotCommand = command.replace(/\n+/g, ' ').trim();
+      await sendKeys(sessionName, copilotCommand, false);
       await new Promise(resolve => setTimeout(resolve, COPILOT_SEND_ENTER_DELAY_MS));
       await sendSpecialKeys(sessionName, ['Enter']);
     } else {

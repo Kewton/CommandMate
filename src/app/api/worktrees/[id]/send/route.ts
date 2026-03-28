@@ -259,7 +259,9 @@ export async function POST(
         // submitting. Sending Enter as a separate tmux command after a delay
         // allows the TUI to process the text first, then accept Enter as submit.
         const sessionName = cliTool.getSessionName(params.id);
-        await sendKeys(sessionName, trimmedContent, false);
+        // Replace newlines with spaces to prevent Copilot CLI multi-line mode
+        const copilotContent = trimmedContent.replace(/\n+/g, ' ').trim();
+        await sendKeys(sessionName, copilotContent, false);
         await new Promise(resolve => setTimeout(resolve, COPILOT_SEND_ENTER_DELAY_MS));
         await sendSpecialKeys(sessionName, ['Enter']);
         invalidateCache(sessionName);

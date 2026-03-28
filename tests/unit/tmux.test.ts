@@ -166,7 +166,7 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '50'],
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '200'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -193,7 +193,7 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '50'],
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '200'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -227,7 +227,7 @@ describe('tmux library', () => {
       );
     });
 
-    it('should use default window size (200x50) with legacy signature', async () => {
+    it('should use default window size (200x200) with legacy signature', async () => {
       vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
         const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
         callback(null, { stdout: '', stderr: '' });
@@ -238,7 +238,7 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '50'],
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '200'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -258,7 +258,7 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '50'],
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '200'],
         { timeout: 5000 },
         expect.any(Function)
       );
