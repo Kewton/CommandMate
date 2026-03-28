@@ -384,33 +384,36 @@ describe('IP Restriction Module', () => {
         'security:trust-proxy-unexpected',
         expect.objectContaining({ value: 'TRUE' })
       );
-});
+    });
 
     it('should not warn for CM_TRUST_PROXY=true', async () => {
       process.env.CM_TRUST_PROXY = 'true';
       mockLogger.warn.mockClear();
       await import('../../src/lib/security/ip-restriction');
       expect(mockLogger.warn).not.toHaveBeenCalledWith(
-        expect.stringContaining('CM_TRUST_PROXY has unexpected value')
+        'security:trust-proxy-unexpected',
+        expect.anything()
       );
-});
+    });
 
     it('should not warn for CM_TRUST_PROXY=false', async () => {
       process.env.CM_TRUST_PROXY = 'false';
       mockLogger.warn.mockClear();
       await import('../../src/lib/security/ip-restriction');
       expect(mockLogger.warn).not.toHaveBeenCalledWith(
-        expect.stringContaining('CM_TRUST_PROXY has unexpected value')
+        'security:trust-proxy-unexpected',
+        expect.anything()
       );
-});
+    });
 
     it('should not warn when CM_TRUST_PROXY is not set', async () => {
       delete process.env.CM_TRUST_PROXY;
       mockLogger.warn.mockClear();
       await import('../../src/lib/security/ip-restriction');
       expect(mockLogger.warn).not.toHaveBeenCalledWith(
-        expect.stringContaining('CM_TRUST_PROXY has unexpected value')
+        'security:trust-proxy-unexpected',
+        expect.anything()
       );
-});
+    });
   });
 });
