@@ -19,6 +19,7 @@ import { getDbInstance } from '@/lib/db-instance';
 import { hasSession, sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 import { createLogger } from '@/lib/logger';
+import { COPILOT_SEND_ENTER_DELAY_MS } from '@/config/copilot-constants';
 
 const logger = createLogger('api/terminal');
 
@@ -85,7 +86,7 @@ export async function POST(
       // In multi-line mode, C-m (bundled with text) adds a newline instead of
       // submitting. Sending Enter as a separate command after a delay works.
       await sendKeys(sessionName, command, false);
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, COPILOT_SEND_ENTER_DELAY_MS));
       await sendSpecialKeys(sessionName, ['Enter']);
     } else {
       await sendKeys(sessionName, command);

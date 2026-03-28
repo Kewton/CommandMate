@@ -85,7 +85,7 @@ export function resolveExtractionStartIndex(
   // doesn't grow -- it's always ~PANE_HEIGHT lines. bufferWasReset is often true because
   // lastCapturedLine = totalLines. Must execute BEFORE Branch 1 to avoid Branch 1's small
   // window (40 lines) which fails to find the second-to-last Build marker in a 200-line pane.
-  if (cliToolId === 'opencode') {
+  if (cliToolId === 'opencode' || cliToolId === 'copilot') {
     const foundUserPrompt = findRecentUserPromptIndex(totalLines);
     return foundUserPrompt >= 0 ? foundUserPrompt + 1 : 0;
   }

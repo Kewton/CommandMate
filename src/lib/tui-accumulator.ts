@@ -10,11 +10,13 @@
  * Issue #479: Extracted from response-poller.ts for single-responsibility separation
  */
 
+import type { CLIToolType } from './cli-tools/types';
 import {
   stripAnsi,
   stripBoxDrawing,
   OPENCODE_SKIP_PATTERNS,
   OPENCODE_RESPONSE_COMPLETE,
+  COPILOT_SKIP_PATTERNS,
 } from './detection/cli-patterns';
 
 /**
@@ -86,6 +88,48 @@ export function extractTuiContentLines(rawOutput: string): string[] {
 }
 
 /**
+ * Normalize a single Copilot TUI line by removing box-drawing characters
+ * and normalizing whitespace. Exported for reuse in cleanCopilotResponse (DRY).
+ *
+ * @param line - Raw line from Copilot TUI output
+ * @returns Normalized line with TUI decorations removed
+ *
+ * Issue #565
+ */
+export function normalizeCopilotLine(line: string): string {
+  return line
+    .replace(/[\u2500-\u257F]/g, '')  // box-drawing characters
+    .replace(/\s{2,}/g, ' ')          // consecutive whitespace to single space
+    .trim();
+}
+
+/**
+ * Extract meaningful content lines from raw Copilot TUI output.
+ * Strips ANSI codes, box-drawing characters, and lines matching COPILOT_SKIP_PATTERNS.
+ *
+ * @param rawOutput - Raw tmux capture-pane output
+ * @returns Array of cleaned, non-empty content lines
+ *
+ * Issue #565
+ * @internal Exported for unit testing
+ */
+export function extractCopilotContentLines(rawOutput: string): string[] {
+  const strippedOutput = stripAnsi(rawOutput);
+  const lines = strippedOutput.split('\n');
+  const contentLines: string[] = [];
+
+  for (const line of lines) {
+    const normalized = normalizeCopilotLine(line);
+    const trimmed = normalized.trim();
+    if (!trimmed) continue;
+    if (COPILOT_SKIP_PATTERNS.some(p => p.test(trimmed))) continue;
+    contentLines.push(normalized);
+  }
+
+  return contentLines;
+}
+
+/**
  * Find the overlap index between previously accumulated lines and newly captured lines.
  * Searches for the longest suffix of `previous` that matches a prefix of `current`.
  *
@@ -144,14 +188,17 @@ export function initTuiAccumulator(pollerKey: string): void {
  *
  * @param pollerKey - Poller key ("worktreeId:cliToolId")
  * @param rawOutput - Raw tmux capture-pane output
+ * @param cliToolId - CLI tool identifier (default: 'opencode' for backward compatibility)
  *
  * @internal Exported for unit testing
  */
-export function accumulateTuiContent(pollerKey: string, rawOutput: string): void {
+export function accumulateTuiContent(pollerKey: string, rawOutput: string, cliToolId: CLIToolType = 'opencode'): void {
   const state = tuiResponseAccumulator.get(pollerKey);
   if (!state) return;
 
-  const contentLines = extractTuiContentLines(rawOutput);
+  const contentLines = cliToolId === 'copilot'
+    ? extractCopilotContentLines(rawOutput)
+    : extractTuiContentLines(rawOutput);
   if (contentLines.length === 0) return;
 
   state.pollCount++;

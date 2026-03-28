@@ -21,6 +21,7 @@ import {
 import { detectAndResendIfPastedText } from '../pasted-text-helper';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { COPILOT_PROMPT_PATTERN, COPILOT_SELECTION_LIST_PATTERN, stripAnsi } from '../detection/cli-patterns';
+import { COPILOT_TEXT_INPUT_DELAY_MS, COPILOT_SEND_ENTER_DELAY_MS } from '@/config/copilot-constants';
 import { getErrorMessage } from '@/lib/errors';
 import { createLogger } from '@/lib/logger';
 
@@ -269,13 +270,13 @@ export class CopilotTool extends BaseCLITool {
       await sendKeys(sessionName, message, false);
 
       // Wait a moment for the text to be typed
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, COPILOT_TEXT_INPUT_DELAY_MS));
 
       // Send Enter key separately
       await sendSpecialKey(sessionName, 'C-m');
 
       // Wait a moment for the message to be processed
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, COPILOT_SEND_ENTER_DELAY_MS));
 
       // Detect [Pasted text] and resend Enter for multi-line messages
       if (message.includes('\n')) {

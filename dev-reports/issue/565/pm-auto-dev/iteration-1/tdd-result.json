@@ -1,0 +1,42 @@
+{
+  "issue_number": 565,
+  "status": "success",
+  "iteration": 1,
+  "coverage": 80,
+  "test_results": {
+    "total": 5476,
+    "passed": 5469,
+    "failed": 0,
+    "skipped": 7
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "new_files": [
+    "src/config/copilot-constants.ts",
+    "src/lib/polling/prompt-dedup.ts"
+  ],
+  "modified_files": [
+    "src/lib/detection/cli-patterns.ts",
+    "src/lib/tui-accumulator.ts",
+    "src/lib/response-cleaner.ts",
+    "src/lib/response-extractor.ts",
+    "src/lib/polling/response-poller.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/cli-tools/copilot.ts",
+    "src/app/api/worktrees/[id]/send/route.ts",
+    "src/app/api/worktrees/[id]/terminal/route.ts"
+  ],
+  "new_test_files": [
+    "tests/unit/config/copilot-constants.test.ts",
+    "tests/unit/lib/prompt-dedup.test.ts",
+    "tests/unit/lib/tui-accumulator-copilot.test.ts",
+    "tests/unit/lib/response-cleaner-copilot.test.ts"
+  ],
+  "modified_test_files": [
+    "tests/unit/terminal-route.test.ts",
+    "tests/unit/session-cleanup.test.ts"
+  ],
+  "message": "TDD implementation complete for Issue #565. All 6 phases implemented: copilot-constants, COPILOT_SKIP_PATTERNS extension, prompt-dedup module, TUI accumulator Copilot support (extractCopilotContentLines, normalizeCopilotLine, accumulateTuiContent cliToolId parameter), cleanCopilotResponse with normalizeCopilotLine DRY reuse, resolveExtractionStartIndex Copilot branch, response-poller integration (accumulateTuiContent call, duplicate prompt prevention, accumulated content save flow), delay constant unification across 3 files, and cleanup integration."
+}

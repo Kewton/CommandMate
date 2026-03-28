@@ -26,6 +26,7 @@ import { sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 import path from 'path';
 import { createLogger } from '@/lib/logger';
+import { COPILOT_SEND_ENTER_DELAY_MS } from '@/config/copilot-constants';
 
 const logger = createLogger('api/send');
 
@@ -259,7 +260,7 @@ export async function POST(
         // allows the TUI to process the text first, then accept Enter as submit.
         const sessionName = cliTool.getSessionName(params.id);
         await sendKeys(sessionName, trimmedContent, false);
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await new Promise(resolve => setTimeout(resolve, COPILOT_SEND_ENTER_DELAY_MS));
         await sendSpecialKeys(sessionName, ['Enter']);
         invalidateCache(sessionName);
       } else {
