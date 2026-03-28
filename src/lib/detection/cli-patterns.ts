@@ -303,6 +303,10 @@ export const COPILOT_SKIP_PATTERNS: readonly RegExp[] = [
   /^Tip:\s+\//,
   // Initial display text
   /^Describe a task to get started/,
+  // Issue #571: Disclaimer, initialization message, environment info
+  /^Copilot uses AI, so always check for mistakes\.$/,  // Disclaimer (full-line match to avoid filtering user content mentioning Copilot)
+  /^● 💡/,                                              // Initialization hint message
+  /^● Environment loaded:/,                              // Environment info
 ] as const;
 
 /**
