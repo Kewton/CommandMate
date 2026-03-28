@@ -13,7 +13,7 @@ import {
   OPENCODE_RESPONSE_COMPLETE,
   COPILOT_SKIP_PATTERNS,
 } from './detection/cli-patterns';
-import { normalizeOpenCodeLine } from './tui-accumulator';
+import { normalizeOpenCodeLine, normalizeCopilotLine } from './tui-accumulator';
 
 /**
  * Clean up Claude response by removing shell setup commands, environment exports, ANSI codes, and banner
@@ -150,8 +150,9 @@ export function cleanGeminiResponse(response: string): string {
 }
 
 /**
- * Clean Copilot response by removing shell prompts and TUI artifacts
- * Issue #545: Placeholder implementation - to be refined after Phase 1 TUI investigation
+ * Clean Copilot response by removing TUI artifacts and normalizing content.
+ * Issue #565: Full implementation using normalizeCopilotLine (DRY with tui-accumulator)
+ * and COPILOT_SKIP_PATTERNS for filtering.
  *
  * @param response - Raw Copilot response
  * @returns Cleaned response
@@ -162,14 +163,15 @@ export function cleanCopilotResponse(response: string): string {
   const cleanedLines: string[] = [];
 
   for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
+    // Normalize using the same function as TUI accumulator (DRY)
+    const normalized = normalizeCopilotLine(line);
+    if (!normalized) continue;
 
     // Skip lines matching any Copilot skip pattern
-    const shouldSkip = COPILOT_SKIP_PATTERNS.some(pattern => pattern.test(trimmed));
+    const shouldSkip = COPILOT_SKIP_PATTERNS.some(pattern => pattern.test(normalized));
     if (shouldSkip) continue;
 
-    cleanedLines.push(line);
+    cleanedLines.push(normalized);
   }
 
   return cleanedLines.join('\n').trim();

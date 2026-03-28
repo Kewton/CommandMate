@@ -8,7 +8,7 @@
  * Uses response-poller for CLI tool sessions.
  */
 
-import { stopPolling as stopResponsePolling } from './polling/response-poller';
+import { stopPolling as stopResponsePolling, clearPromptHashCache } from './polling/response-poller';
 import { stopAutoYesPollingByWorktree, deleteAutoYesStateByWorktree } from './polling/auto-yes-manager';
 import { stopScheduleForWorktree } from './schedule-manager';
 import { stopTimersForWorktree } from './timer-manager';
@@ -219,6 +219,11 @@ export async function killWorktreeSession(
     const manager = CLIToolManager.getInstance();
     const tool = manager.getTool(cliToolId); // throws Error if not found
     if (!await tool.isRunning(worktreeId)) return false; // SF-004: await
+
+    // Issue #565: Clear prompt dedup cache on session kill
+    const pollerKey = `${worktreeId}:${cliToolId}`;
+    clearPromptHashCache(pollerKey);
+
     const sessionName = tool.getSessionName(worktreeId);
     return killSession(sessionName);
   } catch {

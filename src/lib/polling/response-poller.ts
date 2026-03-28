@@ -65,8 +65,11 @@ import {
   getAccumulatedContent,
   clearTuiAccumulator,
   extractTuiContentLines,
+  extractCopilotContentLines,
+  normalizeCopilotLine,
   findOverlapIndex,
 } from '../tui-accumulator';
+import { isDuplicatePrompt, clearPromptHashCache } from './prompt-dedup';
 
 // ============================================================================
 // Named re-exports from sub-modules (barrel pattern, D4-001: no export *)
@@ -81,12 +84,17 @@ export { cleanClaudeResponse, cleanGeminiResponse, cleanOpenCodeResponse, cleanC
 // tui-accumulator public API (@internal functions, exported for test access)
 export {
   extractTuiContentLines,
+  extractCopilotContentLines,
+  normalizeCopilotLine,
   findOverlapIndex,
   initTuiAccumulator,
   accumulateTuiContent,
   getAccumulatedContent,
   clearTuiAccumulator,
 };
+
+// prompt-dedup public API
+export { isDuplicatePrompt, clearPromptHashCache };
 
 // ============================================================================
 // Constants
@@ -364,17 +372,15 @@ function extractResponse(
   const hasSeparator = separatorPattern.test(cleanOutputToCheck);
   const isThinking = thinkingPattern.test(cleanOutputToCheck);
 
-  // Codex/Gemini/Vibe-Local completion logic: prompt detected and not thinking (separator optional)
-  // - Codex: Interactive TUI, detects > prompt
-  // - Gemini: Interactive REPL, detects > / > prompt
-  // - Vibe-Local: Interactive REPL, detects > prompt
-  // Claude: require both prompt and separator
-  const isCodexOrGeminiComplete = (cliToolId === 'codex' || cliToolId === 'gemini' || cliToolId === 'vibe-local' || cliToolId === 'copilot') && hasPrompt && !isThinking;
+  // Prompt-based completion logic: prompt detected and not thinking (separator optional)
+  // Applies to: Codex, Gemini, Vibe-Local, Copilot (all use interactive prompt indicators)
+  // Claude: requires both prompt and separator
+  const isPromptBasedComplete = (cliToolId === 'codex' || cliToolId === 'gemini' || cliToolId === 'vibe-local' || cliToolId === 'copilot') && hasPrompt && !isThinking;
   const isClaudeComplete = cliToolId === 'claude' && hasPrompt && hasSeparator && !isThinking;
   // [D2-002] OpenCode completion: detected via Build summary line pattern (independent of prompt/separator)
   const isOpenCodeDone = cliToolId === 'opencode' && isOpenCodeComplete(cleanOutputToCheck);
 
-  if (isCodexOrGeminiComplete || isClaudeComplete || isOpenCodeDone) {
+  if (isPromptBasedComplete || isClaudeComplete || isOpenCodeDone) {
     // CLI tool has completed response
     // Extract the response content from lastCapturedLine to the separator (not just last 20 lines)
     const responseLines: string[] = [];
@@ -604,7 +610,7 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
     // Layer 2: Accumulate TUI content for full-screen TUI tools (for overlap tracking only).
     if (cliToolId === 'opencode' || cliToolId === 'copilot') {
       const pollerKey = getPollerKey(worktreeId, cliToolId);
-      accumulateTuiContent(pollerKey, output);
+      accumulateTuiContent(pollerKey, output, cliToolId);
     }
 
     // Extract response
@@ -659,6 +665,14 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
     const promptDetection = result.promptDetection ?? detectPromptWithOptions(result.response, cliToolId);
 
     if (promptDetection.isPrompt) {
+      // Issue #565: Content hash-based duplicate prompt prevention for TUI tools
+      const promptContent = promptDetection.rawContent || promptDetection.cleanContent;
+      const pollerKey = getPollerKey(worktreeId, cliToolId);
+      if (isDuplicatePrompt(pollerKey, promptContent)) {
+        logger.info('duplicate-prompt-skipped', { worktreeId, cliToolId });
+        return false;
+      }
+
       // This is a prompt - save as prompt message
       clearInProgressMessageId(db, worktreeId, cliToolId);
 
@@ -707,10 +721,16 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
     } else if (cliToolId === 'claude') {
       cleanedResponse = cleanClaudeResponse(result.response);
     } else if (cliToolId === 'copilot') {
-      cleanedResponse = cleanCopilotResponse(result.response);
-
-      // Clear accumulator for next response cycle (same as OpenCode)
+      // Issue #565: For Copilot, use accumulated TUI content instead of extractResponse result.
+      // Unlike OpenCode, Copilot's accumulated content is used for the final saved response
+      // because extractResponse result may contain status bar artifacts.
+      // NOTE: OpenCode does NOT use getAccumulatedContent (past Q&A history leaks).
       const pollerKey = getPollerKey(worktreeId, cliToolId);
+      const accumulatedContent = getAccumulatedContent(pollerKey);
+      const sourceContent = accumulatedContent || result.response;
+      cleanedResponse = cleanCopilotResponse(sourceContent);
+
+      // Clear accumulator for next response cycle
       clearTuiAccumulator(pollerKey);
     } else if (cliToolId === 'opencode') {
       cleanedResponse = cleanOpenCodeResponse(result.response);
@@ -870,6 +890,9 @@ export function stopPolling(worktreeId: string, cliToolId: CLIToolType): void {
 
   // Clean up TUI accumulator if present
   clearTuiAccumulator(pollerKey);
+
+  // Issue #565: Clear prompt hash cache to prevent stale dedup state
+  clearPromptHashCache(pollerKey);
 }
 
 /**

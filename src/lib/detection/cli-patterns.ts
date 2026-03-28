@@ -284,6 +284,9 @@ export const COPILOT_SELECTION_LIST_PATTERN = /Search\s+\w+\.\.\.|Select\s+Model
  */
 export const COPILOT_SKIP_PATTERNS: readonly RegExp[] = [
   PASTED_TEXT_PATTERN,
+  COPILOT_SEPARATOR_PATTERN,
+  COPILOT_THINKING_PATTERN,
+  COPILOT_SELECTION_LIST_PATTERN,
 ] as const;
 
 /**

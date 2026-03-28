@@ -36,6 +36,7 @@ vi.mock('@/lib/db', () => ({
 vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn(),
   sendKeys: vi.fn(),
+  sendSpecialKeys: vi.fn(),
 }));
 
 import { POST } from '@/app/api/worktrees/[id]/terminal/route';
@@ -156,7 +157,8 @@ describe('POST /api/worktrees/[id]/terminal', () => {
 
       expect(res.status).toBe(200);
       expect(json.success).toBe(true);
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-copilot-wt-1', '/model');
+      // Issue #565: sendKeys called with false (no Enter), then sendSpecialKeys sends Enter separately
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-copilot-wt-1', '/model', false);
       expect(mockSendMessage).not.toHaveBeenCalled();
     });
 
@@ -167,7 +169,8 @@ describe('POST /api/worktrees/[id]/terminal', () => {
 
       expect(res.status).toBe(200);
       expect(json.success).toBe(true);
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-copilot-wt-1', 'hello world');
+      // Issue #565: sendKeys called with false (no Enter), then sendSpecialKeys sends Enter separately
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-copilot-wt-1', 'hello world', false);
       expect(mockSendMessage).not.toHaveBeenCalled();
     });
 
