@@ -21,7 +21,9 @@ import {
   updateSessionState,
 } from './db';
 import { broadcastMessage } from './ws-server';
-import { cleanClaudeResponse, cleanGeminiResponse, cleanOpenCodeResponse, cleanCopilotResponse } from './polling/response-poller';
+// Issue #571 [DR1-05]: Import directly from response-cleaner instead of barrel re-export
+import { cleanClaudeResponse, cleanGeminiResponse, cleanOpenCodeResponse, cleanCopilotResponse, truncateMessage } from './response-cleaner';
+import { COPILOT_MAX_MESSAGE_LENGTH, COPILOT_TRUNCATION_MARKER } from '@/config/copilot-constants';
 import { stripAnsi } from './detection/cli-patterns';
 import type { CLIToolType } from './cli-tools/types';
 import type { ChatMessage } from '@/types/models';
@@ -301,9 +303,14 @@ export async function savePendingAssistantResponse(
     // to extract content BEFORE the last user prompt (not after it)
     // This fixes the issue where assistant responses were not being saved
     // when user sends a new message
-    const cleanedResponse = cliToolId === 'claude'
+    let cleanedResponse = cliToolId === 'claude'
       ? extractAssistantResponseBeforeLastPrompt(newOutput, cliToolId)
       : cleanCliResponse(newOutput, cliToolId);
+
+    // Issue #571: Apply size limit for Copilot messages
+    if (cliToolId === 'copilot') {
+      cleanedResponse = truncateMessage(cleanedResponse, COPILOT_MAX_MESSAGE_LENGTH, COPILOT_TRUNCATION_MARKER);
+    }
 
     // 9. Check if cleaned response is empty
     if (!cleanedResponse || cleanedResponse.trim() === '') {

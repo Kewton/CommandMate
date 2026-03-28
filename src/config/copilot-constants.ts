@@ -21,3 +21,18 @@ export const COPILOT_SEND_ENTER_DELAY_MS = 200;
  * Used in copilot.ts sendMessage() between sendKeys and sendSpecialKey.
  */
 export const COPILOT_TEXT_INPUT_DELAY_MS = 100;
+
+/**
+ * Maximum message length (in characters) for Copilot messages saved to the database.
+ * Issue #571: Messages exceeding this limit are truncated with a marker.
+ * Copilot's full-screen TUI can accumulate very large buffers; this prevents
+ * excessively large messages from being stored in the chat history.
+ */
+export const COPILOT_MAX_MESSAGE_LENGTH = 100_000;
+
+/**
+ * Marker text prepended to truncated messages.
+ * Issue #571: Indicates that the message head was removed to fit within
+ * COPILOT_MAX_MESSAGE_LENGTH. The tail (most recent content) is preserved.
+ */
+export const COPILOT_TRUNCATION_MARKER = '[... truncated ...]';

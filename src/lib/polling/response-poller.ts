@@ -58,7 +58,8 @@ const logger = createLogger('response-poller');
 
 // Sub-module imports
 import { resolveExtractionStartIndex, isOpenCodeComplete } from '../response-extractor';
-import { cleanClaudeResponse, cleanGeminiResponse, cleanOpenCodeResponse, cleanCopilotResponse } from '../response-cleaner';
+import { cleanClaudeResponse, cleanGeminiResponse, cleanOpenCodeResponse, cleanCopilotResponse, truncateMessage } from '../response-cleaner';
+import { COPILOT_MAX_MESSAGE_LENGTH, COPILOT_TRUNCATION_MARKER } from '@/config/copilot-constants';
 import {
   initTuiAccumulator,
   accumulateTuiContent,
@@ -95,6 +96,35 @@ export {
 
 // prompt-dedup public API
 export { isDuplicatePrompt, clearPromptHashCache };
+
+// response-cleaner additional exports (Issue #571)
+export { truncateMessage };
+
+// ============================================================================
+// Issue #571: Copilot prompt normalization for deduplication
+// ============================================================================
+
+/**
+ * Normalize prompt content before deduplication check.
+ * For Copilot, replaces cursor position markers (❯ / >) at line beginnings
+ * with spaces, so that prompts differing only in cursor position
+ * are treated as duplicates.
+ *
+ * For non-Copilot tools, returns content unchanged to avoid
+ * affecting their deduplication logic.
+ *
+ * @param content - Raw prompt content
+ * @param cliToolId - CLI tool identifier
+ * @returns Normalized content for deduplication comparison
+ */
+export function normalizePromptForDedup(content: string, cliToolId: CLIToolType): string {
+  if (cliToolId !== 'copilot') {
+    return content;
+  }
+  // Replace ❯ or > at line start (followed by space) with equivalent spaces
+  // This normalizes cursor position differences in selection list prompts
+  return content.replace(/^[❯>]\s/gm, '  ');
+}
 
 // ============================================================================
 // Constants
@@ -666,11 +696,20 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
 
     if (promptDetection.isPrompt) {
       // Issue #565: Content hash-based duplicate prompt prevention for TUI tools
+      // Issue #571: Normalize cursor position markers before dedup check (Copilot only)
       const promptContent = promptDetection.rawContent || promptDetection.cleanContent;
       const pollerKey = getPollerKey(worktreeId, cliToolId);
-      if (isDuplicatePrompt(pollerKey, promptContent)) {
+      const normalizedForDedup = normalizePromptForDedup(promptContent, cliToolId);
+      if (isDuplicatePrompt(pollerKey, normalizedForDedup)) {
         logger.info('duplicate-prompt-skipped', { worktreeId, cliToolId });
         return false;
+      }
+
+      // Issue #571: Clean TUI decorations from Copilot prompt content before saving
+      let promptSaveContent = promptContent;
+      if (cliToolId === 'copilot') {
+        promptSaveContent = cleanCopilotResponse(promptContent);
+        promptSaveContent = truncateMessage(promptSaveContent, COPILOT_MAX_MESSAGE_LENGTH, COPILOT_TRUNCATION_MARKER);
       }
 
       // This is a prompt - save as prompt message
@@ -680,7 +719,8 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
         worktreeId,
         role: 'assistant',
         // Issue #235: rawContent priority for DB save (rawContent contains complete prompt output)
-        content: promptDetection.rawContent || promptDetection.cleanContent,
+        // Issue #571: For Copilot, use cleaned + truncated content
+        content: promptSaveContent,
         messageType: 'prompt',
         promptData: promptDetection.promptData,
         timestamp: new Date(),
@@ -729,6 +769,8 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
       const accumulatedContent = getAccumulatedContent(pollerKey);
       const sourceContent = accumulatedContent || result.response;
       cleanedResponse = cleanCopilotResponse(sourceContent);
+      // Issue #571: Apply size limit to Copilot messages
+      cleanedResponse = truncateMessage(cleanedResponse, COPILOT_MAX_MESSAGE_LENGTH, COPILOT_TRUNCATION_MARKER);
 
       // Clear accumulator for next response cycle
       clearTuiAccumulator(pollerKey);

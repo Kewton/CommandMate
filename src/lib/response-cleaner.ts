@@ -14,6 +14,10 @@ import {
   COPILOT_SKIP_PATTERNS,
 } from './detection/cli-patterns';
 import { normalizeOpenCodeLine, normalizeCopilotLine } from './tui-accumulator';
+import {
+  COPILOT_MAX_MESSAGE_LENGTH,
+  COPILOT_TRUNCATION_MARKER,
+} from '@/config/copilot-constants';
 
 /**
  * Clean up Claude response by removing shell setup commands, environment exports, ANSI codes, and banner
@@ -237,4 +241,57 @@ export function cleanOpenCodeResponse(response: string): string {
   }
 
   return cleanedLines.join('\n').trim();
+}
+
+/**
+ * Truncate a message to fit within a maximum character length.
+ * Issue #571: Prevents excessively large messages from being saved to the database.
+ *
+ * **Tail-preserving**: When truncation is needed, the head (oldest content) is removed
+ * and a marker is prepended. The tail (most recent content) is preserved because
+ * the latest response content is typically the most relevant for chat history. [DR1-07]
+ *
+ * Includes a surrogate pair guard [SEC4-06]: if the cut point falls between
+ * a high surrogate (U+D800-U+DBFF) and its low surrogate (U+DC00-U+DFFF),
+ * the cut is adjusted forward by one character to avoid creating broken pairs.
+ *
+ * @param content - Message content to potentially truncate
+ * @param maxLength - Maximum allowed character length (default: COPILOT_MAX_MESSAGE_LENGTH)
+ * @param marker - Truncation marker text (default: COPILOT_TRUNCATION_MARKER)
+ * @returns Original content if within limit, or marker + tail portion if truncated
+ */
+export function truncateMessage(
+  content: string,
+  maxLength: number = COPILOT_MAX_MESSAGE_LENGTH,
+  marker: string = COPILOT_TRUNCATION_MARKER,
+): string {
+  if (!content || content.length <= maxLength) {
+    return content;
+  }
+
+  // Calculate how many characters of the tail to preserve.
+  // Format: marker + '\n' + tail
+  const markerWithNewline = marker + '\n';
+  const tailLength = maxLength - markerWithNewline.length;
+
+  if (tailLength <= 0) {
+    // Edge case: marker alone exceeds maxLength; return marker truncated to maxLength
+    return marker.slice(0, maxLength);
+  }
+
+  // Determine cut point (index into content from which to take the tail)
+  let cutIndex = content.length - tailLength;
+
+  // Surrogate pair guard: if cutIndex lands on a low surrogate (second half of a pair),
+  // advance by 1 to avoid splitting the pair
+  if (cutIndex > 0 && cutIndex < content.length) {
+    const code = content.charCodeAt(cutIndex);
+    if (code >= 0xDC00 && code <= 0xDFFF) {
+      // This is a low surrogate; skip past it to keep the pair intact in the discarded head
+      cutIndex += 1;
+    }
+  }
+
+  const tail = content.slice(cutIndex);
+  return markerWithNewline + tail;
 }

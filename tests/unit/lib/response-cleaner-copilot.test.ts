@@ -4,7 +4,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { cleanCopilotResponse } from '@/lib/response-cleaner';
+import { cleanCopilotResponse, truncateMessage } from '@/lib/response-cleaner';
+import { COPILOT_MAX_MESSAGE_LENGTH, COPILOT_TRUNCATION_MARKER } from '@/config/copilot-constants';
 
 describe('cleanCopilotResponse', () => {
   it('should return clean text unchanged', () => {
@@ -156,5 +157,124 @@ describe('cleanCopilotResponse', () => {
         'Here is my analysis of the issue:\nThe bug is caused by a null pointer.\nI recommend fixing line 42.'
       );
     });
+  });
+
+  // Issue #571: New COPILOT_SKIP_PATTERNS for disclaimer, init message, environment info
+  describe('Issue #571: COPILOT_SKIP_PATTERNS additions', () => {
+    it('should skip Copilot disclaimer text', () => {
+      const input = [
+        'Copilot uses AI, so always check for mistakes.',
+        'Here is the actual response.',
+      ].join('\n');
+      expect(cleanCopilotResponse(input)).toBe('Here is the actual response.');
+    });
+
+    it('should skip initialization message lines starting with bullet lightbulb', () => {
+      const input = [
+        '\u25CF \uD83D\uDCA1 You can use /help to see available commands',
+        'Actual content here',
+      ].join('\n');
+      expect(cleanCopilotResponse(input)).toBe('Actual content here');
+    });
+
+    it('should skip environment loaded lines', () => {
+      const input = [
+        '\u25CF Environment loaded: .copilot/.env',
+        'Response content',
+      ].join('\n');
+      expect(cleanCopilotResponse(input)).toBe('Response content');
+    });
+
+    it('should skip all three new patterns together', () => {
+      const input = [
+        'Copilot uses AI, so always check for mistakes.',
+        '\u25CF \uD83D\uDCA1 Quick tip: use /model to switch models',
+        '\u25CF Environment loaded: .env.local',
+        'The analysis shows the bug is on line 42.',
+      ].join('\n');
+      expect(cleanCopilotResponse(input)).toBe('The analysis shows the bug is on line 42.');
+    });
+
+    it('should NOT skip user content that mentions Copilot AI', () => {
+      // Partial match should not trigger skip - only full line match
+      const input = 'Copilot uses AI, so always check for mistakes. But here is more text.';
+      expect(cleanCopilotResponse(input)).toBe('Copilot uses AI, so always check for mistakes. But here is more text.');
+    });
+  });
+
+});
+
+// Issue #571: truncateMessage tests
+describe('truncateMessage', () => {
+  const MARKER = COPILOT_TRUNCATION_MARKER;
+
+  it('should return content as-is when within maxLength', () => {
+    const content = 'Short message';
+    expect(truncateMessage(content, 100, MARKER)).toBe(content);
+  });
+
+  it('should return content as-is when exactly at maxLength', () => {
+    const content = 'a'.repeat(100);
+    expect(truncateMessage(content, 100, MARKER)).toBe(content);
+  });
+
+  it('should truncate content exceeding maxLength with marker + tail', () => {
+    // Create a string longer than maxLength
+    const maxLen = 50;
+    const content = 'HEAD_CONTENT_' + 'x'.repeat(40) + '_TAIL_END';
+    const result = truncateMessage(content, maxLen, MARKER);
+
+    // Result should start with marker
+    expect(result.startsWith(MARKER + '\n')).toBe(true);
+    // Result should end with the tail of the original content
+    expect(result.endsWith('_TAIL_END')).toBe(true);
+    // Result length should be <= maxLength
+    expect(result.length).toBeLessThanOrEqual(maxLen);
+  });
+
+  it('should handle empty string', () => {
+    expect(truncateMessage('', 100, MARKER)).toBe('');
+  });
+
+  it('should handle surrogate pairs at boundary correctly', () => {
+    // Create content with emoji (surrogate pair) near the cut point
+    const maxLen = 30;
+    const emoji = '\uD83D\uDE00'; // U+1F600 grinning face
+    // Place emoji so that a naive slice would cut it in half
+    const content = 'a'.repeat(25) + emoji + 'b'.repeat(20);
+    const result = truncateMessage(content, maxLen, MARKER);
+
+    // Result should not contain broken surrogate pairs
+    // Check there's no lone high surrogate (U+D800-U+DBFF) or low surrogate (U+DC00-U+DFFF)
+    for (let i = 0; i < result.length; i++) {
+      const code = result.charCodeAt(i);
+      if (code >= 0xD800 && code <= 0xDBFF) {
+        // High surrogate must be followed by low surrogate
+        const next = result.charCodeAt(i + 1);
+        expect(next >= 0xDC00 && next <= 0xDFFF).toBe(true);
+      }
+      if (code >= 0xDC00 && code <= 0xDFFF) {
+        // Low surrogate must be preceded by high surrogate
+        const prev = result.charCodeAt(i - 1);
+        expect(prev >= 0xD800 && prev <= 0xDBFF).toBe(true);
+      }
+    }
+    expect(result.length).toBeLessThanOrEqual(maxLen);
+  });
+
+  it('should use default COPILOT_MAX_MESSAGE_LENGTH and COPILOT_TRUNCATION_MARKER', () => {
+    // Verify constants are exported correctly
+    expect(COPILOT_MAX_MESSAGE_LENGTH).toBe(100_000);
+    expect(COPILOT_TRUNCATION_MARKER).toBe('[... truncated ...]');
+  });
+
+  it('should preserve the tail (most recent content) when truncating', () => {
+    const maxLen = 40;
+    const tail = 'IMPORTANT_TAIL';
+    const content = 'x'.repeat(100) + tail;
+    const result = truncateMessage(content, maxLen, MARKER);
+
+    expect(result).toContain(tail);
+    expect(result.startsWith(MARKER + '\n')).toBe(true);
   });
 });
