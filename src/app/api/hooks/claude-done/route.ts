@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getDbInstance } from '@/lib/db-instance';
+import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById, createMessage, updateSessionState } from '@/lib/db';
 import { captureClaudeOutput } from '@/lib/session/claude-session';
 import { broadcastMessage } from '@/lib/ws-server';

@@ -16,7 +16,7 @@ vi.mock('../../src/cli/utils/install-context', () => ({
   getConfigDir: vi.fn(() => path.join(homedir(), '.commandmate')),
 }));
 
-import { getDefaultDbPath, validateDbPath, getIssueDbPath } from '../../src/lib/db-path-resolver';
+import { getDefaultDbPath, validateDbPath, getIssueDbPath } from '../../src/lib/db/db-path-resolver';
 import { isGlobalInstall, getConfigDir } from '../../src/cli/utils/install-context';
 
 describe('db-path-resolver', () => {

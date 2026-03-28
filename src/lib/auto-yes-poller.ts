@@ -561,10 +561,6 @@ export function getAutoYesPollerCompositeKeys(): string[] {
   return Array.from(autoYesPollerStates.keys());
 }
 
-/**
- * @deprecated Use getAutoYesPollerCompositeKeys() instead. Renamed for clarity (Issue #525).
- */
-export const getAutoYesPollerWorktreeIds = getAutoYesPollerCompositeKeys;
 
 // =============================================================================
 // byWorktree Helpers (Issue #525)

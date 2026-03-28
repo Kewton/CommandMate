@@ -34,7 +34,6 @@ export {
   checkStopCondition,
   deleteAutoYesState,
   getAutoYesStateCompositeKeys,
-  getAutoYesStateWorktreeIds,
 
   // byWorktree helpers (Issue #525)
   filterCompositeKeysByWorktree,
@@ -71,7 +70,6 @@ export {
   stopAutoYesPolling,
   stopAllAutoYesPolling,
   getAutoYesPollerCompositeKeys,
-  getAutoYesPollerWorktreeIds,
   // byWorktree helpers (Issue #525)
   stopAutoYesPollingByWorktree,
   isAnyPollerActiveForWorktree,

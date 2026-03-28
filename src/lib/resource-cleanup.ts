@@ -25,7 +25,7 @@ import {
 import { isValidWorktreeId } from './security/path-validator';
 import { stopScheduleForWorktree, getScheduleWorktreeIds } from './schedule-manager';
 import { stopTimersForWorktree, getTimerWorktreeIds } from './timer-manager';
-import { getDbInstance } from './db-instance';
+import { getDbInstance } from './db/db-instance';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('resource-cleanup');

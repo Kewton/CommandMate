@@ -10,7 +10,7 @@
  */
 
 import path from 'path';
-import { getDefaultDbPath, validateDbPath } from './db-path-resolver';
+import { getDefaultDbPath, validateDbPath } from './db/db-path-resolver';
 
 // ============================================================
 // Environment Variable Mapping (for fallback support)

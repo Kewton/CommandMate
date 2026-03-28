@@ -5,8 +5,8 @@
  */
 
 import { NextResponse } from 'next/server';
-import { getDbInstance } from '@/lib/db-instance';
-import { getExcludedRepositories } from '@/lib/db-repository';
+import { getDbInstance } from '@/lib/db/db-instance';
+import { getExcludedRepositories } from '@/lib/db/db-repository';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/repositories-excluded');

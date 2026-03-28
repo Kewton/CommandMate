@@ -15,7 +15,7 @@ import {
   getWorktreeIdsByRepository,
   deleteRepositoryWorktrees,
 } from '@/lib/db';
-import { runMigrations } from '@/lib/db-migrations';
+import { runMigrations } from '@/lib/db/db-migrations';
 import type { Worktree } from '@/types/models';
 
 describe('Database Repository Delete Operations', () => {

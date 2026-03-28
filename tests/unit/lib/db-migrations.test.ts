@@ -14,7 +14,7 @@ import {
   getMigrationHistory,
   validateSchema,
   rollbackMigrations,
-} from '../../../src/lib/db-migrations';
+} from '../../../src/lib/db/db-migrations';
 
 describe('db-migrations', () => {
   let db: Database.Database;

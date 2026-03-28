@@ -7,7 +7,7 @@
 
 import Database from 'better-sqlite3';
 import path from 'path';
-import { getDbInstance } from '../src/lib/db-instance';
+import { getDbInstance } from '../src/lib/db/db-instance';
 import { getWorktreeById } from '../src/lib/db';
 import { getEnvByKey } from '../src/lib/env';
 

@@ -9,14 +9,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import Database from 'better-sqlite3';
 import { DELETE } from '@/app/api/repositories/route';
-import { runMigrations } from '@/lib/db-migrations';
+import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree, createMessage, getWorktrees } from '@/lib/db';
-import { getRepositoryByPath } from '@/lib/db-repository';
+import { getRepositoryByPath } from '@/lib/db/db-repository';
 
 // Mock db-instance to use test database
 let testDb: Database.Database;
 
-vi.mock('@/lib/db-instance', () => ({
+vi.mock('@/lib/db/db-instance', () => ({
   getDbInstance: () => testDb,
 }));
 

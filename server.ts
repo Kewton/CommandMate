@@ -38,15 +38,15 @@ import {
   getRepositoryPaths,
   scanMultipleRepositories,
 } from './src/lib/git/worktrees';
-import { getDbInstance } from './src/lib/db-instance';
+import { getDbInstance } from './src/lib/db/db-instance';
 import { stopAllPolling } from './src/lib/polling/response-poller';
 import { stopAllAutoYesPolling } from './src/lib/polling/auto-yes-manager';
 import { initScheduleManager, stopAllSchedules } from './src/lib/schedule-manager';
 import { initTimerManager, stopAllTimers } from './src/lib/timer-manager';
 import { initResourceCleanup, stopResourceCleanup } from './src/lib/resource-cleanup';
-import { runMigrations } from './src/lib/db-migrations';
+import { runMigrations } from './src/lib/db/db-migrations';
 import { getEnvByKey } from './src/lib/env';
-import { registerAndFilterRepositories, resolveRepositoryPath, getAllRepositories } from './src/lib/db-repository';
+import { registerAndFilterRepositories, resolveRepositoryPath, getAllRepositories } from './src/lib/db/db-repository';
 import { getWorktreeIdsByRepository, deleteWorktreesByIds } from './src/lib/db';
 import { cleanupMultipleWorktrees, killWorktreeSession, syncWorktreesAndCleanup } from './src/lib/session-cleanup';
 

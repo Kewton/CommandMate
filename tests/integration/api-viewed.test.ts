@@ -5,17 +5,17 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PATCH as patchViewed } from '@/app/api/worktrees/[id]/viewed/route';
 import Database from 'better-sqlite3';
-import { runMigrations } from '@/lib/db-migrations';
+import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree, getWorktreeById } from '@/lib/db';
 import type { Worktree } from '@/types/models';
 
 // Declare mock function type
-declare module '@/lib/db-instance' {
+declare module '@/lib/db/db-instance' {
   export function setMockDb(db: Database.Database): void;
 }
 
 // Mock the database instance
-vi.mock('@/lib/db-instance', () => {
+vi.mock('@/lib/db/db-instance', () => {
   let mockDb: Database.Database | null = null;
 
   return {
@@ -44,12 +44,12 @@ describe('PATCH /api/worktrees/:id/viewed (G4)', () => {
     db = new Database(':memory:');
     runMigrations(db);
 
-    const { setMockDb } = await import('@/lib/db-instance');
+    const { setMockDb } = await import('@/lib/db/db-instance');
     setMockDb(db);
   });
 
   afterEach(async () => {
-    const { closeDbInstance } = await import('@/lib/db-instance');
+    const { closeDbInstance } = await import('@/lib/db/db-instance');
     closeDbInstance();
     db.close();
   });

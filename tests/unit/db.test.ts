@@ -19,7 +19,7 @@ import {
   getSessionState,
   updateSessionState,
 } from '@/lib/db';
-import { runMigrations } from '@/lib/db-migrations';
+import { runMigrations } from '@/lib/db/db-migrations';
 
 describe('Database Operations', () => {
   let testDb: Database.Database;

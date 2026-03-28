@@ -7,7 +7,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { getDbInstance } from '@/lib/db-instance';
+import { getDbInstance } from '@/lib/db/db-instance';
 import { getExternalAppCache } from '@/lib/external-apps/cache';
 import { proxyHttp, proxyWebSocket, isWebSocketUpgrade } from '@/lib/proxy/handler';
 import { logProxyRequest, logProxyError } from '@/lib/proxy/logger';

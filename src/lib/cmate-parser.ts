@@ -23,7 +23,6 @@ import {
 } from '@/config/schedule-config';
 import {
   CMATE_FILENAME,
-  CONTROL_CHAR_PATTERN,
   NAME_PATTERN,
   MAX_CRON_EXPRESSION_LENGTH,
   MAX_SCHEDULE_ENTRIES,
@@ -43,11 +42,6 @@ export {
   isValidCronExpression,
 };
 
-/**
- * @deprecated Use CONTROL_CHAR_PATTERN from '@/config/cmate-constants' instead.
- * Kept for backward compatibility with existing tests.
- */
-export const CONTROL_CHAR_REGEX = new RegExp(CONTROL_CHAR_PATTERN.source, 'g');
 
 /** Minimum cron interval pattern (every minute) */
 export const MIN_CRON_INTERVAL = '* * * * *';

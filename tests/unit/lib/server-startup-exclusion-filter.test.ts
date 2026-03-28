@@ -16,14 +16,14 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { runMigrations } from '@/lib/db-migrations';
+import { runMigrations } from '@/lib/db/db-migrations';
 import {
   ensureEnvRepositoriesRegistered,
   filterExcludedPaths,
   registerAndFilterRepositories,
   disableRepository,
   getRepositoryByPath,
-} from '@/lib/db-repository';
+} from '@/lib/db/db-repository';
 
 let testDb: Database.Database;
 

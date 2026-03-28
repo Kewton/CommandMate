@@ -27,7 +27,7 @@
  */
 
 import { captureSessionOutput, isSessionRunning } from '@/lib/session/cli-session';
-import { getDbInstance } from '@/lib/db-instance';
+import { getDbInstance } from '@/lib/db/db-instance';
 import {
   createMessage,
   getSessionState,

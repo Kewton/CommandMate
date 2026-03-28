@@ -6,12 +6,12 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getDbInstance } from '@/lib/db-instance';
+import { getDbInstance } from '@/lib/db/db-instance';
 import {
   getWorktreeIdsByRepository,
   deleteRepositoryWorktrees,
 } from '@/lib/db';
-import { validateRepositoryPath, disableRepository } from '@/lib/db-repository';
+import { validateRepositoryPath, disableRepository } from '@/lib/db/db-repository';
 import { cleanupMultipleWorktrees, killWorktreeSession } from '@/lib/session-cleanup';
 import { cleanupRooms, broadcastMessage } from '@/lib/ws-server';
 import { createLogger } from '@/lib/logger';

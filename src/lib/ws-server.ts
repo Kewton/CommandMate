@@ -12,7 +12,7 @@ import { isAuthEnabled, parseCookies, AUTH_COOKIE_NAME, verifyToken } from './se
 import { getAllowedRanges, isIpAllowed, isIpRestrictionEnabled, normalizeIp } from './security/ip-restriction';
 import { isCliToolType } from './cli-tools/types';
 import { CLIToolManager } from './cli-tools/manager';
-import { getDbInstance } from './db-instance';
+import { getDbInstance } from './db/db-instance';
 import { getWorktreeById } from './db';
 import { observeTmuxControlFirstOutputLatency } from './tmux/tmux-control-mode-metrics';
 import { getControlModeTmuxTransport } from './tmux/control-mode-tmux-transport';

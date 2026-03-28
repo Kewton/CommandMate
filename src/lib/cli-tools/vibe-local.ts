@@ -19,7 +19,7 @@ import {
 } from '../tmux/tmux';
 import { detectAndResendIfPastedText } from '../pasted-text-helper';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
-import { getDbInstance } from '../db-instance';
+import { getDbInstance } from '../db/db-instance';
 import { getWorktreeById } from '../db';
 import { createLogger } from '@/lib/logger';
 
