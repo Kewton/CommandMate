@@ -287,6 +287,22 @@ export const COPILOT_SKIP_PATTERNS: readonly RegExp[] = [
   COPILOT_SEPARATOR_PATTERN,
   COPILOT_THINKING_PATTERN,
   COPILOT_SELECTION_LIST_PATTERN,
+  // Logo/banner lines
+  /^GitHub Copilot\s+v/,
+  /[█▘▝▖▗▔▄▌▐]/,
+  /[╭╮╰╯│]/,
+  // Status bar (branch + model display)
+  /\[⎇\s+\w[^\]]*\]/,
+  // Operation guide lines
+  /^shift\+tab\s/,
+  /^\?\s+for\s+shortcuts/,
+  /^ctrl\+[a-z]\s+\w/,
+  // Prompt lines
+  /^[❯>]\s*(Type\s+@|$)/,
+  // Tip/hint lines
+  /^Tip:\s+\//,
+  // Initial display text
+  /^Describe a task to get started/,
 ] as const;
 
 /**
