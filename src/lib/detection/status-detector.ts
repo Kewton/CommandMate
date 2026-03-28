@@ -28,6 +28,7 @@ import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDe
 import { detectPrompt } from './prompt-detector';
 import type { PromptDetectionResult } from './prompt-detector';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
 
 /**
  * Session status types
@@ -87,28 +88,9 @@ export interface StatusDetectionResult {
  */
 const STATUS_CHECK_LINE_COUNT: number = 15;
 
-/**
- * Number of lines from the end to check for thinking indicators.
- * Thinking indicators (spinner + activity text) only appear in the most recent lines.
- * A small window prevents completed thinking summaries (e.g., "Churned for 41s")
- * in scrollback from being falsely detected as active thinking (Issue #188 root cause).
- *
- * SF-002 naming rationale: Named STATUS_THINKING_LINE_COUNT (not THINKING_CHECK_LINE_COUNT)
- * to avoid naming collision with auto-yes-manager.ts. Three related constants exist:
- *
- * | Constant                          | Value | Module              | Purpose                          |
- * |-----------------------------------|-------|---------------------|----------------------------------|
- * | STATUS_THINKING_LINE_COUNT        |   5   | status-detector.ts  | UI status display (accuracy)     |
- * | RESPONSE_THINKING_TAIL_LINE_COUNT |   5   | response-poller.ts  | Response extraction tail check   |
- * | THINKING_CHECK_LINE_COUNT         |  50   | auto-yes-manager.ts | Auto-Yes safety (wider window)   |
- *
- * The UI constants (5) use a narrow window for precision. The Auto-Yes constant (50)
- * uses a wider window that matches detectMultipleChoicePrompt's scan range, prioritizing
- * safety over precision (Issue #191).
- *
- * @constant
- */
-const STATUS_THINKING_LINE_COUNT: number = 5;
+// THINKING_TAIL_LINE_COUNT imported from @/config/thinking-constants (Issue #575)
+// Previously THINKING_TAIL_LINE_COUNT = 5 (local constant)
+// See also: THINKING_CHECK_LINE_COUNT (50) in auto-yes-manager.ts (wider window for safety)
 
 /**
  * Reason string constants for StatusDetectionResult.reason.
@@ -181,7 +163,7 @@ export function detectSessionStatus(
   const contentLines = lines.slice(0, lastNonEmptyIndex + 1);
   const lastLines = contentLines.slice(-STATUS_CHECK_LINE_COUNT).join('\n');
   // DR-003: Separate thinking detection window (5 lines) from prompt detection window (15 lines)
-  const thinkingLines = contentLines.slice(-STATUS_THINKING_LINE_COUNT).join('\n');
+  const thinkingLines = contentLines.slice(-THINKING_TAIL_LINE_COUNT).join('\n');
 
   // 0. Copilot: selection list detection BEFORE thinking detection
   // COPILOT_THINKING_PATTERN includes "Reasoning\s+[■▪▮]" which matches the
@@ -280,7 +262,7 @@ export function detectSessionStatus(
   // 1.6. Copilot CLI selection list detection — moved to priority 0 (above thinking)
   // See comment at priority 0 for rationale.
 
-  // 2. Thinking indicator detection - STATUS_THINKING_LINE_COUNT window (narrower)
+  // 2. Thinking indicator detection - THINKING_TAIL_LINE_COUNT window (narrower)
   // CLI tool is actively processing (shows spinner, "Planning...", etc.)
   if (detectThinking(cliToolId, thinkingLines)) {
     return {
@@ -336,7 +318,7 @@ export function detectSessionStatus(
     if (lastContentIdx >= 0) {
       // B. Check last few content lines for thinking indicators
       const contentThinkingWindow = contentCandidates
-        .slice(Math.max(0, lastContentIdx - STATUS_THINKING_LINE_COUNT + 1), lastContentIdx + 1)
+        .slice(Math.max(0, lastContentIdx - THINKING_TAIL_LINE_COUNT + 1), lastContentIdx + 1)
         .join('\n');
       if (detectThinking('opencode', contentThinkingWindow)) {
         return {
@@ -415,7 +397,7 @@ export function detectSessionStatus(
       if (lastContentIdx >= 0) {
         // A. Check content area for thinking indicators (wider window than step 2)
         const codexThinkingWindow = contentLines
-          .slice(Math.max(0, lastContentIdx - STATUS_THINKING_LINE_COUNT + 1), lastContentIdx + 1)
+          .slice(Math.max(0, lastContentIdx - THINKING_TAIL_LINE_COUNT + 1), lastContentIdx + 1)
           .join('\n');
         if (detectThinking('codex', codexThinkingWindow)) {
           return {
