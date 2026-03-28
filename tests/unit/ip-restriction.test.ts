@@ -381,7 +381,7 @@ describe('IP Restriction Module', () => {
       mockLogger.warn.mockClear();
       await import('../../src/lib/security/ip-restriction');
       expect(mockLogger.warn).toHaveBeenCalledWith(
-        'config:trust-proxy-unexpected',
+        'security:trust-proxy-unexpected',
         expect.objectContaining({ value: 'TRUE' })
       );
 });
