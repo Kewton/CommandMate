@@ -160,24 +160,12 @@ export function setupWebSocket(server: HTTPServer | HTTPSServer): void {
     };
     clients.set(ws, clientInfo);
 
-    // Handle underlying socket errors (catches invalid frame errors earlier)
-    // Force destroy the socket on error to prevent further frame processing
-    const socket = (ws as unknown as { _socket?: { on: (event: string, handler: (err: Error) => void) => void; destroy?: () => void } })._socket;
-    if (socket) {
-      socket.on('error', (err: Error & { code?: string }) => {
-        if (!isExpectedWebSocketError(err)) {
-          logger.error('socket:error', { error: err.message });
-        }
-
-        // Immediately destroy the socket to prevent further errors
-        try {
-          if (socket.destroy) socket.destroy();
-        } catch {
-          // Socket may already be destroyed
-        }
-        handleDisconnect(ws);
-      });
-    }
+    // Issue #573: Removed _socket direct access (as unknown as pattern).
+    // ws.on('error') handler below covers socket-level errors because the ws library
+    // internally propagates underlying socket errors to the WebSocket 'error' event
+    // (see ws lib: WebSocket.js sets up _socket.on('error') -> this.emit('error')).
+    // ws.terminate() is equivalent to _socket.destroy() as it internally calls
+    // this._socket.destroy() (ws lib README: "Immediately destroys the connection").
 
     // Handle messages
     ws.on('message', (data: Buffer) => {

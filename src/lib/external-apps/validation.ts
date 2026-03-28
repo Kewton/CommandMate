@@ -99,6 +99,12 @@ export function isValidTargetHost(host: string): boolean {
 }
 
 /**
+ * Default app type for fallback when invalid values are encountered
+ * Issue #573: Type-safe constant to detect compile errors if 'other' is removed from ExternalAppType
+ */
+export const DEFAULT_APP_TYPE: ExternalAppType = 'other';
+
+/**
  * Validate that an app type is valid
  *
  * @param appType - App type to validate
@@ -106,6 +112,21 @@ export function isValidTargetHost(host: string): boolean {
  */
 export function isValidAppType(appType: string): appType is ExternalAppType {
   return VALID_APP_TYPES.includes(appType as ExternalAppType);
+}
+
+/**
+ * Convert a string to a valid ExternalAppType with fallback
+ * Issue #573: Runtime validation replacing unsafe `as ExternalAppType` casts
+ *
+ * @param value - String value to validate and convert
+ * @returns Valid ExternalAppType, or DEFAULT_APP_TYPE if invalid
+ */
+export function toValidAppType(value: string): ExternalAppType {
+  if (isValidAppType(value)) return value;
+  console.warn(
+    `[validation] invalid app type: "${value}", falling back to "${DEFAULT_APP_TYPE}"`
+  );
+  return DEFAULT_APP_TYPE;
 }
 
 /**

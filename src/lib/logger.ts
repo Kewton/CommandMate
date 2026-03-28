@@ -93,7 +93,10 @@ const SENSITIVE_KEY_PATTERN = /password|secret|token|key|auth/i;
 
 /**
  * Sanitize value (mask sensitive data)
+ * Overload: Record input returns Record output (eliminates `as` cast at call sites)
  */
+function sanitize(value: Record<string, unknown>): Record<string, unknown>;
+function sanitize(value: unknown): unknown;
 function sanitize(value: unknown): unknown {
   if (typeof value === 'string') {
     let sanitized = value;
@@ -213,7 +216,7 @@ function log(
   }
 
   // [MF-1] Sanitize data
-  const sanitizedData = data ? (sanitize(data) as Record<string, unknown>) : undefined;
+  const sanitizedData = data ? sanitize(data) : undefined;
 
   const entry: LogEntry = {
     level,
