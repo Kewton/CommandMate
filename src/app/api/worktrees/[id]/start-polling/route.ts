@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getDbInstance } from '@/lib/db-instance';
+import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { startPolling } from '@/lib/polling/response-poller';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';

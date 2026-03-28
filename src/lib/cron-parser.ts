@@ -55,9 +55,9 @@ interface ScheduleIdRow {
  *
  * @returns The SQLite database instance
  */
-function getLazyDbInstance(): ReturnType<typeof import('./db-instance').getDbInstance> {
+function getLazyDbInstance(): ReturnType<typeof import('./db/db-instance').getDbInstance> {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { getDbInstance } = require('./db-instance') as typeof import('./db-instance');
+  const { getDbInstance } = require('./db/db-instance') as typeof import('./db/db-instance');
   return getDbInstance();
 }
 

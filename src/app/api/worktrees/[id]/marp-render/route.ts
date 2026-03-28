@@ -13,7 +13,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getWorktreeById } from '@/lib/db';
-import { getDbInstance } from '@/lib/db-instance';
+import { getDbInstance } from '@/lib/db/db-instance';
 import Marp from '@marp-team/marp-core';
 
 // ============================================================================

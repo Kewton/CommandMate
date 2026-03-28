@@ -12,7 +12,7 @@ const mockResize = vi.fn();
 const mockGetSubscriberCount = vi.fn();
 const mockCaptureSnapshot = vi.fn();
 
-vi.mock('@/lib/db-instance', () => ({
+vi.mock('@/lib/db/db-instance', () => ({
   getDbInstance: vi.fn(() => ({})),
 }));
 

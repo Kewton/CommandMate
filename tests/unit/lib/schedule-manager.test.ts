@@ -14,7 +14,7 @@ import {
   MAX_CONCURRENT_SCHEDULES,
   batchUpsertSchedules,
 } from '../../../src/lib/schedule-manager';
-import { getDbInstance } from '../../../src/lib/db-instance';
+import { getDbInstance } from '../../../src/lib/db/db-instance';
 
 // Mock logger module (Issue #480)
 const { mockLogger } = vi.hoisted(() => {
@@ -47,7 +47,7 @@ vi.mock('fs', async (importOriginal) => {
 });
 
 // Mock db-instance to avoid actual DB operations
-vi.mock('../../../src/lib/db-instance', () => {
+vi.mock('../../../src/lib/db/db-instance', () => {
   const Database = require('better-sqlite3');
   let db: InstanceType<typeof Database> | null = null;
 

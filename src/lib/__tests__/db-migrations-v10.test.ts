@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { runMigrations, getCurrentVersion } from '../db-migrations';
+import { runMigrations, getCurrentVersion } from '../db/db-migrations';
 
 describe('Database Migration: Version 10 - worktree_memos table', () => {
   let testDb: Database.Database;

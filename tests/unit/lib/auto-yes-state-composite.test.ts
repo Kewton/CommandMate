@@ -11,7 +11,7 @@ import {
   deleteAutoYesState,
   checkStopCondition,
   clearAllAutoYesStates,
-  getAutoYesStateWorktreeIds,
+  getAutoYesStateCompositeKeys,
   getCompositeKeysByWorktree,
   deleteAutoYesStateByWorktree,
   buildCompositeKey,
@@ -196,16 +196,16 @@ describe('auto-yes-state composite key migration (Issue #525)', () => {
     });
   });
 
-  describe('getAutoYesStateWorktreeIds returns composite keys', () => {
+  describe('getAutoYesStateCompositeKeys returns composite keys', () => {
     it('should return empty array when no states', () => {
-      expect(getAutoYesStateWorktreeIds()).toEqual([]);
+      expect(getAutoYesStateCompositeKeys()).toEqual([]);
     });
 
     it('should return composite keys', () => {
       setAutoYesEnabled('wt-1', 'claude', true);
       setAutoYesEnabled('wt-2', 'codex', true);
 
-      const keys = getAutoYesStateWorktreeIds();
+      const keys = getAutoYesStateCompositeKeys();
       expect(keys).toContain('wt-1:claude');
       expect(keys).toContain('wt-2:codex');
     });

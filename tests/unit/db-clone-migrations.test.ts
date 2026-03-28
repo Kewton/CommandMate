@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { runMigrations, getCurrentVersion } from '@/lib/db-migrations';
+import { runMigrations, getCurrentVersion } from '@/lib/db/db-migrations';
 
 describe('Clone URL Migrations', () => {
   let testDb: Database.Database;

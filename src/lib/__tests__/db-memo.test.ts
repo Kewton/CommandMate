@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { runMigrations } from '../db-migrations';
+import { runMigrations } from '../db/db-migrations';
 import { upsertWorktree } from '../db';
 
 // Import functions that we'll implement

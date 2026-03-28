@@ -26,7 +26,6 @@ import {
   sanitizeMessageContent,
   isValidCronExpression,
   validateCmatePath,
-  CONTROL_CHAR_REGEX,
   NAME_PATTERN,
   MAX_CRON_EXPRESSION_LENGTH,
   MAX_SCHEDULE_ENTRIES,
@@ -283,22 +282,6 @@ More text here.
     it('should return same string for clean input', () => {
       const input = 'Hello, world! This is a normal message.';
       expect(sanitizeMessageContent(input)).toBe(input);
-    });
-  });
-
-  describe('CONTROL_CHAR_REGEX', () => {
-    it('should match NUL character', () => {
-      expect(CONTROL_CHAR_REGEX.test('\x00')).toBe(true);
-    });
-
-    it('should not match tab', () => {
-      // Reset lastIndex since CONTROL_CHAR_REGEX has /g flag
-      CONTROL_CHAR_REGEX.lastIndex = 0;
-      expect('\t'.replace(CONTROL_CHAR_REGEX, '')).toBe('\t');
-    });
-
-    it('should not match newline', () => {
-      expect('\n'.replace(CONTROL_CHAR_REGEX, '')).toBe('\n');
     });
   });
 

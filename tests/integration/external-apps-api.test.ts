@@ -6,12 +6,12 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import { runMigrations } from '@/lib/db-migrations';
+import { runMigrations } from '@/lib/db/db-migrations';
 import { createExternalApp } from '@/lib/external-apps/db';
 import type { CreateExternalAppInput, ExternalApp } from '@/types/external-apps';
 
 // Mock the database instance
-vi.mock('@/lib/db-instance', () => {
+vi.mock('@/lib/db/db-instance', () => {
   let mockDb: Database.Database | null = null;
 
   return {
@@ -42,12 +42,12 @@ describe('External Apps API', () => {
     runMigrations(db);
 
     // Set mock database
-    const { setMockDb } = await import('@/lib/db-instance');
+    const { setMockDb } = await import('@/lib/db/db-instance');
     (setMockDb as (db: Database.Database) => void)(db);
   });
 
   afterEach(async () => {
-    const { closeDbInstance } = await import('@/lib/db-instance');
+    const { closeDbInstance } = await import('@/lib/db/db-instance');
     closeDbInstance();
     db.close();
   });

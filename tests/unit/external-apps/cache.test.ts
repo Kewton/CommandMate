@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import { runMigrations } from '@/lib/db-migrations';
+import { runMigrations } from '@/lib/db/db-migrations';
 import { createExternalApp, updateExternalApp, deleteExternalApp } from '@/lib/external-apps/db';
 import { ExternalAppCache, externalAppCache, resetCacheInstance } from '@/lib/external-apps/cache';
 import type { CreateExternalAppInput } from '@/types/external-apps';

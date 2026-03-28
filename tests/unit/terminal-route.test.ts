@@ -25,7 +25,7 @@ vi.mock('@/lib/cli-tools/manager', () => ({
   },
 }));
 
-vi.mock('@/lib/db-instance', () => ({
+vi.mock('@/lib/db/db-instance', () => ({
   getDbInstance: vi.fn(() => ({})),
 }));
 

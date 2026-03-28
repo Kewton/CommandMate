@@ -18,7 +18,7 @@ import { isCliToolType } from '@/lib/cli-tools/types';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { getWorktreeById } from '@/lib/db';
-import { getDbInstance } from '@/lib/db-instance';
+import { getDbInstance } from '@/lib/db/db-instance';
 import {
   createTimer,
   getTimersByWorktree,

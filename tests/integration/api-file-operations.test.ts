@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PUT, POST, DELETE, PATCH, GET } from '@/app/api/worktrees/[id]/files/[...path]/route';
 import { NextRequest } from 'next/server';
 import Database from 'better-sqlite3';
-import { runMigrations } from '@/lib/db-migrations';
+import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree } from '@/lib/db';
 import type { Worktree } from '@/types/models';
 import { join } from 'path';
@@ -17,12 +17,12 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 
 // Declare mock function type
-declare module '@/lib/db-instance' {
+declare module '@/lib/db/db-instance' {
   export function setMockDb(db: Database.Database): void;
 }
 
 // Mock the database instance
-vi.mock('@/lib/db-instance', () => {
+vi.mock('@/lib/db/db-instance', () => {
   let mockDb: Database.Database | null = null;
 
   return {
@@ -54,7 +54,7 @@ describe('File Operations API', () => {
     db = new Database(':memory:');
     runMigrations(db);
 
-    const { setMockDb } = await import('@/lib/db-instance');
+    const { setMockDb } = await import('@/lib/db/db-instance');
     setMockDb(db);
 
     // Create test directory
@@ -73,7 +73,7 @@ describe('File Operations API', () => {
   });
 
   afterEach(async () => {
-    const { closeDbInstance } = await import('@/lib/db-instance');
+    const { closeDbInstance } = await import('@/lib/db/db-instance');
     closeDbInstance();
     db.close();
 

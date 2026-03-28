@@ -6,13 +6,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import Database from 'better-sqlite3';
-import { runMigrations } from '@/lib/db-migrations';
+import { runMigrations } from '@/lib/db/db-migrations';
 import {
   createRepository,
   createCloneJob,
   updateCloneJob,
   getCloneJob,
-} from '@/lib/db-repository';
+} from '@/lib/db/db-repository';
 
 // Mock environment variables (must be before route imports)
 vi.mock('@/lib/env', () => ({
@@ -27,7 +27,7 @@ vi.mock('@/lib/env', () => ({
 // Mock database instance
 let mockDb: Database.Database;
 
-vi.mock('@/lib/db-instance', () => ({
+vi.mock('@/lib/db/db-instance', () => ({
   getDbInstance: () => mockDb,
 }));
 
