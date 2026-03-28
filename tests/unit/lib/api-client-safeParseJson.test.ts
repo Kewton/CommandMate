@@ -21,7 +21,7 @@ describe('api-client safeParseJson behavior (Issue #573)', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
-    process.env.NODE_ENV = originalEnv;
+    vi.stubGlobal('process', { ...process, env: { ...process.env, NODE_ENV: originalEnv } });
   });
 
   describe('fetchApi error path (content-type check)', () => {
@@ -63,7 +63,7 @@ describe('api-client safeParseJson behavior (Issue #573)', () => {
 
   describe('console.warn in development mode', () => {
     it('should warn on non-JSON content-type in development', async () => {
-      process.env.NODE_ENV = 'development';
+      vi.stubGlobal('process', { ...process, env: { ...process.env, NODE_ENV: 'development' } });
       const warnSpy = vi.spyOn(console, 'warn');
 
       const { worktreeApi } = await import('@/lib/api-client');
@@ -95,7 +95,7 @@ describe('api-client safeParseJson behavior (Issue #573)', () => {
 
   describe('content-type truncation', () => {
     it('should truncate long content-type values for security', async () => {
-      process.env.NODE_ENV = 'development';
+      vi.stubGlobal('process', { ...process, env: { ...process.env, NODE_ENV: 'development' } });
       const warnSpy = vi.spyOn(console, 'warn');
 
       const { worktreeApi } = await import('@/lib/api-client');
