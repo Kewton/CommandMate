@@ -120,9 +120,8 @@ export function extractCopilotContentLines(rawOutput: string): string[] {
 
   for (const line of lines) {
     const normalized = normalizeCopilotLine(line);
-    const trimmed = normalized.trim();
-    if (!trimmed) continue;
-    if (COPILOT_SKIP_PATTERNS.some(p => p.test(trimmed))) continue;
+    if (!normalized) continue;
+    if (COPILOT_SKIP_PATTERNS.some(p => p.test(normalized))) continue;
     contentLines.push(normalized);
   }
 

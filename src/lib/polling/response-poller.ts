@@ -372,17 +372,15 @@ function extractResponse(
   const hasSeparator = separatorPattern.test(cleanOutputToCheck);
   const isThinking = thinkingPattern.test(cleanOutputToCheck);
 
-  // Codex/Gemini/Vibe-Local completion logic: prompt detected and not thinking (separator optional)
-  // - Codex: Interactive TUI, detects > prompt
-  // - Gemini: Interactive REPL, detects > / > prompt
-  // - Vibe-Local: Interactive REPL, detects > prompt
-  // Claude: require both prompt and separator
-  const isCodexOrGeminiComplete = (cliToolId === 'codex' || cliToolId === 'gemini' || cliToolId === 'vibe-local' || cliToolId === 'copilot') && hasPrompt && !isThinking;
+  // Prompt-based completion logic: prompt detected and not thinking (separator optional)
+  // Applies to: Codex, Gemini, Vibe-Local, Copilot (all use interactive prompt indicators)
+  // Claude: requires both prompt and separator
+  const isPromptBasedComplete = (cliToolId === 'codex' || cliToolId === 'gemini' || cliToolId === 'vibe-local' || cliToolId === 'copilot') && hasPrompt && !isThinking;
   const isClaudeComplete = cliToolId === 'claude' && hasPrompt && hasSeparator && !isThinking;
   // [D2-002] OpenCode completion: detected via Build summary line pattern (independent of prompt/separator)
   const isOpenCodeDone = cliToolId === 'opencode' && isOpenCodeComplete(cleanOutputToCheck);
 
-  if (isCodexOrGeminiComplete || isClaudeComplete || isOpenCodeDone) {
+  if (isPromptBasedComplete || isClaudeComplete || isOpenCodeDone) {
     // CLI tool has completed response
     // Extract the response content from lastCapturedLine to the separator (not just last 20 lines)
     const responseLines: string[] = [];
