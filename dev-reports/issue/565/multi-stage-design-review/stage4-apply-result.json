@@ -1,0 +1,41 @@
+{
+  "issue_number": 565,
+  "stage": 4,
+  "applied_findings": [
+    {
+      "finding_id": "DR4-001",
+      "status": "applied",
+      "action_taken": "セクション6.2にMAX_ACCUMULATED_LINES定数（10000行）とスライス方式による蓄積バッファ上限制御の設計を追記。tui-accumulator.ts内に定数を配置し、OpenCode/Copilot両方に適用される設計とした。実装チェックリストにも追加。"
+    },
+    {
+      "finding_id": "DR4-002",
+      "status": "applied",
+      "action_taken": "セクション4.1.2にReDoS防止ルールを追記。ネスト量指定子禁止、.*より[^\\n]*推奨のガイドラインを明記。COPILOT_SELECTION_LIST_PATTERNの第3分岐の変更も実装チェックリストに追加。"
+    },
+    {
+      "finding_id": "DR4-003",
+      "status": "applied",
+      "action_taken": "セクション6.1を大幅拡張し、多層防御構造（API層CONTROL_CHAR_REGEX、tmux層execFile、Copilot遅延送信の影響なし）を明記。将来の開発者がセキュリティ境界を正しく理解できるよう文書化。"
+    },
+    {
+      "finding_id": "DR4-004",
+      "status": "applied",
+      "action_taken": "セクション4.2.1のisDuplicatePromptのJSDoc設計にSHA-256衝突時のfalse positive挙動（異なるプロンプトがスキップされる）と対策不要の根拠（SHA-256衝突確率は天文学的に低い）を追記。"
+    },
+    {
+      "finding_id": "DR4-005",
+      "status": "applied",
+      "action_taken": "セクション4.2.2にkillWorktreeSession()でのclearPromptHashCache()呼び出しをクリア箇所2として追記。セクション6.2のリソースリーク対策にもkillWorktreeSession時のクリアを反映。session-cleanup.tsが統合クリーンアップポイントである根拠も記載。"
+    },
+    {
+      "finding_id": "DR4-006",
+      "status": "applied",
+      "action_taken": "セクション6.1にフロントエンド表示時のXSS防御の前提条件を追記。ConversationPairCard等がdangerouslySetInnerHTMLを使用しておらず、Reactの標準エスケープ機構でXSSが防御されていることを明記。将来のUI変更時の注意点も記載。"
+    }
+  ],
+  "summary": {
+    "applied_count": 6,
+    "skipped_count": 0,
+    "partial_count": 0
+  }
+}

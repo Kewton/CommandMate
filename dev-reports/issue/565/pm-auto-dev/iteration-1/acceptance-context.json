@@ -1,0 +1,32 @@
+{
+  "issue_number": 565,
+  "feature_summary": "Copilot CLI（TUI/alternate screen）対応: レスポンス保存・重複・メッセージ送信の問題",
+  "acceptance_criteria": [
+    "Copilotの応答内容がMessage Historyに正しく保存されること",
+    "同一promptメッセージの重複保存が発生しないこと",
+    "78文字超のメッセージがCopilotに正常に送信されること",
+    "cleanCopilotResponseがCopilot固有のTUI装飾を正しく除去すること",
+    "Copilot用TuiAccumulatorパターンが定義され、コンテンツ抽出が機能すること",
+    "200ms遅延値が定数化され3箇所で統一参照されていること",
+    "Copilot用TuiAccumulatorのユニットテストが追加されていること",
+    "既存のOpenCode用TuiAccumulatorテストが壊れないこと",
+    "cleanCopilotResponseのユニットテストが追加されていること",
+    "isFullScreenTuiの共通フラグとCopilot固有ロジックの分岐が適切であること",
+    "送信パス統一後、terminal/route.tsとsend/route.tsで同じ方式が適用されていること"
+  ],
+  "test_scenarios": [
+    "extractCopilotContentLinesがCopilot TUI出力からコンテンツ行のみ抽出する",
+    "normalizeCopilotLineがbox-drawing文字と連続空白を正規化する",
+    "accumulateTuiContent(key, output, 'copilot')がCopilot用抽出関数を使用する",
+    "accumulateTuiContent(key, output)がデフォルトでOpenCode用抽出関数を使用する（後方互換）",
+    "cleanCopilotResponseがTUI装飾を除去しレスポンス本文を保持する",
+    "isDuplicatePromptが同一コンテンツの重複を検出する",
+    "isDuplicatePromptが異なるコンテンツを非重複と判定する",
+    "clearPromptHashCacheがキャッシュをクリアする",
+    "resolveExtractionStartIndexがCopilotをOpenCodeと同様に処理する",
+    "COPILOT_SEND_ENTER_DELAY_MSがsend/route.ts, terminal/route.ts, copilot.tsで参照される",
+    "response-poller.tsのaccumulateTuiContent呼び出しがcliToolIdを渡す",
+    "Copilotレスポンス保存時にgetAccumulatedContentが使用される",
+    "OpenCodeレスポンス保存時にはgetAccumulatedContentが使用されない"
+  ]
+}

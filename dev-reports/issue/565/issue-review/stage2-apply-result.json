@@ -1,0 +1,66 @@
+{
+  "issue_number": 565,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "applied_findings": [
+    {
+      "finding_id": "F1-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "action_taken": "事象2とalternate screenモードの説明を修正。「約24行」を「tmuxペインの表示行数分（デフォルト端末サイズでは約24行）」に変更し、alternate screenモードではスクロールバックバッファが無効化されるため表示中の行のみ取得可能と補足。"
+    },
+    {
+      "finding_id": "F1-002",
+      "severity": "must_fix",
+      "status": "applied",
+      "action_taken": "「受け入れ条件」セクションを新設。7項目のチェックリストを追加: (1)レスポンス本文のHistory保存、(2)prompt重複防止（content hash）、(3)78文字超メッセージ送信（100/200/500文字検証）、(4)暫定対策副作用解消、(5)cleanCopilotResponseのTUI装飾除去、(6)TuiAccumulatorパターン定義、(7)200ms遅延値の定数化。"
+    },
+    {
+      "finding_id": "F1-003",
+      "severity": "should_fix",
+      "status": "applied",
+      "action_taken": "必須対応2の実装方針を具体化。promptメッセージ保存前のDB直近メッセージとのSHA-256ハッシュ比較、response-poller.tsのcheckForResponse内での適用箇所、既存lineCountベースとの共存方針（独立レイヤー）、対象スコープ（prompt優先）を明記。"
+    },
+    {
+      "finding_id": "F1-004",
+      "severity": "should_fix",
+      "status": "applied",
+      "action_taken": "必須対応1のスコープにcleanCopilotResponseの本実装を明示的に追加。COPILOT_SKIP_PATTERNSがPastedTextPatternのみのplaceholder状態であること、Copilot固有のTUI装飾除去パターン定義が必要であることを記載。受け入れ条件にも対応する項目を追加。"
+    },
+    {
+      "finding_id": "F1-005",
+      "severity": "should_fix",
+      "status": "applied",
+      "action_taken": "必須対応3に検証基準を追加: 100/200/500文字での送信成功率計測、遅延値の定数化・config配置、失敗時リトライ戦略検討、sendKeys第2引数とsendSpecialKeysの組み合わせテストケース策定を明記。"
+    },
+    {
+      "finding_id": "F1-006",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "action_taken": "暫定対策セクションの「未コミット」を「コミット7c68640eで適用済み」に更新。"
+    },
+    {
+      "finding_id": "F1-007",
+      "severity": "should_fix",
+      "status": "applied",
+      "action_taken": "必須対応1に具体的な実装アプローチを追加。extractCopilotContentLines関数の新設またはcli-tools層へのStrategy統合の選択肢を明記。必要な3要素（normalize関数、スキップパターン、完了検出パターン）を明示。"
+    },
+    {
+      "finding_id": "F1-008",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "action_taken": "gh issue edit --add-label bugでbugラベルを付与。"
+    },
+    {
+      "finding_id": "F1-009",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "action_taken": "事象セクションの冒頭に事象間の因果関係を注記として追加。事象1と事象2がalternate screen問題に共通起因すること、事象3が暫定対策の副作用であることを明記。事象3の説明にも因果関係を追記。"
+    }
+  ],
+  "summary": {
+    "applied_count": 9,
+    "skipped_count": 0,
+    "partial_count": 0
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "issue_number": 565,
+  "stage": 4,
+  "applied_findings": [
+    {
+      "finding_id": "F3-001",
+      "severity": "must_fix",
+      "status": "applied",
+      "action_taken": "必須1「Copilot用TuiAccumulator対応」セクションに「呼び出し分岐の設計」サブセクションを追加。accumulateTuiContent()にcliToolIdパラメータを追加する方式を推奨として明記し、response-poller.ts L605-608の改修が必要であることを記載した。"
+    },
+    {
+      "finding_id": "F3-002",
+      "severity": "must_fix",
+      "status": "applied",
+      "action_taken": "影響範囲セクションのresponse-poller.tsの説明に、isFullScreenTuiを共通フラグとして維持しつつCopilot固有ロジックはcliToolId === 'copilot'で個別分岐する方針を追加。L684のポーリング停止抑制がCopilot固有の理由であることとOpenCodeへの影響確認の必要性を記載した。受け入れ条件にisFullScreenTuiとCopilot固有分岐の設計確認項目を追加した。"
+    },
+    {
+      "finding_id": "F3-003",
+      "severity": "should_fix",
+      "status": "applied",
+      "action_taken": "必須3「メッセージ送信のマルチラインモード対策の安定化」の遅延値定数化を具体化。COPILOT_SEND_ENTER_DELAY_MS定数を定義し、send/route.ts、terminal/route.ts、copilot.ts L278の3箇所全てで統一参照する設計を明記した。影響範囲にcopilot.tsを追加した。"
+    },
+    {
+      "finding_id": "F3-004",
+      "severity": "should_fix",
+      "status": "applied",
+      "action_taken": "受け入れ条件に3項目を追加: (1) Copilot用TuiAccumulatorのユニットテスト追加、(2) 既存OpenCode用テストの非破壊確認、(3) cleanCopilotResponseのユニットテスト追加。影響範囲にテストファイル(response-poller-tui-accumulator.test.ts)を追加した。"
+    },
+    {
+      "finding_id": "F3-005",
+      "severity": "should_fix",
+      "status": "applied",
+      "action_taken": "推奨4「Copilotレスポンス完了検出」に検討事項を追加。(A) プロンプトベース完了検出で十分か、(B) 独自完了検出が必要かの判断基準を記載。TuiAccumulator蓄積コンテンツの利用可否で判断する方針を明記した。"
+    },
+    {
+      "finding_id": "F3-006",
+      "severity": "should_fix",
+      "status": "applied",
+      "action_taken": "必須2「TUI向けプロンプト重複防止」にパフォーマンス考慮セクションを追加。Map<pollerKey, string>によるインメモリキャッシュを第一段階、キャッシュミス時のみDBクエリする2層方式を記載。chat-db.tsへのハッシュカラム追加は不要と明記した。"
+    },
+    {
+      "finding_id": "F3-007",
+      "severity": "should_fix",
+      "status": "applied",
+      "action_taken": "必須3に「メッセージ送信パスの統一方針」サブセクションを追加。(A) copilot.tsのsendMessage()修正方式を優先検討、(B) send/route.tsインライン実装を正とする方式を代替案として記載。長期的にはcli-tools層Strategy統合の方針も明記した。影響範囲にsend/route.tsの二重実装統一を追記した。"
+    },
+    {
+      "finding_id": "F3-008",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "action_taken": "受け入れ条件にcleanCopilotResponseのユニットテスト追加項目を追加（TUI装飾除去、ステータスバーフィルタリング、正常レスポンス保持の検証）。F3-004の対応と統合して記載した。"
+    },
+    {
+      "finding_id": "F3-009",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "action_taken": "影響範囲セクションのresponse-extractor.tsの説明を追加。extractResponse() L518のプロンプト検出スキップ条件にcopilotを含めるかの判断が必要であること、L344の早期プロンプト検出との関係を記載した。"
+    },
+    {
+      "finding_id": "F3-010",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "action_taken": "レビュー履歴のStage 3セクションにCLAUDE.md更新を本Issue完了後に対応する旨を記載。Issue本文への個別セクション追加は本Issueのスコープ外のため省略した。"
+    }
+  ],
+  "summary": {
+    "applied_count": 10,
+    "skipped_count": 0,
+    "partial_count": 0
+  }
+}

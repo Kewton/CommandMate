@@ -1,0 +1,85 @@
+{
+  "issue_number": 565,
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "title": "extractCopilotContentLines と cleanCopilotResponse の正規化ロジック重複（SRP/DRY違反）",
+      "description": "設計方針書セクション4.1.1の extractCopilotContentLines 内の normalizeCopilotLine() と、セクション4.1.4の cleanCopilotResponse 内のインラインの正規化ロジック（box-drawing除去 + 連続空白正規化）が同一の処理を二重に定義している。extractCopilotContentLines は TuiAccumulator の蓄積時に使用され、cleanCopilotResponse はレスポンス保存前に使用されるが、正規化処理自体は完全に同一である。OpenCode側では normalizeOpenCodeLine が共通関数として切り出され、cleanOpenCodeResponse から再利用されている（response-cleaner.ts L209, L224）。Copilot側だけこのパターンに従っていない。",
+      "suggestion": "normalizeCopilotLine() を tui-accumulator.ts から export し、cleanCopilotResponse 内でも再利用する。OpenCodeの normalizeOpenCodeLine と同様のパターンに統一する。",
+      "affected_section": "4.1.1, 4.1.4"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "title": "accumulateTuiContent の cliToolId 分岐が開放/閉鎖原則（OCP）に反する",
+      "description": "設計方針書セクション3.1で、accumulateTuiContent 内部に cliToolId === 'copilot' の条件分岐を追加する方針となっている。現在は opencode と copilot の2ツールだが、今後 alternate screen モードを持つ新たなCLIツールが追加された場合、同関数に更に条件分岐を追加する必要がある。既存のコードベースでは getCliToolPatterns() や detectThinking() など switch 文で分岐するパターンが確立されているため統一性はあるが、tui-accumulator は蓄積ロジック自体がツール固有のため、extractContentLines 関数をツール別に登録できる仕組みが望ましい。",
+      "suggestion": "即座のリファクタリングは不要だが、設計方針書のセクション3.1に「3ツール目の alternate screen 対応時に、extractContentLines を CLIToolType をキーとしたレジストリパターンに移行する」旨の拡張メモを追記する。現状の if/else は2ツールであれば許容範囲。",
+      "affected_section": "3.1"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "title": "COPILOT_SKIP_PATTERNS が tui-accumulator と response-cleaner の両方で参照される設計上の明示が不足",
+      "description": "extractCopilotContentLines（セクション4.1.1）と cleanCopilotResponse（セクション4.1.4）の両方が COPILOT_SKIP_PATTERNS を使用してフィルタリングを行う。これ自体はDRY原則に準拠しているが、同じスキップパターンが蓄積時と保存時の2箇所で適用される理由（蓄積時はインクリメンタルなフィルタ、保存時は最終フィルタとしての防御的再適用）が設計方針書に明記されていない。将来のメンテナーが片方だけ修正して不整合が生じるリスクがある。",
+      "suggestion": "セクション4.1.4の設計判断に「COPILOT_SKIP_PATTERNS を蓄積時（Layer 2）と保存時（cleanCopilotResponse）の両方で適用する理由：蓄積時の漏れに対する防御的フィルタリング」という説明を追記する。",
+      "affected_section": "4.1.4"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "title": "resolveExtractionStartIndex の Copilot 分岐が OpenCode と同一条件に統合されているが、isFullScreenTui フラグとの整合性に懸念",
+      "description": "設計方針書セクション4.4では resolveExtractionStartIndex に cliToolId === 'opencode' || cliToolId === 'copilot' の分岐を追加する方針だが、セクション4.5の isFullScreenTui 分岐整理表では Layer 2 蓄積を isFullScreenTui で統一する方針となっている。resolveExtractionStartIndex 側だけ個別の cliToolId 列挙で分岐し、他は isFullScreenTui フラグで分岐するのは一貫性に欠ける。isFullScreenTui の判定ロジックが cliToolId === 'opencode' || cliToolId === 'copilot' であるなら、resolveExtractionStartIndex も isFullScreenTui を受け取る方がインターフェースの一貫性が高い。",
+      "suggestion": "resolveExtractionStartIndex のシグネチャを cliToolId ベースのまま維持するか、isFullScreenTui フラグベースに変更するかの方針を明確にする。現状は cliToolId を受け取っているため最低限動作するが、セクション4.5のフラグ統一方針との設計意図の齟齬を解消する注記を追加する。",
+      "affected_section": "4.4, 4.5"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "must_fix",
+      "category": "DRY",
+      "title": "送信パスの二重実装が明示的な技術的負債として管理されていない",
+      "description": "設計方針書セクション4.3.2で send/route.ts のインライン実装と copilot.ts の sendMessage() の二重実装を認容する方針(B)を採用している。理由（Issue #559のブロッキング問題）は妥当だが、この技術的負債を解消するための条件やタイムラインが設定されていない。セクション8のトレードオフ表には「二重実装が残る」と記載があるが、いつ・どのような条件で統合するかが不明確。copilot.ts の sendMessage() は現在もCLIからの呼び出しで使用される可能性があるとされているが、実際にどのパスから呼ばれているかの調査結果が記載されていない。",
+      "suggestion": "以下を設計方針書に追記する：(1) copilot.ts sendMessage() の実際の呼び出し元を特定し記載する（CLIコマンドからの利用有無）、(2) 統合の前提条件（ICLITool.sendMessage の非同期設計変更）を明記する、(3) 技術的負債チケット（Issue番号）を作成し参照する。",
+      "affected_section": "4.3.2, 8"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "title": "2層キャッシュ設計の第2層（DB参照）が未実装のまま言及されている",
+      "description": "設計方針書セクション3.2で「第2層: キャッシュミス時のみDB参照」と記載し、セクション4.2.1のコード例では「実装時にパフォーマンス影響を確認」とコメントされている。しかし、実際の isDuplicatePrompt 実装（セクション4.2.1）ではインメモリキャッシュのみで第2層のDB参照は実装されていない。第2層が不要であれば言及自体を削除し、必要であれば実装計画を明記すべき。中途半端な言及はKISS原則に反し、将来のメンテナーを混乱させる。",
+      "suggestion": "セクション3.2の第2層DB参照の記載を削除するか、「将来のオプション」として別セクションに移動する。セクション4.2.1の実装が最終形であることを明確にする。",
+      "affected_section": "3.2, 4.2.1"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "title": "COPILOT_SKIP_PATTERNS の一部パターンが実装前に追加されている",
+      "description": "設計方針書セクション4.1.2で COPILOT_SKIP_PATTERNS に多数のパターン（shortcuts表示、ナビゲーション指示、ctrl+x表示、Esc指示等）を追加する方針だが、現在の暫定実装（cli-patterns.ts L285-287）では PASTED_TEXT_PATTERN のみが定義されている。設計方針書のパターン一覧が実際のCopilot TUI出力の観察に基づくものか、推測に基づくものかが不明確。YAGNI原則の観点から、実際に問題を引き起こすパターンのみを段階的に追加する方が安全。",
+      "suggestion": "設計方針書に各パターンの根拠（実際のCopilot TUI出力例）を付記する。また、パターン追加はTDD方式で「実際の出力サンプル -> テスト作成 -> パターン追加」の順序で進める旨を明記する。",
+      "affected_section": "4.1.2"
+    },
+    {
+      "id": "DR1-008",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "title": "promptHashCache がモジュールスコープの可変状態として response-poller.ts に直接配置されている（SRP懸念）",
+      "description": "設計方針書セクション4.2.1で promptHashCache を response-poller.ts のモジュールスコープに配置する方針となっている。response-poller.ts は既にポーリング制御、レスポンス抽出、保存判定など多くの責務を持つファイルである（CLAUDE.md記載のモジュール説明でも複数責務が列挙されている）。重複防止のキャッシュ管理という新たな責務を追加すると、SRPへの準拠が更に低下する。既存の tui-accumulator.ts がモジュールスコープの Map を管理しているパターンに倣い、重複防止ロジックを独立モジュールに切り出すことが望ましい。",
+      "suggestion": "isDuplicatePrompt() と promptHashCache を独立ファイル（例: src/lib/polling/prompt-dedup.ts）に切り出す。response-poller.ts からはこの関数を呼び出すだけにする。テスタビリティも向上する。",
+      "affected_section": "4.2.1"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3,
+    "total": 8
+  }
+}

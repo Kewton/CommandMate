@@ -1,0 +1,61 @@
+{
+  "issue_number": 565,
+  "stage": 2,
+  "applied_findings": [
+    {
+      "finding_id": "DR2-001",
+      "status": "applied",
+      "action_taken": "セクション4.5を新設し、extractResponse L518の一般プロンプト検出でCopilotをスキップする設計判断と具体的なコード変更（cliToolId !== 'copilot' 条件追加）を記載"
+    },
+    {
+      "finding_id": "DR2-002",
+      "status": "applied",
+      "action_taken": "セクション4.1.4の設計判断を「二重適用」から「三箇所適用」に更新し、extractResponseループ(L414-418)のskipPatternsフィルタもCOPILOT_SKIP_PATTERNSの影響を受けることを明記。データフロー図にもskipPatternsフィルタの適用を追記"
+    },
+    {
+      "finding_id": "DR2-003",
+      "status": "applied",
+      "action_taken": "セクション4.1.3のBefore/Afterの直前に、現状の誤動作（CopilotがOpenCode用のnormalizeOpenCodeLine/OPENCODE_SKIP_PATTERNSで処理されている問題）を明記"
+    },
+    {
+      "finding_id": "DR2-004",
+      "status": "applied",
+      "action_taken": "セクション4.1.3のAfterシグネチャをセクション3.1と統一し、cliToolId: CLIToolType = 'opencode'（デフォルト値付き）に修正"
+    },
+    {
+      "finding_id": "DR2-005",
+      "status": "applied",
+      "action_taken": "セクション4.8の対応表にresponse-poller.tsの具体的な行番号（L642, L650, L661, L684, L691, L749）と各箇所の変更内容（変更なし/変更あり+内容）を追加"
+    },
+    {
+      "finding_id": "DR2-006",
+      "status": "applied",
+      "action_taken": "セクション4.2.1のコード例を修正し、isDuplicatePrompt()がcreateMessage()(L665)の前に配置されることを注記付きで明示。擬似コードにも行番号参照を追加"
+    },
+    {
+      "finding_id": "DR2-007",
+      "status": "applied",
+      "action_taken": "セクション2.2のデータフロー図の直前に、Layer番号が処理の抽象度（深さ）を表す注記を追加"
+    },
+    {
+      "finding_id": "DR2-008",
+      "status": "applied",
+      "action_taken": "セクション4.6を新設し、isCodexOrGeminiComplete条件(hasPrompt && !isThinking)をCopilotにも適用する設計判断を記載。isCopilotComplete独自関数は不要とする根拠を明記"
+    },
+    {
+      "finding_id": "DR2-009",
+      "status": "applied",
+      "action_taken": "セクション2.2のデータフロー図の引数名を key から pollerKey に修正"
+    },
+    {
+      "finding_id": "DR2-010",
+      "status": "applied",
+      "action_taken": "セクション4.7を新設し、checkForResponse()のレスポンス保存パスでgetAccumulatedContent(pollerKey)を使用してresult.responseを置換するフローを設計。データフロー図の[レスポンス保存]セクションにも蓄積コンテンツ取得フローを追記"
+    }
+  ],
+  "summary": {
+    "applied_count": 10,
+    "skipped_count": 0,
+    "partial_count": 0
+  }
+}

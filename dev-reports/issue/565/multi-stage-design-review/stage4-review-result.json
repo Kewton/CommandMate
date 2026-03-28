@@ -1,0 +1,82 @@
+{
+  "issue_number": 565,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "DR4-001",
+      "severity": "should_fix",
+      "category": "メモリ安全性",
+      "title": "TuiAccumulator蓄積バッファに上限が設定されていない",
+      "description": "tui-accumulator.tsのTuiAccumulatorStateのlinesフィールドには蓄積行数の上限が設けられていない。Copilotセッションが長時間継続した場合（例: 数時間のセッションで数千ポーリングサイクル）、state.linesが無制限に増加し、Node.jsプロセスのメモリを圧迫する可能性がある。現在のOpenCode実装でも同様の問題が潜在しているが、Copilot対応によりTuiAccumulatorを使用するツールが増えるため、リスクが顕在化する確率が上がる。",
+      "suggestion": "accumulateTuiContent()内でstate.linesの行数に上限（例: MAX_ACCUMULATED_LINES = 10000）を設け、超過した場合は古い行を破棄するリングバッファ方式またはスライス方式（state.lines = state.lines.slice(-MAX_ACCUMULATED_LINES)）を導入する。この定数はcopilot-constants.tsまたはtui-accumulator.ts内に配置する。設計方針書セクション6.2にこの対策を明記すること。",
+      "affected_section": "セクション6.2 リソースリーク対策、セクション4.1 TuiAccumulator対応"
+    },
+    {
+      "id": "DR4-002",
+      "severity": "nice_to_have",
+      "category": "ReDoS",
+      "title": "COPILOT_SELECTION_LIST_PATTERNに潜在的なReDoSリスク",
+      "description": "COPILOT_SELECTION_LIST_PATTERNの第3分岐 /to navigate.*Enter to select/ は、`.*` が貪欲マッチを行う。tmux capture-paneの出力は通常24行程度であり、各行は有限長（ターミナル幅に制限される）ため、実用上のReDoSリスクは極めて低い。ただし、設計方針書セクション4.1.2でパターン追加時のTDD方針が定められていることから、パターンの安全性ルールとして `.*` の使用を最小限にするガイドラインを追記すると防御的である。現在のパターン（SEC4-001注記あり）については実害なしと判断する。",
+      "suggestion": "cli-patterns.tsのCOPILOT_SELECTION_LIST_PATTERNの第3分岐を /to navigate[^\\n]*Enter to select/ に変更し、改行をまたがないことを明示する。また、パターン追加手順（セクション4.1.2）に「ネストした量指定子（.*.*等）の禁止」と「.* より [^\\n]* を推奨」のReDoS防止ルールを追記する。",
+      "affected_section": "セクション4.1.2 COPILOT_SKIP_PATTERNS拡張"
+    },
+    {
+      "id": "DR4-003",
+      "severity": "nice_to_have",
+      "category": "インジェクション",
+      "title": "sendKeys経由のコマンドインジェクション防御が適切に文書化されていない",
+      "description": "tmux.tsのsendKeys()はexecFile()を使用しており、シェル解釈を経由しないためシェルインジェクションは防御されている（コメントにも記載あり）。しかし、設計方針書セクション6.1では「メッセージ送信時のサニタイズは既存のsend/route.tsのバリデーションに委譲」とだけ記載されており、tmuxレイヤーでの防御（execFileによるシェル解釈回避）やsend/route.tsのCONTROL_CHAR_REGEX（制御文字チェック）による多層防御の全体像が記述されていない。",
+      "suggestion": "設計方針書セクション6.1に、以下の多層防御構造を明記する: (1) send/route.tsのCONTROL_CHAR_REGEX（\\x00-\\x1f, \\x7f）による制御文字拒否、(2) tmux.tsのexecFile()によるシェル解釈回避、(3) Copilot固有の遅延送信（COPILOT_SEND_ENTER_DELAY_MS）がインジェクション防御に影響しないことの確認。これにより将来の開発者がセキュリティ境界を正しく理解できる。",
+      "affected_section": "セクション6.1 入力バリデーション"
+    },
+    {
+      "id": "DR4-004",
+      "severity": "nice_to_have",
+      "category": "その他",
+      "title": "SHA-256ハッシュ使用の目的が明確だが、衝突時の挙動が未文書化",
+      "description": "prompt-dedup.tsでSHA-256をプロンプト重複検出に使用している。SHA-256はセキュリティ目的ではなく重複検出目的であり、この用途は適切である。ただし、極めて稀なケースとしてハッシュ衝突が発生した場合、異なるプロンプトが誤って重複として判定されスキップされる可能性がある。SHA-256の衝突確率は天文学的に低く実害はないが、設計文書として衝突時の挙動（false positive: 異なるプロンプトがスキップされる）を明記しておくと良い。",
+      "suggestion": "セクション4.2.1のisDuplicatePromptのJSDocに「SHA-256衝突時はfalse positive（異なるプロンプトがスキップされる）が発生するが、SHA-256の衝突確率は無視できるレベルであり、対策不要」とコメントを追記する。",
+      "affected_section": "セクション4.2.1 content hashベース重複チェック"
+    },
+    {
+      "id": "DR4-005",
+      "severity": "should_fix",
+      "category": "メモリ安全性",
+      "title": "promptHashCacheのサイズ監視が将来の検討事項に留まっている",
+      "description": "設計方針書セクション6.2で、promptHashCacheのメモリリーク対策として「pollerKey単位でMap.setが上書きするため同一キーの蓄積は発生せず、キー数はアクティブセッション数に比例する」と分析しており、これは正確である。しかし、stopPollingが呼ばれずにプロセスが継続するシナリオ（例: ブラウザタブを閉じたがセッション終了処理がトリガーされない場合）では、キーが残り続ける。各キーのデータサイズは小さい（64文字のhex + pollerKey文字列）ため即座にメモリ問題にはならないが、clearPromptHashCache()をsession-cleanup.tsのkillWorktreeSessionフローにも組み込むことで確実性が上がる。",
+      "suggestion": "設計方針書セクション4.2.2のキャッシュクリア箇所に、stopPolling()に加えてsession-cleanup.tsのkillWorktreeSession()内でもclearPromptHashCache()を呼び出す設計を追記する。session-cleanup.tsは既にTuiAccumulatorのクリアやポーラー停止を行う統合クリーンアップポイントであるため、promptHashCacheのクリアも同じ箇所に配置するのが自然である。",
+      "affected_section": "セクション4.2.2 キャッシュクリア、セクション6.2 リソースリーク対策"
+    },
+    {
+      "id": "DR4-006",
+      "severity": "nice_to_have",
+      "category": "OWASP",
+      "title": "蓄積コンテンツのDB保存時にXSSベクトルの考慮が未記載",
+      "description": "セクション4.7で蓄積コンテンツをDB保存し、UIに表示する流れがある。Copilot TUIの出力にはANSIエスケープシーケンスやUnicode特殊文字が含まれる。stripAnsi()でANSIコードは除去されるが、保存されたレスポンスがフロントエンドで表示される際のXSS防御については設計方針書のスコープ外（既存の表示レイヤーに委譲）である。既存のConversationPairCard等のコンポーネントがdangerouslySetInnerHTMLを使用していないことが前提となる。",
+      "suggestion": "セクション6.1に「DB保存されたレスポンスのフロントエンド表示は既存のReactコンポーネント（ConversationPairCard等）のテキストレンダリングに委譲しており、dangerouslySetInnerHTMLは使用していない」旨の前提条件を明記する。これにより将来の変更時にXSSリスクを意識できる。",
+      "affected_section": "セクション6.1 入力バリデーション"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 4,
+    "total": 6
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-565-copilot-tui-design-policy.md",
+    "src/lib/tui-accumulator.ts",
+    "src/lib/detection/cli-patterns.ts",
+    "src/lib/tmux/tmux.ts",
+    "src/app/api/worktrees/[id]/send/route.ts"
+  ],
+  "timestamp": "2026-03-28T00:00:00Z"
+}

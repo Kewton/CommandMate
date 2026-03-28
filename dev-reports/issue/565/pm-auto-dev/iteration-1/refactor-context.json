@@ -1,0 +1,27 @@
+{
+  "issue_number": 565,
+  "refactor_targets": [
+    "src/lib/tui-accumulator.ts",
+    "src/lib/response-cleaner.ts",
+    "src/lib/polling/response-poller.ts",
+    "src/lib/polling/prompt-dedup.ts",
+    "src/lib/detection/cli-patterns.ts",
+    "src/lib/response-extractor.ts",
+    "src/config/copilot-constants.ts",
+    "src/app/api/worktrees/[id]/send/route.ts",
+    "src/app/api/worktrees/[id]/terminal/route.ts",
+    "src/lib/cli-tools/copilot.ts",
+    "src/lib/session-cleanup.ts"
+  ],
+  "quality_metrics": {
+    "tests_passed": 5469,
+    "tests_failed": 0,
+    "tsc_errors": 0,
+    "lint_errors": 0
+  },
+  "improvement_goals": [
+    "コード品質の確認と改善",
+    "不要なコード重複の排除",
+    "テスト品質の向上"
+  ]
+}

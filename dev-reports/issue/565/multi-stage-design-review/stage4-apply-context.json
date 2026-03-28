@@ -1,0 +1,7 @@
+{
+  "issue_number": 565,
+  "review_result_path": "dev-reports/issue/565/multi-stage-design-review/stage4-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-565-copilot-tui-design-policy.md",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘事項対応"
+}

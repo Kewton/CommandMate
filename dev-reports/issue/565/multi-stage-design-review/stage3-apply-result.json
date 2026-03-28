@@ -1,0 +1,61 @@
+{
+  "issue_number": 565,
+  "stage": 3,
+  "applied_findings": [
+    {
+      "finding_id": "DR3-001",
+      "status": "applied",
+      "action_taken": "セクション4.7のgetAccumulatedContent()適用条件をisFullScreenTui一括条件からcliToolId === 'copilot'個別条件に修正。OpenCodeでのgetAccumulatedContent()未使用の事実と理由（過去Q&A履歴リーク問題）を明記。データフロー図（セクション2.2）とisFullScreenTui分岐表（セクション4.8）も同様に更新。Copilotでの過去Q&A履歴混入検証とトリミング戦略の実機確認計画を追記。"
+    },
+    {
+      "finding_id": "DR3-002",
+      "status": "applied",
+      "action_taken": "セクション4.4にCOPILOT_PROMPT_PATTERNの誤検出リスク（'>'や'?'が応答本文内にも出現しうる）を記載。Copilot TUI出力サンプルを用いたfindRecentUserPromptIndexの検出精度テストケース追加の検証計画を追記。誤検出頻発時の代替ブランチ（常にindex 0から開始）も選択肢として明記。"
+    },
+    {
+      "finding_id": "DR3-003",
+      "status": "applied",
+      "action_taken": "セクション4.1.3にデフォルト値'opencode'が既存テスト互換のためのものであること、本番コードではデフォルト値に依存せず常にcliToolIdを明示的に渡すコーディング規約を追記。JSDocへの意図記載も実装チェックリストに含めた。"
+    },
+    {
+      "finding_id": "DR3-004",
+      "status": "applied",
+      "action_taken": "セクション5.2にcliToolId分岐の具体的テストケース3件を追記: (1) accumulateTuiContent(key, rawOutput, 'copilot')がextractCopilotContentLinesを呼ぶ検証、(2) accumulateTuiContent(key, rawOutput, 'opencode')の明示的引数検証、(3) Copilot用テストキーでの動作確認。"
+    },
+    {
+      "finding_id": "DR3-005",
+      "status": "applied",
+      "action_taken": "セクション6.2にプロセス異常終了時のpromptHashCacheのメモリリスク評価（pollerKey上書きのため実害極低）と、resource-cleanup.tsへのサイズ監視追加を将来の検討事項として記載。"
+    },
+    {
+      "finding_id": "DR3-006",
+      "status": "applied",
+      "action_taken": "セクション4.1.2に初回リリース時のCOPILOT_SKIP_PATTERNSが最小限であることのリスク、cleanCopilotResponseの後段フィルタリング（方針B）によるリスク緩和策、初回リリース後のTUI出力サンプル収集によるパターン拡充のフォローアップ計画を追記。"
+    },
+    {
+      "finding_id": "DR3-007",
+      "status": "applied",
+      "action_taken": "セクション4.5にCopilot完了検出の2パス網羅性保証を追記。L344早期プロンプト検出とL372 isCodexOrGeminiCompleteの2パスでCOPILOT_PROMPT_PATTERNが参照されるため、いずれかで必ず検出される保証があることを明示。L518スキップの正当性根拠も補強。"
+    },
+    {
+      "finding_id": "DR3-008",
+      "status": "applied",
+      "action_taken": "セクション7.1にextractCopilotContentLinesの計算量O(n*m)を明示（n=約24行、m=パターン数）。パターン数が20個以上に増加した場合の正規表現OR結合による最適化方針を将来の検討事項として追記。"
+    },
+    {
+      "finding_id": "DR3-009",
+      "status": "applied",
+      "action_taken": "セクション4.2.1にisDuplicatePromptの汎用シグネチャ（pollerKey, content）による全ツール拡張容易性を追記。isFullScreenTui条件を外すだけで適用範囲を拡大可能であること、この拡張容易性をprompt-dedup.tsのJSDocに記載する方針を明記。"
+    },
+    {
+      "finding_id": "DR3-010",
+      "status": "applied",
+      "action_taken": "セクション5.2.1を新設し、統合テストの3段階対応方針を記載: (1) 単体テスト（必須）、(2) response-poller.test.tsへの統合テスト追加（推奨）、(3) 手動テスト手順書（フォールバック）。"
+    }
+  ],
+  "summary": {
+    "applied_count": 10,
+    "skipped_count": 0,
+    "partial_count": 0
+  }
+}
