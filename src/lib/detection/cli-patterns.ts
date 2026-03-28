@@ -4,7 +4,7 @@
  */
 
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import type { DetectPromptOptions } from './prompt-detector';
+import type { DetectPromptOptions } from './types';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('cli-patterns');

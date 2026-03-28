@@ -8,6 +8,7 @@
  */
 
 import { createHash } from 'crypto';
+import type { CLIToolType } from '@/lib/cli-tools/types';
 
 /**
  * In-memory cache: pollerKey -> SHA-256 hash of last saved prompt content.
@@ -41,4 +42,27 @@ export function isDuplicatePrompt(pollerKey: string, content: string): boolean {
  */
 export function clearPromptHashCache(pollerKey: string): void {
   promptHashCache.delete(pollerKey);
+}
+
+/**
+ * Normalize prompt content before deduplication check.
+ * For Copilot, replaces cursor position markers at line beginnings
+ * with spaces, so that prompts differing only in cursor position
+ * are treated as duplicates.
+ *
+ * For non-Copilot tools, returns content unchanged to avoid
+ * affecting their deduplication logic.
+ *
+ * Issue #571: Moved from response-poller.ts in Issue #575 module split.
+ *
+ * @param content - Raw prompt content
+ * @param cliToolId - CLI tool identifier
+ * @returns Normalized content for deduplication comparison
+ */
+export function normalizePromptForDedup(content: string, cliToolId: CLIToolType): string {
+  if (cliToolId !== 'copilot') {
+    return content;
+  }
+  // Replace cursor position markers at line start with equivalent spaces
+  return content.replace(/^[❯>]\s/gm, '  ');
 }
