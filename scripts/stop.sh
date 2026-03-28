@@ -26,8 +26,20 @@ else
     exit 1
   fi
 
+  # Cross-platform PID lookup: lsof (macOS/Linux) -> ss+fuser fallback (WSL2/Linux)
+  find_pids_by_port() {
+      local port=$1
+      if command -v lsof &>/dev/null; then
+          lsof -ti:"$port" 2>/dev/null | grep -E '^[0-9]+$' | sort -u || true
+      elif command -v ss &>/dev/null && command -v fuser &>/dev/null; then
+          fuser "$port"/tcp 2>/dev/null | tr -s ' ' '\n' | grep -E '^[0-9]+$' | sort -u || true
+      else
+          echo "WARNING: Neither lsof nor ss+fuser available. Cannot find processes by port." >&2
+      fi
+  }
+
   # Safe PID pipeline: validate numeric + deduplicate [D1-002]
-  PIDS=$(lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$' | sort -u || true)
+  PIDS=$(find_pids_by_port $PORT)
 
   if [ -n "$PIDS" ]; then
     echo "Stopping process(es) on port $PORT: $(echo $PIDS | tr '\n' ' ')"
@@ -35,7 +47,7 @@ else
 
     # SIGTERM -> SIGKILL fallback [D1-002: || true for REMAINING]
     sleep 2
-    REMAINING=$(lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$' | sort -u || true)
+    REMAINING=$(find_pids_by_port $PORT)
     if [ -n "$REMAINING" ]; then
       echo "Force killing remaining processes: $(echo $REMAINING | tr '\n' ' ')"
       echo "$REMAINING" | xargs kill -9 2>/dev/null
