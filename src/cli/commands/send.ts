@@ -18,7 +18,7 @@ export function createSendCommand(): Command {
     .description('Send a message to a worktree agent')
     .argument('<worktree-id>', 'Worktree ID')
     .argument('<message>', 'Message to send')
-    .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode)')
+    .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode, copilot)')
     .option('--auto-yes', 'Enable auto-yes before sending')
     .option('--duration <duration>', `Auto-yes duration (${ALLOWED_DURATIONS.join(', ')})`)
     .option('--stop-pattern <pattern>', 'Auto-yes stop pattern (regex)')

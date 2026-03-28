@@ -26,7 +26,7 @@ export function createCaptureCommand(): Command {
     .description('Capture current terminal output from a worktree')
     .argument('<worktree-id>', 'Worktree ID')
     .option('--json', 'JSON output (excludes fullOutput)')
-    .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode)')
+    .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode, copilot)')
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeId: string, options: CaptureOptions) => {
       try {
