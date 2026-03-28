@@ -159,6 +159,151 @@ describe('cleanCopilotResponse', () => {
     });
   });
 
+  // Issue #571: Latest response extraction — filter TUI decoration residue
+  describe('Issue #571: latest response extraction', () => {
+    it('should extract only content after the last ❯ prompt line', () => {
+      const input = [
+        '● Model changed to: gpt-5-mini (medium)',
+        '❯ このブランチを解説して',
+        '● ブランチ名、アップストリーム、直近コミット...',
+        '● Get current branch, branch -vv, recent commits, status, and remotes (shell)',
+        'git --no-pager symbolic-ref --short HEAD && echo \'--- branch -vv ---\'',
+        '17 lines...',
+        '◐ I realize I need to focus on creating a concise Japanese summary...',
+        '● 要約（簡潔）：',
+        '- 現在チェックアウト中のブランチ: develop',
+        '- 直近はマージ中心の履歴...',
+        '続けて詳しい差分・特定ブランチのコミット一覧・PR 内容の表示など対応可能です。',
+        '❯ hello',
+        'Hello! How can I help you with this repository?',
+      ].join('\n');
+
+      expect(cleanCopilotResponse(input)).toBe(
+        'Hello! How can I help you with this repository?'
+      );
+    });
+
+    it('should skip ● tool-action lines (Get, Read, Run, etc.)', () => {
+      const input = [
+        '❯ explain this code',
+        '● Read package.json',
+        '● Get current directory structure (shell)',
+        '● Here is the explanation of the code.',
+      ].join('\n');
+
+      expect(cleanCopilotResponse(input)).toBe(
+        'Here is the explanation of the code.'
+      );
+    });
+
+    it('should preserve ● lines with non-action content (actual response)', () => {
+      const input = [
+        '❯ 要約して',
+        '● 要約（簡潔）：',
+        '- ポイント1: テスト実装',
+        '- ポイント2: リファクタリング',
+      ].join('\n');
+
+      expect(cleanCopilotResponse(input)).toBe(
+        '要約（簡潔）：\n- ポイント1: テスト実装\n- ポイント2: リファクタリング'
+      );
+    });
+
+    it('should skip ◐◑◒◓ thinking indicator lines', () => {
+      const input = [
+        '❯ fix the bug',
+        '◐ Analyzing the code...',
+        '◑ Still thinking...',
+        '● The bug is on line 42.',
+      ].join('\n');
+
+      expect(cleanCopilotResponse(input)).toBe('The bug is on line 42.');
+    });
+
+    it('should skip "N lines..." fold markers', () => {
+      const input = [
+        '❯ show git log',
+        '17 lines...',
+        '3 lines...',
+        'Here is the summary of recent commits.',
+      ].join('\n');
+
+      expect(cleanCopilotResponse(input)).toBe(
+        'Here is the summary of recent commits.'
+      );
+    });
+
+    it('should skip shell command output lines', () => {
+      const input = [
+        '❯ check the branch',
+        'git --no-pager symbolic-ref --short HEAD',
+        'npm run test:unit',
+        'The current branch is develop.',
+      ].join('\n');
+
+      expect(cleanCopilotResponse(input)).toBe(
+        'The current branch is develop.'
+      );
+    });
+
+    it('should skip ● Model changed to: lines', () => {
+      const input = [
+        '● Model changed to: gpt-5-mini (medium)',
+        '❯ hello',
+        'Hi there!',
+      ].join('\n');
+
+      expect(cleanCopilotResponse(input)).toBe('Hi there!');
+    });
+
+    it('should skip ❯ prompt lines that leak through after extraction', () => {
+      const input = [
+        '❯ first question',
+        'First answer.',
+        '❯ second question',
+        'Second answer.',
+        '❯',  // empty prompt at end
+      ].join('\n');
+
+      expect(cleanCopilotResponse(input)).toBe('Second answer.');
+    });
+
+    it('should handle content with no ❯ prompt (fallback to full content)', () => {
+      const input = [
+        'This is content without any prompt marker.',
+        'It should be returned as-is.',
+      ].join('\n');
+
+      expect(cleanCopilotResponse(input)).toBe(
+        'This is content without any prompt marker.\nIt should be returned as-is.'
+      );
+    });
+
+    it('should handle the full real-world example from the issue', () => {
+      const input = [
+        '● Model changed to: gpt-5-mini (medium)',
+        '❯ このブランチを解説して',
+        '● ブランチ名、アップストリーム、直近コミット...',
+        '● Get current branch, branch -vv, recent commits, status, and remotes (shell)',
+        'git --no-pager symbolic-ref --short HEAD && echo \'--- branch -vv ---\'',
+        '17 lines...',
+        '◐ I realize I need to focus on creating a concise Japanese summary...',
+        '● 要約（簡潔）：',
+        '- 現在チェックアウト中のブランチ: develop',
+        '- 直近はマージ中心の履歴...',
+        '続けて詳しい差分・特定ブランチのコミット一覧・PR 内容の表示など対応可能です。',
+        '❯ hello',
+        '◐ thinking about what to say...',
+        '● Hello! How can I help you with this repository?',
+        'Feel free to ask about code, branches, or anything else.',
+      ].join('\n');
+
+      expect(cleanCopilotResponse(input)).toBe(
+        'Hello! How can I help you with this repository?\nFeel free to ask about code, branches, or anything else.'
+      );
+    });
+  });
+
   // Issue #571: New COPILOT_SKIP_PATTERNS for disclaimer, init message, environment info
   describe('Issue #571: COPILOT_SKIP_PATTERNS additions', () => {
     it('should skip Copilot disclaimer text', () => {

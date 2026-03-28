@@ -154,26 +154,129 @@ export function cleanGeminiResponse(response: string): string {
 }
 
 /**
- * Clean Copilot response by removing TUI artifacts and normalizing content.
+ * Copilot tool-action pattern: ● followed by English tool/action keywords.
+ * These lines represent Copilot's internal tool calls (shell, file reads, etc.)
+ * and should be filtered from saved responses.
+ * Does NOT match ● followed by non-action text (e.g., Japanese response content).
+ *
+ * Issue #571: Distinguish tool actions from actual response content starting with ●
+ */
+const COPILOT_TOOL_ACTION_PATTERN = /^●\s+(?:Get |Read |Run |Search |Write |Delete |Edit |List |Create |Check |Fetch |Map |Explore |Execute |Find |Install |Update |Open |Close |Copy |Move |Rename |Set |Test |Build |Deploy |Start |Stop |Restart |Kill |Call |Send |Upload |Download |Compile |Analyze |Scan |Apply |Revert |Reset |Push |Pull |Clone |Merge |Commit |Checkout |Branch |Tag |Diff |Log |Show |Status |Init |Config |Add |Remove |Index |Query |Connect |Disconnect |Ping |Trace |Debug |Validate |Verify |Inspect |Monitor |Watch |Clean |Purge |Flush |Load |Save |Export |Import |Format |Lint |Parse |Generate |Transform |Convert |Migrate |Upgrade |Patch |Enable |Disable |Grant |Revoke |Approve |Deny |Lock |Unlock |Mount |Unmount |Attach |Detach |Register |Unregister |Subscribe |Unsubscribe |Publish |Unpublish |Encrypt |Decrypt |Sign |Hash |Encode |Decode |Compress |Decompress |Archive |Extract |Backup |Restore |Dump |Model changed to:)/;
+
+/**
+ * Pattern for "N lines..." fold markers in Copilot TUI output.
+ * These indicate collapsed command output.
+ */
+const COPILOT_FOLD_MARKER_PATTERN = /^\d+\s+lines\.\.\.$/;
+
+/**
+ * Pattern for Copilot thinking indicator characters (◐◑◒◓).
+ */
+const COPILOT_THINKING_INDICATOR_PATTERN = /^[◐◑◒◓]/;
+
+/**
+ * Pattern for shell command output lines in Copilot TUI.
+ * Matches common command prefixes that appear in tool call output.
+ */
+const COPILOT_COMMAND_OUTPUT_PATTERN = /^(?:git\s+--no-pager|git\s+(?:log|diff|show|status|branch|remote|fetch|pull|push|merge|rebase|checkout|reset|stash|tag|config|clone|init|add|commit|rm|mv|bisect|grep|ls-files|rev-parse|describe|shortlog|blame|reflog|cherry-pick|revert|submodule|worktree)\b|npm\s+|npx\s+|node\s+|yarn\s+|pnpm\s+|cargo\s+|pip\s+|python\s+|ruby\s+|go\s+|rustc\s+|make\s+|cmake\s+|docker\s+|kubectl\s+|aws\s+|gcloud\s+|az\s+|terraform\s+|ansible\s+|curl\s+|wget\s+|ssh\s+|scp\s+|rsync\s+|find\s+|grep\s+|sed\s+|awk\s+|cat\s+|ls\s+|cd\s+|mkdir\s+|rm\s+|cp\s+|mv\s+|chmod\s+|chown\s+|echo\s+)/;
+
+/**
+ * Clean Copilot response by removing TUI artifacts, extracting only the latest
+ * response, and normalizing content.
+ *
  * Issue #565: Full implementation using normalizeCopilotLine (DRY with tui-accumulator)
  * and COPILOT_SKIP_PATTERNS for filtering.
  *
+ * Issue #571: Added "latest response only" extraction logic:
+ * 1. Find the last ❯ prompt line — content after it is the latest response
+ * 2. Filter ● tool-action lines (shell, Read, Get, etc.) while preserving ● response content
+ * 3. Filter ◐◑◒◓ thinking indicators
+ * 4. Filter "N lines..." fold markers
+ * 5. Filter shell command output lines
+ *
  * @param response - Raw Copilot response
- * @returns Cleaned response
+ * @returns Cleaned response (only the latest response)
  */
 export function cleanCopilotResponse(response: string): string {
   const strippedResponse = stripAnsi(response);
   const lines = strippedResponse.split('\n');
+
+  // Step 1: Find the last ❯ prompt line with user input (not empty prompt)
+  // This marks the boundary — everything after is the latest response
+  let lastUserPromptIndex = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const normalized = normalizeCopilotLine(lines[i]);
+    if (!normalized) continue;
+    // Match ❯ followed by actual content (user input)
+    if (/^❯\s+\S/.test(normalized)) {
+      lastUserPromptIndex = i;
+      break;
+    }
+  }
+
+  // Extract lines after the last user prompt
+  const startIndex = lastUserPromptIndex >= 0 ? lastUserPromptIndex + 1 : 0;
+  const responseLines = lines.slice(startIndex);
+
   const cleanedLines: string[] = [];
 
-  for (const line of lines) {
+  // Track block-level skip state for multi-line constructs
+  let inThinkingBlock = false;
+  let inCommandOutputBlock = false;
+
+  for (const line of responseLines) {
     // Normalize using the same function as TUI accumulator (DRY)
     const normalized = normalizeCopilotLine(line);
     if (!normalized) continue;
 
-    // Skip lines matching any Copilot skip pattern
+    // Skip lines matching any Copilot skip pattern (existing patterns)
     const shouldSkip = COPILOT_SKIP_PATTERNS.some(pattern => pattern.test(normalized));
     if (shouldSkip) continue;
+
+    // Issue #571: Skip ● tool-action lines (but preserve ● response content)
+    if (COPILOT_TOOL_ACTION_PATTERN.test(normalized)) {
+      inCommandOutputBlock = true;
+      inThinkingBlock = false;
+      continue;
+    }
+
+    // Issue #571: Skip ◐◑◒◓ thinking indicator lines and their continuation lines
+    if (COPILOT_THINKING_INDICATOR_PATTERN.test(normalized)) {
+      inThinkingBlock = true;
+      inCommandOutputBlock = false;
+      continue;
+    }
+
+    // Issue #571: Skip "N lines..." fold markers
+    if (COPILOT_FOLD_MARKER_PATTERN.test(normalized)) continue;
+
+    // Issue #571: Skip shell command output lines
+    if (COPILOT_COMMAND_OUTPUT_PATTERN.test(normalized)) continue;
+
+    // Skip empty ❯ prompt lines and ❯ with content (previous prompts that leaked through)
+    if (/^❯\s*/.test(normalized)) continue;
+
+    // Issue #571: Skip │ and └ prefixed lines (command output block content)
+    if (/^[│└]/.test(normalized)) {
+      continue;
+    }
+
+    // Detect new content block: ● starts a new response block, reset skip states
+    if (/^●/.test(normalized)) {
+      inThinkingBlock = false;
+      inCommandOutputBlock = false;
+      // This is a ● line that didn't match COPILOT_TOOL_ACTION_PATTERN,
+      // so it's actual response content — keep it, but remove the ● prefix
+      cleanedLines.push(normalized.replace(/^●\s*/, ''));
+      continue;
+    }
+
+    // If we're in a thinking or command output block, skip continuation lines
+    // until a new block marker (● or ❯) is found.
+    // Note: TUI accumulator normalizes lines (trim), so indentation is lost.
+    if (inThinkingBlock || inCommandOutputBlock) {
+      continue;
+    }
 
     cleanedLines.push(normalized);
   }
