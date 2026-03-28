@@ -159,12 +159,13 @@ tests/
 | `src/lib/session/claude-session.ts` | Claude CLIセッション管理・ヘルスチェック |
 | `src/lib/detection/status-detector.ts` | セッションステータス検出、SELECTION_LIST_REASONS Set定数（Issue #547） |
 | `src/lib/session/worktree-status-helper.ts` | Worktreeセッションステータス一括検出 |
-| `src/lib/polling/response-poller.ts` | レスポンスポーリング・ポーリング制御バレルファイル（Issue #479） |
-| `src/lib/response-extractor.ts` | レスポンス抽出ロジック（resolveExtractionStartIndex, isOpenCodeComplete）（Issue #479） |
-| `src/lib/response-cleaner.ts` | CLIツール別レスポンスクリーニング（cleanClaudeResponse等）（Issue #479） |
-| `src/lib/tui-accumulator.ts` | TUIアキュムレータ状態管理（Issue #479） |
+| `src/lib/polling/response-poller.ts` | レスポンスポーリング・ポーリング制御バレルファイル（Issue #479）、重複防止(prompt-dedup統合)・蓄積コンテンツ保存機能（Issue #565） |
+| `src/lib/polling/prompt-dedup.ts` | プロンプト重複検出（SHA-256ハッシュキャッシュ）（Issue #565） |
+| `src/lib/response-extractor.ts` | レスポンス抽出ロジック（resolveExtractionStartIndex, isOpenCodeComplete）（Issue #479）、Copilot分岐追加（Issue #565） |
+| `src/lib/response-cleaner.ts` | CLIツール別レスポンスクリーニング（cleanClaudeResponse, cleanCopilotResponse等）（Issue #479, #565） |
+| `src/lib/tui-accumulator.ts` | TUIアキュムレータ状態管理（Issue #479）、extractCopilotContentLines/normalizeCopilotLine追加（Issue #565） |
 | `src/lib/detection/prompt-detector.ts` | プロンプト検出（2パス方式） |
-| `src/lib/detection/cli-patterns.ts` | CLIツール別パターン定義、COPILOT_SELECTION_LIST_PATTERN（Issue #547） |
+| `src/lib/detection/cli-patterns.ts` | CLIツール別パターン定義、COPILOT_SELECTION_LIST_PATTERN（Issue #547）、COPILOT_SKIP_PATTERNS拡張（Issue #565） |
 | `src/lib/polling/auto-yes-manager.ts` | Auto-Yes状態管理・バレルファイル・複合キーヘルパー（Issue #479, #525） |
 | `src/lib/auto-yes-poller.ts` | Auto-Yesポーリングループ本体・複合キー対応（Issue #479, #525） |
 | `src/lib/auto-yes-state.ts` | Auto-Yes状態管理・複合キーヘルパー（Issue #479, #525） |
@@ -173,6 +174,7 @@ tests/
 | `src/config/html-extensions.ts` | HTML拡張子定義・判定関数・SandboxLevel型・SANDBOX_ATTRIBUTES（Issue #490） |
 | `src/config/file-polling-config.ts` | ファイルポーリング定数（FILE_TREE_POLL_INTERVAL_MS, FILE_CONTENT_POLL_INTERVAL_MS）（Issue #469） |
 | `src/config/timer-constants.ts` | タイマー定数定義（TIMER_DELAYS, MAX_TIMERS_PER_WORKTREE, TIMER_STATUS, isValidTimerDelay）（Issue #534） |
+| `src/config/copilot-constants.ts` | Copilot CLIタイミング定数（COPILOT_SEND_ENTER_DELAY_MS, COPILOT_TEXT_INPUT_DELAY_MS）（Issue #565） |
 | `src/lib/detection/prompt-key.ts` | promptKey重複排除ユーティリティ |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
 | `src/lib/cli-tools/types.ts` | CLIツール型定義（IImageCapableCLITool/isImageCapableCLITool追加）（Issue #474）（Issue #545: copilot追加、6ツール対応） |

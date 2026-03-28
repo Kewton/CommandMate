@@ -1,0 +1,51 @@
+{
+  "issue_number": 565,
+  "stage": 1,
+  "applied_findings": [
+    {
+      "finding_id": "DR1-001",
+      "status": "applied",
+      "action_taken": "normalizeCopilotLine を export 関数に変更し、cleanCopilotResponse から import して再利用する設計に修正。OpenCode の normalizeOpenCodeLine パターンと統一。セクション4.1.1, 4.1.4 を更新。"
+    },
+    {
+      "finding_id": "DR1-002",
+      "status": "applied",
+      "action_taken": "セクション3.1に拡張メモを追記。3ツール目の alternate screen 対応時に extractContentLines を CLIToolType をキーとしたレジストリパターンに移行する方針を明記。"
+    },
+    {
+      "finding_id": "DR1-003",
+      "status": "applied",
+      "action_taken": "セクション4.1.4に設計判断注記を追加。COPILOT_SKIP_PATTERNS を蓄積時（Layer 2）と保存時（cleanCopilotResponse）の両方で適用する理由（インクリメンタルフィルタ vs 防御的フィルタ）を明記。"
+    },
+    {
+      "finding_id": "DR1-004",
+      "status": "applied",
+      "action_taken": "セクション4.4に設計意図の注記を追加。resolveExtractionStartIndex が cliToolId ベースを維持する理由と、isFullScreenTui の判定条件との同一性を保つ必要がある点を明記。"
+    },
+    {
+      "finding_id": "DR1-005",
+      "status": "applied",
+      "action_taken": "セクション4.3.2に技術的負債管理セクションを追加。(1) copilot.ts sendMessage() の実際の呼び出し元を特定・記載、(2) 統合の前提条件（ICLITool.sendMessage 非同期設計変更）を明記、(3) 技術的負債チケット作成TODOを追記。トレードオフ表にも負債管理参照を追加。"
+    },
+    {
+      "finding_id": "DR1-006",
+      "status": "applied",
+      "action_taken": "セクション3.2のタイトルを「インメモリキャッシュ」に変更し、第2層DB参照の記載を削除。インメモリのみが最終形であることを設計判断として明記。データフロー図からも第2層を削除。"
+    },
+    {
+      "finding_id": "DR1-007",
+      "status": "applied",
+      "action_taken": "セクション4.1.2にTDD方式での段階的パターン追加方針を明記。未確認パターンをコメントアウトし、実機確認済みパターンのみを有効化する設計に変更。パターン追加手順を追記。"
+    },
+    {
+      "finding_id": "DR1-008",
+      "status": "applied",
+      "action_taken": "isDuplicatePrompt と promptHashCache を src/lib/polling/prompt-dedup.ts 独立モジュールに切り出す設計に変更。セクション3.2, 4.2.1, 4.2.2, 影響範囲、テストファイル一覧を全て更新。response-poller.ts からは関数呼び出しのみとする。"
+    }
+  ],
+  "summary": {
+    "applied_count": 8,
+    "skipped_count": 0,
+    "partial_count": 0
+  }
+}

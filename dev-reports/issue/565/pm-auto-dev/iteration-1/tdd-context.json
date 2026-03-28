@@ -1,0 +1,35 @@
+{
+  "issue_number": 565,
+  "title": "Copilot CLI（TUI/alternate screen）対応: レスポンス保存・重複・メッセージ送信の問題",
+  "acceptance_criteria": [
+    "Copilotの応答内容がMessage History���正しく保存されること（ステータスバー文字列ではなく本文が保存される）",
+    "同一promptメッセージの重複保存が発生��ない��と（content hashベースで一意化）",
+    "78文字超のメッセージがCopilotに正常に送信されること",
+    "暫定対策の副作用（isFullScreenTuiによる重複悪化）が解消���れていること",
+    "cleanCopilotResponseがCopilot固有のTUI装飾を正��く除去すること",
+    "Copilot用TuiAccumulatorパターン（スキップ・完了検出）が定義され、コンテンツ抽出が機能すること",
+    "200ms遅延値が定数化されconfigに配置され、3箇所で統一参照されていること",
+    "Copilot用TuiAccumulatorのユニットテストが追加されていること",
+    "既存のOpenCode用TuiAccumulatorテストが壊れないこと",
+    "cleanCopilotResponseのユニットテストが追加されていること",
+    "isFullScreenTuiの共通フラグとCopilot固有ロジックの分岐が適切に設計されていること",
+    "送信パス統一後、terminal/route.tsとsend/route.tsで同じ方式が適用されていること"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: 遅延定数ファイル作成 (src/config/copilot-constants.ts)",
+    "Task 1.2: COPILOT_SKIP_PATTERNS拡張 (cli-patterns.ts)",
+    "Task 1.3: prompt-dedup.ts独立モジュール作成",
+    "Task 2.1: extractCopilotContentLines/normalizeCopilotLine実装 (tui-accumulator.ts)",
+    "Task 2.2: accumulateTuiContentシグネチャ拡張",
+    "Task 3.1: cleanCopilotResponse本実装 (response-cleaner.ts)",
+    "Task 3.2: resolveExtractionStartIndex Copilot分��追加 (response-extractor.ts)",
+    "Task 4.1: response-poller.ts accumulateTuiContent呼び出し修正",
+    "Task 4.2: プロンプト重複防止統合 (response-poller.ts)",
+    "Task 4.3: Copilot蓄積コ���テンツ→レスポンス保存フ���ー",
+    "Task 5.1-5.3: send/route.ts, terminal/route.ts, copilot.ts遅延定数化",
+    "Task 6.1-6.2: stopPolling/session-cleanup promptHashCacheクリア"
+  ],
+  "design_doc_path": "dev-reports/design/issue-565-copilot-tui-design-policy.md",
+  "work_plan_path": "dev-reports/issue/565/work-plan.md",
+  "target_coverage": 80
+}

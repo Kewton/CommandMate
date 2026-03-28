@@ -1,0 +1,112 @@
+{
+  "issue_number": 565,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "review_date": "2026-03-28",
+  "previous_findings_status": [
+    {
+      "finding_id": "F3-001",
+      "status": "resolved",
+      "note": "必須1にaccumulateTuiContent()のcliToolIdパラメータ追加方式が明記されている。pollerKeyからの逆引きではなくシグネチャ拡張方式（accumulateTuiContent(key, lines, cliToolId)）を推奨として記載。response-poller.ts L605-608での呼び出し改修も明記済み。"
+    },
+    {
+      "finding_id": "F3-002",
+      "status": "resolved",
+      "note": "影響範囲セクションにisFullScreenTuiを共通フラグとして維持しつつCopilot固有ロジックはcliToolId === 'copilot'で個別分岐する方針が明記されている。L684のOpenCodeへの影響確認も記載済み。受け入れ条件にも「isFullScreenTuiの共通フラグとCopilot固有ロジックの分岐が適切に設計されていること」が追加されている。"
+    },
+    {
+      "finding_id": "F3-003",
+      "status": "resolved",
+      "note": "必須3にCOPILOT_SEND_ENTER_DELAY_MS定数の定義と3箇所統一が明記されている。copilot.tsの2段階遅延（100ms + 200ms）の詳細も補足済み。"
+    },
+    {
+      "finding_id": "F3-004",
+      "status": "resolved",
+      "note": "受け入れ条件にCopilot用TuiAccumulatorのユニットテスト追加（extractCopilotContentLines、skip/normalizeパターン）と既存OpenCodeテストの非破壊確認が明記されている。"
+    },
+    {
+      "finding_id": "F3-005",
+      "status": "resolved",
+      "note": "推奨4にCopilot完了検出の判断基準（(A) hasPrompt && !isThinkingで十分か、(B) isCopilotComplete独自検出が必要か）がTuiAccumulator蓄積コンテンツの利用可否を基準として明記されている。"
+    },
+    {
+      "finding_id": "F3-006",
+      "status": "resolved",
+      "note": "必須2にインメモリキャッシュ（Map<pollerKey, string>）を第一段階、キャッシュミス時のみDBクエリする2層方式が明記されている。chat-db.tsへのハッシュカラム追加不要も記載済み。"
+    },
+    {
+      "finding_id": "F3-007",
+      "status": "resolved",
+      "note": "必須3にメッセージ送信パスの統一方針（(A) sendMessage()修正優先、(B) インライン実装正として非推奨化）が明記されている。長期的なStrategy統合の方向性も記載済み。"
+    },
+    {
+      "finding_id": "F3-008",
+      "status": "resolved",
+      "note": "受け入れ条件にcleanCopilotResponseのユニットテスト追加（TUI装飾除去、ステータスバーフィルタリング、正常レスポンス保持）が明記されている。"
+    },
+    {
+      "finding_id": "F3-009",
+      "status": "resolved",
+      "note": "影響範囲のresponse-poller.tsの項にextractResponse() L518のプロンプト検出スキップ条件にcopilotを含めるかの判断が必要である旨が記載されている。"
+    },
+    {
+      "finding_id": "F3-010",
+      "status": "resolved",
+      "note": "CLAUDE.md更新はIssue完了後に対応とし、Issue本文への記載は省略（レビュー履歴に記録済み）。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F7-001",
+      "severity": "should_fix",
+      "category": "波及効果",
+      "title": "resolveExtractionStartIndex()にCopilot用ブランチが存在せず、extractResponse内でCopilotのレスポンス抽出開始位置が不適切になる可能性",
+      "description": "response-extractor.ts のresolveExtractionStartIndex()は5分岐の決定木を持つが、copilotに対するブランチが存在しない。OpenCodeはBranch 2a（cliToolId === 'opencode'）で専用処理されるが、CopilotはBranch 1（bufferWasReset）またはBranch 4（通常ケース）に到達する。Copilotもalternate screenモードで固定バッファサイズのため、OpenCodeと同様にlastCapturedLineが無意味になる場合がある。しかしCopilotはfindRecentUserPromptIndex内でOpenCodeのようなBuild marker探索ロジックを持たないため、Branch 1に到達してもwindowSize=40での一般プロンプトパターン（/^[>❯]\\s+\\S/）で探索される。Copilotのプロンプト画面にこのパターンが存在するかは未検証であり、startIndex=0にフォールバックする可能性が高い。影響範囲セクションにresolveExtractionStartIndex()のCopilot対応が記載されていない。",
+      "suggestion": "影響範囲にsrc/lib/response-extractor.tsのresolveExtractionStartIndex()へのCopilot分岐追加の検討を追記する。Copilotがalternate screenで動作するため、OpenCodeのBranch 2aと同様の専用処理（CopilotのTUI構造に応じたユーザープロンプト検出）が必要かどうかを実装時に検証する方針を記載する。",
+      "affected_section": "## 影響範囲"
+    },
+    {
+      "id": "F7-002",
+      "severity": "should_fix",
+      "category": "互換性",
+      "title": "extractResponse内のCopilotレスポンス抽出ループにCopilot固有の終了条件（endIndex break）が未定義",
+      "description": "extractResponse() L390-421のレスポンス抽出ループでは、codex、gemini、opencodeにそれぞれ固有の終了条件（プロンプト行やステータスバーパターンでbreak）が定義されているが、copilotには終了条件がない。copilotはisCodexOrGeminiComplete（L372）の条件でisComplete=trueになるため抽出ループに到達するが、ループ内でCopilotのTUI要素（ステータスバー「shortcuts...」、セパレーター「────」等）が終了条件なしにresponseに含まれてしまう。cleanCopilotResponse()で後からフィルタリングする方針であれば問題ないが、extractResponse段階でのノイズ混入がcleanCopilotResponseの実装負荷を上げる。Issueにこの設計判断が明記されていない。",
+      "suggestion": "必須1または影響範囲に、extractResponseのレスポンス抽出ループでCopilot固有の終了条件を追加するか、cleanCopilotResponseでのフィルタリングに委ねるかの設計判断を明記する。後者の場合、cleanCopilotResponseがステータスバーやショートカット表示を確実に除去できるパターン定義が必要。",
+      "affected_section": "## 本対応で必要なこと > 必須 > 1. Copilot用TuiAccumulator対応"
+    },
+    {
+      "id": "F7-003",
+      "severity": "nice_to_have",
+      "category": "テスト",
+      "title": "メッセージ送信パス統一方針(A)/(B)のどちらを選択しても既存のintegrationテストへの影響が未評価",
+      "description": "必須3でメッセージ送信パスの統一方針として(A) copilot.ts sendMessage()修正、(B) send/route.tsインライン実装を正とする、の2案が記載されている。(A)を選択した場合、send/route.tsのCopilot分岐コードが削除され、terminal/route.tsとの整合性を保つ必要がある。(B)を選択した場合、copilot.tsのsendMessage()が非推奨になるが、他の箇所（例えば将来のCLIコマンド）からcopilot.tsのsendMessage()を呼び出す可能性への考慮がない。いずれの方針でも、既存のintegrationテスト（もし存在する場合）への影響確認が必要だが、テスト計画に含まれていない。",
+      "suggestion": "受け入れ条件または必須3に、送信パス統一後にterminal/route.tsのCopilotコマンド送信経路にも同じ方式が適用されていることの確認を追加する。",
+      "affected_section": "## 本対応で必要なこと > 必須 > 3. メッセージ送信のマルチラインモード対策の安定化"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 1,
+    "total": 3
+  },
+  "code_references": [
+    {
+      "file": "src/lib/response-extractor.ts",
+      "relevance": "resolveExtractionStartIndex()の5分岐決定木にCopilot用ブランチが存在しない。L88のOpenCode専用分岐と同等の処理がCopilotに必要かの検討対象。"
+    },
+    {
+      "file": "src/lib/polling/response-poller.ts",
+      "relevance": "extractResponse() L390-421のレスポンス抽出ループにCopilot固有の終了条件が未定義。L372のisCodexOrGeminiComplete条件でCopilotが完了判定される。"
+    },
+    {
+      "file": "src/lib/cli-tools/copilot.ts",
+      "relevance": "sendMessage()の統一方針（A/B案）選択後のterminal/route.tsとの整合性。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/terminal/route.ts",
+      "relevance": "L83-89のCopilot分岐。送信パス統一時にsend/route.tsと同じ方式が適用される必要がある。"
+    }
+  ],
+  "doc_references": []
+}

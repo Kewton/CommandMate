@@ -1,0 +1,80 @@
+{
+  "issue_number": 565,
+  "status": "passed",
+  "criteria_results": [
+    {
+      "criteria": "Copilotの応答内容がMessage Historyに正しく保存されること",
+      "status": "pass",
+      "evidence": "response-poller.ts lines 725-736: Copilot response saving uses getAccumulatedContent() from the TUI accumulator, then cleans via cleanCopilotResponse(). The accumulated content captures scrolled-away lines that extractResponse would miss. Accumulator is cleared after save for the next cycle."
+    },
+    {
+      "criteria": "同一promptメッセージの重複保存が発生しないこと",
+      "status": "pass",
+      "evidence": "prompt-dedup.ts: isDuplicatePrompt() uses SHA-256 content hashing with per-pollerKey cache. response-poller.ts line 673: isDuplicatePrompt() is called before saving prompt messages, returning early if duplicate detected. clearPromptHashCache() is called in session-cleanup.ts line 225 on session kill."
+    },
+    {
+      "criteria": "78文字超のメッセージがCopilotに正常に送信されること",
+      "status": "pass",
+      "evidence": "send/route.ts lines 255-265 and terminal/route.ts lines 84-91: Copilot messages are sent via sendKeys(sessionName, text, false) followed by a delay (COPILOT_SEND_ENTER_DELAY_MS=200ms) then sendSpecialKeys(['Enter']). This separates text input from Enter submission, avoiding the multi-line mode issue where C-m bundled with text creates a newline instead of submitting."
+    },
+    {
+      "criteria": "cleanCopilotResponseがCopilot固有のTUI装飾を正しく除去すること",
+      "status": "pass",
+      "evidence": "response-cleaner.ts lines 160-178: cleanCopilotResponse() strips ANSI codes via stripAnsi(), normalizes lines via normalizeCopilotLine() (removes box-drawing chars, normalizes whitespace), and filters lines matching COPILOT_SKIP_PATTERNS (separator, thinking/spinner, selection list, pasted text). Tests in response-cleaner-copilot.test.ts (11 test cases) all pass."
+    },
+    {
+      "criteria": "Copilot用TuiAccumulatorパターンが定義され、コンテンツ抽出が機能すること",
+      "status": "pass",
+      "evidence": "tui-accumulator.ts: extractCopilotContentLines() (lines 116-130) strips ANSI, normalizes via normalizeCopilotLine(), filters via COPILOT_SKIP_PATTERNS. accumulateTuiContent() (line 195) accepts cliToolId parameter, dispatching to extractCopilotContentLines when cliToolId='copilot'. Tests in tui-accumulator-copilot.test.ts (15 test cases) all pass."
+    },
+    {
+      "criteria": "200ms遅延値が定数化され3箇所で統一参照されていること",
+      "status": "pass",
+      "evidence": "copilot-constants.ts: COPILOT_SEND_ENTER_DELAY_MS=200 and COPILOT_TEXT_INPUT_DELAY_MS=100. COPILOT_SEND_ENTER_DELAY_MS is imported in 3 files: src/lib/cli-tools/copilot.ts, src/app/api/worktrees/[id]/send/route.ts, src/app/api/worktrees/[id]/terminal/route.ts. COPILOT_TEXT_INPUT_DELAY_MS is imported in copilot.ts."
+    },
+    {
+      "criteria": "Copilot用TuiAccumulatorのユニットテストが追加されていること",
+      "status": "pass",
+      "evidence": "tests/unit/lib/tui-accumulator-copilot.test.ts: 15 test cases covering normalizeCopilotLine (5 tests), extractCopilotContentLines (9 tests), and accumulateTuiContent with cliToolId='copilot' (4 tests including overlap detection). All pass."
+    },
+    {
+      "criteria": "既存のOpenCode用TuiAccumulatorテストが壊れないこと",
+      "status": "pass",
+      "evidence": "tests/unit/lib/response-poller-tui-accumulator.test.ts: 33 existing OpenCode TUI accumulator tests all pass. The accumulateTuiContent function defaults to 'opencode' when cliToolId is omitted, maintaining backward compatibility."
+    },
+    {
+      "criteria": "cleanCopilotResponseのユニットテストが追加されていること",
+      "status": "pass",
+      "evidence": "tests/unit/lib/response-cleaner-copilot.test.ts: 11 test cases covering clean text passthrough, ANSI stripping, empty line removal, separator/thinking/selection/pasted-text skipping, box-drawing normalization, complex mixed content, all-artifact content, and whitespace trimming. All pass."
+    },
+    {
+      "criteria": "isFullScreenTuiの共通フラグとCopilot固有ロジックの分岐が適切であること",
+      "status": "pass",
+      "evidence": "response-poller.ts line 645: isFullScreenTui = cliToolId === 'opencode' || cliToolId === 'copilot' used for line-count duplicate detection skip. Lines 613-616: TUI accumulation shared for both opencode and copilot. Lines 725-744: Copilot uses getAccumulatedContent() for saving while OpenCode does NOT (documented comment explains past Q&A history leak issue). response-extractor.ts line 88: resolveExtractionStartIndex treats copilot same as opencode."
+    },
+    {
+      "criteria": "送信パス統一後、terminal/route.tsとsend/route.tsで同じ方式が適用されていること",
+      "status": "pass",
+      "evidence": "Both send/route.ts (lines 255-265) and terminal/route.ts (lines 84-91) use the same pattern for Copilot: sendKeys(sessionName, text, false) -> delay(COPILOT_SEND_ENTER_DELAY_MS) -> sendSpecialKeys(sessionName, ['Enter']). Both import COPILOT_SEND_ENTER_DELAY_MS from the same constants module."
+    }
+  ],
+  "test_results": {
+    "unit_tests": "pass",
+    "type_check": "pass",
+    "lint": "pass",
+    "details": {
+      "unit_test_files": "281 passed (281)",
+      "unit_test_cases": "5469 passed | 7 skipped (5476) | 0 failed",
+      "typescript_errors": 0,
+      "eslint_errors": 0,
+      "new_test_files_verified": [
+        "tests/unit/config/copilot-constants.test.ts (5 tests)",
+        "tests/unit/lib/prompt-dedup.test.ts (8 tests)",
+        "tests/unit/lib/tui-accumulator-copilot.test.ts (15 tests)",
+        "tests/unit/lib/response-cleaner-copilot.test.ts (11 tests)"
+      ],
+      "existing_test_regression": "tests/unit/lib/response-poller-tui-accumulator.test.ts: 33 tests all pass (no regression)"
+    }
+  },
+  "summary": "All 11 acceptance criteria PASSED. The implementation correctly addresses the three core problems from Issue #565: (1) Copilot response saving uses TUI accumulator with overlap detection and cleanCopilotResponse for artifact removal, (2) duplicate prompt prevention via SHA-256 content hashing in prompt-dedup module with session-cleanup integration, (3) long message sending uses separated text+Enter pattern with centralized delay constants (200ms) across 3 files. Static analysis clean (0 TypeScript errors, 0 ESLint errors). All 5469 unit tests pass with 0 failures. 4 new test files with 39 total test cases provide meaningful coverage. No regression in existing OpenCode TUI accumulator tests (33 tests pass)."
+}

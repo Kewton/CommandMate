@@ -1,0 +1,148 @@
+{
+  "issue_number": 565,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_date": "2026-03-28",
+  "findings": [
+    {
+      "id": "F3-001",
+      "severity": "must_fix",
+      "category": "波及効果",
+      "title": "tui-accumulator.tsのextractTuiContentLines がOpenCode専用のnormalize/skipロジックをハードコードしており、Copilot用の分岐が未設計",
+      "description": "tui-accumulator.ts の extractTuiContentLines() は normalizeOpenCodeLine() と OPENCODE_SKIP_PATTERNS をハードコードで使用している。Issueでは「extractCopilotContentLines関数を新設」と記載しているが、accumulateTuiContent() がどちらの関数を呼び出すかの分岐メカニズム（pollerKeyからcliToolIdを逆引きする仕組み、またはaccumulateTuiContentにcliToolIdパラメータを追加する方式）が明記されていない。response-poller.ts L605-608 の accumulateTuiContent 呼び出し箇所はcliToolIdを渡しておらず、現状では Copilot のキャプチャ出力にも OpenCode の normalize/skip が適用されてしまう。",
+      "suggestion": "accumulateTuiContent() のシグネチャに cliToolId パラメータを追加するか、pollerKey のフォーマット（'worktreeId:cliToolId'）からcliToolIdを抽出する方式を明記する。Issueの「必須1. Copilot用TuiAccumulator対応」セクションに、accumulateTuiContent/extractTuiContentLines の呼び出し分岐の設計を追加すべき。",
+      "affected_section": "## 本対応で必要なこと > 必須 > 1. Copilot用TuiAccumulator対応"
+    },
+    {
+      "id": "F3-002",
+      "severity": "must_fix",
+      "category": "波及効果",
+      "title": "response-poller.ts の isFullScreenTui による4箇所の分岐がOpenCodeの既存動作にも影響するリスク",
+      "description": "response-poller.ts L637 で isFullScreenTui = cliToolId === 'opencode' || cliToolId === 'copilot' と定義されており、L642, L650, L684, L749, L777 の5箇所で使用されている。Copilot向けの変更（例: プロンプト重複防止ロジックの追加）をこの共通フラグの分岐に追加すると、OpenCodeの既存動作に意図しない副作用が生じる可能性がある。特にL684（プロンプト検出時にポーリング停止しない）は元々OpenCodeには不要だったコメントに記載の通り『Copilot: Do NOT stop polling on prompt detection』とCopilot固有の理由。",
+      "suggestion": "isFullScreenTui を共通フラグとして維持しつつ、Copilot固有のロジック（プロンプト重複防止、ポーリング継続）は cliToolId === 'copilot' で個別に分岐する設計を明記する。L684の条件は既に「Full-screen TUI tools (Copilot)」というコメントがあるが、OpenCodeに対してもポーリング停止しないことの影響を確認・記載する。",
+      "affected_section": "## 影響範囲"
+    },
+    {
+      "id": "F3-003",
+      "severity": "should_fix",
+      "category": "互換性",
+      "title": "send/route.ts と terminal/route.ts の200ms遅延がハードコードされており定数化の設計が不明確",
+      "description": "send/route.ts L262 と terminal/route.ts L88 にそれぞれ setTimeout(resolve, 200) がハードコードされている。Issueの「必須3」で「遅延値を定数化してconfig/に配置」と記載しているが、両APIルートが同じ定数を共有するのか、それぞれ独立した値にするのか、またcopilot.ts L278 にも同様の200ms遅延（sendMessage内）がある点への言及がない。3箇所の遅延値が不整合になるリスクがある。",
+      "suggestion": "config/ 配下に COPILOT_SEND_ENTER_DELAY_MS のような定数を定義し、send/route.ts, terminal/route.ts, copilot.ts の3箇所全てで参照する設計を明記する。copilot.ts の sendMessage() 内の遅延もスコープに含めるかどうかを判断する。",
+      "affected_section": "## 本対応で必要なこと > 必須 > 3. メッセージ送信のマルチラインモード対策の安定化"
+    },
+    {
+      "id": "F3-004",
+      "severity": "should_fix",
+      "category": "テスト",
+      "title": "既存テスト（response-poller-tui-accumulator.test.ts）がOpenCode専用前提で記述されており、Copilot対応時の修正範囲が未特定",
+      "description": "tests/unit/lib/response-poller-tui-accumulator.test.ts は TEST_KEY = 'test-worktree:opencode' で固定されており、extractTuiContentLines のテストケースも全てOpenCodeのTUI装飾（box-drawing, OPENCODE_SKIP_PATTERNS）を前提としている。Copilot用の extractCopilotContentLines または分岐ロジックを追加した場合、このテストファイルの更新が必要だが、Issueの受け入れ条件にテストに関する項目がない。",
+      "suggestion": "受け入れ条件に「Copilot用TuiAccumulator のユニットテストが追加されていること（extractCopilotContentLines, Copilot用skip/normalizeパターンのテスト）」を追加する。既存のOpenCodeテストが壊れないことの確認もスコープに含める。",
+      "affected_section": "## 受け入れ条件"
+    },
+    {
+      "id": "F3-005",
+      "severity": "should_fix",
+      "category": "波及効果",
+      "title": "Copilot completionの検出メカニズムが未定義のまま extractResponse 内で isCodexOrGeminiComplete に同居",
+      "description": "extractResponse() L372 で copilot は isCodexOrGeminiComplete の条件（hasPrompt && !isThinking）に含まれている。しかしCopilotはalternate screenモードで動作するため、プロンプト復帰時にはレスポンス本文が既に消えている可能性がある。Issueの「推奨4. Copilotレスポンス完了検出」で言及はあるが、現在の isCodexOrGeminiComplete に含まれている状態で正しく動作するのか、あるいは OpenCode のように独自の完了検出（isCopilotComplete）が必要なのかの判断基準が明確でない。",
+      "suggestion": "Copilotの完了検出方式について、(A) 現在のプロンプトベース完了検出で十分か、(B) OpenCodeのような独自完了検出が必要かの判断基準を記載する。alternate screenモードでは完了検出時にレスポンス本文がキャプチャに含まれない可能性があるため、TuiAccumulatorからの蓄積コンテンツを使用する方式も検討が必要。",
+      "affected_section": "## 本対応で必要なこと > 推奨 > 4. Copilotレスポンス完了検出"
+    },
+    {
+      "id": "F3-006",
+      "severity": "should_fix",
+      "category": "波及効果",
+      "title": "SHA-256ハッシュベース重複防止のDB問い合わせがポーリング頻度（2秒毎）で発生するパフォーマンス懸念",
+      "description": "Issueの「必須2」でpromptメッセージ保存前にDB上の直近メッセージとcontent SHA-256ハッシュを比較する方式が提案されている。response-poller のポーリング間隔は2秒であり、プロンプト検出時に毎回DBクエリ + SHA-256計算が発生する。単発では問題にならないが、複数worktreeが同時にCopilotセッションを実行している場合の累積負荷が未評価。",
+      "suggestion": "SHA-256計算のパフォーマンス影響は小さいが、DBクエリについてはインメモリキャッシュ（直近保存したpromptのハッシュをMap<pollerKey, string>で保持）との比較を第一段階とし、キャッシュミス時のみDBクエリする2層方式を検討する。chat-db.ts にハッシュカラムを追加するかどうかも明記する。",
+      "affected_section": "## 本対応で必要なこと > 必須 > 2. TUI向けプロンプト重複防止"
+    },
+    {
+      "id": "F3-007",
+      "severity": "should_fix",
+      "category": "互換性",
+      "title": "copilot.ts の sendMessage() と send/route.ts の Copilot 分岐でメッセージ送信ロジックが二重実装",
+      "description": "copilot.ts L241-293 の sendMessage() はwaitForPrompt + sendKeys(false) + sendSpecialKey('C-m') + detectAndResendIfPastedText というフローを持つ。一方 send/route.ts L254-264 では sendKeys(false) + setTimeout(200ms) + sendSpecialKeys(['Enter']) という異なるフローを使用し、Issue #559 のブロッキング問題の回避としてsendMessage()を迂回している。この二重実装により、どちらが正しいメッセージ送信パスか不明確であり、今回の安定化対策をどちらに適用すべきかの指針がない。",
+      "suggestion": "Issueの「必須3」に、(A) copilot.ts の sendMessage() を修正して send/route.ts から呼び出す方式、(B) send/route.ts のインライン実装を正とし copilot.ts の sendMessage() を非推奨にする方式、いずれかの方針を明記する。長期的にはcli-tools層のStrategyパターンに統合すべき。",
+      "affected_section": "## 本対応で必要なこと > 必須 > 3. メッセージ送信のマルチラインモード対策の安定化"
+    },
+    {
+      "id": "F3-008",
+      "severity": "nice_to_have",
+      "category": "テスト",
+      "title": "cleanCopilotResponse のテストが存在しない",
+      "description": "response-cleaner.ts L159-176 の cleanCopilotResponse() は現在 COPILOT_SKIP_PATTERNS（PastedTextPatternのみ）しか適用しないplaceholder実装だが、テストファイルが存在しない。本対応でCopilot固有のスキップパターンを追加した際、リグレッションを防ぐテストがない。",
+      "suggestion": "cleanCopilotResponse のユニットテストを新規作成し、Copilot TUI装飾の除去、ステータスバー文字列のフィルタリング、正常なレスポンス本文の保持を検証するテストケースを含める。",
+      "affected_section": "## 受け入れ条件"
+    },
+    {
+      "id": "F3-009",
+      "severity": "nice_to_have",
+      "category": "その他",
+      "title": "extractResponse 内の L518 で copilot がプロンプト検出スキップ対象に含まれていない",
+      "description": "extractResponse() L518 で cliToolId !== 'opencode' の条件でOpenCodeのみプロンプト検出をスキップしている。Copilotも alternate screen TUI だが、L344 の早期プロンプト検出（claude || codex || copilot）でカバーされている。ただし、L344の早期検出がfalseの場合にL518のパスに到達し、copilotでも一般プロンプト検出が実行される。これが意図的かどうか不明。",
+      "suggestion": "L518 の条件を cliToolId !== 'opencode' && cliToolId !== 'copilot' にすべきか、現状の動作で問題ないかをIssueに明記する。alternate screen TUI での一般プロンプト検出が誤検出につながる可能性を検証する。",
+      "affected_section": "## 影響範囲"
+    },
+    {
+      "id": "F3-010",
+      "severity": "nice_to_have",
+      "category": "その他",
+      "title": "CLAUDE.mdのモジュールリファレンスにtui-accumulator.tsの記載がCopilot対応を反映していない",
+      "description": "CLAUDE.md のモジュール一覧で src/lib/tui-accumulator.ts の説明は「TUIアキュムレータ状態管理（Issue #479）」のみで、Copilot対応の予定が反映されていない。本Issue完了後にドキュメント更新が必要。",
+      "suggestion": "本Issue完了後に CLAUDE.md のモジュール説明を更新し、「Copilot/OpenCode TUIアキュムレータ状態管理」に修正する。",
+      "affected_section": "## 影響範囲"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 5,
+    "nice_to_have_count": 3,
+    "total": 10
+  },
+  "code_references": [
+    {
+      "file": "src/lib/tui-accumulator.ts",
+      "relevance": "Copilot用コンテンツ蓄積パターンの追加対象。extractTuiContentLines がOpenCode専用。"
+    },
+    {
+      "file": "src/lib/polling/response-poller.ts",
+      "relevance": "isFullScreenTui フラグの5箇所の使用、checkForResponse のプロンプト保存ロジック、extractResponse のCopilot完了検出。"
+    },
+    {
+      "file": "src/lib/detection/cli-patterns.ts",
+      "relevance": "COPILOT_SKIP_PATTERNS（現在placeholder）、getCliToolPatterns のCopilotエントリ。"
+    },
+    {
+      "file": "src/lib/response-cleaner.ts",
+      "relevance": "cleanCopilotResponse（L159-176、placeholder実装）。テスト未作成。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/send/route.ts",
+      "relevance": "Copilot用200ms遅延（L262）。copilot.ts sendMessage()との二重実装。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/terminal/route.ts",
+      "relevance": "Copilot用200ms遅延（L88）。定数化対象。"
+    },
+    {
+      "file": "src/lib/cli-tools/copilot.ts",
+      "relevance": "sendMessage() 内の200ms遅延（L278）。send/route.tsとの実装重複。"
+    },
+    {
+      "file": "tests/unit/lib/response-poller-tui-accumulator.test.ts",
+      "relevance": "OpenCode専用テスト。Copilot対応時に更新必要。"
+    },
+    {
+      "file": "src/lib/response-extractor.ts",
+      "relevance": "isOpenCodeComplete のみ定義。Copilot用完了検出の追加候補。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュールリファレンス（tui-accumulator.ts の説明更新対象）"
+    }
+  ]
+}

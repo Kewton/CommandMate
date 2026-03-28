@@ -1,0 +1,67 @@
+{
+  "issue_number": 565,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_date": "2026-03-28",
+  "previous_findings_status": [
+    { "finding_id": "F1-001", "status": "resolved", "note": "事象2と根本原因セクションで「tmuxペインの表示行数分（デフォルト端末サイズでは約24行）」に修正済み。alternate screenモードの説明も補足されている。" },
+    { "finding_id": "F1-002", "status": "resolved", "note": "受け入れ条件セクションが新設され、11項目の具体的なチェックリストが定義されている。検証可能な基準が含まれている。" },
+    { "finding_id": "F1-003", "status": "resolved", "note": "必須2にSHA-256ハッシュ比較、インメモリキャッシュ2層方式、適用箇所、対象スコープが具体的に記載されている。" },
+    { "finding_id": "F1-004", "status": "resolved", "note": "必須1にcleanCopilotResponseの本実装が明示的にスコープに含まれている。COPILOT_SKIP_PATTERNSのplaceholder状態と拡充の必要性も記載済み。" },
+    { "finding_id": "F1-005", "status": "resolved", "note": "必須3に検証基準（100/200/500文字）、定数化方針（COPILOT_SEND_ENTER_DELAY_MS）、3箇所統一、テストケース策定が記載されている。" },
+    { "finding_id": "F1-006", "status": "resolved", "note": "暫定対策テーブルが「コミット7c68640eで適用済み」に更新されている。" },
+    { "finding_id": "F1-007", "status": "resolved", "note": "必須1に実装アプローチ（extractCopilotContentLines新設またはStrategy統合）、3要素（normalize、スキップパターン、完了検出）、呼び出し分岐の設計が具体的に記載されている。" },
+    { "finding_id": "F1-008", "status": "resolved", "note": "bugラベルが付与されていることをgh issue viewで確認済み。" },
+    { "finding_id": "F1-009", "status": "resolved", "note": "事象セクション冒頭に因果関係の注記が追加されている。事象3の説明にも暫定対策の副作用である旨が明記されている。" }
+  ],
+  "findings": [
+    {
+      "id": "F5-001",
+      "severity": "should_fix",
+      "category": "正確性",
+      "title": "影響範囲セクションのresponse-extractor.tsの行番号参照が実際のコードと不一致",
+      "description": "影響範囲セクションに「src/lib/response-extractor.ts -- Copilot完了検出の追加候補。extractResponse() L518のプロンプト検出スキップ条件」と記載されているが、extractResponse()関数はresponse-poller.ts L260に定義されており、L518のプロンプト検出スキップ条件もresponse-poller.ts内にある。response-extractor.tsはisOpenCodeComplete()とresolveExtractionStartIndex()のみを含む別ファイル（116行）。ファイル名とL518の行番号参照が混在しており、実装時に混乱を招く可能性がある。",
+      "suggestion": "影響範囲の該当箇所を「src/lib/response-extractor.ts」から「src/lib/polling/response-poller.ts（extractResponse内 L518）」に修正する。response-extractor.tsへの言及が必要であれば、isOpenCodeComplete()のCopilot版追加候補として別途記載する。",
+      "affected_section": "影響範囲"
+    },
+    {
+      "id": "F5-002",
+      "severity": "nice_to_have",
+      "category": "正確性",
+      "title": "copilot.ts sendMessage()内の遅延値が200msではなく、100ms + 200msの2段階である",
+      "description": "Issueの必須3で「copilot.ts L278（sendMessage内の200ms遅延）」と記載しているが、実際のcopilot.ts sendMessage()はL272で100ms遅延（テキスト入力待ち）、L278で200ms遅延（処理待ち）と2段階の遅延がある。さらにsendSpecialKey('C-m')を使用しており、send/route.tsのsendSpecialKeys(['Enter'])とは異なるキーコードを使用している。定数化の際にこの差異（C-m vs Enter、100ms+200ms vs 200ms）を考慮する必要がある。",
+      "suggestion": "必須3の遅延値定数化の説明に、copilot.tsではテキスト入力待ち（100ms）とメッセージ処理待ち（200ms）の2段階遅延があることを補足する。定数化対象がどちらの遅延か（または両方か）を明確にする。",
+      "affected_section": "本対応で必要なこと > 必須 > 3"
+    },
+    {
+      "id": "F5-003",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "影響範囲のresponse-poller.ts行番号がisFullScreenTui使用箇所として5箇所ではなく6箇所",
+      "description": "影響範囲に「isFullScreenTui: L637, 重複チェック: L642/L650/L749」と4箇所の行番号が記載されているが、実際にはL637（定義）、L642、L650、L684（プロンプト検出時ポーリング停止）、L749の5箇所がisFullScreenTuiを使用している。さらにL813にもcliToolId === 'opencode' || cliToolId === 'copilot'の条件がある。影響範囲の注記でL684には言及しているが、括弧内の行番号リストに含まれていないため不完全に見える。",
+      "suggestion": "影響範囲の行番号リストを「isFullScreenTui: L637定義, L642/L650/L749重複チェック, L684プロンプト時ポーリング停止」に整理するか、本文の注記で全箇所をカバーしている旨を明記する。",
+      "affected_section": "影響範囲"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 1,
+    "nice_to_have_count": 2,
+    "total": 3
+  },
+  "code_references": [
+    {
+      "file": "src/lib/polling/response-poller.ts",
+      "relevance": "extractResponse()関数の実際の定義場所（L260）。L518のプロンプト検出スキップ条件の所在。isFullScreenTuiの全使用箇所。"
+    },
+    {
+      "file": "src/lib/response-extractor.ts",
+      "relevance": "isOpenCodeComplete()とresolveExtractionStartIndex()のみ含む。extractResponse()は含まれない。"
+    },
+    {
+      "file": "src/lib/cli-tools/copilot.ts",
+      "relevance": "sendMessage()内のL272（100ms遅延）とL278（200ms遅延）の2段階遅延。sendSpecialKey('C-m')の使用。"
+    }
+  ],
+  "doc_references": []
+}

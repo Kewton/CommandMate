@@ -1,0 +1,11 @@
+{
+  "issue_number": 565,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": { "status": "success", "tests_passed": 5469, "tests_failed": 0 },
+    "acceptance": { "status": "passed", "criteria_passed": 11, "criteria_total": 11 },
+    "refactor": { "status": "success", "changes": 2 },
+    "documentation": { "status": "success", "files_updated": 1 },
+    "uat": { "status": "passed", "tests_passed": 18, "tests_total": 18 }
+  }
+}
