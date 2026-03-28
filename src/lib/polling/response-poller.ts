@@ -601,8 +601,8 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
     // Capture current output
     const output = await captureSessionOutput(worktreeId, cliToolId, 10000);
 
-    // Layer 2: Accumulate TUI content for OpenCode (for overlap tracking only).
-    if (cliToolId === 'opencode') {
+    // Layer 2: Accumulate TUI content for full-screen TUI tools (for overlap tracking only).
+    if (cliToolId === 'opencode' || cliToolId === 'copilot') {
       const pollerKey = getPollerKey(worktreeId, cliToolId);
       accumulateTuiContent(pollerKey, output);
     }
@@ -634,7 +634,7 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
     // The tmux pane doesn't grow (no scrollback); each response overwrites the same pane,
     // so lineCount is always approximately equal to lastCapturedLine. Skip line-based
     // duplicate detection entirely for full-screen TUIs.
-    const isFullScreenTui = cliToolId === 'opencode';
+    const isFullScreenTui = cliToolId === 'opencode' || cliToolId === 'copilot';
 
     // CRITICAL FIX: If lineCount == lastCapturedLine AND there's no in-progress message,
     // this response has already been saved. Skip to prevent duplicates.
@@ -675,7 +675,15 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
 
       updateSessionState(db, worktreeId, cliToolId, result.lineCount);
       broadcastMessage('message', { worktreeId, message });
-      stopPolling(worktreeId, cliToolId);
+
+      // Full-screen TUI tools (Copilot): Do NOT stop polling on prompt detection.
+      // In alternate screen mode, after the user answers a permission prompt (e.g. "Allow
+      // directory access"), the actual response continues in the same TUI session. If we
+      // stop polling here, the continuation response will never be saved.
+      // For non-TUI tools, stop polling as before (prompt = end of response cycle).
+      if (!isFullScreenTui) {
+        stopPolling(worktreeId, cliToolId);
+      }
 
       return true;
     }
@@ -700,6 +708,10 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
       cleanedResponse = cleanClaudeResponse(result.response);
     } else if (cliToolId === 'copilot') {
       cleanedResponse = cleanCopilotResponse(result.response);
+
+      // Clear accumulator for next response cycle (same as OpenCode)
+      const pollerKey = getPollerKey(worktreeId, cliToolId);
+      clearTuiAccumulator(pollerKey);
     } else if (cliToolId === 'opencode') {
       cleanedResponse = cleanOpenCodeResponse(result.response);
 
@@ -797,8 +809,8 @@ export function startPolling(worktreeId: string, cliToolId: CLIToolType): void {
   // Record start time
   pollingStartTimes.set(pollerKey, Date.now());
 
-  // Initialize TUI accumulator for OpenCode (Layer 2 safety net)
-  if (cliToolId === 'opencode') {
+  // Initialize TUI accumulator for full-screen TUI tools (Layer 2 safety net)
+  if (cliToolId === 'opencode' || cliToolId === 'copilot') {
     initTuiAccumulator(pollerKey);
   }
 

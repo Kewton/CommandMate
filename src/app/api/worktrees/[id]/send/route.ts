@@ -22,7 +22,7 @@ import { startPolling } from '@/lib/polling/response-poller';
 import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
 import { getGitStatus } from '@/lib/git/git-utils';
 import { isPathSafe, resolveAndValidateRealPath } from '@/lib/security/path-validator';
-import { sendKeys } from '@/lib/tmux/tmux';
+import { sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 import path from 'path';
 import { createLogger } from '@/lib/logger';
@@ -253,8 +253,14 @@ export async function POST(
         }
       } else if (cliToolId === 'copilot') {
         // Copilot: use sendKeys directly to avoid waitForPrompt blocking (#559)
+        // Copilot CLI auto-enters multi-line mode when text exceeds pane width.
+        // In multi-line mode, C-m (bundled with text) adds a newline instead of
+        // submitting. Sending Enter as a separate tmux command after a delay
+        // allows the TUI to process the text first, then accept Enter as submit.
         const sessionName = cliTool.getSessionName(params.id);
-        await sendKeys(sessionName, trimmedContent);
+        await sendKeys(sessionName, trimmedContent, false);
+        await new Promise(resolve => setTimeout(resolve, 200));
+        await sendSpecialKeys(sessionName, ['Enter']);
         invalidateCache(sessionName);
       } else {
         await cliTool.sendMessage(params.id, trimmedContent);

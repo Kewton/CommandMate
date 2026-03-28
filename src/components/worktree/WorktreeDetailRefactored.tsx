@@ -452,10 +452,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     }
   }, [displayedAgents, activeCliTab, setActiveCliTab]);
 
-  // Issue #379: Disable auto-follow for OpenCode (full-screen TUI).
-  // OpenCode renders its TUI in a fixed viewport where menus (e.g., /model, /commands)
-  // appear at the top. Auto-following new content to bottom would hide these menus.
-  const disableAutoFollow = activeCliTab === 'opencode';
+  // Issue #379: Disable auto-follow for full-screen TUI tools (OpenCode, Copilot).
+  // These tools render in alternate screen mode where menus appear at the top.
+  // Auto-following new content to bottom would hide these menus.
+  const disableAutoFollow = activeCliTab === 'opencode' || activeCliTab === 'copilot';
 
   /** Issue #368: Callback for AgentSettingsPane to update selectedAgents */
   const handleSelectedAgentsChange = useCallback((agents: CLIToolType[]) => {
