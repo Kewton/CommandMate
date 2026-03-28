@@ -72,4 +72,89 @@ describe('cleanCopilotResponse', () => {
     const input = '  \nContent line\n  ';
     expect(cleanCopilotResponse(input)).toBe('Content line');
   });
+
+  // Issue #565 追加: TUI装飾パターンのフィルタリング
+  describe('Copilot TUI decoration filtering', () => {
+    it('should skip logo/banner lines', () => {
+      const input = [
+        'GitHub Copilot v1.0.12',
+        '█ ▘▝ █',
+        '▔▔▔▔',
+        '╭─╮╭─╮',
+        '╰─╯╰─╯',
+        'Actual response content',
+      ].join('\n');
+      expect(cleanCopilotResponse(input)).toBe('Actual response content');
+    });
+
+    it('should skip status bar lines with branch and model info', () => {
+      const input = [
+        '~/share/work/github/Anvil-develop [⎇ develop] GPT-5 mini (medium)',
+        'The analysis result is:',
+        'Bug is in line 42',
+      ].join('\n');
+      expect(cleanCopilotResponse(input)).toBe('The analysis result is:\nBug is in line 42');
+    });
+
+    it('should skip operation guide lines', () => {
+      const input = [
+        'shift+tab switch mode',
+        '? for shortcuts',
+        'ctrl+q enqueue',
+        'Actual content here',
+      ].join('\n');
+      expect(cleanCopilotResponse(input)).toBe('Actual content here');
+    });
+
+    it('should skip prompt lines', () => {
+      const input = [
+        '❯ Type @ to mention files...',
+        '❯',
+        'Response text here',
+      ].join('\n');
+      expect(cleanCopilotResponse(input)).toBe('Response text here');
+    });
+
+    it('should skip tip/hint lines', () => {
+      const input = [
+        'Tip: /share Share session or research report...',
+        'Tip: /model Switch between available models',
+        'Here is the actual response',
+      ].join('\n');
+      expect(cleanCopilotResponse(input)).toBe('Here is the actual response');
+    });
+
+    it('should skip initial display text', () => {
+      const input = [
+        'Describe a task to get started.',
+        'The result of the analysis:',
+      ].join('\n');
+      expect(cleanCopilotResponse(input)).toBe('The result of the analysis:');
+    });
+
+    it('should handle complex real-world Copilot TUI output', () => {
+      const input = [
+        'GitHub Copilot v1.0.12',
+        '█ ▘▝ █',
+        '──────────────────',
+        'Describe a task to get started.',
+        'Tip: /share Share session or research report...',
+        '~/share/work/github/Anvil-develop [⎇ develop] GPT-5 mini (medium)',
+        '❯ Type @ to mention files...',
+        'shift+tab switch mode',
+        '? for shortcuts',
+        '──────────────────',
+        'Here is my analysis of the issue:',
+        '',
+        'The bug is caused by a null pointer.',
+        'I recommend fixing line 42.',
+        '',
+        '❯',
+        'shift+tab switch mode',
+      ].join('\n');
+      expect(cleanCopilotResponse(input)).toBe(
+        'Here is my analysis of the issue:\nThe bug is caused by a null pointer.\nI recommend fixing line 42.'
+      );
+    });
+  });
 });
