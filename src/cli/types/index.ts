@@ -182,13 +182,15 @@ export interface LsOptions {
   token?: string;
 }
 
-/** send command options [Issue #518] */
+/** send command options [Issue #518, #576] */
 export interface SendOptions {
   agent?: string;
   autoYes?: boolean;
   duration?: string;
   stopPattern?: string;
   token?: string;
+  /** Issue #576: AI model name for Copilot agent */
+  model?: string;
 }
 
 /** wait command options [Issue #518] */

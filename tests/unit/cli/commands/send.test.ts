@@ -105,6 +105,79 @@ describe('send command action', () => {
     expect(mockExit).toHaveBeenCalledWith(2);
   });
 
+  it('sends with --model flag for copilot', async () => {
+    mockFetchResponse({ id: 1, role: 'user', content: 'test', worktreeId: 'wt1' }, 201);
+    const { createSendCommand } = await import('../../../../src/cli/commands/send');
+    const cmd = createSendCommand();
+    await cmd.parseAsync(['node', 'send', 'wt1', 'test', '--agent', 'copilot', '--model', 'gpt-5-mini']);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/worktrees/wt1/send'),
+      expect.objectContaining({
+        body: JSON.stringify({ content: 'test', cliToolId: 'copilot', model: 'gpt-5-mini' }),
+      })
+    );
+  });
+
+  it('rejects --model without --agent copilot', async () => {
+    const { createSendCommand } = await import('../../../../src/cli/commands/send');
+    const cmd = createSendCommand();
+    await cmd.parseAsync(['node', 'send', 'wt1', 'hello', '--model', 'gpt-5-mini']);
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      expect.stringContaining('--model')
+    );
+    expect(mockExit).toHaveBeenCalledWith(2); // CONFIG_ERROR
+  });
+
+  it('rejects --model with non-copilot agent', async () => {
+    const { createSendCommand } = await import('../../../../src/cli/commands/send');
+    const cmd = createSendCommand();
+    await cmd.parseAsync(['node', 'send', 'wt1', 'hello', '--agent', 'claude', '--model', 'gpt-5-mini']);
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      expect.stringContaining('--model')
+    );
+    expect(mockExit).toHaveBeenCalledWith(2);
+  });
+
+  it('rejects --model with invalid characters', async () => {
+    const { createSendCommand } = await import('../../../../src/cli/commands/send');
+    const cmd = createSendCommand();
+    await cmd.parseAsync(['node', 'send', 'wt1', 'hello', '--agent', 'copilot', '--model', 'model; rm -rf /']);
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      expect.stringContaining('model')
+    );
+    expect(mockExit).toHaveBeenCalledWith(2);
+  });
+
+  it('rejects --model exceeding max length', async () => {
+    const { createSendCommand } = await import('../../../../src/cli/commands/send');
+    const cmd = createSendCommand();
+    const longModel = 'a'.repeat(129);
+    await cmd.parseAsync(['node', 'send', 'wt1', 'hello', '--agent', 'copilot', '--model', longModel]);
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      expect.stringContaining('model')
+    );
+    expect(mockExit).toHaveBeenCalledWith(2);
+  });
+
+  it('sends auto-yes after message when --model and --auto-yes combined', async () => {
+    // With --model, auto-yes should be enabled AFTER the send (not before)
+    const mockFn = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 201, json: () => Promise.resolve({ id: 1 }), text: () => Promise.resolve('{"id":1}') })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({}), text: () => Promise.resolve('{}') });
+    global.fetch = mockFn;
+
+    const { createSendCommand } = await import('../../../../src/cli/commands/send');
+    const cmd = createSendCommand();
+    await cmd.parseAsync(['node', 'send', 'wt1', 'test', '--agent', 'copilot', '--model', 'gpt-5-mini', '--auto-yes']);
+
+    expect(mockFn).toHaveBeenCalledTimes(2);
+    // First call: send (with model)
+    expect(mockFn.mock.calls[0][0]).toContain('/send');
+    // Second call: auto-yes
+    expect(mockFn.mock.calls[1][0]).toContain('/auto-yes');
+  });
+
   it('handles server error', async () => {
     mockFetchError('connect ECONNREFUSED 127.0.0.1:3000');
     const { createSendCommand } = await import('../../../../src/cli/commands/send');
