@@ -18,7 +18,7 @@ import {
 } from './db/timer-db';
 import { sendKeys } from './tmux/tmux';
 import { CLIToolManager } from './cli-tools/manager';
-import { getDbInstance } from '@/lib/db-instance';
+import { getDbInstance } from '@/lib/db/db-instance';
 import { createLogger } from '@/lib/logger';
 import { TIMER_CLEANUP_RETENTION_DAYS, TIMER_STATUS } from '@/config/timer-constants';
 import type { CLIToolType } from './cli-tools/types';

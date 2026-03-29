@@ -349,10 +349,6 @@ export function getAutoYesStateCompositeKeys(): string[] {
   return Array.from(autoYesStates.keys());
 }
 
-/**
- * @deprecated Use getAutoYesStateCompositeKeys() instead. Renamed for clarity (Issue #525).
- */
-export const getAutoYesStateWorktreeIds = getAutoYesStateCompositeKeys;
 
 // =============================================================================
 // byWorktree Helpers (Issue #525)

@@ -1,0 +1,32 @@
+{
+  "issue_number": 565,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "applied_findings": [
+    {
+      "finding_id": "F5-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "action_taken": "影響範囲セクションのresponse-extractor.tsの記述を修正。(1) response-poller.tsの項にextractResponse()がL260に定義されている旨とL518のプロンプト検出スキップ条件の検討事項を追記。(2) response-extractor.tsの項をisOpenCodeComplete()のCopilot版追加候補（isCopilotComplete）に限定し、extractResponse()はこのファイルには含まれない旨を明記。"
+    },
+    {
+      "finding_id": "F5-002",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "action_taken": "必須3のcopilot.ts遅延値の記述を詳細化。L278の200ms遅延のみの記載から、L272テキスト入力待ち100ms + L278メッセージ処理待ち200msの2段階遅延であることを明記。定数化の際にどちらの遅延を対象とするかの検討事項を追加。sendSpecialKey('C-m')とsendSpecialKeys(['Enter'])のキーコード差異についても注記。影響範囲のcopilot.tsの項も同様に2段階遅延の詳細を反映。"
+    },
+    {
+      "finding_id": "F5-003",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "action_taken": "影響範囲のresponse-poller.tsの行番号リストを整理。旧: 「isFullScreenTui: L637, 重複チェック: L642/L650/L749」から新: 「isFullScreenTui: L637定義, L642/L650/L749重複チェック, L684プロンプト時ポーリング停止抑制」に更新し、L684が行番号リスト内に明示的に含まれるようにした。"
+    }
+  ],
+  "summary": {
+    "applied_count": 3,
+    "skipped_count": 0,
+    "partial_count": 0
+  },
+  "review_history_updated": true,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/565"
+}

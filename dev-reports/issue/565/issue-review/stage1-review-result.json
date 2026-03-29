@@ -1,0 +1,127 @@
+{
+  "issue_number": 565,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_date": "2026-03-28",
+  "findings": [
+    {
+      "id": "F1-001",
+      "severity": "should_fix",
+      "category": "正確性",
+      "title": "24行制限は固定値ではなく画面サイズ依存",
+      "description": "Issueの複数箇所で「約24行しか取得できない」と記載されているが、これはtmuxペインのサイズ（行数）に依存する値であり、固定的な制限ではない。仮説検証でもPartially Confirmedとなっている。tmuxペインの行数がデフォルト24行の端末サイズに依存する点は正しいが、Issueの記述だけ読むとalternate screenモード固有の24行制限があるように誤解される。",
+      "suggestion": "「現在画面の約24行」を「tmuxペインの表示行数（デフォルト端末サイズでは約24行）」に修正し、alternate screenモードではスクロールバックバッファが無効化されるため表示中の行のみ取得可能という説明に補足する。",
+      "affected_section": "事象2 / 根本原因 > alternate screenモード"
+    },
+    {
+      "id": "F1-002",
+      "severity": "must_fix",
+      "category": "受入条件",
+      "title": "受け入れ条件が明示されていない",
+      "description": "Issueに「本対応で必要なこと」セクションはあるが、具体的な受け入れ条件（Acceptance Criteria）が定義されていない。「Copilot用TuiAccumulator対応」「TUI向けプロンプト重複防止」「メッセージ送信のマルチラインモード対策の安定化」は方針レベルの記述であり、何をもって完了とするか（例: 重複メッセージが0件になる、レスポンス本文がDBに保存される等）が不明確。",
+      "suggestion": "各必須/推奨対応項目について検証可能な受け入れ条件を追加する。例: (1) Copilotの応答内容がMessage Historyに正しく保存されること、(2) 同一promptの重複保存が発生しないこと（content hashで一意化）、(3) 78文字超のメッセージが正常に送信されること、(4) 暫定対策の副作用（isFullScreenTuiによる重複悪化）が解消されていること。",
+      "affected_section": "本対応で必要なこと"
+    },
+    {
+      "id": "F1-003",
+      "severity": "should_fix",
+      "category": "実装方針",
+      "title": "content hashベース重複防止の具体的な設計が未記載",
+      "description": "必須対応2で「content hashベース等」とあるが、具体的にどのレイヤーで重複チェックを行うのか、既存のlineCountベースとどう共存させるのかが記載されていない。response-poller.ts内には3箇所のlineCountベース重複チェック（L642, L650, L749）があり、isFullScreenTui時に全てスキップされている。Copilot専用の重複防止策をどの位置に挿入するかの方針が必要。",
+      "suggestion": "重複防止の実装方針を具体化する。例: (1) promptメッセージ保存前にDB上の直近メッセージとcontentのSHA-256ハッシュを比較、(2) response-poller.tsのcheckForResponse内でisFullScreenTui時はcontent hashで重複チェック、(3) messageType='prompt'に限定するか全メッセージ対象か明記。",
+      "affected_section": "本対応で必要なこと > 必須 > 2"
+    },
+    {
+      "id": "F1-004",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "cleanCopilotResponseがplaceholder実装のままである点がIssueに未記載",
+      "description": "仮説検証でConfirmedされたとおり、src/lib/response-cleaner.tsのcleanCopilotResponseは現在COPILOT_SKIP_PATTERNS（PastedTextPatternのみ）しかフィルタせず、実質的にplaceholder実装。Issueの「本対応で必要なこと」ではTuiAccumulatorのCopilot対応に言及しているが、cleanCopilotResponseの拡充については直接触れていない。",
+      "suggestion": "必須対応1のスコープにcleanCopilotResponseの本実装を明示的に含める。Copilot固有のTUI装飾（ステータスバー、ショートカットキー表示、セパレーター等）を除去するスキップパターンの定義が必要。",
+      "affected_section": "本対応で必要なこと > 必須 > 1"
+    },
+    {
+      "id": "F1-005",
+      "severity": "should_fix",
+      "category": "実装方針",
+      "title": "200ms遅延の妥当性検証方針が不明確",
+      "description": "必須対応3で「現在の200ms遅延が十分か検証、または別アプローチ」とあるが、何をもって十分とするかの基準がない。send/route.tsとterminal/route.tsの両方で同一のハードコード値200msが使用されており、ネットワークやマシン負荷によって不十分になるリスクがある。",
+      "suggestion": "検証基準を明記する。例: (1) 100文字/200文字/500文字のメッセージで送信成功率を計測、(2) 失敗時のリトライ戦略の検討、(3) 遅延値を定数化してconfig化する方針。また、sendKeys第2引数のfalse（C-m付加なし）とsendSpecialKeysの組み合わせが正しいことを確認するテストケースの策定。",
+      "affected_section": "本対応で必要なこと > 必須 > 3"
+    },
+    {
+      "id": "F1-006",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "暫定対策の「未コミット」記述と実際の状態が不一致の可能性",
+      "description": "Issueの暫定対策テーブルに「本Issue内で実施済み / 未コミット」とあるが、git logにはコミット7c68640e「fix(copilot): Copilot TUI対応の暫定修正 (#565)」が存在し、既にコミット済みの状態。Issueの記述が最新状態を反映していない。",
+      "suggestion": "暫定対策セクションの記述を更新し、コミット済みの変更を反映する。例: 「本Issue内で実施済み（7c68640eでコミット済み）」",
+      "affected_section": "暫定対策"
+    },
+    {
+      "id": "F1-007",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "TuiAccumulatorのCopilot適用がIssueの影響範囲に含まれているが具体的な拡張方針がない",
+      "description": "tui-accumulator.tsは現在OpenCode完全専用の実装（normalizeOpenCodeLine、OPENCODE_SKIP_PATTERNS、OPENCODE_RESPONSE_COMPLETE）。Copilot対応には(1) Copilot用normalize関数、(2) Copilot用スキップパターン、(3) Copilot用完了検出パターンの3点が必要だが、Issueでは「extractTuiContentLinesのCopilot版」としか述べておらず、新規関数を作るのか既存関数にcliToolIdパラメータを追加するのかの方針が不明。",
+      "suggestion": "実装アプローチを明記する。選択肢として: (A) extractTuiContentLinesにcliToolIdパラメータを追加し内部で分岐、(B) extractCopilotContentLines関数を新設、(C) Strategy パターンでcli-tools層に統合。既存のcli-tools/のStrategy パターンとの整合性を考慮するとBまたはCが妥当。",
+      "affected_section": "本対応で必要なこと > 必須 > 1"
+    },
+    {
+      "id": "F1-008",
+      "severity": "nice_to_have",
+      "category": "その他",
+      "title": "ラベルが未設定",
+      "description": "Issue #565にラベルが設定されていない。CLAUDE.mdのPRルールでは種類に応じたラベル付与が規定されている。",
+      "suggestion": "bugラベルの付与を推奨。",
+      "affected_section": "Issueメタデータ"
+    },
+    {
+      "id": "F1-009",
+      "severity": "nice_to_have",
+      "category": "その他",
+      "title": "事象間の依存関係が明記されていない",
+      "description": "4つの事象が独立に記載されているが、事象1と事象3は根本原因が関連している（isFullScreenTuiの適用がレスポンス保存失敗と重複の両方に影響）。また、事象3の重複発生は暫定対策（isFullScreenTui適用、ポーリング継続）の副作用として発生しているが、この因果関係がIssue本文では分散して記述されている。",
+      "suggestion": "事象間の因果関係を図示または箇条書きで明記する。例: 「事象3は暫定対策（isFullScreenTui適用）の副作用として発生」「事象1と事象2は共通のalternate screen問題に起因」",
+      "affected_section": "事象 / 根本原因"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 5,
+    "nice_to_have_count": 3,
+    "total": 9
+  },
+  "code_references": [
+    {
+      "file": "src/lib/polling/response-poller.ts",
+      "relevance": "isFullScreenTui定義（L637）、3箇所のlineCount重複検出スキップ（L642,L650,L749）、プロンプト検出後のポーリング継続（L684）"
+    },
+    {
+      "file": "src/lib/tui-accumulator.ts",
+      "relevance": "OpenCode専用のTUI蓄積ロジック。Copilot対応が必要な中心ファイル"
+    },
+    {
+      "file": "src/lib/detection/cli-patterns.ts",
+      "relevance": "COPILOT_SKIP_PATTERNS（L285-287）がPastedTextPatternのみのplaceholder状態"
+    },
+    {
+      "file": "src/lib/response-cleaner.ts",
+      "relevance": "cleanCopilotResponse（L159-176）がplaceholder実装"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/send/route.ts",
+      "relevance": "Copilot用200ms遅延分離送信（L254-264）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/terminal/route.ts",
+      "relevance": "Copilot用200ms遅延分離送信（L83-89）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュールリファレンスにcopilot関連モジュールの記載あり、整合性確認済み"
+    }
+  ]
+}

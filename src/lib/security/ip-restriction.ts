@@ -20,6 +20,7 @@
 // Integrated into this module; no external references needed (YAGNI).
 
 import { createLogger } from '@/lib/logger';
+import { logSecurityEvent } from './security-logger';
 
 const logger = createLogger('ip-restriction');
 const IPV4_MAPPED_IPV6_PREFIX = '::ffff:';
@@ -27,10 +28,10 @@ const IPV4_PATTERN = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 const IPV4_CIDR_PATTERN = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/;
 const MAX_IPV4_PREFIX_LENGTH = 32;
 
-/** [S4-002] DoS prevention: upper limit on CIDR entry count */
+/** [SEC-016] DoS prevention: upper limit on CIDR entry count */
 const MAX_ALLOWED_IP_ENTRIES = 256;
 
-/** [S4-005] Input validation: max length per entry ('255.255.255.255/32' = 18 chars) */
+/** [SEC-017] Input validation: max length per entry ('255.255.255.255/32' = 18 chars) */
 const MAX_CIDR_ENTRY_LENGTH = 18;
 
 // --- Exported type ---
@@ -49,13 +50,13 @@ export interface CidrRange {
 
 const allowedIpsEnv = process.env.CM_ALLOWED_IPS?.trim() || '';
 
-// [S4-006] CM_TRUST_PROXY value validation:
+// [SEC-018] CM_TRUST_PROXY value validation:
 // 'true' is the only value that enables proxy trust. Other non-empty values
 // (e.g., 'TRUE', '1', 'yes') fall back to safe default (no proxy trust),
 // and a warning is emitted to help operators detect configuration mistakes.
 const trustProxyEnv = process.env.CM_TRUST_PROXY?.trim() || '';
 if (trustProxyEnv !== '' && trustProxyEnv !== 'true' && trustProxyEnv !== 'false') {
-  logger.warn('config:trust-proxy-unexpected', { value: trustProxyEnv });
+  logSecurityEvent(logger, 'trust-proxy-unexpected', { value: trustProxyEnv });
 }
 
 /** Whether CM_TRUST_PROXY is strictly 'true' */
@@ -103,11 +104,11 @@ export function normalizeIp(ip: string): string {
  * Parse CM_ALLOWED_IPS environment variable string into CidrRange array.
  * Throws Error on invalid CIDR format (fail-fast).
  *
- * [S4-002] Throws when entry count exceeds MAX_ALLOWED_IP_ENTRIES (256).
+ * [SEC-016] Throws when entry count exceeds MAX_ALLOWED_IP_ENTRIES (256).
  * Large CIDR entry counts cause parse delay and per-request OR-loop
  * performance degradation.
  *
- * [S4-005] Throws when any entry exceeds MAX_CIDR_ENTRY_LENGTH (18 chars).
+ * [SEC-017] Throws when any entry exceeds MAX_CIDR_ENTRY_LENGTH (18 chars).
  * IPv4 CIDR maximum is '255.255.255.255/32' (18 chars); longer input is
  * rejected before regex matching.
  *
@@ -121,7 +122,7 @@ export function parseAllowedIps(envValue: string): CidrRange[] {
 
   const entries = trimmed.split(',').map(e => e.trim()).filter(e => e.length > 0);
 
-  // [S4-002] DoS prevention: entry count upper limit
+  // [SEC-016] DoS prevention: entry count upper limit
   if (entries.length > MAX_ALLOWED_IP_ENTRIES) {
     throw new Error(
       `CM_ALLOWED_IPS: too many entries (${entries.length}). Maximum is ${MAX_ALLOWED_IP_ENTRIES}.`
@@ -131,7 +132,7 @@ export function parseAllowedIps(envValue: string): CidrRange[] {
   const ranges: CidrRange[] = [];
 
   for (const entry of entries) {
-    // [S4-005] Entry length validation (before regex)
+    // [SEC-017] Entry length validation (before regex)
     if (entry.length > MAX_CIDR_ENTRY_LENGTH) {
       throw new Error(
         `CM_ALLOWED_IPS: entry "${entry}" exceeds maximum length of ${MAX_CIDR_ENTRY_LENGTH} characters.`
@@ -229,7 +230,7 @@ export function isIpAllowed(ip: string, ranges: CidrRange[]): boolean {
  * list via CM_TRUSTED_PROXIES), consider splitting to a separate module
  * (e.g., request-ip.ts).
  *
- * [S4-001] WARNING: When CM_TRUST_PROXY=true, the leftmost IP from
+ * [SEC-015] WARNING: When CM_TRUST_PROXY=true, the leftmost IP from
  * X-Forwarded-For is used. An attacker can inject arbitrary IPs at the
  * front of the header. The reverse proxy MUST overwrite X-Forwarded-For
  * with the client IP it received (trusted proxy sets the client IP it

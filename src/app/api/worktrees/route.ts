@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 // Force dynamic rendering - this route uses searchParams and database access
 export const dynamic = 'force-dynamic';
-import { getDbInstance } from '@/lib/db-instance';
+import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktrees, getRepositories, getMessages, markPendingPromptsAsAnswered } from '@/lib/db';
 import { listSessions } from '@/lib/tmux/tmux';
 import { detectWorktreeSessionStatus } from '@/lib/session/worktree-status-helper';

@@ -1,0 +1,88 @@
+{
+  "issue_number": 565,
+  "status": "success",
+  "changes": [
+    {
+      "file": "src/lib/tui-accumulator.ts",
+      "change_type": "cleanup",
+      "description": "Removed redundant .trim() call in extractCopilotContentLines. normalizeCopilotLine already returns a trimmed string, so the intermediate `trimmed` variable was unnecessary (DRY)."
+    },
+    {
+      "file": "src/lib/polling/response-poller.ts",
+      "change_type": "refactor",
+      "description": "Renamed `isCodexOrGeminiComplete` to `isPromptBasedComplete` to accurately reflect that the variable now covers 4 tool types (Codex, Gemini, Vibe-Local, Copilot). Updated comment to match."
+    },
+    {
+      "file": "src/lib/response-cleaner.ts",
+      "change_type": "none",
+      "description": "Reviewed: cleanCopilotResponse correctly reuses normalizeCopilotLine (DRY) and COPILOT_SKIP_PATTERNS. No changes needed."
+    },
+    {
+      "file": "src/lib/polling/prompt-dedup.ts",
+      "change_type": "none",
+      "description": "Reviewed: Clean SRP module with SHA-256 hashing. No changes needed."
+    },
+    {
+      "file": "src/lib/detection/cli-patterns.ts",
+      "change_type": "none",
+      "description": "Reviewed: COPILOT_SKIP_PATTERNS correctly composes existing patterns. No changes needed."
+    },
+    {
+      "file": "src/lib/response-extractor.ts",
+      "change_type": "none",
+      "description": "Reviewed: Copilot branch correctly grouped with opencode in resolveExtractionStartIndex. No changes needed."
+    },
+    {
+      "file": "src/config/copilot-constants.ts",
+      "change_type": "none",
+      "description": "Reviewed: Well-structured constants with clear JSDoc. No changes needed."
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/send/route.ts",
+      "change_type": "none",
+      "description": "Reviewed: Correctly imports COPILOT_SEND_ENTER_DELAY_MS from copilot-constants. No changes needed."
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/terminal/route.ts",
+      "change_type": "none",
+      "description": "Reviewed: Correctly imports COPILOT_SEND_ENTER_DELAY_MS from copilot-constants. No changes needed."
+    },
+    {
+      "file": "src/lib/cli-tools/copilot.ts",
+      "change_type": "none",
+      "description": "Reviewed: Correctly imports both COPILOT_TEXT_INPUT_DELAY_MS and COPILOT_SEND_ENTER_DELAY_MS. No changes needed."
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "change_type": "none",
+      "description": "Reviewed: clearPromptHashCache correctly called in killWorktreeSession. No changes needed."
+    }
+  ],
+  "quality_metrics": {
+    "before_coverage": null,
+    "after_coverage": null
+  },
+  "test_results": {
+    "total": 5469,
+    "passed": 5469,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "refactorings_applied": [
+    "Removed redundant .trim() in extractCopilotContentLines (DRY: normalizeCopilotLine already trims)",
+    "Renamed isCodexOrGeminiComplete to isPromptBasedComplete (naming clarity for 4-tool scope)"
+  ],
+  "files_changed": [
+    "src/lib/tui-accumulator.ts",
+    "src/lib/polling/response-poller.ts"
+  ],
+  "commits": [
+    "6dec87e2: refactor(copilot): improve naming clarity and remove redundant code"
+  ],
+  "message": "Refactoring complete. Code was already well-structured following SOLID/DRY principles. Two improvements applied: redundant .trim() removal and misleading variable naming fix. All 5469 tests pass, 0 static analysis errors."
+}

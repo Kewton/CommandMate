@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getDbInstance } from '@/lib/db-instance';
+import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { isValidWorktreeId, isPathSafe } from '@/lib/security/path-validator';
 import { getGitDiff, handleGitApiError } from '@/lib/git/git-utils';

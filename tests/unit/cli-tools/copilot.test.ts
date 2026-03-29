@@ -191,4 +191,117 @@ describe('CopilotTool', () => {
       expect(extract.call(tool, '/compact  ')).toBe('compact');
     });
   });
+
+  describe('sendModelCommand', () => {
+    it('should be a public method', () => {
+      expect(typeof tool.sendModelCommand).toBe('function');
+    });
+
+    it('should throw if session does not exist', async () => {
+      const { hasSession } = await import('@/lib/tmux/tmux');
+      vi.mocked(hasSession).mockResolvedValue(false);
+
+      await expect(tool.sendModelCommand('test-wt', 'gpt-5-mini'))
+        .rejects.toThrow(/does not exist/);
+    });
+
+    it('should send /model command and Enter to session', async () => {
+      vi.useFakeTimers();
+
+      const { hasSession, sendKeys, capturePane } = await import('@/lib/tmux/tmux');
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(capturePane).mockResolvedValue('> ');
+
+      const promise = tool.sendModelCommand('test-wt', 'gpt-5-mini');
+      await vi.advanceTimersByTimeAsync(40000);
+      await promise;
+
+      expect(sendKeys).toHaveBeenCalledWith(
+        'mcbd-copilot-test-wt',
+        '/model gpt-5-mini',
+        true
+      );
+
+      vi.useRealTimers();
+    });
+
+    it('should send Enter to confirm selection list when detected', async () => {
+      vi.useFakeTimers();
+
+      const { hasSession, capturePane, sendSpecialKey } = await import('@/lib/tmux/tmux');
+      vi.mocked(hasSession).mockResolvedValue(true);
+
+      let callCount = 0;
+      vi.mocked(capturePane).mockImplementation(async () => {
+        callCount++;
+        if (callCount <= 3) {
+          return 'Search models...';
+        }
+        return '> ';
+      });
+
+      const promise = tool.sendModelCommand('test-wt', 'gpt-5-mini');
+      await vi.advanceTimersByTimeAsync(40000);
+      await promise;
+
+      expect(sendSpecialKey).toHaveBeenCalledWith(
+        'mcbd-copilot-test-wt',
+        'C-m'
+      );
+
+      vi.useRealTimers();
+    });
+
+    it('should wait for prompt recovery after model switch', async () => {
+      vi.useFakeTimers();
+
+      const { hasSession, capturePane } = await import('@/lib/tmux/tmux');
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(capturePane).mockResolvedValue('> ');
+
+      const promise = tool.sendModelCommand('test-wt', 'gpt-5-mini');
+      await vi.advanceTimersByTimeAsync(40000);
+
+      await expect(promise).resolves.toBeUndefined();
+
+      vi.useRealTimers();
+    });
+  });
+
+  describe('waitForSelectionList returns boolean', () => {
+    it('should return true when selection list is detected', async () => {
+      const { hasSession, capturePane } = await import('@/lib/tmux/tmux');
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(capturePane).mockResolvedValue('Search models...');
+
+      // Access private method for testing
+      const waitForSelectionList = (tool as unknown as {
+        waitForSelectionList(s: string): Promise<boolean>
+      }).waitForSelectionList;
+
+      const result = await waitForSelectionList.call(tool, 'mcbd-copilot-test');
+      expect(result).toBe(true);
+    });
+
+    it('should return false when selection list times out', async () => {
+      vi.useFakeTimers();
+
+      const { capturePane } = await import('@/lib/tmux/tmux');
+      vi.mocked(capturePane).mockResolvedValue('some other output');
+
+      const waitForSelectionList = (tool as unknown as {
+        waitForSelectionList(s: string): Promise<boolean>
+      }).waitForSelectionList;
+
+      const promise = waitForSelectionList.call(tool, 'mcbd-copilot-test');
+
+      // Advance timers past the 5s timeout
+      await vi.advanceTimersByTimeAsync(6000);
+
+      const result = await promise;
+      expect(result).toBe(false);
+
+      vi.useRealTimers();
+    });
+  });
 });

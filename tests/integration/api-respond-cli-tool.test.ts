@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { POST as respondToPrompt } from '@/app/api/worktrees/[id]/respond/route';
 import Database from 'better-sqlite3';
-import { runMigrations } from '@/lib/db-migrations';
+import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree, createMessage } from '@/lib/db';
 import type { Worktree, ChatMessage } from '@/types/models';
 
@@ -21,12 +21,12 @@ vi.mock('@/lib/ws-server', () => ({
 }));
 
 // Declare mock function type
-declare module '@/lib/db-instance' {
+declare module '@/lib/db/db-instance' {
   export function setMockDb(db: Database.Database): void;
 }
 
 // Mock the database instance
-vi.mock('@/lib/db-instance', () => {
+vi.mock('@/lib/db/db-instance', () => {
   let mockDb: Database.Database | null = null;
 
   return {
@@ -57,7 +57,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
     runMigrations(db);
 
     // Set mock database
-    const { setMockDb } = await import('@/lib/db-instance');
+    const { setMockDb } = await import('@/lib/db/db-instance');
     setMockDb(db);
 
     // Reset mocks
@@ -65,7 +65,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
   });
 
   afterEach(async () => {
-    const { closeDbInstance } = await import('@/lib/db-instance');
+    const { closeDbInstance } = await import('@/lib/db/db-instance');
     closeDbInstance();
     db.close();
   });

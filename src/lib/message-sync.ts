@@ -83,7 +83,7 @@ export function addOptimisticMessage(
     ...newMessage,
     id: tempId,
     timestamp: newMessage.timestamp || new Date(),
-  } as ChatMessage;
+  };
 
   const result = [...messages, optimistic];
 

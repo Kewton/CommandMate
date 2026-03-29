@@ -204,6 +204,30 @@ describe('sanitizeTerminalOutput', () => {
       const input = 'Text\x00with\x00null';
       const result = sanitizeTerminalOutput(input);
       expect(typeof result).toBe('string');
+      // Null bytes should be removed from the output
+      expect(result).not.toContain('\x00');
+      expect(result).toContain('Textwithnull');
+    });
+
+    it('should remove null bytes from input', () => {
+      const input = 'hello\x00world';
+      const result = sanitizeTerminalOutput(input);
+      expect(result).toContain('helloworld');
+      expect(result).not.toContain('\x00');
+    });
+
+    it('should truncate oversized input', () => {
+      // 2MB input
+      const input = 'a'.repeat(2 * 1024 * 1024);
+      const result = sanitizeTerminalOutput(input);
+      // Output should be at most 1MB worth of content (after sanitization)
+      // The raw truncation happens at 1MB, sanitization may change length slightly
+      expect(result.length).toBeLessThanOrEqual(1_048_576);
+    });
+
+    it('should return empty string for empty input', () => {
+      const result = sanitizeTerminalOutput('');
+      expect(result).toBe('');
     });
   });
 });

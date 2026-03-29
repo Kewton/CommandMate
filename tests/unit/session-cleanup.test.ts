@@ -11,6 +11,7 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 // Mock response-poller before importing
 vi.mock('@/lib/polling/response-poller', () => ({
   stopPolling: vi.fn(),
+  clearPromptHashCache: vi.fn(),
 }));
 
 // Mock auto-yes and schedule modules

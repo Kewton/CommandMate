@@ -1,0 +1,103 @@
+{
+  "issue_number": 565,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "findings": [
+    {
+      "id": "DR2-001",
+      "severity": "should_fix",
+      "category": "コード整合性",
+      "title": "resolveExtractionStartIndex の設計提案コードと実際のシグネチャに差異なし（確認OK）だが、extractResponse L518 のCopilotスキップ条件が未設計",
+      "description": "設計方針書セクション4.4でresolveExtractionStartIndexにCopilot分岐を追加する方針が記載されているが、extractResponse() L518の一般プロンプト検出（`if (cliToolId !== 'opencode')`）でCopilotが除外されていない点について、設計方針書に明確な方針が記載されていない。Issue本文の影響範囲セクションでは「extractResponse L518のcopilotスキップ条件検討」と言及されているが、設計方針書にはこの判断結果が反映されていない。",
+      "suggestion": "設計方針書に「L518の一般プロンプト検出においてCopilotを除外するか否か」の設計判断を追記する。Copilotは早期プロンプト検出（L344）で既にカバーされているため、L518でopencode同様にスキップする方が一貫性がある可能性がある。判断結果と根拠をセクション4.5または新規セクションに記載すること。",
+      "affected_section": "4.5 isFullScreenTui分岐の整理"
+    },
+    {
+      "id": "DR2-002",
+      "severity": "should_fix",
+      "category": "コード整合性",
+      "title": "設計方針書のCOPILOT_SKIP_PATTERNS拡張案と現在のコードの差分が不明確",
+      "description": "設計方針書セクション4.1.2では、COPILOT_SKIP_PATTERNSにCOPILOT_SEPARATOR_PATTERN、COPILOT_THINKING_PATTERN、COPILOT_SELECTION_LIST_PATTERNを追加する案を記載しているが、セクション4.1.4のcleanCopilotResponseでは「COPILOT_SKIP_PATTERNS.some(p => p.test(normalized))」として参照している。一方、現在のgetCliToolPatterns('copilot')のskipPatternsも同じCOPILOT_SKIP_PATTERNSを返す。extractResponseのレスポンス抽出ループ（L414-418）でもskipPatternsでフィルタリングされるため、方針(B)（後段フィルタリング）を採用するならば、extractResponseループ内のskipPatternsでもCOPILOT_SKIP_PATTERNSが適用される点が設計方針書で明示されていない。",
+      "suggestion": "方針(B)を採用する場合でも、extractResponse内のskipPatternsフィルタリング（L414-418）がCOPILOT_SKIP_PATTERNSの拡張によって影響を受けることをセクション4.1.4または2.2のデータフロー図に明記する。skipPatternsはgetCliToolPatterns()から取得されるため、COPILOT_SKIP_PATTERNSの変更がextractResponseとcleanCopilotResponseの両方に影響する。これは「二重適用」の範囲をさらに広げるものであり、DR1-003の設計判断と合わせて3箇所（extractCopilotContentLines、extractResponseループ、cleanCopilotResponse）での適用関係を整理すべき。",
+      "affected_section": "4.1.4 cleanCopilotResponse 本実装"
+    },
+    {
+      "id": "DR2-003",
+      "severity": "must_fix",
+      "category": "コード整合性",
+      "title": "accumulateTuiContent呼び出し時にOpenCode用extractTuiContentLinesが常に使用される問題が設計に未記載",
+      "description": "現在のaccumulateTuiContent（tui-accumulator.ts L150-178）は内部でextractTuiContentLines()をハードコードで呼び出している。response-poller.ts L605-608ではCopilotに対してもaccumulateTuiContent()を呼んでいるが、これはOpenCode用のnormalizeOpenCodeLine()とOPENCODE_SKIP_PATTERNSを使ってコンテンツ抽出を行う。つまり現在のコードでは、CopilotのTUI出力がOpenCodeのパターンで処理されており、正しくコンテンツ抽出できていない。設計方針書ではセクション4.1.3でシグネチャ拡張を提案しているが、この「現状の誤動作」を明示的に記載していない。実装者がこの点を理解していない場合、テスト不足につながる恐れがある。",
+      "suggestion": "セクション4.1.3の「Before/After」の直前に、現在の問題状態（CopilotがOpenCode用パターンで処理されている）を明記する。例：「現在のコードではcliToolIdに関わらずextractTuiContentLines()（OpenCode専用）が呼ばれるため、CopilotのTUI出力は誤ったパターンでフィルタリングされている。本変更はこの問題を修正するものである。」",
+      "affected_section": "4.1.3 accumulateTuiContent シグネチャ拡張"
+    },
+    {
+      "id": "DR2-004",
+      "severity": "nice_to_have",
+      "category": "内部整合性",
+      "title": "セクション3.1のaccumulateTuiContentデフォルト引数がOpenCode固定である理由が不十分",
+      "description": "セクション3.1のコード例では`cliToolId: CLIToolType = 'opencode'`（後方互換）としているが、セクション4.1.3のAfterでは`cliToolId?: CLIToolType`（オプショナル、デフォルト値なし）となっている。両者でシグネチャが異なる。セクション8の設計上の決定事項テーブルでは「デフォルト値がOpenCode固定」と記載されているため、セクション3.1の方が最終設計と見られるが、セクション4.1.3と矛盾する。",
+      "suggestion": "セクション3.1と4.1.3のシグネチャを統一する。推奨：`cliToolId: CLIToolType = 'opencode'`をデフォルト値として採用し、既存のOpenCode呼び出し元を修正不要にする方式（セクション3.1の記載）に統一する。セクション4.1.3も同じデフォルト値付きのシグネチャに修正する。",
+      "affected_section": "3.1 Strategy統合, 4.1.3 accumulateTuiContent シグネチャ拡張"
+    },
+    {
+      "id": "DR2-005",
+      "severity": "should_fix",
+      "category": "Issue整合性",
+      "title": "Issue受け入れ条件「isFullScreenTuiの共通フラグとCopilot固有ロジックの分岐が適切に設計されていること」に対する設計の対応が不十分",
+      "description": "Issueの受け入れ条件に「isFullScreenTuiの共通フラグとCopilot固有ロジック（cliToolId === 'copilot'）の分岐が適切に設計されていること」が含まれている。設計方針書セクション4.5に対応表があるが、checkForResponse()内の具体的なコード変更箇所（L637-L749の各分岐ポイント）に対して、どこをisFullScreenTuiのままにし、どこをcliToolIdベースに変更するかの具体的なコード差分が示されていない。",
+      "suggestion": "セクション4.5の表を補完し、response-poller.ts内の具体的な行番号と変更内容（変更なし/変更あり+変更内容）を対応付ける。特にL642、L650、L684、L749の4箇所について、isFullScreenTuiを維持するのか、Copilot固有の追加条件を加えるのかを明示する。",
+      "affected_section": "4.5 isFullScreenTui分岐の整理"
+    },
+    {
+      "id": "DR2-006",
+      "severity": "should_fix",
+      "category": "コード整合性",
+      "title": "prompt-dedup.ts のcheckForResponse内での呼び出し位置が不正確",
+      "description": "設計方針書セクション4.2.1のコード例では、checkForResponse()内のプロンプト保存直前にisDuplicatePromptを呼ぶとしている。しかし実際のcheckForResponse()のコードフロー（L661-688）を見ると、promptDetectionの判定後、createMessage()でDB保存し、updateSessionState()し、broadcastMessage()してから、isFullScreenTui判定でstopPolling()をスキップしている。設計のコード例では`return false`で保存スキップとしているが、既にL665-674でcreateMessage()が実行された後では手遅れである。isDuplicatePromptの呼び出しはcreateMessage()の前に配置する必要がある。設計例の擬似コードの位置関係が実際のコードフローと合致しない。",
+      "suggestion": "セクション4.2.1のコード例を修正し、isDuplicatePrompt()の呼び出しがcreateMessage()（L665）の前に配置されることを明示する。具体的には、L661 `if (promptDetection.isPrompt)` の直後、L663 `clearInProgressMessageId` の前にisDuplicatePromptチェックを挿入する形でコード例を修正する。",
+      "affected_section": "4.2.1 content hashベース重複チェック"
+    },
+    {
+      "id": "DR2-007",
+      "severity": "nice_to_have",
+      "category": "内部整合性",
+      "title": "データフロー図のLayer 1とLayer 2の番号付けが実行順序と逆",
+      "description": "セクション2.2のデータフロー図では、先にLayer 2（accumulateTuiContent）が実行され、次にLayer 1（extractResponse）が実行される順序で記載されている。しかし「Layer 2」の方がLayer 1より先に実行されるのは、番号付けとしてはやや直感に反する。これはOpenCode設計からの踏襲と思われるが、新規の読み手には混乱を招く可能性がある。",
+      "suggestion": "Layer番号を実行順序に合わせて振り直すか、番号が処理の深さ（抽象度）を表すものであることを注記として追加する。",
+      "affected_section": "2.2 データフロー"
+    },
+    {
+      "id": "DR2-008",
+      "severity": "should_fix",
+      "category": "Issue整合性",
+      "title": "Issueの必須要件「Copilotレスポンス完了検出」の設計が設計方針書に不足",
+      "description": "Issue本文の「推奨4: Copilotレスポンス完了検出」では、(A)現在のhasPrompt && !isThinking で十分か、(B)isCopilotComplete独自関数が必要かの判断を求めている。設計方針書ではセクション4.4のresolveExtractionStartIndexの記載でCopilot分岐追加に言及しているが、完了検出方式そのもの（extractResponse L372のisCodexOrGeminiComplete条件にCopilotが含まれている現状をどう扱うか）についての明示的な設計判断がない。",
+      "suggestion": "設計方針書に「Copilotレスポンス完了検出」の設計判断セクションを追加し、現在のisCodexOrGeminiComplete条件（hasPrompt && !isThinking）をCopilotにも適用し続けるのか、別途isCopilotComplete関数を新設するのかを明記する。Issue本文の判断基準「TuiAccumulatorからの蓄積コンテンツが完了検出時に正しくレスポンスとして取得できるか」に基づく判断結果を記載すること。",
+      "affected_section": "新規セクション追加推奨（4.6 Copilotレスポンス完了検出 等）"
+    },
+    {
+      "id": "DR2-009",
+      "severity": "nice_to_have",
+      "category": "内部整合性",
+      "title": "用語「pollerKey」と「key」の混在",
+      "description": "セクション2.2のデータフロー図では`accumulateTuiContent(key, rawOutput, 'copilot')`と引数名が`key`になっているが、実際のコード（tui-accumulator.ts L150）およびセクション3.1、4.1.3のコード例では`pollerKey`が使われている。セクション4.2.1でも`pollerKey`が使われている。データフロー図のみ`key`となっており、表記が不統一。",
+      "suggestion": "データフロー図の引数名を`pollerKey`に統一する。",
+      "affected_section": "2.2 データフロー"
+    },
+    {
+      "id": "DR2-010",
+      "severity": "must_fix",
+      "category": "Issue整合性",
+      "title": "Issueの受け入れ条件「蓄積コンテンツがレスポンス保存時に使用される」フローが設計方針書に未記載",
+      "description": "Issueの事象1（レスポンス本文が保存されない）の解決には、TuiAccumulatorで蓄積したコンテンツがレスポンス保存時に使用される必要がある。しかし設計方針書のデータフロー図やcheckForResponse()の設計変更には、蓄積コンテンツ（getAccumulatedContent()）をレスポンス本文として使用するフローが記載されていない。現在のcheckForResponse()コード（L704-710）を見ると、copilotの場合cleanCopilotResponse(result.response)で処理しているが、result.responseはextractResponse()の戻り値であり、tmuxの現在表示行から抽出したものに過ぎない。蓄積されたTUI全体コンテンツ（getAccumulatedContent()）はどこでresult.responseに代入されるのか、そのフローが設計に明記されていない。OpenCodeの場合もresult.responseがextractResponseから返されるが、蓄積コンテンツがどう統合されるかは既存のOpenCode実装次第である。Copilotにおいてこの統合がどう行われるかは重要な設計ポイントであり、記載がないと事象1の根本解決が達成されない可能性がある。",
+      "suggestion": "セクション2.2のデータフローまたは新規セクションに、レスポンス保存時のフローを追加する。具体的には、checkForResponse()のレスポンス保存パス（L691以降）において、Copilotの場合にresult.responseをgetAccumulatedContent(pollerKey)で置換するか、あるいはextractResponse()内でTuiAccumulatorの蓄積コンテンツを使用するかの設計判断を記載すること。",
+      "affected_section": "2.2 データフロー, 4.1 全体"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 5,
+    "nice_to_have_count": 3,
+    "total": 10
+  }
+}

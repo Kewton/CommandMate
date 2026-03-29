@@ -1,0 +1,29 @@
+{
+  "issue_number": 565,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "applied_findings": [
+    {
+      "finding_id": "F7-001",
+      "status": "applied",
+      "action_taken": "影響範囲セクションのresponse-extractor.tsの項にresolveExtractionStartIndex()の5分岐決定木にCopilot用ブランチが存在しない問題を追記。OpenCode Branch 2aと同様の専用処理がCopilotに必要かを実装時に検証する方針を記載。alternate screenモードでのlastCapturedLine無意味化リスクも明記。"
+    },
+    {
+      "finding_id": "F7-002",
+      "status": "applied",
+      "action_taken": "必須1のCopilot用TuiAccumulator対応に「extractResponseレスポンス抽出ループの設計判断」を追加。(A) ループ内にCopilot固有の終了条件（ステータスバー・セパレーター等でbreak）を追加する方式と、(B) cleanCopilotResponseでの後段フィルタリングに委ねる方式の2案を明記。影響範囲のresponse-poller.tsの項にもextractResponse()レスポンス抽出ループの問題と必須1との連動を追記。"
+    },
+    {
+      "finding_id": "F7-003",
+      "status": "applied",
+      "action_taken": "受け入れ条件に「送信パス統一後、terminal/route.tsのCopilotコマンド送信経路にもsend/route.tsと同じ方式が適用されていること」を追加。影響範囲のterminal/route.tsの項にも送信パス統一後の方式一致確認事項を追記。"
+    }
+  ],
+  "summary": {
+    "applied_count": 3,
+    "skipped_count": 0,
+    "partial_count": 0
+  },
+  "review_history_updated": true,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/565"
+}

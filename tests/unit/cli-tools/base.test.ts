@@ -2,9 +2,13 @@
  * Unit tests for BaseCLITool
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { BaseCLITool } from '@/lib/cli-tools/base';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+
+vi.mock('@/lib/tmux/tmux', () => ({
+  sendSpecialKey: vi.fn().mockResolvedValue(undefined),
+}));
 
 // テスト用の具象クラス
 class TestCLITool extends BaseCLITool {
@@ -96,9 +100,10 @@ describe('BaseCLITool', () => {
       expect(typeof tool.interrupt).toBe('function');
     });
 
-    it('should be async and return a Promise', () => {
+    it('should be async and return a Promise', async () => {
       const result = tool.interrupt('test-worktree');
       expect(result).toBeInstanceOf(Promise);
+      await result;
     });
   });
 });

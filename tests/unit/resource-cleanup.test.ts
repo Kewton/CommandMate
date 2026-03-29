@@ -48,7 +48,7 @@ vi.mock('@/lib/polling/response-poller', () => ({
 
 // Mock db-instance
 const mockDbAll = vi.fn().mockReturnValue([]);
-vi.mock('@/lib/db-instance', () => ({
+vi.mock('@/lib/db/db-instance', () => ({
   getDbInstance: vi.fn(() => ({
     prepare: vi.fn().mockReturnValue({
       all: mockDbAll,

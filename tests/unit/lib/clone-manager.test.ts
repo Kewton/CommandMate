@@ -5,14 +5,14 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import { runMigrations } from '@/lib/db-migrations';
+import { runMigrations } from '@/lib/db/db-migrations';
 import { CloneManager, CloneManagerError, resetWorktreeBasePathWarning, resolveCustomTargetPath } from '@/lib/git/clone-manager';
 import {
   createRepository,
   getCloneJob,
   createCloneJob,
   updateCloneJob,
-} from '@/lib/db-repository';
+} from '@/lib/db/db-repository';
 
 // Mock child_process
 vi.mock('child_process', () => ({

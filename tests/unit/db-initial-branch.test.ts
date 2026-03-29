@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { runMigrations, getCurrentVersion, CURRENT_SCHEMA_VERSION } from '@/lib/db-migrations';
+import { runMigrations, getCurrentVersion, CURRENT_SCHEMA_VERSION } from '@/lib/db/db-migrations';
 import { saveInitialBranch, getInitialBranch } from '@/lib/db';
 
 describe('Initial Branch Database Operations', () => {

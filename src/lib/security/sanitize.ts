@@ -6,6 +6,9 @@
 import DOMPurify from 'isomorphic-dompurify';
 import AnsiToHtml from 'ansi-to-html';
 
+/** Maximum terminal output length (1MB). Inputs exceeding this are truncated. */
+const MAX_TERMINAL_OUTPUT_LENGTH = 1_048_576;
+
 const ansiConverter = new AnsiToHtml({
   fg: '#d1d5db',  // gray-300
   bg: '#1f2937',  // gray-800
@@ -26,8 +29,14 @@ const ansiConverter = new AnsiToHtml({
  * ```
  */
 export function sanitizeTerminalOutput(output: string): string {
+  // Step 0: Input validation
+  let validated = output.replace(/\0/g, '');
+  if (validated.length > MAX_TERMINAL_OUTPUT_LENGTH) {
+    validated = validated.slice(0, MAX_TERMINAL_OUTPUT_LENGTH);
+  }
+
   // Step 1: Convert ANSI codes to HTML (escapeXML: true provides basic escaping)
-  const html = ansiConverter.toHtml(output);
+  const html = ansiConverter.toHtml(validated);
 
   // Step 2: Additional sanitization with DOMPurify
   // Only allow span tags and style attributes (for ANSI colors)

@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { POST as sendMessage } from '@/app/api/worktrees/[id]/send/route';
 import Database from 'better-sqlite3';
-import { runMigrations } from '@/lib/db-migrations';
+import { runMigrations } from '@/lib/db/db-migrations';
 import { createMessage, getMessages, upsertWorktree } from '@/lib/db';
 import type { Worktree } from '@/types/models';
 
@@ -46,13 +46,28 @@ vi.mock('@/lib/cli-tools/gemini', () => ({
   }
 }));
 
+vi.mock('@/lib/cli-tools/copilot', () => ({
+  CopilotTool: class {
+    id = 'copilot';
+    name = 'Copilot';
+    command = 'gh';
+    async isInstalled() { return true; }
+    async isRunning() { return false; }
+    async startSession() {}
+    async sendMessage() {}
+    async sendModelCommand() {}
+    async killSession() {}
+    getSessionName(id: string) { return `mcbd-copilot-${id}`; }
+  }
+}));
+
 // Declare mock function type
-declare module '@/lib/db-instance' {
+declare module '@/lib/db/db-instance' {
   export function setMockDb(db: Database.Database): void;
 }
 
 // Mock the database instance
-vi.mock('@/lib/db-instance', () => {
+vi.mock('@/lib/db/db-instance', () => {
   let mockDb: Database.Database | null = null;
 
   return {
@@ -83,7 +98,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
     runMigrations(db);
 
     // Set mock database
-    const { setMockDb } = await import('@/lib/db-instance');
+    const { setMockDb } = await import('@/lib/db/db-instance');
     setMockDb(db);
 
     // Reset mocks
@@ -91,7 +106,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
   });
 
   afterEach(async () => {
-    const { closeDbInstance } = await import('@/lib/db-instance');
+    const { closeDbInstance } = await import('@/lib/db/db-instance');
     closeDbInstance();
     db.close();
   });
@@ -279,6 +294,121 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
       const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-prefix' } });
       // Path validation catches this as invalid (either symlink check or whitelist check)
       expect(response.status).toBe(400);
+    });
+  });
+
+  describe('Model parameter (Issue #576)', () => {
+    it('should reject model with invalid characters', async () => {
+      const worktree: Worktree = {
+        id: 'test-model-invalid',
+        name: 'Test Model',
+        path: '/path/to/test',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'TestRepo',
+        cliToolId: 'copilot',
+      };
+      upsertWorktree(db, worktree);
+
+      const request = new Request('http://localhost:3000/api/worktrees/test-model-invalid/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'Test', model: 'model; rm -rf /' }),
+      });
+
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-model-invalid' } });
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.error).toContain('model');
+    });
+
+    it('should reject model exceeding max length', async () => {
+      const worktree: Worktree = {
+        id: 'test-model-long',
+        name: 'Test Model Long',
+        path: '/path/to/test',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'TestRepo',
+        cliToolId: 'copilot',
+      };
+      upsertWorktree(db, worktree);
+
+      const longModel = 'a'.repeat(129);
+      const request = new Request('http://localhost:3000/api/worktrees/test-model-long/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'Test', model: longModel }),
+      });
+
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-model-long' } });
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.error).toContain('model');
+    });
+
+    it('should reject model with control characters', async () => {
+      const worktree: Worktree = {
+        id: 'test-model-ctrl',
+        name: 'Test Model Ctrl',
+        path: '/path/to/test',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'TestRepo',
+        cliToolId: 'copilot',
+      };
+      upsertWorktree(db, worktree);
+
+      const request = new Request('http://localhost:3000/api/worktrees/test-model-ctrl/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'Test', model: 'gpt-4\x00' }),
+      });
+
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-model-ctrl' } });
+      expect(response.status).toBe(400);
+    });
+
+    it('should reject model when cliToolId is not copilot', async () => {
+      const worktree: Worktree = {
+        id: 'test-model-claude',
+        name: 'Test Model Claude',
+        path: '/path/to/test',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'TestRepo',
+      };
+      upsertWorktree(db, worktree);
+
+      const request = new Request('http://localhost:3000/api/worktrees/test-model-claude/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'Test', model: 'gpt-5-mini', cliToolId: 'claude' }),
+      });
+
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-model-claude' } });
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.error).toContain('copilot');
+    });
+
+    it('should accept valid model name for copilot', async () => {
+      const worktree: Worktree = {
+        id: 'test-model-valid',
+        name: 'Test Model Valid',
+        path: '/path/to/test',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'TestRepo',
+        cliToolId: 'copilot',
+      };
+      upsertWorktree(db, worktree);
+
+      const request = new Request('http://localhost:3000/api/worktrees/test-model-valid/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'Test message', model: 'gpt-5-mini' }),
+      });
+
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-model-valid' } });
+      // Should succeed (201) or at least not be 400
+      // Note: might be 500 if copilot session fails to start in test env, but not 400
+      expect(response.status).not.toBe(400);
     });
   });
 

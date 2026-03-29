@@ -202,6 +202,66 @@ describe('detectSessionStatus - Copilot selection_list detection', () => {
     expect(result.reason).not.toBe(STATUS_REASON.COPILOT_SELECTION_LIST);
   });
 
+  it('should detect selection list even when Reasoning indicator is present', () => {
+    // /model selection screen shows "Reasoning ■■■ medium" which matches
+    // COPILOT_THINKING_PATTERN. Selection list must take priority.
+    const output = [
+      'Select Model',
+      'Choose the AI model to use for Copilot CLI.',
+      '[Available] Upgrade',
+      'Search models...',
+      '❯ Claude Sonnet 4.6 (default) ✓        1x',
+      '  Claude Sonnet 4.5                     1x',
+      '  Claude Haiku 4.5                   0.33x',
+      '  Claude Opus 4.6                       3x',
+      '  GPT-5 mini                            0x',
+      '',
+      'Reasoning ■■■ medium',
+      '',
+      '↑↓ to navigate · Tab switch tab · ←→ reasoning effort · Enter to select · Esc to cancel',
+    ].join('\n');
+
+    const result = detectSessionStatus(output, 'copilot');
+    expect(result.status).toBe('waiting');
+    expect(result.reason).toBe(STATUS_REASON.COPILOT_SELECTION_LIST);
+  });
+
+  it('should detect prompt (not selection list) for yes/no confirmation (2 options)', () => {
+    // Copilot yes/no prompts (2-3 options) should show PromptPanel, not NavigationButtons.
+    const output = [
+      'Do you want to run this command?',
+      '',
+      '❯ 1. Yes',
+      '  2. No, and tell Copilot what to do differently (Esc to stop)',
+      '',
+      '↑↓ to navigate · Enter to select · Esc to cancel',
+    ].join('\n');
+
+    const result = detectSessionStatus(output, 'copilot');
+    expect(result.status).toBe('waiting');
+    expect(result.reason).toBe('prompt_detected');
+    expect(result.hasActivePrompt).toBe(true);
+  });
+
+  it('should detect selection list (not prompt) for ask_user multi-select (4+ options)', () => {
+    // Copilot ask_user with 4+ options should show NavigationButtons for ↑↓ selection.
+    const output = [
+      '次のアクションを選んでください（推奨はビルド+テスト）。',
+      '❯ 1. ビルド+テスト実行 (推奨)',
+      '  2. Clippyチェックのみ',
+      '  3. 特定ファイルを詳しく調査する（ファイル名を指定）',
+      '  4. 何もしない',
+      '  5. Other (type your answer)',
+      '',
+      '↑↓ to select · Enter to confirm · Esc to cancel',
+    ].join('\n');
+
+    const result = detectSessionStatus(output, 'copilot');
+    expect(result.status).toBe('waiting');
+    expect(result.reason).toBe(STATUS_REASON.COPILOT_SELECTION_LIST);
+    expect(result.hasActivePrompt).toBe(false);
+  });
+
   it('should NOT detect copilot_selection_list for normal Copilot response', () => {
     const output = [
       'Here is your code:',

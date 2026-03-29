@@ -28,6 +28,7 @@ import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDe
 import { detectPrompt } from './prompt-detector';
 import type { PromptDetectionResult } from './prompt-detector';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
 
 /**
  * Session status types
@@ -87,28 +88,9 @@ export interface StatusDetectionResult {
  */
 const STATUS_CHECK_LINE_COUNT: number = 15;
 
-/**
- * Number of lines from the end to check for thinking indicators.
- * Thinking indicators (spinner + activity text) only appear in the most recent lines.
- * A small window prevents completed thinking summaries (e.g., "Churned for 41s")
- * in scrollback from being falsely detected as active thinking (Issue #188 root cause).
- *
- * SF-002 naming rationale: Named STATUS_THINKING_LINE_COUNT (not THINKING_CHECK_LINE_COUNT)
- * to avoid naming collision with auto-yes-manager.ts. Three related constants exist:
- *
- * | Constant                          | Value | Module              | Purpose                          |
- * |-----------------------------------|-------|---------------------|----------------------------------|
- * | STATUS_THINKING_LINE_COUNT        |   5   | status-detector.ts  | UI status display (accuracy)     |
- * | RESPONSE_THINKING_TAIL_LINE_COUNT |   5   | response-poller.ts  | Response extraction tail check   |
- * | THINKING_CHECK_LINE_COUNT         |  50   | auto-yes-manager.ts | Auto-Yes safety (wider window)   |
- *
- * The UI constants (5) use a narrow window for precision. The Auto-Yes constant (50)
- * uses a wider window that matches detectMultipleChoicePrompt's scan range, prioritizing
- * safety over precision (Issue #191).
- *
- * @constant
- */
-const STATUS_THINKING_LINE_COUNT: number = 5;
+// THINKING_TAIL_LINE_COUNT imported from @/config/thinking-constants (Issue #575)
+// Previously THINKING_TAIL_LINE_COUNT = 5 (local constant)
+// See also: THINKING_CHECK_LINE_COUNT (50) in auto-yes-manager.ts (wider window for safety)
 
 /**
  * Reason string constants for StatusDetectionResult.reason.
@@ -181,9 +163,45 @@ export function detectSessionStatus(
   const contentLines = lines.slice(0, lastNonEmptyIndex + 1);
   const lastLines = contentLines.slice(-STATUS_CHECK_LINE_COUNT).join('\n');
   // DR-003: Separate thinking detection window (5 lines) from prompt detection window (15 lines)
-  const thinkingLines = contentLines.slice(-STATUS_THINKING_LINE_COUNT).join('\n');
+  const thinkingLines = contentLines.slice(-THINKING_TAIL_LINE_COUNT).join('\n');
 
-  // 0. Copilot: thinking detection BEFORE prompt detection (Issue #547)
+  // 0. Copilot: selection list detection BEFORE thinking detection
+  // COPILOT_THINKING_PATTERN includes "Reasoning\s+[■▪▮]" which matches the
+  // "Reasoning ■■■ medium" UI element shown in /model selection lists.
+  // Without this early check, the selection list would be misdetected as thinking.
+  // However, yes/no prompts also contain "to navigate · Enter to select" footer,
+  // so we must check detectPrompt first — if a prompt is detected, it takes priority
+  // over selection list (prompts show PromptPanel with Yes/No buttons).
+  const copilotSelectionWindow = contentLines.slice(-30).join('\n');
+  if (cliToolId === 'copilot' && COPILOT_SELECTION_LIST_PATTERN.test(copilotSelectionWindow)) {
+    const promptOptions = buildDetectPromptOptions(cliToolId);
+    const promptDetection = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions);
+    if (promptDetection.isPrompt) {
+      // Distinguish yes/no prompts (2-3 options, e.g., "Do you want to run this command?")
+      // from ask_user multi-select prompts (4+ options). Yes/no prompts should show
+      // PromptPanel with buttons; ask_user prompts need NavigationButtons for ↑↓ selection.
+      const optionsCount = promptDetection.promptData?.options?.length ?? 0;
+      if (optionsCount <= 3) {
+        return {
+          status: 'waiting',
+          confidence: 'high',
+          reason: 'prompt_detected',
+          hasActivePrompt: true,
+          promptDetection,
+        };
+      }
+      // 4+ options: treat as selection list (NavigationButtons)
+    }
+    return {
+      status: 'waiting',
+      confidence: 'high',
+      reason: STATUS_REASON.COPILOT_SELECTION_LIST,
+      hasActivePrompt: false,
+      promptDetection,
+    };
+  }
+
+  // 0.5. Copilot: thinking detection BEFORE prompt detection (Issue #547)
   // Copilot CLI keeps the "❯" prompt visible even during processing,
   // so prompt detection would always match first. Check thinking first for copilot.
   // Uses last 15 lines (not 5) because copilot shows action log lines above prompt.
@@ -241,24 +259,10 @@ export function detectSessionStatus(
     };
   }
 
-  // 1.6. Copilot CLI selection list detection (Issue #547)
-  // Copilot CLI shows selection prompts (e.g., /model) with arrow key navigation.
-  // Uses last 30 lines (not 15) because model selection lists can exceed 15 lines,
-  // but not full cleanOutput to avoid false positives from scrollback buffer
-  // (selection list text persists in tmux history after list is closed).
-  // cliToolId guard prevents false positives on other CLI tools (DR2-004).
-  const copilotSelectionWindow = contentLines.slice(-30).join('\n');
-  if (cliToolId === 'copilot' && COPILOT_SELECTION_LIST_PATTERN.test(copilotSelectionWindow)) {
-    return {
-      status: 'waiting',
-      confidence: 'high',
-      reason: STATUS_REASON.COPILOT_SELECTION_LIST,
-      hasActivePrompt: false,
-      promptDetection,
-    };
-  }
+  // 1.6. Copilot CLI selection list detection — moved to priority 0 (above thinking)
+  // See comment at priority 0 for rationale.
 
-  // 2. Thinking indicator detection - STATUS_THINKING_LINE_COUNT window (narrower)
+  // 2. Thinking indicator detection - THINKING_TAIL_LINE_COUNT window (narrower)
   // CLI tool is actively processing (shows spinner, "Planning...", etc.)
   if (detectThinking(cliToolId, thinkingLines)) {
     return {
@@ -314,7 +318,7 @@ export function detectSessionStatus(
     if (lastContentIdx >= 0) {
       // B. Check last few content lines for thinking indicators
       const contentThinkingWindow = contentCandidates
-        .slice(Math.max(0, lastContentIdx - STATUS_THINKING_LINE_COUNT + 1), lastContentIdx + 1)
+        .slice(Math.max(0, lastContentIdx - THINKING_TAIL_LINE_COUNT + 1), lastContentIdx + 1)
         .join('\n');
       if (detectThinking('opencode', contentThinkingWindow)) {
         return {
@@ -393,7 +397,7 @@ export function detectSessionStatus(
       if (lastContentIdx >= 0) {
         // A. Check content area for thinking indicators (wider window than step 2)
         const codexThinkingWindow = contentLines
-          .slice(Math.max(0, lastContentIdx - STATUS_THINKING_LINE_COUNT + 1), lastContentIdx + 1)
+          .slice(Math.max(0, lastContentIdx - THINKING_TAIL_LINE_COUNT + 1), lastContentIdx + 1)
           .join('\n');
         if (detectThinking('codex', codexThinkingWindow)) {
           return {

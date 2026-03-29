@@ -66,7 +66,7 @@ vi.mock('@/lib/cli-tools/opencode-config', () => ({
 }));
 
 // Mock db modules for vibe-local
-vi.mock('@/lib/db-instance', () => ({
+vi.mock('@/lib/db/db-instance', () => ({
   getDbInstance: vi.fn().mockReturnValue({}),
 }));
 

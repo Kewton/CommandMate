@@ -4,7 +4,7 @@
  */
 
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import type { DetectPromptOptions } from './prompt-detector';
+import type { DetectPromptOptions } from './types';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('cli-patterns');
@@ -276,7 +276,7 @@ export const COPILOT_SEPARATOR_PATTERN = /^─{10,}$/m;
  * No /g flag (S4-5: would make test() stateful).
  * No nested quantifiers (SEC4-001: ReDoS safety).
  */
-export const COPILOT_SELECTION_LIST_PATTERN = /Search\s+\w+\.\.\.|Select\s+Model|to navigate.*Enter to select/m;
+export const COPILOT_SELECTION_LIST_PATTERN = /Search\s+\w+\.\.\.|Select\s+Model|to (?:navigate|select).*Enter to (?:select|confirm)/m;
 
 /**
  * Copilot skip patterns for response cleaning (Issue #545)
@@ -284,6 +284,29 @@ export const COPILOT_SELECTION_LIST_PATTERN = /Search\s+\w+\.\.\.|Select\s+Model
  */
 export const COPILOT_SKIP_PATTERNS: readonly RegExp[] = [
   PASTED_TEXT_PATTERN,
+  COPILOT_SEPARATOR_PATTERN,
+  COPILOT_THINKING_PATTERN,
+  COPILOT_SELECTION_LIST_PATTERN,
+  // Logo/banner lines
+  /^GitHub Copilot\s+v/,
+  /[█▘▝▖▗▔▄▌▐]/,
+  /[╭╮╰╯│]/,
+  // Status bar (branch + model display)
+  /\[⎇\s+\w[^\]]*\]/,
+  // Operation guide lines
+  /^shift\+tab\s/,
+  /^\?\s+for\s+shortcuts/,
+  /^ctrl\+[a-z]\s+\w/,
+  // Prompt lines
+  /^[❯>]\s*(Type\s+@|$)/,
+  // Tip/hint lines
+  /^Tip:\s+\//,
+  // Initial display text
+  /^Describe a task to get started/,
+  // Issue #571: Disclaimer, initialization message, environment info
+  /^Copilot uses AI, so always check for mistakes\.$/,  // Disclaimer (full-line match to avoid filtering user content mentioning Copilot)
+  /^● 💡/,                                              // Initialization hint message
+  /^● Environment loaded:/,                              // Environment info
 ] as const;
 
 /**

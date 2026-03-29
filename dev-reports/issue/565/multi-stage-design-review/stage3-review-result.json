@@ -1,0 +1,103 @@
+{
+  "issue_number": 565,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "findings": [
+    {
+      "id": "DR3-001",
+      "severity": "must_fix",
+      "category": "波及効果",
+      "title": "getAccumulatedContent()によるレスポンス置換がOpenCodeの既存実装と矛盾",
+      "description": "設計方針書セクション4.7では、isFullScreenTui時にgetAccumulatedContent(pollerKey)でresult.responseを置換する設計としている。しかし、現在のOpenCode実装（response-poller.ts L715-723）では、getAccumulatedContent()を使用していない。コメント（L718-720）に明示的に記載されているように、accumulatedContentはTUI全体の過去Q&A履歴を含むため、cleanOpenCodeResponseでトリミングしても旧レスポンスがリークする問題があるため、意図的にresult.responseを使用している。設計方針書の「isFullScreenTui条件で統一的に適用」方針をそのまま実装すると、OpenCodeの既存の正常動作を破壊するか、Copilotでも同様のQ&A履歴リーク問題が発生する可能性がある。",
+      "suggestion": "セクション4.7の設計を修正し、isFullScreenTuiの一括条件ではなく、cliToolId === 'copilot' の個別条件でgetAccumulatedContent()を適用すること。また、Copilotの蓄積コンテンツにも過去Q&A履歴が混入しないかを実機で検証し、混入する場合はcleanCopilotResponse内でトリミング戦略を明示すること。設計方針書の注記「OpenCodeで既にgetAccumulatedContent()を使用している場合は、その実装パターンに準拠する」の回答として、「OpenCodeでは使用していない」ことを明記すべき。",
+      "affected_section": "セクション4.7 蓄積コンテンツのレスポンス保存フロー、セクション4.8 isFullScreenTui分岐の整理"
+    },
+    {
+      "id": "DR3-002",
+      "severity": "should_fix",
+      "category": "波及効果",
+      "title": "resolveExtractionStartIndex Branch 2aにCopilot追加時のfindRecentUserPromptIndex動作未検証",
+      "description": "設計方針書セクション4.4では、resolveExtractionStartIndex内でcliToolId === 'opencode' || cliToolId === 'copilot'の条件でBranch 2aを適用するとしている。Branch 2aではfindRecentUserPromptIndex(totalLines)を呼び出し、ユーザープロンプト行を探す。しかし、findRecentUserPromptIndexはcliToolId別のpromptPatternに依存しており（response-poller.ts内のextractResponse()からコールバックとして渡される）、CopilotのCOPILOT_PROMPT_PATTERN（/^[>❯]\\s|^\\?\\s+/m）がTUI出力のalternate screen内で正しくユーザープロンプト行を検出できるかが未検証。OpenCodeの場合はOPENCODE_PROMPT_PATTERN（/Ask anything.../）で一意に特定できるが、Copilotの'>'や'?'は応答本文内にも出現しうる。",
+      "suggestion": "Copilot TUIのalternate screen出力サンプルを用いて、findRecentUserPromptIndexが正しくユーザープロンプト行を検出できるかのテストケースを追加すること。誤検出が多い場合は、Branch 2aではなく別ブランチ（例: 常にindex 0から開始）を検討する。",
+      "affected_section": "セクション4.4 resolveExtractionStartIndex Copilot分岐"
+    },
+    {
+      "id": "DR3-003",
+      "severity": "should_fix",
+      "category": "後方互換性",
+      "title": "accumulateTuiContentのデフォルト引数'opencode'が将来の混乱を招く",
+      "description": "accumulateTuiContentのシグネチャ変更で cliToolId: CLIToolType = 'opencode' としているが、現在の呼び出し元（response-poller.ts L605-608）は既にcliToolIdを明示的に渡す条件分岐内にある（cliToolId === 'opencode' || cliToolId === 'copilot'）。デフォルト値が使用されるケースは既存コードに存在しない。デフォルト値の'opencode'は「引数なし呼び出し = OpenCode」という暗黙の仮定を作り、将来別の文脈から呼び出された場合に誤った動作を引き起こす可能性がある。ただし、既存テスト（response-poller-tui-accumulator.test.ts）ではaccumulateTuiContent(key, rawOutput)の2引数呼び出しが多数あり、これらはデフォルト値により正常動作を維持する。",
+      "suggestion": "既存テストの後方互換性のためにデフォルト値は維持してよいが、JSDocにデフォルト値の使用が既存テスト互換のためである旨を明記すること。本番コードからの呼び出しでは常にcliToolIdを明示的に渡すことをコーディング規約として追記する。",
+      "affected_section": "セクション3.1 Strategy統合、セクション4.1.3 accumulateTuiContent シグネチャ拡張"
+    },
+    {
+      "id": "DR3-004",
+      "severity": "should_fix",
+      "category": "テスト",
+      "title": "既存テストresponse-poller-tui-accumulator.test.tsのaccumulateTuiContent呼び出しが暗黙的にOpenCode動作を検証",
+      "description": "既存のresponse-poller-tui-accumulator.test.tsでは、accumulateTuiContent(key, rawOutput)を2引数で呼び出している（約10箇所）。シグネチャ変更後、これらはデフォルト値'opencode'でextractTuiContentLines()を呼ぶため、既存テストは壊れない。しかし、テストファイル内でcliToolId引数のテストケースが存在しないため、Copilotパスの分岐がテストされない。また、TEST_KEY = 'test-worktree:opencode' が固定されており、Copilot用のテストキーでの動作確認が欠けている。",
+      "suggestion": "response-poller-tui-accumulator.test.tsに以下のテストケースを追加計画に含めること: (1) accumulateTuiContent(key, rawOutput, 'copilot')が extractCopilotContentLinesを呼ぶことの検証、(2) accumulateTuiContent(key, rawOutput, 'opencode')が extractTuiContentLinesを呼ぶことの検証（明示的引数）。これにより分岐の網羅性が向上する。設計方針書セクション5.2の既存テスト更新計画にこの具体的なテストケースを追記する。",
+      "affected_section": "セクション5.2 既存テスト更新"
+    },
+    {
+      "id": "DR3-005",
+      "severity": "nice_to_have",
+      "category": "パフォーマンス",
+      "title": "SHA-256計算のパフォーマンスは問題ないが、promptHashCacheのメモリリーク対策が不十分",
+      "description": "SHA-256計算自体は設計方針書記載の通り<1msで問題ない。しかし、promptHashCacheはMap<string, string>でpollerKey単位で管理されており、stopPolling時にclearPromptHashCacheが呼ばれる設計だが、session-cleanup.tsのkillWorktreeSession等からstopPollingを呼ぶパスでは、clearPromptHashCacheが間接的に呼ばれることになる。一方、プロセス異常終了やuncaughtExceptionの場合、stopPollingが呼ばれずキャッシュが残り続ける可能性がある。ただし、pollerKey単位でMap.setが上書きするため、同一キーの蓄積は発生せず、キー数はアクティブセッション数に比例するため、実際のメモリリスクは極めて低い。",
+      "suggestion": "現状の設計で十分だが、resource-cleanup.tsの孤立リソース検出にpromptHashCacheのサイズ監視を追加することを将来の検討事項として記載してもよい。",
+      "affected_section": "セクション6.2 リソースリーク対策"
+    },
+    {
+      "id": "DR3-006",
+      "severity": "should_fix",
+      "category": "波及効果",
+      "title": "COPILOT_SKIP_PATTERNSの現状がほぼ空のため、設計の3箇所適用による実効性が低い",
+      "description": "現在のCOPILOT_SKIP_PATTERNS（cli-patterns.ts L285-287）にはPASTED_TEXT_PATTERNの1パターンのみが含まれている。設計方針書セクション4.1.2ではCOPILOT_SEPARATOR_PATTERNとCOPILOT_THINKING_PATTERNを追加する計画だが、他のパターン（ショートカット表示行、ナビゲーション指示等）はコメントアウト状態であり、TDD方式で段階的に追加する方針（DR1-007）としている。これ自体は正しいが、初回リリース時点ではextractCopilotContentLinesのフィルタリング効果が限定的であり、TUIの装飾行がそのまま蓄積コンテンツに混入する可能性がある。",
+      "suggestion": "初回リリース時のCOPILOT_SKIP_PATTERNSが最小限であることのリスクを設計方針書に明記し、蓄積コンテンツの品質が低い場合はcleanCopilotResponseの後段フィルタリング（方針B）で吸収される旨を補足する。また、初回リリース後にTUI出力サンプルを収集してパターンを拡充するフォローアップ計画を記載する。",
+      "affected_section": "セクション4.1.2 COPILOT_SKIP_PATTERNS拡張"
+    },
+    {
+      "id": "DR3-007",
+      "severity": "should_fix",
+      "category": "波及効果",
+      "title": "extractResponse L518のCopilotスキップが早期プロンプト検出L344と重複する意図の明確化",
+      "description": "設計方針書セクション4.5ではL518の一般プロンプト検出からCopilotをスキップする変更を記載している。一方、L344の早期プロンプト検出にはCopilotが既に含まれている（cliToolId === 'claude' || cliToolId === 'codex' || cliToolId === 'copilot'）。L518をスキップする変更自体は正しいが、CopilotがL344で検出され且つL518もスキップされる場合、「L344で検出されなかったCopilotプロンプト」を検出する手段が完全に失われる。OpenCodeではisOpenCodeCompleteという独立した完了検出があるため問題ないが、Copilotの完了検出（isCodexOrGeminiComplete L372）が失敗した場合のフォールバックパスが存在しなくなる。",
+      "suggestion": "Copilotの完了検出がL344早期検出とL372のisCodexOrGeminiCompleteの2パスで十分であることの根拠を設計方針書に追記する。特に、CopilotのpromptPatternがL344とL372の両方で使用されるため、いずれかで検出される保証があることを明示する。",
+      "affected_section": "セクション4.5 extractResponse L518 一般プロンプト検出のCopilotスキップ判断"
+    },
+    {
+      "id": "DR3-008",
+      "severity": "nice_to_have",
+      "category": "パフォーマンス",
+      "title": "extractCopilotContentLinesの計算量はO(n*m)だが実用上問題なし",
+      "description": "extractCopilotContentLinesは各行に対してCOPILOT_SKIP_PATTERNSの全パターンをテストする（O(n*m)、n=行数、m=パターン数）。tmux capture-paneの出力は約24行（設計方針書セクション2.2）、パターン数は現在1個（将来的に10個程度）であるため、計算量は実用上無視できる。extractTuiContentLines（OpenCode）も同様のO(n*m)構造であり、パフォーマンス差は生じない。",
+      "suggestion": "現状の設計で問題ない。パターン数が大幅に増加した場合（20個以上）に備えて、正規表現の統合（OR結合）を検討するメモをコード内に残してもよいが、優先度は低い。",
+      "affected_section": "セクション7.1 ポーリング影響"
+    },
+    {
+      "id": "DR3-009",
+      "severity": "should_fix",
+      "category": "後方互換性",
+      "title": "isDuplicatePromptがisFullScreenTui条件内のみで適用される設計だが、将来的な全ツール適用の可能性を考慮すべき",
+      "description": "設計方針書セクション4.2.1では、isDuplicatePromptの呼び出しをisFullScreenTui条件内に配置している（L307: if (isFullScreenTui && isDuplicatePrompt(pollerKey, promptContent))）。非TUIツール（claude, codex, gemini, vibe-local）ではline-countベースの重複防止が機能するため、hash重複チェックは不要という判断は妥当。ただし、将来的にline-countベースの重複防止に問題が発見された場合に、isDuplicatePromptを全ツールに適用する拡張パスが容易であることを確認しておくべき。",
+      "suggestion": "isDuplicatePromptの関数シグネチャは汎用的（pollerKey, content）であり、isFullScreenTui条件を外すだけで全ツールに適用可能。この拡張容易性をprompt-dedup.tsのJSDocに記載する。",
+      "affected_section": "セクション4.2.1 content hashベース重複チェック"
+    },
+    {
+      "id": "DR3-010",
+      "severity": "nice_to_have",
+      "category": "テスト",
+      "title": "テスト計画でresponse-poller.tsの統合テスト（checkForResponse内のisDuplicatePrompt呼び出し）が欠如",
+      "description": "設計方針書セクション5.1の新規テストファイルにprompt-dedup.test.tsが含まれているが、これはisDuplicatePromptの単体テストのみ。checkForResponse内でisDuplicatePromptが正しく呼ばれ、createMessageの前に重複をスキップする統合的な動作のテストは計画されていない。response-poller.tsのcheckForResponseは多数のモック依存があり統合テストが困難ではあるが、重複防止が正しく機能することの確認は重要。",
+      "suggestion": "既存のresponse-poller.test.tsに、Copilotの重複プロンプト検出シナリオのテストケースを追加する計画を検討する。モック構成が複雑な場合は、最低限prompt-dedup.test.tsでの単体テストでカバーし、手動テスト手順書に統合シナリオを記載する。",
+      "affected_section": "セクション5 テスト計画"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 6,
+    "nice_to_have_count": 3,
+    "total": 10
+  }
+}

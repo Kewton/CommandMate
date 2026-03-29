@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
 // Mock the database functions
-vi.mock('@/lib/db-instance', () => ({
+vi.mock('@/lib/db/db-instance', () => ({
   getDbInstance: vi.fn(() => ({})),
 }));
 

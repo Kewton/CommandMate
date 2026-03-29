@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
-import { getDbInstance } from '@/lib/db-instance';
+import { getDbInstance } from '@/lib/db/db-instance';
 import { scanWorktrees } from '@/lib/git/worktrees';
 import { isPathSafe } from '@/lib/security/path-validator';
 import { getEnv } from '@/lib/env';

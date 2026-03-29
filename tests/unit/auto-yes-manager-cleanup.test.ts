@@ -12,8 +12,8 @@ import {
   clearAllPollerStates,
   startAutoYesPolling,
   deleteAutoYesState,
-  getAutoYesStateWorktreeIds,
-  getAutoYesPollerWorktreeIds,
+  getAutoYesStateCompositeKeys,
+  getAutoYesPollerCompositeKeys,
   buildCompositeKey,
 } from '@/lib/polling/auto-yes-manager';
 
@@ -85,19 +85,19 @@ describe('Auto-Yes Manager Cleanup Functions (Issue #404, #525)', () => {
       startAutoYesPolling('wt-both', 'claude');
 
       // Verify poller is active
-      expect(getAutoYesPollerWorktreeIds()).toContain('wt-both:claude');
+      expect(getAutoYesPollerCompositeKeys()).toContain('wt-both:claude');
 
       // Act: delete only the auto-yes state
       deleteAutoYesState(buildCompositeKey('wt-both', 'claude'));
 
       // Assert: poller should still be present
-      expect(getAutoYesPollerWorktreeIds()).toContain('wt-both:claude');
+      expect(getAutoYesPollerCompositeKeys()).toContain('wt-both:claude');
     });
   });
 
-  describe('getAutoYesStateWorktreeIds (returns composite keys)', () => {
+  describe('getAutoYesStateCompositeKeys (returns composite keys)', () => {
     it('should return empty array when no states exist', () => {
-      expect(getAutoYesStateWorktreeIds()).toEqual([]);
+      expect(getAutoYesStateCompositeKeys()).toEqual([]);
     });
 
     it('should return correct composite keys', () => {
@@ -105,7 +105,7 @@ describe('Auto-Yes Manager Cleanup Functions (Issue #404, #525)', () => {
       setAutoYesEnabled('wt-b', 'codex', true);
       setAutoYesEnabled('wt-c', 'claude', true);
 
-      const ids = getAutoYesStateWorktreeIds();
+      const ids = getAutoYesStateCompositeKeys();
       expect(ids).toHaveLength(3);
       expect(ids).toContain('wt-a:claude');
       expect(ids).toContain('wt-b:codex');
@@ -113,9 +113,9 @@ describe('Auto-Yes Manager Cleanup Functions (Issue #404, #525)', () => {
     });
   });
 
-  describe('getAutoYesPollerWorktreeIds (returns composite keys)', () => {
+  describe('getAutoYesPollerCompositeKeys (returns composite keys)', () => {
     it('should return empty array when no pollers exist', () => {
-      expect(getAutoYesPollerWorktreeIds()).toEqual([]);
+      expect(getAutoYesPollerCompositeKeys()).toEqual([]);
     });
 
     it('should return correct composite keys for active pollers', () => {
@@ -125,7 +125,7 @@ describe('Auto-Yes Manager Cleanup Functions (Issue #404, #525)', () => {
       startAutoYesPolling('wt-p1', 'claude');
       startAutoYesPolling('wt-p2', 'codex');
 
-      const ids = getAutoYesPollerWorktreeIds();
+      const ids = getAutoYesPollerCompositeKeys();
       expect(ids).toHaveLength(2);
       expect(ids).toContain('wt-p1:claude');
       expect(ids).toContain('wt-p2:codex');

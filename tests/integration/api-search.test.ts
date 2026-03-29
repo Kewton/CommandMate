@@ -13,7 +13,7 @@ import { NextRequest } from 'next/server';
 import { GET } from '@/app/api/worktrees/[id]/search/route';
 
 // Mock dependencies
-vi.mock('@/lib/db-instance', () => ({
+vi.mock('@/lib/db/db-instance', () => ({
   getDbInstance: vi.fn(() => ({})),
 }));
 

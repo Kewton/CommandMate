@@ -20,7 +20,7 @@ vi.mock('croner', () => ({
 }));
 
 // Mock db-instance
-vi.mock('../../../src/lib/db-instance', () => {
+vi.mock('../../../src/lib/db/db-instance', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const Database = require('better-sqlite3');
   let db: InstanceType<typeof Database> | null = null;

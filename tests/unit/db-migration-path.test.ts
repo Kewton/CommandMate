@@ -12,7 +12,7 @@ import {
   getLegacyDbPaths,
   migrateDbIfNeeded,
   resolveAndValidatePath,
-} from '../../src/lib/db-migration-path';
+} from '../../src/lib/db/db-migration-path';
 
 // Mock logger module (Issue #480)
 const { mockLogger } = vi.hoisted(() => {

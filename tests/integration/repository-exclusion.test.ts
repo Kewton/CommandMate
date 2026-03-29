@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import Database from 'better-sqlite3';
-import { runMigrations } from '@/lib/db-migrations';
+import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree, getWorktrees } from '@/lib/db';
 import {
   createRepository,
@@ -18,14 +18,14 @@ import {
   restoreRepository,
   ensureEnvRepositoriesRegistered,
   filterExcludedPaths,
-} from '@/lib/db-repository';
+} from '@/lib/db/db-repository';
 import { GET } from '@/app/api/repositories/excluded/route';
 import { PUT } from '@/app/api/repositories/restore/route';
 
 // Mock db-instance to use test database
 let testDb: Database.Database;
 
-vi.mock('@/lib/db-instance', () => ({
+vi.mock('@/lib/db/db-instance', () => ({
   getDbInstance: () => testDb,
 }));
 

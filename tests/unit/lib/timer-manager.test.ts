@@ -22,7 +22,7 @@ const mockDbPrepare = vi.fn();
 const mockDb = {
   prepare: mockDbPrepare,
 };
-vi.mock('@/lib/db-instance', () => ({
+vi.mock('@/lib/db/db-instance', () => ({
   getDbInstance: vi.fn(() => mockDb),
 }));
 

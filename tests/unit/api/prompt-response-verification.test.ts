@@ -15,18 +15,18 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { POST as promptResponse } from '@/app/api/worktrees/[id]/prompt-response/route';
 import type { NextRequest } from 'next/server';
 import Database from 'better-sqlite3';
-import { runMigrations } from '@/lib/db-migrations';
+import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree } from '@/lib/db';
 import type { Worktree, PromptType } from '@/types/models';
 
 // --- Mocks ---
 
 // Mock db-instance
-declare module '@/lib/db-instance' {
+declare module '@/lib/db/db-instance' {
   export function setMockDb(db: Database.Database): void;
 }
 
-vi.mock('@/lib/db-instance', () => {
+vi.mock('@/lib/db/db-instance', () => {
   let mockDb: Database.Database | null = null;
   return {
     getDbInstance: () => {
@@ -116,7 +116,7 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
     db = new Database(':memory:');
     runMigrations(db);
 
-    const { setMockDb } = await import('@/lib/db-instance');
+    const { setMockDb } = await import('@/lib/db/db-instance');
     setMockDb(db);
 
     // Create test worktree
@@ -251,7 +251,7 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
     db = new Database(':memory:');
     runMigrations(db);
 
-    const { setMockDb } = await import('@/lib/db-instance');
+    const { setMockDb } = await import('@/lib/db/db-instance');
     setMockDb(db);
 
     const worktree: Worktree = {
@@ -500,7 +500,7 @@ describe('POST /api/worktrees/:id/prompt-response - Error handling and edge case
     db = new Database(':memory:');
     runMigrations(db);
 
-    const { setMockDb } = await import('@/lib/db-instance');
+    const { setMockDb } = await import('@/lib/db/db-instance');
     setMockDb(db);
 
     const worktree: Worktree = {
@@ -638,7 +638,7 @@ describe('POST /api/worktrees/:id/prompt-response - Multi-select (checkbox) prom
     db = new Database(':memory:');
     runMigrations(db);
 
-    const { setMockDb } = await import('@/lib/db-instance');
+    const { setMockDb } = await import('@/lib/db/db-instance');
     setMockDb(db);
 
     const worktree: Worktree = {

@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getDbInstance } from '@/lib/db-instance';
+import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById, upsertWorktree } from '@/lib/db';
 import { CLI_TOOL_IDS, isCliToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';

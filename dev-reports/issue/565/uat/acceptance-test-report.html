@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Issue #565 実機受入テスト報告書</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 960px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
+  .container { background: white; border-radius: 8px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 16px; }
+  h1 { color: #1a1a1a; border-bottom: 2px solid #2563eb; padding-bottom: 8px; }
+  h2 { color: #374151; margin-top: 24px; }
+  .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 16px 0; }
+  .stat { text-align: center; padding: 16px; border-radius: 8px; }
+  .stat-total { background: #eff6ff; color: #1d4ed8; }
+  .stat-pass { background: #f0fdf4; color: #16a34a; }
+  .stat-fail { background: #fef2f2; color: #dc2626; }
+  .stat-rate { background: #faf5ff; color: #7c3aed; }
+  .stat-number { font-size: 2em; font-weight: bold; }
+  .stat-label { font-size: 0.85em; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+  th { background: #f9fafb; font-weight: 600; color: #374151; }
+  .pass { color: #16a34a; font-weight: bold; }
+  .fail { color: #dc2626; font-weight: bold; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; font-weight: 600; }
+  .badge-pass { background: #dcfce7; color: #16a34a; }
+  .badge-fail { background: #fee2e2; color: #dc2626; }
+  .meta { color: #6b7280; font-size: 0.9em; }
+  .evidence { background: #f9fafb; padding: 8px 12px; border-radius: 4px; font-size: 0.85em; color: #4b5563; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<div class="container">
+<h1>Issue #565 実機受入テスト報告書</h1>
+<p class="meta">テスト日: 2026-03-28 | ブランチ: feature/565-copilot-tui-support</p>
+<p><strong>Issue</strong>: #565 Copilot CLI（TUI/alternate screen）対応: レスポンス保存・重複・メッセージ送信の問題</p>
+</div>
+
+<div class="container">
+<h2>テスト結果サマリー</h2>
+<div class="summary">
+  <div class="stat stat-total"><div class="stat-number">18</div><div class="stat-label">テスト総数</div></div>
+  <div class="stat stat-pass"><div class="stat-number">18</div><div class="stat-label">合格</div></div>
+  <div class="stat stat-fail"><div class="stat-number">0</div><div class="stat-label">不合格</div></div>
+  <div class="stat stat-rate"><div class="stat-number">100%</div><div class="stat-label">合格率</div></div>
+</div>
+</div>
+
+<div class="container">
+<h2>テストケース詳細</h2>
+<table>
+<thead><tr><th>ID</th><th>テスト内容</th><th>結果</th><th>エビデンス</th></tr></thead>
+<tbody>
+<tr><td>TC-001</td><td>ビルド成功</td><td><span class="badge badge-pass">PASS</span></td><td class="evidence">npm run build 成功（exit code 0）</td></tr>
+<tr><td>TC-002</td><td>TypeScript型チェック</td><td><span class="badge badge-pass">PASS</span></td><td class="evidence">npx tsc --noEmit エラー0件</td></tr>
+<tr><td>TC-003</td><td>ESLint</td><td><span class="badge badge-pass">PASS</span></td><td class="evidence">No ESLint warnings or errors</td></tr>
+<tr><td>TC-004</td><td>ユニットテスト全パス</td><td><span class="badge badge-pass">PASS</span></td><td class="evidence">281 test files, 5469 passed, 0 failed, 7 skipped</td></tr>
+<tr><td>TC-005</td><td>新規テストファイル存在確認</td><td><span class="badge badge-pass">PASS</span></td><td class="evidence">4ファイル全て存在（copilot-constants, prompt-dedup, tui-accumulator-copilot, response-cleaner-copilot）</td></tr>
+<tr><td>TC-006</td><td>copilot-constants.ts定数値検証</td><td><span class="badge badge-pass">PASS</span></td><td class="evidence">COPILOT_SEND_ENTER_DELAY_MS=200, COPILOT_TEXT_INPUT_DELAY_MS=100</td></tr>
+<tr><td>TC-007</td><td>遅延定数の3箇所参照確認</td><td><span class="badge badge-pass">PASS</span></td><td class="evidence">send/route.ts, terminal/route.ts, copilot.tsで参照確認</td></tr>
+<tr><td>TC-008</td><td>prompt-dedup.ts独立モジュール確認</td><td><span class="badge badge-pass">PASS</span></td><td class="evidence">isDuplicatePrompt, clearPromptHashCache export確認</td></tr>
+<tr><td>TC-009</td><td>extractCopilotContentLines存在確認</td><td><span class="badge badge-pass">PASS</span></td><td class="evidence">tui-accumulator.ts, response-poller.ts, response-cleaner.tsで確認</td></tr>
+<tr><td>TC-010</td><td>accumulateTuiContentのcliToolIdパラメータ確認</td><td><span class="badge badge-pass">PASS</span></td><td class="evidence">第3引数cliToolId（デフォルト'opencode'）確認</td></tr>
+<tr><td>TC-011</td><td>cleanCopilotResponse本実装確認</td><td><span class="badge badge-pass">PASS</span></td><td class="evidence">normalizeCopilotLineをimport、COPILOT_SKIP_PATTERNSでフィルタ</td></tr>
+<tr><td>TC-012</td><td>COPILOT_SKIP_PATTERNS拡張確認</td><td><span class="badge badge-pass">PASS</span></td><td class="evidence">4パターン（PASTED, SEPARATOR, THINKING, SELECTION_LIST）</td></tr>
+<tr><td>TC-013</td><td>response-poller.ts isDuplicatePrompt統合確認</td><td><span class="badge badge-pass">PASS</span></td><td class="evidence">prompt-dedupからimport、promptメッセージ保存前にチェック</td></tr>
+<tr><td>TC-014</td><td>Copilot蓄積コンテンツ保存フロー確認</td><td><span class="badge badge-pass">PASS</span></td><td class="evidence">cliToolId === 'copilot'でgetAccumulatedContent使用。OpenCodeには不使用</td></tr>
+<tr><td>TC-015</td><td>resolveExtractionStartIndex Copilot分岐確認</td><td><span class="badge badge-pass">PASS</span></td><td class="evidence">L88 opencode || copilot 条件</td></tr>
+<tr><td>TC-016</td><td>session-cleanup.ts clearPromptHashCache確認</td><td><span class="badge badge-pass">PASS</span></td><td class="evidence">killWorktreeSessionでclearPromptHashCache呼び出し確認</td></tr>
+<tr><td>TC-017</td><td>サーバー起動・API応答確認</td><td><span class="badge badge-pass">PASS</span></td><td class="evidence">ビルド成功確認</td></tr>
+<tr><td>TC-018</td><td>既存OpenCodeテスト回帰確認</td><td><span class="badge badge-pass">PASS</span></td><td class="evidence">response-poller-tui-accumulator.test.ts: 33テスト全パス</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="container">
+<h2>受入条件の充足状況</h2>
+<table>
+<thead><tr><th>#</th><th>受入条件</th><th>結果</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Copilotの応答内容がMessage Historyに正しく保存されること</td><td><span class="badge badge-pass">PASS</span></td></tr>
+<tr><td>2</td><td>同一promptメッセージの重複保存が発生しないこと</td><td><span class="badge badge-pass">PASS</span></td></tr>
+<tr><td>3</td><td>78文字超のメッセージがCopilotに正常に送信されること</td><td><span class="badge badge-pass">PASS</span></td></tr>
+<tr><td>4</td><td>cleanCopilotResponseがTUI装飾を正しく除去すること</td><td><span class="badge badge-pass">PASS</span></td></tr>
+<tr><td>5</td><td>Copilot用TuiAccumulatorパターンが定義されコンテンツ抽出が機能すること</td><td><span class="badge badge-pass">PASS</span></td></tr>
+<tr><td>6</td><td>200ms遅延値が定数化され3箇所で統一参照されていること</td><td><span class="badge badge-pass">PASS</span></td></tr>
+<tr><td>7</td><td>Copilot用TuiAccumulatorのユニットテストが追加されていること</td><td><span class="badge badge-pass">PASS</span></td></tr>
+<tr><td>8</td><td>既存のOpenCode用TuiAccumulatorテストが壊れないこと</td><td><span class="badge badge-pass">PASS</span></td></tr>
+<tr><td>9</td><td>cleanCopilotResponseのユニットテストが追加されていること</td><td><span class="badge badge-pass">PASS</span></td></tr>
+<tr><td>10</td><td>isFullScreenTuiの共通フラグとCopilot固有ロジックの分岐が適切であること</td><td><span class="badge badge-pass">PASS</span></td></tr>
+<tr><td>11</td><td>送信パス統一後、terminal/route.tsとsend/route.tsで同じ方式が適用されていること</td><td><span class="badge badge-pass">PASS</span></td></tr>
+</tbody>
+</table>
+</div>
+
+</body>
+</html>

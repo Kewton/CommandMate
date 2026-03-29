@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getDbInstance } from '@/lib/db-instance';
+import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById, getMemoById, updateMemo, deleteMemo } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
 

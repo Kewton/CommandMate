@@ -15,10 +15,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isCliToolType } from '@/lib/cli-tools/types';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { getWorktreeById } from '@/lib/db';
-import { getDbInstance } from '@/lib/db-instance';
-import { hasSession, sendKeys } from '@/lib/tmux/tmux';
+import { getDbInstance } from '@/lib/db/db-instance';
+import { hasSession, sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 import { createLogger } from '@/lib/logger';
+import { COPILOT_SEND_ENTER_DELAY_MS } from '@/config/copilot-constants';
 
 const logger = createLogger('api/terminal');
 
@@ -80,7 +81,18 @@ export async function POST(
 
     // Send command to tmux session via sendKeys (non-blocking for all tools)
     // Note: copilot sendMessage() was reverted due to waitForPrompt blocking issues (#559)
-    await sendKeys(sessionName, command);
+    if (cliToolId === 'copilot') {
+      // Copilot CLI auto-enters multi-line mode when text exceeds pane width.
+      // In multi-line mode, C-m (bundled with text) adds a newline instead of
+      // submitting. Sending Enter as a separate command after a delay works.
+      // Replace newlines with spaces to prevent Copilot CLI multi-line mode
+      const copilotCommand = command.replace(/\n+/g, ' ').trim();
+      await sendKeys(sessionName, copilotCommand, false);
+      await new Promise(resolve => setTimeout(resolve, COPILOT_SEND_ENTER_DELAY_MS));
+      await sendSpecialKeys(sessionName, ['Enter']);
+    } else {
+      await sendKeys(sessionName, command);
+    }
 
     // Issue #405: Invalidate cache after sending command
     invalidateCache(sessionName);

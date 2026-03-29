@@ -21,7 +21,7 @@ CommandMate is a local control plane for agent CLIs.
 npx commandmate
 ```
 
-**From install to your first session in 60 seconds.** macOS / Linux · Node.js v20+ · npm · git · tmux
+**From install to your first session in 60 seconds.** macOS / Linux / Windows (WSL2) · Node.js v20+ · npm · git · tmux
 
 ---
 
@@ -108,6 +108,7 @@ commandmate start --daemon
 Open http://localhost:3000 in your browser.
 
 See the [CLI Setup Guide](./docs/en/user-guide/cli-setup-guide.md) for details.
+For Windows users, see the [WSL2 Setup Guide](./docs/user-guide/wsl2-setup.md).
 
 </details>
 

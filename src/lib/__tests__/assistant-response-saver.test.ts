@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import { runMigrations } from '../db-migrations';
+import { runMigrations } from '../db/db-migrations';
 import { upsertWorktree, getMessages, updateSessionState, getSessionState } from '../db';
 
 // The module we're testing - will be created

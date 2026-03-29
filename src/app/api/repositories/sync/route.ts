@@ -6,9 +6,9 @@
  */
 
 import { NextResponse } from 'next/server';
-import { getDbInstance } from '@/lib/db-instance';
+import { getDbInstance } from '@/lib/db/db-instance';
 import { getRepositoryPaths, scanMultipleRepositories } from '@/lib/git/worktrees';
-import { registerAndFilterRepositories, getAllRepositories } from '@/lib/db-repository';
+import { registerAndFilterRepositories, getAllRepositories } from '@/lib/db/db-repository';
 import { syncWorktreesAndCleanup } from '@/lib/session-cleanup';
 import { createLogger } from '@/lib/logger';
 

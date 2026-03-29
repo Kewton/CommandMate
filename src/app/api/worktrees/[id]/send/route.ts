@@ -14,7 +14,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getDbInstance } from '@/lib/db-instance';
+import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById, createMessage, updateLastUserMessage, clearInProgressMessageId, saveInitialBranch, getInitialBranch, getMessages, deleteMessageById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, isImageCapableCLITool, type CLIToolType } from '@/lib/cli-tools/types';
@@ -22,10 +22,12 @@ import { startPolling } from '@/lib/polling/response-poller';
 import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
 import { getGitStatus } from '@/lib/git/git-utils';
 import { isPathSafe, resolveAndValidateRealPath } from '@/lib/security/path-validator';
-import { sendKeys } from '@/lib/tmux/tmux';
+import { sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 import path from 'path';
 import { createLogger } from '@/lib/logger';
+import { COPILOT_SEND_ENTER_DELAY_MS } from '@/config/copilot-constants';
+import { CopilotTool } from '@/lib/cli-tools/copilot';
 
 const logger = createLogger('api/send');
 
@@ -39,7 +41,14 @@ interface SendMessageRequest {
   content: string;
   cliToolId?: CLIToolType;  // Optional: override the worktree's default CLI tool
   imagePath?: string;  // Issue #474: relative path within .commandmate/attachments/
+  model?: string;  // Issue #576: AI model name for Copilot agent
 }
+
+/** Issue #576: Valid model name pattern (alphanumeric, hyphens, dots, underscores, slashes, colons) */
+const MODEL_NAME_PATTERN = /^[a-zA-Z0-9\-._/:]+$/;
+
+/** Issue #576: Maximum model name length */
+const MODEL_NAME_MAX_LENGTH = 128;
 
 /** [S4-M2] URL schemes that are not allowed in imagePath (SSRF prevention) */
 const DANGEROUS_SCHEMES = ['file://', 'http://', 'https://', 'ftp://', 'data:'];
@@ -150,6 +159,38 @@ export async function POST(
       );
     }
 
+    // Issue #576: Validate model parameter
+    if (body.model) {
+      // model is only supported for copilot
+      if (cliToolId !== 'copilot') {
+        return NextResponse.json(
+          { error: 'The model parameter is only supported for copilot agent' },
+          { status: 400 }
+        );
+      }
+      // Control character check
+      if (CONTROL_CHAR_REGEX.test(body.model)) {
+        return NextResponse.json(
+          { error: 'Invalid model name: contains control characters' },
+          { status: 400 }
+        );
+      }
+      // Character pattern check
+      if (!MODEL_NAME_PATTERN.test(body.model)) {
+        return NextResponse.json(
+          { error: 'Invalid model name: contains invalid characters' },
+          { status: 400 }
+        );
+      }
+      // Length check
+      if (body.model.length > MODEL_NAME_MAX_LENGTH) {
+        return NextResponse.json(
+          { error: `Invalid model name: exceeds maximum length of ${MODEL_NAME_MAX_LENGTH} characters` },
+          { status: 400 }
+        );
+      }
+    }
+
     // Get CLI tool instance from manager
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(cliToolId);
@@ -237,6 +278,21 @@ export async function POST(
       absoluteImagePath = validationResult;
     }
 
+    // Issue #576: Send /model command before message if model is specified
+    if (body.model && cliToolId === 'copilot') {
+      try {
+        const copilotTool = cliTool as CopilotTool;
+        await copilotTool.sendModelCommand(params.id, body.model);
+        logger.info('copilot-model-command-sent', { model: body.model });
+      } catch (error: unknown) {
+        logger.error('failed-to-send-model-command:', { error: error instanceof Error ? error.message : String(error) });
+        return NextResponse.json(
+          { error: `Failed to switch model to ${body.model}: ${getErrorMessage(error)}` },
+          { status: 500 }
+        );
+      }
+    }
+
     // Send message to CLI tool
     try {
       // Issue #474: Image-aware sending
@@ -253,8 +309,16 @@ export async function POST(
         }
       } else if (cliToolId === 'copilot') {
         // Copilot: use sendKeys directly to avoid waitForPrompt blocking (#559)
+        // Copilot CLI auto-enters multi-line mode when text exceeds pane width.
+        // In multi-line mode, C-m (bundled with text) adds a newline instead of
+        // submitting. Sending Enter as a separate tmux command after a delay
+        // allows the TUI to process the text first, then accept Enter as submit.
         const sessionName = cliTool.getSessionName(params.id);
-        await sendKeys(sessionName, trimmedContent);
+        // Replace newlines with spaces to prevent Copilot CLI multi-line mode
+        const copilotContent = trimmedContent.replace(/\n+/g, ' ').trim();
+        await sendKeys(sessionName, copilotContent, false);
+        await new Promise(resolve => setTimeout(resolve, COPILOT_SEND_ENTER_DELAY_MS));
+        await sendSpecialKeys(sessionName, ['Enter']);
         invalidateCache(sessionName);
       } else {
         await cliTool.sendMessage(params.id, trimmedContent);

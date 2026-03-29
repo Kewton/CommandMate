@@ -14,7 +14,7 @@
 
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { getDbInstance } from '@/lib/db-instance';
+import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { getSlashCommandGroups, loadCodexSkills, loadCodexPrompts } from '@/lib/slash-commands';
 import { getStandardCommandGroups } from '@/lib/standard-commands';

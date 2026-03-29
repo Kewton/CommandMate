@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { runMigrations } from '@/lib/db-migrations';
+import { runMigrations } from '@/lib/db/db-migrations';
 import {
   createRepository,
   getRepositoryByNormalizedUrl,
@@ -18,7 +18,7 @@ import {
   getCloneJob,
   getActiveCloneJobByUrl,
   getCloneJobsByStatus,
-} from '@/lib/db-repository';
+} from '@/lib/db/db-repository';
 import type { CloneJobStatus } from '@/types/clone';
 
 describe('Repository DB Operations', () => {

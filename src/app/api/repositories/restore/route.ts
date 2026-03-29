@@ -9,11 +9,11 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getDbInstance } from '@/lib/db-instance';
+import { getDbInstance } from '@/lib/db/db-instance';
 import {
   validateRepositoryPath,
   restoreRepository,
-} from '@/lib/db-repository';
+} from '@/lib/db/db-repository';
 import { scanWorktrees } from '@/lib/git/worktrees';
 import { syncWorktreesAndCleanup } from '@/lib/session-cleanup';
 import fs from 'fs';

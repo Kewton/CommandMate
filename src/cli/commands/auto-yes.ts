@@ -20,7 +20,7 @@ export function createAutoYesCommand(): Command {
     .option('--disable', 'Disable auto-yes')
     .option('--duration <duration>', `Duration (${ALLOWED_DURATIONS.join(', ')})`)
     .option('--stop-pattern <pattern>', 'Stop pattern (regex, max 500 chars)')
-    .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode)')
+    .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode, copilot)')
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeId: string, options: AutoYesOptions) => {
       try {

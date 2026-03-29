@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getDbInstance } from '@/lib/db-instance';
+import { getDbInstance } from '@/lib/db/db-instance';
 import { getEnv } from '@/lib/env';
 import { CloneManager } from '@/lib/git/clone-manager';
 import type { CloneJobStatus } from '@/types/clone';

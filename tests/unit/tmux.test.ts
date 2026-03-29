@@ -166,7 +166,7 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd'],
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '200'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -193,13 +193,72 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd'],
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '200'],
         { timeout: 5000 },
         expect.any(Function)
       );
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
         ['set-option', '-t', 'test-session', 'history-limit', '100000'],
+        { timeout: 5000 },
+        expect.any(Function)
+      );
+    });
+
+    it('should create session with window size options', async () => {
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
+        callback(null, { stdout: '', stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+
+      await createSession({
+        sessionName: 'test-session',
+        workingDirectory: '/path/to/cwd',
+        windowWidth: 200,
+        windowHeight: 50,
+      });
+
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '50'],
+        { timeout: 5000 },
+        expect.any(Function)
+      );
+    });
+
+    it('should use default window size (200x200) with legacy signature', async () => {
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
+        callback(null, { stdout: '', stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+
+      await createSession('test-session', '/path/to/cwd');
+
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '200'],
+        { timeout: 5000 },
+        expect.any(Function)
+      );
+    });
+
+    it('should use default window size with options object (no size specified)', async () => {
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
+        callback(null, { stdout: '', stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+
+      await createSession({
+        sessionName: 'test-session',
+        workingDirectory: '/path/to/cwd',
+      });
+
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '200'],
         { timeout: 5000 },
         expect.any(Function)
       );

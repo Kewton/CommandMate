@@ -30,6 +30,8 @@ export interface CreateSessionOptions {
   sessionName: string;
   workingDirectory: string;
   historyLimit?: number;  // scrollback バッファサイズ（デフォルト: 50000）
+  windowWidth?: number;   // ペイン幅（デフォルト: 200）
+  windowHeight?: number;  // ペイン高さ（デフォルト: 200、alternate screen TUIで十分な表示領域を確保）
 }
 
 /**
@@ -159,24 +161,31 @@ export async function createSession(
   let sessionName: string;
   let workingDirectory: string;
   let historyLimit: number;
+  let windowWidth: number;
+  let windowHeight: number;
 
   if (typeof sessionNameOrOptions === 'string') {
     // Legacy signature
     sessionName = sessionNameOrOptions;
     workingDirectory = cwd!;
     historyLimit = 50000;
+    windowWidth = 200;
+    windowHeight = 200;
   } else {
     // New signature with options
     sessionName = sessionNameOrOptions.sessionName;
     workingDirectory = sessionNameOrOptions.workingDirectory;
     historyLimit = sessionNameOrOptions.historyLimit || 50000;
+    windowWidth = sessionNameOrOptions.windowWidth || 200;
+    windowHeight = sessionNameOrOptions.windowHeight || 200;
   }
 
   try {
-    // Create session
+    // Create session with explicit window size to avoid 80x24 default
+    // This is critical for TUI tools (Copilot, OpenCode) that use alternate screen
     await execFileAsync(
       'tmux',
-      ['new-session', '-d', '-s', sessionName, '-c', workingDirectory],
+      ['new-session', '-d', '-s', sessionName, '-c', workingDirectory, '-x', String(windowWidth), '-y', String(windowHeight)],
       { timeout: DEFAULT_TIMEOUT }
     );
 

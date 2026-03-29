@@ -19,7 +19,7 @@ export function createRespondCommand(): Command {
     .description("Respond to an agent's prompt (yes/no, number, or text)")
     .argument('<worktree-id>', 'Worktree ID')
     .argument('<answer>', 'Response answer (yes, no, number, or free text)')
-    .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode)')
+    .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode, copilot)')
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeId: string, answer: string, options: RespondOptions) => {
       try {
