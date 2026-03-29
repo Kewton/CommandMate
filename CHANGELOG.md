@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.14] - 2026-03-29
+
+### Added
+- CLI: `--model` option for `send` command to support Copilot model switching (Issue #576)
+- Copilot: TUI response handling with deduplication and accumulated content saving (Issue #565)
+  - `extractCopilotContentLines` / `normalizeCopilotLine` in tui-accumulator
+  - Copilot-specific branching in response-extractor
+  - Prompt deduplication with SHA-256 hash cache (`prompt-dedup.ts`)
+  - Copilot timing constants (`copilot-constants.ts`)
+- WSL2: Windows environment support with setup guide and troubleshooting (Issue #551)
+
+### Fixed
+- Copilot: extract latest response only in `cleanCopilotResponse` (Issue #571)
+- Copilot: clean up History redundant display (Issue #571)
+- Copilot: add TUI decoration skip patterns to `COPILOT_SKIP_PATTERNS` (Issue #565)
+- Copilot: fix message sending, selection list detection, and pane size (Issue #565)
+- tmux: set explicit window size on session creation to fix TUI display (Issue #565)
+- Timer: show all tools including copilot in agent selector
+- CLI: add copilot to `--agent` help text in send/respond/capture/auto-yes commands
+- Test: mock `sendSpecialKey` in base.test.ts to prevent unhandled rejection
+
+### Refactored
+- Module split: split large modules into sub-files, Phase 1 (Issue #575)
+- Security: unify security comment identifiers and strengthen input sanitization (Issue #574)
+- Type safety: remove dangerous type casts and improve silent failure handling (Issue #573)
+- DB: remove deprecated forwarding files and unify import paths (Issue #550)
+- Copilot: improve naming clarity and remove redundant code
+- Test: fix assertion format and indentation in ip-restriction tests
+- Test: remove unused imports in db-toValidAppType test
+- Test: use `vi.stubGlobal` for NODE_ENV assignment in api-client test
+
+### Changed
+- chore: bump vitest 4.1.1 → 4.1.2
+
 ## [0.4.13] - 2026-03-28
 
 ### Added
