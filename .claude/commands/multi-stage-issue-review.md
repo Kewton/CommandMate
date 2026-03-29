@@ -34,12 +34,17 @@ Issueの記載内容を多角的にレビューし、ブラッシュアップす
 - **issue_number**: 対象Issue番号（必須）
 - **skip_stage**: スキップするステージ番号（カンマ区切り）
 
-### サブエージェントモデル指定
+### サブエージェント/レビュアー指定
 
-| エージェント | モデル | 理由 |
-|-------------|--------|------|
-| issue-review-agent | **opus** | 品質判断にOpus必要 |
-| apply-issue-review-agent | sonnet（継承） | JSON→Issue更新のみ |
+| ステージ | レビュアー | 理由 |
+|---------|----------|------|
+| Stage 1-4（1回目） | **Claude opus**（サブエージェント） | 品質判断にOpus必要 |
+| Stage 5-8（2回目） | **Codex**（commandmatedev `--agent codex` 経由） | 異なるモデルによるクロスレビュー |
+| 指摘反映（全ステージ） | sonnet（継承） | JSON→Issue更新のみ |
+
+> **⚠ 重要**: Stage 5-8 は必ず `commandmatedev send ... --agent codex` でCodexに委譲すること。
+> Claude サブエージェント（Agent tool）で代替実行してはならない。
+> commandmatedev が利用不可の場合はユーザーに報告して中断すること。
 
 ---
 
@@ -123,50 +128,11 @@ Issue内に記載された仮説・原因分析・前提条件をコードベー
 
 **ファイルパス**: `dev-reports/issue/{issue_number}/issue-review/hypothesis-verification.md`
 
-```markdown
-# Issue #{issue_number} 仮説検証レポート
-
-## 検証日時
-- {date}
-
-## 検証結果サマリー
-
-| # | 仮説/主張 | 判定 | 根拠 |
-|---|----------|------|------|
-| 1 | {仮説の要約} | Confirmed/Rejected/Partially/Unverifiable | {根拠の要約} |
-| 2 | {仮説の要約} | ... | ... |
-
-## 詳細検証
-
-### 仮説 1: {仮説タイトル}
-
-**Issue内の記述**: {原文引用}
-
-**検証手順**:
-1. {確認したファイル/関数}
-2. {確認した内容}
-
-**判定**: {Confirmed/Rejected/Partially Confirmed/Unverifiable}
-
-**根拠**: {コード箇所の引用、行番号など}
-
-**Issueへの影響**: {Rejectedの場合、Issue記載のどの部分を修正すべきか}
-
----
-
-## Stage 1レビューへの申し送り事項
-
-- {Rejectedな仮説がある場合、レビュー時に重点確認すべきポイント}
-- {Partially Confirmedの場合、補足が必要な箇所}
-```
-
 #### 0.5-4. Phase 0.5完了確認
 
 - 全仮説の検証が完了している
 - 検証レポートが作成されている
 - Rejectedな仮説がある場合、Stage 1レビューへの申し送り事項が記載されている
-
-> **Stage 1への引き継ぎ**: Rejectedな仮説がある場合、Stage 1のレビューコンテキスト（stage1-review-context.json）にhypothesis_verification_pathを追加し、レビュー時に仮説の誤りを踏まえた確認を依頼する。
 
 ---
 
@@ -178,7 +144,7 @@ Issue内に記載された仮説・原因分析・前提条件をコードベー
 
 ```json
 {
-  "issue_number": {issue_number},
+  "issue_number": "{issue_number}",
   "focus_area": "通常",
   "iteration": 1,
   "stage": 1,
@@ -196,30 +162,9 @@ Context file: dev-reports/issue/{issue_number}/issue-review/stage1-review-contex
 Output file: dev-reports/issue/{issue_number}/issue-review/stage1-review-result.json
 ```
 
-#### 1-3. Stage 1完了確認
-
-- レビュー結果ファイル作成完了
-- 指摘事項が分類されている
-
 ---
 
 ### Stage 2: 指摘事項反映（1回目）
-
-#### 2-1. コンテキスト作成
-
-**ファイルパス**: `dev-reports/issue/{issue_number}/issue-review/stage2-apply-context.json`
-
-```json
-{
-  "issue_number": {issue_number},
-  "review_result_path": "dev-reports/issue/{issue_number}/issue-review/stage1-review-result.json",
-  "iteration": 1,
-  "stage": 2,
-  "stage_name": "指摘事項反映（1回目）"
-}
-```
-
-#### 2-2. 指摘事項反映
 
 ```
 Use apply-issue-review-agent to update Issue #{issue_number} based on Stage 1 review.
@@ -228,31 +173,9 @@ Context file: dev-reports/issue/{issue_number}/issue-review/stage2-apply-context
 Output file: dev-reports/issue/{issue_number}/issue-review/stage2-apply-result.json
 ```
 
-#### 2-3. Stage 2完了確認
-
-- Must Fix項目すべて対応済み
-- Issue更新完了
-
 ---
 
 ### Stage 3: 影響範囲レビュー（1回目）
-
-#### 3-1. コンテキスト作成
-
-**ファイルパス**: `dev-reports/issue/{issue_number}/issue-review/stage3-review-context.json`
-
-```json
-{
-  "issue_number": {issue_number},
-  "focus_area": "影響範囲",
-  "iteration": 1,
-  "stage": 3,
-  "stage_name": "影響範囲レビュー（1回目）",
-  "previous_stages": ["stage1", "stage2"]
-}
-```
-
-#### 3-2. レビュー実行
 
 ```
 Use issue-review-agent (model: opus) to review Issue #{issue_number} with focus on 影響範囲.
@@ -261,30 +184,9 @@ Context file: dev-reports/issue/{issue_number}/issue-review/stage3-review-contex
 Output file: dev-reports/issue/{issue_number}/issue-review/stage3-review-result.json
 ```
 
-#### 3-3. Stage 3完了確認
-
-- 影響範囲の分析完了
-- 指摘事項が分類されている
-
 ---
 
 ### Stage 4: 指摘事項反映（1回目）
-
-#### 4-1. コンテキスト作成
-
-**ファイルパス**: `dev-reports/issue/{issue_number}/issue-review/stage4-apply-context.json`
-
-```json
-{
-  "issue_number": {issue_number},
-  "review_result_path": "dev-reports/issue/{issue_number}/issue-review/stage3-review-result.json",
-  "iteration": 1,
-  "stage": 4,
-  "stage_name": "指摘事項反映（1回目）"
-}
-```
-
-#### 4-2. 指摘事項反映
 
 ```
 Use apply-issue-review-agent to update Issue #{issue_number} based on Stage 3 review.
@@ -293,169 +195,111 @@ Context file: dev-reports/issue/{issue_number}/issue-review/stage4-apply-context
 Output file: dev-reports/issue/{issue_number}/issue-review/stage4-apply-result.json
 ```
 
-#### 4-3. Stage 4完了確認
-
-- 影響範囲に関するMust Fix項目すべて対応済み
-- Issue更新完了
-
 ---
 
 ### 2回目イテレーション自動スキップ判定
 
 Stage 4完了後、1回目イテレーションの Must Fix 件数を確認し、**2回目イテレーション（Stage 5-8）の実行要否を判定**します。
 
-#### 判定手順
-
-1. `stage1-review-result.json` と `stage3-review-result.json` を読み込む
-2. 各ファイルから Must Fix 件数を集計する
-3. **Must Fix 合計が 0件** の場合 → Stage 5-8 をスキップし、Phase Final に進む
-4. **Must Fix が 1件以上** の場合 → Stage 5-8 を通常通り実行する
-
-#### スキップ時の記録
-
-スキップする場合、以下をログに記録してください：
-
-```
-✅ 1回目イテレーション Must Fix: 0件 → 2回目イテレーション（Stage 5-8）をスキップ
-```
-
-Stage 5-8 の TodoWrite 項目は「スキップ（Must Fix 0件）」として完了マークしてください。
+- **Must Fix 合計が 0件** → Stage 5-8 をスキップし、Phase Final に進む
+- **Must Fix が 1件以上** → Stage 5-8 を通常通り実行する
 
 ---
 
-### Stage 5: 通常レビュー（2回目）
+### Stage 5-8: 2回目イテレーション（Codexによるクロスレビュー）
 
-#### 5-1. コンテキスト作成
+2回目イテレーションは**Codex**（`--agent codex`）にレビューを委譲し、異なるモデルによるクロスレビューで品質を向上させます。
 
-**ファイルパス**: `dev-reports/issue/{issue_number}/issue-review/stage5-review-context.json`
+> **⚠ 禁止事項**: このステージをClaudeサブエージェント（Agent tool）で代替実行しないこと。
+> 必ず `commandmatedev send --agent codex` でCodexに送信すること。
 
-```json
+#### 5-0. commandmatedev 利用可能性確認
+
+```bash
+# commandmatedev が利用可能か確認（利用不可の場合はユーザーに報告して中断）
+which commandmatedev || { echo "ERROR: commandmatedev not available. Stage 5-8 requires Codex via commandmatedev."; exit 1; }
+```
+
+#### 5-1. Codexへのレビュー依頼
+
+commandmatedev CLIを使い、同一worktreeの**Codex**セッション（`--agent codex`）にレビューを依頼します。
+
+**worktree IDの取得**:
+```bash
+# 現在のworktreeディレクトリ名からIDを推定
+WORKTREE_ID=$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g')
+```
+
+**Stage 5-6: 通常レビュー（2回目）+ 反映**:
+```bash
+commandmatedev send "$WORKTREE_ID" \
+  "Issue #{issue_number} の2回目通常レビューを実施してください。
+
+## 対象
+- Issue番号: #{issue_number}
+- 1回目レビュー結果: dev-reports/issue/{issue_number}/issue-review/stage1-review-result.json
+- 1回目影響範囲レビュー結果: dev-reports/issue/{issue_number}/issue-review/stage3-review-result.json
+- 仮説検証: dev-reports/issue/{issue_number}/issue-review/hypothesis-verification.md
+
+## 指示
+1. gh issue view {issue_number} --json body で最新のIssue本文を取得
+2. 1回目レビュー（stage1, stage3）で指摘された内容が適切に反映されているか確認
+3. 新たな問題点・改善点がないかレビュー
+4. レビュー結果をJSON形式で dev-reports/issue/{issue_number}/issue-review/stage5-review-result.json に出力
+5. Must Fix/Should Fix指摘があればIssue本文を更新（gh issue edit）
+6. 反映結果を dev-reports/issue/{issue_number}/issue-review/stage6-apply-result.json に出力
+
+## 出力フォーマット
+stage5-review-result.json:
 {
-  "issue_number": {issue_number},
-  "focus_area": "通常",
-  "iteration": 2,
-  "stage": 5,
-  "stage_name": "通常レビュー（2回目）",
-  "previous_stages": ["stage1", "stage2", "stage3", "stage4"],
-  "previous_review": "dev-reports/issue/{issue_number}/issue-review/stage1-review-result.json"
-}
+  \"stage\": 5,
+  \"focus\": \"通常（2回目）\",
+  \"reviewer\": \"codex\",
+  \"findings\": [{\"id\": \"S5-NNN\", \"severity\": \"Must Fix|Should Fix|Nice to Have\", \"title\": \"...\", \"description\": \"...\"}],
+  \"must_fix_count\": N,
+  \"should_fix_count\": N,
+  \"nice_to_have_count\": N
+}" \
+  --agent codex --auto-yes --duration 1h
 ```
 
-#### 5-2. レビュー実行
-
-```
-Use issue-review-agent (model: opus) to review Issue #{issue_number} with focus on 通常 (2nd iteration).
-
-Context file: dev-reports/issue/{issue_number}/issue-review/stage5-review-context.json
-Output file: dev-reports/issue/{issue_number}/issue-review/stage5-review-result.json
-
-Check that previous findings have been addressed and identify any new issues.
+Codexの完了を待機:
+```bash
+commandmatedev wait "$WORKTREE_ID" --timeout 3600 --on-prompt agent
 ```
 
-#### 5-3. Stage 5完了確認
+**Stage 7-8: 影響範囲レビュー（2回目）+ 反映**:
+```bash
+commandmatedev send "$WORKTREE_ID" \
+  "Issue #{issue_number} の2回目影響範囲レビューを実施してください。
 
-- 前回の指摘が対応されていることを確認
-- 新規指摘事項が分類されている
+## 対象
+- Issue番号: #{issue_number}
+- Stage 5レビュー結果: dev-reports/issue/{issue_number}/issue-review/stage5-review-result.json
 
----
+## 指示
+1. gh issue view {issue_number} --json body で最新のIssue本文を取得
+2. 変更の波及効果を分析（影響ファイル、既存テスト、APIの後方互換性等）
+3. レビュー結果をJSON形式で dev-reports/issue/{issue_number}/issue-review/stage7-review-result.json に出力
+4. Must Fix/Should Fix指摘があればIssue本文を更新（gh issue edit）
+5. 反映結果を dev-reports/issue/{issue_number}/issue-review/stage8-apply-result.json に出力
 
-### Stage 6: 指摘事項反映（2回目）
-
-#### 6-1. コンテキスト作成
-
-**ファイルパス**: `dev-reports/issue/{issue_number}/issue-review/stage6-apply-context.json`
-
-```json
-{
-  "issue_number": {issue_number},
-  "review_result_path": "dev-reports/issue/{issue_number}/issue-review/stage5-review-result.json",
-  "iteration": 2,
-  "stage": 6,
-  "stage_name": "指摘事項反映（2回目）"
-}
+## 出力フォーマット
+stage5と同じJSON形式（stageを7に変更、focusを「影響範囲（2回目）」に変更）" \
+  --agent codex --auto-yes --duration 1h
 ```
 
-#### 6-2. 指摘事項反映
-
-```
-Use apply-issue-review-agent to update Issue #{issue_number} based on Stage 5 review.
-
-Context file: dev-reports/issue/{issue_number}/issue-review/stage6-apply-context.json
-Output file: dev-reports/issue/{issue_number}/issue-review/stage6-apply-result.json
+Codexの完了を待機:
+```bash
+commandmatedev wait "$WORKTREE_ID" --timeout 3600 --on-prompt agent
 ```
 
-#### 6-3. Stage 6完了確認
+#### 5-2. Codexレビュー結果の確認
 
-- 2回目の通常レビュー指摘すべて対応済み
-- Issue更新完了
-
----
-
-### Stage 7: 影響範囲レビュー（2回目）
-
-#### 7-1. コンテキスト作成
-
-**ファイルパス**: `dev-reports/issue/{issue_number}/issue-review/stage7-review-context.json`
-
-```json
-{
-  "issue_number": {issue_number},
-  "focus_area": "影響範囲",
-  "iteration": 2,
-  "stage": 7,
-  "stage_name": "影響範囲レビュー（2回目）",
-  "previous_stages": ["stage1", "stage2", "stage3", "stage4", "stage5", "stage6"],
-  "previous_review": "dev-reports/issue/{issue_number}/issue-review/stage3-review-result.json"
-}
-```
-
-#### 7-2. レビュー実行
-
-```
-Use issue-review-agent (model: opus) to review Issue #{issue_number} with focus on 影響範囲 (2nd iteration).
-
-Context file: dev-reports/issue/{issue_number}/issue-review/stage7-review-context.json
-Output file: dev-reports/issue/{issue_number}/issue-review/stage7-review-result.json
-
-Check that previous findings have been addressed and identify any new issues.
-```
-
-#### 7-3. Stage 7完了確認
-
-- 前回の影響範囲指摘が対応されていることを確認
-- 新規指摘事項が分類されている
-
----
-
-### Stage 8: 指摘事項反映（2回目）
-
-#### 8-1. コンテキスト作成
-
-**ファイルパス**: `dev-reports/issue/{issue_number}/issue-review/stage8-apply-context.json`
-
-```json
-{
-  "issue_number": {issue_number},
-  "review_result_path": "dev-reports/issue/{issue_number}/issue-review/stage7-review-result.json",
-  "iteration": 2,
-  "stage": 8,
-  "stage_name": "指摘事項反映（2回目）"
-}
-```
-
-#### 8-2. 指摘事項反映
-
-```
-Use apply-issue-review-agent to update Issue #{issue_number} based on Stage 7 review.
-
-Context file: dev-reports/issue/{issue_number}/issue-review/stage8-apply-context.json
-Output file: dev-reports/issue/{issue_number}/issue-review/stage8-apply-result.json
-```
-
-#### 8-3. Stage 8完了確認
-
-- 2回目の影響範囲レビュー指摘すべて対応済み
-- Issue更新完了
+Stage 5-8完了後、以下を確認:
+- `stage5-review-result.json` が生成されている
+- `stage7-review-result.json` が生成されている
+- GitHubのIssueが更新されている（Must Fix指摘があった場合）
 
 ---
 
@@ -474,10 +318,6 @@ gh issue view {issue_number}
 ```markdown
 # Issue #{issue_number} マルチステージレビュー完了報告
 
-## レビュー日時
-- 開始: {start_time}
-- 完了: {end_time}
-
 ## 仮説検証結果（Phase 0.5）
 
 | # | 仮説/主張 | 判定 |
@@ -488,52 +328,17 @@ gh issue view {issue_number}
 
 | Stage | レビュー種別 | 指摘数 | 対応数 | ステータス |
 |-------|------------|-------|-------|----------|
-| 1 | 通常レビュー（1回目） | X | - | ✅ |
-| 2 | 指摘事項反映（1回目） | - | X | ✅ |
-| 3 | 影響範囲レビュー（1回目） | X | - | ✅ |
-| 4 | 指摘事項反映（1回目） | - | X | ✅ |
-| 5 | 通常レビュー（2回目） | X | - | ✅/⏭️スキップ |
-| 6 | 指摘事項反映（2回目） | - | X | ✅/⏭️スキップ |
-| 7 | 影響範囲レビュー（2回目） | X | - | ✅/⏭️スキップ |
-| 8 | 指摘事項反映（2回目） | - | X | ✅/⏭️スキップ |
-
-## 統計
-
-- **総指摘数**: X件
-- **対応完了**: X件
-- **スキップ**: X件
-
-## 主な改善点
-
-1. {改善点1}
-2. {改善点2}
-3. {改善点3}
-
-## Issue差分サマリー
-
-### 追加されたセクション
-- {セクション1}
-- {セクション2}
-
-### 修正されたセクション
-- {セクション1}: {修正内容}
-- {セクション2}: {修正内容}
+| 1 | 通常レビュー（1回目） | X | - | 完了 |
+| 2 | 指摘事項反映（1回目） | - | X | 完了 |
+| 3 | 影響範囲レビュー（1回目） | X | - | 完了 |
+| 4 | 指摘事項反映（1回目） | - | X | 完了 |
+| 5-8 | 2回目イテレーション | X | X | 完了/スキップ |
 
 ## 次のアクション
 
 - [ ] Issueの最終確認
-- [ ] 実装開始（/tdd-impl または /pm-auto-dev）
-
-## 関連ファイル
-
-- 元のIssue: `dev-reports/issue/{issue_number}/issue-review/original-issue.json`
-- 仮説検証: `dev-reports/issue/{issue_number}/issue-review/hypothesis-verification.md`
-- レビュー結果: `dev-reports/issue/{issue_number}/issue-review/stage*-review-result.json`
-- 反映結果: `dev-reports/issue/{issue_number}/issue-review/stage*-apply-result.json`
-
----
-
-*Generated by multi-stage-issue-review command*
+- [ ] /design-policy で設計方針策定
+- [ ] /tdd-impl または /pm-auto-dev で実装を開始
 ```
 
 ---
@@ -543,25 +348,18 @@ gh issue view {issue_number}
 ```
 dev-reports/issue/{issue_number}/
 └── issue-review/
-    ├── original-issue.json          # 元のIssue内容
-    ├── hypothesis-verification.md   # 仮説検証レポート（Phase 0.5）
-    ├── stage1-review-context.json   # Stage 1 レビューコンテキスト
-    ├── stage1-review-result.json    # Stage 1 レビュー結果
-    ├── stage2-apply-context.json    # Stage 2 反映コンテキスト
-    ├── stage2-apply-result.json     # Stage 2 反映結果
-    ├── stage3-review-context.json   # Stage 3 レビューコンテキスト
-    ├── stage3-review-result.json    # Stage 3 レビュー結果
-    ├── stage4-apply-context.json    # Stage 4 反映コンテキスト
-    ├── stage4-apply-result.json     # Stage 4 反映結果
-    ├── stage5-review-context.json   # Stage 5 レビューコンテキスト
-    ├── stage5-review-result.json    # Stage 5 レビュー結果
-    ├── stage6-apply-context.json    # Stage 6 反映コンテキスト
-    ├── stage6-apply-result.json     # Stage 6 反映結果
-    ├── stage7-review-context.json   # Stage 7 レビューコンテキスト
-    ├── stage7-review-result.json    # Stage 7 レビュー結果
-    ├── stage8-apply-context.json    # Stage 8 反映コンテキスト
-    ├── stage8-apply-result.json     # Stage 8 反映結果
-    └── summary-report.md            # 最終サマリーレポート
+    ├── original-issue.json
+    ├── hypothesis-verification.md
+    ├── stage1-review-context.json
+    ├── stage1-review-result.json
+    ├── stage2-apply-context.json
+    ├── stage2-apply-result.json
+    ├── stage3-review-context.json
+    ├── stage3-review-result.json
+    ├── stage4-apply-context.json
+    ├── stage4-apply-result.json
+    ├── stage5-review-context.json ~ stage8-apply-result.json
+    └── summary-report.md
 ```
 
 ---
@@ -576,80 +374,6 @@ dev-reports/issue/{issue_number}/
 - 各ステージのMust Fix指摘が対応済み
 - GitHubのIssueが更新されている
 - サマリーレポート作成完了
-
----
-
-## 使用例
-
-```
-User: /multi-stage-issue-review 83
-
-Multi-Stage Issue Review:
-
-🔍 Phase 0.5: 仮説検証
-  Issue内の仮説を抽出中...
-  - 仮説 1: 「〜が原因」→ Confirmed（コード確認済み）
-  - 仮説 2: 「〜の仕様」→ Rejected（実際は〜）
-  ✅ Phase 0.5 完了（2件検証: 1 Confirmed, 1 Rejected）
-
-📋 Stage 1/8: 通常レビュー（1回目）
-  レビュー実行中...
-  - 指摘: Must Fix 2件, Should Fix 3件, Nice to Have 1件
-  ✅ Stage 1 完了
-
-📋 Stage 2/8: 指摘事項反映（1回目）
-  Issue更新中...
-  - 反映: 5/6件（Nice to Have 1件スキップ）
-  ✅ Stage 2 完了
-
-📋 Stage 3/8: 影響範囲レビュー（1回目）
-  レビュー実行中...
-  - 指摘: Must Fix 1件, Should Fix 2件
-  ✅ Stage 3 完了
-
-📋 Stage 4/8: 指摘事項反映（1回目）
-  Issue更新中...
-  - 反映: 3/3件
-  ✅ Stage 4 完了
-
-📋 Stage 5/8: 通常レビュー（2回目）
-  レビュー実行中...
-  - 指摘: Must Fix 0件, Should Fix 1件
-  ✅ Stage 5 完了
-
-📋 Stage 6/8: 指摘事項反映（2回目）
-  Issue更新中...
-  - 反映: 1/1件
-  ✅ Stage 6 完了
-
-📋 Stage 7/8: 影響範囲レビュー（2回目）
-  レビュー実行中...
-  - 指摘: Must Fix 0件, Should Fix 0件
-  指摘なし - スキップ
-  ✅ Stage 7 完了
-
-📋 Stage 8/8: 指摘事項反映（2回目）
-  指摘なしのためスキップ
-  ✅ Stage 8 完了
-
-🎉 マルチステージIssueレビュー完了！
-
-| イテレーション | 通常レビュー | 影響範囲レビュー |
-|--------------|------------|----------------|
-| 1回目 | 6件 → 5件反映 | 3件 → 3件反映 |
-| 2回目 | 1件 → 1件反映 | 0件 |
-
-総指摘数: 10件
-対応完了: 9件
-スキップ: 1件
-
-更新Issue: https://github.com/Kewton/CommandMate/issues/83
-レポート: dev-reports/issue/83/issue-review/summary-report.md
-
-次のアクション:
-- Issueの最終確認
-- /tdd-impl または /pm-auto-dev で実装を開始
-```
 
 ---
 
