@@ -19,6 +19,7 @@ import { isCliToolType } from '@/lib/cli-tools/types';
 import {
   CLAUDE_PERMISSIONS,
   CODEX_SANDBOXES,
+  COPILOT_PERMISSIONS,
   DEFAULT_PERMISSIONS,
 } from '@/config/schedule-config';
 import {
@@ -252,10 +253,12 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
       case 'codex':
         allowedValues = CODEX_SANDBOXES;
         break;
+      case 'copilot':
+        allowedValues = COPILOT_PERMISSIONS;
+        break;
       case 'gemini':
       case 'vibe-local':
-      case 'copilot':
-        // No permission flags for gemini/vibe-local/copilot; only empty string is valid
+        // No permission flags for gemini/vibe-local; only empty string is valid
         allowedValues = [];
         if (permission) {
           logger.warn('parse:permission-ignored', { name: sanitizedName, cliToolId: resolvedCliToolId, permission });

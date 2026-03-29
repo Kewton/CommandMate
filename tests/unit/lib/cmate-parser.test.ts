@@ -474,6 +474,56 @@ More text here.
       expect(rows).toHaveLength(2);
     });
 
+    it('should parse copilot with allow-all-tools permission', () => {
+      const rows = [
+        ['copilot-task', '0 9 * * *', 'Do something', 'copilot', 'true', 'allow-all-tools'],
+      ];
+      const entries = parseSchedulesSection(rows);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].cliToolId).toBe('copilot');
+      expect(entries[0].permission).toBe('allow-all-tools');
+    });
+
+    it('should parse copilot with yolo permission', () => {
+      const rows = [
+        ['copilot-task', '0 9 * * *', 'Do something', 'copilot', 'true', 'yolo'],
+      ];
+      const entries = parseSchedulesSection(rows);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].permission).toBe('yolo');
+    });
+
+    it('should fallback copilot invalid permission to default (allow-all-tools)', () => {
+      mockLogger.warn.mockClear();
+      const rows = [
+        ['copilot-task', '0 9 * * *', 'Do something', 'copilot', 'true', 'invalid-perm'],
+      ];
+      const entries = parseSchedulesSection(rows);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].permission).toBe('allow-all-tools');
+      expect(mockLogger.warn).toHaveBeenCalledWith('parse:invalid-permission', expect.any(Object));
+    });
+
+    it('should apply default permission (allow-all-tools) when copilot permission is not specified (DR2-005)', () => {
+      const rows = [
+        ['copilot-task', '0 9 * * *', 'Do something', 'copilot', 'true'],
+      ];
+      const entries = parseSchedulesSection(rows);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].permission).toBe('allow-all-tools');
+    });
+
+    it('should apply default permission (allow-all-tools) when copilot permission is empty string (DR2-005)', () => {
+      const rows = [
+        ['copilot-task', '0 9 * * *', 'Do something', 'copilot', 'true', ''],
+      ];
+      const entries = parseSchedulesSection(rows);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].permission).toBe('allow-all-tools');
+    });
+  });
+
+  describe('parseCmateFile edge cases', () => {
     it('should skip lines without pipe character within a section', () => {
       const content = `## Test
 
