@@ -204,6 +204,18 @@ async function syncSchedules(): Promise<void> {
 
           activeScheduleIds.add(scheduleId);
 
+          // Skip disabled or incomplete entries
+          if (!entry.enabled || !entry.cronExpression) {
+            // If a running cron job exists for this entry, stop it
+            const disabledState = manager.schedules.get(scheduleId);
+            if (disabledState) {
+              disabledState.cronJob.stop();
+              manager.schedules.delete(scheduleId);
+              logger.info('schedule:disabled', { name: entry.name });
+            }
+            continue;
+          }
+
           // Check if this schedule already has a running cron job
           const existingState = manager.schedules.get(scheduleId);
           if (existingState) {
@@ -211,8 +223,6 @@ async function syncSchedules(): Promise<void> {
             existingState.entry = entry;
             continue;
           }
-
-          if (!entry.enabled || !entry.cronExpression) continue;
 
           // Create new cron job
           try {
