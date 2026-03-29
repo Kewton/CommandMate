@@ -80,6 +80,8 @@ cd CommandMate
 3. 対話式環境設定（`setup-env.sh`）
 4. データベース初期化、ビルド、起動（`build-and-start.sh --daemon`）
 
+> **Note**: `build-and-start.sh` および `stop.sh` はプロジェクトルートの `.env` ファイルを自動読み込みします。カスタムサーバー（`node dist/server/server.js`）は Next.js の `.env` 自動読み込みが効かないため、スクリプト側で環境変数を export しています。環境変数が既に設定されている場合は `.env` の値で上書きされません。
+
 ### 手動セットアップ
 
 カスタマイズが必要な場合は、手動でセットアップできます：

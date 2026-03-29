@@ -19,6 +19,10 @@ PID_FILE="$LOG_DIR/server.pid"
 DATA_DIR="$PROJECT_DIR/data"
 MAX_LOG_SIZE_MB=10           # Log rotation threshold (MB)
 MAX_LOG_GENERATIONS=3        # Number of log generations to keep
+
+# Load .env file (custom server does not auto-load .env)
+source "$SCRIPT_DIR/load-env.sh"
+
 # Support both CM_PORT and legacy MCBD_PORT
 PORT=${CM_PORT:-${MCBD_PORT:-3000}}
 

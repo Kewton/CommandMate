@@ -6,6 +6,11 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Load .env file (for CM_PORT, CM_DB_PATH etc.)
+source "$SCRIPT_DIR/load-env.sh"
+
 # Support both CM_PORT and legacy MCBD_PORT
 PORT=${CM_PORT:-${MCBD_PORT:-3000}}
 HEALTH_URL="http://localhost:$PORT/"

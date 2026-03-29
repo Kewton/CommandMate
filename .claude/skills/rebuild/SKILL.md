@@ -68,4 +68,7 @@ cd {TARGET_DIR} && CM_PORT={port} ./scripts/stop.sh && CM_PORT={port} ./scripts/
   停止:     cd {TARGET_DIR} && CM_PORT={port} ./scripts/stop.sh
 ```
 
-**注意**: `./scripts/stop.sh` は `CM_PORT` 環境変数で対象ポートを決定する。未指定時はデフォルト（3000）のみ停止する。複数ポートで起動している場合、特定ポートだけ停止するには必ず `CM_PORT={port}` を付けること。
+**注意**:
+- `./scripts/stop.sh` と `./scripts/build-and-start.sh` はプロジェクトルートの `.env` ファイルを自動読み込みする（`CM_PORT`, `CM_DB_PATH` 等）。
+- `--port` オプションで `CM_PORT` を明示指定した場合、`.env` の値より優先される（環境変数が既にセットされている場合は `.env` で上書きされない仕様）。
+- 複数ポートで起動している場合、特定ポートだけ停止するには必ず `CM_PORT={port}` を付けること。
