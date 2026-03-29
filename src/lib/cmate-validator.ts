@@ -18,6 +18,7 @@ import {
 import {
   CLAUDE_PERMISSIONS,
   CODEX_SANDBOXES,
+  COPILOT_PERMISSIONS,
 } from '@/config/schedule-config';
 
 // =============================================================================
@@ -248,10 +249,12 @@ export function validateSchedulesSection(
       const trimmedPermission = permissionStr.trim();
       // Validate permission value against allowed values for the CLI tool
       const cliToolId = row[3]?.trim() || 'claude';
-      // copilot, gemini, vibe-local have no permission flags; skip validation
+      // Validate permission value against allowed values for the CLI tool
+      // DR3-002: copilot separated from gemini/vibe-local to accept COPILOT_PERMISSIONS
       const allowedValues: readonly string[] =
         cliToolId === 'codex' ? CODEX_SANDBOXES
-        : (cliToolId === 'copilot' || cliToolId === 'gemini' || cliToolId === 'vibe-local') ? []
+        : cliToolId === 'copilot' ? COPILOT_PERMISSIONS
+        : (cliToolId === 'gemini' || cliToolId === 'vibe-local') ? []
         : CLAUDE_PERMISSIONS;
       if (!allowedValues.includes(trimmedPermission)) {
         errors.push({

@@ -17,6 +17,7 @@ import { execFile } from 'child_process';
 import { sanitizeEnvForChildProcess } from '@/lib/security/env-sanitizer';
 import { stripAnsi } from '@/lib/detection/cli-patterns';
 import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
+import { COPILOT_PERMISSIONS, type CopilotPermission } from '@/config/schedule-config';
 
 // =============================================================================
 // Constants
@@ -132,8 +133,15 @@ export function buildCliArgs(message: string, cliToolId: string, permission?: st
         return ['run', '-m', `ollama/${options.model}`, message];
       }
       return ['run', message];
-    case 'copilot':
-      return ['copilot', '-p', message];
+    case 'copilot': {
+      // SEC4-001: COPILOT_PERMISSIONS whitelist validation for direct call path safety.
+      // Unlike Codex's ?? (nullish coalescing), we use explicit whitelist check (DR2-003).
+      // Falsy values (undefined, empty string) and invalid values all fallback to 'allow-all-tools'.
+      const safePerm = COPILOT_PERMISSIONS.includes(permission as CopilotPermission)
+        ? permission
+        : 'allow-all-tools';
+      return ['copilot', '-p', message, `--${safePerm}`];
+    }
     case 'claude':
     default:
       return ['-p', message, '--output-format', 'text', '--permission-mode', permission ?? 'acceptEdits'];

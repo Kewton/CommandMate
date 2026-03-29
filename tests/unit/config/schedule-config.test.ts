@@ -10,6 +10,8 @@ import {
   MAX_SCHEDULE_CRON_LENGTH,
   UUID_V4_PATTERN,
   isValidUuidV4,
+  COPILOT_PERMISSIONS,
+  DEFAULT_PERMISSIONS,
 } from '../../../src/config/schedule-config';
 
 describe('schedule-config', () => {
@@ -80,6 +82,28 @@ describe('schedule-config', () => {
 
     it('should return false for UUID with missing characters', () => {
       expect(isValidUuidV4('550e8400-e29b-41d4-a716')).toBe(false);
+    });
+  });
+
+  describe('COPILOT_PERMISSIONS', () => {
+    it('should contain allow-all-tools and yolo', () => {
+      expect(COPILOT_PERMISSIONS).toContain('allow-all-tools');
+      expect(COPILOT_PERMISSIONS).toContain('yolo');
+    });
+
+    it('should have exactly 2 entries', () => {
+      expect(COPILOT_PERMISSIONS).toHaveLength(2);
+    });
+
+    it('should be a readonly array', () => {
+      // TypeScript enforces this at compile time; at runtime, we check it is an array
+      expect(Array.isArray(COPILOT_PERMISSIONS)).toBe(true);
+    });
+  });
+
+  describe('DEFAULT_PERMISSIONS', () => {
+    it('should have copilot default as allow-all-tools', () => {
+      expect(DEFAULT_PERMISSIONS['copilot']).toBe('allow-all-tools');
     });
   });
 });

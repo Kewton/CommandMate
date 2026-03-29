@@ -41,8 +41,28 @@ describe('ALLOWED_CLI_TOOLS derivation [DR2-002]', () => {
 });
 
 describe('buildCliArgs copilot case', () => {
-  it('should build correct args for copilot', () => {
+  it('should build args with --allow-all-tools when permission is not specified (fallback)', () => {
     const args = buildCliArgs('hello', 'copilot');
-    expect(args).toEqual(['copilot', '-p', 'hello']);
+    expect(args).toEqual(['copilot', '-p', 'hello', '--allow-all-tools']);
+  });
+
+  it('should build args with --allow-all-tools when permission is allow-all-tools', () => {
+    const args = buildCliArgs('hello', 'copilot', 'allow-all-tools');
+    expect(args).toEqual(['copilot', '-p', 'hello', '--allow-all-tools']);
+  });
+
+  it('should build args with --yolo when permission is yolo', () => {
+    const args = buildCliArgs('hello', 'copilot', 'yolo');
+    expect(args).toEqual(['copilot', '-p', 'hello', '--yolo']);
+  });
+
+  it('should fallback to --allow-all-tools for invalid permission (SEC4-001)', () => {
+    const args = buildCliArgs('hello', 'copilot', 'invalid-perm');
+    expect(args).toEqual(['copilot', '-p', 'hello', '--allow-all-tools']);
+  });
+
+  it('should fallback to --allow-all-tools for empty string permission', () => {
+    const args = buildCliArgs('hello', 'copilot', '');
+    expect(args).toEqual(['copilot', '-p', 'hello', '--allow-all-tools']);
   });
 });

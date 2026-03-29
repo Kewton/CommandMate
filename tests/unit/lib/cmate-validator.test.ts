@@ -294,5 +294,38 @@ describe('cmate-validator', () => {
     it('should return empty array for empty rows', () => {
       expect(validateSchedulesSection([])).toEqual([]);
     });
+
+    it('should accept valid copilot permission (allow-all-tools)', () => {
+      const rows = [['copilot-task', '0 * * * *', 'Do something', 'copilot', 'true', 'allow-all-tools']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors).toEqual([]);
+    });
+
+    it('should accept valid copilot permission (yolo)', () => {
+      const rows = [['copilot-task', '0 * * * *', 'Do something', 'copilot', 'true', 'yolo']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors).toEqual([]);
+    });
+
+    it('should detect invalid copilot permission', () => {
+      const rows = [['copilot-task', '0 * * * *', 'Do something', 'copilot', 'true', 'read-only']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors).toHaveLength(1);
+      expect(errors[0].field).toBe('permission');
+      expect(errors[0].message).toContain('invalid permission');
+      expect(errors[0].message).toContain('copilot');
+    });
+
+    it('should allow empty copilot permission (DR2-005)', () => {
+      const rows = [['copilot-task', '0 * * * *', 'Do something', 'copilot', 'true', '']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors).toEqual([]);
+    });
+
+    it('should allow omitted copilot permission column', () => {
+      const rows = [['copilot-task', '0 * * * *', 'Do something', 'copilot', 'true']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors).toEqual([]);
+    });
   });
 });
