@@ -48,7 +48,10 @@ TodoWriteツールで作業計画を作成：
 - [ ] Phase 8: 完了報告
 ```
 
-**重要（エージェント指定ルール）**: `commandmatedev send` でワーカーにタスクを送信する際は、**必ず `--agent copilot` や `--agent codex` 等、オーケストレーター自身（claude）以外のエージェントを指定**すること。これにより、オーケストレーターのClaude CLIセッションとワーカーのセッションが分離され、確実に別のコーディングエージェントがタスクを実行する。
+**重要（エージェント指定ルール）**: `commandmatedev send` でワーカーにタスクを送信する際のエージェント指定は以下に従うこと：
+- **開発タスク**（`/pm-auto-issue2dev`, `/bug-fix` 等）: `--agent claude` を指定
+- **レビュー系**（仕様レビュー、設計レビュー等）: 一部 `--agent codex` に依頼可
+- **バグ根本原因分析**（Phase 2.5）: `--agent copilot --model claude-opus-4.6` を指定
 
 ---
 
@@ -198,20 +201,20 @@ gh issue edit "$bug_issue" --repo Kewton/MyCodeBranchDesk --body "${CURRENT_BODY
 
 ### 3-1. 各ワーカーにタスク送信
 
-**Issue種別に応じて異なるコマンドを送信する（必ず `--agent copilot` 等でclaude以外を指定）：**
+**Issue種別に応じて異なるコマンドを送信する（エージェント指定ルールに従う）：**
 
 ```bash
 # バグIssue: /bug-fix を送信（Phase 2.5の分析結果を参照して修正）
 for bug_issue in $BUG_ISSUES:
   WT=$(commandmatedev ls --branch "feature/{N}" --quiet)
   commandmatedev send "$WT" "/bug-fix ${bug_issue}" \
-    --auto-yes --duration 3h
+    --agent claude --auto-yes --duration 3h
 
 # 機能Issue: /pm-auto-issue2dev を送信（従来通り）
 for feature_issue in $FEATURE_ISSUES:
   WT=$(commandmatedev ls --branch "feature/{N}" --quiet)
   commandmatedev send "$WT" "/pm-auto-issue2dev ${feature_issue}" \
-    --auto-yes --duration 3h
+    --agent claude --auto-yes --duration 3h
 ```
 
 独立したIssueは並列で送信する。強依存のIssueは直列実行（先行Issue完了後に送信）。
