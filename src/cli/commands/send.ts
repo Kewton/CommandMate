@@ -19,6 +19,7 @@ export function createSendCommand(): Command {
     .argument('<worktree-id>', 'Worktree ID')
     .argument('<message>', 'Message to send')
     .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode, copilot)')
+    .option('--model <model>', 'Specify AI model for Copilot agent')
     .option('--auto-yes', 'Enable auto-yes before sending')
     .option('--duration <duration>', `Auto-yes duration (${ALLOWED_DURATIONS.join(', ')})`)
     .option('--stop-pattern <pattern>', 'Auto-yes stop pattern (regex)')
@@ -43,10 +44,31 @@ export function createSendCommand(): Command {
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
+        // Issue #576: Validate --model option
+        if (options.model) {
+          // --model requires --agent copilot
+          if (!options.agent || options.agent !== 'copilot') {
+            console.error('Error: --model option requires --agent copilot');
+            process.exit(ExitCode.CONFIG_ERROR);
+          }
+          // Character pattern check
+          const MODEL_NAME_PATTERN = /^[a-zA-Z0-9\-._/:]+$/;
+          if (!MODEL_NAME_PATTERN.test(options.model)) {
+            console.error('Error: Invalid model name: contains invalid characters');
+            process.exit(ExitCode.CONFIG_ERROR);
+          }
+          // Length check
+          const MODEL_NAME_MAX_LENGTH = 128;
+          if (options.model.length > MODEL_NAME_MAX_LENGTH) {
+            console.error(`Error: Invalid model name: exceeds maximum length of ${MODEL_NAME_MAX_LENGTH} characters`);
+            process.exit(ExitCode.CONFIG_ERROR);
+          }
+        }
+
         const client = new ApiClient({ token: options.token });
 
-        // --auto-yes: enable auto-yes first [DR2-02]
-        if (options.autoYes) {
+        // --auto-yes: enable auto-yes first (unless --model is specified, then after send) [DR2-02]
+        if (options.autoYes && !options.model) {
           const durationMs = options.duration
             ? parseDurationToMs(options.duration)
             : parseDurationToMs('1h'); // default 1h
@@ -76,9 +98,40 @@ export function createSendCommand(): Command {
         if (options.agent) {
           sendBody.cliToolId = options.agent;
         }
+        // Issue #576: Include model in send body
+        if (options.model) {
+          sendBody.model = options.model;
+        }
 
         await client.post<ChatMessage>(`/api/worktrees/${worktreeId}/send`, sendBody);
         console.error('Message sent.');
+
+        // Issue #576: Enable auto-yes AFTER send when --model is specified
+        // This avoids auto-yes interfering with the /model command interaction
+        if (options.autoYes && options.model) {
+          const durationMs = options.duration
+            ? parseDurationToMs(options.duration)
+            : parseDurationToMs('1h');
+
+          if (durationMs === null) {
+            console.error(`Error: Invalid duration. Must be one of: ${ALLOWED_DURATIONS.join(', ')}`);
+            process.exit(ExitCode.CONFIG_ERROR);
+          }
+
+          const autoYesBody: Record<string, unknown> = {
+            enabled: true,
+            duration: durationMs,
+          };
+          if (options.agent) {
+            autoYesBody.cliToolId = options.agent;
+          }
+          if (options.stopPattern) {
+            autoYesBody.stopPattern = options.stopPattern;
+          }
+
+          await client.post<void>(`/api/worktrees/${worktreeId}/auto-yes`, autoYesBody);
+          console.error('Auto-yes enabled.');
+        }
       } catch (error) {
         handleCommandError(error);
       }

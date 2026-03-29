@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 import {
   COPILOT_SEND_ENTER_DELAY_MS,
   COPILOT_TEXT_INPUT_DELAY_MS,
+  COPILOT_MODEL_SWITCH_TIMEOUT_MS,
 } from '@/config/copilot-constants';
 
 describe('copilot-constants', () => {
@@ -30,5 +31,14 @@ describe('copilot-constants', () => {
 
   it('COPILOT_TEXT_INPUT_DELAY_MS should be less than COPILOT_SEND_ENTER_DELAY_MS', () => {
     expect(COPILOT_TEXT_INPUT_DELAY_MS).toBeLessThan(COPILOT_SEND_ENTER_DELAY_MS);
+  });
+
+  it('COPILOT_MODEL_SWITCH_TIMEOUT_MS should be 30000', () => {
+    expect(COPILOT_MODEL_SWITCH_TIMEOUT_MS).toBe(30_000);
+  });
+
+  it('COPILOT_MODEL_SWITCH_TIMEOUT_MS should be a positive number', () => {
+    expect(typeof COPILOT_MODEL_SWITCH_TIMEOUT_MS).toBe('number');
+    expect(COPILOT_MODEL_SWITCH_TIMEOUT_MS).toBeGreaterThan(0);
   });
 });

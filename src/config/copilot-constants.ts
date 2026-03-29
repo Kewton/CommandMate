@@ -36,3 +36,10 @@ export const COPILOT_MAX_MESSAGE_LENGTH = 100_000;
  * COPILOT_MAX_MESSAGE_LENGTH. The tail (most recent content) is preserved.
  */
 export const COPILOT_TRUNCATION_MARKER = '[... truncated ...]';
+
+/**
+ * Timeout (ms) for waiting for prompt recovery after /model command.
+ * Issue #576: Model switching may take longer than normal prompt detection
+ * due to server-side model loading.
+ */
+export const COPILOT_MODEL_SWITCH_TIMEOUT_MS = 30_000;

@@ -21,7 +21,7 @@ import {
 import { detectAndResendIfPastedText } from '../pasted-text-helper';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { COPILOT_PROMPT_PATTERN, COPILOT_SELECTION_LIST_PATTERN, stripAnsi } from '../detection/cli-patterns';
-import { COPILOT_TEXT_INPUT_DELAY_MS, COPILOT_SEND_ENTER_DELAY_MS } from '@/config/copilot-constants';
+import { COPILOT_TEXT_INPUT_DELAY_MS, COPILOT_SEND_ENTER_DELAY_MS, COPILOT_MODEL_SWITCH_TIMEOUT_MS } from '@/config/copilot-constants';
 import { getErrorMessage } from '@/lib/errors';
 import { createLogger } from '@/lib/logger';
 
@@ -179,11 +179,14 @@ export class CopilotTool extends BaseCLITool {
   /**
    * Wait for Copilot prompt before sending a message.
    * Used by sendMessage to ensure Copilot is ready to accept input.
+   *
+   * @param sessionName - tmux session name
+   * @param timeoutMs - Optional timeout in ms (default: COPILOT_PROMPT_WAIT_TIMEOUT_MS)
    */
-  private async waitForPrompt(sessionName: string): Promise<void> {
+  private async waitForPrompt(sessionName: string, timeoutMs: number = COPILOT_PROMPT_WAIT_TIMEOUT_MS): Promise<void> {
     const startTime = Date.now();
     const pollInterval = 500;
-    while (Date.now() - startTime < COPILOT_PROMPT_WAIT_TIMEOUT_MS) {
+    while (Date.now() - startTime < timeoutMs) {
       try {
         const rawOutput = await capturePane(sessionName, 50);
         const output = stripAnsi(rawOutput);
@@ -212,8 +215,10 @@ export class CopilotTool extends BaseCLITool {
   /**
    * Wait for the selection list to appear after sending a selection list command.
    * Polls the terminal output for COPILOT_SELECTION_LIST_PATTERN.
+   *
+   * @returns true if selection list was detected, false if timed out
    */
-  private async waitForSelectionList(sessionName: string): Promise<void> {
+  private async waitForSelectionList(sessionName: string): Promise<boolean> {
     const maxWaitMs = 5000;
     const pollInterval = 300;
     const startTime = Date.now();
@@ -224,13 +229,14 @@ export class CopilotTool extends BaseCLITool {
         const output = stripAnsi(rawOutput);
         if (COPILOT_SELECTION_LIST_PATTERN.test(output)) {
           logger.info('copilot-selection-list-detected');
-          return;
+          return true;
         }
       } catch {
         // Capture may fail - continue polling
       }
     }
     logger.info('copilot-selection-list-not-detected-timeout');
+    return false;
   }
 
   /**
@@ -290,6 +296,56 @@ export class CopilotTool extends BaseCLITool {
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to send message to Copilot: ${errorMessage}`);
+    }
+  }
+
+  /**
+   * Send /model command to switch the AI model in Copilot session.
+   * Issue #576: Supports --model option for commandmate send.
+   *
+   * Flow:
+   * 1. Verify session exists
+   * 2. Send `/model <modelName>` + Enter
+   * 3. Wait for selection list to appear
+   * 4. If selection list detected, send Enter to confirm
+   * 5. Wait for prompt recovery with extended timeout
+   *
+   * @param worktreeId - Worktree ID
+   * @param modelName - Model name to switch to
+   */
+  async sendModelCommand(worktreeId: string, modelName: string): Promise<void> {
+    const sessionName = this.getSessionName(worktreeId);
+
+    // Check if session exists
+    const exists = await hasSession(sessionName);
+    if (!exists) {
+      throw new Error(
+        `Copilot session ${sessionName} does not exist. Start the session first.`
+      );
+    }
+
+    try {
+      // Send /model <modelName> command with Enter
+      await sendKeys(sessionName, `/model ${modelName}`, true);
+
+      // Wait for selection list to appear
+      const selectionListDetected = await this.waitForSelectionList(sessionName);
+
+      // If selection list appeared, send Enter to confirm the selection
+      if (selectionListDetected) {
+        await sendSpecialKey(sessionName, 'C-m');
+      }
+
+      // Wait for prompt recovery with extended timeout for model switching
+      await this.waitForPrompt(sessionName, COPILOT_MODEL_SWITCH_TIMEOUT_MS);
+
+      // Invalidate cache after model switch
+      invalidateCache(sessionName);
+
+      logger.info('copilot-model-switched', { model: modelName });
+    } catch (error: unknown) {
+      const errorMessage = getErrorMessage(error);
+      throw new Error(`Failed to switch Copilot model to ${modelName}: ${errorMessage}`);
     }
   }
 
