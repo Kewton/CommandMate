@@ -5,6 +5,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import Database from 'better-sqlite3';
+import { randomUUID } from 'crypto';
 import {
   initScheduleManager,
   stopAllSchedules,
@@ -13,8 +15,11 @@ import {
   POLL_INTERVAL_MS,
   MAX_CONCURRENT_SCHEDULES,
   batchUpsertSchedules,
+  getActiveSchedulesForWorktree,
 } from '../../../src/lib/schedule-manager';
 import { getDbInstance } from '../../../src/lib/db/db-instance';
+import { readCmateFile, parseSchedulesSection } from '../../../src/lib/cmate-parser';
+import { getAllWorktrees, getCmateMtime, batchUpsertSchedules as mockBatchUpsertSchedules } from '../../../src/lib/cron-parser';
 
 // Mock logger module (Issue #480)
 const { mockLogger } = vi.hoisted(() => {
@@ -37,6 +42,11 @@ vi.mock('../../../src/lib/cmate-parser', () => ({
   parseSchedulesSection: vi.fn().mockReturnValue([]),
 }));
 
+vi.mock('../../../src/lib/job-executor', () => ({
+  executeSchedule: vi.fn(),
+  recoverRunningLogs: vi.fn(),
+}));
+
 // Mock fs module - only statSync needed for getCmateMtime() (DJ-005)
 vi.mock('fs', async (importOriginal) => {
   const original = await importOriginal<typeof import('fs')>();
@@ -46,10 +56,20 @@ vi.mock('fs', async (importOriginal) => {
   };
 });
 
+vi.mock('../../../src/lib/cron-parser', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../src/lib/cron-parser')>();
+  return {
+    ...original,
+    getAllWorktrees: vi.fn().mockReturnValue([]),
+    getCmateMtime: vi.fn().mockReturnValue(12345),
+    batchUpsertSchedules: vi.fn().mockReturnValue([]),
+    disableStaleSchedules: vi.fn(),
+  };
+});
+
 // Mock db-instance to avoid actual DB operations
 vi.mock('../../../src/lib/db/db-instance', () => {
-  const Database = require('better-sqlite3');
-  let db: InstanceType<typeof Database> | null = null;
+  let db: Database.Database | null = null;
 
   function getTestDb() {
     if (!db) {
@@ -207,7 +227,6 @@ describe('schedule-manager', () => {
     it('should INSERT new schedules via direct DB test', () => {
       const db = getDbInstance();
       const now = Date.now();
-      const { randomUUID } = require('crypto') as typeof import('crypto');
 
       db.prepare('INSERT OR IGNORE INTO worktrees (id, name, path, updated_at) VALUES (?, ?, ?, ?)').run(
         'wt-batch-new', 'batch-new-wt', '/tmp/batch-new', now
@@ -258,7 +277,6 @@ describe('schedule-manager', () => {
     it('should UPDATE existing schedules and preserve IDs via direct DB test', () => {
       const db = getDbInstance();
       const now = Date.now();
-      const { randomUUID } = require('crypto') as typeof import('crypto');
 
       db.prepare('INSERT OR IGNORE INTO worktrees (id, name, path, updated_at) VALUES (?, ?, ?, ?)').run(
         'wt-batch-update', 'batch-update-wt', '/tmp/batch-update', now
@@ -370,6 +388,69 @@ describe('schedule-manager', () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(isScheduleManagerInitialized()).toBe(true);
     });
+
+    it('should recreate inactive schedule state even when CMATE.md mtime is unchanged', async () => {
+      const db = getDbInstance();
+      const now = Date.now();
+      const scheduleId = 'sched-recover-inactive';
+      const worktreeId = 'wt-recover-inactive';
+      const worktreePath = '/tmp/recover-inactive';
+      const entry = {
+        name: 'copilot-analysis',
+        cronExpression: '*/5 * * * *',
+        message: 'check model',
+        cliToolId: 'copilot',
+        enabled: true,
+        permission: 'yolo',
+      };
+
+      vi.mocked(readCmateFile).mockResolvedValue(new Map([['Schedules', [['row']]]]));
+      vi.mocked(parseSchedulesSection).mockReturnValue([entry]);
+      vi.mocked(getAllWorktrees).mockReturnValue([{ id: worktreeId, path: worktreePath }]);
+      vi.mocked(getCmateMtime).mockReturnValue(12345);
+      vi.mocked(mockBatchUpsertSchedules).mockReturnValue([scheduleId]);
+
+      db.prepare('INSERT OR IGNORE INTO worktrees (id, name, path, updated_at) VALUES (?, ?, ?, ?)').run(
+        worktreeId, 'recover-wt', worktreePath, now
+      );
+      db.prepare(`
+        INSERT OR REPLACE INTO scheduled_executions (id, worktree_id, name, message, cron_expression, cli_tool_id, enabled, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        scheduleId, worktreeId, entry.name, entry.message, entry.cronExpression, entry.cliToolId, 1, now, now
+      );
+
+      initScheduleManager();
+      await vi.advanceTimersByTimeAsync(0);
+
+      const inactiveCronJob = {
+        stop: vi.fn(),
+        schedule: vi.fn(),
+        isStopped: vi.fn().mockReturnValue(true),
+        isRunning: vi.fn().mockReturnValue(false),
+      };
+
+      globalThis.__scheduleManagerStates!.schedules.set(scheduleId, {
+        scheduleId,
+        worktreeId,
+        cronJob: inactiveCronJob as unknown as import('croner').Cron,
+        isExecuting: false,
+        entry,
+      });
+      globalThis.__scheduleManagerStates!.cmateFileCache.set(worktreePath, 12345);
+
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+
+      const recoveredState = globalThis.__scheduleManagerStates!.schedules.get(scheduleId);
+      expect(recoveredState).toBeDefined();
+      expect(recoveredState!.cronJob).not.toBe(inactiveCronJob);
+      expect(inactiveCronJob.stop).toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalledWith('schedule:inactive-state-detected', { worktreeId });
+      expect(mockLogger.warn).toHaveBeenCalledWith('schedule:recreated-inactive', {
+        name: entry.name,
+        cron: entry.cronExpression,
+      });
+    });
   });
 
   describe('restart recovery', () => {
@@ -414,6 +495,55 @@ describe('schedule-manager', () => {
       // Verify the log was updated
       const log = db.prepare('SELECT status FROM execution_logs WHERE id = ?').get(logId) as { status: string };
       expect(log.status).toBe('failed');
+    });
+  });
+
+  describe('getActiveSchedulesForWorktree', () => {
+    it('should expose in-memory schedule state for visualization', () => {
+      const nextRun = new Date('2026-03-31T01:00:00.000Z');
+      const cronJob = {
+        stop: vi.fn(),
+        schedule: vi.fn(),
+        isStopped: vi.fn().mockReturnValue(false),
+        nextRun: vi.fn().mockReturnValue(nextRun),
+      };
+
+      globalThis.__scheduleManagerStates = {
+        timerId: null,
+        schedules: new Map([
+          ['sched-1', {
+            scheduleId: 'sched-1',
+            worktreeId: 'wt-1',
+            cronJob: cronJob as unknown as import('croner').Cron,
+            isExecuting: true,
+            entry: {
+              name: 'copilot-analysis',
+              message: 'msg',
+              cronExpression: '*/5 * * * *',
+              cliToolId: 'copilot',
+              enabled: true,
+              permission: 'yolo',
+            },
+          }],
+        ]),
+        initialized: true,
+        isSyncing: false,
+        cmateFileCache: new Map(),
+      };
+
+      expect(getActiveSchedulesForWorktree('wt-1')).toEqual([
+        {
+          scheduleId: 'sched-1',
+          worktreeId: 'wt-1',
+          name: 'copilot-analysis',
+          cronExpression: '*/5 * * * *',
+          cliToolId: 'copilot',
+          enabled: true,
+          isExecuting: true,
+          isCronActive: true,
+          nextRunAt: nextRun.getTime(),
+        },
+      ]);
     });
   });
 });

@@ -17,6 +17,16 @@
   },
   "enabled": "有効",
   "disabled": "無効",
+  "activeSchedulesTitle": "Active Schedules",
+  "activeSchedulesDescription": "DB設定ではなく、現在メモリ上で登録されている cron state です。",
+  "noActiveSchedules": "現在メモリ上で登録されている schedule はありません。",
+  "nextRun": "次回実行",
+  "agentLabel": "Agent",
+  "activeState": {
+    "active": "稼働中",
+    "inactive": "停止",
+    "executing": "実行中"
+  },
   "lastRun": "最終実行",
   "cron": "Cron式",
   "exitCode": "終了コード",

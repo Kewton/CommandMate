@@ -525,7 +525,7 @@ export async function getSlashCommandGroups(basePath?: string): Promise<SlashCom
     const skills = await loadSkills(basePath);
     const codexLocalSkills = await loadCodexSkills(basePath);
     const codexLocalPrompts = await loadCodexPrompts(basePath);
-    const deduplicated = deduplicateByName([...skills, ...codexLocalSkills, ...codexLocalPrompts, ...getCopilotBuiltinCommands()], commands);
+    const deduplicated = deduplicateByName([...skills, ...codexLocalSkills, ...codexLocalPrompts], commands);
     return groupByCategory(deduplicated);
   }
 
@@ -537,7 +537,7 @@ export async function getSlashCommandGroups(basePath?: string): Promise<SlashCom
     // Intentional: skillsCache is populated here; loadSkills does not manage its own cache
     skillsCache = await loadSkills().catch(() => []);
   }
-  const deduplicated = deduplicateByName([...skillsCache, ...getCopilotBuiltinCommands()], commandsCache);
+  const deduplicated = deduplicateByName([...skillsCache], commandsCache);
   return groupByCategory(deduplicated);
 }
 
