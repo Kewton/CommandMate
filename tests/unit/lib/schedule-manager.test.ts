@@ -15,6 +15,8 @@ import {
   batchUpsertSchedules,
 } from '../../../src/lib/schedule-manager';
 import { getDbInstance } from '../../../src/lib/db/db-instance';
+import { readCmateFile, parseSchedulesSection } from '../../../src/lib/cmate-parser';
+import { getAllWorktrees, getCmateMtime, batchUpsertSchedules as mockBatchUpsertSchedules } from '../../../src/lib/cron-parser';
 
 // Mock logger module (Issue #480)
 const { mockLogger } = vi.hoisted(() => {
@@ -43,6 +45,17 @@ vi.mock('fs', async (importOriginal) => {
   return {
     ...original,
     statSync: vi.fn().mockReturnValue({ mtimeMs: 12345 }),
+  };
+});
+
+vi.mock('../../../src/lib/cron-parser', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../src/lib/cron-parser')>();
+  return {
+    ...original,
+    getAllWorktrees: vi.fn().mockReturnValue([]),
+    getCmateMtime: vi.fn().mockReturnValue(12345),
+    batchUpsertSchedules: vi.fn().mockReturnValue([]),
+    disableStaleSchedules: vi.fn(),
   };
 });
 
@@ -369,6 +382,69 @@ describe('schedule-manager', () => {
       // Flush the fire-and-forget syncSchedules() Promise (DR3-001)
       await vi.advanceTimersByTimeAsync(0);
       expect(isScheduleManagerInitialized()).toBe(true);
+    });
+
+    it('should recreate inactive schedule state even when CMATE.md mtime is unchanged', async () => {
+      const db = getDbInstance();
+      const now = Date.now();
+      const scheduleId = 'sched-recover-inactive';
+      const worktreeId = 'wt-recover-inactive';
+      const worktreePath = '/tmp/recover-inactive';
+      const entry = {
+        name: 'copilot-analysis',
+        cronExpression: '*/5 * * * *',
+        message: 'check model',
+        cliToolId: 'copilot',
+        enabled: true,
+        permission: 'yolo',
+      };
+
+      vi.mocked(readCmateFile).mockResolvedValue(new Map([['Schedules', [['row']]]]));
+      vi.mocked(parseSchedulesSection).mockReturnValue([entry]);
+      vi.mocked(getAllWorktrees).mockReturnValue([{ id: worktreeId, path: worktreePath }]);
+      vi.mocked(getCmateMtime).mockReturnValue(12345);
+      vi.mocked(mockBatchUpsertSchedules).mockReturnValue([scheduleId]);
+
+      db.prepare('INSERT OR IGNORE INTO worktrees (id, name, path, updated_at) VALUES (?, ?, ?, ?)').run(
+        worktreeId, 'recover-wt', worktreePath, now
+      );
+      db.prepare(`
+        INSERT OR REPLACE INTO scheduled_executions (id, worktree_id, name, message, cron_expression, cli_tool_id, enabled, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        scheduleId, worktreeId, entry.name, entry.message, entry.cronExpression, entry.cliToolId, 1, now, now
+      );
+
+      initScheduleManager();
+      await vi.advanceTimersByTimeAsync(0);
+
+      const inactiveCronJob = {
+        stop: vi.fn(),
+        schedule: vi.fn(),
+        isStopped: vi.fn().mockReturnValue(true),
+        isRunning: vi.fn().mockReturnValue(false),
+      };
+
+      globalThis.__scheduleManagerStates!.schedules.set(scheduleId, {
+        scheduleId,
+        worktreeId,
+        cronJob: inactiveCronJob as unknown as import('croner').Cron,
+        isExecuting: false,
+        entry,
+      });
+      globalThis.__scheduleManagerStates!.cmateFileCache.set(worktreePath, 12345);
+
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+
+      const recoveredState = globalThis.__scheduleManagerStates!.schedules.get(scheduleId);
+      expect(recoveredState).toBeDefined();
+      expect(recoveredState!.cronJob).not.toBe(inactiveCronJob);
+      expect(inactiveCronJob.stop).toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalledWith('schedule:inactive-state-detected', { worktreeId });
+      expect(mockLogger.warn).toHaveBeenCalledWith('schedule:recreated-inactive', {
+        name: entry.name,
+        cron: entry.cronExpression,
+      });
     });
   });
 

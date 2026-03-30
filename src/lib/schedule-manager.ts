@@ -80,6 +80,46 @@ interface ManagerState {
   cmateFileCache: Map<string, number>;
 }
 
+function isCronJobActive(cronJob: import('croner').Cron): boolean {
+  try {
+    if (typeof cronJob.isStopped === 'function') {
+      return !cronJob.isStopped();
+    }
+    if (typeof cronJob.isRunning === 'function') {
+      return cronJob.isRunning();
+    }
+  } catch {
+    return false;
+  }
+
+  return true;
+}
+
+function createScheduleState(
+  worktreeId: string,
+  scheduleId: string,
+  entry: ScheduleState['entry']
+): ScheduleState {
+  const cronJob = new Cron(entry.cronExpression, {
+    paused: false,
+    protect: true,
+  });
+
+  const state: ScheduleState = {
+    scheduleId,
+    worktreeId,
+    cronJob,
+    isExecuting: false,
+    entry,
+  };
+
+  cronJob.schedule(() => {
+    void executeSchedule(state);
+  });
+
+  return state;
+}
+
 // =============================================================================
 // Global State (hot reload persistence)
 // =============================================================================
@@ -168,15 +208,27 @@ async function syncSchedules(): Promise<void> {
           continue;
         }
 
+        const worktreeScheduleIds: string[] = [];
+        let hasInactiveState = false;
+        for (const [scheduleId, state] of manager.schedules) {
+          if (state.worktreeId !== worktree.id) continue;
+          worktreeScheduleIds.push(scheduleId);
+          if (!isCronJobActive(state.cronJob)) {
+            hasInactiveState = true;
+          }
+        }
+
         // If mtime matches cached value, skip DB operations for this worktree
         if (cachedMtime !== undefined && cachedMtime === mtime) {
-          // File unchanged - re-add existing schedule IDs to keep them active
-          for (const [scheduleId, state] of manager.schedules) {
-            if (state.worktreeId === worktree.id) {
+          if (!hasInactiveState) {
+            // File unchanged - re-add existing schedule IDs to keep them active
+            for (const scheduleId of worktreeScheduleIds) {
               activeScheduleIds.add(scheduleId);
             }
+            continue;
           }
-          continue;
+
+          logger.warn('schedule:inactive-state-detected', { worktreeId: worktree.id });
         }
 
         // Update mtime cache
@@ -219,6 +271,19 @@ async function syncSchedules(): Promise<void> {
           // Check if this schedule already has a running cron job
           const existingState = manager.schedules.get(scheduleId);
           if (existingState) {
+            if (!isCronJobActive(existingState.cronJob)) {
+              try {
+                existingState.cronJob.stop();
+              } catch {
+                // Ignore cleanup errors for inactive cron jobs
+              }
+
+              const recoveredState = createScheduleState(worktree.id, scheduleId, entry);
+              manager.schedules.set(scheduleId, recoveredState);
+              logger.warn('schedule:recreated-inactive', { name: entry.name, cron: entry.cronExpression });
+              continue;
+            }
+
             // Update entry if changed
             existingState.entry = entry;
             continue;
@@ -226,24 +291,7 @@ async function syncSchedules(): Promise<void> {
 
           // Create new cron job
           try {
-            const cronJob = new Cron(entry.cronExpression, {
-              paused: false,
-              protect: true, // Prevent overlapping
-            });
-
-            const state: ScheduleState = {
-              scheduleId,
-              worktreeId: worktree.id,
-              cronJob,
-              isExecuting: false,
-              entry,
-            };
-
-            // Schedule execution
-            cronJob.schedule(() => {
-              void executeSchedule(state);
-            });
-
+            const state = createScheduleState(worktree.id, scheduleId, entry);
             manager.schedules.set(scheduleId, state);
             logger.info('schedule:created', { name: entry.name, cron: entry.cronExpression });
           } catch (cronError) {
