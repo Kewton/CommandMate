@@ -80,6 +80,18 @@ interface ManagerState {
   cmateFileCache: Map<string, number>;
 }
 
+export interface ActiveScheduleInfo {
+  scheduleId: string;
+  worktreeId: string;
+  name: string;
+  cronExpression: string;
+  cliToolId: string;
+  enabled: boolean;
+  isExecuting: boolean;
+  isCronActive: boolean;
+  nextRunAt: number | null;
+}
+
 function isCronJobActive(cronJob: import('croner').Cron): boolean {
   try {
     if (typeof cronJob.isStopped === 'function') {
@@ -472,4 +484,40 @@ export function getScheduleWorktreeIds(): string[] {
     worktreeIds.add(state.worktreeId);
   }
   return Array.from(worktreeIds);
+}
+
+export function getActiveSchedulesForWorktree(worktreeId: string): ActiveScheduleInfo[] {
+  const manager = getManagerState();
+  const schedules: ActiveScheduleInfo[] = [];
+
+  for (const [scheduleId, state] of manager.schedules) {
+    if (state.worktreeId !== worktreeId) continue;
+
+    let nextRunAt: number | null = null;
+    try {
+      const nextRun = typeof state.cronJob.nextRun === 'function'
+        ? state.cronJob.nextRun()
+        : null;
+      if (nextRun instanceof Date) {
+        nextRunAt = nextRun.getTime();
+      }
+    } catch {
+      nextRunAt = null;
+    }
+
+    schedules.push({
+      scheduleId,
+      worktreeId,
+      name: state.entry.name,
+      cronExpression: state.entry.cronExpression,
+      cliToolId: state.entry.cliToolId,
+      enabled: state.entry.enabled,
+      isExecuting: state.isExecuting,
+      isCronActive: isCronJobActive(state.cronJob),
+      nextRunAt,
+    });
+  }
+
+  schedules.sort((a, b) => a.name.localeCompare(b.name));
+  return schedules;
 }

@@ -5,6 +5,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import Database from 'better-sqlite3';
+import { randomUUID } from 'crypto';
 import {
   initScheduleManager,
   stopAllSchedules,
@@ -13,6 +15,7 @@ import {
   POLL_INTERVAL_MS,
   MAX_CONCURRENT_SCHEDULES,
   batchUpsertSchedules,
+  getActiveSchedulesForWorktree,
 } from '../../../src/lib/schedule-manager';
 import { getDbInstance } from '../../../src/lib/db/db-instance';
 import { readCmateFile, parseSchedulesSection } from '../../../src/lib/cmate-parser';
@@ -39,6 +42,11 @@ vi.mock('../../../src/lib/cmate-parser', () => ({
   parseSchedulesSection: vi.fn().mockReturnValue([]),
 }));
 
+vi.mock('../../../src/lib/job-executor', () => ({
+  executeSchedule: vi.fn(),
+  recoverRunningLogs: vi.fn(),
+}));
+
 // Mock fs module - only statSync needed for getCmateMtime() (DJ-005)
 vi.mock('fs', async (importOriginal) => {
   const original = await importOriginal<typeof import('fs')>();
@@ -61,8 +69,7 @@ vi.mock('../../../src/lib/cron-parser', async (importOriginal) => {
 
 // Mock db-instance to avoid actual DB operations
 vi.mock('../../../src/lib/db/db-instance', () => {
-  const Database = require('better-sqlite3');
-  let db: InstanceType<typeof Database> | null = null;
+  let db: Database.Database | null = null;
 
   function getTestDb() {
     if (!db) {
@@ -220,7 +227,6 @@ describe('schedule-manager', () => {
     it('should INSERT new schedules via direct DB test', () => {
       const db = getDbInstance();
       const now = Date.now();
-      const { randomUUID } = require('crypto') as typeof import('crypto');
 
       db.prepare('INSERT OR IGNORE INTO worktrees (id, name, path, updated_at) VALUES (?, ?, ?, ?)').run(
         'wt-batch-new', 'batch-new-wt', '/tmp/batch-new', now
@@ -271,7 +277,6 @@ describe('schedule-manager', () => {
     it('should UPDATE existing schedules and preserve IDs via direct DB test', () => {
       const db = getDbInstance();
       const now = Date.now();
-      const { randomUUID } = require('crypto') as typeof import('crypto');
 
       db.prepare('INSERT OR IGNORE INTO worktrees (id, name, path, updated_at) VALUES (?, ?, ?, ?)').run(
         'wt-batch-update', 'batch-update-wt', '/tmp/batch-update', now
@@ -490,6 +495,55 @@ describe('schedule-manager', () => {
       // Verify the log was updated
       const log = db.prepare('SELECT status FROM execution_logs WHERE id = ?').get(logId) as { status: string };
       expect(log.status).toBe('failed');
+    });
+  });
+
+  describe('getActiveSchedulesForWorktree', () => {
+    it('should expose in-memory schedule state for visualization', () => {
+      const nextRun = new Date('2026-03-31T01:00:00.000Z');
+      const cronJob = {
+        stop: vi.fn(),
+        schedule: vi.fn(),
+        isStopped: vi.fn().mockReturnValue(false),
+        nextRun: vi.fn().mockReturnValue(nextRun),
+      };
+
+      globalThis.__scheduleManagerStates = {
+        timerId: null,
+        schedules: new Map([
+          ['sched-1', {
+            scheduleId: 'sched-1',
+            worktreeId: 'wt-1',
+            cronJob: cronJob as unknown as import('croner').Cron,
+            isExecuting: true,
+            entry: {
+              name: 'copilot-analysis',
+              message: 'msg',
+              cronExpression: '*/5 * * * *',
+              cliToolId: 'copilot',
+              enabled: true,
+              permission: 'yolo',
+            },
+          }],
+        ]),
+        initialized: true,
+        isSyncing: false,
+        cmateFileCache: new Map(),
+      };
+
+      expect(getActiveSchedulesForWorktree('wt-1')).toEqual([
+        {
+          scheduleId: 'sched-1',
+          worktreeId: 'wt-1',
+          name: 'copilot-analysis',
+          cronExpression: '*/5 * * * *',
+          cliToolId: 'copilot',
+          enabled: true,
+          isExecuting: true,
+          isCronActive: true,
+          nextRunAt: nextRun.getTime(),
+        },
+      ]);
     });
   });
 });
