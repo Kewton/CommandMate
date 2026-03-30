@@ -62,7 +62,7 @@ export function getCommandForTool(cliToolId: string): string {
 
 /** Options for executeClaudeCommand */
 export interface ExecuteCommandOptions {
-  /** Ollama model name for vibe-local */
+  /** AI model name (vibe-local: Ollama model, copilot: --model flag value) */
   model?: string;
 }
 
@@ -140,7 +140,12 @@ export function buildCliArgs(message: string, cliToolId: string, permission?: st
       const safePerm = COPILOT_PERMISSIONS.includes(permission as CopilotPermission)
         ? permission
         : 'allow-all-tools';
-      return ['copilot', '-p', message, `--${safePerm}`];
+      const args = ['copilot'];
+      if (options?.model) {
+        args.push('--model', options.model);
+      }
+      args.push('-p', message, `--${safePerm}`);
+      return args;
     }
     case 'claude':
     default:

@@ -14,6 +14,12 @@ import { executeClaudeCommand, type ExecuteCommandOptions } from './session/clau
 import type { ScheduleEntry } from '@/types/cmate';
 import { createLogger } from '@/lib/logger';
 
+/** Worktree row shape used by resolveModelOption */
+interface WorktreeRow {
+  path: string;
+  vibe_local_model: string | null;
+}
+
 const logger = createLogger('job-executor');
 
 // =============================================================================
@@ -140,6 +146,33 @@ export function recoverRunningLogs(): void {
 }
 
 // =============================================================================
+// Model Resolution
+// =============================================================================
+
+/**
+ * Resolve the model option for a scheduled execution (DR1-004).
+ * Centralizes per-tool model resolution strategy:
+ * - copilot: from CMATE.md ScheduleEntry.model
+ * - vibe-local: from DB worktree.vibe_local_model
+ *
+ * @param entry - Schedule entry from CMATE.md
+ * @param worktree - Worktree row from DB
+ * @returns ExecuteCommandOptions with model, or undefined
+ */
+export function resolveModelOption(
+  entry: ScheduleEntry,
+  worktree: WorktreeRow
+): ExecuteCommandOptions | undefined {
+  if (entry.cliToolId === 'copilot' && entry.model) {
+    return { model: entry.model };
+  }
+  if (entry.cliToolId === 'vibe-local' && worktree.vibe_local_model) {
+    return { model: worktree.vibe_local_model };
+  }
+  return undefined;
+}
+
+// =============================================================================
 // Schedule Execution
 // =============================================================================
 
@@ -160,18 +193,15 @@ export async function executeSchedule(state: ScheduleState): Promise<void> {
 
   try {
     const db = getLazyDbInstance();
-    const worktree = db.prepare('SELECT path, vibe_local_model FROM worktrees WHERE id = ?').get(state.worktreeId) as { path: string; vibe_local_model: string | null } | undefined;
+    const worktree = db.prepare('SELECT path, vibe_local_model FROM worktrees WHERE id = ?').get(state.worktreeId) as WorktreeRow | undefined;
 
     if (!worktree) {
       updateExecutionLog(logId, 'failed', 'Worktree not found', null);
       return;
     }
 
-    // Build options for vibe-local model
-    const options: ExecuteCommandOptions | undefined =
-      state.entry.cliToolId === 'vibe-local' && worktree.vibe_local_model
-        ? { model: worktree.vibe_local_model }
-        : undefined;
+    // Resolve model via centralized helper (DR1-004)
+    const options = resolveModelOption(state.entry, worktree);
 
     const result = await executeClaudeCommand(
       state.entry.message,
