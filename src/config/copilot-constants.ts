@@ -43,3 +43,17 @@ export const COPILOT_TRUNCATION_MARKER = '[... truncated ...]';
  * due to server-side model loading.
  */
 export const COPILOT_MODEL_SWITCH_TIMEOUT_MS = 30_000;
+
+/**
+ * Copilot model name allowed pattern.
+ * Leading character must be alphanumeric to prevent CLI option injection
+ * ambiguity with leading '-' (DR4-001).
+ * Issue #588: Shared between cmate-cli-tool-parser, send API, and CLI send.
+ */
+export const MODEL_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9\-._/:]*$/;
+
+/**
+ * Maximum length for Copilot model names.
+ * Issue #588: Shared validation constant.
+ */
+export const MAX_MODEL_NAME_LENGTH = 128;

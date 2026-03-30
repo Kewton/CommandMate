@@ -327,5 +327,33 @@ describe('cmate-validator', () => {
       const errors = validateSchedulesSection(rows);
       expect(errors).toEqual([]);
     });
+
+    // Issue #588: copilot --model validation
+    it('should accept copilot --model with valid model name', () => {
+      const rows = [['copilot-task', '0 * * * *', 'Do something', 'copilot --model gpt-4', 'true', 'allow-all-tools']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors).toEqual([]);
+    });
+
+    it('should report error for claude --model (unsupported)', () => {
+      const rows = [['task', '0 * * * *', 'msg', 'claude --model gpt-4', 'true']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors.some(e => e.field === 'cliTool')).toBe(true);
+    });
+
+    it('should report model error for copilot --model with invalid name', () => {
+      const rows = [['task', '0 * * * *', 'msg', 'copilot --model -invalid', 'true']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors.some(e => e.field === 'model')).toBe(true);
+    });
+
+    it('should report cliTool error for unknown CLI tool', () => {
+      const rows = [['task', '0 * * * *', 'msg', 'unknown-tool', 'true']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors.some(e => e.field === 'cliTool')).toBe(true);
+    });
   });
 });

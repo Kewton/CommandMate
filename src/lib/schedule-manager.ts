@@ -90,6 +90,8 @@ export interface ActiveScheduleInfo {
   isExecuting: boolean;
   isCronActive: boolean;
   nextRunAt: number | null;
+  /** AI model name (copilot only, from CMATE.md CLI Tool column) */
+  model?: string;
 }
 
 function isCronJobActive(cronJob: import('croner').Cron): boolean {
@@ -515,6 +517,7 @@ export function getActiveSchedulesForWorktree(worktreeId: string): ActiveSchedul
       isExecuting: state.isExecuting,
       isCronActive: isCronJobActive(state.cronJob),
       nextRunAt,
+      model: state.entry.model,
     });
   }
 

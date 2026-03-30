@@ -521,6 +521,55 @@ More text here.
       expect(entries).toHaveLength(1);
       expect(entries[0].permission).toBe('allow-all-tools');
     });
+
+    // Issue #588: copilot --model parsing
+    it('should parse copilot --model gpt-4 and set model field', () => {
+      const rows = [
+        ['copilot-model-task', '0 9 * * *', 'Do something', 'copilot --model gpt-4', 'true', 'allow-all-tools'],
+      ];
+      const entries = parseSchedulesSection(rows);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].cliToolId).toBe('copilot');
+      expect(entries[0].model).toBe('gpt-4');
+      expect(entries[0].permission).toBe('allow-all-tools');
+    });
+
+    it('should parse copilot without --model and have undefined model', () => {
+      const rows = [
+        ['copilot-task', '0 9 * * *', 'Do something', 'copilot', 'true'],
+      ];
+      const entries = parseSchedulesSection(rows);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].cliToolId).toBe('copilot');
+      expect(entries[0].model).toBeUndefined();
+    });
+
+    it('should skip entry when claude has --model (unsupported)', () => {
+      mockLogger.warn.mockClear();
+      const rows = [
+        ['claude-model', '0 9 * * *', 'Do something', 'claude --model gpt-4', 'true'],
+      ];
+      const entries = parseSchedulesSection(rows);
+      expect(entries).toHaveLength(0);
+      expect(mockLogger.warn).toHaveBeenCalled();
+    });
+
+    it('should skip entry when copilot --model has invalid model name', () => {
+      mockLogger.warn.mockClear();
+      const rows = [
+        ['bad-model', '0 9 * * *', 'Do something', 'copilot --model -invalid', 'true'],
+      ];
+      const entries = parseSchedulesSection(rows);
+      expect(entries).toHaveLength(0);
+    });
+
+    it('should have model undefined for plain claude entries', () => {
+      const rows = [
+        ['test', '0 9 * * *', 'hello', 'claude', 'true'],
+      ];
+      const entries = parseSchedulesSection(rows);
+      expect(entries[0].model).toBeUndefined();
+    });
   });
 
   describe('parseCmateFile edge cases', () => {

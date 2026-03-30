@@ -11,6 +11,44 @@ import { ApiClient, isValidWorktreeId, MAX_STOP_PATTERN_LENGTH } from '../utils/
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constants';
 import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
+import { validateCopilotModelName } from '../config/model-validation';
+
+/**
+ * Build auto-yes request body and send it to the API (DRY extraction).
+ * Validates duration and exits on invalid input.
+ *
+ * @param client - API client instance
+ * @param worktreeId - Target worktree ID
+ * @param options - Send command options containing auto-yes settings
+ */
+async function enableAutoYes(
+  client: ApiClient,
+  worktreeId: string,
+  options: SendOptions
+): Promise<void> {
+  const durationMs = options.duration
+    ? parseDurationToMs(options.duration)
+    : parseDurationToMs('1h'); // default 1h
+
+  if (durationMs === null) {
+    console.error(`Error: Invalid duration. Must be one of: ${ALLOWED_DURATIONS.join(', ')}`);
+    process.exit(ExitCode.CONFIG_ERROR);
+  }
+
+  const autoYesBody: Record<string, unknown> = {
+    enabled: true,
+    duration: durationMs,
+  };
+  if (options.agent) {
+    autoYesBody.cliToolId = options.agent;
+  }
+  if (options.stopPattern) {
+    autoYesBody.stopPattern = options.stopPattern;
+  }
+
+  await client.post<void>(`/api/worktrees/${worktreeId}/auto-yes`, autoYesBody);
+  console.error('Auto-yes enabled.');
+}
 
 export function createSendCommand(): Command {
   const cmd = new Command('send');
@@ -44,23 +82,16 @@ export function createSendCommand(): Command {
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
-        // Issue #576: Validate --model option
+        // Issue #576/#588: Validate --model option via shared validator (DR1-003)
         if (options.model) {
           // --model requires --agent copilot
           if (!options.agent || options.agent !== 'copilot') {
             console.error('Error: --model option requires --agent copilot');
             process.exit(ExitCode.CONFIG_ERROR);
           }
-          // Character pattern check
-          const MODEL_NAME_PATTERN = /^[a-zA-Z0-9\-._/:]+$/;
-          if (!MODEL_NAME_PATTERN.test(options.model)) {
-            console.error('Error: Invalid model name: contains invalid characters');
-            process.exit(ExitCode.CONFIG_ERROR);
-          }
-          // Length check
-          const MODEL_NAME_MAX_LENGTH = 128;
-          if (options.model.length > MODEL_NAME_MAX_LENGTH) {
-            console.error(`Error: Invalid model name: exceeds maximum length of ${MODEL_NAME_MAX_LENGTH} characters`);
+          const modelValidation = validateCopilotModelName(options.model);
+          if (!modelValidation.valid) {
+            console.error(`Error: Invalid model name: ${modelValidation.reason}`);
             process.exit(ExitCode.CONFIG_ERROR);
           }
         }
@@ -69,28 +100,7 @@ export function createSendCommand(): Command {
 
         // --auto-yes: enable auto-yes first (unless --model is specified, then after send) [DR2-02]
         if (options.autoYes && !options.model) {
-          const durationMs = options.duration
-            ? parseDurationToMs(options.duration)
-            : parseDurationToMs('1h'); // default 1h
-
-          if (durationMs === null) {
-            console.error(`Error: Invalid duration. Must be one of: ${ALLOWED_DURATIONS.join(', ')}`);
-            process.exit(ExitCode.CONFIG_ERROR);
-          }
-
-          const autoYesBody: Record<string, unknown> = {
-            enabled: true,
-            duration: durationMs,
-          };
-          if (options.agent) {
-            autoYesBody.cliToolId = options.agent;
-          }
-          if (options.stopPattern) {
-            autoYesBody.stopPattern = options.stopPattern;
-          }
-
-          await client.post<void>(`/api/worktrees/${worktreeId}/auto-yes`, autoYesBody);
-          console.error('Auto-yes enabled.');
+          await enableAutoYes(client, worktreeId, options);
         }
 
         // [DR2-05] Send API uses "content" not "message"
@@ -109,28 +119,7 @@ export function createSendCommand(): Command {
         // Issue #576: Enable auto-yes AFTER send when --model is specified
         // This avoids auto-yes interfering with the /model command interaction
         if (options.autoYes && options.model) {
-          const durationMs = options.duration
-            ? parseDurationToMs(options.duration)
-            : parseDurationToMs('1h');
-
-          if (durationMs === null) {
-            console.error(`Error: Invalid duration. Must be one of: ${ALLOWED_DURATIONS.join(', ')}`);
-            process.exit(ExitCode.CONFIG_ERROR);
-          }
-
-          const autoYesBody: Record<string, unknown> = {
-            enabled: true,
-            duration: durationMs,
-          };
-          if (options.agent) {
-            autoYesBody.cliToolId = options.agent;
-          }
-          if (options.stopPattern) {
-            autoYesBody.stopPattern = options.stopPattern;
-          }
-
-          await client.post<void>(`/api/worktrees/${worktreeId}/auto-yes`, autoYesBody);
-          console.error('Auto-yes enabled.');
+          await enableAutoYes(client, worktreeId, options);
         }
       } catch (error) {
         handleCommandError(error);

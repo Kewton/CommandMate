@@ -53,4 +53,31 @@ describe('cmate-parser / cmate-validator consistency (SEC4-004)', () => {
     expect(errors).toHaveLength(1);
     expect(errors[0].field).toBe('permission');
   });
+
+  // Issue #588: copilot --model consistency
+  it('should accept "copilot --model gpt-4" in both parser and validator', () => {
+    const row = ['copilot-task', '0 9 * * *', 'Do something', 'copilot --model gpt-4', 'true', 'allow-all-tools'];
+
+    // Parser should accept and set model
+    const entries = parseSchedulesSection([row]);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].cliToolId).toBe('copilot');
+    expect(entries[0].model).toBe('gpt-4');
+
+    // Validator should return no errors
+    const errors = validateSchedulesSection([row]);
+    expect(errors).toEqual([]);
+  });
+
+  it('should reject "claude --model gpt-4" in both parser and validator', () => {
+    const row = ['task', '0 9 * * *', 'Do something', 'claude --model gpt-4', 'true'];
+
+    // Parser should skip (returns empty)
+    const entries = parseSchedulesSection([row]);
+    expect(entries).toHaveLength(0);
+
+    // Validator should report error
+    const errors = validateSchedulesSection([row]);
+    expect(errors.length).toBeGreaterThan(0);
+  });
 });

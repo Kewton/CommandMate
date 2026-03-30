@@ -63,6 +63,7 @@ interface ActiveSchedule {
   isExecuting: boolean;
   isCronActive: boolean;
   nextRunAt: number | null;
+  model?: string;
 }
 
 export interface ExecutionLogPaneProps {
@@ -243,6 +244,9 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
                   <div className="mt-1 text-xs text-gray-600 dark:text-gray-400">
                     <span>{t('cron')}: {schedule.cronExpression || 'N/A'}</span>
                     <span className="ml-3">{t('agentLabel')}: {schedule.cliToolId}</span>
+                    {schedule.model && (
+                      <span className="ml-3">model: {schedule.model}</span>
+                    )}
                     {schedule.nextRunAt && (
                       <span className="ml-3">{t('nextRun')}: {formatTimestamp(schedule.nextRunAt)}</span>
                     )}
