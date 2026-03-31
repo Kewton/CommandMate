@@ -260,8 +260,8 @@ tests/
 | `src/app/api/worktrees/[id]/git/log/route.ts` | Gitコミット履歴取得API（Issue #447） |
 | `src/app/api/worktrees/[id]/git/show/[commitHash]/route.ts` | Gitコミット変更ファイル一覧API（Issue #447） |
 | `src/app/api/worktrees/[id]/git/diff/route.ts` | Gitファイルdiff取得API（Issue #447） |
-| `src/app/api/worktrees/[id]/special-keys/route.ts` | 特殊キー送信API（Up/Down/Enter/Escape、6層防御）（Issue #473） |
-| `src/components/worktree/NavigationButtons.tsx` | OpenCode TUI選択リストナビゲーションボタン（Issue #473） |
+| `src/app/api/worktrees/[id]/special-keys/route.ts` | 特殊キー送信API（Up/Down/Left/Right/Enter/Escape、6層防御）（Issue #473, #592） |
+| `src/components/worktree/NavigationButtons.tsx` | OpenCode TUI選択リストナビゲーションボタン、Left/Right対応（Issue #473, #592） |
 | `src/cli/utils/api-client.ts` | CLI用HTTPクライアント（認証トークン解決・エラー分類・ApiClient/ApiError）（Issue #518） |
 | `src/cli/utils/command-helpers.ts` | CLI共通ヘルパー（TOKEN_WARNING定数・handleCommandError統一エラーハンドラ）（Issue #518） |
 | `src/cli/types/api-responses.ts` | CLI側APIレスポンス型定義（WorktreeListResponse, CurrentOutputResponse, PromptResponseResult等）（Issue #518） |

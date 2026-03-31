@@ -33,7 +33,7 @@ vi.mock('@/lib/db', () => ({
 vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn(),
   sendSpecialKeys: vi.fn(),
-  isAllowedSpecialKey: vi.fn((key: string) => ['Up', 'Down', 'Enter', 'Escape', 'Tab', 'BTab'].includes(key)),
+  isAllowedSpecialKey: vi.fn((key: string) => ['Up', 'Down', 'Left', 'Right', 'Enter', 'Escape', 'Tab', 'BTab'].includes(key)),
   sendSpecialKeysAndInvalidate: vi.fn(),
 }));
 
