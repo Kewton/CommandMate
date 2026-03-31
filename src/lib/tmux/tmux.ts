@@ -492,7 +492,7 @@ export async function sendSpecialKey(
  * [DR3-001] Named NAVIGATION_KEY_VALUES to avoid collision with existing SPECIAL_KEY_VALUES.
  * [DR2-004] Exported as as const array + type guard (not Set) for immutability guarantee.
  */
-export const NAVIGATION_KEY_VALUES = ['Up', 'Down', 'Enter', 'Escape', 'Tab', 'BTab'] as const;
+export const NAVIGATION_KEY_VALUES = ['Up', 'Down', 'Left', 'Right', 'Enter', 'Escape', 'Tab', 'BTab'] as const;
 
 /**
  * Navigation key type derived from NAVIGATION_KEY_VALUES.

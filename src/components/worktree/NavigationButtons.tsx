@@ -3,6 +3,7 @@
 /**
  * NavigationButtons component for TUI selection list navigation.
  * Issue #473: Provides Up/Down/Enter/Escape buttons for OpenCode TUI interaction.
+ * Issue #592: Added Left/Right buttons for Copilot reasoning effort adjustment.
  *
  * Touch targets: minimum 44x44px for mobile accessibility.
  * Keyboard: Arrow keys intercepted only when component has focus.
@@ -11,6 +12,7 @@
 
 import { useCallback, useState, type KeyboardEvent } from 'react';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import type { NavigationKey } from '@/lib/tmux/tmux';
 
 export interface NavigationButtonsProps {
   worktreeId: string;
@@ -20,12 +22,14 @@ export interface NavigationButtonsProps {
 }
 
 /** Navigation button configuration */
-const NAVIGATION_BUTTONS = [
+const NAVIGATION_BUTTONS: ReadonlyArray<{ key: NavigationKey; label: string; ariaLabel: string }> = [
+  { key: 'Left', label: '\u25C0', ariaLabel: 'Left' },
   { key: 'Up', label: '\u25B2', ariaLabel: 'Up' },
   { key: 'Down', label: '\u25BC', ariaLabel: 'Down' },
+  { key: 'Right', label: '\u25B6', ariaLabel: 'Right' },
   { key: 'Enter', label: '\u21B5', ariaLabel: 'Enter' },
   { key: 'Escape', label: 'Esc', ariaLabel: 'Escape' },
-] as const;
+];
 
 export function NavigationButtons({ worktreeId, cliToolId, onKeysSent }: NavigationButtonsProps) {
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -52,8 +56,10 @@ export function NavigationButtons({ worktreeId, cliToolId, onKeysSent }: Navigat
 
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
     const keyMap: Record<string, string> = {
+      ArrowLeft: 'Left',
       ArrowUp: 'Up',
       ArrowDown: 'Down',
+      ArrowRight: 'Right',
       Enter: 'Enter',
       Escape: 'Escape',
     };
