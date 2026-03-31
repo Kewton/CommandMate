@@ -16,7 +16,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
-import { getSlashCommandGroups, loadCodexSkills, loadCodexPrompts, getCopilotBuiltinCommands } from '@/lib/slash-commands';
+import { getSlashCommandGroups, loadCodexSkills, loadCodexPrompts, getCopilotBuiltinCommands, getGeminiBuiltinCommands } from '@/lib/slash-commands';
 import { getStandardCommandGroups } from '@/lib/standard-commands';
 import { mergeCommandGroups, filterCommandsByCliTool, groupByCategory } from '@/lib/command-merger';
 import { isValidWorktreePath } from '@/lib/security/worktree-path-validator';
@@ -112,13 +112,19 @@ export async function GET(
       ? [{ category: 'skill' as const, label: 'Skills', commands: allGlobalCodex }]
       : [];
 
-    // Issue #586: Copilot builtins are only injected when cliTool is 'copilot'
-    // to prevent overriding Claude standard commands with same names (clear, model, etc.)
+    // Builtins are injected per-cli to prevent unrelated tools from overriding
+    // shared standard commands with same names (clear, model, help, etc.).
     const copilotBuiltinGroups: SlashCommandGroup[] = cliTool === 'copilot'
       ? groupByCategory(getCopilotBuiltinCommands())
       : [];
+    const geminiBuiltinGroups: SlashCommandGroup[] = cliTool === 'gemini'
+      ? groupByCategory(getGeminiBuiltinCommands())
+      : [];
 
-    const mergedGroups = mergeCommandGroups(standardGroups, [...worktreeGroups, ...globalCodexGroups, ...copilotBuiltinGroups]);
+    const mergedGroups = mergeCommandGroups(
+      standardGroups,
+      [...worktreeGroups, ...globalCodexGroups, ...copilotBuiltinGroups, ...geminiBuiltinGroups]
+    );
 
     // Issue #4: Filter by CLI tool
     const filteredGroups = filterCommandsByCliTool(mergedGroups, cliTool);

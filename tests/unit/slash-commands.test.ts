@@ -125,6 +125,36 @@ describe('loadSlashCommands', () => {
     expect(workPlan?.model).toBe('sonnet');
   });
 
+  it('should parse valid cliTools from command frontmatter', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-command-cli-tools');
+    const commandsDir = path.join(testDir, '.claude', 'commands');
+    try {
+      fs.mkdirSync(commandsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(commandsDir, 'shared-command.md'),
+        [
+          '---',
+          'description: Shared command',
+          'cliTools:',
+          '  - gemini',
+          '  - codex',
+          '  - invalid-tool',
+          '---',
+          'Body',
+        ].join('\n')
+      );
+
+      const { loadSlashCommands } = await import('@/lib/slash-commands');
+      const commands = await loadSlashCommands(testDir);
+      const shared = commands.find((cmd) => cmd.name === 'shared-command');
+
+      expect(shared).toBeDefined();
+      expect(shared?.cliTools).toEqual(['gemini', 'codex']);
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
   it('should extract command name from filename', async () => {
     const { loadSlashCommands } = await import('@/lib/slash-commands');
     const commands = await loadSlashCommands();
@@ -366,6 +396,36 @@ describe('loadSkills', () => {
       expect(skills[0].description).toBe('A skill');
       expect(skills[0].category).toBe('skill');
       expect(skills[0].source).toBe('skill');
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should parse valid cliTools from skill frontmatter', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-skill-cli-tools');
+    const skillDir = path.join(testDir, '.claude', 'skills', 'shared-skill');
+    try {
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(skillDir, 'SKILL.md'),
+        [
+          '---',
+          'name: shared-skill',
+          'description: Shared skill',
+          'cliTools:',
+          '  - gemini',
+          '  - copilot',
+          '  - invalid-tool',
+          '---',
+          'Body',
+        ].join('\n')
+      );
+
+      const { loadSkills } = await import('@/lib/slash-commands');
+      const skills = await loadSkills(testDir);
+
+      expect(skills).toHaveLength(1);
+      expect(skills[0].cliTools).toEqual(['gemini', 'copilot']);
     } finally {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
@@ -1214,6 +1274,48 @@ describe('getCopilotBuiltinCommands', () => {
     const { getCopilotBuiltinCommands } = await import('@/lib/slash-commands');
     const commands = getCopilotBuiltinCommands();
     expect(commands.length).toBeGreaterThanOrEqual(40);
+  });
+});
+
+describe('getGeminiBuiltinCommands', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('should return curated Gemini builtin commands', async () => {
+    const { getGeminiBuiltinCommands } = await import('@/lib/slash-commands');
+    const commands = getGeminiBuiltinCommands();
+
+    expect(Array.isArray(commands)).toBe(true);
+    expect(commands.length).toBeGreaterThan(0);
+  });
+
+  it('should include /model with Gemini-specific metadata', async () => {
+    const { getGeminiBuiltinCommands } = await import('@/lib/slash-commands');
+    const commands = getGeminiBuiltinCommands();
+    const modelCmd = commands.find((c) => c.name === 'model');
+
+    expect(modelCmd).toBeDefined();
+    expect(modelCmd?.category).toBe('standard-config');
+    expect(modelCmd?.cliTools).toEqual(['gemini']);
+    expect(modelCmd?.source).toBe('builtin');
+  });
+
+  it('should expose the main Gemini interactive commands we rely on in the UI', async () => {
+    const { getGeminiBuiltinCommands } = await import('@/lib/slash-commands');
+    const names = getGeminiBuiltinCommands().map((c) => c.name);
+
+    expect(names).toContain('model');
+    expect(names).toContain('clear');
+    expect(names).toContain('compact');
+    expect(names).toContain('rewind');
+    expect(names).toContain('theme');
+    expect(names).toContain('help');
+    expect(names).toContain('quit');
+    expect(names).toContain('commands reload');
+    expect(names).toContain('memory reload');
+    expect(names).toContain('skills reload');
+    expect(names).toContain('mcp reload');
   });
 });
 

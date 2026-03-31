@@ -21,6 +21,7 @@ import type {
 } from '@/types/slash-commands';
 import { COMMAND_CATEGORIES } from '@/types/slash-commands';
 import { groupByCategory } from '@/lib/command-merger';
+import { isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
 import { truncateString } from '@/lib/utils';
 import { createLogger } from '@/lib/logger';
 
@@ -108,6 +109,29 @@ function getSkillsDir(basePath?: string): string {
 }
 
 /**
+ * Parse cliTools frontmatter into validated CLI tool IDs.
+ */
+function parseCliTools(value: unknown): CLIToolType[] | undefined {
+  if (typeof value === 'string') {
+    return isCliToolType(value) ? [value] : undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const cliTools = value.filter(
+    (entry): entry is CLIToolType => typeof entry === 'string' && isCliToolType(entry)
+  );
+
+  if (cliTools.length === 0) {
+    return undefined;
+  }
+
+  return Array.from(new Set(cliTools));
+}
+
+/**
  * Parse a command file and extract metadata
  */
 function parseCommandFile(filePath: string): SlashCommand | null {
@@ -123,6 +147,7 @@ function parseCommandFile(filePath: string): SlashCommand | null {
       description: frontmatter.description || '',
       category: category as SlashCommandCategory,
       model: frontmatter.model,
+      cliTools: parseCliTools(frontmatter.cliTools),
       filePath: path.relative(process.cwd(), filePath),
     };
   } catch (error) {
@@ -134,10 +159,9 @@ function parseCommandFile(filePath: string): SlashCommand | null {
 /**
  * Parse a skill file (SKILL.md) and extract metadata (Issue #343)
  *
- * [D009] Note on cliTools: .claude/skills/ skills do not set cliTools (left as undefined),
- * which means filterCommandsByCliTool() treats them as claude-only (cliToolId === 'claude').
- * Codex skills (.codex/skills/) set cliTools: ['codex'] explicitly in loadCodexSkills().
- * See filterCommandsByCliTool() in command-merger.ts for the authoritative behavior.
+ * [D009] Note on cliTools: .claude/skills/ skills default to undefined unless frontmatter
+ * sets cliTools explicitly. Undefined means Claude-only in filterCommandsByCliTool().
+ * Codex skills (.codex/skills/) still set cliTools: ['codex'] explicitly in loadCodexSkills().
  *
  * @param skillDirPath - Absolute path to the skill subdirectory
  * @param skillName - Directory name used as fallback for skill name
@@ -154,10 +178,12 @@ function parseSkillFile(skillDirPath: string, skillName: string): SlashCommand |
     const content = fs.readFileSync(skillPath, 'utf-8');
     let name: string = skillName;
     let description: string = '';
+    let cliTools: CLIToolType[] | undefined;
     try {
       const { data: frontmatter } = safeParseFrontmatter(content);
       name = frontmatter.name || skillName;
       description = frontmatter.description || '';
+      cliTools = parseCliTools(frontmatter.cliTools);
     } catch {
       // Fallback: SKILL.md may contain YAML-unfriendly characters (e.g., unquoted
       // colons or brackets in argument-hint). Extract only name/description via regex.
@@ -170,6 +196,7 @@ function parseSkillFile(skillDirPath: string, skillName: string): SlashCommand |
       description: truncateString(description, MAX_SKILL_DESCRIPTION_LENGTH),
       category: 'skill',
       source: 'skill',
+      cliTools,
       filePath: path.relative(process.cwd(), skillPath),
     };
   } catch (error) {
@@ -477,6 +504,31 @@ export function getCopilotBuiltinCommands(): SlashCommand[] {
     { name: 'restart', description: 'Restart the CLI preserving session', category: 'standard-session', cliTools: ['copilot'], filePath: '', source: 'builtin' },
     { name: 'undo', description: 'Rewind last turn and revert changes', category: 'standard-session', cliTools: ['copilot'], filePath: '', source: 'builtin' },
     { name: 'user', description: 'Manage GitHub user list', category: 'standard-config', cliTools: ['copilot'], filePath: '', source: 'builtin' },
+  ];
+}
+
+/**
+ * Get Gemini CLI builtin commands.
+ *
+ * Returns curated interactive commands confirmed from Gemini CLI source/docs.
+ * These are injected only when cliTool is 'gemini' so they can safely override
+ * shared standard command names like clear/model/help for Gemini sessions.
+ */
+export function getGeminiBuiltinCommands(): SlashCommand[] {
+  return [
+    { name: 'clear', description: 'Clear the screen and conversation history', category: 'standard-session', cliTools: ['gemini'], filePath: '', source: 'builtin' },
+    { name: 'compact', description: 'Compress the context by replacing it with a summary', category: 'standard-session', cliTools: ['gemini'], filePath: '', source: 'builtin' },
+    { name: 'rewind', description: 'Rewind to a previous conversation state', category: 'standard-session', cliTools: ['gemini'], filePath: '', source: 'builtin' },
+    { name: 'quit', description: 'Exit the CLI', category: 'standard-session', cliTools: ['gemini'], filePath: '', source: 'builtin' },
+    { name: 'model', description: 'Manage model configuration', category: 'standard-config', cliTools: ['gemini'], filePath: '', source: 'builtin' },
+    { name: 'theme', description: 'Change the theme', category: 'standard-config', cliTools: ['gemini'], filePath: '', source: 'builtin' },
+    { name: 'agents reload', description: 'Reload the agent registry', category: 'standard-config', cliTools: ['gemini'], filePath: '', source: 'builtin' },
+    { name: 'commands reload', description: 'Reload custom slash commands', category: 'standard-config', cliTools: ['gemini'], filePath: '', source: 'builtin' },
+    { name: 'memory reload', description: 'Reload context files (e.g. GEMINI.md)', category: 'standard-config', cliTools: ['gemini'], filePath: '', source: 'builtin' },
+    { name: 'mcp reload', description: 'Restart and reload MCP servers', category: 'standard-config', cliTools: ['gemini'], filePath: '', source: 'builtin' },
+    { name: 'skills reload', description: 'Reload discovered agent skills from disk', category: 'standard-config', cliTools: ['gemini'], filePath: '', source: 'builtin' },
+    { name: 'extensions reload', description: 'Reload all active extensions', category: 'standard-config', cliTools: ['gemini'], filePath: '', source: 'builtin' },
+    { name: 'help', description: 'Show help for interactive commands', category: 'standard-util', cliTools: ['gemini'], filePath: '', source: 'builtin' },
   ];
 }
 
