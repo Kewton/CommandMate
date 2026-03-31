@@ -17,7 +17,7 @@ import {
 import type { SlashCommandCategory } from '@/types/slash-commands';
 
 describe('STANDARD_COMMANDS', () => {
-  it('should have 33 standard commands (14 Claude-only + 3 shared + 9 Codex-only + 7 OpenCode-only)', () => {
+  it('should have 33 standard commands (8 Claude-only + 9 shared + 9 Codex-only + 7 OpenCode-only)', () => {
     expect(STANDARD_COMMANDS.length).toBe(33);
   });
 
@@ -34,16 +34,10 @@ describe('STANDARD_COMMANDS', () => {
 
   it('should have Claude commands without cliTools field (backward compatible)', () => {
     const claudeOnlyCommands = [
-      'clear',
-      'resume',
       'rewind',
       'config',
-      'model',
-      'permissions',
-      'status',
       'context',
       'cost',
-      'review',
       'pr-comments',
       'doctor',
       'export',
@@ -53,6 +47,23 @@ describe('STANDARD_COMMANDS', () => {
       const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
       expect(cmd).toBeDefined();
       expect(cmd?.cliTools).toBeUndefined();
+    });
+  });
+
+  it('should have commands shared between Claude and Codex', () => {
+    const sharedCommands = [
+      'clear',
+      'compact',
+      'resume',
+      'model',
+      'permissions',
+      'status',
+      'review',
+    ];
+    sharedCommands.forEach((name) => {
+      const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
+      expect(cmd).toBeDefined();
+      expect(cmd?.cliTools).toEqual(expect.arrayContaining(['claude', 'codex']));
     });
   });
 
@@ -110,6 +121,13 @@ describe('STANDARD_COMMANDS', () => {
       (cmd) => cmd.cliTools?.includes('opencode')
     );
     expect(opencodeCommands.length).toBe(10);
+  });
+
+  it('should have 17 commands available for Codex', () => {
+    const codexCommands = STANDARD_COMMANDS.filter(
+      (cmd) => cmd.cliTools?.includes('codex')
+    );
+    expect(codexCommands.length).toBe(17);
   });
 
   it('should include session management commands', () => {

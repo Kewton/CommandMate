@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { mergeCommandGroups, groupByCategory, filterCommandGroups, CATEGORY_ORDER } from '@/lib/command-merger';
+import { mergeCommandGroups, groupByCategory, filterCommandGroups, filterCommandsByCliTool, CATEGORY_ORDER } from '@/lib/command-merger';
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
 
 describe('mergeCommandGroups', () => {
@@ -289,5 +289,85 @@ describe('filterCommandGroups', () => {
     expect(result.length).toBe(1);
     expect(result[0].commands.length).toBe(1);
     expect(result[0].commands[0].name).toBe('clear');
+  });
+});
+
+describe('filterCommandsByCliTool', () => {
+  const testGroups: SlashCommandGroup[] = [
+    {
+      category: 'standard-session',
+      label: 'Standard (Session)',
+      commands: [
+        {
+          name: 'clear',
+          description: 'Clear conversation history',
+          category: 'standard-session',
+          isStandard: true,
+          source: 'standard',
+          filePath: '',
+        },
+        {
+          name: 'compact',
+          description: 'Compact context to reduce token usage',
+          category: 'standard-session',
+          isStandard: true,
+          source: 'standard',
+          filePath: '',
+          cliTools: ['claude', 'codex', 'opencode'],
+        },
+      ],
+    },
+    {
+      category: 'standard-config',
+      label: 'Standard (Config)',
+      commands: [
+        {
+          name: 'model',
+          description: 'Switch AI model',
+          category: 'standard-config',
+          isStandard: true,
+          source: 'standard',
+          filePath: '',
+          cliTools: ['claude', 'codex'],
+        },
+        {
+          name: 'help',
+          description: 'Show all available commands',
+          category: 'standard-util',
+          isStandard: true,
+          source: 'standard',
+          filePath: '',
+          cliTools: ['claude', 'opencode'],
+        },
+      ],
+    },
+  ];
+
+  it('should keep backward-compatible commands visible for Claude', () => {
+    const result = filterCommandsByCliTool(testGroups, 'claude');
+    const names = result.flatMap((group) => group.commands.map((cmd) => cmd.name));
+
+    expect(names).toContain('clear');
+    expect(names).toContain('compact');
+    expect(names).toContain('model');
+    expect(names).toContain('help');
+  });
+
+  it('should show explicitly shared commands for Codex', () => {
+    const result = filterCommandsByCliTool(testGroups, 'codex');
+    const names = result.flatMap((group) => group.commands.map((cmd) => cmd.name));
+
+    expect(names).toContain('compact');
+    expect(names).toContain('model');
+  });
+
+  it('should not leak Claude-only or other-tool commands into Codex', () => {
+    const result = filterCommandsByCliTool(testGroups, 'codex');
+    const names = result.flatMap((group) => group.commands.map((cmd) => cmd.name));
+
+    expect(names).not.toContain('clear');
+    expect(names).not.toContain('help');
+    expect(result).toHaveLength(2);
+    expect(result[1].commands).toHaveLength(1);
   });
 });

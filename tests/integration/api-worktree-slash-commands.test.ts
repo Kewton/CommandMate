@@ -93,4 +93,35 @@ describe('GET /api/worktrees/[id]/slash-commands', () => {
     expect(data.sources).toHaveProperty('skill');
     expect(typeof data.sources.skill).toBe('number');
   });
+
+  it('should return Codex shared commands when cliTool=codex', async () => {
+    const { getWorktreeById } = await import('@/lib/db');
+    vi.mocked(getWorktreeById).mockReturnValue({
+      id: 'test-id',
+      name: 'test',
+      path: '/Users/test/projects/my-project',
+      repositoryPath: '/Users/test/projects/my-project',
+      repositoryName: 'my-project',
+      cliToolId: 'codex',
+    });
+
+    const { GET } = await import(
+      '@/app/api/worktrees/[id]/slash-commands/route'
+    );
+
+    const request = new NextRequest('http://localhost:3000/api/worktrees/test-id/slash-commands?cliTool=codex');
+    const response = await GET(request, { params: Promise.resolve({ id: 'test-id' }) });
+
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    const allNames = data.groups.flatMap((group: { commands: Array<{ name: string }> }) =>
+      group.commands.map((command) => command.name)
+    );
+
+    expect(allNames).toContain('clear');
+    expect(allNames).toContain('model');
+    expect(allNames).toContain('status');
+    expect(allNames).toContain('review');
+    expect(allNames).not.toContain('context');
+  });
 });
