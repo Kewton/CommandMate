@@ -23,7 +23,7 @@ vi.mock('@/lib/cli-tools/types', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/cli-tools/types')>();
   return {
     ...original,
-    CLI_TOOL_IDS: ['claude'] as readonly CLIToolType[],
+    CLI_TOOL_IDS: ['claude', 'gemini'] as readonly CLIToolType[],
   };
 });
 
@@ -47,6 +47,10 @@ vi.mock('@/lib/session/claude-session', () => ({
 
 vi.mock('@/lib/cli-tools/opencode', () => ({
   OPENCODE_PANE_HEIGHT: 200,
+}));
+
+vi.mock('@/lib/cli-tools/gemini', () => ({
+  GEMINI_PANE_HEIGHT: 200,
 }));
 
 vi.mock('@/lib/polling/auto-yes-manager', () => ({
@@ -109,5 +113,15 @@ describe('worktree-status-helper (Issue #501)', () => {
     // detectSessionStatus should not be called when session is not running
     expect(detectSessionStatus).not.toHaveBeenCalled();
     expect(result.isSessionRunning).toBe(false);
+  });
+
+  it('should capture the full Gemini pane height for status detection', async () => {
+    vi.mocked(getLastServerResponseTimestamp).mockReturnValue(null);
+
+    const sessionNameSet = new Set(['gemini-wt-4']);
+    await detectWorktreeSessionStatus('wt-4', sessionNameSet, mockDb, mockGetMessages, mockMarkPending);
+
+    const { captureSessionOutput } = await import('@/lib/session/cli-session');
+    expect(captureSessionOutput).toHaveBeenCalledWith('wt-4', 'gemini', 200);
   });
 });

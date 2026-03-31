@@ -287,6 +287,18 @@ describe('status-detector', () => {
     });
   });
 
+  describe('gemini prompt padding detection', () => {
+    it('should detect ready when the Gemini prompt is followed by pane padding', () => {
+      const output = `> Type your message or @path/to/file${'\n'.repeat(180)}`;
+
+      const result = detectSessionStatus(output, 'gemini');
+
+      expect(result.status).toBe('ready');
+      expect(result.confidence).toBe('high');
+      expect(result.reason).toBe('input_prompt');
+    });
+  });
+
   describe('Bug fix: trailing empty lines and indented prompts', () => {
     it('should detect multiple choice prompt with trailing tmux padding empty lines', () => {
       // Real-world scenario: Claude Bash tool prompt followed by tmux terminal padding.

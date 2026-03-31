@@ -35,6 +35,9 @@ function getErrorMessage(error: unknown): string {
 /** Wait for Gemini CLI to initialize after launch (banner + auth + dialog) */
 const GEMINI_INIT_WAIT_MS = 6000;
 
+/** Gemini runs in a 200-line tmux pane and keeps the prompt near the top. */
+export const GEMINI_PANE_HEIGHT = 200;
+
 /** Interval for polling trust dialog / prompt detection */
 const GEMINI_POLL_INTERVAL_MS = 1000;
 
@@ -124,7 +127,7 @@ export class GeminiTool extends BaseCLITool {
     let trustDialogHandled = false;
     for (let i = 0; i < GEMINI_INIT_MAX_ATTEMPTS; i++) {
       try {
-        const rawOutput = await capturePane(sessionName, 50);
+        const rawOutput = await capturePane(sessionName, GEMINI_PANE_HEIGHT);
         // Strip ANSI escape codes before pattern matching
         // (Gemini TUI uses 24-bit color codes that break regex matching)
         const output = stripAnsi(rawOutput);
@@ -159,7 +162,7 @@ export class GeminiTool extends BaseCLITool {
     const pollInterval = 500;
     while (Date.now() - startTime < GEMINI_PROMPT_WAIT_TIMEOUT_MS) {
       try {
-        const rawOutput = await capturePane(sessionName, 50);
+        const rawOutput = await capturePane(sessionName, GEMINI_PANE_HEIGHT);
         const output = stripAnsi(rawOutput);
         if (GEMINI_PROMPT_PATTERN.test(output)) {
           return;
