@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.15] - 2026-03-31
+
+### Added
+- Schedule: allow Copilot model selection in CMATE schedule CLI Tool column (Issue #588)
+- Schedule: add Copilot CLI permission flag support for CMATE schedules (Issue #584)
+- Schedule: expose active schedule state
+- Commands: add current-situation, cause-analysis commands and update orchestrate for bug workflow
+- Commands: add Codex cross-review to multi-stage review commands
+
+### Fixed
+- Slash commands: prevent Copilot builtins from overriding Claude standard commands (Issue #586)
+- Schedule: recover inactive schedule cron jobs
+- Schedule: stop cron job when schedule is disabled via Enabled=false
+- Commands: correct agent assignment rules in orchestrate command
+- Scripts: add .env auto-loading to all shell scripts
+- Schedule: add missing new files for Copilot model selection (Issue #588)
+
+### Docs
+- Add Copilot model selection syntax to CMATE schedules guide (ja/en)
+
 ## [0.4.14] - 2026-03-29
 
 ### Added
