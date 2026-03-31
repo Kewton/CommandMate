@@ -35,8 +35,8 @@ describe('NAVIGATION_KEY_VALUES', () => {
     expect(Array.isArray(NAVIGATION_KEY_VALUES)).toBe(true);
   });
 
-  it('should contain exactly the 6 allowed navigation keys', () => {
-    expect(NAVIGATION_KEY_VALUES).toEqual(['Up', 'Down', 'Enter', 'Escape', 'Tab', 'BTab']);
+  it('should contain exactly the 8 allowed navigation keys', () => {
+    expect(NAVIGATION_KEY_VALUES).toEqual(['Up', 'Down', 'Left', 'Right', 'Enter', 'Escape', 'Tab', 'BTab']);
   });
 
   it('should be distinct from SPECIAL_KEY_VALUES (no name collision)', () => {
@@ -58,8 +58,8 @@ describe('isAllowedSpecialKey', () => {
     expect(isAllowedSpecialKey('C-c')).toBe(false);
     expect(isAllowedSpecialKey('C-d')).toBe(false);
     expect(isAllowedSpecialKey('C-m')).toBe(false);
-    expect(isAllowedSpecialKey('Left')).toBe(false);
-    expect(isAllowedSpecialKey('Right')).toBe(false);
+    expect(isAllowedSpecialKey('Left')).toBe(true);
+    expect(isAllowedSpecialKey('Right')).toBe(true);
     expect(isAllowedSpecialKey('Space')).toBe(false);
     expect(isAllowedSpecialKey('')).toBe(false);
     expect(isAllowedSpecialKey('arbitrary-key')).toBe(false);
@@ -71,6 +71,12 @@ describe('isAllowedSpecialKey', () => {
     expect(isAllowedSpecialKey('UP')).toBe(false);
     expect(isAllowedSpecialKey('down')).toBe(false);
     expect(isAllowedSpecialKey('enter')).toBe(false);
+  });
+
+  it('should reject Space, BSpace, and DC keys (security regression)', () => {
+    expect(isAllowedSpecialKey('Space')).toBe(false);
+    expect(isAllowedSpecialKey('BSpace')).toBe(false);
+    expect(isAllowedSpecialKey('DC')).toBe(false);
   });
 
   it('should act as type guard (narrows to NavigationKey)', () => {

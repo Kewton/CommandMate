@@ -1,7 +1,7 @@
 /**
  * Special Keys API endpoint
- * Sends navigation keys (Up/Down/Enter/Escape/Tab/BTab) to tmux sessions
- * for TUI interaction (e.g., OpenCode selection lists).
+ * Sends navigation keys (Up/Down/Left/Right/Enter/Escape/Tab/BTab) to tmux sessions
+ * for TUI interaction (e.g., OpenCode selection lists, Copilot reasoning effort).
  *
  * Issue #473: Multi-layer defense following terminal/route.ts pattern.
  * [DR1-001] Validation structure mirrors terminal/route.ts.
