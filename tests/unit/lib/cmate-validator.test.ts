@@ -294,5 +294,66 @@ describe('cmate-validator', () => {
     it('should return empty array for empty rows', () => {
       expect(validateSchedulesSection([])).toEqual([]);
     });
+
+    it('should accept valid copilot permission (allow-all-tools)', () => {
+      const rows = [['copilot-task', '0 * * * *', 'Do something', 'copilot', 'true', 'allow-all-tools']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors).toEqual([]);
+    });
+
+    it('should accept valid copilot permission (yolo)', () => {
+      const rows = [['copilot-task', '0 * * * *', 'Do something', 'copilot', 'true', 'yolo']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors).toEqual([]);
+    });
+
+    it('should detect invalid copilot permission', () => {
+      const rows = [['copilot-task', '0 * * * *', 'Do something', 'copilot', 'true', 'read-only']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors).toHaveLength(1);
+      expect(errors[0].field).toBe('permission');
+      expect(errors[0].message).toContain('invalid permission');
+      expect(errors[0].message).toContain('copilot');
+    });
+
+    it('should allow empty copilot permission (DR2-005)', () => {
+      const rows = [['copilot-task', '0 * * * *', 'Do something', 'copilot', 'true', '']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors).toEqual([]);
+    });
+
+    it('should allow omitted copilot permission column', () => {
+      const rows = [['copilot-task', '0 * * * *', 'Do something', 'copilot', 'true']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors).toEqual([]);
+    });
+
+    // Issue #588: copilot --model validation
+    it('should accept copilot --model with valid model name', () => {
+      const rows = [['copilot-task', '0 * * * *', 'Do something', 'copilot --model gpt-4', 'true', 'allow-all-tools']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors).toEqual([]);
+    });
+
+    it('should report error for claude --model (unsupported)', () => {
+      const rows = [['task', '0 * * * *', 'msg', 'claude --model gpt-4', 'true']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors.some(e => e.field === 'cliTool')).toBe(true);
+    });
+
+    it('should report model error for copilot --model with invalid name', () => {
+      const rows = [['task', '0 * * * *', 'msg', 'copilot --model -invalid', 'true']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors.some(e => e.field === 'model')).toBe(true);
+    });
+
+    it('should report cliTool error for unknown CLI tool', () => {
+      const rows = [['task', '0 * * * *', 'msg', 'unknown-tool', 'true']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors.some(e => e.field === 'cliTool')).toBe(true);
+    });
   });
 });

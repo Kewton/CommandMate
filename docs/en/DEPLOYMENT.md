@@ -80,6 +80,8 @@ cd CommandMate
 3. Interactive environment configuration (`setup-env.sh`)
 4. Database initialization, build, and start (`build-and-start.sh --daemon`)
 
+> **Note**: `build-and-start.sh` and `stop.sh` automatically load the `.env` file from the project root. Since the custom server (`node dist/server/server.js`) does not support Next.js automatic `.env` loading, the scripts export environment variables explicitly. Variables already set in the environment are not overwritten by `.env` values.
+
 ### Manual Setup
 
 For customization, you can set up manually:

@@ -28,6 +28,7 @@ import path from 'path';
 import { createLogger } from '@/lib/logger';
 import { COPILOT_SEND_ENTER_DELAY_MS } from '@/config/copilot-constants';
 import { CopilotTool } from '@/lib/cli-tools/copilot';
+import { validateCopilotModelName } from '@/lib/cmate-cli-tool-parser';
 
 const logger = createLogger('api/send');
 
@@ -44,11 +45,9 @@ interface SendMessageRequest {
   model?: string;  // Issue #576: AI model name for Copilot agent
 }
 
-/** Issue #576: Valid model name pattern (alphanumeric, hyphens, dots, underscores, slashes, colons) */
-const MODEL_NAME_PATTERN = /^[a-zA-Z0-9\-._/:]+$/;
-
-/** Issue #576: Maximum model name length */
-const MODEL_NAME_MAX_LENGTH = 128;
+// Issue #588: MODEL_NAME_PATTERN and MAX_MODEL_NAME_LENGTH are now centralized
+// in copilot-constants.ts and validated via validateCopilotModelName() from
+// cmate-cli-tool-parser.ts (DR1-003).
 
 /** [S4-M2] URL schemes that are not allowed in imagePath (SSRF prevention) */
 const DANGEROUS_SCHEMES = ['file://', 'http://', 'https://', 'ftp://', 'data:'];
@@ -151,15 +150,15 @@ export async function POST(
     // Determine which CLI tool to use (priority: request > worktree setting > default)
     const cliToolId = body.cliToolId || worktree.cliToolId || DEFAULT_CLI_TOOL;
 
-    // Validate CLI tool ID
+    // Validate CLI tool ID (DR4-002: fixed error text, no raw input reflection)
     if (!VALID_CLI_TOOL_IDS.includes(cliToolId)) {
       return NextResponse.json(
-        { error: `Invalid CLI tool ID: ${cliToolId}. Must be one of: ${VALID_CLI_TOOL_IDS.join(', ')}` },
+        { error: `Invalid CLI tool ID. Must be one of: ${VALID_CLI_TOOL_IDS.join(', ')}` },
         { status: 400 }
       );
     }
 
-    // Issue #576: Validate model parameter
+    // Issue #576/#588: Validate model parameter via shared validator (DR1-003)
     if (body.model) {
       // model is only supported for copilot
       if (cliToolId !== 'copilot') {
@@ -168,24 +167,10 @@ export async function POST(
           { status: 400 }
         );
       }
-      // Control character check
-      if (CONTROL_CHAR_REGEX.test(body.model)) {
+      const modelValidation = validateCopilotModelName(body.model);
+      if (!modelValidation.valid) {
         return NextResponse.json(
-          { error: 'Invalid model name: contains control characters' },
-          { status: 400 }
-        );
-      }
-      // Character pattern check
-      if (!MODEL_NAME_PATTERN.test(body.model)) {
-        return NextResponse.json(
-          { error: 'Invalid model name: contains invalid characters' },
-          { status: 400 }
-        );
-      }
-      // Length check
-      if (body.model.length > MODEL_NAME_MAX_LENGTH) {
-        return NextResponse.json(
-          { error: `Invalid model name: exceeds maximum length of ${MODEL_NAME_MAX_LENGTH} characters` },
+          { error: `Invalid model name: ${modelValidation.reason}` },
           { status: 400 }
         );
       }

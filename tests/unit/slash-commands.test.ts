@@ -1216,3 +1216,77 @@ describe('getCopilotBuiltinCommands', () => {
     expect(commands.length).toBeGreaterThanOrEqual(40);
   });
 });
+
+describe('Issue #586: Copilot builtins must not override Claude standard commands', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('getSlashCommandGroups should NOT include Copilot builtin commands in output', async () => {
+    // When getSlashCommandGroups is called (with or without basePath),
+    // the returned groups should NOT contain any commands with cliTools: ['copilot']
+    // and source: 'builtin'. Copilot builtins should be injected only in the API route.
+    const testDir = path.resolve(__dirname, '../fixtures/test-586-no-copilot');
+    const commandsDir = path.join(testDir, '.claude', 'commands');
+    try {
+      fs.mkdirSync(commandsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(commandsDir, 'test-cmd.md'),
+        '---\ndescription: Test command\n---\nContent'
+      );
+
+      const { getSlashCommandGroups } = await import('@/lib/slash-commands');
+      const groups = await getSlashCommandGroups(testDir);
+
+      const allCommands = groups.flatMap((g) => g.commands);
+      const copilotBuiltins = allCommands.filter(
+        (c) => c.source === 'builtin' && c.cliTools?.includes('copilot')
+      );
+      expect(copilotBuiltins).toHaveLength(0);
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('getSlashCommandGroups without basePath should NOT include Copilot builtins', async () => {
+    const { getSlashCommandGroups, clearCache } = await import('@/lib/slash-commands');
+    clearCache();
+    const groups = await getSlashCommandGroups();
+
+    const allCommands = groups.flatMap((g) => g.commands);
+    const copilotBuiltins = allCommands.filter(
+      (c) => c.source === 'builtin' && c.cliTools?.includes('copilot')
+    );
+    expect(copilotBuiltins).toHaveLength(0);
+  });
+
+  it('deduplicateByName should not be called with Copilot builtins - commands with same names should keep original cliTools', async () => {
+    // Verify that Claude standard command names (clear, model, compact, etc.)
+    // are not overwritten by Copilot builtins in deduplicateByName
+    const { deduplicateByName } = await import('@/lib/slash-commands');
+
+    const claudeCommands: SlashCommand[] = [
+      { name: 'clear', description: 'Clear conversation', category: 'standard-session', filePath: '' },
+      { name: 'model', description: 'Switch model', category: 'standard-config', filePath: '' },
+    ];
+
+    const copilotBuiltins: SlashCommand[] = [
+      { name: 'clear', description: 'Copilot clear', category: 'standard-session', cliTools: ['copilot'], filePath: '', source: 'builtin' },
+      { name: 'model', description: 'Copilot model', category: 'standard-config', cliTools: ['copilot'], filePath: '', source: 'builtin' },
+    ];
+
+    // If Copilot builtins are passed as skills (first arg), they get overridden by commands (second arg)
+    // But the bug was that they were in skills, and then mergeCommandGroups SF-1 override caused issues.
+    // The fix ensures Copilot builtins are never in deduplicateByName at all.
+    const result = deduplicateByName(copilotBuiltins, claudeCommands);
+
+    // Claude commands should take priority
+    const clearCmd = result.find((c) => c.name === 'clear');
+    expect(clearCmd?.cliTools).toBeUndefined(); // Claude's version has no cliTools
+    expect(clearCmd?.description).toBe('Clear conversation');
+  });
+});

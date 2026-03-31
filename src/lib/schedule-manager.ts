@@ -80,6 +80,60 @@ interface ManagerState {
   cmateFileCache: Map<string, number>;
 }
 
+export interface ActiveScheduleInfo {
+  scheduleId: string;
+  worktreeId: string;
+  name: string;
+  cronExpression: string;
+  cliToolId: string;
+  enabled: boolean;
+  isExecuting: boolean;
+  isCronActive: boolean;
+  nextRunAt: number | null;
+  /** AI model name (copilot only, from CMATE.md CLI Tool column) */
+  model?: string;
+}
+
+function isCronJobActive(cronJob: import('croner').Cron): boolean {
+  try {
+    if (typeof cronJob.isStopped === 'function') {
+      return !cronJob.isStopped();
+    }
+    if (typeof cronJob.isRunning === 'function') {
+      return cronJob.isRunning();
+    }
+  } catch {
+    return false;
+  }
+
+  return true;
+}
+
+function createScheduleState(
+  worktreeId: string,
+  scheduleId: string,
+  entry: ScheduleState['entry']
+): ScheduleState {
+  const cronJob = new Cron(entry.cronExpression, {
+    paused: false,
+    protect: true,
+  });
+
+  const state: ScheduleState = {
+    scheduleId,
+    worktreeId,
+    cronJob,
+    isExecuting: false,
+    entry,
+  };
+
+  cronJob.schedule(() => {
+    void executeSchedule(state);
+  });
+
+  return state;
+}
+
 // =============================================================================
 // Global State (hot reload persistence)
 // =============================================================================
@@ -168,15 +222,27 @@ async function syncSchedules(): Promise<void> {
           continue;
         }
 
+        const worktreeScheduleIds: string[] = [];
+        let hasInactiveState = false;
+        for (const [scheduleId, state] of manager.schedules) {
+          if (state.worktreeId !== worktree.id) continue;
+          worktreeScheduleIds.push(scheduleId);
+          if (!isCronJobActive(state.cronJob)) {
+            hasInactiveState = true;
+          }
+        }
+
         // If mtime matches cached value, skip DB operations for this worktree
         if (cachedMtime !== undefined && cachedMtime === mtime) {
-          // File unchanged - re-add existing schedule IDs to keep them active
-          for (const [scheduleId, state] of manager.schedules) {
-            if (state.worktreeId === worktree.id) {
+          if (!hasInactiveState) {
+            // File unchanged - re-add existing schedule IDs to keep them active
+            for (const scheduleId of worktreeScheduleIds) {
               activeScheduleIds.add(scheduleId);
             }
+            continue;
           }
-          continue;
+
+          logger.warn('schedule:inactive-state-detected', { worktreeId: worktree.id });
         }
 
         // Update mtime cache
@@ -204,36 +270,42 @@ async function syncSchedules(): Promise<void> {
 
           activeScheduleIds.add(scheduleId);
 
+          // Skip disabled or incomplete entries
+          if (!entry.enabled || !entry.cronExpression) {
+            // If a running cron job exists for this entry, stop it
+            const disabledState = manager.schedules.get(scheduleId);
+            if (disabledState) {
+              disabledState.cronJob.stop();
+              manager.schedules.delete(scheduleId);
+              logger.info('schedule:disabled', { name: entry.name });
+            }
+            continue;
+          }
+
           // Check if this schedule already has a running cron job
           const existingState = manager.schedules.get(scheduleId);
           if (existingState) {
+            if (!isCronJobActive(existingState.cronJob)) {
+              try {
+                existingState.cronJob.stop();
+              } catch {
+                // Ignore cleanup errors for inactive cron jobs
+              }
+
+              const recoveredState = createScheduleState(worktree.id, scheduleId, entry);
+              manager.schedules.set(scheduleId, recoveredState);
+              logger.warn('schedule:recreated-inactive', { name: entry.name, cron: entry.cronExpression });
+              continue;
+            }
+
             // Update entry if changed
             existingState.entry = entry;
             continue;
           }
 
-          if (!entry.enabled || !entry.cronExpression) continue;
-
           // Create new cron job
           try {
-            const cronJob = new Cron(entry.cronExpression, {
-              paused: false,
-              protect: true, // Prevent overlapping
-            });
-
-            const state: ScheduleState = {
-              scheduleId,
-              worktreeId: worktree.id,
-              cronJob,
-              isExecuting: false,
-              entry,
-            };
-
-            // Schedule execution
-            cronJob.schedule(() => {
-              void executeSchedule(state);
-            });
-
+            const state = createScheduleState(worktree.id, scheduleId, entry);
             manager.schedules.set(scheduleId, state);
             logger.info('schedule:created', { name: entry.name, cron: entry.cronExpression });
           } catch (cronError) {
@@ -414,4 +486,41 @@ export function getScheduleWorktreeIds(): string[] {
     worktreeIds.add(state.worktreeId);
   }
   return Array.from(worktreeIds);
+}
+
+export function getActiveSchedulesForWorktree(worktreeId: string): ActiveScheduleInfo[] {
+  const manager = getManagerState();
+  const schedules: ActiveScheduleInfo[] = [];
+
+  for (const [scheduleId, state] of manager.schedules) {
+    if (state.worktreeId !== worktreeId) continue;
+
+    let nextRunAt: number | null = null;
+    try {
+      const nextRun = typeof state.cronJob.nextRun === 'function'
+        ? state.cronJob.nextRun()
+        : null;
+      if (nextRun instanceof Date) {
+        nextRunAt = nextRun.getTime();
+      }
+    } catch {
+      nextRunAt = null;
+    }
+
+    schedules.push({
+      scheduleId,
+      worktreeId,
+      name: state.entry.name,
+      cronExpression: state.entry.cronExpression,
+      cliToolId: state.entry.cliToolId,
+      enabled: state.entry.enabled,
+      isExecuting: state.isExecuting,
+      isCronActive: isCronJobActive(state.cronJob),
+      nextRunAt,
+      model: state.entry.model,
+    });
+  }
+
+  schedules.sort((a, b) => a.name.localeCompare(b.name));
+  return schedules;
 }

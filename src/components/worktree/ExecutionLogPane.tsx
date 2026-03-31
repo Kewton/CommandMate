@@ -53,6 +53,19 @@ interface Schedule {
   updated_at: number;
 }
 
+interface ActiveSchedule {
+  scheduleId: string;
+  worktreeId: string;
+  name: string;
+  cronExpression: string;
+  cliToolId: string;
+  enabled: boolean;
+  isExecuting: boolean;
+  isCronActive: boolean;
+  nextRunAt: number | null;
+  model?: string;
+}
+
 export interface ExecutionLogPaneProps {
   worktreeId: string;
   className?: string;
@@ -104,6 +117,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
   const t = useTranslations('schedule');
   const [logs, setLogs] = useState<ExecutionLog[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [activeSchedules, setActiveSchedules] = useState<ActiveSchedule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
@@ -114,9 +128,10 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
     setError(null);
 
     try {
-      const [logsRes, schedulesRes] = await Promise.all([
+      const [logsRes, schedulesRes, activeRes] = await Promise.all([
         fetch(`/api/worktrees/${worktreeId}/execution-logs`),
         fetch(`/api/worktrees/${worktreeId}/schedules`),
+        fetch(`/api/worktrees/${worktreeId}/schedules/active`),
       ]);
 
       if (logsRes.ok) {
@@ -127,6 +142,13 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
       if (schedulesRes.ok) {
         const schedulesData = await schedulesRes.json();
         setSchedules(schedulesData.schedules || []);
+      }
+
+      if (activeRes.ok) {
+        const activeData = await activeRes.json();
+        setActiveSchedules(activeData.schedules || []);
+      } else {
+        setActiveSchedules([]);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch data');
@@ -191,6 +213,49 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
       {/* Schedules Section */}
       <div>
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">{t('title')} ({schedules.length})</h3>
+        <div className="mb-3 rounded border border-cyan-100 bg-cyan-50/60 p-3 dark:border-cyan-900/40 dark:bg-cyan-950/20">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-semibold text-cyan-900 dark:text-cyan-200">
+              {t('activeSchedulesTitle')} ({activeSchedules.length})
+            </span>
+            <span className="text-xs text-cyan-700 dark:text-cyan-300">
+              {t('activeSchedulesDescription')}
+            </span>
+          </div>
+          {activeSchedules.length === 0 ? (
+            <p className="text-xs text-cyan-800 dark:text-cyan-300">{t('noActiveSchedules')}</p>
+          ) : (
+            <div className="space-y-2">
+              {activeSchedules.map((schedule) => (
+                <div key={schedule.scheduleId} className="rounded border border-cyan-200/80 bg-white/80 p-3 dark:border-cyan-900/40 dark:bg-gray-900/60">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-sm text-gray-900 dark:text-gray-100">{schedule.name}</span>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs px-2 py-0.5 rounded ${schedule.isCronActive ? 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300'}`}>
+                        {schedule.isCronActive ? t('activeState.active') : t('activeState.inactive')}
+                      </span>
+                      {schedule.isExecuting && (
+                        <span className="text-xs px-2 py-0.5 rounded bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300">
+                          {t('activeState.executing')}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                    <span>{t('cron')}: {schedule.cronExpression || 'N/A'}</span>
+                    <span className="ml-3">{t('agentLabel')}: {schedule.cliToolId}</span>
+                    {schedule.model && (
+                      <span className="ml-3">model: {schedule.model}</span>
+                    )}
+                    {schedule.nextRunAt && (
+                      <span className="ml-3">{t('nextRun')}: {formatTimestamp(schedule.nextRunAt)}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         {schedules.length === 0 ? (
           <div className="text-center py-8 text-gray-500 dark:text-gray-400">
             <p className="font-medium text-gray-600 dark:text-gray-300 mb-3">{t('noSchedulesTitle')}</p>

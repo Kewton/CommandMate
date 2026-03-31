@@ -34,6 +34,13 @@ export type ClaudePermission = (typeof CLAUDE_PERMISSIONS)[number];
 export const CODEX_SANDBOXES = ['read-only', 'workspace-write', 'danger-full-access'] as const;
 export type CodexSandbox = (typeof CODEX_SANDBOXES)[number];
 
+/** Allowed permission values for copilot CLI (--allow-all-tools / --yolo) */
+export const COPILOT_PERMISSIONS = [
+  'allow-all-tools',
+  'yolo',
+] as const;
+export type CopilotPermission = (typeof COPILOT_PERMISSIONS)[number];
+
 /** Allowed permission values for gemini CLI (no permission flags) */
 export const GEMINI_PERMISSIONS = [] as const;
 
@@ -46,7 +53,7 @@ export const DEFAULT_PERMISSIONS: Record<string, string> = {
   codex: 'workspace-write',
   gemini: '',
   'vibe-local': '',
-  copilot: '',
+  copilot: 'allow-all-tools',
 };
 
 // =============================================================================

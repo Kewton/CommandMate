@@ -174,7 +174,7 @@ tests/
 | `src/config/html-extensions.ts` | HTML拡張子定義・判定関数・SandboxLevel型・SANDBOX_ATTRIBUTES（Issue #490） |
 | `src/config/file-polling-config.ts` | ファイルポーリング定数（FILE_TREE_POLL_INTERVAL_MS, FILE_CONTENT_POLL_INTERVAL_MS）（Issue #469） |
 | `src/config/timer-constants.ts` | タイマー定数定義（TIMER_DELAYS, MAX_TIMERS_PER_WORKTREE, TIMER_STATUS, isValidTimerDelay）（Issue #534） |
-| `src/config/copilot-constants.ts` | Copilot CLIタイミング定数（COPILOT_SEND_ENTER_DELAY_MS, COPILOT_TEXT_INPUT_DELAY_MS）（Issue #565） |
+| `src/config/copilot-constants.ts` | Copilot CLIタイミング定数（COPILOT_SEND_ENTER_DELAY_MS, COPILOT_TEXT_INPUT_DELAY_MS）（Issue #565）、MODEL_NAME_PATTERN/MAX_MODEL_NAME_LENGTH追加（Issue #588） |
 | `src/lib/detection/prompt-key.ts` | promptKey重複排除ユーティリティ |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
 | `src/lib/cli-tools/types.ts` | CLIツール型定義（IImageCapableCLITool/isImageCapableCLITool追加）（Issue #474）（Issue #545: copilot追加、6ツール対応） |
@@ -186,10 +186,11 @@ tests/
 | `src/lib/selected-agents-validator.ts` | エージェント選択バリデーション（2-4エージェント） |
 | `src/lib/session/claude-executor.ts` | CLI非インタラクティブ実行エンジン |
 | `src/lib/timer-manager.ts` | タイマーマネージャー（globalThis singleton、setTimeout管理、サーバー再起動リカバリ）（Issue #534） |
-| `src/lib/schedule-manager.ts` | スケジューラーメイン・ジョブ登録管理（Issue #409, Issue #479） |
+| `src/lib/schedule-manager.ts` | スケジューラーメイン・ジョブ登録管理（Issue #409, Issue #479）、ActiveScheduleInfo.model追加（Issue #588） |
 | `src/lib/cron-parser.ts` | CMATE.md mtime検出・スケジュール一括更新（Issue #479） |
 | `src/lib/job-executor.ts` | ジョブ実行エンジン・実行ログCRUD（Issue #479） |
-| `src/lib/cmate-parser.ts` | CMATE.md汎用パーサー |
+| `src/lib/cmate-parser.ts` | CMATE.md汎用パーサー、parseAndValidateCliToolColumn連携（Issue #588） |
+| `src/lib/cmate-cli-tool-parser.ts` | CLI Tool列パース・model名バリデーション共有モジュール（parseCliToolColumn, validateCopilotModelName, TOOLS_WITH_MODEL_SUPPORT）（Issue #588） |
 | `src/lib/session-cleanup.ts` | セッション/ポーラー/スケジューラー停止（Facade）、killWorktreeSession共通化、syncWorktreesAndCleanup（Issue #526） |
 | `src/lib/session-key-sender.ts` | Claudeセッションキー送信ロジック（Issue #479） |
 | `src/lib/prompt-answer-input.ts` | プロンプト応答入力ロジック（getAnswerInput）（Issue #479） |
@@ -266,6 +267,7 @@ tests/
 | `src/cli/types/api-responses.ts` | CLI側APIレスポンス型定義（WorktreeListResponse, CurrentOutputResponse, PromptResponseResult等）（Issue #518） |
 | `src/cli/config/duration-constants.ts` | CLI側duration定数（DURATION_MAP, parseDurationToMs）（Issue #518） |
 | `src/cli/config/cli-tool-ids.ts` | CLI側ツールID定義（CLI_TOOL_IDS, isCliToolId、copilot含む6ツール）（Issue #518, #545） |
+| `src/cli/config/model-validation.ts` | CLI側model名バリデーション（validateCopilotModelName、MODEL_NAME_PATTERN、クロスバリデーション対象）（Issue #588） |
 
 ### CLIモジュール
 

@@ -17,6 +17,16 @@
   },
   "enabled": "Enabled",
   "disabled": "Disabled",
+  "activeSchedulesTitle": "Active Schedules",
+  "activeSchedulesDescription": "In-memory cron state currently registered by the scheduler.",
+  "noActiveSchedules": "No schedules are currently registered in memory.",
+  "nextRun": "Next run",
+  "agentLabel": "Agent",
+  "activeState": {
+    "active": "Active",
+    "inactive": "Inactive",
+    "executing": "Executing"
+  },
   "lastRun": "Last run",
   "cron": "Cron",
   "exitCode": "Exit",

@@ -8,6 +8,11 @@ set -e
 
 APP_NAME="commandmate"
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Load .env file (custom server does not auto-load .env)
+source "$SCRIPT_DIR/load-env.sh"
+
 echo "Starting CommandMate..."
 
 # Check if PM2 is available

@@ -18,7 +18,10 @@ import {
 import {
   CLAUDE_PERMISSIONS,
   CODEX_SANDBOXES,
+  COPILOT_PERMISSIONS,
 } from '@/config/schedule-config';
+import { parseAndValidateCliToolColumn } from '@/lib/cmate-cli-tool-parser';
+import { isCliToolType } from '@/lib/cli-tools/types';
 
 // =============================================================================
 // Types
@@ -31,7 +34,7 @@ export interface CmateValidationError {
   /** Human-readable error message */
   message: string;
   /** Field that caused the error */
-  field: 'columns' | 'name' | 'cron' | 'message' | 'header' | 'permission';
+  field: 'columns' | 'name' | 'cron' | 'message' | 'header' | 'permission' | 'cliTool' | 'model';
 }
 
 /** Required header columns for the Schedules table */
@@ -50,6 +53,7 @@ export const CMATE_TEMPLATE_CONTENT = `## Schedules
 | Name | Cron | Message | CLI Tool | Enabled | Permission |
 |------|------|---------|----------|---------|------------|
 | example-task | 0 * * * * | README.mdを要約してください | claude | true | acceptEdits |
+| copilot-example | 0 9 * * * | コードをレビューしてください | copilot --model gpt-4.1 | true | allow-all-tools |
 `;
 
 // =============================================================================
@@ -241,17 +245,36 @@ export function validateSchedulesSection(
       });
     }
 
+    // Validate CLI Tool column via shared pipeline (DR1-007)
+    const { result: parsed, errors: cliToolErrors } = parseAndValidateCliToolColumn(row[3] || '');
+    for (const errMsg of cliToolErrors) {
+      errors.push({
+        row: i,
+        message: `Row ${i + 1}: ${errMsg}`,
+        field: errMsg.includes('Model') ? 'model' : 'cliTool',
+      });
+    }
+
+    // Validate cliToolId is a known tool (DR2-009)
+    if (parsed && !isCliToolType(parsed.cliToolId)) {
+      errors.push({
+        row: i,
+        message: `Row ${i + 1}: unknown CLI Tool "${parsed.cliToolId}"`,
+        field: 'cliTool',
+      });
+    }
+
     // Validate permission (6th column)
-    // Empty/missing permission is allowed — parser applies default per CLI tool
+    // Empty/missing permission is allowed -- parser applies default per CLI tool
     const permissionStr = row[5];
     if (permissionStr !== undefined && permissionStr.trim() !== '') {
       const trimmedPermission = permissionStr.trim();
-      // Validate permission value against allowed values for the CLI tool
-      const cliToolId = row[3]?.trim() || 'claude';
-      // copilot, gemini, vibe-local have no permission flags; skip validation
+      const cliToolId = parsed.cliToolId;
+      // DR3-002: copilot separated from gemini/vibe-local to accept COPILOT_PERMISSIONS
       const allowedValues: readonly string[] =
         cliToolId === 'codex' ? CODEX_SANDBOXES
-        : (cliToolId === 'copilot' || cliToolId === 'gemini' || cliToolId === 'vibe-local') ? []
+        : cliToolId === 'copilot' ? COPILOT_PERMISSIONS
+        : (cliToolId === 'gemini' || cliToolId === 'vibe-local') ? []
         : CLAUDE_PERMISSIONS;
       if (!allowedValues.includes(trimmedPermission)) {
         errors.push({

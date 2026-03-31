@@ -19,6 +19,8 @@ export interface ScheduleEntry {
   enabled: boolean;
   /** Permission mode (claude: --permission-mode, codex: --sandbox) */
   permission: string;
+  /** AI model name (copilot only, from CLI Tool column --model option) */
+  model?: string;
 }
 
 /**

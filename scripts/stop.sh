@@ -6,6 +6,11 @@
 
 APP_NAME="commandmate"
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Load .env file (for CM_PORT etc.)
+source "$SCRIPT_DIR/load-env.sh"
+
 echo "Stopping CommandMate..."
 
 if command -v pm2 &> /dev/null; then

@@ -16,9 +16,11 @@ import { realpath, readFile } from 'fs/promises';
 import path from 'path';
 import type { ScheduleEntry, CmateConfig } from '@/types/cmate';
 import { isCliToolType } from '@/lib/cli-tools/types';
+import { parseAndValidateCliToolColumn } from '@/lib/cmate-cli-tool-parser';
 import {
   CLAUDE_PERMISSIONS,
   CODEX_SANDBOXES,
+  COPILOT_PERMISSIONS,
   DEFAULT_PERMISSIONS,
 } from '@/config/schedule-config';
 import {
@@ -209,7 +211,7 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
       continue;
     }
 
-    const [name, cronExpression, message, cliToolId, enabledStr, permissionStr] = row;
+    const [name, cronExpression, message, rawCliTool, enabledStr, permissionStr] = row;
 
     // Validate name
     const sanitizedName = sanitizeMessageContent(name);
@@ -237,8 +239,15 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
       enabledStr === '' ||
       enabledStr.toLowerCase() === 'true';
 
-    // Parse and validate CLI tool ID [SEC-002]
-    const resolvedCliToolId = cliToolId?.trim() || 'claude';
+    // Parse and validate CLI tool column via shared pipeline (DR1-007)
+    const { result: parsed, errors: cliToolErrors } = parseAndValidateCliToolColumn(rawCliTool || '');
+    if (cliToolErrors.length > 0) {
+      logger.warn('parse:invalid-cli-tool-column', { name: sanitizedName, errors: cliToolErrors });
+      continue;
+    }
+
+    // Validate CLI tool ID [SEC-002]
+    const resolvedCliToolId = parsed.cliToolId;
     if (!isCliToolType(resolvedCliToolId)) {
       logger.warn('parse:invalid-cli-tool', { name: sanitizedName, cliToolId: resolvedCliToolId });
       continue;
@@ -252,10 +261,12 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
       case 'codex':
         allowedValues = CODEX_SANDBOXES;
         break;
+      case 'copilot':
+        allowedValues = COPILOT_PERMISSIONS;
+        break;
       case 'gemini':
       case 'vibe-local':
-      case 'copilot':
-        // No permission flags for gemini/vibe-local/copilot; only empty string is valid
+        // No permission flags for gemini/vibe-local; only empty string is valid
         allowedValues = [];
         if (permission) {
           logger.warn('parse:permission-ignored', { name: sanitizedName, cliToolId: resolvedCliToolId, permission });
@@ -278,6 +289,7 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
       cliToolId: resolvedCliToolId,
       enabled,
       permission,
+      model: parsed.model,
     });
   }
 

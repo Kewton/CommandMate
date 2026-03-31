@@ -8,6 +8,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 LOG_DIR="$PROJECT_DIR/logs"
 PID_FILE="$LOG_DIR/server.pid"
+
+# Load .env file (for CM_PORT etc.)
+source "$SCRIPT_DIR/load-env.sh"
+
 # Support both CM_PORT and legacy MCBD_PORT
 PORT=${CM_PORT:-${MCBD_PORT:-3000}}
 
