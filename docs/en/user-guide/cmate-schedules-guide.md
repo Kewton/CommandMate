@@ -67,7 +67,7 @@ Create a `## Schedules` section in your `CMATE.md` and define entries using Mark
 | **Name** | Yes | Schedule name. 1-100 characters. Alphanumeric, Japanese, hyphens, and spaces allowed | - |
 | **Cron** | Yes | Cron expression (5-6 fields). Defines execution timing | - |
 | **Message** | Yes | Prompt sent to `claude -p`. Max 10,000 characters | - |
-| **CLI Tool** | No | CLI tool to use (`claude` / `codex` / `gemini` / `vibe-local` / `copilot`) | `claude` |
+| **CLI Tool** | No | CLI tool to use (`claude` / `codex` / `gemini` / `vibe-local` / `copilot`). Copilot only: `copilot --model <model-name>` for model selection | `claude` |
 | **Enabled** | No | Enable/disable the schedule (`true` / `false`) | `true` |
 | **Permission** | No | Execution permission level. See Permission Reference below | Tool-specific default |
 
@@ -119,6 +119,16 @@ No permission settings. The Permission column is ignored.
 | `yolo` | Allows all tool usage and bypasses all user confirmations |
 
 > **Warning:** `yolo` is the maximum permission mode that bypasses all user confirmations. When combined with scheduled execution (unattended batch), there is a risk of unrestricted file system writes and arbitrary command execution without human review.
+
+#### Copilot Model Selection
+
+Use `copilot --model <model-name>` in the CLI Tool column to specify a model for scheduled execution.
+
+```markdown
+| copilot-task | 0 9 * * * | Analyze code changes | copilot --model claude-opus-4.6 | true | allow-all-tools |
+```
+
+Model names may contain alphanumeric characters, hyphens, dots, and slashes. Model selection is only supported for copilot (ignored for other CLI tools).
 
 ### vibe-local
 
