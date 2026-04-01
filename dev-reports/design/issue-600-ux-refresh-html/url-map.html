@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CommandMate v0.5 - URL Map</title>
+  <style>
+    :root { --bg:#08111f; --surface:#111827; --surface2:#1f2937; --border:#475569; --text:#e5eefc; --muted:#94a3b8; --accent:#22d3ee; --green:#22c55e; --yellow:#facc15; --pink:#fb7185; }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at top,#13203a 0%,#08111f 48%,#040914 100%);color:var(--text)}
+    .page{max-width:1440px;margin:0 auto;padding:36px 24px 64px}
+    h1{margin:0 0 8px;font-size:2rem}
+    h1 span{color:var(--accent)}
+    h2{margin:0 0 10px;font-size:1.2rem}
+    p{color:var(--muted);line-height:1.65}
+    .hero,.section,.diagram,.note{border:1px solid rgba(71,85,105,.8);border-radius:22px;background:rgba(17,24,39,.82);box-shadow:0 18px 50px rgba(0,0,0,.28)}
+    .hero,.section,.diagram,.note{padding:20px}
+    .badges,.footer-links{display:flex;gap:10px;flex-wrap:wrap}
+    .badge,.pill{padding:8px 12px;border-radius:999px;background:rgba(15,23,42,.85);border:1px solid rgba(71,85,105,.7);color:var(--muted);font-size:.84rem}
+    .badge strong,.pill strong,.route strong,.node strong{color:var(--text)}
+    .grid{display:grid;grid-template-columns:1.2fr .8fr;gap:18px;margin-top:18px}
+    .route-table{width:100%;border-collapse:collapse;margin-top:12px;font-size:.92rem}
+    .route-table th,.route-table td{border:1px solid rgba(71,85,105,.7);padding:12px 14px;vertical-align:top}
+    .route-table th{text-align:left;background:rgba(31,41,55,.92)}
+    .route-table td{color:var(--muted)}
+    .flow{display:grid;grid-template-columns:1fr 260px 1fr;gap:16px;align-items:start;margin-top:16px}
+    .column{display:grid;gap:12px}
+    .node{padding:14px 16px;border-radius:18px;border:1px solid rgba(71,85,105,.7);background:rgba(15,23,42,.78)}
+    .center{border-color:rgba(34,211,238,.4);background:rgba(34,211,238,.1)}
+    .arrow{display:flex;align-items:center;justify-content:center;min-height:74px;color:var(--accent);font-size:1.2rem;font-weight:800}
+    .mini{font-size:.82rem;color:var(--muted);margin-top:6px}
+    .subgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:16px}
+    ul{margin:10px 0 0 18px;color:var(--muted)}
+    .footer-links{margin-top:20px}
+    .footer-links a{color:var(--text);text-decoration:none;border:1px solid rgba(148,163,184,.28);padding:10px 14px;border-radius:12px;font-weight:700}
+    @media (max-width:1080px){.grid,.flow,.subgrid{grid-template-columns:1fr}.arrow{min-height:auto}}
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>CommandMate <span>URL Map</span></h1>
+    <p>現行URLと、UX再設計で定義したURL一覧です。特に `/worktrees/:id` を中核の実行画面として残し、他画面との責務分離と遷移関係を整理しています。</p>
+
+    <div class="hero">
+      <div class="badges">
+        <div class="badge"><strong>維持するもの</strong> `/worktrees/:id` は残す</div>
+        <div class="badge"><strong>役割</strong> 実行・監視・返信の主画面</div>
+        <div class="badge"><strong>分離するもの</strong> 探索は `/sessions`、登録は `/repositories`</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <section class="section">
+        <h2>URL一覧</h2>
+        <p>現行コードで存在するURLと、再設計で追加定義するURLを同じ表にまとめています。`Current` は現行実装、`Proposed` はUX設計上の定義です。</p>
+        <table class="route-table">
+          <thead>
+            <tr>
+              <th>URL</th>
+              <th>状態</th>
+              <th>役割</th>
+              <th>`/worktrees/:id` との関係</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>/login</strong></td>
+              <td>Current</td>
+              <td>認証入口</td>
+              <td>認証後に `/` へ。間接的に detail へ入る前段。</td>
+            </tr>
+            <tr>
+              <td><strong>/</strong></td>
+              <td>Current → Proposed</td>
+              <td>現行は Repository + Worktree List + External Apps の混在。再設計後は Home / Mission Control。</td>
+              <td>detail へ入る前の判断面。待ち・完了・リスクから `/worktrees/:id` または `/worktrees/:id/reply` へ遷移。</td>
+            </tr>
+            <tr>
+              <td><strong>/sessions</strong></td>
+              <td>Proposed</td>
+              <td>worktree 一覧、検索、絞り込み、選択</td>
+              <td>対象を選んで `/worktrees/:id` に入るための探索面。</td>
+            </tr>
+            <tr>
+              <td><strong>/repositories</strong></td>
+              <td>Proposed</td>
+              <td>Local Path / Clone URL / Sync / Excluded restore</td>
+              <td>登録・同期後は `/sessions` または直接 `/worktrees/:id` に進む。</td>
+            </tr>
+            <tr>
+              <td><strong>/review</strong></td>
+              <td>Proposed</td>
+              <td>Done / Approval / Stalled の処理キュー</td>
+              <td>成果確認で detail を再度開く必要がある時に `/worktrees/:id` へ戻る。</td>
+            </tr>
+            <tr>
+              <td><strong>/more</strong></td>
+              <td>Proposed</td>
+              <td>Settings / External Apps / Help / Auth</td>
+              <td>detail の補助設定面。通常は detail の直接前後には置かない。</td>
+            </tr>
+            <tr>
+              <td><strong>/worktrees/:id</strong></td>
+              <td>Current + Core</td>
+              <td>実行・監視・返信・ファイル・ログ・ノート・Git の主画面</td>
+              <td>全導線の中心。再設計後も URL と責務を維持する。</td>
+            </tr>
+            <tr>
+              <td><strong>/worktrees/:id/reply</strong></td>
+              <td>Proposed</td>
+              <td>軽量 Quick Reply 画面 / シート</td>
+              <td>Home / Review / 通知から直接入る軽量導線。深掘り時は `/worktrees/:id` へエスカレーション。</td>
+            </tr>
+            <tr>
+              <td><strong>/worktrees/:id?pane=history|terminal|files|logs|notes|git</strong></td>
+              <td>Proposed</td>
+              <td>detail 内のタブ深リンク</td>
+              <td>detail を壊さずに、現在できる操作をそのまま深リンク化するための定義。</td>
+            </tr>
+            <tr>
+              <td><strong>/worktrees/:id/terminal</strong></td>
+              <td>Current</td>
+              <td>フルスクリーン terminal</td>
+              <td>detail の補助サブページ。主画面は `/worktrees/:id` のまま。</td>
+            </tr>
+            <tr>
+              <td><strong>/worktrees/:id/files/:path</strong></td>
+              <td>Current</td>
+              <td>フルスクリーン file viewer</td>
+              <td>detail から派生する閲覧サブページ。閲覧後は detail に戻る。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <aside class="note">
+        <h2>結論</h2>
+        <p>`/worktrees/:id` は残ります。しかも再設計ではむしろ重要度が上がります。`Home` や `Sessions` は「選ぶ」「判断する」画面で、`/worktrees/:id` は「実際に進める」画面です。</p>
+        <ul>
+          <li>今できる send / prompt reply / terminal / files / logs / notes / auto-yes は維持前提</li>
+          <li>違いは、`/` に混在している情報を責務別URLへ分けること</li>
+          <li>Quick Reply は detail の代替ではなく軽量入口</li>
+        </ul>
+      </aside>
+    </div>
+
+    <section class="diagram" style="margin-top:18px;">
+      <h2>`/worktrees/:id` を中心にした遷移関係</h2>
+      <p>ポイントは、`/worktrees/:id` を「どこからでも戻ってこられる作業の母艦」にすることです。</p>
+
+      <div class="flow">
+        <div class="column">
+          <div class="node">
+            <strong>/</strong>
+            <div class="mini">Waiting / Running / Done の要約から detail へ</div>
+          </div>
+          <div class="node">
+            <strong>/sessions</strong>
+            <div class="mini">一覧から対象 worktree を選び detail へ</div>
+          </div>
+          <div class="node">
+            <strong>/review</strong>
+            <div class="mini">Done / Approval / Stalled から再確認のため detail へ</div>
+          </div>
+          <div class="node">
+            <strong>/worktrees/:id/reply</strong>
+            <div class="mini">軽量返答で足りない時に detail へ移る</div>
+          </div>
+          <div class="node">
+            <strong>/repositories</strong>
+            <div class="mini">登録・sync 後に sessions または detail へ</div>
+          </div>
+        </div>
+
+        <div class="arrow">⇄</div>
+
+        <div class="column">
+          <div class="node center">
+            <strong>/worktrees/:id</strong>
+            <div class="mini">実行・監視・返信・文脈確認の中心</div>
+          </div>
+          <div class="node">
+            <strong>/worktrees/:id/terminal</strong>
+            <div class="mini">フルスクリーン terminal に派生</div>
+          </div>
+          <div class="node">
+            <strong>/worktrees/:id/files/:path</strong>
+            <div class="mini">ファイル閲覧に派生</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="subgrid">
+      <section class="section">
+        <h2>`/worktrees/:id` に入るべき時</h2>
+        <ul>
+          <li>Prompt の背景を見てから返答したい時</li>
+          <li>Terminal / Logs / Files / Notes を横断して判断したい時</li>
+          <li>新しい指示を送る時</li>
+          <li>完了結果の中身を確認して次アクションを決める時</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>`/worktrees/:id` に入らなくてよい時</h2>
+        <ul>
+          <li>Home で見える軽い yes/no の返答だけで足りる時 → `/worktrees/:id/reply`</li>
+          <li>単に別の branch を探したい時 → `/sessions`</li>
+          <li>repository を登録したい時 → `/repositories`</li>
+          <li>成果物を一覧で処理したい時 → `/review`</li>
+        </ul>
+      </section>
+    </div>
+
+    <section class="note" style="margin-top:18px;">
+      <h2>実装に落とす時のルール</h2>
+      <ul>
+        <li>`/worktrees/:id` は URL も責務も維持する</li>
+        <li>現在の detail でできることは、detail 内タブや sub-route で維持する</li>
+        <li>新URLは detail を置き換えるのではなく、前後の責務を整理するために増やす</li>
+        <li>Home から detail に飛ぶ時も、必ず `Repository 名 + Branch 名 + Agent + Status` を見せて文脈を失わない</li>
+      </ul>
+    </section>
+
+    <div class="footer-links">
+      <a href="./index.html">一覧へ戻る</a>
+      <a href="./desktop-transitions.html">PC版遷移図</a>
+      <a href="./mobile-transitions.html">スマホ版遷移図</a>
+      <a href="./desktop-worktree-detail-screen.html">PC Worktree Detail</a>
+      <a href="./mobile-worktree-detail-screen.html">Mobile Worktree Detail</a>
+    </div>
+  </div>
+</body>
+</html>

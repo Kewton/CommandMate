@@ -14,8 +14,8 @@ import { type ReactNode } from 'react';
 import { NextIntlClientProvider } from 'next-intl';
 import { ThemeProvider } from 'next-themes';
 import { SidebarProvider } from '@/contexts/SidebarContext';
-import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
 import { AuthProvider } from '@/contexts/AuthContext';
+import { WorktreesCacheProvider } from '@/components/providers/WorktreesCacheProvider';
 
 interface AppProvidersProps {
   children: ReactNode;
@@ -41,9 +41,9 @@ export function AppProviders({ children, locale, messages, timeZone, authEnabled
       <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
         <AuthProvider authEnabled={authEnabled}>
           <SidebarProvider>
-            <WorktreeSelectionProvider>
+            <WorktreesCacheProvider>
               {children}
-            </WorktreeSelectionProvider>
+            </WorktreesCacheProvider>
           </SidebarProvider>
         </AuthProvider>
       </ThemeProvider>

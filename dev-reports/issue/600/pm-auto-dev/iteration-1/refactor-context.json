@@ -1,0 +1,21 @@
+{
+  "issue_number": 600,
+  "refactor_targets": [
+    "src/components/layout/Header.tsx",
+    "src/components/layout/AppShell.tsx",
+    "src/app/page.tsx",
+    "src/app/review/page.tsx",
+    "src/app/api/worktrees/route.ts"
+  ],
+  "quality_metrics": {
+    "tests_passed": 5900,
+    "tsc_errors": 0,
+    "lint_errors": 0
+  },
+  "improvement_goals": [
+    "新規コードの品質確認とコード整理",
+    "重複コードの削除",
+    "命名規則の統一",
+    "不要なimportの削除"
+  ]
+}

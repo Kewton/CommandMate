@@ -23,10 +23,10 @@ import { normalizeExtension } from '@/config/image-extensions';
 export const VIDEO_EXTENSIONS: readonly string[] = ['.mp4'] as const;
 
 /**
- * Maximum video file size in bytes (15MB)
+ * Maximum video file size in bytes (100MB)
  * [SF-001] Named with _BYTES suffix for clarity, matching existing patterns
  */
-export const VIDEO_MAX_SIZE_BYTES = 15 * 1024 * 1024;
+export const VIDEO_MAX_SIZE_BYTES = 100 * 1024 * 1024;
 
 /**
  * Video extension validator configuration

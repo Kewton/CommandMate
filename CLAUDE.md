@@ -102,7 +102,11 @@ bin/
 
 src/
 ├── app/           # Next.js App Router
-│   └── api/       # APIルート
+│   ├── api/       # APIルート
+│   ├── sessions/  # Sessions画面（Issue #600）
+│   ├── repositories/ # Repositories画面（Issue #600）
+│   ├── review/    # Review画面（Issue #600）
+│   └── more/      # More画面（Issue #600）
 ├── cli/           # CLIモジュール（Issue #96）
 │   ├── index.ts       # CLIメインロジック（commander設定）
 │   ├── commands/      # サブコマンド（init, start, stop, status, ls, send, wait, respond, capture, auto-yes）
@@ -111,13 +115,18 @@ src/
 │   └── types/         # CLI共通型定義（ExitCode enum）
 ├── components/    # UIコンポーネント
 │   ├── common/    # 再利用可能な共通UIコンポーネント（Toast等）
-│   ├── sidebar/   # サイドバー関連
+│   ├── home/      # Home画面コンポーネント（Issue #600）
+│   ├── layout/    # レイアウトコンポーネント（Header, AppShell）
 │   ├── mobile/    # モバイル専用
+│   ├── providers/ # プロバイダーコンポーネント（Issue #600）
+│   ├── review/    # Review画面コンポーネント（Issue #600）
+│   ├── sidebar/   # サイドバー関連
 │   └── worktree/  # ワークツリー詳細
 ├── config/        # 設定（ステータス色、編集可能拡張子など）
 ├── contexts/      # React Context
 ├── hooks/         # カスタムフック（useContextMenu等）
 ├── lib/           # ユーティリティ・ビジネスロジック
+│   ├── api/       # APIユーティリティ（Issue #600）
 │   ├── cli-tools/ # CLIツール抽象化層
 │   ├── db/        # データベース（Issue #481）
 │   ├── tmux/      # tmuxセッション管理・トランスポート（Issue #481）
@@ -268,6 +277,29 @@ tests/
 | `src/cli/config/duration-constants.ts` | CLI側duration定数（DURATION_MAP, parseDurationToMs）（Issue #518） |
 | `src/cli/config/cli-tool-ids.ts` | CLI側ツールID定義（CLI_TOOL_IDS, isCliToolId、copilot含む6ツール）（Issue #518, #545） |
 | `src/cli/config/model-validation.ts` | CLI側model名バリデーション（validateCopilotModelName、MODEL_NAME_PATTERN、クロスバリデーション対象）（Issue #588） |
+| `src/config/review-config.ts` | Review設定定数（STALLED_THRESHOLD_MS, REVIEW_POLL_INTERVAL_MS）（Issue #600） |
+| `src/lib/session/next-action-helper.ts` | 次アクション算出ヘルパー（getNextAction, getReviewStatus, ReviewStatus型）（Issue #600） |
+| `src/lib/detection/stalled-detector.ts` | Stalled判定（isWorktreeStalled）（Issue #600） |
+| `src/lib/deep-link-validator.ts` | Deep linkバリデーション（isDeepLinkPane, normalizeDeepLinkPane, VALID_PANES, DeepLinkPane型）（Issue #600） |
+| `src/lib/api/worktrees-include-parser.ts` | API includeパラメータパーサー（Issue #600） |
+| `src/hooks/useLayoutConfig.ts` | レイアウト設定フック（LayoutConfig, LAYOUT_MAP, resolveLayoutConfig）（Issue #600） |
+| `src/hooks/useSendMessage.ts` | メッセージ送信フック（Issue #600） |
+| `src/hooks/useWorktreeList.ts` | Worktreeリスト共通フック（ソート・フィルタ・グループ化）（Issue #600） |
+| `src/hooks/useWorktreesCache.ts` | Worktrees共有キャッシュフック（Issue #600） |
+| `src/hooks/useWorktreeTabState.ts` | Worktreeタブ状態管理フック（deep link対応）（Issue #600） |
+| `src/components/mobile/GlobalMobileNav.tsx` | モバイルグローバルナビ（4タブ）（Issue #600） |
+| `src/components/home/HomeSessionSummary.tsx` | Home画面セッション集計サマリー（Issue #600） |
+| `src/components/review/ReviewCard.tsx` | Reviewカード（Issue #600） |
+| `src/components/review/SimpleMessageInput.tsx` | 軽量メッセージ入力（Review画面用）（Issue #600） |
+| `src/components/worktree/WorktreeDetailHeader.tsx` | Worktree詳細ヘッダー（Repository名・Branch名・Agent・Status・次アクション）（Issue #600） |
+| `src/components/providers/WorktreesCacheProvider.tsx` | Worktreesキャッシュプロバイダー（Issue #600） |
+| `src/app/sessions/page.tsx` | Sessions画面（Issue #600） |
+| `src/app/repositories/page.tsx` | Repositories画面（Issue #600） |
+| `src/app/review/page.tsx` | Review画面（Issue #600） |
+| `src/app/more/page.tsx` | More画面（Issue #600） |
+| `src/components/layout/Header.tsx` | PC 5画面ナビゲーション（Issue #600） |
+| `src/components/layout/AppShell.tsx` | アプリケーションシェル（useLayoutConfig統合）（Issue #600） |
+| `src/types/ui-state.ts` | UI状態型定義（DeepLinkPane型追加）（Issue #600） |
 
 ### CLIモジュール
 

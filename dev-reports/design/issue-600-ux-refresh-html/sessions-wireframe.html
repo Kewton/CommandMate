@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CommandMate v0.5 - Sessions Wireframe</title>
+  <style>
+    :root {
+      --bg: #09111f;
+      --surface: #111827;
+      --surface-2: #1f2937;
+      --border: #475569;
+      --text: #e5eefc;
+      --muted: #94a3b8;
+      --accent: #22d3ee;
+      --green: #22c55e;
+      --yellow: #facc15;
+      --blue: #60a5fa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at top, #13203a 0%, #09111f 45%, #040914 100%);
+    }
+    .page { max-width: 1320px; margin: 0 auto; padding: 36px 24px 64px; }
+    h1 { margin: 0 0 8px; font-size: 2rem; }
+    h1 span { color: var(--accent); }
+    p { color: var(--muted); line-height: 1.65; }
+    .hero, .card, .screen, .phone {
+      border: 1px solid rgba(71,85,105,0.8);
+      border-radius: 22px;
+      background: rgba(17,24,39,0.82);
+      box-shadow: 0 18px 50px rgba(0,0,0,0.28);
+    }
+    .hero { padding: 22px; margin-bottom: 20px; }
+    .badges, .actions, .chips { display: flex; gap: 10px; flex-wrap: wrap; }
+    .badge, .chip, .action {
+      padding: 8px 12px; border-radius: 999px; background: rgba(15,23,42,0.8);
+      border: 1px solid rgba(71,85,105,0.7); color: var(--muted); font-size: .84rem;
+    }
+    .badge strong, .chip strong { color: var(--text); }
+    .grid { display: grid; grid-template-columns: 1.2fr .8fr; gap: 18px; margin-top: 18px; }
+    .card { padding: 18px; }
+    .card h2 { margin: 0 0 8px; font-size: 1.1rem; }
+    .desktop { display: grid; grid-template-columns: 300px 1fr; min-height: 760px; overflow: hidden; margin-top: 14px; }
+    .side { padding: 16px; background: rgba(9,14,25,0.9); border-right: 1px solid rgba(71,85,105,0.7); }
+    .main { padding: 16px; }
+    .section-title { color: var(--muted); font-size: .76rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; margin: 14px 0 10px; }
+    .item, .row, .panel {
+      border: 1px solid rgba(71,85,105,0.6); border-radius: 16px; background: rgba(15,23,42,0.72); padding: 12px; margin-bottom: 10px;
+    }
+    .meta-line { color: var(--blue); font-size: .74rem; font-weight: 700; margin-bottom: 6px; }
+    .item.active { border-color: rgba(34,211,238,0.35); background: rgba(34,211,238,0.08); }
+    .item strong, .row strong, .panel strong { display:block; margin-bottom: 4px; }
+    .toolbar, .rowline { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .input { flex: 1; min-width: 180px; padding: 10px 12px; border-radius: 12px; background: rgba(9,14,25,0.75); border: 1px solid rgba(71,85,105,0.7); color: var(--muted); }
+    .pill { padding: 6px 10px; border-radius: 999px; font-size: .76rem; font-weight: 700; background: rgba(51,65,85,0.72); color: var(--text); }
+    .row { display: grid; grid-template-columns: 180px 100px 1fr 100px; gap: 12px; align-items: center; }
+    .state-waiting { color: var(--yellow); font-weight: 700; }
+    .state-running { color: var(--accent); font-weight: 700; }
+    .state-idle { color: var(--muted); font-weight: 700; }
+    .state-done { color: var(--green); font-weight: 700; }
+    .phones { display: grid; grid-template-columns: repeat(2, minmax(280px, 1fr)); gap: 18px; margin-top: 18px; }
+    .phone { max-width: 340px; margin: 0 auto; padding: 14px; border-radius: 34px; }
+    .screen { min-height: 700px; border-radius: 26px; padding: 16px 16px 90px; position: relative; }
+    .tabbar {
+      position: absolute; left: 12px; right: 12px; bottom: 12px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+      padding: 10px; border-radius: 18px; background: rgba(9,14,25,0.92); border: 1px solid rgba(71,85,105,0.75);
+    }
+    .tab { text-align: center; font-size: .74rem; color: var(--muted); padding: 8px 4px; border-radius: 12px; }
+    .tab.active { color: var(--text); background: rgba(34,211,238,0.1); border: 1px solid rgba(34,211,238,0.25); }
+    .footer-links { margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap; }
+    .footer-links a { color: var(--text); text-decoration: none; border: 1px solid rgba(148,163,184,0.28); padding: 10px 14px; border-radius: 12px; font-weight: 700; }
+    @media (max-width: 980px) {
+      .grid, .phones { grid-template-columns: 1fr; }
+      .desktop { grid-template-columns: 1fr; }
+      .side { border-right: none; border-bottom: 1px solid rgba(71,85,105,0.7); }
+      .row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>CommandMate <span>Sessions</span></h1>
+    <p>
+      これは <strong>現行のメイン画面（WorktreeList）を昇格・整理した画面</strong>です。
+      役割は「探す・絞る・選ぶ」。送信や詳細操作は worktree detail に委譲します。
+    </p>
+
+    <div class="hero">
+      <div class="badges">
+        <div class="badge"><strong>役割</strong> 一覧 / 検索 / フィルタ / 選択</div>
+        <div class="badge"><strong>現行との関係</strong> WorktreeList の進化版</div>
+        <div class="badge"><strong>やらないこと</strong> Repository 登録フォーム常設</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Desktop selected state</h2>
+        <p>左で絞り込み、右で一覧。選択後は detail へ自然に遷移。</p>
+        <div class="desktop screen">
+          <aside class="side">
+            <div class="section-title">Saved views</div>
+            <div class="item active"><strong>All Sessions</strong><p>12 worktrees</p></div>
+            <div class="item"><strong>Waiting for me</strong><p>1 item</p></div>
+            <div class="item"><strong>Running now</strong><p>3 items</p></div>
+            <div class="item"><strong>Favorites</strong><p>4 items</p></div>
+
+            <div class="section-title">Quick filters</div>
+            <div class="item"><strong>Repository</strong><p>MyCodeBranchDesk / sandbox-app</p></div>
+            <div class="item"><strong>Status</strong><p>Todo / Doing / Done / Unsorted</p></div>
+            <div class="item"><strong>Agent</strong><p>Claude / Copilot / Gemini</p></div>
+          </aside>
+
+          <main class="main">
+            <div class="toolbar">
+              <div class="input">Search worktrees, branch names, summaries...</div>
+              <span class="pill">Sort: Updated</span>
+              <span class="pill">Group: Repository</span>
+            </div>
+
+            <div class="section-title">Session list</div>
+            <div class="row">
+              <div><div class="meta-line">Repo: MyCodeBranchDesk • Agent: Copilot</div><strong>feature/588-model-validation</strong></div>
+              <span class="state-waiting">Waiting</span>
+              <p>Copilot needs confirmation about strict validation</p>
+              <span class="pill">Open</span>
+            </div>
+            <div class="row">
+              <div><div class="meta-line">Repo: MyCodeBranchDesk • Agent: Claude</div><strong>feature/592-nav-keys</strong></div>
+              <span class="state-running">Running</span>
+              <p>Claude is updating navigation key handling and tests</p>
+              <span class="pill">Watch</span>
+            </div>
+            <div class="row">
+              <div><div class="meta-line">Repo: MyCodeBranchDesk • Agent: none</div><strong>main</strong></div>
+              <span class="state-idle">Idle</span>
+              <p>No active session. Ready to open detail and send a task</p>
+              <span class="pill">Start</span>
+            </div>
+
+            <div class="section-title">UX note</div>
+            <div class="panel">
+              <strong>Why this exists</strong>
+              <p>Home は優先判断、Sessions は探索。現行ホームの “全部入り” をこの画面に寄せる。</p>
+            </div>
+          </main>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>UX rules</h2>
+        <div class="panel">
+          <strong>1. One destination for finding</strong>
+          <p>検索、絞り込み、favorite、status はここに集約。</p>
+        </div>
+        <div class="panel">
+          <strong>2. Open, don’t act here too much</strong>
+          <p>送信や Auto Yes は detail へ。ここでは対象 worktree を確定させる。</p>
+        </div>
+        <div class="panel">
+          <strong>3. Current main screen?</strong>
+          <p>はい。今回の整理では、現行ホームの一覧部分が Sessions に相当します。</p>
+        </div>
+      </section>
+    </div>
+
+    <section class="card" style="margin-top: 18px;">
+      <h2>Mobile selected state</h2>
+      <p>スマホでは一覧を軽くし、Saved views と検索起点で素早く対象を見つける。</p>
+      <div class="phones">
+        <div class="phone">
+          <div class="screen">
+            <div class="chips">
+              <span class="chip"><strong>Sessions</strong></span>
+              <span class="chip">All</span>
+              <span class="chip">Waiting</span>
+              <span class="chip">Running</span>
+            </div>
+            <div class="item" style="margin-top: 12px;">
+              <strong>Search</strong>
+              <p>feature/588, nav-keys, repo name...</p>
+            </div>
+            <div class="item active"><div class="meta-line">Repo: MyCodeBranchDesk • Agent: Copilot</div><strong>feature/588-model-validation</strong><p>Waiting • needs reply</p></div>
+            <div class="item"><div class="meta-line">Repo: MyCodeBranchDesk • Agent: Claude</div><strong>feature/592-nav-keys</strong><p>Running • 12m</p></div>
+            <div class="item"><div class="meta-line">Repo: commandmate-sandbox • Agent: Copilot</div><strong>fix/565-copilot-response</strong><p>Done • ready to review</p></div>
+            <div class="item"><div class="meta-line">Repo: MyCodeBranchDesk • Agent: none</div><strong>main</strong><p>Idle • open detail to send</p></div>
+            <div class="tabbar">
+              <div class="tab">Home</div>
+              <div class="tab active">Sessions</div>
+              <div class="tab">Repos</div>
+              <div class="tab">More</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="phone">
+          <div class="screen">
+            <div class="panel">
+              <strong>Selected session preview</strong>
+              <p>MyCodeBranchDesk / feature/588-model-validation / Copilot</p>
+            </div>
+            <div class="panel">
+              <strong>Status</strong>
+              <p>Waiting for a reply. Open detail to answer with context.</p>
+            </div>
+            <div class="panel">
+              <strong>Next actions</strong>
+              <p>Open detail / Quick reply from Home / Pin for later</p>
+            </div>
+            <div class="tabbar">
+              <div class="tab">Home</div>
+              <div class="tab active">Sessions</div>
+              <div class="tab">Repos</div>
+              <div class="tab">More</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="footer-links">
+      <a href="./index.html">一覧へ戻る</a>
+      <a href="./journey-map.html">シナリオ整理</a>
+      <a href="./repositories-wireframe.html">Repositories</a>
+    </div>
+  </div>
+</body>
+</html>

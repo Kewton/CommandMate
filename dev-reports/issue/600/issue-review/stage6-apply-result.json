@@ -1,0 +1,11 @@
+{
+  "stage": 6,
+  "action": "apply",
+  "applied_findings": [
+    "S5-001",
+    "S5-002"
+  ],
+  "skipped_findings": [],
+  "issue_updated": true,
+  "summary": "Issue #600 本文を更新し、Stalled判定の根拠を `getLastServerResponseTimestamp()` ベースへ統一するとともに、deep link の `pane` 値と mobile/desktop UI の対応表を追記した。"
+}

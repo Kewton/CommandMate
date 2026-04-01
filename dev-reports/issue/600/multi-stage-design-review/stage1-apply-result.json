@@ -1,0 +1,41 @@
+{
+  "stage": 1,
+  "action": "apply",
+  "applied_findings": [
+    "DR1-001",
+    "DR1-002",
+    "DR1-003",
+    "DR1-005",
+    "DR1-007",
+    "DR1-009",
+    "DR1-010"
+  ],
+  "skipped_findings": [],
+  "noted_findings": [
+    "DR1-004",
+    "DR1-006",
+    "DR1-008"
+  ],
+  "design_doc_updated": true,
+  "summary": "Must Fix 2件（DR1-003: useLayoutConfigフック集約によるAppShell SRP違反解消、DR1-010: stalled-detector分離によるDIP違反解消）およびShould Fix 5件（DR1-001: useSendMessage+SimpleMessageInput分離、DR1-002: OCP備考記載、DR1-005: useWorktreeList共通化、DR1-007: WorktreeDetailRefactored事前分割戦略、DR1-009: useWorktreesCache共有キャッシュ設計）をすべて設計方針書に反映。Nice to Have 3件（DR1-004, DR1-006, DR1-008）は備考として記録。システム構成図、設計パターン、技術的判断、実装計画、テスト戦略、リスク軽減策の各セクションを更新し、レビュー指摘事項サマリーおよび実装チェックリストを新設。",
+  "updated_sections": [
+    "1. アーキテクチャ設計 - システム構成図（stalled-detector, useLayoutConfig, SimpleMessageInput, useSendMessage追加）",
+    "1. アーキテクチャ設計 - レイヤー構成（ビジネスロジック層更新）",
+    "1. アーキテクチャ設計 - 設計原則（SRP原則追加）",
+    "2. 技術選定 - 技術的判断（インライン返信の選定理由変更）",
+    "3-2. Variant パターン → 送信ロジック共通化パターン（DR1-001）",
+    "3-3. Derived State パターン（DR1-002 備考追加）",
+    "3-4. Conditional Layout パターン（DR1-003: useLayoutConfig集約）",
+    "6-2. Sessions画面（DR1-005: useWorktreeList共通化）",
+    "6-4. Review画面（SimpleMessageInput参照に変更）",
+    "6-6. Worktree Detail（DR1-007: 事前リファクタリング戦略）",
+    "9. パフォーマンス設計 - Stalled判定（DR1-010: stalled-detector分離）",
+    "9. パフォーマンス設計 - ポーリング共有キャッシュ（DR1-009: 新設）",
+    "10. 設計上の決定事項とトレードオフ（DR1-001, DR1-005反映）",
+    "11. 実装計画概要 - Phase 1, Phase 2（新規ファイル・変更ファイル更新）",
+    "12. テスト戦略（新規テスト対象追加）",
+    "13. リスクと軽減策（DR1-007, DR1-009反映）",
+    "14. Stage 1 レビュー指摘事項サマリー（新設）",
+    "15. レビュー対応 実装チェックリスト（新設）"
+  ]
+}

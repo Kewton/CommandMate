@@ -1,0 +1,29 @@
+{
+  "stage": 4,
+  "action": "apply",
+  "applied_findings": [
+    "DR4-001",
+    "DR4-002",
+    "DR4-003",
+    "DR4-004",
+    "DR4-005",
+    "DR4-006",
+    "DR4-007",
+    "DR4-008",
+    "DR4-009",
+    "DR4-010"
+  ],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "summary": "Stage 4 セキュリティレビューの全10件（Must Fix 2件、Should Fix 5件、Nice to Have 3件）を設計方針書に反映した。Must Fix: (1) DR4-003 新規4画面の認証保護テストをセクション12の統合テストでMust Fixに昇格し、具体的テストケース3種を明記。(2) DR4-010 paneパラメータのランタイムホワイトリスト検証をセクション7・8に追加（isDeepLinkPane型ガード関数、生searchParams直接参照禁止の設計規約）。Should Fix: DR4-001 includeパラメータのホワイトリスト検証実装指針をセクション8に具体化、DR4-002 pane型ガード関数定義をセクション7に追加、DR4-004 SimpleMessageInputのXSS対策をセクション3-2・8に追加、DR4-006 CSP方針をセクション8に追加、DR4-009 useWorktreesCache()のAbortControllerキャンセル・フィールドクリア方針をセクション9に追加。Nice to Have: DR4-005 クライアントサイド集計の信頼性注記をセクション6-1に追加、DR4-007 セキュリティログ方針をセクション8に追加、DR4-008 CSRF対策の前提をセクション8に追加。Stage 4サマリー（セクション20）と実装チェックリスト（セクション21）を新設。",
+  "updated_sections": [
+    "セクション3-2: SimpleMessageInputにセキュリティ注記追加 (DR4-004)",
+    "セクション6-1: Home画面にクライアントサイド集計の信頼性注記追加 (DR4-005)",
+    "セクション7: deep link pane設計にランタイム型ガード関数・設計規約追加 (DR4-002, DR4-010)",
+    "セクション8: セキュリティ設計を大幅拡充（入力バリデーション詳細化、XSS対策、CSP方針、CSRF対策、ログ方針）",
+    "セクション9: useWorktreesCache()にAbortControllerキャンセル・フィールドクリア方針追加 (DR4-009)",
+    "セクション12: 統合テストの認証ミドルウェア検証をMust Fixに昇格、テストケース3種明記 (DR4-003)",
+    "セクション20: Stage 4レビュー指摘事項サマリー新設",
+    "セクション21: Stage 4レビュー対応実装チェックリスト新設"
+  ]
+}

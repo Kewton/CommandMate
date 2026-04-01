@@ -17,9 +17,22 @@ import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from './cli-session';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
 import { OPENCODE_PANE_HEIGHT } from '@/lib/cli-tools/opencode';
+import { GEMINI_PANE_HEIGHT } from '@/lib/cli-tools/gemini';
 import { isSessionHealthy } from './claude-session';
 import { getLastServerResponseTimestamp, buildCompositeKey } from '@/lib/polling/auto-yes-manager';
 import type { getMessages as GetMessagesFn, markPendingPromptsAsAnswered as MarkPendingFn } from '@/lib/db';
+
+function getStatusCaptureLines(cliToolId: CLIToolType): number {
+  if (cliToolId === 'opencode') {
+    return OPENCODE_PANE_HEIGHT;
+  }
+
+  if (cliToolId === 'gemini') {
+    return GEMINI_PANE_HEIGHT;
+  }
+
+  return 100;
+}
 
 /** Per-CLI-tool session status */
 export interface CliToolSessionStatus {
@@ -86,8 +99,7 @@ export async function detectWorktreeSessionStatus(
       let isProcessing = false;
       if (isRunning) {
         try {
-          // OpenCode TUI uses a 200-line pane; capture full pane to see content area
-          const captureLines = cliToolId === 'opencode' ? OPENCODE_PANE_HEIGHT : 100;
+          const captureLines = getStatusCaptureLines(cliToolId);
           const output = await captureSessionOutput(worktreeId, cliToolId, captureLines);
           // Issue #501, #525: Pass last server response timestamp using compositeKey
           const compositeKey = buildCompositeKey(worktreeId, cliToolId);

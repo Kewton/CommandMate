@@ -174,7 +174,7 @@ export const worktreeApi = {
   /**
    * Update worktree status
    */
-  async updateStatus(id: string, status: 'todo' | 'doing' | 'done' | null): Promise<Worktree> {
+  async updateStatus(id: string, status: 'ready' | 'in_progress' | 'in_review' | 'done' | null): Promise<Worktree> {
     return fetchApi<Worktree>(`/api/worktrees/${id}`, {
       method: 'PATCH',
       body: JSON.stringify({ status }),

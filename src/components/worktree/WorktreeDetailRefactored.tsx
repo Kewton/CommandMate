@@ -115,6 +115,7 @@ export interface WorktreeDetailRefactoredProps {
 /** API response shape for current output endpoint */
 interface CurrentOutputResponse {
   isRunning: boolean;
+  cliToolId?: CLIToolType;
   isGenerating?: boolean;
   isPromptWaiting?: boolean;
   promptData?: PromptData;
@@ -238,6 +239,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Issue #4: Ref to avoid polling callback recreation on tab switch
   const activeCliTabRef = useRef<CLIToolType>(activeCliTab);
   activeCliTabRef.current = activeCliTab;
+  // Issue #597: Latest-request guards prevent stale async responses from older
+  // polls/tab switches from overwriting the active CLI tab state.
+  const latestMessagesRequestIdRef = useRef(0);
+  const latestCurrentOutputRequestIdRef = useRef(0);
   // Issue #525: Derive active agent's auto-yes state from per-agent map
   const autoYesEnabled = autoYesStateMap.get(activeCliTab)?.enabled ?? false;
   const autoYesExpiresAt = autoYesStateMap.get(activeCliTab)?.expiresAt ?? null;
@@ -362,8 +367,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   /** Fetch message history for the worktree */
   // Issue #4: Use ref for activeCliTab to avoid callback recreation on tab switch
   const fetchMessages = useCallback(async (): Promise<void> => {
+    const requestedCliTool = activeCliTabRef.current;
+    const requestId = ++latestMessagesRequestIdRef.current;
     try {
-      const params = new URLSearchParams({ cliTool: activeCliTabRef.current });
+      const params = new URLSearchParams({ cliTool: requestedCliTool });
       if (showArchivedRef.current) {
         params.set('includeArchived', 'true');
       }
@@ -372,8 +379,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         throw new Error(`Failed to fetch messages: ${response.status}`);
       }
       const data: ChatMessage[] = await response.json();
+      if (latestMessagesRequestIdRef.current !== requestId || activeCliTabRef.current !== requestedCliTool) {
+        return;
+      }
       actions.setMessages(parseMessageTimestamps(data));
     } catch (err) {
+      if (latestMessagesRequestIdRef.current !== requestId || activeCliTabRef.current !== requestedCliTool) {
+        return;
+      }
       console.error('[WorktreeDetailRefactored] Error fetching messages:', err);
     }
   }, [worktreeId, actions]);
@@ -381,12 +394,20 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   /** Fetch current terminal output and prompt status */
   // Issue #4: Use ref for activeCliTab to avoid callback recreation on tab switch
   const fetchCurrentOutput = useCallback(async (): Promise<void> => {
+    const requestedCliTool = activeCliTabRef.current;
+    const requestId = ++latestCurrentOutputRequestIdRef.current;
     try {
-      const response = await fetch(`/api/worktrees/${worktreeId}/current-output?cliTool=${activeCliTabRef.current}`);
+      const response = await fetch(`/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCliTool}`);
       if (!response.ok) {
         return;
       }
       const data: CurrentOutputResponse = await response.json();
+      if (latestCurrentOutputRequestIdRef.current !== requestId || activeCliTabRef.current !== requestedCliTool) {
+        return;
+      }
+      if (data.cliToolId && data.cliToolId !== requestedCliTool) {
+        return;
+      }
 
       // Update terminal state - use fullOutput for complete display, fallback to realtimeSnippet
       // Only clear output if we explicitly have empty fullOutput (session not running returns empty)
@@ -417,12 +438,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
       // Update auto-yes state from server (Issue #314: stopReason tracking, Issue #525: per-agent)
       if (data.autoYes) {
-        const currentCliTool = activeCliTabRef.current;
         const wasEnabled = prevAutoYesEnabledRef.current;
         const autoYes = data.autoYes;
         setAutoYesStateMap(prev => {
           const next = new Map(prev);
-          next.set(currentCliTool, { enabled: autoYes.enabled, expiresAt: autoYes.expiresAt });
+          next.set(requestedCliTool, { enabled: autoYes.enabled, expiresAt: autoYes.expiresAt });
           return next;
         });
         prevAutoYesEnabledRef.current = autoYes.enabled;
@@ -434,6 +454,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         }
       }
     } catch (err) {
+      if (latestCurrentOutputRequestIdRef.current !== requestId || activeCliTabRef.current !== requestedCliTool) {
+        return;
+      }
       console.error('[WorktreeDetailRefactored] Error fetching current output:', err);
     }
   }, [worktreeId, actions, state.prompt.visible]);
@@ -480,6 +503,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       // Clear stale data immediately for snappy UI
       actions.clearMessages();
       actions.setTerminalOutput('', '');
+      actions.setTerminalActive(false);
+      actions.setTerminalThinking(false);
+      actions.clearPrompt();
+      setIsSelectionListActive(false);
       // Fetch fresh data for the new tab
       void fetchMessages();
       void fetchCurrentOutput();
@@ -598,6 +625,23 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     setDiffContent(null);
     setDiffFilePath(null);
   }, []);
+
+  /** Handle worktree status change via dropdown */
+  const handleWorktreeStatusChange = useCallback(async (newStatus: 'ready' | 'in_progress' | 'in_review' | 'done' | null) => {
+    try {
+      const response = await fetch(`/api/worktrees/${worktreeId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (response.ok) {
+        const updated = await response.json();
+        setWorktree(updated);
+      }
+    } catch {
+      // Silently handle
+    }
+  }, [worktreeId]);
 
   /** Handle info button click - open info modal */
   const handleInfoClick = useCallback(() => {
@@ -1524,6 +1568,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onInfoClick={handleInfoClick}
             onMenuClick={toggle}
             hasUpdate={hasUpdate}
+            worktreeStatus={worktree?.status ?? null}
+            onWorktreeStatusChange={handleWorktreeStatusChange}
           />
           {/* Issue #111: Branch mismatch warning */}
           {worktree?.gitStatus && (

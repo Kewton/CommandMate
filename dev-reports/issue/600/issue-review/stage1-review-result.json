@@ -1,0 +1,144 @@
+{
+  "issue_number": 600,
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "reviewer": "opus",
+  "review_date": "2026-04-01",
+  "summary": {
+    "must_fix_count": 3,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "S1-MF-001",
+        "category": "整合性",
+        "issue": "Review画面の「Done / Approval / Stalled」概念が現在のデータモデルに存在しない",
+        "location": "Issue本文「Review を Done / Approval / Stalled の処理面として設ける」",
+        "recommendation": "現在のWorktreeモデルのstatusフィールドは 'todo' | 'doing' | 'done' | null の4値のみ。Review画面が必要とする「Approval」「Stalled」ステータスは存在しない。SessionStatusも 'idle' | 'ready' | 'running' | 'waiting' の4値で「Stalled」を直接表現できない。Issueに以下を明記すべき: (1) Stalledの判定ロジック（例: running状態で一定時間出力なし）、(2) Approvalの定義（既存PromptType 'approval' との関係）、(3) DBスキーマ変更の要否",
+        "evidence": "src/types/models.ts L73: status?: 'todo' | 'doing' | 'done' | null、src/lib/detection/status-detector.ts L36: SessionStatus = 'idle' | 'ready' | 'running' | 'waiting'"
+      },
+      {
+        "id": "S1-MF-002",
+        "category": "曖昧性",
+        "issue": "視認性ルールの「次アクション」の定義が不明確",
+        "location": "Issue本文「すべての session/worktree 行・カードに、最低でも Repository名 / Branch名 / Agent / Status / 次アクション を表示する」",
+        "recommendation": "「次アクション」が何を指すか定義されていない。候補として: (a) システムが自動推定するCTA（例: 'Reply to prompt', 'Review diff', 'Restart'）、(b) ユーザーが設定するフリーテキスト、(c) ステータスに基づく固定マッピング。実装者によって解釈が分かれるため、具体的な仕様を記載すべき",
+        "evidence": "現在のWorktreeモデルにnextAction相当のフィールドは存在しない（src/types/models.ts）"
+      },
+      {
+        "id": "S1-MF-003",
+        "category": "曖昧性",
+        "issue": "/worktrees/:id/reply の位置づけと挙動が未定義",
+        "location": "Issue本文「新設・再編対象URL」および「/worktrees/:id/reply もしくは同等の軽量返信導線を設計・実装する」",
+        "recommendation": "新設URLとして /worktrees/:id/reply が挙げられているが、(1) どのような画面か（フルページ? モーダル? ボトムシート?）、(2) /worktrees/:id のメッセージ入力との違い、(3) 「軽量」の具体的な意味、(4) モバイル・PCでの表示差異が不明。「もしくは同等の軽量返信導線」という表現は実装者に判断を丸投げしている。受け入れ条件としても検証不可能",
+        "evidence": "現在のコードベースに /reply ルートは存在しない"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S1-SF-001",
+        "category": "完全性",
+        "issue": "サイドバーの扱いが未記載",
+        "location": "Issue本文全体",
+        "recommendation": "現在のAppShellはサイドバー（Branches一覧）を全画面で表示する構造。新しい5画面体制でサイドバーがどうなるか記載がない。選択肢として: (a) 全画面共通で維持、(b) Sessions画面に吸収して他画面では非表示、(c) ボトムナビに置換。これはレイアウト全体の根幹に関わるため明記すべき",
+        "evidence": "src/components/layout/AppShell.tsx: 全ページでSidebarを表示、src/components/layout/Sidebar.tsx: Branches一覧表示"
+      },
+      {
+        "id": "S1-SF-002",
+        "category": "完全性",
+        "issue": "PCとモバイルのナビゲーション構造が具体化されていない",
+        "location": "Issue本文「PC / モバイル双方で整合的な遷移と情報設計を定義する」",
+        "recommendation": "UXプロトタイプHTMLではモバイルにボトムタブバー（Home / Sessions / Repos / More の4タブ）が見られるが、Issue本文には具体的なナビゲーション構造の記載がない。現在のモバイルナビは MobileTabBar（terminal / history / files / memo / info の5タブ）でWorktree Detail専用。新しいグローバルナビとDetail内ローカルナビの関係を明記すべき",
+        "evidence": "src/components/mobile/MobileTabBar.tsx: MobileTab = 'terminal' | 'history' | 'files' | 'memo' | 'info'、プロトタイプHTML: Home / Sessions / Repos / More の4タブ"
+      },
+      {
+        "id": "S1-SF-003",
+        "category": "実現可能性",
+        "issue": "query paramによるdeep link戦略の技術的制約が未考慮",
+        "location": "Issue本文「detail 内タブの deep link 戦略（query param など）を整理する」および「/worktrees/:id?pane=history|terminal|files|logs|notes|git」",
+        "recommendation": "現在の WorktreeDetailRefactored（1966行）はクライアントコンポーネントでタブ状態をuseStateで管理している。query paramベースに変更すると: (1) router.push/replaceによるタブ切替はサーバーリクエストが発生しうる（Next.js 14 App Router）、(2) 既存のMobileTabBarとの統合方法、(3) ブラウザ戻る/進むとの整合性。技術的な制約と選択肢を記載すべき",
+        "evidence": "src/components/worktree/WorktreeDetailRefactored.tsx: 1966行のクライアントコンポーネント"
+      },
+      {
+        "id": "S1-SF-004",
+        "category": "正確性",
+        "issue": "受け入れ条件「URL設計と画面遷移がドキュメント化されている」が検証基準として不十分",
+        "location": "Issue本文「受け入れ条件」セクション",
+        "recommendation": "「ドキュメント化されている」は主観的な基準。具体的にどのドキュメントに何が記載されるべきか（例: docs/architecture.md の更新、URL一覧表の追加場所）を指定すべき。また、他の受け入れ条件も「整合した遷移が定義・実装される」等、具体的な検証方法が不明確なものがある"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S1-NTH-001",
+        "category": "完全性",
+        "issue": "External Apps（外部アプリ管理）のMore画面への移動が実装タスクに明記されていない",
+        "location": "Issue本文「実装タスク」セクション",
+        "recommendation": "目標セクションでは「More を Settings / External Apps / Help / Auth の補助面として整理する」と記載されているが、実装タスクには「More 画面を新設し、External Apps / Theme / Locale / Auth / Help を整理する」としか書かれていない。現行ホームからExternalAppsManagerを移動する作業が暗黙的。明示的なタスクとして追加すると見落としを防げる",
+        "evidence": "src/app/page.tsx L39: <ExternalAppsManager />"
+      },
+      {
+        "id": "S1-NTH-002",
+        "category": "完全性",
+        "issue": "認証・権限への言及がない",
+        "location": "Issue本文全体",
+        "recommendation": "新しい画面（/sessions, /repositories, /review, /more）はミドルウェアによる認証が必要。既存の認証フローは /login と middleware.ts で処理されているが、新規URLが認証対象に含まれることを記載するとよい",
+        "evidence": "src/middleware.ts: 認証ミドルウェア"
+      },
+      {
+        "id": "S1-NTH-003",
+        "category": "完全性",
+        "issue": "UXプロトタイプHTMLへの参照リンクがIssue本文にない",
+        "location": "Issue本文「参考」セクション",
+        "recommendation": "参考セクションに「UXプロトタイプHTMLを issue 登録後に dev-reports 配下へ移動して管理する」とあるが、既に dev-reports/design/issue-600-ux-refresh-html/ に26ファイルが配置されている。Issue本文から具体的なパスへのリンクを追加すると、レビュアーや実装者がプロトタイプを参照しやすくなる"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/app/page.tsx",
+      "relevance": "現行ホーム画面。WorktreeList / RepositoryManager / ExternalAppsManager が混在。分解対象"
+    },
+    {
+      "file": "src/components/layout/AppShell.tsx",
+      "relevance": "全画面共通レイアウト。サイドバー表示を制御。新画面体制での扱いが未定義"
+    },
+    {
+      "file": "src/components/layout/Sidebar.tsx",
+      "relevance": "ブランチ一覧サイドバー。Sessions画面との責務分離が必要"
+    },
+    {
+      "file": "src/components/mobile/MobileTabBar.tsx",
+      "relevance": "モバイルタブバー。現在はWorktree Detail専用（5タブ）。グローバルナビとの関係が未定義"
+    },
+    {
+      "file": "src/types/models.ts",
+      "relevance": "Worktreeモデル定義。Review画面に必要なStalled/Approvalステータスが未定義"
+    },
+    {
+      "file": "src/lib/detection/status-detector.ts",
+      "relevance": "セッションステータス検出。Stalled判定ロジックの基盤となる可能性"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "Worktree詳細画面（1966行）。query paramベースのdeep link対応の影響範囲"
+    },
+    {
+      "file": "src/contexts/SidebarContext.tsx",
+      "relevance": "サイドバー状態管理。新画面体制での変更が必要になる可能性"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "dev-reports/design/issue-600-ux-refresh-html/",
+      "relevance": "UXプロトタイプHTML群（26ファイル）。Issue本文の設計意図を補完"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト全体のファイル構成・技術スタック定義"
+    }
+  ]
+}

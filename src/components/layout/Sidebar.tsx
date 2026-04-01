@@ -21,7 +21,8 @@ import { LogoutButton } from '@/components/common/LogoutButton';
 import { useToast, ToastContainer } from '@/components/common/Toast';
 import { repositoryApi, ApiError } from '@/lib/api-client';
 import { toBranchItem } from '@/types/sidebar';
-import { sortBranches, groupBranches, generateRepositoryColor } from '@/lib/sidebar-utils';
+import { generateRepositoryColor } from '@/lib/sidebar-utils';
+import { useWorktreeList } from '@/hooks/useWorktreeList';
 import type { ViewMode } from '@/lib/sidebar-utils';
 
 // ============================================================================
@@ -60,31 +61,20 @@ export const Sidebar = memo(function Sidebar() {
     }
   });
 
-  // 3-stage useMemo chain (DRY principle)
+  // Convert worktrees to sidebar items
+  const branchItems = useMemo(() => worktrees.map(toBranchItem), [worktrees]);
 
-  // Stage 1: Search filter
-  const searchFilteredItems = useMemo(() => {
-    const items = worktrees.map(toBranchItem);
-    if (!searchQuery.trim()) return items;
-    const query = searchQuery.toLowerCase();
-    return items.filter(
-      (b) =>
-        b.name.toLowerCase().includes(query) ||
-        b.repositoryName.toLowerCase().includes(query)
-    );
-  }, [worktrees, searchQuery]);
+  // Use shared useWorktreeList hook for sorting, filtering, and grouping (Issue #600 Task 3.8)
+  const { sortedItems: flatBranches, groupedItems } = useWorktreeList({
+    items: branchItems,
+    sortKey,
+    sortDirection,
+    viewMode,
+    filterText: searchQuery,
+  });
 
-  // Stage 2: Flat sorted list (only computed when viewMode is flat)
-  const flatBranches = useMemo(
-    () => (viewMode === 'flat' ? sortBranches(searchFilteredItems, sortKey, sortDirection) : []),
-    [viewMode, searchFilteredItems, sortKey, sortDirection]
-  );
-
-  // Stage 3: Grouped sorted list (only computed when viewMode is grouped)
-  const groupedBranches = useMemo(
-    () => (viewMode === 'grouped' ? groupBranches(searchFilteredItems, sortKey, sortDirection) : null),
-    [viewMode, searchFilteredItems, sortKey, sortDirection]
-  );
+  // Adapt groupedItems to match previous interface (null when flat mode)
+  const groupedBranches = viewMode === 'grouped' ? groupedItems : null;
 
   // Persist groupCollapsed to localStorage
   useEffect(() => {

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CommandMate v0.5 - Mobile Worktree Detail Screen</title>
+  <style>
+    :root { --bg:#08111f; --surface:#111827; --border:#475569; --text:#e5eefc; --muted:#94a3b8; --accent:#22d3ee; --yellow:#facc15; --green:#22c55e; }
+    *{box-sizing:border-box} body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at top,#13203a 0%,#08111f 48%,#040914 100%);color:var(--text)}
+    .page{max-width:760px;margin:0 auto;padding:32px 20px 56px} h1{margin:0 0 8px;font-size:1.9rem} h1 span{color:var(--accent)} p{color:var(--muted);line-height:1.65}
+    .hero,.phone,.section,.panel,.composer{border:1px solid rgba(71,85,105,.8);border-radius:22px;background:rgba(17,24,39,.82);box-shadow:0 18px 50px rgba(0,0,0,.28)}
+    .hero,.section,.panel,.composer{padding:18px}.badges,.actions,.footer-links,.tabs{display:flex;gap:10px;flex-wrap:wrap}.badge,.action,.tab{padding:8px 12px;border-radius:999px;background:rgba(15,23,42,.85);border:1px solid rgba(71,85,105,.7);color:var(--muted);font-size:.82rem}
+    .phone{margin-top:18px;padding:12px;max-width:420px}.status{display:flex;justify-content:space-between;color:var(--muted);font-size:.8rem;padding:6px 8px}
+    .screen{border:1px solid rgba(71,85,105,.65);border-radius:28px;background:rgba(9,14,25,.92);padding:16px;min-height:780px}
+    .meta{display:block;margin-bottom:8px;color:#93c5fd;font-size:.78rem;font-weight:700}.panel{margin-top:14px}.composer-box{min-height:90px;padding:14px;border-radius:16px;background:rgba(9,14,25,.85);border:1px solid rgba(71,85,105,.65);color:var(--text)}
+    .footer-links{margin-top:20px}.footer-links a{color:var(--text);text-decoration:none;border:1px solid rgba(148,163,184,.28);padding:10px 14px;border-radius:12px;font-weight:700}
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>CommandMate <span>Mobile Worktree Detail</span></h1>
+    <p>スマホ版の Worktree Detail です。履歴確認と短い追記・返信を片手でできる構造にしています。</p>
+
+    <div class="hero">
+      <div class="badges">
+        <div class="badge"><strong>責務</strong> 文脈確認と返信</div>
+        <div class="badge"><strong>固定表示</strong> Repo / Branch / Agent / Status</div>
+      </div>
+    </div>
+
+    <div class="phone">
+      <div class="status"><span>9:44</span><span>5G · 81%</span></div>
+      <div class="screen">
+        <div class="section">
+          <span class="meta">Repo: MyCodeBranchDesk • Branch: feature/592-nav-keys • Agent: Claude • Running</span>
+          <strong>Worktree Detail</strong>
+          <p>Open latest output, history, and send a short follow-up.</p>
+        </div>
+
+        <div class="tabs">
+          <span class="tab">History</span>
+          <span class="tab">Terminal</span>
+          <span class="tab">Files</span>
+          <span class="tab">Logs</span>
+        </div>
+
+        <div class="panel">
+          <strong>Latest output</strong>
+          <p>Updating route tests and navigation button behavior. Latest output 20s ago.</p>
+        </div>
+
+        <div class="panel">
+          <strong>Recent conversation</strong>
+          <p><span class="meta">You</span>Fix left/right navigation support.</p>
+          <p><span class="meta">Claude</span>Running targeted tests now.</p>
+        </div>
+
+        <div class="composer">
+          <strong>Send follow-up</strong>
+          <div class="composer-box">After tests pass, summarize changed files in 3 bullets.</div>
+          <div class="actions" style="margin-top:12px;">
+            <span class="action">Send</span>
+            <span class="action">Back to Sessions</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer-links">
+      <a href="./index.html">一覧へ戻る</a>
+      <a href="./mobile-sessions-screen.html">Mobile Sessions</a>
+      <a href="./mobile-review-screen.html">Mobile Review</a>
+    </div>
+  </div>
+</body>
+</html>

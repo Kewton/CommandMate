@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CommandMate v0.5 - Desktop UX Wireframe</title>
+  <style>
+    :root {
+      --bg: #0b1120;
+      --surface: #111827;
+      --surface-2: #1f2937;
+      --surface-3: #334155;
+      --border: #475569;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #22d3ee;
+      --accent-2: #8b5cf6;
+      --green: #22c55e;
+      --yellow: #facc15;
+      --red: #fb7185;
+      --blue: #60a5fa;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #0f1a30 0%, #09101d 48%, #050914 100%);
+      color: var(--text);
+    }
+
+    .page {
+      max-width: 1500px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+
+    .meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 1.9rem;
+      font-weight: 800;
+    }
+
+    h1 span { color: var(--accent); }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      max-width: 760px;
+    }
+
+    .top-notes {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .pill {
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(17, 24, 39, 0.85);
+      border: 1px solid rgba(71, 85, 105, 0.7);
+      color: var(--muted);
+      font-size: 0.85rem;
+      white-space: nowrap;
+    }
+
+    .pill strong { color: var(--text); }
+
+    .frame {
+      border: 1px solid rgba(71, 85, 105, 0.85);
+      border-radius: 24px;
+      overflow: hidden;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.38);
+      background: rgba(2, 8, 23, 0.85);
+      backdrop-filter: blur(14px);
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 260px 1fr 340px;
+      min-height: 920px;
+    }
+
+    .sidebar,
+    .rightbar {
+      background: rgba(9, 14, 25, 0.92);
+    }
+
+    .sidebar {
+      border-right: 1px solid rgba(71, 85, 105, 0.7);
+      padding: 20px 16px;
+    }
+
+    .main {
+      padding: 20px;
+      background:
+        linear-gradient(180deg, rgba(17, 24, 39, 0.92) 0%, rgba(15, 23, 42, 0.92) 100%);
+    }
+
+    .rightbar {
+      border-left: 1px solid rgba(71, 85, 105, 0.7);
+      padding: 20px 16px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .brand-title {
+      font-weight: 800;
+      font-size: 1rem;
+      letter-spacing: 0.01em;
+    }
+
+    .live-dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 6px rgba(34, 197, 94, 0.12);
+    }
+
+    .section-title {
+      margin: 20px 0 10px;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .nav-item,
+    .branch-item {
+      border: 1px solid rgba(71, 85, 105, 0.55);
+      background: rgba(15, 23, 42, 0.75);
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin-bottom: 10px;
+    }
+
+    .nav-item.active {
+      border-color: rgba(34, 211, 238, 0.5);
+      background: rgba(34, 211, 238, 0.12);
+    }
+
+    .nav-item strong,
+    .branch-item strong { display: block; font-size: 0.95rem; }
+
+    .nav-item small,
+    .branch-item small {
+      color: var(--muted);
+      display: block;
+      margin-top: 2px;
+    }
+    .repo-hint {
+      display: inline-block;
+      margin-top: 6px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      background: rgba(96, 165, 250, 0.12);
+      color: var(--blue);
+    }
+
+    .branch-item {
+      display: grid;
+      grid-template-columns: 12px 1fr auto;
+      gap: 10px;
+      align-items: start;
+    }
+
+    .status-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      margin-top: 4px;
+    }
+
+    .status-dot.waiting { background: var(--yellow); }
+    .status-dot.running { background: var(--accent); }
+    .status-dot.done { background: var(--green); }
+    .status-dot.idle { background: #64748b; }
+
+    .count {
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 0.76rem;
+      font-weight: 700;
+      background: rgba(51, 65, 85, 0.7);
+      color: var(--text);
+    }
+
+    .header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+    }
+
+    .header h2 {
+      margin: 0 0 6px;
+      font-size: 1.5rem;
+    }
+
+    .header p {
+      margin: 0;
+      color: var(--muted);
+      max-width: 620px;
+    }
+
+    .cta-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .cta {
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 0.88rem;
+      border: 1px dashed rgba(148, 163, 184, 0.4);
+      background: rgba(15, 23, 42, 0.8);
+      color: var(--text);
+    }
+
+    .cta.primary {
+      background: linear-gradient(135deg, rgba(34, 211, 238, 0.22), rgba(96, 165, 250, 0.16));
+      border-style: solid;
+      border-color: rgba(34, 211, 238, 0.35);
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .stat-card,
+    .panel,
+    .lane-card,
+    .feed-card,
+    .table-card {
+      border: 1px solid rgba(71, 85, 105, 0.72);
+      border-radius: 18px;
+      background: rgba(15, 23, 42, 0.72);
+    }
+
+    .stat-card {
+      padding: 16px;
+      min-height: 114px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .stat-card::after {
+      content: "";
+      position: absolute;
+      inset: auto -18px -26px auto;
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      background: rgba(34, 211, 238, 0.07);
+    }
+
+    .stat-label {
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .stat-number {
+      margin-top: 10px;
+      font-size: 2rem;
+      font-weight: 800;
+    }
+
+    .stat-foot {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    .impact-box {
+      margin-bottom: 18px;
+      padding: 16px 18px;
+      border-radius: 18px;
+      background: linear-gradient(135deg, rgba(34, 211, 238, 0.1), rgba(139, 92, 246, 0.12));
+      border: 1px solid rgba(34, 211, 238, 0.28);
+    }
+
+    .impact-box strong { color: #cffafe; }
+
+    .panel {
+      padding: 16px;
+      margin-bottom: 18px;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 12px;
+    }
+
+    .panel-header h3 {
+      margin: 0;
+      font-size: 1rem;
+    }
+
+    .panel-sub {
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    .attention-grid,
+    .running-grid,
+    .bottom-grid {
+      display: grid;
+      gap: 14px;
+    }
+
+    .attention-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .running-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .bottom-grid { grid-template-columns: 1.1fr 0.9fr; }
+
+    .lane-card,
+    .feed-card,
+    .table-card {
+      padding: 14px;
+    }
+
+    .wire-label {
+      display: inline-block;
+      margin-bottom: 10px;
+      padding: 4px 9px;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.12);
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .attention-item,
+    .run-item,
+    .feed-item,
+    .session-row {
+      border: 1px dashed rgba(148, 163, 184, 0.32);
+      border-radius: 14px;
+      padding: 12px;
+      background: rgba(9, 14, 25, 0.45);
+    }
+
+    .attention-item + .attention-item,
+    .feed-item + .feed-item,
+    .session-row + .session-row { margin-top: 10px; }
+
+    .attention-item h4,
+    .run-item h4,
+    .feed-item h4 {
+      margin: 0 0 6px;
+      font-size: 0.95rem;
+    }
+
+    .attention-item p,
+    .run-item p,
+    .feed-item p,
+    .session-row p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.84rem;
+      line-height: 1.5;
+    }
+
+    .priority {
+      display: inline-block;
+      margin-bottom: 8px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+
+    .priority.high { background: rgba(251, 113, 133, 0.12); color: var(--red); }
+    .priority.mid { background: rgba(250, 204, 21, 0.12); color: var(--yellow); }
+    .priority.low { background: rgba(34, 197, 94, 0.12); color: var(--green); }
+
+    .run-item {
+      min-height: 180px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .run-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .tool {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--blue);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .progress {
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(51, 65, 85, 0.8);
+      overflow: hidden;
+      margin-top: 12px;
+    }
+
+    .progress > span {
+      display: block;
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    }
+
+    .run-meta {
+      margin-top: 10px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .mini-pill {
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(51, 65, 85, 0.72);
+      color: var(--muted);
+      font-size: 0.74rem;
+      font-weight: 700;
+    }
+
+    .feed-item strong,
+    .session-row strong {
+      color: var(--text);
+    }
+
+    .session-row {
+      display: grid;
+      grid-template-columns: 180px 120px 1fr 110px;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .session-row .state {
+      font-weight: 700;
+    }
+
+    .state.waiting { color: var(--yellow); }
+    .state.running { color: var(--accent); }
+    .state.done { color: var(--green); }
+    .state.idle { color: var(--muted); }
+
+    .annotation {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: rgba(139, 92, 246, 0.08);
+      border: 1px solid rgba(139, 92, 246, 0.22);
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .foot-actions {
+      margin-top: 18px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .ghost {
+      padding: 10px 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 700;
+    }
+
+    @media (max-width: 1280px) {
+      .app { grid-template-columns: 220px 1fr; }
+      .rightbar { display: none; }
+    }
+
+    @media (max-width: 980px) {
+      .stats,
+      .attention-grid,
+      .running-grid,
+      .bottom-grid { grid-template-columns: 1fr; }
+      .app { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="meta">
+      <div>
+        <h1>CommandMate <span>Desktop Home Wireframe</span></h1>
+        <p class="subtitle">
+          コンセプト: <strong>Mission Control</strong>。複数AIセッションの全体状況と、
+          人が次に介入すべき箇所が一目で分かるPC向けホーム。
+        </p>
+      </div>
+      <div class="top-notes">
+        <div class="pill"><strong>狙い</strong> 1秒で現況把握</div>
+        <div class="pill"><strong>優先</strong> Waiting / Error / Completed</div>
+        <div class="pill"><strong>導線</strong> 登録は Repositories に集約</div>
+        <div class="pill"><strong>動画映え</strong> 数値と状態が動く</div>
+      </div>
+    </div>
+
+    <div class="frame">
+      <div class="app">
+        <aside class="sidebar">
+          <div class="brand">
+            <div class="brand-title">CommandMate</div>
+            <span class="live-dot"></span>
+          </div>
+
+          <div class="section-title">Primary navigation</div>
+          <div class="nav-item active">
+            <strong>Home / Mission Control</strong>
+            <small>今すぐ確認すべきことを集約</small>
+          </div>
+          <div class="nav-item">
+            <strong>Sessions</strong>
+            <small>全 worktree / 全 agent を探索</small>
+          </div>
+          <div class="nav-item">
+            <strong>Repositories</strong>
+            <small>追加・同期・削除・復元はここに分離</small>
+          </div>
+          <div class="nav-item">
+            <strong>Review</strong>
+            <small>完了済み・未確認をまとめて見る</small>
+          </div>
+          <div class="nav-item">
+            <strong>More / Settings</strong>
+            <small>External Apps と設定を退避</small>
+          </div>
+
+          <div class="section-title">Pinned work</div>
+          <div class="branch-item">
+            <span class="status-dot waiting"></span>
+            <div>
+              <strong>feature/588-model-validation</strong>
+              <small>返信待ち / Copilot</small>
+              <span class="repo-hint">Repo: MyCodeBranchDesk</span>
+            </div>
+            <span class="count">1</span>
+          </div>
+          <div class="branch-item">
+            <span class="status-dot running"></span>
+            <div>
+              <strong>feature/592-nav-keys</strong>
+              <small>実行中 / Claude</small>
+              <span class="repo-hint">Repo: MyCodeBranchDesk</span>
+            </div>
+            <span class="count">2</span>
+          </div>
+          <div class="branch-item">
+            <span class="status-dot done"></span>
+            <div>
+              <strong>fix/565-copilot-response</strong>
+              <small>完了 / 未確認</small>
+              <span class="repo-hint">Repo: commandmate-sandbox</span>
+            </div>
+            <span class="count">✓</span>
+          </div>
+        </aside>
+
+        <main class="main">
+          <div class="header">
+            <div>
+              <h2>Mission Control</h2>
+              <p>
+                AIが今どこで止まり、どこが進み、どこで成果が出たかを一画面で判断する。
+                一覧管理ではなく、意思決定のためのホーム。
+              </p>
+            </div>
+            <div class="cta-row">
+              <div class="cta primary">Resume most urgent</div>
+              <div class="cta">Reply to waiting session</div>
+              <div class="cta">Sync repositories</div>
+            </div>
+          </div>
+
+          <div class="stats">
+            <div class="stat-card">
+              <div class="stat-label">Running now</div>
+              <div class="stat-number">3</div>
+              <div class="stat-foot">2 Claude / 1 Copilot が継続実行中</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Waiting for you</div>
+              <div class="stat-number">1</div>
+              <div class="stat-foot">今日の最優先。人の返答で再開できる</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Completed today</div>
+              <div class="stat-number">5</div>
+              <div class="stat-foot">未レビュー 2 / 共有できる成果 3</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Coverage</div>
+              <div class="stat-number">12</div>
+              <div class="stat-foot">管理中 worktree / 4 repositories</div>
+            </div>
+          </div>
+
+          <div class="impact-box">
+            <strong>Hero message:</strong>
+            「3 agents are working while you are away. 1 needs your reply. 5 finished today.」
+            <br>
+            マーケティング動画では、この行と上段数字の変化が最初の見せ場。
+          </div>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h3>Needs Attention</h3>
+                <div class="panel-sub">最上段は “今すぐ人が見るべきもの” に限定</div>
+              </div>
+              <span class="wire-label">Section A</span>
+            </div>
+            <div class="attention-grid">
+              <div class="lane-card">
+                <span class="priority high">Reply needed</span>
+                <div class="attention-item">
+                  <h4>feature/588-model-validation</h4>
+                  <p>Repo: MyCodeBranchDesk • Agent: Copilot • "Use strict validation for model names?"</p>
+                </div>
+                <div class="attention-item">
+                  <h4>Suggested actions</h4>
+                  <p>Yes / Edit prompt / Open full terminal</p>
+                </div>
+              </div>
+
+              <div class="lane-card">
+                <span class="priority mid">Completed, review next</span>
+                <div class="attention-item">
+                  <h4>fix/565-copilot-response</h4>
+                  <p>Repo: commandmate-sandbox • Agent: Copilot • Tests passed. PR description draft ready.</p>
+                </div>
+                <div class="attention-item">
+                  <h4>Suggested actions</h4>
+                  <p>Open diff / Open result / Create PR</p>
+                </div>
+              </div>
+
+              <div class="lane-card">
+                <span class="priority low">Blocked or stale</span>
+                <div class="attention-item">
+                  <h4>feature/547-selection-list</h4>
+                  <p>Repo: MyCodeBranchDesk • Agent: Claude • No output change for 24 min. Possibly stalled.</p>
+                </div>
+                <div class="attention-item">
+                  <h4>Suggested actions</h4>
+                  <p>Inspect logs / Restart / Send follow-up</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h3>Running Now</h3>
+                <div class="panel-sub">動画で最も映える。複数AIが並列に働いている実感を出す</div>
+              </div>
+              <span class="wire-label">Section B</span>
+            </div>
+            <div class="running-grid">
+              <div class="run-item">
+                <div>
+                  <div class="run-top">
+                    <h4>feature/592-nav-keys</h4>
+                    <span class="tool">Claude</span>
+                  </div>
+                  <p>Repo: MyCodeBranchDesk • Terminal: "Updating navigation button handling and route tests..."</p>
+                  <div class="progress"><span style="width: 68%"></span></div>
+                </div>
+                <div class="run-meta">
+                  <span class="mini-pill">Running 12m</span>
+                  <span class="mini-pill">2 files changed</span>
+                  <span class="mini-pill">Tests next</span>
+                </div>
+              </div>
+
+              <div class="run-item">
+                <div>
+                  <div class="run-top">
+                    <h4>feature/590-mobile-home</h4>
+                    <span class="tool">Copilot</span>
+                  </div>
+                  <p>Repo: commandmate-sandbox • Terminal: "Refactoring mobile summary cards for sticky priority stack..."</p>
+                  <div class="progress"><span style="width: 45%"></span></div>
+                </div>
+                <div class="run-meta">
+                  <span class="mini-pill">Running 7m</span>
+                  <span class="mini-pill">UI only</span>
+                  <span class="mini-pill">Ready for review</span>
+                </div>
+              </div>
+
+              <div class="run-item">
+                <div>
+                  <div class="run-top">
+                    <h4>fix/587-session-summary</h4>
+                    <span class="tool">Claude</span>
+                  </div>
+                  <p>Repo: MyCodeBranchDesk • Terminal: "Generating concise summary and updating status badges..."</p>
+                  <div class="progress"><span style="width: 84%"></span></div>
+                </div>
+                <div class="run-meta">
+                  <span class="mini-pill">Running 19m</span>
+                  <span class="mini-pill">1 prompt handled</span>
+                  <span class="mini-pill">Finalizing</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <div class="bottom-grid">
+            <section class="table-card">
+              <div class="panel-header">
+                <div>
+                  <h3>All Sessions Preview</h3>
+                  <div class="panel-sub">全件探索はここでは軽く。重い管理機能は Sessions 画面へ</div>
+                </div>
+                <span class="wire-label">Section C</span>
+              </div>
+
+              <div class="session-row">
+                <div><strong>feature/588-model-validation</strong><div class="panel-sub">MyCodeBranchDesk • Copilot</div></div>
+                <span class="state waiting">Waiting</span>
+                <p>Model validation rules need human decision</p>
+                <span class="count">Reply</span>
+              </div>
+              <div class="session-row">
+                <div><strong>feature/592-nav-keys</strong><div class="panel-sub">MyCodeBranchDesk • Claude</div></div>
+                <span class="state running">Running</span>
+                <p>Keyboard navigation refactor in progress</p>
+                <span class="count">Watch</span>
+              </div>
+              <div class="session-row">
+                <div><strong>fix/565-copilot-response</strong><div class="panel-sub">commandmate-sandbox • Copilot</div></div>
+                <span class="state done">Done</span>
+                <p>All checks passed. Summary generated.</p>
+                <span class="count">Review</span>
+              </div>
+              <div class="session-row">
+                <div><strong>main</strong><div class="panel-sub">MyCodeBranchDesk • No active agent</div></div>
+                <span class="state idle">Idle</span>
+                <p>No active agent. Ready to start.</p>
+                <span class="count">Start</span>
+              </div>
+            </section>
+
+            <section class="feed-card">
+              <div class="panel-header">
+                <div>
+                  <h3>Activity Feed</h3>
+                  <div class="panel-sub">右カラムに時系列の変化を集約。状態変化が動画で見える</div>
+                </div>
+                <span class="wire-label">Section D</span>
+              </div>
+              <div class="feed-item">
+                <h4>10:41 • Completed</h4>
+                <p><strong>fix/565-copilot-response</strong> finished and test summary was saved.</p>
+              </div>
+              <div class="feed-item">
+                <h4>10:37 • Prompt</h4>
+                <p><strong>feature/588-model-validation</strong> asked for human confirmation.</p>
+              </div>
+              <div class="feed-item">
+                <h4>10:28 • Started</h4>
+                <p><strong>feature/592-nav-keys</strong> switched from plan to implementation.</p>
+              </div>
+              <div class="feed-item">
+                <h4>10:14 • Synced</h4>
+                <p>4 repositories refreshed. 1 new worktree discovered.</p>
+              </div>
+            </section>
+          </div>
+
+          <div class="annotation">
+            <strong>設計意図:</strong>
+            現状の「Repository → Worktree一覧 → Apps」という並びをやめ、
+            「現況把握 → 介入 → 進行確認 → 全件探索」の順に再構成。
+            デスクトップは一覧密度を活かしつつも、最上段に意思決定を置く。
+            リポジトリ登録・同期・削除・復元は Home ではなく Repositories に寄せる。
+          </div>
+
+          <div class="foot-actions">
+            <a class="ghost" href="./index.html">一覧へ戻る</a>
+            <a class="ghost" href="./mobile-wireframe.html">モバイル版を見る</a>
+            <a class="ghost" href="./journey-map.html">シナリオ整理を見る</a>
+          </div>
+        </main>
+
+        <aside class="rightbar">
+          <div class="section-title">Marketing cut points</div>
+          <div class="nav-item active">
+            <strong>1. Hero count-up</strong>
+            <small>Running / Waiting / Completed の数が増減する</small>
+          </div>
+          <div class="nav-item">
+            <strong>2. Waiting card opens</strong>
+            <small>「人の一言で再開できる」価値が見える</small>
+          </div>
+          <div class="nav-item">
+            <strong>3. Running bars move</strong>
+            <small>複数AIが同時に進む様子を短尺で表現</small>
+          </div>
+          <div class="nav-item">
+            <strong>4. Feed updates</strong>
+            <small>ブラウザを見ていない間も進捗が蓄積される</small>
+          </div>
+
+          <div class="section-title">Wireframe notes</div>
+          <div class="nav-item">
+            <strong>Home is not admin</strong>
+            <small>Repository管理やExternal Appsは別導線へ</small>
+          </div>
+          <div class="nav-item">
+            <strong>Needs Attention first</strong>
+            <small>Waiting / Error / Done-unreviewed を優先</small>
+          </div>
+          <div class="nav-item">
+            <strong>Sessions becomes secondary</strong>
+            <small>全件探索は専用画面に譲る</small>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

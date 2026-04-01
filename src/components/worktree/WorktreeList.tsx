@@ -37,7 +37,7 @@ export function WorktreeList({ initialWorktrees = [] }: WorktreeListProps) {
   const [sortBy, setSortBy] = useState<SortOption>('updated');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [selectedRepository, setSelectedRepository] = useState<string | null>(null);
-  const [selectedStatus, setSelectedStatus] = useState<'todo' | 'doing' | 'done' | 'unset' | null>(null);
+  const [selectedStatus, setSelectedStatus] = useState<'ready' | 'in_progress' | 'in_review' | 'done' | 'unset' | null>(null);
   const [deletingRepository, setDeletingRepository] = useState<string | null>(null);
   const [excludedRepositories, setExcludedRepositories] = useState<ExcludedRepository[]>([]);
   const [excludedExpanded, setExcludedExpanded] = useState(false);
@@ -395,25 +395,32 @@ Type "delete" to confirm:`;
           All
         </Button>
         <Button
-          variant={selectedStatus === 'todo' ? 'primary' : 'ghost'}
+          variant={selectedStatus === 'ready' ? 'primary' : 'ghost'}
           size="sm"
-          onClick={() => setSelectedStatus('todo')}
+          onClick={() => setSelectedStatus('ready')}
         >
-          📝 ToDo
+          Ready
         </Button>
         <Button
-          variant={selectedStatus === 'doing' ? 'primary' : 'ghost'}
+          variant={selectedStatus === 'in_progress' ? 'primary' : 'ghost'}
           size="sm"
-          onClick={() => setSelectedStatus('doing')}
+          onClick={() => setSelectedStatus('in_progress')}
         >
-          🚧 Doing
+          In Progress
+        </Button>
+        <Button
+          variant={selectedStatus === 'in_review' ? 'primary' : 'ghost'}
+          size="sm"
+          onClick={() => setSelectedStatus('in_review')}
+        >
+          In Review
         </Button>
         <Button
           variant={selectedStatus === 'done' ? 'primary' : 'ghost'}
           size="sm"
           onClick={() => setSelectedStatus('done')}
         >
-          ✅ Done
+          Done
         </Button>
         <Button
           variant={selectedStatus === 'unset' ? 'primary' : 'ghost'}

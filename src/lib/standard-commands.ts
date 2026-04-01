@@ -2,7 +2,7 @@
  * Standard CLI Tool Commands (Issue #56, Issue #4)
  *
  * Static definitions for built-in slash commands of supported CLI tools.
- * - Claude Code commands (existing, no cliTools field for backward compatibility)
+ * - Claude Code commands (legacy Claude-only commands may omit cliTools)
  * - Codex CLI commands (new, with cliTools: ['codex'])
  *
  * References:
@@ -18,7 +18,8 @@ import { groupByCategory } from '@/lib/command-merger';
  * Standard CLI tool commands
  *
  * Issue #4: Codex-specific commands use `cliTools: ['codex']`.
- * Existing Claude commands have no cliTools field (backward compatible, Claude-only).
+ * Issue #594: Commands shared with Codex must opt in explicitly via `cliTools`.
+ * Commands without `cliTools` remain Claude-only for backward compatibility.
  */
 export const STANDARD_COMMANDS: SlashCommand[] = [
   // ============================================================================
@@ -33,6 +34,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
     isStandard: true,
     source: 'standard',
     filePath: '',
+    cliTools: ['claude', 'codex'],
   },
   {
     name: 'compact',
@@ -41,7 +43,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
     isStandard: true,
     source: 'standard',
     filePath: '',
-    cliTools: ['claude', 'opencode'],
+    cliTools: ['claude', 'codex', 'opencode'],
   },
   {
     name: 'resume',
@@ -50,6 +52,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
     isStandard: true,
     source: 'standard',
     filePath: '',
+    cliTools: ['claude', 'codex'],
   },
   {
     name: 'rewind',
@@ -76,6 +79,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
     isStandard: true,
     source: 'standard',
     filePath: '',
+    cliTools: ['claude', 'codex'],
   },
   {
     name: 'permissions',
@@ -84,6 +88,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
     isStandard: true,
     source: 'standard',
     filePath: '',
+    cliTools: ['claude', 'codex'],
   },
 
   // Monitoring
@@ -94,6 +99,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
     isStandard: true,
     source: 'standard',
     filePath: '',
+    cliTools: ['claude', 'codex'],
   },
   {
     name: 'context',
@@ -120,6 +126,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
     isStandard: true,
     source: 'standard',
     filePath: '',
+    cliTools: ['claude', 'codex'],
   },
   {
     name: 'pr-comments',

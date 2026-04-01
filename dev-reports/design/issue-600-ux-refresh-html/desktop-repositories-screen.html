@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CommandMate v0.5 - Desktop Repositories Screen</title>
+  <style>
+    :root { --bg:#08111f; --surface:#111827; --border:#475569; --text:#e5eefc; --muted:#94a3b8; --accent:#22d3ee; }
+    *{box-sizing:border-box} body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at top,#13203a 0%,#08111f 48%,#040914 100%);color:var(--text)}
+    .page{max-width:1460px;margin:0 auto;padding:36px 24px 64px} h1{margin:0 0 8px;font-size:2rem} h1 span{color:var(--accent)} p{color:var(--muted);line-height:1.65}
+    .hero,.shell,.col,.repo,.form,.result,.footer{border:1px solid rgba(71,85,105,.8);border-radius:22px;background:rgba(17,24,39,.82);box-shadow:0 18px 50px rgba(0,0,0,.28)}
+    .hero,.col{padding:20px}.badges,.tabs,.actions,.footer-links{display:flex;gap:10px;flex-wrap:wrap}
+    .badge,.tab,.action{padding:8px 12px;border-radius:999px;background:rgba(15,23,42,.85);border:1px solid rgba(71,85,105,.7);color:var(--muted);font-size:.84rem}
+    .tab.active{background:rgba(34,211,238,.1);border-color:rgba(34,211,238,.3);color:var(--text)}
+    .shell{margin-top:18px;overflow:hidden}.layout{display:grid;grid-template-columns:1.05fr .95fr}
+    .left,.right{padding:18px}.left{border-right:1px solid rgba(71,85,105,.7)} .repo,.form,.result{padding:14px;margin-top:12px}
+    .field{margin-top:10px;padding:12px 14px;border-radius:14px;background:rgba(9,14,25,.8);border:1px solid rgba(71,85,105,.7);color:var(--muted)}
+    .footer-links{margin-top:20px}.footer-links a{color:var(--text);text-decoration:none;border:1px solid rgba(148,163,184,.28);padding:10px 14px;border-radius:12px;font-weight:700}
+    @media (max-width:980px){.layout{grid-template-columns:1fr}.left{border-right:none;border-bottom:1px solid rgba(71,85,105,.7)}}
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>CommandMate <span>Desktop Repositories</span></h1>
+    <p>PC版の `Repositories` 選択時画面です。追加・Clone・Sync・削除・Excluded 復元を一箇所に集約します。</p>
+    <div class="hero">
+      <div class="badges">
+        <div class="badge"><strong>主役</strong> Add Repository</div>
+        <div class="badge"><strong>現行との関係</strong> RepositoryManager の専用昇格面</div>
+        <div class="badge"><strong>終点</strong> 登録完了後は Sessions へ誘導</div>
+      </div>
+    </div>
+
+    <div class="shell">
+      <div class="layout">
+        <div class="left">
+          <div class="tabs">
+            <span class="tab active">Registered</span>
+            <span class="tab">Excluded</span>
+            <span class="tab">Sync History</span>
+          </div>
+          <div class="repo"><strong>MyCodeBranchDesk</strong><p>84 branches • Sync 2m ago • actions: Sync / Delete</p></div>
+          <div class="repo"><strong>commandmate-sandbox</strong><p>6 branches • Sync 12m ago • actions: Sync / Delete</p></div>
+          <div class="repo"><strong>Excluded repositories</strong><p>2 items • restore from Excluded tab</p></div>
+          <div class="result"><strong>Latest sync result</strong><p>1 new worktree discovered. 2 repositories unchanged. 2 excluded skipped.</p></div>
+        </div>
+
+        <div class="right">
+          <div class="form">
+            <strong>Add Repository</strong>
+            <p>ホームに置かれていた登録フォームをここへ移動。Setup 文脈を独立させる。</p>
+            <div class="tabs" style="margin-top:10px;">
+              <span class="tab active">Local Path</span>
+              <span class="tab">Clone URL</span>
+            </div>
+            <div class="field">/absolute/path/to/repository</div>
+            <div class="actions" style="margin-top:10px;">
+              <span class="action">Scan & Add</span>
+              <span class="action">Cancel</span>
+            </div>
+          </div>
+
+          <div class="form">
+            <strong>Clone status</strong>
+            <p>Pending / Running / Failed / Completed をこの画面で継続表示。</p>
+            <div class="field">git@github.com:user/repo.git</div>
+            <div class="result"><strong>Running</strong><p>Cloning repository... estimated progress indicator / logs</p></div>
+          </div>
+
+          <div class="form">
+            <strong>Next step</strong>
+            <p>登録完了後は “Open Sessions” CTA を強く表示し、対象 worktree 選択へつなぐ。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer-links">
+      <a href="./index.html">一覧へ戻る</a>
+      <a href="./desktop-sessions-screen.html">PC Sessions</a>
+      <a href="./sessions-transitions.html">Sessions遷移</a>
+    </div>
+  </div>
+</body>
+</html>

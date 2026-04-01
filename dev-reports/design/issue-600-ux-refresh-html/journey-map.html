@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CommandMate v0.5 - User Scenarios and Journey Map</title>
+  <style>
+    :root {
+      --bg: #0a1120;
+      --surface: #111827;
+      --surface-2: #1f2937;
+      --border: #475569;
+      --text: #e5eefc;
+      --muted: #94a3b8;
+      --accent: #22d3ee;
+      --purple: #8b5cf6;
+      --green: #22c55e;
+      --yellow: #facc15;
+      --red: #fb7185;
+      --blue: #60a5fa;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #13203a 0%, #08111f 45%, #040914 100%);
+      color: var(--text);
+      line-height: 1.65;
+    }
+
+    .container {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 40px 24px 72px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 2rem;
+      font-weight: 800;
+    }
+
+    h1 span { color: var(--accent); }
+
+    h2 {
+      margin: 36px 0 14px;
+      font-size: 1.3rem;
+    }
+
+    p {
+      margin: 0 0 12px;
+      color: var(--muted);
+    }
+
+    .lead {
+      max-width: 900px;
+      margin-bottom: 24px;
+    }
+
+    .badges,
+    .flow,
+    .nav-map {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .badge,
+    .node,
+    .step {
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(71, 85, 105, 0.75);
+      background: rgba(15, 23, 42, 0.8);
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+
+    .badge strong,
+    .node strong,
+    .step strong { color: var(--text); }
+
+    .hero,
+    .section,
+    .note,
+    .device-card,
+    .scenario-card,
+    .principle-card {
+      border-radius: 20px;
+      border: 1px solid rgba(71, 85, 105, 0.8);
+      background: rgba(17, 24, 39, 0.82);
+      box-shadow: 0 16px 44px rgba(0, 0, 0, 0.28);
+    }
+
+    .hero,
+    .section,
+    .note {
+      padding: 22px;
+    }
+
+    .grid-2,
+    .grid-3,
+    .scenario-grid,
+    .principle-grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .grid-2 { grid-template-columns: 1.2fr 0.8fr; }
+    .grid-3,
+    .scenario-grid,
+    .principle-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    .section {
+      margin-top: 22px;
+    }
+
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 14px;
+      font-size: 0.92rem;
+    }
+
+    .table th,
+    .table td {
+      padding: 12px 14px;
+      border: 1px solid rgba(71, 85, 105, 0.7);
+      vertical-align: top;
+    }
+
+    .table th {
+      background: rgba(31, 41, 55, 0.92);
+      text-align: left;
+      color: var(--text);
+    }
+
+    .table td { color: var(--muted); }
+
+    .scenario-card,
+    .principle-card,
+    .device-card {
+      padding: 18px;
+    }
+
+    .scenario-card h3,
+    .principle-card h3,
+    .device-card h3 {
+      margin: 0 0 8px;
+      font-size: 1rem;
+    }
+
+    .label {
+      display: inline-block;
+      margin-bottom: 10px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .label.setup { background: rgba(96, 165, 250, 0.14); color: var(--blue); }
+    .label.run { background: rgba(34, 211, 238, 0.14); color: var(--accent); }
+    .label.review { background: rgba(34, 197, 94, 0.14); color: var(--green); }
+    .label.manage { background: rgba(250, 204, 21, 0.14); color: var(--yellow); }
+
+    .arrow {
+      color: var(--accent);
+      font-weight: 700;
+      margin: 0 2px;
+    }
+
+    .mini-title {
+      margin: 0 0 8px;
+      color: var(--text);
+      font-size: 0.9rem;
+      font-weight: 700;
+    }
+
+    ul {
+      margin: 8px 0 0;
+      padding-left: 20px;
+      color: var(--muted);
+    }
+
+    li + li { margin-top: 6px; }
+
+    .footer-links {
+      margin-top: 24px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .footer-links a {
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 700;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      border-radius: 12px;
+      padding: 10px 14px;
+    }
+
+    @media (max-width: 960px) {
+      .grid-2,
+      .grid-3,
+      .scenario-grid,
+      .principle-grid { grid-template-columns: 1fr; }
+      .table { font-size: 0.86rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>CommandMate <span>User Scenarios / Journey Map</span></h1>
+    <p class="lead">
+      既存機能を前提に、ユーザシナリオをライフサイクルで再整理したページです。
+      「どこで登録し、どこで選び、どこで実行し、どこでレビューし、どこで管理するか」を
+      Desktop / Mobile で同じ mental model に揃えています。
+    </p>
+
+    <div class="badges">
+      <div class="badge"><strong>原則 1</strong> Home は状況判断と Inbox</div>
+      <div class="badge"><strong>原則 2</strong> Repositories は登録・同期・削除・復元</div>
+      <div class="badge"><strong>原則 3</strong> Sessions は worktree 選択と探索</div>
+      <div class="badge"><strong>原則 4</strong> 実行は選択済み worktree detail で行う</div>
+      <div class="badge"><strong>原則 5</strong> More は設定と外部連携</div>
+    </div>
+
+    <section class="hero" style="margin-top: 18px;">
+      <div class="grid-2">
+        <div>
+          <h2 style="margin-top: 0;">North Star</h2>
+          <p>
+            現状はホームに Repository 管理、Worktree 一覧、External Apps が並び、シナリオごとの入口が混在しています。
+            新UXでは、ユーザーの行動を <strong>導入 → 登録 → 選択 → 実行 → レビュー → 管理</strong> の流れに沿って分離します。
+          </p>
+          <div class="flow" style="margin-top: 12px;">
+            <span class="step"><strong>Start / Login</strong></span>
+            <span class="arrow">→</span>
+            <span class="step"><strong>Repositories</strong></span>
+            <span class="arrow">→</span>
+            <span class="step"><strong>Sessions</strong></span>
+            <span class="arrow">→</span>
+            <span class="step"><strong>Worktree Detail</strong></span>
+            <span class="arrow">→</span>
+            <span class="step"><strong>Review / Home</strong></span>
+          </div>
+        </div>
+        <div class="note">
+          <div class="mini-title">整合性の核</div>
+          <ul>
+            <li>リポジトリ登録は Home 直置きではなく <strong>Repositories</strong> に集約</li>
+            <li>新規タスク送信はグローバルではなく <strong>選択済み worktree</strong> で行う</li>
+            <li>Waiting / Completed / Error は <strong>Home</strong> に集約</li>
+            <li>検索・フィルタ・選択は <strong>Sessions</strong> に寄せる</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>1. ユーザシナリオ棚卸し</h2>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>フェーズ</th>
+            <th>ユーザシナリオ</th>
+            <th>正しい入口</th>
+            <th>主な完了条件</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>導入</td>
+            <td>CLI起動 / URLアクセス / トークンログイン</td>
+            <td>`Login` または `Home(empty)`</td>
+            <td>Web UI に入れる</td>
+          </tr>
+          <tr>
+            <td>登録</td>
+            <td>ローカルディレクトリ指定で repository 登録</td>
+            <td>`Repositories > Add > Local Path`</td>
+            <td>worktree が認識される</td>
+          </tr>
+          <tr>
+            <td>登録</td>
+            <td>Clone URL 指定で repository 登録</td>
+            <td>`Repositories > Add > Clone URL`</td>
+            <td>clone 完了後に自動登録</td>
+          </tr>
+          <tr>
+            <td>登録</td>
+            <td>Sync で repository / worktree を再検出</td>
+            <td>`Repositories`</td>
+            <td>一覧が最新になる</td>
+          </tr>
+          <tr>
+            <td>探索</td>
+            <td>検索 / filter / favorite / status で worktree を探す</td>
+            <td>`Sessions`</td>
+            <td>対象 worktree が選択できる</td>
+          </tr>
+          <tr>
+            <td>実行</td>
+            <td>worktree を開きメッセージ送信</td>
+            <td>`Sessions > Worktree Detail`</td>
+            <td>agent が走り始める</td>
+          </tr>
+          <tr>
+            <td>実行</td>
+            <td>Prompt への応答</td>
+            <td>`Home(Inbox)` または `Worktree Detail`</td>
+            <td>処理が再開される</td>
+          </tr>
+          <tr>
+            <td>実行</td>
+            <td>Auto Yes を有効化</td>
+            <td>`Worktree Detail`</td>
+            <td>無人実行が始まる</td>
+          </tr>
+          <tr>
+            <td>レビュー</td>
+            <td>実行中タスクの監視</td>
+            <td>`Home` / `Sessions` / `Worktree Detail`</td>
+            <td>状況把握できる</td>
+          </tr>
+          <tr>
+            <td>レビュー</td>
+            <td>完了タスクの確認、diff/log/history/notes 閲覧</td>
+            <td>`Home(Completed)` → `Worktree Detail`</td>
+            <td>次の判断ができる</td>
+          </tr>
+          <tr>
+            <td>管理</td>
+            <td>Repository 削除</td>
+            <td>`Repositories`</td>
+            <td>管理対象から外れる</td>
+          </tr>
+          <tr>
+            <td>管理</td>
+            <td>Excluded Repository の復元</td>
+            <td>`Repositories > Excluded`</td>
+            <td>再び対象に戻る</td>
+          </tr>
+          <tr>
+            <td>管理</td>
+            <td>External Apps の追加 / 編集 / 削除</td>
+            <td>`More > External Apps`</td>
+            <td>外部連携が管理できる</td>
+          </tr>
+          <tr>
+            <td>運用</td>
+            <td>Agent 設定、Notes、Files、Logs を扱う</td>
+            <td>`Worktree Detail`</td>
+            <td>worktree 文脈で完結</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>2. 統一 IA / ナビゲーション</h2>
+      <div class="grid-2">
+        <div class="device-card">
+          <div class="mini-title">Desktop primary navigation</div>
+          <div class="nav-map">
+            <span class="node"><strong>Home</strong><br>Inbox / Mission Control</span>
+            <span class="node"><strong>Sessions</strong><br>検索・選択・一覧</span>
+            <span class="node"><strong>Repositories</strong><br>登録・同期・削除・復元</span>
+            <span class="node"><strong>Review</strong><br>完了・要確認</span>
+            <span class="node"><strong>More</strong><br>External Apps / Settings</span>
+          </div>
+        </div>
+
+        <div class="device-card">
+          <div class="mini-title">Mobile primary navigation</div>
+          <div class="nav-map">
+            <span class="node"><strong>Home</strong><br>Inbox / Waiting</span>
+            <span class="node"><strong>Sessions</strong><br>選択と探索</span>
+            <span class="node"><strong>Repos</strong><br>登録・Sync</span>
+            <span class="node"><strong>More</strong><br>Review / Apps / Settings</span>
+          </div>
+          <p style="margin-top: 10px;">
+            モバイルではタブ数を絞るため、Review は Home と More に分散。ただし mental model は Desktop と共通。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>3. シナリオ別の導線整理</h2>
+      <div class="scenario-grid">
+        <div class="scenario-card">
+          <span class="label setup">Setup</span>
+          <h3>初回導入 / ログイン</h3>
+          <p>
+            `commandmate start` 後、必要なら token login を通過。認証後の初回表示は
+            <strong>Home(empty state)</strong> に統一し、ここから `Add Repository` を強く出す。
+          </p>
+        </div>
+
+        <div class="scenario-card">
+          <span class="label setup">Setup</span>
+          <h3>ローカルディレクトリ登録</h3>
+          <p>
+            `Repositories` で `Add Repository` を開き、`Local Path` を選択。
+            Scan 結果と登録完了は同一フロー内で見せ、終了後 `Sessions` へ誘導する。
+          </p>
+        </div>
+
+        <div class="scenario-card">
+          <span class="label setup">Setup</span>
+          <h3>Clone URL 登録</h3>
+          <p>
+            `Repositories` の `Clone URL` に統一。clone 中は別画面に飛ばさず、
+            progress / pending / failed を同コンテキストで表示する。
+          </p>
+        </div>
+
+        <div class="scenario-card">
+          <span class="label run">Run</span>
+          <h3>worktree 選択</h3>
+          <p>
+            選択、検索、favorite、status 絞り込みはすべて `Sessions` に集約。
+            Home に一覧を再実装しない。
+          </p>
+        </div>
+
+        <div class="scenario-card">
+          <span class="label run">Run</span>
+          <h3>メッセージ送信 / 実行開始</h3>
+          <p>
+            実行開始は必ず <strong>選択済み worktree detail</strong> で行う。
+            グローバルな “Send” 画面は作らず、対象 worktree が曖昧にならないようにする。
+          </p>
+        </div>
+
+        <div class="scenario-card">
+          <span class="label run">Run</span>
+          <h3>Prompt への応答</h3>
+          <p>
+            最短導線は `Home(Inbox)`。詳細確認が必要なら `Worktree Detail` へ遷移。
+            “すぐ返す” と “文脈を見て返す” の両方を許容する。
+          </p>
+        </div>
+
+        <div class="scenario-card">
+          <span class="label review">Review</span>
+          <h3>実行中の監視</h3>
+          <p>
+            概況は `Home`、詳細は `Sessions / Worktree Detail`。
+            Home はリアルタイムの全体把握、Sessions は探索、Detail は深掘りに役割分担する。
+          </p>
+        </div>
+
+        <div class="scenario-card">
+          <span class="label review">Review</span>
+          <h3>完了後の確認</h3>
+          <p>
+            `Home` に Completed queue を置き、そこから diff / logs / notes / files へ接続。
+            完了したが未確認のものを埋もれさせない。
+          </p>
+        </div>
+
+        <div class="scenario-card">
+          <span class="label manage">Manage</span>
+          <h3>Repository 削除 / 復元 / 外部連携</h3>
+          <p>
+            Repository 関連は `Repositories`、外部アプリは `More` に集約。
+            管理操作を Home の主文脈から切り離す。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>4. 整合性ルール</h2>
+      <div class="principle-grid">
+        <div class="principle-card">
+          <h3>Rule 1 — One job, one place</h3>
+          <p>
+            Repository 登録を Home / Modal / 空状態で分散させず、基本は `Repositories` に一本化。
+            例外は初回 empty state からのショートカットのみ。
+          </p>
+        </div>
+
+        <div class="principle-card">
+          <h3>Rule 2 — Home is for decisions</h3>
+          <p>
+            Home は “何をするか決める画面”。Waiting、Completed、Error、Running summary を置く。
+            管理フォームは常設しない。
+          </p>
+        </div>
+
+        <div class="principle-card">
+          <h3>Rule 3 — Sessions is for finding</h3>
+          <p>
+            一覧、検索、絞り込み、favorite、status 操作は Sessions に集約。
+            Home のカードは検索用ではなく、優先タスク用に絞る。
+          </p>
+        </div>
+
+        <div class="principle-card">
+          <h3>Rule 4 — Detail is for acting</h3>
+          <p>
+            実際の送信、Auto Yes、ファイル閲覧、ノート、ログ閲覧は worktree detail に集約。
+            “何に送るか分からない send” を作らない。
+          </p>
+        </div>
+
+        <div class="principle-card">
+          <h3>Rule 5 — Review is a first-class state</h3>
+          <p>
+            完了タスクを “終わったら見えなくなる” 状態にしない。Home / Review から再訪しやすくし、
+            次の判断につなげる。
+          </p>
+        </div>
+
+        <div class="principle-card">
+          <h3>Rule 6 — Mobile mirrors desktop</h3>
+          <p>
+            画面数は減らしても、役割は揃える。Home は Inbox、Sessions は探索、Repos は登録、More は管理。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>5. 実装に落とした時の差分</h2>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>現状</th>
+            <th>変更後</th>
+            <th>狙い</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Home に RepositoryManager / WorktreeList / ExternalApps が縦積み</td>
+            <td>Home は Mission Control、Repository 管理と Apps を分離</td>
+            <td>初見の価値訴求を明確化</td>
+          </tr>
+          <tr>
+            <td>Desktop は sidebar、Mobile は homepage list で worktree 選択</td>
+            <td>両方とも `Sessions` に探索機能を寄せる</td>
+            <td>device 間で役割を一致</td>
+          </tr>
+          <tr>
+            <td>Send の文脈が detail 依存で、Home からは見えにくい</td>
+            <td>「送信は detail」と明示し、Home には対象 worktree への導線だけ置く</td>
+            <td>誤送信防止と mental model 明確化</td>
+          </tr>
+          <tr>
+            <td>Excluded Repositories が一覧末尾に出る</td>
+            <td>`Repositories > Excluded` に昇格</td>
+            <td>削除と復元を同じ文脈に収める</td>
+          </tr>
+          <tr>
+            <td>External Apps が Home 下部</td>
+            <td>`More > External Apps` へ移動</td>
+            <td>主導線を汚さない</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <div class="footer-links">
+      <a href="./index.html">一覧へ戻る</a>
+      <a href="./desktop-wireframe.html">PC版 wireframe</a>
+      <a href="./mobile-wireframe.html">モバイル版 wireframe</a>
+    </div>
+  </div>
+</body>
+</html>
