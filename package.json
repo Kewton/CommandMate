@@ -1,6 +1,6 @@
 {
   "name": "commandmate",
-  "version": "0.4.16",
+  "version": "0.5.0",
   "description": "A local control plane for agent CLIs — orchestration and visibility for Claude Code, Codex, Gemini CLI, and more across Git worktrees",
   "keywords": [
     "claude-code",
