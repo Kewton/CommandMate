@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CommandMate v0.5 - Mobile Transitions</title>
+  <style>
+    :root { --bg:#08111f; --surface:#111827; --border:#475569; --text:#e5eefc; --muted:#94a3b8; --accent:#22d3ee; --green:#22c55e; --yellow:#facc15; }
+    *{box-sizing:border-box} body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at top,#13203a 0%,#08111f 48%,#040914 100%);color:var(--text)}
+    .page{max-width:1320px;margin:0 auto;padding:36px 24px 64px} h1{margin:0 0 8px;font-size:2rem} h1 span{color:var(--accent)} p{color:var(--muted);line-height:1.65}
+    .hero,.phones,.phone,.table-wrap,.note{border:1px solid rgba(71,85,105,.8);border-radius:22px;background:rgba(17,24,39,.82);box-shadow:0 18px 50px rgba(0,0,0,.28)}
+    .hero,.phones,.table-wrap,.note{padding:20px}.badges,.footer-links{display:flex;gap:10px;flex-wrap:wrap}
+    .badge{padding:8px 12px;border-radius:999px;background:rgba(15,23,42,.85);border:1px solid rgba(71,85,105,.7);color:var(--muted);font-size:.84rem}.badge strong{color:var(--text)}
+    .phone-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:18px}
+    .phone{padding:16px}
+    .step{border:1px solid rgba(71,85,105,.6);border-radius:16px;background:rgba(9,14,25,.55);padding:14px;margin-top:10px}
+    .step strong{display:block;margin-bottom:4px}.arrow{text-align:center;color:var(--accent);font-weight:800;margin:10px 0}
+    table{width:100%;border-collapse:collapse;margin-top:12px;font-size:.92rem}
+    th,td{border:1px solid rgba(71,85,105,.7);padding:12px 14px;vertical-align:top} th{text-align:left;background:rgba(31,41,55,.92)} td{color:var(--muted)}
+    .footer-links{margin-top:20px}.footer-links a{color:var(--text);text-decoration:none;border:1px solid rgba(148,163,184,.28);padding:10px 14px;border-radius:12px;font-weight:700}
+    @media (max-width:980px){.phone-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>CommandMate <span>Mobile Flow</span></h1>
+    <p>スマホ版の画面遷移図です。Inbox 優先で、短時間の確認・返答・再開が最短になるよう設計しています。</p>
+
+    <div class="hero">
+      <div class="badges">
+        <div class="badge"><strong>Home</strong> Inbox / Waiting / Completed</div>
+        <div class="badge"><strong>Sessions</strong> 軽い一覧と選択</div>
+        <div class="badge"><strong>Repos</strong> 登録と Sync</div>
+        <div class="badge"><strong>More</strong> Review / Settings / Apps</div>
+      </div>
+    </div>
+
+    <div class="phones">
+      <div class="phone-grid">
+        <div class="phone">
+          <strong>1. Inbox first</strong>
+          <div class="step"><strong>Home</strong><p>Waiting / Running / Completed を最初に提示</p></div>
+          <div class="arrow">↓</div>
+          <div class="step"><strong>Quick Reply</strong><p>軽い返答はその場で完了</p></div>
+        </div>
+        <div class="phone">
+          <strong>2. Need more context</strong>
+          <div class="step"><strong>Sessions</strong><p>Repository 名付きで対象を選ぶ</p></div>
+          <div class="arrow">↓</div>
+          <div class="step"><strong>Worktree Detail</strong><p>History / Terminal / Logs を見て返答</p></div>
+        </div>
+        <div class="phone">
+          <strong>3. Setup & settings</strong>
+          <div class="step"><strong>Repos</strong><p>Local Path / Clone URL / Sync / Excluded</p></div>
+          <div class="arrow">↓</div>
+          <div class="step"><strong>More</strong><p>Review / External Apps / Theme / Auth</p></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="table-wrap" style="margin-top:18px;">
+      <strong>Mobile transition table</strong>
+      <table>
+        <thead><tr><th>現在画面</th><th>ユーザーの意図</th><th>遷移先</th><th>備考</th></tr></thead>
+        <tbody>
+          <tr><td>Home</td><td>すぐ返答したい</td><td>Quick Reply</td><td>最短1タップ返答</td></tr>
+          <tr><td>Home</td><td>文脈を見たい</td><td>Sessions → Worktree Detail</td><td>軽い一覧から対象を選ぶ</td></tr>
+          <tr><td>Repos</td><td>登録後に作業したい</td><td>Sessions</td><td>登録完了後は一覧へ誘導</td></tr>
+          <tr><td>More</td><td>完了物を確認したい</td><td>Review hub</td><td>モバイルでは More 内に内包可</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note" style="margin-top:18px;">
+      <strong>視認性方針</strong>
+      <p>スマホ版では、各カードに `Repository 名` を枝の下に常設し、さらに `Agent` と `状態` を同じ高さで見せる。親指で見てもどの文脈か迷わないようにする。</p>
+    </div>
+
+    <div class="footer-links">
+      <a href="./index.html">一覧へ戻る</a>
+      <a href="./desktop-transitions.html">PC版遷移図</a>
+      <a href="./mobile-wireframe.html">モバイル wireframe</a>
+    </div>
+  </div>
+</body>
+</html>

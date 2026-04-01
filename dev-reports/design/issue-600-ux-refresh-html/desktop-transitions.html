@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CommandMate v0.5 - Desktop Transitions</title>
+  <style>
+    :root { --bg:#08111f; --surface:#111827; --border:#475569; --text:#e5eefc; --muted:#94a3b8; --accent:#22d3ee; --green:#22c55e; --yellow:#facc15; }
+    *{box-sizing:border-box} body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at top,#13203a 0%,#08111f 48%,#040914 100%);color:var(--text)}
+    .page{max-width:1380px;margin:0 auto;padding:36px 24px 64px} h1{margin:0 0 8px;font-size:2rem} h1 span{color:var(--accent)} p{color:var(--muted);line-height:1.65}
+    .hero,.diagram,.table-wrap,.note{border:1px solid rgba(71,85,105,.8);border-radius:22px;background:rgba(17,24,39,.82);box-shadow:0 18px 50px rgba(0,0,0,.28)}
+    .hero,.diagram,.table-wrap,.note{padding:20px}.badges,.lanes,.footer-links{display:flex;gap:10px;flex-wrap:wrap}
+    .badge,.node{padding:8px 12px;border-radius:999px;background:rgba(15,23,42,.85);border:1px solid rgba(71,85,105,.7);color:var(--muted);font-size:.84rem}
+    .badge strong,.node strong{color:var(--text)}
+    .flow-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:18px}
+    .col{border:1px solid rgba(71,85,105,.65);border-radius:18px;background:rgba(15,23,42,.74);padding:16px}
+    .stage{border:1px solid rgba(71,85,105,.55);border-radius:16px;background:rgba(9,14,25,.55);padding:14px;margin-top:10px}
+    .stage strong{display:block;margin-bottom:4px}
+    .arrow{margin:10px 0;color:var(--accent);font-weight:800;text-align:center}
+    table{width:100%;border-collapse:collapse;margin-top:12px;font-size:.92rem}
+    th,td{border:1px solid rgba(71,85,105,.7);padding:12px 14px;vertical-align:top} th{text-align:left;background:rgba(31,41,55,.92)} td{color:var(--muted)}
+    .footer-links{margin-top:20px}.footer-links a{color:var(--text);text-decoration:none;border:1px solid rgba(148,163,184,.28);padding:10px 14px;border-radius:12px;font-weight:700}
+    @media (max-width:980px){.flow-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>CommandMate <span>Desktop Flow</span></h1>
+    <p>PC版の画面遷移図です。探索、実行、レビューを分離し、複数セッションを俯瞰しながら深掘りできる構造にしています。</p>
+
+    <div class="hero">
+      <div class="badges">
+        <div class="badge"><strong>Home</strong> 判断と優先度</div>
+        <div class="badge"><strong>Sessions</strong> 検索・絞り込み・選択</div>
+        <div class="badge"><strong>Worktree Detail</strong> 実行・監視・文脈確認</div>
+        <div class="badge"><strong>Review</strong> 完了と承認待ち処理</div>
+      </div>
+    </div>
+
+    <div class="diagram">
+      <div class="flow-grid">
+        <div class="col">
+          <strong>Entry / Triage</strong>
+          <div class="stage"><strong>Login / Home</strong><p>Waiting、Running、Completed summary を確認</p></div>
+          <div class="arrow">↓</div>
+          <div class="stage"><strong>Choose intent</strong><p>探すなら Sessions、登録なら Repositories、確認なら Review</p></div>
+        </div>
+        <div class="col">
+          <strong>Execution Loop</strong>
+          <div class="stage"><strong>Sessions</strong><p>Repository 名付き一覧で対象 worktree を選ぶ</p></div>
+          <div class="arrow">↓</div>
+          <div class="stage"><strong>Worktree Detail</strong><p>Send / Auto Yes / Files / Logs / Notes / Prompt response</p></div>
+          <div class="arrow">↺</div>
+          <div class="stage"><strong>Back to Sessions</strong><p>別 worktree を続けて選ぶ</p></div>
+        </div>
+        <div class="col">
+          <strong>Outcome Loop</strong>
+          <div class="stage"><strong>Review</strong><p>Done、Approval、Stale の処理</p></div>
+          <div class="arrow">↓</div>
+          <div class="stage"><strong>Detail or Home</strong><p>深掘りなら Detail、概況確認なら Home へ戻る</p></div>
+          <div class="arrow">↓</div>
+          <div class="stage"><strong>Repositories / More</strong><p>必要時だけ設定や登録へ</p></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="table-wrap" style="margin-top:18px;">
+      <strong>Desktop transition table</strong>
+      <table>
+        <thead><tr><th>現在画面</th><th>ユーザーの意図</th><th>遷移先</th><th>備考</th></tr></thead>
+        <tbody>
+          <tr><td>Home</td><td>作業対象を探したい</td><td>Sessions</td><td>Home は要約、Sessions は探索</td></tr>
+          <tr><td>Home</td><td>Prompt に答えたい</td><td>Quick Reply or Worktree Detail</td><td>軽い返答は Home、重い判断は Detail</td></tr>
+          <tr><td>Sessions</td><td>実行したい</td><td>Worktree Detail</td><td>Send / Auto Yes は Detail の責務</td></tr>
+          <tr><td>Worktree Detail</td><td>結果を処理したい</td><td>Review</td><td>Done / Approval / Stale をまとめて扱う</td></tr>
+          <tr><td>Sessions</td><td>リポジトリを追加したい</td><td>Repositories</td><td>登録は分離</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note" style="margin-top:18px;">
+      <strong>視認性方針</strong>
+      <p>PC版では、一覧やカードに必ず `Repository 名`、`Branch 名`、`Agent`、`状態`、`次アクション` の最低5要素を載せる。ブランチ名だけで判断させない。</p>
+    </div>
+
+    <div class="footer-links">
+      <a href="./index.html">一覧へ戻る</a>
+      <a href="./mobile-transitions.html">スマホ版遷移図</a>
+      <a href="./desktop-sessions-screen.html">PC Sessions</a>
+    </div>
+  </div>
+</body>
+</html>

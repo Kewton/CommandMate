@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CommandMate v0.5 - Mobile Repositories Screen</title>
+  <style>
+    :root { --bg:#08111f; --surface:#111827; --border:#475569; --text:#e5eefc; --muted:#94a3b8; --accent:#22d3ee; }
+    *{box-sizing:border-box} body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at top,#13203a 0%,#08111f 48%,#040914 100%);color:var(--text)}
+    .page{max-width:760px;margin:0 auto;padding:32px 20px 56px} h1{margin:0 0 8px;font-size:1.9rem} h1 span{color:var(--accent)} p{color:var(--muted);line-height:1.65}
+    .hero,.phone,.section,.item{border:1px solid rgba(71,85,105,.8);border-radius:22px;background:rgba(17,24,39,.82);box-shadow:0 18px 50px rgba(0,0,0,.28)}
+    .hero,.section,.item{padding:18px}.badges,.footer-links,.tabs{display:flex;gap:10px;flex-wrap:wrap}.badge,.tab{padding:8px 12px;border-radius:999px;background:rgba(15,23,42,.85);border:1px solid rgba(71,85,105,.7);color:var(--muted);font-size:.82rem}
+    .phone{margin-top:18px;padding:12px;max-width:420px}.status{display:flex;justify-content:space-between;color:var(--muted);font-size:.8rem;padding:6px 8px}
+    .screen{border:1px solid rgba(71,85,105,.65);border-radius:28px;background:rgba(9,14,25,.92);padding:16px;min-height:760px}.item{margin-top:14px}
+    .footer-links{margin-top:20px}.footer-links a{color:var(--text);text-decoration:none;border:1px solid rgba(148,163,184,.28);padding:10px 14px;border-radius:12px;font-weight:700}
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>CommandMate <span>Mobile Repositories</span></h1>
+    <p>登録、clone、sync、excluded 復元を Home から分離した管理面です。</p>
+
+    <div class="hero">
+      <div class="badges">
+        <div class="badge"><strong>役割</strong> Repository setup</div>
+        <div class="badge"><strong>主導線外</strong> 判断面から分離</div>
+      </div>
+    </div>
+
+    <div class="phone">
+      <div class="status"><span>9:45</span><span>5G · 80%</span></div>
+      <div class="screen">
+        <div class="section"><strong>Add source</strong><p>Local Path / Clone URL / Restore excluded</p></div>
+        <div class="item"><strong>MyCodeBranchDesk</strong><p>84 branches • Last synced 5m ago</p></div>
+        <div class="item"><strong>commandmate-sandbox</strong><p>19 branches • Sync available</p></div>
+        <div class="item"><strong>Excluded repositories</strong><p>2 hidden repos can be restored</p></div>
+        <div class="tabs">
+          <span class="tab">Local Path</span>
+          <span class="tab">Clone URL</span>
+          <span class="tab">Restore</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer-links">
+      <a href="./index.html">一覧へ戻る</a>
+      <a href="./mobile-sessions-screen.html">Mobile Sessions</a>
+      <a href="./mobile-more-settings-screen.html">Mobile More</a>
+    </div>
+  </div>
+</body>
+</html>

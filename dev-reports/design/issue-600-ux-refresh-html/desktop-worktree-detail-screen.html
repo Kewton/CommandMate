@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CommandMate v0.5 - Desktop Worktree Detail Screen</title>
+  <style>
+    :root { --bg:#08111f; --surface:#111827; --surface2:#1f2937; --border:#475569; --text:#e5eefc; --muted:#94a3b8; --accent:#22d3ee; --green:#22c55e; --yellow:#facc15; --pink:#fb7185; }
+    *{box-sizing:border-box} body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at top,#13203a 0%,#08111f 48%,#040914 100%);color:var(--text)}
+    .page{max-width:1520px;margin:0 auto;padding:36px 24px 64px} h1{margin:0 0 8px;font-size:2rem} h1 span{color:var(--accent)} p{color:var(--muted);line-height:1.65}
+    .hero,.shell,.panel,.terminal,.composer,.feed{border:1px solid rgba(71,85,105,.8);border-radius:22px;background:rgba(17,24,39,.82);box-shadow:0 18px 50px rgba(0,0,0,.28)}
+    .hero,.panel,.terminal,.composer,.feed{padding:18px}.badges,.actions,.footer-links,.chips{display:flex;gap:10px;flex-wrap:wrap}.badge,.chip,.action{padding:8px 12px;border-radius:999px;background:rgba(15,23,42,.85);border:1px solid rgba(71,85,105,.7);color:var(--muted);font-size:.84rem}
+    .shell{margin-top:18px;padding:18px}.header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.title-wrap strong{font-size:1.2rem}
+    .meta{display:inline-block;margin-bottom:10px;padding:3px 9px;border-radius:999px;background:rgba(96,165,250,.14);color:#93c5fd;font-size:.74rem;font-weight:700}
+    .layout{display:grid;grid-template-columns:280px 1fr 320px;gap:16px;margin-top:16px}.stack{display:grid;gap:16px}
+    .item{padding:12px 0;border-top:1px solid rgba(71,85,105,.4)}.item:first-child{border-top:none;padding-top:0}
+    .terminal pre{margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#dbeafe;white-space:pre-wrap;line-height:1.6}
+    .composer-box{min-height:92px;padding:14px;border-radius:16px;background:rgba(9,14,25,.85);border:1px solid rgba(71,85,105,.65);color:var(--text)}
+    .footer-links{margin-top:20px}.footer-links a{color:var(--text);text-decoration:none;border:1px solid rgba(148,163,184,.28);padding:10px 14px;border-radius:12px;font-weight:700}
+    @media (max-width:1180px){.layout{grid-template-columns:1fr}.header{flex-direction:column}}
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>CommandMate <span>Desktop Worktree Detail</span></h1>
+    <p>PC版の実行面です。`Repository`、`Branch`、`Agent`、`状態` をヘッダーで固定表示し、会話・ターミナル・ファイル・ログを横断できます。</p>
+
+    <div class="hero">
+      <div class="badges">
+        <div class="badge"><strong>責務</strong> Send / Watch / Inspect / Reply</div>
+        <div class="badge"><strong>文脈</strong> Repo + Branch + Agent + Status を固定</div>
+        <div class="badge"><strong>戻り先</strong> Sessions / Review / Home</div>
+      </div>
+    </div>
+
+    <div class="shell">
+      <div class="header">
+        <div class="title-wrap">
+          <span class="meta">Repo: MyCodeBranchDesk • Branch: feature/592-nav-keys • Agent: Claude • Status: Running</span>
+          <strong>Worktree execution detail</strong>
+          <p>Keyboard navigation button handling and route tests are being updated.</p>
+        </div>
+        <div class="chips">
+          <span class="chip">Auto Yes: Off</span>
+          <span class="chip">Terminal live</span>
+          <span class="chip">Last output: 20s ago</span>
+        </div>
+      </div>
+
+      <div class="layout">
+        <aside class="stack">
+          <div class="panel">
+            <strong>Conversation</strong>
+            <div class="item"><span class="meta">You</span><p>Fix navigation buttons to support left/right and align tests.</p></div>
+            <div class="item"><span class="meta">Claude</span><p>Updating route tests and button handling. Will share summary after validation.</p></div>
+            <div class="item"><span class="meta">Prompt</span><p>No prompt now. Continue monitoring.</p></div>
+          </div>
+          <div class="panel">
+            <strong>Notes</strong>
+            <div class="item"><p>Branch belongs to MyCodeBranchDesk, not sandbox. Keep repo identity visible.</p></div>
+            <div class="item"><p>Likely review target after tests pass.</p></div>
+          </div>
+        </aside>
+
+        <main class="stack">
+          <div class="terminal">
+            <strong>Terminal</strong>
+            <pre>$ npm run test:unit -- navigation
+✓ special-keys route handles left/right
+✓ navigation buttons call correct API
+… updating snapshots
+
+Claude: "Adjusting detail footer actions and retrying targeted tests."</pre>
+          </div>
+          <div class="composer">
+            <strong>Send instruction</strong>
+            <div class="composer-box">After tests pass, summarize changed files and next review steps in 3 bullets.</div>
+            <div class="actions" style="margin-top:12px;">
+              <span class="action">Send</span>
+              <span class="action">Attach note</span>
+              <span class="action">Enable Auto Yes</span>
+            </div>
+          </div>
+        </main>
+
+        <aside class="stack">
+          <div class="feed">
+            <strong>Files / Diff</strong>
+            <div class="item"><span class="meta">Changed</span><p>`src/components/worktree/NavigationButtons.tsx`</p></div>
+            <div class="item"><span class="meta">Changed</span><p>`src/app/api/worktrees/[id]/special-keys/route.ts`</p></div>
+            <div class="item"><span class="meta">Changed</span><p>`tests/unit/...`</p></div>
+          </div>
+          <div class="feed">
+            <strong>Logs / Next action</strong>
+            <div class="item"><p>If tests fail, stay here. If tests pass, move to Review.</p></div>
+            <div class="item"><p>Use Sessions to jump to another worktree after this run.</p></div>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <div class="footer-links">
+      <a href="./index.html">一覧へ戻る</a>
+      <a href="./desktop-sessions-screen.html">PC Sessions</a>
+      <a href="./desktop-review-screen.html">PC Review</a>
+    </div>
+  </div>
+</body>
+</html>

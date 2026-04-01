@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CommandMate v0.5 - Mobile Sessions Screen</title>
+  <style>
+    :root { --bg:#08111f; --surface:#111827; --border:#475569; --text:#e5eefc; --muted:#94a3b8; --accent:#22d3ee; --green:#22c55e; --yellow:#facc15; }
+    *{box-sizing:border-box} body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at top,#13203a 0%,#08111f 48%,#040914 100%);color:var(--text)}
+    .page{max-width:760px;margin:0 auto;padding:32px 20px 56px} h1{margin:0 0 8px;font-size:1.9rem} h1 span{color:var(--accent)} p{color:var(--muted);line-height:1.65}
+    .hero,.phone,.section,.item{border:1px solid rgba(71,85,105,.8);border-radius:22px;background:rgba(17,24,39,.82);box-shadow:0 18px 50px rgba(0,0,0,.28)}
+    .hero,.section,.item{padding:18px}.badges,.footer-links{display:flex;gap:10px;flex-wrap:wrap}.badge,.tab{padding:8px 12px;border-radius:999px;background:rgba(15,23,42,.85);border:1px solid rgba(71,85,105,.7);color:var(--muted);font-size:.82rem}
+    .phone{margin-top:18px;padding:12px;max-width:420px}.status{display:flex;justify-content:space-between;color:var(--muted);font-size:.8rem;padding:6px 8px}
+    .screen{border:1px solid rgba(71,85,105,.65);border-radius:28px;background:rgba(9,14,25,.92);padding:16px;min-height:760px}
+    .meta{display:block;margin-bottom:8px;color:#93c5fd;font-size:.78rem;font-weight:700}.item{margin-top:14px}.tabbar{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px}.tab.active{color:var(--text);border-color:rgba(34,211,238,.35);background:rgba(34,211,238,.12)}
+    .footer-links{margin-top:20px}.footer-links a{color:var(--text);text-decoration:none;border:1px solid rgba(148,163,184,.28);padding:10px 14px;border-radius:12px;font-weight:700}
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>CommandMate <span>Mobile Sessions</span></h1>
+    <p>軽い一覧と選択に絞ったモバイル版 Sessions です。各カードにリポジトリ名を常設します。</p>
+
+    <div class="hero">
+      <div class="badges">
+        <div class="badge"><strong>役割</strong> 対象 worktree を選ぶ</div>
+        <div class="badge"><strong>視認性</strong> Repo + Branch + Agent + Status</div>
+      </div>
+    </div>
+
+    <div class="phone">
+      <div class="status"><span>9:43</span><span>5G · 81%</span></div>
+      <div class="screen">
+        <div class="section"><strong>Sessions</strong><p>Search: branch, repository, summary...</p></div>
+        <div class="item"><span class="meta">Repo: MyCodeBranchDesk • Agent: Copilot • Waiting</span><strong>feature/588-model-validation</strong><p>Needs reply. Open detail or answer from Home.</p></div>
+        <div class="item"><span class="meta">Repo: MyCodeBranchDesk • Agent: Claude • Running</span><strong>feature/592-nav-keys</strong><p>Latest output 20s ago.</p></div>
+        <div class="item"><span class="meta">Repo: commandmate-sandbox • Agent: Copilot • Done</span><strong>fix/565-copilot-response</strong><p>Ready for review.</p></div>
+        <div class="item"><span class="meta">Repo: MyCodeBranchDesk • Agent: none • Ready</span><strong>main</strong><p>No active session. Good for a new task.</p></div>
+        <div class="tabbar">
+          <div class="tab">Home</div>
+          <div class="tab active">Sessions</div>
+          <div class="tab">Repos</div>
+          <div class="tab">More</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer-links">
+      <a href="./index.html">一覧へ戻る</a>
+      <a href="./mobile-worktree-detail-screen.html">Mobile Worktree Detail</a>
+      <a href="./mobile-repositories-screen.html">Mobile Repositories</a>
+    </div>
+  </div>
+</body>
+</html>

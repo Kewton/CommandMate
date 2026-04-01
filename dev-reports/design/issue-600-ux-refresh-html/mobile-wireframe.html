@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CommandMate v0.5 - Mobile UX Wireframe</title>
+  <style>
+    :root {
+      --bg: #08111f;
+      --surface: #111827;
+      --surface-2: #1f2937;
+      --surface-3: #334155;
+      --border: #475569;
+      --text: #e5eefc;
+      --muted: #94a3b8;
+      --accent: #22d3ee;
+      --purple: #8b5cf6;
+      --green: #22c55e;
+      --yellow: #facc15;
+      --red: #fb7185;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #13203a 0%, #07101d 48%, #040914 100%);
+      color: var(--text);
+    }
+
+    .page {
+      max-width: 1340px;
+      margin: 0 auto;
+      padding: 28px 20px 56px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.85rem;
+      font-weight: 800;
+    }
+
+    h1 span { color: var(--accent); }
+
+    .subtitle {
+      margin: 0 0 24px;
+      color: var(--muted);
+      max-width: 860px;
+      line-height: 1.7;
+    }
+
+    .top-badges {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 24px;
+    }
+
+    .badge {
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(71, 85, 105, 0.7);
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+
+    .badge strong { color: var(--text); }
+
+    .phone-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+      gap: 26px;
+      align-items: start;
+    }
+
+    .device-block {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .device-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .device-title h2 {
+      margin: 0;
+      font-size: 1.05rem;
+    }
+
+    .label {
+      display: inline-block;
+      padding: 4px 9px;
+      border-radius: 999px;
+      background: rgba(34, 211, 238, 0.12);
+      color: var(--accent);
+      font-size: 0.74rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .device-note {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+
+    .phone {
+      width: 100%;
+      max-width: 340px;
+      margin: 0 auto;
+      border-radius: 36px;
+      padding: 14px;
+      background: linear-gradient(180deg, #0f172a 0%, #0b1220 100%);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+    }
+
+    .screen {
+      min-height: 760px;
+      border-radius: 28px;
+      overflow: hidden;
+      background: linear-gradient(180deg, #111827 0%, #0f172a 100%);
+      border: 1px solid rgba(71, 85, 105, 0.65);
+      position: relative;
+    }
+
+    .statusbar {
+      padding: 16px 18px 8px;
+      color: var(--muted);
+      font-size: 0.78rem;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .notch {
+      width: 112px;
+      height: 28px;
+      background: #020617;
+      margin: 0 auto;
+      border-radius: 0 0 20px 20px;
+    }
+
+    .screen-inner {
+      padding: 14px 16px 94px;
+    }
+
+    .top-card,
+    .summary-card,
+    .stack-card,
+    .mini-card,
+    .sheet,
+    .tabbar,
+    .chip-row,
+    .feed-row {
+      border: 1px solid rgba(71, 85, 105, 0.7);
+      background: rgba(15, 23, 42, 0.72);
+      border-radius: 20px;
+    }
+
+    .top-card,
+    .summary-card,
+    .stack-card,
+    .sheet {
+      padding: 14px;
+    }
+
+    .hero-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .hero-head h3,
+    .section-head h3 {
+      margin: 0;
+      font-size: 1rem;
+    }
+
+    .hero-head p,
+    .section-head p,
+    .stack-card p,
+    .sheet p,
+    .device-note,
+    .mini-card p {
+      color: var(--muted);
+    }
+
+    .hero-head p,
+    .section-head p {
+      margin: 4px 0 0;
+      font-size: 0.82rem;
+      line-height: 1.45;
+    }
+
+    .live {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(34, 197, 94, 0.12);
+      color: var(--green);
+      font-size: 0.74rem;
+      font-weight: 700;
+    }
+
+    .live::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .summary-card {
+      text-align: center;
+      min-height: 88px;
+    }
+
+    .summary-card .num {
+      font-size: 1.45rem;
+      font-weight: 800;
+      margin-bottom: 4px;
+    }
+
+    .summary-card .cap {
+      color: var(--muted);
+      font-size: 0.74rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .summary-card .sub {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 0.76rem;
+      line-height: 1.35;
+    }
+
+    .chip-row {
+      display: flex;
+      gap: 8px;
+      overflow: hidden;
+      padding: 10px;
+      margin-top: 10px;
+    }
+
+    .chip {
+      padding: 8px 10px;
+      border-radius: 999px;
+      background: rgba(51, 65, 85, 0.72);
+      color: var(--text);
+      font-size: 0.76rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .section-head {
+      margin: 14px 0 10px;
+    }
+
+    .stack-card + .stack-card,
+    .mini-card + .mini-card,
+    .feed-row + .feed-row {
+      margin-top: 10px;
+    }
+
+    .priority {
+      display: inline-block;
+      margin-bottom: 8px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+
+    .priority.high { background: rgba(250, 204, 21, 0.14); color: var(--yellow); }
+    .priority.good { background: rgba(34, 197, 94, 0.14); color: var(--green); }
+    .priority.info { background: rgba(34, 211, 238, 0.14); color: var(--accent); }
+
+    .stack-card h4,
+    .mini-card h4,
+    .sheet h4,
+    .feed-row h4 {
+      margin: 0 0 6px;
+      font-size: 0.94rem;
+    }
+
+    .stack-card p,
+    .mini-card p,
+    .sheet p,
+    .feed-row p {
+      margin: 0;
+      font-size: 0.82rem;
+      line-height: 1.5;
+    }
+    .meta-line {
+      margin: 0 0 6px;
+      color: var(--accent);
+      font-size: 0.74rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    .action {
+      padding: 8px 10px;
+      border-radius: 12px;
+      border: 1px dashed rgba(148, 163, 184, 0.32);
+      background: rgba(9, 14, 25, 0.5);
+      font-size: 0.76rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .mini-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .mini-card {
+      padding: 12px;
+      border: 1px dashed rgba(148, 163, 184, 0.3);
+      background: rgba(9, 14, 25, 0.5);
+      border-radius: 16px;
+    }
+
+    .feed-row {
+      padding: 12px;
+    }
+
+    .sheet {
+      margin-top: 18px;
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.92) 0%, rgba(30, 41, 59, 0.92) 100%);
+    }
+
+    .sheet-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .sheet-actions .action {
+      text-align: center;
+      border-style: solid;
+    }
+
+    .sheet-actions .action.primary {
+      background: rgba(34, 211, 238, 0.14);
+      border-color: rgba(34, 211, 238, 0.26);
+    }
+
+    .tabbar {
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: 12px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      padding: 10px;
+      background: rgba(9, 14, 25, 0.92);
+      backdrop-filter: blur(12px);
+    }
+
+    .tab {
+      text-align: center;
+      font-size: 0.74rem;
+      color: var(--muted);
+      padding: 8px 4px;
+      border-radius: 14px;
+      border: 1px solid transparent;
+    }
+
+    .tab.active {
+      color: var(--text);
+      border-color: rgba(34, 211, 238, 0.25);
+      background: rgba(34, 211, 238, 0.1);
+    }
+
+    .explain {
+      margin-top: 28px;
+      padding: 18px 20px;
+      border-radius: 18px;
+      background: rgba(139, 92, 246, 0.1);
+      border: 1px solid rgba(139, 92, 246, 0.24);
+      color: var(--muted);
+    }
+
+    .footer-links {
+      margin-top: 18px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .footer-links a {
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 700;
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      border-radius: 12px;
+      padding: 10px 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>CommandMate <span>Mobile Home Wireframe</span></h1>
+    <p class="subtitle">
+      コンセプト: <strong>Inbox / Reply Center</strong>。スマホでは一覧管理よりも、
+      「今すぐ返す」「完了を確認する」「必要なら repository を追加する」を親指で最短操作できるホームにする。
+    </p>
+
+    <div class="top-badges">
+      <div class="badge"><strong>主目的</strong> 即判断 / 即返信</div>
+      <div class="badge"><strong>優先順</strong> Waiting → Running → Completed</div>
+      <div class="badge"><strong>補助導線</strong> Repos で登録 / Sync</div>
+      <div class="badge"><strong>動画映え</strong> ポケットから出して一返答で再開</div>
+    </div>
+
+    <div class="phone-grid">
+      <section class="device-block">
+        <div class="device-title">
+          <h2>Screen A — Home / Inbox</h2>
+          <span class="label">Primary</span>
+        </div>
+        <p class="device-note">
+          最初の画面で「返信待ち」「進行中」「成果」を縦導線で並べる。探索より優先順位付けを重視。
+        </p>
+
+        <div class="phone">
+          <div class="screen">
+            <div class="statusbar">
+              <span>9:41</span>
+              <span>5G · 82%</span>
+            </div>
+            <div class="notch"></div>
+            <div class="screen-inner">
+              <div class="top-card">
+                <div class="hero-head">
+                  <div>
+                    <h3>CommandMate</h3>
+                    <p>Today, your agents kept moving.</p>
+                  </div>
+                  <span class="live">Live</span>
+                </div>
+
+                <div class="summary-grid">
+                  <div class="summary-card">
+                    <div class="num">1</div>
+                    <div class="cap">Waiting</div>
+                    <div class="sub">今すぐ返答</div>
+                  </div>
+                  <div class="summary-card">
+                    <div class="num">3</div>
+                    <div class="cap">Running</div>
+                    <div class="sub">離席中も進行</div>
+                  </div>
+                  <div class="summary-card">
+                    <div class="num">5</div>
+                    <div class="cap">Done</div>
+                    <div class="sub">本日の成果</div>
+                  </div>
+                </div>
+
+                <div class="chip-row">
+                  <span class="chip">Reply now</span>
+                  <span class="chip">See latest wins</span>
+                  <span class="chip">Add repository</span>
+                </div>
+              </div>
+
+              <div class="section-head">
+                <h3>Needs attention</h3>
+                <p>スマホの最優先領域。ここだけ見れば次の一手が決まる。</p>
+              </div>
+
+              <div class="stack-card">
+                <span class="priority high">Reply needed</span>
+                <p class="meta-line">Repo: MyCodeBranchDesk • Agent: Copilot</p>
+                <h4>feature/588-model-validation</h4>
+                <p>Copilot: "Use strict validation for model names?"</p>
+                <div class="actions">
+                  <span class="action">Yes</span>
+                  <span class="action">Review context</span>
+                </div>
+              </div>
+
+              <div class="stack-card">
+                <span class="priority good">Completed</span>
+                <p class="meta-line">Repo: commandmate-sandbox • Agent: Copilot</p>
+                <h4>fix/565-copilot-response</h4>
+                <p>All checks passed. Ready for quick review.</p>
+                <div class="actions">
+                  <span class="action">Open diff</span>
+                  <span class="action">Share result</span>
+                </div>
+              </div>
+
+              <div class="section-head">
+                <h3>Running now</h3>
+                <p>“PCを離れても進む” を実感させる帯。</p>
+              </div>
+
+              <div class="mini-row">
+                <div class="mini-card">
+                  <span class="priority info">Claude</span>
+                  <p class="meta-line">Repo: MyCodeBranchDesk</p>
+                  <h4>feature/592-nav-keys</h4>
+                  <p>Updating keyboard navigation…</p>
+                </div>
+                <div class="mini-card">
+                  <span class="priority info">Copilot</span>
+                  <p class="meta-line">Repo: commandmate-sandbox</p>
+                  <h4>feature/590-mobile-home</h4>
+                  <p>Refactoring sticky summary…</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="tabbar">
+              <div class="tab active">Home</div>
+              <div class="tab">Sessions</div>
+              <div class="tab">Repos</div>
+              <div class="tab">More</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="device-block">
+        <div class="device-title">
+          <h2>Screen B — Quick Reply Sheet</h2>
+          <span class="label">Critical flow</span>
+        </div>
+        <p class="device-note">
+          通知やホームのカードから即開く返答シート。モバイル価値の中心。
+        </p>
+
+        <div class="phone">
+          <div class="screen">
+            <div class="statusbar">
+              <span>9:42</span>
+              <span>5G · 82%</span>
+            </div>
+            <div class="notch"></div>
+            <div class="screen-inner">
+              <div class="top-card">
+                <div class="hero-head">
+                  <div>
+                    <h3>1 waiting for your reply</h3>
+                    <p>最短1タップで再開させるための画面</p>
+                  </div>
+                  <span class="live">Active</span>
+                </div>
+                <div class="summary-card" style="min-height: 78px;">
+                  <div class="num">12m</div>
+                  <div class="cap">Paused</div>
+                  <div class="sub">ここで止まっている時間</div>
+                </div>
+              </div>
+
+              <div class="sheet">
+                <span class="priority high">Reply sheet</span>
+                <p class="meta-line">Repo: MyCodeBranchDesk • Agent: Copilot</p>
+                <h4>feature/588-model-validation</h4>
+                <p>Copilot asks:</p>
+                <p style="margin-top: 6px;">
+                  "Use strict validation for model names to prevent unsupported formats?"
+                </p>
+                <div class="sheet-actions">
+                  <span class="action primary">Yes, use strict validation</span>
+                  <span class="action">Open full context</span>
+                  <span class="action">Edit instruction</span>
+                  <span class="action">Pause for later</span>
+                </div>
+              </div>
+
+              <div class="section-head">
+                <h3>Recent completed</h3>
+                <p>返答後に何を確認するかも同じ画面で見せる。</p>
+              </div>
+
+              <div class="feed-row">
+                <p class="meta-line">Repo: commandmate-sandbox • Agent: Copilot</p>
+                <h4>fix/565-copilot-response</h4>
+                <p>Finished 3 min ago. Tests passed and summary generated.</p>
+              </div>
+              <div class="feed-row">
+                <p class="meta-line">Repo: MyCodeBranchDesk • Agent: Claude</p>
+                <h4>feature/547-selection-list</h4>
+                <p>Prompt resolved. Ready to continue from desktop later.</p>
+              </div>
+            </div>
+
+            <div class="tabbar">
+              <div class="tab">Home</div>
+              <div class="tab active">Sessions</div>
+              <div class="tab">Repos</div>
+              <div class="tab">More</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="device-block">
+        <div class="device-title">
+          <h2>Screen C — Repositories / Add Source</h2>
+          <span class="label">Setup</span>
+        </div>
+        <p class="device-note">
+          repository 登録、clone、sync、excluded 復元をまとめる管理導線。Home に管理フォームを混在させない。
+        </p>
+
+        <div class="phone">
+          <div class="screen">
+            <div class="statusbar">
+              <span>9:44</span>
+              <span>5G · 81%</span>
+            </div>
+            <div class="notch"></div>
+            <div class="screen-inner">
+              <div class="top-card">
+                <div class="hero-head">
+                  <div>
+                    <h3>Repositories</h3>
+                    <p>登録と同期をここに集約。Home は判断に専念させる</p>
+                  </div>
+                  <span class="live">Ready</span>
+                </div>
+                <div class="chip-row">
+                  <span class="chip">Local Path</span>
+                  <span class="chip">Clone URL</span>
+                  <span class="chip">Sync All</span>
+                </div>
+              </div>
+
+              <div class="stack-card">
+                <span class="priority info">Add repository</span>
+                <h4>Choose source</h4>
+                <p>Select Local Path for an existing repo, or Clone URL for a remote repo.</p>
+                <div class="actions">
+                  <span class="action">Local Path</span>
+                  <span class="action">Clone URL</span>
+                </div>
+              </div>
+
+              <div class="stack-card">
+                <span class="priority info">Maintenance</span>
+                <h4>Sync & excluded</h4>
+                <p>Sync all repositories, then restore previously excluded items from the same screen.</p>
+                <div class="actions">
+                  <span class="action">Sync All</span>
+                  <span class="action">Excluded list</span>
+                </div>
+              </div>
+
+              <div class="section-head">
+                <h3>After registration</h3>
+                <p>登録後は Sessions へ遷移し、worktree を選んで detail から実行する。</p>
+              </div>
+
+              <div class="feed-row">
+                <h4>Go to Sessions</h4>
+                <p>Search / filter / favorite / status で対象 worktree を選ぶ。</p>
+              </div>
+            </div>
+
+            <div class="tabbar">
+              <div class="tab">Home</div>
+              <div class="tab">Sessions</div>
+              <div class="tab active">Repos</div>
+              <div class="tab">More</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="explain">
+      <strong>設計意図:</strong>
+      モバイルでは「長い worktree 一覧を探す」体験をやめ、待ち・進行・完了の順で積む。
+      これにより、通知 → 返答 → 再開 → 成果確認のループが1〜2分で完結する。
+      一方で repository 登録や sync は `Repos` に分離し、送信操作は選択済み worktree detail に限定する。
+    </div>
+
+    <div class="footer-links">
+      <a href="./index.html">一覧へ戻る</a>
+      <a href="./desktop-wireframe.html">PC版を見る</a>
+      <a href="./journey-map.html">シナリオ整理を見る</a>
+    </div>
+  </div>
+</body>
+</html>
