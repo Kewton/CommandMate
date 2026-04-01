@@ -1,0 +1,22 @@
+/**
+ * Review screen configuration constants
+ *
+ * Issue #600: UX refresh - Review screen stalled detection and polling
+ */
+
+/**
+ * Threshold in milliseconds for considering a worktree as "stalled".
+ * If no auto-yes server response has been received for this duration,
+ * the worktree is considered stalled.
+ *
+ * Default: 5 minutes (300,000 ms)
+ */
+export const STALLED_THRESHOLD_MS = 300_000;
+
+/**
+ * Polling interval in milliseconds for the Review screen.
+ * Used to periodically refresh worktree review statuses.
+ *
+ * Default: 7 seconds (7,000 ms)
+ */
+export const REVIEW_POLL_INTERVAL_MS = 7_000;
