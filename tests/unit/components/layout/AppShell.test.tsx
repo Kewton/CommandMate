@@ -205,9 +205,9 @@ describe('AppShell', () => {
       );
 
       // Sidebar should be a complementary landmark (aside) or navigation
-      const complementary = screen.queryByRole('complementary');
-      const navigation = screen.queryByRole('navigation');
-      expect(complementary || navigation).toBeTruthy();
+      const complementary = screen.queryAllByRole('complementary');
+      const navigation = screen.queryAllByRole('navigation');
+      expect(complementary.length > 0 || navigation.length > 0).toBeTruthy();
     });
   });
 

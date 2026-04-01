@@ -298,4 +298,71 @@ describe('Auth Middleware', () => {
       expect(res.status).toBe(200);
     });
   });
+
+  // ============================================================
+  // Issue #600: New URL auth protection tests
+  // ============================================================
+
+  describe('New URL auth protection (Issue #600)', () => {
+    it('should redirect /sessions to /login for unauthenticated requests', async () => {
+      const { hashToken } = await import('@/lib/security/auth');
+      const hash = hashToken('test-token');
+      process.env.CM_AUTH_TOKEN_HASH = hash;
+      vi.resetModules();
+      process.env.CM_AUTH_TOKEN_HASH = hash;
+
+      const { middleware } = await import('@/middleware');
+      const req = createMockRequest('/sessions');
+      const res = await middleware(req as never);
+      expect(res.status).toBe(302);
+    });
+
+    it('should redirect /repositories to /login for unauthenticated requests', async () => {
+      const { hashToken } = await import('@/lib/security/auth');
+      const hash = hashToken('test-token');
+      process.env.CM_AUTH_TOKEN_HASH = hash;
+      vi.resetModules();
+      process.env.CM_AUTH_TOKEN_HASH = hash;
+
+      const { middleware } = await import('@/middleware');
+      const req = createMockRequest('/repositories');
+      const res = await middleware(req as never);
+      expect(res.status).toBe(302);
+    });
+
+    it('should redirect /review to /login for unauthenticated requests', async () => {
+      const { hashToken } = await import('@/lib/security/auth');
+      const hash = hashToken('test-token');
+      process.env.CM_AUTH_TOKEN_HASH = hash;
+      vi.resetModules();
+      process.env.CM_AUTH_TOKEN_HASH = hash;
+
+      const { middleware } = await import('@/middleware');
+      const req = createMockRequest('/review');
+      const res = await middleware(req as never);
+      expect(res.status).toBe(302);
+    });
+
+    it('should redirect /more to /login for unauthenticated requests', async () => {
+      const { hashToken } = await import('@/lib/security/auth');
+      const hash = hashToken('test-token');
+      process.env.CM_AUTH_TOKEN_HASH = hash;
+      vi.resetModules();
+      process.env.CM_AUTH_TOKEN_HASH = hash;
+
+      const { middleware } = await import('@/middleware');
+      const req = createMockRequest('/more');
+      const res = await middleware(req as never);
+      expect(res.status).toBe(302);
+    });
+
+    it('should NOT have new URLs in AUTH_EXCLUDED_PATHS', async () => {
+      const { AUTH_EXCLUDED_PATHS } = await import('@/config/auth-config');
+      const excludedPaths = AUTH_EXCLUDED_PATHS as readonly string[];
+      expect(excludedPaths).not.toContain('/sessions');
+      expect(excludedPaths).not.toContain('/repositories');
+      expect(excludedPaths).not.toContain('/review');
+      expect(excludedPaths).not.toContain('/more');
+    });
+  });
 });

@@ -1,26 +1,44 @@
 /**
  * Header Component
  * Main application header with navigation
+ *
+ * Issue #600: UX refresh - PC 5-screen horizontal navigation
+ * Home | Sessions | Repos | Review | More
  */
 
 'use client';
 
 import React from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 
 export interface HeaderProps {
   title?: string;
 }
 
 /**
- * Application header with branding and navigation
+ * Navigation items for the PC header.
+ * Each entry maps a label to a href and a pathname match function.
+ */
+const NAV_ITEMS: Array<{ label: string; href: string; isActive: (pathname: string) => boolean }> = [
+  { label: 'Home', href: '/', isActive: (p) => p === '/' },
+  { label: 'Sessions', href: '/sessions', isActive: (p) => p.startsWith('/sessions') },
+  { label: 'Repos', href: '/repositories', isActive: (p) => p.startsWith('/repositories') },
+  { label: 'Review', href: '/review', isActive: (p) => p.startsWith('/review') },
+  { label: 'More', href: '/more', isActive: (p) => p.startsWith('/more') },
+];
+
+/**
+ * Application header with branding and 5-screen navigation.
  *
  * @example
  * ```tsx
- * <Header title="MyCodeBranchDesk" />
+ * <Header title="CommandMate" />
  * ```
  */
 export function Header({ title = 'CommandMate' }: HeaderProps) {
+  const pathname = usePathname();
+
   return (
     <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50">
       <div className="container-custom">
@@ -48,13 +66,23 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
           </div>
 
           {/* Navigation */}
-          <nav className="flex items-center space-x-6">
-            <Link
-              href="/"
-              className="text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
-            >
-              Worktrees
-            </Link>
+          <nav className="flex items-center space-x-6" role="navigation">
+            {NAV_ITEMS.map((item) => {
+              const active = item.isActive(pathname);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`text-sm font-medium transition-colors ${
+                    active
+                      ? 'text-cyan-600 dark:text-cyan-400'
+                      : 'text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100'
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
             <a
               href="https://github.com/kewton/MyCodeBranchDesk"
               target="_blank"
