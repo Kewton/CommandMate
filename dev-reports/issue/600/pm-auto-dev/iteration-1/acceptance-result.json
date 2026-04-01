@@ -1,0 +1,185 @@
+{
+  "status": "passed",
+  "issue_number": 600,
+  "test_date": "2026-04-01",
+  "overall_result": "passed",
+  "test_cases": [
+    {
+      "scenario": "Home screen shows Running/Waiting counts and shortcut cards to Sessions/Repos/Review/More",
+      "result": "passed",
+      "evidence": "src/app/page.tsx: HomeSessionSummary renders runningCount/waitingCount. SHORTCUT_CARDS array contains 4 Link entries to /sessions, /repositories, /review, /more with data-testid attributes."
+    },
+    {
+      "scenario": "Sessions page shows worktree list with filter and search",
+      "result": "passed",
+      "evidence": "src/app/sessions/page.tsx: Uses useWorktreesCache() for worktree list. Filter input (data-testid='sessions-filter') filters by name/repositoryName. Links to /worktrees/:id."
+    },
+    {
+      "scenario": "Repositories page renders RepositoryManager",
+      "result": "passed",
+      "evidence": "src/app/repositories/page.tsx: Wraps existing RepositoryManager component in AppShell layout."
+    },
+    {
+      "scenario": "Review page has Done/Approval/Stalled tab filters",
+      "result": "passed",
+      "evidence": "src/app/review/page.tsx: FILTER_TABS array with 'done', 'approval', 'stalled' values. Filters use server-computed reviewStatus (from ?include=review) with fallback to client-side heuristics."
+    },
+    {
+      "scenario": "More page shows ExternalApps and Repositories link",
+      "result": "passed",
+      "evidence": "src/app/more/page.tsx: Renders ExternalAppsManager and Link to /repositories."
+    },
+    {
+      "scenario": "PC Header shows 5-screen navigation",
+      "result": "passed",
+      "evidence": "src/components/layout/Header.tsx: NAV_ITEMS array with Home, Sessions, Repos, Review, More links with active state detection."
+    },
+    {
+      "scenario": "Mobile GlobalMobileNav with 4 tabs",
+      "result": "passed",
+      "evidence": "src/components/mobile/GlobalMobileNav.tsx: MOBILE_NAV_TABS has 4 entries (Home, Sessions, Review, More). Repositories accessible via More page."
+    },
+    {
+      "scenario": "Worktree Detail hides global nav",
+      "result": "passed",
+      "evidence": "src/hooks/useLayoutConfig.ts: LAYOUT_MAP entry for '/worktrees/' sets showGlobalNav=false, showLocalNav=true. AppShell conditionally renders Header/GlobalMobileNav based on showGlobalNav flag. Tests in tests/unit/useLayoutConfig.test.ts verify this."
+    },
+    {
+      "scenario": "Deep link ?pane= value restores correct tab",
+      "result": "passed",
+      "evidence": "src/hooks/useWorktreeTabState.ts: Reads searchParams.get('pane'), validates via normalizeDeepLinkPane(). Maps to LeftPaneTab/MobileActivePane/HistorySubTab. tests/unit/hooks/deep-link-mapping.test.ts verifies all 9 pane values map correctly."
+    },
+    {
+      "scenario": "Invalid pane values fall back to 'terminal'",
+      "result": "passed",
+      "evidence": "src/lib/deep-link-validator.ts: normalizeDeepLinkPane() returns 'terminal' for null/undefined/invalid/XSS strings. tests/unit/deep-link-validator.test.ts covers invalid values, XSS attempts, whitespace."
+    },
+    {
+      "scenario": "?include=review returns reviewStatus/isStalled/nextAction",
+      "result": "passed",
+      "evidence": "src/app/api/worktrees/route.ts: When includeReview is true, computes sessionStatus, stalled state, nextAction, reviewStatus and appends to response. Fields are optional in Worktree type."
+    },
+    {
+      "scenario": "New URLs (4) are protected by auth middleware",
+      "result": "passed",
+      "evidence": "src/config/auth-config.ts: AUTH_EXCLUDED_PATHS does NOT include /sessions, /repositories, /review, /more. tests/integration/auth-middleware.test.ts has 4 test cases verifying redirect to /login for unauthenticated requests to each new URL."
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "id": "AC-001",
+      "criterion": "Home / Sessions / Repositories / Review / More / Worktree Detail の責務が明確であり、各画面の入出力がドキュメント化されている",
+      "verified": true,
+      "evidence": "6 page files exist (src/app/page.tsx, sessions/page.tsx, repositories/page.tsx, review/page.tsx, more/page.tsx, worktrees/[id]/page.tsx). Each has JSDoc comments describing responsibilities. docs/architecture.md Section 11 documents all URLs, pane values, and navigation structure."
+    },
+    {
+      "id": "AC-002",
+      "criterion": "Home画面から各専門画面への導線が1クリックで到達可能",
+      "verified": true,
+      "evidence": "src/app/page.tsx: SHORTCUT_CARDS array provides direct Link components to /sessions, /repositories, /review, /more. Each renders as a clickable card with data-testid."
+    },
+    {
+      "id": "AC-003",
+      "criterion": "/worktrees/:id が引き続き利用でき、既存主要機能が維持される",
+      "verified": true,
+      "evidence": "src/app/worktrees/[id]/page.tsx exists unchanged. WorktreeDetailRefactored.tsx continues to function. All 5900 existing unit tests pass."
+    },
+    {
+      "id": "AC-004",
+      "criterion": "PC / モバイルで整合した遷移が定義・実装される",
+      "verified": true,
+      "evidence": "PC: Header.tsx with 5 nav items. Mobile: GlobalMobileNav.tsx with 4 tabs (Repos via More). useLayoutConfig.ts drives conditional rendering. AppShell.tsx renders Header on desktop, GlobalMobileNav on mobile. Worktree Detail hides global nav on both. Tests in AppShell-layout.test.tsx and useLayoutConfig.test.ts verify behavior."
+    },
+    {
+      "id": "AC-005",
+      "criterion": "URL設計と画面遷移が docs/architecture.md に追記されている",
+      "verified": true,
+      "evidence": "docs/architecture.md Section 11 (lines 608-683) contains: 11.1 URL一覧 (7 URLs), 11.2 DeepLinkPane値 (9 pane values), 11.3 画面遷移図, 11.4 ナビゲーション構造, 11.5 データフロー."
+    },
+    {
+      "id": "AC-006",
+      "criterion": "Review画面で Done / Approval / Stalled のフィルタリングが正常に動作する",
+      "verified": true,
+      "evidence": "src/app/review/page.tsx: FILTER_TABS with done/approval/stalled. filteredWorktrees uses server-computed reviewStatus with client-side fallback. API route adds reviewStatus via getReviewStatus() when ?include=review."
+    },
+    {
+      "id": "AC-007",
+      "criterion": "次アクションがすべてのSessionStatusパターンで正しく表示される",
+      "verified": true,
+      "evidence": "src/lib/session/next-action-helper.ts: getNextAction() covers null, idle, ready, waiting (approval vs other), running (stalled vs not). Exhaustive switch with 'never' check. tests/unit/next-action-helper.test.ts covers all patterns including edge cases (13 test cases)."
+    },
+    {
+      "id": "AC-008",
+      "criterion": "deep link（/worktrees/:id?pane=xxx）でタブが正しく復元される",
+      "verified": true,
+      "evidence": "src/hooks/useWorktreeTabState.ts reads searchParams, validates via normalizeDeepLinkPane(), maps to LeftPaneTab/MobileActivePane. tests/unit/hooks/deep-link-mapping.test.ts covers all 9 pane values. tests/unit/deep-link-validator.test.ts covers validation including XSS prevention."
+    },
+    {
+      "id": "AC-009",
+      "criterion": "新規URLが認証ミドルウェアで保護されていることがテストで検証されている",
+      "verified": true,
+      "evidence": "tests/integration/auth-middleware.test.ts lines 307-365: 4 test cases verify /sessions, /repositories, /review, /more redirect to /login when unauthenticated. Also verifies these paths are NOT in AUTH_EXCLUDED_PATHS."
+    },
+    {
+      "id": "AC-010",
+      "criterion": "既存のユニットテストが通過する",
+      "verified": true,
+      "evidence": "npm run test:unit: 310 test files passed, 5900 tests passed, 0 failed, 7 skipped."
+    },
+    {
+      "id": "AC-011",
+      "criterion": "worktrees APIレスポンスへの追加フィールドがオプショナルであり後方互換性維持",
+      "verified": true,
+      "evidence": "src/types/models.ts: reviewStatus?, isStalled?, nextAction? are all optional fields. API only adds them when ?include=review is specified. Without the query param, response is unchanged."
+    },
+    {
+      "id": "AC-012",
+      "criterion": "DBスキーマ変更なし",
+      "verified": true,
+      "evidence": "git diff main --name-only -- src/lib/db/ returns empty. No migration files added. Review fields are computed at runtime from existing session state, not stored in DB."
+    }
+  ],
+  "test_execution": {
+    "unit_tests": {
+      "total": 5907,
+      "passed": 5900,
+      "failed": 0,
+      "skipped": 7,
+      "test_files": 310
+    },
+    "tsc_errors": 0,
+    "lint_errors": 0
+  },
+  "evidence_files": [
+    "src/app/page.tsx",
+    "src/app/sessions/page.tsx",
+    "src/app/repositories/page.tsx",
+    "src/app/review/page.tsx",
+    "src/app/more/page.tsx",
+    "src/components/layout/Header.tsx",
+    "src/components/layout/AppShell.tsx",
+    "src/components/mobile/GlobalMobileNav.tsx",
+    "src/components/home/HomeSessionSummary.tsx",
+    "src/hooks/useLayoutConfig.ts",
+    "src/hooks/useWorktreeTabState.ts",
+    "src/lib/deep-link-validator.ts",
+    "src/lib/session/next-action-helper.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/types/models.ts",
+    "src/middleware.ts",
+    "src/config/auth-config.ts",
+    "docs/architecture.md",
+    "tests/unit/deep-link-validator.test.ts",
+    "tests/unit/next-action-helper.test.ts",
+    "tests/unit/hooks/deep-link-mapping.test.ts",
+    "tests/unit/useLayoutConfig.test.ts",
+    "tests/unit/AppShell-layout.test.tsx",
+    "tests/integration/auth-middleware.test.ts"
+  ],
+  "notes": [
+    "Minor documentation inconsistency: docs/architecture.md Section 11.4 says mobile has '5 tabs' but GlobalMobileNav.tsx implements 4 tabs (Repositories accessed via More page). The code and code comments are consistent; only the architecture doc line is slightly inaccurate. This does not affect functionality.",
+    "Review page uses polling with REVIEW_POLL_INTERVAL_MS for auto-refresh.",
+    "Deep link validation includes XSS prevention via whitelist approach."
+  ],
+  "message": "All 12 acceptance criteria are verified. The implementation correctly introduces 6 screens with clear responsibility separation, 1-click navigation from Home, PC/mobile navigation consistency, deep link support with security validation, review filtering, next-action display for all SessionStatus patterns, auth protection for new URLs, full backward compatibility (optional API fields, no DB changes), and all existing tests pass."
+}

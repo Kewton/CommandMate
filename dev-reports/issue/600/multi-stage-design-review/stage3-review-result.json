@@ -1,0 +1,91 @@
+{
+  "stage": 3,
+  "focus": "影響範囲",
+  "reviewer": "opus (fallback from codex)",
+  "findings": [
+    {
+      "id": "DR3-001",
+      "severity": "Must Fix",
+      "category": "波及効果",
+      "title": "MessageInput送信ロジック抽出がuseImageAttachment・WorktreeDetailRefactoredの状態管理に波及する",
+      "description": "設計方針書ではMessageInputの送信ロジックをuseSendMessage()フックに抽出する方針だが、現在のMessageInputの送信処理はWorktreeDetailRefactored内のonSendMessage/handleSendMessage経由で実行されており、送信前にuseImageAttachment(resetAfterSend)の状態リセット、chat-db経由のメッセージ永続化、terminal APIへのキー送信(session-key-sender)、pasted-text-helperによるEnter再送など複数の副作用と連携している。useSendMessage()フックがこれらの副作用をすべて包含するのか、送信API呼び出しのみに限定するのかが設計方針書で明確でない。SimpleMessageInputはテキスト送信のみなので問題ないが、既存MessageInputにuseSendMessage()を適用する際、これら副作用の移行範囲が不明確だと、画像添付送信やpasted-text対応の退行バグが発生するリスクがある。",
+      "suggestion": "useSendMessage()フックの責務範囲を設計方針書で明確化する。推奨: useSendMessage()はAPI呼び出し(terminal API送信 + chat-db永続化)のみを責務とし、画像添付リセット・pasted-text処理はMessageInput側のonSuccess/onErrorコールバックで処理する設計とする。SimpleMessageInputはonSuccessでテキストクリアのみ行う。"
+    },
+    {
+      "id": "DR3-002",
+      "severity": "Should Fix",
+      "category": "テスト範囲",
+      "title": "WorktreeDetailRefactored分割に伴う既存テスト38ファイルへの波及が過小評価されている",
+      "description": "テスト戦略(セクション12)では「既存テスト修正(23ファイル以上)」とあるが、実際にWorktreeDetailRefactored・MessageInput・AppShell・worktree-status-helper・sidebar-utilsに依存するテストファイルは38ファイル存在する(unit 15ファイル + integration 23ファイル)。特にWorktreeDetailRefactoredのリファクタリング(Header/Desktop/Mobile分離)はimportパスの変更だけでなく、テスト内のコンポーネントレンダリング・propsモック・DOM要素セレクタの大幅修正が必要。WorktreeDetailRefactored-mobile-overflow.test.tsx、WorktreeDetailRefactored-cli-tab-switching.test.tsx、WorktreeDetailRefactored.test.tsx、worktree-detail-integration.test.tsxの4つは分割後のコンポーネント構造に合わせた根本的な書き換えが必要。",
+      "suggestion": "テスト戦略セクションの「23ファイル以上」を「38ファイル以上」に修正する。WorktreeDetailRefactored分割に伴うテスト修正をPhase 2の独立タスクとして明記し、特に上記4ファイルの書き換え工数を見積もりに含める。"
+    },
+    {
+      "id": "DR3-003",
+      "severity": "Should Fix",
+      "category": "波及効果",
+      "title": "page.tsxの全面書き換えがRepositoryManager・WorktreeList・ExternalAppsManagerの利用箇所を移動するが、移行導線設計がない",
+      "description": "Phase 1でHome画面(src/app/page.tsx)を全面書き換えし、RepositoryManagerを/repositories、WorktreeListを/sessions、ExternalAppsManagerを/moreに移動する。外部ブックマーク・ブラウザ履歴・CLI docsコマンドなどから直接/(ルート)にアクセスした場合、従来のRepositoryManager等が表示されなくなる。設計方針書セクション6-1に「各専門画面への1クリック導線」があるが、初回アクセス時のユーザー混乱を軽減する具体策がない。また、tests/integration/issue-288-acceptance.test.tsxなどのテストがHome画面のコンポーネント構成を前提としている可能性がある。",
+      "suggestion": "Phase 1のHome画面に、(1)RepositoryManager・WorktreeList・ExternalAppsManagerの移動先を明示するショートカットカードを目立つ配置で設ける、(2)初回表示時にUIの変更を案内するバナーを検討する。また、issue-288-acceptance等のテストファイルを影響テスト一覧に追加する。"
+    },
+    {
+      "id": "DR3-004",
+      "severity": "Should Fix",
+      "category": "Phase依存",
+      "title": "Phase 2のuseWorktreesCache()導入がPhase 1で作成済みの画面に後方修正を要求する",
+      "description": "Phase 1でHome画面・Sessions画面・Review画面・Sidebar改修が行われ、各画面が独自にworktrees APIをfetchする実装になる。Phase 2でuseWorktreesCache()を導入し共有キャッシュに統合する際、Phase 1で作成した全画面のデータ取得ロジックを書き換える必要がある。これはPhase間の手戻りであり、Phase 1の実装が一時的にDR1-009(ポーリング競合)の問題を抱えた状態でリリースされることを意味する。",
+      "suggestion": "useWorktreesCache()をPhase 1に前倒しするか、Phase 1のフェッチロジックをuseWorktreesCache()のインターフェースに合わせた薄いラッパー(実装は直接fetch)を使い、Phase 2でラッパーの中身をキャッシュ実装に差し替える戦略を採用する。Phase依存関係マトリクスにも反映する。"
+    },
+    {
+      "id": "DR3-005",
+      "severity": "Should Fix",
+      "category": "波及効果",
+      "title": "useLayoutConfig()導入時のデフォルト値が既存2画面の挙動を変更するリスク",
+      "description": "現在AppShellはsrc/app/page.tsxとsrc/app/worktrees/[id]/page.tsxの2箇所で使用されている。useLayoutConfig()のLAYOUT_MAPデフォルト値の設定次第で既存画面の挙動が変わる可能性がある。特にworktrees/[id]ではshowGlobalNav: false, showLocalNav: trueの設定が必要だが、現在のAppShellにはGlobalMobileNav表示/非表示の概念自体がなく、この新概念の導入とworktrees/[id]の既存MobileTabBarとの整合性を確認する必要がある。",
+      "suggestion": "useLayoutConfig()のデフォルト値を現在のAppShellの挙動と完全一致させるユニットテストをPhase 1のテスト戦略に追加する。'/'と'/worktrees/:id'でのレイアウトフラグが導入前後で変化しないことを検証するテストケースを作成する。"
+    },
+    {
+      "id": "DR3-006",
+      "severity": "Nice to Have",
+      "category": "パフォーマンス",
+      "title": "?include=review時のStalled判定パフォーマンス記述がAPIルート全体のO(N)と混同されうる",
+      "description": "設計方針書では「worktree数が多い環境でもO(1)のタイムスタンプ比較のみ」と記載しているが、APIルートハンドラがPromise.all(worktrees.map(...))で全worktreeに対してstalled-detector.tsを呼び出すため、API全体としてはO(N)。worktree < 50では問題ないが、設計方針書の「O(1)」記述は個々の判定を指しており、API全体のパフォーマンス特性と混同されるリスクがある。",
+      "suggestion": "設計方針書セクション9のパフォーマンス記述を「各worktreeのStalled判定はO(1)のタイムスタンプ比較。API全体ではworktree数に比例(O(N))するが、既存のdetectWorktreeSessionStatus()と同等のオーダーであり、worktree < 50の前提で十分なパフォーマンス」と明確化する。"
+    },
+    {
+      "id": "DR3-007",
+      "severity": "Nice to Have",
+      "category": "後方互換性",
+      "title": "新規4画面URL追加のmiddleware保護をテスト戦略で具体化すべき",
+      "description": "テスト戦略で「認証ミドルウェア: 新規URL4件の保護検証」がPhase 1にあり適切だが、auth-middleware.test.tsの既存テスト構造にこれら4パスを追加するだけでは、AUTH_EXCLUDED_PATHSへの誤追加を検出できない。middlewareのmatcherは正規表現ベースのnegative lookaheadで動作しており、新規パスはすべてマッチするが、これを静的に保証するテストが欠けている。",
+      "suggestion": "テスト戦略に、(1)AUTH_EXCLUDED_PATHSに新規パスが含まれていないことの静的検証、(2)middleware.config.matcherパターンが新規パスにマッチすることの正規表現テスト、の2点を追加する。"
+    },
+    {
+      "id": "DR3-008",
+      "severity": "Nice to Have",
+      "category": "後方互換性",
+      "title": "CLI側コマンドのAPI後方互換性テストが具体化されていない",
+      "description": "設計方針書で「CLI側のWorktreeListResponse型への影響なし」と記載されているが、CLIの各コマンド(ls, send, wait, respond, capture)がworktrees APIの既存レスポンスフィールドのみを参照していることのテストが具体化されていない。src/cli/types/api-responses.tsとsrc/cli/commands/ls.tsが主な検証対象。",
+      "suggestion": "Phase 3のテスト戦略「後方互換性: 既存CLIレスポンス互換」に、(1)?include=reviewなしの場合にreviewStatus/isStalled/nextActionフィールドが含まれないことのアサーション、(2)CLI側api-client.tsがunknownフィールドを含むレスポンスを正常にパースできることのユニットテスト、の2点を具体的に明記する。"
+    },
+    {
+      "id": "DR3-009",
+      "severity": "Must Fix",
+      "category": "波及効果",
+      "title": "useWorktreeList()共通フック抽出がSidebarContextのソート状態管理とlocalStorageパターンに波及する",
+      "description": "設計方針書(DR1-005対応)でSessions画面とSidebarのフィルタ・ソート・グループ化ロジックをuseWorktreeList()に共通化する方針だが、現在のSidebarのソート状態はSidebarContext.tsx(localStorageパターン)で管理されており、sortKey/sortDirection/viewModeがContext経由でSortSelectorとSidebarに共有されている。useWorktreeList()がソートロジックを含む場合、(1)Sessions画面のソート状態をどこで管理するか、(2)SidebarContextのsortKey/viewMode状態とuseWorktreeList()のソート引数の関係、(3)Sessions画面とSidebarで異なるソート設定を同時に保持できるか、が未定義。SidebarContextを共有するとSidebar側のソート変更がSessions画面に波及し、ユーザー体験上問題になる。",
+      "suggestion": "useWorktreeList()はソート・フィルタの「実行ロジック」のみを提供し、ソート状態の「保持」は呼び出し側に委ねる設計を明記する。useWorktreeList({ worktrees, sortKey, sortDirection, viewMode, searchQuery })のように外部から状態を注入するインターフェースとし、SidebarはSidebarContext経由で、Sessions画面は独自のuseState+localStorageで状態を管理する。"
+    },
+    {
+      "id": "DR3-010",
+      "severity": "Should Fix",
+      "category": "パフォーマンス",
+      "title": "Review画面の7秒ポーリングとuseWorktreesCache()の通常ポーリングが2系統並行するリスク",
+      "description": "Review画面は?include=review付きで7秒ポーリングし、共有キャッシュ(useWorktreesCache())は通常のworktrees APIをポーリングする。設計方針書では「ベースとなるworktreeデータは共有キャッシュから取得する」とあるが、Review画面在中時に共有キャッシュと?include=reviewの2系統が同一エンドポイントの異なるバリエーションを並行ポーリングする。worktree数が少なければ問題は軽微だが、不要なAPI呼び出しが発生し、ステータス更新タイミングにもズレが生じる。",
+      "suggestion": "useWorktreesCache()に拡張フェッチモードを設け、Review画面在中時は共有キャッシュのフェッチが?include=reviewを付与し、baseデータとreviewデータの両方を更新する設計とする。Review画面を離れた場合は通常モードに戻る。これにより2系統が1系統に統合される。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 5,
+  "nice_to_have_count": 3,
+  "summary": "影響範囲分析の結果、設計方針書は既存コードベースの構造を適切に理解した上で設計されているが、実装時に想定外の波及が生じる箇所が複数確認された。Must Fixとして、(1) useSendMessage()フックの責務範囲が不明確であり、MessageInputの複雑な副作用チェーン(画像添付リセット、pasted-text処理、session-key-sender等)との統合方法が未定義(DR3-001)、(2) useWorktreeList()共通化がSidebarContextのソート状態管理(localStorage永続化パターン)と衝突し、Sessions画面とSidebarで独立したソート状態を保持する設計が欠如(DR3-009)。Phase依存関係では、useWorktreesCache()がPhase 2配置のためPhase 1で作成した全画面が一時的にポーリング競合状態になる手戻りリスクがある(DR3-004)。テスト影響範囲は設計方針書の「23ファイル以上」より実際には38ファイル以上に及ぶ(DR3-002)。パフォーマンスについてはStalled判定のO(1)記述がAPI全体のO(N)と混同されるリスクがあるが、worktree < 50前提では実用上問題ない(DR3-006)。後方互換性はmiddleware matcher・AUTH_EXCLUDED_PATHS・CLI APIレスポンスの3点で適切に考慮されているが、テスト戦略の具体化を推奨する(DR3-007, DR3-008)。"
+}

@@ -1,0 +1,39 @@
+{
+  "issue_number": 600,
+  "test_date": "2026-04-01",
+  "environment": {
+    "port": 3010,
+    "branch": "feature/600-worktree",
+    "node_version": "v22"
+  },
+  "results": [
+    {"id": "TC-001", "title": "Home画面の表示", "status": "pass", "evidence": "HTTP 200, Sessions/Review等のリンク2件検出"},
+    {"id": "TC-002", "title": "Sessions画面の表示", "status": "pass", "evidence": "HTTP 200"},
+    {"id": "TC-003", "title": "Repositories画面の表示", "status": "pass", "evidence": "HTTP 200"},
+    {"id": "TC-004", "title": "Review画面の表示", "status": "pass", "evidence": "HTTP 200"},
+    {"id": "TC-005", "title": "More画面の表示", "status": "pass", "evidence": "HTTP 200"},
+    {"id": "TC-006", "title": "Worktree Detail既存機能維持", "status": "pass", "evidence": "HTTP 200"},
+    {"id": "TC-007", "title": "worktrees API基本応答", "status": "pass", "evidence": "worktrees:16, repositories:9 返却"},
+    {"id": "TC-008", "title": "worktrees API ?include=review", "status": "pass", "evidence": "reviewStatus:true, isStalled:true, nextAction:true"},
+    {"id": "TC-009", "title": "worktrees API ?include=invalid", "status": "pass", "evidence": "reviewStatus present: False（不正値サイレント無視）"},
+    {"id": "TC-010", "title": "認証保護 /sessions", "status": "pass", "evidence": "HTTP 200（認証無効環境）、ユニットテストで認証動作検証済"},
+    {"id": "TC-011", "title": "認証保護 /repositories", "status": "pass", "evidence": "HTTP 200（認証無効環境）、ユニットテストで認証動作検証済"},
+    {"id": "TC-012", "title": "認証保護 /review", "status": "pass", "evidence": "HTTP 200（認証無効環境）、ユニットテストで認証動作検証済"},
+    {"id": "TC-013", "title": "認証保護 /more", "status": "pass", "evidence": "HTTP 200（認証無効環境）、ユニットテストで認証動作検証済"},
+    {"id": "TC-014", "title": "deep link pane=terminal", "status": "pass", "evidence": "HTTP 200"},
+    {"id": "TC-015", "title": "deep link pane=history", "status": "pass", "evidence": "HTTP 200"},
+    {"id": "TC-016", "title": "deep link pane=invalid フォールバック", "status": "pass", "evidence": "HTTP 200（エラーなし）"},
+    {"id": "TC-017", "title": "ユニットテスト全パス", "status": "pass", "evidence": "310 files, 5900 passed, 0 failed, 7 skipped"},
+    {"id": "TC-018", "title": "TypeScript型チェック", "status": "pass", "evidence": "0 errors"},
+    {"id": "TC-019", "title": "ESLint", "status": "pass", "evidence": "No warnings or errors"},
+    {"id": "TC-020", "title": "docs/architecture.md URL設計", "status": "pass", "evidence": "5 hits for URL設計/DeepLinkPane/ナビゲーション"},
+    {"id": "TC-021", "title": "DBスキーマ変更なし", "status": "pass", "evidence": "No migration files added"},
+    {"id": "TC-022", "title": "ビルド成功", "status": "pass", "evidence": "build-and-start.sh 成功、サーバーPID:67021"}
+  ],
+  "summary": {
+    "total": 22,
+    "passed": 22,
+    "failed": 0,
+    "pass_rate": "100%"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "issue_number": "600",
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "previous_reviews": [
+    "dev-reports/issue/600/issue-review/stage1-review-result.json",
+    "dev-reports/issue/600/issue-review/stage3-review-result.json",
+    "dev-reports/issue/600/issue-review/stage5-review-result.json"
+  ],
+  "note": "Codex session did not produce output files; fallback to Claude agent"
+}

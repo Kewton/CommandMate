@@ -1,0 +1,109 @@
+{
+  "stage": 7,
+  "focus": "影響範囲（2回目）",
+  "reviewer": "opus (fallback from codex)",
+  "review_date": "2026-04-01",
+  "findings": [
+    {
+      "id": "S7-001",
+      "severity": "Should Fix",
+      "category": "影響範囲の正確性",
+      "title": "Stalled判定の参照先がIssue本文内で不統一: response-poller.ts vs auto-yes-poller.ts",
+      "description": "Issue本文の「実装上の注意事項 > パフォーマンス」節には「response-poller.ts の最終出力タイムスタンプを活用」と記載されている。一方、Phase 2タスクにも「Stalled判定を response-poller.ts の最終出力タイムスタンプベースで実装する」とある。しかし実際のコードを確認すると、getLastServerResponseTimestamp() は src/lib/auto-yes-poller.ts で定義され、src/lib/polling/auto-yes-manager.ts 経由でエクスポートされている。worktree-status-helper.ts も既に auto-yes-manager.ts から import している。Issue本文の「response-poller.ts」参照は実装者を誤った場所に誘導する。",
+      "affected_files": [
+        "src/lib/auto-yes-poller.ts",
+        "src/lib/polling/auto-yes-manager.ts",
+        "src/lib/session/worktree-status-helper.ts"
+      ],
+      "suggestion": "Issue本文のパフォーマンス節とPhase 2タスクの「response-poller.ts」を「auto-yes-poller.ts（auto-yes-manager.ts経由）」に修正する。Stalled判定セクションの記載は既に正しいので、他の箇所も統一する。"
+    },
+    {
+      "id": "S7-002",
+      "severity": "Should Fix",
+      "category": "影響ファイル漏れ",
+      "title": "deep link実装に伴うUI状態型・reducer・hookの更新が主要変更ファイルに記載されていない",
+      "description": "deep link戦略セクションではpane値として terminal|history|files|notes|logs|agent|timer|git|info の9種を定義し、MobileTabBarとの対応表も追加されている。しかし、既存実装では MobileActivePane（ui-state.ts）が 'history' | 'terminal' | 'files' | 'memo' | 'info' の5値、LeftPaneTab（LeftPaneTabSwitcher.tsx, ui-state.ts）が 'history' | 'files' | 'memo' の3値、WorktreeUIAction（ui-actions.ts）がこれらを参照、useWorktreeUIState.ts がreducerロジックを持つ。pane値9種をこれらの型に統合または対応マッピングするには、少なくとも src/types/ui-state.ts、src/types/ui-actions.ts、src/hooks/useWorktreeUIState.ts、src/components/worktree/LeftPaneTabSwitcher.tsx の4ファイルの更新が必要だが、Issue本文の「主要変更ファイル」に含まれていない。",
+      "affected_files": [
+        "src/types/ui-state.ts",
+        "src/types/ui-actions.ts",
+        "src/hooks/useWorktreeUIState.ts",
+        "src/components/worktree/LeftPaneTabSwitcher.tsx"
+      ],
+      "suggestion": "「新規ファイル・変更ファイルの見込み > 主要変更ファイル」に上記4ファイルを追加する。また、Phase 2タスクの「detail内タブのdeep link」タスクにこれらファイルの型変更を含むことを注記する。"
+    },
+    {
+      "id": "S7-003",
+      "severity": "Should Fix",
+      "category": "テスト戦略の不足",
+      "title": "getNextAction()ヘルパーの入力条件にSessionStatusの全パターン網羅テストが受け入れ条件に含まれているが、テスト戦略にisStalled引数の取得方法が未定義",
+      "description": "受け入れ条件に「次アクションがすべてのSessionStatusパターンで正しく表示される」とあり、getNextAction(status, promptType, isStalled)のシグネチャも定義されている。しかし、isStalled引数の算出にはSTALLED_THRESHOLD_MSとgetLastServerResponseTimestamp()が必要で、これはサーバーサイドでのみ算出可能。クライアントサイドで次アクションを表示するには、APIレスポンスにisStalledフィールドが含まれている必要がある。Phase 2タスクに「Review画面用API拡張（GET /api/worktrees?include=review）」があるが、isStalledフィールドはinclude=review時のみ返す設計。すると、Home画面やSessions画面で次アクションを表示する場合、これらの画面もinclude=reviewパラメータを付与するか、別の方法でStalled情報を取得する必要がある。この整合性がIssue本文で明示されていない。",
+      "affected_files": [
+        "src/lib/session/next-action-helper.ts",
+        "src/app/api/worktrees/route.ts",
+        "src/app/page.tsx",
+        "src/app/sessions/page.tsx"
+      ],
+      "suggestion": "次アクション表示がHome/Sessions画面でも必要な場合、isStalledフィールドをinclude=review有無にかかわらず常に返すか、またはHome/Sessions画面でもinclude=reviewを使う方針を明記する。あるいは、Home/Sessions画面ではStalled判定なしの簡易版次アクション（isStalled=false固定）を使う方針も選択肢として記載する。"
+    },
+    {
+      "id": "S7-004",
+      "severity": "Nice to Have",
+      "category": "Phase分割の妥当性",
+      "title": "Phase 1タスクにReview画面新設が含まれているが、Review画面はStalled判定APIに依存しておりPhase 2のAPI拡張が前提",
+      "description": "Phase 1の「Review画面を新設し、Done / Approval / Stalled をリアルタイム算出して一元処理できるようにする」はPhase 2の「Review画面用API拡張（GET /api/worktrees?include=review）」と「Stalled判定をauto-yes-pollerの最終出力タイムスタンプベースで実装する」に依存する。Phase 1でReview画面の枠組みを作りつつDone/Approvalのみ表示し、Phase 2でStalled追加、という段階的アプローチが暗黙的だが、タスク記述が「Done / Approval / Stalledをリアルタイム算出」となっており、Phase間の依存関係が不明確。",
+      "affected_files": [],
+      "suggestion": "Phase 1のReview画面タスクを「Review画面の枠組みを新設し、Doneフィルタを先行実装する（Approval/StalledはPhase 2のAPI拡張後に追加）」のように段階を明示するか、Phase間依存を注記する。"
+    },
+    {
+      "id": "S7-005",
+      "severity": "Nice to Have",
+      "category": "影響範囲の網羅性",
+      "title": "WorktreeCard.tsxが影響ファイルに含まれていない",
+      "description": "現在のWorktreeCard.tsxは各worktreeの表示にstatus(todo/doing/done)、isSessionRunning、isWaitingForResponseを使用している。Sessions画面でWorktreeListを再利用する際、次アクション表示やReviewステータス表示をカードに追加する場合、WorktreeCard.tsxのpropsとレンダリングにも変更が生じる可能性がある。また、視認性ルールで要求されている「Repository名 / Branch名 / Agent / Status / 次アクション」の全表示は現在のWorktreeCardには含まれていない項目（次アクション）がある。",
+      "affected_files": [
+        "src/components/worktree/WorktreeCard.tsx"
+      ],
+      "suggestion": "主要変更ファイルにWorktreeCard.tsxを追加検討する。視認性ルールの全項目を満たすにはカードUI変更が必要になる可能性が高い。"
+    },
+    {
+      "id": "S7-006",
+      "severity": "Nice to Have",
+      "category": "テスト戦略",
+      "title": "simplified variant対応のMessageInput既存テストへの影響が未記載",
+      "description": "MessageInputにvariant='simplified'を追加する計画だが、既存のMessageInputテストファイルへの影響がテスト戦略セクションに含まれていない。simplified variantでは下書き永続化・ファイル添付・スラッシュコマンドが無効化されるため、(1)新バリアントの正常系テスト追加と(2)既存テストがデフォルトバリアントで引き続きパスすることの確認が必要。",
+      "affected_files": [
+        "src/components/worktree/MessageInput.tsx",
+        "tests/unit/components/worktree/MessageInput.test.tsx"
+      ],
+      "suggestion": "テスト戦略にMessageInput simplified variantのテスト計画を追記する。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 3,
+  "nice_to_have_count": 3,
+  "impact_summary": {
+    "new_files_verified": [
+      "src/app/sessions/page.tsx",
+      "src/app/repositories/page.tsx",
+      "src/app/review/page.tsx",
+      "src/app/more/page.tsx",
+      "src/components/mobile/GlobalMobileNav.tsx",
+      "src/components/review/ReviewCard.tsx",
+      "src/components/home/HomeSessionSummary.tsx",
+      "src/lib/session/next-action-helper.ts",
+      "src/config/review-config.ts"
+    ],
+    "missing_from_modified_files": [
+      "src/types/ui-state.ts",
+      "src/types/ui-actions.ts",
+      "src/hooks/useWorktreeUIState.ts",
+      "src/components/worktree/LeftPaneTabSwitcher.tsx",
+      "src/components/worktree/WorktreeCard.tsx"
+    ],
+    "api_changes": "GET /api/worktrees?include=review（既存APIの拡張）- isStalled/reviewStatusフィールドの提供範囲をHome/Sessions画面との関係で明確化が必要",
+    "db_changes": "不要（確認済み: worktree.statusは既に'todo'|'doing'|'done'|nullで定義済み）",
+    "backward_compatibility": "CLI側api-responses.ts WorktreeItemにオプショナルフィールド追加で後方互換維持可能（確認済み）",
+    "auth_impact": "新規URLは既存ワイルドカードmatcherで自動保護（確認済み: AUTH_EXCLUDED_PATHSは/login, /api/auth/*のみ）"
+  },
+  "summary": "Stage 5の指摘を受けてIssueが大幅に改善されており、Stalled判定のステータス定義、pane値の対応表、Phase分割などが明確化されている。Must Fixレベルの問題はない。残る課題は(1) response-poller.ts参照の不統一（実際はauto-yes-poller.ts）、(2) deep link実装に影響するui-state/ui-actions/useWorktreeUIState/LeftPaneTabSwitcherが主要変更ファイルから漏れている点、(3) isStalledフィールドのHome/Sessions画面での必要性が未整理の3点。いずれもShould Fixレベルであり、実装前に方針を固めておけば手戻りを防げる。"
+}

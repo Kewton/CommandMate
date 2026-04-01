@@ -52,6 +52,15 @@ export interface PromptState {
 }
 
 /**
+ * Deep link pane type for ?pane= query parameter [DR2-006]
+ * Issue #600: Unified pane identifier for deep linking
+ *
+ * Not a 1:1 mapping with MobileActivePane or LeftPaneTab.
+ * Conversion logic resides in useWorktreeTabState().
+ */
+export type DeepLinkPane = 'terminal' | 'history' | 'git' | 'files' | 'notes' | 'logs' | 'agent' | 'timer' | 'info';
+
+/**
  * Mobile tab type for navigation
  */
 export type MobileActivePane = 'history' | 'terminal' | 'files' | 'memo' | 'info';

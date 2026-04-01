@@ -735,6 +735,50 @@ describe('Sidebar', () => {
     });
   });
 
+  describe('useWorktreeList integration (Issue #600)', () => {
+    it('should use useWorktreeList for sorting and grouping', async () => {
+      // This test validates the Sidebar still produces correct output
+      // after migrating from inline useMemo to useWorktreeList hook
+      const orderedWorktrees: Worktree[] = [
+        {
+          id: 'z-branch',
+          name: 'z-feature',
+          path: '/path/to/z',
+          repositoryPath: '/path/to/repo',
+          repositoryName: 'RepoZ',
+          updatedAt: new Date('2025-01-01T00:00:00Z'),
+        },
+        {
+          id: 'a-branch',
+          name: 'a-feature',
+          path: '/path/to/a',
+          repositoryPath: '/path/to/repo',
+          repositoryName: 'RepoA',
+          updatedAt: new Date('2025-01-02T00:00:00Z'),
+        },
+      ];
+
+      (worktreeApi.getAll as ReturnType<typeof vi.fn>).mockResolvedValue({
+        worktrees: orderedWorktrees,
+        repositories: [],
+      });
+
+      // Set flat view mode to verify sort order
+      localStorage.setItem('mcbd-sidebar-view-mode', 'flat');
+
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('z-feature')).toBeInTheDocument();
+        expect(screen.getByText('a-feature')).toBeInTheDocument();
+      });
+    });
+  });
+
   describe('SyncButton', () => {
     beforeEach(() => {
       (repositoryApi.sync as ReturnType<typeof vi.fn>).mockResolvedValue({

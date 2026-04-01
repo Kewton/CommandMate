@@ -175,6 +175,8 @@ interface WorktreeInfoFieldsProps {
   showLogs: boolean;
   /** Toggle logs visibility */
   onToggleLogs: () => void;
+  /** Callback to update parent worktree state */
+  onWorktreeUpdate?: (updated: Worktree) => void;
 }
 
 /**
@@ -191,6 +193,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
   descriptionEditor,
   showLogs,
   onToggleLogs,
+  onWorktreeUpdate,
 }: WorktreeInfoFieldsProps) {
   const { isEditing, text, setText, isSaving, handleSave, handleCancel, startEditing } = descriptionEditor;
 
@@ -279,19 +282,39 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
         <p className="text-sm text-gray-700 dark:text-gray-300 break-all font-mono">{worktree.path}</p>
       </div>
 
-      {/* Status */}
-      {worktree.status && (
-        <div className={cardClassName}>
-          <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Status</h2>
-          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-            worktree.status === 'done' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' :
-            worktree.status === 'doing' ? 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-300' :
-            'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
-          }`}>
-            {worktree.status.toUpperCase()}
-          </span>
-        </div>
-      )}
+      {/* Status - dropdown for mobile */}
+      <div className={cardClassName}>
+        <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Status</h2>
+        <select
+          value={worktree.status ?? ''}
+          onChange={async (e) => {
+            const val = e.target.value;
+            const newStatus = val === '' ? null : val as 'ready' | 'in_progress' | 'in_review' | 'done';
+            try {
+              const response = await fetch(`/api/worktrees/${worktree.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: newStatus }),
+              });
+              if (response.ok && onWorktreeUpdate) {
+                const updated = await response.json();
+                onWorktreeUpdate(updated);
+              }
+            } catch {
+              // Silently handle
+            }
+          }}
+          className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-cyan-500 focus:border-transparent w-full"
+          data-testid="mobile-status-dropdown"
+          aria-label="Worktree status"
+        >
+          <option value="">Not set</option>
+          <option value="ready">Ready</option>
+          <option value="in_progress">In Progress</option>
+          <option value="in_review">In Review</option>
+          <option value="done">Done</option>
+        </select>
+      </div>
 
       {/* Description - Editable */}
       <div className={cardClassName}>
@@ -411,7 +434,20 @@ interface DesktopHeaderProps {
   onMenuClick: () => void;
   /** Whether an app update is available (shows notification dot on Info button) - Issue #278 */
   hasUpdate?: boolean;
+  /** Current worktree status (ready/in_progress/in_review/done/null) */
+  worktreeStatus?: 'ready' | 'in_progress' | 'in_review' | 'done' | null;
+  /** Callback when worktree status is changed via dropdown */
+  onWorktreeStatusChange?: (status: 'ready' | 'in_progress' | 'in_review' | 'done' | null) => void;
 }
+
+/** Worktree status options for dropdown */
+const WORKTREE_STATUS_OPTIONS: Array<{ value: 'ready' | 'in_progress' | 'in_review' | 'done' | null; label: string }> = [
+  { value: null, label: 'Not set' },
+  { value: 'ready', label: 'Ready' },
+  { value: 'in_progress', label: 'In Progress' },
+  { value: 'in_review', label: 'In Review' },
+  { value: 'done', label: 'Done' },
+];
 
 /** Status indicator configuration is imported from @/config/status-colors (SF1) */
 
@@ -426,6 +462,8 @@ export const DesktopHeader = memo(function DesktopHeader({
   onInfoClick,
   onMenuClick,
   hasUpdate,
+  worktreeStatus,
+  onWorktreeStatusChange,
 }: DesktopHeaderProps) {
   const statusConfig = DESKTOP_STATUS_CONFIG[status];
   // Issue #111: DRY - Use shared truncateString utility
@@ -542,7 +580,28 @@ export const DesktopHeader = memo(function DesktopHeader({
         </div>
       </div>
 
-      {/* Right: Info button */}
+      {/* Right: Status dropdown + Info button */}
+      <div className="flex items-center gap-2">
+        {/* Worktree status dropdown */}
+        {onWorktreeStatusChange && (
+          <select
+            value={worktreeStatus ?? ''}
+            onChange={(e) => {
+              const val = e.target.value;
+              onWorktreeStatusChange(val === '' ? null : val as 'ready' | 'in_progress' | 'in_review' | 'done');
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="text-xs px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-cyan-500 focus:border-transparent cursor-pointer"
+            data-testid="desktop-status-dropdown"
+            aria-label="Worktree status"
+          >
+            {WORKTREE_STATUS_OPTIONS.map((opt) => (
+              <option key={opt.label} value={opt.value ?? ''}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        )}
       <button
         type="button"
         onClick={onInfoClick}
@@ -572,6 +631,7 @@ export const DesktopHeader = memo(function DesktopHeader({
           />
         )}
       </button>
+      </div>
     </div>
   );
 });
@@ -624,6 +684,7 @@ export const InfoModal = memo(function InfoModal({
           descriptionEditor={descriptionEditor}
           showLogs={showLogs}
           onToggleLogs={() => setShowLogs(!showLogs)}
+          onWorktreeUpdate={onWorktreeUpdate}
         />
       </div>
     </Modal>
@@ -755,6 +816,7 @@ export const MobileInfoContent = memo(function MobileInfoContent({
         descriptionEditor={descriptionEditor}
         showLogs={showLogs}
         onToggleLogs={() => setShowLogs(!showLogs)}
+        onWorktreeUpdate={onWorktreeUpdate}
       />
     </div>
   );

@@ -1,0 +1,17 @@
+{
+  "stage": 3,
+  "action": "apply",
+  "applied_findings": [
+    "DR3-001",
+    "DR3-002",
+    "DR3-003",
+    "DR3-004",
+    "DR3-005",
+    "DR3-006",
+    "DR3-009",
+    "DR3-010"
+  ],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "summary": "Stage 3 影響分析レビューの全 Must Fix (2件) と全 Should Fix (5件) を設計方針書に反映した。DR3-001: useSendMessage()の責務範囲をAPI呼び出し（terminal API送信 + chat-db永続化）に限定し、副作用はonSuccess/onErrorコールバックで処理する設計を明記。DR3-009: useWorktreeList()はソート・フィルタの実行ロジックのみ提供し、ソート状態の保持は呼び出し側に委ねるインターフェースを明記（Sessions画面とSidebarで独立したソート状態を保持）。DR3-002: テスト影響範囲を38ファイル以上に修正、根本書き換え必要な4ファイルを明示。DR3-003: Home画面にショートカットカードと初回案内バナーの導線設計を追加。DR3-004: Phase 1にuseWorktreesCache()の薄いラッパーを配置しPhase間手戻りを回避する戦略を追加。DR3-005: useLayoutConfig()デフォルト値検証テストをテスト戦略に追加。DR3-010: useWorktreesCache()の拡張フェッチモード（Review画面在中時は?include=review付き）で2系統ポーリングを1系統に統合。DR3-006(Nice to Have): Stalled判定のパフォーマンス記述を明確化。ソースコードは変更していない。"
+}

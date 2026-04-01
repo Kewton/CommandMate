@@ -1,0 +1,236 @@
+{
+  "stage": 3,
+  "focus": "影響範囲（1回目）",
+  "reviewer": "opus",
+  "review_date": "2026-04-01",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "Must Fix",
+      "category": "後方互換性",
+      "title": "Home画面（/）の責務分解による既存ブックマーク・リンクへの影響が未定義",
+      "description": "現在の `/` はWorktreeList + RepositoryManager + ExternalAppsManagerを一括表示している。Issueではこれらを `/sessions`, `/repositories`, `/more` に分離する計画だが、既存ユーザーが `/` にブックマークしている場合の移行パスが未定義。`/` をHome（Mission Control）に置き換えると、従来の操作フロー（Repositoryの追加、Worktreeの一覧表示など）が `/` から直接到達できなくなる。リダイレクト戦略またはHome画面からの明確な導線を受け入れ条件に含めるべき。",
+      "affected_files": [
+        "src/app/page.tsx",
+        "src/components/worktree/WorktreeList.tsx",
+        "src/components/repository/RepositoryManager.tsx",
+        "src/components/external-apps/ExternalAppsManager.tsx"
+      ],
+      "suggestion": "受け入れ条件に「Home画面から各専門画面への導線が1クリックで到達可能であること」を明記する。また、移行期間中の旧UIフォールバックの要否を検討する。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "Must Fix",
+      "category": "コンポーネント影響",
+      "title": "WorktreeDetailRefactored.tsx（1966行）のdeep link対応が大規模リファクタリングを伴う",
+      "description": "Issue記載のdeep link戦略では、現在のuseStateベースのタブ管理をuseSearchParams()ベースに移行する。WorktreeDetailRefactored.tsxは1966行の大規模コンポーネントで、タブ状態はDesktopのLeftPaneTab選択、MobileのMobileTab選択の2系統がある。これらをsearchParamsに統合するには、(1) コンポーネント内の全タブ制御ロジックの書き換え、(2) MobileTabBarへのsearchParams連携、(3) router.replace呼び出しの追加が必要。影響範囲が広く、既存の23個の関連テストファイルへの影響も大きい。",
+      "affected_files": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/components/mobile/MobileTabBar.tsx",
+        "src/components/worktree/WorktreeDetailSubComponents.tsx",
+        "src/components/worktree/LeftPaneTabSwitcher.tsx",
+        "tests/unit/components/worktree/WorktreeDetailRefactored-mobile-overflow.test.tsx",
+        "tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx",
+        "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+        "tests/unit/components/mobile/MobileTabBar.test.tsx",
+        "tests/integration/worktree-detail-integration.test.tsx",
+        "tests/e2e/worktree-detail.spec.ts"
+      ],
+      "suggestion": "deep link対応を別サブタスクとして分離し、段階的に実装する。Phase 1: 新画面の枠組み作成、Phase 2: deep link移行。テスト修正計画も事前に立てること。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "Must Fix",
+      "category": "認証・セキュリティ",
+      "title": "middleware.tsのmatcher設定は新規URLを自動カバーするが、AUTH_EXCLUDED_PATHSとの整合性確認が必要",
+      "description": "現在のmiddleware.tsのmatcher設定は `/((?!_next/|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)` で、静的アセット以外の全パスにマッチする。そのため新規URL（/sessions, /repositories, /review, /more）は自動的に認証対象になる。ただし、AUTH_EXCLUDED_PATHSは完全一致（===）で判定しており、新規URLが誤って除外リストに追加されないことを確認する必要がある。Issue記載の「ミドルウェアのマッチャーパスに新規URLを含めること」は、現在のワイルドカードmatcherでは追加作業不要だが、Issueの記述が誤解を招く可能性がある。",
+      "affected_files": [
+        "src/middleware.ts",
+        "src/config/auth-config.ts"
+      ],
+      "suggestion": "Issueの実装タスク「新規URL を middleware.ts の認証マッチャーに追加する」を「新規URLが既存の認証ミドルウェアで正しく保護されることを確認する（現在のワイルドカードmatcherにより追加設定は不要だが、テストで検証する）」に修正する。認証テスト（tests/integration/auth-middleware.test.ts）に新規URLの検証ケースを追加する。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "Should Fix",
+      "category": "コンポーネント影響",
+      "title": "AppShell.tsxへのグローバルナビゲーション追加がレイアウト構造を根本的に変更する",
+      "description": "現在のAppShell.tsxはSidebar + Main contentの2列構造。Issue計画では、(1) PCヘッダーに水平ナビ5画面を追加、(2) モバイルにボトムタブバー4タブを追加、(3) Sessions画面でサイドバー自動折りたたみが必要。これにより、AppShellは現在のパス（usePathname()）を参照してサイドバーの折りたたみ状態を制御する必要がある。また、Header.tsxの現在の実装はシンプルなロゴ+GitHubリンクのみで、5画面ナビゲーションの実装は大幅な改修が必要。",
+      "affected_files": [
+        "src/components/layout/AppShell.tsx",
+        "src/components/layout/Header.tsx",
+        "src/contexts/SidebarContext.tsx",
+        "tests/unit/components/layout/AppShell.test.tsx",
+        "tests/unit/components/layout/Sidebar.test.tsx"
+      ],
+      "suggestion": "AppShellにusePathname()ベースの自動折りたたみロジックを追加する。SidebarContextに `autoCollapsedPaths: string[]` のような設定を追加し、特定パスでの自動折りたたみを宣言的に制御可能にする。Header.tsxは完全に書き直す前提で設計する。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "Should Fix",
+      "category": "コンポーネント影響",
+      "title": "モバイルのグローバルナビとローカルナビの排他制御が複雑な状態管理を要する",
+      "description": "Issue計画では、モバイルのグローバルナビ（Home/Sessions/Review/More）とWorktree Detail内ローカルナビ（terminal/history/files/memo/info）を排他表示にする。現在のMobileTabBarはWorktreeDetailRefactored内でのみ使用されており、グローバルナビは存在しない。排他制御の実装には、(1) 現在のURLパス判定（/worktrees/:idかどうか）、(2) グローバルナビ用の新コンポーネント作成、(3) AppShellまたはlayout.tsxレベルでの条件分岐が必要。",
+      "affected_files": [
+        "src/components/mobile/MobileTabBar.tsx",
+        "src/components/layout/AppShell.tsx",
+        "src/app/layout.tsx",
+        "tests/unit/components/mobile/MobileTabBar.test.tsx"
+      ],
+      "suggestion": "グローバルナビ用に新コンポーネント `GlobalMobileNav.tsx` を作成し、AppShell内で `usePathname()` に基づいてグローバルナビとローカルナビを切り替える。既存MobileTabBarの変更は最小限にとどめる。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "Should Fix",
+      "category": "API影響",
+      "title": "Review画面のStalled判定にはAPI新設またはworktrees APIの拡張が必要",
+      "description": "Review画面で表示するStalled状態は「SessionStatus === 'running' かつ最終出力からN秒経過」で算出される。現在のworktrees APIレスポンスにはSessionStatusは含まれるが、最終出力のタイムスタンプは含まれていない。tmux captureのタイムスタンプ比較はサーバーサイドで実施する必要があり、(1) 既存 GET /api/worktrees のレスポンスにstalled判定結果を追加するか、(2) Review画面専用のAPIエンドポイント（例: GET /api/review）を新設するかを決定する必要がある。",
+      "affected_files": [
+        "src/app/api/worktrees/route.ts",
+        "src/lib/session/worktree-status-helper.ts",
+        "src/lib/detection/status-detector.ts",
+        "src/lib/tmux/tmux-capture-cache.ts"
+      ],
+      "suggestion": "既存の GET /api/worktrees にquery param `?include=review` を追加してReview用の追加フィールド（isStalled, reviewStatus）を返す方式を推奨。専用APIは保守コストが増えるため避ける。STALLED_THRESHOLD_MS定数は src/config/review-config.ts に定義する。"
+    },
+    {
+      "id": "S3-007",
+      "severity": "Should Fix",
+      "category": "コンポーネント影響",
+      "title": "新設4画面のPage コンポーネントとNext.js App Router構造の追加",
+      "description": "Sessions, Repositories, Review, Moreの4画面新設には、Next.js App Routerの規約に従い、src/app/sessions/page.tsx, src/app/repositories/page.tsx, src/app/review/page.tsx, src/app/more/page.tsx の4ファイルを新規作成する必要がある。各画面に必要なコンポーネント群も新規作成が必要。特にSessions画面はWorktreeList.tsxの機能を大幅に取り込むため、既存コンポーネントの分解・再利用戦略を事前に設計すべき。",
+      "affected_files": [
+        "src/app/sessions/page.tsx",
+        "src/app/repositories/page.tsx",
+        "src/app/review/page.tsx",
+        "src/app/more/page.tsx"
+      ],
+      "suggestion": "WorktreeList.tsx内のフィルタリング・ソート・検索ロジックを共通hooksに抽出し、Sessions画面とSidebarの両方から再利用可能にする。RepositoryManager.tsxはほぼそのままRepositories画面に移動可能。ExternalAppsManagerもMore画面に移動可能。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "Should Fix",
+      "category": "テスト影響",
+      "title": "既存テスト23ファイル以上への影響と新規テスト要件",
+      "description": "影響を受ける既存テストファイル: (1) AppShell関連（AppShell.test.tsx, Sidebar.test.tsx, SidebarToggle.test.tsx）、(2) WorktreeDetail関連（WorktreeDetailRefactored.test.tsx, mobile-overflow.test.tsx, cli-tab-switching.test.tsx, WebSocket.test.tsx）、(3) MobileTabBar.test.tsx, MobileHeader.test.tsx、(4) SidebarContext.test.tsx、(5) sidebar-utils.test.ts、(6) auth-middleware.test.ts、(7) E2E: worktree-detail.spec.ts。さらに新規テストとして、各新画面のレンダリングテスト、グローバルナビの遷移テスト、deep linkの復元テスト、Review画面のフィルタリングテスト、getNextAction()のユニットテストが必要。",
+      "affected_files": [
+        "tests/unit/components/layout/AppShell.test.tsx",
+        "tests/unit/components/layout/Sidebar.test.tsx",
+        "tests/unit/components/layout/SidebarToggle.test.tsx",
+        "tests/unit/components/worktree/WorktreeDetailRefactored-mobile-overflow.test.tsx",
+        "tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx",
+        "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+        "tests/unit/components/mobile/MobileTabBar.test.tsx",
+        "tests/unit/components/mobile/MobileHeader.test.tsx",
+        "tests/unit/contexts/SidebarContext.test.tsx",
+        "tests/integration/worktree-detail-integration.test.tsx",
+        "tests/integration/auth-middleware.test.ts",
+        "tests/e2e/worktree-detail.spec.ts"
+      ],
+      "suggestion": "テスト修正の優先順位を定める。Phase 1: 新規画面のスモークテスト、Phase 2: 既存テストの修正（特にAppShell・SidebarContextの変更に伴うもの）、Phase 3: deep link・Review画面のテスト追加。getNextAction()は純関数のためユニットテスト容易。"
+    },
+    {
+      "id": "S3-009",
+      "severity": "Should Fix",
+      "category": "パフォーマンス影響",
+      "title": "Review画面のリアルタイムStalled判定がtmux captureの負荷を増大させる可能性",
+      "description": "Review画面はDone/Approval/Stalledをリアルタイム算出する。Stalled判定には全running状態のworktreeに対してtmux captureの最終出力タイムスタンプを確認する必要がある。現在のtmux-capture-cache.ts（TTL=2秒、singleflight）はキャッシュを持つが、Review画面を開いた状態でのポーリングが加わると、既存のWorktree Detail画面のポーリングと合わせて負荷が増す。特にworktree数が多い環境（20以上）では顕著になりうる。",
+      "affected_files": [
+        "src/lib/tmux/tmux-capture-cache.ts",
+        "src/lib/session/worktree-status-helper.ts",
+        "src/app/api/worktrees/route.ts"
+      ],
+      "suggestion": "Stalled判定はtmux captureではなく、既存のresponse-poller.tsが保持する最終出力タイムスタンプ（getLastServerResponseTimestamp）を活用する方がtmuxプロセス呼び出しを回避できる。また、Review画面のポーリング間隔を5-10秒に設定し、通常のDetail画面のポーリングより低頻度にする。"
+    },
+    {
+      "id": "S3-010",
+      "severity": "Should Fix",
+      "category": "コンポーネント影響",
+      "title": "Review画面のインライン返信フォーム（PC）は既存MessageInputの簡易版として新規作成が必要",
+      "description": "Issue計画ではReview画面の各カード内にインライン返信フォームを配置する。既存のMessageInput.tsxは下書き永続化・ファイル添付・スラッシュコマンド・Auto-Yes連携など多機能。「プロンプト応答に特化し、高度機能は省略する」という仕様は、既存MessageInputのサブセットとして新コンポーネント `InlineReplyForm.tsx` を作成するか、MessageInputにsimplifiedモードを追加するかの選択が必要。",
+      "affected_files": [
+        "src/components/worktree/MessageInput.tsx"
+      ],
+      "suggestion": "MessageInputに `variant='simplified'` propsを追加して機能を制限する方式を推奨。新規コンポーネントを作るとMessageInputとの機能差分が将来的に乖離しやすい。simplifiedバリアントでは下書き永続化・ファイル添付・スラッシュコマンドを無効化する。"
+    },
+    {
+      "id": "S3-011",
+      "severity": "Nice to Have",
+      "category": "CLI影響",
+      "title": "commandmate CLIコマンドへの直接的な影響はないが、ドキュメント更新が必要",
+      "description": "CLIコマンド（ls, send, wait, respond, capture, auto-yes）はすべてAPIエンドポイント（/api/worktrees/*）経由で動作しており、今回のUI変更ではAPIの破壊的変更は予定されていない。ただし、Review画面用のAPI拡張（Stalledフィールド追加など）がworktrees APIレスポンスに影響する場合、CLI側のレスポンス型定義（src/cli/types/api-responses.ts）の更新が必要になる可能性がある。",
+      "affected_files": [
+        "src/cli/types/api-responses.ts",
+        "docs/user-guide/commands-guide.md"
+      ],
+      "suggestion": "worktrees APIレスポンスに追加フィールド（isStalled, reviewStatusなど）を入れる場合は、既存フィールドを変更せずオプショナルフィールドとして追加し、CLI側の後方互換性を維持する。"
+    },
+    {
+      "id": "S3-012",
+      "severity": "Nice to Have",
+      "category": "DB影響",
+      "title": "DBスキーマ変更は不要だが、getNextAction()に必要なデータ取得効率の確認が必要",
+      "description": "Issue記載通りDBスキーマ変更は不要。ただし、Home画面やSessions画面で全worktreeに対してgetNextAction()を算出するには、各worktreeのSessionStatus + PromptType + Stalled判定が必要。現在のworktrees APIは既にこれらの情報を返しているが、Home画面が「Approval待ちのworktree数」「Stalled数」などの集計値を表示する場合、APIレスポンスの効率化（集計専用エンドポイントなど）の検討が有益。",
+      "affected_files": [
+        "src/app/api/worktrees/route.ts",
+        "src/lib/db/worktree-db.ts"
+      ],
+      "suggestion": "初期実装ではworktrees APIの既存レスポンスをクライアントサイドで集計する方式で十分。worktree数が50を超える環境で性能問題が出た場合に集計APIを検討する。"
+    },
+    {
+      "id": "S3-013",
+      "severity": "Nice to Have",
+      "category": "後方互換性",
+      "title": "docs/architecture.mdへのURL設計・画面遷移の追記が受け入れ条件に含まれている",
+      "description": "受け入れ条件に「URL設計と画面遷移が docs/architecture.md に追記されている」とある。現在のdocs/architecture.mdの構成を確認し、追記箇所を事前に特定しておくと実装時のスムーズな反映が可能。",
+      "affected_files": [
+        "docs/architecture.md",
+        "CLAUDE.md"
+      ],
+      "suggestion": "docs/architecture.mdに「URL設計」「画面遷移図」「ナビゲーション構造」セクションを追加する。CLAUDE.mdのファイル構成セクションにも新規ページファイルを追記する。"
+    }
+  ],
+  "must_fix_count": 3,
+  "should_fix_count": 7,
+  "nice_to_have_count": 3,
+  "impact_summary": {
+    "new_files": [
+      "src/app/sessions/page.tsx",
+      "src/app/repositories/page.tsx",
+      "src/app/review/page.tsx",
+      "src/app/more/page.tsx",
+      "src/components/mobile/GlobalMobileNav.tsx",
+      "src/components/review/ReviewCard.tsx",
+      "src/components/review/InlineReplyForm.tsx",
+      "src/components/home/HomeSessionSummary.tsx",
+      "src/lib/session/next-action-helper.ts",
+      "src/config/review-config.ts"
+    ],
+    "modified_files": [
+      "src/app/page.tsx",
+      "src/components/layout/AppShell.tsx",
+      "src/components/layout/Header.tsx",
+      "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "src/components/worktree/WorktreeDetailSubComponents.tsx",
+      "src/components/mobile/MobileTabBar.tsx",
+      "src/components/mobile/MobileHeader.tsx",
+      "src/contexts/SidebarContext.tsx",
+      "src/app/api/worktrees/route.ts",
+      "src/lib/session/worktree-status-helper.ts",
+      "src/middleware.ts",
+      "docs/architecture.md",
+      "CLAUDE.md",
+      "tests/unit/components/layout/AppShell.test.tsx",
+      "tests/unit/components/mobile/MobileTabBar.test.tsx",
+      "tests/unit/contexts/SidebarContext.test.tsx",
+      "tests/integration/auth-middleware.test.ts",
+      "tests/e2e/worktree-detail.spec.ts"
+    ],
+    "deleted_files": [],
+    "new_apis": [
+      "GET /api/worktrees?include=review (既存APIの拡張、Review用フィールド追加)"
+    ],
+    "db_changes": "不要。Review画面のステータス（Done/Approval/Stalled）は既存フィールドの組み合わせでリアルタイム算出する。"
+  },
+  "summary": "Issue #600 は CommandMate のUI構造を根本的に再設計する大規模変更である。影響範囲は広く、新規ファイル約10個、変更ファイル約18個に及ぶ。DBスキーマ変更は不要で、APIの破壊的変更もないため、バックエンドへの影響は限定的。最大のリスクは (1) WorktreeDetailRefactored.tsx（1966行）のdeep link対応によるテスト影響、(2) AppShell/Header/MobileTabBarのレイアウト構造変更による全画面への波及、(3) Review画面のStalled判定のパフォーマンス影響の3点。CLI CLIコマンドへの直接影響はない。段階的な実装（Phase 1: 画面枠組み、Phase 2: deep link、Phase 3: Review機能）を推奨する。"
+}

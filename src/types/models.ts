@@ -69,8 +69,8 @@ export interface Worktree {
   sessionStatusByCli?: Partial<Record<CLIToolType, { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean }>>;
   /** Whether this worktree is marked as favorite */
   favorite?: boolean;
-  /** Worktree status: todo, doing, done, or null if not set */
-  status?: 'todo' | 'doing' | 'done' | null;
+  /** Worktree status: ready, in_progress, in_review, done, or null if not set */
+  status?: 'ready' | 'in_progress' | 'in_review' | 'done' | null;
   /** External link URL (e.g., issue tracker, PR, documentation) */
   link?: string;
   /** CLI tool type (claude, codex, gemini, vibe-local) - defaults to 'claude' */
@@ -83,6 +83,12 @@ export interface Worktree {
   vibeLocalContextWindow?: number | null;
   /** Git status information (Issue #111) - optional for backward compatibility */
   gitStatus?: GitStatus;
+  /** Review status derived from session state (Issue #600, ?include=review) */
+  reviewStatus?: 'done' | 'approval' | 'stalled' | null;
+  /** Whether the session is considered stalled (Issue #600, ?include=review) */
+  isStalled?: boolean;
+  /** Next action display string (Issue #600, ?include=review) */
+  nextAction?: string;
 }
 
 /**

@@ -262,6 +262,87 @@ describe('WorktreeSelectionContext', () => {
     });
   });
 
+  describe('External worktrees injection (Issue #600)', () => {
+    it('should accept worktrees via externalWorktrees prop', async () => {
+      render(
+        <WorktreeSelectionProvider externalWorktrees={mockWorktrees}>
+          <TestConsumer />
+        </WorktreeSelectionProvider>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('worktreeCount').textContent).toBe('2');
+      });
+    });
+
+    it('should not call worktreeApi.getAll when externalWorktrees is provided', async () => {
+      (worktreeApi.getAll as ReturnType<typeof vi.fn>).mockClear();
+
+      render(
+        <WorktreeSelectionProvider externalWorktrees={mockWorktrees}>
+          <TestConsumer />
+        </WorktreeSelectionProvider>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('worktreeCount').textContent).toBe('2');
+      });
+
+      // Should not have called getAll since external worktrees are provided
+      expect(worktreeApi.getAll).not.toHaveBeenCalled();
+    });
+
+    it('should update worktrees when externalWorktrees changes', async () => {
+      const { rerender } = render(
+        <WorktreeSelectionProvider externalWorktrees={mockWorktrees}>
+          <TestConsumer />
+        </WorktreeSelectionProvider>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('worktreeCount').textContent).toBe('2');
+      });
+
+      const updatedWorktrees = [...mockWorktrees, {
+        id: 'feature-test-3',
+        name: 'feature/test-3',
+        path: '/path/to/worktree3',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'MyRepo',
+      }] as Worktree[];
+
+      rerender(
+        <WorktreeSelectionProvider externalWorktrees={updatedWorktrees}>
+          <TestConsumer />
+        </WorktreeSelectionProvider>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('worktreeCount').textContent).toBe('3');
+      });
+    });
+
+    it('should still support selectWorktree when using externalWorktrees', async () => {
+      render(
+        <WorktreeSelectionProvider externalWorktrees={mockWorktrees}>
+          <TestConsumer />
+        </WorktreeSelectionProvider>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('worktreeCount').textContent).toBe('2');
+      });
+
+      act(() => {
+        screen.getByTestId('selectWorktree').click();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('selectedWorktreeId').textContent).toBe('feature-test-1');
+      });
+    });
+  });
+
   describe('getPollingInterval', () => {
     it('should return 2000ms when any worktree is processing', () => {
       const worktrees = [

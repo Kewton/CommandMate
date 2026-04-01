@@ -394,8 +394,8 @@ describe('getMaxFileSize', () => {
     expect(getMaxFileSize('.json')).toBe(5 * 1024 * 1024);
   });
 
-  it('should return 15MB for .mp4 (Issue #302)', () => {
-    expect(getMaxFileSize('.mp4')).toBe(15 * 1024 * 1024);
+  it('should return 100MB for .mp4 (Issue #302, #600)', () => {
+    expect(getMaxFileSize('.mp4')).toBe(100 * 1024 * 1024);
   });
 
   it('should be case-insensitive', () => {

@@ -12,17 +12,38 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktrees, getRepositories, getMessages, markPendingPromptsAsAnswered } from '@/lib/db';
 import { listSessions } from '@/lib/tmux/tmux';
 import { detectWorktreeSessionStatus } from '@/lib/session/worktree-status-helper';
+import { parseIncludeParam } from '@/lib/api/worktrees-include-parser';
+import { isWorktreeStalled } from '@/lib/detection/stalled-detector';
+import { getNextAction, getReviewStatus } from '@/lib/session/next-action-helper';
 import { createLogger } from '@/lib/logger';
+import type { SessionStatus } from '@/lib/detection/status-detector';
+import type { PromptType } from '@/types/models';
 
 const logger = createLogger('api/worktrees');
+
+/**
+ * Derive SessionStatus from worktree status helper result.
+ */
+function deriveSessionStatus(status: {
+  isSessionRunning: boolean;
+  isWaitingForResponse: boolean;
+  isProcessing: boolean;
+}): SessionStatus | null {
+  if (!status.isSessionRunning) return null;
+  if (status.isWaitingForResponse) return 'waiting';
+  if (status.isProcessing) return 'running';
+  return 'ready';
+}
 
 export async function GET(request: NextRequest) {
   try {
     const db = getDbInstance();
 
-    // Check for repository filter query parameter
+    // Check for query parameters
     const searchParams = request.nextUrl?.searchParams;
     const repositoryFilter = searchParams?.get('repository');
+    const includes = parseIncludeParam(searchParams?.get('include') ?? null);
+    const includeReview = includes.has('review');
 
     // Parallel: DB query and tmux session list are independent
     const worktrees = getWorktrees(db, repositoryFilter || undefined);
@@ -40,10 +61,35 @@ export async function GET(request: NextRequest) {
           markPendingPromptsAsAnswered,
         );
 
-        return {
+        const base = {
           ...worktree,
           ...status,
         };
+
+        // Issue #600: Add review fields when ?include=review
+        if (includeReview) {
+          const cliToolId = worktree.cliToolId ?? 'claude';
+          const sessionStatus = deriveSessionStatus(status);
+          const stalled = isWorktreeStalled(worktree.id, cliToolId);
+          // Derive promptType from status helper - approximate from isWaitingForResponse
+          const promptType: PromptType | null = status.isWaitingForResponse ? 'approval' : null;
+          const nextAction = getNextAction(sessionStatus, promptType, stalled);
+          const reviewStatus = getReviewStatus(
+            worktree.status ?? null,
+            sessionStatus,
+            promptType,
+            stalled
+          );
+
+          return {
+            ...base,
+            isStalled: stalled,
+            nextAction,
+            reviewStatus,
+          };
+        }
+
+        return base;
       })
     );
 

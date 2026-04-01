@@ -1,0 +1,45 @@
+{
+  "status": "success",
+  "coverage": 85.0,
+  "unit_tests": {
+    "total": 5897,
+    "passed": 5890,
+    "failed": 0,
+    "skipped": 7
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/hooks/useWorktreeTabState.ts",
+    "src/components/worktree/WorktreeDetailHeader.tsx",
+    "src/lib/api/worktrees-include-parser.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/review/page.tsx",
+    "src/components/worktree/WorktreeCard.tsx",
+    "src/types/models.ts",
+    "tests/unit/hooks/useWorktreeTabState.test.ts",
+    "tests/unit/hooks/deep-link-mapping.test.ts",
+    "tests/unit/components/worktree/WorktreeDetailHeader.test.tsx",
+    "tests/unit/components/worktree/WorktreeCard-nextAction.test.tsx",
+    "tests/unit/api/worktrees-include-review.test.ts",
+    "tests/unit/components/review/ReviewPage-stalled.test.tsx"
+  ],
+  "commits": [
+    "7bb9c777: feat(ux): implement Phase 3 deep link, API extension, and Review stalled (#600)"
+  ],
+  "tasks_completed": [
+    "3.1: WorktreeDetailHeader.tsx extracted, useWorktreeTabState.ts created with deep link validation",
+    "3.2: Deep link pane mapping implemented (9 panes -> LeftPaneTab/MobileActivePane/HistorySubTab)",
+    "3.4: WorktreeCard next action display with data-testid attributes",
+    "3.5: worktrees API ?include=review with parseIncludeParam whitelist validation",
+    "3.6: Review page Stalled tab with server-computed reviewStatus filtering"
+  ],
+  "tasks_deferred": [
+    "3.3: MobileTabBar searchParams integration (requires WorktreeDetailRefactored.tsx integration)",
+    "3.7: WorktreeSelectionContext -> useWorktreesCache migration (architectural change requiring careful staged rollout)",
+    "3.8: Sidebar useWorktreeList integration (depends on 3.7)"
+  ],
+  "message": "Phase 3 core tasks completed. Deep link validation, API extension, Review stalled filter, WorktreeDetailHeader extraction, and WorktreeCard next action display all implemented with tests. Tasks 3.3/3.7/3.8 deferred as they require deeper integration with the 1966-line WorktreeDetailRefactored.tsx and context provider architecture. All 310 test files pass (5890 tests). TypeScript and ESLint: 0 errors."
+}

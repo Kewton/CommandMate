@@ -292,6 +292,84 @@ describe('MobileTabBar', () => {
     });
   });
 
+  describe('searchParams integration (Issue #600)', () => {
+    it('should call onSearchParamsChange when provided and tab is clicked', () => {
+      const onTabChange = vi.fn();
+      const onSearchParamsChange = vi.fn();
+      render(
+        <MobileTabBar
+          {...defaultProps}
+          onTabChange={onTabChange}
+          onSearchParamsChange={onSearchParamsChange}
+        />
+      );
+
+      fireEvent.click(screen.getByRole('tab', { name: /history/i }));
+
+      // Both callbacks should be called
+      expect(onTabChange).toHaveBeenCalledWith('history');
+      expect(onSearchParamsChange).toHaveBeenCalledWith('history');
+    });
+
+    it('should not call onSearchParamsChange when not provided', () => {
+      const onTabChange = vi.fn();
+      render(
+        <MobileTabBar
+          {...defaultProps}
+          onTabChange={onTabChange}
+        />
+      );
+
+      fireEvent.click(screen.getByRole('tab', { name: /files/i }));
+
+      expect(onTabChange).toHaveBeenCalledWith('files');
+      // No error should occur when onSearchParamsChange is not provided
+    });
+
+    it('should map memo tab to notes DeepLinkPane in onSearchParamsChange', () => {
+      const onSearchParamsChange = vi.fn();
+      render(
+        <MobileTabBar
+          {...defaultProps}
+          onSearchParamsChange={onSearchParamsChange}
+        />
+      );
+
+      fireEvent.click(screen.getByRole('tab', { name: /cmate/i }));
+
+      expect(onSearchParamsChange).toHaveBeenCalledWith('notes');
+    });
+
+    it('should map terminal tab to terminal DeepLinkPane', () => {
+      const onSearchParamsChange = vi.fn();
+      render(
+        <MobileTabBar
+          {...defaultProps}
+          activeTab="history"
+          onSearchParamsChange={onSearchParamsChange}
+        />
+      );
+
+      fireEvent.click(screen.getByRole('tab', { name: /terminal/i }));
+
+      expect(onSearchParamsChange).toHaveBeenCalledWith('terminal');
+    });
+
+    it('should map info tab to info DeepLinkPane', () => {
+      const onSearchParamsChange = vi.fn();
+      render(
+        <MobileTabBar
+          {...defaultProps}
+          onSearchParamsChange={onSearchParamsChange}
+        />
+      );
+
+      fireEvent.click(screen.getByRole('tab', { name: /info/i }));
+
+      expect(onSearchParamsChange).toHaveBeenCalledWith('info');
+    });
+  });
+
   describe('Update Notification Badge (Issue #278)', () => {
     it('should show info-update-badge when hasUpdate is true', () => {
       render(<MobileTabBar {...defaultProps} hasUpdate={true} />);

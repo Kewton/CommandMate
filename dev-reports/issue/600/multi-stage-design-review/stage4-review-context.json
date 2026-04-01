@@ -1,0 +1,12 @@
+{
+  "issue_number": "600",
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "design_doc_path": "dev-reports/design/issue-600-ux-refresh-design-policy.md",
+  "previous_reviews": [
+    "dev-reports/issue/600/multi-stage-design-review/stage1-review-result.json",
+    "dev-reports/issue/600/multi-stage-design-review/stage2-review-result.json",
+    "dev-reports/issue/600/multi-stage-design-review/stage3-review-result.json"
+  ]
+}

@@ -135,7 +135,7 @@ export async function PATCH(
 
     // Update status if provided
     if ('status' in body) {
-      const validStatuses = ['todo', 'doing', 'done', null];
+      const validStatuses = ['ready', 'in_progress', 'in_review', 'done', null];
       if (validStatuses.includes(body.status)) {
         updateStatus(db, params.id, body.status);
       }

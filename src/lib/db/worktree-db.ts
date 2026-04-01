@@ -151,7 +151,7 @@ export function getWorktrees(
       lastViewedAt: row.last_viewed_at ? new Date(row.last_viewed_at) : undefined,
       lastAssistantMessageAt: row.last_assistant_message_at ? new Date(row.last_assistant_message_at) : undefined,
       favorite: row.favorite === 1,
-      status: (row.status as 'todo' | 'doing' | 'done' | null) || null,
+      status: (row.status as 'ready' | 'in_progress' | 'in_review' | 'done' | null) || null,
       link: row.link || undefined,
       cliToolId: (row.cli_tool_id as CLIToolType | null) ?? 'claude',
       selectedAgents: parseSelectedAgents(row.selected_agents),
@@ -253,7 +253,7 @@ export function getWorktreeById(
     lastViewedAt: row.last_viewed_at ? new Date(row.last_viewed_at) : undefined,
     lastAssistantMessageAt: row.last_assistant_message_at ? new Date(row.last_assistant_message_at) : undefined,
     favorite: row.favorite === 1,
-    status: (row.status as 'todo' | 'doing' | 'done' | null) || null,
+    status: (row.status as 'ready' | 'in_progress' | 'in_review' | 'done' | null) || null,
     link: row.link || undefined,
     cliToolId: (row.cli_tool_id as CLIToolType | null) ?? 'claude',
     selectedAgents: parseSelectedAgents(row.selected_agents),
@@ -382,7 +382,7 @@ export function updateFavorite(
 export function updateStatus(
   db: Database.Database,
   id: string,
-  status: 'todo' | 'doing' | 'done' | null
+  status: 'ready' | 'in_progress' | 'in_review' | 'done' | null
 ): void {
   const stmt = db.prepare(`
     UPDATE worktrees
