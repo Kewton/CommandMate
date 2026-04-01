@@ -107,6 +107,12 @@ interface WorktreeSelectionContextValue {
 /** Provider props */
 interface WorktreeSelectionProviderProps {
   children: ReactNode;
+  /**
+   * External worktrees from useWorktreesCache (Issue #600).
+   * When provided, the provider skips its own fetch/polling logic
+   * and uses this data as the worktree list source.
+   */
+  externalWorktrees?: Worktree[];
 }
 
 /** Reducer action types */
@@ -177,11 +183,20 @@ function worktreeSelectionReducer(
  * </WorktreeSelectionProvider>
  * ```
  */
-export function WorktreeSelectionProvider({ children }: WorktreeSelectionProviderProps) {
+export function WorktreeSelectionProvider({ children, externalWorktrees }: WorktreeSelectionProviderProps) {
+  const useExternal = externalWorktrees !== undefined;
   const [state, dispatch] = useReducer(worktreeSelectionReducer, initialState);
 
-  // Fetch worktrees on mount
+  // Sync external worktrees into state when provided (Issue #600)
+  useEffect(() => {
+    if (useExternal && externalWorktrees) {
+      dispatch({ type: 'SET_WORKTREES', worktrees: externalWorktrees });
+    }
+  }, [useExternal, externalWorktrees]);
+
+  // Fetch worktrees on mount (only when not using external source)
   const fetchWorktrees = useCallback(async () => {
+    if (useExternal) return;
     dispatch({ type: 'SET_LOADING', isLoading: true });
     dispatch({ type: 'SET_ERROR', error: null });
 
@@ -192,7 +207,7 @@ export function WorktreeSelectionProvider({ children }: WorktreeSelectionProvide
       const message = err instanceof Error ? err.message : 'Failed to fetch worktrees';
       dispatch({ type: 'SET_ERROR', error: message });
     }
-  }, []);
+  }, [useExternal]);
 
   // Select a worktree with optimistic update
   const selectWorktree = useCallback(async (id: string) => {
@@ -223,14 +238,18 @@ export function WorktreeSelectionProvider({ children }: WorktreeSelectionProvide
     await fetchWorktrees();
   }, [fetchWorktrees]);
 
-  // Initial fetch
+  // Initial fetch (only when not using external source)
   useEffect(() => {
-    fetchWorktrees();
-  }, [fetchWorktrees]);
+    if (!useExternal) {
+      fetchWorktrees();
+    }
+  }, [fetchWorktrees, useExternal]);
 
-  // Dynamic polling for worktree status updates
+  // Dynamic polling for worktree status updates (only when not using external source)
   // Uses setTimeout for adaptive polling intervals based on worktree activity
   useEffect(() => {
+    if (useExternal) return;
+
     let timeoutId: NodeJS.Timeout | null = null;
     let isMounted = true;
 
@@ -269,7 +288,7 @@ export function WorktreeSelectionProvider({ children }: WorktreeSelectionProvide
         clearTimeout(timeoutId);
       }
     };
-  }, []);
+  }, [useExternal]);
 
   const value: WorktreeSelectionContextValue = {
     selectedWorktreeId: state.selectedWorktreeId,

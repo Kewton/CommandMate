@@ -603,4 +603,83 @@ feature/foo
 - セッションごとの履歴メトリクス
 - などを可視化するため、ChatMessage や Worktree にメタ情報フィールドを拡張する余地を残す。
 
+---
+
+## 11. URL設計・画面遷移 (Issue #600)
+
+### 11.1 URL一覧
+
+| パス | 画面名 | 説明 |
+|------|--------|------|
+| `/` | Home | ダッシュボード。セッションサマリー・ショートカットカード |
+| `/sessions` | Sessions | Worktree一覧。フィルタ・ソート・グループ化 |
+| `/repositories` | Repositories | リポジトリ管理。追加・同期・削除 |
+| `/review` | Review | レビュー待ちWorktree一覧。Done/Approval/Stalledフィルタ |
+| `/more` | More | 設定・外部アプリ・バージョン情報 |
+| `/worktrees/[id]` | Worktree Detail | Worktree詳細。ターミナル・履歴・ファイル・メモ |
+| `/worktrees/[id]?pane=<DeepLinkPane>` | Worktree Detail (deep link) | 特定ペインを直接表示 |
+
+### 11.2 DeepLinkPane 値
+
+`?pane=` クエリパラメータで指定可能な値:
+
+| pane値 | デスクトップ左ペイン | モバイルタブ | 説明 |
+|--------|---------------------|-------------|------|
+| `terminal` | history | Terminal | ターミナル表示（デフォルト） |
+| `history` | history | History | 会話履歴 |
+| `git` | history | History | Gitコミット履歴 |
+| `files` | files | Files | ファイルツリー・エディタ |
+| `notes` | memo | CMATE | メモ・ノート |
+| `logs` | memo | CMATE | 実行ログ |
+| `agent` | memo | CMATE | エージェント設定 |
+| `timer` | memo | CMATE | タイマー |
+| `info` | history | Info | Worktree情報 |
+
+### 11.3 画面遷移図
+
+```
+Home (/)
+  |-- Sessions (/sessions) --> Worktree Detail (/worktrees/[id])
+  |-- Repositories (/repositories)
+  |-- Review (/review) --> Worktree Detail (/worktrees/[id]?pane=terminal)
+  |-- More (/more)
+
+Worktree Detail (/worktrees/[id])
+  |-- ?pane=terminal (default)
+  |-- ?pane=history
+  |-- ?pane=git
+  |-- ?pane=files
+  |-- ?pane=notes / logs / agent / timer
+  |-- ?pane=info
+```
+
+### 11.4 ナビゲーション構造
+
+**PC（デスクトップ）:**
+- Header: 5画面ナビゲーションリンク（Home / Sessions / Repositories / Review / More）
+- Sidebar: Worktree一覧（ソート・グループ化・検索）
+- メインエリア: 選択中のページコンテンツ
+
+**モバイル:**
+- GlobalMobileNav: 下部固定5タブ（Home / Sessions / Review / Repositories / More）
+- Worktree Detail内: MobileTabBar（Terminal / History / Files / CMATE / Info）
+  - MobileTabBarは`onSearchParamsChange`コールバックで`?pane=`を更新
+
+### 11.5 データフロー
+
+```
+useWorktreesCache() ── 唯一のworktree一覧取得元
+  |
+  +-- WorktreesCacheProvider
+  |     |
+  |     +-- WorktreeSelectionProvider (externalWorktrees)
+  |           |-- 選択中worktree ID管理
+  |           |-- 詳細取得 (GET /api/worktrees/:id)
+  |           |-- markAsViewed
+  |
+  +-- useWorktreeList() ── ソート・フィルタ・グループ化
+        |-- Sidebar
+        |-- Sessions画面
+```
+
 ⸻

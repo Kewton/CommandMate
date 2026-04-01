@@ -8,6 +8,7 @@
 
 import { useCallback, useMemo, memo } from 'react';
 import { NotificationDot } from '@/components/common/NotificationDot';
+import type { DeepLinkPane } from '@/types/ui-state';
 
 /**
  * Tab type for mobile view
@@ -28,6 +29,12 @@ export interface MobileTabBarProps {
   hasPrompt?: boolean;
   /** Whether an app update is available (shows badge on Info tab) - Issue #278 */
   hasUpdate?: boolean;
+  /**
+   * Optional callback to sync tab changes with searchParams (Issue #600).
+   * Maps MobileTab to DeepLinkPane before calling.
+   * memo -> 'notes', others map 1:1.
+   */
+  onSearchParamsChange?: (pane: DeepLinkPane) => void;
 }
 
 /**
@@ -82,6 +89,15 @@ const ICON_PATHS = {
  * Tab configurations
  * Order: Terminal, History, Files, Memo, Info
  */
+/**
+ * Map MobileTab to DeepLinkPane for searchParams integration (Issue #600).
+ * memo tab maps to 'notes' (the first sub-pane); others map 1:1.
+ */
+function toDeepLinkPane(tab: MobileTab): DeepLinkPane {
+  if (tab === 'memo') return 'notes';
+  return tab;
+}
+
 const TABS: TabConfig[] = [
   { id: 'terminal', label: 'Terminal', icon: <Icon path={ICON_PATHS.terminal} /> },
   { id: 'history', label: 'History', icon: <Icon path={ICON_PATHS.history} /> },
@@ -102,6 +118,7 @@ export function MobileTabBar({
   hasNewOutput = false,
   hasPrompt = false,
   hasUpdate = false,
+  onSearchParamsChange,
 }: MobileTabBarProps) {
   /**
    * Get tab styles based on active state
@@ -157,7 +174,10 @@ export function MobileTabBar({
           role="tab"
           aria-selected={activeTab === tab.id}
           aria-label={tab.label}
-          onClick={() => onTabChange(tab.id)}
+          onClick={() => {
+            onTabChange(tab.id);
+            onSearchParamsChange?.(toDeepLinkPane(tab.id));
+          }}
           className={getTabStyles(tab.id)}
         >
           {tab.icon}
