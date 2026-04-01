@@ -69,8 +69,8 @@ export interface Worktree {
   sessionStatusByCli?: Partial<Record<CLIToolType, { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean }>>;
   /** Whether this worktree is marked as favorite */
   favorite?: boolean;
-  /** Worktree status: todo, doing, done, or null if not set */
-  status?: 'todo' | 'doing' | 'done' | null;
+  /** Worktree status: ready, in_progress, in_review, done, or null if not set */
+  status?: 'ready' | 'in_progress' | 'in_review' | 'done' | null;
   /** External link URL (e.g., issue tracker, PR, documentation) */
   link?: string;
   /** CLI tool type (claude, codex, gemini, vibe-local) - defaults to 'claude' */

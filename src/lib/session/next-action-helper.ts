@@ -48,19 +48,19 @@ export function getNextAction(
 /**
  * Determine the review status for a worktree.
  *
- * @param worktreeStatus - Worktree's status field (todo/doing/done/null)
+ * @param worktreeStatus - Worktree's status field (ready/in_progress/in_review/done/null)
  * @param sessionStatus - Current session status or null
  * @param promptType - Type of active prompt, if any
  * @param isStalled - Whether the session is considered stalled
  * @returns ReviewStatus if applicable, null otherwise
  */
 export function getReviewStatus(
-  worktreeStatus: 'todo' | 'doing' | 'done' | null,
+  worktreeStatus: 'ready' | 'in_progress' | 'in_review' | 'done' | null,
   sessionStatus: SessionStatus | null,
   promptType: PromptType | null,
   isStalled: boolean
 ): ReviewStatus | null {
-  if (worktreeStatus === 'done') return 'done';
+  if (worktreeStatus === 'in_review') return 'done';
   if (sessionStatus === 'waiting' && promptType === 'approval') return 'approval';
   if (sessionStatus === 'running' && isStalled) return 'stalled';
   return null;

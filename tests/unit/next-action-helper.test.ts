@@ -71,16 +71,16 @@ describe('getNextAction()', () => {
 });
 
 describe('getReviewStatus()', () => {
-  it('should return "done" when worktreeStatus is done', () => {
-    expect(getReviewStatus('done', null, null, false)).toBe('done');
+  it('should return "done" when worktreeStatus is in_review', () => {
+    expect(getReviewStatus('in_review', null, null, false)).toBe('done');
   });
 
-  it('should return "done" regardless of session status when worktreeStatus is done', () => {
-    expect(getReviewStatus('done', 'running', 'approval', true)).toBe('done');
+  it('should return "done" regardless of session status when worktreeStatus is in_review', () => {
+    expect(getReviewStatus('in_review', 'running', 'approval', true)).toBe('done');
   });
 
   it('should return "approval" when session is waiting with approval prompt', () => {
-    expect(getReviewStatus('doing', 'waiting', 'approval', false)).toBe('approval');
+    expect(getReviewStatus('in_progress', 'waiting', 'approval', false)).toBe('approval');
   });
 
   it('should return "approval" when worktreeStatus is null and session waiting with approval', () => {
@@ -88,7 +88,7 @@ describe('getReviewStatus()', () => {
   });
 
   it('should return "stalled" when session is running and stalled', () => {
-    expect(getReviewStatus('doing', 'running', null, true)).toBe('stalled');
+    expect(getReviewStatus('in_progress', 'running', null, true)).toBe('stalled');
   });
 
   it('should return "stalled" when worktreeStatus is null and running+stalled', () => {
@@ -96,36 +96,36 @@ describe('getReviewStatus()', () => {
   });
 
   it('should return null when no review condition is met', () => {
-    expect(getReviewStatus('todo', 'running', null, false)).toBeNull();
-    expect(getReviewStatus('doing', 'ready', null, false)).toBeNull();
+    expect(getReviewStatus('ready', 'running', null, false)).toBeNull();
+    expect(getReviewStatus('in_progress', 'ready', null, false)).toBeNull();
     expect(getReviewStatus(null, 'idle', null, false)).toBeNull();
     expect(getReviewStatus(null, null, null, false)).toBeNull();
   });
 
   it('should return null when waiting but not approval prompt', () => {
-    expect(getReviewStatus('doing', 'waiting', 'yes_no', false)).toBeNull();
-    expect(getReviewStatus('doing', 'waiting', 'multiple_choice', false)).toBeNull();
+    expect(getReviewStatus('in_progress', 'waiting', 'yes_no', false)).toBeNull();
+    expect(getReviewStatus('in_progress', 'waiting', 'multiple_choice', false)).toBeNull();
   });
 
-  it('should prioritize done over approval', () => {
-    expect(getReviewStatus('done', 'waiting', 'approval', false)).toBe('done');
+  it('should prioritize in_review over approval', () => {
+    expect(getReviewStatus('in_review', 'waiting', 'approval', false)).toBe('done');
   });
 
-  it('should prioritize done over stalled', () => {
-    expect(getReviewStatus('done', 'running', null, true)).toBe('done');
+  it('should prioritize in_review over stalled', () => {
+    expect(getReviewStatus('in_review', 'running', null, true)).toBe('done');
   });
 
   it('should prioritize approval over stalled when both conditions met', () => {
     // waiting + approval + stalled: approval wins
-    expect(getReviewStatus('doing', 'waiting', 'approval', true)).toBe('approval');
+    expect(getReviewStatus('in_progress', 'waiting', 'approval', true)).toBe('approval');
   });
 
   it('should handle all worktreeStatus values', () => {
-    const statuses: Array<'todo' | 'doing' | 'done' | null> = ['todo', 'doing', 'done', null];
+    const statuses: Array<'ready' | 'in_progress' | 'in_review' | 'done' | null> = ['ready', 'in_progress', 'in_review', 'done', null];
     for (const ws of statuses) {
       // Should not throw
       const result = getReviewStatus(ws, 'idle', null, false);
-      if (ws === 'done') {
+      if (ws === 'in_review') {
         expect(result).toBe('done');
       } else {
         expect(result).toBeNull();

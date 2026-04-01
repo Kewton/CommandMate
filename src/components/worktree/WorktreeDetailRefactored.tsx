@@ -626,6 +626,23 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     setDiffFilePath(null);
   }, []);
 
+  /** Handle worktree status change via dropdown */
+  const handleWorktreeStatusChange = useCallback(async (newStatus: 'ready' | 'in_progress' | 'in_review' | 'done' | null) => {
+    try {
+      const response = await fetch(`/api/worktrees/${worktreeId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (response.ok) {
+        const updated = await response.json();
+        setWorktree(updated);
+      }
+    } catch {
+      // Silently handle
+    }
+  }, [worktreeId]);
+
   /** Handle info button click - open info modal */
   const handleInfoClick = useCallback(() => {
     setIsInfoModalOpen(true);
@@ -1551,6 +1568,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onInfoClick={handleInfoClick}
             onMenuClick={toggle}
             hasUpdate={hasUpdate}
+            worktreeStatus={worktree?.status ?? null}
+            onWorktreeStatusChange={handleWorktreeStatusChange}
           />
           {/* Issue #111: Branch mismatch warning */}
           {worktree?.gitStatus && (

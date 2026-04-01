@@ -12,7 +12,41 @@ import { useState, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { AppShell } from '@/components/layout';
 import { useWorktreesCache } from '@/hooks/useWorktreesCache';
+import { deriveCliStatus } from '@/types/sidebar';
+import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
+import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
+import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
 import type { Worktree } from '@/types/models';
+import type { BranchStatus } from '@/types/sidebar';
+
+/** Small CLI status dot for Sessions list */
+function CliDot({ status, label }: { status: BranchStatus; label: string }) {
+  const config = SIDEBAR_STATUS_CONFIG[status];
+  const title = `${label}: ${config.label}`;
+  const base = 'w-2.5 h-2.5 rounded-full flex-shrink-0';
+
+  if (config.type === 'spinner') {
+    return (
+      <span
+        className={`${base} border-2 border-t-transparent animate-spin ${config.className}`}
+        title={title}
+      />
+    );
+  }
+  return <span className={`${base} ${config.className}`} title={title} />;
+}
+
+/** Format status display label */
+function formatStatus(status: string | null | undefined): string {
+  if (!status) return '';
+  switch (status) {
+    case 'ready': return 'Ready';
+    case 'in_progress': return 'In Progress';
+    case 'in_review': return 'In Review';
+    case 'done': return 'Done';
+    default: return status;
+  }
+}
 
 export default function SessionsPage() {
   const { worktrees, isLoading, error } = useWorktreesCache();
@@ -76,46 +110,70 @@ export default function SessionsPage() {
                 {filterText ? 'No matching sessions found.' : 'No sessions yet.'}
               </div>
             ) : (
-              filteredWorktrees.map((wt: Worktree) => (
-                <Link
-                  key={wt.id}
-                  href={`/worktrees/${wt.id}`}
-                  className="block bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700 hover:border-cyan-300 dark:hover:border-cyan-700 transition-colors"
-                  data-testid={`session-item-${wt.id}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                        {wt.name}
+              filteredWorktrees.map((wt: Worktree) => {
+                const agents = wt.selectedAgents ?? DEFAULT_SELECTED_AGENTS;
+                return (
+                  <Link
+                    key={wt.id}
+                    href={`/worktrees/${wt.id}`}
+                    className="block bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700 hover:border-cyan-300 dark:hover:border-cyan-700 transition-colors"
+                    data-testid={`session-item-${wt.id}`}
+                  >
+                    {/* Row 1: Name, Agent statuses */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                          {wt.name}
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                          {wt.repositoryName}
+                        </div>
                       </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                        {wt.repositoryName}
+
+                      {/* Per-agent status dots */}
+                      <div className="flex items-center gap-2 ml-4 flex-shrink-0">
+                        {agents.map((agent) => {
+                          const agentStatus = deriveCliStatus(wt.sessionStatusByCli?.[agent]);
+                          return (
+                            <div key={agent} className="flex items-center gap-1" data-testid={`session-agent-${agent}`}>
+                              <CliDot status={agentStatus} label={getCliToolDisplayName(agent)} />
+                              <span className="text-xs text-gray-500 dark:text-gray-400">
+                                {getCliToolDisplayName(agent)}
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 ml-4">
-                      {wt.cliToolId && (
-                        <span className="text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
-                          {wt.cliToolId}
-                        </span>
-                      )}
-                      {wt.status && (
-                        <span className={`text-xs px-2 py-0.5 rounded ${
+
+                    {/* Row 2: Description (if present) */}
+                    {wt.description && (
+                      <div className="mt-2">
+                        <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 whitespace-pre-wrap">
+                          {wt.description}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Row 3: Status badge (read-only) */}
+                    {wt.status && (
+                      <div className="mt-2">
+                        <span className={`px-2 py-0.5 text-xs font-medium rounded ${
                           wt.status === 'done'
                             ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
-                            : wt.status === 'doing'
-                            ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+                            : wt.status === 'in_review'
+                            ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400'
+                            : wt.status === 'in_progress'
+                            ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-400'
                             : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
                         }`}>
-                          {wt.status}
+                          {formatStatus(wt.status)}
                         </span>
-                      )}
-                      {wt.isSessionRunning && (
-                        <span className="w-2 h-2 rounded-full bg-green-500" title="Running" />
-                      )}
-                    </div>
-                  </div>
-                </Link>
-              ))
+                      </div>
+                    )}
+                  </Link>
+                );
+              })
             )}
           </div>
         )}

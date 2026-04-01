@@ -34,8 +34,7 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
   const [isKilling, setIsKilling] = useState(false);
   const [isFavorite, setIsFavorite] = useState(favorite || false);
   const [isTogglingFavorite, setIsTogglingFavorite] = useState(false);
-  const [currentStatus, setCurrentStatus] = useState<'todo' | 'doing' | 'done' | null>(status || null);
-  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const currentStatus = status || null;
 
   const t = useTranslations();
   const locale = useLocale();
@@ -94,30 +93,6 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
       alert(`${t('worktree.errors.failedToUpdateFavorite')}: ${errorMessage}`);
     } finally {
       setIsTogglingFavorite(false);
-    }
-  };
-
-  /**
-   * Handle status change
-   */
-  const handleStatusChange = async (newStatus: 'todo' | 'doing' | 'done' | null, e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    try {
-      setIsUpdatingStatus(true);
-      await worktreeApi.updateStatus(id, newStatus);
-      setCurrentStatus(newStatus);
-
-      // Notify parent component to refresh
-      if (onStatusChanged) {
-        onStatusChanged();
-      }
-    } catch (err) {
-      const errorMessage = handleApiError(err);
-      alert(`${t('worktree.errors.failedToUpdateStatus')}: ${errorMessage}`);
-    } finally {
-      setIsUpdatingStatus(false);
     }
   };
 
@@ -245,56 +220,22 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
               </div>
             )}
 
-            {/* Status - Azure DevOps style */}
-            <div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Status</p>
-              <div className="flex gap-1 flex-wrap">
-                <button
-                  onClick={(e) => handleStatusChange(null, e)}
-                  disabled={isUpdatingStatus}
-                  className={`px-2 py-1 text-xs font-medium rounded border transition-colors disabled:opacity-50 ${
-                    currentStatus === null
-                      ? 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-400 dark:border-gray-500'
-                      : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
-                  }`}
-                >
-                  Not set
-                </button>
-                <button
-                  onClick={(e) => handleStatusChange('todo', e)}
-                  disabled={isUpdatingStatus}
-                  className={`px-2 py-1 text-xs font-medium rounded border transition-colors disabled:opacity-50 ${
-                    currentStatus === 'todo'
-                      ? 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-400 dark:border-gray-500'
-                      : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
-                  }`}
-                >
-                  ToDo
-                </button>
-                <button
-                  onClick={(e) => handleStatusChange('doing', e)}
-                  disabled={isUpdatingStatus}
-                  className={`px-2 py-1 text-xs font-medium rounded border transition-colors disabled:opacity-50 ${
-                    currentStatus === 'doing'
-                      ? 'bg-cyan-100 dark:bg-cyan-900 text-cyan-700 dark:text-cyan-300 border-cyan-400 dark:border-cyan-600'
-                      : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:bg-cyan-50 dark:hover:bg-gray-700'
-                  }`}
-                >
-                  Doing
-                </button>
-                <button
-                  onClick={(e) => handleStatusChange('done', e)}
-                  disabled={isUpdatingStatus}
-                  className={`px-2 py-1 text-xs font-medium rounded border transition-colors disabled:opacity-50 ${
-                    currentStatus === 'done'
-                      ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 border-green-400 dark:border-green-600'
-                      : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:bg-green-50 dark:hover:bg-gray-700'
-                  }`}
-                >
-                  Done
-                </button>
+            {/* Status badge (read-only in card; editable in detail header) */}
+            {currentStatus && (
+              <div>
+                <span className={`px-2 py-1 text-xs font-medium rounded ${
+                  currentStatus === 'done'
+                    ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
+                    : currentStatus === 'in_review'
+                    ? 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300'
+                    : currentStatus === 'in_progress'
+                    ? 'bg-cyan-100 dark:bg-cyan-900 text-cyan-700 dark:text-cyan-300'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                }`}>
+                  {currentStatus === 'in_progress' ? 'In Progress' : currentStatus === 'in_review' ? 'In Review' : currentStatus === 'ready' ? 'Ready' : 'Done'}
+                </span>
               </div>
-            </div>
+            )}
 
             {/* Updated At */}
             {relativeTime && (
