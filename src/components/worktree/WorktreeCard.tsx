@@ -29,7 +29,7 @@ export interface WorktreeCardProps {
  * <WorktreeCard worktree={worktree} />
  * ```
  */
-export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: WorktreeCardProps) {
+export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
   const { id, name, description, updatedAt, isSessionRunning, isWaitingForResponse, favorite, status, link, repositoryName, nextAction } = worktree;
   const [isKilling, setIsKilling] = useState(false);
   const [isFavorite, setIsFavorite] = useState(favorite || false);

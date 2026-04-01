@@ -13,7 +13,7 @@ import Link from 'next/link';
 import { AppShell } from '@/components/layout';
 import { useWorktreesCache } from '@/hooks/useWorktreesCache';
 import { deriveCliStatus } from '@/types/sidebar';
-import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
+import { getCliToolDisplayName } from '@/lib/cli-tools/types';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
 import type { Worktree } from '@/types/models';

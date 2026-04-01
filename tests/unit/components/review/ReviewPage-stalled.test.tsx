@@ -1,6 +1,6 @@
 /**
- * Unit tests for Review page stalled filter
- * Issue #600: UX refresh - Phase 3 stalled tab
+ * Unit tests for Review page filters (In Review / Approval / Stalled)
+ * Issue #600: UX refresh
  *
  * @vitest-environment jsdom
  */
@@ -23,8 +23,8 @@ vi.mock('next/navigation', () => ({
 
 // Mock next/link
 vi.mock('next/link', () => ({
-  default: ({ children, href }: { children: React.ReactNode; href: string }) =>
-    React.createElement('a', { href }, children),
+  default: ({ children, href, ...props }: { children: React.ReactNode; href: string; [key: string]: unknown }) =>
+    React.createElement('a', { href, ...props }, children),
 }));
 
 // Mock AppShell
@@ -33,68 +33,56 @@ vi.mock('@/components/layout', () => ({
     React.createElement('div', { 'data-testid': 'app-shell' }, children),
 }));
 
-// Mock ReviewCard
-vi.mock('@/components/review/ReviewCard', () => ({
-  ReviewCard: ({ worktreeId, status, nextAction, children }: {
-    worktreeId: string;
-    status: string;
-    nextAction: string;
-    children?: React.ReactNode;
-  }) => React.createElement('div', {
-    'data-testid': `review-card-${worktreeId}`,
-    'data-status': status,
-  }, [nextAction, children]),
-}));
-
-// Mock SimpleMessageInput
-vi.mock('@/components/review/SimpleMessageInput', () => ({
-  SimpleMessageInput: () => React.createElement('div', { 'data-testid': 'simple-input' }),
-}));
-
 // Mock review-config
 vi.mock('@/config/review-config', () => ({
-  REVIEW_POLL_INTERVAL_MS: 60000, // Long interval to avoid interference
+  REVIEW_POLL_INTERVAL_MS: 60000,
 }));
 
-// Mock fetch
+// Mock status-colors
+vi.mock('@/config/status-colors', () => ({
+  SIDEBAR_STATUS_CONFIG: {
+    idle: { type: 'dot', className: 'bg-gray-400', label: 'Idle' },
+    ready: { type: 'dot', className: 'bg-cyan-500', label: 'Ready' },
+    running: { type: 'spinner', className: 'border-green-500', label: 'Running' },
+    waiting: { type: 'dot', className: 'bg-yellow-500', label: 'Waiting' },
+    generating: { type: 'spinner', className: 'border-blue-500', label: 'Generating' },
+  },
+}));
+
 const mockWorktrees = [
   {
-    id: 'wt-done',
-    name: 'feature/done',
+    id: 'wt-in-review',
+    name: 'feature/in-review',
     repositoryName: 'repo-1',
-    status: 'done',
-    reviewStatus: 'done',
-    nextAction: 'Review completed',
+    status: 'in_review',
     cliToolId: 'claude',
+    selectedAgents: ['claude'],
   },
   {
     id: 'wt-approval',
     name: 'feature/approval',
     repositoryName: 'repo-1',
-    status: 'doing',
-    reviewStatus: 'approval',
-    nextAction: 'Approve / Reject',
+    status: 'in_progress',
     isWaitingForResponse: true,
     cliToolId: 'claude',
+    selectedAgents: ['claude'],
   },
   {
     id: 'wt-stalled',
     name: 'feature/stalled',
     repositoryName: 'repo-1',
-    status: 'doing',
-    reviewStatus: 'stalled',
-    nextAction: 'Check stalled',
+    status: 'in_progress',
     isStalled: true,
     cliToolId: 'claude',
+    selectedAgents: ['claude'],
   },
   {
     id: 'wt-running',
     name: 'feature/running',
     repositoryName: 'repo-1',
-    status: 'doing',
-    reviewStatus: null,
-    nextAction: 'Running...',
+    status: 'in_progress',
     cliToolId: 'claude',
+    selectedAgents: ['claude'],
   },
 ];
 
@@ -108,12 +96,42 @@ beforeEach(() => {
 
 import ReviewPage from '@/app/review/page';
 
-describe('Review page stalled filter', () => {
-  it('should render Stalled filter tab', async () => {
+describe('Review page filters', () => {
+  it('should render all three filter tabs', async () => {
     render(React.createElement(ReviewPage));
     await waitFor(() => {
+      expect(screen.getByTestId('review-filter-in_review')).toBeDefined();
+      expect(screen.getByTestId('review-filter-approval')).toBeDefined();
       expect(screen.getByTestId('review-filter-stalled')).toBeDefined();
     });
+  });
+
+  it('should show in_review worktrees by default', async () => {
+    render(React.createElement(ReviewPage));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('review-item-wt-in-review')).toBeDefined();
+    });
+
+    expect(screen.queryByTestId('review-item-wt-approval')).toBeNull();
+    expect(screen.queryByTestId('review-item-wt-stalled')).toBeNull();
+  });
+
+  it('should show approval worktrees when Approval tab is active', async () => {
+    render(React.createElement(ReviewPage));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('review-list')).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByTestId('review-filter-approval'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('review-item-wt-approval')).toBeDefined();
+    });
+
+    expect(screen.queryByTestId('review-item-wt-in-review')).toBeNull();
+    expect(screen.queryByTestId('review-item-wt-stalled')).toBeNull();
   });
 
   it('should show stalled worktrees when Stalled tab is active', async () => {
@@ -123,17 +141,14 @@ describe('Review page stalled filter', () => {
       expect(screen.getByTestId('review-list')).toBeDefined();
     });
 
-    // Click stalled tab
     fireEvent.click(screen.getByTestId('review-filter-stalled'));
 
     await waitFor(() => {
-      expect(screen.getByTestId('review-card-wt-stalled')).toBeDefined();
+      expect(screen.getByTestId('review-item-wt-stalled')).toBeDefined();
     });
 
-    // Should not show done or approval worktrees
-    expect(screen.queryByTestId('review-card-wt-done')).toBeNull();
-    expect(screen.queryByTestId('review-card-wt-approval')).toBeNull();
-    expect(screen.queryByTestId('review-card-wt-running')).toBeNull();
+    expect(screen.queryByTestId('review-item-wt-in-review')).toBeNull();
+    expect(screen.queryByTestId('review-item-wt-approval')).toBeNull();
   });
 
   it('should fetch with include=review parameter', async () => {
@@ -142,15 +157,5 @@ describe('Review page stalled filter', () => {
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith('/api/worktrees?include=review');
     });
-  });
-
-  it('should show done worktrees by default', async () => {
-    render(React.createElement(ReviewPage));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('review-card-wt-done')).toBeDefined();
-    });
-
-    expect(screen.queryByTestId('review-card-wt-stalled')).toBeNull();
   });
 });

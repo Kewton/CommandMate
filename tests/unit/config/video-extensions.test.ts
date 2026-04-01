@@ -44,8 +44,8 @@ describe('VIDEO_EXTENSIONS', () => {
 });
 
 describe('VIDEO_MAX_SIZE_BYTES', () => {
-  it('should be 15MB', () => {
-    expect(VIDEO_MAX_SIZE_BYTES).toBe(15 * 1024 * 1024);
+  it('should be 100MB', () => {
+    expect(VIDEO_MAX_SIZE_BYTES).toBe(100 * 1024 * 1024);
   });
 });
 
@@ -180,8 +180,8 @@ describe('validateVideoMagicBytes', () => {
 
 describe('validateVideoContent', () => {
   describe('file size validation', () => {
-    it('should reject files exceeding 15MB', () => {
-      const largeBuffer = Buffer.alloc(15 * 1024 * 1024 + 1);
+    it('should reject files exceeding 100MB', () => {
+      const largeBuffer = Buffer.alloc(100 * 1024 * 1024 + 1);
       // Set valid magic bytes
       largeBuffer[4] = 0x66;
       largeBuffer[5] = 0x74;
@@ -190,11 +190,11 @@ describe('validateVideoContent', () => {
 
       const result = validateVideoContent('.mp4', largeBuffer);
       expect(result.valid).toBe(false);
-      expect(result.error).toContain('15MB');
+      expect(result.error).toContain('100MB');
     });
 
-    it('should accept files at exactly 15MB with valid magic bytes', () => {
-      const maxBuffer = Buffer.alloc(15 * 1024 * 1024);
+    it('should accept files at exactly 100MB with valid magic bytes', () => {
+      const maxBuffer = Buffer.alloc(100 * 1024 * 1024);
       maxBuffer[4] = 0x66;
       maxBuffer[5] = 0x74;
       maxBuffer[6] = 0x79;
