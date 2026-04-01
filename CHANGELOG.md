@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-02
+
+### Added
+- UX Refresh: 5画面構成（Home / Sessions / Repositories / Review / More）への全面リニューアル (Issue #600)
+  - Phase 1: Foundation（共通フック、キャッシュプロバイダー、レイアウト設定）
+  - Phase 2: Screen framework（Sessions / Repositories / Review / More画面、モバイルグローバルナビ）
+  - Phase 3: Deep link、API拡張、Review stalled検出
+  - Phase 4: 統合・デモGIF更新・動画アップロード上限100MB
+- UX: ステータスシステム刷新とReviewページフィルター (Issue #600)
+- UI: WorktreeDetailHeaderにPC用Homeリンクを追加 (Issue #600)
+
+### Fixed
+- Worktree: stale CLI tab responsesのガード処理 (Issue #602)
+- Gemini: ステータススピナーの不一致を修正
+- Gemini: スラッシュコマンドの復元
+- Commands: Codex共有スラッシュコマンドの表示修正
+- CI: lint/テストエラーの修正 (Issue #600)
+
+### Docs
+- UX Refresh設計レポート・CLAUDE.md更新 (Issue #600)
+
 ## [0.4.16] - 2026-04-01
 
 ### Added
