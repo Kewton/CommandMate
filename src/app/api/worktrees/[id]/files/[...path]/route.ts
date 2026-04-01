@@ -213,7 +213,7 @@ export async function GET(
       try {
         // [DRY] Check file size before reading full content (memory efficiency)
         const fileStat = await stat(absolutePath);
-        const maxSizeBytes = 15 * 1024 * 1024; // VIDEO_MAX_SIZE_BYTES
+        const maxSizeBytes = 100 * 1024 * 1024; // VIDEO_MAX_SIZE_BYTES
         if (fileStat.size > maxSizeBytes) {
           return createErrorResponse('FILE_TOO_LARGE', `File size exceeds ${maxSizeBytes / 1024 / 1024}MB limit`);
         }

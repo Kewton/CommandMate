@@ -16,8 +16,8 @@ const nextConfig = {
   },
   experimental: {
     serverActions: {
-      // [CONS-006] Increased to 16mb for video file upload support (15MB + overhead) - Issue #302
-      bodySizeLimit: '16mb',
+      // [CONS-006] Increased to 105mb for video file upload support (100MB + overhead) - Issue #302, #600
+      bodySizeLimit: '105mb',
     },
   },
   async headers() {
