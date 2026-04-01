@@ -448,4 +448,61 @@ describe('status-detector', () => {
       expect(result.reason).toBe('thinking_indicator');
     });
   });
+
+  // ==========================================================================
+  // Issue #604: Trailing blank lines after prompt
+  // ==========================================================================
+  describe('Issue #604: trailing blank lines after prompt', () => {
+    it('should detect input_prompt when 150+ blank lines follow the prompt', () => {
+      // Simulate tmux buffer: Claude prompt followed by 200 empty lines
+      // (tmux terminal padding). The status detector strips trailing empty
+      // lines before windowing, so the prompt should still be detected.
+      const promptLine = `${PROMPT} `;
+      const blankLines = Array(200).fill('').join('\n');
+      const output = [
+        'Some response content',
+        SEPARATOR,
+        promptLine,
+        blankLines,
+      ].join('\n');
+
+      const result = detectSessionStatus(output, 'claude');
+      expect(result.status).toBe('ready');
+      expect(result.reason).toBe('input_prompt');
+    });
+
+    it('should detect input_prompt when 500 blank lines follow the prompt', () => {
+      // Even with a very large number of trailing blank lines, the prompt
+      // should be correctly detected after stripping empty lines.
+      const promptLine = `${PROMPT} `;
+      const blankLines = Array(500).fill('').join('\n');
+      const output = [
+        SEPARATOR,
+        'Response content here',
+        SEPARATOR,
+        promptLine,
+        blankLines,
+      ].join('\n');
+
+      const result = detectSessionStatus(output, 'claude');
+      expect(result.status).toBe('ready');
+      expect(result.reason).toBe('input_prompt');
+    });
+
+    it('should detect input_prompt with recommended command after blank lines', () => {
+      // Claude prompt with a suggested command, followed by blank lines
+      const promptLine = `${PROMPT} /work-plan`;
+      const blankLines = Array(200).fill('').join('\n');
+      const output = [
+        'Response content',
+        SEPARATOR,
+        promptLine,
+        blankLines,
+      ].join('\n');
+
+      const result = detectSessionStatus(output, 'claude');
+      expect(result.status).toBe('ready');
+      expect(result.reason).toBe('input_prompt');
+    });
+  });
 });
