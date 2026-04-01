@@ -10,6 +10,7 @@
 'use client';
 
 import React, { memo } from 'react';
+import Link from 'next/link';
 import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
 import type { SessionStatus } from '@/lib/detection/status-detector';
 
@@ -72,6 +73,18 @@ export const WorktreeDetailHeader = memo(function WorktreeDetailHeader({
       data-testid="worktree-detail-header"
       className="flex items-center gap-3 px-4 py-2 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 text-sm overflow-x-auto"
     >
+      {/* Home link */}
+      <Link
+        href="/"
+        data-testid="header-home-link"
+        className="text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300 flex-shrink-0"
+        title="Home"
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4" />
+        </svg>
+      </Link>
+
       {/* Repository */}
       <span
         data-testid="header-repo-name"
