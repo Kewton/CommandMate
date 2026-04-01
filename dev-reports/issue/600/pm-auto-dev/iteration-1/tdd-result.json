@@ -28,6 +28,8 @@
     "tests/unit/useWorktreeList.test.ts",
     "tests/unit/useWorktreesCache.test.ts"
   ],
-  "commits": [],
+  "commits": [
+    "275da40a: feat(ux): implement Phase 1 foundation for UX refresh (#600)"
+  ],
   "message": "Phase 1 TDD implementation complete. 8 tasks implemented: review-config constants, DeepLinkPane type, getNextAction/getReviewStatus helpers, stalled-detector, useLayoutConfig, useSendMessage, useWorktreeList, useWorktreesCache, isDeepLinkPane validator. 80 new tests all passing. 0 ESLint errors, 0 TypeScript errors. All 298 existing test files (5775 tests) continue to pass with no regressions."
 }

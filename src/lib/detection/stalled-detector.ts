@@ -9,8 +9,7 @@
  */
 
 import { STALLED_THRESHOLD_MS } from '@/config/review-config';
-import { getLastServerResponseTimestamp } from '@/lib/polling/auto-yes-manager';
-import { buildCompositeKey } from '@/lib/polling/auto-yes-manager';
+import { getLastServerResponseTimestamp, buildCompositeKey } from '@/lib/polling/auto-yes-manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 /**

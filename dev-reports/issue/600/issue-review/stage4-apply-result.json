@@ -1,0 +1,102 @@
+{
+  "issue_number": 600,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目 - 影響範囲）",
+  "action": "apply",
+  "apply_date": "2026-04-01",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "S3-001",
+        "status": "applied",
+        "change_summary": "受け入れ条件にHome画面から各専門画面への1クリック導線保証を追記。実装タスクPhase 1に到達性保証タスクを追加"
+      },
+      {
+        "id": "S3-002",
+        "status": "applied",
+        "change_summary": "deep link戦略セクションに段階的実装方針を追記。実装タスクをPhase 1/2/3に分割し、WorktreeDetailRefactoredの段階的移行とテスト修正計画を明記"
+      },
+      {
+        "id": "S3-003",
+        "status": "applied",
+        "change_summary": "認証要件セクションをワイルドカードmatcherの説明に修正。実装タスクを「マッチャーに追加する」から「テストで検証する」に変更。auth-middleware.test.tsに新規URL4件の検証ケース追加を明記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S3-004",
+        "status": "applied",
+        "change_summary": "Review画面ステータス定義セクションにStalled判定実装方針を追記（response-pollerのタイムスタンプ活用、ポーリング間隔5-10秒）"
+      },
+      {
+        "id": "S3-005",
+        "status": "applied",
+        "change_summary": "Review画面用API実装方針を追記（既存worktrees APIに?include=reviewパラメータ追加方式）"
+      },
+      {
+        "id": "S3-006",
+        "status": "applied",
+        "change_summary": "新規ファイル・変更ファイルの見込みセクションを新設。コンポーネント再利用戦略（WorktreeList hooks抽出、RepositoryManager/ExternalAppsManager移動）を明記"
+      },
+      {
+        "id": "S3-007",
+        "status": "applied",
+        "change_summary": "テスト戦略セクションを新設。影響テスト23ファイル以上、修正優先順位（Phase 1-3）を明記。Phase 3にテストタスク9項目を詳細化"
+      },
+      {
+        "id": "S3-008",
+        "status": "applied",
+        "change_summary": "ナビゲーション構造のモバイルセクションにGlobalMobileNav.tsx作成方針とusePathname()による排他制御を追記"
+      },
+      {
+        "id": "S3-009",
+        "status": "applied",
+        "change_summary": "実装上の注意事項セクションを新設。Home画面集計のパフォーマンス方針（クライアントサイド集計、50超時に集計API検討）を明記"
+      },
+      {
+        "id": "S3-010",
+        "status": "applied",
+        "change_summary": "reply仕様セクションをMessageInput variant='simplified'方式に修正。新規コンポーネント方式を避ける理由も記載"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S3-011",
+        "status": "applied",
+        "change_summary": "サイドバーセクションにSidebarContextのautoCollapsedPaths設定追加を明記"
+      },
+      {
+        "id": "S3-012",
+        "status": "applied",
+        "change_summary": "後方互換性セクション・実装タスクPhase 3にAPI追加フィールドのオプショナル化とCLI側後方互換性維持を明記"
+      },
+      {
+        "id": "S3-013",
+        "status": "applied",
+        "change_summary": "Phase 3タスクにdocs/architecture.mdへのURL設計・画面遷移図・ナビゲーション構造セクション追加を明記"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 13,
+    "applied": 13,
+    "skipped": 0
+  },
+  "changes_made": [
+    "認証要件セクション: ワイルドカードmatcher説明に修正、テスト検証方針に変更",
+    "Review画面ステータス定義セクション: Stalled判定実装方針・API拡張方針・ポーリング間隔を追記",
+    "reply仕様セクション: MessageInput variant='simplified'方式に具体化",
+    "サイドバーセクション: SidebarContext autoCollapsedPaths追加を明記",
+    "ナビゲーション構造セクション: Header.tsx改修規模、GlobalMobileNav.tsx排他制御を追記",
+    "deep link戦略セクション: 段階的実装推奨、テスト影響範囲を追記",
+    "新規ファイル・変更ファイルの見込みセクション: 新設（約10新規、主要変更ファイル一覧、再利用戦略）",
+    "実装タスク: Phase 1/2/3に分割、テストタスク詳細化、認証タスク修正",
+    "受け入れ条件: Home画面1クリック導線、認証テスト検証、API後方互換性を追加",
+    "実装上の注意事項セクション: 新設（パフォーマンス、テスト戦略、後方互換性）",
+    "レビュー履歴: Stage 3セクション追加（Must Fix 3件、Should Fix 7件、Nice to Have 3件）"
+  ],
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/600"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "stage": 5,
+  "focus": "通常（2回目）",
+  "reviewer": "codex",
+  "findings": [
+    {
+      "id": "S5-001",
+      "severity": "Should Fix",
+      "title": "Stalled判定の根拠がIssue本文内で食い違っている",
+      "description": "Review画面のステータス定義表では Stalled の根拠を「tmux capture のタイムスタンプ比較」としている一方、実装方針の箇条書きでは `getLastServerResponseTimestamp()` を使う方針になっていた。現在のコードでは `detectWorktreeSessionStatus()` が `getLastServerResponseTimestamp()` を使っており、Issue本文の表記をそろえないと実装判断がぶれる。",
+      "suggestion": "Stalled の算出根拠を `getLastServerResponseTimestamp()` ベースに統一し、参照先も現在の実コードに合わせて明記する。"
+    },
+    {
+      "id": "S5-002",
+      "severity": "Should Fix",
+      "title": "deep link の pane 定義がモバイル既存タブ語彙と一致していない",
+      "description": "Issue本文では `MobileTabBar` も同じ `searchParams` を参照・更新する方針だが、定義済みの pane 値は `history|terminal|files|logs|notes|git` のみで、既存の mobile tab で使っている `memo` / `info` 系や `NotesAndLogsPane` の subTab との対応が不明だった。現コードの mobile tab は `terminal | history | files | memo | info` であり、このままでは deep link 設計を一意に実装できない。",
+      "suggestion": "pane 値と既存UIの対応表をIssue本文へ追加し、少なくとも `terminal|history|files|notes|logs|agent|timer|git|info` のマッピングを定義する。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 2,
+  "nice_to_have_count": 0
+}

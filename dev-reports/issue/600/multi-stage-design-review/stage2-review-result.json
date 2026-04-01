@@ -1,0 +1,119 @@
+{
+  "stage": 2,
+  "focus": "整合性",
+  "reviewer": "opus",
+  "findings": [
+    {
+      "id": "DR2-001",
+      "severity": "Must Fix",
+      "category": "Issue整合性",
+      "title": "Issue本文と設計方針書でMessageInputの実装方針が矛盾している",
+      "description": "Issue #600 本文の「/worktrees/:id/reply の仕様」セクションには「既存の MessageInput コンポーネントに variant='simplified' propsを追加して機能を制限する方式で実装する」と明記されている。一方、設計方針書はStage 1レビュー（DR1-001）を反映し、セクション3-2で「MessageInputにvariantを追加するのではなく、送信ロジックをカスタムフック(useSendMessage)に抽出し、軽量版(SimpleMessageInput)を別コンポーネントとして新設する」と記載されている。Issue本文の「新規コンポーネント方式はMessageInputとの機能乖離リスクがあるため避ける」という記載と設計方針書の方針が直接矛盾する。設計方針書側の変更（DR1-001対応）が正しい判断であるが、Issue本文が未更新のまま残っている。",
+      "location": "Issue #600 本文「/worktrees/:id/reply の仕様」 vs 設計方針書セクション3-2",
+      "suggestion": "Issue #600 本文の「/worktrees/:id/reply の仕様」セクションを更新し、設計方針書と一致させる。具体的には variant='simplified' の記載を削除し、SimpleMessageInput + useSendMessage() 方式に書き換える。「新規コンポーネント方式は機能乖離リスクがあるため避ける」の記載も「送信ロジックを useSendMessage() フックで共有することで機能乖離リスクを回避する」に変更する。"
+    },
+    {
+      "id": "DR2-002",
+      "severity": "Should Fix",
+      "category": "Issue整合性",
+      "title": "Issue本文と設計方針書でSidebarContextのautoCollapsedPaths追加方針が矛盾",
+      "description": "Issue #600 本文の「サイドバーの扱い」セクションには「SidebarContext に autoCollapsedPaths: string[] 設定を追加し、特定パスでの自動折りたたみを宣言的に制御可能にする」と記載されている。一方、設計方針書はStage 1レビュー（DR1-003）を反映し、セクション3-4で useLayoutConfig() フックに集約する方針に変更済み。セクション11のPhase 1でも「SidebarContext.tsx - autoCollapsedPaths 追加は不要に [DR1-003]」と明記されている。Issue本文側が未更新。",
+      "location": "Issue #600 本文「サイドバーの扱い」 vs 設計方針書セクション3-4・セクション11",
+      "suggestion": "Issue #600 本文の「サイドバーの扱い」セクションから autoCollapsedPaths の記載を削除し、useLayoutConfig() による制御に書き換える。"
+    },
+    {
+      "id": "DR2-003",
+      "severity": "Should Fix",
+      "category": "Issue整合性",
+      "title": "Issue本文と設計方針書でStalled判定の配置先が矛盾",
+      "description": "Issue #600 本文の「新規ファイル・変更ファイルの見込み」の「主要変更ファイル」に「src/lib/session/worktree-status-helper.ts - Stalled判定追加」と記載されている。一方、設計方針書はStage 1レビュー（DR1-010）を反映し、セクション9で stalled-detector.ts を新設してworktree-status-helperにはStalled判定を追加しない方針に変更済み。設計方針書セクション11でも「worktree-status-helper.ts - セッションステータス検出のみ（Stalled判定は追加しない）[DR1-010]」と明記されている。Issue本文側が未更新。",
+      "location": "Issue #600 本文「新規ファイル・変更ファイルの見込み」 vs 設計方針書セクション9・セクション11",
+      "suggestion": "Issue本文の主要変更ファイルリストで worktree-status-helper.ts の説明を「セッションステータス検出のみ（Stalled判定は追加しない）」に変更し、新規ファイルに stalled-detector.ts を追加する。"
+    },
+    {
+      "id": "DR2-004",
+      "severity": "Should Fix",
+      "category": "Issue整合性",
+      "title": "Issue本文のPhase 2タスクにMessageInput variant記載が残存",
+      "description": "Issue #600 本文の「Phase 2: deep link・Detail画面改修」タスクリストに「Review 画面のインライン返信フォーム（MessageInput に variant='simplified'）とモバイル遷移導線を実装する」と記載されている。設計方針書ではSimpleMessageInput + useSendMessage()方式に変更済み。",
+      "location": "Issue #600 本文「実装タスク Phase 2」",
+      "suggestion": "Phase 2タスクの該当項目を「Review 画面のインライン返信フォーム（SimpleMessageInput + useSendMessage()）とモバイル遷移導線を実装する」に更新する。"
+    },
+    {
+      "id": "DR2-005",
+      "severity": "Should Fix",
+      "category": "コード整合性",
+      "title": "設計方針書のgetNextAction()がSessionStatus型の全値を網羅していない",
+      "description": "設計方針書セクション3-3のgetNextAction()実装コードでは、SessionStatus の値として 'idle', 'ready', 'running', 'waiting' の4値を扱っている。src/lib/detection/status-detector.ts での定義 'idle' | 'ready' | 'running' | 'waiting' と一致するが、getNextAction()の引数型が SessionStatus | null となっているのに対し、null の場合と 'idle' の場合で同じ 'Start' を返す実装になっている。これ自体は問題ないが、status-detector.ts の SessionStatus が将来拡張された場合（例: 'error' 状態追加）、getNextAction()がデフォルトで 'Running...' を返してしまう。TypeScript の exhaustive check が欠けている。",
+      "location": "設計方針書セクション3-3 vs src/lib/detection/status-detector.ts",
+      "suggestion": "getNextAction() の最終行を default ケースではなく、exhaustive check（satisfies never パターン）を追加するか、少なくともコメントで現在扱うSessionStatusの全値を明記する。DR1-002備考と連携して、将来のステータス追加時にコンパイルエラーで検出できるようにする。"
+    },
+    {
+      "id": "DR2-006",
+      "severity": "Should Fix",
+      "category": "型整合性",
+      "title": "deep link pane値の拡張がMobileActivePane型・LeftPaneTab型と不整合",
+      "description": "設計方針書セクション7のdeep link pane マッピングでは9種のpane値（terminal, history, git, files, notes, logs, agent, timer, info）を定義している。現在の型定義は MobileActivePane = 'history' | 'terminal' | 'files' | 'memo' | 'info'（5値）、LeftPaneTab = 'history' | 'files' | 'memo'（3値）。設計方針書は「src/types/ui-state.ts - MobileActivePane・LeftPaneTab型をpane値9種に対応拡張」と記載しているが、pane値とMobileActivePane/LeftPaneTabは1対1対応ではない（例: pane=notes はMobileTab=memo + subTab=notes）。pane値用の型（DeepLinkPane型）とMobileActivePane型・LeftPaneTab型は別の型として定義すべきだが、設計方針書ではこの区別が曖昧。",
+      "location": "設計方針書セクション7・Issue本文「新規ファイル・変更ファイルの見込み」 vs src/types/ui-state.ts",
+      "suggestion": "pane値9種用の型（例: type DeepLinkPane = 'terminal' | 'history' | 'git' | 'files' | 'notes' | 'logs' | 'agent' | 'timer' | 'info'）をMobileActivePane/LeftPaneTabとは別に定義し、paneからMobileActivePane/LeftPaneTabへの変換ロジックをuseWorktreeTabState()フック内に閉じ込める設計を明記する。「MobileActivePane・LeftPaneTab型をpane値9種に対応拡張」という記載は誤解を招くため、「DeepLinkPane型を新設し、既存型への変換マッピングを実装」に修正する。"
+    },
+    {
+      "id": "DR2-007",
+      "severity": "Nice to Have",
+      "category": "内部整合性",
+      "title": "Review画面のポーリング間隔がIssue本文と設計方針書で表現が異なる",
+      "description": "Issue #600 本文では「Review画面のポーリング間隔: 5-10秒とし、Detail画面のポーリングより低頻度にする」と範囲指定。設計方針書では REVIEW_POLL_INTERVAL_MS = 7_000（7秒固定）と具体値を定義。7秒は5-10秒の範囲内なので矛盾ではないが、Issue本文の範囲指定と設計方針書の固定値の間で意図の齟齬がある可能性がある。",
+      "location": "Issue #600 本文「Review画面のポーリング間隔」 vs 設計方針書セクション4（新規定数）",
+      "suggestion": "Issue本文のポーリング間隔記載を「7秒（REVIEW_POLL_INTERVAL_MS = 7000）」に更新し、設計方針書と一致させる。"
+    },
+    {
+      "id": "DR2-008",
+      "severity": "Nice to Have",
+      "category": "パス正確性",
+      "title": "設計方針書の新規ファイルパス src/lib/session/next-action-helper.ts がPhase配置と矛盾",
+      "description": "Issue #600 本文の「新規ファイル」セクションでは next-action-helper.ts が新規ファイル一覧（約10個）に含まれているが、Phase分割ではPhase 2に配置されている。設計方針書セクション11でもPhase 2の新規ファイルに列挙されている。一方、Issue本文の「新規ファイル（約10個）」リストはPhase 1のものと思われるコンテキスト（Sessions画面、Review画面など）と混在している。",
+      "location": "Issue #600 本文「新規ファイル・変更ファイルの見込み」 vs 設計方針書セクション11",
+      "suggestion": "Issue本文の新規ファイルリストをPhase別に整理するか、全Phase横断のリストであることを明記する。設計方針書セクション11のPhase別分類が正として扱い、Issue本文はそれに準拠させる。"
+    },
+    {
+      "id": "DR2-009",
+      "severity": "Nice to Have",
+      "category": "コード整合性",
+      "title": "設計方針書のWorktree型参照が実際の型定義と微妙に異なる",
+      "description": "設計方針書セクション4のデータモデル設計で「src/types/models.ts - 変更不要」として Worktree インターフェースを引用しているが、status フィールドが「status?: 'todo' | 'doing' | 'done' | null」と記載されている。実際の src/types/models.ts では同じく「status?: 'todo' | 'doing' | 'done' | null」だが、コメントは「Worktree status: todo, doing, done, or null if not set」。この点は一致しているが、Worktree インターフェースの他のフィールド（id, name, path, repositoryPath, repositoryName, description, lastUserMessage等）が設計方針書では「... 既存フィールド」と省略されている。WorktreeWithReviewStatus が extends Worktree としているため問題はないが、reviewStatus/isStalled/nextAction がオプショナルフィールドとして追加される点について、実際のAPIレスポンス組み立て（worktrees/route.ts の map 内で spread + 追加フィールド）との整合は良好。",
+      "location": "設計方針書セクション4 vs src/types/models.ts",
+      "suggestion": "特に対応不要。設計方針書の記載は正確。"
+    },
+    {
+      "id": "DR2-010",
+      "severity": "Should Fix",
+      "category": "API整合性",
+      "title": "既存worktrees APIレスポンスにrepositories配列が含まれているが設計方針書で言及なし",
+      "description": "現在の GET /api/worktrees のレスポンスは { worktrees: [...], repositories: [...] } の構造。設計方針書セクション5のAPI設計では worktrees 配列の拡張のみを記載し、repositories 配列への影響を言及していない。?include=review の場合もレスポンス構造全体の記載がない。Repositories画面が /repositories として独立するにあたり、worktrees APIでrepositories配列を返し続ける必要があるか、あるいはRepositories画面は別のAPIを呼ぶのかが不明確。",
+      "location": "設計方針書セクション5 vs src/app/api/worktrees/route.ts",
+      "suggestion": "設計方針書のAPI設計セクションに、(1) ?include=review 時のレスポンス全体構造（repositories配列を含むか）、(2) Repositories画面が使用するAPIエンドポイント（既存の /api/worktrees のrepositories配列か、/api/repositories 単体か）を明記する。"
+    },
+    {
+      "id": "DR2-011",
+      "severity": "Nice to Have",
+      "category": "内部整合性",
+      "title": "Home画面のStalled集計方法が不明確",
+      "description": "設計方針書セクション6-1でHome画面の構成に「セッション集計サマリー（Running / Waiting / Stalled のカウント）」と記載。セクション9のパフォーマンス設計では Home画面は「クライアントサイド集計」「既存worktrees APIのポーリング」とあり、?include=review は使わない。しかし、Stalled判定は ?include=review でのみ返される isStalled フィールドに依存する。Home画面で Stalled カウントを表示するには ?include=review が必要だが、設計方針書ではHome画面では include=review を付与しない方針と記載されている（「Home/Sessions画面では include=review パラメータを付与しない」）。",
+      "location": "設計方針書セクション6-1 vs セクション9 vs Issue本文「次アクションの定義」",
+      "suggestion": "Home画面の集計サマリーからStalledカウントを除外し「Running / Waiting のカウント」とするか、Home画面でも ?include=review を使用する方針に変更する。前者の方がパフォーマンス設計との整合が取れる。Stalled数の把握はReview画面に委ねる。"
+    },
+    {
+      "id": "DR2-012",
+      "severity": "Must Fix",
+      "category": "内部整合性",
+      "title": "設計方針書のPhase 1新規ファイルにstalled-detector.tsとnext-action-helper.tsの配置タイミングが不整合",
+      "description": "設計方針書セクション11のPhase 1新規ファイルに review-config.ts（STALLED_THRESHOLD_MS等）が含まれているが、STALLED_THRESHOLD_MS を使用する stalled-detector.ts はPhase 2に配置されている。review-config.ts をPhase 1で作成しても、Phase 2まで使用されないファイルが残る。また、Issue本文のPhase 1タスクには「Review画面を新設し、Done / Approval / Stalled をリアルタイム算出して一元処理できるようにする（ただしStalled判定はPhase 2のAPI拡張完了後に有効化。Phase 1ではDone / Approvalのフィルタを先行実装する）」とあり、Phase 1でのStalled判定は明示的に除外されている。review-config.ts のPhase 1配置自体は問題ないが（定数の事前定義として許容される）、Phase間の依存関係が設計方針書で十分に説明されていない。",
+      "location": "設計方針書セクション11 Phase 1/Phase 2 の依存関係",
+      "suggestion": "設計方針書セクション11のPhase 1に「review-config.ts はStalled判定の閾値定数を事前定義するもので、実際の使用はPhase 2から」という注記を追加する。また、Phase間の依存関係を明示するセクション（例: Phase依存関係マトリクス）を追加し、どのファイルがどのPhaseで初めて使用されるかを明確にする。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 6,
+  "nice_to_have_count": 4,
+  "summary": "Issue #600 の設計方針書は、Stage 1レビュー（設計原則レビュー）の指摘事項10件を適切に反映しており、設計方針書内部の整合性は概ね良好である。しかし、Issue本文側がStage 1レビュー結果の反映後に十分更新されておらず、設計方針書との間に複数の矛盾が残存している（DR2-001〜DR2-004）。特にMessageInputのvariant方式 vs SimpleMessageInput分離方式の矛盾（DR2-001）は実装着手時の混乱を招くため Must Fix とする。型整合性の観点では、deep link pane値9種とMobileActivePane/LeftPaneTab型の関係が曖昧であり、DeepLinkPane型の新設を推奨する（DR2-006）。API整合性では、既存のworktrees APIがrepositories配列を含むレスポンスを返している点が設計方針書で言及されておらず、Repositories画面のデータ取得方法が不明確（DR2-010）。内部整合性では、Home画面のStalled集計とinclude=review未使用方針の矛盾（DR2-011）が設計の整合を損なっている。既存コードとの整合性（ファイルパス、型定義、API構造）は良好で、設計方針書に記載された既存ファイルパスはすべて実在し、型定義も正確に参照されている。"
+}

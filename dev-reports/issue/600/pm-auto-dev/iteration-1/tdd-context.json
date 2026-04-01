@@ -1,0 +1,27 @@
+{
+  "issue_number": 600,
+  "title": "ホーム中心のUX刷新とWorktree Detail中心導線の再設計",
+  "design_policy_path": "dev-reports/design/issue-600-ux-refresh-design-policy.md",
+  "work_plan_path": "dev-reports/issue/600/work-plan.md",
+  "acceptance_criteria": [
+    "Home / Sessions / Repositories / Review / More / Worktree Detail の責務が明確であり、各画面の入出力がドキュメント化されている",
+    "Home画面から各専門画面への導線が1クリックで到達可能",
+    "/worktrees/:id が引き続き利用でき、既存主要機能が維持される",
+    "PC / モバイルで整合した遷移が定義・実装される",
+    "URL設計と画面遷移が docs/architecture.md に追記されている",
+    "Review画面で Done / Approval / Stalled のフィルタリングが正常に動作する",
+    "次アクションがすべてのSessionStatusパターンで正しく表示される",
+    "deep link（/worktrees/:id?pane=xxx）でタブが正しく復元される",
+    "新規URLが認証ミドルウェアで保護されていることがテストで検証されている",
+    "既存のE2Eテスト・ユニットテストが通過する",
+    "worktrees APIレスポンスへの追加フィールドがオプショナルであり後方互換性維持",
+    "DBスキーマ変更なし"
+  ],
+  "implementation_tasks": [
+    "Phase 1: 設定定数・型定義、getNextAction、stalled-detector、useLayoutConfig、useSendMessage、useWorktreeList、useWorktreesCache、isDeepLinkPane",
+    "Phase 2: Header改修、GlobalMobileNav、AppShell統合、Home再設計、Sessions/Repositories/Review/More新設、認証テスト",
+    "Phase 3: WorktreeDetail分割、deep link移行、MobileTabBar統合、WorktreeCard改修、API拡張、Review Stalled統合、Context移行、Sidebar統合",
+    "Phase 4: 既存テスト修正、E2Eテスト更新、docs更新、最終チェック"
+  ],
+  "target_coverage": 80
+}

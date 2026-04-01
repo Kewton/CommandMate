@@ -1,0 +1,101 @@
+{
+  "stage": 4,
+  "focus": "セキュリティ",
+  "reviewer": "opus",
+  "findings": [
+    {
+      "id": "DR4-001",
+      "severity": "Should Fix",
+      "category": "入力バリデーション",
+      "title": "?include クエリパラメータのホワイトリスト検証が設計方針書に具体実装指針なし",
+      "description": "設計方針書セクション8で「?include=review パラメータ: 許可値のホワイトリスト検証」と記載されているが、具体的なバリデーション実装（許可値の定義場所、不正値時の挙動、複数値対応の可否）が明記されていない。現在のworktrees APIルート（route.ts）には include パラメータの処理が未実装であり、実装者が独自判断でバリデーションを省略するリスクがある。DR1-008（Nice to Have）でカンマ区切り対応が言及されているが、セキュリティ観点では許可値を厳密に定義する必要がある。",
+      "owasp_ref": "A03",
+      "suggestion": "セクション5またはセクション8に以下を明記する: (1) 許可値を定数として定義（例: const VALID_INCLUDE_VALUES = ['review'] as const）、(2) 不正値は無視してincludeなしと同等に扱う（エラーレスポンスは返さない=情報漏洩防止）、(3) カンマ区切り対応する場合は各値を個別にホワイトリスト検証する"
+    },
+    {
+      "id": "DR4-002",
+      "severity": "Should Fix",
+      "category": "入力バリデーション",
+      "title": "?pane クエリパラメータの型安全なバリデーション指針が不足",
+      "description": "設計方針書セクション8で「?pane=xxx パラメータ: 許可値のホワイトリスト検証、不正値はデフォルトにフォールバック」と記載されており方針は正しい。しかし、DeepLinkPane型（9種の文字列リテラル）とバリデーション関数の関係が明示されていない。useWorktreeTabState()内でバリデーションする設計だが、URLから取得した文字列をDeepLinkPane型にキャストする際の型ガード関数の定義が未記載。不正なpane値がそのまま内部ロジックに渡ると、予期しない動作を引き起こす可能性がある。",
+      "owasp_ref": "A03",
+      "suggestion": "src/types/ui-state.ts にランタイム型ガード関数を定義する方針を明記する: export function isDeepLinkPane(value: string): value is DeepLinkPane { return VALID_PANES.has(value as DeepLinkPane); } useWorktreeTabState()内で searchParams.get('pane') を型ガードで検証し、不正値は 'terminal' にフォールバックする実装指針をセクション7に追加する"
+    },
+    {
+      "id": "DR4-003",
+      "severity": "Must Fix",
+      "category": "A01 Broken Access Control",
+      "title": "新規4画面のmiddleware保護検証がテスト計画に不十分",
+      "description": "新規URL（/sessions, /repositories, /review, /more）は既存のmiddleware matcherパターン '/((?!_next/|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)' で自動的にマッチし認証保護される設計だが、AUTH_EXCLUDED_PATHSへの誤追加防止テストが「DR3-007 Nice to Have」として備考扱いになっている。認証バイパスは最もクリティカルなセキュリティ欠陥であり、新規URLの保護検証は Must Fix として統合テストに組み込むべきである。特に /sessions と /review はworktreeのセッション状態やメッセージ送信機能を含むため、認証なしアクセスは深刻なリスクとなる。",
+      "owasp_ref": "A01",
+      "suggestion": "テスト戦略セクション12の統合テスト「認証ミドルウェア: 新規URL4件の保護検証」を Must Fix に昇格し、具体的なテストケースを明記する: (1) /sessions, /repositories, /review, /more が認証なしで401/302を返すこと、(2) AUTH_EXCLUDED_PATHS にこれら4パスが含まれていないことを検証するアサーション、(3) middleware.config.matcher パターンがこれら4パスにマッチすることのユニットテスト"
+    },
+    {
+      "id": "DR4-004",
+      "severity": "Should Fix",
+      "category": "A03 Injection",
+      "title": "SimpleMessageInputのインライン返信でのXSSリスク考慮が未記載",
+      "description": "Review画面のSimpleMessageInputはユーザー入力をterminal APIに送信し、chat-dbに永続化する。設計方針書ではuseSendMessage()の責務としてAPI呼び出しとDB永続化が記載されているが、入力値のサニタイズ方針が明記されていない。既存のMessageInputは474行のフル機能版でありサニタイズ処理が含まれている可能性があるが、SimpleMessageInputは新規コンポーネントとして独立実装されるため、サニタイズ処理の継承が保証されない。terminal APIのMAX_COMMAND_LENGTH（10000）制限は既存だが、HTMLエンティティやスクリプトタグの無害化については言及がない。",
+      "owasp_ref": "A03",
+      "suggestion": "セクション3-2のSimpleMessageInput設計に以下を追加する: (1) useSendMessage()内でcommandパラメータの長さ制限（既存terminal APIのMAX_COMMAND_LENGTH準拠）を明記、(2) chat-db永続化時の入力値はプレーンテキストとして保存し、表示時はReactのデフォルトエスケープを利用する旨を明記、(3) ReviewCard内でのメッセージ表示にdangerouslySetInnerHTMLを使用しない方針を明記"
+    },
+    {
+      "id": "DR4-005",
+      "severity": "Nice to Have",
+      "category": "A04 Insecure Design",
+      "title": "クライアントサイド集計の信頼性に関するセキュリティ注記がない",
+      "description": "Home画面のセッション集計サマリー（Running/Waitingカウント）はクライアントサイドで算出される設計である。これはセキュリティ観点では低リスクだが、クライアントサイド集計値は改ざん可能であるため、この値に基づいてセキュリティ判断（アクセス制御や操作の許可/不許可）を行わない旨を明記すべきである。現時点では表示目的のみと読み取れるが、将来の拡張時に集計値を条件として使用するリスクがある。",
+      "owasp_ref": "A04",
+      "suggestion": "セクション6-1のHome画面設計に「クライアントサイド集計値は表示目的のみ。アクセス制御や操作可否の判断には使用しない」という注記を追加する"
+    },
+    {
+      "id": "DR4-006",
+      "severity": "Should Fix",
+      "category": "A05 Security Misconfiguration",
+      "title": "新規4画面にContent Security Policy（CSP）ヘッダーの考慮がない",
+      "description": "既存のプロジェクトではCSPヘッダーの設定が見当たらない（proxy/config.tsにCSPへの言及があるのみ）。新規4画面（特にReview画面のインライン返信フォーム）を追加する際、CSPの設定方針を検討すべきである。Review画面でユーザー入力を含むコンテンツを表示する場合、XSS攻撃の緩和策としてCSPは有効である。ただし、既存プロジェクト全体でCSPが未設定であるため、Issue #600の範囲外として別Issueに分離する判断も妥当。",
+      "owasp_ref": "A05",
+      "suggestion": "セクション8のセキュリティ設計に以下を追加する: (1) CSPヘッダーの導入はIssue #600のスコープ外とし、別Issueとして起票する旨を明記、(2) ただしReview画面のSimpleMessageInput/ReviewCardではインラインスクリプトやeval()を使用しない方針を明記"
+    },
+    {
+      "id": "DR4-007",
+      "severity": "Nice to Have",
+      "category": "A09 Security Logging and Monitoring Failures",
+      "title": "新規画面のセキュリティイベントログ方針が未記載",
+      "description": "設計方針書にセキュリティイベント（認証失敗、不正パラメータ検出等）のログ出力方針が記載されていない。既存のmiddleware.tsではIP制限違反やBearer認証失敗のログ出力（console.warn）が実装されているが、新規画面固有のセキュリティイベント（例: 不正なinclude/paneパラメータ、Review画面からの不正なworktree IDでの送信試行）のログ方針が不明。",
+      "owasp_ref": "A09",
+      "suggestion": "セクション8に新規画面のログ方針を追加: (1) 不正なinclude/paneパラメータはログ出力せずサイレントフォールバック（DoSログ汚染防止）、(2) 存在しないworktree IDへの送信試行は既存terminal APIのエラーログに委ねる、(3) 新規のセキュリティログ追加は不要（既存middleware/APIのログで十分カバー）"
+    },
+    {
+      "id": "DR4-008",
+      "severity": "Nice to Have",
+      "category": "CSRF対策",
+      "title": "Review画面インライン返信のCSRF対策が既存メカニズムに依存する旨が未記載",
+      "description": "Review画面のSimpleMessageInputはPOSTリクエスト（terminal API）を送信するが、CSRF対策の方針が設計方針書に記載されていない。既存プロジェクトではCSRFトークンは未実装だが、認証CookieにSameSite=strict が設定されており（auth.ts）、かつ同一オリジンからのfetch APIリクエストのみが想定されるため、実質的なCSRF防御は確保されている。ただしこの前提が設計方針書に明記されていない。",
+      "owasp_ref": "A05",
+      "suggestion": "セクション8に以下を追加: 「CSRF対策: 認証CookieのSameSite=strict設定と同一オリジンfetchにより防御。追加のCSRFトークン実装は不要。この前提はSimpleMessageInputのuseSendMessage()にも適用される」"
+    },
+    {
+      "id": "DR4-009",
+      "severity": "Should Fix",
+      "category": "A08 Software and Data Integrity Failures",
+      "title": "useWorktreesCache()の共有キャッシュにおけるデータ整合性保証が不十分",
+      "description": "useWorktreesCache()はPhase 1で薄いラッパー、Phase 2でキャッシュ実装に差し替える設計である。Phase 2のキャッシュ実装において、Review画面在中時の?include=reviewフェッチモード切替時にレースコンディションが発生するリスクがある。具体的には、Review画面から離脱した直後に?include=review付きのレスポンスが返却された場合、review用フィールド（reviewStatus, isStalled, nextAction）が通常モードの画面に残留する可能性がある。",
+      "owasp_ref": "A08",
+      "suggestion": "セクション9のuseWorktreesCache()設計に以下を追加: (1) フェッチモード切替時は進行中のfetchをAbortControllerでキャンセルする方針を明記、(2) 通常モードに戻った際はreview用フィールドをundefinedにクリアする方針を明記、(3) Phase 2実装時のテストケースとして「モード切替時のデータ整合性」を追加"
+    },
+    {
+      "id": "DR4-010",
+      "severity": "Must Fix",
+      "category": "A03 Injection",
+      "title": "deep linkのpaneパラメータがDOM操作に直接使用される経路のサニタイズ保証がない",
+      "description": "?pane=xxxパラメータはuseSearchParams()経由でURLから取得され、useWorktreeTabState()内でタブ切替ロジックに使用される。設計方針書ではDeepLinkPane型への変換が記載されているが、TypeScriptの型チェックはランタイムでは機能しない。攻撃者が?pane=<script>alert(1)</script>のような値を設定した場合、URLバーやブラウザ履歴への反映は安全だが、値がDOM属性（data-pane, aria-selected等）やclassName生成に使用される場合にDOM-based XSSのリスクがある。特にタブコンポーネントがpane値をキーとして使用する場合、Reactのキーはエスケープされるがログ出力やエラーメッセージに含まれる可能性がある。",
+      "owasp_ref": "A03",
+      "suggestion": "セクション7のdeep link設計に以下を追加: (1) useWorktreeTabState()の冒頭でpane値をDeepLinkPane型のホワイトリストに対して検証し、不一致の場合は'terminal'にフォールバックする（型ガード関数を使用）、(2) フォールバック後のpane値のみを内部ロジックで使用し、生の searchParams.get('pane') 値をコンポーネント内で直接参照しない設計規約を明記、(3) これはDR4-002と合わせて実装する"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 5,
+  "nice_to_have_count": 3,
+  "summary": "Issue #600 の設計方針書に対するセキュリティレビュー（OWASP Top 10 準拠）を実施した。全体として、既存の認証基盤（middleware + SameSite=strict Cookie + Bearer トークン + IP制限）が堅牢であり、新規4画面はmiddleware matcherパターンにより自動的に認証保護される設計は適切である。DBスキーマ変更なし・既存API後方互換の方針もセキュリティ面で好ましい。\n\nMust Fix 2件: (1) 新規4画面の認証保護テストがNice to Have扱いになっており、認証バイパス防止の観点からMust Fixに昇格すべき（DR4-003）。(2) deep linkのpaneパラメータのランタイム検証方針が不十分で、DOM-based XSSの経路が残る（DR4-010）。\n\nShould Fix 5件: includeパラメータのホワイトリスト検証実装指針の具体化（DR4-001）、paneパラメータの型ガード関数定義（DR4-002）、SimpleMessageInputのXSSリスク考慮（DR4-004）、CSPヘッダー方針の明記（DR4-006）、共有キャッシュのモード切替時データ整合性（DR4-009）。\n\nNice to Have 3件: クライアントサイド集計の信頼性注記（DR4-005）、セキュリティイベントログ方針（DR4-007）、CSRF対策の前提明記（DR4-008）。\n\n既存プロジェクトのセキュリティ対策（定数時間比較、MAX_COMMAND_LENGTH、HttpOnly/SameSite=strict Cookie、IP制限、パスバリデーション）は良好であり、Issue #600ではこれらの基盤を適切に活用する設計となっている。主な改善点は、設計方針書におけるバリデーション実装指針の具体化と、テスト計画における認証保護検証の優先度引き上げである。"
+}

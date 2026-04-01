@@ -1,0 +1,57 @@
+{
+  "stage": 2,
+  "action": "apply",
+  "applied_findings": [
+    "DR2-001",
+    "DR2-002",
+    "DR2-003",
+    "DR2-004",
+    "DR2-005",
+    "DR2-006",
+    "DR2-007",
+    "DR2-010",
+    "DR2-011",
+    "DR2-012"
+  ],
+  "skipped_findings": [
+    "DR2-008",
+    "DR2-009"
+  ],
+  "skipped_reasons": {
+    "DR2-008": "設計方針書のPhase別分類が正として扱う。Issue本文はPhase横断リストとして許容",
+    "DR2-009": "設計方針書の記載は正確であり対応不要（レビュー結果でも対応不要と判定）"
+  },
+  "design_doc_updated": true,
+  "issue_updated": true,
+  "changes_summary": {
+    "design_policy": {
+      "file": "dev-reports/design/issue-600-ux-refresh-design-policy.md",
+      "changes": [
+        "DR2-005: getNextAction()にexhaustive check（satisfies neverパターン）を追加",
+        "DR2-006: セクション7にDeepLinkPane型新設を明記、ui-state.tsの変更記載を修正",
+        "DR2-010: セクション5にレスポンス全体構造とRepositories画面のデータ取得方針を追加",
+        "DR2-011: セクション6-1のHome画面集計サマリーからStalledカウントを除外（Running/Waitingのみ）",
+        "DR2-012: セクション11にPhase依存関係マトリクスを追加、review-config.tsにPhase別使用注記",
+        "セクション16: Stage 2レビュー指摘事項サマリーを追加",
+        "セクション17: Stage 2レビュー対応実装チェックリストを追加"
+      ]
+    },
+    "issue_body": {
+      "target": "GitHub Issue #600",
+      "changes": [
+        "DR2-001: /worktrees/:id/reply セクションをSimpleMessageInput + useSendMessage()方式に更新",
+        "DR2-002: サイドバーセクションをuseLayoutConfig()方式に更新",
+        "DR2-003: worktree-status-helperの説明を更新、stalled-detector.tsを新規ファイルに追加",
+        "DR2-004: Phase 2タスクをSimpleMessageInput方式に更新",
+        "DR2-007: ポーリング間隔を7秒固定に更新（2箇所）",
+        "DR2-001関連: MessageInput.tsxの変更ファイル説明を更新",
+        "DR2-002関連: SidebarContext.tsxの変更ファイル説明を更新、Phase 1タスクを更新",
+        "DR2-006関連: ui-state.tsの変更ファイル説明をDeepLinkPane型新設に更新",
+        "DR2-001/DR2-004関連: Phase 3テストタスクをSimpleMessageInput+useSendMessage()に更新",
+        "新規ファイルリストにuseSendMessage.ts、SimpleMessageInput.tsx、stalled-detector.tsを追加",
+        "レビュー履歴にStage 2セクションを追加"
+      ]
+    }
+  },
+  "summary": "Stage 2整合性レビューの12件中10件を反映。Must Fix 2件（DR2-001: Issue本文のvariant方式をSimpleMessageInput+useSendMessage()方式に更新、DR2-012: Phase依存関係マトリクスを設計方針書に追加）、Should Fix 6件（DR2-002~006, DR2-010: Issue本文の旧記載更新、exhaustive check追加、DeepLinkPane型新設、APIレスポンス構造明記）、Nice to Have 2件（DR2-007: ポーリング間隔7秒固定化、DR2-011: Home画面Stalledカウント除外）を反映。DR2-008（ファイルリストPhase整理）とDR2-009（Worktree型参照正確性）は対応不要としてスキップ。設計方針書とIssue本文の両方を更新し、整合性を確保した。"
+}

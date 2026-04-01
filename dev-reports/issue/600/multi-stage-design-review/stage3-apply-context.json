@@ -1,0 +1,8 @@
+{
+  "issue_number": "600",
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘事項対応",
+  "review_result_path": "dev-reports/issue/600/multi-stage-design-review/stage3-review-result.json",
+  "target_doc": "dev-reports/design/issue-600-ux-refresh-design-policy.md",
+  "action": "設計方針書のみ更新。ソースコードは変更しない。"
+}

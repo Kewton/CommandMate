@@ -1,0 +1,7 @@
+{
+  "issue_number": "600",
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目 - 影響範囲）",
+  "review_result_path": "dev-reports/issue/600/issue-review/stage3-review-result.json",
+  "action": "Stage 3の影響範囲レビュー指摘事項をIssue本文に反映する"
+}

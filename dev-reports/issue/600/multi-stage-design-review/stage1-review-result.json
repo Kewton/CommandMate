@@ -1,0 +1,101 @@
+{
+  "stage": 1,
+  "focus": "設計原則",
+  "reviewer": "opus",
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "Should Fix",
+      "category": "SOLID",
+      "title": "MessageInput variant追加による単一責務原則（SRP）違反リスク",
+      "description": "MessageInput.tsx は既に474行あり、下書き永続化、スラッシュコマンド、画像添付、IME制御など多数の責務を持つ。ここに variant='simplified' を追加して条件分岐を増やすと、SRP違反がさらに悪化する。設計方針書では「機能乖離リスク回避」を理由に既存コンポーネント拡張を選択しているが、simplified版は「テキスト入力 + 送信ボタンのみ」であり、default版と共有するロジックは送信処理のみ。共有部分が少ないにもかかわらず同一コンポーネントに押し込むのはSRP的に不適切。",
+      "location": "セクション3-2 Variantパターン / セクション10 MessageInput variant",
+      "suggestion": "送信ロジック（API呼び出し、エラーハンドリング）をカスタムフック useSendMessage() に抽出し、MessageInput（フル機能版）と SimpleMessageInput（軽量版）に分離する。両者が useSendMessage() を共有することで、機能乖離リスクを回避しつつSRPを維持できる。"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "Should Fix",
+      "category": "SOLID",
+      "title": "next-action-helper.ts の getNextAction() が開放閉鎖原則（OCP）に違反",
+      "description": "getNextAction() は if 文の連鎖で次アクションを決定しており、新しいステータスやプロンプトタイプが追加されるたびに関数本体を修正する必要がある。現在のプロジェクトでは CLI ツールが6種類あり、今後もツール固有のステータスが追加される可能性がある。",
+      "location": "セクション3-3 Derived State パターン",
+      "suggestion": "現時点ではステータスパターンが限定的なため if 文で十分だが、将来の拡張性を考慮して、アクションマッピングテーブル（Record<SessionStatus, (promptType, isStalled) => string>）として定義することを検討する。ただし、YAGNI原則とのバランスを考え、ツール固有ステータスが実際に追加されるまでは現在の設計でも許容範囲。"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "Must Fix",
+      "category": "SOLID",
+      "title": "AppShell.tsx への pathname 条件分岐集中による SRP 違反",
+      "description": "設計方針書セクション3-4では、AppShell.tsx 内で usePathname() に基づき、サイドバー折りたたみ、GlobalMobileNav表示/非表示、ローカルナビ表示/非表示などのレイアウト制御を行うと記載されている。これらの条件分岐が AppShell に集中すると、新画面追加のたびに AppShell を修正する必要がある。また、SidebarContext に autoCollapsedPaths を追加する設計も、レイアウト判断ロジックが Context と AppShell に分散する問題を生む。",
+      "location": "セクション3-4 Conditional Layout パターン / Phase 1 実装計画",
+      "suggestion": "pathname に基づくレイアウト判断を専用の useLayoutConfig(pathname) フックに集約する。このフックが { showSidebar, showGlobalNav, showLocalNav, autoCollapseSidebar } のようなフラグオブジェクトを返し、AppShell はそのフラグに基づいて描画するだけにする。新画面追加時はフック内のマッピングテーブルを更新するだけで済む。"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "Nice to Have",
+      "category": "KISS",
+      "title": "deep link pane マッピングの複雑性",
+      "description": "セクション7の deep link pane マッピングテーブルでは、PC と モバイルで同一の pane 値が異なるタブ+サブタブの組み合わせにマッピングされる。特に git, notes, logs, agent, timer は PC では親タブ内のサブタブ、モバイルでは別タブ+サブタブとなり、マッピングロジックが複雑。",
+      "location": "セクション7 deep link pane マッピング",
+      "suggestion": "pane マッピングをプラットフォーム別に定義する設定オブジェクト（PANE_CONFIG）として一元管理し、useSearchParams からの読み取りと書き込みを専用フック useDeepLinkPane() に閉じ込める。これにより、各コンポーネントはプラットフォーム差異を意識せずに済む。"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "Should Fix",
+      "category": "DRY",
+      "title": "Sessions画面とサイドバーの機能重複",
+      "description": "設計方針書では Sessions 画面がサイドバーと内容が重複することを認識した上で、サイドバーを維持しつつ Sessions 画面でサイドバーを自動折りたたみする方針としている。しかし、WorktreeList のフィルタリング・ソート・検索ロジックと Sidebar のソート・グループ化ロジック（sidebar-utils.ts）が並行して存在し続けることになり、DRY 違反が拡大するリスクがある。",
+      "location": "セクション6-2 Sessions画面 / セクション10 サイドバー維持",
+      "suggestion": "Sessions 画面と Sidebar の Worktree リスト表示ロジック（フィルタ、ソート、グループ化）を共通フック useWorktreeList() に抽出し、Sessions 画面と Sidebar の両方がこのフックを利用する形にする。UI は別々でも、データ取得・加工ロジックは共通化する。"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "Nice to Have",
+      "category": "YAGNI",
+      "title": "More画面の設計範囲が広い",
+      "description": "More画面（/more）に Theme / Locale 設定、Auth情報、Help / About が含まれているが、現在の Home 画面にはこれらの設定UIは存在しない。ExternalAppsManager の移動は既存コンポーネントの再配置で妥当だが、Theme/Locale/Auth/Help は新規UI開発が必要であり、Issue #600 のスコープ（UX刷新）から逸脱する可能性がある。",
+      "location": "セクション6-5 More画面",
+      "suggestion": "Phase 1 では ExternalAppsManager の移動のみを行い、Theme/Locale/Auth/Help は将来の Issue として分離する。More 画面のプレースホルダーとして「Coming soon」セクションを設けておく。"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "Should Fix",
+      "category": "コンポーネント設計",
+      "title": "WorktreeDetailRefactored.tsx（1966行）の大規模変更に対する分割戦略の欠如",
+      "description": "設計方針書セクション13で WorktreeDetailRefactored（1966行）の大規模変更がリスクとして認識されているが、Phase分割以外の具体的な軽減策がない。useSearchParams への移行、ヘッダー情報の常時表示追加、deep link 対応などの変更が1966行のコンポーネントに入ると、レビュー困難でバグ混入リスクが高い。",
+      "location": "セクション6-6 Worktree Detail / セクション13 リスクと軽減策",
+      "suggestion": "Issue #600 の一環として、WorktreeDetailRefactored の責務分割を先行して行う。具体的には、(1) ヘッダー部分を WorktreeDetailHeader として抽出、(2) タブ状態管理を useWorktreeTabState フックに抽出、(3) レスポンシブ分岐を WorktreeDetailDesktop / WorktreeDetailMobile に分離する。この前処理により、後続の deep link 対応が安全に行える。"
+    },
+    {
+      "id": "DR1-008",
+      "severity": "Nice to Have",
+      "category": "API設計",
+      "title": "include クエリパラメータの拡張設計が不明確",
+      "description": "?include=review は最初の include パラメータだが、将来的に複数の include 値が必要になった場合（例: ?include=review,metrics）の設計が言及されていない。現在の設計は単一値前提に見える。",
+      "location": "セクション5 API設計",
+      "suggestion": "include パラメータがカンマ区切りの複数値を受け付けるか、単一値のみかを明記する。将来の拡張を見据え、include=review のパース処理を汎用的に実装しておくことを推奨（例: const includes = new Set(searchParams.get('include')?.split(',') ?? [])）。"
+    },
+    {
+      "id": "DR1-009",
+      "severity": "Should Fix",
+      "category": "状態管理",
+      "title": "Review画面のポーリング状態と他画面のポーリング状態の競合リスク",
+      "description": "Review画面は7秒間隔で ?include=review を使って worktrees API をポーリングする。一方、Home画面やSidebar も既存の worktrees API をポーリングしている可能性がある。同一エンドポイントへの複数ポーリングが並行すると、不要なAPI呼び出しが発生し、またステータスの更新タイミングにズレが生じる。",
+      "location": "セクション9 パフォーマンス設計 / セクション6-4 Review画面",
+      "suggestion": "worktrees API のポーリングを SWR や TanStack Query のようなキャッシュ層で一元管理するか、最低限 React Context で共有キャッシュを設けて、複数画面から同一データを参照できるようにする。既存のポーリング機構との統合方針を設計方針書に明記すべき。"
+    },
+    {
+      "id": "DR1-010",
+      "severity": "Must Fix",
+      "category": "SOLID",
+      "title": "worktree-status-helper.ts への Stalled 判定ロジック追加が依存性逆転原則（DIP）に違反",
+      "description": "設計方針書では worktree-status-helper.ts に Stalled 判定を追加し、auto-yes-manager.ts の getLastServerResponseTimestamp() を直接参照する。現在の worktree-status-helper.ts は既に auto-yes-manager からインポートしているが、Stalled 判定という新しいビジネスルール（閾値比較、STALLED_THRESHOLD_MS）をこのヘルパーに追加すると、セッション検出の責務と Review ビジネスルールの責務が混在する。",
+      "location": "セクション9 パフォーマンス設計 / Phase 2 実装計画",
+      "suggestion": "Stalled 判定ロジックを next-action-helper.ts（または stalled-detector.ts）に配置し、worktree-status-helper.ts は純粋にセッションステータス検出に留める。API ルートハンドラが ?include=review の場合のみ Stalled 判定モジュールを呼び出す構成にすることで、責務を明確に分離できる。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 5,
+  "nice_to_have_count": 3,
+  "summary": "Issue #600 の設計方針書は、DBスキーマ変更なし・既存API後方互換・段階的実装という3つの基本方針が明確で、全体として堅実な設計。しかし、SOLID原則の観点で3つの懸念がある。(1) AppShell への pathname 条件分岐集中（SRP違反）、(2) worktree-status-helper への Stalled 判定追加による責務混在（DIP違反）、(3) MessageInput への variant 追加による複雑性増大（SRP違反リスク）。特に (1) と (2) は Must Fix として、レイアウト判断の専用フック化と Stalled 判定モジュールの分離を推奨する。DRY の観点では Sessions 画面とサイドバーの重複ロジック共通化、YAGNI の観点では More 画面のスコープ縮小を提案する。WorktreeDetailRefactored（1966行）への変更は、事前の責務分割なしでは高リスクであり、リファクタリング先行を強く推奨する。"
+}

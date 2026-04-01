@@ -1,0 +1,15 @@
+{
+  "stage": 8,
+  "action": "apply",
+  "applied_findings": [
+    "S7-001",
+    "S7-002",
+    "S7-003",
+    "S7-NTH-001",
+    "S7-NTH-002",
+    "S7-NTH-003"
+  ],
+  "skipped_findings": [],
+  "issue_updated": true,
+  "summary": "Stage 7（影響範囲レビュー2回目）の全6件の指摘をIssue #600本文に反映。Should Fix 3件: (S7-001) Stalled判定の参照先をIssue全体で auto-yes-poller.ts / auto-yes-manager.ts に統一確認し、Stage 3レビュー履歴のS3-004記述を修正。(S7-002) deep link実装に伴う ui-state.ts, ui-actions.ts, useWorktreeUIState.ts, LeftPaneTabSwitcher.tsx の4ファイルを主要変更ファイルとPhase 2タスクに追加。(S7-003) isStalled引数の画面別取得方針を「次アクションの定義」セクションに追記（Home/Sessions画面ではisStalled=false固定、Review画面のみinclude=reviewで正確値取得）。Nice to Have 3件: (S7-NTH-001) WorktreeCard.tsxを主要変更ファイルに追加。(S7-NTH-002) deep link関連テスト・MessageInput simplified variantテストをテスト戦略とPhase 3タスクに追記。(S7-NTH-003) テスト項目とPhaseの紐付けをテスト戦略に追加し、Phase 1 Review画面タスクにStalled判定のPhase間依存を明記。"
+}
