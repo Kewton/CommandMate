@@ -12,6 +12,7 @@ import { captureSessionOutput } from '@/lib/session/cli-session';
 import { detectSessionStatus, STATUS_REASON, SELECTION_LIST_REASONS } from '@/lib/detection/status-detector';
 import { getAutoYesState, getLastServerResponseTimestamp, isPollerActive, buildCompositeKey } from '@/lib/polling/auto-yes-manager';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
+import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/current-output');
@@ -74,7 +75,7 @@ export async function GET(
     const lastCapturedLine = sessionState?.lastCapturedLine || 0;
 
     // Capture current output
-    const output = await captureSessionOutput(params.id, cliToolId, 10000);
+    const output = await captureSessionOutput(params.id, cliToolId, STATUS_CAPTURE_LINES);
     const lines = output.split('\n');
     const totalLines = lines.length;
 
