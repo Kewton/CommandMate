@@ -17,13 +17,14 @@ import type { Worktree } from '@/types/models';
 
 /**
  * Review filter tabs.
- * Phase 2: 'done' and 'approval' only. 'stalled' added in Phase 3.
+ * Phase 3: Done, Approval, and Stalled filters enabled.
  */
-type ReviewFilter = 'done' | 'approval';
+type ReviewFilter = 'done' | 'approval' | 'stalled';
 
 const FILTER_TABS: Array<{ value: ReviewFilter; label: string }> = [
   { value: 'done', label: 'Done' },
   { value: 'approval', label: 'Approval' },
+  { value: 'stalled', label: 'Stalled' },
 ];
 
 export default function ReviewPage() {
@@ -34,7 +35,7 @@ export default function ReviewPage() {
 
   const fetchWorktrees = useCallback(async () => {
     try {
-      const response = await fetch('/api/worktrees');
+      const response = await fetch('/api/worktrees?include=review');
       if (response.ok) {
         const data = await response.json();
         setWorktrees(data.worktrees ?? []);
@@ -59,17 +60,24 @@ export default function ReviewPage() {
 
   /**
    * Filter worktrees by review status.
-   * Phase 2: Client-side filtering based on existing Worktree fields.
-   * - done: worktree.status === 'done'
-   * - approval: isWaitingForResponse === true (approximation for approval prompt)
+   * Phase 3: Uses server-computed reviewStatus from ?include=review.
+   * Falls back to client-side heuristics when reviewStatus is not available.
    */
   const filteredWorktrees = useMemo(() => {
     return worktrees.filter((wt) => {
+      // Use server-computed reviewStatus when available (Phase 3)
+      if (wt.reviewStatus !== undefined) {
+        return wt.reviewStatus === activeFilter;
+      }
+      // Fallback for backward compatibility
       if (activeFilter === 'done') {
         return wt.status === 'done';
       }
       if (activeFilter === 'approval') {
         return wt.isWaitingForResponse === true;
+      }
+      if (activeFilter === 'stalled') {
+        return wt.isStalled === true;
       }
       return false;
     });
@@ -125,7 +133,7 @@ export default function ReviewPage() {
                   repositoryName={wt.repositoryName}
                   branchName={wt.name}
                   status={activeFilter}
-                  nextAction={activeFilter === 'done' ? 'Review completed' : 'Approve / Reject'}
+                  nextAction={wt.nextAction ?? (activeFilter === 'done' ? 'Review completed' : activeFilter === 'stalled' ? 'Check stalled' : 'Approve / Reject')}
                   cliToolId={wt.cliToolId ?? 'claude'}
                 >
                   {activeFilter === 'approval' && (

@@ -30,7 +30,7 @@ export interface WorktreeCardProps {
  * ```
  */
 export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: WorktreeCardProps) {
-  const { id, name, description, updatedAt, isSessionRunning, isWaitingForResponse, favorite, status, link } = worktree;
+  const { id, name, description, updatedAt, isSessionRunning, isWaitingForResponse, favorite, status, link, repositoryName, nextAction } = worktree;
   const [isKilling, setIsKilling] = useState(false);
   const [isFavorite, setIsFavorite] = useState(favorite || false);
   const [isTogglingFavorite, setIsTogglingFavorite] = useState(false);
@@ -190,6 +190,26 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
 
         <CardContent>
           <div className="space-y-3">
+            {/* Repository name */}
+            {repositoryName && (
+              <span
+                data-testid="worktree-card-repo-name"
+                className="text-xs text-gray-500 dark:text-gray-400"
+              >
+                {repositoryName}
+              </span>
+            )}
+
+            {/* Next action (Issue #600) */}
+            {nextAction && (
+              <span
+                data-testid="worktree-card-next-action"
+                className="inline-block px-2 py-0.5 text-xs rounded bg-cyan-50 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300"
+              >
+                {nextAction}
+              </span>
+            )}
+
             {/* Description */}
             {description && (
               <div>

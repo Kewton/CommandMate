@@ -83,6 +83,12 @@ export interface Worktree {
   vibeLocalContextWindow?: number | null;
   /** Git status information (Issue #111) - optional for backward compatibility */
   gitStatus?: GitStatus;
+  /** Review status derived from session state (Issue #600, ?include=review) */
+  reviewStatus?: 'done' | 'approval' | 'stalled' | null;
+  /** Whether the session is considered stalled (Issue #600, ?include=review) */
+  isStalled?: boolean;
+  /** Next action display string (Issue #600, ?include=review) */
+  nextAction?: string;
 }
 
 /**
