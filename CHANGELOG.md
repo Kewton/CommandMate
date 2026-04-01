@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.16] - 2026-04-01
+
+### Added
+- Navigation: add Left/Right keys to NavigationButtons for Copilot TUI (Issue #592)
+
 ## [0.4.15] - 2026-03-31
 
 ### Added
