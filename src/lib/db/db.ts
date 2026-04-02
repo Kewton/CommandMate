@@ -51,8 +51,9 @@ export {
   updatePromptData,
   markPendingPromptsAsAnswered,
   ACTIVE_FILTER,
+  getMessagesByDateRange,
 } from './chat-db';
-export type { GetMessagesOptions } from './chat-db';
+export type { GetMessagesOptions, GetMessagesByDateRangeOptions } from './chat-db';
 
 // session-db
 export {
@@ -88,3 +89,11 @@ export {
   recoverStuckSendingTimers,
 } from './timer-db';
 export type { TimerMessage, CreateTimerParams, GetTimerOptions } from './timer-db';
+
+// daily-report-db (Issue #607)
+export {
+  getDailyReport,
+  saveDailyReport,
+  updateDailyReportContent,
+} from './daily-report-db';
+export type { DailyReport } from './daily-report-db';

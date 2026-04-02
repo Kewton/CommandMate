@@ -64,6 +64,8 @@ export function getCommandForTool(cliToolId: string): string {
 export interface ExecuteCommandOptions {
   /** AI model name (vibe-local: Ollama model, copilot: --model flag value) */
   model?: string;
+  /** Execution timeout in milliseconds (default: EXECUTION_TIMEOUT_MS) */
+  timeoutMs?: number;
 }
 
 /** Result of executing a claude -p command */
@@ -196,7 +198,7 @@ export async function executeClaudeCommand(
         cwd,
         env: sanitizeEnvForChildProcess(),
         maxBuffer: MAX_OUTPUT_SIZE,
-        timeout: EXECUTION_TIMEOUT_MS,
+        timeout: options?.timeoutMs ?? EXECUTION_TIMEOUT_MS,
       },
       (error, stdout, stderr) => {
         if (error) {
