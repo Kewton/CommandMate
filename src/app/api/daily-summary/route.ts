@@ -18,7 +18,7 @@ import {
   OutputValidationError,
   MAX_SUMMARY_OUTPUT_LENGTH,
 } from '@/lib/daily-summary-generator';
-import { SUMMARY_ALLOWED_TOOLS } from '@/config/review-config';
+import { SUMMARY_ALLOWED_TOOLS, MAX_USER_INSTRUCTION_LENGTH } from '@/config/review-config';
 
 // =============================================================================
 // Validation
@@ -107,7 +107,13 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { date, tool, model } = body;
+
+    // Body shape validation
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
+
+    const { date, tool, model, userInstruction } = body;
 
     // Validate date
     if (!date || typeof date !== 'string') {
@@ -128,9 +134,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid model parameter' }, { status: 400 });
     }
 
+    // Validate userInstruction (optional, Issue #612)
+    if (userInstruction !== undefined && userInstruction !== null) {
+      if (typeof userInstruction !== 'string') {
+        return NextResponse.json({ error: 'Invalid userInstruction parameter' }, { status: 400 });
+      }
+      if (userInstruction.length > MAX_USER_INSTRUCTION_LENGTH) {
+        return NextResponse.json(
+          { error: `userInstruction exceeds maximum length (${MAX_USER_INSTRUCTION_LENGTH})` },
+          { status: 400 }
+        );
+      }
+    }
+
     const db = getDbInstance();
 
-    const report = await generateDailySummary(db, { date, tool, model });
+    const report = await generateDailySummary(db, {
+      date,
+      tool,
+      model,
+      userInstruction: userInstruction || undefined,
+    });
 
     return NextResponse.json({
       report: {

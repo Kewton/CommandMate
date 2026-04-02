@@ -98,8 +98,8 @@ function formatStatus(status: string | null | undefined): string {
 export default function SessionsPage() {
   const { worktrees, isLoading, error } = useWorktreesCache();
   const [filterText, setFilterText] = useState('');
-  const [sortKey, setSortKey] = useState<SortKey>('lastSent');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [sortKey, setSortKey] = useState<SortKey>('repositoryName');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
   const filteredAndSorted = useMemo(() => {
     let result = worktrees;
@@ -131,12 +131,18 @@ export default function SessionsPage() {
         }
         case 'repositoryName': {
           comparison = a.repositoryName.toLowerCase().localeCompare(b.repositoryName.toLowerCase());
+          if (comparison === 0) {
+            comparison = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+          }
           break;
         }
         case 'status': {
           const priorityA = WORKTREE_STATUS_PRIORITY[a.status ?? ''] ?? DEFAULT_STATUS_PRIORITY;
           const priorityB = WORKTREE_STATUS_PRIORITY[b.status ?? ''] ?? DEFAULT_STATUS_PRIORITY;
           comparison = priorityA - priorityB;
+          if (comparison === 0) {
+            comparison = a.repositoryName.toLowerCase().localeCompare(b.repositoryName.toLowerCase());
+          }
           break;
         }
         default:

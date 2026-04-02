@@ -9,7 +9,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import ReportDatePicker from './ReportDatePicker';
-import { SUMMARY_ALLOWED_TOOLS } from '@/config/review-config';
+import { SUMMARY_ALLOWED_TOOLS, MAX_USER_INSTRUCTION_LENGTH } from '@/config/review-config';
 
 /** Format Date to YYYY-MM-DD */
 function formatToday(): string {
@@ -41,6 +41,7 @@ export default function ReportTab() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [userInstruction, setUserInstruction] = useState('');
 
   // Fetch report for selected date
   const fetchReport = useCallback(async (date: string) => {
@@ -89,6 +90,9 @@ export default function ReportTab() {
       const body: Record<string, string> = { date: selectedDate, tool: selectedTool };
       if (selectedTool === 'copilot' && modelInput.trim()) {
         body.model = modelInput.trim();
+      }
+      if (userInstruction.trim()) {
+        body.userInstruction = userInstruction.trim();
       }
 
       const res = await fetch('/api/daily-summary', {
@@ -181,6 +185,23 @@ export default function ReportTab() {
           )}
         </div>
 
+      </div>
+
+      {/* User instruction textarea (Issue #612) */}
+      <div className="mb-4">
+        <textarea
+          value={userInstruction}
+          onChange={(e) => setUserInstruction(e.target.value)}
+          rows={3}
+          maxLength={MAX_USER_INSTRUCTION_LENGTH}
+          placeholder="Additional instructions for summary generation (optional)"
+          className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200 resize-y"
+          data-testid="user-instruction-input"
+        />
+      </div>
+
+      {/* Generate button */}
+      <div className="mb-6">
         <button
           onClick={handleGenerate}
           disabled={isGenerating || messageCount === 0}
