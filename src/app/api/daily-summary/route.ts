@@ -18,7 +18,24 @@ import {
   OutputValidationError,
   MAX_SUMMARY_OUTPUT_LENGTH,
 } from '@/lib/daily-summary-generator';
+import type { DailyReport } from '@/lib/db/daily-report-db';
 import { SUMMARY_ALLOWED_TOOLS, MAX_USER_INSTRUCTION_LENGTH } from '@/config/review-config';
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/** Serialize a DailyReport to a plain JSON-safe object (Date -> ISO string) */
+function serializeReport(report: DailyReport) {
+  return {
+    date: report.date,
+    content: report.content,
+    generatedByTool: report.generatedByTool,
+    model: report.model,
+    createdAt: report.createdAt.toISOString(),
+    updatedAt: report.updatedAt.toISOString(),
+  };
+}
 
 // =============================================================================
 // Validation
@@ -81,14 +98,7 @@ export async function GET(request: NextRequest) {
     const messages = getMessagesByDateRange(db, { after: dayStart, before: dayEnd });
 
     return NextResponse.json({
-      report: report ? {
-        date: report.date,
-        content: report.content,
-        generatedByTool: report.generatedByTool,
-        model: report.model,
-        createdAt: report.createdAt.toISOString(),
-        updatedAt: report.updatedAt.toISOString(),
-      } : null,
+      report: report ? serializeReport(report) : null,
       messageCount: messages.length,
     });
   } catch (error) {
@@ -157,14 +167,7 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({
-      report: {
-        date: report.date,
-        content: report.content,
-        generatedByTool: report.generatedByTool,
-        model: report.model,
-        createdAt: report.createdAt.toISOString(),
-        updatedAt: report.updatedAt.toISOString(),
-      },
+      report: serializeReport(report),
       generated: true,
     });
   } catch (error) {
@@ -236,14 +239,7 @@ export async function PUT(request: NextRequest) {
     const updated = getDailyReport(db, date)!;
 
     return NextResponse.json({
-      report: {
-        date: updated.date,
-        content: updated.content,
-        generatedByTool: updated.generatedByTool,
-        model: updated.model,
-        createdAt: updated.createdAt.toISOString(),
-        updatedAt: updated.updatedAt.toISOString(),
-      },
+      report: serializeReport(updated),
     });
   } catch (error) {
     console.error('PUT /api/daily-summary error:', error);

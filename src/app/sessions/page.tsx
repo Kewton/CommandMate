@@ -79,17 +79,28 @@ function CliDot({ status, label }: { status: BranchStatus; label: string }) {
   return <span className={`${base} ${config.className}`} title={title} />;
 }
 
+/** Status display labels */
+const STATUS_LABELS: Record<string, string> = {
+  ready: 'Ready',
+  in_progress: 'In Progress',
+  in_review: 'In Review',
+  done: 'Done',
+};
+
 /** Format status display label */
 function formatStatus(status: string | null | undefined): string {
   if (!status) return '';
-  switch (status) {
-    case 'ready': return 'Ready';
-    case 'in_progress': return 'In Progress';
-    case 'in_review': return 'In Review';
-    case 'done': return 'Done';
-    default: return status;
-  }
+  return STATUS_LABELS[status] ?? status;
 }
+
+/** Status badge CSS classes keyed by status value */
+const STATUS_BADGE_CLASSES: Record<string, string> = {
+  done: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
+  in_review: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400',
+  in_progress: 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-400',
+};
+
+const DEFAULT_BADGE_CLASS = 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300';
 
 // ============================================================================
 // Component
@@ -271,13 +282,7 @@ export default function SessionsPage() {
                     {wt.status && (
                       <div className="mt-2">
                         <span className={`px-2 py-0.5 text-xs font-medium rounded ${
-                          wt.status === 'done'
-                            ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
-                            : wt.status === 'in_review'
-                            ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400'
-                            : wt.status === 'in_progress'
-                            ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-400'
-                            : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                          STATUS_BADGE_CLASSES[wt.status ?? ''] ?? DEFAULT_BADGE_CLASS
                         }`}>
                           {formatStatus(wt.status)}
                         </span>
