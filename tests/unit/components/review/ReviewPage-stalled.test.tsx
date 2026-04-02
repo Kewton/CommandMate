@@ -1,6 +1,7 @@
 /**
  * Unit tests for Review page filters (In Review / Approval / Stalled)
  * Issue #600: UX refresh
+ * Issue #607: Updated for page-level tab shell (ReviewTab extraction)
  *
  * @vitest-environment jsdom
  */
@@ -36,6 +37,8 @@ vi.mock('@/components/layout', () => ({
 // Mock review-config
 vi.mock('@/config/review-config', () => ({
   REVIEW_POLL_INTERVAL_MS: 60000,
+  SUMMARY_GENERATION_TIMEOUT_MS: 60000,
+  SUMMARY_ALLOWED_TOOLS: ['claude', 'codex', 'copilot'],
 }));
 
 // Mock status-colors
@@ -97,7 +100,15 @@ beforeEach(() => {
 import ReviewPage from '@/app/review/page';
 
 describe('Review page filters', () => {
-  it('should render all three filter tabs', async () => {
+  it('should render page-level tabs (Review / Report)', async () => {
+    render(React.createElement(ReviewPage));
+    await waitFor(() => {
+      expect(screen.getByTestId('page-tab-review')).toBeDefined();
+      expect(screen.getByTestId('page-tab-report')).toBeDefined();
+    });
+  });
+
+  it('should render all three filter tabs in Review tab', async () => {
     render(React.createElement(ReviewPage));
     await waitFor(() => {
       expect(screen.getByTestId('review-filter-in_review')).toBeDefined();
