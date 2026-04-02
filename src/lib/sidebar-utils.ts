@@ -11,9 +11,25 @@ import type { SidebarBranchItem, BranchStatus } from '@/types/sidebar';
 // ============================================================================
 
 /**
- * Available sort keys for sidebar branch list
+ * All available sort keys as a const array (single source of truth)
  */
-export type SortKey = 'updatedAt' | 'repositoryName' | 'branchName' | 'status';
+export const SORT_KEYS = ['updatedAt', 'repositoryName', 'branchName', 'status', 'lastSent'] as const;
+
+/**
+ * Available sort keys for sidebar branch list
+ * Derived from SORT_KEYS const array for single source of truth [DP-005]
+ */
+export type SortKey = typeof SORT_KEYS[number];
+
+/**
+ * Type guard to validate if a string is a valid SortKey.
+ * Uses SORT_KEYS array as single source of truth.
+ *
+ * @param key - String to validate
+ * @returns true if key is a valid SortKey
+ */
+export const isValidSortKey = (key: string): key is SortKey =>
+  (SORT_KEYS as ReadonlyArray<string>).includes(key);
 
 /**
  * Sort direction
@@ -92,6 +108,28 @@ export function generateRepositoryColor(repositoryName: string): string {
 }
 
 /**
+ * Compare two timestamp values for sorting.
+ * Returns raw comparison value (positive if a is newer, negative if b is newer).
+ * Null/undefined values are sent to the end of sort regardless of direction.
+ *
+ * @param a - First timestamp (ISO string, numeric ms, null, or undefined)
+ * @param b - Second timestamp (ISO string, numeric ms, null, or undefined)
+ * @returns Comparison value: positive if a > b, negative if a < b, 0 if equal.
+ *   Returns 1 if only a is null (a goes after b), -1 if only b is null.
+ */
+export function compareByTimestamp(
+  a: string | number | Date | null | undefined,
+  b: string | number | Date | null | undefined,
+): number {
+  if (!a && !b) return 0;
+  if (!a) return 1;  // null goes to end
+  if (!b) return -1; // null goes to end
+  const aTime = a instanceof Date ? a.getTime() : new Date(a as string | number).getTime();
+  const bTime = b instanceof Date ? b.getTime() : new Date(b as string | number).getTime();
+  return bTime - aTime; // Default: newest first (desc)
+}
+
+/**
  * Sort branch items by the specified key and direction
  *
  * @param branches - Array of branch items to sort
@@ -150,12 +188,31 @@ export function sortBranches(
         comparison = priorityA - priorityB;
         break;
       }
+
+      case 'lastSent': {
+        // NOTE: SidebarBranchItem has no lastUserMessageAt field.
+        // Falls back to lastActivity (updatedAt-derived) for sidebar usage.
+        // Sessions page uses Worktree.lastUserMessageAt directly.
+        const cmp = compareByTimestamp(a.lastActivity, b.lastActivity);
+        // Null values go to end regardless of direction - handle specially
+        if (!a.lastActivity && !b.lastActivity) { comparison = 0; break; }
+        if (!a.lastActivity) return 1;  // a has no date, goes to end
+        if (!b.lastActivity) return -1; // b has no date, goes to end
+        comparison = cmp;
+        break;
+      }
+
+      default:
+        // [CON-001] Explicit defense: unknown SortKey produces no sort
+        comparison = 0;
+        break;
     }
 
     // Apply direction multiplier
     // For updatedAt: desc = newest first (default), asc = oldest first
     // For others: asc = A-Z/priority order (default), desc = Z-A/reverse priority
-    const isDefaultDirection = sortKey === 'updatedAt' ? direction === 'desc' : direction === 'asc';
+    const isDescDefault = sortKey === 'updatedAt' || sortKey === 'lastSent';
+    const isDefaultDirection = isDescDefault ? direction === 'desc' : direction === 'asc';
     return isDefaultDirection ? comparison : -comparison;
   });
 
