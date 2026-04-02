@@ -106,6 +106,8 @@ export interface GenerateDailySummaryParams {
   date: string;
   tool: string;
   model?: string;
+  /** Optional user instruction for summary customization (Issue #612) */
+  userInstruction?: string;
 }
 
 /**
@@ -122,7 +124,7 @@ export async function generateDailySummary(
   db: Database.Database,
   params: GenerateDailySummaryParams
 ): Promise<DailyReport> {
-  const { date, tool, model } = params;
+  const { date, tool, model, userInstruction } = params;
 
   // Concurrent execution check
   if (isGenerating()) {
@@ -153,7 +155,7 @@ export async function generateDailySummary(
     }
 
     // 3. Build prompt
-    const prompt = buildSummaryPrompt(messages, worktreeMap);
+    const prompt = buildSummaryPrompt(messages, worktreeMap, userInstruction);
 
     // 4. Execute AI command
     const result = await executeClaudeCommand(

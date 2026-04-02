@@ -57,7 +57,7 @@ const MoreIcon = () => (
 const MOBILE_NAV_TABS: MobileNavTab[] = [
   { label: 'Home', href: '/', isActive: (p) => p === '/', icon: <HomeIcon /> },
   { label: 'Sessions', href: '/sessions', isActive: (p) => p.startsWith('/sessions'), icon: <SessionsIcon /> },
-  { label: 'Review', href: '/review', isActive: (p) => p.startsWith('/review'), icon: <ReviewIcon /> },
+  { label: 'Review/Report', href: '/review', isActive: (p) => p.startsWith('/review'), icon: <ReviewIcon /> },
   { label: 'More', href: '/more', isActive: (p) => p.startsWith('/more'), icon: <MoreIcon /> },
 ];
 

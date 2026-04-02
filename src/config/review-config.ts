@@ -35,3 +35,9 @@ export const SUMMARY_GENERATION_TIMEOUT_MS = 60_000;
  */
 export const SUMMARY_ALLOWED_TOOLS = ['claude', 'codex', 'copilot'] as const;
 export type SummaryAllowedTool = typeof SUMMARY_ALLOWED_TOOLS[number];
+
+/**
+ * Maximum character length for user instruction in summary generation.
+ * Issue #612: Report UI improvements
+ */
+export const MAX_USER_INSTRUCTION_LENGTH = 1000;

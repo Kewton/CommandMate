@@ -41,12 +41,12 @@ describe('Header', () => {
     expect(screen.getByText('MyApp')).toBeDefined();
   });
 
-  it('should render 5 navigation links: Home, Sessions, Repos, Review, More', () => {
+  it('should render 5 navigation links: Home, Sessions, Repos, Review/Report, More', () => {
     render(<Header />);
     expect(screen.getByText('Home')).toBeDefined();
     expect(screen.getByText('Sessions')).toBeDefined();
     expect(screen.getByText('Repos')).toBeDefined();
-    expect(screen.getByText('Review')).toBeDefined();
+    expect(screen.getByText('Review/Report')).toBeDefined();
     expect(screen.getByText('More')).toBeDefined();
   });
 
@@ -55,7 +55,7 @@ describe('Header', () => {
     const homeLink = screen.getByText('Home').closest('a');
     const sessionsLink = screen.getByText('Sessions').closest('a');
     const reposLink = screen.getByText('Repos').closest('a');
-    const reviewLink = screen.getByText('Review').closest('a');
+    const reviewLink = screen.getByText('Review/Report').closest('a');
     const moreLink = screen.getByText('More').closest('a');
 
     expect(homeLink?.getAttribute('href')).toBe('/');
@@ -79,10 +79,10 @@ describe('Header', () => {
     expect(sessionsLink?.className).toContain('text-cyan-600');
   });
 
-  it('should highlight the active Review link when on /review', () => {
+  it('should highlight the active Review/Report link when on /review', () => {
     mockPathname.mockReturnValue('/review');
     render(<Header />);
-    const reviewLink = screen.getByText('Review').closest('a');
+    const reviewLink = screen.getByText('Review/Report').closest('a');
     expect(reviewLink?.className).toContain('text-cyan-600');
   });
 

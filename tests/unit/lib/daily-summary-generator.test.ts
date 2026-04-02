@@ -47,8 +47,11 @@ vi.mock('@/config/review-config', () => ({
 }));
 
 // Mock summary-prompt-builder
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockBuildSummaryPrompt = vi.fn((..._args: any[]) => 'mock prompt');
 vi.mock('@/lib/summary-prompt-builder', () => ({
-  buildSummaryPrompt: vi.fn(() => 'mock prompt'),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  buildSummaryPrompt: (...args: any[]) => mockBuildSummaryPrompt(...args),
 }));
 
 import {
@@ -263,6 +266,69 @@ describe('daily-summary-generator', () => {
       }
 
       expect(globalThis.__dailySummaryGenerating).toBeUndefined();
+    });
+
+    it('should propagate userInstruction to buildSummaryPrompt (Issue #612)', async () => {
+      const validOutput = 'x'.repeat(MIN_SUMMARY_OUTPUT_LENGTH + 10);
+      mockGetMessagesByDateRange.mockReturnValue([
+        { id: 'msg-1', worktreeId: 'wt-1', role: 'user', content: 'hello', timestamp: new Date() },
+      ]);
+      mockExecuteClaudeCommand.mockResolvedValue({
+        output: validOutput,
+        exitCode: 0,
+        status: 'completed',
+      });
+      mockSaveDailyReport.mockReturnValue({
+        date: '2026-04-02',
+        content: validOutput,
+        generatedByTool: 'claude',
+        model: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      await generateDailySummary(mockDb, {
+        date: '2026-04-02',
+        tool: 'claude',
+        userInstruction: 'Focus on testing',
+      });
+
+      expect(mockBuildSummaryPrompt).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.any(Map),
+        'Focus on testing'
+      );
+    });
+
+    it('should NOT pass userInstruction to buildSummaryPrompt when undefined (Issue #612)', async () => {
+      const validOutput = 'x'.repeat(MIN_SUMMARY_OUTPUT_LENGTH + 10);
+      mockGetMessagesByDateRange.mockReturnValue([
+        { id: 'msg-1', worktreeId: 'wt-1', role: 'user', content: 'hello', timestamp: new Date() },
+      ]);
+      mockExecuteClaudeCommand.mockResolvedValue({
+        output: validOutput,
+        exitCode: 0,
+        status: 'completed',
+      });
+      mockSaveDailyReport.mockReturnValue({
+        date: '2026-04-02',
+        content: validOutput,
+        generatedByTool: 'claude',
+        model: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      await generateDailySummary(mockDb, {
+        date: '2026-04-02',
+        tool: 'claude',
+      });
+
+      expect(mockBuildSummaryPrompt).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.any(Map),
+        undefined
+      );
     });
   });
 });

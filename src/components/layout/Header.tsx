@@ -24,7 +24,7 @@ const NAV_ITEMS: Array<{ label: string; href: string; isActive: (pathname: strin
   { label: 'Home', href: '/', isActive: (p) => p === '/' },
   { label: 'Sessions', href: '/sessions', isActive: (p) => p.startsWith('/sessions') },
   { label: 'Repos', href: '/repositories', isActive: (p) => p.startsWith('/repositories') },
-  { label: 'Review', href: '/review', isActive: (p) => p.startsWith('/review') },
+  { label: 'Review/Report', href: '/review', isActive: (p) => p.startsWith('/review') },
   { label: 'More', href: '/more', isActive: (p) => p.startsWith('/more') },
 ];
 
