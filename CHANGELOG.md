@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-04-02
+
+### Added
+- Report: ユーザー指示入力とUI改善 (Issue #612)
+- Daily Summary: デイリーサマリー機能の実装 (Issue #607)
+- Sessions: ソートオプションとメッセージプレビューを追加 (Issue #606)
+
+### Fixed
+- Sessions: デフォルトソートを「最終送信（新しい順）」に変更
+- Sessions: 表示順をリポジトリ名→ブランチ名の順に変更
+- Sidebar: セッションフラグからworktreeステータスを導出し、適応型ポーリングを追加 (Issue #608)
+- Status: キャプチャ行数統一によりスピナーがreadyで停止する問題を修正 (Issue #604)
+
+### Refactored
+- Daily Summary / Sessions: ヘルパー関数を抽出し重複を削減
+- Sessions: sanitizePreviewを共有configモジュールに抽出
+
 ## [0.5.0] - 2026-04-02
 
 ### Added
