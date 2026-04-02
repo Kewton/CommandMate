@@ -95,9 +95,16 @@ export function calculateHasUnread(worktree: Worktree): boolean {
  * @returns SidebarBranchItem for sidebar display
  */
 export function toBranchItem(worktree: Worktree): SidebarBranchItem {
-  // Issue #4: Sidebar no longer shows per-CLI session status.
-  // Status is always 'idle' since detailed status is shown in WorktreeDetail.
-  const status: BranchStatus = 'idle';
+  // Issue #608: Derive top-level status from worktree session flags
+  const status = deriveCliStatus(
+    worktree.isSessionRunning !== undefined
+      ? {
+          isRunning: worktree.isSessionRunning ?? false,
+          isWaitingForResponse: worktree.isWaitingForResponse ?? false,
+          isProcessing: worktree.isProcessing ?? false,
+        }
+      : undefined
+  );
 
   // Use new hasUnread logic based on lastAssistantMessageAt and lastViewedAt
   const hasUnread = calculateHasUnread(worktree);

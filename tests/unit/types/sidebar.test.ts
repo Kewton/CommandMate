@@ -68,7 +68,7 @@ describe('sidebar types', () => {
       expect(result.hasUnread).toBe(false);
     });
 
-    it('should always return idle status (Issue #4: sidebar no longer shows session status)', () => {
+    it('should return ready when session is running', () => {
       const worktree: Worktree = {
         id: 'feature-test',
         name: 'feature/test',
@@ -82,10 +82,10 @@ describe('sidebar types', () => {
 
       const result = toBranchItem(worktree);
 
-      expect(result.status).toBe('idle');
+      expect(result.status).toBe('ready');
     });
 
-    it('should return idle even when session is processing', () => {
+    it('should return running when session is processing', () => {
       const worktree: Worktree = {
         id: 'feature-test',
         name: 'feature/test',
@@ -99,10 +99,10 @@ describe('sidebar types', () => {
 
       const result = toBranchItem(worktree);
 
-      expect(result.status).toBe('idle');
+      expect(result.status).toBe('running');
     });
 
-    it('should return idle even when waiting for response', () => {
+    it('should return waiting when waiting for response', () => {
       const worktree: Worktree = {
         id: 'feature-test',
         name: 'feature/test',
@@ -115,7 +115,7 @@ describe('sidebar types', () => {
 
       const result = toBranchItem(worktree);
 
-      expect(result.status).toBe('idle');
+      expect(result.status).toBe('waiting');
     });
 
     it('should return idle even with sessionStatusByCli data', () => {

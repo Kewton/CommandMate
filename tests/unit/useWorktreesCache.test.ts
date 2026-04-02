@@ -4,9 +4,13 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
-import { useWorktreesCache } from '@/hooks/useWorktreesCache';
+import {
+  useWorktreesCache,
+  POLLING_INTERVAL_ACTIVE,
+  POLLING_INTERVAL_IDLE,
+} from '@/hooks/useWorktreesCache';
 
 // Mock global fetch
 const mockFetch = vi.fn();
@@ -116,5 +120,106 @@ describe('useWorktreesCache()', () => {
     });
 
     expect(result.current.worktrees).toEqual([]);
+  });
+
+  describe('polling constants', () => {
+    it('should export POLLING_INTERVAL_ACTIVE as 5000', () => {
+      expect(POLLING_INTERVAL_ACTIVE).toBe(5000);
+    });
+
+    it('should export POLLING_INTERVAL_IDLE as 30000', () => {
+      expect(POLLING_INTERVAL_IDLE).toBe(30000);
+    });
+  });
+
+  describe('adaptive polling', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('should poll with idle interval when no sessions are running', async () => {
+      const idleWorktrees = [{ id: 'wt-1', name: 'main', isSessionRunning: false }];
+      // Always resolve with idle worktrees
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ worktrees: idleWorktrees }),
+      });
+
+      renderHook(() => useWorktreesCache());
+
+      // Flush initial fetch + setTimeout(startPolling, 0)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+
+      const fetchCountAfterInit = mockFetch.mock.calls.length;
+
+      // Advance by less than IDLE interval - should NOT poll
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_IDLE - 100);
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(fetchCountAfterInit);
+
+      // Advance past idle interval threshold
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+
+      // Should have polled once more
+      expect(mockFetch).toHaveBeenCalledTimes(fetchCountAfterInit + 1);
+    });
+
+    it('should poll with active interval when sessions are running', async () => {
+      const activeWorktrees = [{ id: 'wt-1', name: 'main', isSessionRunning: true }];
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ worktrees: activeWorktrees }),
+      });
+
+      renderHook(() => useWorktreesCache());
+
+      // Flush initial fetch + setTimeout(startPolling, 0)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+
+      const fetchCountAfterInit = mockFetch.mock.calls.length;
+
+      // Advance past active interval
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_ACTIVE + 100);
+      });
+
+      // Should have polled at least once more
+      expect(mockFetch.mock.calls.length).toBeGreaterThan(fetchCountAfterInit);
+    });
+
+    it('should stop polling on unmount', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ worktrees: [{ id: 'wt-1', name: 'main' }] }),
+      });
+
+      const { unmount } = renderHook(() => useWorktreesCache());
+
+      // Flush initial fetch + setTimeout(startPolling, 0)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+
+      const fetchCountAfterInit = mockFetch.mock.calls.length;
+      unmount();
+
+      // Advance time - should not trigger more fetches after unmount
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_IDLE * 3);
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(fetchCountAfterInit);
+    });
   });
 });
