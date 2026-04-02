@@ -109,8 +109,8 @@ const DEFAULT_BADGE_CLASS = 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:tex
 export default function SessionsPage() {
   const { worktrees, isLoading, error } = useWorktreesCache();
   const [filterText, setFilterText] = useState('');
-  const [sortKey, setSortKey] = useState<SortKey>('repositoryName');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [sortKey, setSortKey] = useState<SortKey>('lastSent');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
   const filteredAndSorted = useMemo(() => {
     let result = worktrees;
