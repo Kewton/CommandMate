@@ -12,6 +12,9 @@ import {
   SortKey,
   SortDirection,
   STATUS_PRIORITY,
+  SORT_KEYS,
+  isValidSortKey,
+  compareByTimestamp,
 } from '@/lib/sidebar-utils';
 import type { ViewMode, BranchGroup } from '@/lib/sidebar-utils';
 import type { SidebarBranchItem } from '@/types/sidebar';
@@ -32,10 +35,89 @@ const createBranchItem = (
 });
 
 describe('sidebar-utils', () => {
+  describe('SORT_KEYS', () => {
+    it('should contain all 5 sort key values', () => {
+      expect(SORT_KEYS).toHaveLength(5);
+      expect(SORT_KEYS).toContain('updatedAt');
+      expect(SORT_KEYS).toContain('repositoryName');
+      expect(SORT_KEYS).toContain('branchName');
+      expect(SORT_KEYS).toContain('status');
+      expect(SORT_KEYS).toContain('lastSent');
+    });
+
+    it('should be readonly', () => {
+      // TypeScript enforces readonly at compile time; runtime check that it is an array
+      expect(Array.isArray(SORT_KEYS)).toBe(true);
+    });
+  });
+
   describe('SortKey', () => {
-    it('should have valid sort key values', () => {
-      const keys: SortKey[] = ['updatedAt', 'repositoryName', 'branchName', 'status'];
-      expect(keys).toHaveLength(4);
+    it('should have valid sort key values including lastSent', () => {
+      const keys: SortKey[] = ['updatedAt', 'repositoryName', 'branchName', 'status', 'lastSent'];
+      expect(keys).toHaveLength(5);
+    });
+  });
+
+  describe('isValidSortKey', () => {
+    it('should return true for all valid sort keys', () => {
+      expect(isValidSortKey('updatedAt')).toBe(true);
+      expect(isValidSortKey('repositoryName')).toBe(true);
+      expect(isValidSortKey('branchName')).toBe(true);
+      expect(isValidSortKey('status')).toBe(true);
+      expect(isValidSortKey('lastSent')).toBe(true);
+    });
+
+    it('should return false for invalid sort keys', () => {
+      expect(isValidSortKey('invalid')).toBe(false);
+      expect(isValidSortKey('')).toBe(false);
+      expect(isValidSortKey('UPDATED_AT')).toBe(false);
+    });
+  });
+
+  describe('compareByTimestamp', () => {
+    it('should return negative when a is newer than b (bTime - aTime)', () => {
+      // a is newer => aTime > bTime => bTime - aTime < 0
+      const result = compareByTimestamp('2024-06-01', '2024-01-01');
+      expect(result).toBeLessThan(0);
+    });
+
+    it('should return positive when b is newer than a (bTime - aTime)', () => {
+      // b is newer => bTime > aTime => bTime - aTime > 0
+      const result = compareByTimestamp('2024-01-01', '2024-06-01');
+      expect(result).toBeGreaterThan(0);
+    });
+
+    it('should return 0 when both are equal', () => {
+      const result = compareByTimestamp('2024-06-01', '2024-06-01');
+      expect(result).toBe(0);
+    });
+
+    it('should return 1 when a is null (null goes to end)', () => {
+      const result = compareByTimestamp(null, '2024-06-01');
+      expect(result).toBe(1);
+    });
+
+    it('should return -1 when b is null (null goes to end)', () => {
+      const result = compareByTimestamp('2024-06-01', null);
+      expect(result).toBe(-1);
+    });
+
+    it('should return 0 when both are null', () => {
+      const result = compareByTimestamp(null, null);
+      expect(result).toBe(0);
+    });
+
+    it('should return 0 when both are undefined', () => {
+      const result = compareByTimestamp(undefined, undefined);
+      expect(result).toBe(0);
+    });
+
+    it('should handle numeric timestamps', () => {
+      const a = new Date('2024-06-01').getTime();
+      const b = new Date('2024-01-01').getTime();
+      const result = compareByTimestamp(a, b);
+      // a is newer => bTime - aTime < 0
+      expect(result).toBeLessThan(0);
     });
   });
 
@@ -221,6 +303,99 @@ describe('sidebar-utils', () => {
 
         expect(result[0].status).toBe('idle');
         expect(result[1].status).toBe('waiting');
+      });
+    });
+
+    describe('sort by lastSent', () => {
+      it('should sort by lastActivity as fallback (desc = newest first)', () => {
+        const branches: SidebarBranchItem[] = [
+          createBranchItem({
+            id: '1',
+            name: 'old-branch',
+            lastActivity: new Date('2024-01-01'),
+          }),
+          createBranchItem({
+            id: '2',
+            name: 'new-branch',
+            lastActivity: new Date('2024-06-01'),
+          }),
+          createBranchItem({
+            id: '3',
+            name: 'middle-branch',
+            lastActivity: new Date('2024-03-01'),
+          }),
+        ];
+
+        const result = sortBranches(branches, 'lastSent', 'desc');
+
+        expect(result[0].id).toBe('2'); // newest
+        expect(result[1].id).toBe('3'); // middle
+        expect(result[2].id).toBe('1'); // oldest
+      });
+
+      it('should sort by lastActivity ascending (oldest first)', () => {
+        const branches: SidebarBranchItem[] = [
+          createBranchItem({
+            id: '1',
+            name: 'old-branch',
+            lastActivity: new Date('2024-01-01'),
+          }),
+          createBranchItem({
+            id: '2',
+            name: 'new-branch',
+            lastActivity: new Date('2024-06-01'),
+          }),
+        ];
+
+        const result = sortBranches(branches, 'lastSent', 'asc');
+
+        expect(result[0].id).toBe('1'); // oldest
+        expect(result[1].id).toBe('2'); // newest
+      });
+
+      it('should place null lastActivity at end regardless of direction', () => {
+        const branches: SidebarBranchItem[] = [
+          createBranchItem({
+            id: '1',
+            name: 'no-date',
+            lastActivity: undefined,
+          }),
+          createBranchItem({
+            id: '2',
+            name: 'has-date',
+            lastActivity: new Date('2024-06-01'),
+          }),
+          createBranchItem({
+            id: '3',
+            name: 'also-no-date',
+            lastActivity: undefined,
+          }),
+        ];
+
+        // desc direction
+        const resultDesc = sortBranches(branches, 'lastSent', 'desc');
+        expect(resultDesc[0].id).toBe('2');
+
+        // asc direction
+        const resultAsc = sortBranches(branches, 'lastSent', 'asc');
+        expect(resultAsc[0].id).toBe('2');
+      });
+    });
+
+    describe('default case', () => {
+      it('should not throw for unknown sort key and preserve order', () => {
+        const branches: SidebarBranchItem[] = [
+          createBranchItem({ id: '1', name: 'a' }),
+          createBranchItem({ id: '2', name: 'b' }),
+        ];
+
+        // Force an unknown sort key via type assertion
+        const result = sortBranches(branches, 'unknownKey' as SortKey, 'asc');
+
+        expect(result).toHaveLength(2);
+        // comparison = 0 means order is preserved
+        expect(result[0].id).toBe('1');
+        expect(result[1].id).toBe('2');
       });
     });
 

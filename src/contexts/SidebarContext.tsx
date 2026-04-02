@@ -19,6 +19,7 @@ import React, {
   useMemo,
   type ReactNode,
 } from 'react';
+import { isValidSortKey } from '@/lib/sidebar-utils';
 import type { SortKey, SortDirection, ViewMode } from '@/lib/sidebar-utils';
 
 // ============================================================================
@@ -233,8 +234,11 @@ export function SidebarProvider({
     () => JSON.stringify({ sortKey: state.sortKey, sortDirection: state.sortDirection }),
     (stored) => {
       try {
-        const { sortKey, sortDirection } = JSON.parse(stored);
-        if (sortKey && sortDirection) {
+        const parsed = JSON.parse(stored);
+        const sortDirection = parsed.sortDirection;
+        // Validate sortKey against SORT_KEYS to prevent invalid values from localStorage
+        const sortKey = isValidSortKey(parsed.sortKey) ? parsed.sortKey : DEFAULT_SORT_KEY;
+        if (sortKey && (sortDirection === 'asc' || sortDirection === 'desc')) {
           dispatch({ type: 'LOAD_SORT_SETTINGS', sortKey, sortDirection });
         }
       } catch { /* ignore parse errors */ }
