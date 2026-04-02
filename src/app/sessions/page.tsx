@@ -246,10 +246,10 @@ export default function SessionsPage() {
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                          {wt.name}
+                          {wt.repositoryName}
                         </div>
                         <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                          {wt.repositoryName}
+                          {wt.name}
                         </div>
                       </div>
 
