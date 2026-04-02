@@ -13,6 +13,7 @@ import {
   useSidebarContext,
   DEFAULT_SIDEBAR_WIDTH,
   SIDEBAR_VIEW_MODE_STORAGE_KEY,
+  SIDEBAR_SORT_STORAGE_KEY,
   DEFAULT_VIEW_MODE,
 } from '@/contexts/SidebarContext';
 
@@ -25,6 +26,8 @@ function TestConsumer() {
       <span data-testid="width">{context.width}</span>
       <span data-testid="isMobileDrawerOpen">{String(context.isMobileDrawerOpen)}</span>
       <span data-testid="viewMode">{context.viewMode}</span>
+      <span data-testid="sortKey">{context.sortKey}</span>
+      <span data-testid="sortDirection">{context.sortDirection}</span>
       <button data-testid="toggle" onClick={context.toggle}>Toggle</button>
       <button data-testid="setWidth" onClick={() => context.setWidth(400)}>Set Width</button>
       <button data-testid="openMobileDrawer" onClick={context.openMobileDrawer}>Open Drawer</button>
@@ -260,6 +263,56 @@ describe('SidebarContext', () => {
   describe('DEFAULT_VIEW_MODE', () => {
     it('should export default view mode constant as grouped', () => {
       expect(DEFAULT_VIEW_MODE).toBe('grouped');
+    });
+  });
+
+  describe('sort settings localStorage', () => {
+    it('should fallback invalid sortKey from localStorage to default', () => {
+      // Store an invalid sortKey value
+      localStorage.setItem(
+        SIDEBAR_SORT_STORAGE_KEY,
+        JSON.stringify({ sortKey: 'invalidKey', sortDirection: 'asc' })
+      );
+
+      render(
+        <SidebarProvider>
+          <TestConsumer />
+        </SidebarProvider>
+      );
+
+      // Should fallback to default 'updatedAt' instead of using invalid value
+      expect(screen.getByTestId('sortKey').textContent).toBe('updatedAt');
+      expect(screen.getByTestId('sortDirection').textContent).toBe('asc');
+    });
+
+    it('should load valid sortKey from localStorage', () => {
+      localStorage.setItem(
+        SIDEBAR_SORT_STORAGE_KEY,
+        JSON.stringify({ sortKey: 'repositoryName', sortDirection: 'desc' })
+      );
+
+      render(
+        <SidebarProvider>
+          <TestConsumer />
+        </SidebarProvider>
+      );
+
+      expect(screen.getByTestId('sortKey').textContent).toBe('repositoryName');
+      expect(screen.getByTestId('sortDirection').textContent).toBe('desc');
+    });
+
+    it('should handle corrupted JSON in localStorage gracefully', () => {
+      localStorage.setItem(SIDEBAR_SORT_STORAGE_KEY, 'not-json');
+
+      render(
+        <SidebarProvider>
+          <TestConsumer />
+        </SidebarProvider>
+      );
+
+      // Should use defaults
+      expect(screen.getByTestId('sortKey').textContent).toBe('updatedAt');
+      expect(screen.getByTestId('sortDirection').textContent).toBe('desc');
     });
   });
 });

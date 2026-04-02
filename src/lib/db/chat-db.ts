@@ -375,6 +375,47 @@ export function clearLastUserMessage(
   stmt.run(worktreeId);
 }
 
+/** Options for getMessagesByDateRange query */
+export interface GetMessagesByDateRangeOptions {
+  after: Date;
+  before: Date;
+  includeArchived?: boolean;
+}
+
+/**
+ * Get messages across all worktrees within a date range.
+ * Used for daily summary generation.
+ *
+ * Issue #607: Cross-worktree message retrieval for daily summary
+ *
+ * @param db - Database instance
+ * @param options - Date range and filter options
+ * @returns ChatMessage[] sorted by timestamp ASC
+ */
+export function getMessagesByDateRange(
+  db: Database.Database,
+  options: GetMessagesByDateRangeOptions
+): ChatMessage[] {
+  const { after, before, includeArchived = false } = options;
+
+  let query = `
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, archived
+    FROM chat_messages
+    WHERE timestamp >= ? AND timestamp < ?
+  `;
+
+  if (!includeArchived) {
+    query += ` ${ACTIVE_FILTER}`;
+  }
+
+  query += ` ORDER BY timestamp ASC`;
+
+  const stmt = db.prepare(query);
+  const rows = stmt.all(after.getTime(), before.getTime()) as ChatMessageRow[];
+
+  return rows.map(mapChatMessage);
+}
+
 /**
  * Get message by ID
  */

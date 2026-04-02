@@ -20,3 +20,24 @@ export const STALLED_THRESHOLD_MS = 300_000;
  * Default: 7 seconds (7,000 ms)
  */
 export const REVIEW_POLL_INTERVAL_MS = 7_000;
+
+/**
+ * Timeout in milliseconds for AI summary generation.
+ * Issue #607: Daily summary feature
+ *
+ * Default: 60 seconds (60,000 ms)
+ */
+export const SUMMARY_GENERATION_TIMEOUT_MS = 60_000;
+
+/**
+ * Allowed CLI tools for AI summary generation.
+ * Issue #607: Only claude, codex, copilot support non-interactive execution.
+ */
+export const SUMMARY_ALLOWED_TOOLS = ['claude', 'codex', 'copilot'] as const;
+export type SummaryAllowedTool = typeof SUMMARY_ALLOWED_TOOLS[number];
+
+/**
+ * Maximum character length for user instruction in summary generation.
+ * Issue #612: Report UI improvements
+ */
+export const MAX_USER_INSTRUCTION_LENGTH = 1000;

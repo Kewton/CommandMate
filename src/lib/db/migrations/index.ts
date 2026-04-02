@@ -5,7 +5,8 @@ import { v01_v05_migrations } from './v01-v05-initial-schema';
 import { v06_v10_migrations } from './v06-v10-schema-updates';
 import { v11_v15_migrations } from './v11-v15-feature-additions';
 import { v16_v20_migrations } from './v16-v20-refactoring';
-import { v21_v23_migrations } from './v21-v23-latest';
+import { v21_v23_migrations } from './v21-v23';
+import { v24_migrations } from './v24-daily-summaries';
 
 /**
  * Complete ordered list of all migrations.
@@ -17,4 +18,5 @@ export const migrations: Migration[] = [
   ...v11_v15_migrations,
   ...v16_v20_migrations,
   ...v21_v23_migrations,
+  ...v24_migrations,
 ];

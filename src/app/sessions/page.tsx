@@ -2,7 +2,8 @@
  * Sessions Page (/sessions)
  *
  * Issue #600: UX refresh - Worktree exploration, search, and filtering.
- * Uses useWorktreeList() and useWorktreesCache() for shared logic [DR1-005].
+ * Issue #606: Sessions enhancement - sort options and last sent message display.
+ * Uses useWorktreesCache() for shared logic [DR1-005].
  * Sidebar auto-collapses on this page (via useLayoutConfig).
  */
 
@@ -16,8 +17,50 @@ import { deriveCliStatus } from '@/types/sidebar';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
+import { SortSelectorBase } from '@/components/sidebar/SortSelectorBase';
+import { compareByTimestamp } from '@/lib/sidebar-utils';
+import { formatRelativeTime } from '@/lib/date-utils';
+import {
+  MESSAGE_PREVIEW_MAX_LENGTH_PC,
+  MESSAGE_PREVIEW_MAX_LENGTH_SP,
+  sanitizePreview,
+} from '@/config/message-preview-config';
+import type { SortKey, SortDirection } from '@/lib/sidebar-utils';
+import type { SortOption } from '@/components/sidebar/SortSelectorBase';
 import type { Worktree } from '@/types/models';
 import type { BranchStatus } from '@/types/sidebar';
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/** Sort options for Sessions page (includes lastSent, no branchName/updatedAt) [CON-002] */
+const SESSIONS_SORT_OPTIONS: ReadonlyArray<SortOption> = [
+  { key: 'repositoryName', label: 'Repository' },
+  { key: 'status', label: 'Status' },
+  { key: 'lastSent', label: 'Last Sent' },
+];
+
+/** Default directions for Sessions sort keys */
+const SESSIONS_DEFAULT_DIRECTIONS: Partial<Record<SortKey, SortDirection>> = {
+  lastSent: 'desc',
+  updatedAt: 'desc',
+};
+
+/** Status priority for sorting (lower = higher priority) */
+const WORKTREE_STATUS_PRIORITY: Record<string, number> = {
+  ready: 0,
+  in_progress: 1,
+  in_review: 2,
+  done: 3,
+};
+
+/** Default priority for null/unknown status */
+const DEFAULT_STATUS_PRIORITY = 4;
+
+// ============================================================================
+// Helpers
+// ============================================================================
 
 /** Small CLI status dot for Sessions list */
 function CliDot({ status, label }: { status: BranchStatus; label: string }) {
@@ -36,31 +79,96 @@ function CliDot({ status, label }: { status: BranchStatus; label: string }) {
   return <span className={`${base} ${config.className}`} title={title} />;
 }
 
+/** Status display labels */
+const STATUS_LABELS: Record<string, string> = {
+  ready: 'Ready',
+  in_progress: 'In Progress',
+  in_review: 'In Review',
+  done: 'Done',
+};
+
 /** Format status display label */
 function formatStatus(status: string | null | undefined): string {
   if (!status) return '';
-  switch (status) {
-    case 'ready': return 'Ready';
-    case 'in_progress': return 'In Progress';
-    case 'in_review': return 'In Review';
-    case 'done': return 'Done';
-    default: return status;
-  }
+  return STATUS_LABELS[status] ?? status;
 }
+
+/** Status badge CSS classes keyed by status value */
+const STATUS_BADGE_CLASSES: Record<string, string> = {
+  done: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
+  in_review: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400',
+  in_progress: 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-400',
+};
+
+const DEFAULT_BADGE_CLASS = 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300';
+
+// ============================================================================
+// Component
+// ============================================================================
 
 export default function SessionsPage() {
   const { worktrees, isLoading, error } = useWorktreesCache();
   const [filterText, setFilterText] = useState('');
+  const [sortKey, setSortKey] = useState<SortKey>('lastSent');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
-  const filteredWorktrees = useMemo(() => {
-    if (!filterText) return worktrees;
-    const lower = filterText.toLowerCase();
-    return worktrees.filter(
-      (wt) =>
-        wt.name.toLowerCase().includes(lower) ||
-        wt.repositoryName.toLowerCase().includes(lower)
-    );
-  }, [worktrees, filterText]);
+  const filteredAndSorted = useMemo(() => {
+    let result = worktrees;
+
+    // Filter
+    if (filterText) {
+      const lower = filterText.toLowerCase();
+      result = result.filter(
+        (wt) =>
+          wt.name.toLowerCase().includes(lower) ||
+          wt.repositoryName.toLowerCase().includes(lower)
+      );
+    }
+
+    // Sort
+    const sorted = [...result];
+    sorted.sort((a, b) => {
+      let comparison = 0;
+
+      switch (sortKey) {
+        case 'lastSent': {
+          const cmp = compareByTimestamp(a.lastUserMessageAt, b.lastUserMessageAt);
+          // Null values go to end regardless of direction
+          if (!a.lastUserMessageAt && !b.lastUserMessageAt) return 0;
+          if (!a.lastUserMessageAt) return 1;
+          if (!b.lastUserMessageAt) return -1;
+          comparison = cmp;
+          break;
+        }
+        case 'repositoryName': {
+          comparison = a.repositoryName.toLowerCase().localeCompare(b.repositoryName.toLowerCase());
+          if (comparison === 0) {
+            comparison = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+          }
+          break;
+        }
+        case 'status': {
+          const priorityA = WORKTREE_STATUS_PRIORITY[a.status ?? ''] ?? DEFAULT_STATUS_PRIORITY;
+          const priorityB = WORKTREE_STATUS_PRIORITY[b.status ?? ''] ?? DEFAULT_STATUS_PRIORITY;
+          comparison = priorityA - priorityB;
+          if (comparison === 0) {
+            comparison = a.repositoryName.toLowerCase().localeCompare(b.repositoryName.toLowerCase());
+          }
+          break;
+        }
+        default:
+          comparison = 0;
+          break;
+      }
+
+      // Apply direction
+      const isDescDefault = sortKey === 'lastSent';
+      const isDefaultDirection = isDescDefault ? sortDirection === 'desc' : sortDirection === 'asc';
+      return isDefaultDirection ? comparison : -comparison;
+    });
+
+    return sorted;
+  }, [worktrees, filterText, sortKey, sortDirection]);
 
   const handleFilterChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setFilterText(e.target.value);
@@ -76,15 +184,23 @@ export default function SessionsPage() {
           </p>
         </div>
 
-        {/* Search / Filter */}
-        <div className="mb-6">
+        {/* Search / Filter + Sort */}
+        <div className="mb-6 flex items-center gap-4">
           <input
             type="text"
             placeholder="Filter by name or repository..."
             value={filterText}
             onChange={handleFilterChange}
-            className="w-full max-w-md px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+            className="flex-1 max-w-md px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
             data-testid="sessions-filter"
+          />
+          <SortSelectorBase
+            sortKey={sortKey}
+            sortDirection={sortDirection}
+            onSortKeyChange={setSortKey}
+            onSortDirectionChange={setSortDirection}
+            options={SESSIONS_SORT_OPTIONS}
+            defaultDirections={SESSIONS_DEFAULT_DIRECTIONS}
           />
         </div>
 
@@ -105,13 +221,20 @@ export default function SessionsPage() {
         {/* Session list */}
         {!isLoading && !error && (
           <div className="space-y-2" data-testid="sessions-list">
-            {filteredWorktrees.length === 0 ? (
+            {filteredAndSorted.length === 0 ? (
               <div className="text-gray-500 dark:text-gray-400 py-8 text-center" data-testid="sessions-empty">
                 {filterText ? 'No matching sessions found.' : 'No sessions yet.'}
               </div>
             ) : (
-              filteredWorktrees.map((wt: Worktree) => {
+              filteredAndSorted.map((wt: Worktree) => {
                 const agents = wt.selectedAgents ?? DEFAULT_SELECTED_AGENTS;
+                const sanitizedMessage = wt.lastUserMessage
+                  ? sanitizePreview(wt.lastUserMessage)
+                  : null;
+                const relativeTime = wt.lastUserMessageAt
+                  ? formatRelativeTime(String(wt.lastUserMessageAt))
+                  : null;
+
                 return (
                   <Link
                     key={wt.id}
@@ -123,10 +246,10 @@ export default function SessionsPage() {
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                          {wt.name}
+                          {wt.repositoryName}
                         </div>
                         <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                          {wt.repositoryName}
+                          {wt.name}
                         </div>
                       </div>
 
@@ -159,16 +282,36 @@ export default function SessionsPage() {
                     {wt.status && (
                       <div className="mt-2">
                         <span className={`px-2 py-0.5 text-xs font-medium rounded ${
-                          wt.status === 'done'
-                            ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
-                            : wt.status === 'in_review'
-                            ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400'
-                            : wt.status === 'in_progress'
-                            ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-400'
-                            : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                          STATUS_BADGE_CLASSES[wt.status ?? ''] ?? DEFAULT_BADGE_CLASS
                         }`}>
                           {formatStatus(wt.status)}
                         </span>
+                      </div>
+                    )}
+
+                    {/* Row 4: Last sent message preview + relative time [Issue #606] */}
+                    {sanitizedMessage && (
+                      <div className="mt-2 flex items-center gap-2" data-testid={`session-message-${wt.id}`}>
+                        <span className="text-xs text-gray-500 dark:text-gray-400 truncate min-w-0 flex-1">
+                          {/* PC preview (md and above) */}
+                          <span className="hidden md:inline" data-testid={`session-message-pc-${wt.id}`}>
+                            {sanitizedMessage.slice(0, MESSAGE_PREVIEW_MAX_LENGTH_PC)}
+                            {sanitizedMessage.length > MESSAGE_PREVIEW_MAX_LENGTH_PC ? '...' : ''}
+                          </span>
+                          {/* SP preview (below md) */}
+                          <span className="inline md:hidden" data-testid={`session-message-sp-${wt.id}`}>
+                            {sanitizedMessage.slice(0, MESSAGE_PREVIEW_MAX_LENGTH_SP)}
+                            {sanitizedMessage.length > MESSAGE_PREVIEW_MAX_LENGTH_SP ? '...' : ''}
+                          </span>
+                        </span>
+                        {relativeTime && (
+                          <span
+                            className="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0 whitespace-nowrap"
+                            data-testid={`session-time-${wt.id}`}
+                          >
+                            {relativeTime}
+                          </span>
+                        )}
                       </div>
                     )}
                   </Link>

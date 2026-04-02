@@ -18,6 +18,7 @@ import { captureSessionOutput } from './cli-session';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
 import { OPENCODE_PANE_HEIGHT } from '@/lib/cli-tools/opencode';
 import { GEMINI_PANE_HEIGHT } from '@/lib/cli-tools/gemini';
+import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import { isSessionHealthy } from './claude-session';
 import { getLastServerResponseTimestamp, buildCompositeKey } from '@/lib/polling/auto-yes-manager';
 import type { getMessages as GetMessagesFn, markPendingPromptsAsAnswered as MarkPendingFn } from '@/lib/db';
@@ -31,7 +32,7 @@ function getStatusCaptureLines(cliToolId: CLIToolType): number {
     return GEMINI_PANE_HEIGHT;
   }
 
-  return 100;
+  return STATUS_CAPTURE_LINES;
 }
 
 /** Per-CLI-tool session status */
