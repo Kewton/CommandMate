@@ -1,6 +1,7 @@
 /** Multiple choice prompt detection logic extracted from prompt-detector.ts (Issue #575). */
 
 import type { DetectPromptOptions, PromptDetectionResult } from './types';
+import type { SubmitMode } from '@/types/models';
 
 // ============================================================================
 // Constants
@@ -71,7 +72,18 @@ const COLLAPSED_OUTPUT_PATTERN = /^\s*\[[^\]]*\d+\s+lines?\]/i;
  * When this footer is present, numbered options form an active prompt even if
  * the default cursor marker is missing from the capture output.
  */
-const CONFIRMATION_FOOTER_PATTERN = /press\s+enter\s+to\s+confirm\s+or\s+esc\s+to\s+cancel/i;
+/**
+ * Extended to match both "press enter to confirm" and "press number to confirm" footers.
+ * Issue #616: Codex Reasoning Level UI uses "press number to confirm" instead of "press enter to confirm".
+ */
+const CONFIRMATION_FOOTER_PATTERN = /press\s+(?:enter|number)\s+to\s+confirm/i;
+
+/**
+ * Pattern to detect "press number to confirm" footer specifically.
+ * When matched, the prompt uses answer_only submitMode (no Enter key needed).
+ * Issue #616.
+ */
+const NUMBER_FOOTER_PATTERN = /press\s+number\s+to\s+confirm/i;
 
 /**
  * Maximum number of lines to scan upward from questionEndIndex
@@ -443,6 +455,7 @@ function extractInstructionText(
  * @param instructionText - Instruction text for the prompt block
  * @param output - Original output text (used for rawContent truncation)
  * @param truncateRawContentFn - Function to truncate raw content
+ * @param submitMode - Optional submit mode for the prompt (Issue #616)
  * @returns PromptDetectionResult with isPrompt: true and multiple_choice data
  */
 export function buildMultipleChoiceResult(
@@ -451,6 +464,7 @@ export function buildMultipleChoiceResult(
   instructionText: string | undefined,
   output: string,
   truncateRawContentFn: (content: string) => string,
+  submitMode?: SubmitMode,
 ): PromptDetectionResult {
   return {
     isPrompt: true,
@@ -470,6 +484,7 @@ export function buildMultipleChoiceResult(
       }),
       status: 'pending',
       instructionText,
+      ...(submitMode ? { submitMode } : {}),
     },
     cleanContent: question.trim(),
     rawContent: truncateRawContentFn(output.trim()),  // Issue #235: complete prompt output (truncated) [MF-001]
@@ -523,7 +538,20 @@ export function detectMultipleChoicePrompt(
   // Calculate scan window: last 50 non-trailing-empty lines
   const scanStart = Math.max(0, effectiveEnd - 50);
   const scanWindow = lines.slice(scanStart, effectiveEnd);
-  const hasConfirmationFooter = scanWindow.some((rawLine) => CONFIRMATION_FOOTER_PATTERN.test(rawLine.trim()));
+  // Single-pass footer detection: identify both confirmation footer presence and
+  // specific "press number to confirm" variant in one iteration (Issue #616).
+  let hasConfirmationFooter = false;
+  let hasNumberFooter = false;
+  for (const rawLine of scanWindow) {
+    const trimmed = rawLine.trim();
+    if (!hasConfirmationFooter && CONFIRMATION_FOOTER_PATTERN.test(trimmed)) {
+      hasConfirmationFooter = true;
+      if (NUMBER_FOOTER_PATTERN.test(trimmed)) {
+        hasNumberFooter = true;
+      }
+      break; // Both patterns are subsets of CONFIRMATION_FOOTER; one match suffices
+    }
+  }
 
   // ==========================================================================
   // Pass 1: Check for ❯ indicator existence in scan window
@@ -709,5 +737,10 @@ export function detectMultipleChoicePrompt(
   const question = extractQuestionText(lines, questionEndIndex);
   const instructionText = extractInstructionText(lines, questionEndIndex, effectiveEnd);
 
-  return buildMultipleChoiceResult(question, collectedOptions, instructionText, output, truncateRawContentFn);
+  // Issue #616: Determine submitMode from confirmation footer (detected in single-pass above)
+  const submitMode: SubmitMode | undefined = hasConfirmationFooter
+    ? (hasNumberFooter ? 'answer_only' : 'answer_then_enter')
+    : undefined;
+
+  return buildMultipleChoiceResult(question, collectedOptions, instructionText, output, truncateRawContentFn, submitMode);
 }

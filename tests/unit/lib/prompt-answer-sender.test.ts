@@ -383,6 +383,164 @@ describe('sendPromptAnswer', () => {
   });
 
   // =========================================================================
+  // Issue #616: submitMode handling
+  // =========================================================================
+  describe('Issue #616: submitMode handling', () => {
+    it('should NOT send Enter when submitMode=answer_only + multiple_choice + numeric answer', async () => {
+      const promptData: PromptData = {
+        type: 'multiple_choice',
+        question: 'Reasoning level',
+        options: [
+          { number: 1, label: 'low', isDefault: true },
+          { number: 2, label: 'medium', isDefault: false },
+          { number: 3, label: 'high', isDefault: false },
+        ],
+        status: 'pending',
+        submitMode: 'answer_only',
+      };
+
+      await sendPromptAnswer({
+        sessionName: 'codex-test',
+        answer: '2',
+        cliToolId: 'codex',
+        promptData,
+      });
+
+      // submitMode=answer_only: send text only, NO Enter
+      expect(sendKeys).toHaveBeenCalledWith('codex-test', '2', false);
+      // Should NOT have been called with Enter (second call)
+      expect(sendKeys).toHaveBeenCalledTimes(1);
+      expect(sendSpecialKeys).not.toHaveBeenCalled();
+    });
+
+    it('should send Enter when submitMode=answer_then_enter', async () => {
+      const promptData: PromptData = {
+        type: 'multiple_choice',
+        question: 'Select option:',
+        options: [
+          { number: 1, label: 'A', isDefault: true },
+          { number: 2, label: 'B', isDefault: false },
+        ],
+        status: 'pending',
+        submitMode: 'answer_then_enter',
+      };
+
+      await sendPromptAnswer({
+        sessionName: 'codex-test',
+        answer: '2',
+        cliToolId: 'codex',
+        promptData,
+      });
+
+      // submitMode=answer_then_enter: send text + Enter (standard behavior)
+      expect(sendKeys).toHaveBeenCalledWith('codex-test', '2', false);
+      expect(sendKeys).toHaveBeenCalledWith('codex-test', '', true);
+      expect(sendKeys).toHaveBeenCalledTimes(2);
+    });
+
+    it('should default to answer_then_enter when submitMode is undefined', async () => {
+      const promptData: PromptData = {
+        type: 'multiple_choice',
+        question: 'Choose:',
+        options: [
+          { number: 1, label: 'X', isDefault: true },
+          { number: 2, label: 'Y', isDefault: false },
+        ],
+        status: 'pending',
+        // submitMode intentionally omitted
+      };
+
+      await sendPromptAnswer({
+        sessionName: 'codex-test',
+        answer: '1',
+        cliToolId: 'codex',
+        promptData,
+      });
+
+      // undefined submitMode -> answer_then_enter fallback -> Enter should be sent
+      expect(sendKeys).toHaveBeenCalledWith('codex-test', '1', false);
+      expect(sendKeys).toHaveBeenCalledWith('codex-test', '', true);
+      expect(sendKeys).toHaveBeenCalledTimes(2);
+    });
+
+    it('should use fallbackSubmitMode=answer_only when promptData has no submitMode', async () => {
+      const promptData: PromptData = {
+        type: 'multiple_choice',
+        question: 'Choose:',
+        options: [
+          { number: 1, label: 'A', isDefault: true },
+          { number: 2, label: 'B', isDefault: false },
+        ],
+        status: 'pending',
+        // submitMode intentionally omitted
+      };
+
+      await sendPromptAnswer({
+        sessionName: 'codex-test',
+        answer: '1',
+        cliToolId: 'codex',
+        promptData,
+        fallbackSubmitMode: 'answer_only',
+      });
+
+      // fallbackSubmitMode=answer_only: send text only, NO Enter
+      expect(sendKeys).toHaveBeenCalledWith('codex-test', '1', false);
+      expect(sendKeys).toHaveBeenCalledTimes(1);
+    });
+
+    it('should fallback to answer_then_enter for invalid submitMode values', async () => {
+      const promptData: PromptData = {
+        type: 'multiple_choice',
+        question: 'Choose:',
+        options: [
+          { number: 1, label: 'A', isDefault: true },
+          { number: 2, label: 'B', isDefault: false },
+        ],
+        status: 'pending',
+        // Using type assertion to simulate invalid value
+        submitMode: 'invalid' as 'answer_only',
+      };
+
+      await sendPromptAnswer({
+        sessionName: 'codex-test',
+        answer: '1',
+        cliToolId: 'codex',
+        promptData,
+      });
+
+      // Invalid submitMode -> answer_then_enter fallback -> Enter should be sent
+      expect(sendKeys).toHaveBeenCalledWith('codex-test', '1', false);
+      expect(sendKeys).toHaveBeenCalledWith('codex-test', '', true);
+      expect(sendKeys).toHaveBeenCalledTimes(2);
+    });
+
+    it('should NOT skip Enter when submitMode=answer_only but answer is non-numeric', async () => {
+      const promptData: PromptData = {
+        type: 'multiple_choice',
+        question: 'Choose:',
+        options: [
+          { number: 1, label: 'A', isDefault: true },
+          { number: 2, label: 'B', isDefault: false },
+        ],
+        status: 'pending',
+        submitMode: 'answer_only',
+      };
+
+      await sendPromptAnswer({
+        sessionName: 'codex-test',
+        answer: 'custom text',
+        cliToolId: 'codex',
+        promptData,
+      });
+
+      // Non-numeric answer: even with submitMode=answer_only, Enter is sent
+      expect(sendKeys).toHaveBeenCalledWith('codex-test', 'custom text', false);
+      expect(sendKeys).toHaveBeenCalledWith('codex-test', '', true);
+      expect(sendKeys).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // =========================================================================
   // Edge case: promptData.type=multiple_choice takes priority over fallback
   // =========================================================================
   describe('promptData priority over fallback', () => {

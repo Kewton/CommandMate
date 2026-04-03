@@ -79,4 +79,74 @@ describe('buildPromptResponseBody', () => {
 
     expect(body.cliTool).toBe('codex');
   });
+
+  // =========================================================================
+  // Issue #616: submitMode inclusion
+  // =========================================================================
+  describe('Issue #616: submitMode', () => {
+    it('should include submitMode for multiple_choice with submitMode=answer_only', () => {
+      const promptData: PromptData = {
+        type: 'multiple_choice',
+        question: 'Reasoning level',
+        options: [
+          { number: 1, label: 'low', isDefault: true },
+          { number: 2, label: 'medium', isDefault: false },
+          { number: 3, label: 'high', isDefault: false },
+        ],
+        status: 'pending',
+        submitMode: 'answer_only',
+      };
+
+      const body = buildPromptResponseBody('2', 'codex', promptData);
+
+      expect(body.submitMode).toBe('answer_only');
+      expect(body.promptType).toBe('multiple_choice');
+    });
+
+    it('should include submitMode for multiple_choice with submitMode=answer_then_enter', () => {
+      const promptData: PromptData = {
+        type: 'multiple_choice',
+        question: 'Select:',
+        options: [
+          { number: 1, label: 'A', isDefault: true },
+          { number: 2, label: 'B', isDefault: false },
+        ],
+        status: 'pending',
+        submitMode: 'answer_then_enter',
+      };
+
+      const body = buildPromptResponseBody('1', 'codex', promptData);
+
+      expect(body.submitMode).toBe('answer_then_enter');
+    });
+
+    it('should not include submitMode when promptData has no submitMode', () => {
+      const promptData: PromptData = {
+        type: 'multiple_choice',
+        question: 'Choose:',
+        options: [
+          { number: 1, label: 'A', isDefault: true },
+          { number: 2, label: 'B', isDefault: false },
+        ],
+        status: 'pending',
+      };
+
+      const body = buildPromptResponseBody('1', 'codex', promptData);
+
+      expect(body.submitMode).toBeUndefined();
+    });
+
+    it('should not include submitMode for yes_no prompts', () => {
+      const promptData: PromptData = {
+        type: 'yes_no',
+        question: 'Continue?',
+        options: ['yes', 'no'],
+        status: 'pending',
+      };
+
+      const body = buildPromptResponseBody('y', 'claude', promptData);
+
+      expect(body.submitMode).toBeUndefined();
+    });
+  });
 });

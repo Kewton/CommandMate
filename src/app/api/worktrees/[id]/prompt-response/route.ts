@@ -14,7 +14,8 @@ import { detectPrompt, type PromptDetectionResult } from '@/lib/detection/prompt
 import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/detection/cli-patterns';
 import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
-import type { PromptType } from '@/types/models';
+import type { PromptType, SubmitMode } from '@/types/models';
+import { isValidSubmitMode } from '@/types/models';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/prompt-response');
@@ -26,6 +27,8 @@ interface PromptResponseRequest {
   promptType?: PromptType;
   /** Issue #287: Default option number from client-side detection (fallback when promptCheck fails) */
   defaultOptionNumber?: number;
+  /** Issue #616: Submit mode from client-side detection (fallback when promptCheck fails) */
+  submitMode?: string;
 }
 
 export async function POST(
@@ -41,7 +44,11 @@ export async function POST(
     }
 
     const body: PromptResponseRequest = await req.json();
-    const { answer, cliTool: cliToolParam, promptType: bodyPromptType, defaultOptionNumber: bodyDefaultOptionNumber } = body;
+    const { answer, cliTool: cliToolParam, promptType: bodyPromptType, defaultOptionNumber: bodyDefaultOptionNumber, submitMode: bodySubmitMode } = body;
+
+    // Issue #616: Allowlist validation for submitMode
+    const validSubmitMode: SubmitMode | undefined =
+      isValidSubmitMode(bodySubmitMode) ? bodySubmitMode : undefined;
 
     // Validation
     if (!answer) {
@@ -124,6 +131,7 @@ export async function POST(
         promptData: promptCheck?.promptData,
         fallbackPromptType: bodyPromptType,
         fallbackDefaultOptionNumber: bodyDefaultOptionNumber,
+        fallbackSubmitMode: validSubmitMode,
       });
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
