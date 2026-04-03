@@ -538,7 +538,20 @@ export function detectMultipleChoicePrompt(
   // Calculate scan window: last 50 non-trailing-empty lines
   const scanStart = Math.max(0, effectiveEnd - 50);
   const scanWindow = lines.slice(scanStart, effectiveEnd);
-  const hasConfirmationFooter = scanWindow.some((rawLine) => CONFIRMATION_FOOTER_PATTERN.test(rawLine.trim()));
+  // Single-pass footer detection: identify both confirmation footer presence and
+  // specific "press number to confirm" variant in one iteration (Issue #616).
+  let hasConfirmationFooter = false;
+  let hasNumberFooter = false;
+  for (const rawLine of scanWindow) {
+    const trimmed = rawLine.trim();
+    if (!hasConfirmationFooter && CONFIRMATION_FOOTER_PATTERN.test(trimmed)) {
+      hasConfirmationFooter = true;
+      if (NUMBER_FOOTER_PATTERN.test(trimmed)) {
+        hasNumberFooter = true;
+      }
+      break; // Both patterns are subsets of CONFIRMATION_FOOTER; one match suffices
+    }
+  }
 
   // ==========================================================================
   // Pass 1: Check for ❯ indicator existence in scan window
@@ -724,12 +737,10 @@ export function detectMultipleChoicePrompt(
   const question = extractQuestionText(lines, questionEndIndex);
   const instructionText = extractInstructionText(lines, questionEndIndex, effectiveEnd);
 
-  // Issue #616: Determine submitMode from confirmation footer
-  let submitMode: SubmitMode | undefined;
-  if (hasConfirmationFooter) {
-    const hasNumberFooter = scanWindow.some((rawLine) => NUMBER_FOOTER_PATTERN.test(rawLine.trim()));
-    submitMode = hasNumberFooter ? 'answer_only' : 'answer_then_enter';
-  }
+  // Issue #616: Determine submitMode from confirmation footer (detected in single-pass above)
+  const submitMode: SubmitMode | undefined = hasConfirmationFooter
+    ? (hasNumberFooter ? 'answer_only' : 'answer_then_enter')
+    : undefined;
 
   return buildMultipleChoiceResult(question, collectedOptions, instructionText, output, truncateRawContentFn, submitMode);
 }

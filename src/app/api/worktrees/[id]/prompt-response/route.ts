@@ -15,6 +15,7 @@ import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/dete
 import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import type { PromptType, SubmitMode } from '@/types/models';
+import { isValidSubmitMode } from '@/types/models';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/prompt-response');
@@ -47,9 +48,7 @@ export async function POST(
 
     // Issue #616: Allowlist validation for submitMode
     const validSubmitMode: SubmitMode | undefined =
-      (bodySubmitMode === 'answer_only' || bodySubmitMode === 'answer_then_enter')
-        ? bodySubmitMode
-        : undefined;
+      isValidSubmitMode(bodySubmitMode) ? bodySubmitMode : undefined;
 
     // Validation
     if (!answer) {

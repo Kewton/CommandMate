@@ -9,10 +9,37 @@
 import { sendKeys, sendSpecialKeys } from './tmux/tmux';
 import type { CLIToolType } from './cli-tools/types';
 import type { PromptData, PromptType, SubmitMode } from '@/types/models';
+import { isValidSubmitMode } from '@/types/models';
 import { invalidateCache } from './tmux/tmux-capture-cache';
 
 /** Regex pattern to detect checkbox-style multi-select options */
 const CHECKBOX_OPTION_PATTERN = /^\[[ x]\] /;
+
+/**
+ * Resolve the effective SubmitMode from promptData, fallback, and default.
+ * Resolution order: promptData.submitMode -> fallbackSubmitMode -> 'answer_then_enter'.
+ * Invalid values are normalized to 'answer_then_enter' via allowlist validation.
+ *
+ * @returns The resolved SubmitMode, guaranteed to be a valid value.
+ */
+function resolveSubmitMode(params: SendPromptAnswerParams): SubmitMode {
+  const fromPromptData = params.promptData?.type === 'multiple_choice'
+    ? params.promptData.submitMode
+    : undefined;
+  const raw = fromPromptData ?? params.fallbackSubmitMode ?? 'answer_then_enter';
+  return isValidSubmitMode(raw) ? raw : 'answer_then_enter';
+}
+
+/**
+ * Determine whether the Enter key should be suppressed after sending the answer text.
+ * answer_only mode applies only when the prompt is multiple_choice and the answer is numeric.
+ */
+function shouldSuppressEnter(params: SendPromptAnswerParams, submitMode: SubmitMode): boolean {
+  if (submitMode !== 'answer_only') return false;
+  const isMultipleChoice = params.promptData?.type === 'multiple_choice'
+    || params.fallbackPromptType === 'multiple_choice';
+  return isMultipleChoice && /^\d+$/.test(params.answer);
+}
 
 /**
  * Build navigation key array for cursor movement.
@@ -102,19 +129,10 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
     // Standard CLI prompt: send text + Enter (y/n, Approve?, etc.)
     await sendKeys(sessionName, answer, false);
 
-    // Issue #616: Resolve submitMode (fail-safe included)
-    const rawSubmitMode = (params.promptData?.type === 'multiple_choice' ? params.promptData.submitMode : undefined)
-      ?? params.fallbackSubmitMode
-      ?? 'answer_then_enter';
-    // Allowlist normalization (invalid values fall back to answer_then_enter)
-    const resolvedSubmitMode: SubmitMode = (rawSubmitMode === 'answer_only' || rawSubmitMode === 'answer_then_enter')
-      ? rawSubmitMode : 'answer_then_enter';
-    // answer_only applies only for multiple_choice with numeric answer
-    const applyAnswerOnly = resolvedSubmitMode === 'answer_only'
-      && (params.promptData?.type === 'multiple_choice' || params.fallbackPromptType === 'multiple_choice')
-      && /^\d+$/.test(params.answer);
+    // Issue #616: Resolve submitMode and determine whether to suppress Enter
+    const resolvedSubmitMode = resolveSubmitMode(params);
 
-    if (!applyAnswerOnly) {
+    if (!shouldSuppressEnter(params, resolvedSubmitMode)) {
       // Wait a moment for the input to be processed
       await new Promise(resolve => setTimeout(resolve, 100));
 

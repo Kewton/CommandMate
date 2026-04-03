@@ -176,6 +176,16 @@ export interface MultipleChoiceOption {
 export type SubmitMode = 'answer_only' | 'answer_then_enter';
 
 /**
+ * Type guard for SubmitMode values.
+ * Validates that a string is a valid SubmitMode ('answer_only' or 'answer_then_enter').
+ * Used for allowlist validation of untrusted input from API requests.
+ * Issue #616.
+ */
+export function isValidSubmitMode(value: unknown): value is SubmitMode {
+  return value === 'answer_only' || value === 'answer_then_enter';
+}
+
+/**
  * Multiple choice prompt data
  */
 export interface MultipleChoicePromptData extends BasePromptData {
