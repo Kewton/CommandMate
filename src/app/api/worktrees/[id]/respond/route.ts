@@ -6,8 +6,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getMessageById, updatePromptData, getWorktreeById } from '@/lib/db';
-import { sendKeys } from '@/lib/tmux/tmux';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
+import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
 import { startPolling } from '@/lib/polling/response-poller';
 import { getAnswerInput } from '@/lib/detection/prompt-detector';
 import { broadcastMessage } from '@/lib/ws-server';
@@ -144,20 +144,15 @@ export async function POST(
     // Get session name for the CLI tool
     const sessionName = cliTool.getSessionName(params.id);
 
-    // Send answer to tmux
-    // For Claude prompts, send the answer and then Enter separately
-    // This is because Claude's interactive menu responds immediately to the key press
+    // Send answer to tmux via shared sendPromptAnswer() (Issue #616)
     try {
-      // Send the answer (number or y/n)
-      await sendKeys(sessionName, input, false);
+      await sendPromptAnswer({
+        sessionName,
+        answer: input,
+        cliToolId,
+        promptData: message.promptData,
+      });
       logger.info('sent-answer-to');
-
-      // Wait a moment for the input to be processed
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Send Enter
-      await sendKeys(sessionName, '', true);
-      logger.info('sent-enter-to');
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return NextResponse.json(

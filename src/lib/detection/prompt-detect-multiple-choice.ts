@@ -1,6 +1,7 @@
 /** Multiple choice prompt detection logic extracted from prompt-detector.ts (Issue #575). */
 
 import type { DetectPromptOptions, PromptDetectionResult } from './types';
+import type { SubmitMode } from '@/types/models';
 
 // ============================================================================
 // Constants
@@ -71,7 +72,18 @@ const COLLAPSED_OUTPUT_PATTERN = /^\s*\[[^\]]*\d+\s+lines?\]/i;
  * When this footer is present, numbered options form an active prompt even if
  * the default cursor marker is missing from the capture output.
  */
-const CONFIRMATION_FOOTER_PATTERN = /press\s+enter\s+to\s+confirm\s+or\s+esc\s+to\s+cancel/i;
+/**
+ * Extended to match both "press enter to confirm" and "press number to confirm" footers.
+ * Issue #616: Codex Reasoning Level UI uses "press number to confirm" instead of "press enter to confirm".
+ */
+const CONFIRMATION_FOOTER_PATTERN = /press\s+(?:enter|number)\s+to\s+confirm/i;
+
+/**
+ * Pattern to detect "press number to confirm" footer specifically.
+ * When matched, the prompt uses answer_only submitMode (no Enter key needed).
+ * Issue #616.
+ */
+const NUMBER_FOOTER_PATTERN = /press\s+number\s+to\s+confirm/i;
 
 /**
  * Maximum number of lines to scan upward from questionEndIndex
@@ -443,6 +455,7 @@ function extractInstructionText(
  * @param instructionText - Instruction text for the prompt block
  * @param output - Original output text (used for rawContent truncation)
  * @param truncateRawContentFn - Function to truncate raw content
+ * @param submitMode - Optional submit mode for the prompt (Issue #616)
  * @returns PromptDetectionResult with isPrompt: true and multiple_choice data
  */
 export function buildMultipleChoiceResult(
@@ -451,6 +464,7 @@ export function buildMultipleChoiceResult(
   instructionText: string | undefined,
   output: string,
   truncateRawContentFn: (content: string) => string,
+  submitMode?: SubmitMode,
 ): PromptDetectionResult {
   return {
     isPrompt: true,
@@ -470,6 +484,7 @@ export function buildMultipleChoiceResult(
       }),
       status: 'pending',
       instructionText,
+      ...(submitMode ? { submitMode } : {}),
     },
     cleanContent: question.trim(),
     rawContent: truncateRawContentFn(output.trim()),  // Issue #235: complete prompt output (truncated) [MF-001]
@@ -709,5 +724,12 @@ export function detectMultipleChoicePrompt(
   const question = extractQuestionText(lines, questionEndIndex);
   const instructionText = extractInstructionText(lines, questionEndIndex, effectiveEnd);
 
-  return buildMultipleChoiceResult(question, collectedOptions, instructionText, output, truncateRawContentFn);
+  // Issue #616: Determine submitMode from confirmation footer
+  let submitMode: SubmitMode | undefined;
+  if (hasConfirmationFooter) {
+    const hasNumberFooter = scanWindow.some((rawLine) => NUMBER_FOOTER_PATTERN.test(rawLine.trim()));
+    submitMode = hasNumberFooter ? 'answer_only' : 'answer_then_enter';
+  }
+
+  return buildMultipleChoiceResult(question, collectedOptions, instructionText, output, truncateRawContentFn, submitMode);
 }

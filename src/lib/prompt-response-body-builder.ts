@@ -10,7 +10,7 @@
  * re-verification fails. This module eliminates that duplication.
  */
 
-import type { PromptData } from '@/types/models';
+import type { PromptData, SubmitMode } from '@/types/models';
 
 /**
  * Shape of the prompt-response API request body.
@@ -20,6 +20,8 @@ export interface PromptResponseBody {
   cliTool: string;
   promptType?: string;
   defaultOptionNumber?: number;
+  /** Issue #616: Submit mode for multiple choice prompts */
+  submitMode?: SubmitMode;
 }
 
 /**
@@ -48,6 +50,10 @@ export function buildPromptResponseBody(
       const defaultOption = promptData.options.find(o => o.isDefault);
       if (defaultOption) {
         body.defaultOptionNumber = defaultOption.number;
+      }
+      // Issue #616: Include submitMode if present
+      if (promptData.submitMode) {
+        body.submitMode = promptData.submitMode;
       }
     }
   }

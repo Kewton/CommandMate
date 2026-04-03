@@ -2728,4 +2728,92 @@ Are you sure you want to continue? (yes/no)
       }
     });
   });
+
+  // =========================================================================
+  // Issue #616: Codex Reasoning Level prompt submitMode detection
+  // =========================================================================
+  describe('Issue #616: submitMode detection for Codex Reasoning Level UI', () => {
+    it('should detect multiple_choice with submitMode=answer_only when "Press number to confirm" footer is present', () => {
+      const output = [
+        'Reasoning level',
+        '\u203A 1. low',
+        '  2. medium',
+        '  3. high',
+        '',
+        'press number to confirm or esc to cancel',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.submitMode).toBe('answer_only');
+      }
+    });
+
+    it('should detect multiple_choice with submitMode=answer_then_enter when "Press enter to confirm" footer is present', () => {
+      const output = [
+        'Select an option:',
+        '\u203A 1. Option A',
+        '  2. Option B',
+        '',
+        'press enter to confirm or esc to cancel',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.submitMode).toBe('answer_then_enter');
+      }
+    });
+
+    it('should not set submitMode when no confirmation footer is present (standard cursor prompt)', () => {
+      const output = [
+        'Select an option:',
+        '\u276F 1. Yes',
+        '  2. No',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.submitMode).toBeUndefined();
+      }
+    });
+
+    it('should not produce false positive for gemini normal output', () => {
+      // Gemini tool output that should NOT be detected as a prompt
+      const output = [
+        'Here are some recommendations:',
+        '1. Add comprehensive tests',
+        '2. Update documentation',
+        '3. Refactor the module',
+        '',
+        'These changes should improve code quality.',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(false);
+    });
+
+    it('should not produce false positive for vibe-local normal output', () => {
+      // vibe-local output with numbered steps
+      const output = [
+        'Steps to fix the issue:',
+        '1. Open the configuration file',
+        '2. Update the database URL',
+        '3. Restart the server',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(false);
+    });
+  });
 });

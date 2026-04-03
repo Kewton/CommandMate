@@ -168,12 +168,22 @@ export interface MultipleChoiceOption {
 }
 
 /**
+ * Submit mode for multiple choice prompts.
+ * - 'answer_only': Send only the answer number (no Enter key). Used by Codex CLI "Press number to confirm" UI.
+ * - 'answer_then_enter': Send the answer number followed by Enter key (default behavior).
+ * Issue #616: Codex Reasoning Level selection requires answer_only mode.
+ */
+export type SubmitMode = 'answer_only' | 'answer_then_enter';
+
+/**
  * Multiple choice prompt data
  */
 export interface MultipleChoicePromptData extends BasePromptData {
   type: 'multiple_choice';
   /** Available options */
   options: MultipleChoiceOption[];
+  /** How to submit the answer: 'answer_only' (no Enter) or 'answer_then_enter' (default). Issue #616. */
+  submitMode?: SubmitMode;
 }
 
 /**
