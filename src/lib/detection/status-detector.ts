@@ -24,7 +24,7 @@
  * coupling via a minimal DTO/projection type.
  */
 
-import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN } from './cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
 import type { PromptDetectionResult } from './prompt-detector';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -103,6 +103,7 @@ export const STATUS_REASON = {
   OPENCODE_SELECTION_LIST: 'opencode_selection_list',
   CLAUDE_SELECTION_LIST: 'claude_selection_list',
   COPILOT_SELECTION_LIST: 'copilot_selection_list',
+  CODEX_SELECTION_LIST: 'codex_selection_list',
   OPENCODE_RESPONSE_COMPLETE: 'opencode_response_complete',
   INPUT_PROMPT: 'input_prompt',
   NO_RECENT_OUTPUT: 'no_recent_output',
@@ -120,6 +121,7 @@ export const SELECTION_LIST_REASONS = new Set<string>([
   STATUS_REASON.OPENCODE_SELECTION_LIST,
   STATUS_REASON.CLAUDE_SELECTION_LIST,
   STATUS_REASON.COPILOT_SELECTION_LIST,
+  STATUS_REASON.CODEX_SELECTION_LIST,
 ]);
 
 /**
@@ -216,6 +218,27 @@ export function detectSessionStatus(
       hasActivePrompt: false,
       promptDetection,
     };
+  }
+
+  // 0.8. Codex: selection list detection BEFORE prompt detection (Issue #622)
+  // CODEX_SELECTION_LIST_PATTERN matches "press enter to confirm/select" footer.
+  // Without this early check, detectPrompt() at priority 1 would detect the numbered
+  // options (e.g., "› 1. gpt-5.4") as a multiple_choice prompt, preventing
+  // NavigationButtons from being shown.
+  // This mirrors the Copilot Priority 0 pattern above.
+  if (cliToolId === 'codex') {
+    const codexFullContent = contentLines.join('\n');
+    if (CODEX_SELECTION_LIST_PATTERN.test(codexFullContent)) {
+      const codexPromptOptions = buildDetectPromptOptions(cliToolId);
+      const codexPromptDetection = detectPrompt(stripBoxDrawing(cleanOutput), codexPromptOptions);
+      return {
+        status: 'waiting',
+        confidence: 'high',
+        reason: STATUS_REASON.CODEX_SELECTION_LIST,
+        hasActivePrompt: false,
+        promptDetection: codexPromptDetection,
+      };
+    }
   }
 
   // 1. Interactive prompt detection (highest priority)
@@ -408,6 +431,9 @@ export function detectSessionStatus(
             promptDetection,
           };
         }
+
+        // A2. (Removed — Codex selection list detection moved to priority 0.8,
+        // before detectPrompt, to prevent false multiple_choice detection. Issue #622)
 
         // B. Check if the last content line is the idle › prompt.
         // The last non-empty line above the status bar is the current active line.

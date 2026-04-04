@@ -364,5 +364,18 @@ describe('Auth Middleware', () => {
       expect(excludedPaths).not.toContain('/review');
       expect(excludedPaths).not.toContain('/more');
     });
+
+    it('should redirect /api/templates to /login for unauthenticated requests (Issue #618)', async () => {
+      const { hashToken } = await import('@/lib/security/auth');
+      const hash = hashToken('test-token');
+      process.env.CM_AUTH_TOKEN_HASH = hash;
+      vi.resetModules();
+      process.env.CM_AUTH_TOKEN_HASH = hash;
+
+      const { middleware } = await import('@/middleware');
+      const req = createMockRequest('/api/templates');
+      const res = await middleware(req as never);
+      expect(res.status).toBe(302);
+    });
   });
 });

@@ -3,8 +3,9 @@
  *
  * Issue #600: UX refresh - Shows worktrees needing attention.
  * Issue #607: Added Report tab for daily summary feature.
+ * Issue #618: Added Template tab for report template management.
  *
- * Page-level tab shell: Review | Report
+ * Page-level tab shell: Review | Report | Template
  * Each tab delegates to its own component.
  */
 
@@ -14,12 +15,14 @@ import { useState } from 'react';
 import { AppShell } from '@/components/layout';
 import ReviewTab from '@/components/review/ReviewTab';
 import ReportTab from '@/components/review/ReportTab';
+import TemplateTab from '@/components/review/TemplateTab';
 
-type PageTab = 'review' | 'report';
+type PageTab = 'review' | 'report' | 'template';
 
 const PAGE_TABS: Array<{ value: PageTab; label: string }> = [
   { value: 'review', label: 'Review' },
   { value: 'report', label: 'Report' },
+  { value: 'template', label: 'Template' },
 ];
 
 export default function ReviewPage() {
@@ -56,6 +59,7 @@ export default function ReviewPage() {
         {/* Tab content */}
         {pageTab === 'review' && <ReviewTab />}
         {pageTab === 'report' && <ReportTab />}
+        {pageTab === 'template' && <TemplateTab />}
       </div>
     </AppShell>
   );

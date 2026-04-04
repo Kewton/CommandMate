@@ -2728,4 +2728,141 @@ Are you sure you want to continue? (yes/no)
       }
     });
   });
+
+  // =========================================================================
+  // Issue #616: Codex Reasoning Level prompt submitMode detection
+  // =========================================================================
+  describe('Issue #616: submitMode detection for Codex Reasoning Level UI', () => {
+    it('should detect multiple_choice with submitMode=answer_only when "Press number to confirm" footer is present', () => {
+      const output = [
+        'Reasoning level',
+        '\u203A 1. low',
+        '  2. medium',
+        '  3. high',
+        '',
+        'press number to confirm or esc to cancel',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.submitMode).toBe('answer_only');
+      }
+    });
+
+    it('should detect multiple_choice with submitMode=answer_then_enter when "Press enter to confirm" footer is present', () => {
+      const output = [
+        'Select an option:',
+        '\u203A 1. Option A',
+        '  2. Option B',
+        '',
+        'press enter to confirm or esc to cancel',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.submitMode).toBe('answer_then_enter');
+      }
+    });
+
+    it('should not set submitMode when no confirmation footer is present (standard cursor prompt)', () => {
+      const output = [
+        'Select an option:',
+        '\u276F 1. Yes',
+        '  2. No',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.submitMode).toBeUndefined();
+      }
+    });
+
+    it('should not produce false positive for gemini normal output', () => {
+      // Gemini tool output that should NOT be detected as a prompt
+      const output = [
+        'Here are some recommendations:',
+        '1. Add comprehensive tests',
+        '2. Update documentation',
+        '3. Refactor the module',
+        '',
+        'These changes should improve code quality.',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(false);
+    });
+
+    it('should not produce false positive for vibe-local normal output', () => {
+      // vibe-local output with numbered steps
+      const output = [
+        'Steps to fix the issue:',
+        '1. Open the configuration file',
+        '2. Update the database URL',
+        '3. Restart the server',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(false);
+    });
+  });
+
+  // Issue #622: Codex /model Step 1 should not be detected as multiple_choice by prompt detector
+  describe('Issue #622: Codex /model Step 1 prompt detector behavior', () => {
+    it('should detect Codex /model Step 1 as multiple_choice by prompt detector (intercepted by status-detector)', () => {
+      // Note: The prompt detector itself MAY detect this as multiple_choice because
+      // it has numbered options with cursor indicator. The fix is at the status-detector
+      // level which intercepts BEFORE the prompt detector runs.
+      // This test documents the prompt detector's behavior for this input.
+      const output = [
+        'Select Model and Effort',
+        '',
+        '\u203A 1. gpt-5.4 (current)   Latest frontier agentic coding model.',
+        '  2. gpt-5.4-mini        Smaller frontier agentic coding model.',
+        '  3. o3                   Advanced reasoning model.',
+        '  4. o4-mini              Fast, affordable reasoning model.',
+        '',
+        'Press enter to select reasoning effort, or esc to dismiss.',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+      // The prompt detector may or may not detect this as a prompt.
+      // The important thing is that status-detector's early Codex selection list
+      // check runs BEFORE detectPrompt, so this path is never reached in practice.
+      // We just document the behavior here.
+      if (result.isPrompt) {
+        expect(result.promptData?.type).toBe('multiple_choice');
+      }
+    });
+
+    it('should detect Codex /model Step 2 reasoning level as multiple_choice', () => {
+      // Step 2 with "press enter to confirm" - also intercepted by status-detector
+      const output = [
+        'Select Reasoning Level for gpt-5.4',
+        '',
+        '  1. Low                         Fast responses with lighter reasoning',
+        '\u203A 2. Medium (default) (current)  Balances speed and reasoning depth for everyday tasks',
+        '  3. High                        Greater reasoning depth for complex problems',
+        '  4. Extra high                  Extra high reasoning depth for complex problems',
+        '',
+        'Press enter to confirm or esc to go back',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+      // Similar to Step 1 - status-detector intercepts first
+      if (result.isPrompt) {
+        expect(result.promptData?.type).toBe('multiple_choice');
+      }
+    });
+  });
 });

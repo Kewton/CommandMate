@@ -163,6 +163,7 @@ tests/
 | `src/lib/db/session-db.ts` | セッション状態管理（Issue #479） |
 | `src/lib/db/memo-db.ts` | メモ管理CRUD（Issue #479） |
 | `src/lib/db/timer-db.ts` | タイマーメッセージCRUD操作（Issue #534） |
+| `src/lib/db/template-db.ts` | レポートテンプレートCRUD操作（getAllTemplates, getTemplateById, createTemplate, updateTemplate, deleteTemplate, getTemplateCount）（Issue #618） |
 | `src/lib/tmux/tmux.ts` | tmuxセッション管理基盤（execFile使用） |
 | `src/lib/tmux/tmux-capture-cache.ts` | tmux captureキャッシュ（TTL=2秒、singleflight） |
 | `src/lib/session/claude-session.ts` | Claude CLIセッション管理・ヘルスチェック |
@@ -263,6 +264,7 @@ tests/
 | `src/hooks/useFileSearch.ts` | 検索状態管理フック |
 | `src/hooks/useTerminalSearch.ts` | ターミナル内テキスト検索フック（Issue #47）debounce 300ms、最大500件、最小2文字 |
 | `src/hooks/useFragmentLogin.ts` | フラグメントベース自動ログイン |
+| `src/hooks/useReportGeneration.ts` | レポート生成モード管理フック（GenerationMode: none/template/custom、テンプレート選択・userInstruction管理）（Issue #618） |
 | `src/app/api/worktrees/[id]/terminal/route.ts` | ターミナルコマンド送信API（Copilot全コマンドをsendMessage()に委譲）（Issue #559） |
 | `src/app/api/worktrees/[id]/capture/route.ts` | ターミナル出力キャプチャAPI |
 | `src/app/api/worktrees/[id]/marp-render/route.ts` | MARPスライドレンダリングAPI |
@@ -270,6 +272,8 @@ tests/
 | `src/app/api/worktrees/[id]/git/show/[commitHash]/route.ts` | Gitコミット変更ファイル一覧API（Issue #447） |
 | `src/app/api/worktrees/[id]/git/diff/route.ts` | Gitファイルdiff取得API（Issue #447） |
 | `src/app/api/worktrees/[id]/special-keys/route.ts` | 特殊キー送信API（Up/Down/Left/Right/Enter/Escape、6層防御）（Issue #473, #592） |
+| `src/app/api/templates/route.ts` | レポートテンプレートAPI（GET全件取得/POST作成、5件上限・バリデーション）（Issue #618） |
+| `src/app/api/templates/[id]/route.ts` | レポートテンプレート個別API（PUT更新/DELETE削除、UUID検証）（Issue #618） |
 | `src/components/worktree/NavigationButtons.tsx` | OpenCode TUI選択リストナビゲーションボタン、Left/Right対応（Issue #473, #592） |
 | `src/cli/utils/api-client.ts` | CLI用HTTPクライアント（認証トークン解決・エラー分類・ApiClient/ApiError）（Issue #518） |
 | `src/cli/utils/command-helpers.ts` | CLI共通ヘルパー（TOKEN_WARNING定数・handleCommandError統一エラーハンドラ）（Issue #518） |
@@ -277,7 +281,7 @@ tests/
 | `src/cli/config/duration-constants.ts` | CLI側duration定数（DURATION_MAP, parseDurationToMs）（Issue #518） |
 | `src/cli/config/cli-tool-ids.ts` | CLI側ツールID定義（CLI_TOOL_IDS, isCliToolId、copilot含む6ツール）（Issue #518, #545） |
 | `src/cli/config/model-validation.ts` | CLI側model名バリデーション（validateCopilotModelName、MODEL_NAME_PATTERN、クロスバリデーション対象）（Issue #588） |
-| `src/config/review-config.ts` | Review設定定数（STALLED_THRESHOLD_MS, REVIEW_POLL_INTERVAL_MS）（Issue #600） |
+| `src/config/review-config.ts` | Review設定定数・テンプレート定数（STALLED_THRESHOLD_MS, REVIEW_POLL_INTERVAL_MS, MAX_TEMPLATES, MAX_TEMPLATE_NAME_LENGTH, MAX_TEMPLATE_CONTENT_LENGTH）（Issue #600, #618） |
 | `src/lib/session/next-action-helper.ts` | 次アクション算出ヘルパー（getNextAction, getReviewStatus, ReviewStatus型）（Issue #600） |
 | `src/lib/detection/stalled-detector.ts` | Stalled判定（isWorktreeStalled）（Issue #600） |
 | `src/lib/deep-link-validator.ts` | Deep linkバリデーション（isDeepLinkPane, normalizeDeepLinkPane, VALID_PANES, DeepLinkPane型）（Issue #600） |
@@ -291,6 +295,7 @@ tests/
 | `src/components/home/HomeSessionSummary.tsx` | Home画面セッション集計サマリー（Issue #600） |
 | `src/components/review/ReviewCard.tsx` | Reviewカード（Issue #600） |
 | `src/components/review/SimpleMessageInput.tsx` | 軽量メッセージ入力（Review画面用）（Issue #600） |
+| `src/components/review/TemplateTab.tsx` | テンプレート管理UI（一覧・作成・編集・削除、最大5件制限）（Issue #618） |
 | `src/components/worktree/WorktreeDetailHeader.tsx` | Worktree詳細ヘッダー（Repository名・Branch名・Agent・Status・次アクション）（Issue #600） |
 | `src/components/providers/WorktreesCacheProvider.tsx` | Worktreesキャッシュプロバイダー（Issue #600） |
 | `src/app/sessions/page.tsx` | Sessions画面（Issue #600） |

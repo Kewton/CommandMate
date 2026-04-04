@@ -3,6 +3,7 @@
  * Daily report generation, viewing, and editing.
  *
  * Issue #607: Daily summary feature
+ * Issue #618: Report template system - 3 generation modes
  */
 
 'use client';
@@ -10,6 +11,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import ReportDatePicker from './ReportDatePicker';
 import { SUMMARY_ALLOWED_TOOLS, MAX_USER_INSTRUCTION_LENGTH } from '@/config/review-config';
+import { useReportGeneration } from '@/hooks/useReportGeneration';
+import { copyToClipboard } from '@/lib/clipboard-utils';
+import type { GenerationMode } from '@/hooks/useReportGeneration';
 
 /** Format Date to YYYY-MM-DD */
 function formatToday(): string {
@@ -29,6 +33,12 @@ interface ReportData {
   updatedAt: string;
 }
 
+const MODE_OPTIONS: Array<{ value: GenerationMode; label: string }> = [
+  { value: 'none', label: 'No instruction' },
+  { value: 'template', label: 'Template' },
+  { value: 'custom', label: 'Custom' },
+];
+
 export default function ReportTab() {
   const [selectedDate, setSelectedDate] = useState(formatToday());
   const [selectedTool, setSelectedTool] = useState<string>('claude');
@@ -40,8 +50,20 @@ export default function ReportTab() {
   const [isLoading, setIsLoading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [userInstruction, setUserInstruction] = useState('');
+
+  const {
+    mode,
+    setMode,
+    userInstruction,
+    setUserInstruction,
+    isUserInstructionReadOnly,
+    templates,
+    selectedTemplateId,
+    selectTemplate,
+    isLoadingTemplates,
+  } = useReportGeneration();
 
   // Fetch report for selected date
   const fetchReport = useCallback(async (date: string) => {
@@ -91,7 +113,7 @@ export default function ReportTab() {
       if (selectedTool === 'copilot' && modelInput.trim()) {
         body.model = modelInput.trim();
       }
-      if (userInstruction.trim()) {
+      if (mode !== 'none' && userInstruction.trim()) {
         body.userInstruction = userInstruction.trim();
       }
 
@@ -187,18 +209,75 @@ export default function ReportTab() {
 
       </div>
 
-      {/* User instruction textarea (Issue #612) */}
-      <div className="mb-4">
-        <textarea
-          value={userInstruction}
-          onChange={(e) => setUserInstruction(e.target.value)}
-          rows={3}
-          maxLength={MAX_USER_INSTRUCTION_LENGTH}
-          placeholder="Additional instructions for summary generation (optional)"
-          className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200 resize-y"
-          data-testid="user-instruction-input"
-        />
+      {/* Generation mode selector */}
+      <div className="mb-4" data-testid="generation-mode-selector">
+        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+          Generation Mode
+        </label>
+        <div className="flex gap-4">
+          {MODE_OPTIONS.map((option) => (
+            <label key={option.value} className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="radio"
+                name="generation-mode"
+                value={option.value}
+                checked={mode === option.value}
+                onChange={() => setMode(option.value)}
+                data-testid={`mode-radio-${option.value}`}
+              />
+              <span className="text-gray-700 dark:text-gray-300">{option.label}</span>
+            </label>
+          ))}
+        </div>
       </div>
+
+      {/* Template selector (only in template mode) */}
+      {mode === 'template' && (
+        <div className="mb-4" data-testid="template-selector">
+          <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+            Select Template
+          </label>
+          {isLoadingTemplates ? (
+            <div className="text-sm text-gray-500">Loading templates...</div>
+          ) : templates.length === 0 ? (
+            <div className="text-sm text-gray-500">No templates available. Create one in the Template tab.</div>
+          ) : (
+            <select
+              value={selectedTemplateId || ''}
+              onChange={(e) => selectTemplate(e.target.value)}
+              className="px-3 py-1 text-sm border rounded dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200"
+              data-testid="template-select"
+            >
+              <option value="">-- Select a template --</option>
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
+
+      {/* User instruction textarea (visible in template and custom modes) */}
+      {mode !== 'none' && (
+        <div className="mb-4">
+          <textarea
+            value={userInstruction}
+            onChange={(e) => setUserInstruction(e.target.value)}
+            rows={3}
+            maxLength={MAX_USER_INSTRUCTION_LENGTH}
+            readOnly={isUserInstructionReadOnly}
+            placeholder={
+              mode === 'template'
+                ? 'Select a template above to populate this field'
+                : 'Additional instructions for summary generation'
+            }
+            className={`w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200 resize-y ${
+              isUserInstructionReadOnly ? 'bg-gray-100 dark:bg-gray-900 cursor-not-allowed' : ''
+            }`}
+            data-testid="user-instruction-input"
+          />
+        </div>
+      )}
 
       {/* Generate button */}
       <div className="mb-6">
@@ -250,20 +329,33 @@ export default function ReportTab() {
               Generated by: {report.generatedByTool}
               {report.model && ` (${report.model})`}
             </div>
-            <button
-              onClick={() => {
-                if (isEditing) {
-                  handleSave();
-                } else {
-                  setIsEditing(true);
-                }
-              }}
-              disabled={isSaving}
-              className="px-3 py-1 text-xs font-medium rounded transition-colors bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300"
-              data-testid="edit-save-button"
-            >
-              {isSaving ? 'Saving...' : isEditing ? 'Save' : 'Edit'}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={async () => {
+                  await copyToClipboard(report.content);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+                className="px-3 py-1 text-xs font-medium rounded transition-colors bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300"
+                data-testid="copy-report-button"
+              >
+                {copied ? 'Copied!' : 'Copy'}
+              </button>
+              <button
+                onClick={() => {
+                  if (isEditing) {
+                    handleSave();
+                  } else {
+                    setIsEditing(true);
+                  }
+                }}
+                disabled={isSaving}
+                className="px-3 py-1 text-xs font-medium rounded transition-colors bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300"
+                data-testid="edit-save-button"
+              >
+                {isSaving ? 'Saving...' : isEditing ? 'Save' : 'Edit'}
+              </button>
+            </div>
           </div>
 
           {isEditing ? (

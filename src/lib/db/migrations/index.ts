@@ -7,6 +7,7 @@ import { v11_v15_migrations } from './v11-v15-feature-additions';
 import { v16_v20_migrations } from './v16-v20-refactoring';
 import { v21_v23_migrations } from './v21-v23';
 import { v24_migrations } from './v24-daily-summaries';
+import { v25_migrations } from './v25-report-templates';
 
 /**
  * Complete ordered list of all migrations.
@@ -19,4 +20,5 @@ export const migrations: Migration[] = [
   ...v16_v20_migrations,
   ...v21_v23_migrations,
   ...v24_migrations,
+  ...v25_migrations,
 ];
