@@ -48,6 +48,7 @@ describe('Database Operations', () => {
       expect(tableNames).toContain('worktrees');
       expect(tableNames).toContain('chat_messages');
       expect(tableNames).toContain('session_states');
+      expect(tableNames).toContain('report_templates');
     });
 
     it('should create indexes for performance', () => {

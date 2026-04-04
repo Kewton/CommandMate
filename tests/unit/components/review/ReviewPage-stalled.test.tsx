@@ -39,6 +39,10 @@ vi.mock('@/config/review-config', () => ({
   REVIEW_POLL_INTERVAL_MS: 60000,
   SUMMARY_GENERATION_TIMEOUT_MS: 60000,
   SUMMARY_ALLOWED_TOOLS: ['claude', 'codex', 'copilot'],
+  MAX_TEMPLATES: 5,
+  MAX_TEMPLATE_NAME_LENGTH: 100,
+  MAX_TEMPLATE_CONTENT_LENGTH: 1000,
+  MAX_USER_INSTRUCTION_LENGTH: 1000,
 }));
 
 // Mock status-colors
@@ -100,11 +104,12 @@ beforeEach(() => {
 import ReviewPage from '@/app/review/page';
 
 describe('Review page filters', () => {
-  it('should render page-level tabs (Review / Report)', async () => {
+  it('should render page-level tabs (Review / Report / Template)', async () => {
     render(React.createElement(ReviewPage));
     await waitFor(() => {
       expect(screen.getByTestId('page-tab-review')).toBeDefined();
       expect(screen.getByTestId('page-tab-report')).toBeDefined();
+      expect(screen.getByTestId('page-tab-template')).toBeDefined();
     });
   });
 

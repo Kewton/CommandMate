@@ -1,7 +1,8 @@
 /**
- * Review screen configuration constants
+ * Review screen and report template configuration constants
  *
  * Issue #600: UX refresh - Review screen stalled detection and polling
+ * Issue #618: Report template system
  */
 
 /**
@@ -41,3 +42,21 @@ export type SummaryAllowedTool = typeof SUMMARY_ALLOWED_TOOLS[number];
  * Issue #612: Report UI improvements
  */
 export const MAX_USER_INSTRUCTION_LENGTH = 1000;
+
+/**
+ * Maximum number of report templates.
+ * Issue #618: Report template system
+ */
+export const MAX_TEMPLATES = 5;
+
+/**
+ * Maximum character length for template name.
+ * Issue #618: Report template system
+ */
+export const MAX_TEMPLATE_NAME_LENGTH = 100;
+
+/**
+ * Maximum character length for template content.
+ * Issue #618: Report template system
+ */
+export const MAX_TEMPLATE_CONTENT_LENGTH = 1000;
