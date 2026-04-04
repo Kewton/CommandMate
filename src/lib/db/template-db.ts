@@ -1,16 +1,11 @@
 /**
  * Report template database operations
- * CRUD operations for report_templates table
- *
  * Issue #618: Report template system
  */
 
 import { randomUUID } from 'crypto';
 import Database from 'better-sqlite3';
 
-/**
- * Report template model
- */
 export interface ReportTemplate {
   id: string;
   name: string;
@@ -20,9 +15,6 @@ export interface ReportTemplate {
   updatedAt: Date;
 }
 
-/**
- * Database row type for report templates
- */
 type ReportTemplateRow = {
   id: string;
   name: string;
@@ -32,9 +24,6 @@ type ReportTemplateRow = {
   updated_at: number;
 };
 
-/**
- * Map database row to ReportTemplate model
- */
 function mapTemplateRow(row: ReportTemplateRow): ReportTemplate {
   return {
     id: row.id,
@@ -46,12 +35,7 @@ function mapTemplateRow(row: ReportTemplateRow): ReportTemplate {
   };
 }
 
-/**
- * Get all templates, sorted by created_at ASC
- */
-export function getAllTemplates(
-  db: Database.Database
-): ReportTemplate[] {
+export function getAllTemplates(db: Database.Database): ReportTemplate[] {
   const stmt = db.prepare(`
     SELECT id, name, content, sort_order, created_at, updated_at
     FROM report_templates
@@ -62,13 +46,6 @@ export function getAllTemplates(
   return rows.map(mapTemplateRow);
 }
 
-/**
- * Get a template by ID
- *
- * @param db - Database instance
- * @param id - Template ID
- * @returns Template or null if not found
- */
 export function getTemplateById(
   db: Database.Database,
   id: string
@@ -83,19 +60,9 @@ export function getTemplateById(
   return row ? mapTemplateRow(row) : null;
 }
 
-/**
- * Create a new template
- *
- * @param db - Database instance
- * @param options - Template options (name, content)
- * @returns Created template
- */
 export function createTemplate(
   db: Database.Database,
-  options: {
-    name: string;
-    content: string;
-  }
+  options: { name: string; content: string }
 ): ReportTemplate {
   const id = randomUUID();
   const now = Date.now();
@@ -117,20 +84,10 @@ export function createTemplate(
   };
 }
 
-/**
- * Update an existing template
- *
- * @param db - Database instance
- * @param id - Template ID
- * @param updates - Fields to update (name and/or content)
- */
 export function updateTemplate(
   db: Database.Database,
   id: string,
-  updates: {
-    name?: string;
-    content?: string;
-  }
+  updates: { name?: string; content?: string }
 ): void {
   const now = Date.now();
   const assignments: string[] = ['updated_at = ?'];
@@ -157,16 +114,7 @@ export function updateTemplate(
   stmt.run(...params);
 }
 
-/**
- * Delete a template by ID
- *
- * @param db - Database instance
- * @param id - Template ID
- */
-export function deleteTemplate(
-  db: Database.Database,
-  id: string
-): void {
+export function deleteTemplate(db: Database.Database, id: string): void {
   const stmt = db.prepare(`
     DELETE FROM report_templates
     WHERE id = ?
@@ -175,15 +123,7 @@ export function deleteTemplate(
   stmt.run(id);
 }
 
-/**
- * Get the count of all templates
- *
- * @param db - Database instance
- * @returns Number of templates
- */
-export function getTemplateCount(
-  db: Database.Database
-): number {
+export function getTemplateCount(db: Database.Database): number {
   const result = db.prepare(
     'SELECT COUNT(*) as count FROM report_templates'
   ).get() as { count: number };

@@ -8,33 +8,14 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
+import { getAllTemplates, createTemplate, getTemplateCount } from '@/lib/db/template-db';
+import { MAX_TEMPLATES } from '@/config/review-config';
 import {
-  getAllTemplates,
-  createTemplate,
-  getTemplateCount,
-} from '@/lib/db/template-db';
-import type { ReportTemplate } from '@/lib/db/template-db';
-import {
-  MAX_TEMPLATES,
-  MAX_TEMPLATE_NAME_LENGTH,
-  MAX_TEMPLATE_CONTENT_LENGTH,
-} from '@/config/review-config';
-
-/** Serialize a ReportTemplate to a plain JSON-safe object (Date -> ISO string) */
-function serializeTemplate(template: ReportTemplate) {
-  return {
-    id: template.id,
-    name: template.name,
-    content: template.content,
-    sortOrder: template.sortOrder,
-    createdAt: template.createdAt.toISOString(),
-    updatedAt: template.updatedAt.toISOString(),
-  };
-}
-
-// =============================================================================
-// GET: Retrieve all templates
-// =============================================================================
+  serializeTemplate,
+  validateRequestBody,
+  validateTemplateName,
+  validateTemplateContent,
+} from '@/lib/api/template-helpers';
 
 export async function GET() {
   try {
@@ -53,46 +34,23 @@ export async function GET() {
   }
 }
 
-// =============================================================================
-// POST: Create a new template
-// =============================================================================
-
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    // Body shape validation
-    if (!body || typeof body !== 'object' || Array.isArray(body)) {
-      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
-    }
+    const bodyError = validateRequestBody(body);
+    if (bodyError) return bodyError;
 
     const { name, content } = body;
 
-    // Validate name
-    if (!name || typeof name !== 'string' || name.trim() === '') {
-      return NextResponse.json({ error: 'name is required and cannot be empty' }, { status: 400 });
-    }
-    if (name.length > MAX_TEMPLATE_NAME_LENGTH) {
-      return NextResponse.json(
-        { error: `name exceeds maximum length (${MAX_TEMPLATE_NAME_LENGTH})` },
-        { status: 400 }
-      );
-    }
+    const nameError = validateTemplateName(name, true);
+    if (nameError) return nameError;
 
-    // Validate content
-    if (!content || typeof content !== 'string' || content.trim() === '') {
-      return NextResponse.json({ error: 'content is required and cannot be empty' }, { status: 400 });
-    }
-    if (content.length > MAX_TEMPLATE_CONTENT_LENGTH) {
-      return NextResponse.json(
-        { error: `content exceeds maximum length (${MAX_TEMPLATE_CONTENT_LENGTH})` },
-        { status: 400 }
-      );
-    }
+    const contentError = validateTemplateContent(content, true);
+    if (contentError) return contentError;
 
     const db = getDbInstance();
 
-    // Check template count limit
     const count = getTemplateCount(db);
     if (count >= MAX_TEMPLATES) {
       return NextResponse.json(

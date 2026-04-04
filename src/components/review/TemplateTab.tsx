@@ -13,15 +13,7 @@ import {
   MAX_TEMPLATE_NAME_LENGTH,
   MAX_TEMPLATE_CONTENT_LENGTH,
 } from '@/config/review-config';
-
-interface TemplateData {
-  id: string;
-  name: string;
-  content: string;
-  sortOrder: number;
-  createdAt: string;
-  updatedAt: string;
-}
+import type { TemplateData } from '@/hooks/useReportGeneration';
 
 export default function TemplateTab() {
   const [templates, setTemplates] = useState<TemplateData[]>([]);

@@ -8,35 +8,14 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
+import { getTemplateById, updateTemplate, deleteTemplate } from '@/lib/db/template-db';
 import {
-  getTemplateById,
-  updateTemplate,
-  deleteTemplate,
-} from '@/lib/db/template-db';
-import type { ReportTemplate } from '@/lib/db/template-db';
-import {
-  MAX_TEMPLATE_NAME_LENGTH,
-  MAX_TEMPLATE_CONTENT_LENGTH,
-} from '@/config/review-config';
-
-/** UUID v4 format regex */
-const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-/** Serialize a ReportTemplate to a plain JSON-safe object (Date -> ISO string) */
-function serializeTemplate(template: ReportTemplate) {
-  return {
-    id: template.id,
-    name: template.name,
-    content: template.content,
-    sortOrder: template.sortOrder,
-    createdAt: template.createdAt.toISOString(),
-    updatedAt: template.updatedAt.toISOString(),
-  };
-}
-
-// =============================================================================
-// PUT: Update a template
-// =============================================================================
+  UUID_V4_REGEX,
+  serializeTemplate,
+  validateRequestBody,
+  validateTemplateName,
+  validateTemplateContent,
+} from '@/lib/api/template-helpers';
 
 export async function PUT(
   request: NextRequest,
@@ -45,49 +24,25 @@ export async function PUT(
   try {
     const { id } = await params;
 
-    // UUID v4 format check
     if (!UUID_V4_REGEX.test(id)) {
       return NextResponse.json({ error: 'Invalid template ID format' }, { status: 400 });
     }
 
     const body = await request.json();
 
-    // Body shape validation
-    if (!body || typeof body !== 'object' || Array.isArray(body)) {
-      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
-    }
+    const bodyError = validateRequestBody(body);
+    if (bodyError) return bodyError;
 
     const { name, content } = body;
 
-    // Validate name (if provided)
-    if (name !== undefined) {
-      if (typeof name !== 'string' || name.trim() === '') {
-        return NextResponse.json({ error: 'name cannot be empty' }, { status: 400 });
-      }
-      if (name.length > MAX_TEMPLATE_NAME_LENGTH) {
-        return NextResponse.json(
-          { error: `name exceeds maximum length (${MAX_TEMPLATE_NAME_LENGTH})` },
-          { status: 400 }
-        );
-      }
-    }
+    const nameError = validateTemplateName(name, false);
+    if (nameError) return nameError;
 
-    // Validate content (if provided)
-    if (content !== undefined) {
-      if (typeof content !== 'string' || content.trim() === '') {
-        return NextResponse.json({ error: 'content cannot be empty' }, { status: 400 });
-      }
-      if (content.length > MAX_TEMPLATE_CONTENT_LENGTH) {
-        return NextResponse.json(
-          { error: `content exceeds maximum length (${MAX_TEMPLATE_CONTENT_LENGTH})` },
-          { status: 400 }
-        );
-      }
-    }
+    const contentError = validateTemplateContent(content, false);
+    if (contentError) return contentError;
 
     const db = getDbInstance();
 
-    // Check existence
     const existing = getTemplateById(db, id);
     if (!existing) {
       return NextResponse.json({ error: 'Template not found' }, { status: 404 });
@@ -113,10 +68,6 @@ export async function PUT(
   }
 }
 
-// =============================================================================
-// DELETE: Delete a template
-// =============================================================================
-
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -124,14 +75,12 @@ export async function DELETE(
   try {
     const { id } = await params;
 
-    // UUID v4 format check
     if (!UUID_V4_REGEX.test(id)) {
       return NextResponse.json({ error: 'Invalid template ID format' }, { status: 400 });
     }
 
     const db = getDbInstance();
 
-    // Check existence
     const existing = getTemplateById(db, id);
     if (!existing) {
       return NextResponse.json({ error: 'Template not found' }, { status: 404 });
