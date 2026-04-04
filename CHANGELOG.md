@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-04-04
+
+### Added
+- Review: レポートテンプレート機能を追加し、CRUD API と 3 モード生成UIを実装 (Issue #618)
+- Report: レポート本文のコピーボタンを追加
+
+### Fixed
+- Codex: `/model` Step 1 のモデル選択UIを selection list として検出 (Issue #622)
+- Codex: `/model` 選択UIを waiting status として検出 (Issue #619)
+- Detection: Codex Reasoning Level UI を `multiple_choice` prompt と `submitMode` 対応で処理
+
+### Refactored
+- Template API: 共有ヘルパーを抽出して重複を削減 (Issue #618)
+- Prompt handling: `SubmitMode` バリデーションヘルパーを抽出して重複を削減 (Issue #616)
+
 ## [0.5.1] - 2026-04-02
 
 ### Added
@@ -1052,7 +1067,17 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.4.9...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/Kewton/CommandMate/compare/v0.5.1...v0.5.2
+[0.5.1]: https://github.com/Kewton/CommandMate/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/Kewton/CommandMate/compare/v0.4.16...v0.5.0
+[0.4.16]: https://github.com/Kewton/CommandMate/compare/v0.4.15...v0.4.16
+[0.4.15]: https://github.com/Kewton/CommandMate/compare/v0.4.14...v0.4.15
+[0.4.14]: https://github.com/Kewton/CommandMate/compare/v0.4.13...v0.4.14
+[0.4.13]: https://github.com/Kewton/CommandMate/compare/v0.4.12...v0.4.13
+[0.4.12]: https://github.com/Kewton/CommandMate/compare/v0.4.11...v0.4.12
+[0.4.11]: https://github.com/Kewton/CommandMate/compare/v0.4.10...v0.4.11
+[0.4.10]: https://github.com/Kewton/CommandMate/compare/v0.4.9...v0.4.10
 [0.4.9]: https://github.com/Kewton/CommandMate/compare/v0.4.8...v0.4.9
 [0.4.8]: https://github.com/Kewton/CommandMate/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/Kewton/CommandMate/compare/v0.4.6...v0.4.7
