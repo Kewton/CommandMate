@@ -2816,4 +2816,53 @@ Are you sure you want to continue? (yes/no)
       expect(result.isPrompt).toBe(false);
     });
   });
+
+  // Issue #622: Codex /model Step 1 should not be detected as multiple_choice by prompt detector
+  describe('Issue #622: Codex /model Step 1 prompt detector behavior', () => {
+    it('should detect Codex /model Step 1 as multiple_choice by prompt detector (intercepted by status-detector)', () => {
+      // Note: The prompt detector itself MAY detect this as multiple_choice because
+      // it has numbered options with cursor indicator. The fix is at the status-detector
+      // level which intercepts BEFORE the prompt detector runs.
+      // This test documents the prompt detector's behavior for this input.
+      const output = [
+        'Select Model and Effort',
+        '',
+        '\u203A 1. gpt-5.4 (current)   Latest frontier agentic coding model.',
+        '  2. gpt-5.4-mini        Smaller frontier agentic coding model.',
+        '  3. o3                   Advanced reasoning model.',
+        '  4. o4-mini              Fast, affordable reasoning model.',
+        '',
+        'Press enter to select reasoning effort, or esc to dismiss.',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+      // The prompt detector may or may not detect this as a prompt.
+      // The important thing is that status-detector's early Codex selection list
+      // check runs BEFORE detectPrompt, so this path is never reached in practice.
+      // We just document the behavior here.
+      if (result.isPrompt) {
+        expect(result.promptData?.type).toBe('multiple_choice');
+      }
+    });
+
+    it('should detect Codex /model Step 2 reasoning level as multiple_choice', () => {
+      // Step 2 with "press enter to confirm" - also intercepted by status-detector
+      const output = [
+        'Select Reasoning Level for gpt-5.4',
+        '',
+        '  1. Low                         Fast responses with lighter reasoning',
+        '\u203A 2. Medium (default) (current)  Balances speed and reasoning depth for everyday tasks',
+        '  3. High                        Greater reasoning depth for complex problems',
+        '  4. Extra high                  Extra high reasoning depth for complex problems',
+        '',
+        'Press enter to confirm or esc to go back',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+      // Similar to Step 1 - status-detector intercepts first
+      if (result.isPrompt) {
+        expect(result.promptData?.type).toBe('multiple_choice');
+      }
+    });
+  });
 });

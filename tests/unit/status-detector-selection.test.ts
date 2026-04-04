@@ -310,19 +310,20 @@ describe('detectSessionStatus - Codex selection_list detection (Issue #619)', ()
     expect(result.hasActivePrompt).toBe(false);
   });
 
-  it('should prioritize thinking (A) over selection list', () => {
-    // If thinking indicator is present alongside "press enter to confirm",
-    // thinking should take priority (step A before selection list step)
+  it('should prioritize selection list over thinking when both present (Issue #622)', () => {
+    // When "press enter to confirm" footer and thinking indicator are both present,
+    // selection list detection (priority 0.8) runs first and takes precedence.
+    // This is correct because the footer definitively indicates a selection list UI.
     const output = buildCodexOutput([
       'Select a model',
-      '  ❯ o4-mini (current)',
+      '  \u276F o4-mini (current)',
       'press enter to confirm or esc to cancel',
-      '• Planning something',  // thinking indicator in last lines
+      '\u2022 Planning something',  // thinking indicator in last lines
     ]);
 
     const result = detectSessionStatus(output, 'codex');
-    expect(result.status).toBe('running');
-    expect(result.reason).toBe('thinking_indicator');
+    expect(result.status).toBe('waiting');
+    expect(result.reason).toBe(STATUS_REASON.CODEX_SELECTION_LIST);
   });
 
   it('should detect numbered prompt (Step 2) via priority 1 detectPrompt, not selection list', () => {
@@ -367,5 +368,68 @@ describe('detectSessionStatus - Codex selection_list detection (Issue #619)', ()
 
     const result = detectSessionStatus(output, 'claude');
     expect(result.reason).not.toBe(STATUS_REASON.CODEX_SELECTION_LIST);
+  });
+});
+
+describe('detectSessionStatus - Codex /model Step 1 model selection (Issue #622)', () => {
+  it('should detect Codex /model Step 1 with "press enter to select" as codex_selection_list', () => {
+    // Step 1: Model selection uses "Press enter to select reasoning effort, or esc to dismiss."
+    // This must be detected as codex_selection_list, NOT as multiple_choice prompt.
+    const output = buildCodexOutput([
+      'Select Model and Effort',
+      '',
+      '\u203A 1. gpt-5.4 (current)   Latest frontier agentic coding model.',
+      '  2. gpt-5.4-mini        Smaller frontier agentic coding model.',
+      '  3. o3                   Advanced reasoning model.',
+      '  4. o4-mini              Fast, affordable reasoning model.',
+      '',
+      'Press enter to select reasoning effort, or esc to dismiss.',
+    ]);
+
+    const result = detectSessionStatus(output, 'codex');
+    expect(result.status).toBe('waiting');
+    expect(result.confidence).toBe('high');
+    expect(result.reason).toBe(STATUS_REASON.CODEX_SELECTION_LIST);
+    expect(result.hasActivePrompt).toBe(false);
+  });
+
+  it('should detect Codex /model Step 2 with "press enter to confirm" as codex_selection_list', () => {
+    // Step 2: Reasoning level selection uses "Press enter to confirm or esc to go back"
+    // This must still be detected as codex_selection_list (regression check).
+    const output = buildCodexOutput([
+      'Select Reasoning Level for gpt-5.4',
+      '',
+      '  1. Low                         Fast responses with lighter reasoning',
+      '\u203A 2. Medium (default) (current)  Balances speed and reasoning depth for everyday tasks',
+      '  3. High                        Greater reasoning depth for complex problems',
+      '  4. Extra high                  Extra high reasoning depth for complex problems',
+      '',
+      'Press enter to confirm or esc to go back',
+    ]);
+
+    const result = detectSessionStatus(output, 'codex');
+    expect(result.status).toBe('waiting');
+    expect(result.confidence).toBe('high');
+    expect(result.reason).toBe(STATUS_REASON.CODEX_SELECTION_LIST);
+    expect(result.hasActivePrompt).toBe(false);
+  });
+
+  it('should NOT affect "press number to confirm" detection (Issue #616 regression)', () => {
+    // "press number to confirm" should still be detected as multiple_choice prompt,
+    // not codex_selection_list.
+    const output = buildCodexOutput([
+      'Reasoning level',
+      '',
+      '  1. low',
+      '  2. medium (default)',
+      '  3. high',
+      '',
+      'press number to confirm or esc to cancel',
+    ]);
+
+    const result = detectSessionStatus(output, 'codex');
+    expect(result.reason).not.toBe(STATUS_REASON.CODEX_SELECTION_LIST);
+    expect(result.status).toBe('waiting');
+    expect(result.reason).toBe('prompt_detected');
   });
 });
