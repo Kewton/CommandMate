@@ -24,7 +24,7 @@
  * coupling via a minimal DTO/projection type.
  */
 
-import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN } from './cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
 import type { PromptDetectionResult } from './prompt-detector';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -103,6 +103,7 @@ export const STATUS_REASON = {
   OPENCODE_SELECTION_LIST: 'opencode_selection_list',
   CLAUDE_SELECTION_LIST: 'claude_selection_list',
   COPILOT_SELECTION_LIST: 'copilot_selection_list',
+  CODEX_SELECTION_LIST: 'codex_selection_list',
   OPENCODE_RESPONSE_COMPLETE: 'opencode_response_complete',
   INPUT_PROMPT: 'input_prompt',
   NO_RECENT_OUTPUT: 'no_recent_output',
@@ -120,6 +121,7 @@ export const SELECTION_LIST_REASONS = new Set<string>([
   STATUS_REASON.OPENCODE_SELECTION_LIST,
   STATUS_REASON.CLAUDE_SELECTION_LIST,
   STATUS_REASON.COPILOT_SELECTION_LIST,
+  STATUS_REASON.CODEX_SELECTION_LIST,
 ]);
 
 /**
@@ -404,6 +406,25 @@ export function detectSessionStatus(
             status: 'running',
             confidence: 'high',
             reason: 'thinking_indicator',
+            hasActivePrompt: false,
+            promptDetection,
+          };
+        }
+
+        // A2. Check content area for selection list (Issue #619: Codex /model selection list)
+        // Codex /model Step 1 shows arrow-key selection list with
+        // "press enter to confirm or esc to cancel" footer.
+        // Must be checked AFTER thinking (A) but BEFORE idle prompt (B).
+        // "press number to confirm" (Step 2) is NOT matched — that's handled
+        // by detectMultipleChoicePrompt at priority 1.
+        const codexFullContentText = contentLines
+          .slice(0, lastContentIdx + 1)
+          .join('\n');
+        if (CODEX_SELECTION_LIST_PATTERN.test(codexFullContentText)) {
+          return {
+            status: 'waiting',
+            confidence: 'high',
+            reason: STATUS_REASON.CODEX_SELECTION_LIST,
             hasActivePrompt: false,
             promptDetection,
           };

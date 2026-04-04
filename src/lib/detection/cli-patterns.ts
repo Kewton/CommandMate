@@ -84,6 +84,20 @@ export const CODEX_PROMPT_PATTERN = /^›\s*/m;
 export const CODEX_SEPARATOR_PATTERN = /^─.*Worked for.*─+$/m;
 
 /**
+ * Codex CLI selection list footer pattern (Issue #619)
+ * Detects Codex CLI's interactive selection prompts that use arrow key
+ * navigation (e.g., /model command's model selection step).
+ *
+ * Matches: "press enter to confirm or esc to cancel"
+ * Does NOT match: "press number to confirm" (handled by detectMultipleChoicePrompt)
+ *
+ * The distinction is important: "press enter to confirm" indicates an arrow-key
+ * selection list (NavigationButtons), while "press number to confirm" indicates
+ * a numbered prompt (PromptPanel with buttons).
+ */
+export const CODEX_SELECTION_LIST_PATTERN = /press\s+enter\s+to\s+confirm/i;
+
+/**
  * Pasted text pattern
  *
  * Claude CLI displays this when it detects multi-line text paste in the
