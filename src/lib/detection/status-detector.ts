@@ -220,6 +220,27 @@ export function detectSessionStatus(
     };
   }
 
+  // 0.8. Codex: selection list detection BEFORE prompt detection (Issue #622)
+  // CODEX_SELECTION_LIST_PATTERN matches "press enter to confirm/select" footer.
+  // Without this early check, detectPrompt() at priority 1 would detect the numbered
+  // options (e.g., "› 1. gpt-5.4") as a multiple_choice prompt, preventing
+  // NavigationButtons from being shown.
+  // This mirrors the Copilot Priority 0 pattern above.
+  if (cliToolId === 'codex') {
+    const codexFullContent = contentLines.join('\n');
+    if (CODEX_SELECTION_LIST_PATTERN.test(codexFullContent)) {
+      const codexPromptOptions = buildDetectPromptOptions(cliToolId);
+      const codexPromptDetection = detectPrompt(stripBoxDrawing(cleanOutput), codexPromptOptions);
+      return {
+        status: 'waiting',
+        confidence: 'high',
+        reason: STATUS_REASON.CODEX_SELECTION_LIST,
+        hasActivePrompt: false,
+        promptDetection: codexPromptDetection,
+      };
+    }
+  }
+
   // 1. Interactive prompt detection (highest priority)
   // This includes yes/no prompts, multiple choice, and approval prompts
   const promptOptions = buildDetectPromptOptions(cliToolId);
@@ -411,24 +432,8 @@ export function detectSessionStatus(
           };
         }
 
-        // A2. Check content area for selection list (Issue #619: Codex /model selection list)
-        // Codex /model Step 1 shows arrow-key selection list with
-        // "press enter to confirm or esc to cancel" footer.
-        // Must be checked AFTER thinking (A) but BEFORE idle prompt (B).
-        // "press number to confirm" (Step 2) is NOT matched — that's handled
-        // by detectMultipleChoicePrompt at priority 1.
-        const codexFullContentText = contentLines
-          .slice(0, lastContentIdx + 1)
-          .join('\n');
-        if (CODEX_SELECTION_LIST_PATTERN.test(codexFullContentText)) {
-          return {
-            status: 'waiting',
-            confidence: 'high',
-            reason: STATUS_REASON.CODEX_SELECTION_LIST,
-            hasActivePrompt: false,
-            promptDetection,
-          };
-        }
+        // A2. (Removed — Codex selection list detection moved to priority 0.8,
+        // before detectPrompt, to prevent false multiple_choice detection. Issue #622)
 
         // B. Check if the last content line is the idle › prompt.
         // The last non-empty line above the status bar is the current active line.
