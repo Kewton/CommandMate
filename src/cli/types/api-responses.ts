@@ -116,6 +116,14 @@ export interface TemplateResponse {
   content: string;
 }
 
+// Mirrors: src/app/api/daily-summary/status/route.ts GET response [Issue #638]
+export interface DailySummaryStatusResponse {
+  generating: boolean;
+  date?: string;
+  tool?: string;
+  startedAt?: string;
+}
+
 // Mirrors: src/types/models.ts ChatMessage (subset for send response)
 export interface ChatMessage {
   id?: number;
