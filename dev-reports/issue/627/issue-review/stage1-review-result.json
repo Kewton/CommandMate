@@ -1,0 +1,81 @@
+{
+  "stage": 1,
+  "focus": "通常",
+  "reviewer": "opus",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "Must Fix",
+      "title": "git log --since/--until のタイムゾーン未指定によるコミット漏れ・重複リスク",
+      "description": "Issueの git log コマンド例では `--since=\"2026-04-04\" --until=\"2026-04-05\"` と日付のみを指定しているが、gitはローカルタイムゾーンで解釈する。daily-summary-generator.ts の dayStart/dayEnd は `new Date(date + 'T00:00:00')` でローカルTZ依存だが、git log の --since/--until もローカルTZ依存なので一見整合しているように見える。しかしサーバーのTZとユーザーの期待するTZが異なる場合（Docker環境、クラウドデプロイ等）にコミットの漏れや重複が発生する。Issueにはタイムゾーンに関する記述が一切ない。",
+      "suggestion": "getCommitsByDateRange 関数の引数でISO 8601形式（タイムゾーン付き）の日時文字列を受け取るか、明示的に `--date=local` を指定する設計を記載すべき。少なくとも既存の dayStart/dayEnd (Date型) をそのまま ISO文字列に変換して --since/--until に渡す方針を明記する。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "Must Fix",
+      "title": "プロンプト長制限の調整方法が未定義",
+      "description": "Issueの実装タスクに「プロンプト長制限の調整（コミットログ分の余裕確保）」と記載されているが、具体的な方針が一切示されていない。現在 MAX_TOTAL_MESSAGE_LENGTH = MAX_MESSAGE_LENGTH = 10000 文字で、messages + commit_log の合計がこの上限に収まる必要がある。コミットログが大量の場合（例: 100コミット以上のモノレポ）、メッセージセクションが完全に切り捨てられる可能性がある。",
+      "suggestion": "以下のいずれかの方針を明記すべき: (A) MAX_TOTAL_MESSAGE_LENGTH を増加させる（例: 15000文字）、(B) コミットログ専用の上限を設ける（例: MAX_COMMIT_LOG_LENGTH = 3000文字）としてメッセージとコミットログで独立したトランケーション、(C) 割合ベース（メッセージ70%/コミットログ30%）。受入条件の「適切にトランケーション」も具体的な基準（どちらが優先されるか）を定義すべき。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "Should Fix",
+      "title": "コミットログのサニタイズ（インジェクション対策）が未記載",
+      "description": "コミットメッセージは外部入力であり、<user_data>タグや<commit_log>タグを含む悪意あるコミットメッセージが存在し得る。既存の sanitizeMessage() は <user_data> タグのみをエスケープしているが、新規追加する <commit_log> タグもエスケープ対象に含める必要がある。Issueにサニタイズに関する記述がない。",
+      "suggestion": "sanitizeMessage() を拡張して <commit_log> タグもエスケープするか、コミットログ専用のサニタイズ関数を設計する旨を実装タスクに追加すべき。また、コミットメッセージ内の制御文字除去も必要。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "Should Fix",
+      "title": "git log のタイムアウト値が不十分な可能性",
+      "description": "既存の GIT_LOG_TIMEOUT_MS = 3000ms は単一worktreeでのログ取得用。本Issueでは全リポジトリに対して --all で全ブランチのコミットを取得するため、大規模リポジトリでは3秒では不足する可能性がある。また、複数リポジトリを逐次実行する場合、合計タイムアウトが SUMMARY_GENERATION_TIMEOUT_MS (60秒) に食い込むリスクがある。",
+      "suggestion": "コミットログ取得専用のタイムアウト定数（例: GIT_COMMIT_LOG_TIMEOUT_MS = 5000ms）を設けるか、既存のGIT_LOG_TIMEOUT_MSを再利用しつつ全リポジトリの合計タイムアウト上限を設定する方針を記載すべき。並列実行（Promise.allSettled）の検討も推奨。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "Should Fix",
+      "title": "getRepositories() vs getAllRepositories() の選択が曖昧",
+      "description": "Issue本文では「worktreeテーブルから取得」と記載しているが、影響範囲テーブルに `db-repository.ts` も「関連コンポーネント」として挙げている。worktree-db.ts の getRepositories() は worktrees テーブルから GROUP BY で取得するためCommandMateが管理するリポジトリに限定されるが、db-repository.ts の getAllRepositories() は repositories テーブルから取得する。両者の差異と採用方針がIssue上で明確でない。",
+      "suggestion": "getRepositories(db) (worktree-db.ts) を使う方針を明示的に記載し、db-repository.ts は使用しない旨を明記すべき。理由: worktreeテーブルにはrepository_pathが直接格納されており、git logの実行パスとして直接利用可能。"
+    },
+    {
+      "id": "S1-006",
+      "severity": "Should Fix",
+      "title": "git log 実行対象パスの存在確認が未記載",
+      "description": "getRepositories() が返す repository_path は、worktreeが削除済みでもDB上に残っている可能性がある。存在しないパスに対して git log を実行するとエラーになるが、このエラーハンドリング方針がIssueに記載されていない。",
+      "suggestion": "getCommitsByDateRange() 内でパスの存在確認を行うか、git log実行時のエラーを握りつぶして次のリポジトリに進む方針を実装タスクまたは受入条件に追記すべき。"
+    },
+    {
+      "id": "S1-007",
+      "severity": "Should Fix",
+      "title": "getCommitsByDateRange の戻り値型が未定義",
+      "description": "Issueの実装タスクに `getCommitsByDateRange(repoPath, since, until)` の追加が記載されているが、戻り値の型定義が示されていない。既存の CommitInfo 型を再利用するのか、簡略化した型（shortHash + message + author のみ）にするのか不明。git log の --format も既存の getGitLog とは異なるフォーマット（`%h %s (%an)`）を使用する設計になっている。",
+      "suggestion": "既存の CommitInfo 型との関係を明確にすべき。プロンプト用途なので `{ shortHash: string; message: string; author: string }` のような簡略型か、既存 CommitInfo の再利用かを記載する。formatも統一を検討。"
+    },
+    {
+      "id": "S1-008",
+      "severity": "Nice to Have",
+      "title": "重複コミットの除外が未考慮",
+      "description": "git log --all は全ブランチを対象とするため、マージコミットが複数ブランチに存在する場合、同一コミットが重複して表示される可能性がある。git logはデフォルトで重複を排除するが、Issueにこの点の言及がない。",
+      "suggestion": "git log --all はデフォルトで同一コミットの重複を排除するため実装上は問題ないが、設計意図として明記しておくと実装者の混乱を防げる。"
+    },
+    {
+      "id": "S1-009",
+      "severity": "Nice to Have",
+      "title": "テスト対象の網羅性",
+      "description": "実装タスクに「ユニットテスト追加」とあるが、テスト対象ファイルが `tests/unit/lib/summary-prompt-builder.test.ts` のみ記載。git-utils.ts の新関数 getCommitsByDateRange と daily-summary-generator.ts のコミットログ収集ロジックのテストも必要。",
+      "suggestion": "テスト追加対象として以下も明記すべき: (1) tests/unit/lib/git/git-utils.test.ts (getCommitsByDateRange のユニットテスト), (2) daily-summary-generator.ts のコミットログ統合に関するテスト（モック利用）。"
+    },
+    {
+      "id": "S1-010",
+      "severity": "Nice to Have",
+      "title": "受入条件「Issue消化数・コミット数が正確に反映されること」の検証方法が不明",
+      "description": "受入条件に「生成されたレポートにIssue消化数・コミット数が正確に反映されること」とあるが、AIの出力内容は非決定的であり、プロンプトにコミットログを含めたからといってAIが必ず正確な数値を出力する保証はない。この受入条件の検証方法が定義されていない。",
+      "suggestion": "この受入条件を「プロンプトにコミットログセクションが含まれ、コミット数がセクションヘッダーに記載されていること」のように、検証可能な条件に修正することを推奨。AI出力の正確性はプロンプトの品質で間接的に担保する方針を明記する。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 5,
+  "nice_to_have_count": 3,
+  "summary": "Issue #627 は全体として妥当な設計方針を持つが、実装に入る前に解決すべき重要な課題が2点ある。第一に、git log の --since/--until のタイムゾーン処理が未定義であり、サーバー環境によってコミットの漏れ・重複が発生するリスクがある。第二に、プロンプト長制限（10000文字）の調整方針が具体的に示されておらず、コミットログ追加によるメッセージセクション切り捨てリスクへの対処が不明確。また、コミットログのサニタイズ、タイムアウト設定、リポジトリパスの存在確認、戻り値型定義など、実装時に判断が必要な設計詳細がIssueに不足している。"
+}

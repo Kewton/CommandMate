@@ -1,0 +1,9 @@
+{
+  "stage": 6,
+  "issue_number": "627",
+  "applied_findings": ["S5-001", "S5-002", "S5-003"],
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "updated_body": "> **Note**: このIssueは 2026-04-05 にStage 5通常レビュー結果を反映して更新されました。\n> Stage 1レビュー反映: S1-001〜S1-010\n> Stage 3レビュー反映: S3-001〜S3-008\n> Stage 5レビュー反映: S5-001〜S5-003\n> 詳細: dev-reports/issue/627/issue-review/\n\n## 概要\n\nレポート生成時に、CommandMateが管理する全リポジトリから当日の全コミットメッセージを取得し、プロンプトの追加セクションとしてAIに渡す。これによりAIがIssue消化数・作業内容・コミット数を正確に把握しやすくする。\n\n## 背景・課題\n\n現在のレポート生成は `chat_messages` テーブルのメッセージ内容のみをデータソースとしており、Issue消化数やコミット数のような構造化情報を含まない。そのためAIがメッセージ内容から推測するしかなく、日次レポートの精度に限界がある。\n\n## 提案する解決策\n\n### データ取得\n\nプロンプト構築時に、DBに登録された全リポ",
+  "summary": "Stage 5レビューで検出した Must Fix 2件と Should Fix 1件を Issue #627 本文へ反映した。具体的には、タイムゾーン前提を『既存daily summaryと同じ実行環境ローカルTZ』として明示し、プロンプト長は `MAX_MESSAGE_LENGTH` を総上限にした配分管理へ修正し、`commitLogs` の受け渡し型にリポジトリ表示名を含める設計へ更新した。"
+}

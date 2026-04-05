@@ -1,0 +1,39 @@
+{
+  "issue_number": 627,
+  "feature_summary": "レポート生成時に全リポジトリの当日コミットログをプロンプトに含める",
+  "acceptance_criteria": [
+    "全リポジトリ（DB登録済みかつパス存在）の当日コミットが取得できる",
+    "全ブランチのコミットが対象になる（--all）",
+    "コミットがないリポジトリはスキップされる",
+    "パスが存在しないリポジトリはエラーにならずスキップされる",
+    "git log の個別タイムアウトが GIT_COMMIT_LOG_TIMEOUT_MS で制御される",
+    "git log 並列実行の全体タイムアウトが GIT_LOG_TOTAL_TIMEOUT_MS で制御される",
+    "プロンプトに <commit_log> セクションが含まれる",
+    "リポジトリごとのセクションヘッダーに表示名とコミット数が含まれる",
+    "コミットログ内の <commit_log> / <user_data> タグがエスケープされる",
+    "コミットログが MAX_COMMIT_LOG_LENGTH を超える場合にトランケーションされる",
+    "最終プロンプト全体が MAX_MESSAGE_LENGTH 以内",
+    "既存のレポート生成機能に回帰がない",
+    "buildSummaryPrompt の既存呼び出しが修正なしで動作する",
+    "既存テストが新モック追加後もパスする"
+  ],
+  "test_scenarios": [
+    "シナリオ1: getCommitsByDateRange が通常コミットを取得できる",
+    "シナリオ2: パスが存在しないリポジトリはスキップされる",
+    "シナリオ3: collectRepositoryCommitLogs が空コミットのリポジトリをスキップする",
+    "シナリオ4: buildSummaryPrompt に commitLogs を渡すと <commit_log> セクションが生成される",
+    "シナリオ5: コミットログが MAX_COMMIT_LOG_LENGTH を超える場合にトランケーションされる",
+    "シナリオ6: <commit_log> タグがエスケープされる",
+    "シナリオ7: daily-summary-generator がコミットログをプロンプトに含める",
+    "シナリオ8: withTimeout がタイムアウト時にフォールバック値を返す",
+    "シナリオ9: 既存テストが全てパスする"
+  ],
+  "implemented_files": [
+    "src/types/git.ts",
+    "src/config/review-config.ts",
+    "src/lib/utils.ts",
+    "src/lib/git/git-utils.ts",
+    "src/lib/summary-prompt-builder.ts",
+    "src/lib/daily-summary-generator.ts"
+  ]
+}

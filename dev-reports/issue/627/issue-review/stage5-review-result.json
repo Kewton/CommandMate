@@ -1,0 +1,32 @@
+{
+  "stage": 5,
+  "focus": "通常（2回目）",
+  "reviewer": "codex",
+  "findings": [
+    {
+      "id": "S5-001",
+      "severity": "Must Fix",
+      "title": "タイムゾーン方針が依然として実行環境依存のままになっている",
+      "description": "Issue本文では `dayStart` / `dayEnd` を `toISOString()` で `--since` / `--until` に渡すことで「サーバーのTZ設定に依存せず」としているが、実際には `src/lib/daily-summary-generator.ts` と `src/app/api/daily-summary/route.ts` の日付生成が `new Date(date + 'T00:00:00')` の実行環境ローカルTZ依存であり、ブラウザ側の `src/components/review/ReportDatePicker.tsx` が生成する `YYYY-MM-DD` とズレる可能性が残っている。`toISOString()` は既にローカルTZで解釈済みの日時をUTC表現へ変換するだけで、日次集計の基準TZ自体は固定しない。",
+      "suggestion": "Issue本文では「日次集計の基準タイムゾーン」を明示し、少なくとも既存の daily summary と同じ実行環境ローカルTZを正とするのか、あるいは明示的なタイムゾーン入力を受けるのかを決めるべき。併せて、`toISOString()` はシリアライズ手段であってTZ基準の解決ではない旨に修正し、受入条件にもフロントエンドとAPIで同じTZ解釈を使うことを追加する。"
+    },
+    {
+      "id": "S5-002",
+      "severity": "Must Fix",
+      "title": "プロンプト長制限の説明が実装上の総上限と整合していない",
+      "description": "Issue本文ではメッセージセクション 10000 文字とコミットログセクション 3000 文字を独立管理する前提になっているが、実際には `src/lib/session/claude-executor.ts` の `MAX_MESSAGE_LENGTH = 10000` が最終的なプロンプト全体の上限であり、`buildSummaryPrompt` が生成したシステムプロンプト・`<user_instruction>`・`<user_data>`・`<commit_log>` をまとめて 10000 文字を超えると末尾が切り落とされる。現状のIssue記述のままではコミットログ追加後にプロンプト末尾が暗黙に切り詰められ、S1-002 で求めていたトランケーション方針が未解決のまま残る。",
+      "suggestion": "Issue本文では `MAX_COMMIT_LOG_LENGTH = 3000` をコミットログ単体の上限として残してもよいが、別途「最終プロンプト全体は `MAX_MESSAGE_LENGTH` 以内に収める」総量制御を必須要件として追加すべき。具体的には、system prompt と userInstruction のオーバーヘッドを差し引いた残りを messages / commit logs に按分するか、`MAX_MESSAGE_LENGTH` 自体を見直すかを明記し、受入条件にも `executeClaudeCommand` 側の末尾切り詰めに依存しないことを追加する。"
+    },
+    {
+      "id": "S5-003",
+      "severity": "Should Fix",
+      "title": "commitLogs の受け渡し型にリポジトリ表示名が含まれていない",
+      "description": "Issue本文の `buildSummaryPrompt` 拡張案では第4引数が `Map<string, CommitLogEntry[]>`（リポジトリパス -> コミットログ）になっているが、同じIssue本文の `<commit_log>` 例では `## Repository: MyCodeBranchDesk` のようにリポジトリ名を見出しに使う前提になっている。`src/lib/db/worktree-db.ts` の `getRepositories()` は path と name の両方を返すため、現行案のままだと `summary-prompt-builder.ts` 側で表示名を復元できず、Issue本文内でデータ形状と出力例が食い違っている。",
+      "suggestion": "第4引数は `Map<string, { name: string; commits: CommitLogEntry[] }>` など、少なくとも表示名を含む構造に修正すべき。実装タスクとテスト項目にも「リポジトリ名を見出しへ出す」前提を揃えて記載する。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 1,
+  "nice_to_have_count": 0,
+  "summary": "Stage 1 / Stage 3 で指摘された内容の大半はIssue本文に反映されていたが、重要論点が2点残っていた。1つ目はタイムゾーンで、`toISOString()` への変換だけでは日次集計の基準TZが定義されず、フロントエンドの `YYYY-MM-DD` とAPI側解釈のズレ余地が残っている。2つ目はプロンプト長で、コミットログ用に3000文字の独立枠を追加しても `executeClaudeCommand` の総上限10000文字を超えれば末尾切り詰めが発生するため、総量制御の記述が必要。加えて、commitLogs の型が出力例のリポジトリ名表示に必要な情報を持っておらず、設計の整合性補強が望まれる。"
+}

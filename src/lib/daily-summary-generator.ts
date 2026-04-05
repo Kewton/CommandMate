@@ -16,6 +16,7 @@ import type Database from 'better-sqlite3';
 import { createLogger } from '@/lib/logger';
 import { executeClaudeCommand, MAX_MESSAGE_LENGTH } from '@/lib/session/claude-executor';
 import { buildSummaryPrompt } from '@/lib/summary-prompt-builder';
+import { DEFAULT_PERMISSIONS } from '@/config/schedule-config';
 import { getMessagesByDateRange } from '@/lib/db/chat-db';
 import { saveDailyReport } from '@/lib/db/daily-report-db';
 import { getWorktrees } from '@/lib/db/worktree-db';
@@ -171,11 +172,13 @@ export async function generateDailySummary(
     const prompt = buildSummaryPrompt(messages, worktreeMap, userInstruction, commitLogs);
 
     // 5. Execute AI command
+    // Issue #626: Use tool-specific default permission (e.g. codex: 'workspace-write')
+    const permission = DEFAULT_PERMISSIONS[tool] || 'default';
     const result = await executeClaudeCommand(
       prompt,
       process.cwd(),
       tool,
-      'default',
+      permission,
       { timeoutMs: SUMMARY_GENERATION_TIMEOUT_MS, model }
     );
 

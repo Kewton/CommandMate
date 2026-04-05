@@ -73,6 +73,17 @@ vi.mock('@/config/review-config', () => ({
   GIT_LOG_TOTAL_TIMEOUT_MS: 15000,
 }));
 
+// Mock schedule-config (DEFAULT_PERMISSIONS)
+vi.mock('@/config/schedule-config', () => ({
+  DEFAULT_PERMISSIONS: {
+    claude: 'acceptEdits',
+    codex: 'workspace-write',
+    gemini: '',
+    'vibe-local': '',
+    copilot: 'allow-all-tools',
+  },
+}));
+
 // Mock summary-prompt-builder
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockBuildSummaryPrompt = vi.fn((..._args: any[]) => 'mock prompt');
@@ -258,8 +269,74 @@ describe('daily-summary-generator', () => {
         expect.any(String),
         expect.any(String),
         'copilot',
-        'default',
+        'allow-all-tools',
         { timeoutMs: 60000, model: 'gpt-4o' }
+      );
+    });
+
+    it('should pass workspace-write permission for codex (Issue #626)', async () => {
+      const validOutput = 'x'.repeat(MIN_SUMMARY_OUTPUT_LENGTH + 10);
+      mockGetMessagesByDateRange.mockReturnValue([
+        { id: 'msg-1', worktreeId: 'wt-1', role: 'user', content: 'hello', timestamp: new Date() },
+      ]);
+      mockExecuteClaudeCommand.mockResolvedValue({
+        output: validOutput,
+        exitCode: 0,
+        status: 'completed',
+      });
+      mockSaveDailyReport.mockReturnValue({
+        date: '2026-04-02',
+        content: validOutput,
+        generatedByTool: 'codex',
+        model: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      await generateDailySummary(mockDb, {
+        date: '2026-04-02',
+        tool: 'codex',
+      });
+
+      expect(mockExecuteClaudeCommand).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        'codex',
+        'workspace-write',
+        { timeoutMs: 60000, model: undefined }
+      );
+    });
+
+    it('should pass acceptEdits permission for claude (Issue #626)', async () => {
+      const validOutput = 'x'.repeat(MIN_SUMMARY_OUTPUT_LENGTH + 10);
+      mockGetMessagesByDateRange.mockReturnValue([
+        { id: 'msg-1', worktreeId: 'wt-1', role: 'user', content: 'hello', timestamp: new Date() },
+      ]);
+      mockExecuteClaudeCommand.mockResolvedValue({
+        output: validOutput,
+        exitCode: 0,
+        status: 'completed',
+      });
+      mockSaveDailyReport.mockReturnValue({
+        date: '2026-04-02',
+        content: validOutput,
+        generatedByTool: 'claude',
+        model: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      await generateDailySummary(mockDb, {
+        date: '2026-04-02',
+        tool: 'claude',
+      });
+
+      expect(mockExecuteClaudeCommand).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        'claude',
+        'acceptEdits',
+        { timeoutMs: 60000, model: undefined }
       );
     });
 

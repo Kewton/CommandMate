@@ -1,0 +1,33 @@
+{
+  "issue_number": 627,
+  "status": "success",
+  "refactored_files": [
+    "src/lib/utils.ts"
+  ],
+  "changes": [
+    {
+      "file": "src/lib/utils.ts",
+      "description": "TimeoutError class and withTimeout function were inserted between escapeHtml JSDoc comment and escapeHtml function definition, breaking the JSDoc association. Moved them after escapeHtml into a dedicated section with a consistent section separator comment (Issue #627). No functional change."
+    }
+  ],
+  "quality_metrics": {
+    "before_coverage": null,
+    "after_coverage": null
+  },
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "test_results": {
+    "passed": 6131,
+    "failed": 0,
+    "skipped": 7,
+    "total": 6138
+  },
+  "commits": [
+    "1973ff64: refactor(utils): fix JSDoc association and organize timeout utilities"
+  ],
+  "summary": "Fixed a code organization issue in src/lib/utils.ts where the Issue #627 additions (TimeoutError, withTimeout) were inserted between the escapeHtml JSDoc comment and its function definition, breaking the JSDoc association. Moved them to a dedicated section at the end of the file with a consistent section separator comment. Other target files (src/types/git.ts, src/lib/git/git-utils.ts, src/lib/summary-prompt-builder.ts, src/lib/daily-summary-generator.ts) were reviewed and found to be well-structured with consistent naming, proper JSDoc, appropriate error handling, and good test coverage. All 6131 tests pass, 0 ESLint errors, 0 TypeScript errors."
+}

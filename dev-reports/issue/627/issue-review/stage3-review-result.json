@@ -1,0 +1,67 @@
+{
+  "stage": 3,
+  "focus": "影響範囲",
+  "reviewer": "opus",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "Must Fix",
+      "title": "buildSummaryPrompt の引数変更が既存テスト20件以上に影響する",
+      "description": "Issue の実装タスクでは buildSummaryPrompt にコミットログデータを渡すために引数を拡張する必要がある。現在のシグネチャは buildSummaryPrompt(messages, worktrees, userInstruction?) であり、新たにコミットログ引数を追加する場合、(1) 第4引数として追加するか、(2) オブジェクト引数に変更するかの2通りがある。第4引数として追加する場合はオプショナルにすれば既存呼び出し（daily-summary-generator.ts line 158、テスト15箇所）は後方互換だが、Issueにこの設計判断が記載されていない。オブジェクト引数に変更する場合は全ての呼び出し箇所とテストの修正が必要。",
+      "suggestion": "buildSummaryPrompt の引数拡張方針を明示すべき。推奨案: コミットログを第4引数 (commitLogs?: Map<string, CommitLogEntry[]>) としてオプショナルに追加する。これにより既存の呼び出し箇所（daily-summary-generator.ts、テスト15箇所）は修正不要で後方互換を維持できる。Issueの実装タスクに「引数をオプショナル追加とし、既存呼び出しの修正は不要」と明記すべき。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "Must Fix",
+      "title": "daily-summary-generator.ts の非同期化に伴うテストモック構造の大幅変更が必要",
+      "description": "現在の daily-summary-generator.ts はメッセージ取得（同期: getMessagesByDateRange）とプロンプト構築（同期: buildSummaryPrompt）のみで、git操作を含まない。Issue実装後は getRepositories(db)（同期）と getCommitsByDateRange()（非同期 / Promise.allSettled）が追加される。既存テスト (daily-summary-generator.test.ts) は worktree-db のモックとして getWorktrees のみを設定しているが、getRepositories のモック追加が必要。さらに git-utils の getCommitsByDateRange のモックも必要。Issueの実装タスクでは tests/unit/lib/daily-summary-generator.test.ts のテスト追加に言及しているが、既存テスト11件への影響（新しいモック追加による修正）が明記されていない。",
+      "suggestion": "Issueの実装タスクに以下を追記すべき: (1) daily-summary-generator.test.ts の既存モック設定に getRepositories と getCommitsByDateRange のモックを追加する必要がある、(2) 既存テスト11件は新モックがデフォルトで空配列を返す設定にすれば修正不要だが、その方針を明記する。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "Should Fix",
+      "title": "SUMMARY_GENERATION_TIMEOUT_MS (60秒) への git log 並列実行の時間的影響が未評価",
+      "description": "現在のレポート生成フローは (1) getMessagesByDateRange (同期、高速) -> (2) buildSummaryPrompt (同期、高速) -> (3) executeClaudeCommand (非同期、timeoutMs=60秒) という構成。Issue実装後は (1) と (2) の間に「全リポジトリの git log 並列実行」が挿入される。Promise.allSettled で並列実行するとしても、GIT_COMMIT_LOG_TIMEOUT_MS=5000ms のタイムアウトが全リポジトリで発火した場合、最低5秒のオーバーヘッドが発生する。この5秒は SUMMARY_GENERATION_TIMEOUT_MS の60秒には含まれない（executeClaudeCommand の引数としてのみ使用されている）。ただし、isGenerating() のフェイルセーフ（60秒+10秒マージン）には影響する可能性がある。git log 取得時間がフェイルセーフタイマーを圧迫するリスクがある。",
+      "suggestion": "daily-summary-generator.ts の startedAt は git log 実行前に設定されるため、git log に5秒かかると AI 実行に使える実質時間は 60+10-5=65秒のフェイルセーフ時間内に収まる。ただし、リポジトリ数が多い場合（10以上）に git log 取得に要する合計時間の上限を設定すべき。例: 全リポジトリの git log 取得全体に対するタイムアウト（例: 15秒）を設け、超過した場合は取得済み分のみでプロンプトを構築する方針を記載する。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "Should Fix",
+      "title": "getRepositories() がアーカイブ済みworktreeを含むリポジトリパスも返す",
+      "description": "worktree-db.ts の getRepositories() は WHERE repository_path IS NOT NULL のみでフィルタしており、archived/削除済みworktreeのリポジトリパスも含む。CommandMateの他の機能（サイドバー等）では archived フィルタを適用しているが、getRepositories() にはこのフィルタがない。アーカイブ済みworktreeのリポジトリパスが既に削除されている場合、S1-006 のパス存在確認でスキップされるが、無駄な git log 実行が発生する。",
+      "suggestion": "getRepositories() の呼び出し時にアーカイブ済みworktreeを除外するか、daily-summary-generator.ts 内でフィルタリングする方針を検討すべき。ただし、アーカイブ済みworktreeでもリポジトリ自体は有効な場合があるため、パス存在確認（S1-006）で十分とする判断もある。Issueにこの判断を明記すべき。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "Should Fix",
+      "title": "summary-prompt-builder.test.ts の sanitizeMessage テストに commit_log タグのエスケープテストが必要",
+      "description": "Stage 1 で指摘された S1-003（commit_log タグのサニタイズ）の実装に伴い、既存の sanitizeMessage テスト（8件）に <commit_log> タグのエスケープテストを追加する必要がある。現在のテストは <user_data> タグのエスケープのみを検証している。Issueの実装タスクには「sanitizeMessage() を拡張して <commit_log> タグもエスケープ」と記載があるが、既存テストへの追加が明示されていない。",
+      "suggestion": "実装タスクのテスト追加項目に「既存 sanitizeMessage テストに <commit_log> タグエスケープのテストケースを追加」を明記すべき。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "Should Fix",
+      "title": "APIルート (daily-summary/route.ts) への影響がIssueに記載されていない",
+      "description": "daily-summary/route.ts の POST ハンドラは generateDailySummary() を呼び出しており、この関数が非同期で git log を実行するようになる。関数シグネチャ自体は変わらない（既に async）ため API ルートの修正は不要だが、レスポンス時間が増加する可能性がある。特に、git log 並列実行 + AI 実行で合計タイムアウトがNext.jsのデフォルトAPIタイムアウト（あれば）を超える可能性がある。また、API ルートのエラーハンドリングには新しいエラー型（git log 失敗時）のキャッチが不要であることの確認が必要（generateDailySummary 内で握りつぶすため）。",
+      "suggestion": "Issueの影響範囲テーブルに daily-summary/route.ts を「変更不要だが影響を受けるファイル」として追記し、(1) APIレスポンス時間増加の可能性、(2) 新しいエラー型の伝播がないことの確認、を記載すべき。"
+    },
+    {
+      "id": "S3-007",
+      "severity": "Nice to Have",
+      "title": "git-utils.ts への新関数追加がAPI層の git 関連テストに間接的影響を与える可能性",
+      "description": "git-utils.ts には現在 getGitLog, getGitShow, getGitDiff, handleGitApiError が export されており、API ルート（git/log, git/show, git/diff）から使用されている。新関数 getCommitsByDateRange は API ルートからは直接呼ばれず daily-summary-generator.ts からのみ呼ばれるため、既存 API テストへの影響はない。ただし、tests/unit/lib/git/ ディレクトリが現在存在しないため、新規作成が必要。",
+      "suggestion": "tests/unit/lib/git/ ディレクトリの新規作成をタスクに明記する（些細だが実装者の混乱を防ぐため）。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "Nice to Have",
+      "title": "review-config.ts への MAX_COMMIT_LOG_LENGTH 追加が他のインポートに影響しない確認",
+      "description": "review-config.ts は現在 STALLED_THRESHOLD_MS, REVIEW_POLL_INTERVAL_MS, SUMMARY_GENERATION_TIMEOUT_MS, SUMMARY_ALLOWED_TOOLS, MAX_USER_INSTRUCTION_LENGTH, MAX_TEMPLATES, MAX_TEMPLATE_NAME_LENGTH, MAX_TEMPLATE_CONTENT_LENGTH をエクスポートしている。MAX_COMMIT_LOG_LENGTH の追加は純粋な追加であり、既存のインポートに影響しない。ただし、この定数は summary-prompt-builder.ts からインポートされるため、新たな依存関係（summary-prompt-builder.ts -> review-config.ts）が発生する。",
+      "suggestion": "この新しい依存関係は問題ないが、循環依存が発生しないことを確認すべき。現状 review-config.ts は他モジュールをインポートしていないため問題なし。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 4,
+  "nice_to_have_count": 2,
+  "summary": "影響範囲レビューの結果、Issue #627 の実装が影響するファイル・コンポーネントについて2件のMust Fix、4件のShould Fix、2件のNice to Haveを検出した。最も重要な指摘は、(1) buildSummaryPrompt の引数拡張方針が未定義であり、後方互換性の設計判断がIssueに記載されていない点、(2) daily-summary-generator.test.ts の既存11件のテストが新しいモック（getRepositories, getCommitsByDateRange）の追加を必要とする点である。APIルート（daily-summary/route.ts）は関数シグネチャの変更がないため修正不要だが、レスポンス時間増加の影響がある。getRepositories() がアーカイブ済みworktreeのリポジトリパスも返す点、sanitizeMessage の既存テストへのcommit_logタグテスト追加、git log 並列実行のタイムアウトがフェイルセーフに与える影響なども実装前に検討が必要。"
+}

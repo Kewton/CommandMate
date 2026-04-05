@@ -1,0 +1,11 @@
+{
+  "stage": 3,
+  "applied_findings": [
+    "DR3-001",
+    "DR3-002",
+    "DR3-003"
+  ],
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "summary": "Stage 3 影響範囲レビューの全3件（Must Fix 1件、Should Fix 2件）を設計方針書に反映した。主要変更: (1) DR3-001: `tests/unit/lib/daily-summary-generator.test.ts` の更新対象を `getCommitsByDateRange` から `collectRepositoryCommitLogs` へ修正し、`GIT_LOG_TOTAL_TIMEOUT_MS` モック追加も明記。(2) DR3-002: `src/lib/utils.ts` は新規追加ではなく既存共有モジュールの拡張であることを明記し、`tests/unit/lib/utils.test.ts` を影響テストとして追加。(3) DR3-003: `collectRepositoryCommitLogs()` は `getRepositories()` 契約を変更しない一方で `/api/worktrees` が同契約に依存することを明記し、`src/app/api/worktrees/route.ts` と `tests/integration/api-worktrees.test.ts` を互換性確認対象に追加した。合わせて Stage 3 サマリーセクションと実装チェックリストも更新済み。"
+}
