@@ -11,7 +11,9 @@
  */
 
 import type { ChatMessage } from '@/types/models';
+import type { RepositoryCommitLogs } from '@/types/git';
 import { MAX_MESSAGE_LENGTH } from '@/lib/session/claude-executor';
+import { MAX_COMMIT_LOG_LENGTH } from '@/config/review-config';
 
 // =============================================================================
 // Constants
@@ -19,6 +21,9 @@ import { MAX_MESSAGE_LENGTH } from '@/lib/session/claude-executor';
 
 /** Maximum total character count for all messages combined in the prompt */
 export const MAX_TOTAL_MESSAGE_LENGTH = MAX_MESSAGE_LENGTH;
+
+/** Tags to escape in user-supplied content (DR4-003) */
+const ESCAPED_TAGS = ['user_data', 'commit_log'] as const;
 
 // =============================================================================
 // Sanitization (private)
@@ -37,10 +42,13 @@ export const MAX_TOTAL_MESSAGE_LENGTH = MAX_MESSAGE_LENGTH;
 export function sanitizeMessage(msg: string): string {
   // 1. Remove control characters (keep \t=0x09, \n=0x0a, \r=0x0d)
   let sanitized = msg.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
-  // 2. Escape user_data tags (case-insensitive)
-  sanitized = sanitized.replace(/<\/?user_data>/gi, (match) =>
-    match.replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  );
+  // 2. Escape known tags (case-insensitive)
+  for (const tag of ESCAPED_TAGS) {
+    const pattern = new RegExp(`</?${tag}>`, 'gi');
+    sanitized = sanitized.replace(pattern, (match) =>
+      match.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    );
+  }
   // 3. Truncate
   return sanitized.slice(0, MAX_MESSAGE_LENGTH);
 }
@@ -62,7 +70,8 @@ export function sanitizeMessage(msg: string): string {
 export function buildSummaryPrompt(
   messages: ChatMessage[],
   worktrees: Map<string, string>,
-  userInstruction?: string
+  userInstruction?: string,
+  commitLogs?: RepositoryCommitLogs
 ): string {
   const systemPrompt = `You are a technical report generator. Summarize the following work logs into a concise daily report in Japanese Markdown format.
 
@@ -125,5 +134,48 @@ ${sections.join('\n\n')}${truncationNote}
     ? `\n\n<user_instruction>\n${sanitizeMessage(userInstruction)}\n</user_instruction>`
     : '';
 
-  return `${systemPrompt}${instructionSection}\n\n${dataSection}`;
+  // Build commit log section (Issue #627)
+  let commitLogSection = '';
+  if (commitLogs && commitLogs.size > 0) {
+    const logLines: string[] = [];
+    let logLength = 0;
+    let logTruncated = false;
+
+    for (const [, { name, commits }] of commitLogs) {
+      const header = `### ${sanitizeMessage(name)} (${commits.length} commits)`;
+      if (logLength + header.length > MAX_COMMIT_LOG_LENGTH) {
+        logTruncated = true;
+        break;
+      }
+      logLines.push(header);
+      logLength += header.length;
+
+      for (const commit of commits) {
+        const line = `- ${sanitizeMessage(commit.shortHash)} ${sanitizeMessage(commit.message)} (${sanitizeMessage(commit.author)})`;
+        if (logLength + line.length > MAX_COMMIT_LOG_LENGTH) {
+          logTruncated = true;
+          break;
+        }
+        logLines.push(line);
+        logLength += line.length;
+      }
+
+      if (logTruncated) break;
+    }
+
+    const truncNote = logTruncated
+      ? '\n\n(Note: Some commit logs were omitted due to length limits)'
+      : '';
+
+    commitLogSection = `\n\n<commit_log>\n${logLines.join('\n')}${truncNote}\n</commit_log>`;
+  }
+
+  // Ensure final prompt fits within MAX_MESSAGE_LENGTH
+  const basePrompt = `${systemPrompt}${instructionSection}\n\n${dataSection}${commitLogSection}`;
+  if (basePrompt.length > MAX_MESSAGE_LENGTH) {
+    // Truncate by removing commit log section if it causes overflow
+    return `${systemPrompt}${instructionSection}\n\n${dataSection}`.slice(0, MAX_MESSAGE_LENGTH);
+  }
+
+  return basePrompt;
 }

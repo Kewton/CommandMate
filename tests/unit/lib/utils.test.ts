@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { debounce, escapeRegExp, computeMatchedPaths, truncateString, escapeHtml } from '@/lib/utils';
+import { debounce, escapeRegExp, computeMatchedPaths, truncateString, escapeHtml, withTimeout, TimeoutError } from '@/lib/utils';
 
 describe('debounce', () => {
   beforeEach(() => {
@@ -121,6 +121,69 @@ describe('debounce', () => {
 
     // This should compile without errors
     debouncedFn('test', 42);
+  });
+});
+
+/**
+ * withTimeout Tests
+ * Issue #627: Timeout wrapper for async operations
+ */
+describe('withTimeout', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('should resolve with the promise value when it completes before timeout', async () => {
+    const promise = Promise.resolve('success');
+    const result = await withTimeout(promise, 1000);
+    expect(result).toBe('success');
+  });
+
+  it('should reject with TimeoutError when promise exceeds timeout and no fallback', async () => {
+    const promise = new Promise<string>((resolve) => {
+      setTimeout(() => resolve('late'), 2000);
+    });
+
+    const resultPromise = withTimeout(promise, 100);
+    vi.advanceTimersByTime(100);
+
+    await expect(resultPromise).rejects.toThrow(TimeoutError);
+    await expect(resultPromise).rejects.toThrow('Operation timed out after 100ms');
+  });
+
+  it('should resolve with fallback value when promise exceeds timeout', async () => {
+    const promise = new Promise<string>((resolve) => {
+      setTimeout(() => resolve('late'), 2000);
+    });
+
+    const resultPromise = withTimeout(promise, 100, 'fallback');
+    vi.advanceTimersByTime(100);
+
+    const result = await resultPromise;
+    expect(result).toBe('fallback');
+  });
+
+  it('should reject with original error when promise rejects before timeout', async () => {
+    const promise = Promise.reject(new Error('original error'));
+
+    await expect(withTimeout(promise, 1000)).rejects.toThrow('original error');
+  });
+
+  it('should resolve with fallback when fallback is an empty Map', async () => {
+    const promise = new Promise<Map<string, string>>((resolve) => {
+      setTimeout(() => resolve(new Map([['key', 'value']])), 2000);
+    });
+
+    const fallback = new Map<string, string>();
+    const resultPromise = withTimeout(promise, 100, fallback);
+    vi.advanceTimersByTime(100);
+
+    const result = await resultPromise;
+    expect(result.size).toBe(0);
   });
 });
 

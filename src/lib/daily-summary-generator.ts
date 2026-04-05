@@ -19,8 +19,11 @@ import { buildSummaryPrompt } from '@/lib/summary-prompt-builder';
 import { getMessagesByDateRange } from '@/lib/db/chat-db';
 import { saveDailyReport } from '@/lib/db/daily-report-db';
 import { getWorktrees } from '@/lib/db/worktree-db';
+import { getAllRepositories } from '@/lib/db/db-repository';
 import type { DailyReport } from '@/lib/db/daily-report-db';
-import { SUMMARY_GENERATION_TIMEOUT_MS } from '@/config/review-config';
+import { SUMMARY_GENERATION_TIMEOUT_MS, GIT_LOG_TOTAL_TIMEOUT_MS } from '@/config/review-config';
+import { collectRepositoryCommitLogs } from '@/lib/git/git-utils';
+import { withTimeout } from '@/lib/utils';
 
 const logger = createLogger('daily-summary');
 
@@ -154,10 +157,20 @@ export async function generateDailySummary(
       worktreeMap.set(wt.id, wt.name);
     }
 
-    // 3. Build prompt
-    const prompt = buildSummaryPrompt(messages, worktreeMap, userInstruction);
+    // 3. Collect commit logs from all repositories (Issue #627)
+    const repositories = getAllRepositories(db);
+    const since = dayStart.toISOString();
+    const until = dayEnd.toISOString();
+    const commitLogs = await withTimeout(
+      collectRepositoryCommitLogs(repositories, since, until),
+      GIT_LOG_TOTAL_TIMEOUT_MS,
+      new Map()
+    );
 
-    // 4. Execute AI command
+    // 4. Build prompt
+    const prompt = buildSummaryPrompt(messages, worktreeMap, userInstruction, commitLogs);
+
+    // 5. Execute AI command
     const result = await executeClaudeCommand(
       prompt,
       process.cwd(),
@@ -176,7 +189,7 @@ export async function generateDailySummary(
       throw new Error(`Summary generation failed: ${result.error}`);
     }
 
-    // 5. Validate and sanitize output
+    // 6. Validate and sanitize output
     let output = result.output.trim();
 
     // Remove control characters (same pattern as sanitizeMessage)
@@ -192,7 +205,7 @@ export async function generateDailySummary(
       output = output.slice(0, MAX_SUMMARY_OUTPUT_LENGTH);
     }
 
-    // 6. Save to database
+    // 7. Save to database
     const report = saveDailyReport(db, {
       date,
       content: output,
