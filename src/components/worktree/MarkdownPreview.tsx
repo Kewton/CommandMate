@@ -23,6 +23,7 @@
 import React, { memo, useMemo, useCallback, useRef, useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/github-dark.css';
@@ -75,7 +76,7 @@ export interface LargeFileWarningProps {
  * Fetches an image from the worktree file API and displays it as a data URI.
  * The file API returns JSON with a Base64 data URI in the `content` field.
  */
-function WorktreeImage({ apiUrl, alt }: { apiUrl: string; alt: string }) {
+function WorktreeImage({ apiUrl, alt, width, height }: { apiUrl: string; alt: string; width?: string; height?: string }) {
   const [dataUri, setDataUri] = useState<string | null>(null);
 
   useEffect(() => {
@@ -93,7 +94,7 @@ function WorktreeImage({ apiUrl, alt }: { apiUrl: string; alt: string }) {
 
   if (!dataUri) return <span style={{ color: '#999' }}>[loading image...]</span>;
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={dataUri} alt={alt} style={{ maxWidth: '100%' }} />;
+  return <img src={dataUri} alt={alt} width={width} height={height} style={{ maxWidth: width || '100%' }} />;
 }
 
 /**
@@ -158,7 +159,9 @@ export const MarkdownPreview = memo(function MarkdownPreview({
     () => ({
       code: MermaidCodeBlock, // [Issue #100] mermaid diagram support
       // Resolve relative image paths via worktree file API (returns Base64 data URI in JSON)
-      img: ({ src, alt }) => {
+      img: ({ src, alt, width, height, ...props }) => {
+        const w = (width ?? props.node?.properties?.width) as string | undefined;
+        const h = (height ?? props.node?.properties?.height) as string | undefined;
         if (src && !src.startsWith('http://') && !src.startsWith('https://') && !src.startsWith('data:')) {
           const filePath = currentFilePathRef.current;
           const wtId = worktreeIdRef.current;
@@ -166,13 +169,13 @@ export const MarkdownPreview = memo(function MarkdownPreview({
             const resolved = resolveRelativePath(filePath, src);
             if (resolved) {
               const apiUrl = `/api/worktrees/${wtId}/files/${encodePathForUrl(resolved)}`;
-              return <WorktreeImage apiUrl={apiUrl} alt={alt ?? ''} />;
+              return <WorktreeImage apiUrl={apiUrl} alt={alt ?? ''} width={w} height={h} />;
             }
           }
         }
         // External or data URI images: render directly
         // eslint-disable-next-line @next/next/no-img-element
-        return <img src={src} alt={alt ?? ''} style={{ maxWidth: '100%' }} />;
+        return <img src={src} alt={alt ?? ''} width={w} height={h} style={{ maxWidth: w || '100%' }} />;
       },
       // [Issue #505] Custom link component for file navigation
       a: ({ href, children, ...props }) => {
@@ -198,7 +201,7 @@ export const MarkdownPreview = memo(function MarkdownPreview({
   // which detaches link elements and makes them unclickable.
   const remarkPlugins = useMemo(() => [remarkGfm], []);
   const rehypePlugins = useMemo(
-    () => [[rehypeSanitize, REHYPE_SANITIZE_SCHEMA], rehypeHighlight],
+    () => [rehypeRaw, [rehypeSanitize, REHYPE_SANITIZE_SCHEMA], rehypeHighlight],
     [],
   );
 

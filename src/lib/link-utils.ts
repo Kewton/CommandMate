@@ -128,6 +128,8 @@ export const REHYPE_SANITIZE_SCHEMA = {
       // Allow http, https, and relative paths for img src (reject javascript:, data:, etc.)
       ['src', /^(?:https?:\/\/|(?![a-zA-Z][a-zA-Z0-9+.-]*:))/],
       'alt',
+      'width',
+      'height',
     ],
   },
 };
