@@ -12,6 +12,8 @@
  * - Output sanitization (control character removal)
  */
 
+import { existsSync } from 'fs';
+import { join } from 'path';
 import type Database from 'better-sqlite3';
 import { createLogger } from '@/lib/logger';
 import { executeClaudeCommand, MAX_MESSAGE_LENGTH } from '@/lib/session/claude-executor';
@@ -159,8 +161,22 @@ export async function generateDailySummary(
       worktreeMap.set(wt.id, wt.name);
     }
 
-    // 3. Collect commit logs from all repositories (Issue #627)
-    const repositories = getAllRepositories(db);
+    // 3. Collect commit logs from valid repositories (Issue #627, #632)
+    const allRepositories = getAllRepositories(db);
+    const repositories = allRepositories.filter(repo => {
+      if (!repo.enabled) return false;
+      if (!existsSync(repo.path)) return false;
+      if (!existsSync(join(repo.path, '.git'))) return false;
+      return true;
+    });
+
+    if (repositories.length < allRepositories.length) {
+      logger.info('repositories-filtered', {
+        total: allRepositories.length,
+        valid: repositories.length,
+        skipped: allRepositories.length - repositories.length,
+      });
+    }
     const since = dayStart.toISOString();
     const until = dayEnd.toISOString();
     const commitLogs = await withTimeout(

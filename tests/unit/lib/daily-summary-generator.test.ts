@@ -1,9 +1,21 @@
 /**
  * Tests for daily-summary-generator.ts
  * Issue #607: AI summary generation with concurrent execution control
+ * Issue #632: Filter invalid repositories before commit log collection
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+// Mock fs (for existsSync) - Issue #632
+const mockExistsSync = vi.fn();
+vi.mock('fs', () => ({
+  existsSync: (...args: unknown[]) => mockExistsSync(...args),
+}));
+
+// Mock path (for join) - Issue #632
+vi.mock('path', () => ({
+  join: (...args: string[]) => args.join('/'),
+}));
 
 // Mock logger
 vi.mock('@/lib/logger', () => ({
@@ -120,10 +132,12 @@ describe('daily-summary-generator', () => {
       { id: 'wt-1', name: 'feature/test' },
     ]);
     mockGetAllRepositories.mockReturnValue([
-      { id: 'repo-1', name: 'MyRepo', path: '/repos/myrepo' },
+      { id: 'repo-1', name: 'MyRepo', path: '/repos/myrepo', enabled: true },
     ]);
     mockCollectRepositoryCommitLogs.mockResolvedValue(new Map());
     mockCollectIssueInfos.mockResolvedValue([]);
+    // Default: all paths exist (Issue #632)
+    mockExistsSync.mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -569,6 +583,119 @@ describe('daily-summary-generator', () => {
         expect.any(Map),
         [] // graceful degradation: empty array
       );
+    });
+  });
+
+  describe('repository filtering (Issue #632)', () => {
+    const validOutput = 'x'.repeat(MIN_SUMMARY_OUTPUT_LENGTH + 10);
+
+    /** Helper to set up mocks for a successful generation flow */
+    function setupSuccessfulGeneration() {
+      mockGetMessagesByDateRange.mockReturnValue([
+        { id: 'msg-1', worktreeId: 'wt-1', role: 'user', content: 'hello', timestamp: new Date() },
+      ]);
+      mockExecuteClaudeCommand.mockResolvedValue({
+        output: validOutput,
+        exitCode: 0,
+        status: 'completed',
+      });
+      mockSaveDailyReport.mockReturnValue({
+        date: '2026-04-02',
+        content: validOutput,
+        generatedByTool: 'claude',
+        model: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    }
+
+    it('should exclude disabled repositories (enabled=false)', async () => {
+      setupSuccessfulGeneration();
+      mockGetAllRepositories.mockReturnValue([
+        { id: 'repo-1', name: 'EnabledRepo', path: '/repos/enabled', enabled: true },
+        { id: 'repo-2', name: 'DisabledRepo', path: '/repos/disabled', enabled: false },
+      ]);
+      mockExistsSync.mockReturnValue(true);
+
+      await generateDailySummary(mockDb, { date: '2026-04-02', tool: 'claude' });
+
+      const passedRepos = mockCollectRepositoryCommitLogs.mock.calls[0][0];
+      expect(passedRepos).toHaveLength(1);
+      expect(passedRepos[0].name).toBe('EnabledRepo');
+    });
+
+    it('should exclude repositories with non-existent paths', async () => {
+      setupSuccessfulGeneration();
+      mockGetAllRepositories.mockReturnValue([
+        { id: 'repo-1', name: 'ExistsRepo', path: '/repos/exists', enabled: true },
+        { id: 'repo-2', name: 'MissingRepo', path: '/repos/missing', enabled: true },
+      ]);
+      mockExistsSync.mockImplementation((p: string) => {
+        if (p === '/repos/missing') return false;
+        return true;
+      });
+
+      await generateDailySummary(mockDb, { date: '2026-04-02', tool: 'claude' });
+
+      const passedRepos = mockCollectRepositoryCommitLogs.mock.calls[0][0];
+      expect(passedRepos).toHaveLength(1);
+      expect(passedRepos[0].name).toBe('ExistsRepo');
+    });
+
+    it('should exclude repositories without .git directory', async () => {
+      setupSuccessfulGeneration();
+      mockGetAllRepositories.mockReturnValue([
+        { id: 'repo-1', name: 'GitRepo', path: '/repos/gitrepo', enabled: true },
+        { id: 'repo-2', name: 'NoGitRepo', path: '/repos/nogit', enabled: true },
+      ]);
+      mockExistsSync.mockImplementation((p: string) => {
+        if (p === '/repos/nogit/.git') return false;
+        return true;
+      });
+
+      await generateDailySummary(mockDb, { date: '2026-04-02', tool: 'claude' });
+
+      const passedRepos = mockCollectRepositoryCommitLogs.mock.calls[0][0];
+      expect(passedRepos).toHaveLength(1);
+      expect(passedRepos[0].name).toBe('GitRepo');
+    });
+
+    it('should pass only valid repositories to collectRepositoryCommitLogs', async () => {
+      setupSuccessfulGeneration();
+      mockGetAllRepositories.mockReturnValue([
+        { id: 'repo-1', name: 'ValidRepo', path: '/repos/valid', enabled: true },
+        { id: 'repo-2', name: 'DisabledRepo', path: '/repos/disabled', enabled: false },
+        { id: 'repo-3', name: 'MissingPathRepo', path: '/repos/missing', enabled: true },
+        { id: 'repo-4', name: 'NoGitRepo', path: '/repos/nogit', enabled: true },
+      ]);
+      mockExistsSync.mockImplementation((p: string) => {
+        if (p === '/repos/missing') return false;
+        if (p === '/repos/nogit/.git') return false;
+        return true;
+      });
+
+      await generateDailySummary(mockDb, { date: '2026-04-02', tool: 'claude' });
+
+      const passedRepos = mockCollectRepositoryCommitLogs.mock.calls[0][0];
+      expect(passedRepos).toHaveLength(1);
+      expect(passedRepos[0].name).toBe('ValidRepo');
+    });
+
+    it('should handle all repositories being invalid without error', async () => {
+      setupSuccessfulGeneration();
+      mockGetAllRepositories.mockReturnValue([
+        { id: 'repo-1', name: 'DisabledRepo', path: '/repos/disabled', enabled: false },
+        { id: 'repo-2', name: 'MissingRepo', path: '/repos/missing', enabled: true },
+      ]);
+      mockExistsSync.mockImplementation((p: string) => {
+        if (p === '/repos/missing') return false;
+        return true;
+      });
+
+      await generateDailySummary(mockDb, { date: '2026-04-02', tool: 'claude' });
+
+      const passedRepos = mockCollectRepositoryCommitLogs.mock.calls[0][0];
+      expect(passedRepos).toHaveLength(0);
     });
   });
 });
