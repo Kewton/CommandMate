@@ -13,6 +13,7 @@ import type {
 } from '../types/api-responses';
 import { ApiClient } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
+import { createSpinner } from '../utils/spinner';
 
 /** Allowed tool values for report generation */
 const ALLOWED_TOOLS = ['claude', 'codex', 'copilot'] as const;
@@ -89,10 +90,16 @@ export function createReportCommand(): Command {
         if (options.model) body.model = options.model;
         if (userInstruction) body.userInstruction = userInstruction;
 
-        console.error(`Generating report for ${date}...`);
-        const result = await client.post<DailySummaryGenerateResponse>('/api/daily-summary', body);
-
-        console.log(result.report.content);
+        const spinner = createSpinner(`Generating report for ${date}...`);
+        spinner.start();
+        try {
+          const result = await client.post<DailySummaryGenerateResponse>('/api/daily-summary', body);
+          spinner.succeed(`Report generated for ${date}`);
+          console.log(result.report.content);
+        } catch (error) {
+          spinner.fail(`Report generation failed for ${date}`);
+          throw error;
+        }
       } catch (error) {
         handleCommandError(error);
       }

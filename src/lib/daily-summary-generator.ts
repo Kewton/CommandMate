@@ -51,6 +51,10 @@ const FAILSAFE_MARGIN_MS = 10_000;
 interface GeneratingState {
   active: boolean;
   startedAt: number;
+  /** Target date for generation (Issue #638) */
+  date?: string;
+  /** AI tool used for generation (Issue #638) */
+  tool?: string;
 }
 
 declare global {
@@ -74,6 +78,16 @@ export function isGenerating(): boolean {
   }
 
   return true;
+}
+
+/**
+ * Get the current generating state if active.
+ * Returns null if no generation is in progress (or flag was failsafe-reset).
+ * Issue #638: Expose generation state for status endpoint.
+ */
+export function getGeneratingState(): GeneratingState | null {
+  if (!isGenerating()) return null;
+  return globalThis.__dailySummaryGenerating ?? null;
 }
 
 // =============================================================================
@@ -139,8 +153,8 @@ export async function generateDailySummary(
     throw new ConcurrentGenerationError();
   }
 
-  // Set generating flag
-  globalThis.__dailySummaryGenerating = { active: true, startedAt: Date.now() };
+  // Set generating flag (Issue #638: include date/tool for status endpoint)
+  globalThis.__dailySummaryGenerating = { active: true, startedAt: Date.now(), date, tool };
 
   try {
     logger.info('generation-started', { date, tool });
