@@ -74,6 +74,24 @@ export const MAX_COMMIT_LOG_LENGTH = 3000;
 export const GIT_LOG_TOTAL_TIMEOUT_MS = 15_000;
 
 /**
+ * Maximum total character length for the summary prompt.
+ * Issue #634: Section-based prompt length management
+ */
+export const MAX_PROMPT_LENGTH = 15000;
+
+/**
+ * Maximum character length for user_data section in summary prompt.
+ * Issue #634: Section-based prompt length management
+ */
+export const MAX_USER_DATA_LENGTH = 6000;
+
+/**
+ * Maximum character length for issue_context section in summary prompt.
+ * Issue #634: Section-based prompt length management
+ */
+export const MAX_ISSUE_CONTEXT_LENGTH = 3000;
+
+/**
  * Maximum character length for issue body summary in prompt.
  * Issue #630: Issue context in report
  */
