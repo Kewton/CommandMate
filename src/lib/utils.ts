@@ -127,8 +127,21 @@ export function truncateString(str: string, maxLength: number = 30): string {
  * // '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;'
  * ```
  */
+export function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+// =============================================================================
+// Issue #627: Timeout utilities for async operations
+// =============================================================================
+
 /**
- * Custom error class for timeout scenarios in withTimeout utility
+ * Custom error class for timeout scenarios in withTimeout utility.
  * Issue #627: Commit log in report
  */
 export class TimeoutError extends Error {
@@ -176,13 +189,4 @@ export function withTimeout<T>(
       }
     );
   });
-}
-
-export function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
 }
