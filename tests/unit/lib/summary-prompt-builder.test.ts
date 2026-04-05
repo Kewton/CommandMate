@@ -6,6 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { sanitizeMessage, buildSummaryPrompt, MAX_TOTAL_MESSAGE_LENGTH } from '@/lib/summary-prompt-builder';
 import { MAX_MESSAGE_LENGTH } from '@/lib/session/claude-executor';
+import { MAX_PROMPT_LENGTH, MAX_USER_DATA_LENGTH, MAX_ISSUE_CONTEXT_LENGTH } from '@/config/review-config';
 import type { ChatMessage } from '@/types/models';
 import type { RepositoryCommitLogs, IssueInfo } from '@/types/git';
 
@@ -466,6 +467,111 @@ describe('buildSummaryPrompt', () => {
       expect(result).toContain('<commit_log>');
       expect(result).toContain('<issue_context>');
       expect(result).toContain('<user_instruction>');
+    });
+  });
+
+  describe('section-based truncation (Issue #634)', () => {
+    const mockIssue: IssueInfo = {
+      repositoryName: 'CommandMate',
+      number: 634,
+      title: 'Fix prompt length',
+      labels: ['bug'],
+      state: 'open',
+      bodySummary: 'Prompt length issue.',
+    };
+
+    it('should preserve commit_log and issue_context even when user_data is large', () => {
+      // Create messages with large content that would exceed old MAX_MESSAGE_LENGTH
+      const largeContent = 'x'.repeat(8000);
+      const messages = [createMockMessage({ content: largeContent })];
+      const worktrees = new Map([['wt-1', 'feature/test']]);
+      const commitLogs: RepositoryCommitLogs = new Map([
+        ['repo-1', {
+          name: 'MyRepo',
+          commits: [{ shortHash: 'abc1234', message: 'Important commit', author: 'Dev' }],
+        }],
+      ]);
+
+      const result = buildSummaryPrompt(messages, worktrees, undefined, commitLogs, [mockIssue]);
+
+      // Both commit_log and issue_context MUST be present
+      expect(result).toContain('<commit_log>');
+      expect(result).toContain('abc1234');
+      expect(result).toContain('<issue_context>');
+      expect(result).toContain('CommandMate#634');
+    });
+
+    it('should truncate user_data section to MAX_USER_DATA_LENGTH', () => {
+      // Create messages that exceed MAX_USER_DATA_LENGTH
+      const largeContent = 'y'.repeat(MAX_USER_DATA_LENGTH + 2000);
+      const messages = [createMockMessage({ content: largeContent })];
+      const worktrees = new Map([['wt-1', 'feature/test']]);
+
+      const result = buildSummaryPrompt(messages, worktrees);
+
+      // Extract user_data section content
+      const userDataMatch = result.match(/<user_data>([\s\S]*?)<\/user_data>/);
+      expect(userDataMatch).not.toBeNull();
+      // The user_data section should be truncated (message content limited)
+      expect(result).toContain('omitted due to length limits');
+    });
+
+    it('should truncate issue_context section to MAX_ISSUE_CONTEXT_LENGTH', () => {
+      const messages = [createMockMessage()];
+      const worktrees = new Map([['wt-1', 'feature/test']]);
+      // Create many issues with large bodies to exceed MAX_ISSUE_CONTEXT_LENGTH
+      const manyIssues: IssueInfo[] = Array.from({ length: 50 }, (_, i) => ({
+        repositoryName: 'Repo',
+        number: i,
+        title: 'Issue ' + 'title'.repeat(20),
+        labels: ['bug'],
+        state: 'open',
+        bodySummary: 'Body text '.repeat(30),
+      }));
+
+      const result = buildSummaryPrompt(messages, worktrees, undefined, undefined, manyIssues);
+
+      // issue_context section should be present but truncated
+      expect(result).toContain('<issue_context>');
+      expect(result).toContain('omitted due to length limits');
+      // Not all 50 issues should be included
+      const issueHeaders = (result.match(/## Repo#\d+/g) ?? []);
+      expect(issueHeaders.length).toBeLessThan(50);
+      expect(issueHeaders.length).toBeGreaterThan(0);
+    });
+
+    it('should keep total prompt within MAX_PROMPT_LENGTH', () => {
+      // Create large content for all sections
+      const largeContent = 'z'.repeat(8000);
+      const messages = [createMockMessage({ content: largeContent })];
+      const worktrees = new Map([['wt-1', 'feature/test']]);
+      const commitLogs: RepositoryCommitLogs = new Map([
+        ['repo-1', {
+          name: 'LargeRepo',
+          commits: Array.from({ length: 100 }, (_, i) => ({
+            shortHash: `h${i}`,
+            message: 'commit message text',
+            author: 'Dev',
+          })),
+        }],
+      ]);
+      const manyIssues: IssueInfo[] = Array.from({ length: 30 }, (_, i) => ({
+        repositoryName: 'Repo',
+        number: i,
+        title: 'Issue ' + i,
+        labels: ['bug'],
+        state: 'open',
+        bodySummary: 'Description '.repeat(20),
+      }));
+
+      const result = buildSummaryPrompt(messages, worktrees, 'instruction', commitLogs, manyIssues);
+
+      expect(result.length).toBeLessThanOrEqual(MAX_PROMPT_LENGTH);
+    });
+
+    it('should use MAX_USER_DATA_LENGTH for MAX_TOTAL_MESSAGE_LENGTH', () => {
+      // Verify the exported constant reflects the new limit
+      expect(MAX_TOTAL_MESSAGE_LENGTH).toBe(MAX_USER_DATA_LENGTH);
     });
   });
 });

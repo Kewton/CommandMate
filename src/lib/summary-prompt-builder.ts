@@ -13,14 +13,14 @@
 import type { ChatMessage } from '@/types/models';
 import type { RepositoryCommitLogs, IssueInfo } from '@/types/git';
 import { MAX_MESSAGE_LENGTH } from '@/lib/session/claude-executor';
-import { MAX_COMMIT_LOG_LENGTH } from '@/config/review-config';
+import { MAX_COMMIT_LOG_LENGTH, MAX_PROMPT_LENGTH, MAX_USER_DATA_LENGTH, MAX_ISSUE_CONTEXT_LENGTH } from '@/config/review-config';
 
 // =============================================================================
 // Constants
 // =============================================================================
 
-/** Maximum total character count for all messages combined in the prompt */
-export const MAX_TOTAL_MESSAGE_LENGTH = MAX_MESSAGE_LENGTH;
+/** Maximum total character count for all messages combined in the user_data section (Issue #634) */
+export const MAX_TOTAL_MESSAGE_LENGTH = MAX_USER_DATA_LENGTH;
 
 /** Tags to escape in user-supplied content (DR4-003) */
 const ESCAPED_TAGS = ['user_data', 'commit_log', 'issue_context'] as const;
@@ -136,23 +136,33 @@ ${sections.join('\n\n')}${truncationNote}
     ? `\n\n<user_instruction>\n${sanitizeMessage(userInstruction)}\n</user_instruction>`
     : '';
 
-  // Build issue context section (Issue #630)
+  // Build issue context section (Issue #630, #634: truncate to MAX_ISSUE_CONTEXT_LENGTH)
   let issueContextSection = '';
   if (issueInfos && issueInfos.length > 0) {
     const lines: string[] = [];
+    let issueLength = 0;
+    let issueTruncated = false;
     for (const issue of issueInfos) {
       const repoPrefix = sanitizeMessage(`${issue.repositoryName}#${issue.number}`);
       const title = sanitizeMessage(issue.title);
       const labels = issue.labels.map((l) => sanitizeMessage(l)).join(', ');
       const state = sanitizeMessage(issue.state);
       const body = sanitizeMessage(issue.bodySummary);
-      lines.push(`## ${repoPrefix}: ${title}`);
-      lines.push(`Labels: ${labels}`);
-      lines.push(`Status: ${state}`);
-      if (body) lines.push(body);
-      lines.push('');
+      const issueLines = [`## ${repoPrefix}: ${title}`, `Labels: ${labels}`, `Status: ${state}`];
+      if (body) issueLines.push(body);
+      issueLines.push('');
+      const block = issueLines.join('\n');
+      if (issueLength + block.length > MAX_ISSUE_CONTEXT_LENGTH) {
+        issueTruncated = true;
+        break;
+      }
+      lines.push(block);
+      issueLength += block.length;
     }
-    issueContextSection = `\n\n<issue_context>\n${lines.join('\n').trimEnd()}\n</issue_context>`;
+    const issueTruncNote = issueTruncated
+      ? '\n\n(Note: Some issue context was omitted due to length limits)'
+      : '';
+    issueContextSection = `\n\n<issue_context>\n${lines.join('\n').trimEnd()}${issueTruncNote}\n</issue_context>`;
   }
 
   // Build commit log section (Issue #627)
@@ -191,25 +201,16 @@ ${sections.join('\n\n')}${truncationNote}
     commitLogSection = `\n\n<commit_log>\n${logLines.join('\n')}${truncNote}\n</commit_log>`;
   }
 
-  // Ensure final prompt fits within MAX_MESSAGE_LENGTH (Issue #630: priority order)
-  // Priority: user_data > issue_context > commit_log
+  // Issue #634: Each section is individually truncated, so assemble them directly.
+  // Fallback: if total exceeds MAX_PROMPT_LENGTH, shrink user_data.
   const fullPrompt = `${systemPrompt}${instructionSection}\n\n${dataSection}${issueContextSection}${commitLogSection}`;
-  if (fullPrompt.length <= MAX_MESSAGE_LENGTH) {
+  if (fullPrompt.length <= MAX_PROMPT_LENGTH) {
     return fullPrompt;
   }
 
-  // Step 1: Remove commit_log
-  const withoutCommitLog = `${systemPrompt}${instructionSection}\n\n${dataSection}${issueContextSection}`;
-  if (withoutCommitLog.length <= MAX_MESSAGE_LENGTH) {
-    return withoutCommitLog;
-  }
-
-  // Step 2: Remove issue_context
-  const withoutIssueContext = `${systemPrompt}${instructionSection}\n\n${dataSection}`;
-  if (withoutIssueContext.length <= MAX_MESSAGE_LENGTH) {
-    return withoutIssueContext;
-  }
-
-  // Step 3: Truncate user_data (last resort)
-  return withoutIssueContext.slice(0, MAX_MESSAGE_LENGTH);
+  // Fallback: reduce user_data to fit within MAX_PROMPT_LENGTH
+  const overhead = fullPrompt.length - dataSection.length;
+  const allowedDataLength = Math.max(0, MAX_PROMPT_LENGTH - overhead);
+  const trimmedDataSection = dataSection.slice(0, allowedDataLength);
+  return `${systemPrompt}${instructionSection}\n\n${trimmedDataSection}${issueContextSection}${commitLogSection}`.slice(0, MAX_PROMPT_LENGTH);
 }
