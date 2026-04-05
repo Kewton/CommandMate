@@ -36,9 +36,9 @@ export interface UploadableExtensionValidator {
 }
 
 /**
- * Default maximum file size (5MB)
+ * Default maximum file size (20MB)
  */
-export const DEFAULT_MAX_FILE_SIZE = 5 * 1024 * 1024;
+export const DEFAULT_MAX_FILE_SIZE = 20 * 1024 * 1024;
 
 /**
  * Validators for each supported uploadable extension

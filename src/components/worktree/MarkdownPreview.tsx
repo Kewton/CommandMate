@@ -20,7 +20,7 @@
 
 'use client';
 
-import React, { memo, useMemo, useCallback, useRef } from 'react';
+import React, { memo, useMemo, useCallback, useRef, useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
@@ -29,6 +29,7 @@ import 'highlight.js/styles/github-dark.css';
 import { X, AlertTriangle, FileText, Eye } from 'lucide-react';
 import { MermaidCodeBlock } from '@/components/worktree/MermaidCodeBlock';
 import { classifyLink, resolveRelativePath, sanitizeHref, REHYPE_SANITIZE_SCHEMA } from '@/lib/link-utils';
+import { encodePathForUrl } from '@/lib/url-path-encoder';
 import type { Components } from 'react-markdown';
 
 // ============================================================================
@@ -45,6 +46,8 @@ export interface MarkdownPreviewProps {
   onOpenFile?: (path: string) => void;
   /** Current file path for resolving relative links (Issue #505) [DR3-009] */
   currentFilePath?: string;
+  /** Worktree ID for resolving relative image paths to file API URLs */
+  worktreeId?: string;
 }
 
 export interface MobileTabBarProps {
@@ -69,6 +72,31 @@ export interface LargeFileWarningProps {
 // ============================================================================
 
 /**
+ * Fetches an image from the worktree file API and displays it as a data URI.
+ * The file API returns JSON with a Base64 data URI in the `content` field.
+ */
+function WorktreeImage({ apiUrl, alt }: { apiUrl: string; alt: string }) {
+  const [dataUri, setDataUri] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(apiUrl)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data?.content) {
+          setDataUri(data.content);
+        }
+      })
+      .catch(() => { /* silently ignore */ });
+    return () => { cancelled = true; };
+  }, [apiUrl]);
+
+  if (!dataUri) return <span style={{ color: '#999' }}>[loading image...]</span>;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={dataUri} alt={alt} style={{ maxWidth: '100%' }} />;
+}
+
+/**
  * Renders markdown content with GFM, syntax highlighting, XSS protection,
  * Mermaid diagram support, and link click handling.
  */
@@ -76,6 +104,7 @@ export const MarkdownPreview = memo(function MarkdownPreview({
   content,
   onOpenFile,
   currentFilePath,
+  worktreeId,
 }: MarkdownPreviewProps) {
   // Use refs to avoid re-creating handleLinkClick when props change.
   // This prevents ReactMarkdown from rebuilding the entire DOM tree
@@ -84,6 +113,8 @@ export const MarkdownPreview = memo(function MarkdownPreview({
   onOpenFileRef.current = onOpenFile;
   const currentFilePathRef = useRef(currentFilePath);
   currentFilePathRef.current = currentFilePath;
+  const worktreeIdRef = useRef(worktreeId);
+  worktreeIdRef.current = worktreeId;
 
   /**
    * Handle link click based on link type. [DR1-002]
@@ -126,6 +157,23 @@ export const MarkdownPreview = memo(function MarkdownPreview({
   const markdownComponents: Partial<Components> = useMemo(
     () => ({
       code: MermaidCodeBlock, // [Issue #100] mermaid diagram support
+      // Resolve relative image paths via worktree file API (returns Base64 data URI in JSON)
+      img: ({ src, alt }) => {
+        if (src && !src.startsWith('http://') && !src.startsWith('https://') && !src.startsWith('data:')) {
+          const filePath = currentFilePathRef.current;
+          const wtId = worktreeIdRef.current;
+          if (filePath && wtId) {
+            const resolved = resolveRelativePath(filePath, src);
+            if (resolved) {
+              const apiUrl = `/api/worktrees/${wtId}/files/${encodePathForUrl(resolved)}`;
+              return <WorktreeImage apiUrl={apiUrl} alt={alt ?? ''} />;
+            }
+          }
+        }
+        // External or data URI images: render directly
+        // eslint-disable-next-line @next/next/no-img-element
+        return <img src={src} alt={alt ?? ''} style={{ maxWidth: '100%' }} />;
+      },
       // [Issue #505] Custom link component for file navigation
       a: ({ href, children, ...props }) => {
         if (!href) {

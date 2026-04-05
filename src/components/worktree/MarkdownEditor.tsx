@@ -789,7 +789,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
                 data-testid="markdown-preview"
                 className="flex-1 p-4 overflow-y-auto prose prose-sm dark:prose-invert max-w-none"
               >
-                <MarkdownPreview content={previewContent} onOpenFile={onOpenFile} currentFilePath={filePath} />
+                <MarkdownPreview content={previewContent} onOpenFile={onOpenFile} currentFilePath={filePath} worktreeId={worktreeId} />
               </div>
             </div>
           )
@@ -806,7 +806,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
               data-testid="markdown-preview"
               className="flex-1 p-4 overflow-y-auto prose prose-sm dark:prose-invert max-w-none"
             >
-              <MarkdownPreview content={previewContent} onOpenFile={onOpenFile} currentFilePath={filePath} />
+              <MarkdownPreview content={previewContent} onOpenFile={onOpenFile} currentFilePath={filePath} worktreeId={worktreeId} />
             </div>
           </div>
         )}
