@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-04-05
+
+### Added
+- Report: レポート生成ステータスをUIとCLIで可視化 (Issue #638)
+- CLI: `report` コマンドを追加（日次レポートの生成・表示・一覧表示） (Issue #636)
+- Report: 日次レポートのプロンプトにGitHub Issueコンテキストを追加 (Issue #630)
+- Report: 日次レポート生成にコミットログ収集を追加 (Issue #627)
+
+### Fixed
+- Report: ステータスエンドポイントのdynamic renderingを強制 (Issue #638)
+- Report: セクション別プロンプト長制限でcommit_logとissue_contextを保持 (Issue #634)
+- Report: コミットログ収集前に無効なリポジトリをフィルタリング (Issue #632)
+- Codex: daily summary生成にツール固有パーミッションを使用 (Issue #626)
+
+### Refactored
+- Utils: JSDocの関連付け修正とタイムアウトユーティリティの整理 (Issue #627)
+
 ## [0.5.2] - 2026-04-04
 
 ### Added
