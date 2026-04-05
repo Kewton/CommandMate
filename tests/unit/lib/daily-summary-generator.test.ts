@@ -53,6 +53,12 @@ vi.mock('@/lib/git/git-utils', () => ({
   collectRepositoryCommitLogs: (...args: unknown[]) => mockCollectRepositoryCommitLogs(...args),
 }));
 
+// Mock github-api
+const mockCollectIssueInfos = vi.fn();
+vi.mock('@/lib/git/github-api', () => ({
+  collectIssueInfos: (...args: unknown[]) => mockCollectIssueInfos(...args),
+}));
+
 // Mock utils (withTimeout)
 vi.mock('@/lib/utils', async () => {
   return {
@@ -71,6 +77,7 @@ vi.mock('@/lib/utils', async () => {
 vi.mock('@/config/review-config', () => ({
   SUMMARY_GENERATION_TIMEOUT_MS: 60000,
   GIT_LOG_TOTAL_TIMEOUT_MS: 15000,
+  ISSUE_FETCH_TOTAL_TIMEOUT_MS: 15000,
 }));
 
 // Mock schedule-config (DEFAULT_PERMISSIONS)
@@ -116,6 +123,7 @@ describe('daily-summary-generator', () => {
       { id: 'repo-1', name: 'MyRepo', path: '/repos/myrepo' },
     ]);
     mockCollectRepositoryCommitLogs.mockResolvedValue(new Map());
+    mockCollectIssueInfos.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -405,7 +413,8 @@ describe('daily-summary-generator', () => {
         expect.any(Array),
         expect.any(Map),
         'Focus on testing',
-        expect.any(Map)
+        expect.any(Map),
+        expect.any(Array)
       );
     });
 
@@ -448,6 +457,7 @@ describe('daily-summary-generator', () => {
         expect.any(Map),
         undefined,
         mockCommitLogs,
+        expect.any(Array)
       );
     });
 
@@ -479,7 +489,85 @@ describe('daily-summary-generator', () => {
         expect.any(Array),
         expect.any(Map),
         undefined,
-        expect.any(Map)
+        expect.any(Map),
+        expect.any(Array)
+      );
+    });
+
+    it('should propagate issueInfos to buildSummaryPrompt (Issue #630)', async () => {
+      const validOutput = 'x'.repeat(MIN_SUMMARY_OUTPUT_LENGTH + 10);
+      mockGetMessagesByDateRange.mockReturnValue([
+        { id: 'msg-1', worktreeId: 'wt-1', role: 'user', content: 'fix #123', timestamp: new Date() },
+      ]);
+      mockExecuteClaudeCommand.mockResolvedValue({
+        output: validOutput,
+        exitCode: 0,
+        status: 'completed',
+      });
+      mockSaveDailyReport.mockReturnValue({
+        date: '2026-04-05',
+        content: validOutput,
+        generatedByTool: 'claude',
+        model: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const mockIssueInfos = [
+        {
+          repositoryName: 'CommandMate',
+          number: 123,
+          title: 'Test Issue',
+          labels: ['bug'],
+          state: 'closed',
+          bodySummary: 'Some body',
+        },
+      ];
+      mockCollectIssueInfos.mockResolvedValue(mockIssueInfos);
+
+      await generateDailySummary(mockDb, { date: '2026-04-05', tool: 'claude' });
+
+      expect(mockCollectIssueInfos).toHaveBeenCalled();
+      expect(mockBuildSummaryPrompt).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.any(Map),
+        undefined,
+        expect.any(Map),
+        mockIssueInfos
+      );
+    });
+
+    it('should continue without issueInfos when collectIssueInfos fails (Issue #630)', async () => {
+      const validOutput = 'x'.repeat(MIN_SUMMARY_OUTPUT_LENGTH + 10);
+      mockGetMessagesByDateRange.mockReturnValue([
+        { id: 'msg-1', worktreeId: 'wt-1', role: 'user', content: 'hello', timestamp: new Date() },
+      ]);
+      mockExecuteClaudeCommand.mockResolvedValue({
+        output: validOutput,
+        exitCode: 0,
+        status: 'completed',
+      });
+      mockSaveDailyReport.mockReturnValue({
+        date: '2026-04-05',
+        content: validOutput,
+        generatedByTool: 'claude',
+        model: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      // collectIssueInfos fails → should gracefully degrade to empty array
+      mockCollectIssueInfos.mockRejectedValue(new Error('gh CLI not available'));
+
+      const result = await generateDailySummary(mockDb, { date: '2026-04-05', tool: 'claude' });
+
+      expect(result).toBeDefined();
+      expect(mockBuildSummaryPrompt).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.any(Map),
+        undefined,
+        expect.any(Map),
+        [] // graceful degradation: empty array
       );
     });
   });

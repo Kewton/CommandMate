@@ -485,3 +485,31 @@ export async function collectRepositoryCommitLogs(
 
   return commitLogs;
 }
+
+// =============================================================================
+// Issue #630: Issue context in report
+// =============================================================================
+
+/**
+ * Pattern to extract issue numbers from commit messages.
+ * Matches: #NNN, Closes #NNN, Fixes #NNN, Resolves #NNN (case-insensitive)
+ */
+const ISSUE_NUMBER_PATTERN = /(?:(?:closes|fixes|resolves)\s+)?#(\d+)/gi;
+
+/**
+ * Extract unique issue numbers from an array of commit messages.
+ *
+ * @param messages - Array of commit message strings
+ * @returns Sorted array of unique issue numbers
+ */
+export function extractIssueNumbers(messages: string[]): number[] {
+  const seen = new Set<number>();
+  for (const msg of messages) {
+    ISSUE_NUMBER_PATTERN.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = ISSUE_NUMBER_PATTERN.exec(msg)) !== null) {
+      seen.add(parseInt(match[1], 10));
+    }
+  }
+  return Array.from(seen).sort((a, b) => a - b);
+}

@@ -72,3 +72,27 @@ export const MAX_COMMIT_LOG_LENGTH = 3000;
  * Issue #627: Commit log in report
  */
 export const GIT_LOG_TOTAL_TIMEOUT_MS = 15_000;
+
+/**
+ * Maximum character length for issue body summary in prompt.
+ * Issue #630: Issue context in report
+ */
+export const MAX_ISSUE_BODY_LENGTH = 500;
+
+/**
+ * Maximum number of issues to fetch per report generation.
+ * Issue #630: Issue context in report
+ */
+export const MAX_ISSUES_PER_REPORT = 20;
+
+/**
+ * Timeout in milliseconds for fetching a single GitHub Issue.
+ * Issue #630: Issue context in report
+ */
+export const ISSUE_FETCH_TIMEOUT_MS = 10_000;
+
+/**
+ * Total timeout in milliseconds for fetching all GitHub Issues.
+ * Issue #630: Issue context in report
+ */
+export const ISSUE_FETCH_TOTAL_TIMEOUT_MS = 15_000;

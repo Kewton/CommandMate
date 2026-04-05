@@ -22,8 +22,9 @@ import { saveDailyReport } from '@/lib/db/daily-report-db';
 import { getWorktrees } from '@/lib/db/worktree-db';
 import { getAllRepositories } from '@/lib/db/db-repository';
 import type { DailyReport } from '@/lib/db/daily-report-db';
-import { SUMMARY_GENERATION_TIMEOUT_MS, GIT_LOG_TOTAL_TIMEOUT_MS } from '@/config/review-config';
+import { SUMMARY_GENERATION_TIMEOUT_MS, GIT_LOG_TOTAL_TIMEOUT_MS, ISSUE_FETCH_TOTAL_TIMEOUT_MS } from '@/config/review-config';
 import { collectRepositoryCommitLogs } from '@/lib/git/git-utils';
+import { collectIssueInfos } from '@/lib/git/github-api';
 import { withTimeout } from '@/lib/utils';
 
 const logger = createLogger('daily-summary');
@@ -168,8 +169,18 @@ export async function generateDailySummary(
       new Map()
     );
 
+    // 3.5. Collect Issue information from commit messages (Issue #630)
+    const commitMessages = Array.from(commitLogs.values()).flatMap(
+      ({ commits }) => commits.map((c: { message: string }) => c.message)
+    );
+    const issueInfos = await withTimeout(
+      collectIssueInfos(repositories, commitMessages).catch(() => []),
+      ISSUE_FETCH_TOTAL_TIMEOUT_MS,
+      []
+    );
+
     // 4. Build prompt
-    const prompt = buildSummaryPrompt(messages, worktreeMap, userInstruction, commitLogs);
+    const prompt = buildSummaryPrompt(messages, worktreeMap, userInstruction, commitLogs, issueInfos);
 
     // 5. Execute AI command
     // Issue #626: Use tool-specific default permission (e.g. codex: 'workspace-write')

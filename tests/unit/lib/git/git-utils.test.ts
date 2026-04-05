@@ -36,7 +36,7 @@ vi.mock('util', () => ({
   promisify: () => mockExecFileAsync,
 }));
 
-import { getCommitsByDateRange, collectRepositoryCommitLogs } from '@/lib/git/git-utils';
+import { getCommitsByDateRange, collectRepositoryCommitLogs, extractIssueNumbers } from '@/lib/git/git-utils';
 
 describe('getCommitsByDateRange (Issue #627)', () => {
   beforeEach(() => {
@@ -189,5 +189,56 @@ describe('collectRepositoryCommitLogs (Issue #627)', () => {
 
     expect(result.size).toBe(1);
     expect(result.has('repo-1')).toBe(true);
+  });
+});
+
+describe('extractIssueNumbers (Issue #630)', () => {
+  it('should extract simple #NNN patterns', () => {
+    expect(extractIssueNumbers(['fix bug #123'])).toEqual([123]);
+  });
+
+  it('should extract Closes #NNN patterns', () => {
+    expect(extractIssueNumbers(['Closes #456'])).toEqual([456]);
+  });
+
+  it('should extract Fixes #NNN patterns', () => {
+    expect(extractIssueNumbers(['Fixes #789'])).toEqual([789]);
+  });
+
+  it('should extract Resolves #NNN patterns', () => {
+    expect(extractIssueNumbers(['Resolves #100'])).toEqual([100]);
+  });
+
+  it('should extract multiple issue numbers from one message', () => {
+    const result = extractIssueNumbers(['fix #1 and #2']);
+    expect(result).toContain(1);
+    expect(result).toContain(2);
+  });
+
+  it('should return unique issue numbers across multiple messages', () => {
+    const result = extractIssueNumbers(['fix #123', 'also #123 and #456']);
+    expect(result).toEqual(expect.arrayContaining([123, 456]));
+    expect(result).toHaveLength(2);
+  });
+
+  it('should return empty array for no matches', () => {
+    expect(extractIssueNumbers(['no issue here'])).toEqual([]);
+  });
+
+  it('should handle empty array', () => {
+    expect(extractIssueNumbers([])).toEqual([]);
+  });
+
+  it('should be case-insensitive for keywords', () => {
+    expect(extractIssueNumbers(['closes #10'])).toEqual([10]);
+    expect(extractIssueNumbers(['FIXES #20'])).toEqual([20]);
+  });
+
+  it('should handle mixed patterns in multiple messages', () => {
+    const msgs = ['feat: add feature #630', 'Closes #627', 'Fixes #626'];
+    const result = extractIssueNumbers(msgs);
+    expect(result).toContain(630);
+    expect(result).toContain(627);
+    expect(result).toContain(626);
   });
 });
