@@ -1,0 +1,32 @@
+{
+  "stage": 7,
+  "focus": "影響範囲（2回目）",
+  "reviewer": "codex",
+  "findings": [
+    {
+      "id": "S7-001",
+      "severity": "Must Fix",
+      "title": "daily-summary-generator.test.ts の review-config モック更新が影響範囲から漏れている",
+      "description": "`src/lib/daily-summary-generator.ts` は Stage 5 反映後の設計で `GIT_LOG_TOTAL_TIMEOUT_MS` を追加参照する想定だが、既存の `tests/unit/lib/daily-summary-generator.test.ts` では `@/config/review-config` のモックが `SUMMARY_GENERATION_TIMEOUT_MS` しか返していない。Issue本文のテストタスクでは `getRepositories` / `getCommitsByDateRange` のモック追加には触れている一方、config mock への新定数追加が明記されておらず、このままだと既存テストが未定義値前提で動くか、実装次第で壊れる。",
+      "suggestion": "Issue本文のテストタスクと影響範囲に、`tests/unit/lib/daily-summary-generator.test.ts` の `@/config/review-config` モックへ `GIT_LOG_TOTAL_TIMEOUT_MS` を追加する旨を明記すべき。既存モック更新の対象を `getRepositories` / `getCommitsByDateRange` だけでなく review-config まで広げる。"
+    },
+    {
+      "id": "S7-002",
+      "severity": "Should Fix",
+      "title": "getRepositories() の既存利用先である /api/worktrees が影響範囲表に載っていない",
+      "description": "`getRepositories(db)` は daily summary 用だけでなく `src/app/api/worktrees/route.ts` でも `repositories` レスポンス生成に使われている。Issue本文は `src/lib/db/worktree-db.ts` を変更対象に入れている一方、その直接利用先である `/api/worktrees` と `tests/integration/api-worktrees.test.ts` を影響範囲に含めていない。将来、daily summary 向けに `getRepositories()` の絞り込みや返却形状を変えると、worktrees API の既存契約へ波及する。",
+      "suggestion": "Issue本文の「変更不要だが影響を受けるファイル」に `src/app/api/worktrees/route.ts` を追加し、テスト影響として `tests/integration/api-worktrees.test.ts` も記載すべき。少なくとも `repositories` フィールドの互換性を確認する前提を明文化する。"
+    },
+    {
+      "id": "S7-003",
+      "severity": "Should Fix",
+      "title": "daily-summary/route.ts の呼び出し側である ReportTab とそのテストが影響範囲から漏れている",
+      "description": "`src/components/review/ReportTab.tsx` は `/api/daily-summary` の GET / POST / PUT を直接叩く唯一の呼び出し側であり、Issue本文でも `src/app/api/daily-summary/route.ts` のレスポンス時間増加を認めている。それにもかかわらず、呼び出し側コンポーネントと `tests/unit/components/review/ReportTab.test.tsx` は影響範囲・テスト影響のどちらにも記載がない。現状の ReportTab テストは初期表示時の GET モックしか見ておらず、生成フローや 429 / 504 / エラー応答の互換性は未カバーである。",
+      "suggestion": "Issue本文の影響範囲に `src/components/review/ReportTab.tsx` を追加し、テスト対象として `tests/unit/components/review/ReportTab.test.tsx` も追記すべき。少なくとも generate ボタン押下時の POST 維持、429 / 504 応答時のハンドリング、既存レスポンス shape の互換性を確認する方針を加える。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 2,
+  "nice_to_have_count": 0,
+  "summary": "Stage 5 反映後の影響範囲を再確認したところ、最大の漏れは `tests/unit/lib/daily-summary-generator.test.ts` の review-config モック更新で、Issue本文が新定数 `GIT_LOG_TOTAL_TIMEOUT_MS` への追随を明記していなかった。加えて、`getRepositories()` の既存利用先である `/api/worktrees` と、その契約を担保する `tests/integration/api-worktrees.test.ts`、および `daily-summary` API の直接呼び出し側である `ReportTab` とそのテストが影響範囲表から落ちていた。設計自体は概ね整ったが、波及先の明示と既存テスト更新範囲の明文化がまだ必要である。"
+}

@@ -135,3 +135,58 @@ export function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
 }
+
+// =============================================================================
+// Issue #627: Timeout utilities for async operations
+// =============================================================================
+
+/**
+ * Custom error class for timeout scenarios in withTimeout utility.
+ * Issue #627: Commit log in report
+ */
+export class TimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TimeoutError';
+  }
+}
+
+/**
+ * Wrap a promise with a timeout. If the promise does not resolve within
+ * the specified duration, either resolve with a fallback value or reject
+ * with a TimeoutError.
+ *
+ * Issue #627: Commit log in report
+ *
+ * @param promise - The promise to wrap
+ * @param timeoutMs - Timeout duration in milliseconds
+ * @param fallback - Optional fallback value to resolve with on timeout
+ * @returns The resolved value of the promise or the fallback
+ * @throws {TimeoutError} When timeout occurs and no fallback is provided
+ */
+export function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  fallback?: T
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (fallback !== undefined) {
+        resolve(fallback);
+      } else {
+        reject(new TimeoutError(`Operation timed out after ${timeoutMs}ms`));
+      }
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}

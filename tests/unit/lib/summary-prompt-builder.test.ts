@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 import { sanitizeMessage, buildSummaryPrompt, MAX_TOTAL_MESSAGE_LENGTH } from '@/lib/summary-prompt-builder';
 import { MAX_MESSAGE_LENGTH } from '@/lib/session/claude-executor';
 import type { ChatMessage } from '@/types/models';
+import type { RepositoryCommitLogs } from '@/types/git';
 
 function createMockMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
   return {
@@ -53,6 +54,15 @@ describe('sanitizeMessage', () => {
     expect(result).not.toContain('</user_data>');
     expect(result).toContain('&lt;user_data&gt;');
     expect(result).toContain('&lt;/user_data&gt;');
+  });
+
+  it('should escape <commit_log> tags (Issue #627)', () => {
+    const input = 'text <commit_log> injection </commit_log> end';
+    const result = sanitizeMessage(input);
+    expect(result).not.toContain('<commit_log>');
+    expect(result).not.toContain('</commit_log>');
+    expect(result).toContain('&lt;commit_log&gt;');
+    expect(result).toContain('&lt;/commit_log&gt;');
   });
 
   it('should escape user_data tags case-insensitively', () => {
@@ -223,6 +233,127 @@ describe('buildSummaryPrompt', () => {
       expect(dataSectionIdx).toBeGreaterThan(-1);
       expect(systemIdx).toBeLessThan(instructionIdx);
       expect(instructionIdx).toBeLessThan(dataSectionIdx);
+    });
+  });
+
+  describe('commitLogs support (Issue #627)', () => {
+    it('should include <commit_log> section when commitLogs is provided', () => {
+      const messages = [createMockMessage()];
+      const worktrees = new Map([['wt-1', 'feature/test']]);
+      const commitLogs: RepositoryCommitLogs = new Map([
+        ['repo-1', {
+          name: 'MyRepo',
+          commits: [
+            { shortHash: 'abc1234', message: 'Fix bug', author: 'John' },
+          ],
+        }],
+      ]);
+
+      const result = buildSummaryPrompt(messages, worktrees, undefined, commitLogs);
+
+      expect(result).toContain('<commit_log>');
+      expect(result).toContain('</commit_log>');
+      expect(result).toContain('### MyRepo (1 commits)');
+      expect(result).toContain('- abc1234 Fix bug (John)');
+    });
+
+    it('should NOT include <commit_log> section when commitLogs is undefined', () => {
+      const messages = [createMockMessage()];
+      const worktrees = new Map([['wt-1', 'feature/test']]);
+
+      const result = buildSummaryPrompt(messages, worktrees);
+
+      expect(result).not.toContain('<commit_log>');
+    });
+
+    it('should NOT include <commit_log> section when commitLogs is empty', () => {
+      const messages = [createMockMessage()];
+      const worktrees = new Map([['wt-1', 'feature/test']]);
+      const commitLogs: RepositoryCommitLogs = new Map();
+
+      const result = buildSummaryPrompt(messages, worktrees, undefined, commitLogs);
+
+      expect(result).not.toContain('<commit_log>');
+    });
+
+    it('should include multiple repositories in commit log section', () => {
+      const messages = [createMockMessage()];
+      const worktrees = new Map([['wt-1', 'feature/test']]);
+      const commitLogs: RepositoryCommitLogs = new Map([
+        ['repo-1', {
+          name: 'Frontend',
+          commits: [{ shortHash: 'abc1234', message: 'Fix UI', author: 'Alice' }],
+        }],
+        ['repo-2', {
+          name: 'Backend',
+          commits: [{ shortHash: 'def5678', message: 'Add API', author: 'Bob' }],
+        }],
+      ]);
+
+      const result = buildSummaryPrompt(messages, worktrees, undefined, commitLogs);
+
+      expect(result).toContain('### Frontend (1 commits)');
+      expect(result).toContain('### Backend (1 commits)');
+      expect(result).toContain('- abc1234 Fix UI (Alice)');
+      expect(result).toContain('- def5678 Add API (Bob)');
+    });
+
+    it('should sanitize commit log content for tag injection', () => {
+      const messages = [createMockMessage()];
+      const worktrees = new Map([['wt-1', 'feature/test']]);
+      const commitLogs: RepositoryCommitLogs = new Map([
+        ['repo-1', {
+          name: '<commit_log>Injected',
+          commits: [
+            { shortHash: 'abc1234', message: '<user_data>evil</user_data>', author: 'Attacker' },
+          ],
+        }],
+      ]);
+
+      const result = buildSummaryPrompt(messages, worktrees, undefined, commitLogs);
+
+      // Tags in commit messages should be escaped
+      expect(result).not.toMatch(/### <commit_log>/);
+      expect(result).not.toMatch(/<user_data>evil<\/user_data>/);
+    });
+
+    it('should truncate commit log when exceeding MAX_COMMIT_LOG_LENGTH', () => {
+      const messages = [createMockMessage()];
+      const worktrees = new Map([['wt-1', 'feature/test']]);
+
+      // Create many commits to exceed the limit
+      const manyCommits = Array.from({ length: 200 }, (_, i) => ({
+        shortHash: `hash${i.toString().padStart(3, '0')}`,
+        message: 'x'.repeat(20),
+        author: 'Developer',
+      }));
+
+      const commitLogs: RepositoryCommitLogs = new Map([
+        ['repo-1', { name: 'LargeRepo', commits: manyCommits }],
+      ]);
+
+      const result = buildSummaryPrompt(messages, worktrees, undefined, commitLogs);
+
+      expect(result).toContain('<commit_log>');
+      expect(result).toContain('omitted due to length limits');
+    });
+
+    it('should work with both userInstruction and commitLogs', () => {
+      const messages = [createMockMessage()];
+      const worktrees = new Map([['wt-1', 'feature/test']]);
+      const commitLogs: RepositoryCommitLogs = new Map([
+        ['repo-1', {
+          name: 'MyRepo',
+          commits: [{ shortHash: 'abc1234', message: 'Fix bug', author: 'John' }],
+        }],
+      ]);
+
+      const result = buildSummaryPrompt(messages, worktrees, 'Focus on commits', commitLogs);
+
+      expect(result).toContain('<user_instruction>');
+      expect(result).toContain('Focus on commits');
+      expect(result).toContain('<commit_log>');
+      expect(result).toContain('abc1234');
     });
   });
 });

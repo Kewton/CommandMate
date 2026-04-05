@@ -11,8 +11,9 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { NextResponse } from 'next/server';
+import fs from 'fs';
 import type { GitStatus } from '@/types/models';
-import type { CommitInfo, ChangedFile } from '@/types/git';
+import type { CommitInfo, ChangedFile, CommitLogEntry, RepositoryCommitLogs } from '@/types/git';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('git-utils');
@@ -379,4 +380,108 @@ export function handleGitApiError(error: unknown, logPrefix: string): NextRespon
     { error: 'Failed to execute git command' },
     { status: 500 }
   );
+}
+
+// ============================================================================
+// Issue #627: Commit log collection for daily reports
+// ============================================================================
+
+/** Timeout for individual git log commit collection in milliseconds */
+const GIT_COMMIT_LOG_TIMEOUT_MS = 5000;
+
+/**
+ * Unit separator character used as field delimiter in git log format.
+ * Using \x1f avoids conflicts with commit messages that may contain
+ * common delimiters like | or ,.
+ */
+const FIELD_SEPARATOR = '\x1f';
+
+/**
+ * Get commits within a date range for a repository.
+ * Uses --all to include all branches.
+ *
+ * @param repoPath - Path to the repository (must exist on filesystem)
+ * @param since - ISO 8601 date string for the start of the range
+ * @param until - ISO 8601 date string for the end of the range
+ * @returns Array of CommitLogEntry, empty array on error or missing path
+ */
+export async function getCommitsByDateRange(
+  repoPath: string,
+  since: string,
+  until: string
+): Promise<CommitLogEntry[]> {
+  if (!fs.existsSync(repoPath)) {
+    return [];
+  }
+
+  try {
+    const { stdout } = await execFileAsync('git', [
+      'log',
+      '--all',
+      `--since=${since}`,
+      `--until=${until}`,
+      `--format=%h${FIELD_SEPARATOR}%s${FIELD_SEPARATOR}%an`,
+      '--',
+    ], {
+      cwd: repoPath,
+      timeout: GIT_COMMIT_LOG_TIMEOUT_MS,
+    });
+
+    const trimmed = stdout.trim();
+    if (!trimmed) return [];
+
+    const entries: CommitLogEntry[] = [];
+    for (const line of trimmed.split('\n')) {
+      const parts = line.split(FIELD_SEPARATOR);
+      if (parts.length !== 3) continue;
+      entries.push({
+        shortHash: parts[0],
+        message: parts[1],
+        author: parts[2],
+      });
+    }
+
+    return entries;
+  } catch (error) {
+    logger.error('git:commit-log-failed', {
+      repoPath,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    return [];
+  }
+}
+
+/**
+ * Collect commit logs from multiple repositories in parallel.
+ * Repositories with no commits are skipped from the result.
+ *
+ * @param repositories - Array of { id, name, path } objects
+ * @param since - ISO 8601 date string for the start of the range
+ * @param until - ISO 8601 date string for the end of the range
+ * @returns Map of repository ID to { name, commits }
+ */
+export async function collectRepositoryCommitLogs(
+  repositories: Array<{ id: string; name: string; path: string }>,
+  since: string,
+  until: string
+): Promise<RepositoryCommitLogs> {
+  const results = await Promise.allSettled(
+    repositories.map(async (repo) => ({
+      id: repo.id,
+      name: repo.name,
+      commits: await getCommitsByDateRange(repo.path, since, until),
+    }))
+  );
+
+  const commitLogs: RepositoryCommitLogs = new Map();
+  for (const result of results) {
+    if (result.status === 'fulfilled' && result.value.commits.length > 0) {
+      commitLogs.set(result.value.id, {
+        name: result.value.name,
+        commits: result.value.commits,
+      });
+    }
+  }
+
+  return commitLogs;
 }

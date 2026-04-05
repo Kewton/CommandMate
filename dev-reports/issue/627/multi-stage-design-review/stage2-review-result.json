@@ -1,0 +1,67 @@
+{
+  "stage": 2,
+  "focus": "整合性",
+  "reviewer": "opus",
+  "findings": [
+    {
+      "id": "DR2-001",
+      "severity": "Must Fix",
+      "title": "execGitCommand はカスタムタイムアウトを受け付けない -- getCommitsByDateRange の実装方針と不整合",
+      "description": "設計方針書セクション4で「既存の execGitCommand（null 返却パターン）を内部利用し、null の場合に空配列を返す」としているが、実際の execGitCommand 関数はタイムアウト値をパラメータとして受け取らず、ハードコードされた GIT_COMMAND_TIMEOUT_MS = 1000ms を使用する（git-utils.ts 35-53行目）。設計で要求する GIT_COMMIT_LOG_TIMEOUT_MS = 5000ms のカスタムタイムアウトを execGitCommand 経由では指定できない。一方 execGitCommandTyped は timeout パラメータを受け取るが、null ではなく例外をスローするパターンであり、設計方針のエラーハンドリング方針 (DR1-006) と矛盾する。",
+      "suggestion": "以下の3択から選択し、設計方針書に明記する: (A) execGitCommand に timeout パラメータを追加する（既存呼び出しはデフォルト値で後方互換維持）、(B) execGitCommandTyped を利用し try-catch で空配列を返す形に変更する（DR1-006 の方針を修正）、(C) getCommitsByDateRange 内で execFileAsync を直接呼び出し、独自のエラーハンドリングを実装する。推奨は (A): execGitCommand(args, cwd, timeout?: number) とし、デフォルト値を GIT_COMMAND_TIMEOUT_MS にする。"
+    },
+    {
+      "id": "DR2-002",
+      "severity": "Should Fix",
+      "title": "セクション6「タイムアウト時は取得済み分のみで続行」とセクション4 withTimeout 設計の矛盾",
+      "description": "セクション6の並列実行の説明に「タイムアウト時は取得済み分のみで続行」と記載されているが、セクション4の withTimeout 設計では「タイムアウト時に取得済み部分結果を返せない（全体フォールバック）」「取得済み分のみ返すパターンが必要になった場合は別途拡張する」とトレードオフを明記している。セクション9の決定事項テーブルにも「タイムアウト時に取得済み部分結果を返せない」と記載されている。セクション6の記述が他のセクションと矛盾する。",
+      "suggestion": "セクション6の並列実行の記述を「タイムアウト時は空Mapをフォールバックとして使用し、コミットログなしで続行」に修正する。または、Promise.allSettled の各リポジトリ結果を withTimeout でラップし、タイムアウト時に取得済み分を返す設計にするなら、セクション4の withTimeout 設計も合わせて修正する。"
+    },
+    {
+      "id": "DR2-003",
+      "severity": "Should Fix",
+      "title": "getRepositories の返却型に worktreeCount が含まれるが collectRepositoryCommitLogs の引数型と不一致",
+      "description": "getRepositories(db) は Array<{ path: string; name: string; worktreeCount: number }> を返す（worktree-db.ts 167-170行目）。設計方針書の collectRepositoryCommitLogs は Array<{ path: string; name: string }> を引数に取る。TypeScript の構造的部分型により実行時エラーにはならないが、設計方針書のシグネチャが実際のデータ構造を正確に反映していない。",
+      "suggestion": "設計方針書の collectRepositoryCommitLogs の引数型を Array<{ path: string; name: string; [key: string]: unknown }> とするか、もしくは呼び出し元で明示的に map して { path, name } のみを渡す設計にする。あるいは、実際には構造的部分型で動作するため、設計方針書のコメントに「getRepositories の返却値をそのまま渡せる（余剰プロパティは無視される）」と注記するだけでもよい。"
+    },
+    {
+      "id": "DR2-004",
+      "severity": "Should Fix",
+      "title": "getRepositories が返す path は repository_path であり worktree path ではない点の明確化不足",
+      "description": "設計方針書では「getRepositories(db) が返すパスはDB内の信頼済みパス」としているが、repository_path がリポジトリのルートパスであることが明示されていない。worktree path とは異なる。git log --all をリポジトリルートパスで実行すれば全ブランチの全コミットを取得できるが、もし worktree パス（サブディレクトリ）が渡された場合は .git がない可能性がある。実装者が混乱する恐れがある。",
+      "suggestion": "設計方針書のセクション4またはセクション7で、getRepositories が返す path は worktrees テーブルの repository_path カラム（リポジトリのルートディレクトリパス）であり、個別の worktree path ではないことを明記する。これにより git log --all が正しく動作することの根拠も明確になる。"
+    },
+    {
+      "id": "DR2-005",
+      "severity": "Should Fix",
+      "title": "git log --format で使用する %h%s%an と CommitInfo の既存パースロジックの乖離",
+      "description": "設計方針書の git log フォーマットは --format=\"%h\\x1f%s\\x1f%an\"（shortHash, message, author の3フィールド、Unit Separator 区切り）。一方、既存の parseGitLogOutput は --format=\"%H%n%h%n%s%n%an%n%aI\"（5フィールド、改行区切り）をパースする。新しい getCommitsByDateRange は独自のパースロジックが必要だが、設計方針書にパースロジックの記述がない。フォーマットの違いは意図的（CommitLogEntry は3フィールドのみ）だが、パース関数の設計が欠けている。",
+      "suggestion": "getCommitsByDateRange 内で使用するパース関数（例: parseCommitLogOutput）のロジックを設計方針書に追記する。Unit Separator (\\x1f) での split、空行スキップ、フィールド数検証などの仕様を明記すべき。既存の parseGitLogOutput は再利用できないため、新規パース関数が必要であることを明示する。"
+    },
+    {
+      "id": "DR2-006",
+      "severity": "Nice to Have",
+      "title": "ESCAPED_TAGS を summary-prompt-builder.ts に配置する設計は妥当だが export 方針が未記載",
+      "description": "設計方針書では ESCAPED_TAGS を summary-prompt-builder.ts の定数として定義するとしている。sanitizeMessage は @internal（テスト用 export）だが、ESCAPED_TAGS のアクセス修飾（export するか否か）が未記載。テストで ESCAPED_TAGS の内容を検証する場合は export が必要。",
+      "suggestion": "ESCAPED_TAGS を export するか、file-scope 定数（非 export）として sanitizeMessage 内部でのみ参照するかを明記する。テスト容易性を考慮すると export が望ましいが、内部実装の詳細であるため非 export + sanitizeMessage のテストで間接的に検証する方針でもよい。"
+    },
+    {
+      "id": "DR2-007",
+      "severity": "Nice to Have",
+      "title": "MAX_COMMIT_LOG_LENGTH の配置場所が review-config.ts だが ESCAPED_TAGS は summary-prompt-builder.ts -- 定数配置の一貫性",
+      "description": "設計方針書のセクション10では MAX_COMMIT_LOG_LENGTH を review-config.ts に追加するとしている。一方、ESCAPED_TAGS は summary-prompt-builder.ts に配置する。両方とも buildSummaryPrompt の動作に関わる定数だが、配置場所が分散している。review-config.ts には既に MAX_USER_INSTRUCTION_LENGTH や SUMMARY_GENERATION_TIMEOUT_MS があり、レポート生成関連定数の集約場所として機能している。",
+      "suggestion": "特に変更は不要だが、設計方針書に配置の判断理由を簡潔に記載するとよい。例: MAX_COMMIT_LOG_LENGTH は複数モジュールから参照される可能性があるため review-config.ts に配置、ESCAPED_TAGS は sanitizeMessage の内部実装に密結合のため summary-prompt-builder.ts に配置。"
+    },
+    {
+      "id": "DR2-008",
+      "severity": "Nice to Have",
+      "title": "daily-summary-generator.ts で getWorktrees を使用しているが設計方針書では getRepositories を使用 -- import 追加の明記",
+      "description": "現在の daily-summary-generator.ts は worktree-db.ts から getWorktrees をインポートしている（20行目）。設計方針書では新たに getRepositories を追加使用する。同じ worktree-db.ts からの追加インポートが必要だが、変更ファイルサマリー（セクション10）に worktree-db.ts への変更が記載されていない（「既存関数活用」のみ）。実装時に混乱は生じないが、正確性のため。",
+      "suggestion": "セクション10の daily-summary-generator.ts の変更内容に「getRepositories の import 追加」を明記する。worktree-db.ts 自体は変更不要であることは正しい。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 4,
+  "nice_to_have_count": 3,
+  "summary": "整合性レビューの結果、Must Fix 1件、Should Fix 4件、Nice to Have 3件の指摘を検出した。最も重大な問題は DR2-001: execGitCommand がカスタムタイムアウトを受け付けないにもかかわらず、設計方針書が「execGitCommand パターンを内部利用」としている点。GIT_COMMIT_LOG_TIMEOUT_MS = 5000ms を使用するには execGitCommand の拡張、execGitCommandTyped の利用、または execFileAsync の直接呼び出しのいずれかが必要であり、設計方針書で選択を明確化すべきである。Should Fix では、セクション間の矛盾（タイムアウト時の部分結果返却に関する記述の不整合）、getRepositories 返却型と collectRepositoryCommitLogs 引数型の差異、repository_path の意味の明確化不足、新しい git log フォーマットに対するパースロジックの設計欠如を指摘した。CommitInfo 型の Pick 互換性（shortHash, message, author フィールドの存在）、withTimeout の src/lib/utils.ts 配置、GIT_COMMIT_LOG_TIMEOUT_MS のファイルスコープ定数化については、既存コードとの整合性が確認された。"
+}

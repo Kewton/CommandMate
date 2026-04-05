@@ -1,0 +1,36 @@
+{
+  "issue_number": 627,
+  "title": "feat: レポート生成時に全リポジトリの当日コミットログをプロンプトに含める",
+  "design_doc_path": "dev-reports/design/issue-627-commit-log-in-report-design-policy.md",
+  "work_plan_path": "dev-reports/issue/627/work-plan.md",
+  "acceptance_criteria": [
+    "全リポジトリ（DB登録済みかつパス存在）の当日コミットが取得できる",
+    "全ブランチのコミットが対象になる（--all）",
+    "コミットがないリポジトリはスキップされる",
+    "パスが存在しないリポジトリはエラーにならずスキップされる",
+    "git log の個別タイムアウトが GIT_COMMIT_LOG_TIMEOUT_MS で制御される",
+    "git log 並列実行の全体タイムアウトが GIT_LOG_TOTAL_TIMEOUT_MS で制御される",
+    "プロンプトに <commit_log> セクションが含まれる",
+    "リポジトリごとのセクションヘッダーに表示名とコミット数が含まれる",
+    "コミットログ内の <commit_log> / <user_data> タグがエスケープされる",
+    "コミットログが MAX_COMMIT_LOG_LENGTH を超える場合にトランケーションされる",
+    "最終プロンプト全体が MAX_MESSAGE_LENGTH 以内",
+    "既存のレポート生成機能に回帰がない",
+    "buildSummaryPrompt の既存呼び出しが修正なしで動作する",
+    "既存テストが新モック追加後もパスする"
+  ],
+  "implementation_tasks": [
+    "src/types/git.ts に CommitLogEntry 型エイリアスと RepositoryCommitLogs 型を追加",
+    "src/config/review-config.ts に MAX_COMMIT_LOG_LENGTH=3000 と GIT_LOG_TOTAL_TIMEOUT_MS=15000 を追加",
+    "src/lib/utils.ts に withTimeout ユーティリティを追加",
+    "src/lib/git/git-utils.ts に GIT_COMMIT_LOG_TIMEOUT_MS定数・getCommitsByDateRange・collectRepositoryCommitLogs を追加",
+    "src/lib/summary-prompt-builder.ts の sanitizeMessage を ESCAPED_TAGS 配列ベースに拡張",
+    "src/lib/summary-prompt-builder.ts の buildSummaryPrompt に第4引数 commitLogs? を追加",
+    "src/lib/daily-summary-generator.ts でリポジトリ一覧取得とコミットログ収集を追加",
+    "tests/unit/lib/utils.test.ts に withTimeout テスト追加",
+    "tests/unit/lib/git/git-utils.test.ts を新規作成（getCommitsByDateRange・collectRepositoryCommitLogs テスト）",
+    "tests/unit/lib/summary-prompt-builder.test.ts にコミットログ関連テスト追加",
+    "tests/unit/lib/daily-summary-generator.test.ts のモック更新（getRepositories・collectRepositoryCommitLogs・GIT_LOG_TOTAL_TIMEOUT_MS）"
+  ],
+  "target_coverage": 80
+}

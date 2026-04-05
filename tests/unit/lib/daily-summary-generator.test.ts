@@ -41,9 +41,36 @@ vi.mock('@/lib/db/worktree-db', () => ({
   getWorktrees: (...args: unknown[]) => mockGetWorktrees(...args),
 }));
 
+// Mock db-repository
+const mockGetAllRepositories = vi.fn();
+vi.mock('@/lib/db/db-repository', () => ({
+  getAllRepositories: (...args: unknown[]) => mockGetAllRepositories(...args),
+}));
+
+// Mock git-utils
+const mockCollectRepositoryCommitLogs = vi.fn();
+vi.mock('@/lib/git/git-utils', () => ({
+  collectRepositoryCommitLogs: (...args: unknown[]) => mockCollectRepositoryCommitLogs(...args),
+}));
+
+// Mock utils (withTimeout)
+vi.mock('@/lib/utils', async () => {
+  return {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    withTimeout: (promise: Promise<any>) => promise,
+    TimeoutError: class TimeoutError extends Error {
+      constructor(message: string) {
+        super(message);
+        this.name = 'TimeoutError';
+      }
+    },
+  };
+});
+
 // Mock review-config
 vi.mock('@/config/review-config', () => ({
   SUMMARY_GENERATION_TIMEOUT_MS: 60000,
+  GIT_LOG_TOTAL_TIMEOUT_MS: 15000,
 }));
 
 // Mock schedule-config (DEFAULT_PERMISSIONS)
@@ -85,6 +112,10 @@ describe('daily-summary-generator', () => {
     mockGetWorktrees.mockReturnValue([
       { id: 'wt-1', name: 'feature/test' },
     ]);
+    mockGetAllRepositories.mockReturnValue([
+      { id: 'repo-1', name: 'MyRepo', path: '/repos/myrepo' },
+    ]);
+    mockCollectRepositoryCommitLogs.mockResolvedValue(new Map());
   });
 
   afterEach(() => {
@@ -373,7 +404,50 @@ describe('daily-summary-generator', () => {
       expect(mockBuildSummaryPrompt).toHaveBeenCalledWith(
         expect.any(Array),
         expect.any(Map),
-        'Focus on testing'
+        'Focus on testing',
+        expect.any(Map)
+      );
+    });
+
+    it('should propagate commitLogs to buildSummaryPrompt (Issue #627)', async () => {
+      const validOutput = 'x'.repeat(MIN_SUMMARY_OUTPUT_LENGTH + 10);
+      mockGetMessagesByDateRange.mockReturnValue([
+        { id: 'msg-1', worktreeId: 'wt-1', role: 'user', content: 'hello', timestamp: new Date() },
+      ]);
+      mockExecuteClaudeCommand.mockResolvedValue({
+        output: validOutput,
+        exitCode: 0,
+        status: 'completed',
+      });
+      mockSaveDailyReport.mockReturnValue({
+        date: '2026-04-02',
+        content: validOutput,
+        generatedByTool: 'claude',
+        model: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const mockCommitLogs = new Map([
+        ['repo-1', { name: 'MyRepo', commits: [{ shortHash: 'abc', message: 'fix', author: 'Dev' }] }],
+      ]);
+      mockCollectRepositoryCommitLogs.mockResolvedValue(mockCommitLogs);
+
+      await generateDailySummary(mockDb, {
+        date: '2026-04-02',
+        tool: 'claude',
+      });
+
+      expect(mockCollectRepositoryCommitLogs).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.any(String),
+        expect.any(String),
+      );
+      expect(mockBuildSummaryPrompt).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.any(Map),
+        undefined,
+        mockCommitLogs,
       );
     });
 
@@ -404,7 +478,8 @@ describe('daily-summary-generator', () => {
       expect(mockBuildSummaryPrompt).toHaveBeenCalledWith(
         expect.any(Array),
         expect.any(Map),
-        undefined
+        undefined,
+        expect.any(Map)
       );
     });
   });

@@ -1,0 +1,32 @@
+{
+  "stage": 3,
+  "focus": "影響範囲",
+  "reviewer": "codex",
+  "findings": [
+    {
+      "id": "DR3-001",
+      "severity": "Must Fix",
+      "title": "daily-summary-generator.test.ts のモック対象が collectRepositoryCommitLogs 設計に追随していない",
+      "description": "設計方針書ではコミットログ収集責務を `git-utils.ts` の `collectRepositoryCommitLogs()` に切り出しているが、テスト設計の既存更新項目は依然として `getCommitsByDateRange` モック追加になっている。`daily-summary-generator.ts` の責務分離方針とずれており、実装時に誤った依存をモックする恐れがある。加えて、既存 `tests/unit/lib/daily-summary-generator.test.ts` では `@/config/review-config` モックが `SUMMARY_GENERATION_TIMEOUT_MS` のみで、新設 `GIT_LOG_TOTAL_TIMEOUT_MS` 追加の影響も受ける。",
+      "suggestion": "設計方針書のテスト設計・変更ファイルサマリー・実装チェックリストを更新し、`tests/unit/lib/daily-summary-generator.test.ts` では `getRepositories` と `collectRepositoryCommitLogs`、および `GIT_LOG_TOTAL_TIMEOUT_MS` をモック更新対象として明記すべき。"
+    },
+    {
+      "id": "DR3-002",
+      "severity": "Should Fix",
+      "title": "withTimeout の utils.ts 追加が既存共有モジュールへの変更として扱われていない",
+      "description": "設計方針書の変更ファイルサマリーでは `src/lib/utils.ts` を「追加」としているが、実際には既存の共有ユーティリティモジュールへの named export 追加であり、既存 import 利用箇所と `tests/unit/lib/utils.test.ts` への回帰確認が必要になる。ファイル新規追加として扱うと、共有モジュール変更の波及範囲が過小評価される。",
+      "suggestion": "設計方針書では `src/lib/utils.ts` を「拡張」に修正し、`tests/unit/lib/utils.test.ts` を影響テストとして追加して `withTimeout` の挙動確認と既存 utility export の回帰確認を明記すべき。"
+    },
+    {
+      "id": "DR3-003",
+      "severity": "Should Fix",
+      "title": "collectRepositoryCommitLogs と共有 getRepositories 契約による /api/worktrees への影響確認が弱い",
+      "description": "`collectRepositoryCommitLogs()` 自体は `getRepositories()` の返却値を読み取るだけで `/api/worktrees` を直接変更しないが、同じ `getRepositories()` を `src/app/api/worktrees/route.ts` も `repositories` レスポンス生成に利用している。設計方針書には互換性確認テストとして `tests/integration/api-worktrees.test.ts` がある一方、影響を受ける既存モジュールとして `src/app/api/worktrees/route.ts` 自体が明示されておらず、共有契約確認の意図が弱い。",
+      "suggestion": "設計方針書の変更ファイルサマリーに `src/app/api/worktrees/route.ts` を「コード変更不要だが互換性確認対象」として追加し、`collectRepositoryCommitLogs()` は `getRepositories()` 契約を変更しない前提であることをテスト設計と合わせて明記すべき。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 2,
+  "nice_to_have_count": 0,
+  "summary": "影響範囲レビューの結果、設計方針書は Stage 1 / 2 の技術設計を概ね適切に反映していたが、テストと共有モジュールへの波及の記述に3点の補強が必要だった。最重要は `daily-summary-generator.test.ts` のモック対象で、責務分離後の設計に合わせて `collectRepositoryCommitLogs` と `GIT_LOG_TOTAL_TIMEOUT_MS` を追記する必要があった。加えて、既存 `utils.ts` への `withTimeout` 追加は共有モジュール拡張として扱うべきこと、`getRepositories()` 共有契約を利用する `/api/worktrees` も影響確認対象として明示すべきことを指摘した。"
+}

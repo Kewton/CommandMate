@@ -60,3 +60,15 @@ export const MAX_TEMPLATE_NAME_LENGTH = 100;
  * Issue #618: Report template system
  */
 export const MAX_TEMPLATE_CONTENT_LENGTH = 1000;
+
+/**
+ * Maximum character length for commit log section in summary prompt.
+ * Issue #627: Commit log in report
+ */
+export const MAX_COMMIT_LOG_LENGTH = 3000;
+
+/**
+ * Total timeout in milliseconds for collecting commit logs from all repositories.
+ * Issue #627: Commit log in report
+ */
+export const GIT_LOG_TOTAL_TIMEOUT_MS = 15_000;
