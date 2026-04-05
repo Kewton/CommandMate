@@ -60,3 +60,57 @@ export const MAX_TEMPLATE_NAME_LENGTH = 100;
  * Issue #618: Report template system
  */
 export const MAX_TEMPLATE_CONTENT_LENGTH = 1000;
+
+/**
+ * Maximum character length for commit log section in summary prompt.
+ * Issue #627: Commit log in report
+ */
+export const MAX_COMMIT_LOG_LENGTH = 3000;
+
+/**
+ * Total timeout in milliseconds for collecting commit logs from all repositories.
+ * Issue #627: Commit log in report
+ */
+export const GIT_LOG_TOTAL_TIMEOUT_MS = 15_000;
+
+/**
+ * Maximum total character length for the summary prompt.
+ * Issue #634: Section-based prompt length management
+ */
+export const MAX_PROMPT_LENGTH = 15000;
+
+/**
+ * Maximum character length for user_data section in summary prompt.
+ * Issue #634: Section-based prompt length management
+ */
+export const MAX_USER_DATA_LENGTH = 6000;
+
+/**
+ * Maximum character length for issue_context section in summary prompt.
+ * Issue #634: Section-based prompt length management
+ */
+export const MAX_ISSUE_CONTEXT_LENGTH = 3000;
+
+/**
+ * Maximum character length for issue body summary in prompt.
+ * Issue #630: Issue context in report
+ */
+export const MAX_ISSUE_BODY_LENGTH = 500;
+
+/**
+ * Maximum number of issues to fetch per report generation.
+ * Issue #630: Issue context in report
+ */
+export const MAX_ISSUES_PER_REPORT = 20;
+
+/**
+ * Timeout in milliseconds for fetching a single GitHub Issue.
+ * Issue #630: Issue context in report
+ */
+export const ISSUE_FETCH_TIMEOUT_MS = 10_000;
+
+/**
+ * Total timeout in milliseconds for fetching all GitHub Issues.
+ * Issue #630: Issue context in report
+ */
+export const ISSUE_FETCH_TOTAL_TIMEOUT_MS = 15_000;

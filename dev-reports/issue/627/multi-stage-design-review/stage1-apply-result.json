@@ -1,0 +1,21 @@
+{
+  "stage": 1,
+  "applied_findings": [
+    "DR1-001",
+    "DR1-002",
+    "DR1-003",
+    "DR1-005",
+    "DR1-006",
+    "DR1-007",
+    "DR1-008",
+    "DR1-009",
+    "DR1-010"
+  ],
+  "skipped_findings": [
+    "DR1-004"
+  ],
+  "skip_reasons": {
+    "DR1-004": "Nice to Have: RepositoryCommitLogs の Map vs 配列の変更は、現設計で機能要件を満たしており KISS 観点で変更の必要性が低い。将来的な拡張時に再検討する。"
+  },
+  "summary": "Stage 1 設計原則レビューの全10件の指摘事項のうち、9件を設計方針書に反映した。Must Fix 2件（DR1-002: withTimeout ユーティリティの設計明記、DR1-007: GIT_COMMIT_LOG_TIMEOUT_MS の配置場所明記）は全て反映済み。Should Fix 5件（DR1-001: buildSummaryPrompt 引数方針、DR1-003: CommitLogEntry の Pick 型エイリアス化、DR1-005: sanitizeMessage のタグ定数配列化、DR1-008: コミットログ収集の専用関数切り出し、DR1-009: トランケーション実装箇所の明確化）も全て反映済み。Nice to Have 3件のうち2件（DR1-006: エラーハンドリングパターン統一、DR1-010: テストファイル既存確認）を反映し、1件（DR1-004: Map vs 配列）は現設計で十分と判断しスキップした。設計方針書にはレビュー指摘サマリーセクション（セクション11）と実装チェックリスト（セクション12）を追加した。"
+}

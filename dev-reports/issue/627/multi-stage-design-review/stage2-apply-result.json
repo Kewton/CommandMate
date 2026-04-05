@@ -1,0 +1,16 @@
+{
+  "stage": 2,
+  "applied_findings": [
+    "DR2-001",
+    "DR2-002",
+    "DR2-003",
+    "DR2-004",
+    "DR2-005",
+    "DR2-006",
+    "DR2-007",
+    "DR2-008"
+  ],
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "summary": "Stage 2 整合性レビューの全8件（Must Fix 1件、Should Fix 4件、Nice to Have 3件）を設計方針書に反映完了。主要変更: (1) DR2-001: getCommitsByDateRange のエラーハンドリング方針を execGitCommand パターンから execFileAsync 直接呼び出し + try-catch に変更し、カスタムタイムアウト (GIT_COMMIT_LOG_TIMEOUT_MS = 5000ms) を実現。(2) DR2-002: セクション6の「取得済み分のみで続行」を「空Mapフォールバックで続行」に修正し、withTimeout 設計との矛盾を解消。(3) DR2-003: collectRepositoryCommitLogs の引数型に構造的部分型による余剰プロパティ許容の注記を追加。(4) DR2-004: repository_path がリポジトリルートパスであることをセクション5・7に明記。(5) DR2-005: Unit Separator 分割のパースロジック設計をセクション4に追記。(6) DR2-006/007/008: ESCAPED_TAGS の非 export 方針、定数配置判断理由、daily-summary-generator.ts の import 追加をそれぞれ明記。決定事項テーブル（セクション9）と実装チェックリスト（セクション13）も更新済み。"
+}

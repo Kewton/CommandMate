@@ -12,6 +12,7 @@ import { useState, useEffect, useCallback } from 'react';
 import ReportDatePicker from './ReportDatePicker';
 import { SUMMARY_ALLOWED_TOOLS, MAX_USER_INSTRUCTION_LENGTH } from '@/config/review-config';
 import { useReportGeneration } from '@/hooks/useReportGeneration';
+import { useGenerationStatus } from '@/hooks/useGenerationStatus';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import type { GenerationMode } from '@/hooks/useReportGeneration';
 
@@ -65,6 +66,10 @@ export default function ReportTab() {
     isLoadingTemplates,
   } = useReportGeneration();
 
+  // Issue #638: Poll generation status to detect remote/ongoing generation
+  const remoteStatus = useGenerationStatus(!isGenerating);
+  const isRemoteGenerating = remoteStatus.generating && !isGenerating;
+
   // Fetch report for selected date
   const fetchReport = useCallback(async (date: string) => {
     setIsLoading(true);
@@ -95,6 +100,17 @@ export default function ReportTab() {
   useEffect(() => {
     fetchReport(selectedDate);
   }, [selectedDate, fetchReport]);
+
+  // Issue #638: Auto-refresh when remote generation completes
+  const [wasRemoteGenerating, setWasRemoteGenerating] = useState(false);
+  useEffect(() => {
+    if (remoteStatus.generating) {
+      setWasRemoteGenerating(true);
+    } else if (wasRemoteGenerating) {
+      setWasRemoteGenerating(false);
+      fetchReport(selectedDate);
+    }
+  }, [remoteStatus.generating, wasRemoteGenerating, fetchReport, selectedDate]);
 
   const handleDateChange = (date: string) => {
     setSelectedDate(date);
@@ -283,15 +299,15 @@ export default function ReportTab() {
       <div className="mb-6">
         <button
           onClick={handleGenerate}
-          disabled={isGenerating || messageCount === 0}
+          disabled={isGenerating || isRemoteGenerating || messageCount === 0}
           className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-            isGenerating || messageCount === 0
+            isGenerating || isRemoteGenerating || messageCount === 0
               ? 'bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-500 cursor-not-allowed'
               : 'bg-cyan-600 text-white hover:bg-cyan-700'
           }`}
           data-testid="generate-button"
         >
-          {isGenerating ? 'Generating...' : 'Generate Summary'}
+          {isGenerating || isRemoteGenerating ? 'Generating...' : 'Generate Summary'}
         </button>
       </div>
 
@@ -313,11 +329,13 @@ export default function ReportTab() {
         </div>
       )}
 
-      {/* Loading spinner for generation */}
-      {isGenerating && (
+      {/* Loading spinner for generation (local or remote) */}
+      {(isGenerating || isRemoteGenerating) && (
         <div className="flex items-center gap-2 mb-4 text-sm text-gray-600 dark:text-gray-400" data-testid="generating-spinner">
           <div className="w-4 h-4 border-2 border-cyan-600 border-t-transparent rounded-full animate-spin" />
-          Generating summary...
+          {isRemoteGenerating && remoteStatus.tool
+            ? `Generating report... (tool: ${remoteStatus.tool}${remoteStatus.startedAt ? `, started: ${Math.round((Date.now() - new Date(remoteStatus.startedAt).getTime()) / 1000)}s ago` : ''})`
+            : 'Generating summary...'}
         </div>
       )}
 

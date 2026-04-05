@@ -1,0 +1,9 @@
+{
+  "stage": 8,
+  "issue_number": "627",
+  "applied_findings": ["S7-001", "S7-002", "S7-003"],
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "updated_body": "> **Note**: このIssueは 2026-04-05 にStage 7影響範囲レビュー結果を反映して更新されました。\n> Stage 1レビュー反映: S1-001〜S1-010\n> Stage 3レビュー反映: S3-001〜S3-008\n> Stage 5レビュー反映: S5-001〜S5-003\n> Stage 7レビュー反映: S7-001〜S7-003\n> 詳細: dev-reports/issue/627/issue-review/\n\n## 概要\n\nレポート生成時に、CommandMateが管理する全リポジトリから当日の全コミットメッセージを取得し、プロンプトの追加セクションとしてAIに渡す。これによりAIがIssue消化数・作業内容・コミット数を正確に把握しやすくする。\n\n## 背景・課題\n\n現在のレポート生成は `chat_messages` テーブルのメッセージ内容のみをデータソースとしており、Issue消化数やコミット数のような構造化情報を含まない。そのためAIがメッセージ内容から推測するしかなく、日次レポートの精度に限界がある。\n\n## 提案する解決策\n",
+  "summary": "Stage 7影響範囲レビューで検出した Must Fix 1件と Should Fix 2件を Issue #627 本文へ反映した。`daily-summary-generator.test.ts` の review-config mock へ `GIT_LOG_TOTAL_TIMEOUT_MS` を追加すべき点をテストタスクへ追記し、`getRepositories()` の既存利用先である `/api/worktrees` と `tests/integration/api-worktrees.test.ts`、および `/api/daily-summary` の直接呼び出し側である `ReportTab` とそのテストを影響範囲に追加した。"
+}

@@ -12,15 +12,22 @@
  * - Output sanitization (control character removal)
  */
 
+import { existsSync } from 'fs';
+import { join } from 'path';
 import type Database from 'better-sqlite3';
 import { createLogger } from '@/lib/logger';
 import { executeClaudeCommand, MAX_MESSAGE_LENGTH } from '@/lib/session/claude-executor';
 import { buildSummaryPrompt } from '@/lib/summary-prompt-builder';
+import { DEFAULT_PERMISSIONS } from '@/config/schedule-config';
 import { getMessagesByDateRange } from '@/lib/db/chat-db';
 import { saveDailyReport } from '@/lib/db/daily-report-db';
 import { getWorktrees } from '@/lib/db/worktree-db';
+import { getAllRepositories } from '@/lib/db/db-repository';
 import type { DailyReport } from '@/lib/db/daily-report-db';
-import { SUMMARY_GENERATION_TIMEOUT_MS } from '@/config/review-config';
+import { SUMMARY_GENERATION_TIMEOUT_MS, GIT_LOG_TOTAL_TIMEOUT_MS, ISSUE_FETCH_TOTAL_TIMEOUT_MS } from '@/config/review-config';
+import { collectRepositoryCommitLogs } from '@/lib/git/git-utils';
+import { collectIssueInfos } from '@/lib/git/github-api';
+import { withTimeout } from '@/lib/utils';
 
 const logger = createLogger('daily-summary');
 
@@ -44,6 +51,10 @@ const FAILSAFE_MARGIN_MS = 10_000;
 interface GeneratingState {
   active: boolean;
   startedAt: number;
+  /** Target date for generation (Issue #638) */
+  date?: string;
+  /** AI tool used for generation (Issue #638) */
+  tool?: string;
 }
 
 declare global {
@@ -67,6 +78,16 @@ export function isGenerating(): boolean {
   }
 
   return true;
+}
+
+/**
+ * Get the current generating state if active.
+ * Returns null if no generation is in progress (or flag was failsafe-reset).
+ * Issue #638: Expose generation state for status endpoint.
+ */
+export function getGeneratingState(): GeneratingState | null {
+  if (!isGenerating()) return null;
+  return globalThis.__dailySummaryGenerating ?? null;
 }
 
 // =============================================================================
@@ -132,8 +153,8 @@ export async function generateDailySummary(
     throw new ConcurrentGenerationError();
   }
 
-  // Set generating flag
-  globalThis.__dailySummaryGenerating = { active: true, startedAt: Date.now() };
+  // Set generating flag (Issue #638: include date/tool for status endpoint)
+  globalThis.__dailySummaryGenerating = { active: true, startedAt: Date.now(), date, tool };
 
   try {
     logger.info('generation-started', { date, tool });
@@ -154,15 +175,51 @@ export async function generateDailySummary(
       worktreeMap.set(wt.id, wt.name);
     }
 
-    // 3. Build prompt
-    const prompt = buildSummaryPrompt(messages, worktreeMap, userInstruction);
+    // 3. Collect commit logs from valid repositories (Issue #627, #632)
+    const allRepositories = getAllRepositories(db);
+    const repositories = allRepositories.filter(repo => {
+      if (!repo.enabled) return false;
+      if (!existsSync(repo.path)) return false;
+      if (!existsSync(join(repo.path, '.git'))) return false;
+      return true;
+    });
 
-    // 4. Execute AI command
+    if (repositories.length < allRepositories.length) {
+      logger.info('repositories-filtered', {
+        total: allRepositories.length,
+        valid: repositories.length,
+        skipped: allRepositories.length - repositories.length,
+      });
+    }
+    const since = dayStart.toISOString();
+    const until = dayEnd.toISOString();
+    const commitLogs = await withTimeout(
+      collectRepositoryCommitLogs(repositories, since, until),
+      GIT_LOG_TOTAL_TIMEOUT_MS,
+      new Map()
+    );
+
+    // 3.5. Collect Issue information from commit messages (Issue #630)
+    const commitMessages = Array.from(commitLogs.values()).flatMap(
+      ({ commits }) => commits.map((c: { message: string }) => c.message)
+    );
+    const issueInfos = await withTimeout(
+      collectIssueInfos(repositories, commitMessages).catch(() => []),
+      ISSUE_FETCH_TOTAL_TIMEOUT_MS,
+      []
+    );
+
+    // 4. Build prompt
+    const prompt = buildSummaryPrompt(messages, worktreeMap, userInstruction, commitLogs, issueInfos);
+
+    // 5. Execute AI command
+    // Issue #626: Use tool-specific default permission (e.g. codex: 'workspace-write')
+    const permission = DEFAULT_PERMISSIONS[tool] || 'default';
     const result = await executeClaudeCommand(
       prompt,
       process.cwd(),
       tool,
-      'default',
+      permission,
       { timeoutMs: SUMMARY_GENERATION_TIMEOUT_MS, model }
     );
 
@@ -176,7 +233,7 @@ export async function generateDailySummary(
       throw new Error(`Summary generation failed: ${result.error}`);
     }
 
-    // 5. Validate and sanitize output
+    // 6. Validate and sanitize output
     let output = result.output.trim();
 
     // Remove control characters (same pattern as sanitizeMessage)
@@ -192,7 +249,7 @@ export async function generateDailySummary(
       output = output.slice(0, MAX_SUMMARY_OUTPUT_LENGTH);
     }
 
-    // 6. Save to database
+    // 7. Save to database
     const report = saveDailyReport(db, {
       date,
       content: output,

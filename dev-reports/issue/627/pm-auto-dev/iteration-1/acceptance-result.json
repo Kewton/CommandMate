@@ -1,0 +1,104 @@
+{
+  "issue_number": 627,
+  "status": "passed",
+  "criteria_results": [
+    {
+      "criterion": "CommitLogEntry and RepositoryCommitLogs types defined in src/types/git.ts",
+      "status": "passed",
+      "evidence": "CommitLogEntry is defined as Pick<CommitInfo, 'shortHash' | 'message' | 'author'> at line 69. RepositoryCommitLogs is defined as Map<string, { name: string; commits: CommitLogEntry[] }> at line 75."
+    },
+    {
+      "criterion": "MAX_COMMIT_LOG_LENGTH and GIT_LOG_TOTAL_TIMEOUT_MS added to src/config/review-config.ts",
+      "status": "passed",
+      "evidence": "MAX_COMMIT_LOG_LENGTH = 3000 at line 68. GIT_LOG_TOTAL_TIMEOUT_MS = 15_000 at line 74."
+    },
+    {
+      "criterion": "withTimeout implemented in src/lib/utils.ts",
+      "status": "passed",
+      "evidence": "withTimeout<T>(promise, timeoutMs, fallback?) implemented at lines 154-179. TimeoutError class at lines 134-139. Supports fallback value on timeout and rejects with TimeoutError when no fallback provided."
+    },
+    {
+      "criterion": "getCommitsByDateRange implemented in src/lib/git/git-utils.ts",
+      "status": "passed",
+      "evidence": "Function at lines 408-452. Uses --all flag for all branches, fs.existsSync check for missing paths, GIT_COMMIT_LOG_TIMEOUT_MS (5000ms), unit separator field delimiter, returns empty array on error."
+    },
+    {
+      "criterion": "collectRepositoryCommitLogs implemented in src/lib/git/git-utils.ts",
+      "status": "passed",
+      "evidence": "Function at lines 463-487. Uses Promise.allSettled for parallel execution, skips repositories with 0 commits, returns RepositoryCommitLogs Map."
+    },
+    {
+      "criterion": "buildSummaryPrompt accepts 4th argument commitLogs and generates <commit_log> section",
+      "status": "passed",
+      "evidence": "4th parameter commitLogs?: RepositoryCommitLogs at line 74. <commit_log> section built at lines 138-171 with repository headers showing name and commit count."
+    },
+    {
+      "criterion": "Tag escaping for <commit_log> and <user_data> in commit log content",
+      "status": "passed",
+      "evidence": "ESCAPED_TAGS array includes 'commit_log' at line 27. sanitizeMessage escapes both <commit_log> and <user_data> tags. All commit content passes through sanitizeMessage."
+    },
+    {
+      "criterion": "Commit log truncation at MAX_COMMIT_LOG_LENGTH",
+      "status": "passed",
+      "evidence": "logLength tracked and compared against MAX_COMMIT_LOG_LENGTH at lines 148 and 154. Truncation note appended when limit exceeded."
+    },
+    {
+      "criterion": "Final prompt fits within MAX_MESSAGE_LENGTH",
+      "status": "passed",
+      "evidence": "Check at line 175: if basePrompt.length > MAX_MESSAGE_LENGTH, commit log section is removed and prompt truncated."
+    },
+    {
+      "criterion": "daily-summary-generator integrates commit log collection",
+      "status": "passed",
+      "evidence": "getAllRepositories called at line 161, collectRepositoryCommitLogs called at line 164 wrapped with withTimeout(GIT_LOG_TOTAL_TIMEOUT_MS, new Map()), commitLogs passed to buildSummaryPrompt at line 171."
+    },
+    {
+      "criterion": "buildSummaryPrompt backward compatible (existing calls without commitLogs work)",
+      "status": "passed",
+      "evidence": "4th parameter is optional (commitLogs?: RepositoryCommitLogs). Existing tests call buildSummaryPrompt(messages, worktrees) and buildSummaryPrompt(messages, worktrees, userInstruction) without commitLogs - all pass."
+    },
+    {
+      "criterion": "All repositories (DB registered with existing path) have today's commits collected",
+      "status": "passed",
+      "evidence": "getAllRepositories(db) fetches all DB-registered repos. getCommitsByDateRange checks fs.existsSync and returns [] for missing paths. collectRepositoryCommitLogs runs all in parallel."
+    },
+    {
+      "criterion": "All branches included via --all flag",
+      "status": "passed",
+      "evidence": "git log args include '--all' at line 419 in getCommitsByDateRange."
+    },
+    {
+      "criterion": "Repositories with no commits are skipped",
+      "status": "passed",
+      "evidence": "collectRepositoryCommitLogs only adds to Map when result.value.commits.length > 0 at line 478."
+    },
+    {
+      "criterion": "Non-existent path repositories are skipped without error",
+      "status": "passed",
+      "evidence": "getCommitsByDateRange returns [] when !fs.existsSync(repoPath) at line 413."
+    },
+    {
+      "criterion": "Individual git log timeout controlled by GIT_COMMIT_LOG_TIMEOUT_MS",
+      "status": "passed",
+      "evidence": "GIT_COMMIT_LOG_TIMEOUT_MS = 5000 at line 390, passed to execFileAsync timeout option at line 425."
+    },
+    {
+      "criterion": "Total timeout controlled by GIT_LOG_TOTAL_TIMEOUT_MS",
+      "status": "passed",
+      "evidence": "withTimeout wraps collectRepositoryCommitLogs with GIT_LOG_TOTAL_TIMEOUT_MS at line 164-167 in daily-summary-generator.ts."
+    },
+    {
+      "criterion": "Existing tests pass with new mocks",
+      "status": "passed",
+      "evidence": "All 322 test files passed (6131 tests, 0 failures). daily-summary-generator tests include mocks for getAllRepositories, collectRepositoryCommitLogs, and withTimeout."
+    }
+  ],
+  "test_results": {
+    "passed": 6131,
+    "failed": 0,
+    "skipped": 7,
+    "total": 6138
+  },
+  "typescript_errors": 0,
+  "summary": "All 14 acceptance criteria for Issue #627 (commit log in report) are satisfied. Type definitions (CommitLogEntry, RepositoryCommitLogs), configuration constants (MAX_COMMIT_LOG_LENGTH, GIT_LOG_TOTAL_TIMEOUT_MS), utility function (withTimeout), git log collection functions (getCommitsByDateRange, collectRepositoryCommitLogs), prompt builder integration (<commit_log> section with tag escaping and truncation), and daily summary generator integration (with timeout-wrapped commit log collection) are all correctly implemented. All 6131 unit tests pass and TypeScript type checking reports zero errors. Backward compatibility is maintained for existing buildSummaryPrompt callers."
+}

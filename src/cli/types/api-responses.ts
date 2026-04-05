@@ -87,6 +87,43 @@ export interface WaitPromptOutput {
   [key: string]: unknown;
 }
 
+// Mirrors: src/app/api/daily-summary/route.ts GET response [Issue #636]
+export interface DailySummaryGetResponse {
+  report: SerializedReport | null;
+  messageCount: number;
+}
+
+// Mirrors: src/app/api/daily-summary/route.ts POST response [Issue #636]
+export interface DailySummaryGenerateResponse {
+  report: SerializedReport;
+  generated: boolean;
+}
+
+// Mirrors: serializeReport() in daily-summary route.ts [Issue #636]
+export interface SerializedReport {
+  date: string;
+  content: string;
+  generatedByTool: string;
+  model: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Mirrors: src/app/api/templates/[id]/route.ts GET response [Issue #636]
+export interface TemplateResponse {
+  id: string;
+  name: string;
+  content: string;
+}
+
+// Mirrors: src/app/api/daily-summary/status/route.ts GET response [Issue #638]
+export interface DailySummaryStatusResponse {
+  generating: boolean;
+  date?: string;
+  tool?: string;
+  startedAt?: string;
+}
+
 // Mirrors: src/types/models.ts ChatMessage (subset for send response)
 export interface ChatMessage {
   id?: number;

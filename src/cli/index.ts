@@ -17,6 +17,8 @@ import { createWaitCommand } from './commands/wait';
 import { createRespondCommand } from './commands/respond';
 import { createCaptureCommand } from './commands/capture';
 import { createAutoYesCommand } from './commands/auto-yes';
+// Issue #636: Report command
+import { createReportCommand } from './commands/report';
 
 // Read version from package.json
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -119,6 +121,9 @@ program.addCommand(createWaitCommand());
 program.addCommand(createRespondCommand());
 program.addCommand(createCaptureCommand());
 program.addCommand(createAutoYesCommand());
+
+// Issue #636: Report command
+program.addCommand(createReportCommand());
 
 // Issue #264: AI Tool Integration help section
 program.addHelpText('after', `

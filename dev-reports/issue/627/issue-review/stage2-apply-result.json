@@ -1,0 +1,78 @@
+{
+  "stage": 2,
+  "issue_number": "627",
+  "applied_findings": ["S1-001", "S1-002", "S1-003", "S1-004", "S1-005", "S1-006", "S1-007", "S1-008", "S1-009", "S1-010"],
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "applied_details": {
+    "must_fix": [
+      {
+        "id": "S1-001",
+        "status": "applied",
+        "change_summary": "git log --since/--until にISO 8601形式（タイムゾーン付き）を使用する方針を明記。dayStart/dayEnd (Date型) を toISOString() で変換して渡す設計をコード例付きで追記。"
+      },
+      {
+        "id": "S1-002",
+        "status": "applied",
+        "change_summary": "コミットログ専用の上限定数 MAX_COMMIT_LOG_LENGTH = 3000 を新設。メッセージセクションとコミットログセクションで独立したトランケーションを行う方針を明記。トランケーションルール（優先度・切り捨て順序）を具体化。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S1-003",
+        "status": "applied",
+        "change_summary": "コミットログのサニタイズ対策を専用セクションとして追記。sanitizeMessage() の拡張（<commit_log>タグエスケープ）、制御文字除去、実装場所を明記。受入条件にも追加。"
+      },
+      {
+        "id": "S1-004",
+        "status": "applied",
+        "change_summary": "git log タイムアウト設定を専用セクションとして追記。GIT_COMMIT_LOG_TIMEOUT_MS = 5000 の新設、Promise.allSettled() による並列実行方針を明記。受入条件にも追加。"
+      },
+      {
+        "id": "S1-005",
+        "status": "applied",
+        "change_summary": "getRepositories(db) (worktree-db.ts) を使用する方針を明示。db-repository.ts は使用しない旨と理由を記載。関連コンポーネントからdb-repository.tsを取り消し線で無効化。"
+      },
+      {
+        "id": "S1-006",
+        "status": "applied",
+        "change_summary": "リポジトリパスの存在確認とエラーハンドリング方針を専用セクションとして追記。fs.existsSync によるチェック、スキップ＋ログ出力の方針をコード例付きで明記。受入条件にも追加。"
+      },
+      {
+        "id": "S1-007",
+        "status": "applied",
+        "change_summary": "getCommitsByDateRange の戻り値型 CommitLogEntry を定義。既存 CommitInfo 型との差異（プロンプト埋め込み用の簡略型）を説明。関数シグネチャも明記。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S1-008",
+        "status": "applied",
+        "change_summary": "git log --all がデフォルトで重複を排除する旨をデータ取得セクションの --all 説明に追記。"
+      },
+      {
+        "id": "S1-009",
+        "status": "applied",
+        "change_summary": "テスト対象を拡充。git-utils.test.ts と daily-summary-generator.test.ts を実装タスク・変更対象ファイルに追加。テスト観点（正常系・パス不存在・タイムアウト・エラーハンドリング等）も明記。"
+      },
+      {
+        "id": "S1-010",
+        "status": "applied",
+        "change_summary": "受入条件をAI出力依存の表現から検証可能な条件に修正。「コミット数がセクションヘッダーに記載されていること」に変更し、AI出力の正確性はプロンプト品質で間接的に担保する方針を注記。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 10,
+    "applied": 10,
+    "skipped": 0,
+    "must_fix_applied": 2,
+    "should_fix_applied": 5,
+    "nice_to_have_applied": 3
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/627"
+  },
+  "updated_body_summary": "Stage 1レビューの全10件の指摘事項をIssue本文に反映。タイムゾーン処理方針、プロンプト長制限の具体化、サニタイズ対策、タイムアウト設定、リポジトリ取得方針の明確化、パス存在確認、戻り値型定義、重複排除の注記、テスト対象拡充、受入条件の検証可能化を実施。"
+}

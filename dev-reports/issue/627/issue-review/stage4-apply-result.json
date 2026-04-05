@@ -1,0 +1,17 @@
+{
+  "stage": 4,
+  "issue_number": "627",
+  "applied_findings": [
+    "S3-001",
+    "S3-002",
+    "S3-003",
+    "S3-004",
+    "S3-005",
+    "S3-006",
+    "S3-007",
+    "S3-008"
+  ],
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "summary": "Stage 3影響範囲レビューの全8件（Must Fix 2件、Should Fix 4件、Nice to Have 2件）をIssue #627に反映。S3-001: buildSummaryPromptの引数拡張方針（第4引数オプショナル追加、後方互換維持）を新セクションとして追加し、実装タスク・受入条件・影響範囲テーブルにも反映。S3-002: daily-summary-generator.test.tsの既存テスト11件へのモック追加方針（getRepositories・getCommitsByDateRangeモックをデフォルト空配列で追加）をテスト実装タスクと受入条件に明記。S3-003: git log並列実行の全体タイムアウト（GIT_LOG_TOTAL_TIMEOUT_MS=15000）とフェイルセーフへの影響を新セクション・実装タスク・受入条件に追加。S3-004: アーカイブ済みworktreeのリポジトリパス処理方針を新セクションとして追加。S3-005: 既存sanitizeMessageテストへのcommit_logタグエスケープテスト追加をテスト実装タスクに明記。S3-006: daily-summary/route.tsを「変更不要だが影響を受けるファイル」テーブルとして影響範囲に追加。S3-007: tests/unit/lib/git/ディレクトリ新規作成をテスト実装タスクに明記。S3-008: review-config.tsへの定数追加が循環依存なしであることを影響範囲テーブルに明記。"
+}

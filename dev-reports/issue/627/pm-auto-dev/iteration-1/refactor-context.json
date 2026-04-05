@@ -1,0 +1,19 @@
+{
+  "issue_number": 627,
+  "refactor_targets": [
+    "src/types/git.ts",
+    "src/lib/utils.ts",
+    "src/lib/git/git-utils.ts",
+    "src/lib/summary-prompt-builder.ts",
+    "src/lib/daily-summary-generator.ts"
+  ],
+  "quality_metrics": {
+    "before_tests_passed": 6131
+  },
+  "improvement_goals": [
+    "コードの可読性・保守性向上",
+    "不要な複雑さの排除",
+    "既存パターンとの一貫性確保",
+    "JSDocコメントの品質確認"
+  ]
+}

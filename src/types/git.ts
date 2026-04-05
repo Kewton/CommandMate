@@ -57,3 +57,42 @@ export interface GitDiffResponse {
  * Used by API routes to validate commit hash parameters before passing to git commands.
  */
 export const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/;
+
+// =============================================================================
+// Issue #627: Commit log in report
+// =============================================================================
+
+/**
+ * Lightweight commit entry for report generation.
+ * Picks only the fields needed for commit log display.
+ */
+export type CommitLogEntry = Pick<CommitInfo, 'shortHash' | 'message' | 'author'>;
+
+/**
+ * Map of repository ID to its name and commits.
+ * Used to collect commit logs across all repositories for daily reports.
+ */
+export type RepositoryCommitLogs = Map<string, { name: string; commits: CommitLogEntry[] }>;
+
+// =============================================================================
+// Issue #630: Issue context in report
+// =============================================================================
+
+/**
+ * GitHub Issue information for report generation context.
+ * Includes repository name prefix to distinguish same issue numbers across repos.
+ */
+export interface IssueInfo {
+  /** Repository name (for disambiguation when same issue number exists in multiple repos) */
+  repositoryName: string;
+  /** Issue number */
+  number: number;
+  /** Issue title */
+  title: string;
+  /** Issue labels */
+  labels: string[];
+  /** Issue state (open/closed) */
+  state: string;
+  /** Truncated body summary (up to MAX_ISSUE_BODY_LENGTH chars) */
+  bodySummary: string;
+}

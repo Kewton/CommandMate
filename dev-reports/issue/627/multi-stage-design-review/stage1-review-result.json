@@ -1,0 +1,81 @@
+{
+  "stage": 1,
+  "focus": "設計原則",
+  "reviewer": "opus",
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "Should Fix",
+      "title": "buildSummaryPrompt の引数増加による可読性低下 - オブジェクト引数パターンへの移行を検討",
+      "description": "buildSummaryPrompt は現在3引数（messages, worktrees, userInstruction?）であり、設計方針書では第4引数として commitLogs? を追加する。位置引数が4つになると呼び出し側でどの引数が何かを把握しづらくなる。daily-summary-generator.ts の GenerateDailySummaryParams のようにオブジェクト引数パターンを既に使っているプロジェクトにおいて、一貫性が欠ける。",
+      "suggestion": "buildSummaryPrompt の引数を options オブジェクトにリファクタリングする。例: buildSummaryPrompt({ messages, worktrees, userInstruction?, commitLogs? })。ただし後方互換性を維持するため、既存の3引数シグネチャを非推奨とし段階的に移行するか、本Issue内で一括変更するかを判断すること。KISS原則の観点からは、本Issueでは第4引数追加のまま進め、別Issueでリファクタリングを計画する選択肢もある。"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "Must Fix",
+      "title": "withTimeout ユーティリティが未定義",
+      "description": "設計方針書の daily-summary-generator.ts フローで `withTimeout(Promise.allSettled(...), GIT_LOG_TOTAL_TIMEOUT_MS)` を使用しているが、プロジェクト内に withTimeout 関数は存在しない。実装時に定義が必要だが、設計方針書に定義場所・シグネチャ・タイムアウト時の挙動（例: 取得済み結果を返すのか、例外をスローするのか）が記載されていない。",
+      "suggestion": "withTimeout のシグネチャ、配置場所（src/lib/utils.ts 等）、タイムアウト時の挙動を設計方針書に明記する。特に Promise.allSettled をラップする場合、タイムアウト発生時に既に settled な結果のみを返す設計なのか、全体を reject する設計なのかを決定する必要がある。設計方針書の '4. API設計' セクションに追記が適切。"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "Should Fix",
+      "title": "CommitLogEntry と CommitInfo の型重複 - DRY原則の懸念",
+      "description": "設計方針書では CommitLogEntry を新規型として定義し、既存の CommitInfo とは別物とする判断をしている。CommitLogEntry は CommitInfo のサブセット（shortHash, message, author）であり、Pick<CommitInfo, 'shortHash' | 'message' | 'author'> で表現可能。新規型を作ると、将来 CommitInfo のフィールド名が変更された際に追従漏れが発生する。",
+      "suggestion": "CommitLogEntry を独立型として定義する代わりに、Pick<CommitInfo, 'shortHash' | 'message' | 'author'> を型エイリアスとして定義する。例: type CommitLogEntry = Pick<CommitInfo, 'shortHash' | 'message' | 'author'>。これにより DRY 原則を維持しつつ、軽量な型として利用できる。ただし、git log の format が CommitInfo のパースロジックと異なるため、実行時の変換は必要。"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "Nice to Have",
+      "title": "RepositoryCommitLogs の Map キーが path だが name も必要 - データ構造の選択",
+      "description": "RepositoryCommitLogs は Map<string, { name, commits }> で key が path。buildSummaryPrompt に渡す際に path をキーにする必然性が低い（プロンプト内では name のみ使用）。配列 Array<{ path, name, commits }> の方がシンプルで、Map の lookup が不要な場面では過剰。",
+      "suggestion": "RepositoryCommitLogs を Array<{ name: string; commits: CommitLogEntry[] }> に簡素化することを検討する。path はプロンプト構築には不要であり、KISS原則に沿う。Map が必要なのは重複排除だが、getRepositories の結果は既に GROUP BY で一意。"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "Should Fix",
+      "title": "sanitizeMessage 拡張方法が OCP 違反",
+      "description": "設計方針書では sanitizeMessage に commit_log タグエスケープを直接追加する。今後新しいタグ（例: <schedule_data>）が追加されるたびに sanitizeMessage を修正する必要があり、Open/Closed Principle に反する。既に user_data タグのエスケープがハードコードされている。",
+      "suggestion": "エスケープ対象タグを定数配列として定義し、sanitizeMessage がその配列をループ処理する設計に変更する。例: const ESCAPED_TAGS = ['user_data', 'commit_log'] as const; sanitized = ESCAPED_TAGS.reduce((s, tag) => s.replace(new RegExp(`<\\\\/?${tag}>`, 'gi'), ...), sanitized)。これにより新タグ追加時は配列への追加のみで済む。"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "Nice to Have",
+      "title": "getCommitsByDateRange のエラーハンドリングが既存パターンと不一致",
+      "description": "既存の git-utils.ts には2つのエラーハンドリングパターンがある: (1) execGitCommand は null を返す、(2) execGitCommandTyped は型付きエラーをスローする。設計方針書の getCommitsByDateRange は 'エラー時は空配列を返す' としており、(1)に近いが第3のパターンとなる。",
+      "suggestion": "既存の execGitCommand（null 返却）を内部利用し、null の場合に空配列を返す設計とすることで、既存パターンとの一貫性を保つ。ただし、タイムアウト値をカスタマイズする必要があるため、execGitCommand に timeout パラメータを追加するか、execGitCommandTyped を利用して catch で空配列を返すかを明確にする。設計方針書に採用パターンを明記すべき。"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "Must Fix",
+      "title": "GIT_COMMIT_LOG_TIMEOUT_MS の配置場所が不明確",
+      "description": "設計方針書では GIT_COMMIT_LOG_TIMEOUT_MS = 5000 を個別リポジトリのタイムアウトとして定義しているが、配置場所が明記されていない。review-config.ts には GIT_LOG_TOTAL_TIMEOUT_MS のみが記載されている。git-utils.ts には既に GIT_COMMAND_TIMEOUT_MS = 1000 と GIT_LOG_TIMEOUT_MS = 3000 が定義されており、同じファイルに類似定数が3つ存在することになる。",
+      "suggestion": "GIT_COMMIT_LOG_TIMEOUT_MS は git-utils.ts に配置し、既存の GIT_LOG_TIMEOUT_MS (3000ms) との関係を整理する。5000ms は GIT_LOG_TIMEOUT_MS より大きく、全ブランチ対象の --all オプションを使うため妥当だが、名前の類似性から混乱しやすい。GIT_COMMIT_LOG_TIMEOUT_MS のドキュメントコメントに '--all オプション付きのため GIT_LOG_TIMEOUT_MS より大きい' 旨を記載すること。設計方針書のセクション10（変更ファイルサマリー）にも配置場所を明記する。"
+    },
+    {
+      "id": "DR1-008",
+      "severity": "Should Fix",
+      "title": "コミットログ収集ロジックの責務が daily-summary-generator.ts に集中",
+      "description": "設計方針書では daily-summary-generator.ts にリポジトリ一覧取得、並列 git log 実行、RepositoryCommitLogs 構築、タイムアウト管理を全て追加する。これは単一責任原則（SRP）の観点で懸念がある。daily-summary-generator.ts の現在の責務は 'AI サマリー生成のオーケストレーション' であり、'git コミットログ収集' は別の責務。",
+      "suggestion": "コミットログ収集ロジックを専用関数として git-utils.ts に切り出す。例: collectRepositoryCommitLogs(db, since, until): Promise<RepositoryCommitLogs>。daily-summary-generator.ts はこの関数を呼ぶだけにする。これにより git-utils.ts が git 操作の責務を一元管理し、テストも容易になる。ただし、db 引数の依存方向に注意（git-utils が db モジュールに依存してよいか検討が必要。依存逆転の観点からは、リポジトリ一覧は呼び出し元から渡す方が良い）。"
+    },
+    {
+      "id": "DR1-009",
+      "severity": "Should Fix",
+      "title": "MAX_COMMIT_LOG_LENGTH のトランケーション実装箇所が未指定",
+      "description": "設計方針書でMAX_COMMIT_LOG_LENGTH = 3000 を定義し '独立トランケーション' とあるが、トランケーションを行う具体的な関数・箇所が明記されていない。buildSummaryPrompt 内で行うのか、daily-summary-generator.ts で行うのか不明。プロンプト構築とデータ収集のどちらの責務かが曖昧。",
+      "suggestion": "トランケーションは buildSummaryPrompt 内で行うのが適切（プロンプト構築の責務）。buildSummaryPrompt が commitLogs を受け取った後、commit_log セクションを構築する際に MAX_COMMIT_LOG_LENGTH でトランケーションする設計を明記する。daily-summary-generator.ts は生データを渡し、buildSummaryPrompt がプロンプト最適化の責務を持つ形にする。"
+    },
+    {
+      "id": "DR1-010",
+      "severity": "Nice to Have",
+      "title": "テスト設計で git-utils.test.ts が '新規' とあるが既存テストの確認が必要",
+      "description": "設計方針書では tests/unit/lib/git/git-utils.test.ts を '新規テストファイル' としているが、git-utils.ts は Issue #447 で実装済みの既存ファイル。既存テストが存在する可能性がある。既存テストがある場合は '追加' であり、ない場合のみ '新規'。",
+      "suggestion": "既存の git-utils テストの有無を確認し、設計方針書の記載を正確にする。既存テストがあれば getCommitsByDateRange のテストケースを追加する形に修正する。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 5,
+  "nice_to_have_count": 3,
+  "summary": "設計方針書は全体として堅実であり、セキュリティ（execFile使用、サニタイズ）、パフォーマンス（並列実行、タイムアウト階層）、後方互換性（オプショナル引数）への配慮が適切になされている。主要な指摘は2点のMust Fix: (1) withTimeout ユーティリティの定義・挙動が未記載、(2) GIT_COMMIT_LOG_TIMEOUT_MS の配置場所が不明確。Should Fix では、sanitizeMessage のタグエスケープ拡張性（OCP違反）、コミットログ収集ロジックの責務分離（SRP）、CommitLogEntry の DRY 原則準拠、トランケーション実装箇所の明確化が主な改善点。既存コードパターンとの一貫性は概ね保たれているが、エラーハンドリングパターンの選択を明確化すべき。YAGNI原則については問題なく、不要な機能は含まれていない。"
+}
