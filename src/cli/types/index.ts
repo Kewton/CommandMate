@@ -277,6 +277,30 @@ export interface DocsOptions {
   all?: boolean;
 }
 
+/** report command options [Issue #636] */
+export interface ReportGenerateOptions {
+  date?: string;
+  tool?: string;
+  model?: string;
+  template?: string;
+  instruction?: string;
+  token?: string;
+}
+
+/** report show options [Issue #636] */
+export interface ReportShowOptions {
+  date?: string;
+  json?: boolean;
+  token?: string;
+}
+
+/** report list options [Issue #636] */
+export interface ReportListOptions {
+  days?: number;
+  json?: boolean;
+  token?: string;
+}
+
 /**
  * Extract error message from unknown error
  * Issue #125: DRY - centralized error message extraction
