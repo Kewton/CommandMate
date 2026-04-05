@@ -8,6 +8,9 @@
 import { NextResponse } from 'next/server';
 import { isGenerating, getGeneratingState } from '@/lib/daily-summary-generator';
 
+/** Force dynamic rendering - this route reads runtime state (globalThis) */
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   if (!isGenerating()) {
     return NextResponse.json({ generating: false });
