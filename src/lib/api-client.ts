@@ -13,6 +13,7 @@ import type { SlashCommandGroup } from '@/types/slash-commands';
 export interface RepositorySummary {
   path: string;
   name: string;
+  displayName?: string;
   worktreeCount: number;
 }
 

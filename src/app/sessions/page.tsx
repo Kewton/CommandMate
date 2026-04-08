@@ -121,7 +121,8 @@ export default function SessionsPage() {
       result = result.filter(
         (wt) =>
           wt.name.toLowerCase().includes(lower) ||
-          wt.repositoryName.toLowerCase().includes(lower)
+          wt.repositoryName.toLowerCase().includes(lower) ||
+          (wt.repositoryDisplayName?.toLowerCase().includes(lower) ?? false)
       );
     }
 
@@ -141,7 +142,9 @@ export default function SessionsPage() {
           break;
         }
         case 'repositoryName': {
-          comparison = a.repositoryName.toLowerCase().localeCompare(b.repositoryName.toLowerCase());
+          const repoA = (a.repositoryDisplayName ?? a.repositoryName).toLowerCase();
+          const repoB = (b.repositoryDisplayName ?? b.repositoryName).toLowerCase();
+          comparison = repoA.localeCompare(repoB);
           if (comparison === 0) {
             comparison = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
           }
@@ -152,7 +155,9 @@ export default function SessionsPage() {
           const priorityB = WORKTREE_STATUS_PRIORITY[b.status ?? ''] ?? DEFAULT_STATUS_PRIORITY;
           comparison = priorityA - priorityB;
           if (comparison === 0) {
-            comparison = a.repositoryName.toLowerCase().localeCompare(b.repositoryName.toLowerCase());
+            const repoA2 = (a.repositoryDisplayName ?? a.repositoryName).toLowerCase();
+            const repoB2 = (b.repositoryDisplayName ?? b.repositoryName).toLowerCase();
+            comparison = repoA2.localeCompare(repoB2);
           }
           break;
         }
@@ -246,7 +251,7 @@ export default function SessionsPage() {
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                          {wt.repositoryName}
+                          {wt.repositoryDisplayName ?? wt.repositoryName}
                         </div>
                         <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
                           {wt.name}
