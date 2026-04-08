@@ -92,9 +92,11 @@ export function getWorktrees(
       w.last_user_message, w.last_user_message_at, w.last_message_summary,
       w.updated_at, w.favorite, w.status, w.link, w.cli_tool_id, w.last_viewed_at,
       w.selected_agents, w.vibe_local_model, w.vibe_local_context_window,
+      r.display_name as repository_display_name,
       (SELECT MAX(timestamp) FROM chat_messages
        WHERE worktree_id = w.id AND role = 'assistant' ${ACTIVE_FILTER}) as last_assistant_message_at
     FROM worktrees w
+    LEFT JOIN repositories r ON w.repository_path = r.path
   `;
 
   const params: string[] = [];
@@ -126,6 +128,7 @@ export function getWorktrees(
     selected_agents: string | null;
     vibe_local_model: string | null;
     vibe_local_context_window: number | null;
+    repository_display_name: string | null;
     last_assistant_message_at: number | null;
   }>;
 
@@ -142,6 +145,7 @@ export function getWorktrees(
       path: row.path,
       repositoryPath: row.repository_path || '',
       repositoryName: row.repository_name || '',
+      repositoryDisplayName: row.repository_display_name || undefined,
       description: row.description || undefined,
       lastUserMessage: row.last_user_message || undefined,
       lastUserMessageAt: row.last_user_message_at ? new Date(row.last_user_message_at) : undefined,
@@ -167,28 +171,33 @@ export function getWorktrees(
 export function getRepositories(db: Database.Database): Array<{
   path: string;
   name: string;
+  displayName?: string;
   worktreeCount: number;
 }> {
   const stmt = db.prepare(`
     SELECT
-      repository_path as path,
-      repository_name as name,
+      w.repository_path as path,
+      w.repository_name as name,
+      r.display_name as display_name,
       COUNT(*) as worktree_count
-    FROM worktrees
-    WHERE repository_path IS NOT NULL
-    GROUP BY repository_path, repository_name
-    ORDER BY repository_name ASC
+    FROM worktrees w
+    LEFT JOIN repositories r ON w.repository_path = r.path
+    WHERE w.repository_path IS NOT NULL
+    GROUP BY w.repository_path, w.repository_name
+    ORDER BY w.repository_name ASC
   `);
 
   const rows = stmt.all() as Array<{
     path: string;
     name: string;
+    display_name: string | null;
     worktree_count: number;
   }>;
 
   return rows.map((row) => ({
     path: row.path,
     name: row.name,
+    displayName: row.display_name || undefined,
     worktreeCount: row.worktree_count,
   }));
 }
@@ -207,9 +216,11 @@ export function getWorktreeById(
       w.last_user_message, w.last_user_message_at, w.last_message_summary,
       w.updated_at, w.favorite, w.status, w.link, w.cli_tool_id, w.last_viewed_at,
       w.selected_agents, w.vibe_local_model, w.vibe_local_context_window,
+      r.display_name as repository_display_name,
       (SELECT MAX(timestamp) FROM chat_messages
        WHERE worktree_id = w.id AND role = 'assistant' ${ACTIVE_FILTER}) as last_assistant_message_at
     FROM worktrees w
+    LEFT JOIN repositories r ON w.repository_path = r.path
     WHERE w.id = ?
   `);
 
@@ -232,6 +243,7 @@ export function getWorktreeById(
     selected_agents: string | null;
     vibe_local_model: string | null;
     vibe_local_context_window: number | null;
+    repository_display_name: string | null;
     last_assistant_message_at: number | null;
   } | undefined;
 
@@ -245,6 +257,7 @@ export function getWorktreeById(
     path: row.path,
     repositoryPath: row.repository_path || '',
     repositoryName: row.repository_name || '',
+    repositoryDisplayName: row.repository_display_name || undefined,
     description: row.description || undefined,
     lastUserMessage: row.last_user_message || undefined,
     lastUserMessageAt: row.last_user_message_at ? new Date(row.last_user_message_at) : undefined,

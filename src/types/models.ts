@@ -43,6 +43,8 @@ export interface Worktree {
   repositoryPath: string;
   /** Repository display name (e.g., "MyProject") */
   repositoryName: string;
+  /** Repository user-defined alias (Issue #642) */
+  repositoryDisplayName?: string;
   /** User description for this worktree */
   description?: string;
   /** Latest user message content (truncated to ~200 chars) */
@@ -99,6 +101,8 @@ export interface Repository {
   id: string;
   /** Repository display name */
   name: string;
+  /** User-defined alias for display (Issue #642) */
+  displayName?: string;
   /** Absolute path to repository root */
   path: string;
   /** Whether this repository is enabled for scanning */

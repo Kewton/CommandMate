@@ -16,6 +16,7 @@ import { isSystemDirectory } from '@/config/system-directories';
 export interface Repository {
   id: string;
   name: string;
+  displayName?: string;
   path: string;
   enabled: boolean;
   cloneUrl?: string;
@@ -52,6 +53,7 @@ export interface CloneJobDB {
 interface RepositoryRow {
   id: string;
   name: string;
+  display_name: string | null;
   path: string;
   enabled: number;
   clone_url: string | null;
@@ -89,6 +91,7 @@ function mapRepositoryRow(row: RepositoryRow): Repository {
   return {
     id: row.id,
     name: row.name,
+    displayName: row.display_name || undefined,
     path: row.path,
     enabled: row.enabled === 1,
     cloneUrl: row.clone_url || undefined,
@@ -235,6 +238,7 @@ export function updateRepository(
   id: string,
   updates: {
     name?: string;
+    displayName?: string;
     enabled?: boolean;
     cloneUrl?: string;
     normalizedCloneUrl?: string;
@@ -247,6 +251,11 @@ export function updateRepository(
   if (updates.name !== undefined) {
     assignments.push('name = ?');
     params.push(updates.name);
+  }
+
+  if (updates.displayName !== undefined) {
+    assignments.push('display_name = ?');
+    params.push(updates.displayName || null);
   }
 
   if (updates.enabled !== undefined) {

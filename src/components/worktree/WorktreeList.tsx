@@ -188,6 +188,7 @@ export function WorktreeList({ initialWorktrees = [] }: WorktreeListProps) {
           wt.name.toLowerCase().includes(query) ||
           wt.path.toLowerCase().includes(query) ||
           wt.repositoryName.toLowerCase().includes(query) ||
+          (wt.repositoryDisplayName?.toLowerCase().includes(query) ?? false) ||
           wt.lastMessageSummary?.toLowerCase().includes(query) ||
           wt.description?.toLowerCase().includes(query)
       );
@@ -499,7 +500,7 @@ Type "delete" to confirm:`;
         <div className="space-y-8">
           {Array.from(worktreesByRepository.entries()).map(([repoPath, repoWorktrees]) => {
             const repoInfo = repositories.find((r) => r.path === repoPath);
-            const repoName = repoInfo?.name || 'Unknown Repository';
+            const repoName = repoInfo?.displayName ?? repoInfo?.name ?? 'Unknown Repository';
 
             return (
               <div key={repoPath} className="space-y-4">

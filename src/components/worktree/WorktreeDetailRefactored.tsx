@@ -1560,7 +1560,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           {/* Desktop Header with back button, status, and info */}
           <DesktopHeader
             worktreeName={worktreeName}
-            repositoryName={worktree?.repositoryName ?? 'Unknown'}
+            repositoryName={worktree?.repositoryDisplayName ?? worktree?.repositoryName ?? 'Unknown'}
             description={worktree?.description}
             status={worktreeStatus}
             gitStatus={worktree?.gitStatus}
