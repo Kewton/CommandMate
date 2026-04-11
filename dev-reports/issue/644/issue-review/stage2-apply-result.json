@@ -1,0 +1,60 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 644,
+  "iteration": 1,
+  "apply_date": "2026-04-12",
+  "source_review": "dev-reports/issue/644/issue-review/stage1-review-result.json",
+  "applied_findings": [
+    "S1-001",
+    "S1-002",
+    "S1-003",
+    "S1-004"
+  ],
+  "skipped_findings": [],
+  "skipped_reason": {},
+  "nice_to_have_skipped": [
+    "S1-005",
+    "S1-006",
+    "S1-007"
+  ],
+  "github_updated": true,
+  "github_url": "https://github.com/Kewton/CommandMate/issues/644",
+  "changes": [
+    {
+      "finding_id": "S1-001",
+      "severity": "Should Fix",
+      "section": "2. api-client 追加",
+      "change_summary": "updateDisplayName のレスポンス型を RepositoryListItem から分離し、worktreeCount を除外した UpdateRepositoryDisplayNameResponse 型を定義。PUT /api/repositories/[id] が worktreeCount を返却しない実APIとの型整合性を確保。RepositoryListItem と Omit<RepositoryListItem, 'worktreeCount'> の 2 型を明示的に定義し、フロントの保存後処理方針（局所更新 or 全体再フェッチ）も追記。"
+    },
+    {
+      "finding_id": "S1-002",
+      "severity": "Should Fix",
+      "section": "1. API 追加",
+      "change_summary": "既存 src/lib/db/worktree-db.ts:171 の getRepositories() を流用しない理由を明記。worktrees テーブル起点の GROUP BY クエリのため (1) worktree 0 件のリポジトリを返さない (2) id/enabled フィールドを返さない という制約を具体化。getAllRepositories(db)（db-repository.ts:290-300）を使用し、worktreeCount は別途 worktrees テーブルへの集計クエリで付与する方針を記載。代替案として getAllRepositoriesWithWorktreeCount() ヘルパーの追加も言及。"
+    },
+    {
+      "finding_id": "S1-003",
+      "severity": "Should Fix",
+      "section": "機能要件 1. リポジトリ一覧表示 / 実装方針 1. API 追加",
+      "change_summary": "無効化リポジトリの扱いを方針 (a) で明確化。getAllRepositories(db) が WHERE 句なしで enabled=0 も含む全件を返すため、フロント側で enabled フィールドを参照して無効バッジを表示する。/api/repositories/excluded（Issue #190）は別目的のため本 Issue では使用しない旨を明示。機能要件セクションと API 追加セクションの両方に記載。"
+    },
+    {
+      "finding_id": "S1-004",
+      "severity": "Should Fix",
+      "section": "4. 共有定数",
+      "change_summary": "共有定数 MAX_DISPLAY_NAME_LENGTH の配置先を具体化。新規ファイル src/config/repository-config.ts を作成し export const MAX_DISPLAY_NAME_LENGTH = 100 を定義。既存 src/config/auth-config.ts / review-config.ts / timer-constants.ts の命名パターンを踏襲する方針を明記。API ルート（src/app/api/repositories/[id]/route.ts:13）のローカル定義を削除し、フロント（RepositoryList.tsx）と共に import する旨を明記。関連ファイルリストにも src/config/repository-config.ts を追加。"
+    }
+  ],
+  "additional_updates": [
+    {
+      "section": "受け入れ条件",
+      "change_summary": "無効化リポジトリのバッジ表示を受け入れ条件に追加。100 文字バリデーションに MAX_DISPLAY_NAME_LENGTH の import 元を明記。"
+    },
+    {
+      "section": "関連ファイル",
+      "change_summary": "src/lib/db/worktree-db.ts（getRepositories() との棲み分け参照）と src/config/repository-config.ts（新規）を追加。"
+    }
+  ],
+  "summary": "Stage 1 レビューの Should Fix 4 件（S1-001〜S1-004）をすべて Issue #644 本文に反映しました。Nice to Have の S1-005〜S1-007 はコンテキスト設定（apply_nice_to_have=false）により適用対象外としてスキップ。gh issue edit --body-file で GitHub Issue を更新済み（https://github.com/Kewton/CommandMate/issues/644）。主な変更: (1) updateDisplayName のレスポンス型を worktreeCount を除外した独立型に分離、(2) 既存 getRepositories() との棲み分けを明記、(3) 無効化リポジトリは getAllRepositories() 全件返却＋フロントで enabled バッジ表示の方針を確定、(4) MAX_DISPLAY_NAME_LENGTH の配置先を src/config/repository-config.ts に確定。"
+}

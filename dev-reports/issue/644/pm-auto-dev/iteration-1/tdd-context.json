@@ -1,0 +1,62 @@
+{
+  "issue_number": 644,
+  "title": "feat(repositories): リポジトリ一覧表示と別名編集UI",
+  "acceptance_criteria": [
+    "/repositories 画面で登録済みリポジトリの一覧が表示される（RepositoryList は RepositoryManager の上部に配置）",
+    "各行でリポジトリ名・別名・パス・worktree数・enabled状態が確認できる",
+    "無効化リポジトリ（enabled=false）が無効バッジ付きで一覧に表示される",
+    "各行で別名をインライン編集し、保存すると DBに永続化される",
+    "保存した別名が Sessions 画面・Worktree詳細画面など既存の表示箇所に反映される（リロード後反映）",
+    "空文字 / null 保存で別名がクリアされ、フォールバックとして name が表示に戻る",
+    "100文字超入力時にクライアント側でバリデーションエラーが出る（MAX_DISPLAY_NAME_LENGTH を src/config/repository-config.ts から import して使用）",
+    "既存 PUT /api/repositories/[id] ルートのローカル定数 MAX_DISPLAY_NAME_LENGTH が src/config/repository-config.ts からの import に置換され、エラーメッセージ文言は従来通りであること",
+    "worktreeCount 集計クエリが repository_path ベースで動作し、repository_id ではないこと",
+    "既存 getAllRepositories(db) のシグネチャが変更されていないこと",
+    "RepositoryManager の Add/Sync 完了後に RepositoryList が自動再取得される（page.tsx の refreshKey state 連携）",
+    "GET /api/repositories が既存の認証ミドルウェアを正常に通過すること",
+    "保存成功/失敗時に適切なフィードバック（トースト or メッセージ）が出る",
+    "ダークモードで崩れなく表示される",
+    "npm run lint / npx tsc --noEmit / npm run test:unit / npm run test:integration がパスする",
+    "新規テスト3ファイルが追加されている: tests/integration/api-repositories-list.test.ts, tests/unit/components/repository/RepositoryList.test.tsx, tests/integration/api-repositories-put.test.ts"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: src/config/repository-config.ts 新規作成（MAX_DISPLAY_NAME_LENGTH = 100 をエクスポート）",
+    "Task 1.2: src/lib/db/db-repository.ts に getAllRepositoriesWithWorktreeCount(db) ヘルパー追加（既存 getAllRepositories() は変更しない）",
+    "Task 2.1: src/app/api/repositories/route.ts に GET ハンドラ追加（getAllRepositoriesWithWorktreeCount 使用）",
+    "Task 2.2: src/app/api/repositories/[id]/route.ts のローカル定数を共有定数 import に置換",
+    "Task 3.1: src/lib/api-client.ts に RepositoryListItem 型・UpdateRepositoryDisplayNameResponse 型・list()・updateDisplayName() を追加",
+    "Task 4.1: src/components/repository/RepositoryList.tsx 新規作成（インライン別名編集・enabled バッジ・refreshKey prop）",
+    "Task 4.2: src/components/repository/index.ts に RepositoryList をエクスポート追加",
+    "Task 4.3: src/app/repositories/page.tsx 更新（RepositoryList を上部に配置・refreshKey 連携）",
+    "Task 5.1: tests/integration/api-repositories-list.test.ts 新規作成",
+    "Task 5.2: tests/integration/api-repositories-put.test.ts 新規作成",
+    "Task 5.3: tests/unit/components/repository/RepositoryList.test.tsx 新規作成",
+    "Task 6.1: CLAUDE.md の主要モジュール一覧を更新"
+  ],
+  "target_coverage": 80,
+  "key_files": {
+    "new": [
+      "src/config/repository-config.ts",
+      "src/components/repository/RepositoryList.tsx",
+      "tests/integration/api-repositories-list.test.ts",
+      "tests/integration/api-repositories-put.test.ts",
+      "tests/unit/components/repository/RepositoryList.test.tsx"
+    ],
+    "modified": [
+      "src/lib/db/db-repository.ts",
+      "src/app/api/repositories/route.ts",
+      "src/app/api/repositories/[id]/route.ts",
+      "src/lib/api-client.ts",
+      "src/components/repository/index.ts",
+      "src/app/repositories/page.tsx",
+      "CLAUDE.md"
+    ]
+  },
+  "constraints": [
+    "既存 getAllRepositories(db) のシグネチャは変更しない",
+    "worktrees テーブルには repository_id カラムがなく、repository_path で紐付け",
+    "PUT /api/repositories/[id] のエラーメッセージ文言を変更しない",
+    "ダークモード対応（Tailwind CSS）必須",
+    "認証ミドルウェアは追加変更なし（既存のまま流用）"
+  ]
+}

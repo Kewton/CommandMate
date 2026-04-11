@@ -3,14 +3,13 @@
  * PUT: Update repository display_name
  *
  * Issue #642: Repository display name (alias) feature
+ * Issue #644: Shared MAX_DISPLAY_NAME_LENGTH constant
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getRepositoryById, updateRepository } from '@/lib/db/db-repository';
-
-/** Maximum length for display_name */
-const MAX_DISPLAY_NAME_LENGTH = 100;
+import { MAX_DISPLAY_NAME_LENGTH } from '@/config/repository-config';
 
 export async function PUT(
   request: NextRequest,

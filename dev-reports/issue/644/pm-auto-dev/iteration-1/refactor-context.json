@@ -1,0 +1,24 @@
+{
+  "issue_number": 644,
+  "refactor_targets": [
+    "src/config/repository-config.ts",
+    "src/lib/db/db-repository.ts",
+    "src/app/api/repositories/route.ts",
+    "src/app/api/repositories/[id]/route.ts",
+    "src/lib/api-client.ts",
+    "src/components/repository/RepositoryList.tsx",
+    "src/app/repositories/page.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "lint_status": "pass",
+    "typecheck_status": "pass"
+  },
+  "improvement_goals": [
+    "コードの可読性・保守性の向上",
+    "重複ロジックの排除",
+    "型安全性の確認",
+    "エラーハンドリングの適切さ確認",
+    "パフォーマンス上の問題がないか確認"
+  ]
+}

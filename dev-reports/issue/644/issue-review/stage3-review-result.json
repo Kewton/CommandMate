@@ -1,0 +1,152 @@
+{
+  "stage": 3,
+  "focus": "影響範囲",
+  "reviewer": "issue-review-agent",
+  "issue_number": 644,
+  "iteration": 1,
+  "review_date": "2026-04-12",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "Must Fix",
+      "title": "worktreeCount 集計クエリの JOIN キー誤り（repositoryId ではなく repository_path）",
+      "description": "Issueの「実装方針 1. API追加」で、worktreeCount を付与する集計クエリ例として `SELECT repositoryId, COUNT(*) FROM worktrees GROUP BY repositoryId` が提示されているが、実装上これは破綻する。worktrees テーブルには `repository_id` カラムが存在せず、リポジトリとの紐付けは `repository_path` 文字列で行われている（`src/lib/db/migrations/v11-v15-feature-additions.ts:195-230`, `src/lib/db/worktree-db.ts:91,99,179-186` 参照）。`repository_id` FK は `clone_jobs` テーブルにのみ存在する。このまま実装するとクエリがコンパイルエラー（no such column）で落ちる、もしくは全件が 0 件として付与される。",
+      "suggestion": "Issue本文を下記に修正する：\n- 集計クエリ例を `SELECT repository_path, COUNT(*) FROM worktrees WHERE repository_path IS NOT NULL GROUP BY repository_path` に変更\n- Map のキーとして `repository_path` を使い、`getAllRepositories(db)` の各要素に対して `map.get(repo.path) ?? 0` で worktreeCount を付与する\n- もしくは DB 層に新規ヘルパー `getAllRepositoriesWithWorktreeCount()` を追加し、`SELECT r.*, (SELECT COUNT(*) FROM worktrees w WHERE w.repository_path = r.path) AS worktree_count FROM repositories r ORDER BY r.name ASC` 形式で一括取得する（こちらがより N+1 安全で推奨）\n- Issue本文末尾の『実装方針』内「例:」の文言を `repository_path` 前提に書き換える"
+    },
+    {
+      "id": "S3-002",
+      "severity": "Must Fix",
+      "title": "GET /api/worktrees が返す repositories リストとの表記不整合リスク",
+      "description": "既存 `GET /api/worktrees`（`src/app/api/worktrees/route.ts:97`）は `getRepositories(db)`（`src/lib/db/worktree-db.ts:171`）を呼び出し、worktrees テーブル起点で `{ path, name, displayName, worktreeCount }` 形式のリポジトリサマリーを返している。一方、本Issueで新設する `GET /api/repositories` は `getAllRepositories(db)` ベースで `{ id, name, displayName, path, enabled, worktreeCount }` を返す。結果として以下の不整合が発生する：\n1. 同じ『リポジトリ』概念に対して2系統のAPI（worktrees 起点 vs repositories 起点）が併存し、どちらを単一の真実とするかが不明確\n2. `getRepositories()`（worktree-db.ts）は worktrees.repository_name を name として返すのに対し、`getAllRepositories()` は repositories テーブルの name カラム（= `path.basename()` 由来）を返す。両者が一致しない場合（例: リポジトリディレクトリをリネーム後、worktreeは古い名前のまま）に表示名が食い違う\n3. 本Issueで別名を編集した後、`WorktreeList.tsx`/`Sidebar.tsx` などで使われる `WorktreesResponse.repositories` 側のキャッシュが更新されないと、サイドバー表示と Repositories 画面の表示がズレる\n\n受け入れ条件には『保存した別名が Sessions 画面・Worktree 詳細画面など既存の表示箇所に反映される』とあるが、この整合性をどう担保するかの実装方針が不足している。",
+      "suggestion": "Issue本文の『実装方針』または『非機能要件』に以下を追記する：\n1. 別名更新後の既存画面への反映経路を明示する\n   - Option A: 更新後にフロント側で `worktreeApi.getAll()`（`/api/worktrees`）のキャッシュも無効化・再取得する（`WorktreesCacheProvider` 経由）\n   - Option B: WebSocket で `repository_display_name_updated` イベントをブロードキャストし、購読側で更新する\n   - Option C: 受け入れ条件の『画面リロード不要 or リロード後』の後者で許容する旨を明記し、リロード前提の運用とする\n2. 新 `GET /api/repositories`（全件）と既存 `GET /api/worktrees` 内の `repositories`（worktree起点）で名前フィールドがズレる可能性について、本Issueの方針を明示する（例: Repositories画面は repositories テーブルを Single Source of Truth として扱い、他画面の表示は既存仕様のまま据え置く）"
+    },
+    {
+      "id": "S3-003",
+      "severity": "Should Fix",
+      "title": "PUT /api/repositories/[id] 既存ルートの MAX_DISPLAY_NAME_LENGTH 重複定義の解消手順が不足",
+      "description": "『4. 共有定数（S1-004）』で `src/config/repository-config.ts` を新設し `MAX_DISPLAY_NAME_LENGTH = 100` を定義する方針は示されているが、既存ルート `src/app/api/repositories/[id]/route.ts:13` のローカル `const MAX_DISPLAY_NAME_LENGTH = 100;` を置き換える作業が『Issue #642 の後方互換を壊さない』ことの明示が弱い。具体的には：\n1. 既存ルートは `400` エラー時に `` `displayName must be ${MAX_DISPLAY_NAME_LENGTH} characters or less` `` という文字列を返しており、この値をリテラル 100 から定数参照に変更しても挙動は同じだが、既存 Issue #642 のテスト（もしくは将来追加される Integration テスト）がこのメッセージに依存している可能性がある\n2. 既存 `route.ts` の import パスを既存テストも想定しているか確認が必要\n3. 実際にこの PUT ルートの Integration テストは現状存在しない（`tests/integration/api-repository-delete.test.ts` と `tests/unit/db-repository-display-name.test.ts` のみ）ため、定数置換自体は安全だが、本Issueで新設する API の Integration テストと同時に PUT ルートの Integration テストも追加することが望ましい",
+      "suggestion": "受け入れ条件または実装方針 §4 に以下を追記：\n- 既存 `src/app/api/repositories/[id]/route.ts` の import を追加し、ローカル定数を削除する手順を明示\n- 既存の PUT ルートの挙動・エラーメッセージ文言を変更しないこと（文言は `` `displayName must be ${MAX_DISPLAY_NAME_LENGTH} characters or less` `` のまま、定数参照だけを置き換える）\n- 可能なら PUT `/api/repositories/[id]` の Integration テストを本Issueで新規追加する（バリデーション・400・404・成功パス）"
+    },
+    {
+      "id": "S3-004",
+      "severity": "Should Fix",
+      "title": "既存 RepositoryManager と新規 RepositoryList の refresh 連携仕様が未定義",
+      "description": "『実装方針 3. UI コンポーネント追加』で『新規追加 or Sync 完了後に RepositoryList の再取得をトリガー（onRepositoryAdded を活用 or 共通 refresh）』と書かれているが、具体的な実装パターン（親 page.tsx で state を持ち両コンポーネントに渡すか、Context を導入するか）が未定義。`RepositoryManager.tsx:29-74` を見ると `onRepositoryAdded` コールバックは既に存在し、親から注入できる設計になっているため、page.tsx 側で `refreshKey` state を持ちバケツリレーするパターンが素直。これが曖昧なまま実装に入ると、\n- RepositoryManager 側の Sync All 成功後に RepositoryList が古いままになる\n- Clone 完了後も同様\n- RepositoryList の削除導線を追加した場合（本Issueでは明記なし）に RepositoryManager 側との同期がさらに曖昧化\nといったバグが発生しやすい。",
+      "suggestion": "実装方針 §3 に以下のような具体パターンを追記する：\n```tsx\n// src/app/repositories/page.tsx\nconst [refreshKey, setRefreshKey] = useState(0);\nconst handleChanged = useCallback(() => setRefreshKey(k => k + 1), []);\nreturn (\n  <>\n    <RepositoryManager onRepositoryAdded={handleChanged} />\n    <RepositoryList refreshKey={refreshKey} onChanged={handleChanged} />\n  </>\n);\n```\nまたは『RepositoryList は RepositoryManager から props で refresh trigger を受け取る』『削除導線は本Issueでは追加しない（既存 WorktreeList 側に集約）』のいずれかを明示する。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "Should Fix",
+      "title": "新規 GET /api/repositories 追加による `sync/route.ts` の利用箇所と変更有無の明示不足",
+      "description": "`getAllRepositories(db)` は既に `src/app/api/repositories/sync/route.ts:26` と `src/lib/daily-summary-generator.ts:179` の2箇所で呼ばれており、Repository 型全件を返す実装に依存している。本Issueでは worktreeCount を『別途集計クエリで付与』または『新規ヘルパー `getAllRepositoriesWithWorktreeCount()` を追加』のどちらかを選ぶと書かれているが、後者を選んだ場合に既存の `getAllRepositories(db)` シグネチャは変えない前提かが明示されていない。既存関数を変えると上記2箇所の呼び出し元への影響（型の変更・worktreeCount フィールドの不要追加）が発生する。",
+      "suggestion": "実装方針 §1 に以下を追記：\n- 既存 `getAllRepositories(db)` のシグネチャは変更しない（後方互換を維持）\n- 本Issueで追加するロジックは次のいずれかに限定する\n  - (a) API ルート内で `getAllRepositories(db)` を呼び出した後、worktree 集計クエリ結果の Map を別途取得してマージする\n  - (b) DB 層に新規ヘルパー `getAllRepositoriesWithWorktreeCount(db)` を追加する（既存 `getAllRepositories` は温存）\n- `src/app/api/repositories/sync/route.ts:26` と `src/lib/daily-summary-generator.ts:179` の既存呼び出し箇所は変更しない旨を明記"
+    },
+    {
+      "id": "S3-006",
+      "severity": "Should Fix",
+      "title": "新規テストの対象範囲が『unit test を追加』のみで粒度が曖昧",
+      "description": "受け入れ条件に『新規 API (GET /api/repositories) と UI コンポーネント (RepositoryList) の unit test を追加』とあるが、API ルート層の test は本プロジェクトでは `tests/integration/api-*.test.ts` として integration 配下に置かれる慣習がある（例: `tests/integration/api-repository-delete.test.ts`）。また既存の `RepositoryManager.test.tsx`（645 行）は vitest + React Testing Library を使った詳細な unit test になっており、RepositoryList でも同等の粒度が期待される。具体的に以下が不明瞭：\n1. GET API のテストは unit か integration か（本プロジェクトは integration 側で NextRequest 経由のテストを採用）\n2. PUT `/api/repositories/[id]` の Integration テストを本Issueでも追加するか（現状 Issue #642 由来のテストは unit のみ）\n3. `src/lib/api-client.ts` の新メソッド（`list`, `updateDisplayName`）のテストを追加するか（既存 api-client は direct unit test が薄く、コンポーネント経由で間接テストされる傾向）",
+      "suggestion": "受け入れ条件を以下に改訂：\n- [ ] `tests/integration/api-repositories-list.test.ts`（新規）で GET `/api/repositories` の成功パス・enabled=0 を含む全件返却・worktreeCount 集計正しさを検証\n- [ ] `tests/unit/components/repository/RepositoryList.test.tsx`（新規）でインライン編集・保存・キャンセル・バリデーション（100文字超）・enabled バッジ表示を検証\n- [ ] 可能なら `tests/integration/api-repositories-put.test.ts`（新規）で PUT `/api/repositories/[id]` のバリデーション・404・成功パスを検証（Issue #642 時点で未カバー分を補完）"
+    },
+    {
+      "id": "S3-007",
+      "severity": "Should Fix",
+      "title": "GET /api/repositories への認証・IP制限ミドルウェアの通過確認が未記載",
+      "description": "本プロジェクトは `src/middleware.ts` と `src/lib/security/auth.ts` で API ルートに対して Edge Runtime の認証ミドルウェアを通している。新規 `GET /api/repositories` も同じく認証必須となるが、Issue本文には認証・IP制限ミドルウェアの通過確認が明記されていない。既存 `DELETE /api/repositories` / `PUT /api/repositories/[id]` / `GET /api/repositories/excluded` と同列で通過する想定だが、受け入れ条件に明示しておくことで回帰を防げる。",
+      "suggestion": "受け入れ条件に以下を追加：\n- [ ] GET `/api/repositories` が既存の認証ミドルウェア（`src/middleware.ts`）を正常に通過し、未認証時に 307 redirect / 401 を返すこと\n- [ ] IP 制限が有効な環境下で、許可IPからのみアクセスできること（既存APIと同等の挙動）\n\nまたは『認証・IP制限は既存ミドルウェアを流用するため本Issueでは追加変更なし』と明記する。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "Should Fix",
+      "title": "ポーリング方針の具体値・WebSocket連携の有無が未決定",
+      "description": "非機能要件に『一覧取得は画面マウント時に 1 回、編集後に差分再取得 or 該当行のみ更新』と記載されているが、以下のケースが考慮されていない：\n1. 他タブ・他ユーザーがリポジトリを追加/削除した場合、Repositories 画面を開きっぱなしだと反映されない\n2. Sync All ボタンが別Component（RepositoryManager）にあるため、Sync 完了後の自動更新経路が S3-004 と連動して未定義\n3. 既存プロジェクトで画面を開きっぱなしにする運用がある場合、WebSocket（`src/lib/ws-server.ts`）で `repository_deleted` などのイベントが既にブロードキャストされているので、それを購読して RepositoryList を再取得する余地がある",
+      "suggestion": "実装方針に以下のいずれかを明記：\n- Option A: Repositories 画面ではポーリングせず、Sync/Add/Delete イベント時のみ refresh する（S3-004 と連動）\n- Option B: 既存 WebSocket イベント（`repository_deleted` 等）を購読して自動更新する\n- Option C: 30秒間隔のポーリングを `useEffect` で実装する（非推奨：負荷増）\n\nまた、リポジトリ数が多い場合の目安件数（例: 100件超を想定するか、20件程度でよいか）を明示し、仮想スクロール要否の判断基準とする。"
+    },
+    {
+      "id": "S3-009",
+      "severity": "Nice to Have",
+      "title": "RepositoryList の配置位置（上部 or 下部）が曖昧",
+      "description": "機能要件で『既存の「Add Repository」「Sync All」セクションとは別に、下部もしくは上部に配置する』と両方の可能性を残している。UX的には『一覧が先に見える → 必要に応じて追加』が自然であり、既存の類似画面（Sessions, More）のレイアウトとも整合する。『下部もしくは上部』の曖昧表現は実装時の迷いを生む。",
+      "suggestion": "実装方針 §3 に『RepositoryList を RepositoryManager の上部に配置する（一覧ファースト）』と明記する。または代わりに『RepositoryList を下部に配置し、Add/Sync 操作後に自動スクロールで RepositoryList 側に誘導する』のいずれかに確定する。"
+    },
+    {
+      "id": "S3-010",
+      "severity": "Nice to Have",
+      "title": "Repository 型の enabled 返却と createdAt/updatedAt の扱い",
+      "description": "`getAllRepositories(db)` は `Repository` 型（`createdAt: Date`, `updatedAt: Date`, `cloneSource`, `isEnvManaged` 等を含む）を返す。しかし Issue 実装方針のレスポンス例は `{ id, name, displayName, path, enabled, worktreeCount }` の最小セットのみを返す方針。`Date` 型を JSON で返す際のシリアライズ仕様（ISO 8601 文字列 vs epoch ms）や、将来の拡張を見越して `cloneSource` を含めるかが未決定。また、`RepositoryListItem` 型は api-client 側のフロント型として新設されるが、`src/types/models.ts` の既存 `Repository` 型との関係（サブセットか、独立型か）が不明瞭。",
+      "suggestion": "実装方針 §2 に以下を追記：\n- `RepositoryListItem` はフロント専用の純粋なシリアライズ型とし、`src/types/models.ts` の `Repository` 型はそのまま維持する\n- レスポンスには `createdAt` / `updatedAt` / `cloneSource` / `isEnvManaged` を含めない（本Issueの機能に不要なため）\n- 将来 Repositories 画面に『いつクローンしたか』などの情報を表示したくなった場合は別Issueで拡張する"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 6,
+  "nice_to_have_count": 2,
+  "summary": "影響範囲レビューの結果、Must Fix 2件、Should Fix 6件、Nice to Have 2件を検出した。最重要は S3-001（worktrees テーブルには repository_id カラムがなく repository_path で紐付いているため、Issue本文の集計クエリ例がそのままでは動かない）と S3-002（既存 GET /api/worktrees の repositories と新 GET /api/repositories の棲み分けおよび別名更新の反映経路が未定義）。これらを修正しないと実装時にクエリ失敗や表示の不整合を招く。Should Fix として、既存 PUT /api/repositories/[id] との定数共有の具体手順、RepositoryManager と RepositoryList の refresh 連携、新規/既存テストの粒度、認証・ポーリング方針を明確化する必要がある。",
+  "code_references": [
+    {
+      "file": "src/app/repositories/page.tsx",
+      "relevance": "新規 RepositoryList を配置する親ページ"
+    },
+    {
+      "file": "src/components/repository/RepositoryManager.tsx",
+      "relevance": "既存 Manager（onRepositoryAdded コールバックで refresh 連携）"
+    },
+    {
+      "file": "src/app/api/repositories/route.ts",
+      "relevance": "新規 GET を追記する先（既存 DELETE と同居）"
+    },
+    {
+      "file": "src/app/api/repositories/[id]/route.ts",
+      "relevance": "既存 PUT（MAX_DISPLAY_NAME_LENGTH のローカル定義を共有定数に置換）"
+    },
+    {
+      "file": "src/app/api/worktrees/route.ts",
+      "relevance": "既存 GET /api/worktrees で返される repositories との整合性確認"
+    },
+    {
+      "file": "src/lib/db/db-repository.ts",
+      "relevance": "getAllRepositories() 既存シグネチャ、および worktreeCount 付与ヘルパー追加候補"
+    },
+    {
+      "file": "src/lib/db/worktree-db.ts",
+      "relevance": "既存 getRepositories() との棲み分け、worktree テーブルの repository_path FK 確認"
+    },
+    {
+      "file": "src/lib/db/migrations/v11-v15-feature-additions.ts",
+      "relevance": "worktrees テーブルのスキーマ（repository_id カラムが存在しないことを確認）"
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "relevance": "repositoryApi.list / updateDisplayName 追加、RepositoryListItem 型の整合性"
+    },
+    {
+      "file": "src/types/models.ts",
+      "relevance": "既存 Repository 型（displayName 定義済み、createdAt/updatedAt を含む）"
+    },
+    {
+      "file": "src/lib/daily-summary-generator.ts",
+      "relevance": "既存 getAllRepositories 呼び出し元（シグネチャ変更時の影響範囲）"
+    },
+    {
+      "file": "src/app/api/repositories/sync/route.ts",
+      "relevance": "既存 getAllRepositories 呼び出し元（同上）"
+    },
+    {
+      "file": "tests/integration/api-repository-delete.test.ts",
+      "relevance": "既存 DELETE テストの構成（新規 GET テストの雛形）"
+    },
+    {
+      "file": "tests/unit/components/repository/RepositoryManager.test.tsx",
+      "relevance": "既存 Manager テストの粒度（新規 List テストの参考）"
+    },
+    {
+      "file": "tests/unit/db-repository-display-name.test.ts",
+      "relevance": "Issue #642 の DB テスト（本Issueの worktreeCount 集計テストで拡張）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "DB層モジュール責務の定義（db-repository.ts vs worktree-db.ts の境界）"
+    }
+  ]
+}
