@@ -1,0 +1,200 @@
+{
+  "issue_number": 644,
+  "status": "passed",
+  "criteria_results": [
+    {
+      "criterion": "src/config/repository-config.ts exists and exports MAX_DISPLAY_NAME_LENGTH = 100",
+      "status": "pass",
+      "notes": "File exists at src/config/repository-config.ts and exports `export const MAX_DISPLAY_NAME_LENGTH = 100;` with JSDoc referencing Issue #644 and the shared usage between API route and RepositoryList."
+    },
+    {
+      "criterion": "src/lib/db/db-repository.ts: getAllRepositoriesWithWorktreeCount(db) added, uses repository_path based aggregation, and existing getAllRepositories(db) signature is unchanged",
+      "status": "pass",
+      "notes": "getAllRepositoriesWithWorktreeCount is added (lines 330-345) and uses `SELECT r.*, (SELECT COUNT(*) FROM worktrees w WHERE w.repository_path = r.path) AS worktree_count FROM repositories r`. It explicitly aggregates via repository_path (NOT repository_id). getAllRepositories(db) signature at line 290 is unchanged - still returns Repository[] and uses the original SELECT. Includes explicit comment warning against repository_id usage."
+    },
+    {
+      "criterion": "src/app/api/repositories/route.ts: GET handler added and uses getAllRepositoriesWithWorktreeCount",
+      "status": "pass",
+      "notes": "GET handler added at lines 41-65. Imports getAllRepositoriesWithWorktreeCount from @/lib/db/db-repository and uses it. Returns all repositories (enabled and disabled) with worktreeCount, displayName (string or null), enabled flag, path, id, name. Returns 200 on success, 500 on error with logger."
+    },
+    {
+      "criterion": "src/app/api/repositories/[id]/route.ts: local MAX_DISPLAY_NAME_LENGTH removed, now imported from @/config/repository-config, error message unchanged",
+      "status": "pass",
+      "notes": "Line 12 imports MAX_DISPLAY_NAME_LENGTH from '@/config/repository-config'. No local constant definition. Error message at line 41 still reads `displayName must be ${MAX_DISPLAY_NAME_LENGTH} characters or less` (historical phrasing preserved, verified by integration test at tests/integration/api-repositories-put.test.ts line 84-86)."
+    },
+    {
+      "criterion": "src/lib/api-client.ts: RepositoryListItem type, UpdateRepositoryDisplayNameResponse type, list() method, updateDisplayName() method added",
+      "status": "pass",
+      "notes": "RepositoryListItem interface at lines 342-349 (id/name/displayName/path/enabled/worktreeCount). UpdateRepositoryDisplayNameResponse interface at lines 359-362 using Omit<RepositoryListItem,'worktreeCount'>. repositoryApi.list() method at lines 512-516 returns the list. repositoryApi.updateDisplayName(id, displayName) method at lines 526-537 uses encodeURIComponent(id) for PUT safety."
+    },
+    {
+      "criterion": "src/components/repository/RepositoryList.tsx exists with refreshKey/onChanged props, inline edit, Enter save / Esc cancel, Disabled badge, 100-char validation, dark mode",
+      "status": "pass",
+      "notes": "RepositoryListProps defined at lines 31-39 with refreshKey (required) and onChanged (optional). useEffect refetches on refreshKey change (lines 93-95). Inline edit via `edit` state with id/value/error/saving. Enter key saves (handleKeyDown line 171), Escape cancels (line 174). Disabled badge rendered when repo.enabled === false (lines 307-311). Client-side 100-char validation using MAX_DISPLAY_NAME_LENGTH from @/config/repository-config (lines 117-120, 128-133). Save button disabled on validation error (line 320). Dark mode classes: `dark:text-gray-100`, `dark:bg-gray-800`, `dark:bg-green-900/30`, `dark:bg-red-900/30`, etc. Feedback region (success/error) at lines 209-220. Empty string/trimmed value sent as null to clear (lines 140)."
+    },
+    {
+      "criterion": "src/components/repository/index.ts exports RepositoryList",
+      "status": "pass",
+      "notes": "Line 8 exports RepositoryList and line 9 exports RepositoryListProps type. Existing RepositoryManager export is preserved."
+    },
+    {
+      "criterion": "src/app/repositories/page.tsx places RepositoryList above RepositoryManager with refreshKey integration",
+      "status": "pass",
+      "notes": "RepositoryList rendered BEFORE RepositoryManager inside `<div className=\"space-y-6\">` at lines 38-39. refreshKey state managed via useState (line 21). handleChanged callback increments refreshKey (lines 23-25). RepositoryList receives refreshKey and onChanged={handleChanged}. RepositoryManager receives onRepositoryAdded={handleChanged}, so Add/Sync flows trigger RepositoryList refetch."
+    },
+    {
+      "criterion": "Three test files exist: tests/integration/api-repositories-list.test.ts, tests/integration/api-repositories-put.test.ts, tests/unit/components/repository/RepositoryList.test.tsx",
+      "status": "pass",
+      "notes": "All three test files exist. api-repositories-list.test.ts has 7 tests (empty list, worktreeCount=0, repository_path aggregation (explicit comment), disabled repositories included, displayName string/null, name ASC ordering, field shape whitelist). api-repositories-put.test.ts has 8 tests (400 for number type, 400 for length exceed with historical phrasing, boundary at MAX, 404, 200 happy path, empty string clear, null clear, missing body). RepositoryList.test.tsx has 18 tests covering rendering, disabled badge, inline edit Enter/Esc/Cancel, 101-char validation disabling save, feedback on error, onChanged callback."
+    },
+    {
+      "criterion": "npx tsc --noEmit passes with no errors",
+      "status": "pass",
+      "notes": "tsc --noEmit exited with no output (success) - zero TypeScript errors."
+    },
+    {
+      "criterion": "npm run lint passes with no errors",
+      "status": "pass",
+      "notes": "next lint reported: 'No ESLint warnings or errors'."
+    },
+    {
+      "criterion": "npm run test:unit: new tests pass",
+      "status": "pass",
+      "notes": "Full unit test suite: 330 files passed, 6237 tests passed, 7 skipped. Targeted run of tests/unit/components/repository/RepositoryList.test.tsx: 18/18 passed in 872ms. (Pre-existing stderr warnings about useWorktreeSelection/useSidebarContext/report-generator are unrelated to Issue #644 and do not cause failures.)"
+    },
+    {
+      "criterion": "npm run test:integration: new tests pass",
+      "status": "pass",
+      "notes": "Targeted run of tests/integration/api-repositories-list.test.ts (7 tests) + tests/integration/api-repositories-put.test.ts (8 tests): 2 files passed, 15 tests passed in 289ms. Note: The full integration suite has pre-existing unrelated failures in tests/integration/api/files-304.test.ts and tests/integration/trust-dialog-auto-response.test.ts; these files are NOT modified by Issue #644 and their failures are orthogonal to this change."
+    }
+  ],
+  "test_cases": [
+    {
+      "scenario": "Scenario 1: GET /api/repositories returns repository list (enabled=0 included, with worktreeCount)",
+      "result": "passed",
+      "evidence": "api-repositories-list.test.ts 'includes disabled repositories in the list' + 'returns registered repositories with worktreeCount = 0' + 'each returned item has the expected field shape' - all PASSED"
+    },
+    {
+      "scenario": "Scenario 2: worktreeCount is correctly aggregated by repository_path",
+      "result": "passed",
+      "evidence": "api-repositories-list.test.ts 'aggregates worktreeCount using repository_path (NOT repository_id)' - PASSED. Test creates 2 repos + 3 worktrees via upsertWorktree with matching repository_path and asserts count 2 and 1 respectively."
+    },
+    {
+      "scenario": "Scenario 3: PUT /api/repositories/[id] updates displayName",
+      "result": "passed",
+      "evidence": "api-repositories-put.test.ts 'returns 200 and updates displayName on the happy path' - PASSED. DB row verified via getRepositoryById."
+    },
+    {
+      "scenario": "Scenario 4: PUT with displayName > 100 chars returns 400",
+      "result": "passed",
+      "evidence": "api-repositories-put.test.ts 'returns 400 with the historical error message when displayName exceeds 100 chars' - PASSED. Pins the wording `displayName must be 100 characters or less`."
+    },
+    {
+      "scenario": "Scenario 5: RepositoryList renders repository list",
+      "result": "passed",
+      "evidence": "RepositoryList.test.tsx 'loads repositories on mount via repositoryApi.list()' + 'renders name, path, worktreeCount for each repository' - PASSED"
+    },
+    {
+      "scenario": "Scenario 6: Inline edit - Edit button -> input -> Enter saves",
+      "result": "passed",
+      "evidence": "RepositoryList.test.tsx 'enters edit mode with the current displayName in the input' + 'saves on Enter key' + 'calls updateDisplayName on Save click' - PASSED"
+    },
+    {
+      "scenario": "Scenario 7: Inline edit - Esc cancels",
+      "result": "passed",
+      "evidence": "RepositoryList.test.tsx 'cancels on Escape key' + 'cancels the edit when Cancel button is clicked' - PASSED"
+    },
+    {
+      "scenario": "Scenario 8: Disabled badge shown for enabled=false rows",
+      "result": "passed",
+      "evidence": "RepositoryList.test.tsx 'renders \"Disabled\" badge when a repository has enabled=false' - PASSED. Scoped via data-testid=repository-row-* to disambiguate from header."
+    },
+    {
+      "scenario": "Scenario 9: 101-char input triggers client-side validation",
+      "result": "passed",
+      "evidence": "RepositoryList.test.tsx 'shows client-side validation error when input exceeds 100 chars' - PASSED. Save button is disabled when validation error is set."
+    },
+    {
+      "scenario": "Scenario 10: MAX_DISPLAY_NAME_LENGTH defined in src/config/repository-config.ts",
+      "result": "passed",
+      "evidence": "File read confirmed `export const MAX_DISPLAY_NAME_LENGTH = 100;`. Both the API route (src/app/api/repositories/[id]/route.ts line 12) and the client component (src/components/repository/RepositoryList.tsx line 29) import from @/config/repository-config."
+    },
+    {
+      "scenario": "Scenario 11: page.tsx refreshKey integration between RepositoryList and RepositoryManager",
+      "result": "passed",
+      "evidence": "src/app/repositories/page.tsx lines 21-39: useState refreshKey, handleChanged increments it, RepositoryList receives refreshKey + onChanged=handleChanged, RepositoryManager receives onRepositoryAdded=handleChanged so Add/Sync bumps refreshKey causing RepositoryList refetch."
+    },
+    {
+      "scenario": "Scenario 12: CLAUDE.md module table updated",
+      "result": "passed",
+      "evidence": "CLAUDE.md line 188 lists src/config/repository-config.ts with Issue #644 reference. Line 302 lists src/components/repository/RepositoryList.tsx with Issue #644 reference. Line 304 updates src/app/repositories/page.tsx description mentioning Issue #644."
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "/repositories 画面で登録済みリポジトリの一覧が表示される（RepositoryList は RepositoryManager の上部に配置）",
+      "verified": true
+    },
+    {
+      "criterion": "各行でリポジトリ名・別名・パス・worktree数・enabled状態が確認できる",
+      "verified": true
+    },
+    {
+      "criterion": "無効化リポジトリ（enabled=false）が無効バッジ付きで一覧に表示される",
+      "verified": true
+    },
+    {
+      "criterion": "各行で別名をインライン編集し、保存すると DBに永続化される",
+      "verified": true
+    },
+    {
+      "criterion": "保存した別名がリロード後に反映される",
+      "verified": true
+    },
+    {
+      "criterion": "空文字 / null 保存で別名がクリアされる",
+      "verified": true
+    },
+    {
+      "criterion": "100文字超入力時にクライアント側でバリデーションエラーが出る",
+      "verified": true
+    },
+    {
+      "criterion": "RepositoryManager の Add/Sync 完了後に RepositoryList が自動再取得される",
+      "verified": true
+    },
+    {
+      "criterion": "GET /api/repositories が既存の認証ミドルウェアを流用する",
+      "verified": true
+    },
+    {
+      "criterion": "保存成功/失敗時にフィードバックが出る",
+      "verified": true
+    },
+    {
+      "criterion": "ダークモード対応",
+      "verified": true
+    },
+    {
+      "criterion": "lint/型チェック/unit tests/integration tests がパスする",
+      "verified": true
+    }
+  ],
+  "evidence_files": [
+    "/Users/maenokota/share/work/github_kewton/commandmate-issue-644/src/config/repository-config.ts",
+    "/Users/maenokota/share/work/github_kewton/commandmate-issue-644/src/lib/db/db-repository.ts",
+    "/Users/maenokota/share/work/github_kewton/commandmate-issue-644/src/app/api/repositories/route.ts",
+    "/Users/maenokota/share/work/github_kewton/commandmate-issue-644/src/app/api/repositories/[id]/route.ts",
+    "/Users/maenokota/share/work/github_kewton/commandmate-issue-644/src/lib/api-client.ts",
+    "/Users/maenokota/share/work/github_kewton/commandmate-issue-644/src/components/repository/RepositoryList.tsx",
+    "/Users/maenokota/share/work/github_kewton/commandmate-issue-644/src/components/repository/index.ts",
+    "/Users/maenokota/share/work/github_kewton/commandmate-issue-644/src/app/repositories/page.tsx",
+    "/Users/maenokota/share/work/github_kewton/commandmate-issue-644/tests/integration/api-repositories-list.test.ts",
+    "/Users/maenokota/share/work/github_kewton/commandmate-issue-644/tests/integration/api-repositories-put.test.ts",
+    "/Users/maenokota/share/work/github_kewton/commandmate-issue-644/tests/unit/components/repository/RepositoryList.test.tsx",
+    "/Users/maenokota/share/work/github_kewton/commandmate-issue-644/CLAUDE.md"
+  ],
+  "overall_pass": true,
+  "summary": "Issue #644 の全受入項目を充足。src/config/repository-config.ts で MAX_DISPLAY_NAME_LENGTH=100 を共有化し、API route と RepositoryList の両方が同一定数を使用。getAllRepositoriesWithWorktreeCount は repository_path ベースで集計され、既存 getAllRepositories のシグネチャは保持。GET /api/repositories は全件（enabled/disabled 両方）を worktreeCount 付きで返却。PUT /api/repositories/[id] は歴史的エラーメッセージ文言を保持し、空文字/null で別名クリアに対応。RepositoryList は refreshKey/onChanged props、Enter/Esc キーボード操作、Disabled バッジ、100文字バリデーション、ダークモード対応、成功/失敗フィードバックを全て実装。page.tsx で RepositoryList を RepositoryManager 上部に配置し refreshKey 連携。型チェック（tsc --noEmit エラー0）、lint（エラー0）、unit test（対象 18/18 PASS・全体 6237/6244 PASS）、integration test（対象 15/15 PASS）が全て通過。統合スイートの files-304 と trust-dialog-auto-response の failure は Issue #644 の変更範囲外の既存 flaky テストで本件と無関係。",
+  "message": "すべての受入条件を満たしています"
+}

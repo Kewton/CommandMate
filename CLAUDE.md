@@ -185,6 +185,7 @@ tests/
 | `src/config/file-polling-config.ts` | ファイルポーリング定数（FILE_TREE_POLL_INTERVAL_MS, FILE_CONTENT_POLL_INTERVAL_MS）（Issue #469） |
 | `src/config/timer-constants.ts` | タイマー定数定義（TIMER_DELAYS, MAX_TIMERS_PER_WORKTREE, TIMER_STATUS, isValidTimerDelay）（Issue #534） |
 | `src/config/copilot-constants.ts` | Copilot CLIタイミング定数（COPILOT_SEND_ENTER_DELAY_MS, COPILOT_TEXT_INPUT_DELAY_MS）（Issue #565）、MODEL_NAME_PATTERN/MAX_MODEL_NAME_LENGTH追加（Issue #588） |
+| `src/config/repository-config.ts` | リポジトリ共有定数（MAX_DISPLAY_NAME_LENGTH）（Issue #644） |
 | `src/lib/detection/prompt-key.ts` | promptKey重複排除ユーティリティ |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
 | `src/lib/cli-tools/types.ts` | CLIツール型定義（IImageCapableCLITool/isImageCapableCLITool追加）（Issue #474）（Issue #545: copilot追加、6ツール対応） |
@@ -298,8 +299,9 @@ tests/
 | `src/components/review/TemplateTab.tsx` | テンプレート管理UI（一覧・作成・編集・削除、最大5件制限）（Issue #618） |
 | `src/components/worktree/WorktreeDetailHeader.tsx` | Worktree詳細ヘッダー（Repository名・Branch名・Agent・Status・次アクション）（Issue #600） |
 | `src/components/providers/WorktreesCacheProvider.tsx` | Worktreesキャッシュプロバイダー（Issue #600） |
+| `src/components/repository/RepositoryList.tsx` | リポジトリ一覧表示・インライン別名編集UI（Issue #644） |
 | `src/app/sessions/page.tsx` | Sessions画面（Issue #600） |
-| `src/app/repositories/page.tsx` | Repositories画面（Issue #600） |
+| `src/app/repositories/page.tsx` | Repositories画面（Issue #600, #644: RepositoryList上部配置・refreshKey連携） |
 | `src/app/review/page.tsx` | Review画面（Issue #600） |
 | `src/app/more/page.tsx` | More画面（Issue #600） |
 | `src/components/layout/Header.tsx` | PC 5画面ナビゲーション（Issue #600） |

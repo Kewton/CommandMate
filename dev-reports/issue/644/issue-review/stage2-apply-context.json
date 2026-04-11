@@ -1,0 +1,9 @@
+{
+  "issue_number": "644",
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "review_result_path": "dev-reports/issue/644/issue-review/stage1-review-result.json",
+  "apply_must_fix": true,
+  "apply_should_fix": true,
+  "apply_nice_to_have": false
+}

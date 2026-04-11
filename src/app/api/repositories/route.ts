@@ -1,8 +1,11 @@
 /**
- * API Route: DELETE /api/repositories
- * Deletes a repository and all its worktrees from the database
+ * API Routes: GET & DELETE /api/repositories
+ * - GET: Returns repository list augmented with worktree counts (Issue #644)
+ * - DELETE: Deletes a repository and all its worktrees from the database
+ *
  * Issue #69: Repository delete feature
  * Issue #190: Repository exclusion on sync (disableRepository before worktree check)
+ * Issue #644: Repository list display
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -11,12 +14,55 @@ import {
   getWorktreeIdsByRepository,
   deleteRepositoryWorktrees,
 } from '@/lib/db';
-import { validateRepositoryPath, disableRepository } from '@/lib/db/db-repository';
+import {
+  validateRepositoryPath,
+  disableRepository,
+  getAllRepositoriesWithWorktreeCount,
+} from '@/lib/db/db-repository';
 import { cleanupMultipleWorktrees, killWorktreeSession } from '@/lib/session-cleanup';
 import { cleanupRooms, broadcastMessage } from '@/lib/ws-server';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/repositories');
+
+/**
+ * GET /api/repositories
+ *
+ * Response:
+ * - 200: { success: true, repositories: RepositoryListItem[] }
+ * - 500: { success: false, error: string }
+ *
+ * Returns ALL repositories (enabled and disabled) so the client can render
+ * a "Disabled" badge for rows with enabled=false. Each row includes the
+ * number of worktrees currently registered under that repository path.
+ *
+ * Issue #644
+ */
+export async function GET() {
+  try {
+    const db = getDbInstance();
+    const repos = getAllRepositoriesWithWorktreeCount(db);
+
+    const repositories = repos.map((r) => ({
+      id: r.id,
+      name: r.name,
+      displayName: r.displayName ?? null,
+      path: r.path,
+      enabled: r.enabled,
+      worktreeCount: r.worktreeCount,
+    }));
+
+    return NextResponse.json({ success: true, repositories }, { status: 200 });
+  } catch (error: unknown) {
+    logger.error('repository:list-failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return NextResponse.json(
+      { success: false, error: 'Failed to list repositories' },
+      { status: 500 }
+    );
+  }
+}
 
 /**
  * DELETE /api/repositories

@@ -1,0 +1,46 @@
+{
+  "issue_number": 644,
+  "feature_summary": "feat(repositories): リポジトリ一覧表示と別名編集UI",
+  "acceptance_criteria": [
+    "/repositories 画面で登録済みリポジトリの一覧が表示される（RepositoryList は RepositoryManager の上部に配置）",
+    "各行でリポジトリ名・別名・パス・worktree数・enabled状態が確認できる",
+    "無効化リポジトリ（enabled=false）が無効バッジ付きで一覧に表示される",
+    "各行で別名をインライン編集し、保存すると DBに永続化される",
+    "保存した別名がリロード後に反映される",
+    "空文字 / null 保存で別名がクリアされる",
+    "100文字超入力時にクライアント側でバリデーションエラーが出る",
+    "RepositoryManager の Add/Sync 完了後に RepositoryList が自動再取得される",
+    "GET /api/repositories が既存の認証ミドルウェアを流用する",
+    "保存成功/失敗時にフィードバックが出る",
+    "ダークモード対応",
+    "lint/型チェック/unit tests/integration tests がパスする"
+  ],
+  "test_scenarios": [
+    "シナリオ1: GET /api/repositories がリポジトリ一覧を返す（enabled=0 含む全件・worktreeCount 付き）",
+    "シナリオ2: worktreeCount が repository_path ベースで正しく集計される",
+    "シナリオ3: PUT /api/repositories/[id] で displayName が更新される",
+    "シナリオ4: PUT に 100文字超の displayName を渡すと 400 エラーが返る",
+    "シナリオ5: RepositoryList コンポーネントがリポジトリ一覧をレンダリングする",
+    "シナリオ6: インライン編集：編集ボタン → input → Enter で保存",
+    "シナリオ7: インライン編集：Esc でキャンセル",
+    "シナリオ8: enabled=false の行に Disabled バッジが表示される",
+    "シナリオ9: 100文字超入力でクライアント側バリデーションエラー",
+    "シナリオ10: MAX_DISPLAY_NAME_LENGTH が src/config/repository-config.ts で定義されている",
+    "シナリオ11: page.tsx で refreshKey による RepositoryList ↔ RepositoryManager の連携",
+    "シナリオ12: CLAUDE.md のモジュール一覧が更新されている"
+  ],
+  "implemented_files": [
+    "src/config/repository-config.ts",
+    "src/lib/db/db-repository.ts",
+    "src/app/api/repositories/route.ts",
+    "src/app/api/repositories/[id]/route.ts",
+    "src/lib/api-client.ts",
+    "src/components/repository/RepositoryList.tsx",
+    "src/components/repository/index.ts",
+    "src/app/repositories/page.tsx",
+    "tests/integration/api-repositories-list.test.ts",
+    "tests/integration/api-repositories-put.test.ts",
+    "tests/unit/components/repository/RepositoryList.test.tsx",
+    "CLAUDE.md"
+  ]
+}
