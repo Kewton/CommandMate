@@ -26,6 +26,9 @@
   "files_changed": [
     "src/components/repository/RepositoryList.tsx"
   ],
+  "commits": [
+    "8fcfe64b: refactor(repository): dedupe error-message resolution in display-name save"
+  ],
   "review_observations": {
     "type_safety": "No any usage detected. All component state, API shapes, and hook callbacks are strongly typed. RepositoryListItem and UpdateRepositoryDisplayNameResponse correctly model the API contract, including the fact that PUT does not return worktreeCount.",
     "error_handling": "GET /api/repositories logs failures via the shared logger and returns a 500 with a generic message. PUT keeps its existing error-message contract (not modified per constraint). The client-side save-error path now resolves the message once and propagates it to both the inline editor and the feedback banner.",
