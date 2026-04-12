@@ -7,15 +7,17 @@
  * Functions as the write permission list for PUT /api/worktrees/[id]/files/[...path] API.
  * - .md: Edited via MarkdownEditor
  * - .html/.htm: Edited via HtmlPreview (Issue #490)
+ * - .yaml/.yml: Edited via MarkdownEditor in text mode (Issue #646)
  */
 
 import { HTML_MAX_SIZE_BYTES } from '@/config/html-extensions';
+import { isYamlSafe } from '@/config/uploadable-extensions';
 
 /**
  * List of file extensions that can be edited
- * Future extensions (txt, json, yaml) can be added here
+ * Future extensions (txt, json) can be added here
  */
-export const EDITABLE_EXTENSIONS: readonly string[] = ['.md', '.html', '.htm'] as const;
+export const EDITABLE_EXTENSIONS: readonly string[] = ['.md', '.html', '.htm', '.yaml', '.yml'] as const;
 
 /**
  * Extension validator configuration
@@ -26,8 +28,19 @@ export interface ExtensionValidator {
   extension: string;
   /** Maximum file size in bytes */
   maxFileSize?: number;
-  /** Custom validation function */
-  additionalValidation?: (content: string) => boolean;
+  /** Custom validation function. Returns true if valid, false or error message string if invalid. */
+  additionalValidation?: (content: string) => string | boolean;
+}
+
+/**
+ * YAML content validation wrapper for additionalValidation
+ * [Issue #646] Returns error message string on dangerous tag detection
+ */
+function validateYamlContent(content: string): string | boolean {
+  if (!isYamlSafe(content)) {
+    return 'Dangerous YAML tags detected (e.g., !ruby/object). Please use only safe tags.';
+  }
+  return true;
 }
 
 /**
@@ -46,6 +59,17 @@ export const EXTENSION_VALIDATORS: ExtensionValidator[] = [
   {
     extension: '.htm',
     maxFileSize: HTML_MAX_SIZE_BYTES,
+  },
+  // Issue #646: YAML files - additionalValidation blocks dangerous tags
+  {
+    extension: '.yaml',
+    maxFileSize: 1024 * 1024, // 1MB
+    additionalValidation: validateYamlContent,
+  },
+  {
+    extension: '.yml',
+    maxFileSize: 1024 * 1024, // 1MB
+    additionalValidation: validateYamlContent,
   },
 ];
 
@@ -111,8 +135,16 @@ export function validateContent(
   }
 
   // Run additional validation if defined
-  if (validator.additionalValidation && !validator.additionalValidation(content)) {
-    return { valid: false, error: 'Content validation failed' };
+  if (validator.additionalValidation) {
+    const validationResult = validator.additionalValidation(content);
+    if (validationResult === true) {
+      // pass
+    } else if (validationResult === false) {
+      return { valid: false, error: 'Content validation failed' };
+    } else {
+      // string = specific error message
+      return { valid: false, error: validationResult };
+    }
   }
 
   return { valid: true };

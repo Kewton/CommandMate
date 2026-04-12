@@ -50,7 +50,7 @@ import { useAutoSave } from '@/hooks/useAutoSave';
 import { useSwipeGesture } from '@/hooks/useSwipeGesture';
 import { useVirtualKeyboard } from '@/hooks/useVirtualKeyboard';
 import { Z_INDEX } from '@/config/z-index';
-import type { EditorProps, ViewMode } from '@/types/markdown-editor';
+import type { EditorProps, EditorFileType, ViewMode } from '@/types/markdown-editor';
 import {
   VIEW_MODE_STRATEGIES,
   LOCAL_STORAGE_KEY,
@@ -66,6 +66,14 @@ import {
   isValidSplitRatio,
   isValidBoolean,
 } from '@/types/markdown-editor';
+
+/**
+ * Detect file type from file path extension (Issue #646)
+ * .md files get 'markdown' mode (with preview), all others get 'text' mode (editor only)
+ */
+function detectFileType(filePath: string): EditorFileType {
+  return filePath.toLowerCase().endsWith('.md') ? 'markdown' : 'text';
+}
 
 /**
  * Validate and parse view mode from storage
@@ -108,6 +116,7 @@ function getInitialViewMode(initialViewMode?: ViewMode): ViewMode {
 export const MarkdownEditor = memo(function MarkdownEditor({
   worktreeId,
   filePath,
+  fileType: fileTypeProp,
   onClose,
   onSave,
   initialViewMode,
@@ -115,12 +124,16 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   onDirtyChange,
   onOpenFile,
 }: EditorProps) {
+  // Resolve file type: explicit prop > auto-detect from extension (Issue #646)
+  const fileType = fileTypeProp ?? detectFileType(filePath);
+  const isTextMode = fileType === 'text';
+
   // State
   const [content, setContent] = useState('');
   const [originalContent, setOriginalContent] = useState('');
   const [previewContent, setPreviewContent] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
-    getInitialViewMode(initialViewMode)
+    isTextMode ? 'editor' : getInitialViewMode(initialViewMode)
   );
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -206,16 +219,17 @@ export const MarkdownEditor = memo(function MarkdownEditor({
 
   // Computed state
   const isDirty = content !== originalContent;
-  const strategy = VIEW_MODE_STRATEGIES[viewMode];
+  // In text mode, always use editor-only strategy (no preview)
+  const strategy = isTextMode ? VIEW_MODE_STRATEGIES['editor'] : VIEW_MODE_STRATEGIES[viewMode];
 
   // Notify parent of isDirty state changes (Issue #469: polling control)
   useEffect(() => {
     onDirtyChange?.(isDirty);
   }, [isDirty, onDirtyChange]);
 
-  // In mobile portrait mode with split view, use tab switching
+  // In mobile portrait mode with split view, use tab switching (not in text mode)
   const isMobilePortrait = isMobile && typeof window !== 'undefined' && window.innerHeight > window.innerWidth;
-  const showMobileTabs = isMobilePortrait && viewMode === 'split';
+  const showMobileTabs = !isTextMode && isMobilePortrait && viewMode === 'split';
 
   /**
    * Debounced preview update
@@ -683,6 +697,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         isSaving={isSaving}
         onSave={saveContent}
         onClose={onClose ? handleClose : undefined}
+        hideViewModeToggle={isTextMode}
       />
 
       {/* ESC hint when maximized */}
@@ -729,7 +744,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
                 onKeyDown={handleKeyDown}
                 onScroll={handleEditorScroll}
                 className="flex-1 py-4 pr-4 pl-3 font-mono text-sm resize-none bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none leading-[1.5rem]"
-                placeholder="Start typing markdown..."
+                placeholder={isTextMode ? 'Start typing...' : 'Start typing markdown...'}
                 spellCheck={false}
               />
             </div>
@@ -760,7 +775,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
               onKeyDown={handleKeyDown}
               onScroll={handleEditorScroll}
               className="flex-1 py-4 pr-4 pl-3 font-mono text-sm resize-none bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-inset leading-[1.5rem]"
-              placeholder="Start typing markdown..."
+              placeholder={isTextMode ? 'Start typing...' : 'Start typing markdown...'}
               spellCheck={false}
             />
           </div>

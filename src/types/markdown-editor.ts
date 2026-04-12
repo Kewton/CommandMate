@@ -70,6 +70,13 @@ export interface EditorState {
 }
 
 /**
+ * File type for editor mode selection
+ * - 'markdown': Full markdown editing with preview (default for .md files)
+ * - 'text': Plain text editing without preview (for .yaml, .yml, etc.)
+ */
+export type EditorFileType = 'markdown' | 'text';
+
+/**
  * Props for MarkdownEditor component
  */
 export interface EditorProps {
@@ -77,6 +84,11 @@ export interface EditorProps {
   worktreeId: string;
   /** File path relative to worktree root */
   filePath: string;
+  /**
+   * File type for editor mode selection (Issue #646)
+   * When omitted, auto-detected from filePath extension (.md -> 'markdown', others -> 'text')
+   */
+  fileType?: EditorFileType;
   /** Callback when editor is closed */
   onClose?: () => void;
   /** Callback when file is saved successfully */

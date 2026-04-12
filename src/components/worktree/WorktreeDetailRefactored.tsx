@@ -92,6 +92,7 @@ import { deriveCliStatus } from '@/types/sidebar';
 import { useTranslations } from 'next-intl';
 import { useFileOperations } from '@/hooks/useFileOperations';
 import { MoveDialog } from '@/components/worktree/MoveDialog';
+import { NewFileDialog } from '@/components/worktree/NewFileDialog';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
 import { parseCmateContent, validateScheduleHeaders, validateSchedulesSection, CMATE_TEMPLATE_CONTENT } from '@/lib/cmate-validator';
 
@@ -248,6 +249,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const autoYesExpiresAt = autoYesStateMap.get(activeCliTab)?.expiresAt ?? null;
   // Trigger to refresh FileTreeView after file operations
   const [fileTreeRefresh, setFileTreeRefresh] = useState(0);
+
+  // [Issue #646] NewFileDialog state
+  const [showNewFileDialog, setShowNewFileDialog] = useState(false);
+  const [newFileParentPath, setNewFileParentPath] = useState('');
 
   // [Issue #469] Tree polling: detect file tree changes via JSON comparison
   const prevTreeHashRef = useRef<string | null>(null);
@@ -778,14 +783,16 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // File Operation Handlers (for FileTreeView context menu)
   // ========================================================================
 
-  /** Handle new file creation in FileTreeView */
-  const handleNewFile = useCallback(async (parentPath: string) => {
-    const fileName = window.prompt('Enter file name (e.g., document.md):');
-    if (!fileName) return;
+  /** Handle new file creation - open NewFileDialog (Issue #646) */
+  const handleNewFile = useCallback((parentPath: string) => {
+    setNewFileParentPath(parentPath);
+    setShowNewFileDialog(true);
+  }, []);
 
-    // Add .md extension if not present
-    const finalName = fileName.endsWith('.md') ? fileName : `${fileName}.md`;
-    const newPath = parentPath ? `${parentPath}/${finalName}` : finalName;
+  /** Handle new file creation confirmation from NewFileDialog (Issue #646) */
+  const handleNewFileConfirm = useCallback(async (finalName: string) => {
+    setShowNewFileDialog(false);
+    const newPath = newFileParentPath ? `${newFileParentPath}/${finalName}` : finalName;
 
     try {
       const response = await fetch(
@@ -801,11 +808,15 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       }
       // File created successfully - trigger FileTreeView refresh
       setFileTreeRefresh(prev => prev + 1);
-    } catch (err) {
-      console.error('[WorktreeDetailRefactored] Failed to create file:', err);
+    } catch {
       window.alert(tError('fileOps.failedToCreateFile'));
     }
-  }, [worktreeId, tError]);
+  }, [worktreeId, newFileParentPath, tError]);
+
+  /** Handle new file dialog cancel (Issue #646) */
+  const handleNewFileCancel = useCallback(() => {
+    setShowNewFileDialog(false);
+  }, []);
 
   /** Handle new directory creation in FileTreeView */
   const handleNewDirectory = useCallback(async (parentPath: string) => {
@@ -1701,6 +1712,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               sourceType={moveTarget.type}
             />
           )}
+          {/* [Issue #646] New file dialog */}
+          <NewFileDialog
+            isOpen={showNewFileDialog}
+            parentPath={newFileParentPath}
+            onConfirm={handleNewFileConfirm}
+            onCancel={handleNewFileCancel}
+          />
           {/* Toast notifications */}
           <ToastContainer toasts={toasts} onClose={removeToast} />
         </div>
@@ -1975,6 +1993,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             sourceType={moveTarget.type}
           />
         )}
+        {/* [Issue #646] New file dialog (Mobile) */}
+        <NewFileDialog
+          isOpen={showNewFileDialog}
+          parentPath={newFileParentPath}
+          onConfirm={handleNewFileConfirm}
+          onCancel={handleNewFileCancel}
+        />
         {/* Toast notifications (Mobile) */}
         <ToastContainer toasts={toasts} onClose={removeToast} />
       </div>

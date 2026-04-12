@@ -22,6 +22,7 @@ import { ImageViewer } from './ImageViewer';
 import { VideoViewer } from './VideoViewer';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
+import { isEditableExtension } from '@/config/editable-extensions';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
 import { Z_INDEX } from '@/config/z-index';
@@ -750,6 +751,26 @@ export const FilePanelContent = memo(function FilePanelContent({
               onOpenFile={onOpenFile}
             />
           )}
+        </div>
+      </MaximizableWrapper>
+    );
+  }
+
+  // Editable text files (YAML, etc.): text editor mode (Issue #646)
+  if (isEditableExtension('.' + content.extension)) {
+    return (
+      <MaximizableWrapper isMaximized={isMaximized} onToggle={toggleMaximize} filePath={tab.path}>
+        <div className="h-full flex flex-col">
+          <MarkdownWithSearch
+            tab={tab}
+            content={content}
+            worktreeId={worktreeId}
+            isMaximized={isMaximized}
+            onToggleMaximize={toggleMaximize}
+            onFileSaved={onFileSaved}
+            onDirtyChange={handleDirtyChange}
+            onOpenFile={onOpenFile}
+          />
         </div>
       </MaximizableWrapper>
     );
