@@ -590,7 +590,10 @@ export const FilePanelContent = memo(function FilePanelContent({
 
         if (!response.ok) {
           const errorData = await response.json();
-          onLoadError(tab.path, errorData.error || 'Failed to load file');
+          const errMsg = typeof errorData.error === 'string'
+            ? errorData.error
+            : errorData.error?.message || 'Failed to load file';
+          onLoadError(tab.path, errMsg);
           return;
         }
 
