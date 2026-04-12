@@ -13,6 +13,7 @@ import {
   OPENCODE_THINKING_PATTERN,
   OPENCODE_RESPONSE_COMPLETE,
   COPILOT_SELECTION_LIST_PATTERN,
+  CLAUDE_SELECTION_LIST_FOOTER,
 } from '@/lib/detection/cli-patterns';
 
 describe('OPENCODE_SELECTION_LIST_PATTERN', () => {
@@ -126,5 +127,22 @@ Select Model
 
   it('should not use the global flag (no /g)', () => {
     expect(COPILOT_SELECTION_LIST_PATTERN.global).toBe(false);
+  });
+});
+
+describe('CLAUDE_SELECTION_LIST_FOOTER', () => {
+  it('should match "Enter to select" variants', () => {
+    expect(CLAUDE_SELECTION_LIST_FOOTER.test('Enter to select · Tab/Arrow keys to navigate · Esc to cancel')).toBe(true);
+    expect(CLAUDE_SELECTION_LIST_FOOTER.test('Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel')).toBe(true);
+  });
+
+  it('should match "Enter to confirm" variant (/model command)', () => {
+    expect(CLAUDE_SELECTION_LIST_FOOTER.test('Enter to confirm · Esc to exit')).toBe(true);
+  });
+
+  it('should not match unrelated text', () => {
+    expect(CLAUDE_SELECTION_LIST_FOOTER.test('> ')).toBe(false);
+    expect(CLAUDE_SELECTION_LIST_FOOTER.test('esc to interrupt')).toBe(false);
+    expect(CLAUDE_SELECTION_LIST_FOOTER.test('Press enter to continue')).toBe(false);
   });
 });

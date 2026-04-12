@@ -22,9 +22,19 @@ import { ImageViewer } from './ImageViewer';
 import { VideoViewer } from './VideoViewer';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
+import { isEditableExtension } from '@/config/editable-extensions';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
 import { Z_INDEX } from '@/config/z-index';
+
+/** Shared loading fallback for dynamic imports */
+function DynamicImportSpinner() {
+  return (
+    <div className="flex items-center justify-center py-12 bg-white dark:bg-gray-900">
+      <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-cyan-600 dark:border-t-cyan-400" />
+    </div>
+  );
+}
 
 /** Dynamic import of HtmlPreview for HTML files in tab panel - Issue #490 */
 const HtmlPreview = dynamic(
@@ -34,11 +44,7 @@ const HtmlPreview = dynamic(
     })),
   {
     ssr: false,
-    loading: () => (
-      <div className="flex items-center justify-center py-12 bg-white dark:bg-gray-900">
-        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-cyan-600 dark:border-t-cyan-400" />
-      </div>
-    ),
+    loading: () => <DynamicImportSpinner />,
   },
 );
 
@@ -50,11 +56,7 @@ const MarkdownEditor = dynamic(
     })),
   {
     ssr: false,
-    loading: () => (
-      <div className="flex items-center justify-center py-12 bg-white dark:bg-gray-900">
-        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-cyan-600 dark:border-t-cyan-400" />
-      </div>
-    ),
+    loading: () => <DynamicImportSpinner />,
   },
 );
 
@@ -588,7 +590,10 @@ export const FilePanelContent = memo(function FilePanelContent({
 
         if (!response.ok) {
           const errorData = await response.json();
-          onLoadError(tab.path, errorData.error || 'Failed to load file');
+          const errMsg = typeof errorData.error === 'string'
+            ? errorData.error
+            : errorData.error?.message || 'Failed to load file';
+          onLoadError(tab.path, errMsg);
           return;
         }
 
@@ -750,6 +755,26 @@ export const FilePanelContent = memo(function FilePanelContent({
               onOpenFile={onOpenFile}
             />
           )}
+        </div>
+      </MaximizableWrapper>
+    );
+  }
+
+  // Editable text files (YAML, etc.): text editor mode (Issue #646)
+  if (isEditableExtension('.' + content.extension)) {
+    return (
+      <MaximizableWrapper isMaximized={isMaximized} onToggle={toggleMaximize} filePath={tab.path}>
+        <div className="h-full flex flex-col">
+          <MarkdownWithSearch
+            tab={tab}
+            content={content}
+            worktreeId={worktreeId}
+            isMaximized={isMaximized}
+            onToggleMaximize={toggleMaximize}
+            onFileSaved={onFileSaved}
+            onDirtyChange={handleDirtyChange}
+            onOpenFile={onOpenFile}
+          />
         </div>
       </MaximizableWrapper>
     );

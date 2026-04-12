@@ -1,0 +1,59 @@
+{
+  "issue_number": 646,
+  "status": "success",
+  "changes": [
+    {
+      "file": "src/config/editable-extensions.ts",
+      "description": "Extracted TEXT_MAX_SIZE_BYTES constant to replace 3 occurrences of magic number 1024*1024. Simplified validateContent additional validation from if/else-if/else chain to a single ternary expression. Removed redundant inline comments."
+    },
+    {
+      "file": "src/components/worktree/NewFileDialog.tsx",
+      "description": "Simplified resolveFileName by removing redundant EDITABLE_EXTENSIONS.includes check. Cases (a) and (c) both returned trimmed, so the branch was a no-op. Streamlined JSDoc to match simplified logic."
+    },
+    {
+      "file": "src/components/worktree/FilePanelContent.tsx",
+      "description": "Extracted DynamicImportSpinner component to deduplicate identical loading spinner markup used by HtmlPreview and MarkdownEditor dynamic imports."
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "description": "Extracted renderEditorInner callback to deduplicate line-number gutter + textarea rendering shared between mobile portrait and desktop layouts. Reduced ~40 lines of duplicated JSX."
+    },
+    {
+      "file": "src/types/markdown-editor.ts",
+      "description": "Added cross-reference comment on FILE_SIZE_LIMITS.MAX_SIZE to maintain consistency with TEXT_MAX_SIZE_BYTES in editable-extensions.ts."
+    }
+  ],
+  "test_results": {
+    "unit_tests_passed": true,
+    "lint_passed": true,
+    "type_check_passed": true
+  },
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "after_coverage": 80.0
+  },
+  "refactorings_applied": [
+    "Magic number extraction (DRY: TEXT_MAX_SIZE_BYTES constant)",
+    "Dead code removal (resolveFileName redundant branch)",
+    "Component extraction (DynamicImportSpinner)",
+    "Render function extraction (renderEditorInner)",
+    "Conditional logic simplification (validateContent)"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "files_changed": [
+    "src/config/editable-extensions.ts",
+    "src/components/worktree/NewFileDialog.tsx",
+    "src/components/worktree/FilePanelContent.tsx",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/types/markdown-editor.ts"
+  ],
+  "commits": [
+    "9caf0ebf: refactor(issue-646): improve code quality of file editing feature"
+  ],
+  "summary": "Refactored Issue #646 implementation across 5 files with net -28 lines. Key improvements: extracted TEXT_MAX_SIZE_BYTES constant to eliminate magic number duplication, removed dead code in resolveFileName, extracted shared components (DynamicImportSpinner, renderEditorInner) to reduce JSX duplication, and simplified conditional validation logic. All 331 test files (6271 tests) pass. Zero ESLint/TypeScript errors."
+}

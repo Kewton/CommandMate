@@ -366,7 +366,10 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
 
         if (!response.ok) {
           const errorData = await response.json();
-          throw new Error(errorData.error || 'Failed to load file');
+          const errMsg = typeof errorData.error === 'string'
+            ? errorData.error
+            : errorData.error?.message || 'Failed to load file';
+          throw new Error(errMsg);
         }
 
         const data = await response.json();

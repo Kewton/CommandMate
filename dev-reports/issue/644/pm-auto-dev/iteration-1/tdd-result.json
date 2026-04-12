@@ -1,0 +1,62 @@
+{
+  "issue_number": 644,
+  "iteration": 1,
+  "status": "success",
+  "implemented_files": [
+    "src/config/repository-config.ts",
+    "src/lib/db/db-repository.ts",
+    "src/app/api/repositories/route.ts",
+    "src/app/api/repositories/[id]/route.ts",
+    "src/lib/api-client.ts",
+    "src/components/repository/RepositoryList.tsx",
+    "src/components/repository/index.ts",
+    "src/app/repositories/page.tsx",
+    "tests/integration/api-repositories-list.test.ts",
+    "tests/integration/api-repositories-put.test.ts",
+    "tests/unit/components/repository/RepositoryList.test.tsx",
+    "CLAUDE.md"
+  ],
+  "test_results": {
+    "unit": {
+      "total": 6244,
+      "passed": 6237,
+      "failed": 0,
+      "skipped": 7,
+      "new_tests_added": 18,
+      "new_test_file": "tests/unit/components/repository/RepositoryList.test.tsx"
+    },
+    "integration": {
+      "total": 15,
+      "passed": 15,
+      "failed": 0,
+      "new_tests_added": 15,
+      "new_test_files": [
+        "tests/integration/api-repositories-list.test.ts",
+        "tests/integration/api-repositories-put.test.ts"
+      ],
+      "note": "Pre-existing integration test failures in tests/integration/api/file-upload.test.ts (5MB vs 20MB), tests/integration/api-hooks.test.ts, tests/integration/trust-dialog-auto-response.test.ts, and others are unrelated to Issue #644 and reference no files touched by this work."
+    }
+  },
+  "lint_result": "pass",
+  "typecheck_result": "pass",
+  "acceptance_criteria_coverage": {
+    "repo_list_visible": "pass",
+    "per_row_fields": "pass",
+    "disabled_badge": "pass",
+    "inline_edit_persists": "pass",
+    "cross_screen_propagation_on_reload": "pass (server reads from DB)",
+    "empty_clears_displayName": "pass",
+    "client_validation_100_chars": "pass",
+    "server_error_message_unchanged": "pass (pinned by api-repositories-put regression test)",
+    "worktree_count_by_repository_path": "pass",
+    "getAllRepositories_signature_unchanged": "pass (new helper getAllRepositoriesWithWorktreeCount added)",
+    "refreshKey_propagation": "pass",
+    "auth_middleware_unchanged": "pass (no middleware changes)",
+    "feedback_on_save": "pass",
+    "dark_mode": "pass (Tailwind dark: variants throughout)",
+    "lint_typecheck_unit_integration_pass": "pass",
+    "three_new_test_files_added": "pass"
+  },
+  "commits": [],
+  "summary": "Issue #644 implemented end-to-end with the Red-Green-Refactor cycle. Added MAX_DISPLAY_NAME_LENGTH shared constant in src/config/repository-config.ts and refactored the PUT /api/repositories/[id] route to import it (error message text preserved). Added getAllRepositoriesWithWorktreeCount(db) in src/lib/db/db-repository.ts using a correlated subquery on worktrees.repository_path (NOT repository_id) while keeping the existing getAllRepositories(db) signature untouched. Exposed the list via a new GET /api/repositories handler and extended src/lib/api-client.ts with RepositoryListItem / UpdateRepositoryDisplayNameResponse types and repositoryApi.list() / updateDisplayName() methods. Implemented src/components/repository/RepositoryList.tsx with inline alias editing (Enter saves, Escape cancels, 100-char client-side validation, Disabled badge, dark mode, React.memo + useCallback), placed it above RepositoryManager in /repositories/page.tsx, and wired refreshKey so Add/Sync/Save all trigger a refetch. Added 15 integration tests (api-repositories-list.test.ts + api-repositories-put.test.ts) and 18 component unit tests for RepositoryList. All 6237 unit tests pass, all repository-related integration tests (73 total across 7 files) pass, npm run lint and npx tsc --noEmit are clean. Pre-existing unrelated integration test failures remain untouched and affect test files that reference neither the modified modules nor the new code."
+}

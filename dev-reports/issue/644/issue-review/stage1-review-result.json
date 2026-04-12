@@ -1,0 +1,136 @@
+{
+  "stage": 1,
+  "focus": "通常",
+  "reviewer": "issue-review-agent",
+  "issue_number": 644,
+  "iteration": 1,
+  "review_date": "2026-04-12",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "Should Fix",
+      "category": "整合性",
+      "title": "`updateDisplayName` のレスポンス型が実APIの返却フィールドと一致しない",
+      "description": "Issue の実装方針で示されている `repositoryApi.updateDisplayName` のレスポンス型は `{ success: boolean; repository: RepositoryListItem }` となっていますが、既存の `PUT /api/repositories/[id]`（`src/app/api/repositories/[id]/route.ts` L63-73）が返却するのは `{ success, repository: { id, name, displayName, path, enabled } }` で、`worktreeCount` を含みません。`RepositoryListItem`（Issueの GET レスポンス例に準拠）は `worktreeCount` を必須にしているため、同じ型を使うと型不整合になります。",
+      "location": "## 実装方針（たたき台）> 2. api-client 追加",
+      "suggestion": "(a) PUT レスポンス用の型を分離する（例: `UpdateRepositoryResponse` は `repository: Omit<RepositoryListItem, 'worktreeCount'>` もしくは独立型として定義）、または (b) PUT 実行後は API 側で `worktreeCount` もあわせて返すよう `src/app/api/repositories/[id]/route.ts` も改修する、のいずれかを Issue 本文に明記してください。フロント側で保存後に一覧全体を再取得する方針なら (a) の方が影響範囲が小さいです。",
+      "evidence": "src/app/api/repositories/[id]/route.ts:63-73 では repository オブジェクトに worktreeCount フィールドが無い"
+    },
+    {
+      "id": "S1-002",
+      "severity": "Should Fix",
+      "category": "整合性/完全性",
+      "title": "既存の `getRepositories()`（worktree-db.ts）との関係・棲み分けが Issue 本文で言及されていない",
+      "description": "現状 `src/lib/db/worktree-db.ts:171` に `getRepositories(db)` が既に存在し、`worktreeCount` と `displayName` を含む形で返却しています（`/api/worktrees` 内で使用中）。しかしこの関数は `worktrees` テーブルからの LEFT JOIN・GROUP BY で構成されているため、worktree が 0 件のリポジトリや `id`/`enabled` フィールドを返さないという実装上の制約があります。Issue の方針は `getAllRepositories(db)`（repositories テーブル直）を使う前提ですが、『なぜ既存の `getRepositories()` を流用せず新しい実装が必要なのか』の説明が Issue 本文にないため、実装時に誤って既存関数を流用してしまうリスクがあります。",
+      "location": "## 実装方針（たたき台）> 1. API 追加",
+      "suggestion": "Issue 本文の実装方針に以下を追記してください: 『`src/lib/db/worktree-db.ts:171` の既存 `getRepositories()` は worktrees テーブル起点の GROUP BY クエリで、`id`/`enabled`/worktree 0 件のリポジトリを返さないため、本 Issue の要件を満たせない。そのため `getAllRepositories(db)`（repositories テーブル直）を使用し、`worktreeCount` は別途 `worktrees` テーブルへの集計クエリで付与する（または DB 層に新しいヘルパー関数 `getAllRepositoriesWithWorktreeCount()` を追加する）』。",
+      "evidence": "src/lib/db/worktree-db.ts:171-203, src/lib/db/db-repository.ts:290-300"
+    },
+    {
+      "id": "S1-003",
+      "severity": "Should Fix",
+      "category": "完全性/正確性",
+      "title": "要件に挙げられている『無効化リポジトリの識別』と既存 excluded API の関係が曖昧",
+      "description": "Issue の機能要件1末尾で『無効化されたリポジトリは別セクション or バッジで識別可能にする（既存の excluded API を流用してもよい）』とありますが、実装方針で `getAllRepositories(db)` を使う前提なら `enabled` フィールドが一覧に含まれるため、`/api/repositories/excluded`（Issue #190）を呼ぶ必要はありません。しかも `getAllRepositories(db)` は Issue #190 の `enabled=0` レコードも含めて全件返します（`src/lib/db/db-repository.ts:290-300` は WHERE 句なし）。逆に、もし一覧表示から無効化リポジトリを除外したい場合は `WHERE enabled = 1` が必要です。どちらの方針かによって API 実装が変わります。",
+      "location": "## 要件 > 機能要件 > 1. リポジトリ一覧表示 / ## 実装方針 > 1. API 追加",
+      "suggestion": "Issue 本文で方針を明確化してください: (a) GET /api/repositories は全リポジトリ（enabled=0 含む）を返し、フロントでは `enabled` で無効バッジを出す、(b) GET /api/repositories はデフォルトで enabled=1 のみ返し、クエリパラメータ `?includeDisabled=true` で切り替える、(c) excluded API と GET /api/repositories を別のリストとして扱う。推奨は (a)（最小実装で要件を満たす）。",
+      "evidence": "src/lib/db/db-repository.ts:290-300（WHERE 句なし）、src/lib/db/db-repository.ts:510-523 が excluded API 用の `enabled = 0` クエリ"
+    },
+    {
+      "id": "S1-004",
+      "severity": "Should Fix",
+      "category": "完全性",
+      "title": "共有定数化する `MAX_DISPLAY_NAME_LENGTH` の配置先・エクスポート命名が未指定",
+      "description": "Issue は『`MAX_DISPLAY_NAME_LENGTH = 100` を `src/config/` などに移動』と記載していますが、配置先ファイル名（例: `src/config/repository-config.ts` など）とエクスポート名が指定されていません。既存の `src/config/` には `auth-config.ts` / `review-config.ts` / `timer-constants.ts` 等の命名パターンがあり、PR 実装時に配置のブレが発生する可能性があります。またこの定数は DB スキーマに直結する値ではないため、バリデーションのみに使う軽量定数として独立ファイルにするか、既存の repository 関連定数と同居させるか設計判断が必要です。",
+      "location": "## 実装方針（たたき台）> 4. 共有定数",
+      "suggestion": "Issue 本文に『新規ファイル `src/config/repository-config.ts` を作成し、`export const MAX_DISPLAY_NAME_LENGTH = 100` を定義する。API ルート（`src/app/api/repositories/[id]/route.ts:13`）とフロント（`RepositoryList.tsx`）の両方から import する』のように具体化してください。既存の `src/config/auth-config.ts` のパターンを踏襲すると自然です。",
+      "evidence": "src/config/ 配下の既存命名パターン（auth-config.ts, review-config.ts, timer-constants.ts）"
+    },
+    {
+      "id": "S1-005",
+      "severity": "Nice to Have",
+      "category": "完全性",
+      "title": "保存成功時のフィードバック実装方針（Toast）の具体化",
+      "description": "Issue の機能要件2に『トースト or 成功メッセージを表示』とありますが、本リポジトリには既存の共通 Toast コンポーネント `src/components/common/Toast.tsx` があります。Issue 本文に既存コンポーネントへの言及がないため、実装者が独自にインラインメッセージを追加してしまう（= 既存の UX パターンと乖離する）可能性があります。",
+      "location": "## 要件 > 機能要件 > 2. 別名の編集",
+      "suggestion": "Issue 本文に『保存成功/失敗のフィードバックは既存の `src/components/common/Toast.tsx` を使用する』と記載してください。参考実装として、既存の `RepositoryManager.tsx` は `setSuccess`/`setError` でインラインメッセージを出す旧パターンを採用しているため、Toast 採用時はその旨を明記すると実装者が迷いません。",
+      "evidence": "src/components/common/Toast.tsx が存在、src/components/repository/RepositoryManager.tsx は L37-39 でインラインメッセージ採用"
+    },
+    {
+      "id": "S1-006",
+      "severity": "Nice to Have",
+      "category": "完全性",
+      "title": "`RepositoryList` と `RepositoryManager` のリフレッシュ連携の設計が抽象的",
+      "description": "実装方針に『新規追加 or Sync 完了後に `RepositoryList` の再取得をトリガー（`onRepositoryAdded` を活用 or 共通 refresh）』とありますが、実装パターンとしては (a) page コンポーネントで `refreshKey` state を持ち `onRepositoryAdded` で increment する、(b) `RepositoryList` に `ref` を公開して親から `refetch()` を呼ぶ、(c) SWR/React Query を導入する、などいくつかパターンがあります。親子双方向の状態管理になるため、方針が曖昧だと実装コストが予想よりかかる可能性があります。",
+      "location": "## 実装方針（たたき台）> 3. UI コンポーネント追加",
+      "suggestion": "Issue 本文に、推奨実装パターン（例: 『`src/app/repositories/page.tsx` で `refreshKey` state を保持し、`RepositoryManager.onRepositoryAdded` と Sync 完了時にインクリメント、`RepositoryList` は key prop として受け取って useEffect で再フェッチする』）を1文だけ追加してください。既存の `WorktreesCacheProvider` 等との整合性を考慮する場合はその旨も触れる価値があります。",
+      "evidence": "src/components/repository/RepositoryManager.tsx:29-59 の onRepositoryAdded コールバック"
+    },
+    {
+      "id": "S1-007",
+      "severity": "Nice to Have",
+      "category": "完全性",
+      "title": "受け入れ条件に関連する型定義ファイル（`src/types/models.ts`）更新の明示",
+      "description": "`Repository` インターフェイス（`src/types/models.ts:99-114`）は既に `displayName` を持っていますが、`worktreeCount` は含まれていません。Issue の API レスポンス例で示されている `RepositoryListItem` 型を新規に追加する必要があるかどうか、既存の `Repository` 型を拡張するかどうかが Issue 本文で明言されていません。",
+      "location": "## 実装方針（たたき台）> 2. api-client 追加",
+      "suggestion": "Issue 本文に『`src/lib/api-client.ts` に新規型 `RepositoryListItem`（`Pick<Repository, 'id'|'name'|'displayName'|'path'|'enabled'> & { worktreeCount: number }`）を定義する』のように具体的な型定義方針を明記してください。DB 層の `Repository` 型（`src/lib/db/db-repository.ts:16-28`）は `cloneSource`/`isEnvManaged`/`createdAt`/`updatedAt` 等のフィールドを持つため、UI にそのまま流すのは避けた方がよいです。",
+      "evidence": "src/types/models.ts:99-114, src/lib/db/db-repository.ts:16-28, src/lib/api-client.ts:13-18"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 4,
+  "nice_to_have_count": 3,
+  "summary": "Issue #644 の記載内容は、前提条件・API パス・関数名・ファイルパスのレベルで既存コードと整合しており、仮説検証結果通り Must Fix に相当する重大な誤りはありません。ただし実装方針レベルで、(1) 既存 `getRepositories()`（worktree-db.ts）との棲み分け、(2) `updateDisplayName` レスポンス型の整合、(3) 無効化リポジトリの扱いと excluded API の関係、(4) 共有定数の配置先、の4点が曖昧なため Should Fix として具体化を推奨します。また Toast 利用・再フェッチ戦略・型定義方針に関する Nice to Have の補足が3件あります。これらを本文に反映すれば、実装フェーズでの手戻りリスクを大きく削減できます。",
+  "code_references": [
+    {
+      "file": "src/app/repositories/page.tsx",
+      "relevance": "RepositoryManager のみ描画、RepositoryList 追加対象"
+    },
+    {
+      "file": "src/components/repository/RepositoryManager.tsx",
+      "relevance": "既存の Add+Sync UI（L37-39 でインラインメッセージ採用、Toast 未使用）"
+    },
+    {
+      "file": "src/app/api/repositories/route.ts",
+      "relevance": "DELETE のみ実装、GET ハンドラを追記する対象"
+    },
+    {
+      "file": "src/app/api/repositories/[id]/route.ts",
+      "relevance": "PUT は L63-73 で worktreeCount を返却しない、MAX_DISPLAY_NAME_LENGTH が L13 にローカル定義"
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "relevance": "repositoryApi に list/updateDisplayName 未実装（L379-478）"
+    },
+    {
+      "file": "src/lib/db/db-repository.ts",
+      "relevance": "getAllRepositories() が L290-300、worktreeCount を含まない、WHERE 句なしで enabled=0 も返す"
+    },
+    {
+      "file": "src/lib/db/worktree-db.ts",
+      "relevance": "既存 getRepositories() が L171-203、worktreeCount と displayName を持つが id/enabled を返さず worktree 0 件のリポジトリも除外"
+    },
+    {
+      "file": "src/types/models.ts",
+      "relevance": "Repository 型に displayName 済（L105）、worktreeCount は未定義"
+    },
+    {
+      "file": "src/components/common/Toast.tsx",
+      "relevance": "既存共通 Toast コンポーネント（Issue 本文に未言及）"
+    },
+    {
+      "file": "src/config/",
+      "relevance": "auth-config.ts/review-config.ts 等の既存命名パターン、repository 用定数ファイルが未存在"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構造・品質チェックコマンドの参照"
+    },
+    {
+      "file": "dev-reports/issue/644/issue-review/hypothesis-verification.md",
+      "relevance": "前提条件6件すべて Confirmed、H-5/H-6 の補足あり"
+    }
+  ]
+}

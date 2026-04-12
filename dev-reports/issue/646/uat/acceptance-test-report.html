@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UAT Report - Issue #646 ファイル編集強化</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; background: #f5f5f5; color: #333; }
+  .container { max-width: 1000px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 1.8rem; color: #1a1a2e; border-bottom: 3px solid #4CAF50; padding-bottom: 12px; }
+  h2 { font-size: 1.2rem; color: #333; margin-top: 32px; }
+  .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 24px 0; }
+  .summary-card { background: white; border-radius: 8px; padding: 16px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+  .summary-card .number { font-size: 2.5rem; font-weight: bold; }
+  .summary-card .label { color: #666; font-size: 0.9rem; margin-top: 4px; }
+  .pass-color { color: #4CAF50; }
+  .fail-color { color: #f44336; }
+  .rate-color { color: #2196F3; }
+  .total-color { color: #555; }
+  .info-box { background: white; border-radius: 8px; padding: 16px; margin: 16px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+  .info-box table { width: 100%; border-collapse: collapse; }
+  .info-box td, .info-box th { padding: 8px 12px; text-align: left; border-bottom: 1px solid #eee; }
+  .info-box th { color: #666; font-weight: normal; width: 200px; }
+  .test-card { background: white; border-radius: 8px; padding: 16px; margin: 12px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border-left: 4px solid #4CAF50; }
+  .test-card.fail { border-left-color: #f44336; }
+  .test-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .test-id { font-weight: bold; color: #666; font-size: 0.85rem; }
+  .test-title { font-size: 1rem; font-weight: 600; flex: 1; margin: 0 12px; }
+  .badge { padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: bold; }
+  .badge-pass { background: #e8f5e9; color: #2e7d32; }
+  .badge-fail { background: #ffebee; color: #c62828; }
+  .test-detail { font-size: 0.9rem; }
+  .test-detail table { width: 100%; border-collapse: collapse; }
+  .test-detail td { padding: 6px 8px; border-bottom: 1px solid #f0f0f0; }
+  .test-detail td:first-child { color: #666; width: 100px; }
+  .code { background: #f8f8f8; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px 12px; font-family: monospace; font-size: 0.85rem; white-space: pre-wrap; word-break: break-all; margin-top: 4px; }
+  .note { color: #555; font-size: 0.85rem; margin-top: 8px; padding: 8px; background: #fffde7; border-radius: 4px; }
+  .footer { margin-top: 40px; text-align: center; color: #999; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>実機受入テスト報告書</h1>
+  <p>Issue #646 ファイル編集強化（YAML ファイル編集・拡張子選択対応）</p>
+
+  <div class="summary">
+    <div class="summary-card">
+      <div class="number total-color">11</div>
+      <div class="label">テスト総数</div>
+    </div>
+    <div class="summary-card">
+      <div class="number pass-color">11</div>
+      <div class="label">PASS</div>
+    </div>
+    <div class="summary-card">
+      <div class="number fail-color">0</div>
+      <div class="label">FAIL</div>
+    </div>
+    <div class="summary-card">
+      <div class="number rate-color">100%</div>
+      <div class="label">合格率</div>
+    </div>
+  </div>
+
+  <div class="info-box">
+    <table>
+      <tr><th>テスト日</th><td>2026-04-12</td></tr>
+      <tr><th>対象 Issue</th><td>#646 ファイル編集強化</td></tr>
+      <tr><th>ブランチ</th><td>feature/646-worktree</td></tr>
+      <tr><th>テスト環境</th><td>localhost:3010 (CommandMate サーバー)</td></tr>
+      <tr><th>最終判定</th><td style="color:#2e7d32;font-weight:bold;">✅ 全件 PASS — 受入条件を満たしています</td></tr>
+    </table>
+  </div>
+
+  <h2>テストケース詳細</h2>
+
+  <div class="test-card">
+    <div class="test-header">
+      <span class="test-id">TC-001</span>
+      <span class="test-title">EDITABLE_EXTENSIONS に .yaml/.yml が含まれる（単体テスト）</span>
+      <span class="badge badge-pass">PASS</span>
+    </div>
+    <div class="test-detail">
+      <table>
+        <tr><td>確認観点</td><td>AC-1 EDITABLE_EXTENSIONS に .yaml/.yml が含まれる</td></tr>
+        <tr><td>実行コマンド</td><td><div class="code">npm run test:unit -- editable-extensions</div></td></tr>
+        <tr><td>結果</td><td><div class="code">✓ should include .md, .html, .htm, .yaml, .yml (toHaveLength(5))
+✓ should have a validator for .yaml extension - Issue #646
+✓ should have a validator for .yml extension - Issue #646</div></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="test-card">
+    <div class="test-header">
+      <span class="test-id">TC-002</span>
+      <span class="test-title">YAML ファイルの PUT API でバリデーション成功（安全なコンテンツ）</span>
+      <span class="badge badge-pass">PASS</span>
+    </div>
+    <div class="test-detail">
+      <table>
+        <tr><td>確認観点</td><td>AC-2 .yaml ファイルを編集・保存できる</td></tr>
+        <tr><td>実行コマンド</td><td><div class="code">PUT /api/worktrees/{id}/files/test-uat.yaml
+body: {"content":"name: updated\nvalue: world"}</div></td></tr>
+        <tr><td>結果</td><td><div class="code">HTTP 200: {"success":true,"path":"test-uat.yaml"}</div></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="test-card">
+    <div class="test-header">
+      <span class="test-id">TC-003</span>
+      <span class="test-title">YAML ファイルの PUT API で危険タグをブロック（!ruby/object）</span>
+      <span class="badge badge-pass">PASS</span>
+    </div>
+    <div class="test-detail">
+      <table>
+        <tr><td>確認観点</td><td>AC-3 危険タグのブロックと具体的エラーメッセージ</td></tr>
+        <tr><td>実行コマンド</td><td><div class="code">PUT /api/worktrees/{id}/files/test-uat.yaml
+body: {"content":"attack: !ruby/object:Gem::Installer {}"}</div></td></tr>
+        <tr><td>結果</td><td><div class="code">HTTP 400: {"success":false,"error":{"code":"INVALID_CONTENT",
+  "message":"Dangerous YAML tags detected (e.g., !ruby/object). Please use only safe tags."}}</div></td></tr>
+      </table>
+      <div class="note">具体的なエラーメッセージ付きでブロック ✅</div>
+    </div>
+  </div>
+
+  <div class="test-card">
+    <div class="test-header">
+      <span class="test-id">TC-004</span>
+      <span class="test-title">.yml 拡張子でも危険タグをブロック（!!python）</span>
+      <span class="badge badge-pass">PASS</span>
+    </div>
+    <div class="test-detail">
+      <table>
+        <tr><td>確認観点</td><td>AC-3 .yml でも同様にブロックされる</td></tr>
+        <tr><td>実行コマンド</td><td><div class="code">PUT /api/worktrees/{id}/files/test-uat.yml
+body: {"content":"attack: !!python/object:__builtin__.compile {}"}</div></td></tr>
+        <tr><td>結果</td><td><div class="code">HTTP 400: {"success":false,"error":{"code":"INVALID_CONTENT",
+  "message":"Dangerous YAML tags detected (e.g., !ruby/object). Please use only safe tags."}}</div></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="test-card">
+    <div class="test-header">
+      <span class="test-id">TC-006</span>
+      <span class="test-title">.md ファイルの PUT API が正常動作（回帰確認）</span>
+      <span class="badge badge-pass">PASS</span>
+    </div>
+    <div class="test-detail">
+      <table>
+        <tr><td>確認観点</td><td>AC-4 既存の .md 編集機能に影響がない</td></tr>
+        <tr><td>実行コマンド</td><td><div class="code">PUT /api/worktrees/{id}/files/test-uat-regression.md
+body: {"content":"# Test\n\nHello World"}</div></td></tr>
+        <tr><td>結果</td><td><div class="code">HTTP 200: {"success":true,"path":"test-uat-regression.md"}</div></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="test-card">
+    <div class="test-header">
+      <span class="test-id">TC-007</span>
+      <span class="test-title">isEditableExtension 関数の動作確認（単体テスト）</span>
+      <span class="badge badge-pass">PASS</span>
+    </div>
+    <div class="test-detail">
+      <table>
+        <tr><td>確認観点</td><td>AC-1 isEditableExtension('.yaml') が true を返す</td></tr>
+        <tr><td>結果</td><td><div class="code">✓ should return true for .yaml - Issue #646
+✓ should return true for .yml - Issue #646
+✓ should return true for .YAML (case-insensitive) - Issue #646</div></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="test-card">
+    <div class="test-header">
+      <span class="test-id">TC-008</span>
+      <span class="test-title">validateContent の 3 分岐ロジック確認（単体テスト）</span>
+      <span class="badge badge-pass">PASS</span>
+    </div>
+    <div class="test-detail">
+      <table>
+        <tr><td>確認観点</td><td>AC-3 string 型エラーメッセージが返される</td></tr>
+        <tr><td>結果</td><td><div class="code">✓ should return specific error message string for dangerous YAML tags
+✓ should reject YAML with dangerous !ruby/object tag
+✓ should reject YAML with dangerous !!python tag</div></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="test-card">
+    <div class="test-header">
+      <span class="test-id">TC-009</span>
+      <span class="test-title">NewFileDialog の resolveFileName ヘルパー（単体テスト）</span>
+      <span class="badge badge-pass">PASS</span>
+    </div>
+    <div class="test-detail">
+      <table>
+        <tr><td>確認観点</td><td>AC-5 拡張子選択 UI の動作仕様（3 パターン）</td></tr>
+        <tr><td>結果</td><td><div class="code">21 tests passed
+✓ (a) file name has an EDITABLE_EXTENSIONS extension → use as-is (6 tests)
+✓ (b) file name has no extension → append selected extension (5 tests)
+✓ (c) file name has a non-editable extension → use as-is (4 tests)
+✓ edge cases (6 tests)</div></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="test-card">
+    <div class="test-header">
+      <span class="test-id">TC-010</span>
+      <span class="test-title">TypeScript 型チェック・ESLint パス</span>
+      <span class="badge badge-pass">PASS</span>
+    </div>
+    <div class="test-detail">
+      <table>
+        <tr><td>確認観点</td><td>AC-6 npm run lint / npx tsc --noEmit がパスする</td></tr>
+        <tr><td>結果</td><td><div class="code">npx tsc --noEmit: 0 errors
+npm run lint: ✔ No ESLint warnings or errors</div></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="test-card">
+    <div class="test-header">
+      <span class="test-id">TC-011</span>
+      <span class="test-title">結合テスト（YAML ファイル操作）</span>
+      <span class="badge badge-pass">PASS</span>
+    </div>
+    <div class="test-detail">
+      <table>
+        <tr><td>確認観点</td><td>AC-2, AC-3 YAML CRUD・危険タグ拒否</td></tr>
+        <tr><td>実行コマンド</td><td><div class="code">npx vitest run tests/integration/yaml-file-operations.test.ts</div></td></tr>
+        <tr><td>結果</td><td><div class="code">Test Files: 1 passed
+Tests: 12 passed
+Duration: 401ms</div></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="test-card">
+    <div class="test-header">
+      <span class="test-id">TC-012</span>
+      <span class="test-title">YAML POST API（新規作成）</span>
+      <span class="badge badge-pass">PASS</span>
+    </div>
+    <div class="test-detail">
+      <table>
+        <tr><td>確認観点</td><td>AC-2 .yaml ファイルを新規作成できる</td></tr>
+        <tr><td>実行コマンド</td><td><div class="code">POST /api/worktrees/{id}/files/test-uat.yaml
+body: {"type":"file","content":"name: test\nvalue: hello"}</div></td></tr>
+        <tr><td>結果</td><td><div class="code">HTTP 201: {"success":true,"path":"test-uat.yaml"}</div></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="footer">
+    <p>Generated by CommandMate UAT Framework — Issue #646 — 2026-04-12</p>
+  </div>
+</div>
+</body>
+</html>

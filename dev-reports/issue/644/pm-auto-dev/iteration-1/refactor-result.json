@@ -1,0 +1,41 @@
+{
+  "issue_number": 644,
+  "status": "success",
+  "changes_made": [
+    "src/components/repository/RepositoryList.tsx: Resolve handleApiError(err) once in the save-error catch block and reuse the resolved message for both the inline editor error and the feedback banner (DRY). This guarantees the two surfaces always show identical text and avoids invoking the error helper twice."
+  ],
+  "no_changes_needed": [
+    "src/config/repository-config.ts: Minimal single-constant file with clear JSDoc. Nothing to improve.",
+    "src/lib/db/db-repository.ts (getAllRepositoriesWithWorktreeCount): SQL uses a correlated subquery on worktrees.repository_path (matches the design note in JSDoc), mapRepositoryRow is reused, Number(row.worktree_count) || 0 guards against any null aggregation. Existing getAllRepositories signature is intentionally preserved per constraint.",
+    "src/app/api/repositories/route.ts (GET): Thin handler, proper try/catch with structured logging, explicit response shape mapping, returns disabled repos as required by the spec. No smells to address.",
+    "src/app/api/repositories/[id]/route.ts: Uses the shared MAX_DISPLAY_NAME_LENGTH constant from @/config/repository-config. Error messages are fixed by constraint and must not be touched. The existing pre-#644 error handling shape is left untouched.",
+    "src/lib/api-client.ts: RepositoryListItem / UpdateRepositoryDisplayNameResponse / repositoryApi.list() / repositoryApi.updateDisplayName() are fully typed with no any, use encodeURIComponent on the path parameter, document the returned shape, and reuse the shared fetchApi / ApiError plumbing.",
+    "src/app/repositories/page.tsx: Already uses useCallback for the refreshKey bumper and passes it to both RepositoryList and RepositoryManager. Nothing to trim."
+  ],
+  "lint_result": "pass",
+  "typecheck_result": "pass",
+  "test_result": "pass",
+  "quality_metrics": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0,
+    "unit_tests_before": "6237 passed / 7 skipped",
+    "unit_tests_after": "6237 passed / 7 skipped"
+  },
+  "files_changed": [
+    "src/components/repository/RepositoryList.tsx"
+  ],
+  "commits": [
+    "8fcfe64b: refactor(repository): dedupe error-message resolution in display-name save"
+  ],
+  "review_observations": {
+    "type_safety": "No any usage detected. All component state, API shapes, and hook callbacks are strongly typed. RepositoryListItem and UpdateRepositoryDisplayNameResponse correctly model the API contract, including the fact that PUT does not return worktreeCount.",
+    "error_handling": "GET /api/repositories logs failures via the shared logger and returns a 500 with a generic message. PUT keeps its existing error-message contract (not modified per constraint). The client-side save-error path now resolves the message once and propagates it to both the inline editor and the feedback banner.",
+    "react_patterns": "useEffect is correctly driven by [fetchRepositories, refreshKey]. All handlers (fetchRepositories, handleStartEdit, handleCancelEdit, handleChangeValue, handleSave, handleKeyDown) are wrapped with useCallback with correct dependency arrays. The exported component is wrapped with React.memo to avoid needless re-renders when refreshKey is stable.",
+    "duplication": "Removed the only notable duplication: two handleApiError(err) invocations inside the save catch block.",
+    "naming": "Variable and function names are descriptive (fetchRepositories, handleStartEdit, handleChangeValue, edit.saving, feedback). The EditState interface and INITIAL_EDIT constant make the editor state machine explicit.",
+    "comments": "File-level JSDoc explains the Issue #644 context and the client-side concerns (Enter/Escape, empty-clears-alias, 100 char limit, dark mode). Inline comments justify the preserved worktreeCount merge and the new errorMessage reuse."
+  },
+  "summary": "Issue #644 refactor targets are of high quality and required only one DRY clean-up: the save-error path in RepositoryList now resolves the API error message once and reuses it for both the editor error and the feedback banner. All other target files were reviewed against type-safety, error-handling, React patterns, duplication, naming, and comments and needed no changes. TypeScript (0 errors), ESLint (0 errors), and the full unit-test suite (6237 passed / 7 skipped) all remain green after the edit."
+}

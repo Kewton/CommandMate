@@ -120,7 +120,7 @@ export function toBranchItem(worktree: Worktree): SidebarBranchItem {
   return {
     id: worktree.id,
     name: worktree.name,
-    repositoryName: worktree.repositoryName,
+    repositoryName: worktree.repositoryDisplayName ?? worktree.repositoryName,
     status,
     hasUnread,
     lastActivity: worktree.updatedAt,

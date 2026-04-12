@@ -1,0 +1,44 @@
+{
+  "issue_number": 646,
+  "iteration": 1,
+  "status": "success",
+  "implemented_tasks": [
+    "Task 1.1: EDITABLE_EXTENSIONS and EXTENSION_VALIDATORS updated with .yaml/.yml, additionalValidation extended to string|boolean, validateContent 3-branch logic",
+    "Task 1.2: Existing tests updated (toHaveLength 5), YAML validator tests added, YAML validateContent tests added",
+    "Task 2.1: NewFileDialog.tsx created with resolveFileName helper (3 extension resolution patterns)",
+    "Task 2.2: WorktreeDetailRefactored handleNewFile replaced window.prompt with NewFileDialog, existing tests updated",
+    "Task 3.1: FilePanelContent.tsx YAML routing added via isEditableExtension before default CodeViewer",
+    "Task 3.2: EditorProps fileType added, MarkdownEditor generalized for text-only mode (no preview for YAML)",
+    "Task 4.1: NewFileDialog.test.tsx created with 20 test cases for resolveFileName",
+    "Task 4.2: yaml-file-operations.test.ts integration tests created (12 tests: CRUD, dangerous tags, regression)"
+  ],
+  "test_results": {
+    "unit_tests_passed": true,
+    "unit_test_files": 331,
+    "unit_tests_total": 6271,
+    "integration_tests_passed": true,
+    "integration_tests_yaml": 12,
+    "integration_tests_file_ops_regression": 24,
+    "lint_passed": true,
+    "type_check_passed": true
+  },
+  "files_changed": [
+    "src/config/editable-extensions.ts",
+    "src/types/markdown-editor.ts",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/MarkdownToolbar.tsx",
+    "src/components/worktree/FilePanelContent.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/config/editable-extensions.test.ts",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+  ],
+  "files_created": [
+    "src/components/worktree/NewFileDialog.tsx",
+    "tests/unit/components/worktree/NewFileDialog.test.tsx",
+    "tests/integration/yaml-file-operations.test.ts"
+  ],
+  "commits": [
+    "6f9e0d6e: feat(editor): add YAML file editing and extension selection dialog"
+  ],
+  "summary": "TDD implementation complete for Issue #646. Added YAML file editing support (.yaml/.yml) with dangerous tag validation, created NewFileDialog with extension selection dropdown replacing window.prompt, generalized MarkdownEditor for text-only mode, and added YAML routing in FilePanelContent. All 331 unit test files pass (6271 tests), 12 new integration tests pass, TypeScript type check and ESLint both clean."
+}

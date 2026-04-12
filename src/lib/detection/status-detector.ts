@@ -226,18 +226,39 @@ export function detectSessionStatus(
   // options (e.g., "› 1. gpt-5.4") as a multiple_choice prompt, preventing
   // NavigationButtons from being shown.
   // This mirrors the Copilot Priority 0 pattern above.
+  //
+  // The pattern is scoped to the content window immediately above the Codex status
+  // bar (mirroring step 2.7's boundary detection). Matching against the full content
+  // would allow stale "Press enter to confirm" text from already-answered approval
+  // prompts high in scrollback to falsely trigger NavigationButtons.
   if (cliToolId === 'codex') {
-    const codexFullContent = contentLines.join('\n');
-    if (CODEX_SELECTION_LIST_PATTERN.test(codexFullContent)) {
-      const codexPromptOptions = buildDetectPromptOptions(cliToolId);
-      const codexPromptDetection = detectPrompt(stripBoxDrawing(cleanOutput), codexPromptOptions);
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.CODEX_SELECTION_LIST,
-        hasActivePrompt: false,
-        promptDetection: codexPromptDetection,
-      };
+    const codexStatusBarPattern = /^\s*\S+.*\d+%\s+left\s+·/;
+    let codexFooterBoundary = -1;
+    for (let ci = contentLines.length - 1; ci >= Math.max(0, contentLines.length - 10); ci--) {
+      if (codexStatusBarPattern.test(contentLines[ci])) {
+        codexFooterBoundary = ci;
+        break;
+      }
+    }
+    let codexContentEnd = codexFooterBoundary >= 0 ? codexFooterBoundary - 1 : contentLines.length - 1;
+    while (codexContentEnd >= 0 && contentLines[codexContentEnd].trim() === '') {
+      codexContentEnd--;
+    }
+    if (codexContentEnd >= 0) {
+      const codexSelectionWindow = contentLines
+        .slice(Math.max(0, codexContentEnd - STATUS_CHECK_LINE_COUNT + 1), codexContentEnd + 1)
+        .join('\n');
+      if (CODEX_SELECTION_LIST_PATTERN.test(codexSelectionWindow)) {
+        const codexPromptOptions = buildDetectPromptOptions(cliToolId);
+        const codexPromptDetection = detectPrompt(stripBoxDrawing(cleanOutput), codexPromptOptions);
+        return {
+          status: 'waiting',
+          confidence: 'high',
+          reason: STATUS_REASON.CODEX_SELECTION_LIST,
+          hasActivePrompt: false,
+          promptDetection: codexPromptDetection,
+        };
+      }
     }
   }
 

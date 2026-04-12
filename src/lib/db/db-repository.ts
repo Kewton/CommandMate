@@ -16,6 +16,7 @@ import { isSystemDirectory } from '@/config/system-directories';
 export interface Repository {
   id: string;
   name: string;
+  displayName?: string;
   path: string;
   enabled: boolean;
   cloneUrl?: string;
@@ -52,6 +53,7 @@ export interface CloneJobDB {
 interface RepositoryRow {
   id: string;
   name: string;
+  display_name: string | null;
   path: string;
   enabled: number;
   clone_url: string | null;
@@ -89,6 +91,7 @@ function mapRepositoryRow(row: RepositoryRow): Repository {
   return {
     id: row.id,
     name: row.name,
+    displayName: row.display_name || undefined,
     path: row.path,
     enabled: row.enabled === 1,
     cloneUrl: row.clone_url || undefined,
@@ -235,6 +238,7 @@ export function updateRepository(
   id: string,
   updates: {
     name?: string;
+    displayName?: string;
     enabled?: boolean;
     cloneUrl?: string;
     normalizedCloneUrl?: string;
@@ -247,6 +251,11 @@ export function updateRepository(
   if (updates.name !== undefined) {
     assignments.push('name = ?');
     params.push(updates.name);
+  }
+
+  if (updates.displayName !== undefined) {
+    assignments.push('display_name = ?');
+    params.push(updates.displayName || null);
   }
 
   if (updates.enabled !== undefined) {
@@ -288,6 +297,51 @@ export function getAllRepositories(
 
   const rows = stmt.all() as RepositoryRow[];
   return rows.map(mapRepositoryRow);
+}
+
+/**
+ * Repository row with worktree count aggregation
+ * Issue #644: Repository list view
+ */
+interface RepositoryRowWithCount extends RepositoryRow {
+  worktree_count: number;
+}
+
+/**
+ * Get all repositories with the number of worktrees associated to each.
+ *
+ * Issue #644: Repository list display for /repositories page.
+ *
+ * IMPORTANT: The worktrees table does NOT have a repository_id column.
+ * Repository ↔ worktree linkage is done by matching
+ * `repositories.path` against `worktrees.repository_path` (TEXT).
+ * Do not try to use repository_id here — it only exists on clone_jobs.
+ *
+ * The existing `getAllRepositories(db)` signature is intentionally left
+ * unchanged so existing callers (sync route, daily-summary-generator) are
+ * not affected.
+ *
+ * @param db - Database instance
+ * @returns Array of repositories augmented with a `worktreeCount` field.
+ *          Returns all repositories (enabled = 0 and enabled = 1), because
+ *          the /repositories screen must show disabled repositories with a
+ *          "Disabled" badge per acceptance criteria.
+ */
+export function getAllRepositoriesWithWorktreeCount(
+  db: Database.Database
+): (Repository & { worktreeCount: number })[] {
+  const stmt = db.prepare(`
+    SELECT r.*,
+      (SELECT COUNT(*) FROM worktrees w WHERE w.repository_path = r.path) AS worktree_count
+    FROM repositories r
+    ORDER BY r.name ASC
+  `);
+
+  const rows = stmt.all() as RepositoryRowWithCount[];
+  return rows.map((row) => ({
+    ...mapRepositoryRow(row),
+    worktreeCount: Number(row.worktree_count) || 0,
+  }));
 }
 
 // ============================================================

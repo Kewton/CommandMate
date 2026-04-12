@@ -25,11 +25,13 @@ describe('EDITABLE_EXTENSIONS', () => {
     expect(Array.isArray(EDITABLE_EXTENSIONS)).toBe(true);
   });
 
-  it('should include .md, .html, .htm', () => {
-    expect(EDITABLE_EXTENSIONS).toHaveLength(3);
+  it('should include .md, .html, .htm, .yaml, .yml', () => {
+    expect(EDITABLE_EXTENSIONS).toHaveLength(5);
     expect(EDITABLE_EXTENSIONS).toContain('.md');
     expect(EDITABLE_EXTENSIONS).toContain('.html');
     expect(EDITABLE_EXTENSIONS).toContain('.htm');
+    expect(EDITABLE_EXTENSIONS).toContain('.yaml');
+    expect(EDITABLE_EXTENSIONS).toContain('.yml');
   });
 });
 
@@ -55,6 +57,20 @@ describe('EXTENSION_VALIDATORS', () => {
     expect(htmValidator).toBeDefined();
     expect(htmValidator?.maxFileSize).toBe(5 * 1024 * 1024);
   });
+
+  it('should have a validator for .yaml extension - Issue #646', () => {
+    const yamlValidator = EXTENSION_VALIDATORS.find(v => v.extension === '.yaml');
+    expect(yamlValidator).toBeDefined();
+    expect(yamlValidator?.maxFileSize).toBe(1024 * 1024);
+    expect(yamlValidator?.additionalValidation).toBeDefined();
+  });
+
+  it('should have a validator for .yml extension - Issue #646', () => {
+    const ymlValidator = EXTENSION_VALIDATORS.find(v => v.extension === '.yml');
+    expect(ymlValidator).toBeDefined();
+    expect(ymlValidator?.maxFileSize).toBe(1024 * 1024);
+    expect(ymlValidator?.additionalValidation).toBeDefined();
+  });
 });
 
 describe('isEditableExtension', () => {
@@ -73,6 +89,19 @@ describe('isEditableExtension', () => {
 
   it('should return true for .htm - Issue #490', () => {
     expect(isEditableExtension('.htm')).toBe(true);
+  });
+
+  it('should return true for .yaml - Issue #646', () => {
+    expect(isEditableExtension('.yaml')).toBe(true);
+  });
+
+  it('should return true for .yml - Issue #646', () => {
+    expect(isEditableExtension('.yml')).toBe(true);
+  });
+
+  it('should return true for .YAML (case-insensitive) - Issue #646', () => {
+    expect(isEditableExtension('.YAML')).toBe(true);
+    expect(isEditableExtension('.Yml')).toBe(true);
   });
 
   it('should return false for non-editable extensions', () => {
@@ -225,6 +254,63 @@ describe('validateContent', () => {
     it('should accept empty HTML content', () => {
       const result = validateContent('.html', '');
       expect(result.valid).toBe(true);
+    });
+  });
+
+  describe('YAML content validation - Issue #646', () => {
+    it('should accept valid YAML content for .yaml', () => {
+      const result = validateContent('.yaml', 'name: test\nversion: 1.0');
+      expect(result.valid).toBe(true);
+    });
+
+    it('should accept valid YAML content for .yml', () => {
+      const result = validateContent('.yml', 'key: value\nlist:\n  - item1\n  - item2');
+      expect(result.valid).toBe(true);
+    });
+
+    it('should accept empty YAML content', () => {
+      const result = validateContent('.yaml', '');
+      expect(result.valid).toBe(true);
+    });
+
+    it('should reject YAML content exceeding 1MB for .yaml', () => {
+      const largeContent = 'x'.repeat(1024 * 1024 + 1);
+      const result = validateContent('.yaml', largeContent);
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('File size exceeds limit');
+    });
+
+    it('should reject YAML content exceeding 1MB for .yml', () => {
+      const largeContent = 'x'.repeat(1024 * 1024 + 1);
+      const result = validateContent('.yml', largeContent);
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('File size exceeds limit');
+    });
+
+    it('should reject YAML with dangerous !ruby/object tag', () => {
+      const result = validateContent('.yaml', 'exploit: !ruby/object:Gem::Requirement\n  - test');
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('Dangerous YAML tags detected');
+    });
+
+    it('should reject YAML with dangerous !!python tag', () => {
+      const result = validateContent('.yml', 'exploit: !!python/object/apply:os.system\n  - echo pwned');
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('Dangerous YAML tags detected');
+    });
+
+    it('should return specific error message string for dangerous YAML tags', () => {
+      const result = validateContent('.yaml', '!ruby/object:Exploit {}');
+      expect(result.valid).toBe(false);
+      expect(typeof result.error).toBe('string');
+      expect(result.error).not.toBe('Content validation failed');
+      expect(result.error).toContain('Dangerous YAML tags detected');
+    });
+
+    it('should reject YAML content with NULL bytes (binary detection)', () => {
+      const result = validateContent('.yaml', 'key: value\x00');
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('Binary content detected');
     });
   });
 

@@ -13,6 +13,7 @@ import type { SlashCommandGroup } from '@/types/slash-commands';
 export interface RepositorySummary {
   path: string;
   name: string;
+  displayName?: string;
   worktreeCount: number;
 }
 
@@ -335,6 +336,32 @@ export interface ExcludedRepository {
 }
 
 /**
+ * Repository list item returned by GET /api/repositories
+ * Issue #644: Repository list display and inline display_name edit UI
+ */
+export interface RepositoryListItem {
+  id: string;
+  name: string;
+  displayName: string | null;
+  path: string;
+  enabled: boolean;
+  worktreeCount: number;
+}
+
+/**
+ * Response type for PUT /api/repositories/[id]
+ * Issue #644: Shared response shape for display_name update
+ *
+ * NOTE: The API returns the updated repository WITHOUT worktreeCount
+ * (the PUT handler does not re-aggregate). The client is expected to
+ * preserve its current worktreeCount locally when merging the update.
+ */
+export interface UpdateRepositoryDisplayNameResponse {
+  success: boolean;
+  repository: Omit<RepositoryListItem, 'worktreeCount'>;
+}
+
+/**
  * Delete repository response type
  */
 export interface DeleteRepositoryResponse {
@@ -473,6 +500,40 @@ export const repositoryApi = {
       method: 'PUT',
       body: JSON.stringify({ repositoryPath }),
     });
+  },
+
+  /**
+   * List all repositories with worktree counts.
+   * Issue #644: Repository list display
+   *
+   * @returns Object containing the repository list.
+   *          Includes disabled repositories (enabled=false) with worktreeCount.
+   */
+  async list(): Promise<{ success: boolean; repositories: RepositoryListItem[] }> {
+    return fetchApi<{ success: boolean; repositories: RepositoryListItem[] }>(
+      '/api/repositories'
+    );
+  },
+
+  /**
+   * Update the display_name (alias) for a repository.
+   * Issue #644: Repository list inline edit
+   *
+   * @param id - Repository ID
+   * @param displayName - New display name. Pass an empty string or null to clear.
+   * @returns The updated repository (without worktreeCount).
+   */
+  async updateDisplayName(
+    id: string,
+    displayName: string | null
+  ): Promise<UpdateRepositoryDisplayNameResponse> {
+    return fetchApi<UpdateRepositoryDisplayNameResponse>(
+      `/api/repositories/${encodeURIComponent(id)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ displayName }),
+      }
+    );
   },
 };
 

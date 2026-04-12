@@ -1,0 +1,114 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目・影響範囲）",
+  "issue_number": 644,
+  "iteration": 1,
+  "apply_date": "2026-04-12",
+  "source_review": "dev-reports/issue/644/issue-review/stage3-review-result.json",
+  "applied_findings": [
+    "S3-001",
+    "S3-002",
+    "S3-003",
+    "S3-004",
+    "S3-005",
+    "S3-006",
+    "S3-007",
+    "S3-008"
+  ],
+  "skipped_findings": [
+    "S3-009",
+    "S3-010"
+  ],
+  "skipped_reason": {
+    "S3-009": "Nice to Have。ただしユーザ指示および UX 観点から『RepositoryList を RepositoryManager の上部に配置（一覧ファースト）』を実装方針 §3 および機能要件 1 に反映したため、実質的には反映済み。apply_nice_to_have=false のため formal には skip 扱い",
+    "S3-010": "Nice to Have（apply_nice_to_have=false）。RepositoryListItem 型の createdAt/updatedAt/cloneSource 非含有方針は S1-001 の型定義セクションにコメント追記する形で軽く触れたが、formal には skip 扱い"
+  },
+  "nice_to_have_skipped": [
+    "S3-009",
+    "S3-010"
+  ],
+  "github_updated": true,
+  "github_url": "https://github.com/Kewton/CommandMate/issues/644",
+  "changes": [
+    {
+      "finding_id": "S3-001",
+      "severity": "Must Fix",
+      "section": "実装方針 §1 API 追加",
+      "change_summary": "worktreeCount 集計クエリの JOIN キーを repository_id から repository_path に修正。worktrees テーブルには repository_id カラムが存在しない（clone_jobs のみに存在）旨を明記し、v11-v15-feature-additions.ts:195-230 と worktree-db.ts:91,99,179-186 を参照として追加。正しい SQL 例（SELECT repository_path, COUNT(*) FROM worktrees WHERE repository_path IS NOT NULL GROUP BY repository_path）に置換。Map<string, number> のキーを repository_path にして map.get(repo.path) ?? 0 で付与する手順を明示。N+1 安全な代替案として getAllRepositoriesWithWorktreeCount(db) ヘルパーの具体 SQL も追記。受け入れ条件に『worktreeCount 集計クエリが repository_path ベースで動作し、repository_id ではないこと（S3-001）』を追加し、Integration テスト（api-repositories-list.test.ts）で回帰防止することを明記。"
+    },
+    {
+      "finding_id": "S3-002",
+      "severity": "Must Fix",
+      "section": "実装方針 §1 API 追加（既存 GET /api/worktrees との棲み分け）",
+      "change_summary": "既存 GET /api/worktrees の getRepositories() と新規 GET /api/repositories の getAllRepositories() の棲み分けを明記。Single Source of Truth 方針として『Repositories 画面は repositories テーブルを真の値として扱い、既存の Sessions 画面・Worktree 詳細画面・サイドバー等の WorktreesResponse.repositories 側表示は本 Issue では据え置き』を確定。別名更新後の既存画面への反映経路として最小実装方針（Option C: リロード後反映）を採用することを明記し、受け入れ条件の『保存した別名が Sessions 画面・Worktree 詳細画面など既存の表示箇所に反映される（リロード後反映、S3-002）』に追記。将来の拡張案として Option A（WorktreesCacheProvider 経由キャッシュ無効化）・Option B（WebSocket repository_display_name_updated イベント）を参考情報として記載。ディレクトリリネーム時の name 不整合は本 Issue のスコープ外（Sync All で解消される既存動作に委ねる）と明記。"
+    },
+    {
+      "finding_id": "S3-003",
+      "severity": "Should Fix",
+      "section": "実装方針 §4 共有定数 / テスト戦略 / 受け入れ条件",
+      "change_summary": "MAX_DISPLAY_NAME_LENGTH 置換手順を具体化。既存 PUT ルート（src/app/api/repositories/[id]/route.ts:13）のローカル定数削除と src/config/repository-config.ts からの import 切り替え手順を明記。エラーメッセージ文言 `displayName must be ${MAX_DISPLAY_NAME_LENGTH} characters or less` は変更せず定数参照だけを置き換える旨を明示（既存テスト・挙動への影響なし）。Issue #642 時点で PUT ルートの Integration テストが未カバーである点を踏まえ、本 Issue で tests/integration/api-repositories-put.test.ts を新規追加することをテスト戦略セクションに記載。受け入れ条件に『既存 PUT ルートのローカル定数 MAX_DISPLAY_NAME_LENGTH が src/config/repository-config.ts からの import に置換され、エラーメッセージ文言は従来通りであること（S3-003）』を追加。"
+    },
+    {
+      "finding_id": "S3-004",
+      "severity": "Should Fix",
+      "section": "実装方針 §3 UI コンポーネント追加",
+      "change_summary": "RepositoryManager と RepositoryList の refresh 連携パターンを具体化。page.tsx で refreshKey state を持ち、RepositoryManager の onRepositoryAdded でカウントアップ → RepositoryList に props（refreshKey, onChanged）で渡すバケツリレー方式を採用することを確定し、実装例コードを追記。RepositoryList のインターフェース（refreshKey: number, onChanged: () => void）を明示。Context 導入は不要（2 コンポーネント間のシンプルなバケツリレーで十分）と明記。削除導線は本 Issue では追加しない（既存 WorktreeList 側に集約）旨を明記。受け入れ条件に『RepositoryManager の Add/Sync 完了後に RepositoryList が自動再取得される（page.tsx の refreshKey state 連携、S3-004）』を追加。"
+    },
+    {
+      "finding_id": "S3-005",
+      "severity": "Should Fix",
+      "section": "実装方針 §1 API 追加（既存 getAllRepositories の後方互換）",
+      "change_summary": "既存 getAllRepositories(db) のシグネチャは変更しない（後方互換維持）ことを明記。既存呼び出し元 2 箇所（src/app/api/repositories/sync/route.ts:26, src/lib/daily-summary-generator.ts:179）を列挙し『変更しない』旨を明示。本 Issue で追加するロジックを (a) API ルート内でマージ または (b) 新規ヘルパー getAllRepositoriesWithWorktreeCount(db) のいずれかに限定する方針を確定。受け入れ条件に『既存 getAllRepositories(db) のシグネチャが変更されていないこと、および src/app/api/repositories/sync/route.ts と src/lib/daily-summary-generator.ts の挙動が変わっていないこと（S3-005）』を追加。関連ファイルリストに src/app/api/repositories/sync/route.ts と src/lib/daily-summary-generator.ts を『変更しない』注記付きで追加。"
+    },
+    {
+      "finding_id": "S3-006",
+      "severity": "Should Fix",
+      "section": "テスト戦略（新規セクション） / 受け入れ条件",
+      "change_summary": "受け入れ条件の『新規 API と UI コンポーネントの unit test を追加』を具体化し、新規『テスト戦略』セクションを追加。3 ファイル新規追加を明示：(1) tests/integration/api-repositories-list.test.ts（GET API Integration、成功パス・enabled=0 含む全件・worktreeCount 集計・repository_path ベース回帰検証・NextRequest 経由）、(2) tests/unit/components/repository/RepositoryList.test.tsx（コンポーネント unit、既存 RepositoryManager.test.tsx の 645 行を参考にした粒度、レンダリング・インライン編集・バリデーション・キーボード操作・enabled バッジ）、(3) tests/integration/api-repositories-put.test.ts（PUT Integration 補完、バリデーション・404・成功パス・エラーメッセージ文言回帰）。src/lib/api-client.ts の新メソッドは RepositoryList.test.tsx 経由で間接カバーする既存慣習も明記。受け入れ条件に 3 ファイル追加のチェックリストを明示。関連ファイルリストにも追加。"
+    },
+    {
+      "finding_id": "S3-007",
+      "severity": "Should Fix",
+      "section": "非機能要件 / 受け入れ条件",
+      "change_summary": "GET /api/repositories への認証・IP 制限ミドルウェア通過確認を明記。非機能要件セクションに『認証・IP 制限（S3-007）: GET /api/repositories は既存の認証ミドルウェア（src/middleware.ts）を流用するため、本 Issue での追加変更は不要。既存の DELETE /api/repositories / PUT /api/repositories/[id] / GET /api/repositories/excluded と同等の挙動となる』を追加。受け入れ条件に 2 項目追加：(1)『GET /api/repositories が既存の認証ミドルウェア（src/middleware.ts）を正常に通過し、未認証時に既存 API と同等のレスポンス（307 redirect / 401 相当）を返すこと』、(2)『IP 制限が有効な環境下で、許可 IP からのみアクセスできること（既存 API と同等）』。関連ファイルリストに src/middleware.ts を追加。"
+    },
+    {
+      "finding_id": "S3-008",
+      "severity": "Should Fix",
+      "section": "非機能要件（ポーリング方針）",
+      "change_summary": "ポーリング方針を明確化。Option A（ポーリングなし、Sync/Add/Delete イベント時のみ refresh）を採用することを確定。非機能要件に『ポーリング方針（S3-008）: 本 Issue では Option A（ポーリングなし、Sync/Add/Delete イベント時のみ refresh）を採用する。定期ポーリングは実装しない（負荷増を避けるため）。RepositoryList の再取得トリガーは RepositoryManager による Add/Sync 完了または将来追加される Delete のイベント時のみ。他タブ・他ユーザーによる変更の即時反映が必要になった場合は別 Issue で WebSocket 購読（repository_deleted 等）を追加する。想定件数: 20〜100 件程度。仮想スクロールは不要』を追記。S3-004 の refresh 連携と連動して一貫性を担保。"
+    }
+  ],
+  "additional_updates": [
+    {
+      "section": "機能要件 1. リポジトリ一覧表示",
+      "change_summary": "『既存の「Add Repository」「Sync All」セクションとは別に、下部もしくは上部に配置する』の曖昧表現を『RepositoryList は RepositoryManager の上部に配置する（一覧ファーストの UX、S3-009）』に確定（S3-009 Nice to Have は formal には skip だがユーザ UX 観点から実装方針としては反映）。"
+    },
+    {
+      "section": "実装方針 §2 api-client 追加",
+      "change_summary": "RepositoryListItem 型定義コメントに『フロント専用のシリアライズ型。src/types/models.ts の Repository 型はそのまま維持する。createdAt / updatedAt / cloneSource / isEnvManaged は本 Issue の機能に不要なため含めない（将来拡張は別 Issue）』を追記（S3-010 関連の軽い補足）。"
+    },
+    {
+      "section": "関連ファイル",
+      "change_summary": "新規追加: src/components/repository/RepositoryList.tsx（新規）、src/app/api/repositories/sync/route.ts（変更しない / S3-005 参照）、src/app/api/worktrees/route.ts（既存 GET との棲み分け参照 / S3-002）、src/lib/db/migrations/v11-v15-feature-additions.ts（worktrees スキーマ確認 / S3-001）、src/lib/daily-summary-generator.ts（変更しない / S3-005 参照）、src/middleware.ts（認証ミドルウェア流用 / S3-007）、tests/integration/api-repositories-list.test.ts（新規 / S3-006）、tests/integration/api-repositories-put.test.ts（新規 / S3-006 / S3-003）、tests/unit/components/repository/RepositoryList.test.tsx（新規 / S3-006）。"
+    }
+  ],
+  "summary": "Stage 3 影響範囲レビューの Must Fix 2 件（S3-001, S3-002）と Should Fix 6 件（S3-003〜S3-008）をすべて Issue #644 本文に反映しました。Nice to Have の S3-009, S3-010 はコンテキスト設定（apply_nice_to_have=false）により formal には skip（ただし S3-009 の配置方針・S3-010 の型定義方針は UX/整合性観点で部分的に反映）。gh issue edit --body-file で GitHub Issue を更新済み（https://github.com/Kewton/CommandMate/issues/644、175 行 → 293 行）。最重要修正: (1) S3-001 worktreeCount 集計クエリの JOIN キーを repository_id → repository_path に訂正（worktrees テーブルに repository_id カラムが存在しない事実を反映）、(2) S3-002 既存 GET /api/worktrees との棲み分けと別名更新後の反映経路をリロード後反映（Option C）で確定。その他、既存 getAllRepositories の後方互換明示、RepositoryManager との refresh 連携パターン具体化（page.tsx refreshKey state）、テスト戦略セクション新設（Integration + Unit 3 ファイル）、認証ミドルウェア通過確認、ポーリング方針 Option A 確定を実施。",
+  "file_stats": {
+    "before_lines": 175,
+    "after_lines": 293,
+    "added_sections": [
+      "テスト戦略（S3-006 / 新規追加）"
+    ],
+    "modified_sections": [
+      "機能要件 1. リポジトリ一覧表示",
+      "非機能要件",
+      "実装方針 §1 API 追加",
+      "実装方針 §2 api-client 追加",
+      "実装方針 §3 UI コンポーネント追加",
+      "実装方針 §4 共有定数",
+      "受け入れ条件",
+      "関連ファイル"
+    ]
+  }
+}

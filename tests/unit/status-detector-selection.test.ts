@@ -432,4 +432,28 @@ describe('detectSessionStatus - Codex /model Step 1 model selection (Issue #622)
     expect(result.status).toBe('waiting');
     expect(result.reason).toBe('prompt_detected');
   });
+
+  it('should NOT detect selection list when "Press enter to confirm" is stale in scrollback', () => {
+    // Bug fix: previously, CODEX_SELECTION_LIST_PATTERN was evaluated against the full
+    // content, so an already-answered approval prompt left behind in scrollback would
+    // keep NavigationButtons visible even while Codex was actively running commands.
+    // The detection window is now scoped to the content just above the status bar,
+    // so stale footer text far up in scrollback no longer triggers it.
+    const staleHistory = [
+      '› 1. Yes, proceed (y)',
+      '  2. No, and tell Codex what to do differently (esc)',
+      'Press enter to confirm or esc to cancel',
+      '✔ You approved codex to run something this time',
+    ];
+    const recentActivity: string[] = [];
+    for (let i = 0; i < 40; i++) {
+      recentActivity.push(`• Ran command step ${i}`);
+    }
+    recentActivity.push('› Write tests for @filename');
+
+    const output = buildCodexOutput([...staleHistory, ...recentActivity]);
+    const result = detectSessionStatus(output, 'codex');
+
+    expect(result.reason).not.toBe(STATUS_REASON.CODEX_SELECTION_LIST);
+  });
 });

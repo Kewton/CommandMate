@@ -98,8 +98,8 @@ describe('UPLOADABLE_EXTENSION_VALIDATORS', () => {
 });
 
 describe('DEFAULT_MAX_FILE_SIZE', () => {
-  it('should be 5MB', () => {
-    expect(DEFAULT_MAX_FILE_SIZE).toBe(5 * 1024 * 1024);
+  it('should be 20MB', () => {
+    expect(DEFAULT_MAX_FILE_SIZE).toBe(20 * 1024 * 1024);
   });
 });
 
@@ -389,9 +389,9 @@ describe('[SEC-001] validateMagicBytes', () => {
 
 describe('getMaxFileSize', () => {
   it('should return default size for known extensions', () => {
-    expect(getMaxFileSize('.png')).toBe(5 * 1024 * 1024);
-    expect(getMaxFileSize('.txt')).toBe(5 * 1024 * 1024);
-    expect(getMaxFileSize('.json')).toBe(5 * 1024 * 1024);
+    expect(getMaxFileSize('.png')).toBe(20 * 1024 * 1024);
+    expect(getMaxFileSize('.txt')).toBe(20 * 1024 * 1024);
+    expect(getMaxFileSize('.json')).toBe(20 * 1024 * 1024);
   });
 
   it('should return 100MB for .mp4 (Issue #302, #600)', () => {
@@ -399,12 +399,12 @@ describe('getMaxFileSize', () => {
   });
 
   it('should be case-insensitive', () => {
-    expect(getMaxFileSize('.PNG')).toBe(5 * 1024 * 1024);
-    expect(getMaxFileSize('.Txt')).toBe(5 * 1024 * 1024);
+    expect(getMaxFileSize('.PNG')).toBe(20 * 1024 * 1024);
+    expect(getMaxFileSize('.Txt')).toBe(20 * 1024 * 1024);
   });
 
   it('should return default size for unknown extensions', () => {
-    expect(getMaxFileSize('.xyz')).toBe(5 * 1024 * 1024);
+    expect(getMaxFileSize('.xyz')).toBe(20 * 1024 * 1024);
   });
 });
 

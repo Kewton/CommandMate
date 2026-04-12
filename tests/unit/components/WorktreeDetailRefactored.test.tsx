@@ -563,7 +563,7 @@ describe('WorktreeDetailRefactored', () => {
       vi.restoreAllMocks();
     });
 
-    it('passes onNewFile handler to FileTreeView', async () => {
+    it('opens NewFileDialog when clicking new file button (Issue #646)', async () => {
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       // Wait for component to load and switch to files tab
@@ -583,11 +583,13 @@ describe('WorktreeDetailRefactored', () => {
       const newFileBtn = screen.getByTestId('new-file-btn');
       fireEvent.click(newFileBtn);
 
-      // Verify that prompt was called
-      expect(window.prompt).toHaveBeenCalledWith('Enter file name (e.g., document.md):');
+      // Verify that NewFileDialog is shown (not window.prompt)
+      await waitFor(() => {
+        expect(screen.getByTestId('new-file-name-input')).toBeInTheDocument();
+      });
     });
 
-    it('calls POST API when creating a new file', async () => {
+    it('calls POST API when confirming new file via dialog (Issue #646)', async () => {
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       await waitFor(() => {
@@ -603,6 +605,19 @@ describe('WorktreeDetailRefactored', () => {
 
       const newFileBtn = screen.getByTestId('new-file-btn');
       fireEvent.click(newFileBtn);
+
+      // Wait for dialog to appear
+      await waitFor(() => {
+        expect(screen.getByTestId('new-file-name-input')).toBeInTheDocument();
+      });
+
+      // Type a file name
+      const input = screen.getByTestId('new-file-name-input');
+      fireEvent.change(input, { target: { value: 'newfile' } });
+
+      // Click confirm button
+      const confirmBtn = screen.getByTestId('new-file-confirm-button');
+      fireEvent.click(confirmBtn);
 
       await waitFor(() => {
         const createCall = mockFetch.mock.calls.find(

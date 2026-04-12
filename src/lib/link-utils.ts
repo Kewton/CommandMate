@@ -120,5 +120,16 @@ export const REHYPE_SANITIZE_SCHEMA = {
       // Replace with allowlist-filtered href [DR4-001]
       ['href', /^(?:#|mailto:|tel:|https?:\/\/|(?![a-zA-Z][a-zA-Z0-9+.-]*:))/],
     ],
+    img: [
+      // Keep default img attributes except bare 'src'
+      ...(defaultSchema.attributes?.img ?? []).filter(
+        (attr) => attr !== 'src',
+      ),
+      // Allow http, https, and relative paths for img src (reject javascript:, data:, etc.)
+      ['src', /^(?:https?:\/\/|(?![a-zA-Z][a-zA-Z0-9+.-]*:))/],
+      'alt',
+      'width',
+      'height',
+    ],
   },
 };

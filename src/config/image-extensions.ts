@@ -26,10 +26,10 @@ export const IMAGE_EXTENSIONS: readonly string[] = [
 ] as const;
 
 /**
- * Maximum image file size in bytes (5MB)
+ * Maximum image file size in bytes (20MB)
  * [SF-001] Named with _BYTES suffix for clarity, matching existing patterns
  */
-export const IMAGE_MAX_SIZE_BYTES = 5 * 1024 * 1024;
+export const IMAGE_MAX_SIZE_BYTES = 20 * 1024 * 1024;
 
 /**
  * Image extension validator configuration

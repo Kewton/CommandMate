@@ -1,0 +1,60 @@
+{
+  "stage": 2,
+  "issue_number": 646,
+  "apply_date": "2026-04-12",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "S1-001",
+        "status": "applied",
+        "change_summary": "EXTENSION_VALIDATORS に .yaml/.yml バリデータ追加タスクを実装タスクセクションに明記。影響範囲テーブルの editable-extensions.ts の変更内容にも EXTENSION_VALIDATORS への追加を追記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S1-002",
+        "status": "applied",
+        "change_summary": "YAML エディタの設計方針として MarkdownEditor 汎用化を採用。セクション 4 に方針・理由・代替案を記載。影響範囲テーブルに MarkdownEditor.tsx を追加。実装タスクにも反映"
+      },
+      {
+        "id": "S1-003",
+        "status": "applied",
+        "change_summary": "拡張子選択候補に .htm を追加。セクション 3 の選択候補リストと受入条件の拡張子リストを .md/.yaml/.yml/.html/.htm に更新。理由を補足ノートとして記載"
+      },
+      {
+        "id": "S1-004",
+        "status": "applied",
+        "change_summary": "YAML バリデーション失敗時のエラーフィードバック方針を追記。ExtensionValidator の additionalValidation を string|boolean に拡張する設計を提案セクション 2 に記載。実装タスクと受入条件にも反映"
+      },
+      {
+        "id": "S1-005",
+        "status": "applied",
+        "change_summary": "受入条件に拡張子選択 UI の具体的動作仕様を 3 パターン（a: 拡張子含む->そのまま使用、b: 拡張子なし->ドロップダウン値付与、c: 矛盾時->ファイル名優先）として追加。セクション 3 にも同一ルールを明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S1-006",
+        "status": "applied",
+        "change_summary": "window.prompt() から React コンポーネントベースのダイアログ (NewFileDialog.tsx) への移行方針をセクション 3、実装タスク、影響範囲テーブルに記載"
+      },
+      {
+        "id": "S1-007",
+        "status": "applied",
+        "change_summary": "CLAUDE.md モジュール説明更新タスクを実装タスクセクションに追加"
+      }
+    ]
+  },
+  "skipped_findings": [],
+  "summary": {
+    "total_findings": 7,
+    "applied": 7,
+    "skipped": 0
+  },
+  "changes_summary": "全 7 件の指摘事項（Must Fix: 1, Should Fix: 4, Nice to Have: 2）を Issue 本文に反映。主な変更: (1) EXTENSION_VALIDATORS 追加タスクの明記、(2) YAML エディタとして MarkdownEditor 汎用化方針を採用、(3) .htm を拡張子候補に追加、(4) YAML バリデーションエラーフィードバック方針を追記、(5) 拡張子選択の 3 パターン動作仕様を受入条件に追加、(6) window.prompt から React ダイアログへの移行方針記載、(7) CLAUDE.md 更新タスク追加。レビュー履歴セクションも新設",
+  "issue_updated": true,
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/646"
+  }
+}

@@ -257,7 +257,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
             )}
           </button>
         </div>
-        <p className="text-base text-gray-900 dark:text-gray-100">{worktree.repositoryName}</p>
+        <p className="text-base text-gray-900 dark:text-gray-100">{worktree.repositoryDisplayName ?? worktree.repositoryName}</p>
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 break-all">{worktree.repositoryPath}</p>
       </div>
 

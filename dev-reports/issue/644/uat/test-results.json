@@ -1,0 +1,152 @@
+{
+  "issue_number": 644,
+  "test_date": "2026-04-12",
+  "environment": {
+    "port": 3010,
+    "branch": "feature/644-worktree",
+    "repo": "/Users/maenokota/share/work/github_kewton/commandmate-issue-644"
+  },
+  "results": [
+    {
+      "id": "TC-001",
+      "title": "GET /api/repositories - 成功レスポンス",
+      "status": "pass",
+      "command": "curl -s http://localhost:3010/api/repositories",
+      "stdout": "{\"success\":true,\"repositories\":[12件のリポジトリ、各要素に id/name/displayName/path/enabled/worktreeCount フィールドあり]}",
+      "exit_code": 0,
+      "evidence_note": "12件のリポジトリが返却され、各フィールドが仕様通り。enabled=false の2件も含まれる"
+    },
+    {
+      "id": "TC-002",
+      "title": "GET /api/repositories - worktreeCount 集計 (repository_path ベース)",
+      "status": "pass",
+      "command": "curl -s http://localhost:3010/api/repositories | jq",
+      "stdout": "total: 12, disabled: 2, sample worktreeCount: 20",
+      "exit_code": 0,
+      "evidence_note": "worktreeCount が数値で正しく返却される。repository_path ベースの集計が動作している（S3-001 回帰防止）"
+    },
+    {
+      "id": "TC-003",
+      "title": "PUT /api/repositories/[id] - displayName 更新成功",
+      "status": "pass",
+      "command": "curl -s -X PUT http://localhost:3010/api/repositories/65b1605b... -d '{\"displayName\":\"UAT Test Alias\"}'",
+      "stdout": "{\"success\":true,\"repository\":{\"id\":\"65b1605b...\",\"name\":\"CommandMate-Marketing\",\"displayName\":\"UAT Test Alias\",\"path\":\"/tmp/repos/CommandMate-Marketing\",\"enabled\":true}}",
+      "exit_code": 0,
+      "evidence_note": "displayName がDBに永続化された。worktreeCount はレスポンスに含まれない（仕様通り）"
+    },
+    {
+      "id": "TC-004",
+      "title": "PUT /api/repositories/[id] - 100文字超で400エラー",
+      "status": "pass",
+      "command": "curl -sw ... -X PUT ... -d '{\"displayName\":\"101文字\"}'",
+      "stdout": "{\"error\":\"displayName must be 100 characters or less\"}\nHTTP_STATUS:400",
+      "exit_code": 0,
+      "evidence_note": "エラーメッセージ文言が従来通り（S3-003 回帰防止確認済み）"
+    },
+    {
+      "id": "TC-005",
+      "title": "PUT /api/repositories/[id] - 空文字でdisplayNameクリア",
+      "status": "pass",
+      "command": "curl -s -X PUT ... -d '{\"displayName\":\"\"}'",
+      "stdout": "{\"success\":true,\"repository\":{...,\"displayName\":null,...}}",
+      "exit_code": 0,
+      "evidence_note": "空文字送信で displayName が null にクリアされた"
+    },
+    {
+      "id": "TC-006",
+      "title": "PUT /api/repositories/[id] - 存在しないIDで404",
+      "status": "pass",
+      "command": "curl -sw ... -X PUT http://localhost:3010/api/repositories/nonexistent-id-xxx -d '{\"displayName\":\"foo\"}'",
+      "stdout": "{\"error\":\"Repository not found\"}\nHTTP_STATUS:404",
+      "exit_code": 0,
+      "evidence_note": "存在しないIDに対して404が正しく返る"
+    },
+    {
+      "id": "TC-007",
+      "title": "GET /api/repositories - 既存API(/api/worktrees)と両立",
+      "status": "pass",
+      "command": "curl /api/repositories, curl /api/worktrees",
+      "stdout": "GET /api/repositories count: 12\nGET /api/worktrees repositories count: 9",
+      "exit_code": 0,
+      "evidence_note": "両方のエンドポイントが併存して正しく動作。新規GETと既存GETで件数差（12 vs 9）があるのは既存GETが worktree 0件を返さない既知動作（S3-002）"
+    },
+    {
+      "id": "TC-008",
+      "title": "/repositories ページ - HTTP 200",
+      "status": "pass",
+      "command": "curl -s -o /dev/null -w '%{http_code}' http://localhost:3010/repositories",
+      "stdout": "HTTP:200",
+      "exit_code": 0,
+      "evidence_note": "ページがエラーなくレンダリングされる"
+    },
+    {
+      "id": "TC-009",
+      "title": "/repositories ページ - RepositoryList 要素存在",
+      "status": "pass",
+      "command": "curl -s http://localhost:3010/repositories | grep -c 'Repositories'",
+      "stdout": "3",
+      "exit_code": 0,
+      "evidence_note": "ページ要素がレンダリングされている"
+    },
+    {
+      "id": "TC-010",
+      "title": "必須ファイル存在確認",
+      "status": "pass",
+      "command": "test -f 新規5ファイル && echo OK",
+      "stdout": "TC-010 OK",
+      "exit_code": 0,
+      "evidence_note": "新規5ファイル（repository-config.ts, RepositoryList.tsx, テスト3ファイル）がすべて存在"
+    },
+    {
+      "id": "TC-011",
+      "title": "既存 getAllRepositories シグネチャ不変",
+      "status": "pass",
+      "command": "grep -A 2 'export function getAllRepositories' src/lib/db/db-repository.ts",
+      "stdout": "export function getAllRepositories(\n  db: Database.Database\n): Repository[]\n--\nexport function getAllRepositoriesWithWorktreeCount(",
+      "exit_code": 0,
+      "evidence_note": "既存シグネチャは (db: Database.Database): Repository[] のまま維持。新関数 getAllRepositoriesWithWorktreeCount が別途追加されている（S3-005 回帰防止確認済み）"
+    },
+    {
+      "id": "TC-012",
+      "title": "TypeScript エラー確認",
+      "status": "pass",
+      "command": "npx tsc --noEmit",
+      "stdout": "(empty)",
+      "exit_code": 0,
+      "evidence_note": "型エラー0件"
+    },
+    {
+      "id": "TC-013",
+      "title": "ESLint エラー確認",
+      "status": "pass",
+      "command": "npm run lint",
+      "stdout": "✔ No ESLint warnings or errors",
+      "exit_code": 0,
+      "evidence_note": "Lintエラー0件"
+    },
+    {
+      "id": "TC-014",
+      "title": "Integration テスト実行",
+      "status": "pass",
+      "command": "npx vitest run tests/integration/api-repositories-list.test.ts tests/integration/api-repositories-put.test.ts",
+      "stdout": "Test Files 2 passed (2)\nTests 15 passed (15)",
+      "exit_code": 0,
+      "evidence_note": "新規Integrationテスト15/15パス"
+    },
+    {
+      "id": "TC-015",
+      "title": "Unit テスト実行（RepositoryList）",
+      "status": "pass",
+      "command": "npx vitest run tests/unit/components/repository/RepositoryList.test.tsx",
+      "stdout": "Test Files 1 passed (1)\nTests 18 passed (18)",
+      "exit_code": 0,
+      "evidence_note": "新規Unitテスト18/18パス"
+    }
+  ],
+  "summary": {
+    "total": 15,
+    "passed": 15,
+    "failed": 0,
+    "pass_rate": "100%"
+  }
+}

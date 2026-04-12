@@ -47,8 +47,8 @@ describe('IMAGE_EXTENSIONS', () => {
 });
 
 describe('IMAGE_MAX_SIZE_BYTES', () => {
-  it('should be 5MB', () => {
-    expect(IMAGE_MAX_SIZE_BYTES).toBe(5 * 1024 * 1024);
+  it('should be 20MB', () => {
+    expect(IMAGE_MAX_SIZE_BYTES).toBe(20 * 1024 * 1024);
   });
 });
 
@@ -500,8 +500,8 @@ describe('validateSvgContent', () => {
 
 describe('validateImageContent', () => {
   describe('file size validation', () => {
-    it('should reject files exceeding 5MB', () => {
-      const largeBuffer = Buffer.alloc(5 * 1024 * 1024 + 1);
+    it('should reject files exceeding 20MB', () => {
+      const largeBuffer = Buffer.alloc(20 * 1024 * 1024 + 1);
       largeBuffer[0] = 0x89;
       largeBuffer[1] = 0x50;
       largeBuffer[2] = 0x4E;
@@ -509,11 +509,11 @@ describe('validateImageContent', () => {
 
       const result = validateImageContent('.png', largeBuffer);
       expect(result.valid).toBe(false);
-      expect(result.error).toContain('5MB');
+      expect(result.error).toContain('20MB');
     });
 
-    it('should accept files at exactly 5MB', () => {
-      const maxBuffer = Buffer.alloc(5 * 1024 * 1024);
+    it('should accept files at exactly 20MB', () => {
+      const maxBuffer = Buffer.alloc(20 * 1024 * 1024);
       maxBuffer[0] = 0x89;
       maxBuffer[1] = 0x50;
       maxBuffer[2] = 0x4E;

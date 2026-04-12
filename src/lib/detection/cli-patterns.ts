@@ -226,11 +226,12 @@ export const OPENCODE_SELECTION_LIST_PATTERN = /^\s*(Select\s+(model|provider)|C
  * Detects Claude CLI's interactive selection prompts that require
  * arrow key navigation and Enter to select/toggle.
  *
- * Matches footer instruction lines (two known variants):
+ * Matches footer instruction lines (known variants):
  *   "Enter to select · Tab/Arrow keys to navigate · Esc to cancel"
  *   "Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel"
+ *   "Enter to confirm · Esc to exit"  (/model command)
  */
-export const CLAUDE_SELECTION_LIST_FOOTER = /Enter\s+to\s+select\s+.*to\s+navigate/;
+export const CLAUDE_SELECTION_LIST_FOOTER = /Enter\s+to\s+(?:select\s+.*to\s+navigate|confirm\s+·\s+Esc)/;
 
 /**
  * OpenCode TUI separator pattern (Issue #379)

@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Issue #644 実機受入テスト報告書</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+    margin: 0;
+    padding: 0;
+    background: #f5f7fa;
+    color: #1f2937;
+    line-height: 1.6;
+  }
+  .container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 32px 24px;
+  }
+  header {
+    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+    color: #fff;
+    padding: 40px 24px;
+    margin-bottom: 32px;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(79, 70, 229, 0.2);
+  }
+  header h1 {
+    margin: 0 0 8px 0;
+    font-size: 28px;
+  }
+  header .subtitle {
+    font-size: 15px;
+    opacity: 0.92;
+  }
+  .meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin-top: 20px;
+  }
+  .meta-item {
+    background: rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(4px);
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  .meta-item .label {
+    display: block;
+    opacity: 0.8;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 3px;
+  }
+  .meta-item .value {
+    font-weight: 600;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 13px;
+  }
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+  .summary-card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 20px;
+    text-align: center;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    border-top: 4px solid #4f46e5;
+  }
+  .summary-card.pass { border-top-color: #10b981; }
+  .summary-card.fail { border-top-color: #ef4444; }
+  .summary-card .number {
+    font-size: 36px;
+    font-weight: 700;
+    color: #1f2937;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+  .summary-card.pass .number { color: #10b981; }
+  .summary-card.fail .number { color: #ef4444; }
+  .summary-card .label {
+    font-size: 13px;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  h2 {
+    font-size: 20px;
+    margin: 32px 0 16px 0;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #e5e7eb;
+    color: #1f2937;
+  }
+  .test-case {
+    background: #fff;
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    border-left: 4px solid #10b981;
+  }
+  .test-case.fail {
+    border-left-color: #ef4444;
+  }
+  .test-case .header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+  .test-case .id {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 12px;
+    color: #6b7280;
+    background: #f3f4f6;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+  .test-case .title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #1f2937;
+    margin: 4px 0 0 0;
+    flex: 1;
+  }
+  .badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .badge.pass {
+    background: #d1fae5;
+    color: #065f46;
+  }
+  .badge.fail {
+    background: #fee2e2;
+    color: #991b1b;
+  }
+  .field {
+    margin-top: 10px;
+  }
+  .field-label {
+    font-size: 11px;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .field-value {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 12px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 10px 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #374151;
+  }
+  .field-note {
+    font-size: 13px;
+    color: #4b5563;
+    background: #eff6ff;
+    border-left: 3px solid #3b82f6;
+    border-radius: 4px;
+    padding: 8px 12px;
+  }
+  footer {
+    margin-top: 40px;
+    padding: 16px;
+    text-align: center;
+    font-size: 12px;
+    color: #9ca3af;
+  }
+  .progress-bar {
+    background: rgba(255, 255, 255, 0.2);
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 16px;
+  }
+  .progress-bar .fill {
+    background: #10b981;
+    height: 100%;
+    width: 100%;
+    transition: width 0.3s ease;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>Issue #644 実機受入テスト報告書</h1>
+  <div class="subtitle">feat(repositories): リポジトリ一覧表示と別名編集UI</div>
+  <div class="meta">
+    <div class="meta-item">
+      <span class="label">Issue</span>
+      <span class="value">#644</span>
+    </div>
+    <div class="meta-item">
+      <span class="label">テスト日</span>
+      <span class="value">2026-04-12</span>
+    </div>
+    <div class="meta-item">
+      <span class="label">ブランチ</span>
+      <span class="value">feature/644-worktree</span>
+    </div>
+    <div class="meta-item">
+      <span class="label">ポート</span>
+      <span class="value">3010</span>
+    </div>
+  </div>
+  <div class="progress-bar"><div class="fill"></div></div>
+</header>
+
+<section class="summary">
+  <div class="summary-card">
+    <div class="number">15</div>
+    <div class="label">Total</div>
+  </div>
+  <div class="summary-card pass">
+    <div class="number">15</div>
+    <div class="label">Passed</div>
+  </div>
+  <div class="summary-card fail">
+    <div class="number">0</div>
+    <div class="label">Failed</div>
+  </div>
+  <div class="summary-card pass">
+    <div class="number">100%</div>
+    <div class="label">Pass Rate</div>
+  </div>
+</section>
+
+<h2>Backend API テスト</h2>
+
+<div class="test-case">
+  <div class="header-row">
+    <div>
+      <span class="id">TC-001</span>
+      <h3 class="title">GET /api/repositories - 成功レスポンス</h3>
+    </div>
+    <span class="badge pass">PASS</span>
+  </div>
+  <div class="field">
+    <div class="field-label">実行コマンド</div>
+    <div class="field-value">curl -s http://localhost:3010/api/repositories</div>
+  </div>
+  <div class="field">
+    <div class="field-label">結果</div>
+    <div class="field-value">{"success":true,"repositories":[12件のリポジトリ、各要素に id/name/displayName/path/enabled/worktreeCount フィールドあり]}
+exit_code: 0</div>
+  </div>
+  <div class="field">
+    <div class="field-label">エビデンス補足</div>
+    <div class="field-note">12件のリポジトリが返却され、各フィールドが仕様通り。enabled=false の2件も含まれる</div>
+  </div>
+</div>
+
+<div class="test-case">
+  <div class="header-row">
+    <div>
+      <span class="id">TC-002</span>
+      <h3 class="title">GET /api/repositories - worktreeCount 集計 (repository_path ベース)</h3>
+    </div>
+    <span class="badge pass">PASS</span>
+  </div>
+  <div class="field">
+    <div class="field-label">実行コマンド</div>
+    <div class="field-value">curl -s http://localhost:3010/api/repositories | jq</div>
+  </div>
+  <div class="field">
+    <div class="field-label">結果</div>
+    <div class="field-value">total: 12, disabled: 2, sample worktreeCount: 20
+exit_code: 0</div>
+  </div>
+  <div class="field">
+    <div class="field-label">エビデンス補足</div>
+    <div class="field-note">worktreeCount が数値で正しく返却される。repository_path ベースの集計が動作している（S3-001 回帰防止）</div>
+  </div>
+</div>
+
+<div class="test-case">
+  <div class="header-row">
+    <div>
+      <span class="id">TC-003</span>
+      <h3 class="title">PUT /api/repositories/[id] - displayName 更新成功</h3>
+    </div>
+    <span class="badge pass">PASS</span>
+  </div>
+  <div class="field">
+    <div class="field-label">実行コマンド</div>
+    <div class="field-value">curl -s -X PUT http://localhost:3010/api/repositories/65b1605b... -d '{"displayName":"UAT Test Alias"}'</div>
+  </div>
+  <div class="field">
+    <div class="field-label">結果</div>
+    <div class="field-value">{"success":true,"repository":{"id":"65b1605b...","name":"CommandMate-Marketing","displayName":"UAT Test Alias","path":"/tmp/repos/CommandMate-Marketing","enabled":true}}
+exit_code: 0</div>
+  </div>
+  <div class="field">
+    <div class="field-label">エビデンス補足</div>
+    <div class="field-note">displayName がDBに永続化された。worktreeCount はレスポンスに含まれない（仕様通り）</div>
+  </div>
+</div>
+
+<div class="test-case">
+  <div class="header-row">
+    <div>
+      <span class="id">TC-004</span>
+      <h3 class="title">PUT /api/repositories/[id] - 100文字超で400エラー</h3>
+    </div>
+    <span class="badge pass">PASS</span>
+  </div>
+  <div class="field">
+    <div class="field-label">実行コマンド</div>
+    <div class="field-value">curl -sw ... -X PUT ... -d '{"displayName":"101文字"}'</div>
+  </div>
+  <div class="field">
+    <div class="field-label">結果</div>
+    <div class="field-value">{"error":"displayName must be 100 characters or less"}
+HTTP_STATUS:400
+exit_code: 0</div>
+  </div>
+  <div class="field">
+    <div class="field-label">エビデンス補足</div>
+    <div class="field-note">エラーメッセージ文言が従来通り（S3-003 回帰防止確認済み）</div>
+  </div>
+</div>
+
+<div class="test-case">
+  <div class="header-row">
+    <div>
+      <span class="id">TC-005</span>
+      <h3 class="title">PUT /api/repositories/[id] - 空文字でdisplayNameクリア</h3>
+    </div>
+    <span class="badge pass">PASS</span>
+  </div>
+  <div class="field">
+    <div class="field-label">実行コマンド</div>
+    <div class="field-value">curl -s -X PUT ... -d '{"displayName":""}'</div>
+  </div>
+  <div class="field">
+    <div class="field-label">結果</div>
+    <div class="field-value">{"success":true,"repository":{...,"displayName":null,...}}
+exit_code: 0</div>
+  </div>
+  <div class="field">
+    <div class="field-label">エビデンス補足</div>
+    <div class="field-note">空文字送信で displayName が null にクリアされた</div>
+  </div>
+</div>
+
+<div class="test-case">
+  <div class="header-row">
+    <div>
+      <span class="id">TC-006</span>
+      <h3 class="title">PUT /api/repositories/[id] - 存在しないIDで404</h3>
+    </div>
+    <span class="badge pass">PASS</span>
+  </div>
+  <div class="field">
+    <div class="field-label">実行コマンド</div>
+    <div class="field-value">curl -sw ... -X PUT http://localhost:3010/api/repositories/nonexistent-id-xxx -d '{"displayName":"foo"}'</div>
+  </div>
+  <div class="field">
+    <div class="field-label">結果</div>
+    <div class="field-value">{"error":"Repository not found"}
+HTTP_STATUS:404
+exit_code: 0</div>
+  </div>
+  <div class="field">
+    <div class="field-label">エビデンス補足</div>
+    <div class="field-note">存在しないIDに対して404が正しく返る</div>
+  </div>
+</div>
+
+<div class="test-case">
+  <div class="header-row">
+    <div>
+      <span class="id">TC-007</span>
+      <h3 class="title">GET /api/repositories - 既存API(/api/worktrees)と両立</h3>
+    </div>
+    <span class="badge pass">PASS</span>
+  </div>
+  <div class="field">
+    <div class="field-label">実行コマンド</div>
+    <div class="field-value">curl /api/repositories, curl /api/worktrees</div>
+  </div>
+  <div class="field">
+    <div class="field-label">結果</div>
+    <div class="field-value">GET /api/repositories count: 12
+GET /api/worktrees repositories count: 9
+exit_code: 0</div>
+  </div>
+  <div class="field">
+    <div class="field-label">エビデンス補足</div>
+    <div class="field-note">両方のエンドポイントが併存して正しく動作。新規GETと既存GETで件数差（12 vs 9）があるのは既存GETが worktree 0件を返さない既知動作（S3-002）</div>
+  </div>
+</div>
+
+<h2>UI / 統合テスト</h2>
+
+<div class="test-case">
+  <div class="header-row">
+    <div>
+      <span class="id">TC-008</span>
+      <h3 class="title">/repositories ページ - HTTP 200</h3>
+    </div>
+    <span class="badge pass">PASS</span>
+  </div>
+  <div class="field">
+    <div class="field-label">実行コマンド</div>
+    <div class="field-value">curl -s -o /dev/null -w '%{http_code}' http://localhost:3010/repositories</div>
+  </div>
+  <div class="field">
+    <div class="field-label">結果</div>
+    <div class="field-value">HTTP:200
+exit_code: 0</div>
+  </div>
+  <div class="field">
+    <div class="field-label">エビデンス補足</div>
+    <div class="field-note">ページがエラーなくレンダリングされる</div>
+  </div>
+</div>
+
+<div class="test-case">
+  <div class="header-row">
+    <div>
+      <span class="id">TC-009</span>
+      <h3 class="title">/repositories ページ - RepositoryList 要素存在</h3>
+    </div>
+    <span class="badge pass">PASS</span>
+  </div>
+  <div class="field">
+    <div class="field-label">実行コマンド</div>
+    <div class="field-value">curl -s http://localhost:3010/repositories | grep -c 'Repositories'</div>
+  </div>
+  <div class="field">
+    <div class="field-label">結果</div>
+    <div class="field-value">3
+exit_code: 0</div>
+  </div>
+  <div class="field">
+    <div class="field-label">エビデンス補足</div>
+    <div class="field-note">ページ要素がレンダリングされている</div>
+  </div>
+</div>
+
+<h2>ファイル存在確認テスト</h2>
+
+<div class="test-case">
+  <div class="header-row">
+    <div>
+      <span class="id">TC-010</span>
+      <h3 class="title">必須ファイル存在確認</h3>
+    </div>
+    <span class="badge pass">PASS</span>
+  </div>
+  <div class="field">
+    <div class="field-label">実行コマンド</div>
+    <div class="field-value">test -f 新規5ファイル && echo OK</div>
+  </div>
+  <div class="field">
+    <div class="field-label">結果</div>
+    <div class="field-value">TC-010 OK
+exit_code: 0</div>
+  </div>
+  <div class="field">
+    <div class="field-label">エビデンス補足</div>
+    <div class="field-note">新規5ファイル（repository-config.ts, RepositoryList.tsx, テスト3ファイル）がすべて存在</div>
+  </div>
+</div>
+
+<div class="test-case">
+  <div class="header-row">
+    <div>
+      <span class="id">TC-011</span>
+      <h3 class="title">既存 getAllRepositories シグネチャ不変</h3>
+    </div>
+    <span class="badge pass">PASS</span>
+  </div>
+  <div class="field">
+    <div class="field-label">実行コマンド</div>
+    <div class="field-value">grep -A 2 'export function getAllRepositories' src/lib/db/db-repository.ts</div>
+  </div>
+  <div class="field">
+    <div class="field-label">結果</div>
+    <div class="field-value">export function getAllRepositories(
+  db: Database.Database
+): Repository[]
+--
+export function getAllRepositoriesWithWorktreeCount(
+exit_code: 0</div>
+  </div>
+  <div class="field">
+    <div class="field-label">エビデンス補足</div>
+    <div class="field-note">既存シグネチャは (db: Database.Database): Repository[] のまま維持。新関数 getAllRepositoriesWithWorktreeCount が別途追加されている（S3-005 回帰防止確認済み）</div>
+  </div>
+</div>
+
+<h2>品質チェックテスト</h2>
+
+<div class="test-case">
+  <div class="header-row">
+    <div>
+      <span class="id">TC-012</span>
+      <h3 class="title">TypeScript エラー確認</h3>
+    </div>
+    <span class="badge pass">PASS</span>
+  </div>
+  <div class="field">
+    <div class="field-label">実行コマンド</div>
+    <div class="field-value">npx tsc --noEmit</div>
+  </div>
+  <div class="field">
+    <div class="field-label">結果</div>
+    <div class="field-value">(empty)
+exit_code: 0</div>
+  </div>
+  <div class="field">
+    <div class="field-label">エビデンス補足</div>
+    <div class="field-note">型エラー0件</div>
+  </div>
+</div>
+
+<div class="test-case">
+  <div class="header-row">
+    <div>
+      <span class="id">TC-013</span>
+      <h3 class="title">ESLint エラー確認</h3>
+    </div>
+    <span class="badge pass">PASS</span>
+  </div>
+  <div class="field">
+    <div class="field-label">実行コマンド</div>
+    <div class="field-value">npm run lint</div>
+  </div>
+  <div class="field">
+    <div class="field-label">結果</div>
+    <div class="field-value">No ESLint warnings or errors
+exit_code: 0</div>
+  </div>
+  <div class="field">
+    <div class="field-label">エビデンス補足</div>
+    <div class="field-note">Lintエラー0件</div>
+  </div>
+</div>
+
+<div class="test-case">
+  <div class="header-row">
+    <div>
+      <span class="id">TC-014</span>
+      <h3 class="title">Integration テスト実行</h3>
+    </div>
+    <span class="badge pass">PASS</span>
+  </div>
+  <div class="field">
+    <div class="field-label">実行コマンド</div>
+    <div class="field-value">npx vitest run tests/integration/api-repositories-list.test.ts tests/integration/api-repositories-put.test.ts</div>
+  </div>
+  <div class="field">
+    <div class="field-label">結果</div>
+    <div class="field-value">Test Files 2 passed (2)
+Tests 15 passed (15)
+exit_code: 0</div>
+  </div>
+  <div class="field">
+    <div class="field-label">エビデンス補足</div>
+    <div class="field-note">新規Integrationテスト15/15パス</div>
+  </div>
+</div>
+
+<div class="test-case">
+  <div class="header-row">
+    <div>
+      <span class="id">TC-015</span>
+      <h3 class="title">Unit テスト実行（RepositoryList）</h3>
+    </div>
+    <span class="badge pass">PASS</span>
+  </div>
+  <div class="field">
+    <div class="field-label">実行コマンド</div>
+    <div class="field-value">npx vitest run tests/unit/components/repository/RepositoryList.test.tsx</div>
+  </div>
+  <div class="field">
+    <div class="field-label">結果</div>
+    <div class="field-value">Test Files 1 passed (1)
+Tests 18 passed (18)
+exit_code: 0</div>
+  </div>
+  <div class="field">
+    <div class="field-label">エビデンス補足</div>
+    <div class="field-note">新規Unitテスト18/18パス</div>
+  </div>
+</div>
+
+<footer>
+  Issue #644 実機受入テスト報告書 / Generated 2026-04-12 / CommandMate UAT
+</footer>
+
+</div>
+</body>
+</html>
