@@ -1,0 +1,29 @@
+{
+  "issue_number": 646,
+  "feature_summary": "ファイル編集強化（YAML ファイル編集・拡張子選択対応）",
+  "acceptance_criteria": [
+    "新規ファイル作成時に拡張子を選択できる（.md / .yaml / .yml / .html / .htm）",
+    "ファイル名に EDITABLE_EXTENSIONS の拡張子が含まれる場合はそのまま使用",
+    "拡張子なしの場合はドロップダウンの選択値を付与（デフォルト: .md）",
+    "ファイル名の拡張子とドロップダウンが矛盾する場合はファイル名の拡張子を優先",
+    ".yaml / .yml ファイルを CommandMate UI 上で新規作成できる",
+    "既存の .yaml / .yml ファイルを UI 上で編集・保存できる",
+    "危険な YAML タグ（!ruby/object 等）を含むコンテンツの保存がブロックされる",
+    "YAML バリデーション失敗時に具体的なエラーメッセージが表示される",
+    "既存の .md / .html / .htm 編集機能に影響がない（回帰なし）",
+    "npm run lint / npx tsc --noEmit / npm run test:unit がパスする",
+    "新規単体テストおよび結合テストが追加されている"
+  ],
+  "test_scenarios": [
+    "シナリオ 1: .yaml 拡張子指定でファイル名入力 → 新規 YAML ファイル作成 → YAML ファイルが編集可能エディタで開く",
+    "シナリオ 2: 拡張子なしでファイル名入力 → ドロップダウンで .yaml 選択 → config.yaml として作成",
+    "シナリオ 3: ファイル名 test.md でドロップダウン .yaml 選択 → ファイル名の .md が優先される",
+    "シナリオ 4: 既存 .yaml ファイルをクリック → 編集可能エディタが開き保存できる",
+    "シナリオ 5: 危険タグ含む YAML を保存 → エラーメッセージが表示されブロックされる",
+    "シナリオ 6: .md ファイル編集 → 既存機能に影響なし（Markdown プレビューが表示される）",
+    "シナリオ 7: EDITABLE_EXTENSIONS に .yaml/.yml が含まれる",
+    "シナリオ 8: EXTENSION_VALIDATORS に .yaml/.yml のバリデータが存在する",
+    "シナリオ 9: npm run lint / npx tsc --noEmit / npm run test:unit が全パス"
+  ],
+  "tdd_result_path": "dev-reports/issue/646/pm-auto-dev/iteration-1/tdd-result.json"
+}

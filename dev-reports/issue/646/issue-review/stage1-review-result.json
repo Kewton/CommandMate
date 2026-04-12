@@ -1,0 +1,118 @@
+{
+  "stage": 1,
+  "focus": "通常",
+  "reviewer": "opus",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "Must Fix",
+      "category": "完全性",
+      "title": "EXTENSION_VALIDATORS への .yaml/.yml 追加が実装タスクに明記されていない",
+      "description": "Issue の実装タスクでは EDITABLE_EXTENSIONS への .yaml/.yml 追加と isYamlSafe() 流用に言及しているが、EXTENSION_VALIDATORS 配列への追加タスクが明記されていない。EXTENSION_VALIDATORS に .yaml/.yml のエントリが無い場合、validateContent() は 'Unsupported extension' エラーを返す（editable-extensions.ts:91）。PUT API での保存も POST API での内容バリデーションも失敗する。EDITABLE_EXTENSIONS と EXTENSION_VALIDATORS は別配列で管理されており、両方への追加が必須。",
+      "location": "## 実装タスク セクション / src/config/editable-extensions.ts",
+      "evidence": "validateContent() (行 86-91): validator = EXTENSION_VALIDATORS.find(v => v.extension === normalizedExt); if (!validator) return { valid: false, error: 'Unsupported extension' };",
+      "suggestion": "実装タスクに「EXTENSION_VALIDATORS に .yaml/.yml のバリデータを追加（maxFileSize: 1MB, additionalValidation: isYamlSafe）」を明示的に追加する"
+    },
+    {
+      "id": "S1-002",
+      "severity": "Should Fix",
+      "category": "明確性",
+      "title": "YAML 用エディタコンポーネントの設計が未記載",
+      "description": "Issue は FilePanelContent.tsx で「YAML ファイルにコードエディタ表示を適用」「シンタックスハイライト対応（既存の CodeViewer を活用）」と記載しているが、YAML ファイルの編集・保存をどのコンポーネントで実現するかが明確でない。現在の FilePanelContent.tsx は extension === 'md' のときに MarkdownEditor（保存機能あり）、それ以外は CodeViewerWithSearch（読み取り専用）にルーティングする。CodeViewer は dangerouslySetInnerHTML を使用した表示専用コンポーネントであり、編集・保存機能を持たない。YAML 編集には新規の編集可能コンポーネントか、MarkdownEditor の汎用化が必要。",
+      "location": "## 4. UI 対応 セクション / src/components/worktree/FilePanelContent.tsx (行 722-768)",
+      "evidence": "FilePanelContent.tsx: extension === 'md' -> MarkdownEditor (編集可), default -> CodeViewerWithSearch (読み取り専用)",
+      "suggestion": "YAML 編集に使用するエディタコンポーネントの方針を明記する。例: (A) MarkdownEditor を汎用テキストエディタとして拡張、(B) YAML 専用の軽量テキストエディタを新規作成、(C) CodeViewer に編集・保存機能を追加。それぞれのトレードオフと選択理由を記載すべき"
+    },
+    {
+      "id": "S1-003",
+      "severity": "Should Fix",
+      "category": "完全性",
+      "title": "拡張子選択 UI の .htm 欠落",
+      "description": "Issue のセクション 3 で新規ファイル作成時の拡張子選択候補を「.md / .yaml / .yml / .html」と記載しているが、現在 EDITABLE_EXTENSIONS に含まれている .htm が候補に含まれていない。.htm を意図的に除外するのか、単純な記載漏れなのかが不明。",
+      "location": "## 3. ファイル作成時の拡張子選択 UI セクション",
+      "evidence": "EDITABLE_EXTENSIONS = ['.md', '.html', '.htm'] (editable-extensions.ts:18) だが、Issue の拡張子選択候補は .md / .yaml / .yml / .html のみ",
+      "suggestion": ".htm を候補に含めるか、意図的に除外する場合はその理由（例: .html に統一、.htm は非推奨）を Issue に記載する"
+    },
+    {
+      "id": "S1-004",
+      "severity": "Should Fix",
+      "category": "技術的妥当性",
+      "title": "isYamlSafe() のエラーフィードバック設計が未定義",
+      "description": "isYamlSafe() は boolean を返すのみで、どの危険タグが検出されたかの情報を提供しない。validateContent() の additionalValidation も boolean 返却のため、ユーザーには 'Content validation failed' という汎用エラーのみ表示される。YAML のデシリアライゼーション攻撃タグがブロックされた場合、ユーザーはなぜ保存できないのか理解できない可能性がある。",
+      "location": "src/config/uploadable-extensions.ts:223-235 / src/config/editable-extensions.ts:113-115",
+      "evidence": "additionalValidation は (content: string) => boolean 型。isYamlSafe() が false を返した場合、エラーメッセージは固定の 'Content validation failed'",
+      "suggestion": "最低限、YAML バリデーション失敗時のエラーメッセージを 'Dangerous YAML tags detected (e.g., !ruby/object)' 等の具体的なものに変更する方針を記載する。ExtensionValidator の additionalValidation を string | boolean を返す型に拡張するか、エラーメッセージ用の別フィールドを設ける方法がある"
+    },
+    {
+      "id": "S1-005",
+      "severity": "Should Fix",
+      "category": "受け入れ条件",
+      "title": "拡張子選択 UI の動作仕様が受入条件として不十分",
+      "description": "受入条件に「新規ファイル作成時に拡張子を選択できる」とあるが、具体的な動作仕様が不明。(1) ファイル名に拡張子を含めた場合（例: config.yaml）の振る舞い、(2) ファイル名に拡張子がなく選択もしなかった場合のデフォルト動作、(3) ファイル名の拡張子とドロップダウン選択が矛盾した場合（例: ファイル名 test.md でドロップダウン .yaml）の振る舞いが定義されていない。Issue 本文のセクション 3 に部分的な記述はあるが、受入条件として検証可能な形に落とし込まれていない。",
+      "location": "## 受入条件 セクション / ## 3. ファイル作成時の拡張子選択 UI",
+      "evidence": "受入条件: 「新規ファイル作成時に拡張子を選択できる（.md / .yaml / .yml / .html）」のみ。本文には「拡張子が含まれていればそのまま使用し、拡張子なしの場合はドロップダウンの選択値を付与」とあるが、矛盾時の仕様は未定義",
+      "suggestion": "受入条件を以下のように具体化する: (a) ファイル名に EDITABLE_EXTENSIONS の拡張子が含まれる場合はそのまま使用、(b) 拡張子なしの場合はドロップダウンの選択値を付与、(c) ファイル名の拡張子とドロップダウンが矛盾する場合はファイル名を優先（またはエラー表示）"
+    },
+    {
+      "id": "S1-006",
+      "severity": "Nice to Have",
+      "category": "完全性",
+      "title": "window.prompt から拡張子選択対応ダイアログへの移行方針が未記載",
+      "description": "現在の handleNewFile は window.prompt() でファイル名を取得しているが、拡張子のドロップダウン選択は window.prompt() では実現できない。モーダルダイアログまたは React コンポーネントベースの入力 UI が必要になるが、この UI 変更の方針が Issue に記載されていない。",
+      "location": "src/components/worktree/WorktreeDetailRefactored.tsx:783",
+      "evidence": "const fileName = window.prompt('Enter file name (e.g., document.md):');",
+      "suggestion": "window.prompt から React コンポーネントベースのダイアログに変更する方針を明記する。新規ダイアログコンポーネントを作成するか、既存の共通モーダルを利用するか等の設計方針を追加する"
+    },
+    {
+      "id": "S1-007",
+      "severity": "Nice to Have",
+      "category": "完全性",
+      "title": "CLAUDE.md のモジュールリファレンス更新タスクの欠落",
+      "description": "CLAUDE.md の editable-extensions.ts の説明は現在 '.md, .html/.htm を EDITABLE_EXTENSIONS に追加' のパターンで記載されている。YAML 追加後に CLAUDE.md やモジュールリファレンスの更新が必要だが、実装タスクに含まれていない。",
+      "location": "## 実装タスク セクション",
+      "evidence": "CLAUDE.md のファイル構成セクションにはモジュール一覧が記載されているが、実装タスクにドキュメント更新が含まれていない",
+      "suggestion": "実装タスクに「CLAUDE.md のモジュール説明を更新（editable-extensions.ts に .yaml/.yml 追加を反映）」を追加する"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 4,
+  "nice_to_have_count": 2,
+  "summary": "Issue #646 の記載内容はコードベースの事実に対しておおむね正確であるが、1件の Must Fix と 4件の Should Fix が検出された。最も重要な問題は、EXTENSION_VALIDATORS への .yaml/.yml 追加タスクが実装タスクに明記されていない点である（S1-001）。EDITABLE_EXTENSIONS への追加だけでは validateContent() が 'Unsupported extension' エラーを返し、ファイル保存が失敗する。次に重要なのは、YAML 編集用エディタコンポーネントの設計方針が不明確な点（S1-002）で、現在の FilePanelContent.tsx では YAML は読み取り専用の CodeViewer にルーティングされるため、編集・保存機能の実装方針を明確にする必要がある。その他、拡張子選択 UI での .htm の扱い（S1-003）、isYamlSafe() のエラーフィードバック（S1-004）、受入条件の具体化（S1-005）も対応が推奨される。",
+  "code_references": [
+    {
+      "file": "src/config/editable-extensions.ts",
+      "lines": "36-50, 86-91",
+      "relevance": "EXTENSION_VALIDATORS 配列と validateContent() -- YAML バリデータ追加が必須"
+    },
+    {
+      "file": "src/config/uploadable-extensions.ts",
+      "lines": "223-235",
+      "relevance": "isYamlSafe() の実装 -- additionalValidation として流用する際のエラーフィードバック"
+    },
+    {
+      "file": "src/components/worktree/FilePanelContent.tsx",
+      "lines": "222-282, 722-768",
+      "relevance": "CodeViewer (読み取り専用) と md 分岐ロジック -- YAML 編集のルーティング追加が必要"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "782-808",
+      "relevance": "handleNewFile -- window.prompt から拡張子選択ダイアログへの変更が必要"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "lines": "325-373, 379-426",
+      "relevance": "PUT (isEditableFile ガード) と POST (validateContent 呼び出し) -- EXTENSION_VALIDATORS 未追加時に影響"
+    },
+    {
+      "file": "tests/unit/config/editable-extensions.test.ts",
+      "relevance": "既存テスト -- YAML 追加に伴うテスト更新が必要（length チェックが 3 固定）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュール説明の更新が必要"
+    }
+  ]
+}

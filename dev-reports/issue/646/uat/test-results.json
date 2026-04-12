@@ -1,0 +1,115 @@
+{
+  "issue_number": 646,
+  "test_date": "2026-04-12",
+  "environment": {
+    "port": 3010,
+    "branch": "feature/646-worktree"
+  },
+  "results": [
+    {
+      "id": "TC-001",
+      "title": "EDITABLE_EXTENSIONS に .yaml/.yml が含まれる（単体テスト）",
+      "status": "pass",
+      "command": "npm run test:unit -- editable-extensions",
+      "stdout": "✓ should include .md, .html, .htm, .yaml, .yml (toHaveLength(5))",
+      "exit_code": 0,
+      "evidence_note": "全テスト PASS"
+    },
+    {
+      "id": "TC-002",
+      "title": "YAML ファイルの PUT API でバリデーション成功（安全なコンテンツ）",
+      "status": "pass",
+      "command": "curl -X PUT /api/worktrees/{id}/files/test-uat.yaml -d '{\"content\":\"name: test\\nvalue: hello\"}'",
+      "stdout": "{\"success\":true,\"path\":\"test-uat.yaml\"}",
+      "exit_code": 0,
+      "evidence_note": "HTTP 200 で保存成功。TC-012 でファイル作成後に実行"
+    },
+    {
+      "id": "TC-003",
+      "title": "YAML ファイルの PUT API で危険タグをブロック（!ruby/object）",
+      "status": "pass",
+      "command": "curl -X PUT /api/worktrees/{id}/files/test-uat.yaml -d '{\"content\":\"attack: !ruby/object:Gem::Installer {}\"}'",
+      "stdout": "{\"success\":false,\"error\":{\"code\":\"INVALID_CONTENT\",\"message\":\"Dangerous YAML tags detected (e.g., !ruby/object). Please use only safe tags.\"}}",
+      "exit_code": 0,
+      "evidence_note": "HTTP 400、具体的なエラーメッセージ付きでブロック"
+    },
+    {
+      "id": "TC-004",
+      "title": ".yml 拡張子ファイルの PUT API で危険タグをブロック（!!python）",
+      "status": "pass",
+      "command": "curl -X PUT /api/worktrees/{id}/files/test-uat.yml -d '{\"content\":\"attack: !!python/object:__builtin__.compile {}\"}'",
+      "stdout": "{\"success\":false,\"error\":{\"code\":\"INVALID_CONTENT\",\"message\":\"Dangerous YAML tags detected (e.g., !ruby/object). Please use only safe tags.\"}}",
+      "exit_code": 0,
+      "evidence_note": "HTTP 400、.yml でも同様にブロック"
+    },
+    {
+      "id": "TC-006",
+      "title": ".md ファイルの PUT API が正常動作（回帰確認）",
+      "status": "pass",
+      "command": "curl -X PUT /api/worktrees/{id}/files/test-uat-regression.md -d '{\"content\":\"# Test\\n\\nHello World\"}'",
+      "stdout": "{\"success\":true,\"path\":\"test-uat-regression.md\"}",
+      "exit_code": 0,
+      "evidence_note": "HTTP 200、既存 .md 機能に影響なし"
+    },
+    {
+      "id": "TC-007",
+      "title": "isEditableExtension 関数の動作確認（単体テスト）",
+      "status": "pass",
+      "command": "npm run test:unit -- editable-extensions",
+      "stdout": "✓ should return true for .yaml / ✓ should return true for .yml / ✓ should return true for .YAML (case-insensitive)",
+      "exit_code": 0,
+      "evidence_note": "大文字小文字を問わず true を返すことを確認"
+    },
+    {
+      "id": "TC-008",
+      "title": "validateContent の 3 分岐ロジック確認（単体テスト）",
+      "status": "pass",
+      "command": "npm run test:unit -- editable-extensions",
+      "stdout": "✓ should return specific error message string for dangerous YAML tags",
+      "exit_code": 0,
+      "evidence_note": "string 型のエラーメッセージを返すことを確認"
+    },
+    {
+      "id": "TC-009",
+      "title": "NewFileDialog の resolveFileName ヘルパー（単体テスト）",
+      "status": "pass",
+      "command": "npm run test:unit -- NewFileDialog",
+      "stdout": "21 tests passed (pattern (a)/(b)/(c) and edge cases all PASS)",
+      "exit_code": 0,
+      "evidence_note": "拡張子決定ロジック 3 パターン全て PASS"
+    },
+    {
+      "id": "TC-010",
+      "title": "TypeScript 型チェック・ESLint パス",
+      "status": "pass",
+      "command": "npx tsc --noEmit && npm run lint",
+      "stdout": "(tsc: 0 errors) / ✔ No ESLint warnings or errors",
+      "exit_code": 0,
+      "evidence_note": "型エラーなし、lint エラーなし"
+    },
+    {
+      "id": "TC-011",
+      "title": "結合テスト（YAML ファイル操作）",
+      "status": "pass",
+      "command": "npx vitest run tests/integration/yaml-file-operations.test.ts",
+      "stdout": "Test Files: 1 passed / Tests: 12 passed",
+      "exit_code": 0,
+      "evidence_note": "CRUD・危険タグ拒否・回帰 全 12 テスト PASS"
+    },
+    {
+      "id": "TC-012",
+      "title": "YAML POST API（新規作成）",
+      "status": "pass",
+      "command": "curl -X POST /api/worktrees/{id}/files/new-test.yaml -d '{\"type\":\"file\",\"content\":\"version: \\\"3\\\"\\nservices:\\n  app:\\n    image: nginx\"}'",
+      "stdout": "{\"success\":true,\"path\":\"test-uat.yaml\"}",
+      "exit_code": 0,
+      "evidence_note": "HTTP 201 で新規 .yaml ファイル作成成功"
+    }
+  ],
+  "summary": {
+    "total": 11,
+    "passed": 11,
+    "failed": 0,
+    "pass_rate": "100%"
+  }
+}

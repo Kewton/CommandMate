@@ -186,6 +186,7 @@ tests/
 | `src/config/timer-constants.ts` | タイマー定数定義（TIMER_DELAYS, MAX_TIMERS_PER_WORKTREE, TIMER_STATUS, isValidTimerDelay）（Issue #534） |
 | `src/config/copilot-constants.ts` | Copilot CLIタイミング定数（COPILOT_SEND_ENTER_DELAY_MS, COPILOT_TEXT_INPUT_DELAY_MS）（Issue #565）、MODEL_NAME_PATTERN/MAX_MODEL_NAME_LENGTH追加（Issue #588） |
 | `src/config/repository-config.ts` | リポジトリ共有定数（MAX_DISPLAY_NAME_LENGTH）（Issue #644） |
+| `src/config/editable-extensions.ts` | 編集可能拡張子定義・バリデーション（EDITABLE_EXTENSIONS, EXTENSION_VALIDATORS, isEditableExtension, validateContent）。.yaml/.yml 追加・YAML危険タグバリデーション（Issue #646） |
 | `src/lib/detection/prompt-key.ts` | promptKey重複排除ユーティリティ |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
 | `src/lib/cli-tools/types.ts` | CLIツール型定義（IImageCapableCLITool/isImageCapableCLITool追加）（Issue #474）（Issue #545: copilot追加、6ツール対応） |
@@ -232,7 +233,7 @@ tests/
 | `src/i18n.ts` | next-intl設定 |
 | `src/lib/locale-cookie.ts` | ロケールCookie管理 |
 | `src/lib/date-locale.ts` | date-fnsロケールマッピング |
-| `src/components/worktree/WorktreeDetailRefactored.tsx` | Worktree詳細画面（メイン画面、ツリーポーリング対応、履歴・メモ挿入state管理）（Issue #469, #485） |
+| `src/components/worktree/WorktreeDetailRefactored.tsx` | Worktree詳細画面（メイン画面、ツリーポーリング対応、履歴・メモ挿入state管理、NewFileDialog連携）（Issue #469, #485, #646） |
 | `src/components/worktree/AgentSettingsPane.tsx` | エージェント選択UI |
 | `src/components/worktree/MessageInput.tsx` | メッセージ入力（下書き永続化対応、pendingInsertText外部挿入対応）（Issue #485） |
 | `src/components/worktree/ConversationPairCard.tsx` | 会話ペアカード（ユーザー/アシスタントメッセージ表示、挿入ボタン）（Issue #485） |
@@ -241,11 +242,12 @@ tests/
 | `src/components/worktree/MemoPane.tsx` | メモペイン（メモ一覧表示、onInsertToMessage伝播）（Issue #485） |
 | `src/components/worktree/NotesAndLogsPane.tsx` | Notes&Logsペイン（メモ・ログタブ、onInsertToMessage伝播）（Issue #485） |
 | `src/components/worktree/WorktreeDetailSubComponents.tsx` | Worktree詳細サブコンポーネント（MobileContent等、onInsertToMessage伝播）（Issue #485） |
-| `src/components/worktree/MarkdownEditor.tsx` | マークダウンエディタメイン（Issue #479） |
+| `src/components/worktree/MarkdownEditor.tsx` | マークダウンエディタメイン（Issue #479）、汎用テキストエディタ化・YAML等非mdファイルのプレビュー非表示対応（Issue #646） |
+| `src/components/worktree/NewFileDialog.tsx` | 新規ファイル作成ダイアログ（ファイル名入力・拡張子選択、拡張子決定ロジック3パターン）（Issue #646） |
 | `src/components/worktree/TerminalSearchBar.tsx` | ターミナル内テキスト検索バーUI（Issue #47）件数表示・前/次ナビ・Esc閉じ |
 | `src/components/worktree/FilePanelSplit.tsx` | ターミナル+ファイルパネル分割 |
 | `src/components/worktree/FilePanelTabs.tsx` | ファイルタブバーUI |
-| `src/components/worktree/FilePanelContent.tsx` | ファイルコンテンツ表示（ファイル内容ポーリング対応）（Issue #469） |
+| `src/components/worktree/FilePanelContent.tsx` | ファイルコンテンツ表示（ファイル内容ポーリング対応）（Issue #469）、YAMLファイル編集ルーティング追加（Issue #646） |
 | `src/components/worktree/HtmlPreview.tsx` | HTMLファイルプレビューコンポーネント（iframe srcdoc + Safe/Interactiveサンドボックス）（Issue #490） |
 | `src/components/worktree/FileViewer.tsx` | ファイルビューア |
 | `src/components/worktree/FileSearchBar.tsx` | ファイル検索バー共通コンポーネント（Issue #469） |

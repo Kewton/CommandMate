@@ -1,0 +1,88 @@
+{
+  "stage": 3,
+  "focus": "影響範囲",
+  "reviewer": "opus",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "Must Fix",
+      "title": "additionalValidation の戻り値型変更は validateContent() のロジック修正を伴う破壊的変更",
+      "description": "Issue では additionalValidation の戻り値を (content: string) => boolean から (content: string) => string | boolean に拡張すると記載しているが、現在の validateContent() (editable-extensions.ts:114) は `if (validator.additionalValidation && !validator.additionalValidation(content))` という否定チェックで判定している。戻り値が string の場合、JavaScript では空文字列以外の string は truthy であるため `!validator.additionalValidation(content)` が false となり、エラーメッセージ付きの string が返されても「バリデーション成功」として扱われてしまう。validateContent() のロジックを `const result = validator.additionalValidation(content); if (result === false || typeof result === 'string')` のような形に修正する必要がある。Issue の実装タスクにこの validateContent() のロジック修正が明示されていない。",
+      "suggestion": "実装タスクに「validateContent() の additionalValidation 呼び出しロジックを修正: string 返却時はそのエラーメッセージを ContentValidationResult.error として使用」を追加する。具体的には、additionalValidation の結果が true の場合のみ通過、false の場合は汎用メッセージ、string の場合はその文字列をエラーメッセージとして使う3分岐ロジックが必要。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "Must Fix",
+      "title": "既存テスト editable-extensions.test.ts の EDITABLE_EXTENSIONS.toHaveLength(3) が必ず失敗する",
+      "description": "tests/unit/config/editable-extensions.test.ts:29 に `expect(EDITABLE_EXTENSIONS).toHaveLength(3)` というハードコードされた length チェックが存在する。.yaml と .yml を追加すると配列長が 5 になり、このテストが確実に失敗する。Issue の実装タスクには「ユニットテスト追加」とあるが、既存テストの修正が必要であることが明示されていない。",
+      "suggestion": "実装タスクに「既存の editable-extensions.test.ts の toHaveLength(3) を toHaveLength(5) に修正し、.yaml/.yml の toContain チェックを追加」を明記する。また、同テストファイルの isEditableExtension テストで .yaml/.yml が false を返すテスト（79行目付近の non-editable extensions テスト群）との整合性も確認が必要。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "Should Fix",
+      "title": "FilePanelContent.tsx の分岐ロジックで YAML ファイルがデフォルトの CodeViewer にルーティングされる",
+      "description": "FilePanelContent.tsx のレンダリング分岐は isImage -> isVideo -> isHtml -> extension === 'md' -> default(CodeViewerWithSearch) の順で判定される。YAML ファイルは FileContent 型に isYaml のようなフラグがなく、extension が 'yaml' または 'yml' となるだけなので、現状ではデフォルトの CodeViewerWithSearch（読み取り専用）にフォールバックする。Issue では「MarkdownEditor を汎用テキストエディタとして拡張する」としているが、FilePanelContent.tsx にどのような分岐条件で YAML ファイルを MarkdownEditor にルーティングするかの具体的な設計が不足している。extension === 'yaml' || extension === 'yml' の条件を md の判定の前後どちらに入れるか、あるいは isEditableExtension() を使った汎用的な判定にするかで実装が変わる。",
+      "suggestion": "FilePanelContent.tsx の変更内容をより具体的に記述する。例: 'md 判定の後に `isEditableExtension(\".\" + content.extension)` でフォールバック的に MarkdownEditor(汎用化版) にルーティングする分岐を追加し、将来の拡張子追加にも自動対応する設計にする' など。ただし、この場合 md と html は先に個別の分岐でハンドルされるので二重判定にはならない。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "Should Fix",
+      "title": "MarkdownEditor 汎用化時の MarkdownPreview コンポーネントの扱いが未定義",
+      "description": "MarkdownEditor は内部で MarkdownPreview コンポーネントを使用しており、MarkdownPreview は ReactMarkdown + remark-gfm + rehype-sanitize 等のマークダウン専用レンダリングパイプラインを含む。YAML ファイル編集時にこの MarkdownPreview をそのまま使うと、YAML コンテンツがマークダウンとして解釈されてしまう（例: `#` がヘッダーになる、`---` がセパレータになる等）。Issue では「プレビュー機能を拡張子に応じて切り替える（yaml: シンタックスハイライト付きプレビュー or なし）」と言及しているが、MarkdownEditor コンポーネントが filePath / extension の情報をどう受け取り、プレビュー切替をどう実装するかの具体的な設計がない。EditorProps 型に extension や fileType を追加するのか、filePath から自動判定するのかも未定義。",
+      "suggestion": "MarkdownEditor 汎用化の設計を具体化する: (1) EditorProps に fileType?: string を追加するか filePath の拡張子から自動判定するか、(2) YAML 時は MarkdownPreview の代わりに CodeViewer を表示するか、プレビューなしの editor-only モードを強制するか、(3) MarkdownToolbar のテキスト placeholder (「Start typing markdown...」) を拡張子に応じて変更するか。これらの判断を Issue に記載すること。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "Should Fix",
+      "title": "PUT API の isEditableFile チェックと POST API の挙動の非対称性",
+      "description": "PUT /api/worktrees/:id/files/:path (route.ts:338) は `isEditableFile(relativePath)` でファイルの拡張子が編集可能かどうかを最初にチェックし、編集不可なら 403 を返す。POST (route.ts:400-401) は `type === 'file'` かつ `content !== undefined` の場合のみ `isEditableExtension(ext)` をチェックし、一致する場合のみ validateContent を実行する。つまり POST は編集不可な拡張子のファイルも content 付きで作成できる（validateContent がスキップされる）。YAML を EDITABLE_EXTENSIONS に追加すること自体は PUT/POST 両方で自動的に動作するが、この非対称的な動作は想定通りか確認が必要。特に、YAML ファイルを POST で新規作成する際に content が undefined（空ファイル）の場合は isYamlSafe バリデーションがスキップされる点に注意。",
+      "suggestion": "POST API の挙動について Issue に補足を追加する。空ファイル（content undefined）での YAML 新規作成は安全なので許容可能だが、設計判断として明示しておくとよい。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "Should Fix",
+      "title": "validateContent の content.length によるサイズ制限は文字数であり、バイト数ではない",
+      "description": "editable-extensions.ts:96 の `content.length > validator.maxFileSize` は JavaScript の String.length（文字数）と maxFileSize（バイト数）を比較している。マルチバイト文字（日本語、絵文字等）を含む YAML ファイルの場合、実際のバイト数は content.length より大きくなる。例えば全角文字のみ 500KB 文字 = 約 1.5MB のバイト数となり、maxFileSize: 1MB を超過しても通過してしまう可能性がある。MarkdownEditor.tsx:255 では `new Blob([fileContent]).size` で正確なバイト数を計算しているのに対し、validateContent では文字数での近似チェックになっている。これは YAML に限らず既存の md/html でも同じ問題だが、YAML の設定ファイルで日本語コメントが多い場合に顕在化しやすい。",
+      "suggestion": "これは既存の問題であり Issue #646 のスコープ外とすることも可能だが、YAML バリデータ追加を機に validateContent 内のサイズチェックを `new TextEncoder().encode(content).length` に修正することを検討する。もしくは、既知の制限として Issue に注記する。"
+    },
+    {
+      "id": "S3-007",
+      "severity": "Should Fix",
+      "title": "handleNewFile の window.prompt() 除去が FileTreeView と ContextMenu の onNewFile シグネチャに波及する",
+      "description": "handleNewFile は現在 (parentPath: string) => Promise<void> のシグネチャで、内部で window.prompt() を呼び出している。NewFileDialog.tsx への移行により、handleNewFile は非同期ダイアログの表示トリガーとなり、ダイアログの結果を待つ必要がある。FileTreeView.tsx、ContextMenu.tsx、WorktreeDetailSubComponents.tsx がすべて onNewFile?: (parentPath: string) => void のインターフェースで handleNewFile を受け取っている。NewFileDialog 導入後は、handleNewFile が state（showNewFileDialog, newFileParentPath 等）を設定し、実際のファイル作成はダイアログの onSubmit コールバックで行う形になるため、既存の onNewFile シグネチャ自体は変わらないが、WorktreeDetailRefactored.tsx に useState のダイアログ状態管理が追加される。この state 追加と JSX への NewFileDialog 配置が、既に大規模な WorktreeDetailRefactored.tsx の複雑度をさらに高める。",
+      "suggestion": "Issue の影響範囲テーブルに FileTreeView.tsx と ContextMenu.tsx への影響がないことを明記する（onNewFile シグネチャ不変のため）。また、WorktreeDetailRefactored.tsx への state 追加については、将来的にファイル操作ロジックをカスタムフック（useFileOperations 等）に抽出するリファクタリングを別 Issue として検討する旨を記載するとよい。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "Should Fix",
+      "title": "isYamlSafe() の危険タグパターンが YAML アンカー/エイリアスや merge key を考慮していない",
+      "description": "uploadable-extensions.ts の isYamlSafe() は !ruby/object, !python/object 等の言語固有タグのみをブロックしている。しかし YAML には他にも潜在的に危険な構文がある: (1) 極端に深いネスト（例: 1000階層以上）による YAML パーサーの DoS、(2) アンカー(&)/エイリアス(*)の再帰参照による Billion Laughs 攻撃（例: &a [*a, *a] のような構造）。Issue では「isYamlSafe() が YAML 構文バリデーションを行わない点での DoS リスク」が確認すべきセキュリティ影響として挙げられているが、Issue 本文にはこのリスクへの対応方針が記載されていない。ただし、CommandMate はブラウザ上のテキストエディタであり、サーバー側で YAML をパースしないため、Billion Laughs 攻撃の実質的なリスクは低い（YAML を単なるテキストとして保存するだけ）。",
+      "suggestion": "Issue にリスク評価を追記する: 「サーバー側では YAML をテキストとして保存するのみでパースしないため、Billion Laughs 等のパーサー DoS は適用外。isYamlSafe() は言語固有デシリアライゼーションタグのブロックに限定し、構文レベルの DoS 対策はスコープ外とする」。これにより、レビューア・実装者がセキュリティ判断の根拠を共有できる。"
+    },
+    {
+      "id": "S3-009",
+      "severity": "Nice to Have",
+      "title": "CLAUDE.md のモジュール説明で editable-extensions.ts の説明が現状を反映していない",
+      "description": "CLAUDE.md のファイル構成セクションおよびモジュール一覧に editable-extensions.ts の言及がない。Issue の実装タスクに「CLAUDE.md のモジュール説明を更新」が含まれているが、具体的にどのセクションにどのような記述を追加するかが未定義。現在 CLAUDE.md は config/ ディレクトリの個別ファイルとして html-extensions.ts, file-polling-config.ts, timer-constants.ts, copilot-constants.ts, repository-config.ts, review-config.ts 等を主要モジュール一覧に記載しているが、editable-extensions.ts は記載されていない。",
+      "suggestion": "CLAUDE.md の主要モジュール一覧に `src/config/editable-extensions.ts` のエントリを追加する。例: `| src/config/editable-extensions.ts | 編集可能拡張子定義・コンテンツバリデーション（.md/.html/.htm/.yaml/.yml）（Issue #646） |`"
+    },
+    {
+      "id": "S3-010",
+      "severity": "Nice to Have",
+      "title": "FileContent 型に isYaml フラグが不要であることの明示",
+      "description": "FileContent 型（src/types/models.ts:310-327）には isImage, isVideo, isHtml のフラグがあり、API の GET レスポンスでファイル種別を示している。YAML ファイルの場合、GET API の route.ts では isHtml 判定の後にテキストファイルとして返却されるため isYaml フラグは付与されない。FilePanelContent.tsx では content.extension で YAML を判定する形になるが、isImage/isVideo/isHtml とのパターンの非対称性が生じる。これは設計上問題ではないが、将来のメンテナンスのために判断根拠を記載しておくとよい。",
+      "suggestion": "影響範囲セクションの補足として「FileContent 型への isYaml フラグ追加は不要（テキストファイルとして扱い、extension で判定する。isHtml は iframe sandbox 制御のために必要だったが、YAML にはそのような特殊処理がない）」を記載する。"
+    },
+    {
+      "id": "S3-011",
+      "severity": "Nice to Have",
+      "title": "テスト影響範囲の網羅性: 統合テストと E2E テストの更新が必要",
+      "description": "Issue の実装タスクでは「ユニットテスト追加」「結合テスト追加」が記載されているが、既存テストファイルの修正が必要なものが具体的に列挙されていない。影響を受ける既存テストファイル: (1) tests/unit/config/editable-extensions.test.ts (前述の toHaveLength(3) 等)、(2) tests/unit/lib/file-operations.test.ts (isEditableFile のテストに .yaml/.yml の true ケース追加)、(3) tests/integration/api-file-operations.test.ts (PUT/POST の YAML ファイル操作テスト追加)。E2E テスト tests/e2e/file-tree-operations.spec.ts でファイル新規作成のフローテストがある場合は NewFileDialog への移行で壊れる可能性がある。",
+      "suggestion": "実装タスクに「既存テスト修正」セクションを追加し、上記の具体的なテストファイルを列挙する。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 6,
+  "nice_to_have_count": 3,
+  "summary": "影響範囲レビュー（1回目）では、2件の Must Fix、6件の Should Fix、3件の Nice to Have を検出した。最も重大な問題は (S3-001) additionalValidation の戻り値型を string | boolean に変更する際に validateContent() の判定ロジックが truthy/falsy の挙動により正しく動作しない点と、(S3-002) 既存テストの EDITABLE_EXTENSIONS.toHaveLength(3) が確実に失敗する点である。Should Fix では、FilePanelContent.tsx での YAML ルーティング設計の具体性不足 (S3-003)、MarkdownEditor 汎用化時の MarkdownPreview の扱い (S3-004)、PUT/POST API の非対称的な挙動 (S3-005)、validateContent のサイズチェックが文字数ベースである問題 (S3-006)、handleNewFile の window.prompt() 移行時の影響範囲 (S3-007)、isYamlSafe() のセキュリティリスク評価 (S3-008) を指摘した。全体として、Issue は Stage 1 レビュー反映後の状態として十分な品質だが、実装時に手戻りが発生しやすいポイント（特に型変更の波及効果とテスト影響）についての記述を補強することで、よりスムーズな実装が可能になる。"
+}
