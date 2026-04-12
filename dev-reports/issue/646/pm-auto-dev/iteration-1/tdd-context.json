@@ -1,0 +1,39 @@
+{
+  "issue_number": 646,
+  "issue_title": "ファイル編集強化（YAML ファイル編集・拡張子選択対応）",
+  "acceptance_criteria": [
+    "新規ファイル作成時に拡張子を選択できる（.md / .yaml / .yml / .html / .htm）",
+    "ファイル名に EDITABLE_EXTENSIONS の拡張子が含まれる場合はそのまま使用",
+    "拡張子なしの場合はドロップダウンの選択値を付与（デフォルト: .md）",
+    "ファイル名の拡張子とドロップダウンが矛盾する場合はファイル名の拡張子を優先",
+    ".yaml / .yml ファイルを CommandMate UI 上で新規作成できる",
+    "既存の .yaml / .yml ファイルを UI 上で編集・保存できる",
+    "危険な YAML タグ（!ruby/object 等）を含むコンテンツの保存がブロックされる",
+    "YAML バリデーション失敗時に具体的なエラーメッセージが表示される",
+    "既存の .md / .html / .htm 編集機能に影響がない（回帰なし）",
+    "npm run lint / npx tsc --noEmit / npm run test:unit がパスする",
+    "新規単体テストおよび結合テストを追加"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: src/config/editable-extensions.ts に .yaml/.yml を EDITABLE_EXTENSIONS と EXTENSION_VALIDATORS に追加。ExtensionValidator.additionalValidation を string|boolean 対応に拡張。validateContent() を 3 分岐ロジックに修正",
+    "Task 1.2: tests/unit/config/editable-extensions.test.ts の toHaveLength(3) を toHaveLength(5) に修正し、YAML バリデータのテストケースを追加",
+    "Task 2.1: src/components/worktree/NewFileDialog.tsx を新規作成（ファイル名入力 + 拡張子選択ドロップダウン、拡張子決定ロジック 3 パターン）",
+    "Task 2.2: src/components/worktree/WorktreeDetailRefactored.tsx の handleNewFile を window.prompt() から NewFileDialog 連携に改修（useState でダイアログ状態管理）",
+    "Task 3.2: src/types/markdown-editor.ts の EditorProps に fileType?: 'markdown' | 'text' を追加。src/components/worktree/MarkdownEditor.tsx を汎用テキストエディタ化（YAML ではプレビュータブ非表示、ViewMode デフォルト 'editor'）",
+    "Task 3.1: src/components/worktree/FilePanelContent.tsx に YAML ルーティング追加（extension === 'md' の後に isEditableExtension() 汎用分岐を追加）",
+    "Task 4.1: tests/unit/components/worktree/NewFileDialog.test.tsx を新規作成（拡張子決定ロジック 3 パターンテスト）",
+    "Task 4.2: tests/integration/yaml-file-operations.test.ts を新規作成（YAML CRUD フロー・危険タグ拒否テスト）",
+    "Task 5.1: CLAUDE.md のモジュール説明を更新（editable-extensions.ts に .yaml/.yml 追加を反映、NewFileDialog.tsx を追加）"
+  ],
+  "target_coverage": 80,
+  "work_plan_path": "dev-reports/issue/646/work-plan.md",
+  "key_files": {
+    "config": "src/config/editable-extensions.ts",
+    "upload_config": "src/config/uploadable-extensions.ts",
+    "markdown_editor_types": "src/types/markdown-editor.ts",
+    "markdown_editor": "src/components/worktree/MarkdownEditor.tsx",
+    "file_panel_content": "src/components/worktree/FilePanelContent.tsx",
+    "worktree_detail": "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "existing_test": "tests/unit/config/editable-extensions.test.ts"
+  }
+}

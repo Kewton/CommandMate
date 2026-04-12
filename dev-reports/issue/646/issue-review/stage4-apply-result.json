@@ -1,0 +1,78 @@
+{
+  "issue_number": 646,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目 影響範囲）",
+  "apply_date": "2026-04-12",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "S3-001",
+        "status": "applied",
+        "change_summary": "validateContent() の additionalValidation 呼び出しロジック修正を実装タスクに追加。string | boolean 3 分岐ロジック（true: 通過、false: 汎用エラー、string: そのままエラーメッセージ）の設計をセクション 2 と実装タスクに明記"
+      },
+      {
+        "id": "S3-002",
+        "status": "applied",
+        "change_summary": "既存テスト editable-extensions.test.ts の修正を専用の実装タスクとして追加（toHaveLength(5) 修正、.yaml/.yml の toContain チェック追加、YAML バリデータテストケース追加）"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S3-003",
+        "status": "applied",
+        "change_summary": "FilePanelContent.tsx のルーティング設計をセクション 4 に具体化（md 判定後に isEditableExtension() による汎用分岐を追加、将来の拡張子追加にも自動対応）。影響範囲テーブルと実装タスクにも反映"
+      },
+      {
+        "id": "S3-004",
+        "status": "applied",
+        "change_summary": "MarkdownEditor 汎用化時のプレビュー分岐方針をセクション 4 に明記（YAML ではエディタのみ表示、md のみ MarkdownPreview 表示）。EditorProps への fileType 追加または filePath 拡張子判定の選択肢を記載。実装タスクにも反映"
+      },
+      {
+        "id": "S3-005",
+        "status": "applied",
+        "change_summary": "セクション 5（API 対応）に空ファイル作成時の YAML バリデーションスキップの設計判断を追記（空ファイルにはバリデーション対象コンテンツが存在しないため安全）"
+      },
+      {
+        "id": "S3-006",
+        "status": "applied",
+        "change_summary": "補足情報にマルチバイト文字でのファイルサイズ検証の制限を既知の制限として記載。既存の md/html でも同様の問題であり、改善は別 Issue で対応する旨を明記"
+      },
+      {
+        "id": "S3-007",
+        "status": "applied",
+        "change_summary": "セクション 3 に WorktreeDetailRefactored.tsx のダイアログ状態管理追加を明記。影響範囲に「影響なしの確認済みファイル」セクションを追加（FileTreeView.tsx, TreeContextMenu.tsx, FileContent 型）。実装タスクにも useState 追加を反映"
+      },
+      {
+        "id": "S3-008",
+        "status": "applied",
+        "change_summary": "セクション 2 にセキュリティリスク評価を追記（サーバー側で YAML をパースしないため Billion Laughs 攻撃リスクなし、isYamlSafe() は言語固有タグブロックに限定）"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S3-009",
+        "status": "skipped",
+        "reason": "CLAUDE.md の具体的な記述内容は実装時に対応する。Issue の実装タスクに CLAUDE.md 更新タスクは既に含まれている"
+      },
+      {
+        "id": "S3-010",
+        "status": "applied",
+        "change_summary": "影響範囲の「影響なしの確認済みファイル」セクションに FileContent 型への isYaml フラグ不要の根拠を記載（テキストファイルとして扱い extension で判定、isHtml は iframe sandbox 制御用だが YAML にはそのような特殊処理がない）"
+      },
+      {
+        "id": "S3-011",
+        "status": "applied",
+        "change_summary": "影響範囲に「影響を受けるテストファイル」セクションを新設。editable-extensions.test.ts の具体的修正内容と E2E テストへの影響を記載"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 11,
+    "applied": 10,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/646"
+  }
+}

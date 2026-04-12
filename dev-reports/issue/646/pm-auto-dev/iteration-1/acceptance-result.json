@@ -1,0 +1,63 @@
+{
+  "issue_number": 646,
+  "status": "passed",
+  "criteria_results": [
+    {
+      "id": "AC-1",
+      "description": "EDITABLE_EXTENSIONS に .yaml/.yml が含まれる",
+      "status": "passed",
+      "notes": "src/config/editable-extensions.ts の EDITABLE_EXTENSIONS 配列に '.yaml' と '.yml' が含まれていることを確認。定義: ['.md', '.html', '.htm', '.yaml', '.yml']"
+    },
+    {
+      "id": "AC-2",
+      "description": "EXTENSION_VALIDATORS に .yaml/.yml バリデータが存在する",
+      "status": "passed",
+      "notes": "EXTENSION_VALIDATORS に .yaml と .yml のエントリがあり、両方とも maxFileSize: 1MB と additionalValidation: validateYamlContent が設定されている。validateYamlContent は isYamlSafe() を呼び出し、危険タグ検出時にエラーメッセージ文字列を返す。"
+    },
+    {
+      "id": "AC-3",
+      "description": "validateContent() の 3 分岐ロジック実装",
+      "status": "passed",
+      "notes": "validateContent() の additionalValidation 呼び出し結果の処理が 3 分岐に対応: (1) true -> パス、(2) false -> 汎用エラー 'Content validation failed'、(3) string -> 具体的エラーメッセージを返却。138-147行で実装を確認。"
+    },
+    {
+      "id": "AC-4",
+      "description": "NewFileDialog が実装されている",
+      "status": "passed",
+      "notes": "src/components/worktree/NewFileDialog.tsx が存在。resolveFileName ヘルパーが 3 パターン実装: (a) ファイル名にEDITABLE_EXTENSIONS拡張子あり -> そのまま使用、(b) 拡張子なし -> ドロップダウン選択値を付与、(c) 非編集対象拡張子 -> ファイル名優先。Modal + input + select ドロップダウンUIを確認。"
+    },
+    {
+      "id": "AC-5",
+      "description": "WorktreeDetailRefactored の handleNewFile が改修されている",
+      "status": "passed",
+      "notes": "handleNewFile は setShowNewFileDialog(true) を呼び出して NewFileDialog を表示する方式に変更済み。window.prompt() はディレクトリ作成とリネーム操作のみで使用されており、新規ファイル作成からは完全に廃止されている。NewFileDialog コンポーネントが PC/Mobile 両方のレンダリングツリーに組み込まれていることを確認。"
+    },
+    {
+      "id": "AC-6",
+      "description": "FilePanelContent に YAML ルーティングが追加されている",
+      "status": "passed",
+      "notes": "FilePanelContent.tsx の 759-777行で、extension === 'md' の後に isEditableExtension('.' + content.extension) による分岐が追加されている。YAML ファイルは MarkdownWithSearch コンポーネントでテキスト編集モードとして表示される。"
+    },
+    {
+      "id": "AC-7",
+      "description": "MarkdownEditor が汎用化されている",
+      "status": "passed",
+      "notes": "EditorProps に fileType?: EditorFileType が追加されている (src/types/markdown-editor.ts)。EditorFileType = 'markdown' | 'text'。detectFileType() が .md -> 'markdown'、それ以外 -> 'text' を返す。isTextMode が true の場合: (1) viewMode を 'editor' で初期化、(2) VIEW_MODE_STRATEGIES['editor'] を使用 (プレビュー非表示)、(3) MarkdownToolbar の hideViewModeToggle=true でビューモード切替ボタンを非表示。"
+    },
+    {
+      "id": "AC-8",
+      "description": "品質チェック (lint / tsc / test:unit) がパス",
+      "status": "passed",
+      "notes": "npx tsc --noEmit: エラーなし。npm run lint: No ESLint warnings or errors。npm run test:unit: 331 test files passed, 6271 tests passed, 7 skipped。全て正常にパス。"
+    },
+    {
+      "id": "AC-9",
+      "description": "新規テストファイルの存在確認",
+      "status": "passed",
+      "notes": "tests/unit/components/worktree/NewFileDialog.test.tsx が存在し 20 テストパス (resolveFileName の 3 パターン + エッジケース)。tests/integration/yaml-file-operations.test.ts が存在し 12 テストパス (YAML CRUD、危険タグ拒否、.md 回帰テスト)。"
+    }
+  ],
+  "passed_count": 9,
+  "failed_count": 0,
+  "overall_notes": "全 9 件の受入条件を満たしている。EDITABLE_EXTENSIONS への .yaml/.yml 追加、EXTENSION_VALIDATORS のバリデータ設定、validateContent の 3 分岐ロジック、NewFileDialog コンポーネントの実装と WorktreeDetailRefactored への統合、FilePanelContent の YAML ルーティング、MarkdownEditor の汎用化 (fileType/isTextMode)、品質チェック (tsc/lint/test:unit) 全パス、新規テストファイル (単体 20 件 + 結合 12 件) の存在と通過を確認。"
+}

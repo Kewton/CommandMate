@@ -63,6 +63,8 @@ export interface MarkdownToolbarProps {
   onSave: () => void;
   /** Callback for close */
   onClose?: () => void;
+  /** Hide view mode toggle buttons (for text-only mode, Issue #646) */
+  hideViewModeToggle?: boolean;
 }
 
 // ============================================================================
@@ -85,6 +87,7 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
   isSaving,
   onSave,
   onClose,
+  hideViewModeToggle,
 }: MarkdownToolbarProps) {
   return (
     <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
@@ -104,8 +107,8 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
 
       {/* Controls */}
       <div className="flex items-center gap-2 flex-shrink-0">
-        {/* View mode buttons - hide on mobile portrait with split mode */}
-        {!showMobileTabs && (
+        {/* View mode buttons - hide on mobile portrait with split mode, or in text-only mode */}
+        {!showMobileTabs && !hideViewModeToggle && (
           <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
             <button
               data-testid="view-mode-split"

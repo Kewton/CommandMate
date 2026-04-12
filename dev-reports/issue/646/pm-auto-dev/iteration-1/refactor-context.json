@@ -1,0 +1,21 @@
+{
+  "issue_number": 646,
+  "refactor_targets": [
+    "src/config/editable-extensions.ts",
+    "src/components/worktree/NewFileDialog.tsx",
+    "src/components/worktree/FilePanelContent.tsx",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "lint_errors": 0,
+    "type_errors": 0
+  },
+  "improvement_goals": [
+    "コードの重複除去",
+    "型定義の明確化",
+    "不要なコメントの削除",
+    "SOLID 原則への準拠確認"
+  ]
+}
