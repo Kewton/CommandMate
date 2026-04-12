@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-04-12
+
+### Added
+- Editor: YAMLファイル編集と拡張子選択ダイアログを追加 (Issue #646)
+- DB: リポジトリにdisplay_name（カスタム別名）を追加 (Issue #642)
+- Markdown: HTML imgタグの相対パスとwidth/height属性をサポート
+- Upload: 画像アップロード上限を20MBに引き上げ、マークダウンビューアで相対画像パスを解決
+
+### Fixed
+- Detection: React error #31 と Claude `/model` 選択リスト検出を修正 (Issue #648)
+
+### Refactored
+- Editor: ファイル編集機能のコード品質改善 (Issue #646)
+- Repository: display_name保存時のエラーメッセージ解決ロジックの重複排除 (Issue #644)
+
+### Tests
+- Test: ファイルサイズテストを5MBから20MBに更新し設定変更に追従
+
 ## [0.5.3] - 2026-04-05
 
 ### Added
