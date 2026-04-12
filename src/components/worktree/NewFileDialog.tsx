@@ -5,9 +5,8 @@
  * Supports file name input with a dropdown for extension selection.
  *
  * Extension resolution logic (resolveFileName):
- * (a) File name already has an EDITABLE_EXTENSIONS extension -> use as-is
- * (b) File name has no extension -> append selected extension from dropdown
- * (c) File name has a different extension -> file name's extension takes priority
+ * - File name already has an extension -> use as-is
+ * - File name has no extension -> append selected extension from dropdown
  */
 
 'use client';
@@ -29,36 +28,21 @@ export interface NewFileDialogProps {
 
 /**
  * Resolve the final file name based on user input and selected extension.
- *
- * (a) If fileName already has an EDITABLE_EXTENSIONS extension -> return as-is
- * (b) If fileName has no extension (no dot, or ends with dot) -> append selectedExt
- * (c) If fileName has a non-editable extension -> return as-is (file name's extension takes priority)
- *
- * @param fileName - User-entered file name
- * @param selectedExt - Extension from dropdown (e.g., '.md')
- * @returns Resolved file name
+ * If the file name already contains an extension, it is returned as-is.
+ * Otherwise the selected extension from the dropdown is appended.
  */
 export function resolveFileName(fileName: string, selectedExt: string): string {
   const trimmed = fileName.trim();
   if (!trimmed) return '';
 
-  // Find the last dot position
   const lastDotIndex = trimmed.lastIndexOf('.');
 
-  // No extension in file name (no dot, or dot is first character like ".gitignore")
+  // No extension (no dot, or dot is first character like ".gitignore") -> append selected extension
   if (lastDotIndex <= 0) {
     return trimmed + selectedExt;
   }
 
-  // Extract the extension from the file name
-  const fileExt = trimmed.substring(lastDotIndex).toLowerCase();
-
-  // (a) File name already has an editable extension -> use as-is
-  if (EDITABLE_EXTENSIONS.includes(fileExt)) {
-    return trimmed;
-  }
-
-  // (c) File name has a non-editable extension -> file name takes priority
+  // File name already has an extension (editable or not) -> use as-is
   return trimmed;
 }
 

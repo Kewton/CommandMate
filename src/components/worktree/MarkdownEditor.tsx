@@ -485,6 +485,32 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     [saveContent, isAutoSaveEnabled, saveNow, onSave, filePath, toggleFullscreen, exitFullscreen, isMaximized]
   );
 
+  /** Shared line number gutter + textarea rendering (DRY: used by both mobile and desktop layouts) */
+  const renderEditorInner = useCallback((showFocusRing: boolean) => (
+    <>
+      <div
+        ref={lineNumberRef}
+        className="flex-shrink-0 py-4 pl-2 pr-2 text-right select-none text-gray-400 dark:text-gray-600 font-mono text-sm bg-gray-50 dark:bg-gray-800/50 border-r border-gray-200 dark:border-gray-700 overflow-hidden"
+        aria-hidden="true"
+      >
+        {Array.from({ length: lineCount }, (_, i) => (
+          <div key={i + 1} className="leading-[1.5rem]">{i + 1}</div>
+        ))}
+      </div>
+      <textarea
+        ref={textareaRef}
+        data-testid="markdown-editor-textarea"
+        value={content}
+        onChange={handleContentChange}
+        onKeyDown={handleKeyDown}
+        onScroll={handleEditorScroll}
+        className={`flex-1 py-4 pr-4 pl-3 font-mono text-sm resize-none bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none leading-[1.5rem]${showFocusRing ? ' focus:ring-2 focus:ring-cyan-500 focus:ring-inset' : ''}`}
+        placeholder={isTextMode ? 'Start typing...' : 'Start typing markdown...'}
+        spellCheck={false}
+      />
+    </>
+  ), [lineCount, content, handleContentChange, handleKeyDown, handleEditorScroll, isTextMode]);
+
   // Global ESC key handler for maximized mode
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -727,26 +753,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
               data-testid="markdown-editor-container"
               className="flex overflow-hidden w-full flex-1"
             >
-              <div
-                ref={lineNumberRef}
-                className="flex-shrink-0 py-4 pl-2 pr-2 text-right select-none text-gray-400 dark:text-gray-600 font-mono text-sm bg-gray-50 dark:bg-gray-800/50 border-r border-gray-200 dark:border-gray-700 overflow-hidden"
-                aria-hidden="true"
-              >
-                {Array.from({ length: lineCount }, (_, i) => (
-                  <div key={i + 1} className="leading-[1.5rem]">{i + 1}</div>
-                ))}
-              </div>
-              <textarea
-                ref={textareaRef}
-                data-testid="markdown-editor-textarea"
-                value={content}
-                onChange={handleContentChange}
-                onKeyDown={handleKeyDown}
-                onScroll={handleEditorScroll}
-                className="flex-1 py-4 pr-4 pl-3 font-mono text-sm resize-none bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none leading-[1.5rem]"
-                placeholder={isTextMode ? 'Start typing...' : 'Start typing markdown...'}
-                spellCheck={false}
-              />
+              {renderEditorInner(false)}
             </div>
           )
         ) : (
@@ -758,26 +765,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
             }`}
             style={viewMode === 'split' ? editorWidthStyle : { width: strategy.showEditor ? '100%' : '0%' }}
           >
-            <div
-              ref={lineNumberRef}
-              className="flex-shrink-0 py-4 pl-2 pr-2 text-right select-none text-gray-400 dark:text-gray-600 font-mono text-sm bg-gray-50 dark:bg-gray-800/50 border-r border-gray-200 dark:border-gray-700 overflow-hidden"
-              aria-hidden="true"
-            >
-              {Array.from({ length: lineCount }, (_, i) => (
-                <div key={i + 1} className="leading-[1.5rem]">{i + 1}</div>
-              ))}
-            </div>
-            <textarea
-              ref={textareaRef}
-              data-testid="markdown-editor-textarea"
-              value={content}
-              onChange={handleContentChange}
-              onKeyDown={handleKeyDown}
-              onScroll={handleEditorScroll}
-              className="flex-1 py-4 pr-4 pl-3 font-mono text-sm resize-none bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-inset leading-[1.5rem]"
-              placeholder={isTextMode ? 'Start typing...' : 'Start typing markdown...'}
-              spellCheck={false}
-            />
+            {renderEditorInner(true)}
           </div>
         )}
 

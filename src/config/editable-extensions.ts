@@ -13,6 +13,9 @@
 import { HTML_MAX_SIZE_BYTES } from '@/config/html-extensions';
 import { isYamlSafe } from '@/config/uploadable-extensions';
 
+/** Maximum file size for text-based editable files (1MB) */
+export const TEXT_MAX_SIZE_BYTES = 1024 * 1024;
+
 /**
  * List of file extensions that can be edited
  * Future extensions (txt, json) can be added here
@@ -49,9 +52,8 @@ function validateYamlContent(content: string): string | boolean {
 export const EXTENSION_VALIDATORS: ExtensionValidator[] = [
   {
     extension: '.md',
-    maxFileSize: 1024 * 1024, // 1MB
+    maxFileSize: TEXT_MAX_SIZE_BYTES,
   },
-  // Issue #490: HTML files - additionalValidation undefined (sandbox attribute ensures safety)
   {
     extension: '.html',
     maxFileSize: HTML_MAX_SIZE_BYTES,
@@ -60,15 +62,14 @@ export const EXTENSION_VALIDATORS: ExtensionValidator[] = [
     extension: '.htm',
     maxFileSize: HTML_MAX_SIZE_BYTES,
   },
-  // Issue #646: YAML files - additionalValidation blocks dangerous tags
   {
     extension: '.yaml',
-    maxFileSize: 1024 * 1024, // 1MB
+    maxFileSize: TEXT_MAX_SIZE_BYTES,
     additionalValidation: validateYamlContent,
   },
   {
     extension: '.yml',
-    maxFileSize: 1024 * 1024, // 1MB
+    maxFileSize: TEXT_MAX_SIZE_BYTES,
     additionalValidation: validateYamlContent,
   },
 ];
@@ -137,13 +138,11 @@ export function validateContent(
   // Run additional validation if defined
   if (validator.additionalValidation) {
     const validationResult = validator.additionalValidation(content);
-    if (validationResult === true) {
-      // pass
-    } else if (validationResult === false) {
-      return { valid: false, error: 'Content validation failed' };
-    } else {
-      // string = specific error message
-      return { valid: false, error: validationResult };
+    if (validationResult !== true) {
+      const error = typeof validationResult === 'string'
+        ? validationResult
+        : 'Content validation failed';
+      return { valid: false, error };
     }
   }
 
