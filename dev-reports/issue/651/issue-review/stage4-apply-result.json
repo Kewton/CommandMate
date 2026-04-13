@@ -1,0 +1,58 @@
+{
+  "issue_number": 651,
+  "stage": 4,
+  "stage_name": "指摘事項反映（影響範囲、1回目）",
+  "apply_date": "2026-04-13",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "影響範囲の変更対象ファイルに src/types/sidebar.ts を追加。SidebarBranchItem型へのworktreePathフィールド追加とtoBranchItem()のWorktree.pathマッピング修正を明記。要件セクション（デザイン要件3項目目）にもworktreeパス取得の実装方針を追記。受入条件にworktreePath取得の検証項目を追加"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "影響範囲の変更対象ファイルに src/hooks/useSidebar.ts を追加。localStorage永続化とDEFAULT_SIDEBAR_WIDTH変更の不整合対応として3つの方針（A: 永続化廃止、B: マイグレーション、C: 仕様整理）を要件セクションとファイル変更内容に明記。受入条件にlocalStorage互換性の検証項目を追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "テスト影響・更新方針セクションに tests/unit/contexts/SidebarContext.test.tsx を追加。DEFAULT_SIDEBAR_WIDTHアサート値の288から224への更新方針を明記"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "テスト影響・更新方針セクションに tests/unit/hooks/useSidebar.test.ts を追加。useSidebar.tsのwidth永続化に変更が入る場合のlocalStorage復元テスト更新方針を明記"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "Sidebar.tsxの変更内容を具体化: grouped表示（line 189）では showRepositoryName={false}、flat表示（line 202）では showRepositoryName={true} を設定する旨を明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "SidebarContext.tsxのコメント更新は既に影響範囲ファイルの変更内容に含まれている（line 29のコメント更新を明記済み）。CLAUDE.md更新は実装完了後に別途対応するため、Issueの影響範囲には含めない"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "ツールチップのダークモード対応はサイドバーがbg-gray-900固定暗色UIのため実装時に判断する。受入条件の「ダークモードで崩れなく表示される」は既に記載済みであり、追加の記載は不要"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 7,
+    "applied": 5,
+    "skipped": 2
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/651"
+  }
+}

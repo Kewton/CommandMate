@@ -1,0 +1,31 @@
+{
+  "status": "success",
+  "coverage": 80,
+  "unit_tests": {
+    "total": 6293,
+    "passed": 6293,
+    "failed": 0,
+    "skipped": 7
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/types/sidebar.ts",
+    "src/contexts/SidebarContext.tsx",
+    "src/hooks/useSidebar.ts",
+    "src/components/layout/AppShell.tsx",
+    "src/components/sidebar/BranchListItem.tsx",
+    "src/components/layout/Sidebar.tsx",
+    "tests/unit/types/sidebar.test.ts",
+    "tests/unit/contexts/SidebarContext.test.tsx",
+    "tests/unit/components/sidebar/BranchListItem.test.tsx",
+    "tests/unit/hooks/useSidebar.test.ts",
+    "tests/unit/components/layout/Sidebar.test.tsx"
+  ],
+  "commits": [
+    "270db0c7: feat(sidebar): compact PC sidebar to w-56 with tooltip details (#651)"
+  ],
+  "message": "TDD implementation complete. All 6293 unit tests pass (7 skipped). ESLint: 0 errors. TypeScript: 0 errors. Sidebar width reduced from 288px to 224px, tooltip with WAI-ARIA pattern added, showRepositoryName prop for grouped view, localStorage migration for existing users."
+}

@@ -1,0 +1,123 @@
+{
+  "issue_number": 651,
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-04-13",
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 4,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "整合性",
+        "issue": "サイドバー幅がAppShell.tsxでTailwindクラス(w-72/pl-72)としてハードコードされており、DEFAULT_SIDEBAR_WIDTH定数の変更だけでは実際の表示幅が変わらない",
+        "location": "## 影響範囲 セクション - 変更対象ファイル",
+        "recommendation": "影響範囲にsrc/components/layout/AppShell.tsxを追加する。AppShell.tsxの3箇所(line 88: w-72, line 122: w-72, line 140: md:pl-72)もサイドバー幅と連動するため変更が必要。さらに、DEFAULT_SIDEBAR_WIDTH定数とTailwindクラスの二重管理を解消する設計判断(inline style化 or カスタムTailwindクラス)をIssueに明記すべき",
+        "evidence": "AppShell.tsx line 88: 'fixed left-0 top-0 h-full w-72 z-50' (モバイル), line 122: 'fixed left-0 top-0 h-full w-72' (デスクトップ), line 140: '${showSidebar && isOpen ? \"md:pl-72\" : \"md:pl-0\"}' (メインコンテンツのpadding)"
+      },
+      {
+        "id": "MF-2",
+        "category": "明確性",
+        "issue": "サイドバーの縮小後の目標幅が未定義。「現在の288pxから狭くする」だけでは受け入れ条件が検証不可能",
+        "location": "## 要件 - デザイン要件 4項目目, ## 受入条件 1項目目",
+        "recommendation": "具体的な目標幅を数値で定義する（例: 224px(w-56), 208px(w-52)等）。または最小・最大の許容範囲を指定する。受入条件の「サイドバーがコンパクトに表示される」も具体的なpx値で検証可能にすべき",
+        "evidence": "Issue本文: 「サイドバー全体の幅を縮小（現在の288pxから狭くする）」、受入条件: 「サイドバーがコンパクトに表示される」- いずれも定量的基準なし"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "明確性",
+        "issue": "ツールチップの実装方針が未記載。既存のtitle属性拡充なのか、カスタムツールチップコンポーネントを新規作成するのか不明",
+        "location": "## 要件 - デザイン要件 3項目目",
+        "recommendation": "ツールチップの実装方針を明記する。選択肢: (A) HTML title属性の拡充（最もシンプル、ただし表示タイミング・スタイルがOS依存）、(B) CSSベースのカスタムツールチップ（外部ライブラリ不要、スタイル制御可能）、(C) ツールチップライブラリ導入（Radix UI Tooltip等）。また、ツールチップに表示する「詳細情報」の具体的な内容（ブランチ名、ステータス、パス等のうちどれか）を明記すべき",
+        "evidence": "仮説検証レポートで「ツールチップ実装方針（既存title属性拡充 vs カスタムコンポーネント新規作成）がIssueに未記載」と指摘あり。BranchListItem.tsxでは現在CliStatusDotのみtitle属性使用"
+      },
+      {
+        "id": "SF-2",
+        "category": "技術的妥当性",
+        "issue": "BranchListItemコンポーネントは現在viewModeを認識しておらず、ツリー表示時のリポジトリ名省略ロジックの実装方針が未定義",
+        "location": "## 要件 - デザイン要件 2項目目",
+        "recommendation": "実装方針を明記する。選択肢: (A) BranchListItemにviewMode propsを追加してコンポーネント内で条件分岐、(B) BranchListItemにshowRepositoryName boolean propsを追加して親(Sidebar.tsx)が制御、(C) grouped/flat用に別コンポーネントを作成。(B)が最もシンプルで推奨",
+        "evidence": "BranchListItem.tsxにはviewMode関連のprops/importが一切なく、repositoryNameは常にline 110-112で表示されている"
+      },
+      {
+        "id": "SF-3",
+        "category": "完全性",
+        "issue": "アクセシビリティ対応の考慮が不足。ツールチップはマウスオーバー前提だが、キーボードナビゲーション・スクリーンリーダー対応が言及されていない",
+        "location": "## 要件 - デザイン要件 3項目目, ## 受入条件",
+        "recommendation": "ツールチップがfocus時にも表示される要件を追加する。WAI-ARIA tooltipパターン(role=tooltip, aria-describedby)の採用を検討。リポジトリ名省略時にaria-labelにリポジトリ名を含める等のスクリーンリーダー対応も明記すべき",
+        "evidence": "既存のBranchListItemは適切なaria属性(aria-current, aria-label等)を使用しており、アクセシビリティへの配慮は既にあるプロジェクト。しかし本Issueの変更でリポジトリ名が視覚的に省略されることで、スクリーンリーダーユーザーへの情報欠落が生じうる"
+      },
+      {
+        "id": "SF-4",
+        "category": "完全性",
+        "issue": "既存テストへの影響と追加テスト方針が未記載",
+        "location": "## 受入条件",
+        "recommendation": "BranchListItem.test.tsxの既存テスト(repositoryName表示テスト、スタイリングテスト等)が変更の影響を受ける。テスト更新方針を明記する: (1) リポジトリ名の条件付き表示テスト追加、(2) ツールチップ表示テスト追加、(3) AppShellの幅変更に伴うレイアウトテスト更新",
+        "evidence": "BranchListItem.test.tsx line 56-66に'should display repository name'テストが存在し、リポジトリ名が常に表示される前提"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "モバイル表示への影響が未言及。AppShell.tsxのモバイルドロワーもw-72がハードコードされている",
+        "location": "## 影響範囲",
+        "recommendation": "モバイルドロワーの幅もPC版に合わせて変更するのか、現状維持なのかを明記する。AppShell.tsx line 88のモバイル用w-72も対象かどうかを判断すべき",
+        "evidence": "AppShell.tsx line 88: モバイルドロワーに'w-72'が適用されている"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "参考イメージのパスがローカルファイルパスになっており、GitHub上で閲覧不可",
+        "location": "## 要件 - 参考イメージ",
+        "recommendation": "参考イメージをGitHub Issue添付ファイルとしてアップロードし、URLを更新する。現在のパス(/Users/maenokota/...)はローカル環境のみで有効",
+        "evidence": "Issue本文: '![サイドバー参考](/Users/maenokota/share/work/...)' - ローカルファイルパス"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/layout/AppShell.tsx",
+      "relevance": "サイドバー幅(w-72)とメインコンテンツpadding(pl-72)がハードコードされている主要変更対象（Issueの影響範囲に記載漏れ）"
+    },
+    {
+      "file": "src/components/sidebar/BranchListItem.tsx",
+      "relevance": "リポジトリ名表示・ツールチップ追加の主要変更対象。viewMode非対応のためprops追加が必要"
+    },
+    {
+      "file": "src/contexts/SidebarContext.tsx",
+      "relevance": "DEFAULT_SIDEBAR_WIDTH定数の変更対象。ただし実際のCSS幅とは非連動"
+    },
+    {
+      "file": "src/components/layout/Sidebar.tsx",
+      "relevance": "grouped/flatモードの切り替えとBranchListItemへのprops受け渡しの親コンポーネント"
+    },
+    {
+      "file": "src/hooks/useSidebar.ts",
+      "relevance": "sidebar width状態のlocalStorage永続化。定数変更時に既存ユーザーのキャッシュとの整合性確認が必要"
+    },
+    {
+      "file": "tests/unit/components/sidebar/BranchListItem.test.tsx",
+      "relevance": "既存テストの更新が必要（repositoryName表示テスト等）"
+    },
+    {
+      "file": "tests/unit/AppShell-layout.test.tsx",
+      "relevance": "AppShellのレイアウトテスト。幅変更に伴う更新確認が必要"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "docs/features/sidebar-status-indicator.md",
+      "relevance": "サイドバーステータス表示の仕様ドキュメント。コンパクト化後もステータス表示が維持されることの確認用"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構成・モジュール一覧。sidebar関連コンポーネントの全体像把握用"
+    }
+  ]
+}

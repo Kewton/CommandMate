@@ -1,0 +1,23 @@
+{
+  "issue_number": 651,
+  "refactor_targets": [
+    "src/types/sidebar.ts",
+    "src/contexts/SidebarContext.tsx",
+    "src/hooks/useSidebar.ts",
+    "src/components/layout/AppShell.tsx",
+    "src/components/sidebar/BranchListItem.tsx",
+    "src/components/layout/Sidebar.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "tests_passing": 6293,
+    "lint_errors": 0,
+    "ts_errors": 0
+  },
+  "improvement_goals": [
+    "コード品質と可読性の確認・改善",
+    "不要なコメントや冗長なコードの削除",
+    "型定義の適切性確認",
+    "ツールチップ実装のパターン統一確認"
+  ]
+}
