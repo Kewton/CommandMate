@@ -231,9 +231,9 @@ describe('POST /api/worktrees/:id/memos', () => {
     expect(data.memo.position).toBe(2);
   });
 
-  it('should return 400 when memo limit (5) exceeded', async () => {
-    // Create 5 memos
-    for (let i = 0; i < 5; i++) {
+  it('should return 400 when memo limit (10) exceeded', async () => {
+    // Create 10 memos
+    for (let i = 0; i < 10; i++) {
       createMemo(db, 'test-worktree', { title: `Memo ${i}`, position: i });
     }
 

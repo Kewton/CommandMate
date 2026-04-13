@@ -12,7 +12,7 @@ import { MemoAddButton } from '@/components/worktree/MemoAddButton';
 describe('MemoAddButton', () => {
   const defaultProps = {
     currentCount: 2,
-    maxCount: 5,
+    maxCount: 10,
     onAdd: vi.fn(),
   };
 
@@ -32,16 +32,16 @@ describe('MemoAddButton', () => {
     });
 
     it('should display remaining count', () => {
-      render(<MemoAddButton {...defaultProps} currentCount={2} maxCount={5} />);
+      render(<MemoAddButton {...defaultProps} currentCount={2} maxCount={10} />);
 
-      expect(screen.getByText(/3/)).toBeInTheDocument();
+      expect(screen.getByText(/8/)).toBeInTheDocument();
     });
 
     it('should show proper remaining text format', () => {
-      render(<MemoAddButton {...defaultProps} currentCount={1} maxCount={5} />);
+      render(<MemoAddButton {...defaultProps} currentCount={1} maxCount={10} />);
 
-      // Should display something like "4 remaining" or "remaining 4"
-      expect(screen.getByText(/4/)).toBeInTheDocument();
+      // Should display something like "9 remaining" or "remaining 9"
+      expect(screen.getByText(/9/)).toBeInTheDocument();
     });
 
     it('should apply custom className', () => {
@@ -65,7 +65,7 @@ describe('MemoAddButton', () => {
 
     it('should not call onAdd when disabled', () => {
       const onAdd = vi.fn();
-      render(<MemoAddButton {...defaultProps} onAdd={onAdd} currentCount={5} maxCount={5} />);
+      render(<MemoAddButton {...defaultProps} onAdd={onAdd} currentCount={10} maxCount={10} />);
 
       const button = screen.getByRole('button', { name: /add memo/i });
       fireEvent.click(button);
@@ -76,21 +76,21 @@ describe('MemoAddButton', () => {
 
   describe('Disabled state', () => {
     it('should be disabled when currentCount equals maxCount', () => {
-      render(<MemoAddButton {...defaultProps} currentCount={5} maxCount={5} />);
+      render(<MemoAddButton {...defaultProps} currentCount={10} maxCount={10} />);
 
       const button = screen.getByRole('button', { name: /add memo/i });
       expect(button).toBeDisabled();
     });
 
     it('should be enabled when currentCount is less than maxCount', () => {
-      render(<MemoAddButton {...defaultProps} currentCount={4} maxCount={5} />);
+      render(<MemoAddButton {...defaultProps} currentCount={9} maxCount={10} />);
 
       const button = screen.getByRole('button', { name: /add memo/i });
       expect(button).not.toBeDisabled();
     });
 
     it('should show zero remaining when at limit', () => {
-      render(<MemoAddButton {...defaultProps} currentCount={5} maxCount={5} />);
+      render(<MemoAddButton {...defaultProps} currentCount={10} maxCount={10} />);
 
       expect(screen.getByText(/0/)).toBeInTheDocument();
     });
@@ -129,7 +129,7 @@ describe('MemoAddButton', () => {
     });
 
     it('should have disabled styling when at limit', () => {
-      render(<MemoAddButton {...defaultProps} currentCount={5} maxCount={5} />);
+      render(<MemoAddButton {...defaultProps} currentCount={10} maxCount={10} />);
 
       const button = screen.getByRole('button', { name: /add memo/i });
       expect(button.className).toMatch(/opacity-|cursor-not-allowed|disabled/);
@@ -145,7 +145,7 @@ describe('MemoAddButton', () => {
     });
 
     it('should indicate disabled state accessibly', () => {
-      render(<MemoAddButton {...defaultProps} currentCount={5} maxCount={5} />);
+      render(<MemoAddButton {...defaultProps} currentCount={10} maxCount={10} />);
 
       const button = screen.getByRole('button', { name: /add memo/i });
       expect(button).toHaveAttribute('aria-disabled', 'true');
@@ -154,15 +154,15 @@ describe('MemoAddButton', () => {
 
   describe('Edge cases', () => {
     it('should handle zero current count', () => {
-      render(<MemoAddButton {...defaultProps} currentCount={0} maxCount={5} />);
+      render(<MemoAddButton {...defaultProps} currentCount={0} maxCount={10} />);
 
-      expect(screen.getByText(/5/)).toBeInTheDocument();
+      expect(screen.getByText(/10/)).toBeInTheDocument();
       const button = screen.getByRole('button', { name: /add memo/i });
       expect(button).not.toBeDisabled();
     });
 
     it('should handle currentCount greater than maxCount gracefully', () => {
-      render(<MemoAddButton {...defaultProps} currentCount={6} maxCount={5} />);
+      render(<MemoAddButton {...defaultProps} currentCount={11} maxCount={10} />);
 
       const button = screen.getByRole('button', { name: /add memo/i });
       expect(button).toBeDisabled();

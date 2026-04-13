@@ -1,0 +1,67 @@
+{
+  "stage": 3,
+  "focus": "影響範囲（1回目）",
+  "reviewer": "opus",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "Must Fix",
+      "title": "db-memo.test.tsの「Max 5 memos constraint」テストが影響範囲に含まれていない",
+      "description": "src/lib/__tests__/db-memo.test.ts の行402-423に「Max 5 memos constraint (application level)」というdescribeブロックが存在し、テスト名に「should allow creating up to 5 memos at positions 0-4」（行403）とハードコードされた「5」が含まれている。さらに行404のループが `for (let i = 0; i < 5; i++)` で5件まで作成し、行413で `expect(memos).toHaveLength(5)` とアサートしている。また行416のテストでは「should fail when trying to use position >= 5」とテスト名に5がハードコードされている。このファイルはIssueの影響範囲テーブルに記載されていないが、上限変更に伴いテスト名・ループ回数・アサーション値の更新が必要である。",
+      "suggestion": "影響範囲テーブルに `src/lib/__tests__/db-memo.test.ts` を追加し、変更内容として「Max 5 memos constraintテストブロック（行402-423）のテスト名・ループ回数・アサーション値を5→10に更新」と記載する。具体的には：(1) テスト名 'should allow creating up to 5 memos at positions 0-4' を 'should allow creating up to 10 memos at positions 0-9' に変更、(2) ループ上限を `i < 10` に変更、(3) toHaveLength(5) を toHaveLength(10) に変更、(4) テスト名 'should fail when trying to use position >= 5' を 'should fail when trying to use position >= 10' に変更、(5) createMemo position: 5 を position: 10 に変更、(6) expect(memo.position).toBe(5) を expect(memo.position).toBe(10) に変更。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "Should Fix",
+      "title": "db-memo.test.tsの「Max 5 memos constraint」テストもmemo-config.tsの共有定数を参照すべき",
+      "description": "Issue #652のStage 1レビューでDRY切り出し（src/config/memo-config.ts）が「実施」に格上げされた。しかし、src/lib/__tests__/db-memo.test.ts のテストでは上限値が直接 5 でハードコードされており、共有定数からインポートする設計が考慮されていない。テスト内でMAX_MEMOSの値をハードコードし続けると、将来の上限変更時に同じ問題が再発する。テスト名にはリテラル値を含めるのが一般的だが、ループ回数とアサーション値はMAX_MEMOSをインポートして使用することでDRY原則を維持できる。",
+      "suggestion": "実装タスクの共有定数導入と合わせて、db-memo.test.tsのテストでも `import { MAX_MEMOS } from '@/config/memo-config'` を使用し、ループ回数（`i < MAX_MEMOS`）やアサーション値（`toHaveLength(MAX_MEMOS)`）を定数参照に変更することを検討する。テスト名は可読性のためリテラル値（10）を維持して問題ない。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "Should Fix",
+      "title": "MemoAddButton.test.tsxのdefaultPropsのmaxCount:5が影響範囲に含まれていない",
+      "description": "tests/unit/components/worktree/MemoAddButton.test.tsx の行15-17で defaultProps の maxCount が 5 にハードコードされている。また、テスト全体（行35, 41, 67-68, 79, 86, 93, 131, 159, 164-165）で maxCount={5} が多数使用されている。MemoAddButtonコンポーネント自体はprops経由で maxCount を受け取るため動作上の問題はないが、テストが「5件上限」の前提で書かれており、実装変更後にテストが旧仕様の値で動作することになる。テストの意図と実装の整合性の観点から、影響範囲に含めて更新を検討すべきである。",
+      "suggestion": "影響範囲テーブルに `tests/unit/components/worktree/MemoAddButton.test.tsx` を追加する。ただし、MemoAddButtonはprops経由でmaxCountを受け取るため、テスト自体は任意の値で動作する。対応方針として2つの選択肢がある：(A) defaultPropsを10に更新し、テスト全体のmaxCount値を10に統一する（推奨：テストが実際の使用状況を反映する）、(B) propsベースのテストであるため変更不要と判断する。いずれの場合もIssueに方針を明記すること。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "Should Fix",
+      "title": "docs/module-reference.mdのMemoPane記述に「最大5件」がハードコードされている",
+      "description": "docs/module-reference.md 行115に「メモ一覧コンテナ（最大5件、GET/POST/DELETE操作、ローディング・エラー状態管理）」と記載されている。実装でMAX_MEMOSを10に変更した場合、このドキュメントとの間に不整合が生じる。Stage 1レビュー（S1-006）で指摘済みだがStage 2の反映対象には含まれておらず、現在のIssue本文の影響範囲テーブルにもこのドキュメントは記載されていない。",
+      "suggestion": "影響範囲テーブルに `docs/module-reference.md` を追加し、変更内容として「MemoPane記述の『最大5件』を『最大10件』に更新」と記載する。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "Nice to Have",
+      "title": "DBスキーマへの影響なし（確認結果）",
+      "description": "worktree_memosテーブルのスキーマ（src/lib/db/migrations/v06-v10-schema-updates.ts 行168-179）を確認した。UNIQUE(worktree_id, position)制約はあるが、position値の範囲制限（CHECKなど）は存在しない。DBレイヤー（memo-db.ts）にも件数上限チェックはなく、上限制御は全てAPIレイヤー（route.ts）とUIレイヤー（MemoPane.tsx）で行われている。そのため、DBスキーマのマイグレーション追加は不要であり、既存のマイグレーションファイルへの変更も不要。この点はIssueに明記するとレビューアの疑問を予防できる。",
+      "suggestion": "Issueの影響範囲セクションに「DBスキーマ変更不要（位置のCHECK制約なし、上限制御はAPI/UIレイヤーで実施）」という注記を追加する。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "Nice to Have",
+      "title": "API後方互換性への影響なし（確認結果）",
+      "description": "APIレスポンスの形式（GET: { memos: [...] }、POST: { memo: {...} }、エラー: { error: string }）は変更されない。エラーメッセージ `Maximum memo limit (${MAX_MEMOS}) reached` の数値部分が5→10に変わるのみであり、クライアント側でこの数値をパースしている箇所はない（MemoPane.tsxはAPI呼び出し時にhandleApiErrorでエラーメッセージをそのまま表示するのみ）。CLIモジュール（src/cli/）にもメモ関連のコマンドは存在しない。したがってAPI後方互換性に問題はない。",
+      "suggestion": "特に対応不要だが、Issueの実装タスクに「API形式変更なし」と明記するとレビューの効率が上がる。"
+    },
+    {
+      "id": "S3-007",
+      "severity": "Nice to Have",
+      "title": "UIレイアウトへの影響は軽微だがテスト計画に具体性が不足",
+      "description": "MemoPane.tsxは `overflow-y-auto` クラスを持つフレックスコンテナ内にMemoCardをmap描画している（行199）。各MemoCardは固定高ではなく、textarea rows=4とtitle inputを含むカードである。10件表示時にはスクロールが発生するが、overflow-y-autoにより自動的にスクロール可能になるためレイアウト崩れは発生しない。ただし、Issueの実装タスクに「UI 表示の確認（10 件表示時のレイアウト崩れがないこと）」と記載されているものの、具体的な確認手順（デスクトップ/モバイル両方、タブ切り替え時のスクロール位置など）が明示されていない。",
+      "suggestion": "受入条件の「UI表示確認」をより具体的にする。例：「デスクトップ版NotesAndLogsPaneのNotesタブで10件メモ表示時にスクロールが正常に動作すること」「モバイル版でも同様にスクロールが正常動作すること」。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "Nice to Have",
+      "title": "パフォーマンスへの影響は無視できるレベル（確認結果）",
+      "description": "メモデータの取得はSQLiteの単一クエリ（ORDER BY position ASC）で、10件でも実行時間は1ms未満。各MemoCardにはuseAutoSaveフック（debounce 300ms）が含まれるが、10個のフックインスタンスは軽量でメモリ・CPU負荷は無視できる。フロントエンドのレンダリングも、MemoCardがReact.memo()でラップされており、個別のカードの更新が他のカードの再レンダーを誘発しない設計になっている。パフォーマンス上の懸念はない。",
+      "suggestion": "特に対応不要。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 3,
+  "nice_to_have_count": 4,
+  "summary": "影響範囲レビューの結果、1件のMust Fix、3件のShould Fix、4件のNice to Haveを検出した。Must Fixは、src/lib/__tests__/db-memo.test.tsに「Max 5 memos constraint」テストブロック（行402-423）が存在し、テスト名・ループ回数・アサーション値に「5」がハードコードされているにもかかわらず、Issueの影響範囲テーブルに含まれていない点である。Should Fixは、(1) db-memo.test.tsのテストでも共有定数を参照すべき点、(2) MemoAddButton.test.tsxのdefaultProps maxCount:5の扱い方針が未記載の点、(3) docs/module-reference.mdの「最大5件」記述がドキュメント更新対象として未記載の点である。DBスキーマ変更は不要（位置制約なし）、API後方互換性の問題なし、パフォーマンス影響は無視できるレベルであることを確認した。UIレイアウトはoverflow-y-autoにより10件でもスクロール対応されるが、テスト計画の具体性向上が望ましい。"
+}

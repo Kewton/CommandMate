@@ -8,11 +8,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById, getMemosByWorktreeId, createMemo } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
+import { MAX_MEMOS } from '@/config/memo-config';
 
 const logger = createLogger('api/memos');
-
-/** Maximum number of memos allowed per worktree */
-const MAX_MEMOS = 5;
 
 /** Maximum title length */
 const MAX_TITLE_LENGTH = 100;
