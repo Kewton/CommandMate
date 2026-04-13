@@ -1,0 +1,44 @@
+{
+  "issue_number": 651,
+  "issue_title": "feat(sidebar): PC版サイドバーをコンパクト化し、ツールチップで詳細表示",
+  "acceptance_criteria": [
+    "サイドバー幅が224px（w-56）に縮小されている",
+    "DEFAULT_SIDEBAR_WIDTH定数とAppShell.tsxのレイアウト幅が一致している（二重管理の解消）",
+    "useSidebar.tsのlocalStorage永続化とDEFAULT_SIDEBAR_WIDTH変更の整合性が確保されている（既存ユーザーのキャッシュ{width:288}との互換性対応済み）",
+    "ツリー表示モード時、ツリー配下の項目にリポジトリ名が表示されない",
+    "フラット表示モード時、リポジトリ名（別名）が従来通り表示される",
+    "マウスオーバーでツールチップに詳細情報（ブランチ名、リポジトリ名、ステータス、worktreeパス）が表示される",
+    "ツールチップのworktreeパス表示がSidebarBranchItem.worktreePathから正しく取得されている",
+    "ツールチップがキーボードフォーカス（:focus-visible）時にも表示される",
+    "ツールチップがWAI-ARIA tooltipパターン（role='tooltip', aria-describedby）に準拠している",
+    "リポジトリ名が視覚的に省略される場合、aria-labelにリポジトリ名が含まれている",
+    "既存のサイドバー機能（ソート、フィルタ、グループ化、アーカイブ等）が正常動作する",
+    "ダークモードで崩れなく表示される",
+    "既存テスト（BranchListItem.test.tsx, SidebarContext.test.tsx）が更新され、パスしている",
+    "npm run lint / npx tsc --noEmit / npm run test:unit がパスする"
+  ],
+  "implementation_tasks": [
+    "Task 1-1: src/types/sidebar.ts の SidebarBranchItem 型に worktreePath?: string フィールドを追加",
+    "Task 1-2: src/types/sidebar.ts の toBranchItem() 関数で worktreePath: worktree.path をマッピング",
+    "Task 2-1: src/contexts/SidebarContext.tsx の DEFAULT_SIDEBAR_WIDTH を 288 → 224 に変更（コメントも更新）",
+    "Task 2-2: src/hooks/useSidebar.ts の getPersistedSidebarState() にlocalStorageマイグレーション追加（旧値288→224）",
+    "Task 3-1: src/components/layout/AppShell.tsx のデスクトップサイドバー幅: w-72→w-56, pl-72→pl-56（モバイルは現状維持）",
+    "Task 3-2: src/components/sidebar/BranchListItem.tsx に showRepositoryName?: boolean props追加と条件分岐実装",
+    "Task 3-3: src/components/sidebar/BranchListItem.tsx にCSSカスタムツールチップ実装（Tailwind CSS group、WAI-ARIA対応）",
+    "Task 3-4: src/components/layout/Sidebar.tsx で grouped表示にshowRepositoryName={false}、flat表示はデフォルト",
+    "Task 4-1: tests/unit/components/sidebar/BranchListItem.test.tsx にshowRepositoryName/ツールチップテスト追加",
+    "Task 4-2: tests/unit/contexts/SidebarContext.test.tsx のDEFAULT_SIDEBAR_WIDTH アサート値を288→224に更新"
+  ],
+  "target_coverage": 80,
+  "work_plan_path": "dev-reports/issue/651/work-plan.md",
+  "key_files": [
+    "src/types/sidebar.ts",
+    "src/contexts/SidebarContext.tsx",
+    "src/hooks/useSidebar.ts",
+    "src/components/layout/AppShell.tsx",
+    "src/components/sidebar/BranchListItem.tsx",
+    "src/components/layout/Sidebar.tsx",
+    "tests/unit/components/sidebar/BranchListItem.test.tsx",
+    "tests/unit/contexts/SidebarContext.test.tsx"
+  ]
+}

@@ -184,6 +184,36 @@ describe('useSidebar', () => {
     });
   });
 
+  describe('localStorage migration (Issue #651)', () => {
+    it('should migrate old width 288 to new width 224 in getPersistedSidebarState', () => {
+      localStorage.setItem(SIDEBAR_STORAGE_KEY, JSON.stringify({ isOpen: true, width: 288 }));
+
+      const result = getPersistedSidebarState();
+
+      expect(result).not.toBeNull();
+      expect(result!.width).toBe(224);
+    });
+
+    it('should not change width if it is not 288', () => {
+      localStorage.setItem(SIDEBAR_STORAGE_KEY, JSON.stringify({ isOpen: true, width: 350 }));
+
+      const result = getPersistedSidebarState();
+
+      expect(result).not.toBeNull();
+      expect(result!.width).toBe(350);
+    });
+
+    it('should keep width 224 unchanged', () => {
+      localStorage.setItem(SIDEBAR_STORAGE_KEY, JSON.stringify({ isOpen: false, width: 224 }));
+
+      const result = getPersistedSidebarState();
+
+      expect(result).not.toBeNull();
+      expect(result!.width).toBe(224);
+      expect(result!.isOpen).toBe(false);
+    });
+  });
+
   describe('localStorage persistence edge cases', () => {
     it('should persist width changes to localStorage', () => {
       const { result } = renderHook(() => useSidebar(), { wrapper });

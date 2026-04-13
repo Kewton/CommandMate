@@ -1,0 +1,143 @@
+{
+  "issue_number": 651,
+  "overall_status": "passed",
+  "scenarios": [
+    {
+      "id": 1,
+      "description": "AppShell.tsxのデスクトップサイドバーにw-56クラスが設定されている",
+      "status": "passed",
+      "details": "AppShell.tsx line 122: aside要素に 'w-56' クラスが含まれている"
+    },
+    {
+      "id": 2,
+      "description": "AppShell.tsxのメインコンテンツにmd:pl-56クラスが設定されている",
+      "status": "passed",
+      "details": "AppShell.tsx line 140: main要素に 'md:pl-56' クラスが含まれている（isOpen時）"
+    },
+    {
+      "id": 3,
+      "description": "DEFAULT_SIDEBAR_WIDTHが224である",
+      "status": "passed",
+      "details": "SidebarContext.tsx line 30: export const DEFAULT_SIDEBAR_WIDTH = 224"
+    },
+    {
+      "id": 4,
+      "description": "SidebarBranchItemにworktreePathフィールドが存在する",
+      "status": "passed",
+      "details": "src/types/sidebar.ts line 63-64: worktreePath?: string フィールドが SidebarBranchItem に定義されている（Issue #651コメント付き）"
+    },
+    {
+      "id": 5,
+      "description": "toBranchItem()がworktreePathをマッピングする",
+      "status": "passed",
+      "details": "src/types/sidebar.ts line 131: worktreePath: worktree.path でマッピングされている"
+    },
+    {
+      "id": 6,
+      "description": "BranchListItemがshowRepositoryName=falseでリポジトリ名を非表示にする",
+      "status": "passed",
+      "details": "BranchListItem.tsx line 117: showRepositoryName && (...) の条件分岐でリポジトリ名表示を制御。さらに line 89で aria-label フォールバックも実装済み"
+    },
+    {
+      "id": 7,
+      "description": "BranchListItemがshowRepositoryName=true（デフォルト）でリポジトリ名を表示する",
+      "status": "passed",
+      "details": "BranchListItem.tsx line 79: showRepositoryName = true がデフォルト値として設定されている"
+    },
+    {
+      "id": 8,
+      "description": "BranchListItemがrole=tooltipのツールチップを持つ",
+      "status": "passed",
+      "details": "BranchListItem.tsx line 149: role='tooltip' が div 要素に設定されている"
+    },
+    {
+      "id": 9,
+      "description": "ツールチップにブランチ名・リポジトリ名・ステータス・worktreeパスが含まれる",
+      "status": "passed",
+      "details": "BranchListItem.tsx lines 160-165: branch.name, branch.repositoryName, branch.status, branch.worktreePath がツールチップ内に表示される"
+    },
+    {
+      "id": 10,
+      "description": "aria-describedbyとtooltipのidが対応している",
+      "status": "passed",
+      "details": "BranchListItem.tsx: button要素にaria-describedby={tooltipId} (line 88)、tooltip div要素にid={tooltipId} (line 148)。tooltipIdは 'tooltip-${branch.id}' で一意"
+    },
+    {
+      "id": 11,
+      "description": "getPersistedSidebarState()が旧値288を224にマイグレーションする",
+      "status": "passed",
+      "details": "useSidebar.ts lines 94-96: LEGACY_SIDEBAR_WIDTH(288)と比較し、DEFAULT_SIDEBAR_WIDTH(224)にマイグレーションするロジックが実装されている"
+    },
+    {
+      "id": 12,
+      "description": "Sidebar.tsxのgrouped表示でshowRepositoryName={false}が渡される",
+      "status": "passed",
+      "details": "Sidebar.tsx line 194: grouped viewのBranchListItem呼び出しに showRepositoryName={false} が明示的に渡されている"
+    },
+    {
+      "id": 13,
+      "description": "npm run test:unit が全テストパス",
+      "status": "passed",
+      "details": "331 test files passed, 6293 tests passed, 7 skipped, 0 failures"
+    },
+    {
+      "id": 14,
+      "description": "npx tsc --noEmit が0エラー",
+      "status": "passed",
+      "details": "TypeScript type check completed with zero errors (no output)"
+    },
+    {
+      "id": 15,
+      "description": "npm run lint が0エラー",
+      "status": "passed",
+      "details": "ESLint: 'No ESLint warnings or errors'"
+    }
+  ],
+  "passed_count": 15,
+  "failed_count": 0,
+  "acceptance_criteria_status": [
+    {
+      "criterion": "サイドバー幅が224px（w-56）に縮小されている",
+      "verified": true
+    },
+    {
+      "criterion": "DEFAULT_SIDEBAR_WIDTH定数とAppShell.tsxのレイアウト幅が一致している",
+      "verified": true
+    },
+    {
+      "criterion": "useSidebar.tsのlocalStorage互換性対応（旧値288→224マイグレーション）が実装されている",
+      "verified": true
+    },
+    {
+      "criterion": "ツリー表示モード時、ツリー配下の項目にリポジトリ名が表示されない",
+      "verified": true
+    },
+    {
+      "criterion": "フラット表示モード時、リポジトリ名（別名）が従来通り表示される",
+      "verified": true
+    },
+    {
+      "criterion": "マウスオーバーでツールチップに詳細情報（ブランチ名、リポジトリ名、ステータス、worktreeパス）が表示される",
+      "verified": true
+    },
+    {
+      "criterion": "ツールチップがWAI-ARIA tooltipパターン（role='tooltip', aria-describedby）に準拠している",
+      "verified": true
+    },
+    {
+      "criterion": "ツールチップがキーボードフォーカス時にも表示される",
+      "verified": true
+    },
+    {
+      "criterion": "既存のサイドバー機能（ソート、フィルタ、グループ化）が正常動作する",
+      "verified": true
+    },
+    {
+      "criterion": "npm run lint / npx tsc --noEmit / npm run test:unit がパスする",
+      "verified": true
+    }
+  ],
+  "evidence_files": [],
+  "status": "passed",
+  "message": "全15シナリオが合格。全受入条件を満たしています。"
+}

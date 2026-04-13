@@ -24,10 +24,12 @@ export interface BranchListItemProps {
   isSelected: boolean;
   /** Callback when branch is clicked */
   onClick: () => void;
+  /** Whether to show the repository name inline (Issue #651: hidden in grouped view) */
+  showRepositoryName?: boolean;
 }
 
 // ============================================================================
-// CLI Status Dot
+// Sub-components
 // ============================================================================
 
 /** Small status indicator dot for a CLI tool */
@@ -54,6 +56,32 @@ function CliStatusDot({ status, label }: { status: BranchStatus; label: string }
   );
 }
 
+/** Tooltip shown on hover/focus with branch details (Issue #651) */
+function BranchTooltip({ id, branch }: { id: string; branch: SidebarBranchItem }) {
+  return (
+    <div
+      id={id}
+      role="tooltip"
+      className="
+        invisible group-hover:visible group-focus-within:visible
+        opacity-0 group-hover:opacity-100 group-focus-within:opacity-100
+        absolute bottom-full left-0 z-50 mb-1
+        px-3 py-2 rounded-md shadow-lg
+        bg-gray-950 text-xs text-gray-200 border border-gray-700
+        whitespace-nowrap pointer-events-none
+        transition-opacity duration-150
+      "
+    >
+      <p className="font-medium text-white">{branch.name}</p>
+      <p className="text-gray-400">{branch.repositoryName}</p>
+      <p className="text-gray-400">Status: {branch.status}</p>
+      {branch.worktreePath && (
+        <p className="text-gray-500 truncate max-w-xs">{branch.worktreePath}</p>
+      )}
+    </div>
+  );
+}
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -74,14 +102,19 @@ export const BranchListItem = memo(function BranchListItem({
   branch,
   isSelected,
   onClick,
+  showRepositoryName = true,
 }: BranchListItemProps) {
+  const tooltipId = `tooltip-${branch.id}`;
+
   return (
     <button
       data-testid="branch-list-item"
       onClick={onClick}
       aria-current={isSelected ? 'true' : undefined}
+      aria-describedby={tooltipId}
+      aria-label={!showRepositoryName ? `${branch.name} - ${branch.repositoryName}` : undefined}
       className={`
-        w-full px-4 py-3 flex flex-col gap-1
+        group relative w-full px-4 py-3 flex flex-col gap-1
         hover:bg-gray-800 transition-colors
         focus:outline-none focus:ring-2 focus:ring-inset focus:ring-cyan-500
         ${isSelected ? 'bg-gray-700 border-l-2 border-cyan-500' : 'border-l-2 border-transparent'}
@@ -107,9 +140,11 @@ export const BranchListItem = memo(function BranchListItem({
           <p className="text-sm font-medium text-white truncate">
             {branch.name}
           </p>
-          <p className="text-xs text-gray-400 truncate">
-            {branch.repositoryName}
-          </p>
+          {showRepositoryName && (
+            <p className="text-xs text-gray-400 truncate">
+              {branch.repositoryName}
+            </p>
+          )}
         </div>
 
         {/* Unread indicator */}
@@ -133,6 +168,9 @@ export const BranchListItem = memo(function BranchListItem({
           </p>
         </div>
       )}
+
+      {/* Tooltip: shown on hover/focus, positioned above the item (Issue #651) */}
+      <BranchTooltip id={tooltipId} branch={branch} />
     </button>
   );
 });

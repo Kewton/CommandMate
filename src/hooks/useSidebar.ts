@@ -8,7 +8,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useSidebarContext } from '@/contexts/SidebarContext';
+import { useSidebarContext, DEFAULT_SIDEBAR_WIDTH } from '@/contexts/SidebarContext';
 
 // ============================================================================
 // Constants
@@ -16,6 +16,9 @@ import { useSidebarContext } from '@/contexts/SidebarContext';
 
 /** localStorage key for sidebar state */
 export const SIDEBAR_STORAGE_KEY = 'sidebar-state';
+
+/** Old default sidebar width (w-72 = 288px) before Issue #651 compactification to w-56 = 224px */
+const LEGACY_SIDEBAR_WIDTH = 288;
 
 // ============================================================================
 // Types
@@ -87,7 +90,12 @@ export function getPersistedSidebarState(): PersistedSidebarState | null {
   try {
     const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY);
     if (!stored) return null;
-    return JSON.parse(stored) as PersistedSidebarState;
+    const parsed = JSON.parse(stored) as PersistedSidebarState;
+    // Issue #651: Migrate old default width (288) to new default (224)
+    if (parsed.width === LEGACY_SIDEBAR_WIDTH) {
+      parsed.width = DEFAULT_SIDEBAR_WIDTH;
+    }
+    return parsed;
   } catch {
     return null;
   }

@@ -1,0 +1,202 @@
+{
+  "issue_number": 651,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_date": "2026-04-13",
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "ツールチップに「worktreeパス」を表示する要件があるが、SidebarBranchItem型にpathフィールドが存在しない。Worktree.pathからtoBranchItem()経由でSidebarBranchItemにマッピングされていないため、BranchListItemからworktreeパスにアクセスする手段がない",
+        "location": "## 要件 - デザイン要件 3項目目「表示内容: ブランチ名（フルパス）、リポジトリ名、ステータス、worktreeパス」",
+        "recommendation": "SidebarBranchItem型にworktreePath（またはpath）フィールドを追加し、toBranchItem()でWorktree.pathから値をマッピングする必要がある。影響範囲の変更対象ファイルに src/types/sidebar.ts を追加すべき",
+        "evidence": "src/types/sidebar.ts SidebarBranchItem: id, name, repositoryName, status, hasUnread, lastActivity, description, cliStatus の7フィールドのみ。pathフィールドなし。toBranchItem() (line 97-130) でもWorktree.pathはマッピングされていない"
+      },
+      {
+        "id": "MF-2",
+        "category": "依存関係",
+        "issue": "useSidebar.tsフックがsidebar幅(width)をlocalStorage('sidebar-state')に永続化しているが、DEFAULT_SIDEBAR_WIDTH変更時の既存ユーザーのキャッシュ移行が考慮されていない。既存ユーザーのlocalStorageには{isOpen: true, width: 288}が保存されており、定数を224に変更してもlocalStorageの値が優先されると幅が288のまま残る可能性がある",
+        "location": "## 影響範囲 - 変更対象ファイル",
+        "recommendation": "影響範囲にsrc/hooks/useSidebar.tsを追加する。対応方針として次のいずれかを明記すべき: (A) widthのlocalStorage永続化を廃止する（現在AppShell.tsxはTailwindクラスで幅を制御しておりcontext.widthは実質未使用のため安全）、(B) localStorage読み込み時に旧値288を新値224にマイグレーションするロジックを追加する、(C) setWidth()を今回のスコープでは変更しない場合、AppShell.tsxのinline style化と連動してwidth永続化の仕様を整理する",
+        "evidence": "src/hooks/useSidebar.ts line 60-64: localStorage.setItem(SIDEBAR_STORAGE_KEY, JSON.stringify({isOpen, width})) で幅を永続化。tests/unit/hooks/useSidebar.test.ts line 110: テストで{isOpen: false, width: 350}のlocalStorage復元を検証。現在のAppShell.tsxはcontext.widthを使用せずTailwindクラス(w-72)でハードコードしているため実害は少ないが、inline style化する場合はwidthの不整合が問題化する"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト範囲",
+        "issue": "tests/unit/contexts/SidebarContext.test.tsx にDEFAULT_SIDEBAR_WIDTHの値を288としてアサートするテスト(line 175)が存在する。定数変更時にこのテストが失敗するため、影響範囲のテストファイル一覧に含めるべき",
+        "location": "## 影響範囲 - テスト影響・更新方針",
+        "recommendation": "テスト影響セクションにtests/unit/contexts/SidebarContext.test.tsxを追加する。テスト更新内容: DEFAULT_SIDEBAR_WIDTHのアサート値を288から224に変更",
+        "evidence": "tests/unit/contexts/SidebarContext.test.tsx line 175: expect(DEFAULT_SIDEBAR_WIDTH).toBe(288); // 72 * 4 = 288px (w-72)"
+      },
+      {
+        "id": "SF-2",
+        "category": "テスト範囲",
+        "issue": "tests/unit/hooks/useSidebar.test.tsでsidebar幅のlocalStorage永続化をテストしている。useSidebar.tsに変更が入る場合、このテストファイルも更新が必要",
+        "location": "## 影響範囲 - テスト影響・更新方針",
+        "recommendation": "テスト影響セクションにtests/unit/hooks/useSidebar.test.tsを追加する。useSidebar.tsの変更方針に応じてテスト更新方針を明記する",
+        "evidence": "tests/unit/hooks/useSidebar.test.ts line 102: localStorageへの幅永続化テスト、line 110: width: 350での復元テスト"
+      },
+      {
+        "id": "SF-3",
+        "category": "影響ファイル",
+        "issue": "Sidebar.tsxでBranchListItemを呼び出す箇所が2箇所（grouped表示 line 189、flat表示 line 202）あり、showRepositoryName propsの受け渡しが必要だが、viewModeに応じた条件分岐の具体的な記述が影響範囲に不足している",
+        "location": "## 影響範囲 - 変更対象ファイル Sidebar.tsx",
+        "recommendation": "Sidebar.tsxの変更内容を具体化する: grouped表示(line 189)では showRepositoryName={false}、flat表示(line 202)では showRepositoryName={true} を渡す。また、BranchListItemProps型の変更（showRepositoryName追加）がSidebar.tsxのTypeScript型チェックに影響することも明記すべき",
+        "evidence": "src/components/layout/Sidebar.tsx line 188-195: grouped表示でのBranchListItem使用、line 200-207: flat表示でのBranchListItem使用。現在showRepositoryNameは渡されていない"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント更新",
+        "issue": "CLAUDE.mdのSidebarContext.tsxの説明コメントに「DEFAULT_SIDEBAR_WIDTH = 288px (w-72)」相当の記載がある。定数変更後にドキュメントとの不整合が生じる",
+        "location": "## 影響範囲",
+        "recommendation": "変更完了後にCLAUDE.mdのモジュール説明を更新する作業を記載する。具体的にはSidebarContext.tsxの行「Default sidebar width in pixels (w-72 = 288px)」のコメントも更新対象",
+        "evidence": "src/contexts/SidebarContext.tsx line 29: '/** Default sidebar width in pixels (w-72 = 288px) */' コメント。CLAUDE.mdにはSidebarContextの個別の定数値は直接記載されていないが、docs/features/sidebar-status-indicator.mdなどの関連ドキュメントに幅の前提が含まれている可能性がある"
+      },
+      {
+        "id": "NTH-2",
+        "category": "破壊的変更",
+        "issue": "BranchListItemにダークモード(dark:)クラスが一切使われていない。現在のサイドバーはbg-gray-900の固定暗色背景のためダークモード対応不要だが、ツールチップを新規追加する際はダークモード対応が必要になる可能性がある",
+        "location": "## 受入条件「ダークモードで崩れなく表示される」",
+        "recommendation": "ツールチップのスタイリングではダークモード(dark:)クラスの使用を検討する。ただし、サイドバー自体がbg-gray-900の暗色固定UIであるため、ツールチップもサイドバー内に閉じる前提であればdark:クラスは不要。AppShell.tsxのsidebar-containerにはdark:border-gray-600があるため、ツールチップがサイドバー領域外にはみ出す場合はダークモード対応が必要",
+        "evidence": "src/components/sidebar/BranchListItem.tsx: dark:クラスの使用なし。src/components/layout/AppShell.tsx line 123: border-r border-gray-200 dark:border-gray-600 (デスクトップサイドバーにdark:あり)。src/components/layout/Sidebar.tsx line 133: bg-gray-900固定"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "directly_affected_files": [
+      {
+        "file": "src/contexts/SidebarContext.tsx",
+        "change_type": "modify",
+        "description": "DEFAULT_SIDEBAR_WIDTH定数を288から224に変更。コメントも更新"
+      },
+      {
+        "file": "src/components/layout/AppShell.tsx",
+        "change_type": "modify",
+        "description": "w-72をw-56に、pl-72をpl-56に変更（3箇所: line 88, 122, 140）。inline style化の場合はDEFAULT_SIDEBAR_WIDTH参照に変更"
+      },
+      {
+        "file": "src/components/sidebar/BranchListItem.tsx",
+        "change_type": "modify",
+        "description": "showRepositoryName props追加、ツールチップUI実装、ARIA属性追加"
+      },
+      {
+        "file": "src/components/layout/Sidebar.tsx",
+        "change_type": "modify",
+        "description": "BranchListItemへのshowRepositoryName props受け渡し（grouped: false, flat: true）"
+      },
+      {
+        "file": "src/types/sidebar.ts",
+        "change_type": "modify",
+        "description": "SidebarBranchItem型にworktreePath(path)フィールド追加。toBranchItem()でWorktree.pathをマッピング追加"
+      }
+    ],
+    "indirectly_affected_files": [
+      {
+        "file": "src/hooks/useSidebar.ts",
+        "change_type": "potential_modify",
+        "description": "sidebar幅のlocalStorage永続化がDEFAULT_SIDEBAR_WIDTH変更と不整合になる可能性。inline style化する場合はcontext.widthの整合性確保が必要"
+      },
+      {
+        "file": "src/lib/sidebar-utils.ts",
+        "change_type": "no_change",
+        "description": "ソート・グループ化ロジックは幅変更の影響を受けない。変更不要"
+      }
+    ],
+    "test_files_affected": [
+      {
+        "file": "tests/unit/components/sidebar/BranchListItem.test.tsx",
+        "change_type": "modify",
+        "description": "showRepositoryName props追加に伴うテスト更新。条件付き表示テスト・ツールチップテスト追加"
+      },
+      {
+        "file": "tests/unit/AppShell-layout.test.tsx",
+        "change_type": "modify",
+        "description": "幅変更に伴うレイアウトテスト更新"
+      },
+      {
+        "file": "tests/unit/components/layout/AppShell.test.tsx",
+        "change_type": "potential_modify",
+        "description": "w-72/pl-72のクラス名をチェックしているテストがあれば更新が必要。現在はクラス名の直接検証はしていないが、transform/translateのテスト(line 287)は影響なし"
+      },
+      {
+        "file": "tests/unit/contexts/SidebarContext.test.tsx",
+        "change_type": "modify",
+        "description": "line 175のDEFAULT_SIDEBAR_WIDTH === 288アサートを224に更新"
+      },
+      {
+        "file": "tests/unit/hooks/useSidebar.test.ts",
+        "change_type": "potential_modify",
+        "description": "useSidebar.tsのwidth永続化に変更が入る場合、関連テストの更新が必要"
+      }
+    ],
+    "breaking_changes": [],
+    "no_impact_confirmed": [
+      "src/lib/sidebar-utils.ts - ソート・グループ化ロジックは幅に依存しない",
+      "src/hooks/useWorktreeList.ts - フィルタ・ソートロジックは幅に依存しない",
+      "src/config/status-colors.ts - ステータスドットの表示は幅変更の影響を受けない",
+      "src/components/sidebar/SortSelector.tsx - ソートUIは幅変更の影響を受けない",
+      "src/components/mobile/GlobalMobileNav.tsx - モバイルナビはサイドバー幅に依存しない",
+      "CMATE.md - スケジュール設定ファイルはUI変更の影響を受けない"
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/types/sidebar.ts",
+      "relevance": "SidebarBranchItem型にworktreePathフィールドが欠落。ツールチップ要件の実現にはこのファイルの変更が必須（Issueの影響範囲に記載漏れ）"
+    },
+    {
+      "file": "src/hooks/useSidebar.ts",
+      "relevance": "sidebar幅(width)のlocalStorage永続化。DEFAULT_SIDEBAR_WIDTH変更時のキャッシュ互換性に影響（Issueの影響範囲に記載漏れ）"
+    },
+    {
+      "file": "src/contexts/SidebarContext.tsx",
+      "relevance": "DEFAULT_SIDEBAR_WIDTH定数の定義箇所。line 29のコメントも更新対象"
+    },
+    {
+      "file": "src/components/layout/AppShell.tsx",
+      "relevance": "w-72/pl-72のハードコード3箇所。inline style化の場合はDEFAULT_SIDEBAR_WIDTHインポートが必要"
+    },
+    {
+      "file": "src/components/sidebar/BranchListItem.tsx",
+      "relevance": "repositoryName表示(line 110-112)の条件化とツールチップ追加の主要変更対象"
+    },
+    {
+      "file": "src/components/layout/Sidebar.tsx",
+      "relevance": "BranchListItem呼び出し箇所2箇所(line 189, 202)でshowRepositoryName propsの受け渡しが必要"
+    },
+    {
+      "file": "tests/unit/contexts/SidebarContext.test.tsx",
+      "relevance": "DEFAULT_SIDEBAR_WIDTH === 288のアサート(line 175)の更新が必要（Issueのテスト影響セクションに記載漏れ）"
+    },
+    {
+      "file": "tests/unit/hooks/useSidebar.test.ts",
+      "relevance": "useSidebar.tsのwidth永続化テスト。useSidebar.tsの変更に連動して更新が必要（Issueのテスト影響セクションに記載漏れ）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "docs/features/sidebar-status-indicator.md",
+      "relevance": "サイドバーのステータス表示仕様ドキュメント。幅変更後もステータス表示が正常動作することの確認用"
+    },
+    {
+      "file": "dev-reports/design/issue-112-sidebar-transform-design-policy.md",
+      "relevance": "Issue #112のサイドバーtransform設計方針。DEFAULT_SIDEBAR_WIDTHとCSS変数の二重管理に関する過去の議論記録"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト全体構成。SidebarContext.tsxの説明更新対象"
+    }
+  ]
+}

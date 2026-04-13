@@ -191,6 +191,7 @@ export const Sidebar = memo(function Sidebar() {
                       branch={branch}
                       isSelected={branch.id === selectedWorktreeId}
                       onClick={() => handleBranchClick(branch.id)}
+                      showRepositoryName={false}
                     />
                   ))}
               </div>
