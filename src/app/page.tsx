@@ -17,6 +17,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { AppShell } from '@/components/layout';
 import { HomeSessionSummary } from '@/components/home/HomeSessionSummary';
+import { AssistantChatPanel } from '@/components/home/AssistantChatPanel';
 import type { Worktree } from '@/types/models';
 
 /**
@@ -142,6 +143,9 @@ export default function Home() {
             A local control plane for agent CLIs — orchestration and visibility on top of Claude Code, Codex, Gemini CLI, and more.
           </p>
         </div>
+
+        {/* Assistant Chat Panel */}
+        <AssistantChatPanel />
 
         {/* Session Summary */}
         <div className="mb-8">
