@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../db/db-migrations';
 import { upsertWorktree } from '../db';
+import { MAX_MEMOS } from '@/config/memo-config';
 
 // Import functions that we'll implement
 import {
@@ -399,9 +400,9 @@ describe('Database Memo Operations', () => {
     });
   });
 
-  describe('Max 5 memos constraint (application level)', () => {
-    it('should allow creating up to 5 memos at positions 0-4', () => {
-      for (let i = 0; i < 5; i++) {
+  describe('Max 10 memos constraint (application level)', () => {
+    it('should allow creating up to 10 memos at positions 0-9', () => {
+      for (let i = 0; i < MAX_MEMOS; i++) {
         const memo = createMemo(testDb, 'test-worktree', {
           title: `Memo ${i}`,
           position: i,
@@ -410,15 +411,15 @@ describe('Database Memo Operations', () => {
       }
 
       const memos = getMemosByWorktreeId(testDb, 'test-worktree');
-      expect(memos).toHaveLength(5);
+      expect(memos).toHaveLength(MAX_MEMOS);
     });
 
-    it('should fail when trying to use position >= 5', () => {
+    it('should fail when trying to use position >= 10', () => {
       // Note: DB doesn't have a CHECK constraint for position,
       // but the application should enforce this
       // This test just verifies the DB allows it (enforcement at API layer)
-      const memo = createMemo(testDb, 'test-worktree', { position: 5 });
-      expect(memo.position).toBe(5);
+      const memo = createMemo(testDb, 'test-worktree', { position: MAX_MEMOS });
+      expect(memo.position).toBe(MAX_MEMOS);
     });
   });
 });

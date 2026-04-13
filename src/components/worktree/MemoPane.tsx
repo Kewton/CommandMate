@@ -15,14 +15,8 @@ import React, { useState, useEffect, useCallback, memo } from 'react';
 import { memoApi, handleApiError } from '@/lib/api-client';
 import { MemoCard } from './MemoCard';
 import { MemoAddButton } from './MemoAddButton';
+import { MAX_MEMOS } from '@/config/memo-config';
 import type { WorktreeMemo } from '@/types/models';
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-/** Maximum number of memos per worktree */
-const MAX_MEMOS = 5;
 
 // ============================================================================
 // Types
