@@ -17,7 +17,7 @@ import { useSidebarContext, DEFAULT_SIDEBAR_WIDTH } from '@/contexts/SidebarCont
 /** localStorage key for sidebar state */
 export const SIDEBAR_STORAGE_KEY = 'sidebar-state';
 
-/** Old default sidebar width before Issue #651 compactification */
+/** Old default sidebar width (w-72 = 288px) before Issue #651 compactification to w-56 = 224px */
 const LEGACY_SIDEBAR_WIDTH = 288;
 
 // ============================================================================

@@ -29,7 +29,7 @@ export interface BranchListItemProps {
 }
 
 // ============================================================================
-// CLI Status Dot
+// Sub-components
 // ============================================================================
 
 /** Small status indicator dot for a CLI tool */
@@ -53,6 +53,32 @@ function CliStatusDot({ status, label }: { status: BranchStatus; label: string }
       title={title}
       aria-label={title}
     />
+  );
+}
+
+/** Tooltip shown on hover/focus with branch details (Issue #651) */
+function BranchTooltip({ id, branch }: { id: string; branch: SidebarBranchItem }) {
+  return (
+    <div
+      id={id}
+      role="tooltip"
+      className="
+        invisible group-hover:visible group-focus-within:visible
+        opacity-0 group-hover:opacity-100 group-focus-within:opacity-100
+        absolute bottom-full left-0 z-50 mb-1
+        px-3 py-2 rounded-md shadow-lg
+        bg-gray-950 text-xs text-gray-200 border border-gray-700
+        whitespace-nowrap pointer-events-none
+        transition-opacity duration-150
+      "
+    >
+      <p className="font-medium text-white">{branch.name}</p>
+      <p className="text-gray-400">{branch.repositoryName}</p>
+      <p className="text-gray-400">Status: {branch.status}</p>
+      {branch.worktreePath && (
+        <p className="text-gray-500 truncate max-w-xs">{branch.worktreePath}</p>
+      )}
+    </div>
   );
 }
 
@@ -143,27 +169,8 @@ export const BranchListItem = memo(function BranchListItem({
         </div>
       )}
 
-      {/* Tooltip (Issue #651): shown on hover/focus, positioned above the item */}
-      <div
-        id={tooltipId}
-        role="tooltip"
-        className="
-          invisible group-hover:visible group-focus-within:visible
-          opacity-0 group-hover:opacity-100 group-focus-within:opacity-100
-          absolute bottom-full left-0 z-50 mb-1
-          px-3 py-2 rounded-md shadow-lg
-          bg-gray-950 text-xs text-gray-200 border border-gray-700
-          whitespace-nowrap pointer-events-none
-          transition-opacity duration-150
-        "
-      >
-        <p className="font-medium text-white">{branch.name}</p>
-        <p className="text-gray-400">{branch.repositoryName}</p>
-        <p className="text-gray-400">Status: {branch.status}</p>
-        {branch.worktreePath && (
-          <p className="text-gray-500 truncate max-w-xs">{branch.worktreePath}</p>
-        )}
-      </div>
+      {/* Tooltip: shown on hover/focus, positioned above the item (Issue #651) */}
+      <BranchTooltip id={tooltipId} branch={branch} />
     </button>
   );
 });

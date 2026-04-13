@@ -115,6 +115,7 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
 
       <div className="flex flex-1 min-h-0">
         {/* Desktop sidebar - fixed position with transform animation (Issue #112) */}
+        {/* w-56 = 224px = DEFAULT_SIDEBAR_WIDTH; keep in sync with pl-56 below */}
         {showSidebar && (
           <aside
             data-testid="sidebar-container"
@@ -132,7 +133,7 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
           </aside>
         )}
 
-        {/* Main content - padding adjusts based on sidebar state */}
+        {/* Main content - pl-56 matches sidebar w-56 = DEFAULT_SIDEBAR_WIDTH */}
         <main
           className={`
             flex-1 min-w-0 h-full overflow-hidden

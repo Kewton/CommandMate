@@ -60,7 +60,7 @@ export interface SidebarBranchItem {
   description?: string;
   /** Per-CLI tool status for sidebar display */
   cliStatus?: Partial<Record<CLIToolType, BranchStatus>>;
-  /** Absolute path to the worktree directory (Issue #651: for tooltip display) */
+  /** Absolute path to the worktree directory (Issue #651) */
   worktreePath?: string;
 }
 
