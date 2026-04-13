@@ -12,12 +12,14 @@ import { stopPolling as stopResponsePolling, clearPromptHashCache } from './poll
 import { stopAutoYesPollingByWorktree, deleteAutoYesStateByWorktree } from './polling/auto-yes-manager';
 import { stopScheduleForWorktree } from './schedule-manager';
 import { stopTimersForWorktree } from './timer-manager';
+import { stopAllGlobalSessionPolling } from './polling/global-session-poller';
 import { clearAllCache } from './tmux/tmux-capture-cache';
 import { CLI_TOOL_IDS, type CLIToolType } from './cli-tools/types';
+import { GLOBAL_SESSION_WORKTREE_ID } from './session/global-session-constants';
 import { getErrorMessage } from './errors';
 import { createLogger } from '@/lib/logger';
 import { CLIToolManager } from './cli-tools/manager';
-import { killSession } from './tmux/tmux';
+import { killSession, hasSession } from './tmux/tmux';
 import { syncWorktreesToDB, type SyncResult } from './git/worktrees';
 import type { Worktree } from '@/types/models';
 import type Database from 'better-sqlite3';
@@ -232,6 +234,46 @@ export async function killWorktreeSession(
 }
 
 /**
+ * Clean up all global assistant sessions.
+ * Issue #649: Kill any orphaned mcbd-{cli_tool_id}-__global__ tmux sessions
+ * and stop all global session pollers.
+ *
+ * Called during server shutdown and syncWorktreesAndCleanup.
+ * Errors are logged but do not propagate (cleanup is best-effort).
+ *
+ * @returns Number of sessions killed
+ */
+export async function cleanupGlobalSessions(): Promise<number> {
+  // Stop all global pollers first
+  stopAllGlobalSessionPolling();
+
+  let sessionsKilled = 0;
+  const manager = CLIToolManager.getInstance();
+
+  for (const cliToolId of CLI_TOOL_IDS) {
+    try {
+      const tool = manager.getTool(cliToolId);
+      const sessionName = tool.getSessionName(GLOBAL_SESSION_WORKTREE_ID);
+      const exists = await hasSession(sessionName);
+      if (exists) {
+        const killed = await killSession(sessionName);
+        if (killed) {
+          sessionsKilled++;
+          logger.info('global-session:killed', { cliToolId, sessionName });
+        }
+      }
+    } catch (error) {
+      logger.warn('global-session:kill-failed', {
+        cliToolId,
+        error: getErrorMessage(error),
+      });
+    }
+  }
+
+  return sessionsKilled;
+}
+
+/**
  * Result of syncWorktreesAndCleanup
  */
 export interface SyncAndCleanupResult {
@@ -257,6 +299,13 @@ export async function syncWorktreesAndCleanup(
   worktrees: Worktree[]
 ): Promise<SyncAndCleanupResult> {
   const syncResult = syncWorktreesToDB(db, worktrees);
+
+  // Issue #649: Clean up orphaned global assistant sessions
+  try {
+    await cleanupGlobalSessions();
+  } catch (error) {
+    logger.warn('sync:global-cleanup-failed', { error: getErrorMessage(error) });
+  }
 
   let cleanupWarnings: string[] = [];
 

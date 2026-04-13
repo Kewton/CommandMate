@@ -1,0 +1,187 @@
+{
+  "stage": 3,
+  "focus": "影響範囲",
+  "findings": [
+    {
+      "id": "S3-MF-001",
+      "severity": "Must Fix",
+      "category": "影響ファイル",
+      "title": "response-checker.ts の getWorktreeById() が仮想 worktreeID '__global__' で null を返しポーリング即停止",
+      "description": "response-checker.ts の checkForResponse() (行411) は冒頭で getWorktreeById(db, worktreeId) を呼び出し、null の場合に stopPolling() して return false する。仮想 worktreeID '__global__' は worktrees テーブルに存在しないため、ポーリング開始直後に停止される。レスポンスポーリングがグローバルセッションで一切機能しない致命的な問題。",
+      "location": "src/lib/polling/response-checker.ts:408-415",
+      "recommendation": "以下のいずれかの対応方針を Issue に明記すること: (A) グローバルセッション専用のポーリング関数を新規作成し getWorktreeById チェックを省略、(B) checkForResponse 内に '__global__' を特別扱いする条件分岐を追加（ただし既存ロジックの複雑化リスクあり）、(C) worktrees テーブルに仮想レコードを INSERT する（DBスキーマの意味的整合性の問題あり）。推奨は (A)。",
+      "evidence": "response-checker.ts:408-415: const worktree = getWorktreeById(db, worktreeId); if (!worktree) { stopPolling(worktreeId, cliToolId); return false; }"
+    },
+    {
+      "id": "S3-MF-002",
+      "severity": "Must Fix",
+      "category": "依存関係",
+      "title": "chat-db.ts の createMessage() が worktrees テーブルの updated_at を UPDATE するため、存在しない worktreeId で失敗",
+      "description": "createMessage() (chat-db.ts:103-138) は内部で updateWorktreeTimestamp() と updateLastUserMessage() を呼び出し、worktrees テーブルの updated_at, last_user_message, last_user_message_at を UPDATE する。仮想 worktreeID '__global__' が worktrees テーブルに存在しない場合、UPDATE は成功する（changes=0）がデータの整合性が失われる。また chat_messages テーブルの FOREIGN KEY 制約 (worktree_id REFERENCES worktrees(id) ON DELETE CASCADE) により、存在しない worktreeId への INSERT 自体が失敗する可能性がある（PRAGMA foreign_keys 設定依存）。",
+      "location": "src/lib/db/chat-db.ts:103-138, src/lib/db/init-db.ts:33-48",
+      "recommendation": "Phase 1 で DB 保存なし方針を採用する場合は createMessage() を呼ばないことを明記。DB 保存する場合は (A) foreign_keys PRAGMA の確認、(B) '__global__' レコードの worktrees テーブルへの登録方針、(C) テスト追加が必須。",
+      "evidence": "init-db.ts:46: FOREIGN KEY (worktree_id) REFERENCES worktrees(id) ON DELETE CASCADE"
+    },
+    {
+      "id": "S3-MF-003",
+      "severity": "Must Fix",
+      "category": "破壊的変更",
+      "title": "session-cleanup.ts がグローバルセッション mcbd-global-* パターンを認識しない",
+      "description": "session-cleanup.ts の cleanupWorktreeSessions() は worktreeId を引数に取り、CLI_TOOL_IDS をループして各ツールのセッション名 mcbd-{tool}-{worktreeId} をキルする。しかしグローバルセッションの命名が mcbd-global-{cli_tool_id} 形式の場合、この関数では到達不能。サーバー再起動やアプリ終了時にグローバルセッションの tmux プロセスが残留する。syncWorktreesAndCleanup() も DB ベースの削除ID に基づくため、グローバルセッションは検出されない。",
+      "location": "src/lib/session-cleanup.ts:75-158, 255-284",
+      "recommendation": "Issue に以下を追加: (1) session-cleanup.ts に mcbd-global-* パターンのセッションを停止する cleanupGlobalSessions() 関数を追加するタスク、(2) サーバー起動時の既存グローバルセッション検出・クリーンアップ方針。",
+      "evidence": "session-cleanup.ts は CLI_TOOL_IDS ループで mcbd-{tool}-{worktreeId} 形式のみ対象。mcbd-global-* は関数シグネチャからも到達不能。"
+    },
+    {
+      "id": "S3-SF-001",
+      "severity": "Should Fix",
+      "category": "依存関係",
+      "title": "conversation-logger.ts の recordClaudeConversation() が worktreeId でログファイルパスを構築",
+      "description": "recordClaudeConversation() は worktreeId を用いて getLastUserMessage() でユーザーメッセージを取得し、createLog() でログファイルを作成する。Phase 1 で DB 保存なし方針の場合、getLastUserMessage() は常に null を返すため、ログは一切記録されない。これは意図的なスコープ限定として許容可能だが、明示が必要。",
+      "location": "src/lib/conversation-logger.ts:18-35",
+      "recommendation": "Issue に「Phase 1 ではグローバルセッションの会話ログファイル出力はスコープ外」と明記。"
+    },
+    {
+      "id": "S3-SF-002",
+      "severity": "Should Fix",
+      "category": "影響ファイル",
+      "title": "resource-cleanup.ts の cleanupOrphanedMapEntries() がグローバルセッション用 Map エントリを誤って孤立と判定",
+      "description": "cleanupOrphanedMapEntries() は DB の worktrees テーブルから有効な worktreeId 一覧を取得し、Map に存在するが DB にない worktreeId のエントリを削除する。グローバルセッションの仮想 ID '__global__' は DB に存在しないため、Auto-Yes 状態、スケジュール、タイマー等のエントリが 24 時間周期のクリーンアップで削除される。Phase 1 でこれらの機能がスコープ外であっても、将来の拡張時に問題となる。",
+      "location": "src/lib/resource-cleanup.ts:220-295",
+      "recommendation": "将来の拡張を見据え、resource-cleanup.ts の cleanupOrphanedMapEntries() に予約 ID ('__global__' 等) をスキップするロジック追加を実装タスクとして記載するか、Phase 2 タスクとして明示。"
+    },
+    {
+      "id": "S3-SF-003",
+      "severity": "Should Fix",
+      "category": "影響ファイル",
+      "title": "cli-session.ts の resolveSessionContext() がグローバルセッション命名規則と不整合",
+      "description": "cli-session.ts の resolveSessionContext() は CLIToolManager.getTool(cliToolId).getSessionName(worktreeId) を呼び出す。BaseCLITool.getSessionName() は mcbd-{tool}-{worktreeId} 形式を生成する。Issue ではグローバルセッション名を mcbd-global-{cli_tool_id} 形式としており、生成パターンが一致しない。captureSessionOutput() や isSessionRunning() がグローバルセッションに対して正しく動作しない。",
+      "location": "src/lib/session/cli-session.ts:33-38, src/lib/cli-tools/base.ts:46-50",
+      "recommendation": "Issue のセッション命名方針を以下のいずれかに修正: (A) mcbd-{tool}-__global__ 形式にして既存の getSessionName() を再利用（推奨、変更最小）、(B) mcbd-global-{tool} 形式を維持する場合はグローバルセッション専用の getSessionName() オーバーライドを実装タスクに追加。"
+    },
+    {
+      "id": "S3-SF-004",
+      "severity": "Should Fix",
+      "category": "テスト範囲",
+      "title": "既存テストの回帰リスク: session-cleanup と response-poller のテストが worktreeId の存在前提に依存",
+      "description": "tests/unit/session-cleanup.test.ts と tests/unit/session-cleanup-issue404.test.ts は worktreeId が DB の worktrees テーブルに存在する前提で書かれている。グローバルセッション導入に伴い session-cleanup.ts を変更する場合、既存テストが破損する可能性がある。response-checker.ts の checkForResponse() テストも同様。",
+      "location": "tests/unit/session-cleanup.test.ts, tests/unit/session-cleanup-issue404.test.ts",
+      "recommendation": "Issue の実装タスクに以下を追加: (1) 既存 session-cleanup テストの回帰確認、(2) グローバルセッション用のクリーンアップテスト追加、(3) response-checker がグローバルセッション ID で正しく動作するテスト追加。"
+    },
+    {
+      "id": "S3-SF-005",
+      "severity": "Should Fix",
+      "category": "影響ファイル",
+      "title": "worktree-status-helper.ts が全 CLI_TOOL_IDS をループしてグローバルセッションのステータスを拾う可能性",
+      "description": "worktree-status-helper.ts の detectWorktreeSessionStatus() は tmux の listSessions() 結果と照合してセッション稼働状態を検出する。グローバルセッションの tmux セッション名が mcbd-{tool}-__global__ 形式の場合、worktrees API のレスポンスに影響し、サイドバーにゴーストエントリが表示される可能性がある。",
+      "location": "src/lib/session/worktree-status-helper.ts",
+      "recommendation": "Issue に worktree 一覧 API のグローバルセッション除外フィルタについて記載を追加。"
+    },
+    {
+      "id": "S3-SF-006",
+      "severity": "Should Fix",
+      "category": "テスト範囲",
+      "title": "API 認証ミドルウェアは /api/assistant/* を自動的にカバーするが、明示的な確認タスクが不足",
+      "description": "middleware.ts のマッチャー (/((?!_next/|favicon\\.ico|...).*)) は /api/assistant/* にもマッチするため、認証は自動適用される。AUTH_EXCLUDED_PATHS には含まれていないため問題ない。ただし、実装時に誤って AUTH_EXCLUDED_PATHS に追加しないよう、セキュリティテストタスクが必要。",
+      "location": "src/middleware.ts, src/config/auth-config.ts",
+      "recommendation": "実装タスクに「/api/assistant/* の認証テスト追加」を明記。AUTH_EXCLUDED_PATHS に追加しないことを実装ガイドラインとして記載。"
+    },
+    {
+      "id": "S3-SF-007",
+      "severity": "Should Fix",
+      "category": "破壊的変更",
+      "title": "session_states テーブルの FOREIGN KEY 制約が '__global__' に対して制約違反を起こす",
+      "description": "session_states テーブルは PRIMARY KEY (worktree_id, cli_tool_id) かつ FOREIGN KEY (worktree_id) REFERENCES worktrees(id) ON DELETE CASCADE を持つ (init-db.ts:79-88)。response-checker.ts の checkForResponse() 内で updateSessionState() を呼ぶと、worktrees テーブルに存在しない '__global__' に対する UPSERT が FOREIGN KEY 制約違反で失敗する。",
+      "location": "src/lib/db/init-db.ts:79-88, src/lib/db/session-db.ts",
+      "recommendation": "DB 操作の方針を明確化すること。Phase 1 でポーリングを使う場合は updateSessionState の呼び出しを回避する設計が必須。"
+    },
+    {
+      "id": "S3-NTH-001",
+      "severity": "Nice to Have",
+      "category": "ドキュメント更新",
+      "title": "CLAUDE.md のモジュール一覧に新規 API ルートとコンポーネントの記載が必要",
+      "description": "CLAUDE.md にはモジュール一覧が詳細に記載されている。/api/assistant/* ルートと AssistantMessageInput コンポーネントを実装後に追記が必要。",
+      "location": "CLAUDE.md",
+      "recommendation": "実装完了後に CLAUDE.md の「主要モジュール一覧」セクションへの追記タスクを追加。"
+    },
+    {
+      "id": "S3-NTH-002",
+      "severity": "Nice to Have",
+      "category": "移行考慮",
+      "title": "Phase 1 スコープ外機能の明示的リスト化が不足",
+      "description": "Stage 1 レビューで指摘された Auto-Yes, スケジューラー, CLI コマンド統合等のスコープ外機能について、Issue 本文（改訂版）には Phase 1 制限の記載が追加されているが、影響範囲の観点から各機能のスコープ外理由と Phase 2 への引き継ぎ項目を一覧化すると、実装漏れリスクを低減できる。",
+      "location": "Issue 本文",
+      "recommendation": "Issue 本文に「Phase 1 スコープ外機能一覧」セクションを追加し、各機能名・理由・Phase 2 への引き継ぎ要否を表形式で記載。"
+    }
+  ],
+  "must_fix_count": 3,
+  "should_fix_count": 7,
+  "nice_to_have_count": 2,
+  "summary": "影響範囲レビューの結果、Must Fix 3件、Should Fix 7件、Nice to Have 2件の指摘事項を検出した。最も深刻な問題は、仮想 worktreeID '__global__' が既存コードベースの worktrees テーブル存在前提に抵触する点である。(1) response-checker.ts の checkForResponse() がポーリング開始直後に停止する（MF-001）、(2) chat_messages / session_states テーブルの FOREIGN KEY 制約で DB 操作が失敗する（MF-002, SF-007）、(3) session-cleanup.ts がグローバルセッションの tmux プロセスを停止できずリーク（MF-003）。これらは全て、既存アーキテクチャが worktreeId を DB の worktrees テーブルに存在する実体として前提しているために発生する。Issue 本文で採用する設計方針（DB 保存なし + 専用ポーリング or 仮想レコード挿入）を明確にし、各影響ポイントへの対処方法を実装タスクに追加する必要がある。",
+  "code_references": [
+    {
+      "file": "src/lib/polling/response-checker.ts",
+      "lines": "408-415",
+      "relevance": "checkForResponse() 内の getWorktreeById() チェックがグローバルセッションのポーリングをブロック"
+    },
+    {
+      "file": "src/lib/db/init-db.ts",
+      "lines": "33-48, 79-88",
+      "relevance": "chat_messages と session_states の FOREIGN KEY 制約が仮想 worktreeID を拒否"
+    },
+    {
+      "file": "src/lib/db/chat-db.ts",
+      "lines": "103-138",
+      "relevance": "createMessage() が worktrees テーブルの updated_at を更新（存在しない worktreeId で空振り）"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "lines": "75-158",
+      "relevance": "cleanupWorktreeSessions() が mcbd-global-* パターンに非対応"
+    },
+    {
+      "file": "src/lib/resource-cleanup.ts",
+      "lines": "220-295",
+      "relevance": "cleanupOrphanedMapEntries() が DB 非存在の仮想 ID を孤立エントリとして削除"
+    },
+    {
+      "file": "src/lib/session/cli-session.ts",
+      "lines": "33-38",
+      "relevance": "resolveSessionContext() のセッション名生成がグローバルセッション命名と不整合"
+    },
+    {
+      "file": "src/lib/cli-tools/base.ts",
+      "lines": "46-50",
+      "relevance": "getSessionName() の mcbd-{tool}-{worktreeId} 形式がグローバルセッション命名と不整合"
+    },
+    {
+      "file": "src/lib/conversation-logger.ts",
+      "lines": "18-35",
+      "relevance": "recordClaudeConversation() が worktreeId で DB 問合せ（DB 非保存時は空振り）"
+    },
+    {
+      "file": "src/lib/session/worktree-status-helper.ts",
+      "relevance": "セッションステータス検出がグローバルセッションを拾いサイドバーに表示するリスク"
+    },
+    {
+      "file": "src/middleware.ts",
+      "relevance": "/api/assistant/* は認証マッチャーで自動カバー済み（AUTH_EXCLUDED_PATHS 非追加を確認）"
+    },
+    {
+      "file": "src/lib/security/path-validator.ts",
+      "lines": "19-31",
+      "relevance": "WORKTREE_ID_PATTERN は __global__ を許容（アンダースコア許可）"
+    },
+    {
+      "file": "src/lib/cli-tools/validation.ts",
+      "lines": "20",
+      "relevance": "SESSION_NAME_PATTERN は mcbd-claude-__global__ を許容（問題なし）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュール一覧の更新が必要（新規 API ルート・コンポーネント追加時）"
+    }
+  ]
+}

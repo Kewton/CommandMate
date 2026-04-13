@@ -21,6 +21,7 @@ import { GEMINI_PANE_HEIGHT } from '@/lib/cli-tools/gemini';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import { isSessionHealthy } from './claude-session';
 import { getLastServerResponseTimestamp, buildCompositeKey } from '@/lib/polling/auto-yes-manager';
+import { GLOBAL_SESSION_WORKTREE_ID } from '@/lib/session/global-session-constants';
 import type { getMessages as GetMessagesFn, markPendingPromptsAsAnswered as MarkPendingFn } from '@/lib/db';
 
 function getStatusCaptureLines(cliToolId: CLIToolType): number {
@@ -74,6 +75,17 @@ export async function detectWorktreeSessionStatus(
   getMessages: typeof GetMessagesFn,
   markPendingPromptsAsAnswered: typeof MarkPendingFn,
 ): Promise<WorktreeSessionStatus> {
+  // Issue #649: Skip status detection for global assistant sessions.
+  // Global sessions are not real worktrees and should not appear in the sidebar.
+  if (worktreeId === GLOBAL_SESSION_WORKTREE_ID) {
+    return {
+      sessionStatusByCli: {},
+      isSessionRunning: false,
+      isWaitingForResponse: false,
+      isProcessing: false,
+    };
+  }
+
   const manager = CLIToolManager.getInstance();
   const allCliTools: readonly CLIToolType[] = CLI_TOOL_IDS;
 

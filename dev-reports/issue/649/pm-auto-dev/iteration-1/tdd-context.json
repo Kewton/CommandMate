@@ -1,0 +1,53 @@
+{
+  "issue_number": 649,
+  "title": "アシスタントチャット機能",
+  "acceptance_criteria": [
+    "Home 画面でアシスタントチャットが利用できる",
+    "登録済みリポジトリの一覧から作業ディレクトリを選択できる",
+    "インストール済みの全CLIツールから選択してセッションを開始できる",
+    "セッション開始時に CLI 使い方・リポジトリ情報がコンテキストとして付与される（CLIツール毎の付与方式に従う）",
+    "メッセージの送受信が正常に動作する",
+    "アシスタントのターミナル出力がリアルタイムに表示される",
+    "ターミナル出力のキャプチャ間隔が既存の capture API と同等である",
+    "セッション停止ボタンからグローバルセッションを停止できる",
+    "セッション実行中にリポジトリを変更した場合、確認ダイアログが表示される",
+    "サーバー再起動時に孤立した mcbd-{cli_tool_id}-__global__ セッションがクリーンアップされる",
+    "グローバルセッションがサイドバーの worktree 一覧に表示されない",
+    "チャットUIが折りたたみ/展開できる",
+    "既存の worktree セッション機能に影響がない（回帰テストパス）",
+    "ダークモード対応",
+    "モバイルレイアウトでチャットUIが適切に表示される",
+    "/api/assistant/* が認証ミドルウェアで保護されている",
+    "npm run lint / npx tsc --noEmit / npm run test:unit がパスする"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: src/lib/session/global-session-constants.ts 作成（GLOBAL_SESSION_WORKTREE_ID='__global__' 等の定数定義）",
+    "Task 1.2: src/types/assistant.ts 作成（StartAssistantRequest, StartAssistantResponse 等の型定義）",
+    "Task 2.1: src/lib/polling/global-session-poller.ts 作成（pollGlobalSession, stopGlobalSessionPolling, stopAllGlobalSessionPolling）",
+    "Task 2.2: src/app/api/assistant/start/route.ts 作成（POST /api/assistant/start、DB操作なし）",
+    "Task 2.3: src/app/api/assistant/terminal/route.ts 作成（POST /api/assistant/terminal）",
+    "Task 2.4: src/app/api/assistant/current-output/route.ts 作成（GET /api/assistant/current-output）",
+    "Task 2.5: src/app/api/assistant/session/route.ts 作成（DELETE /api/assistant/session）",
+    "Task 2.6: src/lib/assistant/context-builder.ts 作成（buildGlobalContext()）",
+    "Task 2.7: src/lib/session-cleanup.ts 変更（cleanupGlobalSessions() 追加）",
+    "Task 2.8: src/lib/session/worktree-status-helper.ts 変更（__global__ 除外フィルタ追加）",
+    "Task 2.9: src/lib/api/assistant-api.ts 作成（assistantApi クライアント）",
+    "Task 3.1: src/components/home/AssistantMessageInput.tsx 作成（送信専用入力）",
+    "Task 3.2: src/components/home/AssistantChatPanel.tsx 作成（メインパネル）",
+    "Task 3.3: src/app/page.tsx 変更（AssistantChatPanel 組み込み）",
+    "Task 4.1: tests/unit/global-session-poller.test.ts 作成",
+    "Task 4.2: tests/unit/session-cleanup-global.test.ts 作成",
+    "Task 4.3: tests/unit/api-assistant.test.ts 作成",
+    "Task 4.4: tests/unit/assistant-context-builder.test.ts 作成",
+    "Task 5.1: CLAUDE.md のモジュール一覧更新"
+  ],
+  "architecture_notes": {
+    "session_naming": "mcbd-{cli_tool_id}-__global__ 形式（既存 BaseCLITool.getSessionName('__global__') を再利用）",
+    "db_policy": "Phase 1 では DB 操作を一切行わない（chat_messages / session_states の FOREIGN KEY 制約回避）",
+    "polling": "既存 response-checker.ts を使わない。専用の pollGlobalSession() を新規実装",
+    "components": "MessageInput は直接流用しない。AssistantMessageInput を新規作成",
+    "security": "/api/assistant/* は AUTH_EXCLUDED_PATHS に追加しない（認証必須）"
+  },
+  "target_coverage": 80,
+  "work_plan_path": "dev-reports/issue/649/work-plan.md"
+}
