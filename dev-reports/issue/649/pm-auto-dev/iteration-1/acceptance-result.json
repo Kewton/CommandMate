@@ -1,0 +1,107 @@
+{
+  "status": "passed",
+  "criteria_results": [
+    {
+      "criterion": "Home画面でアシスタントチャットが利用できる",
+      "status": "passed",
+      "evidence": "src/app/page.tsx にて <AssistantChatPanel /> が組み込まれている（148行目）。data-testid='assistant-chat-panel' で識別可能。"
+    },
+    {
+      "criterion": "登録済みリポジトリの一覧から作業ディレクトリを選択できる",
+      "status": "passed",
+      "evidence": "AssistantChatPanel.tsx にて /api/worktrees からリポジトリ一覧を取得し、select要素（data-testid='assistant-repo-select'）で表示。displayName対応済み。"
+    },
+    {
+      "criterion": "インストール済みの全CLIツールから選択してセッションを開始できる",
+      "status": "passed",
+      "evidence": "UIはCLI_TOOL_IDS全件を表示し、POST /api/assistant/start でisInstalled()チェック実施（76-79行目）。未インストールツール選択時は400エラーで適切に拒否。"
+    },
+    {
+      "criterion": "セッション開始時にCLI使い方・リポジトリ情報がコンテキストとして付与される",
+      "status": "passed",
+      "evidence": "src/app/api/assistant/start/route.ts の84-86行目で buildGlobalContext() を呼び出し、cliTool.sendMessage() でコンテキスト送信。context-builder.ts にてツール名・リポジトリ一覧を含むコンテキスト文字列を生成。テスト（assistant-context-builder.test.ts 13テスト全パス）で検証済み。"
+    },
+    {
+      "criterion": "メッセージの送受信が正常に動作する",
+      "status": "passed",
+      "evidence": "POST /api/assistant/terminal でtmux sendKeys/sendSpecialKeysによるメッセージ送信。Copilot対応あり。GET /api/assistant/current-output でcapturePane経由の出力取得。assistant-api.ts にて型安全なクライアントAPI提供。"
+    },
+    {
+      "criterion": "アシスタントのターミナル出力がリアルタイムに表示される",
+      "status": "passed",
+      "evidence": "AssistantChatPanel.tsx でsetInterval(poll, GLOBAL_POLL_INTERVAL_MS)によるポーリング実装（113行目）。出力は<pre>要素にauto-scrollで表示（125-129行目）。"
+    },
+    {
+      "criterion": "ターミナル出力のキャプチャ間隔が既存のcapture APIと同等である",
+      "status": "passed",
+      "evidence": "GLOBAL_POLL_INTERVAL_MS=2000ms（global-session-constants.ts 22行目）。既存POLLING_INTERVAL=2000ms（response-poller-core.ts 21行目）と一致。"
+    },
+    {
+      "criterion": "セッション停止ボタンからグローバルセッションを停止できる",
+      "status": "passed",
+      "evidence": "AssistantChatPanel.tsx のhandleStop()でassistantApi.stopSession()呼び出し（170行目）。DELETE /api/assistant/session でstopGlobalSessionPolling + killSession実行。"
+    },
+    {
+      "criterion": "セッション実行中にリポジトリを変更した場合、確認ダイアログが表示される",
+      "status": "passed",
+      "evidence": "AssistantChatPanel.tsx のhandleRepoChange()（192-203行目）でsessionActive時にwindow.confirm()呼び出し。キャンセル時はreturnで変更を中止。"
+    },
+    {
+      "criterion": "サーバー再起動時に孤立したmcbd-{cli_tool_id}-__global__セッションがクリーンアップされる",
+      "status": "passed",
+      "evidence": "session-cleanup.ts のcleanupGlobalSessions()（246-273行目）がCLI_TOOL_IDS全ツールについてhasSession/killSession実施。syncWorktreesAndCleanup()から呼び出し（303-308行目）。テスト（session-cleanup-global.test.ts 5テスト全パス）で検証済み。"
+    },
+    {
+      "criterion": "グローバルセッションがサイドバーのworktree一覧に表示されない",
+      "status": "passed",
+      "evidence": "worktree-status-helper.ts のdetectWorktreeSessionStatus()（79-86行目）でGLOBAL_SESSION_WORKTREE_ID('__global__')の早期リターン実装。全ステータスfalseの空オブジェクトを返却。"
+    },
+    {
+      "criterion": "チャットUIが折りたたみ/展開できる",
+      "status": "passed",
+      "evidence": "AssistantChatPanel.tsx でcollapsed stateをlocalStorage永続化（COLLAPSED_KEY）。toggleCollapsed()でtoggle。data-testid='assistant-toggle-button'で操作可能。"
+    },
+    {
+      "criterion": "既存のworktreeセッション機能に影響がない（回帰テストパス）",
+      "status": "passed",
+      "evidence": "npm run test:unit で334テストファイル全パス、6319テスト成功（7スキップ、0失敗）。既存テストに回帰なし。"
+    },
+    {
+      "criterion": "ダークモード対応",
+      "status": "passed",
+      "evidence": "AssistantChatPanel.tsx に11箇所のdark:クラス適用（bg-gray-800, border-gray-700, text-gray-100等）。AssistantMessageInput.tsx にも2箇所のdark:クラス適用。"
+    },
+    {
+      "criterion": "モバイルレイアウトでチャットUIが適切に表示される",
+      "status": "passed",
+      "evidence": "AssistantChatPanel.tsx でflex-wrap（243行目）により小画面でのコントロール折り返し対応。max-w-[200px] truncateによるリポジトリ名省略。maxHeight: '50vh'によるビューポート比率制限。"
+    },
+    {
+      "criterion": "/api/assistant/*が認証ミドルウェアで保護されている",
+      "status": "passed",
+      "evidence": "AUTH_EXCLUDED_PATHSに'/api/assistant'関連パスが含まれていないことを確認（auth-config.ts 31-36行目、/login, /api/auth/* のみ）。middleware.tsは除外パス以外の全リクエストに認証を適用。"
+    },
+    {
+      "criterion": "npm run lint / npx tsc --noEmit / npm run test:unitがパスする",
+      "status": "passed",
+      "evidence": "lint: 'No ESLint warnings or errors'。tsc --noEmit: エラーなし（出力なし＝成功）。test:unit: 334ファイル全パス、6319テスト成功。"
+    }
+  ],
+  "test_results": {
+    "lint": "passed",
+    "type_check": "passed",
+    "unit_tests": "passed",
+    "total_tests": 6326,
+    "passed_tests": 6319,
+    "skipped_tests": 7,
+    "failed_tests": 0,
+    "test_files": 334
+  },
+  "issues": [
+    {
+      "severity": "low",
+      "description": "CLIツール選択UIが全ツール（CLI_TOOL_IDS）を表示し、インストール済みのみにフィルタリングしていない。テストシナリオ3では'installed tools only'と記載があるが、サーバーサイドでisInstalled()チェックが行われるため機能的には問題なし。UX改善として、フロントエンドでインストール済みツールのみ表示するか、未インストールツールにdisabled属性を付与することを推奨。"
+    }
+  ],
+  "summary": "全17件の受入条件を検証し、全てPASSED。npm run lint、npx tsc --noEmit、npm run test:unit（334ファイル/6319テスト）が全パス。実装は設計通りで、DB操作なし・認証保護済み・__global__フィルタ・クリーンアップ処理が正しく実装されている。軽微なUX改善点（CLIツールUIフィルタリング）を1件指摘したが、機能的な問題はなく受入基準を満たしている。"
+}
