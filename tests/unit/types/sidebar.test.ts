@@ -256,6 +256,45 @@ describe('sidebar types', () => {
 
       expect(result.lastActivity).toEqual(updateDate);
     });
+
+    it('should include worktreePath from worktree.path (Issue #651)', () => {
+      const worktree: Worktree = {
+        id: 'feature-test',
+        name: 'feature/test',
+        path: '/Users/dev/projects/my-repo/worktrees/feature-test',
+        repositoryPath: '/Users/dev/projects/my-repo',
+        repositoryName: 'MyRepo',
+      };
+
+      const result = toBranchItem(worktree);
+
+      expect(result.worktreePath).toBe('/Users/dev/projects/my-repo/worktrees/feature-test');
+    });
+
+    it('should accept optional worktreePath on SidebarBranchItem (Issue #651)', () => {
+      const item: SidebarBranchItem = {
+        id: 'test-id',
+        name: 'feature/test',
+        repositoryName: 'MyRepo',
+        status: 'idle',
+        hasUnread: false,
+        worktreePath: '/path/to/worktree',
+      };
+
+      expect(item.worktreePath).toBe('/path/to/worktree');
+    });
+
+    it('should have undefined worktreePath when SidebarBranchItem is created without it', () => {
+      const item: SidebarBranchItem = {
+        id: 'test-id',
+        name: 'feature/test',
+        repositoryName: 'MyRepo',
+        status: 'idle',
+        hasUnread: false,
+      };
+
+      expect(item.worktreePath).toBeUndefined();
+    });
   });
 
   describe('deriveCliStatus', () => {

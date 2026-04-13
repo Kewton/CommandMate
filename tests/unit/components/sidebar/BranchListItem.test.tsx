@@ -50,7 +50,8 @@ describe('BranchListItem', () => {
         />
       );
 
-      expect(screen.getByText('feature/test')).toBeInTheDocument();
+      // Branch name appears in both inline display and tooltip
+      expect(screen.getAllByText('feature/test').length).toBeGreaterThanOrEqual(1);
     });
 
     it('should display repository name', () => {
@@ -62,7 +63,8 @@ describe('BranchListItem', () => {
         />
       );
 
-      expect(screen.getByText('MyRepo')).toBeInTheDocument();
+      // Repository name appears in both inline display and tooltip
+      expect(screen.getAllByText('MyRepo').length).toBeGreaterThanOrEqual(1);
     });
 
     it('should render as button element', () => {
@@ -312,8 +314,168 @@ describe('BranchListItem', () => {
         />
       );
 
-      const nameElement = screen.getByText(longName.name);
-      expect(nameElement.className).toMatch(/truncate|overflow|ellipsis/);
+      // Branch name appears in inline display and tooltip; check the inline one has truncate
+      const nameElements = screen.getAllByText(longName.name);
+      const inlineElement = nameElements.find((el) => !el.closest('[role="tooltip"]'));
+      expect(inlineElement).toBeDefined();
+      expect(inlineElement!.className).toMatch(/truncate|overflow|ellipsis/);
+    });
+  });
+
+  describe('showRepositoryName prop (Issue #651)', () => {
+    it('should display repository name inline by default (showRepositoryName not set)', () => {
+      render(
+        <BranchListItem
+          branch={defaultBranch}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      // Repository name should appear at least twice: inline + tooltip
+      expect(screen.getAllByText('MyRepo').length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('should display repository name inline when showRepositoryName is true', () => {
+      render(
+        <BranchListItem
+          branch={defaultBranch}
+          isSelected={false}
+          onClick={() => {}}
+          showRepositoryName={true}
+        />
+      );
+
+      // Repository name should appear at least twice: inline + tooltip
+      expect(screen.getAllByText('MyRepo').length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('should not display repository name when showRepositoryName is false', () => {
+      render(
+        <BranchListItem
+          branch={defaultBranch}
+          isSelected={false}
+          onClick={() => {}}
+          showRepositoryName={false}
+        />
+      );
+
+      // Repository name should not be in the branch info section
+      // (it will still be in the tooltip)
+      const branchInfoTexts = screen.getByTestId('branch-list-item').querySelectorAll('p');
+      const visibleTexts = Array.from(branchInfoTexts)
+        .filter((el) => !el.closest('[role="tooltip"]'))
+        .map((el) => el.textContent);
+      expect(visibleTexts).not.toContain('MyRepo');
+    });
+  });
+
+  describe('Tooltip (Issue #651)', () => {
+    it('should render a tooltip with role="tooltip"', () => {
+      render(
+        <BranchListItem
+          branch={defaultBranch}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      expect(screen.getByRole('tooltip')).toBeInTheDocument();
+    });
+
+    it('should have tooltip id matching aria-describedby on button', () => {
+      render(
+        <BranchListItem
+          branch={defaultBranch}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      const button = screen.getByTestId('branch-list-item');
+      const tooltipId = `tooltip-${defaultBranch.id}`;
+      expect(button).toHaveAttribute('aria-describedby', tooltipId);
+
+      const tooltip = screen.getByRole('tooltip');
+      expect(tooltip).toHaveAttribute('id', tooltipId);
+    });
+
+    it('should display branch name in tooltip', () => {
+      render(
+        <BranchListItem
+          branch={defaultBranch}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      const tooltip = screen.getByRole('tooltip');
+      expect(tooltip.textContent).toContain('feature/test');
+    });
+
+    it('should display repository name in tooltip', () => {
+      render(
+        <BranchListItem
+          branch={defaultBranch}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      const tooltip = screen.getByRole('tooltip');
+      expect(tooltip.textContent).toContain('MyRepo');
+    });
+
+    it('should display status in tooltip', () => {
+      render(
+        <BranchListItem
+          branch={{ ...defaultBranch, status: 'running' }}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      const tooltip = screen.getByRole('tooltip');
+      expect(tooltip.textContent).toContain('running');
+    });
+
+    it('should display worktreePath in tooltip when provided', () => {
+      render(
+        <BranchListItem
+          branch={{ ...defaultBranch, worktreePath: '/path/to/worktree' }}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      const tooltip = screen.getByRole('tooltip');
+      expect(tooltip.textContent).toContain('/path/to/worktree');
+    });
+
+    it('should not crash when worktreePath is undefined', () => {
+      render(
+        <BranchListItem
+          branch={defaultBranch}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      const tooltip = screen.getByRole('tooltip');
+      expect(tooltip).toBeInTheDocument();
+    });
+
+    it('should include group classes for hover visibility', () => {
+      render(
+        <BranchListItem
+          branch={defaultBranch}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      const button = screen.getByTestId('branch-list-item');
+      expect(button.className).toMatch(/group/);
     });
   });
 
@@ -360,6 +522,20 @@ describe('BranchListItem', () => {
       fireEvent.click(button);
 
       expect(onClick).toHaveBeenCalled();
+    });
+
+    it('should include aria-label with repository name when showRepositoryName is false (Issue #651)', () => {
+      render(
+        <BranchListItem
+          branch={defaultBranch}
+          isSelected={false}
+          onClick={() => {}}
+          showRepositoryName={false}
+        />
+      );
+
+      const button = screen.getByTestId('branch-list-item');
+      expect(button.getAttribute('aria-label')).toContain('MyRepo');
     });
   });
 });

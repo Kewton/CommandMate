@@ -26,8 +26,8 @@ import type { SortKey, SortDirection, ViewMode } from '@/lib/sidebar-utils';
 // Constants
 // ============================================================================
 
-/** Default sidebar width in pixels (w-72 = 288px) */
-export const DEFAULT_SIDEBAR_WIDTH = 288;
+/** Default sidebar width in pixels (w-56 = 224px) */
+export const DEFAULT_SIDEBAR_WIDTH = 224;
 
 /** LocalStorage key for sort settings */
 export const SIDEBAR_SORT_STORAGE_KEY = 'mcbd-sidebar-sort';

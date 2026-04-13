@@ -143,9 +143,10 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('feature/test-1')).toBeInTheDocument();
-        expect(screen.getByText('feature/test-2')).toBeInTheDocument();
-        expect(screen.getByText('main')).toBeInTheDocument();
+        // Branch names appear in both inline display and tooltip
+        expect(screen.getAllByText('feature/test-1').length).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText('feature/test-2').length).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText('main').length).toBeGreaterThanOrEqual(1);
       });
     });
 
@@ -310,17 +311,17 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('feature/test-1')).toBeInTheDocument();
+        expect(screen.getAllByText('feature/test-1').length).toBeGreaterThanOrEqual(1);
       });
 
       // Click on a branch
-      const branchItem = screen.getByText('feature/test-1').closest('[data-testid="branch-list-item"]');
+      const branchItem = screen.getAllByText('feature/test-1')[0].closest('[data-testid="branch-list-item"]');
       if (branchItem) {
         fireEvent.click(branchItem);
       }
 
       // Branch should still be visible after click
-      expect(screen.getByText('feature/test-1')).toBeInTheDocument();
+      expect(screen.getAllByText('feature/test-1').length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -333,7 +334,7 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('feature/test-1')).toBeInTheDocument();
+        expect(screen.getAllByText('feature/test-1').length).toBeGreaterThanOrEqual(1);
       });
 
       // Type in search input
@@ -342,9 +343,9 @@ describe('Sidebar', () => {
 
       // Should show only matching branch
       await waitFor(() => {
-        expect(screen.getByText('feature/test-1')).toBeInTheDocument();
-        expect(screen.queryByText('feature/test-2')).not.toBeInTheDocument();
-        expect(screen.queryByText('main')).not.toBeInTheDocument();
+        expect(screen.getAllByText('feature/test-1').length).toBeGreaterThanOrEqual(1);
+        expect(screen.queryAllByText('feature/test-2').length).toBe(0);
+        expect(screen.queryAllByText('main').filter((el) => !el.closest('[role="tooltip"]')).length).toBe(0);
       });
     });
 
@@ -371,7 +372,7 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('feature/other')).toBeInTheDocument();
+        expect(screen.getAllByText('feature/other').length).toBeGreaterThanOrEqual(1);
       });
 
       // Type in search input for repository name
@@ -380,8 +381,8 @@ describe('Sidebar', () => {
 
       // Should show only matching branch
       await waitFor(() => {
-        expect(screen.getByText('feature/other')).toBeInTheDocument();
-        expect(screen.queryByText('feature/test-1')).not.toBeInTheDocument();
+        expect(screen.getAllByText('feature/other').length).toBeGreaterThanOrEqual(1);
+        expect(screen.queryAllByText('feature/test-1').length).toBe(0);
       });
     });
 
@@ -393,7 +394,7 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('feature/test-1')).toBeInTheDocument();
+        expect(screen.getAllByText('feature/test-1').length).toBeGreaterThanOrEqual(1);
       });
 
       // Type in search input with non-matching query
@@ -414,7 +415,7 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('feature/test-1')).toBeInTheDocument();
+        expect(screen.getAllByText('feature/test-1').length).toBeGreaterThanOrEqual(1);
       });
 
       // Type and then clear search input
@@ -422,16 +423,16 @@ describe('Sidebar', () => {
       fireEvent.change(searchInput, { target: { value: 'test-1' } });
 
       await waitFor(() => {
-        expect(screen.queryByText('main')).not.toBeInTheDocument();
+        expect(screen.queryAllByText('main').filter((el) => !el.closest('[role="tooltip"]')).length).toBe(0);
       });
 
       fireEvent.change(searchInput, { target: { value: '' } });
 
       // Should show all branches again
       await waitFor(() => {
-        expect(screen.getByText('feature/test-1')).toBeInTheDocument();
-        expect(screen.getByText('feature/test-2')).toBeInTheDocument();
-        expect(screen.getByText('main')).toBeInTheDocument();
+        expect(screen.getAllByText('feature/test-1').length).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText('feature/test-2').length).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText('main').length).toBeGreaterThanOrEqual(1);
       });
     });
 
@@ -443,7 +444,7 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('feature/test-1')).toBeInTheDocument();
+        expect(screen.getAllByText('feature/test-1').length).toBeGreaterThanOrEqual(1);
       });
 
       // Type in search input with different case
@@ -452,9 +453,9 @@ describe('Sidebar', () => {
 
       // Should show matching branches (case-insensitive)
       await waitFor(() => {
-        expect(screen.getByText('feature/test-1')).toBeInTheDocument();
-        expect(screen.getByText('feature/test-2')).toBeInTheDocument();
-        expect(screen.queryByText('main')).not.toBeInTheDocument();
+        expect(screen.getAllByText('feature/test-1').length).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText('feature/test-2').length).toBeGreaterThanOrEqual(1);
+        expect(screen.queryAllByText('main').filter((el) => !el.closest('[role="tooltip"]')).length).toBe(0);
       });
     });
   });
@@ -526,9 +527,10 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('feature/a-work')).toBeInTheDocument();
-        expect(screen.getByText('feature/b-work')).toBeInTheDocument();
-        expect(screen.getByText('main')).toBeInTheDocument();
+        // Branch names appear in both inline display and tooltip
+        expect(screen.getAllByText('feature/a-work').length).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText('feature/b-work').length).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText('main').length).toBeGreaterThanOrEqual(1);
       });
     });
 
@@ -552,19 +554,17 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('feature/a-work')).toBeInTheDocument();
+        expect(screen.getAllByText('feature/a-work').length).toBeGreaterThanOrEqual(1);
       });
 
       // Click the first group header to collapse it
       const groupHeaders = screen.getAllByTestId('group-header');
       fireEvent.click(groupHeaders[0]);
 
-      // Branches in collapsed group should be hidden
+      // Branches in collapsed group should be hidden (no inline or tooltip instances)
       await waitFor(() => {
-        // RepoA branches should be collapsed
-        expect(screen.queryByText('feature/a-work')).not.toBeInTheDocument();
-        // RepoB branches should still be visible
-        expect(screen.getByText('feature/b-work')).toBeInTheDocument();
+        expect(screen.queryAllByText('feature/a-work').length).toBe(0);
+        expect(screen.getAllByText('feature/b-work').length).toBeGreaterThanOrEqual(1);
       });
     });
 
@@ -576,21 +576,21 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('feature/a-work')).toBeInTheDocument();
+        expect(screen.getAllByText('feature/a-work').length).toBeGreaterThanOrEqual(1);
       });
 
       // Collapse
       const groupHeaders1 = screen.getAllByTestId('group-header');
       fireEvent.click(groupHeaders1[0]);
       await waitFor(() => {
-        expect(screen.queryByText('feature/a-work')).not.toBeInTheDocument();
+        expect(screen.queryAllByText('feature/a-work').length).toBe(0);
       });
 
       // Expand (re-query headers after re-render)
       const groupHeaders2 = screen.getAllByTestId('group-header');
       fireEvent.click(groupHeaders2[0]);
       await waitFor(() => {
-        expect(screen.getByText('feature/a-work')).toBeInTheDocument();
+        expect(screen.getAllByText('feature/a-work').length).toBeGreaterThanOrEqual(1);
       });
     });
 
@@ -602,7 +602,7 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('feature/a-work')).toBeInTheDocument();
+        expect(screen.getAllByText('feature/a-work').length).toBeGreaterThanOrEqual(1);
       });
 
       // Collapse RepoA group
@@ -610,7 +610,7 @@ describe('Sidebar', () => {
       fireEvent.click(groupHeaders1[0]);
 
       await waitFor(() => {
-        expect(screen.queryByText('feature/a-work')).not.toBeInTheDocument();
+        expect(screen.queryAllByText('feature/a-work').length).toBe(0);
       });
 
       // Search for something in RepoA - should override collapsed state
@@ -618,7 +618,7 @@ describe('Sidebar', () => {
       fireEvent.change(searchInput, { target: { value: 'a-work' } });
 
       await waitFor(() => {
-        expect(screen.getByText('feature/a-work')).toBeInTheDocument();
+        expect(screen.getAllByText('feature/a-work').length).toBeGreaterThanOrEqual(1);
       });
     });
 
@@ -630,7 +630,7 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('feature/a-work')).toBeInTheDocument();
+        expect(screen.getAllByText('feature/a-work').length).toBeGreaterThanOrEqual(1);
       });
 
       const searchInput = screen.getByPlaceholderText(/search/i);
@@ -638,7 +638,7 @@ describe('Sidebar', () => {
 
       await waitFor(() => {
         // RepoB group should be visible
-        expect(screen.getByText('feature/b-work')).toBeInTheDocument();
+        expect(screen.getAllByText('feature/b-work').length).toBeGreaterThanOrEqual(1);
         // RepoA group header should not be visible (no matching branches)
         const groupHeaders = screen.getAllByTestId('group-header');
         expect(groupHeaders.length).toBe(1);
@@ -660,8 +660,8 @@ describe('Sidebar', () => {
       await waitFor(() => {
         // In flat mode, group headers should not be present
         expect(screen.queryAllByTestId('group-header').length).toBe(0);
-        // Branches should still be visible
-        expect(screen.getByText('feature/test-1')).toBeInTheDocument();
+        // Branches should still be visible (inline + tooltip)
+        expect(screen.getAllByText('feature/test-1').length).toBeGreaterThanOrEqual(1);
       });
     });
   });
@@ -773,8 +773,8 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('z-feature')).toBeInTheDocument();
-        expect(screen.getByText('a-feature')).toBeInTheDocument();
+        expect(screen.getAllByText('z-feature').length).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText('a-feature').length).toBeGreaterThanOrEqual(1);
       });
     });
   });
