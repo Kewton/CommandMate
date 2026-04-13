@@ -1,0 +1,116 @@
+{
+  "issue_number": 652,
+  "test_date": "2026-04-14",
+  "environment": {
+    "port": 3010,
+    "branch": "feature/652-worktree",
+    "worktree_id": "commandmate-issue-652-feature-652-worktree"
+  },
+  "results": [
+    {
+      "id": "TC-001",
+      "title": "メモを10件まで登録できること（APIレベル）",
+      "status": "pass",
+      "command": "curl -X POST /api/worktrees/$WORKTREE_ID/memos (x10)",
+      "stdout": "Memo 1-10: HTTP 201 (全10件)",
+      "exit_code": 0,
+      "evidence_note": "10件全てHTTP 201で登録成功"
+    },
+    {
+      "id": "TC-002",
+      "title": "10件登録後にリスト取得で10件表示されること",
+      "status": "pass",
+      "command": "curl /api/worktrees/$WORKTREE_ID/memos | length",
+      "stdout": "10",
+      "exit_code": 0,
+      "evidence_note": "memos配列長: 10"
+    },
+    {
+      "id": "TC-003",
+      "title": "11件目の登録でエラーになること",
+      "status": "pass",
+      "command": "curl -X POST /api/worktrees/$WORKTREE_ID/memos (11件目)",
+      "stdout": "HTTP Status: 400, Error message: Maximum memo limit (10) reached",
+      "exit_code": 0,
+      "evidence_note": "400エラーでエラーメッセージに '10' が含まれる"
+    },
+    {
+      "id": "TC-004",
+      "title": "メモの編集（PUT）が正常動作すること",
+      "status": "pass",
+      "command": "curl -X PUT /api/worktrees/$WORKTREE_ID/memos/$MEMO_ID",
+      "stdout": "更新後タイトル: Updated Title",
+      "exit_code": 0,
+      "evidence_note": "HTTP 200でタイトル更新成功"
+    },
+    {
+      "id": "TC-005",
+      "title": "メモの削除（DELETE）が正常動作すること",
+      "status": "pass",
+      "command": "curl -X DELETE /api/worktrees/$WORKTREE_ID/memos/$MEMO_ID",
+      "stdout": "HTTP Status: 200",
+      "exit_code": 0,
+      "evidence_note": "HTTP 200で削除成功"
+    },
+    {
+      "id": "TC-006",
+      "title": "メモ削除後に再び10件まで登録できること",
+      "status": "pass",
+      "command": "curl -X POST /api/worktrees/$WORKTREE_ID/memos (削除後)",
+      "stdout": "HTTP Status: 201",
+      "exit_code": 0,
+      "evidence_note": "削除後に再登録成功（上限管理正常）"
+    },
+    {
+      "id": "TC-007",
+      "title": "npm run lint がパスすること",
+      "status": "pass",
+      "command": "npm run lint",
+      "stdout": "✔ No ESLint warnings or errors",
+      "exit_code": 0,
+      "evidence_note": "ESLintエラー0件"
+    },
+    {
+      "id": "TC-008",
+      "title": "npx tsc --noEmit がパスすること",
+      "status": "pass",
+      "command": "npx tsc --noEmit",
+      "stdout": "(no output)",
+      "exit_code": 0,
+      "evidence_note": "TypeScript型エラー0件"
+    },
+    {
+      "id": "TC-009",
+      "title": "npm run test:unit がパスすること",
+      "status": "pass",
+      "command": "npm run test:unit",
+      "stdout": "Test Files 331 passed (331) / Tests 6275 passed | 7 skipped (6282)",
+      "exit_code": 0,
+      "evidence_note": "全ユニットテスト通過"
+    },
+    {
+      "id": "TC-010",
+      "title": "memos統合テストがパスすること",
+      "status": "pass",
+      "command": "npx vitest run tests/integration/api/memos.test.ts",
+      "stdout": "Test Files 1 passed (1) / Tests 24 passed (24)",
+      "exit_code": 0,
+      "evidence_note": "24件全テスト通過（10件制限テスト含む）"
+    },
+    {
+      "id": "TC-011",
+      "title": "定数がmemo-config.tsからimportされていること",
+      "status": "pass",
+      "command": "grep -n 'const MAX_MEMOS' MemoPane.tsx / grep memo-config MemoPane.tsx",
+      "stdout": "ローカル定数: なし / import: '@/config/memo-config' 確認",
+      "exit_code": 0,
+      "evidence_note": "DRY原則が正しく実施されている"
+    }
+  ],
+  "summary": {
+    "total": 11,
+    "passed": 11,
+    "failed": 0,
+    "pass_rate": "100%"
+  }
+}

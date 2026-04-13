@@ -1,0 +1,19 @@
+{
+  "issue_number": 652,
+  "refactor_targets": [
+    "src/config/memo-config.ts",
+    "src/components/worktree/MemoPane.tsx",
+    "src/app/api/worktrees/[id]/memos/route.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "lint_errors": 0,
+    "tsc_errors": 0
+  },
+  "improvement_goals": [
+    "コードの可読性確認（コメント・JSDoc品質）",
+    "既存のプロジェクトパターンとの整合性確認",
+    "不要なコードや冗長な記述がないか確認"
+  ],
+  "context": "Issue #652は小規模な定数リファクタリング。MAX_MEMOSを5→10に変更し、DRY原則に従いsrc/config/memo-config.tsに一元化した。実装は完了しており、全テストパス済み。"
+}

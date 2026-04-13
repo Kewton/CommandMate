@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Issue #652 受入テスト報告書</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; padding: 20px; }
+  .container { max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; color: #1a1a2e; margin-bottom: 8px; }
+  h2 { font-size: 1.2rem; color: #16213e; margin: 24px 0 12px; border-bottom: 2px solid #0f3460; padding-bottom: 6px; }
+  .header { background: #1a1a2e; color: white; padding: 24px; border-radius: 8px; margin-bottom: 24px; }
+  .header p { margin-top: 6px; opacity: 0.85; font-size: 0.9rem; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; }
+  .badge-pass { background: #d4edda; color: #155724; }
+  .badge-fail { background: #f8d7da; color: #721c24; }
+  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+  .summary-card { background: white; border-radius: 8px; padding: 16px; text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+  .summary-card .number { font-size: 2rem; font-weight: 700; }
+  .summary-card .label { font-size: 0.8rem; color: #666; margin-top: 4px; }
+  .number-total { color: #0f3460; }
+  .number-pass { color: #28a745; }
+  .number-fail { color: #dc3545; }
+  .number-rate { color: #17a2b8; }
+  .test-card { background: white; border-radius: 8px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); border-left: 4px solid #28a745; }
+  .test-card.fail { border-left-color: #dc3545; }
+  .test-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .test-id { font-weight: 700; color: #0f3460; font-size: 0.85rem; }
+  .test-title { font-weight: 600; flex: 1; margin: 0 12px; }
+  .test-detail { font-size: 0.85rem; color: #555; }
+  .test-detail dt { font-weight: 600; color: #333; margin-top: 8px; }
+  .test-detail dd { font-family: monospace; background: #f8f9fa; padding: 6px 10px; border-radius: 4px; margin-top: 4px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  .info-table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+  .info-table th, .info-table td { padding: 10px 14px; text-align: left; border-bottom: 1px solid #e9ecef; font-size: 0.9rem; }
+  .info-table th { background: #f8f9fa; font-weight: 600; width: 160px; }
+  .footer { text-align: center; margin-top: 32px; font-size: 0.8rem; color: #888; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="header">
+  <h1>実機受入テスト報告書</h1>
+  <p>Issue #652 — feat(memo): CMATE Notes の上限を 5 → 10 に引き上げ</p>
+  <p>テスト日: 2026-04-14 | ブランチ: feature/652-worktree | 環境: localhost:3010</p>
+</div>
+
+<h2>サマリー</h2>
+<div class="summary-grid">
+  <div class="summary-card">
+    <div class="number number-total">11</div>
+    <div class="label">テスト総数</div>
+  </div>
+  <div class="summary-card">
+    <div class="number number-pass">11</div>
+    <div class="label">合格</div>
+  </div>
+  <div class="summary-card">
+    <div class="number number-fail">0</div>
+    <div class="label">不合格</div>
+  </div>
+  <div class="summary-card">
+    <div class="number number-rate">100%</div>
+    <div class="label">合格率</div>
+  </div>
+</div>
+
+<h2>テスト環境</h2>
+<table class="info-table">
+  <tr><th>Issue</th><td>#652 feat(memo): CMATE Notes の上限を 5 → 10 に引き上げ</td></tr>
+  <tr><th>テスト日</th><td>2026-04-14</td></tr>
+  <tr><th>ブランチ</th><td>feature/652-worktree</td></tr>
+  <tr><th>サーバーポート</th><td>3010（テスト後停止済み）</td></tr>
+  <tr><th>Worktree ID</th><td>commandmate-issue-652-feature-652-worktree</td></tr>
+</table>
+
+<h2>受入条件との対応確認</h2>
+<table class="info-table">
+  <tr><th>受入条件</th><th>対応TC</th><th>結果</th></tr>
+  <tr><td>Notes を 10 件まで登録できる</td><td>TC-001, TC-002</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>11 件目の登録時にエラーメッセージが表示される</td><td>TC-003</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>既存の Notes 機能（作成・編集・削除）が正常動作する</td><td>TC-004〜TC-006</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>npm run lint がパスする</td><td>TC-007</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>npx tsc --noEmit がパスする</td><td>TC-008</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>npm run test:unit がパスする</td><td>TC-009</td><td><span class="badge badge-pass">PASS</span></td></tr>
+  <tr><td>npm run test:integration がパスする</td><td>TC-010</td><td><span class="badge badge-pass">PASS</span></td></tr>
+</table>
+
+<h2>テストケース詳細</h2>
+
+<div class="test-card">
+  <div class="test-header">
+    <span class="test-id">TC-001</span>
+    <span class="test-title">メモを10件まで登録できること（APIレベル）</span>
+    <span class="badge badge-pass">PASS</span>
+  </div>
+  <dl class="test-detail">
+    <dt>実行コマンド</dt><dd>curl -X POST /api/worktrees/$WORKTREE_ID/memos × 10回</dd>
+    <dt>結果</dt><dd>Memo 1: HTTP 201
+Memo 2: HTTP 201
+Memo 3: HTTP 201
+Memo 4: HTTP 201
+Memo 5: HTTP 201
+Memo 6: HTTP 201
+Memo 7: HTTP 201
+Memo 8: HTTP 201
+Memo 9: HTTP 201
+Memo 10: HTTP 201</dd>
+    <dt>判定根拠</dt><dd>10件全てHTTP 201で登録成功。旧上限（5件）を超えても正常に登録できることを確認。</dd>
+  </dl>
+</div>
+
+<div class="test-card">
+  <div class="test-header">
+    <span class="test-id">TC-002</span>
+    <span class="test-title">10件登録後にリスト取得で10件表示されること</span>
+    <span class="badge badge-pass">PASS</span>
+  </div>
+  <dl class="test-detail">
+    <dt>実行コマンド</dt><dd>curl /api/worktrees/$WORKTREE_ID/memos | python3 -c "print(len(data['memos']))"</dd>
+    <dt>結果</dt><dd>メモ件数: 10</dd>
+    <dt>判定根拠</dt><dd>GET APIで10件全て取得できることを確認。</dd>
+  </dl>
+</div>
+
+<div class="test-card">
+  <div class="test-header">
+    <span class="test-id">TC-003</span>
+    <span class="test-title">11件目の登録でエラーになること</span>
+    <span class="badge badge-pass">PASS</span>
+  </div>
+  <dl class="test-detail">
+    <dt>実行コマンド</dt><dd>curl -X POST /api/worktrees/$WORKTREE_ID/memos -d '{"title":"Memo 11",...}'</dd>
+    <dt>結果</dt><dd>HTTP Status: 400
+Error message: "Maximum memo limit (10) reached"</dd>
+    <dt>判定根拠</dt><dd>HTTP 400エラーが返り、エラーメッセージに上限値「10」が明示されている。</dd>
+  </dl>
+</div>
+
+<div class="test-card">
+  <div class="test-header">
+    <span class="test-id">TC-004</span>
+    <span class="test-title">メモの編集（PUT）が正常動作すること</span>
+    <span class="badge badge-pass">PASS</span>
+  </div>
+  <dl class="test-detail">
+    <dt>実行コマンド</dt><dd>curl -X PUT /api/worktrees/$WORKTREE_ID/memos/$MEMO_ID -d '{"title":"Updated Title",...}'</dd>
+    <dt>結果</dt><dd>更新後タイトル: Updated Title (HTTP 200)</dd>
+    <dt>判定根拠</dt><dd>既存メモの編集機能が正常に動作する。</dd>
+  </dl>
+</div>
+
+<div class="test-card">
+  <div class="test-header">
+    <span class="test-id">TC-005</span>
+    <span class="test-title">メモの削除（DELETE）が正常動作すること</span>
+    <span class="badge badge-pass">PASS</span>
+  </div>
+  <dl class="test-detail">
+    <dt>実行コマンド</dt><dd>curl -X DELETE /api/worktrees/$WORKTREE_ID/memos/$MEMO_ID</dd>
+    <dt>結果</dt><dd>HTTP Status: 200</dd>
+    <dt>判定根拠</dt><dd>既存メモの削除機能が正常に動作する。</dd>
+  </dl>
+</div>
+
+<div class="test-card">
+  <div class="test-header">
+    <span class="test-id">TC-006</span>
+    <span class="test-title">メモ削除後に再び10件まで登録できること</span>
+    <span class="badge badge-pass">PASS</span>
+  </div>
+  <dl class="test-detail">
+    <dt>実行コマンド</dt><dd>curl -X DELETE (1件削除) → curl -X POST (1件追加)</dd>
+    <dt>結果</dt><dd>DELETE: HTTP 200 → POST: HTTP 201</dd>
+    <dt>判定根拠</dt><dd>削除後に上限カウントが正しく更新され、再登録が成功する。</dd>
+  </dl>
+</div>
+
+<div class="test-card">
+  <div class="test-header">
+    <span class="test-id">TC-007</span>
+    <span class="test-title">npm run lint がパスすること</span>
+    <span class="badge badge-pass">PASS</span>
+  </div>
+  <dl class="test-detail">
+    <dt>実行コマンド</dt><dd>npm run lint</dd>
+    <dt>結果</dt><dd>✔ No ESLint warnings or errors (exit code: 0)</dd>
+    <dt>判定根拠</dt><dd>ESLintエラー0件。</dd>
+  </dl>
+</div>
+
+<div class="test-card">
+  <div class="test-header">
+    <span class="test-id">TC-008</span>
+    <span class="test-title">npx tsc --noEmit がパスすること</span>
+    <span class="badge badge-pass">PASS</span>
+  </div>
+  <dl class="test-detail">
+    <dt>実行コマンド</dt><dd>npx tsc --noEmit</dd>
+    <dt>結果</dt><dd>(no output) exit code: 0</dd>
+    <dt>判定根拠</dt><dd>TypeScript型エラー0件。</dd>
+  </dl>
+</div>
+
+<div class="test-card">
+  <div class="test-header">
+    <span class="test-id">TC-009</span>
+    <span class="test-title">npm run test:unit がパスすること</span>
+    <span class="badge badge-pass">PASS</span>
+  </div>
+  <dl class="test-detail">
+    <dt>実行コマンド</dt><dd>npm run test:unit</dd>
+    <dt>結果</dt><dd>Test Files  331 passed (331)
+Tests  6275 passed | 7 skipped (6282)
+exit code: 0</dd>
+    <dt>判定根拠</dt><dd>全ユニットテスト通過（MemoPane, MemoAddButton含む）。</dd>
+  </dl>
+</div>
+
+<div class="test-card">
+  <div class="test-header">
+    <span class="test-id">TC-010</span>
+    <span class="test-title">memos統合テストがパスすること</span>
+    <span class="badge badge-pass">PASS</span>
+  </div>
+  <dl class="test-detail">
+    <dt>実行コマンド</dt><dd>npx vitest run tests/integration/api/memos.test.ts</dd>
+    <dt>結果</dt><dd>Test Files  1 passed (1)
+Tests  24 passed (24)
+exit code: 0</dd>
+    <dt>判定根拠</dt><dd>24件全テスト通過。10件制限テスト「should return 400 when memo limit (10) exceeded」を含む。</dd>
+  </dl>
+</div>
+
+<div class="test-card">
+  <div class="test-header">
+    <span class="test-id">TC-011</span>
+    <span class="test-title">定数がmemo-config.tsからimportされていること（DRY確認）</span>
+    <span class="badge badge-pass">PASS</span>
+  </div>
+  <dl class="test-detail">
+    <dt>実行コマンド</dt><dd>grep "const MAX_MEMOS" MemoPane.tsx / grep "memo-config" MemoPane.tsx</dd>
+    <dt>結果</dt><dd>MemoPane.tsx ローカル定数: なし
+memos/route.ts ローカル定数: なし
+MemoPane.tsx: import { MAX_MEMOS } from '@/config/memo-config'; (line 15)
+memos/route.ts: import { MAX_MEMOS } from '@/config/memo-config'; (line 11)</dd>
+    <dt>判定根拠</dt><dd>DRY原則が正しく実施され、src/config/memo-config.ts から一元的にimportされている。</dd>
+  </dl>
+</div>
+
+<div class="footer">
+  <p>CommandMate Issue #652 UAT報告書 — 生成日: 2026-04-14 | 全11件 PASS (100%)</p>
+</div>
+
+</div>
+</body>
+</html>

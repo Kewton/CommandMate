@@ -1,0 +1,60 @@
+{
+  "stage": 1,
+  "focus": "通常（1回目）",
+  "reviewer": "opus",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "Must Fix",
+      "title": "テストファイルパスが誤っている",
+      "description": "Issueの「実装タスク」セクションおよび「影響範囲」テーブルで参照されている `tests/unit/lib/db-memo.test.ts` は存在しない。実際にメモ上限テストが存在するのは `tests/integration/api/memos.test.ts`（行234: `should return 400 when memo limit (5) exceeded`）である。仮説検証でRejected判定済み。",
+      "suggestion": "Issue本文の実装タスク欄と影響範囲テーブルのテストファイルパスを `tests/integration/api/memos.test.ts` に修正する。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "Should Fix",
+      "title": "影響範囲にテストファイルが不足している（MemoPane単体テスト・MemoAddButton単体テスト）",
+      "description": "影響範囲テーブルに記載されているテストファイルは1つだけだが、実際にはメモ上限値「5」をハードコードまたは参照しているテストが3ファイル存在する。\n\n1. `tests/integration/api/memos.test.ts` 行234: API上限テスト（5件制限テスト名・ループ回数の更新が必要）\n2. `tests/unit/components/worktree/MemoPane.test.tsx` 行171-172: `should disable add button when at memo limit (5)` テスト名にハードコードされた「5」と、5件分のモックデータ生成\n3. `tests/unit/components/worktree/MemoAddButton.test.tsx` 行15: defaultPropsの `maxCount: 5` および多数のテストケースで `maxCount={5}` がハードコードされている\n\n共有定数に切り出す場合、これらのテストファイルも更新対象になる。切り出さない場合でも、テスト名やモックデータの件数を10に合わせる更新が必要。",
+      "suggestion": "影響範囲テーブルに以下を追加する:\n- `tests/integration/api/memos.test.ts` - 上限テスト更新（5→10）\n- `tests/unit/components/worktree/MemoPane.test.tsx` - 上限テスト更新（5→10）\n- `tests/unit/components/worktree/MemoAddButton.test.tsx` - maxCountデフォルト値更新（任意、テスト自体はprops経由なので動作に影響なし）"
+    },
+    {
+      "id": "S1-003",
+      "severity": "Should Fix",
+      "title": "DRY切り出しの設計方針が「検討」のみで不明確",
+      "description": "Issueでは「共有定数への切り出し検討」としてタスクリストに含まれているが、実施するかどうかの判断基準が明確でない。既にプロジェクトには `src/config/repository-config.ts`（MAX_DISPLAY_NAME_LENGTH）や `src/config/timer-constants.ts`（MAX_TIMERS_PER_WORKTREE）など、同種の共有定数ファイルが複数存在し、DRY原則に沿ったパターンが確立されている。また、Issue #19の過去レビューでもこのDRY違反が指摘済みである（`dev-reports/issue/19/pm-auto-dev/refactor-result.json` に記録）。",
+      "suggestion": "「検討」ではなく「実施」として `src/config/memo-config.ts` への切り出しをタスクに含めることを推奨する。プロジェクトの既存パターン（repository-config.ts, timer-constants.ts等）に倣い、以下の形が適切:\n\n```typescript\n// src/config/memo-config.ts\nexport const MAX_MEMOS = 10;\n```\n\nこれにより MemoPane.tsx と memos/route.ts の両方が同一ソースを参照するようになり、値の不整合リスクを排除できる。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "Should Fix",
+      "title": "受入条件に「テストがパスすること」のスコープが不足",
+      "description": "受入条件の4項目目に `npm run test:unit` がパスすることと記載されているが、メモ上限テストの本体は `tests/integration/api/memos.test.ts`（integration test）に存在する。`npm run test:unit` だけでは上限変更の正当性が検証できない。",
+      "suggestion": "受入条件に `npm run test:integration` のパスも追加する。または `npm test`（全テスト）に変更する。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "Nice to Have",
+      "title": "route.ts内のpositionループ上限がMAX_MEMOSを参照している",
+      "description": "`src/app/api/worktrees/[id]/memos/route.ts` 行120で、自動ポジション決定ロジックが `while (usedPositions.has(position) && position < MAX_MEMOS)` としてMAX_MEMOSをループ上限に使用している。値を5→10に変更すれば自動的に追従するため機能的な問題はないが、この隠れた依存関係をIssueの影響範囲セクションに「変更内容」として明記しておくとレビューアの理解を助ける。",
+      "suggestion": "影響範囲テーブルの `memos/route.ts` の変更内容欄に「MAX_MEMOS変更（上限チェック＋positionループ上限に影響）」と追記する。"
+    },
+    {
+      "id": "S1-006",
+      "severity": "Nice to Have",
+      "title": "docs/module-reference.md のMemoPane記述にハードコードされた「最大5件」がある",
+      "description": "`docs/module-reference.md` 行115に「メモ一覧コンテナ（最大5件、GET/POST/DELETE操作...）」と記載されている。定数変更時にドキュメントも合わせて更新しないと、コードとドキュメントの間に不整合が生じる。",
+      "suggestion": "影響範囲に `docs/module-reference.md` のMemoPane記述更新を追加する。"
+    },
+    {
+      "id": "S1-007",
+      "severity": "Nice to Have",
+      "title": "受入条件の「並び替え」機能はMemoPane UIに未実装の可能性",
+      "description": "受入条件に「既存の Notes 機能（作成・編集・削除・並び替え）が正常動作する」とあるが、MemoPane.tsxのソースコードおよび統合テストにreorder/drag関連のUIコードが見当たらない。`memo-db.ts` に `reorderMemos` 関数は存在するが、UIから呼び出されているかはソースの調査範囲では確認できなかった。受入条件に含める場合は、テスト手順を明確にすべき。",
+      "suggestion": "並び替え機能がUIに存在する場合はそのテスト手順を明記する。存在しない場合は受入条件から「並び替え」を削除する。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 3,
+  "nice_to_have_count": 3,
+  "summary": "Issue #652は全体的によく整理されたIssueだが、1件のMust Fix（テストファイルパスの誤り）と3件のShould Fix（テスト影響範囲の不足、DRY切り出しの方針不明確、受入条件のテストスコープ不足）がある。テストファイルパスが `tests/unit/lib/db-memo.test.ts`（存在しない）と記載されている点は実装着手前に必ず修正が必要。また、実際に上限値をハードコードしているテストは3ファイルに分散しており、影響範囲テーブルへの追加が推奨される。DRY切り出しについては、プロジェクト既存パターン（repository-config.ts, timer-constants.ts）との整合性から「検討」ではなく「実施」とするのが適切。"
+}

@@ -1,0 +1,7 @@
+{
+  "stage": 2,
+  "applied_findings": ["S1-001", "S1-002", "S1-003", "S1-004"],
+  "skipped_findings": [],
+  "github_issue_updated": true,
+  "summary": "4件の指摘事項を全てIssue #652に反映完了。S1-001: テストファイルパスを tests/unit/lib/db-memo.test.ts から tests/integration/api/memos.test.ts に修正。S1-002: 影響範囲テーブルに tests/integration/api/memos.test.ts と tests/unit/components/worktree/MemoPane.test.tsx を追加。S1-003: DRY切り出しを「検討」から「実施」に変更し、src/config/memo-config.ts の新規作成を実装タスクに明記。S1-004: 受入条件に npm run test:integration を追加。"
+}

@@ -112,7 +112,7 @@
 | `src/app/api/worktrees/[id]/marp-render/route.ts` | MARPスライドサーバーサイドレンダリングAPIエンドポイント（**Issue #438**: POST /api/worktrees/[id]/marp-render、リクエスト: { markdownContent: string }、MAX_MARP_CONTENT_LENGTH=1MB DoS防御、worktree存在確認、@marp-team/marp-coreでHTMLスライド配列生成、レスポンス: { slides: string[] }、固定文字列エラーレスポンス） |
 | `src/components/worktree/MarkdownEditor.tsx` | マークダウンエディタコンポーネント（**Issue #389: auto-saveモード追加** - auto-save ON/OFFトグル（data-testid="auto-save-toggle"）、useAutoSave統合（debounceMs=3000ms）、saveToApi（純粋API呼び出し、saveFnパラメータを使用）とsaveContent（isDirtyガード付き手動保存）の責務分離、保存状態インジケーター（data-testid="auto-save-indicator"）、auto-save ON時Save非表示、beforeunload条件拡張（isDirty OR isAutoSaving）、Ctrl+S分岐（auto-save ON時はsaveNow()+onSave()）、handleClose async化（saveNow()+autoSaveError確認ダイアログ）、エラーフォールバック（auto-save OFF切り替え+Toast）。**Issue #410: WorktreeDetailRefactored.tsxからnext/dynamicでdynamic importされる（ssr: false）、rehype-highlight/highlight.js CSSを含む全チャンクがコードスプリットされる**。**Issue #411: React.memo()ラップ（条件付き描画のため効果限定的）**） |
 | `src/components/worktree/MemoCard.tsx` | メモカードコンポーネント（インライン編集・自動保存・削除ボタン。**Issue #321: コピーボタン追加**、Copy/Checkアイコン切替（2秒）、useRefタイマークリーンアップ（S1-002）、COPY_FEEDBACK_DURATION_MS定数、サイレントエラーハンドリング） |
-| `src/components/worktree/MemoPane.tsx` | メモ一覧コンテナ（最大5件、GET/POST/DELETE操作、ローディング・エラー状態管理） |
+| `src/components/worktree/MemoPane.tsx` | メモ一覧コンテナ（最大10件、GET/POST/DELETE操作、ローディング・エラー状態管理）（Issue #652） |
 | `src/components/worktree/MemoAddButton.tsx` | メモ追加ボタン（残件数表示、上限時disabled、ローディングインジケーター） |
 | `src/components/worktree/ImageViewer.tsx` | 画像表示コンポーネント |
 | `src/components/worktree/VideoViewer.tsx` | 動画再生コンポーネント（Issue #302: HTML5 videoタグ、controls属性、ローディングインジケーター、エラーフォールバックUI） |
