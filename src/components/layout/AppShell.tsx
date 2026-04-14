@@ -10,7 +10,7 @@
 
 'use client';
 
-import React, { memo, type ReactNode } from 'react';
+import React, { memo, useCallback, type ReactNode } from 'react';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useLayoutConfig } from '@/hooks/useLayoutConfig';
@@ -28,6 +28,12 @@ import { Z_INDEX } from '@/config/z-index';
  * Used by both mobile drawer and desktop sidebar (Issue #112).
  */
 const SIDEBAR_TRANSITION = 'transform transition-transform duration-300 ease-out';
+
+/** Minimum sidebar width when drag-resizing */
+const MIN_SIDEBAR_WIDTH = 160;
+
+/** Maximum sidebar width when drag-resizing */
+const MAX_SIDEBAR_WIDTH = 480;
 
 // ============================================================================
 // Types
@@ -62,9 +68,13 @@ export interface AppShellProps {
  * ```
  */
 export const AppShell = memo(function AppShell({ children }: AppShellProps) {
-  const { isOpen, isMobileDrawerOpen, closeMobileDrawer } = useSidebarContext();
+  const { isOpen, isMobileDrawerOpen, closeMobileDrawer, width, setWidth } = useSidebarContext();
   const isMobile = useIsMobile();
   const { showSidebar, showGlobalNav } = useLayoutConfig();
+
+  const handleWidthChange = useCallback((newWidth: number) => {
+    setWidth(Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, newWidth)));
+  }, [setWidth]);
 
   // Mobile layout with drawer
   if (isMobile) {
@@ -115,31 +125,29 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
 
       <div className="flex flex-1 min-h-0">
         {/* Desktop sidebar - fixed position with transform animation (Issue #112) */}
-        {/* w-56 = 224px = DEFAULT_SIDEBAR_WIDTH; keep in sync with pl-56 below */}
+        {/* Width is dynamic (drag-resizable); stored in SidebarContext + localStorage */}
         {showSidebar && (
           <aside
             data-testid="sidebar-container"
             className={`
-              fixed left-0 top-0 h-full w-56
+              fixed left-0 top-0 h-full
               border-r border-gray-200 dark:border-gray-600
               ${SIDEBAR_TRANSITION}
               ${isOpen ? 'translate-x-0' : '-translate-x-full'}
             `}
-            style={{ zIndex: Z_INDEX.SIDEBAR }}
+            style={{ width: `${width}px`, zIndex: Z_INDEX.SIDEBAR }}
             role="complementary"
             aria-hidden={!isOpen}
           >
             <Sidebar />
+            <ResizeHandle currentWidth={width} onWidthChange={handleWidthChange} />
           </aside>
         )}
 
-        {/* Main content - pl-56 matches sidebar w-56 = DEFAULT_SIDEBAR_WIDTH */}
+        {/* Main content - paddingLeft matches sidebar width */}
         <main
-          className={`
-            flex-1 min-w-0 h-full overflow-hidden
-            transition-[padding] duration-300 ease-out
-            ${showSidebar && isOpen ? 'md:pl-56' : 'md:pl-0'}
-          `}
+          className="flex-1 min-w-0 h-full overflow-hidden transition-[padding] duration-300 ease-out"
+          style={{ paddingLeft: showSidebar && isOpen ? `${width}px` : 0 }}
           role="main"
         >
           {children}
@@ -148,3 +156,50 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
     </div>
   );
 });
+
+// ============================================================================
+// ResizeHandle
+// ============================================================================
+
+/**
+ * Thin drag handle on the right edge of the sidebar for resizing.
+ * Emits the new absolute width (not a delta) via onWidthChange.
+ */
+function ResizeHandle({
+  currentWidth,
+  onWidthChange,
+}: {
+  currentWidth: number;
+  onWidthChange: (width: number) => void;
+}) {
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = currentWidth;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      onWidthChange(startWidth + (moveEvent.clientX - startX));
+    };
+
+    const handleMouseUp = () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  return (
+    <div
+      data-testid="sidebar-resize-handle"
+      aria-hidden="true"
+      onMouseDown={handleMouseDown}
+      className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-cyan-500/40 transition-colors"
+    />
+  );
+}

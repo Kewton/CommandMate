@@ -7,7 +7,8 @@
 
 'use client';
 
-import React, { memo } from 'react';
+import React, { memo, useRef, useState, useEffect } from 'react';
+import ReactDOM from 'react-dom';
 import type { SidebarBranchItem, BranchStatus } from '@/types/sidebar';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
@@ -56,21 +57,53 @@ function CliStatusDot({ status, label }: { status: BranchStatus; label: string }
   );
 }
 
-/** Tooltip shown on hover/focus with branch details (Issue #651) */
-function BranchTooltip({ id, branch }: { id: string; branch: SidebarBranchItem }) {
-  return (
+/**
+ * Tooltip shown on hover/focus with branch details (Issue #651).
+ * Rendered via React portal to escape the sidebar's overflow-y:auto clipping.
+ * Always present in DOM (CSS-controlled visibility) so aria-describedby works.
+ */
+function BranchTooltip({
+  id,
+  branch,
+  isVisible,
+  anchorRef,
+}: {
+  id: string;
+  branch: SidebarBranchItem;
+  isVisible: boolean;
+  anchorRef: { current: HTMLButtonElement | null };
+}) {
+  // Start off-screen so tooltip is never briefly visible at (0,0) before coords are set
+  const [coords, setCoords] = useState({ top: -9999, left: -9999 });
+
+  // Update position when tooltip becomes visible
+  useEffect(() => {
+    if (isVisible && anchorRef.current) {
+      const rect = anchorRef.current.getBoundingClientRect();
+      setCoords({ top: rect.top, left: rect.right + 8 });
+    }
+  }, [isVisible, anchorRef]);
+
+  // Portals require document — skip during SSR
+  // (portal content is outside the component subtree so there is no hydration mismatch)
+  if (typeof document === 'undefined') return null;
+
+  return ReactDOM.createPortal(
     <div
       id={id}
       role="tooltip"
       className="
-        invisible group-hover:visible group-focus-within:visible
-        opacity-0 group-hover:opacity-100 group-focus-within:opacity-100
-        absolute bottom-full left-0 z-50 mb-1
+        fixed z-[9999]
         px-3 py-2 rounded-md shadow-lg
         bg-gray-950 text-xs text-gray-200 border border-gray-700
         whitespace-nowrap pointer-events-none
         transition-opacity duration-150
       "
+      style={{
+        top: coords.top,
+        left: coords.left,
+        opacity: isVisible ? 1 : 0,
+      }}
     >
       <p className="font-medium text-white">{branch.name}</p>
       <p className="text-gray-400">{branch.repositoryName}</p>
@@ -78,7 +111,8 @@ function BranchTooltip({ id, branch }: { id: string; branch: SidebarBranchItem }
       {branch.worktreePath && (
         <p className="text-gray-500 truncate max-w-xs">{branch.worktreePath}</p>
       )}
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -105,11 +139,18 @@ export const BranchListItem = memo(function BranchListItem({
   showRepositoryName = true,
 }: BranchListItemProps) {
   const tooltipId = `tooltip-${branch.id}`;
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [isTooltipVisible, setIsTooltipVisible] = useState(false);
 
   return (
     <button
+      ref={buttonRef}
       data-testid="branch-list-item"
       onClick={onClick}
+      onMouseEnter={() => setIsTooltipVisible(true)}
+      onMouseLeave={() => setIsTooltipVisible(false)}
+      onFocus={() => setIsTooltipVisible(true)}
+      onBlur={() => setIsTooltipVisible(false)}
       aria-current={isSelected ? 'true' : undefined}
       aria-describedby={tooltipId}
       aria-label={!showRepositoryName ? `${branch.name} - ${branch.repositoryName}` : undefined}
@@ -169,8 +210,13 @@ export const BranchListItem = memo(function BranchListItem({
         </div>
       )}
 
-      {/* Tooltip: shown on hover/focus, positioned above the item (Issue #651) */}
-      <BranchTooltip id={tooltipId} branch={branch} />
+      {/* Tooltip: portal to document.body to escape overflow clipping (Issue #651) */}
+      <BranchTooltip
+        id={tooltipId}
+        branch={branch}
+        isVisible={isTooltipVisible}
+        anchorRef={buttonRef}
+      />
     </button>
   );
 });

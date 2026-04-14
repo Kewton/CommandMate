@@ -36,6 +36,8 @@ export interface SortSelectorBaseProps {
   options: ReadonlyArray<SortOption>;
   /** Default directions per key (applied when switching to a new key) [CON-005] */
   defaultDirections?: Partial<Record<SortKey, SortDirection>>;
+  /** When true, hides the label text to save horizontal space (used in compact sidebar) */
+  compact?: boolean;
 }
 
 // ============================================================================
@@ -57,6 +59,7 @@ export const SortSelectorBase = memo(function SortSelectorBase({
   onSortDirectionChange,
   options,
   defaultDirections,
+  compact,
 }: SortSelectorBaseProps) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -133,7 +136,7 @@ export const SortSelectorBase = memo(function SortSelectorBase({
           "
         >
           <SortIcon className="w-3 h-3" />
-          <span className="hidden sm:inline">{currentLabel}</span>
+          <span className={compact ? 'hidden' : 'hidden sm:inline'}>{currentLabel}</span>
         </button>
 
         {/* Direction toggle */}
