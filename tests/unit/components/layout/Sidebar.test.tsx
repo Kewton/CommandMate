@@ -44,6 +44,8 @@ vi.mock('@/lib/api-client', async (importOriginal) => {
 
 import { worktreeApi, repositoryApi, ApiError } from '@/lib/api-client';
 
+const originalLocation = window.location;
+
 const mockWorktrees: Worktree[] = [
   {
     id: 'feature-test-1',
@@ -94,6 +96,11 @@ describe('Sidebar', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      value: originalLocation,
+    });
   });
 
   describe('Rendering', () => {
@@ -322,6 +329,48 @@ describe('Sidebar', () => {
 
       // Branch should still be visible after click
       expect(screen.getAllByText('feature/test-1').length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('should clear pending fallback timer on unmount', async () => {
+      const hrefSetter = vi.fn();
+      const locationObj = {
+        ...originalLocation,
+        pathname: '/worktrees/feature-test-1',
+      };
+      Object.defineProperty(locationObj, 'href', {
+        get: () => 'http://localhost/worktrees/feature-test-1',
+        set: (value: string) => {
+          hrefSetter(value);
+        },
+        configurable: true,
+      });
+      Object.defineProperty(window, 'location', {
+        writable: true,
+        value: locationObj,
+      });
+
+      const { unmount } = render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getAllByText('feature/test-2').length).toBeGreaterThanOrEqual(1);
+      });
+
+      vi.useFakeTimers();
+
+      const branchItem = screen.getAllByText('feature/test-2')[0].closest('[data-testid="branch-list-item"]');
+      expect(branchItem).not.toBeNull();
+
+      fireEvent.click(branchItem!);
+      expect(mockPush).toHaveBeenCalledWith('/worktrees/feature-test-2');
+
+      unmount();
+      vi.advanceTimersByTime(500);
+
+      expect(hrefSetter).not.toHaveBeenCalled();
     });
   });
 
