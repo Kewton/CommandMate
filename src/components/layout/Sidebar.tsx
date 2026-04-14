@@ -283,7 +283,6 @@ function GroupHeader({
       className="
         w-full flex items-center gap-2 px-4 py-2
         text-xs font-semibold text-gray-300 uppercase tracking-wider
-        border-b border-gray-700
         focus:outline-none focus:ring-2 focus:ring-inset focus:ring-cyan-500
         transition-colors
       "

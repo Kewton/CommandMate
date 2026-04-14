@@ -10,7 +10,7 @@
 
 'use client';
 
-import React, { memo, useCallback, type ReactNode } from 'react';
+import React, { memo, useCallback, useRef, type ReactNode } from 'react';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useLayoutConfig } from '@/hooks/useLayoutConfig';
@@ -72,8 +72,13 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
   const isMobile = useIsMobile();
   const { showSidebar, showGlobalNav } = useLayoutConfig();
 
+  // Refs for direct DOM manipulation during drag (avoids React re-render lag)
+  const sidebarRef = useRef<HTMLElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+
+  // Called only on mouseup — persists final width to React state + localStorage
   const handleWidthChange = useCallback((newWidth: number) => {
-    setWidth(Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, newWidth)));
+    setWidth(newWidth); // already clamped by ResizeHandle
   }, [setWidth]);
 
   // Mobile layout with drawer
@@ -128,6 +133,7 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
         {/* Width is dynamic (drag-resizable); stored in SidebarContext + localStorage */}
         {showSidebar && (
           <aside
+            ref={sidebarRef}
             data-testid="sidebar-container"
             className={`
               fixed left-0 top-0 h-full
@@ -140,12 +146,18 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
             aria-hidden={!isOpen}
           >
             <Sidebar />
-            <ResizeHandle currentWidth={width} onWidthChange={handleWidthChange} />
+            <ResizeHandle
+              currentWidth={width}
+              sidebarRef={sidebarRef}
+              mainRef={mainRef}
+              onWidthChange={handleWidthChange}
+            />
           </aside>
         )}
 
         {/* Main content - paddingLeft matches sidebar width */}
         <main
+          ref={mainRef}
           className="flex-1 min-w-0 h-full overflow-hidden transition-[padding] duration-300 ease-out"
           style={{ paddingLeft: showSidebar && isOpen ? `${width}px` : 0 }}
           role="main"
@@ -163,29 +175,56 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
 
 /**
  * Thin drag handle on the right edge of the sidebar for resizing.
- * Emits the new absolute width (not a delta) via onWidthChange.
+ *
+ * During drag: updates sidebar width and main paddingLeft directly via DOM refs
+ * (no React state changes) for zero-lag response.
+ * On mouseup: calls onWidthChange once to persist the final value to React state.
  */
 function ResizeHandle({
   currentWidth,
+  sidebarRef,
+  mainRef,
   onWidthChange,
 }: {
   currentWidth: number;
+  sidebarRef: { current: HTMLElement | null };
+  mainRef: { current: HTMLElement | null };
   onWidthChange: (width: number) => void;
 }) {
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
     const startWidth = currentWidth;
+    let finalWidth = startWidth;
+
+    // Disable padding transition while dragging to prevent animation lag
+    if (mainRef.current) {
+      mainRef.current.style.transition = 'none';
+    }
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
-      onWidthChange(startWidth + (moveEvent.clientX - startX));
+      const raw = startWidth + (moveEvent.clientX - startX);
+      finalWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, raw));
+      // Direct DOM writes — bypasses React state for lag-free tracking
+      if (sidebarRef.current) {
+        sidebarRef.current.style.width = `${finalWidth}px`;
+      }
+      if (mainRef.current) {
+        mainRef.current.style.paddingLeft = `${finalWidth}px`;
+      }
     };
 
     const handleMouseUp = () => {
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+      // Restore transition so sidebar toggle animates smoothly again
+      if (mainRef.current) {
+        mainRef.current.style.transition = '';
+      }
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      // Commit final width to React state (triggers localStorage persist)
+      onWidthChange(finalWidth);
     };
 
     document.body.style.cursor = 'col-resize';
