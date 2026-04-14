@@ -51,6 +51,46 @@ import type { BranchGroup } from '@/lib/sidebar-utils';
 /** LocalStorage key for group collapsed state */
 const SIDEBAR_GROUP_COLLAPSED_STORAGE_KEY = 'mcbd-sidebar-group-collapsed';
 
+/** LocalStorage key for branch list scroll position */
+const SIDEBAR_SCROLL_TOP_STORAGE_KEY = 'mcbd-sidebar-scroll-top';
+
+/** In-memory cache used across client-side remounts */
+let lastSidebarScrollTop = 0;
+
+function readSidebarScrollTop(): number {
+  if (typeof window === 'undefined') return lastSidebarScrollTop;
+
+  try {
+    const stored = localStorage.getItem(SIDEBAR_SCROLL_TOP_STORAGE_KEY);
+    if (!stored) {
+      lastSidebarScrollTop = 0;
+      return 0;
+    }
+
+    const parsed = Number(stored);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      lastSidebarScrollTop = parsed;
+    }
+  } catch {
+    // Ignore localStorage errors
+  }
+
+  return lastSidebarScrollTop;
+}
+
+function persistSidebarScrollTop(scrollTop: number): void {
+  const normalized = Number.isFinite(scrollTop) && scrollTop > 0 ? scrollTop : 0;
+  lastSidebarScrollTop = normalized;
+
+  if (typeof window === 'undefined') return;
+
+  try {
+    localStorage.setItem(SIDEBAR_SCROLL_TOP_STORAGE_KEY, String(normalized));
+  } catch {
+    // Ignore localStorage errors
+  }
+}
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -68,6 +108,7 @@ export const Sidebar = memo(function Sidebar() {
   const { worktrees, selectedWorktreeId, selectWorktree, refreshWorktrees } = useWorktreeSelection();
   const { closeMobileDrawer, sortKey, sortDirection, viewMode, setViewMode } = useSidebarContext();
   const [searchQuery, setSearchQuery] = useState('');
+  const branchListRef = useRef<HTMLDivElement>(null);
 
   // Group collapsed state with localStorage sync
   const [groupCollapsed, setGroupCollapsed] = useState<Record<string, boolean>>(() => {
@@ -156,16 +197,35 @@ export const Sidebar = memo(function Sidebar() {
     }));
   }, []);
 
+  const saveBranchListScroll = useCallback(() => {
+    persistSidebarScrollTop(branchListRef.current?.scrollTop ?? 0);
+  }, []);
+
+  // Restore saved scroll position after the list content has rendered.
+  useEffect(() => {
+    const branchList = branchListRef.current;
+    if (!branchList) return;
+
+    const frameId = window.requestAnimationFrame(() => {
+      branchList.scrollTop = readSidebarScrollTop();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [flatBranches.length, groupedBranches?.length, viewMode]);
+
   // Handle branch selection.
   // Note: no fallback timer — Next.js App Router defers history.pushState to a React
   // effect, so window.location.pathname does not update synchronously with router.push().
   // A fallback timer that checks window.location.pathname would fire before the URL
   // updates and trigger a spurious full-page reload on every navigation.
   const handleBranchClick = useCallback((branchId: string) => {
+    saveBranchListScroll();
     selectWorktree(branchId);
     router.push(`/worktrees/${branchId}`);
     closeMobileDrawer();
-  }, [selectWorktree, router, closeMobileDrawer]);
+  }, [saveBranchListScroll, selectWorktree, router, closeMobileDrawer]);
 
   // DnD sensors: require 8px move before activating (distinguishes click from drag)
   const sensors = useSensors(
@@ -246,7 +306,9 @@ export const Sidebar = memo(function Sidebar() {
 
       {/* Branch list */}
       <div
+        ref={branchListRef}
         data-testid="branch-list"
+        onScroll={saveBranchListScroll}
         className="flex-1 overflow-y-auto"
       >
         {isEmpty ? (
