@@ -156,45 +156,15 @@ export const Sidebar = memo(function Sidebar() {
     }));
   }, []);
 
-  // Ref to track the single active fallback timer.
-  // Using a ref (not state) so updates don't trigger re-renders.
-  const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (fallbackTimerRef.current !== null) {
-        clearTimeout(fallbackTimerRef.current);
-        fallbackTimerRef.current = null;
-      }
-    };
-  }, []);
-
   // Handle branch selection.
-  // Fallback: if router.push silently fails (e.g., Next.js Router Cache corruption),
-  // navigate via window.location.href after a short delay.
-  //
-  // Bug fix: previously each click created a new timer whose cleanup was never
-  // invoked (useCallback return values are discarded by event handlers), and
-  // popstate does not fire on programmatic router.push calls. Accumulated timers
-  // compared stale target paths against the current pathname and triggered spurious
-  // full-page reloads. Using a single ref-tracked timer ensures only the latest
-  // click's fallback can fire.
+  // Note: no fallback timer — Next.js App Router defers history.pushState to a React
+  // effect, so window.location.pathname does not update synchronously with router.push().
+  // A fallback timer that checks window.location.pathname would fire before the URL
+  // updates and trigger a spurious full-page reload on every navigation.
   const handleBranchClick = useCallback((branchId: string) => {
     selectWorktree(branchId);
-    const targetPath = `/worktrees/${branchId}`;
-    router.push(targetPath);
+    router.push(`/worktrees/${branchId}`);
     closeMobileDrawer();
-
-    // Cancel any timer from a previous click before setting a new one.
-    if (fallbackTimerRef.current !== null) {
-      clearTimeout(fallbackTimerRef.current);
-    }
-    fallbackTimerRef.current = setTimeout(() => {
-      fallbackTimerRef.current = null;
-      if (window.location.pathname !== targetPath) {
-        window.location.href = targetPath;
-      }
-    }, 500);
   }, [selectWorktree, router, closeMobileDrawer]);
 
   // DnD sensors: require 8px move before activating (distinguishes click from drag)
