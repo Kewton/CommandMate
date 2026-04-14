@@ -58,6 +58,7 @@ export const SortSelector = memo(function SortSelector() {
       onSortDirectionChange={setSortDirection}
       options={SIDEBAR_SORT_OPTIONS}
       defaultDirections={SIDEBAR_DEFAULT_DIRECTIONS}
+      compact
     />
   );
 });
