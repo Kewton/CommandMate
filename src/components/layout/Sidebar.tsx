@@ -156,27 +156,36 @@ export const Sidebar = memo(function Sidebar() {
     }));
   }, []);
 
-  // Handle branch selection
-  // Fallback: if router.push fails to navigate (e.g., Next.js Router Cache corruption),
-  // use window.location.href after a short delay to ensure navigation succeeds.
+  // Ref to track the single active fallback timer.
+  // Using a ref (not state) so updates don't trigger re-renders.
+  const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Handle branch selection.
+  // Fallback: if router.push silently fails (e.g., Next.js Router Cache corruption),
+  // navigate via window.location.href after a short delay.
+  //
+  // Bug fix: previously each click created a new timer whose cleanup was never
+  // invoked (useCallback return values are discarded by event handlers), and
+  // popstate does not fire on programmatic router.push calls. Accumulated timers
+  // compared stale target paths against the current pathname and triggered spurious
+  // full-page reloads. Using a single ref-tracked timer ensures only the latest
+  // click's fallback can fire.
   const handleBranchClick = useCallback((branchId: string) => {
     selectWorktree(branchId);
     const targetPath = `/worktrees/${branchId}`;
     router.push(targetPath);
     closeMobileDrawer();
-    // Fallback navigation if router.push silently fails
-    const timerId = setTimeout(() => {
+
+    // Cancel any timer from a previous click before setting a new one.
+    if (fallbackTimerRef.current !== null) {
+      clearTimeout(fallbackTimerRef.current);
+    }
+    fallbackTimerRef.current = setTimeout(() => {
+      fallbackTimerRef.current = null;
       if (window.location.pathname !== targetPath) {
         window.location.href = targetPath;
       }
-    }, 300);
-    // Cleanup: if route changes before timeout, cancel fallback
-    const handleRouteChange = () => clearTimeout(timerId);
-    window.addEventListener('popstate', handleRouteChange, { once: true });
-    return () => {
-      clearTimeout(timerId);
-      window.removeEventListener('popstate', handleRouteChange);
-    };
+    }, 500);
   }, [selectWorktree, router, closeMobileDrawer]);
 
   // DnD sensors: require 8px move before activating (distinguishes click from drag)
