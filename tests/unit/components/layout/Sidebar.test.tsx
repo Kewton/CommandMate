@@ -348,6 +348,48 @@ describe('Sidebar', () => {
       fireEvent.click(branchItem!);
       expect(mockPush).toHaveBeenCalledWith('/worktrees/feature-test-2');
     });
+
+    it('should save branch list scroll position on click', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const branchList = await screen.findByTestId('branch-list');
+      branchList.scrollTop = 180;
+
+      const branchItem = screen.getAllByText('feature/test-2')[0].closest('[data-testid="branch-list-item"]');
+      expect(branchItem).not.toBeNull();
+
+      fireEvent.click(branchItem!);
+
+      expect(localStorage.getItem('mcbd-sidebar-scroll-top')).toBe('180');
+    });
+
+    it('should restore branch list scroll position after remount', async () => {
+      const firstRender = render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const firstBranchList = await screen.findByTestId('branch-list');
+      firstBranchList.scrollTop = 240;
+      fireEvent.scroll(firstBranchList);
+
+      firstRender.unmount();
+
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('branch-list').scrollTop).toBe(240);
+      });
+    });
   });
 
   describe('Search filtering', () => {
