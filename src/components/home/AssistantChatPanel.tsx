@@ -17,9 +17,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AssistantMessageInput } from './AssistantMessageInput';
 import { assistantApi } from '@/lib/api/assistant-api';
+import type { AssistantToolInfo } from '@/lib/api/assistant-api';
 import { GLOBAL_POLL_INTERVAL_MS } from '@/lib/session/global-session-constants';
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import { CLI_TOOL_IDS, getCliToolDisplayName } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
 
 /** localStorage key for panel collapsed state */
 const COLLAPSED_KEY = 'commandmate-assistant-collapsed';
@@ -36,6 +37,7 @@ interface RepositoryOption {
 export function AssistantChatPanel() {
   const [collapsed, setCollapsed] = useState(true);
   const [repositories, setRepositories] = useState<RepositoryOption[]>([]);
+  const [availableTools, setAvailableTools] = useState<AssistantToolInfo[]>([]);
   const [selectedRepo, setSelectedRepo] = useState('');
   const [selectedTool, setSelectedTool] = useState<CLIToolType>('claude');
   const [sessionActive, setSessionActive] = useState(false);
@@ -60,7 +62,7 @@ export function AssistantChatPanel() {
     }
   }, []);
 
-  // Fetch repositories
+  // Fetch repositories and installed tools
   useEffect(() => {
     async function fetchRepos() {
       try {
@@ -83,7 +85,24 @@ export function AssistantChatPanel() {
         // Silently handle fetch errors
       }
     }
-    fetchRepos();
+
+    async function fetchTools() {
+      const tools = await assistantApi.getInstalledTools();
+      if (tools.length > 0) {
+        setAvailableTools(tools);
+        // Update selectedTool to first installed tool if current is not installed
+        const installedTool = tools.find((t) => t.installed);
+        if (installedTool) {
+          setSelectedTool((prev) => {
+            const prevInstalled = tools.find((t) => t.id === prev)?.installed;
+            return prevInstalled ? prev : installedTool.id;
+          });
+        }
+      }
+    }
+
+    void fetchRepos();
+    void fetchTools();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Polling for output
@@ -267,9 +286,9 @@ export function AssistantChatPanel() {
               className="text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded px-2 py-1"
               data-testid="assistant-tool-select"
             >
-              {CLI_TOOL_IDS.map((toolId) => (
-                <option key={toolId} value={toolId}>
-                  {getCliToolDisplayName(toolId)}
+              {availableTools.map((tool) => (
+                <option key={tool.id} value={tool.id} disabled={!tool.installed}>
+                  {tool.name}{!tool.installed ? ' (not installed)' : ''}
                 </option>
               ))}
             </select>

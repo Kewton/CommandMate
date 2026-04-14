@@ -1,0 +1,53 @@
+{
+  "issue_number": 649,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "implemented_files": [
+        "src/lib/session/global-session-constants.ts",
+        "src/types/assistant.ts",
+        "src/lib/polling/global-session-poller.ts",
+        "src/lib/assistant/context-builder.ts",
+        "src/lib/session-cleanup.ts (変更)",
+        "src/lib/session/worktree-status-helper.ts (変更)",
+        "src/app/api/assistant/start/route.ts",
+        "src/app/api/assistant/terminal/route.ts",
+        "src/app/api/assistant/current-output/route.ts",
+        "src/app/api/assistant/session/route.ts",
+        "src/lib/api/assistant-api.ts",
+        "src/components/home/AssistantMessageInput.tsx",
+        "src/components/home/AssistantChatPanel.tsx",
+        "src/app/page.tsx (変更)",
+        "tests/unit/global-session-poller.test.ts",
+        "tests/unit/session-cleanup-global.test.ts",
+        "tests/unit/assistant-context-builder.test.ts"
+      ],
+      "test_results": {
+        "total": 6319,
+        "passed": 6319,
+        "failed": 0,
+        "skipped": 7
+      },
+      "lint_errors": 0,
+      "type_errors": 0
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_passed": 17,
+      "criteria_failed": 0
+    },
+    "refactor": {
+      "status": "success",
+      "changes": [
+        "GET /api/assistant/tools エンドポイント追加",
+        "assistantApi に getInstalledTools() 追加",
+        "AssistantChatPanel のCLIツール選択UIを動的インストール状態フィルタリングに改善"
+      ]
+    },
+    "documentation": {
+      "status": "success",
+      "updated_files": ["CLAUDE.md"]
+    }
+  }
+}
