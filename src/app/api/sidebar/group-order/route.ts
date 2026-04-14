@@ -3,6 +3,9 @@
  * PUT /api/sidebar/group-order  — save repository group order
  */
 
+// Disable static caching so GET always reads from DB and PUT is never 405-blocked
+export const dynamic = 'force-dynamic';
+
 import { NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getSidebarGroupOrder, setSidebarGroupOrder } from '@/lib/db/app-settings-db';
