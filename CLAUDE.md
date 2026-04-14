@@ -204,7 +204,12 @@ tests/
 | `src/lib/job-executor.ts` | ジョブ実行エンジン・実行ログCRUD（Issue #479） |
 | `src/lib/cmate-parser.ts` | CMATE.md汎用パーサー、parseAndValidateCliToolColumn連携（Issue #588） |
 | `src/lib/cmate-cli-tool-parser.ts` | CLI Tool列パース・model名バリデーション共有モジュール（parseCliToolColumn, validateCopilotModelName, TOOLS_WITH_MODEL_SUPPORT）（Issue #588） |
-| `src/lib/session-cleanup.ts` | セッション/ポーラー/スケジューラー停止（Facade）、killWorktreeSession共通化、syncWorktreesAndCleanup（Issue #526） |
+| `src/lib/session-cleanup.ts` | セッション/ポーラー/スケジューラー停止（Facade）、killWorktreeSession共通化、syncWorktreesAndCleanup（Issue #526）、cleanupGlobalSessions追加（Issue #649） |
+| `src/lib/session/global-session-constants.ts` | グローバルセッション定数（GLOBAL_SESSION_WORKTREE_ID='\_\_global\_\_', GLOBAL_POLL_INTERVAL_MS等）（Issue #649） |
+| `src/lib/polling/global-session-poller.ts` | グローバルセッション専用ポーリング（pollGlobalSession, stopGlobalSessionPolling, stopAllGlobalSessionPolling, isGlobalPollerActive）（Issue #649） |
+| `src/lib/assistant/context-builder.ts` | グローバルセッション用デフォルトコンテキスト生成（buildGlobalContext, getEnabledRepositories）（Issue #649） |
+| `src/lib/api/assistant-api.ts` | アシスタントAPIクライアント（startSession, sendCommand, getCurrentOutput, stopSession, getInstalledTools）（Issue #649） |
+| `src/types/assistant.ts` | アシスタント機能型定義（StartAssistantRequest, StartAssistantResponse, AssistantCurrentOutputResponse等）（Issue #649） |
 | `src/lib/session-key-sender.ts` | Claudeセッションキー送信ロジック（Issue #479） |
 | `src/lib/prompt-answer-input.ts` | プロンプト応答入力ロジック（getAnswerInput）（Issue #479） |
 | `src/lib/resource-cleanup.ts` | リソースリーク対策（孤立プロセス/Map検出） |
@@ -277,6 +282,11 @@ tests/
 | `src/app/api/worktrees/[id]/git/diff/route.ts` | Gitファイルdiff取得API（Issue #447） |
 | `src/app/api/worktrees/[id]/special-keys/route.ts` | 特殊キー送信API（Up/Down/Left/Right/Enter/Escape、6層防御）（Issue #473, #592） |
 | `src/app/api/templates/route.ts` | レポートテンプレートAPI（GET全件取得/POST作成、5件上限・バリデーション）（Issue #618） |
+| `src/app/api/assistant/start/route.ts` | グローバルセッション開始API（POST、DB操作なし、cliToolId検証・ディレクトリバリデーション・コンテキスト送信）（Issue #649） |
+| `src/app/api/assistant/terminal/route.ts` | グローバルセッションメッセージ送信API（POST、sendKeys使用）（Issue #649） |
+| `src/app/api/assistant/current-output/route.ts` | グローバルセッション出力取得API（GET、capturePane使用）（Issue #649） |
+| `src/app/api/assistant/session/route.ts` | グローバルセッション停止API（DELETE、stopGlobalSessionPolling+killSession）（Issue #649） |
+| `src/app/api/assistant/tools/route.ts` | インストール済みCLIツール一覧API（GET、CLIToolManager.getAllToolsInfo()使用）（Issue #649） |
 | `src/app/api/templates/[id]/route.ts` | レポートテンプレート個別API（PUT更新/DELETE削除、UUID検証）（Issue #618） |
 | `src/components/worktree/NavigationButtons.tsx` | OpenCode TUI選択リストナビゲーションボタン、Left/Right対応（Issue #473, #592） |
 | `src/cli/utils/api-client.ts` | CLI用HTTPクライアント（認証トークン解決・エラー分類・ApiClient/ApiError）（Issue #518） |
@@ -297,6 +307,8 @@ tests/
 | `src/hooks/useWorktreeTabState.ts` | Worktreeタブ状態管理フック（deep link対応）（Issue #600） |
 | `src/components/mobile/GlobalMobileNav.tsx` | モバイルグローバルナビ（4タブ）（Issue #600） |
 | `src/components/home/HomeSessionSummary.tsx` | Home画面セッション集計サマリー（Issue #600） |
+| `src/components/home/AssistantChatPanel.tsx` | Home画面アシスタントチャットパネル（折りたたみ可能・最大50vh・ポーリング・セッション開始/停止）（Issue #649） |
+| `src/components/home/AssistantMessageInput.tsx` | アシスタント専用メッセージ入力（送信のみ・スラッシュコマンド/画像添付なし）（Issue #649） |
 | `src/components/review/ReviewCard.tsx` | Reviewカード（Issue #600） |
 | `src/components/review/SimpleMessageInput.tsx` | 軽量メッセージ入力（Review画面用）（Issue #600） |
 | `src/components/review/TemplateTab.tsx` | テンプレート管理UI（一覧・作成・編集・削除、最大5件制限）（Issue #618） |

@@ -11,6 +11,12 @@ import type {
   AssistantCurrentOutputResponse,
 } from '@/types/assistant';
 
+export interface AssistantToolInfo {
+  id: CLIToolType;
+  name: string;
+  installed: boolean;
+}
+
 /**
  * Assistant API client object.
  * All methods throw on network errors; callers should handle errors appropriately.
@@ -104,5 +110,19 @@ export const assistantApi = {
     }
 
     return res.json();
+  },
+
+  /**
+   * Get list of installed CLI tools.
+   *
+   * @returns Array of tool info with installation status
+   */
+  async getInstalledTools(): Promise<AssistantToolInfo[]> {
+    const res = await fetch('/api/assistant/tools');
+    if (!res.ok) {
+      return [];
+    }
+    const data = await res.json();
+    return (data.tools ?? []) as AssistantToolInfo[];
   },
 };
