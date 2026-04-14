@@ -273,16 +273,24 @@ export function AssistantChatPanel() {
           </div>
 
           {/* Controls */}
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto] md:items-end">
-            <label className="block">
+          <div className="flex flex-col gap-1">
+            {/* Labels row */}
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto]">
               <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-300">
                 Repository to Work In
               </span>
+              <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-300">
+                Assistant CLI
+              </span>
+              <span className="hidden md:block" />
+            </div>
+            {/* Selects + button row — all items aligned to center */}
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto] md:items-center">
               <select
                 value={selectedRepo}
                 onChange={(e) => handleRepoChange(e.target.value)}
                 disabled={repositories.length === 0}
-                className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-100 px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+                className="w-full rounded-lg border border-slate-600 bg-slate-100 px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:cursor-not-allowed disabled:bg-slate-300"
                 data-testid="assistant-repo-select"
               >
                 {repositories.length === 0 && (
@@ -294,22 +302,12 @@ export function AssistantChatPanel() {
                   </option>
                 ))}
               </select>
-              <p className="mt-1 text-xs text-slate-300">
-                {selectedRepository
-                  ? `Current start directory: ${selectedRepository.displayName || selectedRepository.name}`
-                  : 'Select the repository that will be used as the assistant session start directory.'}
-              </p>
-            </label>
 
-            <label className="block">
-              <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-300">
-                Assistant CLI
-              </span>
               <select
                 value={selectedTool}
                 onChange={(e) => handleToolChange(e.target.value as CLIToolType)}
                 disabled={sessionActive}
-                className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-100 px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+                className="w-full rounded-lg border border-slate-600 bg-slate-100 px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:cursor-not-allowed disabled:bg-slate-300"
                 data-testid="assistant-tool-select"
               >
                 {availableTools.map((tool) => (
@@ -318,29 +316,35 @@ export function AssistantChatPanel() {
                   </option>
                 ))}
               </select>
-            </label>
 
-            <div className="flex items-end">
-              {!sessionActive ? (
-                <button
-                  onClick={handleStart}
-                  disabled={!selectedRepo || starting}
-                  className="w-full rounded-lg bg-cyan-500 px-4 py-2 text-sm font-medium text-slate-950 transition-colors hover:bg-cyan-400 disabled:bg-slate-500 disabled:text-slate-300 md:w-auto"
-                  data-testid="assistant-start-button"
-                >
-                  {starting ? 'Starting...' : 'Start'}
-                </button>
-              ) : (
-                <button
-                  onClick={handleStop}
-                  disabled={stopping}
-                  className="w-full rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-500 disabled:bg-slate-500 disabled:text-slate-300 md:w-auto"
-                  data-testid="assistant-stop-button"
-                >
-                  {stopping ? 'Stopping...' : 'Stop'}
-                </button>
-              )}
+              <div>
+                {!sessionActive ? (
+                  <button
+                    onClick={handleStart}
+                    disabled={!selectedRepo || starting}
+                    className="w-full rounded-lg bg-cyan-500 px-4 py-2 text-sm font-medium text-slate-950 transition-colors hover:bg-cyan-400 disabled:bg-slate-500 disabled:text-slate-300 md:w-auto"
+                    data-testid="assistant-start-button"
+                  >
+                    {starting ? 'Starting...' : 'Start'}
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleStop}
+                    disabled={stopping}
+                    className="w-full rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-500 disabled:bg-slate-500 disabled:text-slate-300 md:w-auto"
+                    data-testid="assistant-stop-button"
+                  >
+                    {stopping ? 'Stopping...' : 'Stop'}
+                  </button>
+                )}
+              </div>
             </div>
+            {/* Description below selects */}
+            <p className="text-xs text-slate-300">
+              {selectedRepository
+                ? `Start directory: ${selectedRepository.displayName || selectedRepository.name}`
+                : 'Select the repository used as the assistant session start directory.'}
+            </p>
           </div>
 
           {/* Error display */}

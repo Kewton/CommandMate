@@ -69,7 +69,7 @@ describe('AssistantChatPanel', () => {
     ).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(screen.getByText('Current start directory: Alpha Repo')).toBeInTheDocument();
+      expect(screen.getByText('Start directory: Alpha Repo')).toBeInTheDocument();
     });
   });
 
