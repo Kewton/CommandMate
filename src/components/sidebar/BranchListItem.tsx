@@ -96,7 +96,7 @@ function BranchTooltip({
         fixed z-[9999]
         px-3 py-2 rounded-md shadow-lg
         bg-gray-950 text-xs text-gray-200 border border-gray-700
-        whitespace-nowrap pointer-events-none
+        pointer-events-none max-w-sm
         transition-opacity duration-150
       "
       style={{
@@ -105,11 +105,16 @@ function BranchTooltip({
         opacity: isVisible ? 1 : 0,
       }}
     >
-      <p className="font-medium text-white">{branch.name}</p>
-      <p className="text-gray-400">{branch.repositoryName}</p>
-      <p className="text-gray-400">Status: {branch.status}</p>
+      <p className="font-medium text-white whitespace-nowrap">{branch.name}</p>
+      <p className="text-gray-400 whitespace-nowrap">{branch.repositoryName}</p>
+      <p className="text-gray-400 whitespace-nowrap">Status: {branch.status}</p>
       {branch.worktreePath && (
-        <p className="text-gray-500 truncate max-w-xs">{branch.worktreePath}</p>
+        <p className="text-gray-500 truncate">{branch.worktreePath}</p>
+      )}
+      {branch.description && (
+        <p className="text-gray-300 mt-1 border-t border-gray-700 pt-1 whitespace-pre-wrap break-words">
+          {branch.description}
+        </p>
       )}
     </div>,
     document.body
