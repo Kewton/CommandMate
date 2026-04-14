@@ -230,7 +230,7 @@ describe('Sidebar', () => {
 
       await waitFor(() => {
         const sidebar = screen.getByTestId('sidebar');
-        expect(sidebar.className).toMatch(/bg-gray-900|bg-slate-900|bg-zinc-900/);
+        expect(sidebar.className).toMatch(/bg-gray-800|bg-gray-900|bg-slate-900|bg-zinc-900/);
       });
     });
   });

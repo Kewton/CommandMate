@@ -91,7 +91,7 @@ describe('BranchListItem', () => {
       );
 
       const item = screen.getByTestId('branch-list-item');
-      expect(item.className).toMatch(/bg-gray-700|selected|border-l|border-cyan/);
+      expect(item.className).toMatch(/bg-gray-600|bg-gray-700|selected|border-l|border-cyan/);
     });
 
     it('should not apply selected styling when not selected', () => {
@@ -104,7 +104,8 @@ describe('BranchListItem', () => {
       );
 
       const item = screen.getByTestId('branch-list-item');
-      expect(item.className).not.toMatch(/bg-gray-700/);
+      // bg-gray-600 is the selected background; unselected should not have it
+      expect(item.className).not.toMatch(/(?<![a-z-])bg-gray-600/);
     });
 
     it('should have aria-current attribute when selected', () => {
