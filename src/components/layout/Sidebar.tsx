@@ -160,6 +160,15 @@ export const Sidebar = memo(function Sidebar() {
   // Using a ref (not state) so updates don't trigger re-renders.
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  useEffect(() => {
+    return () => {
+      if (fallbackTimerRef.current !== null) {
+        clearTimeout(fallbackTimerRef.current);
+        fallbackTimerRef.current = null;
+      }
+    };
+  }, []);
+
   // Handle branch selection.
   // Fallback: if router.push silently fails (e.g., Next.js Router Cache corruption),
   // navigate via window.location.href after a short delay.
