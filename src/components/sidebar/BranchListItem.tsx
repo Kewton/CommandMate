@@ -156,9 +156,9 @@ export const BranchListItem = memo(function BranchListItem({
       aria-label={!showRepositoryName ? `${branch.name} - ${branch.repositoryName}` : undefined}
       className={`
         group relative w-full px-4 py-3 flex flex-col gap-1
-        hover:bg-gray-800 transition-colors
+        hover:bg-gray-700 transition-colors
         focus:outline-none focus:ring-2 focus:ring-inset focus:ring-cyan-500
-        ${isSelected ? 'bg-gray-700 border-l-2 border-cyan-500' : 'border-l-2 border-transparent'}
+        ${isSelected ? 'bg-gray-600 border-l-2 border-cyan-500' : 'border-l-2 border-transparent'}
       `}
     >
       {/* Main row: CLI status dots, info, unread */}

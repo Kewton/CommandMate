@@ -9,6 +9,7 @@ import { v21_v23_migrations } from './v21-v23';
 import { v24_migrations } from './v24-daily-summaries';
 import { v25_migrations } from './v25-report-templates';
 import { v26_migrations } from './v26-repository-display-name';
+import { v27_migrations } from './v27-app-settings';
 
 /**
  * Complete ordered list of all migrations.
@@ -23,4 +24,5 @@ export const migrations: Migration[] = [
   ...v24_migrations,
   ...v25_migrations,
   ...v26_migrations,
+  ...v27_migrations,
 ];

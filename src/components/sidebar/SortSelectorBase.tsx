@@ -166,7 +166,7 @@ export const SortSelectorBase = memo(function SortSelectorBase({
           className="
             absolute right-0 top-full mt-1 z-50
             min-w-[140px] py-1 rounded-md shadow-lg
-            bg-gray-800 border border-gray-600
+            bg-gray-700 border border-gray-600
           "
         >
           {options.map((option) => (
@@ -179,7 +179,7 @@ export const SortSelectorBase = memo(function SortSelectorBase({
               className={`
                 w-full px-3 py-2 text-left text-sm
                 flex items-center justify-between
-                hover:bg-gray-700 transition-colors
+                hover:bg-gray-600 transition-colors
                 ${sortKey === option.key ? 'text-blue-400' : 'text-gray-300'}
               `}
             >

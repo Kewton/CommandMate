@@ -24,7 +24,7 @@ export interface Migration {
  * Current schema version
  * Increment this when adding new migrations
  */
-export const CURRENT_SCHEMA_VERSION = 26;
+export const CURRENT_SCHEMA_VERSION = 27;
 
 /**
  * Get current schema version from database
@@ -221,7 +221,7 @@ export function validateSchema(db: Database.Database): boolean {
     `).all() as Array<{ name: string }>;
 
     const tableNames = tables.map(t => t.name);
-    const requiredTables = ['worktrees', 'chat_messages', 'session_states', 'schema_version', 'worktree_memos', 'external_apps', 'repositories', 'clone_jobs', 'scheduled_executions', 'execution_logs', 'daily_reports', 'report_templates'];
+    const requiredTables = ['worktrees', 'chat_messages', 'session_states', 'schema_version', 'worktree_memos', 'external_apps', 'repositories', 'clone_jobs', 'scheduled_executions', 'execution_logs', 'daily_reports', 'report_templates', 'app_settings'];
 
     const missingTables = requiredTables.filter(t => !tableNames.includes(t));
 
