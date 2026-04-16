@@ -193,6 +193,10 @@ export async function startCommand(options: StartOptions): Promise<void> {
 
       logger.info(`Starting ${serverLabel} in background...`);
 
+      // Mark the daemon child as launched via the CommandMate CLI so the server
+      // can surface the appropriate command name (e.g. in the assistant context).
+      process.env.CM_LAUNCHED_BY = 'commandmate-cli';
+
       // Issue #331: Set auth environment variables in process.env so daemon.ts can forward them
       // to the child process. daemon.ts reads process.env[key] to build the child env object.
       if (authTokenHash) {
@@ -277,6 +281,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
       ...process.env,
       ...(mainEnvResult.parsed || {}),
       ...(envResult.parsed || {}),
+      CM_LAUNCHED_BY: 'commandmate-cli',
     };
 
     // Command line options override .env values

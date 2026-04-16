@@ -13,24 +13,30 @@ import { getAllRepositories, type Repository } from '@/lib/db/db-repository';
 import { getWorktrees } from '@/lib/db/worktree-db';
 import type Database from 'better-sqlite3';
 
-const COMMANDMATE_CLI_REFERENCE = `## CommandMate CLI Reference
+function resolveCommandMateBinary(): string {
+  return process.env.CM_LAUNCHED_BY === 'commandmate-cli' ? 'commandmate' : 'commandmatedev';
+}
+
+function buildCommandMateCliReference(bin: string): string {
+  return `## CommandMate CLI Reference
 
 The user runs a CommandMate server locally. These are the CLI commands available from their terminal:
 
-- \`commandmate --version\` — Show version
-- \`commandmate init [--defaults]\` — Initialize configuration (interactive / non-interactive)
-- \`commandmate start [--dev] [--daemon] [--issue N] [--port N] [--auto-port]\` — Start the server (foreground / dev / background / issue-scoped)
-- \`commandmate stop [--issue N]\` — Stop the server
-- \`commandmate status [--all] [--issue N]\` — Show running server status
-- \`commandmate ls [--json] [--quiet] [--branch PREFIX]\` — List worktrees
-- \`commandmate send <worktree-id> "message" [--agent NAME] [--auto-yes] [--duration T]\` — Send a message to an agent session
-- \`commandmate wait <worktree-id>... [--timeout N] [--stall-timeout N] [--on-prompt TYPE]\` — Wait until the agent finishes or a prompt appears
-- \`commandmate respond <worktree-id> "answer" [--agent NAME]\` — Respond to an agent prompt
-- \`commandmate capture <worktree-id> [--json] [--agent NAME]\` — Capture the current terminal output of a session
-- \`commandmate auto-yes <worktree-id> [--enable] [--disable] [--duration T] [--stop-pattern PAT]\` — Toggle Auto-Yes
+- \`${bin} --version\` — Show version
+- \`${bin} init [--defaults]\` — Initialize configuration (interactive / non-interactive)
+- \`${bin} start [--dev] [--daemon] [--issue N] [--port N] [--auto-port]\` — Start the server (foreground / dev / background / issue-scoped)
+- \`${bin} stop [--issue N]\` — Stop the server
+- \`${bin} status [--all] [--issue N]\` — Show running server status
+- \`${bin} ls [--json] [--quiet] [--branch PREFIX]\` — List worktrees
+- \`${bin} send <worktree-id> "message" [--agent NAME] [--auto-yes] [--duration T]\` — Send a message to an agent session
+- \`${bin} wait <worktree-id>... [--timeout N] [--stall-timeout N] [--on-prompt TYPE]\` — Wait until the agent finishes or a prompt appears
+- \`${bin} respond <worktree-id> "answer" [--agent NAME]\` — Respond to an agent prompt
+- \`${bin} capture <worktree-id> [--json] [--agent NAME]\` — Capture the current terminal output of a session
+- \`${bin} auto-yes <worktree-id> [--enable] [--disable] [--duration T] [--stop-pattern PAT]\` — Toggle Auto-Yes
 - \`--duration\` accepts values like \`1h\`, \`3h\`, \`8h\`.
 - \`--agent\` selects the CLI tool: \`claude\`, \`codex\`, \`gemini\`, \`vibe-local\`, \`opencode\`, \`copilot\`.
 `;
+}
 
 function buildRepositoriesSection(db: Database.Database): string {
   const repositories = getAllRepositories(db);
@@ -102,11 +108,12 @@ export function buildAssistantStartupSnapshot(
   takenAt: Date = new Date(),
 ): string {
   const toolName = getCliToolDisplayName(cliToolId);
+  const cliBinary = resolveCommandMateBinary();
 
   return [
     `You are an assistant using ${toolName}, running inside CommandMate.`,
     '',
-    COMMANDMATE_CLI_REFERENCE,
+    buildCommandMateCliReference(cliBinary),
     buildRepositoriesSection(db),
     '',
     buildActiveWorktreesSection(db, takenAt),
