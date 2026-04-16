@@ -17,7 +17,6 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { AppShell } from '@/components/layout';
 import { HomeSessionSummary } from '@/components/home/HomeSessionSummary';
-import { AssistantChatPanel } from '@/components/home/AssistantChatPanel';
 import type { Worktree } from '@/types/models';
 
 /**
@@ -29,6 +28,16 @@ const BANNER_DISMISSED_KEY = 'commandmate-home-banner-dismissed';
  * Shortcut card data for navigation.
  */
 const SHORTCUT_CARDS = [
+  {
+    title: 'Chat',
+    description: 'Talk to a local CLI assistant scoped to a repository',
+    href: '/chat',
+    icon: (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+      </svg>
+    ),
+  },
   {
     title: 'Sessions',
     description: 'View and manage all worktree sessions',
@@ -144,9 +153,6 @@ export default function Home() {
           </p>
         </div>
 
-        {/* Assistant Chat Panel */}
-        <AssistantChatPanel />
-
         {/* Session Summary */}
         <div className="mb-8">
           <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-gray-100">Session Overview</h2>
@@ -154,7 +160,7 @@ export default function Home() {
         </div>
 
         {/* Shortcut Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           {SHORTCUT_CARDS.map((card) => (
             <Link
               key={card.href}

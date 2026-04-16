@@ -1,135 +1,187 @@
 /**
  * AssistantChatPanel Component
- * Issue #649: Main assistant chat panel for the Home page.
- *
- * Features:
- * - Collapsible panel (max 50vh when expanded)
- * - Repository selection dropdown
- * - CLI tool selection
- * - Terminal output display with polling
- * - Session start/stop controls
- * - Dark mode support
- * - Mobile responsive layout
+ * Home page chat-first Assistant Chat UI.
  */
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { AssistantMessageInput } from './AssistantMessageInput';
+import { AssistantMessageList } from './AssistantMessageList';
 import { assistantApi } from '@/lib/api/assistant-api';
 import type { AssistantToolInfo } from '@/lib/api/assistant-api';
 import { GLOBAL_POLL_INTERVAL_MS } from '@/lib/session/global-session-constants';
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
+import type {
+  AssistantConversation,
+  AssistantMessage,
+} from '@/lib/db/assistant-conversation-db';
 
-/** localStorage key for panel collapsed state */
-const COLLAPSED_KEY = 'commandmate-assistant-collapsed';
-
-/** localStorage key for selected CLI tool */
 const CLI_TOOL_KEY = 'commandmate-assistant-cli-tool';
+const ASSISTANT_ALLOWED_TOOLS: readonly CLIToolType[] = ['claude', 'codex'];
+
+function isAssistantAllowedTool(value: string): value is CLIToolType {
+  return (ASSISTANT_ALLOWED_TOOLS as readonly string[]).includes(value);
+}
 
 interface RepositoryOption {
+  id: string;
   path: string;
   name: string;
   displayName?: string;
 }
 
 export function AssistantChatPanel() {
-  const [collapsed, setCollapsed] = useState(true);
   const [repositories, setRepositories] = useState<RepositoryOption[]>([]);
   const [availableTools, setAvailableTools] = useState<AssistantToolInfo[]>([]);
-  const [selectedRepo, setSelectedRepo] = useState('');
+  const [selectedRepoId, setSelectedRepoId] = useState('');
   const [selectedTool, setSelectedTool] = useState<CLIToolType>('claude');
-  const [sessionActive, setSessionActive] = useState(false);
-  const [output, setOutput] = useState('');
+  const [conversation, setConversation] = useState<AssistantConversation | null>(null);
+  const [messages, setMessages] = useState<AssistantMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
-  const outputRef = useRef<HTMLPreElement>(null);
+  const [clearing, setClearing] = useState(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Restore collapsed state from localStorage
+  const conversationActive = conversation?.status === 'ready' || conversation?.status === 'running';
+  const executionRunning = conversation?.status === 'running';
+  const canSend = conversation?.status === 'ready';
+  const selectedRepository = repositories.find((repo) => repo.id === selectedRepoId);
+  const allowedTools = useMemo(
+    () => availableTools.filter((tool) => isAssistantAllowedTool(tool.id)),
+    [availableTools],
+  );
+  const selectedToolInfo = allowedTools.find((tool) => tool.id === selectedTool);
+  const assistantLabel = selectedToolInfo?.name ?? selectedTool;
+
+  const loadMessages = useCallback(async (conversationId: string) => {
+    const nextMessages = await assistantApi.getMessages(conversationId);
+    setMessages(nextMessages);
+  }, []);
+
+  const loadConversation = useCallback(async () => {
+    if (!selectedRepoId) {
+      setConversation(null);
+      setMessages([]);
+      return;
+    }
+
+    const nextConversation = await assistantApi.getConversation(selectedRepoId, selectedTool);
+    setConversation(nextConversation);
+    if (nextConversation) {
+      await loadMessages(nextConversation.id);
+    } else {
+      setMessages([]);
+    }
+  }, [loadMessages, selectedRepoId, selectedTool]);
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem(COLLAPSED_KEY);
-      if (saved !== null) {
-        setCollapsed(saved === 'true');
-      }
       const savedTool = localStorage.getItem(CLI_TOOL_KEY);
-      if (savedTool && (CLI_TOOL_IDS as readonly string[]).includes(savedTool)) {
-        setSelectedTool(savedTool as CLIToolType);
+      if (savedTool && isAssistantAllowedTool(savedTool)) {
+        setSelectedTool(savedTool);
       }
     }
   }, []);
 
-  // Fetch repositories and installed tools
   useEffect(() => {
     async function fetchRepos() {
       try {
         const res = await fetch('/api/worktrees');
-        if (res.ok) {
-          const data = await res.json();
-          const repos: RepositoryOption[] = (data.repositories ?? []).map(
-            (r: { path: string; name: string; displayName?: string }) => ({
-              path: r.path,
-              name: r.name,
-              displayName: r.displayName,
-            }),
-          );
-          setRepositories(repos);
-          if (repos.length > 0 && !selectedRepo) {
-            setSelectedRepo(repos[0].path);
-          }
+        if (!res.ok) {
+          return;
+        }
+        const data = await res.json();
+        const repos: RepositoryOption[] = (data.repositories ?? []).map(
+          (repo: { id: string; path: string; name: string; displayName?: string }) => ({
+            id: repo.id,
+            path: repo.path,
+            name: repo.name,
+            displayName: repo.displayName,
+          }),
+        );
+        setRepositories(repos);
+        if (repos.length > 0) {
+          setSelectedRepoId((prev) => prev || repos[0].id);
         }
       } catch {
-        // Silently handle fetch errors
+        // Silent fetch failure
       }
     }
 
     async function fetchTools() {
       const tools = await assistantApi.getInstalledTools();
-      if (tools.length > 0) {
-        setAvailableTools(tools);
-        // Update selectedTool to first installed tool if current is not installed
-        const installedTool = tools.find((t) => t.installed);
-        if (installedTool) {
-          setSelectedTool((prev) => {
-            const prevInstalled = tools.find((t) => t.id === prev)?.installed;
-            return prevInstalled ? prev : installedTool.id;
-          });
-        }
+      setAvailableTools(tools);
+
+      const supportedTools = tools.filter((tool) => isAssistantAllowedTool(tool.id));
+      const installedTool = supportedTools.find((tool) => tool.installed);
+      if (installedTool) {
+        setSelectedTool((prev) => {
+          const prevTool = supportedTools.find((tool) => tool.id === prev);
+          return prevTool?.installed ? prev : installedTool.id;
+        });
       }
     }
 
     void fetchRepos();
     void fetchTools();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Polling for output
   useEffect(() => {
-    if (!sessionActive) {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
+    if (!selectedRepoId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const nextConversation = await assistantApi.getConversation(selectedRepoId, selectedTool);
+        if (cancelled) {
+          return;
+        }
+
+        setConversation(nextConversation);
+        if (nextConversation) {
+          const nextMessages = await assistantApi.getMessages(nextConversation.id);
+          if (!cancelled) {
+            setMessages(nextMessages);
+          }
+        } else {
+          setMessages([]);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load conversation');
+        }
       }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRepoId, selectedTool]);
+
+  useEffect(() => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+
+    if (!conversation) {
       return;
     }
 
     const poll = async () => {
       try {
-        const data = await assistantApi.getCurrentOutput(selectedTool);
-        setOutput(data.output);
-        if (!data.sessionActive) {
-          setSessionActive(false);
-        }
+        await loadConversation();
       } catch {
-        // Silently handle poll errors
+        // Silent poll failure
       }
     };
 
-    // Initial poll
     void poll();
-
     pollIntervalRef.current = setInterval(poll, GLOBAL_POLL_INTERVAL_MS);
 
     return () => {
@@ -138,26 +190,12 @@ export function AssistantChatPanel() {
         pollIntervalRef.current = null;
       }
     };
-  }, [sessionActive, selectedTool]);
-
-  // Auto-scroll output to bottom
-  useEffect(() => {
-    if (outputRef.current) {
-      outputRef.current.scrollTop = outputRef.current.scrollHeight;
-    }
-  }, [output]);
-
-  const toggleCollapsed = useCallback(() => {
-    setCollapsed((prev) => {
-      const next = !prev;
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(COLLAPSED_KEY, String(next));
-      }
-      return next;
-    });
-  }, []);
+  }, [conversation?.id, loadConversation, conversation]);
 
   const handleToolChange = useCallback((tool: CLIToolType) => {
+    if (!isAssistantAllowedTool(tool)) {
+      return;
+    }
     setSelectedTool(tool);
     if (typeof window !== 'undefined') {
       localStorage.setItem(CLI_TOOL_KEY, tool);
@@ -165,116 +203,137 @@ export function AssistantChatPanel() {
   }, []);
 
   const handleStart = useCallback(async () => {
-    if (!selectedRepo || starting) return;
+    if (!selectedRepoId || starting) {
+      return;
+    }
 
     setStarting(true);
     setError(null);
     try {
-      await assistantApi.startSession(selectedTool, selectedRepo);
-      setSessionActive(true);
-      setOutput('');
+      const result = await assistantApi.startSession(selectedTool, selectedRepoId);
+      setConversation(result.conversation);
+      await loadMessages(result.conversation.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start session');
     } finally {
       setStarting(false);
     }
-  }, [selectedRepo, selectedTool, starting]);
+  }, [loadMessages, selectedRepoId, selectedTool, starting]);
 
   const handleStop = useCallback(async () => {
-    if (stopping) return;
+    if (!conversation || stopping) {
+      return;
+    }
 
     setStopping(true);
     setError(null);
     try {
-      await assistantApi.stopSession(selectedTool);
-      setSessionActive(false);
+      await assistantApi.stopSession(selectedTool, conversation.id);
+      await loadConversation();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to stop session');
     } finally {
       setStopping(false);
     }
-  }, [selectedTool, stopping]);
+  }, [conversation, loadConversation, selectedTool, stopping]);
+
+  const handleClearHistory = useCallback(async () => {
+    if (!conversation || clearing || executionRunning) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'Clear all chat history for this repository and CLI? Past messages will no longer be sent back to the assistant.',
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setClearing(true);
+    setError(null);
+    try {
+      await assistantApi.clearMessages(conversation.id);
+      await loadConversation();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to clear history');
+    } finally {
+      setClearing(false);
+    }
+  }, [clearing, conversation, executionRunning, loadConversation]);
 
   const handleSendMessage = useCallback(
     async (message: string) => {
+      if (!conversation || !canSend) {
+        return;
+      }
+
       setError(null);
       try {
-        await assistantApi.sendCommand(selectedTool, message);
+        await assistantApi.sendCommand(selectedTool, conversation.id, message);
+        setConversation((prev) => (prev ? { ...prev, status: 'running' } : prev));
+        await Promise.all([
+          loadMessages(conversation.id),
+          loadConversation(),
+        ]);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to send message');
         throw err;
       }
     },
-    [selectedTool],
+    [canSend, conversation, loadConversation, loadMessages, selectedTool],
+  );
+
+  const handleEditMessage = useCallback(
+    async (target: AssistantMessage, newContent: string) => {
+      if (!conversation || !canSend) {
+        throw new Error('Session is not ready to resend messages');
+      }
+
+      setError(null);
+      await assistantApi.clearMessages(conversation.id, { fromMessageId: target.id });
+      await assistantApi.sendCommand(selectedTool, conversation.id, newContent);
+      setConversation((prev) => (prev ? { ...prev, status: 'running' } : prev));
+      await Promise.all([
+        loadMessages(conversation.id),
+        loadConversation(),
+      ]);
+    },
+    [canSend, conversation, loadConversation, loadMessages, selectedTool],
   );
 
   const handleRepoChange = useCallback(
-    (newRepo: string) => {
-      if (sessionActive) {
+    async (newRepoId: string) => {
+      if (conversationActive) {
         const confirmed = window.confirm(
-          'Changing repository will not affect the active session. Do you want to continue?',
+          'Changing repository will stop the active conversation. Do you want to continue?',
         );
-        if (!confirmed) return;
-      }
-      setSelectedRepo(newRepo);
-    },
-    [sessionActive],
-  );
+        if (!confirmed) {
+          return;
+        }
 
-  const selectedRepository = repositories.find((repo) => repo.path === selectedRepo);
+        try {
+          await assistantApi.stopSession(selectedTool, conversation.id);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Failed to stop session');
+          return;
+        }
+      }
+
+      setSelectedRepoId(newRepoId);
+      setError(null);
+    },
+    [conversation, conversationActive, selectedTool],
+  );
 
   return (
     <div
-      className="mb-6 overflow-hidden rounded-xl border border-slate-800 bg-slate-950/95 shadow-lg shadow-slate-950/20"
+      className="overflow-hidden rounded-xl border border-slate-800 bg-slate-950/95 shadow-lg shadow-slate-950/20"
       data-testid="assistant-chat-panel"
     >
-      {/* Header */}
-      <button
-        onClick={toggleCollapsed}
-        className="flex w-full items-center justify-between border-b border-slate-800 bg-slate-900/90 px-4 py-3 transition-colors hover:bg-slate-900"
-        data-testid="assistant-toggle-button"
+      <div
+        className="flex h-[78vh] min-h-[34rem] max-h-[48rem] flex-col gap-4 overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950/80 p-4"
       >
-        <div className="flex items-center gap-2">
-          <svg className="w-5 h-5 text-cyan-600 dark:text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-          </svg>
-          <span className="text-sm font-semibold text-slate-100">
-            Assistant Chat
-          </span>
-          {sessionActive && (
-            <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-300">
-              Active
-            </span>
-          )}
-        </div>
-        <svg
-          className={`h-4 w-4 text-slate-400 transition-transform ${collapsed ? '' : 'rotate-180'}`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-
-      {/* Content */}
-      {!collapsed && (
-        <div
-          className="space-y-4 bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950/80 p-4"
-          style={{ maxHeight: '50vh', display: 'flex', flexDirection: 'column' }}
-        >
-          <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-            <p className="text-sm font-medium text-slate-100">
-              Start a local assistant session in a repository and chat from that working directory.
-            </p>
-            <p className="mt-1 text-xs text-slate-300">
-              The repository selection sets where the assistant starts running commands and reading files.
-            </p>
-          </div>
-
-          {/* Controls */}
           <div className="flex flex-col gap-1">
-            {/* Labels row */}
             <div className="grid gap-3 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto]">
               <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-300">
                 Repository to Work In
@@ -284,20 +343,18 @@ export function AssistantChatPanel() {
               </span>
               <span className="hidden md:block" />
             </div>
-            {/* Selects + button row — all items aligned to center */}
+
             <div className="grid gap-3 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto] md:items-center">
               <select
-                value={selectedRepo}
-                onChange={(e) => handleRepoChange(e.target.value)}
+                value={selectedRepoId}
+                onChange={(e) => void handleRepoChange(e.target.value)}
                 disabled={repositories.length === 0}
                 className="w-full rounded-lg border border-slate-600 bg-slate-100 px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:cursor-not-allowed disabled:bg-slate-300"
                 data-testid="assistant-repo-select"
               >
-                {repositories.length === 0 && (
-                  <option value="">No repositories</option>
-                )}
+                {repositories.length === 0 && <option value="">No repositories</option>}
                 {repositories.map((repo) => (
-                  <option key={repo.path} value={repo.path}>
+                  <option key={repo.id} value={repo.id}>
                     {repo.displayName || repo.name}
                   </option>
                 ))}
@@ -306,11 +363,11 @@ export function AssistantChatPanel() {
               <select
                 value={selectedTool}
                 onChange={(e) => handleToolChange(e.target.value as CLIToolType)}
-                disabled={sessionActive}
+                disabled={conversationActive}
                 className="w-full rounded-lg border border-slate-600 bg-slate-100 px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:cursor-not-allowed disabled:bg-slate-300"
                 data-testid="assistant-tool-select"
               >
-                {availableTools.map((tool) => (
+                {allowedTools.map((tool) => (
                   <option key={tool.id} value={tool.id} disabled={!tool.installed}>
                     {tool.name}{!tool.installed ? ' (not installed)' : ''}
                   </option>
@@ -318,10 +375,10 @@ export function AssistantChatPanel() {
               </select>
 
               <div>
-                {!sessionActive ? (
+                {!conversationActive ? (
                   <button
                     onClick={handleStart}
-                    disabled={!selectedRepo || starting}
+                    disabled={!selectedRepoId || starting}
                     className="w-full rounded-lg bg-cyan-500 px-4 py-2 text-sm font-medium text-slate-950 transition-colors hover:bg-cyan-400 disabled:bg-slate-500 disabled:text-slate-300 md:w-auto"
                     data-testid="assistant-start-button"
                   >
@@ -339,38 +396,59 @@ export function AssistantChatPanel() {
                 )}
               </div>
             </div>
-            {/* Description below selects */}
+
             <p className="text-xs text-slate-300">
               {selectedRepository
-                ? `Start directory: ${selectedRepository.displayName || selectedRepository.name}`
+                ? `Start directory: ${selectedRepository.displayName || selectedRepository.name} (${selectedRepository.path})`
                 : 'Select the repository used as the assistant session start directory.'}
             </p>
           </div>
 
-          {/* Error display */}
           {error && (
             <div className="rounded border border-red-800 bg-red-950/40 p-2 text-sm text-red-200">
               {error}
             </div>
           )}
 
-          {/* Terminal output */}
-          <pre
-            ref={outputRef}
-            className="flex-1 min-h-[100px] max-h-[35vh] overflow-auto bg-gray-900 text-green-400 text-xs font-mono p-3 rounded border border-gray-700 whitespace-pre-wrap break-words"
-            data-testid="assistant-output"
-          >
-            {output || (sessionActive ? 'Waiting for output...' : 'Select a repository and click Start to open an assistant session.')}
-          </pre>
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+            <div className="flex shrink-0 items-center justify-between">
+              <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                History
+              </span>
+              <button
+                type="button"
+                onClick={handleClearHistory}
+                disabled={!conversation || clearing || executionRunning || messages.length === 0}
+                className="inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-900/80 px-2.5 py-1 text-xs font-medium text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-900/40 disabled:text-slate-500"
+                data-testid="assistant-clear-button"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" />
+                </svg>
+                {clearing ? 'Clearing...' : 'Clear history'}
+              </button>
+            </div>
 
-          {/* Message input */}
-          <AssistantMessageInput
-            onSend={handleSendMessage}
-            disabled={!sessionActive}
-            placeholder={sessionActive ? 'Type your message... (Enter to send)' : 'Start a session first'}
-          />
-        </div>
-      )}
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <AssistantMessageList
+                messages={messages}
+                assistantLabel={assistantLabel}
+                sessionActive={conversationActive}
+                waitingForResponse={executionRunning}
+                canEdit={canSend}
+                onEditMessage={handleEditMessage}
+              />
+            </div>
+
+            <div className="shrink-0">
+              <AssistantMessageInput
+                onSend={handleSendMessage}
+                disabled={!canSend}
+                placeholder={canSend ? 'Type your message... (Enter to send)' : conversationActive ? 'Waiting for the current run to finish' : 'Start a session first'}
+              />
+            </div>
+          </div>
+      </div>
     </div>
   );
 }

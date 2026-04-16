@@ -169,6 +169,7 @@ export function getWorktrees(
  * Get list of unique repositories from worktrees
  */
 export function getRepositories(db: Database.Database): Array<{
+  id?: string;
   path: string;
   name: string;
   displayName?: string;
@@ -176,6 +177,7 @@ export function getRepositories(db: Database.Database): Array<{
 }> {
   const stmt = db.prepare(`
     SELECT
+      r.id as id,
       w.repository_path as path,
       w.repository_name as name,
       r.display_name as display_name,
@@ -188,6 +190,7 @@ export function getRepositories(db: Database.Database): Array<{
   `);
 
   const rows = stmt.all() as Array<{
+    id: string | null;
     path: string;
     name: string;
     display_name: string | null;
@@ -195,6 +198,7 @@ export function getRepositories(db: Database.Database): Array<{
   }>;
 
   return rows.map((row) => ({
+    id: row.id || undefined,
     path: row.path,
     name: row.name,
     displayName: row.display_name || undefined,
