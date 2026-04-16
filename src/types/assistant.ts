@@ -1,51 +1,47 @@
 /**
- * Type definitions for the assistant chat feature
- * Issue #649: Assistant chat with global (non-worktree) sessions
- *
- * These types define the API request/response shapes for:
- * - Starting an assistant session
- * - Sending terminal commands
- * - Retrieving current output
+ * Types for Home Assistant Chat conversation APIs.
  */
 
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import type {
+  AssistantConversation,
+  AssistantMessage,
+} from '@/lib/db/assistant-conversation-db';
 
-/**
- * Request body for POST /api/assistant/start
- */
 export interface StartAssistantRequest {
-  /** CLI tool to use for the session (claude, codex, gemini, etc.) */
   cliToolId: CLIToolType;
-  /** Working directory path for the session */
-  workingDirectory: string;
+  repositoryId: string;
 }
 
-/**
- * Response body for POST /api/assistant/start
- */
 export interface StartAssistantResponse {
-  /** Whether the session was started successfully */
   success: boolean;
-  /** The tmux session name that was created */
-  sessionName: string;
+  conversation: AssistantConversation;
+  executionMode?: 'interactive' | 'non_interactive';
+  resumeAvailable?: boolean;
 }
 
-/**
- * Request body for POST /api/assistant/terminal
- */
+export interface AssistantConversationResponse {
+  conversation: AssistantConversation | null;
+}
+
+export interface AssistantMessagesResponse {
+  conversationId: string;
+  messages: AssistantMessage[];
+}
+
 export interface AssistantTerminalRequest {
-  /** CLI tool ID for the active session */
   cliToolId: CLIToolType;
-  /** Command/message to send to the session */
+  conversationId: string;
   command: string;
 }
 
-/**
- * Response body for GET /api/assistant/current-output
- */
 export interface AssistantCurrentOutputResponse {
-  /** Captured terminal output */
   output: string;
-  /** Whether the session is still active */
   sessionActive: boolean;
+}
+
+export interface AssistantSendResponse {
+  success: boolean;
+  messageId: string;
+  executionId?: string;
 }

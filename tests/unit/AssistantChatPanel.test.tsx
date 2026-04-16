@@ -4,13 +4,15 @@
 
 import React from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { AssistantChatPanel } from '@/components/home/AssistantChatPanel';
 import { assistantApi } from '@/lib/api/assistant-api';
 
 vi.mock('@/lib/api/assistant-api', () => ({
   assistantApi: {
     getInstalledTools: vi.fn(),
+    getConversation: vi.fn(),
+    getMessages: vi.fn(),
     startSession: vi.fn(),
     stopSession: vi.fn(),
     sendCommand: vi.fn(),
@@ -30,7 +32,12 @@ describe('AssistantChatPanel', () => {
       ok: true,
       json: async () => ({
         repositories: [
-          { path: '/repos/alpha', name: 'alpha', displayName: 'Alpha Repo' },
+          {
+            id: 'repo-1',
+            path: '/repos/alpha',
+            name: 'alpha',
+            displayName: 'Alpha Repo',
+          },
         ],
       }),
     } as Response);
@@ -38,6 +45,12 @@ describe('AssistantChatPanel', () => {
     vi.mocked(assistantApi.getInstalledTools).mockResolvedValue([
       { id: 'claude', name: 'Claude Code', installed: true },
     ]);
+    vi.mocked(assistantApi.getConversation).mockResolvedValue(null);
+    vi.mocked(assistantApi.getMessages).mockResolvedValue([]);
+    vi.mocked(assistantApi.getCurrentOutput).mockResolvedValue({
+      output: '',
+      sessionActive: false,
+    });
   });
 
   afterEach(() => {
@@ -48,35 +61,20 @@ describe('AssistantChatPanel', () => {
     render(<AssistantChatPanel />);
 
     expect(screen.getByTestId('assistant-chat-panel')).toHaveClass('bg-slate-950/95');
-    expect(screen.getByTestId('assistant-toggle-button')).toHaveClass('bg-slate-900/90');
   });
 
-  it('explains what the repository selector controls', async () => {
+  it('shows repository selector and start directory hint', async () => {
     render(<AssistantChatPanel />);
 
-    fireEvent.click(screen.getByTestId('assistant-toggle-button'));
-
-    expect(
-      await screen.findByText(
-        'Start a local assistant session in a repository and chat from that working directory.',
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByText('Repository to Work In')).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'The repository selection sets where the assistant starts running commands and reading files.',
-      ),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('Repository to Work In')).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(screen.getByText('Start directory: Alpha Repo')).toBeInTheDocument();
+      expect(screen.getByText('Start directory: Alpha Repo (/repos/alpha)')).toBeInTheDocument();
     });
   });
 
   it('shows a clearer empty-state prompt before the session starts', async () => {
     render(<AssistantChatPanel />);
-
-    fireEvent.click(screen.getByTestId('assistant-toggle-button'));
 
     expect(
       await screen.findByText('Select a repository and click Start to open an assistant session.'),

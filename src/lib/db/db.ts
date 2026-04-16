@@ -97,3 +97,38 @@ export {
   updateDailyReportContent,
 } from './daily-report-db';
 export type { DailyReport } from './daily-report-db';
+
+// assistant-conversation-db
+export {
+  getAssistantConversationById,
+  getAssistantConversationByRepositoryAndCliTool,
+  createAssistantConversation,
+  updateAssistantConversation,
+  createAssistantMessage,
+  updateAssistantMessageStatus,
+  getAssistantMessages,
+  getAssistantMessageById,
+  archiveAllAssistantMessages,
+  archiveAssistantMessagesFrom,
+  createAssistantExecution,
+  updateAssistantExecution,
+  getAssistantExecutionById,
+  getLatestAssistantExecutionByConversation,
+  getRunningAssistantExecutionByConversation,
+  listRunningAssistantExecutions,
+  getAssistantSessionState,
+  updateAssistantSessionState,
+  deleteAssistantSessionState,
+} from './assistant-conversation-db';
+export type {
+  AssistantConversation,
+  AssistantConversationStatus,
+  AssistantConversationExecutionMode,
+  AssistantMessage,
+  AssistantMessageRole,
+  AssistantMessageType,
+  AssistantMessageDeliveryStatus,
+  AssistantExecution,
+  AssistantExecutionStatus,
+  AssistantSessionState,
+} from './assistant-conversation-db';

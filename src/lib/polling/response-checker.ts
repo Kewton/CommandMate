@@ -50,7 +50,7 @@ import { getPollerKey, stopPolling, GEMINI_LOADING_INDICATORS } from './response
 /**
  * Return type for extractResponse(), representing partial or complete response extraction.
  */
-interface ExtractionResult {
+export interface ExtractionResult {
   response: string;
   isComplete: boolean;
   lineCount: number;
@@ -140,7 +140,7 @@ export function detectPromptWithOptions(
  * @param cliToolId - CLI tool ID (claude, codex, gemini)
  * @returns Extracted response or null if incomplete
  */
-function extractResponse(
+export function extractResponse(
   output: string,
   lastCapturedLine: number,
   cliToolId: CLIToolType

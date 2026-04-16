@@ -12,6 +12,12 @@ vi.mock('@/lib/db/db-repository', () => ({
   getAllRepositories: (...args: unknown[]) => mockGetAllRepositories(...args),
 }));
 
+// Mock getWorktrees (context builder reports worktree counts and an active snapshot)
+const mockGetWorktrees = vi.fn();
+vi.mock('@/lib/db/worktree-db', () => ({
+  getWorktrees: (...args: unknown[]) => mockGetWorktrees(...args),
+}));
+
 import { buildGlobalContext, getEnabledRepositories } from '@/lib/assistant/context-builder';
 
 // Create a mock DB instance
@@ -34,6 +40,7 @@ function createMockRepository(overrides: Partial<Repository> = {}): Repository {
 describe('buildGlobalContext', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetWorktrees.mockReturnValue([]);
   });
 
   it('should include the CLI tool display name', () => {
@@ -81,7 +88,9 @@ describe('buildGlobalContext', () => {
 
     const context = buildGlobalContext('claude', mockDb);
 
-    expect(context).toContain('(disabled)');
+    expect(context).toContain('disabled-repo');
+    // Repositories table now uses an Enabled column with yes/no
+    expect(context).toMatch(/disabled-repo.*\|.*no/);
   });
 
   it('should show message when no repositories exist', () => {
