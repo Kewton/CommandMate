@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-04-17
+
+### Added
+- Assistant: Home画面に非インタラクティブなClaude/Codex対応のアシスタントチャット機能を追加 (Issue #649)
+- Assistant: 専用Chatタブを追加し、commandmate CLI起動とスクリプト起動をコンテキストで区別 (Issue #649)
+- Sidebar: PC用サイドバーをw-56にコンパクト化しツールチップで詳細表示 (Issue #651)
+- Sidebar: ブランチ間ナビゲーション時にスクロール位置を保持 (Issue #651)
+- Sidebar: ブランチツールチップで説明文全文を表示 (Issue #651)
+- Sidebar: サイドバー背景の差別化とDnDによるグループ並び替えを追加 (Issue #651)
+- Memo: CMATE Notesの上限を5件から10件に拡張 (Issue #652)
+
+### Fixed
+- Assistant: ドロップダウンの高さを揃えコントロール配置を修正 (Issue #649)
+- Sidebar: コンパクト化後のリサイズ・ツールチップ・オーバーフロー問題を修正 (Issue #651)
+- Sidebar: ドラッグリサイズのラグとグループヘッダー下線を除去 (Issue #651)
+- Sidebar: ブランチ高速クリック時のフルページリロードを防止 (Issue #651)
+- Sidebar: アンマウント時にフォールバックタイマーをキャンセル (Issue #651)
+- Sidebar: フルページリロードを誘発していたフォールバックタイマーを除去 (Issue #651)
+- Sidebar: group-orderルートに dynamic export を追加し静的キャッシュを回避 (Issue #651)
+
+### Refactored
+- Assistant: インストール済みツールAPIを追加しCLIツールセレクタのUXを改善 (Issue #649)
+- Sidebar: BranchTooltipサブコンポーネントを抽出し保守性コメントを整理 (Issue #651)
+- Memo: MemoPaneのimport順を統一 (Issue #652)
+
+### Style
+- Assistant: AssistantChatPanelのUIレイアウトとビジュアルデザインを調整 (Issue #649)
+
+### Tests
+- Assistant: Chatタブおよびcontext-builder変更に合わせて既存テストを更新 (Issue #649)
+
 ## [0.5.4] - 2026-04-12
 
 ### Added
