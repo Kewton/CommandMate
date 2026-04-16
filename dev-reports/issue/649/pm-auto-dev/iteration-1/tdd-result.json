@@ -1,0 +1,40 @@
+{
+  "status": "success",
+  "implemented_files": [
+    "src/lib/session/global-session-constants.ts",
+    "src/types/assistant.ts",
+    "src/lib/polling/global-session-poller.ts",
+    "src/lib/assistant/context-builder.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/session/worktree-status-helper.ts",
+    "src/app/api/assistant/start/route.ts",
+    "src/app/api/assistant/terminal/route.ts",
+    "src/app/api/assistant/current-output/route.ts",
+    "src/app/api/assistant/session/route.ts",
+    "src/lib/api/assistant-api.ts",
+    "src/components/home/AssistantMessageInput.tsx",
+    "src/components/home/AssistantChatPanel.tsx",
+    "src/app/page.tsx",
+    "tests/unit/global-session-poller.test.ts",
+    "tests/unit/session-cleanup-global.test.ts",
+    "tests/unit/assistant-context-builder.test.ts"
+  ],
+  "test_results": {
+    "total": 6326,
+    "passed": 6319,
+    "failed": 0,
+    "skipped": 7
+  },
+  "new_tests": {
+    "total": 26,
+    "passed": 26,
+    "failed": 0
+  },
+  "coverage": 80,
+  "lint_errors": 0,
+  "type_errors": 0,
+  "commits": [
+    "38ec3c95: feat(assistant): implement assistant chat feature for Home page"
+  ],
+  "notes": "All 17 files implemented. 3 new test files with 26 tests. Full regression suite passes (334 files, 6319 tests). No lint or type errors. Backend includes: global session constants, poller, context builder, 4 API routes, session cleanup integration, worktree status helper __global__ filter, and client API module. Frontend includes: AssistantMessageInput (simplified input with IME guard), AssistantChatPanel (collapsible panel with repo/tool selection, output polling, session controls), and Home page integration."
+}

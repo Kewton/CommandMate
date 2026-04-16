@@ -33,8 +33,8 @@ describe('db-migrations', () => {
   });
 
   describe('CURRENT_SCHEMA_VERSION', () => {
-    it('should be 24 after Migration #24', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(26);
+    it('should be 30 after Migration #30', () => {
+      expect(CURRENT_SCHEMA_VERSION).toBe(30);
     });
   });
 
@@ -63,6 +63,29 @@ describe('db-migrations', () => {
       expect(history.length).toBe(CURRENT_SCHEMA_VERSION);
       expect(history.find(m => m.version === 16)?.name).toBe('add-issue-no-to-external-apps');
       expect(history.find(m => m.version === 17)?.name).toBe('add-scheduled-executions-and-execution-logs');
+    });
+
+    it('should create assistant conversation tables', () => {
+      runMigrations(db);
+
+      const tables = db.prepare(`
+        SELECT name FROM sqlite_master
+        WHERE type = 'table'
+          AND name IN (
+            'assistant_conversations',
+            'assistant_messages',
+            'assistant_session_states',
+            'assistant_executions'
+          )
+        ORDER BY name
+      `).all() as Array<{ name: string }>;
+
+      expect(tables.map((table) => table.name)).toEqual([
+        'assistant_conversations',
+        'assistant_executions',
+        'assistant_messages',
+        'assistant_session_states',
+      ]);
     });
   });
 
@@ -495,7 +518,7 @@ describe('db-migrations', () => {
   describe('rollbackMigrations', () => {
     it('should rollback Migration #17 and remove schedule tables', () => {
       runMigrations(db);
-      expect(getCurrentVersion(db)).toBe(26);
+      expect(getCurrentVersion(db)).toBe(CURRENT_SCHEMA_VERSION);
 
       rollbackMigrations(db, 16);
       expect(getCurrentVersion(db)).toBe(16);
@@ -508,7 +531,7 @@ describe('db-migrations', () => {
 
     it('should rollback Migration #16 and remove issue_no column', () => {
       runMigrations(db);
-      expect(getCurrentVersion(db)).toBe(26);
+      expect(getCurrentVersion(db)).toBe(CURRENT_SCHEMA_VERSION);
 
       rollbackMigrations(db, 15);
       expect(getCurrentVersion(db)).toBe(15);

@@ -1,0 +1,30 @@
+{
+  "issue_number": 652,
+  "feature_summary": "CMATE Notes（メモ）の最大件数を5件から10件に引き上げ。共有定数 src/config/memo-config.ts を新規作成してMAX_MEMOSを一元管理。",
+  "acceptance_criteria": [
+    "Notes を 10 件まで登録できる",
+    "11 件目の登録時にエラーメッセージが表示される",
+    "既存の Notes 機能（作成・編集・削除・並び替え）が正常動作する",
+    "npm run lint がパスする（エラー0件）",
+    "npx tsc --noEmit がパスする（型エラー0件）",
+    "npm run test:unit がパスする",
+    "npm run test:integration がパスする"
+  ],
+  "test_scenarios": [
+    "シナリオ1: MAX_MEMOS定数がsrc/config/memo-config.tsに10として定義されている",
+    "シナリオ2: MemoPane.tsxとmemos/route.tsがローカル定数を持たずmemo-config.tsからimportしている",
+    "シナリオ3: tests/integration/api/memos.testが10件制限をテストしている",
+    "シナリオ4: src/lib/__tests__/db-memo.testが10件制限のテスト名・アサーションになっている",
+    "シナリオ5: 全ユニットテスト・統合テストがパスする",
+    "シナリオ6: lint・TypeScript型チェックがエラーなし"
+  ],
+  "implemented_files": [
+    "src/config/memo-config.ts",
+    "src/components/worktree/MemoPane.tsx",
+    "src/app/api/worktrees/[id]/memos/route.ts",
+    "tests/integration/api/memos.test.ts",
+    "src/lib/__tests__/db-memo.test.ts",
+    "tests/unit/components/worktree/MemoPane.test.tsx",
+    "tests/unit/components/worktree/MemoAddButton.test.tsx"
+  ]
+}

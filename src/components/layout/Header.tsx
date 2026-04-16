@@ -22,6 +22,7 @@ export interface HeaderProps {
  */
 const NAV_ITEMS: Array<{ label: string; href: string; isActive: (pathname: string) => boolean }> = [
   { label: 'Home', href: '/', isActive: (p) => p === '/' },
+  { label: 'Chat', href: '/chat', isActive: (p) => p.startsWith('/chat') },
   { label: 'Sessions', href: '/sessions', isActive: (p) => p.startsWith('/sessions') },
   { label: 'Repos', href: '/repositories', isActive: (p) => p.startsWith('/repositories') },
   { label: 'Review/Report', href: '/review', isActive: (p) => p.startsWith('/review') },

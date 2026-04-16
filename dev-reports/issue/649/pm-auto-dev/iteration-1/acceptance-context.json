@@ -1,0 +1,38 @@
+{
+  "issue_number": 649,
+  "feature_summary": "アシスタントチャット機能 - Home 画面にworktree非依存のグローバルCLIセッションを提供",
+  "acceptance_criteria": [
+    "Home 画面でアシスタントチャットが利用できる",
+    "登録済みリポジトリの一覧から作業ディレクトリを選択できる",
+    "インストール済みの全CLIツールから選択してセッションを開始できる",
+    "セッション開始時に CLI 使い方・リポジトリ情報がコンテキストとして付与される（CLIツール毎の付与方式に従う）",
+    "メッセージの送受信が正常に動作する",
+    "アシスタントのターミナル出力がリアルタイムに表示される",
+    "ターミナル出力のキャプチャ間隔が既存の capture API と同等である",
+    "セッション停止ボタンからグローバルセッションを停止できる",
+    "セッション実行中にリポジトリを変更した場合、確認ダイアログが表示される",
+    "サーバー再起動時に孤立した mcbd-{cli_tool_id}-__global__ セッションがクリーンアップされる",
+    "グローバルセッションがサイドバーの worktree 一覧に表示されない",
+    "チャットUIが折りたたみ/展開できる",
+    "既存の worktree セッション機能に影響がない（回帰テストパス）",
+    "ダークモード対応",
+    "モバイルレイアウトでチャットUIが適切に表示される",
+    "/api/assistant/* が認証ミドルウェアで保護されている",
+    "npm run lint / npx tsc --noEmit / npm run test:unit がパスする"
+  ],
+  "test_scenarios": [
+    "シナリオ1: AssistantChatPanel コンポーネントがHome画面に存在し、折りたたみ/展開が機能する",
+    "シナリオ2: リポジトリ選択ドロップダウンが登録リポジトリ一覧を表示する",
+    "シナリオ3: CLIツール選択UIがインストール済みツールのみを表示する",
+    "シナリオ4: POST /api/assistant/start が正常にセッションを開始する",
+    "シナリオ5: POST /api/assistant/terminal がメッセージを送信する",
+    "シナリオ6: GET /api/assistant/current-output がターミナル出力を返す",
+    "シナリオ7: DELETE /api/assistant/session がセッションを停止する",
+    "シナリオ8: cleanupGlobalSessions() がmcbd-*-__global__パターンを検出・停止する",
+    "シナリオ9: worktree-status-helper が __global__ セッションをサイドバーから除外する",
+    "シナリオ10: /api/assistant/* が未認証アクセスを拒否する（AUTH_EXCLUDED_PATHS未追加確認）",
+    "シナリオ11: npm run lint / npx tsc --noEmit / npm run test:unit がすべてパスする",
+    "シナリオ12: 既存のworktreeセッション関連テストが回帰していない"
+  ],
+  "tdd_result_path": "dev-reports/issue/649/pm-auto-dev/iteration-1/tdd-result.json"
+}

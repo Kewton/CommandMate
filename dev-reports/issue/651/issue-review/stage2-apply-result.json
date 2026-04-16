@@ -1,0 +1,63 @@
+{
+  "issue_number": 651,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-04-13",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "影響範囲にAppShell.tsxを追加。w-72/pl-72ハードコード箇所（モバイルドロワー・デスクトップ・メインコンテンツpaddingの3箇所）を明記し、DEFAULT_SIDEBAR_WIDTH定数との二重管理解消方針（inline style化検討）を記載"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "サイドバーの目標幅を224px（w-56）に具体的に定義。デザイン要件・機能要件・受入条件のすべてに具体的なpx値を反映し、検証可能な条件に更新"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "ツールチップ実装方針をCSSベースカスタムツールチップ（Tailwind CSS）に決定。表示内容（ブランチ名フルパス、リポジトリ名、ステータス、worktreeパス）をデザイン要件に明記"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "BranchListItemにshowRepositoryName boolean propsを追加し、親コンポーネント（Sidebar.tsx）がviewModeに応じて制御する実装方針を明記。影響範囲にSidebar.tsxのprops受け渡し変更も追加"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "アクセシビリティ対応を受入条件に3項目追加: (1) focus-visible時のツールチップ表示、(2) WAI-ARIA tooltipパターン（role=tooltip, aria-describedby）準拠、(3) リポジトリ名省略時のaria-label対応"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "テスト影響・更新方針セクションを影響範囲に追加。BranchListItem.test.tsx（条件付きリポジトリ名表示テスト、ツールチップテスト）とAppShell-layout.test.tsx（幅変更テスト）の更新方針を明記。受入条件にもテストパス要件を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "partially_applied",
+        "change_summary": "AppShell.tsxのモバイルドロワー（line 88）のw-72も変更対象ファイルの説明に含めた。モバイルも含めてPC版と同一幅に統一する前提で記載"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "参考イメージのローカルパスはユーザーが元々設定したもの。GitHub Issue添付ファイルへのアップロードはユーザー操作が必要なため、本反映では対応しない"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 7,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/651"
+  }
+}

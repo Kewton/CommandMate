@@ -1,0 +1,166 @@
+{
+  "stage": 1,
+  "focus": "通常",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "Must Fix",
+      "category": "整合性",
+      "title": "CLI ツール選択が3種類に限定されているが、既存コードは6種類をサポート",
+      "description": "Issue本文のCLIツール選択肢は「Claude Code / Codex / Gemini」の3種類と記載されているが、既存のCLI_TOOL_IDS定数は ['claude', 'codex', 'gemini', 'vibe-local', 'opencode', 'copilot'] の6種類を定義している（src/lib/cli-tools/types.ts）。グローバルセッションで利用可能なツールの範囲を明確にする必要がある。「インストール済みのツールすべて」なのか、意図的に3種類に絞るのかが不明確。",
+      "suggestion": "以下のいずれかを明記すること: (A) インストール済みCLIツール全6種を対象とする（CLIToolManager.getInstalledTools()を使用）、(B) 3種限定の場合はその理由と対応するフィルタリングロジックの実装タスクを追加する。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "Must Fix",
+      "category": "技術的妥当性",
+      "title": "MessageInput の worktreeId 依存設計に対する拡張方針が未記載",
+      "description": "仮説検証でも確認されている通り、MessageInput は worktreeId を必須Propsとして受け取り、内部で worktreeApi.sendMessage(worktreeId, ...) を呼び出している。また useSlashCommands(worktreeId), useImageAttachment(worktreeId, ...), InterruptButton も worktreeId を必須としている。Issueの「既存の MessageInput を流用・簡略化」という記述だけでは、どのように拡張するかの方針が不足している。",
+      "suggestion": "以下の設計方針をIssueに追記すること: (1) MessageInputの既存コンポーネントをそのまま拡張するか、グローバルセッション専用の簡略版コンポーネントを新規作成するか。(2) worktreeId をオプション化する場合、既存の50以上のworktreeId依存箇所への影響。(3) グローバルセッション用の代替ID体系（例: 'global-home' 等の仮想worktreeId）の採用有無。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "Must Fix",
+      "category": "技術的妥当性",
+      "title": "レスポンスポーリング機構のworktreeId依存性に対する設計方針が未記載",
+      "description": "response-poller-core.ts の activePollers Map は 'worktreeId:cliToolId' を複合キーとして使用し、startPolling/stopPolling も worktreeId を第1引数として受け取る。chat-db.ts の addMessage/getMessages も worktree_id を NOT NULL 制約付きカラムとして使用している。グローバルセッションではこれらの既存機構をどう利用するかが未定義。",
+      "suggestion": "実装タスクに「グローバルセッションのポーリング設計」を追加し、以下のいずれかの方針を明記: (A) 仮想worktreeID（例: '__global__'）を割り当ててexisting ポーリング機構を再利用、(B) assistant専用のポーリングモジュールを新規作成、(C) APIルート /api/assistant/* が独自のポーリングを持つ。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "Must Fix",
+      "category": "完全性",
+      "title": "セッションのライフサイクル管理（停止・クリーンアップ）が未記載",
+      "description": "グローバルセッション mcbd-global-home の停止・クリーンアップ方針がIssueに記載されていない。既存の session-cleanup.ts は worktreeId ベースでクリーンアップを実行する。アプリ終了時やサーバー再起動時のグローバルセッション破棄、ページ遷移時のセッション維持/破棄ポリシーが不明。",
+      "suggestion": "以下を受入条件または実装タスクに追加: (1) グローバルセッションの停止UI（ボタンまたはセッション切替時の自動停止）、(2) サーバー再起動時の mcbd-global-home セッション検出とクリーンアップ、(3) session-cleanup.ts への統合方針。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "Should Fix",
+      "category": "明確性",
+      "title": "tmuxセッション名 mcbd-global-home が既存命名規則と矛盾",
+      "description": "既存のtmuxセッション名は BaseCLITool.getSessionName() により 'mcbd-{cli_tool_id}-{worktree_id}' 形式で生成される。'mcbd-global-home' はこの命名規則に従っておらず、cli_tool_id が含まれていない。複数のCLIツールを選択可能にする場合、同時に1つのグローバルセッションしか持てないことになるが、これが意図的な制約なのか不明。",
+      "suggestion": "以下のいずれかを明記: (A) グローバルセッションは常に1つだけ（CLIツール切替時は既存セッションを停止して再作成）、(B) CLIツール毎にセッションを持つ（mcbd-global-claude, mcbd-global-codex 等の命名）。(A)の場合はCLIツール切替時のセッション停止フローも記載が必要。"
+    },
+    {
+      "id": "S1-006",
+      "severity": "Should Fix",
+      "category": "完全性",
+      "title": "チャット履歴の保存方針が曖昧（DB保存 or セッション内のみ）",
+      "description": "Issue本文に「チャット履歴（DB保存 or セッション内のみ）」と記載されているが、どちらを採用するか未決定。DB保存の場合、chat_messages テーブルの worktree_id NOT NULL 制約との整合性問題がある。セッション内のみの場合、tmux出力のキャプチャのみで履歴管理する必要がある。",
+      "suggestion": "以下のいずれかに確定すること: (A) DB保存する場合: chat_messages テーブルに worktree_id = NULL を許容するスキーマ変更、または global_session_id 的な仮想IDを worktree_id に格納する方針。(B) セッション内のみの場合: ターミナル出力のキャプチャ（capturePane）のみで表示する旨を明記し、DBマイグレーション不要と記載。"
+    },
+    {
+      "id": "S1-007",
+      "severity": "Should Fix",
+      "category": "完全性",
+      "title": "デフォルトコンテキストの付与方法が具体化されていない",
+      "description": "「CLAUDE.md / システムプロンプト相当として自動付与」と記載されているが、技術的な付与方法が不明。Claude CodeはCLAUDE.mdを自動読み込みするが、Codex/Geminiには該当する仕組みがない。また「現在アクティブなworktreeセッションのステータス」は動的情報であり、セッション開始時のスナップショットなのか、都度最新情報を付与するのかが不明。",
+      "suggestion": "以下を追記: (1) CLIツール毎のコンテキスト付与方式（Claude: CLAUDE.md自動読み込み / Codex: --system-prompt引数 / Gemini: 初回メッセージとして送信 等）、(2) 動的情報（アクティブセッション状態）は初回のみか毎回更新かを明記。"
+    },
+    {
+      "id": "S1-008",
+      "severity": "Should Fix",
+      "category": "完全性",
+      "title": "作業ディレクトリ変更時の既存セッション処理が未記載",
+      "description": "ドロップダウンでリポジトリ（作業ディレクトリ）を選択可能と記載されているが、セッション実行中にリポジトリを切り替えた場合の挙動が不明。tmuxセッションの作業ディレクトリは作成時に固定されるため、切替には既存セッションの停止と再作成が必要になる。",
+      "suggestion": "以下のいずれかの方針を追記: (A) セッション実行中はリポジトリ選択を無効化（disabled）、(B) リポジトリ変更時に確認ダイアログを表示し、セッション停止→再作成、(C) リポジトリ毎に別セッションを持つ（命名を mcbd-global-{repo-id} 等に変更）。"
+    },
+    {
+      "id": "S1-009",
+      "severity": "Should Fix",
+      "category": "受け入れ条件",
+      "title": "受入条件にターミナル出力表示の検証項目がない",
+      "description": "Issue本文で「ターミナル出力表示を流用・簡略化」と記載されているが、受入条件にはターミナル出力の表示に関する項目がない。アシスタントの応答がリアルタイムで表示されることは主要機能であり、受入条件として明示すべき。",
+      "suggestion": "受入条件に以下を追加: 「アシスタントのターミナル出力がリアルタイムに表示される」「ターミナル出力のキャプチャ間隔が適切である（既存のcapture APIと同等）」"
+    },
+    {
+      "id": "S1-010",
+      "severity": "Should Fix",
+      "category": "完全性",
+      "title": "実装タスクに API /api/assistant/stop (セッション停止) エンドポイントが不足",
+      "description": "APIとして start, terminal, current-output の3つが記載されているが、セッション停止用のエンドポイントがない。既存のworktreeセッション管理では /api/worktrees/[id]/session (DELETE) でセッション停止が可能。グローバルセッションにも同等の停止機能が必要。",
+      "suggestion": "API追加に以下を加える: DELETE /api/assistant/session (または POST /api/assistant/stop) -- グローバルセッション停止。また、UI上のセッション停止ボタンの実装タスクも追加。"
+    },
+    {
+      "id": "S1-011",
+      "severity": "Should Fix",
+      "category": "技術的妥当性",
+      "title": "Home画面のレイアウト変更による既存コンポーネントへの影響考慮が不足",
+      "description": "「現在のHome画面の上部にチャットUIを配置」と記載されているが、Home画面は現在AppShellでラップされたシンプルなレイアウト。チャットUI（ターミナル出力表示 + メッセージ入力 + ドロップダウン群）を上部に配置すると、Session OverviewやShortcut Cardsが押し下げられ、既存のHome画面の使い勝手が大きく変わる。モバイル表示でのレイアウト崩れリスクも高い。",
+      "suggestion": "以下を検討し記載: (1) チャットUIの高さ制限（折りたたみ可能か、固定高か）、(2) モバイルレイアウトでの配置方針（タブ切替 or スクロール）、(3) チャットUIが非アクティブ時の最小化表示。"
+    },
+    {
+      "id": "S1-012",
+      "severity": "Nice to Have",
+      "category": "完全性",
+      "title": "セキュリティ考慮事項の記載がない",
+      "description": "グローバルセッションは任意のリポジトリパスで CLI を起動するため、既存の worktree ベースのパス検証（path-validator.ts）と同等のセキュリティ層が必要。また、新規APIエンドポイント /api/assistant/* に対する認証ミドルウェアの適用確認も必要。",
+      "suggestion": "実装タスクに以下を追加: (1) リポジトリパスのバリデーション（registeredリポジトリのパスのみ許可）、(2) /api/assistant/* への認証ミドルウェア適用確認、(3) MAX_COMMAND_LENGTH 等の DoS 対策。"
+    },
+    {
+      "id": "S1-013",
+      "severity": "Nice to Have",
+      "category": "完全性",
+      "title": "既存のCLIコマンド（commandmate ls, send, wait等）との統合方針がない",
+      "description": "Issue #518で追加されたCLIコマンド群は worktreeId ベースで動作する。グローバルセッションをこれらのCLIコマンドからも操作可能にするかの方針が未記載。",
+      "suggestion": "スコープ外であれば「Phase 1ではCLIコマンドからのグローバルセッション操作はサポートしない」と明記。将来対応予定であれば follow-up Issue への言及を追加。"
+    },
+    {
+      "id": "S1-014",
+      "severity": "Nice to Have",
+      "category": "完全性",
+      "title": "Auto-Yes・スケジューラー等の既存機能のグローバルセッション対応範囲が不明",
+      "description": "既存のAuto-Yes、レスポンスポーリング、スケジューラー等の機能はworktreeIdベースで設計されている。グローバルセッションでこれらの機能を利用可能にするかが記載されていない。",
+      "suggestion": "「Phase 1では基本的なメッセージ送受信のみをサポートし、Auto-Yes・スケジューラー等の高度な機能はスコープ外」等のスコープ定義を追記。"
+    }
+  ],
+  "must_fix_count": 4,
+  "should_fix_count": 7,
+  "nice_to_have_count": 3,
+  "summary": "Issue #649 は worktree ベースで設計された既存アーキテクチャに対してグローバルセッションという新概念を導入するため、既存コードとの整合性や技術的設計方針の明確化が多数必要。Must Fixは4件で、(1) CLIツール選択範囲の不整合、(2) MessageInputの worktreeId 依存設計への拡張方針不足、(3) ポーリング機構のworktreeId依存設計への対応方針不足、(4) セッションライフサイクル管理の欠如。Should Fixは7件で、主にtmuxセッション命名規則の矛盾、チャット履歴保存方針の未決定、デフォルトコンテキスト付与方法の具体化不足等。全体として機能の方向性は妥当だが、既存アーキテクチャとの統合ポイントについての設計判断が不足しており、実装フェーズで大幅な手戻りリスクがある。",
+  "code_references": [
+    {
+      "file": "src/lib/cli-tools/types.ts",
+      "relevance": "CLI_TOOL_IDS定義（6種類）とIssue記載（3種類）の不整合"
+    },
+    {
+      "file": "src/components/worktree/MessageInput.tsx",
+      "relevance": "worktreeId必須Props設計、流用候補コンポーネント"
+    },
+    {
+      "file": "src/lib/polling/response-poller-core.ts",
+      "relevance": "activePollers Mapのworktree依存複合キー設計"
+    },
+    {
+      "file": "src/lib/cli-tools/base.ts",
+      "relevance": "getSessionName()のmcbd-{tool}-{worktreeId}命名規則"
+    },
+    {
+      "file": "src/lib/db/init-db.ts",
+      "relevance": "chat_messages.worktree_id NOT NULL制約"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "relevance": "worktreeIdベースのセッションクリーンアップ"
+    },
+    {
+      "file": "src/app/page.tsx",
+      "relevance": "Home画面のエントリポイント（レイアウト変更対象）"
+    },
+    {
+      "file": "src/lib/db/db-repository.ts",
+      "relevance": "getAllRepositoriesWithWorktreeCount()（リポジトリ選択UI用）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュール一覧・アーキテクチャ整合性確認"
+    },
+    {
+      "file": "docs/architecture.md",
+      "relevance": "Home画面の現行設計・ルーティング構成"
+    }
+  ]
+}

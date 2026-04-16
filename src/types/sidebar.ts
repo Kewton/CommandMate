@@ -60,6 +60,8 @@ export interface SidebarBranchItem {
   description?: string;
   /** Per-CLI tool status for sidebar display */
   cliStatus?: Partial<Record<CLIToolType, BranchStatus>>;
+  /** Absolute path to the worktree directory (Issue #651) */
+  worktreePath?: string;
 }
 
 /**
@@ -126,5 +128,6 @@ export function toBranchItem(worktree: Worktree): SidebarBranchItem {
     lastActivity: worktree.updatedAt,
     description: worktree.description,
     cliStatus,
+    worktreePath: worktree.path,
   };
 }

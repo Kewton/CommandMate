@@ -168,8 +168,8 @@ describe('MemoPane', () => {
       });
     });
 
-    it('should disable add button when at memo limit (5)', async () => {
-      const fiveMemos = Array.from({ length: 5 }, (_, i) => ({
+    it('should disable add button when at memo limit (10)', async () => {
+      const fiveMemos = Array.from({ length: 10 }, (_, i) => ({
         id: `memo-${i}`,
         worktreeId: 'worktree-1',
         title: `Memo ${i}`,

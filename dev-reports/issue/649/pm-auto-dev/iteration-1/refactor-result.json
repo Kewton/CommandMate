@@ -1,0 +1,26 @@
+{
+  "status": "success",
+  "changes": [
+    {
+      "file": "src/app/api/assistant/tools/route.ts",
+      "description": "新規追加: GET /api/assistant/tools エンドポイント。CLIToolManager.getAllToolsInfo() でインストール済みツール一覧を返す"
+    },
+    {
+      "file": "src/lib/api/assistant-api.ts",
+      "description": "AssistantToolInfo 型を追加。getInstalledTools() メソッドを assistantApi に追加"
+    },
+    {
+      "file": "src/components/home/AssistantChatPanel.tsx",
+      "description": "availableTools state 追加。fetchTools() でインストール済みツールを取得。CLIツール選択UIを未インストールツールをdisabled表示に改善。CLI_TOOL_IDS ハードコードを動的取得に置換"
+    }
+  ],
+  "quality_metrics": {
+    "lint_errors": 0,
+    "type_errors": 0,
+    "test_files": 334,
+    "test_passed": 6319,
+    "test_failed": 0,
+    "test_skipped": 7
+  },
+  "summary": "受入テストで指摘されたCLIツール選択UIの改善を実施。GET /api/assistant/tools エンドポイントを新規追加し、AssistantChatPanel がマウント時にインストール状態を取得してドロップダウンに反映するよう改善。未インストールのツールは '(not installed)' 表示でdisabled化。TypeScript/ESLint/ユニットテスト全パス。"
+}

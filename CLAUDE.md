@@ -185,6 +185,7 @@ tests/
 | `src/config/file-polling-config.ts` | ファイルポーリング定数（FILE_TREE_POLL_INTERVAL_MS, FILE_CONTENT_POLL_INTERVAL_MS）（Issue #469） |
 | `src/config/timer-constants.ts` | タイマー定数定義（TIMER_DELAYS, MAX_TIMERS_PER_WORKTREE, TIMER_STATUS, isValidTimerDelay）（Issue #534） |
 | `src/config/copilot-constants.ts` | Copilot CLIタイミング定数（COPILOT_SEND_ENTER_DELAY_MS, COPILOT_TEXT_INPUT_DELAY_MS）（Issue #565）、MODEL_NAME_PATTERN/MAX_MODEL_NAME_LENGTH追加（Issue #588） |
+| `src/config/memo-config.ts` | メモ共有定数（MAX_MEMOS）（Issue #652） |
 | `src/config/repository-config.ts` | リポジトリ共有定数（MAX_DISPLAY_NAME_LENGTH）（Issue #644） |
 | `src/config/editable-extensions.ts` | 編集可能拡張子定義・バリデーション（EDITABLE_EXTENSIONS, EXTENSION_VALIDATORS, isEditableExtension, validateContent）。.yaml/.yml 追加・YAML危険タグバリデーション（Issue #646） |
 | `src/lib/detection/prompt-key.ts` | promptKey重複排除ユーティリティ |
@@ -203,7 +204,12 @@ tests/
 | `src/lib/job-executor.ts` | ジョブ実行エンジン・実行ログCRUD（Issue #479） |
 | `src/lib/cmate-parser.ts` | CMATE.md汎用パーサー、parseAndValidateCliToolColumn連携（Issue #588） |
 | `src/lib/cmate-cli-tool-parser.ts` | CLI Tool列パース・model名バリデーション共有モジュール（parseCliToolColumn, validateCopilotModelName, TOOLS_WITH_MODEL_SUPPORT）（Issue #588） |
-| `src/lib/session-cleanup.ts` | セッション/ポーラー/スケジューラー停止（Facade）、killWorktreeSession共通化、syncWorktreesAndCleanup（Issue #526） |
+| `src/lib/session-cleanup.ts` | セッション/ポーラー/スケジューラー停止（Facade）、killWorktreeSession共通化、syncWorktreesAndCleanup（Issue #526）、cleanupGlobalSessions追加（Issue #649） |
+| `src/lib/session/global-session-constants.ts` | グローバルセッション定数（GLOBAL_SESSION_WORKTREE_ID='\_\_global\_\_', GLOBAL_POLL_INTERVAL_MS等）（Issue #649） |
+| `src/lib/polling/global-session-poller.ts` | グローバルセッション専用ポーリング（pollGlobalSession, stopGlobalSessionPolling, stopAllGlobalSessionPolling, isGlobalPollerActive）（Issue #649） |
+| `src/lib/assistant/context-builder.ts` | グローバルセッション用デフォルトコンテキスト生成（buildGlobalContext, getEnabledRepositories）（Issue #649） |
+| `src/lib/api/assistant-api.ts` | アシスタントAPIクライアント（startSession, sendCommand, getCurrentOutput, stopSession, getInstalledTools）（Issue #649） |
+| `src/types/assistant.ts` | アシスタント機能型定義（StartAssistantRequest, StartAssistantResponse, AssistantCurrentOutputResponse等）（Issue #649） |
 | `src/lib/session-key-sender.ts` | Claudeセッションキー送信ロジック（Issue #479） |
 | `src/lib/prompt-answer-input.ts` | プロンプト応答入力ロジック（getAnswerInput）（Issue #479） |
 | `src/lib/resource-cleanup.ts` | リソースリーク対策（孤立プロセス/Map検出） |
@@ -223,7 +229,7 @@ tests/
 | `src/lib/git/git-utils.ts` | Git情報取得・コミット履歴/diff取得（Issue #447）、getCommitsByDateRange/collectRepositoryCommitLogs追加（Issue #627） |
 | `src/types/git.ts` | Git関連型定義（CommitInfo, ChangedFile, GitLogResponse等）（Issue #447）、CommitLogEntry/RepositoryCommitLogs追加（Issue #627） |
 | `src/lib/sidebar-utils.ts` | サイドバーソート・グループ化ユーティリティ（SortKey, SortDirection, ViewMode型, BranchGroup型, sortBranches(), groupBranches(), generateRepositoryColor()）（Issue #449, #504） |
-| `src/contexts/SidebarContext.tsx` | サイドバー状態管理Context（isOpen, sortKey, viewMode, localStorageパターン）（Issue #449） |
+| `src/contexts/SidebarContext.tsx` | サイドバー状態管理Context（isOpen, sortKey, viewMode, localStorageパターン）（Issue #449）、DEFAULT_SIDEBAR_WIDTH=224(w-56)に変更（Issue #651） |
 | `src/lib/utils.ts` | 汎用ユーティリティ（withTimeout追加: Issue #627） |
 | `src/lib/date-utils.ts` | 相対時刻フォーマット |
 | `src/lib/clipboard-utils.ts` | クリップボードコピー |
@@ -276,6 +282,11 @@ tests/
 | `src/app/api/worktrees/[id]/git/diff/route.ts` | Gitファイルdiff取得API（Issue #447） |
 | `src/app/api/worktrees/[id]/special-keys/route.ts` | 特殊キー送信API（Up/Down/Left/Right/Enter/Escape、6層防御）（Issue #473, #592） |
 | `src/app/api/templates/route.ts` | レポートテンプレートAPI（GET全件取得/POST作成、5件上限・バリデーション）（Issue #618） |
+| `src/app/api/assistant/start/route.ts` | グローバルセッション開始API（POST、DB操作なし、cliToolId検証・ディレクトリバリデーション・コンテキスト送信）（Issue #649） |
+| `src/app/api/assistant/terminal/route.ts` | グローバルセッションメッセージ送信API（POST、sendKeys使用）（Issue #649） |
+| `src/app/api/assistant/current-output/route.ts` | グローバルセッション出力取得API（GET、capturePane使用）（Issue #649） |
+| `src/app/api/assistant/session/route.ts` | グローバルセッション停止API（DELETE、stopGlobalSessionPolling+killSession）（Issue #649） |
+| `src/app/api/assistant/tools/route.ts` | インストール済みCLIツール一覧API（GET、CLIToolManager.getAllToolsInfo()使用）（Issue #649） |
 | `src/app/api/templates/[id]/route.ts` | レポートテンプレート個別API（PUT更新/DELETE削除、UUID検証）（Issue #618） |
 | `src/components/worktree/NavigationButtons.tsx` | OpenCode TUI選択リストナビゲーションボタン、Left/Right対応（Issue #473, #592） |
 | `src/cli/utils/api-client.ts` | CLI用HTTPクライアント（認証トークン解決・エラー分類・ApiClient/ApiError）（Issue #518） |
@@ -296,6 +307,8 @@ tests/
 | `src/hooks/useWorktreeTabState.ts` | Worktreeタブ状態管理フック（deep link対応）（Issue #600） |
 | `src/components/mobile/GlobalMobileNav.tsx` | モバイルグローバルナビ（4タブ）（Issue #600） |
 | `src/components/home/HomeSessionSummary.tsx` | Home画面セッション集計サマリー（Issue #600） |
+| `src/components/home/AssistantChatPanel.tsx` | Home画面アシスタントチャットパネル（折りたたみ可能・最大50vh・ポーリング・セッション開始/停止）（Issue #649） |
+| `src/components/home/AssistantMessageInput.tsx` | アシスタント専用メッセージ入力（送信のみ・スラッシュコマンド/画像添付なし）（Issue #649） |
 | `src/components/review/ReviewCard.tsx` | Reviewカード（Issue #600） |
 | `src/components/review/SimpleMessageInput.tsx` | 軽量メッセージ入力（Review画面用）（Issue #600） |
 | `src/components/review/TemplateTab.tsx` | テンプレート管理UI（一覧・作成・編集・削除、最大5件制限）（Issue #618） |

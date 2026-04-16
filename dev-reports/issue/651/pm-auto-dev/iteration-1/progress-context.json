@@ -1,0 +1,38 @@
+{
+  "issue_number": 651,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "tests_passing": 6293,
+      "lint_errors": 0,
+      "ts_errors": 0,
+      "files_changed": 6,
+      "test_files_changed": 5
+    },
+    "acceptance": {
+      "status": "passed",
+      "scenarios_total": 15,
+      "scenarios_passed": 15
+    },
+    "refactor": {
+      "status": "success",
+      "improvements": ["BranchTooltipサブコンポーネント抽出", "AppShell.tsxにコメント追加（定数同期の明示）", "useSidebar.tsのJSDoc改善"]
+    },
+    "uat": {
+      "status": "passed",
+      "total": 15,
+      "passed": 15,
+      "failed": 0,
+      "pass_rate": "100%"
+    }
+  },
+  "key_changes": [
+    "src/types/sidebar.ts: SidebarBranchItem型にworktreePath追加、toBranchItem()マッピング",
+    "src/contexts/SidebarContext.tsx: DEFAULT_SIDEBAR_WIDTH 288→224",
+    "src/hooks/useSidebar.ts: LocalStorageマイグレーション（旧値288→224）",
+    "src/components/layout/AppShell.tsx: w-72→w-56, pl-72→pl-56（デスクトップのみ）",
+    "src/components/sidebar/BranchListItem.tsx: showRepositoryName props、BranchTooltipサブコンポーネント（WAI-ARIA対応）",
+    "src/components/layout/Sidebar.tsx: grouped表示にshowRepositoryName={false}"
+  ]
+}

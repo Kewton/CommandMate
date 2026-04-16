@@ -1,0 +1,94 @@
+{
+  "issue_number": 649,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-04-14",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "S1-001",
+        "status": "applied",
+        "change_summary": "CLIツール選択範囲を3種類から全6種類（CLIToolManager.getInstalledTools()）に拡張。CLI_TOOL_IDS定数との整合性を確保"
+      },
+      {
+        "id": "S1-002",
+        "status": "applied",
+        "change_summary": "MessageInputの直接拡張ではなく、グローバルセッション専用の簡略版コンポーネント AssistantMessageInput を新規作成する方針を明記。worktreeId依存箇所への影響回避理由を記載"
+      },
+      {
+        "id": "S1-003",
+        "status": "applied",
+        "change_summary": "レスポンスポーリング設計セクションを新規追加。仮想worktreeID '__global__' を使用して既存ポーリング機構を再利用する方針を明記。Phase 1ではDB保存を行わない旨も記載"
+      },
+      {
+        "id": "S1-004",
+        "status": "applied",
+        "change_summary": "セッションのライフサイクル管理セクションを新規追加。停止UI、サーバー再起動時のクリーンアップ、ページ遷移時の維持、CLIツール切替時の挙動を明記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S1-005",
+        "status": "applied",
+        "change_summary": "tmuxセッション名を mcbd-global-home（固定）から mcbd-global-{cli_tool_id} 形式に変更。CLIツール毎に独立セッションを持つ方針を採用"
+      },
+      {
+        "id": "S1-006",
+        "status": "applied",
+        "change_summary": "チャット履歴保存方針セクションを新規追加。Phase 1ではセッション内のみ（capturePane）とし、DBマイグレーション不要と確定。将来のDB保存方式も言及"
+      },
+      {
+        "id": "S1-007",
+        "status": "applied",
+        "change_summary": "デフォルトコンテキスト付与方法をCLIツール毎のテーブルで具体化。動的情報はセッション開始時のスナップショットと明記"
+      },
+      {
+        "id": "S1-008",
+        "status": "applied",
+        "change_summary": "作業ディレクトリ変更時の処理方針を追記。確認ダイアログ表示+セッション停止・再作成フロー。実装タスクにも項目追加"
+      },
+      {
+        "id": "S1-009",
+        "status": "applied",
+        "change_summary": "受入条件に「ターミナル出力がリアルタイムに表示される」「キャプチャ間隔が既存と同等」の2項目を追加"
+      },
+      {
+        "id": "S1-010",
+        "status": "applied",
+        "change_summary": "DELETE /api/assistant/session エンドポイントをAPI追加セクションに追加。セッション停止UIの実装タスクも追加"
+      },
+      {
+        "id": "S1-011",
+        "status": "applied",
+        "change_summary": "Home画面レイアウト変更への配慮を追記。折りたたみ可能、高さ上限50vh、モバイルではタブ切替方式。受入条件にも折りたたみ・モバイル対応項目を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S1-012",
+        "status": "partially_applied",
+        "change_summary": "セキュリティ関連の実装タスクとして認証ミドルウェア適用確認とリポジトリパスバリデーションを追加。MAX_COMMAND_LENGTH等のDoS対策は詳細設計時に検討"
+      },
+      {
+        "id": "S1-013",
+        "status": "applied",
+        "change_summary": "スコープ定義（Phase 1）セクションを新規追加し、CLIコマンドからのグローバルセッション操作はスコープ外と明記"
+      },
+      {
+        "id": "S1-014",
+        "status": "applied",
+        "change_summary": "スコープ定義（Phase 1）セクションにAuto-Yes・スケジューラー等の高度な機能はスコープ外と明記"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 14,
+    "applied": 13,
+    "partially_applied": 1,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/649"
+  }
+}

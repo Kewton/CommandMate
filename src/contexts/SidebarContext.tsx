@@ -26,8 +26,8 @@ import type { SortKey, SortDirection, ViewMode } from '@/lib/sidebar-utils';
 // Constants
 // ============================================================================
 
-/** Default sidebar width in pixels (w-72 = 288px) */
-export const DEFAULT_SIDEBAR_WIDTH = 288;
+/** Default sidebar width in pixels (w-56 = 224px) */
+export const DEFAULT_SIDEBAR_WIDTH = 224;
 
 /** LocalStorage key for sort settings */
 export const SIDEBAR_SORT_STORAGE_KEY = 'mcbd-sidebar-sort';
@@ -43,6 +43,12 @@ export const SIDEBAR_VIEW_MODE_STORAGE_KEY = 'mcbd-sidebar-view-mode';
 
 /** Default view mode */
 export const DEFAULT_VIEW_MODE: ViewMode = 'grouped';
+
+/** LocalStorage key for sidebar width */
+export const SIDEBAR_WIDTH_STORAGE_KEY = 'mcbd-sidebar-width';
+
+/** Legacy default width before Issue #651 compaction (for migration) */
+const LEGACY_SIDEBAR_WIDTH = 288;
 
 // ============================================================================
 // Types
@@ -253,6 +259,21 @@ export function SidebarProvider({
     (stored) => {
       if (stored === 'grouped' || stored === 'flat') {
         dispatch({ type: 'SET_VIEW_MODE', viewMode: stored });
+      }
+    },
+  );
+
+  // Sync width with localStorage (load on mount, persist on change)
+  // Issue #651 follow-up: migrate legacy width 288 → 224
+  useLocalStorageSync(
+    SIDEBAR_WIDTH_STORAGE_KEY,
+    state.width,
+    () => String(state.width),
+    (stored) => {
+      const parsed = Number(stored);
+      if (!isNaN(parsed) && parsed > 0) {
+        const width = parsed === LEGACY_SIDEBAR_WIDTH ? DEFAULT_SIDEBAR_WIDTH : parsed;
+        dispatch({ type: 'SET_WIDTH', width });
       }
     },
   );

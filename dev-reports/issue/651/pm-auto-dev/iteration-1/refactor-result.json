@@ -1,0 +1,37 @@
+{
+  "status": "success",
+  "issue_number": 651,
+  "refactored_files": [
+    "src/types/sidebar.ts",
+    "src/components/sidebar/BranchListItem.tsx",
+    "src/components/layout/AppShell.tsx",
+    "src/hooks/useSidebar.ts"
+  ],
+  "improvements": [
+    "Extracted inline tooltip markup into dedicated BranchTooltip sub-component in BranchListItem for improved readability and Single Responsibility",
+    "Renamed section header from 'CLI Status Dot' to 'Sub-components' to reflect the section now containing multiple sub-components",
+    "Added comments linking Tailwind width classes (w-56/pl-56) to DEFAULT_SIDEBAR_WIDTH constant in AppShell for maintainability",
+    "Improved JSDoc for LEGACY_SIDEBAR_WIDTH with Tailwind class references (w-72=288px, w-56=224px)",
+    "Simplified worktreePath JSDoc to remove implementation-specific 'for tooltip display' note"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "after_coverage": 80.0
+  },
+  "test_results": {
+    "status": "passed",
+    "count": 6293
+  },
+  "lint_errors": 0,
+  "ts_errors": 0,
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "commits": [
+    "59c8e3f3: refactor(sidebar): extract BranchTooltip sub-component and improve maintainability comments"
+  ],
+  "message": "Refactoring completed. Extracted BranchTooltip sub-component, improved maintainability comments. All 6293 tests pass, 0 lint errors, 0 TypeScript errors."
+}

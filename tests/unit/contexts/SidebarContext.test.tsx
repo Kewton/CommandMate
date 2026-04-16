@@ -171,8 +171,8 @@ describe('SidebarContext', () => {
   });
 
   describe('DEFAULT_SIDEBAR_WIDTH', () => {
-    it('should export default width constant', () => {
-      expect(DEFAULT_SIDEBAR_WIDTH).toBe(288); // 72 * 4 = 288px (w-72)
+    it('should export default width constant as 224px (Issue #651: w-56)', () => {
+      expect(DEFAULT_SIDEBAR_WIDTH).toBe(224); // 56 * 4 = 224px (w-56)
     });
   });
 

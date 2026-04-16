@@ -34,11 +34,12 @@ describe('GlobalMobileNav', () => {
     mockRouterPush.mockClear();
   });
 
-  it('should render 4 tabs: Home, Sessions, Review/Report, More', () => {
+  it('should render 5 tabs: Home, Chat, Sessions, Review, More', () => {
     render(<GlobalMobileNav />);
     expect(screen.getByText('Home')).toBeDefined();
+    expect(screen.getByText('Chat')).toBeDefined();
     expect(screen.getByText('Sessions')).toBeDefined();
-    expect(screen.getByText('Review/Report')).toBeDefined();
+    expect(screen.getByText('Review')).toBeDefined();
     expect(screen.getByText('More')).toBeDefined();
   });
 
@@ -51,11 +52,13 @@ describe('GlobalMobileNav', () => {
   it('should have correct hrefs for tabs', () => {
     render(<GlobalMobileNav />);
     const homeLink = screen.getByText('Home').closest('a');
+    const chatLink = screen.getByText('Chat').closest('a');
     const sessionsLink = screen.getByText('Sessions').closest('a');
-    const reviewLink = screen.getByText('Review/Report').closest('a');
+    const reviewLink = screen.getByText('Review').closest('a');
     const moreLink = screen.getByText('More').closest('a');
 
     expect(homeLink?.getAttribute('href')).toBe('/');
+    expect(chatLink?.getAttribute('href')).toBe('/chat');
     expect(sessionsLink?.getAttribute('href')).toBe('/sessions');
     expect(reviewLink?.getAttribute('href')).toBe('/review');
     expect(moreLink?.getAttribute('href')).toBe('/more');
@@ -75,10 +78,10 @@ describe('GlobalMobileNav', () => {
     expect(sessionsLink?.className).toContain('text-cyan-600');
   });
 
-  it('should highlight active Review/Report tab when on /review', () => {
+  it('should highlight active Review tab when on /review', () => {
     mockPathname.mockReturnValue('/review');
     render(<GlobalMobileNav />);
-    const reviewLink = screen.getByText('Review/Report').closest('a');
+    const reviewLink = screen.getByText('Review').closest('a');
     expect(reviewLink?.className).toContain('text-cyan-600');
   });
 

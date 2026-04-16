@@ -4,6 +4,9 @@
  * Main sidebar component containing the branch list.
  * Includes search/filter functionality, branch status display,
  * and repository-based grouping (Issue #449).
+ *
+ * Issue #651: Compact w-56 sidebar + tooltips.
+ * DnD group reordering (drag-and-drop) with DB persistence via /api/sidebar/group-order.
  */
 
 'use client';
@@ -11,6 +14,21 @@
 import React, { memo, useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import {
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useWorktreeSelection } from '@/contexts/WorktreeSelectionContext';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { BranchListItem } from '@/components/sidebar/BranchListItem';
@@ -24,6 +42,7 @@ import { toBranchItem } from '@/types/sidebar';
 import { generateRepositoryColor } from '@/lib/sidebar-utils';
 import { useWorktreeList } from '@/hooks/useWorktreeList';
 import type { ViewMode } from '@/lib/sidebar-utils';
+import type { BranchGroup } from '@/lib/sidebar-utils';
 
 // ============================================================================
 // Constants
@@ -31,6 +50,46 @@ import type { ViewMode } from '@/lib/sidebar-utils';
 
 /** LocalStorage key for group collapsed state */
 const SIDEBAR_GROUP_COLLAPSED_STORAGE_KEY = 'mcbd-sidebar-group-collapsed';
+
+/** LocalStorage key for branch list scroll position */
+const SIDEBAR_SCROLL_TOP_STORAGE_KEY = 'mcbd-sidebar-scroll-top';
+
+/** In-memory cache used across client-side remounts */
+let lastSidebarScrollTop = 0;
+
+function readSidebarScrollTop(): number {
+  if (typeof window === 'undefined') return lastSidebarScrollTop;
+
+  try {
+    const stored = localStorage.getItem(SIDEBAR_SCROLL_TOP_STORAGE_KEY);
+    if (!stored) {
+      lastSidebarScrollTop = 0;
+      return 0;
+    }
+
+    const parsed = Number(stored);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      lastSidebarScrollTop = parsed;
+    }
+  } catch {
+    // Ignore localStorage errors
+  }
+
+  return lastSidebarScrollTop;
+}
+
+function persistSidebarScrollTop(scrollTop: number): void {
+  const normalized = Number.isFinite(scrollTop) && scrollTop > 0 ? scrollTop : 0;
+  lastSidebarScrollTop = normalized;
+
+  if (typeof window === 'undefined') return;
+
+  try {
+    localStorage.setItem(SIDEBAR_SCROLL_TOP_STORAGE_KEY, String(normalized));
+  } catch {
+    // Ignore localStorage errors
+  }
+}
 
 // ============================================================================
 // Component
@@ -49,6 +108,7 @@ export const Sidebar = memo(function Sidebar() {
   const { worktrees, selectedWorktreeId, selectWorktree, refreshWorktrees } = useWorktreeSelection();
   const { closeMobileDrawer, sortKey, sortDirection, viewMode, setViewMode } = useSidebarContext();
   const [searchQuery, setSearchQuery] = useState('');
+  const branchListRef = useRef<HTMLDivElement>(null);
 
   // Group collapsed state with localStorage sync
   const [groupCollapsed, setGroupCollapsed] = useState<Record<string, boolean>>(() => {
@@ -60,6 +120,27 @@ export const Sidebar = memo(function Sidebar() {
       return {};
     }
   });
+
+  // Repository group display order (DB-backed, fetched on mount)
+  const [repositoryOrder, setRepositoryOrder] = useState<string[]>([]);
+  const orderLoadedRef = useRef(false);
+
+  // Fetch saved group order from server on mount
+  useEffect(() => {
+    if (orderLoadedRef.current) return;
+    orderLoadedRef.current = true;
+
+    fetch('/api/sidebar/group-order')
+      .then((res) => res.json())
+      .then((data: { success: boolean; order: string[] | null }) => {
+        if (data.success && Array.isArray(data.order)) {
+          setRepositoryOrder(data.order);
+        }
+      })
+      .catch(() => {
+        // Non-fatal: fall back to alphabetical order
+      });
+  }, []);
 
   // Convert worktrees to sidebar items
   const branchItems = useMemo(() => worktrees.map(toBranchItem), [worktrees]);
@@ -73,8 +154,27 @@ export const Sidebar = memo(function Sidebar() {
     filterText: searchQuery,
   });
 
+  // Apply saved repository order to groupedItems (only when not searching)
+  const orderedGroups: BranchGroup[] | null = useMemo(() => {
+    if (viewMode !== 'grouped' || !groupedItems) return null;
+
+    if (searchQuery.trim() || repositoryOrder.length === 0) {
+      // No custom order: use default (alphabetical from groupBranches)
+      return groupedItems;
+    }
+
+    // Place known repos first in saved order, then append any new repos at end
+    const orderMap = new Map(repositoryOrder.map((name, idx) => [name, idx]));
+    return [...groupedItems].sort((a, b) => {
+      const ia = orderMap.has(a.repositoryName) ? orderMap.get(a.repositoryName)! : Infinity;
+      const ib = orderMap.has(b.repositoryName) ? orderMap.get(b.repositoryName)! : Infinity;
+      if (ia === ib) return a.repositoryName.localeCompare(b.repositoryName);
+      return ia - ib;
+    });
+  }, [viewMode, groupedItems, repositoryOrder, searchQuery]);
+
   // Adapt groupedItems to match previous interface (null when flat mode)
-  const groupedBranches = viewMode === 'grouped' ? groupedItems : null;
+  const groupedBranches = viewMode === 'grouped' ? orderedGroups : null;
 
   // Persist groupCollapsed to localStorage
   useEffect(() => {
@@ -97,28 +197,69 @@ export const Sidebar = memo(function Sidebar() {
     }));
   }, []);
 
-  // Handle branch selection
-  // Fallback: if router.push fails to navigate (e.g., Next.js Router Cache corruption),
-  // use window.location.href after a short delay to ensure navigation succeeds.
-  const handleBranchClick = useCallback((branchId: string) => {
-    selectWorktree(branchId);
-    const targetPath = `/worktrees/${branchId}`;
-    router.push(targetPath);
-    closeMobileDrawer();
-    // Fallback navigation if router.push silently fails
-    const timerId = setTimeout(() => {
-      if (window.location.pathname !== targetPath) {
-        window.location.href = targetPath;
-      }
-    }, 300);
-    // Cleanup: if route changes before timeout, cancel fallback
-    const handleRouteChange = () => clearTimeout(timerId);
-    window.addEventListener('popstate', handleRouteChange, { once: true });
+  const saveBranchListScroll = useCallback(() => {
+    persistSidebarScrollTop(branchListRef.current?.scrollTop ?? 0);
+  }, []);
+
+  // Restore saved scroll position after the list content has rendered.
+  useEffect(() => {
+    const branchList = branchListRef.current;
+    if (!branchList) return;
+
+    const frameId = window.requestAnimationFrame(() => {
+      branchList.scrollTop = readSidebarScrollTop();
+    });
+
     return () => {
-      clearTimeout(timerId);
-      window.removeEventListener('popstate', handleRouteChange);
+      window.cancelAnimationFrame(frameId);
     };
-  }, [selectWorktree, router, closeMobileDrawer]);
+  }, [flatBranches.length, groupedBranches?.length, viewMode]);
+
+  // Handle branch selection.
+  // Note: no fallback timer — Next.js App Router defers history.pushState to a React
+  // effect, so window.location.pathname does not update synchronously with router.push().
+  // A fallback timer that checks window.location.pathname would fire before the URL
+  // updates and trigger a spurious full-page reload on every navigation.
+  const handleBranchClick = useCallback((branchId: string) => {
+    saveBranchListScroll();
+    selectWorktree(branchId);
+    router.push(`/worktrees/${branchId}`);
+    closeMobileDrawer();
+  }, [saveBranchListScroll, selectWorktree, router, closeMobileDrawer]);
+
+  // DnD sensors: require 8px move before activating (distinguishes click from drag)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  );
+
+  // Handle group reorder via DnD
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id || !groupedBranches) return;
+
+      const currentOrder = groupedBranches.map((g) => g.repositoryName);
+      const oldIndex = currentOrder.indexOf(String(active.id));
+      const newIndex = currentOrder.indexOf(String(over.id));
+      if (oldIndex === -1 || newIndex === -1) return;
+
+      const newOrder = arrayMove(currentOrder, oldIndex, newIndex);
+
+      // Optimistic update
+      setRepositoryOrder(newOrder);
+
+      // Persist to server
+      fetch('/api/sidebar/group-order', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order: newOrder }),
+      }).catch(() => {
+        // Revert on error
+        setRepositoryOrder(currentOrder);
+      });
+    },
+    [groupedBranches]
+  );
 
   // Check if list is empty (for both modes)
   const isEmpty = viewMode === 'flat'
@@ -129,7 +270,7 @@ export const Sidebar = memo(function Sidebar() {
     <nav
       data-testid="sidebar"
       aria-label="Branch navigation"
-      className="h-full flex flex-col bg-gray-900 text-white"
+      className="h-full flex flex-col bg-gray-800 text-white"
       role="navigation"
     >
       {/* Header */}
@@ -156,7 +297,7 @@ export const Sidebar = memo(function Sidebar() {
           onChange={(e) => setSearchQuery(e.target.value)}
           className="
             w-full px-3 py-2 rounded-md
-            bg-gray-800 text-white placeholder-gray-400
+            bg-gray-700 text-white placeholder-gray-400
             border border-gray-600
             focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent
           "
@@ -165,7 +306,9 @@ export const Sidebar = memo(function Sidebar() {
 
       {/* Branch list */}
       <div
+        ref={branchListRef}
         data-testid="branch-list"
+        onScroll={saveBranchListScroll}
         className="flex-1 overflow-y-auto"
       >
         {isEmpty ? (
@@ -173,29 +316,32 @@ export const Sidebar = memo(function Sidebar() {
             {searchQuery ? 'No branches found' : 'No branches available'}
           </div>
         ) : viewMode === 'grouped' && groupedBranches ? (
-          // Grouped view
-          groupedBranches.map((group) => {
-            const isExpanded = !groupCollapsed[group.repositoryName] || !!searchQuery.trim();
-            return (
-              <div key={group.repositoryName}>
-                <GroupHeader
-                  repositoryName={group.repositoryName}
-                  branchCount={group.branches.length}
-                  isExpanded={isExpanded}
-                  onClick={() => toggleGroup(group.repositoryName)}
-                />
-                {isExpanded &&
-                  group.branches.map((branch) => (
-                    <BranchListItem
-                      key={branch.id}
-                      branch={branch}
-                      isSelected={branch.id === selectedWorktreeId}
-                      onClick={() => handleBranchClick(branch.id)}
-                    />
-                  ))}
-              </div>
-            );
-          })
+          // Grouped view with DnD reordering
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={groupedBranches.map((g) => g.repositoryName)}
+              strategy={verticalListSortingStrategy}
+            >
+              {groupedBranches.map((group) => {
+                const isExpanded = !groupCollapsed[group.repositoryName] || !!searchQuery.trim();
+                return (
+                  <SortableGroupItem
+                    key={group.repositoryName}
+                    group={group}
+                    isExpanded={isExpanded}
+                    selectedWorktreeId={selectedWorktreeId}
+                    onToggle={() => toggleGroup(group.repositoryName)}
+                    onBranchClick={handleBranchClick}
+                    isDragDisabled={!!searchQuery.trim()}
+                  />
+                );
+              })}
+            </SortableContext>
+          </DndContext>
         ) : (
           // Flat view
           flatBranches.map((branch) => (
@@ -222,6 +368,67 @@ export const Sidebar = memo(function Sidebar() {
     </nav>
   );
 });
+
+// ============================================================================
+// SortableGroupItem
+// ============================================================================
+
+/** Sortable wrapper for a repository group (DnD-enabled) */
+function SortableGroupItem({
+  group,
+  isExpanded,
+  selectedWorktreeId,
+  onToggle,
+  onBranchClick,
+  isDragDisabled,
+}: {
+  group: BranchGroup;
+  isExpanded: boolean;
+  selectedWorktreeId: string | null;
+  onToggle: () => void;
+  onBranchClick: (branchId: string) => void;
+  isDragDisabled: boolean;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: group.repositoryName, disabled: isDragDisabled });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <GroupHeader
+        repositoryName={group.repositoryName}
+        branchCount={group.branches.length}
+        isExpanded={isExpanded}
+        onClick={onToggle}
+        dragHandleRef={setActivatorNodeRef}
+        dragHandleListeners={isDragDisabled ? undefined : listeners}
+        dragHandleAttributes={isDragDisabled ? undefined : attributes}
+      />
+      {isExpanded &&
+        group.branches.map((branch) => (
+          <BranchListItem
+            key={branch.id}
+            branch={branch}
+            isSelected={branch.id === selectedWorktreeId}
+            onClick={() => onBranchClick(branch.id)}
+            showRepositoryName={false}
+          />
+        ))}
+    </div>
+  );
+}
 
 // ============================================================================
 // Helper Functions
@@ -261,38 +468,61 @@ export function parseGroupCollapsed(raw: string): Record<string, boolean> {
 // Inline Sub-components
 // ============================================================================
 
-/** Group header showing repository name with collapse/expand toggle */
+/** Group header showing repository name with collapse/expand toggle and drag handle */
 function GroupHeader({
   repositoryName,
   branchCount,
   isExpanded,
   onClick,
+  dragHandleRef,
+  dragHandleListeners,
+  dragHandleAttributes,
 }: {
   repositoryName: string;
   branchCount: number;
   isExpanded: boolean;
   onClick: () => void;
+  dragHandleRef?: (node: HTMLElement | null) => void;
+  dragHandleListeners?: React.HTMLAttributes<HTMLElement>;
+  dragHandleAttributes?: React.HTMLAttributes<HTMLElement>;
 }) {
   return (
-    <button
-      data-testid="group-header"
-      type="button"
-      onClick={onClick}
-      aria-expanded={isExpanded}
-      className="
-        w-full flex items-center gap-2 px-4 py-2
-        text-xs font-semibold text-gray-300 uppercase tracking-wider
-        bg-gray-800/50 hover:bg-gray-800
-        border-b border-gray-700
-        focus:outline-none focus:ring-2 focus:ring-inset focus:ring-cyan-500
-        transition-colors
-      "
-    >
-      <ChevronIcon isExpanded={isExpanded} />
-      <GroupIcon color={generateRepositoryColor(repositoryName)} />
-      <span className="flex-1 text-left truncate">{repositoryName}</span>
-      <span className="text-gray-500 font-normal">{branchCount}</span>
-    </button>
+    <div className="flex items-center w-full">
+      {/* Drag handle — separate from the clickable header button */}
+      {dragHandleListeners && (
+        <div
+          ref={dragHandleRef}
+          {...dragHandleListeners}
+          {...dragHandleAttributes}
+          aria-label="Drag to reorder group"
+          className="
+            flex-shrink-0 flex items-center justify-center
+            w-6 h-full pl-2 cursor-grab active:cursor-grabbing
+            text-gray-500 hover:text-gray-300 transition-colors
+          "
+        >
+          <GripVerticalIcon />
+        </div>
+      )}
+
+      <button
+        data-testid="group-header"
+        type="button"
+        onClick={onClick}
+        aria-expanded={isExpanded}
+        className="
+          flex-1 flex items-center gap-2 px-2 py-2
+          text-xs font-semibold text-gray-300 uppercase tracking-wider
+          focus:outline-none focus:ring-2 focus:ring-inset focus:ring-cyan-500
+          transition-colors
+        "
+      >
+        <ChevronIcon isExpanded={isExpanded} />
+        <GroupIcon color={generateRepositoryColor(repositoryName)} />
+        <span className="flex-1 text-left truncate">{repositoryName}</span>
+        <span className="text-gray-500 font-normal pr-2">{branchCount}</span>
+      </button>
+    </div>
   );
 }
 
@@ -376,6 +606,25 @@ function FlatListIcon({ className = 'w-3 h-3' }: { className?: string }) {
       strokeWidth={2}
     >
       <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+  );
+}
+
+/** Grip vertical (drag handle) icon */
+function GripVerticalIcon() {
+  return (
+    <svg
+      className="w-3 h-3"
+      fill="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <circle cx="9" cy="5" r="1.5" />
+      <circle cx="15" cy="5" r="1.5" />
+      <circle cx="9" cy="12" r="1.5" />
+      <circle cx="15" cy="12" r="1.5" />
+      <circle cx="9" cy="19" r="1.5" />
+      <circle cx="15" cy="19" r="1.5" />
     </svg>
   );
 }
