@@ -10,6 +10,12 @@ const nextConfig = {
     NEXT_PUBLIC_APP_VERSION: packageJson.version,
   },
   reactStrictMode: true,
+  // Issue #671: Do not auto-redirect /proxy/<prefix>/ → /proxy/<prefix>.
+  // Streamlit and similar upstreams require the trailing slash form when
+  // baseUrlPath is set, so suppressing the 308 redirect keeps those apps
+  // routable. Other Next.js routes retain their existing behavior; trailing
+  // slash consistency is left to the caller.
+  skipTrailingSlashRedirect: true,
   eslint: {
     // Temporarily ignore ESLint errors during build
     ignoreDuringBuilds: true,

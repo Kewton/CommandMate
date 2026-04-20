@@ -1,0 +1,55 @@
+{
+  "bug_id": "issue671_20260420_085636",
+  "related_issue": 671,
+  "bug_description": "External Apps として登録した WebSocket 利用アプリ (Streamlit 等) を Open した際に、_stcore/stream への WebSocket Upgrade が CommandMate 内蔵 WSS に吸収され upstream に到達しない。",
+  "fix_summary": "src/lib/ws-server.ts の upgrade ハンドラに /proxy/<prefix> 分岐を追加し、External App 設定に基づいて upstream (localhost/127.0.0.1 のみ) へ TCP パススルーの WebSocket プロキシを実装。補助的に HEAD メソッド追加・proxyWebSocket() のdeprecated化・next.config.js の skipTrailingSlashRedirect: true 設定を実施。",
+  "files_changed": [
+    "src/lib/ws-server.ts",
+    "src/lib/proxy/handler.ts",
+    "src/app/proxy/[...path]/route.ts",
+    "next.config.js",
+    "tests/unit/ws-server-proxy-upgrade.test.ts (新規)",
+    "tests/unit/proxy/route.test.ts"
+  ],
+  "acceptance_criteria": [
+    "AC-1: Streamlit 製 External App を Open すると WebSocket が確立しアプリが完全にインタラクティブに動作する (ws-server が /proxy/<prefix> upgrade を upstream へ TCP パススルー)",
+    "AC-2: 再現コマンドの WebSocket Upgrade に対し upstream Streamlit からのフレームが流れる (timeout しない)",
+    "AC-3: CommandMate 内蔵 WS 機能 (Terminal, Subscribe, Broadcast) のリグレッションが無い",
+    "AC-4: enabled=0 または websocket_enabled=0 の External App への WS Upgrade は適切に拒否される (4xx)",
+    "AC-5: tests/integration/websocket.test.ts が引き続きパスする",
+    "AC-6: 新たに External Apps WS プロキシのユニットテストが追加されている",
+    "AC-7: targetHost が localhost/127.0.0.1 以外の場合 403 で拒否される (SSRF 防御)",
+    "AC-8: /proxy/[...path] に HEAD メソッドが追加されヘルスチェックで 405 にならない",
+    "AC-9: Next.js の trailing slash redirect (308) が無効化され /proxy/<prefix>/ が維持される",
+    "AC-10: npm run lint / npx tsc --noEmit / npm run test:unit がすべてパスする"
+  ],
+  "test_scenarios": [
+    "シナリオ 1: /proxy/<prefix>/_stcore/stream に対する WebSocket Upgrade で upstream に net.connect が呼ばれることを単体テストで確認",
+    "シナリオ 2: ExternalApp が見つからない場合 404 が返る",
+    "シナリオ 3: enabled=false の場合 503 が返る",
+    "シナリオ 4: websocketEnabled=false の場合 403 が返る",
+    "シナリオ 5: targetHost が evil.example.com の場合 403 が返る (SSRF 防御)",
+    "シナリオ 6: upstream が connect 前にエラーで落ちた場合 502 が返る",
+    "シナリオ 7: upstream が接続後に close した場合 クライアント socket が destroy される",
+    "シナリオ 8: /ws や /terminal_subscribe などの内蔵 WSS パスは既存通り動作する (リグレッション無し)",
+    "シナリオ 9: /_next/ HMR パスは既存通り動作する",
+    "シナリオ 10: HEAD /proxy/<prefix>/health が 200/204 で upstream に転送される"
+  ],
+  "verification_commands": [
+    "cd /Users/maenokota/share/work/github_kewton/commandmate-issue-671 && npm run lint",
+    "cd /Users/maenokota/share/work/github_kewton/commandmate-issue-671 && npx tsc --noEmit",
+    "cd /Users/maenokota/share/work/github_kewton/commandmate-issue-671 && npx vitest run tests/unit/ws-server-proxy-upgrade.test.ts",
+    "cd /Users/maenokota/share/work/github_kewton/commandmate-issue-671 && npx vitest run tests/unit/proxy/ tests/unit/external-apps/ tests/unit/ws-server-cleanup.test.ts tests/integration/websocket.test.ts"
+  ],
+  "previous_test_results": {
+    "lint": "pass",
+    "tsc": "pass",
+    "unit_test_files": 337,
+    "unit_test_passed": 6342,
+    "unit_test_skipped": 7,
+    "unit_test_failed": 0,
+    "regression_files": 13,
+    "regression_passed": 179,
+    "regression_failed": 0
+  }
+}

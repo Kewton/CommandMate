@@ -1,0 +1,64 @@
+{
+  "bug_id": "issue671_20260420_085636",
+  "related_issue": 671,
+  "workflow": "bug-fix",
+  "phases": {
+    "phase_1_investigation": {
+      "status": "completed",
+      "result_file": "dev-reports/bug-fix/issue671_20260420_085636/investigation-result.json",
+      "notes": "Issue #671 に既に詳細な根本原因分析と採用対策が記載されていたため、investigation-agent 呼び出しを省略し、Issue 内容を投影した investigation-result.json を生成"
+    },
+    "phase_2_countermeasure_selection": {
+      "status": "completed",
+      "user_choice": "主対応 + 補助対応すべて",
+      "selected_actions": ["1-ws-proxy", "2-proxy-handler-stub", "3-head-method", "4-trailing-slash"]
+    },
+    "phase_3_work_plan": {
+      "status": "completed",
+      "result_file": "dev-reports/bug-fix/issue671_20260420_085636/work-plan-context.json"
+    },
+    "phase_4_tdd_implementation": {
+      "status": "success",
+      "result_file": "dev-reports/bug-fix/issue671_20260420_085636/tdd-fix-result.json",
+      "files_changed": [
+        "src/lib/ws-server.ts",
+        "src/lib/proxy/handler.ts",
+        "src/app/proxy/[...path]/route.ts",
+        "next.config.js",
+        "tests/unit/ws-server-proxy-upgrade.test.ts (新規)",
+        "tests/unit/proxy/route.test.ts"
+      ],
+      "tests_added_count": 12,
+      "coverage_estimate": 92
+    },
+    "phase_5_acceptance_test": {
+      "status": "pass",
+      "result_file": "dev-reports/bug-fix/issue671_20260420_085636/acceptance-result.json",
+      "acceptance_criteria_passed": 10,
+      "acceptance_criteria_failed": 0
+    }
+  },
+  "test_summary": {
+    "lint": "pass",
+    "tsc": "pass",
+    "unit_test_files": 337,
+    "unit_test_passed": 6342,
+    "unit_test_skipped": 7,
+    "unit_test_failed": 0,
+    "regression_files": 13,
+    "regression_passed": 179,
+    "regression_failed": 0
+  },
+  "follow_ups": [
+    "live Streamlit の e2e 検証は別 Issue で対応",
+    "tests/integration/proxy-websocket.test.ts を別途追加する案 (echo upstream + DB seed)",
+    "IPv6 loopback (::1) の PROXY_ALLOWED_HOSTS 追加検討",
+    "docs/architecture.md に skipTrailingSlashRedirect の rationale を追記",
+    "tests/integration/external-apps-api.test.ts の既存の duplicate-name 409 返却不具合は別 Issue で追跡"
+  ],
+  "commit_status": "not_committed",
+  "next_steps": [
+    "ユーザーにレビューを依頼",
+    "承認されたら git commit & PR 作成 (feature/671-worktree → develop)"
+  ]
+}

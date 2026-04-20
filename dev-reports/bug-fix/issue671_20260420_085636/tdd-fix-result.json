@@ -1,0 +1,105 @@
+{
+  "bug_id": "issue671_20260420_085636",
+  "related_issue": 671,
+  "status": "success",
+  "summary": "Implemented /proxy/<prefix> WebSocket TCP pass-through in src/lib/ws-server.ts via a new testable handleProxyUpgrade() helper with dependency injection. Added HEAD method to the /proxy/[...path] Next.js route, deprecated proxyWebSocket() as a defense-in-depth fallback, and disabled Next.js trailing-slash redirect so Streamlit-style baseUrlPath apps stay routable.",
+  "files_changed": [
+    "src/lib/ws-server.ts",
+    "src/lib/proxy/handler.ts",
+    "src/app/proxy/[...path]/route.ts",
+    "next.config.js",
+    "tests/unit/ws-server-proxy-upgrade.test.ts",
+    "tests/unit/proxy/route.test.ts"
+  ],
+  "tests_added": [
+    {
+      "file": "tests/unit/ws-server-proxy-upgrade.test.ts",
+      "tests": [
+        "returns 400 when pathPrefix is missing (/proxy/)",
+        "returns 404 when cache lookup returns null",
+        "returns 503 when app.enabled is false",
+        "returns 403 when app.websocketEnabled is false",
+        "returns 403 when targetHost is not localhost or 127.0.0.1 (SSRF defense)",
+        "allows localhost as targetHost",
+        "connects upstream via netConnect and forwards WS upgrade request on 'connect'",
+        "writes 502 and destroys client socket when upstream emits error before connect",
+        "destroys client socket when upstream closes after connect",
+        "destroys upstream when client socket closes",
+        "does not proceed after await when socket already destroyed"
+      ]
+    },
+    {
+      "file": "tests/unit/proxy/route.test.ts",
+      "tests": [
+        "should proxy HEAD request through handleProxy"
+      ]
+    }
+  ],
+  "test_results": {
+    "lint": {
+      "status": "pass",
+      "command": "npm run lint",
+      "output": "No ESLint warnings or errors"
+    },
+    "tsc": {
+      "status": "pass",
+      "command": "npx tsc --noEmit",
+      "output": "No type errors"
+    },
+    "unit": {
+      "status": "pass",
+      "command": "npm run test:unit",
+      "files": 337,
+      "passed": 6342,
+      "skipped": 7,
+      "failed": 0
+    },
+    "regression_scope": {
+      "status": "pass",
+      "command": "npx vitest run tests/unit/ws-server-proxy-upgrade.test.ts tests/unit/proxy/ tests/unit/external-apps/ tests/unit/ws-server-cleanup.test.ts tests/integration/websocket.test.ts",
+      "files": 13,
+      "passed": 179,
+      "failed": 0
+    },
+    "integration_scope": {
+      "status": "partial",
+      "notes": "tests/integration/websocket.test.ts, ws-auth.test.ts, auth-middleware.test.ts all pass. tests/integration/external-apps-api.test.ts has 1 pre-existing failure (duplicate-name test returns 500 instead of 409) that reproduces on clean main — unrelated to this fix."
+    }
+  },
+  "coverage_estimate": {
+    "new_code_paths_percent": 92,
+    "rationale": "All branches of handleProxyUpgrade are exercised by unit tests: missing prefix, cache miss, disabled, websocketEnabled=false, SSRF block, localhost allow-list, happy path (connect + raw request + pipes), upstream error before connect (502), upstream close after connect, client close after connect, and the post-await socket.destroyed guard. Only the outer void IIFE's catch block and the cache-throw path are not directly asserted (they are defensive)."
+  },
+  "implementation_details": {
+    "action_1_ws_proxy_upgrade": {
+      "file": "src/lib/ws-server.ts",
+      "approach": "Extracted handleProxyUpgrade(request, socket, head, deps) as an exported async helper with dependency injection for getDb, getCache, and netConnect. The upgrade handler wraps it in void (async () => { ... })() after IP-restriction and auth checks and before wss.handleUpgrade. Added PROXY_ALLOWED_HOSTS Set ({ 'localhost', '127.0.0.1' }) for SSRF defense. Added writeRawResponseAndDestroy() and buildUpstreamUpgradeRequest() helpers. Upstream errors before connect produce 502; after connect, teardown destroys both sockets. Logs only include pathPrefix, never host/port.",
+      "testability": "Exposed via __internal.handleProxyUpgrade. All tests use in-memory EventEmitter stubs — no real TCP sockets or database needed."
+    },
+    "action_2_proxy_handler_stub": {
+      "files": ["src/lib/proxy/handler.ts", "src/app/proxy/[...path]/route.ts"],
+      "approach": "Added @deprecated JSDoc tag to proxyWebSocket() explaining that ws-server.ts intercepts upgrades first and this is a defense-in-depth fallback. Added inline comment in the route file above the isWebSocketUpgrade branch noting the same. The 426 behavior is preserved unchanged."
+    },
+    "action_3_head_method": {
+      "file": "src/app/proxy/[...path]/route.ts",
+      "approach": "Added export async function HEAD(...) that mirrors GET and delegates to handleProxy. proxyHttp already guards method !== 'GET' && method !== 'HEAD' so no change was needed there."
+    },
+    "action_4_trailing_slash": {
+      "file": "next.config.js",
+      "approach": "Added skipTrailingSlashRedirect: true at the top level of nextConfig with a comment explaining the rationale (Streamlit baseUrlPath compatibility)."
+    }
+  },
+  "security_notes": [
+    "SSRF defense: targetHost is compared against a Set allow-list ({ 'localhost', '127.0.0.1' }). Non-loopback hosts return 403 and log only pathPrefix.",
+    "Log entries never include upstream host or port, only pathPrefix.",
+    "Existing IP restriction and auth (Cookie) checks run BEFORE the /proxy branch in the upgrade handler, so they still apply.",
+    "If the client socket is destroyed during the async cache lookup, the handler checks socket.destroyed/writable and bails out without connecting upstream.",
+    "Both directions of the TCP pipe destroy the other side on error/close, preventing file descriptor leaks."
+  ],
+  "notes": [
+    "Did NOT write tests/integration/proxy-websocket.test.ts. Spinning up a real ws upstream + seeding better-sqlite3 external_apps rows + starting a CommandMate HTTP server + wiring ws client would duplicate significant plumbing from existing tests and risk flakiness with DB singletons. Unit tests exhaustively cover every branch of handleProxyUpgrade, so the integration value-add is small relative to the maintenance cost. Relying on unit tests plus the existing tests/integration/websocket.test.ts regression, as the task description permits.",
+    "Pre-existing failure in tests/integration/external-apps-api.test.ts ('should return 409 for duplicate name' → 500) reproduces on clean main (confirmed via git stash). It is not caused by this change and is out of scope.",
+    "No commit was made — awaiting user review."
+  ],
+  "commit_status": "not_committed"
+}

@@ -8,6 +8,8 @@ import { Server as HTTPServer } from 'http';
 import { Server as HTTPSServer } from 'https';
 import { WebSocketServer, WebSocket } from 'ws';
 import { IncomingMessage } from 'http';
+import { connect as netConnectImpl, Socket as NetSocket } from 'net';
+import type { Duplex } from 'stream';
 import { isAuthEnabled, parseCookies, AUTH_COOKIE_NAME, verifyToken } from './security/auth';
 import { getAllowedRanges, isIpAllowed, isIpRestrictionEnabled, normalizeIp } from './security/ip-restriction';
 import { isCliToolType } from './cli-tools/types';
@@ -17,6 +19,8 @@ import { getWorktreeById } from './db';
 import { observeTmuxControlFirstOutputLatency } from './tmux/tmux-control-mode-metrics';
 import { getControlModeTmuxTransport } from './tmux/control-mode-tmux-transport';
 import { isTmuxControlModeEnabled } from './tmux/tmux-control-mode-flags';
+import { getExternalAppCache } from './external-apps/cache';
+import type { ExternalApp } from '@/types/external-apps';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('ws-server');
@@ -58,6 +62,197 @@ const rooms = new Map<string, Set<WebSocket>>();
 const MAX_TERMINAL_INPUT_LENGTH = 4096;
 const MAX_TERMINAL_SUBSCRIBERS_PER_SESSION = 4;
 const TERMINAL_FALLBACK_CAPTURE_LINES = -200;
+
+/**
+ * Allowed upstream hosts for /proxy/<prefix> WebSocket proxying.
+ * SSRF defense: only accept loopback addresses.
+ * Issue #671.
+ */
+const PROXY_ALLOWED_HOSTS = new Set(['localhost', '127.0.0.1']);
+
+/**
+ * Write a minimal HTTP error response to a raw upgrade socket and destroy it.
+ * Used for 4xx / 5xx rejections in the /proxy/<prefix> upgrade branch.
+ */
+function writeRawResponseAndDestroy(socket: Duplex, statusLine: string): void {
+  try {
+    socket.write(`HTTP/1.1 ${statusLine}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`);
+  } catch {
+    // Socket may already be closed; ignore.
+  }
+  socket.destroy();
+}
+
+/**
+ * Build the raw HTTP upgrade request to send to the upstream.
+ * Preserves Upgrade, Connection, and all Sec-WebSocket-* headers verbatim.
+ * This is a raw TCP pass-through, not a stripped proxy.
+ */
+function buildUpstreamUpgradeRequest(request: IncomingMessage): string {
+  const method = request.method || 'GET';
+  const url = request.url || '/';
+  const httpVersion = request.httpVersion || '1.1';
+  const lines: string[] = [`${method} ${url} HTTP/${httpVersion}`];
+
+  for (const [name, value] of Object.entries(request.headers)) {
+    if (value === undefined) continue;
+    if (Array.isArray(value)) {
+      for (const v of value) {
+        lines.push(`${name}: ${v}`);
+      }
+    } else {
+      lines.push(`${name}: ${value}`);
+    }
+  }
+
+  return lines.join('\r\n') + '\r\n\r\n';
+}
+
+/**
+ * Dependencies for handleProxyUpgrade (injected for testability).
+ */
+interface ProxyUpgradeDeps {
+  getDb: () => unknown;
+  getCache: (db: unknown) => { getByPathPrefix: (p: string) => Promise<ExternalApp | null | undefined> };
+  netConnect: (opts: { host: string; port: number }) => NetSocket | Duplex;
+}
+
+/**
+ * Handle a WebSocket upgrade request targeted at /proxy/<prefix>/...
+ * by TCP-piping it to the configured External App upstream.
+ *
+ * - Rejects malformed, missing, disabled, non-websocket-enabled apps.
+ * - Rejects non-loopback target hosts (SSRF defense).
+ * - On success, pipes bytes in both directions without touching the WS protocol.
+ *
+ * Issue #671.
+ */
+export async function handleProxyUpgrade(
+  request: IncomingMessage,
+  socket: Duplex,
+  _head: Buffer,
+  deps: ProxyUpgradeDeps
+): Promise<void> {
+  const url = request.url || '/';
+  // /proxy/<prefix>/... → segment index 2 is the prefix
+  const segments = url.split('?')[0].split('/');
+  const pathPrefix = segments[2] || '';
+
+  if (!pathPrefix) {
+    writeRawResponseAndDestroy(socket, '400 Bad Request');
+    return;
+  }
+
+  let app: ExternalApp | null | undefined;
+  try {
+    const db = deps.getDb();
+    const cache = deps.getCache(db);
+    app = await cache.getByPathPrefix(pathPrefix);
+  } catch (err) {
+    logger.error('ws-proxy:cache-error', {
+      pathPrefix,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    if (!socket.destroyed && socket.writable) {
+      writeRawResponseAndDestroy(socket, '502 Bad Gateway');
+    }
+    return;
+  }
+
+  // After awaiting, the client socket may have gone away.
+  if (socket.destroyed || !socket.writable) {
+    return;
+  }
+
+  if (!app) {
+    writeRawResponseAndDestroy(socket, '404 Not Found');
+    return;
+  }
+
+  if (!app.enabled) {
+    writeRawResponseAndDestroy(socket, '503 Service Unavailable');
+    return;
+  }
+
+  if (!app.websocketEnabled) {
+    writeRawResponseAndDestroy(socket, '403 Forbidden');
+    return;
+  }
+
+  if (!PROXY_ALLOWED_HOSTS.has(app.targetHost)) {
+    // Do not log host/port; only pathPrefix.
+    logger.warn('ws-proxy:ssrf-blocked', { pathPrefix });
+    writeRawResponseAndDestroy(socket, '403 Forbidden');
+    return;
+  }
+
+  // Establish upstream TCP connection and wire up bidirectional piping.
+  const upstream = deps.netConnect({ host: app.targetHost, port: app.targetPort });
+  let upstreamConnected = false;
+  let teardownCalled = false;
+
+  const teardown = (): void => {
+    if (teardownCalled) return;
+    teardownCalled = true;
+    try {
+      upstream.destroy();
+    } catch {
+      // ignore
+    }
+    try {
+      socket.destroy();
+    } catch {
+      // ignore
+    }
+  };
+
+  upstream.on('connect', () => {
+    upstreamConnected = true;
+    try {
+      const rawRequest = buildUpstreamUpgradeRequest(request);
+      upstream.write(rawRequest);
+    } catch (writeErr) {
+      logger.error('ws-proxy:upstream-write-error', {
+        pathPrefix,
+        error: writeErr instanceof Error ? writeErr.message : String(writeErr),
+      });
+      teardown();
+      return;
+    }
+
+    // Raw TCP pass-through: upstream and client exchange bytes directly.
+    socket.pipe(upstream);
+    upstream.pipe(socket);
+  });
+
+  upstream.on('error', (err: Error) => {
+    logger.error('ws-proxy:upstream-error', {
+      pathPrefix,
+      error: err.message,
+    });
+    if (!upstreamConnected && !socket.destroyed && socket.writable) {
+      writeRawResponseAndDestroy(socket, '502 Bad Gateway');
+    } else {
+      teardown();
+    }
+  });
+
+  upstream.on('close', () => {
+    teardown();
+  });
+
+  socket.on('error', (err: Error) => {
+    logger.error('ws-proxy:client-error', {
+      pathPrefix,
+      error: err.message,
+    });
+    teardown();
+  });
+
+  socket.on('close', () => {
+    teardown();
+  });
+}
 
 /**
  * Check if a WebSocket error is an expected non-fatal error.
@@ -136,6 +331,34 @@ export function setupWebSocket(server: HTTPServer | HTTPSServer): void {
         socket.destroy();
         return;
       }
+    }
+
+    // Issue #671: External Apps WebSocket TCP proxy.
+    // /proxy/<prefix>/... upgrades are forwarded to the upstream app's TCP port.
+    // Everything else falls through to the built-in WSS (broadcast, terminal, etc.).
+    if (pathname.startsWith('/proxy/')) {
+      void (async () => {
+        try {
+          await handleProxyUpgrade(request, socket, head, {
+            getDb: () => getDbInstance(),
+            getCache: (db) => getExternalAppCache(db as never),
+            netConnect: (opts) => netConnectImpl(opts),
+          });
+        } catch (err) {
+          logger.error('ws-proxy:unhandled-error', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          if (!socket.destroyed && socket.writable) {
+            try {
+              socket.write('HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
+            } catch {
+              // ignore
+            }
+            socket.destroy();
+          }
+        }
+      })();
+      return;
     }
 
     wss!.handleUpgrade(request, socket, head, (ws) => {
@@ -633,6 +856,7 @@ export function closeWebSocket(): void {
 
 export const __internal = {
   handleMessage,
+  handleProxyUpgrade,
   handleTerminalSubscribe,
   handleTerminalInput,
   handleTerminalResize,
