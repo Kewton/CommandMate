@@ -46,12 +46,21 @@ export const SENSITIVE_REQUEST_HEADERS = [
 ] as const;
 
 /**
- * HTTP headers that should be stripped from proxied responses
+ * HTTP headers that should be stripped from proxied responses.
+ *
+ * content-encoding / content-length are stripped because Node's fetch
+ * transparently decompresses the response body (Node 18+ undici default),
+ * so forwarding the upstream Content-Encoding: gzip alongside an
+ * already-decompressed body causes the browser to fail with
+ * ERR_CONTENT_DECODING_FAILED. Length likewise no longer matches the
+ * decoded body, so we let the platform recompute it.
  */
 export const HOP_BY_HOP_RESPONSE_HEADERS = [
   'transfer-encoding',
   'connection',
   'keep-alive',
+  'content-encoding',
+  'content-length',
 ] as const;
 
 /**
