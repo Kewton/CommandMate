@@ -160,6 +160,13 @@ export async function proxyHttp(
  * Issue #395: Removed directUrl field and internal URL from message to prevent
  * leaking upstream host/port information to the client.
  *
+ * @deprecated Issue #671: WebSocket upgrades are now intercepted in
+ *   {@link ../ws-server.ts} by the HTTP server's `upgrade` event listener and
+ *   proxied as raw TCP pass-through. This function is retained as a
+ *   defense-in-depth fallback that only runs if a WebSocket upgrade somehow
+ *   bypasses the upgrade listener and reaches the Next.js route handler, which
+ *   is not expected in normal operation.
+ *
  * @param request - The incoming WebSocket upgrade request (unused after Issue #395)
  * @param app - The external app configuration (unused, no longer exposed in response)
  * @param path - The full request path (unused, no longer exposed in response)

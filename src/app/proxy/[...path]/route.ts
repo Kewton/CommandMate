@@ -63,7 +63,10 @@ async function handleProxy(
       );
     }
 
-    // Check for WebSocket upgrade
+    // Issue #671: WebSocket upgrades are handled in src/lib/ws-server.ts's
+    // HTTP 'upgrade' event listener before Next.js sees them. This branch is a
+    // defense-in-depth fallback that returns 426 in the unexpected case where a
+    // WebSocket upgrade bypasses the upgrade listener and arrives here.
     if (isWebSocketUpgrade(request)) {
       const response = await proxyWebSocket(request, app, path);
 
@@ -118,6 +121,21 @@ async function handleProxy(
  * GET /proxy/[...path]
  */
 export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ path: string[] }> }
+) {
+  const { path } = await params;
+  return handleProxy(request, path);
+}
+
+/**
+ * HEAD /proxy/[...path]
+ *
+ * Issue #671: Mirror of GET so upstream apps (e.g. Streamlit) that issue HEAD
+ * probes against their own static assets succeed. proxyHttp already skips the
+ * body for GET and HEAD requests.
+ */
+export async function HEAD(
   request: Request,
   { params }: { params: Promise<{ path: string[] }> }
 ) {

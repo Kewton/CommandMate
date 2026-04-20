@@ -1,0 +1,109 @@
+{
+  "bug_id": "issue671_20260420_085636",
+  "related_issue": 671,
+  "status": "pass",
+  "summary": "All 10 acceptance criteria verified via re-run regression tests (179/179 pass across 13 files), lint (clean), tsc (clean) and direct code review of the 4 changed source files. The /proxy/<prefix> branch in src/lib/ws-server.ts correctly implements TCP pass-through with verbatim upgrade-header forwarding, IP/auth checks remain ordered before the proxy branch, SSRF allow-list is enforced ({'localhost', '127.0.0.1'}), HEAD method is exported from the Next.js route, and skipTrailingSlashRedirect is enabled. Built-in WSS handleUpgrade still runs for non-/proxy/ paths so Terminal/Subscribe/Broadcast regressions are protected.",
+  "acceptance_criteria_status": [
+    {
+      "id": "AC-1",
+      "status": "pass",
+      "evidence": "src/lib/ws-server.ts:336-362 (upgrade handler branches on pathname.startsWith('/proxy/') and delegates to handleProxyUpgrade with real getDbInstance/getExternalAppCache/netConnectImpl DI); ws-server.ts:209-226 (on 'connect' writes raw upgrade request and pipes both directions); unit test 'connects upstream via netConnect and forwards WS upgrade request on connect' asserts socket.pipe(upstream) and upstream.pipe(socket) are wired."
+    },
+    {
+      "id": "AC-2",
+      "status": "pass",
+      "evidence": "src/lib/ws-server.ts:91-109 buildUpstreamUpgradeRequest() preserves method/url/httpVersion and ALL headers verbatim (including Upgrade, Connection, Sec-WebSocket-*). Test 'connects upstream via netConnect...' asserts the payload contains 'upgrade: websocket', 'connection: upgrade', 'sec-websocket-key: test-key-123', 'sec-websocket-protocol: streamlit', starts with 'GET /proxy/stl/_stcore/stream HTTP/1.1\\r\\n', and ends with the required '\\r\\n\\r\\n' terminator. Live Streamlit verification is out of scope per context instruction."
+    },
+    {
+      "id": "AC-3",
+      "status": "pass",
+      "evidence": "src/lib/ws-server.ts:364-366 — for non-/proxy/ paths the code falls through to wss!.handleUpgrade(request, socket, head, ...) unchanged. tests/integration/websocket.test.ts and tests/unit/ws-server-cleanup.test.ts all pass (part of 179/179 regression run)."
+    },
+    {
+      "id": "AC-4",
+      "status": "pass",
+      "evidence": "src/lib/ws-server.ts:172-180 — !app.enabled → 503, !app.websocketEnabled → 403. Unit tests 'returns 503 when app.enabled is false' and 'returns 403 when app.websocketEnabled is false' both assert the response status line contains the right code and that netConnect is NOT called."
+    },
+    {
+      "id": "AC-5",
+      "status": "pass",
+      "evidence": "tests/integration/websocket.test.ts included in regression-scope run (13 files, 179 tests, 0 failed)."
+    },
+    {
+      "id": "AC-6",
+      "status": "pass",
+      "evidence": "tests/unit/ws-server-proxy-upgrade.test.ts exists with 11 new tests covering all handleProxyUpgrade branches (400/404/503/403-websocket/403-SSRF/allow-localhost/happy-path/502-before-connect/close-after-connect/client-close/destroyed-socket-guard). tests/unit/proxy/route.test.ts adds 1 new HEAD-method test."
+    },
+    {
+      "id": "AC-7",
+      "status": "pass",
+      "evidence": "src/lib/ws-server.ts:67-71 PROXY_ALLOWED_HOSTS = new Set(['localhost', '127.0.0.1']); ws-server.ts:182-187 enforces allow-list and returns 403. Unit test 'returns 403 when targetHost is not localhost or 127.0.0.1' uses targetHost='evil.example.com' and asserts 403+destroy+no-netConnect. Log at line 184 scrubs host/port and only records pathPrefix."
+    },
+    {
+      "id": "AC-8",
+      "status": "pass",
+      "evidence": "src/app/proxy/[...path]/route.ts:138-144 exports async function HEAD that delegates to handleProxy (identical to GET). Unit test 'should proxy HEAD request through handleProxy' asserts route.HEAD exists, returns 200, calls proxyHttp with the full path, and logs method: 'HEAD'. proxyHttp at src/lib/proxy/handler.ts:103 already excludes body for HEAD requests."
+    },
+    {
+      "id": "AC-9",
+      "status": "pass",
+      "evidence": "next.config.js:13-18 sets skipTrailingSlashRedirect: true at the nextConfig top level with a comment citing Issue #671 and Streamlit baseUrlPath compatibility."
+    },
+    {
+      "id": "AC-10",
+      "status": "pass",
+      "evidence": "npm run lint → 'No ESLint warnings or errors'; npx tsc --noEmit → empty output (0 lines of diagnostics); regression-scope vitest → 13 files / 179 tests passed / 0 failed in 2.44s. Full npm run test:unit (6342 pass / 7 skip / 0 fail) recorded in tdd-fix-result.json and not re-run per acceptance instructions."
+    }
+  ],
+  "test_results": {
+    "lint": {
+      "status": "pass",
+      "command": "npm run lint",
+      "output": "No ESLint warnings or errors"
+    },
+    "tsc": {
+      "status": "pass",
+      "command": "npx tsc --noEmit",
+      "output": "No type errors (empty output)"
+    },
+    "regression_scope": {
+      "status": "pass",
+      "command": "npx vitest run tests/unit/ws-server-proxy-upgrade.test.ts tests/unit/proxy/ tests/unit/external-apps/ tests/unit/ws-server-cleanup.test.ts tests/integration/websocket.test.ts",
+      "files": 13,
+      "passed": 179,
+      "failed": 0,
+      "duration_seconds": 2.44
+    },
+    "unit_full": {
+      "status": "not_rerun",
+      "note": "Trusted from tdd-fix-result.json: 337 files / 6342 passed / 7 skipped / 0 failed. Per acceptance instructions we re-ran only the regression scope."
+    }
+  },
+  "code_review_notes": [
+    "Security ordering in src/lib/ws-server.ts is correct: IP restriction (line 311-321) → auth (line 324-334) → /proxy/ branch (line 339-362) → built-in WSS (line 364). An unauthenticated or IP-denied request cannot reach handleProxyUpgrade.",
+    "All log entries in the /proxy/ path (ws-proxy:cache-error, ws-proxy:ssrf-blocked, ws-proxy:upstream-error, ws-proxy:upstream-write-error, ws-proxy:client-error, ws-proxy:unhandled-error) include only pathPrefix and an error message; never upstream host or port. This matches AC-7/Issue #395 policy.",
+    "teardown() is idempotent via teardownCalled guard (line 194-196), preventing double-destroy races between upstream.close/socket.close/upstream.error events.",
+    "Post-await socket-destroyed guard (line 163-165) covers the race where the client disconnects while cache lookup is in-flight; the handler bails out without leaking an upstream connection.",
+    "proxyWebSocket() in src/lib/proxy/handler.ts is correctly marked @deprecated (line 163-168) with a JSDoc explaining its new defense-in-depth role. 426 behavior is preserved so any upgrade that bypasses the ws-server.ts listener still gets a well-formed response rather than a crash.",
+    "next.config.js skipTrailingSlashRedirect:true is a global setting; other Next.js routes that previously depended on the default trailing-slash behavior are now unaffected because the default was already 'no redirect' for app-router dynamic segments, but callers should test any routes that care about canonical trailing slashes.",
+    "__internal.handleProxyUpgrade export is appropriately scoped alongside existing test hooks (handleMessage, handleTerminalSubscribe, etc.) so the DI-based test surface is consistent with the rest of the file."
+  ],
+  "gaps": [
+    "No live end-to-end verification with a real Streamlit upstream was performed. Per the acceptance instructions this is explicitly out of scope and considered too heavy for this pass. AC-1 and AC-2 are therefore verified by unit-test coverage of the byte-level upgrade-request construction plus the handshake wiring, not by an actual WS round-trip against Streamlit.",
+    "No integration test was added that spins up a real ws upstream + CommandMate HTTP server + better-sqlite3 external_apps row. The TDD agent documented this decision in tdd-fix-result.json and the unit-test coverage is high (~92% of new branches). A follow-up Issue could add one end-to-end scenario if desired.",
+    "Pre-existing failure in tests/integration/external-apps-api.test.ts ('should return 409 for duplicate name' returns 500) is NOT caused by this change (reproduces on main per tdd-fix-result.json) but remains unresolved. Out of scope for Issue #671."
+  ],
+  "recommendations": [
+    "Add a minimal tests/integration/proxy-websocket.test.ts that uses the 'ws' library to run an echo upstream on 127.0.0.1:<random-port>, seeds an external_apps row via the DB helper, starts the CommandMate server, opens a WS to /proxy/<prefix>/echo, and asserts a round-trip. This would convert AC-1/AC-2 from 'unit-test-verified' to 'e2e-verified' — file a follow-up Issue.",
+    "Consider extending PROXY_ALLOWED_HOSTS to also accept '::1' (IPv6 loopback) if operators run upstreams bound to the IPv6 loopback only. Currently only the IPv4 loopback forms are allowed.",
+    "skipTrailingSlashRedirect:true is global. Add a short note to docs/architecture.md (or the external-apps docs) explaining that /proxy/<prefix>/ and /proxy/<prefix> are now treated as distinct paths so future contributors do not reintroduce the 308 behavior via a rewrite.",
+    "Open a separate Issue for the pre-existing tests/integration/external-apps-api.test.ts duplicate-name 500→409 regression; it is unrelated but visible in the current test surface."
+  ],
+  "notes": [
+    "Per acceptance instructions, a real Streamlit upstream was NOT started. Unit tests + code review treated as sufficient evidence for AC-1/AC-2.",
+    "npx tsc --noEmit was executed successfully but produced no output (0 lines), which is the expected pass signal.",
+    "Regression scope reproduced the TDD-reported numbers exactly: 13 files / 179 tests / 0 failed.",
+    "No source code was modified during this acceptance pass."
+  ],
+  "verification_timestamp": "2026-04-20T09:08:54Z"
+}
