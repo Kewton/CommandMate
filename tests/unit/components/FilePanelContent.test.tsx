@@ -27,6 +27,13 @@ vi.mock('@/components/worktree/VideoViewer', () => ({
   ),
 }));
 
+// Mock PdfPreview (Issue #673)
+vi.mock('@/components/worktree/PdfPreview', () => ({
+  PdfPreview: ({ dataUri, filePath }: { dataUri: string; filePath: string }) => (
+    <div data-testid="pdf-preview" data-uri={dataUri} data-path={filePath} />
+  ),
+}));
+
 // Mock highlight.js
 vi.mock('highlight.js', () => ({
   default: {
@@ -118,6 +125,29 @@ describe('FilePanelContent', () => {
       render(<FilePanelContent tab={tab} {...defaultProps} />);
 
       expect(screen.getByTestId('video-viewer')).toBeInTheDocument();
+    });
+
+    it('should render PdfPreview for PDF content (Issue #673)', async () => {
+      const content = createContent({
+        isPdf: true,
+        content: 'data:application/pdf;base64,JVBERi0xLjQK',
+        mimeType: 'application/pdf',
+        path: 'docs/sample.pdf',
+        extension: 'pdf',
+      });
+      const tab = createTab({ content, path: 'docs/sample.pdf', name: 'sample.pdf' });
+      render(<FilePanelContent tab={tab} {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('pdf-preview')).toBeInTheDocument();
+      });
+
+      const pdfEl = screen.getByTestId('pdf-preview');
+      expect(pdfEl.getAttribute('data-uri')).toBe('data:application/pdf;base64,JVBERi0xLjQK');
+      expect(pdfEl.getAttribute('data-path')).toBe('docs/sample.pdf');
+      // PDF branch must be exclusive with image/video/html viewers
+      expect(screen.queryByTestId('image-viewer')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('video-viewer')).not.toBeInTheDocument();
     });
 
     it('should render syntax-highlighted code for text content', () => {

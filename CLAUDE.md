@@ -188,6 +188,7 @@ tests/
 | `src/config/memo-config.ts` | メモ共有定数（MAX_MEMOS）（Issue #652） |
 | `src/config/repository-config.ts` | リポジトリ共有定数（MAX_DISPLAY_NAME_LENGTH）（Issue #644） |
 | `src/config/editable-extensions.ts` | 編集可能拡張子定義・バリデーション（EDITABLE_EXTENSIONS, EXTENSION_VALIDATORS, isEditableExtension, validateContent）。.yaml/.yml 追加・YAML危険タグバリデーション（Issue #646） |
+| `src/config/pdf-extensions.ts` | PDF拡張子・サイズ(20MB)・magic bytes(`%PDF-`)・iframe sandbox定数、isPdfExtension / validatePdfMagicBytes / validatePdfContent（Issue #673） |
 | `src/lib/detection/prompt-key.ts` | promptKey重複排除ユーティリティ |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
 | `src/lib/cli-tools/types.ts` | CLIツール型定義（IImageCapableCLITool/isImageCapableCLITool追加）（Issue #474）（Issue #545: copilot追加、6ツール対応） |
@@ -255,6 +256,7 @@ tests/
 | `src/components/worktree/FilePanelTabs.tsx` | ファイルタブバーUI |
 | `src/components/worktree/FilePanelContent.tsx` | ファイルコンテンツ表示（ファイル内容ポーリング対応）（Issue #469）、YAMLファイル編集ルーティング追加（Issue #646） |
 | `src/components/worktree/HtmlPreview.tsx` | HTMLファイルプレビューコンポーネント（iframe srcdoc + Safe/Interactiveサンドボックス）（Issue #490） |
+| `src/components/worktree/PdfPreview.tsx` | PDFファイルプレビューコンポーネント（data URI → Blob URL → iframe `sandbox="allow-scripts"`、cleanup revokeObjectURL、fetch失敗時ダウンロードフォールバック）（Issue #673） |
 | `src/components/worktree/FileViewer.tsx` | ファイルビューア |
 | `src/components/worktree/FileSearchBar.tsx` | ファイル検索バー共通コンポーネント（Issue #469） |
 | `src/components/worktree/FileTreeView.tsx` | ファイルツリービュー（Issue #479） |
