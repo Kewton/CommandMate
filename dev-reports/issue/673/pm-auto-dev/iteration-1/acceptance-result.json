@@ -1,0 +1,160 @@
+{
+  "overall_status": "passed",
+  "issue_number": 673,
+  "feature_summary": "Filesタブで .pdf ファイル選択時にBlob URL + iframeでPDFプレビューを表示する機能",
+  "criteria_results": [
+    {
+      "id": "AC-001",
+      "criterion": "Chrome/Firefox最新版で .pdf ファイル選択時にiframeでPDFが表示される（PDFレンダリングは手動UAT）",
+      "status": "passed",
+      "evidence": "src/components/worktree/PdfPreview.tsx:108-116 returns <iframe src={blobUrl}> when Blob URL is ready. FilePanelContent.tsx:719-730 routes isPdf tabs to PdfPreview. Actual browser rendering reserved for Phase 6 UAT."
+    },
+    {
+      "id": "AC-002",
+      "criterion": "iframeに sandbox='allow-scripts' が設定されている",
+      "status": "passed",
+      "evidence": "src/config/pdf-extensions.ts:51 defines PDF_IFRAME_SANDBOX = 'allow-scripts'. PdfPreview.tsx:111 passes it to iframe sandbox attr. Verified by tests/unit/components/PdfPreview.test.tsx:70-76 ('renders an iframe with sandbox=\"allow-scripts\"... expect(iframe.getAttribute('sandbox')).toBe('allow-scripts'))."
+    },
+    {
+      "id": "AC-003",
+      "criterion": "iframeに title='PDF Preview: {filePath}' 相当の属性が設定されている",
+      "status": "passed",
+      "evidence": "PdfPreview.tsx:112 sets title={`PDF Preview: ${filePath}`}. Verified by PdfPreview.test.tsx:74,85 (screen.getByTitle(`PDF Preview: ${defaultProps.filePath}`))."
+    },
+    {
+      "id": "AC-004",
+      "criterion": "非PDF形式を .pdf 拡張子で開いた際に magic bytes検証でブロックされ INVALID_MAGIC_BYTES エラー応答される（400）",
+      "status": "passed",
+      "evidence": "src/config/pdf-extensions.ts:97-102 validatePdfMagicBytes checks first 5 bytes against %PDF-. route.ts:281-286 returns createErrorResponse('INVALID_MAGIC_BYTES', ...). ERROR_CODE_TO_HTTP_STATUS maps INVALID_MAGIC_BYTES -> 400 (route.ts:78). Verified by tests/unit/api/files-pdf.test.ts:113-126."
+    },
+    {
+      "id": "AC-005",
+      "criterion": "20MB超過PDFで PDF_SIZE_EXCEEDED エラー応答される（413）",
+      "status": "passed",
+      "evidence": "pdf-extensions.ts:27 PDF_MAX_SIZE_BYTES = 20*1024*1024. validatePdfContent (pdf-extensions.ts:110-116) returns size error. route.ts:277-280 returns createErrorResponse('PDF_SIZE_EXCEEDED', ...). ERROR_CODE_TO_HTTP_STATUS maps PDF_SIZE_EXCEEDED -> 413 (route.ts:86). Verified by files-pdf.test.ts:97-110 (status 413, code PDF_SIZE_EXCEEDED)."
+    },
+    {
+      "id": "AC-006",
+      "criterion": "next.config.js の CSP frame-src に blob: が追加されている",
+      "status": "passed",
+      "evidence": "next.config.js:74 - \"frame-src 'self' blob:\" present in CSP header array."
+    },
+    {
+      "id": "AC-007",
+      "criterion": "next.config.js のCSPコメントに DR4-007 撤回経緯（Issue #490 → #673）が記載されている",
+      "status": "passed",
+      "evidence": "next.config.js:72-73 - // Issue #490: HTML/MARP srcdoc (DR4-007: blob: originally excluded) / // Issue #673: blob: added for PDF preview (Blob URL + iframe) — DR4-007 retraction."
+    },
+    {
+      "id": "AC-008",
+      "criterion": "PDFタブでは useFileContentPolling の自動ポーリングが行われない",
+      "status": "passed",
+      "evidence": "src/hooks/useFileContentPolling.ts:50-51 - enabled gated by '!tab.content?.isPdf' with the comment 'Issue #673: PDF tabs disable polling to avoid re-fetching large Base64 payloads'."
+    },
+    {
+      "id": "AC-009",
+      "criterion": "Blob URLのメモリリーク防止: コンポーネントアンマウント時に URL.revokeObjectURL が呼ばれる",
+      "status": "passed",
+      "evidence": "PdfPreview.tsx:68-73 useEffect cleanup calls URL.revokeObjectURL(currentUrl) for the created Blob URL. Verified by PdfPreview.test.tsx mocks for createObjectURL/revokeObjectURL (line 14/34) and explicit revocation tests."
+    },
+    {
+      "id": "AC-010",
+      "criterion": "ファイル切替時に古いBlob URLがrevokeされる",
+      "status": "passed",
+      "evidence": "PdfPreview.tsx:44-74 useEffect depends on [dataUri, filePath]; returning cleanup that revokes currentUrl ensures old URL is revoked when inputs change. Also a 'cancelled' flag prevents setState after unmount. Verified by PdfPreview.test.tsx:113 ('revokes the old blob URL when filePath changes')."
+    },
+    {
+      "id": "AC-011",
+      "criterion": "fetch失敗時にエラーUIへフォールバックする",
+      "status": "passed",
+      "evidence": "PdfPreview.tsx:53-66 try/catch sets hasError. Line 76-95 renders error UI with download link (data-testid='pdf-preview-error'). Covered by test file (tdd-result.json: 'fetch failure fallback - all branches covered')."
+    },
+    {
+      "id": "AC-012",
+      "criterion": "path-validator によるパストラバーサル攻撃防御が継続適用されている",
+      "status": "passed",
+      "evidence": "src/app/api/worktrees/[id]/files/[...path]/route.ts:126-138 - isPathSafe() and resolveAndValidateRealPath() invoked in getWorktreeAndValidatePath(). PDF branch (route.ts:268-307) is reached only after these validations. No bypass in PDF flow."
+    },
+    {
+      "id": "AC-013",
+      "criterion": "CLAUDE.md 主要モジュール一覧に src/config/pdf-extensions.ts が追加されている",
+      "status": "passed",
+      "evidence": "CLAUDE.md line 191: `src/config/pdf-extensions.ts` | PDF拡張子・サイズ(20MB)・magic bytes(`%PDF-`)・iframe sandbox定数, isPdfExtension/validatePdfMagicBytes/validatePdfContent (Issue #673). CLAUDE.md line 259: PdfPreview.tsx entry also registered."
+    },
+    {
+      "id": "AC-014",
+      "criterion": "全既存テスト（6381件）がパスする",
+      "status": "passed",
+      "evidence": "npm run test:unit: Test Files 340 passed, Tests 6381 passed | 7 skipped (6388), Duration 13.54s. Exit code 0."
+    },
+    {
+      "id": "AC-015",
+      "criterion": "Lint・型チェック・ビルドが全て通る",
+      "status": "passed",
+      "evidence": "npm run lint: 'No ESLint warnings or errors' (exit 0). npx tsc --noEmit: exit 0, no output. npm run build: Next.js build succeeded with full route listing (middleware 28.9kB compiled, all routes generated)."
+    }
+  ],
+  "test_scenarios_results": [
+    {
+      "scenario": "シナリオ1: pdf-extensions ユニットテスト検証",
+      "status": "passed",
+      "evidence": "tests/unit/config/pdf-extensions.test.ts included in 38 passing PDF-specific tests (npx vitest run -> Test Files 3 passed, Tests 38 passed)."
+    },
+    {
+      "scenario": "シナリオ2: ファイル取得API PDF分岐の検証",
+      "status": "passed",
+      "evidence": "tests/unit/api/files-pdf.test.ts covers success path, PDF_SIZE_EXCEEDED (413), INVALID_MAGIC_BYTES (400), FILE_NOT_FOUND (ENOENT). All pass."
+    },
+    {
+      "scenario": "シナリオ3: PdfPreview コンポーネントの iframe属性・sandbox='allow-scripts'・title属性・Blob URLライフサイクル",
+      "status": "passed",
+      "evidence": "tests/unit/components/PdfPreview.test.tsx explicitly asserts sandbox='allow-scripts', title='PDF Preview: {filePath}', revocation on filePath change, fetch failure fallback. All pass."
+    },
+    {
+      "scenario": "シナリオ4: FilePanelContent での isPdf 分岐確認（他Viewerと排他）",
+      "status": "passed",
+      "evidence": "FilePanelContent.tsx:719-730 isPdf branch appears after isImage/isVideo and before isHtml, mutually exclusive (content.isPdf). Test file tests/unit/components/FilePanelContent.test.tsx was modified for this branch and passes as part of 6381 total."
+    },
+    {
+      "scenario": "シナリオ5: useFileContentPolling の PDF無効化条件（!tab.content?.isPdf）",
+      "status": "passed",
+      "evidence": "useFileContentPolling.ts:51 enabled=tab.content !== null && !tab.loading && !tab.isDirty && !tab.content?.isPdf. Covered by unit tests passing in the 6381-suite."
+    },
+    {
+      "scenario": "シナリオ6: next.config.js CSPコメントと DR4-007撤回根拠の記載",
+      "status": "passed",
+      "evidence": "next.config.js lines 72-74 include both comments and 'frame-src self blob:'."
+    },
+    {
+      "scenario": "シナリオ7: 静的解析・型チェック・ビルド全通過",
+      "status": "passed",
+      "evidence": "Lint (No ESLint warnings or errors), tsc --noEmit (exit 0, no output), next build (success)."
+    }
+  ],
+  "test_results": {
+    "total": 6388,
+    "passed": 6381,
+    "failed": 0,
+    "skipped": 7
+  },
+  "quality_checks": {
+    "lint": "pass",
+    "type_check": "pass",
+    "build": "pass",
+    "unit_tests": "pass"
+  },
+  "evidence_files": [
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/config/pdf-extensions.ts",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/components/worktree/PdfPreview.tsx",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/app/api/worktrees/[id]/files/[...path]/route.ts",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/components/worktree/FilePanelContent.tsx",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/hooks/useFileContentPolling.ts",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/next.config.js",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/types/models.ts",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/CLAUDE.md",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/tests/unit/config/pdf-extensions.test.ts",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/tests/unit/components/PdfPreview.test.tsx",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/tests/unit/api/files-pdf.test.ts"
+  ],
+  "notes": "All 15 acceptance criteria and 7 test scenarios passed via static code inspection + full vitest suite (6381 passing, 7 pre-existing skips) + lint + tsc + next build. PDF-specific suites: 3 files / 38 tests pass standalone. Actual PDF rendering in Chrome/Firefox is deferred to Phase 6 /uat (manual) per work-plan. stderr output observed during vitest run originates from deliberate negative-case tests (Provider-missing validators, invalid date input) and does not indicate test failure — exit code 0. No regressions detected."
+}

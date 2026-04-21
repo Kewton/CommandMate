@@ -1,0 +1,98 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目・通常）",
+  "issue_number": 673,
+  "apply_date": "2026-04-21",
+  "reviewer_stage_applied": 1,
+  "applied_findings": [
+    "S1-001",
+    "S1-002",
+    "S1-003",
+    "S1-004",
+    "S1-005",
+    "S1-006",
+    "S1-007",
+    "S1-008",
+    "S1-009",
+    "S1-010",
+    "S1-011",
+    "S1-012",
+    "S1-013",
+    "S1-014",
+    "S1-015"
+  ],
+  "skipped_findings": [],
+  "issue_update_status": "updated",
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/673",
+    "command": "gh issue edit 673 --body-file <updated-body>"
+  },
+  "major_changes": [
+    "Issue冒頭にレビュー反映ノートと『重要な設計変更』の警告を追加（HtmlPreviewパターンが流用できない点を明記）",
+    "『背景・課題』セクションに『PDFに固有の技術的制約（Stage 1レビューで判明）』サブセクションを新設し、srcDoc不可/sandbox要件/CSP/100MB非現実性/nosniff影響の5点を明記",
+    "『提案する解決策』を全面書き換え: <iframe srcDoc> 案を削除し、方式A（Blob URL + iframe）/方式B（ストリーミングAPI + Blob URL）の2案に整理、PoC結果で最終決定する方針に変更",
+    "サイズ上限を100MB→暫定20MBに引き下げ、根拠（Base64サイズ・メモリ・dataURL上限・業務用PDF実態）を本文記載",
+    "『エラー時のUX』表を新設: サイズ超過/magic bytes不一致/破損PDF/モバイル内蔵ビューワ非対応/ENOENT の各UI挙動を定義",
+    "『アクセシビリティ（a11y）』セクションを新設: iframe title属性・ファイル名ラベル・ダウンロードリンク常設・WCAG観点のキーボード注記",
+    "『実装タスク』にPoC・事前検証セクションを追加（6環境×3スキーム×3 sandbox値の検証）、PoC結果記録先も指定",
+    "magic bytes検証（%PDF-）関数を実装タスク/主要な変更点に追加し、image/video と同構造化",
+    "useFileContentPolling との相性対応（isPdf時のpolling無効化 or 軽量メタデータ切替）を実装タスクに追加",
+    "FilePanelContent.tsx のPDF分岐挿入位置を L705-707 に具体化、挿入原則を本文明記",
+    "PdfPreview の dynamic(..., { ssr: false }) 動的import、MaximizableWrapper+FileToolbar ラッピングを明記",
+    "『変更対象ファイル』表に next.config.js（CSP更新）、files-raw Route Handler（方式B時）、FileViewer.tsx（追従要否）を追加",
+    "『受入条件』を機能/セキュリティ/エラーUX/アクセシビリティ/テスト品質の5カテゴリに構造化し、具体的な検証方法（実機スクリーンショット、JavaScript埋め込みPDFテスト、magic bytes検証、文言確認）を明記",
+    "『セキュリティ考慮事項』を更新: sandbox値PoC決定方針、CSP更新に伴うクリックジャッキング/phishingリスク、blob:限定優先、AcroForms/JS無効化検証を追加",
+    "末尾に『レビュー履歴』セクションを追加し、S1-001〜S1-015 の全15件について反映内容を列挙"
+  ],
+  "updated_sections": [
+    "冒頭（レビュー反映ノート・重要な設計変更警告）",
+    "概要",
+    "背景・課題（PDF固有の技術的制約サブセクション追加）",
+    "提案する解決策（方式A/B整理、PoCポイント、サイズ上限見直し、主要な変更点、エラー時のUX、アクセシビリティ）",
+    "実装タスク（PoC・事前検証/実装/ユニットテスト/結合・受入 に分割）",
+    "受入条件（5カテゴリ構造化）",
+    "影響範囲（変更対象ファイル表に3ファイル追加、関連コンポーネント注記更新）",
+    "セキュリティ考慮事項",
+    "レビュー履歴（新設）"
+  ],
+  "findings_details": {
+    "must_fix": [
+      {"id": "S1-001", "status": "applied", "summary": "sandbox=\"\"非対応問題をPoCでsandbox値決定方針に変更し、allow-scripts必要性をセキュリティ考慮事項に明記"},
+      {"id": "S1-002", "status": "applied", "summary": "next.config.js を変更対象ファイルに追加、CSP frame-src への blob:/data: 最小限追加を実装タスク化"},
+      {"id": "S1-003", "status": "applied", "summary": "iframe srcDoc をPDF用途から削除、方式A/Bの Blob URL ベース2案に確定"},
+      {"id": "S1-004", "status": "applied", "summary": "100MB上限を暫定20MBに引き下げ、根拠を本文記載、方式B（ストリーミング）で大容量対応可能とした"}
+    ],
+    "should_fix": [
+      {"id": "S1-005", "status": "applied", "summary": "validatePdfMagicBytes（%PDF-）/validatePdfContent をpdf-extensions.tsに追加、ユニットテストも追加"},
+      {"id": "S1-006", "status": "applied", "summary": "エラー時のUX表を新設（非PDF/破損/モバイル非対応/iframe失敗）、モバイルダウンロードフォールバックを実装タスク化"},
+      {"id": "S1-007", "status": "applied", "summary": "a11yセクション新設、iframe title属性・ファイル名ラベル・ダウンロードリンクを受入条件化"},
+      {"id": "S1-008", "status": "applied", "summary": "isPdf時のpolling無効化 or 軽量メタデータエンドポイントへの切替を実装タスクおよび関連コンポーネント注記に追加"},
+      {"id": "S1-009", "status": "applied", "summary": "受入条件を機能/セキュリティ/エラーUX/a11y/テスト品質の5カテゴリに構造化、対象ブラウザ指定・スクリーンショット添付・エラー文言・magic bytes検証を明記"},
+      {"id": "S1-010", "status": "applied", "summary": "ユニットテストを pdf-extensions.test.ts / files-pdf.test.ts / FilePanelContent.test.tsx / PdfPreview.test.tsx の4本に分解"},
+      {"id": "S1-011", "status": "applied", "summary": "FilePanelContent.tsx の挿入位置を L705 (VideoViewer) 直後・L707 (HtmlPreview) 直前に具体化、挿入原則も明記"}
+    ],
+    "nice_to_have": [
+      {"id": "S1-012", "status": "applied", "summary": "PdfPreview の dynamic(..., { ssr: false }) 動的import化を主要な変更点・実装タスクに明記"},
+      {"id": "S1-013", "status": "applied", "summary": "PDF_EXTENSIONS: readonly string[] = ['.pdf'] as const の配列定義パターンを明記"},
+      {"id": "S1-014", "status": "applied", "summary": "FileViewer.tsx の追従要否判断タスクを追加、影響範囲テーブルにも追加"},
+      {"id": "S1-015", "status": "applied", "summary": "PdfPreview を MaximizableWrapper + FileToolbar で囲むUI統一方針を明記"}
+    ]
+  },
+  "summary": {
+    "total_findings": 15,
+    "must_fix_total": 4,
+    "must_fix_applied": 4,
+    "should_fix_total": 7,
+    "should_fix_applied": 7,
+    "nice_to_have_total": 4,
+    "nice_to_have_applied": 4,
+    "applied": 15,
+    "skipped": 0
+  },
+  "notes": [
+    "Stage 1 で明らかになった『HtmlPreviewパターン流用前提の崩壊』を Issue 冒頭で明示し、方式A/Bの2案併記 + PoC駆動の意思決定プロセスに変更",
+    "PoC（6ブラウザ × 3スキーム × 3 sandbox値）の結果次第で本文を再更新する方針を実装タスクに明記",
+    "既存の Issue 構造（概要/背景・課題/提案する解決策/実装タスク/受入条件/影響範囲/セキュリティ考慮事項）は維持し、必要なサブセクション（技術的制約/エラー時のUX/a11y/レビュー履歴）のみ追加"
+  ]
+}

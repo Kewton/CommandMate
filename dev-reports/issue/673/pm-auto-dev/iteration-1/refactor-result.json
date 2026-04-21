@@ -1,0 +1,63 @@
+{
+  "status": "success",
+  "changes_applied": [
+    {
+      "file": "src/config/pdf-extensions.ts",
+      "change": "Removed local normalizeExtension() and imported it from @/config/image-extensions (same pattern as video-extensions.ts).",
+      "reason": "DRY: the function was a byte-for-byte duplicate of the existing exported helper; video-extensions.ts already reuses it, so aligning removes drift risk and 7 lines of duplication."
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "change": "Removed three WHAT-level comments inside the PDF GET branch (\"Read file as binary\", \"Validate PDF content (size + magic bytes)\", \"magic bytes failure\", \"Convert to Base64 data URI\").",
+      "reason": "Per CLAUDE.md coding style, keep WHY comments only. Identifier names (validatePdfContent, readFile, base64 data URI template) make intent obvious."
+    },
+    {
+      "file": "src/components/worktree/PdfPreview.tsx",
+      "change": "Removed one WHAT-level comment (\"Reset state for new input (filePath / dataUri change).\") inside useEffect.",
+      "reason": "The two setState calls immediately below already make the reset intent explicit; keep the file focused on WHY-level security/UX comments at the top."
+    }
+  ],
+  "skipped_opportunities": [
+    {
+      "description": "Refactor the image/video/PDF branches in route.ts into a single generic binary-file handler.",
+      "reason_skipped": "Out of scope per context constraints ('do not create unnecessary abstractions', 'minimal improvement'). Each branch has distinct validation paths (SVG XSS check, ftyp offset, Base64 fallback). Extracting would hide legitimate differences and break the current structural pattern."
+    },
+    {
+      "description": "Replace string matching (validation.error?.includes('MB')) with a discriminated union / error-code field on PdfValidationResult.",
+      "reason_skipped": "Existing image and video branches use the same string-matching idiom. Diverging here would break structural symmetry with the two surrounding branches — changing the pattern in isolation for PDF only would be a regression in consistency."
+    },
+    {
+      "description": "Move the Issue #673 PDF-polling skip flag (tab.content?.isPdf) in useFileContentPolling to a more general 'isBinary' predicate.",
+      "reason_skipped": "Current logic is tied to a specific boolean on FileContent. Image and video paths do not currently suffer the same large-payload problem in production polling, so generalizing now would be speculative (YAGNI)."
+    },
+    {
+      "description": "Parameterize createPdfBufferOfSize with an optional fill byte.",
+      "reason_skipped": "Current tests cover size boundary only (0x20 filler is sufficient). No caller would benefit from additional surface area today."
+    },
+    {
+      "description": "Drop the unused sizeBytes prop from PdfPreviewProps.",
+      "reason_skipped": "API stability constraint: the refactor brief forbids breaking API / type changes. The prop is explicitly marked 'reserved for future UI display'."
+    }
+  ],
+  "quality_after": {
+    "lint": "pass",
+    "type_check": "pass",
+    "unit_tests": "pass",
+    "tests_passing": 6381
+  },
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "files_changed": [
+    "src/config/pdf-extensions.ts",
+    "src/components/worktree/PdfPreview.tsx",
+    "src/app/api/worktrees/[id]/files/[...path]/route.ts"
+  ],
+  "commits": [
+    "e7ea0443: refactor(pdf): share normalizeExtension and trim obvious comments"
+  ],
+  "notes": "Applied 3 low-risk refinements: (1) deduplicate normalizeExtension by reusing the exported helper from image-extensions.ts (mirrors video-extensions.ts), (2) strip a handful of WHAT-level comments in the PDF GET branch and PdfPreview useEffect to align with the WHY-only comment policy in CLAUDE.md, (3) no behavioural change. Full suite (6381 tests) still green; lint and tsc --noEmit clean. Evaluated but deliberately skipped: generalized binary-file handler (breaks symmetry with image/video), discriminated union for validation errors (inconsistent with surrounding branches), polling predicate generalization (YAGNI), unused sizeBytes prop removal (API-stability constraint)."
+}

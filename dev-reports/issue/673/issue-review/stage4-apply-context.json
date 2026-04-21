@@ -1,0 +1,8 @@
+{
+  "issue_number": "673",
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目・影響範囲）",
+  "review_result_path": "dev-reports/issue/673/issue-review/stage3-review-result.json",
+  "output_path": "dev-reports/issue/673/issue-review/stage4-apply-result.json",
+  "apply_policy": "Must Fix 3件（S3-001 CSP副作用評価、S3-002 Blob URLライフサイクル設計、S3-003 useFileContentPolling分岐）とShould Fix 8件を全件反映する。Nice to Haveは選別。Issue本文のセクション構造は維持し、該当箇所を追記・更新する。"
+}
