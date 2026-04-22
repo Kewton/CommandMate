@@ -67,13 +67,13 @@ describe('PdfPreview', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders an iframe with sandbox="allow-scripts" and correct title after blob URL is ready', async () => {
+  it('renders an iframe without the sandbox attribute (Chrome PDF viewer compat) and correct title after blob URL is ready', async () => {
     render(<PdfPreview {...defaultProps} />);
 
     await waitFor(() => {
       const iframe = screen.getByTitle(`PDF Preview: ${defaultProps.filePath}`);
       expect(iframe).toBeInTheDocument();
-      expect(iframe.getAttribute('sandbox')).toBe('allow-scripts');
+      expect(iframe.hasAttribute('sandbox')).toBe(false);
     });
   });
 

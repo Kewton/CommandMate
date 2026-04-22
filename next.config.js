@@ -33,9 +33,10 @@ const nextConfig = {
         source: '/:path*',
         headers: [
           {
-            // Prevent clickjacking attacks
+            // Prevent clickjacking attacks (SAMEORIGIN allows same-origin
+            // iframes, required for Issue #673 PDF preview blob: iframe)
             key: 'X-Frame-Options',
-            value: 'DENY',
+            value: 'SAMEORIGIN',
           },
           {
             // Prevent MIME type sniffing
@@ -68,11 +69,13 @@ const nextConfig = {
               "img-src 'self' data: blob:",
               "media-src 'self' data:", // Allow video playback with data URIs (Issue #302)
               "font-src 'self' data:",
-              "connect-src 'self' ws: wss:", // Allow WebSocket connections
+              "connect-src 'self' data: ws: wss:", // Allow WebSocket + data: URIs (Issue #673: PdfPreview fetch)
               // Issue #490: HTML/MARP srcdoc (DR4-007: blob: originally excluded)
               // Issue #673: blob: added for PDF preview (Blob URL + iframe) — DR4-007 retraction
               "frame-src 'self' blob:",
-              "frame-ancestors 'none'",
+              // Issue #673: 'self' allows same-origin blob: iframe (PDF preview)
+              // while still preventing external clickjacking.
+              "frame-ancestors 'self'",
             ].join('; '),
           },
         ],

@@ -23,6 +23,7 @@ import { Modal } from '@/components/ui';
 import { FileContent } from '@/types/models';
 import { ImageViewer } from './ImageViewer';
 import { VideoViewer } from './VideoViewer';
+import { PdfPreview } from './PdfPreview';
 import type { SandboxLevel } from '@/config/html-extensions';
 import { SANDBOX_ATTRIBUTES } from '@/config/html-extensions';
 import { copyToClipboard } from '@/lib/clipboard-utils';
@@ -245,9 +246,9 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
   const searchInputRef = useRef<HTMLInputElement>(null);
   const codeContainerRef = useRef<HTMLDivElement>(null);
 
-  /** Whether the current content supports clipboard copy (text files only, not image/video) */
+  /** Whether the current content supports clipboard copy (text files only, not image/video/pdf) */
   const canCopy = useMemo(
-    () => Boolean(content?.content && !content.isImage && !content.isVideo),
+    () => Boolean(content?.content && !content.isImage && !content.isVideo && !content.isPdf),
     [content]
   );
 
@@ -430,7 +431,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
   }, [onEditMarkdown, filePath, onClose]);
 
   const codeViewData = useMemo(() => {
-    if (!content || content.isImage || content.isVideo || content.isHtml || (isMarp && marpSlides)) {
+    if (!content || content.isImage || content.isVideo || content.isHtml || content.isPdf || (isMarp && marpSlides)) {
       return null;
     }
     const lineNumbers = Array.from(
@@ -462,6 +463,19 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
     }
     if (content.isVideo) {
       return <VideoViewer src={content.content} mimeType={content.mimeType} />;
+    }
+    // [Issue #673] PDF preview (mobile): iframe variant is blocked by
+    // mobile Chrome, so show an open-in-new-tab / download UI instead.
+    if (content.isPdf) {
+      return (
+        <div className="h-full min-h-[40vh]">
+          <PdfPreview
+            dataUri={content.content}
+            filePath={filePath}
+            variant="download"
+          />
+        </div>
+      );
     }
     // [Issue #490] HTML preview with mobile tab switching (Source/Preview)
     if (content.isHtml) {

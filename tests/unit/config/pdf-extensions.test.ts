@@ -50,8 +50,8 @@ describe('PDF_MAGIC_BYTES', () => {
 });
 
 describe('PDF_IFRAME_SANDBOX', () => {
-  it('should be allow-scripts (minimum for Firefox pdf.js)', () => {
-    expect(PDF_IFRAME_SANDBOX).toBe('allow-scripts');
+  it('should be undefined so the iframe omits the sandbox attribute (Chrome PDF viewer compat)', () => {
+    expect(PDF_IFRAME_SANDBOX).toBeUndefined();
   });
 });
 

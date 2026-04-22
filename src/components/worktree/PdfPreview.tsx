@@ -2,17 +2,21 @@
  * PdfPreview Component
  * Issue #673: PDF viewer implementation
  *
- * Renders a PDF inside an iframe by:
- *   1. Fetching the incoming Base64 data URI into a Blob
- *   2. Creating a Blob URL via `URL.createObjectURL`
- *   3. Pointing an iframe with `sandbox="allow-scripts"` at the Blob URL
+ * Variants:
+ *   - `iframe` (default, desktop): embeds the PDF via a Blob URL iframe.
+ *     Desktop Chrome/Firefox render it with their built-in viewer.
+ *   - `download`: shows "Open" / "Download" buttons wired to a Blob URL.
+ *     Required on mobile Chrome, which lacks an in-page PDF viewer and
+ *     blocks iframe-loaded PDFs ("このコンテンツはブロックされました").
  *
  * Security:
- *   - The iframe uses `sandbox="allow-scripts"` without `allow-same-origin`,
- *     putting the PDF in an opaque origin so that even if embedded scripts
- *     were to run, they cannot read cookies/storage from the host document.
- *   - CSP `frame-src 'self' blob:` (see next.config.js) explicitly allows
- *     `blob:` URIs required by this component.
+ *   - iframe variant: no `sandbox` attribute. Chrome's built-in PDF viewer
+ *     runs via a MIME-handler navigation that conflicts with *any* sandbox
+ *     value; see `PDF_IFRAME_SANDBOX` docs for the full rationale.
+ *   - Clickjacking protection is enforced at the host page level via
+ *     `X-Frame-Options: SAMEORIGIN` + CSP `frame-ancestors 'self'`.
+ *   - CSP `frame-src 'self' blob:` / `connect-src 'self' data:` in
+ *     next.config.js allow the Blob and data: fetches this component needs.
  *
  * UX:
  *   - Shows a loading indicator until the Blob URL is ready.
@@ -25,6 +29,8 @@
 import React, { useEffect, useState } from 'react';
 import { PDF_IFRAME_SANDBOX } from '@/config/pdf-extensions';
 
+export type PdfPreviewVariant = 'iframe' | 'download';
+
 export interface PdfPreviewProps {
   /** Base64 data URI (`data:application/pdf;base64,...`) returned by the API */
   dataUri: string;
@@ -32,12 +38,17 @@ export interface PdfPreviewProps {
   filePath: string;
   /** Optional file size in bytes (reserved for future UI display) */
   sizeBytes?: number;
+  /**
+   * Rendering variant. Defaults to `iframe` for desktop.
+   * Pass `download` on mobile where in-page PDF rendering is unreliable.
+   */
+  variant?: PdfPreviewVariant;
 }
 
 /**
- * Core PDF preview: Blob URL + iframe.
+ * Core PDF preview: Blob URL + iframe (desktop) or Blob URL + buttons (mobile).
  */
-export function PdfPreview({ dataUri, filePath }: PdfPreviewProps): React.JSX.Element {
+export function PdfPreview({ dataUri, filePath, variant = 'iframe' }: PdfPreviewProps): React.JSX.Element {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [hasError, setHasError] = useState(false);
 
@@ -100,6 +111,51 @@ export function PdfPreview({ dataUri, filePath }: PdfPreviewProps): React.JSX.El
         data-testid="pdf-preview-loading"
       >
         <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-cyan-600 dark:border-t-cyan-400" />
+      </div>
+    );
+  }
+
+  if (variant === 'download') {
+    const fileName = filePath.split('/').pop() || 'document.pdf';
+    return (
+      <div
+        className="h-full flex flex-col items-center justify-center gap-4 p-6 text-center"
+        data-testid="pdf-preview-download"
+      >
+        <svg
+          className="w-16 h-16 text-gray-400 dark:text-gray-500"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.5}
+            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+          />
+        </svg>
+        <p className="text-sm text-gray-700 dark:text-gray-300 break-all">
+          {fileName}
+        </p>
+        <div className="flex flex-col gap-2 w-full max-w-xs">
+          <a
+            href={blobUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg bg-cyan-600 hover:bg-cyan-700 active:bg-cyan-800 text-white text-sm font-medium transition-colors"
+          >
+            PDFを新しいタブで開く
+          </a>
+          <a
+            href={blobUrl}
+            download={fileName}
+            className="inline-flex items-center justify-center gap-2 px-6 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+          >
+            ダウンロード
+          </a>
+        </div>
       </div>
     );
   }

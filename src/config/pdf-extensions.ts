@@ -45,12 +45,25 @@ export const PDF_MAGIC_BYTES: readonly number[] = [
 /**
  * iframe sandbox attribute for PDF preview.
  *
- * `allow-scripts` is the minimum required for Firefox's built-in pdf.js
- * viewer to function. Note that omitting `allow-same-origin` keeps the
- * PDF in an opaque origin, preventing it from accessing the parent
- * document's cookies / storage even if it somehow executes code.
+ * Left `undefined` intentionally. Chrome's built-in PDF viewer renders
+ * `application/pdf` by navigating the iframe to its internal MIME-handler
+ * extension origin. Any `sandbox` value (even `allow-scripts
+ * allow-same-origin`) causes Chrome to block that navigation and show
+ * "このページは Chrome によってブロックされています" in the iframe.
+ *
+ * Omitting the attribute is acceptable here because:
+ *   - The blob URL already inherits the creator document's origin — no new
+ *     cross-origin access is granted by dropping the sandbox.
+ *   - PDF bytes are not executed as page scripts; Chrome renders them via
+ *     its internal PDF viewer extension in a privileged origin.
+ *   - PDF-embedded JavaScript (AcroForms) runs inside the PDF viewer's
+ *     own sandbox, not the page context.
+ *   - Clickjacking is still mitigated by the host page's
+ *     `X-Frame-Options: SAMEORIGIN` + CSP `frame-ancestors 'self'`.
+ *
+ * React renders `sandbox={undefined}` as no attribute, which is what we want.
  */
-export const PDF_IFRAME_SANDBOX = 'allow-scripts';
+export const PDF_IFRAME_SANDBOX: string | undefined = undefined;
 
 /**
  * MIME type for PDF content.
