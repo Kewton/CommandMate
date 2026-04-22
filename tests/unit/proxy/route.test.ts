@@ -179,4 +179,39 @@ describe('Proxy Route Handler - pathPrefix preservation', () => {
       '/proxy/app/a/b/c'
     );
   });
+
+  // Issue #671: HEAD method support for proxy route
+  it('should proxy HEAD request through handleProxy', async () => {
+    const mockApp = createMockApp({
+      name: 'headtest',
+      displayName: 'HEAD Test',
+      pathPrefix: 'headtest',
+      targetPort: 3013,
+    });
+    const { proxyHttp, logProxyRequest } = await setupProxyMocks(mockApp);
+
+    const route = await import('@/app/proxy/[...path]/route');
+    expect(typeof route.HEAD).toBe('function');
+
+    const request = new Request('http://localhost:3000/proxy/headtest/page', {
+      method: 'HEAD',
+    });
+    const response = await route.HEAD(request, {
+      params: Promise.resolve({ path: ['headtest', 'page'] }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(proxyHttp).toHaveBeenCalledWith(
+      request,
+      mockApp,
+      '/proxy/headtest/page'
+    );
+    expect(logProxyRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'HEAD',
+        pathPrefix: 'headtest',
+        path: '/proxy/headtest/page',
+      })
+    );
+  });
 });

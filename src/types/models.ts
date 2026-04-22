@@ -322,7 +322,9 @@ export interface FileContent {
   isVideo?: boolean;
   /** Whether the file is an HTML file (optional, for HTML files) - Issue #490 */
   isHtml?: boolean;
-  /** MIME type (optional, for image/video files) */
+  /** Whether the file is a PDF file (optional, for PDF files) - Issue #673 */
+  isPdf?: boolean;
+  /** MIME type (optional, for image/video/pdf files) */
   mimeType?: string;
 }
 

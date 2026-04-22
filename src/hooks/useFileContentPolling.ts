@@ -47,7 +47,8 @@ export function useFileContentPolling({
 
   useFilePolling({
     intervalMs: FILE_CONTENT_POLL_INTERVAL_MS,
-    enabled: tab.content !== null && !tab.loading && !tab.isDirty,
+    // Issue #673: PDF tabs disable polling to avoid re-fetching large Base64 payloads
+    enabled: tab.content !== null && !tab.loading && !tab.isDirty && !tab.content?.isPdf,
     onPoll: async () => {
       const url = `/api/worktrees/${worktreeId}/files/${encodePathForUrl(tabPathRef.current)}`;
       const headers: Record<string, string> = {};

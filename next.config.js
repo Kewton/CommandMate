@@ -10,6 +10,12 @@ const nextConfig = {
     NEXT_PUBLIC_APP_VERSION: packageJson.version,
   },
   reactStrictMode: true,
+  // Issue #671: Do not auto-redirect /proxy/<prefix>/ → /proxy/<prefix>.
+  // Streamlit and similar upstreams require the trailing slash form when
+  // baseUrlPath is set, so suppressing the 308 redirect keeps those apps
+  // routable. Other Next.js routes retain their existing behavior; trailing
+  // slash consistency is left to the caller.
+  skipTrailingSlashRedirect: true,
   eslint: {
     // Temporarily ignore ESLint errors during build
     ignoreDuringBuilds: true,
@@ -27,9 +33,10 @@ const nextConfig = {
         source: '/:path*',
         headers: [
           {
-            // Prevent clickjacking attacks
+            // Prevent clickjacking attacks (SAMEORIGIN allows same-origin
+            // iframes, required for Issue #673 PDF preview blob: iframe)
             key: 'X-Frame-Options',
-            value: 'DENY',
+            value: 'SAMEORIGIN',
           },
           {
             // Prevent MIME type sniffing
@@ -62,9 +69,13 @@ const nextConfig = {
               "img-src 'self' data: blob:",
               "media-src 'self' data:", // Allow video playback with data URIs (Issue #302)
               "font-src 'self' data:",
-              "connect-src 'self' ws: wss:", // Allow WebSocket connections
-              "frame-src 'self'", // Allow iframe srcdoc for HTML/MARP preview (Issue #490, DR4-007: blob: excluded)
-              "frame-ancestors 'none'",
+              "connect-src 'self' data: ws: wss:", // Allow WebSocket + data: URIs (Issue #673: PdfPreview fetch)
+              // Issue #490: HTML/MARP srcdoc (DR4-007: blob: originally excluded)
+              // Issue #673: blob: added for PDF preview (Blob URL + iframe) — DR4-007 retraction
+              "frame-src 'self' blob:",
+              // Issue #673: 'self' allows same-origin blob: iframe (PDF preview)
+              // while still preventing external clickjacking.
+              "frame-ancestors 'self'",
             ].join('; '),
           },
         ],

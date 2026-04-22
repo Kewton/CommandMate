@@ -1,0 +1,50 @@
+{
+  "bug_id": "issue671_20260420_085636",
+  "related_issue": 671,
+  "summary": "External Apps として登録した Streamlit 等の WebSocket 利用アプリを Open しても、`_stcore/stream` への WebSocket Upgrade が CommandMate 内蔵 WebSocketServer に吸い込まれ、upstream に到達しないため画面が初期状態で停止する。",
+  "root_cause": {
+    "description": "`server.ts` が upgrade ヘッダ付きリクエストを HTTP サーバーの upgrade イベントに流し、`src/lib/ws-server.ts` の upgrade ハンドラが `/_next/` 以外の全パスを CommandMate 内蔵 WebSocketServer にハンドオーバーしてしまう。結果として `/proxy/<prefix>/_stcore/stream` 宛の WebSocket は upstream Streamlit ではなく CommandMate WSS に張られ、Streamlit 側のフレームは無視される。Next.js Route Handler 側の `proxyWebSocket()` (426 返却) は呼び出されない。",
+    "affected_files": [
+      "src/lib/ws-server.ts",
+      "src/lib/proxy/handler.ts",
+      "src/app/proxy/[...path]/route.ts",
+      "server.ts"
+    ]
+  },
+  "auxiliary_issues": [
+    {
+      "id": "trailing-slash",
+      "description": "Next.js が `/proxy/<prefix>/` を 308 で `/proxy/<prefix>` に redirect することで、Streamlit 相対リンクが期待する末尾スラッシュとずれる場面がある。"
+    },
+    {
+      "id": "head-method",
+      "description": "`src/app/proxy/[...path]/route.ts` に `HEAD` メソッドエクスポートがなく、ヘルスチェックや先行 HEAD リクエストで 405 となる。"
+    }
+  ],
+  "adopted_countermeasure": {
+    "title": "`ws-server.ts` の upgrade ハンドラで `/proxy/<prefix>` を External Apps upstream にパススルーする WebSocket TCP プロキシを実装",
+    "implementation_sketch": [
+      "`/proxy/` プレフィックスから pathPrefix を抽出 → `getExternalAppCache(db).getByPathPrefix(pathPrefix)` で upstream 解決",
+      "`enabled=1` かつ `websocket_enabled=1` の場合のみ通過、それ以外は 403/404 等で拒否",
+      "`net.connect({ host: targetHost, port: targetPort })` で upstream へ TCP 接続し、クライアントから受けた Upgrade リクエスト行 + ヘッダを先頭で書き出す",
+      "上流からの 101 応答以降、双方向 pipe で WebSocket フレームを中継",
+      "どちらかが error/close したら両端を破棄",
+      "既存の IP 制限・認証チェックを upgrade 分岐の先頭で維持",
+      "`src/lib/proxy/handler.ts:proxyWebSocket()` は dead code になるため stub 化 or 削除"
+    ]
+  },
+  "security_considerations": [
+    "targetHost バリデーションは既存の localhost/127.0.0.1 限定ルールを再チェックする",
+    "認証 (isAuthEnabled) / IP 制限 (isIpRestrictionEnabled) の順序は現行 ws-server を踏襲",
+    "upstream 切断時のクライアント socket リーク防止 (close/error 双方ハンドル)"
+  ],
+  "severity": "high",
+  "regression_risk": {
+    "areas": [
+      "CommandMate 内蔵 /ws 系 (subscribe / terminal_subscribe / broadcast)",
+      "/_next/ HMR",
+      "既存 External Apps の HTTP プロキシ"
+    ],
+    "mitigation": "upgrade ハンドラの新分岐は `/proxy/<prefix>` のみを対象とし、`/_next/` やその他のパスは既存ロジックをそのまま維持する。既存テストを必ず通す。"
+  }
+}

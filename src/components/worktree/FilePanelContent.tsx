@@ -48,6 +48,18 @@ const HtmlPreview = dynamic(
   },
 );
 
+/** Dynamic import of PdfPreview for PDF files in tab panel - Issue #673 */
+const PdfPreview = dynamic(
+  () =>
+    import('@/components/worktree/PdfPreview').then((mod) => ({
+      default: mod.PdfPreview,
+    })),
+  {
+    ssr: false,
+    loading: () => <DynamicImportSpinner />,
+  },
+);
+
 /** Dynamic import of MarkdownEditor for .md files in tab panel */
 const MarkdownEditor = dynamic(
   () =>
@@ -697,6 +709,20 @@ export const FilePanelContent = memo(function FilePanelContent({
           <FileToolbar filePath={tab.path} isMaximized={isMaximized} onToggleMaximize={toggleMaximize} />
           <div className="flex-1 overflow-auto">
             <VideoViewer src={content.content} mimeType={content.mimeType} />
+          </div>
+        </div>
+      </MaximizableWrapper>
+    );
+  }
+
+  // [Issue #673] PDF preview (after isVideo, before isHtml)
+  if (content.isPdf) {
+    return (
+      <MaximizableWrapper isMaximized={isMaximized} onToggle={toggleMaximize} filePath={tab.path}>
+        <div className="h-full flex flex-col">
+          <FileToolbar filePath={tab.path} isMaximized={isMaximized} onToggleMaximize={toggleMaximize} />
+          <div className="flex-1 min-h-0">
+            <PdfPreview dataUri={content.content} filePath={tab.path} />
           </div>
         </div>
       </MaximizableWrapper>

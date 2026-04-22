@@ -1,0 +1,11 @@
+{
+  "issue_number": "673",
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "hypothesis_verification_path": "dev-reports/issue/673/issue-review/hypothesis-verification.md",
+  "original_issue_path": "dev-reports/issue/673/issue-review/original-issue.json",
+  "output_path": "dev-reports/issue/673/issue-review/stage1-review-result.json",
+  "review_focus": "Issue本文の整合性・正確性・完全性を重点的にチェック。既存コード/ドキュメントとの整合性、受入条件の明確性、実装タスクの漏れ、セクション記述の妥当性を確認する。"
+}

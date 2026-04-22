@@ -1,0 +1,110 @@
+{
+  "stage": 3,
+  "iteration": 1,
+  "focus": "影響範囲（1回目）",
+  "reviewer": "claude-opus",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "Must Fix",
+      "title": "CSP frame-src 変更の既存iframe使用箇所への副作用未評価（HtmlPreview / MARP / FileViewer）",
+      "description": "`next.config.js` L72 の CSP は `frame-src 'self'` が現状。Issue本文では `frame-src 'self' blob:` を追加するとあるが、この変更が既存のiframe利用コンポーネント（`HtmlPreview.tsx` の srcDoc iframe、`FileViewer.tsx` の モバイル HtmlPreview、`MarpEditorWithSlides` のスライド表示 iframe）に与える副作用を評価していない。`srcDoc` は URI スキームではなく attribute なので `frame-src` の `'self'` で引き続き許可されるが、`DR4-007: blob: excluded` のコメント（L72）は明示的に blob: を除外した経緯を示しており、当該除外理由（どのスレッド/Issueで除外決定が下されたか）を確認した上で撤回する旨を本文に明記する必要がある。過去の設計判断を上書きする場合は撤回根拠を Issue 本文で言及すべき。",
+      "suggestion": "影響範囲セクションに以下を追記: (1) `frame-src 'self' blob:` 追加後も `HtmlPreview` (srcDoc), `FileViewer` (mobile srcDoc), `MarpEditorWithSlides` は srcDoc を使用するため CSP 変更の副作用なし、(2) `DR4-007: blob: excluded` の撤回理由（PDF Blob URL 使用のため必要最小限で解禁）をコメントに明記、(3) `frame-ancestors 'none'` は維持（このIssueの変更対象外）、(4) `X-Frame-Options: DENY` との整合性（自サイトのiframeは X-Frame-Options では制御されないため影響なし）を確認済みと注記。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "Must Fix",
+      "title": "Blob URL のメモリリークリスク：revokeObjectURL タイミングと StrictMode 二重マウント対応が未記述",
+      "description": "`next.config.js` L12 で `reactStrictMode: true` が有効化されているため、開発環境では `useEffect` が2回実行される。Issue本文は「useEffect のクリーンアップで URL.revokeObjectURL を呼ぶ」と記載するが、(a) StrictMode 二重マウントで Blob URL が作成直後に revoke されると iframe src 設定前に無効化されるリスク、(b) ファイルタブ切替時のアンマウント前に新しい Blob URL を生成する順序、(c) 非同期 fetch → blob 生成の途中でアンマウントされた場合の cleanup、が未記述。特に現在のコードベースには `createObjectURL` / `revokeObjectURL` の使用例が一切無い（grep結果: No matches found）ため、初採用としてリファレンス実装パターンを Issue本文に明示すべき。",
+      "suggestion": "PdfPreview のライフサイクル設計を次のように詳細化: (1) `useEffect` 内で fetch → blob → createObjectURL を逐次実行し、`cancelled` フラグで非同期中のアンマウントに備える、(2) cleanup で `cancelled = true; URL.revokeObjectURL(blobUrl)` を実行、(3) StrictMode 対応として、`useRef<string | null>` で現在のBlob URLを保持し、新しいURL生成前に古いURLをrevoke、(4) iframe の `src` は Blob URL が確定した時点で state 更新（初期値は空文字かローディング表示）、(5) ファイル切替（`filePath` 変更）時も useEffect 依存配列で再実行され、古い Blob URL が正しく revoke されることをテスト項目に追加。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "Must Fix",
+      "title": "useFileContentPolling のPDF分岐実装方針が API Route 側の挙動と整合していない",
+      "description": "`useFileContentPolling.ts` は URL を `/api/worktrees/.../files/...` で固定し、`If-Modified-Since` ヘッダで304を受ける設計。Issue本文は「isPdf=true の場合はpolling無効化、もしくはメタデータ（mtime/size）のみ軽量エンドポイントで検知」とするが、(a) どちらを採用するか方針が曖昧、(b) 「無効化」を選ぶ場合でも `enabled: tab.content !== null && !tab.loading && !tab.isDirty` の既存 enabled 条件に `!isPdf` を追加する実装箇所（`useFileContentPolling.ts` L50）が実装タスクに無い、(c) 「メタデータのみ軽量エンドポイント」を選ぶ場合は新規 API Route（例: `/api/worktrees/[id]/files-meta/[...path]`）の新設が必要で、これが影響範囲テーブルと実装タスクに記載されていない、(d) PDF 取得APIレスポンスで Last-Modified を返せばクライアント側で304を取れる（現状のfiles APIはLast-Modifiedを返すが、PDFバイナリをJSONに入れるかBlobで返すかで挙動が変わる）。",
+      "suggestion": "PoC の結果を待たずに設計方針を Issue 本文で確定させる: 案1)「isPdf=true は一律pollingを無効化。ユーザの明示的な再ロードボタンを提供」、案2)「PDF は `HEAD /api/worktrees/[id]/files/.../?meta=true` のような軽量モードで mtime のみ取得し、変化検知時にユーザへ通知してワンクリックで再ロード」のいずれかを確定。実装タスクに `useFileContentPolling.ts` の enabled 条件に `!tab.content?.isPdf` を追加する変更点を明記。方式B（ストリーミング）採用時は `Last-Modified` ヘッダを必ず返し、クライアント側 HEAD リクエストで変化検知する方式を記述。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "Should Fix",
+      "title": "バイナリファイル処理パス拡張性（将来の docx / xlsx 等）への配慮が未記述",
+      "description": "現在の `files/[...path]/route.ts` は image (L162) → video (L210) → text という順次分岐で肥大化しており、Issue #673 でPDF分岐を追加すると分岐が4段に増える。同様のパターンを将来 docx/xlsx/epub 等で繰り返すと、API Route が巨大なif-elseチェインになる。共通化ヘルパー（`readBinaryFileWithValidation`）の検討がStage 2で反映されていない。ただし本Issueの責務を越える可能性もあるため Should Fix とする。",
+      "suggestion": "影響範囲セクションに「将来の拡張性」サブセクションを追加し、以下を記載: (1) 現在のPDF分岐はimage/video と同じパターンで実装する（DRY考慮は別Issueで実施）、(2) 将来バイナリファイル形式が3つ以上に増える場合は `readBinaryFileWithValidation(buffer, ext, validators)` のような共通ヘルパー抽出を別Issueで検討、(3) 方式B（ストリーミング）採用時は `/files-raw/[...path]` が全バイナリ形式の共通エンドポイントとして機能する可能性を明記。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "Should Fix",
+      "title": "既存テストヘルパー（tests/helpers）にバイナリファイル生成ユーティリティが無く、PDFテストフィクスチャ戦略が未記述",
+      "description": "`tests/helpers/` を確認したが、image/video テスト（`tests/unit/config/image-extensions.test.ts` 等）ではテスト内で `Buffer.from([0x89, 0x50, ...])` のように magic bytes を直接指定してダミーバイナリを生成している。PDF ではより複雑な構造（`%PDF-1.x\\n...\\n%%EOF`）が必要で、さらに正常系のPDFレンダリングを確認する場合は実PDFバイナリをフィクスチャとして保持する必要がある。Issue本文の `tests/unit/components/PdfPreview.test.tsx` で iframe描画/Blob URL/revoke を jsdom で検証する方針だが、(a) Blob/URL.createObjectURL は jsdom では limited support、(b) 実PDFバイナリの置き場所（`tests/fixtures/` は現状存在しない）、(c) fetch モック戦略（`tests/helpers/mock-api.ts` 流用可否）が未記述。",
+      "suggestion": "実装タスクに以下を追加: (1) `tests/fixtures/pdfs/sample.pdf`（小サイズの有効PDF、ダウンロード可能なサンプル）と `tests/fixtures/pdfs/broken.pdf`（magic bytes は正しいが構造破損）を用意、(2) `tests/helpers/pdf-fixtures.ts` に `createMinimalPdfBuffer()` / `createPdfWithMagicBytes(ext)` ヘルパーを追加、(3) jsdom環境で `URL.createObjectURL` をモック（または `happy-dom` への切替）、(4) `mock-api.ts` に PDF API レスポンス（Base64 / binary）のモックヘルパーを追加。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "Should Fix",
+      "title": "E2E (Playwright) での PDF レンダリング検証方針が未記述",
+      "description": "`tests/e2e/` に9本のspecファイルがあり Playwright v1.56.1 が導入済み。iframe 内のPDFレンダリングはブラウザ内蔵ビューワ（Chrome PDFium, Firefox pdf.js）依存で、Playwright の自動化では (a) iframe の内容検証が難しい、(b) PDF ビューワ内の文字列抽出はヘッドレスでは利用制約あり、(c) Chromium ヘッドレスのPDFiumはデフォルト無効の場合がある、という既知の難しさがある。Issue本文の受入条件「実機ブラウザ（Chrome/Firefox最新版）でPDF表示のスクリーンショット添付」は手動UATを示唆するが、自動E2Eの範囲が不明確。",
+      "suggestion": "実装タスクまたは受入条件に以下を明記: (1) PDF表示の成立（iframe要素がマウントされている・blob URL が src に設定されている・onError が発火しない）までは Playwright で自動検証、(2) PDF 内の文字列レンダリング検証は手動UATでスクリーンショット添付とし、E2E対象外、(3) Chromium のヘッドレス設定で PDFium を有効化する設定（`--enable-features=PDFium` 等）の検討が必要な場合は playwright.config に追加。既存E2Eのパターン（`worktree-detail.spec.ts` 等）との整合性を確認。"
+    },
+    {
+      "id": "S3-007",
+      "severity": "Should Fix",
+      "title": "セキュリティ境界との干渉評価が path-validator / middleware に限定され、proxy handler / file-operations への影響が未記述",
+      "description": "Issue本文は path-validator と magic bytes 検証に言及するが、(a) 認証ミドルウェア（`src/middleware.ts`）が `/api/worktrees/.../files-raw/...`（方式B）を正しく保護対象に含むか、matcher 設定（L160: `'/((?!_next/|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)'`）に `.pdf` 除外が無いことの確認が未記述、(b) `file-operations.ts` の既存 `readFileContent` はテキスト想定のため、PDF用に `readFile(absolutePath)` 直接呼び出しを API Route 側で実装（image/video と同パターン）で良いかの方針が曖昧、(c) プロキシハンドラ (`src/lib/proxy/handler.ts`) と PDF 表示は別経路なので干渉しないが、その旨を明記すべき。",
+      "suggestion": "影響範囲の「セキュリティ考慮事項」セクションを以下に拡張: (1) middleware matcher の拡張子除外一覧（svg/png/jpg/jpeg/gif/webp/ico）に `.pdf` は含まれないため、`.pdf` ファイル取得は継続して認証対象であることを確認、(2) 方式B（`/files-raw/...`）採用時も同じ認証マッチパターンに含まれることを確認、(3) `file-operations.ts` は変更せず、PDF 読み込みは API Route で直接 `readFile(absolutePath)` を呼ぶ（image/video と同パターン）、(4) プロキシハンドラは別経路のため影響なし、(5) Content-Disposition: inline 設定時のファイル名サニタイズ（RFC 6266対応、ASCII以外はパーセントエンコード）。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "Should Fix",
+      "title": "方式B（ストリーミング）採用時のEdge Runtime互換性・Cache-Control・bodySizeLimit への影響が未記述",
+      "description": "`next.config.js` L26 の `bodySizeLimit: '105mb'` は Server Actions 用で、Route Handler には直接影響しないが、方式B（ストリーミング）採用時の Route Handler での `NextResponse` body streaming の挙動（Node.js runtime 前提）をIssue本文で明記していない。また L80-86 の `/api/:path*` に対する `Cache-Control: no-store` ヘッダが全API共通で適用されるため、PDFストリーミングでも毎回フル転送になり、中規模ファイル（~20MB）でもネットワーク負荷が発生する。さらに既存 API Routes はデフォルトで Node.js runtime だが、`export const runtime = 'edge'` を誤設定すると `readFile` 等の fs モジュールが動作しない。",
+      "suggestion": "方式B採用時の追加考慮事項として以下を影響範囲セクションに追加: (1) `/files-raw/[...path]/route.ts` は必ず Node.js runtime（`export const runtime = 'nodejs'` 明示または無指定）、Edge runtime 不可の理由（fs.readFile 利用）を明記、(2) `Cache-Control: no-store` がPDFでも適用されるため、クライアント側のキャッシュ活用はできない（認証上の意図的な挙動であることをコメントで明記）、(3) `bodySizeLimit: '105mb'` は影響無し（Server Actions用）であることを明記、(4) `ReadableStream` で返却する場合は `fs.createReadStream` + Web Streams API 変換パターンを参考実装として付記。"
+    },
+    {
+      "id": "S3-009",
+      "severity": "Should Fix",
+      "title": "国際化（i18n）ファイルへの新規メッセージ追加が実装タスクに漏れている",
+      "description": "`locales/{en,ja}/` 配下に `common.json / worktree.json / error.json / prompt.json / auth.json / autoYes.json / schedule.json` の7ファイルがあり、`src/i18n.ts` で全ロードされる。Issue本文のエラー時UX（「ファイルサイズが {上限} を超えています」「PDFファイルとして解釈できません」「PDFの表示に失敗しました」）および aria-label 等は多言語対応すべきだが、i18nファイルへの追加が実装タスクに含まれていない。既存のエラーメッセージがハードコーディングされている前例があるかもしれないが、新規追加分は日英両対応を原則とする。",
+      "suggestion": "実装タスクの「実装」セクションに以下を追加: (1) `locales/en/error.json` / `locales/ja/error.json` に `pdfSizeExceeded`, `pdfInvalidMagicBytes`, `pdfLoadFailed`, `pdfDownloadFallback` 等のエントリを追加、(2) `locales/{en,ja}/worktree.json` にPDFビューワ関連のラベル（例: `pdfPreview.downloadLink`, `pdfPreview.title`）を追加、(3) 既存 image/video のエラーメッセージが i18n 化されているか確認し、されていない場合は本Issueのスコープとは別に別Issueを立てる（本Issueは新規追加分のみ）。"
+    },
+    {
+      "id": "S3-010",
+      "severity": "Should Fix",
+      "title": "モバイル（iOS Safari / Android Chrome）でのPDF挙動とPoC検証項目の具体化不足",
+      "description": "Issue本文はモバイルについて「内蔵ビューワ非対応時にダウンロードリンクへフォールバック」と記載するが、具体的な検知方法（User-Agent検知? iframe onError タイムアウト? navigator.pdfViewerEnabled?）が不明確。iOS Safari は歴史的に `<iframe src=\"*.pdf\">` を `<object>` として扱い、画面内スクロールが動作しない / ピンチズーム不可等の既知問題がある。また Blob URL が iOS Safari では session scope でしか有効でない点も未考慮。`FileViewer.tsx` のモバイル経路にも PDF 分岐が必要になる可能性が高い（S1-014 でも指摘済みだが具体化されていない）。",
+      "suggestion": "PoCセクションに以下の検証項目を追加: (1) iOS Safari の Blob URL 有効スコープ（ページ閉じるとrevokeされる）、(2) `navigator.pdfViewerEnabled`（Firefox 100+）の検知ロジック有無、(3) iframe onError のブラウザ間差異（Safari では発火しないケース）、(4) モバイルでは `window.open(blobUrl, '_blank')` で新タブ表示するUXも候補、(5) `FileViewer.tsx`（モバイル経路）への PDF 分岐追加は「追従要否確認」ではなく「追従する前提で実装タスクに含める」に格上げ。"
+    },
+    {
+      "id": "S3-011",
+      "severity": "Should Fix",
+      "title": "CSP変更に関するドキュメント更新（CLAUDE.md / module-reference.md / implementation-history.md）未記述",
+      "description": "CLAUDE.md のモジュール一覧に `next.config.js` は掲載されていないが、プロジェクトのセキュリティ関連設定の中核ファイル。`docs/module-reference.md` には詳細（Issue番号・定数・セキュリティ注釈）が記載されている想定。本Issueの CSP 変更は Issue #490 の `DR4-007: blob: excluded` を撤回する変更でありセキュリティ境界の変更に該当する。また `src/config/pdf-extensions.ts` の新規追加は CLAUDE.md の「主要モジュール一覧」へ追記すべき（image-extensions / video-extensions / html-extensions と同列）。",
+      "suggestion": "実装タスクに以下を追加: (1) `CLAUDE.md` の「主要モジュール一覧」テーブルに `src/config/pdf-extensions.ts`（PDF拡張子定義・サイズ上限・magic bytes検証）、`src/components/worktree/PdfPreview.tsx`（PDFプレビューコンポーネント）、方式B採用時は `src/app/api/worktrees/[id]/files-raw/[...path]/route.ts`（PDFバイナリストリーミング）を追加、(2) `docs/module-reference.md` にも同様のエントリを追加、(3) `docs/implementation-history.md` に Issue #673 の項目を追加（Issue #490 HtmlPreview の後に配置）、(4) `next.config.js` の CSP コメント `DR4-007: blob: excluded` を「Issue #490: blob: excluded (DR4-007) → Issue #673: blob: added for PDF preview」に更新、撤回理由を履歴化。"
+    },
+    {
+      "id": "S3-012",
+      "severity": "Nice to Have",
+      "title": "tests/fixtures ディレクトリが存在しないため、新規作成タスクが必要",
+      "description": "現在のプロジェクトには `tests/fixtures/` ディレクトリが存在しない（`tests/helpers/` のみ）。PDFフィクスチャを配置するには新規ディレクトリ作成が必要で、これを実装タスクに明記すべき。またバイナリファイル（.pdf）を Git に含める場合、サイズ（数KB〜数十KB）と LFS の要否も検討事項。",
+      "suggestion": "実装タスクに「`tests/fixtures/pdfs/` ディレクトリ新規作成、最小PDF（5KB以下）を数点配置、`.gitattributes` で LFS 不要を確認」を追加。またフィクスチャ生成スクリプト（`scripts/generate-pdf-fixtures.js` 等）を検討し、Git に大きなバイナリを含めない選択肢も提示。"
+    },
+    {
+      "id": "S3-013",
+      "severity": "Nice to Have",
+      "title": "FileViewer.tsx（モバイル/単体ビュー）のテストが既存でスクリーンショット確認のみの場合、PDFビューの影響範囲が限定される",
+      "description": "`src/app/worktrees/[id]/files/[...path]/page.tsx` はモバイル単体ビューで isImage / isVideo / isHtml 分岐を持つ（L134-)。PDF分岐をここにも追加する場合、影響範囲が `FilePanelContent.tsx` と `FileViewer.tsx`（モバイルHtmlPreview）と `page.tsx` の3箇所になる。Issue 本文は `FileViewer.tsx` のみ「追従要否確認」としているが、`page.tsx` 経路も同時に検討すべき。",
+      "suggestion": "影響範囲テーブルに `src/app/worktrees/[id]/files/[...path]/page.tsx`（モバイル単体ビュー、PDF分岐追加検討）を追加。S1-014 の判断タスクと合わせて、3箇所（FilePanelContent / FileViewer / page.tsx）の PDF 分岐方針を PoC と同時期に決定。"
+    },
+    {
+      "id": "S3-014",
+      "severity": "Nice to Have",
+      "title": "PDF プレビュー追加に伴うバンドルサイズ変化と dynamic import 効果の定量化",
+      "description": "Issue本文は `dynamic(..., { ssr: false })` による動的importでバンドルサイズ削減方針を明記するが、PdfPreview 自体は iframe ベースで pdf.js などのライブラリを同梱しない前提であれば、動的importの効果は限定的（数KB程度）。他方で方式B採用時のストリーミングAPIは追加依存なしで実装可能。Issueで「バンドルサイズ削減効果」を強調しすぎない方が良い。",
+      "suggestion": "実装タスクの dynamic import の位置づけを「HtmlPreview と統一のパターンで書く（一貫性担保）」に改め、バンドルサイズ削減を副次的効果と記載。PoC で pdf.js 依存を追加する判断をした場合は、その時点でバンドルサイズ測定を受入条件に追加。"
+    }
+  ],
+  "must_fix_count": 3,
+  "should_fix_count": 8,
+  "nice_to_have_count": 3,
+  "overall_assessment": "Stage 2 でIssue本文は大幅改訂され、Stage 1 の15件の指摘が高品質に反映されている。本Stage 3（影響範囲1回目）では、反映後も残存する影響範囲の抜け漏れを14件検出した。重要度の高い順に、(1) CSP frame-src 変更の既存iframe利用箇所（HtmlPreview/FileViewer/MARP）への副作用評価とDR4-007撤回の経緯明記（Must Fix）、(2) Blob URL ライフサイクル設計（StrictMode 二重マウント・非同期中のアンマウント・revoke タイミング）の具体化（Must Fix）、(3) useFileContentPolling の PDF分岐実装方針（無効化 vs 軽量メタデータエンドポイント）の確定と実装箇所明記（Must Fix）が Phase 4（実装）に進む前に解消すべき。Should Fix 8件は、将来の docx/xlsx 拡張性、テストフィクスチャ戦略、E2E検証範囲、middleware matcher、Edge Runtime互換性、i18n追加、モバイルUX、ドキュメント更新など多岐に渡る影響範囲の網羅を補完する。Nice to Have 3件は tests/fixtures 新設、page.tsx 経路への追従、dynamic import 効果定量化など、実装時に都度判断可能な事項。全体として Stage 2 の改訂は十分に質が高く、Stage 3 で検出された項目は Phase 4（実装着手前）にもう一度 Issue 更新をかければ解消可能なレベル。Must Fix 3件の反映後は、Stage 4（影響範囲2回目）または Phase 4 へ進む判断が妥当。"
+}

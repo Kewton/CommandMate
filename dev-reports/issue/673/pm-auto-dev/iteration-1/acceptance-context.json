@@ -1,0 +1,33 @@
+{
+  "issue_number": 673,
+  "feature_summary": "Filesタブで .pdf ファイル選択時にBlob URL + iframeでPDFプレビューを表示する機能",
+  "tdd_result_path": "dev-reports/issue/673/pm-auto-dev/iteration-1/tdd-result.json",
+  "work_plan_path": "dev-reports/issue/673/work-plan.md",
+  "acceptance_criteria": [
+    "Chrome/Firefox最新版で .pdf ファイル選択時にiframeでPDFが表示される（PDFレンダリングは手動UAT）",
+    "iframeに sandbox='allow-scripts' が設定されている",
+    "iframeに title='PDF Preview: {filePath}' 相当の属性が設定されている",
+    "非PDF形式を .pdf 拡張子で開いた際に magic bytes検証でブロックされ INVALID_MAGIC_BYTES エラー応答される（400）",
+    "20MB超過PDFで PDF_SIZE_EXCEEDED エラー応答される（413）",
+    "next.config.js の CSP frame-src に blob: が追加されている",
+    "next.config.js のCSPコメントに DR4-007 撤回経緯（Issue #490 → #673）が記載されている",
+    "PDFタブでは useFileContentPolling の自動ポーリングが行われない",
+    "Blob URLのメモリリーク防止: コンポーネントアンマウント時に URL.revokeObjectURL が呼ばれる",
+    "ファイル切替時に古いBlob URLがrevokeされる",
+    "fetch失敗時にエラーUIへフォールバックする",
+    "path-validator によるパストラバーサル攻撃防御が継続適用されている",
+    "CLAUDE.md 主要モジュール一覧に src/config/pdf-extensions.ts が追加されている",
+    "全既存テスト（6381件）がパスする",
+    "Lint・型チェック・ビルドが全て通る"
+  ],
+  "test_scenarios": [
+    "シナリオ1: pdf-extensions ユニットテスト検証（isPdfExtension, validatePdfMagicBytes, validatePdfContent の境界値・エラーケース）",
+    "シナリオ2: ファイル取得API PDF分岐の検証（正常応答 / PDF_SIZE_EXCEEDED / INVALID_MAGIC_BYTES / ENOENT）",
+    "シナリオ3: PdfPreview コンポーネントの iframe属性・sandbox='allow-scripts'・title属性・Blob URLライフサイクル",
+    "シナリオ4: FilePanelContent での isPdf 分岐確認（他Viewerと排他）",
+    "シナリオ5: useFileContentPolling の PDF無効化条件（!tab.content?.isPdf）",
+    "シナリオ6: next.config.js CSPコメントと DR4-007撤回根拠の記載",
+    "シナリオ7: 静的解析・型チェック・ビルド全通過"
+  ],
+  "output_path": "dev-reports/issue/673/pm-auto-dev/iteration-1/acceptance-result.json"
+}

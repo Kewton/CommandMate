@@ -1,0 +1,38 @@
+{
+  "issue_number": 673,
+  "tdd_result_path": "dev-reports/issue/673/pm-auto-dev/iteration-1/tdd-result.json",
+  "acceptance_result_path": "dev-reports/issue/673/pm-auto-dev/iteration-1/acceptance-result.json",
+  "refactor_targets": [
+    "src/config/pdf-extensions.ts",
+    "src/components/worktree/PdfPreview.tsx",
+    "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+    "src/hooks/useFileContentPolling.ts",
+    "tests/helpers/pdf-fixtures.ts",
+    "tests/unit/config/pdf-extensions.test.ts",
+    "tests/unit/api/files-pdf.test.ts",
+    "tests/unit/components/PdfPreview.test.tsx"
+  ],
+  "quality_metrics": {
+    "before_tests_passing": 6381,
+    "before_tests_added": 39,
+    "before_lint": "pass",
+    "before_type_check": "pass",
+    "before_build": "pass"
+  },
+  "improvement_goals": [
+    "既存 image/video 分岐との構造的対称性確認（route.ts内のPDF分岐が他と一貫したスタイルか）",
+    "PdfPreview.tsx の副作用管理（useEffect cleanup, cancelled flag）が適切か",
+    "マジックナンバーの定数化徹底（PDF_EXTENSIONS/PDF_MAX_SIZE_BYTES/PDF_MAGIC_BYTES/PDF_IFRAME_SANDBOX）",
+    "エラーコード命名の一貫性（PDF_SIZE_EXCEEDED, INVALID_MAGIC_BYTES）",
+    "コメント最小化（識別子で自明なものは削除、WHYのみ残す）",
+    "テストのDRY化機会があれば適用（pdf-fixtures.ts ヘルパー十分活用されているか）"
+  ],
+  "constraints": [
+    "全既存テストがパスする状態を維持",
+    "Lint・型チェック・ビルドを壊さない",
+    "APIシグネチャ・型定義の破壊的変更は行わない",
+    "改善幅は最小限。劇的リファクタリングではなく軽微な洗練のみ",
+    "不要な抽象化は作らない（DRY原則の過剰適用を避ける）"
+  ],
+  "output_path": "dev-reports/issue/673/pm-auto-dev/iteration-1/refactor-result.json"
+}

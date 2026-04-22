@@ -1,0 +1,151 @@
+{
+  "stage": 1,
+  "iteration": 1,
+  "focus": "通常（1回目）",
+  "reviewer": "claude-opus",
+  "issue_number": 673,
+  "review_date": "2026-04-21",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "Must Fix",
+      "category": "正確性 / 整合性",
+      "title": "sandbox=\"\"ではブラウザ内蔵PDFビューワ（特にFirefox pdf.js）が動作しない / Chromeでも挙動が不安定",
+      "description": "Issueは「HtmlPreview（Issue #490）と同じセキュリティパターンを踏襲」として `iframe sandbox=\"\"` を提案しているが、HTMLのレンダリングとPDFのレンダリングは仕組みが根本的に異なる。Firefoxの内蔵PDFビューワは pdf.js (JavaScript実装) であり、sandbox=\"\"（=allow-scripts無し）ではスクリプト実行が禁止されるためPDFが表示されない。Chromeの内蔵PDFビューワはプラグイン扱いで比較的寛容だが、sandbox=\"\"下での表示挙動はブラウザ／OS／バージョン依存であり、仕様として保証されない。また `X-Content-Type-Options: nosniff` が全ルートで有効（next.config.js L42-43）なので、レスポンスの `Content-Type` が PDF と認識されない data URI 経由の表示では、ブラウザが内蔵ビューワを起動しないリスクがある。受入条件「プレビューが表示される」を満たせない可能性が高い。",
+      "suggestion": "実装前に主要ブラウザ（Chrome/Firefox/Safari/Edge）でのdata URI + sandbox=\"\" + PDFの表示可否を実機検証すること。Firefoxで動作させるには少なくとも `sandbox=\"allow-scripts\"` が必要（HtmlPreviewのInteractiveモード相当）。あるいは `<embed type=\"application/pdf\">` や Blob URL + `sandbox=\"allow-scripts allow-same-origin\"` を検討する。検証結果を踏まえてIssue本文の「セキュリティ考慮事項」セクションを更新し、採用するサンドボックス値と根拠を明記すること。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "Must Fix",
+      "category": "整合性",
+      "title": "CSP `frame-src 'self'` では data: URI をiframeで読み込めない",
+      "description": "`next.config.js` L72 でCSPが `frame-src 'self'` に制限されている。Issue本文の提案通り `<iframe src=\"data:application/pdf;base64,...\">` を使う場合、CSPの frame-src ディレクティブに `data:` を追加しない限りブラウザがフレームのロードをブロックする（`srcDoc` の場合はCSPの frame-src ではなく親のCSPが継承されるが、PDFバイナリをsrcDocに埋め込むことは不可能）。Issue本文の「主要な変更点」「変更対象ファイル」に `next.config.js` のCSP更新が含まれていない。Issue #302 (mp4) では同様の理由で `media-src 'self' data:` を追加した前例があり、同じ対応が必要。",
+      "suggestion": "Issueの「変更対象ファイル」テーブルに `next.config.js` を追加し、CSP `frame-src` に `data:` を許可する変更（例: `frame-src 'self' data:`）を実装タスクに含める。ただし `frame-src 'self' data:` は data: URIでの任意HTMLフレーム読み込みを許可することになり、クリックジャッキングやphishingページの埋め込みリスクが僅かに増える点をセキュリティ考慮事項に明記すること。代替として Blob URL 方式（`frame-src 'self' blob:` を追加）も検討。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "Must Fix",
+      "category": "正確性",
+      "title": "srcDocはPDFに利用不可。「srcDoc or src=\"data:...\"」の両論併記は誤り",
+      "description": "Issue本文「主要な変更点」と「PdfPreview.tsx 新規作成」の記述で `<iframe srcDoc>` or `src=\"data:application/pdf;base64,...\"` と両論併記されている。しかし srcDoc は文字列HTMLドキュメントを埋め込むための属性であり、PDFはバイナリ（Base64文字列にしたものはHTMLではない）なのでsrcDocでは表示できない（srcDocに突っ込んでもブラウザはPDFとしてレンダリングせず、ただの文字列として扱う）。HtmlPreviewで srcDoc を使っているのは「HTML文書」だからであり、HtmlPreviewパターンをそのまま踏襲すると動作しない。",
+      "suggestion": "Issue本文から `<iframe srcDoc>` の選択肢を削除し、`<iframe src=\"data:application/pdf;base64,...\">` もしくは Blob URL 方式 (`URL.createObjectURL(new Blob([bytes], {type: 'application/pdf'}))`) に確定させる。S1-001 の調査結果に基づき最終方式を決定し、その旨を明記すること。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "Must Fix",
+      "category": "完全性 / 技術的妥当性",
+      "title": "PDF_MAX_SIZE_BYTES=100MBとBase64応答のサイズ・メモリ・Next.jsレスポンス制約が未検証",
+      "description": "100MBのPDFをBase64エンコードすると約 133.3MB の文字列になる。これを `NextResponse.json({ content: dataUri, ... })` で返す場合、(1) Node.js内でのBase64文字列生成（~266MB のV8 UTF-16メモリ確保）、(2) JSON.stringifyで全体を文字列化（さらに~266MBの一時確保）、(3) クライアント側でfetch → JSON.parse → 巨大な文字列をReact stateに保持、(4) iframe src属性にdata URIを設定する際、Chromeのdata URL最大長は一般に~2MBとされており、100MB級のdata URIは動作しないブラウザが多い（Firefoxは制限なしだが、Chromiumはアドレスバー以外でも制限あり）、という重大な技術課題がある。100MB上限の妥当性が検証されていない。参考: 画像は20MB/IMAGE_MAX_SIZE_BYTES、動画は100MB/VIDEO_MAX_SIZE_BYTESだが、動画は `<video>` の `src` に data URI を使うだけでiframe化していない。",
+      "suggestion": "以下を実施すること: (1) Chrome/Firefox/Safariでdata URIに許容される最大サイズを実機検証し、PDF_MAX_SIZE_BYTESを現実的な値に引き下げる（例: 10-25MB）、または (2) Base64 data URI方式を廃止し、ファイルを直接ストリーミング返却する `/api/worktrees/[id]/files-raw/[...path]` のようなRoute Handlerを新設してiframeの `src` に通常URLを渡す方式へ変更する、(3) Blob URL方式（クライアントでバイナリをfetchしBlob化）も検討する。Next.js Route Handlerのレスポンスサイズ制限（デフォルトは明示制限なしだがメモリ効率が悪い）についても設計方針に記載すること。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "Should Fix",
+      "category": "整合性",
+      "title": "PDFのmagic bytes / MIME型検証がimage/videoの既存パターンと不整合",
+      "description": "既存のimage-extensions.ts・video-extensions.tsは拡張子だけでなく magic bytes 検証（PNG: `89 50 4E 47`、MP4: offset 4 の `ftyp`）で偽装ファイルを防いでいる。PDFにもmagic bytes `25 50 44 46 2D` (`%PDF-`) が存在するが、Issueの `pdf-extensions.ts` 設計には `PDF_EXTENSION_VALIDATORS` や `validatePdfMagicBytes` / `validatePdfContent` に相当する記述がない。非PDFファイル（悪意あるHTMLをmasqueradeしたものなど）を .pdf 拡張子で開いた場合、iframeに data:application/pdf として渡されることになり、ブラウザの挙動は不定（Firefoxは内容を嗅ぎ分けてエラー表示、Chromeは空画面）。既存の防御パターンと明確に不整合。",
+      "suggestion": "Issue本文の「主要な変更点」「実装タスク」に以下を追加: (1) `src/config/pdf-extensions.ts` に `validatePdfMagicBytes(buffer)` （先頭 5byte が `%PDF-` か検証）と `validatePdfContent(buffer)` を実装する、(2) API Route の PDF 分岐で `validatePdfContent` を呼び出し、不正な場合 `INVALID_MAGIC_BYTES` エラーを返す。ユニットテスト項目にも追加。"
+    },
+    {
+      "id": "S1-006",
+      "severity": "Should Fix",
+      "category": "明確性 / 完全性",
+      "title": "エラー状態（非PDF/破損PDF/PDF無効化ブラウザ）のUX記述が無い",
+      "description": "Issue「受入条件」と「実装タスク」にはサイズ超過のエラーメッセージしか記載が無く、以下のケースの挙動が未定義: (a) .pdf 拡張子だが実体は非PDFファイル（S1-005のmagic bytes検証に落ちた場合のUI）、(b) 破損PDF（magic bytesは正しいが構造が壊れている）、(c) PDFビューワが無効なブラウザ（主にiOS Safari・Android Chromeでは内蔵ビューワが無くダウンロード促進になる）、(d) iframe sandbox/CSPでレンダリング失敗した場合のフォールバック。特に(c)はモバイル対応として重要（CommandMateはモバイルUIも重視している）。",
+      "suggestion": "Issue本文に以下を追加: (1) 「エラー時のUX」セクションを新設し、非PDF/破損PDF/表示不可ブラウザそれぞれのメッセージ表示方針を記載、(2) モバイルSafariなど内蔵ビューワが無い環境ではダウンロードリンク（`<a href=\"data:...\" download>`）にフォールバックする方針を明記、(3) iframeの `onError` ハンドラ or `onLoad`タイムアウトで表示失敗を検知する実装タスクを追加。受入条件にも「非PDFファイルを.pdfで開いた際に分かりやすいエラーメッセージが表示される」を追加。"
+    },
+    {
+      "id": "S1-007",
+      "severity": "Should Fix",
+      "category": "完全性",
+      "title": "アクセシビリティ観点の記述が欠如",
+      "description": "iframeには `title` 属性（HtmlPreviewでは `title={\\`HTML Preview: ${filePath}\\`}`）や適切なキーボードフォーカス管理が必要だが、Issueには一切記載が無い。PDFは特に目の不自由な利用者にとって重要な情報源であり、スクリーンリーダーにiframe内のコンテンツが伝達されない設計は配慮不足。また、PDF内の検索・ページ送りといった操作はブラウザ内蔵ビューワに依存するため、WCAG観点でのキーボード操作の注記も必要。",
+      "suggestion": "Issueの「主要な変更点」または新規「アクセシビリティ」セクションに以下を追加: (1) iframeに `title=\"PDF Preview: {filePath}\"` を付与する、(2) iframe外側にファイル名を示すラベルを置く、(3) 受入条件に「iframeに適切なtitle属性が設定されている」を追加、(4) （Nice to Have 寄りだが）PDFコンテンツをダウンロードするフォールバックリンクを常設する案を検討。"
+    },
+    {
+      "id": "S1-008",
+      "severity": "Should Fix",
+      "category": "技術的妥当性",
+      "title": "useFileContentPollingと巨大Base64応答の相性（polling毎に巨大レスポンスの可能性）",
+      "description": "影響範囲の「関連コンポーネント」に useFileContentPolling が挙げられているが、懸念の具体記述が無い。useFileContentPolling.ts は If-Modified-Since/304 で差分検知するため通常は問題ないが、(1) 初回ロードでは 100MB級の Base64 文字列がJSONで返る、(2) ファイルが変更された瞬間のpollでも巨大レスポンスが返る、(3) タブを複数開くと複数のpollingが同時発生する、という設計上のリスクがある。isDirty=falseでpollingが走るため、PDFプレビュー表示中は継続的にbodyチェックが発生。304が返れば帯域は消費しないが、mtimeが変わると数百MBのレスポンスが走る。",
+      "suggestion": "以下を検討・記載すること: (1) PDF（isPdf=true）の場合はuseFileContentPollingを無効化するか、pollingインターバルを大幅に伸ばす、(2) またはメタデータ（mtime, size）のみ返す軽量エンドポイントに切り替えて更新検知し、変更ありならユーザー明示操作で再ロード、(3) Issueの「影響範囲 > 関連コンポーネント > useFileContentPolling」の行にこの懸念と対応方針を明記する。"
+    },
+    {
+      "id": "S1-009",
+      "severity": "Should Fix",
+      "category": "完全性 / 受入条件",
+      "title": "受入条件が曖昧で客観検証が難しい項目を含む",
+      "description": "現在の受入条件「プレビューが表示される」「sandbox=\"\"が設定されPDF内のスクリプト実行が無効化されている」「100MB超過時に明示的なエラーメッセージ」は、(1) どのブラウザで表示確認するのか（S1-001の通りブラウザ依存）、(2) PDFスクリプト実行無効化の検証方法（AcroForms/JSを含むPDFでの実機テスト？）、(3) エラーメッセージの具体文言・表示位置、が不明。また、「既存のテストが全てパスする」「Lint/型チェック/ビルドが通る」は汎用条件で、PDF機能固有の動作テストに関する条件が欠けている。",
+      "suggestion": "受入条件を以下のように具体化: (1) 「Chrome最新版・Firefox最新版で .pdf ファイル選択時に内蔵PDFビューワが表示される（実機スクリーンショットを添付）」、(2) 「JavaScript埋め込みPDF（テスト用サンプル）を開いた際にスクリプトが実行されない（アラート等が発生しないこと）」、(3) 「100MB超過時に『ファイルサイズが100MBを超えています』というユーザ向けエラーメッセージが `<ErrorDisplay>` 相当で表示される」、(4) 「非PDF形式を.pdfで開いた際にmagic bytes検証でブロックされ、エラーUIが表示される」、(5) 「PdfPreviewのユニットテストがパスする」を追加。"
+    },
+    {
+      "id": "S1-010",
+      "severity": "Should Fix",
+      "category": "整合性 / 完全性",
+      "title": "既存テストとの整合: FilePanelContent.test.tsx / file-extensions テストへの追加記述が不足",
+      "description": "実装タスクでは「ユニットテスト追加（拡張子判定・APIバイナリ応答・サイズ超過エラー）」とあるが、既存のテスト資産との整合が書かれていない。tests/unit/config/image-extensions.test.ts, video-extensions.test.ts と同構造の pdf-extensions.test.ts が必要なこと、tests/unit/components/FilePanelContent.test.tsx に isPdf 分岐のテスト追加が必要なことが読み取れない。また、API Route 層（ `files/[...path]/route.ts` ）の isImage/isVideo テストパターンに習って PDFのBase64応答テスト（成功・サイズ超過・magic bytes不一致・ENOENT）も必要だが、具体記述なし。",
+      "suggestion": "「実装タスク > ユニットテスト追加」を次のように分解: (1) `tests/unit/config/pdf-extensions.test.ts`（isPdfExtension・validatePdfContent・validatePdfMagicBytes・PDF_MAX_SIZE_BYTES）、(2) `tests/unit/api/files-pdf.test.ts`（GET時のBase64応答・サイズ超過・magic bytes不一致・ファイル未存在）、(3) `tests/unit/components/FilePanelContent.test.tsx` に isPdf 分岐テストを追加、(4) `tests/unit/components/PdfPreview.test.tsx`（iframe描画・sandbox属性・タイトル属性）。E2E/結合テストの要否にも触れる。"
+    },
+    {
+      "id": "S1-011",
+      "severity": "Should Fix",
+      "category": "整合性",
+      "title": "FilePanelContentのルーティング順序の記述が曖昧（isHtmlとisPdfの順序整合）",
+      "description": "「FilePanelContent.tsx のルーティング分岐にPDF判定を追加（画像・動画と並ぶ位置）」とあるが、既存コード（L679-725）のルーティング順序は image → video → html → md → editable → default であり、具体的な挿入位置（video の後 / html の前 / md の前 など）が明示されていない。実装者によってバラツキが出る可能性があり、`isPdf` と `isHtml` が同時に true になるケースは無いとしても、将来的な順序入れ替えが困難になる。",
+      "suggestion": "実装タスクに「FilePanelContent.tsx L705 (VideoViewer) の直後、かつ L707 (HtmlPreview) の直前に isPdf 分岐を挿入する」のように具体行番号ベースで指示するか、あるいは挿入位置の原則（「バイナリ viewer グループ: image → video → pdf、次に text viewer グループ: html → md → editable」）を明記すること。"
+    },
+    {
+      "id": "S1-012",
+      "severity": "Nice to Have",
+      "category": "完全性",
+      "title": "動的import（dynamic）によるコード分割の方針が未記載",
+      "description": "既存の HtmlPreview / MarkdownEditor は `dynamic(..., { ssr: false })` で動的importされている（FilePanelContent.tsx L40-61）。PdfPreview も同様に動的import化するか、静的importで済ませるかが未記述。PDFビューワ機能はファイル閲覧時のみ使われるのでバンドルサイズ削減の観点から動的importが妥当だが、Issueに明記されていない。",
+      "suggestion": "実装タスクに「PdfPreviewはFilePanelContent.tsxで `dynamic(..., { ssr: false })` として動的importする（HtmlPreviewと同パターン）」を追加。"
+    },
+    {
+      "id": "S1-013",
+      "severity": "Nice to Have",
+      "category": "明確性",
+      "title": "PDF_EXTENSIONS の定義が単一かどうか曖昧（将来の .xdp 等は？）",
+      "description": "Issueでは `PDF_EXTENSIONS` を定数として新設するとあるが、事実上 .pdf のみが対象のはず。配列として定義する（image/videoに倣う）のか、単一文字列定数にするのかが不明。拡張性（将来 .fdp や .xfdl 等を追加するか）の方針も不明。YAGNI原則に従えば `.pdf` 単独でよいが、image-extensions のパターンに揃えるなら配列 `['.pdf']` のほうが整合性が高い。",
+      "suggestion": "「`PDF_EXTENSIONS: readonly string[] = ['.pdf'] as const`（image/video と同パターン）」と明記する。もしくは「現時点では.pdfのみだが、拡張子配列として定義して将来拡張に備える」旨を書き添える。"
+    },
+    {
+      "id": "S1-014",
+      "severity": "Nice to Have",
+      "category": "完全性",
+      "title": "FileViewer.tsx（旧実装）側の追従の要否が曖昧",
+      "description": "影響範囲に「FileViewer.tsx（ファイル表示の既存構造）」が挙げられているが、FileViewer.tsxを改修するのか参照のみなのかが不明瞭。FilePanelContent.tsxが新実装でFileViewer.tsxが旧実装の場合、片方だけ対応すると表示経路によってPDFが表示できる/できないが分岐する。",
+      "suggestion": "Issue本文で「FileViewer.tsxはモバイル/単体ビュー用途で存続しており、ここにもisPdf分岐を追加する」または「FileViewer.tsxは旧実装なので本Issueでは非対応」のどちらかを明記する。実装方針を確認の上で「影響範囲 > 変更対象ファイル」に追加するか、「関連コンポーネント」の表現を『参照のみ』と限定する。"
+    },
+    {
+      "id": "S1-015",
+      "severity": "Nice to Have",
+      "category": "完全性",
+      "title": "MaximizableWrapper / FileToolbar 等のUI wrapper整合の記述が欠如",
+      "description": "既存のisImage/isVideo/isHtml分岐（FilePanelContent.tsx L679-725）は `<MaximizableWrapper>` と `<FileToolbar>` を挟んだ共通UIパターンになっているが、Issueの「PdfPreview.tsx 新規作成」ではこれらを含めるか記載なし。統一感のあるUI体験提供のため、最大化ボタン・ツールバーを含めるかは決めておくべき。",
+      "suggestion": "PdfPreviewのコンポーネント仕様に「MaximizableWrapper + FileToolbar で囲み、既存のImage/Video/HTML表示と同じUI frame を提供する」または「最小実装ではツールバーなしでiframeのみ表示」を明記。FileToolbar の copyableContent（Base64/ダウンロードリンク等）の扱いも仕様化する。"
+    }
+  ],
+  "must_fix_count": 4,
+  "should_fix_count": 7,
+  "nice_to_have_count": 4,
+  "overall_assessment": "Issue本文は既存のHtmlPreview（Issue #490）・video（Issue #302）パターンの表面的な流用として書かれているが、PDF固有の技術的制約が十分に検証されていない。特にMust Fix 4件（sandbox=\"\"下のPDFレンダリング可否、CSP frame-src制約、srcDocがPDFで使用不可、100MB Base64 data URIの実現可能性）は『動作する前提』そのものを揺るがす重大な問題であり、このまま実装に入ると受入条件すら満たせない可能性がある。Should Fix 7件（magic bytes検証・エラーUX・a11y・polling・受入条件具体化・テスト戦略・ルーティング順序）は実装品質に直結する補強が必要。Stage 1 として、仮説検証ではConfirmedだった前提（HtmlPreviewパターンが流用可能）が、PDFのブラウザレンダリング特性まで踏み込むと成立しない点を強く指摘する。先行してブラウザ検証（PoC）を行い、Issueの技術方針を確定してから設計フェーズに進むことを強く推奨する。",
+  "code_references": [
+    {"file": "src/components/worktree/HtmlPreview.tsx", "lines": "L119-137", "relevance": "iframe srcDoc + sandbox=\"\"パターンの既存実装（PDFと挙動が異なる根拠）"},
+    {"file": "src/app/api/worktrees/[id]/files/[...path]/route.ts", "lines": "L162-258", "relevance": "image/videoのBase64応答分岐（PDF追加時の参考パターン、magic bytes検証含む）"},
+    {"file": "src/config/image-extensions.ts", "lines": "L19-301", "relevance": "拡張子定数・magic bytes検証・MIME型ヘルパーの既存パターン"},
+    {"file": "src/config/video-extensions.ts", "lines": "L23-165", "relevance": "100MB上限・ftyp magic bytes検証の既存パターン"},
+    {"file": "src/config/html-extensions.ts", "lines": "L45-57", "relevance": "SANDBOX_ATTRIBUTES定義（safe=\"\", interactive=\"allow-scripts\"）"},
+    {"file": "src/components/worktree/FilePanelContent.tsx", "lines": "L679-794", "relevance": "ルーティング分岐の既存順序 / MaximizableWrapper+FileToolbar共通パターン"},
+    {"file": "src/types/models.ts", "lines": "L310-327", "relevance": "FileContent型にisImage/isVideo/isHtml既存、isPdf追加位置"},
+    {"file": "next.config.js", "lines": "L24-27, L42-43, L63-75", "relevance": "bodySizeLimit=105mb（Server Actions専用）、nosniff、CSP frame-src 'self'（data: 未許可）"},
+    {"file": "src/hooks/useFileContentPolling.ts", "lines": "L36-71", "relevance": "ポーリング＋If-Modified-Since/304の挙動（巨大Base64応答との相性）"},
+    {"file": "src/config/binary-extensions.ts", "lines": "L40", "relevance": ".pdfは既存でbinary扱い（isPdfExtensionの実装分担検討）"}
+  ],
+  "doc_references": [
+    {"file": "dev-reports/issue/673/issue-review/hypothesis-verification.md", "relevance": "前提仮説はConfirmedだがPDFレンダリング特性までは検証されていない"},
+    {"file": "dev-reports/issue/302/issue-review/stage3-review-report.md", "relevance": "先行例: video対応でbodySizeLimit(Server Actions vs Route Handler)・CSP media-src追加が必要だった前例"},
+    {"file": "dev-reports/design/issue-302-mp4-upload-design-policy.md", "relevance": "先行例: 100MBバイナリのBase64 data URI返却設計（ただし<video>でありiframeではない点に注意）"}
+  ]
+}

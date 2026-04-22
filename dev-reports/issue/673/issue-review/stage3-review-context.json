@@ -1,0 +1,12 @@
+{
+  "issue_number": "673",
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "hypothesis_verification_path": "dev-reports/issue/673/issue-review/hypothesis-verification.md",
+  "stage1_review_path": "dev-reports/issue/673/issue-review/stage1-review-result.json",
+  "stage2_apply_path": "dev-reports/issue/673/issue-review/stage2-apply-result.json",
+  "output_path": "dev-reports/issue/673/issue-review/stage3-review-result.json",
+  "review_focus": "Stage 2で更新されたIssue本文について影響範囲を分析する。変更の波及先（既存コード、他機能、テスト、ビルド、CI、セキュリティ境界）を網羅的に洗い出し、見落とされた影響範囲・リスクを指摘する。特にCSP変更・Blob URL方式導入・useFileContentPolling挙動変更が他画面に与える影響を重点チェック。"
+}

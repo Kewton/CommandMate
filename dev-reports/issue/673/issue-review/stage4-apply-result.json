@@ -1,0 +1,214 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目・影響範囲）",
+  "issue_number": "673",
+  "applied_at": "2026-04-21",
+  "issue_update_status": "updated",
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/673",
+  "applied_findings": [
+    {
+      "id": "S3-001",
+      "severity": "Must Fix",
+      "title": "CSP frame-src 変更の既存iframe使用箇所への副作用評価",
+      "applied_sections": [
+        "既存CSP変更の副作用評価（新設セクション）",
+        "主要な変更点（next.config.js コメント更新を具体化）",
+        "実装タスク > 実装（CSP更新とコメント記載タスク）",
+        "ドキュメント更新（next.config.js コメント履歴化）",
+        "レビュー履歴 > イテレーション2"
+      ],
+      "changes": "HtmlPreview/FileViewer/MARP/frame-ancestors/X-Frame-Options/img-src/media-src の副作用表を追加。srcDocはURIスキーム評価対象外のため影響なしを明示。DR4-007撤回根拠（Issue #490時点は srcDoc十分 → Issue #673 は PDF のため最小リスクで解禁）をBefore/After コメント例つきで記述。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "Must Fix",
+      "title": "Blob URL ライフサイクル実装パターン",
+      "applied_sections": [
+        "Blob URL ライフサイクル設計（新設セクション）",
+        "主要な変更点（PdfPreview.tsx useEffect クリーンアップ詳細化）",
+        "影響範囲 > 変更対象ファイル（PdfPreview.tsx 変更内容に cancelled フラグ + cleanup revoke 追記）",
+        "受入条件 > テスト / 品質（StrictMode 二重マウント耐性テスト追加）",
+        "レビュー履歴 > イテレーション2"
+      ],
+      "changes": "useEffect + cancelled フラグによる非同期キャンセル、reactStrictMode 二重マウント対応、ファイル切替時の revoke タイミング、初期state null によるiframeマウント順序、エラーパスの扱いをリファレンス実装コード例つきで明記。useRef パターンは採用しない判断も記載。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "Must Fix",
+      "title": "useFileContentPolling のPDF分岐方針確定",
+      "applied_sections": [
+        "主要な変更点（useFileContentPolling.ts のPDF分岐確定サブセクション新設）",
+        "実装タスク > 実装（enabled条件変更タスク追記）",
+        "影響範囲 > 変更対象ファイル（useFileContentPolling.ts を変更対象に追加）",
+        "影響範囲 > 関連コンポーネント（useFileContentPolling 記述を更新）",
+        "受入条件 > 機能（PDFタブのポーリング無効化確認項目追加）",
+        "レビュー履歴 > イテレーション2"
+      ],
+      "changes": "案1（一律無効化）採用確定。L50 enabled条件を `tab.content !== null && !tab.loading && !tab.isDirty && !tab.content?.isPdf` に変更。再ロードボタンをFileToolbar 連携で提供。案2（軽量メタデータエンドポイント）は将来別Issue検討と明示。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "Should Fix",
+      "title": "将来のバイナリ拡張（docx/xlsx）への配慮",
+      "applied_sections": [
+        "影響範囲 > 将来の拡張性（新設サブセクション）",
+        "レビュー履歴 > イテレーション2"
+      ],
+      "changes": "本Issueは既存image/videoパターンと揃えて実装しDRY共通化は別Issueと明示。将来バイナリ3形式以上で `readBinaryFileWithValidation` 共通ヘルパー抽出検討、方式B `/files-raw` が全バイナリ共通エンドポイントとして機能する可能性を記述。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "Should Fix",
+      "title": "テストフィクスチャ戦略",
+      "applied_sections": [
+        "実装タスク > ユニットテスト（テストフィクスチャ整備サブセクション新設）",
+        "影響範囲 > 変更対象ファイル（tests/fixtures/pdfs/, tests/helpers/pdf-fixtures.ts, tests/helpers/mock-api.ts を追加）",
+        "受入条件 > テスト / 品質（フィクスチャを用いたテスト安定動作確認項目追加）",
+        "レビュー履歴 > イテレーション2"
+      ],
+      "changes": "tests/fixtures/pdfs/sample.pdf・broken.pdf 新規配置、tests/helpers/pdf-fixtures.ts に createMinimalPdfBuffer/createPdfWithMagicBytes/createBrokenPdfBuffer ヘルパー新設、mock-api.ts にPDFモック追加、URL.createObjectURLのjsdomモック戦略（vi.stubGlobal or happy-dom）を確定。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "Should Fix",
+      "title": "Playwright PDFテスト範囲の明確化",
+      "applied_sections": [
+        "実装タスク > 結合・受入（E2E自動検証範囲と手動UAT範囲を区分）",
+        "受入条件 > テスト / 品質（Playwright E2E で iframeマウント等の自動検証、レンダリングは手動UAT）",
+        "レビュー履歴 > イテレーション2"
+      ],
+      "changes": "自動化範囲（iframeマウント確認、Blob URL設定、onError非発火、sandbox属性）と手動UAT範囲（PDFコンテンツレンダリング品質）を明確化。Chromium ヘッドレスの PDFium 設定（--enable-features=PDFium）検証タスク化。"
+    },
+    {
+      "id": "S3-007",
+      "severity": "Should Fix",
+      "title": "セキュリティ境界（middleware matcher、Content-Disposition）",
+      "applied_sections": [
+        "実装タスク > 実装（middleware matcher 確認タスク、file-operations.ts 非改修方針、Content-Disposition サニタイズタスク）",
+        "影響範囲 > セキュリティ考慮事項（middleware matcher / file-operations.ts / プロキシハンドラ / Content-Disposition の4項目追記）",
+        "受入条件 > セキュリティ（middleware matcher 保護確認、Content-Disposition 確認項目追加）",
+        "レビュー履歴 > イテレーション2"
+      ],
+      "changes": "src/middleware.ts L160 matcher が .pdf を除外していない確認、file-operations.ts は変更せずAPI Route で直接 readFile を呼ぶ方針、プロキシハンドラは別経路、RFC 6266 準拠 Content-Disposition サニタイズ（filename*=UTF-8''...）を追記。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "Should Fix",
+      "title": "Edge Runtime 非対応、Cache-Control、bodySizeLimit",
+      "applied_sections": [
+        "実装タスク > 実装（方式B採用時の Node.js runtime 明示、Cache-Control コメント、ReadableStream パターン）",
+        "影響範囲 > セキュリティ考慮事項（Edge Runtime 非対応、Cache-Control、bodySizeLimit、ReadableStream の4項目追記）",
+        "レビュー履歴 > イテレーション2"
+      ],
+      "changes": "export const runtime = 'nodejs' 明示（fs.readFile 利用）、Cache-Control: no-store グローバル適用の意図的挙動、bodySizeLimit は Server Actions 用で Route Handler 影響無し、fs.createReadStream + Web Streams API 変換パターンを記述。"
+    },
+    {
+      "id": "S3-009",
+      "severity": "Should Fix",
+      "title": "i18n ファイル更新タスク",
+      "applied_sections": [
+        "実装タスク > 国際化（i18n）（新設サブセクション）",
+        "影響範囲 > 変更対象ファイル（locales/{en,ja}/error.json, worktree.json を追加）",
+        "レビュー履歴 > イテレーション2"
+      ],
+      "changes": "locales/en/error.json・locales/ja/error.json に pdfSizeExceeded/pdfInvalidMagicBytes/pdfLoadFailed/pdfDownloadFallback、locales/{en,ja}/worktree.json に pdfPreview.title/downloadLink/reload/iframeTitle を追加。既存 image/video i18n 化状況確認は別Issue化。"
+    },
+    {
+      "id": "S3-010",
+      "severity": "Should Fix",
+      "title": "モバイル（navigator.pdfViewerEnabled / iOS Safari Blob URL）確定",
+      "applied_sections": [
+        "PoCで確認するポイント（モバイル固有検証サブセクション追加）",
+        "実装タスク > 実装（FileViewer.tsx 追従を「追従要否確認」から「実装タスクに含める」に格上げ）",
+        "影響範囲 > 変更対象ファイル（FileViewer.tsx を PDF分岐追加確定に更新）",
+        "レビュー履歴 > イテレーション2"
+      ],
+      "changes": "navigator.pdfViewerEnabled 検知、iOS Safari Blob URL セッションスコープ、iframe onError ブラウザ間差異、window.open(blobUrl) 新タブUX候補、iOS Safari iframe PDF レンダリング既知問題を PoC 項目に追加。FileViewer.tsx 追従を確定事項に格上げ。"
+    },
+    {
+      "id": "S3-011",
+      "severity": "Should Fix",
+      "title": "CLAUDE.md / module-reference.md / implementation-history.md 追記",
+      "applied_sections": [
+        "実装タスク > ドキュメント更新（新設サブセクション）",
+        "影響範囲 > 変更対象ファイル（CLAUDE.md, docs/module-reference.md, docs/implementation-history.md 追加）",
+        "受入条件 > ドキュメント（新設）",
+        "レビュー履歴 > イテレーション2"
+      ],
+      "changes": "CLAUDE.md 主要モジュール一覧に src/config/pdf-extensions.ts, src/components/worktree/PdfPreview.tsx, 方式B採用時の /files-raw/[...path]/route.ts を追加。docs/module-reference.md も同様更新。docs/implementation-history.md に Issue #673 項目を Issue #490 の後に配置。next.config.js コメントに Issue #490: blob: excluded (DR4-007) → Issue #673: blob: added for PDF preview を記載。"
+    },
+    {
+      "id": "S3-012",
+      "severity": "Nice to Have",
+      "title": "tests/fixtures ディレクトリ新規作成",
+      "applied_sections": [
+        "実装タスク > ユニットテスト > テストフィクスチャ整備",
+        "影響範囲 > 変更対象ファイル（tests/fixtures/pdfs/ 追加）"
+      ],
+      "changes": "tests/fixtures/pdfs/ 新規ディレクトリ作成（現状非存在）、sample.pdf 5KB以下、.gitattributes で LFS 不要確認、フィクスチャ生成スクリプト scripts/generate-pdf-fixtures.js の検討をオプション記載。"
+    },
+    {
+      "id": "S3-013",
+      "severity": "Nice to Have",
+      "title": "FileViewer.tsx / page.tsx 経路への追従",
+      "applied_sections": [
+        "実装タスク > 実装（page.tsx PDF分岐追加要否タスク）",
+        "影響範囲 > 変更対象ファイル（src/app/worktrees/[id]/files/[...path]/page.tsx 追加）"
+      ],
+      "changes": "src/app/worktrees/[id]/files/[...path]/page.tsx（モバイル単体ビュー）の PDF 分岐追加要否を PoC と同時期に決定する旨を実装タスクと影響範囲テーブルに追加。"
+    },
+    {
+      "id": "S3-014",
+      "severity": "Nice to Have",
+      "title": "dynamic import 効果の位置づけ修正",
+      "applied_sections": [
+        "主要な変更点（PdfPreview.tsx の dynamic import 説明を修正）",
+        "影響範囲 > バンドルサイズ変化（新設サブセクション）",
+        "レビュー履歴 > イテレーション2"
+      ],
+      "changes": "dynamic(..., { ssr: false }) 採用主目的を「HtmlPreview と統一のパターン（一貫性担保）」と修正、バンドルサイズ削減は副次的効果として記載。pdf.js 依存追加判断時のバンドルサイズ測定を条件付きタスクとして追記。"
+    }
+  ],
+  "skipped_findings": [],
+  "major_changes": [
+    "新設セクション「Blob URL ライフサイクル設計」（S3-002 / Must Fix）を追加し、cancelled フラグ・StrictMode 二重マウント対応・ファイル切替時revokeタイミングをリファレンス実装コード例つきで明記",
+    "新設セクション「既存CSP変更の副作用評価」（S3-001 / Must Fix）を追加し、HtmlPreview/FileViewer/MARP/frame-ancestors/X-Frame-Options/img-src/media-src の7項目副作用表とDR4-007撤回根拠（Before/After コメント例）を記述",
+    "useFileContentPolling のPDF分岐方針を案1（一律無効化）に確定（S3-003 / Must Fix）。enabled 条件変更を実装タスク・影響範囲テーブル・受入条件すべてに反映",
+    "「将来の拡張性」「バンドルサイズ変化」2つの新設サブセクションを影響範囲に追加",
+    "実装タスクに「国際化（i18n）」「ドキュメント更新」2つの新設サブセクションを追加し、locales/{en,ja}/error.json・worktree.json、CLAUDE.md、docs/module-reference.md、docs/implementation-history.md の更新タスクを明記",
+    "テストフィクスチャ戦略を確定（tests/fixtures/pdfs/ 新規ディレクトリ、tests/helpers/pdf-fixtures.ts 新設、URL.createObjectURL モック戦略、mock-api.ts 拡張）",
+    "FileViewer.tsx の PDF 分岐追加を「要否確認」から「実装タスクに含める」に格上げ（S3-010）",
+    "セキュリティ考慮事項を大幅拡張（middleware matcher / file-operations.ts 非改修 / プロキシハンドラ非干渉 / Content-Disposition RFC 6266 / Edge Runtime 非対応 / Cache-Control / bodySizeLimit / ReadableStream の8項目）",
+    "影響範囲 > 変更対象ファイルテーブルに 11 ファイル追加（useFileContentPolling.ts, locales×2, tests/fixtures/pdfs/, tests/helpers/pdf-fixtures.ts, tests/helpers/mock-api.ts, page.tsx, CLAUDE.md, docs/module-reference.md, docs/implementation-history.md, FileViewer.tsx 位置づけ変更）",
+    "レビュー履歴にイテレーション2（Stage 3）セクションを追加し、S3-001〜S3-014 の14件の反映内容を記録"
+  ],
+  "updated_sections": [
+    "ヘッダーNote（Stage 3追加更新を記載）",
+    "提案する解決策 > Blob URL ライフサイクル設計（新設）",
+    "提案する解決策 > 既存CSP変更の副作用評価（新設）",
+    "提案する解決策 > PoCで確認するポイント（モバイル固有検証追加）",
+    "提案する解決策 > 主要な変更点（useFileContentPolling 分岐、next.config.js コメント更新を具体化）",
+    "実装タスク > PoC・事前検証（モバイル検証項目追加）",
+    "実装タスク > 実装（CSPコメント、middleware、FileViewer、useFileContentPolling、再ロードボタン、Content-Disposition、Edge Runtime）",
+    "実装タスク > 国際化（i18n）（新設）",
+    "実装タスク > ドキュメント更新（新設）",
+    "実装タスク > ユニットテスト（フィクスチャ整備、pdf-fixtures.ts、mock-api.ts、URL.createObjectURL モック）",
+    "実装タスク > 結合・受入（E2E自動検証範囲 vs 手動UAT範囲）",
+    "受入条件 > 機能（PDFタブのポーリング無効化、再ロードボタン）",
+    "受入条件 > セキュリティ（middleware matcher、Content-Disposition）",
+    "受入条件 > テスト / 品質（フィクスチャ、Playwright E2E）",
+    "受入条件 > ドキュメント（新設）",
+    "影響範囲 > 変更対象ファイル（11 行追加）",
+    "影響範囲 > 関連コンポーネント（useFileContentPolling、FileViewer.tsx 記述更新）",
+    "影響範囲 > セキュリティ考慮事項（8 項目追記）",
+    "影響範囲 > 将来の拡張性（新設）",
+    "影響範囲 > バンドルサイズ変化（新設）",
+    "レビュー履歴 > イテレーション2 (Stage 3)（新設）"
+  ],
+  "must_fix_applied": 3,
+  "should_fix_applied": 8,
+  "nice_to_have_applied": 3,
+  "total_applied": 14,
+  "total_skipped": 0,
+  "notes": "Stage 3レビューの全14件（Must Fix 3 / Should Fix 8 / Nice to Have 3）を反映。Nice to Have は選別指示だったが S3-012・S3-013・S3-014 はいずれも影響範囲の具体化・一貫性改善に寄与するため採用。スキップ項目なし。Issue #673 本文をGitHub上で更新済み。"
+}

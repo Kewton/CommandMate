@@ -41,6 +41,11 @@ import {
   validateVideoContent,
 } from '@/config/video-extensions';
 import { isHtmlExtension, HTML_MAX_SIZE_BYTES } from '@/config/html-extensions';
+import {
+  isPdfExtension,
+  validatePdfContent,
+  PDF_MIME_TYPE,
+} from '@/config/pdf-extensions';
 import { extname } from 'path';
 import { readFile, stat } from 'fs/promises';
 import { createLogger } from '@/lib/logger';
@@ -77,6 +82,8 @@ const ERROR_CODE_TO_HTTP_STATUS: Record<string, number> = {
   // Move-specific error codes
   MOVE_SAME_PATH: 400,
   MOVE_INTO_SELF: 400,
+  // PDF-specific error codes (Issue #673)
+  PDF_SIZE_EXCEEDED: 413,
 };
 
 /**
@@ -248,6 +255,44 @@ export async function GET(
           worktreePath: worktree.path,
           isVideo: true,
           mimeType,
+        });
+      } catch (err: unknown) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          return createErrorResponse('FILE_NOT_FOUND', 'File not found');
+        }
+        throw err;
+      }
+    }
+
+    // Check if this is a PDF file (Issue #673)
+    if (isPdfExtension(ext)) {
+      const absolutePath = join(worktree.path, relativePath);
+
+      try {
+        const fileBuffer = await readFile(absolutePath);
+
+        const validation = validatePdfContent(fileBuffer);
+        if (!validation.valid) {
+          if (validation.error?.includes('MB')) {
+            return createErrorResponse('PDF_SIZE_EXCEEDED', validation.error);
+          }
+          return createErrorResponse(
+            'INVALID_MAGIC_BYTES',
+            validation.error || 'Invalid PDF magic bytes',
+          );
+        }
+
+        const base64 = fileBuffer.toString('base64');
+        const dataUri = `data:${PDF_MIME_TYPE};base64,${base64}`;
+
+        return NextResponse.json({
+          success: true,
+          path: relativePath,
+          content: dataUri,
+          extension,
+          worktreePath: worktree.path,
+          isPdf: true,
+          mimeType: PDF_MIME_TYPE,
         });
       } catch (err: unknown) {
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') {

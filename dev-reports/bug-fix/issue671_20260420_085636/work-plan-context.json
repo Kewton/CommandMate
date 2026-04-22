@@ -1,0 +1,95 @@
+{
+  "bug_id": "issue671_20260420_085636",
+  "related_issue": 671,
+  "bug_description": "External Apps として登録した WebSocket 利用アプリ (Streamlit 等) を Open した際に、upstream への WebSocket が CommandMate 内蔵 WSS に吸収されアプリが起動しない。",
+  "selected_actions": [
+    {
+      "action_id": "1-ws-proxy",
+      "title": "ws-server.ts upgrade ハンドラに /proxy/<prefix> WebSocket TCP プロキシを実装",
+      "priority": "high",
+      "files_to_modify": [
+        "src/lib/ws-server.ts"
+      ],
+      "details": [
+        "pathname.startsWith('/proxy/') の分岐を /_next/ 分岐の後に追加",
+        "pathPrefix を `/proxy/<pathPrefix>/...` から抽出",
+        "getDbInstance() + getExternalAppCache(db).getByPathPrefix(pathPrefix) で upstream 解決",
+        "app が存在しない / enabled=0 / websocket_enabled=0 の場合は 404/503 で socket を閉じる",
+        "targetHost を localhost/127.0.0.1 に限定して SSRF 防御",
+        "net.connect({ host, port }) で upstream に接続し、クライアントから受けた HTTP Upgrade リクエスト行 + ヘッダを書き出す",
+        "双方向 socket.pipe(upstream) / upstream.pipe(socket) で WebSocket フレームを中継",
+        "error/close で両端 destroy してリソースリークを防ぐ",
+        "既存の認証 (isAuthEnabled) / IP 制限 (isIpRestrictionEnabled) チェックは upgrade 先頭で維持"
+      ]
+    },
+    {
+      "action_id": "2-proxy-handler-stub",
+      "title": "proxy/handler.ts の proxyWebSocket() を明示的 dead-code stub 化",
+      "priority": "medium",
+      "files_to_modify": [
+        "src/lib/proxy/handler.ts",
+        "src/app/proxy/[...path]/route.ts"
+      ],
+      "details": [
+        "proxyWebSocket() は実際には呼び出されなくなる（Next.js Route Handler に WebSocket Upgrade が来ない）",
+        "route.ts の isWebSocketUpgrade 分岐は防御的に残し、想定外の到達時は 426 返却の挙動を維持",
+        "コメントで 'Upgrade は ws-server.ts で処理される' 旨を明記"
+      ]
+    },
+    {
+      "action_id": "3-head-method",
+      "title": "/proxy/[...path]/route.ts に HEAD メソッドを追加",
+      "priority": "medium",
+      "files_to_modify": [
+        "src/app/proxy/[...path]/route.ts"
+      ],
+      "details": [
+        "export async function HEAD() を handleProxy に委譲する形で追加",
+        "proxyHttp は既に method !== GET/HEAD で body を送らない実装",
+        "外部ヘルスチェックや先行 HEAD リクエストで 405 が出ない"
+      ]
+    },
+    {
+      "action_id": "4-trailing-slash",
+      "title": "next.config.js に skipTrailingSlashRedirect: true を追加",
+      "priority": "low",
+      "files_to_modify": [
+        "next.config.js"
+      ],
+      "details": [
+        "/proxy/<prefix>/ を 308 で /proxy/<prefix> に飛ばさないようにする",
+        "Streamlit の生成する相対リンクの解決と齟齬が出る問題を回避",
+        "他 Next.js 標準ルートへの影響を確認 (現状 trailingSlash: false のままで / なしに揃える運用)"
+      ]
+    }
+  ],
+  "deliverables": [
+    "src/lib/ws-server.ts (/proxy/<prefix> WebSocket TCP プロキシ実装)",
+    "src/lib/proxy/handler.ts (proxyWebSocket() コメント更新)",
+    "src/app/proxy/[...path]/route.ts (HEAD メソッド追加、WS 分岐にコメント)",
+    "next.config.js (skipTrailingSlashRedirect)",
+    "tests/unit/ws-server-proxy-upgrade.test.ts (新規、WebSocket upgrade の分岐ロジック単体テスト)",
+    "tests/integration/proxy-websocket.test.ts (新規、実 upstream を spawn して WS 疎通確認)"
+  ],
+  "definition_of_done": [
+    "Streamlit 製 External App で WebSocket が確立しアプリが完全にインタラクティブに動作する",
+    "`enabled=0` または `websocket_enabled=0` の External App への WS Upgrade は適切に拒否される (4xx)",
+    "CommandMate 内蔵 WS 機能 (terminal_subscribe, subscribe, broadcast) のリグレッションなし",
+    "既存 tests/integration/websocket.test.ts がパスする",
+    "新規テストが追加されカバレッジ 80% 以上",
+    "`npm run lint` と `npx tsc --noEmit` がパスする"
+  ],
+  "security_requirements": [
+    "upgrade ハンドラの先頭で IP 制限・認証チェックを維持 (現行 ws-server の順序を踏襲)",
+    "targetHost は localhost / 127.0.0.1 のみ許可 (SSRF 防止)",
+    "upstream 切断時にクライアント socket を確実に破棄しリソースリークを防ぐ",
+    "ログには internal host/port を出さない"
+  ],
+  "regression_test_scope": [
+    "tests/integration/websocket.test.ts (既存 WSS 機能)",
+    "tests/unit/proxy/handler.test.ts",
+    "tests/unit/proxy/route.test.ts",
+    "tests/unit/external-apps/cache.test.ts",
+    "tests/unit/ws-server-cleanup.test.ts"
+  ]
+}
