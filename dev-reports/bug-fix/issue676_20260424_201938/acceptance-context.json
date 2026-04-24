@@ -1,0 +1,36 @@
+{
+  "bug_id": "issue676_20260424_201938",
+  "issue_number": 676,
+  "bug_description": "サイドバーのブランチ tooltip が isTooltipVisible=true で固着し残り続ける。Issue #675 の無限ループ中に mouseleave 合成イベントのレースで state が true のまま固定される。",
+  "fix_summary": "A+B+C 併用で防御的修正を実施: (A) 選択中ブランチでは tooltip を出さない、(B) click 時に明示的に setIsTooltipVisible(false)、(C) isVisible=false のとき portal の中身を null にして DOM から物理除去、加えて aria-describedby も tooltip が実在するときだけ付与する形に変更。",
+  "files_modified": [
+    "src/components/sidebar/BranchListItem.tsx",
+    "tests/unit/components/sidebar/BranchListItem.test.tsx",
+    "tests/unit/components/layout/Sidebar.test.tsx"
+  ],
+  "acceptance_criteria": [
+    "選択中ブランチでは tooltip が表示されないこと（isSelected=true）",
+    "マウスを別要素に移動すると tooltip が消えること（mouseLeave）",
+    "button を click すると tooltip が消えること（click 時の明示的リセット）",
+    "focus → blur でも tooltip が消えること",
+    "isVisible=false のとき tooltip div が DOM に存在しないこと（最終防御線）",
+    "aria-describedby は tooltip が DOM に実在するときだけ button に付与されること",
+    "既存の tooltip 表示機能（mouseEnter/focus で表示、branch 情報を表示）が壊れていないこと",
+    "lint/tsc/unit test 全てパス"
+  ],
+  "test_scenarios": [
+    "シナリオ1: 未選択ブランチをホバー → tooltip 表示 → マウス離脱 → tooltip 消失",
+    "シナリオ2: ブランチをクリック → tooltip 即座に消失 → onClick コールバック発火",
+    "シナリオ3: 既に選択中のブランチをホバー → tooltip が表示されない（A 案）",
+    "シナリオ4: キーボード focus → tooltip 表示 → blur → tooltip 消失",
+    "シナリオ5: 初期レンダリング直後 → tooltip が DOM に存在しない（C 案）",
+    "シナリオ6: tooltip 非表示時 → button に aria-describedby が付いていない"
+  ],
+  "verification_commands": [
+    "npm run lint",
+    "npx tsc --noEmit",
+    "npm run test:unit -- tests/unit/components/sidebar/BranchListItem.test.tsx",
+    "npm run test:unit"
+  ],
+  "tdd_result_file": "dev-reports/bug-fix/issue676_20260424_201938/tdd-fix-result.json"
+}

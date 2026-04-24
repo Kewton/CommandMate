@@ -1,0 +1,115 @@
+{
+  "bug_id": "issue676_20260424_201938",
+  "issue_number": 676,
+  "status": "passed",
+  "summary": "Applied A+B+C fix to BranchListItem: (A) suppress tooltip for selected branch, (B) explicitly reset visibility on click, (C) unmount portal contents and drop aria-describedby when not visible. All new TDD tests and the full unit test suite pass.",
+  "selected_actions": ["A", "B", "C"],
+  "files_changed": [
+    {
+      "path": "src/components/sidebar/BranchListItem.tsx",
+      "change_type": "modified",
+      "summary": "BranchTooltip returns null when !isVisible (C, removed opacity-0 stale DOM node). Parent component computes showTooltip = isTooltipVisible && !isSelected (A) and passes it to BranchTooltip. onClick is now wrapped via handleClick which calls setIsTooltipVisible(false) before invoking the upstream onClick (B). aria-describedby is only attached while showTooltip is true. JSDoc updated to reflect new lifecycle; useState/useEffect ordering in BranchTooltip preserved (early return for !isVisible placed after the useEffect)."
+    },
+    {
+      "path": "tests/unit/components/sidebar/BranchListItem.test.tsx",
+      "change_type": "modified",
+      "summary": "Existing Tooltip (Issue #651) tests updated to fire mouseEnter before asserting tooltip presence/attributes. showRepositoryName tests now verify inline-only presence (>=1 via DOM subtree filter) instead of expecting tooltip duplicates. Added new describe block 'Tooltip visibility lifecycle (Issue #676)' with 9 tests covering initial absence, mouseEnter/mouseLeave, focus/blur, click-dismisses-tooltip, onClick still fires, selected-branch suppression, and aria-describedby gating."
+    },
+    {
+      "path": "tests/unit/components/layout/Sidebar.test.tsx",
+      "change_type": "modified",
+      "summary": "Relaxed 'should show repository name for each branch' from >=3 to >=1 because that assertion implicitly relied on tooltips always being mounted in the DOM. In grouped view the repository name now comes solely from the group header (branch items have showRepositoryName={false})."
+    }
+  ],
+  "tdd_cycle": {
+    "red": {
+      "description": "Added 9 new tests in 'Tooltip visibility lifecycle (Issue #676)' and updated 8 existing Tooltip tests to fire mouseEnter first. Confirmed 7 tests failed against the unchanged implementation before applying the fix.",
+      "failing_tests_before_fix": 7
+    },
+    "green": {
+      "description": "Applied A+B+C in BranchListItem.tsx. Re-ran target test file: 45/45 passed.",
+      "passing_tests_after_fix": 45
+    },
+    "refactor": {
+      "description": "Updated JSDoc on BranchTooltip to describe new mount-on-visible lifecycle. Removed obsolete `opacity: isVisible ? 1 : 0` style. No further refactoring to stay within the minimal-fix scope."
+    }
+  },
+  "test_summary": {
+    "target_file": "tests/unit/components/sidebar/BranchListItem.test.tsx",
+    "target_file_tests_total": 45,
+    "target_file_tests_passed": 45,
+    "target_file_tests_failed": 0,
+    "new_tests_added": 9,
+    "existing_tests_updated": 10,
+    "suite_total": 6397,
+    "suite_passed": 6390,
+    "suite_skipped": 7,
+    "suite_failed": 0,
+    "baseline_before_fix": "36 tests in target file, 6381 tests across suite (all passing)",
+    "after_fix": "45 tests in target file (+9), 6390 tests across suite (+9, all passing)"
+  },
+  "new_tests": [
+    "should not render tooltip in DOM on initial render (C)",
+    "should not attach aria-describedby on initial render (accessibility)",
+    "should show tooltip on mouseEnter",
+    "should hide tooltip on mouseLeave",
+    "should hide tooltip on click (B)",
+    "should still invoke onClick when click hides the tooltip (B)",
+    "should not render tooltip when isSelected=true even on mouseEnter (A + C)",
+    "should not attach aria-describedby when isSelected=true (A)",
+    "should show tooltip on focus and hide on blur"
+  ],
+  "quality_checks": {
+    "lint": {
+      "command": "npm run lint",
+      "status": "passed",
+      "output_summary": "No ESLint warnings or errors"
+    },
+    "typecheck": {
+      "command": "npx tsc --noEmit",
+      "status": "passed",
+      "output_summary": "No type errors"
+    },
+    "unit_tests_target": {
+      "command": "npx vitest run tests/unit/components/sidebar/BranchListItem.test.tsx",
+      "status": "passed",
+      "output_summary": "45 passed, 0 failed"
+    },
+    "unit_tests_full": {
+      "command": "npm run test:unit",
+      "status": "passed",
+      "output_summary": "340 test files passed, 6390 tests passed, 7 skipped, 0 failed"
+    }
+  },
+  "coverage": {
+    "note": "Coverage not measured separately in this task; existing and new unit tests cover all modified branches (BranchListItem render states: hover/click/focus/blur, selected vs unselected, initial mount, aria-describedby gating).",
+    "branches_covered": [
+      "BranchTooltip early return when !isVisible",
+      "BranchTooltip rendered when isVisible",
+      "showTooltip = isTooltipVisible && !isSelected (both sides)",
+      "handleClick resets visibility before invoking onClick",
+      "aria-describedby gated on showTooltip",
+      "mouseEnter/mouseLeave/focus/blur transitions"
+    ]
+  },
+  "definition_of_done": {
+    "npm run lint pass": true,
+    "npx tsc --noEmit pass": true,
+    "target test file pass (with new tests)": true,
+    "full npm run test:unit pass": true,
+    "isSelected=true => tooltip absent from DOM": true,
+    "click => tooltip hidden": true,
+    "mouseEnter shows tooltip, mouseLeave hides": true
+  },
+  "important_notes_addressed": [
+    "BranchTooltip useState/useEffect order preserved: the early `if (!isVisible) return null;` is placed AFTER the useEffect declaration, so hook order is stable regardless of visibility transitions.",
+    "aria-describedby is now conditionally attached only while the tooltip is mounted, which is the accessible behavior and avoids a dangling reference.",
+    "Updated BranchTooltip JSDoc to replace the stale 'Always present in DOM / CSS-controlled visibility so aria-describedby works' note with a description of the new mount-on-visible lifecycle.",
+    "Scope kept minimal: did not touch Issue #675 infinite-loop code; no unrelated refactoring. Only one adjacent test (Sidebar.test.tsx 'should show repository name for each branch') was tweaked because it implicitly depended on tooltips always being mounted; the change is a straight relaxation of the count expectation."
+  ],
+  "commit": {
+    "hash": "54d62d91bc4d06fe06402e458e592a643ec41534",
+    "branch": "feature/676-worktree",
+    "message_subject": "fix(#676): prevent stuck sidebar branch tooltip (A+B+C)"
+  }
+}
