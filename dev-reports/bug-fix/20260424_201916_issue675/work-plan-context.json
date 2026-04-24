@@ -1,0 +1,75 @@
+{
+  "bug_id": "20260424_201916_issue675",
+  "issue_number": 675,
+  "bug_description": ".md ファイル表示中にサイドバーから別ブランチを選択しても URL が更新されず画面遷移しない。MarkdownEditor 経由で発生する onDirtyChange 無限 re-render ループが router.push の transition を starve させることが原因。",
+  "selected_actions": [
+    {
+      "action_id": "A",
+      "title": "useCallback deps を fileTabs.dispatch のみに絞る (根本修正)",
+      "description": "WorktreeDetailRefactored.tsx:1298-1313 の handleLoadContent / handleLoadError / handleSetLoading / handleDirtyChange の useCallback deps を [fileTabs] から [fileTabs.dispatch] に変更。dispatch は useReducer 由来で identity が stable なため、コールバックが毎レンダー再生成されなくなり、FilePanelContent → MarkdownEditor への不安定 prop 伝播が止まる。",
+      "files_to_modify": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "change_points": [
+        "L1298-1300: handleLoadContent useCallback deps [fileTabs] → [fileTabs.dispatch]",
+        "L1302-1304: handleLoadError useCallback deps [fileTabs] → [fileTabs.dispatch]",
+        "L1306-1308: handleSetLoading useCallback deps [fileTabs] → [fileTabs.dispatch]",
+        "L1310-1313: handleDirtyChange useCallback deps [fileTabs] → [fileTabs.dispatch]"
+      ]
+    },
+    {
+      "action_id": "B",
+      "title": "SET_DIRTY reducer で同値時 no-op (防衛線)",
+      "description": "useFileTabs.ts:239-246 の SET_DIRTY case で、対象 tab の isDirty が既に同じ値なら state を同一参照のまま返す。useReducer は state 参照が同一なら再レンダーをスキップするため、将来別経路で deps が崩れても同値 dispatch は無害化できる。",
+      "files_to_modify": [
+        "src/hooks/useFileTabs.ts"
+      ],
+      "change_points": [
+        "SET_DIRTY case 先頭で対象 tab を検索し、isDirty が同値なら return state;"
+      ]
+    }
+  ],
+  "out_of_scope": [
+    "WorktreeDetailRefactored.tsx L551/L570/L581/L875/L904 の『fileTabs 全体を deps に置く』アンチパターン → 別 Issue 化"
+  ],
+  "deliverables": [
+    "src/components/worktree/WorktreeDetailRefactored.tsx (useCallback deps 修正)",
+    "src/hooks/useFileTabs.ts (SET_DIRTY reducer no-op 追加)",
+    "tests/unit/hooks/useFileTabs.test.ts (SET_DIRTY no-op テスト追加)",
+    "tests/unit/components/MarkdownEditor.test.tsx (既存テストで onDirtyChange stable 時の再呼び出し抑止を検証、または必要なら追加)"
+  ],
+  "test_strategy": {
+    "tdd_cycle": "Red-Green-Refactor",
+    "red_phase_tests": [
+      {
+        "id": "T1",
+        "type": "unit",
+        "file": "tests/unit/hooks/useFileTabs.test.ts",
+        "description": "SET_DIRTY に同値 (現在 isDirty=false の tab に対して isDirty:false) を dispatch した場合、result === previousState が成立することを assert。現状実装では新 state を返すので Red。",
+        "target": "useFileTabs reducer"
+      },
+      {
+        "id": "T2",
+        "type": "unit",
+        "file": "tests/unit/hooks/useFileTabs.test.ts",
+        "description": "SET_DIRTY で isDirty が真に変化した場合は新 state を返し、tabs[i].isDirty が更新されること。既存挙動の退行防止。",
+        "target": "useFileTabs reducer"
+      }
+    ],
+    "acceptance_tests": [
+      "T3 (手動): Worktree A で .md を開いた状態でサイドバーから Worktree B を選択 → URL が /worktrees/B に変わる",
+      "T4 (手動): .yaml / .yml でも同様に動作することを確認 (investigation で特定された拡張範囲)",
+      ".png / .json で回帰しないことを確認 (もともと再現しないので変化なし想定)"
+    ]
+  },
+  "definition_of_done": [
+    "T1/T2 の unit test が green",
+    "npm run lint がパス",
+    "npx tsc --noEmit がパス",
+    "npm run test:unit がパス",
+    "手動受入: .md / .yaml / .yml 表示中でもサイドバーからのブランチ遷移で URL が更新される"
+  ],
+  "risk_level": "low",
+  "estimated_loc_change": "WorktreeDetailRefactored.tsx: 4行修正 / useFileTabs.ts: 3-4行追加 / tests: +10行程度",
+  "target_coverage": 80
+}

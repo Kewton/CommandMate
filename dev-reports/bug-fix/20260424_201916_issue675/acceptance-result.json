@@ -1,0 +1,126 @@
+{
+  "bug_id": "20260424_201916_issue675",
+  "issue_number": 675,
+  "branch": "feature/675-worktree",
+  "commit": "e91e1928",
+  "executed_at": "2026-04-24T20:34:00+09:00",
+  "overall_result": "PASS",
+  "summary": "Issue #675 バグ修正 (A案: useCallback deps 安定化 / B案: SET_DIRTY no-op short-circuit) の自動受入テスト (S1-S4) をすべて実施し、全項目 PASS を確認。実機テスト (S5-S7) は指示通りスキップ。",
+  "scenarios": [
+    {
+      "id": "S1",
+      "description": "B案の no-op 検証: SET_DIRTY で isDirty=false → false の 2 回 dispatch で state 参照が変わらない",
+      "result": "PASS",
+      "evidence": {
+        "test_file": "tests/unit/hooks/useFileTabs.test.ts",
+        "test_cases": [
+          "SET_DIRTY should return same state reference when isDirty is already the same value (false→false) (line 455)",
+          "SET_DIRTY should return same state reference when isDirty is already the same value (true→true) (line 466)",
+          "SET_DIRTY applied twice with the same value returns a stable reference (line 477)"
+        ],
+        "implementation": "src/hooks/useFileTabs.ts:242 `if (current && current.isDirty === action.isDirty) return state;`",
+        "test_run": "44 passed (44) — tests/unit/hooks/useFileTabs.test.ts"
+      }
+    },
+    {
+      "id": "S2",
+      "description": "B案の回帰防止: SET_DIRTY で isDirty=false → true で新 state 参照が返り tabs[i].isDirty が更新される",
+      "result": "PASS",
+      "evidence": {
+        "test_file": "tests/unit/hooks/useFileTabs.test.ts",
+        "test_cases": [
+          "SET_DIRTY should set isDirty to true for the specified tab (line 406)",
+          "SET_DIRTY should set isDirty to false for the specified tab (line 417)",
+          "SET_DIRTY should only affect the specified tab (line 428)",
+          "SET_DIRTY should return same state if path not found (line 443)"
+        ],
+        "test_run": "44 passed (44) — tests/unit/hooks/useFileTabs.test.ts"
+      }
+    },
+    {
+      "id": "S3",
+      "description": "A案の適用確認: WorktreeDetailRefactored.tsx の 4 useCallback deps が [fileTabs.dispatch]",
+      "result": "PASS",
+      "evidence": {
+        "command": "grep -n \"fileTabs.dispatch\\]\" src/components/worktree/WorktreeDetailRefactored.tsx",
+        "matches": [
+          "1304:  }, [fileTabs.dispatch]);  // handleLoadContent",
+          "1309:  }, [fileTabs.dispatch]);  // handleLoadError",
+          "1314:  }, [fileTabs.dispatch]);  // handleSetLoading",
+          "1320:  }, [fileTabs.dispatch]);  // handleDirtyChange"
+        ],
+        "count": 4,
+        "expected": 4
+      }
+    },
+    {
+      "id": "S4",
+      "description": "lint / typecheck / unit test / build が全て通る",
+      "result": "PASS",
+      "evidence": {
+        "lint": {
+          "command": "npm run lint",
+          "result": "PASS",
+          "output": "✔ No ESLint warnings or errors"
+        },
+        "typecheck": {
+          "command": "npx tsc --noEmit",
+          "result": "PASS",
+          "output": "(no output = success, exit 0)"
+        },
+        "unit_test": {
+          "command": "npm run test:unit",
+          "result": "PASS",
+          "output": "Test Files 340 passed (340); Tests 6384 passed | 7 skipped (6391); Duration 13.54s",
+          "note": "stderr に出力された 'useWorktreeSelection / useSidebarContext must be used within Provider' / 'Report generation failed' などはテスト側が意図的にエラー分岐を検証しているケースで、テスト結果は all passed。"
+        },
+        "build": {
+          "command": "npm run build",
+          "result": "PASS",
+          "output": "✓ Compiled successfully",
+          "note": "ビルド中に /api/assistant/current-output の 'Dynamic server usage' ログが表示されるが、これは Next.js 14 が dynamic route を情報ログとして出しているもので、ビルド出力でも該当ルートは 'ƒ (Dynamic)' としてマークされており、成功を阻害しない。"
+        }
+      }
+    },
+    {
+      "id": "S5",
+      "description": "手動受入: Worktree A で .md を開いた状態 → サイドバーから Worktree B 選択で URL が更新",
+      "result": "SKIPPED",
+      "reason": "指示により実機起動は行わない (S5-S7 はユーザー側で実機確認予定)"
+    },
+    {
+      "id": "S6",
+      "description": "手動受入: .yaml / .yml でも同様に遷移",
+      "result": "SKIPPED",
+      "reason": "指示により実機起動は行わない"
+    },
+    {
+      "id": "S7",
+      "description": "回帰確認: .png / .json 表示中でもサイドバー遷移が動作",
+      "result": "SKIPPED",
+      "reason": "指示により実機起動は行わない"
+    }
+  ],
+  "supplementary_checks": [
+    {
+      "name": "B案 実装確認 (useFileTabs.ts)",
+      "command": "grep -n \"current.isDirty === action.isDirty\" src/hooks/useFileTabs.ts",
+      "result": "PASS",
+      "match": "242:      if (current && current.isDirty === action.isDirty) return state;"
+    }
+  ],
+  "acceptance_criteria_status": [
+    { "criterion": "SET_DIRTY 同値 dispatch で state 参照が変わらない", "status": "PASS", "scenario": "S1" },
+    { "criterion": "SET_DIRTY で isDirty が真に変化する場合は従来通り新 state が返る", "status": "PASS", "scenario": "S2" },
+    { "criterion": "useCallback deps 変更後も 4 ハンドラの動作は変わらない", "status": "PASS", "scenario": "S3 (static) + S4 (unit/type)" },
+    { "criterion": "ESLint (npm run lint) がパスする", "status": "PASS", "scenario": "S4" },
+    { "criterion": "TypeScript 型チェック (npx tsc --noEmit) がパスする", "status": "PASS", "scenario": "S4" },
+    { "criterion": "Unit テスト (npm run test:unit) 全件パスする", "status": "PASS", "scenario": "S4" },
+    { "criterion": "ビルド (npm run build) がパスする", "status": "PASS", "scenario": "S4" }
+  ],
+  "failures": [],
+  "recommendations": [
+    "本セッションで自動検証は全て通過したので、ユーザーは実機 (commandmate start) で S5-S7 を確認することを推奨: Worktree A(.md/.yaml/.yml 開いた状態) → サイドバーで Worktree B 選択 → URL が /worktrees/{B} に更新される / 非対象拡張子 (.png/.json) でも遷移する。",
+    "out_of_scope の WorktreeDetailRefactored.tsx L551/L570/L581/L875/L904 の同種アンチパターン (useCallback deps に Object 全体を渡しているパターン) は別 Issue で扱う予定のため、本受入では検証対象外。"
+  ]
+}

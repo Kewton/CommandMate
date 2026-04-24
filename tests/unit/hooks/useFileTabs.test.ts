@@ -450,6 +450,42 @@ describe('fileTabsReducer', () => {
 
       expect(result).toBe(stateWithTab);
     });
+
+    // [Issue #675] Re-render loop guard: same-value SET_DIRTY must be a no-op
+    it('SET_DIRTY should return same state reference when isDirty is already the same value (false→false)', () => {
+      const stateWithTab: FileTabsState = {
+        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false }],
+        activeIndex: 0,
+      };
+      const action: FileTabsAction = { type: 'SET_DIRTY', path: 'a.ts', isDirty: false };
+      const result = fileTabsReducer(stateWithTab, action);
+
+      expect(result).toBe(stateWithTab);
+    });
+
+    it('SET_DIRTY should return same state reference when isDirty is already the same value (true→true)', () => {
+      const stateWithTab: FileTabsState = {
+        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: true }],
+        activeIndex: 0,
+      };
+      const action: FileTabsAction = { type: 'SET_DIRTY', path: 'a.ts', isDirty: true };
+      const result = fileTabsReducer(stateWithTab, action);
+
+      expect(result).toBe(stateWithTab);
+    });
+
+    it('SET_DIRTY applied twice with the same value returns a stable reference', () => {
+      const stateWithTab: FileTabsState = {
+        tabs: [{ path: 'a.ts', name: 'a.ts', content: null, loading: false, error: null, isDirty: false }],
+        activeIndex: 0,
+      };
+      const action: FileTabsAction = { type: 'SET_DIRTY', path: 'a.ts', isDirty: true };
+      const first = fileTabsReducer(stateWithTab, action);
+      const second = fileTabsReducer(first, action);
+
+      expect(first.tabs[0].isDirty).toBe(true);
+      expect(second).toBe(first);
+    });
   });
 });
 

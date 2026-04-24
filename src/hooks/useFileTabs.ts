@@ -237,6 +237,9 @@ export function fileTabsReducer(state: FileTabsState, action: FileTabsAction): F
     }
 
     case 'SET_DIRTY': {
+      // [Issue #675] Short-circuit no-op dispatches so upstream useReducer skips re-render
+      const current = state.tabs.find((t) => t.path === action.path);
+      if (current && current.isDirty === action.isDirty) return state;
       const newTabs = updateTabByPath(state.tabs, action.path, (tab) => ({
         ...tab,
         isDirty: action.isDirty,

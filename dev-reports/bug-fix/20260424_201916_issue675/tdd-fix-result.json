@@ -1,0 +1,136 @@
+{
+  "bug_id": "20260424_201916_issue675",
+  "issue_number": 675,
+  "branch": "feature/675-worktree",
+  "mode": "subagent",
+  "status": "success",
+  "summary": "Applied Plan A (useCallback deps: [fileTabs] -> [fileTabs.dispatch] in WorktreeDetailRefactored.tsx) and Plan B (SET_DIRTY no-op short-circuit in useFileTabs.ts) following strict Red-Green-Refactor TDD. All lint, typecheck, and unit tests pass.",
+  "phases": {
+    "red": {
+      "description": "Added 3 failing tests to tests/unit/hooks/useFileTabs.test.ts covering the SET_DIRTY same-value no-op invariant (B plan contract).",
+      "tests_added": [
+        {
+          "name": "SET_DIRTY should return same state reference when isDirty is already the same value (false→false)",
+          "file": "tests/unit/hooks/useFileTabs.test.ts"
+        },
+        {
+          "name": "SET_DIRTY should return same state reference when isDirty is already the same value (true→true)",
+          "file": "tests/unit/hooks/useFileTabs.test.ts"
+        },
+        {
+          "name": "SET_DIRTY applied twice with the same value returns a stable reference",
+          "file": "tests/unit/hooks/useFileTabs.test.ts"
+        }
+      ],
+      "initial_test_run": {
+        "command": "npm run test:unit -- tests/unit/hooks/useFileTabs.test.ts",
+        "result": "FAIL",
+        "failed_tests": 3,
+        "passed_tests": 6381,
+        "reason": "Reducer always returned a new state object for SET_DIRTY regardless of whether the value actually changed."
+      }
+    },
+    "green": {
+      "description": "Implemented both plans. B in useFileTabs SET_DIRTY reducer (same-value short-circuit). A in WorktreeDetailRefactored.tsx (4 useCallback deps switched to fileTabs.dispatch with targeted eslint-disable-next-line for react-hooks/exhaustive-deps).",
+      "changes": [
+        {
+          "file": "src/hooks/useFileTabs.ts",
+          "change": "In SET_DIRTY case: find the target tab first and return state unchanged if current.isDirty === action.isDirty. Keeps existing behaviour when tab is missing or when value truly changes."
+        },
+        {
+          "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+          "change": "handleLoadContent, handleLoadError, handleSetLoading, handleDirtyChange useCallback deps: [fileTabs] -> [fileTabs.dispatch]. Added a single WHY comment above the block and eslint-disable-next-line react-hooks/exhaustive-deps on each dep-array line because the linter cannot see that useReducer dispatch identity is stable."
+        }
+      ],
+      "test_run_after_fix": {
+        "command": "npm run test:unit -- tests/unit/hooks/useFileTabs.test.ts",
+        "result": "PASS",
+        "tests_passed": 6384,
+        "tests_skipped": 7,
+        "tests_failed": 0
+      }
+    },
+    "refactor": {
+      "description": "Minimal change set; no extra refactoring performed. Scope held to the two files listed in the plan. Added only WHY comments (Issue #675 rationale for dispatch-only deps; Issue #675 rationale for short-circuit). Out-of-scope anti-patterns (L551/L570/L581/L875/L904) intentionally left untouched for a separate Issue.",
+      "notes": [
+        "Did not alter other reducer cases (SET_CONTENT / SET_LOADING / SET_ERROR / RENAME_FILE / MOVE_TO_FRONT).",
+        "Did not alter updateTabByPath helper.",
+        "Existing SET_DIRTY true/false transition tests continue to pass unchanged (regression-free).",
+        "All other useCallback/useMemo call sites in WorktreeDetailRefactored.tsx were not modified."
+      ]
+    }
+  },
+  "files_modified": [
+    {
+      "path": "src/hooks/useFileTabs.ts",
+      "lines_added": 3,
+      "lines_removed": 0,
+      "diff_summary": "SET_DIRTY case prefixed with find + same-value short-circuit (return state)."
+    },
+    {
+      "path": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines_added": 11,
+      "lines_removed": 4,
+      "diff_summary": "Replaced [fileTabs] with [fileTabs.dispatch] in 4 useCallbacks (handleLoadContent, handleLoadError, handleSetLoading, handleDirtyChange). Added WHY comment + per-hook eslint-disable-next-line react-hooks/exhaustive-deps pragmas."
+    },
+    {
+      "path": "tests/unit/hooks/useFileTabs.test.ts",
+      "lines_added": 36,
+      "lines_removed": 0,
+      "diff_summary": "Added 3 tests under the 'isDirty flag' describe block asserting same-reference return for no-op SET_DIRTY dispatches."
+    }
+  ],
+  "quality_checks": {
+    "lint": {
+      "command": "npm run lint",
+      "exit_code": 0,
+      "result": "PASS",
+      "details": "No ESLint warnings or errors. The 4 deliberately-disabled react-hooks/exhaustive-deps warnings are suppressed with line-level pragmas that include a WHY comment at the block header."
+    },
+    "typecheck": {
+      "command": "npx tsc --noEmit",
+      "exit_code": 0,
+      "result": "PASS",
+      "details": "No type errors."
+    },
+    "unit_tests": {
+      "command": "npm run test:unit",
+      "exit_code": 0,
+      "result": "PASS",
+      "test_files": 340,
+      "tests_passed": 6384,
+      "tests_skipped": 7,
+      "tests_failed": 0,
+      "delta_vs_baseline": "+3 new tests (all pass). No regressions in the remaining 6381."
+    },
+    "targeted_tests": {
+      "command": "npm run test:unit -- tests/unit/hooks/useFileTabs.test.ts tests/unit/components/MarkdownEditor.test.tsx",
+      "exit_code": 0,
+      "result": "PASS",
+      "note": "Full suite runs and all pass; vitest's positional args filter by test-file name."
+    }
+  },
+  "commit": {
+    "hash": "e91e1928ad3feba137c85a408125d225f4b55dd1",
+    "branch": "feature/675-worktree",
+    "message_subject": "fix(#675): stop re-render loop blocking worktree URL updates",
+    "files_in_commit": [
+      "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "src/hooks/useFileTabs.ts",
+      "tests/unit/hooks/useFileTabs.test.ts"
+    ]
+  },
+  "success_criteria": {
+    "red_green_cycle_complete": true,
+    "all_tests_pass": true,
+    "lint_clean": true,
+    "typecheck_clean": true,
+    "committed": true,
+    "coverage_target_met": "not-measured-in-this-run (target 80; unit suite expanded from 6381 to 6384 tests, all passing)"
+  },
+  "notes": [
+    "The claim in the context that `[fileTabs.dispatch]` alone would silence react-hooks/exhaustive-deps was not accurate for this ESLint configuration (next/core-web-vitals); the rule still flags fileTabs as a missing dependency when any member of it is referenced in the callback body. A minimal eslint-disable-next-line pragma was added on each dep-array line, with a single WHY comment at the block header explaining dispatch stability. This preserves the original intent (keep deps minimal) without introducing rule-wide suppression.",
+    "Out-of-scope anti-patterns noted in the context (L551/L570/L581/L875/L904 in WorktreeDetailRefactored.tsx) were intentionally left untouched and should be addressed in a follow-up issue.",
+    "No DB, API, or contract-level changes. Pure React render-loop guard."
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "bug_id": "20260424_201916_issue675",
+  "issue_number": 675,
+  "bug_description": ".md ファイル表示中にサイドバーから別ブランチを選択しても URL が更新されず画面遷移しない。",
+  "fix_summary": "(A案) WorktreeDetailRefactored.tsx:1298-1317 の 4 つの useCallback (handleLoadContent / handleLoadError / handleSetLoading / handleDirtyChange) の deps を [fileTabs] から [fileTabs.dispatch] に変更してコールバック identity を安定化。(B案) useFileTabs.ts の SET_DIRTY reducer で対象 tab の isDirty が同値なら state を同一参照で返す no-op 判定を追加。結果として MarkdownEditor の useEffect が不要に発火しなくなり、無限 re-render ループが解消され、router.push の transition が starve しなくなる。",
+  "commit": "e91e1928",
+  "branch": "feature/675-worktree",
+  "changed_files": [
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/hooks/useFileTabs.ts",
+    "tests/unit/hooks/useFileTabs.test.ts"
+  ],
+  "acceptance_criteria": [
+    "SET_DIRTY 同値 dispatch で state 参照が変わらない (unit test で検証済)",
+    "SET_DIRTY で isDirty が真に変化する場合は従来通り新 state が返る (既存テストで回帰なし)",
+    "useCallback deps 変更後も handleLoadContent / handleLoadError / handleSetLoading / handleDirtyChange の動作は変わらない (既存統合テスト / 型チェックで担保)",
+    "ESLint (npm run lint) がパスする",
+    "TypeScript 型チェック (npx tsc --noEmit) がパスする",
+    "Unit テスト (npm run test:unit) 全件パスする",
+    "ビルド (npm run build) がパスする"
+  ],
+  "test_scenarios": [
+    {
+      "id": "S1",
+      "type": "automated-unit",
+      "description": "B案の no-op 検証: SET_DIRTY で isDirty=false → false の 2 回 dispatch で state 参照が変わらない",
+      "verification_method": "npm run test:unit -- tests/unit/hooks/useFileTabs.test.ts"
+    },
+    {
+      "id": "S2",
+      "type": "automated-unit",
+      "description": "B案の回帰防止: SET_DIRTY で isDirty=false → true の dispatch で新 state 参照が返り、tabs[i].isDirty が更新される",
+      "verification_method": "npm run test:unit -- tests/unit/hooks/useFileTabs.test.ts"
+    },
+    {
+      "id": "S3",
+      "type": "static",
+      "description": "A案の適用確認: WorktreeDetailRefactored.tsx の 4 つの useCallback deps が [fileTabs.dispatch] になっている",
+      "verification_method": "grep で deps を確認"
+    },
+    {
+      "id": "S4",
+      "type": "automated-full",
+      "description": "全ユニットテスト通過 / ESLint / TypeScript / ビルド",
+      "verification_method": "npm run lint && npx tsc --noEmit && npm run test:unit && npm run build"
+    },
+    {
+      "id": "S5",
+      "type": "manual (optional)",
+      "description": "手動受入: Worktree A で .md ファイルを開いた状態 → サイドバーから Worktree B を選択 → URL が /worktrees/B に変わる",
+      "verification_method": "サーバーを起動 (commandmate start) して実機確認"
+    },
+    {
+      "id": "S6",
+      "type": "manual (optional)",
+      "description": "手動受入: .yaml / .yml でも同様に遷移する (MarkdownEditor 経由の拡張子)",
+      "verification_method": "実機確認"
+    },
+    {
+      "id": "S7",
+      "type": "manual-regression (optional)",
+      "description": "回帰確認: .png / .json 表示中でもサイドバー遷移が動作する (もともと再現しないので挙動維持)",
+      "verification_method": "実機確認"
+    }
+  ],
+  "out_of_scope": [
+    "WorktreeDetailRefactored.tsx L551/L570/L581/L875/L904 の同種アンチパターン修正 (別 Issue 化予定)"
+  ],
+  "notes": [
+    "S5-S7 の手動受入は本セッション内では実機起動せず、コードレベルでの検証 (S1-S4) のみを実施してください。ユーザー側で必要に応じて実機確認します。",
+    "acceptance-test-agent は自動検証 (S1-S4) を実行し、結果を acceptance-result.json に記録してください。"
+  ]
+}

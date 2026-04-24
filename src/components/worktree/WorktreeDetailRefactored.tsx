@@ -1295,22 +1295,29 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Issue #438: File panel loading callbacks (memoized for FilePanelSplit)
   // ========================================================================
 
+  // [Issue #675] Depend on the stable useReducer dispatch identity only; depending on
+  // the whole fileTabs object (re-created every render) triggers a SET_DIRTY feedback
+  // loop that starves router.push transitions. exhaustive-deps can't infer dispatch stability.
   const handleLoadContent = useCallback((path: string, content: FileContent) => {
     fileTabs.dispatch({ type: 'SET_CONTENT', path, content });
-  }, [fileTabs]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileTabs.dispatch]);
 
   const handleLoadError = useCallback((path: string, errorMsg: string) => {
     fileTabs.dispatch({ type: 'SET_ERROR', path, error: errorMsg });
-  }, [fileTabs]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileTabs.dispatch]);
 
   const handleSetLoading = useCallback((path: string, isLoading: boolean) => {
     fileTabs.dispatch({ type: 'SET_LOADING', path, loading: isLoading });
-  }, [fileTabs]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileTabs.dispatch]);
 
   // [Issue #469] isDirty state change callback for file content polling control
   const handleDirtyChange = useCallback((path: string, isDirty: boolean) => {
     fileTabs.dispatch({ type: 'SET_DIRTY', path, isDirty });
-  }, [fileTabs]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileTabs.dispatch]);
 
   // ========================================================================
   // Memoized Panes (Issue #411: avoid re-render on polling)
