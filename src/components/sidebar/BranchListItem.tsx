@@ -58,9 +58,10 @@ function CliStatusDot({ status, label }: { status: BranchStatus; label: string }
 }
 
 /**
- * Tooltip shown on hover/focus with branch details (Issue #651).
+ * Tooltip shown on hover/focus with branch details (Issue #651, #676).
  * Rendered via React portal to escape the sidebar's overflow-y:auto clipping.
- * Always present in DOM (CSS-controlled visibility) so aria-describedby works.
+ * Only mounted into the DOM while `isVisible` is true (Issue #676 fix) to avoid
+ * stuck-tooltip states caused by missed `mouseleave`/`blur` events.
  */
 function BranchTooltip({
   id,
@@ -77,6 +78,7 @@ function BranchTooltip({
   const [coords, setCoords] = useState({ top: -9999, left: -9999 });
 
   // Update position when tooltip becomes visible
+  // (Hook ordering kept intact: this effect runs unconditionally on every render.)
   useEffect(() => {
     if (isVisible && anchorRef.current) {
       const rect = anchorRef.current.getBoundingClientRect();
@@ -87,6 +89,10 @@ function BranchTooltip({
   // Portals require document — skip during SSR
   // (portal content is outside the component subtree so there is no hydration mismatch)
   if (typeof document === 'undefined') return null;
+
+  // Issue #676: Unmount tooltip content when not visible so a stale
+  // `isTooltipVisible=true` can never cause the tooltip to linger in the DOM.
+  if (!isVisible) return null;
 
   return ReactDOM.createPortal(
     <div
@@ -102,7 +108,6 @@ function BranchTooltip({
       style={{
         top: coords.top,
         left: coords.left,
-        opacity: isVisible ? 1 : 0,
       }}
     >
       <p className="font-medium text-white whitespace-nowrap">{branch.name}</p>
@@ -147,17 +152,30 @@ export const BranchListItem = memo(function BranchListItem({
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [isTooltipVisible, setIsTooltipVisible] = useState(false);
 
+  // Issue #676 (A): selected branches never show the tooltip so a stuck
+  // `isTooltipVisible=true` does not leave a tooltip lingering next to the
+  // currently-focused item.
+  const showTooltip = isTooltipVisible && !isSelected;
+
+  // Issue #676 (B): clicking closes the tooltip explicitly before firing the
+  // upstream onClick, so even if a subsequent re-render misses the mouseleave
+  // event, the tooltip state is reset.
+  const handleClick = () => {
+    setIsTooltipVisible(false);
+    onClick();
+  };
+
   return (
     <button
       ref={buttonRef}
       data-testid="branch-list-item"
-      onClick={onClick}
+      onClick={handleClick}
       onMouseEnter={() => setIsTooltipVisible(true)}
       onMouseLeave={() => setIsTooltipVisible(false)}
       onFocus={() => setIsTooltipVisible(true)}
       onBlur={() => setIsTooltipVisible(false)}
       aria-current={isSelected ? 'true' : undefined}
-      aria-describedby={tooltipId}
+      aria-describedby={showTooltip ? tooltipId : undefined}
       aria-label={!showRepositoryName ? `${branch.name} - ${branch.repositoryName}` : undefined}
       className={`
         group relative w-full px-4 py-3 flex flex-col gap-1
@@ -219,7 +237,7 @@ export const BranchListItem = memo(function BranchListItem({
       <BranchTooltip
         id={tooltipId}
         branch={branch}
-        isVisible={isTooltipVisible}
+        isVisible={showTooltip}
         anchorRef={buttonRef}
       />
     </button>

@@ -165,9 +165,11 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
+        // In grouped mode the repository name is rendered once in the group
+        // header (branch items use showRepositoryName={false} and the per-item
+        // tooltip is only mounted on hover — Issue #676).
         const repoNames = screen.getAllByText('MyRepo');
-        // 3 branch items + 1 group header = 4 in grouped mode
-        expect(repoNames.length).toBeGreaterThanOrEqual(3);
+        expect(repoNames.length).toBeGreaterThanOrEqual(1);
       });
     });
   });

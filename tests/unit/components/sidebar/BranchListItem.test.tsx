@@ -50,7 +50,7 @@ describe('BranchListItem', () => {
         />
       );
 
-      // Branch name appears in both inline display and tooltip
+      // Branch name appears in inline display (tooltip is only in DOM when hovered)
       expect(screen.getAllByText('feature/test').length).toBeGreaterThanOrEqual(1);
     });
 
@@ -63,7 +63,7 @@ describe('BranchListItem', () => {
         />
       );
 
-      // Repository name appears in both inline display and tooltip
+      // Repository name appears in inline display (tooltip is only in DOM when hovered)
       expect(screen.getAllByText('MyRepo').length).toBeGreaterThanOrEqual(1);
     });
 
@@ -333,8 +333,10 @@ describe('BranchListItem', () => {
         />
       );
 
-      // Repository name should appear at least twice: inline + tooltip
-      expect(screen.getAllByText('MyRepo').length).toBeGreaterThanOrEqual(2);
+      // Repository name should appear inline (tooltip only in DOM when hovered)
+      const branchInfoTexts = screen.getByTestId('branch-list-item').querySelectorAll('p');
+      const inlineTexts = Array.from(branchInfoTexts).map((el) => el.textContent);
+      expect(inlineTexts).toContain('MyRepo');
     });
 
     it('should display repository name inline when showRepositoryName is true', () => {
@@ -347,8 +349,10 @@ describe('BranchListItem', () => {
         />
       );
 
-      // Repository name should appear at least twice: inline + tooltip
-      expect(screen.getAllByText('MyRepo').length).toBeGreaterThanOrEqual(2);
+      // Repository name should appear inline (tooltip only in DOM when hovered)
+      const branchInfoTexts = screen.getByTestId('branch-list-item').querySelectorAll('p');
+      const inlineTexts = Array.from(branchInfoTexts).map((el) => el.textContent);
+      expect(inlineTexts).toContain('MyRepo');
     });
 
     it('should not display repository name when showRepositoryName is false', () => {
@@ -372,7 +376,7 @@ describe('BranchListItem', () => {
   });
 
   describe('Tooltip (Issue #651)', () => {
-    it('should render a tooltip with role="tooltip"', () => {
+    it('should render a tooltip with role="tooltip" on mouseEnter', () => {
       render(
         <BranchListItem
           branch={defaultBranch}
@@ -381,10 +385,11 @@ describe('BranchListItem', () => {
         />
       );
 
+      fireEvent.mouseEnter(screen.getByRole('button'));
       expect(screen.getByRole('tooltip')).toBeInTheDocument();
     });
 
-    it('should have tooltip id matching aria-describedby on button', () => {
+    it('should have tooltip id matching aria-describedby on button when tooltip is visible', () => {
       render(
         <BranchListItem
           branch={defaultBranch}
@@ -394,6 +399,8 @@ describe('BranchListItem', () => {
       );
 
       const button = screen.getByTestId('branch-list-item');
+      fireEvent.mouseEnter(button);
+
       const tooltipId = `tooltip-${defaultBranch.id}`;
       expect(button).toHaveAttribute('aria-describedby', tooltipId);
 
@@ -410,6 +417,7 @@ describe('BranchListItem', () => {
         />
       );
 
+      fireEvent.mouseEnter(screen.getByRole('button'));
       const tooltip = screen.getByRole('tooltip');
       expect(tooltip.textContent).toContain('feature/test');
     });
@@ -423,6 +431,7 @@ describe('BranchListItem', () => {
         />
       );
 
+      fireEvent.mouseEnter(screen.getByRole('button'));
       const tooltip = screen.getByRole('tooltip');
       expect(tooltip.textContent).toContain('MyRepo');
     });
@@ -436,6 +445,7 @@ describe('BranchListItem', () => {
         />
       );
 
+      fireEvent.mouseEnter(screen.getByRole('button'));
       const tooltip = screen.getByRole('tooltip');
       expect(tooltip.textContent).toContain('running');
     });
@@ -449,6 +459,7 @@ describe('BranchListItem', () => {
         />
       );
 
+      fireEvent.mouseEnter(screen.getByRole('button'));
       const tooltip = screen.getByRole('tooltip');
       expect(tooltip.textContent).toContain('/path/to/worktree');
     });
@@ -462,6 +473,7 @@ describe('BranchListItem', () => {
         />
       );
 
+      fireEvent.mouseEnter(screen.getByRole('button'));
       const tooltip = screen.getByRole('tooltip');
       expect(tooltip).toBeInTheDocument();
     });
@@ -477,6 +489,141 @@ describe('BranchListItem', () => {
 
       const button = screen.getByTestId('branch-list-item');
       expect(button.className).toMatch(/group/);
+    });
+  });
+
+  describe('Tooltip visibility lifecycle (Issue #676)', () => {
+    it('should not render tooltip in DOM on initial render (C)', () => {
+      render(
+        <BranchListItem
+          branch={defaultBranch}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    });
+
+    it('should not attach aria-describedby on initial render (accessibility)', () => {
+      render(
+        <BranchListItem
+          branch={defaultBranch}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      const button = screen.getByTestId('branch-list-item');
+      expect(button).not.toHaveAttribute('aria-describedby');
+    });
+
+    it('should show tooltip on mouseEnter', () => {
+      render(
+        <BranchListItem
+          branch={defaultBranch}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      fireEvent.mouseEnter(screen.getByRole('button'));
+      expect(screen.getByRole('tooltip')).toBeInTheDocument();
+    });
+
+    it('should hide tooltip on mouseLeave', () => {
+      render(
+        <BranchListItem
+          branch={defaultBranch}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      const button = screen.getByRole('button');
+      fireEvent.mouseEnter(button);
+      expect(screen.getByRole('tooltip')).toBeInTheDocument();
+
+      fireEvent.mouseLeave(button);
+      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    });
+
+    it('should hide tooltip on click (B)', () => {
+      render(
+        <BranchListItem
+          branch={defaultBranch}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      const button = screen.getByRole('button');
+      fireEvent.mouseEnter(button);
+      expect(screen.getByRole('tooltip')).toBeInTheDocument();
+
+      fireEvent.click(button);
+      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    });
+
+    it('should still invoke onClick when click hides the tooltip (B)', () => {
+      const onClick = vi.fn();
+      render(
+        <BranchListItem
+          branch={defaultBranch}
+          isSelected={false}
+          onClick={onClick}
+        />
+      );
+
+      const button = screen.getByRole('button');
+      fireEvent.mouseEnter(button);
+      fireEvent.click(button);
+
+      expect(onClick).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not render tooltip when isSelected=true even on mouseEnter (A + C)', () => {
+      render(
+        <BranchListItem
+          branch={defaultBranch}
+          isSelected={true}
+          onClick={() => {}}
+        />
+      );
+
+      fireEvent.mouseEnter(screen.getByRole('button'));
+      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    });
+
+    it('should not attach aria-describedby when isSelected=true (A)', () => {
+      render(
+        <BranchListItem
+          branch={defaultBranch}
+          isSelected={true}
+          onClick={() => {}}
+        />
+      );
+
+      fireEvent.mouseEnter(screen.getByRole('button'));
+      const button = screen.getByTestId('branch-list-item');
+      expect(button).not.toHaveAttribute('aria-describedby');
+    });
+
+    it('should show tooltip on focus and hide on blur', () => {
+      render(
+        <BranchListItem
+          branch={defaultBranch}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      const button = screen.getByRole('button');
+      fireEvent.focus(button);
+      expect(screen.getByRole('tooltip')).toBeInTheDocument();
+
+      fireEvent.blur(button);
+      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
     });
   });
 
