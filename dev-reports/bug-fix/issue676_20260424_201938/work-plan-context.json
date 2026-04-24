@@ -1,0 +1,40 @@
+{
+  "bug_id": "issue676_20260424_201938",
+  "issue_number": 676,
+  "bug_description": "サイドバーのブランチ tooltip が isTooltipVisible=true で固着し残り続ける",
+  "selected_actions": [
+    {
+      "action_id": "A",
+      "title": "選択中ブランチでは tooltip を出さない",
+      "description": "BranchListItem.tsx の BranchTooltip に渡す isVisible を `isTooltipVisible && !isSelected` に変更。選択中ブランチの情報はメイン画面に出ているため tooltip として見せる必要は薄く、スクショ症状（選択済みブランチの tooltip 残留）をこれで解消。",
+      "files_to_modify": ["src/components/sidebar/BranchListItem.tsx"],
+      "target_line": 222
+    },
+    {
+      "action_id": "B",
+      "title": "click 時に明示的に state を false にする",
+      "description": "onClick ハンドラで setIsTooltipVisible(false) を先に呼ぶ。click という確実なトリガで state を落とせるため、onMouseLeave スキップに依存しなくなる。",
+      "files_to_modify": ["src/components/sidebar/BranchListItem.tsx"],
+      "target_line": 154
+    },
+    {
+      "action_id": "C",
+      "title": "state false 時は portal の中身を null にする",
+      "description": "BranchTooltip の createPortal の children を `isVisible ? <div>...</div> : null` に変更。opacity 制御のみだと DOM 常時存在で state 異常時に必ず残留するため、物理的に除去する最終防御線。従来コメントの「Always present in DOM」の前提も改め、コメントも合わせて更新する。",
+      "files_to_modify": ["src/components/sidebar/BranchListItem.tsx"],
+      "target_line_range": "91-121"
+    }
+  ],
+  "deliverables": [
+    "src/components/sidebar/BranchListItem.tsx の修正",
+    "tests/unit/components/sidebar/BranchListItem.test.tsx への対応テスト追加"
+  ],
+  "definition_of_done": [
+    "isSelected=true のとき tooltip div 要素が DOM に描画されない（A+C 検証）",
+    "click 時に setIsTooltipVisible(false) が呼ばれる（B 検証）",
+    "isVisible=false のとき portal 内部が null で tooltip div が DOM に存在しない（C 検証）",
+    "既存の tooltip 関連テストが壊れないこと",
+    "npm run lint と npx tsc --noEmit がパス",
+    "npm run test:unit がパス"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "bug_id": "issue676_20260424_201938",
+  "issue_number": 676,
+  "title": "サイドバーのブランチ tooltip が isTooltipVisible=true で固着し残り続ける",
+  "root_cause": "BranchListItem.tsx の isTooltipVisible state が true のまま固定される。Issue #675 の無限ループ中に mouseleave 合成イベントと React 18 concurrent rendering のレースで setIsTooltipVisible(false) が dispatch されない。加えて tooltip は portal で DOM に常時存在し opacity 制御のみのため、state 異常時にユーザー画面から除去できない構造になっている。",
+  "affected_files": [
+    "src/components/sidebar/BranchListItem.tsx"
+  ],
+  "severity": "high",
+  "related_issues": [675],
+  "recommended_fix": "A+B+C 併用（Issue 本文記載の通り）",
+  "skipped_reason": "Issue #676 本文に調査済みの根本原因・修正方針・テスト方針が既に詳細に記載済みのため、investigation-agent 呼び出しをスキップ。実ファイル (src/components/sidebar/BranchListItem.tsx) で Issue 記載の行番号・コード構造と一致することを確認済み。"
+}

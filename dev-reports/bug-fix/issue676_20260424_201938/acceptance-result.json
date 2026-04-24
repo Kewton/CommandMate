@@ -1,0 +1,161 @@
+{
+  "bug_id": "issue676_20260424_201938",
+  "issue_number": 676,
+  "result": "passed",
+  "summary": "All 7 acceptance criteria verified by unit tests (45/45 in BranchListItem.test.tsx, 9 new Issue #676 tests). All quality gates pass: lint clean, tsc clean, full unit suite 6390 passed / 7 skipped / 0 failed. Implementation correctly applies defensive strategies A+B+C to src/components/sidebar/BranchListItem.tsx. Hook ordering is preserved in BranchTooltip, SSR guard intact, scope strictly contained to sidebar BranchListItem (with one unrelated Sidebar.test.tsx count relaxation that is logically consistent with the DOM change).",
+  "acceptance_criteria_results": [
+    {
+      "criterion": "選択中ブランチでは tooltip が表示されないこと (isSelected=true)",
+      "status": "passed",
+      "evidence": "BranchListItem.tsx L158: showTooltip = isTooltipVisible && !isSelected. Verified by 'should not render tooltip when isSelected=true even on mouseEnter (A + C)' test that fires mouseEnter on a selected branch and asserts queryByRole('tooltip') is absent."
+    },
+    {
+      "criterion": "マウスを別要素に移動すると tooltip が消えること (mouseLeave)",
+      "status": "passed",
+      "evidence": "BranchListItem.tsx L174: onMouseLeave={() => setIsTooltipVisible(false)}. Verified by 'should hide tooltip on mouseLeave' test which enters then leaves and asserts tooltip is removed from DOM."
+    },
+    {
+      "criterion": "button を click すると tooltip が消えること (click 時の明示的リセット)",
+      "status": "passed",
+      "evidence": "BranchListItem.tsx L163-166: handleClick wraps onClick and calls setIsTooltipVisible(false) first. Verified by 'should hide tooltip on click (B)' and 'should still invoke onClick when click hides the tooltip (B)' tests (onClick vi.fn called exactly once)."
+    },
+    {
+      "criterion": "focus → blur でも tooltip が消えること",
+      "status": "passed",
+      "evidence": "BranchListItem.tsx L175-176: onFocus/onBlur toggle isTooltipVisible. Verified by 'should show tooltip on focus and hide on blur' test."
+    },
+    {
+      "criterion": "isVisible=false のとき tooltip div が DOM に存在しないこと (最終防御線)",
+      "status": "passed",
+      "evidence": "BranchListItem.tsx L95: 'if (!isVisible) return null;' placed AFTER the useEffect so Hook order is stable. The obsolete opacity-based always-mounted rendering was removed. Verified by 'should not render tooltip in DOM on initial render (C)' test."
+    },
+    {
+      "criterion": "aria-describedby は tooltip が DOM に実在するときだけ button に付与されること",
+      "status": "passed",
+      "evidence": "BranchListItem.tsx L178: aria-describedby={showTooltip ? tooltipId : undefined}. Verified by 'should not attach aria-describedby on initial render' and 'should not attach aria-describedby when isSelected=true (A)' tests."
+    },
+    {
+      "criterion": "既存の tooltip 表示機能 (mouseEnter/focus で表示, branch 情報を表示) が壊れていないこと",
+      "status": "passed",
+      "evidence": "10 existing tooltip tests were updated to fire mouseEnter first and all pass. 'should show tooltip on mouseEnter' explicitly asserts tooltip becomes present. Tooltip content rendering (name, repositoryName, status, worktreePath, description) in BranchTooltip JSX is unchanged."
+    }
+  ],
+  "quality_gate_results": {
+    "lint": {
+      "command": "npm run lint",
+      "status": "passed",
+      "output": "No ESLint warnings or errors"
+    },
+    "typecheck": {
+      "command": "npx tsc --noEmit",
+      "status": "passed",
+      "output": "No type errors"
+    },
+    "unit_tests_target": {
+      "command": "npx vitest run tests/unit/components/sidebar/BranchListItem.test.tsx",
+      "status": "passed",
+      "total": 45,
+      "passed": 45,
+      "failed": 0,
+      "output": "Test Files 1 passed (1); Tests 45 passed (45); Duration ~712ms"
+    },
+    "unit_tests_full": {
+      "command": "npm run test:unit",
+      "status": "passed",
+      "total_files": 340,
+      "total": 6397,
+      "passed": 6390,
+      "skipped": 7,
+      "failed": 0,
+      "output": "Test Files 340 passed (340); Tests 6390 passed | 7 skipped (6397); Duration ~13.87s. Matches TDD result baseline exactly; no regressions introduced."
+    }
+  },
+  "test_scenarios_results": [
+    {
+      "scenario": "シナリオ1: 未選択ブランチをホバー → tooltip 表示 → マウス離脱 → tooltip 消失",
+      "status": "passed",
+      "evidence": "'should show tooltip on mouseEnter' + 'should hide tooltip on mouseLeave'"
+    },
+    {
+      "scenario": "シナリオ2: ブランチをクリック → tooltip 即座に消失 → onClick コールバック発火",
+      "status": "passed",
+      "evidence": "'should hide tooltip on click (B)' + 'should still invoke onClick when click hides the tooltip (B)'"
+    },
+    {
+      "scenario": "シナリオ3: 既に選択中のブランチをホバー → tooltip が表示されない (A 案)",
+      "status": "passed",
+      "evidence": "'should not render tooltip when isSelected=true even on mouseEnter (A + C)'"
+    },
+    {
+      "scenario": "シナリオ4: キーボード focus → tooltip 表示 → blur → tooltip 消失",
+      "status": "passed",
+      "evidence": "'should show tooltip on focus and hide on blur'"
+    },
+    {
+      "scenario": "シナリオ5: 初期レンダリング直後 → tooltip が DOM に存在しない (C 案)",
+      "status": "passed",
+      "evidence": "'should not render tooltip in DOM on initial render (C)'"
+    },
+    {
+      "scenario": "シナリオ6: tooltip 非表示時 → button に aria-describedby が付いていない",
+      "status": "passed",
+      "evidence": "'should not attach aria-describedby on initial render' + 'should not attach aria-describedby when isSelected=true (A)'"
+    }
+  ],
+  "code_review_findings": [
+    {
+      "severity": "info",
+      "area": "Hook ordering",
+      "finding": "BranchTooltip preserves stable Hook order: useState → useEffect → SSR guard (typeof document) → visibility early return → createPortal. The early `if (!isVisible) return null;` is placed AFTER the useEffect, so React never observes a changing number of Hook calls. Correctly implemented as described in the issue spec."
+    },
+    {
+      "severity": "info",
+      "area": "SSR safety",
+      "finding": "The `typeof document === 'undefined'` guard is retained before the visibility guard (BranchListItem.tsx L91), so SSR behavior is unchanged."
+    },
+    {
+      "severity": "info",
+      "area": "Accessibility",
+      "finding": "aria-describedby is now conditionally attached only when the tooltip is actually in the DOM (L178). This is the accessible behavior and avoids screen readers following a dangling reference when the tooltip node does not exist."
+    },
+    {
+      "severity": "info",
+      "area": "Scope containment",
+      "finding": "Production code changes are limited to src/components/sidebar/BranchListItem.tsx. Other sidebar features (CliStatusDot, unread indicator, description rendering, showRepositoryName inline display, aria-current, aria-label, focus ring) are untouched. Issue #675 infinite-loop code is not modified, confirming the requested scope separation."
+    },
+    {
+      "severity": "info",
+      "area": "Style cleanup",
+      "finding": "The obsolete `opacity: isVisible ? 1 : 0` inline style was removed along with the always-mounted portal strategy; the `transition-opacity` CSS class remains but is now a no-op (no dynamic opacity change). Harmless, but a minor follow-up could strip `transition-opacity duration-150` from the className for clarity. Not a blocker."
+    },
+    {
+      "severity": "info",
+      "area": "Sidebar.test.tsx relaxation",
+      "finding": "Adjacent test 'should show repository name for each branch' was relaxed from >=3 to >=1 occurrences. Justified: in grouped view branch items already use showRepositoryName={false}, so the previous >=3 only passed because the always-mounted tooltip DOM duplicated the repo-name text. With tooltips now mounting only on hover, >=1 (group header) is the correct expectation and accurately reflects user-visible content."
+    },
+    {
+      "severity": "info",
+      "area": "Alignment with Issue #676 directive",
+      "finding": "Implementation applies all three strategies A + B + C as requested in the Issue body and TDD plan. Each strategy is independently verifiable via dedicated tests, which provides good defense-in-depth against future regressions."
+    }
+  ],
+  "risk_assessment": {
+    "scope_contained_to_sidebar_branch_list_item": true,
+    "issue_675_untouched": true,
+    "ssr_portal_guard_preserved": true,
+    "accessibility_regressions": "none detected; aria-describedby behavior is stricter (only when tooltip actually exists), aria-current / aria-label unchanged, keyboard focus path unchanged",
+    "existing_functionality_regressions": "none detected; full 6390-test suite passes, target file 45/45 passes, 10 existing tooltip tests updated to still assert tooltip content after mouseEnter",
+    "notable_considerations": [
+      "Existing Sidebar.test.tsx count assertion was relaxed due to the DOM node no longer being always-mounted. This is a consequence of the fix, not a functional regression; the grouped-view repository name is still rendered once in the group header and the branch-level name remains accessible via the tooltip on hover.",
+      "The CSS `transition-opacity duration-150` class on the tooltip div is now largely cosmetic since mount/unmount happens instead of opacity fading. Minor follow-up opportunity, not a defect.",
+      "Hook ordering inside BranchTooltip relies on the early return being placed AFTER useState/useEffect. This is currently satisfied but worth calling out in a future code review so it is not accidentally reshuffled."
+    ]
+  },
+  "recommendation": "Approve. The fix correctly implements the A+B+C defensive strategies prescribed in Issue #676, all acceptance criteria are covered by automated tests, and every quality gate (lint, tsc, target-file tests, full unit suite) passes with zero regressions. Scope is tightly contained to the sidebar BranchListItem component, aligning with the instruction to keep Issue #675 infinite-loop code out of scope. Ready to proceed to PR / UAT stage.",
+  "evidence_files": [
+    "src/components/sidebar/BranchListItem.tsx (commit 54d62d91)",
+    "tests/unit/components/sidebar/BranchListItem.test.tsx (45 tests, +9 new, 10 updated)",
+    "tests/unit/components/layout/Sidebar.test.tsx (1 assertion relaxed)",
+    "dev-reports/bug-fix/issue676_20260424_201938/tdd-fix-result.json"
+  ]
+}

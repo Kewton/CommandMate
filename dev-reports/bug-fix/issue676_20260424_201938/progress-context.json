@@ -1,0 +1,58 @@
+{
+  "bug_id": "issue676_20260424_201938",
+  "issue_number": 676,
+  "issue_title": "fix: サイドバーのブランチ tooltip が isTooltipVisible=true で固着し残り続ける",
+  "severity": "high",
+  "branch": "feature/676-worktree",
+  "commit": "54d62d91",
+  "phases": {
+    "phase1_investigation": {
+      "status": "completed",
+      "note": "Issue #676 本文に詳細な根本原因分析と A/B/C 対策案が既に記載済みのため investigation-agent 呼び出しはスキップ。実ファイルとの整合性は確認済み。",
+      "result_file": "dev-reports/bug-fix/issue676_20260424_201938/investigation-result.json"
+    },
+    "phase2_proposal": {
+      "status": "completed",
+      "user_selection": "A+B+C 全て適用 (推奨)"
+    },
+    "phase3_work_plan": {
+      "status": "completed",
+      "result_file": "dev-reports/bug-fix/issue676_20260424_201938/work-plan-context.json"
+    },
+    "phase4_tdd_fix": {
+      "status": "passed",
+      "result_file": "dev-reports/bug-fix/issue676_20260424_201938/tdd-fix-result.json",
+      "metrics": {
+        "new_tests": 9,
+        "updated_tests": 10,
+        "target_file_tests": "45/45 passed",
+        "full_suite": "6390 passed / 7 skipped / 0 failed"
+      }
+    },
+    "phase5_acceptance": {
+      "status": "passed",
+      "result_file": "dev-reports/bug-fix/issue676_20260424_201938/acceptance-result.json",
+      "acceptance_criteria": "7/7 met",
+      "quality_gates": "lint/tsc/unit test 全て pass"
+    }
+  },
+  "root_cause": "BranchListItem.tsx の isTooltipVisible state が true のまま固定される。Issue #675 の無限ループ中に mouseleave 合成イベントと React 18 concurrent rendering のレースで setIsTooltipVisible(false) が dispatch されない。加えて tooltip は portal で常時 DOM に存在し opacity 制御のみのため、state 異常時にユーザー画面から物理除去できない構造になっていた。",
+  "fix_applied": {
+    "A": "選択中ブランチでは tooltip を表示しない (showTooltip = isTooltipVisible && !isSelected)",
+    "B": "click ラッパーで setIsTooltipVisible(false) 後に props.onClick を呼ぶ",
+    "C": "BranchTooltip を isVisible=false のとき return null で DOM から物理除去（useEffect の後）。aria-describedby は tooltip 実在時のみ button に付与"
+  },
+  "files_changed": [
+    "src/components/sidebar/BranchListItem.tsx",
+    "tests/unit/components/sidebar/BranchListItem.test.tsx",
+    "tests/unit/components/layout/Sidebar.test.tsx"
+  ],
+  "risks_accepted": [
+    "Issue #675 の無限ループ本体は本 issue 範囲外のため未修正（別 issue で対応）。本修正は race に対する多層防御であり、#675 修正後も適切に動作する設計。"
+  ],
+  "next_steps": [
+    "PR 作成（/create-pr）",
+    "develop への マージ後、実機で再現条件（.md ファイル表示中）での UAT（/uat）",
+    "Issue #675（無限ループ本体）を別途対応"
+  ]
+}
