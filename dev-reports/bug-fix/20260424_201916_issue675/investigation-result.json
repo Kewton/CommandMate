@@ -1,0 +1,205 @@
+{
+  "status": "completed",
+  "investigation_summary": {
+    "issue_description": "Files タブで .md を表示中、サイドバーのブランチ切替で URL 遷移が commit されない。原因は MarkdownEditor の useEffect([isDirty, onDirtyChange]) が毎レンダー再実行され、dispatch({type: 'SET_DIRTY'}) の同値更新でも新 state を生成して再レンダーが続き、router.push が起動した transition が低優先度のまま scheduler に starve される挙動。",
+    "error_type": "React re-render loop starving App Router transition",
+    "affected_files": [
+      "src/hooks/useFileTabs.ts",
+      "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "src/components/worktree/FilePanelContent.tsx",
+      "src/components/worktree/MarkdownEditor.tsx"
+    ],
+    "reproduction_confirmed": "code-level (ソースコード上で再現メカニズムを確認。実機再現は Issue の再現手順に記載済み)"
+  },
+  "code_location_verification": {
+    "useFileTabs_SET_DIRTY_reducer": {
+      "issue_claim": "src/hooks/useFileTabs.ts:239-246 SET_DIRTY reducer は同値判定なし",
+      "verified": true,
+      "note": "L239-246 の reducer は updateTabByPath(...) → {...state, tabs: newTabs} を常に返すため、同値(例: isDirty=false → false)でも新 state 参照を返す。",
+      "evidence": "updateTabByPath(tabs, action.path, (tab) => ({...tab, isDirty: action.isDirty})) は配列コピー + オブジェクトコピーを無条件で実施"
+    },
+    "useFileTabs_return_object": {
+      "issue_claim": "src/hooks/useFileTabs.ts:384 return { state, dispatch, openFile, ... } が毎レンダー新オブジェクト",
+      "verified": true,
+      "note": "L384 で毎レンダー新オブジェクトリテラルを返すため、呼び出し側で deps=[fileTabs] にすると毎回 deps 変化。個々のメンバ(dispatch は useReducer 由来で stable、openFile/closeTab/activateTab/onFileRenamed/onFileDeleted/moveToFront は useCallback([]) で stable)は安定しているのに、ラッパーオブジェクトだけが不安定。"
+    },
+    "WorktreeDetailRefactored_callbacks_deps": {
+      "issue_claim": "L1298-1313 handleLoadContent / handleLoadError / handleSetLoading / handleDirtyChange の useCallback deps=[fileTabs]",
+      "verified": true,
+      "note": "L1300, L1304, L1308, L1313 すべて deps=[fileTabs]。fileTabs ラッパーが毎レンダー新参照なので 4 つのコールバックも毎レンダー再生成される。"
+    },
+    "FilePanelContent_handleDirtyChange_memo": {
+      "issue_claim": "src/components/worktree/FilePanelContent.tsx:563-568 useMemo で onDirtyChange をラップ (deps=[onDirtyChange, tab.path])",
+      "verified": true,
+      "note": "親から渡る onDirtyChange が毎回新参照のため、handleDirtyChange useMemo も毎回新関数。下位 (MarkdownEditor 他) に伝播。"
+    },
+    "MarkdownEditor_useEffect": {
+      "issue_claim": "src/components/worktree/MarkdownEditor.tsx:226-228 useEffect([isDirty, onDirtyChange]) で onDirtyChange?.(isDirty) を呼ぶ",
+      "verified": true,
+      "note": "L226-228 は isDirty が false 継続でも、onDirtyChange identity が毎レンダー変わるため effect が毎レンダー発火 → dispatch SET_DIRTY を親が呼ぶ → SET_DIRTY reducer が無条件で新 state → 親再レンダー → onDirtyChange 再生成 → ... の連鎖を構成。"
+    }
+  },
+  "analysis_validity": {
+    "infinite_loop_mechanism": {
+      "verdict": "概ね妥当",
+      "comment": "『useEffect 内 dispatch が高優先度更新としてキューに積まれ続け、router.push の transition が discard される』という説明は半分正しい。React 18 の並行レンダリングでは、sync(既定) priority の setState が繰り返し発生すると transition (低優先度) は commit されず、実質的にスターブ(starve)する。厳密には『discard』ではなく『repeatedly deferred / starved』。ただし現象としては URL が反映されないことに変わりなく、Issue 本文の原因分析としては成立する。修正方針 (A/B どちらも) によって dispatch が停止 → transition が commit できる、という結論は正しい。"
+    },
+    "md_only_reason": {
+      "verdict": "半分正しい (より正確には MarkdownEditor を描画する拡張子で再現)",
+      "comment": "FilePanelContent.tsx を確認: (1) content.extension === 'md' → MarkdownWithSearch → MarkdownEditor、(2) isEditableExtension('.'+ext) → MarkdownWithSearch → MarkdownEditor (YAML/YML等)、(3) MarpEditorWithSlides → MarkdownEditor。よって .yaml/.yml などの『編集可能テキスト』でも同じループが起きるはず。また HtmlPreview は onDirtyChange prop を type 受領するだけで本体は呼び出さないため、.html は無関係。ImageViewer / CodeViewerWithSearch / PdfPreview は onDirtyChange を受け取らないため無関係。Issue 本文の『.png/.json 等では再現しない』観察は正しいが、『.md 限定』は言い過ぎで .yaml/.yml でも再現する可能性が高い。受け入れテストに含めることを推奨。",
+      "triggering_components": [
+        "MarkdownEditor (src/components/worktree/MarkdownEditor.tsx)"
+      ],
+      "triggering_file_types": [".md", ".yaml", ".yml", "(isEditableExtension() が true を返す全拡張子)"]
+    }
+  },
+  "root_cause_analysis": {
+    "category": "コードバグ (React hooks deps 不安定 + reducer 無条件 state 更新)",
+    "primary_cause": "useFileTabs.ts:384 の戻り値オブジェクトが毎レンダー新参照になるため、WorktreeDetailRefactored.tsx:1298-1313 の useCallback が毎レンダー再生成される。それが FilePanelContent → MarkdownEditor と伝播し、MarkdownEditor.tsx:226-228 の useEffect が毎レンダー発火し、SET_DIRTY reducer が同値でも新 state を返すため再レンダーが無限連鎖。結果として App Router の router.push transition が commit できない。",
+    "evidence": [
+      "useFileTabs.ts:384 の return は毎レンダー新オブジェクトリテラル (個々のメンバは安定でもラッパーは不安定)",
+      "WorktreeDetailRefactored.tsx:1300/1304/1308/1313 すべて deps=[fileTabs] でラッパー全体を依存にしている",
+      "MarkdownEditor.tsx:226-228 の useEffect deps に onDirtyChange を含む (関数 identity 依存)",
+      "useFileTabs.ts:239-246 の SET_DIRTY reducer は同値判定なし (updateTabByPath が無条件で新配列/新オブジェクトを返す)",
+      "観察された挙動『.md のみ再現、画像/JSON/PDF では再現しない』は MarkdownEditor を描画する経路だけが onDirtyChange useEffect を持つこととキレイに一致"
+    ]
+  },
+  "severity_assessment": {
+    "severity": "high",
+    "impact": "サイドバーからのブランチ切替という主要ナビゲーションが .md / .yaml 等の編集可能テキストファイルを表示中に機能しない。ユーザの作業フローを阻害する。データ破壊はない。",
+    "data_loss_risk": "なし (編集内容は保存ボタン/オートセーブ経路で別管理)"
+  },
+  "recommended_actions": [
+    {
+      "action_id": "1",
+      "priority": "high",
+      "title": "A案: useCallback deps を fileTabs.dispatch のみに絞る",
+      "description": "WorktreeDetailRefactored.tsx:1298-1313 の handleLoadContent / handleLoadError / handleSetLoading / handleDirtyChange の deps を [fileTabs] から [fileTabs.dispatch] に変更。dispatch は useReducer 由来で identity が stable (React 保証) なのでコールバックも毎レンダー同一参照になり、FilePanelContent の useMemo と MarkdownEditor の useEffect が発火しなくなる。",
+      "files_to_modify": ["src/components/worktree/WorktreeDetailRefactored.tsx"],
+      "risk_level": "low",
+      "side_effects": [
+        "1298-1313 の 4 コールバックのみ変更すれば十分。rightPaneMemo (L1427) の deps は handleDirtyChange 他の identity が安定した時点で不要に更新されなくなるため副次的にレンダー回数が減る (改善)。",
+        "他箇所で fileTabs.state / fileTabs.openFile / fileTabs.onFileRenamed / fileTabs.onFileDeleted を使う handleFilePathClick(L542-551) / handleFileSelect(L559-570) / handleOpenFile(L576-581) / handleRename(L849-875) / handleDelete(L878-904) は本修正と無関係 (別のアンチパターンは残るが、Issue #675 の再現経路とは別系統)。",
+        "ESLint react-hooks/exhaustive-deps が警告を出す可能性あり。dispatch は safe to omit だが、明示的に [fileTabs.dispatch] と書くか eslint-disable-next-line で抑止する必要あり。"
+      ]
+    },
+    {
+      "action_id": "2",
+      "priority": "high",
+      "title": "B案: SET_DIRTY reducer で同値時 no-op",
+      "description": "useFileTabs.ts:239-246 の SET_DIRTY case で、対象 tab の isDirty が既に同じ値なら state をそのまま返す (参照不変)。useReducer は state 参照が同一なら再レンダーをスキップするため、仮に今後別経路で deps が崩れても同値 dispatch は無害化できる多層防御。",
+      "files_to_modify": ["src/hooks/useFileTabs.ts"],
+      "risk_level": "low",
+      "side_effects": [
+        "SET_DIRTY dispatcher は現時点で WorktreeDetailRefactored.tsx:1312 の 1 箇所のみ。他経路への波及なし。",
+        "既存テスト tests/unit/hooks/useFileTabs.test.ts:406-452 は true↔false の実際の変化に対する検証で、no-op 追加とは互いに直交。既存アサーションに影響なし。",
+        "updateTabByPath 本体は変更しない。他の action (SET_CONTENT/SET_LOADING/SET_ERROR/RENAME_FILE) は同値判定を持たないが、それらはユーザ操作起点で頻発しないため現状問題視されていない。SET_DIRTY のみローカル変更で十分。"
+      ]
+    },
+    {
+      "action_id": "3",
+      "priority": "medium",
+      "title": "推奨: A+B両方適用 (多層防御)",
+      "description": "A案で根本原因(不安定 deps)を断ち、B案で将来の再発を予防。単独適用でもバグは治るが、今回の事例は『ラッパーオブジェクト全体を deps に置く』という書き間違いが原因であり、別のコールバックで同じミスが再発する余地が大きい。B案を入れておけば SET_DIRTY 経路の暴走は構造的に防げる。",
+      "files_to_modify": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/hooks/useFileTabs.ts"
+      ],
+      "risk_level": "low"
+    },
+    {
+      "action_id": "4",
+      "priority": "low",
+      "title": "将来的な検討: useFileTabs の return を useMemo でラップ or 個別 export",
+      "description": "L384 の return オブジェクトを useMemo 化するか、個別の値を分割 export する API に変えると、呼び出し側で deps=[fileTabs] を書いても安定になる。ただし今回のスコープ外とし、別 Issue として切り出すのが望ましい。",
+      "files_to_modify": ["src/hooks/useFileTabs.ts"],
+      "risk_level": "medium"
+    }
+  ],
+  "related_antipatterns_in_codebase": {
+    "summary": "WorktreeDetailRefactored.tsx 内で useCallback/useMemo の deps に fileTabs ラッパーオブジェクト全体を置いている箇所は 7 箇所あった。Issue #675 の直接原因は L1298-1313 の 4 箇所だが、他 3 箇所も将来の不具合リスクを内包する。",
+    "occurrences": [
+      {
+        "line": "551",
+        "context": "handleFilePathClick: deps=[isMobile, fileTabs, showTabLimitToast]",
+        "note": "fileTabs.openFile のみ参照。[isMobile, fileTabs.openFile, showTabLimitToast] で安全。現状機能している副作用は onClick 起点のみのため顕在化していない。"
+      },
+      {
+        "line": "570",
+        "context": "handleFileSelect: deps=[isMobile, fileTabs, showTabLimitToast]",
+        "note": "同上。fileTabs.openFile のみ使用。"
+      },
+      {
+        "line": "581",
+        "context": "handleOpenFile: deps=[fileTabs, showTabLimitToast]",
+        "note": "fileTabs.openFile のみ使用。"
+      },
+      {
+        "line": "875",
+        "context": "handleRename: deps=[worktreeId, fileTabs, tError]",
+        "note": "fileTabs.onFileRenamed のみ使用。"
+      },
+      {
+        "line": "904",
+        "context": "handleDelete: deps=[worktreeId, editorFilePath, fileTabs, tCommon, tError]",
+        "note": "fileTabs.onFileDeleted のみ使用。"
+      },
+      {
+        "line": "1300, 1304, 1308, 1313",
+        "context": "handleLoadContent / handleLoadError / handleSetLoading / handleDirtyChange: deps=[fileTabs]",
+        "note": "Issue #675 の直接原因。fileTabs.dispatch のみ使用。"
+      },
+      {
+        "line": "1427",
+        "context": "rightPaneMemo: deps=[..., fileTabs.state, fileTabs.closeTab, fileTabs.activateTab, fileTabs.moveToFront, ...]",
+        "note": "個別メンバ参照になっており、これ単独では不安定化しない。ただし上流コールバック(handleLoadContent 等) が毎レンダー変わるため結局 invalidate される。A案で上流を修正すれば rightPaneMemo も安定化する。"
+      }
+    ],
+    "recommendation": "Issue #675 の修正スコープは L1298-1313 のみで十分。他 5 箇所 (L551, L570, L581, L875, L904) は別 Issue / refactoring スコープで『React hooks deps に object whole を置かない』規約として一括整理を推奨。"
+  },
+  "recommended_test_cases": [
+    {
+      "id": "T1",
+      "type": "unit (reducer)",
+      "file": "tests/unit/hooks/useFileTabs.test.ts",
+      "case": "SET_DIRTY で isDirty が既に同値の場合、state が同一参照で返ること (result === stateWithTab) を assert。B案の不変条件を検証。"
+    },
+    {
+      "id": "T2",
+      "type": "unit (hook)",
+      "file": "tests/unit/hooks/useFileTabs.test.ts (または新規)",
+      "case": "renderHook で dispatch の identity が複数レンダーで同一であることを確認 (React 保証の再確認)。A案の前提検証。"
+    },
+    {
+      "id": "T3",
+      "type": "unit (component)",
+      "file": "tests/unit/components/MarkdownEditor.test.tsx",
+      "case": "onDirtyChange を同一参照で渡した場合、isDirty が変化しない限り onDirtyChange が再呼び出しされないこと (= useEffect が余計に発火しないこと)。既存の mockClear を使ったアサーションの追補。"
+    },
+    {
+      "id": "T4",
+      "type": "integration/e2e",
+      "file": "tests/e2e (or integration)",
+      "case": "Worktree 詳細で .md を開いた状態 → サイドバーから別ブランチを選択 → URL が想定通り変化することを検証。再現テスト。",
+      "note": ".yaml/.yml でも同様のテストを追加することを推奨 (Issue 本文の『md 限定』仮説への補足確認)。"
+    },
+    {
+      "id": "T5",
+      "type": "manual verification",
+      "case": "Chrome DevTools Profiler で MarkdownEditor 表示中のレンダー回数を録画し、修正前後でレンダー無限ループが止まっていることを視覚的に確認。"
+    }
+  ],
+  "notes_for_implementer": [
+    "A案を採用する場合、ESLint react-hooks/exhaustive-deps のルール違反にならないよう、deps は [fileTabs.dispatch] と書く (個別メンバ参照)。fileTabs 全体を外すとルール違反になる。",
+    "B案の no-op 実装例: case 'SET_DIRTY' の updateTabByPath 呼び出し前に const tab = state.tabs.find(t => t.path === action.path); if (tab && tab.isDirty === action.isDirty) return state; を追加。",
+    "修正後、useFileContentPolling の挙動 (isDirty=true でポーリング停止) に影響しないことを確認。SET_DIRTY の真の状態遷移は引き続き反映される必要がある。",
+    "rightPaneMemo (L1397-1428) の deps は今回触らなくてよい。上流のコールバック identity が安定化すれば自動的に無駄な再評価が減る。",
+    "今回のスコープでは『ラッパーオブジェクト全体を deps に置く』別箇所 (L551, L570, L581, L875, L904) は修正しない方針が妥当。Issue のスコープを膨らませないため。別 Issue 化を推奨。"
+  ],
+  "next_steps": [
+    "A案 + B案の両方を採用する方針で実装計画を作成",
+    "T1 (reducer no-op)、T3 (MarkdownEditor onDirtyChange stability) のユニットテストを先に追加 (TDD)",
+    "実装後、T4 (navigation E2E) で .md / .yaml の両方を検証",
+    "修正対象外の L551/L570/L581/L875/L904 の『fileTabs 全体 deps』は別 Issue として起票を推奨"
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "bug_id": "20260424_201916_issue675",
+  "issue_number": 675,
+  "issue_title": "fix: Markdown ファイル表示中にサイドバーからのブランチ遷移が効かない (onDirtyChange 無限ループ)",
+  "branch": "feature/675-worktree",
+  "commit": "e91e1928",
+  "phases": {
+    "phase1_investigation": {
+      "result_file": "dev-reports/bug-fix/20260424_201916_issue675/investigation-result.json",
+      "summary": "Issue 本文記載のコード位置を全て検証・一致確認。根本原因 (useFileTabs return が毎レンダー新オブジェクト → WorktreeDetailRefactored useCallback deps=[fileTabs] が毎レンダー再生成 → FilePanelContent/MarkdownEditor に不安定 prop 伝播 → MarkdownEditor useEffect 発火 → SET_DIRTY reducer が同値でも新 state → 無限ループ) は妥当。ただし『.md 限定』は言い過ぎで .yaml/.yml 等 isEditableExtension() が true の拡張子でも再現する可能性あり。同種アンチパターンが同ファイル内 5 箇所 (L551/570/581/875/904) に残存、別 Issue 化を推奨。"
+    },
+    "phase2_user_feedback": {
+      "selected_actions": "A案 + B案 両方適用",
+      "out_of_scope_handling": "他 5 箇所のアンチパターンは別 Issue 化"
+    },
+    "phase3_work_plan": {
+      "context_file": "dev-reports/bug-fix/20260424_201916_issue675/work-plan-context.json",
+      "summary": "A案 (WorktreeDetailRefactored.tsx の 4 useCallback deps → [fileTabs.dispatch]) と B案 (useFileTabs.ts SET_DIRTY reducer で同値 no-op) を 1 コミットで実装。TDD で B案の reducer テストを先行追加。"
+    },
+    "phase4_tdd_fix": {
+      "result_file": "dev-reports/bug-fix/20260424_201916_issue675/tdd-fix-result.json",
+      "red_phase": "tests/unit/hooks/useFileTabs.test.ts に SET_DIRTY 同値 no-op 検証 3 件 (false→false / true→true / double-apply) を追加。初回実行で 3 FAIL / 6381 PASS (Red 成立)。",
+      "green_phase": "B案 (useFileTabs.ts SET_DIRTY reducer に find + 同値判定追加) → A案 (WorktreeDetailRefactored.tsx の 4 useCallback deps 変更、exhaustive-deps 警告対策に eslint-disable-next-line 付与) を順次適用。追加テスト含む全ユニットテスト 6384 PASS / 7 skipped。",
+      "refactor_phase": "スコープ最小維持。updateTabByPath 本体や他 reducer case、対象外の L551/570/581/875/904 アンチパターンは非変更。",
+      "files_changed": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx (+11 -4)",
+        "src/hooks/useFileTabs.ts (+3 -0)",
+        "tests/unit/hooks/useFileTabs.test.ts (+36 -0)"
+      ],
+      "commit": "e91e1928 fix(#675): stop re-render loop blocking worktree URL updates"
+    },
+    "phase5_acceptance": {
+      "result_file": "dev-reports/bug-fix/20260424_201916_issue675/acceptance-result.json",
+      "overall": "PASS",
+      "automated_checks": {
+        "lint": "PASS (No ESLint warnings or errors)",
+        "typecheck": "PASS (tsc --noEmit exit 0)",
+        "unit_test": "PASS (340 files, 6384 passed, 7 skipped, 0 failed)",
+        "build": "PASS (Next.js compiled successfully)",
+        "static_grep_A": "PASS (WorktreeDetailRefactored.tsx 4 箇所すべて [fileTabs.dispatch])",
+        "static_grep_B": "PASS (useFileTabs.ts:242 に同値判定存在)"
+      },
+      "manual_checks_skipped": [
+        "S5 実機: .md 表示中にサイドバーからブランチ遷移",
+        "S6 実機: .yaml/.yml での同様挙動",
+        "S7 実機: .png/.json の回帰確認"
+      ]
+    }
+  },
+  "key_decisions": [
+    "A案 + B案 両方適用で多層防御 (Issue 本文の推奨どおり)",
+    "ESLint exhaustive-deps が member-access deps でも警告を出す問題は eslint-disable-next-line で局所抑止 (dispatch は useReducer 由来で stable という React 保証に依拠)",
+    "同ファイル内の他 5 箇所のアンチパターンは別 Issue として切り出す"
+  ],
+  "follow_ups": [
+    "別 Issue 起票: WorktreeDetailRefactored.tsx L551/L570/L581/L875/L904 の『fileTabs 全体を deps に置く』アンチパターンの一括整理",
+    "別 Issue 候補: useFileTabs の return を useMemo でラップ or 個別 export (呼び出し側で deps=[fileTabs] を書いてもループしない API に改善)",
+    "実機受入 (S5/S6/S7): .md + サイドバー遷移、.yaml/.yml、.png/.json の回帰確認はユーザー側で実施を推奨"
+  ],
+  "next_steps": [
+    "PR 作成 (/create-pr または gh pr create) で develop へマージ依頼",
+    "実機受入後、問題なければマージ",
+    "上記 follow-up Issue を適宜起票"
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "bug_id": "20260424_201916_issue675",
+  "issue_number": 675,
+  "branch": "feature/675-worktree",
+  "bug_description": ".md ファイル表示中にサイドバーから別ブランチを選択しても URL が更新されない。MarkdownEditor 経由の onDirtyChange useEffect が毎レンダー発火して SET_DIRTY reducer を無限に呼び、高優先度 dispatch が router.push の transition を starve させる。",
+  "selected_actions": [
+    {
+      "action_id": "A",
+      "title": "WorktreeDetailRefactored.tsx の useCallback deps 修正",
+      "description": "L1298-1313 の handleLoadContent / handleLoadError / handleSetLoading / handleDirtyChange の useCallback deps を [fileTabs] から [fileTabs.dispatch] に変更する。dispatch は useReducer 由来で identity が stable。コールバック identity を安定化させ、FilePanelContent → MarkdownEditor への不安定 prop 伝播を止めて、MarkdownEditor.tsx:226-228 の useEffect が毎レンダー発火する状態を解消する。",
+      "files_to_modify": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "specific_changes": [
+        "handleLoadContent useCallback deps: [fileTabs] → [fileTabs.dispatch]",
+        "handleLoadError useCallback deps: [fileTabs] → [fileTabs.dispatch]",
+        "handleSetLoading useCallback deps: [fileTabs] → [fileTabs.dispatch]",
+        "handleDirtyChange useCallback deps: [fileTabs] → [fileTabs.dispatch]"
+      ]
+    },
+    {
+      "action_id": "B",
+      "title": "useFileTabs.ts SET_DIRTY reducer で同値 no-op",
+      "description": "SET_DIRTY case で、対象 tab の isDirty が既に同じ値なら state を同一参照のまま返す。updateTabByPath を呼ばずに早期 return することで、useReducer が再レンダーをスキップする。将来別経路で deps が崩れた時の多層防御。",
+      "files_to_modify": [
+        "src/hooks/useFileTabs.ts"
+      ],
+      "specific_changes": [
+        "SET_DIRTY case 冒頭で const tab = state.tabs.find(t => t.path === action.path); を行い、tab が存在し tab.isDirty === action.isDirty の場合は return state; を追加"
+      ]
+    }
+  ],
+  "tdd_requirements": {
+    "red_phase": "先に失敗するテストを書く",
+    "test_cases": [
+      {
+        "id": "T1",
+        "file": "tests/unit/hooks/useFileTabs.test.ts",
+        "description": "SET_DIRTY dispatch で対象 tab の isDirty が既に同値 (false→false もしくは true→true) の場合、reducer の戻り値が呼び出し前の state と同一参照 (===) であることを検証する。B案の不変条件を担保。",
+        "expected_before_fix": "FAIL (現状は updateTabByPath が無条件に新 state を返すため state 参照が変わる)",
+        "expected_after_fix": "PASS"
+      },
+      {
+        "id": "T2",
+        "file": "tests/unit/hooks/useFileTabs.test.ts",
+        "description": "SET_DIRTY で isDirty が真に変化する場合 (false→true / true→false) は従来通り新 state を返し、tabs 配列内の対象 tab の isDirty が正しく更新されていることを検証。既存挙動の回帰防止。",
+        "expected_before_fix": "PASS (既存挙動)",
+        "expected_after_fix": "PASS"
+      }
+    ]
+  },
+  "quality_requirements": {
+    "lint": "npm run lint",
+    "typecheck": "npx tsc --noEmit",
+    "unit_test": "npm run test:unit",
+    "coverage_target": 80
+  },
+  "implementation_notes": [
+    "A案適用時、ESLint react-hooks/exhaustive-deps は fileTabs.dispatch を個別メンバ参照にすれば警告を出さない (プロジェクトの既存ルール確認)。",
+    "B案適用時、updateTabByPath 本体は変更しない。SET_DIRTY case にのみ同値判定を追加。他の action (SET_CONTENT / SET_LOADING / SET_ERROR / RENAME_FILE) には手を入れない。",
+    "既存テスト (tests/unit/hooks/useFileTabs.test.ts) の true↔false 遷移テストは変更不要 (直交)。",
+    "rightPaneMemo や他の useCallback/useMemo は今回触らない。上流の identity が安定すれば自動的に無駄な再評価が減る。",
+    "コメントは最小限に。WHY が自明でない箇所 (例: dispatch identity stability を明示するコメント) のみ 1 行で。"
+  ],
+  "out_of_scope": [
+    "WorktreeDetailRefactored.tsx L551/L570/L581/L875/L904 の同種アンチパターン (別 Issue 化予定)",
+    "useFileTabs return の useMemo 化や API 変更 (別 Issue 候補)"
+  ],
+  "target_coverage": 80
+}

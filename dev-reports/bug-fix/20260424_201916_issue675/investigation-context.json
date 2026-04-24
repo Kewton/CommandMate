@@ -1,0 +1,60 @@
+{
+  "issue_number": 675,
+  "issue_title": "fix: Markdown ファイル表示中にサイドバーからのブランチ遷移が効かない (onDirtyChange 無限ループ)",
+  "issue_description": "Files タブから .md ファイルを開いて表示している状態で、サイドバーから別のブランチを選択しても URL が変化せず画面遷移しない。クリックハンドラや router.push は発火しているが、Next.js App Router の navigation transition が commit されない。",
+  "reported_root_cause": "MarkdownEditor の onDirtyChange が毎レンダー identity が変わる useCallback を prop として受け取り、useEffect([isDirty, onDirtyChange]) が毎レンダー発火 → dispatch SET_DIRTY (同値でも新 state 生成) → 再レンダー連鎖。useEffect 内 dispatch が高優先度更新としてキューに常時積まれ続け、router.push 内部の startTransition (低優先度 transition) が割り込まれて commit されない。",
+  "reported_chain": [
+    "useFileTabs.ts: return 戻り値が毎レンダー新オブジェクト (分割代入なしで返すため deps に fileTabs 全体を置くと参照が毎回変わる)",
+    "WorktreeDetailRefactored.tsx: useCallback の deps が [fileTabs] なので毎レンダー新関数 (handleDirtyChange / handleLoadContent / handleLoadError / handleSetLoading)",
+    "FilePanelContent.tsx: useMemo deps に変動する onDirtyChange を含むためラッパーも毎回新しい",
+    "MarkdownEditor.tsx: useEffect deps の onDirtyChange が毎回新しいので useEffect が毎レンダー発火",
+    "useFileTabs.ts SET_DIRTY reducer: 同値でも常に新しい state を返すため再レンダーが必ず起きる"
+  ],
+  "affected_files": [
+    "src/hooks/useFileTabs.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/FilePanelContent.tsx",
+    "src/components/worktree/MarkdownEditor.tsx"
+  ],
+  "specific_line_references": {
+    "src/hooks/useFileTabs.ts:239-246": "SET_DIRTY reducer (同値判定なし)",
+    "src/hooks/useFileTabs.ts:384": "return { state, dispatch, openFile, ... } が毎レンダー新オブジェクト",
+    "src/components/worktree/WorktreeDetailRefactored.tsx:1298-1313": "handleLoadContent / handleLoadError / handleSetLoading / handleDirtyChange が deps=[fileTabs] で不安定",
+    "src/components/worktree/FilePanelContent.tsx:563-568": "useMemo で onDirtyChange をラップ",
+    "src/components/worktree/MarkdownEditor.tsx:226-228": "useEffect([isDirty, onDirtyChange]) で onDirtyChange 呼び出し"
+  },
+  "reproduction_steps": [
+    "1. 任意の Worktree を開く",
+    "2. 左ペインの Files タブから任意の .md ファイルを選択し、右ペインのファイルパネルに表示する",
+    "3. サイドバーから別のブランチを選択（クリック）する"
+  ],
+  "observed_behaviors": [
+    "URL が変化しない",
+    "ファイルタブを全て閉じると正常に遷移する",
+    ".png / .json などの他ファイル種別では再現しない（.md 限定）",
+    "最大化状態とは無関係",
+    "history.pushState 直叩きだと URL は更新される",
+    "サイドバー onClick は発火している"
+  ],
+  "proposed_fixes": {
+    "A": {
+      "title": "useCallback deps を fileTabs.dispatch のみに絞る",
+      "target": "src/components/worktree/WorktreeDetailRefactored.tsx:1298-1313",
+      "rationale": "dispatch は useReducer 由来で stable。コールバック identity 安定化で無限ループを切る"
+    },
+    "B": {
+      "title": "SET_DIRTY reducer で同値時 no-op",
+      "target": "src/hooks/useFileTabs.ts:239-246",
+      "rationale": "将来 deps が崩れても同値 dispatch は state 変更を起こさず再レンダーしない防衛線"
+    }
+  },
+  "environment": {
+    "os": "macOS (Darwin 25.4.0)",
+    "browser": "Chrome (desktop)",
+    "branch": "develop",
+    "related_commit": "edc7193d fix(#673): make PDF preview work on real Chrome (desktop + mobile)",
+    "node_version": "unknown"
+  },
+  "severity_hint": "high",
+  "investigation_request": "1) Issue 本文に記載されたコード位置が現行コードと一致しているか検証する。2) 分析（無限ループで router.push が discard される構造）が妥当か、追加で留意すべき副作用箇所がないか確認する。3) 同じアンチパターン（useCallback/useMemo の deps にオブジェクト全体を置いている）が他に潜んでいないかをざっと確認する。出力は investigation-result.json に保存してください。"
+}
