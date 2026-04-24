@@ -1,0 +1,61 @@
+{
+  "bug_id": "issue676_20260424_201938",
+  "issue_number": 676,
+  "bug_description": "サイドバーのブランチ tooltip が isTooltipVisible=true で固着し残り続ける。Issue #675 の無限ループ中に mouseleave 合成イベントと React concurrent rendering のレースで state が true のまま固定される。",
+  "selected_actions": [
+    {
+      "action_id": "A",
+      "title": "選択中ブランチでは tooltip を出さない",
+      "description": "BranchListItem.tsx の BranchTooltip に渡す isVisible を `isTooltipVisible && !isSelected` に変更。",
+      "target_location": "src/components/sidebar/BranchListItem.tsx の BranchTooltip 呼び出し箇所（222行付近）"
+    },
+    {
+      "action_id": "B",
+      "title": "click 時に明示的に state を false にする",
+      "description": "onClick ハンドラを wrapper 化し、setIsTooltipVisible(false) を先に呼んでから props.onClick を呼ぶ。",
+      "target_location": "src/components/sidebar/BranchListItem.tsx の button onClick（154行）"
+    },
+    {
+      "action_id": "C",
+      "title": "state false 時は portal の中身を null にする",
+      "description": "BranchTooltip の createPortal の第1引数を `isVisible ? <div>...</div> : null` に変更。旧コメント『Always present in DOM』『CSS-controlled visibility so aria-describedby works』は実態と乖離するので整合するように削除/更新。aria-describedby の tooltip は存在しないとスクリーンリーダーから参照先なしになるため、button 側の aria-describedby は isTooltipVisible && !isSelected が true のときのみ付与するか、従来通り常に付与するかは既存挙動維持（既存テスト tooltip-{id} が一致するという期待あり line 398）を優先すべきか、修正により tooltip 要素が存在しないときは aria-describedby を付けない方が仕様として正しい。→ 判断: 『isVisible が false のとき aria-describedby を付けない』が正しいが、既存テストが aria-describedby=tooltip-{id} を期待しているので、その既存テストも合わせて hover/focus 状態で検証するよう更新する。",
+      "target_location": "src/components/sidebar/BranchListItem.tsx の BranchTooltip 本体 createPortal（91-121行）と button の aria-describedby（160行）"
+    }
+  ],
+  "files_to_modify": [
+    "src/components/sidebar/BranchListItem.tsx",
+    "tests/unit/components/sidebar/BranchListItem.test.tsx"
+  ],
+  "test_strategy": {
+    "new_tests_to_add": [
+      "『選択中ブランチでは tooltip 要素が DOM に存在しない』- isSelected=true のとき mouseEnter しても `screen.queryByRole('tooltip')` が null である（A+C 検証）",
+      "『click 時に tooltip が消える』- mouseEnter でツールチップ表示 → click → screen.queryByRole('tooltip') が null（B+C 検証）",
+      "『初期状態では tooltip が DOM に存在しない』- render 直後に queryByRole('tooltip') が null（C 検証）",
+      "『mouseEnter で tooltip が表示される』- mouseEnter で getByRole('tooltip') が存在（基本動作の維持確認）",
+      "『mouseLeave で tooltip が消える』- mouseEnter → mouseLeave で queryByRole('tooltip') が null（基本動作の維持確認）"
+    ],
+    "existing_tests_to_update": [
+      "『should display branch name』line 54: tooltip 非表示前提に修正 or そのまま（>=1 なので問題なし）",
+      "『should display repository name』line 67: >=1 なので問題なし",
+      "『showRepositoryName prop』- line 337, 351: `>=2` 期待を hover 後に検証する or `>=1` に緩和する（推奨: インラインのみ存在を検証する形に修正）",
+      "『Tooltip (Issue #651)』line 374-481: 各テストで mouseEnter を事前に行って tooltip を表示させてから検証する形に全て更新する",
+      "『should truncate long branch names』line 304-323: closest('[role=\"tooltip\"]') フィルタが tooltip 非在時でも安全に動くこと確認"
+    ]
+  },
+  "target_coverage": 80,
+  "definition_of_done": [
+    "npm run lint がパス",
+    "npx tsc --noEmit がパス",
+    "npm run test:unit -- tests/unit/components/sidebar/BranchListItem.test.tsx がパス（新規テスト含む）",
+    "全 npm run test:unit がパス（他の既存テストに影響を出していないこと）",
+    "isSelected=true のときは tooltip が DOM に存在しないこと",
+    "click 時に tooltip が消えること",
+    "mouseEnter で tooltip が表示され mouseLeave で消えること"
+  ],
+  "important_notes": [
+    "BranchTooltip 内部の useState/useEffect の順序維持に注意（isVisible が false → true になるときに useEffect で座標計算する既存フロー）",
+    "aria-describedby は従来 button に常時付与されていたが、tooltip 要素が DOM に存在しないと無意味な参照になるため、tooltip が表示されているときだけ付与する形に変更する（アクセシビリティ的にも正しい）",
+    "既存の BranchTooltip コメント（60-63行）『Always present in DOM』は実態と乖離するため更新する",
+    "修正は最小限に。リファクタリングや別バグ修正に手を広げない"
+  ]
+}
