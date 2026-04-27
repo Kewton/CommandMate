@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-04-27
+
+### Added
+- PDF: PDFファイルプレビュー機能を追加（Blob URL + iframe sandbox方式） (Issue #673)
+
+### Fixed
+- PDF: 実際のChrome（デスクトップ・モバイル）でPDFプレビューが動作するよう修正 (Issue #673)
+- Sidebar: ブランチ切り替え時にツールチップが固定表示される問題を修正 (Issue #676)
+- Worktree: 再レンダリングループによってworktree URL更新がブロックされる問題を修正 (Issue #675)
+- Proxy: External AppsへのWebSocket upgradeをプロキシで中継するよう修正 (Issue #671)
+- Proxy: プロキシ応答から `content-encoding` / `content-length` ヘッダを除去
+
+### Refactored
+- PDF: `normalizeExtension` の共有化と冗長コメントの整理 (Issue #673)
+
 ## [0.5.5] - 2026-04-17
 
 ### Added
