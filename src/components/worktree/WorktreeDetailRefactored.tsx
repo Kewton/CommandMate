@@ -192,7 +192,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const [error, setError] = useState<string | null>(null);
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
   // Issue #438: File tabs state (replaces fileViewerPath for desktop)
-  const fileTabs = useFileTabs(worktreeId);
+  // Issue #683: B案 - [tabsState, tabsActions] tuple; tabsActions is stable across renders
+  const [tabsState, tabsActions] = useFileTabs(worktreeId);
   // Mobile-only: file viewer path for modal display (desktop uses fileTabs)
   const [mobileFileViewerPath, setMobileFileViewerPath] = useState<string | null>(null);
   const [editorFilePath, setEditorFilePath] = useState<string | null>(null);
@@ -543,12 +544,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     if (isMobile) {
       setMobileFileViewerPath(path);
     } else {
-      const result = fileTabs.openFile(path);
+      const result = tabsActions.openFile(path);
       if (result === 'limit_reached') {
         showTabLimitToast();
       }
     }
-  }, [isMobile, fileTabs, showTabLimitToast]);
+  }, [isMobile, tabsActions, showTabLimitToast]);
 
   /**
    * Handle file select from FileTreeView
@@ -562,23 +563,23 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       setMobileFileViewerPath(path);
     } else {
       // Desktop: open in file tab panel (including .md files for preview)
-      const result = fileTabs.openFile(path);
+      const result = tabsActions.openFile(path);
       if (result === 'limit_reached') {
         showTabLimitToast();
       }
     }
-  }, [isMobile, fileTabs, showTabLimitToast]);
+  }, [isMobile, tabsActions, showTabLimitToast]);
 
   /**
    * Handle opening a file from a link in MarkdownPreview/HtmlPreview (Issue #505).
    * Opens the file as a new tab, or shows Toast if limit is reached.
    */
   const handleOpenFile = useCallback((path: string) => {
-    const result = fileTabs.openFile(path);
+    const result = tabsActions.openFile(path);
     if (result === 'limit_reached') {
       showTabLimitToast();
     }
-  }, [fileTabs, showTabLimitToast]);
+  }, [tabsActions, showTabLimitToast]);
 
   /** Handle closing mobile FileViewer modal */
   const handleMobileFileViewerClose = useCallback(() => {
@@ -865,14 +866,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       }
       // Renamed successfully - update file tab if the renamed file was open
       const parentDir = path.includes('/') ? path.substring(0, path.lastIndexOf('/') + 1) : '';
-      fileTabs.onFileRenamed(path, `${parentDir}${newName}`);
+      tabsActions.onFileRenamed(path, `${parentDir}${newName}`);
       // Trigger FileTreeView refresh
       setFileTreeRefresh(prev => prev + 1);
     } catch (err) {
       console.error('[WorktreeDetailRefactored] Failed to rename:', err);
       window.alert(tError('fileOps.failedToRename'));
     }
-  }, [worktreeId, fileTabs, tError]);
+  }, [worktreeId, tabsActions, tError]);
 
   /** Handle file/directory delete in FileTreeView */
   const handleDelete = useCallback(async (path: string) => {
@@ -894,14 +895,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         setEditorFilePath(null);
       }
       // Issue #438: Close file tab if the deleted file was open
-      fileTabs.onFileDeleted(path);
+      tabsActions.onFileDeleted(path);
       // Trigger FileTreeView refresh
       setFileTreeRefresh(prev => prev + 1);
     } catch (err) {
       console.error('[WorktreeDetailRefactored] Failed to delete:', err);
       window.alert(tError('fileOps.failedToDelete'));
     }
-  }, [worktreeId, editorFilePath, fileTabs, tCommon, tError]);
+  }, [worktreeId, editorFilePath, tabsActions, tCommon, tError]);
 
   // Issue #314 / #499 Item 5: Show stop reason toast when pending (deferred from fetchCurrentOutput)
   useEffect(() => {
@@ -1295,29 +1296,23 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Issue #438: File panel loading callbacks (memoized for FilePanelSplit)
   // ========================================================================
 
-  // [Issue #675] Depend on the stable useReducer dispatch identity only; depending on
-  // the whole fileTabs object (re-created every render) triggers a SET_DIRTY feedback
-  // loop that starves router.push transitions. exhaustive-deps can't infer dispatch stability.
+  // [Issue #675, #683] tabsActions is stable (useMemo-wrapped, all fns are useCallback with [])
   const handleLoadContent = useCallback((path: string, content: FileContent) => {
-    fileTabs.dispatch({ type: 'SET_CONTENT', path, content });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileTabs.dispatch]);
+    tabsActions.dispatch({ type: 'SET_CONTENT', path, content });
+  }, [tabsActions]);
 
   const handleLoadError = useCallback((path: string, errorMsg: string) => {
-    fileTabs.dispatch({ type: 'SET_ERROR', path, error: errorMsg });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileTabs.dispatch]);
+    tabsActions.dispatch({ type: 'SET_ERROR', path, error: errorMsg });
+  }, [tabsActions]);
 
   const handleSetLoading = useCallback((path: string, isLoading: boolean) => {
-    fileTabs.dispatch({ type: 'SET_LOADING', path, loading: isLoading });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileTabs.dispatch]);
+    tabsActions.dispatch({ type: 'SET_LOADING', path, loading: isLoading });
+  }, [tabsActions]);
 
   // [Issue #469] isDirty state change callback for file content polling control
   const handleDirtyChange = useCallback((path: string, isDirty: boolean) => {
-    fileTabs.dispatch({ type: 'SET_DIRTY', path, isDirty });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileTabs.dispatch]);
+    tabsActions.dispatch({ type: 'SET_DIRTY', path, isDirty });
+  }, [tabsActions]);
 
   // ========================================================================
   // Memoized Panes (Issue #411: avoid re-render on polling)
@@ -1415,10 +1410,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           />
         }
         terminalHeader={terminalHeaderMemo}
-        fileTabs={fileTabs.state}
+        fileTabs={tabsState}
         worktreeId={worktreeId}
-        onCloseTab={fileTabs.closeTab}
-        onActivateTab={fileTabs.activateTab}
+        onCloseTab={tabsActions.closeTab}
+        onActivateTab={tabsActions.activateTab}
         onLoadContent={handleLoadContent}
         onLoadError={handleLoadError}
         onSetLoading={handleSetLoading}
@@ -1427,11 +1422,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         diffFilePath={diffFilePath}
         onCloseDiff={handleCloseDiff}
         onDirtyChange={handleDirtyChange}
-        onMoveToFront={fileTabs.moveToFront}
+        onMoveToFront={tabsActions.moveToFront}
         onOpenFile={handleOpenFile}
       />
     ),
-    [state.terminal.output, state.terminal.isActive, state.terminal.isThinking, state.terminal.autoScroll, handleAutoScrollChange, disableAutoFollow, terminalHeaderMemo, fileTabs.state, fileTabs.closeTab, fileTabs.activateTab, worktreeId, handleLoadContent, handleLoadError, handleSetLoading, handleFilePanelSave, diffContent, diffFilePath, handleCloseDiff, handleDirtyChange, fileTabs.moveToFront, handleOpenFile]
+    [state.terminal.output, state.terminal.isActive, state.terminal.isThinking, state.terminal.autoScroll, handleAutoScrollChange, disableAutoFollow, terminalHeaderMemo, tabsState, tabsActions.closeTab, tabsActions.activateTab, worktreeId, handleLoadContent, handleLoadError, handleSetLoading, handleFilePanelSave, diffContent, diffFilePath, handleCloseDiff, handleDirtyChange, tabsActions.moveToFront, handleOpenFile]
   );
 
   /**

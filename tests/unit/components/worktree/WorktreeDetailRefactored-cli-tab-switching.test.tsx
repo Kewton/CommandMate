@@ -143,16 +143,20 @@ vi.mock('@/components/worktree/AutoYesToggle', () => ({
   AutoYesToggle: () => <div data-testid="auto-yes-toggle" />,
 }));
 
+// Issue #683: tuple form [state, actions]
 vi.mock('@/hooks/useFileTabs', () => ({
-  useFileTabs: () => ({
-    state: { tabs: [], activeIndex: null },
-    dispatch: vi.fn(),
-    openFile: vi.fn().mockReturnValue('opened'),
-    closeTab: vi.fn(),
-    activateTab: vi.fn(),
-    onFileRenamed: vi.fn(),
-    onFileDeleted: vi.fn(),
-  }),
+  useFileTabs: () => [
+    { tabs: [], activeIndex: null },
+    {
+      dispatch: vi.fn(),
+      openFile: vi.fn().mockReturnValue('opened'),
+      closeTab: vi.fn(),
+      activateTab: vi.fn(),
+      onFileRenamed: vi.fn(),
+      onFileDeleted: vi.fn(),
+      moveToFront: vi.fn(),
+    },
+  ],
   MAX_FILE_TABS: 10,
 }));
 

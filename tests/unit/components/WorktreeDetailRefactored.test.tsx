@@ -189,17 +189,20 @@ vi.mock('@/components/worktree/FileViewer', () => ({
     ) : null,
 }));
 
-// Issue #438: Mock useFileTabs hook
+// Issue #438: Mock useFileTabs hook (Issue #683: tuple form [state, actions])
 vi.mock('@/hooks/useFileTabs', () => ({
-  useFileTabs: () => ({
-    state: { tabs: [], activeIndex: null },
-    dispatch: vi.fn(),
-    openFile: vi.fn().mockReturnValue('opened'),
-    closeTab: vi.fn(),
-    activateTab: vi.fn(),
-    onFileRenamed: vi.fn(),
-    onFileDeleted: vi.fn(),
-  }),
+  useFileTabs: () => [
+    { tabs: [], activeIndex: null },
+    {
+      dispatch: vi.fn(),
+      openFile: vi.fn().mockReturnValue('opened'),
+      closeTab: vi.fn(),
+      activateTab: vi.fn(),
+      onFileRenamed: vi.fn(),
+      onFileDeleted: vi.fn(),
+      moveToFront: vi.fn(),
+    },
+  ],
 }));
 
 // Issue #438: Mock FilePanelSplit

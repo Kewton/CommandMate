@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useFileTabs, MAX_FILE_TABS, fileTabsReducer } from '@/hooks/useFileTabs';
-import type { FileTabsState, FileTabsAction, FileTab } from '@/hooks/useFileTabs';
+import type { FileTabsState, FileTabsAction, FileTab, FileTabsActions } from '@/hooks/useFileTabs';
 import type { FileContent } from '@/types/models';
 
 // ============================================================================
@@ -501,8 +501,8 @@ describe('useFileTabs', () => {
   it('should initialize with empty state', () => {
     const { result } = renderHook(() => useFileTabs('test-wt'));
 
-    expect(result.current.state.tabs).toHaveLength(0);
-    expect(result.current.state.activeIndex).toBeNull();
+    expect(result.current[0].tabs).toHaveLength(0);
+    expect(result.current[0].activeIndex).toBeNull();
   });
 
   describe('openFile', () => {
@@ -511,28 +511,28 @@ describe('useFileTabs', () => {
 
       let returnValue: string;
       act(() => {
-        returnValue = result.current.openFile('src/index.ts');
+        returnValue = result.current[1].openFile('src/index.ts');
       });
 
       expect(returnValue!).toBe('opened');
-      expect(result.current.state.tabs).toHaveLength(1);
-      expect(result.current.state.activeIndex).toBe(0);
+      expect(result.current[0].tabs).toHaveLength(1);
+      expect(result.current[0].activeIndex).toBe(0);
     });
 
     it('should return "activated" when opening an already open file', () => {
       const { result } = renderHook(() => useFileTabs('test-wt'));
 
       act(() => {
-        result.current.openFile('src/index.ts');
+        result.current[1].openFile('src/index.ts');
       });
 
       let returnValue: string;
       act(() => {
-        returnValue = result.current.openFile('src/index.ts');
+        returnValue = result.current[1].openFile('src/index.ts');
       });
 
       expect(returnValue!).toBe('activated');
-      expect(result.current.state.tabs).toHaveLength(1);
+      expect(result.current[0].tabs).toHaveLength(1);
     });
 
     it('should return "limit_reached" when at max tabs', () => {
@@ -541,17 +541,17 @@ describe('useFileTabs', () => {
       // Open MAX_FILE_TABS files
       for (let i = 0; i < MAX_FILE_TABS; i++) {
         act(() => {
-          result.current.openFile(`file${i}.ts`);
+          result.current[1].openFile(`file${i}.ts`);
         });
       }
 
       let returnValue: string;
       act(() => {
-        returnValue = result.current.openFile('extra-file.ts');
+        returnValue = result.current[1].openFile('extra-file.ts');
       });
 
       expect(returnValue!).toBe('limit_reached');
-      expect(result.current.state.tabs).toHaveLength(MAX_FILE_TABS);
+      expect(result.current[0].tabs).toHaveLength(MAX_FILE_TABS);
     });
   });
 
@@ -560,16 +560,16 @@ describe('useFileTabs', () => {
       const { result } = renderHook(() => useFileTabs('test-wt'));
 
       act(() => {
-        result.current.openFile('a.ts');
-        result.current.openFile('b.ts');
+        result.current[1].openFile('a.ts');
+        result.current[1].openFile('b.ts');
       });
 
       act(() => {
-        result.current.closeTab('a.ts');
+        result.current[1].closeTab('a.ts');
       });
 
-      expect(result.current.state.tabs).toHaveLength(1);
-      expect(result.current.state.tabs[0].path).toBe('b.ts');
+      expect(result.current[0].tabs).toHaveLength(1);
+      expect(result.current[0].tabs[0].path).toBe('b.ts');
     });
   });
 
@@ -578,15 +578,15 @@ describe('useFileTabs', () => {
       const { result } = renderHook(() => useFileTabs('test-wt'));
 
       act(() => {
-        result.current.openFile('a.ts');
-        result.current.openFile('b.ts');
+        result.current[1].openFile('a.ts');
+        result.current[1].openFile('b.ts');
       });
 
       act(() => {
-        result.current.activateTab('a.ts');
+        result.current[1].activateTab('a.ts');
       });
 
-      expect(result.current.state.activeIndex).toBe(0);
+      expect(result.current[0].activeIndex).toBe(0);
     });
   });
 
@@ -595,15 +595,15 @@ describe('useFileTabs', () => {
       const { result } = renderHook(() => useFileTabs('test-wt'));
 
       act(() => {
-        result.current.openFile('src/old.ts');
+        result.current[1].openFile('src/old.ts');
       });
 
       act(() => {
-        result.current.onFileRenamed('src/old.ts', 'src/new.ts');
+        result.current[1].onFileRenamed('src/old.ts', 'src/new.ts');
       });
 
-      expect(result.current.state.tabs[0].path).toBe('src/new.ts');
-      expect(result.current.state.tabs[0].name).toBe('new.ts');
+      expect(result.current[0].tabs[0].path).toBe('src/new.ts');
+      expect(result.current[0].tabs[0].name).toBe('new.ts');
     });
   });
 
@@ -612,15 +612,15 @@ describe('useFileTabs', () => {
       const { result } = renderHook(() => useFileTabs('test-wt'));
 
       act(() => {
-        result.current.openFile('a.ts');
+        result.current[1].openFile('a.ts');
       });
 
       act(() => {
-        result.current.onFileDeleted('a.ts');
+        result.current[1].onFileDeleted('a.ts');
       });
 
-      expect(result.current.state.tabs).toHaveLength(0);
-      expect(result.current.state.activeIndex).toBeNull();
+      expect(result.current[0].tabs).toHaveLength(0);
+      expect(result.current[0].activeIndex).toBeNull();
     });
   });
 
@@ -629,17 +629,51 @@ describe('useFileTabs', () => {
       const { result } = renderHook(() => useFileTabs('test-wt'));
 
       act(() => {
-        result.current.openFile('a.ts');
-        result.current.openFile('b.ts');
-        result.current.openFile('c.ts');
+        result.current[1].openFile('a.ts');
+        result.current[1].openFile('b.ts');
+        result.current[1].openFile('c.ts');
       });
 
       act(() => {
-        result.current.moveToFront('c.ts');
+        result.current[1].moveToFront('c.ts');
       });
 
-      expect(result.current.state.tabs[0].path).toBe('c.ts');
-      expect(result.current.state.activeIndex).toBe(0);
+      expect(result.current[0].tabs[0].path).toBe('c.ts');
+      expect(result.current[0].activeIndex).toBe(0);
+    });
+  });
+
+  describe('actions reference stability', () => {
+    it('actions object should be the same reference across renders when state does not change', () => {
+      const { result, rerender } = renderHook(() => useFileTabs('test-wt'));
+
+      const actions1 = result.current[1];
+      rerender();
+      const actions2 = result.current[1];
+
+      expect(Object.is(actions1, actions2)).toBe(true);
+    });
+
+    it('actions object should be the same reference after state changes', () => {
+      const { result } = renderHook(() => useFileTabs('test-wt'));
+
+      const actionsBefore = result.current[1];
+      act(() => {
+        result.current[1].openFile('a.ts');
+      });
+      const actionsAfter = result.current[1];
+
+      expect(Object.is(actionsBefore, actionsAfter)).toBe(true);
+    });
+
+    it('individual action functions should be stable across renders', () => {
+      const { result, rerender } = renderHook(() => useFileTabs('test-wt'));
+
+      const openFile1 = result.current[1].openFile;
+      rerender();
+      const openFile2 = result.current[1].openFile;
+
+      expect(Object.is(openFile1, openFile2)).toBe(true);
     });
   });
 });

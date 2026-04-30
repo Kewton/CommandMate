@@ -9,7 +9,7 @@
 
 'use client';
 
-import { useReducer, useCallback, useEffect, useRef } from 'react';
+import { useReducer, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { FileContent } from '@/types/models';
 
 // ============================================================================
@@ -265,9 +265,8 @@ export function fileTabsReducer(state: FileTabsState, action: FileTabsAction): F
 // Hook
 // ============================================================================
 
-/** Return type of the useFileTabs hook */
-export interface UseFileTabsReturn {
-  state: FileTabsState;
+/** Stable action dispatchers returned by useFileTabs (Issue #683: B案) */
+export interface FileTabsActions {
   dispatch: React.Dispatch<FileTabsAction>;
   openFile: (path: string) => 'opened' | 'activated' | 'limit_reached';
   closeTab: (path: string) => void;
@@ -313,10 +312,12 @@ function writePersistedTabs(worktreeId: string, state: FileTabsState): void {
  * Hook for managing file tabs in the desktop file panel.
  * Persists open tab paths to localStorage per worktreeId.
  *
+ * Returns [state, actions] tuple (Issue #683: B案 - actions object is stable across renders).
+ *
  * @param worktreeId - Worktree identifier for localStorage scoping
- * @returns File tabs state and action dispatchers
+ * @returns [FileTabsState, FileTabsActions] tuple
  */
-export function useFileTabs(worktreeId: string): UseFileTabsReturn {
+export function useFileTabs(worktreeId: string): readonly [FileTabsState, FileTabsActions] {
   const [state, dispatch] = useReducer(fileTabsReducer, initialState);
   const restoredRef = useRef(false);
   const lastWorktreeIdRef = useRef(worktreeId);
@@ -384,5 +385,10 @@ export function useFileTabs(worktreeId: string): UseFileTabsReturn {
     dispatch({ type: 'MOVE_TO_FRONT', path });
   }, []);
 
-  return { state, dispatch, openFile, closeTab, activateTab, onFileRenamed, onFileDeleted, moveToFront };
+  const actions = useMemo<FileTabsActions>(
+    () => ({ dispatch, openFile, closeTab, activateTab, onFileRenamed, onFileDeleted, moveToFront }),
+    [dispatch, openFile, closeTab, activateTab, onFileRenamed, onFileDeleted, moveToFront],
+  );
+
+  return [state, actions] as const;
 }
