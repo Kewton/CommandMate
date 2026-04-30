@@ -1,0 +1,30 @@
+{
+  "phase": "Phase 4 TDD Fix",
+  "approach": "Refactor + Regression-Test-First (no behavior change in production code; new guard tests added; dead prop removed).",
+  "modified_files": [
+    {
+      "path": "tests/unit/hooks/useFileTabs.test.ts",
+      "change_type": "test added",
+      "summary": "Added 3 new tests covering #681 verification: (1) extension-agnostic SET_DIRTY no-op across .md/.yaml/.yml/.html tabs, (2) 30-iteration rapid-fire same-value dispatch stability, (3) flip-and-stabilise transitions on .yaml and .html tabs."
+    },
+    {
+      "path": "src/components/worktree/HtmlPreview.tsx",
+      "change_type": "removed dead prop",
+      "summary": "Removed unused onDirtyChange from HtmlPreviewProps (was declared but never destructured/used in component body)."
+    },
+    {
+      "path": "src/components/worktree/FilePanelContent.tsx",
+      "change_type": "cleanup",
+      "summary": "Removed onDirtyChange={handleDirtyChange} prop from <HtmlPreview /> call site since it was a no-op pass-through."
+    }
+  ],
+  "test_results": {
+    "useFileTabs.test.ts": "47/47 pass (was 44, +3 new for #681)",
+    "HtmlPreview.test.tsx": "all pass (no test referenced onDirtyChange)",
+    "MarkdownEditor.test.tsx": "all pass (existing onDirtyChange tests unchanged)",
+    "full_unit_suite": "340 files, 6396 pass / 7 skipped"
+  },
+  "type_check": "tsc --noEmit: 0 errors",
+  "lint": "ESLint: 0 errors on modified files",
+  "coverage_note": "No production logic changed in HtmlPreview/FilePanelContent — only dead prop removal. The #675 fix already structurally covers all extensions routing through MarkdownEditor (.md/.yaml/.yml). HtmlPreview never fired onDirtyChange, so .html/.htm cannot trigger the loop. New tests guard against future regressions of the SET_DIRTY no-op behavior across mixed extensions."
+}
