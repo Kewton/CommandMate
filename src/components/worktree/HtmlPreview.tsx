@@ -61,7 +61,6 @@ export interface HtmlPreviewProps {
   filePath: string;
   htmlContent: string;
   onFileSaved?: (path: string) => void;
-  onDirtyChange?: (isDirty: boolean) => void;
   /** Callback to open a file from a link (Issue #505) */
   onOpenFile?: (path: string) => void;
 }

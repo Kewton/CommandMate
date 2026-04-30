@@ -1,0 +1,94 @@
+{
+  "issue_number": 681,
+  "title": "verify: .yaml/.yml/.html でも #675 と同種の re-render ループが発生しないか確認",
+  "summary": "Issue #675 の re-render ループ修正が、他の editable extensions (.yaml/.yml/.html/.htm) でも有効か検証する Issue。コード解析の結果、修正は構造的に全拡張子をカバーしており、追加修正は不要と判断。ただし回帰防止のためのテスト追加を推奨。",
+  "routing_analysis": {
+    "src/components/worktree/FilePanelContent.tsx": {
+      ".md": "MarkdownEditor (markdown mode) via MarkdownWithSearch (line 755-787)",
+      ".html / .htm": "HtmlPreview (line 733-751) - matched by content.isHtml",
+      ".yaml / .yml": "MarkdownEditor (text mode) via MarkdownWithSearch (line 790-807) - matched by isEditableExtension"
+    },
+    "key_finding": ".yaml/.yml share the exact same MarkdownEditor + handleDirtyChange path as .md; .html/.htm route through HtmlPreview which does NOT consume onDirtyChange."
+  },
+  "root_cause_recap": {
+    "description": "MarkdownEditor.tsx:226-228 has `useEffect(() => { onDirtyChange?.(isDirty) }, [isDirty, onDirtyChange])`. Before #675, the parent `handleDirtyChange` callback had `[fileTabs]` deps - fileTabs object identity changed every render - so callback identity changed - useEffect re-fired - SET_DIRTY dispatched (even with same value) - reducer always created new state - useReducer re-rendered parent - loop. Loop starved router.push transitions.",
+    "fix_layers": [
+      "Layer A (WorktreeDetailRefactored.tsx:1298-1320): Callback deps changed to [fileTabs.dispatch] - dispatch identity is stable across renders by useReducer guarantee",
+      "Layer B (useFileTabs.ts:239-249): SET_DIRTY reducer short-circuits and returns same state reference when target tab's isDirty value is unchanged - upstream useReducer skips re-render"
+    ]
+  },
+  "per_extension_verdict": {
+    ".yaml": {
+      "reproduces": false,
+      "rationale": "Routes to MarkdownEditor text mode through the SAME handleDirtyChange callback. Both #675 fix layers apply identically: (A) parent callback identity is stable, (B) reducer no-op short-circuit catches duplicate SET_DIRTY dispatches. The fix is structural at the dispatch path, not extension-specific.",
+      "covered_by_675_fix": true
+    },
+    ".yml": {
+      "reproduces": false,
+      "rationale": "Identical route to .yaml.",
+      "covered_by_675_fix": true
+    },
+    ".html": {
+      "reproduces": false,
+      "rationale": "Routes to HtmlPreview. HtmlPreviewProps declares onDirtyChange (line 64) but the component implementation (HtmlPreview.tsx:155-159) does NOT destructure or use onDirtyChange. There is no useEffect that fires onDirtyChange. Therefore HTML files cannot trigger the SET_DIRTY feedback loop in the first place.",
+      "covered_by_675_fix": "n/a (loop pre-conditions absent)"
+    },
+    ".htm": {
+      "reproduces": false,
+      "rationale": "Identical route to .html (HTML_EXTENSIONS=['.html', '.htm']).",
+      "covered_by_675_fix": "n/a (loop pre-conditions absent)"
+    }
+  },
+  "html_preview_pattern_diff_vs_markdown_editor": {
+    "MarkdownEditor.tsx:226-228": "useEffect(() => { onDirtyChange?.(isDirty); }, [isDirty, onDirtyChange]) - actively pumps state to parent",
+    "HtmlPreview.tsx": "Declares prop in interface but never destructures/uses it. No useEffect, no onDirtyChange call site. Effectively dead prop wiring.",
+    "implication": "The #675 antipattern (effect pumping isDirty + unstable parent callback identity) is NOT present in HtmlPreview. The dead prop is forwarded from FilePanelContent.tsx:744 but ignored downstream."
+  },
+  "acceptance_criteria_assessment": [
+    {
+      "criterion": ".yaml / .yml / .html / .htm の 4 種で再現テストを実施し結果を報告",
+      "status": "static analysis complete; no reproduction expected. Recommend regression-test additions to lock in.",
+      "addressed": true
+    },
+    {
+      "criterion": "再現する拡張子があれば追加修正の Issue を起票",
+      "status": "no extension reproduces; no follow-up Issue required.",
+      "addressed": true
+    },
+    {
+      "criterion": "HtmlPreview の onDirtyChange useEffect 実装を確認し記録",
+      "status": "HtmlPreview does NOT implement an onDirtyChange useEffect. Prop declared in interface but unused in implementation (dead wiring from FilePanelContent.tsx:744). Documented above.",
+      "addressed": true
+    }
+  ],
+  "recommended_actions": [
+    {
+      "action_id": "1",
+      "title": "回帰防止テスト追加: SET_DIRTY 連続同値 dispatch の参照不変性確認 (拡張子非依存)",
+      "priority": "Medium",
+      "description": "useFileTabs.test.ts に既に SET_DIRTY 同値 no-op のテストはある。この Issue では追加で .yaml/.yml/.html を含む複数拡張子のタブ間で SET_DIRTY 同値連打が新しい state を生成しないことを検証するテストを追加する。",
+      "files_to_modify": [
+        "tests/unit/hooks/useFileTabs.test.ts"
+      ]
+    },
+    {
+      "action_id": "2",
+      "title": "HtmlPreview の dead prop (onDirtyChange) を整理",
+      "priority": "Low",
+      "description": "HtmlPreviewProps から未使用の onDirtyChange を削除し、FilePanelContent.tsx:744 の handleDirtyChange 渡しも削除する。または『意図的に未配線、HTMLファイルは isDirty 状態を持たない』ことを明記するコメントを追加する。",
+      "files_to_modify": [
+        "src/components/worktree/HtmlPreview.tsx",
+        "src/components/worktree/FilePanelContent.tsx"
+      ]
+    },
+    {
+      "action_id": "3",
+      "title": "対応なし (verify-only クローズ)",
+      "priority": "Acceptable",
+      "description": "受入条件は静的解析で全項目満たしており、#675 修正でカバー済みであることを検証レポートとして残し、追加コード変更なしで Issue クローズ。",
+      "files_to_modify": []
+    }
+  ],
+  "severity_reassessment": "low",
+  "confidence": "high"
+}

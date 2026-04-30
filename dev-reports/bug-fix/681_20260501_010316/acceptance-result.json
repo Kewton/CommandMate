@@ -1,0 +1,41 @@
+{
+  "phase": "Phase 5 Acceptance Test",
+  "issue_number": 681,
+  "verdict": "PASS",
+  "criteria": [
+    {
+      "criterion": ".yaml / .yml / .html / .htm の 4 種で再現テストを実施し結果を報告",
+      "method": "static code analysis + automated reducer-level regression tests",
+      "result": "PASS",
+      "evidence": [
+        ".yaml/.yml route to MarkdownEditor (text mode) which fires the same onDirtyChange useEffect as .md. The #675 fix is at the parent callback (WorktreeDetailRefactored.tsx:1317-1320 deps=[fileTabs.dispatch]) and reducer (useFileTabs.ts:239-249 SET_DIRTY no-op short-circuit), both of which are extension-agnostic. → No reproduction expected.",
+        ".html/.htm route to HtmlPreview, which does NOT call onDirtyChange anywhere in its implementation (HtmlPreview.tsx:154-159 only destructures filePath/htmlContent/onOpenFile; no useEffect on isDirty exists). → Loop pre-conditions absent.",
+        "New test useFileTabs.test.ts:#681-1 verifies that SET_DIRTY same-value dispatches across mixed extensions (.md/.yaml/.yml/.html) all return the SAME state reference (no re-render trigger).",
+        "New test useFileTabs.test.ts:#681-2 verifies 30-iteration rapid-fire same-value dispatch stability across 3 extensions.",
+        "New test useFileTabs.test.ts:#681-3 verifies that real isDirty transitions on .yaml/.html tabs still produce a new state, then stabilise on second same-value dispatch."
+      ]
+    },
+    {
+      "criterion": "再現する拡張子があれば追加修正の Issue を起票",
+      "result": "N/A — no extension reproduces the loop. Static analysis + tests confirm structural coverage by #675 fix.",
+      "follow_up_issue_required": false
+    },
+    {
+      "criterion": "HtmlPreview の onDirtyChange useEffect 実装を確認し記録",
+      "result": "PASS",
+      "finding": "HtmlPreview did NOT have an onDirtyChange useEffect. The prop was declared in HtmlPreviewProps (line 64) but completely unused in the component body — destructured props omit it, no useEffect references isDirty. Confirmed dead wiring. As part of this fix, the unused prop has been removed from HtmlPreviewProps and the call site in FilePanelContent.tsx, eliminating the dead pass-through."
+    }
+  ],
+  "test_summary": {
+    "type_check": "tsc --noEmit → 0 errors",
+    "lint": "ESLint on modified files → 0 errors",
+    "unit_tests": "340 files / 6396 pass / 7 skipped",
+    "new_tests_added": 3,
+    "regression": "none"
+  },
+  "no_reproduction_proof": [
+    "Layer A — parent callback identity: WorktreeDetailRefactored.tsx:1317-1320 uses deps=[fileTabs.dispatch]. dispatch is guaranteed-stable by useReducer. Therefore handleDirtyChange identity does not change render-to-render — children's [onDirtyChange] dep does not refire.",
+    "Layer B — reducer no-op: useFileTabs.ts:239-249 returns the same state reference when target tab's isDirty is unchanged. Even if a duplicate SET_DIRTY arrives, useReducer skips re-render.",
+    "Layer C — HTML routing: FilePanelContent.tsx:733-750 routes .html/.htm to HtmlPreview, which never calls onDirtyChange — the loop's source signal is absent."
+  ]
+}

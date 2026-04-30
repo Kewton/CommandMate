@@ -741,7 +741,6 @@ export const FilePanelContent = memo(function FilePanelContent({
               filePath={tab.path}
               htmlContent={content.content}
               onFileSaved={onFileSaved}
-              onDirtyChange={handleDirtyChange}
               onOpenFile={onOpenFile}
             />
           </div>
