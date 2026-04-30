@@ -1,0 +1,74 @@
+{
+  "stage": 1,
+  "focus": "通常",
+  "reviewer": "opus",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "Should Fix",
+      "title": "現状コード行番号が誤り（384 ではなく 387）",
+      "description": "Issue本文では `src/hooks/useFileTabs.ts:384` を問題箇所として指しているが、実際のコードでは `return { state, dispatch, ... };` は line 387 にある。Line 383-385 は `moveToFront = useCallback(...)` の定義。",
+      "suggestion": "`useFileTabs.ts:384` を `useFileTabs.ts:387` に修正、または行番号を外してコード抜粋のみで示す（行番号は変動しやすいため後者推奨）"
+    },
+    {
+      "id": "S1-002",
+      "severity": "Must Fix",
+      "title": "影響範囲セクションのテストファイルパスが誤り",
+      "description": "影響セクションに `src/hooks/useFileTabs.test.ts` と記載されているが、実際のリポジトリでは `tests/unit/hooks/useFileTabs.test.ts` に配置されている（`src/hooks` 配下に `*.test.ts` は存在しない）。",
+      "suggestion": "影響範囲を `tests/unit/hooks/useFileTabs.test.ts` に訂正する（CLAUDE.md の `tests/unit/...` 規約と整合）"
+    },
+    {
+      "id": "S1-003",
+      "severity": "Must Fix",
+      "title": "影響範囲に消費側テスト2ファイルの追従が抜けている",
+      "description": "`useFileTabs` の戻り値構造を変更すると、useFileTabsをモックしているテスト2ファイルもモック構造の追従修正が必要。`tests/unit/components/WorktreeDetailRefactored.test.tsx`（line 193-203のvi.mock）と `tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx`（line 146-157のvi.mock）。B案でタプルを返すように変更すると、現在のオブジェクト形式モックはランタイムエラーとなる。また両ファイルのモックは現状 `moveToFront` を含んでおらず漏れがある。",
+      "suggestion": "影響セクションに上記2ファイルを追記。`moveToFront` モック漏れも併せて補完する旨を明記"
+    },
+    {
+      "id": "S1-004",
+      "severity": "Should Fix",
+      "title": "B案サンプルコードにUseFileTabsReturn型変更への言及が不足",
+      "description": "推奨されているB案はタプルを返すが、現在エクスポートされている `UseFileTabsReturn` 型インターフェースの取り扱いが言及されていない。タプル化に伴い型シグネチャの破壊的変更が発生し、受入条件にも型API変更の方針が含まれていない。",
+      "suggestion": "B案を採用する場合、戻り値型: `readonly [FileTabsState, FileTabsActions]` への変更、新規型 `FileTabsActions` のエクスポート、既存 `UseFileTabsReturn` 型の deprecated化または削除を Issue に明記"
+    },
+    {
+      "id": "S1-005",
+      "severity": "Should Fix",
+      "title": "受入条件『再render回数の減少確認』が定量的でない",
+      "description": "最後の受入条件『React DevTools Profiler で WorktreeDetailRefactored 配下の re-render 回数が減ることを確認』は手動・主観的な確認になっており、再現手順と閾値が示されていない。",
+      "suggestion": "定量条件を明記するか、`renderHook` ベースで戻り値（actions 部分）が連続 render で同一参照を保つ単体テストを追加し受入条件にする（推奨）"
+    },
+    {
+      "id": "S1-006",
+      "severity": "Should Fix",
+      "title": "受入条件『戻り値構造の方針を決定（A/B/C案）』が後工程に持ち越される",
+      "description": "受入条件の1番目が『方針を決定』となっており、Issue単体では結論が確定していない。B案を『推奨』と書いてはいるが、A/C案に対する却下理由が決定事項として明示されておらず、実装者が独自判断でA案を選ぶ余地が残っている。",
+      "suggestion": "受入条件を具体化: [ ] B案（state と actions のタプル分離）に基づき実装、A案不採用理由とC案不採用理由を明記"
+    },
+    {
+      "id": "S1-007",
+      "severity": "Nice to Have",
+      "title": "消費側deps書き換えの規模感が影響範囲から伝わりづらい",
+      "description": "B案を採用した場合、WorktreeDetailRefactored.tsx 内で書き換わる useCallback/useMemo の deps は概算7-8箇所、20-25行に及ぶ（line 551/570/581/875/904/1304/1309/1314/1320/1434）。",
+      "suggestion": "影響セクションに概算規模を追記し、Issue #682と1 PRで進めるかの方針も明記推奨"
+    },
+    {
+      "id": "S1-008",
+      "severity": "Nice to Have",
+      "title": "関連Issue #681との依存方向が曖昧",
+      "description": "Issue #681との依存関係が不明確で、#683が#681の前提か独立して進めて良いのか本文から読み取れない。",
+      "suggestion": "関連セクションに依存方向を追記"
+    },
+    {
+      "id": "S1-009",
+      "severity": "Nice to Have",
+      "title": "B案でactionsにdispatchを含めるか否かの方針が未確定",
+      "description": "B案サンプルでactionsにdispatchを含めるかは未明示。現状WorktreeDetailRefactored.tsxではfileTabs.dispatch経由でSET_CONTENT/SET_LOADING/SET_DIRTYを呼ぶパターンが残っており、これらをactions関数に置き換えるかも設計判断が必要。",
+      "suggestion": "Issue本文にactionsの構造を明示（dispatch露出継続案 vs 専用アクション関数追加案）"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 4,
+  "nice_to_have_count": 3,
+  "summary": "Issue #683の問題定義と改善方針は技術的に妥当。Must Fix 2件（テストファイルパスの誤り、消費側テスト2ファイルのモック追従抜け）とShould Fix 4件（行番号誤り、型API変更の方針未記載、受入条件の定量化、A/B/C案の確定化）を Issue本文に反映してから work-plan へ進むのが望ましい。"
+}
