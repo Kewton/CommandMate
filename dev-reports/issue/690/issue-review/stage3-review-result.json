@@ -1,0 +1,80 @@
+{
+  "stage": 3,
+  "focus": "影響範囲（1回目）",
+  "reviewer": "opus",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "Must Fix",
+      "title": "useWorktreesCache が `data.repositories` を捨てているためフロント到達経路が成立しない",
+      "description": "Issueは『Sidebar が `/api/worktrees` レスポンスの `repositories.visible` を参照してworktreeをフィルタリング』する設計（案A）を採用しているが、現状 `src/hooks/useWorktreesCache.ts`（Issue #600 で導入されたシングルソース）は `data.worktrees ?? []` のみを取り出しており、`data.repositories` を一切保持していない。さらにこのフックの戻り値型 `UseWorktreesCacheReturn` には `repositories` フィールドが無く、これを `WorktreesCacheProvider` 経由で `WorktreeSelectionProvider` に流し込んでいる。つまり Sidebar が現状アクセスできる Context (`useWorktreeSelection`) には `repositories` が一切届かず、Issue記載の実装方針のままでは Sidebar からは `repository.visible` を取得できない。\n\n影響箇所:\n- `src/hooks/useWorktreesCache.ts` 22-65行: `worktrees` のみを state 管理、`repositories` は捨てられる\n- `src/components/providers/WorktreesCacheProvider.tsx` 29行: `const { worktrees } = useWorktreesCache();` のみ\n- `src/contexts/WorktreeSelectionContext.tsx` 89-105行: `WorktreeSelectionContextValue` に `repositories` が無い\n- `src/contexts/WorktreeSelectionContext.tsx` 198-210行: `fetchWorktrees` が `response.worktrees` のみを dispatch、`response.repositories` を捨てている\n\nこの導線が無いと、Sidebar は visible 情報をどこからも参照できず、Issue記載のフィルタリングが機能しない。",
+      "suggestion": "Issueの『実装タスク』『影響範囲』に以下を追加する:\n  - `src/hooks/useWorktreesCache.ts`: `repositories: RepositorySummary[]` を state に追加し、`UseWorktreesCacheReturn` に含める\n  - `src/components/providers/WorktreesCacheProvider.tsx`: `repositories` を `WorktreeSelectionProvider` に external prop として渡す（または別 Context で配信）\n  - `src/contexts/WorktreeSelectionContext.tsx`: `WorktreeSelectionContextValue` / `WorktreeSelectionState` に `repositories: RepositorySummary[]` を追加し、reducer の `SET_WORKTREES` アクションに `repositories` を含めるか、`SET_REPOSITORIES` を新設\n  - `WorktreeSelectionProvider` の `externalWorktrees` prop に加え `externalRepositories` prop を追加（または props 構造を `{ worktrees, repositories }` のオブジェクトに統合）\n  - `WorktreesCacheProvider` も同様にバインドを更新\n\nまたは、より小さい変更として、Sidebar 専用の薄い Context（`useRepositoriesCache` フック）を新設して `/api/worktrees` の repositories だけ別経路で取得する案もあり得るが、二重取得になるため推奨しない。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "Must Fix",
+      "title": "`RepositorySummary` 型に `visible` が不足、API レスポンス型との非整合",
+      "description": "`/api/worktrees` レスポンスは `src/lib/api-client.ts` 13-18行の `RepositorySummary` 型で表現されている:\n```ts\nexport interface RepositorySummary {\n  id?: string;\n  path: string;\n  name: string;\n  displayName?: string;\n  worktreeCount: number;\n}\n```\nこの型には `visible` が無い。Issueの『API client 型定義（`RepositoryListItem` 等） に `visible` フィールド追加』というタスクは `RepositoryListItem`（`/api/repositories` 用）のみを名指ししているが、実際は `RepositorySummary`（`/api/worktrees` 用）にも `visible` が必要。さらに `getRepositories(db)`（`worktree-db.ts` 171-207行）の戻り値型も同じ shape のため、SQL に `r.visible` を SELECT しただけでは型エラーが出る。",
+      "suggestion": "Issueの『APIレイヤ』タスクに以下を追加:\n  - `src/lib/api-client.ts` の `RepositorySummary` インターフェースにも `visible: boolean` を追加（`RepositoryListItem` だけでなく）\n  - `src/lib/db/worktree-db.ts` の `getRepositories()` の戻り値型 `Array<{ ... }>` にも `visible: boolean` を含める\n  - SELECT 文に `r.visible as visible` を追加し、`enabled` も Sidebar 側の disabled badge 判定に使う場合は併せて含めるか検討\n\n**注意**: `enabled` フラグも将来的に同様のロジックで使われる可能性があるため、この機会に `RepositorySummary` に `enabled` も追加するか、`visible` のみに限定するかを Issue で明記する。`enabled` は現状 `RepositoryListItem` のみが持つ非対称な状態。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "Must Fix",
+      "title": "`runner.ts` の `CURRENT_SCHEMA_VERSION = 30` 更新タスクが欠落",
+      "description": "`src/lib/db/migrations/runner.ts` 27行に `export const CURRENT_SCHEMA_VERSION = 30;` というハードコード値があり、これは v30 までを示している。v31 マイグレーションを追加する場合は、この定数も `31` に更新する必要があるが、Issue の実装タスクには『`runner.ts` に `v31-repository-visible.ts` を登録』としか書かれておらず、`CURRENT_SCHEMA_VERSION` 更新が抜けている。`db-migrations.ts` 経由で再エクスポートされており、CIや起動時バリデーションに影響する可能性がある。",
+      "suggestion": "実装タスク『DBレイヤ』に以下を追加:\n  - `src/lib/db/migrations/runner.ts` の `CURRENT_SCHEMA_VERSION` を `30` → `31` に更新\n\n念のため、テストレイヤにも『`tests/unit/db-migrations.test.ts` でスキーマバージョンが想定通り 31 に上がっていることを確認』を追加する。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "Should Fix",
+      "title": "`updateRepository` の `displayName` 仕様変更が `restoreRepository` 等と非整合になるリスク",
+      "description": "現状の `updateRepository`（`db-repository.ts` 236-285行）の updates 型には `displayName?: string` のみで `null` が無いが、PUT API は `null` で displayName をクリアできる仕様（route.ts 56-58行 `displayName: typeof displayName === 'string' ? displayName.trim() : ''`）。新規に `visible?: boolean` を追加するのは問題ないが、現状の `restoreRepository`（582行）は `updateRepository(db, repo.id, { enabled: true });` を呼び `visible` には触れない。これは仕様（enabled/visible 独立）通りの挙動だが、テストでこの非接触挙動を明示的に担保する必要がある。\n\nまた `disableRepository`（531-552行）は新規作成時に `createRepository` を呼ぶが、Issueで `createRepository` の引数型を拡張する際、`disableRepository` 内の呼び出しが `visible` を渡さない場合のデフォルト挙動（`true` であるべき）を明記しないと、disabled+invisible で隠れて作成されるリスクがある。",
+      "suggestion": "Issueの実装タスクに以下を明記:\n  - `disableRepository`(`db-repository.ts` 531-552行) は `createRepository` 呼び出し時に `visible` を渡さない（デフォルト true で表示される）。`createRepository` の `data.visible !== false ? 1 : 0` のような Boolean 取り扱いも `enabled` と同じパターンを踏襲する\n  - `restoreRepository`(577-583行) は `visible` には触れない（既存の `visible` 値を維持）\n  - テストケースに『`disableRepository` で新規作成された disabled レコードは `visible=true` が初期値』『`restoreRepository` 後も既存の `visible` 値が維持される』を追加"
+    },
+    {
+      "id": "S3-005",
+      "severity": "Should Fix",
+      "title": "`/api/repositories/[id]` PUT の現状実装と Issue 仕様の差異が大きい",
+      "description": "現状の `src/app/api/repositories/[id]/route.ts` は『displayName 更新専用』として最小実装されており、レスポンスは `repository: { id, name, displayName, path, enabled }`（`worktreeCount` を含まない）。Issueでは『partial update』『レスポンスに `visible` を追加』とあるが、以下の点でリファクタリングが必要:\n  1. `body` の `displayName` チェックは現状と互換だが、`visible` を boolean で厳密チェックするロジックを追加する必要がある\n  2. `displayName` も `visible` も両方 undefined のケース（空 partial update）の挙動を明記する必要がある（`updates` が空だと `updateRepository` は `updated_at` のみ更新する → 不要更新）\n  3. レスポンスの shape が `RepositoryListItem` と非対称（`worktreeCount` 不在）。`RepositoryListItem` を流用するなら shape を揃えるか、専用型を継続使用するかの選択を明記する必要がある\n  4. Issue #644 のフロントは `UpdateRepositoryDisplayNameResponse`（`Omit<RepositoryListItem, 'worktreeCount'>`）を期待しており、`visible` を追加するときレスポンス shape を変えると既存呼び出しが壊れる可能性がある\n\n影響: `src/lib/api-client.ts` 359-362行 `UpdateRepositoryDisplayNameResponse`、`src/components/repository/RepositoryList.tsx` 141行 `repositoryApi.updateDisplayName(...)` への波及。",
+      "suggestion": "Issueに以下を明記:\n  - PUT API は `displayName` と `visible` の両方が undefined の場合、400 を返す（または何もせず success: true で返すかを定義）\n  - レスポンス型は `Omit<RepositoryListItem, 'worktreeCount'>` を継続使用し、これに `visible: boolean` を追加（`UpdateRepositoryDisplayNameResponse` を改名するか、汎用名 `UpdateRepositoryResponse` に変更するかも検討）\n  - `repositoryApi.updateDisplayName` を改名（例: `repositoryApi.update(id, { displayName?, visible? })`）するか、新規メソッド `repositoryApi.setVisibility(id, visible)` を追加するかを設計判断として明記"
+    },
+    {
+      "id": "S3-006",
+      "severity": "Should Fix",
+      "title": "サイドバー側のフィルタリングロジックの実装位置と useWorktreeList フックへの影響",
+      "description": "`src/components/layout/Sidebar.tsx` 145-155行は `worktrees.map(toBranchItem)` してから `useWorktreeList`（Issue #600 のフィルタ・ソート・グルーピング共有フック）に渡している。visible でのフィルタリングを Sidebar に追加する場合、以下の選択肢があり Issue で方針が未定義:\n  - (X) `Sidebar.tsx` の `branchItems` 構築時に visible=false の repository に紐づく worktree を除外（`branchItems = useMemo(() => worktrees.filter(wt => repositories.find(r => r.path === wt.repositoryPath)?.visible !== false).map(toBranchItem), [worktrees, repositories])`）\n  - (Y) `useWorktreeList` フック自体に visible フィルタを組み込む（他の利用箇所 `app/sessions/page.tsx` などにも影響）\n  - (Z) `toBranchItem`（`src/types/sidebar.ts`）の段階で visible 情報を伝播させ、`useWorktreeList` の filterText などでフィルタ\n\n各画面の意図（Sessions 画面では visible に関わらず全件表示すべきか、Sidebar と同じく非表示すべきか）が定義されていないと実装者が困る。Issue記載の『非表示設定されたリポジトリ配下のworktreeはサイドバーから完全に除外する』はサイドバー限定の言及だが、Sessions/Review 画面の挙動が不明。",
+      "suggestion": "Issueに以下を明記:\n  - フィルタ実装位置: Sidebar.tsx 内のローカルフィルタとし、`useWorktreeList` 共有フックには変更を加えない（推奨）\n  - 他画面（Sessions, Review, Repositories）の `visible=false` worktree 取り扱い: 全画面でフィルタするのか、Sidebar限定なのかを明示\n    - 推奨: Repositories画面は visible に関わらず全件表示（管理画面のため）。Sessions/Review は要件次第で別Issue化\n  - `useWorktreeList` の入力 `items` を呼び出し側で事前フィルタする方針を明記（共有フックの責務分離）"
+    },
+    {
+      "id": "S3-007",
+      "severity": "Should Fix",
+      "title": "既存テスト `db-repository-exclusion.test.ts` などへの影響と回帰テスト計画の不足",
+      "description": "現存する `tests/unit/db-repository-exclusion.test.ts`、`tests/unit/db-repository-display-name.test.ts`、`tests/unit/db-repository-delete.test.ts`、`tests/unit/db-repository-clone.test.ts`、`tests/integration/repository-exclusion.test.ts`、`tests/integration/api-repository-delete.test.ts`、`tests/unit/components/repository/RepositoryList.test.tsx`、`tests/unit/components/repository/RepositoryManager.test.tsx` は `Repository` 型・`createRepository`/`updateRepository`/`getAllRepositoriesWithWorktreeCount` を直接または間接に使っており、`visible` フィールド追加で型不整合 or expected オブジェクト不一致が発生する可能性が高い。Issueの『既存テスト（`db-repository-exclusion.test.ts` 等）が引き続きパスする』だけでは具体性が不足。",
+      "suggestion": "Issueの『テストレイヤ』タスクに以下のリグレッション確認項目を追加:\n  - `tests/unit/db-repository-exclusion.test.ts`: `enabled=false` レコードでも `visible=true` がデフォルトで設定される\n  - `tests/unit/db-repository-display-name.test.ts`: `displayName` 更新時に `visible` が変わらない\n  - `tests/unit/db-repository-delete.test.ts`: 削除時の挙動が visible に依存しない\n  - `tests/unit/components/repository/RepositoryList.test.tsx`: 既存の Status/Edit/Save テストが visible 列追加後も通る\n  - `tests/integration/repository-exclusion.test.ts`: enabled/visible マトリクス（4組合せ）の動作\n  - `tests/unit/db-migrations.test.ts`: v31 マイグレーションが既存DB（v30 適用済み）に冪等に適用される、ALTER TABLE で既存レコードの visible が DEFAULT 1 で埋まる"
+    },
+    {
+      "id": "S3-008",
+      "severity": "Should Fix",
+      "title": "Sidebarフィルタによる既存 BranchListItem の Disabled badge 表示への影響が未定義",
+      "description": "`src/components/sidebar/BranchListItem.tsx` および `BranchStatusIndicator.tsx` は Issue #190 で disabled リポジトリの worktree に Disabled バッジを表示する仕様が入っている可能性がある（`enabled=false` の worktree も Sidebar に表示し、バッジ付きで識別）。Issueの受入条件 3つ目『`enabled=false` かつ `visible=false` でもサイドバーから除外される』は OK だが、『`enabled=false` かつ `visible=true` の場合はサイドバーに表示される（Issue #190 の挙動を変えない）』を実装する場合、Sidebar に渡される worktree 配列が `enabled` フラグ情報を持っているか確認が必要。\n\n現状 `getRepositories(db)` の戻り値型に `enabled` は含まれていない（`worktree-db.ts` 171-207行）。S3-002 の修正で `RepositorySummary` に `visible` を追加するついでに `enabled` も追加すれば、Sidebar での disabled バッジ判定も可能になる。Issueでは『disabled badge は従来通り表示』とあるが、実装上の経路が未定義。",
+      "suggestion": "Issueの『DBレイヤ』『APIレイヤ』タスクに以下を追加:\n  - `getRepositories(db)` の SELECT に `r.enabled as enabled` も含める（visible とセット）\n  - `RepositorySummary` に `enabled: boolean` を追加\n  - 受入条件に『`enabled=false`(disabled) リポジトリの worktree が visible=true なら Sidebar に表示され、Disabled バッジが表示される』をテスト可能な形で記載\n\nもしくは、disabled バッジは現状 worktree 自体のフラグから判定している場合（`Worktree` 型に直接含まれる場合）、その経路を再確認し Issue に明示する。"
+    },
+    {
+      "id": "S3-009",
+      "severity": "Nice to Have",
+      "title": "ポーリング頻度（5s/30s）と即時反映UXの整合性",
+      "description": "`useWorktreesCache.ts` は active=5s/idle=30s のポーリングで `/api/worktrees` を取得する。トグル送信成功後、楽観的更新でローカル UI は即時反映されるが、他のタブ・他のセッション（例: `useWorktreeSelection` 経由の `worktreeApi.getAll()` 独自ポーリング、2-10s）との整合性が確保されるかが不明。フリーフローティングなキャッシュが2系統あるため、片方だけ更新されると Sidebar と Repositories 画面で表示が一時的にズレる可能性がある。",
+      "suggestion": "実装時判断として:\n  - PUT 成功後、`refreshWorktrees()` を即座に呼び出し全体の repositories ペイロードを再取得する\n  - もしくは、楽観的更新を Repositories 画面のローカル state だけでなく、共有 Context (`WorktreesCacheProvider`) にも反映させる仕組みを検討\n  - 受け入れ条件に『ポーリング後に他タブへ伝播するまで最大30秒の遅延が許容される』など明記し期待値を揃える\n\nNice to Have なので Issue 必須化はしない。"
+    },
+    {
+      "id": "S3-010",
+      "severity": "Nice to Have",
+      "title": "`AssistantChatPanel` などの他コンシューマでの `data.repositories` 利用箇所への波及",
+      "description": "`src/components/home/AssistantChatPanel.tsx` 96行で `(data.repositories ?? []).map(...)` という形で `/api/repositories` の結果を消費している。Issueは `/api/worktrees` レスポンスの `repositories` フィールドを変更するが、`/api/repositories` のレスポンス（GET）にも `visible` を含めるためこの consumer にも影響する可能性がある。具体的には `RepositoryOption` 型などが impacted。\n\nまた `src/components/worktree/WorktreeList.tsx` 73行も `data.repositories` を使うが、これは `WorktreesResponse` の `repositories: RepositorySummary[]` で `visible` 追加すると無害（フィルタしない場合は無視される）。",
+      "suggestion": "Issueに以下のメモを残す（タスク必須化はしない）:\n  - `AssistantChatPanel.tsx` の `RepositoryOption` 構築時、`visible=false` を除外するか全件表示するかは要件次第（推奨は全件: アシスタントは visible に依存しない）\n  - `WorktreeList.tsx` も同様に visible フィルタを適用しない（旧画面のため）\n\nリリース後にユーザフィードバックを見て決定する旨を Issue に書く程度で OK。"
+    }
+  ],
+  "must_fix_count": 3,
+  "should_fix_count": 5,
+  "nice_to_have_count": 2
+}

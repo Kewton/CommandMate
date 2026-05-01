@@ -9,12 +9,23 @@ import type { SlashCommandGroup } from '@/types/slash-commands';
 
 /**
  * Repository summary from API
+ *
+ * Issue #690: `visible` and `enabled` are surfaced via the worktrees API
+ * payload so the sidebar can filter out hidden repositories without an
+ * extra request. The `id` is optional because LEFT JOIN with worktrees
+ * may not have a matching repositories row for legacy data.
  */
 export interface RepositorySummary {
+  /** Repository ID (optional — null when no repositories row exists yet) */
+  id?: string;
   path: string;
   name: string;
   displayName?: string;
   worktreeCount: number;
+  /** Sidebar visibility flag (Issue #690). Defaults to true. */
+  visible: boolean;
+  /** Sync inclusion flag (Issue #190). Defaults to true. */
+  enabled: boolean;
 }
 
 /**
@@ -338,6 +349,7 @@ export interface ExcludedRepository {
 /**
  * Repository list item returned by GET /api/repositories
  * Issue #644: Repository list display and inline display_name edit UI
+ * Issue #690: `visible` field added for sidebar visibility toggle
  */
 export interface RepositoryListItem {
   id: string;
@@ -345,21 +357,34 @@ export interface RepositoryListItem {
   displayName: string | null;
   path: string;
   enabled: boolean;
+  /** Sidebar visibility flag (Issue #690). Defaults to true. */
+  visible: boolean;
   worktreeCount: number;
 }
 
 /**
  * Response type for PUT /api/repositories/[id]
- * Issue #644: Shared response shape for display_name update
+ *
+ * Issue #644: Originally introduced for the `displayName` partial-update.
+ * Issue #690: Now also handles the `visible` partial-update; the canonical
+ *             name is `UpdateRepositoryResponse`. `UpdateRepositoryDisplayNameResponse`
+ *             remains as a back-compat alias for any external consumer that
+ *             imported the original name.
  *
  * NOTE: The API returns the updated repository WITHOUT worktreeCount
  * (the PUT handler does not re-aggregate). The client is expected to
  * preserve its current worktreeCount locally when merging the update.
  */
-export interface UpdateRepositoryDisplayNameResponse {
+export interface UpdateRepositoryResponse {
   success: boolean;
   repository: Omit<RepositoryListItem, 'worktreeCount'>;
 }
+
+/**
+ * Back-compat alias for `UpdateRepositoryResponse` (Issue #644).
+ * Prefer `UpdateRepositoryResponse` in new code.
+ */
+export type UpdateRepositoryDisplayNameResponse = UpdateRepositoryResponse;
 
 /**
  * Delete repository response type
@@ -526,12 +551,33 @@ export const repositoryApi = {
   async updateDisplayName(
     id: string,
     displayName: string | null
-  ): Promise<UpdateRepositoryDisplayNameResponse> {
-    return fetchApi<UpdateRepositoryDisplayNameResponse>(
+  ): Promise<UpdateRepositoryResponse> {
+    return fetchApi<UpdateRepositoryResponse>(
       `/api/repositories/${encodeURIComponent(id)}`,
       {
         method: 'PUT',
         body: JSON.stringify({ displayName }),
+      }
+    );
+  },
+
+  /**
+   * Update the sidebar visibility flag for a repository.
+   * Issue #690: Repositories screen visibility toggle.
+   *
+   * @param id - Repository ID
+   * @param visible - true => shown in sidebar, false => hidden
+   * @returns The updated repository (without worktreeCount).
+   */
+  async updateVisibility(
+    id: string,
+    visible: boolean
+  ): Promise<UpdateRepositoryResponse> {
+    return fetchApi<UpdateRepositoryResponse>(
+      `/api/repositories/${encodeURIComponent(id)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ visible }),
       }
     );
   },

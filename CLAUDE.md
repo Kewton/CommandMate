@@ -157,8 +157,8 @@ tests/
 | `src/lib/db/db-instance.ts` | DBインスタンス管理 |
 | `src/lib/db/db-path-resolver.ts` | DBパス解決 |
 | `src/lib/db/db-migration-path.ts` | DBマイグレーション |
-| `src/lib/db/db-repository.ts` | リポジトリDB操作 |
-| `src/lib/db/worktree-db.ts` | Worktree CRUD操作、archivedフィルタ対応（Issue #479, #168） |
+| `src/lib/db/db-repository.ts` | リポジトリDB操作、`visible` フラグ対応CRUD（Issue #690）、`enabled` フラグ対応CRUD（Issue #190） |
+| `src/lib/db/worktree-db.ts` | Worktree CRUD操作、archivedフィルタ対応（Issue #479, #168）、getRepositories に visible/enabled 追加（Issue #690） |
 | `src/lib/db/chat-db.ts` | チャットメッセージCRUD操作、論理削除（archived）・GetMessagesOptions・ACTIVE_FILTER（Issue #479, #168） |
 | `src/lib/db/session-db.ts` | セッション状態管理（Issue #479） |
 | `src/lib/db/memo-db.ts` | メモ管理CRUD（Issue #479） |
@@ -229,7 +229,7 @@ tests/
 | `src/lib/file-tree.ts` | ディレクトリツリー構造生成 |
 | `src/lib/git/git-utils.ts` | Git情報取得・コミット履歴/diff取得（Issue #447）、getCommitsByDateRange/collectRepositoryCommitLogs追加（Issue #627） |
 | `src/types/git.ts` | Git関連型定義（CommitInfo, ChangedFile, GitLogResponse等）（Issue #447）、CommitLogEntry/RepositoryCommitLogs追加（Issue #627） |
-| `src/lib/sidebar-utils.ts` | サイドバーソート・グループ化ユーティリティ（SortKey, SortDirection, ViewMode型, BranchGroup型, sortBranches(), groupBranches(), generateRepositoryColor()）（Issue #449, #504） |
+| `src/lib/sidebar-utils.ts` | サイドバーソート・グループ化ユーティリティ（SortKey, SortDirection, ViewMode型, BranchGroup型, sortBranches(), groupBranches(), generateRepositoryColor()）（Issue #449, #504）、buildHiddenRepositoryPathSet/filterWorktreesByVisibility追加（Issue #690） |
 | `src/contexts/SidebarContext.tsx` | サイドバー状態管理Context（isOpen, sortKey, viewMode, localStorageパターン）（Issue #449）、DEFAULT_SIDEBAR_WIDTH=224(w-56)に変更（Issue #651） |
 | `src/lib/utils.ts` | 汎用ユーティリティ（withTimeout追加: Issue #627） |
 | `src/lib/date-utils.ts` | 相対時刻フォーマット |
@@ -305,7 +305,7 @@ tests/
 | `src/hooks/useLayoutConfig.ts` | レイアウト設定フック（LayoutConfig, LAYOUT_MAP, resolveLayoutConfig）（Issue #600） |
 | `src/hooks/useSendMessage.ts` | メッセージ送信フック（Issue #600） |
 | `src/hooks/useWorktreeList.ts` | Worktreeリスト共通フック（ソート・フィルタ・グループ化）（Issue #600） |
-| `src/hooks/useWorktreesCache.ts` | Worktrees共有キャッシュフック（Issue #600） |
+| `src/hooks/useWorktreesCache.ts` | Worktrees共有キャッシュフック（Issue #600）、repositories: RepositorySummary[] state追加（Issue #690） |
 | `src/hooks/useWorktreeTabState.ts` | Worktreeタブ状態管理フック（deep link対応）（Issue #600） |
 | `src/components/mobile/GlobalMobileNav.tsx` | モバイルグローバルナビ（4タブ）（Issue #600） |
 | `src/components/home/HomeSessionSummary.tsx` | Home画面セッション集計サマリー（Issue #600） |
@@ -315,8 +315,8 @@ tests/
 | `src/components/review/SimpleMessageInput.tsx` | 軽量メッセージ入力（Review画面用）（Issue #600） |
 | `src/components/review/TemplateTab.tsx` | テンプレート管理UI（一覧・作成・編集・削除、最大5件制限）（Issue #618） |
 | `src/components/worktree/WorktreeDetailHeader.tsx` | Worktree詳細ヘッダー（Repository名・Branch名・Agent・Status・次アクション）（Issue #600） |
-| `src/components/providers/WorktreesCacheProvider.tsx` | Worktreesキャッシュプロバイダー（Issue #600） |
-| `src/components/repository/RepositoryList.tsx` | リポジトリ一覧表示・インライン別名編集UI（Issue #644） |
+| `src/components/providers/WorktreesCacheProvider.tsx` | Worktreesキャッシュプロバイダー（Issue #600）、repositories伝播追加（Issue #690） |
+| `src/components/repository/RepositoryList.tsx` | リポジトリ一覧表示・インライン別名編集UI（Issue #644）、Visibility列トグルUI追加・楽観的更新・エラーロー��バック（Issue #690） |
 | `src/app/sessions/page.tsx` | Sessions画面（Issue #600） |
 | `src/app/repositories/page.tsx` | Repositories画面（Issue #600, #644: RepositoryList上部配置・refreshKey連携） |
 | `src/app/review/page.tsx` | Review画面（Issue #600） |

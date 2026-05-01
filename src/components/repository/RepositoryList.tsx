@@ -2,6 +2,9 @@
  * RepositoryList Component
  *
  * Issue #644: Repository list display and inline display_name edit UI.
+ * Issue #690: Adds a Visibility column with a toggle switch that flips
+ *             the `visible` flag immediately (optimistic update) and
+ *             rolls back + surfaces a feedback banner on failure.
  *
  * Renders a table of all registered repositories (enabled & disabled) with
  * inline editing of the display_name (alias). Refetches when `refreshKey`
@@ -15,6 +18,11 @@
  *   @/config/repository-config (shared with the API route so client and
  *   server stay in sync)
  * - Dark mode support via Tailwind CSS
+ *
+ * Visibility independence (Issue #690):
+ *   - The toggle controls ONLY `visible`. It must NEVER touch `enabled`.
+ *   - `enabled` continues to be governed by the existing disable/restore
+ *     flow (Issue #190).
  */
 
 'use client';
@@ -76,6 +84,10 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
   const [feedback, setFeedback] = useState<
     { type: 'success' | 'error'; message: string } | null
   >(null);
+  // Issue #690: Track which rows currently have a visibility toggle in flight
+  // so we can disable the control to prevent double-clicks and to render a
+  // pending state. Uses a Set keyed by repository ID.
+  const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
 
   const fetchRepositories = useCallback(async () => {
     setLoading(true);
@@ -183,6 +195,72 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
     [handleCancelEdit, handleSave]
   );
 
+  /**
+   * Toggle the sidebar visibility for a single repository (Issue #690).
+   *
+   * Optimistic update flow:
+   *   1. Flip the row in local state immediately.
+   *   2. PUT /api/repositories/[id] { visible }.
+   *   3. On success: replace the row with the API response (preserves
+   *      worktreeCount because the API does not return it).
+   *   4. On failure: roll back the local change and surface a feedback
+   *      banner with the API error message.
+   */
+  const handleToggleVisibility = useCallback(
+    async (repo: RepositoryListItem) => {
+      // Prevent double-clicks while a request is in flight for this row.
+      if (togglingIds.has(repo.id)) {
+        return;
+      }
+
+      const nextVisible = !repo.visible;
+      const previousRepo = repo;
+
+      // Mark in-flight
+      setTogglingIds((prev) => {
+        const next = new Set(prev);
+        next.add(repo.id);
+        return next;
+      });
+
+      // Optimistic local update
+      setRepositories((prev) =>
+        prev.map((r) =>
+          r.id === repo.id ? { ...r, visible: nextVisible } : r
+        )
+      );
+      setFeedback(null);
+
+      try {
+        const result = await repositoryApi.updateVisibility(repo.id, nextVisible);
+
+        // Merge API response while preserving worktreeCount.
+        setRepositories((prev) =>
+          prev.map((r) =>
+            r.id === repo.id ? { ...r, ...result.repository } : r
+          )
+        );
+
+        if (onChanged) {
+          onChanged();
+        }
+      } catch (err) {
+        // Rollback the optimistic update
+        setRepositories((prev) =>
+          prev.map((r) => (r.id === repo.id ? { ...previousRepo } : r))
+        );
+        setFeedback({ type: 'error', message: handleApiError(err) });
+      } finally {
+        setTogglingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(repo.id);
+          return next;
+        });
+      }
+    },
+    [onChanged, togglingIds]
+  );
+
   if (loading && repositories.length === 0) {
     return (
       <Card padding="lg">
@@ -243,6 +321,10 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                 <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
                   Status
                 </th>
+                {/* Issue #690: Visibility column with sidebar visibility toggle */}
+                <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
+                  Visibility
+                </th>
                 <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
                   Actions
                 </th>
@@ -252,7 +334,7 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
               {repositories.length === 0 && (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={7}
                     className="px-4 py-6 text-center text-gray-500 dark:text-gray-400"
                   >
                     No repositories registered yet.
@@ -314,6 +396,14 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                         <Badge variant="gray">Disabled</Badge>
                       )}
                     </td>
+                    {/* Issue #690: Visibility toggle. Independent of `enabled`. */}
+                    <td className="px-4 py-3 align-top">
+                      <VisibilityToggle
+                        repo={repo}
+                        pending={togglingIds.has(repo.id)}
+                        onToggle={handleToggleVisibility}
+                      />
+                    </td>
                     <td className="px-4 py-3 align-top">
                       {isEditing ? (
                         <div className="flex gap-2">
@@ -353,6 +443,65 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
         </div>
       </Card>
     </div>
+  );
+}
+
+/**
+ * VisibilityToggle (Issue #690)
+ *
+ * Renders an accessible switch button that flips the sidebar visibility
+ * for the given repository. The button uses `role="switch"` and
+ * `aria-checked` so screen readers announce the toggle state. While a
+ * request is in flight (`pending`), the button is disabled and shows a
+ * subtle visual cue.
+ *
+ * NOTE on accessibility: per ARIA, `role="switch"` uses `aria-checked`
+ * (not `aria-pressed`). `aria-pressed` is for `role="button"` toggles.
+ */
+function VisibilityToggle({
+  repo,
+  pending,
+  onToggle,
+}: {
+  repo: RepositoryListItem;
+  pending: boolean;
+  onToggle: (repo: RepositoryListItem) => void;
+}) {
+  const isVisible = repo.visible;
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={isVisible}
+      aria-label={
+        isVisible
+          ? `Hide ${repo.name} from sidebar`
+          : `Show ${repo.name} in sidebar`
+      }
+      data-testid={`visibility-toggle-${repo.id}`}
+      onClick={() => onToggle(repo)}
+      disabled={pending}
+      className={`
+        inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium
+        border transition-colors
+        focus:outline-none focus:ring-2 focus:ring-cyan-500
+        disabled:opacity-60 disabled:cursor-not-allowed
+        ${
+          isVisible
+            ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 border-green-300 dark:border-green-800'
+            : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-700'
+        }
+      `}
+    >
+      <span
+        aria-hidden="true"
+        className={`
+          inline-block w-2 h-2 rounded-full
+          ${isVisible ? 'bg-green-500' : 'bg-gray-400'}
+        `}
+      />
+      {isVisible ? 'Visible' : 'Hidden'}
+    </button>
   );
 }
 

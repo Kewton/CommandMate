@@ -1,0 +1,43 @@
+{
+  "issue_number": 690,
+  "status": "success",
+  "refactored_files": [
+    "src/lib/sidebar-utils.ts",
+    "src/components/layout/Sidebar.tsx",
+    "src/lib/api-client.ts",
+    "tests/unit/components/repository/RepositoryList.test.tsx"
+  ],
+  "changes_summary": "Extracted sidebar visibility filter logic into reusable utilities (buildHiddenRepositoryPathSet, filterWorktreesByVisibility) in src/lib/sidebar-utils.ts to improve readability of Sidebar.tsx. Promoted UpdateRepositoryResponse to the canonical type name in api-client.ts (previously the alias was on the wrong side of the relationship after Issue #690 broadened the response shape). Wrapped pending-promise resolution in act() inside RepositoryList.test.tsx to silence the 'update was not wrapped in act(...)' warnings emitted by the 'disables the toggle while a request is in flight' test. No behavioral changes.",
+  "refactorings_applied": [
+    "Extracted Sidebar visibility filter into pure helper functions in sidebar-utils.ts",
+    "Replaced two inline useMemo bodies in Sidebar.tsx with calls to the new helpers (DRY, SRP)",
+    "Renamed UpdateRepositoryDisplayNameResponse <-> UpdateRepositoryResponse so the canonical name reflects the post-#690 shape, alias retained for back-compat",
+    "Wrapped fireEvent-triggered async state update in act() inside RepositoryList.test.tsx"
+  ],
+  "test_results": {
+    "passed": 128,
+    "failed": 0,
+    "scope": "Issue #690 related test files (db-migrations, db-repository-exclusion, repository-visibility, RepositoryList, Sidebar-visibility)",
+    "broader_run": {
+      "total_passed": 6434,
+      "total_skipped": 7,
+      "total_failed": 0,
+      "regression_check": "No regressions: full unit suite (342 files / 6434 tests / 7 skipped) passes."
+    }
+  },
+  "lint_result": "pass",
+  "type_check_result": "pass",
+  "build_result": "pass",
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0,
+    "act_warnings_before": 2,
+    "act_warnings_after": 0
+  },
+  "commits": [
+    "d5f95637: refactor(#690): extract sidebar visibility helpers and fix act() warnings"
+  ],
+  "notes": "All four improvement goals from refactor-context.json were addressed: (1) act() warnings on RepositoryList.test.tsx are gone, (2) RepositorySummary.visible/enabled usage was reviewed and confirmed consistent across api-client.ts, useWorktreesCache.ts, WorktreesCacheProvider.tsx, WorktreeSelectionContext.tsx, and Sidebar.tsx (visible default true, enabled default true, both surfaced from the worktrees API and threaded through the cache to the Sidebar), (3) Sidebar.tsx visibility filter is now a 3-line composition over two named helpers in sidebar-utils.ts instead of two anonymous useMemo bodies, (4) the UpdateRepositoryDisplayNameResponse / UpdateRepositoryResponse alias relationship was inverted so the canonical name reflects the post-#690 shape. No DB layer changes were necessary - db-repository.ts and worktree-db.ts visible/enabled handling was already clean and well-documented. Migration v31 file was reviewed and is already minimal. WorktreesCacheProvider.tsx and useWorktreesCache.ts were reviewed and contained no dead code. All 6434 unit tests still pass; lint, type-check, and build all succeed."
+}

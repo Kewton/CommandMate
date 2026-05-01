@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Worktree } from '@/types/models';
+import type { RepositorySummary } from '@/lib/api-client';
 
 /** Polling interval when at least one session is running (5s) */
 export const POLLING_INTERVAL_ACTIVE = 5000;
@@ -22,6 +23,11 @@ export const POLLING_INTERVAL_IDLE = 30000;
 export interface UseWorktreesCacheReturn {
   /** List of worktrees */
   worktrees: Worktree[];
+  /**
+   * List of repositories returned by the same /api/worktrees response
+   * (Issue #690). Used by the Sidebar to filter out hidden repositories.
+   */
+  repositories: RepositorySummary[];
   /** Whether the initial load is in progress */
   isLoading: boolean;
   /** Last error, if any */
@@ -40,6 +46,10 @@ export interface UseWorktreesCacheReturn {
  */
 export function useWorktreesCache(): UseWorktreesCacheReturn {
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
+  // Issue #690: Cache repositories alongside worktrees so the Sidebar
+  // can filter out hidden repositories (visible=false) without an extra
+  // round-trip.
+  const [repositories, setRepositories] = useState<RepositorySummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -54,7 +64,9 @@ export function useWorktreesCache(): UseWorktreesCacheReturn {
       }
       const data = await response.json();
       const wts = data.worktrees ?? [];
+      const repos = data.repositories ?? [];
       setWorktrees(wts);
+      setRepositories(repos);
       worktreesRef.current = wts;
     } catch (err) {
       const fetchError = err instanceof Error ? err : new Error(String(err));
@@ -119,5 +131,5 @@ export function useWorktreesCache(): UseWorktreesCacheReturn {
     worktreesRef.current = worktrees;
   }, [worktrees]);
 
-  return { worktrees, isLoading, error, refresh };
+  return { worktrees, repositories, isLoading, error, refresh };
 }

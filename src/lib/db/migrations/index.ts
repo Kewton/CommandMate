@@ -13,6 +13,7 @@ import { v27_migrations } from './v27-app-settings';
 import { v28_migrations } from './v28-assistant-conversations';
 import { v29_migrations } from './v29-assistant-non-interactive';
 import { v30_migrations } from './v30-assistant-context-snapshot';
+import { v31_migrations } from './v31-repository-visible';
 
 /**
  * Complete ordered list of all migrations.
@@ -31,4 +32,5 @@ export const migrations: Migration[] = [
   ...v28_migrations,
   ...v29_migrations,
   ...v30_migrations,
+  ...v31_migrations,
 ];

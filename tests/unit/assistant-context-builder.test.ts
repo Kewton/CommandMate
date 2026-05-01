@@ -29,6 +29,7 @@ function createMockRepository(overrides: Partial<Repository> = {}): Repository {
     name: 'test-repo',
     path: '/path/to/repo',
     enabled: true,
+    visible: true,
     cloneSource: 'local' as const,
     isEnvManaged: false,
     createdAt: new Date(),

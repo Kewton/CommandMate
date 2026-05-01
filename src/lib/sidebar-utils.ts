@@ -6,6 +6,26 @@
 
 import type { SidebarBranchItem, BranchStatus } from '@/types/sidebar';
 
+/**
+ * Minimal repository shape used by sidebar visibility filtering (Issue #690).
+ * Kept structurally compatible with `RepositorySummary` (api-client) and the
+ * worktree DB `getRepositories()` rows so callers can pass either directly.
+ */
+export interface RepositoryVisibilityInfo {
+  /** Repository path used to match against `Worktree.repositoryPath`. */
+  path: string;
+  /** Sidebar visibility flag. `false` hides this repository's worktrees. */
+  visible: boolean;
+}
+
+/**
+ * Minimal worktree shape used by sidebar visibility filtering (Issue #690).
+ */
+interface WorktreeVisibilityInfo {
+  /** Repository path or empty string for legacy rows. */
+  repositoryPath: string;
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -82,6 +102,60 @@ export const REPO_DOT_LIGHTNESS = 60;
 // ============================================================================
 // Functions
 // ============================================================================
+
+/**
+ * Build the set of repository paths that should be hidden from the sidebar
+ * (Issue #690).
+ *
+ * A repository is "hidden" when its row in the API payload has
+ * `visible === false`. Repositories with `visible === true` (or rows that
+ * pre-date migration v31 and are normalized to `true` upstream) are NOT
+ * placed in the set.
+ *
+ * @param repositories - Repository summaries returned by the worktrees API
+ * @returns A `Set<string>` of repository paths that must be hidden
+ */
+export function buildHiddenRepositoryPathSet(
+  repositories: ReadonlyArray<RepositoryVisibilityInfo>
+): Set<string> {
+  const hidden = new Set<string>();
+  for (const repo of repositories) {
+    if (repo.visible === false) {
+      hidden.add(repo.path);
+    }
+  }
+  return hidden;
+}
+
+/**
+ * Filter out worktrees whose repository is hidden (Issue #690).
+ *
+ * Used by the Sidebar to enforce the user's per-repository visibility choice.
+ * `useWorktreeList` is intentionally NOT filtered so the Sessions/Review
+ * screens continue to show every worktree for management purposes.
+ *
+ * Match strategy:
+ *   - Worktrees with no `repositoryPath` (legacy rows) are kept.
+ *   - Worktrees whose `repositoryPath` matches a hidden repository are
+ *     excluded.
+ *
+ * @param worktrees - Worktrees to filter
+ * @param hiddenRepositoryPaths - Set built via `buildHiddenRepositoryPathSet`
+ * @returns A new array containing only the worktrees that should be shown
+ */
+export function filterWorktreesByVisibility<T extends WorktreeVisibilityInfo>(
+  worktrees: ReadonlyArray<T>,
+  hiddenRepositoryPaths: ReadonlySet<string>
+): T[] {
+  if (hiddenRepositoryPaths.size === 0) {
+    return worktrees.slice();
+  }
+  return worktrees.filter((wt) => {
+    const repoPath = wt.repositoryPath;
+    if (!repoPath) return true;
+    return !hiddenRepositoryPaths.has(repoPath);
+  });
+}
 
 /**
  * Simple hash function (djb2-like algorithm).

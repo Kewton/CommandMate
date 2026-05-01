@@ -1,0 +1,30 @@
+{
+  "issue_number": 690,
+  "feature_summary": "Repositoriesから表示/非表示を切り替えたい - repositories テーブルに visible カラムを追加し、Repositories画面でトグルボタンにより表示/非表示を切り替え、非表示のリポジトリ配下のworktreeをSidebarから除外する",
+  "acceptance_criteria": [
+    "Repositories 画面の各リポジトリ行に「Visibility」列のトグルボタンが表示される",
+    "トグルボタンクリックで即時に表示/非表示が切り替わる（保存ボタン操作不要）",
+    "「非表示」に設定したリポジトリのworktreeがサイドバーから消える",
+    "「表示中」に戻すとサイドバーに再表示される",
+    "ページリロード後も設定が維持される（DB保存）",
+    "既存リポジトリは全て「表示中」として初期化される（DEFAULT 1）",
+    "enabled=false（disabled）でも visible=true の場合はサイドバーに表示され、Disabled バッジが表示される（Issue #190 の挙動を変えない）",
+    "visible=false だが enabled=true の場合はサイドバーから除外される",
+    "enabled=false かつ visible=false でもサイドバーから除外される",
+    "Sessions 画面・Review 画面では visible=false でも全件表示される（管理用途）",
+    "トグル送信失敗時、楽観的更新がロールバックされ feedback バナーでエラーが通知される",
+    "DB層・API層・UI層・サイドバーフィルタ・Cache/Context層の各ユニットテストがパスする",
+    "既存テスト（db-repository-exclusion.test.ts 等）が引き続きパスする"
+  ],
+  "test_scenarios": [
+    "シナリオ1: DBマイグレーション v31 が正常に適用され、visible カラムが追加される",
+    "シナリオ2: RepositoryList 画面で Visibility 列のトグルボタンが各行に表示される",
+    "シナリオ3: トグルボタンをクリックすると PUT /api/repositories/[id] が即時呼ばれ visible が更新される",
+    "シナリオ4: visible=false に設定したリポジトリのworktreeが Sidebar から非表示になる",
+    "シナリオ5: enabled=false + visible=true のリポジトリのworktreeは Sidebar に Disabled バッジ付きで表示される",
+    "シナリオ6: enabled=false + visible=false のリポジトリのworktreeは Sidebar から除外される",
+    "シナリオ7: PUT API 失敗時に楽観的更新がロールバックされ feedback バナーが表示される",
+    "シナリオ8: 既存テストが引き続きパスする（特に db-repository-exclusion）"
+  ],
+  "tdd_result_path": "dev-reports/issue/690/pm-auto-dev/iteration-1/tdd-result.json"
+}
