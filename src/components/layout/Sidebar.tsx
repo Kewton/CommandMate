@@ -172,12 +172,14 @@ export const Sidebar = memo(function Sidebar() {
   // Convert worktrees to sidebar items
   const branchItems = useMemo(() => visibleWorktrees.map(toBranchItem), [visibleWorktrees]);
 
-  // ---- Click-freeze: snapshot the list for 1s after branch click ----
+  // ---- Hover-freeze: snapshot list ORDER while cursor is over the branch list ----
   // Polling updates lastActivity every 5s for active sessions, causing sort-order
-  // changes that reorder the list right after the user clicks a branch. We freeze
-  // the display list for 1s so the list doesn't jump while the click interaction
-  // is still settling. selectedWorktreeId remains live, so the newly-selected
-  // branch is highlighted correctly even while the list order is frozen.
+  // changes that visually reorder the list while the user is interacting with it.
+  // We freeze the display ORDER while the cursor is inside the list (and for 1s
+  // after it leaves) so items never jump under the pointer or during a click.
+  // Item DATA (status dots, hasUnread, description) remains live — only positions
+  // are frozen. This prevents both the visible reorder flash and scroll position
+  // shifts caused by items moving above the viewport mid-interaction.
   const frozenBranchItemsRef = useRef<{
     items: SidebarBranchItem[];
     expiresAt: number;
@@ -190,12 +192,47 @@ export const Sidebar = memo(function Sidebar() {
   }, []);
 
   const effectiveBranchItems = useMemo(() => {
-    void freezeVersion; // ensure we recompute when the freeze lifts
+    void freezeVersion;
     const frozen = frozenBranchItemsRef.current;
-    if (frozen && Date.now() < frozen.expiresAt) return frozen.items;
-    return branchItems;
+    if (!frozen || Date.now() >= frozen.expiresAt) return branchItems;
+    // Live data, frozen order: preserve positions from the hover-time snapshot
+    // but replace each item's data with the latest live version so status dots
+    // and unread indicators continue to update while positions stay stable.
+    const liveById = new Map(branchItems.map(item => [item.id, item]));
+    const frozenIds = new Set(frozen.items.map(item => item.id));
+    return [
+      ...frozen.items
+        .filter(item => liveById.has(item.id))
+        .map(item => liveById.get(item.id)!),
+      // Items that appeared after the freeze was taken append at the end
+      ...branchItems.filter(item => !frozenIds.has(item.id)),
+    ];
   }, [branchItems, freezeVersion]);
-  // ---- end click-freeze ----
+
+  // Activate freeze when cursor enters the branch list: snapshot current order,
+  // hold indefinitely until cursor leaves. Capturing branchItems here is
+  // intentional — this is the order we want to lock in.
+  const handleListMouseEnter = useCallback(() => {
+    if (freezeTimerRef.current !== null) {
+      clearTimeout(freezeTimerRef.current);
+      freezeTimerRef.current = null;
+    }
+    frozenBranchItemsRef.current = { items: branchItems, expiresAt: Infinity };
+    setFreezeVersion(v => v + 1);
+  }, [branchItems]);
+
+  // Hold freeze for 1s after cursor leaves (covers click + re-render settling),
+  // then release so the list reflects the live order again.
+  const handleListMouseLeave = useCallback(() => {
+    if (!frozenBranchItemsRef.current) return;
+    frozenBranchItemsRef.current = { ...frozenBranchItemsRef.current, expiresAt: Date.now() + 1000 };
+    if (freezeTimerRef.current !== null) clearTimeout(freezeTimerRef.current);
+    freezeTimerRef.current = setTimeout(() => {
+      frozenBranchItemsRef.current = null;
+      setFreezeVersion(v => v + 1);
+    }, 1000);
+  }, []);
+  // ---- end hover-freeze ----
 
   // Use shared useWorktreeList hook for sorting, filtering, and grouping (Issue #600 Task 3.8)
   const { sortedItems: flatBranches, groupedItems } = useWorktreeList({
@@ -253,7 +290,11 @@ export const Sidebar = memo(function Sidebar() {
     persistSidebarScrollTop(branchListRef.current?.scrollTop ?? 0);
   }, []);
 
-  // Restore saved scroll position after the list content has rendered.
+  // Restore saved scroll position when items first appear (initial data load) and
+  // on viewMode change. Intentionally NOT triggered by every list-length change —
+  // that would cause visible scroll jumps whenever the hover-freeze/unfreeze cycle
+  // briefly changes the rendered item count.
+  const hasAnyItems = flatBranches.length > 0 || (groupedBranches?.length ?? 0) > 0;
   useEffect(() => {
     const branchList = branchListRef.current;
     if (!branchList) return;
@@ -265,7 +306,7 @@ export const Sidebar = memo(function Sidebar() {
     return () => {
       window.cancelAnimationFrame(frameId);
     };
-  }, [flatBranches.length, groupedBranches?.length, viewMode]);
+  }, [hasAnyItems, viewMode]);
 
   // Handle branch selection.
   // Note: no fallback timer — Next.js App Router defers history.pushState to a React
@@ -273,20 +314,11 @@ export const Sidebar = memo(function Sidebar() {
   // A fallback timer that checks window.location.pathname would fire before the URL
   // updates and trigger a spurious full-page reload on every navigation.
   const handleBranchClick = useCallback((branchId: string) => {
-    // Freeze display list for 1s so polling-induced sort-order changes don't
-    // visually reorder items right after the user clicks a branch.
-    frozenBranchItemsRef.current = { items: branchItems, expiresAt: Date.now() + 1000 };
-    if (freezeTimerRef.current !== null) clearTimeout(freezeTimerRef.current);
-    freezeTimerRef.current = setTimeout(() => {
-      frozenBranchItemsRef.current = null;
-      setFreezeVersion((v) => v + 1);
-    }, 1000);
-
     saveBranchListScroll();
     selectWorktree(branchId);
     router.push(`/worktrees/${branchId}`);
     closeMobileDrawer();
-  }, [branchItems, saveBranchListScroll, selectWorktree, router, closeMobileDrawer]);
+  }, [saveBranchListScroll, selectWorktree, router, closeMobileDrawer]);
 
   // DnD sensors: require 8px move before activating (distinguishes click from drag)
   const sensors = useSensors(
@@ -370,6 +402,8 @@ export const Sidebar = memo(function Sidebar() {
         ref={branchListRef}
         data-testid="branch-list"
         onScroll={saveBranchListScroll}
+        onMouseEnter={handleListMouseEnter}
+        onMouseLeave={handleListMouseLeave}
         className="flex-1 overflow-y-auto"
       >
         {isEmpty ? (
