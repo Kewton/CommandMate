@@ -157,6 +157,16 @@ export const BranchListItem = memo(function BranchListItem({
   // currently-focused item.
   const showTooltip = isTooltipVisible && !isSelected;
 
+  // Safety net: reset tooltip whenever isSelected becomes true.
+  // Covers React concurrent-mode timing gaps (router.push inside startTransition
+  // defers the sidebar re-render), onFocus/onClick inter-batch races, and
+  // group-expansion onMouseEnter triggers that fire before the selection lands.
+  useEffect(() => {
+    if (isSelected) {
+      setIsTooltipVisible(false);
+    }
+  }, [isSelected]);
+
   // Issue #676 (B): clicking closes the tooltip explicitly before firing the
   // upstream onClick, so even if a subsequent re-render misses the mouseleave
   // event, the tooltip state is reset.
