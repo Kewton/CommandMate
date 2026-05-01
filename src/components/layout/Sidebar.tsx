@@ -39,6 +39,7 @@ import { LogoutButton } from '@/components/common/LogoutButton';
 import { useToast, ToastContainer } from '@/components/common/Toast';
 import { repositoryApi, ApiError } from '@/lib/api-client';
 import { toBranchItem } from '@/types/sidebar';
+import type { SidebarBranchItem } from '@/types/sidebar';
 import {
   generateRepositoryColor,
   buildHiddenRepositoryPathSet,
@@ -171,9 +172,34 @@ export const Sidebar = memo(function Sidebar() {
   // Convert worktrees to sidebar items
   const branchItems = useMemo(() => visibleWorktrees.map(toBranchItem), [visibleWorktrees]);
 
+  // ---- Click-freeze: snapshot the list for 1s after branch click ----
+  // Polling updates lastActivity every 5s for active sessions, causing sort-order
+  // changes that reorder the list right after the user clicks a branch. We freeze
+  // the display list for 1s so the list doesn't jump while the click interaction
+  // is still settling. selectedWorktreeId remains live, so the newly-selected
+  // branch is highlighted correctly even while the list order is frozen.
+  const frozenBranchItemsRef = useRef<{
+    items: SidebarBranchItem[];
+    expiresAt: number;
+  } | null>(null);
+  const [freezeVersion, setFreezeVersion] = useState(0);
+  const freezeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (freezeTimerRef.current !== null) clearTimeout(freezeTimerRef.current);
+  }, []);
+
+  const effectiveBranchItems = useMemo(() => {
+    void freezeVersion; // ensure we recompute when the freeze lifts
+    const frozen = frozenBranchItemsRef.current;
+    if (frozen && Date.now() < frozen.expiresAt) return frozen.items;
+    return branchItems;
+  }, [branchItems, freezeVersion]);
+  // ---- end click-freeze ----
+
   // Use shared useWorktreeList hook for sorting, filtering, and grouping (Issue #600 Task 3.8)
   const { sortedItems: flatBranches, groupedItems } = useWorktreeList({
-    items: branchItems,
+    items: effectiveBranchItems,
     sortKey,
     sortDirection,
     viewMode,
@@ -247,11 +273,20 @@ export const Sidebar = memo(function Sidebar() {
   // A fallback timer that checks window.location.pathname would fire before the URL
   // updates and trigger a spurious full-page reload on every navigation.
   const handleBranchClick = useCallback((branchId: string) => {
+    // Freeze display list for 1s so polling-induced sort-order changes don't
+    // visually reorder items right after the user clicks a branch.
+    frozenBranchItemsRef.current = { items: branchItems, expiresAt: Date.now() + 1000 };
+    if (freezeTimerRef.current !== null) clearTimeout(freezeTimerRef.current);
+    freezeTimerRef.current = setTimeout(() => {
+      frozenBranchItemsRef.current = null;
+      setFreezeVersion((v) => v + 1);
+    }, 1000);
+
     saveBranchListScroll();
     selectWorktree(branchId);
     router.push(`/worktrees/${branchId}`);
     closeMobileDrawer();
-  }, [saveBranchListScroll, selectWorktree, router, closeMobileDrawer]);
+  }, [branchItems, saveBranchListScroll, selectWorktree, router, closeMobileDrawer]);
 
   // DnD sensors: require 8px move before activating (distinguishes click from drag)
   const sensors = useSensors(
