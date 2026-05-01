@@ -363,6 +363,9 @@ describe('Sidebar', () => {
       const branchList = await screen.findByTestId('branch-list');
       branchList.scrollTop = 180;
 
+      await waitFor(() => {
+        expect(screen.getAllByText('feature/test-2').length).toBeGreaterThanOrEqual(1);
+      });
       const branchItem = screen.getAllByText('feature/test-2')[0].closest('[data-testid="branch-list-item"]');
       expect(branchItem).not.toBeNull();
 

@@ -138,6 +138,11 @@ function BranchTooltip({
  */
 let suppressMouseEnterUntil = 0;
 
+/** Exported only for tests — reset click-triggered tooltip suppression. */
+export function __resetMouseEnterSuppression(): void {
+  suppressMouseEnterUntil = 0;
+}
+
 // ============================================================================
 // Component
 // ============================================================================
