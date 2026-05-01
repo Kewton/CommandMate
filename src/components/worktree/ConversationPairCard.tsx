@@ -9,8 +9,11 @@
 
 import React, { useMemo, useCallback, memo } from 'react';
 import { Copy, ArrowDownToLine } from 'lucide-react';
+import { useLocale } from 'next-intl';
 import type { ConversationPair } from '@/types/conversation';
 import type { ChatMessage } from '@/types/models';
+import { getDateFnsLocale } from '@/lib/date-locale';
+import { formatMessageTimestamp } from '@/lib/date-utils';
 
 // ============================================================================
 // Types
@@ -207,10 +210,9 @@ const UserMessageSection = memo(function UserMessageSection({
   onCopy?: (content: string) => void;
   onInsertToMessage?: (content: string) => void;
 }) {
-  const formattedTime = useMemo(
-    () => message.timestamp.toLocaleTimeString(),
-    [message.timestamp]
-  );
+  const locale = useLocale();
+  const dateFnsLocale = getDateFnsLocale(locale);
+  const formattedTime = formatMessageTimestamp(message.timestamp, dateFnsLocale);
 
   return (
     <div className="relative bg-blue-900/30 border-l-4 border-blue-500 p-3">
@@ -274,10 +276,9 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
   onFilePathClick: (path: string) => void;
   onCopy?: (content: string) => void;
 }) {
-  const formattedTime = useMemo(
-    () => message.timestamp.toLocaleTimeString(),
-    [message.timestamp]
-  );
+  const locale = useLocale();
+  const dateFnsLocale = getDateFnsLocale(locale);
+  const formattedTime = formatMessageTimestamp(message.timestamp, dateFnsLocale);
 
   const { text: truncatedText, isTruncated } = useMemo(
     () => getTruncatedContent(message.content),

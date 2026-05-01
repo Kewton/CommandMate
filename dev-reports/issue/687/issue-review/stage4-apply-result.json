@@ -1,0 +1,7 @@
+{
+  "stage": 4,
+  "applied_findings": ["S3-001", "S3-002", "S3-003", "S3-004", "S3-006"],
+  "skipped_findings": ["S3-005"],
+  "changes_summary": "Issue #687 に Stage 3 影響範囲レビュー指摘事項を反映。(1) S3-001: 「主要な変更点」配下に「メモ化サブコンポーネントとの整合性」サブセクションを新設し、useLocale() / getDateFnsLocale() の安定参照（同一 locale 文字列に対し同一参照）により memo 比較に影響しない旨と、親で hook を 1 回呼ぶ代替案の検討記録を追加。(2) S3-002: スコープ外セクションを再構成し、AssistantMessageList.tsx:22 を別 Issue 扱いとする根拠（本 Issue は MessageHistory (HistoryPane) 配下の ConversationPairCard.tsx のみが対象、Home 画面は Issue #649 で導入された別コンテキスト・別 UX 検討中、別途トラッキング Issue を作成予定）を明記。(3) S3-003: 「主要な変更点」と「実装タスク」に formatMessageTimestamp の内部実装方針を追加（format(timestamp, 'PPp', locale ? { locale } : undefined) の薄いラッパー、locale 未指定時は date-fns デフォルト en-US、Invalid Date 入力時は空文字返却の防御的フォールバック）。(4) S3-004: 受入条件に SSR/Hydration ミスマッチ確認項目を追加（'use client' 配下のため CSR のみで描画、format() 出力はクライアントタイムゾーンに従う、ハイドレーションミスマッチ対象外）。(5) S3-006: スコープ外セクションを 3 項目に整理し、各項目に根拠を 1 文で添えた（MessageList.tsx 全体 / PromptMessage.tsx / AssistantMessageList.tsx:22）。S3-005 は Issue 自体の修正は不要との指摘のためスキップ（実装/テストレベルで対応する性質の指摘）。実装タスクには useMemo 依存配列の参照安定性に関する実装コメントを残すタスクを 1 行追加し、テストには locale 省略時 / Invalid Date のケースを明記。",
+  "github_updated": true
+}

@@ -1,13 +1,15 @@
 /**
- * formatRelativeTime() Unit Tests
+ * formatRelativeTime() / formatMessageTimestamp() Unit Tests
  * [SF-001] Independent utility for testability and reuse
  *
  * TDD Approach: Red (test first) -> Green (implement) -> Refactor
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { formatRelativeTime } from '@/lib/date-utils';
+import { format } from 'date-fns';
+import { formatRelativeTime, formatMessageTimestamp } from '@/lib/date-utils';
 import { ja } from 'date-fns/locale/ja';
+import { enUS } from 'date-fns/locale/en-US';
 
 describe('formatRelativeTime [SF-001]', () => {
   afterEach(() => {
@@ -101,6 +103,82 @@ describe('formatRelativeTime [SF-001]', () => {
       const result = formatRelativeTime('');
 
       expect(result).toBe('');
+    });
+  });
+});
+
+describe('formatMessageTimestamp [SF-001]', () => {
+  // Use a fixed Date so locale formatting is deterministic.
+  const fixedDate = new Date('2026-02-15T10:30:00Z');
+
+  describe('basic formatting', () => {
+    it('should format Date with ja locale using PPp format', () => {
+      const result = formatMessageTimestamp(fixedDate, ja);
+
+      expect(typeof result).toBe('string');
+      expect(result.length).toBeGreaterThan(0);
+      // Must equal the canonical date-fns format used by MessageList/PromptMessage.
+      expect(result).toBe(format(fixedDate, 'PPp', { locale: ja }));
+    });
+
+    it('should format Date with en-US locale using PPp format', () => {
+      const result = formatMessageTimestamp(fixedDate, enUS);
+
+      expect(typeof result).toBe('string');
+      expect(result.length).toBeGreaterThan(0);
+      expect(result).toBe(format(fixedDate, 'PPp', { locale: enUS }));
+    });
+
+    it('should format Date without locale (date-fns default)', () => {
+      const result = formatMessageTimestamp(fixedDate);
+
+      expect(typeof result).toBe('string');
+      expect(result.length).toBeGreaterThan(0);
+      // No-locale call must equal date-fns no-locale format output.
+      expect(result).toBe(format(fixedDate, 'PPp'));
+    });
+
+    it('should produce different output for different locales', () => {
+      const jaResult = formatMessageTimestamp(fixedDate, ja);
+      const enResult = formatMessageTimestamp(fixedDate, enUS);
+
+      // Locale must actually affect the output (sanity check on locale wiring).
+      expect(jaResult).not.toBe(enResult);
+    });
+  });
+
+  describe('edge cases', () => {
+    it('should return empty string for Invalid Date', () => {
+      const invalid = new Date('invalid');
+
+      expect(formatMessageTimestamp(invalid)).toBe('');
+      expect(formatMessageTimestamp(invalid, ja)).toBe('');
+    });
+
+    it('should return empty string when non-Date is passed (as any)', () => {
+      // Defensive fallback: runtime callers may pass strings/null/undefined.
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      expect(formatMessageTimestamp('2026-02-15T10:30:00Z' as any)).toBe('');
+      expect(formatMessageTimestamp(null as any)).toBe('');
+      expect(formatMessageTimestamp(undefined as any)).toBe('');
+      expect(formatMessageTimestamp(1234567890 as any)).toBe('');
+      /* eslint-enable @typescript-eslint/no-explicit-any */
+    });
+  });
+
+  describe('output consistency', () => {
+    it('should produce same output as format(date, PPp, { locale })', () => {
+      // Guarantees the helper does not deviate from MessageList/PromptMessage.
+      const dates = [
+        new Date('2026-01-01T00:00:00Z'),
+        new Date('2026-06-15T13:45:30Z'),
+        new Date('2026-12-31T23:59:59Z'),
+      ];
+
+      for (const d of dates) {
+        expect(formatMessageTimestamp(d, ja)).toBe(format(d, 'PPp', { locale: ja }));
+        expect(formatMessageTimestamp(d, enUS)).toBe(format(d, 'PPp', { locale: enUS }));
+      }
     });
   });
 });

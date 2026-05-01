@@ -1,0 +1,27 @@
+{
+  "issue_number": 687,
+  "status": "success",
+  "changes_made": [
+    "src/lib/date-utils.ts: formatMessageTimestamp の JSDoc を簡潔化。MessageList/PromptMessage との整合性および getDateFnsLocale() 利用の指針を 1 段落に圧縮し、テスト固有の 'as any' に関する記述を API ドキュメントから削除（テスト関心事の漏れを排除）。動作・シグネチャ変更なし。",
+    "src/components/worktree/ConversationPairCard.tsx: UserMessageSection と AssistantMessageItem に重複していた 'Issue #687: Show PPp ...' という同一の 2 行コメントを両箇所から削除し、MessageList.tsx / PromptMessage.tsx と同じ無コメント・スタイルに揃えた（YAGNI / コードベース全体との一貫性向上）。",
+    "tests/unit/lib/date-utils.test.ts: 'should return empty string when non-Date is passed' テスト内の 4 行重複していた // eslint-disable-next-line @typescript-eslint/no-explicit-any を、ブロック単位の /* eslint-disable ... */ /* eslint-enable ... */ 1 組に集約してノイズを削減（DRY）。"
+  ],
+  "no_changes_needed": [
+    "src/lib/date-utils.ts: import { format, formatDistanceToNow } from 'date-fns' は既に 1 行に集約済み。未使用 import / console.log は無し。",
+    "src/components/worktree/ConversationPairCard.tsx: toLocaleTimeString() の残骸なし。useLocale / getDateFnsLocale / formatMessageTimestamp の import 位置は既存スタイルと整合済み。タイムスタンプ整形は MessageList.tsx / PromptMessage.tsx と同様に useMemo を使わず直接呼び出しており、不要な useMemo は残っていない。UserMessageSection と AssistantMessageItem の整形ロジック（locale 取得 → dateFnsLocale 解決 → formatMessageTimestamp 呼び出し）は対称的。",
+    "tests/unit/lib/date-utils.test.ts: afterEach(() => vi.useRealTimers()) は formatRelativeTime describe 内のみで宣言されており、formatMessageTimestamp describe（fake timers 未使用）には及んでいない。スコープは適切で共有不要。テストケースに重複なし、エッジケース（Invalid Date / 非 Date 入力 / 複数ロケール / 出力一貫性）は網羅済み。"
+  ],
+  "test_results": {
+    "unit_tests_passed": true,
+    "test_count": 6406,
+    "date_utils_test_count": 16,
+    "conversation_pair_card_test_count": 7,
+    "skipped": 7,
+    "test_files": 340
+  },
+  "type_check_passed": true,
+  "lint_passed": true,
+  "commit": "c1f71a08",
+  "commit_message": "refactor(#687): tighten timestamp helper docs and remove redundant comments",
+  "summary": "Issue #687 の実装に対するリファクタリングを実施。動作変更なしで (1) formatMessageTimestamp の JSDoc を簡潔化（テスト関心事の混入を除去）、(2) ConversationPairCard.tsx 内の重複した Issue #687 解説コメントを削除して MessageList.tsx / PromptMessage.tsx と統一、(3) テストの per-line eslint-disable をブロック単位に集約してノイズ削減、の 3 点を行った。全 6406 単体テスト pass、tsc --noEmit pass、ESLint warnings 0。差分は 3 ファイル / +8 / -17 行。"
+}

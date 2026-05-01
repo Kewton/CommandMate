@@ -1,0 +1,59 @@
+{
+  "stage": 1,
+  "focus": "設計原則",
+  "reviewer": "architecture-review-agent",
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "Should Fix",
+      "title": "DRY 違反: MessageList.tsx / PromptMessage.tsx の `format(new Date(message.timestamp), 'PPp', { locale })` と重複",
+      "description": "設計方針書では `formatMessageTimestamp` を新設しつつ、既存の `MessageList.tsx:66` および `PromptMessage.tsx:74` で同一の `format(new Date(message.timestamp), 'PPp', { locale })` 表現が残置される。これは『同じフォーマット仕様を 3 箇所で表現』する DRY 違反であり、将来 `'PPp'` を別フォーマットに変更する際に複数箇所の修正が必要となる。設計方針書 §10『スコープ外』では『既に PPp を使用しており変更不要』としているが、DRY 観点では『使用箇所の置き換え』こそが本来必要な作業である。少なくとも『ConversationPairCard 修正と同タイミングで MessageList / PromptMessage も `formatMessageTimestamp` に置換する』方針に変更するのが望ましい。",
+      "location": "design-policy §10 スコープ外, src/components/worktree/MessageList.tsx:66, src/components/worktree/PromptMessage.tsx:74",
+      "suggestion": "Issue スコープを若干広げ、`MessageList.tsx:66` / `PromptMessage.tsx:74` も `formatMessageTimestamp(new Date(message.timestamp), dateFnsLocale)` に置換する。これにより『PPp フォーマット仕様の一元管理』という `formatMessageTimestamp` 新設の本来の意義が達成される。どうしてもスコープ外とするなら、設計方針書に『フォローアップ Issue で MessageList/PromptMessage も移行予定』と明記し、技術的負債を可視化する。"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "Nice to Have",
+      "title": "Single Responsibility: `formatRelativeTime` (string 入力) と `formatMessageTimestamp` (Date 入力) の引数型不統一",
+      "description": "`formatRelativeTime(isoString: string, locale?: Locale)` は ISO 8601 文字列を受け取るのに対し、新設する `formatMessageTimestamp(timestamp: Date, locale?: Locale)` は `Date` を受け取る。同一モジュール内の類似関数で入力型が分かれることは API 一貫性を損ない、利用側で『どちらが Date か文字列か』を都度確認する負担が発生する。`MessageList.tsx` / `PromptMessage.tsx` では `new Date(message.timestamp)` でラップしている事実から、ChatMessage.timestamp が string 型である可能性も高い。",
+      "location": "src/lib/date-utils.ts (既存 `formatRelativeTime`), 設計方針書 §3 薄いラッパー関数パターン",
+      "suggestion": "次のいずれかを検討する: (a) `formatMessageTimestamp(timestamp: Date | string, locale?: Locale)` でユニオン型を受ける、(b) `ChatMessage.timestamp` の実際の型を確認のうえ、最も多用される入力型に合わせる。少なくとも設計方針書に『ChatMessage.timestamp は Date 型として扱われる前提』を明記し、`MessageList`/`PromptMessage` 側が `new Date()` でラップしている矛盾を整理する。"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "Nice to Have",
+      "title": "Open/Closed: フォーマット文字列 'PPp' のハードコードによる拡張困難性",
+      "description": "`formatMessageTimestamp` 内で 'PPp' をハードコードしているため、将来『日付のみ』『秒まで』など別フォーマットを採用する際に関数本体の改変が必要になる。`formatRelativeTime` も同様にフォーマットがハードコードだが、用途が『相対時刻』に固定されているのに対し、`formatMessageTimestamp` は『メッセージ用タイムスタンプ』という抽象度がやや高い名称で、用途が将来拡張されうる。",
+      "location": "設計方針書 §3 (formatMessageTimestamp 実装例 L74), src/lib/date-utils.ts (新設予定)",
+      "suggestion": "現時点では YAGNI の観点から拡張不要という判断は妥当だが、関数名を `formatMessageDateTime` や `formatChatTimestamp` のように『PPp 相当の日付+時刻表示』を意図する名称に絞り込むか、JSDoc に『'PPp' (date + time, localized) を返す』と明記して責務を限定する。これにより将来別フォーマットが必要になった場合は別関数を新設する判断が容易になる。"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "Nice to Have",
+      "title": "KISS: `useMemo` の依存配列拡大による僅かな複雑度増加",
+      "description": "設計方針書 §4『memo 化サブコンポーネントとの整合性』で `useMemo([message.timestamp, dateFnsLocale])` を提案しているが、`getDateFnsLocale(locale)` は同期 Map ルックアップで実行コストが極小である。`useMemo` を使わず単なる関数呼び出しでも実用上問題ない。しかし既存 `MessageList`/`PromptMessage` は `useMemo` を使っていない (直接 `const timestamp = format(...)` を呼んでいる) ため、ConversationPairCard だけ `useMemo` を残す合理性が弱い。",
+      "location": "設計方針書 §3 既存パターン踏襲 (L88-91), §4 memo 化サブコンポーネントとの整合性",
+      "suggestion": "既存 `MessageList.tsx:66` / `PromptMessage.tsx:74` と同様に `useMemo` を外し、関数本体で直接 `formatMessageTimestamp(message.timestamp, dateFnsLocale)` を呼ぶ実装にする。サブコンポーネント自体が `React.memo` でラップされているため、親再レンダリング時の再計算は memo 比較で抑制される。これにより『既存パターン踏襲 (Consistency)』と KISS 原則の両方が満たされる。"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "Nice to Have",
+      "title": "DRY/設計パターン: locale 解決ロジックの重複",
+      "description": "設計方針書 §3 で `const locale = useLocale(); const dateFnsLocale = getDateFnsLocale(locale);` を `UserMessageSection` と `AssistantMessageItem` の両方で書く想定になっており、同一ファイル内で 2 回繰り返される。さらに `MessageList.tsx`, `PromptMessage.tsx` でも同じ 2 行ペアが反復される。",
+      "location": "設計方針書 §3 既存パターン踏襲, src/components/worktree/MessageList.tsx:62-63, src/components/worktree/PromptMessage.tsx:69-70",
+      "suggestion": "親 `ConversationPairCard` で 1 度だけ `useLocale` + `getDateFnsLocale` を実行し、`dateFnsLocale` を子サブコンポーネントへ props で渡す案を検討する。`getDateFnsLocale` の戻り値は同一参照なので props 経由でも `React.memo` を破壊しない。または `useDateFnsLocale()` カスタムフックを新設して 2 行を 1 行に集約する。ただし設計方針書の『既存パターン踏襲』との整合性も考慮し、ファイル横断の改善は別 Issue とする選択肢もあり。"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "Nice to Have",
+      "title": "Interface Segregation: `locale?: Locale` のオプショナル性が UI 用途では不要",
+      "description": "`formatMessageTimestamp(timestamp: Date, locale?: Locale)` は `formatRelativeTime` と揃えて `locale` をオプショナルにしているが、本機能の主な利用箇所は React コンポーネントであり、`useLocale()` から得た locale を必ず渡せる。locale 未指定時のフォールバック動作 (date-fns デフォルト=英語) は UI 表示としては予期せぬ挙動を生む可能性がある。",
+      "location": "設計方針書 §3 (L71 関数シグネチャ), §8 テスト設計 (L155-160 'should format Date without locale using date-fns default')",
+      "suggestion": "本関数の利用シナリオが UI コンポーネント内に限定されるなら、`locale: Locale` を必須引数にすることで誤用 (locale 渡し忘れ) を型レベルで防げる。`formatRelativeTime` との API 統一を優先するなら現状維持で問題ないが、その場合は JSDoc に『locale 省略時は date-fns デフォルト=enUS 相当が使用される』と明記する。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 1,
+  "nice_to_have_count": 5,
+  "summary": "設計方針書は薄いラッパー関数パターン・既存実装との一貫性・防御的実装 (Invalid Date ガード) を適切に踏まえており、全体として SOLID/KISS/YAGNI の各原則を満たしている。Must Fix レベルの設計欠陥は検出されなかった。一方で DRY 原則の観点では、新設する `formatMessageTimestamp` の本来の意義 (PPp フォーマット仕様の一元管理) が `MessageList.tsx`/`PromptMessage.tsx` をスコープ外とすることで半減している点が Should Fix として最重要である。少なくとも本 Issue または直後のフォローアップで両ファイルも置換し、フォーマット文字列を 1 箇所に集約することを推奨する。Nice to Have レベルでは、入力型の不統一 (string vs Date)、useMemo の不要性、locale 解決ロジックの重複など、小規模な改善余地が複数存在するが、いずれも本 Issue のスコープでは『既存パターン踏襲』を優先する判断は妥当である。"
+}

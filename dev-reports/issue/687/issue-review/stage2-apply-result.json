@@ -1,0 +1,10 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 687,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/687",
+  "applied_findings": ["S1-001", "S1-002", "S1-003", "S1-004", "S1-005", "S1-006"],
+  "skipped_findings": [],
+  "changes_summary": "Stage 1 レビューで指摘された全 6 件（Should Fix 3 件 + Nice to Have 3 件）を Issue #687 本文に反映。(1) S1-001: 「提案する解決策」「実装タスク」に next-intl 連携手順（useLocale + getDateFnsLocale の import / 取得 / 引数渡し）を明記。(2) S1-002: formatMessageTimestamp の引数型方針を「Date 限定・ConversationPairCard 専用」と明記し、MessageList.tsx / PromptMessage.tsx 共通化はスコープ外として明示。(3) S1-003: 影響範囲に既存テスト 3 ファイル（ConversationPairCard 関連 unit/integration）を追加し、受入条件に「既存テストが引き続きパスすること」を追加。(4) S1-004: 「スコープ外」セクションを新設し、MessageList.tsx:603（リアルタイム時刻）/ MessageList.tsx:62-66 / PromptMessage.tsx:69-74 / AssistantMessageList.tsx:22 の対応方針を明記。(5) S1-005: 受入条件のサンプル出力に「date-fns バージョンに依存。秒の有無もバージョン挙動に従う」「'PPp'（Long Date + Long Time）に準拠」と注釈を追加し、サンプルを秒含み（12:34:56）に修正。(6) S1-006: 実装タスクに「useMemo 依存配列を [message.timestamp, dateFnsLocale] に更新」を明記。",
+  "github_updated": true
+}

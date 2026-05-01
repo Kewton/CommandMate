@@ -1,0 +1,59 @@
+{
+  "stage": 1,
+  "focus": "通常",
+  "reviewer": "issue-review-agent",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "Should Fix",
+      "title": "ロケール解決方法の不明確さ（next-intl連携が未記載）",
+      "description": "Issueでは `formatMessageTimestamp(timestamp: Date, locale?: Locale)` のシグネチャのみ示されているが、ConversationPairCard.tsx は現状 next-intl の useLocale / getDateFnsLocale を import しておらず、ロケール解決のための統合手順（呼び出し側でロケールを取得して渡すか、関数内部で解決するか）が未定義。MessageList.tsx:62-66、PromptMessage.tsx:69-74 は `useLocale()` + `getDateFnsLocale(locale)` で解決しており、同じパターンで統一すべき。受入条件「ロケールに応じて表示形式が切り替わる」を満たすために、UserMessageSection / AssistantMessageItem 双方でロケール取得が必要となる点を明記すべき。",
+      "location": "Issue「実装タスク」「受入条件」セクション、src/components/worktree/ConversationPairCard.tsx L199-213, L262-280",
+      "suggestion": "実装タスクに次を追記する: (1) ConversationPairCard.tsx に `useLocale` / `getDateFnsLocale` の import を追加、(2) UserMessageSection / AssistantMessageItem それぞれで `const dateFnsLocale = getDateFnsLocale(useLocale());` を呼び出し `formatMessageTimestamp(message.timestamp, dateFnsLocale)` に渡す（または親コンポーネントから locale を props として受け渡す）。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "Should Fix",
+      "title": "MessageList.tsx / PromptMessage.tsx と timestamp 型の不一致が明示されていない",
+      "description": "src/types/models.ts L211-223 の `ChatMessage.timestamp` は `Date` 型である。一方、MessageList.tsx:66 / PromptMessage.tsx:74 は防御的に `format(new Date(message.timestamp), 'PPp', ...)` と Date 化している。Issue 提案の `formatMessageTimestamp(timestamp: Date, ...)` は ConversationPairCard.tsx の現状と整合するが、参考実装側との微妙な差異（既に Date を再ラップしている vs しない）が触れられていない。共通関数化するなら、引数型を `Date | string` または `Date | number | string` で統一して MessageList.tsx / PromptMessage.tsx も置き換える方針か、ConversationPairCard 専用に Date のみ受ける方針かを明記すべき。",
+      "location": "Issue「主要な変更点」、src/types/models.ts L211-223、src/components/worktree/MessageList.tsx:66、src/components/worktree/PromptMessage.tsx:74",
+      "suggestion": "次のいずれかを明記する: (a) 「ConversationPairCard 専用に Date を受ける」と限定し、MessageList.tsx / PromptMessage.tsx の置換は今回のスコープ外と明示する。 (b) 共通化を志向し、`formatMessageTimestamp(timestamp: Date | string, locale?: Locale): string` とし、MessageList.tsx / PromptMessage.tsx の `format(new Date(...), 'PPp', { locale })` も同関数で置換する。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "Should Fix",
+      "title": "影響範囲に既存テストファイルが含まれていない",
+      "description": "ConversationPairCard には既存テストが存在する（tests/unit/components/worktree/ConversationPairCard.test.tsx、src/components/worktree/__tests__/ConversationPairCard.test.tsx、tests/integration/conversation-pair-card.test.tsx）。timestamp 表示文言の検証は現状無いが、UI の文字列表示を変更するため、ロケール依存の出力を扱うテストでスナップショット/正規表現での検証追加（または近傍のテストにタイムスタンプ表示確認を追加）を検討すべき。少なくとも影響範囲表に既存テストファイルを記載し、回帰テストの実行を「受入条件」または「テスト範囲」として明示すべき。",
+      "location": "Issue「影響範囲」テーブル、tests/unit/components/worktree/ConversationPairCard.test.tsx、tests/integration/conversation-pair-card.test.tsx、src/components/worktree/__tests__/ConversationPairCard.test.tsx",
+      "suggestion": "影響範囲テーブルに既存テストを追加し、「ConversationPairCard の既存テスト（unit/integration）が引き続きパスすること」を受入条件に明記する。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "Nice to Have",
+      "title": "他の toLocaleTimeString() 残存箇所の方針が不明確",
+      "description": "Issueは ConversationPairCard.tsx のみを対象としているが、コードベースには他にも `toLocaleTimeString()` を使用する箇所が残っている: (1) src/components/worktree/MessageList.tsx:603 の `<span>{new Date().toLocaleTimeString()}</span>`（リアルタイム時刻表示）、(2) src/components/home/AssistantMessageList.tsx:22 の `formatTimestamp` 関数（hour/minute のみ表示）。これらを今回のスコープに含めるかは検討要。仮説検証メモにも申し送りされている通り、(1) は現在時刻表示で目的が異なる可能性が高いが、(2) のアシスタントメッセージは MessageHistory と同様に「日付不明」問題が起きうる。スコープ判断の根拠を Issue に追記することを推奨。",
+      "location": "src/components/worktree/MessageList.tsx:603、src/components/home/AssistantMessageList.tsx:22",
+      "suggestion": "「スコープ外」セクションを追加し、「MessageList.tsx:603 はリアルタイム時刻表示のため対象外」「AssistantMessageList.tsx:22 はホーム画面のアシスタント機能で別 Issue とする/今回も含める」のいずれかを明記する。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "Nice to Have",
+      "title": "受入条件のフォーマット例の妥当性確認",
+      "description": "受入条件に「日本語: `2026年1月1日 12:34` / 英語: `Jan 1, 2026, 12:34 PM`」とあるが、date-fns v3+ の 'PPp' は実装上「分」までではなく「秒/AM-PM」を含む可能性がある。実際 PPp は Long Date + Long Time の組み合わせで、ja ロケールでは `2026年1月1日 12:34:56` のように秒まで出る場合がある（date-fns バージョン依存）。Issue記載の例文と実出力に乖離がないか、実装時に検証すべき。曖昧さを避けるためフォーマットの正確な期待値（秒含めるかどうか）を明記すると良い。",
+      "location": "Issue「受入条件」",
+      "suggestion": "受入条件のサンプル文字列に注釈を加えるか、「date-fns 'PPp' フォーマットの出力に従う（MessageList.tsx と同一）」と表現する。秒の表示有無も明記する。"
+    },
+    {
+      "id": "S1-006",
+      "severity": "Nice to Have",
+      "title": "useMemo 依存配列の更新が暗黙的",
+      "description": "ConversationPairCard.tsx L210-213, L277-280 は `useMemo(() => message.timestamp.toLocaleTimeString(), [message.timestamp])` の形をしている。Issue 提案の置換では locale も依存に追加する必要があるが、その点が実装タスクに記載されていない。useMemo 依存配列の更新漏れを防ぐため、実装タスクに「依存配列に locale を追加する」を明記すべき。",
+      "location": "src/components/worktree/ConversationPairCard.tsx L210-213, L277-280",
+      "suggestion": "実装タスクに「useMemo 依存配列を `[message.timestamp, dateFnsLocale]` に更新」を追加する。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 3,
+  "nice_to_have_count": 3,
+  "summary": "Issue #687 の記述は仮説検証で全 4 件の前提が Confirmed であり、対象ファイル・行番号・現状コードの記載は正確。技術的実現性も問題なく、既存の MessageList.tsx / PromptMessage.tsx と同一の date-fns 'PPp' フォーマット採用方針は整合的である。Must Fix はないが、Should Fix が 3 件: (1) next-intl ロケール取得方法（useLocale + getDateFnsLocale）が実装タスクに不足、(2) `Date` vs `Date|string` の引数型方針が不明確で MessageList.tsx 等共通化の射程が曖昧、(3) 影響範囲表に既存テストファイル（ConversationPairCard 関連 3 ファイル）が未記載。Nice to Have として、他箇所の toLocaleTimeString() 残存（MessageList.tsx:603 / AssistantMessageList.tsx:22）の扱い、'PPp' の出力例検証、useMemo 依存配列更新の明記を推奨。これらを補完すれば work-plan に進める品質。"
+}

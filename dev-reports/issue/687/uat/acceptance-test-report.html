@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Issue #687 実機受入テスト報告書</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.6; padding: 24px; }
+    .container { max-width: 960px; margin: 0 auto; }
+    h1 { font-size: 1.6rem; color: #f8fafc; margin-bottom: 4px; }
+    h2 { font-size: 1.1rem; color: #94a3b8; margin: 24px 0 12px; border-bottom: 1px solid #1e293b; padding-bottom: 6px; }
+    .meta { color: #64748b; font-size: 0.85rem; margin-bottom: 24px; }
+    .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+    .summary-card { background: #1e293b; border-radius: 8px; padding: 16px; text-align: center; }
+    .summary-card .num { font-size: 2rem; font-weight: 700; }
+    .summary-card .label { font-size: 0.75rem; color: #94a3b8; margin-top: 4px; }
+    .green { color: #22c55e; }
+    .red { color: #ef4444; }
+    .blue { color: #3b82f6; }
+    .yellow { color: #f59e0b; }
+    .badge-pass { display: inline-block; background: #166534; color: #86efac; font-size: 0.75rem; font-weight: 600; padding: 2px 10px; border-radius: 4px; }
+    .badge-fail { display: inline-block; background: #7f1d1d; color: #fca5a5; font-size: 0.75rem; font-weight: 600; padding: 2px 10px; border-radius: 4px; }
+    .tc-card { background: #1e293b; border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+    .tc-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid #0f172a; }
+    .tc-id { font-size: 0.75rem; color: #64748b; font-weight: 600; }
+    .tc-title { font-size: 0.9rem; font-weight: 600; margin-left: 8px; color: #e2e8f0; }
+    .tc-body { padding: 12px 16px; }
+    .tc-row { display: flex; gap: 8px; margin-bottom: 6px; font-size: 0.82rem; }
+    .tc-label { color: #64748b; min-width: 80px; flex-shrink: 0; }
+    .tc-value { color: #cbd5e1; word-break: break-all; }
+    code { background: #0f172a; color: #7dd3fc; padding: 2px 6px; border-radius: 3px; font-size: 0.8rem; font-family: 'SF Mono', 'Fira Code', monospace; }
+    .criteria-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .criteria-table th { background: #1e293b; padding: 8px 12px; text-align: left; color: #94a3b8; font-weight: 600; }
+    .criteria-table td { padding: 8px 12px; border-bottom: 1px solid #1e293b; }
+    .criteria-table tr:hover td { background: #1e293b44; }
+    .check { color: #22c55e; }
+    .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #1e293b; color: #475569; font-size: 0.8rem; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Issue #687 実機受入テスト報告書</h1>
+    <p class="meta">MessageHistoryに日付も表示してほしい &nbsp;|&nbsp; ブランチ: feature/687-worktree &nbsp;|&nbsp; テスト日: 2026-05-01</p>
+
+    <!-- Summary -->
+    <div class="summary-grid">
+      <div class="summary-card">
+        <div class="num blue">8</div>
+        <div class="label">テスト総数</div>
+      </div>
+      <div class="summary-card">
+        <div class="num green">8</div>
+        <div class="label">合格 (PASS)</div>
+      </div>
+      <div class="summary-card">
+        <div class="num red">0</div>
+        <div class="label">不合格 (FAIL)</div>
+      </div>
+      <div class="summary-card">
+        <div class="num green">100%</div>
+        <div class="label">合格率</div>
+      </div>
+    </div>
+
+    <!-- Acceptance Criteria -->
+    <h2>受入条件網羅性</h2>
+    <table class="criteria-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>受入条件</th>
+          <th>対応 TC</th>
+          <th>結果</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>MessageHistory に date-fns 'PPp' フォーマット相当の日付+時刻が表示される</td>
+          <td>TC-005, TC-006, TC-007</td>
+          <td><span class="check">✅ PASS</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>ロケールに応じて表示形式が切り替わる（日本語/英語）</td>
+          <td>TC-001, TC-006</td>
+          <td><span class="check">✅ PASS</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>MessageList.tsx / PromptMessage.tsx と同一フォーマットで表示が統一される</td>
+          <td>TC-001, TC-007</td>
+          <td><span class="check">✅ PASS</span></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>formatMessageTimestamp のユニットテストがパスする</td>
+          <td>TC-001</td>
+          <td><span class="check">✅ PASS</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>ConversationPairCard の既存テスト（unit / integration）が引き続きパスする</td>
+          <td>TC-002</td>
+          <td><span class="check">✅ PASS</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- Test Cases -->
+    <h2>テストケース詳細</h2>
+
+    <div class="tc-card">
+      <div class="tc-header">
+        <div><span class="tc-id">TC-001</span><span class="tc-title">ユニットテスト全件パス確認</span></div>
+        <span class="badge-pass">PASS</span>
+      </div>
+      <div class="tc-body">
+        <div class="tc-row"><span class="tc-label">コマンド</span><code>npm run test:unit -- date-utils --reporter=verbose</code></div>
+        <div class="tc-row"><span class="tc-label">結果</span><span class="tc-value green">340 test files passed | 6406 tests passed (7 skipped)<br>formatMessageTimestamp: 7 新規テスト全パス（ja/enUS/locale未指定/ロケール差分/InvalidDate/非Date/出力整合性）</span></div>
+        <div class="tc-row"><span class="tc-label">Exit code</span><code>0</code></div>
+      </div>
+    </div>
+
+    <div class="tc-card">
+      <div class="tc-header">
+        <div><span class="tc-id">TC-002</span><span class="tc-title">ConversationPairCard 回帰テストパス確認</span></div>
+        <span class="badge-pass">PASS</span>
+      </div>
+      <div class="tc-body">
+        <div class="tc-row"><span class="tc-label">コマンド</span><code>npm run test:unit -- ConversationPairCard --reporter=verbose</code></div>
+        <div class="tc-row"><span class="tc-label">結果</span><span class="tc-value green">既存テスト全件パス。既存の /12:34/ 正規表現アサーションも 'PPp' 出力（時刻を含む）にマッチして引き続きパス。</span></div>
+        <div class="tc-row"><span class="tc-label">Exit code</span><code>0</code></div>
+      </div>
+    </div>
+
+    <div class="tc-card">
+      <div class="tc-header">
+        <div><span class="tc-id">TC-003</span><span class="tc-title">TypeScript 型チェックパス確認</span></div>
+        <span class="badge-pass">PASS</span>
+      </div>
+      <div class="tc-body">
+        <div class="tc-row"><span class="tc-label">コマンド</span><code>npx tsc --noEmit</code></div>
+        <div class="tc-row"><span class="tc-label">結果</span><span class="tc-value green">型エラー 0件</span></div>
+        <div class="tc-row"><span class="tc-label">Exit code</span><code>0</code></div>
+      </div>
+    </div>
+
+    <div class="tc-card">
+      <div class="tc-header">
+        <div><span class="tc-id">TC-004</span><span class="tc-title">ESLint パス確認</span></div>
+        <span class="badge-pass">PASS</span>
+      </div>
+      <div class="tc-body">
+        <div class="tc-row"><span class="tc-label">コマンド</span><code>npm run lint</code></div>
+        <div class="tc-row"><span class="tc-label">結果</span><span class="tc-value green">エラー・警告 0件</span></div>
+        <div class="tc-row"><span class="tc-label">Exit code</span><code>0</code></div>
+      </div>
+    </div>
+
+    <div class="tc-card">
+      <div class="tc-header">
+        <div><span class="tc-id">TC-005</span><span class="tc-title">toLocaleTimeString 残留なし確認</span></div>
+        <span class="badge-pass">PASS</span>
+      </div>
+      <div class="tc-body">
+        <div class="tc-row"><span class="tc-label">コマンド</span><code>grep -n "toLocaleTimeString" src/components/worktree/ConversationPairCard.tsx</code></div>
+        <div class="tc-row"><span class="tc-label">結果</span><span class="tc-value green">マッチなし（0件）— toLocaleTimeString が完全に削除されている</span></div>
+        <div class="tc-row"><span class="tc-label">Exit code</span><code>1（マッチなし = 期待通り）</code></div>
+      </div>
+    </div>
+
+    <div class="tc-card">
+      <div class="tc-header">
+        <div><span class="tc-id">TC-006</span><span class="tc-title">formatMessageTimestamp / useLocale / getDateFnsLocale の import・使用確認</span></div>
+        <span class="badge-pass">PASS</span>
+      </div>
+      <div class="tc-body">
+        <div class="tc-row"><span class="tc-label">コマンド</span><code>grep -n "formatMessageTimestamp|useLocale|getDateFnsLocale" src/components/worktree/ConversationPairCard.tsx</code></div>
+        <div class="tc-row"><span class="tc-label">結果</span><span class="tc-value green">L12: import useLocale / L15: import getDateFnsLocale / L16: import formatMessageTimestamp<br>L213-215: UserMessageSection での使用<br>L279-281: AssistantMessageItem での使用（計8件マッチ）</span></div>
+        <div class="tc-row"><span class="tc-label">Exit code</span><code>0</code></div>
+      </div>
+    </div>
+
+    <div class="tc-card">
+      <div class="tc-header">
+        <div><span class="tc-id">TC-007</span><span class="tc-title">date-utils.ts 実装確認（'PPp' / instanceof Date / isNaN）</span></div>
+        <span class="badge-pass">PASS</span>
+      </div>
+      <div class="tc-body">
+        <div class="tc-row"><span class="tc-label">コマンド</span><code>grep -n "PPp|instanceof Date|isNaN" src/lib/date-utils.ts</code></div>
+        <div class="tc-row"><span class="tc-label">結果</span><span class="tc-value green">L69: !(timestamp instanceof Date) || isNaN(timestamp.getTime())<br>L72: format(timestamp, 'PPp', locale ? { locale } : undefined)<br>三重防御（instanceof + isNaN + TypeScript型）確認</span></div>
+        <div class="tc-row"><span class="tc-label">Exit code</span><code>0</code></div>
+      </div>
+    </div>
+
+    <div class="tc-card">
+      <div class="tc-header">
+        <div><span class="tc-id">TC-008</span><span class="tc-title">ビルド成功確認</span></div>
+        <span class="badge-pass">PASS</span>
+      </div>
+      <div class="tc-body">
+        <div class="tc-row"><span class="tc-label">コマンド</span><code>npm run build</code></div>
+        <div class="tc-row"><span class="tc-label">結果</span><span class="tc-value green">Next.js ビルド成功。Static/Dynamic page generation 完了。</span></div>
+        <div class="tc-row"><span class="tc-label">Exit code</span><code>0</code></div>
+      </div>
+    </div>
+
+    <div class="footer">
+      Generated by CommandMate PM Auto-Dev &nbsp;|&nbsp; Issue #687 &nbsp;|&nbsp; 2026-05-01
+    </div>
+  </div>
+</body>
+</html>

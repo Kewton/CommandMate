@@ -1,0 +1,43 @@
+{
+  "stage": 2,
+  "focus": "整合性",
+  "reviewer": "architecture-review-agent",
+  "findings": [
+    {
+      "id": "DR2-001",
+      "severity": "Nice to Have",
+      "title": "MessageList.tsx の参照行範囲 `62-66` の書き方は誤解を招く",
+      "description": "設計書の複数箇所（L105, L120, L249, L256, L265）で MessageList.tsx の該当行を `62-66` と記述している。実際には L62-65 は `useLocale()` / `getDateFnsLocale()` / `useTranslations()` の取得行であり、`format(new Date(message.timestamp), 'PPp', { locale: dateFnsLocale })` の呼び出しは L66 単独である。レビュー上は文脈で読み取れるが、フォローアップ Issue で機械的に置換する際に L62-65 の他コード（useTranslations 等）も巻き込まれかねないので、`L66`（または `L62-66 のうち format() 呼び出し L66`）と明記する方が正確。",
+      "location": "dev-reports/design/issue-687-message-timestamp-design-policy.md L105, L120, L249, L256, L265 / src/components/worktree/MessageList.tsx L62-66",
+      "suggestion": "「`MessageList.tsx:62-66`」の表記を「`MessageList.tsx:66`（L62-65 はロケール取得・useTranslations）」のように、`format()` 呼び出し行を単独で示す。フォローアップ Issue の置換対象も L66 単独であることを明記する。"
+    },
+    {
+      "id": "DR2-002",
+      "severity": "Nice to Have",
+      "title": "PromptMessage.tsx の参照行範囲 `69-74` も同様に precise でない",
+      "description": "設計書 L105, L249, L256, L266 で PromptMessage.tsx を `69-74` と記述している。実際には L69-71 は `useLocale()` / `getDateFnsLocale()` / `useState(false)` であり、`format()` 呼び出しは L74 単独。DR2-001 と同じ理由で、置換対象としては L74 を明示する方が正確。",
+      "location": "dev-reports/design/issue-687-message-timestamp-design-policy.md L105, L249, L256, L266 / src/components/worktree/PromptMessage.tsx L69-74",
+      "suggestion": "「`PromptMessage.tsx:69-74`」を「`PromptMessage.tsx:74`（L69-71 はロケール取得・useState）」と置き換え、フォローアップ Issue の置換対象も L74 単独であることを明記する。"
+    },
+    {
+      "id": "DR2-003",
+      "severity": "Nice to Have",
+      "title": "`MessageList.tsx` / `PromptMessage.tsx` は `new Date(message.timestamp)` で再ラップしている事実を設計書で明示すべき",
+      "description": "設計書 L256, L265 では将来の置換例を `formatMessageTimestamp(new Date(message.timestamp), dateFnsLocale)` と記述しており、これは現状のコード（L66 / L74）と整合する。一方、設計書の `formatMessageTimestamp` 仕様（L86-91）は引数を `Date` 型に限定しており、ChatMessage.timestamp は src/types/models.ts L223 で `Date` 型に定義されている（API レスポンスは src/components/worktree/WorktreeDetailSubComponents.tsx L92-98 / src/hooks/useInfiniteMessages.ts L72-77 の `parseMessageTimestamps` で Date に変換済）。したがって本来は `new Date(...)` の再ラップは不要だが、MessageList.tsx / PromptMessage.tsx では現状そう書かれている。フォローアップ Issue で置換する際、`new Date(...)` をそのまま残すのか除去するのかを設計書で明示する方が、置換時の挙動差異（既に Date 型の場合 `new Date(date)` は valid Date のコピーになるため挙動は変わらない）を後続実装者が判断しやすい。",
+      "location": "dev-reports/design/issue-687-message-timestamp-design-policy.md L256, L265 / src/components/worktree/MessageList.tsx L66 / src/components/worktree/PromptMessage.tsx L74",
+      "suggestion": "フォローアップ Issue 用の置換例に注釈を追加: 「`message.timestamp` は parseMessageTimestamps によって既に Date 型なので、`new Date(...)` の再ラップは冗長だが安全側で残してもよい。除去する場合は `formatMessageTimestamp(message.timestamp, dateFnsLocale)` と書ける」と明記。あるいは ConversationPairCard 側の使用例（L113）と統一して `new Date(...)` なしのフォームを推奨する旨を追記する。"
+    },
+    {
+      "id": "DR2-004",
+      "severity": "Nice to Have",
+      "title": "テストファイル `tests/unit/lib/date-utils.test.ts` への追加方針を明示すべき",
+      "description": "設計書 L179 で「追加テスト: `tests/unit/lib/date-utils.test.ts`」と記述しているが、実際には同ファイルは既存（formatRelativeTime のテストが含まれる）。新規作成ではなく既存ファイルへ describe ブロック追加となる。設計書のサンプルコード（L182-221）は describe ブロック単位で記述されており実装上は問題ないが、レビュー観点で「新規作成」と「既存への追加」は混在しないよう明記すると整合性が上がる。",
+      "location": "dev-reports/design/issue-687-message-timestamp-design-policy.md L179, L279 / tests/unit/lib/date-utils.test.ts (既存ファイル, formatRelativeTime テスト L12-106 が既に存在)",
+      "suggestion": "「変更対象ファイルサマリー」表（L275-280）の `tests/unit/lib/date-utils.test.ts` 行を「追加」→「修正（既存ファイルへ describe ブロック追加）」に変更し、既存の formatRelativeTime テストとの共存を明示する。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 0,
+  "nice_to_have_count": 4,
+  "summary": "Stage 2 整合性レビューの結果、設計方針書と実コードの整合性は非常に高い。主要な確認項目はすべて一致した: (1) ChatMessage.timestamp は Date 型 (src/types/models.ts L223)、(2) getDateFnsLocale(locale: string): Locale シグネチャ (src/lib/date-locale.ts L17-19)、(3) Locale 型は date-fns から import (src/lib/date-locale.ts L9, src/lib/date-utils.ts L11)、(4) ConversationPairCard.tsx の UserMessageSection (L199) / AssistantMessageItem (L262) は memo 化済みで line 番号も一致、(5) MessageList.tsx / PromptMessage.tsx の useLocale + getDateFnsLocale + format のパターンも実コードと整合、(6) 既存テスト3ファイル (tests/unit/components/worktree/ConversationPairCard.test.tsx, src/components/worktree/__tests__/ConversationPairCard.test.tsx, tests/integration/conversation-pair-card.test.tsx) もすべて存在を確認、(7) AssistantMessageList.tsx L22 / MessageList.tsx L603 のスコープ外記述も実コードと一致、(8) useMemo 不使用に関する設計書の言及 (MessageList/PromptMessage は format() を関数ボディで直接呼ぶ) も実コードと一致。Must Fix / Should Fix は 0 件。Nice to Have として、行範囲記法 `MessageList.tsx:62-66` および `PromptMessage.tsx:69-74` が format() 呼び出し行（L66 / L74）以外も含む書き方になっており、フォローアップ Issue で機械的置換する際の正確性のためポイント行を明示すべき点 (DR2-001, DR2-002)、`new Date(message.timestamp)` 再ラップの扱い (DR2-003)、tests/unit/lib/date-utils.test.ts が既存ファイルである旨の表記 (DR2-004) を改善提案として記録した。設計の本質的な整合性問題はなく、Phase 4 実装に進めるレベル。"
+}

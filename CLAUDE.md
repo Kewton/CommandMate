@@ -232,7 +232,7 @@ tests/
 | `src/lib/sidebar-utils.ts` | サイドバーソート・グループ化ユーティリティ（SortKey, SortDirection, ViewMode型, BranchGroup型, sortBranches(), groupBranches(), generateRepositoryColor()）（Issue #449, #504）、buildHiddenRepositoryPathSet/filterWorktreesByVisibility追加（Issue #690） |
 | `src/contexts/SidebarContext.tsx` | サイドバー状態管理Context（isOpen, sortKey, viewMode, localStorageパターン）（Issue #449）、DEFAULT_SIDEBAR_WIDTH=224(w-56)に変更（Issue #651） |
 | `src/lib/utils.ts` | 汎用ユーティリティ（withTimeout追加: Issue #627） |
-| `src/lib/date-utils.ts` | 相対時刻フォーマット |
+| `src/lib/date-utils.ts` | 相対時刻フォーマット（formatRelativeTime）、メッセージタイムスタンプフォーマット（formatMessageTimestamp、'PPp'フォーマット・ロケール対応）（Issue #687） |
 | `src/lib/clipboard-utils.ts` | クリップボードコピー |
 | `src/lib/pasted-text-helper.ts` | Pasted text検知・Enter再送 |
 | `src/lib/api-logger.ts` | 開発環境APIロギング |
