@@ -59,8 +59,49 @@ const SIDEBAR_GROUP_COLLAPSED_STORAGE_KEY = 'mcbd-sidebar-group-collapsed';
 /** LocalStorage key for branch list scroll position */
 const SIDEBAR_SCROLL_TOP_STORAGE_KEY = 'mcbd-sidebar-scroll-top';
 
+/** LocalStorage key for repository group order cache */
+const SIDEBAR_GROUP_ORDER_CACHE_STORAGE_KEY = 'mcbd-sidebar-group-order-cache';
+
 /** In-memory cache used across client-side remounts */
 let lastSidebarScrollTop = 0;
+let lastRepositoryOrder: string[] | null = null;
+
+function parseRepositoryOrder(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((value): value is string => typeof value === 'string')
+      .slice(0, 500);
+  } catch {
+    return [];
+  }
+}
+
+function readRepositoryOrderCache(): string[] {
+  if (typeof window === 'undefined') return lastRepositoryOrder ?? [];
+
+  try {
+    const stored = localStorage.getItem(SIDEBAR_GROUP_ORDER_CACHE_STORAGE_KEY);
+    if (!stored) return [];
+    const parsed = parseRepositoryOrder(stored);
+    lastRepositoryOrder = parsed.length > 0 ? parsed : null;
+    return parsed;
+  } catch {
+    return [];
+  }
+}
+
+function persistRepositoryOrderCache(order: string[]): void {
+  lastRepositoryOrder = order;
+  if (typeof window === 'undefined') return;
+
+  try {
+    localStorage.setItem(SIDEBAR_GROUP_ORDER_CACHE_STORAGE_KEY, JSON.stringify(order));
+  } catch {
+    // Ignore localStorage errors
+  }
+}
 
 function readSidebarScrollTop(): number {
   if (typeof window === 'undefined') return lastSidebarScrollTop;
@@ -133,7 +174,7 @@ export const Sidebar = memo(function Sidebar() {
   });
 
   // Repository group display order (DB-backed, fetched on mount)
-  const [repositoryOrder, setRepositoryOrder] = useState<string[]>([]);
+  const [repositoryOrder, setRepositoryOrder] = useState<string[]>(readRepositoryOrderCache);
   const orderLoadedRef = useRef(false);
 
   // Fetch saved group order from server on mount
@@ -146,6 +187,7 @@ export const Sidebar = memo(function Sidebar() {
       .then((data: { success: boolean; order: string[] | null }) => {
         if (data.success && Array.isArray(data.order)) {
           setRepositoryOrder(data.order);
+          persistRepositoryOrderCache(data.order);
         }
       })
       .catch(() => {
@@ -334,6 +376,7 @@ export const Sidebar = memo(function Sidebar() {
 
       // Optimistic update
       setRepositoryOrder(newOrder);
+      persistRepositoryOrderCache(newOrder);
 
       // Persist to server
       fetch('/api/sidebar/group-order', {
@@ -343,6 +386,7 @@ export const Sidebar = memo(function Sidebar() {
       }).catch(() => {
         // Revert on error
         setRepositoryOrder(currentOrder);
+        persistRepositoryOrderCache(currentOrder);
       });
     },
     [groupedBranches]
