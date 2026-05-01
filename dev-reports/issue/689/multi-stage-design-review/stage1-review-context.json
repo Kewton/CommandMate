@@ -1,0 +1,13 @@
+{
+  "issue_number": "689",
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "design_policy_path": "dev-reports/design/issue-689-standard-commands-update-design-policy.md",
+  "related_files": [
+    "src/lib/standard-commands.ts",
+    "tests/unit/lib/standard-commands.test.ts",
+    "src/lib/command-merger.ts",
+    "src/types/slash-commands.ts"
+  ]
+}

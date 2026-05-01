@@ -1,0 +1,39 @@
+{
+  "stage": 5,
+  "focus": "通常（2回目）",
+  "reviewer": "codex",
+  "findings": [
+    {
+      "id": "S5-001",
+      "severity": "Must Fix",
+      "title": "Codex built-in の `/fast` が追加対象にも除外対象にも入っていない",
+      "description": "Issue 本文の Codex 側現状確認では `slash_command.rs` に `/fast` が存在すると記載されている一方、Codex 追加対象 8 件にも Codex 表示しないコマンド一覧にも `/fast` が含まれていない。さらに Claude 追加対象では `fast` を `cliTools: undefined` として追加する方針のため、そのまま実装すると `fast` は Claude-only 扱いになり、Codex 選択時には表示されない。これは受入条件の『現行 Codex CLI と CommandMate の差分が追加対象・除外対象リストと一致』を満たせない。",
+      "suggestion": "`/fast` を Codex で表示するか除外するかを確定する。表示する場合は Claude 側の実在確認結果に応じて `cliTools: ['codex']` または `['claude', 'codex']` とし、総件数・codexOnly/shared 件数・テスト更新表・FREQUENTLY_USED 方針を再計算する。除外する場合は Codex 表示しないコマンド一覧に `/fast` と除外理由を追加する。"
+    },
+    {
+      "id": "S5-002",
+      "severity": "Must Fix",
+      "title": "Claude Code 追加対象 4 件の一次情報が現行情報と整合していない",
+      "description": "Issue 本文は `/effort`, `/fast`, `/focus`, `/lazy` を Claude Code の slash command として追加する前提だが、2026-05-01 に確認した Anthropic 公式 Slash commands ページにはこれら 4 件が built-in slash command として掲載されていない。またローカル Claude Code 2.1.123 の `claude --help` では `--effort` は CLI option として確認できるが、slash command の `/effort` や `/fast`, `/focus`, `/lazy` は確認できない。現状の根拠欄『Claude Code 公式ドキュメント `/help` 出力（実装時に `claude --help` で再確認）』では slash command の実在を検証できず、存在しない slash command を追加するリスクがある。",
+      "suggestion": "Claude Code 追加対象 4 件について、interactive `/help` の出力、公式ドキュメント URL、または該当実装ソースなど、slash command としての一次情報を Issue 本文に明記する。根拠を確認できないコマンドは追加対象・受入条件・件数サマリー・テスト更新表から削除し、必要なら CLI option と slash command を分けて別 Issue 化する。"
+    },
+    {
+      "id": "S5-003",
+      "severity": "Should Fix",
+      "title": "Codex main の追加 built-in コマンドが除外リストに未反映",
+      "description": "2026-05-01 時点の `openai/codex` main の `codex-rs/tui/src/slash_command.rs` には、Issue 本文の Codex built-in 一覧や除外リストにない `setup-default-sandbox`, `sandbox-add-read-dir`, `debug-m-drop`, `debug-m-update` が存在する。Issue は実装時に最新 main / 該当タグを再確認するとしているため、これらが最終検証時に存在する場合の扱いを明示しておかないと、差分整理の受入条件が曖昧になる。",
+      "suggestion": "Codex 表示しないコマンド一覧に、最新確認で存在する sandbox/debug 系コマンドを追加するか、対象バージョンを `codex-cli 0.125.0` の該当タグ/コミットに固定する。少なくとも実装タスクに『最新確認で新たに見つかった built-in は追加対象または除外対象に必ず分類し、除外リストとテストコメントを更新する』を追加する。"
+    },
+    {
+      "id": "S5-004",
+      "severity": "Should Fix",
+      "title": "Copilot 同名衝突の回帰テストが実装タスク・受入条件に落ち切っていない",
+      "description": "Stage 3 反映後の Issue 本文には、`agent`, `skills`, `plan` の同名衝突について cliTool=codex / cliTool=copilot 双方で確認する必要があると記載されている。しかし実装タスクとテスト更新箇所一覧で具体的に追加指示されているのは `tests/integration/api-worktree-slash-commands.test.ts` の codex ケースへの 8 件 `toContain` 追加のみで、copilot ケースの追加テストが明示されていない。既存の同ファイルにも copilot ケースは存在しないため、このままだと Stage 3 の設計依存リスクがテストで固定されない。",
+      "suggestion": "`tests/integration/api-worktree-slash-commands.test.ts` に cliTool=copilot のケースを追加し、`agent`, `skills`, `plan` が Copilot builtin として表示されること、Codex-only の新規コマンドが Copilot に漏れないこと、必要に応じて `source: 'builtin'` で上書きされることを検証するタスクと受入条件を追加する。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 2,
+  "nice_to_have_count": 0,
+  "summary": "Stage 1/3 の主要指摘は概ね Issue 本文へ反映済み。ただし 2 回目レビューでは、Codex built-in `/fast` の扱いが追加対象・除外対象のどちらにも分類されていない点と、Claude Code 追加対象 4 件の slash command としての一次情報が現行公式情報および `claude --help` だけでは確認できない点を Must Fix とした。加えて、最新 `openai/codex` main にある sandbox/debug 系 built-in の分類方針と、Copilot 同名衝突を固定する integration test の具体化を Should Fix とした。"
+}

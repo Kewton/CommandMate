@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 
 // Mock the database functions
 vi.mock('@/lib/db/db-instance', () => ({
@@ -125,6 +126,64 @@ describe('GET /api/worktrees/[id]/slash-commands', () => {
     expect(allNames).toContain('status');
     expect(allNames).toContain('review');
     expect(allNames).not.toContain('context');
+  });
+
+  // Issue #689: New Codex commands are visible when cliTool=codex (DR3-001: global Codex mocked)
+  it('should return new Codex standard commands (plan/goal/agent etc.) when cliTool=codex', async () => {
+    // Use isolated HOME to avoid global ~/.codex/skills or ~/.codex/prompts overriding standard commands
+    const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'commandmate-test-'));
+    const originalHome = process.env.HOME;
+    process.env.HOME = isolatedHome;
+
+    try {
+      const { getWorktreeById } = await import('@/lib/db');
+      vi.mocked(getWorktreeById).mockReturnValue({
+        id: 'test-id',
+        name: 'test',
+        path: '/Users/test/projects/my-project',
+        repositoryPath: '/Users/test/projects/my-project',
+        repositoryName: 'my-project',
+        cliToolId: 'codex',
+      });
+
+      const { GET } = await import(
+        '@/app/api/worktrees/[id]/slash-commands/route'
+      );
+
+      const request = new NextRequest('http://localhost:3000/api/worktrees/test-id/slash-commands?cliTool=codex');
+      const response = await GET(request, { params: Promise.resolve({ id: 'test-id' }) });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+
+      type CommandEntry = { name: string; source: string; cliTools?: string[] };
+      const allCommands: CommandEntry[] = data.groups.flatMap(
+        (group: { commands: CommandEntry[] }) => group.commands
+      );
+      const allNames = allCommands.map((c) => c.name);
+
+      // New Codex standard commands should be present
+      const newCodexCommands = ['plan', 'goal', 'agent', 'subagents', 'fork', 'memories', 'skills', 'hooks'];
+      for (const name of newCodexCommands) {
+        expect(allNames).toContain(name);
+        const cmd = allCommands.find((c) => c.name === name);
+        expect(cmd).toBeDefined();
+        expect(cmd?.source).toBe('standard');
+        expect(cmd?.cliTools).toEqual(['codex']);
+      }
+
+      // Claude-only commands should not appear for Codex
+      expect(allNames).not.toContain('effort');
+      expect(allNames).not.toContain('fast');
+      expect(allNames).not.toContain('focus');
+      expect(allNames).not.toContain('lazy');
+
+      // OpenCode-only command 'agents' should not appear for Codex
+      expect(allNames).not.toContain('agents');
+    } finally {
+      process.env.HOME = originalHome;
+      fs.rmSync(isolatedHome, { recursive: true, force: true });
+    }
   });
 
   it('should return Gemini builtins and gemini-tagged worktree commands when cliTool=gemini', async () => {

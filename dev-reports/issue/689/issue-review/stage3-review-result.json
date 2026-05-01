@@ -1,0 +1,139 @@
+{
+  "stage": 3,
+  "focus": "影響範囲",
+  "reviewer": "issue-review-agent",
+  "issue_number": 689,
+  "review_date": "2026-05-01",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "Must Fix",
+      "title": "新規追加コマンド名の Copilot 組み込みコマンドとの重複が影響範囲に未記載",
+      "description": "Issue 本文の影響範囲セクションには `src/lib/slash-commands.ts` を『本 Issue 対象外』としているが、Codex 追加対象として確定した `agent`, `skills`, `plan` の 3 つは `getCopilotBuiltinCommands()` (src/lib/slash-commands.ts L459, L460, L502) に同名コマンドとして既存定義がある。`src/app/api/worktrees/[id]/slash-commands/route.ts` の mergeCommandGroups は `Map<string, SlashCommand>` で名前重複を上書き処理するため、cliTool=copilot の場合は『copilot 組み込みが Codex の標準を上書き → filterCommandsByCliTool で copilot のみ通過』の二段階で動作し、cliTool=codex の場合は copilotBuiltinGroups 自体が空配列になるため Codex 標準が残る。すなわち動作には支障がないが、この『重複名は cliTool 別注入により隔離される』という設計依存関係が Issue 影響範囲に明示されていないため、将来 mergeCommandGroups の優先順位を変更した場合に未検出のリグレッションを起こすリスクがある。",
+      "suggestion": "Issue 本文の影響範囲セクションに以下を追記する: (1) 新規追加する `agent` / `skills` / `plan` はそれぞれ `getCopilotBuiltinCommands()` に Copilot 用同名コマンドが存在する、(2) src/app/api/worktrees/[id]/slash-commands/route.ts の copilotBuiltinGroups は cliTool === 'copilot' のときのみ注入され mergeCommandGroups の worktreeGroups パラメータ側に渡るため Codex 標準を上書きする、(3) filterCommandsByCliTool で最終的に cliTool に該当するもののみ通過するため動作上の衝突はないが、テストで cliTool=codex/copilot の双方で当該コマンドが正しく表示されることを確認する。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "Must Fix",
+      "title": "Codex 排他コマンド数 17→25 への変更がテストの『9個の codexOnlyCommands 配列』に与える影響が未明示",
+      "description": "Issue 本文の『テスト更新箇所一覧表』では L80-94 の `codexOnlyCommands` リストの更新を指示しているが、確定リスト (goal, agent, subagents, fork, memories, skills, hooks の 7 件 + 表示維持の plan) のうち、どれが `cliTools: ['codex']` のみ (Codex 排他) で、どれが共有 (`['claude', 'codex']` 等) になるかが Issue 本文の category 割り当て表からは読み取れない。Issue 本文の『追加対象コマンド確定リスト』では cliTools 値が指定されていないため、既存の opt-in 原則 (Issue #594) に従えば全て `['codex']` 排他になるが、Issue で明示されていない。これにより L80-94 の `codexOnlyCommands` リストに何件追加するか (7 件か 8 件か) の解釈が実装者依存となる。",
+      "suggestion": "Issue 本文の category 割り当て指針表に cliTools 値の列を追加するか、別表を作成して以下を明示する: (1) Claude 追加 4 件 (effort/fast/focus/lazy) は `['claude']` または backward-compatible に undefined のどちらか、(2) Codex 追加 8 件 (plan/goal/agent/subagents/fork/memories/skills/hooks) は全て `['codex']` 排他か、または共有候補があるか、(3) FREQUENTLY_USED.codex に追加する `plan` は cliTools 値がどうなるか。Issue #594 の opt-in 原則 (共有判定は両 CLI で同セマンティクスを公式ドキュメントで確認できた場合のみ) に基づき全て排他とするのか、Issue で確定する。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "Must Fix",
+      "title": "Claude 追加 4 件 (effort/fast/focus/lazy) の cliTools 値方針が未確定で『8 Claude-only』テストに影響",
+      "description": "tests/unit/lib/standard-commands.test.ts L20 のテスト名は『8 Claude-only + 9 shared + 9 Codex-only + 7 OpenCode-only』であり、L36-50 の `claudeOnlyCommands` 配列は cliTools が undefined であることを検証する (rewind, config, context, cost, pr-comments, doctor, export, todos の 8 件)。Issue では Claude 追加 4 件 (effort/fast/focus/lazy) を加えるとあるが、既存 Claude-only コマンドが全て cliTools undefined である一方、Issue #594 以降の opt-in 原則では新規追加は明示的に cliTools を設定するのが正しい (現状の opencode-only や codex-only と同様)。すなわち effort/fast/focus/lazy を `cliTools: ['claude']` で追加するのか、あるいは backward-compatible に undefined で追加するのか方針が未確定。前者の場合、L36-50 の `claudeOnlyCommands` (cliTools undefined 検証) には追加されず、別途 `['claude']` 検証を追加する必要がある。",
+      "suggestion": "Issue 本文に以下を追記する: (1) Claude 追加 4 件の cliTools 値を `['claude']` で明示する (Issue #594 opt-in 原則準拠) か、undefined にする (既存 Claude-only と同パターン) かを決定、(2) 前者の場合は L20 テスト名の更新方針 (例: 『8 Claude-only (legacy) + 4 Claude-only (explicit) + ...』)、(3) 後者の場合は『新規追加も backward-compatible 方針を踏襲』の根拠記載。テスト L36-50 の更新範囲が変わるため、Issue 段階で確定が必要。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "Should Fix",
+      "title": "FREQUENTLY_USED.codex 変更による getFrequentlyUsedCommands テスト (L213-216) の更新が未記載",
+      "description": "Issue 本文の『テスト更新箇所一覧』には L21/L46/L80-94/L119-124/L126-131/L194 が列挙されているが、tests/unit/lib/standard-commands.test.ts L213-216 の `Codex frequently used should include new and undo` テストは現状 `mcp` が消えても通る (toContain アサート 2 件のみ) ため見落としやすい。一方、新規追加する `/plan` が FREQUENTLY_USED.codex に含まれることを検証する追加テストが必要だが、Issue 本文の『テスト追加項目 3: /plan が Codex 表示時に含まれることの検証』と FREQUENTLY_USED.codex の検証は別物。Issue で両方を明確に区別すべき。",
+      "suggestion": "Issue 本文のテスト更新箇所一覧に以下を追加する: (1) tests/unit/lib/standard-commands.test.ts L213-216 を更新し `expect(FREQUENTLY_USED.codex).toContain('plan')` を追加、(2) FREQUENTLY_USED.codex から `mcp` が削除されたことを検証する `expect(FREQUENTLY_USED.codex).not.toContain('mcp')` を追加 (回帰防止)、(3) 受入条件の一文として『FREQUENTLY_USED.codex の更新がテストで検証されている』を追加。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "Should Fix",
+      "title": "Stage 1 で関連 Issue として #547 が言及されたが、Copilot/Gemini 影響範囲ファイルとしての位置づけが弱い",
+      "description": "Issue #689 本文の前提セクションでは Copilot/Gemini が `getCopilotBuiltinCommands` / `getGeminiBuiltinCommands` で別系統管理されている旨が明記され、本 Issue 対象外と確定されている。これは正しい。しかし関連コンポーネント表 (本 Issue では変更不要) に src/lib/slash-commands.ts のみ列挙されており、API ルート route.ts の copilotBuiltinGroups 注入ロジック (L117-122) や、新規追加コマンド名と Copilot builtin の重複判定 (S3-001) との関係性が読み取れない。`getCopilotBuiltinCommands` 内の `agent` (L459)、`skills` (L460)、`plan` (L502)、`mcp` (L461)、`init` (L458)、`logout` (L500)、`new` (L501)、`undo` (L505) 等は STANDARD_COMMANDS の同名コマンドと衝突する可能性があるため、影響範囲確認時に slash-commands.ts も読むことが望ましい。",
+      "suggestion": "Issue 本文の影響範囲セクションに以下を追記する: (1) src/lib/slash-commands.ts の `getCopilotBuiltinCommands` (L450-508) には `init`, `agent`, `skills`, `mcp`, `plan`, `logout`, `new`, `undo`, `feedback` 等 STANDARD_COMMANDS と同名のコマンドが含まれるため、cliTool=copilot 時の動作確認が必要、(2) 同関数の `getGeminiBuiltinCommands` (L517-533) にも `clear`, `compact`, `model`, `quit`, `help` 等の同名コマンドがあるため Gemini も同様、(3) これらは route.ts の cliTool 別注入ロジックで隔離されるが、レビュー時には slash-commands.ts を読み取り専用で参照することを明記。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "Should Fix",
+      "title": "tests/integration/api-worktree-slash-commands.test.ts の codex テスト (L99-128) への影響が未確認",
+      "description": "tests/integration/api-worktree-slash-commands.test.ts L99-128 の『should return Codex shared commands when cliTool=codex』テストは `expect(allNames).toContain('clear'/'model'/'status'/'review')` で共有コマンドの存在を検証し、`expect(allNames).not.toContain('context')` で Claude-only が除外されていることを検証している。Issue で追加される Codex 専用 8 件 (plan, goal, agent, subagents, fork, memories, skills, hooks) は新規に Codex 出力に含まれることになる。当該テストは `not.toContain` でホワイトリスト的検証ではなく、特定名のみブラックリスト的検証 (context 除外) なので破壊しないが、追加コマンドの存在検証 (toContain) は明示的に追加すべき。Issue の『テスト更新箇所一覧』には integration test への言及がない。",
+      "suggestion": "Issue 本文に以下を追加する: (1) tests/integration/api-worktree-slash-commands.test.ts L99-128 の codex テストに新規追加コマンドの存在検証を追加 (例: `expect(allNames).toContain('plan')` `expect(allNames).toContain('goal')`)、(2) 影響範囲セクションに『tests/integration/api-worktree-slash-commands.test.ts (Issue では破壊しないが追加検証を推奨)』を読み取り専用ファイルとして追加。"
+    },
+    {
+      "id": "S3-007",
+      "severity": "Should Fix",
+      "title": "Issue #4 シェアード判定テスト (L53-77) のシェアードコマンド数 9 件が変動する可能性",
+      "description": "tests/unit/lib/standard-commands.test.ts L20 のテスト名にある『9 shared』はテストコード内では具体的件数アサートはなく、L53-77 の `sharedCommands` 配列 (claude+codex 7件: clear/compact/resume/model/permissions/status/review、claude+opencode 2件: compact/help) の存在検証のみ。Issue 本文の category 割り当て指針では新規追加のうち共有を増やすかどうかが未明示 (S3-002 と関連)。仮に Codex 追加で claude と共有のものが現れた場合 (例: `agent` を `['claude', 'codex']` にする等)、L20 のテスト名 (件数記述部分) の更新が必要になる。",
+      "suggestion": "S3-002 の Issue 本文確定 (cliTools 値方針) に追従し、L20 のテスト名コメント (`8 Claude-only + 9 shared + 9 Codex-only + 7 OpenCode-only`) の各数値の更新方針を Issue で明示する。例: 『追加コマンドは全て Codex 排他とするため、shared は 9 件のまま変わらず、Codex-only は 9 + 7 = 16 件、Claude-only (legacy) は 8 件のまま、Claude-only (explicit) は 4 件追加で計 12 件』のような新総件数構成を Issue にテーブル化する。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "Nice to Have",
+      "title": "後方互換性: 既存 Codex skill / prompt との名前衝突可能性が未言及",
+      "description": "src/lib/slash-commands.ts の `loadCodexSkills()` は ~/.codex/skills/ (および .system/) からスキルを読み込み cliTools=['codex'] でカテゴリ='skill' として登録する。`loadCodexPrompts()` は ~/.codex/prompts/*.md を category='skill', invocation='codex-prompt' として登録する。新規追加する `/plan`, `/goal`, `/agent`, `/subagents`, `/fork`, `/memories`, `/skills`, `/hooks` がユーザーの ~/.codex/skills/{plan}/SKILL.md や ~/.codex/prompts/plan.md と衝突する可能性がある。route.ts の mergeCommandGroups では同名は worktree 側 (= globalCodexGroups) が標準を上書きするため、ユーザーが定義した skill が優先されるという既存の優先順位ルール (SF-1) が適用される。これは設計どおりだが、Issue で言及がないため、ユーザーが既に Codex skill `/plan` 等を持っていた場合に標準 `/plan` が見えなくなる点を Issue で明示すべき。",
+      "suggestion": "Issue 本文の影響範囲または注記セクションに『ユーザーが ~/.codex/skills/{name}/ または ~/.codex/prompts/{name}.md として既に定義しているコマンド名と新規追加が衝突した場合、SF-1 (worktree 優先) によりユーザー定義が優先される。これは既存の設計どおりの挙動である』を追加する。これにより実装後の不具合報告 (『標準 /plan が見えない』) を未然に防げる。"
+    },
+    {
+      "id": "S3-009",
+      "severity": "Nice to Have",
+      "title": "SlashCommandList コンポーネントの『Codex』バッジ表示への影響が未言及",
+      "description": "src/components/worktree/SlashCommandList.tsx L85-89 では `command.cliTools?.length === 1 && command.cliTools[0] === 'codex'` の場合に『Codex』バッジを表示する。S3-002 で確定する cliTools 値方針に従い、新規追加 Codex 排他 8 件はすべてこのバッジが表示される。Issue ではこの UI 上の影響に言及がないが、影響範囲としては記録すべき。",
+      "suggestion": "Issue 本文の関連コンポーネント表に『src/components/worktree/SlashCommandList.tsx (本 Issue では変更不要、新規追加 Codex 排他 8 件は自動的に Codex バッジが表示される)』を追記する。受入条件の確認項目として『Codex 選択時に新規追加 8 件すべて Codex バッジが表示される』を追加するとなお良い。"
+    },
+    {
+      "id": "S3-010",
+      "severity": "Nice to Have",
+      "title": "OpenCode 件数 (10) 変更なしの根拠を明記すべき",
+      "description": "Issue のテスト更新箇所一覧では『L119-124 should have 10 commands available for OpenCode は OpenCode 件数は変わらないため変更なし (追加が共有でない場合)』と記載されている。これは S3-002 の cliTools 値確定に依存する。Codex 追加 8 件のうちどれかが OpenCode と共有 (`['codex', 'opencode']` 等) になる場合は OpenCode 件数も変わる。Issue で『OpenCode の件数は変わらない』を確定するためには、Codex 追加 8 件すべてが OpenCode を含まないことを明示する必要がある。",
+      "suggestion": "Issue 本文に『Codex 追加 8 件 (plan, goal, agent, subagents, fork, memories, skills, hooks) はすべて Codex 排他 (`['codex']`) であり、OpenCode の cliTools には含めない。よって OpenCode 件数 10 件は変更なし』を明示する。S3-002 と一緒に解決可能。"
+    }
+  ],
+  "must_fix_count": 3,
+  "should_fix_count": 4,
+  "nice_to_have_count": 3,
+  "summary": "Stage 3 影響範囲レビューでは、Issue #689 が Stage 1/2 反映後も大筋で適切な影響範囲を捕捉できているが、(A) 新規追加コマンド名が `getCopilotBuiltinCommands()` の同名コマンドと衝突し mergeCommandGroups の cliTool 別注入ロジックで隔離されるという『見落とされやすい設計依存』が未明示 (S3-001), (B) 新規追加コマンドの cliTools 値方針 (排他か共有か) が確定していないため、テスト L20 のテスト名 (8/9/9/7 件構成) の更新規模・L80-94 codexOnlyCommands 配列の追加件数・L36-50 claudeOnlyCommands 配列との関係が実装者依存となる (S3-002, S3-003), の Must Fix 3 件を指摘。Should Fix 4 件は (C) FREQUENTLY_USED.codex から mcp 削除を検証する回帰テスト追加 (S3-004), (D) Copilot/Gemini builtin コマンドの同名衝突一覧の影響範囲明記 (S3-005), (E) integration test への toContain 追加検証 (S3-006), (F) シェアード件数の総件数構成テーブル化 (S3-007)。Nice to Have 3 件はユーザー定義 Codex skill との SF-1 優先順位の言及 (S3-008), SlashCommandList の Codex バッジ表示 UI 影響 (S3-009), OpenCode 件数 10 維持の根拠明記 (S3-010)。これら 10 項目を Issue 本文の影響範囲・テスト更新箇所・category 割り当て指針セクションに反映することで、実装段階で『どのテストをどう更新すべきか』『どのファイルを読み取り専用で確認すべきか』が機械的に判断可能になり、Stage 4 以降の手戻りを最小化できる。",
+  "code_references": [
+    {
+      "file": "src/lib/standard-commands.ts",
+      "relevance": "本 Issue の主たる変更対象。L24-349 の STANDARD_COMMANDS 配列、L354-358 の FREQUENTLY_USED 定数を更新する。"
+    },
+    {
+      "file": "tests/unit/lib/standard-commands.test.ts",
+      "relevance": "L20 (件数+構成記述), L36-50 (claudeOnlyCommands), L53-77 (sharedCommands), L80-100 (codexOnlyCommands), L119-131 (件数アサート), L194-196 (FREQUENTLY_USED 5件制約), L213-216 (FREQUENTLY_USED.codex 検証) を更新。"
+    },
+    {
+      "file": "src/lib/slash-commands.ts",
+      "relevance": "本 Issue では変更不要。ただし getCopilotBuiltinCommands (L450-508) の `init`, `agent`, `skills`, `mcp`, `plan`, `logout`, `new`, `undo`, `feedback` および getGeminiBuiltinCommands (L517-533) の `clear`, `compact`, `model`, `quit`, `help` が STANDARD_COMMANDS と同名衝突するため、影響範囲として読み取り必須 (S3-001, S3-005)。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/slash-commands/route.ts",
+      "relevance": "本 Issue では変更不要。L117-122 の copilotBuiltinGroups / geminiBuiltinGroups 注入と L124-127 の mergeCommandGroups 呼び出しにより、cliTool 別に同名コマンドが隔離される。S3-001 で言及。"
+    },
+    {
+      "file": "src/lib/command-merger.ts",
+      "relevance": "本 Issue では変更不要。L99-129 の mergeCommandGroups は Map<string, SlashCommand> で名前重複を後勝ち上書き、L184-201 の filterCommandsByCliTool で cliTool 別フィルタ。新規追加コマンドの動作確認に必要。"
+    },
+    {
+      "file": "src/components/worktree/SlashCommandList.tsx",
+      "relevance": "本 Issue では変更不要。L85-89 の Codex バッジ表示が新規追加 Codex 排他 8 件にも自動適用される (S3-009)。"
+    },
+    {
+      "file": "src/components/worktree/SlashCommandSelector.tsx",
+      "relevance": "本 Issue では変更不要。L62-64 で filterCommandGroups 経由でフィルタ表示。新規追加コマンドの description テキストも検索対象。"
+    },
+    {
+      "file": "src/types/slash-commands.ts",
+      "relevance": "本 Issue では変更不要 (Issue で確定した『新カテゴリ追加なし』方針)。SlashCommandCategory 型 (L14-26) と CATEGORY_LABELS 定数 (L81-94) は影響なし。"
+    },
+    {
+      "file": "tests/integration/api-worktree-slash-commands.test.ts",
+      "relevance": "本 Issue で言及なし。L99-128 の codex 共有コマンド検証は破壊しないが、新規追加 Codex 8 件の存在検証 (toContain) を追加することが望ましい (S3-006)。"
+    },
+    {
+      "file": "src/hooks/useSlashCommands.ts",
+      "relevance": "本 Issue では変更不要。API レスポンスを groups にそのまま設定するのみで、コマンド名・件数に依存しない。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "dev-reports/issue/689/issue-review/stage1-review-result.json",
+      "relevance": "Stage 1 通常レビュー結果。S1-002 (共有/排他分類表) と S1-007 (category 割り当て指針) が本 Stage 3 で参照する基礎情報。"
+    },
+    {
+      "file": "dev-reports/issue/689/issue-review/stage2-apply-result.json",
+      "relevance": "Stage 2 反映結果。Stage 1 の Must Fix 4件 + Should Fix 4件すべて反映済み。本 Stage 3 はその上に影響範囲観点の追加指摘を行う。"
+    },
+    {
+      "file": "dev-reports/issue/689/issue-review/hypothesis-verification.md",
+      "relevance": "Issue 内主張の検証レポート。Stage 3 では新規参照箇所なし。"
+    }
+  ]
+}
