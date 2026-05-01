@@ -157,14 +157,12 @@ describe('formatMessageTimestamp [SF-001]', () => {
 
     it('should return empty string when non-Date is passed (as any)', () => {
       // Defensive fallback: runtime callers may pass strings/null/undefined.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      /* eslint-disable @typescript-eslint/no-explicit-any */
       expect(formatMessageTimestamp('2026-02-15T10:30:00Z' as any)).toBe('');
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       expect(formatMessageTimestamp(null as any)).toBe('');
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       expect(formatMessageTimestamp(undefined as any)).toBe('');
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       expect(formatMessageTimestamp(1234567890 as any)).toBe('');
+      /* eslint-enable @typescript-eslint/no-explicit-any */
     });
   });
 

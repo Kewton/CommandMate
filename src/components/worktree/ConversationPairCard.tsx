@@ -210,8 +210,6 @@ const UserMessageSection = memo(function UserMessageSection({
   onCopy?: (content: string) => void;
   onInsertToMessage?: (content: string) => void;
 }) {
-  // Issue #687: Show "PPp" (date + time) instead of time-only, matching
-  // MessageList.tsx and PromptMessage.tsx for consistent UI presentation.
   const locale = useLocale();
   const dateFnsLocale = getDateFnsLocale(locale);
   const formattedTime = formatMessageTimestamp(message.timestamp, dateFnsLocale);
@@ -278,8 +276,6 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
   onFilePathClick: (path: string) => void;
   onCopy?: (content: string) => void;
 }) {
-  // Issue #687: Show "PPp" (date + time) instead of time-only, matching
-  // MessageList.tsx and PromptMessage.tsx for consistent UI presentation.
   const locale = useLocale();
   const dateFnsLocale = getDateFnsLocale(locale);
   const formattedTime = formatMessageTimestamp(message.timestamp, dateFnsLocale);

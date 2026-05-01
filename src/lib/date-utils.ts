@@ -46,16 +46,13 @@ export function formatRelativeTime(isoString: string, locale?: Locale): string {
 /**
  * Format a message timestamp as a localized date + time string. (Issue #687)
  *
- * Uses date-fns `'PPp'` (Long localized date + Long localized time), which is
- * the same format used by `MessageList.tsx` and `PromptMessage.tsx`. Keeping
- * the format identical guarantees a consistent timestamp presentation across
- * all chat-style UI surfaces.
+ * Uses date-fns `'PPp'` (long localized date + long localized time) to match
+ * `MessageList.tsx` and `PromptMessage.tsx`, ensuring consistent timestamp
+ * presentation across all chat-style UI surfaces. UI callers should pass a
+ * resolved `Locale` from `getDateFnsLocale()`.
  *
- * - When `locale` is omitted, date-fns falls back to its default (en-US-like)
- *   formatting. UI callers should always pass a resolved `Locale` from
- *   `getDateFnsLocale()`.
- * - For an `Invalid Date` (or any non-`Date` value passed in via `as any`),
- *   returns an empty string as a safe UI fallback.
+ * Returns an empty string for invalid `Date` values (or non-`Date` runtime
+ * inputs) as a safe UI fallback.
  *
  * @param timestamp - The Date to render
  * @param locale - Optional date-fns Locale object
