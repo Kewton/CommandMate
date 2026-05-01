@@ -1,0 +1,7 @@
+{
+  "stage": 1,
+  "applied_findings": ["DR1-001", "DR1-002", "DR1-003", "DR1-004", "DR1-005", "DR1-006"],
+  "skipped_findings": ["DR1-007", "DR1-008"],
+  "design_policy_updated": true,
+  "summary": "Stage 1設計レビュー指摘のMust Fix 2件・Should Fix 4件を設計方針書に反映。DR1-001ではClaude追加4件の`cliTools`を`undefined`から`['claude']`明示に変更し、Issue #594 opt-in原則を継承（§3 cliTools設計方針/§4件数構成/§4 Claude追加表/§7テスト/§8トレードオフ/§9実装手順を更新）。DR1-002では`/agent`（Codex単数）と`/agents`（OpenCode複数）の差別化方針および`filterCommandsByCliTool`によるCLI別隔離でUI混乱が発生しない旨を§3/§4/§7/§8/§9に追記。DR1-003では§7にL20の`it()`説明文更新を明記し、追加テスト項目のcategory配置を具体化。DR1-004では新規Codex 8件それぞれの『共有しない理由』を§3共有可能性検討表および§4 Codex追加表（共有しない理由列追加）に明記。DR1-005では§4 FREQUENTLY_USED更新欄に`mcp`除外理由・`plan`採用理由・5件構成維持・他8件を昇格させない理由を明文化。DR1-006では§7にCLI ツール隔離マトリクステスト（`EXPECTED_CLI_VISIBILITY`によるSSoT化、`it.each`によるテーブル駆動テスト、Copilot/Gemini含む5ツールの網羅検証）を新設。新セクション§10レビュー履歴・§11レビュー指摘事項サマリー・§12実装チェックリストを追加。Nice to Have 2件（DR1-007再発防止策、DR1-008英語統一）はスコープ外として今回スキップ。"
+}

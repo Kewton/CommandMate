@@ -1,0 +1,156 @@
+{
+  "stage": 1,
+  "focus": "通常",
+  "reviewer": "issue-review-agent",
+  "issue_number": 689,
+  "review_date": "2026-05-01",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "Must Fix",
+      "category": "整合性",
+      "title": "影響範囲の記載に Copilot/Gemini built-in コマンドが含まれていない",
+      "description": "Issue本文では `src/lib/standard-commands.ts` の `STANDARD_COMMANDS` の更新のみが提案されているが、実際のリポジトリでは Copilot の組み込みコマンドは `src/lib/slash-commands.ts` の `getCopilotBuiltinCommands()` に、Gemini は `getGeminiBuiltinCommands()` に分離されている（`src/app/api/worktrees/[id]/slash-commands/route.ts` Line 19, 117-122 で参照）。すなわち CommandMate には『標準コマンド一覧』が二系統（STANDARD_COMMANDS / *BuiltinCommands）存在し、Codex/Claude/OpenCode は前者、Copilot/Gemini は後者で管理されている。Issueタイトルが『claude code や codex の表示コマンド最新化』である以上、Copilot/Gemini は対象外で問題ないが、Codex のコマンド管理が STANDARD_COMMANDS 一極に集約されている点を本Issueの前提として明示しないと、実装担当者が『Codex も builtin commands に分離すべきか』を迷う恐れがある。",
+      "location": "## 影響範囲 / 関連コンポーネント セクション",
+      "suggestion": "Issueに以下を明記する: (1) Codex/Claude/OpenCode の標準コマンドは `STANDARD_COMMANDS` で一括管理されており、本Issueでも当該定数を更新する方針を維持する、(2) Copilot/Gemini の組み込みコマンドは別系統（`getCopilotBuiltinCommands` / `getGeminiBuiltinCommands`）で管理されているが本Issueの対象外、(3) もし将来的に統合を検討する場合は別Issueで扱う。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "Must Fix",
+      "category": "正確性",
+      "title": "Issue記載の現状サマリと実装の `cliTools` 値が完全には一致していない",
+      "description": "Issue『現状確認』セクションでは Codex 対象として 17件を列挙しているが、各コマンドの `cliTools` 値は微妙に異なる構成: 例えば `compact` は `['claude', 'codex', 'opencode']`、`new` は `['codex', 'opencode']`、`undo`/`logout`/`quit`/`approvals`/`diff`/`mention`/`mcp`/`init`/`feedback` は `['codex']` のみで Codex 排他。Issueでは『Codex 対象として定義されている主なコマンド』として一括列挙しているが、共有コマンド (`clear`/`compact`/`resume`/`model`/`permissions`/`status`/`review`/`new`) と Codex 排他コマンド (`undo`/`logout`/`quit`/`approvals`/`diff`/`mention`/`mcp`/`init`/`feedback`) を区別しないため、実装時に共有コマンドを誤って Codex 専用扱いしてしまうリスクがある。仮説検証レポートでも『Codex 排他: 9件、Codex+OpenCode 共有: 1件、Claude+Codex 共有: 7件』と分類されているにもかかわらず、Issue本文では合計17件の単一リストとして提示されている。",
+      "location": "## 現状確認 / CommandMate 側 セクション",
+      "suggestion": "現状確認セクションに以下のような表を追加する。\n\n| 種別 | コマンド | cliTools |\n|---|---|---|\n| Claude+Codex 共有 | clear, compact, resume, model, permissions, status, review | 共有 |\n| Codex+OpenCode 共有 | new | 共有 |\n| Codex 排他 | undo, logout, quit, approvals, diff, mention, mcp, init, feedback | ['codex'] のみ |\n\nこの分類により、新規追加するコマンド（plan等）が共有か排他かの判断が容易になる。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "Must Fix",
+      "category": "明確性 / 受け入れ条件",
+      "title": "Claude Code の追加対象コマンドが『等』で曖昧、確定リストが必要",
+      "description": "Issue本文に『`/effort`, `/fast`, `/focus`, `/lazy` 等が未定義』とあるが、『等』により最終的な追加対象が確定していない。受入条件には `/effort`, `/fast`, `/focus` のみ記載されており、`/lazy` が含まれない理由も不明。さらに Claude Code には他にも `/agents`, `/output-style`, `/output-style-set`, `/login`, `/logout`, `/mcp`, `/usage`, `/upgrade`, `/install-github-app`, `/security-review`, `/bug` 等の組み込みコマンドが存在する可能性があり、本Issueで追加するコマンドの確定リストとその根拠（公式ドキュメントURL や CLI 出力等）を明示しないと、実装後に『他にも追加すべきだったのでは』というレビュー指摘が継続的に発生する恐れがある。",
+      "location": "## 概要・実装タスク・受入条件 セクション",
+      "suggestion": "Issueに『追加対象コマンド確定リスト』セクションを設け、以下を明記する: (1) Claude Code に追加するコマンド名の確定リスト、(2) 各コマンドの description 案、(3) 一次情報の出典（Anthropic 公式ドキュメント URL、または `claude --help` / 実行画面のスクリーンショット等）、(4) 今回スコープ外とするコマンドがあればその理由。受入条件もこの確定リスト全件に合わせて更新する。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "Must Fix",
+      "category": "明確性 / 受け入れ条件",
+      "title": "Codex 側の追加・整理対象コマンドの確定リストが不足",
+      "description": "実装タスクには『Codex 不足コマンド（少なくとも `plan`）を追加』とあるが、『少なくとも』により対象が確定していない。Issue本文では Codex CLI の built-in が広範に列挙され、feature-gated / debug-only / platform-specific の分類も実装タスクに残されているが、最終的に何を追加し、何を表示しないか、どう判断するかが Issue では決まっていない。受入条件にも『現行 Codex CLI の主要 built-in コマンドとの差分が整理されている』とあるが、『主要』の定義が示されていないため検証不能（Acceptance Criteria が verifiable でない）。",
+      "location": "## 実装タスク / 受入条件 セクション",
+      "suggestion": "Issue に以下を追加する: (1) Codex 側で本Issueで追加する確定コマンドリスト（plan の他に goal, agent, subagents, fork, hooks, memories, skills 等のうちどれを含めるか）、(2) 表示しないと決めたコマンドの確定リストと理由（feature flag が常時OFF、debug-only等）、(3) 既存 `/undo` を削除するか維持するかの方針決定（Hypothesis 6 が Unverifiable のため、本Issueで削除は行わず別Issueで再検討する等の判断を明記する）、(4) 受入条件の『主要』を具体名で置換。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "Should Fix",
+      "category": "完全性",
+      "title": "FREQUENTLY_USED 更新方針が抽象的",
+      "description": "実装タスクに『`FREQUENTLY_USED.codex` も必要に応じて更新する』とあるが、現行値は `['new', 'undo', 'diff', 'approvals', 'mcp']` で5件固定（テスト `should contain 5 frequently used commands per tool` で5件を強制）。新規追加する `/plan` を入れるなら既存5件のうちどれを外すかの判断が必要。Issueに更新方針が示されていない。",
+      "location": "## 実装タスク セクション",
+      "suggestion": "FREQUENTLY_USED の更新基準を明文化する。例: (1) 現行5件構成は維持する、(2) `/plan` を追加するなら使用頻度の低い `/mcp` または `/approvals` と置換する、または (3) 5件制約を撤廃して `/plan` を追加する（テスト `should contain 5 frequently used commands per tool` の更新も含む）、のいずれを採るか。Claude 側の `FREQUENTLY_USED.claude` も同様に判断方針を明記する。"
+    },
+    {
+      "id": "S1-006",
+      "severity": "Should Fix",
+      "category": "完全性",
+      "title": "テスト更新範囲の特定が不十分",
+      "description": "実装タスクには『ユニットテストを追加/更新』とあるが、`tests/unit/lib/standard-commands.test.ts` には件数や `cliTools` 構成を厳密に検証するテストが多数存在する: `expect(STANDARD_COMMANDS.length).toBe(33)` (L21), `should have 17 commands available for Codex` (L126-131), `should have 10 commands available for OpenCode` (L119-124), `codexOnlyCommands` リスト固定 (L80-94), 件数アサート (L46, 119, 126, 194), 等。コマンド追加に伴いこれら多数のテストが連動更新必須となる。Issue にこれらの具体的な更新箇所が記載されていないと、テスト失敗の原因把握に時間を要する可能性がある。",
+      "location": "## 実装タスク / 影響範囲 セクション",
+      "suggestion": "Issue に『テスト更新箇所一覧』を追加し、最低限以下を記載する: (1) `STANDARD_COMMANDS.length` の期待値を新総件数に更新、(2) `should have N commands available for Codex` の件数更新、(3) `claudeOnlyCommands` / `codexOnlyCommands` / 共有リスト の追加要素反映、(4) `should contain 5 frequently used commands per tool` を維持するか変更するかの方針、(5) 新規追加コマンドの category 検証テスト追加要否。"
+    },
+    {
+      "id": "S1-007",
+      "severity": "Should Fix",
+      "category": "整合性",
+      "title": "新規追加コマンドの category 割り当て指針が未定義",
+      "description": "現状 STANDARD_COMMANDS の category は `standard-session` / `standard-config` / `standard-monitor` / `standard-git` / `standard-util` の5種で、`src/lib/command-merger.ts` の `CATEGORY_ORDER` でも同じ5種が定義されている。Issue で追加候補となっている `/plan`, `/goal`, `/effort`, `/fast`, `/focus`, `/lazy` 等を、これらの既存 category のどこに配置するかが未決定。例えば `/plan` は『新規 category（standard-planning 等）として新設するか、`standard-session` か `standard-util` に入れるか』を決める必要がある。新カテゴリ新設の場合は `CATEGORY_ORDER` と `CATEGORY_LABELS`（`src/types/slash-commands.ts`）の更新も必要となり、影響範囲が拡大する。",
+      "location": "## 提案する解決策 / 影響範囲 セクション",
+      "suggestion": "Issue に『category 割り当て方針』セクションを追加し、追加コマンドごとに既存5カテゴリのどれに割り当てるか、または新カテゴリを作成するかを明記する。新カテゴリ作成の場合は `src/types/slash-commands.ts` の `SlashCommandCategory` 型と `CATEGORY_LABELS` 定数、`src/lib/command-merger.ts` の `CATEGORY_ORDER` 配列の更新も影響範囲に追加する。"
+    },
+    {
+      "id": "S1-008",
+      "severity": "Should Fix",
+      "category": "正確性",
+      "title": "Hypothesis 6 (`/undo` のCodex側コメントアウト) が未検証のまま受入条件に影響",
+      "description": "仮説検証レポート (hypothesis-verification.md L20, L83-88) では Hypothesis 6『`/undo` は現行Codex側でコメントアウトされており見直しが必要』が **Unverifiable** とされている。一方、Issue 実装タスクには『古い可能性がある Codex 定義（例: `undo`）を確認し、必要なら削除または説明を修正』とあり、検証不能な前提に基づく実装タスクが残されている。検証ソース（`openai/codex` 公式リポジトリの該当ファイル URL とコミットハッシュ）を Issue に明示しないと、実装担当者がそれぞれ別の情報源で判断してしまう恐れがある。",
+      "location": "## 現状確認 / Codex 側 セクション、## 実装タスク",
+      "suggestion": "Issue に Codex CLI の slash command 定義を確認した一次情報を明示する: (1) `https://github.com/openai/codex` の該当ファイル URL（`codex-rs/tui/src/slash_command.rs` 等）、(2) 確認時点の コミットハッシュまたはタグ（`codex-cli 0.125.0` のリリース対応コミット等）、(3) `/undo` がコメントアウトされている該当行の引用。Unverifiable な場合は『今回は削除せず維持する』判断を Issue で確定させる。"
+    },
+    {
+      "id": "S1-009",
+      "severity": "Nice to Have",
+      "category": "明確性",
+      "title": "受入条件に `/lazy` の検証項目が含まれていない",
+      "description": "Issue 概要および実装タスクには Claude Code の追加対象として `/effort`, `/fast`, `/focus`, `/lazy` が列挙されているが、受入条件には『`/effort`, `/fast`, `/focus` が表示される』のみで `/lazy` が含まれていない。意図的な除外なのか記載漏れなのかが不明。",
+      "location": "## 受入条件 セクション",
+      "suggestion": "`/lazy` を受入条件に含めるか、または除外する場合はその理由（『`/lazy` は Anthropic 公式ドキュメントで非推奨化された』等）を Issue 本文または『追加対象コマンド確定リスト』に明記する。"
+    },
+    {
+      "id": "S1-010",
+      "severity": "Nice to Have",
+      "category": "完全性",
+      "title": "関連 Issue / PR へのリンクがない",
+      "description": "STANDARD_COMMANDS の現行コードには Issue #56, #4, #594, #379 への参照コメントがあり、本Issueは『コマンド最新化』という位置付けからこれら過去 Issue との連続性が高い。Issue 本文に過去関連 Issue へのリンクがなく、レビュー時に経緯を追うコストが発生する。",
+      "location": "Issue 本文全体",
+      "suggestion": "Issue に『関連 Issue』セクションを追加し、最低限以下を参照する: (1) Issue #4: Codex 用 cliTools 導入、(2) Issue #56: 標準コマンド初期実装、(3) Issue #594: 共有コマンド明示的 opt-in 化、(4) Issue #379: OpenCode 対応、(5) Issue #547: COPILOT_SELECTION_LIST_PATTERN 追加（getCopilotBuiltinCommands の存在背景）。"
+    },
+    {
+      "id": "S1-011",
+      "severity": "Nice to Have",
+      "category": "完全性",
+      "title": "リンクされている Codex CLI の参考 URL（Issue 本文中）の検証日付がない",
+      "description": "Issue では『調査時点のローカル Codex CLI: `codex-cli 0.125.0`』と記載されているが、調査日付が明示されていない。Codex CLI は活発に更新されるため、実装着手時点でバージョンが進んでいる可能性がある。",
+      "location": "## 現状確認 / Codex 側 セクション",
+      "suggestion": "調査日付（YYYY-MM-DD）と、参照した openai/codex リポジトリのコミットハッシュを Issue に追記する。実装時に再検証が必要かどうかの判断基準として活用できる。"
+    }
+  ],
+  "must_fix_count": 4,
+  "should_fix_count": 4,
+  "nice_to_have_count": 3,
+  "summary": "Issue #689 は Claude Code / Codex の組み込みスラッシュコマンドを最新化する妥当な提案であり、対象ファイル（`src/lib/standard-commands.ts`、`tests/unit/lib/standard-commands.test.ts`）の特定は正確。仮説検証レポートと Issue 記載は概ね整合している。一方、(1) 追加対象コマンドの確定リストが Claude/Codex 共に『等』『少なくとも』で曖昧（S1-003, S1-004）、(2) 既存 STANDARD_COMMANDS 内の cliTools 構成（共有/排他）の区別が Issue の現状確認では平坦に列挙されており実装ミスを誘発しうる（S1-002）、(3) Copilot/Gemini が別系統（getCopilotBuiltinCommands / getGeminiBuiltinCommands）で管理されている事実が Issue で前提化されていない（S1-001）、という4件を Must Fix として指摘。加えて FREQUENTLY_USED 更新方針（S1-005）、テスト更新範囲（S1-006）、新規コマンドの category 割り当て指針（S1-007）、Hypothesis 6 の検証ソース明示（S1-008）を Should Fix として指摘。これら 8 項目を補強することで、実装段階での再レビュー・手戻りを大幅に削減できる。",
+  "code_references": [
+    {
+      "file": "src/lib/standard-commands.ts",
+      "relevance": "本Issue の主たる変更対象。STANDARD_COMMANDS 配列および FREQUENTLY_USED 定数を更新する。"
+    },
+    {
+      "file": "tests/unit/lib/standard-commands.test.ts",
+      "relevance": "件数・cliTools 構成・カテゴリ分類を厳密に検証しているテスト。コマンド追加に伴い多数のアサートが連動更新必須。"
+    },
+    {
+      "file": "src/lib/command-merger.ts",
+      "relevance": "CATEGORY_ORDER と filterCommandsByCliTool を提供。新カテゴリ新設の場合は CATEGORY_ORDER 更新が必要。"
+    },
+    {
+      "file": "src/lib/slash-commands.ts",
+      "relevance": "getCopilotBuiltinCommands / getGeminiBuiltinCommands 実装箇所。本Issue では非対象だが Issue で前提を明示する必要がある。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/slash-commands/route.ts",
+      "relevance": "STANDARD_COMMANDS と Copilot/Gemini builtin コマンドを統合する API。本Issue では変更不要だが影響範囲確認に必要。"
+    },
+    {
+      "file": "src/lib/cli-tools/types.ts",
+      "relevance": "CLIToolType (= 'claude' | 'codex' | 'gemini' | 'vibe-local' | 'opencode' | 'copilot') の定義。新規 cliTools 値を追加する場合の参照元。"
+    },
+    {
+      "file": "src/types/slash-commands.ts",
+      "relevance": "SlashCommandCategory 型および CATEGORY_LABELS 定数。新カテゴリ追加時に更新が必要。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "dev-reports/issue/689/issue-review/hypothesis-verification.md",
+      "relevance": "Issue 内主張の検証レポート。Hypothesis 6 が Unverifiable のため Issue 本文に検証ソースの明示が必要（S1-008）。"
+    },
+    {
+      "file": "dev-reports/issue/689/issue-review/original-issue.json",
+      "relevance": "GitHub Issue #689 の原文。本レビューの対象。"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト規約。`src/lib/slash-commands.ts` に Copilot 用 getCopilotBuiltinCommands が Issue #547 で追加された旨が記載されており、本Issue で前提化すべき情報。"
+    }
+  ]
+}

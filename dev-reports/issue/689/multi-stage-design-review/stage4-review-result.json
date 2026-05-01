@@ -1,0 +1,39 @@
+{
+  "stage": 4,
+  "focus": "セキュリティ",
+  "reviewer": "codex",
+  "findings": [
+    {
+      "id": "DR4-001",
+      "severity": "Must Fix",
+      "title": "セキュリティ章の断定記述不足（信頼境界・表示経路の前提未明示）",
+      "description": "§6が「静的定数なのでリスクなし」と断定しており、信頼境界（STANDARD_COMMANDSは開発者管理=境界内）と表示経路（Reactテキストノード）の前提が未明示。",
+      "suggestion": "§6に信頼境界定義・OWASP Top 10観点の影響有無テーブルを追加"
+    },
+    {
+      "id": "DR4-002",
+      "severity": "Should Fix",
+      "title": "コマンド名allowlist条件が未定義",
+      "description": "nameフィールドの安全パターン(/^[a-z][a-z0-9-]*$/)・filePath===''・source==='standard'の不変条件がテスト要件として未記載。",
+      "suggestion": "§6と§7にname allowlistパターン検証テストを追加"
+    },
+    {
+      "id": "DR4-003",
+      "severity": "Should Fix",
+      "title": "description XSS前提とUI回帰テストが未定義",
+      "description": "descriptionがプレーンテキストであることの制約とSlashCommandListでの回帰テストが未記載。",
+      "suggestion": "§7にdescriptionのHTMLタグ不含テストとUI回帰テストを追加"
+    },
+    {
+      "id": "DR4-004",
+      "severity": "Should Fix",
+      "title": "OWASP Top 10各観点の影響有無が未明文化",
+      "description": "認証・暗号化・依存関係等への影響なしが設計方針書に明記されていない。",
+      "suggestion": "§6にOWASP Top 10観点別影響有無テーブルを追加"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 3,
+  "nice_to_have_count": 0,
+  "summary": "データ定義層に閉じた変更のためリスクは低いが、§6セキュリティ設計の断定記述・コマンド名allowlist・description XSS回帰テスト・OWASP観点明文化が不足。設計方針書への反映は完了済み。"
+}

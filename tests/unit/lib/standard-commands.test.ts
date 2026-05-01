@@ -17,8 +17,8 @@ import {
 import type { SlashCommandCategory } from '@/types/slash-commands';
 
 describe('STANDARD_COMMANDS', () => {
-  it('should have 33 standard commands (8 Claude-only + 9 shared + 9 Codex-only + 7 OpenCode-only)', () => {
-    expect(STANDARD_COMMANDS.length).toBe(33);
+  it('should have 45 standard commands (12 Claude-only + 9 shared + 17 Codex-only + 7 OpenCode-only)', () => {
+    expect(STANDARD_COMMANDS.length).toBe(45);
   });
 
   it('should have all required properties for each command', () => {
@@ -87,6 +87,15 @@ describe('STANDARD_COMMANDS', () => {
       'mcp',
       'init',
       'feedback',
+      // Issue #689: new Codex commands
+      'plan',
+      'goal',
+      'agent',
+      'subagents',
+      'fork',
+      'memories',
+      'skills',
+      'hooks',
     ];
     codexOnlyCommands.forEach((name) => {
       const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
@@ -123,11 +132,11 @@ describe('STANDARD_COMMANDS', () => {
     expect(opencodeCommands.length).toBe(10);
   });
 
-  it('should have 17 commands available for Codex', () => {
+  it('should have 25 commands available for Codex', () => {
     const codexCommands = STANDARD_COMMANDS.filter(
       (cmd) => cmd.cliTools?.includes('codex')
     );
-    expect(codexCommands.length).toBe(17);
+    expect(codexCommands.length).toBe(25);
   });
 
   it('should include session management commands', () => {
@@ -180,6 +189,99 @@ describe('STANDARD_COMMANDS', () => {
     const uniqueNames = new Set(names);
     expect(names.length).toBe(uniqueNames.size);
   });
+
+  // Issue #689: New Claude commands with explicit cliTools: ['claude'] (DR1-001)
+  it('should have new Claude-only commands (effort/fast/focus/lazy) with explicit cliTools: ["claude"]', () => {
+    const newClaudeCommands = ['effort', 'fast', 'focus', 'lazy'];
+    newClaudeCommands.forEach((name) => {
+      const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
+      expect(cmd).toBeDefined();
+      expect(cmd?.cliTools).toEqual(['claude']);
+    });
+  });
+
+  it('should have new Claude commands in correct categories (DR1-003)', () => {
+    const configCommands = ['effort', 'fast', 'lazy'];
+    configCommands.forEach((name) => {
+      const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
+      expect(cmd).toBeDefined();
+      expect(cmd?.category).toBe('standard-config');
+    });
+    const focusCmd = STANDARD_COMMANDS.find((c) => c.name === 'focus');
+    expect(focusCmd).toBeDefined();
+    expect(focusCmd?.category).toBe('standard-session');
+  });
+
+  // Issue #689: New Codex commands (DR1-004)
+  it('should have new Codex commands in correct categories', () => {
+    const sessionCommands = ['plan', 'goal', 'agent', 'subagents', 'fork'];
+    sessionCommands.forEach((name) => {
+      const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
+      expect(cmd).toBeDefined();
+      expect(cmd?.category).toBe('standard-session');
+      expect(cmd?.cliTools).toEqual(['codex']);
+    });
+    const configCommands = ['memories', 'skills', 'hooks'];
+    configCommands.forEach((name) => {
+      const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
+      expect(cmd).toBeDefined();
+      expect(cmd?.category).toBe('standard-config');
+      expect(cmd?.cliTools).toEqual(['codex']);
+    });
+  });
+
+  // Issue #689: Claude display total = 20 (DR2-001)
+  it('should have 20 commands available for Claude', () => {
+    const claudeCommands = STANDARD_COMMANDS.filter(
+      (cmd) => !cmd.cliTools || cmd.cliTools.includes('claude')
+    );
+    expect(claudeCommands.length).toBe(20);
+  });
+
+  // Issue #689: agent (Codex) vs agents (OpenCode) differentiation (DR1-002)
+  it('agent (Codex) and agents (OpenCode) should have distinct descriptions', () => {
+    const agent = STANDARD_COMMANDS.find((c) => c.name === 'agent');
+    const agents = STANDARD_COMMANDS.find((c) => c.name === 'agents');
+    expect(agent).toBeDefined();
+    expect(agents).toBeDefined();
+    expect(agent?.description).not.toBe(agents?.description);
+  });
+
+  // Issue #689: Security - allowlist validation (DR4-002)
+  it('should have all command names matching allowed pattern /^[a-z][a-z0-9-]*$/', () => {
+    const allowedPattern = /^[a-z][a-z0-9-]*$/;
+    STANDARD_COMMANDS.forEach((cmd) => {
+      expect(cmd.name).toMatch(allowedPattern);
+    });
+  });
+
+  it('should have all commands with source=standard and filePath=""', () => {
+    STANDARD_COMMANDS.forEach((cmd) => {
+      expect(cmd.source).toBe('standard');
+      expect(cmd.filePath).toBe('');
+    });
+  });
+
+  // Issue #689: XSS regression - description safety (DR4-003)
+  it('should have all descriptions without HTML tags or dangerous patterns', () => {
+    const dangerousPatterns = [/<[^>]+>/, /javascript:/i, /onerror=/i, /onclick=/i];
+    STANDARD_COMMANDS.forEach((cmd) => {
+      expect(cmd.description).toBeTruthy();
+      dangerousPatterns.forEach((pattern) => {
+        expect(cmd.description).not.toMatch(pattern);
+      });
+    });
+  });
+
+  // Issue #689: new Claude-only 4 commands should not have undefined cliTools (DR1-001)
+  it('should not have new commands with undefined cliTools (DR1-001: no new undefined)', () => {
+    const newCommandNames = ['effort', 'fast', 'focus', 'lazy', 'plan', 'goal', 'agent', 'subagents', 'fork', 'memories', 'skills', 'hooks'];
+    newCommandNames.forEach((name) => {
+      const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
+      expect(cmd).toBeDefined();
+      expect(cmd?.cliTools).toBeDefined();
+    });
+  });
 });
 
 describe('FREQUENTLY_USED', () => {
@@ -210,9 +312,11 @@ describe('FREQUENTLY_USED', () => {
     expect(FREQUENTLY_USED.claude).toContain('compact');
   });
 
-  it('Codex frequently used should include new and undo', () => {
+  it('Codex frequently used should include new, undo and plan (not mcp)', () => {
     expect(FREQUENTLY_USED.codex).toContain('new');
     expect(FREQUENTLY_USED.codex).toContain('undo');
+    expect(FREQUENTLY_USED.codex).toContain('plan');
+    expect(FREQUENTLY_USED.codex).not.toContain('mcp');
   });
 
   it('OpenCode frequently used should include models, new, compact, help, exit', () => {

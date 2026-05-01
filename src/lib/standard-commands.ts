@@ -173,6 +173,50 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
 
   // ============================================================================
+  // CLAUDE CODE NEW COMMANDS (Issue #689, cliTools: ['claude'] explicit per Issue #594 opt-in)
+  // ============================================================================
+
+  // Session Management - Claude only (new)
+  {
+    name: 'focus',
+    description: 'Toggle focus mode',
+    category: 'standard-session',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['claude'],
+  },
+
+  // Configuration - Claude only (new)
+  {
+    name: 'effort',
+    description: 'Adjust model thinking effort (high/medium/low)',
+    category: 'standard-config',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['claude'],
+  },
+  {
+    name: 'fast',
+    description: 'Switch to fast response mode',
+    category: 'standard-config',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['claude'],
+  },
+  {
+    name: 'lazy',
+    description: 'Toggle lazy mode',
+    category: 'standard-config',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['claude'],
+  },
+
+  // ============================================================================
   // CODEX CLI ONLY COMMANDS (Issue #4)
   // ============================================================================
 
@@ -275,6 +319,86 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
 
   // ============================================================================
+  // CODEX CLI NEW COMMANDS (Issue #689)
+  // ============================================================================
+
+  // Session Management - Codex only (new)
+  {
+    name: 'plan',
+    description: 'Toggle plan mode',
+    category: 'standard-session',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['codex'],
+  },
+  {
+    name: 'goal',
+    description: 'Set goal for current session',
+    category: 'standard-session',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['codex'],
+  },
+  {
+    name: 'agent',
+    description: 'Switch active agent (Codex)',
+    category: 'standard-session',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['codex'],
+  },
+  {
+    name: 'subagents',
+    description: 'Manage subagents',
+    category: 'standard-session',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['codex'],
+  },
+  {
+    name: 'fork',
+    description: 'Fork current session',
+    category: 'standard-session',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['codex'],
+  },
+
+  // Configuration - Codex only (new)
+  {
+    name: 'memories',
+    description: 'Manage Codex memories',
+    category: 'standard-config',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['codex'],
+  },
+  {
+    name: 'skills',
+    description: 'Manage Codex skills',
+    category: 'standard-config',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['codex'],
+  },
+  {
+    name: 'hooks',
+    description: 'Manage Codex hooks',
+    category: 'standard-config',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['codex'],
+  },
+
+  // ============================================================================
   // OPENCODE TUI ONLY COMMANDS (Issue #379)
   // ============================================================================
 
@@ -319,7 +443,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'agents',
-    description: 'Switch agent',
+    description: 'List/manage all available agents (OpenCode)',
     category: 'standard-config',
     isStandard: true,
     source: 'standard',
@@ -353,7 +477,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
  */
 export const FREQUENTLY_USED: Record<string, string[]> = {
   claude: ['clear', 'compact', 'status', 'help', 'review'],
-  codex: ['new', 'undo', 'diff', 'approvals', 'mcp'],
+  codex: ['new', 'undo', 'diff', 'approvals', 'plan'],
   opencode: ['models', 'new', 'compact', 'help', 'exit'],
 };
 
