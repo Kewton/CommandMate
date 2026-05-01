@@ -157,15 +157,23 @@ export const BranchListItem = memo(function BranchListItem({
   // currently-focused item.
   const showTooltip = isTooltipVisible && !isSelected;
 
-  // Safety net: reset tooltip whenever isSelected becomes true.
-  // Covers React concurrent-mode timing gaps (router.push inside startTransition
-  // defers the sidebar re-render), onFocus/onClick inter-batch races, and
-  // group-expansion onMouseEnter triggers that fire before the selection lands.
+  // Safety net A: reset tooltip whenever isSelected becomes true.
   useEffect(() => {
     if (isSelected) {
       setIsTooltipVisible(false);
     }
   }, [isSelected]);
+
+  // Safety net B: close this tooltip on ANY document click.
+  // This handles the case where onMouseLeave doesn't fire (fast cursor moves,
+  // DOM changes from polling during click, React concurrent re-renders) and
+  // another branch's tooltip stays visible showing wrong-repository content.
+  useEffect(() => {
+    if (!isTooltipVisible) return;
+    const close = () => setIsTooltipVisible(false);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [isTooltipVisible]);
 
   // Issue #676 (B): clicking closes the tooltip explicitly before firing the
   // upstream onClick, so even if a subsequent re-render misses the mouseleave
@@ -182,7 +190,14 @@ export const BranchListItem = memo(function BranchListItem({
       onClick={handleClick}
       onMouseEnter={() => setIsTooltipVisible(true)}
       onMouseLeave={() => setIsTooltipVisible(false)}
-      onFocus={() => setIsTooltipVisible(true)}
+      onFocus={(e) => {
+        // Show tooltip only for keyboard focus (:focus-visible), not pointer clicks.
+        // onFocus fires on mousedown which races with handleClick, causing a
+        // brief tooltip flash even after the click handler closes it.
+        if ((e.target as HTMLElement).matches(':focus-visible')) {
+          setIsTooltipVisible(true);
+        }
+      }}
       onBlur={() => setIsTooltipVisible(false)}
       aria-current={isSelected ? 'true' : undefined}
       aria-describedby={showTooltip ? tooltipId : undefined}
