@@ -19,6 +19,13 @@ export interface Repository {
   displayName?: string;
   path: string;
   enabled: boolean;
+  /**
+   * Sidebar visibility flag (Issue #690).
+   * `true` (default) means the repository's worktrees are shown in the
+   * sidebar. Independent of `enabled` — see migration v31 docstring for the
+   * concept separation.
+   */
+  visible: boolean;
   cloneUrl?: string;
   normalizedCloneUrl?: string;
   cloneSource: 'local' | 'https' | 'ssh';
@@ -56,6 +63,8 @@ interface RepositoryRow {
   display_name: string | null;
   path: string;
   enabled: number;
+  /** Sidebar visibility flag (Issue #690), 0 or 1 */
+  visible: number;
   clone_url: string | null;
   normalized_clone_url: string | null;
   clone_source: string;
@@ -94,6 +103,9 @@ function mapRepositoryRow(row: RepositoryRow): Repository {
     displayName: row.display_name || undefined,
     path: row.path,
     enabled: row.enabled === 1,
+    // Issue #690: visible defaults to 1 in DB (migration v31). Pre-existing
+    // rows that pre-date the migration are auto-defaulted to 1 by SQLite.
+    visible: row.visible === 1,
     cloneUrl: row.clone_url || undefined,
     normalizedCloneUrl: row.normalized_clone_url || undefined,
     cloneSource: row.clone_source as 'local' | 'https' | 'ssh',
@@ -131,6 +143,9 @@ function mapCloneJobRow(row: CloneJobRow): CloneJobDB {
 
 /**
  * Create a new repository
+ *
+ * Issue #690: `visible` field added. Defaults to `true` (sidebar visible)
+ * when omitted, mirroring SQLite DEFAULT 1 set by migration v31.
  */
 export function createRepository(
   db: Database.Database,
@@ -142,6 +157,8 @@ export function createRepository(
     cloneSource: 'local' | 'https' | 'ssh';
     isEnvManaged?: boolean;
     enabled?: boolean;
+    /** Sidebar visibility (Issue #690). Defaults to true. */
+    visible?: boolean;
   }
 ): Repository {
   const id = randomUUID();
@@ -149,10 +166,10 @@ export function createRepository(
 
   const stmt = db.prepare(`
     INSERT INTO repositories (
-      id, name, path, enabled, clone_url, normalized_clone_url,
+      id, name, path, enabled, visible, clone_url, normalized_clone_url,
       clone_source, is_env_managed, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -160,6 +177,7 @@ export function createRepository(
     data.name,
     data.path,
     data.enabled !== false ? 1 : 0,
+    data.visible !== false ? 1 : 0,
     data.cloneUrl || null,
     data.normalizedCloneUrl || null,
     data.cloneSource,
@@ -173,6 +191,7 @@ export function createRepository(
     name: data.name,
     path: data.path,
     enabled: data.enabled !== false,
+    visible: data.visible !== false,
     cloneUrl: data.cloneUrl,
     normalizedCloneUrl: data.normalizedCloneUrl,
     cloneSource: data.cloneSource,
@@ -232,6 +251,10 @@ export function getRepositoryByPath(
 
 /**
  * Update repository
+ *
+ * Issue #690: `visible` partial-update is supported and is INDEPENDENT of
+ * `enabled`. Toggling visibility from the Repositories screen must NEVER
+ * touch enabled, and disable/restore (Issue #190) must NEVER touch visible.
  */
 export function updateRepository(
   db: Database.Database,
@@ -240,6 +263,7 @@ export function updateRepository(
     name?: string;
     displayName?: string;
     enabled?: boolean;
+    visible?: boolean;
     cloneUrl?: string;
     normalizedCloneUrl?: string;
   }
@@ -261,6 +285,11 @@ export function updateRepository(
   if (updates.enabled !== undefined) {
     assignments.push('enabled = ?');
     params.push(updates.enabled ? 1 : 0);
+  }
+
+  if (updates.visible !== undefined) {
+    assignments.push('visible = ?');
+    params.push(updates.visible ? 1 : 0);
   }
 
   if (updates.cloneUrl !== undefined) {

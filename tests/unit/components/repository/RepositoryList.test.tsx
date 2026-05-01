@@ -15,6 +15,7 @@ vi.mock('@/lib/api-client', () => ({
   repositoryApi: {
     list: vi.fn(),
     updateDisplayName: vi.fn(),
+    updateVisibility: vi.fn(),
   },
   handleApiError: vi.fn((err: unknown) => {
     if (err instanceof Error) return err.message;
@@ -34,6 +35,7 @@ function buildRepo(overrides: Partial<RepositoryListItem> = {}): RepositoryListI
     displayName: overrides.displayName ?? null,
     path: overrides.path ?? '/path/to/repo-one',
     enabled: overrides.enabled ?? true,
+    visible: overrides.visible ?? true,
     worktreeCount: overrides.worktreeCount ?? 0,
   };
 }
@@ -202,6 +204,7 @@ describe('RepositoryList (Issue #644)', () => {
           displayName: 'New Alias',
           path: '/path/to/repo-a',
           enabled: true,
+          visible: true,
         },
       });
     });
@@ -349,6 +352,7 @@ describe('RepositoryList (Issue #644)', () => {
           displayName: 'Bumped',
           path: '/path/to/repo-a',
           enabled: true,
+          visible: true,
         },
       });
 
@@ -358,6 +362,199 @@ describe('RepositoryList (Issue #644)', () => {
       await waitFor(() => {
         expect(onChanged).toHaveBeenCalled();
       });
+    });
+  });
+
+  describe('Visibility toggle (Issue #690)', () => {
+    it('renders the toggle in "Visible" state when visible=true', async () => {
+      vi.mocked(repositoryApi.list).mockResolvedValue({
+        success: true,
+        repositories: [buildRepo({ id: 'r1', name: 'repo-vis', visible: true })],
+      });
+
+      render(<RepositoryList refreshKey={0} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('repo-vis')).toBeInTheDocument();
+      });
+
+      const toggle = screen.getByTestId('visibility-toggle-r1');
+      // role="switch" uses aria-checked (per ARIA spec)
+      expect(toggle).toHaveAttribute('aria-checked', 'true');
+      expect(toggle.textContent).toMatch(/visible/i);
+    });
+
+    it('renders the toggle in "Hidden" state when visible=false', async () => {
+      vi.mocked(repositoryApi.list).mockResolvedValue({
+        success: true,
+        repositories: [buildRepo({ id: 'r1', name: 'hidden-repo', visible: false })],
+      });
+
+      render(<RepositoryList refreshKey={0} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('hidden-repo')).toBeInTheDocument();
+      });
+
+      const toggle = screen.getByTestId('visibility-toggle-r1');
+      expect(toggle).toHaveAttribute('aria-checked', 'false');
+      expect(toggle.textContent).toMatch(/hidden/i);
+    });
+
+    it('flips visibility optimistically and calls updateVisibility', async () => {
+      vi.mocked(repositoryApi.list).mockResolvedValue({
+        success: true,
+        repositories: [buildRepo({ id: 'r1', name: 'opt', visible: true })],
+      });
+      vi.mocked(repositoryApi.updateVisibility).mockResolvedValue({
+        success: true,
+        repository: {
+          id: 'r1',
+          name: 'opt',
+          displayName: null,
+          path: '/path/to/repo-one',
+          enabled: true,
+          visible: false,
+        },
+      });
+
+      render(<RepositoryList refreshKey={0} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('visibility-toggle-r1')).toBeInTheDocument();
+      });
+
+      const toggle = screen.getByTestId('visibility-toggle-r1');
+      fireEvent.click(toggle);
+
+      // Optimistic flip: should already show Hidden before resolution.
+      // (We can't easily assert mid-flight state here without controlling the
+      // promise — instead assert the API was called with the new value.)
+      await waitFor(() => {
+        expect(repositoryApi.updateVisibility).toHaveBeenCalledWith('r1', false);
+      });
+
+      // After API resolves, the row should reflect the new state.
+      await waitFor(() => {
+        expect(screen.getByTestId('visibility-toggle-r1')).toHaveAttribute(
+          'aria-checked',
+          'false'
+        );
+      });
+    });
+
+    it('rolls back the optimistic update and shows feedback on failure', async () => {
+      vi.mocked(repositoryApi.list).mockResolvedValue({
+        success: true,
+        repositories: [buildRepo({ id: 'r1', name: 'rollback', visible: true })],
+      });
+      vi.mocked(repositoryApi.updateVisibility).mockRejectedValue(
+        new Error('Network down')
+      );
+
+      render(<RepositoryList refreshKey={0} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('visibility-toggle-r1')).toBeInTheDocument();
+      });
+
+      const toggle = screen.getByTestId('visibility-toggle-r1');
+      fireEvent.click(toggle);
+
+      // Final state should match the original (rolled back to visible=true).
+      await waitFor(() => {
+        expect(screen.getByTestId('visibility-toggle-r1')).toHaveAttribute(
+          'aria-checked',
+          'true'
+        );
+      });
+
+      // Feedback banner shows the error.
+      expect(screen.getAllByText(/network down/i).length).toBeGreaterThan(0);
+    });
+
+    it('disables the toggle while a request is in flight (no double-clicks)', async () => {
+      vi.mocked(repositoryApi.list).mockResolvedValue({
+        success: true,
+        repositories: [buildRepo({ id: 'r1', name: 'pending', visible: true })],
+      });
+
+      // Make the promise pending — never resolve in this test.
+      let resolveFn:
+        | ((value: Awaited<ReturnType<typeof repositoryApi.updateVisibility>>) => void)
+        | undefined;
+      vi.mocked(repositoryApi.updateVisibility).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveFn = resolve;
+          })
+      );
+
+      render(<RepositoryList refreshKey={0} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('visibility-toggle-r1')).toBeInTheDocument();
+      });
+
+      const toggle = screen.getByTestId('visibility-toggle-r1') as HTMLButtonElement;
+      fireEvent.click(toggle);
+
+      await waitFor(() => {
+        expect(toggle).toBeDisabled();
+      });
+
+      // Cleanup: resolve the pending promise so React doesn't warn.
+      if (resolveFn) {
+        resolveFn({
+          success: true,
+          repository: {
+            id: 'r1',
+            name: 'pending',
+            displayName: null,
+            path: '/path/to/repo-one',
+            enabled: true,
+            visible: false,
+          },
+        });
+      }
+    });
+
+    it('does not modify enabled when toggling visible (independence)', async () => {
+      // Repository is enabled=false (Disabled badge) but visible=true.
+      vi.mocked(repositoryApi.list).mockResolvedValue({
+        success: true,
+        repositories: [
+          buildRepo({ id: 'r1', name: 'indep', enabled: false, visible: true }),
+        ],
+      });
+      vi.mocked(repositoryApi.updateVisibility).mockResolvedValue({
+        success: true,
+        repository: {
+          id: 'r1',
+          name: 'indep',
+          displayName: null,
+          path: '/path/to/repo-one',
+          enabled: false,
+          visible: false,
+        },
+      });
+
+      render(<RepositoryList refreshKey={0} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('visibility-toggle-r1')).toBeInTheDocument();
+      });
+
+      const toggle = screen.getByTestId('visibility-toggle-r1');
+      fireEvent.click(toggle);
+
+      await waitFor(() => {
+        expect(repositoryApi.updateVisibility).toHaveBeenCalledWith('r1', false);
+      });
+
+      // The Disabled badge should still be present (enabled was not touched).
+      const disabledRow = screen.getByTestId('repository-row-r1');
+      expect(disabledRow.textContent).toMatch(/Disabled/);
     });
   });
 });

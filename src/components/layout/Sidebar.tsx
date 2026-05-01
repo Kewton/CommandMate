@@ -105,7 +105,13 @@ function persistSidebarScrollTop(scrollTop: number): void {
  */
 export const Sidebar = memo(function Sidebar() {
   const router = useRouter();
-  const { worktrees, selectedWorktreeId, selectWorktree, refreshWorktrees } = useWorktreeSelection();
+  const {
+    worktrees,
+    repositories,
+    selectedWorktreeId,
+    selectWorktree,
+    refreshWorktrees,
+  } = useWorktreeSelection();
   const { closeMobileDrawer, sortKey, sortDirection, viewMode, setViewMode } = useSidebarContext();
   const [searchQuery, setSearchQuery] = useState('');
   const branchListRef = useRef<HTMLDivElement>(null);
@@ -142,8 +148,40 @@ export const Sidebar = memo(function Sidebar() {
       });
   }, []);
 
+  // Issue #690: Filter out worktrees whose repository is hidden (visible=false).
+  // This is a Sidebar-local filter — useWorktreeList is intentionally not
+  // modified so the Sessions/Review screens continue to show every worktree
+  // for management purposes.
+  //
+  // Match strategy:
+  //   - Repositories are keyed by `path` in the API payload.
+  //   - Each Worktree carries `repositoryPath`.
+  //   - A worktree whose `repositoryPath` matches a repository row with
+  //     `visible === false` is excluded.
+  //   - Worktrees with no matching repository row (legacy data, LEFT JOIN
+  //     miss) are kept (default visible).
+  const hiddenRepositoryPaths = useMemo(() => {
+    const set = new Set<string>();
+    for (const repo of repositories) {
+      if (repo.visible === false) {
+        set.add(repo.path);
+      }
+    }
+    return set;
+  }, [repositories]);
+
+  const visibleWorktrees = useMemo(
+    () =>
+      worktrees.filter((wt) => {
+        const repoPath = wt.repositoryPath;
+        if (!repoPath) return true;
+        return !hiddenRepositoryPaths.has(repoPath);
+      }),
+    [worktrees, hiddenRepositoryPaths]
+  );
+
   // Convert worktrees to sidebar items
-  const branchItems = useMemo(() => worktrees.map(toBranchItem), [worktrees]);
+  const branchItems = useMemo(() => visibleWorktrees.map(toBranchItem), [visibleWorktrees]);
 
   // Use shared useWorktreeList hook for sorting, filtering, and grouping (Issue #600 Task 3.8)
   const { sortedItems: flatBranches, groupedItems } = useWorktreeList({

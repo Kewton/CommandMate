@@ -19,7 +19,7 @@ import React, {
   type ReactNode,
 } from 'react';
 import type { Worktree } from '@/types/models';
-import { worktreeApi, ApiError } from '@/lib/api-client';
+import { worktreeApi, ApiError, type RepositorySummary } from '@/lib/api-client';
 
 // ============================================================================
 // Constants
@@ -76,6 +76,11 @@ interface WorktreeSelectionState {
   selectedWorktreeId: string | null;
   /** List of available worktrees */
   worktrees: Worktree[];
+  /**
+   * List of repositories accompanying the worktrees payload (Issue #690).
+   * Surfaces visible/enabled flags to the Sidebar.
+   */
+  repositories: RepositorySummary[];
   /** Detailed data for selected worktree */
   selectedWorktreeDetail: Worktree | null;
   /** Loading state for worktree list */
@@ -92,6 +97,11 @@ interface WorktreeSelectionContextValue {
   selectedWorktreeId: string | null;
   /** List of available worktrees */
   worktrees: Worktree[];
+  /**
+   * Repositories surfaced from the worktrees payload (Issue #690).
+   * Consumers (Sidebar) use the `visible` flag to filter the branch list.
+   */
+  repositories: RepositorySummary[];
   /** Detailed data for selected worktree */
   selectedWorktreeDetail: Worktree | null;
   /** Loading state for worktree detail */
@@ -113,11 +123,17 @@ interface WorktreeSelectionProviderProps {
    * and uses this data as the worktree list source.
    */
   externalWorktrees?: Worktree[];
+  /**
+   * External repositories from useWorktreesCache (Issue #690).
+   * Surfaced via the `repositories` field on the context value.
+   */
+  externalRepositories?: RepositorySummary[];
 }
 
 /** Reducer action types */
 type WorktreeSelectionAction =
   | { type: 'SET_WORKTREES'; worktrees: Worktree[] }
+  | { type: 'SET_REPOSITORIES'; repositories: RepositorySummary[] }
   | { type: 'SELECT_WORKTREE'; id: string }
   | { type: 'SET_WORKTREE_DETAIL'; detail: Worktree }
   | { type: 'SET_LOADING'; isLoading: boolean }
@@ -137,6 +153,7 @@ const WorktreeSelectionContext = createContext<WorktreeSelectionContextValue | n
 const initialState: WorktreeSelectionState = {
   selectedWorktreeId: null,
   worktrees: [],
+  repositories: [],
   selectedWorktreeDetail: null,
   isLoading: true,
   isLoadingDetail: false,
@@ -150,6 +167,8 @@ function worktreeSelectionReducer(
   switch (action.type) {
     case 'SET_WORKTREES':
       return { ...state, worktrees: action.worktrees, isLoading: false };
+    case 'SET_REPOSITORIES':
+      return { ...state, repositories: action.repositories };
     case 'SELECT_WORKTREE':
       return { ...state, selectedWorktreeId: action.id };
     case 'SET_WORKTREE_DETAIL':
@@ -183,7 +202,11 @@ function worktreeSelectionReducer(
  * </WorktreeSelectionProvider>
  * ```
  */
-export function WorktreeSelectionProvider({ children, externalWorktrees }: WorktreeSelectionProviderProps) {
+export function WorktreeSelectionProvider({
+  children,
+  externalWorktrees,
+  externalRepositories,
+}: WorktreeSelectionProviderProps) {
   const useExternal = externalWorktrees !== undefined;
   const [state, dispatch] = useReducer(worktreeSelectionReducer, initialState);
 
@@ -194,6 +217,15 @@ export function WorktreeSelectionProvider({ children, externalWorktrees }: Workt
     }
   }, [useExternal, externalWorktrees]);
 
+  // Issue #690: Sync external repositories when provided so the Sidebar
+  // can filter hidden repositories. Defensive: tolerate undefined (legacy
+  // callers that don't pass externalRepositories).
+  useEffect(() => {
+    if (useExternal && externalRepositories) {
+      dispatch({ type: 'SET_REPOSITORIES', repositories: externalRepositories });
+    }
+  }, [useExternal, externalRepositories]);
+
   // Fetch worktrees on mount (only when not using external source)
   const fetchWorktrees = useCallback(async () => {
     if (useExternal) return;
@@ -203,6 +235,8 @@ export function WorktreeSelectionProvider({ children, externalWorktrees }: Workt
     try {
       const response = await worktreeApi.getAll();
       dispatch({ type: 'SET_WORKTREES', worktrees: response.worktrees });
+      // Issue #690: Surface repositories so the sidebar can filter hidden ones.
+      dispatch({ type: 'SET_REPOSITORIES', repositories: response.repositories ?? [] });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to fetch worktrees';
       dispatch({ type: 'SET_ERROR', error: message });
@@ -260,6 +294,8 @@ export function WorktreeSelectionProvider({ children, externalWorktrees }: Workt
         // Silent refresh (don't show loading state during polling)
         const response = await worktreeApi.getAll();
         dispatch({ type: 'SET_WORKTREES', worktrees: response.worktrees });
+        // Issue #690: Keep repositories in sync during polling too.
+        dispatch({ type: 'SET_REPOSITORIES', repositories: response.repositories ?? [] });
 
         // Schedule next poll with dynamic interval based on current worktree states
         const nextInterval = getPollingInterval(response.worktrees);
@@ -293,6 +329,7 @@ export function WorktreeSelectionProvider({ children, externalWorktrees }: Workt
   const value: WorktreeSelectionContextValue = {
     selectedWorktreeId: state.selectedWorktreeId,
     worktrees: state.worktrees,
+    repositories: state.repositories,
     selectedWorktreeDetail: state.selectedWorktreeDetail,
     isLoadingDetail: state.isLoadingDetail,
     error: state.error,

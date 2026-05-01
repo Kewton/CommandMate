@@ -542,6 +542,131 @@ describe('enabled default value behavior (MF-C01)', () => {
 });
 
 // ============================================================
+// Repository visibility (Issue #690)
+// ============================================================
+
+describe('repository visibility flag (Issue #690)', () => {
+  it('should default visible=true when not specified on createRepository', () => {
+    const repo = createRepository(testDb, {
+      name: 'repo1',
+      path: '/home/user/repos/repo1',
+      cloneSource: 'local',
+    });
+
+    expect(repo.visible).toBe(true);
+
+    // Verify in DB
+    const fetched = getRepositoryByPath(testDb, '/home/user/repos/repo1');
+    expect(fetched).not.toBeNull();
+    expect(fetched!.visible).toBe(true);
+  });
+
+  it('should set visible=false when explicitly passed', () => {
+    const repo = createRepository(testDb, {
+      name: 'repo1',
+      path: '/home/user/repos/repo1',
+      cloneSource: 'local',
+      visible: false,
+    });
+
+    expect(repo.visible).toBe(false);
+
+    const fetched = getRepositoryByPath(testDb, '/home/user/repos/repo1');
+    expect(fetched).not.toBeNull();
+    expect(fetched!.visible).toBe(false);
+  });
+
+  it('disableRepository should NOT change visible (independence)', () => {
+    createRepository(testDb, {
+      name: 'repo1',
+      path: '/home/user/repos/repo1',
+      cloneSource: 'local',
+      enabled: true,
+      visible: true,
+    });
+
+    disableRepository(testDb, '/home/user/repos/repo1');
+
+    const repo = getRepositoryByPath(testDb, '/home/user/repos/repo1');
+    expect(repo).not.toBeNull();
+    expect(repo!.enabled).toBe(false);
+    // visible must remain unchanged
+    expect(repo!.visible).toBe(true);
+  });
+
+  it('disableRepository should preserve visible=false when already hidden', () => {
+    createRepository(testDb, {
+      name: 'repo1',
+      path: '/home/user/repos/repo1',
+      cloneSource: 'local',
+      enabled: true,
+      visible: false,
+    });
+
+    disableRepository(testDb, '/home/user/repos/repo1');
+
+    const repo = getRepositoryByPath(testDb, '/home/user/repos/repo1');
+    expect(repo).not.toBeNull();
+    expect(repo!.enabled).toBe(false);
+    expect(repo!.visible).toBe(false);
+  });
+
+  it('restoreRepository should NOT change visible (independence)', () => {
+    createRepository(testDb, {
+      name: 'repo1',
+      path: '/home/user/repos/repo1',
+      cloneSource: 'local',
+      enabled: false,
+      visible: false,
+    });
+
+    const result = restoreRepository(testDb, '/home/user/repos/repo1');
+    expect(result).not.toBeNull();
+    expect(result!.enabled).toBe(true);
+
+    // visible should NOT have been touched
+    const repo = getRepositoryByPath(testDb, '/home/user/repos/repo1');
+    expect(repo!.visible).toBe(false);
+  });
+
+  it('disableRepository should default visible=true when creating new disabled record', () => {
+    // disableRepository creates a new disabled row when path is unknown
+    disableRepository(testDb, '/home/user/repos/new-repo');
+
+    const repo = getRepositoryByPath(testDb, '/home/user/repos/new-repo');
+    expect(repo).not.toBeNull();
+    expect(repo!.enabled).toBe(false);
+    // The newly-created disabled record should remain visible=true (default)
+    expect(repo!.visible).toBe(true);
+  });
+
+  describe('enabled × visible 4-combination matrix', () => {
+    it.each([
+      [true, true],
+      [true, false],
+      [false, true],
+      [false, false],
+    ])(
+      'should persist enabled=%s, visible=%s independently',
+      (enabled, visible) => {
+        createRepository(testDb, {
+          name: 'mat',
+          path: '/home/user/repos/mat',
+          cloneSource: 'local',
+          enabled,
+          visible,
+        });
+
+        const repo = getRepositoryByPath(testDb, '/home/user/repos/mat');
+        expect(repo).not.toBeNull();
+        expect(repo!.enabled).toBe(enabled);
+        expect(repo!.visible).toBe(visible);
+      }
+    );
+  });
+});
+
+// ============================================================
 // Path consistency test (SF-I04)
 // ============================================================
 

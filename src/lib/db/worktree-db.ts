@@ -167,6 +167,11 @@ export function getWorktrees(
 
 /**
  * Get list of unique repositories from worktrees
+ *
+ * Issue #690: Includes `visible` and `enabled` flags so the sidebar can
+ * filter out hidden repositories (visible=false). When the worktree row
+ * has no matching repositories row (LEFT JOIN miss), default to
+ * visible=true and enabled=true so legacy rows behave like before.
  */
 export function getRepositories(db: Database.Database): Array<{
   id?: string;
@@ -174,6 +179,8 @@ export function getRepositories(db: Database.Database): Array<{
   name: string;
   displayName?: string;
   worktreeCount: number;
+  visible: boolean;
+  enabled: boolean;
 }> {
   const stmt = db.prepare(`
     SELECT
@@ -181,6 +188,8 @@ export function getRepositories(db: Database.Database): Array<{
       w.repository_path as path,
       w.repository_name as name,
       r.display_name as display_name,
+      r.visible as visible,
+      r.enabled as enabled,
       COUNT(*) as worktree_count
     FROM worktrees w
     LEFT JOIN repositories r ON w.repository_path = r.path
@@ -194,6 +203,8 @@ export function getRepositories(db: Database.Database): Array<{
     path: string;
     name: string;
     display_name: string | null;
+    visible: number | null;
+    enabled: number | null;
     worktree_count: number;
   }>;
 
@@ -203,6 +214,9 @@ export function getRepositories(db: Database.Database): Array<{
     name: row.name,
     displayName: row.display_name || undefined,
     worktreeCount: row.worktree_count,
+    // LEFT JOIN miss => default to visible/enabled to preserve legacy behavior
+    visible: row.visible === null ? true : row.visible === 1,
+    enabled: row.enabled === null ? true : row.enabled === 1,
   }));
 }
 

@@ -24,12 +24,18 @@ interface WorktreesCacheProviderProps {
  * Provider that wires useWorktreesCache into WorktreeSelectionProvider.
  *
  * Usage: Place inside SidebarProvider, wraps children with WorktreeSelectionProvider.
+ *
+ * Issue #690: Also propagates the cached `repositories` payload (with
+ * `visible` / `enabled`) so the Sidebar can filter hidden repositories.
  */
 export function WorktreesCacheProvider({ children }: WorktreesCacheProviderProps) {
-  const { worktrees } = useWorktreesCache();
+  const { worktrees, repositories } = useWorktreesCache();
 
   return (
-    <WorktreeSelectionProvider externalWorktrees={worktrees}>
+    <WorktreeSelectionProvider
+      externalWorktrees={worktrees}
+      externalRepositories={repositories}
+    >
       {children}
     </WorktreeSelectionProvider>
   );

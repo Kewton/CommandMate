@@ -219,13 +219,14 @@ describe('GET /api/repositories (Issue #644)', () => {
     expect(data.repositories).toHaveLength(1);
     const repo = data.repositories[0];
 
-    // Whitelist of expected fields
+    // Whitelist of expected fields (Issue #690: `visible` added)
     const expectedFields = new Set([
       'id',
       'name',
       'displayName',
       'path',
       'enabled',
+      'visible',
       'worktreeCount',
     ]);
 
