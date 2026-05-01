@@ -39,7 +39,11 @@ import { LogoutButton } from '@/components/common/LogoutButton';
 import { useToast, ToastContainer } from '@/components/common/Toast';
 import { repositoryApi, ApiError } from '@/lib/api-client';
 import { toBranchItem } from '@/types/sidebar';
-import { generateRepositoryColor } from '@/lib/sidebar-utils';
+import {
+  generateRepositoryColor,
+  buildHiddenRepositoryPathSet,
+  filterWorktreesByVisibility,
+} from '@/lib/sidebar-utils';
 import { useWorktreeList } from '@/hooks/useWorktreeList';
 import type { ViewMode } from '@/lib/sidebar-utils';
 import type { BranchGroup } from '@/lib/sidebar-utils';
@@ -152,31 +156,15 @@ export const Sidebar = memo(function Sidebar() {
   // This is a Sidebar-local filter — useWorktreeList is intentionally not
   // modified so the Sessions/Review screens continue to show every worktree
   // for management purposes.
-  //
-  // Match strategy:
-  //   - Repositories are keyed by `path` in the API payload.
-  //   - Each Worktree carries `repositoryPath`.
-  //   - A worktree whose `repositoryPath` matches a repository row with
-  //     `visible === false` is excluded.
-  //   - Worktrees with no matching repository row (legacy data, LEFT JOIN
-  //     miss) are kept (default visible).
-  const hiddenRepositoryPaths = useMemo(() => {
-    const set = new Set<string>();
-    for (const repo of repositories) {
-      if (repo.visible === false) {
-        set.add(repo.path);
-      }
-    }
-    return set;
-  }, [repositories]);
+  // See `buildHiddenRepositoryPathSet` / `filterWorktreesByVisibility` in
+  // sidebar-utils for the matching rules and legacy-row fallback.
+  const hiddenRepositoryPaths = useMemo(
+    () => buildHiddenRepositoryPathSet(repositories),
+    [repositories]
+  );
 
   const visibleWorktrees = useMemo(
-    () =>
-      worktrees.filter((wt) => {
-        const repoPath = wt.repositoryPath;
-        if (!repoPath) return true;
-        return !hiddenRepositoryPaths.has(repoPath);
-      }),
+    () => filterWorktreesByVisibility(worktrees, hiddenRepositoryPaths),
     [worktrees, hiddenRepositoryPaths]
   );
 

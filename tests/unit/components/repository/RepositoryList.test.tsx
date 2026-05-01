@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { RepositoryList } from '@/components/repository/RepositoryList';
 import type { RepositoryListItem } from '@/lib/api-client';
 
@@ -503,18 +503,21 @@ describe('RepositoryList (Issue #644)', () => {
         expect(toggle).toBeDisabled();
       });
 
-      // Cleanup: resolve the pending promise so React doesn't warn.
+      // Cleanup: resolve the pending promise inside act() so React's
+      // post-resolution state update is properly flushed in the test.
       if (resolveFn) {
-        resolveFn({
-          success: true,
-          repository: {
-            id: 'r1',
-            name: 'pending',
-            displayName: null,
-            path: '/path/to/repo-one',
-            enabled: true,
-            visible: false,
-          },
+        await act(async () => {
+          resolveFn!({
+            success: true,
+            repository: {
+              id: 'r1',
+              name: 'pending',
+              displayName: null,
+              path: '/path/to/repo-one',
+              enabled: true,
+              visible: false,
+            },
+          });
         });
       }
     });

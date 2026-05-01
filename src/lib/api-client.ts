@@ -364,21 +364,27 @@ export interface RepositoryListItem {
 
 /**
  * Response type for PUT /api/repositories/[id]
- * Issue #644: Shared response shape for display_name update
- * Issue #690: Now also handles `visible` partial-update; renamed conceptually
- *             but the type alias is preserved for back-compat.
+ *
+ * Issue #644: Originally introduced for the `displayName` partial-update.
+ * Issue #690: Now also handles the `visible` partial-update; the canonical
+ *             name is `UpdateRepositoryResponse`. `UpdateRepositoryDisplayNameResponse`
+ *             remains as a back-compat alias for any external consumer that
+ *             imported the original name.
  *
  * NOTE: The API returns the updated repository WITHOUT worktreeCount
  * (the PUT handler does not re-aggregate). The client is expected to
  * preserve its current worktreeCount locally when merging the update.
  */
-export interface UpdateRepositoryDisplayNameResponse {
+export interface UpdateRepositoryResponse {
   success: boolean;
   repository: Omit<RepositoryListItem, 'worktreeCount'>;
 }
 
-/** Alias (Issue #690): semantically clearer name for the same shape. */
-export type UpdateRepositoryResponse = UpdateRepositoryDisplayNameResponse;
+/**
+ * Back-compat alias for `UpdateRepositoryResponse` (Issue #644).
+ * Prefer `UpdateRepositoryResponse` in new code.
+ */
+export type UpdateRepositoryDisplayNameResponse = UpdateRepositoryResponse;
 
 /**
  * Delete repository response type
@@ -545,8 +551,8 @@ export const repositoryApi = {
   async updateDisplayName(
     id: string,
     displayName: string | null
-  ): Promise<UpdateRepositoryDisplayNameResponse> {
-    return fetchApi<UpdateRepositoryDisplayNameResponse>(
+  ): Promise<UpdateRepositoryResponse> {
+    return fetchApi<UpdateRepositoryResponse>(
       `/api/repositories/${encodeURIComponent(id)}`,
       {
         method: 'PUT',
