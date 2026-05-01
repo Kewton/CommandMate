@@ -11,7 +11,7 @@
 
 'use client';
 
-import React, { memo, useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import React, { memo, useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useDeferredValue } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import {
@@ -39,6 +39,7 @@ import { LogoutButton } from '@/components/common/LogoutButton';
 import { useToast, ToastContainer } from '@/components/common/Toast';
 import { repositoryApi, ApiError } from '@/lib/api-client';
 import { toBranchItem } from '@/types/sidebar';
+import type { SidebarBranchItem } from '@/types/sidebar';
 import {
   generateRepositoryColor,
   buildHiddenRepositoryPathSet,
@@ -58,8 +59,49 @@ const SIDEBAR_GROUP_COLLAPSED_STORAGE_KEY = 'mcbd-sidebar-group-collapsed';
 /** LocalStorage key for branch list scroll position */
 const SIDEBAR_SCROLL_TOP_STORAGE_KEY = 'mcbd-sidebar-scroll-top';
 
+/** LocalStorage key for repository group order cache */
+const SIDEBAR_GROUP_ORDER_CACHE_STORAGE_KEY = 'mcbd-sidebar-group-order-cache';
+
 /** In-memory cache used across client-side remounts */
 let lastSidebarScrollTop = 0;
+let lastRepositoryOrder: string[] | null = null;
+
+function parseRepositoryOrder(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((value): value is string => typeof value === 'string')
+      .slice(0, 500);
+  } catch {
+    return [];
+  }
+}
+
+function readRepositoryOrderCache(): string[] {
+  if (typeof window === 'undefined') return lastRepositoryOrder ?? [];
+
+  try {
+    const stored = localStorage.getItem(SIDEBAR_GROUP_ORDER_CACHE_STORAGE_KEY);
+    if (!stored) return [];
+    const parsed = parseRepositoryOrder(stored);
+    lastRepositoryOrder = parsed.length > 0 ? parsed : null;
+    return parsed;
+  } catch {
+    return [];
+  }
+}
+
+function persistRepositoryOrderCache(order: string[]): void {
+  lastRepositoryOrder = order;
+  if (typeof window === 'undefined') return;
+
+  try {
+    localStorage.setItem(SIDEBAR_GROUP_ORDER_CACHE_STORAGE_KEY, JSON.stringify(order));
+  } catch {
+    // Ignore localStorage errors
+  }
+}
 
 function readSidebarScrollTop(): number {
   if (typeof window === 'undefined') return lastSidebarScrollTop;
@@ -132,7 +174,7 @@ export const Sidebar = memo(function Sidebar() {
   });
 
   // Repository group display order (DB-backed, fetched on mount)
-  const [repositoryOrder, setRepositoryOrder] = useState<string[]>([]);
+  const [repositoryOrder, setRepositoryOrder] = useState<string[]>(readRepositoryOrderCache);
   const orderLoadedRef = useRef(false);
 
   // Fetch saved group order from server on mount
@@ -145,6 +187,7 @@ export const Sidebar = memo(function Sidebar() {
       .then((data: { success: boolean; order: string[] | null }) => {
         if (data.success && Array.isArray(data.order)) {
           setRepositoryOrder(data.order);
+          persistRepositoryOrderCache(data.order);
         }
       })
       .catch(() => {
@@ -171,9 +214,79 @@ export const Sidebar = memo(function Sidebar() {
   // Convert worktrees to sidebar items
   const branchItems = useMemo(() => visibleWorktrees.map(toBranchItem), [visibleWorktrees]);
 
+  // Defer poll-driven branchItems updates so the list order only changes when
+  // React's scheduler has idle time (i.e. the pointer is not moving).
+  // This prevents visible reorders while the user's cursor is in transit toward
+  // a branch — a window not covered by the hover-freeze below.
+  const stableBranchItems = useDeferredValue(branchItems);
+
+  // ---- Hover-freeze: snapshot list ORDER while cursor is over the branch list ----
+  // Polling updates lastActivity every 5s for active sessions, causing sort-order
+  // changes that visually reorder the list while the user is interacting with it.
+  // We freeze the display ORDER while the cursor is inside the list (and for 1s
+  // after it leaves) so items never jump under the pointer or during a click.
+  //
+  // Design: the freeze is entirely ref-based — no forced re-render on activation.
+  // The freeze "activates" only when branchItems next changes (next poll), at
+  // which point effectiveBranchItems returns frozen.items instead of the new live
+  // order. This avoids any flash that occurred when a forced re-render combined
+  // a new freezeVersion with a concurrently-committed poll transition.
+  const frozenBranchItemsRef = useRef<{
+    items: SidebarBranchItem[];
+    expiresAt: number;
+  } | null>(null);
+  const freezeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (freezeTimerRef.current !== null) clearTimeout(freezeTimerRef.current);
+  }, []);
+
+  const effectiveBranchItems = useMemo(() => {
+    const frozen = frozenBranchItemsRef.current;
+    if (!frozen || Date.now() >= frozen.expiresAt) return stableBranchItems;
+    return frozen.items;
+  }, [stableBranchItems]);
+
+  // Track the currently-rendered items (updated after each committed render,
+  // before paint). handleListMouseEnter reads this to freeze exactly what
+  // the user is seeing — not just the live branchItems closure.
+  const displayedItemsRef = useRef<SidebarBranchItem[]>(effectiveBranchItems);
+  useLayoutEffect(() => {
+    displayedItemsRef.current = effectiveBranchItems;
+  });
+
+  const handleListMouseEnter = useCallback(() => {
+    if (freezeTimerRef.current !== null) {
+      clearTimeout(freezeTimerRef.current);
+      freezeTimerRef.current = null;
+    }
+    const currentFrozen = frozenBranchItemsRef.current;
+    if (currentFrozen && Date.now() < currentFrozen.expiresAt) {
+      // Re-entering during the 1s leave window: just extend to Infinity.
+      // No state update, no re-render.
+      frozenBranchItemsRef.current = { ...currentFrozen, expiresAt: Infinity };
+      return;
+    }
+    // New freeze: silently lock in the currently-displayed order.
+    // No setFreezeVersion → no re-render on hover, so nothing can flash.
+    frozenBranchItemsRef.current = { items: displayedItemsRef.current, expiresAt: Infinity };
+  }, []);
+
+  // Hold freeze for 1s after cursor leaves (covers click + re-render settling),
+  // then silently release so the list reflects the live order on the next poll.
+  const handleListMouseLeave = useCallback(() => {
+    if (!frozenBranchItemsRef.current) return;
+    frozenBranchItemsRef.current = { ...frozenBranchItemsRef.current, expiresAt: Date.now() + 1000 };
+    if (freezeTimerRef.current !== null) clearTimeout(freezeTimerRef.current);
+    freezeTimerRef.current = setTimeout(() => {
+      frozenBranchItemsRef.current = null;
+    }, 1000);
+  }, []);
+  // ---- end hover-freeze ----
+
   // Use shared useWorktreeList hook for sorting, filtering, and grouping (Issue #600 Task 3.8)
   const { sortedItems: flatBranches, groupedItems } = useWorktreeList({
-    items: branchItems,
+    items: effectiveBranchItems,
     sortKey,
     sortDirection,
     viewMode,
@@ -227,7 +340,11 @@ export const Sidebar = memo(function Sidebar() {
     persistSidebarScrollTop(branchListRef.current?.scrollTop ?? 0);
   }, []);
 
-  // Restore saved scroll position after the list content has rendered.
+  // Restore saved scroll position when items first appear (initial data load) and
+  // on viewMode change. Intentionally NOT triggered by every list-length change —
+  // that would cause visible scroll jumps whenever the hover-freeze/unfreeze cycle
+  // briefly changes the rendered item count.
+  const hasAnyItems = flatBranches.length > 0 || (groupedBranches?.length ?? 0) > 0;
   useEffect(() => {
     const branchList = branchListRef.current;
     if (!branchList) return;
@@ -239,7 +356,7 @@ export const Sidebar = memo(function Sidebar() {
     return () => {
       window.cancelAnimationFrame(frameId);
     };
-  }, [flatBranches.length, groupedBranches?.length, viewMode]);
+  }, [hasAnyItems, viewMode]);
 
   // Handle branch selection.
   // Note: no fallback timer — Next.js App Router defers history.pushState to a React
@@ -273,6 +390,7 @@ export const Sidebar = memo(function Sidebar() {
 
       // Optimistic update
       setRepositoryOrder(newOrder);
+      persistRepositoryOrderCache(newOrder);
 
       // Persist to server
       fetch('/api/sidebar/group-order', {
@@ -282,6 +400,7 @@ export const Sidebar = memo(function Sidebar() {
       }).catch(() => {
         // Revert on error
         setRepositoryOrder(currentOrder);
+        persistRepositoryOrderCache(currentOrder);
       });
     },
     [groupedBranches]
@@ -335,6 +454,8 @@ export const Sidebar = memo(function Sidebar() {
         ref={branchListRef}
         data-testid="branch-list"
         onScroll={saveBranchListScroll}
+        onMouseEnter={handleListMouseEnter}
+        onMouseLeave={handleListMouseLeave}
         className="flex-1 overflow-y-auto"
       >
         {isEmpty ? (

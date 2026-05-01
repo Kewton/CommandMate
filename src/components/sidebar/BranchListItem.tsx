@@ -7,7 +7,7 @@
 
 'use client';
 
-import React, { memo, useRef, useState, useEffect } from 'react';
+import React, { memo, useRef, useState, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import type { SidebarBranchItem, BranchStatus } from '@/types/sidebar';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
@@ -127,6 +127,23 @@ function BranchTooltip({
 }
 
 // ============================================================================
+// Module-level tooltip suppression
+// ============================================================================
+
+/**
+ * Timestamp (ms) until which onMouseEnter should NOT open a tooltip.
+ * Set by handleClick so that list reorders caused by React re-renders
+ * after a branch click don't immediately show a tooltip on whichever
+ * element lands under the cursor.
+ */
+let suppressMouseEnterUntil = 0;
+
+/** Exported only for tests — reset click-triggered tooltip suppression. */
+export function __resetMouseEnterSuppression(): void {
+  suppressMouseEnterUntil = 0;
+}
+
+// ============================================================================
 // Component
 // ============================================================================
 
@@ -151,16 +168,52 @@ export const BranchListItem = memo(function BranchListItem({
   const tooltipId = `tooltip-${branch.id}`;
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [isTooltipVisible, setIsTooltipVisible] = useState(false);
+  // Timer for the 150ms show-delay (prevents spurious tooltips from
+  // DOM-reflow mouseenter events triggered by polling list reorders).
+  const showTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearShowTimer = useCallback(() => {
+    if (showTimerRef.current !== null) {
+      clearTimeout(showTimerRef.current);
+      showTimerRef.current = null;
+    }
+  }, []);
+
+  // Cancel the pending timer when the component unmounts.
+  useEffect(() => () => clearShowTimer(), [clearShowTimer]);
 
   // Issue #676 (A): selected branches never show the tooltip so a stuck
   // `isTooltipVisible=true` does not leave a tooltip lingering next to the
   // currently-focused item.
   const showTooltip = isTooltipVisible && !isSelected;
 
+  // Safety net A: reset tooltip whenever isSelected becomes true.
+  useEffect(() => {
+    if (isSelected) {
+      setIsTooltipVisible(false);
+    }
+  }, [isSelected]);
+
+  // Safety net B: close this tooltip on ANY document click.
+  // This handles the case where onMouseLeave doesn't fire (fast cursor moves,
+  // DOM changes from polling during click, React concurrent re-renders) and
+  // another branch's tooltip stays visible showing wrong-repository content.
+  useEffect(() => {
+    if (!isTooltipVisible) return;
+    const close = () => setIsTooltipVisible(false);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [isTooltipVisible]);
+
   // Issue #676 (B): clicking closes the tooltip explicitly before firing the
   // upstream onClick, so even if a subsequent re-render misses the mouseleave
   // event, the tooltip state is reset.
   const handleClick = () => {
+    clearShowTimer();
+    // Suppress mouseenter-triggered tooltips for 400ms so that list reorders
+    // caused by the re-render following this click don't immediately show a
+    // tooltip on whichever element lands under the cursor.
+    suppressMouseEnterUntil = Date.now() + 400;
     setIsTooltipVisible(false);
     onClick();
   };
@@ -170,10 +223,36 @@ export const BranchListItem = memo(function BranchListItem({
       ref={buttonRef}
       data-testid="branch-list-item"
       onClick={handleClick}
-      onMouseEnter={() => setIsTooltipVisible(true)}
-      onMouseLeave={() => setIsTooltipVisible(false)}
-      onFocus={() => setIsTooltipVisible(true)}
-      onBlur={() => setIsTooltipVisible(false)}
+      onMouseEnter={() => {
+        clearShowTimer();
+        if (Date.now() >= suppressMouseEnterUntil) {
+          // 150ms delay: filters out spurious mouseenter events fired when the
+          // browser moves a DOM element under the stationary cursor (polling
+          // list reorders). An intentional hover outlasts this delay easily.
+          showTimerRef.current = setTimeout(() => {
+            setIsTooltipVisible(true);
+          }, 150);
+        }
+      }}
+      onMouseLeave={() => {
+        clearShowTimer();
+        setIsTooltipVisible(false);
+      }}
+      onFocus={(e) => {
+        clearShowTimer();
+        // Show tooltip only for keyboard focus (:focus-visible), not pointer clicks.
+        // onFocus fires on mousedown which races with handleClick, causing a
+        // brief tooltip flash even after the click handler closes it.
+        if ((e.target as HTMLElement).matches(':focus-visible')) {
+          showTimerRef.current = setTimeout(() => {
+            setIsTooltipVisible(true);
+          }, 150);
+        }
+      }}
+      onBlur={() => {
+        clearShowTimer();
+        setIsTooltipVisible(false);
+      }}
       aria-current={isSelected ? 'true' : undefined}
       aria-describedby={showTooltip ? tooltipId : undefined}
       aria-label={!showRepositoryName ? `${branch.name} - ${branch.repositoryName}` : undefined}

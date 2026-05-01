@@ -6,9 +6,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
-import { BranchListItem } from '@/components/sidebar/BranchListItem';
+import { BranchListItem, __resetMouseEnterSuppression } from '@/components/sidebar/BranchListItem';
 import type { SidebarBranchItem } from '@/types/sidebar';
 
 describe('BranchListItem', () => {
@@ -22,6 +22,7 @@ describe('BranchListItem', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    __resetMouseEnterSuppression();
   });
 
   afterEach(() => {
@@ -376,7 +377,7 @@ describe('BranchListItem', () => {
   });
 
   describe('Tooltip (Issue #651)', () => {
-    it('should render a tooltip with role="tooltip" on mouseEnter', () => {
+    it('should render a tooltip with role="tooltip" on mouseEnter', async () => {
       render(
         <BranchListItem
           branch={defaultBranch}
@@ -386,10 +387,10 @@ describe('BranchListItem', () => {
       );
 
       fireEvent.mouseEnter(screen.getByRole('button'));
-      expect(screen.getByRole('tooltip')).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByRole('tooltip')).toBeInTheDocument());
     });
 
-    it('should have tooltip id matching aria-describedby on button when tooltip is visible', () => {
+    it('should have tooltip id matching aria-describedby on button when tooltip is visible', async () => {
       render(
         <BranchListItem
           branch={defaultBranch}
@@ -400,6 +401,7 @@ describe('BranchListItem', () => {
 
       const button = screen.getByTestId('branch-list-item');
       fireEvent.mouseEnter(button);
+      await waitFor(() => expect(screen.getByRole('tooltip')).toBeInTheDocument());
 
       const tooltipId = `tooltip-${defaultBranch.id}`;
       expect(button).toHaveAttribute('aria-describedby', tooltipId);
@@ -408,7 +410,7 @@ describe('BranchListItem', () => {
       expect(tooltip).toHaveAttribute('id', tooltipId);
     });
 
-    it('should display branch name in tooltip', () => {
+    it('should display branch name in tooltip', async () => {
       render(
         <BranchListItem
           branch={defaultBranch}
@@ -418,11 +420,11 @@ describe('BranchListItem', () => {
       );
 
       fireEvent.mouseEnter(screen.getByRole('button'));
-      const tooltip = screen.getByRole('tooltip');
+      const tooltip = await screen.findByRole('tooltip');
       expect(tooltip.textContent).toContain('feature/test');
     });
 
-    it('should display repository name in tooltip', () => {
+    it('should display repository name in tooltip', async () => {
       render(
         <BranchListItem
           branch={defaultBranch}
@@ -432,11 +434,11 @@ describe('BranchListItem', () => {
       );
 
       fireEvent.mouseEnter(screen.getByRole('button'));
-      const tooltip = screen.getByRole('tooltip');
+      const tooltip = await screen.findByRole('tooltip');
       expect(tooltip.textContent).toContain('MyRepo');
     });
 
-    it('should display status in tooltip', () => {
+    it('should display status in tooltip', async () => {
       render(
         <BranchListItem
           branch={{ ...defaultBranch, status: 'running' }}
@@ -446,11 +448,11 @@ describe('BranchListItem', () => {
       );
 
       fireEvent.mouseEnter(screen.getByRole('button'));
-      const tooltip = screen.getByRole('tooltip');
+      const tooltip = await screen.findByRole('tooltip');
       expect(tooltip.textContent).toContain('running');
     });
 
-    it('should display worktreePath in tooltip when provided', () => {
+    it('should display worktreePath in tooltip when provided', async () => {
       render(
         <BranchListItem
           branch={{ ...defaultBranch, worktreePath: '/path/to/worktree' }}
@@ -460,11 +462,11 @@ describe('BranchListItem', () => {
       );
 
       fireEvent.mouseEnter(screen.getByRole('button'));
-      const tooltip = screen.getByRole('tooltip');
+      const tooltip = await screen.findByRole('tooltip');
       expect(tooltip.textContent).toContain('/path/to/worktree');
     });
 
-    it('should not crash when worktreePath is undefined', () => {
+    it('should not crash when worktreePath is undefined', async () => {
       render(
         <BranchListItem
           branch={defaultBranch}
@@ -474,7 +476,7 @@ describe('BranchListItem', () => {
       );
 
       fireEvent.mouseEnter(screen.getByRole('button'));
-      const tooltip = screen.getByRole('tooltip');
+      const tooltip = await screen.findByRole('tooltip');
       expect(tooltip).toBeInTheDocument();
     });
 
@@ -518,7 +520,7 @@ describe('BranchListItem', () => {
       expect(button).not.toHaveAttribute('aria-describedby');
     });
 
-    it('should show tooltip on mouseEnter', () => {
+    it('should show tooltip on mouseEnter', async () => {
       render(
         <BranchListItem
           branch={defaultBranch}
@@ -528,10 +530,10 @@ describe('BranchListItem', () => {
       );
 
       fireEvent.mouseEnter(screen.getByRole('button'));
-      expect(screen.getByRole('tooltip')).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByRole('tooltip')).toBeInTheDocument());
     });
 
-    it('should hide tooltip on mouseLeave', () => {
+    it('should hide tooltip on mouseLeave', async () => {
       render(
         <BranchListItem
           branch={defaultBranch}
@@ -542,13 +544,13 @@ describe('BranchListItem', () => {
 
       const button = screen.getByRole('button');
       fireEvent.mouseEnter(button);
-      expect(screen.getByRole('tooltip')).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByRole('tooltip')).toBeInTheDocument());
 
       fireEvent.mouseLeave(button);
       expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
     });
 
-    it('should hide tooltip on click (B)', () => {
+    it('should hide tooltip on click (B)', async () => {
       render(
         <BranchListItem
           branch={defaultBranch}
@@ -559,13 +561,13 @@ describe('BranchListItem', () => {
 
       const button = screen.getByRole('button');
       fireEvent.mouseEnter(button);
-      expect(screen.getByRole('tooltip')).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByRole('tooltip')).toBeInTheDocument());
 
       fireEvent.click(button);
       expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
     });
 
-    it('should still invoke onClick when click hides the tooltip (B)', () => {
+    it('should still invoke onClick when click hides the tooltip (B)', async () => {
       const onClick = vi.fn();
       render(
         <BranchListItem
@@ -577,12 +579,13 @@ describe('BranchListItem', () => {
 
       const button = screen.getByRole('button');
       fireEvent.mouseEnter(button);
+      await waitFor(() => expect(screen.getByRole('tooltip')).toBeInTheDocument());
       fireEvent.click(button);
 
       expect(onClick).toHaveBeenCalledTimes(1);
     });
 
-    it('should not render tooltip when isSelected=true even on mouseEnter (A + C)', () => {
+    it('should not render tooltip when isSelected=true even on mouseEnter (A + C)', async () => {
       render(
         <BranchListItem
           branch={defaultBranch}
@@ -592,6 +595,8 @@ describe('BranchListItem', () => {
       );
 
       fireEvent.mouseEnter(screen.getByRole('button'));
+      // Wait long enough to confirm tooltip does NOT appear (isSelected suppresses it)
+      await new Promise((r) => setTimeout(r, 300));
       expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
     });
 
@@ -609,7 +614,7 @@ describe('BranchListItem', () => {
       expect(button).not.toHaveAttribute('aria-describedby');
     });
 
-    it('should show tooltip on focus and hide on blur', () => {
+    it('should show tooltip on focus and hide on blur', async () => {
       render(
         <BranchListItem
           branch={defaultBranch}
@@ -619,8 +624,19 @@ describe('BranchListItem', () => {
       );
 
       const button = screen.getByRole('button');
+      // jsdom programmatic focus doesn't set :focus-visible (spec requires keyboard
+      // interaction), so mock matches() to simulate keyboard-focused state.
+      const realMatches = HTMLElement.prototype.matches;
+      vi.spyOn(HTMLElement.prototype, 'matches').mockImplementation(function (
+        this: Element,
+        selector: string
+      ) {
+        if (selector === ':focus-visible') return true;
+        return realMatches.call(this, selector);
+      });
+
       fireEvent.focus(button);
-      expect(screen.getByRole('tooltip')).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByRole('tooltip')).toBeInTheDocument());
 
       fireEvent.blur(button);
       expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();

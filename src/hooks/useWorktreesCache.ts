@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, startTransition } from 'react';
 import type { Worktree } from '@/types/models';
 import type { RepositorySummary } from '@/lib/api-client';
 
@@ -65,8 +65,13 @@ export function useWorktreesCache(): UseWorktreesCacheReturn {
       const data = await response.json();
       const wts = data.worktrees ?? [];
       const repos = data.repositories ?? [];
-      setWorktrees(wts);
-      setRepositories(repos);
+      // Mark polling state updates as low-priority transitions so urgent
+      // user interactions (clicks, keypresses) are never blocked by a
+      // poll-induced list reorder landing mid-click.
+      startTransition(() => {
+        setWorktrees(wts);
+        setRepositories(repos);
+      });
       worktreesRef.current = wts;
     } catch (err) {
       const fetchError = err instanceof Error ? err : new Error(String(err));

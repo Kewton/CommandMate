@@ -45,6 +45,7 @@ vi.mock('@/lib/api-client', async (importOriginal) => {
 import { worktreeApi, repositoryApi, ApiError } from '@/lib/api-client';
 
 const originalLocation = window.location;
+const originalFetch = global.fetch;
 
 const mockWorktrees: Worktree[] = [
   {
@@ -96,6 +97,7 @@ describe('Sidebar', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    global.fetch = originalFetch;
     vi.useRealTimers();
     Object.defineProperty(window, 'location', {
       writable: true,
@@ -361,6 +363,9 @@ describe('Sidebar', () => {
       const branchList = await screen.findByTestId('branch-list');
       branchList.scrollTop = 180;
 
+      await waitFor(() => {
+        expect(screen.getAllByText('feature/test-2').length).toBeGreaterThanOrEqual(1);
+      });
       const branchItem = screen.getAllByText('feature/test-2')[0].closest('[data-testid="branch-list-item"]');
       expect(branchItem).not.toBeNull();
 
@@ -845,6 +850,75 @@ describe('Sidebar', () => {
         expect(screen.getAllByText('z-feature').length).toBeGreaterThanOrEqual(1);
         expect(screen.getAllByText('a-feature').length).toBeGreaterThanOrEqual(1);
       });
+    });
+  });
+
+  describe('repository group order cache', () => {
+    it('uses cached repository order before the DB-backed order request resolves', async () => {
+      const groupedWorktrees: Worktree[] = [
+        {
+          id: 'mywebdata-main',
+          name: 'main',
+          path: '/path/to/mywebdata',
+          repositoryPath: '/path/to/mywebdata',
+          repositoryName: 'myWebData',
+          updatedAt: new Date('2025-01-01T00:00:00Z'),
+        },
+        {
+          id: 'onecompression-main',
+          name: 'main',
+          path: '/path/to/onecompression',
+          repositoryPath: '/path/to/onecompression',
+          repositoryName: 'OneCompression',
+          updatedAt: new Date('2025-01-01T00:00:00Z'),
+        },
+        {
+          id: 'photon-mlx-main',
+          name: 'main',
+          path: '/path/to/photon-mlx',
+          repositoryPath: '/path/to/photon-mlx',
+          repositoryName: 'photon-mlx',
+          updatedAt: new Date('2025-01-01T00:00:00Z'),
+        },
+        {
+          id: 'self-hosted-runner-main',
+          name: 'main',
+          path: '/path/to/self-hosted-runner',
+          repositoryPath: '/path/to/self-hosted-runner',
+          repositoryName: 'self-hosted-runner',
+          updatedAt: new Date('2025-01-01T00:00:00Z'),
+        },
+      ];
+
+      localStorage.setItem(
+        'mcbd-sidebar-group-order-cache',
+        JSON.stringify(['photon-mlx', 'self-hosted-runner', 'myWebData', 'OneCompression'])
+      );
+
+      (worktreeApi.getAll as ReturnType<typeof vi.fn>).mockResolvedValue({
+        worktrees: groupedWorktrees,
+        repositories: [],
+      });
+      global.fetch = vi.fn(() => new Promise(() => {})) as unknown as typeof fetch;
+
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('photon-mlx')).toBeInTheDocument();
+      });
+
+      const groupNames = screen
+        .getAllByTestId('group-header')
+        .map((button) => button.textContent ?? '');
+
+      expect(groupNames[0]).toContain('photon-mlx');
+      expect(groupNames[1]).toContain('self-hosted-runner');
+      expect(groupNames[2]).toContain('myWebData');
+      expect(groupNames[3]).toContain('OneCompression');
     });
   });
 
