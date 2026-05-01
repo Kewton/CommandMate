@@ -1,0 +1,40 @@
+{
+  "bug_id": "681_20260501_010316",
+  "issue_number": 681,
+  "bug_description": "Issue #681: .yaml/.yml/.html でも #675 と同種の re-render ループが発生しないか確認 (verify)",
+  "selected_actions": [
+    {
+      "action_id": "1",
+      "title": "回帰防止テスト追加: 複数拡張子混在 + 連続同値 SET_DIRTY",
+      "description": "useFileTabs.test.ts に拡張子非依存の SET_DIRTY 連打 no-op テストを追加する。.md/.yaml/.yml/.html のタブを混在させたシナリオで、各タブに対する isDirty 同値連続 dispatch が state 参照を変えないことを検証する。",
+      "files_to_modify": [
+        "tests/unit/hooks/useFileTabs.test.ts"
+      ],
+      "tdd_phase": "Red→Green",
+      "test_strategy": "AAA pattern. Arrange: 混在拡張子の FileTabsState を構築。Act: 同値 SET_DIRTY を連続 dispatch。Assert: state 参照が変わらない (toBe) と各タブの isDirty 値が想定通りであることを確認。"
+    },
+    {
+      "action_id": "2",
+      "title": "HtmlPreview の未使用 onDirtyChange prop を削除",
+      "description": "HtmlPreviewProps から onDirtyChange を削除し、FilePanelContent.tsx で HtmlPreview に渡している handleDirtyChange も削除する。これにより dead wiring を排除し、将来コード読解者の混乱を防ぐ。",
+      "files_to_modify": [
+        "src/components/worktree/HtmlPreview.tsx",
+        "src/components/worktree/FilePanelContent.tsx"
+      ],
+      "tdd_phase": "Refactor (機能変更なし)",
+      "test_strategy": "型チェック (tsc --noEmit) と lint で破綻がないことを確認。HtmlPreview の既存テストが壊れないことを確認。"
+    }
+  ],
+  "deliverables": [
+    "tests/unit/hooks/useFileTabs.test.ts: SET_DIRTY 同値連打テスト追加",
+    "src/components/worktree/HtmlPreview.tsx: 未使用 onDirtyChange prop 削除",
+    "src/components/worktree/FilePanelContent.tsx: HtmlPreview への onDirtyChange 渡し削除"
+  ],
+  "definition_of_done": [
+    "新規テストが pass する",
+    "既存の useFileTabs/MarkdownEditor/HtmlPreview のテストが全て pass する",
+    "tsc --noEmit がエラーなく完了する",
+    "ESLint が通る",
+    "受入テスト (Phase 5) で 4拡張子全てが #675 のループを再発しないことを動作レベルで確認"
+  ]
+}

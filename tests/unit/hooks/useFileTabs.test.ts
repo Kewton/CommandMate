@@ -486,6 +486,77 @@ describe('fileTabsReducer', () => {
       expect(first.tabs[0].isDirty).toBe(true);
       expect(second).toBe(first);
     });
+
+    // [Issue #681] Verify the SET_DIRTY no-op guard is extension-agnostic.
+    // The same fix that protects .md must also protect .yaml/.yml/.html (which share
+    // the upstream dispatch path even though .html routes to HtmlPreview, not MarkdownEditor).
+    it('SET_DIRTY no-op short-circuit applies regardless of file extension (#681)', () => {
+      const mixedState: FileTabsState = {
+        tabs: [
+          { path: 'note.md', name: 'note.md', content: null, loading: false, error: null, isDirty: true },
+          { path: 'config.yaml', name: 'config.yaml', content: null, loading: false, error: null, isDirty: false },
+          { path: 'manifest.yml', name: 'manifest.yml', content: null, loading: false, error: null, isDirty: true },
+          { path: 'index.html', name: 'index.html', content: null, loading: false, error: null, isDirty: false },
+        ],
+        activeIndex: 0,
+      };
+
+      const noOpActions: FileTabsAction[] = [
+        { type: 'SET_DIRTY', path: 'note.md', isDirty: true },
+        { type: 'SET_DIRTY', path: 'config.yaml', isDirty: false },
+        { type: 'SET_DIRTY', path: 'manifest.yml', isDirty: true },
+        { type: 'SET_DIRTY', path: 'index.html', isDirty: false },
+      ];
+
+      for (const action of noOpActions) {
+        const result = fileTabsReducer(mixedState, action);
+        expect(result).toBe(mixedState);
+      }
+    });
+
+    it('SET_DIRTY same-value rapid-fire dispatches across extensions never produce a new state reference (#681)', () => {
+      const mixedState: FileTabsState = {
+        tabs: [
+          { path: 'doc.md', name: 'doc.md', content: null, loading: false, error: null, isDirty: false },
+          { path: 'app.yaml', name: 'app.yaml', content: null, loading: false, error: null, isDirty: false },
+          { path: 'page.html', name: 'page.html', content: null, loading: false, error: null, isDirty: false },
+        ],
+        activeIndex: 0,
+      };
+
+      let current = mixedState;
+      const paths = ['doc.md', 'app.yaml', 'page.html'];
+      for (let i = 0; i < 30; i++) {
+        const path = paths[i % paths.length];
+        current = fileTabsReducer(current, { type: 'SET_DIRTY', path, isDirty: false });
+      }
+
+      expect(current).toBe(mixedState);
+    });
+
+    it('SET_DIRTY value transition (false→true) on a yaml/html tab still produces a new state, then stabilises (#681)', () => {
+      const mixedState: FileTabsState = {
+        tabs: [
+          { path: 'config.yaml', name: 'config.yaml', content: null, loading: false, error: null, isDirty: false },
+          { path: 'index.html', name: 'index.html', content: null, loading: false, error: null, isDirty: false },
+        ],
+        activeIndex: 0,
+      };
+
+      const flipYaml = fileTabsReducer(mixedState, { type: 'SET_DIRTY', path: 'config.yaml', isDirty: true });
+      expect(flipYaml).not.toBe(mixedState);
+      expect(flipYaml.tabs[0].isDirty).toBe(true);
+
+      const stableYaml = fileTabsReducer(flipYaml, { type: 'SET_DIRTY', path: 'config.yaml', isDirty: true });
+      expect(stableYaml).toBe(flipYaml);
+
+      const flipHtml = fileTabsReducer(stableYaml, { type: 'SET_DIRTY', path: 'index.html', isDirty: true });
+      expect(flipHtml).not.toBe(stableYaml);
+      expect(flipHtml.tabs[1].isDirty).toBe(true);
+
+      const stableHtml = fileTabsReducer(flipHtml, { type: 'SET_DIRTY', path: 'index.html', isDirty: true });
+      expect(stableHtml).toBe(flipHtml);
+    });
   });
 });
 
