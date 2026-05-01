@@ -88,6 +88,12 @@ export interface LayoutState {
   leftPaneTab: LeftPaneTab;
   /** Split ratio for desktop view (0.0 - 1.0) */
   splitRatio: number;
+  /**
+   * Whether the desktop left pane is collapsed (Issue #688).
+   * When true, the left pane is hidden (width 0) and a 24px expand bar is shown.
+   * Persisted to localStorage under key `commandmate.worktree.leftPaneCollapsed`.
+   */
+  leftPaneCollapsed: boolean;
 }
 
 /**
@@ -156,6 +162,7 @@ export const initialLayoutState: LayoutState = {
   mobileActivePane: 'terminal',
   leftPaneTab: 'history',
   splitRatio: 0.5,
+  leftPaneCollapsed: false,
 };
 
 /**

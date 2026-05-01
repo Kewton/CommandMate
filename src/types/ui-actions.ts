@@ -33,6 +33,9 @@ export type WorktreeUIAction =
   | { type: 'SET_MOBILE_ACTIVE_PANE'; pane: MobileActivePane }
   | { type: 'SET_LEFT_PANE_TAB'; tab: LeftPaneTab }
   | { type: 'SET_SPLIT_RATIO'; ratio: number }
+  // Issue #688: Left pane collapse/expand
+  | { type: 'TOGGLE_LEFT_PANE' }
+  | { type: 'SET_LEFT_PANE_COLLAPSED'; collapsed: boolean }
 
   // Error actions
   | { type: 'SET_ERROR'; error: ErrorState }
