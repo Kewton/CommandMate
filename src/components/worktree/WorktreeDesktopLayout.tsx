@@ -33,6 +33,17 @@ export interface WorktreeDesktopLayoutProps {
   maxLeftWidth?: number;
   /** Additional CSS classes */
   className?: string;
+  /**
+   * Whether the left pane is collapsed (Issue #688).
+   * Optional for backward compatibility — when undefined, defaults to expanded.
+   */
+  leftPaneCollapsed?: boolean;
+  /**
+   * Callback to toggle the left pane collapsed state (Issue #688).
+   * Required when leftPaneCollapsed is controlled; the expand bar will not render
+   * a working button without it.
+   */
+  onToggleLeftPane?: () => void;
 }
 
 /** Props for MobileLayout sub-component */
@@ -48,6 +59,10 @@ interface DesktopLayoutProps {
   leftWidth: number;
   onResize: (delta: number) => void;
   className: string;
+  /** Issue #688: collapsed state for left pane */
+  leftPaneCollapsed: boolean;
+  /** Issue #688: callback to expand the left pane */
+  onToggleLeftPane?: () => void;
 }
 
 /** Active pane type for mobile layout */
@@ -146,9 +161,16 @@ const MobileLayout = memo(function MobileLayout({
   );
 });
 
+/** Width of the expand bar shown when the left pane is collapsed (Issue #688). */
+const EXPAND_BAR_WIDTH_PX = 24;
+
 /**
  * Desktop layout component - two columns with resizer.
  * Memoized to prevent unnecessary re-renders.
+ *
+ * Issue #688: Supports left pane collapse. When `leftPaneCollapsed` is true,
+ * the left pane is rendered with width 0, the resizer is hidden, and a 24px
+ * expand bar with a ▶ button is shown at the left edge.
  */
 const DesktopLayout = memo(function DesktopLayout({
   leftPane,
@@ -156,10 +178,25 @@ const DesktopLayout = memo(function DesktopLayout({
   leftWidth,
   onResize,
   className,
+  leftPaneCollapsed,
+  onToggleLeftPane,
 }: DesktopLayoutProps) {
-  // Memoize pane width styles
-  const leftPaneStyle = useMemo(() => ({ width: `${leftWidth}%` }), [leftWidth]);
-  const rightPaneStyle = useMemo(() => ({ width: `${100 - leftWidth}%` }), [leftWidth]);
+  // Memoize pane width styles. When collapsed, force left pane to 0px and
+  // give the right pane the remaining space (full width minus the expand bar).
+  const leftPaneStyle = useMemo(
+    () =>
+      leftPaneCollapsed
+        ? { width: '0px' }
+        : { width: `${leftWidth}%` },
+    [leftWidth, leftPaneCollapsed]
+  );
+  const rightPaneStyle = useMemo(
+    () =>
+      leftPaneCollapsed
+        ? { width: `calc(100% - ${EXPAND_BAR_WIDTH_PX}px)` }
+        : { width: `${100 - leftWidth}%` },
+    [leftWidth, leftPaneCollapsed]
+  );
 
   // Memoize container className
   const containerClassName = useMemo(
@@ -173,20 +210,57 @@ const DesktopLayout = memo(function DesktopLayout({
       role="main"
       className={containerClassName}
     >
+      {/* Expand bar — shown only when collapsed */}
+      {leftPaneCollapsed && (
+        <div
+          data-testid="expand-bar"
+          style={{ width: `${EXPAND_BAR_WIDTH_PX}px` }}
+          className="flex-shrink-0 flex items-center justify-center bg-gray-100 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700"
+        >
+          <button
+            type="button"
+            aria-label="Expand left panel"
+            aria-expanded="false"
+            aria-controls="worktree-left-pane"
+            onClick={onToggleLeftPane}
+            className="flex items-center justify-center w-full h-10 text-gray-500 dark:text-gray-400 hover:text-cyan-600 dark:hover:text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+          >
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 5l7 7-7 7"
+              />
+            </svg>
+          </button>
+        </div>
+      )}
+
       {/* Left pane */}
       <div
+        id="worktree-left-pane"
         data-testid="left-pane"
         aria-label="History pane"
+        aria-hidden={leftPaneCollapsed}
         style={leftPaneStyle}
-        className="flex-shrink-0 overflow-hidden"
+        className="flex-shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out"
       >
         <ErrorBoundary componentName={COMPONENT_NAMES.left}>
           {leftPane}
         </ErrorBoundary>
       </div>
 
-      {/* Resizer */}
-      <PaneResizer onResize={onResize} orientation="horizontal" ariaValueNow={leftWidth} />
+      {/* Resizer — hidden when collapsed (Issue #688) */}
+      {!leftPaneCollapsed && (
+        <PaneResizer onResize={onResize} orientation="horizontal" ariaValueNow={leftWidth} />
+      )}
 
       {/* Right pane */}
       <div
@@ -234,6 +308,8 @@ export const WorktreeDesktopLayout = memo(function WorktreeDesktopLayout({
   minLeftWidth = DEFAULT_MIN_WIDTH,
   maxLeftWidth = DEFAULT_MAX_WIDTH,
   className = '',
+  leftPaneCollapsed = false,
+  onToggleLeftPane,
 }: WorktreeDesktopLayoutProps) {
   const isMobile = useIsMobile();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -277,6 +353,8 @@ export const WorktreeDesktopLayout = memo(function WorktreeDesktopLayout({
         leftWidth={leftWidth}
         onResize={handleResize}
         className={className}
+        leftPaneCollapsed={leftPaneCollapsed}
+        onToggleLeftPane={onToggleLeftPane}
       />
     </div>
   );

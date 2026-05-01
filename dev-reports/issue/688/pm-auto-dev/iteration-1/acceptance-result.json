@@ -1,0 +1,140 @@
+{
+  "issue_number": 688,
+  "status": "passed",
+  "criteria_results": [
+    {
+      "criterion": "左パネル右端の ◀ ボタンをクリックするとパネルが非表示になり右パネルが全幅になる",
+      "status": "pass",
+      "evidence": "LeftPaneTabSwitcher.tsx (L195-219): onCollapse プロパティが渡されたときに ◀ ボタンを描画。WorktreeDetailRefactored.tsx (L1447) では onCollapse={actions.toggleLeftPane} を渡し、actions.toggleLeftPane() が dispatch({type:'SET_LEFT_PANE_COLLAPSED', collapsed: !current}) で leftPaneCollapsed を true 化。WorktreeDesktopLayout.tsx (L186-199) で leftPaneCollapsed=true 時、左ペイン width: 0px、右ペイン width: calc(100% - 24px) を適用。Vitest テスト 'should hide left pane (width: 0) when leftPaneCollapsed is true' / 'should call onToggleLeftPane when expand button clicked' で確認済み。"
+    },
+    {
+      "criterion": "最小バー上の ▶ ボタンをクリックするとパネルが再表示される",
+      "status": "pass",
+      "evidence": "WorktreeDesktopLayout.tsx (L213-244): leftPaneCollapsed=true のときのみ data-testid=\"expand-bar\" 内に ▶ アイコンボタンを描画。onClick={onToggleLeftPane} で actions.toggleLeftPane が呼ばれ leftPaneCollapsed が false に戻る。Vitest テスト 'should show expand bar when collapsed' / 'should call onToggleLeftPane when expand button clicked' で確認。"
+    },
+    {
+      "criterion": "折りたたみ時の左パネル幅は 0px、画面左端に幅 24px の縦バー（展開バー）を表示する",
+      "status": "pass",
+      "evidence": "WorktreeDesktopLayout.tsx: EXPAND_BAR_WIDTH_PX=24 (L165)。leftPaneStyle (L186-192) は leftPaneCollapsed=true 時 { width: '0px' } を返し、expand bar (L215-217) は style={{ width: `${EXPAND_BAR_WIDTH_PX}px` }} で 24px 幅。data-testid=\"expand-bar\" 要素として描画。Vitest テスト 'should hide left pane (width: 0)' / 'should show expand bar when collapsed' で検証済み。"
+    },
+    {
+      "criterion": "展開バーの中央に ▶ アイコンボタンを配置する",
+      "status": "pass",
+      "evidence": "WorktreeDesktopLayout.tsx (L218): expand-bar div は className=\"flex-shrink-0 flex items-center justify-center ...\" で中央寄せ。子要素として ▶ SVG パス d=\"M9 5l7 7-7 7\" を持つ button (L220-243) を配置。"
+    },
+    {
+      "criterion": "折りたたみ中は PaneResizer を非表示にし、ドラッグ操作を無効化する",
+      "status": "pass",
+      "evidence": "WorktreeDesktopLayout.tsx (L260-263): {!leftPaneCollapsed && (<PaneResizer ... />)} という条件レンダリングで、leftPaneCollapsed=true 時に PaneResizer 自体が DOM に存在しない。Vitest テスト 'should hide PaneResizer when collapsed' / 'should show PaneResizer when not collapsed' で検証済み。"
+    },
+    {
+      "criterion": "展開時は折りたたみ前の leftWidth (%) を復元する",
+      "status": "pass",
+      "evidence": "WorktreeDesktopLayout.tsx: leftWidth は useState(initialLeftWidth) で保持され (L316)、折りたたみ操作によって変更されない。leftPaneStyle は collapsed 時 0px を返すが、展開後 (leftPaneCollapsed=false) は元の `${leftWidth}%` を返すためレイアウトが復元される。"
+    },
+    {
+      "criterion": "ページリロード後も折りたたみ状態が維持される（localStorage キー: commandmate.worktree.leftPaneCollapsed）",
+      "status": "pass",
+      "evidence": "useWorktreeUIState.ts (L26): LEFT_PANE_COLLAPSED_STORAGE_KEY = 'commandmate.worktree.leftPaneCollapsed'。L277-281 で useLocalStorageState を利用、L289-296 でマウント時に storedCollapsed を SET_LEFT_PANE_COLLAPSED に dispatch して水和。L363-367 の toggleLeftPane で setStoredCollapsed(next) を呼び localStorage に保存。"
+    },
+    {
+      "criterion": "PC版のみ機能する（モバイル版は対象外）",
+      "status": "pass",
+      "evidence": "WorktreeDesktopLayout.tsx (L343-345): isMobile=true のとき MobileLayout を返し、DesktopLayout (expand-bar 含む) は描画されない。Vitest テスト 'should not render expand bar on mobile even when collapsed' で検証済み。"
+    },
+    {
+      "criterion": "折りたたみ/展開ボタンに aria-label, aria-expanded, aria-controls を付与する",
+      "status": "pass",
+      "evidence": "Collapse ボタン (LeftPaneTabSwitcher.tsx L196-201): aria-label=\"Collapse left panel\", aria-expanded=\"true\", aria-controls=\"worktree-left-pane\"。Expand ボタン (WorktreeDesktopLayout.tsx L220-226): aria-label=\"Expand left panel\", aria-expanded=\"false\", aria-controls=\"worktree-left-pane\"。左ペイン div (L247-254) に id=\"worktree-left-pane\" を付与。Vitest テスト 'should expose proper aria attributes on expand button' / 'should set id=\"worktree-left-pane\" on left pane for aria-controls reference' で検証。"
+    },
+    {
+      "criterion": "キーボード（Tab → Enter/Space）で操作可能",
+      "status": "pass",
+      "evidence": "両ボタンとも <button type=\"button\"> でブラウザネイティブのフォーカス可能性とEnter/Space起動を継承。focus:outline-none focus:ring-2 focus:ring-cyan-500 によりフォーカス可視化。Vitest テスト 'should support keyboard activation (Enter) on expand button' で検証済み。LeftPaneTabSwitcher のタブも Space/Enter キー対応 (handleKeyDown L146-154)。"
+    },
+    {
+      "criterion": "ユニットテストがパスする",
+      "status": "pass",
+      "evidence": "npm run test:unit: Test Files 340 passed, Tests 6416 passed | 7 skipped (6423), 失敗 0。Issue #688 専用テスト (WorktreeDesktopLayout / LeftPaneTabSwitcher / useWorktreeUIState) 91 件すべてパス、'Collapse functionality (Issue #688)' suite 10件 + 'should toggle left pane collapsed state (Issue #688)' を含む。"
+    }
+  ],
+  "test_results": {
+    "typescript": "passed",
+    "lint": "passed",
+    "unit_tests": {
+      "total": 6423,
+      "passed": 6416,
+      "skipped": 7,
+      "failed": 0
+    }
+  },
+  "scenario_results": [
+    {
+      "scenario": "シナリオ1: leftPaneCollapsed=true で expand-bar 表示・left-pane 幅 0px",
+      "status": "pass",
+      "evidence": "WorktreeDesktopLayout.test.tsx 'should hide left pane (width: 0) when leftPaneCollapsed is true' / 'should show expand bar when collapsed' で検証済み。"
+    },
+    {
+      "scenario": "シナリオ2: leftPaneCollapsed=true で PaneResizer 非表示",
+      "status": "pass",
+      "evidence": "WorktreeDesktopLayout.test.tsx 'should hide PaneResizer when collapsed' で検証済み。WorktreeDesktopLayout.tsx L260-263 の条件レンダリング。"
+    },
+    {
+      "scenario": "シナリオ3: expand bar ボタンクリックで onToggleLeftPane が呼ばれる",
+      "status": "pass",
+      "evidence": "WorktreeDesktopLayout.test.tsx 'should call onToggleLeftPane when expand button clicked' で検証済み。"
+    },
+    {
+      "scenario": "シナリオ4: leftPaneCollapsed=false で通常表示（expand-bar なし）",
+      "status": "pass",
+      "evidence": "WorktreeDesktopLayout.test.tsx 'should not show expand bar when not collapsed' / 'should show left pane when leftPaneCollapsed is false (default)' で検証済み。"
+    },
+    {
+      "scenario": "シナリオ5: isMobile=true では MobileLayout が表示され expand-bar が表示されない",
+      "status": "pass",
+      "evidence": "WorktreeDesktopLayout.test.tsx 'should not render expand bar on mobile even when collapsed' で検証済み。L343-345 の早期 return ロジック。"
+    },
+    {
+      "scenario": "シナリオ6: LeftPaneTabSwitcher に onCollapse を渡すと ◀ ボタンが表示される",
+      "status": "pass",
+      "evidence": "LeftPaneTabSwitcher.tsx L195: {onCollapse && (<button ...>)} という条件レンダリング。"
+    },
+    {
+      "scenario": "シナリオ7: ◀ ボタンに aria-label/aria-expanded/aria-controls が付与されている",
+      "status": "pass",
+      "evidence": "LeftPaneTabSwitcher.tsx L196-201 で 3 属性すべて付与済み。"
+    },
+    {
+      "scenario": "シナリオ8: TOGGLE_LEFT_PANE で leftPaneCollapsed が true になる",
+      "status": "pass",
+      "evidence": "useWorktreeUIState.ts L121-125 の reducer ケース。useWorktreeUIState.test.ts 'should toggle left pane collapsed state (Issue #688)' で検証済み。"
+    },
+    {
+      "scenario": "シナリオ9: TOGGLE_LEFT_PANE 2回で false に戻る",
+      "status": "pass",
+      "evidence": "TOGGLE_LEFT_PANE は !state.layout.leftPaneCollapsed で反転、または toggleLeftPane action が next = !collapsedRef.current で交互反転。テストでも 2 回呼んで false 戻りを確認。"
+    },
+    {
+      "scenario": "シナリオ10: actions に toggleLeftPane 関数が存在する",
+      "status": "pass",
+      "evidence": "useWorktreeUIState.ts L233-234 で WorktreeUIActions interface に宣言、L363-367 で memoized 実装を提供。"
+    },
+    {
+      "scenario": "シナリオ11: TypeScript 型チェック (npx tsc --noEmit) パス",
+      "status": "pass",
+      "evidence": "exit code 0、エラー出力なし。"
+    },
+    {
+      "scenario": "シナリオ12: ESLint (npm run lint) パス",
+      "status": "pass",
+      "evidence": "'No ESLint warnings or errors'。exit code 0。"
+    },
+    {
+      "scenario": "シナリオ13: 全ユニットテスト (npm run test:unit) パス",
+      "status": "pass",
+      "evidence": "Test Files 340 passed (340)、Tests 6416 passed | 7 skipped、失敗 0。"
+    }
+  ],
+  "overall_status": "passed",
+  "notes": "Issue #688『PC版左パネル折りたたみ機能』の全11受入条件と全13テストシナリオが pass。型チェック・Lint・全6416ユニットテストもクリーン。実装は (1) ui-state.ts に LayoutState.leftPaneCollapsed:boolean、(2) ui-actions.ts に TOGGLE_LEFT_PANE / SET_LEFT_PANE_COLLAPSED、(3) useWorktreeUIState で reducer 分岐 + useLocalStorageState 連携 (key: commandmate.worktree.leftPaneCollapsed) + actions.toggleLeftPane、(4) WorktreeDesktopLayout で leftPaneCollapsed/onToggleLeftPane オプション props、24px expand-bar、id=worktree-left-pane、aria-* 属性、PaneResizer 条件描画、(5) LeftPaneTabSwitcher で onCollapse + ◀ ボタン (aria-label/aria-expanded/aria-controls) 、(6) WorktreeDetailRefactored で state.layout.leftPaneCollapsed / actions.toggleLeftPane を伝播、を含む。Mobile では DesktopLayout 自体が描画されないため折りたたみ機能はPC版のみ動作する。stderr に Context Provider 不在を意図的に検証する負経路テストのエラー出力があるが、これはテストコード内の expect-throw シナリオであり実際の失敗ではない。"
+}

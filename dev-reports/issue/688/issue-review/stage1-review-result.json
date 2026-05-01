@@ -1,0 +1,119 @@
+{
+  "stage": 1,
+  "focus": "通常",
+  "reviewer": "opus",
+  "issue_number": 688,
+  "review_date": "2026-05-01",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "Must Fix",
+      "category": "完全性 / 正確性",
+      "title": "変更対象ファイルに型定義・hook・レイアウトコンポーネントが含まれていない",
+      "description": "Issue本文の『変更対象ファイル』欄には `WorktreeDetailRefactored.tsx` とテストのみが列挙されているが、仮説検証の通り `WorktreeUIState` / `WorktreeUIAction` / `useWorktreeUIState` の三点セットへの追加が必須。さらに、折りたたみ時の幅 0 化や折りたたみボタン UI は `WorktreeDesktopLayout.tsx` 側で扱う必要があり（leftWidth は同コンポーネント内 useState で管理されているため）、レビュー時点の主要変更ファイルとして欠落している。",
+      "location": "## 影響範囲 > ### 変更対象ファイル",
+      "evidence": "src/types/ui-state.ts (LayoutState は leftPaneCollapsed 未保持), src/types/ui-actions.ts (TOGGLE_LEFT_PANE 未定義), src/hooks/useWorktreeUIState.ts (アクション/reducer 未対応), src/components/worktree/WorktreeDesktopLayout.tsx L240 で leftWidth を内部 useState 管理",
+      "suggestion": "変更対象ファイルに以下を追加する: 1) `src/types/ui-state.ts` (LayoutState への leftPaneCollapsed 追加), 2) `src/types/ui-actions.ts` (TOGGLE_LEFT_PANE / SET_LEFT_PANE_COLLAPSED アクション追加), 3) `src/hooks/useWorktreeUIState.ts` (reducer ケース・action creator 追加), 4) `src/components/worktree/WorktreeDesktopLayout.tsx` (折りたたみ受け渡しまたはゼロ幅化対応・展開ボタン UI), 5) `src/components/worktree/LeftPaneTabSwitcher.tsx` または新規ボタンコンポーネント (◀ 折りたたみボタンの追加先)。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "Must Fix",
+      "category": "整合性 / 技術的妥当性",
+      "title": "`WorktreeUIState` (useReducer) と localStorage 永続化のレイヤ分離方針が示されていない",
+      "description": "Issueは『WorktreeUIState に leftPaneCollapsed を追加』『localStorage に状態保存(SidebarContextと同方式)』の双方を主要変更点として列挙しているが、(a) reducer 状態を localStorage と双方向に同期する責務をどのレイヤに置くか、(b) SidebarContext で使われている独自 `useLocalStorageSync` パターンと、汎用フック `useLocalStorageState` のどちらを採用するか、が未定義。CLAUDE.md・hypothesis-verification ともに `useLocalStorageState` の利用が推奨されており、整合性確保のために方針確定が必要。",
+      "location": "## 提案する解決策 > ### 主要な変更点",
+      "evidence": "src/contexts/SidebarContext.tsx で useLocalStorageSync(独自実装) を使用しているのに対し、src/hooks/useLocalStorageState.ts (汎用) が存在し MarkdownEditor.tsx 等で利用されている。Issue は『SidebarContext と同方式』と記述しているが、現プロジェクトでは useLocalStorageState の使用が推奨パターンに置き換わりつつある",
+      "suggestion": "Issue本文で永続化方式を一本化する。推奨は『useLocalStorageState フックを使い、初期値をstate初期化時に注入(または useEffect でload→dispatch)、setLeftPaneCollapsed action 内で localStorage に書き込み』とし、SidebarContext 方式参照は削除または『参考』レベルへ降格する。ストレージキー名(例: `commandmate.worktree.leftPaneCollapsed`)も明記する。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "Should Fix",
+      "category": "受け入れ条件の明確性",
+      "title": "折りたたみ時の最小バーの仕様・展開ボタン位置・PaneResizer の挙動が不明確",
+      "description": "受入条件に『最小バー上の ▶ ボタンをクリックするとパネルが再表示される』とあるが、(1) 折りたたみ時に幅何 px の縦バーを残すのか(完全 0 幅か、幅 24-32px のミニバーか)、(2) ▶ ボタンを縦バーのどこに配置するか、(3) PaneResizer は折りたたみ中に非表示にするのか、(4) leftWidth の min/max(現状 minLeftWidth=15) と折りたたみ状態の関係(折りたたみは min を無視)が不明。実装者により解釈が割れる。",
+      "location": "## 受入条件",
+      "evidence": "src/components/worktree/WorktreeDesktopLayout.tsx L189 で PaneResizer をレンダリング、L240 で leftWidth (パーセント, 初期 20%, min 15%, max 60%) を制御",
+      "suggestion": "受入条件を以下のように具体化する: 『折りたたみ時の左パネル幅は 0px(完全非表示)とし、画面左端に幅 24px の縦バー(展開バー)を表示する』『展開バー中央に ▶ アイコンボタンを配置する』『折りたたみ中は PaneResizer を非表示にし、ドラッグ操作を無効化する』『展開時は折りたたみ前の leftWidth(%) を復元する』。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "Should Fix",
+      "category": "受け入れ条件の明確性 / 完全性",
+      "title": "アニメーション要否・アクセシビリティ要件が記載されていない",
+      "description": "折りたたみ/展開時のトランジションアニメーション(CSS transition の有無、duration)、aria-expanded・aria-controls 属性、キーボード操作(Tabフォーカス, Enter/Space で起動)、スクリーンリーダーラベル(『History panel collapse button』等)について Issue に記載がない。LeftPaneTabSwitcher は role=tablist/aria-selected/keyboard handler を持つため、新ボタンも同水準のアクセシビリティが期待される。",
+      "location": "## 受入条件",
+      "evidence": "src/components/worktree/LeftPaneTabSwitcher.tsx L141-148 で keyboard handler、L168-170 で role=tablist 実装あり",
+      "suggestion": "受入条件に以下を追加: 『折りたたみ/展開ボタンには aria-label, aria-expanded, aria-controls を付与する』『キーボード(Tab→Enter/Space)で操作可能』『パネル幅変化に CSS transition (200ms ease-in-out) を適用する(または『アニメーションなし』を明示)』。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "Should Fix",
+      "category": "整合性",
+      "title": "`LayoutState.splitRatio` が未使用となっている既存負債への言及がない",
+      "description": "`LayoutState` には既に `splitRatio: number` (初期値 0.5) が定義されているが、`WorktreeDetailRefactored.tsx` は `splitRatio` を WorktreeDesktopLayout に渡していない(grep で参照ゼロ)。WorktreeDesktopLayout は内部 useState で `leftWidth` を独立管理している状態。今回 `leftPaneCollapsed` を `LayoutState` に追加する場合、(A) 同じく WorktreeDesktopLayout の内部状態で完結させるか、(B) reducer→props で受け渡すかの設計判断が、既存 `splitRatio` の取り扱いと一貫している必要がある。",
+      "location": "## 提案する解決策 > ### 主要な変更点",
+      "evidence": "src/types/ui-state.ts L91 で splitRatio 定義, src/components/worktree/WorktreeDetailRefactored.tsx L1596-1602 で initialLeftWidth=20 を直接ハードコード、splitRatio props を渡していない",
+      "suggestion": "実装方針を明示する: (案A) WorktreeDesktopLayout 内部で leftPaneCollapsed と leftWidth を一緒に管理し、初期値のみ props 受け取り (既存 splitRatio と同じ未使用状態を許容); (案B) WorktreeUIState 経由で leftPaneCollapsed を伝搬し、副作業として splitRatio も連携(WorktreeDesktopLayout を controlled component 化)。Issue にどちらを採用するか追記する。"
+    },
+    {
+      "id": "S1-006",
+      "severity": "Should Fix",
+      "category": "完全性 / 正確性",
+      "title": "テストファイルパスが既存構成と一部不一致",
+      "description": "Issueでは新規テストの追加先を `tests/unit/components/WorktreeDetailRefactored.test.tsx` とのみ記述しているが、関連テストは `tests/unit/components/WorktreeDesktopLayout.test.tsx` および `tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx` などにも分布している。折りたたみ機能の単体テストは `WorktreeDesktopLayout.test.tsx`(レイアウト) と `WorktreeDetailRefactored.test.tsx`(統合) の双方で観点が分かれる。",
+      "location": "## 影響範囲 > ### 変更対象ファイル",
+      "evidence": "tests/unit/components/WorktreeDesktopLayout.test.tsx, tests/unit/components/worktree/WorktreeDetailRefactored-*.test.tsx 群が存在",
+      "suggestion": "テスト追加先を分離して列挙する: (a) `tests/unit/components/WorktreeDesktopLayout.test.tsx` — 折りたたみ表示/▶ボタン表示/PaneResizer非表示, (b) `tests/unit/components/WorktreeDetailRefactored.test.tsx` — TOGGLE_LEFT_PANE dispatch・localStorage 永続化, (c) 必要に応じ `tests/unit/hooks/useWorktreeUIState.test.tsx` を新規追加し reducer の単体テストを書く。"
+    },
+    {
+      "id": "S1-007",
+      "severity": "Nice to Have",
+      "category": "明確性",
+      "title": "折りたたみ状態のローカルストレージキー命名規則が未指定",
+      "description": "SidebarContext では `commandmate.sidebar.*` のような namespace prefix を使用している可能性が高いが、新規追加する key 名(例: `commandmate.worktree.leftPaneCollapsed`)が Issue 内で指定されていない。複数 worktree 間で状態を共有するか、worktree 単位で分けるかも未定。",
+      "location": "## 提案する解決策",
+      "evidence": "src/contexts/SidebarContext.tsx L237-269 で複数の localStorage キーを使用",
+      "suggestion": "受入条件または実装タスクに『localStorage キー: `commandmate.worktree.leftPaneCollapsed` (全worktree共有) または `commandmate.worktree.{worktreeId}.leftPaneCollapsed` (worktree個別)』を明記する。UX観点では全worktree共有を推奨。"
+    },
+    {
+      "id": "S1-008",
+      "severity": "Nice to Have",
+      "category": "完全性",
+      "title": "モバイル版(MobileLayout)では折りたたみ状態が無視されることへの言及がない",
+      "description": "受入条件に『PC版のみ機能する(モバイル版は対象外)』とあるが、`WorktreeDesktopLayout` 内 `useIsMobile()` の判定で MobileLayout に切り替わると、PC で折りたたんだ状態がモバイルから戻った際にどう扱われるか(状態は保持されるが UI に影響しない、で問題ないか)、画面幅変動時の挙動説明がない。",
+      "location": "## 受入条件",
+      "evidence": "src/components/worktree/WorktreeDesktopLayout.tsx L267-269 で isMobile 時 MobileLayout を返す",
+      "suggestion": "受入条件補足として『モバイル時は leftPaneCollapsed の値に関わらず常に MobileLayout を表示し、状態自体は保持される(PCに戻った時に維持)』を追記する。"
+    },
+    {
+      "id": "S1-009",
+      "severity": "Nice to Have",
+      "category": "完全性",
+      "title": "関連 Issue/PR・既存類似機能(Sidebar 折りたたみ)へのリンクがない",
+      "description": "サイドバー側に既に折りたたみ機能があり (SidebarContext, SidebarToggle) 、UI/UX 面で類似する。Issue 本文に既存類似機能へのリンクがあると実装者がパターンを参照しやすい。",
+      "location": "Issue本文",
+      "evidence": "src/contexts/SidebarContext.tsx, tests/unit/components/layout/SidebarToggle.test.tsx",
+      "suggestion": "Issue本文末尾に『参考: サイドバー折りたたみ機能の類似実装は src/contexts/SidebarContext.tsx と src/components/layout/SidebarToggle.tsx を参照』を追記する。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 4,
+  "nice_to_have_count": 3,
+  "code_references": [
+    { "file": "src/types/ui-state.ts", "relevance": "LayoutState への leftPaneCollapsed 追加先" },
+    { "file": "src/types/ui-actions.ts", "relevance": "TOGGLE_LEFT_PANE アクション追加先" },
+    { "file": "src/hooks/useWorktreeUIState.ts", "relevance": "reducer/action creator 拡張先" },
+    { "file": "src/components/worktree/WorktreeDetailRefactored.tsx", "relevance": "レイアウト統合・leftPaneMemo 構築箇所(L1441-1551, L1595-1603)" },
+    { "file": "src/components/worktree/WorktreeDesktopLayout.tsx", "relevance": "leftWidth 内部管理・折りたたみゼロ幅化対象(L240-)" },
+    { "file": "src/components/worktree/LeftPaneTabSwitcher.tsx", "relevance": "折りたたみボタン配置候補 / アクセシビリティ参考実装" },
+    { "file": "src/hooks/useLocalStorageState.ts", "relevance": "永続化フック(推奨採用)" },
+    { "file": "src/contexts/SidebarContext.tsx", "relevance": "Issue で参照される localStorage 同期パターン" },
+    { "file": "tests/unit/components/WorktreeDesktopLayout.test.tsx", "relevance": "レイアウト層の単体テスト追加先" },
+    { "file": "tests/unit/components/WorktreeDetailRefactored.test.tsx", "relevance": "統合テスト追加先" }
+  ],
+  "doc_references": [
+    { "file": "CLAUDE.md", "relevance": "コーディング規約・モジュール一覧" },
+    { "file": "dev-reports/issue/688/issue-review/hypothesis-verification.md", "relevance": "前提仮説検証(全 Confirmed)" }
+  ],
+  "summary": "Issue #688 はPC版Worktree詳細画面の左パネル折りたたみ機能追加で、提案アプローチ自体(WorktreeUIState 拡張＋localStorage 永続化＋折りたたみボタン UI)は既存アーキテクチャと整合的。ただし『変更対象ファイル』欄が `WorktreeDetailRefactored.tsx` のみに限定されており、実際には `ui-state.ts` / `ui-actions.ts` / `useWorktreeUIState.ts` / `WorktreeDesktopLayout.tsx` / `LeftPaneTabSwitcher.tsx` の追加変更が必須(Must Fix)。また localStorage 永続化方式が SidebarContext の独自パターンと汎用 `useLocalStorageState` の混在で曖昧(Must Fix)。受入条件は折りたたみ時の最小バー仕様・PaneResizer 挙動・アクセシビリティ要件・アニメーション有無が不明確(Should Fix×4)。既存 `LayoutState.splitRatio` が未使用負債である点も、設計方針(controlled vs uncontrolled)に影響するため明示が望ましい。Must Fix 2件・Should Fix 4件・Nice to Have 3件を Stage 2(影響範囲レビュー)前に修正することを推奨。"
+}

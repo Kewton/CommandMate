@@ -1444,6 +1444,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         <LeftPaneTabSwitcher
           activeTab={leftPaneTab}
           onTabChange={handleLeftPaneTabChange}
+          onCollapse={actions.toggleLeftPane}
         />
         <div className="flex-1 min-h-0 overflow-hidden">
           {leftPaneTab === 'history' && (
@@ -1548,7 +1549,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         </div>
       </div>
     ),
-    [leftPaneTab, handleLeftPaneTabChange, historySubTab, state.messages, worktreeId, handleFilePathClick, showToast, fileSearch.query, fileSearch.mode, fileSearch.isSearching, fileSearch.error, fileSearch.setQuery, fileSearch.setMode, fileSearch.clearSearch, fileSearch.results?.results, handleFileSelect, handleNewFile, handleNewDirectory, handleRename, handleDelete, handleUpload, handleMove, handleCmateSetup, fileTreeRefresh, selectedAgents, handleSelectedAgentsChange, vibeLocalModel, handleVibeLocalModelChange, vibeLocalContextWindow, handleVibeLocalContextWindowChange, handleDiffSelect, handleInsertToMessage, showArchived, handleShowArchivedChange]
+    [leftPaneTab, handleLeftPaneTabChange, historySubTab, state.messages, worktreeId, handleFilePathClick, showToast, fileSearch.query, fileSearch.mode, fileSearch.isSearching, fileSearch.error, fileSearch.setQuery, fileSearch.setMode, fileSearch.clearSearch, fileSearch.results?.results, handleFileSelect, handleNewFile, handleNewDirectory, handleRename, handleDelete, handleUpload, handleMove, handleCmateSetup, fileTreeRefresh, selectedAgents, handleSelectedAgentsChange, vibeLocalModel, handleVibeLocalModelChange, vibeLocalContextWindow, handleVibeLocalContextWindowChange, handleDiffSelect, handleInsertToMessage, showArchived, handleShowArchivedChange, actions.toggleLeftPane]
   );
 
   // ========================================================================
@@ -1599,6 +1600,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               initialLeftWidth={20}
               minLeftWidth={15}
               maxLeftWidth={60}
+              leftPaneCollapsed={state.layout.leftPaneCollapsed}
+              onToggleLeftPane={actions.toggleLeftPane}
             />
           </div>
           {/* Issue #473: Navigation buttons for OpenCode TUI selection list */}

@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useReducer, useMemo } from 'react';
+import { useReducer, useMemo, useEffect, useRef } from 'react';
 import type { WorktreeUIState, UIPhase, ErrorState, MobileActivePane, LeftPaneTab } from '@/types/ui-state';
 import type { WorktreeUIAction } from '@/types/ui-actions';
 import type { ChatMessage, PromptData } from '@/types/models';
@@ -18,6 +18,12 @@ import {
   initialPromptState,
   initialErrorState,
 } from '@/types/ui-state';
+import { useLocalStorageState } from '@/hooks/useLocalStorageState';
+
+/**
+ * localStorage key for persisting left pane collapsed state (Issue #688)
+ */
+const LEFT_PANE_COLLAPSED_STORAGE_KEY = 'commandmate.worktree.leftPaneCollapsed';
 
 /**
  * Reducer function for worktree UI state
@@ -109,6 +115,19 @@ export function worktreeUIReducer(
       return {
         ...state,
         layout: { ...state.layout, leftPaneTab: action.tab },
+      };
+
+    // Issue #688: Left pane collapse/expand
+    case 'TOGGLE_LEFT_PANE':
+      return {
+        ...state,
+        layout: { ...state.layout, leftPaneCollapsed: !state.layout.leftPaneCollapsed },
+      };
+
+    case 'SET_LEFT_PANE_COLLAPSED':
+      return {
+        ...state,
+        layout: { ...state.layout, leftPaneCollapsed: action.collapsed },
       };
 
     // Error actions
@@ -211,6 +230,8 @@ export interface WorktreeUIActions {
   setLayoutMode: (mode: 'split' | 'tabs') => void;
   setSplitRatio: (ratio: number) => void;
   setWsConnected: (connected: boolean) => void;
+  /** Toggle left pane collapsed state (Issue #688) */
+  toggleLeftPane: () => void;
 }
 
 /**
@@ -242,6 +263,37 @@ export function useWorktreeUIState(): {
   actions: WorktreeUIActions;
 } {
   const [state, dispatch] = useReducer(worktreeUIReducer, undefined, createInitialUIState);
+
+  /**
+   * Issue #688: Persist leftPaneCollapsed to localStorage.
+   *
+   * Synchronization strategy (avoids infinite loop):
+   * 1. On mount: read from localStorage and dispatch SET_LEFT_PANE_COLLAPSED to seed reducer state.
+   * 2. On toggle: actions.toggleLeftPane() dispatches TOGGLE_LEFT_PANE AND calls setStoredCollapsed
+   *    via a ref-tracked "next value" so localStorage stays in sync.
+   * 3. The hydration effect uses an `isHydrated` ref so we don't re-dispatch repeatedly when
+   *    `storedCollapsed` is updated by setStoredCollapsed().
+   */
+  const { value: storedCollapsed, setValue: setStoredCollapsed } = useLocalStorageState<boolean>({
+    key: LEFT_PANE_COLLAPSED_STORAGE_KEY,
+    defaultValue: false,
+    validate: (v): v is boolean => typeof v === 'boolean',
+  });
+
+  // Track current collapsed state in a ref so action creators (memoized with []) can read it.
+  const collapsedRef = useRef(state.layout.leftPaneCollapsed);
+  collapsedRef.current = state.layout.leftPaneCollapsed;
+
+  // Hydrate from localStorage exactly once on first availability.
+  const isHydratedRef = useRef(false);
+  useEffect(() => {
+    if (isHydratedRef.current) return;
+    isHydratedRef.current = true;
+    // If stored value differs from initial reducer value, sync it.
+    if (storedCollapsed !== collapsedRef.current) {
+      dispatch({ type: 'SET_LEFT_PANE_COLLAPSED', collapsed: storedCollapsed });
+    }
+  }, [storedCollapsed]);
 
   // Memoized action creators
   const actions = useMemo<WorktreeUIActions>(
@@ -305,8 +357,16 @@ export function useWorktreeUIState(): {
 
       setWsConnected: (connected: boolean) =>
         dispatch({ type: 'SET_WS_CONNECTED', connected }),
+
+      // Issue #688: Toggle left pane and persist to localStorage.
+      // Use the ref so we don't capture stale state in this useMemo([]) closure.
+      toggleLeftPane: () => {
+        const next = !collapsedRef.current;
+        dispatch({ type: 'SET_LEFT_PANE_COLLAPSED', collapsed: next });
+        setStoredCollapsed(next);
+      },
     }),
-    []
+    [setStoredCollapsed]
   );
 
   return { state, dispatch, actions };

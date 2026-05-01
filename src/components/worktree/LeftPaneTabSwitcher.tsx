@@ -25,6 +25,11 @@ export interface LeftPaneTabSwitcherProps {
   onTabChange: (tab: LeftPaneTab) => void;
   /** Additional CSS classes */
   className?: string;
+  /**
+   * Optional callback to collapse the left pane (Issue #688).
+   * When provided, a ◀ button is shown at the right end of the tab bar.
+   */
+  onCollapse?: () => void;
 }
 
 interface TabConfig {
@@ -123,6 +128,7 @@ export const LeftPaneTabSwitcher = memo(function LeftPaneTabSwitcher({
   activeTab,
   onTabChange,
   className = '',
+  onCollapse,
 }: LeftPaneTabSwitcherProps) {
   /**
    * Handle tab click
@@ -185,6 +191,32 @@ export const LeftPaneTabSwitcher = memo(function LeftPaneTabSwitcher({
           <span>{tab.label}</span>
         </button>
       ))}
+      {/* Issue #688: Collapse button at the right end of the tab bar */}
+      {onCollapse && (
+        <button
+          type="button"
+          aria-label="Collapse left panel"
+          aria-expanded="true"
+          aria-controls="worktree-left-pane"
+          onClick={onCollapse}
+          className="ml-auto flex items-center justify-center px-2 py-2 text-gray-500 dark:text-gray-400 hover:text-cyan-600 dark:hover:text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-inset"
+        >
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15 19l-7-7 7-7"
+            />
+          </svg>
+        </button>
+      )}
     </div>
   );
 });
