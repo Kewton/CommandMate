@@ -1,0 +1,12 @@
+{
+  "stage": 3,
+  "applied_findings": [
+    "DR3-001",
+    "DR3-002",
+    "DR3-003",
+    "DR3-004"
+  ],
+  "skipped_findings": [],
+  "design_policy_updated": true,
+  "summary": "Stage 3 影響範囲レビューの Must Fix 1 件と Should Fix 3 件を設計方針書へ反映した。主な反映内容: システム構成図と変更対象レイヤーに global Codex skills/prompts を追加し、同名衝突時の後勝ち上書き仕様と統合テスト隔離方針を §5/§7 に追記。API の cliTool 対象を CLIToolType の 6 ツールとして明記し、vibe-local は STANDARD_COMMANDS 0 件の現状仕様として整理。Copilot/Gemini builtin の同名衝突は unit matrix ではなく API route integration test で source/cliTools/sources 形状まで検証する方針に更新。sources.standard 件数は同名上書きがない deterministic な環境でのみ固定アサートする条件を明記した。"
+}

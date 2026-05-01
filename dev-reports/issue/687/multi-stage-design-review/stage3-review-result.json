@@ -1,0 +1,22 @@
+{
+  "stage": 3,
+  "focus": "影響範囲",
+  "reviewer": "codex",
+  "findings": [
+    {
+      "id": "DR3-001",
+      "severity": "Should Fix",
+      "title": "ConversationPairCard の表示仕様変更を既存テストが保証できない",
+      "description": "設計方針書では src/components/worktree/__tests__/ConversationPairCard.test.tsx の timestamp テストを「影響軽微」かつ必要に応じた更新としていたが、現行アサーションは /12:34/ の時刻部分だけを確認しているため、日付が追加されない実装でも通過する。Issue #687 の主目的は MessageHistory のタイムスタンプを時刻のみから日付+時刻に変えることなので、component test 側でも日付部分を含む表示を明示的に検証する必要がある。"
+    },
+    {
+      "id": "DR3-002",
+      "severity": "Nice to Have",
+      "title": "長いローカライズ済み日時文字列の UI 影響を明示するとよい",
+      "description": "'PPp' の enUS 出力は日本語より長く、assistant message の件数カウンタやコピーボタンと同じヘッダー行に表示される。既存のテキスト折り返しテストは本文中心であり、タイムスタンプ行の欠落や過度な省略は直接検証していない。大きなリスクではないが、回帰確認観点として表示要素が欠落しないことを設計書に明記すると実装時の見落としを減らせる。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 1,
+  "nice_to_have_count": 1
+}

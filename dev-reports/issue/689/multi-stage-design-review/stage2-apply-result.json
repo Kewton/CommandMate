@@ -1,0 +1,8 @@
+{
+  "stage": 2,
+  "applied_findings": ["DR2-001", "DR2-002", "DR2-003", "DR2-004", "DR2-005", "DR2-006"],
+  "skipped_findings": ["DR2-007", "DR2-008"],
+  "design_policy_updated": true,
+  "design_policy_path": "dev-reports/design/issue-689-standard-commands-update-design-policy.md",
+  "summary": "Stage 2整合性レビューのMust Fix 3件・Should Fix 3件をすべて設計方針書に反映。DR2-001: §4件数構成サマリーのClaude表示総数を17→21から16→20に訂正（実コード根拠: undefined 8件 + cliToolsに'claude'を含む既存8件 = 16件）。§7追加テスト項目6も20件に修正。DR2-002: §7テスト更新表の行番号を実コードと整合（L36-50→L35-51、L80-94→L79-100、L194→L213）。DR2-003: 既存テストL35『should have Claude commands without cliTools field』の名称は据え置く方針を§7に明記し、新規4件のcliTools:['claude']明示検証は独立it ブロックで追加することを明文化。DR2-004: §7マトリクステストの対象CLIツール集合に'vibe-local'を追加し全6ツール（claude/codex/opencode/copilot/gemini/vibe-local）に拡張、§9実装手順とS§12実装チェックリストも更新。DR2-005: §4件数表にshared内訳（claude+codex=6, 3-way=1, claude+opencode=1, codex+opencode=1）と各CLI表示総数の算出ロジックを注記として追加。DR2-006: §7マトリクステスト末尾に2つのit.eachの役割分担とundefinedフォールバックの根拠（filterCommandsByCliTool L184-201の挙動）を明記。§10レビュー履歴にStage 2行を追加、§11反映状況サマリーにStage 2セクションを追加、§12実装チェックリストにStage 2 Must Fix/Should Fix項目を追加。Nice to Have 2件（DR2-007/DR2-008）は設計の根幹に影響しないためスキップ。"
+}

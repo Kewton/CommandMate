@@ -1,0 +1,50 @@
+{
+  "issue_number": 688,
+  "title": "PC版にて、「History/Files/CMATE」タブの表示領域の表示/非表示を切り替え可能にしてほしい",
+  "acceptance_criteria": [
+    "左パネル右端の ◀ ボタンをクリックするとパネルが非表示になり右パネルが全幅になる",
+    "最小バー上の ▶ ボタンをクリックするとパネルが再表示される",
+    "折りたたみ時の左パネル幅は 0px（完全非表示）とし、画面左端に幅 24px の縦バー（展開バー）を表示する",
+    "展開バーの中央に ▶ アイコンボタンを配置する",
+    "折りたたみ中は PaneResizer を非表示にし、ドラッグ操作を無効化する",
+    "展開時は折りたたみ前の leftWidth (%) を復元する",
+    "ページリロード後も折りたたみ状態が維持される（localStorage、キー: commandmate.worktree.leftPaneCollapsed）",
+    "PC版のみ機能する（モバイル版は対象外）",
+    "折りたたみ/展開ボタンに aria-label, aria-expanded, aria-controls を付与する",
+    "キーボード（Tab → Enter/Space）で操作可能",
+    "ユニットテストがパスする"
+  ],
+  "implementation_tasks": [
+    "src/types/ui-state.ts の LayoutState に leftPaneCollapsed: boolean を追加",
+    "src/types/ui-actions.ts に TOGGLE_LEFT_PANE / SET_LEFT_PANE_COLLAPSED アクションを追加",
+    "src/hooks/useWorktreeUIState.ts の reducer に上記アクションのケースを追加",
+    "src/hooks/useWorktreeUIState.ts の WorktreeUIActions interface に toggleLeftPane: () => void を追加",
+    "src/hooks/useWorktreeUIState.ts の actions オブジェクトに toggleLeftPane エントリを追加",
+    "src/hooks/useWorktreeUIState.ts 内で useLocalStorageState を呼び出し、初回 effect で dispatch({ type: 'SET_LEFT_PANE_COLLAPSED', collapsed: stored }) を実行",
+    "src/components/worktree/WorktreeDesktopLayout.tsx を controlled component 化し、leftPaneCollapsed?: boolean および onToggleLeftPane?: () => void をオプショナル props として受け取り対応",
+    "src/components/worktree/WorktreeDesktopLayout.tsx に折りたたみ時の幅ゼロ化 + 展開バー（▶ ボタン）UI を実装",
+    "src/components/worktree/LeftPaneTabSwitcher.tsx 右端への折りたたみボタン（◀）配置、aria 属性付与",
+    "src/components/worktree/WorktreeDetailRefactored.tsx に leftPaneCollapsed を WorktreeDesktopLayout へ props 伝搬、actions.toggleLeftPane バインド",
+    "tests/unit/hooks/useWorktreeUIState.test.ts に reducer 単体テスト追加",
+    "tests/unit/components/WorktreeDesktopLayout.test.tsx にレイアウト層テスト追加",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx に統合テスト追加"
+  ],
+  "key_files": {
+    "src/types/ui-state.ts": "LayoutState interface - leftPaneCollapsed を追加",
+    "src/types/ui-actions.ts": "WorktreeUIAction union - 新アクション追加",
+    "src/hooks/useWorktreeUIState.ts": "reducer / WorktreeUIActions / actions / localStorage 連携",
+    "src/hooks/useLocalStorageState.ts": "永続化フック（既存、再利用）",
+    "src/components/worktree/WorktreeDesktopLayout.tsx": "折りたたみ UI / 展開バー / PaneResizer 制御",
+    "src/components/worktree/LeftPaneTabSwitcher.tsx": "◀ 折りたたみボタン追加",
+    "src/components/worktree/WorktreeDetailRefactored.tsx": "props 伝搬・leftPaneMemo 依存配列"
+  },
+  "design_notes": {
+    "backward_compatibility": "WorktreeDesktopLayoutProps の新規 props はオプショナル（?）にすること。既存テスト24箇所が無修正で通るように。",
+    "localStorage_init": "初期描画は false（展開状態）で表示し、useEffect 後に localStorage 値を反映。hydration warning を避けるため。",
+    "transition": "CSS transition は折りたたみ/展開時のみ。PaneResizer ドラッグ中は無効化（今回はシンプルに常時 transition でも可）。",
+    "mobile": "useIsMobile() が true の場合は折りたたみ UI を表示しない。leftPaneCollapsed の値は保持。",
+    "leftPaneMemo": "actions は useMemo([]) で安定参照。依存配列に追加しても余計な再計算は発生しない。",
+    "expand_bar_width": "折りたたみ時: 左端に幅 24px の縦バー（展開バー）を表示。展開バー中央に ▶ ボタン。"
+  },
+  "target_coverage": 80
+}

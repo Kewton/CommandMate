@@ -1,0 +1,30 @@
+{
+  "issue_number": 690,
+  "refactor_targets": [
+    "src/lib/db/migrations/v31-repository-visible.ts",
+    "src/lib/db/db-repository.ts",
+    "src/lib/db/worktree-db.ts",
+    "src/lib/api-client.ts",
+    "src/app/api/repositories/route.ts",
+    "src/app/api/repositories/[id]/route.ts",
+    "src/hooks/useWorktreesCache.ts",
+    "src/components/providers/WorktreesCacheProvider.tsx",
+    "src/contexts/WorktreeSelectionContext.tsx",
+    "src/components/repository/RepositoryList.tsx",
+    "src/components/layout/Sidebar.tsx"
+  ],
+  "quality_metrics": {
+    "lint": "pass",
+    "type_check": "pass",
+    "tests_passed": 128,
+    "tests_failed": 0
+  },
+  "improvement_goals": [
+    "act() 警告を発生させているReactテストコードの整理（cosmetic issue）",
+    "型定義の一貫性確認（RepositorySummary の enabled/visible が全ての利用箇所で正しく使われているか）",
+    "Sidebar.tsx の visible フィルタロジックの可読性向上",
+    "不要なコードや冗長なパターンの除去"
+  ],
+  "tdd_result_path": "dev-reports/issue/690/pm-auto-dev/iteration-1/tdd-result.json",
+  "acceptance_result_path": "dev-reports/issue/690/pm-auto-dev/iteration-1/acceptance-result.json"
+}

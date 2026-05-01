@@ -1,0 +1,26 @@
+{
+  "issue_number": 687,
+  "feature_summary": "MessageHistoryタイムスタンプに日付+時刻表示を追加（date-fns 'PPp' フォーマット、ロケール対応）",
+  "acceptance_criteria": [
+    "MessageHistory に date-fns 'PPp' フォーマット相当の日付+時刻が表示される（MessageList.tsx / PromptMessage.tsx と同一フォーマット）",
+    "ロケールに応じて表示形式が切り替わる（日本語/英語）",
+    "formatMessageTimestamp のユニットテストがパスする（7ケース追加、16件全パス）",
+    "ConversationPairCard の既存テスト（unit / integration）が引き続きパスする（36件全パス）",
+    "TypeScript 型チェックがパスする",
+    "ESLint エラーがない"
+  ],
+  "test_scenarios": [
+    "シナリオ1: formatMessageTimestamp(date, ja) が format(date, 'PPp', { locale: ja }) と同一文字列を返す",
+    "シナリオ2: formatMessageTimestamp(date, enUS) が format(date, 'PPp', { locale: enUS }) と同一文字列を返す",
+    "シナリオ3: formatMessageTimestamp(new Date('invalid')) が空文字を返す（Invalid Date ガード）",
+    "シナリオ4: formatMessageTimestamp(null as any) が空文字を返す（非 Date ガード）",
+    "シナリオ5: ConversationPairCard.tsx の UserMessageSection が toLocaleTimeString() ではなく formatMessageTimestamp() を使っている",
+    "シナリオ6: ConversationPairCard.tsx の AssistantMessageItem が toLocaleTimeString() ではなく formatMessageTimestamp() を使っている",
+    "シナリオ7: 全ユニットテスト・回帰テストがパスする"
+  ],
+  "implemented_files": [
+    "src/lib/date-utils.ts",
+    "src/components/worktree/ConversationPairCard.tsx",
+    "tests/unit/lib/date-utils.test.ts"
+  ]
+}

@@ -1,0 +1,114 @@
+{
+  "stage": 3,
+  "focus": "影響範囲",
+  "reviewer": "opus",
+  "issue_number": 688,
+  "review_date": "2026-05-01",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "Must Fix",
+      "category": "型定義の波及・互換性",
+      "title": "WorktreeDesktopLayout を controlled component 化すると、既存呼び出し元・モック・全テストの props インターフェースが破壊される",
+      "description": "Issue は『WorktreeDesktopLayout を controlled component 化し、leftPaneCollapsed を props で受け取る』と明記している。しかし WorktreeDesktopLayoutProps 自体は現状『leftPane / rightPane / initialLeftWidth / minLeftWidth / maxLeftWidth / className』のみで構成されており、leftWidth は内部 useState で完結している。controlled 化に踏み切る場合の影響範囲を整理すると以下のとおり大きい:\n\n  1. 実装側呼び出し元: `src/components/worktree/WorktreeDetailRefactored.tsx` L1596-1602(現状唯一の呼び出し元)で leftPaneCollapsed/onToggleLeftPane(またはコールバック) を新たに props 伝搬する必要があり、useReducer 由来の state(state.layout.leftPaneCollapsed)と actions.toggleLeftPane を WorktreeDetailRefactored 側で参照することになる。これは leftPaneMemo 構築の依存配列(L1551 既に巨大な依存配列)にも影響する。\n  2. テストモック: `tests/unit/components/WorktreeDetailRefactored.test.tsx` L72-79, `tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx` L63-70, `tests/unit/components/app-version-display.test.tsx` L81-90, `tests/integration/issue-266-acceptance.test.tsx` L67-74 の計4ファイルで `vi.mock('@/components/worktree/WorktreeDesktopLayout', ...)` がモックを定義しているが、いずれも leftPane/rightPane の2 props しか取らない。controlled 化後に新 props を渡しても落ちないが、新規 props の値検証(leftPaneCollapsed=true で画面要素が消える等)は別途必要。\n  3. WorktreeDesktopLayout 単体テスト: `tests/unit/components/WorktreeDesktopLayout.test.tsx` 全 24 箇所が `<WorktreeDesktopLayout>` を直接 render している。leftPaneCollapsed を必須 props にすると全テスト要修正・任意 props にしてもテスト追記が必要。\n\n  Issue の『変更対象ファイル』には `WorktreeDetailRefactored.test.tsx` `WorktreeDesktopLayout.test.tsx` `useWorktreeUIState.test.ts` のみ列挙されており、上記テスト3件(cli-tab-switching, app-version-display, issue-266-acceptance)のモック更新義務に言及がない。",
+      "evidence": "src/components/worktree/WorktreeDesktopLayout.tsx L23-36 (Props定義), L240 (内部 useState), src/components/worktree/WorktreeDetailRefactored.tsx L1596-1602 (唯一の呼び出し元), tests/unit/components/WorktreeDetailRefactored.test.tsx L72-79, tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx L63-70, tests/unit/components/app-version-display.test.tsx L81-90, tests/integration/issue-266-acceptance.test.tsx L67-74",
+      "suggestion": "影響範囲リストに以下を追加し、互換性方針を明示する:\n  - `leftPaneCollapsed?: boolean` および `onToggleLeftPane?: () => void` を WorktreeDesktopLayoutProps に **オプショナル** で追加し、未指定時は従来通り完全に内部状態で動作する後方互換モードを維持する(既存 24 件のテストは無修正で通る)。\n  - 影響を受けるテスト/モックファイル一覧を Issue 本文に追記: `tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx`, `tests/unit/components/app-version-display.test.tsx`, `tests/integration/issue-266-acceptance.test.tsx`(モック側は2 props のみで通るが、テストメソッド内で新しい挙動を検証する場合は更新)。\n  - もし必須 props にする場合、24 箇所すべてに leftPaneCollapsed={false} を追加するメンテナンス工数(約30分相当) を Issue 内タスクに含める。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "Must Fix",
+      "category": "型定義の波及（never チェック）",
+      "title": "WorktreeUIAction に新規 action を追加した時、worktreeUIReducer の switch 網羅性が崩れないことの保証手段が示されていない",
+      "description": "現在の `worktreeUIReducer` は switch(action.type) の default ケースで `return state` を返すのみで、TypeScript の `never` exhaustive check を使用していない(useWorktreeUIState.ts L29-185)。このため `TOGGLE_LEFT_PANE` / `SET_LEFT_PANE_COLLAPSED` を WorktreeUIAction に追加しても、reducer 側で case を実装し忘れてもコンパイルエラーにならない。\n\n  さらに重要なのは、useWorktreeUIState 内 `WorktreeUIActions` interface (L191-214) と `actions` オブジェクト(L247-310) も手動メンテである点。Issue では『action creator 追加』とあるが、interface に `toggleLeftPane: () => void` を追加 → actions オブジェクトに追加 → 漏れた場合 dispatch しか使えない手段が残るが利用側の useCallback chain が壊れる。",
+      "evidence": "src/hooks/useWorktreeUIState.ts L29 switch文に exhaustive check なし、L183-184 default ケースで state そのまま返却、L191-214 WorktreeUIActions interface 手動メンテ、L247-310 actions オブジェクトも手動メンテ",
+      "suggestion": "実装タスクに以下を明示する:\n  1. `worktreeUIReducer` の default 直前に `default: { const _exhaustive: never = action; void _exhaustive; return state; }` 形式の網羅チェックを追加 **または** 既存スタイル踏襲(default = state) ならテストで網羅を担保する。\n  2. `WorktreeUIActions` interface に `toggleLeftPane: () => void` (および必要なら `setLeftPaneCollapsed: (collapsed: boolean) => void`) を追加し、`actions` オブジェクトに対応エントリを追加することを明示。\n  3. `useWorktreeUIState.test.ts` L131-149 'Layout actions' describe ブロックに新 action のケースを追加し、L320-334 'should provide action creators' assertion(現在 11 個チェック)に `toggleLeftPane` を追加。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "Should Fix",
+      "category": "永続化・SSR 影響",
+      "title": "`useLocalStorageState` を `useWorktreeUIState` reducer に組み込む構造が示されていない（reducer 純粋性 vs useEffect 副作用の境界）",
+      "description": "useLocalStorageState は **コンポーネントレベルの useState + useEffect** ベース(L121, L202-206)で、初回レンダリングは defaultValue → useEffect で localStorage から再読込 → 再レンダリングという 2 段階フローで動作する。これを useReducer ベースの WorktreeUIState に組み込む方法は2案ある:\n\n  - 案X: useWorktreeUIState 内部で useLocalStorageState を呼び出し、value を useEffect で reducer に dispatch(SET_LEFT_PANE_COLLAPSED) する。問題: 初回 idle 状態に false→真値の上書き flash が発生する可能性。\n  - 案Y: useReducer の lazy initializer (createInitialUIState) で localStorage を直接読む。問題: SSR で window 未定義になる(現状 createInitialUIState は SSR でも安全に呼ばれている)。\n\n  Issue 本文の『初期化時に localStorage から値を読み込み、トグル時に書き込む』という記述では、上記どちらの実装方針かが判別できない。`WorktreeDetailRefactored.tsx` は `'use client'` 指定済(L23 周辺の import 推定) なので CSR-only ではあるが、Next.js App Router の hydration warning(初期 false で hydrate → useEffect で true に変わると DOM 不一致警告) を回避する設計が必要。",
+      "evidence": "src/hooks/useLocalStorageState.ts L121 (useState defaultValue 初期化), L202-206 (useEffect で localStorage 読込), src/types/ui-state.ts L174-184 (createInitialUIState は同期), src/hooks/useWorktreeUIState.ts L244 (useReducer lazy initializer)",
+      "suggestion": "Issue 本文の『useLocalStorageState 連携』に以下を追記:\n  - **採用案**: useWorktreeUIState 内部で useLocalStorageState を呼び出し、初回 effect 取得値で `dispatch({ type: 'SET_LEFT_PANE_COLLAPSED', collapsed: <stored> })` を実行する(案X)。\n  - **hydration 安全策**: 初期描画時はパネル展開状態(false)で出し、useEffect 後の再レンダリングで折りたたみ状態を反映する(=DOM 構造が大きく変わらないなら hydration warning は出ない)。\n  - **テスト**: `tests/unit/components/WorktreeDetailRefactored.test.tsx` で localStorage に true をセットした状態で render → useEffect 後に折りたたみ状態になる、というケースを最低 1 件追加。\n  - 別案として、useReducer lazy initializer で `typeof window !== 'undefined' ? localStorage.getItem(...) : false` を採用する場合は、その旨を明記する(SSR 互換)。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "Should Fix",
+      "category": "テスト影響範囲の漏れ",
+      "title": "Mobile/desktop 切替境界（useIsMobile）の状態保持テストが欠落している",
+      "description": "受入条件には『PC版のみ機能する。モバイル版は対象外』と明記され、Stage1 でも S1-008 で言及されているが、影響範囲レビュー観点として、**画面幅が変動した際の挙動**(レスポンシブ境界 768px 越え)に対するテスト追加が必要。具体的には:\n\n  1. PC で折りたたみ → リサイズでモバイル → リサイズで PC、で折りたたみ状態維持。\n  2. localStorage の状態が PC 専用キーとして使われるが、複数 worktree タブを開いている場合(同じ localStorage キーを共有)に互いに影響することの動作確認(全worktree共有=正しい挙動だが意図確認のテストが必要)。\n\n  これらは `tests/unit/components/worktree/WorktreeDetailRefactored-mobile-overflow.test.tsx` (既存) のパターンを参照しつつ、新規テストとして追加すべき観点だが、Issue 本文のテストタスクには含まれていない。",
+      "evidence": "tests/unit/components/worktree/WorktreeDetailRefactored-mobile-overflow.test.tsx (既存テストパターン), src/components/worktree/WorktreeDesktopLayout.tsx L267-269 (useIsMobile 分岐), src/components/worktree/WorktreeDetailRefactored.tsx L180 (isMobile 取得)",
+      "suggestion": "テストタスクに以下を追加:\n  - `tests/unit/components/WorktreeDesktopLayout.test.tsx` に、leftPaneCollapsed=true & isMobile=true の組合せで MobileLayout が表示され、leftPaneCollapsed が無視されることを確認するテスト。\n  - `tests/unit/components/WorktreeDetailRefactored.test.tsx` に、useIsMobile を true→false に切替えた場合に折りたたみ状態が反映されることを確認するテスト(rerender)。\n  - 同一 localStorage キーを別 worktreeId が読む場合の挙動(全worktree共有)を 1 件カバー。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "Should Fix",
+      "category": "リファクタリングの波及範囲",
+      "title": "splitRatio が未使用負債のまま放置されることが、設計レビューでの将来的な再リファクタを誘発する",
+      "description": "Stage1 の S1-005 で言及済の通り、`LayoutState.splitRatio` (初期値 0.5、`SET_SPLIT_RATIO` action 経由で更新) は WorktreeDesktopLayout から完全に独立して存在し、現在誰も読み書きしていない。Issue では『今回スコープでは splitRatio は触らない』と明記されているが、Stage 3 影響範囲レビューでは **意図しない副作用**として以下を指摘する:\n\n  1. `tests/unit/hooks/useWorktreeUIState.test.ts` L144-148 に `SET_SPLIT_RATIO` のテストが既に存在し、splitRatio=0.7 を確認している。これを残す限り Action は WorktreeUIAction に必要。\n  2. 今回新規追加する `leftPaneCollapsed` も同様に「reducer に居るが実際の幅制御は WorktreeDesktopLayout 内部 useState で行う」設計(案A)になる場合、**State の真実の所在(source of truth)が二重化** してしまう。controlled 化(Issue の案A 後半)で WorktreeDesktopLayout を controlled にするなら、leftWidth(%) も同時に controlled 化して splitRatio に統合するのが整合性高い。\n  3. ただし完全 controlled 化は既存テスト 24 件の修正コストが大きい(S3-001 参照)ため、**今回スコープ外明示**＋**フォローアップ Issue を作成**する方が安全。",
+      "evidence": "src/types/ui-state.ts L90 splitRatio定義, L158 初期値0.5, src/types/ui-actions.ts L35 SET_SPLIT_RATIO定義, src/hooks/useWorktreeUIState.ts L102-106 reducer ケース, L212/L303-304 action creator, tests/unit/hooks/useWorktreeUIState.test.ts L144-148 既存テスト",
+      "suggestion": "Issue 本文末尾の『参考: 既存の類似機能』直前に『フォローアップ』セクションを追加し、以下を明記する:\n  - 『今回スコープでは splitRatio (LayoutState) は触らない。folow-up Issue として、leftWidth と splitRatio を統合し、WorktreeDesktopLayout を完全 controlled component 化する Issue を別途起票することを推奨』。\n  - これにより、Stage 4 以降の影響範囲レビュー(2回目)で同じ指摘が再発しない。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "Should Fix",
+      "category": "依存配列・再レンダリング影響",
+      "title": "leftPaneMemo / rightPaneMemo の再構築タイミングと折りたたみ state 変更の整合性が考慮されていない",
+      "description": "WorktreeDetailRefactored.tsx L1551 の `leftPaneMemo` の useMemo 依存配列は既に **巨大** (33 個程度) で、leftPaneTab/handleLeftPaneTabChange/historySubTab/state.messages/.../showArchived/handleShowArchivedChange を含む。今回 controlled component 化によって追加される `leftPaneCollapsed`(state.layout.leftPaneCollapsed)・`actions.toggleLeftPane` を WorktreeDesktopLayout の props に渡すフローを取った場合、これらが leftPaneMemo の依存配列に含まれるべきかは設計判断。\n\n  - もし leftPaneMemo 内部で leftPaneCollapsed を参照しない(例: ◀ ボタンの onClick だけが state を読む) なら依存配列に追加不要だが、◀ ボタンを LeftPaneTabSwitcher に追加するなら、LeftPaneTabSwitcher に渡す callback に actions.toggleLeftPane が含まれ、メモ依存配列に actions.toggleLeftPane を追加する必要がある。\n  - actions オブジェクトは useMemo で安定化されているが、実際は内側の関数が dispatch+useMemo([]) で安定化(L247) されており、actions.toggleLeftPane は再レンダリング不変。問題は actions 全体の参照が leftPaneMemo に新規依存として追加されるか否か。",
+      "evidence": "src/components/worktree/WorktreeDetailRefactored.tsx L1441-1551 (leftPaneMemo の useMemo 依存配列), src/hooks/useWorktreeUIState.ts L247-310 (actions の useMemo([]))",
+      "suggestion": "実装タスクに以下を追記:\n  - 折りたたみ ◀ ボタンの onClick は `actions.toggleLeftPane` または `dispatch({ type: 'TOGGLE_LEFT_PANE' })` を直接バインドし、leftPaneMemo 内で参照する場合は依存配列に追加する。\n  - LeftPaneTabSwitcher の props に onCollapse?: () => void を追加し、callback ref として `actions.toggleLeftPane` を渡す。actions は安定参照なので依存配列追加でも余計な再計算は発生しない。\n  - 展開バー(▶ ボタン) は WorktreeDesktopLayout 内部に配置し、leftPaneMemo には直接関与させない設計を推奨。"
+    },
+    {
+      "id": "S3-007",
+      "severity": "Nice to Have",
+      "category": "アクセシビリティ波及",
+      "title": "aria-controls の参照先 ID が WorktreeDesktopLayout 内 left-pane の id と一致するか不明",
+      "description": "受入条件に『aria-label, aria-expanded, aria-controls』を付与とあるが、aria-controls=参照する要素IDが現状の `WorktreeDesktopLayout` 左ペインに存在しない。`<div data-testid='left-pane'>` には aria-label='History pane' は付いているが、`id` 属性がない(L177-186)。\n\n  - aria-controls を機能させるには、folding ボタンが指す要素に id を付与する必要がある(例: id='worktree-left-pane')。\n  - mobile 版の MobileLayout には id={`${activePane}-panel`} が付いている(L137)が、Desktop 版にはない。",
+      "evidence": "src/components/worktree/WorktreeDesktopLayout.tsx L177-186 (Desktop 左ペインに id なし), L136-140 (Mobile では id 付与済)",
+      "suggestion": "実装タスクに以下を追記: 『WorktreeDesktopLayout の左ペイン div に id=\"worktree-left-pane\" を付与し、折りたたみ/展開ボタンの aria-controls=\"worktree-left-pane\" でリンクする』。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "Nice to Have",
+      "category": "影響範囲の網羅性（CSS transition）",
+      "title": "CSS transition の影響として、PaneResizer ドラッグ中のパフォーマンスへの干渉が考慮されていない",
+      "description": "受入条件に『パネル幅変化に CSS transition (200ms ease-in-out) を適用』とある。現状 WorktreeDesktopLayout の左ペインは `style={{ width: '${leftWidth}%' }}` を直接設定(L161, L180) し、PaneResizer ドラッグ中も毎フレーム width が更新される。ここに transition: width 200ms を入れると、ドラッグ中に追従が遅延し、UX が悪化する可能性がある。",
+      "evidence": "src/components/worktree/WorktreeDesktopLayout.tsx L161 (style={{ width }} 直接設定), L240-264 (drag 中 setLeftWidth が連続呼ばれる)",
+      "suggestion": "実装方針として『transition は折りたたみ/展開時のみ適用し、PaneResizer ドラッグ中は transition: none に切替える』ことを Issue に明記する。具体的には:\n  - 折りたたみ状態変化を検知する isAnimating フラグを WorktreeDesktopLayout 内部 useState で管理。\n  - PaneResizer の onResize 中(mouseDown～mouseUp) は className に `transition-none` を追加。\n  - 折りたたみ/展開時のみ `transition-[width] duration-200 ease-in-out` を適用。"
+    },
+    {
+      "id": "S3-009",
+      "severity": "Nice to Have",
+      "category": "テスト構造の整合性",
+      "title": "新規 useLocalStorageState テスト統合か既存 hook テスト追記か方針未定",
+      "description": "useLocalStorageState は既に専用テスト(`tests/unit/hooks/useLocalStorageState.test.ts`) を持つ。Issue で追加する `useWorktreeUIState.test.ts` の reducer テストは pure function テストなので localStorage モック不要だが、useLocalStorageState 連携部分は jsdom + localStorage mock で test する必要がある。これを useWorktreeUIState.test.ts(現状 388行)に追記するのか、別ファイル(useWorktreeUIState-persistence.test.ts) に分離するのか方針未定。",
+      "evidence": "tests/unit/hooks/useWorktreeUIState.test.ts(388行), tests/unit/hooks/useLocalStorageState.test.ts(既存)",
+      "suggestion": "テストタスクに『useWorktreeUIState.test.ts の末尾に describe(\"localStorage persistence\")ブロックを追加するか、新規ファイル useWorktreeUIState-persistence.test.ts を作成するかを実装者判断とする。前者推奨(関連性が高いため)』を明記。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 4,
+  "nice_to_have_count": 3,
+  "code_references": [
+    { "file": "src/components/worktree/WorktreeDesktopLayout.tsx", "relevance": "唯一の controlled 化対象（Props 拡張先）", "lines": "23-36, 230-283" },
+    { "file": "src/components/worktree/WorktreeDetailRefactored.tsx", "relevance": "WorktreeDesktopLayout の唯一の呼び出し元", "lines": "1596-1602, 1441-1551" },
+    { "file": "src/types/ui-state.ts", "relevance": "LayoutState/initialLayoutState 拡張先", "lines": "82-91, 154-159" },
+    { "file": "src/types/ui-actions.ts", "relevance": "WorktreeUIAction union 拡張先", "lines": "16-54" },
+    { "file": "src/hooks/useWorktreeUIState.ts", "relevance": "reducer/actions interface 同時更新", "lines": "29-185, 191-214, 247-310" },
+    { "file": "src/hooks/useLocalStorageState.ts", "relevance": "永続化採用フック（SSR safe useEffect 二段階）", "lines": "96-214" },
+    { "file": "src/components/worktree/LeftPaneTabSwitcher.tsx", "relevance": "◀ ボタン配置候補（aria-* 参考）", "lines": "166-189" },
+    { "file": "tests/unit/components/WorktreeDesktopLayout.test.tsx", "relevance": "controlled 化に伴い 24 箇所影響可能性", "lines": "33-373" },
+    { "file": "tests/unit/components/WorktreeDetailRefactored.test.tsx", "relevance": "モック更新対象", "lines": "72-79" },
+    { "file": "tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx", "relevance": "モック更新対象（Issue 本文未記載）", "lines": "63-70" },
+    { "file": "tests/unit/components/app-version-display.test.tsx", "relevance": "モック更新対象（Issue 本文未記載）", "lines": "81-90" },
+    { "file": "tests/integration/issue-266-acceptance.test.tsx", "relevance": "モック更新対象（Issue 本文未記載）", "lines": "67-74" },
+    { "file": "tests/unit/hooks/useWorktreeUIState.test.ts", "relevance": "reducer 単体テスト追加先", "lines": "131-149, 313-334" }
+  ],
+  "doc_references": [
+    { "file": "dev-reports/issue/688/issue-review/stage1-review-result.json", "relevance": "Stage 1 通常レビュー（S1-005, S1-008 関連）" },
+    { "file": "dev-reports/issue/688/issue-review/hypothesis-verification.md", "relevance": "前提仮説検証（全 Confirmed）" },
+    { "file": "CLAUDE.md", "relevance": "コーディング規約・モジュール一覧" }
+  ],
+  "summary": "Issue #688 の影響範囲レビュー（Stage 3）。Stage 1 通常レビューで指摘された Must Fix 2 件は、コンテンツ自体が反映済（変更対象ファイルへの ui-state.ts/ui-actions.ts/useWorktreeUIState.ts 追記、useLocalStorageState 採用一本化）であることを確認。一方、影響範囲観点で新たに 9 件の指摘を抽出した。最大の懸念は (1) WorktreeDesktopLayout の controlled 化で 24 箇所の既存テストおよび 4 箇所のモック定義(モック側は WorktreeDetailRefactored.test.tsx・cli-tab-switching・app-version-display・issue-266-acceptance)に波及し、Issue 本文の『変更対象ファイル』に 2 件不足している点 (S3-001 Must Fix)。(2) WorktreeUIAction union/WorktreeUIActions interface 二重メンテナンスに対する exhaustive-check 戦略が示されていない点 (S3-002 Must Fix)。さらに (3) useLocalStorageState の useEffect 二段階初期化と useReducer lazy initializer の境界設計、(4) useIsMobile 切替境界、(5) leftPaneMemo の依存配列、(6) splitRatio 未使用負債のフォローアップ Issue 化必要性、(7) aria-controls 参照先 ID 未存在、(8) PaneResizer ドラッグ中の transition 干渉、(9) localStorage 永続化テストの配置先、を Should Fix×4・Nice to Have×3 として指摘。総じて Issue 本文は技術的方向性として妥当だが、controlled 化と useLocalStorageState 連携のレイヤ責務(初期化フロー、SSR/hydration、依存配列、トランジション制御)を Issue または work-plan で詰める必要がある。Must Fix×2 を Stage 4(2 回目通常)前に修正推奨。"
+}

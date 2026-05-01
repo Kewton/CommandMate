@@ -1,0 +1,96 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（影響範囲、1回目）",
+  "issue_number": 689,
+  "repo": "Kewton/CommandMate",
+  "applied_at": "2026-05-01",
+  "applied_findings": [
+    "S3-001",
+    "S3-002",
+    "S3-003",
+    "S3-004",
+    "S3-005",
+    "S3-006",
+    "S3-007"
+  ],
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "issue_updated": true,
+  "applied_details": {
+    "S3-001": {
+      "severity": "Must Fix",
+      "title": "新規追加コマンド名の Copilot 組み込みコマンドとの重複が影響範囲に未記載",
+      "applied_changes": [
+        "影響範囲セクションに『設計依存関係: 同名コマンドの cliTool 別隔離』サブセクションを新設",
+        "agent/skills/plan が getCopilotBuiltinCommands と同名であり、route.ts の cliTool 別注入と filterCommandsByCliTool で隔離される設計を明記",
+        "cliTool=copilot/codex/gemini それぞれの動作メカニズムを記載",
+        "将来 mergeCommandGroups の優先順位変更でリグレッションが発生するリスクと、双方向 toContain 検証の必要性を記載"
+      ]
+    },
+    "S3-002": {
+      "severity": "Must Fix",
+      "title": "Codex 排他コマンド数 17→25 への変更がテストの 9 個の codexOnlyCommands 配列に与える影響が未明示",
+      "applied_changes": [
+        "Codex 追加対象テーブルに『cliTools 値』列を追加し、8 件すべて ['codex'] と明記",
+        "cliTools 値方針確定セクションを追加し、Issue #594 の opt-in 原則に基づく Codex 排他化を根拠として明記",
+        "Codex 表示件数を 17 → 25 件に明記",
+        "category 割り当て指針表に cliTools 列を追加",
+        "テスト更新箇所一覧で L80-94 codexOnlyCommands リストの 9 → 17 件への更新を明示",
+        "L126-131 should have 17 commands available for Codex を toBe(25) に更新する指示を追加"
+      ]
+    },
+    "S3-003": {
+      "severity": "Must Fix",
+      "title": "Claude 追加 4 件の cliTools 値方針が未確定で『8 Claude-only』テストに影響",
+      "applied_changes": [
+        "Claude Code 追加対象テーブルに『cliTools 値』列を追加し、4 件すべて undefined（後方互換）と明記",
+        "cliTools 値方針確定セクションを追加し、既存 Claude-only 8 件と同パターンを踏襲する根拠を記載",
+        "テスト L36-50 の claudeOnlyCommands 配列が 8 → 12 件になる影響を明記",
+        "新総件数構成テーブルで Claude-only legacy が 8 → 12 件になることを明記",
+        "テスト L20 のテスト名を『12 Claude-only + 9 shared + 17 Codex-only + 7 OpenCode-only』に更新する指示を追加"
+      ]
+    },
+    "S3-004": {
+      "severity": "Should Fix",
+      "title": "FREQUENTLY_USED.codex 変更による getFrequentlyUsedCommands テスト (L213-216) の更新が未記載",
+      "applied_changes": [
+        "実装タスクに『FREQUENTLY_USED.codex から mcp が削除されていることを検証する回帰テストを追加』を追加",
+        "テスト更新箇所一覧の L213-216 行に expect(FREQUENTLY_USED.codex).toContain('plan') と not.toContain('mcp') の追加を明記",
+        "テスト追加項目 6 として『FREQUENTLY_USED.codex が mcp を含まないことの回帰テスト』を追加",
+        "受入条件に『FREQUENTLY_USED.codex から mcp が削除されたことがテストで検証されている』を追加"
+      ]
+    },
+    "S3-005": {
+      "severity": "Should Fix",
+      "title": "Stage 1 で関連 Issue として #547 が言及されたが、Copilot/Gemini 影響範囲ファイルとしての位置づけが弱い",
+      "applied_changes": [
+        "影響範囲セクションの『設計依存関係: 同名コマンドの cliTool 別隔離』に同名衝突一覧表を追加",
+        "getCopilotBuiltinCommands の agent/skills/plan/mcp/init/logout/new/undo/feedback の同名コマンドを表化",
+        "getGeminiBuiltinCommands の clear/compact/model/quit/help の同名コマンドを記載",
+        "本 Issue では slash-commands.ts は読み取り専用で参照することを明記"
+      ]
+    },
+    "S3-006": {
+      "severity": "Should Fix",
+      "title": "tests/integration/api-worktree-slash-commands.test.ts の codex テスト (L99-128) への影響が未確認",
+      "applied_changes": [
+        "変更対象ファイル表に tests/integration/api-worktree-slash-commands.test.ts を追加",
+        "実装タスクに integration test の codex テストへの toContain 検証 8 件追加を追加",
+        "テスト更新箇所一覧の末尾に integration test 更新セクションを追加",
+        "受入条件に『integration test で新規追加 Codex 8 件の存在が検証されパスする』を追加"
+      ]
+    },
+    "S3-007": {
+      "severity": "Should Fix",
+      "title": "Issue #4 シェアード判定テスト (L53-77) のシェアードコマンド数 9 件が変動する可能性",
+      "applied_changes": [
+        "実装タスクと提案する解決策の間に『新総件数構成サマリー』テーブルを新設",
+        "STANDARD_COMMANDS 総件数 33→45、Claude-only legacy 8→12、shared 9→9、Codex-only 9→17、OpenCode-only 7→7、Codex 表示総数 17→25、OpenCode 表示総数 10→10、Claude 表示総数 17→21 を明示",
+        "テスト L20 のテスト名更新を『12 Claude-only + 9 shared + 17 Codex-only + 7 OpenCode-only』に確定",
+        "L53-77 sharedCommands 配列は変更なしを明記",
+        "L21 の toBe(33) → toBe(45) を明記"
+      ]
+    }
+  },
+  "summary": "Stage 3 影響範囲レビューで指摘された Must Fix 3 件と Should Fix 4 件をすべて Issue #689 本文に反映した。主な反映内容: (1) 新規追加コマンド名（agent/skills/plan）と getCopilotBuiltinCommands の同名衝突を『設計依存関係』サブセクションで詳細化（S3-001/S3-005）、(2) Claude 追加 4 件は cliTools=undefined（後方互換）、Codex 追加 8 件は cliTools=['codex']（排他）と方針確定（S3-002/S3-003）、(3) 新総件数構成サマリーテーブル（33→45 件、Codex 17→25 件、Claude legacy 8→12 件等）を新設（S3-007）、(4) FREQUENTLY_USED.codex から mcp 削除の回帰テスト追加と integration test の toContain 検証追加を実装タスク・テスト更新一覧・受入条件に反映（S3-004/S3-006）。Nice to Have 3 件（S3-008/S3-009/S3-010）は影響範囲セクションに参考情報として既に取り込み済み（S3-008 はユーザー定義 Codex skill との優先順位、S3-009 は SlashCommandList の Codex バッジ、S3-010 は OpenCode 件数 10 維持の根拠）。Issue は gh issue edit で更新済み（updatedAt: 2026-05-01T01:25:04Z）。"
+}

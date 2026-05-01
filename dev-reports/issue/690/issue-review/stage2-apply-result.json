@@ -1,0 +1,25 @@
+{
+  "stage": 2,
+  "applied_findings": [
+    "S1-001",
+    "S1-002",
+    "S1-003",
+    "S1-004",
+    "S1-005",
+    "S1-006",
+    "S1-007"
+  ],
+  "skipped_findings": [
+    "S1-008",
+    "S1-009",
+    "S1-010"
+  ],
+  "skip_reasons": {
+    "S1-008": "Nice to Have - 実装時に判断",
+    "S1-009": "Nice to Have - 実装時に判断（Sidebarフィルタタスクに『フィルタ後にworktreeが0件の場合の空状態フォールバック（実装時に判断）』として軽く言及済み）",
+    "S1-010": "Nice to Have - 実装時に判断"
+  },
+  "issue_updated": true,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/690",
+  "summary": "Stage 1 レビューの Must Fix 3件・Should Fix 4件をすべてGitHub Issue #690 に反映。主な変更: (1) マイグレーションファイル名を v3x → v31-repository-visible.ts に修正し runner.ts/index.ts への登録タスクを追加 (S1-001)、(2) Sidebarフィルタリングのデータパスとして案A (`getRepositories()` 戻り値に visible を追加し /api/worktrees レスポンス経由でSidebarが参照) を採用する設計判断を明記し worktree-db.ts を影響範囲に追加 (S1-002)、(3) 背景節に `enabled`(sync除外) と `visible`(表示制御) の概念分離表を追加し受入条件に両フラグの組合せマトリクス (enabled=false×visible=true 等) を追加 (S1-003)、(4) PUT API のリクエスト/レスポンス仕様 ({ displayName?, visible? } partial update、boolean 厳密チェック、レスポンスに visible 追加) を実装タスクに明記 (S1-004)、(5) トグルUI仕様 (即時PUT送信、楽観的更新、エラー時ロールバック、新規Visibility列、role=switch/aria-pressed) を追加 (S1-005)、(6) db-repository.ts の具体的変更箇所 (Repository/RepositoryRow/mapRepositoryRow/createRepository/updateRepository/RepositoryListItem) を実装タスクに具体化 (S1-006)、(7) テスト要件をDB層・API層・UI層・サイドバーフィルタの4観点に具体化 (S1-007)。Nice to Have 3件 (S1-008選択中worktree遷移、S1-009全非表示時UI、S1-010 WebSocket同期) は実装時判断としてスキップ。"
+}

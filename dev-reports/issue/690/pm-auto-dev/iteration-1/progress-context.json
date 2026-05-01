@@ -1,0 +1,29 @@
+{
+  "issue_number": 690,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "tests_passed": 235,
+      "tests_failed": 0,
+      "lint": "pass",
+      "type_check": "pass",
+      "commit": "0469b37e"
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_passed": 13,
+      "criteria_total": 13,
+      "build": "pass"
+    },
+    "refactor": {
+      "status": "success",
+      "changes": ["sidebar-utils.ts に visibility ヘルパー抽出", "act() 警告解消", "型定義一貫性確認"],
+      "commit": "d5f95637"
+    },
+    "documentation": {
+      "status": "completed",
+      "updated_files": ["CLAUDE.md", "docs/implementation-history.md"]
+    }
+  }
+}

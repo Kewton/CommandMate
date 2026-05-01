@@ -1,9 +1,15 @@
 /**
  * Repository API Route (individual repository)
- * PUT: Update repository display_name
+ * PUT: Update repository display_name and/or visible (partial update)
  *
  * Issue #642: Repository display name (alias) feature
  * Issue #644: Shared MAX_DISPLAY_NAME_LENGTH constant
+ * Issue #690: Add `visible` partial-update for sidebar visibility toggle.
+ *
+ * Validation rules (Issue #690):
+ *   - At least one of `displayName` or `visible` must be provided.
+ *   - `visible`, when present, must be a boolean.
+ *   - Updating `visible` does NOT touch `enabled` (concept independence).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -28,7 +34,15 @@ export async function PUT(
       return NextResponse.json({ error: 'Request body is required' }, { status: 400 });
     }
 
-    const { displayName } = body;
+    const { displayName, visible } = body;
+
+    // Issue #690: At least one updatable field must be present.
+    if (displayName === undefined && visible === undefined) {
+      return NextResponse.json(
+        { error: 'displayName or visible is required' },
+        { status: 400 }
+      );
+    }
 
     // displayName must be a string or undefined/null
     if (displayName !== undefined && displayName !== null && typeof displayName !== 'string') {
@@ -43,6 +57,11 @@ export async function PUT(
       );
     }
 
+    // Issue #690: visible must be boolean when supplied.
+    if (visible !== undefined && typeof visible !== 'boolean') {
+      return NextResponse.json({ error: 'visible must be a boolean' }, { status: 400 });
+    }
+
     const db = getDbInstance();
 
     const existing = getRepositoryById(db, id);
@@ -51,9 +70,12 @@ export async function PUT(
     }
 
     // Build updates: empty string or null clears display_name
-    const updates: { displayName?: string } = {};
+    const updates: { displayName?: string; visible?: boolean } = {};
     if (displayName !== undefined) {
       updates.displayName = typeof displayName === 'string' ? displayName.trim() : '';
+    }
+    if (visible !== undefined) {
+      updates.visible = visible;
     }
 
     updateRepository(db, id, updates);
@@ -68,6 +90,8 @@ export async function PUT(
         displayName: updated.displayName ?? null,
         path: updated.path,
         enabled: updated.enabled,
+        // Issue #690: Surface visible to clients so the UI can sync state.
+        visible: updated.visible,
       },
     });
   } catch {

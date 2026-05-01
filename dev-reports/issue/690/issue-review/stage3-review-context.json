@@ -1,0 +1,10 @@
+{
+  "issue_number": "690",
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "hypothesis_verification_path": "dev-reports/issue/690/issue-review/hypothesis-verification.md",
+  "stage1_result_path": "dev-reports/issue/690/issue-review/stage1-review-result.json",
+  "stage2_apply_result_path": "dev-reports/issue/690/issue-review/stage2-apply-result.json"
+}

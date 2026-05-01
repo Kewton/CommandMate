@@ -1,0 +1,12 @@
+{
+  "stage": 8,
+  "applied_findings": [
+    "S7-001",
+    "S7-002",
+    "S7-003"
+  ],
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "issue_updated": true,
+  "summary": "Stage 7 影響範囲レビューで検出した Must Fix 1 件と Should Fix 2 件を Issue #689 本文末尾の『Stage 7 レビュー反映（2回目影響範囲レビュー）』セクションとして追記した。反映内容は、Stage 5 解決後の最終コマンドマトリクス・件数・テスト期待値の再計算ゲート、API レスポンス `sources` 形状を不用意に変更しない後方互換方針、Copilot/Codex 同名衝突テストで `source` / `cliTools` / category / description まで検証する方針。gh issue edit により Issue 本文更新済み。"
+}

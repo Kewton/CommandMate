@@ -1,0 +1,13 @@
+{
+  "stage": 3,
+  "focus": "影響範囲",
+  "reviewer": "codex",
+  "applied_findings": [
+    "DR3-001",
+    "DR3-002"
+  ],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "updated_file": "dev-reports/design/issue-687-message-timestamp-design-policy.md",
+  "update_summary": "影響範囲レビューの結果を設計方針書へ反映した。src/components/worktree/__tests__/ConversationPairCard.test.tsx の timestamp テストを「影響あり」に変更し、時刻部分のみではなく日付+時刻を確認するアサーションへ更新する方針を明記した。あわせて長い enUS 形式の日時文字列と assistant message のカウンタ表示が同一行に出る影響を回帰確認観点として追記し、変更対象ファイルサマリーにも co-located component test の修正を追加した。"
+}

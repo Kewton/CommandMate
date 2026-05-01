@@ -146,6 +146,34 @@ describe('worktreeUIReducer', () => {
       const result = worktreeUIReducer(initialState, action);
       expect(result.layout.splitRatio).toBe(0.7);
     });
+
+    it('should have leftPaneCollapsed=false in initial state (Issue #688)', () => {
+      expect(initialState.layout.leftPaneCollapsed).toBe(false);
+    });
+
+    it('should handle TOGGLE_LEFT_PANE action (Issue #688)', () => {
+      const action: WorktreeUIAction = { type: 'TOGGLE_LEFT_PANE' };
+      const result = worktreeUIReducer(initialState, action);
+      expect(result.layout.leftPaneCollapsed).toBe(true);
+    });
+
+    it('should handle TOGGLE_LEFT_PANE action twice (toggle back) (Issue #688)', () => {
+      const stateCollapsed = worktreeUIReducer(initialState, { type: 'TOGGLE_LEFT_PANE' });
+      const result = worktreeUIReducer(stateCollapsed, { type: 'TOGGLE_LEFT_PANE' });
+      expect(result.layout.leftPaneCollapsed).toBe(false);
+    });
+
+    it('should handle SET_LEFT_PANE_COLLAPSED action (Issue #688)', () => {
+      const action: WorktreeUIAction = { type: 'SET_LEFT_PANE_COLLAPSED', collapsed: true };
+      const result = worktreeUIReducer(initialState, action);
+      expect(result.layout.leftPaneCollapsed).toBe(true);
+    });
+
+    it('should handle SET_LEFT_PANE_COLLAPSED action with false (Issue #688)', () => {
+      const stateCollapsed = worktreeUIReducer(initialState, { type: 'SET_LEFT_PANE_COLLAPSED', collapsed: true });
+      const result = worktreeUIReducer(stateCollapsed, { type: 'SET_LEFT_PANE_COLLAPSED', collapsed: false });
+      expect(result.layout.leftPaneCollapsed).toBe(false);
+    });
   });
 
   describe('Error actions', () => {
@@ -331,6 +359,25 @@ describe('useWorktreeUIState hook', () => {
     expect(typeof result.current.actions.sessionEnded).toBe('function');
     expect(typeof result.current.actions.setAutoScroll).toBe('function');
     expect(typeof result.current.actions.setMobileActivePane).toBe('function');
+    expect(typeof result.current.actions.toggleLeftPane).toBe('function');
+  });
+
+  it('should toggle left pane collapsed state (Issue #688)', () => {
+    const { result } = renderHook(() => useWorktreeUIState());
+
+    expect(result.current.state.layout.leftPaneCollapsed).toBe(false);
+
+    act(() => {
+      result.current.actions.toggleLeftPane();
+    });
+
+    expect(result.current.state.layout.leftPaneCollapsed).toBe(true);
+
+    act(() => {
+      result.current.actions.toggleLeftPane();
+    });
+
+    expect(result.current.state.layout.leftPaneCollapsed).toBe(false);
   });
 
   it('should update state when action is dispatched', () => {

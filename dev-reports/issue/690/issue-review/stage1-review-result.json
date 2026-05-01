@@ -1,0 +1,80 @@
+{
+  "stage": 1,
+  "focus": "通常（1回目）",
+  "reviewer": "opus",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "Must Fix",
+      "title": "マイグレーションファイル名の番号が誤っている（v3x → v31）",
+      "description": "Issueでは新規マイグレーションファイルを `src/lib/db/migrations/v3x-repository-visible.ts` としているが、現状の最大バージョンは `v30-assistant-context-snapshot.ts` であり、次に追加すべきは `v31-repository-visible.ts` が正しい。`v3x` というプレースホルダ表記のままだと実装者がそのまま命名しかねず、命名規則違反かつバージョン管理ミスを誘発する。",
+      "suggestion": "Issue本文の影響範囲表およびタスク欄の `v3x-repository-visible.ts` をすべて `v31-repository-visible.ts` に置換する。あわせて `src/lib/db/migrations/runner.ts` への登録 / `src/lib/db/migrations/index.ts` のexport追加（既存のマイグレーション管理パターン）を実装タスクに明記する。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "Must Fix",
+      "title": "Sidebarフィルタリングに必要なデータパス（API変更）の記載漏れ",
+      "description": "Issueは「Sidebar.tsx で `visible=false` リポジトリのworktreeをフロント側でフィルタリング除外」と記載しているが、現状の `Worktree` 型 (`src/types/models.ts`) には `repositoryVisible` 等のフィールドが無く、Sidebarが利用する `useWorktreeSelection` Context（`/api/worktrees` レスポンス）からは個々のworktreeに対応するリポジトリの `visible` フラグを直接判定できない。一方で `/api/worktrees` GET レスポンスには既に `repositories` 配列が同梱されている（`getRepositories(db)` 経由）が、現状の戻り値型に `enabled`/`visible` フィールドが含まれていない（`worktree-db.ts#getRepositories` 参照）。実装方針として以下のいずれかを選択する必要があり、Issueにこの設計判断が欠けている。\n  - (A) `getRepositories()` の戻り値に `visible` を追加し、`/api/worktrees` レスポンスの `repositories` 経由でSidebarが参照する。\n  - (B) Worktree自体に `repositoryVisible` を付与する（`getWorktrees` のJOINを拡張）。\n  - (C) Sidebarで別途 `/api/repositories` を叩いてクロスリファレンスする。",
+      "suggestion": "Issueの「実装タスク」と「影響範囲」に上記いずれかの方針を明記し、対応するコード変更（`src/lib/db/worktree-db.ts` の `getRepositories` 戻り値拡張、`/api/worktrees` レスポンス、`Worktree` または `Repository` 型定義）を追加する。推奨は (A): `getRepositories` の戻り値に `visible` を追加する案で、既存の `repositories` ペイロードを再利用でき変更点が最小。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "Must Fix",
+      "title": "`enabled`（sync除外）と `visible`（表示制御）の概念分離が明示されていない",
+      "description": "`repositories.enabled` は Issue #190 でsync除外（リポジトリスキャン対象外＝論理削除に近い扱い）として既に意味付けされており、`disableRepository`/`restoreRepository`/`getExcludedRepositoryPaths` 等のロジック全般がこのフラグに依存している（`src/lib/db/db-repository.ts` 348-583行）。一方Issue #690の `visible` は「サイドバー表示制御」専用。Issue本文ではこの2フラグの違いに一切触れていないため、実装者が `enabled` を流用したり、`enabled=false`（disabled） のリポジトリも `visible` の判定対象に含めてしまう恐れがある。受入条件にもこのケースの扱い（disabled かつ visible=true、enabled=true かつ visible=false 等のマトリクス）が定義されていない。",
+      "suggestion": "Issueの「背景・課題」または「設計方針」節に `enabled` と `visible` の役割分担を明記する。例: 『`enabled` は Issue #190 のsync除外用フラグであり、これとは独立に、サイドバー表示制御専用の `visible` カラムを新設する。Sidebarはworktreeレベルで `repositoryVisible=false` のものを除外するが、既存の `enabled=false`（disabled）リポジトリは従来通り disabled badge で扱う』のように明文化する。受入条件にも『`enabled=false`（disabled）でも `visible=true` の場合はサイドバーに表示される（Issue #190 の挙動を変えない）』『`visible=false` だが `enabled=true` の場合はサイドバーから除外される』のような両軸の確認項目を追加する。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "Should Fix",
+      "title": "`/api/repositories/[id]` PUTレスポンス形式の更新仕様が記載されていない",
+      "description": "現状の `PUT /api/repositories/[id]` は `displayName` のみ受け付け、レスポンスは `repository: { id, name, displayName, path, enabled }` を返している（`src/app/api/repositories/[id]/route.ts` 63-72行）。Issue #690で `visible` を追加するなら、リクエストボディに `visible` を受け付けるバリデーション（boolean 型チェック、partial update への対応）と、レスポンスに `visible` を含めることが必須だが、Issueには『PUT で `visible` 更新対応』としか書かれておらず仕様が曖昧。`displayName` と `visible` を同時更新できるか、片方ずつなのかも未定義。",
+      "suggestion": "Issueに以下を追記する:\n  - リクエストボディ仕様: `{ displayName?: string|null, visible?: boolean }` の partial update を受け付ける\n  - 型バリデーション: `visible` は boolean 厳密チェック（404/400ハンドリング）\n  - レスポンスの `repository` オブジェクトに `visible: boolean` を追加\n  - `GET /api/repositories` レスポンスにも `visible` を含める（タスクには記載済みだが、`enabled` と区別される旨を明記）"
+    },
+    {
+      "id": "S1-005",
+      "severity": "Should Fix",
+      "title": "RepositoryListのトグルボタンUI仕様が曖昧",
+      "description": "「Issue #644 の別名編集パターンと同方式」と記載されているが、別名編集は『Edit→input→Save/Cancel』のフローで、トグルボタンとはUI性質が異なる。トグルボタンの場合、典型的には『クリック即時反映（楽観的UI更新 or pending状態）』が求められるが、Issueには動作仕様（保存ボタン経由か即時反映か、エラー時のロールバック挙動、確認ダイアログの要否）が定義されていない。また、現状の `RepositoryList` テーブルには既に「Status」列（Enabled/Disabled badge）が存在する（`RepositoryList.tsx` 311-315行）ため、トグルを別列として追加するのか、Status列に統合するのかも未定義。",
+      "suggestion": "Issueに以下を明記する:\n  - 操作: トグルボタンクリックで即時 PUT 送信（保存ボタンなし）。送信中は disabled。\n  - 楽観的更新: 失敗時はトグル状態を元に戻し、`feedback` バナーで `handleApiError(err)` を表示\n  - 列構成: 既存「Status」列とは別の新規列（例: 『Visibility』）として追加。Status は `enabled` ベース、Visibility は `visible` ベースで独立させる。\n  - aria-label: スクリーンリーダー対応（例: `aria-pressed={visible}` または `role=\"switch\"`）"
+    },
+    {
+      "id": "S1-006",
+      "severity": "Should Fix",
+      "title": "新規・既存リポジトリの `visible` 初期値設定タスクの不足",
+      "description": "受入条件に『既存リポジトリは全て「表示中」として初期化される（`DEFAULT 1`）』とある一方、`createRepository` 関数（`src/lib/db/db-repository.ts` 135行～）は INSERT 文に `visible` カラムを含めない実装になる場合、SQLiteのDEFAULT 1 が効くものの、関数の戻り値オブジェクトには `visible` が含まれない不整合が発生する可能性がある。また、現状 `Repository` インターフェース、`mapRepositoryRow`、`updateRepository` の updates 型にも `visible` 追加が必要だが、実装タスクは『db-repository.ts に CRUD 操作を追加』としか書かれておらず、影響範囲が不十分。",
+      "suggestion": "実装タスクを以下のように具体化する:\n  - `Repository` インターフェース（`db-repository.ts` 16-28行）に `visible: boolean` を追加\n  - `RepositoryRow` インターフェース（53-65行）に `visible: number` を追加\n  - `mapRepositoryRow`（90-104行）で `visible: row.visible === 1` をマッピング\n  - `createRepository` の INSERT 文と引数に `visible` を追加（デフォルト true）\n  - `updateRepository` の updates 型に `visible?: boolean` を追加し、UPDATE文に分岐を追加\n  - `getAllRepositoriesWithWorktreeCount` の戻り値型に `visible` が反映されることを確認\n  - `RepositoryListItem`（API client 型）にも `visible` を追加"
+    },
+    {
+      "id": "S1-007",
+      "severity": "Should Fix",
+      "title": "テスト要件が抽象的で網羅性検証が困難",
+      "description": "受入条件の『ユニットテストがパスする』および実装タスクの『ユニットテストを追加（DB層・UIコンポーネント）』はテストすべき観点が定まっていない。本機能は次の観点でリグレッションリスクが高い:\n  - DBマイグレーションの冪等性（既存DBへの ALTER TABLE）\n  - 既存レコードへのデフォルト値適用（`DEFAULT 1` が効くか）\n  - `enabled=false` レコードへの影響（既存 Issue #190 のテストとの両立）\n  - APIのバリデーション（型チェック、partial update）\n  - Sidebarフィルタの境界条件（リポジトリが取得できなかった場合のフォールバック）\n  - 既存テスト（`tests/unit/lib/db-repository-exclusion.test.ts`、`db-repository-display-name.test.ts`）への影響",
+      "suggestion": "実装タスクに最低限以下のテストケースを明記する:\n  - DB層: visibleカラム追加のマイグレーションテスト、`createRepository`/`updateRepository`/`getAllRepositoriesWithWorktreeCount` の `visible` 取扱い、既存レコードへのデフォルト適用\n  - API層: `PUT /api/repositories/[id]` の `visible` 更新（boolean以外は400、404、success）\n  - UI層: `RepositoryList` のトグル動作（楽観的更新、エラー時ロールバック）\n  - サイドバーフィルタ: `repositoryVisible=false` ワークツリーが除外されること、すべて非表示時の空表示挙動"
+    },
+    {
+      "id": "S1-008",
+      "severity": "Nice to Have",
+      "title": "選択中worktreeが非表示化されたときの遷移挙動が未定義",
+      "description": "ユーザがリポジトリを「非表示」に切り替えた瞬間に、Sidebarで現在選択中の worktree がそのリポジトリ配下だった場合、ワークツリーがサイドバーから消えるが、画面右側の詳細表示はそのまま残るのか、別のworktreeに自動遷移するのか、空状態に戻るのかがIssueで定義されていない。UX上の混乱を招く可能性がある。",
+      "suggestion": "受入条件に以下を追記する:\n  - 『非表示にしたリポジトリの worktree が現在選択中だった場合、選択を解除して空表示に戻す（または最初の visible なworktreeに自動遷移する）』のいずれかを明示。\n  - URLが `/worktree/[id]` で worktree IDを持つ場合のフォールバック挙動も明記。"
+    },
+    {
+      "id": "S1-009",
+      "severity": "Nice to Have",
+      "title": "全リポジトリ非表示時の空状態UI設計が記載されていない",
+      "description": "ユーザが全てのリポジトリを「非表示」にすると、サイドバーが完全に空になる。この場合に「すべて非表示になっています。Repositories画面で表示設定を確認してください」のようなガイダンスを表示するのか、単に空欄にするのかが未定義。",
+      "suggestion": "受入条件または UI仕様に空状態のメッセージ表示要否を明記する。Issue #644 の RepositoryList が空時に `'No repositories registered yet.'` を表示しているのと同様、Sidebarでも空状態のフォールバックUIを定義する。"
+    },
+    {
+      "id": "S1-010",
+      "severity": "Nice to Have",
+      "title": "WebSocketブロードキャストによる他タブ/ウィンドウ同期の検討漏れ",
+      "description": "`/api/repositories` の DELETE は `broadcastMessage('repository_deleted', ...)` で他クライアントに通知している（`route.ts` 148-152行）。`visible` 更新も他のタブで開いているサイドバーをリアルタイムに更新したい場合、同様のブロードキャストが望ましいが、Issueには記載がない。",
+      "suggestion": "他タブ同期が要件であれば、PUT 成功時に `broadcastMessage('repository_visibility_changed', { repositoryId, visible })` を発行する旨を実装タスクに追加する。要件外であれば「リロードまで反映されない」旨を明記して期待値を揃える。"
+    }
+  ],
+  "must_fix_count": 3,
+  "should_fix_count": 4,
+  "nice_to_have_count": 3
+}

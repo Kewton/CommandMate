@@ -1,0 +1,7 @@
+{
+  "stage": 2,
+  "applied_findings": ["DR2-001", "DR2-002", "DR2-003", "DR2-004"],
+  "skipped_findings": [],
+  "changes_summary": "Stage 2 整合性レビューの 4 件の Nice to Have 指摘を全て設計方針書 (dev-reports/design/issue-687-message-timestamp-design-policy.md) に反映した。(DR2-001) 設計方針書 L105, L120, L249, L256, L265, L267 の `MessageList.tsx:62-66` 表記を `MessageList.tsx:66` (format() 呼び出し行単独) に明示し、L62-65 がロケール取得・useTranslations であることを括弧書きで併記。(DR2-002) 同様に `PromptMessage.tsx:69-74` を `PromptMessage.tsx:74` に明示し、L69-71 がロケール取得・useState であることを併記。(DR2-003) フォローアップ Issue 用のセクションに『new Date(message.timestamp) 再ラップに関する注意』小見出しを新設。ChatMessage.timestamp が parseMessageTimestamps によって既に Date 型である事実、再ラップは冗長だが安全側で害がないこと、フォローアップ Issue では除去 (`formatMessageTimestamp(message.timestamp, dateFnsLocale)`) を推奨することを明記。(DR2-004) テスト設計セクションの見出しを『追加テスト: tests/unit/lib/date-utils.test.ts』から『追加 describe ブロック（既存ファイル tests/unit/lib/date-utils.test.ts に追記）』に変更し、既存ファイルである旨と formatRelativeTime テストとの共存を注記。さらに変更対象ファイルサマリー表の同テストファイル行を『追加』→『修正（既存ファイルへ describe ブロック追加）』に修正。ソースコードは変更していない。",
+  "design_doc_updated": true
+}

@@ -1,0 +1,65 @@
+{
+  "issue_number": 690,
+  "iteration": 1,
+  "status": "success",
+  "implemented_files": [
+    "src/lib/db/migrations/v31-repository-visible.ts",
+    "src/lib/db/migrations/runner.ts",
+    "src/lib/db/migrations/index.ts",
+    "src/lib/db/db-repository.ts",
+    "src/lib/db/worktree-db.ts",
+    "src/lib/api-client.ts",
+    "src/app/api/repositories/route.ts",
+    "src/app/api/repositories/[id]/route.ts",
+    "src/hooks/useWorktreesCache.ts",
+    "src/components/providers/WorktreesCacheProvider.tsx",
+    "src/contexts/WorktreeSelectionContext.tsx",
+    "src/components/repository/RepositoryList.tsx",
+    "src/components/layout/Sidebar.tsx"
+  ],
+  "test_files": [
+    "tests/unit/lib/db-migrations.test.ts",
+    "tests/unit/lib/db-repository-exclusion.test.ts",
+    "tests/unit/api/repository-visibility.test.ts",
+    "tests/unit/components/repository/RepositoryList.test.tsx",
+    "tests/unit/components/layout/Sidebar-visibility.test.tsx",
+    "tests/integration/api-repositories-list.test.ts",
+    "tests/unit/assistant-context-builder.test.ts"
+  ],
+  "test_results": {
+    "passed": 235,
+    "failed": 0,
+    "scope": "scoped to Issue #690 related test files",
+    "broader_run": {
+      "total_passed": 7205,
+      "total_failed": 45,
+      "regression_check": "No new failures introduced. The 45 pre-existing failures (e.g., db-migrations-v10, api-clone, status-detector) all reproduce on the unchanged main branch and are unrelated to Issue #690."
+    }
+  },
+  "lint_result": "pass",
+  "type_check_result": "pass",
+  "commits": [
+    "0469b37e: feat(#690): add repository visibility toggle for sidebar control"
+  ],
+  "phases": {
+    "red": "New failing tests authored for migration v31, repository visibility API, RepositoryList toggle UI, and Sidebar filter.",
+    "green": "Implemented migration v31, db-repository visible field, getRepositories visible/enabled, API GET/PUT visible, cache/context propagation, RepositoryList Visibility column with optimistic update, and Sidebar local filter.",
+    "refactor": "Subcomponent VisibilityToggle extracted with role=\"switch\" + aria-checked accessibility. Type alias UpdateRepositoryResponse added for clarity. JSDoc explicitly notes enabled vs visible independence."
+  },
+  "acceptance_criteria_coverage": {
+    "ac1_visibility_column_renders": true,
+    "ac2_immediate_toggle_no_save_button": true,
+    "ac3_hidden_repo_worktrees_excluded_from_sidebar": true,
+    "ac4_visible_again_reappears_in_sidebar": true,
+    "ac5_persists_across_page_reload": true,
+    "ac6_existing_repos_default_visible_true": true,
+    "ac7_disabled_visible_shown_in_sidebar_with_badge": true,
+    "ac8_visible_false_excludes_from_sidebar": true,
+    "ac9_disabled_and_hidden_excludes_from_sidebar": true,
+    "ac10_sessions_review_screens_show_all": true,
+    "ac11_optimistic_update_rollback_on_failure": true,
+    "ac12_db_api_ui_sidebar_cache_unit_tests_pass": true,
+    "ac13_existing_tests_still_pass": true
+  },
+  "notes": "All 13 acceptance criteria are covered with new tests and pre-existing tests still pass. enabled and visible flags are kept strictly independent at the DB layer (disableRepository/restoreRepository never touch visible) and at the UI layer (the Visibility toggle never touches enabled). The Sidebar filter is implemented as a Sidebar-local filter rather than modifying useWorktreeList so that Sessions and Review screens continue to render every worktree (per AC10). Coverage was not measured as a single percentage because vitest --coverage with focused test files reports a misleading whole-codebase percentage; instead, all new code paths have direct unit-test coverage (DB migration up/down, CRUD with new column, API success/error/independence, UI optimistic update + rollback + pending-state lock, sidebar filtering for the four enabled×visible combinations)."
+}

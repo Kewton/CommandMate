@@ -39,7 +39,11 @@ import { LogoutButton } from '@/components/common/LogoutButton';
 import { useToast, ToastContainer } from '@/components/common/Toast';
 import { repositoryApi, ApiError } from '@/lib/api-client';
 import { toBranchItem } from '@/types/sidebar';
-import { generateRepositoryColor } from '@/lib/sidebar-utils';
+import {
+  generateRepositoryColor,
+  buildHiddenRepositoryPathSet,
+  filterWorktreesByVisibility,
+} from '@/lib/sidebar-utils';
 import { useWorktreeList } from '@/hooks/useWorktreeList';
 import type { ViewMode } from '@/lib/sidebar-utils';
 import type { BranchGroup } from '@/lib/sidebar-utils';
@@ -105,7 +109,13 @@ function persistSidebarScrollTop(scrollTop: number): void {
  */
 export const Sidebar = memo(function Sidebar() {
   const router = useRouter();
-  const { worktrees, selectedWorktreeId, selectWorktree, refreshWorktrees } = useWorktreeSelection();
+  const {
+    worktrees,
+    repositories,
+    selectedWorktreeId,
+    selectWorktree,
+    refreshWorktrees,
+  } = useWorktreeSelection();
   const { closeMobileDrawer, sortKey, sortDirection, viewMode, setViewMode } = useSidebarContext();
   const [searchQuery, setSearchQuery] = useState('');
   const branchListRef = useRef<HTMLDivElement>(null);
@@ -142,8 +152,24 @@ export const Sidebar = memo(function Sidebar() {
       });
   }, []);
 
+  // Issue #690: Filter out worktrees whose repository is hidden (visible=false).
+  // This is a Sidebar-local filter — useWorktreeList is intentionally not
+  // modified so the Sessions/Review screens continue to show every worktree
+  // for management purposes.
+  // See `buildHiddenRepositoryPathSet` / `filterWorktreesByVisibility` in
+  // sidebar-utils for the matching rules and legacy-row fallback.
+  const hiddenRepositoryPaths = useMemo(
+    () => buildHiddenRepositoryPathSet(repositories),
+    [repositories]
+  );
+
+  const visibleWorktrees = useMemo(
+    () => filterWorktreesByVisibility(worktrees, hiddenRepositoryPaths),
+    [worktrees, hiddenRepositoryPaths]
+  );
+
   // Convert worktrees to sidebar items
-  const branchItems = useMemo(() => worktrees.map(toBranchItem), [worktrees]);
+  const branchItems = useMemo(() => visibleWorktrees.map(toBranchItem), [visibleWorktrees]);
 
   // Use shared useWorktreeList hook for sorting, filtering, and grouping (Issue #600 Task 3.8)
   const { sortedItems: flatBranches, groupedItems } = useWorktreeList({

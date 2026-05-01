@@ -1,0 +1,39 @@
+{
+  "stage": 3,
+  "focus": "影響範囲",
+  "reviewer": "codex",
+  "findings": [
+    {
+      "id": "DR3-001",
+      "severity": "Must Fix",
+      "title": "global Codex skill/prompt の同名上書きと統合テストの環境依存が未整理",
+      "description": "設計方針書は変更対象をデータ定義層に閉じると整理しているが、`src/app/api/worktrees/[id]/slash-commands/route.ts` は `loadCodexSkills()` / `loadCodexPrompts()` を basePath 未指定で呼び、`~/.codex/skills` と `~/.codex/prompts` の global 定義も merge 対象にする。これらは `source: 'codex-skill'`, `cliTools: ['codex']` として STANDARD_COMMANDS より後に merge されるため、`plan`, `skills`, `hooks`, `memories` など本 Issue で追加する標準コマンドをユーザー定義が上書きできる。設計方針書にこの優先順位と統合テストの隔離方針がないと、開発者のローカル `~/.codex` 内容によって API 統合テストの `toContain` や `sources.standard` 件数が非決定的になる。",
+      "suggestion": "システム構成図・影響範囲表・API 設計に global Codex skills/prompts を追記し、同名衝突時はユーザー定義が標準コマンドを上書きする既存仕様として維持することを明記する。Codex 統合テストでは `loadCodexSkills()` / `loadCodexPrompts()` を空配列に mock する、または HOME 相当を一時ディレクトリへ隔離する。必要に応じて、global Codex prompt/skill が標準コマンドを上書きする仕様確認テストを別ケースとして追加する。"
+    },
+    {
+      "id": "DR3-002",
+      "severity": "Should Fix",
+      "title": "Copilot/Gemini builtin の route-level 注入は unit matrix だけでは検証できない",
+      "description": "設計方針書の Copilot 同名衝突テスト例は `filterCommandsByCliTool(groups, 'copilot')` を直接呼んでいるが、Copilot/Gemini builtin は `src/app/api/worktrees/[id]/slash-commands/route.ts` で `cliTool === 'copilot' / 'gemini'` のときだけ `getCopilotBuiltinCommands()` / `getGeminiBuiltinCommands()` が注入される。`STANDARD_COMMANDS` だけを渡す unit matrix では、`plan`, `agent`, `skills` が Copilot builtin として後勝ち上書きされる経路を検証できない。",
+      "suggestion": "`tests/integration/api-worktree-slash-commands.test.ts` に API route を通す cliTool=copilot ケースを追加し、`plan`, `agent`, `skills` が `source: 'builtin'`, `cliTools: ['copilot']` として表示されること、`goal`, `subagents`, `fork`, `memories`, `hooks` など Copilot に存在しない Codex-only コマンドが漏れないこと、top-level `sources.builtin` を追加しないことを検証する。Gemini の同名 builtin も既存統合テストで必要に応じて `source: 'builtin'` を確認する。"
+    },
+    {
+      "id": "DR3-003",
+      "severity": "Should Fix",
+      "title": "API の `cliTool` 対象が 6 ツールであることが §5 に明記されていない",
+      "description": "設計方針書 §5 は `GET /api/worktrees/[id]/slash-commands?cliTool=claude|codex|opencode` と記載しているが、実装の `validateCliTool()` は `CLI_TOOL_IDS` に基づき `claude`, `codex`, `gemini`, `vibe-local`, `opencode`, `copilot` の 6 ツールを受け付ける。§7 の matrix test では 6 ツールを対象にしているため、API 設計側の対象 CLI 記載とテスト設計が不整合になっている。",
+      "suggestion": "§5 を `?cliTool=<CLIToolType>` とし、6 ツールすべてを列挙する。`vibe-local` は STANDARD_COMMANDS の表示対象が 0 件であり空集合を返す現状仕様として明記する。API ルート実装・クエリパラメータ仕様・レスポンス型は変更しない。"
+    },
+    {
+      "id": "DR3-004",
+      "severity": "Should Fix",
+      "title": "`sources.standard` 件数は同名上書きの有無で変動するため固定条件が必要",
+      "description": "設計方針書 §5 は `sources.standard` の件数が増加すると説明しているが、API route は merge 後・filter 後のコマンドを source 別に数えるため、worktree command、global Codex skill/prompt、Copilot/Gemini builtin が同名で後勝ち上書きした場合は `source: 'standard'` の件数が減る。特に DR3-001 の global Codex 定義や DR3-002 の Copilot builtin 同名コマンドでは、標準コマンドの追加件数と API `sources.standard` が一致しないケースがある。",
+      "suggestion": "`sources.standard` の件数増加は同名上書きがない deterministic なテスト環境での期待値であると明記する。固定件数アサートは global/worktree/builtin 上書きがないケースに限定し、上書きありケースでは `sources.standard` が減りうることを仕様として扱う。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 3,
+  "nice_to_have_count": 0,
+  "summary": "Stage 3 影響範囲レビューでは、設計方針書が `STANDARD_COMMANDS` のデータ定義変更に焦点を絞れている一方で、API route が実際に merge する global Codex skills/prompts と Copilot/Gemini builtin の route-level 注入が影響範囲として不足している点を指摘した。Must Fix は global Codex 定義による同名上書きと統合テストの環境依存。Should Fix は Copilot/Gemini builtin を API route integration test で検証する必要性、API `cliTool` 対象 6 ツールの明記、`sources.standard` 件数の固定条件の明確化である。"
+}

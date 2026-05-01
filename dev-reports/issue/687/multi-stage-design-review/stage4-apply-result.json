@@ -1,0 +1,65 @@
+{
+  "stage": 4,
+  "focus": "セキュリティ",
+  "applier": "architecture-review-agent",
+  "design_doc": "dev-reports/design/issue-687-message-timestamp-design-policy.md",
+  "design_doc_updated": false,
+  "applied_findings": [
+    {
+      "id": "DR4-001",
+      "severity": "Should Fix",
+      "title": "§6 セキュリティ設計に「ロケール文字列のサニタイズ経路（2段ホワイトリスト保証）」を明記すべき",
+      "status": "already_applied",
+      "applied_section": "§6 セキュリティ設計 / ロケール注入 行 + セキュリティ境界",
+      "applied_line_range": "L184, L192",
+      "note": "Stage 4 の前段（codex による先行 apply, stage4-apply-result.json）で既に適用済み。設計書 §6 の表に「ロケール注入」行が追加され「`useLocale()` の値は next-intl / `SUPPORTED_LOCALES` により `en` / `ja` へ制限される。`getDateFnsLocale(locale)` は `DATE_FNS_LOCALE_MAP` の allowlist ルックアップで、未知 locale は `enUS` にフォールバックする。」と明記。さらに「セキュリティ境界」セクションで「locale は `SUPPORTED_LOCALES` と `DATE_FNS_LOCALE_MAP` の allowlist で扱い、ユーザーが任意の date-fns locale モジュール名やフォーマット文字列を指定できる設計にはしない。」と明記済み。"
+    },
+    {
+      "id": "DR4-002",
+      "severity": "Should Fix",
+      "title": "§6 セキュリティ設計の XSS 評価に「JSX テキスト子要素としての自動エスケープ」を明示すべき",
+      "status": "already_applied",
+      "applied_section": "§6 セキュリティ設計 / XSS 行 + セキュリティ境界",
+      "applied_line_range": "L181, L193",
+      "note": "Stage 4 の前段で既に適用済み。§6 XSS 行で「`formatMessageTimestamp()` の戻り値は React の通常テキストノードとして描画する。`dangerouslySetInnerHTML`、HTML 文字列連結、属性への未エスケープ挿入は行わない。」と明記。さらに「セキュリティ境界」で「date-fns `format()` の結果は React がテキストとしてエスケープするため、XSS 防御は React の標準レンダリングに委ねる。実装時に `innerHTML` 系 API へ変更しないこと。」と防御深度を補強済み。OWASP A03 Injection の低減として明示的にマッピング済み。"
+    },
+    {
+      "id": "DR4-003",
+      "severity": "Should Fix",
+      "title": "Invalid Date ガードの前提条件（Date インスタンスであること）を §6 に明示すべき",
+      "status": "already_applied",
+      "applied_section": "§6 セキュリティ設計 / 入力バリデーション 行 + §3 実装例 L89",
+      "applied_line_range": "L86, L89, L182",
+      "note": "Stage 4 の前段で既に適用済み。§6 入力バリデーション行で「`timestamp instanceof Date` と `isNaN(timestamp.getTime())` を確認し、異常値は空文字にフォールバックする。」と明記。さらに §3 実装例 L88-93 のガード条件が `if (!(timestamp instanceof Date) || isNaN(timestamp.getTime()))` に強化済み。L86 docstring も「`Invalid Date` または実行時に `Date` 以外が混入した場合は空文字を返す」に更新済み。型システム（コンパイル時）+ `instanceof Date` ガード（ランタイム）+ `isNaN()` ガード（値域）の三重防御に強化されている。OWASP A04/A05 へのマッピングも明記済み。"
+    },
+    {
+      "id": "DR4-004",
+      "severity": "Should Fix",
+      "title": "外部依存 date-fns のサプライチェーン評価と 'PPp' 静的リテラル使用方針を §6 に明記すべき",
+      "status": "already_applied",
+      "applied_section": "§6 セキュリティ設計 / date-fns 安全性 行",
+      "applied_line_range": "L183",
+      "note": "Stage 4 の前段で既に適用済み。§6 date-fns 安全性 行で「フォーマット文字列は実装内固定の `'PPp'` とし、ユーザー入力・翻訳文・locale 文字列から組み立てない。これによりフォーマットトークン注入や意図しない巨大出力を避ける。date-fns は既存依存であり、新規パッケージ追加は行わない。」と明記済み。OWASP A06 Vulnerable and Outdated Components の追加リスクなしと明示的にマッピング済み。"
+    },
+    {
+      "id": "DR4-005",
+      "severity": "Nice to Have",
+      "title": "プライバシー・情報漏洩観点を §6 に追記すべき",
+      "status": "already_applied",
+      "applied_section": "§6 セキュリティ設計 / 認可・機密性 行",
+      "applied_line_range": "L186",
+      "note": "Stage 4 の前段で既に適用済み。§6 認可・機密性 行で「表示対象は既存の `ChatMessage.timestamp` の整形のみで、取得対象データ・API レスポンス・認可境界は変更しない。日付+時刻表示により新規の機密情報は追加されない。」と明記済み。OWASP A01 Broken Access Control / A02 Cryptographic Failures への影響なしと明示的にマッピング済み。"
+    },
+    {
+      "id": "DR4-006",
+      "severity": "Nice to Have",
+      "title": "OWASP Top 10 2021 マッピング表を §6 末尾に追加すべき",
+      "status": "partially_applied",
+      "applied_section": "§6 セキュリティ設計 / メインテーブルの OWASP Top 10 列",
+      "applied_line_range": "L179-186",
+      "note": "Stage 4 の前段で部分的に適用済み。§6 のメインテーブルに「OWASP Top 10 との関係」列が追加されており、各観点（XSS / 入力バリデーション / date-fns 安全性 / ロケール注入 / コマンドインジェクション / 認可・機密性）について A01-A06 のマッピングが行レベルで明示済み。独立した OWASP マッピング表（A01-A10 全カテゴリ網羅）は未追加だが、現行のテーブル形式で本 Issue にとって重要なカテゴリ（A01/A02/A03/A04/A05/A06）はカバーされているため、追加マッピング表は冗長と判断し見送り。完全な A01-A10 網羅が必要な場合はフォローアップで追加検討。"
+    }
+  ],
+  "skipped_findings": [],
+  "summary": "Stage 4 セキュリティレビューの 6 件の指摘事項（Should Fix 4 件 + Nice to Have 2 件）は、**Stage 4 前段の codex による先行 apply で設計方針書 §6 セキュリティ設計セクションが大幅に拡充された結果、全て反映済み**。具体的に確認した適用内容: (1) §6 が表形式に拡張され、XSS / 入力バリデーション / date-fns 安全性 / ロケール注入 / コマンドインジェクション / 認可・機密性 の 6 観点を OWASP Top 10 2021 のカテゴリマッピング付き（A01/A02/A03/A04/A05/A06）で明示、(2) §6 の「セキュリティ境界」サブセクションで信頼境界（API/DB→UI、locale→date-fns Locale）が明示され、各境界での防御戦略を記載、(3) §3 実装例 L88-93 のガード条件が `if (!(timestamp instanceof Date) || isNaN(timestamp.getTime()))` に強化（型システム + `instanceof Date` + `isNaN()` の三重防御）、(4) docstring L86 も Date 以外混入時の挙動を明記、(5) §8 テスト設計に Date 以外混入時の空文字フォールバックテストも追加済み。**本 Stage 4 review-result（architecture-review-agent 版）で記録した Should Fix 4 件は全て `already_applied`、Nice to Have 2 件のうち DR4-005 は `already_applied`、DR4-006 は `partially_applied`（メインテーブルの OWASP 列で十分カバー）**。設計方針書への追加修正は不要。**実装ブロック要因なし**。設計方針書のセキュリティ設計セクションは Stage 4 レビューの全観点（XSS / 入力検証 / date-fns 安全性 / ロケール関連リスク / OWASP Top 10 / プライバシー）を満たしており、TDD 実装フェーズへ移行可能。"
+}

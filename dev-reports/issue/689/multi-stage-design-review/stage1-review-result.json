@@ -1,0 +1,67 @@
+{
+  "stage": 1,
+  "focus": "設計原則",
+  "reviewer": "architecture-review-agent",
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "Must Fix",
+      "title": "Claude追加4件の `cliTools: undefined` 採用は Issue #594 opt-in 原則と矛盾している",
+      "description": "設計方針書 §3 では『Claude+Codex 共有』を `['claude','codex']`、Codex-only を `['codex']` と明示する opt-in 原則（Issue #594）を継承すると述べている。一方で Claude 追加 4 件（effort/fast/focus/lazy）は『既存 Claude-only コマンドとの一貫性（後方互換）』を理由に `cliTools: undefined` を採用しており、§8 のトレードオフ欄でも『cliTools 設計が不均一』と認めている。\n\nfilterCommandsByCliTool() の実装（src/lib/command-merger.ts L184-201）は cliTools が undefined のとき『Claude 専用』として扱う仕様であり、新規追加コマンドにとって `undefined` という暗黙の意味付けを増やすことは、SOLID の OCP（変更に対して閉じ、拡張に対して開く）と DIP（具象実装に依存しない明示的な型契約）を弱める。さらに src/types/slash-commands.ts L54-62 の JSDoc 自体が『undefined does NOT mean "all tools" — it means claude-only』とわざわざ警告しており、新規定義時にこの暗黙ルールへ依存するのは実装ガイドラインとしても望ましくない。\n\n後方互換性は『既存 8 件を変更しない』ことで担保されているのであって、新規追加 4 件は既存パターンに合わせる必然性はない。",
+      "suggestion": "Claude 追加 4 件は明示的に `cliTools: ['claude']` を指定する（Issue #594 opt-in 原則の継承）。これにより:\n- §4 の件数表は『Claude-only 明示』というカテゴリを 1 行追加して件数のみ調整\n- 既存テスト L35-50『commands without cliTools field』のリストは現行 8 件のまま据え置き、新規 4 件用に『Claude-only with explicit cliTools: [\"claude\"]』のテストブロックを追加\n- filterCommandsByCliTool() の挙動は変わらず（cliTools.includes('claude') で hit する）\n\nこれが受け入れられない場合は、§8 のトレードオフに『undefined 採用は既存パターンとの一貫性が利便性を上回ると判断したため』という採用根拠を追記し、将来の統一 Issue 番号を明記すること。"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "Must Fix",
+      "title": "`/agent`（Codex追加）と `/agents`（OpenCode既存）の同名類似による混乱・テスト網羅性の不足",
+      "description": "現行コード src/lib/standard-commands.ts L320-328 に既存の `agents`（cliTools: ['opencode']）が存在する。設計方針書 §4 では Codex 追加に `agent`（単数形、cliTools: ['codex']）を加える計画である。\n\n問題点:\n1. 命名衝突に近い類似（agent vs agents）。SlashCommandList の検索/フィルタで両方ヒットする可能性があり、KISS 原則の観点でユーザー体験を損ねる。\n2. STANDARD_COMMANDS.test.ts L178-182 の『no duplicate command names』テストは name 完全一致のみ検出するため、この類似を検知できない。\n3. command-merger.ts の mergeCommandGroups (L99-129) は『name で Map dedup』する仕様だが、両者は別 name のため統合時の挙動も検証が必要。\n4. Codex の `/agent`（単数）と `/subagents` が同一 category（standard-session）に並ぶことで、UI 上の認知負荷も上昇する。\n\nまた設計方針書には `/agent` と `/agents` の差別化に関する記述が一切なく、設計の完全性が不足している。",
+      "suggestion": "下記いずれかを設計方針書に明記し、テスト追加箇所と意図を記述すること:\n\n(a) Codex CLI の最新仕様で `/agent`（単数）と `/agents`（複数）が別物として明確に定義されているならば、それぞれの description を差別化（例: agent = 'Switch active agent', agents = 'List/manage all available agents'）し、両者が異なる cliTools で並立する旨を §4 の表に注記する。\n\n(b) 同一機能の表記揺れであれば、Codex 側を `agents` に統一して既存 OpenCode の `/agents` に `cliTools: ['codex','opencode']` を opt-in 追加する（共有コマンド化）。\n\n加えて以下のテストを追加する:\n- description の文言比較（混同防止のため意図的に異なる文言になっているか）\n- filterCommandsByCliTool('codex') で `agent` のみ、'opencode' で `agents` のみが返ることの検証\n- filterCommandsByCliTool('claude') ではどちらも返らないことの回帰検証"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "Should Fix",
+      "title": "テスト L20 の件数アサーションの説明文（コメント）が件数構成と整合していない",
+      "description": "設計方針書 §7 では『L21 総件数 toBe(33) → toBe(45)』と更新するとしているが、現行 L20 のテスト名は `'should have 33 standard commands (8 Claude-only + 9 shared + 9 Codex-only + 7 OpenCode-only)'` という内訳を含んだ説明文になっている。\n\n設計方針書 §4 の件数構成サマリー（Claude-only 12 + shared 9 + Codex-only 17 + OpenCode-only 7 = 45）はテスト名にも反映する必要があるが、§7 ではアサート値（toBe）のみの更新指示しかなく、テスト名（it() の第1引数）の更新が漏れている。\n\nこれは『テスト設計の適切さ』『設計方針書の完全性』の観点で、TDD Red→Green サイクルにおける『テストの意図が読み取れる』要件を毀損する（テスト名と内訳が不一致のまま Green になる可能性）。",
+      "suggestion": "§7 のテスト更新表に以下の行を追加する:\n```\n| L20 | テスト名（it 第1引数） | 'should have 33 standard commands (8 Claude-only + 9 shared + 9 Codex-only + 7 OpenCode-only)' → 'should have 45 standard commands (12 Claude-only + 9 shared + 17 Codex-only + 7 OpenCode-only)' |\n```\n同様に、新規追加コマンドの category 配置（standard-config / standard-session）が既存テスト L142-176 のリストと整合するか確認し、§7 の追加テスト項目 1 を『effort/fast/lazy が standard-config に、focus が standard-session に存在すること』のように具体化すること。"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "Should Fix",
+      "title": "§4 の OpenCode 表示総数 10 件が変更前後で同値である根拠が不明瞭",
+      "description": "件数構成サマリーで OpenCode 表示総数は『変更前 10 → 変更後 10』とあり、新規追加 12 件は OpenCode に影響しないことが意図されている。しかし、設計方針書 §3 の cliTools 設計方針表では『Codex+OpenCode 共有』に新規追加が含まれない（既存 1 件 = `new` のみ）と暗黙的に示されているのみで、新規 Codex 追加 8 件の中に OpenCode と共有すべきものがないかの検討プロセスが記述されていない。\n\nたとえば `/agent` ↔ OpenCode 既存 `/agents`（DR1-002 と関連）、`/skills` ↔ Codex skill ローダー（src/lib/slash-commands.ts、CLAUDE.md にも .codex/skills 対応の記述あり）など、共有候補となりうるものが複数ある。設計方針書には『なぜ共有しないか』の判断ログが不足しており、YAGNI 観点では『今は不要』で済むが、後追い拡張のたびにこの判断を再現するコストが発生する（DRY 原則の違反、判断の重複）。",
+      "suggestion": "§3 または §8 に『OpenCode/Claude との共有可能性検討表』を追加し、新規 Codex 追加 8 件それぞれについて以下を 1 行で記述する:\n```\n| コマンド名 | OpenCode 検討 | Claude 検討 | 共有しない理由 |\n| plan      | 未実装        | 未実装       | Codex 固有モード |\n| skills    | 別実装あり(.codex/skills) | 別実装あり(.claude/skills) | ローダー側で解決済 |\n| agent     | /agents が既存 | 未実装 | DR1-002 で別途検討 |\n...\n```\nこの判断ログにより、将来 §3 の表だけ見て一貫性違反を疑われる事態を防ぎ、設計方針書の完全性が向上する。"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "Should Fix",
+      "title": "FREQUENTLY_USED.codex の `mcp` → `plan` 置換に対する選定基準が説明されていない",
+      "description": "§4 で『FREQUENTLY_USED.codex を `['new', 'undo', 'diff', 'approvals', 'mcp']` から `['new', 'undo', 'diff', 'approvals', 'plan']` に変更する』とあるが、なぜ新規追加 8 件の中から `plan` だけが昇格対象になり、なぜ `mcp` が外れる必要があるのかの根拠が §8 のトレードオフ表にも記載がない（『5件構成を維持/mcp を除外』とのみ記載）。\n\n選定根拠のないマジックリスト変更は、将来の Codex CLI 仕様変更時に再判断のコストを生む（DRY/SSoT 違反）。また STANDARD_COMMANDS.test.ts L213-215 にある回帰テスト『Codex frequently used should include new and undo』のようなロックイン条件を、`plan` についても明示すべきである。",
+      "suggestion": "§4 の FREQUENTLY_USED 更新欄に選定基準を 2-3 行で追記する。例:\n- `mcp` 除外理由: Codex CLI 標準フローから外れる管理系で、利用頻度が低いことを Issue #689 調査ログ（Hypothesis X）で確認\n- `plan` 採用理由: Codex の対話起点として最も使用される計画モードで、UI 上の即アクセスが UX 改善に直結\n\nまた §7 の追加テスト項目に『FREQUENTLY_USED.codex の最初の 3 件は new/undo/diff の順序であること（順序ロックイン）』を追加すれば、UI 上の表示順に対する保護も得られる。"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "Should Fix",
+      "title": "Copilot 隔離テスト（S7-003）の対象が新規 8 件のみで、回帰観点が不足している",
+      "description": "§7 の Copilot 同名衝突テストは新規 Codex-only 8 件（plan/goal/agent/subagents/fork/memories/skills/hooks）のみを `not.toContain` で検証する設計になっている。しかし src/lib/cli-tools/types.ts のコメント（CLAUDE.md 抜粋）によれば Copilot は 6 ツール構成の 1 つであり、command-merger.ts の filterCommandsByCliTool() は CLIToolType を直接受け取る。\n\n問題点:\n1. 既存 Codex-only 9 件（undo/logout/quit/approvals/diff/mention/mcp/init/feedback）について Copilot 隔離が暗黙にしか担保されておらず、もし将来 standard-commands.ts の編集ミスで誤って `cliTools` に 'copilot' が混入しても検知できない。\n2. STANDARD_COMMANDS の各コマンドが期待する『描画対象 CLI ツール集合』を網羅したマトリクステストが存在しない（DRY: 各 CLI ツール毎に個別テストが散在しており SSoT がない）。\n3. Gemini 隔離も統合テスト L130-181 で間接的に検証されるのみで、ユニット層でのカバレッジがない。",
+      "suggestion": "§7 に『CLI ツール隔離マトリクステスト』を新規セクションとして追加し、以下のような表駆動テストを設計する:\n```typescript\nconst EXPECTED_CLI_VISIBILITY: Record<string, CLIToolType[]> = {\n  // claude only\n  rewind: ['claude'], config: ['claude'], context: ['claude'], ...\n  // codex only (new + existing)\n  plan: ['codex'], goal: ['codex'], ..., undo: ['codex'], mcp: ['codex'], ...\n  // shared\n  clear: ['claude','codex'], compact: ['claude','codex','opencode'], ...\n};\n\nit.each(Object.entries(EXPECTED_CLI_VISIBILITY))('%s should be visible only for expected tools', (name, expected) => {\n  const cmd = STANDARD_COMMANDS.find(c => c.name === name)!;\n  const actual = cmd.cliTools ?? ['claude'];\n  expect(actual.sort()).toEqual(expected.sort());\n});\n```\nこのテーブルが SSoT となり、将来のコマンド追加・cliTools 変更時に必ず 1 行追加すれば良くなり、DRY が改善される。"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "Nice to Have",
+      "title": "実装手順の自動化チェックが弱い（CLI 仕様の最新性検証）",
+      "description": "§9 実装手順は『静的配列を更新し、テストを通す』のみで、CommandMate のソースコード内には『Claude/Codex の最新コマンドリストとの diff を検出する』仕組みがない。設計方針書 §8 でも『CLI 更新のたびに手動更新が必要』というトレードオフを明示的に受容している。\n\nこれは KISS/YAGNI の観点では適切な判断だが、§9 にレビュー観点（実装後の確認手順）として『参照リンク（標準コマンドの一次ソース）と実装コマンドリストの突合チェック』が含まれていない。今回の Issue 自体が『最新化漏れの是正』であることから、再発防止策が設計方針書に記載されないのは設計の完全性が不足している。",
+      "suggestion": "§9 に下記いずれかを追記する:\n(a) PR テンプレートまたは CHANGELOG に『参照ソース URL とチェック日』を記録するルールを設ける（軽量、YAGNI 寄り）\n(b) `tests/unit/lib/standard-commands.test.ts` のヘッダーに『LAST_REVIEWED: 2026-05-01 against URL: https://...』というコメントを追加し、半期に 1 度の見直し対象とする\n(c) `docs/module-reference.md` または `docs/implementation-history.md` に『標準コマンド最新性チェック手順』というセクションを追加し、Issue #689 の経緯を残す\n\n選択肢 (a) または (b) を推奨。"
+    },
+    {
+      "id": "DR1-008",
+      "severity": "Nice to Have",
+      "title": "新規追加コマンドの description 文言が日英混在で命名規約・SSoTの一貫性に欠ける",
+      "description": "§4 の新規追加表で description は日本語（『モデルの思考コストを調整 (high/medium/low)』『計画モード切替』等）になっている。一方、現行 src/lib/standard-commands.ts の既存定義はすべて英語（'Clear conversation history', 'Compact context to reduce token usage'）で記述されており、混在すると以下の問題が生じる:\n\n1. SlashCommandList の表示時、ユーザーは英日混在のコマンドリストを見ることになる（KISS 観点で UX 低下）。\n2. 検索フィルタ filterCommandGroups (command-merger.ts L151-171) は description.toLowerCase() で部分一致を行うため、日本語クエリと英語クエリで挙動が変わる（DRY 観点で検索ロジックの単純さが失われる）。\n3. 既存テスト L24-33 の『all required properties』チェックでは description.length > 0 のみで、言語規約は検証されない。\n\nプロジェクトには i18n（next-intl）が導入されているが、STANDARD_COMMANDS は静的定数で i18n 対象外であるため、命名規約として『英語で統一する』と方針書に明記すべき。",
+      "suggestion": "§4 の追加コマンド表の description を英語化し、英語が一次表現であることを §3 設計パターンに明記する:\n\n```\n| effort   | Adjust model thinking effort (high/medium/low) |\n| fast     | Switch to fast response mode |\n| focus    | Toggle focus mode |\n| lazy     | Toggle lazy mode |\n| plan     | Toggle planning mode |\n| goal     | Set conversation goal |\n| agent    | Switch active agent |\n| subagents| Manage subagents |\n| fork     | Fork current session |\n| memories | Manage memories |\n| skills   | Manage skills |\n| hooks    | Manage hooks |\n```\n\n併せて §7 のユニットテストに『all descriptions are ASCII (English)』のような言語チェックを追加することで、命名規約を機械的に保証できる。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 4,
+  "nice_to_have_count": 2,
+  "summary": "Stage 1 通常レビュー（設計原則）として、SOLID/KISS/YAGNI/DRY 原則および設計方針書の完全性・テスト設計の適切さを観点に評価した。\n\n[Must Fix 2件]\n- DR1-001: 新規 Claude 追加 4 件で `cliTools: undefined` を採用すると、Issue #594 の opt-in 原則と矛盾し、SOLID/OCP・DIP を弱める。明示的な `cliTools: ['claude']` を採用すべき。\n- DR1-002: `/agent`（Codex 新規）と `/agents`（OpenCode 既存）の類似命名に対する差別化方針が設計方針書に記述されておらず、UI 混乱・テスト未網羅のリスクがある。\n\n[Should Fix 4件]\n- DR1-003: テスト L20 の説明文（it 第1引数）の更新が §7 から漏れている。\n- DR1-004: OpenCode/Claude との共有可能性に関する判断ログが不足しており、再現性が低い。\n- DR1-005: FREQUENTLY_USED.codex の `mcp`→`plan` 置換の選定根拠が記載されていない。\n- DR1-006: Copilot/Gemini 隔離テストが新規 8 件のみで、CLI ツール可視性の SSoT 化（テーブル駆動テスト）が実現されていない。\n\n[Nice to Have 2件]\n- DR1-007: 標準コマンド最新性の再発防止策（チェック手順・記録）の追記。\n- DR1-008: 新規追加コマンドの description が日本語になっており、既存（英語）と混在する。命名規約として英語統一を明記すべき。\n\n総評: データ定義層に閉じた変更でアーキテクチャ的影響は小さいが、Issue #594 で確立した opt-in 原則の継承徹底（DR1-001）と類似命名の差別化（DR1-002）は設計方針書段階で解決すべき。Should Fix の 4 件は完全性・SSoT・テスト設計のいずれかを補強するもので、実装前の追記を推奨する。"
+}

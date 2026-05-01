@@ -1,0 +1,32 @@
+{
+  "stage": 7,
+  "focus": "影響範囲（2回目）",
+  "reviewer": "codex",
+  "findings": [
+    {
+      "id": "S7-001",
+      "severity": "Must Fix",
+      "title": "Stage 5 の解決結果が件数表・実装タスク・受入条件へ伝播する前提が未整理",
+      "description": "Issue 本文末尾の Stage 5 追記では `/fast` を Codex で表示するか除外するか、また Claude Code 追加対象 4 件を維持するか削除するかを実装前に確定するとしている。一方、本文本体には `STANDARD_COMMANDS` 総件数 45、Claude 表示 21、Codex 表示 25、Claude-only 12、Codex-only 17、テスト `toBe(45)` / `toBe(25)`、追加対象 12 件という固定値が残っている。S5-001/S5-002 の解決次第でこれらの値は必ず変動するため、実装者が本文本体だけを機械的に実装すると、テスト期待値・API 表示件数・受入条件が矛盾する。",
+      "suggestion": "Stage 5 の Must Fix 解決後に有効となる最終コマンドマトリクスを本文へ追加し、`STANDARD_COMMANDS` 総件数、Claude/Codex/OpenCode 表示件数、shared / Claude-only / Codex-only 件数、`tests/unit/lib/standard-commands.test.ts` の期待値、`tests/integration/api-worktree-slash-commands.test.ts` の追加検証対象をすべて再計算するタスクを追加する。Stage 5 解決前の 45/25/21 などの固定値は暫定値として明示するか、最終値確定まで実装不可のゲートにする。"
+    },
+    {
+      "id": "S7-002",
+      "severity": "Should Fix",
+      "title": "API 後方互換性として `sources` レスポンス形状の維持方針が未記載",
+      "description": "Stage 5 の S5-004 では Copilot 同名衝突テストで必要に応じて `source: 'builtin'` を確認するとしているが、`src/app/api/worktrees/[id]/slash-commands/route.ts` の `SlashCommandsResponse.sources` は `standard`, `worktree`, `mcbd`, `skill`, `codexSkill` のみで、`builtin` 件数はレスポンスに含めていない。コマンド個別の `source: 'builtin'` は `groups[].commands[]` 内に存在するため、テストはそこを検証すれば足りる。Issue に方針がないと、実装者が `sources.builtin` を追加して API レスポンス形状や型を変更する可能性がある。",
+      "suggestion": "本 Issue では API レスポンスのトップレベル形状を変更しない方針を明記する。Copilot/Gemini builtin の確認は `groups[].commands[]` 内の `source`, `cliTools`, `category`, `description` を検証する。もし `sources.builtin` を追加する判断をする場合は、`SlashCommandsResponse` 型、関連 API テスト、フロントエンド利用箇所を更新対象に含め、後方互換性への影響を別途明記する。"
+    },
+    {
+      "id": "S7-003",
+      "severity": "Should Fix",
+      "title": "Copilot 同名衝突テストは `toContain` だけでは隔離機構を検証できない",
+      "description": "Issue 本文では `agent`, `skills`, `plan` の同名衝突について cliTool=codex / cliTool=copilot 双方の `toContain` 検証を追加するとしている。しかし `allNames` に名前が含まれるだけでは、Copilot builtin が STANDARD_COMMANDS を後勝ち上書きしていることや、Codex-only 定義が Copilot に漏れていないことを十分に検出できない。例えば `/plan` が誤って `cliTools: ['codex', 'copilot']` になっても、`toContain('plan')` は通ってしまう。",
+      "suggestion": "`tests/integration/api-worktree-slash-commands.test.ts` の copilot ケースでは、`plan`, `agent`, `skills` について `source === 'builtin'`, `cliTools === ['copilot']`, Copilot 側の expected category/description を検証する。codex ケースでは同名コマンドが `source === 'standard'` かつ `cliTools === ['codex']` であることを検証する。加えて `goal`, `subagents`, `fork`, `memories`, `hooks` など Copilot に存在しない Codex-only 追加候補が cliTool=copilot で表示されないことを検証する。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 2,
+  "nice_to_have_count": 0,
+  "summary": "Stage 5 の指摘により、Issue #689 の実装対象と件数期待値は未確定状態になっている。影響範囲レビューでは、Stage 5 解決後に固定件数・テスト期待値・受入条件を再計算するゲートが必要な点を Must Fix とした。さらに、Copilot/Gemini builtin の確認で API レスポンス `sources` 形状を不用意に変えない後方互換方針と、同名衝突テストを `toContain` だけでなく `source` / `cliTools` / category まで検証する必要性を Should Fix とした。"
+}

@@ -49,6 +49,8 @@ export async function GET() {
       displayName: r.displayName ?? null,
       path: r.path,
       enabled: r.enabled,
+      // Issue #690: Sidebar visibility flag, independent of `enabled`.
+      visible: r.visible,
       worktreeCount: r.worktreeCount,
     }));
 

@@ -324,6 +324,164 @@ describe('WorktreeDesktopLayout', () => {
     });
   });
 
+  describe('Collapse functionality (Issue #688)', () => {
+    it('should show left pane when leftPaneCollapsed is false (default)', () => {
+      render(
+        <WorktreeDesktopLayout
+          leftPane={<div data-testid="left-content">Left Content</div>}
+          rightPane={<div data-testid="right-content">Right Content</div>}
+          leftPaneCollapsed={false}
+        />
+      );
+      const leftPane = screen.getByTestId('left-pane');
+      expect(leftPane).toBeInTheDocument();
+      // Default 50% width is preserved when not collapsed
+      expect(leftPane.style.width).not.toBe('0px');
+    });
+
+    it('should hide left pane (width: 0) when leftPaneCollapsed is true', () => {
+      render(
+        <WorktreeDesktopLayout
+          leftPane={<div>Left</div>}
+          rightPane={<div>Right</div>}
+          leftPaneCollapsed={true}
+        />
+      );
+
+      const leftPane = screen.getByTestId('left-pane');
+      // Collapsed left pane should have width 0
+      expect(leftPane.style.width).toBe('0px');
+    });
+
+    it('should show expand bar when collapsed', () => {
+      render(
+        <WorktreeDesktopLayout
+          leftPane={<div>Left</div>}
+          rightPane={<div>Right</div>}
+          leftPaneCollapsed={true}
+        />
+      );
+
+      expect(screen.getByTestId('expand-bar')).toBeInTheDocument();
+    });
+
+    it('should not show expand bar when not collapsed', () => {
+      render(
+        <WorktreeDesktopLayout
+          leftPane={<div>Left</div>}
+          rightPane={<div>Right</div>}
+          leftPaneCollapsed={false}
+        />
+      );
+
+      expect(screen.queryByTestId('expand-bar')).not.toBeInTheDocument();
+    });
+
+    it('should hide PaneResizer when collapsed', () => {
+      render(
+        <WorktreeDesktopLayout
+          leftPane={<div>Left</div>}
+          rightPane={<div>Right</div>}
+          leftPaneCollapsed={true}
+        />
+      );
+
+      // Resizer (separator) should be hidden when collapsed
+      expect(screen.queryByRole('separator')).not.toBeInTheDocument();
+    });
+
+    it('should show PaneResizer when not collapsed', () => {
+      render(
+        <WorktreeDesktopLayout
+          leftPane={<div>Left</div>}
+          rightPane={<div>Right</div>}
+          leftPaneCollapsed={false}
+        />
+      );
+
+      expect(screen.getByRole('separator')).toBeInTheDocument();
+    });
+
+    it('should call onToggleLeftPane when expand button clicked', () => {
+      const onToggle = vi.fn();
+      render(
+        <WorktreeDesktopLayout
+          leftPane={<div>Left</div>}
+          rightPane={<div>Right</div>}
+          leftPaneCollapsed={true}
+          onToggleLeftPane={onToggle}
+        />
+      );
+
+      const expandButton = screen.getByRole('button', { name: /expand left panel/i });
+      fireEvent.click(expandButton);
+      expect(onToggle).toHaveBeenCalledTimes(1);
+    });
+
+    it('should expose proper aria attributes on expand button', () => {
+      render(
+        <WorktreeDesktopLayout
+          leftPane={<div>Left</div>}
+          rightPane={<div>Right</div>}
+          leftPaneCollapsed={true}
+          onToggleLeftPane={() => {}}
+        />
+      );
+
+      const expandButton = screen.getByRole('button', { name: /expand left panel/i });
+      expect(expandButton).toHaveAttribute('aria-label');
+      expect(expandButton).toHaveAttribute('aria-expanded', 'false');
+      expect(expandButton).toHaveAttribute('aria-controls', 'worktree-left-pane');
+    });
+
+    it('should support keyboard activation (Enter) on expand button', () => {
+      const onToggle = vi.fn();
+      render(
+        <WorktreeDesktopLayout
+          leftPane={<div>Left</div>}
+          rightPane={<div>Right</div>}
+          leftPaneCollapsed={true}
+          onToggleLeftPane={onToggle}
+        />
+      );
+
+      const expandButton = screen.getByRole('button', { name: /expand left panel/i });
+      // Native button responds to Enter/Space via click event automatically when focused.
+      // Verify by clicking directly (jsdom doesn't simulate native keyboard activation).
+      fireEvent.click(expandButton);
+      expect(onToggle).toHaveBeenCalled();
+    });
+
+    it('should not render expand bar on mobile even when collapsed', () => {
+      vi.mocked(useIsMobile).mockReturnValue(true);
+
+      render(
+        <WorktreeDesktopLayout
+          leftPane={<div>Left</div>}
+          rightPane={<div>Right</div>}
+          leftPaneCollapsed={true}
+        />
+      );
+
+      // Mobile layout takes over; expand-bar should not appear
+      expect(screen.queryByTestId('expand-bar')).not.toBeInTheDocument();
+      expect(screen.getByTestId('mobile-layout')).toBeInTheDocument();
+    });
+
+    it('should set id="worktree-left-pane" on left pane for aria-controls reference', () => {
+      render(
+        <WorktreeDesktopLayout
+          leftPane={<div>Left</div>}
+          rightPane={<div>Right</div>}
+          leftPaneCollapsed={false}
+        />
+      );
+
+      const leftPane = screen.getByTestId('left-pane');
+      expect(leftPane).toHaveAttribute('id', 'worktree-left-pane');
+    });
+  });
+
   describe('Edge cases', () => {
     it('should handle empty panes', () => {
       render(

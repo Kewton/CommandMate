@@ -1,0 +1,13 @@
+{
+  "stage": 6,
+  "applied_findings": [
+    "S5-001",
+    "S5-002",
+    "S5-003",
+    "S5-004"
+  ],
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "issue_updated": true,
+  "summary": "Stage 5 通常レビューで検出した Must Fix 2 件と Should Fix 2 件を Issue #689 本文末尾の『Stage 5 レビュー反映（2回目通常レビュー）』セクションとして追記した。反映内容は、Codex built-in `/fast` の分類漏れ、Claude Code 追加対象 4 件の slash command としての一次情報不足、最新 Codex main で新たに見つかる built-in の分類方針、Copilot 同名衝突を固定する integration test の具体化。gh issue edit により Issue 本文更新済み。"
+}

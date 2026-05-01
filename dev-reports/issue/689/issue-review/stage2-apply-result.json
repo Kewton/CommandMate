@@ -1,0 +1,9 @@
+{
+  "stage": 2,
+  "applied_findings": ["S1-001", "S1-002", "S1-003", "S1-004", "S1-005", "S1-006", "S1-007", "S1-008"],
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "issue_updated": true,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/689",
+  "summary": "Stage 1 レビューで指摘された Must Fix 4件と Should Fix 4件をすべて Issue #689 本文に反映。主な追加: (1) 前提セクションを新設し STANDARD_COMMANDS と getCopilotBuiltinCommands/getGeminiBuiltinCommands の 2 系統管理を明記 (S1-001), (2) 現状確認に共有/排他を区別する分類表を追加（Claude+Codex 共有 7件、Codex+OpenCode 共有 1件、Codex 排他 9件）(S1-002), (3) Claude Code 追加対象を effort/fast/focus/lazy の 4 件確定、出典・description 案・スコープ外コマンド一覧 (login/logout/mcp 等) 付きで明記 (S1-003), (4) Codex 追加対象を plan/goal/agent/subagents/fork/memories/skills/hooks の 8 件、表示しないコマンド (debug-config/keymap/vim/experimental/personality/realtime/settings/apps/plugins/side/copy/rename/title/statusline/theme/exit/ps/stop/collab) を確定リスト化 (S1-004), (5) FREQUENTLY_USED.codex を ['new','undo','diff','approvals','plan'] に変更する方針を明記、5件制約は維持 (S1-005), (6) テスト更新箇所一覧表を追加（行番号付きで L21/L46/L80-94/L119-124/L126-131/L194 を網羅）+ 5 種類のテスト追加項目 (S1-006), (7) category 割り当て指針を追加し新カテゴリ作成不要を確定、影響範囲に src/types/slash-commands.ts と src/lib/command-merger.ts を読み取り専用として明記 (S1-007), (8) /undo は Hypothesis 6 が Unverifiable のため本 Issue では削除せず維持し別 Issue で再検討する方針を確定 (S1-008)。加えて関連 Issue (#4, #56, #379, #547, #594) リンクと調査日付 (2026-04-30) も追記。受入条件は確定リスト全件に合わせて更新。"
+}

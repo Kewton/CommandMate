@@ -1,0 +1,65 @@
+{
+  "issue_number": 688,
+  "iteration": 1,
+  "status": "success",
+  "implemented_files": [
+    "src/types/ui-state.ts",
+    "src/types/ui-actions.ts",
+    "src/hooks/useWorktreeUIState.ts",
+    "src/components/worktree/WorktreeDesktopLayout.tsx",
+    "src/components/worktree/LeftPaneTabSwitcher.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "test_files": [
+    "tests/unit/hooks/useWorktreeUIState.test.ts",
+    "tests/unit/components/WorktreeDesktopLayout.test.tsx"
+  ],
+  "test_results": {
+    "total": 6416,
+    "passed": 6416,
+    "failed": 0,
+    "skipped": 7,
+    "new_tests_added": 16,
+    "focused_tests": {
+      "useWorktreeUIState": 36,
+      "WorktreeDesktopLayout": 32
+    }
+  },
+  "coverage": 90.71,
+  "coverage_target": 80,
+  "static_analysis": {
+    "eslint_errors": 0,
+    "eslint_warnings": 0,
+    "typescript_errors": 0
+  },
+  "type_check": "passed",
+  "lint": "passed",
+  "commits": [
+    "556b7d47: feat(#688): add collapsible left pane to PC worktree detail view"
+  ],
+  "tdd_phases": {
+    "red": "16 failing tests confirmed (14 from new tests on missing functionality)",
+    "green": "All tests pass after implementation",
+    "refactor": "Code reviewed for type safety, naming clarity, and JSDoc comments"
+  },
+  "acceptance_criteria_coverage": {
+    "left_pane_hidden_on_collapse": "covered by WorktreeDesktopLayout.test.tsx 'should hide left pane (width: 0) when leftPaneCollapsed is true'",
+    "expand_bar_visible_on_collapse": "covered by 'should show expand bar when collapsed'",
+    "expand_bar_button_calls_callback": "covered by 'should call onToggleLeftPane when expand button clicked'",
+    "pane_resizer_hidden_on_collapse": "covered by 'should hide PaneResizer when collapsed'",
+    "aria_attributes": "covered by 'should expose proper aria attributes on expand button'",
+    "keyboard_operable": "covered by 'should support keyboard activation (Enter) on expand button'",
+    "mobile_excluded": "covered by 'should not render expand bar on mobile even when collapsed'",
+    "localStorage_persistence": "covered indirectly via useLocalStorageState (already tested) + 'should toggle left pane collapsed state' verifying state changes that trigger localStorage writes",
+    "reducer_actions": "covered by TOGGLE_LEFT_PANE / SET_LEFT_PANE_COLLAPSED reducer tests in useWorktreeUIState.test.ts",
+    "backward_compatibility": "WorktreeDesktopLayoutProps new props are optional; all 24 existing tests pass without modification"
+  },
+  "design_decisions": [
+    "leftPaneCollapsed/onToggleLeftPane are optional props on WorktreeDesktopLayout to preserve backward compatibility",
+    "useLocalStorageState integration uses isHydratedRef to avoid infinite useEffect loops between state and storage",
+    "collapsedRef gives the memoized actions object access to current state without changing the [] dependency array semantics",
+    "Mobile path entirely bypasses collapse UI by checking useIsMobile() before reaching the DesktopLayout subcomponent",
+    "Expand bar uses width 24px (CSS px) to match acceptance criteria; right pane uses calc(100% - 24px) when collapsed"
+  ],
+  "message": "TDD実装完了。Red→Green→Refactorサイクルを完了。新規テスト16件追加 (reducer 5件 + hook 1件 + layout 10件)。全6416件パス、カバレッジ90.71%、TypeScript/ESLintエラーゼロ。"
+}

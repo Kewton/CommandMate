@@ -33,8 +33,55 @@ describe('db-migrations', () => {
   });
 
   describe('CURRENT_SCHEMA_VERSION', () => {
-    it('should be 30 after Migration #30', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(30);
+    it('should be 31 after Migration #31', () => {
+      expect(CURRENT_SCHEMA_VERSION).toBe(31);
+    });
+  });
+
+  describe('Migration #31: add-repository-visible (Issue #690)', () => {
+    beforeEach(() => {
+      runMigrations(db);
+    });
+
+    it('should add visible column to repositories table', () => {
+      const columns = db.prepare("PRAGMA table_info('repositories')").all() as Array<{
+        name: string;
+        type: string;
+        notnull: number;
+        dflt_value: string | null;
+      }>;
+
+      const visibleColumn = columns.find(col => col.name === 'visible');
+      expect(visibleColumn).toBeDefined();
+      expect(visibleColumn?.type).toBe('INTEGER');
+      expect(visibleColumn?.dflt_value).toBe('1');
+    });
+
+    it('should default visible to 1 for newly inserted repositories', () => {
+      const now = Date.now();
+      db.prepare(`
+        INSERT INTO repositories (id, name, path, enabled, clone_source, is_env_managed, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run('vis-1', 'visible-repo', '/tmp/visible-repo', 1, 'local', 0, now, now);
+
+      const row = db.prepare('SELECT visible FROM repositories WHERE id = ?').get('vis-1') as { visible: number };
+      expect(row.visible).toBe(1);
+    });
+
+    it('should record migration in schema_version table', () => {
+      const history = getMigrationHistory(db);
+      expect(history.find(m => m.version === 31)?.name).toBe('add-repository-visible');
+    });
+
+    it('should rollback by dropping the visible column', () => {
+      rollbackMigrations(db, 30);
+      expect(getCurrentVersion(db)).toBe(30);
+
+      const columns = db.prepare("PRAGMA table_info('repositories')").all() as Array<{
+        name: string;
+      }>;
+      const columnNames = columns.map(c => c.name);
+      expect(columnNames).not.toContain('visible');
     });
   });
 

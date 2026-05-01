@@ -1,0 +1,81 @@
+{
+  "issue_number": 690,
+  "status": "passed",
+  "acceptance_criteria_results": [
+    {
+      "criterion": "AC1: Repositories 画面の各リポジトリ行に「Visibility」列のトグルボタンが表示される",
+      "result": "passed",
+      "evidence": "tests/unit/components/repository/RepositoryList.test.tsx > Visibility toggle (Issue #690) > 'renders the toggle in Visible state when visible=true' および 'renders the toggle in Hidden state when visible=false' が合格。VisibilityToggle サブコンポーネント（role=switch + aria-checked）が各行にレンダリング。"
+    },
+    {
+      "criterion": "AC2: トグルボタンクリックで即時に表示/非表示が切り替わる（保存ボタン操作不要）",
+      "result": "passed",
+      "evidence": "tests/unit/components/repository/RepositoryList.test.tsx > 'flips visibility optimistically and calls updateVisibility' が合格。クリック直後に楽観的更新が走り、PUT /api/repositories/[id] が即時呼ばれる。"
+    },
+    {
+      "criterion": "AC3: 「非表示」に設定したリポジトリのworktreeがサイドバーから消える",
+      "result": "passed",
+      "evidence": "tests/unit/components/layout/Sidebar-visibility.test.tsx で visible=false のリポジトリ配下の worktree が Sidebar から除外されることを検証。Sidebar.tsx で visible=false のフィルタを実装。"
+    },
+    {
+      "criterion": "AC4: 「表示中」に戻すとサイドバーに再表示される",
+      "result": "passed",
+      "evidence": "tests/unit/components/layout/Sidebar-visibility.test.tsx で visible=true のリポジトリは Sidebar に表示されることを検証。トグル UI から true に戻すと cache が更新され Sidebar に再表示。"
+    },
+    {
+      "criterion": "AC5: ページリロード後も設定が維持される（DB保存）",
+      "result": "passed",
+      "evidence": "tests/unit/api/repository-visibility.test.ts > 'updates visible from true to false' および 'updates visible from false to true' が合格。PUT API で DB に永続化、GET API で再取得時にも反映。"
+    },
+    {
+      "criterion": "AC6: 既存リポジトリは全て「表示中」として初期化される（DEFAULT 1）",
+      "result": "passed",
+      "evidence": "tests/unit/lib/db-migrations.test.ts でマイグレーション v31 が visible カラムを DEFAULT 1 で追加することを検証。tests/unit/api/repository-visibility.test.ts > 'includes visible: true for repositories created with the default' が合格。"
+    },
+    {
+      "criterion": "AC7: enabled=false でも visible=true ならサイドバーに表示（Disabled バッジ付き）",
+      "result": "passed",
+      "evidence": "tests/unit/components/layout/Sidebar-visibility.test.tsx で enabled=false + visible=true のリポジトリは Sidebar に Disabled バッジ付きで表示されることを検証。Issue #190 の挙動を維持。"
+    },
+    {
+      "criterion": "AC8: visible=false なら enabled=true でもサイドバーから除外",
+      "result": "passed",
+      "evidence": "tests/unit/components/layout/Sidebar-visibility.test.tsx で enabled=true + visible=false のリポジトリは Sidebar から除外されることを検証。"
+    },
+    {
+      "criterion": "AC9: enabled=false かつ visible=false でもサイドバーから除外",
+      "result": "passed",
+      "evidence": "tests/unit/components/layout/Sidebar-visibility.test.tsx で enabled=false + visible=false の組合せでも Sidebar から除外されることを検証。"
+    },
+    {
+      "criterion": "AC10: Sessions/Review 画面では visible=false でも全件表示（管理用途）",
+      "result": "passed",
+      "evidence": "Sidebar.tsx に Sidebar-local フィルタとして実装。useWorktreeList は変更されていないため、Sessions/Review 画面は visible に関わらず全件表示。tdd-result.json の notes にも明記。"
+    },
+    {
+      "criterion": "AC11: トグル失敗時は楽観的更新がロールバックされ feedback バナー表示",
+      "result": "passed",
+      "evidence": "tests/unit/components/repository/RepositoryList.test.tsx > 'rolls back the optimistic update and shows feedback on failure' および 'disables the toggle while a request is in flight' が合格。"
+    },
+    {
+      "criterion": "AC12: 全ユニットテストがパス",
+      "result": "passed",
+      "evidence": "5 ファイル / 128 テストすべて合格。db-migrations.test.ts, db-repository-exclusion.test.ts, repository-visibility.test.ts, RepositoryList.test.tsx, Sidebar-visibility.test.tsx。"
+    },
+    {
+      "criterion": "AC13: 既存テストが引き続きパス",
+      "result": "passed",
+      "evidence": "db-repository-exclusion.test.ts（Issue #190 既存テスト）が引き続き合格。tdd-result.json でも broader run（7205 passed）でリグレッション無しを確認済み。"
+    }
+  ],
+  "test_run": {
+    "passed": 128,
+    "failed": 0,
+    "command": "npx vitest run tests/unit/lib/db-migrations.test.ts tests/unit/lib/db-repository-exclusion.test.ts tests/unit/api/repository-visibility.test.ts tests/unit/components/repository/RepositoryList.test.tsx tests/unit/components/layout/Sidebar-visibility.test.tsx"
+  },
+  "lint_result": "pass",
+  "type_check_result": "pass",
+  "build_result": "pass",
+  "overall_verdict": "PASS",
+  "notes": "全 13 受入条件をクリア。Issue #690 関連の 5 テストファイル / 128 テストがすべて合格。`npx tsc --noEmit` はエラー無し、`npm run lint` は warnings/errors 無し、`npm run build` は成功。enabled と visible は DB/UI 両層で完全に独立。Sidebar フィルタは Sidebar-local 実装のため Sessions/Review 画面の挙動は変更されていない。act() warning が RepositoryList テストで出ているが、テスト自体は全て合格しており機能上の問題は無い。"
+}
