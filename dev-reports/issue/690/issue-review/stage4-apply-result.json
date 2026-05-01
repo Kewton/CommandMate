@@ -1,0 +1,39 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目・影響範囲）",
+  "issue_number": "690",
+  "applied_findings": [
+    "S3-001",
+    "S3-002",
+    "S3-003",
+    "S3-004",
+    "S3-005",
+    "S3-006",
+    "S3-007",
+    "S3-008"
+  ],
+  "skipped_findings": [
+    "S3-009",
+    "S3-010"
+  ],
+  "skip_reasons": {
+    "S3-009": "Nice to Have（ポーリング頻度とUX整合性の最適化）。本Issueでは楽観的更新で十分とし、別Issueでフォローアップ検討。",
+    "S3-010": "Nice to Have（AssistantChatPanel/WorktreeList への波及）。`visible` 追加自体は consumer 側で無害（フィルタしない場合は無視される）。リリース後にフィードバックで判断。影響範囲表で『影響を受けない』として明記。"
+  },
+  "issue_updated": true,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/690",
+  "summary": "Stage 3（影響範囲レビュー）の Must Fix 3件・Should Fix 5件を全て GitHub Issue #690 に反映。主な追加内容: (1) S3-001: useWorktreesCache→WorktreesCacheProvider→WorktreeSelectionContext の3層に repositories 伝播経路を追加するタスクを新セクション『Cache/Context層』として実装タスクと影響範囲表に追記。(2) S3-002: src/lib/api-client.ts の RepositorySummary 型に visible: boolean および enabled: boolean 追加タスクを APIレイヤと影響範囲表に追記。(3) S3-003: src/lib/db/migrations/runner.ts の CURRENT_SCHEMA_VERSION を 30→31 に更新するタスクを DBレイヤと影響範囲表、テストレイヤ（db-migrations.test.ts での確認）に追記。(4) S3-004: disableRepository / restoreRepository が visible に触れず独立挙動を保つことを実装タスク・受入条件・テストケースに明記。(5) S3-005: PUT API の partial update 仕様（両方 undefined で 400）、レスポンス型 UpdateRepositoryDisplayNameResponse の visible 追加または UpdateRepositoryResponse へのリファクタ判断を APIレイヤに追記。(6) S3-006: フィルタ実装位置を『Sidebar.tsx 内ローカルフィルタ』と確定、useWorktreeList 共有フックは変更せず、Sessions/Review 画面は全件表示（管理用途）と明記。(7) S3-007: 既存テスト群（db-repository-exclusion/display-name/delete/clone, RepositoryList/RepositoryManager コンポーネント, integration テスト）への visible フィールド追加に伴う回帰確認項目をテストレイヤに具体化。(8) S3-008: RepositorySummary に enabled も含めることで Sidebar の Disabled badge 表示を維持することを実装タスク・受入条件に明記。Nice to Have 2件（S3-009, S3-010）はスキップしつつ S3-010 は『影響を受けない』として参考情報に記載。",
+  "must_fix_applied": 3,
+  "should_fix_applied": 5,
+  "nice_to_have_skipped": 2,
+  "key_changes": [
+    "新セクション『Cache/Context層の伝播経路（重要・S3-001）』を背景・課題に追加",
+    "新セクション『Cache/Context層（S3-001、新規追加）』を実装タスクに追加（3ファイルの修正タスク）",
+    "新セクション『disableRepository / restoreRepository の独立性テスト（S3-004）』をテストレイヤに追加",
+    "新セクション『他画面の挙動』を受入条件に追加（Sessions/Review 全件表示）",
+    "新セクション『影響を受けない（参考）』を影響範囲に追加",
+    "DBレイヤに CURRENT_SCHEMA_VERSION 30→31 更新タスク追記",
+    "APIレイヤに src/lib/api-client.ts の RepositorySummary/RepositoryListItem/UpdateRepositoryDisplayNameResponse 全体の型修正タスクを統合・詳細化",
+    "影響範囲表に4ファイル（api-client.ts, useWorktreesCache.ts, WorktreesCacheProvider.tsx, WorktreeSelectionContext.tsx）と複数テストファイルを追加"
+  ]
+}
