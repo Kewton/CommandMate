@@ -7,7 +7,7 @@
  * @module lib/date-utils
  */
 
-import { formatDistanceToNow } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 import type { Locale } from 'date-fns';
 
 /**
@@ -41,4 +41,36 @@ export function formatRelativeTime(isoString: string, locale?: Locale): string {
     addSuffix: true,
     ...(locale ? { locale } : {}),
   });
+}
+
+/**
+ * Format a message timestamp as a localized date + time string. (Issue #687)
+ *
+ * Uses date-fns `'PPp'` (Long localized date + Long localized time), which is
+ * the same format used by `MessageList.tsx` and `PromptMessage.tsx`. Keeping
+ * the format identical guarantees a consistent timestamp presentation across
+ * all chat-style UI surfaces.
+ *
+ * - When `locale` is omitted, date-fns falls back to its default (en-US-like)
+ *   formatting. UI callers should always pass a resolved `Locale` from
+ *   `getDateFnsLocale()`.
+ * - For an `Invalid Date` (or any non-`Date` value passed in via `as any`),
+ *   returns an empty string as a safe UI fallback.
+ *
+ * @param timestamp - The Date to render
+ * @param locale - Optional date-fns Locale object
+ * @returns Localized "PPp" string, or empty string for invalid input
+ *
+ * @example
+ * ```ts
+ * formatMessageTimestamp(new Date('2026-02-15T10:30:00Z'), ja)
+ * // => '2026年2月15日 19:30' (example, depends on TZ/locale)
+ * formatMessageTimestamp(new Date('invalid')) // => ''
+ * ```
+ */
+export function formatMessageTimestamp(timestamp: Date, locale?: Locale): string {
+  if (!(timestamp instanceof Date) || isNaN(timestamp.getTime())) {
+    return '';
+  }
+  return format(timestamp, 'PPp', locale ? { locale } : undefined);
 }
