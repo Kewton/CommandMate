@@ -1,0 +1,59 @@
+{
+  "stage": 3,
+  "focus": "影響範囲",
+  "reviewer": "issue-review-agent",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "Should Fix",
+      "title": "useLocale() 呼び出し位置が memo 化済みサブコンポーネント内になり再レンダリング挙動の説明が不足",
+      "description": "現状 ConversationPairCard.tsx の UserMessageSection (L199, memo) と AssistantMessageItem (L262, memo) は React.memo でラップされており、親 (ConversationPairCard 本体) も memo 化されている。Issue で示された方針では「UserMessageSection / AssistantMessageItem 内で `const dateFnsLocale = getDateFnsLocale(useLocale());` を取得」とあるが、useLocale() は next-intl コンテキスト変更を購読する hook であり、locale が変わるとサブコンポーネントが再レンダリングされる。これ自体は正しい挙動だが、memo 化されたサブコンポーネントに hook が増える点・useMemo 依存配列に dateFnsLocale を追加する点（S3-005）の関係が暗黙的。さらに `getDateFnsLocale(locale)` は呼び出すたびに DATE_FNS_LOCALE_MAP[locale] を返すだけ（参照は安定）だが、`useLocale()` の戻り値が安定なら問題ないことを設計レビューで明記しておくと安全。実装タスクに「`getDateFnsLocale(useLocale())` の戻り値は SupportedLocale 単位で同一参照（DATE_FNS_LOCALE_MAP の値）であり memo 比較に影響しない」旨を明記すると、後続レビューで誤解を防げる。",
+      "location": "src/components/worktree/ConversationPairCard.tsx L199 (UserMessageSection memo), L262 (AssistantMessageItem memo), L416 (ConversationPairCard memo)",
+      "suggestion": "Issue「主要な変更点」または「実装タスク」に補足を追加する: 「`useLocale()` および `getDateFnsLocale()` は安定参照を返すため、メモ化サブコンポーネント (memo) の再レンダリングは locale 変更時のみ発生する」。または、親コンポーネント (ConversationPairCard 本体) で 1 回だけ `dateFnsLocale` を解決し props で UserMessageSection / AssistantMessageItem に渡す案も検討する（hook 呼び出しを 1 箇所に集約できる）。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "Should Fix",
+      "title": "AssistantMessageList.tsx の toLocaleTimeString 残存をスコープ外にした根拠が弱い",
+      "description": "Issue 本文「スコープ外」に `AssistantMessageList.tsx:22` は別 Issue 扱いとあるが、当該ファイル (src/components/home/AssistantMessageList.tsx L21-23) の `formatTimestamp` は `timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })` を使用しており、まさに本 Issue が解消したい『日付不明』問題と同一の症状を持つ。Home 画面のアシスタントチャットパネル (Issue #649) は MessageHistory と類似の長時間滞在を伴う UI で、日をまたぐシナリオが容易に発生し得る。今回追加する `formatMessageTimestamp` を使えば 1〜2 行で同じ修正が可能であり、別 Issue にする工数的メリットが薄い。少なくとも『なぜスコープ外か』の根拠（例: 本 Issue は MessageHistory のみが Bug Report の対象、Home 画面は別 UX 検討中、など）を追記するか、同 Issue 内で同時修正することを推奨。",
+      "location": "src/components/home/AssistantMessageList.tsx L21-23、Issue 本文「スコープ外」",
+      "suggestion": "次のいずれかを選択する: (a) Issue タイトルとスコープを ConversationPairCard 限定と明示し、AssistantMessageList については別 Issue 番号を予約・記載する。 (b) `formatMessageTimestamp` を date-utils に追加するならば、AssistantMessageList.tsx も同関数に置き換える実装タスクを追加し、本 Issue の影響範囲・テスト範囲・受入条件を更新する（コスト最小で完全解消）。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "Should Fix",
+      "title": "formatMessageTimestamp の実装方針（date-fns 依存／format 'PPp' の流用）と date-utils.ts の SRP との整合性が未記載",
+      "description": "src/lib/date-utils.ts は冒頭ヘッダで「[SF-001] Provides date formatting utilities for UI display. Separated from date-locale.ts for Single Responsibility Principle.」と記載されており、現状は formatRelativeTime のみを提供する小さなモジュールである。今回 `formatMessageTimestamp` を追加することで「相対時刻」と「絶対時刻ロケール表示」の 2 種類が混在することになる。設計上は問題ないが、(1) 関数の内部実装が date-fns の `format(timestamp, 'PPp', { locale })` を呼ぶ薄いラッパーとなる点、(2) 引数 `locale` が省略された場合のデフォルト挙動（date-fns のデフォルト = en-US 想定）、(3) Invalid Date のガード方針（formatRelativeTime と同じく空文字フォールバック or throw）、が Issue に記載されていない。実装段階での解釈ぶれを避けるため明記すべき。特に Invalid Date ガードは ChatMessage.timestamp が Date 型保証だとしても、DB から復元される際の Date 化失敗を考慮すると安全側に倒す価値がある。",
+      "location": "Issue「主要な変更点」「実装タスク」、src/lib/date-utils.ts L1-44、src/components/worktree/MessageList.tsx L66、src/components/worktree/PromptMessage.tsx L74",
+      "suggestion": "Issue に次を追記する: 「`formatMessageTimestamp` の内部実装は `format(timestamp, 'PPp', locale ? { locale } : undefined)` とする」「locale 未指定時は date-fns デフォルト（en-US）に従う」「Invalid Date 入力時は空文字を返す（formatRelativeTime と同じ防御的フォールバック）」。Invalid Date ガードを採用しない場合はその理由を明記する。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "Nice to Have",
+      "title": "テスト範囲に SSR/Hydration ミスマッチ観点の確認が含まれていない",
+      "description": "ConversationPairCard.tsx は 'use client' 指定だが、useLocale / getDateFnsLocale の組み合わせはサーバとクライアントで同一ロケールが解決される前提が必要。toLocaleTimeString はブラウザのロケール設定に依存し、SSR と CSR で異なる出力を生むハイドレーションミスマッチの古典的源泉である。今回 `format(date, 'PPp', { locale })` に変更することで next-intl から取得した locale で SSR と CSR の出力が一致する見込みだが、(a) サーバ側で `format()` がタイムゾーンを Node プロセスのタイムゾーン依存で解釈する点、(b) クライアント側がブラウザのタイムゾーンで解釈する点、で「日付」境界付近のミスマッチが残る可能性がある。受入条件・テスト範囲にハイドレーション動作確認（または 'use client' 直下なので CSR のみで描画される旨）を明記すると安全。",
+      "location": "Issue「受入条件」、src/components/worktree/ConversationPairCard.tsx L8 'use client'",
+      "suggestion": "受入条件または検証メモに「ConversationPairCard は 'use client' 配下のため SSR ではマウント前 placeholder がレンダリングされ、format() の出力はクライアントのタイムゾーンに従う（ハイドレーションミスマッチ対象外）」と明記する。または unit テスト で `vi.setSystemTime()` + 任意 TZ で出力検証を追加する。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "Nice to Have",
+      "title": "useMemo 依存配列の更新が `dateFnsLocale` と書かれているが安定参照前提の記述がない",
+      "description": "Stage 2 反映で実装タスクに「useMemo 依存配列を [message.timestamp, dateFnsLocale] に更新」が追加されたが、`dateFnsLocale` は `getDateFnsLocale(useLocale())` の結果である。`getDateFnsLocale` は `DATE_FNS_LOCALE_MAP[locale] ?? enUS` を返すため、同じ locale 文字列に対しては常に同一参照（DATE_FNS_LOCALE_MAP のエントリ参照）が返る。したがって useMemo は locale 変更時のみ再計算される。この『参照安定性』は実装者が直感的に把握しづらく、もし `getDateFnsLocale` が将来オブジェクトをスプレッド構築する実装に変更された場合、毎レンダリングで useMemo が再計算され効果が消失する。Issue への明示は不要だとしても、テスト or 設計書側で『DATE_FNS_LOCALE_MAP のエントリは同一参照を返す前提』を担保するテストの追加を推奨。",
+      "location": "src/lib/date-locale.ts L17-19、Issue「実装タスク」useMemo 依存配列項",
+      "suggestion": "(a) date-locale.ts に「DATE_FNS_LOCALE_MAP は同一 locale 文字列に対し同一参照を返す（純粋ルックアップ）」とコメントを追加する、または (b) `formatMessageTimestamp` のテストで `getDateFnsLocale('ja') === getDateFnsLocale('ja')` を確認する。Issue 自体の修正は不要。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "Nice to Have",
+      "title": "MessageList.tsx:603 のリアルタイム時刻表示の判断根拠を補強",
+      "description": "Issue「スコープ外」に「`MessageList.tsx:603` のリアルタイム時刻表示は対象外」とあり、これは妥当（`new Date().toLocaleTimeString()` で現在時刻を都度表示する用途のため、日付情報の優先度が低い）。ただし、影響範囲レビューの観点では『MessageList.tsx 全体』が今回の Issue で『触らない』と明示されているのに、L603 だけ別途記載することで読み手が「他にも何かあるのか?」と疑問を持つ可能性がある。簡潔さのため、スコープ外項目を「MessageList.tsx 全体（L62-66 既存実装は適切、L603 はリアルタイム時刻のため別目的）」のように 1 行にまとめても良い。",
+      "location": "Issue「スコープ外」、src/components/worktree/MessageList.tsx L603",
+      "suggestion": "スコープ外セクションを次のように整理する: 「MessageList.tsx は本 Issue 対象外（L62-66 は既に PPp フォーマット、L603 は現在時刻表示で目的が異なる）」「PromptMessage.tsx は既に PPp フォーマットのため対象外」「AssistantMessageList.tsx:22 は別 Issue 扱い（理由: ___）」と理由を 1 文で添える。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 3,
+  "nice_to_have_count": 3,
+  "summary": "Issue #687 の影響範囲は基本的に妥当（変更対象 3 ファイル: ConversationPairCard.tsx、date-utils.ts、date-utils.test.ts と既存テスト 3 ファイルの回帰）であり、波及効果は限定的。Must Fix はないが、Should Fix が 3 件: (1) S3-001: memo 化済みサブコンポーネント内で useLocale を呼ぶ場合の再レンダリング・参照安定性の説明不足、(2) S3-002: AssistantMessageList.tsx:22 を別 Issue 扱いとした根拠が弱く、同問題が同 UI 種で残る（同時対応またはトラッキング Issue 番号を明記すべき）、(3) S3-003: formatMessageTimestamp の内部実装方針（date-fns format 流用、Invalid Date ガード、locale 未指定時のデフォルト）が未記載。Nice to Have として、SSR/ハイドレーションミスマッチ観点（'use client' 配下の補足）、useMemo 依存配列の参照安定性ドキュメント、スコープ外項目の整理を推奨。後方互換性は問題なく、新規追加 API のみで既存インターフェース破壊もない。テスト網羅性は影響範囲表に既存テスト 3 ファイルが追加済みで概ね十分。これらを補完すれば work-plan に進める品質。"
+}

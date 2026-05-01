@@ -1,0 +1,28 @@
+{
+  "issue_number": 687,
+  "iteration": 1,
+  "status": "success",
+  "implemented_files": [
+    "src/lib/date-utils.ts",
+    "src/components/worktree/ConversationPairCard.tsx",
+    "tests/unit/lib/date-utils.test.ts"
+  ],
+  "test_results": {
+    "unit_tests_passed": true,
+    "regression_tests_passed": true,
+    "test_count": 6406,
+    "new_test_count": 7,
+    "date_utils_test_count": 16,
+    "conversation_pair_card_regression_count": 36,
+    "skipped": 7
+  },
+  "type_check_passed": true,
+  "lint_passed": true,
+  "commit_hash": "f73ec695",
+  "tdd_cycle": {
+    "red": "Added 7 failing test cases for formatMessageTimestamp (basic ja/enUS/no-locale formatting, locale-difference sanity, Invalid Date guard, non-Date guard, and PPp output consistency).",
+    "green": "Implemented formatMessageTimestamp(timestamp, locale?) in src/lib/date-utils.ts using date-fns format(date, 'PPp', { locale }) with Invalid Date / non-Date defensive fallback returning empty string.",
+    "refactor": "Replaced the two toLocaleTimeString() useMemo blocks in ConversationPairCard.tsx (UserMessageSection / AssistantMessageItem) with the new helper plus useLocale + getDateFnsLocale, matching MessageList.tsx / PromptMessage.tsx."
+  },
+  "summary": "Issue #687: Added formatMessageTimestamp() in src/lib/date-utils.ts (date-fns 'PPp' with Invalid Date guard) and switched ConversationPairCard's UserMessageSection/AssistantMessageItem from toLocaleTimeString() to the new helper via useLocale/getDateFnsLocale. 7 new unit tests pass. All 36 ConversationPairCard regression tests pass. Full unit suite: 6406 passed / 7 skipped. tsc --noEmit and npm run lint both clean."
+}

@@ -1,0 +1,26 @@
+{
+  "issue_number": 687,
+  "refactor_targets": [
+    "src/lib/date-utils.ts",
+    "src/components/worktree/ConversationPairCard.tsx",
+    "tests/unit/lib/date-utils.test.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "test_count": 16,
+    "lint_errors": 0,
+    "type_errors": 0
+  },
+  "improvement_goals": [
+    "コードの可読性向上（不要なコメントの削除、命名の改善）",
+    "テストの品質確認（重複テストの排除、エッジケースの網羅性確認）",
+    "SOLID原則への準拠確認",
+    "不要な useMemo が残っていないか確認"
+  ],
+  "constraints": [
+    "動作を変更しないこと",
+    "テストをすべてパスさせること",
+    "TypeScript 型チェックをパスさせること",
+    "ESLint エラーを出さないこと"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "stage": 1,
+  "applied_findings": ["DR1-001", "DR1-003", "DR1-004", "DR1-006"],
+  "skipped_findings": ["DR1-002", "DR1-005"],
+  "changes_summary": "設計方針書 (dev-reports/design/issue-687-message-timestamp-design-policy.md) にStage 1のレビュー指摘を反映。(1) DR1-001: §10「スコープ外」を「スコープ外（および技術的負債のトラッキング）」に改題し、MessageList.tsx / PromptMessage.tsx を formatMessageTimestamp に置換するフォローアップ Issue を作成する旨を明記、対象ファイル一覧と移行内容を追記。(2) DR1-003: §3 の formatMessageTimestamp 実装例にJSDocを追加し、'PPp' が date-fns の Long localized date + Long localized time を意味することと、ja/enUSの出力例を明記。さらに引用ブロックで 'PPp' フォーマットの意味を解説。(3) DR1-004: §3「既存パターン踏襲」に新規サブセクション「useMemo の必要性に関する補足」を追加し、MessageList.tsx / PromptMessage.tsx は useMemo を使わず直接 format() を呼んでいる事実を明記、useMemo を外す代替実装も提示。(4) DR1-006: §3 の実装例 JSDoc に locale 省略時のフォールバック動作（date-fns デフォルト=enUS 相当）を明記し、UI コンポーネントから呼び出す場合は useLocale() 由来のロケールを必ず渡すよう注意喚起する引用ブロックを追加。スキップ事項: DR1-002（入力型統一）と DR1-005（locale 解決ロジック共通化）は Nice to Have レベルかつ既存パターン踏襲の方針と整合性を優先するため、本 Issue では反映せず将来の検討事項として残す。",
+  "design_doc_updated": true
+}

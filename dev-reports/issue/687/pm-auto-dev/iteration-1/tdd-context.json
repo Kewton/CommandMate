@@ -1,0 +1,29 @@
+{
+  "issue_number": 687,
+  "issue_title": "MessageHistoryに日付も表示してほしい",
+  "acceptance_criteria": [
+    "MessageHistory に date-fns 'PPp' フォーマット相当の日付+時刻が表示される（MessageList.tsx / PromptMessage.tsx と同一フォーマット）",
+    "ロケールに応じて表示形式が切り替わる（日本語/英語）",
+    "formatMessageTimestamp のユニットテストがパスする",
+    "ConversationPairCard の既存テスト（unit / integration）が引き続きパスする"
+  ],
+  "implementation_tasks": [
+    "src/lib/date-utils.ts に formatMessageTimestamp(timestamp: Date, locale?: Locale): string を追加（内部実装: format(timestamp, 'PPp', locale ? { locale } : undefined)、Invalid Date ガード: !(timestamp instanceof Date) || isNaN(timestamp.getTime()) → 空文字）",
+    "src/components/worktree/ConversationPairCard.tsx に useLocale(next-intl) / getDateFnsLocale(@/lib/date-locale) / formatMessageTimestamp(@/lib/date-utils) の import を追加",
+    "ConversationPairCard.tsx の UserMessageSection（L210-213）で toLocaleTimeString() を formatMessageTimestamp(message.timestamp, dateFnsLocale) に置換",
+    "ConversationPairCard.tsx の AssistantMessageItem（L277-280）で toLocaleTimeString() を formatMessageTimestamp(message.timestamp, dateFnsLocale) に置換",
+    "tests/unit/lib/date-utils.test.ts に formatMessageTimestamp の describe ブロックを追加（ja/enUS ロケール、locale 未指定、Invalid Date、instanceof 非 Date、出力整合性の 6 ケース以上）"
+  ],
+  "design_policy_path": "dev-reports/design/issue-687-message-timestamp-design-policy.md",
+  "work_plan_path": "dev-reports/issue/687/work-plan.md",
+  "target_coverage": 80,
+  "key_files": [
+    "src/lib/date-utils.ts",
+    "src/lib/date-locale.ts",
+    "src/components/worktree/ConversationPairCard.tsx",
+    "tests/unit/lib/date-utils.test.ts",
+    "tests/unit/components/worktree/ConversationPairCard.test.tsx",
+    "src/components/worktree/__tests__/ConversationPairCard.test.tsx",
+    "tests/integration/conversation-pair-card.test.tsx"
+  ]
+}

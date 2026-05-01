@@ -1,0 +1,43 @@
+{
+  "issue_number": 687,
+  "overall_status": "passed",
+  "criteria_results": [
+    {
+      "criterion": "MessageHistory に date-fns 'PPp' フォーマット相当の日付+時刻が表示される（MessageList.tsx / PromptMessage.tsx と同一フォーマット）",
+      "status": "passed",
+      "details": "src/lib/date-utils.ts に formatMessageTimestamp が実装され、format(timestamp, 'PPp', locale ? { locale } : undefined) を使用している（lines 71-76）。MessageList.tsx / PromptMessage.tsx と同一の 'PPp' フォーマット。"
+    },
+    {
+      "criterion": "ロケールに応じて表示形式が切り替わる（日本語/英語）",
+      "status": "passed",
+      "details": "ConversationPairCard.tsx の UserMessageSection (line 215-217) と AssistantMessageItem (line 283-285) が useLocale() / getDateFnsLocale() で解決した locale を formatMessageTimestamp に渡している。import 文も確認済み (lines 12, 15, 16)。"
+    },
+    {
+      "criterion": "formatMessageTimestamp のユニットテストがパスする（7ケース追加、16件全パス）",
+      "status": "passed",
+      "details": "tests/unit/lib/date-utils.test.ts: Test Files 1 passed, Tests 16 passed (16)。Invalid Date ガード（!(timestamp instanceof Date) || isNaN(timestamp.getTime())）も実装で確認済み (line 72)。"
+    },
+    {
+      "criterion": "ConversationPairCard の既存テスト（unit / integration）が引き続きパスする",
+      "status": "passed",
+      "details": "tests/unit/components/worktree/ConversationPairCard.test.tsx (7 tests) + tests/integration/conversation-pair-card.test.tsx + tests/unit/components/HistoryPane.test.tsx を一括実行で 34/34 全パス。grep 結果: ConversationPairCard.tsx 内に toLocaleTimeString は 0 件残存（完全置換済み）、formatMessageTimestamp 参照は 3 件（import + 2 使用箇所）。"
+    },
+    {
+      "criterion": "TypeScript 型チェックがパスする",
+      "status": "passed",
+      "details": "npx tsc --noEmit が EXIT_CODE=0 でエラー出力なし。"
+    },
+    {
+      "criterion": "ESLint エラーがない",
+      "status": "passed",
+      "details": "npm run lint: 'No ESLint warnings or errors'。"
+    }
+  ],
+  "test_summary": {
+    "unit_tests": "date-utils: 16/16 passed; ConversationPairCard 関連: 34/34 passed; full suite (vitest filter date-utils): 6406 passed / 7 skipped; full suite (vitest filter ConversationPairCard): 6430 passed / 7 skipped",
+    "regression_tests": "全 unit テスト 6406-6430 件パス（7 件 skipped は既存）、回帰なし",
+    "type_check": "passed",
+    "lint": "passed"
+  },
+  "summary": "Issue #687 の全受入条件をパス。formatMessageTimestamp は src/lib/date-utils.ts に date-fns 'PPp' フォーマット + Invalid Date ガード付きで実装されており、ConversationPairCard.tsx の UserMessageSection/AssistantMessageItem 両方で toLocaleTimeString() を完全に置換。useLocale + getDateFnsLocale でロケール対応も実現。date-utils の追加 7 ケース含む 16 件全パス、ConversationPairCard 関連 34 件全パス、TypeScript / ESLint も問題なし。受入完了。"
+}

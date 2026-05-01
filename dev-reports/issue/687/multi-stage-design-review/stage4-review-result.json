@@ -1,0 +1,59 @@
+{
+  "stage": 4,
+  "focus": "セキュリティ",
+  "reviewer": "architecture-review-agent",
+  "findings": [
+    {
+      "id": "DR4-001",
+      "severity": "Should Fix",
+      "title": "§6 セキュリティ設計に「ロケール文字列のサニタイズ経路（2段ホワイトリスト保証）」を明記すべき",
+      "description": "現状の §6 セキュリティ設計（L177-181）は『XSS / 入力バリデーション / 外部依存』の 3 項目を簡潔に記載しているのみで、`useLocale()` から得られるロケール文字列（`en`/`ja`）が `format()` の locale 引数経路でどう保護されているかが明示されていない。実コード上、ロケール文字列の安全性は次の 2 段ホワイトリストで担保されている: (1) `src/i18n.ts` L9, L14, L19 で `SUPPORTED_LOCALES.includes(...)` チェック → 不正値は `DEFAULT_LOCALE='en'` フォールバック、(2) `src/lib/date-locale.ts` L17-19 の `getDateFnsLocale()` が `DATE_FNS_LOCALE_MAP[locale as SupportedLocale] ?? enUS` で再度ホワイトリスト照合し、未知ロケールは `enUS` にフォールバック。この 2 段防御により Cookie / Accept-Language / URL 等の外部入力経由でも `format()` に到達する `Locale` オブジェクトは date-fns 公式同梱の `enUS`/`ja` のいずれかに正規化される。OWASP A03（Injection）観点でロケール文字列インジェクションが構造的に成立しないことを設計書本文で明記しないと、レビュー・監査時の追跡可能性が低い。Stage 4 レビュー指示で『ロケール文字列のサニタイズ』『DATE_FNS_LOCALE_MAP ルックアップの安全性』を明文化することが要求されているため、Should Fix とする。",
+      "location": "dev-reports/design/issue-687-message-timestamp-design-policy.md §6 セキュリティ設計 L177-181 / src/i18n.ts L9-21 / src/lib/date-locale.ts L17-19",
+      "suggestion": "§6 に以下を追記（OWASP A03 マッピング込み）: 「**ロケール文字列インジェクション（OWASP A03 Injection）**: `format()` の `locale` 引数に渡される `Locale` オブジェクトは、(1) `src/i18n.ts` の `SUPPORTED_LOCALES.includes(...)` ホワイトリストで未知ロケール文字列を `DEFAULT_LOCALE='en'` にフォールバック、(2) `getDateFnsLocale()` が `DATE_FNS_LOCALE_MAP[locale as SupportedLocale] ?? enUS` で再度照合し、未知キーは `enUS` にフォールバックする 2 段防御で保護される。Cookie/Accept-Language 経由の不正値も date-fns 公式 Locale オブジェクト (`enUS`/`ja`) のみが `format()` に到達するため、`'PPp'` フォーマット文字列を介したインジェクションは構造的に成立しない。」"
+    },
+    {
+      "id": "DR4-002",
+      "severity": "Should Fix",
+      "title": "§6 セキュリティ設計の XSS 評価に「JSX テキスト子要素としての自動エスケープ」を明示すべき",
+      "description": "§6 L178 は『format() の出力は日付文字列のみで HTML を含まない。安全。』と簡潔に述べているが、レンダリング側（`ConversationPairCard.tsx` L219, L293）で `<span>{formattedTime}</span>` のように **JSX テキスト子要素として** 出力される事実、および React がテキスト子要素を自動エスケープすること（`dangerouslySetInnerHTML` 不使用）が言及されていない。仮に将来 `formatMessageTimestamp` の出力に意図せず `<` や `&` 等が混入したとしても、JSX テキスト子要素経路では HTML エンティティ化されるため XSS は成立しない。Stage 4 レビュー指示で『format() の出力が HTML に直接埋め込まれる場合の XSS リスク』『React の JSX での自動エスケープにより安全かどうか』を明文化することが要求されているため、設計書として防御の根拠（JSX 自動エスケープ機構）を明示する必要がある。",
+      "location": "dev-reports/design/issue-687-message-timestamp-design-policy.md §6 セキュリティ設計 L178 / src/components/worktree/ConversationPairCard.tsx L219, L293",
+      "suggestion": "§6 の XSS 項を以下に拡充: 「**XSS（OWASP A03）**: `format()` の出力は日付・時刻を表す純テキスト（HTML タグを含まない）であり、`ConversationPairCard.tsx` L219/L293 の `<span>{formattedTime}</span>` のように **JSX テキスト子要素として** レンダリングされる。React はテキスト子要素を自動的に HTML エンティティ化するため (`dangerouslySetInnerHTML` 不使用)、仮に `format()` の出力に `<`/`&`/`\"` が混入しても XSS は構造的に成立しない。」"
+    },
+    {
+      "id": "DR4-003",
+      "severity": "Should Fix",
+      "title": "Invalid Date ガード `isNaN(timestamp.getTime())` の前提条件（`timestamp` が `Date` インスタンスであること）を §6 に明示すべき",
+      "description": "§3 L106-110 で『`message.timestamp` は常に `Date` 型』という型保証は記載されているが、§6 セキュリティ設計の入力バリデーション項（L179）には `isNaN(timestamp.getTime())` ガードが Invalid Date のみを対象としており、**`timestamp` が `Date` インスタンスでない（例: string, null, undefined）場合は `getTime is not a function` 等の `TypeError` で例外を投げて React コンポーネントのレンダリングが失敗する** ことが明示されていない。型シグネチャ `timestamp: Date` が TypeScript レベルで強制されているため通常運用では問題ないが、(a) `as any` キャスト経路、(b) optimistic update やテストフィクスチャでの string 注入、(c) JSON.parse 直後の Date 化忘れ、等の経路で混入する可能性がゼロではない。Stage 4 レビュー指示で『timestamp: Date の入力検証が十分か』『Invalid Date ガードの実装』が観点として要求されているため、TS 型強制 + parseMessageTimestamps() ランタイム正規化 + `isNaN()` ガードの三重防御戦略を明示する必要がある。",
+      "location": "dev-reports/design/issue-687-message-timestamp-design-policy.md §6 セキュリティ設計 L179 / 関数シグネチャ L88",
+      "suggestion": "§6 に以下を追記: 「**入力バリデーション（OWASP A05 Security Misconfiguration / 防御深度）**: `formatMessageTimestamp` は引数 `timestamp` を TypeScript 型シグネチャ `Date` で限定する。`isNaN(timestamp.getTime())` ガードは valid Date オブジェクトの値域 (Invalid Date 含む) のみを対象とし、非 `Date` インスタンス（string, null, undefined 等）が混入した場合は `TypeError` で例外を投げて fail-fast する設計とする。型システムによる事前検査（コンパイル時）と、`parseMessageTimestamps()` (`src/components/worktree/WorktreeDetailSubComponents.tsx:93`, `src/hooks/useInfiniteMessages.ts:72`) によるランタイム正規化、`isNaN()` ガードによる Invalid Date 検出の三重防御で混入経路は塞がれている。フォローアップ実装で別経路（optimistic update, テストフィクスチャ等）を追加する際は必ず Date 型を渡すこと。インスタンスチェックの追加（`timestamp instanceof Date && !isNaN(timestamp.getTime())`）は KISS / YAGNI 原則と TS 型保証を踏まえ採用しないが、混入時は React Error Boundary / 親コンポーネントの try-catch でユーザー体験を保護する責務とする。」"
+    },
+    {
+      "id": "DR4-004",
+      "severity": "Should Fix",
+      "title": "外部依存 date-fns のサプライチェーン評価（OWASP A06）と `'PPp'` 静的リテラル使用方針を §6 に明記すべき",
+      "description": "§6 L180 は『date-fns は既存依存。新規パッケージ追加なし。』とのみ記載されており、OWASP A06（Vulnerable and Outdated Components）観点での評価が浅い。実運用上 `package.json` で `date-fns: ^4.1.0` が指定されており、既に `MessageList.tsx`, `PromptMessage.tsx`, `log-manager.ts` 等で `format()` を import 済みであるため、本 Issue による攻撃面拡大はなく、サプライチェーンリスクは新規追加分ゼロである事実を明示することで監査時の追跡可能性が向上する。また `format(date, formatString, options?)` の `formatString` 引数に **静的リテラル `'PPp'` のみ** を渡し、ユーザー入力由来のフォーマット文字列を渡さない設計であることも明記すべき（フォーマット文字列に `'YY' / 'D' / 'X'` 等が許可されているため、動的構築は別種のロケール表現混乱や `format()` 内部での意図しない解釈を招く可能性がある）。Stage 4 レビュー指示で『date-fns format() 関数自体のセキュリティリスク』『'PPp' フォーマット文字列の安全性』『A06: Vulnerable and Outdated Components』が観点として要求されているため、Should Fix とする。",
+      "location": "dev-reports/design/issue-687-message-timestamp-design-policy.md §6 セキュリティ設計 L180",
+      "suggestion": "§6 を以下に拡充: 「**外部依存・サプライチェーン（OWASP A06 Vulnerable and Outdated Components）**: date-fns は本プロジェクトで既に `package.json` の `^4.1.0` として導入済みであり、`src/components/worktree/MessageList.tsx`, `src/components/worktree/PromptMessage.tsx`, `src/lib/log-manager.ts` 等で `format()` を使用済み。本 Issue による新規パッケージ追加・新規 transitive 依存導入はなく、攻撃面の拡大はゼロ。**フォーマット文字列の安全性**: `format()` の第 2 引数 `formatString` には **静的リテラル `'PPp'` のみ** を渡し、ユーザー入力由来の値を絶対に渡さない設計とする（動的フォーマット構築は API 規約上禁止）。`'PPp'` は date-fns 公式の Long localized date + Long localized time プリセットであり、ロケール定義は date-fns 同梱の `enUS`/`ja` ロケールオブジェクトに従う。」"
+    },
+    {
+      "id": "DR4-005",
+      "severity": "Nice to Have",
+      "title": "プライバシー・情報漏洩観点（タイムスタンプ表示の年月日追加）を §6 に追記すべき",
+      "description": "本 Issue は表示テキストを「時刻のみ（例: `12:34:56`）」から「日付+時刻（例: `2026年1月1日 12:34` / `January 1, 2026 at 12:34 PM`）」に変更する。タイムスタンプ自体は `ChatMessage.timestamp` として既にクライアント側に存在しており **新規露出データはゼロ** だが、表示形式の変更により: (a) スクリーンショット共有時に投稿者の利用日付が露出する、(b) `screen.getByText(...)` 系のテストで日付文字列が外部参照される、(c) ログエクスポート (`src/lib/log-export-sanitizer.ts`) との出力整合性、等の二次的な可視性変化がある。プライバシー観点でリスクは無視できるレベルだが、設計書として『表示形式変更によるデータ露出は新規発生せず、`ChatMessage.timestamp` 自体は既にクライアント側に存在するデータの再フォーマット表示である』ことを明示することで、レビュー時の懸念を事前解消できる。Stage 4 レビュー指示で『タイムスタンプ情報の適切な取り扱い』が観点として要求されているが、リスクが極めて低いため Nice to Have とする。",
+      "location": "dev-reports/design/issue-687-message-timestamp-design-policy.md §6 セキュリティ設計（追加項）",
+      "suggestion": "§6 に以下を追記: 「**プライバシー・情報漏洩**: 本 Issue は `ChatMessage.timestamp`（既にクライアントメモリ内に存在する `Date` オブジェクト）の表示形式を「時刻のみ」から「日付+時刻」に変更するのみで、新規データ露出・サーバー送信・永続化の変更は一切ない。スクリーンショット共有時の利用日付可視性は許容範囲（既に同一画面の `formatRelativeTime()` 表示で「N 日前」等として推測可能）。タイムゾーンはクライアント環境（`'use client'` 配下）に従い、サーバー側で UTC 固定（`src/i18n.ts` L38）の取り扱いと矛盾しない。」"
+    },
+    {
+      "id": "DR4-006",
+      "severity": "Nice to Have",
+      "title": "OWASP Top 10 2021 マッピング表を §6 末尾に追加すると監査時の追跡可能性が向上する",
+      "description": "セキュリティレビュー（Stage 4）の観点では、本 Issue が OWASP Top 10 のどのカテゴリに該当 / 非該当かを一覧化することで、後続の監査・PR レビュー時に評価枠組みが共有される。現在の §6 はフリーフォームの 3 項目記載のため、Stage 4 レビュー時に逐一実装コードを確認しないと OWASP カテゴリへのマッピングが追跡できない。Stage 4 レビュー指示で『OWASP Top 10 準拠確認（A03 Injection / A05 Security Misconfiguration / A06 Vulnerable and Outdated Components）』が観点として要求されているため、明示的なマッピング表を追加することで監査要件を満たせる。",
+      "location": "dev-reports/design/issue-687-message-timestamp-design-policy.md §6 セキュリティ設計（末尾）",
+      "suggestion": "§6 末尾に OWASP Top 10 2021 マッピング表（A01-A10 各カテゴリの該当性・評価）を追加し、本 Issue が `A03 Injection` / `A05 Security Misconfiguration` / `A06 Vulnerable and Outdated Components` の各観点で構造的に安全であることを一覧形式で明示する。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 4,
+  "nice_to_have_count": 2,
+  "summary": "Issue #687 設計方針書のセキュリティ評価結果: **Must Fix は 0 件、Should Fix は 4 件（ドキュメント拡充）、Nice to Have は 2 件**。実装経路（`format(timestamp, 'PPp', { locale })` → JSX テキスト子要素 `<span>{formattedTime}</span>`）は **構造的に安全** で実装ブロック要因はないが、Stage 4 レビュー指示で要求された各観点（XSS / 入力検証 / date-fns 安全性 / ロケール注入 / OWASP Top 10）について現行の §6 セキュリティ設計セクション（L177-181 の 3 項目）が説明不足のため、Should Fix としてドキュメント拡充を提案する。具体的根拠: (1) **XSS**: React JSX テキスト子要素として自動エスケープされ、`dangerouslySetInnerHTML` 不使用。`format()` の出力に万一 HTML メタ文字が混入しても無害化される (DR4-002)。(2) **ロケール文字列インジェクション**: `src/i18n.ts` L9-19 の `SUPPORTED_LOCALES.includes(...)` ホワイトリスト + `src/lib/date-locale.ts` L17-19 の `DATE_FNS_LOCALE_MAP[locale as SupportedLocale] ?? enUS` フォールバックによる 2 段防御で、外部入力由来のロケール文字列も date-fns 公式 Locale (`enUS`/`ja`) に正規化される (DR4-001)。(3) **Invalid Date / 入力検証**: `isNaN(timestamp.getTime())` ガード + 空文字フォールバックで防御。型シグネチャ `Date` 強制 + `parseMessageTimestamps()` ランタイム正規化 + `isNaN()` ガードの三重防御で非 Date 混入経路は塞がれている (DR4-003)。(4) **'PPp' フォーマット文字列**: 静的リテラル使用、動的構築禁止の設計 (DR4-004)。(5) **date-fns**: `^4.1.0` 既存依存、本 Issue で新規追加・transitive 依存変更なし、攻撃面の拡大ゼロ (DR4-004)。(6) **プライバシー**: `ChatMessage.timestamp` は既存クライアント側データで、表示形式変更のみ・新規露出なし (DR4-005)。**Must Fix が 0 件のため実装ブロック要因はないが**、Should Fix 4 件は設計書の監査追跡可能性向上のため設計書本体を直接更新する。"
+}
