@@ -1,0 +1,63 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 688,
+  "applied_date": "2026-05-01",
+  "applied_findings": ["S1-001", "S1-002", "S1-003", "S1-004", "S1-005", "S1-006"],
+  "skipped_findings": [],
+  "nice_to_have_applied": ["S1-007", "S1-009"],
+  "nice_to_have_skipped": ["S1-008"],
+  "changes_made": [
+    {
+      "finding_id": "S1-001",
+      "section": "## 影響範囲 > ### 変更対象ファイル",
+      "change_type": "expanded_table",
+      "description": "変更対象ファイルテーブルに以下を追加: src/types/ui-state.ts, src/types/ui-actions.ts, src/hooks/useWorktreeUIState.ts, src/components/worktree/WorktreeDesktopLayout.tsx, src/components/worktree/LeftPaneTabSwitcher.tsx。それぞれの変更内容も明記。"
+    },
+    {
+      "finding_id": "S1-002",
+      "section": "## 提案する解決策 > ### 主要な変更点",
+      "change_type": "clarified_persistence_method",
+      "description": "永続化方式を `useLocalStorageState` フックに一本化。ストレージキー `commandmate.worktree.leftPaneCollapsed`（全worktree共有）を明記。SidebarContext の独自方式は採用しない旨を追記。"
+    },
+    {
+      "finding_id": "S1-003",
+      "section": "## 受入条件 > ### 折りたたみ動作",
+      "change_type": "added_acceptance_criteria",
+      "description": "折りたたみ時の最小バー仕様を追加: 折りたたみ時の幅0px、画面左端に幅24pxの展開バー、中央に▶ボタン、PaneResizer非表示、leftWidth(%)復元の各受入条件を追記。"
+    },
+    {
+      "finding_id": "S1-004",
+      "section": "## 受入条件 > ### アクセシビリティ・アニメーション",
+      "change_type": "added_a11y_section",
+      "description": "新セクション「アクセシビリティ・アニメーション」を追加。aria-label/aria-expanded/aria-controls の付与、Tab→Enter/Space によるキーボード操作、CSS transition (200ms ease-in-out) を受入条件として明記。"
+    },
+    {
+      "finding_id": "S1-005",
+      "section": "## 提案する解決策 > ### 設計方針（案A: 推奨）",
+      "change_type": "added_design_policy_section",
+      "description": "新セクション「設計方針（案A: 推奨）」を追加。WorktreeDesktopLayout を controlled component 化し leftPaneCollapsed を props で受け取る方針を明示。leftWidth は引き続き内部 useState 管理し、splitRatio は今回スコープ外であることを記載。"
+    },
+    {
+      "finding_id": "S1-006",
+      "section": "## 影響範囲 > ### 変更対象ファイル",
+      "change_type": "split_test_files",
+      "description": "テストファイルを3つに分離して列挙: tests/unit/components/WorktreeDesktopLayout.test.tsx (レイアウト層), tests/unit/components/WorktreeDetailRefactored.test.tsx (統合), tests/unit/hooks/useWorktreeUIState.test.ts (reducer 単体)。"
+    },
+    {
+      "finding_id": "S1-007",
+      "section": "## 受入条件 / ## 実装タスク",
+      "change_type": "added_storage_key_naming",
+      "description": "(Nice to Have) localStorage キー名 `commandmate.worktree.leftPaneCollapsed`（全worktree共有）を明記。"
+    },
+    {
+      "finding_id": "S1-009",
+      "section": "## 影響範囲 > ### 参考: 既存の類似機能",
+      "change_type": "added_reference_section",
+      "description": "(Nice to Have) サイドバー折りたたみ機能（SidebarContext.tsx / SidebarToggle.tsx）への参照を末尾に追加。"
+    }
+  ],
+  "issue_updated": true,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/688",
+  "update_method": "gh issue edit 688 --body-file"
+}

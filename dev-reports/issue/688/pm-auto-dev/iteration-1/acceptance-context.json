@@ -1,0 +1,40 @@
+{
+  "issue_number": 688,
+  "feature_summary": "PC版Worktree詳細画面の左パネル（History/Files/CMATEタブ）折りたたみ/展開機能",
+  "acceptance_criteria": [
+    "左パネル右端の ◀ ボタンをクリックするとパネルが非表示になり右パネルが全幅になる",
+    "最小バー上の ▶ ボタンをクリックするとパネルが再表示される",
+    "折りたたみ時の左パネル幅は 0px（完全非表示）、画面左端に幅 24px の縦バー（展開バー）を表示する",
+    "展開バーの中央に ▶ アイコンボタンを配置する",
+    "折りたたみ中は PaneResizer を非表示にし、ドラッグ操作を無効化する",
+    "展開時は折りたたみ前の leftWidth (%) を復元する",
+    "ページリロード後も折りたたみ状態が維持される（localStorage キー: commandmate.worktree.leftPaneCollapsed）",
+    "PC版のみ機能する（モバイル版は対象外）",
+    "折りたたみ/展開ボタンに aria-label, aria-expanded, aria-controls を付与する",
+    "キーボード（Tab → Enter/Space）で操作可能",
+    "ユニットテストがパスする"
+  ],
+  "test_scenarios": [
+    "シナリオ1: WorktreeDesktopLayout に leftPaneCollapsed=true を渡すと expand-bar が表示され、left-pane の幅が 0px になる",
+    "シナリオ2: WorktreeDesktopLayout に leftPaneCollapsed=true を渡すと PaneResizer が非表示になる",
+    "シナリオ3: WorktreeDesktopLayout の expand bar のボタンをクリックすると onToggleLeftPane が呼ばれる",
+    "シナリオ4: WorktreeDesktopLayout に leftPaneCollapsed=false を渡すと通常表示になる（expand-bar なし）",
+    "シナリオ5: isMobile=true の場合、leftPaneCollapsed=true でも MobileLayout が表示され expand-bar が表示されない",
+    "シナリオ6: LeftPaneTabSwitcher に onCollapse を渡すと ◀ ボタンが表示される",
+    "シナリオ7: LeftPaneTabSwitcher の ◀ ボタンに aria-label=\"Collapse left panel\", aria-expanded=\"true\", aria-controls=\"worktree-left-pane\" が付与されている",
+    "シナリオ8: useWorktreeUIState の TOGGLE_LEFT_PANE アクションで leftPaneCollapsed が true になる",
+    "シナリオ9: useWorktreeUIState の TOGGLE_LEFT_PANE アクションを2回実行すると leftPaneCollapsed が false に戻る",
+    "シナリオ10: useWorktreeUIState の actions に toggleLeftPane 関数が存在する",
+    "シナリオ11: TypeScript型チェック（npx tsc --noEmit）がパスする",
+    "シナリオ12: ESLint（npm run lint）がパスする",
+    "シナリオ13: 全ユニットテスト（npm run test:unit）がパスする"
+  ],
+  "implemented_files": [
+    "src/types/ui-state.ts",
+    "src/types/ui-actions.ts",
+    "src/hooks/useWorktreeUIState.ts",
+    "src/components/worktree/WorktreeDesktopLayout.tsx",
+    "src/components/worktree/LeftPaneTabSwitcher.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ]
+}

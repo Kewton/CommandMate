@@ -1,0 +1,107 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目 - 影響範囲）",
+  "issue_number": 688,
+  "applied_findings": [
+    "S3-001",
+    "S3-002",
+    "S3-003",
+    "S3-004",
+    "S3-005",
+    "S3-006"
+  ],
+  "skipped_findings": [],
+  "changes_made": [
+    {
+      "finding_id": "S3-001",
+      "severity": "Must Fix",
+      "title": "WorktreeDesktopLayout の controlled 化に関する後方互換方針とテストファイル漏れの追記",
+      "sections_updated": [
+        "設計方針 > WorktreeDesktopLayoutProps の互換性方針（後方互換）",
+        "影響範囲 > テスト追加先 > モック更新が必要なテストファイル"
+      ],
+      "details": [
+        "WorktreeDesktopLayoutProps に leftPaneCollapsed?: boolean および onToggleLeftPane?: () => void をオプショナルで追加する方針を明記",
+        "未指定時は従来通り完全に内部状態で動作する後方互換モードを維持（既存テスト 24 件は無修正で通る）と明記",
+        "tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx をモック確認対象として追加",
+        "tests/unit/components/app-version-display.test.tsx をモック確認対象として追加",
+        "tests/integration/issue-266-acceptance.test.tsx をモック確認対象として追加"
+      ]
+    },
+    {
+      "finding_id": "S3-002",
+      "severity": "Must Fix",
+      "title": "WorktreeUIReducer/WorktreeUIActions の exhaustive check と二重メンテ対策方針の明記",
+      "sections_updated": [
+        "設計方針 > Reducer/Action 追加の実装ガイド",
+        "実装タスク"
+      ],
+      "details": [
+        "WorktreeUIActions interface に toggleLeftPane: () => void を追加するタスクを明示",
+        "actions オブジェクトに対応エントリ（useCallback で安定化）を追加するタスクを明示",
+        "exhaustive check 戦略は既存スタイル（default: return state）踏襲＋テストで網羅担保とする方針を明記",
+        "useWorktreeUIState.test.ts の should provide action creators テストに toggleLeftPane を追加（既存 11 個 → 12 個）と明記",
+        "SET_LEFT_PANE_COLLAPSED action を永続化フック初期化用に追加することを明記"
+      ]
+    },
+    {
+      "finding_id": "S3-003",
+      "severity": "Should Fix",
+      "title": "useLocalStorageState 連携の初期化フロー（採用案 X）の明記",
+      "sections_updated": [
+        "設計方針 > useLocalStorageState 連携の初期化フロー（採用案: X）"
+      ],
+      "details": [
+        "useWorktreeUIState 内部で useLocalStorageState を呼び出し、初回 effect 取得値で dispatch({ type: 'SET_LEFT_PANE_COLLAPSED', collapsed: <stored> }) を実行する方針を明記",
+        "hydration 安全策として、初期描画時はパネル展開状態（false）で表示し、useEffect 後の再レンダリングで折りたたみ状態を反映することを明記",
+        "useLocalStorageState の useState + useEffect 二段階フローと useReducer の lazy initializer の境界責務を明確化"
+      ]
+    },
+    {
+      "finding_id": "S3-004",
+      "severity": "Should Fix",
+      "title": "mobile/desktop 切替テストケースの追加",
+      "sections_updated": [
+        "影響範囲 > テスト追加先"
+      ],
+      "details": [
+        "WorktreeDesktopLayout.test.tsx に leftPaneCollapsed=true & isMobile=true で MobileLayout が優先表示されるテストを追加",
+        "WorktreeDetailRefactored.test.tsx に localStorage から初期値を読み込んで折りたたみ状態になるテストを追加",
+        "WorktreeDetailRefactored.test.tsx に useIsMobile 切替時の状態保持テストを追加"
+      ]
+    },
+    {
+      "finding_id": "S3-005",
+      "severity": "Should Fix",
+      "title": "splitRatio フォローアップ Issue の明記",
+      "sections_updated": [
+        "フォローアップ"
+      ],
+      "details": [
+        "Issue 本文末尾に「フォローアップ」セクションを新設",
+        "今回スコープでは splitRatio は触らない旨を明記",
+        "将来的な leftWidth/splitRatio 統合（WorktreeDesktopLayout の完全 controlled 化）を別 Issue として起票する推奨を明記",
+        "exhaustive check 導入、transition の PaneResizer 干渉対策、aria-controls 参照先 ID 付与もフォローアップ事項として記載"
+      ]
+    },
+    {
+      "finding_id": "S3-006",
+      "severity": "Should Fix",
+      "title": "leftPaneMemo の依存配列に関する実装ガイドの追記",
+      "sections_updated": [
+        "設計方針 > 折りたたみボタンの依存配列（leftPaneMemo）",
+        "実装タスク"
+      ],
+      "details": [
+        "折りたたみ ◀ ボタンの onClick は actions.toggleLeftPane を使用することを明記（actions は useMemo([]) で安定参照）",
+        "leftPaneMemo 内で actions.toggleLeftPane を参照する場合は依存配列に追加することを明記",
+        "展開バー（▶ ボタン）は WorktreeDesktopLayout 内部に配置し、leftPaneMemo に直接関与させない方針を明記",
+        "実装タスクに「leftPaneMemo の依存配列に actions.toggleLeftPane（参照する場合）を追加」を追加"
+      ]
+    }
+  ],
+  "issue_updated": true,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/688",
+  "review_date": "2026-05-01",
+  "summary": "Stage 3 影響範囲レビューで指摘された Must Fix 2 件・Should Fix 4 件の計 6 件をすべて Issue #688 本文に反映完了。Nice to Have 3 件（S3-007 aria-controls 参照先 ID、S3-008 transition の PaneResizer 干渉、S3-009 localStorage 永続化テスト配置）はフォローアップセクションまたは設計方針内で言及済み。具体的には、(1) WorktreeDesktopLayoutProps をオプショナル props で controlled 化する後方互換方針、(2) WorktreeUIActions interface への toggleLeftPane 追加とテスト網羅担保、(3) useLocalStorageState 連携の二段階初期化フロー（採用案 X）、(4) mobile/desktop 切替境界テストの追加、(5) splitRatio フォローアップ Issue の明記、(6) leftPaneMemo の依存配列ガイド、を Issue 本文に追記。これにより Stage 5 以降の影響範囲レビュー（2回目）で同種の指摘が再発するリスクを大幅に低減。"
+}

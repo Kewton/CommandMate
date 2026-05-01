@@ -1,0 +1,32 @@
+{
+  "issue_number": 688,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "coverage": 90.71,
+      "tests_passed": 6416,
+      "new_tests": 16,
+      "commit": "556b7d47 feat(#688): add collapsible left pane to PC worktree detail view"
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_met": 11,
+      "criteria_total": 11
+    },
+    "refactor": {
+      "status": "success",
+      "changes": "なし（実装品質良好）"
+    },
+    "docs": {
+      "status": "success",
+      "updated_files": ["CLAUDE.md"]
+    },
+    "uat": {
+      "status": "passed",
+      "tests_passed": 10,
+      "tests_total": 10,
+      "pass_rate": "100%"
+    }
+  }
+}

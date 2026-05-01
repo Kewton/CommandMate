@@ -1,0 +1,22 @@
+{
+  "issue_number": 688,
+  "refactor_targets": [
+    "src/types/ui-state.ts",
+    "src/types/ui-actions.ts",
+    "src/hooks/useWorktreeUIState.ts",
+    "src/components/worktree/WorktreeDesktopLayout.tsx",
+    "src/components/worktree/LeftPaneTabSwitcher.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 90.71
+  },
+  "improvement_goals": [
+    "コードの重複がないか確認",
+    "不要なコメントがないか確認（WHYが非自明な場合のみコメントを残す）",
+    "型定義の整合性確認",
+    "useWorktreeUIState の localStorage 連携が適切か確認（無限ループ防止の確認）",
+    "WorktreeDesktopLayout の折りたたみ実装が適切か確認（パフォーマンス・アクセシビリティ）",
+    "既存テストが引き続きパスするか確認"
+  ]
+}

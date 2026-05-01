@@ -240,7 +240,9 @@ tests/
 | `src/i18n.ts` | next-intl設定 |
 | `src/lib/locale-cookie.ts` | ロケールCookie管理 |
 | `src/lib/date-locale.ts` | date-fnsロケールマッピング |
-| `src/components/worktree/WorktreeDetailRefactored.tsx` | Worktree詳細画面（メイン画面、ツリーポーリング対応、履歴・メモ挿入state管理、NewFileDialog連携）（Issue #469, #485, #646） |
+| `src/components/worktree/WorktreeDetailRefactored.tsx` | Worktree詳細画面（メイン画面、ツリーポーリング対応、履歴・メモ挿入state管理、NewFileDialog連携）（Issue #469, #485, #646）、左パネル折りたたみprops連携（Issue #688） |
+| `src/components/worktree/WorktreeDesktopLayout.tsx` | PC版左右2分割レイアウト（PaneResizerドラッグリサイズ対応、leftPaneCollapsed props化・折りたたみ/展開バーUI）（Issue #688） |
+| `src/components/worktree/LeftPaneTabSwitcher.tsx` | 左パネルタブ切替UI（History/Files/CMATE）、折りたたみ◀ボタン追加（Issue #688） |
 | `src/components/worktree/AgentSettingsPane.tsx` | エージェント選択UI |
 | `src/components/worktree/MessageInput.tsx` | メッセージ入力（下書き永続化対応、pendingInsertText外部挿入対応）（Issue #485） |
 | `src/components/worktree/ConversationPairCard.tsx` | 会話ペアカード（ユーザー/アシスタントメッセージ表示、挿入ボタン）（Issue #485） |
@@ -302,6 +304,7 @@ tests/
 | `src/lib/detection/stalled-detector.ts` | Stalled判定（isWorktreeStalled）（Issue #600） |
 | `src/lib/deep-link-validator.ts` | Deep linkバリデーション（isDeepLinkPane, normalizeDeepLinkPane, VALID_PANES, DeepLinkPane型）（Issue #600） |
 | `src/lib/api/worktrees-include-parser.ts` | API includeパラメータパーサー（Issue #600） |
+| `src/hooks/useWorktreeUIState.ts` | WorktreeUI状態管理フック（useReducer、WorktreeUIActions、localStorage連携）、leftPaneCollapsed永続化・toggleLeftPane追加（Issue #688） |
 | `src/hooks/useLayoutConfig.ts` | レイアウト設定フック（LayoutConfig, LAYOUT_MAP, resolveLayoutConfig）（Issue #600） |
 | `src/hooks/useSendMessage.ts` | メッセージ送信フック（Issue #600） |
 | `src/hooks/useWorktreeList.ts` | Worktreeリスト共通フック（ソート・フィルタ・グループ化）（Issue #600） |
@@ -323,7 +326,7 @@ tests/
 | `src/app/more/page.tsx` | More画面（Issue #600） |
 | `src/components/layout/Header.tsx` | PC 5画面ナビゲーション（Issue #600） |
 | `src/components/layout/AppShell.tsx` | アプリケーションシェル（useLayoutConfig統合）（Issue #600） |
-| `src/types/ui-state.ts` | UI状態型定義（DeepLinkPane型追加）（Issue #600） |
+| `src/types/ui-state.ts` | UI状態型定義（DeepLinkPane型追加）（Issue #600）、LayoutStateにleftPaneCollapsed追加（Issue #688） |
 
 ### CLIモジュール
 
