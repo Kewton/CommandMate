@@ -175,23 +175,26 @@ export const LeftPaneTabSwitcher = memo(function LeftPaneTabSwitcher({
       aria-label="Left pane view switcher"
       className={`flex border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 ${className}`}
     >
-      {TABS.map((tab) => (
-        <button
-          key={tab.id}
-          type="button"
-          role="tab"
-          aria-selected={activeTab === tab.id}
-          aria-label={tab.label}
-          tabIndex={0}
-          onClick={() => handleTabClick(tab.id)}
-          onKeyDown={(e) => handleKeyDown(tab.id, e)}
-          className={getTabStyles(tab.id)}
-        >
-          {tab.icon}
-          <span>{tab.label}</span>
-        </button>
-      ))}
-      {/* Issue #688: Collapse button at the right end of the tab bar */}
+      {/* Tabs: shrinkable so the collapse button is always visible */}
+      <div className="flex flex-1 min-w-0 overflow-hidden">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            aria-label={tab.label}
+            tabIndex={0}
+            onClick={() => handleTabClick(tab.id)}
+            onKeyDown={(e) => handleKeyDown(tab.id, e)}
+            className={getTabStyles(tab.id)}
+          >
+            {tab.icon}
+            <span>{tab.label}</span>
+          </button>
+        ))}
+      </div>
+      {/* Issue #688: Collapse button — flex-shrink-0 ensures it is always visible regardless of pane width */}
       {onCollapse && (
         <button
           type="button"
@@ -199,7 +202,7 @@ export const LeftPaneTabSwitcher = memo(function LeftPaneTabSwitcher({
           aria-expanded="true"
           aria-controls="worktree-left-pane"
           onClick={onCollapse}
-          className="ml-auto flex items-center justify-center px-2 py-2 text-gray-500 dark:text-gray-400 hover:text-cyan-600 dark:hover:text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-inset"
+          className="flex-shrink-0 flex items-center justify-center px-2 py-2 text-gray-500 dark:text-gray-400 hover:text-cyan-600 dark:hover:text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-inset"
         >
           <svg
             className="w-4 h-4"

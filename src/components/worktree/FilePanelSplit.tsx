@@ -68,6 +68,9 @@ const MIN_TERMINAL_WIDTH = 20;
 /** Maximum terminal width as percentage */
 const MAX_TERMINAL_WIDTH = 80;
 
+/** Width of the collapse/expand bar for the file panel (px) */
+const FILE_PANEL_BAR_WIDTH_PX = 24;
+
 // ============================================================================
 // Main Component
 // ============================================================================
@@ -98,6 +101,9 @@ export const FilePanelSplit = memo(function FilePanelSplit({
 }: FilePanelSplitProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [terminalWidth, setTerminalWidth] = useState(INITIAL_TERMINAL_WIDTH);
+  const [filePanelCollapsed, setFilePanelCollapsed] = useState(false);
+
+  const toggleFilePanel = useCallback(() => setFilePanelCollapsed((v) => !v), []);
 
   const handleResize = useCallback((delta: number) => {
     const container = containerRef.current;
@@ -138,6 +144,37 @@ export const FilePanelSplit = memo(function FilePanelSplit({
     );
   }
 
+  // File panel collapsed: terminal fills width, narrow expand bar on the right
+  if (filePanelCollapsed) {
+    return (
+      <div ref={containerRef} className="flex h-full min-h-0">
+        <div
+          data-testid="terminal-pane"
+          style={{ width: `calc(100% - ${FILE_PANEL_BAR_WIDTH_PX}px)` }}
+          className="flex-shrink-0 overflow-hidden"
+        >
+          {terminalWithHeader}
+        </div>
+        <div
+          data-testid="file-panel-expand-bar"
+          style={{ width: `${FILE_PANEL_BAR_WIDTH_PX}px` }}
+          className="flex-shrink-0 flex items-center justify-center bg-gray-100 dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700"
+        >
+          <button
+            type="button"
+            aria-label="Show file panel"
+            onClick={toggleFilePanel}
+            className="flex items-center justify-center w-full h-10 text-gray-500 dark:text-gray-400 hover:text-cyan-600 dark:hover:text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div ref={containerRef} className="flex h-full min-h-0">
       {/* Terminal pane */}
@@ -160,31 +197,45 @@ export const FilePanelSplit = memo(function FilePanelSplit({
       <div
         data-testid="file-panel-pane"
         style={filePanelStyle}
-        className="flex-grow overflow-hidden"
+        className="flex-grow overflow-hidden flex"
       >
-        {/* Diff view takes priority when active (Issue #447) */}
-        {diffContent && diffFilePath && onCloseDiff ? (
-          <DiffViewer
-            diff={diffContent}
-            filePath={diffFilePath}
-            onClose={onCloseDiff}
-          />
-        ) : (
-          <FilePanelTabs
-            tabs={fileTabs.tabs}
-            activeIndex={fileTabs.activeIndex}
-            worktreeId={worktreeId}
-            onClose={onCloseTab}
-            onActivate={onActivateTab}
-            onLoadContent={onLoadContent}
-            onLoadError={onLoadError}
-            onSetLoading={onSetLoading}
-            onFileSaved={onFileSaved}
-            onDirtyChange={onDirtyChange}
-            onMoveToFront={onMoveToFront}
-            onOpenFile={onOpenFile}
-          />
-        )}
+        {/* Collapse button strip — always visible at the left edge of the file panel */}
+        <button
+          type="button"
+          aria-label="Hide file panel"
+          onClick={toggleFilePanel}
+          className="flex-shrink-0 flex items-center justify-center w-5 h-full bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500 hover:text-cyan-600 dark:hover:text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+        >
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+        {/* File panel content */}
+        <div className="flex-1 min-w-0 overflow-hidden">
+          {/* Diff view takes priority when active (Issue #447) */}
+          {diffContent && diffFilePath && onCloseDiff ? (
+            <DiffViewer
+              diff={diffContent}
+              filePath={diffFilePath}
+              onClose={onCloseDiff}
+            />
+          ) : (
+            <FilePanelTabs
+              tabs={fileTabs.tabs}
+              activeIndex={fileTabs.activeIndex}
+              worktreeId={worktreeId}
+              onClose={onCloseTab}
+              onActivate={onActivateTab}
+              onLoadContent={onLoadContent}
+              onLoadError={onLoadError}
+              onSetLoading={onSetLoading}
+              onFileSaved={onFileSaved}
+              onDirtyChange={onDirtyChange}
+              onMoveToFront={onMoveToFront}
+              onOpenFile={onOpenFile}
+            />
+          )}
+        </div>
       </div>
     </div>
   );

@@ -312,6 +312,10 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                 <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
                   Display name
                 </th>
+                {/* Issue #690: Visibility column placed before Path so it is always reachable on narrow screens */}
+                <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
+                  Visibility
+                </th>
                 <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
                   Path
                 </th>
@@ -320,10 +324,6 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                 </th>
                 <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
                   Status
-                </th>
-                {/* Issue #690: Visibility column with sidebar visibility toggle */}
-                <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
-                  Visibility
                 </th>
                 <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
                   Actions
@@ -383,6 +383,14 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                         </span>
                       )}
                     </td>
+                    {/* Issue #690: Visibility toggle placed before Path for narrow-screen accessibility */}
+                    <td className="px-4 py-3 align-top">
+                      <VisibilityToggle
+                        repo={repo}
+                        pending={togglingIds.has(repo.id)}
+                        onToggle={handleToggleVisibility}
+                      />
+                    </td>
                     <td className="px-4 py-3 align-top text-xs font-mono text-gray-500 dark:text-gray-400 break-all">
                       {repo.path}
                     </td>
@@ -395,14 +403,6 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                       ) : (
                         <Badge variant="gray">Disabled</Badge>
                       )}
-                    </td>
-                    {/* Issue #690: Visibility toggle. Independent of `enabled`. */}
-                    <td className="px-4 py-3 align-top">
-                      <VisibilityToggle
-                        repo={repo}
-                        pending={togglingIds.has(repo.id)}
-                        onToggle={handleToggleVisibility}
-                      />
                     </td>
                     <td className="px-4 py-3 align-top">
                       {isEditing ? (
