@@ -11,7 +11,7 @@
 
 'use client';
 
-import React, { memo, useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import React, { memo, useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useDeferredValue } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import {
@@ -214,19 +214,27 @@ export const Sidebar = memo(function Sidebar() {
   // Convert worktrees to sidebar items
   const branchItems = useMemo(() => visibleWorktrees.map(toBranchItem), [visibleWorktrees]);
 
+  // Defer poll-driven branchItems updates so the list order only changes when
+  // React's scheduler has idle time (i.e. the pointer is not moving).
+  // This prevents visible reorders while the user's cursor is in transit toward
+  // a branch — a window not covered by the hover-freeze below.
+  const stableBranchItems = useDeferredValue(branchItems);
+
   // ---- Hover-freeze: snapshot list ORDER while cursor is over the branch list ----
   // Polling updates lastActivity every 5s for active sessions, causing sort-order
   // changes that visually reorder the list while the user is interacting with it.
   // We freeze the display ORDER while the cursor is inside the list (and for 1s
   // after it leaves) so items never jump under the pointer or during a click.
-  // Item DATA (status dots, hasUnread, description) remains live — only positions
-  // are frozen. This prevents both the visible reorder flash and scroll position
-  // shifts caused by items moving above the viewport mid-interaction.
+  //
+  // Design: the freeze is entirely ref-based — no forced re-render on activation.
+  // The freeze "activates" only when branchItems next changes (next poll), at
+  // which point effectiveBranchItems returns frozen.items instead of the new live
+  // order. This avoids any flash that occurred when a forced re-render combined
+  // a new freezeVersion with a concurrently-committed poll transition.
   const frozenBranchItemsRef = useRef<{
     items: SidebarBranchItem[];
     expiresAt: number;
   } | null>(null);
-  const [freezeVersion, setFreezeVersion] = useState(0);
   const freezeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => () => {
@@ -234,38 +242,44 @@ export const Sidebar = memo(function Sidebar() {
   }, []);
 
   const effectiveBranchItems = useMemo(() => {
-    void freezeVersion;
     const frozen = frozenBranchItemsRef.current;
-    if (!frozen || Date.now() >= frozen.expiresAt) return branchItems;
-    // Return the fully-frozen snapshot including lastActivity.
-    // "Live data, frozen order" is insufficient: useWorktreeList re-sorts
-    // by lastActivity, so live lastActivity values would override the frozen
-    // order. Returning frozen.items (with frozen lastActivity) keeps the
-    // sort output stable for the ~1s hover window.
+    if (!frozen || Date.now() >= frozen.expiresAt) return stableBranchItems;
     return frozen.items;
-  }, [branchItems, freezeVersion]);
+  }, [stableBranchItems]);
 
-  // Activate freeze when cursor enters the branch list: snapshot current order,
-  // hold indefinitely until cursor leaves. Capturing branchItems here is
-  // intentional — this is the order we want to lock in.
+  // Track the currently-rendered items (updated after each committed render,
+  // before paint). handleListMouseEnter reads this to freeze exactly what
+  // the user is seeing — not just the live branchItems closure.
+  const displayedItemsRef = useRef<SidebarBranchItem[]>(effectiveBranchItems);
+  useLayoutEffect(() => {
+    displayedItemsRef.current = effectiveBranchItems;
+  });
+
   const handleListMouseEnter = useCallback(() => {
     if (freezeTimerRef.current !== null) {
       clearTimeout(freezeTimerRef.current);
       freezeTimerRef.current = null;
     }
-    frozenBranchItemsRef.current = { items: branchItems, expiresAt: Infinity };
-    setFreezeVersion(v => v + 1);
-  }, [branchItems]);
+    const currentFrozen = frozenBranchItemsRef.current;
+    if (currentFrozen && Date.now() < currentFrozen.expiresAt) {
+      // Re-entering during the 1s leave window: just extend to Infinity.
+      // No state update, no re-render.
+      frozenBranchItemsRef.current = { ...currentFrozen, expiresAt: Infinity };
+      return;
+    }
+    // New freeze: silently lock in the currently-displayed order.
+    // No setFreezeVersion → no re-render on hover, so nothing can flash.
+    frozenBranchItemsRef.current = { items: displayedItemsRef.current, expiresAt: Infinity };
+  }, []);
 
   // Hold freeze for 1s after cursor leaves (covers click + re-render settling),
-  // then release so the list reflects the live order again.
+  // then silently release so the list reflects the live order on the next poll.
   const handleListMouseLeave = useCallback(() => {
     if (!frozenBranchItemsRef.current) return;
     frozenBranchItemsRef.current = { ...frozenBranchItemsRef.current, expiresAt: Date.now() + 1000 };
     if (freezeTimerRef.current !== null) clearTimeout(freezeTimerRef.current);
     freezeTimerRef.current = setTimeout(() => {
       frozenBranchItemsRef.current = null;
-      setFreezeVersion(v => v + 1);
     }, 1000);
   }, []);
   // ---- end hover-freeze ----
