@@ -195,18 +195,12 @@ export const Sidebar = memo(function Sidebar() {
     void freezeVersion;
     const frozen = frozenBranchItemsRef.current;
     if (!frozen || Date.now() >= frozen.expiresAt) return branchItems;
-    // Live data, frozen order: preserve positions from the hover-time snapshot
-    // but replace each item's data with the latest live version so status dots
-    // and unread indicators continue to update while positions stay stable.
-    const liveById = new Map(branchItems.map(item => [item.id, item]));
-    const frozenIds = new Set(frozen.items.map(item => item.id));
-    return [
-      ...frozen.items
-        .filter(item => liveById.has(item.id))
-        .map(item => liveById.get(item.id)!),
-      // Items that appeared after the freeze was taken append at the end
-      ...branchItems.filter(item => !frozenIds.has(item.id)),
-    ];
+    // Return the fully-frozen snapshot including lastActivity.
+    // "Live data, frozen order" is insufficient: useWorktreeList re-sorts
+    // by lastActivity, so live lastActivity values would override the frozen
+    // order. Returning frozen.items (with frozen lastActivity) keeps the
+    // sort output stable for the ~1s hover window.
+    return frozen.items;
   }, [branchItems, freezeVersion]);
 
   // Activate freeze when cursor enters the branch list: snapshot current order,
