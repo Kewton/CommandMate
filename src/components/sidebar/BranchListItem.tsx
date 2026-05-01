@@ -127,6 +127,18 @@ function BranchTooltip({
 }
 
 // ============================================================================
+// Module-level tooltip suppression
+// ============================================================================
+
+/**
+ * Timestamp (ms) until which onMouseEnter should NOT open a tooltip.
+ * Set by handleClick so that list reorders caused by React re-renders
+ * after a branch click don't immediately show a tooltip on whichever
+ * element lands under the cursor.
+ */
+let suppressMouseEnterUntil = 0;
+
+// ============================================================================
 // Component
 // ============================================================================
 
@@ -179,6 +191,10 @@ export const BranchListItem = memo(function BranchListItem({
   // upstream onClick, so even if a subsequent re-render misses the mouseleave
   // event, the tooltip state is reset.
   const handleClick = () => {
+    // Suppress mouseenter-triggered tooltips for 400ms so that list reorders
+    // caused by the re-render following this click don't immediately show a
+    // tooltip on whichever element lands under the cursor.
+    suppressMouseEnterUntil = Date.now() + 400;
     setIsTooltipVisible(false);
     onClick();
   };
@@ -188,7 +204,11 @@ export const BranchListItem = memo(function BranchListItem({
       ref={buttonRef}
       data-testid="branch-list-item"
       onClick={handleClick}
-      onMouseEnter={() => setIsTooltipVisible(true)}
+      onMouseEnter={() => {
+        if (Date.now() >= suppressMouseEnterUntil) {
+          setIsTooltipVisible(true);
+        }
+      }}
       onMouseLeave={() => setIsTooltipVisible(false)}
       onFocus={(e) => {
         // Show tooltip only for keyboard focus (:focus-visible), not pointer clicks.
