@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.7] - 2026-05-11
+
+### Added
+- Worktree: PC版Worktree詳細ビューに左パネル折りたたみ機能を追加 (Issue #688)
+- Repository: サイドバー表示制御用のリポジトリ可視性トグルを追加 (Issue #690)
+- MessageHistory: メッセージタイムスタンプに日付+時刻を表示 (Issue #687)
+- CLI: STANDARD_COMMANDSを最新のClaude CodeおよびCodexコマンドに更新 (Issue #689)
+
+### Fixed
+- Sidebar: ブランチホバー時のリスト並び替えフラッシュを解消（useDeferredValue + ref-only freeze方式） (Issue #699)
+- Sidebar: リポジトリグループ順序をキャッシュしてホバー時の並び替えを防止 (Issue #699)
+- Sidebar: ブランチクリック後のツールチップ表示によるリスト再描画チラつきを抑制 (Issue #699)
+- Sidebar: startTransitionでポーリング更新をラップしフラッシュを防止 (Issue #699)
+- Sidebar: ドキュメントクリック時に古いツールチップを閉じるよう修正 (Issue #699)
+- Sidebar: 選択済みブランチのスタックしたツールチップをリセット (Issue #699)
+- Worktree: 狭い幅でのパネルトグルUXを改善しファイルパネル折りたたみを追加 (Issue #698)
+- HtmlPreview: 未使用のonDirtyChange propを除去しリグレッションテストを追加 (Issue #681)
+- Tests: クロステスト汚染によるBranchListItemツールチップテスト失敗を修正
+
+### Refactored
+- FileTab: useFileTabsの戻り値を[state, actions]タプル形式に変更 (Issue #683)
+- Sidebar: サイドバー可視性ヘルパーを抽出しact()警告を修正 (Issue #690)
+
 ## [0.5.6] - 2026-04-27
 
 ### Added
