@@ -95,6 +95,12 @@ import { MoveDialog } from '@/components/worktree/MoveDialog';
 import { NewFileDialog } from '@/components/worktree/NewFileDialog';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
 import { parseCmateContent, validateScheduleHeaders, validateSchedulesSection, CMATE_TEMPLATE_CONTENT } from '@/lib/cmate-validator';
+import {
+  HISTORY_DISPLAY_LIMIT_STORAGE_KEY,
+  DEFAULT_MESSAGES_LIMIT,
+  isHistoryDisplayLimit,
+  type HistoryDisplayLimit,
+} from '@/config/history-display-config';
 
 // ============================================================================
 // Constants
@@ -294,6 +300,32 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     showArchivedRef.current = showArchived;
   }, [showArchived]);
 
+  // Issue #701: history display limit state with localStorage persistence
+  const [historyDisplayLimit, setHistoryDisplayLimit] = useState<HistoryDisplayLimit>(() => {
+    if (typeof window === 'undefined') return DEFAULT_MESSAGES_LIMIT;
+    try {
+      const stored = localStorage.getItem(HISTORY_DISPLAY_LIMIT_STORAGE_KEY);
+      if (stored === null) return DEFAULT_MESSAGES_LIMIT;
+      const parsed = parseInt(stored, 10);
+      return isHistoryDisplayLimit(parsed) ? parsed : DEFAULT_MESSAGES_LIMIT;
+    } catch {
+      return DEFAULT_MESSAGES_LIMIT;
+    }
+  });
+  const handleHistoryDisplayLimitChange = useCallback((limit: HistoryDisplayLimit) => {
+    setHistoryDisplayLimit(limit);
+    try {
+      localStorage.setItem(HISTORY_DISPLAY_LIMIT_STORAGE_KEY, String(limit));
+    } catch {
+      /* localStorage unavailable */
+    }
+  }, []);
+  // Ref for historyDisplayLimit to avoid fetchMessages callback recreation
+  const historyDisplayLimitRef = useRef(historyDisplayLimit);
+  useEffect(() => {
+    historyDisplayLimitRef.current = historyDisplayLimit;
+  }, [historyDisplayLimit]);
+
   // TODO: [D1-001] pendingInsertText の状態管理を useTextInsertion カスタムフックに抽出する（技術的負債）
   // [Issue #485] State for inserting text from history/memo into message input
   const [pendingInsertText, setPendingInsertText] = useState<string | null>(null);
@@ -380,6 +412,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       if (showArchivedRef.current) {
         params.set('includeArchived', 'true');
       }
+      // Issue #701: include user-selected history display limit
+      params.set('limit', String(historyDisplayLimitRef.current));
       const response = await fetch(`/api/worktrees/${worktreeId}/messages?${params.toString()}`);
       if (!response.ok) {
         throw new Error(`Failed to fetch messages: ${response.status}`);
@@ -523,6 +557,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   useEffect(() => {
     void fetchMessages();
   }, [showArchived, fetchMessages]);
+
+  // Issue #701: Re-fetch messages when historyDisplayLimit changes
+  useEffect(() => {
+    void fetchMessages();
+  }, [historyDisplayLimit, fetchMessages]);
 
   // Toast state for notifications (moved before event handlers that reference showToast)
   const { toasts, showToast, removeToast } = useToast();
@@ -1484,6 +1523,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   onInsertToMessage={handleInsertToMessage}
                   showArchived={showArchived}
                   onShowArchivedChange={handleShowArchivedChange}
+                  historyDisplayLimit={historyDisplayLimit}
+                  onHistoryDisplayLimitChange={handleHistoryDisplayLimitChange}
                 />
               )}
               {historySubTab === 'git' && (
@@ -1549,7 +1590,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         </div>
       </div>
     ),
-    [leftPaneTab, handleLeftPaneTabChange, historySubTab, state.messages, worktreeId, handleFilePathClick, showToast, fileSearch.query, fileSearch.mode, fileSearch.isSearching, fileSearch.error, fileSearch.setQuery, fileSearch.setMode, fileSearch.clearSearch, fileSearch.results?.results, handleFileSelect, handleNewFile, handleNewDirectory, handleRename, handleDelete, handleUpload, handleMove, handleCmateSetup, fileTreeRefresh, selectedAgents, handleSelectedAgentsChange, vibeLocalModel, handleVibeLocalModelChange, vibeLocalContextWindow, handleVibeLocalContextWindowChange, handleDiffSelect, handleInsertToMessage, showArchived, handleShowArchivedChange, actions.toggleLeftPane]
+    [leftPaneTab, handleLeftPaneTabChange, historySubTab, state.messages, worktreeId, handleFilePathClick, showToast, fileSearch.query, fileSearch.mode, fileSearch.isSearching, fileSearch.error, fileSearch.setQuery, fileSearch.setMode, fileSearch.clearSearch, fileSearch.results?.results, handleFileSelect, handleNewFile, handleNewDirectory, handleRename, handleDelete, handleUpload, handleMove, handleCmateSetup, fileTreeRefresh, selectedAgents, handleSelectedAgentsChange, vibeLocalModel, handleVibeLocalModelChange, vibeLocalContextWindow, handleVibeLocalContextWindowChange, handleDiffSelect, handleInsertToMessage, showArchived, handleShowArchivedChange, historyDisplayLimit, handleHistoryDisplayLimitChange, actions.toggleLeftPane]
   );
 
   // ========================================================================
@@ -1870,6 +1911,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onInsertToMessage={handleInsertToMessage}
             showArchived={showArchived}
             onShowArchivedChange={handleShowArchivedChange}
+            historyDisplayLimit={historyDisplayLimit}
+            onHistoryDisplayLimitChange={handleHistoryDisplayLimitChange}
           />
         </main>
 

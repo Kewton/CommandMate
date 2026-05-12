@@ -353,6 +353,23 @@ describe('Database Operations', () => {
         expect(messages).toHaveLength(5);
       });
 
+      // Issue #701: Verify DB layer handles upper bound limit (250)
+      it('should support limit=250 (Issue #701 upper bound)', () => {
+        for (let i = 0; i < 260; i++) {
+          createMessage(testDb, {
+            worktreeId: 'main',
+            role: 'user',
+            content: `Message ${i}`,
+            messageType: 'normal',
+            timestamp: new Date(2025, 0, 1, 0, 0, 0, i),
+          });
+        }
+
+        const messages = getMessages(testDb, 'main', { limit: 250 });
+
+        expect(messages).toHaveLength(250);
+      });
+
       it('should return empty array for worktree with no messages', () => {
         upsertWorktree(testDb, {
           id: 'empty',

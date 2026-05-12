@@ -21,6 +21,7 @@ import {
   createInfiniteMessagesError,
 } from '@/types/infinite-messages';
 import { groupMessagesIntoPairs } from '@/lib/conversation-grouper';
+import { DEFAULT_MESSAGES_LIMIT } from '@/config/history-display-config';
 
 /**
  * Options for useInfiniteMessages hook
@@ -113,7 +114,7 @@ function parseMessageTimestamps(messages: ChatMessage[]): ChatMessage[] {
 export function useInfiniteMessages(
   options: UseInfiniteMessagesOptions
 ): UseInfiniteMessagesReturn {
-  const { worktreeId, cliToolId, pageSize = 50 } = options;
+  const { worktreeId, cliToolId, pageSize = DEFAULT_MESSAGES_LIMIT } = options;
 
   // State
   const [messages, setMessages] = useState<ChatMessage[]>([]);

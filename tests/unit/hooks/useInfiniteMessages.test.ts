@@ -146,6 +146,52 @@ describe('useInfiniteMessages', () => {
 
       expect(result.current.hasMore).toBe(false);
     });
+
+    // Issue #701: Verify hasMore detection works at the new upper-bound pageSize (250)
+    it('should set hasMore to true when fetched count equals pageSize=250 (Issue #701)', async () => {
+      const mockMessages = createMockMessages(250);
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockMessages),
+      });
+
+      const { result } = renderHook(() =>
+        useInfiniteMessages({
+          worktreeId: 'wt-1',
+          cliToolId: 'claude',
+          pageSize: 250,
+        })
+      );
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      expect(result.current.hasMore).toBe(true);
+      expect(result.current.messages).toHaveLength(250);
+    });
+
+    it('should set hasMore to false when fetched count is less than pageSize=250 (Issue #701)', async () => {
+      const mockMessages = createMockMessages(249);
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockMessages),
+      });
+
+      const { result } = renderHook(() =>
+        useInfiniteMessages({
+          worktreeId: 'wt-1',
+          cliToolId: 'claude',
+          pageSize: 250,
+        })
+      );
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      expect(result.current.hasMore).toBe(false);
+    });
   });
 
   describe('loadMore', () => {

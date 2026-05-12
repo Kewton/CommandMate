@@ -8,6 +8,7 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById, getMessages } from '@/lib/db';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
+import { MAX_MESSAGES_LIMIT, DEFAULT_MESSAGES_LIMIT } from '@/config/history-display-config';
 
 const logger = createLogger('api/messages');
 
@@ -34,7 +35,7 @@ export async function GET(
     const cliToolParam = searchParams.get('cliTool');
 
     const before = beforeParam ? new Date(beforeParam) : undefined;
-    const limit = limitParam ? parseInt(limitParam, 10) : 50;
+    const limit = limitParam ? parseInt(limitParam, 10) : DEFAULT_MESSAGES_LIMIT;
     const cliToolId = cliToolParam as CLIToolType | undefined;
     const includeArchivedParam = searchParams.get('includeArchived');
     const includeArchived = includeArchivedParam === 'true';
@@ -47,10 +48,10 @@ export async function GET(
       );
     }
 
-    // Validate limit
-    if (isNaN(limit) || limit < 1 || limit > 100) {
+    // Validate limit (Issue #701: upper bound raised to MAX_MESSAGES_LIMIT)
+    if (isNaN(limit) || limit < 1 || limit > MAX_MESSAGES_LIMIT) {
       return NextResponse.json(
-        { error: 'Invalid limit parameter (must be 1-100)' },
+        { error: `Invalid limit parameter (must be 1-${MAX_MESSAGES_LIMIT})` },
         { status: 400 }
       );
     }
