@@ -1,16 +1,17 @@
 /**
  * History Display Configuration (Issue #701)
  *
- * Single Source of Truth for history display limit options used by:
- * - GET /api/worktrees/:id/messages (limit validation upper bound)
+ * Single Source of Truth for the history display limit options used by:
+ * - GET /api/worktrees/:id/messages (upper-bound validation)
  * - HistoryPane selector UI (selectable options)
  * - WorktreeDetailRefactored state (persisted to localStorage)
  * - useInfiniteMessages default page size
  *
  * Design decisions:
- * - MAX_MESSAGES_LIMIT is derived from HISTORY_DISPLAY_LIMIT_OPTIONS (no duplication)
- * - DEFAULT_MESSAGES_LIMIT (50) matches historical default before this issue
- * - Storage key namespaced under `commandmate:` to match existing keys (e.g. showArchived)
+ * - MAX_MESSAGES_LIMIT is derived from HISTORY_DISPLAY_LIMIT_OPTIONS (no duplication).
+ * - DEFAULT_MESSAGES_LIMIT (50) matches the historical default before this issue.
+ * - Storage key uses the `commandmate:` namespace, matching other keys
+ *   (e.g. `commandmate:showArchived`).
  */
 
 /**
@@ -25,13 +26,14 @@ export const HISTORY_DISPLAY_LIMIT_OPTIONS = [50, 100, 150, 200, 250] as const;
 export type HistoryDisplayLimit = (typeof HISTORY_DISPLAY_LIMIT_OPTIONS)[number];
 
 /**
- * Upper bound enforced by the API (derived from the maximum option).
+ * Upper bound enforced by the API, derived from the maximum option.
  *
- * The `as 250` literal cast is safe because `Math.max(...HISTORY_DISPLAY_LIMIT_OPTIONS)`
- * is mathematically equivalent to the literal `250` (since 250 is the last entry).
- * Centralising via Math.max prevents drift if the options array is extended later.
+ * Typed as `HistoryDisplayLimit` (not a brittle `as 250` literal) so that
+ * extending `HISTORY_DISPLAY_LIMIT_OPTIONS` does not require touching this line.
  */
-export const MAX_MESSAGES_LIMIT = Math.max(...HISTORY_DISPLAY_LIMIT_OPTIONS) as 250;
+export const MAX_MESSAGES_LIMIT: HistoryDisplayLimit = Math.max(
+  ...HISTORY_DISPLAY_LIMIT_OPTIONS,
+) as HistoryDisplayLimit;
 
 /**
  * Default history display limit (used when no localStorage value is present

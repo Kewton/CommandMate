@@ -48,7 +48,7 @@ export async function GET(
       );
     }
 
-    // Validate limit (Issue #701: upper bound raised to MAX_MESSAGES_LIMIT)
+    // Validate limit. Upper bound is MAX_MESSAGES_LIMIT (Issue #701).
     if (isNaN(limit) || limit < 1 || limit > MAX_MESSAGES_LIMIT) {
       return NextResponse.json(
         { error: `Invalid limit parameter (must be 1-${MAX_MESSAGES_LIMIT})` },
