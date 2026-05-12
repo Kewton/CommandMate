@@ -187,6 +187,7 @@ tests/
 | `src/config/copilot-constants.ts` | Copilot CLIタイミング定数（COPILOT_SEND_ENTER_DELAY_MS, COPILOT_TEXT_INPUT_DELAY_MS）（Issue #565）、MODEL_NAME_PATTERN/MAX_MODEL_NAME_LENGTH追加（Issue #588） |
 | `src/config/memo-config.ts` | メモ共有定数（MAX_MEMOS）（Issue #652） |
 | `src/config/repository-config.ts` | リポジトリ共有定数（MAX_DISPLAY_NAME_LENGTH）（Issue #644） |
+| `src/config/history-display-config.ts` | History表示件数定数（HISTORY_DISPLAY_LIMIT_OPTIONS, MAX_MESSAGES_LIMIT派生, DEFAULT_MESSAGES_LIMIT, HISTORY_DISPLAY_LIMIT_STORAGE_KEY, HistoryDisplayLimit型, isHistoryDisplayLimit型ガード）（Issue #701） |
 | `src/config/editable-extensions.ts` | 編集可能拡張子定義・バリデーション（EDITABLE_EXTENSIONS, EXTENSION_VALIDATORS, isEditableExtension, validateContent）。.yaml/.yml 追加・YAML危険タグバリデーション（Issue #646） |
 | `src/config/pdf-extensions.ts` | PDF拡張子・サイズ(20MB)・magic bytes(`%PDF-`)・iframe sandbox定数、isPdfExtension / validatePdfMagicBytes / validatePdfContent（Issue #673） |
 | `src/lib/detection/prompt-key.ts` | promptKey重複排除ユーティリティ |

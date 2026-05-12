@@ -34,6 +34,7 @@ import { GitPane } from '@/components/worktree/GitPane';
 import type { Worktree, ChatMessage, GitStatus } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { UseFileSearchReturn } from '@/hooks/useFileSearch';
+import type { HistoryDisplayLimit } from '@/config/history-display-config';
 
 // ============================================================================
 // Constants
@@ -878,6 +879,10 @@ interface MobileContentProps {
   showArchived?: boolean;
   /** [Issue #168] Callback when showArchived toggle changes */
   onShowArchivedChange?: (show: boolean) => void;
+  /** [Issue #701] Current history display limit */
+  historyDisplayLimit?: HistoryDisplayLimit;
+  /** [Issue #701] Callback when history display limit changes */
+  onHistoryDisplayLimitChange?: (limit: HistoryDisplayLimit) => void;
 }
 
 /** Renders content based on active mobile tab */
@@ -917,6 +922,8 @@ export const MobileContent = memo(function MobileContent({
   onInsertToMessage,
   showArchived,
   onShowArchivedChange,
+  historyDisplayLimit,
+  onHistoryDisplayLimitChange,
 }: MobileContentProps) {
   switch (activeTab) {
     case 'terminal':
@@ -972,6 +979,8 @@ export const MobileContent = memo(function MobileContent({
                 onInsertToMessage={onInsertToMessage}
                 showArchived={showArchived}
                 onShowArchivedChange={onShowArchivedChange}
+                historyDisplayLimit={historyDisplayLimit}
+                onHistoryDisplayLimitChange={onHistoryDisplayLimitChange}
               />
             </ErrorBoundary>
           ) : (

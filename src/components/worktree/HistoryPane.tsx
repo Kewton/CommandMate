@@ -13,6 +13,11 @@ import type { ChatMessage } from '@/types/models';
 import { useConversationHistory } from '@/hooks/useConversationHistory';
 import { ConversationPairCard } from './ConversationPairCard';
 import { copyToClipboard } from '@/lib/clipboard-utils';
+import {
+  HISTORY_DISPLAY_LIMIT_OPTIONS,
+  isHistoryDisplayLimit,
+  type HistoryDisplayLimit,
+} from '@/config/history-display-config';
 
 // ============================================================================
 // Constants
@@ -51,6 +56,10 @@ export interface HistoryPaneProps {
   showArchived?: boolean;
   /** Issue #168: Callback when showArchived toggle changes */
   onShowArchivedChange?: (show: boolean) => void;
+  /** Issue #701: Current history display limit (50/100/150/200/250) */
+  historyDisplayLimit?: HistoryDisplayLimit;
+  /** Issue #701: Callback when the history display limit selector changes */
+  onHistoryDisplayLimitChange?: (limit: HistoryDisplayLimit) => void;
 }
 
 // ============================================================================
@@ -157,6 +166,8 @@ export const HistoryPane = memo(function HistoryPane({
   onInsertToMessage,
   showArchived = false,
   onShowArchivedChange,
+  historyDisplayLimit,
+  onHistoryDisplayLimitChange,
 }: HistoryPaneProps) {
   // worktreeId is kept in props for future use (e.g., filtering, fetching)
   // Using underscore prefix to indicate intentionally unused parameter
@@ -259,6 +270,17 @@ export const HistoryPane = memo(function HistoryPane({
     });
   };
 
+  // Issue #701: history display limit select handler
+  const handleHistoryDisplayLimitSelectChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const parsed = parseInt(e.target.value, 10);
+      if (isHistoryDisplayLimit(parsed)) {
+        onHistoryDisplayLimitChange?.(parsed);
+      }
+    },
+    [onHistoryDisplayLimitChange]
+  );
+
   return (
     <div
       ref={scrollContainerRef}
@@ -267,19 +289,38 @@ export const HistoryPane = memo(function HistoryPane({
       className={containerClasses}
     >
       {/* Header */}
-      <div className="sticky top-0 bg-gray-900 border-b border-gray-700 px-4 py-2 z-10 flex items-center justify-between">
+      <div className="sticky top-0 bg-gray-900 border-b border-gray-700 px-4 py-2 z-10 flex items-center justify-between flex-wrap gap-1">
         <h3 className="text-sm font-medium text-gray-300">Message History</h3>
-        {onShowArchivedChange && (
-          <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={showArchived}
-              onChange={(e) => onShowArchivedChange(e.target.checked)}
-              className="rounded border-gray-600 bg-gray-800 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-0 h-3.5 w-3.5"
-            />
-            Show archived
-          </label>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {onHistoryDisplayLimitChange && historyDisplayLimit !== undefined && (
+            <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
+              <span>Show</span>
+              <select
+                value={historyDisplayLimit}
+                onChange={handleHistoryDisplayLimitSelectChange}
+                aria-label="History display limit"
+                className="rounded border border-gray-600 bg-gray-800 text-gray-200 text-xs px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              >
+                {HISTORY_DISPLAY_LIMIT_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {onShowArchivedChange && (
+            <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showArchived}
+                onChange={(e) => onShowArchivedChange(e.target.checked)}
+                className="rounded border-gray-600 bg-gray-800 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-0 h-3.5 w-3.5"
+              />
+              Show archived
+            </label>
+          )}
+        </div>
       </div>
 
       {/* Content */}

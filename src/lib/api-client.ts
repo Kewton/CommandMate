@@ -216,14 +216,23 @@ export const worktreeApi = {
   /**
    * Get messages for a worktree, optionally filtered by CLI tool
    * Issue #168: Added includeArchived parameter for session history retention
+   * Issue #701: Added limit parameter for user-selectable display count (50-250)
    */
-  async getMessages(id: string, cliTool?: CLIToolType, includeArchived?: boolean): Promise<ChatMessage[]> {
+  async getMessages(
+    id: string,
+    cliTool?: CLIToolType,
+    includeArchived?: boolean,
+    limit?: number,
+  ): Promise<ChatMessage[]> {
     const params = new URLSearchParams();
     if (cliTool) {
       params.append('cliTool', cliTool);
     }
     if (includeArchived) {
       params.append('includeArchived', 'true');
+    }
+    if (typeof limit === 'number' && Number.isFinite(limit)) {
+      params.append('limit', String(limit));
     }
     const url = `/api/worktrees/${id}/messages${params.toString() ? `?${params.toString()}` : ''}`;
     return fetchApi<ChatMessage[]>(url);
