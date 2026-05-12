@@ -185,6 +185,76 @@ describe('GET /api/worktrees/:id/messages', () => {
     expect(data.error).toContain('not found');
   });
 
+  // Issue #701: Limit boundary tests
+  describe('limit parameter boundary (Issue #701)', () => {
+    it('should accept limit=250 (upper bound) and return 200', async () => {
+      const request = new Request(
+        'http://localhost:3000/api/worktrees/test-worktree/messages?limit=250'
+      );
+      const params = { params: { id: 'test-worktree' } };
+      const response = await getMessages(
+        request as unknown as import('next/server').NextRequest,
+        params
+      );
+      expect(response.status).toBe(200);
+    });
+
+    it('should reject limit=251 (above upper bound) with 400', async () => {
+      const request = new Request(
+        'http://localhost:3000/api/worktrees/test-worktree/messages?limit=251'
+      );
+      const params = { params: { id: 'test-worktree' } };
+      const response = await getMessages(
+        request as unknown as import('next/server').NextRequest,
+        params
+      );
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data).toHaveProperty('error');
+      expect(data.error).toContain('250');
+    });
+
+    it('should reject limit=0 (below lower bound) with 400', async () => {
+      const request = new Request(
+        'http://localhost:3000/api/worktrees/test-worktree/messages?limit=0'
+      );
+      const params = { params: { id: 'test-worktree' } };
+      const response = await getMessages(
+        request as unknown as import('next/server').NextRequest,
+        params
+      );
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data).toHaveProperty('error');
+    });
+
+    it('should reject limit=abc (non-numeric) with 400', async () => {
+      const request = new Request(
+        'http://localhost:3000/api/worktrees/test-worktree/messages?limit=abc'
+      );
+      const params = { params: { id: 'test-worktree' } };
+      const response = await getMessages(
+        request as unknown as import('next/server').NextRequest,
+        params
+      );
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data).toHaveProperty('error');
+    });
+
+    it('should accept limit=1 (lower bound) and return 200', async () => {
+      const request = new Request(
+        'http://localhost:3000/api/worktrees/test-worktree/messages?limit=1'
+      );
+      const params = { params: { id: 'test-worktree' } };
+      const response = await getMessages(
+        request as unknown as import('next/server').NextRequest,
+        params
+      );
+      expect(response.status).toBe(200);
+    });
+  });
+
   it('should return 500 on database error', async () => {
     db.close();
 
