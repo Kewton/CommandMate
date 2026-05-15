@@ -1,0 +1,115 @@
+{
+  "status": "pass",
+  "summary": "Issue #706 (Files タブツリー再描画でスクロール位置リセット) の修正は全 8 項目の受入条件・全 8 件のテストシナリオを満たし、ESLint / TypeScript / Vitest (6491 tests) の検証も全てパスした。FileTreeView.tsx で初回マウント時のみ全画面 loading/error を表示し、refetch 中は既存ツリー DOM を保持しつつ控えめなインジケーター・非破壊エラーバナー・再試行ボタンを表示する実装が正しく動作する。WorktreeDetailRefactored.tsx の prevTreeHashRef 初回スキップロジックも正しく実装され、偽陽性 refresh 発火を回避している。",
+  "acceptance_criteria_results": [
+    {
+      "criterion": "Files タブ初回表示後 5 秒経過時にスクロール位置がリセットされない",
+      "result": "pass",
+      "evidence": "WorktreeDetailRefactored.tsx:279-284 で prevTreeHashRef.current === null の初回ポーリング時はベースラインのみ記録し setFileTreeRefresh を呼ばない。さらに FileTreeView.tsx:383 で rootItems.length === 0 が偽の場合は loading 早期 return せず既存ツリー DOM を保持するため、スクロール位置はリセットされない。"
+    },
+    {
+      "criterion": "実際にファイルが追加／削除された際もスクロール位置・フォーカスが維持される",
+      "result": "pass",
+      "evidence": "FileTreeView.tsx:171-234 の reloadTreeWithExpandedDirs では setRootItems/setCache のみ更新し、ツリーコンテナ DOM は同一インスタンスを保持する。loading 早期 return は rootItems.length === 0 のみで限定されているため、refetch 中もスクロール状態は維持される。"
+    },
+    {
+      "criterion": "refetch 中はパネル内に控えめな更新インジケーターが表示される",
+      "result": "pass",
+      "evidence": "FileTreeView.tsx:412 で isRefetching = loading && rootItems.length > 0 を判定し、:512-525 でツールバー右端に data-testid='file-tree-refetch-indicator' (role='status', aria-live='polite') を表示。テスト (FileTreeView.test.tsx:1589-1635) で 'should show file-tree-refetch-indicator while refetching' 動作を確認済み。"
+    },
+    {
+      "criterion": "初回マウント時（rootItems 未取得時）は従来通り全画面 loading が表示される",
+      "result": "pass",
+      "evidence": "FileTreeView.tsx:383-394 で isInitialLoading = loading && rootItems.length === 0 のとき従来通り data-testid='file-tree-loading' を表示。テスト (FileTreeView.test.tsx:63-66) で 'should render loading state initially' が pass。"
+    },
+    {
+      "criterion": "refetch 失敗時は既存ツリーを保持しつつエラーを非破壊的に通知する",
+      "result": "pass",
+      "evidence": "FileTreeView.tsx:413 で isRefetchError = !!error && rootItems.length > 0 を判定し、:531-549 で data-testid='file-tree-refetch-error' バナー + 再試行ボタンを表示。テスト (FileTreeView.test.tsx:1637-1662) で既存ツリー保持と file-tree-error 非表示を確認済み。"
+    },
+    {
+      "criterion": "既存の npm run test:unit で 0 件の回帰",
+      "result": "pass",
+      "evidence": "npm run test:unit で Test Files 343 passed (343), Tests 6491 passed | 7 skipped (6498)。FileTreeView.test.tsx 単独実行でも 69 tests passed。"
+    },
+    {
+      "criterion": "FileTreeView の refetch 動作に関する新規テストが追加されている",
+      "result": "pass",
+      "evidence": "FileTreeView.test.tsx:1562-1720 に describe('refetch indicator (Issue #706)') が追加され、5 件の新規テスト (loading 非表示・indicator 表示・error 非破壊・全画面 error 維持・retry 動作) が pass。"
+    },
+    {
+      "criterion": "ESLint / TypeScript チェックがパスする",
+      "result": "pass",
+      "evidence": "npm run lint: 'No ESLint warnings or errors'。npx tsc --noEmit: エラー出力なし (exit 0)。"
+    }
+  ],
+  "test_scenario_results": [
+    {
+      "id": "TS-1",
+      "title": "初回マウント時の loading 表示",
+      "result": "pass",
+      "evidence": "FileTreeView.tsx:383-394 isInitialLoading 分岐で data-testid='file-tree-loading' を返す。FileTreeView.test.tsx:63 'should render loading state initially' が pass。"
+    },
+    {
+      "id": "TS-2",
+      "title": "refetch 時の loading 非表示",
+      "result": "pass",
+      "evidence": "FileTreeView.tsx:383 isInitialLoading = loading && rootItems.length === 0 で限定されており、rootItems がある状態では loading=true でも早期 return せず既存ツリー DOM が保持される。FileTreeView.test.tsx:1563 'should not show file-tree-loading on refetch' で rerender 後も file-tree-loading が出ないことを確認済み。"
+    },
+    {
+      "id": "TS-3",
+      "title": "refetch 中の控えめインジケーター表示",
+      "result": "pass",
+      "evidence": "FileTreeView.tsx:512-525 で isRefetching && の条件下、data-testid='file-tree-refetch-indicator' (role='status', aria-live='polite') を表示。FileTreeView.test.tsx:1589 'should show file-tree-refetch-indicator while refetching' が pass (deferred fetch で in-flight 状態をシミュレート)。"
+    },
+    {
+      "id": "TS-4",
+      "title": "refetch エラーの非破壊表示",
+      "result": "pass",
+      "evidence": "FileTreeView.tsx:413, :531-549 で isRefetchError 時に data-testid='file-tree-refetch-error' バナーと再試行ボタンを表示し、ツリー DOM は :550-568 で引き続きレンダリングされる。FileTreeView.test.tsx:1637 'should preserve existing tree and show file-tree-refetch-error on refetch failure' が pass。"
+    },
+    {
+      "id": "TS-5",
+      "title": "初回ロード失敗時の全画面エラー表示",
+      "result": "pass",
+      "evidence": "FileTreeView.tsx:399-409 で isInitialError = !!error && rootItems.length === 0 のとき data-testid='file-tree-error' を全画面表示。FileTreeView.test.tsx:1664 'should still show full-screen file-tree-error on initial load failure' が pass。"
+    },
+    {
+      "id": "TS-6",
+      "title": "再試行ボタンの動作",
+      "result": "pass",
+      "evidence": "FileTreeView.tsx:539-546 で data-testid='file-tree-refetch-retry-button' の onClick が reloadTreeWithExpandedDirs を呼び出す。FileTreeView.test.tsx:1677 'should retry refetch when file-tree-refetch-retry-button is clicked' でクリック後にエラーバナー消失と src 表示を確認済み。"
+    },
+    {
+      "id": "TS-7",
+      "title": "prevTreeHashRef 初回スキップ",
+      "result": "pass",
+      "evidence": "WorktreeDetailRefactored.tsx:265 で prevTreeHashRef = useRef<string | null>(null) 初期化。:279-284 で prevTreeHashRef.current === null の初回ポーリング時は newHash 記録のみ (setFileTreeRefresh 呼ばず)、2 回目以降は newHash !== prev で setFileTreeRefresh(prev => prev + 1) を発火する分岐ロジックが正しく実装されている。"
+    },
+    {
+      "id": "TS-8",
+      "title": "既存 Issue #164 テスト互換",
+      "result": "pass",
+      "evidence": "FileTreeView.test.tsx:1021 describe('refreshTrigger - expand state preservation (Issue #164)') 全件 (maintain expanded directory contents, CONCURRENT_LIMIT, remove deleted directories, no infinite loop, birthtime visibility, cancel previous reload) が pass。FileTreeView.test.tsx 全 69 tests passed。"
+    }
+  ],
+  "validation_command_results": {
+    "lint": {
+      "result": "pass",
+      "details": "npm run lint → 'No ESLint warnings or errors'"
+    },
+    "typecheck": {
+      "result": "pass",
+      "details": "npx tsc --noEmit → エラー出力なし (exit 0)"
+    },
+    "unit_test": {
+      "result": "pass",
+      "details": "npm run test:unit → Test Files 343 passed (343), Tests 6491 passed | 7 skipped (6498)。FileTreeView.test.tsx 単独実行で 69 tests passed (Issue #706 新規 5 件 + Issue #164 既存テスト含む)。"
+    }
+  },
+  "issues_found": [],
+  "recommendations": [
+    "受入テスト観点では問題なし。手動 (Playwright E2E または実機) でも長時間スクロール後の 5 秒ポーリングでスクロール位置が維持されることを最終確認することを推奨 (今回コードレベル + Unit テストで合理的に保証済み)。",
+    "再試行ボタンのラベル '再試行' は日本語ハードコードのため、将来的に i18n 対応する場合は next-intl メッセージへ移行することを検討 (今回の修正スコープ外)。"
+  ]
+}

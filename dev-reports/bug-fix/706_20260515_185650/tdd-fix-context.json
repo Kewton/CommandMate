@@ -1,0 +1,47 @@
+{
+  "bug_id": "706_20260515_185650",
+  "issue_number": 706,
+  "bug_description": "Files タブのツリー再描画でスクロール位置がリセットされる。refetch 中の loading 表示を全置換から控えめインジケーター方式へ変更し、既存ツリー DOM を保持する。",
+  "selected_actions": [
+    {
+      "action_id": "1",
+      "title": "FileTreeView の loading 分岐を初回限定に変更",
+      "description": "isInitialLoading = loading && rootItems.length === 0 のときのみ全画面 Loading を表示。refetch 中は既存ツリー DOM を保持し、ツールバー右側に小型 spinner（data-testid='file-tree-refetch-indicator', aria-live='polite'）を表示。",
+      "files_to_modify": ["src/components/worktree/FileTreeView.tsx"]
+    },
+    {
+      "action_id": "2",
+      "title": "refetch エラー時の非破壊表示",
+      "description": "isInitialError = !!error && rootItems.length === 0 のときのみ全画面 Error 表示。それ以外は既存ツリー上部にエラーバナー（data-testid='file-tree-refetch-error'）。",
+      "files_to_modify": ["src/components/worktree/FileTreeView.tsx"]
+    },
+    {
+      "action_id": "3",
+      "title": "prevTreeHashRef の初回スキップ",
+      "description": "WorktreeDetailRefactored.tsx の `if (newHash !== prevTreeHashRef.current)` を、初回 null のときは比較スキップして代入のみに変更。",
+      "files_to_modify": ["src/components/worktree/WorktreeDetailRefactored.tsx"]
+    },
+    {
+      "action_id": "4",
+      "title": "テスト追加・既存テスト更新",
+      "description": "refetch 時の loading 非表示、refetch インジケーター表示、refetch エラー時の既存ツリー保持に関するテストを追加。data-testid='file-tree-loading' を期待する既存テストは初回マウント時に限定して整合性を確保。",
+      "files_to_modify": ["tests/unit/components/worktree/FileTreeView.test.tsx"]
+    }
+  ],
+  "target_coverage": 80,
+  "test_command": "npm run test:unit -- tests/unit/components/worktree/FileTreeView.test.tsx",
+  "lint_command": "npm run lint",
+  "typecheck_command": "npx tsc --noEmit",
+  "constraints": {
+    "tdd_cycle": "Red-Green-Refactor を厳守。新規テストを先に追加して失敗を確認してから実装する。",
+    "preserve_behavior": "既存の Issue #164 の refreshTrigger expand 状態保持テスト・既存スナップショットテストは破壊しない",
+    "no_unused_changes": "Issue 範囲外のリファクタリングは行わない（コードベース既存規約に準拠）",
+    "accessibility": "更新インジケーターには aria-live='polite' を付与"
+  },
+  "notes": [
+    "FileTreeView は memo() ラップされた関数コンポーネントで、useState/useEffect で状態管理",
+    "loading は useState で管理（初期値 true）、reloadTreeWithExpandedDirs() 内で setLoading(true/false)",
+    "data-testid='file-tree-loading' を期待する既存テストは file_path:tests/unit/components/worktree/FileTreeView.test.tsx:65 にあり、初回マウント時のみのテストに限定する形で整合させる",
+    "TreeNode は key={item.name} で再利用される（FileTreeView.tsx:490）。React reconciliation で DOM が保持される設計に既になっているので、loading 分岐の早期 return を削除すれば既存ツリーが保持される"
+  ]
+}
