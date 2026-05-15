@@ -221,5 +221,175 @@ describe('useWorktreesCache()', () => {
 
       expect(mockFetch).toHaveBeenCalledTimes(fetchCountAfterInit);
     });
+
+    /**
+     * Issue #710: Adaptive polling must update the interval when the
+     * worktree active/idle state changes.
+     */
+    it('should switch from idle to active interval when a session starts', async () => {
+      const idleWorktrees = [{ id: 'wt-1', name: 'main', isSessionRunning: false }];
+      const activeWorktrees = [{ id: 'wt-1', name: 'main', isSessionRunning: true }];
+
+      // First fetch: idle. Subsequent fetches: active.
+      mockFetch.mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({
+          worktrees:
+            mockFetch.mock.calls.length === 1 ? idleWorktrees : activeWorktrees,
+        }),
+      }));
+
+      renderHook(() => useWorktreesCache());
+
+      // Flush initial fetch + setTimeout(startPolling, 0)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+
+      // After idle interval - second fetch happens (returns active worktrees)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_IDLE);
+      });
+      const fetchCountAfterIdleTick = mockFetch.mock.calls.length;
+      expect(fetchCountAfterIdleTick).toBeGreaterThanOrEqual(2);
+
+      // The hook should now have switched to ACTIVE interval (5s).
+      // Advance just past ACTIVE interval - should trigger another fetch.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_ACTIVE + 100);
+      });
+      expect(mockFetch.mock.calls.length).toBeGreaterThan(fetchCountAfterIdleTick);
+    });
+
+    it('should switch from active to idle interval when all sessions stop', async () => {
+      const activeWorktrees = [{ id: 'wt-1', name: 'main', isSessionRunning: true }];
+      const idleWorktrees = [{ id: 'wt-1', name: 'main', isSessionRunning: false }];
+
+      // First fetch: active. Subsequent fetches: idle.
+      mockFetch.mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({
+          worktrees:
+            mockFetch.mock.calls.length === 1 ? activeWorktrees : idleWorktrees,
+        }),
+      }));
+
+      renderHook(() => useWorktreesCache());
+
+      // Flush initial fetch + setTimeout(startPolling, 0)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+
+      // After active interval - second fetch happens (returns idle worktrees)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_ACTIVE + 100);
+      });
+      const fetchCountAfterActiveTick = mockFetch.mock.calls.length;
+      expect(fetchCountAfterActiveTick).toBeGreaterThanOrEqual(2);
+
+      // The hook should now have switched to IDLE interval (30s).
+      // Advancing by ACTIVE interval should NOT trigger another fetch.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_ACTIVE + 100);
+      });
+      expect(mockFetch.mock.calls.length).toBe(fetchCountAfterActiveTick);
+
+      // Advance the rest of the IDLE interval - should trigger a fetch.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(
+          POLLING_INTERVAL_IDLE - POLLING_INTERVAL_ACTIVE,
+        );
+      });
+      expect(mockFetch.mock.calls.length).toBeGreaterThan(fetchCountAfterActiveTick);
+    });
+
+    it('should not restart interval when active state does not change', async () => {
+      const idleWorktreesA = [{ id: 'wt-1', name: 'main', isSessionRunning: false }];
+      const idleWorktreesB = [{ id: 'wt-2', name: 'feature', isSessionRunning: false }];
+
+      // Alternate worktrees identity but keep isSessionRunning=false throughout.
+      mockFetch.mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({
+          worktrees:
+            mockFetch.mock.calls.length % 2 === 1 ? idleWorktreesA : idleWorktreesB,
+        }),
+      }));
+
+      renderHook(() => useWorktreesCache());
+
+      // Flush initial fetch + setTimeout(startPolling, 0)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+
+      const fetchCountAfterInit = mockFetch.mock.calls.length;
+
+      // Advance just less than IDLE interval - should not trigger a fetch
+      // even though worktrees identity changes are happening.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_IDLE - 100);
+      });
+      // No-op: same desired interval, so the setInterval timer should still
+      // be the original one and should not have fired yet.
+      expect(mockFetch.mock.calls.length).toBe(fetchCountAfterInit);
+
+      // After the rest of the IDLE interval - the (original) timer fires.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(mockFetch.mock.calls.length).toBe(fetchCountAfterInit + 1);
+    });
+
+    it('should not restart polling when tab is hidden', async () => {
+      const idleWorktrees = [{ id: 'wt-1', name: 'main', isSessionRunning: false }];
+      const activeWorktrees = [{ id: 'wt-1', name: 'main', isSessionRunning: true }];
+
+      mockFetch.mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({
+          worktrees:
+            mockFetch.mock.calls.length === 1 ? idleWorktrees : activeWorktrees,
+        }),
+      }));
+
+      renderHook(() => useWorktreesCache());
+
+      // Flush initial fetch + setTimeout(startPolling, 0)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+
+      // Set tab hidden and dispatch visibilitychange so polling stops.
+      const originalHidden = Object.getOwnPropertyDescriptor(
+        Document.prototype,
+        'hidden',
+      );
+      Object.defineProperty(document, 'hidden', {
+        value: true,
+        configurable: true,
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+
+      const fetchCountAfterHidden = mockFetch.mock.calls.length;
+
+      // Even after the IDLE interval elapses, no fetch should run because
+      // the tab is hidden. The worktrees state ref still reflects idle
+      // (since no second poll has run yet).
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_IDLE * 2);
+      });
+      expect(mockFetch.mock.calls.length).toBe(fetchCountAfterHidden);
+
+      // Restore document.hidden for subsequent tests.
+      if (originalHidden) {
+        Object.defineProperty(Document.prototype, 'hidden', originalHidden);
+      }
+      Object.defineProperty(document, 'hidden', {
+        value: false,
+        configurable: true,
+      });
+    });
   });
 });

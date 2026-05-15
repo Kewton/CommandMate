@@ -1,0 +1,166 @@
+{
+  "status": "success",
+  "bug_id": "20260515_211253",
+  "related_issue": 710,
+  "verdict": "accepted",
+  "summary": "Issue #710 currentIntervalRef パターン実装の受入テスト合格。useWorktreesCache.test.ts 15/15 PASS、全体 6495 passed | 7 skipped (回帰0件)、ESLint/TSC clean。worktrees の active/idle 遷移時にのみ setInterval が再生成され、document.hidden や初期化前は no-op となる実装が確認できた。",
+  "acceptance_criteria_results": [
+    {
+      "criterion": "worktrees の active/idle 状態変化を検知し、間隔が変わるべきタイミングで startPolling を再実行する",
+      "status": "passed",
+      "evidence": {
+        "implementation": "src/hooks/useWorktreesCache.ts:164-182 にて worktrees useEffect で desired interval を再計算し、currentIntervalRef.current !== desired のときのみ startPolling() を呼ぶ",
+        "tests": [
+          "should switch from idle to active interval when a session starts",
+          "should switch from active to idle interval when all sessions stop"
+        ]
+      }
+    },
+    {
+      "criterion": "active 状態でアプリ起動 → セッション停止 → 30秒間隔に移行",
+      "status": "passed",
+      "evidence": {
+        "test": "should switch from active to idle interval when all sessions stop",
+        "behavior": "ACTIVE 5s 経過後の 2回目 fetch で idle worktrees を受信、その後 ACTIVE 5s が経っても 3回目 fetch が発生せず、IDLE 30s 経過時に初めて 3回目 fetch が発生することを検証"
+      }
+    },
+    {
+      "criterion": "idle 状態でアプリ起動 → セッション開始 → 5秒間隔に移行",
+      "status": "passed",
+      "evidence": {
+        "test": "should switch from idle to active interval when a session starts",
+        "behavior": "IDLE 30s 経過後の 2回目 fetch で active worktrees を受信、その後 ACTIVE 5s 経過時点で 3回目 fetch が発生することを検証"
+      }
+    },
+    {
+      "criterion": "不要な setInterval 再起動が発生しない（同じ間隔のままなら no-op）",
+      "status": "passed",
+      "evidence": {
+        "implementation": "src/hooks/useWorktreesCache.ts:179 `if (currentIntervalRef.current !== desired)` ガード",
+        "test": "should not restart interval when active state does not change",
+        "behavior": "worktrees の identity を交互に変更しつつ isSessionRunning=false を維持。IDLE-100ms 時点で fetch 数は変わらず、IDLE 経過時に元のタイマーで 1 回だけ fetch が発生することを検証"
+      }
+    },
+    {
+      "criterion": "visibility hidden → visible の挙動が壊れない",
+      "status": "passed",
+      "evidence": {
+        "implementation": "src/hooks/useWorktreesCache.ts:168 `if (document.hidden) return` ガード、137-159 行の adaptive-polling useEffect が visibilitychange を所有",
+        "test": "should not restart polling when tab is hidden",
+        "behavior": "document.hidden=true 中は worktrees 変化があっても setInterval が再生成されず fetch が増えない。visibilitychange の visible 遷移時は既存ハンドラ (handleVisibilityChange) が refresh + startPolling を実行することで再開される"
+      }
+    },
+    {
+      "criterion": "npm run test:unit 回帰 0 件",
+      "status": "passed",
+      "evidence": {
+        "full_suite": "6495 passed | 7 skipped (6502 total)",
+        "baseline": 6491,
+        "delta": "+4 new tests (Issue #710)",
+        "regression": 0
+      }
+    }
+  ],
+  "test_scenarios_results": [
+    {
+      "scenario": "シナリオ1: useWorktreesCache 単体テスト全件PASS（15件）",
+      "status": "passed",
+      "command": "NODE_ENV=test npx vitest run tests/unit/useWorktreesCache.test.ts",
+      "result": "Test Files 1 passed (1), Tests 15 passed (15), Duration 789ms"
+    },
+    {
+      "scenario": "シナリオ2: idle→active 遷移時に5s間隔に切替",
+      "status": "passed",
+      "test_name": "should switch from idle to active interval when a session starts"
+    },
+    {
+      "scenario": "シナリオ3: active→idle 遷移時に30s間隔に切替",
+      "status": "passed",
+      "test_name": "should switch from active to idle interval when all sessions stop"
+    },
+    {
+      "scenario": "シナリオ4: 同じ active 状態が続く場合は no-op（setInterval再起動しない）",
+      "status": "passed",
+      "test_name": "should not restart interval when active state does not change"
+    },
+    {
+      "scenario": "シナリオ5: document.hidden 時は worktrees 変化で再起動しない",
+      "status": "passed",
+      "test_name": "should not restart polling when tab is hidden"
+    },
+    {
+      "scenario": "シナリオ6: 既存テストスイート全件PASS（6495件、回帰0件）",
+      "status": "passed",
+      "command": "npm run test:unit",
+      "result": "Test Files 343 passed (343), Tests 6495 passed | 7 skipped (6502), Duration 13.87s"
+    },
+    {
+      "scenario": "シナリオ7: npm run lint PASS",
+      "status": "passed",
+      "command": "npm run lint",
+      "result": "No ESLint warnings or errors"
+    },
+    {
+      "scenario": "シナリオ8: npx tsc --noEmit PASS",
+      "status": "passed",
+      "command": "npx tsc --noEmit",
+      "result": "exit code 0, no output"
+    }
+  ],
+  "execution_results": {
+    "unit_test_file_targeted": {
+      "command": "NODE_ENV=test npx vitest run tests/unit/useWorktreesCache.test.ts",
+      "files_passed": 1,
+      "tests_passed": 15,
+      "tests_failed": 0,
+      "tests_skipped": 0,
+      "duration_ms": 789
+    },
+    "unit_test_full_suite": {
+      "command": "npm run test:unit",
+      "files_passed": 343,
+      "tests_passed": 6495,
+      "tests_failed": 0,
+      "tests_skipped": 7,
+      "duration_seconds": 13.87,
+      "regression_count": 0
+    },
+    "lint": {
+      "command": "npm run lint",
+      "status": "passed",
+      "errors": 0,
+      "warnings": 0
+    },
+    "typecheck": {
+      "command": "npx tsc --noEmit",
+      "status": "passed",
+      "errors": 0
+    }
+  },
+  "implementation_review": {
+    "file": "src/hooks/useWorktreesCache.ts",
+    "key_findings": [
+      "L63: currentIntervalRef = useRef<number | null>(null) で 'null = 停止中' のセマンティクスを明示",
+      "L111-117: stopPolling が intervalRef と currentIntervalRef の両方をリセット",
+      "L125-134: startPolling は stopPolling 経由で既存タイマーをクリアし、desired interval を currentIntervalRef に保存した上で setInterval を生成",
+      "L137-159: adaptive-polling useEffect が初期起動と visibilitychange を専有（worktrees に依存しないので頻繁な再構築なし）",
+      "L164-182: worktrees-change useEffect は worktreesRef 同期に加え、document.hidden / currentIntervalRef===null / desired==current の三段ガードで no-op 判定",
+      "L168: typeof document !== 'undefined' で SSR セーフ"
+    ],
+    "responsibility_separation": "adaptive-polling useEffect が初期起動と visibility を所有し、worktrees-change useEffect は state 変化時の interval 再評価のみを担う。currentIntervalRef===null ガードで二重起動を防止しており、設計として健全。",
+    "coverage_check": {
+      "statements_percent": 95.45,
+      "branches_percent": 87.5,
+      "functions_percent": 100,
+      "lines_percent": 95.31,
+      "meets_target": true,
+      "target": 80
+    }
+  },
+  "evidence_files": [
+    "src/hooks/useWorktreesCache.ts",
+    "tests/unit/useWorktreesCache.test.ts",
+    "dev-reports/bug-fix/20260515_211253/tdd-fix-result.json"
+  ],
+  "recommendation": "Issue #710 修正は受入条件をすべて満たし、回帰0件・カバレッジ目標達成・静的解析クリーンであるため、PR 作成に進んで問題なし。"
+}

@@ -1,0 +1,65 @@
+{
+  "bug_id": "20260515_211253",
+  "related_issue": 710,
+  "bug_description": "useWorktreesCache のポーリング間隔が active/idle 遷移時に動的切替されない",
+  "selected_actions": [
+    {
+      "action_id": "A",
+      "title": "currentIntervalRef パターンで動的切替",
+      "files_to_modify": [
+        "src/hooks/useWorktreesCache.ts",
+        "tests/unit/useWorktreesCache.test.ts"
+      ]
+    }
+  ],
+  "implementation_spec": {
+    "file": "src/hooks/useWorktreesCache.ts",
+    "changes": [
+      {
+        "what": "currentIntervalRef を追加",
+        "code": "const currentIntervalRef = useRef<number | null>(null);"
+      },
+      {
+        "what": "startPolling() を修正",
+        "details": "stopPolling() の後、interval を計算し currentIntervalRef.current に保存してから setInterval を呼ぶ"
+      },
+      {
+        "what": "stopPolling() を修正",
+        "details": "currentIntervalRef.current = null も追加"
+      },
+      {
+        "what": "worktrees 同期 useEffect を拡張",
+        "details": "ref 同期に加えて、desired interval を計算。document.hidden=false かつ currentIntervalRef.current が desired と異なる場合のみ startPolling() を呼ぶ。startPolling/stopPolling/hasActiveSession を adaptive polling useEffect の外側にスコープを移すか、useCallback でラップする必要がある。"
+      }
+    ],
+    "design_consideration": "startPolling/stopPolling/hasActiveSession を adaptive polling useEffect 内に閉じ込めると worktrees useEffect から参照できない。解決策: ヘルパー関数を useCallback でラップしフック直下に置く。または refs を介して連携する。クリーンな実装はヘルパーを useCallback 化すること。"
+  },
+  "test_spec": {
+    "file": "tests/unit/useWorktreesCache.test.ts",
+    "new_test_cases": [
+      {
+        "name": "should switch from idle to active interval when a session starts",
+        "scenario": "初回 fetch で isSessionRunning=false → 2回目 fetch で isSessionRunning=true。worktrees が更新されたら 5s 間隔に切り替わることを検証"
+      },
+      {
+        "name": "should switch from active to idle interval when all sessions stop",
+        "scenario": "初回 fetch で isSessionRunning=true → 2回目 fetch で isSessionRunning=false。worktrees が更新されたら 30s 間隔に切り替わることを検証"
+      },
+      {
+        "name": "should not restart interval when active state does not change",
+        "scenario": "worktrees の中身が変わっても active 状態が変わらなければ setInterval が再起動されない（=clearInterval が呼ばれない）ことを検証"
+      },
+      {
+        "name": "should not restart polling when tab is hidden",
+        "scenario": "document.hidden=true 時に worktrees の active 状態が変化しても startPolling が呼ばれない（=fetch が走らない）ことを検証"
+      }
+    ]
+  },
+  "target_coverage": 80,
+  "constraints": [
+    "Red-Green-Refactor を厳守",
+    "既存テスト（6491件）の回帰 0 件",
+    "ESLint・TypeScript エラー 0 件",
+    "型注釈は strict mode 準拠"
+  ]
+}

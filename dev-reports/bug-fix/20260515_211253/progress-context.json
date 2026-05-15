@@ -1,0 +1,57 @@
+{
+  "bug_id": "20260515_211253",
+  "related_issue": 710,
+  "issue_title": "perf(sidebar): useWorktreesCache のポーリング間隔を active/idle 遷移時に動的切替",
+  "branch": "feature/710-worktree",
+  "phase_results": {
+    "phase_1_investigation": {
+      "status": "completed",
+      "root_cause": "useWorktreesCache の adaptive polling useEffect が依存配列 [refresh] のみで、refresh は stable な useCallback([]) のためマウント時に1回しか実行されない。startPolling() 内の interval は setInterval にベイクされ、worktrees が active/idle 変化しても再評価されない。",
+      "affected_consumers": [
+        "src/components/providers/WorktreesCacheProvider.tsx",
+        "src/app/sessions/page.tsx",
+        "src/contexts/WorktreeSelectionContext.tsx"
+      ],
+      "result_file": "dev-reports/bug-fix/20260515_211253/investigation-result.json"
+    },
+    "phase_2_user_feedback": {
+      "status": "completed",
+      "selected_action": "対策案A: currentIntervalRef パターン"
+    },
+    "phase_3_work_plan": {
+      "status": "completed",
+      "result_file": "dev-reports/bug-fix/20260515_211253/work-plan-context.json"
+    },
+    "phase_4_tdd_fix": {
+      "status": "success",
+      "modified_files": [
+        "src/hooks/useWorktreesCache.ts",
+        "tests/unit/useWorktreesCache.test.ts"
+      ],
+      "new_tests": 4,
+      "total_tests_in_file": 15,
+      "coverage": {
+        "statements": 95.45,
+        "branches": 87.5,
+        "functions": 100,
+        "lines": 95.31
+      },
+      "result_file": "dev-reports/bug-fix/20260515_211253/tdd-fix-result.json"
+    },
+    "phase_5_acceptance": {
+      "status": "accepted",
+      "criteria_passed": 6,
+      "criteria_total": 6,
+      "test_results": "6495 passed | 7 skipped | 0 failed",
+      "lint": "PASS",
+      "tsc": "PASS",
+      "result_file": "dev-reports/bug-fix/20260515_211253/acceptance-result.json"
+    }
+  },
+  "implementation_summary": "useWorktreesCache フックに currentIntervalRef: useRef<number | null>(null) を追加。startPolling/stopPolling/hasActiveSession を useCallback でフック直下にリフトアップ。startPolling 内で desired interval を currentIntervalRef.current に保存してから setInterval を起動。worktrees-change useEffect で desired を再計算し、(1) document.hidden でない、(2) currentIntervalRef.current が null でない（=ポーリング起動済み）、(3) desired と異なる、の3条件をすべて満たす場合のみ startPolling() を呼び出して再起動する。",
+  "next_steps": [
+    "PR作成（feature/710-worktree → develop または main）",
+    "コードレビュー",
+    "本番環境での active/idle 遷移時のネットワーク監視確認"
+  ]
+}
