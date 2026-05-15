@@ -1,0 +1,143 @@
+{
+  "status": "success",
+  "bug_id": "709-20260515_211219",
+  "issue_number": 709,
+  "tdd_cycles": [
+    {
+      "step": "Red 1",
+      "description": "Created tests/unit/components/providers/WorktreesCacheProvider.test.tsx with 5 failing tests: exposes cached fields via context, propagates loading state, propagates error state, forwards refresh() to underlying hook, throws when useWorktreesCacheContext is called outside the Provider.",
+      "verification": "npx vitest run tests/unit/components/providers/WorktreesCacheProvider.test.tsx -> 5 failed (useWorktreesCacheContext is not a function)"
+    },
+    {
+      "step": "Green 1",
+      "description": "Updated src/components/providers/WorktreesCacheProvider.tsx to add createContext<UseWorktreesCacheReturn | null>(null) (WorktreesCacheContext), a useMemo-wrapped context value, and the useWorktreesCacheContext() hook with explicit Provider-out-of-scope error. Existing WorktreeSelectionProvider wrapping with externalWorktrees / externalRepositories is preserved.",
+      "verification": "npx vitest run tests/unit/components/providers/WorktreesCacheProvider.test.tsx -> 5 passed"
+    },
+    {
+      "step": "Red 2",
+      "description": "Migrated tests/unit/SessionsPage.test.tsx from vi.mock('@/hooks/useWorktreesCache', ...) to vi.mock('@/components/providers/WorktreesCacheProvider', ...) exporting useWorktreesCacheContext, added mockRepositories field, and reset it in beforeEach. All 18 existing test cases retained.",
+      "verification": "npx vitest run tests/unit/SessionsPage.test.tsx -> 15 failed | 3 passed (Sessions page still imported useWorktreesCache directly, so the new mock had no effect and tests fell back to real fetch -> stuck in loading)"
+    },
+    {
+      "step": "Green 2",
+      "description": "Updated src/app/sessions/page.tsx to replace `import { useWorktreesCache } from '@/hooks/useWorktreesCache'` with `import { useWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider'` and the corresponding call site. Added Issue #709 explanation to the file header JSDoc.",
+      "verification": "npx vitest run tests/unit/SessionsPage.test.tsx tests/unit/components/providers/WorktreesCacheProvider.test.tsx -> 23 passed (18 Sessions + 5 Provider)"
+    },
+    {
+      "step": "Refactor",
+      "description": "Added Issue #709 rationale comments to WorktreesCacheProvider header, useWorktreesCacheContext JSDoc, and the Sessions page header. Context value wrapped in useMemo for referential stability. No behaviour changes; src/hooks/useWorktreesCache.ts itself is unchanged per constraint.",
+      "verification": "npm run lint -> 0 errors; npx tsc --noEmit -> 0 errors; npm run test:unit -> 344 files / 6496 passed / 7 skipped"
+    }
+  ],
+  "files_changed": [
+    "src/components/providers/WorktreesCacheProvider.tsx",
+    "src/app/sessions/page.tsx",
+    "tests/unit/SessionsPage.test.tsx",
+    "tests/unit/components/providers/WorktreesCacheProvider.test.tsx"
+  ],
+  "diff_summary": {
+    "src/components/providers/WorktreesCacheProvider.tsx": "Added createContext + useContext + useMemo. Added WorktreesCacheContext (null-initialised) and useWorktreesCacheContext() with explicit Provider-out-of-scope error. WorktreeSelectionProvider externalWorktrees / externalRepositories propagation preserved. Header JSDoc updated with Issue #709 rationale.",
+    "src/app/sessions/page.tsx": "Replaced direct useWorktreesCache() call with useWorktreesCacheContext(). Updated header JSDoc with Issue #709 explanation. No render-tree / filter / sort / sanitize changes.",
+    "tests/unit/SessionsPage.test.tsx": "Switched mock target from @/hooks/useWorktreesCache to @/components/providers/WorktreesCacheProvider (useWorktreesCacheContext). Added mockRepositories field reset in beforeEach. All 18 existing assertions intact.",
+    "tests/unit/components/providers/WorktreesCacheProvider.test.tsx": "NEW. 5 tests covering: cache fields are surfaced via context, loading propagation, error propagation, refresh forwarding, and the throws-outside-Provider invariant. WorktreeSelectionProvider is mocked to keep the suite focused on the Context contract."
+  },
+  "verification_results": {
+    "lint": {
+      "command": "npm run lint",
+      "exit_code": 0,
+      "result": "No ESLint warnings or errors"
+    },
+    "typecheck": {
+      "command": "npx tsc --noEmit",
+      "exit_code": 0,
+      "result": "0 TypeScript errors"
+    },
+    "unit_tests": {
+      "command": "npm run test:unit",
+      "exit_code": 0,
+      "test_files_total": 344,
+      "test_files_passed": 344,
+      "test_files_failed": 0,
+      "tests_total": 6503,
+      "tests_passed": 6496,
+      "tests_failed": 0,
+      "tests_skipped": 7,
+      "notes": "Stack traces visible in the test output are the expected throw from the 'outside Provider' test case (asserted via toThrowError)."
+    }
+  },
+  "unit_tests": {
+    "total": 6503,
+    "passed": 6496,
+    "failed": 0,
+    "skipped": 7
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "coverage": {
+    "scope": "Coverage measured for the changed targets (provider + sessions page) via the focused suite tests/unit/components/providers/WorktreesCacheProvider.test.tsx + tests/unit/SessionsPage.test.tsx",
+    "WorktreesCacheProvider.tsx": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "sessions/page.tsx": {
+      "statements": 69.56,
+      "branches": 53.01,
+      "functions": 88.88,
+      "lines": 70.76,
+      "uncovered_lines": "76,96-97,149-170 (pre-existing rendering branches, unchanged by this fix)"
+    },
+    "target_coverage": 80,
+    "target_coverage_met_for_new_code": true,
+    "target_coverage_notes": "All net-new code (WorktreesCacheProvider Context API) is at 100% coverage. The Sessions page percentage reflects pre-existing rendering branches not exercised by the existing suite; this fix neither adds nor removes those branches."
+  },
+  "acceptance_criteria_status": [
+    {
+      "criterion": "Sessions ページで useWorktreesCache を直接呼ばず Context から取得する",
+      "met": true,
+      "evidence": "src/app/sessions/page.tsx now imports useWorktreesCacheContext from @/components/providers/WorktreesCacheProvider; useWorktreesCache is no longer imported."
+    },
+    {
+      "criterion": "useWorktreesCacheContext を Provider 外で呼ぶと適切なエラーが投げられる",
+      "met": true,
+      "evidence": "Test 'throws a descriptive error when useWorktreesCacheContext is called outside the Provider' passes; the hook throws Error('useWorktreesCacheContext must be used within a WorktreesCacheProvider')."
+    },
+    {
+      "criterion": "Provider 経由で worktrees/isLoading/error/refresh が正しく配信される",
+      "met": true,
+      "evidence": "Tests 'exposes the cached worktrees / repositories / isLoading / error / refresh via context', 'propagates loading state', 'propagates error state', and 'forwards refresh() invocations' all pass."
+    },
+    {
+      "criterion": "既存の Sessions ページ単体テストが Context 経由で動作し全件 PASS",
+      "met": true,
+      "evidence": "tests/unit/SessionsPage.test.tsx: 18/18 PASS after migrating mock from useWorktreesCache to useWorktreesCacheContext."
+    },
+    {
+      "criterion": "npm run lint, npx tsc --noEmit, npm run test:unit が全て成功",
+      "met": true,
+      "evidence": "All three commands exit 0 with zero errors."
+    }
+  ],
+  "constraints_respected": [
+    {
+      "constraint": "useWorktreesCache フック自体の実装は変更しない",
+      "respected": true,
+      "evidence": "src/hooks/useWorktreesCache.ts not touched (verified via git diff scope)."
+    },
+    {
+      "constraint": "既存の Sessions ページ振る舞いに回帰を発生させない",
+      "respected": true,
+      "evidence": "All 18 pre-existing Sessions page tests (filter, sort, sanitize/XSS, loading/error/empty, message preview) pass unchanged."
+    },
+    {
+      "constraint": "WorktreeSelectionProvider への externalWorktrees / externalRepositories 伝播は維持する",
+      "respected": true,
+      "evidence": "WorktreesCacheProvider still wraps children with WorktreeSelectionProvider passing externalWorktrees={worktrees} externalRepositories={repositories}."
+    }
+  ],
+  "commits": [],
+  "message": "Issue #709 fix complete. WorktreesCacheProvider now publishes its cache via React Context (useWorktreesCacheContext). Sessions page consumes the Context instead of instantiating a second useWorktreesCache hook, eliminating the duplicate /api/worktrees polling loop. lint / tsc / test:unit all green (344 test files / 6496 tests passed). No commits created (per orchestration policy: the parent agent handles commit/PR)."
+}

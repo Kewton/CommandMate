@@ -1,0 +1,45 @@
+{
+  "bug_id": "709-20260515_211219",
+  "issue_number": 709,
+  "bug_description": "useWorktreesCache が Sessions ページで二重インスタンス化され /api/worktrees ポーリングが2系統並行で動く",
+  "selected_actions": [
+    {
+      "action_id": "1",
+      "title": "WorktreesCacheProvider に Context を導入し Sessions ページから消費",
+      "files_to_modify": [
+        "src/components/providers/WorktreesCacheProvider.tsx",
+        "src/app/sessions/page.tsx",
+        "tests/unit/SessionsPage.test.tsx"
+      ],
+      "implementation_steps": [
+        "Step 1 (Red): WorktreesCacheProvider に Context を期待する単体テストを書く (tests/unit/components/providers/WorktreesCacheProvider.test.tsx 新規)",
+        "Step 2 (Green): WorktreesCacheProvider に WorktreesCacheContext / useWorktreesCacheContext を実装",
+        "Step 3 (Red): Sessions ページが Context 経由で値を取得するテストへ変更 (tests/unit/SessionsPage.test.tsx を Context モックに移行)",
+        "Step 4 (Green): src/app/sessions/page.tsx の useWorktreesCache 呼び出しを useWorktreesCacheContext() に置換",
+        "Step 5 (Refactor): JSDoc 整備、未使用 import 削除"
+      ]
+    }
+  ],
+  "target_coverage": 80,
+  "test_files_to_modify_or_create": [
+    "tests/unit/components/providers/WorktreesCacheProvider.test.tsx (新規)",
+    "tests/unit/SessionsPage.test.tsx (Context モック方式に変更)"
+  ],
+  "acceptance_criteria": [
+    "Sessions ページで useWorktreesCache を直接呼ばず Context から取得する",
+    "useWorktreesCacheContext を Provider 外で呼ぶと適切なエラーが投げられる",
+    "Provider 経由で worktrees/isLoading/error/refresh が正しく配信される",
+    "既存の Sessions ページ単体テストが Context 経由で動作し全件 PASS",
+    "npm run lint, npx tsc --noEmit, npm run test:unit が全て成功"
+  ],
+  "verification_commands": [
+    "npm run lint",
+    "npx tsc --noEmit",
+    "npm run test:unit"
+  ],
+  "constraints": [
+    "useWorktreesCache フック自体の実装は変更しない (テスト/単体利用は維持)",
+    "既存の Sessions ページ振る舞いに回帰を発生させない",
+    "WorktreeSelectionProvider への externalWorktrees / externalRepositories 伝播は維持する"
+  ]
+}

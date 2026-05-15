@@ -3,7 +3,11 @@
  *
  * Issue #600: UX refresh - Worktree exploration, search, and filtering.
  * Issue #606: Sessions enhancement - sort options and last sent message display.
- * Uses useWorktreesCache() for shared logic [DR1-005].
+ * Issue #709: Reads cached worktrees through `useWorktreesCacheContext()`
+ * instead of `useWorktreesCache()` directly so the page shares a single
+ * polling loop with `WorktreesCacheProvider` (otherwise `/api/worktrees`
+ * is polled twice while this page is mounted).
+ *
  * Sidebar auto-collapses on this page (via useLayoutConfig).
  */
 
@@ -12,7 +16,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { AppShell } from '@/components/layout';
-import { useWorktreesCache } from '@/hooks/useWorktreesCache';
+import { useWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
 import { deriveCliStatus } from '@/types/sidebar';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
@@ -107,7 +111,7 @@ const DEFAULT_BADGE_CLASS = 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:tex
 // ============================================================================
 
 export default function SessionsPage() {
-  const { worktrees, isLoading, error } = useWorktreesCache();
+  const { worktrees, isLoading, error } = useWorktreesCacheContext();
   const [filterText, setFilterText] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('lastSent');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');

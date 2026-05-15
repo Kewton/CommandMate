@@ -48,15 +48,21 @@ vi.mock('@/lib/date-utils', () => ({
   },
 }));
 
-// --- useWorktreesCache mock ---
+// --- WorktreesCacheProvider context mock (Issue #709) ---
+// Sessions page now reads cached worktrees via useWorktreesCacheContext()
+// instead of calling useWorktreesCache() directly, so we mock the Context
+// hook here. The underlying useWorktreesCache hook is exercised by its
+// own unit tests.
 const mockRefresh = vi.fn();
 let mockWorktrees: Array<Record<string, unknown>> = [];
+let mockRepositories: Array<Record<string, unknown>> = [];
 let mockIsLoading = false;
 let mockError: Error | null = null;
 
-vi.mock('@/hooks/useWorktreesCache', () => ({
-  useWorktreesCache: () => ({
+vi.mock('@/components/providers/WorktreesCacheProvider', () => ({
+  useWorktreesCacheContext: () => ({
     worktrees: mockWorktrees,
+    repositories: mockRepositories,
     isLoading: mockIsLoading,
     error: mockError,
     refresh: mockRefresh,
@@ -85,6 +91,7 @@ function createWorktree(overrides: Record<string, unknown> = {}) {
 describe('SessionsPage', () => {
   beforeEach(() => {
     mockWorktrees = [];
+    mockRepositories = [];
     mockIsLoading = false;
     mockError = null;
     vi.clearAllMocks();
