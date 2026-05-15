@@ -1,0 +1,66 @@
+
+> commandmate@0.5.7 test:unit
+> NODE_ENV=test vitest run tests/unit
+
+
+ RUN  v4.1.2 /Users/maenokota/share/work/github_kewton/commandmate-issue-704
+
+Error: useWorktreeSelection must be used within a WorktreeSelectionProvider
+    at Module.useWorktreeSelection (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/src/contexts/WorktreeSelectionContext.tsx:380:11)
+    at TestConsumer (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/tests/unit/contexts/WorktreeSelectionContext.test.tsx:52:19)
+    at renderWithHooks (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+    at HTMLUnknownElementImpl._dispatch (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9)
+Error: useWorktreeSelection must be used within a WorktreeSelectionProvider
+    at Module.useWorktreeSelection (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/src/contexts/WorktreeSelectionContext.tsx:380:11)
+    at TestConsumer (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/tests/unit/contexts/WorktreeSelectionContext.test.tsx:52:19)
+    at renderWithHooks (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+    at HTMLUnknownElementImpl._dispatch (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9)
+⠋ Generating report for 2026-05-15...[K✓ Report generated for 2026-05-15
+⠋ Generating report for 2026-04-04...[K✓ Report generated for 2026-04-04
+⠋ Generating report for 2026-05-15...[K✓ Report generated for 2026-05-15
+⠋ Generating report for 2026-05-15...[K✓ Report generated for 2026-05-15
+⠋ Generating report for 2026-05-15...[K✓ Report generated for 2026-05-15
+⠋ Generating report for 2026-05-15...[K✓ Report generated for 2026-05-15
+⠋ Generating report for 2026-05-15...[K✗ Report generation failed for 2026-05-15
+⠋ Generating report for not-a-date...[K✗ Report generation failed for not-a-date
+⠋ Generating report for 2026-05-15...[K✗ Report generation failed for 2026-05-15
+Error: useSidebarContext must be used within a SidebarProvider
+    at useSidebarContext (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/src/contexts/SidebarContext.tsx:366:11)
+    at TestConsumer (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/tests/unit/contexts/SidebarContext.test.tsx:22:19)
+    at renderWithHooks (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+    at HTMLUnknownElementImpl._dispatch (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9)
+Error: useSidebarContext must be used within a SidebarProvider
+    at useSidebarContext (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/src/contexts/SidebarContext.tsx:366:11)
+    at TestConsumer (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/tests/unit/contexts/SidebarContext.test.tsx:22:19)
+    at renderWithHooks (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+    at HTMLUnknownElementImpl._dispatch (/Users/maenokota/share/work/github_kewton/commandmate-issue-704/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9)
+
+ Test Files  343 passed (343)
+      Tests  6486 passed | 7 skipped (6493)
+   Start at  17:54:16
+   Duration  13.66s (transform 12.61s, setup 37.85s, import 37.90s, tests 53.41s, environment 86.19s)
+
