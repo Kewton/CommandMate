@@ -70,8 +70,8 @@ export function initDatabase(db: Database.Database): void {
   `);
 
   db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_messages_archived
-    ON chat_messages(worktree_id, archived, timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_messages_worktree_role_archived_time
+    ON chat_messages(worktree_id, role, archived, timestamp DESC);
   `);
 
   // Create session_states table

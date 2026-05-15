@@ -33,8 +33,55 @@ describe('db-migrations', () => {
   });
 
   describe('CURRENT_SCHEMA_VERSION', () => {
-    it('should be 31 after Migration #31', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(31);
+    it('should be 32 after Migration #32', () => {
+      expect(CURRENT_SCHEMA_VERSION).toBe(32);
+    });
+  });
+
+  describe('Migration #32: add-messages-role-composite-index (Issue #708)', () => {
+    beforeEach(() => {
+      runMigrations(db);
+    });
+
+    it('should create idx_messages_worktree_role_archived_time index', () => {
+      const indexes = db.prepare(
+        "SELECT name, sql FROM sqlite_master WHERE type='index' AND name='idx_messages_worktree_role_archived_time'"
+      ).all() as Array<{ name: string; sql: string }>;
+
+      expect(indexes).toHaveLength(1);
+      expect(indexes[0].sql).toContain('chat_messages');
+      expect(indexes[0].sql).toContain('worktree_id');
+      expect(indexes[0].sql).toContain('role');
+      expect(indexes[0].sql).toContain('archived');
+      expect(indexes[0].sql).toContain('timestamp DESC');
+    });
+
+    it('should drop the old idx_messages_archived index', () => {
+      const indexes = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_messages_archived'"
+      ).all() as Array<{ name: string }>;
+
+      expect(indexes).toHaveLength(0);
+    });
+
+    it('should record migration in schema_version table', () => {
+      const history = getMigrationHistory(db);
+      expect(history.find(m => m.version === 32)?.name).toBe('add-messages-role-composite-index');
+    });
+
+    it('should rollback by dropping the new index and restoring idx_messages_archived', () => {
+      rollbackMigrations(db, 31);
+      expect(getCurrentVersion(db)).toBe(31);
+
+      const newIndex = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_messages_worktree_role_archived_time'"
+      ).all() as Array<{ name: string }>;
+      expect(newIndex).toHaveLength(0);
+
+      const oldIndex = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_messages_archived'"
+      ).all() as Array<{ name: string }>;
+      expect(oldIndex).toHaveLength(1);
     });
   });
 
@@ -442,7 +489,12 @@ describe('db-migrations', () => {
       expect(archivedColumn?.dflt_value).toBe('0');
     });
 
-    it('should create composite index idx_messages_archived', () => {
+    it('should create composite index idx_messages_archived (at v22; superseded by Migration #32)', () => {
+      // Migration #22 created idx_messages_archived. Migration #32 (Issue #708) drops it
+      // and replaces it with idx_messages_worktree_role_archived_time. Rolling back to v31
+      // restores the v22-era idx_messages_archived index so we can assert its presence here.
+      rollbackMigrations(db, 31);
+
       const indexes = db.prepare(
         "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='chat_messages'"
       ).all() as Array<{ name: string }>;
