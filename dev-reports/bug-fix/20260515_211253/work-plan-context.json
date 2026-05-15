@@ -1,0 +1,51 @@
+{
+  "bug_id": "20260515_211253",
+  "related_issue": 710,
+  "bug_description": "useWorktreesCache のポーリング間隔が active/idle 遷移時に動的切替されず、startPolling() 呼び出し時点の interval が永続化する",
+  "selected_actions": [
+    {
+      "action_id": "A",
+      "title": "currentIntervalRef パターンで動的切替",
+      "description": "currentIntervalRef を追加し、worktrees 変化時に desired interval を再計算。現在の interval と異なる場合のみ startPolling() を再実行する。",
+      "files_to_modify": [
+        "src/hooks/useWorktreesCache.ts",
+        "tests/unit/useWorktreesCache.test.ts"
+      ],
+      "implementation_details": [
+        "currentIntervalRef: useRef<number | null>(null) を追加",
+        "startPolling() 内で currentIntervalRef.current = interval を設定",
+        "stopPolling() 内で currentIntervalRef.current = null を設定",
+        "worktrees 同期 useEffect を拡張し、desired interval を計算",
+        "currentIntervalRef.current !== desired かつ !document.hidden の場合のみ startPolling() を呼ぶ",
+        "document.hidden の場合は ref のみ同期してスキップ"
+      ]
+    }
+  ],
+  "deliverables": [
+    "src/hooks/useWorktreesCache.ts（currentIntervalRef 追加、worktrees useEffect 拡張）",
+    "tests/unit/useWorktreesCache.test.ts（active↔idle 遷移テスト、no-op テスト追加）"
+  ],
+  "definition_of_done": [
+    "worktrees の active/idle 状態変化を検知し、間隔が変わるタイミングで startPolling を再実行する",
+    "active 状態で起動 → セッション停止 → 30秒間隔に移行することをテストで確認",
+    "idle 状態で起動 → セッション開始 → 5秒間隔に移行することをテストで確認",
+    "同じ間隔のままなら setInterval 再起動しない（no-op）ことをテストで確認",
+    "visibility hidden → visible の挙動が壊れない",
+    "npm run test:unit 全件 PASS、回帰 0 件",
+    "ESLint と TypeScript チェック PASS"
+  ],
+  "test_strategy": {
+    "new_tests": [
+      "idle → active 遷移時に setInterval が再起動される",
+      "active → idle 遷移時に setInterval が再起動される",
+      "同じ interval のままなら setInterval が再起動されない（no-op）",
+      "document.hidden 時は worktrees 変化で startPolling が呼ばれない"
+    ],
+    "regression_tests": [
+      "既存の idle/active 単独ポーリングテスト",
+      "unmount テスト",
+      "fetch error / network error テスト",
+      "refresh() 手動呼び出しテスト"
+    ]
+  }
+}

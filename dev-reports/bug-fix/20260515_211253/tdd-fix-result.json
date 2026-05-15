@@ -1,0 +1,106 @@
+{
+  "status": "success",
+  "bug_id": "20260515_211253",
+  "related_issue": 710,
+  "implementation_summary": {
+    "approach": "Action A: currentIntervalRef パターンで動的 interval 切替",
+    "description": "useWorktreesCache フックに currentIntervalRef を追加し、worktrees の active/idle 状態が変化したタイミングでのみ setInterval を再起動するように修正。同じ間隔のままなら no-op で、不要なタイマー再生成を抑制。document.hidden 中・初期化前(currentIntervalRef===null)は startPolling を呼ばず、既存の visibilitychange ハンドラと adaptive-polling useEffect の初期化に責務を委譲することで二重起動を防止。",
+    "key_changes": [
+      "currentIntervalRef: useRef<number | null>(null) を追加（活動中の interval を保持）",
+      "startPolling/stopPolling/hasActiveSession を useCallback でフック直下にスコープ移動",
+      "startPolling は currentIntervalRef.current に desired interval を保存してから setInterval を起動",
+      "stopPolling は currentIntervalRef.current = null を実行",
+      "worktrees 同期 useEffect を拡張: worktreesRef 同期に加え、document.hidden=false かつ currentIntervalRef.current !== null かつ desired interval と異なる場合のみ startPolling() を呼ぶ"
+    ]
+  },
+  "test_results": {
+    "new_test_cases_added": 4,
+    "new_test_names": [
+      "should switch from idle to active interval when a session starts",
+      "should switch from active to idle interval when all sessions stop",
+      "should not restart interval when active state does not change",
+      "should not restart polling when tab is hidden"
+    ],
+    "useWorktreesCache_file": {
+      "total": 15,
+      "passed": 15,
+      "failed": 0,
+      "skipped": 0
+    },
+    "full_unit_suite": {
+      "total": 6502,
+      "passed": 6495,
+      "failed": 0,
+      "skipped": 7,
+      "regression": 0,
+      "baseline": 6491,
+      "delta": "+4 new tests"
+    },
+    "red_phase_confirmed": true,
+    "red_phase_failures": [
+      "should switch from idle to active interval when a session starts (expected 2 to be greater than 2)",
+      "should switch from active to idle interval when all sessions stop (expected 3 to be 2)"
+    ],
+    "green_phase_confirmed": true
+  },
+  "coverage": {
+    "file": "src/hooks/useWorktreesCache.ts",
+    "statements": 95.45,
+    "branches": 87.5,
+    "functions": 100,
+    "lines": 95.31,
+    "target": 80,
+    "meets_target": true,
+    "uncovered_lines": "142-143 (clearTimeout in cleanup before timeoutId fires), 169 (typeof document === undefined SSR guard)"
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "eslint_warnings": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/hooks/useWorktreesCache.ts",
+    "tests/unit/useWorktreesCache.test.ts"
+  ],
+  "commits": [],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "worktrees の active/idle 状態変化を検知し、間隔が変わるべきタイミングで startPolling を再実行する",
+      "status": "satisfied",
+      "evidence": "新規テスト 'should switch from idle to active interval' および 'should switch from active to idle interval' でカバー"
+    },
+    {
+      "criterion": "active 状態でアプリ起動 → セッション停止 → 30秒間隔に移行",
+      "status": "satisfied",
+      "evidence": "'should switch from active to idle interval when all sessions stop' でカバー（ACTIVE 5s 経過時点では fetch されず、30s 経過後に fetch されることを検証）"
+    },
+    {
+      "criterion": "idle 状態でアプリ起動 → セッション開始 → 5秒間隔に移行",
+      "status": "satisfied",
+      "evidence": "'should switch from idle to active interval when a session starts' でカバー"
+    },
+    {
+      "criterion": "不要な setInterval 再起動が発生しない（同じ間隔のままなら no-op）",
+      "status": "satisfied",
+      "evidence": "'should not restart interval when active state does not change' でカバー。currentIntervalRef.current !== desired ガードで実装"
+    },
+    {
+      "criterion": "visibility hidden → visible の挙動が壊れない",
+      "status": "satisfied",
+      "evidence": "'should not restart polling when tab is hidden' でカバー。worktrees useEffect は document.hidden=true 時に早期 return"
+    },
+    {
+      "criterion": "npm run test:unit 回帰 0 件",
+      "status": "satisfied",
+      "evidence": "6495 passed | 7 skipped、ベースライン 6491 + 新規 4 = 6495 で完全一致、失敗 0 件"
+    }
+  ],
+  "constraints_compliance": {
+    "red_green_refactor": "Red phase で 2 件の新規テストが失敗することを確認 (idle→active, active→idle 遷移)、Green phase で 4 件全てパス",
+    "no_regressions": "既存 6491 件すべて pass、SessionsPage.test.tsx も 18/18 pass",
+    "eslint_clean": true,
+    "typescript_clean": true,
+    "strict_mode_compliant": true
+  },
+  "message": "Issue #710 currentIntervalRef パターン実装完了。新規テスト 4 件追加・全件 PASS、既存テスト回帰 0 件、ESLint/TSC エラー 0 件、カバレッジ 95.45% (target 80%)。コミットは PM Bug Fix 側で実施される想定のため未実行。"
+}
