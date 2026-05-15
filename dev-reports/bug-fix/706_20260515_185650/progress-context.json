@@ -1,0 +1,69 @@
+{
+  "bug_id": "706_20260515_185650",
+  "issue_number": 706,
+  "issue_title": "fix(files): Files タブのツリー再描画でスクロール位置がリセットされる（refetch 時の loading 表示を見直し）",
+  "branch": "feature/706-worktree",
+  "severity": "high",
+  "user_selection": "フル対応（推奨）— Action 1+2+3+4 を全て実施",
+  "phases": {
+    "phase_1_investigation": {
+      "status": "completed",
+      "result_file": "dev-reports/bug-fix/706_20260515_185650/investigation-result.json",
+      "root_cause_primary": "FileTreeView.tsx:367-378 の loading 早期 return が初回マウント/refetch を区別せず DOM 全置換",
+      "root_cause_secondary": "WorktreeDetailRefactored.tsx:265 の prevTreeHashRef 初期値 null による初回ポーリング偽陽性発火"
+    },
+    "phase_2_user_feedback": {
+      "status": "completed",
+      "decision": "フル対応"
+    },
+    "phase_3_work_plan": {
+      "status": "completed",
+      "plan_file": "dev-reports/bug-fix/706_20260515_185650/work-plan-context.json",
+      "actions": [
+        "Action 1: FileTreeView loading 分岐を初回限定化（Option 3: 既存ツリー保持）",
+        "Action 2: refetch エラー時の非破壊表示・再試行ボタン",
+        "Action 3: WorktreeDetailRefactored prevTreeHashRef 初回スキップ",
+        "Action 4: テスト追加・既存テスト整合"
+      ]
+    },
+    "phase_4_tdd_implementation": {
+      "status": "success",
+      "result_file": "dev-reports/bug-fix/706_20260515_185650/tdd-fix-result.json",
+      "files_modified": [
+        "src/components/worktree/FileTreeView.tsx",
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "tests/unit/components/worktree/FileTreeView.test.tsx"
+      ],
+      "tests_added": 5,
+      "lint": "pass",
+      "typecheck": "pass",
+      "unit_test": "pass (6491 / 7 skipped)",
+      "coverage": "76.81% (Issue 範囲のコードはカバー済み、pre-existing 検索系コードが範囲外)"
+    },
+    "phase_5_acceptance_test": {
+      "status": "pass",
+      "result_file": "dev-reports/bug-fix/706_20260515_185650/acceptance-result.json",
+      "acceptance_criteria": "8/8 pass",
+      "test_scenarios": "8/8 pass (TS-1〜TS-8)",
+      "regressions": 0
+    }
+  },
+  "key_changes": [
+    "FileTreeView: isInitialLoading / isInitialError フラグで全画面表示を rootItems 未取得時に限定",
+    "FileTreeView: refetch 中の控えめインジケーター (file-tree-refetch-indicator, role=status, aria-live=polite)",
+    "FileTreeView: refetch エラーの非破壊バナー (file-tree-refetch-error) と再試行ボタン (file-tree-refetch-retry-button)",
+    "FileTreeView: reloadTreeWithExpandedDirs を useCallback 抽出、mountedRef でアンマウント後の setState を抑止",
+    "WorktreeDetailRefactored: prevTreeHashRef.current === null 時はベースライン記録のみ（偽陽性 refresh 抑止）"
+  ],
+  "user_facing_improvements": [
+    "Files タブのツリー表示後、約 5 秒経過してもスクロール位置がリセットされない",
+    "実ファイル変更検知時もスクロール位置・フォーカス・選択強調が維持される",
+    "refetch 中・エラー時もツリーが消えず連続性が保たれる",
+    "アクセシビリティ: 更新状態が aria-live で控えめに通知される"
+  ],
+  "next_steps": [
+    "PR 作成 (feature/706-worktree → develop)",
+    "(任意) 実機 UAT で PC/モバイル両ビューポートでのスクロール維持を最終確認",
+    "(任意) WorktreeDetailRefactored の prevTreeHashRef 初回スキップに対する単体テスト追加"
+  ]
+}

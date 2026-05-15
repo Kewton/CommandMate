@@ -1,0 +1,42 @@
+{
+  "issue_id": 706,
+  "issue_title": "fix(files): Files タブのツリー再描画でスクロール位置がリセットされる（refetch 時の loading 表示を見直し）",
+  "issue_description": "Files タブのツリー表示で、約5秒経過時や実ファイル変更検知時にツリーが「Loading files...」スピナーへ一瞬切り替わり、スクロール位置・フォーカス・選択強調などのDOMステートが初期化される。",
+  "error_logs": [],
+  "affected_files": [
+    "src/components/worktree/FileTreeView.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/worktree/FileTreeView.test.tsx"
+  ],
+  "reproduction_steps": [
+    "1. CommandMateを起動し、任意のworktree詳細画面を開く",
+    "2. 左ペインでFilesタブに切り替え、ツリー表示を確認",
+    "3. 大きなツリーで深いノードまでスクロール",
+    "4. 約5秒待機する",
+    "5. 実際: ツリーが「Loading files...」スピナーで全置換され、戻った後スクロール位置が先頭にリセット",
+    "6. 期待: スクロール位置・フォーカス・選択状態が維持される"
+  ],
+  "environment": {
+    "os": "macOS",
+    "node_version": "18.x",
+    "browser": "Chrome"
+  },
+  "severity_hint": "high",
+  "known_root_causes": {
+    "structural_issue": {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "lines": "367-378",
+      "description": "loading 分岐が初回マウント時もrefetch時も区別なくツリーDOM全体をspinnerで全置換するため、refresh毎にDOMがunmount→remountされる"
+    },
+    "polling_trigger": {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "265-283",
+      "description": "prevTreeHashRef の初期値 null のせいで初回ポーリング（5秒後）で常に差分検知→setFileTreeRefresh偽陽性発火"
+    },
+    "polling_interval": {
+      "file": "src/config/file-polling-config.ts",
+      "lines": "8",
+      "description": "FILE_TREE_POLL_INTERVAL_MS = 5000ms"
+    }
+  }
+}

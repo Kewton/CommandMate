@@ -25,7 +25,7 @@ import { ContextMenu } from '@/components/worktree/ContextMenu';
 import { TreeNode } from '@/components/worktree/TreeNode';
 import { computeMatchedPaths } from '@/lib/utils';
 import { useLocale } from 'next-intl';
-import { FilePlus, FolderPlus, FileText } from 'lucide-react';
+import { FilePlus, FolderPlus, FileText, AlertCircle } from 'lucide-react';
 
 // ============================================================================
 // Types
@@ -146,6 +146,17 @@ export const FileTreeView = memo(function FileTreeView({
     [worktreeId]
   );
 
+  // [Issue #706] Mounted ref for the reload function. The ref tracks
+  // whether the component is currently mounted so that the retry button
+  // (which can fire after unmount) can short-circuit state updates safely.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   /**
    * [Issue #164] Load root directory and re-fetch all expanded directories
    * on mount or when refreshTrigger changes.
@@ -153,80 +164,81 @@ export const FileTreeView = memo(function FileTreeView({
    * Instead of clearing cache and only reloading root (which caused expanded
    * directories to lose their contents), this re-fetches all expanded
    * directories in parallel chunks of CONCURRENT_LIMIT.
+   *
+   * [Issue #706] Extracted to a useCallback so the refetch error retry
+   * button can re-trigger the same loader.
    */
-  useEffect(() => {
-    let mounted = true;
+  const reloadTreeWithExpandedDirs = useCallback(async () => {
+    if (!mountedRef.current) return;
+    setLoading(true);
+    setError(null);
 
-    const reloadTreeWithExpandedDirs = async () => {
-      setLoading(true);
-      setError(null);
+    try {
+      // Step 1: Re-fetch root directory
+      const rootData = await fetchDirectory();
+      if (!mountedRef.current || !rootData) return;
 
-      try {
-        // Step 1: Re-fetch root directory
-        const rootData = await fetchDirectory();
-        if (!mounted || !rootData) return;
+      // Step 2: Get currently expanded paths from ref (avoids dependency on expanded)
+      const expandedPaths = Array.from(expandedRef.current);
 
-        // Step 2: Get currently expanded paths from ref (avoids dependency on expanded)
-        const expandedPaths = Array.from(expandedRef.current);
+      // Step 3: Re-fetch expanded directories in parallel chunks
+      const newCache = new Map<string, TreeItem[]>();
+      const stalePaths: string[] = [];
 
-        // Step 3: Re-fetch expanded directories in parallel chunks
-        const newCache = new Map<string, TreeItem[]>();
-        const stalePaths: string[] = [];
+      for (let i = 0; i < expandedPaths.length; i += CONCURRENT_LIMIT) {
+        if (!mountedRef.current) return;
 
-        for (let i = 0; i < expandedPaths.length; i += CONCURRENT_LIMIT) {
-          if (!mounted) return;
+        const chunk = expandedPaths.slice(i, i + CONCURRENT_LIMIT);
+        const results = await Promise.allSettled(
+          chunk.map(async (dirPath) => {
+            const data = await fetchDirectory(dirPath);
+            return { dirPath, data };
+          })
+        );
 
-          const chunk = expandedPaths.slice(i, i + CONCURRENT_LIMIT);
-          const results = await Promise.allSettled(
-            chunk.map(async (dirPath) => {
-              const data = await fetchDirectory(dirPath);
-              return { dirPath, data };
-            })
-          );
-
-          for (const [j, result] of results.entries()) {
-            if (result.status === 'fulfilled' && result.value.data) {
-              newCache.set(result.value.dirPath, result.value.data.items);
-            } else {
-              // Directory may have been deleted or become inaccessible
-              stalePaths.push(chunk[j]);
-            }
+        for (const [j, result] of results.entries()) {
+          if (result.status === 'fulfilled' && result.value.data) {
+            newCache.set(result.value.dirPath, result.value.data.items);
+          } else {
+            // Directory may have been deleted or become inaccessible
+            stalePaths.push(chunk[j]);
           }
         }
-
-        if (!mounted) return;
-
-        // Step 4: Update state in batch
-        setRootItems(rootData.items);
-        setCache(newCache);
-
-        // Remove stale paths (deleted/inaccessible directories) from expanded set
-        if (stalePaths.length > 0) {
-          setExpanded((prev) => {
-            const next = new Set(prev);
-            for (const path of stalePaths) {
-              if (path) next.delete(path);
-            }
-            return next;
-          });
-        }
-      } catch (err) {
-        if (mounted) {
-          setError(err instanceof Error ? err.message : 'Failed to load files');
-        }
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
       }
-    };
 
-    reloadTreeWithExpandedDirs();
+      if (!mountedRef.current) return;
 
-    return () => {
-      mounted = false;
-    };
-  }, [fetchDirectory, refreshTrigger]);
+      // Step 4: Update state in batch
+      setRootItems(rootData.items);
+      setCache(newCache);
+
+      // Remove stale paths (deleted/inaccessible directories) from expanded set
+      if (stalePaths.length > 0) {
+        setExpanded((prev) => {
+          const next = new Set(prev);
+          for (const path of stalePaths) {
+            if (path) next.delete(path);
+          }
+          return next;
+        });
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setError(err instanceof Error ? err.message : 'Failed to load files');
+      }
+    } finally {
+      if (mountedRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [fetchDirectory]);
+
+  useEffect(() => {
+    void reloadTreeWithExpandedDirs();
+    // Re-run when refreshTrigger changes; reloadTreeWithExpandedDirs
+    // is stable as long as fetchDirectory (= worktreeId) is unchanged.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadTreeWithExpandedDirs, refreshTrigger]);
 
   /**
    * Load children for a directory
@@ -364,8 +376,12 @@ export const FileTreeView = memo(function FileTreeView({
     return rootItems;
   }, [rootItems, searchQuery, searchMode, matchedPaths, cache]);
 
-  // Loading state
-  if (loading) {
+  // [Issue #706] Only show the full-screen loading indicator on the
+  // initial load. Subsequent refetches keep the existing tree visible to
+  // preserve scroll position / selection, and a compact spinner is
+  // rendered in the toolbar area instead (see below).
+  const isInitialLoading = loading && rootItems.length === 0;
+  if (isInitialLoading) {
     return (
       <div
         data-testid="file-tree-loading"
@@ -377,8 +393,11 @@ export const FileTreeView = memo(function FileTreeView({
     );
   }
 
-  // Error state
-  if (error) {
+  // [Issue #706] Only show the full-screen error state if we never managed
+  // to load any items. Otherwise the tree stays mounted and a refetch
+  // error banner is rendered above it (see below).
+  const isInitialError = !!error && rootItems.length === 0;
+  if (isInitialError) {
     return (
       <div
         data-testid="file-tree-error"
@@ -388,6 +407,10 @@ export const FileTreeView = memo(function FileTreeView({
       </div>
     );
   }
+
+  // [Issue #706] Compact, non-destructive refetch indicator state.
+  const isRefetching = loading && rootItems.length > 0;
+  const isRefetchError = !!error && rootItems.length > 0;
 
   // Empty state
   if (rootItems.length === 0) {
@@ -448,7 +471,7 @@ export const FileTreeView = memo(function FileTreeView({
       className={`overflow-auto bg-white dark:bg-gray-900 ${className}`}
     >
       {/* [Issue #300] Toolbar for root-level file/directory creation */}
-      {(onNewFile || onNewDirectory || onCmateSetup) && (
+      {(onNewFile || onNewDirectory || onCmateSetup || isRefetching) && (
         <div
           data-testid="file-tree-toolbar"
           className="flex items-center gap-1 p-1 border-b border-gray-200 dark:border-gray-700"
@@ -483,6 +506,45 @@ export const FileTreeView = memo(function FileTreeView({
               <span>CMATE</span>
             </button>
           )}
+          {/* [Issue #706] Compact refetch indicator. Anchored to the right
+              edge of the existing toolbar so the tree DOM (and its scroll
+              position) is preserved while a background refresh is running. */}
+          {isRefetching && (
+            <div
+              data-testid="file-tree-refetch-indicator"
+              role="status"
+              aria-live="polite"
+              className="ml-auto flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"
+            >
+              <span
+                aria-hidden="true"
+                className="w-3 h-3 border-2 border-gray-300 dark:border-gray-600 border-t-cyan-500 rounded-full animate-spin"
+              />
+              <span className="sr-only">Refreshing files</span>
+            </div>
+          )}
+        </div>
+      )}
+      {/* [Issue #706] Non-destructive refetch error banner. The previous
+          tree DOM remains mounted, so we surface the error inline with a
+          retry action instead of replacing the whole view. */}
+      {isRefetchError && (
+        <div
+          data-testid="file-tree-refetch-error"
+          role="alert"
+          className="flex items-center gap-2 px-2 py-1 text-xs bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800 text-red-700 dark:text-red-300"
+        >
+          <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+          <span className="flex-1 truncate">{error}</span>
+          <button
+            data-testid="file-tree-refetch-retry-button"
+            onClick={() => {
+              void reloadTreeWithExpandedDirs();
+            }}
+            className="px-2 py-0.5 text-xs rounded border border-red-300 dark:border-red-700 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
+          >
+            再試行
+          </button>
         </div>
       )}
       {filteredRootItems.map((item) => (

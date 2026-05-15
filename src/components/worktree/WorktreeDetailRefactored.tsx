@@ -272,7 +272,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         if (!response.ok) return; // Ignore errors in polling
         const data = await response.json();
         const newHash = JSON.stringify(data?.items);
-        if (newHash !== prevTreeHashRef.current) {
+        // [Issue #706] On the very first poll we have no baseline to
+        // compare against, so just record the hash. Firing a refresh here
+        // would be a false positive that resets the user's scroll/selection
+        // state in FileTreeView for no actual change.
+        if (prevTreeHashRef.current === null) {
+          prevTreeHashRef.current = newHash;
+        } else if (newHash !== prevTreeHashRef.current) {
           prevTreeHashRef.current = newHash;
           setFileTreeRefresh(prev => prev + 1);
         }
