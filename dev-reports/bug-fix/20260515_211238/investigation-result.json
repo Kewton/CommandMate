@@ -1,0 +1,19 @@
+{
+  "bug_id": "20260515_211238",
+  "related_issue": 711,
+  "issue_title": "perf(sync): scanMultipleRepositories の git worktree list を並列実行",
+  "root_cause": {
+    "summary": "scanMultipleRepositories は for-await でリポジトリを逐次スキャンしているため、リポジトリ数 N に対して合計時間が N × 単一スキャン時間となる。リポジトリ間は独立なので並列化可能。",
+    "location": "src/lib/git/worktrees.ts:239-257"
+  },
+  "impact": {
+    "estimated_latency": "12 repos × 50-100ms = 600-1200ms (現状) → 並列化後は最遅 1 件分 (100-200ms)",
+    "affected_endpoint": "POST /api/repositories/sync",
+    "affected_ux": "新規ブランチ追加・リポジトリ同期のたびに遅延を体感"
+  },
+  "severity": "medium",
+  "callers": [
+    "server.ts:240",
+    "src/app/api/repositories/sync/route.ts:46"
+  ]
+}
