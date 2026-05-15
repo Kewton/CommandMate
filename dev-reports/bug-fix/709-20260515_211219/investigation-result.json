@@ -1,0 +1,81 @@
+{
+  "issue_number": 709,
+  "investigation_summary": "useWorktreesCache フックは React Context を使わず内部に useState/useRef/setInterval を保有するため、複数コンポーネントで呼び出すたびに独立したインスタンスとポーリングタイマーが作られる。現在 WorktreesCacheProvider と Sessions ページの2箇所で呼ばれており、/api/worktrees が2倍の頻度で叩かれている。",
+  "root_cause": {
+    "description": "useWorktreesCache が Context API ではなくフック単独で setInterval ベースのポーリングを行っているため、複数の呼び出し箇所がそれぞれ独立した状態とポーリングタイマーを保有する。命名は 'cache' だが実体は単なるカスタムフックである。",
+    "key_locations": [
+      {
+        "file": "src/hooks/useWorktreesCache.ts",
+        "line": "47-140",
+        "issue": "Context を使わないフック実装。useState/useRef/setInterval を内部保有するため呼び出すたびにインスタンスが生成される"
+      },
+      {
+        "file": "src/components/providers/WorktreesCacheProvider.tsx",
+        "line": "32",
+        "issue": "正規の呼び出し箇所 (AppProviders 経由でアプリ全体に1個生成される想定)"
+      },
+      {
+        "file": "src/app/sessions/page.tsx",
+        "line": "110",
+        "issue": "Provider と独立に直接呼び出してしまっており、2つ目のインスタンスが生成される"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "scope": "Sessions ページ表示中の全ユーザー",
+    "user_impact": "サイドバー遅延、ネットワーク帯域・サーバ負荷の倍増",
+    "server_impact": "/api/worktrees の N×M ステータス検出処理 (scanMultipleRepositories) が2倍の頻度で発生",
+    "severity": "high"
+  },
+  "fix_approaches": [
+    {
+      "id": "1",
+      "title": "WorktreesCacheProvider に Context を導入し Sessions ページから消費",
+      "description": "useWorktreesCache の戻り値 (worktrees / repositories / isLoading / error / refresh) を React Context で公開する WorktreesCacheContext を新設。WorktreesCacheProvider が単一の useWorktreesCache インスタンスを保持し、Sessions ページは useContext で取得する。useWorktreesCache フック自体は他で再利用される可能性を考慮し、テスト用にエクスポートを残す。",
+      "priority": "High",
+      "files_to_modify": [
+        "src/components/providers/WorktreesCacheProvider.tsx",
+        "src/app/sessions/page.tsx",
+        "tests/unit/SessionsPage.test.tsx"
+      ],
+      "files_to_create": [],
+      "pros": [
+        "Issue の実装方針案に完全準拠",
+        "Sessions ページ以外の場所でも今後同じ Context から取得可能",
+        "React 標準パターン (Provider + useContext)",
+        "useWorktreesCache フック実装は変更不要 (テスト/単体利用は維持)"
+      ],
+      "cons": [
+        "Sessions ページの useWorktreesCache モックを Context モックに変更する必要"
+      ]
+    },
+    {
+      "id": "2",
+      "title": "重複呼び出し検知の警告を useWorktreesCache に追加",
+      "description": "useWorktreesCache 自身に dev-mode の重複検知を入れて将来の再発を防ぐ。グローバル使用カウンタ (mount/unmount) と StrictMode 配慮で実装。",
+      "priority": "Medium",
+      "files_to_modify": [
+        "src/hooks/useWorktreesCache.ts"
+      ],
+      "files_to_create": [],
+      "pros": [
+        "将来の re-introduction を早期検出",
+        "実装コストは低い"
+      ],
+      "cons": [
+        "StrictMode の double-invoke で誤検知のリスク",
+        "リファクタリング用途で意図的に複数 instance を作る場合に邪魔になる"
+      ]
+    }
+  ],
+  "recommended_approach": "1",
+  "definition_of_done": [
+    "Sessions ページが useWorktreesCache を直接呼ばず Context から取得する",
+    "他に二重呼び出し箇所が無い (grep で確認済み)",
+    "/api/worktrees のリクエストがアプリ全体で常に1系統のみ",
+    "Sessions 画面の表示・フィルタ・ソート機能に回帰なし",
+    "npm run test:unit 全件 PASS",
+    "npm run lint クリーン",
+    "npx tsc --noEmit クリーン"
+  ]
+}
