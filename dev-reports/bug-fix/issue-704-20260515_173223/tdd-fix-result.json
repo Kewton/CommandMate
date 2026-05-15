@@ -1,0 +1,136 @@
+{
+  "status": "success",
+  "bug_id": "issue-704-20260515_173223",
+  "issue_number": 704,
+  "summary": "Issue #704: Claude Code v2.1.142 「Use skill ...?」 承認プロンプトが prompt-detector で検出されなかった不具合を S1 (SUMMARY_LINE_PATTERN) + S2 (CLAUDE_PROMPT_FOOTER_PATTERN による effectiveEnd 切詰め) の二重防御で修正。3層回帰テスト (prompt-detector / status-detector / auto-yes-resolver) を追加。既存テストへの影響ゼロ、品質ゲート (lint / tsc / test:unit) 全パス。",
+  "tdd_steps": [
+    {
+      "step": "Step 1 (Red)",
+      "description": "tests/unit/prompt-detector.test.ts に Issue #704 fixture テストを追加し、現状実装で options.length<2 → noPromptResult が返ることを確認。",
+      "result": "Red 確認: 'should detect Use skill prompt as multiple_choice with 3 options and Yes default' が AssertionError: expected false to be true で失敗。"
+    },
+    {
+      "step": "Step 2 (Green - S1)",
+      "description": "src/lib/detection/prompt-detect-multiple-choice.ts に SUMMARY_LINE_PATTERN 定数を追加し Pass 2 ループ内 (COLLAPSED_OUTPUT_PATTERN の直後) に early-continue を実装。",
+      "result": "Green: Issue #704 fixture テスト 3件すべてパス。"
+    },
+    {
+      "step": "Step 3 (Green - S2)",
+      "description": "CLAUDE_PROMPT_FOOTER_PATTERN を追加し、scanWindow 構築前に逆走査で 'Esc to cancel · Tab to amend' フッターを検索、見つかれば effectiveEnd をそこに切り詰める。scanWindow 再生成済み。",
+      "result": "Green: S1 を一時的に無効化 (`if (false && ...)`) しても S2 単体で fixture テストが通る defense-in-depth 動作を内部確認後、S1 を復元。"
+    },
+    {
+      "step": "Step 4 (Red→Green: status-detector)",
+      "description": "tests/unit/lib/status-detector.test.ts に Issue #704 fixture を追加し sessionStatus='waiting' / reason='prompt_detected' / hasActivePrompt=true / promptDetection.promptData.type='multiple_choice' を期待。",
+      "result": "Green: 追加テストパス。"
+    },
+    {
+      "step": "Step 5 (Red→Green: auto-yes-resolver)",
+      "description": "tests/unit/lib/auto-yes-resolver.test.ts に Yes/Yes2nd/No (default=Yes) の multiple_choice promptData で resolveAutoAnswer が '1' を返すことを期待。",
+      "result": "Green: 追加テストパス。"
+    },
+    {
+      "step": "Step 6 (Refactor)",
+      "description": "JSDoc コメントに Issue #704 タグ・FP 抑止理由 (`(.+)` 不採用、`\\b` アンカーで mid-sentence pending/more 保護)・defense-in-depth 動作意図・ReDoS safe (S4-001) 根拠・regression-guard 説明を明示。COLLAPSED_OUTPUT_PATTERN の直後に配置して既存パターン群との整合性を保つ。",
+      "result": "コメント整備完了。コードの構造変更は最小限。"
+    },
+    {
+      "step": "Step 7 (Quality Gate)",
+      "description": "npm run lint / npx tsc --noEmit / npm run test:unit / coverage 確認。",
+      "result": "全ゲート PASS。"
+    }
+  ],
+  "files_changed": [
+    "src/lib/detection/prompt-detect-multiple-choice.ts",
+    "tests/unit/prompt-detector.test.ts",
+    "tests/unit/lib/status-detector.test.ts",
+    "tests/unit/lib/auto-yes-resolver.test.ts"
+  ],
+  "diff_summary": {
+    "src/lib/detection/prompt-detect-multiple-choice.ts": [
+      "新規定数 SUMMARY_LINE_PATTERN (/^\\s*[…]?\\s*[+\\-↑↓⏵⏷]?\\s*\\d+\\s+(?:pending|more)\\b/i) を COLLAPSED_OUTPUT_PATTERN 直後に追加",
+      "新規定数 CLAUDE_PROMPT_FOOTER_PATTERN (/Esc\\s+to\\s+cancel\\s*[·•]\\s*Tab\\s+to\\s+amend/i) を SUMMARY_LINE_PATTERN 直後に追加",
+      "detectMultipleChoicePrompt() 内 scanWindow 構築前に逆走査で footer 検出 → effectiveEnd 切詰めロジックを追加 (footer 未検出時は no-op fallback)",
+      "Pass 2 ループ内 COLLAPSED_OUTPUT_PATTERN early-continue の直後に SUMMARY_LINE_PATTERN early-continue を追加 (continuationLineCount++; continue;)",
+      "JSDoc: Issue #704 タグ・FP 抑止理由・defense-in-depth 動作意図・ReDoS safe (S4-001) 根拠を明記"
+    ],
+    "tests/unit/prompt-detector.test.ts": [
+      "describe('Issue #704: Claude v2.1.142 skill approval prompt with trailing summary line') を追加",
+      "テストケース 1: ISSUE_704_FIXTURE で multiple_choice / options.length=3 / default='Yes' / numbers=[1,2,3] / 末尾 'No' を期待",
+      "テストケース 2: 末尾サマリー行 (… +1 pending) 単独で isPrompt=false を期待 (FP 防御)",
+      "テストケース 3: option label に 'pending' を含む正当ケース (e.g. '2. Postpone (will remain pending)') が拾われることを期待 (FP 抑止確認)"
+    ],
+    "tests/unit/lib/status-detector.test.ts": [
+      "describe('Issue #704: Claude v2.1.142 Use skill approval prompt') を追加",
+      "テストケース 1: ISSUE_704_FIXTURE 同等入力で detectSessionStatus が status='waiting' / reason='prompt_detected' / hasActivePrompt=true / promptDetection.promptData.type='multiple_choice' を返すことを期待"
+    ],
+    "tests/unit/lib/auto-yes-resolver.test.ts": [
+      "describe('Issue #704: Use skill approval prompt') を追加",
+      "テストケース 1: Yes (default) / Yes2nd / No の multiple_choice で resolveAutoAnswer が '1' を返すことを期待"
+    ]
+  },
+  "tests_added": [
+    {
+      "file": "tests/unit/prompt-detector.test.ts",
+      "describe": "Issue #704: Claude v2.1.142 skill approval prompt with trailing summary line",
+      "cases": [
+        "should detect Use skill prompt as multiple_choice with 3 options and Yes default",
+        "should not false-positive on a standalone trailing summary line",
+        "should preserve real options whose labels happen to contain \"pending\""
+      ]
+    },
+    {
+      "file": "tests/unit/lib/status-detector.test.ts",
+      "describe": "Issue #704: Claude v2.1.142 Use skill approval prompt",
+      "cases": [
+        "should return waiting/prompt_detected for skill approval prompt with trailing summary line"
+      ]
+    },
+    {
+      "file": "tests/unit/lib/auto-yes-resolver.test.ts",
+      "describe": "Issue #704: Use skill approval prompt",
+      "cases": [
+        "should resolve to \"1\" (Yes) for the Use skill Yes/Yes2nd/No multiple_choice prompt"
+      ]
+    }
+  ],
+  "coverage": 96.95,
+  "coverage_target": 80,
+  "coverage_detail": {
+    "file": "src/lib/detection/prompt-detect-multiple-choice.ts",
+    "stmts_pct": 95.6,
+    "branch_pct": 90.66,
+    "funcs_pct": 100,
+    "lines_pct": 96.95
+  },
+  "unit_tests": {
+    "total": 6486,
+    "passed": 6486,
+    "failed": 0,
+    "skipped": 7,
+    "baseline_before_fix": 6481,
+    "new_tests_added": 5
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "eslint_warnings": 0,
+    "typescript_errors": 0
+  },
+  "regression_guards_verified": [
+    "S1 SUMMARY_LINE_PATTERN: 行頭 (^) + (?:pending|more)\\b 限定で末尾サマリー行のみを対象。`(.+)` 不採用",
+    "S1 FP 確認: '2. Postpone (will remain pending)' が依然 collectedOptions に入ることをテストで保証",
+    "S2 fallback: フッター未発見時は effectiveEnd を変更せず、Codex/Gemini/OpenCode/Copilot のテストへの影響ゼロを保証",
+    "Codex /model (#622) テスト現状維持を全テスト pass で確認",
+    "Issue #616 submitMode answer_only / answer_then_enter 検出テスト現状維持を確認",
+    "Issue #181, #161, #256, #287, #372, #460, #499, #547, #604 など prompt-detector 既存テスト 200件全 pass",
+    "ReDoS safe (S4-001): 両 RegExp ともリニア、ネスト量化子なし"
+  ],
+  "defense_in_depth_verification": {
+    "s1_alone": "verified (initial Green confirmation with S1+S2 both active)",
+    "s2_alone": "verified internally (temporarily disabled S1 with `if (false && SUMMARY_LINE_PATTERN.test(line))` and re-ran Issue #704 tests; all 3 cases passed → restored S1 before commit)",
+    "rationale": "Either layer fixes Issue #704 independently. Keeping both protects against future Claude rendering changes (e.g., footer text change → S1 covers, summary wording change → S2 covers)."
+  },
+  "commits": [],
+  "commit_skipped_reason": "コンテキスト指示通り commit は行わず修正・テスト追加のみで停止。user または PR 作成段階で別途コミット。",
+  "message": "TDD Red→Green→Refactor 完走。S1+S2 二重防御で Issue #704 fixture が detectPrompt / detectSessionStatus / resolveAutoAnswer すべてで期待値を返す。既存 6481 件 + 新規 5 件 = 6486 件全パス、coverage 96.95%、lint/tsc クリーン。"
+}

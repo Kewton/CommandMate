@@ -109,4 +109,28 @@ describe('auto-yes-resolver', () => {
       expect(resolveAutoAnswer(promptData)).toBeNull();
     });
   });
+
+  // =========================================================================
+  // Issue #704: Claude v2.1.142 Use skill approval prompt
+  //
+  // Once prompt-detector returns the correct multiple_choice payload (1=Yes,
+  // 2=Yes-and-dont-ask-again, 3=No, default=Yes), resolveAutoAnswer must
+  // surface "1" so that Auto-Yes fires the Yes response.
+  // =========================================================================
+  describe('Issue #704: Use skill approval prompt', () => {
+    it('should resolve to "1" (Yes) for the Use skill Yes/Yes2nd/No multiple_choice prompt', () => {
+      const promptData: MultipleChoicePromptData = {
+        type: 'multiple_choice',
+        question: 'Use skill "multi-stage-issue-review"? Do you want to proceed?',
+        options: [
+          { number: 1, label: 'Yes', isDefault: true },
+          { number: 2, label: 'Yes, and don\'t ask again for multi-stage-issue-review in <path>', isDefault: false },
+          { number: 3, label: 'No', isDefault: false },
+        ],
+        status: 'pending',
+      };
+
+      expect(resolveAutoAnswer(promptData)).toBe('1');
+    });
+  });
 });

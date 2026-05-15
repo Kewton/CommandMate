@@ -1,0 +1,227 @@
+{
+  "bug_id": "issue-704-20260515_173223",
+  "issue_number": 704,
+  "status": "passed",
+  "executed_at": "2026-05-15T17:56:00+09:00",
+  "summary": "Issue #704 (Claude v2.1.142 \"Use skill \\\"X\\\"?\" approval prompt non-detection) の3層修正 (S1: SUMMARY_LINE_PATTERN / S2: CLAUDE_PROMPT_FOOTER_PATTERN / S3: 3層回帰テスト) は受入条件をすべて満たし、品質ゲート (lint/tsc/test) 全件パス、既存テストへの回帰ゼロ、API レイヤーへの伝播も保証されている。",
+
+  "quality_gates": {
+    "lint": {
+      "command": "npm run lint",
+      "result": "passed",
+      "evidence": "No ESLint warnings or errors",
+      "errors": 0,
+      "warnings": 0
+    },
+    "tsc": {
+      "command": "npx tsc --noEmit",
+      "result": "passed",
+      "evidence": "0 errors (empty output)",
+      "errors": 0
+    },
+    "test_unit_full": {
+      "command": "npm run test:unit",
+      "result": "passed",
+      "evidence": "Test Files: 343 passed (343) | Tests: 6486 passed | 7 skipped (6493) | Duration 13.66s",
+      "test_files_passed": 343,
+      "tests_passed": 6486,
+      "tests_skipped": 7,
+      "tests_failed": 0,
+      "baseline_expected": 6486,
+      "matches_expected_outcome": true,
+      "log_file": "dev-reports/bug-fix/issue-704-20260515_173223/evidence/test-unit-full.log",
+      "note": "ログ中の 'Error: useWorktreeSelection/useSidebarContext must be used within a Provider' 等は Provider 外 hook 使用を検証するネガティブテストの期待出力であり、テスト失敗ではない。"
+    }
+  },
+
+  "targeted_tests": {
+    "prompt_detector_issue_704": {
+      "command": "npx vitest run tests/unit/prompt-detector.test.ts -t \"Issue #704\"",
+      "result": "passed",
+      "tests_passed": 3,
+      "tests_skipped": 200,
+      "tests_failed": 0,
+      "log_file": "dev-reports/bug-fix/issue-704-20260515_173223/evidence/test-issue704-prompt-detector.log",
+      "assertions": [
+        "Use skill fixture: isPrompt=true, type=multiple_choice, options.length=3, default option label='Yes', numbers=[1,2,3], options[2].label='No'",
+        "サマリ行単独入力 (`… +1 pending`) では isPrompt=false (FP 回帰防御)",
+        "option label が 'pending' を含む正当ケース (`2. Postpone (will remain pending)`) は引き続き 3 option として収集 (FP 抑止過剰防御の予防)"
+      ]
+    },
+    "status_detector_issue_704": {
+      "command": "npx vitest run tests/unit/lib/status-detector.test.ts -t \"Issue #704\"",
+      "result": "passed",
+      "tests_passed": 1,
+      "tests_skipped": 27,
+      "tests_failed": 0,
+      "log_file": "dev-reports/bug-fix/issue-704-20260515_173223/evidence/test-issue704-status-detector.log",
+      "assertions": [
+        "Use skill fixture (with footer + summary): detectSessionStatus が status='waiting' / hasActivePrompt=true / reason='prompt_detected' / promptDetection.promptData.type='multiple_choice' を返す"
+      ]
+    },
+    "auto_yes_resolver_issue_704": {
+      "command": "npx vitest run tests/unit/lib/auto-yes-resolver.test.ts -t \"Issue #704\"",
+      "result": "passed",
+      "tests_passed": 1,
+      "tests_skipped": 8,
+      "tests_failed": 0,
+      "log_file": "dev-reports/bug-fix/issue-704-20260515_173223/evidence/test-issue704-auto-yes-resolver.log",
+      "assertions": [
+        "Yes/Yes2nd/No 構造の MultipleChoicePromptData (default=Yes) で resolveAutoAnswer が '1' を返す"
+      ]
+    }
+  },
+
+  "api_layer_impact_review": {
+    "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+    "result": "verified",
+    "verification_method": "code review (lines 95-150)",
+    "key_findings": [
+      "L95: const statusResult = detectSessionStatus(output, cliToolId, lastOutputTimestamp);",
+      "L106: const isPromptWaiting = statusResult.hasActivePrompt; — status-detector の hasActivePrompt を SoT として直接バインド",
+      "L137: promptData: isPromptWaiting ? statusResult.promptDetection.promptData ?? null : null — isPromptWaiting=true のときは status-detector が同梱した promptData をそのまま返す",
+      "L122-123: sessionStatus=statusResult.status / sessionStatusReason=statusResult.reason — UI/CLI wait 両方向への伝播"
+    ],
+    "conclusion": "status-detector が Issue #704 fixture で {status:'waiting', hasActivePrompt:true, reason:'prompt_detected', promptDetection.promptData.type:'multiple_choice'} を返すことは単体テストで担保済み。route.ts は本フィールドを素通しで API レスポンスに乗せるため、API レスポンスとして isPromptWaiting=true / promptData!=null (type='multiple_choice', options Yes/Yes2nd/No) が確定的に返る。受入条件 2 のロジック層は完全に充足。"
+  },
+
+  "regression_check": {
+    "scope": "Codex / Gemini / OpenCode / Copilot / Bash 承認 既存テスト",
+    "method": "影響を受けるテストファイルおよび CLI ツール別のテストを個別実行 + 全 unit suite (6486 件) を実行",
+    "results": [
+      {
+        "category": "prompt-detector.test.ts 全件",
+        "tests_passed": 203,
+        "tests_failed": 0,
+        "verdict": "pass"
+      },
+      {
+        "category": "status-detector.test.ts 全件",
+        "tests_passed": 28,
+        "tests_failed": 0,
+        "verdict": "pass"
+      },
+      {
+        "category": "auto-yes-resolver.test.ts 全件",
+        "tests_passed": 9,
+        "tests_failed": 0,
+        "verdict": "pass"
+      },
+      {
+        "category": "Codex CLI 関連テスト (-t \"Codex\")",
+        "tests_passed": 13,
+        "tests_failed": 0,
+        "verdict": "pass"
+      },
+      {
+        "category": "Gemini CLI 関連テスト (-t \"Gemini\")",
+        "tests_passed": 6,
+        "tests_failed": 0,
+        "verdict": "pass"
+      },
+      {
+        "category": "Bash 承認プロンプト関連テスト (-t \"Bash\")",
+        "tests_passed": 5,
+        "tests_failed": 0,
+        "verdict": "pass"
+      },
+      {
+        "category": "全 unit suite",
+        "tests_passed": 6486,
+        "tests_skipped": 7,
+        "tests_failed": 0,
+        "verdict": "pass"
+      }
+    ],
+    "regression_detected": false,
+    "note": "OpenCode/Copilot は -t フィルタで明示的にヒットする describe 名はないが prompt-detector.test.ts 全件 (203) が green であることで間接的に担保 (関連ロジックは selection-list / generic multiple_choice 経由)。Codex CLI の Issue #372 / #616 / #622 関連を含む全 13 件、Gemini ● プロンプト関連 6 件、Bash 承認関連 5 件はすべて pass。"
+  },
+
+  "test_cases": [
+    {
+      "scenario": "シナリオ 1: TDD で書かれた Issue #704 fixture テスト（Use skill 完全プロンプト）が detectPrompt で multiple_choice / options=[Yes, Yes2nd, No] を返す",
+      "result": "passed",
+      "evidence": "tests/unit/prompt-detector.test.ts L2906 - L2921 'should detect Use skill prompt as multiple_choice with 3 options and Yes default' PASSED",
+      "notes": "default=Yes / numbers=[1,2,3] / options[2].label='No' を厳密検証"
+    },
+    {
+      "scenario": "シナリオ 2: 末尾サマリー行（`… +1 pending`）単独で誤検出が発生しない（FP回帰防御）",
+      "result": "passed",
+      "evidence": "tests/unit/prompt-detector.test.ts L2923 - L2938 'should not false-positive on a standalone trailing summary line' PASSED",
+      "notes": "SUMMARY_LINE_PATTERN ガード削除時の phantom prompt 生成を検出する回帰トリップワイヤとして機能"
+    },
+    {
+      "scenario": "シナリオ 3: option label に 'pending' を含む正当ケース（`2. Postpone (will remain pending)`）が引き続き option として収集される（FP抑止）",
+      "result": "passed",
+      "evidence": "tests/unit/prompt-detector.test.ts L2940 - L2960 'should preserve real options whose labels happen to contain pending' PASSED",
+      "notes": "SUMMARY_LINE_PATTERN を過度に緩める実装ミスを検出するペアテスト"
+    },
+    {
+      "scenario": "シナリオ 4: status-detector が Issue #704 fixture で sessionStatus='waiting' / reason='prompt_detected' を返す",
+      "result": "passed",
+      "evidence": "tests/unit/lib/status-detector.test.ts L520 - L544 'should return waiting/prompt_detected for skill approval prompt with trailing summary line' PASSED",
+      "notes": "hasActivePrompt=true および promptDetection.promptData.type='multiple_choice' も検証 (API レイヤーへの伝播保証)"
+    },
+    {
+      "scenario": "シナリオ 5: auto-yes-resolver が Issue #704 の Yes/Yes2nd/No 構造プロンプトで '1' を返す（Yes に自動応答）",
+      "result": "passed",
+      "evidence": "tests/unit/lib/auto-yes-resolver.test.ts L121 - L134 'should resolve to 1 (Yes) for the Use skill Yes/Yes2nd/No multiple_choice prompt' PASSED",
+      "notes": "default option (Yes, number=1) が選ばれることを担保"
+    },
+    {
+      "scenario": "シナリオ 6: 既存テスト（Bash/Edit 承認 / 通常 multiple_choice / Codex/Gemini/OpenCode/Copilot プロンプト）が全パスする（回帰ゼロ）",
+      "result": "passed",
+      "evidence": "prompt-detector.test.ts 203/203 pass, status-detector.test.ts 28/28 pass, auto-yes-resolver.test.ts 9/9 pass, Codex 13/13 pass, Gemini 6/6 pass, Bash 5/5 pass",
+      "notes": "全 unit suite 6486 件パス。回帰ゼロ。"
+    },
+    {
+      "scenario": "シナリオ 7: コード品質ゲート: ESLint パス・TypeScript 型チェックパス・全 unit test パス",
+      "result": "passed",
+      "evidence": "lint: 0 errors 0 warnings / tsc: 0 errors / test:unit: 6486 passed 7 skipped 0 failed",
+      "notes": "expected_outcomes.test_unit_total (6486) と完全一致"
+    }
+  ],
+
+  "acceptance_criteria_status": [
+    {
+      "criterion": "Issue #704 受入条件 1: `Use skill \"X\"?` を含む実出力 fixture で prompt-detector が multiple_choice を返す",
+      "verified": true,
+      "evidence": "tests/unit/prompt-detector.test.ts 'Issue #704: Claude v2.1.142 skill approval prompt with trailing summary line' 3/3 PASSED. type=multiple_choice, options=[Yes, Yes2nd, No], default=Yes, numbers=[1,2,3] が厳密検証されている。"
+    },
+    {
+      "criterion": "Issue #704 受入条件 2: CommandMate Worktree 詳細画面で当該プロンプトの Yes/No ウィンドウが表示される（status-detector が waiting/prompt_detected を返すこと、および API レスポンスの isPromptWaiting=true / promptData!=null を担保することで検証）",
+      "verified": true,
+      "evidence": "(a) status-detector unit test: status='waiting', hasActivePrompt=true, reason='prompt_detected', promptDetection.promptData.type='multiple_choice' を担保。(b) src/app/api/worktrees/[id]/current-output/route.ts L106/137 のコードレビューで isPromptWaiting=statusResult.hasActivePrompt および promptData=statusResult.promptDetection.promptData ?? null と確認。両者を組み合わせ、Issue #704 fixture では API レスポンスとして isPromptWaiting=true / promptData!=null (multiple_choice/Yes-Yes2nd-No) が確定的に返る。",
+      "note_ui": "UI 上の Yes/No ウィンドウ表示自体は本フェーズ範囲外 (別途 /uat スキルで実機検証)。ロジック層 3 層 + API 伝播は完全に充足。"
+    },
+    {
+      "criterion": "Issue #704 受入条件 3: Auto-Yes 有効時にスキル承認プロンプトに対して自動応答が発火する（resolveAutoAnswer が '1' を返すこと）",
+      "verified": true,
+      "evidence": "tests/unit/lib/auto-yes-resolver.test.ts 'Issue #704: Use skill approval prompt' 1/1 PASSED. resolveAutoAnswer(promptData) === '1' を厳密検証。"
+    },
+    {
+      "criterion": "Issue #704 受入条件 4: 既存の Bash/Edit 承認プロンプトの検出が壊れていない（回帰なし）",
+      "verified": true,
+      "evidence": "prompt-detector.test.ts 全 203 件パス。-t \"Bash\" フィルタで Bash 承認関連 5 件全て pass。Codex (13)/Gemini (6) 関連も全 pass。全 unit suite 6486 件パス・0 failed。回帰ゼロ。"
+    },
+    {
+      "criterion": "Issue #704 受入条件 5: 単体テストが追加され `npm run test:unit` でパスする",
+      "verified": true,
+      "evidence": "新規 5 ケース (prompt-detector ×3 / status-detector ×1 / auto-yes-resolver ×1) すべて緑。npm run test:unit 全体: 6486 passed (baseline 6481 + 5 = 6486、expected_outcomes 通り)。"
+    }
+  ],
+
+  "evidence_files": [
+    "dev-reports/bug-fix/issue-704-20260515_173223/evidence/test-unit-full.log",
+    "dev-reports/bug-fix/issue-704-20260515_173223/evidence/test-issue704-prompt-detector.log",
+    "dev-reports/bug-fix/issue-704-20260515_173223/evidence/test-issue704-status-detector.log",
+    "dev-reports/bug-fix/issue-704-20260515_173223/evidence/test-issue704-auto-yes-resolver.log"
+  ],
+
+  "follow_ups": [
+    "[範囲外/予定済] 受入条件 2 の UI レイヤー実機検証 (Yes/No ウィンドウの DOM レンダリング・キー入力反映) は /uat スキルで Claude Code v2.1.142 実セッションを用いて別途確認すること。",
+    "[Optional] CLAUDE_PROMPT_FOOTER_PATTERN は `Esc to cancel · Tab to amend` 行を起点に effectiveEnd を切り詰める設計のため、Claude Code 上流での将来的フッター文言変更（`·` の文字種変更、I18N 化等）に対するセンサーとしてリリースノート監視 issue を残すと安全。"
+  ],
+
+  "message": "Issue #704 の S1+S2+S3 修正は、全受入条件を充足し、品質ゲート (lint/tsc/test) を全件パスし、既存テストへの回帰もありません。API レイヤーまでの伝播も route.ts コードレビューで確認済みです。UI 実機検証 (受入条件 2 の UI レイヤー部分) のみ /uat スキルでの追加検証が予定されています。"
+}
