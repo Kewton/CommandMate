@@ -1,0 +1,8 @@
+{
+  "issue_number": "716",
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目・影響範囲）",
+  "review_result_path": "dev-reports/issue/716/issue-review/stage3-review-result.json",
+  "output_path": "dev-reports/issue/716/issue-review/stage4-apply-result.json",
+  "instructions": "Stage 3 影響範囲レビューの指摘（Must Fix 3 / Should Fix 8 / Nice to Have 3）を GitHub Issue #716 本文に反映してください。特に Must Fix（名前空間衝突、memo リレンダリング、#701 干渉）は詳細に書き込んでください。"
+}

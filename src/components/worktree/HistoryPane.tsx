@@ -4,20 +4,31 @@
  * Displays message history grouped as conversation pairs.
  * Each pair shows a user message with its corresponding assistant response(s).
  * Supports file path detection and click handling.
+ *
+ * [Issue #716] Adds in-pane text search with namespace-isolated highlighting.
  */
 
 'use client';
 
-import React, { useMemo, useCallback, memo, useRef, useLayoutEffect } from 'react';
+import React, { useMemo, useCallback, memo, useRef, useLayoutEffect, useState, useEffect } from 'react';
+import { Search } from 'lucide-react';
 import type { ChatMessage } from '@/types/models';
 import { useConversationHistory } from '@/hooks/useConversationHistory';
+import { useHistorySearch } from '@/hooks/useHistorySearch';
 import { ConversationPairCard } from './ConversationPairCard';
+import { HistorySearchBar } from './HistorySearchBar';
 import { copyToClipboard } from '@/lib/clipboard-utils';
+import {
+  applyHistoryHighlights,
+  clearHistoryHighlights,
+} from '@/lib/terminal-highlight';
 import {
   HISTORY_DISPLAY_LIMIT_OPTIONS,
   isHistoryDisplayLimit,
   type HistoryDisplayLimit,
 } from '@/config/history-display-config';
+import type { ConversationPair } from '@/types/conversation';
+import type { HistoryMatch } from '@/hooks/useHistorySearch';
 
 // ============================================================================
 // Constants
@@ -34,21 +45,12 @@ export const STICKY_HEADER_HEIGHT = 48;
 // Types
 // ============================================================================
 
-/**
- * Props for HistoryPane component
- */
 export interface HistoryPaneProps {
-  /** Array of chat messages to display */
   messages: ChatMessage[];
-  /** Associated worktree ID (reserved for future filtering/fetching) */
   worktreeId: string;
-  /** Callback when a file path is clicked */
   onFilePathClick: (path: string) => void;
-  /** Whether the component is in loading state */
   isLoading?: boolean;
-  /** Additional CSS classes */
   className?: string;
-  /** Toast notification callback for copy feedback (optional) */
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
   /** Issue #485: Callback when a message is inserted into message input */
   onInsertToMessage?: (content: string) => void;
@@ -66,11 +68,6 @@ export interface HistoryPaneProps {
 // Sub-components
 // ============================================================================
 
-/**
- * Loading indicator component.
- * Displays animated dots while content is loading.
- * Includes proper ARIA role and label for accessibility.
- */
 function LoadingIndicator() {
   return (
     <div
@@ -89,11 +86,6 @@ function LoadingIndicator() {
   );
 }
 
-/**
- * Empty state component.
- * Displays a friendly message and icon when there are no messages.
- * Provides visual feedback to users that the history is empty.
- */
 function EmptyState() {
   return (
     <div className="flex flex-col items-center justify-center py-8 text-gray-500">
@@ -117,10 +109,40 @@ function EmptyState() {
 }
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Escape a value for safe inclusion inside a double-quoted attribute selector.
+ * Message IDs are UUIDs in practice, but we still escape defensively to avoid
+ * any selector injection in case the id format ever changes.
+ */
+function escapeAttrValue(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/** Reverse-index search hits to the pair IDs that own them. */
+function computeMatchedPairIds(
+  matches: HistoryMatch[],
+  pairs: ConversationPair[]
+): Set<string> {
+  const messageIdToPairId = new Map<string, string>();
+  for (const pair of pairs) {
+    if (pair.userMessage) messageIdToPairId.set(pair.userMessage.id, pair.id);
+    for (const am of pair.assistantMessages) messageIdToPairId.set(am.id, pair.id);
+  }
+  const result = new Set<string>();
+  for (const m of matches) {
+    const pid = messageIdToPairId.get(m.messageId);
+    if (pid) result.add(pid);
+  }
+  return result;
+}
+
+// ============================================================================
 // Main Component
 // ============================================================================
 
-/** Base container classes for the history pane */
 const BASE_CONTAINER_CLASSES = [
   'h-full',
   'flex',
@@ -133,32 +155,9 @@ const BASE_CONTAINER_CLASSES = [
   'border-gray-700',
 ] as const;
 
-/**
- * HistoryPane component for displaying message history as conversation pairs.
- *
- * Features:
- * - Groups user and assistant messages into conversation pairs
- * - Supports consecutive assistant messages in a single pair
- * - Handles orphan assistant messages (system messages)
- * - Shows pending state when waiting for response
- * - Independent scrolling
- * - Clickable file paths
- * - Loading and empty states
- * - Accessibility support
- *
- * @example
- * ```tsx
- * <HistoryPane
- *   messages={messages}
- *   worktreeId="my-worktree"
- *   onFilePathClick={(path) => openFile(path)}
- *   isLoading={false}
- * />
- * ```
- */
 export const HistoryPane = memo(function HistoryPane({
   messages,
-  worktreeId: _worktreeId,
+  worktreeId,
   onFilePathClick,
   isLoading = false,
   className = '',
@@ -169,18 +168,66 @@ export const HistoryPane = memo(function HistoryPane({
   historyDisplayLimit,
   onHistoryDisplayLimitChange,
 }: HistoryPaneProps) {
-  // worktreeId is kept in props for future use (e.g., filtering, fetching)
-  // Using underscore prefix to indicate intentionally unused parameter
-  void _worktreeId;
-
-  // Scroll container ref for position preservation
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  // Store scroll position to restore after re-renders
   const scrollPositionRef = useRef<number>(0);
-  // Track message count to detect meaningful changes
   const prevMessageCountRef = useRef<number>(messages.length);
+  /** [Issue #716] Saved scrollTop at the moment search was opened. */
+  const searchStartScrollPositionRef = useRef<number | null>(null);
 
-  // Save scroll position before render
+  // ---------------------------------------------------------------
+  // Conversation pairing + manual expand state (unchanged)
+  // ---------------------------------------------------------------
+  const { pairs, isExpanded: isManuallyExpanded, toggleExpand } = useConversationHistory(messages);
+
+  // ---------------------------------------------------------------
+  // [Issue #716] Search
+  // ---------------------------------------------------------------
+  // Pre-filter searchable messages (archived/empty removed); see design §5.2.
+  const searchableMessages = useMemo(
+    () =>
+      messages.filter(
+        (m) => !m.archived && typeof m.content === 'string' && m.content.length > 0
+      ),
+    [messages]
+  );
+
+  const {
+    isOpen: isSearchOpen,
+    query: searchQuery,
+    matchCount,
+    currentIndex,
+    isAtMaxMatches,
+    matchPositions,
+    currentMatch,
+    openSearch,
+    closeSearch,
+    setQuery: setSearchQuery,
+    onCompositionStart,
+    onCompositionEnd,
+    nextMatch,
+    prevMatch,
+  } = useHistorySearch({ messages: searchableMessages });
+
+  const isSearchActive = isSearchOpen && matchPositions.length > 0;
+
+  const [autoExpandedIds, setAutoExpandedIds] = useState<Set<string>>(new Set());
+
+  // Reset search when worktree context changes.
+  useEffect(() => {
+    closeSearch();
+    // Intentionally exclude closeSearch from deps; reset only on worktree change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [worktreeId]);
+
+  // ---------------------------------------------------------------
+  // Effect order per design policy §4.2:
+  //   (1) save scroll position
+  //   (2) restore scroll position (skipped while search is active)
+  //   (3) compute autoExpandedIds
+  //   (4) apply highlights + scrollIntoView
+  // ---------------------------------------------------------------
+
+  // (1) Save scrollTop before re-render.
   useLayoutEffect(() => {
     const container = scrollContainerRef.current;
     if (container) {
@@ -188,54 +235,111 @@ export const HistoryPane = memo(function HistoryPane({
     }
   });
 
-  // Restore scroll position after render if message count unchanged
+  // (2) Restore scrollTop if message count is stable; skip while searching.
   useLayoutEffect(() => {
     const container = scrollContainerRef.current;
     const prevCount = prevMessageCountRef.current;
 
-    // Only restore scroll if message count hasn't increased
-    // (new messages should allow natural scroll behavior)
+    if (isSearchActive) {
+      // Update the count baseline so the next non-searching render restores correctly.
+      prevMessageCountRef.current = messages.length;
+      return;
+    }
+
     if (container && messages.length === prevCount) {
       requestAnimationFrame(() => {
         container.scrollTop = scrollPositionRef.current;
-        // Note: sticky header does not affect scrollTop calculation
-        // as content flows below the header naturally
       });
     }
-
-    // Update previous count for next render
     prevMessageCountRef.current = messages.length;
-  }, [messages.length]);
+  }, [messages.length, isSearchActive]);
 
-  // Use conversation history hook for grouping and expand/collapse state
-  const { pairs, isExpanded, toggleExpand } = useConversationHistory(messages);
+  // (3) Recompute auto-expanded pair IDs whenever search results change.
+  useLayoutEffect(() => {
+    if (!isSearchOpen || matchPositions.length === 0) {
+      setAutoExpandedIds((prev) => (prev.size === 0 ? prev : new Set()));
+      return;
+    }
+    setAutoExpandedIds(computeMatchedPairIds(matchPositions, pairs));
+  }, [isSearchOpen, matchPositions, pairs]);
 
-  // Build container class string
+  // (4) Apply per-message highlights and scroll the current match into view.
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    if (!isSearchOpen || matchPositions.length === 0) {
+      clearHistoryHighlights();
+      return;
+    }
+
+    for (const match of matchPositions) {
+      const el = container.querySelector(
+        `[data-message-id="${escapeAttrValue(match.messageId)}"]`
+      );
+      if (!el) continue;
+      const localIdx =
+        currentMatch?.messageId === match.messageId ? currentMatch.localIndex : -1;
+      applyHistoryHighlights(el, match.ranges, localIdx);
+    }
+
+    if (currentMatch) {
+      const el = container.querySelector(
+        `[data-message-id="${CSS.escape(currentMatch.messageId)}"]`
+      );
+      if (el && typeof (el as HTMLElement).scrollIntoView === 'function') {
+        (el as HTMLElement).scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    }
+
+    return () => {
+      clearHistoryHighlights();
+    };
+  }, [isSearchOpen, matchPositions, currentMatch, autoExpandedIds]);
+
+  // Save scroll position when the search opens; restore it when search closes.
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (isSearchOpen) {
+      if (searchStartScrollPositionRef.current === null && container) {
+        searchStartScrollPositionRef.current = container.scrollTop;
+      }
+    } else {
+      if (searchStartScrollPositionRef.current !== null && container) {
+        const saved = searchStartScrollPositionRef.current;
+        requestAnimationFrame(() => {
+          container.scrollTop = saved;
+        });
+      }
+      searchStartScrollPositionRef.current = null;
+    }
+  }, [isSearchOpen]);
+
+  // ---------------------------------------------------------------
+  // Render helpers
+  // ---------------------------------------------------------------
+
   const containerClasses = useMemo(
     () => [...BASE_CONTAINER_CLASSES, className].filter(Boolean).join(' '),
     [className]
   );
 
-  // Memoize the file path click handler to prevent unnecessary re-renders
   const handleFilePathClick = useCallback(
     (path: string) => onFilePathClick(path),
     [onFilePathClick]
   );
 
-  // Create toggle handler factory
   const createToggleHandler = useCallback(
     (pairId: string) => () => toggleExpand(pairId),
     [toggleExpand]
   );
 
-  // Copy message handler - uses copyToClipboard utility (SF-S4-1, MF-1 DRY)
   const handleCopy = useCallback(
     async (content: string) => {
       try {
         await copyToClipboard(content);
         showToast?.('Copied to clipboard', 'success');
       } catch {
-        // SF-S4-3: Error log excludes message content
         console.error('[HistoryPane] Failed to copy to clipboard');
         showToast?.('Failed to copy', 'error');
       }
@@ -243,7 +347,6 @@ export const HistoryPane = memo(function HistoryPane({
     [showToast]
   );
 
-  // Render content based on state
   const renderContent = () => {
     if (isLoading) {
       return <LoadingIndicator />;
@@ -252,15 +355,15 @@ export const HistoryPane = memo(function HistoryPane({
       return <EmptyState />;
     }
     return pairs.map((pair) => {
-      // Issue #168: Check if any message in the pair is archived
       const isArchived = pair.userMessage?.archived === true ||
         pair.assistantMessages?.some(m => m.archived === true);
+      const expanded = isManuallyExpanded(pair.id) || autoExpandedIds.has(pair.id);
       return (
         <div key={pair.id} className={isArchived ? 'opacity-60' : ''}>
           <ConversationPairCard
             pair={pair}
             onFilePathClick={handleFilePathClick}
-            isExpanded={isExpanded(pair.id)}
+            isExpanded={expanded}
             onToggleExpand={createToggleHandler(pair.id)}
             onCopy={handleCopy}
             onInsertToMessage={onInsertToMessage}
@@ -270,7 +373,6 @@ export const HistoryPane = memo(function HistoryPane({
     });
   };
 
-  // Issue #701: history display limit select handler
   const handleHistoryDisplayLimitSelectChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       const parsed = parseInt(e.target.value, 10);
@@ -280,6 +382,14 @@ export const HistoryPane = memo(function HistoryPane({
     },
     [onHistoryDisplayLimitChange]
   );
+
+  const handleToggleSearch = useCallback(() => {
+    if (isSearchOpen) {
+      closeSearch();
+    } else {
+      openSearch();
+    }
+  }, [isSearchOpen, openSearch, closeSearch]);
 
   return (
     <div
@@ -320,8 +430,36 @@ export const HistoryPane = memo(function HistoryPane({
               Show archived
             </label>
           )}
+          <button
+            type="button"
+            onClick={handleToggleSearch}
+            aria-label={isSearchOpen ? 'Close search' : 'Open search'}
+            aria-pressed={isSearchOpen}
+            className="p-1 text-gray-400 hover:text-gray-200 rounded transition-colors"
+            title={isSearchOpen ? 'Close search' : 'Open search'}
+          >
+            <Search size={14} aria-hidden="true" />
+          </button>
         </div>
       </div>
+
+      {/* Search bar (toggleable) */}
+      {isSearchOpen && (
+        <div className="sticky top-12 z-10 px-3 py-2 bg-gray-900 border-b border-gray-700">
+          <HistorySearchBar
+            query={searchQuery}
+            onQueryChange={setSearchQuery}
+            matchCount={matchCount}
+            currentIndex={currentIndex}
+            onNext={nextMatch}
+            onPrev={prevMatch}
+            onClose={closeSearch}
+            isAtMaxMatches={isAtMaxMatches}
+            onCompositionStart={onCompositionStart}
+            onCompositionEnd={onCompositionEnd}
+          />
+        </div>
+      )}
 
       {/* Content */}
       <div className="flex-1 p-4 min-h-0">{renderContent()}</div>

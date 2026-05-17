@@ -461,4 +461,87 @@ describe('HistoryPane', () => {
       expect(region.className).toContain('custom-class');
     });
   });
+
+  // ============================================================================
+  // [Issue #716] Search feature
+  // ============================================================================
+
+  describe('Search feature (Issue #716)', () => {
+    it('does not render the search bar by default', () => {
+      const messages: ChatMessage[] = [createTestMessage({ content: 'hello' })];
+      render(
+        <HistoryPane
+          messages={messages}
+          worktreeId={defaultWorktreeId}
+          onFilePathClick={mockOnFilePathClick}
+        />
+      );
+      expect(screen.queryByRole('search')).not.toBeInTheDocument();
+    });
+
+    it('renders a toggle button with Open search aria-label', () => {
+      const messages: ChatMessage[] = [createTestMessage({ content: 'hello' })];
+      render(
+        <HistoryPane
+          messages={messages}
+          worktreeId={defaultWorktreeId}
+          onFilePathClick={mockOnFilePathClick}
+        />
+      );
+      const toggle = screen.getByRole('button', { name: /open search/i });
+      expect(toggle).toBeInTheDocument();
+    });
+
+    it('toggles the search bar visibility and updates aria-label', () => {
+      const messages: ChatMessage[] = [createTestMessage({ content: 'hello' })];
+      render(
+        <HistoryPane
+          messages={messages}
+          worktreeId={defaultWorktreeId}
+          onFilePathClick={mockOnFilePathClick}
+        />
+      );
+      const toggle = screen.getByRole('button', { name: /open search/i });
+      fireEvent.click(toggle);
+
+      expect(screen.getByRole('search')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /close search/i })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /close search/i }));
+      expect(screen.queryByRole('search')).not.toBeInTheDocument();
+    });
+
+    it('exposes data-message-id on user message content for highlight targeting', () => {
+      const messages: ChatMessage[] = [
+        createTestMessage({ id: 'user-1', content: 'sentinel', role: 'user' }),
+      ];
+      const { container } = render(
+        <HistoryPane
+          messages={messages}
+          worktreeId={defaultWorktreeId}
+          onFilePathClick={mockOnFilePathClick}
+        />
+      );
+      const el = container.querySelector('[data-message-id="user-1"]');
+      expect(el).not.toBeNull();
+      expect(el?.textContent).toContain('sentinel');
+    });
+
+    it('exposes data-message-id on assistant message content for highlight targeting', () => {
+      const messages: ChatMessage[] = [
+        createTestMessage({ id: 'u-1', content: 'q', role: 'user' }),
+        createTestMessage({ id: 'a-1', content: 'sentinel answer', role: 'assistant' }),
+      ];
+      const { container } = render(
+        <HistoryPane
+          messages={messages}
+          worktreeId={defaultWorktreeId}
+          onFilePathClick={mockOnFilePathClick}
+        />
+      );
+      const el = container.querySelector('[data-message-id="a-1"]');
+      expect(el).not.toBeNull();
+      expect(el?.textContent).toContain('sentinel answer');
+    });
+  });
 });

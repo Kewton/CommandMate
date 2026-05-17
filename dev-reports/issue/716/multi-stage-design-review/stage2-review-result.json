@@ -1,0 +1,119 @@
+{
+  "stage": 2,
+  "focus": "整合性",
+  "reviewer": "claude-opus",
+  "findings": [
+    {
+      "id": "DR2-001",
+      "severity": "Must Fix",
+      "category": "既存実装整合性",
+      "title": "AssistantMessageItem の truncate 時に parent div の textContent が message.content と一致しない（DR1-007 不変条件の欠陥）",
+      "description": "§4.2 / §10 で『data-message-id を MessageContent の親 <div>（pre-wrap）に付与』『textContent オフセット不変条件: container.querySelector('[data-message-id]').textContent === message.content』と明記している。しかし ConversationPairCard.tsx の実装（行 301-306）を確認すると、AssistantMessageItem の MessageContent 親 div は以下の構造になっている：\n```tsx\n<div className=\"text-sm ... whitespace-pre-wrap ...\">\n  <MessageContent content={displayContent} ... />\n  {!isExpanded && isTruncated && (<span className=\"text-gray-500\">...</span>)}\n</div>\n```\nここで `displayContent = isExpanded || !isTruncated ? message.content : truncatedText` のため、truncate された collapsed 状態のアシスタントメッセージでは `parentDiv.textContent === truncatedText + '...'` となり、`message.content` と一致しない。\n\n§6.3 の自動展開ロジックは `matchedPairIds` を `pair.id` レベルで強制展開する設計だが、(1) 展開状態の反映と useLayoutEffect の実行は同一レンダリングサイクルで保証されない可能性、(2) `findMatches` が `message.content`（フル）を使ってオフセット計算する一方、レンダリング DOM の textContent は `truncatedText + '...'` という事実は『データソースと DOM の二重表現問題』であり、自動展開だけでは解決しない（フレーム間で一瞬ハイライト座標がずれる可能性）。",
+      "location_in_doc": "§4.2 副作用パターン, §6.3 ConversationPairCard, §10 決定事項表 'data-message-id 付与位置'",
+      "recommendation": "次のいずれかを選択して §4.2 / §6.3 を明確化すること。\n(A) AssistantMessageItem 内で『検索アクティブ中は常に displayContent = message.content（truncate を無効化）』とし、自動展開（hasLongContent && isExpanded）と独立に DOM の textContent を message.content と一致させる。これには ConversationPairCard / AssistantMessageItem に『検索アクティブフラグ』を伝播する必要があり DR1-005『autoExpanded props 追加なし』と矛盾するため、別の経路（例: HistoryPane の searchActive コンテキスト or 内部 ref で AssistantMessageItem を強制 isExpanded=true にする）を検討。\n(B) useHistorySearch.findMatches が『parentDiv.textContent 相当の文字列』に対してオフセットを計算する（つまり truncate された状態の文字列を検索対象とする）。ただしこれだと折りたたまれた長文の末尾はマッチ対象外となるため Issue 受入条件『検索対象テキスト: ChatMessage.content 全文（truncate 表示中の隠れた末尾文字列も含む）』に違反する。\n(C) §4.2 useLayoutEffect 内で『自動展開反映後の DOM 上で applyHistoryHighlights を呼ぶ』ことを保証するため、useLayoutEffect の依存配列に expandedPairs 状態も含め、auto-expand が反映された 1 フレーム後にハイライト適用するシーケンスを明文化。Issue 受入条件で『truncate 中の隠れた末尾文字列も検索対象』と書かれているため、自動展開で対応するのが本筋。ただし truncate 表示状態の DOM では『...』分のオフセットずれは残るため、自動展開でしか整合性を保てない事実を §4.2 / §6.3 に追記すべき。\n推奨は (C) + DR1-005 ロジックの強化（pair.id ベースから messageId ベースに切り替えるか、autoExpandedIds を AssistantMessagesSection の isExpanded プロパティへ強制反映する）。"
+    },
+    {
+      "id": "DR2-002",
+      "severity": "Must Fix",
+      "category": "Stage1波及",
+      "title": "§6.3 サンプルコードの『expandedPairIds』『setExpandedPairIds』が useConversationHistory の実装 I/F と不一致",
+      "description": "§6.3 のサンプルコード（DR1-005 反映）で以下のように書かれているが、これは現状の useConversationHistory.ts の I/F と整合していない：\n```typescript\nexpandStateSnapshotRef.current = new Map(expandedPairIds);\n...\nsetExpandedPairIds(prev => new Set([...prev, ...matchedPairIds]));\n...\nsetExpandedPairIds(new Set(...));\n```\nしかし useConversationHistory が return するのは：\n- `expandedPairs: Set<string>`（命名は expandedPairs であって expandedPairIds ではない）\n- `toggleExpand: (pairId: string) => void`（個別トグルのみ。bulk setter は提供されていない）\n\nつまり setExpandedPairIds という外部 setter は HistoryPane からアクセスできない。`useConversationHistory` の I/F 拡張（bulk setter 追加）か、HistoryPane で別途独自の expanded state を持つ（既存 useConversationHistory.expandedPairs と二重管理）か、いずれかの方針が必要だが §6.3 は方針を示していない。\n\nまた `expandedPairIds` という命名と `useConversationHistory.expandedPairs` の命名が異なるのも整合性問題。",
+      "location_in_doc": "§6.3 ConversationPairCard の自動展開（props 追加なし方針）, §10 決定事項表",
+      "recommendation": "次のいずれかを §6.3 に明示すること：\n(A) useConversationHistory に新たな bulk setter（例: `setExpandedPairs(next: Set<string>)`）を追加する I/F 変更を §6.3 / §11.3 に追記。既存 toggleExpand は維持。\n(B) HistoryPane 側で独自の `searchAutoExpandedPairs: Set<string>` を保持し、ConversationPairCard の isExpanded を `expandedPairs.has(pair.id) || searchAutoExpandedPairs.has(pair.id)` の合成で渡す（既存 useConversationHistory に手を入れない）。検索終了時は searchAutoExpandedPairs を空 Set にクリアするだけで元の expand 状態に戻る。スナップショット復元ロジック不要となり KISS。\n(C) useConversationHistory の return に setExpandedPairs を追加し、サンプルコードのまま動くようにする。\n\n推奨は (B)。スナップショット ref が不要になり、検索アクティブ／非アクティブの状態が `searchAutoExpandedPairs.size > 0` のみで判定でき、復元ロジック（『元の expand 状態へ正確に復元』）も自動的に満たされる。サンプルコードを (B) ベースに書き換えるか、命名を `expandedPairs` に統一すること。"
+    },
+    {
+      "id": "DR2-003",
+      "severity": "Should Fix",
+      "category": "既存実装整合性",
+      "title": "useTerminalSearch の containerRef ベース実装と useHistorySearch の messages ベース実装の非対称性が §11.3『Issue #47 を踏襲』に矛盾",
+      "description": "§11.3 で『Issue #47 (TerminalSearch): UI/Hook/highlight 3層構造を踏襲』と謳っているが、両 Hook の設計は本質的に非対称：\n- useTerminalSearch: 入力 `{ output: string, containerRef: RefObject<Element | null> }`、findMatches は `container.textContent` を走査\n- useHistorySearch: 入力 `{ messages: ChatMessage[] }`、findMatches は messages 配列を走査\n\nこの非対称性は §10 DR1-004 で『findMatches の対象が container.textContent（線形）vs ChatMessage[]（構造化）と本質的に異なる』として正当化されているが、§11.3 の『踏襲』表現と整合していない。さらに useHistorySearch には containerRef が無い設計だが、§4.2 では HistoryPane が container.querySelector を行う構造になっており、Hook と Component の責務分離方針が両 Hook で異なる（useTerminalSearch は Hook が DOM 直接操作、useHistorySearch は Hook が messages のみ扱い HistoryPane が DOM 操作）。この設計差異はクリーンだが、§11.3 で『踏襲』と書くと読み手が「同じ呼び出しパターン」と誤解する可能性がある。",
+      "location_in_doc": "§11.3 既存パターン踏襲, §4.2 副作用パターン, §6.1 useHistorySearch Hook",
+      "recommendation": "§11.3 の表現を以下のように修正：\n『Issue #47 (TerminalSearch): UI（SearchBar）/ Hook（state + debounce + match 計算）/ highlight（CSS Custom Highlight API ラッパー）の3層構造を踏襲。ただし findMatches の入力源と DOM 操作責務は両 Hook で異なる（useTerminalSearch は container.textContent を Hook 内で走査・DOM 操作も Hook 内で実施、useHistorySearch は messages を Hook で走査・DOM 操作は HistoryPane 側で実施）』。\n\nまた §6.1 に『useHistorySearch は containerRef を取らない（責務分離: Hook はマッチ計算のみ、DOM 操作は HistoryPane が担当）』ことを設計判断として明記。これにより読み手が Issue #47 の呼び出しパターンと混同しなくなる。"
+    },
+    {
+      "id": "DR2-004",
+      "severity": "Should Fix",
+      "category": "章間整合性",
+      "title": "DEBOUNCE_MS (300ms) / 最小2文字 (MIN_QUERY_LENGTH=2) の共通定数管理が DR1-006 で未対応",
+      "description": "Issue 受入条件『共通定数（TerminalSearch と統一）』では 4 項目すべて統一を求めている：\n1. 最大マッチ件数: 500（→ DR1-006 で対応済み）\n2. debounce: 300ms（→ **未対応**）\n3. 最小クエリ長: 2文字（→ **未対応**）\n4. scrollIntoView: `{ block: 'center', behavior: 'smooth' }`（→ 関数呼び出し時の即値で対応可能、定数化不要）\n\nDR1-006 の反映（§10, §11.2）は TERMINAL_SEARCH_MAX_MATCHES の rename import のみ言及しており、debounce と min-query-length は対象外。しかし useTerminalSearch.ts の DEBOUNCE_MS（行 24）は `const`（export なし）、最小2文字は `if (searchQuery.length < 2)`（行 79）でマジックナンバー直書き。これらを useHistorySearch でも統一するには：\n- DEBOUNCE_MS を useTerminalSearch.ts で export する（破壊的でない）\n- 最小2文字を `MIN_QUERY_LENGTH` 定数として export する（破壊的でない）\n\n設計書ではこの2つの定数の共通化方針が明文化されておらず、実装時に『片方は 300、片方は 250』のような不整合バグが発生し得る。",
+      "location_in_doc": "§10 決定事項表 '定数共通化', §11.2 DRY, §15.2 反映サマリー DR1-006",
+      "recommendation": "§10 の『定数共通化』エントリを以下のように拡充：\n『初版は useTerminalSearch.ts から rename import 方式を採用。対象定数は (1) TERMINAL_SEARCH_MAX_MATCHES（既存 export）、(2) DEBOUNCE_MS（**本 Issue で export 化**）、(3) MIN_QUERY_LENGTH（**本 Issue で export 化、既存マジックナンバー 2 を定数化**）の 3 つ。useTerminalSearch.ts への変更は『非破壊的な export 追加』のみで既存呼び出し側に影響なし』\n\nまた §15 実装順序の冒頭に『useTerminalSearch.ts の DEBOUNCE_MS / MIN_QUERY_LENGTH を export 化（後方互換）』を追加。§15.1 実装チェックリスト DR1-006 にも『DEBOUNCE_MS / MIN_QUERY_LENGTH が rename import で共有されている』を追記。"
+    },
+    {
+      "id": "DR2-005",
+      "severity": "Should Fix",
+      "category": "Issue整合性",
+      "title": "Issue 受入条件『フォールバックオーバーレイのスタイル区別』が設計書 §7 / §10 でカバーされていない",
+      "description": "Issue 本文の受入条件『ハイライト/ナビゲーション』に以下が明記されている：\n『フォールバックオーバーレイ（CSS Highlight 非対応ブラウザ）のスタイルも `terminal-search-fallback-overlay` と区別可能な見た目にする』\n\nしかし設計書 §4.1 のラッパー関数追加方式では `HISTORY_SEARCH_NAMESPACE.fallbackOverlayId = 'history-search-fallback-overlay'` で ID は分離されているものの、**スタイル（背景色・形状）の区別**については言及がない。`terminal-highlight.ts` の `showFallbackOverlay`（行 158-171）は `backgroundColor = 'rgba(255, 165, 0, 0.6)'` をハードコードしており、history 用にも同じ橙色オーバーレイが描かれる。\n\n§4.1 で『内部実装は applyHighlightsInternal で共通化』としているため、現状の設計のままでは fallback overlay の見た目が完全一致してしまい、両 pane 同時検索時に視覚的区別ができない。",
+      "location_in_doc": "§4.1 Strategy パターン, §7 CSS追加 (実装方針記載なし), §10 決定事項表",
+      "recommendation": "§4.1 の HighlightNamespace 型に色情報を追加するか、別系統で対応すること：\n```typescript\nexport interface HighlightNamespace {\n  highlightName: string;\n  currentHighlightName: string;\n  fallbackOverlayId: string;\n  fallbackOverlayBgColor: string;  // 追加\n}\nconst TERMINAL_SEARCH_NAMESPACE = { ..., fallbackOverlayBgColor: 'rgba(255, 165, 0, 0.6)' };\nexport const HISTORY_SEARCH_NAMESPACE = { ..., fallbackOverlayBgColor: 'rgba(96, 165, 250, 0.5)' };  // 青系\n```\nshowFallbackOverlay は `namespace.fallbackOverlayBgColor` を参照する形に改修。\n\nまたは §7 の globals.css 改修箇所に『.fallback-overlay スタイルを ID セレクタで分離（#terminal-search-fallback-overlay vs #history-search-fallback-overlay）』する CSS パターンへの切り替えを §7 で明示し、JS 側のハードコード backgroundColor を CSS クラス指定に置換する。後者の方が CSS 一元管理で保守性が高い。"
+    },
+    {
+      "id": "DR2-006",
+      "severity": "Should Fix",
+      "category": "命名統一",
+      "title": "用語『matchPositions』の指すものが Hook return / Issue 受入条件 / §2.3 で異なる",
+      "description": "用語の混在が複数箇所で見られる：\n\n1. §5.1 `UseHistorySearchReturn.matchPositions: HistoryMatch[]`（メッセージ単位の集合体）\n2. §2.3 データフロー: 『findMatches(messages, query) → HistoryMatch[] (messageId 単位)』『matchPositions の useMemo はメッセージ毎にローカライズ可能』\n3. Issue 受入条件: 『`useHistorySearch` の unmount 時、worktreeId 切替時、kill-session 時に `query` / `matchPositions` / `debounceRef` を完全クリア』『matchPositions の再計算がスキップされる』\n4. terminal-highlight.ts の MatchPosition: `{ start: number; end: number }`（1 マッチの位置情報）\n\nつまり\n- terminal-highlight.MatchPosition: 1 マッチの座標\n- HistoryMatch.ranges: MatchPosition[]（1 メッセージ内の複数マッチ）\n- useHistorySearch.matchPositions: HistoryMatch[]（全メッセージのマッチ集合）\n\nという 3 階層が同名『matchPositions』『MatchPosition』を共有しており、文脈で意味が変わる。\n\nまた DR1-002 反映の `currentMatch: { messageId; localIndex }` と、§4.2 サンプルコード『const localIdx = currentMatch?.messageId === match.messageId ? currentMatch.localIndex : -1;』では『localIndex』を使うが、これは『そのメッセージ内で何番目の match か』を意味する。一方で useTerminalSearch では『currentIndex』は『全 matches 中の何番目か』（線形）。同じ Issue で 2 種の index 用語が出てくる。",
+      "location_in_doc": "§2.3, §4.2, §5.1, §5.1.1, §10",
+      "recommendation": "用語整理を §5 冒頭に追加すること：\n```\n用語定義:\n- MatchPosition: 1 マッチの textContent 内位置 { start; end }（terminal-highlight.ts より再利用）\n- HistoryMatch: 1 メッセージ内の全マッチ集合 { messageId; ranges: MatchPosition[] }\n- matchPositions (HistoryMatch[]): 全メッセージのマッチ集合（useHistorySearch return）\n- matchCount (number): 全マッチを線形 linearize した時の総数\n- currentIndex (number, 0-based): 線形 linearize 時のグローバル位置\n- currentMatch: 現在 currentIndex が指すメッセージとそのメッセージ内ローカル位置 { messageId; localIndex }\n  - localIndex (number, 0-based): currentMatch.messageId が指すメッセージ内で何番目のマッチか\n```\n\n受入条件で『matchPositions の完全クリア』『再計算スキップ』は HistoryMatch[] 全体を指すと明示。§4.2 のサンプルコードに type 注釈（`match: HistoryMatch`, `localIdx: number (= localIndex within message)`）を加えるとなお良い。"
+    },
+    {
+      "id": "DR2-007",
+      "severity": "Should Fix",
+      "category": "テスト実装可能性",
+      "title": "§9.3 のモック戦略が既存 terminal-highlight テストの実装パターンと若干異なる（参考例の食い違い）",
+      "description": "§9.3.2 の Vitest モック実装方針は以下を提案している：\n```typescript\n// @ts-expect-error - jsdom does not provide CSS.highlights\nglobalThis.CSS = {\n  highlights: new Map(),\n  ...globalThis.CSS,\n};\n```\nしかし実際の既存テスト（tests/unit/lib/terminal-highlight.test.ts）では：\n```typescript\nObject.defineProperty(globalThis, 'CSS', {\n  value: { ... },\n  configurable: true,\n});\n```\nというパターンを使用している。\n\n§9.3 の手法では globalThis.CSS が読み取り専用属性として既に存在する場合に上書きできない可能性があり、また `...globalThis.CSS` の展開順序によっては既存値で highlights が上書きされる可能性もある。プロジェクト既存パターンとの不整合は実装時の混乱を招く。",
+      "location_in_doc": "§9.3.2 Vitest でのモック実装方針",
+      "recommendation": "§9.3.2 を既存 terminal-highlight.test.ts のパターンに合わせて修正：\n```typescript\nbeforeEach(() => {\n  Object.defineProperty(globalThis, 'CSS', {\n    value: {\n      highlights: new Map<string, Highlight>(),\n    },\n    configurable: true,\n    writable: true,\n  });\n  Object.defineProperty(globalThis, 'Highlight', {\n    value: class Highlight {\n      ranges: Range[] = [];\n      constructor(...ranges: Range[]) { this.ranges = ranges; }\n      add(range: Range) { this.ranges.push(range); }\n      clear() { this.ranges = []; }\n    },\n    configurable: true,\n    writable: true,\n  });\n});\n\nafterEach(() => {\n  // クリーンアップ\n  delete (globalThis as any).CSS;\n  delete (globalThis as any).Highlight;\n});\n```\nまた『既存 tests/unit/lib/terminal-highlight.test.ts のパターンを参照すること』を §9.3 の注として追加し、Stage 1 反映時に既存テストファイルの調査が不十分だったことを補強する。"
+    },
+    {
+      "id": "DR2-008",
+      "severity": "Should Fix",
+      "category": "テスト実装可能性",
+      "title": "Issue 受入条件『ConversationPairCard の render 回数を React DevTools Profiler で確認』が単体テストに落とし込めない",
+      "description": "Issue 受入条件『パフォーマンス/互換性』に：\n『検索クエリを 1 文字ずつ入力した際に、`ConversationPairCard` の render 回数が pair 件数 × 入力文字数オーダーで増えない（React DevTools Profiler で確認可能。memo の維持を確認）』\nとあり、設計書 §8.2 でも render 回数の検証が含意されている。\n\nしかし React DevTools Profiler は手動デバッグツールであり、CI で自動検証できない。Vitest + Testing Library での render 回数検証は以下のパターンが必要：\n- ConversationPairCard を `vi.fn()` でラップしたモックコンポーネントに差し替え、呼び出し回数を spy で取る\n- または `@testing-library/react` の `render` を `let renderCount = 0` パターンで包んで実カウント\n\n§9 ではこの検証方法が一切示されておらず、Issue 受入条件と設計書テスト戦略の橋渡しが欠落している。",
+      "location_in_doc": "§9.1 単体テスト, §9.2 統合テスト, §8.2 パフォーマンス受入基準",
+      "recommendation": "§9.2 統合テストに次のテスト項目を追加：\n```\n- ConversationPairCard の memo 維持検証:\n  - ConversationPairCard を `vi.fn()` でラップし、検索クエリを 1 文字ずつ入力（5 文字）した際の render 呼び出し回数を計測\n  - 期待値: 初回 render 後、ハイライト適用は副作用なのでカード自体の再 render は発生しない（呼び出し回数 = pair 数 × 1、増加しない）\n  - 比較対象: クエリ未入力時の render 回数と一致すること\n```\nまたは『React DevTools Profiler での確認はオプション（受入時手動チェック）で、自動テストでは ConversationPairCard を spy で監視するアプローチを採用する』ことを §9.2 に明記。これにより Issue 受入条件のうち『自動検証可能な部分』と『手動検証部分』が明確化される。"
+    },
+    {
+      "id": "DR2-009",
+      "severity": "Should Fix",
+      "category": "章間整合性",
+      "title": "§14 受入条件 → 設計マッピングで『他Issue相互作用』『ドキュメント更新』のマッピング先が不十分",
+      "description": "§14 受入条件 → 設計マッピング表で：\n- 『他Issue相互作用』→ §11.3 のみ\n- 『ドキュメント更新』→ マッピング行が**存在しない**\n\nしかし Issue 受入条件には：\n- 『#168 showArchived トグル変更時、検索 state は維持し matchPositions のみ再計算』\n- 『#701 historyDisplayLimit 変更時、messages 配列が一新されるため検索 state（query は維持、currentIndex はクランプ）』\n- 『#485 メッセージ挿入ボタンと検索ハイライトは UI 上重ならない』\n\nが含まれており、§11.3 の各 Issue 1 行『尊重』『破壊しない』表記では不足。特に：\n- showArchived トグル変更時の『matchPositions のみ再計算』の挙動が §6.1 useHistorySearch の messages 依存配列管理と密接に関わるが §14 / §11.3 で言及なし\n- ArrowDownToLine ボタン（DOM 上での重なり）と CSS Custom Highlight API の z-index 関係が §7 / §8.1 で言及なし\n\nまたドキュメント更新（CLAUDE.md, module-reference.md, implementation-history.md ja/en）は §13 で扱われているが、§14 マッピング表に行が無く受入条件の完全カバレッジが取れていない。",
+      "location_in_doc": "§14 受入条件 → 設計マッピング, §11.3 既存パターン踏襲, §13 ドキュメント更新",
+      "recommendation": "§14 マッピング表に以下の行を追加：\n```\n| ドキュメント更新 | §13 |\n| 他Issue相互作用 (#168 showArchived) | §5.2 検索対象フィルタ, §6.1 messages 依存配列 |\n| 他Issue相互作用 (#701 historyDisplayLimit) | §6.1 messages 依存配列, §8.3 |\n| 他Issue相互作用 (#485 onInsertToMessage) | §11.3 既存 props 破壊しない |\n```\n\nまた §11.3 を以下のように展開：\n```\n#168 showArchived: HistoryPane の searchableMessages フィルタが archived を除外（§5.2）。トグル変更時は messages 配列の参照変化として検知され useHistorySearch の useMemo が再計算されるが、query は維持されるため UX 連続性を保つ。\n#701 historyDisplayLimit: limit 変更時は messages 配列が一新されるため、§6.1 の messages 依存配列最適化（length + last.id + last.timestamp）が変化を検知して再計算をトリガー。currentIndex は §5.1.1 の resolveCurrentMatch で範囲外なら null を返し、HistoryPane 側で 0 にクランプ。\n#485 onInsertToMessage: ConversationPairCard が onInsertToMessage props を受け取る既存 I/F を破壊しない。ArrowDownToLine ボタンは absolute 配置で CSS Custom Highlight API の Highlight オブジェクト（::highlight 疑似要素ベース）と z-index で衝突しないことを §7 で確認。\n```"
+    },
+    {
+      "id": "DR2-010",
+      "severity": "Should Fix",
+      "category": "命名統一",
+      "title": "実装順序 §15 と実装チェックリスト §15.1 で『rename import の対象定数』が片方しか書かれていない（DR1-006 反映の不完全さ）",
+      "description": "§15 実装順序の 2. に：\n『TERMINAL_SEARCH_MAX_MATCHES を useTerminalSearch.ts から HISTORY_SEARCH_MAX_MATCHES として rename import で再エクスポート』\nとあり、§15.1 実装チェックリスト DR1-006 も同様の表記。\n\nしかし DR2-004 で指摘した通り、Issue 受入条件は最大マッチ件数だけでなく debounce / 最小2文字も統一を求めている。さらに『再エクスポート』という用語自体が紛らわしい：\n- (a) useTerminalSearch.ts の `export const TERMINAL_SEARCH_MAX_MATCHES = 500;` を、useHistorySearch.ts で `import { TERMINAL_SEARCH_MAX_MATCHES as HISTORY_SEARCH_MAX_MATCHES } from '@/hooks/useTerminalSearch'` し、さらに `export { HISTORY_SEARCH_MAX_MATCHES };` する → **これが rename import + 再エクスポート**\n- (b) useHistorySearch.ts では rename import のみ（内部利用のみ、export しない）\n\nどちらを指すかが §10 / §15 / §15.1 / §15.2 で揺れている。HistorySearchBar が『500以上』表示のために定数を直接 import する場合は (a) の再エクスポートが必要。",
+      "location_in_doc": "§10, §11.2, §15.1, §15.2",
+      "recommendation": "§10 / §15 / §15.1 に以下を統一して記載：\n『useHistorySearch.ts は useTerminalSearch.ts から TERMINAL_SEARCH_MAX_MATCHES / DEBOUNCE_MS / MIN_QUERY_LENGTH を **rename import + 再 export** する：\n```typescript\n// useHistorySearch.ts\nimport {\n  TERMINAL_SEARCH_MAX_MATCHES as HISTORY_SEARCH_MAX_MATCHES,\n  DEBOUNCE_MS,\n  MIN_QUERY_LENGTH,\n} from '@/hooks/useTerminalSearch';\nexport { HISTORY_SEARCH_MAX_MATCHES };\n```\nHistorySearchBar は `import { HISTORY_SEARCH_MAX_MATCHES } from '@/hooks/useHistorySearch'` で使用可能。DEBOUNCE_MS / MIN_QUERY_LENGTH は内部利用のみで再 export 不要。』\n\nまた §15 実装順序 1. の冒頭に『useTerminalSearch.ts に DEBOUNCE_MS / MIN_QUERY_LENGTH の export を追加（既存マジックナンバーを定数化）』を追加。"
+    },
+    {
+      "id": "DR2-011",
+      "severity": "Nice to Have",
+      "category": "Stage1波及",
+      "title": "DR1-001（OCP 準拠）と DR1-010（HISTORY_SEARCH_NAMESPACE 配置）の関係性が §4.1 で明示されていない",
+      "description": "DR1-001 で『既存 applyTerminalHighlights / clearTerminalHighlights は変更しない、新規 applyHistoryHighlights / clearHistoryHighlights を追加』と決定済み。DR1-010 で『HISTORY_SEARCH_NAMESPACE を terminal-highlight.ts から export』と決定済み。\n\nしかし §4.1 の本文では『将来 file-search 等が追加された段階で src/lib/search-highlight.ts へのリネームを検討（DR1-010 の(A)案、現時点では YAGNI）』とあり、DR1-001 採用方針 (A')（ラッパー関数追加方式）との関係性が暗黙的。具体的には：\n- 将来 file-search namespace が追加されたら、再び terminal-highlight.ts に `applyFileSearchHighlights` を追加するのか？\n- それとも search-highlight.ts へのリネームの瞬間にすべての wrapper を移動するのか？\n\nが §4.1 / §10 で示されていない。",
+      "location_in_doc": "§4.1 Strategy パターン, §10 決定事項表",
+      "recommendation": "§4.1 末尾に次の註を追加：\n『将来 file-search / log-search 等の第3の namespace が追加される場合のマイグレーション戦略：\n- (i) terminal-highlight.ts のままで applyFileSearchHighlights 等を追加 export する（責務肥大化、3 つで限界）\n- (ii) src/lib/search-highlight.ts にリネーム + applyXxxHighlights を集約（破壊的だが OCP 準拠の限界点）\n- (iii) 各 namespace ごとに src/lib/{terminal,history,file}-search-highlight.ts に分割し、共通実装を src/lib/highlight-common.ts に切り出す\n\nIssue #716 では (ii)/(iii) は YAGNI として見送り、(i) の暫定形態で 2 namespace まで運用する。第3 namespace 登場時に再評価。』"
+    },
+    {
+      "id": "DR2-012",
+      "severity": "Nice to Have",
+      "category": "命名統一",
+      "title": "§4.2 サンプルコードと §15 実装順序の effect 宣言順序の説明が不一致",
+      "description": "§4.2 末尾の DR1-012 反映で：\n『同一コンポーネント内では宣言順（declaration order）で実行されるため、検索ハイライト effect は scroll 復元 effect より**後**に宣言し、スクロール競合が起きないようにする。』\nとある。\n\nしかし §4.2 のサンプルコードは『scroll 復元 effect』を示しておらず、§15 実装順序 5. に『scroll 復元競合制御』とあるだけで、具体的な effect 宣言順序が明示されていない。実装時に：\n```typescript\n// 1. scroll 復元 effect (既存)\nuseLayoutEffect(() => { container.scrollTop = ...; }, [messages.length]);\n\n// 2. 検索ハイライト effect (新規、DR1-012 で「後」に宣言)\nuseLayoutEffect(() => { applyHistoryHighlights(...); ... }, [isOpen, matchPositions, currentMatch]);\n```\nの順序を実装者が誤って入れ替えた場合、scroll 復元の後にハイライト適用→scrollIntoView が走り、ユーザーがスクロールしていた位置が上書きされる事故が起きうる。",
+      "location_in_doc": "§4.2 副作用パターン, §15 実装順序 5.",
+      "recommendation": "§4.2 のサンプルコードに『scroll 復元 effect』も含めた最終形を示すか、§15.1 実装チェックリスト DR1-012 に：\n『useLayoutEffect の宣言順序: (1) scrollPositionRef 保存 effect → (2) scrollPositionRef 復元 effect（messages.length 依存、検索アクティブ中はスキップ）→ (3) 検索ハイライト適用 effect（isOpen / matchPositions / currentMatch 依存）の順で書く』\nを明記。\n\nまた DR1-012 反映として『scroll 復元 effect は検索アクティブ中スキップする』と §6 で書かれているため、実は両 effect は実行条件で排他的に動作する。となると宣言順序の重要性は低い（同フレーム内で実行されない）ため、本指摘の優先度は Nice to Have に留める。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 8,
+  "nice_to_have_count": 2,
+  "summary": "Stage 1 で改訂された v1.1 設計書に対する整合性レビュー。全体として、Stage 1 の主要な構造的指摘（OCP 違反解消、currentMatch による責務分離、autoExpanded props 取りやめ）は適切に反映されており、Issue 本文・既存実装（useTerminalSearch / TerminalSearchBar / terminal-highlight / HistoryPane / ConversationPairCard）との大方の整合性は取れている。一方、以下の整合性課題が残存する。\n\n【Must Fix 2件】\n(DR2-001) DR1-007 の『textContent オフセット不変条件』が AssistantMessageItem の truncate 時に成立しない（parentDiv.textContent === truncatedText + '...' となり message.content と一致しない）。自動展開タイミングと useLayoutEffect 実行の同期性も曖昧。設計の中核となるオフセット整合性に関わる必修事項。\n(DR2-002) §6.3 サンプルコードの『expandedPairIds / setExpandedPairIds』が useConversationHistory.ts の実 I/F（expandedPairs Set + toggleExpand のみ、bulk setter なし）と不一致。実装着手前に解決が必要。\n\n【Should Fix 8件】\n(DR2-003) §11.3『Issue #47 を踏襲』の表現と、両 Hook の本質的非対称性（containerRef あり/なし、DOM 操作責務）の説明不足。\n(DR2-004) DEBOUNCE_MS (300) / MIN_QUERY_LENGTH (2) の共通化が DR1-006 で未対応。useTerminalSearch.ts の export 追加が必要。\n(DR2-005) Issue 受入条件『fallback overlay スタイルの区別』が §4.1 / §7 で未対応（背景色がハードコード）。\n(DR2-006) 用語『matchPositions / MatchPosition / localIndex / currentIndex』の 3 階層多重定義の整理。\n(DR2-007) §9.3.2 のモック実装パターンが既存 terminal-highlight.test.ts と異なる（Object.defineProperty vs spread）。\n(DR2-008) Issue 受入条件『ConversationPairCard render 回数を Profiler で確認』が自動テストへ落とし込めない（vi.fn ラップによる spy 戦略の明文化が必要）。\n(DR2-009) §14 マッピング表の欠落行（ドキュメント更新、#168/#701/#485 個別マッピング）。\n(DR2-010) §10/§15/§15.1 で『rename import + 再 export』vs『rename import のみ』の揺れ。\n\n【Nice to Have 2件】\n(DR2-011) DR1-001 と DR1-010 の将来マイグレーション戦略の関係性が暗黙的。\n(DR2-012) §4.2 と §15 で『effect 宣言順序』の具体的指示が分散。\n\n総合評価: Must Fix 2 件（特に DR2-001）はオフセット計算の正確性に関わる必修事項で、自動展開のみでは完全解消されない設計上の隙間がある。DR2-002 は実装着手時に確実に発覚するため早期解決が望ましい。他は設計書の追記・整理で対応可能であり、Stage 2 通過後 Stage 3（影響範囲）/ Stage 4（セキュリティ）でさらに深掘りすることを推奨。"
+}

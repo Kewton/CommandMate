@@ -220,7 +220,10 @@ const UserMessageSection = memo(function UserMessageSection({
         <span className="text-xs font-medium text-blue-400">You</span>
         <span className="text-xs text-gray-500">{formattedTime}</span>
       </div>
-      <div className="text-sm text-gray-200 whitespace-pre-wrap break-words">
+      <div
+        data-message-id={message.id}
+        className="text-sm text-gray-200 whitespace-pre-wrap break-words"
+      >
         <MessageContent content={message.content} onFilePathClick={onFilePathClick} />
       </div>
       {onInsertToMessage && (
@@ -298,7 +301,10 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
           </span>
         )}
       </div>
-      <div className="text-sm text-gray-200 whitespace-pre-wrap break-words [word-break:break-word] max-w-full overflow-x-hidden">
+      <div
+        data-message-id={message.id}
+        className="text-sm text-gray-200 whitespace-pre-wrap break-words [word-break:break-word] max-w-full overflow-x-hidden"
+      >
         <MessageContent content={displayContent} onFilePathClick={onFilePathClick} />
         {!isExpanded && isTruncated && (
           <span className="text-gray-500">...</span>

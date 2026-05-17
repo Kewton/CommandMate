@@ -20,8 +20,21 @@ import {
 /** Maximum number of matches to track (prevents UI freeze on large output) */
 export const TERMINAL_SEARCH_MAX_MATCHES = 500;
 
-/** Debounce delay for search input */
-const DEBOUNCE_MS = 300;
+/**
+ * Debounce delay for search input (ms).
+ * [Issue #716] Exported as SEARCH_DEBOUNCE_MS for shared use with useHistorySearch.
+ */
+export const SEARCH_DEBOUNCE_MS = 300;
+
+/**
+ * Minimum query length to trigger search (DoS prevention).
+ * [Issue #716] Exported as SEARCH_MIN_QUERY_LENGTH for shared use with useHistorySearch.
+ * SEC-TS-004: Minimum 2-char query enforced.
+ */
+export const SEARCH_MIN_QUERY_LENGTH = 2;
+
+/** Debounce delay (private alias retained for backward-compat readability) */
+const DEBOUNCE_MS = SEARCH_DEBOUNCE_MS;
 
 export interface UseTerminalSearchOptions {
   /** Current terminal output text (used to detect output changes) */
@@ -76,7 +89,7 @@ export function useTerminalSearch({
    */
   const findMatches = useCallback(
     (searchQuery: string): { positions: MatchPosition[]; capped: boolean } => {
-      if (searchQuery.length < 2 || !containerRef.current) {
+      if (searchQuery.length < SEARCH_MIN_QUERY_LENGTH || !containerRef.current) {
         return { positions: [], capped: false };
       }
 
@@ -180,7 +193,7 @@ export function useTerminalSearch({
   // Note: isOpen is intentionally NOT in deps to avoid firing when search opens
   // (debounce handles initial search after openSearch + setQuery)
   useEffect(() => {
-    if (debouncedQueryRef.current.length < 2) return;
+    if (debouncedQueryRef.current.length < SEARCH_MIN_QUERY_LENGTH) return;
     runSearch(debouncedQueryRef.current);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [output, runSearch]);
