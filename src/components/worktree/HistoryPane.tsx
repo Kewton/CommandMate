@@ -113,12 +113,12 @@ function EmptyState() {
 // ============================================================================
 
 /**
- * Escape a value for safe inclusion inside a double-quoted attribute selector.
- * Message IDs are UUIDs in practice, but we still escape defensively to avoid
- * any selector injection in case the id format ever changes.
+ * Locate the DOM element for a given message id within the scroll container.
+ * Uses native `CSS.escape` so the selector is safe even if message ids ever
+ * stop being plain UUIDs (defensive).
  */
-function escapeAttrValue(value: string): string {
-  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+function findMessageElement(container: Element, messageId: string): Element | null {
+  return container.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
 }
 
 /** Reverse-index search hits to the pair IDs that own them. */
@@ -273,23 +273,20 @@ export const HistoryPane = memo(function HistoryPane({
       return;
     }
 
+    let currentMatchElement: HTMLElement | null = null;
     for (const match of matchPositions) {
-      const el = container.querySelector(
-        `[data-message-id="${escapeAttrValue(match.messageId)}"]`
-      );
+      const el = findMessageElement(container, match.messageId);
       if (!el) continue;
-      const localIdx =
-        currentMatch?.messageId === match.messageId ? currentMatch.localIndex : -1;
+      const isCurrent = currentMatch?.messageId === match.messageId;
+      const localIdx = isCurrent ? currentMatch.localIndex : -1;
       applyHistoryHighlights(el, match.ranges, localIdx);
+      if (isCurrent && el instanceof HTMLElement) {
+        currentMatchElement = el;
+      }
     }
 
-    if (currentMatch) {
-      const el = container.querySelector(
-        `[data-message-id="${CSS.escape(currentMatch.messageId)}"]`
-      );
-      if (el && typeof (el as HTMLElement).scrollIntoView === 'function') {
-        (el as HTMLElement).scrollIntoView({ block: 'center', behavior: 'smooth' });
-      }
+    if (currentMatchElement && typeof currentMatchElement.scrollIntoView === 'function') {
+      currentMatchElement.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
 
     return () => {

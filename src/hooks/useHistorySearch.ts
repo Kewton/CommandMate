@@ -181,6 +181,14 @@ export function useHistorySearch({
     [matchPositions, currentIndex]
   );
 
+  /** Cancel any pending debounced search. Idempotent. */
+  const clearDebounceTimer = useCallback(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+  }, []);
+
   /** Execute search synchronously using the latest messages snapshot. */
   const runSearch = useCallback((searchQuery: string) => {
     const { positions, capped } = findMatches(messagesRef.current, searchQuery);
@@ -192,17 +200,14 @@ export function useHistorySearch({
   /** Schedule a debounced search, skipping while IME composition is active. */
   const scheduleSearch = useCallback(
     (q: string) => {
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-        debounceRef.current = null;
-      }
+      clearDebounceTimer();
       debouncedQueryRef.current = q;
       if (composingRef.current) return;
       debounceRef.current = setTimeout(() => {
         runSearch(q);
       }, SEARCH_DEBOUNCE_MS);
     },
-    [runSearch]
+    [clearDebounceTimer, runSearch]
   );
 
   const setQuery = useCallback(
@@ -224,11 +229,8 @@ export function useHistorySearch({
     setMatchPositions([]);
     setCurrentIndex(0);
     setIsAtMaxMatches(false);
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-      debounceRef.current = null;
-    }
-  }, []);
+    clearDebounceTimer();
+  }, [clearDebounceTimer]);
 
   const nextMatch = useCallback(() => {
     setCurrentIndex((prev) => {
@@ -246,23 +248,22 @@ export function useHistorySearch({
 
   const onCompositionStart = useCallback(() => {
     composingRef.current = true;
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-      debounceRef.current = null;
-    }
-  }, []);
+    clearDebounceTimer();
+  }, [clearDebounceTimer]);
 
   const onCompositionEnd = useCallback(() => {
     composingRef.current = false;
-    // Resume debounce using whatever query was last typed.
+    // Resume debounce using whatever query was last typed. Short queries are
+    // skipped here as an optimization: findMatches would short-circuit anyway,
+    // but avoiding the timer keeps the test clock and event loop quieter.
     const q = debouncedQueryRef.current;
     if (q.length >= SEARCH_MIN_QUERY_LENGTH) {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
+      clearDebounceTimer();
       debounceRef.current = setTimeout(() => {
         runSearch(q);
       }, SEARCH_DEBOUNCE_MS);
     }
-  }, [runSearch]);
+  }, [clearDebounceTimer, runSearch]);
 
   // Re-run search when the messages payload changes substantively (length
   // / last id / last timestamp). Stable polling payloads do not trigger.
@@ -279,11 +280,10 @@ export function useHistorySearch({
   // Unmount cleanup (debounce + ref scrubbing for privacy).
   useEffect(() => {
     return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = null;
+      clearDebounceTimer();
       debouncedQueryRef.current = '';
     };
-  }, []);
+  }, [clearDebounceTimer]);
 
   return {
     isOpen,
