@@ -1,0 +1,20 @@
+{
+  "issue_number": "716",
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "previous_review_path": "dev-reports/issue/716/issue-review/stage1-review-result.json",
+  "previous_apply_path": "dev-reports/issue/716/issue-review/stage2-apply-result.json",
+  "hypothesis_verification_path": "dev-reports/issue/716/issue-review/hypothesis-verification.md",
+  "output_path": "dev-reports/issue/716/issue-review/stage3-review-result.json",
+  "review_focus": [
+    "変更ファイル候補の網羅性",
+    "既存テストへの影響",
+    "他Issue/機能との干渉（Issue #168 showArchived, #701 historyDisplayLimit, #47 TerminalSearch）",
+    "後方互換性（既存 props、I/F）",
+    "パフォーマンス影響（履歴250件×ポーリング更新時）",
+    "セキュリティ影響（XSS、ReDoS）",
+    "アクセシビリティ影響"
+  ]
+}

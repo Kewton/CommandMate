@@ -1,0 +1,18 @@
+{
+  "issue_number": "716",
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "hypothesis_verification_path": "dev-reports/issue/716/issue-review/hypothesis-verification.md",
+  "original_issue_path": "dev-reports/issue/716/issue-review/original-issue.json",
+  "output_path": "dev-reports/issue/716/issue-review/stage1-review-result.json",
+  "review_focus": [
+    "Issueの記載内容の整合性・正確性",
+    "実装方針の妥当性（特に仮説検証で Rejected された Markdown レンダリング前提）",
+    "受入条件の明確性・テスト可能性",
+    "既存実装（TerminalSearchBar/useTerminalSearch/terminal-highlight.ts）との整合性",
+    "命名・I/F定義の明確性",
+    "用語の統一"
+  ]
+}

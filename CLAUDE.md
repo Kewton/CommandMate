@@ -226,7 +226,7 @@ tests/
 | `src/lib/link-utils.ts` | リンク種別判定・相対パス解決・hrefサニタイズ（Issue #505） |
 | `src/lib/url-path-encoder.ts` | ファイルパスURLエンコード |
 | `src/lib/file-search.ts` | ファイル内容検索 |
-| `src/lib/terminal-highlight.ts` | CSS Custom Highlight API ラッパー（Issue #47）XSS安全なターミナルハイライト |
+| `src/lib/terminal-highlight.ts` | CSS Custom Highlight API ラッパー（Issue #47）XSS安全なターミナルハイライト。Issue #716で名前空間分離（HighlightNamespace型、HISTORY_SEARCH_NAMESPACE、applyHistoryHighlights/clearHistoryHighlights追加） |
 | `src/lib/file-tree.ts` | ディレクトリツリー構造生成 |
 | `src/lib/git/git-utils.ts` | Git情報取得・コミット履歴/diff取得（Issue #447）、getCommitsByDateRange/collectRepositoryCommitLogs追加（Issue #627） |
 | `src/types/git.ts` | Git関連型定義（CommitInfo, ChangedFile, GitLogResponse等）（Issue #447）、CommitLogEntry/RepositoryCommitLogs追加（Issue #627） |
@@ -246,9 +246,10 @@ tests/
 | `src/components/worktree/LeftPaneTabSwitcher.tsx` | 左パネルタブ切替UI（History/Files/CMATE）、折りたたみ◀ボタン追加（Issue #688） |
 | `src/components/worktree/AgentSettingsPane.tsx` | エージェント選択UI |
 | `src/components/worktree/MessageInput.tsx` | メッセージ入力（下書き永続化対応、pendingInsertText外部挿入対応）（Issue #485） |
-| `src/components/worktree/ConversationPairCard.tsx` | 会話ペアカード（ユーザー/アシスタントメッセージ表示、挿入ボタン）（Issue #485） |
+| `src/components/worktree/ConversationPairCard.tsx` | 会話ペアカード（ユーザー/アシスタントメッセージ表示、挿入ボタン）（Issue #485）。Issue #716でMessageContent親divに data-message-id 付与（memo維持、props追加なし） |
 | `src/components/worktree/MemoCard.tsx` | メモカード（メモ表示・コピー・挿入ボタン）（Issue #485） |
-| `src/components/worktree/HistoryPane.tsx` | 履歴ペイン（会話履歴表示、onInsertToMessage伝播）（Issue #485） |
+| `src/components/worktree/HistoryPane.tsx` | 履歴ペイン（会話履歴表示、onInsertToMessage伝播）（Issue #485）。Issue #716でメッセージテキスト検索機能（検索アイコン+HistorySearchBar、autoExpandedIds自動展開、useLayoutEffect副作用でapplyHistoryHighlights、searchStartScrollPositionRef scroll復帰、worktreeId/activeCliTab変化でcloseSearch） |
+| `src/components/worktree/HistorySearchBar.tsx` | 履歴内テキスト検索バーUI（Issue #716）TerminalSearchBar踏襲、role="search"、aria-live、件数表示・前/次ナビ・Esc閉じ、IME composition handler |
 | `src/components/worktree/MemoPane.tsx` | メモペイン（メモ一覧表示、onInsertToMessage伝播）（Issue #485） |
 | `src/components/worktree/NotesAndLogsPane.tsx` | Notes&Logsペイン（メモ・ログタブ、onInsertToMessage伝播）（Issue #485） |
 | `src/components/worktree/WorktreeDetailSubComponents.tsx` | Worktree詳細サブコンポーネント（MobileContent等、onInsertToMessage伝播）（Issue #485） |
@@ -276,7 +277,8 @@ tests/
 | `src/hooks/useImageAttachment.ts` | 画像添付カスタムフック（バリデーション・アップロード・状態管理・resetAfterSend）（Issue #474） |
 | `src/hooks/useAutoYes.ts` | Auto-Yesクライアント側フック |
 | `src/hooks/useFileSearch.ts` | 検索状態管理フック |
-| `src/hooks/useTerminalSearch.ts` | ターミナル内テキスト検索フック（Issue #47）debounce 300ms、最大500件、最小2文字 |
+| `src/hooks/useTerminalSearch.ts` | ターミナル内テキスト検索フック（Issue #47）debounce 300ms、最大500件、最小2文字。Issue #716で SEARCH_DEBOUNCE_MS/SEARCH_MIN_QUERY_LENGTH を共通定数として追加export |
+| `src/hooks/useHistorySearch.ts` | 履歴メッセージテキスト検索フック（Issue #716）messages入力、HistoryMatch[]（messageId単位）、currentMatch{messageId,localIndex}解決、debounce 300ms・最小2文字・最大500件、IME composition aware、messages fingerprint memo |
 | `src/hooks/useFragmentLogin.ts` | フラグメントベース自動ログイン |
 | `src/hooks/useReportGeneration.ts` | レポート生成モード管理フック（GenerationMode: none/template/custom、テンプレート選択・userInstruction管理）（Issue #618） |
 | `src/app/api/worktrees/[id]/terminal/route.ts` | ターミナルコマンド送信API（Copilot全コマンドをsendMessage()に委譲）（Issue #559） |

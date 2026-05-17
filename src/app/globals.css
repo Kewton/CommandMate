@@ -137,6 +137,24 @@
   color: black;
 }
 
+/* [Issue #716] CSS Custom Highlight API - History text search highlighting */
+/* Blue palette so it visually disambiguates from the terminal (orange) namespace */
+::highlight(history-search) {
+  background-color: rgba(59, 130, 246, 0.4);
+  color: inherit;
+}
+
+::highlight(history-search-current) {
+  background-color: rgba(59, 130, 246, 0.8);
+  color: white;
+}
+
+#history-search-fallback-overlay {
+  background-color: rgba(59, 130, 246, 0.6);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
 @layer utilities {
   .pt-safe {
     padding-top: env(safe-area-inset-top, 0px);

@@ -1,0 +1,60 @@
+{
+  "issue_number": 716,
+  "issue_title": "feat: Worktree詳細 HistoryPaneにメッセージテキスト検索機能を追加",
+  "branch": "feature/716-worktree",
+  "design_policy_path": "dev-reports/design/issue-716-history-search-design-policy.md",
+  "work_plan_path": "dev-reports/issue/716/work-plan.md",
+  "target_coverage": 85,
+  "acceptance_criteria_summary": [
+    "HistoryPaneヘッダーに検索アイコンボタンを配置、トグルでHistorySearchBarを表示",
+    "検索クエリはChatMessage.contentに対して部分一致（大文字小文字区別なし）",
+    "ヒットしたメッセージ内の該当文字列をCSS Custom Highlight APIでハイライト（名前空間: history-search）",
+    "件数表示N/M、前/次ナビゲーション、Esc で閉じる",
+    "最小2文字以上、debounce 300ms、最大500件",
+    "次/前ボタンで該当箇所が画面中央付近にscrollIntoView",
+    "折りたたまれた会話ペアにヒットがある場合、自動展開（autoExpandedIds）",
+    "アクセシビリティ: role='search', aria-live='polite', aria-label",
+    "IME composition中はdebounceタイマーをリセットしない",
+    "検索状態はworktreeId/CLIタブ/kill-session切替でクリア",
+    "TerminalPane検索と名前空間分離で共存",
+    "セキュリティ: 検索クエリをログ出力しない、unmount/worktreeId切替時に完全クリア",
+    "パフォーマンス: 250件 × 5文字で50ms以内"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: terminal-highlight.ts にラッパー関数追加（applyHistoryHighlights / clearHistoryHighlights / HISTORY_SEARCH_NAMESPACE / HighlightNamespace export）。既存 applyTerminalHighlights / clearTerminalHighlights のシグネチャは完全維持。内部は applyHighlightsInternal / clearHighlightsInternal に共通化",
+    "Task 1.2: useTerminalSearch.ts で SEARCH_DEBOUNCE_MS=300, SEARCH_MIN_QUERY_LENGTH=2 を追加export（既存のTERMINAL_SEARCH_MAX_MATCHESに加える）",
+    "Task 2.1: tests/unit/hooks/useHistorySearch.test.ts 新規作成（RED）",
+    "Task 2.2: tests/unit/components/worktree/HistorySearchBar.test.tsx 新規作成（RED）",
+    "Task 2.3: tests/unit/components/HistoryPane.test.tsx 既存改修（RED追加）",
+    "Task 2.4: tests/unit/lib/terminal-highlight.test.ts 既存改修（RED追加）",
+    "Task 3.1: src/hooks/useHistorySearch.ts 新規実装（GREEN）。I/F: messages入力、{isOpen, query, matchPositions, currentIndex, isAtMaxMatches, currentMatch, openSearch, closeSearch, setQuery, onCompositionStart, onCompositionEnd, nextMatch, prevMatch} return。findMatches内部実装、debounce、IME aware",
+    "Task 3.2: src/components/worktree/HistorySearchBar.tsx 新規実装。TerminalSearchBarのスタイル踏襲、role='search', aria属性、自動フォーカス, Esc close",
+    "Task 3.3: src/components/worktree/ConversationPairCard.tsx 改修。UserMessageSection/AssistantMessageItemのMessageContent親div に data-message-id={message.id} を付与（他は変更なし）",
+    "Task 3.4: src/components/worktree/HistoryPane.tsx 改修。検索アイコンボタン追加（aria-label動的）、HistorySearchBar組み込み、useHistorySearch呼出、autoExpandedIds管理、useLayoutEffect副作用でapplyHistoryHighlights呼出、scrollIntoView、searchStartScrollPositionRef管理",
+    "Task 3.5: src/app/globals.css に ::highlight(history-search) / ::highlight(history-search-current) / #history-search-fallback-overlay スタイル追加（青系、WCAG AA）"
+  ],
+  "key_design_constraints": [
+    "OCP: terminal-highlight.tsの既存applyTerminalHighlights/clearTerminalHighlightsは完全維持",
+    "memo維持: ConversationPairCardへのprops追加なし（data-message-idのみ）",
+    "useConversationHistory無改修: HistoryPane内部のautoExpandedIdsで対応",
+    "truncate対応: ヒット含むpairを事前展開してからハイライト適用（effect順序厳守）",
+    "Effect順序: (1)scroll保存 → (2)scroll復元(検索アクティブ時スキップ) → (3)autoExpandedIds計算 → (4)ハイライト適用",
+    "messages依存配列最適化: length + last.id/timestamp で再計算抑制",
+    "クリーンアップ: unmount/worktreeId切替時にquery/matchPositions/debounceRef完全クリア"
+  ],
+  "files_to_create": [
+    "src/hooks/useHistorySearch.ts",
+    "src/components/worktree/HistorySearchBar.tsx",
+    "tests/unit/hooks/useHistorySearch.test.ts",
+    "tests/unit/components/worktree/HistorySearchBar.test.tsx"
+  ],
+  "files_to_modify": [
+    "src/lib/terminal-highlight.ts",
+    "src/hooks/useTerminalSearch.ts",
+    "src/components/worktree/HistoryPane.tsx",
+    "src/components/worktree/ConversationPairCard.tsx",
+    "src/app/globals.css",
+    "tests/unit/components/HistoryPane.test.tsx",
+    "tests/unit/lib/terminal-highlight.test.ts"
+  ]
+}
