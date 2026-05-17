@@ -1,0 +1,124 @@
+{
+  "stage": 2,
+  "stage_name": "Stage 2: 整合性反映",
+  "issue_number": "716",
+  "status": "success",
+  "design_doc_path": "dev-reports/design/issue-716-history-search-design-policy.md",
+  "design_doc_version": "1.2",
+  "applied_findings": [
+    {
+      "finding_id": "DR2-001",
+      "severity": "Must Fix",
+      "applied": true,
+      "applied_at": "§4.2 (Effect 宣言順序の規約), §6.3, §10 (折りたたみ挙動 / 検索中の AssistantMessageItem truncate), §14, §15 ステップ 6, §15.1 Stage 2 Must Fix チェックリスト",
+      "summary": "AssistantMessageItem の truncate 時に textContent !== message.content となる DR1-007 不変条件の欠陥を、HistoryPane 内 `autoExpandedIds: Set<string>` 独自管理により解消。ConversationPairCard には `isExpanded={isManuallyExpanded(pair.id) || autoExpandedIds.has(pair.id)}` を渡して検索アクティブ中の collapsed アシスタントメッセージを全文表示に強制。useLayoutEffect の宣言順序を (1) scroll 保存 → (2) scroll 復元 → (3) autoExpandedIds 計算 → (4) ハイライト適用（依存配列に autoExpandedIds を含む）と規約化。専用要素分離 `<span data-message-text>` は将来改善余地として §10 / §15 に記録。"
+    },
+    {
+      "finding_id": "DR2-002",
+      "severity": "Must Fix",
+      "applied": true,
+      "applied_at": "§4.2 サンプルコード, §6.3 全面書き換え, §10 折りたたみ挙動, §11.1 SOLID I, §15.1 Stage 2 Must Fix チェックリスト",
+      "summary": "useConversationHistory.ts の I/F・実装を完全に無改修とし（解決策B採用）、HistoryPane 内で autoExpandedIds: Set<string> を独自管理。expandStateSnapshotRef は不要となり、検索終了時の setAutoExpandedIds(new Set()) のみで元の手動展開状態が自動復元される。computeMatchedPairIds(matchPositions, pairs) の参考実装も追加。"
+    },
+    {
+      "finding_id": "DR2-003",
+      "severity": "Should Fix",
+      "applied": true,
+      "applied_at": "§6.1 設計判断, §11.3 既存パターン踏襲",
+      "summary": "useHistorySearch が containerRef を取らない設計判断を §6.1 に明記。§11.3 で Issue #47 踏襲を「3層構造（UI/Hook/highlight）は同じだが、Hook の I/F と DOM 操作責務は両 Hook で構造的に非対称」と明確化。TerminalPane = 1 つの大きな textContent ブロック vs HistoryPane = messageId 単位の複数要素 という構造差で理由を説明。"
+    },
+    {
+      "finding_id": "DR2-004",
+      "severity": "Should Fix",
+      "applied": true,
+      "applied_at": "§3 技術選定表, §6.1, §10 定数共通化, §11.2 DRY, §15 ステップ 2 (新規), §15.1",
+      "summary": "useTerminalSearch.ts に DEBOUNCE_MS (300) / MIN_QUERY_LENGTH (2) を export 追加（既存マジックナンバー定数化）。useHistorySearch.ts で rename import で共有。TERMINAL_SEARCH_MAX_MATCHES と合わせて 3 定数を SSOT 化。HISTORY_SEARCH_MAX_MATCHES のみ HistorySearchBar 用に再 export。"
+    },
+    {
+      "finding_id": "DR2-005",
+      "severity": "Should Fix",
+      "applied": true,
+      "applied_at": "§4.1 HighlightNamespace 型 + 採用判定, §7.1 globals.css, §10 定数共通化, §15 ステップ 1, §15.1",
+      "summary": "HighlightNamespace 型に fallbackOverlayBgColor: string を追加。TERMINAL_SEARCH_NAMESPACE は既存色 rgba(255,165,0,0.6)（オレンジ系）、HISTORY_SEARCH_NAMESPACE は rgba(96,165,250,0.5)（青系）で同画面同時検索時の視覚的区別を実現。showFallbackOverlay は namespace.fallbackOverlayBgColor を参照する形に改修。globals.css の ID セレクタ上書き例も追記。"
+    },
+    {
+      "finding_id": "DR2-006",
+      "severity": "Should Fix",
+      "applied": true,
+      "applied_at": "§5.0 用語と型対応表（新設）, §15.1",
+      "summary": "§5 冒頭に「用語と型対応表」を新設し、MatchPosition / HistoryMatch / matchPositions / matchCount / currentIndex / currentMatch / localIndex の 7 用語と意味・型を明確化。Issue 受入条件における『matchPositions』が HistoryMatch[] 全体を指すことも明記。"
+    },
+    {
+      "finding_id": "DR2-007",
+      "severity": "Should Fix",
+      "applied": true,
+      "applied_at": "§9.3.2 Vitest モック実装方針, §15 ステップ 8, §15.1",
+      "summary": "モック実装パターンを既存 tests/unit/lib/terminal-highlight.test.ts の Object.defineProperty(globalThis, 'CSS', { value: { highlights: new Map() }, configurable: true, writable: true }) パターンに完全統一。afterEach での delete も明示。"
+    },
+    {
+      "finding_id": "DR2-008",
+      "severity": "Should Fix",
+      "applied": true,
+      "applied_at": "§9.2.1 ConversationPairCard の memo 維持検証（新設）, §15 ステップ 8, §15.1",
+      "summary": "初版採用方針として React DevTools Profiler による手動確認を採用。将来改善として vi.spyOn + React.memo の再レンダ判定、または renderCount カウンタ専用テストラッパーの 2 案を §9.2.1 に明記。autoExpandedIds 変化によるマッチ pair の再 render は仕様として許容。"
+    },
+    {
+      "finding_id": "DR2-009",
+      "severity": "Should Fix",
+      "applied": true,
+      "applied_at": "§7.2 z-index 関係（新設）, §11.3 既存パターン踏襲を Issue 別展開, §14 マッピング表に 4 行追加, §15.1",
+      "summary": "§14 マッピング表に「ドキュメント更新 → §13」「他Issue相互作用 (#168 showArchived) → §5.2/§6.1/§11.3」「他Issue相互作用 (#701 historyDisplayLimit) → §6.1/§8.3/§11.3」「他Issue相互作用 (#485 onInsertToMessage) → §7.2/§11.3」「AssistantMessageItem truncate 整合性 → §4.2/§6.3」の 5 行を追加。§11.3 では Issue 別に Issue #168/#701/#485 の挙動詳細を展開。"
+    },
+    {
+      "finding_id": "DR2-010",
+      "severity": "Should Fix",
+      "applied": true,
+      "applied_at": "§10 定数共通化, §11.2 DRY, §15 ステップ 1 / ステップ 3, §15.1",
+      "summary": "「既存 export 関数のシグネチャ・関数名は変更せず、新規 export 関数を追加する」表現を §10 / §11.2 / §15 / §15.1 で統一。useHistorySearch.ts は rename import + HISTORY_SEARCH_MAX_MATCHES のみ再 export（DEBOUNCE_MS / MIN_QUERY_LENGTH は内部利用のみで再 export 不要）の方針をコード例付きで明確化。"
+    },
+    {
+      "finding_id": "DR2-011",
+      "severity": "Nice to Have",
+      "applied": true,
+      "applied_at": "§4.1 トレードオフ末尾, §10 (DR1-010 関連行と相互参照), §15.1",
+      "summary": "第3 namespace（file-search / log-search 等）追加時のマイグレーション戦略 (i) terminal-highlight.ts のまま追加 / (ii) search-highlight.ts へリネーム + 集約 / (iii) namespace ごと分割 + highlight-common.ts に切り出し の 3 案を §4.1 末尾に追記。Issue #716 では (i) の暫定形態を採用し、第3 namespace 登場時に再評価することを §10 DR1-010 関連行と整合して記述。"
+    },
+    {
+      "finding_id": "DR2-012",
+      "severity": "Nice to Have",
+      "applied": true,
+      "applied_at": "§4.2 Effect 宣言順序の規約（集約）, §15 ステップ 6, §15.1",
+      "summary": "Effect 宣言順序の指示を §4.2 末尾「Effect 宣言順序の規約」に集約。§15 実装順序 6. からは「Effect 宣言順序は §4.2 末尾を参照」とのみ記載し、重複を排除して指示の正典を §4.2 に一本化。"
+    }
+  ],
+  "must_fix_applied": 2,
+  "should_fix_applied": 8,
+  "nice_to_have_applied": 2,
+  "must_fix_total": 2,
+  "should_fix_total": 8,
+  "nice_to_have_total": 2,
+  "sections_updated": [
+    "§3 技術選定表",
+    "§4.1 Strategy パターン（HighlightNamespace 型, fallbackOverlayBgColor, マイグレーション戦略）",
+    "§4.2 副作用パターン（DR2-001 / DR2-002 / DR2-012 Effect 宣言順序の規約集約 + サンプルコード書き換え）",
+    "§5.0 用語と型対応表（新設）",
+    "§6.1 useHistorySearch 設計判断（containerRef なし、DEBOUNCE_MS / MIN_QUERY_LENGTH 共有）",
+    "§6.3 ConversationPairCard 自動展開（DR2-002 解決策B書き換え）",
+    "§7.1 globals.css（新設）",
+    "§7.2 z-index 関係（新設）",
+    "§9.2 統合テスト + §9.2.1 ConversationPairCard memo 維持検証（新設）",
+    "§9.3.2 Vitest モック実装方針（Object.defineProperty 統一）",
+    "§10 決定事項表（折りたたみ挙動 / 検索中 truncate / 定数共通化エントリ書き換え）",
+    "§11.1 SOLID 原則（I 原則に DR2-002 追加）",
+    "§11.2 DRY（DR2-004 / DR2-010 統合）",
+    "§11.3 既存パターン踏襲（Issue 別展開）",
+    "§14 受入条件マッピング表（5 行追加）",
+    "§15 実装順序（10 ステップに再構成、useTerminalSearch.ts 定数 export 追加を新規ステップ 2 として明示）",
+    "§15.1 実装チェックリスト（Stage 2 Must Fix 2 / Should Fix 8 / Nice to Have 2 項目追加）",
+    "§15.3 Stage 2 レビュー反映サマリー表（新設）",
+    "ヘッダ部分（バージョン 1.2、Stage 2 反映ステータス、主な変更点）"
+  ],
+  "skipped": [],
+  "doc_updated_at": "2026-05-17T00:00:00Z",
+  "doc_diff_summary": "Stage 2 整合性レビュー findings 全 12 件を設計方針書 v1.2 に反映。Must Fix 2 件（DR2-001 AssistantMessageItem truncate オフセット不整合 / DR2-002 useConversationHistory I/F 不一致）は HistoryPane 内 autoExpandedIds: Set<string> 独自管理という単一の解決策で同時解消。useConversationHistory.ts は完全無改修。Should Fix 8 件は (a) HighlightNamespace.fallbackOverlayBgColor 追加（DR2-005）、(b) useTerminalSearch.ts に DEBOUNCE_MS / MIN_QUERY_LENGTH の export 追加（DR2-004）、(c) §5.0 用語と型対応表新設（DR2-006）、(d) §9.3 モック実装の Object.defineProperty 統一（DR2-007）、(e) §9.2.1 ConversationPairCard memo 維持検証の手動 Profiler 採用方針（DR2-008）、(f) §14 マッピング表に 5 行追加（DR2-009）、(g) §11.3 Issue 別展開（DR2-003 / DR2-009）、(h) §10 / §15 で rename import + 再 export 表現統一（DR2-010）、で対応。Nice to Have 2 件は §4.1 末尾のマイグレーション戦略追記（DR2-011）と §4.2 末尾 Effect 宣言順序の規約への集約（DR2-012）。§15.1 に Stage 2 用チェックリスト 18 項目を追加し、§15.3 にレビュー反映サマリー表を新設。ソースコードは変更していない。"
+}

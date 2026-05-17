@@ -1,0 +1,48 @@
+{
+  "bug_id": "709-20260515_211219",
+  "issue_number": 709,
+  "issue_title": "perf(sidebar): useWorktreesCache の二重インスタンス化を解消（Provider 経由に統一）",
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/709",
+  "branch": "feature/709-worktree",
+  "phase_results": {
+    "phase_1_investigation": {
+      "result_file": "dev-reports/bug-fix/709-20260515_211219/investigation-result.json",
+      "summary": "useWorktreesCache フックは Context を使わないため複数呼び出しで独立インスタンスが生成される。Sessions ページが Provider と独立に直接呼び出していることが二重ポーリングの原因。",
+      "severity": "high"
+    },
+    "phase_2_proposal": {
+      "selected_action": "対策案1: Provider に Context を導入し Sessions ページから消費"
+    },
+    "phase_3_work_plan": {
+      "context_file": "dev-reports/bug-fix/709-20260515_211219/work-plan-context.json"
+    },
+    "phase_4_tdd_fix": {
+      "result_file": "dev-reports/bug-fix/709-20260515_211219/tdd-fix-result.json",
+      "summary": "TDD Red-Green-Refactor サイクルを2回実施。WorktreesCacheProvider に Context を実装し、Sessions ページを useWorktreesCacheContext 化。",
+      "coverage": {
+        "WorktreesCacheProvider.tsx": "100%"
+      }
+    },
+    "phase_5_acceptance": {
+      "result_file": "dev-reports/bug-fix/709-20260515_211219/acceptance-result.json",
+      "summary": "T1〜T8 全シナリオ合格。Issue 受入条件 4 件全て達成。",
+      "verdict": "合格"
+    }
+  },
+  "modified_files": [
+    "src/components/providers/WorktreesCacheProvider.tsx",
+    "src/app/sessions/page.tsx",
+    "tests/unit/SessionsPage.test.tsx",
+    "tests/unit/components/providers/WorktreesCacheProvider.test.tsx (新規)"
+  ],
+  "verification_results": {
+    "lint": "0 errors",
+    "tsc": "0 errors",
+    "test_unit": "6496 passed / 7 skipped / 0 failed (344 files)"
+  },
+  "next_steps": [
+    "PR 作成 (feature/709-worktree → develop)",
+    "コードレビュー依頼",
+    "develop マージ後の動作確認 (ブラウザ DevTools Network で /api/worktrees ポーリング回数を実機検証)"
+  ]
+}

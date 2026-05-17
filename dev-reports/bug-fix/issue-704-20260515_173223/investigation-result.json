@@ -1,0 +1,215 @@
+{
+  "status": "completed",
+  "issue_number": 704,
+  "investigation_summary": {
+    "issue_description": "Claude Code v2.1.142 で表示される『Use skill \"X\"?』承認プロンプトが detectPrompt / detectMultipleChoicePrompt で検出されない。current-output API が isPromptWaiting=false / promptData=null を返し、UI 上で Yes/No ウィンドウが表示されず Auto-Yes も発火しない。",
+    "error_type": "prompt_detection_false_negative (multiple_choice ロジックの誤判定)",
+    "affected_files": [
+      "src/lib/detection/prompt-detect-multiple-choice.ts",
+      "src/lib/detection/prompt-detector.ts (呼び出し元)",
+      "src/lib/detection/status-detector.ts (呼び出し元・サマリ行が thinking 判定を誘発する副作用あり)",
+      "src/lib/auto-yes-poller.ts (同一の detectPrompt を使用)",
+      "src/app/api/worktrees/[id]/current-output/route.ts (API レスポンス組み立て)"
+    ],
+    "reproduction_confirmed": true,
+    "preliminary_analysis_verdict": "概ね正しい。NORMAL_OPTION_PATTERN による『… +1 pending』誤マッチが Layer 4 (options.length < 2) で no_prompt 返却を起こす流れはコード上の挙動と完全に一致。ただし副次仮説 B（Herding…）はプロンプト検出の主因ではないが、検出失敗時の二次的影響として『thinking_indicator』を誘発する副作用が確認されたため、現象論として無視できない（後述）。"
+  },
+  "confirmed_root_cause": {
+    "primary": "src/lib/detection/prompt-detect-multiple-choice.ts:51 の NORMAL_OPTION_PATTERN = /^\\s*[^\\d]{0,3}(\\d+)(?:\\.(?!\\d)|\\s+)\\s*(.+)$/ が Claude v2.1.142 の Herding 中表示する『… +1 pending』『+N pending』形式のサマリー行を option 番号付きの正規オプション行として誤マッチする。",
+    "mechanism": [
+      "1. Pass 2 は effectiveEnd-1 から逆走査する (prompt-detect-multiple-choice.ts:584)。",
+      "2. 末尾にある『… +1 pending』が NORMAL_OPTION_PATTERN にマッチし、[^\\d]{0,3} が『… +』を吸収、\\d+ が『1』を、\\s+ がスペースを、(.+) が『pending』を捕捉。number=1 / label='pending' が collectedOptions に先頭追加される (prompt-detect-multiple-choice.ts:608-622)。",
+      "3. その後の逆走査で本物の『  3. No』『  2. Yes, ...』『❯ 1. Yes』が現れるが、isValidPrecedingOption(number, [{n:1}]) が number < firstNumber(=1) を要求するため (170-191行)、2, 3 は『先行 option として不正』と判定され捨てられる。1 自身も number<1 を満たさずに弾かれる。",
+      "4. 非オプション扱いに落ちた 3/2/❯1 はそれぞれ isContinuationLine / isQuestionLikeLine を通って一部は continuation、最後は questionEndIndex=i; break で終了する。",
+      "5. 結果として collectedOptions.length === 1。Layer 3 (isConsecutiveFromOne([1])) は通るが、Layer 4 (collectedOptions.length < 2) で noPromptResult(output) が返される (prompt-detect-multiple-choice.ts:704-706)。",
+      "6. これにより detectPrompt は isPrompt=false を返し、status-detector は priority 1 を通過、priority 2 (thinking) に進む。Claude の spinner 文字 U+00B7 (·) と『…』終端を含む『Esc to cancel · Tab to amend → · Herding…』が CLAUDE_THINKING_PATTERN にマッチし、status='running' / reason='thinking_indicator' が返る (status-detector.ts:311-319)。",
+      "7. current-output/route.ts:106 で isPromptWaiting=hasActivePrompt=false → API レスポンスは sessionStatus='running', promptData=null となり、Issue 本文の観測値と一致。",
+      "8. auto-yes-poller も同じ detectPrompt() の結果を見ているため、Auto-Yes も発火しない (auto-yes-poller.ts:315-335)。"
+    ],
+    "alternate_pending_count_paths": [
+      "『… +2 pending』『… +3 pending』など N>=2 のサマリー行が末尾の場合: 上記同様に number=2 などが先頭に入る → isConsecutiveFromOne([2]) が numbers[0]!==1 で false → no_prompt (Layer 3 で落ちる経路)。結論は同じく未検出。",
+      "『+1 pending』(prefix の `… ` が無い形) も [^\\d]{0,3} が省略しても先頭の `+` をスキップして同じく誤マッチする。"
+    ]
+  },
+  "code_evidence": [
+    {
+      "file": "src/lib/detection/prompt-detect-multiple-choice.ts",
+      "line": 51,
+      "snippet": "const NORMAL_OPTION_PATTERN = /^\\s*[^\\d]{0,3}(\\d+)(?:\\.(?!\\d)|\\s+)\\s*(.+)$/;",
+      "note": "[^\\d]{0,3} が `… +` を吸収し、\\s+ 分岐で period 不要マッチを許す設計。S4-001/SEC-001 等のコメントは FP 抑止を Layer 3/4/5 に委ねている前提だが、本ケースは Layer 4 を超えるための『option 番号 1 が先頭で 1 個だけ』という最悪条件を成立させる。"
+    },
+    {
+      "file": "src/lib/detection/prompt-detect-multiple-choice.ts",
+      "line": "170-191",
+      "snippet": "function isValidPrecedingOption(number, collectedOptions): boolean { ... return number < firstNumber && number >= firstNumber - 2; }",
+      "note": "誤って先頭に入った 1 がアンカーとなり、その上方の 1/2/3 をすべて『非先行』と扱って収集対象から外す。逆走査+先行検証の組合せが、末尾誤検出の影響を増幅する。"
+    },
+    {
+      "file": "src/lib/detection/prompt-detect-multiple-choice.ts",
+      "line": "584-622",
+      "snippet": "for (let i = effectiveEnd - 1; i >= scanStart; i--) { ... defaultMatch / normalMatch / isValidPrecedingOption ... }",
+      "note": "末尾起点の逆走査ロジック本体。先頭(=末尾の数字行)を信頼するため、メタデータ行除外ガード(COLLAPSED_OUTPUT_PATTERN だけ)では今回の `… +1 pending` をブロックできない。"
+    },
+    {
+      "file": "src/lib/detection/prompt-detect-multiple-choice.ts",
+      "line": 68,
+      "snippet": "const COLLAPSED_OUTPUT_PATTERN = /^\\s*\\[[^\\]]*\\d+\\s+lines?\\]/i;",
+      "note": "`[… N lines]` 形式は除外できるが、ブラケットなしの `… +N pending` / `↑ N more` / `⏵ N line above` 等は対象外。"
+    },
+    {
+      "file": "src/lib/detection/prompt-detect-multiple-choice.ts",
+      "line": "694-706",
+      "snippet": "if (!isConsecutiveFromOne(optionNumbers)) return noPromptResult(output); ... if (collectedOptions.length < 2 || ...) return noPromptResult(output);",
+      "note": "誤マッチ 1 件のみのときは Layer 3 を通過し Layer 4 (count<2) でだけ落とされる。Layer 3 を強化しても n=1 単独ケースを救えない構造的弱点。"
+    },
+    {
+      "file": "regex experimental verification",
+      "snippet": "node -e に NORMAL_OPTION_PATTERN を貼って実行",
+      "result": [
+        "`… +1 pending` → match: n=1, label='pending'",
+        "`  … +1 pending` → match: n=1, label='pending'",
+        "`+1 pending` → match: n=1, label='pending'",
+        "`… +2 pending` → match: n=2, label='pending'",
+        "`↑ 3 more` → match: n=3, label='more'",
+        "`⏵ 1 line above` → match: n=1, label='line above'",
+        "`1 file changed` → match: n=1, label='file changed'"
+      ],
+      "note": "今回の主犯 (`… +1 pending`) 以外にも同種の構造で誤マッチする Claude/Codex のメタ行候補が複数あり、ガード設計は『今回の文言』ではなく『メタデータ行クラス』として行う必要がある。"
+    }
+  ],
+  "additional_findings": {
+    "hypothesis_a_use_skill_question_extraction": {
+      "verdict": "否定。`Use skill \"multi-stage-issue-review\"?` は isQuestionLikeLine が `?` 包含で true を返す (prompt-detect-multiple-choice.ts:248)。さらに extractQuestionText は questionEndIndex から 5 行上までを連結する (407-420行) ため、本来は『Use skill ...? / Do you want to proceed?』が question として連結される。質問抽出側に追加対応は不要。",
+      "evidence": "node 検証で `Use skill \"multi-stage-issue-review\"?` を isQuestionLikeLine 相当のロジックに通すと true を返す。"
+    },
+    "hypothesis_b_herding_thinking_secondary_effect": {
+      "verdict": "プロンプト未検出の直接原因ではないが、副次的に状態を悪化させている。CLAUDE_THINKING_PATTERN = /[…spinner]\\s+.+…|esc to interrupt/ は U+00B7 (·) を spinner chars に含むため『Esc to cancel · Tab to amend → · Herding…』が thinking として true 判定される (cli-patterns.ts:33-36)。",
+      "consequence": "Layer 4 で no_prompt が返った後、status-detector の priority 2 (detectThinking) でこのフッターが thinking と判定され status='running' / sessionStatusReason='thinking_indicator' になる (status-detector.ts:311-319)。UI には Yes/No ウィンドウではなく『考え中』スピナーが出続けるという観測症状の説明になる。",
+      "action_recommendation": "プロンプト検出が直る (Solution 1 系) と priority 1 で waiting に切り替わるため副症状も解消される。Herding… パターン側を直す優先度は低い。"
+    },
+    "metadata_line_class_inventory": {
+      "claude_v2_1_x_candidates": [
+        "… +N pending",
+        "+N pending",
+        "↑ N more",
+        "↓ N more",
+        "⏵ N line above",
+        "1 file changed",
+        "12 tokens"
+      ],
+      "codex_codepaths_already_guarded": [
+        "[… N lines]",
+        "[… 12 lines] ctrl + a view all"
+      ],
+      "note": "Codex 系は COLLAPSED_OUTPUT_PATTERN で守られている。今回の Claude v2.1.142 サマリー行はブラケット表記を使わないため、別系統のガードが必要。"
+    },
+    "regression_protection_gap": {
+      "finding": "Issue 本文の再現出力に近い『プロンプトの後ろに Herding 中のフッター + サマリー行が後続する』ケースは現行 tests/unit/prompt-detector.test.ts に存在しない。Claude CLI v2.x が今後さらにフッター文言を更新したときに同種の False Negative を踏むリスクが高い。Issue 提案の予防策 (実 capture fixture 化) は妥当。"
+    },
+    "scan_window_consideration": {
+      "finding": "detectMultipleChoicePrompt の scanWindow は末尾 50 行で十分。effectiveEnd の trailing-empty 除去 (534-536行) が効くため、padding 起因の False Negative ではない。問題はあくまで末尾末端のサマリー行誤マッチ。"
+    }
+  },
+  "recommended_solutions": {
+    "immediate": {
+      "id": "S1-summary-line-guard",
+      "title": "Pass 2 オプション収集の手前で SUMMARY_LINE_PATTERN を弾く (即座対策)",
+      "description": "prompt-detect-multiple-choice.ts に新規パターンを追加し、Pass 2 ループ内で COLLAPSED_OUTPUT_PATTERN と同様に continue する。最小スコープでは `… +N pending` / `+N pending` を捕捉し、可能なら `↑/↓ N more`、`⏵ N line above` も同じガードに集約する。",
+      "pattern_sketch": "const SUMMARY_LINE_PATTERN = /^\\s*(?:[…\\u2026]\\s*)?[+\\-↑↓⏵⏷]?\\s*\\d+\\s+(pending|more|line|lines)\\b/i; のような形を起点に、最小ケース (pending|more) から開始し False Positive を見ながら拡張する。",
+      "priority": "high",
+      "implementation_effort": "S (約 1 ファイル / 数行追加 + テスト 2-3 ケース)",
+      "risk": "low: Pass 2 の頭で COLLAPSED_OUTPUT_PATTERN と同じ位置に continue を入れるだけなので既存検出フローへの影響は最小。ただしパターンが過剰に広いと、ユーザー回答中の通常文（例: 『1 line changed』『2 more options to consider』）を含む長文 prompt 末尾を弾いてしまう FP 余地がある → スコープを `pending|more` などのキーワードに固定して始めるのが安全。",
+      "regression_scope": "既存テストで影響する可能性があるのは『option label に pending/more/line を含むケース』。テストフィクスチャを grep して該当が無いことを事前確認すれば実質ゼロ。"
+    },
+    "permanent": {
+      "id": "S2-footer-bounded-extraction",
+      "title": "footer 境界による上限カット (恒久対策)",
+      "description": "Claude 承認プロンプトは『Esc to cancel · Tab to amend → · Herding…』というフッター行が options より下に必ず描画される。Pass 2 の effectiveEnd を『Esc to cancel ... を発見したらその直前行に切り詰める』フッター境界検出に置き換える。COLLAPSED_OUTPUT_PATTERN や SUMMARY_LINE_PATTERN による行単位除外より構造的に強固。CONFIRMATION_FOOTER_PATTERN と同じ思想で CLAUDE_PROMPT_FOOTER_PATTERN を新設する形。",
+      "pattern_sketch": "const CLAUDE_PROMPT_FOOTER_PATTERN = /Esc\\s+to\\s+cancel\\s*·\\s*Tab\\s+to\\s+amend/i; を effectiveEnd 直後で逆走査し、見つかったらその index を新しい effectiveEnd にする。",
+      "priority": "high (中期)",
+      "implementation_effort": "M (Pass 2 ループ範囲計算の改修 + Claude 専用 footer 定数 + テスト 5+ ケース)",
+      "risk": "medium: フッター文言は Claude のバージョンアップで変わるリスクがある (Issue 内でも v2.x で複数バリエーション確認済み)。fallback として『フッターが見つからなければ effectiveEnd は現状維持』にしておけば既存パスの回帰はない。",
+      "regression_scope": "Claude 以外の CLI ツール (Codex/Gemini/OpenCode/Copilot) には影響しない (Claude フッター固有のため)。Claude の既存承認プロンプト fixture は基本 footer が options より下なので False Negative は出ない想定だが、フィクスチャを総ざらいして検証する必要がある。",
+      "synergy_with_s1": "S1 と併用が望ましい。S2 が機能しない (フッター文言が変わった) 場合の保険として S1 が残ると堅牢。"
+    },
+    "preventive": {
+      "id": "S3-real-capture-regression-fixture",
+      "title": "実 capture を fixture 化した 3 層回帰テスト (予防策)",
+      "description": "Issue 本文の再現ターミナル出力を最小化した fixture (約 30-50 行) を tests/unit/fixtures/ 配下に置き、(a) prompt-detector.test.ts で detectPrompt が multiple_choice を返すこと、(b) status-detector の test で sessionStatus='waiting' / reason='prompt_detected' になること、(c) auto-yes-poller の test で resolveAutoAnswer が呼ばれて responded を返すこと、の 3 層で固定する。Claude CLI バージョンアップでフッター文言が更新されたときに即座に気付ける。",
+      "design_only_specification": {
+        "fixture_minimal_lines": [
+          "(略冒頭の対話履歴)",
+          "Use skill \"multi-stage-issue-review\"?",
+          "",
+          "Do you want to proceed?",
+          "❯ 1. Yes",
+          "  2. Yes, and don't ask again for skill use",
+          "  3. No",
+          "",
+          "  Esc to cancel · Tab to amend → · Herding…",
+          "  … +1 pending"
+        ],
+        "expectations": [
+          "detectPrompt(fixture, { requireDefaultIndicator: false }) → isPrompt=true, promptData.type='multiple_choice', options.length=3, defaultOption index 1",
+          "detectSessionStatus(fixture, 'claude') → status='waiting', reason='prompt_detected', hasActivePrompt=true",
+          "detectAndRespondToPrompt → resolveAutoAnswer により 'responded' を返す (Auto-Yes 有効時)"
+        ]
+      },
+      "priority": "medium",
+      "implementation_effort": "S (fixture ファイル + テスト 3 本)",
+      "risk": "none (テスト追加のみ)。",
+      "regression_scope": "なし。"
+    },
+    "recommended_combo": "S1 + S3 を先に着地させ (即座対策 + 回帰テストで根拠固定)、S2 をフォローアップ Issue として中期着地。S2 単独では Claude フッター文言変更時に再発するリスクが残るため S1 を残す方が安全。"
+  },
+  "severity_assessment": {
+    "severity": "high",
+    "impact": "Claude Code v2.1.142 上で『Use skill』『Do you want to proceed?』を含む全 multiple_choice 承認プロンプトが UI に届かず、Auto-Yes も発火しない。Auto-Yes 前提の長時間自動運転 (例: pm-auto-dev / orchestrate) で停止が発生し続け、ユーザー操作が必須になる。Claude Code は CommandMate のメインターゲット CLI のため影響範囲は広い。",
+    "data_loss_risk": "なし (検出失敗のみ、データ書き込み無し)",
+    "user_visible_symptom": "Worktree 詳細画面で Yes/No ウィンドウが出ない / Auto-Yes ステータスは enabled なのに反応しない / セッションが永続的に thinking スピナー表示になる",
+    "blast_radius": "Claude を選択している全 worktree。他 CLI (Codex/Gemini/OpenCode/Copilot/vibe-local) は影響なし (NORMAL_OPTION_PATTERN は共有だが、各ツールはこの種のメタ行をプロンプト直後に描画しないか、COLLAPSED_OUTPUT_PATTERN/footer pattern で別途守られている)。"
+  },
+  "affected_files": {
+    "core_fix": [
+      "src/lib/detection/prompt-detect-multiple-choice.ts (S1: SUMMARY_LINE_PATTERN 追加 + Pass 2 早期 continue / S2: footer 境界による effectiveEnd 切詰)",
+      "src/lib/detection/cli-patterns.ts (S2 時に CLAUDE_PROMPT_FOOTER_PATTERN を export)"
+    ],
+    "indirect_callers_no_change_expected": [
+      "src/lib/detection/prompt-detector.ts (detectPrompt 呼び出し元、内部実装変更のみで挙動修正)",
+      "src/lib/detection/status-detector.ts (priority 1 が成功すれば priority 2 の thinking 誤判定も自動解消)",
+      "src/lib/auto-yes-poller.ts (同じく detectPrompt 経由で自動修復)",
+      "src/app/api/worktrees/[id]/current-output/route.ts (変更不要)"
+    ],
+    "tests_to_add_or_update": [
+      "tests/unit/prompt-detector.test.ts (Claude v2.1.142 multiple_choice + 末尾 `… +1 pending` の fixture を追加し isPrompt=true を期待)",
+      "tests/unit/cli-patterns-selection.test.ts または新規 tests/unit/lib/status-detector.test.ts 系 (sessionStatus='waiting' 確認)",
+      "tests/unit/auto-yes-manager.test.ts または resolveAutoAnswer 周辺 (Auto-Yes 有効時に responded を返す確認)",
+      "(任意) tests/unit/fixtures/claude-v2.1.142-use-skill.txt を fixture として外出し"
+    ]
+  },
+  "regression_risk": {
+    "summary": "S1 即座対策は低リスク、S2 恒久対策は medium。",
+    "details": [
+      "S1: SUMMARY_LINE_PATTERN の語彙 (pending|more|line|lines) を慎重に絞れば、本物の option label との衝突は極低。ただしオプション label に『pending』を含むケース (例: `2. Postpone (will remain pending)`) を弾かないよう、行頭の数字+キーワードのみに限定して `(.+)` 部分を含まないようにする設計が肝要。",
+      "S2: フッター文言 (`Esc to cancel · Tab to amend`) は Claude v2.x で観測されている文言だが、Claude CLI の i18n や将来バージョンで揺れる可能性がある。フッター不検出時は現行ロジックに完全 fallback させることで回帰を抑制可能。",
+      "Layer 3/4/5 ガード (isConsecutiveFromOne / 2+ options / SEC-001) は本修正で touch しないため、既存の False Positive 抑止は維持される。",
+      "isValidPrecedingOption の挙動 (170-191) は変更不要。サマリー行を最初から候補に入れなければ自然に正しい先頭 (1) からの逆走査が成立する。",
+      "副次的影響として、`Herding…` 行が CLAUDE_THINKING_PATTERN にマッチする件はプロンプト検出が成功すれば priority 1 で waiting が確定するため UI 上の症状は解消される。CLAUDE_THINKING_PATTERN 自体は変更不要 (本修正と独立)。"
+    ]
+  },
+  "next_steps": [
+    "1. S1 (SUMMARY_LINE_PATTERN ガード) を最小スコープ (pending|more) で実装",
+    "2. S3 の fixture 設計に沿って prompt-detector.test.ts に Claude v2.1.142 用テストを追加",
+    "3. detectSessionStatus / auto-yes-poller の 2 層で結合テストを追加し、本修正で sessionStatus='waiting' / responded が返ることを固定",
+    "4. S2 (CLAUDE_PROMPT_FOOTER_PATTERN による footer 境界カット) をフォローアップ Issue として登録 (中期着地)",
+    "5. 関連メタ行 (↑/↓ N more, ⏵ N line above 等) の実観測ログを集めるための観測フックを検討 (本修正には含めず、Issue メモとして残す)",
+    "6. Claude CLI バージョンアップ時の検出回帰テストを CI に追加 (S3 fixture を CI で常時実行)"
+  ],
+  "completion_criteria_met": {
+    "root_cause_identified": true,
+    "preliminary_analysis_validated": true,
+    "solutions_proposed": 3,
+    "priority_and_risk_assessed": true,
+    "next_steps_defined": true
+  }
+}

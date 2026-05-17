@@ -54,6 +54,13 @@ export function useWorktreesCache(): UseWorktreesCacheReturn {
   const [error, setError] = useState<Error | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const worktreesRef = useRef<Worktree[]>([]);
+  /**
+   * Issue #710: Tracks the currently-active polling interval (ms) so that
+   * the worktrees-change effect can decide whether the existing setInterval
+   * needs to be re-created. `null` means polling is currently stopped
+   * (e.g. before initial start or while the tab is hidden).
+   */
+  const currentIntervalRef = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -86,28 +93,48 @@ export function useWorktreesCache(): UseWorktreesCacheReturn {
     refresh();
   }, [refresh]);
 
-  // Adaptive polling
+  /**
+   * Returns true if any cached worktree is currently running a session.
+   * Reads from `worktreesRef` so it always sees the latest list regardless
+   * of closure capture.
+   */
+  const hasActiveSession = useCallback(
+    () => worktreesRef.current.some((wt) => wt.isSessionRunning === true),
+    [],
+  );
+
+  /**
+   * Stops the currently-active polling interval (if any) and clears the
+   * `currentIntervalRef` so future starts can re-evaluate the desired
+   * interval.
+   */
+  const stopPolling = useCallback(() => {
+    if (intervalRef.current !== null) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    currentIntervalRef.current = null;
+  }, []);
+
+  /**
+   * (Re)starts polling. Computes the desired interval based on the latest
+   * `hasActiveSession()` reading, stores it in `currentIntervalRef`, and
+   * schedules a new setInterval. Any previously-active interval is
+   * cleared first via `stopPolling()`.
+   */
+  const startPolling = useCallback(() => {
+    stopPolling();
+    const interval = hasActiveSession()
+      ? POLLING_INTERVAL_ACTIVE
+      : POLLING_INTERVAL_IDLE;
+    currentIntervalRef.current = interval;
+    intervalRef.current = setInterval(() => {
+      refresh();
+    }, interval);
+  }, [hasActiveSession, refresh, stopPolling]);
+
+  // Adaptive polling: initial start + visibility change handling
   useEffect(() => {
-    const hasActiveSession = () =>
-      worktreesRef.current.some((wt) => wt.isSessionRunning === true);
-
-    const startPolling = () => {
-      stopPolling();
-      const interval = hasActiveSession()
-        ? POLLING_INTERVAL_ACTIVE
-        : POLLING_INTERVAL_IDLE;
-      intervalRef.current = setInterval(() => {
-        refresh();
-      }, interval);
-    };
-
-    const stopPolling = () => {
-      if (intervalRef.current !== null) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    };
-
     const handleVisibilityChange = () => {
       if (document.hidden) {
         stopPolling();
@@ -129,12 +156,30 @@ export function useWorktreesCache(): UseWorktreesCacheReturn {
       stopPolling();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [refresh]);
+  }, [refresh, startPolling, stopPolling]);
 
-  // Re-establish polling when worktrees change (interval may need updating)
+  // Sync worktreesRef and re-evaluate the polling interval when worktrees
+  // change. Issue #710: if the active/idle state changed, restart polling
+  // with the new desired interval; otherwise this is a no-op.
   useEffect(() => {
     worktreesRef.current = worktrees;
-  }, [worktrees]);
+
+    // Skip while the tab is hidden (visibilitychange handles re-start).
+    if (typeof document !== 'undefined' && document.hidden) {
+      return;
+    }
+    // Skip when polling is not yet running. The adaptive-polling useEffect
+    // owns the initial start (and visibilitychange handles restoration).
+    if (currentIntervalRef.current === null) {
+      return;
+    }
+    const desired = worktrees.some((wt) => wt.isSessionRunning === true)
+      ? POLLING_INTERVAL_ACTIVE
+      : POLLING_INTERVAL_IDLE;
+    if (currentIntervalRef.current !== desired) {
+      startPolling();
+    }
+  }, [worktrees, startPolling]);
 
   return { worktrees, repositories, isLoading, error, refresh };
 }

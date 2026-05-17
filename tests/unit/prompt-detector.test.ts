@@ -2865,4 +2865,98 @@ Are you sure you want to continue? (yes/no)
       }
     });
   });
+
+  // =========================================================================
+  // Issue #704: Claude v2.1.142 "Use skill ...?" prompt summary line FP fix
+  //
+  // Bug: Claude Code v2.1.142 renders "\u2026 +N pending" / "\u2026 +N more" summary
+  // lines below the actual options. The bottom-up Pass 2 scan in
+  // detectMultipleChoicePrompt() previously matched these against
+  // NORMAL_OPTION_PATTERN (e.g. number=1, label="pending"), which then
+  // poisoned isValidPrecedingOption() and rejected the real 1./2./3. options
+  // \u2014 causing the entire prompt to be silently dropped (options.length<2).
+  //
+  // Fix layers (both implemented as defense in depth):
+  //   S1: SUMMARY_LINE_PATTERN early-continue in Pass 2 loop.
+  //   S2: CLAUDE_PROMPT_FOOTER_PATTERN trims effectiveEnd to the Claude
+  //       "Esc to cancel \u00B7 Tab to amend" footer line, putting the summary
+  //       line outside the scan window entirely.
+  // =========================================================================
+  describe('Issue #704: Claude v2.1.142 skill approval prompt with trailing summary line', () => {
+    // Fixture: real-world Claude Code v2.1.142 capture for "Use skill ...?"
+    // approval prompt. The `  \u2026 +1 pending` summary line at the end is the
+    // exact source of the regression.
+    const ISSUE_704_FIXTURE = [
+      '\u23FA Skill(/multi-stage-issue-review)',
+      '\u2500'.repeat(45),
+      'Use skill "multi-stage-issue-review"?',
+      'Claude may use instructions, code, or files from this Skill.',
+      '',
+      '  Issue\u8A18\u8F09\u5185\u5BB9\u306E\u591A\u6BB5\u968E\u30EC\u30D3\u30E5\u30FC\uFF08\u901A\u5E38\u2192\u5F71\u97FF\u7BC4\u56F2\uFF09\u00D72\u56DE\u3068\u6307\u6458\u5BFE\u5FDC\u3092\u81EA\u52D5\u5B9F\u884C',
+      '',
+      'Do you want to proceed?',
+      '\u276F 1. Yes',
+      '  2. Yes, and don\'t ask again for multi-stage-issue-review in <path>',
+      '  3. No',
+      '',
+      '  Esc to cancel \u00B7 Tab to amend \u2192 \u00B7 Herding\u2026',
+      '  \u2026 +1 pending',
+    ].join('\n');
+
+    it('should detect Use skill prompt as multiple_choice with 3 options and Yes default', () => {
+      const result = detectPrompt(ISSUE_704_FIXTURE);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options).toHaveLength(3);
+        // Issue #704 acceptance: the default option (\u276F 1) must be "Yes"
+        const defaultOption = result.promptData.options.find(opt => opt.isDefault);
+        expect(defaultOption?.label).toBe('Yes');
+        // Acceptance: all 3 option numbers must be present and consecutive
+        expect(result.promptData.options.map(o => o.number)).toEqual([1, 2, 3]);
+        // Acceptance: the No option must be preserved
+        expect(result.promptData.options[2].label).toBe('No');
+      }
+    });
+
+    it('should not false-positive on a standalone trailing summary line', () => {
+      // Regression guard: if the buffer contains only a `\u2026 +1 pending` summary
+      // line without an actual numbered prompt above, detectPrompt must NOT
+      // claim a multiple_choice prompt. This catches regressions where the
+      // SUMMARY_LINE_PATTERN guard is removed and the summary line alone
+      // bootstraps a phantom prompt.
+      const output = [
+        'Some response output line 1',
+        'Some response output line 2',
+        '',
+        '  \u2026 +1 pending',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+      expect(result.isPrompt).toBe(false);
+    });
+
+    it('should preserve real options whose labels happen to contain "pending"', () => {
+      // FP-suppression: SUMMARY_LINE_PATTERN must be tight enough that
+      // legitimate option labels mentioning "pending" or "more" are still
+      // collected. This protects against an overly aggressive guard that
+      // would simply drop any line containing the keyword.
+      const output = [
+        'Do you want to proceed?',
+        '\u276F 1. Yes',
+        '  2. Postpone (will remain pending)',
+        '  3. No',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options).toHaveLength(3);
+        expect(result.promptData.options[1].label).toContain('pending');
+      }
+    });
+  });
 });

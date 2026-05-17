@@ -1,0 +1,52 @@
+{
+  "bug_id": "709-20260515_211219",
+  "issue_number": 709,
+  "bug_description": "useWorktreesCache が Sessions ページで二重インスタンス化され /api/worktrees ポーリングが2系統並行で動く",
+  "selected_actions": [
+    {
+      "action_id": "1",
+      "title": "WorktreesCacheProvider に Context を導入し Sessions ページから消費",
+      "description": "useWorktreesCache の戻り値を React Context (WorktreesCacheContext) で公開し、Sessions ページは useContext から取得する",
+      "files_to_modify": [
+        "src/components/providers/WorktreesCacheProvider.tsx",
+        "src/app/sessions/page.tsx",
+        "tests/unit/SessionsPage.test.tsx"
+      ],
+      "implementation_details": {
+        "step_1": "WorktreesCacheProvider.tsx に WorktreesCacheContext を作成し、useWorktreesCache の戻り値 (worktrees, repositories, isLoading, error, refresh) を Context.Provider 経由で配信",
+        "step_2": "useWorktreesCacheContext() フックを export して、Provider 外で使うと例外を投げる安全装置を組み込む",
+        "step_3": "Sessions ページの useWorktreesCache 直接呼び出しを useWorktreesCacheContext() に置き換え",
+        "step_4": "tests/unit/SessionsPage.test.tsx の vi.mock 対象を @/hooks/useWorktreesCache から @/components/providers/WorktreesCacheProvider に変更",
+        "step_5": "Provider 経由の単一インスタンスを検証する単体テストを追加"
+      }
+    }
+  ],
+  "deliverables": [
+    "WorktreesCacheProvider に WorktreesCacheContext を実装",
+    "useWorktreesCacheContext フックを export",
+    "Sessions ページが Context から worktrees / isLoading / error を取得",
+    "Sessions ページの単体テストが Context モック方式に更新され全件 PASS",
+    "WorktreesCacheProvider の単体テストで Context 経由の値配信を検証"
+  ],
+  "definition_of_done": [
+    "Sessions ページで useWorktreesCache の直接呼び出しが消えている",
+    "grep で他に直接呼び出しが無いことを確認",
+    "WorktreesCacheProvider 配下では /api/worktrees ポーリングが1系統のみ",
+    "Sessions 画面の表示・フィルタ・ソート機能に回帰なし (既存テスト PASS)",
+    "新規追加した Context 配信テストが PASS",
+    "npm run test:unit が全件 PASS",
+    "npm run lint クリーン",
+    "npx tsc --noEmit クリーン"
+  ],
+  "test_strategy": {
+    "tdd_cycle": "Red → Green → Refactor",
+    "red_tests": [
+      "WorktreesCacheProvider が Context 経由で worktrees/isLoading/error を配信することを検証",
+      "useWorktreesCacheContext が Provider 外で例外を投げることを検証",
+      "Sessions ページが Context モック経由で worktrees を取得することを検証 (既存テストを Context モックに移行)"
+    ],
+    "green_implementation": "Context 作成 → Provider に value 注入 → Sessions ページを useContext 化",
+    "refactor": "型定義整理・JSDoc 整備"
+  },
+  "rollback_plan": "Sessions ページを useWorktreesCache 直呼びに戻し、Provider の Context export を削除"
+}

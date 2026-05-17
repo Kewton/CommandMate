@@ -1,0 +1,88 @@
+{
+  "bug_id": "706_20260515_185650",
+  "issue_number": 706,
+  "bug_description": "Files タブのツリー再描画でスクロール位置がリセットされる（refetch 時の loading 表示を全置換から控えめインジケーター方式へ変更）",
+  "selected_actions": [
+    {
+      "action_id": "1",
+      "title": "FileTreeView の loading 分岐を初回限定に変更（Option 3）",
+      "description": "loading=true かつ rootItems.length===0 のときだけ全画面 Loading を表示する。refetch 中は既存ツリー DOM を保持し、ツールバー右側に小型 spinner を表示。aria-live 付きの控えめインジケーター。",
+      "files_to_modify": [
+        "src/components/worktree/FileTreeView.tsx"
+      ],
+      "implementation_details": [
+        "isInitialLoading = loading && rootItems.length === 0 を導入",
+        "isInitialLoading 時のみ file-tree-loading の早期 return",
+        "それ以外（refetch 時）は既存ツリーをレンダリングしつつ、ツールバー右端に loading インジケーターを追加",
+        "data-testid='file-tree-refetch-indicator' を付与（テストで参照）",
+        "aria-live='polite' で更新を控えめにアナウンス"
+      ]
+    },
+    {
+      "action_id": "2",
+      "title": "refetch 失敗時の非破壊エラー表示",
+      "description": "rootItems が既にある状態で refetch が失敗した場合、既存ツリーは保持しつつ、ツールバー直下にエラーバナーを表示。初回ロード時のみ既存の全画面エラー表示を維持。",
+      "files_to_modify": [
+        "src/components/worktree/FileTreeView.tsx"
+      ],
+      "implementation_details": [
+        "isInitialError = !!error && rootItems.length === 0 を導入",
+        "isInitialError 時のみ file-tree-error の早期 return",
+        "それ以外（refetch エラー）はツリー上部にエラーバナー表示。data-testid='file-tree-refetch-error'",
+        "エラーバナーには『再試行』ボタン（refetch を再実行）"
+      ]
+    },
+    {
+      "action_id": "3",
+      "title": "prevTreeHashRef 初回スキップで偽陽性ポーリングを抑止",
+      "description": "WorktreeDetailRefactored.tsx の `if (newHash !== prevTreeHashRef.current)` を、初回 null のときは比較スキップして代入のみに変更。",
+      "files_to_modify": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "implementation_details": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx:275 周辺を修正",
+        "`if (prevTreeHashRef.current !== null && newHash !== prevTreeHashRef.current)` に変更",
+        "初回ポーリング時は `prevTreeHashRef.current = newHash` のみ"
+      ]
+    },
+    {
+      "action_id": "4",
+      "title": "テスト追加・既存テスト更新",
+      "description": "FileTreeView の loading/refetch シナリオに関する新規テストを追加し、既存テストを Option 3 仕様に整合させる。",
+      "files_to_modify": [
+        "tests/unit/components/worktree/FileTreeView.test.tsx"
+      ],
+      "implementation_details": [
+        "新規: refreshTrigger 変化時に file-tree-loading が表示されないこと",
+        "新規: refreshTrigger 変化時に file-tree-refetch-indicator が表示されること",
+        "新規: refetch エラー時に既存ツリーが保持され file-tree-refetch-error が表示されること",
+        "既存: 初回ロード時の file-tree-loading 表示は維持（rootItems 取得前）",
+        "既存: refreshTrigger 既存テストの整合性確認"
+      ]
+    }
+  ],
+  "deliverables": [
+    "src/components/worktree/FileTreeView.tsx の修正",
+    "src/components/worktree/WorktreeDetailRefactored.tsx の修正",
+    "tests/unit/components/worktree/FileTreeView.test.tsx の追加・更新"
+  ],
+  "definition_of_done": [
+    "Files タブ初回表示後 5 秒経過時にスクロール位置がリセットされない",
+    "実際にファイルが追加/削除された際もスクロール位置・フォーカスが維持される",
+    "refetch 中はパネル内に控えめな更新インジケーターが表示される",
+    "初回マウント時（rootItems 未取得時）は従来通り全画面 loading が表示される",
+    "refetch 失敗時は既存ツリーを保持しつつエラーを非破壊的に通知する",
+    "既存の npm run test:unit で 0 件の回帰",
+    "FileTreeView の refetch 動作に関する新規テストが追加されている",
+    "ESLint / TypeScript チェックがパスする"
+  ],
+  "target_coverage": 80,
+  "test_targets": [
+    "tests/unit/components/worktree/FileTreeView.test.tsx"
+  ],
+  "tdd_strategy": {
+    "red": "新規テスト（refetch 中の file-tree-loading 非表示、refetch インジケーター表示、refetch エラー時の既存ツリー保持）を追加し、現実装で失敗することを確認",
+    "green": "FileTreeView の loading/error 分岐を Option 3 仕様に変更し、prevTreeHashRef 初回スキップを実装。テストが通ることを確認",
+    "refactor": "重複ロジック整理、型・命名の最適化、既存テストの整合性確保"
+  }
+}

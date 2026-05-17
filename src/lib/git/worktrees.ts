@@ -239,17 +239,29 @@ export async function scanWorktrees(rootDir: string): Promise<Worktree[]> {
 export async function scanMultipleRepositories(
   repositoryPaths: string[]
 ): Promise<Worktree[]> {
-  const allWorktrees: Worktree[] = [];
-
-  for (const repoPath of repositoryPaths) {
-    try {
+  // Issue #711: Parallelize per-repository scans. Each `git worktree list`
+  // spawns an independent child process, so there is no contention between
+  // repositories. allSettled preserves the prior "one failure does not abort
+  // the rest" semantics.
+  const results = await Promise.allSettled(
+    repositoryPaths.map(async (repoPath) => {
       logger.info('repository:scan-start', { repoPath });
       const worktrees = await scanWorktrees(repoPath);
-      allWorktrees.push(...worktrees);
       logger.info('repository:scan-complete', { repoPath, worktreeCount: worktrees.length });
-    } catch (error) {
-      logger.error('repository:scan-failed', { repoPath, error: error instanceof Error ? error.message : String(error) });
-      // Continue with other repositories even if one fails
+      return worktrees;
+    })
+  );
+
+  const allWorktrees: Worktree[] = [];
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    if (result.status === 'fulfilled') {
+      allWorktrees.push(...result.value);
+    } else {
+      logger.error('repository:scan-failed', {
+        repoPath: repositoryPaths[i],
+        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+      });
     }
   }
 

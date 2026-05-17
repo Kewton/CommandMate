@@ -1,0 +1,90 @@
+{
+  "bug_id": "issue-704-20260515_173223",
+  "issue_number": 704,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/704",
+  "issue_title": "fix: Claude Code v2.1.142「Use skill \"X\"?」プロンプトが Yes/No UI として検出されない",
+  "bug_description": "Claude Code v2.1.142 で表示される『Use skill \"X\"?』承認プロンプトが CommandMate の prompt-detector で検出されず、UI に Yes/No 選択ウィンドウが表示されず Auto-Yes も発火しない。",
+  "phases": {
+    "phase_1_investigation": {
+      "status": "completed",
+      "result_file": "dev-reports/bug-fix/issue-704-20260515_173223/investigation-result.json",
+      "summary": "Issue 本文の予備分析が概ね正しいことをコード上で完全に再現確認。真因は src/lib/detection/prompt-detect-multiple-choice.ts:51 の NORMAL_OPTION_PATTERN が末尾の `… +1 pending` を option 1 / label='pending' と誤マッチし、isValidPrecedingOption() の連鎖で本物の 1/2/3 を全て弾くこと。仮説 A（Use skill 未登録）と仮説 B（Herding… thinking 誤判定）は主因ではないと確認。"
+    },
+    "phase_2_solution_proposal": {
+      "status": "completed",
+      "user_choice": "S1+S2+S3 全部実施",
+      "summary": "ユーザーは即座対策(S1) + 恒久対策(S2) + 予防策(S3) の全部実施を選択。Claude フッター文言変更に対する二重防御を獲得しつつ、3層回帰テストで再発検知能力を保証する方針。"
+    },
+    "phase_3_work_plan": {
+      "status": "completed",
+      "result_file": "dev-reports/bug-fix/issue-704-20260515_173223/work-plan-context.json",
+      "summary": "TDD 実装順序: (1) Red - Issue #704 fixture テスト追加 / (2) Green - S1 SUMMARY_LINE_PATTERN / (3) Green - S2 CLAUDE_PROMPT_FOOTER_PATTERN / (4) Red→Green - status-detector / auto-yes-resolver 2層テスト / (5) Refactor - JSDoc・Issue 番号タグ整備 / (6) 品質ゲート全パス確認。"
+    },
+    "phase_4_tdd_implementation": {
+      "status": "completed",
+      "result_file": "dev-reports/bug-fix/issue-704-20260515_173223/tdd-fix-result.json",
+      "files_modified": [
+        "src/lib/detection/prompt-detect-multiple-choice.ts (+83 lines)",
+        "tests/unit/prompt-detector.test.ts (+94 lines)",
+        "tests/unit/lib/status-detector.test.ts (+38 lines)",
+        "tests/unit/lib/auto-yes-resolver.test.ts (+24 lines)"
+      ],
+      "summary": "S1 (SUMMARY_LINE_PATTERN early-continue) と S2 (CLAUDE_PROMPT_FOOTER_PATTERN による effectiveEnd 切詰め) を二重防御として実装。両者は独立に修正完了させる能力があり (S1 を一時的に無効化しても S2 だけで fixture テストが通る) ことを内部検証済み。テストは prompt-detector / status-detector / auto-yes-resolver の3層に追加。",
+      "coverage": "prompt-detect-multiple-choice.ts のカバレッジ: 95.6% stmts / 90.66% branch / 100% funcs / 96.95% lines (target 80%)"
+    },
+    "phase_5_acceptance_test": {
+      "status": "passed",
+      "result_file": "dev-reports/bug-fix/issue-704-20260515_173223/acceptance-result.json",
+      "quality_gates": {
+        "npm_run_lint": "0 errors / 0 warnings",
+        "npx_tsc_noEmit": "0 errors",
+        "npm_run_test_unit": "6486 passed / 7 skipped / 0 failed (baseline 6481 + 5 new = 6486)"
+      },
+      "issue_704_targeted_tests": {
+        "prompt-detector": "3/3 PASSED",
+        "status-detector": "1/1 PASSED",
+        "auto-yes-resolver": "1/1 PASSED"
+      },
+      "acceptance_criteria_results": [
+        { "criterion": "detectPrompt が multiple_choice (Yes/Yes2nd/No, default=Yes) を返す", "status": "PASS" },
+        { "criterion": "API レスポンス isPromptWaiting=true / promptData!=null", "status": "PASS (status-detector unit test + current-output/route.ts コードレビュー)" },
+        { "criterion": "resolveAutoAnswer が '1' を返す", "status": "PASS" },
+        { "criterion": "Bash/Edit/Codex/Gemini 既存検出に回帰なし", "status": "PASS (Bash 5/5, Codex 13/13, Gemini 6/6, prompt-detector 203/203)" },
+        { "criterion": "新規 unit test 追加 & npm run test:unit パス", "status": "PASS" }
+      ]
+    }
+  },
+  "remaining_work": [
+    {
+      "item": "UI 実機検証 (Yes/No ウィンドウの DOM レンダリング)",
+      "owner": "user",
+      "method": "/uat スキルで Claude Code v2.1.142 実セッションを用いて別途確認",
+      "priority": "推奨"
+    },
+    {
+      "item": "Claude Code 上流フッター文言 (Esc to cancel · Tab to amend) のリリースノート監視",
+      "owner": "user (またはフォローアップ Issue 化)",
+      "method": "tracking issue として残す",
+      "priority": "optional"
+    },
+    {
+      "item": "PR 作成",
+      "owner": "user",
+      "method": "/create-pr または手動",
+      "priority": "次ステップ"
+    }
+  ],
+  "next_steps_recommendation": [
+    "1. git diff の最終確認 (4 ファイル / +239 行)",
+    "2. feature/704-worktree ブランチで commit 作成 (推奨メッセージ: `fix(detection): handle Claude v2.1.142 skill approval prompt summary line (#704)`)",
+    "3. /uat で UI 実機検証 (任意・推奨)",
+    "4. /create-pr で develop 向け PR を作成",
+    "5. CI パス確認 → develop マージ"
+  ],
+  "branch_info": {
+    "current_branch": "feature/704-worktree",
+    "base_branch": "develop",
+    "commits": "未コミット (Phase 4 で commit はしない指示)"
+  },
+  "report_format": "ja-JP"
+}

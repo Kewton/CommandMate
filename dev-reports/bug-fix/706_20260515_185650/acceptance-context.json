@@ -1,0 +1,84 @@
+{
+  "bug_id": "706_20260515_185650",
+  "issue_number": 706,
+  "bug_description": "Files タブのツリー再描画でスクロール位置がリセットされる（refetch 時の loading 表示を全置換から控えめインジケーター方式へ変更）",
+  "fix_summary": "1) FileTreeView の loading/error 早期 return を初回マウント時 (rootItems 未取得時) に限定、2) refetch 中は既存ツリー DOM を保持しツールバー右端に小型 spinner (file-tree-refetch-indicator) と非破壊エラーバナー (file-tree-refetch-error + 再試行ボタン) を表示、3) WorktreeDetailRefactored の prevTreeHashRef を初回ポーリング時はベースライン記録のみとし偽陽性 refresh 発火を回避。",
+  "files_modified": [
+    "src/components/worktree/FileTreeView.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/worktree/FileTreeView.test.tsx"
+  ],
+  "acceptance_criteria": [
+    "Files タブ初回表示後 5 秒経過時にスクロール位置がリセットされない",
+    "実際にファイルが追加／削除された際もスクロール位置・フォーカスが維持される",
+    "refetch 中はパネル内に控えめな更新インジケーターが表示される",
+    "初回マウント時（rootItems 未取得時）は従来通り全画面 loading が表示される",
+    "refetch 失敗時は既存ツリーを保持しつつエラーを非破壊的に通知する",
+    "既存の npm run test:unit で 0 件の回帰",
+    "FileTreeView の refetch 動作に関する新規テストが追加されている",
+    "ESLint / TypeScript チェックがパスする"
+  ],
+  "test_scenarios": [
+    {
+      "id": "TS-1",
+      "title": "初回マウント時の loading 表示",
+      "given": "FileTreeView が初めてレンダリングされる (rootItems 未取得)",
+      "when": "loading=true の状態",
+      "then": "data-testid='file-tree-loading' が表示される"
+    },
+    {
+      "id": "TS-2",
+      "title": "refetch 時の loading 非表示",
+      "given": "rootItems が既に取得されツリーが表示されている",
+      "when": "refreshTrigger が変化し loading=true になる",
+      "then": "data-testid='file-tree-loading' は表示されず、既存ツリーが保持される"
+    },
+    {
+      "id": "TS-3",
+      "title": "refetch 中の控えめインジケーター表示",
+      "given": "rootItems が既にある状態",
+      "when": "refreshTrigger が変化し refetch 中",
+      "then": "data-testid='file-tree-refetch-indicator' が表示される (role=status, aria-live=polite)"
+    },
+    {
+      "id": "TS-4",
+      "title": "refetch エラーの非破壊表示",
+      "given": "rootItems が既にある状態",
+      "when": "refetch が失敗",
+      "then": "既存ツリーは保持され、data-testid='file-tree-refetch-error' バナーと再試行ボタンが表示される"
+    },
+    {
+      "id": "TS-5",
+      "title": "初回ロード失敗時の全画面エラー表示",
+      "given": "FileTreeView が初めてレンダリングされる",
+      "when": "fetchDirectory が失敗 (rootItems が取れない)",
+      "then": "data-testid='file-tree-error' が全画面で表示される"
+    },
+    {
+      "id": "TS-6",
+      "title": "再試行ボタンの動作",
+      "given": "refetch エラーバナーが表示されている",
+      "when": "data-testid='file-tree-refetch-retry-button' をクリック",
+      "then": "fetchDirectory が再呼び出しされる"
+    },
+    {
+      "id": "TS-7",
+      "title": "prevTreeHashRef 初回スキップ",
+      "given": "WorktreeDetailRefactored がマウントされ Files タブが表示されている",
+      "when": "初回ツリーポーリング (5秒後) が発火",
+      "then": "setFileTreeRefresh は呼ばれず、prevTreeHashRef のみ更新される。実際のツリー変更時 (2回目以降) は refresh が発火する"
+    },
+    {
+      "id": "TS-8",
+      "title": "既存 Issue #164 テスト互換",
+      "given": "Issue #164 の refreshTrigger expand state preservation シリーズ",
+      "when": "全テストを実行",
+      "then": "全件 pass (回帰なし)"
+    }
+  ],
+  "validation_commands": [
+    "npm run lint",
+    "npx tsc --noEmit",
+    "npm run test:unit"
+  ]
+}

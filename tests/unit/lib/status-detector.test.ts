@@ -505,4 +505,42 @@ describe('status-detector', () => {
       expect(result.reason).toBe('input_prompt');
     });
   });
+
+  // =========================================================================
+  // Issue #704: Claude v2.1.142 "Use skill ...?" approval prompt
+  //
+  // End-to-end status detection guard: even with the trailing
+  // "  … +1 pending" summary line and the
+  // "  Esc to cancel · Tab to amend → · Herding…" footer,
+  // detectSessionStatus must classify the session as `waiting` with
+  // `reason='prompt_detected'` so that the UI surfaces the Yes/No window and
+  // Auto-Yes can fire.
+  // =========================================================================
+  describe('Issue #704: Claude v2.1.142 Use skill approval prompt', () => {
+    it('should return waiting/prompt_detected for skill approval prompt with trailing summary line', () => {
+      const output = [
+        '⏺ Skill(/multi-stage-issue-review)',
+        '─'.repeat(45),
+        'Use skill "multi-stage-issue-review"?',
+        'Claude may use instructions, code, or files from this Skill.',
+        '',
+        '  Issue記載内容の多段階レビュー（通常→影響範囲）×2回と指摘対応を自動実行',
+        '',
+        'Do you want to proceed?',
+        '❯ 1. Yes',
+        '  2. Yes, and don\'t ask again for multi-stage-issue-review in <path>',
+        '  3. No',
+        '',
+        '  Esc to cancel · Tab to amend → · Herding…',
+        '  … +1 pending',
+      ].join('\n');
+
+      const result = detectSessionStatus(output, 'claude');
+
+      expect(result.status).toBe('waiting');
+      expect(result.hasActivePrompt).toBe(true);
+      expect(result.reason).toBe('prompt_detected');
+      expect(result.promptDetection?.promptData?.type).toBe('multiple_choice');
+    });
+  });
 });

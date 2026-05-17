@@ -1,0 +1,60 @@
+{
+  "status": "success",
+  "summary": "Issue #706 修正完了。FileTreeView の loading/error 早期 return を初回マウント時に限定し、refetch 中は既存ツリー DOM を保持したまま小型インジケーター (file-tree-refetch-indicator) と非破壊エラーバナー (file-tree-refetch-error + 再試行ボタン) を表示するように変更。WorktreeDetailRefactored の prevTreeHashRef は初回ポーリング時に偽陽性 refresh を発火しないようベースライン記録のみに変更。Red-Green-Refactor サイクルで 5 件の新規テストを追加し、既存 69 テスト全て pass、unit suite 全体 6491 テストも pass。lint/typecheck も pass。",
+  "files_modified": [
+    "src/components/worktree/FileTreeView.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/worktree/FileTreeView.test.tsx"
+  ],
+  "tests_added": [
+    "FileTreeView > refetch indicator (Issue #706) > should not show file-tree-loading on refetch (refreshTrigger change)",
+    "FileTreeView > refetch indicator (Issue #706) > should show file-tree-refetch-indicator while refetching",
+    "FileTreeView > refetch indicator (Issue #706) > should preserve existing tree and show file-tree-refetch-error on refetch failure",
+    "FileTreeView > refetch indicator (Issue #706) > should still show full-screen file-tree-error on initial load failure",
+    "FileTreeView > refetch indicator (Issue #706) > should retry refetch when file-tree-refetch-retry-button is clicked"
+  ],
+  "test_results": {
+    "lint": "pass",
+    "typecheck": "pass",
+    "unit": "pass",
+    "coverage_percent": 76.81
+  },
+  "tdd_cycles": [
+    {
+      "action_id": "1",
+      "red": "「refetch 時に file-tree-loading が出ない」「refetch 中に file-tree-refetch-indicator が出る」「refetch 完了後に消える」の 3 テストを追加し、当初の loading early-return では tree が unmount されることを fail 確認。",
+      "green": "isInitialLoading = loading && rootItems.length === 0 で初回限定の早期 return に変更。refetch 中は既存ツールバー右端 (ml-auto) に小型 spinner を data-testid=file-tree-refetch-indicator + role=status + aria-live=polite + sr-only ラベルで描画。ツールバー表示条件に isRefetching を追加し、コールバック未提供でも描画されるよう調整。",
+      "refactor": "ロジック簡潔のためフラグ (isInitialLoading / isRefetching) を抽出。コメントで Issue 番号と意図を明記。"
+    },
+    {
+      "action_id": "2",
+      "red": "「refetch エラー時に既存ツリー保持」「初回失敗時のみ full-screen file-tree-error 表示」「再試行ボタンで refetch」の 3 テストを追加し、当初の error early-return で tree が unmount されることを fail 確認。",
+      "green": "isInitialError = !!error && rootItems.length === 0 で初回限定の早期 return に変更。それ以外は ml-auto エラーバナー (data-testid=file-tree-refetch-error, role=alert, AlertCircle アイコン, 「再試行」ボタン data-testid=file-tree-refetch-retry-button) を tree 直前に描画。再試行ボタンは抽出した reloadTreeWithExpandedDirs (useCallback) を呼び直す。",
+      "refactor": "useEffect 内の reload 関数を useCallback で外出しし、mountedRef (useRef + useEffect cleanup) でアンマウント後の state 更新を抑止。retry でも同じ関数を再利用するため重複排除。"
+    },
+    {
+      "action_id": "3",
+      "red": "FileTreeView の Issue #706 テストが pass した段階で WorktreeDetailRefactored の初回ポーリング動作にも同様の偽陽性問題があることをコードレビューで確認 (prevTreeHashRef.current === null のとき null !== '[...]' で必ず初回 refresh が発火する)。",
+      "green": "prevTreeHashRef.current === null のとき比較せずベースラインだけ記録する分岐を追加。コメントで Issue #706 と意図を明記。",
+      "refactor": "コメント追加のみ。挙動本質を変えるリファクタリングは Issue 範囲外のため実施せず。"
+    },
+    {
+      "action_id": "4",
+      "red": "上記 Action 1-2 の RED 確認時に既存テスト 'should render loading state initially' が初回マウント時の rootItems 未取得状態に該当することを確認 (loading=true && rootItems.length===0 のため引き続き file-tree-loading が出る)。",
+      "green": "既存テストは無修正のまま pass。新規 5 件のテストを Issue #706 の describe ブロック配下に集約。",
+      "refactor": "新規 describe を Issue #706 ヘッダコメント付きで追加し、既存 Issue #164/#300 のテストブロックには手を入れない方針を維持。"
+    }
+  ],
+  "notes": [
+    "新規 data-testid: file-tree-refetch-indicator / file-tree-refetch-error / file-tree-refetch-retry-button。既存 data-testid は変更なし。",
+    "アクセシビリティ: indicator は role=status + aria-live=polite + sr-only 'Refreshing files'、エラーバナーは role=alert。",
+    "TreeNode の key={item.name} と React reconciliation により、refetch 中も既存 DOM サブツリーが保持されるためスクロール位置・選択状態が失われない。",
+    "reloadTreeWithExpandedDirs を useCallback で抽出し、再試行ボタンから再呼び出し可能にした。mountedRef でアンマウント後の setState を抑止。",
+    "WorktreeDetailRefactored の prevTreeHashRef 初回スキップにより、Files タブを開いた直後の 5 秒ポーリング第1回目で必ず発火していた偽陽性 refresh が解消。実際にツリーが変わった 2 回目以降のみ refresh が発火する。",
+    "coverage_percent (76.81%) は既存の Issue #21 検索/フィルタ系コード (lines 305-376) と loadChildren error path (line 266) などの未テスト経路に起因する pre-existing な値。新規追加した Issue #706 関連の経路 (lines 152-156, 171-231, 383-499) はすべてカバー済み。issue 範囲外の検索コードへのテスト追加は constraints.no_unused_changes に従い実施せず。"
+  ],
+  "remaining_work": [
+    "(任意) 既存 Issue #21 検索/フィルタコードに対するテストを追加してカバレッジ 80% を目指す (本 Issue 範囲外)。",
+    "(任意) WorktreeDetailRefactored の prevTreeHashRef 初回スキップに対する単体テストを tests/unit/components/WorktreeDetailRefactored.test.tsx に追加する (現状コードレビューでロジック妥当性を確認)。"
+  ]
+}

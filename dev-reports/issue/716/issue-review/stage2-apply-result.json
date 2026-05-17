@@ -1,0 +1,114 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 716,
+  "iteration": 1,
+  "apply_date": "2026-05-17",
+  "applied_findings": [
+    {
+      "finding_id": "S1-001",
+      "severity": "Must Fix",
+      "applied": true,
+      "applied_at": "現状セクション3つ目の箇条書き / 実装方針 4.",
+      "summary": "「Markdownレンダリング」前提の記述を全面削除し、ConversationPairCard 内の MessageContent が whitespace-pre-wrap の生テキスト + ファイルパス用 <button> 構造であることを明記。実装方針 4. の (A)(B) 分岐を削除し、CSS Custom Highlight API + fallback overlay 一本化（terminal-highlight.ts パターン流用、createTreeWalker ベースの textContent オフセット計算、innerHTML/<mark> 不使用、未対応時 showFallbackOverlay フォールバック）に書き換え"
+    },
+    {
+      "finding_id": "S1-002",
+      "severity": "Must Fix",
+      "applied": true,
+      "applied_at": "受入条件「折りたたみ表示時の挙動」セクション",
+      "summary": "「自動展開 or バッジ」の択一を排除し、推奨案の (a) 自動展開方式に確定。検索中はヒットを含むペア / truncate メッセージを自動展開、検索終了で元の collapse 状態へ復元、件数 M に折りたたみ領域内 match を含める、next/prev は全 match に対して順序通りジャンプ + scrollIntoView と明示"
+    },
+    {
+      "finding_id": "S1-003",
+      "severity": "Must Fix",
+      "applied": true,
+      "applied_at": "実装方針 1./4. + 受入条件「マッチング仕様」セクション",
+      "summary": "useHistorySearch の出力を Array<{ messageId: string; ranges: MatchPosition[] }> に確定（推奨案 X）。ハイライト適用はメッセージ要素単位で applyTerminalHighlights を呼ぶ方式と明示。UserMessageSection / AssistantMessageItem に data-message-id を付与、currentIndex はグローバル連番で管理、現在 index が属する messageId を解決して該当要素のみ current highlight を適用。タイムスタンプ・ヘッダー・件数表示への誤マッチを排除する旨を受入条件に追加"
+    },
+    {
+      "finding_id": "S1-004",
+      "severity": "Should Fix",
+      "applied": true,
+      "applied_at": "受入条件「マッチング仕様 > 検索対象範囲」",
+      "summary": "Pending / Orphan / System / archived / truncate の取り扱いを明文化: 通常・Orphan/System は対象、Pending・showArchived=false 時の archived は対象外、truncate 隠れ末尾は対象（自動展開で表示）"
+    },
+    {
+      "finding_id": "S1-005",
+      "severity": "Should Fix",
+      "applied": true,
+      "applied_at": "受入条件「IME composition / 状態管理」+ 実装方針 1./2. + 留意点",
+      "summary": "IME composition 中（compositionstart～compositionend 間）は debounce タイマーをリセットせず composition end で検索実行する旨を明記。HistorySearchBar / useHistorySearch 側で onCompositionStart/End を扱う実装方針を追加。TerminalSearchBar 側の横展開は別Issue化"
+    },
+    {
+      "finding_id": "S1-006",
+      "severity": "Should Fix",
+      "applied": true,
+      "applied_at": "受入条件「共通定数」セクション",
+      "summary": "useTerminalSearch と完全同一定数を採用する旨を明示: 最大500件 / debounce 300ms / 最小2文字 / scrollIntoView({ block: 'center', behavior: 'smooth' })。定数の共通化方針（再エクスポート or @/config/search-config.ts）も併記"
+    },
+    {
+      "finding_id": "S1-007",
+      "severity": "Should Fix",
+      "applied": true,
+      "applied_at": "概要先頭の「用語統一」ブロック / Issue全体の用語",
+      "summary": "用語を「メッセージテキスト検索」「useHistorySearch」「HistorySearchBar」(History 起点) に統一。概要・受入条件・実装方針・テスト要件の表記揺れを除去し、用語統一ブロックを明示"
+    },
+    {
+      "finding_id": "S1-008",
+      "severity": "Should Fix",
+      "applied": true,
+      "applied_at": "受入条件「テスト要件」セクション",
+      "summary": "テスト戦略を大幅拡充: 単体テスト（useHistorySearch 7項目: マッチング・最小長・上限・debounce・ラップアラウンド・currentIndex クランプ・IME composition）/ 単体テスト（HistorySearchBar UI 3項目）/ 統合テスト（HistoryPane 6項目: ハイライト/scrollIntoView/自動展開/state クリア×3/ファイルパスボタン）/ 既存テスト破壊なし"
+    },
+    {
+      "finding_id": "S1-009",
+      "severity": "Should Fix",
+      "applied": true,
+      "applied_at": "受入条件「IME composition / 状態管理」+ 実装方針 3.",
+      "summary": "検索state（isOpen/query/currentIndex）は HistoryPane 内部 state として保持し localStorage 永続化しない旨を明示。worktreeId / CLIタブ / kill-session 変化時は親から key prop もしくは worktreeId 変化検出で useEffect クリア。MobileContent は同インスタンス再利用のため追加 props 不要"
+    },
+    {
+      "finding_id": "S1-010",
+      "severity": "Should Fix",
+      "applied": true,
+      "applied_at": "留意点 + 受入条件「テスト要件」統合テスト",
+      "summary": "ファイルパス用 <button> との相互作用を明文化: ハイライト適用される（CSS Custom Highlight API は子要素を区別しない）/ クリックハンドラは fallback overlay の pointer-events: none により阻害されず動作 / カウント M にファイルパス内 match を含む。統合テストにも該当項目を追加"
+    },
+    {
+      "finding_id": "S1-011",
+      "severity": "Nice to Have",
+      "applied": true,
+      "applied_at": "受入条件「検索UI / 操作系」",
+      "summary": "起動方法を「検索アイコンボタンのみ」と限定し、Ctrl/Cmd+F ショートカットは初版対象外・別Issue化と明記（HistoryPane と TerminalPane のフォーカス優先順位設計のため）"
+    },
+    {
+      "finding_id": "S1-012",
+      "severity": "Nice to Have",
+      "applied": true,
+      "applied_at": "受入条件「共通定数 > 件数表示フォーマット」",
+      "summary": "件数表示フォーマットを TerminalSearchBar と統一: 0件='0/0' / M件='N/M' / 500件超過='N/500以上' と明示"
+    },
+    {
+      "finding_id": "S1-013",
+      "severity": "Nice to Have",
+      "applied": true,
+      "applied_at": "受入条件「検索UI / 操作系」",
+      "summary": "アクセシビリティを留意点から受入条件に格上げ: role='search' / aria-live='polite' / aria-atomic='true' / 検索 input・prev/next/close ボタンに aria-label を設定（TerminalSearchBar と同等）"
+    }
+  ],
+  "must_fix_applied": 3,
+  "should_fix_applied": 7,
+  "nice_to_have_applied": 3,
+  "summary": {
+    "total_findings": 13,
+    "applied": 13,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/716"
+  },
+  "issue_updated_at": "2026-05-17T00:00:00Z",
+  "issue_body_diff_summary": "(1) 冒頭にレビュー反映ノートを追加。(2) 概要に用語統一ブロック追加（メッセージテキスト検索 / useHistorySearch / HistorySearchBar）。(3) 現状3つ目の箇条書きを Markdown レンダリング前提から MessageContent の whitespace-pre-wrap + ファイルパス <button> 構造に書き換え。(4) 受入条件を 7サブセクション（検索UI/操作系・マッチング仕様・ハイライト/ナビゲーション・折りたたみ表示時挙動・共通定数・IME composition/状態管理・モバイル/レイアウト・パフォーマンス/互換性・テスト要件）に再構成し全 Must Fix/Should Fix/Nice to Have を反映。(5) 実装方針 4. の (A)(B) 分岐を削除し CSS Custom Highlight API + fallback overlay 一本化に書き換え、メッセージ要素単位のハイライト適用粒度を明示。(6) 実装方針 1. の useHistorySearch I/F を MatchPosition ベースに確定、IME composition 連携を追記。(7) 実装方針 3. に検索state 保持場所（内部 state、localStorage 非永続化）を明示。(8) 留意点にファイルパス <button> 相互作用と TerminalSearchBar IME 横展開の将来Issue化を追加。(9) 末尾に詳細なレビュー履歴セクションを追加。"
+}

@@ -68,6 +68,54 @@ const SEPARATOR_LINE_PATTERN = /^[-─]+$/;
 const COLLAPSED_OUTPUT_PATTERN = /^\s*\[[^\]]*\d+\s+lines?\]/i;
 
 /**
+ * [Issue #704] Pattern for Claude Code v2.1.142 prompt summary lines such as
+ *   "  … +1 pending"
+ *   "  +2 pending"
+ *   "  ↑3 more"
+ *   "  ↓1 more"
+ * These lines are rendered BELOW the real options when Claude collapses the
+ * remaining choices. They are not selectable options and must be skipped by
+ * Pass 2 — otherwise NORMAL_OPTION_PATTERN matches them as option N with
+ * label "pending"/"more", and the resulting (number, label) tuple poisons
+ * isValidPrecedingOption() so that the real 1./2./3. options above are all
+ * rejected (collectedOptions ends up with length 1 and Layer 4 returns
+ * no_prompt).
+ *
+ * Scope of the pattern (FP suppression is critical):
+ *   - Anchored at line start (^) and requires the trailing keyword to be
+ *     `pending` or `more` followed by a word boundary (\b). This intentionally
+ *     prevents matching legitimate option labels that mention these words
+ *     mid-sentence (e.g. `2. Postpone (will remain pending)`,
+ *     `3. Show me more`) — those still flow through NORMAL_OPTION_PATTERN.
+ *   - Optional leading ellipsis (… U+2026) and optional collapse direction
+ *     marker (+ - ↑ ↓ ⏵ ⏷) accept the variants observed in the wild.
+ *   - The pattern deliberately omits any free `(.+)` capture — it must
+ *     short-circuit, not extract data.
+ *
+ * Pattern shape: linear regex with no nested quantifiers — ReDoS safe (S4-001).
+ */
+const SUMMARY_LINE_PATTERN = /^\s*[…]?\s*[+\-↑↓⏵⏷]?\s*\d+\s+(?:pending|more)\b/i;
+
+/**
+ * [Issue #704] Pattern for the Claude Code v2.1.142 prompt footer line.
+ * Example: "  Esc to cancel · Tab to amend → · Herding…"
+ *
+ * Used as a defense-in-depth complement to SUMMARY_LINE_PATTERN: when this
+ * footer is detected inside the scan window, effectiveEnd is trimmed down to
+ * the footer line so that the trailing `… +N pending` summary cannot reach
+ * Pass 2 at all. Fallback-safe: if the footer is not present (e.g. older
+ * Claude versions, Codex, Gemini, OpenCode, Copilot), effectiveEnd is left
+ * untouched, guaranteeing zero regression for those CLIs.
+ *
+ * Accepts both middle-dot characters used by Claude (U+00B7 `·` and
+ * U+2022 `•`) and allows arbitrary surrounding whitespace because the footer
+ * is rendered with variable indentation depending on terminal width.
+ *
+ * Linear pattern, no nested quantifiers — ReDoS safe (S4-001).
+ */
+const CLAUDE_PROMPT_FOOTER_PATTERN = /Esc\s+to\s+cancel\s*[·•]\s*Tab\s+to\s+amend/i;
+
+/**
  * Codex/OpenAI TUI confirmation footer shown beneath interactive choices.
  * When this footer is present, numbered options form an active prompt even if
  * the default cursor marker is missing from the capture output.
@@ -537,6 +585,22 @@ export function detectMultipleChoicePrompt(
 
   // Calculate scan window: last 50 non-trailing-empty lines
   const scanStart = Math.max(0, effectiveEnd - 50);
+
+  // [Issue #704] S2: trim effectiveEnd to the Claude prompt footer when present.
+  // This pushes the trailing `… +N pending` summary line outside the scan
+  // window entirely, providing defense in depth alongside the S1
+  // SUMMARY_LINE_PATTERN guard inside Pass 2. The reverse scan picks the
+  // *bottom-most* footer occurrence so that earlier conversation history is
+  // not accidentally trimmed when the user has triggered multiple prompts.
+  // Fallback: if no footer line is found, effectiveEnd is left unchanged —
+  // every other CLI tool (Codex, Gemini, OpenCode, Copilot) is therefore
+  // untouched by this branch (regression guard).
+  for (let i = effectiveEnd - 1; i >= scanStart; i--) {
+    if (CLAUDE_PROMPT_FOOTER_PATTERN.test(lines[i])) {
+      effectiveEnd = i;
+      break;
+    }
+  }
   const scanWindow = lines.slice(scanStart, effectiveEnd);
   // Single-pass footer detection: identify both confirmation footer presence and
   // specific "press number to confirm" variant in one iteration (Issue #616).
@@ -588,6 +652,25 @@ export function detectMultipleChoicePrompt(
     // metadata, not selectable options. Skip them before option parsing to
     // avoid misclassifying "12" as an option number.
     if (COLLAPSED_OUTPUT_PATTERN.test(line)) {
+      continuationLineCount++;
+      continue;
+    }
+
+    // [Issue #704] Claude v2.1.142 renders summary lines like "… +1 pending"
+    // BELOW the real options. Without this guard, NORMAL_OPTION_PATTERN below
+    // would match the summary line as `option N / label='pending'`, which
+    // would then poison isValidPrecedingOption() and cause every real option
+    // above (1./2./3.) to be rejected — resulting in collectedOptions.length<2
+    // and a spurious no_prompt verdict. Treat the summary line as metadata
+    // (same continuation handling as COLLAPSED_OUTPUT_PATTERN above) so the
+    // reverse scan continues into the actual option block.
+    //
+    // Defense-in-depth: works alongside the S2 effectiveEnd trim above. Either
+    // S1 or S2 alone is sufficient to fix Issue #704; keeping both protects
+    // against future Claude renderings where the footer line text changes
+    // (S1 still catches) or the summary line wording changes (S2 still
+    // catches via footer trim).
+    if (SUMMARY_LINE_PATTERN.test(line)) {
       continuationLineCount++;
       continue;
     }

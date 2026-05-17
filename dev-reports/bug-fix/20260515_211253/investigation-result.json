@@ -1,0 +1,211 @@
+{
+  "status": "completed",
+  "bug_id": "20260515_211253",
+  "related_issue": 710,
+  "investigation_summary": {
+    "issue_description": "useWorktreesCache のポーリング間隔（active: 5s / idle: 30s）が startPolling() 呼び出し時点で固定され、worktrees の active/idle 状態遷移を契機に再計算されないため、初回 startPolling 時の間隔が永続化する。",
+    "error_type": "logic_bug / stale-closure-by-design",
+    "affected_files": [
+      "src/hooks/useWorktreesCache.ts"
+    ],
+    "consumer_files": [
+      "src/components/providers/WorktreesCacheProvider.tsx",
+      "src/contexts/WorktreeSelectionContext.tsx",
+      "src/app/sessions/page.tsx"
+    ],
+    "test_files": [
+      "tests/unit/useWorktreesCache.test.ts",
+      "tests/unit/SessionsPage.test.tsx"
+    ],
+    "reproduction_confirmed": true,
+    "baseline_test_status": "6491 passed | 7 skipped (vitest 全体)"
+  },
+  "root_cause_analysis": {
+    "category": "コードバグ（適応的ポーリングの状態遷移ロジック欠落）",
+    "primary_cause": "適応的ポーリングを担う useEffect (src/hooks/useWorktreesCache.ts L90-132) の依存配列が [refresh] のみであり、worktrees の active/idle 状態が変化しても再評価されない。startPolling() 内で interval を決定する箇所は初回マウント時の一度きりしか走らない。",
+    "secondary_cause": "L134-137 の useEffect は worktreesRef.current に最新値を同期しているだけで、setInterval を再起動する責務を持たない。hasActiveSession() は ref 経由で最新値を読めるが、interval 値自体は setInterval(closure, interval) で既に固定されているため、ref を更新しても interval は変わらない。",
+    "evidence": [
+      "L90-132: useEffect 依存配列 = [refresh]。refresh は useCallback([]) で安定参照のため、このエフェクトは事実上マウント時にしか走らない。",
+      "L94-102: startPolling() は const interval = hasActiveSession() ? ACTIVE : IDLE で一度評価し、setInterval(refresh, interval) として固定。",
+      "L99-101: setInterval のコールバックは refresh() を呼ぶだけで、間隔を再評価しない。",
+      "L111-118: visibilitychange ハンドラは visible 時に startPolling() を呼び直すため『非表示→表示』を経由した場合にのみ間隔が再計算される。これが症状の出方に偏りを生む（ユーザーが画面を切り替えると治る場合がある）。",
+      "L134-137: worktrees 変化時の useEffect は worktreesRef.current = worktrees を行うのみで、startPolling を呼んでいない。",
+      "コンシューマ (sessions/page.tsx L110, WorktreesCacheProvider.tsx L32) は useWorktreesCache を直接利用しており、フック内で間隔切替が完結している必要がある（外部で startPolling を再実行する手段がない）。"
+    ],
+    "why_initial_active_persists": "セッションが running の状態でマウントされた場合、初回 startPolling 時に ACTIVE(5s) で固定。その後セッションが停止し worktrees が更新されても、useEffect 再実行のトリガーがないため永遠に 5s 間隔が続く。",
+    "why_initial_idle_persists": "全 idle 状態でマウントされた場合、初回 startPolling 時に IDLE(30s) で固定。セッションが開始しても再評価されず 30s 間隔のまま反応が遅い。"
+  },
+  "impact_analysis": {
+    "user_facing_symptoms": [
+      "セッションを1回でも起動するとサイドバーが永続的に5秒間隔ポーリングになり、停止後も負荷が下がらない（サーバ負荷・電池消費・ネットワーク帯域）",
+      "idle 状態でアプリ起動した場合、セッションを開始しても 30 秒間反応が遅延し UX が劣化",
+      "Issue 概要にある『常時 5 秒間隔になりやすく全体的な処理遅延の主要因』はこの永続 ACTIVE 化が原因と整合"
+    ],
+    "data_loss_risk": "なし（読み取り専用ポーリング）",
+    "security_risk": "なし",
+    "scope": {
+      "affected_components": [
+        "Sidebar (worktree 一覧)",
+        "Sessions ページ",
+        "WorktreeSelectionContext 経由のすべての画面"
+      ],
+      "affected_users": "サイドバーを使う全ユーザー（PC レイアウト/モバイル両方）"
+    },
+    "regression_risk": "低〜中: 修正は useWorktreesCache 内で完結。setInterval 再起動が頻繁になりすぎないよう『同じ間隔なら no-op』ガードが必須。visibilitychange ハンドラとの相互作用に注意。"
+  },
+  "severity_assessment": {
+    "severity": "high",
+    "rationale": "症状が常時発生し全ユーザーに影響、かつサーバ負荷増 (idle 時にも 5s ポーリング) という性能・運用上のリスクが恒常的にある。データ破壊リスクはないが UX/性能インパクトは大きい。"
+  },
+  "recommended_actions": [
+    {
+      "action_id": "1",
+      "priority": "high",
+      "title": "currentIntervalRef + hasActiveSession 派生値による動的 interval 切替",
+      "description": "Issue 提案に沿った実装。useWorktreesCache に currentIntervalRef: useRef<number | null>(null) を追加し、startPolling 内で setInterval 起動時に currentIntervalRef.current = interval を保存。worktrees 依存の useEffect で desired interval を計算し、currentIntervalRef.current と異なる場合のみ startPolling() を再実行する。これにより『同じ間隔のままなら no-op』を保証できる。",
+      "files_to_modify": [
+        "src/hooks/useWorktreesCache.ts"
+      ],
+      "implementation_outline": [
+        "(a) const currentIntervalRef = useRef<number | null>(null) を追加",
+        "(b) startPolling と stopPolling を useCallback 化（または useRef にハンドラを保持して安定化）し、worktrees 変化エフェクトから呼べるようにする",
+        "(c) startPolling 内で currentIntervalRef.current = interval を更新、stopPolling 内で currentIntervalRef.current = null に戻す",
+        "(d) 新たな useEffect: const desired = worktrees.some(w => w.isSessionRunning) ? ACTIVE : IDLE; if (document.hidden) return; if (currentIntervalRef.current !== null && currentIntervalRef.current !== desired) startPolling(); を依存 [worktrees] で実行",
+        "(e) 既存の worktreesRef 同期 useEffect は維持（visibilitychange ハンドラから hasActiveSession() が ref で最新値を読めるよう保持）",
+        "(f) visibilitychange ハンドラの startPolling 呼び出しは currentIntervalRef を経由するので変更不要"
+      ],
+      "risk_level": "low",
+      "considerations": [
+        "依存配列に worktrees を直接入れると、配列の identity が毎回変わるため毎回エフェクトが走るが、no-op ガードで setInterval 再起動はスキップされる。許容範囲。",
+        "派生値で最適化したい場合は const hasActive = worktrees.some(...) を計算し useEffect 依存に hasActive のみ入れる方式（プリミティブ依存）が望ましい。",
+        "document.hidden 時に startPolling を呼ばないガードを忘れない（visibilitychange ハンドラと整合させる）。"
+      ]
+    },
+    {
+      "action_id": "2",
+      "priority": "medium",
+      "title": "派生プリミティブ依存パターン（よりシンプルな代替案）",
+      "description": "const hasActiveSession = worktrees.some(w => w.isSessionRunning === true); を本体で計算し、ポーリング useEffect の依存配列を [refresh, hasActiveSession] にする。エフェクトが再起動されると stopPolling → startPolling が常に走る。実装は最小だが、hasActiveSession が変わるたびに setInterval が再生成される（true ⇄ false の遷移時のみなので頻度は低い）。",
+      "files_to_modify": [
+        "src/hooks/useWorktreesCache.ts"
+      ],
+      "implementation_outline": [
+        "(a) フック本体で const hasActiveSession = worktrees.some(w => w.isSessionRunning === true);",
+        "(b) ポーリング useEffect の依存配列を [refresh, hasActiveSession] に変更",
+        "(c) startPolling 内では hasActiveSession を closure キャプチャして interval を決定",
+        "(d) worktreesRef 同期は維持（visibility 復帰時に最新を読むため）"
+      ],
+      "risk_level": "low",
+      "considerations": [
+        "no-op ガードは依存配列で自動的に効くため不要（hasActiveSession が boolean プリミティブなので React が比較）。",
+        "ただし依存に hasActiveSession のみだと cleanup → stopPolling → startPolling が必ず走る。受け入れ基準『同じ間隔のままなら no-op』を厳密に満たすには Action 1 の方が安全。",
+        "Action 1 と比べてコード変更量が小さく、レビューが容易。"
+      ]
+    },
+    {
+      "action_id": "3",
+      "priority": "low",
+      "title": "setInterval を再帰 setTimeout 方式に置換（より根本的な改修）",
+      "description": "setInterval の代わりに setTimeout を再帰的にスケジュールし、各 tick で hasActiveSession() を再評価して次回の遅延を決める方式。interval の中で worktreesRef を読むので外部からの再起動が不要になる。ただし変更範囲が広く、既存テストの修正・破壊的影響が大きい。",
+      "files_to_modify": [
+        "src/hooks/useWorktreesCache.ts",
+        "tests/unit/useWorktreesCache.test.ts"
+      ],
+      "risk_level": "medium",
+      "recommendation": "今回は採用非推奨（Issue で提案された currentIntervalRef パターンの方が変更最小・受け入れ基準と整合）"
+    }
+  ],
+  "selected_action": "1",
+  "test_strategy": {
+    "new_test_cases": [
+      {
+        "name": "idle → active 遷移時に ACTIVE 間隔に切り替わる",
+        "description": "初回 worktrees=[{isSessionRunning:false}] → 待機 → fetch を [{isSessionRunning:true}] に切り替えて refresh → 以降 ACTIVE(5s) 間隔でポーリングされること",
+        "key_assertions": [
+          "状態切替前は POLLING_INTERVAL_IDLE(30s) 後に fetch が走る",
+          "状態切替後は POLLING_INTERVAL_ACTIVE(5s) 後に fetch が走る"
+        ]
+      },
+      {
+        "name": "active → idle 遷移時に IDLE 間隔に切り替わる",
+        "description": "初回 worktrees=[{isSessionRunning:true}] → 待機 → fetch を [{isSessionRunning:false}] に切り替えて refresh → 以降 IDLE(30s) 間隔でポーリングされること",
+        "key_assertions": [
+          "状態切替前は ACTIVE(5s) 後に fetch が走る",
+          "状態切替後は IDLE(30s) 後に fetch が走る、ACTIVE(5s) 経過時点では走らない"
+        ]
+      },
+      {
+        "name": "同じ間隔のままなら setInterval を再起動しない（no-op）",
+        "description": "worktrees の identity だけ変わるが hasActiveSession は変わらないケースで、現在の interval が継続することを確認（タイマー再生成なしの観測）",
+        "key_assertions": [
+          "POLLING_INTERVAL_IDLE 直前まで時計を進め fetch が呼ばれていないことを確認 → 再起動が起きていれば idle カウンタがリセットされ、ここで呼ばれてしまう"
+        ]
+      },
+      {
+        "name": "visibilitychange hidden → visible との整合",
+        "description": "hidden で stopPolling → visible 復帰時に startPolling し直し、その時点の hasActiveSession で interval が決まること",
+        "key_assertions": [
+          "hidden 中はタイマー経過で fetch が呼ばれない",
+          "visible 復帰時に即時 refresh()",
+          "復帰後の間隔が最新 worktrees に基づく"
+        ]
+      },
+      {
+        "name": "active 状態でマウントしてから idle に遷移するシナリオ",
+        "description": "Issue 受入基準の再現 - active 起動 → 停止後 30s 間隔へ移行",
+        "key_assertions": [
+          "停止後、ACTIVE 5s 経過時点では fetch が呼ばれない（IDLE 化を確認）",
+          "30s 経過後に 1 回 fetch が呼ばれる"
+        ]
+      }
+    ],
+    "existing_tests_compatibility": [
+      "tests/unit/useWorktreesCache.test.ts の既存 6 ケース（adaptive polling 3 ケース含む）は壊さない見込み",
+      "tests/unit/SessionsPage.test.tsx は useWorktreesCache をモックせず実利用しているか確認が必要"
+    ],
+    "verification_commands": [
+      "npm run test:unit -- tests/unit/useWorktreesCache.test.ts",
+      "npm run test:unit",
+      "npx tsc --noEmit",
+      "npm run lint"
+    ]
+  },
+  "acceptance_criteria_mapping": [
+    {
+      "criterion": "worktrees の active/idle 状態変化を検知し、間隔が変わるべきタイミングで startPolling を再実行する",
+      "action": "Action 1 の (d) で worktrees 依存 useEffect + currentIntervalRef 比較により充足"
+    },
+    {
+      "criterion": "active 状態でアプリ起動 → セッション停止 → 30秒間隔に移行",
+      "action": "Action 1 で hasActive=true→false 遷移時に startPolling 再呼出 → IDLE に切替"
+    },
+    {
+      "criterion": "idle 状態でアプリ起動 → セッション開始 → 5秒間隔に移行",
+      "action": "Action 1 で hasActive=false→true 遷移時に startPolling 再呼出 → ACTIVE に切替"
+    },
+    {
+      "criterion": "不要な setInterval 再起動が発生しない（同じ間隔のままなら no-op）",
+      "action": "Action 1 (d) の currentIntervalRef.current !== desired ガードで充足"
+    },
+    {
+      "criterion": "visibility hidden → visible の挙動が壊れない",
+      "action": "既存 visibilitychange ハンドラは維持。Action 1 の追加 useEffect は document.hidden 時は startPolling をスキップする実装にして整合"
+    },
+    {
+      "criterion": "npm run test:unit 回帰 0 件",
+      "action": "Action 1 のスコープは useWorktreesCache.ts に閉じる。基準ベースライン 6491 passed を維持する想定"
+    }
+  ],
+  "next_steps": [
+    "Action 1 (currentIntervalRef パターン) を tdd-impl-agent で実装",
+    "新規テストケース 5 件を tests/unit/useWorktreesCache.test.ts に追加（Red → Green）",
+    "npm run test:unit / npx tsc --noEmit / npm run lint をパス確認",
+    "PM Bug Fix にて手動受入: (i) idle 起動 → セッション開始で 5s 間隔に切替, (ii) active 起動 → 停止で 30s 間隔に切替, (iii) hidden/visible 切替で破綻しないこと"
+  ],
+  "completion": {
+    "root_cause_identified": true,
+    "recommended_actions_provided": 3,
+    "severity_assessed": "high",
+    "next_steps_clarified": true
+  }
+}

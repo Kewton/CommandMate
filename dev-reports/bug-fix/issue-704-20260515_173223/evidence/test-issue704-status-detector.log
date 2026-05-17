@@ -1,0 +1,9 @@
+
+ RUN  v4.1.2 /Users/maenokota/share/work/github_kewton/commandmate-issue-704
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 27 skipped (28)
+   Start at  17:55:19
+   Duration  158ms (transform 49ms, setup 38ms, import 49ms, tests 4ms, environment 0ms)
+

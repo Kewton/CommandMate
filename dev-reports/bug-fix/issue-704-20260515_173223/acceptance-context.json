@@ -1,0 +1,43 @@
+{
+  "bug_id": "issue-704-20260515_173223",
+  "issue_number": 704,
+  "bug_description": "Claude Code v2.1.142「Use skill \"X\"?」プロンプトが prompt-detector で検出されず、UI で Yes/No ウィンドウが出ない、Auto-Yes も発火しない。",
+  "fix_summary": "src/lib/detection/prompt-detect-multiple-choice.ts に SUMMARY_LINE_PATTERN（S1: Pass 2 オプション収集の手前で `… +N pending`/`N more` 系を early-continue）と CLAUDE_PROMPT_FOOTER_PATTERN（S2: `Esc to cancel · Tab to amend` フッターを発見したら effectiveEnd を切り詰め）を追加。3層回帰テスト（S3: prompt-detector / status-detector / auto-yes-resolver）を追加。",
+  "fix_files": [
+    "src/lib/detection/prompt-detect-multiple-choice.ts (+83 lines: SUMMARY_LINE_PATTERN + CLAUDE_PROMPT_FOOTER_PATTERN)",
+    "tests/unit/prompt-detector.test.ts (+94 lines: Issue #704 fixture / FP回帰 / pending含むラベル保持)",
+    "tests/unit/lib/status-detector.test.ts (+38 lines: waiting/prompt_detected 検証)",
+    "tests/unit/lib/auto-yes-resolver.test.ts (+24 lines: Yes 自動応答検証)"
+  ],
+  "acceptance_criteria": [
+    "Issue #704 受入条件 1: `Use skill \"X\"?` を含む実出力 fixture で prompt-detector が multiple_choice を返す",
+    "Issue #704 受入条件 2: CommandMate Worktree 詳細画面で当該プロンプトの Yes/No ウィンドウが表示される（status-detector が waiting/prompt_detected を返すこと、および API レスポンスの isPromptWaiting=true / promptData!=null を担保することで検証）",
+    "Issue #704 受入条件 3: Auto-Yes 有効時にスキル承認プロンプトに対して自動応答が発火する（resolveAutoAnswer が '1' を返すこと）",
+    "Issue #704 受入条件 4: 既存の Bash/Edit 承認プロンプトの検出が壊れていない（回帰なし）",
+    "Issue #704 受入条件 5: 単体テストが追加され `npm run test:unit` でパスする"
+  ],
+  "test_scenarios": [
+    "シナリオ 1: TDD で書かれた Issue #704 fixture テスト（Use skill 完全プロンプト）が detectPrompt で multiple_choice / options=[Yes, Yes2nd, No] を返す",
+    "シナリオ 2: 末尾サマリー行（`… +1 pending`）単独で誤検出が発生しない（FP回帰防御）",
+    "シナリオ 3: option label に 'pending' を含む正当ケース（`2. Postpone (will remain pending)`）が引き続き option として収集される（FP抑止）",
+    "シナリオ 4: status-detector が Issue #704 fixture で sessionStatus='waiting' / reason='prompt_detected' を返す",
+    "シナリオ 5: auto-yes-resolver が Issue #704 の Yes/Yes2nd/No 構造プロンプトで '1' を返す（Yes に自動応答）",
+    "シナリオ 6: 既存テスト（Bash/Edit 承認 / 通常 multiple_choice / Codex/Gemini/OpenCode/Copilot プロンプト）が全パスする（回帰ゼロ）",
+    "シナリオ 7: コード品質ゲート: ESLint パス・TypeScript 型チェックパス・全 unit test パス"
+  ],
+  "verification_commands": [
+    "npm run lint",
+    "npx tsc --noEmit",
+    "npm run test:unit",
+    "npm run test:unit -- --run tests/unit/prompt-detector.test.ts",
+    "npm run test:unit -- --run tests/unit/lib/status-detector.test.ts",
+    "npm run test:unit -- --run tests/unit/lib/auto-yes-resolver.test.ts"
+  ],
+  "expected_outcomes": {
+    "lint": "0 errors / 0 warnings",
+    "tsc": "0 errors",
+    "test_unit_total": "全パス (前ベースライン6481 + 新規5ケース = 6486 expected)",
+    "coverage_prompt_detect_multiple_choice": "80%以上 (target は branch/stmts/funcs/lines いずれも)",
+    "regression": "Codex/Gemini/OpenCode/Copilot 用テストは全パス・現状維持"
+  }
+}

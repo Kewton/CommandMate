@@ -1,0 +1,47 @@
+{
+  "bug_id": "20260515_211253",
+  "related_issue": 710,
+  "issue_title": "perf(sidebar): useWorktreesCache のポーリング間隔を active/idle 遷移時に動的切替",
+  "issue_description": "useWorktreesCache のポーリング間隔は startPolling() 呼び出し時点の一度きりで決まるため、セッションが active → idle / idle → active と遷移しても間隔が更新されない。結果として常時 5 秒間隔になりやすく、全体的な処理遅延の主要因となっている。",
+  "symptoms": [
+    "セッションを1回でも起動するとサイドバーが永続的に5秒間隔ポーリングになる",
+    "セッション停止後も負荷が下がらない",
+    "idle 状態でアプリ起動した場合、active になっても 30 秒間隔のままで反応が悪い"
+  ],
+  "error_logs": [],
+  "affected_files": [
+    "src/hooks/useWorktreesCache.ts"
+  ],
+  "key_code_locations": [
+    {
+      "file": "src/hooks/useWorktreesCache.ts",
+      "lines": "90-132",
+      "issue": "startPolling内のinterval計算が初回のみで、worktreesの変化に応じて再計算されない"
+    },
+    {
+      "file": "src/hooks/useWorktreesCache.ts",
+      "lines": "135-137",
+      "issue": "worktrees更新useEffectがrefに同期するだけでsetIntervalを再起動しない"
+    }
+  ],
+  "reproduction_steps": [
+    "1. アプリ起動（idle状態）",
+    "2. セッションを開始 → ポーリング間隔が30秒のまま（期待: 5秒に変化）",
+    "3. セッションを停止 → ポーリング間隔が5秒のまま（期待: 30秒に変化）"
+  ],
+  "environment": {
+    "framework": "Next.js 14",
+    "language": "TypeScript",
+    "testing": "Vitest + React Testing Library"
+  },
+  "severity_hint": "high",
+  "acceptance_criteria": [
+    "worktrees の active/idle 状態変化を検知し、間隔が変わるべきタイミングで startPolling を再実行する",
+    "active 状態でアプリ起動 → セッション停止 → 30秒間隔に移行",
+    "idle 状態でアプリ起動 → セッション開始 → 5秒間隔に移行",
+    "不要な setInterval 再起動が発生しない（同じ間隔のままなら no-op）",
+    "visibility hidden → visible の挙動が壊れない",
+    "npm run test:unit 回帰 0 件"
+  ],
+  "proposed_approach": "currentIntervalRef を追加し、worktrees変化時に desired interval を再計算。currentIntervalRef と異なる場合のみ startPolling を呼ぶ。"
+}

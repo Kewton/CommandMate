@@ -1,0 +1,87 @@
+{
+  "bug_id": "issue-704-20260515_173223",
+  "issue_number": 704,
+  "bug_description": "Claude Code v2.1.142「Use skill \"X\"?」プロンプトが prompt-detector で検出されず、UI で Yes/No ウィンドウが出ない、Auto-Yes も発火しない。根本原因は src/lib/detection/prompt-detect-multiple-choice.ts:51 の NORMAL_OPTION_PATTERN が末尾の `… +1 pending` を option 1 / label='pending' と誤マッチし、isValidPrecedingOption() の連鎖で本物の 1/2/3 が全部弾かれること。",
+  "target_coverage": 80,
+  "selected_actions": [
+    {
+      "action_id": "S1",
+      "title": "SUMMARY_LINE_PATTERN ガード追加",
+      "description": "src/lib/detection/prompt-detect-multiple-choice.ts に新規 SUMMARY_LINE_PATTERN を追加し、Pass 2 オプション収集ループ内で COLLAPSED_OUTPUT_PATTERN と同じ位置に early-continue を入れる。スコープは `… +N pending` / `+N pending` / `↑N more` / `↓N more` / `N more` 系で、FP 抑止のため行頭の数字+メタキーワード(pending|more)のみに制限する。",
+      "files_to_modify": [
+        "src/lib/detection/prompt-detect-multiple-choice.ts"
+      ],
+      "pattern_proposal": "const SUMMARY_LINE_PATTERN = /^\\s*[…\\u2026]?\\s*[+\\-↑↓⏵⏷]?\\s*\\d+\\s+(?:pending|more)\\b/i;",
+      "pattern_design_notes": [
+        "両端アンカー(^...$)で full-line マッチを要求し False Positive を抑制",
+        "(.+) を含まないため option label に pending/more を含むケース (例: `2. Postpone (will remain pending)`) を弾かない",
+        "ReDoS safe: 全て linear / no nested quantifiers"
+      ]
+    },
+    {
+      "action_id": "S2",
+      "title": "CLAUDE_PROMPT_FOOTER_PATTERN による effectiveEnd 切詰め",
+      "description": "Pass 2 開始前に scanWindow を逆走査して『Esc to cancel · Tab to amend』フッターを発見したら、effectiveEnd をその行 index に切り詰める。フッター未発見時は既存ロジックに完全 fallback。",
+      "files_to_modify": [
+        "src/lib/detection/prompt-detect-multiple-choice.ts"
+      ],
+      "pattern_proposal": "const CLAUDE_PROMPT_FOOTER_PATTERN = /Esc\\s+to\\s+cancel\\s*[·•]\\s*Tab\\s+to\\s+amend/i;",
+      "design_notes": [
+        "アンカーなしの部分一致で良い (フッター文中の一部にこの語列があれば充分)",
+        "中点 `·` (U+00B7) と bullet `•` (U+2022) の両方を許容",
+        "scanWindow 内逆走査で最後に出現する位置を見つけたら effectiveEnd をその index に更新"
+      ]
+    },
+    {
+      "action_id": "S3",
+      "title": "3層回帰テスト追加",
+      "description": "prompt-detector.test.ts / status-detector.test.ts / auto-yes-resolver.test.ts の 3 層で Issue #704 fixture を回帰固定。",
+      "files_to_modify": [
+        "tests/unit/prompt-detector.test.ts",
+        "tests/unit/status-detector.test.ts または同等のパス",
+        "tests/unit/auto-yes-resolver.test.ts"
+      ],
+      "fixture_structure": [
+        "(冒頭略の対話履歴があってもよい)",
+        "⏺ Skill(/multi-stage-issue-review)",
+        "─────────────────────────────────────────────",
+        "Use skill \"multi-stage-issue-review\"?",
+        "Claude may use instructions, code, or files from this Skill.",
+        "",
+        "  Issue記載内容の多段階レビュー（通常→影響範囲）×2回と指摘対応を自動実行",
+        "",
+        "Do you want to proceed?",
+        "❯ 1. Yes",
+        "  2. Yes, and don't ask again for multi-stage-issue-review in <path>",
+        "  3. No",
+        "",
+        "  Esc to cancel · Tab to amend → · Herding…",
+        "  … +1 pending"
+      ]
+    }
+  ],
+  "tdd_implementation_order": [
+    "Step 1 (Red): tests/unit/prompt-detector.test.ts に Issue #704 fixture テストを追加し、isPrompt=true / type='multiple_choice' / options.length=3 / defaultOption='Yes' を expect する。現状の実装では options.length<2 で no_prompt になり Red になることを確認。",
+    "Step 2 (Red): 末尾サマリー行が単独で誤マッチしない回帰テストを追加 (NORMAL_OPTION_PATTERN を直接呼ぶ単体ではなく、detectPrompt 経由で確認)。",
+    "Step 3 (Green - S1): SUMMARY_LINE_PATTERN を prompt-detect-multiple-choice.ts に追加し Pass 2 ループで early-continue。Step 1 を Green にする。",
+    "Step 4 (Green - S2): CLAUDE_PROMPT_FOOTER_PATTERN を追加し effectiveEnd 切詰めを実装。S1 を一時的に無効化しても S2 だけで fixture が通る二重防御を内部確認 (commit 不要)。",
+    "Step 5 (Red→Green): status-detector.test.ts に Issue #704 fixture で sessionStatus='waiting' / reason='prompt_detected' を期待するテストを追加し Green を確認。",
+    "Step 6 (Red→Green): auto-yes-resolver.test.ts に Yes/No プロンプトに対し resolveAutoAnswer が Yes 応答を返すケースを追加し Green を確認。",
+    "Step 7 (Refactor): 定数の配置順序・JSDoc コメント・Issue #704 タグの整備。",
+    "Step 8: npm run lint / npx tsc --noEmit / npm run test:unit で全品質ゲート確認。"
+  ],
+  "acceptance_criteria": [
+    "Issue #704 受入条件: detectPrompt が Use skill fixture で multiple_choice を返す",
+    "Issue #704 受入条件: 末尾 `… +1 pending` を含む fixture で options=[Yes, Yes2nd, No] が抽出される",
+    "Issue #704 受入条件: status-detector が sessionStatus='waiting' / reason='prompt_detected' を返す",
+    "Issue #704 受入条件: Auto-Yes 有効時に resolveAutoAnswer が Yes 応答を返す",
+    "Issue #704 受入条件: 既存テスト (Bash/Edit 承認・通常 multiple_choice) が全パス",
+    "コード品質: npm run lint / npx tsc --noEmit / npm run test:unit 全パス"
+  ],
+  "regression_guards": [
+    "S1 の SUMMARY_LINE_PATTERN は行頭の数字+メタキーワード(pending|more)のみで両端アンカー",
+    "S2 は フッター未発見時 effectiveEnd を変更しない fallback",
+    "Codex/Gemini/OpenCode/Copilot 用テストは現状維持を確認",
+    "tests/unit/prompt-detector.test.ts の既存ケースを grep で前確認"
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "bug_id": "issue-704-20260515_173223",
+  "issue_number": 704,
+  "bug_description": "Claude Code v2.1.142「Use skill \"X\"?」プロンプトが prompt-detector で検出されず、UI で Yes/No ウィンドウが表示されない、Auto-Yes も発火しない。根本原因は NORMAL_OPTION_PATTERN が末尾の `… +1 pending` を option 1 / label='pending' と誤マッチし、isValidPrecedingOption() の連鎖で本物の 1/2/3 が全部弾かれること。",
+  "selected_actions": [
+    {
+      "action_id": "S1",
+      "title": "SUMMARY_LINE_PATTERN ガード追加（即座対策）",
+      "description": "src/lib/detection/prompt-detect-multiple-choice.ts に新規 SUMMARY_LINE_PATTERN を追加し、Pass 2 オプション収集ループ内で COLLAPSED_OUTPUT_PATTERN と同じ位置に early-continue を入れる。`… +N pending` / `+N pending` / `N more` を主スコープに、設計コメントで拡張ガイドラインを明示する。FP 抑止のため (.+) のフリーマッチは含めず、行頭の数字+メタキーワードのみに制限する。",
+      "files_to_modify": [
+        "src/lib/detection/prompt-detect-multiple-choice.ts"
+      ],
+      "expected_changes": [
+        "新規定数 SUMMARY_LINE_PATTERN を 27-52 行目付近 (COLLAPSED_OUTPUT_PATTERN の直後) に追加",
+        "Pass 2 ループ (584-622) の COLLAPSED_OUTPUT_PATTERN チェックの直後または直前で SUMMARY_LINE_PATTERN を判定し、マッチしたら continuationLineCount++ して continue",
+        "JSDoc コメントで設計意図 (Issue #704)・拡張時のガイドライン・FP 警戒語を明示"
+      ]
+    },
+    {
+      "action_id": "S2",
+      "title": "CLAUDE_PROMPT_FOOTER_PATTERN による effectiveEnd 切詰め（恒久対策）",
+      "description": "Claude の承認プロンプトは『Esc to cancel · Tab to amend ...』フッターが options の下に必ず描画される。Pass 2 開始前に scanWindow を逆走査して当該フッターを発見したら、その手前に effectiveEnd を切り詰める。フッターが見つからなければ既存ロジックに完全 fallback して回帰ゼロを保証する。",
+      "files_to_modify": [
+        "src/lib/detection/prompt-detect-multiple-choice.ts",
+        "src/lib/detection/cli-patterns.ts (任意: 共有定数として切り出す場合のみ)"
+      ],
+      "expected_changes": [
+        "新規定数 CLAUDE_PROMPT_FOOTER_PATTERN = /Esc\\s+to\\s+cancel\\s*[·•]\\s*Tab\\s+to\\s+amend/i を追加 (ReDoS safe・両端アンカー不要・大文字小文字非依存)",
+        "Pass 2 開始前 (effectiveEnd 確定後) に effectiveEnd-1 から scanStart まで逆走査してフッター行を探索",
+        "フッター発見時のみ effectiveEnd をその行 index に更新 (≦元 effectiveEnd を保証)",
+        "フッター未発見時は何も変更しない (fallback)"
+      ]
+    },
+    {
+      "action_id": "S3",
+      "title": "実 capture fixture 化 + 3層回帰テスト（予防策）",
+      "description": "Issue #704 の再現ターミナル出力を最小化した fixture を作成し、(a) prompt-detector で multiple_choice を返す、(b) status-detector で waiting + prompt_detected を返す、(c) auto-yes-poller / auto-yes-resolver で Yes 自動応答が解決される、の 3 層で回帰テストを固定する。",
+      "files_to_modify": [
+        "tests/unit/prompt-detector.test.ts",
+        "tests/unit/lib/status-detector.test.ts (パス確認、なければ tests/unit/status-detector.test.ts)",
+        "tests/unit/auto-yes-resolver.test.ts (auto-yes 層の test、なければ近接ファイル)"
+      ],
+      "expected_changes": [
+        "fixture テキストをテストファイル内 const 文字列として保持 (外部ファイル化はスコープ外、最小化優先)",
+        "prompt-detector.test.ts: Claude v2.1.142『Use skill』fixture で detectPrompt が isPrompt=true, type='multiple_choice', options.length=3 を返すケース追加",
+        "prompt-detector.test.ts: 末尾 `… +1 pending` 単独行が誤マッチしないケース (回帰防御)",
+        "prompt-detector.test.ts: 既存の Bash/Edit/通常 multiple_choice fixture が壊れていない確認用ケースは既存テストで担保",
+        "status-detector.test.ts: 同 fixture で sessionStatus='waiting', reason='prompt_detected' を返すケース追加",
+        "auto-yes-resolver.test.ts: Yes/No プロンプトに対し resolveAutoAnswer が Yes (option 1) を返すケース追加"
+      ]
+    }
+  ],
+  "deliverables": [
+    "src/lib/detection/prompt-detect-multiple-choice.ts (SUMMARY_LINE_PATTERN + CLAUDE_PROMPT_FOOTER_PATTERN による Pass 2 改修)",
+    "tests/unit/prompt-detector.test.ts (Issue #704 fixture と回帰テスト追加)",
+    "tests/unit/status-detector.test.ts または tests/unit/lib/status-detector.test.ts (sessionStatus 検証追加)",
+    "tests/unit/auto-yes-resolver.test.ts (Auto-Yes 解決検証追加)"
+  ],
+  "definition_of_done": [
+    "Issue #704 受入条件: `Use skill \"X\"?` を含む実出力 fixture で detectPrompt が multiple_choice を返す",
+    "Issue #704 受入条件: 末尾 `… +N pending` / `N more` 等のサマリー行が option として誤マッチしない",
+    "Issue #704 受入条件: status-detector が当該プロンプトで sessionStatus='waiting' / reason='prompt_detected' を返す",
+    "Issue #704 受入条件: Auto-Yes 有効時に当該プロンプトに対して resolveAutoAnswer が Yes 応答を返す",
+    "Issue #704 受入条件: 既存の Bash/Edit 承認プロンプト・通常 multiple_choice プロンプトの検出が壊れていない（npm run test:unit 全パス）",
+    "Issue #704 受入条件: 単体テストが追加され npm run test:unit でパスする",
+    "コード品質: ESLint パス (npm run lint)",
+    "コード品質: TypeScript 型チェックパス (npx tsc --noEmit)",
+    "コード品質: カバレッジ 80%以上 (追加箇所のロジック分岐)",
+    "回帰防御: S2 (CLAUDE_PROMPT_FOOTER_PATTERN) が fallback として既存パスで動作することを test で固定"
+  ],
+  "files_to_modify_summary": {
+    "production_code": [
+      "src/lib/detection/prompt-detect-multiple-choice.ts"
+    ],
+    "test_code": [
+      "tests/unit/prompt-detector.test.ts",
+      "tests/unit/status-detector.test.ts (または同等のパス)",
+      "tests/unit/auto-yes-resolver.test.ts"
+    ]
+  },
+  "implementation_order": [
+    "1. S3 (fixture + 失敗テスト) を Red として書く - prompt-detector.test.ts で『Use skill』fixture が isPrompt=true を期待するテスト",
+    "2. S1 (SUMMARY_LINE_PATTERN) を実装し Green にする",
+    "3. S2 (CLAUDE_PROMPT_FOOTER_PATTERN) を追加し、ガード二重化を確認 (S1 を一時的に潰しても S2 だけで通る fixture バリエーションを追加)",
+    "4. status-detector / auto-yes-resolver の 2 層テストを追加し 3 層回帰固定",
+    "5. Refactor: 定数名・JSDoc・Issue 番号タグの整備",
+    "6. 全テスト実行・lint・tsc で品質ゲート確認"
+  ],
+  "regression_guards": [
+    "既存 prompt-detector テストの『option label に pending/more/line を含むケース』を grep して影響範囲を事前確認",
+    "S1 の SUMMARY_LINE_PATTERN は行頭の数字+キーワードのみに限定し (.+) フリーマッチを禁止",
+    "S2 の CLAUDE_PROMPT_FOOTER_PATTERN 未発見時は既存 effectiveEnd を維持し fallback",
+    "Codex/Gemini/OpenCode/Copilot 用テストは現状維持を確認"
+  ]
+}

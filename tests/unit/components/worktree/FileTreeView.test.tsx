@@ -1550,4 +1550,172 @@ describe('FileTreeView', () => {
       expect(screen.getByTestId('empty-new-directory-button')).toBeInTheDocument();
     });
   });
+
+  /**
+   * Issue #706: Files タブのツリー再描画でスクロール位置がリセットされる問題の修正
+   *
+   * refetch (refreshTrigger 変化) のたびに「Loading files...」全画面スピナーへ
+   * 置換していたためスクロール位置・選択状態が失われていた。
+   * 全画面 Loading は初回マウント時のみに限定し、refetch 中は既存ツリーを
+   * 保持したまま小型インジケーターを表示するように変更する。
+   */
+  describe('refetch indicator (Issue #706)', () => {
+    it('should not show file-tree-loading on refetch (refreshTrigger change)', async () => {
+      const { rerender } = render(
+        <FileTreeView worktreeId="test-worktree" refreshTrigger={0} />
+      );
+
+      // Wait for initial load to finish (existing tree visible)
+      await waitFor(() => {
+        expect(screen.getByText('src')).toBeInTheDocument();
+      });
+
+      // Trigger refetch
+      rerender(
+        <FileTreeView worktreeId="test-worktree" refreshTrigger={1} />
+      );
+
+      // Existing tree should still be in the DOM
+      expect(screen.getByText('src')).toBeInTheDocument();
+      // Full-screen loading indicator must NOT replace the tree on refetch
+      expect(screen.queryByTestId('file-tree-loading')).not.toBeInTheDocument();
+
+      // Wait for refetch to complete
+      await waitFor(() => {
+        expect(screen.getByText('src')).toBeInTheDocument();
+      });
+    });
+
+    it('should show file-tree-refetch-indicator while refetching', async () => {
+      // Use a deferred fetch implementation to keep the refetch "in-flight"
+      let resolveRefetch: ((value: unknown) => void) | null = null;
+
+      const { rerender } = render(
+        <FileTreeView worktreeId="test-worktree" refreshTrigger={0} />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('src')).toBeInTheDocument();
+      });
+
+      // Switch to a fetch implementation that defers the response
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/tree')) {
+          return new Promise((resolve) => {
+            resolveRefetch = resolve;
+          });
+        }
+        return Promise.reject(new Error('Not found'));
+      });
+
+      rerender(<FileTreeView worktreeId="test-worktree" refreshTrigger={1} />);
+
+      // Indicator should appear while the refetch is in-flight
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-refetch-indicator')).toBeInTheDocument();
+      });
+
+      // Existing tree must still be visible
+      expect(screen.getByText('src')).toBeInTheDocument();
+
+      // Resolve the deferred refetch
+      await act(async () => {
+        if (resolveRefetch) {
+          resolveRefetch({
+            ok: true,
+            json: () => Promise.resolve(mockRootData),
+          });
+        }
+      });
+
+      // After completion, the indicator should be gone
+      await waitFor(() => {
+        expect(screen.queryByTestId('file-tree-refetch-indicator')).not.toBeInTheDocument();
+      });
+    });
+
+    it('should preserve existing tree and show file-tree-refetch-error on refetch failure', async () => {
+      const { rerender } = render(
+        <FileTreeView worktreeId="test-worktree" refreshTrigger={0} />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('src')).toBeInTheDocument();
+      });
+
+      // Switch to a fetch implementation that fails
+      mockFetch.mockImplementation(() => Promise.reject(new Error('Network error')));
+
+      rerender(<FileTreeView worktreeId="test-worktree" refreshTrigger={1} />);
+
+      // Wait for refetch error to surface
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-refetch-error')).toBeInTheDocument();
+      });
+
+      // Existing tree must still be visible (non-destructive error display)
+      expect(screen.getByText('src')).toBeInTheDocument();
+      // The full-screen error state must NOT be shown when we already had a tree
+      expect(screen.queryByTestId('file-tree-error')).not.toBeInTheDocument();
+      // Retry button must be available
+      expect(screen.getByTestId('file-tree-refetch-retry-button')).toBeInTheDocument();
+    });
+
+    it('should still show full-screen file-tree-error on initial load failure', async () => {
+      mockFetch.mockRejectedValue(new Error('Network error'));
+
+      render(<FileTreeView worktreeId="test-worktree" />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-error')).toBeInTheDocument();
+      });
+
+      // No refetch error banner on initial failure
+      expect(screen.queryByTestId('file-tree-refetch-error')).not.toBeInTheDocument();
+    });
+
+    it('should retry refetch when file-tree-refetch-retry-button is clicked', async () => {
+      const { rerender } = render(
+        <FileTreeView worktreeId="test-worktree" refreshTrigger={0} />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('src')).toBeInTheDocument();
+      });
+
+      // Trigger refetch that fails
+      mockFetch.mockImplementation(() => Promise.reject(new Error('Network error')));
+      rerender(<FileTreeView worktreeId="test-worktree" refreshTrigger={1} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-refetch-error')).toBeInTheDocument();
+      });
+
+      // Switch the fetch back to a successful response
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/tree/src')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockSrcData),
+          });
+        }
+        if (url.includes('/tree')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockRootData),
+          });
+        }
+        return Promise.reject(new Error('Not found'));
+      });
+
+      // Click retry
+      fireEvent.click(screen.getByTestId('file-tree-refetch-retry-button'));
+
+      // Error banner should disappear after successful retry
+      await waitFor(() => {
+        expect(screen.queryByTestId('file-tree-refetch-error')).not.toBeInTheDocument();
+      });
+      expect(screen.getByText('src')).toBeInTheDocument();
+    });
+  });
 });

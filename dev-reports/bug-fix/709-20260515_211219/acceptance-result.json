@@ -1,0 +1,197 @@
+{
+  "bug_id": "709-20260515_211219",
+  "issue_number": 709,
+  "executed_at": "2026-05-15T21:30:00+09:00",
+  "overall_result": "pass",
+  "summary": "Issue #709 のバグ修正に対する受入テストは全シナリオ (T1-T8) で合格。useWorktreesCache の二重インスタンス化は構造的に解消され、Sessions ページは WorktreesCacheProvider 経由の Context (useWorktreesCacheContext) のみを使用するように変更されている。src/ 配下で useWorktreesCache() を直接呼び出しているのは src/components/providers/WorktreesCacheProvider.tsx 1箇所のみであることを確認した。新規 Provider テスト (5件) と既存の SessionsPage テスト (18件)、および全 unit テスト (6496件 PASS / 7 skipped、344ファイル) も回帰 0 件で完走している。",
+  "test_scenarios": [
+    {
+      "id": "T1",
+      "name": "Sessions ページの直接呼び出し廃止確認",
+      "result": "pass",
+      "command": "grep -n \"useWorktreesCache\" src/app/sessions/page.tsx",
+      "evidence": [
+        "L6: コメント中の言及のみ (Issue #709 説明)",
+        "L7: コメント中の言及のみ (useWorktreesCache() を直接呼び出していない旨の説明)",
+        "L19: import { useWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';",
+        "L114: const { worktrees, isLoading, error } = useWorktreesCacheContext();"
+      ],
+      "expected": "useWorktreesCache の import が存在せず、useWorktreesCacheContext の import と呼び出しが存在する",
+      "actual": "期待通り。useWorktreesCache の import 文と直接呼び出しは消滅し、useWorktreesCacheContext() のみが使用されている (残るのは説明コメント内の文字列マッチのみ)"
+    },
+    {
+      "id": "T2",
+      "name": "他箇所での二重呼び出し確認",
+      "result": "pass",
+      "command": "grep -rn 'useWorktreesCache(' src/",
+      "evidence": [
+        "src/app/sessions/page.tsx:7  -> コメント内の言及のみ",
+        "src/components/providers/WorktreesCacheProvider.tsx:5  -> コメント内の言及のみ",
+        "src/components/providers/WorktreesCacheProvider.tsx:11 -> コメント内の言及のみ",
+        "src/components/providers/WorktreesCacheProvider.tsx:52 -> 唯一の実呼び出し: const cache = useWorktreesCache();",
+        "src/hooks/useWorktreesCache.ts:47 -> エクスポート宣言 (export function useWorktreesCache(): ...)"
+      ],
+      "expected": "useWorktreesCache() の実呼び出しは WorktreesCacheProvider.tsx の 1 箇所のみ",
+      "actual": "期待通り。実呼び出しは WorktreesCacheProvider.tsx の L52 のみで、他はコメントまたはエクスポート宣言にすぎない。構造的に二重インスタンス化は不可能になっている"
+    },
+    {
+      "id": "T3",
+      "name": "Provider Context テスト (新規)",
+      "result": "pass",
+      "command": "npx vitest run tests/unit/components/providers/WorktreesCacheProvider.test.tsx",
+      "evidence": [
+        "Test Files  1 passed (1)",
+        "Tests       5 passed (5)",
+        "Duration    433ms"
+      ],
+      "expected": "全テスト PASS",
+      "actual": "5 件全て PASS。テスト内容: (1) cached worktrees/repositories/isLoading/error/refresh の context 経由公開、(2) loading state 伝播、(3) error state 伝播、(4) refresh() 関数の forward、(5) Provider 外呼び出し時の Error throw。エラーログは Provider 外呼び出しテストの想定内出力"
+    },
+    {
+      "id": "T4",
+      "name": "Sessions ページテスト回帰確認",
+      "result": "pass",
+      "command": "npx vitest run tests/unit/SessionsPage.test.tsx",
+      "evidence": [
+        "Test Files  1 passed (1)",
+        "Tests       18 passed (18)",
+        "Duration    470ms"
+      ],
+      "expected": "全テスト PASS",
+      "actual": "18 件全て PASS。モック対象が useWorktreesCache から useWorktreesCacheContext に置き換わったが、既存挙動 (フィルタ・ソート・XSS sanitize・loading/error/empty state) すべて維持されている"
+    },
+    {
+      "id": "T5",
+      "name": "Lint 検査",
+      "result": "pass",
+      "command": "npm run lint",
+      "evidence": [
+        "✔ No ESLint warnings or errors"
+      ],
+      "expected": "エラー 0 件",
+      "actual": "ESLint 警告・エラー 0 件"
+    },
+    {
+      "id": "T6",
+      "name": "型検査",
+      "result": "pass",
+      "command": "npx tsc --noEmit",
+      "evidence": [
+        "tsc completed with no output (exit code 0)"
+      ],
+      "expected": "エラー 0 件",
+      "actual": "TypeScript 型エラー 0 件"
+    },
+    {
+      "id": "T7",
+      "name": "Unit Test 全件実行",
+      "result": "pass",
+      "command": "npm run test:unit",
+      "evidence": [
+        "Test Files  344 passed (344)",
+        "Tests       6496 passed | 7 skipped (6503)",
+        "Duration    13.73s",
+        "出力中の Error ログは useSidebarContext / useWorktreesCacheContext / useAuthContext 等の Provider 外呼び出し時の意図的な throw テストの想定内出力"
+      ],
+      "expected": "全件 PASS、新規導入による回帰 0 件",
+      "actual": "344 ファイル / 6496 件 PASS、7 件 skipped、失敗 0 件。回帰なし"
+    },
+    {
+      "id": "T8",
+      "name": "Provider 階層維持確認",
+      "result": "pass",
+      "method": "AppProviders.tsx と WorktreesCacheProvider.tsx の構造確認",
+      "evidence": [
+        "AppProviders.tsx: NextIntlClientProvider > ThemeProvider > AuthProvider > SidebarProvider > WorktreesCacheProvider > children の階層を維持",
+        "WorktreesCacheProvider.tsx: useWorktreesCache() の戻り値から worktrees / repositories を取り出し、WorktreeSelectionProvider に externalWorktrees / externalRepositories として伝播 (L66-71)",
+        "新規追加された WorktreesCacheContext.Provider は WorktreeSelectionProvider の外側を包む形で配置され、Issue #690 の visible/enabled フラグを含む repositories の伝播も維持"
+      ],
+      "expected": "既存の WorktreeSelectionProvider プロパティ伝播が保たれている",
+      "actual": "期待通り。externalWorktrees / externalRepositories の伝播は維持されており、Sidebar の Worktree 表示やリポジトリ visible/enabled フィルタ (Issue #690) に影響しない"
+    }
+  ],
+  "acceptance_criteria_check": [
+    {
+      "criterion": "Sessions ページで useWorktreesCache() の直接呼び出しが廃止されている (Provider 経由の Context から取得)",
+      "achieved": true,
+      "evidence": "src/app/sessions/page.tsx は useWorktreesCacheContext() のみを呼び出している (T1)"
+    },
+    {
+      "criterion": "プロジェクト全体で useWorktreesCache の二重呼び出し箇所が存在しない (Provider のみが呼び出す)",
+      "achieved": true,
+      "evidence": "実呼び出しは src/components/providers/WorktreesCacheProvider.tsx L52 の 1 箇所のみ (T2)"
+    },
+    {
+      "criterion": "useWorktreesCacheContext() を Provider 外で呼ぶと適切なエラーが投げられる",
+      "achieved": true,
+      "evidence": "WorktreesCacheProvider.tsx L92-100 で null チェックし 'useWorktreesCacheContext must be used within a WorktreesCacheProvider' を throw。テスト T3 で確認済み"
+    },
+    {
+      "criterion": "Sessions 画面の既存機能 (フィルタ・ソート・XSS sanitize・loading/error/empty state) に回帰がない",
+      "achieved": true,
+      "evidence": "SessionsPage.test.tsx 18 件全 PASS (T4)"
+    },
+    {
+      "criterion": "新規テスト tests/unit/components/providers/WorktreesCacheProvider.test.tsx が全件 PASS",
+      "achieved": true,
+      "evidence": "5 件全 PASS (T3)"
+    },
+    {
+      "criterion": "既存テスト tests/unit/SessionsPage.test.tsx が全件 PASS",
+      "achieved": true,
+      "evidence": "18 件全 PASS (T4)"
+    },
+    {
+      "criterion": "npm run test:unit 全件 PASS、回帰 0 件",
+      "achieved": true,
+      "evidence": "344 ファイル / 6496 件 PASS、7 件 skipped、失敗 0 件 (T7)"
+    },
+    {
+      "criterion": "npm run lint クリーン",
+      "achieved": true,
+      "evidence": "ESLint 警告・エラー 0 件 (T5)"
+    },
+    {
+      "criterion": "npx tsc --noEmit クリーン",
+      "achieved": true,
+      "evidence": "型エラー 0 件 (T6)"
+    }
+  ],
+  "regression_check_areas": [
+    {
+      "area": "Sessions 画面 (フィルタ・ソート・XSS sanitize・loading/error/empty state)",
+      "result": "no_regression",
+      "evidence": "SessionsPage.test.tsx 18 件全 PASS"
+    },
+    {
+      "area": "Sidebar の Worktree 表示 (WorktreeSelectionContext 経由)",
+      "result": "no_regression",
+      "evidence": "WorktreesCacheProvider は引き続き externalWorktrees / externalRepositories を WorktreeSelectionProvider に伝播 (T8 で構造確認、npm run test:unit 全件 PASS)"
+    },
+    {
+      "area": "リポジトリ visible/enabled フィルタ (Issue #690)",
+      "result": "no_regression",
+      "evidence": "externalRepositories の伝播経路は変更されていない (T8)。useWorktreesCache の戻り値 cache.repositories はそのまま WorktreeSelectionProvider に渡されている"
+    }
+  ],
+  "issues_found": [],
+  "recommendations": [
+    "ネットワーク観点での実機検証 (Chrome DevTools Network パネルで /api/worktrees が単一インスタンス化されることの確認) はサーバ起動が必要で本受入テストの範疇外だが、構造的には useWorktreesCache の実呼び出しが WorktreesCacheProvider 1 箇所に限定されており、これにより setInterval ベースのポーリングが 1 系統に統一されていることがコード上保証される。",
+    "今後 Sessions ページ以外のページ (Repositories, Review, More 等) で worktrees キャッシュを参照したい場合は、必ず useWorktreesCacheContext() を使うこと。useWorktreesCache の export を残しているのは Provider 専用にするべきかどうかは将来の検討課題 (例えば JSDoc で internal API である旨を明示する等)。"
+  ],
+  "test_evidence_summary": {
+    "lint": "PASS (0 warnings, 0 errors)",
+    "type_check": "PASS (tsc --noEmit clean)",
+    "new_provider_test": "PASS (5/5)",
+    "sessions_page_test": "PASS (18/18)",
+    "all_unit_tests": "PASS (6496/6503, 7 skipped, 0 failed across 344 files)",
+    "grep_direct_call_count_in_src": "1 (only in WorktreesCacheProvider.tsx)"
+  },
+  "files_verified": [
+    "/Users/maenokota/share/work/github_kewton/commandmate-issue-709/src/app/sessions/page.tsx",
+    "/Users/maenokota/share/work/github_kewton/commandmate-issue-709/src/components/providers/WorktreesCacheProvider.tsx",
+    "/Users/maenokota/share/work/github_kewton/commandmate-issue-709/src/components/providers/AppProviders.tsx",
+    "/Users/maenokota/share/work/github_kewton/commandmate-issue-709/tests/unit/SessionsPage.test.tsx",
+    "/Users/maenokota/share/work/github_kewton/commandmate-issue-709/tests/unit/components/providers/WorktreesCacheProvider.test.tsx"
+  ]
+}

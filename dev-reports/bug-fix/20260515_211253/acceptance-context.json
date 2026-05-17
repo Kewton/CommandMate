@@ -1,0 +1,40 @@
+{
+  "bug_id": "20260515_211253",
+  "related_issue": 710,
+  "bug_description": "useWorktreesCache のポーリング間隔が active/idle 遷移時に動的切替されない",
+  "fix_summary": "currentIntervalRef を導入し、worktrees 変化時に desired interval (active=5s/idle=30s) を再計算。現在の interval と異なる場合のみ setInterval を再起動する。document.hidden 時や初期化前 (currentIntervalRef.current === null) はスキップ。",
+  "modified_files": [
+    "src/hooks/useWorktreesCache.ts",
+    "tests/unit/useWorktreesCache.test.ts"
+  ],
+  "acceptance_criteria": [
+    "worktrees の active/idle 状態変化を検知し、間隔が変わるべきタイミングで startPolling を再実行する",
+    "active 状態でアプリ起動 → セッション停止 → 30秒間隔に移行することをネットワーク監視で確認",
+    "idle 状態でアプリ起動 → セッション開始 → 5秒間隔に移行することを確認",
+    "不要な setInterval 再起動が発生しない（同じ間隔のままなら no-op）",
+    "visibility hidden → visible の挙動が壊れない",
+    "npm run test:unit 回帰 0 件"
+  ],
+  "test_scenarios": [
+    "シナリオ1: useWorktreesCache 単体テスト全件PASS（15件）",
+    "シナリオ2: idle→active 遷移時に5s間隔に切替",
+    "シナリオ3: active→idle 遷移時に30s間隔に切替",
+    "シナリオ4: 同じ active 状態が続く場合は no-op（setInterval再起動しない）",
+    "シナリオ5: document.hidden 時は worktrees 変化で再起動しない",
+    "シナリオ6: 既存テストスイート全件PASS（6495件、回帰0件）",
+    "シナリオ7: npm run lint PASS",
+    "シナリオ8: npx tsc --noEmit PASS"
+  ],
+  "tdd_result": {
+    "status": "success",
+    "new_tests": 4,
+    "total_tests_in_file": 15,
+    "regression_test_count": 6495,
+    "coverage": {
+      "statements": 95.45,
+      "branches": 87.5,
+      "functions": 100,
+      "lines": 95.31
+    }
+  }
+}

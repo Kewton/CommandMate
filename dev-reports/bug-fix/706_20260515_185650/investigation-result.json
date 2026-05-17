@@ -1,0 +1,80 @@
+{
+  "investigation_summary": "Files タブのツリーが refetch 時に全画面 Loading スピナーで置換されるため、スクロール位置・フォーカス・選択強調などの DOM ステートがリセットされる。原因は (1) FileTreeView の loading 分岐が初回マウント/refetch を区別せず全置換していること、(2) WorktreeDetailRefactored の prevTreeHashRef が null 初期化のため初回ポーリングで偽陽性発火していることの 2 点。",
+  "root_cause": {
+    "primary": {
+      "type": "structural",
+      "description": "FileTreeView.tsx の `if (loading) return <Loading>` 分岐が初回・refetch を区別せず DOM 全置換する",
+      "evidence": [
+        "src/components/worktree/FileTreeView.tsx:367-378 で loading=true 時に常に file-tree-loading を返す",
+        "src/components/worktree/FileTreeView.tsx:161 で reloadTreeWithExpandedDirs() が refreshTrigger 変化時にも setLoading(true) を呼ぶ",
+        "結果として refetch のたびに rootItems を持つ DOM がアンマウントされ、スクロール位置・選択状態が失われる"
+      ]
+    },
+    "secondary": {
+      "type": "false_positive_polling",
+      "description": "WorktreeDetailRefactored のツリーポーリングが初回ポーリング時に偽陽性で refresh を発火する",
+      "evidence": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx:265 で `const prevTreeHashRef = useRef<string | null>(null)`",
+        "src/components/worktree/WorktreeDetailRefactored.tsx:275 の `if (newHash !== prevTreeHashRef.current)` が初回必ず true になる",
+        "FILE_TREE_POLL_INTERVAL_MS=5000ms（src/config/file-polling-config.ts:8）のため、初回マウント約5秒後に発火"
+      ]
+    }
+  },
+  "affected_scope": {
+    "user_facing": [
+      "Files タブを開いている全 worktree 詳細画面",
+      "初回マウント後 5 秒の偽陽性発火 + 2 回目以降の実ファイル変更検知時",
+      "スクロール位置、選択中ファイルの強調、キーボードフォーカス、hover 状態が瞬間的に失われる"
+    ],
+    "platforms": ["PC", "モバイル"]
+  },
+  "severity": "high",
+  "recommended_actions": [
+    {
+      "id": "action-1",
+      "priority": "high",
+      "title": "FileTreeView の loading 分岐を初回限定に変更（Option 3: 既存ツリー保持）",
+      "description": "loading=true かつ rootItems.length===0 のときだけ全画面 Loading を表示し、refetch 中は既存ツリー DOM を保持する。パネル内に控えめな更新インジケーターを表示。",
+      "files_to_modify": [
+        "src/components/worktree/FileTreeView.tsx"
+      ],
+      "rationale": "本質的なスクロール位置リセット問題を根本解決する。実ファイル変更検知時のリセットも同時に解消できる。"
+    },
+    {
+      "id": "action-2",
+      "priority": "high",
+      "title": "refetch 失敗時の非破壊エラー表示",
+      "description": "refetch エラー時は既存ツリーを保持しつつエラーを非破壊的に通知。初回ロードエラーのみ既存の全画面エラー表示を維持。",
+      "files_to_modify": [
+        "src/components/worktree/FileTreeView.tsx"
+      ],
+      "rationale": "refetch 失敗で既存ツリーが消失する二次的な体験悪化を防ぐ。Issue 受入条件に含まれる。"
+    },
+    {
+      "id": "action-3",
+      "priority": "medium",
+      "title": "prevTreeHashRef 初回スキップで偽陽性ポーリングを抑止",
+      "description": "WorktreeDetailRefactored.tsx の `if (newHash !== prevTreeHashRef.current)` を初回 null のときは比較スキップして代入のみに変更。",
+      "files_to_modify": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "rationale": "Option 3 単独でもスクロール維持は実現できるが、無駄な refetch を避ける観点で同時対応推奨。Issue で『同時対応推奨』と記載あり。"
+    },
+    {
+      "id": "action-4",
+      "priority": "high",
+      "title": "テスト追加・既存テスト更新",
+      "description": "data-testid=file-tree-loading の期待値を『rootItems 未取得時に限定』に更新。refetch 中も既存ツリーが保持されることの新規テスト追加。",
+      "files_to_modify": [
+        "tests/unit/components/worktree/FileTreeView.test.tsx"
+      ],
+      "rationale": "受入条件: 既存 `npm run test:unit` で 0 件の回帰、refetch 動作の新規テスト追加が必須。"
+    }
+  ],
+  "risks_and_considerations": [
+    "TreeNode の key（key={item.name}）が安定していることに依存する（React reconciliation での再利用）",
+    "expandedRef.current は既存実装で保持されているため、ロジック変更不要",
+    "data-testid=file-tree-loading を期待する既存テストは初回マウント時シナリオに限定する必要あり",
+    "アクセシビリティ: 更新インジケーターに aria-live を検討"
+  ]
+}

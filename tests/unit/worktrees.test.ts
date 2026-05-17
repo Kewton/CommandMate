@@ -7,14 +7,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { exec } from 'child_process';
 import type { Worktree } from '@/types/models';
 
-// Mock child_process - just auto-mock it
-vi.mock('child_process');
+// Mock child_process - use a factory so the mock function does NOT inherit
+// `util.promisify.custom` from the real exec. With auto-mock, that symbol is
+// preserved and promisify(exec) bypasses mockImplementation entirely.
+vi.mock('child_process', () => ({
+  exec: vi.fn(),
+}));
 
 // Import functions after mocking
 import {
   generateWorktreeId,
   parseWorktreeOutput,
   scanWorktrees,
+  scanMultipleRepositories,
   syncWorktreesToDB,
 } from '@/lib/git/worktrees';
 
@@ -265,6 +270,81 @@ invalid line
       // Unit test just verifies the function exists and has correct signature
       expect(syncWorktreesToDB).toBeDefined();
       expect(typeof syncWorktreesToDB).toBe('function');
+    });
+  });
+
+  // Issue #711: scanMultipleRepositories must run repository scans in parallel
+  describe('scanMultipleRepositories', () => {
+    it('should invoke git worktree list once per repository', async () => {
+      const observedCwds: string[] = [];
+      vi.mocked(exec).mockImplementation(
+        ((_cmd: string, opts: { cwd?: string }, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
+          observedCwds.push(opts?.cwd ?? '');
+          callback(null, '', '');
+          return {} as never;
+        }) as never
+      );
+
+      const result = await scanMultipleRepositories(['/repo1', '/repo2', '/repo3']);
+
+      expect(observedCwds.sort()).toEqual(['/repo1', '/repo2', '/repo3']);
+      expect(result).toEqual([]);
+    });
+
+    it('should continue when one repository scan rejects', async () => {
+      vi.mocked(exec).mockImplementation(
+        ((_cmd: string, opts: { cwd?: string }, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
+          if (opts?.cwd === '/bad-repo') {
+            const error = Object.assign(new Error('permission denied'), { code: 1 });
+            callback(error, '', 'permission denied');
+          } else {
+            callback(null, '', '');
+          }
+          return {} as never;
+        }) as never
+      );
+
+      await expect(
+        scanMultipleRepositories(['/repo1', '/bad-repo', '/repo3'])
+      ).resolves.toEqual([]);
+    });
+
+    it('should return an empty array for an empty repository list', async () => {
+      const result = await scanMultipleRepositories([]);
+      expect(result).toEqual([]);
+    });
+
+    it('should start all repository scans before any of them resolves (parallel)', async () => {
+      const started: string[] = [];
+      const deferred = new Map<string, () => void>();
+
+      vi.mocked(exec).mockImplementation(
+        ((_cmd: string, opts: { cwd?: string }, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
+          const cwd = opts?.cwd ?? '';
+          started.push(cwd);
+          // Hold the callback until we explicitly release it. With sequential
+          // execution, only the first exec would fire and the loop would block
+          // waiting for it to resolve; with parallel execution, all three
+          // should be observed in `started` before any callback resolves.
+          deferred.set(cwd, () => callback(null, '', ''));
+          return {} as never;
+        }) as never
+      );
+
+      const promise = scanMultipleRepositories(['/repo1', '/repo2', '/repo3']);
+
+      // Let the synchronous .map(...) issue all three exec calls.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(started.sort()).toEqual(['/repo1', '/repo2', '/repo3']);
+
+      // Release in reverse order to make sure ordering doesn't depend on
+      // resolution order.
+      deferred.get('/repo3')!();
+      deferred.get('/repo2')!();
+      deferred.get('/repo1')!();
+
+      await expect(promise).resolves.toEqual([]);
     });
   });
 });

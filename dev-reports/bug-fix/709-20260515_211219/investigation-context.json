@@ -1,0 +1,36 @@
+{
+  "issue_number": 709,
+  "issue_description": "useWorktreesCache フックが Sessions 画面表示中に2回インスタンス化され、同じ /api/worktrees ポーリングが並行で2系統動いている。Provider 経由に統一して1系統に集約する。",
+  "error_logs": [],
+  "affected_files": [
+    "src/components/providers/WorktreesCacheProvider.tsx",
+    "src/app/sessions/page.tsx",
+    "src/hooks/useWorktreesCache.ts",
+    "src/contexts/WorktreeSelectionContext.tsx",
+    "src/components/providers/AppProviders.tsx"
+  ],
+  "reproduction_steps": [
+    "1. ブラウザで /sessions にアクセス",
+    "2. ネットワークタブで /api/worktrees の呼び出し頻度を観察",
+    "3. POLLING_INTERVAL_IDLE=30000ms (アイドル時) または POLLING_INTERVAL_ACTIVE=5000ms (アクティブセッション時) に対し、リクエストが2倍の頻度で発生していることを確認"
+  ],
+  "environment": {
+    "framework": "Next.js 14",
+    "language": "TypeScript",
+    "test_framework": "Vitest"
+  },
+  "severity_hint": "high",
+  "key_findings": {
+    "duplicate_instance_locations": [
+      "src/components/providers/WorktreesCacheProvider.tsx:32 (グローバル Provider 経由)",
+      "src/app/sessions/page.tsx:110 (Sessions ページが独自に呼び出し)"
+    ],
+    "internal_state_not_shared": "useWorktreesCache の名前は 'cache' だが React Context を使っていないため、複数箇所で呼ぶと各々独立した useState/useRef/useEffect/setInterval を保有する",
+    "polling_interval_logic": {
+      "POLLING_INTERVAL_ACTIVE": "5000ms",
+      "POLLING_INTERVAL_IDLE": "30000ms",
+      "adaptive": "アクティブセッション有無で切替"
+    },
+    "test_mocking_pattern": "tests/unit/SessionsPage.test.tsx は useWorktreesCache を vi.mock しているため、Context 移行に伴いテストも変更が必要"
+  }
+}

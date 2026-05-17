@@ -1,0 +1,95 @@
+{
+  "issue_number": 704,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/704",
+  "issue_description": "Claude Code v2.1.142「Use skill \"X\"?」プロンプトが Yes/No UI として検出されない。プロンプト検出ロジック（detectPrompt / detectMultipleChoicePrompt）が `isPromptWaiting=false`, `promptData=null` を返すため、UI で Yes/No 選択ウィンドウが表示されず、Auto-Yes も発火しない。",
+  "severity_hint": "high",
+  "environment": {
+    "claude_code_version": "v2.1.142 (Opus 4.7, 1M context)",
+    "os": "macOS Darwin 25.4.0",
+    "node_version": "18.x (推定)",
+    "project_version": "v0.5.7"
+  },
+  "reproduction_steps": [
+    "1. Claude CLI セッション起動済みの worktree で /multi-stage-issue-review のような初回利用のスキルを実行",
+    "2. ターミナルに『Use skill \"X\"?』『Do you want to proceed?』を含む承認プロンプトが表示される",
+    "3. プロンプトの直後に Claude v2.1.142 が新規描画する『Esc to cancel · Tab to amend → · Herding…』『… +1 pending』等のサマリー行が描画される",
+    "4. CommandMate Worktree 詳細画面を開く",
+    "5. 期待: Yes/No 選択ウィンドウ表示 / 実際: 表示されず Auto-Yes も発火しない"
+  ],
+  "observed_api_response": {
+    "endpoint": "GET /api/worktrees/<id>/current-output?cliTool=claude",
+    "actual": {
+      "isPromptWaiting": false,
+      "promptData": null,
+      "isSelectionListActive": false,
+      "sessionStatus": "running",
+      "autoYes": { "enabled": true }
+    },
+    "expected": {
+      "isPromptWaiting": true,
+      "promptData": { "type": "multiple_choice", "question": "...", "options": [] },
+      "sessionStatus": "waiting_prompt"
+    }
+  },
+  "preliminary_root_cause_analysis": {
+    "source": "Issue body (copilot/claude-opus-4.6 による事前分析)",
+    "true_root_cause": "承認プロンプトの後ろに残る『… +1 pending』等のサマリー行が NORMAL_OPTION_PATTERN に誤マッチし、option 1 / label='pending' と誤検出される。これにより isValidPrecedingOption() が上方の本物の 3/2/1 を『先行 option として不正』と判定して捨て、Layer 4 で options.length < 2 となり prompt 不検出になる。",
+    "false_hypotheses": {
+      "hypothesis_a_use_skill_pattern_missing": "❌ 主因ではない。現行の isQuestionLikeLine() は `?` を含む行を question として認識し、question の直前 5 行も連結するため、`Use skill ...?` 単体なら検出可能。",
+      "hypothesis_b_herding_thinking": "❌ 主因ではない。Herding… 自体より、その後ろの『… +1 pending』が致命点。"
+    },
+    "false_match_pattern": "src/lib/detection/prompt-detect-multiple-choice.ts:51 の NORMAL_OPTION_PATTERN = /^\\s*[^\\d]{0,3}(\\d+)(?:\\.(?!\\d)|\\s+)\\s*(.+)$/ が『… +1 pending』を option 1 (label='pending') と誤検出する。`[^\\d]{0,3}` で `… +` (3文字) をスキップし、`1` を捕捉し、`\\s+` で space をマッチさせて `pending` を label として扱う。",
+    "affected_code_paths": [
+      "src/lib/detection/prompt-detect-multiple-choice.ts:27-52 (NORMAL_OPTION_PATTERN 定義)",
+      "src/lib/detection/prompt-detect-multiple-choice.ts:170-191 (isValidPrecedingOption: 先行 option 検証)",
+      "src/lib/detection/prompt-detect-multiple-choice.ts:584-622 (Pass 2 オプション収集ループ)",
+      "src/lib/detection/prompt-detect-multiple-choice.ts:694-705 (Layer 3/4 検証)",
+      "src/lib/auto-yes-poller.ts:315-346 (Auto-Yes ポーラーも同じ detectPrompt() を使用)",
+      "src/app/api/worktrees/[id]/current-output/route.ts:95-137 (API レスポンス組み立て)"
+    ]
+  },
+  "affected_files": [
+    "src/lib/detection/prompt-detect-multiple-choice.ts",
+    "src/lib/detection/prompt-detector.ts",
+    "src/lib/detection/cli-patterns.ts",
+    "src/lib/detection/status-detector.ts",
+    "src/lib/auto-yes-poller.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts"
+  ],
+  "test_files_to_update": [
+    "tests/unit/prompt-detector.test.ts",
+    "tests/unit/cli-patterns-selection.test.ts",
+    "tests/unit/lib/status-detector.test.ts (パス確認要)"
+  ],
+  "acceptance_criteria_from_issue": [
+    "Use skill \"X\"? を含む実出力の fixture で prompt-detector が multiple_choice を返す",
+    "CommandMate Worktree 詳細画面で当該プロンプトの Yes/No ウィンドウが表示される",
+    "Auto-Yes 有効時にスキル承認プロンプトに対して自動応答が発火する",
+    "既存の Bash/Edit 承認プロンプトの検出が壊れていない（回帰なし）",
+    "単体テストが追加され npm run test:unit でパスする"
+  ],
+  "proposed_fix_directions_from_issue": [
+    {
+      "id": "immediate",
+      "title": "即座対策: NORMAL_OPTION_PATTERN の誤検出を止める",
+      "description": "少なくとも『… +1 pending』『+N pending』『+N more』系の summary 行を option 候補から除外する。Pass 2 ループ内で SUMMARY_LINE_PATTERN を先に判定して continue する、または NORMAL_OPTION_PATTERN 自体を厳格化する。"
+    },
+    {
+      "id": "permanent",
+      "title": "恒久対策: footer 境界付き抽出に置き換え",
+      "description": "Claude 承認プロンプトを『末尾から総当たり』ではなく footer / option block / question block の境界付きで抽出する。『Esc to cancel · Tab to amend』より後ろの行は候補にしない設計が安全。"
+    },
+    {
+      "id": "preventive",
+      "title": "予防策: 実 capture を fixture 化した回帰テスト追加",
+      "description": "実際の Claude v2.1.142 capture を fixture 化し、detectPrompt() / detectSessionStatus() / auto-yes-poller の 3 層で回帰テストを追加。『prompt の後ろに Herding… と … +1 pending が続く』ケースを固定。"
+    }
+  ],
+  "investigation_focus": [
+    "1. 予備分析が記載する根本原因（NORMAL_OPTION_PATTERN の誤マッチ）が実際に発生していることをコード上で再現確認する（ユニットテストの一時 fixture / RegExp 単体実行で）",
+    "2. 『… +1 pending』のような pending サマリー行のバリエーション（『+1 pending』『… +2 pending』『+1 line not shown』など）を洗い出す",
+    "3. 既存の COLLAPSED_OUTPUT_PATTERN (/^\\s*\\[[^\\]]*\\d+\\s+lines?\\]/i) との設計上の整合性を確認（同種の『metadata 行を option として扱わない』ガード）",
+    "4. 即座対策（パターン除外）と恒久対策（footer 境界）の影響範囲とリスク比較を提示",
+    "5. 仮説 A『Use skill 行が question として扱われない』も併発していないかを fixture で実証する（万一サマリー行除外しても question 抽出で問題が残る場合は追加対応が必要）"
+  ]
+}

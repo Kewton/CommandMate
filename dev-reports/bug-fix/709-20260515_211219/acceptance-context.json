@@ -1,0 +1,78 @@
+{
+  "bug_id": "709-20260515_211219",
+  "issue_number": 709,
+  "bug_description": "useWorktreesCache が Sessions ページで二重インスタンス化され /api/worktrees ポーリングが2系統並行で動く",
+  "fix_summary": "WorktreesCacheProvider に WorktreesCacheContext を新設し useWorktreesCacheContext() を export。Sessions ページは useWorktreesCache 直呼びをやめ Context から取得する形に変更。これにより /api/worktrees ポーリングはアプリ全体で1系統に統一される。",
+  "modified_files": [
+    "src/components/providers/WorktreesCacheProvider.tsx",
+    "src/app/sessions/page.tsx",
+    "tests/unit/SessionsPage.test.tsx",
+    "tests/unit/components/providers/WorktreesCacheProvider.test.tsx (新規)"
+  ],
+  "acceptance_criteria": [
+    "Sessions ページで useWorktreesCache() の直接呼び出しが廃止されている (Provider 経由の Context から取得)",
+    "プロジェクト全体で useWorktreesCache の二重呼び出し箇所が存在しない (Provider のみが呼び出す)",
+    "useWorktreesCacheContext() を Provider 外で呼ぶと適切なエラーが投げられる",
+    "Sessions 画面の既存機能 (フィルタ・ソート・XSS sanitize・loading/error/empty state) に回帰がない",
+    "新規テスト tests/unit/components/providers/WorktreesCacheProvider.test.tsx が全件 PASS",
+    "既存テスト tests/unit/SessionsPage.test.tsx が全件 PASS",
+    "npm run test:unit 全件 PASS、回帰 0 件",
+    "npm run lint クリーン",
+    "npx tsc --noEmit クリーン"
+  ],
+  "test_scenarios": [
+    {
+      "id": "T1",
+      "name": "Sessions ページの直接呼び出し廃止確認",
+      "method": "grep で src/app/sessions/page.tsx を検査し useWorktreesCache が import されていないこと、useWorktreesCacheContext が import されていることを確認",
+      "expected": "useWorktreesCache の import が存在しない / useWorktreesCacheContext の import と呼び出しが存在する"
+    },
+    {
+      "id": "T2",
+      "name": "他箇所での二重呼び出し確認",
+      "method": "grep -rn 'useWorktreesCache(' src/ で呼び出し箇所を列挙し、WorktreesCacheProvider のみであることを確認",
+      "expected": "useWorktreesCache() の呼び出し箇所は src/components/providers/WorktreesCacheProvider.tsx 1箇所のみ"
+    },
+    {
+      "id": "T3",
+      "name": "Provider Context テスト",
+      "method": "npx vitest run tests/unit/components/providers/WorktreesCacheProvider.test.tsx を実行",
+      "expected": "全テスト PASS"
+    },
+    {
+      "id": "T4",
+      "name": "Sessions ページテスト回帰確認",
+      "method": "npx vitest run tests/unit/SessionsPage.test.tsx を実行",
+      "expected": "全テスト PASS"
+    },
+    {
+      "id": "T5",
+      "name": "Lint 検査",
+      "method": "npm run lint",
+      "expected": "エラー 0 件"
+    },
+    {
+      "id": "T6",
+      "name": "型検査",
+      "method": "npx tsc --noEmit",
+      "expected": "エラー 0 件"
+    },
+    {
+      "id": "T7",
+      "name": "Unit Test 全件実行",
+      "method": "npm run test:unit",
+      "expected": "全件 PASS、新規導入による回帰 0 件"
+    },
+    {
+      "id": "T8",
+      "name": "Provider 階層維持確認",
+      "method": "src/components/providers/AppProviders.tsx と src/components/providers/WorktreesCacheProvider.tsx を確認し、WorktreeSelectionProvider への externalWorktrees / externalRepositories 伝播が維持されていることを確認",
+      "expected": "既存の WorktreeSelectionProvider プロパティ伝播が保たれている"
+    }
+  ],
+  "regression_check_areas": [
+    "Sessions 画面 (フィルタ・ソート・XSS sanitize・loading/error/empty state)",
+    "Sidebar の Worktree 表示 (WorktreeSelectionContext 経由)",
+    "リポジトリ visible/enabled フィルタ (Issue #690)"
+  ]
+}
