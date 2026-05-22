@@ -23,8 +23,15 @@ import { COPILOT_PERMISSIONS, type CopilotPermission } from '@/config/schedule-c
 // Constants
 // =============================================================================
 
-/** Maximum output buffer size for execFile (1MB) */
-export const MAX_OUTPUT_SIZE = 1 * 1024 * 1024;
+/**
+ * Maximum output buffer size for execFile (10MB).
+ *
+ * Issue #719: 暫定緩和（1MB → 10MB）。
+ * execFile はバッファリング方式であり、CLI 出力が膨らむ運用ケースで
+ * `ERR_CHILD_PROCESS_STDIO_MAXBUFFER` を頻発させていたため一時的に拡張。
+ * 根本対策（spawn + rolling buffer 化）は別Issueで対応する。
+ */
+export const MAX_OUTPUT_SIZE = 10 * 1024 * 1024;
 
 /** Maximum output size stored in DB (100KB) */
 export const MAX_STORED_OUTPUT_SIZE = 100 * 1024;
@@ -202,13 +209,34 @@ export async function executeClaudeCommand(
       },
       (error, stdout, stderr) => {
         if (error) {
-          const isTimeout = error.killed || (error as NodeJS.ErrnoException).code === 'ETIMEDOUT';
-          const rawOutput = stripAnsi(stdout || stderr || error.message);
+          // Issue #719: 診断情報（Error / Code / Signal / Reason）を必ず出力先頭に残し、
+          // exitCode は数値の場合のみ保存（文字列コードは null とする）。
+          const errCode = (error as NodeJS.ErrnoException).code;
+          const isMaxBuffer = errCode === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER';
+          // maxBuffer 超過は時間切れではなく「出力過多」なので timeout 扱いにしない。
+          const isTimeout = error.killed || errCode === 'ETIMEDOUT';
+
+          const errorSummary = [
+            `Error: ${error.message}`,
+            `Code: ${errCode ?? 'unknown'}`,
+            `Signal: ${error.signal ?? 'none'}`,
+            isMaxBuffer ? 'Reason: stdout exceeded execFile maxBuffer (output_limit)' : null,
+          ]
+            .filter((line): line is string => line !== null)
+            .join('\n');
+
+          const rawOutput = stripAnsi(
+            [
+              errorSummary,
+              stdout ? `\n--- stdout ---\n${stdout}` : '',
+              stderr ? `\n--- stderr ---\n${stderr}` : '',
+            ].join('\n')
+          );
           const output = truncateOutput(rawOutput);
 
           resolve({
             output,
-            exitCode: error.code ? parseInt(String(error.code), 10) || null : null,
+            exitCode: typeof errCode === 'number' ? errCode : null,
             status: isTimeout ? 'timeout' : 'failed',
             error: error.message,
           });

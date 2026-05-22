@@ -1,9 +1,18 @@
 /**
  * Tests for claude-executor.ts
  * Issue #294: Claude CLI executor for scheduled executions
+ * Issue #719: Add execFile error handling tests (maxBuffer, ETIMEDOUT, signal, exit code)
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { ChildProcess } from 'child_process';
+
+// Mock child_process before importing the module under test
+vi.mock('child_process', () => ({
+  execFile: vi.fn(),
+}));
+
+import { execFile } from 'child_process';
 import {
   truncateOutput,
   buildCliArgs,
@@ -17,9 +26,50 @@ import {
 } from '../../../src/lib/session/claude-executor';
 import { SENSITIVE_ENV_KEYS } from '../../../src/lib/security/env-sanitizer';
 
+const mockedExecFile = vi.mocked(execFile);
+
+/**
+ * Create a minimal mock ChildProcess for execFile return value.
+ */
+function makeMockChild(): ChildProcess {
+  return {
+    stdin: { end: vi.fn() },
+    on: vi.fn(),
+    pid: undefined,
+  } as unknown as ChildProcess;
+}
+
+/**
+ * Configure mocked execFile to invoke its callback with the given (error, stdout, stderr).
+ * Returns the mock child for further assertion if needed.
+ */
+function setupExecFileMock(
+  error: (Error & { code?: string | number; signal?: string; killed?: boolean }) | null,
+  stdout: string,
+  stderr: string
+): ChildProcess {
+  const child = makeMockChild();
+  mockedExecFile.mockImplementationOnce(((
+    _cmd: string,
+    _args: readonly string[],
+    _options: unknown,
+    cb: (
+      err: (Error & { code?: string | number; signal?: string; killed?: boolean }) | null,
+      out: string,
+      err2: string
+    ) => void
+  ) => {
+    // Invoke callback asynchronously to match real Node behavior
+    queueMicrotask(() => cb(error, stdout, stderr));
+    return child;
+  }) as unknown as typeof execFile);
+  return child;
+}
+
 describe('claude-executor', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    mockedExecFile.mockReset();
     // Clear active processes
     globalThis.__scheduleActiveProcesses = undefined;
   });
@@ -29,8 +79,8 @@ describe('claude-executor', () => {
   });
 
   describe('constants', () => {
-    it('should have MAX_OUTPUT_SIZE = 1MB', () => {
-      expect(MAX_OUTPUT_SIZE).toBe(1 * 1024 * 1024);
+    it('should have MAX_OUTPUT_SIZE = 10MB (Issue #719: bumped from 1MB)', () => {
+      expect(MAX_OUTPUT_SIZE).toBe(10 * 1024 * 1024);
     });
 
     it('should have MAX_STORED_OUTPUT_SIZE = 100KB', () => {
@@ -197,6 +247,122 @@ describe('claude-executor', () => {
       expect(SENSITIVE_ENV_KEYS).toContain('CLAUDECODE');
       expect(SENSITIVE_ENV_KEYS).toContain('CM_AUTH_TOKEN_HASH');
       expect(SENSITIVE_ENV_KEYS).toContain('CM_DB_PATH');
+    });
+  });
+
+  // ===========================================================================
+  // Issue #719: execFile error handling
+  // ===========================================================================
+  describe('executeClaudeCommand - execFile error handling (Issue #719)', () => {
+    it('should handle ERR_CHILD_PROCESS_STDIO_MAXBUFFER as failed with diagnostic output', async () => {
+      const hugeStdout = 'x'.repeat(2 * 1024 * 1024); // 2MB to simulate overflow
+      const err = Object.assign(new Error('stdout maxBuffer length exceeded'), {
+        code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
+      });
+      setupExecFileMock(err, hugeStdout, '');
+
+      const result = await executeClaudeCommand('hello', '/tmp', 'claude');
+
+      expect(result.status).toBe('failed');
+      expect(result.exitCode).toBeNull();
+      expect(result.output).toContain('Code: ERR_CHILD_PROCESS_STDIO_MAXBUFFER');
+      expect(result.output).toContain('Reason: stdout exceeded execFile maxBuffer (output_limit)');
+      expect(result.output).toContain('Error: stdout maxBuffer length exceeded');
+      expect(result.error).toBe('stdout maxBuffer length exceeded');
+    });
+
+    it('should handle ETIMEDOUT as timeout status', async () => {
+      const err = Object.assign(new Error('command timed out'), {
+        code: 'ETIMEDOUT',
+      });
+      setupExecFileMock(err, '', '');
+
+      const result = await executeClaudeCommand('hello', '/tmp', 'claude');
+
+      expect(result.status).toBe('timeout');
+      expect(result.exitCode).toBeNull();
+      expect(result.output).toContain('Code: ETIMEDOUT');
+    });
+
+    it('should handle killed=true as timeout status', async () => {
+      const err = Object.assign(new Error('killed'), {
+        killed: true,
+      });
+      setupExecFileMock(err, '', '');
+
+      const result = await executeClaudeCommand('hello', '/tmp', 'claude');
+
+      expect(result.status).toBe('timeout');
+    });
+
+    it('should handle numeric exit code 1 as failed with exitCode=1', async () => {
+      const err = Object.assign(new Error('command failed'), {
+        code: 1,
+      });
+      setupExecFileMock(err, '', 'something went wrong');
+
+      const result = await executeClaudeCommand('hello', '/tmp', 'claude');
+
+      expect(result.status).toBe('failed');
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain('Error: command failed');
+      expect(result.output).toContain('Code: 1');
+      expect(result.output).toContain('--- stderr ---');
+      expect(result.output).toContain('something went wrong');
+    });
+
+    it('should handle SIGTERM signal as failed with exitCode=null', async () => {
+      const err = Object.assign(new Error('killed by signal'), {
+        signal: 'SIGTERM',
+      });
+      setupExecFileMock(err, '', '');
+
+      const result = await executeClaudeCommand('hello', '/tmp', 'claude');
+
+      expect(result.status).toBe('failed');
+      expect(result.exitCode).toBeNull();
+      expect(result.output).toContain('Signal: SIGTERM');
+    });
+
+    it('should not include errorSummary in output on success path', async () => {
+      setupExecFileMock(null, 'hello', '');
+
+      const result = await executeClaudeCommand('hello', '/tmp', 'claude');
+
+      expect(result.status).toBe('completed');
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toBe('hello');
+      expect(result.output).not.toContain('Error:');
+      expect(result.output).not.toContain('Code:');
+      expect(result.output).not.toContain('Signal:');
+    });
+
+    it('should include both stdout and stderr sections when both present on error', async () => {
+      const err = Object.assign(new Error('exit 2'), {
+        code: 2,
+      });
+      setupExecFileMock(err, 'partial output', 'error detail');
+
+      const result = await executeClaudeCommand('hello', '/tmp', 'claude');
+
+      expect(result.status).toBe('failed');
+      expect(result.exitCode).toBe(2);
+      expect(result.output).toContain('--- stdout ---');
+      expect(result.output).toContain('partial output');
+      expect(result.output).toContain('--- stderr ---');
+      expect(result.output).toContain('error detail');
+    });
+
+    it('should report Signal: none and Code: unknown when neither is set on a generic error', async () => {
+      const err = new Error('mystery failure');
+      setupExecFileMock(err, '', '');
+
+      const result = await executeClaudeCommand('hello', '/tmp', 'claude');
+
+      expect(result.status).toBe('failed');
+      expect(result.exitCode).toBeNull();
+      expect(result.output).toContain('Code: unknown');
+      expect(result.output).toContain('Signal: none');
     });
   });
 });
