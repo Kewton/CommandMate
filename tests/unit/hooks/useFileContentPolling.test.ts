@@ -239,4 +239,60 @@ describe('useFileContentPolling', () => {
     const secondCall = mockFetch.mock.calls[1];
     expect(secondCall[1]?.headers?.['If-Modified-Since']).toBe(lastModified);
   });
+
+  // [Issue #723] Large-file polling disable
+  describe('large-file polling disable (Issue #723)', () => {
+    it('should be enabled when totalBytes is undefined (backward compat)', () => {
+      // baseTab.content has no totalBytes — must remain enabled
+      renderHook(() =>
+        useFileContentPolling({ tab: baseTab, worktreeId: 'wt-1', onLoadContent }),
+      );
+
+      expect(mockUseFilePolling).toHaveBeenCalledWith(
+        expect.objectContaining({ enabled: true }),
+      );
+    });
+
+    it('should be enabled when totalBytes is below threshold', () => {
+      const smallTab: FileTab = {
+        ...baseTab,
+        content: { ...mockContent, totalBytes: 512 * 1024 }, // 512KB
+      };
+      renderHook(() =>
+        useFileContentPolling({ tab: smallTab, worktreeId: 'wt-1', onLoadContent }),
+      );
+
+      expect(mockUseFilePolling).toHaveBeenCalledWith(
+        expect.objectContaining({ enabled: true }),
+      );
+    });
+
+    it('should be disabled when totalBytes is exactly at threshold (1MB)', () => {
+      const largeTab: FileTab = {
+        ...baseTab,
+        content: { ...mockContent, totalBytes: 1 * 1024 * 1024 },
+      };
+      renderHook(() =>
+        useFileContentPolling({ tab: largeTab, worktreeId: 'wt-1', onLoadContent }),
+      );
+
+      expect(mockUseFilePolling).toHaveBeenCalledWith(
+        expect.objectContaining({ enabled: false }),
+      );
+    });
+
+    it('should be disabled when totalBytes exceeds the threshold', () => {
+      const largeTab: FileTab = {
+        ...baseTab,
+        content: { ...mockContent, totalBytes: 5 * 1024 * 1024 },
+      };
+      renderHook(() =>
+        useFileContentPolling({ tab: largeTab, worktreeId: 'wt-1', onLoadContent }),
+      );
+
+      expect(mockUseFilePolling).toHaveBeenCalledWith(
+        expect.objectContaining({ enabled: false }),
+      );
+    });
+  });
 });

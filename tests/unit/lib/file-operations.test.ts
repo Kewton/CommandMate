@@ -21,9 +21,11 @@ import {
   isValidNewName,
   writeBinaryFile,
   createErrorResult,
+  readFileLineRange,
   FileOperationResult,
   FileOperationErrorCode,
 } from '@/lib/file-operations';
+import { VIEWER_CHUNK_LINE_SIZE } from '@/config/file-viewer-config';
 
 describe('File Operations', () => {
   let testDir: string;
@@ -479,5 +481,158 @@ describe('File Operations', () => {
       expect(result.success).toBe(true);
       expect(result.size).toBe(content.length);
     });
+  });
+
+  // ==========================================================================
+  // [Issue #723] readFileLineRange — line-range chunked reader for the
+  // read-only large-file viewer. Uses createReadStream + readline (streaming,
+  // not loading entire file in memory).
+  // ==========================================================================
+  describe('readFileLineRange (Issue #723)', () => {
+    /** Helper: build content with N numbered lines. */
+    function makeNumberedLines(count: number): string {
+      const lines: string[] = [];
+      for (let i = 1; i <= count; i++) lines.push(`line ${i}`);
+      return lines.join('\n');
+    }
+
+    it('returns the requested 1-based inclusive line range with metadata', async () => {
+      writeFileSync(join(testDir, 'sample.log'), makeNumberedLines(20));
+
+      const result = await readFileLineRange(testDir, 'sample.log', 3, 5);
+
+      expect(result.success).toBe(true);
+      expect(result.content).toBe('line 3\nline 4\nline 5');
+      expect(result.totalLines).toBe(20);
+      expect(result.totalBytes).toBeGreaterThan(0);
+      expect(result.range).toEqual({ start: 3, end: 5 });
+      expect(result.encoding).toBe('utf-8');
+    });
+
+    it('handles the very first line', async () => {
+      writeFileSync(join(testDir, 'first.log'), makeNumberedLines(5));
+
+      const result = await readFileLineRange(testDir, 'first.log', 1, 1);
+
+      expect(result.success).toBe(true);
+      expect(result.content).toBe('line 1');
+      expect(result.range).toEqual({ start: 1, end: 1 });
+    });
+
+    it('returns empty content for an empty file but reports totalLines=0', async () => {
+      writeFileSync(join(testDir, 'empty.log'), '');
+
+      const result = await readFileLineRange(testDir, 'empty.log', 1, 5);
+
+      expect(result.success).toBe(true);
+      expect(result.content).toBe('');
+      expect(result.totalLines).toBe(0);
+      expect(result.totalBytes).toBe(0);
+      // Range clamped to actual file size (no lines).
+      expect(result.range?.start).toBe(1);
+    });
+
+    it('handles a file whose last line does not end with newline (EOF no LF)', async () => {
+      writeFileSync(join(testDir, 'no-eof.log'), 'line 1\nline 2\nline 3');
+
+      const result = await readFileLineRange(testDir, 'no-eof.log', 1, 3);
+
+      expect(result.success).toBe(true);
+      expect(result.content).toBe('line 1\nline 2\nline 3');
+      expect(result.totalLines).toBe(3);
+      expect(result.range).toEqual({ start: 1, end: 3 });
+    });
+
+    it('clamps endLine to file end and still returns 200-compatible success', async () => {
+      writeFileSync(join(testDir, 'short.log'), makeNumberedLines(5));
+
+      const result = await readFileLineRange(testDir, 'short.log', 3, 100);
+
+      expect(result.success).toBe(true);
+      expect(result.totalLines).toBe(5);
+      expect(result.range?.start).toBe(3);
+      expect(result.range?.end).toBe(5);
+      expect(result.content).toBe('line 3\nline 4\nline 5');
+    });
+
+    it('rejects startLine < 1 with INVALID_REQUEST', async () => {
+      writeFileSync(join(testDir, 'any.log'), 'a\nb');
+
+      const result = await readFileLineRange(testDir, 'any.log', 0, 5);
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('INVALID_REQUEST');
+    });
+
+    it('rejects endLine < startLine with INVALID_REQUEST', async () => {
+      writeFileSync(join(testDir, 'any.log'), 'a\nb');
+
+      const result = await readFileLineRange(testDir, 'any.log', 5, 2);
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('INVALID_REQUEST');
+    });
+
+    it('rejects ranges wider than VIEWER_CHUNK_LINE_SIZE * 4 with INVALID_REQUEST', async () => {
+      writeFileSync(join(testDir, 'any.log'), 'a\nb');
+
+      const tooWide = VIEWER_CHUNK_LINE_SIZE * 4 + 1;
+      const result = await readFileLineRange(testDir, 'any.log', 1, 1 + tooWide);
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('INVALID_REQUEST');
+    });
+
+    it('rejects path traversal via INVALID_PATH', async () => {
+      const result = await readFileLineRange(testDir, '../etc/passwd', 1, 10);
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('INVALID_PATH');
+    });
+
+    it('returns FILE_NOT_FOUND when target file is missing', async () => {
+      const result = await readFileLineRange(testDir, 'missing.log', 1, 10);
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('FILE_NOT_FOUND');
+    });
+
+    // [Issue #723] Streaming-memory check — 100MB file must not load fully into RSS.
+    // Per Acceptance Criteria: RSS increment < 50MB.
+    it('does not load 100MB file fully into memory (RSS increment under 50MB)', async () => {
+      const bigFile = join(testDir, 'big.log');
+      // Build a ~100MB file with 1_000_000 lines of "line {n}\n" (~10-15 bytes each)
+      // Stream-write so the test itself does not blow up memory.
+      const { createWriteStream } = await import('fs');
+      const ws = createWriteStream(bigFile, { encoding: 'utf-8' });
+      await new Promise<void>((resolve, reject) => {
+        const TOTAL = 1_000_000;
+        let i = 1;
+        function pump() {
+          let ok = true;
+          while (i <= TOTAL && ok) {
+            const buf = `line ${i}\n`;
+            ok = ws.write(buf);
+            i++;
+          }
+          if (i > TOTAL) ws.end();
+          else ws.once('drain', pump);
+        }
+        ws.on('finish', resolve);
+        ws.on('error', reject);
+        pump();
+      });
+
+      // Force GC if available (vitest --expose-gc); otherwise rely on natural GC.
+      const gcFn = (globalThis as { gc?: () => void }).gc;
+      if (typeof gcFn === 'function') gcFn();
+      const before = process.memoryUsage().rss;
+
+      // Read a small window from the middle of the file.
+      const result = await readFileLineRange(testDir, 'big.log', 500_000, 500_010);
+
+      const after = process.memoryUsage().rss;
+      const deltaMB = (after - before) / (1024 * 1024);
+
+      expect(result.success).toBe(true);
+      expect(result.content?.startsWith('line 500000')).toBe(true);
+      // Streaming should keep RSS increment well below 50MB.
+      expect(deltaMB).toBeLessThan(50);
+    }, 60_000);
   });
 });

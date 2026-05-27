@@ -235,8 +235,8 @@ describe('Security Tests', () => {
       expect(result.error).toBe('Binary content detected');
     });
 
-    it('should reject file exceeding size limit', () => {
-      const largeContent = 'x'.repeat(1024 * 1024 + 1);
+    it('should reject file exceeding size limit (2MB after Issue #723)', () => {
+      const largeContent = 'x'.repeat(2 * 1024 * 1024 + 1);
       const result = validateContent('.md', largeContent);
       expect(result.valid).toBe(false);
       expect(result.error).toBe('File size exceeds limit');

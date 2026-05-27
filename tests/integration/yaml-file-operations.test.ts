@@ -230,10 +230,10 @@ describe('YAML File Operations API (Issue #646)', () => {
       expect(data.error.code).toBe('INVALID_CONTENT');
     });
 
-    it('should reject YAML content exceeding 1MB', async () => {
+    it('should reject YAML content exceeding 2MB (Issue #723)', async () => {
       writeFileSync(join(testDir, 'config.yaml'), 'name: safe');
 
-      const largeContent = 'x'.repeat(1024 * 1024 + 1);
+      const largeContent = 'x'.repeat(2 * 1024 * 1024 + 1);
       const request = createRequest('PUT', 'config.yaml', { content: largeContent });
       const params = { params: { id: 'test-worktree', path: ['config.yaml'] } };
 

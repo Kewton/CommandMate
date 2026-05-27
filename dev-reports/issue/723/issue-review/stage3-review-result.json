@@ -1,0 +1,206 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "iteration": 1,
+  "focus": "影響範囲",
+  "reviewer": "issue-review-agent (opus)",
+  "review_date": "2026-05-28",
+  "summary": "Stage 2 反映後の Issue #723 本文に対し、コード変更が波及する範囲を実コード照合で精査した結果、(1) FileContent 型拡張の波及先（page.tsx / FileViewer / FilePanelTabs / FilePanelSplit / LogViewer 等）が想定影響範囲表に未記載、(2) 既存 useFileContentSearch / FileViewer 内蔵検索ロジックの重複（FileViewer 側にも同等の split('\\n') + includes が独立して存在）に対する方針が未定義、(3) 既存テスト editable-extensions.test.ts:46 / :64 / :71 が TEXT_MAX_SIZE_BYTES = 1MB を直接 expect していて 2MB 引き上げで必ず破壊、(4) src/types/markdown-editor.ts:227 のコメント参照が同期更新必要、(5) i18n（locales/ja|en/error.json）への新規エラーキー追加方針が未記載（既存 error.json には FILE_TOO_LARGE 系メッセージなし）、(6) FilePanelContent.tsx の分岐順（image → video → pdf → html → md → editable → default code）の中で「行範囲モードをどこで適用するか」が本文の『判定基準』との対応が不明瞭、(7) 編集系 GET 事前ガード（HTML 以外 2MB）導入により、現在 1MB〜2MB の `.yaml`/`.yml`/`.md` ファイルがユーザーから見て「開けるが保存できない」状態にあったものが「開けない」に変わるためマイグレーション影響として明記必要、(8) useFileContentPolling の `enabled` 条件に追加する totalBytes 判定は、行範囲モード初回応答到来までは totalBytes が undefined のため判定タイミングの仕様化が必要、といった点が抽出された。Must Fix 4 件、Should Fix 5 件、Nice to Have 3 件を提案。",
+  "impact_map": {
+    "files_changed_directly": [
+      "src/app/api/worktrees/[id]/files/[...path]/route.ts (GET ハンドラ：行範囲分岐 + 編集系 2MB 事前ガード追加、評価順整理)",
+      "src/lib/file-operations.ts (新規 readFileLineRange 追加、createReadStream + readline、readFile を呼ばない設計)",
+      "src/config/editable-extensions.ts (TEXT_MAX_SIZE_BYTES 1MB → 2MB 引き上げ)",
+      "src/config/file-viewer-config.ts (新規：VIEWER_CHUNK_LINE_SIZE / VIEWER_OVERSCAN_LINES / POLLING_DISABLED_THRESHOLD_BYTES)",
+      "src/types/models.ts (FileContent 型に totalLines / totalBytes / encoding / range を追加)",
+      "src/components/worktree/FilePanelContent.tsx (CodeViewer を仮想化対応に書き換え、ハイライト Map キャッシュ)",
+      "src/hooks/useFileContentPolling.ts (POLLING_DISABLED_THRESHOLD_BYTES 判定追加)",
+      "src/hooks/useFileContentSearch.ts (debounce 300ms 追加、表示済み範囲限定)",
+      "package.json (@tanstack/react-virtual 追加)",
+      "package-lock.json (lockfile 更新)"
+    ],
+    "files_changed_indirectly": [
+      "src/types/markdown-editor.ts:227 (TEXT_MAX_SIZE_BYTES = 1MB のコメント参照が古くなる)",
+      "src/app/worktrees/[id]/files/[...path]/page.tsx (FileContent 型を import、追加メタフィールドの透過は OK だが型推論影響あり)",
+      "src/components/worktree/FileViewer.tsx (FileContent 型を import / 内部に独立した検索ロジック L302-318 を保持し、useFileContentSearch の修正と非対称になる)",
+      "src/components/worktree/FilePanelTabs.tsx (FileContent 型を import、onLoadContent シグネチャ伝播)",
+      "src/components/worktree/FilePanelSplit.tsx (同上)",
+      "src/components/worktree/WorktreeDetailRefactored.tsx (handleLoadContent: (path, content: FileContent) => void、追加メタは透過するが型整合確認必要)",
+      "src/hooks/useFileTabs.ts (FileTab.content: FileContent | null / SET_CONTENT アクションの型を介して追加フィールドを保持)",
+      "src/components/worktree/LogViewer.tsx (別 API ルート /api/worktrees/:id/logs/... を使用しているため直接影響なし、ただし大規模ログ閲覧という意味では同種問題を抱える可能性 → スコープ確認)",
+      "locales/ja/error.json / locales/en/error.json (新規エラー文言『ファイルが大きすぎます』追加の余地、現状は無し)"
+    ],
+    "types_changed": [
+      "FileContent (src/types/models.ts): totalLines?: number / totalBytes?: number / encoding?: string / range?: { start: number; end: number } を追加（全 optional 推奨：既存 API 経路の互換維持）",
+      "FileContentResponse (src/types/models.ts): FileContent の拡張に追従",
+      "FileTab.content (src/hooks/useFileTabs.ts): FileContent 経由で透過、ローカル変更なし"
+    ],
+    "tests_to_add": [
+      "tests/unit/lib/file-operations.test.ts: readFileLineRange の単体テスト (startLine/endLine バリデーション、startLine > endLine、行数超過、空ファイル、最終行 EOF、大ファイル 100MB でストリーム動作)",
+      "tests/integration/api-file-operations.test.ts: GET /api/.../files/...path?startLine=N&endLine=M の動作テスト (200 / 416 範囲外 / メタフィールド totalLines・totalBytes 検証 / 編集系 2MB 超過時 413)",
+      "tests/integration/api-file-operations.test.ts: 編集系 GET 事前ガード (.md / .yaml / .yml ＞ 2MB → 413、HTML 5MB は通る)",
+      "tests/unit/components/FilePanelContent.test.tsx: CodeViewer 仮想化テスト (1万行ファイルでマウントされる行数が limited であること、スクロール時のチャンク fetch、ハイライトキャッシュヒット)",
+      "tests/unit/hooks/useFileContentPolling.test.ts: POLLING_DISABLED_THRESHOLD_BYTES 超過時 enabled=false (totalBytes 未定義時の挙動含む)",
+      "tests/unit/hooks/useFileContentSearch.test.ts: debounce 300ms 動作確認、表示済み範囲限定検索",
+      "tests/integration: 100MB ファイル取得時の Node プロセス RSS 増分 < 50MB の検証 (process.memoryUsage() ベース)"
+    ],
+    "tests_potentially_broken": [
+      "tests/unit/config/editable-extensions.test.ts:46 expect(mdValidator?.maxFileSize).toBe(1024 * 1024) → 2MB へ要更新",
+      "tests/unit/config/editable-extensions.test.ts:64 expect(yamlValidator?.maxFileSize).toBe(1024 * 1024) → 同上",
+      "tests/unit/config/editable-extensions.test.ts:71 expect(ymlValidator?.maxFileSize).toBe(1024 * 1024) → 同上",
+      "tests/unit/config/editable-extensions.test.ts:158-167 validateContent('.md', largeContent) のサイズ閾値テストフィクスチャ更新",
+      "tests/integration/yaml-file-operations.test.ts: YAML 編集系の上限値変更影響を確認要",
+      "tests/unit/components/FilePanelContent.test.tsx: CodeViewer のレンダリング構造変化（<table> → 仮想化コンテナ）で DOM 構造ベースのアサーション要更新（既存テストで <table> や行マウント数を直接見ているものは要確認）"
+    ],
+    "external_modules_affected": [
+      "@tanstack/react-virtual (新規依存追加：実測 bundle size を PR で記載必須)",
+      "node:readline (readFileLineRange で使用、既存依存なしのため import 追加)",
+      "node:fs (createReadStream を file-operations.ts で利用)"
+    ],
+    "related_issues_impact": [
+      {"issue": "#469", "impact": "useFileContentPolling の If-Modified-Since / 304 機構は維持。本Issue は enabled 条件に POLLING_DISABLED_THRESHOLD_BYTES 判定を上乗せ。304 機構との優先順位（PDF と同様）に整合。FILE_CONTENT_POLL_INTERVAL_MS = 5000 はそのまま。"},
+      {"issue": "#490", "impact": "HTML 5MB 事前ガード (route.ts:311) はそのまま維持。本Issue で『編集系 2MB ガードは HTML を除外して .md/.yaml/.yml のみに適用』を明示することで Issue #490 設計を保護。route.ts の評価順は『HTML 専用 → それ以外編集系 → 通常テキスト』の排他分岐とすることで二重評価なし。"},
+      {"issue": "#673", "impact": "PDF は専用パス（isPdf 分岐）で独立。本Issue の編集系/閲覧専用判定の影響なし。useFileContentPolling.ts:51 の !tab.content?.isPdf 既存判定パターンが POLLING_DISABLED_THRESHOLD_BYTES の前例として活用可能。"},
+      {"issue": "#302", "impact": "Video 専用パス。影響なし。"},
+      {"issue": "#646", "impact": "YAML 編集対応で TEXT_MAX_SIZE_BYTES が .yaml/.yml の maxFileSize として参照されている (editable-extensions.ts:67-73)。1MB → 2MB 引き上げで YAML の保存上限も拡張される（意図的かレビューで確認）。validateYamlContent (危険タグ検出) は content.length とは独立に動作するので機能影響なし。"},
+      {"issue": "#47", "impact": "TerminalSearchBar / HistorySearchBar の検索 UI パターン (debounce 300ms、最小 2 文字、最大 500 件) と useFileContentSearch の改修方針を統一すべき。SEARCH_DEBOUNCE_MS / SEARCH_MIN_QUERY_LENGTH 共通定数化（useTerminalSearch から export 済み）の流用を提案。"},
+      {"issue": "#438", "impact": "FilePanelContent / FilePanelTabs / FilePanelSplit 一連の構造に対する変更。tab.content?.isHtml / isPdf 等の既存分岐パターンを踏襲する形で行範囲モード分岐が追加されるべき。"}
+    ]
+  },
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "Must Fix",
+      "category": "テスト破壊",
+      "title": "TEXT_MAX_SIZE_BYTES = 1MB を直接 expect する既存テストが必ず破壊される",
+      "location": "Issue本文 ## 実装方針 > 3. 設定定数 ／ ## 想定影響範囲（テスト影響欄が無い）",
+      "issue": "tests/unit/config/editable-extensions.test.ts:46 / :64 / :71 が `expect(validator?.maxFileSize).toBe(1024 * 1024)` を直書きしており、TEXT_MAX_SIZE_BYTES を 2MB に引き上げる本Issue の変更で 3 件のテストが確実に破壊される。さらに同ファイル :158-167 の `validateContent('.md', largeContent)` 系のサイズ境界テストフィクスチャ（1MB + 1 バイト等）も更新が必要。Issue本文の『想定影響範囲』表に test ファイルへの影響が一切記載されていないため、実装者が見落とすリスクが高い。tests/integration/yaml-file-operations.test.ts も YAML 編集系の上限値変化影響の確認対象。",
+      "suggested_fix": "Issue本文の『想定影響範囲』表に以下を追加：『tests/unit/config/editable-extensions.test.ts: TEXT_MAX_SIZE_BYTES 引き上げに伴う maxFileSize アサーション更新 (.md/.yaml/.yml の 3 箇所) およびサイズ境界テストフィクスチャの 2MB 化』『tests/integration/yaml-file-operations.test.ts: 大ファイル境界の更新確認』。さらに『同期更新を要する箇所は実装PRで test ファイルを同一コミットに含める』とプロセス明示。",
+      "rationale": "PR レビュー段階で初めてテスト破壊が露見すると差し戻しが発生する。Issue 段階で test ファイル影響を明示することで、実装者が test 更新を実装スコープに含められる。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "Must Fix",
+      "category": "型変更",
+      "title": "FileContent 型拡張の波及先（page.tsx / FileViewer / FilePanelTabs / FilePanelSplit / WorktreeDetailRefactored / useFileTabs / LogViewer）が想定影響範囲に未記載",
+      "location": "Issue本文 ## 実装方針 > 1. サーバAPI拡張 『src/types/models.ts の FileContent 型を拡張』／ ## 想定影響範囲",
+      "issue": "FileContent 型を import している箇所は実コード照合で 9 ファイル存在（grep 結果 src/types/models.ts / src/app/worktrees/[id]/files/[...path]/page.tsx / src/components/worktree/FilePanelSplit.tsx / src/components/worktree/FilePanelContent.tsx / src/components/worktree/FilePanelTabs.tsx / src/components/worktree/WorktreeDetailRefactored.tsx / src/components/worktree/FileViewer.tsx / src/hooks/useFileTabs.ts / src/hooks/useFileContentPolling.ts）。新規 totalLines / totalBytes / encoding / range フィールドを optional として追加するなら型安全性は保たれるが、型エイリアス FileContentResponse の更新方針と『追加フィールドを optional とする旨』が本文に未記載。WorktreeDetailRefactored.tsx:1345 の handleLoadContent 等は (path, content: FileContent) => void のシグネチャを保持しており、メタフィールド透過は OK だがレビュー時に確認が必要。",
+      "suggested_fix": "Issue本文の『実装方針 1. サーバAPI拡張』に以下を追記：『FileContent への追加フィールド (totalLines / totalBytes / encoding / range) は全て optional とする。理由：(a) 編集系・画像・動画・PDF・HTML など範囲モードを使わない経路では当該フィールド未設定でも互換性を保つため。(b) 既存 9 ファイルの FileContent 利用箇所 (page.tsx / FilePanelTabs / FilePanelSplit / FilePanelContent / WorktreeDetailRefactored / FileViewer / useFileTabs / useFileContentPolling) は型変更だけで coercion 不要。FileContentResponse は同型拡張。』。あわせて『想定影響範囲』表に上記 7 ファイルを『間接影響（型シグネチャ追従のみ、ロジック変更なし）』として追加。",
+      "rationale": "型を必須 (required) で追加すると 9 ファイルがコンパイルエラーで連鎖破壊する。optional 化を Issue 段階で確定しておくことで、実装者の判断ブレを防ぐ。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "Must Fix",
+      "category": "UX",
+      "title": "編集系 2MB 事前ガード導入で既存ユーザーが『開けたが保存できなかった』ファイル群が『開けなくなる』マイグレーション影響が未記載",
+      "location": "Issue本文 ## 対応方針（ハイブリッド） > B. 編集系ファイル ／ ## 受入条件 > 編集系ファイル",
+      "issue": "現状、編集系（.md/.yaml/.yml）の 1MB〜2MB 程度のファイルはユーザーから見て『GET で開ける（route.ts 側の事前ガード無し）が、PUT で 1MB 超のため保存できない』という挙動になっている (validateContent の事後検証のみ)。本Issue で route.ts に事前 2MB ガードを入れると、これらのファイル群は『そもそも開けない』に変わる。閾値を 1MB → 2MB に同時引き上げするためほとんどのケースで保存自体は通るようになるが、2MB を超える `.md` (例：自動生成された大規模変更ログ、巨大 README) は本変更前後で挙動が明確に変わる。受入条件に『2MB 以下のファイルでは従来動作』は記載があるが、『2MB を超える既存編集系ファイルがどう扱われるか（開かなくなる）』『ユーザーが既に開いている 2MB 超のタブはどうなるか』のマイグレーション項目が無い。",
+      "suggested_fix": "受入条件『編集系ファイル』に以下を追加：『- [ ] 2MB を超える .md/.yaml/.yml は GET 時点で 413 を返し、UI でファイルが開けない旨を表示する（従来は GET 200 で表示されたが PUT 時に保存失敗していたケース）。この挙動変更は破壊的変更として CHANGELOG / リリースノートに明示する』。さらに『- [ ] 既にタブで開いている 2MB 超のファイルは、ポーリングで再フェッチ時に 413 を受け取り、エラー表示に切り替わること』を追加。マイグレーション節（または既存『なぜハイブリッドか』の直後）に『現状の挙動（GET 上限なし、PUT 1MB 上限）と新挙動（GET/PUT 共通 2MB 上限）の対応表』を 1 行追加。",
+      "rationale": "UI 挙動の破壊的変更を Issue 段階で明示しておくと、リリース文書化・ユーザー周知の漏れを防げる。閲覧専用パスへフォールバックする選択肢（編集系で 2MB 超なら閲覧専用モード = 行範囲＋仮想化）も将来案として明記しておくと判断材料になる。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "Must Fix",
+      "category": "ドキュメント",
+      "title": "src/types/markdown-editor.ts:227 のコメント参照および CLAUDE.md モジュールリファレンス更新が未記載",
+      "location": "Issue本文 ## 想定影響範囲 ／ 関連節",
+      "issue": "(a) src/types/markdown-editor.ts:227 に『Maximum file size (1MB) - must match TEXT_MAX_SIZE_BYTES in editable-extensions.ts』というコメントが存在し、TEXT_MAX_SIZE_BYTES の値を 1MB → 2MB に変更する場合、このコメントも『2MB』に同期更新が必要。Issue本文の影響範囲表に無い。(b) CLAUDE.md のモジュール一覧 (現状『src/config/editable-extensions.ts: 編集可能拡張子定義・バリデーション ...（Issue #646）』) に本Issue #723 の表記追加が必要。新規ファイル src/config/file-viewer-config.ts および新規ヘルパ readFileLineRange も CLAUDE.md 記載対象。",
+      "suggested_fix": "Issue本文の『想定影響範囲』表に以下を追加：『src/types/markdown-editor.ts: コメント L227 の TEXT_MAX_SIZE_BYTES 参照値 (1MB → 2MB) の同期更新』『CLAUDE.md: src/config/editable-extensions.ts エントリに Issue #723 を追記、src/config/file-viewer-config.ts (新規) エントリを追加、src/lib/file-operations.ts エントリに readFileLineRange の追加を明記』。実装方針節に『コメント参照値の同期更新も PR の必須項目』と一文追加。",
+      "rationale": "コメント値の不整合は次の開発者が誤った値を信じる起点になる。CLAUDE.md は本プロジェクトでモジュール検索の primary index。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "Should Fix",
+      "category": "整合性",
+      "title": "FileViewer.tsx 内部に独立した同期検索ロジックが残り、useFileContentSearch 改修と非対称になる",
+      "location": "Issue本文 ## 実装方針 > 4. 検索の役割分担 『useFileContentSearch: 表示済みチャンク内検索 + debounce 300ms 追加』",
+      "issue": "src/components/worktree/FileViewer.tsx:302-318 に useFileContentSearch を経由しない独立した検索ロジック（content.content.split('\\n') + lines.forEach + toLowerCase().includes、debounce 無し）が存在する。Issue は useFileContentSearch のみに debounce 追加を提案しているため、FileViewer 側は依然として大ファイル時の検索同期実行問題を抱える。FilePanelContent (PC側) と FileViewer (モーダル) で UX 一貫性が崩れる。",
+      "suggested_fix": "Issue本文の『実装方針 4. 検索の役割分担』に以下を追記：『FileViewer.tsx:302-318 にも同等の同期検索ロジックが残存しているため、(a) useFileContentSearch に置き換える、または (b) 同じく debounce 300ms を入れて統一する。スコープ：本Issue内で対応する／別Issueに切り出す どちらか明示』。推奨は (a) で FileViewer も useFileContentSearch に統一。",
+      "rationale": "同種ロジックが二箇所に残存すると、片方だけ改修して片方が忘れられる典型的な保守事故が発生する。Issue段階でスコープを確定しておく。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "Should Fix",
+      "category": "API契約",
+      "title": "useFileContentPolling.ts:51 の enabled 条件に追加する totalBytes 判定のタイミング仕様が不明",
+      "location": "Issue本文 ## 実装方針 > 5. ポーリング ／ ## 想定影響範囲",
+      "issue": "現状 useFileContentPolling.ts:51 の enabled は `tab.content !== null && !tab.loading && !tab.isDirty && !tab.content?.isPdf`。Issue は『content.totalBytes < POLLING_DISABLED_THRESHOLD_BYTES を追加』としているが、(a) 初回 GET 完了前は tab.content === null で既に enabled=false のため OK だが、(b) 範囲モード初回応答時の totalBytes が undefined のケース（編集系小ファイルや初期実装で未拡張のレスポンス）の挙動が未仕様。totalBytes === undefined の場合、!(undefined < 1MB) = !(false) = true で polling 有効になる：これは小ファイルでの既存挙動を維持する意図と一致するが、明示が必要。",
+      "suggested_fix": "Issue本文の『実装方針 5. ポーリング』に以下を追記：『enabled 条件の正確な形：`tab.content !== null && !tab.loading && !tab.isDirty && !tab.content?.isPdf && !(tab.content?.totalBytes !== undefined && tab.content.totalBytes >= POLLING_DISABLED_THRESHOLD_BYTES)`。totalBytes が undefined の場合（小ファイル、編集系、または未拡張レスポンス）はポーリング有効を維持し既存挙動を保つ。totalBytes が判定可能な値で閾値超過時のみ無効化する。』",
+      "rationale": "境界条件の挙動を Issue 段階で確定しないと、実装者ごとに『undefined のとき有効/無効どちらにするか』の判断が分かれる。"
+    },
+    {
+      "id": "S3-007",
+      "severity": "Should Fix",
+      "category": "API契約",
+      "title": "行範囲モード時の Last-Modified / 304 機構と range クエリの相互作用が未定義",
+      "location": "Issue本文 ## 対応方針（ハイブリッド） > A. 閲覧専用ファイル ／ ## 実装方針 > 1. サーバAPI拡張",
+      "issue": "現状 route.ts:317-333 は If-Modified-Since ヘッダで mtime 比較し 304 を返す（Issue #469）。本Issueで startLine/endLine 指定時、同じファイルでも別の行範囲を要求するクライアントが複数いる場合、(a) mtime が変わっていない（ファイル内容不変）でも違う行範囲が欲しいクライアントは 304 で本文を取れないと困る、(b) 同じ行範囲を再要求するクライアントには 304 で十分。仕様候補：「行範囲モード時は If-Modified-Since 検証をスキップし常に 200」または「Last-Modified に range セグメントを混ぜた弱い ETag を使う」または「クライアント側で範囲モード時は If-Modified-Since を送らない」。本文に方針未記載。",
+      "suggested_fix": "Issue本文の『実装方針 1. サーバAPI拡張』に以下を追記：『行範囲モード（startLine/endLine 指定時）はサーバ側で If-Modified-Since 検証をスキップし常に 200 を返す。理由：同一 mtime でも異なる行範囲を要求できなければ仮想スクロールが破綻するため。クライアント側では仮想スクロールのチャンク fetch では If-Modified-Since ヘッダを送らない実装とする。範囲指定なしの全文モードは従来通り If-Modified-Since / 304 機構を活用する。』",
+      "rationale": "API レイヤと既存 304 機構の相互作用は Issue #469 の影響範囲。実装段階で詰めると後戻りコストが高い。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "Should Fix",
+      "category": "i18n",
+      "title": "新規エラー文言（『ファイルが大きすぎます』）の i18n（locales/ja|en/error.json）追加方針が未記載",
+      "location": "Issue本文 ## 受入条件 > 編集系ファイル ／ ## 想定影響範囲",
+      "issue": "Issue 受入条件に『サイズ上限超過時は FILE_TOO_LARGE (HTTP 413) を返し、UI で「ファイルが大きすぎます」を明示』とあるが、(a) 現状 locales/ja/error.json / locales/en/error.json には FILE_TOO_LARGE 系メッセージが存在しない（grep 結果 0 件）、(b) 既存 error.json の構造に合わせた新規キー命名（例：`error.fileTooLarge.editableLimit`）が未定義、(c) ja/en の両方への同期追加が必要なことが明示されていない。",
+      "suggested_fix": "Issue本文の『想定影響範囲』表に以下を追加：『locales/ja/error.json / locales/en/error.json: 新規キー追加（例 `fileTooLarge.editableLimit = '編集可能ファイルサイズの上限（{limit}MB）を超えています'` / `fileTooLarge.viewerLimit = '...'` 等、ja/en 同期）』。実装方針節に『i18n キーは既存 error.json の構造に合わせる』と明記。",
+      "rationale": "i18n は本プロジェクトの規約（src/i18n.ts で複数 namespace を merge）。Issue 段階で言及しないと PR で『locales/en/error.json も更新してください』が指摘事項として出る。"
+    },
+    {
+      "id": "S3-009",
+      "severity": "Should Fix",
+      "category": "依存追加",
+      "title": "@tanstack/react-virtual のバンドルサイズ・代替検討の根拠は本文に追加されたが、CLAUDE.md コーディング規約との整合（Server/Client Components 境界）が未確認",
+      "location": "Issue本文 ## 実装方針 > 2. クライアント仮想化",
+      "issue": "Stage 2 反映で『React 18 / Next.js 14 互換。CodeViewer は 'use client' コンポーネントとして組み込む』『TanStack 系の API 一貫性・TypeScript 型定義の充実・メンテナンス活発さで選定』が記載されたのは良い。一方で、(a) FilePanelContent.tsx 全体が既に 'use client' のため、CodeViewer 単体の境界は明確だが『Server Components ではなく Client Components のままで影響なし』を念のため明記すべき、(b) バンドルサイズの『実測値』記載タイミング（実装PR で記載する、と Stage 2 で追加済み）は OK だが、本Issue段階で『+30KB 程度を上限の目安とする』等の閾値があると判断しやすい、(c) tree-shaking 対応（@tanstack/react-virtual の sideEffects: false 等）の確認も推奨。",
+      "suggested_fix": "Issue本文の『実装方針 2. クライアント仮想化』に以下を追記：『FilePanelContent.tsx は既存 \\'use client\\' のため Server/Client Components 境界変更なし。バンドルサイズ目安として `+30KB (gzipped)` を許容上限とし、超過時はチャンク分割または代替ライブラリ再検討。@tanstack/react-virtual は ESM + sideEffects: false で tree-shaking 対応』。",
+      "rationale": "CLAUDE.md コーディング規約『Server Components 優先 / 'use client' を明示』との整合をレビューで都度確認する手間を省ける。"
+    },
+    {
+      "id": "S3-010",
+      "severity": "Should Fix",
+      "category": "UX",
+      "title": "FilePanelContent.tsx 内の分岐順（image → video → pdf → html → md → editable → default code）と『判定基準（A/B 分岐ロジック）』の対応マッピングが未明示",
+      "location": "Issue本文 ## 対応方針（ハイブリッド） > 判定基準（A/B 分岐ロジック）",
+      "issue": "Stage 2 で『isEditableExtension(ext) === true → 編集系（B 分岐）/ false かつテキスト → 閲覧専用（A 分岐）/ 画像・動画・PDF は専用パス維持』の判定基準が追加されたのは良い。一方で、FilePanelContent.tsx:691-815 は既に分岐順 image → video → pdf → html → md → editable → default code を持っており、A 分岐（閲覧専用 = 行範囲＋仮想化）は default code 経路（CodeViewer）に対応する。この対応関係が本文に明示されていないため、実装者が『どこに行範囲モードを差し込むか』を読み取りにくい。",
+      "suggested_fix": "Issue本文の『判定基準（A/B 分岐ロジック）』に以下を追記：『クライアント側 FilePanelContent.tsx の分岐対応：(1) isImage / isVideo / isPdf / isHtml → 既存専用パス（影響なし）、(2) extension === md → MarkdownWithSearch（編集系 B、影響軽微）、(3) isEditableExtension(ext) (yaml/yml) → MarkdownWithSearch（編集系 B）、(4) 上記いずれにも該当しないテキスト → 閲覧専用 A 分岐 = CodeViewer（仮想化＋行範囲モード適用対象）。サーバ側 route.ts の startLine/endLine 分岐は (4) のクライアントからのみ送信される。』",
+      "rationale": "クライアントとサーバの判定マッピングが Issue 段階で明示されていれば、実装中の解釈ブレを防げる。"
+    },
+    {
+      "id": "S3-011",
+      "severity": "Nice to Have",
+      "category": "テスト",
+      "title": "100MB 級ログファイル用のテストフィクスチャ方針が未記載",
+      "location": "Issue本文 ## 受入条件 > 閲覧専用ファイル『100MB級のログファイルを開いても...』",
+      "issue": "100MB ファイルでの p50 < 1s / RSS 増分 < 50MB を検証するためには、テスト時に 100MB のフィクスチャファイルが必要。リポジトリにコミットすると肥大化するため、テスト実行時に fs.writeFile で動的生成 → afterAll で削除する方針が望ましいが、本文に未記載。",
+      "suggested_fix": "Issue本文の『受入条件 > 閲覧専用ファイル』または別途『テスト方針』節に追記：『100MB フィクスチャはテスト beforeAll で動的生成（os.tmpdir() 配下に作成）し afterAll で削除。リポジトリにはコミットしない。生成内容は『line {n}\\n』を 100 万行程度。』",
+      "rationale": "テスト方針が曖昧だと『フィクスチャは誰が用意するか』で実装段階で詰まる。"
+    },
+    {
+      "id": "S3-012",
+      "severity": "Nice to Have",
+      "category": "整合性",
+      "title": "Issue #47 の SEARCH_DEBOUNCE_MS / SEARCH_MIN_QUERY_LENGTH 共通定数の流用余地",
+      "location": "Issue本文 ## 実装方針 > 4. 検索の役割分担",
+      "issue": "Issue #716 の対応で src/hooks/useTerminalSearch.ts に SEARCH_DEBOUNCE_MS = 300 / SEARCH_MIN_QUERY_LENGTH = 2 が export されている（CLAUDE.md モジュールリファレンス記載）。本Issue で useFileContentSearch に debounce 300ms と最小 2 文字を追加するなら、これら共通定数の流用が一貫性のある選択肢。",
+      "suggested_fix": "Issue本文の『実装方針 4. 検索の役割分担』に追記：『debounce / 最小クエリ長は src/hooks/useTerminalSearch.ts で export 済みの SEARCH_DEBOUNCE_MS = 300 / SEARCH_MIN_QUERY_LENGTH = 2 を流用する。検索 UI 全体（ターミナル / 履歴 / ファイル）で挙動を統一する。』",
+      "rationale": "プロジェクト内で類似定数の重複定義を避けることで、将来チューニング時に一箇所変更で済む。"
+    },
+    {
+      "id": "S3-013",
+      "severity": "Nice to Have",
+      "category": "セキュリティ",
+      "title": "行範囲 API のバリデーション（startLine ≤ endLine、上限）方針が未記載",
+      "location": "Issue本文 ## 実装方針 > 1. サーバAPI拡張",
+      "issue": "readFileLineRange(root, path, startLine, endLine) の引数バリデーション方針（負数、startLine > endLine、極端に大きい endLine、ファイル総行数超過時の挙動）が未定義。不正値で 500 を返すと UX 悪化、DoS 起点になる可能性も。HTTP ステータスとして 400 (INVALID_REQUEST) or 416 (Range Not Satisfiable) のどちらを使うかも。",
+      "suggested_fix": "Issue本文の『実装方針 1. サーバAPI拡張』に以下を追記：『readFileLineRange の引数バリデーション：(a) startLine >= 1 / endLine >= startLine / endLine - startLine <= VIEWER_CHUNK_LINE_SIZE * 4 程度の上限、(b) 違反時は 400 INVALID_REQUEST、(c) ファイル総行数を超える endLine は実ファイル末尾までクランプし 200 で返す（既存挙動との互換性）、(d) 行範囲指定が無い場合は従来全文モード。』",
+      "rationale": "API の境界仕様を Issue 段階で確定しないと、攻撃面・UX 両面でブレが残る。"
+    }
+  ],
+  "must_fix_count": 4,
+  "should_fix_count": 6,
+  "nice_to_have_count": 3,
+  "scope_completeness_assessment": "Issue #723 の影響範囲は実コード照合で 9 ファイル（FileContent 型利用箇所）+ 3 ファイル（テスト破壊）+ 2 ファイル（i18n locales/ja|en/error.json）+ 1 ファイル（src/types/markdown-editor.ts コメント参照）が直接・間接に波及する。Stage 2 反映後の Issue 本文は (1) 主要な API 契約変更（startLine/endLine 拡張、FileContent 型拡張）と (2) ハイブリッド方針の判定基準・評価順を明示している点で骨格は十分。一方で、(a) 既存テストの破壊（editable-extensions.test.ts の 3 件 + サイズ境界フィクスチャ）が想定影響範囲表に未記載、(b) FileContent 型利用 9 ファイルの追従が optional 化前提で透過することの明示がない、(c) 編集系 2MB 事前ガード導入による『従来は開けたが今後開けない』ファイル群のマイグレーション影響が未記述、(d) i18n 追加方針と FileViewer 内蔵検索ロジックの扱い（useFileContentSearch との重複）が未定義、という Must Fix / Should Fix が複数残る。Phase 4（実装）に進む前に本レビューの Must Fix 4 件を本文反映することで、実装段階での出戻り・PR レビュー指摘を最小化できる。Stage 4 の影響範囲レビュー（2回目）または Phase 4 着手前の最終確認で上記反映状況をチェックすることを推奨。"
+}

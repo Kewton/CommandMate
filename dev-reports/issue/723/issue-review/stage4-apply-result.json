@@ -1,0 +1,59 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目・影響範囲レビュー）",
+  "iteration": 1,
+  "issue_number": "723",
+  "applied_findings": [
+    "S3-001",
+    "S3-002",
+    "S3-003",
+    "S3-004",
+    "S3-005",
+    "S3-006",
+    "S3-007",
+    "S3-008",
+    "S3-009",
+    "S3-010",
+    "S3-011",
+    "S3-012",
+    "S3-013"
+  ],
+  "skipped_findings": [],
+  "issue_updated": true,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/723",
+  "body_diff_summary": {
+    "## 対応方針（ハイブリッド） > 判定基準（A/B 分岐ロジック）": "S3-010: クライアント側 FilePanelContent.tsx の分岐対応マッピング表（image/video/pdf/html/md/editable/default code → A/B 分類）を新規追加。サーバ側 route.ts の startLine/endLine が default code 分岐のみから送信される旨を明示",
+    "## 破壊的変更（マイグレーション影響）": "S3-003: 新規セクションを追加。編集系ファイルの GET 事前ガード追加に伴う変更前後対応表、ユーザー視点の挙動変化（1-2MB は改善、2MB 超は開けなくなる）、将来案を明記",
+    "## 受入条件 > 閲覧専用ファイル": "S3-011: 100MB フィクスチャの動的生成方針（beforeAll/afterAll、os.tmpdir 配下、line {n}\\n 100万行）を追記",
+    "## 受入条件 > 編集系ファイル": "S3-003: 2MB 超ファイルが GET 時点で 413 となる旨、既タブ開きファイルがポーリングで 413 を受け取りエラー表示に切り替わる旨を新規 2 項目追加",
+    "## 実装方針 > 1. サーバAPI拡張": "S3-002（FileContent 拡張フィールド全 optional 化と理由）、S3-007（行範囲モード時の If-Modified-Since スキップ仕様）、S3-013（readFileLineRange 引数バリデーション 400/200 クランプ仕様）を追記",
+    "## 実装方針 > 2. クライアント仮想化": "S3-009: Server/Client 境界変更なしの明示、バンドルサイズ +30KB gzipped 上限、sideEffects: false 対応を追記",
+    "## 実装方針 > 4. 検索の役割分担": "S3-005（FileViewer.tsx:302-318 内蔵検索の useFileContentSearch 置き換え方針）、S3-012（SEARCH_DEBOUNCE_MS / SEARCH_MIN_QUERY_LENGTH 共通定数の流用方針）を追記",
+    "## 実装方針 > 5. ポーリング": "S3-006: enabled 条件の正確な式（totalBytes undefined 時はポーリング有効維持、判定可能値かつ閾値超過時のみ無効化）を仕様化",
+    "## 実装方針 > 6. i18n（新規）": "S3-008: locales/ja|en/error.json への新規エラーキー追加方針、命名例（fileTooLarge.editableLimit / .viewerLimit）、ja/en 同期必須を新規セクションとして追加",
+    "## 実装方針 > 7. ドキュメント・コメント同期（新規）": "S3-004: src/types/markdown-editor.ts:227 コメント参照値更新、CLAUDE.md モジュール一覧の 3 箇所更新を新規セクションとして追加",
+    "## 想定影響範囲": "S3-001（テスト影響を別表として新規追加：editable-extensions.test.ts L46/L64/L71/L158-167、yaml-file-operations.test.ts、FilePanelContent.test.tsx）、S3-002（間接影響ファイル別表追加：FileContent 型 import 9 ファイルの追従内容明記）、S3-004（ドキュメント・コメント同期別表追加）、S3-008（i18n 別表追加）、新規テスト追加リスト、外部モジュール影響、関連 Issue 影響整理（#469/#490/#673/#302/#646/#47/#716/#438）を整理拡充",
+    "## スコープ外": "S3-003 将来案として『2MB 超の編集系ファイルの閲覧専用モードへのフォールバック対応』を追加",
+    "## 関連": "S3-012 連動で 検索 UI 共通定数（Issue #47 / #716）参照を追加"
+  },
+  "must_fix_applied": {
+    "count": 4,
+    "ids": ["S3-001", "S3-002", "S3-003", "S3-004"]
+  },
+  "should_fix_applied": {
+    "count": 6,
+    "ids": ["S3-005", "S3-006", "S3-007", "S3-008", "S3-009", "S3-010"]
+  },
+  "nice_to_have_applied": {
+    "count": 3,
+    "ids": ["S3-011", "S3-012", "S3-013"],
+    "rationale": "S3-011 (テストフィクスチャ方針) は受入条件の検証可能性を補強。S3-012 (共通定数流用) は Issue #47/#716 との整合保証で採用推奨。S3-013 (API バリデーション) はセキュリティ/DoS リスク低減のため採用。3 件すべてが少量追記で実装ブレを大きく抑えられるため反映。"
+  },
+  "constraints_check": {
+    "title_preserved": true,
+    "structure_preserved": true,
+    "stage2_consistency": "Stage 2 で追加済みの『判定基準（A/B 分岐ロジック）』『2MB 統一案 (a) の採用根拠』『@tanstack/react-virtual 選定理由』等は維持。新規追記はすべて既存セクションへのサブセクション追加または別表追加で統合"
+  },
+  "new_body_path": "dev-reports/issue/723/issue-review/issue-body-after-stage4.md",
+  "applied_at": "2026-05-28"
+}

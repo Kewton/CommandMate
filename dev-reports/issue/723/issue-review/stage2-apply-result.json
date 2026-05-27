@@ -1,0 +1,51 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目・通常レビュー）",
+  "iteration": 1,
+  "applied_findings": [
+    "S1-001",
+    "S1-002",
+    "S1-003",
+    "S1-004",
+    "S1-005",
+    "S1-006",
+    "S1-007",
+    "S1-008",
+    "S1-009",
+    "S1-010",
+    "S1-011",
+    "S1-012",
+    "S1-013"
+  ],
+  "skipped_findings": [],
+  "issue_updated": true,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/723",
+  "body_diff_summary": {
+    "概要": "編集系の例示に「HTML 等」を追加（S1-003）",
+    "背景（現状の問題）": "テーブル行1の表現を「通常テキスト（非編集系）だけサイズ上限なし」に修正（S1-005連動・H1正確化）。表4を304スキップ機構の存在と問題範囲（mtime変化時の連鎖再ロード）に書き直し、Issue #469 を明記（S1-005）。サイズ上限一覧テーブルを新規追加（実コードの全種別を明記、画像20MB含む）",
+    "対応方針 A": "「新API」表現を排し「既存GET の挙動拡張」と明記。メタ情報返却方式を JSONレスポンスボディに一意確定（X-Total-Lines等のHTTPヘッダ案は採用しない）。FileContent 型拡張への言及追加（S1-007）",
+    "対応方針 B": "見出しを EDITABLE_EXTENSIONS 全件（.md/.html/.htm/.yaml/.yml）に修正（S1-003）。A/B 判定基準ロジックを明示（isEditableExtension で分岐、画像/動画/PDF除外、判定箇所は route.ts GETハンドラ）（S1-008）。既存 TEXT_MAX_SIZE_BYTES=1MB を 2MB へ引き上げ統一する推奨方針 (a) を明記（S1-002）。画像上限を 5MB→20MB に修正、並びの根拠を補強（S1-001）。HTML の二重ガード（事前5MB+事後5MB）の現状と、本Issue 2MB ガードの適用対象が HTML 除外サブセット（.md/.yaml/.yml）であること、評価順を排他分岐で明示（S1-004）",
+    "受入条件 閲覧専用": "1秒以内表示の測定条件（M1 Mac/localhost/warm cache/Performance API/p50<1s/n=10）明示。メモリ非載せの検証手段（grep/lintで readFile 不使用 + integration test で RSS 増分 50MB 未満）明示（S1-006）",
+    "受入条件 編集系": "上限定数を editable-extensions.ts の TEXT_MAX_SIZE_BYTES 2MB 引き上げに統一する受入条件追加。HTML を 2MB 対象外として 5MB 維持する受入条件追加（S1-002 / S1-004）",
+    "受入条件 横断": "「同制限」の曖昧表現を排除し、GET /files API レイヤでの編集系サイズ上限ガード一元化と、閲覧専用の行ベースAPI移行は独立受入条件として明文化（S1-009）",
+    "実装方針 1": "評価順（HTML分岐→新規2MB分岐→通常テキスト分岐）を擬似フローで記述（S1-004）。FileContent 型拡張への言及（S1-007）",
+    "実装方針 2": "@tanstack/react-virtual 既存依存なしを確定、React18/Next.js14互換と'use client'制約、代替候補（react-window）検討結果を1文で記述、バンドルサイズはPRで実測記載（S1-010）",
+    "実装方針 3": "TEXT_MAX_SIZE_BYTES 引き上げを定数変更として記述。VIEWER_OVERSCAN_LINES / VIEWER_CHUNK_LINE_SIZE の根拠を1080p行高24pxベースで明記（S1-011）。POLLING_DISABLED_THRESHOLD_BYTES=1MB が編集系上限2MBの半分という根拠、TEXT_MAX_SIZE_BYTES 旧値と同値だが意図が別であることを明示（S1-012）",
+    "実装方針 5": "既存 If-Modified-Since/304 機構（Issue #469）への上乗せ位置付けを明示（S1-005連動）",
+    "想定影響範囲": "editable-extensions.ts 行を追加（TEXT_MAX_SIZE_BYTES 1MB→2MB）。file-viewer-config.ts の定数構成を更新。package.json バンドルサイズ実測の注記追加",
+    "関連": "Issue #469 を関連リンクに追加（S1-013）"
+  },
+  "new_body_path": "dev-reports/issue/723/issue-review/issue-body-after-stage2.md",
+  "must_fix_applied": 4,
+  "should_fix_applied": 6,
+  "nice_to_have_applied": 3,
+  "notes": [
+    "全 13 件の findings（Must Fix 4 / Should Fix 6 / Nice to Have 3）を反映。スキップなし",
+    "Issueタイトルは指示に従い変更なし",
+    "コードパス行番号（route.ts:335, 311, FilePanelContent.tsx:239-246 等）は元Issue記載の値を維持。仮説検証時に矛盾は見つかっていない",
+    "HTMLを編集系新規2MB上限の対象外とする方針を S1-004 の suggested_fix のうち「適用対象を HTML 除外サブセットに明示」案で採用（5MB → 2MB 引き下げ案は採用せず、Issue #490 後方互換を優先）",
+    "S1-002 は推奨案 (a)「既存 TEXT_MAX_SIZE_BYTES を 2MB に引き上げ統一」を採用",
+    "S1-007 のメタ情報返却方式は推奨「JSONボディに totalLines/totalBytes/encoding/range を含める」を採用（HTTPヘッダ方式は不採用）",
+    "gh issue edit 723 --body-file は正常完了、issue URL https://github.com/Kewton/CommandMate/issues/723 を取得"
+  ]
+}

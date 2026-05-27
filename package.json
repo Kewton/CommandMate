@@ -54,6 +54,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@marp-team/marp-core": "^4.3.0",
+    "@tanstack/react-virtual": "^3.13.26",
     "ansi-to-html": "^0.7.2",
     "autoprefixer": "^10.4.22",
     "better-sqlite3": "^12.4.1",

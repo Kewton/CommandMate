@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+- FilePanel: 大規模ファイルでPC版がハングする問題に対するハイブリッド対応（行ベースAPI ＋ `@tanstack/react-virtual` 仮想化 ＋ 編集系2MBサイズ上限）。CodeViewer は `useVirtualizer` で可視範囲＋オーバースキャンのみマウントし、行範囲モード（`startLine`/`endLine` クエリ）でチャンク取得・ハイライトキャッシュを実装。サーバ側は `readFileLineRange` で `createReadStream`＋`readline` ストリーミング（メモリ O(チャンク)）。`useFileContentSearch` に debounce 300ms＋最小2文字、`useFileContentPolling` に大ファイル時無効化（`POLLING_DISABLED_THRESHOLD_BYTES = 1MB`）を追加 (Issue #723)
+
+### Added
+- API: `GET /api/worktrees/:id/files/:path?startLine=N&endLine=M` 行範囲モードを追加。行範囲モード時は `If-Modified-Since` をスキップして常に 200 を返す。レスポンス JSON に `totalLines` / `totalBytes` / `encoding` / `range` のオプショナルメタを追加（`FileContent` 型拡張、後方互換） (Issue #723)
+- i18n: `fileTooLarge.editableLimit` / `fileTooLarge.viewerLimit` を `locales/ja/error.json` / `locales/en/error.json` に追加 (Issue #723)
+
+### Changed
+- Config: `TEXT_MAX_SIZE_BYTES` を 1MB → **2MB** に引き上げ。`.md` / `.yaml` / `.yml` の PUT/GET 共通定数として一元化 (Issue #723)
+- FileViewer: 検索ロジックを `useFileContentSearch` に統一（旧 `content.split('\n')` + 同期 `toLowerCase().includes` のインライン実装を撤去） (Issue #723)
+
+### Breaking Changes
+- 編集系ファイルの GET 事前ガード追加: `.md` / `.yaml` / `.yml` の GET 上限が新規 **2MB** になりました。
+  - 2MB 以下: 従来通り開け、保存も可能（改善: 旧来 1MB 超は PUT 失敗していたが 1〜2MB 帯が保存可能に）。
+  - 2MB 超: GET 時点で `FILE_TOO_LARGE` (HTTP 413) を返却し、ファイルが開けなくなります。
+  - 既にタブで開いている 2MB 超ファイルは、ポーリング再フェッチ時に 413 を受け取り、エラー表示に切り替わります。
+  - HTML (`.html` / `.htm`) は本変更の対象外で、既存 5MB ガード（Issue #490）を維持します。
+  - 2MB 超の編集系を扱う必要がある場合は、ファイル分割または将来の閲覧専用モードフォールバック（別 Issue で検討）をご利用ください (Issue #723)
+
 ## [0.5.8] - 2026-05-28
 
 ### Added

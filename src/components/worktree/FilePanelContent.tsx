@@ -13,6 +13,7 @@
 import React, { useEffect, useRef, memo, useState, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { Maximize2, Minimize2, ClipboardCopy, Check, Copy, Search } from 'lucide-react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import type { FileTab } from '@/hooks/useFileTabs';
 import type { FileContent } from '@/types/models';
 import { useFileContentPolling } from '@/hooks/useFileContentPolling';
@@ -23,9 +24,13 @@ import { VideoViewer } from './VideoViewer';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
 import { isEditableExtension } from '@/config/editable-extensions';
+import { VIEWER_OVERSCAN_LINES, VIEWER_CHUNK_LINE_SIZE } from '@/config/file-viewer-config';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
 import { Z_INDEX } from '@/config/z-index';
+
+/** Fixed row height for the virtualized CodeViewer (px). Monospace + leading-6. */
+const CODE_VIEWER_ROW_HEIGHT_PX = 24;
 
 /** Shared loading fallback for dynamic imports */
 function DynamicImportSpinner() {
@@ -233,64 +238,249 @@ function FileToolbar({ filePath, isMaximized, onToggleMaximize, copyableContent,
   );
 }
 
-/** Syntax-highlighted code viewer with line numbers and search support */
-function CodeViewer({ content, extension, searchMatches, searchCurrentIdx }: { content: string; extension: string; searchMatches?: number[]; searchCurrentIdx?: number }) {
+/**
+ * [Issue #723] Lazy chunk-fetch hook for the virtualized CodeViewer.
+ *
+ * When the user scrolls outside the currently loaded slice, request the chunk
+ * (aligned to {@link VIEWER_CHUNK_LINE_SIZE} boundaries) that contains the
+ * first visible row. In-flight requests are tracked so the same chunk is not
+ * fetched twice; only one chunk is requested per scroll position to keep the
+ * effect cheap.
+ *
+ * The hook is a no-op whenever `worktreeId`, `filePath`, or
+ * `onLineRangeFetched` is missing — that is, the consumer is showing a full
+ * (non-paginated) file.
+ */
+function useLazyChunkFetcher({
+  virtualItems,
+  worktreeId,
+  filePath,
+  onLineRangeFetched,
+  loadedStart,
+  loadedLineCount,
+}: {
+  virtualItems: ReturnType<ReturnType<typeof useVirtualizer>['getVirtualItems']>;
+  worktreeId?: string;
+  filePath?: string;
+  onLineRangeFetched?: (data: {
+    content: string;
+    range: { start: number; end: number };
+    totalLines: number;
+    totalBytes?: number;
+  }) => void;
+  loadedStart: number;
+  loadedLineCount: number;
+}) {
+  const inflightChunksRef = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    if (!worktreeId || !filePath || !onLineRangeFetched) return;
+    if (virtualItems.length === 0) return;
+
+    const firstVisible1 = virtualItems[0].index + 1;
+    const lastVisible1 = virtualItems[virtualItems.length - 1].index + 1;
+    const loadedEnd = loadedStart + loadedLineCount - 1;
+
+    // Entire visible window already loaded — nothing to do.
+    if (firstVisible1 >= loadedStart && lastVisible1 <= loadedEnd) return;
+
+    // Round-down the first visible line to a chunk-aligned start.
+    const targetStart =
+      Math.max(1, Math.floor((firstVisible1 - 1) / VIEWER_CHUNK_LINE_SIZE) * VIEWER_CHUNK_LINE_SIZE + 1);
+    const targetEnd = targetStart + VIEWER_CHUNK_LINE_SIZE - 1;
+    const chunkKey = targetStart;
+    if (inflightChunksRef.current.has(chunkKey)) return;
+    inflightChunksRef.current.add(chunkKey);
+
+    const url = `/api/worktrees/${worktreeId}/files/${encodePathForUrl(filePath)}?startLine=${targetStart}&endLine=${targetEnd}`;
+    fetch(url)
+      .then(async (res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        inflightChunksRef.current.delete(chunkKey);
+        if (!data || data.success !== true) return;
+        onLineRangeFetched({
+          content: data.content,
+          range: data.range,
+          totalLines: data.totalLines,
+          totalBytes: data.totalBytes,
+        });
+      })
+      .catch(() => {
+        inflightChunksRef.current.delete(chunkKey);
+      });
+  }, [virtualItems, worktreeId, filePath, onLineRangeFetched, loadedStart, loadedLineCount]);
+}
+
+/**
+ * Syntax-highlighted code viewer with line numbers and search support.
+ *
+ * [Issue #723] Rewritten to use `@tanstack/react-virtual` so that very large
+ * files (tens of thousands of lines) only mount the visible rows + overscan,
+ * preventing the previous full-DOM mount that caused PC hangs. Highlighting is
+ * performed lazily on the visible chunk and cached in a `Map` keyed by chunk
+ * index to avoid recomputation while scrolling.
+ *
+ * Props are unchanged for backward compat with `CodeViewerWithSearch` /
+ * `MarkdownWithSearch`. When the parent supplies `worktreeId` + `filePath` and
+ * the content's `totalLines` exceeds the loaded slice (i.e. line-range mode),
+ * additional chunks are fetched lazily as the user scrolls.
+ */
+function CodeViewer({
+  content,
+  extension,
+  searchMatches,
+  searchCurrentIdx,
+  totalLines,
+  rangeStart,
+  worktreeId,
+  filePath,
+  onLineRangeFetched,
+}: {
+  content: string;
+  extension: string;
+  searchMatches?: number[];
+  searchCurrentIdx?: number;
+  /** Total number of lines in the underlying file (defaults to lines in `content`). */
+  totalLines?: number;
+  /** 1-based start line of the currently loaded `content` slice (defaults to 1). */
+  rangeStart?: number;
+  /** When set together with `filePath`, enables chunked line-range fetching for partial slices. */
+  worktreeId?: string;
+  filePath?: string;
+  /** Callback fired with a fetched chunk so the parent may merge it back into the FileContent state. */
+  onLineRangeFetched?: (data: { content: string; range: { start: number; end: number }; totalLines: number; totalBytes?: number }) => void;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const highlightedHtml = useMemo(() => {
-    try {
-      return hljs.highlight(content, { language: extension, ignoreIllegals: true }).value;
-    } catch {
-      // Unknown language — fall back to auto-detection
-      return hljs.highlightAuto(content).value;
-    }
+
+  // Split loaded content into individual lines once per content change.
+  const loadedLines = useMemo(() => content.split('\n'), [content]);
+
+  // Effective totals (defaults preserve existing single-shot behaviour).
+  const effectiveRangeStart = Math.max(1, rangeStart ?? 1);
+  const loadedLineCount = loadedLines.length;
+  const effectiveTotalLines = Math.max(totalLines ?? loadedLineCount, loadedLineCount);
+
+  // Highlight cache: chunkIndex -> string[] (already split by line)
+  const highlightCacheRef = useRef<Map<number, string[]>>(new Map());
+  // Reset cache whenever content text or extension changes.
+  useEffect(() => {
+    highlightCacheRef.current.clear();
   }, [content, extension]);
-  const lineNumbers = useMemo(
-    () => Array.from({ length: content.split('\n').length }, (_, i) => i + 1),
-    [content],
+
+  // [Issue #723] Per-chunk syntax highlight. Visible chunk index = floor(lineIdx / CHUNK).
+  // Chunks are independent: minor cross-chunk boundary issues are accepted (documented).
+  const getHighlightedLine = useCallback(
+    (zeroBasedLineIdxInLoaded: number): string => {
+      const chunkSize = VIEWER_CHUNK_LINE_SIZE;
+      const chunkIndex = Math.floor(zeroBasedLineIdxInLoaded / chunkSize);
+      const cache = highlightCacheRef.current;
+      let chunkLines = cache.get(chunkIndex);
+      if (!chunkLines) {
+        const start = chunkIndex * chunkSize;
+        const end = Math.min(start + chunkSize, loadedLines.length);
+        const chunkText = loadedLines.slice(start, end).join('\n');
+        let highlighted = '';
+        try {
+          highlighted = hljs.highlight(chunkText, { language: extension, ignoreIllegals: true }).value;
+        } catch {
+          highlighted = hljs.highlightAuto(chunkText).value;
+        }
+        chunkLines = highlighted.split('\n');
+        cache.set(chunkIndex, chunkLines);
+      }
+      const inChunkIdx = zeroBasedLineIdxInLoaded - chunkIndex * chunkSize;
+      return chunkLines[inChunkIdx] ?? '';
+    },
+    [loadedLines, extension],
   );
 
   const matchSet = useMemo(() => new Set(searchMatches ?? []), [searchMatches]);
   const currentMatchLine = (searchMatches?.length ?? 0) > 0 ? searchMatches![searchCurrentIdx ?? 0] : -1;
-  const highlightedLines = useMemo(() => highlightedHtml.split('\n'), [highlightedHtml]);
 
-  // Scroll to current match line
+  // Virtualizer over `effectiveTotalLines` so the scrollbar reflects the full
+  // file even when only a slice is loaded.
+  const virtualizer = useVirtualizer({
+    count: effectiveTotalLines,
+    getScrollElement: () => containerRef.current,
+    estimateSize: () => CODE_VIEWER_ROW_HEIGHT_PX,
+    overscan: VIEWER_OVERSCAN_LINES,
+  });
+
+  // Scroll to current match line (1-based)
   useEffect(() => {
-    if (!searchMatches || searchMatches.length === 0 || !containerRef.current) return;
+    if (!searchMatches || searchMatches.length === 0) return;
     const lineNum = searchMatches[searchCurrentIdx ?? 0];
-    const lineEl = containerRef.current.querySelector(`[data-line="${lineNum}"]`);
-    if (lineEl && typeof lineEl.scrollIntoView === 'function') {
-      lineEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    }
-  }, [searchCurrentIdx, searchMatches]);
+    if (!Number.isFinite(lineNum)) return;
+    // Convert to 0-based index in the effective total line count
+    const index = Math.max(0, Math.min(effectiveTotalLines - 1, lineNum - 1));
+    virtualizer.scrollToIndex(index, { align: 'center' });
+  }, [searchCurrentIdx, searchMatches, virtualizer, effectiveTotalLines]);
+
+  // [Issue #723] Lazy chunk fetching for line-range mode (no-op unless worktreeId
+  // + filePath + onLineRangeFetched are supplied).
+  const virtualItems = virtualizer.getVirtualItems();
+  useLazyChunkFetcher({
+    virtualItems,
+    worktreeId,
+    filePath,
+    onLineRangeFetched,
+    loadedStart: effectiveRangeStart,
+    loadedLineCount,
+  });
 
   return (
     <div className="overflow-auto h-full" ref={containerRef} data-testid="file-content-code">
-      <table className="text-sm w-full border-collapse">
-        <tbody>
-          {lineNumbers.map((lineNumber) => {
-            const idx = lineNumber - 1;
-            const isCurrent = lineNumber === currentMatchLine;
-            const isMatch = matchSet.has(lineNumber);
-            const rowBg = isCurrent ? 'bg-orange-400/30' : isMatch ? 'bg-yellow-400/15' : '';
-            return (
-              <tr key={lineNumber} data-line={lineNumber} className={rowBg}>
-                <td className={`pl-3 pr-2 text-right select-none font-mono border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 sticky left-0 align-top whitespace-nowrap ${isCurrent ? 'text-orange-300' : isMatch ? 'text-yellow-300' : 'text-gray-400 dark:text-gray-600'}`}>
-                  {lineNumber}
-                </td>
-                <td className="px-4 text-gray-900 dark:text-gray-100 align-top">
-                  <pre className="m-0 whitespace-pre-wrap break-words font-mono" style={{ lineHeight: '1.5rem' }}>
-                    <code
-                      className="hljs"
-                      style={{ padding: 0, background: 'transparent' }}
-                      dangerouslySetInnerHTML={{ __html: highlightedLines[idx] ?? '' }}
-                    />
-                  </pre>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <div
+        style={{
+          height: virtualizer.getTotalSize(),
+          width: '100%',
+          position: 'relative',
+        }}
+      >
+        {virtualItems.map((virtualRow) => {
+          const lineNumber = virtualRow.index + 1; // 1-based line number in the full file
+          const loadedIndex = lineNumber - effectiveRangeStart; // 0-based offset in loaded slice
+          const isInLoaded = loadedIndex >= 0 && loadedIndex < loadedLineCount;
+          const isCurrent = lineNumber === currentMatchLine;
+          const isMatch = matchSet.has(lineNumber);
+          const rowBg = isCurrent ? 'bg-orange-400/30' : isMatch ? 'bg-yellow-400/15' : '';
+          const html = isInLoaded ? getHighlightedLine(loadedIndex) : '';
+          return (
+            <div
+              key={virtualRow.key}
+              data-line={lineNumber}
+              data-index={virtualRow.index}
+              ref={virtualizer.measureElement}
+              className={`absolute left-0 right-0 flex font-mono text-sm ${rowBg}`}
+              style={{
+                top: 0,
+                transform: `translateY(${virtualRow.start}px)`,
+                height: `${CODE_VIEWER_ROW_HEIGHT_PX}px`,
+                lineHeight: `${CODE_VIEWER_ROW_HEIGHT_PX}px`,
+              }}
+            >
+              <div
+                className={`px-3 text-right select-none border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 whitespace-nowrap ${
+                  isCurrent ? 'text-orange-300' : isMatch ? 'text-yellow-300' : 'text-gray-400 dark:text-gray-600'
+                }`}
+                style={{ minWidth: '4rem' }}
+              >
+                {lineNumber}
+              </div>
+              <div className="px-4 text-gray-900 dark:text-gray-100 flex-1 min-w-0 overflow-hidden">
+                {isInLoaded ? (
+                  <code
+                    className="hljs"
+                    style={{ padding: 0, background: 'transparent', whiteSpace: 'pre' }}
+                    dangerouslySetInnerHTML={{ __html: html }}
+                  />
+                ) : (
+                  <span className="text-gray-400 italic">Loading…</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -500,8 +690,44 @@ function MarkdownWithSearch({ tab, content, worktreeId, isMaximized, onToggleMax
 }
 
 /** [Issue #47] Code viewer with file content search (PC) */
-function CodeViewerWithSearch({ tab, content, isMaximized, onToggleMaximize }: { tab: FileTab; content: FileContent; isMaximized: boolean; onToggleMaximize: () => void }) {
+function CodeViewerWithSearch({
+  tab,
+  content,
+  worktreeId,
+  isMaximized,
+  onToggleMaximize,
+  onLoadContent,
+}: {
+  tab: FileTab;
+  content: FileContent;
+  worktreeId: string;
+  isMaximized: boolean;
+  onToggleMaximize: () => void;
+  onLoadContent?: (path: string, content: FileContent) => void;
+}) {
   const search = useFileContentSearch(content.content);
+
+  // [Issue #723] When the loaded content is a partial slice (range != full file),
+  // forward chunk-fetch results to the parent via onLoadContent so the cached
+  // FileContent stays consistent.
+  const handleLineRangeFetched = useCallback(
+    (data: { content: string; range: { start: number; end: number }; totalLines: number; totalBytes?: number }) => {
+      if (!onLoadContent) return;
+      onLoadContent(tab.path, {
+        ...content,
+        content: data.content,
+        totalLines: data.totalLines,
+        totalBytes: data.totalBytes ?? content.totalBytes,
+        range: data.range,
+      });
+    },
+    [onLoadContent, tab.path, content],
+  );
+
+  // [Issue #723] Only enable chunk-fetch mode when the content is a partial slice
+  // (has range AND totalLines bigger than slice length).
+  const enableLineRangeFetch =
+    content.range !== undefined && (content.totalLines ?? 0) > (content.range.end - content.range.start + 1);
 
   return (
     <div className="h-full flex flex-col">
@@ -524,6 +750,11 @@ function CodeViewerWithSearch({ tab, content, isMaximized, onToggleMaximize }: {
           extension={content.extension}
           searchMatches={search.searchOpen ? search.searchMatches : undefined}
           searchCurrentIdx={search.searchOpen ? search.searchCurrentIdx : undefined}
+          totalLines={content.totalLines}
+          rangeStart={content.range?.start}
+          worktreeId={enableLineRangeFetch ? worktreeId : undefined}
+          filePath={enableLineRangeFetch ? tab.path : undefined}
+          onLineRangeFetched={enableLineRangeFetch ? handleLineRangeFetched : undefined}
         />
       </div>
     </div>
@@ -811,8 +1042,10 @@ export const FilePanelContent = memo(function FilePanelContent({
       <CodeViewerWithSearch
         tab={tab}
         content={content}
+        worktreeId={worktreeId}
         isMaximized={isMaximized}
         onToggleMaximize={toggleMaximize}
+        onLoadContent={onLoadContent}
       />
     </MaximizableWrapper>
   );
