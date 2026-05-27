@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.8] - 2026-05-28
+
+### Added
+- History: Worktree詳細 HistoryPaneにメッセージテキスト検索機能を追加（名前空間分離CSS Custom Highlight API、debounce/最小2文字/最大500件） (Issue #716)
+- History: 履歴(History)表示件数を50〜250件で選択可能にする（HistoryDisplayLimitセレクタ・localStorage永続化） (Issue #701)
+
+### Fixed
+- Executor: execFile maxBufferエラー（ERR_CHILD_PROCESS_STDIO_MAXBUFFER）の診断ログを改善し上限を10MBに引き上げ (Issue #719)
+- Files: ファイルツリー再フェッチ時のスクロール位置を保持（非破壊的refetch indicator・retryボタン追加） (Issue #706)
+- Detection: Claude Code v2.1.142 スキル承認プロンプトの末尾サマリ行（"… +1 pending"）の誤検出を修正（SUMMARY_LINE_PATTERN/フッタトリミングの多層防御） (Issue #704)
+
+### Performance
+- DB: chat_messagesにrole列を含む複合インデックス（idx_messages_worktree_role_archived_time）を追加し相関サブクエリの線形劣化を解消（Migration v32） (Issue #708)
+- Sidebar: useWorktreesCacheをWorktreesCacheProvider Context経由に統合しポーリングの二重起動を解消 (Issue #709)
+- Sidebar: active/idle遷移時のポーリング間隔（5s/30s）をアダプティブに更新するよう修正 (Issue #710)
+- Sync: scanMultipleRepositoriesをPromise.allSettledで並列化しsync APIのスケーラビリティを改善 (Issue #711)
+
 ## [0.5.7] - 2026-05-11
 
 ### Added
