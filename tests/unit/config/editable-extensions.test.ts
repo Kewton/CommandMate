@@ -41,9 +41,9 @@ describe('EXTENSION_VALIDATORS', () => {
     expect(mdValidator).toBeDefined();
   });
 
-  it('should have a max file size of 1MB for .md', () => {
+  it('should have a max file size of 2MB for .md (Issue #723)', () => {
     const mdValidator = EXTENSION_VALIDATORS.find(v => v.extension === '.md');
-    expect(mdValidator?.maxFileSize).toBe(1024 * 1024);
+    expect(mdValidator?.maxFileSize).toBe(2 * 1024 * 1024);
   });
 
   it('should have a validator for .html extension - Issue #490', () => {
@@ -58,17 +58,17 @@ describe('EXTENSION_VALIDATORS', () => {
     expect(htmValidator?.maxFileSize).toBe(5 * 1024 * 1024);
   });
 
-  it('should have a validator for .yaml extension - Issue #646', () => {
+  it('should have a validator for .yaml extension - Issue #646 (2MB after Issue #723)', () => {
     const yamlValidator = EXTENSION_VALIDATORS.find(v => v.extension === '.yaml');
     expect(yamlValidator).toBeDefined();
-    expect(yamlValidator?.maxFileSize).toBe(1024 * 1024);
+    expect(yamlValidator?.maxFileSize).toBe(2 * 1024 * 1024);
     expect(yamlValidator?.additionalValidation).toBeDefined();
   });
 
-  it('should have a validator for .yml extension - Issue #646', () => {
+  it('should have a validator for .yml extension - Issue #646 (2MB after Issue #723)', () => {
     const ymlValidator = EXTENSION_VALIDATORS.find(v => v.extension === '.yml');
     expect(ymlValidator).toBeDefined();
-    expect(ymlValidator?.maxFileSize).toBe(1024 * 1024);
+    expect(ymlValidator?.maxFileSize).toBe(2 * 1024 * 1024);
     expect(ymlValidator?.additionalValidation).toBeDefined();
   });
 });
@@ -154,15 +154,15 @@ describe('validateContent', () => {
   });
 
   describe('file size validation', () => {
-    it('should reject content exceeding max file size', () => {
-      const largeContent = 'x'.repeat(1024 * 1024 + 1); // 1MB + 1 byte
+    it('should reject content exceeding max file size (2MB, Issue #723)', () => {
+      const largeContent = 'x'.repeat(2 * 1024 * 1024 + 1); // 2MB + 1 byte
       const result = validateContent('.md', largeContent);
       expect(result.valid).toBe(false);
       expect(result.error).toBe('File size exceeds limit');
     });
 
-    it('should accept content at max file size', () => {
-      const maxContent = 'x'.repeat(1024 * 1024); // exactly 1MB
+    it('should accept content at max file size (exactly 2MB, Issue #723)', () => {
+      const maxContent = 'x'.repeat(2 * 1024 * 1024); // exactly 2MB
       const result = validateContent('.md', maxContent);
       expect(result.valid).toBe(true);
     });
@@ -273,15 +273,15 @@ describe('validateContent', () => {
       expect(result.valid).toBe(true);
     });
 
-    it('should reject YAML content exceeding 1MB for .yaml', () => {
-      const largeContent = 'x'.repeat(1024 * 1024 + 1);
+    it('should reject YAML content exceeding 2MB for .yaml (Issue #723)', () => {
+      const largeContent = 'x'.repeat(2 * 1024 * 1024 + 1);
       const result = validateContent('.yaml', largeContent);
       expect(result.valid).toBe(false);
       expect(result.error).toBe('File size exceeds limit');
     });
 
-    it('should reject YAML content exceeding 1MB for .yml', () => {
-      const largeContent = 'x'.repeat(1024 * 1024 + 1);
+    it('should reject YAML content exceeding 2MB for .yml (Issue #723)', () => {
+      const largeContent = 'x'.repeat(2 * 1024 * 1024 + 1);
       const result = validateContent('.yml', largeContent);
       expect(result.valid).toBe(false);
       expect(result.error).toBe('File size exceeds limit');

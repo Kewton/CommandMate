@@ -13,8 +13,15 @@
 import { HTML_MAX_SIZE_BYTES } from '@/config/html-extensions';
 import { isYamlSafe } from '@/config/uploadable-extensions';
 
-/** Maximum file size for text-based editable files (1MB) */
-export const TEXT_MAX_SIZE_BYTES = 1024 * 1024;
+/**
+ * Maximum file size for text-based editable files (2MB).
+ *
+ * [Issue #723] Raised from 1MB to 2MB for unified PUT/GET enforcement.
+ * - Applied to `.md` / `.yaml` / `.yml` via {@link EXTENSION_VALIDATORS}.
+ * - `.html` / `.htm` use {@link HTML_MAX_SIZE_BYTES} (5MB, Issue #490).
+ * - Enforced both pre-read (GET route guard) and post-validate (PUT validateContent).
+ */
+export const TEXT_MAX_SIZE_BYTES = 2 * 1024 * 1024;
 
 /**
  * List of file extensions that can be edited

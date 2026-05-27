@@ -30,6 +30,7 @@ import { copyToClipboard } from '@/lib/clipboard-utils';
 import { Copy, Check, Maximize2, Minimize2, ClipboardCopy, Pencil, Search, X } from 'lucide-react';
 import { Z_INDEX } from '@/config/z-index';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
+import { useFileContentSearch } from '@/hooks/useFileContentSearch';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
 
@@ -38,6 +39,58 @@ const MARP_FRONTMATTER_REGEX = /^---\s*\nmarp:\s*true/;
 
 /** Maximum MARP content length (1MB) */
 const MAX_MARP_CONTENT_LENGTH = 1_000_000;
+
+/**
+ * [Issue #47, Issue #723] Inline search bar shown beneath the toolbar in both
+ * the modal and fullscreen variants of FileViewer. Extracted to remove the
+ * verbatim duplication that previously existed at two render paths.
+ */
+function FileViewerSearchBar({
+  searchInputRef,
+  searchQuery,
+  searchMatches,
+  searchCurrentIdx,
+  onQueryChange,
+  onPrev,
+  onNext,
+  onClose,
+}: {
+  searchInputRef: React.RefObject<HTMLInputElement>;
+  searchQuery: string;
+  searchMatches: number[];
+  searchCurrentIdx: number;
+  onQueryChange: (value: string) => void;
+  onPrev: () => void;
+  onNext: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-1 px-2 py-1 bg-gray-200 dark:bg-gray-700 border-b border-gray-300 dark:border-gray-600">
+      <input
+        ref={searchInputRef}
+        type="text"
+        value={searchQuery}
+        onChange={(e) => onQueryChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') { onClose(); }
+          if (e.key === 'Enter') { if (e.shiftKey) { onPrev(); } else { onNext(); } }
+        }}
+        placeholder="検索..."
+        className="flex-1 min-w-0 px-2 py-0.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-cyan-500"
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
+      />
+      <span className="text-xs text-gray-500 min-w-[3rem] text-right">
+        {searchMatches.length > 0 ? `${searchCurrentIdx + 1}/${searchMatches.length}` : '0/0'}
+      </span>
+      <button onClick={onPrev} disabled={searchMatches.length === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white disabled:text-gray-300 dark:disabled:text-gray-600" aria-label="前の結果">▲</button>
+      <button onClick={onNext} disabled={searchMatches.length === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white disabled:text-gray-300 dark:disabled:text-gray-600" aria-label="次の結果">▼</button>
+      <button onClick={onClose} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-gray-400 hover:text-gray-800 dark:hover:text-white" aria-label="検索を閉じる"><X className="w-4 h-4" /></button>
+    </div>
+  );
+}
 
 /**
  * [Issue #490] Mobile HTML preview with tab switching (Source/Preview)
@@ -239,12 +292,23 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
   const [marpSlides, setMarpSlides] = useState<string[] | null>(null);
   const [marpCurrentSlide, setMarpCurrentSlide] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchMatches, setSearchMatches] = useState<number[]>([]);
-  const [searchCurrentIdx, setSearchCurrentIdx] = useState(0);
-  const searchInputRef = useRef<HTMLInputElement>(null);
   const codeContainerRef = useRef<HTMLDivElement>(null);
+
+  // [Issue #723] Unified search hook (replaces previously inlined logic at
+  // L242-318). Provides debounced (300ms, SEARCH_DEBOUNCE_MS) + minimum-2-char
+  // query semantics shared with FilePanelContent.
+  const {
+    searchOpen,
+    searchQuery,
+    searchMatches,
+    searchCurrentIdx,
+    searchInputRef,
+    openSearch,
+    closeSearch,
+    nextMatch: nextSearchMatch,
+    prevMatch: prevSearchMatch,
+    setSearchQuery,
+  } = useFileContentSearch(content?.content);
 
   /** Whether the current content supports clipboard copy (text files only, not image/video/pdf) */
   const canCopy = useMemo(
@@ -284,39 +348,6 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
     setIsFullscreen((prev) => !prev);
   }, []);
 
-  /** [Issue #47] Open file content search */
-  const openSearch = useCallback(() => {
-    setSearchOpen(true);
-    setTimeout(() => searchInputRef.current?.focus(), 50);
-  }, []);
-
-  /** Close file content search */
-  const closeSearch = useCallback(() => {
-    setSearchOpen(false);
-    setSearchQuery('');
-    setSearchMatches([]);
-    setSearchCurrentIdx(0);
-  }, []);
-
-  /** Find line numbers matching query in file content */
-  useEffect(() => {
-    if (!searchQuery || searchQuery.length < 2 || !content?.content) {
-      setSearchMatches([]);
-      setSearchCurrentIdx(0);
-      return;
-    }
-    const lines = content.content.split('\n');
-    const lowerQuery = searchQuery.toLowerCase();
-    const matches: number[] = [];
-    lines.forEach((line, idx) => {
-      if (line.toLowerCase().includes(lowerQuery)) {
-        matches.push(idx + 1); // 1-based line numbers
-      }
-    });
-    setSearchMatches(matches);
-    setSearchCurrentIdx(0);
-  }, [searchQuery, content?.content]);
-
   /** Scroll to the current match line */
   useEffect(() => {
     if (searchMatches.length === 0 || !codeContainerRef.current) return;
@@ -326,16 +357,6 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
       lineEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
   }, [searchCurrentIdx, searchMatches]);
-
-  const nextSearchMatch = useCallback(() => {
-    if (searchMatches.length === 0) return;
-    setSearchCurrentIdx((prev) => (prev + 1) % searchMatches.length);
-  }, [searchMatches.length]);
-
-  const prevSearchMatch = useCallback(() => {
-    if (searchMatches.length === 0) return;
-    setSearchCurrentIdx((prev) => (prev - 1 + searchMatches.length) % searchMatches.length);
-  }, [searchMatches.length]);
 
   // ESC to exit fullscreen
   useEffect(() => {
@@ -637,30 +658,16 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
         {renderToolbar()}
         {/* [Issue #47] File content search bar (fullscreen) */}
         {searchOpen && (
-          <div className="flex items-center gap-1 px-2 py-1 bg-gray-200 dark:bg-gray-700 border-b border-gray-300 dark:border-gray-600">
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') { closeSearch(); }
-                if (e.key === 'Enter') { if (e.shiftKey) { prevSearchMatch(); } else { nextSearchMatch(); } }
-              }}
-              placeholder="検索..."
-              className="flex-1 min-w-0 px-2 py-0.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-cyan-500"
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-            />
-            <span className="text-xs text-gray-500 min-w-[3rem] text-right">
-              {searchMatches.length > 0 ? `${searchCurrentIdx + 1}/${searchMatches.length}` : '0/0'}
-            </span>
-            <button onClick={prevSearchMatch} disabled={searchMatches.length === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white disabled:text-gray-300 dark:disabled:text-gray-600" aria-label="前の結果">▲</button>
-            <button onClick={nextSearchMatch} disabled={searchMatches.length === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white disabled:text-gray-300 dark:disabled:text-gray-600" aria-label="次の結果">▼</button>
-            <button onClick={closeSearch} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-gray-400 hover:text-gray-800 dark:hover:text-white" aria-label="検索を閉じる"><X className="w-4 h-4" /></button>
-          </div>
+          <FileViewerSearchBar
+            searchInputRef={searchInputRef}
+            searchQuery={searchQuery}
+            searchMatches={searchMatches}
+            searchCurrentIdx={searchCurrentIdx}
+            onQueryChange={setSearchQuery}
+            onPrev={prevSearchMatch}
+            onNext={nextSearchMatch}
+            onClose={closeSearch}
+          />
         )}
         <div className="flex-1 overflow-auto">
           {renderContent()}
@@ -712,30 +719,16 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
               {renderToolbar()}
               {/* [Issue #47] File content search bar */}
               {searchOpen && (
-                <div className="flex items-center gap-1 px-2 py-1 bg-gray-200 dark:bg-gray-700 border-b border-gray-300 dark:border-gray-600">
-                  <input
-                    ref={searchInputRef}
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Escape') { closeSearch(); }
-                      if (e.key === 'Enter') { if (e.shiftKey) { prevSearchMatch(); } else { nextSearchMatch(); } }
-                    }}
-                    placeholder="検索..."
-                    className="flex-1 min-w-0 px-2 py-0.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-cyan-500"
-                    autoComplete="off"
-                    autoCorrect="off"
-                    autoCapitalize="off"
-                    spellCheck={false}
-                  />
-                  <span className="text-xs text-gray-500 min-w-[3rem] text-right">
-                    {searchMatches.length > 0 ? `${searchCurrentIdx + 1}/${searchMatches.length}` : '0/0'}
-                  </span>
-                  <button onClick={prevSearchMatch} disabled={searchMatches.length === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white disabled:text-gray-300 dark:disabled:text-gray-600" aria-label="前の結果">▲</button>
-                  <button onClick={nextSearchMatch} disabled={searchMatches.length === 0} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white disabled:text-gray-300 dark:disabled:text-gray-600" aria-label="次の結果">▼</button>
-                  <button onClick={closeSearch} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-gray-400 hover:text-gray-800 dark:hover:text-white" aria-label="検索を閉じる"><X className="w-4 h-4" /></button>
-                </div>
+                <FileViewerSearchBar
+                  searchInputRef={searchInputRef}
+                  searchQuery={searchQuery}
+                  searchMatches={searchMatches}
+                  searchCurrentIdx={searchCurrentIdx}
+                  onQueryChange={setSearchQuery}
+                  onPrev={prevSearchMatch}
+                  onNext={nextSearchMatch}
+                  onClose={closeSearch}
+                />
               )}
             </div>
             {/* Scrollable content */}

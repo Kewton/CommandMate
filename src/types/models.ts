@@ -306,11 +306,15 @@ export interface TreeResponse {
  * File content representation
  * [MF-001] Does not include 'success' field - API response is a wrapper
  * that returns { success: true, ...FileContent }
+ *
+ * [Issue #723] Added optional metadata fields (totalLines/totalBytes/encoding/range)
+ * to support read-only large-file viewer with line-range fetch + virtualization.
+ * All new fields are optional for backward compatibility with existing call sites.
  */
 export interface FileContent {
   /** File path relative to worktree root */
   path: string;
-  /** File content (text or Base64 data URI for images) */
+  /** File content (text or Base64 data URI for images, or partial range slice) */
   content: string;
   /** File extension without dot (e.g., 'md', 'png') */
   extension: string;
@@ -326,6 +330,14 @@ export interface FileContent {
   isPdf?: boolean;
   /** MIME type (optional, for image/video/pdf files) */
   mimeType?: string;
+  /** Total line count in the file (Issue #723, set on line-range and full-text reads of plain text files) */
+  totalLines?: number;
+  /** Total file size in bytes (Issue #723, set on plain text reads to support polling-throttle decisions) */
+  totalBytes?: number;
+  /** Encoding label, currently always 'utf-8' for text reads (Issue #723) */
+  encoding?: string;
+  /** Line range actually returned when {@link content} is a partial slice (Issue #723, 1-based inclusive) */
+  range?: { start: number; end: number };
 }
 
 /**

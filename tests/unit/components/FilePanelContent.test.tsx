@@ -163,6 +163,27 @@ describe('FilePanelContent', () => {
       expect(codeElement).toBeInTheDocument();
     });
 
+    // [Issue #723] Virtualization test — synthesise a 10,000-line file and
+    // assert that mounted rows are far fewer than the total line count.
+    it('virtualizes large files so DOM only contains visible rows (Issue #723)', () => {
+      const TOTAL_LINES = 10_000;
+      const lines: string[] = [];
+      for (let i = 1; i <= TOTAL_LINES; i++) lines.push(`line ${i}`);
+      const content = createContent({
+        content: lines.join('\n'),
+        extension: 'ts',
+      });
+      const tab = createTab({ content });
+      render(<FilePanelContent tab={tab} {...defaultProps} />);
+
+      const codeElement = screen.getByTestId('file-content-code');
+      expect(codeElement).toBeInTheDocument();
+      // The container should NOT mount 10,000 row elements. We mount only
+      // visible + overscan, so far less than the full line count.
+      const rowEls = codeElement.querySelectorAll('[data-line]');
+      expect(rowEls.length).toBeLessThan(TOTAL_LINES);
+    });
+
     it('should render markdown editor for .md files', () => {
       const content = createContent({
         content: '# Hello World',

@@ -188,7 +188,8 @@ tests/
 | `src/config/memo-config.ts` | メモ共有定数（MAX_MEMOS）（Issue #652） |
 | `src/config/repository-config.ts` | リポジトリ共有定数（MAX_DISPLAY_NAME_LENGTH）（Issue #644） |
 | `src/config/history-display-config.ts` | History表示件数定数（HISTORY_DISPLAY_LIMIT_OPTIONS, MAX_MESSAGES_LIMIT派生, DEFAULT_MESSAGES_LIMIT, HISTORY_DISPLAY_LIMIT_STORAGE_KEY, HistoryDisplayLimit型, isHistoryDisplayLimit型ガード）（Issue #701） |
-| `src/config/editable-extensions.ts` | 編集可能拡張子定義・バリデーション（EDITABLE_EXTENSIONS, EXTENSION_VALIDATORS, isEditableExtension, validateContent）。.yaml/.yml 追加・YAML危険タグバリデーション（Issue #646） |
+| `src/config/editable-extensions.ts` | 編集可能拡張子定義・バリデーション（EDITABLE_EXTENSIONS, EXTENSION_VALIDATORS, isEditableExtension, validateContent）。.yaml/.yml 追加・YAML危険タグバリデーション（Issue #646）。TEXT_MAX_SIZE_BYTES を 2MB に引き上げ・PUT/GET 共通定数化（Issue #723） |
+| `src/config/file-viewer-config.ts` | 大規模ファイル閲覧用定数（VIEWER_CHUNK_LINE_SIZE, VIEWER_OVERSCAN_LINES, POLLING_DISABLED_THRESHOLD_BYTES）（Issue #723） |
 | `src/config/pdf-extensions.ts` | PDF拡張子・サイズ(20MB)・magic bytes(`%PDF-`)・iframe sandbox定数、isPdfExtension / validatePdfMagicBytes / validatePdfContent（Issue #673） |
 | `src/lib/detection/prompt-key.ts` | promptKey重複排除ユーティリティ |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
@@ -219,7 +220,7 @@ tests/
 | `src/lib/proxy/handler.ts` | HTTPプロキシハンドラ |
 | `src/lib/proxy/config.ts` | プロキシ設定定数 |
 | `src/lib/security/path-validator.ts` | パスバリデーション・symlink防御 |
-| `src/lib/file-operations.ts` | ファイルCRUD操作（5層セキュリティ） |
+| `src/lib/file-operations.ts` | ファイルCRUD操作（5層セキュリティ）、`readFileLineRange` で行範囲ストリーミング読み取り（createReadStream + readline、メモリO(チャンク)）（Issue #723） |
 | `src/lib/git/clone-manager.ts` | クローン処理管理（排他制御） |
 | `src/lib/version-checker.ts` | バージョンアップ通知 |
 | `src/lib/slash-commands.ts` | スラッシュコマンドローダー（.claude/commands, .claude/skills, .codex/skills対応、getCopilotBuiltinCommands追加）（Issue #166, #547） |
@@ -258,10 +259,10 @@ tests/
 | `src/components/worktree/TerminalSearchBar.tsx` | ターミナル内テキスト検索バーUI（Issue #47）件数表示・前/次ナビ・Esc閉じ |
 | `src/components/worktree/FilePanelSplit.tsx` | ターミナル+ファイルパネル分割 |
 | `src/components/worktree/FilePanelTabs.tsx` | ファイルタブバーUI |
-| `src/components/worktree/FilePanelContent.tsx` | ファイルコンテンツ表示（ファイル内容ポーリング対応）（Issue #469）、YAMLファイル編集ルーティング追加（Issue #646） |
+| `src/components/worktree/FilePanelContent.tsx` | ファイルコンテンツ表示（ファイル内容ポーリング対応）（Issue #469）、YAMLファイル編集ルーティング追加（Issue #646）、CodeViewer の `@tanstack/react-virtual` 仮想化・行範囲チャンク fetch・ハイライトキャッシュ追加（Issue #723） |
 | `src/components/worktree/HtmlPreview.tsx` | HTMLファイルプレビューコンポーネント（iframe srcdoc + Safe/Interactiveサンドボックス）（Issue #490） |
 | `src/components/worktree/PdfPreview.tsx` | PDFファイルプレビューコンポーネント（data URI → Blob URL → iframe `sandbox="allow-scripts"`、cleanup revokeObjectURL、fetch失敗時ダウンロードフォールバック）（Issue #673） |
-| `src/components/worktree/FileViewer.tsx` | ファイルビューア |
+| `src/components/worktree/FileViewer.tsx` | ファイルビューア、検索ロジックを `useFileContentSearch` に統一（Issue #723） |
 | `src/components/worktree/FileSearchBar.tsx` | ファイル検索バー共通コンポーネント（Issue #469） |
 | `src/components/worktree/FileTreeView.tsx` | ファイルツリービュー（Issue #479） |
 | `src/components/worktree/TreeNode.tsx` | ファイルツリーノードコンポーネント（Issue #479） |
@@ -271,8 +272,8 @@ tests/
 | `src/components/worktree/GitPane.tsx` | Gitタブ（コミット履歴・diff表示）（Issue #447） |
 | `src/components/worktree/TimerPane.tsx` | タイマーUI（登録・カウントダウン・キャンセル、visibilitychange対応ポーリング）（Issue #534） |
 | `src/hooks/useFilePolling.ts` | ポーリングライフサイクル管理（visibilitychange対応）（Issue #469） |
-| `src/hooks/useFileContentPolling.ts` | ファイル内容ポーリング（If-Modified-Since/304）（Issue #469） |
-| `src/hooks/useFileContentSearch.ts` | ファイル内容検索共通フック（Issue #469） |
+| `src/hooks/useFileContentPolling.ts` | ファイル内容ポーリング（If-Modified-Since/304）（Issue #469）、大ファイル時無効化（`POLLING_DISABLED_THRESHOLD_BYTES`）（Issue #723） |
+| `src/hooks/useFileContentSearch.ts` | ファイル内容検索共通フック（Issue #469）、debounce 300ms・最小2文字（`SEARCH_DEBOUNCE_MS` / `SEARCH_MIN_QUERY_LENGTH` 流用）（Issue #723） |
 | `src/hooks/useFileTabs.ts` | タブ状態管理フック（isDirty管理対応）（Issue #469） |
 | `src/hooks/useImageAttachment.ts` | 画像添付カスタムフック（バリデーション・アップロード・状態管理・resetAfterSend）（Issue #474） |
 | `src/hooks/useAutoYes.ts` | Auto-Yesクライアント側フック |

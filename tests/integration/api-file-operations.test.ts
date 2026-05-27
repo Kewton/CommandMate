@@ -449,4 +449,183 @@ describe('File Operations API', () => {
       expect(data.error.code).toBe('WORKTREE_NOT_FOUND');
     });
   });
+
+  // [Issue #723] Line-range mode + editable size pre-guard tests
+  describe('GET line-range mode (Issue #723)', () => {
+    function makeNumberedLines(count: number): string {
+      const lines: string[] = [];
+      for (let i = 1; i <= count; i++) lines.push(`line ${i}`);
+      return lines.join('\n');
+    }
+
+    it('returns requested 1-based inclusive line range with metadata', async () => {
+      writeFileSync(join(testDir, 'sample.log'), makeNumberedLines(100));
+
+      const request = createRequest('GET', 'sample.log', undefined, { startLine: '10', endLine: '12' });
+      const params = { params: { id: 'test-worktree', path: ['sample.log'] } };
+
+      const response = await GET(request, params);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.success).toBe(true);
+      expect(data.content).toBe('line 10\nline 11\nline 12');
+      expect(data.totalLines).toBe(100);
+      expect(data.range).toEqual({ start: 10, end: 12 });
+      expect(data.encoding).toBe('utf-8');
+      expect(typeof data.totalBytes).toBe('number');
+    });
+
+    it('returns 400 INVALID_REQUEST for invalid range (startLine < 1)', async () => {
+      writeFileSync(join(testDir, 'sample.log'), makeNumberedLines(10));
+
+      const request = createRequest('GET', 'sample.log', undefined, { startLine: '0', endLine: '5' });
+      const params = { params: { id: 'test-worktree', path: ['sample.log'] } };
+
+      const response = await GET(request, params);
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data.success).toBe(false);
+      expect(data.error.code).toBe('INVALID_REQUEST');
+    });
+
+    it('returns 400 INVALID_REQUEST for non-numeric startLine', async () => {
+      writeFileSync(join(testDir, 'sample.log'), makeNumberedLines(10));
+
+      const request = createRequest('GET', 'sample.log', undefined, { startLine: 'abc', endLine: '5' });
+      const params = { params: { id: 'test-worktree', path: ['sample.log'] } };
+
+      const response = await GET(request, params);
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data.error.code).toBe('INVALID_REQUEST');
+    });
+
+    it('clamps endLine past EOF and returns 200', async () => {
+      writeFileSync(join(testDir, 'short.log'), makeNumberedLines(5));
+
+      const request = createRequest('GET', 'short.log', undefined, { startLine: '3', endLine: '99' });
+      const params = { params: { id: 'test-worktree', path: ['short.log'] } };
+
+      const response = await GET(request, params);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.range).toEqual({ start: 3, end: 5 });
+      expect(data.content).toBe('line 3\nline 4\nline 5');
+    });
+
+    it('skips If-Modified-Since when range is requested (always 200)', async () => {
+      writeFileSync(join(testDir, 'always.log'), makeNumberedLines(10));
+
+      const url = `http://localhost:3000/api/worktrees/test-worktree/files/always.log?startLine=1&endLine=3`;
+      const request = new NextRequest(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          // Far future date so mtime <= clientDate
+          'If-Modified-Since': new Date(Date.now() + 1000 * 3600 * 24 * 365).toUTCString(),
+        },
+      });
+      const params = { params: { id: 'test-worktree', path: ['always.log'] } };
+
+      const response = await GET(request, params);
+      expect(response.status).toBe(200);
+    });
+  });
+
+  describe('GET editable size pre-guard (Issue #723)', () => {
+    it('returns 413 FILE_TOO_LARGE for .md > 2MB', async () => {
+      // Create a 2MB + 1 byte .md file
+      const large = 'x'.repeat(2 * 1024 * 1024 + 1);
+      writeFileSync(join(testDir, 'big.md'), large);
+
+      const request = createRequest('GET', 'big.md');
+      const params = { params: { id: 'test-worktree', path: ['big.md'] } };
+
+      const response = await GET(request, params);
+      const data = await response.json();
+
+      expect(response.status).toBe(413);
+      expect(data.error.code).toBe('FILE_TOO_LARGE');
+    });
+
+    it('returns 200 for .md at exactly 2MB', async () => {
+      const exact = 'x'.repeat(2 * 1024 * 1024);
+      writeFileSync(join(testDir, 'exact.md'), exact);
+
+      const request = createRequest('GET', 'exact.md');
+      const params = { params: { id: 'test-worktree', path: ['exact.md'] } };
+
+      const response = await GET(request, params);
+      expect(response.status).toBe(200);
+    });
+
+    it('returns 413 FILE_TOO_LARGE for .yaml > 2MB', async () => {
+      const large = 'x'.repeat(2 * 1024 * 1024 + 1);
+      writeFileSync(join(testDir, 'big.yaml'), large);
+
+      const request = createRequest('GET', 'big.yaml');
+      const params = { params: { id: 'test-worktree', path: ['big.yaml'] } };
+
+      const response = await GET(request, params);
+      const data = await response.json();
+
+      expect(response.status).toBe(413);
+      expect(data.error.code).toBe('FILE_TOO_LARGE');
+    });
+
+    it('returns 413 FILE_TOO_LARGE for .yml > 2MB', async () => {
+      const large = 'x'.repeat(2 * 1024 * 1024 + 1);
+      writeFileSync(join(testDir, 'big.yml'), large);
+
+      const request = createRequest('GET', 'big.yml');
+      const params = { params: { id: 'test-worktree', path: ['big.yml'] } };
+
+      const response = await GET(request, params);
+      const data = await response.json();
+
+      expect(response.status).toBe(413);
+      expect(data.error.code).toBe('FILE_TOO_LARGE');
+    });
+
+    it('returns 200 for .html at 4MB (existing 5MB ceiling preserved)', async () => {
+      const fourMb = 'x'.repeat(4 * 1024 * 1024);
+      writeFileSync(join(testDir, 'mid.html'), fourMb);
+
+      const request = createRequest('GET', 'mid.html');
+      const params = { params: { id: 'test-worktree', path: ['mid.html'] } };
+
+      const response = await GET(request, params);
+      expect(response.status).toBe(200);
+    });
+
+    it('returns 413 for .html > 5MB (Issue #490 preserved)', async () => {
+      const sixMb = 'x'.repeat(6 * 1024 * 1024);
+      writeFileSync(join(testDir, 'big.html'), sixMb);
+
+      const request = createRequest('GET', 'big.html');
+      const params = { params: { id: 'test-worktree', path: ['big.html'] } };
+
+      const response = await GET(request, params);
+      const data = await response.json();
+
+      expect(response.status).toBe(413);
+      expect(data.error.code).toBe('FILE_TOO_LARGE');
+    });
+
+    it('does not pre-guard non-editable plain text files (no size limit for non-editable)', async () => {
+      // 3MB plain text file (non-editable extension) — should still be readable
+      const threeMb = 'x'.repeat(3 * 1024 * 1024);
+      writeFileSync(join(testDir, 'large.log'), threeMb);
+
+      const request = createRequest('GET', 'large.log');
+      const params = { params: { id: 'test-worktree', path: ['large.log'] } };
+
+      const response = await GET(request, params);
+      expect(response.status).toBe(200);
+    });
+  });
 });

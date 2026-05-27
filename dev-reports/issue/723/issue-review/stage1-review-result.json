@@ -1,0 +1,158 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "iteration": 1,
+  "focus": "通常",
+  "reviewer": "issue-review-agent (opus)",
+  "review_date": "2026-05-28",
+  "summary": "Issue #723 は『閲覧専用は行ベースAPI＋仮想化、編集系は全文＋サイズ上限』というハイブリッド方針自体は妥当で、根拠（hljs の構文文脈依存、編集系での部分編集事故リスク）も論理的に整合する。一方で、実コードと照合した結果、(1) 編集系の既存上限 TEXT_MAX_SIZE_BYTES = 1MB が validateContent() で既に動作中である点が Issue 本文で全く触れられていない、(2) 画像サイズが『5MB』と誤記（実装は 20MB）、(3) HTML の二重ガード（route.ts 事前 5MB + validateContent 事後 1MB）と Issue 提案 2MB との整合が未整理、(4) 編集系拡張子の例示から .html/.htm が欠落、(5) ポーリング側の If-Modified-Since/304 スキップ機構が既に実装されている事実が未記述、といった整合性・正確性の不備が複数ある。これらは設計判断の前提を誤らせる可能性が高く、Must Fix 優先で本文を是正すべき。また受入条件のうち『1秒以内表示』『メモリに載せない』『可視範囲のみハイライト』といった項目は測定/検証手段が未定義で、Should Fix としての追補が望ましい。",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "Must Fix",
+      "category": "正確性",
+      "title": "画像サイズ上限の数値誤記（5MB → 20MB）",
+      "location": "## 対応方針（ハイブリッド） > B. 編集系ファイル の括弧書き『HTML 5MB / 画像 5MB / 動画 100MB / PDF 20MB との並びで保守的設定』",
+      "current_text": "閾値の初期値は **2MB** を提案（HTML 5MB / 画像 5MB / 動画 100MB / PDF 20MB との並びで保守的設定）",
+      "issue": "画像の上限が 5MB と記述されているが、実装上は `IMAGE_MAX_SIZE_BYTES = 20MB`（`src/config/uploadable-extensions.ts` 系定義、仮説検証 H6）。この誤記により『他の上限と並びで保守的に 2MB』という根拠そのものが成立しなくなる（画像 20MB / PDF 20MB / 動画 100MB と比べると、テキスト 2MB は十分保守的だが、5MB との比較とは設計判断の重みが変わる）。",
+      "suggested_fix": "『（HTML 5MB / 画像 20MB / 動画 100MB / PDF 20MB との並びで保守的設定）』に修正。あわせて『2MB という値を選んだ根拠（編集系で 2MB を超える .md/.yaml は極めて稀／既存 1MB から段階的引き上げ等）』を一文で補強する。",
+      "rationale": "仮説検証 H6 で確認済み。`IMAGE_MAX_SIZE_BYTES` は 20MB が事実。Issue を読んだ実装者がそのまま転記すると別バグの起点になる。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "Must Fix",
+      "category": "設計整合",
+      "title": "編集系の既存上限 TEXT_MAX_SIZE_BYTES = 1MB と提案 2MB の整合が未整理",
+      "location": "## 対応方針（ハイブリッド） > B. 編集系ファイル / ## 実装方針 > 3. 設定定数",
+      "current_text": "`route.ts` のテキスト読み込み分岐で `fileStat.size > EDITABLE_TEXT_MAX_SIZE_BYTES` を事前チェック ... 閾値の初期値は **2MB** を提案 ... `EDITABLE_TEXT_MAX_SIZE_BYTES = 2 * 1024 * 1024`",
+      "issue": "`src/config/editable-extensions.ts:17` に `TEXT_MAX_SIZE_BYTES = 1024 * 1024`（1MB）が既に定義され、`validateContent()` で `content.length > validator.maxFileSize` の事後チェックとして全 EDITABLE_EXTENSIONS（.md/.yaml/.yml）に適用済み（HTML/HTMは HTML_MAX_SIZE_BYTES=5MB）。Issue は新規に `EDITABLE_TEXT_MAX_SIZE_BYTES = 2MB` を別ファイル（`file-viewer-config.ts`）に追加すると読めるが、既存 1MB との関係（廃止／引き上げ／別用途）が一切記述されていない。同名類似定数が二箇所に存在すると、書き込み（PUT）で 1MB、読み込み（GET）で 2MB のような非対称が生じうる。",
+      "suggested_fix": "次のいずれかを Issue 本文に明記する：(a) 既存 `TEXT_MAX_SIZE_BYTES` を 2MB に引き上げて統一する（PUT/GET 共通の単一定数）。(b) 既存 `TEXT_MAX_SIZE_BYTES`（書き込み validateContent 用）と新規 `EDITABLE_TEXT_MAX_SIZE_BYTES`（読み込み route.ts 事前ガード用）を意図的に分離し、その理由を明示。推奨は (a)。あわせて『既存 1MB は validateContent() の事後検証として動作している』という現状認識を本文の『背景』または『B. 編集系ファイル』に追記する。",
+      "rationale": "仮説検証 H1 で確認済み。同種ガードの二重定義は保守事故の温床。受入条件『既存 MarkdownEditor / MarkdownPreview の挙動に変更なし』との両立にも、どちらに合わせるかの明示が不可欠。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "Must Fix",
+      "category": "整合性",
+      "title": "編集系拡張子の例示に .html / .htm が欠落",
+      "location": "## 対応方針（ハイブリッド） > B. 編集系ファイル の見出し『編集系ファイル（`.md`, `.yaml`, `.yml` 等 `isEditableExtension` 該当）』",
+      "current_text": "編集系ファイル（`.md`, `.yaml`, `.yml` 等 `isEditableExtension` 該当）",
+      "issue": "`EDITABLE_EXTENSIONS = ['.md', '.html', '.htm', '.yaml', '.yml']`（editable-extensions.ts:23）であり、.html / .htm も isEditableExtension の対象。Issue の例示から .html/.htm が欠落しているため、設計者が『HTML は閲覧専用扱い』と誤解する余地がある。実際は route.ts:311 で HTML 専用の事前 5MB ガードが既に存在し、かつ validateContent でも事後 1MB（実装は HTML_MAX_SIZE_BYTES=5MB を maxFileSize としているため 5MB チェック）が動作する。",
+      "suggested_fix": "見出しを『編集系ファイル（`.md`, `.html`, `.htm`, `.yaml`, `.yml` ＝ `EDITABLE_EXTENSIONS` 全件）』に修正。さらに『HTML には別途 route.ts 事前 5MB ガード（Issue #490）が存在するため、本Issue の編集系上限は HTML 以外（.md/.yaml/.yml）に適用、HTML は既存の 5MB を踏襲する』など方針を一文添える。",
+      "rationale": "仮説検証 H8 で確認済み。HTML を編集系から見落とすと、設計判断（HTML 5MB を残すか／統一するか）が抜け落ちて実装時に出戻りが発生する。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "Must Fix",
+      "category": "設計整合",
+      "title": "HTML の二重ガード（route.ts 5MB + validateContent 5MB）と提案 2MB の関係が未記述",
+      "location": "## 実装方針 > 1. サーバAPI拡張 『編集系拡張子チェックの直後にサイズ上限ガードを追加』",
+      "current_text": "編集系拡張子チェックの直後にサイズ上限ガードを追加",
+      "issue": "現状、HTML はGET時に route.ts:311 で `HTML_MAX_SIZE_BYTES = 5MB` を事前チェック（Issue #490）し、PUT 時にも validateContent() で 5MB をチェックしている。新たに『編集系拡張子チェック直後に EDITABLE_TEXT_MAX_SIZE_BYTES = 2MB』を入れると、HTML に対しては『5MB の HTML 事前ガード』と『2MB の汎用編集系ガード』のどちらが先に評価されるかで挙動が変わる。提案された定数 2MB は HTML の既存 5MB を狭めることになり、Issue #490 の方針と衝突する。",
+      "suggested_fix": "新規上限の適用対象を『EDITABLE_EXTENSIONS のうち HTML を除外したサブセット（= .md/.yaml/.yml）』と明示する。または HTML を含めて統一する場合は 5MB → 2MB への引き下げが意図的であることと Issue #490 への影響評価（5MB を選んだ設計理由）を本文に追記する。実装方針セクションのガード追加箇所の擬似コード／フローを記述し、評価順を明示する。",
+      "rationale": "Issue #490 の HTML 5MB ガードはセキュリティ判断（DoS）も含む。沈黙のうちに引き下げると後方互換が壊れる。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "Should Fix",
+      "category": "正確性",
+      "title": "ポーリングの 304 スキップ機構（If-Modified-Since）が既に実装済みである事実が未記述",
+      "location": "## 背景（現状の問題） の表 # 4 『mtime更新時はポーリング毎（5秒間隔）に全文再取得 → 再ハイライト → 再レンダリングが反復』",
+      "current_text": "mtime更新時はポーリング毎（5秒間隔）に**全文再取得 → 再ハイライト → 再レンダリング**が反復",
+      "issue": "`useFileContentPolling.ts:56` で `If-Modified-Since` を送り、route.ts:319-333 で 304 を返す機構が既にあり、**mtime 未変更時は本文を返さない**。Issue の現状記述は『5秒毎に反復』が常時発生するかのように読めるが、実際は『mtime が変化したとき限定』。論点が『大ファイルかつ mtime 変化』に限定されることが背景から読み取れず、過大に問題化されている。",
+      "suggested_fix": "『mtime 未変更時は 304 で本文転送をスキップ済み（Issue #469 で実装）。問題は **mtime が変化した瞬間に 5 秒間隔で全文再取得→再ハイライト→再レンダリングが連鎖する点**』のように、現状機構の存在と本Issueの問題範囲を明確化する。",
+      "rationale": "仮説検証 H4 で確認済み。背景の正確性は後工程の設計判断（『大ファイル時のポーリング無効化が必要』の妥当性根拠）に影響する。"
+    },
+    {
+      "id": "S1-006",
+      "severity": "Should Fix",
+      "category": "受入条件",
+      "title": "『1秒以内に表示』『メモリに載せない』の検証手段が未定義",
+      "location": "## 受入条件 > 閲覧専用ファイル（コードビューア）",
+      "current_text": "- [ ] 100MB級のログファイルを開いてもUIがブロックされず、最初の数百行が1秒以内に表示される\n- [ ] サーバ側でファイル全文をメモリに載せない（`createReadStream` + `readline` 等で行ストリーム読み）",
+      "issue": "(a) 『1秒以内』は計測環境（マシンスペック・LAN/ローカル・Cold/Warm）依存で、定義しないと受入合否が定まらない。(b) 『メモリに載せない』は実行時 RSS の差分計測など方法論を伴わないと検証不能。受入テストの自動化可否も判断できない。",
+      "suggested_fix": "(a) 『開発機（M1 Mac 相当）で localhost に対して fetch → 行レンダリング完了までを Performance API で計測し、p50 < 1s』のように測定条件と統計値を明示。(b) 『readFileLineRange 実装内で `readFile` を呼ばないこと（lint/grep ベースの静的検証）』『integration test で 100MB ファイル読み込み時に Node プロセスの RSS 増分が 50MB 未満』など、検証手段を1つに絞って明文化。",
+      "rationale": "曖昧な数値受入条件は実装者ごとに解釈が分かれ、レビュー時の合否判定で混乱を招く。少なくとも『どう測るか』は Issue 段階で確定すべき。"
+    },
+    {
+      "id": "S1-007",
+      "severity": "Should Fix",
+      "category": "整合性",
+      "title": "新規 API 仕様（startLine/endLine）と既存メタ（FileContent 型）の関係が不明瞭",
+      "location": "## 対応方針（ハイブリッド） > A. 閲覧専用ファイル ／ ## 実装方針 > 1. サーバAPI拡張",
+      "current_text": "新API: `GET /api/worktrees/:id/files/:path?startLine=N&endLine=M` で行範囲取得 ... 初回メタAPI（または同APIのレスポンスヘッダ）で `totalLines` / `totalBytes` / `encoding` を返却",
+      "issue": "(a) 『新API』と書かれているが、URL は既存 GET と同一で、クエリパラメータの追加で挙動分岐させる増分仕様である。本文では『新API』『分岐』が混在しており読み手に誤解を与える。(b) `totalLines`/`totalBytes`/`encoding` を『初回メタAPIで返す』のか『同APIのレスポンスヘッダで返す』のかが二択提示のまま確定していない（後工程の設計事項としても、Issue 段階での前提に影響）。(c) JSON ボディに含めるのか、HTTP ヘッダ（X-Total-Lines 等）に含めるのかで、`useFileContentPolling` 側の `If-Modified-Since` との合成挙動が変わる。",
+      "suggested_fix": "(a) 『既存 GET の挙動拡張（startLine/endLine 指定時のみ範囲モード）』と明記。新API という表現を避ける。(b) メタ情報の返却方式を一意に確定（推奨：JSON ボディに totalLines/totalBytes/encoding/range:{start,end} を含める。理由：既存 FileContent 型の自然な拡張、`useFileContentPolling` の 304 と独立）。(c) 既存 `FileContent` 型（`src/types/models.ts`）の拡張方針を実装方針 7 行目に明示。",
+      "rationale": "後段のクライアント実装（仮想化・ポーリング無効化判定）は totalBytes の取得経路に依存する。Issue 段階で確定しないと、実装中に API/型定義のやり直しが発生する。"
+    },
+    {
+      "id": "S1-008",
+      "severity": "Should Fix",
+      "category": "スコープ",
+      "title": "『閲覧専用』『編集系』の判定ロジックの所在が未明示",
+      "location": "## 対応方針（ハイブリッド） A/B 全体",
+      "current_text": "閲覧専用ファイル（コードビューア用途）／編集系ファイル（`.md`, `.yaml`, `.yml` 等 `isEditableExtension` 該当）",
+      "issue": "判定基準は『isEditableExtension が true → 編集系、false → 閲覧専用』という理解で良いか明示されていない。route.ts ／ FilePanelContent ／ useFileContentPolling のどこで分岐するか（サーバ側か、クライアント側か）も不明。例えば、画像/動画/PDF/HTML（バイナリ・特殊扱い）は閲覧専用にもA分岐にも当てはまらない『第3のグループ』であり、Issue の二分法に正確に収まらない。",
+      "suggested_fix": "次を本文に追加：『判定ロジック：`isEditableExtension(ext) === true` なら **編集系（B 分岐）**、`isEditableExtension(ext) === false` かつ **テキストとして扱うべき拡張子**（バイナリ系・画像・動画・PDF・HTML を除外）なら **閲覧専用（A 分岐）**。画像/動画/PDF は既存の専用パスを維持。HTML は編集系として既存の 5MB ガードを維持。』。判定箇所も『route.ts: GET ハンドラの拡張子分岐』に明示。",
+      "rationale": "ハイブリッド方針の核は分岐基準。Issue 段階で確定しないと、実装中に『.json は閲覧専用か編集系か』『.log は？』といった解釈ブレが発生する。"
+    },
+    {
+      "id": "S1-009",
+      "severity": "Should Fix",
+      "category": "受入条件",
+      "title": "横断受入の『ファイルパネル以外の経路』が具体に欠ける",
+      "location": "## 受入条件 > 横断",
+      "current_text": "ファイルパネル以外の経路（File search 結果からのプレビュー、リンクからの遷移など）も同制限が効くこと",
+      "issue": "『同制限』が何を指すか曖昧（編集系の 2MB 上限のみか、閲覧専用の行ベースAPIへの遷移も含むか）。検索結果からのプレビューは部分内容を返すが、リンク遷移は既存 GET にヒットするため、ガードの効きが経路で変わりうる。",
+      "suggested_fix": "『編集系のサイズ上限ガードは GET /files API レイヤで一元化され、呼び出し元（FilePanelContent / FileSearch プレビュー / リンク遷移）に依存せず効くこと』を明文化。閲覧専用の行ベースAPI移行については別受入条件として独立させる。",
+      "rationale": "API レイヤでの一元ガードか、UI レイヤでの個別ガードかで実装規模が大きく変わる。"
+    },
+    {
+      "id": "S1-010",
+      "severity": "Should Fix",
+      "category": "整合性",
+      "title": "@tanstack/react-virtual の前提（既存利用箇所・代替）が記述されていない",
+      "location": "## 実装方針 > 2. クライアント仮想化 ／ ## 想定影響範囲 > package.json",
+      "current_text": "依存追加: `@tanstack/react-virtual`（既存依存に類似ライブラリがなければ）",
+      "issue": "(a) 『既存依存に類似ライブラリがなければ』と曖昧。実調査では `package.json` に仮想化ライブラリは存在しない（仮説検証 H3）。Issue 段階で確定すべき。(b) `@tanstack/react-virtual` は React 18 互換だが、Next.js 14 / RSC 環境でのクライアントコンポーネント前提（'use client'）の制約が示されていない。(c) バンドルサイズへの言及なし。",
+      "suggested_fix": "『既存に仮想化ライブラリはないため、`@tanstack/react-virtual` を新規導入。クライアントコンポーネント（CodeViewer）専用として組み込む。バンドルサイズ +XkB（実測値）』のように事実確定の上で記述。代替候補（react-window 等）を検討した結果も簡潔に一文添える。",
+      "rationale": "依存追加は CLAUDE.md 規約上もレビュー対象。Issue 段階で根拠を残しておくと PR レビューが軽くなる。"
+    },
+    {
+      "id": "S1-011",
+      "severity": "Nice to Have",
+      "category": "完全性",
+      "title": "VIEWER_OVERSCAN_LINES = 100 / VIEWER_CHUNK_LINE_SIZE = 500 の根拠が未記載",
+      "location": "## 実装方針 > 3. 設定定数",
+      "current_text": "VIEWER_CHUNK_LINE_SIZE = 500 / VIEWER_OVERSCAN_LINES = 100",
+      "issue": "提案値の根拠（典型行高さ・ビューポート高さ・スクロール速度との関係）が無く、初期値設定の妥当性が読み手に伝わらない。",
+      "suggested_fix": "『1080p で行高さ 24px → 約 45 行が可視。オーバースキャン 100 行は約 2 画面分のバッファ。チャンク 500 行 ≈ 10 画面分で fetch 粒度を抑制』のような根拠を一文添える。または『初期値、運用後にチューニング』と明記。",
+      "rationale": "実装者がそのままハードコードして後から調整しづらくなる。"
+    },
+    {
+      "id": "S1-012",
+      "severity": "Nice to Have",
+      "category": "完全性",
+      "title": "POLLING_DISABLED_THRESHOLD_BYTES = 1MB が編集系上限 2MB を下回ることの説明",
+      "location": "## 実装方針 > 3. 設定定数 と 5. ポーリング",
+      "current_text": "POLLING_DISABLED_THRESHOLD_BYTES = 1 * 1024 * 1024",
+      "issue": "編集系上限 2MB に対して、ポーリング無効化閾値が 1MB と『編集系の半分』である意図が説明されていない。さらに、既存 TEXT_MAX_SIZE_BYTES = 1MB と同値であるため、混乱を招く。",
+      "suggested_fix": "『編集系上限の半分とすることで、編集可能サイズ帯でも 1MB 超ファイルはポーリング無効化に倒す保守設定』のような根拠を一文添える。または既存 TEXT_MAX_SIZE_BYTES と別意図であることを明示。",
+      "rationale": "近接する数値が複数あると、誤統合・誤分離が起こりやすい。"
+    },
+    {
+      "id": "S1-013",
+      "severity": "Nice to Have",
+      "category": "完全性",
+      "title": "関連 Issue リンクに #469（If-Modified-Since 304 実装）が欠落",
+      "location": "## 関連",
+      "current_text": "既存サイズ上限実装の参考: Issue #490 (HTML 5MB) / Issue #673 (PDF 20MB) / Issue #302 (Video 100MB)",
+      "issue": "ポーリング機構の 304 スキップ・mtime チェックは Issue #469 で実装済み。本Issue はその上に大ファイル時の挙動を上乗せする構造のため、参照しておくのが自然。",
+      "suggested_fix": "『関連』に『Issue #469（ファイルポーリング基盤・If-Modified-Since/304）』を追加。",
+      "rationale": "後続実装者が前提機構を即座に辿れる。"
+    }
+  ],
+  "must_fix_count": 4,
+  "should_fix_count": 6,
+  "nice_to_have_count": 3,
+  "overall_quality_assessment": "Issue の核となる方針（ハイブリッド：閲覧専用は行ベースAPI＋仮想化／編集系は全文＋サイズ上限）と、ハングの 5 大要因（route.ts 上限なし／同期 hljs／仮想化なし／ポーリング全文再取得／検索 debounce なし）の特定は正確で説得力がある。一方で、(1) 既存実装の前提（TEXT_MAX_SIZE_BYTES=1MB が動作中、If-Modified-Since/304 実装済み、HTML/HTM が編集系、画像 20MB）の認識ズレが複数あり、(2) 新規定数と既存定数の関係（2MB vs 1MB、HTML 5MB との整合）が未整理、(3) 受入条件が測定不能項目を含む、(4) 分岐基準（閲覧専用 vs 編集系）の判定ロジックが本文に未明記、という品質的な不備がある。設計の骨格は維持しつつ、Stage 2 への申し送りとして上記 Must Fix 4 件を最優先で本文修正し、その上で影響範囲レビューに移行することを推奨する。"
+}

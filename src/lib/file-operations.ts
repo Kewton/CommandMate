@@ -10,11 +10,13 @@
  */
 
 import { readFile, writeFile, mkdir, rm, rename, stat, readdir } from 'fs/promises';
-import { existsSync, realpathSync, statSync } from 'fs';
+import { existsSync, realpathSync, statSync, createReadStream } from 'fs';
+import { createInterface } from 'readline';
 import { join, extname, dirname, basename, sep, resolve } from 'path';
 import { isPathSafe, resolveAndValidateRealPath } from './security/path-validator';
 import { isEditableExtension } from '@/config/editable-extensions';
 import { DELETE_SAFETY_CONFIG, isProtectedDirectory } from '@/config/file-operations';
+import { VIEWER_CHUNK_LINE_SIZE } from '@/config/file-viewer-config';
 
 /**
  * File operation result
@@ -40,6 +42,7 @@ export type FileOperationErrorCode =
   | 'PERMISSION_DENIED'
   | 'INVALID_PATH'
   | 'INVALID_NAME'
+  | 'INVALID_REQUEST'
   | 'DIRECTORY_NOT_EMPTY'
   | 'FILE_EXISTS'
   | 'PROTECTED_DIRECTORY'
@@ -66,6 +69,7 @@ const ERROR_MESSAGES: Record<FileOperationErrorCode, string> = {
   PERMISSION_DENIED: 'Permission denied',
   INVALID_PATH: 'Invalid path',
   INVALID_NAME: 'Invalid name',
+  INVALID_REQUEST: 'Invalid request',
   DIRECTORY_NOT_EMPTY: 'Directory is not empty',
   FILE_EXISTS: 'File already exists',
   PROTECTED_DIRECTORY: 'Protected directory cannot be deleted',
@@ -272,6 +276,209 @@ export async function readFileContent(
     };
   } catch (error) {
     return mapFsError(error);
+  }
+}
+
+/**
+ * Result of {@link readFileLineRange}.
+ * [Issue #723] Extended file-operations result with line-range metadata.
+ */
+export interface FileLineRangeResult {
+  success: boolean;
+  /** Relative path that was read */
+  path?: string;
+  /** Joined content of the returned line range (no trailing newline appended) */
+  content?: string;
+  /** Total number of lines in the file (after the final newline-or-EOF) */
+  totalLines?: number;
+  /** Total size of the file in bytes (from fs.stat) */
+  totalBytes?: number;
+  /** Always `'utf-8'` on success */
+  encoding?: string;
+  /** Actual line range returned (1-based, inclusive). May be clamped to file end. */
+  range?: { start: number; end: number };
+  /** Error details when `success === false` */
+  error?: {
+    code: string;
+    message: string;
+  };
+}
+
+/**
+ * Maximum width allowed for a single {@link readFileLineRange} request.
+ *
+ * Hard-cap of `VIEWER_CHUNK_LINE_SIZE * 4` enforced as DoS mitigation against
+ * extremely wide range requests. Callers that need more lines must issue
+ * multiple chunked requests.
+ *
+ * [Issue #723]
+ */
+export const READ_FILE_LINE_RANGE_MAX_WIDTH = VIEWER_CHUNK_LINE_SIZE * 4;
+
+/** Build a {@link FileLineRangeResult} error from an error code. */
+function lineRangeError(code: FileOperationErrorCode): FileLineRangeResult {
+  return {
+    success: false,
+    error: { code, message: ERROR_MESSAGES[code] },
+  };
+}
+
+/**
+ * Validate the `startLine` / `endLine` arguments accepted by
+ * {@link readFileLineRange}. Returns `null` when valid, otherwise an
+ * `INVALID_REQUEST` result.
+ */
+function validateLineRangeArgs(
+  startLine: number,
+  endLine: number,
+): FileLineRangeResult | null {
+  const bothIntegers =
+    Number.isFinite(startLine) &&
+    Number.isFinite(endLine) &&
+    Number.isInteger(startLine) &&
+    Number.isInteger(endLine);
+  if (!bothIntegers || startLine < 1 || endLine < startLine) {
+    return lineRangeError('INVALID_REQUEST');
+  }
+  if (endLine - startLine > READ_FILE_LINE_RANGE_MAX_WIDTH) {
+    return lineRangeError('INVALID_REQUEST');
+  }
+  return null;
+}
+
+/**
+ * Stream `fullPath` line-by-line, collecting lines within `[startLine, endLine]`
+ * and counting the total. When the read stops early (current line > endLine),
+ * a second streaming pass is used to finish counting without retaining content.
+ *
+ * The two-pass strategy is required because total line count is part of the
+ * response contract and we deliberately avoid loading the file into memory.
+ */
+async function collectLineRange(
+  fullPath: string,
+  startLine: number,
+  endLine: number,
+): Promise<{ collected: string[]; totalLines: number }> {
+  const collected: string[] = [];
+  let totalLines = 0;
+  let stoppedEarly = false;
+
+  const rl = createInterface({
+    input: createReadStream(fullPath, { encoding: 'utf-8' }),
+    crlfDelay: Infinity,
+  });
+  for await (const line of rl) {
+    totalLines += 1;
+    if (totalLines >= startLine && totalLines <= endLine) {
+      collected.push(line);
+    }
+    if (totalLines > endLine) {
+      stoppedEarly = true;
+      break;
+    }
+  }
+
+  if (stoppedEarly) {
+    totalLines = await countFileLines(fullPath);
+  }
+  return { collected, totalLines };
+}
+
+/** Stream `fullPath` solely to count its total line count. */
+async function countFileLines(fullPath: string): Promise<number> {
+  const rl = createInterface({
+    input: createReadStream(fullPath, { encoding: 'utf-8' }),
+    crlfDelay: Infinity,
+  });
+  let count = 0;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  for await (const _line of rl) {
+    count += 1;
+  }
+  return count;
+}
+
+/**
+ * Read a 1-based inclusive line range from a text file without buffering the
+ * entire file in memory.
+ *
+ * Streams the file via `fs.createReadStream` + `readline`, collecting only the
+ * lines within `[startLine, endLine]`. Returns total line count and byte size
+ * metadata for clients to compute virtualized scroll heights and
+ * polling-throttle decisions.
+ *
+ * Validation (returns `INVALID_REQUEST` on violation):
+ * - `startLine` must be >= 1.
+ * - `endLine` must be >= `startLine`.
+ * - `endLine - startLine` must be <= {@link READ_FILE_LINE_RANGE_MAX_WIDTH}.
+ *
+ * Clamping behavior:
+ * - When `endLine` exceeds the file's actual line count, the result clamps to
+ *   the last available line and still reports `success: true` (HTTP 200
+ *   compatible).
+ *
+ * Safety:
+ * - Two-layer path safety via {@link checkPathSafety}.
+ * - Does NOT call `fs.readFile()` — implementation is pure streaming.
+ *
+ * [Issue #723]
+ *
+ * @param worktreeRoot - Root directory of the worktree
+ * @param relativePath - Relative path to the file
+ * @param startLine - 1-based inclusive start line
+ * @param endLine - 1-based inclusive end line (clamped to file end)
+ * @returns Line-range result with metadata or error
+ */
+export async function readFileLineRange(
+  worktreeRoot: string,
+  relativePath: string,
+  startLine: number,
+  endLine: number,
+): Promise<FileLineRangeResult> {
+  // 1. Argument validation
+  const argError = validateLineRangeArgs(startLine, endLine);
+  if (argError) return argError;
+
+  // 2. Path safety (reuses the same two-layer check as other file ops)
+  const pathError = checkPathSafety(relativePath, worktreeRoot);
+  if (pathError) {
+    const code = pathError.error?.code ?? 'INVALID_PATH';
+    const message = pathError.error?.message ?? ERROR_MESSAGES.INVALID_PATH;
+    return { success: false, error: { code, message } };
+  }
+
+  const fullPath = join(worktreeRoot, relativePath);
+  if (!existsSync(fullPath)) {
+    return lineRangeError('FILE_NOT_FOUND');
+  }
+
+  // 3. Stat for total byte size (avoids loading full file)
+  let totalBytes: number;
+  try {
+    totalBytes = (await stat(fullPath)).size;
+  } catch {
+    return lineRangeError('INTERNAL_ERROR');
+  }
+
+  // 4. Stream and collect the requested range
+  try {
+    const { collected, totalLines } = await collectLineRange(fullPath, startLine, endLine);
+
+    // Clamp the reported range to what actually exists in the file.
+    const actualEnd = totalLines === 0 ? 0 : Math.min(endLine, totalLines);
+    const actualStart = totalLines === 0 ? startLine : Math.min(startLine, actualEnd || startLine);
+
+    return {
+      success: true,
+      path: relativePath,
+      content: collected.join('\n'),
+      totalLines,
+      totalBytes,
+      encoding: 'utf-8',
+      range: { start: actualStart, end: actualEnd },
+    };
+  } catch {
+    return lineRangeError('INTERNAL_ERROR');
   }
 }
 
