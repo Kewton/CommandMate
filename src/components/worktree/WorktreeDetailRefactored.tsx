@@ -25,9 +25,7 @@ import { useIsMobile } from '@/hooks/useIsMobile';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { WorktreeDesktopLayout } from '@/components/worktree/WorktreeDesktopLayout';
 import { TerminalContainer } from '@/components/worktree/TerminalContainer';
-import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { HistoryPane } from '@/components/worktree/HistoryPane';
-import { PromptPanel } from '@/components/worktree/PromptPanel';
 import { MobileHeader, type WorktreeStatus } from '@/components/mobile/MobileHeader';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import { MobileTabBar, type MobileTab } from '@/components/mobile/MobileTabBar';
@@ -49,6 +47,8 @@ import { AgentSettingsPane } from '@/components/worktree/AgentSettingsPane';
 import type { ActivityId } from '@/config/activity-bar-config';
 import { FileViewer } from '@/components/worktree/FileViewer';
 import { FilePanelSplit } from '@/components/worktree/FilePanelSplit';
+import { TerminalSplitContainer } from '@/components/worktree/TerminalSplitContainer';
+import { TerminalSplitPaneContent } from '@/components/worktree/TerminalSplitPaneContent';
 import { useFileTabs, MAX_FILE_TABS } from '@/hooks/useFileTabs';
 import { useFilePolling } from '@/hooks/useFilePolling';
 import { FILE_TREE_POLL_INTERVAL_MS } from '@/config/file-polling-config';
@@ -373,14 +373,33 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   }, [historyDisplayLimit]);
 
   // TODO: [D1-001] pendingInsertText の状態管理を useTextInsertion カスタムフックに抽出する（技術的負債）
-  // [Issue #485] State for inserting text from history/memo into message input
-  const [pendingInsertText, setPendingInsertText] = useState<string | null>(null);
+  // [Issue #485] State for inserting text from history/memo into message input.
+  // Issue #728: tracked per-split (Map<splitIndex, string | null>) for PC.
+  // Mobile path still routes through splitIndex=0 since it has one MessageInput.
+  const [pendingInsertTextMap, setPendingInsertTextMap] = useState<Map<number, string | null>>(
+    () => new Map(),
+  );
+  // Issue #728: focusedSplitIndex follows whichever MessageInput was last focused on PC.
+  // HistoryPane / MemoPane insertions target this split. Mobile keeps using 0.
+  const [focusedSplitIndex, setFocusedSplitIndex] = useState(0);
   const handleInsertToMessage = useCallback((text: string) => {
-    setPendingInsertText(text);
+    setPendingInsertTextMap(prev => {
+      const next = new Map(prev);
+      next.set(focusedSplitIndex, text);
+      return next;
+    });
+  }, [focusedSplitIndex]);
+  const handleInsertConsumed = useCallback((idx: number) => {
+    setPendingInsertTextMap(prev => {
+      if (!prev.has(idx)) return prev;
+      const next = new Map(prev);
+      next.delete(idx);
+      return next;
+    });
   }, []);
-  const handleInsertConsumed = useCallback(() => {
-    setPendingInsertText(null);
-  }, []);
+  // Mobile-compat helper: returns the single pending insert text from splitIndex=0.
+  const pendingInsertText = pendingInsertTextMap.get(0) ?? null;
+  const handleInsertConsumedSingle = useCallback(() => handleInsertConsumed(0), [handleInsertConsumed]);
 
   // [Issue #447] Diff content for right pane display (PC only)
   const [diffContent, setDiffContent] = useState<string | null>(null);
@@ -1401,98 +1420,92 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Memoized Panes (Issue #411: avoid re-render on polling)
   // ========================================================================
 
-  /** Memoized CLI tool tab header for the terminal pane */
-  const terminalHeaderMemo = useMemo(
-    () => (
-      <div className="px-3 py-1.5 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between flex-shrink-0">
-        <nav className="flex items-center gap-3" aria-label="CLI Tool Selection">
-          <AutoYesToggle
-            enabled={autoYesEnabled}
-            expiresAt={autoYesExpiresAt}
-            onToggle={handleAutoYesToggle}
-            lastAutoResponse={lastAutoResponse}
-            cliToolName={activeCliTab}
-            inline
-          />
-          <div className="w-px h-4 bg-gray-300 dark:bg-gray-600" />
-          {displayedAgents.map((tool) => {
-            const toolStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[tool]);
-            const statusConfig = SIDEBAR_STATUS_CONFIG[toolStatus];
-            return (
-              <button
-                key={tool}
-                onClick={() => setActiveCliTab(tool)}
-                className={`pb-1 px-1.5 border-b-2 font-medium text-xs transition-colors flex items-center gap-1 ${
-                  activeCliTab === tool
-                    ? 'border-cyan-600 text-cyan-600'
-                    : 'border-transparent text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
-                }`}
-                aria-current={activeCliTab === tool ? 'page' : undefined}
-              >
-                {statusConfig.type === 'spinner' ? (
-                  <span
-                    className={`w-2 h-2 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`}
-                    title={statusConfig.label}
-                    aria-label={`${tool} status: ${statusConfig.label}`}
-                  />
-                ) : (
-                  <span
-                    className={`w-2 h-2 rounded-full flex-shrink-0 ${statusConfig.className}`}
-                    title={statusConfig.label}
-                    aria-label={`${tool} status: ${statusConfig.label}`}
-                  />
-                )}
-                {getCliToolDisplayName(tool)}
-              </button>
-            );
-          })}
-        </nav>
-        <div className="flex items-center gap-2">
-          {/* [Issue #47] Terminal search button */}
-          <button
-            onClick={() => {
-              // Dispatch a custom event that TerminalDisplay listens for
-              window.dispatchEvent(new CustomEvent('terminal-search-open'));
-            }}
-            className="flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-gray-500 hover:text-gray-800 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
-            aria-label="ターミナル内を検索"
-            data-testid="terminal-search-button"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-          </button>
-          {worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning && (
-            <button
-              onClick={handleKillSession}
-              className="flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors"
-              aria-label={`End ${activeCliTab} session`}
-            >
-              <span aria-hidden="true">&#x2715;</span>
-              End
-            </button>
-          )}
-        </div>
-      </div>
-    ),
-    [autoYesEnabled, autoYesExpiresAt, handleAutoYesToggle, lastAutoResponse, activeCliTab, displayedAgents, worktree?.sessionStatusByCli, handleKillSession, setActiveCliTab]
+  /**
+   * Issue #728 (R3-005): PC-only per-split polling fan-out.
+   *
+   * Each `TerminalSplitPaneContent` owns its own
+   * `useTerminalPanePolling({ worktreeId, cliToolId })` instance, so
+   *   split 0 (Claude) and split 1 (Codex) hit /current-output for their own
+   *   CLI independently. NavigationButtons / PromptPanel / MessageInput are
+   *   rendered for every split.
+   *
+   * The activeCliTab still tracks split 0 so HistoryPane / Auto-Yes UI / kill
+   * session controls (which are CLI-tab-scoped, not split-scoped) continue
+   * working. We only sync activeCliTab when split 0's CLI changes.
+   *
+   * Mobile path is unchanged: it still consumes `state.terminal.*` and the
+   * parent's fetchCurrentOutput loop. The reducer slice is now effectively
+   * mobile-only; tracking its removal as a follow-up.
+   */
+  const renderSplitPane = useCallback(
+    ({
+      splitIndex,
+      cliToolId: paneCli,
+      availableCliTools: paneAvailable,
+      onCliToolChange,
+      onFocus: onPaneFocus,
+    }: {
+      splitIndex: number;
+      cliToolId: CLIToolType;
+      availableCliTools: CLIToolType[];
+      onCliToolChange: (id: CLIToolType) => void;
+      onFocus: () => void;
+      isFocused: boolean;
+    }) => {
+      const panePendingInsert = pendingInsertTextMap.get(splitIndex) ?? null;
+      // autoYesEnabled is globally keyed by activeCliTab; for non-active splits
+      // we look up the same per-agent map by this pane's own CLI.
+      const paneAutoYesEnabled = autoYesStateMap.get(paneCli)?.enabled ?? false;
+      return (
+        <TerminalSplitPaneContent
+          worktreeId={worktreeId}
+          splitIndex={splitIndex}
+          cliToolId={paneCli}
+          availableCliTools={paneAvailable}
+          onCliToolChange={(id) => {
+            onCliToolChange(id);
+            // Sync the (worktree-global) activeCliTab so HistoryPane / Auto-Yes
+            // toggle UI / kill-session controls follow split 0.
+            if (splitIndex === 0) setActiveCliTab(id);
+          }}
+          onFocus={onPaneFocus}
+          pendingInsertText={panePendingInsert}
+          onInsertConsumed={() => handleInsertConsumed(splitIndex)}
+          onMessageSent={handleMessageSent}
+          autoYesEnabled={paneAutoYesEnabled}
+        />
+      );
+    },
+    [
+      worktreeId,
+      pendingInsertTextMap,
+      autoYesStateMap,
+      handleInsertConsumed,
+      handleMessageSent,
+      setActiveCliTab,
+    ],
   );
 
-  /** Memoized right pane (terminal + file panel) to prevent re-render when left pane state changes */
-  const rightPaneMemo = useMemo(
+  const terminalSplitRegion = useMemo(
+    () => (
+      <TerminalSplitContainer
+        worktreeId={worktreeId}
+        renderPane={renderSplitPane}
+        onFocusedSplitChange={setFocusedSplitIndex}
+      />
+    ),
+    [worktreeId, renderSplitPane],
+  );
+
+  /**
+   * Issue #728: PC right pane variant. Uses TerminalSplitContainer in the
+   * terminal slot of FilePanelSplit and passes terminalHeader={null}.
+   */
+  const rightPaneSplitMemo = useMemo(
     () => (
       <FilePanelSplit
-        terminal={
-          <TerminalDisplay
-            output={state.terminal.output}
-            isActive={state.terminal.isActive}
-            isThinking={state.terminal.isThinking}
-            autoScroll={state.terminal.autoScroll}
-            onScrollChange={handleAutoScrollChange}
-            disableAutoFollow={disableAutoFollow}
-          />
-        }
-        terminalHeader={terminalHeaderMemo}
+        terminal={terminalSplitRegion}
+        terminalHeader={null}
         fileTabs={tabsState}
         worktreeId={worktreeId}
         onCloseTab={tabsActions.closeTab}
@@ -1509,7 +1522,23 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         onOpenFile={handleOpenFile}
       />
     ),
-    [state.terminal.output, state.terminal.isActive, state.terminal.isThinking, state.terminal.autoScroll, handleAutoScrollChange, disableAutoFollow, terminalHeaderMemo, tabsState, tabsActions.closeTab, tabsActions.activateTab, worktreeId, handleLoadContent, handleLoadError, handleSetLoading, handleFilePanelSave, diffContent, diffFilePath, handleCloseDiff, handleDirtyChange, tabsActions.moveToFront, handleOpenFile]
+    [
+      terminalSplitRegion,
+      tabsState,
+      worktreeId,
+      tabsActions.closeTab,
+      tabsActions.activateTab,
+      handleLoadContent,
+      handleLoadError,
+      handleSetLoading,
+      handleFilePanelSave,
+      diffContent,
+      diffFilePath,
+      handleCloseDiff,
+      handleDirtyChange,
+      tabsActions.moveToFront,
+      handleOpenFile,
+    ],
   );
 
   /**
@@ -1737,46 +1766,17 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 rightPane={
                   <TerminalContainer
                     history={historyPaneMemo}
-                    terminal={rightPaneMemo}
+                    terminal={rightPaneSplitMemo}
                   />
                 }
               />
             </div>
-            {/* Issue #473: Navigation buttons for OpenCode TUI selection list */}
-            {isSelectionListActive && (
-              <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700 px-4 pt-2 bg-gray-50 dark:bg-gray-800">
-                <NavigationButtons
-                  worktreeId={worktreeId}
-                  cliToolId={activeCliTab}
-                  onKeysSent={fetchCurrentOutput}
-                />
-              </div>
-            )}
-            <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-800">
-              <MessageInput
-                worktreeId={worktreeId}
-                onMessageSent={handleMessageSent}
-                cliToolId={activeCliTab}
-                isSessionRunning={state.terminal.isActive}
-                pendingInsertText={pendingInsertText}
-                onInsertConsumed={handleInsertConsumed}
-              />
-            </div>
+            {/*
+              Issue #728: MessageInput / NavigationButtons / PromptPanel were
+              moved into each TerminalSplitPane (`rightPaneSplitMemo`). No
+              shared footer rendering on PC anymore.
+            */}
           </div>
-          {/* Prompt Panel - fixed overlay at bottom */}
-          {state.prompt.visible && !autoYesEnabled && (
-            <div className="fixed bottom-20 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-2xl px-4">
-              <PromptPanel
-                promptData={state.prompt.data}
-                messageId={state.prompt.messageId}
-                visible={state.prompt.visible}
-                answering={state.prompt.answering}
-                onRespond={handlePromptRespond}
-                onDismiss={handlePromptDismiss}
-                cliToolName={getCliToolDisplayName(activeCliTab)}
-              />
-            </div>
-          )}
           {/* Info Modal */}
           <InfoModal
             worktreeId={worktreeId}
@@ -2038,7 +2038,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               cliToolId={activeCliTab}
               isSessionRunning={state.terminal.isActive}
               pendingInsertText={pendingInsertText}
-              onInsertConsumed={handleInsertConsumed}
+              onInsertConsumed={handleInsertConsumedSingle}
             />
           </div>
         </div>

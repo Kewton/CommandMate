@@ -1,5 +1,19 @@
 /**
  * @vitest-environment jsdom
+ *
+ * Issue #728 rewrite rationale:
+ *   Pre-#728 these tests asserted on the shared CLI tab header buttons
+ *   inside the right pane (Claude / Copilot buttons in `terminalHeaderMemo`).
+ *   That header was removed on PC because each TerminalSplitPane now owns
+ *   its own CLI selector (`<select>` element). The underlying invariant
+ *   under test ("stale fetch responses for the previous CLI never overwrite
+ *   the currently-active CLI's state") is unchanged.
+ *
+ *   The tests now drive the activeCliTab swap through the per-split CLI
+ *   selector for splitIndex=0 (which is wired to `setActiveCliTab` in the
+ *   compat shim). The rest of the assertion shape (history-messages /
+ *   terminal-output / thinking-indicator testids) is identical because
+ *   splitIndex=0 still reads from `state.terminal.*` / `state.messages`.
  */
 
 import React from 'react';
@@ -101,10 +115,21 @@ vi.mock('@/components/worktree/FilePanelSplit', () => ({
     terminalHeader?: React.ReactNode;
   }) => (
     <div data-testid="file-panel-split">
-      <div data-testid="file-panel-header">{terminalHeader}</div>
+      <div data-testid="file-panel-header">{terminalHeader ?? null}</div>
       <div data-testid="file-panel-terminal">{terminal}</div>
     </div>
   ),
+}));
+
+// Issue #728: MessageInput is no longer relevant to this test but is rendered
+// inside each split. Lightweight mock so we don't trigger SlashCommandSelector
+// / useSlashCommands paths in this test file's mock environment.
+vi.mock('@/components/worktree/MessageInput', () => ({
+  MessageInput: () => <div data-testid="message-input-mock" />,
+}));
+
+vi.mock('@/components/worktree/NavigationButtons', () => ({
+  NavigationButtons: () => <div data-testid="navigation-buttons-mock" />,
 }));
 
 vi.mock('@/components/worktree/TerminalDisplay', () => ({
@@ -299,6 +324,12 @@ describe('WorktreeDetailRefactored CLI tab switching', () => {
     mockIsMobile.mockReturnValue(false);
     mockUseUpdateCheck.mockReturnValue({ data: null, loading: false, error: null });
 
+    // Issue #728: Reset terminal-splits / draft localStorage so test order
+    // does not leak split CLI selection between tests.
+    try {
+      window.localStorage.clear();
+    } catch { /* ignore */ }
+
     messageQueue = { claude: [], copilot: [] };
     currentOutputQueue = { claude: [], copilot: [] };
 
@@ -336,11 +367,17 @@ describe('WorktreeDetailRefactored CLI tab switching', () => {
     vi.restoreAllMocks();
   });
 
+  // Issue #728: Drive activeCliTab swaps through split-0's CLI selector.
+  function swapSplitZeroCliTo(value: 'copilot' | 'claude') {
+    const select = screen.getByTestId('cli-selector-0') as HTMLSelectElement;
+    fireEvent.change(select, { target: { value } });
+  }
+
   it('keeps Copilot messages when an older Claude messages response arrives later', async () => {
     render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Copilot/i })).toBeInTheDocument();
+      expect(screen.getByTestId('cli-selector-0')).toBeInTheDocument();
       expect(screen.getByTestId('history-messages')).toHaveTextContent('Claude reply');
     });
 
@@ -352,7 +389,7 @@ describe('WorktreeDetailRefactored CLI tab switching', () => {
       await Promise.resolve();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Copilot/i }));
+    swapSplitZeroCliTo('copilot');
 
     await waitFor(() => {
       expect(screen.getByTestId('history-messages')).toHaveTextContent('Copilot reply');
@@ -373,7 +410,7 @@ describe('WorktreeDetailRefactored CLI tab switching', () => {
     render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Copilot/i })).toBeInTheDocument();
+      expect(screen.getByTestId('cli-selector-0')).toBeInTheDocument();
       expect(screen.getByTestId('terminal-output')).toHaveTextContent('Claude terminal output');
       expect(screen.getByTestId('thinking-indicator')).toBeInTheDocument();
     });
@@ -386,7 +423,7 @@ describe('WorktreeDetailRefactored CLI tab switching', () => {
       await Promise.resolve();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Copilot/i }));
+    swapSplitZeroCliTo('copilot');
 
     await waitFor(() => {
       expect(screen.getByTestId('terminal-output')).toHaveTextContent('Copilot terminal output');

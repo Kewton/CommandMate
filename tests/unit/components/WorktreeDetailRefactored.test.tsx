@@ -246,9 +246,13 @@ vi.mock('@/hooks/useFileTabs', () => ({
   ],
 }));
 
-// Issue #438: Mock FilePanelSplit
+// Issue #438: Mock FilePanelSplit. Issue #728: render the `terminal` slot so
+// that TerminalSplitContainer / TerminalSplitPane / PromptPanel inside it
+// surface in the DOM for tests that assert on them.
 vi.mock('@/components/worktree/FilePanelSplit', () => ({
-  FilePanelSplit: () => <div data-testid="file-panel-split" />,
+  FilePanelSplit: ({ terminal }: { terminal: React.ReactNode }) => (
+    <div data-testid="file-panel-split">{terminal}</div>
+  ),
 }));
 
 // Mock fetch
@@ -1073,10 +1077,16 @@ describe('WorktreeDetailRefactored', () => {
       // Issue #727: file-tree polling fires `/tree` on visibilitychange when the
       // 'files' activity is active (the new default). That polling is independent
       // of the visibilitychange recovery throttle this test is about, so ignore it.
+      // Issue #728: each TerminalSplitPaneContent owns its own per-(worktreeId,
+      // cliToolId) polling hook that also fetches /current-output on
+      // visibilitychange. That polling is independent of the parent's
+      // recovery throttle this test targets, so ignore /current-output too.
       await new Promise((resolve) => setTimeout(resolve, 100));
       const recoveryCalls = mockFetch.mock.calls.filter((call) => {
         const url = typeof call[0] === 'string' ? call[0] : '';
-        return !url.endsWith('/tree');
+        if (url.endsWith('/tree')) return false;
+        if (url.includes('/current-output')) return false;
+        return true;
       });
       expect(recoveryCalls).toHaveLength(0);
 

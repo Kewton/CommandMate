@@ -453,4 +453,29 @@ describe('useWorktreeUIState hook', () => {
     expect(result.current.state.phase).toBe('complete');
     expect(result.current.state.messages).toHaveLength(1);
   });
+
+  // Issue #728: ensure terminal-splits state was NOT added to the reducer.
+  // Independent hook (useTerminalSplits) owns that domain, per S3-006.
+  describe('Issue #728 — no terminalSplits state slice (S3-006)', () => {
+    it('does not expose a terminalSplits slice on state.layout or state root', () => {
+      const { result } = renderHook(() => useWorktreeUIState());
+      const state = result.current.state as unknown as Record<string, unknown> & {
+        layout?: Record<string, unknown>;
+      };
+      expect(state.terminalSplits).toBeUndefined();
+      expect(state.splits).toBeUndefined();
+      expect(state.layout?.terminalSplits).toBeUndefined();
+      expect(state.layout?.splits).toBeUndefined();
+    });
+
+    it('does not expose terminalSplits action creators', () => {
+      const { result } = renderHook(() => useWorktreeUIState());
+      const actions = result.current.actions as unknown as Record<string, unknown>;
+      expect(actions.addSplit).toBeUndefined();
+      expect(actions.removeSplit).toBeUndefined();
+      expect(actions.setSplitCliTool).toBeUndefined();
+      expect(actions.setSplitWidth).toBeUndefined();
+      expect(actions.setFocusedSplitIndex).toBeUndefined();
+    });
+  });
 });
