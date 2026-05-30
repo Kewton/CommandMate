@@ -7,16 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Performance
-- FilePanel: 大規模ファイルでPC版がハングする問題に対するハイブリッド対応（行ベースAPI ＋ `@tanstack/react-virtual` 仮想化 ＋ 編集系2MBサイズ上限）。CodeViewer は `useVirtualizer` で可視範囲＋オーバースキャンのみマウントし、行範囲モード（`startLine`/`endLine` クエリ）でチャンク取得・ハイライトキャッシュを実装。サーバ側は `readFileLineRange` で `createReadStream`＋`readline` ストリーミング（メモリ O(チャンク)）。`useFileContentSearch` に debounce 300ms＋最小2文字、`useFileContentPolling` に大ファイル時無効化（`POLLING_DISABLED_THRESHOLD_BYTES = 1MB`）を追加 (Issue #723)
-
 ### Added
 - API: `GET /api/worktrees/:id/files/:path?startLine=N&endLine=M` 行範囲モードを追加。行範囲モード時は `If-Modified-Since` をスキップして常に 200 を返す。レスポンス JSON に `totalLines` / `totalBytes` / `encoding` / `range` のオプショナルメタを追加（`FileContent` 型拡張、後方互換） (Issue #723)
 - i18n: `fileTooLarge.editableLimit` / `fileTooLarge.viewerLimit` を `locales/ja/error.json` / `locales/en/error.json` に追加 (Issue #723)
+- History: HistoryPaneヘッダーに「User only」フィルタトグルを追加。トグルON時はAssistantメッセージとorphanペアを非表示にし、検索もuser roleのみに絞る。localStorage（`commandmate:historyUserOnly`, `'true'`/`'false'`）で永続化、aria-pressed準拠、lucide-react `User`/`UserCheck` アイコン、PC/モバイル両経路（MobileContent）に対応 (Issue #725)
 
 ### Changed
 - Config: `TEXT_MAX_SIZE_BYTES` を 1MB → **2MB** に引き上げ。`.md` / `.yaml` / `.yml` の PUT/GET 共通定数として一元化 (Issue #723)
 - FileViewer: 検索ロジックを `useFileContentSearch` に統一（旧 `content.split('\n')` + 同期 `toLowerCase().includes` のインライン実装を撤去） (Issue #723)
+- History: HistoryPaneのUser/Assistant視覚優先度を改善。Assistantメッセージのデフォルト折りたたみを2行/100文字に強化（COLLAPSED_MAX_LINES: 5→2、COLLAPSED_MAX_CHARS: 300→100）、Assistantスタイル弱化（text-xs/p-2/bg-gray-900/30、space-y-2）、User側コンテナに防御セット（`[word-break:break-word]` `max-w-full` `overflow-x-hidden`）追加 (Issue #725)
+
+### Performance
+- FilePanel: 大規模ファイルでPC版がハングする問題に対するハイブリッド対応（行ベースAPI ＋ `@tanstack/react-virtual` 仮想化 ＋ 編集系2MBサイズ上限）。CodeViewer は `useVirtualizer` で可視範囲＋オーバースキャンのみマウントし、行範囲モード（`startLine`/`endLine` クエリ）でチャンク取得・ハイライトキャッシュを実装。サーバ側は `readFileLineRange` で `createReadStream`＋`readline` ストリーミング（メモリ O(チャンク)）。`useFileContentSearch` に debounce 300ms＋最小2文字、`useFileContentPolling` に大ファイル時無効化（`POLLING_DISABLED_THRESHOLD_BYTES = 1MB`）を追加 (Issue #723)
 
 ### Breaking Changes
 - 編集系ファイルの GET 事前ガード追加: `.md` / `.yaml` / `.yml` の GET 上限が新規 **2MB** になりました。
