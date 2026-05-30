@@ -24,6 +24,7 @@ import { useWorktreeUIState } from '@/hooks/useWorktreeUIState';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { WorktreeDesktopLayout } from '@/components/worktree/WorktreeDesktopLayout';
+import { TerminalContainer } from '@/components/worktree/TerminalContainer';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { HistoryPane } from '@/components/worktree/HistoryPane';
 import { PromptPanel } from '@/components/worktree/PromptPanel';
@@ -274,12 +275,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     active: activeActivity,
     toggle: toggleActivity,
   } = useActivityBarState();
-  const {
-    visible: historyPaneVisible,
-    width: historyPaneWidth,
-    toggle: toggleHistoryPane,
-    setWidth: setHistoryWidth,
-  } = useHistoryPaneState();
+  // Issue #730: only `toggle` is consumed here so HistoryPane's internal
+  // collapse button can flip visibility. The visible/width state is owned by
+  // `TerminalContainer` (which calls `useHistoryPaneState` itself); cross-
+  // instance changes are broadcast via a CustomEvent emitted by the hook.
+  const { toggle: toggleHistoryPane } = useHistoryPaneState();
 
   // [Issue #469] Tree polling: detect file tree changes via JSON comparison
   const prevTreeHashRef = useRef<string | null>(null);
@@ -694,14 +694,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       toggleActivity(id);
     },
     [toggleActivity]
-  );
-
-  /** Handle History pane resize from layout (PC) */
-  const handleHistoryPaneResize = useCallback(
-    (nextPercent: number) => {
-      setHistoryWidth(nextPercent);
-    },
-    [setHistoryWidth]
   );
 
   /** Handle back button click - navigate to portal */
@@ -1641,32 +1633,36 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   );
 
   /**
-   * Issue #727: History Pane content for the dedicated PC column.
+   * Issue #727 / Issue #730: History Pane content for the TerminalContainer.
    *
-   * MAINTENANCE NOTE (Issue #411 R3-007 / Issue #727):
-   * Keep the deps list in sync with everything HistoryPane receives.
+   * MAINTENANCE NOTE (Issue #411 R3-007 / Issue #727 / Issue #730):
+   * Keep the deps list in sync with everything HistoryPane receives. Visibility
+   * is now owned by `TerminalContainer` (which calls `useHistoryPaneState`
+   * itself), so we no longer gate this memo on `historyPaneVisible`. We still
+   * read `toggleHistoryPane` from our own `useHistoryPaneState` instance so
+   * HistoryPane's internal collapse button can toggle the pane; the hook
+   * broadcasts cross-instance changes via a CustomEvent so both consumers
+   * stay in sync.
    */
   const historyPaneMemo = useMemo(
-    () =>
-      historyPaneVisible ? (
-        <HistoryPane
-          messages={state.messages}
-          worktreeId={worktreeId}
-          onFilePathClick={handleFilePathClick}
-          className="h-full"
-          showToast={showToast}
-          onInsertToMessage={handleInsertToMessage}
-          showArchived={showArchived}
-          onShowArchivedChange={handleShowArchivedChange}
-          historyDisplayLimit={historyDisplayLimit}
-          onHistoryDisplayLimitChange={handleHistoryDisplayLimitChange}
-          historyUserOnly={historyUserOnly}
-          onHistoryUserOnlyChange={handleHistoryUserOnlyChange}
-          onCollapse={toggleHistoryPane}
-        />
-      ) : null,
+    () => (
+      <HistoryPane
+        messages={state.messages}
+        worktreeId={worktreeId}
+        onFilePathClick={handleFilePathClick}
+        className="h-full"
+        showToast={showToast}
+        onInsertToMessage={handleInsertToMessage}
+        showArchived={showArchived}
+        onShowArchivedChange={handleShowArchivedChange}
+        historyDisplayLimit={historyDisplayLimit}
+        onHistoryDisplayLimitChange={handleHistoryDisplayLimitChange}
+        historyUserOnly={historyUserOnly}
+        onHistoryUserOnlyChange={handleHistoryUserOnlyChange}
+        onCollapse={toggleHistoryPane}
+      />
+    ),
     [
-      historyPaneVisible,
       state.messages,
       worktreeId,
       handleFilePathClick,
@@ -1700,60 +1696,72 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   if (!isMobile) {
     return (
       <ErrorBoundary componentName="WorktreeDetailRefactored">
-        <div className="h-full flex flex-col relative">
-          {/* Desktop Header with back button, status, and info */}
-          <DesktopHeader
-            worktreeName={worktreeName}
-            repositoryName={worktree?.repositoryDisplayName ?? worktree?.repositoryName ?? 'Unknown'}
-            description={worktree?.description}
-            status={worktreeStatus}
-            gitStatus={worktree?.gitStatus}
-            onBackClick={handleBackClick}
-            onInfoClick={handleInfoClick}
-            onMenuClick={toggle}
-            hasUpdate={hasUpdate}
-            worktreeStatus={worktree?.status ?? null}
-            onWorktreeStatusChange={handleWorktreeStatusChange}
-          />
-          {/* Issue #111: Branch mismatch warning */}
-          {worktree?.gitStatus && (
-            <BranchMismatchAlert
-              isBranchMismatch={worktree.gitStatus.isBranchMismatch}
-              currentBranch={worktree.gitStatus.currentBranch}
-              initialBranch={worktree.gitStatus.initialBranch}
+        {/*
+          Issue #730: Outer flex puts the ActivityBar as a full-height column
+          on the left (Header bottom → viewport bottom, VS Code style). The
+          inner column hosts DesktopHeader / BranchMismatchAlert /
+          WorktreeDesktopLayout (now a 2-column layout) / NavigationButtons /
+          MessageInput / PromptPanel.
+
+          History now lives inside `TerminalContainer` (passed as `rightPane`),
+          so the desktop layout itself no longer takes a `historyPane` prop.
+        */}
+        <div className="flex h-full overflow-hidden relative">
+          {activityBarMemo}
+          <div className="flex flex-col flex-1 min-h-0">
+            {/* Desktop Header with back button, status, and info */}
+            <DesktopHeader
+              worktreeName={worktreeName}
+              repositoryName={worktree?.repositoryDisplayName ?? worktree?.repositoryName ?? 'Unknown'}
+              description={worktree?.description}
+              status={worktreeStatus}
+              gitStatus={worktree?.gitStatus}
+              onBackClick={handleBackClick}
+              onInfoClick={handleInfoClick}
+              onMenuClick={toggle}
+              hasUpdate={hasUpdate}
+              worktreeStatus={worktree?.status ?? null}
+              onWorktreeStatusChange={handleWorktreeStatusChange}
             />
-          )}
-          <div className="flex-1 min-h-0">
-            <WorktreeDesktopLayout
-              activityBar={activityBarMemo}
-              activityPane={activityPaneMemo}
-              historyPane={historyPaneMemo}
-              rightPane={rightPaneMemo}
-              historyPaneWidth={historyPaneWidth}
-              onHistoryPaneResize={handleHistoryPaneResize}
-              historyPaneCollapsed={!historyPaneVisible}
-              onToggleHistoryPane={toggleHistoryPane}
-            />
-          </div>
-          {/* Issue #473: Navigation buttons for OpenCode TUI selection list */}
-          {isSelectionListActive && (
-            <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700 px-4 pt-2 bg-gray-50 dark:bg-gray-800">
-              <NavigationButtons
-                worktreeId={worktreeId}
-                cliToolId={activeCliTab}
-                onKeysSent={fetchCurrentOutput}
+            {/* Issue #111: Branch mismatch warning */}
+            {worktree?.gitStatus && (
+              <BranchMismatchAlert
+                isBranchMismatch={worktree.gitStatus.isBranchMismatch}
+                currentBranch={worktree.gitStatus.currentBranch}
+                initialBranch={worktree.gitStatus.initialBranch}
+              />
+            )}
+            <div className="flex-1 min-h-0">
+              <WorktreeDesktopLayout
+                activityPane={activityPaneMemo}
+                rightPane={
+                  <TerminalContainer
+                    history={historyPaneMemo}
+                    terminal={rightPaneMemo}
+                  />
+                }
               />
             </div>
-          )}
-          <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-800">
-            <MessageInput
-              worktreeId={worktreeId}
-              onMessageSent={handleMessageSent}
-              cliToolId={activeCliTab}
-              isSessionRunning={state.terminal.isActive}
-              pendingInsertText={pendingInsertText}
-              onInsertConsumed={handleInsertConsumed}
-            />
+            {/* Issue #473: Navigation buttons for OpenCode TUI selection list */}
+            {isSelectionListActive && (
+              <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700 px-4 pt-2 bg-gray-50 dark:bg-gray-800">
+                <NavigationButtons
+                  worktreeId={worktreeId}
+                  cliToolId={activeCliTab}
+                  onKeysSent={fetchCurrentOutput}
+                />
+              </div>
+            )}
+            <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-800">
+              <MessageInput
+                worktreeId={worktreeId}
+                onMessageSent={handleMessageSent}
+                cliToolId={activeCliTab}
+                isSessionRunning={state.terminal.isActive}
+                pendingInsertText={pendingInsertText}
+                onInsertConsumed={handleInsertConsumed}
+              />
+            </div>
           </div>
           {/* Prompt Panel - fixed overlay at bottom */}
           {state.prompt.visible && !autoYesEnabled && (
