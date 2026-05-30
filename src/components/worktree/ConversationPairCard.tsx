@@ -232,7 +232,7 @@ const UserMessageSection = memo(function UserMessageSection({
       </div>
       <div
         data-message-id={message.id}
-        className="text-sm text-gray-200 whitespace-pre-wrap break-words"
+        className="text-sm text-gray-200 whitespace-pre-wrap break-words [word-break:break-word] max-w-full overflow-x-hidden"
       >
         <MessageContent content={message.content} onFilePathClick={onFilePathClick} />
       </div>
@@ -313,7 +313,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
       </div>
       <div
         data-message-id={message.id}
-        className="text-sm text-gray-200 whitespace-pre-wrap break-words [word-break:break-word] max-w-full overflow-x-hidden"
+        className="text-xs text-gray-300 whitespace-pre-wrap break-words [word-break:break-word] max-w-full overflow-x-hidden"
       >
         <MessageContent content={displayContent} onFilePathClick={onFilePathClick} />
         {!isExpanded && isTruncated && (
@@ -356,7 +356,7 @@ const AssistantMessagesSection = memo(function AssistantMessagesSection({
   onCopy?: (content: string) => void;
 }) {
   return (
-    <div className="bg-gray-800/50 border-l-4 border-gray-600 p-3 border-t border-gray-700 space-y-3">
+    <div className="bg-gray-900/30 border-l-4 border-gray-700 p-2 border-t border-gray-700 space-y-2">
       {messages.map((message, index) => (
         <React.Fragment key={message.id}>
           {index > 0 && (
