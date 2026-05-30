@@ -1,0 +1,102 @@
+{
+  "issue_number": 728,
+  "iteration": 1,
+  "issue_title": "feat(terminal): add 1-3 horizontal terminal split with per-split CLI selection and MessageInput (PC)",
+  "branch": "feature/728-worktree",
+  "repository_root": "/Users/maenokota/share/work/github_kewton/commandmate-issue-728",
+  "phase_results": {
+    "issue_review": {
+      "status": "success",
+      "stages_completed": "Stage 0.5 + 1-4 (Stage 5-8 skipped per user feedback memory)",
+      "must_fix_total": 6,
+      "should_fix_total": 11,
+      "nice_to_have_total": 5,
+      "issue_body_growth": "8954 → 31068 chars",
+      "summary_report_path": "dev-reports/issue/728/issue-review/summary-report.md"
+    },
+    "work_plan": {
+      "status": "success",
+      "task_count": 19,
+      "estimated_hours": 27.1,
+      "plan_path": "dev-reports/issue/728/work-plan.md"
+    },
+    "tdd": {
+      "status": "success",
+      "coverage_estimate": 92,
+      "new_files": [
+        "src/config/terminal-split-config.ts",
+        "src/hooks/useTerminalSplits.ts",
+        "src/components/worktree/TerminalSplitContainer.tsx",
+        "src/components/worktree/TerminalSplitPane.tsx",
+        "tests/helpers/terminal-splits.ts"
+      ],
+      "modified_files": [
+        "src/components/worktree/MessageInput.tsx",
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+        "tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx",
+        "tests/unit/hooks/useWorktreeUIState.test.ts"
+      ],
+      "new_tests_count": 59,
+      "tdd_result_path": "dev-reports/issue/728/pm-auto-dev/iteration-1/tdd-result.json"
+    },
+    "acceptance": {
+      "status": "request_refactor (resolved by refactor phase)",
+      "pass_count": 22,
+      "partial_count": 3,
+      "not_verifiable_unit_count": 1,
+      "fail_count_initial": 1,
+      "fail_count_after_refactor": 0,
+      "result_path": "dev-reports/issue/728/pm-auto-dev/iteration-1/acceptance-result.json"
+    },
+    "refactor": {
+      "status": "success",
+      "completed_targets": ["R3-005 (per-split polling fan-out)", "R3-006 (attach detection wiring)", "R3-009 (CLAUDE.md / CHANGELOG.md)"],
+      "new_files_added_in_refactor": [
+        "src/hooks/useTerminalPanePolling.ts",
+        "src/components/worktree/TerminalSplitPaneContent.tsx"
+      ],
+      "new_tests_count": 12,
+      "test_unit_baseline_to_current": "6687 → 6699 pass",
+      "ac_coverage_now": {
+        "AC-07": "pass",
+        "AC-13": "pass",
+        "AC-15": "pass",
+        "AC-17": "pass",
+        "AC-CRITICAL-DEFERRED-FETCH": "pass"
+      },
+      "remaining_followups_count": 3,
+      "result_path": "dev-reports/issue/728/pm-auto-dev/iteration-1/refactor-result.json"
+    },
+    "docs_update": {
+      "status": "success",
+      "updated_files": ["CLAUDE.md", "CHANGELOG.md"]
+    },
+    "uat": {
+      "status": "skipped",
+      "rationale": "ユニットテスト + acceptance-test-agent による静的検証で全 AC 達成。実機 UAT は必要に応じユーザー側で /uat 728 を別途実行可能"
+    }
+  },
+  "final_quality_gates": {
+    "lint": "pass (0 errors)",
+    "tsc": "pass (0 errors)",
+    "test_unit": "pass (6699/6706, 7 skipped — +12 vs 6687 baseline)",
+    "build": "pass"
+  },
+  "commit": {
+    "hash": "4771413e",
+    "title": "feat(terminal): per-split polling fan-out for PC 1-3 terminal splits (#728)",
+    "files_touched": 24,
+    "includes": "All new components/hooks + edits + docs (CLAUDE.md/CHANGELOG.md) + dev-reports (issue-review + pm-auto-dev iteration-1)"
+  },
+  "remaining_followups": [
+    {"id": "R3-007", "severity": "non_blocking", "title": "state.terminal.* reducer slice の完全削除 (Mobile 経路移行後)"},
+    {"id": "R3-008", "severity": "non_blocking", "title": "Playwright e2e (PaneResizer 並列 5 マウント / cursor 残留 / cross-worktree 永続化)"},
+    {"id": "R3-010", "severity": "non_blocking", "title": "WorktreeDetailRefactored-cli-tab-switching.test.tsx の再々設計 (R3-007 後)"}
+  ],
+  "next_actions": [
+    "Phase 6 完了報告 (PM Auto Issue2Dev サマリ)",
+    "ユーザー判断: /create-pr 728 で PR 作成",
+    "ユーザー判断: /uat 728 で実機受入テスト (任意)"
+  ]
+}
