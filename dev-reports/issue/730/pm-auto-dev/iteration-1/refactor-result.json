@@ -1,0 +1,69 @@
+{
+  "issue_number": 730,
+  "iteration": 1,
+  "status": "skipped",
+  "summary": "Reviewed all 6 Issue #730 targets (Tooltip.tsx, TerminalContainer.tsx, ActivityBar.tsx, WorktreeDesktopLayout.tsx, WorktreeDetailRefactored.tsx, useHistoryPaneState.ts) plus the two new test files. The TDD commit (6b14f4c6) already meets a high quality bar: strong JSDoc with Issue-number traceability and rationale ('why'), single-responsibility components, no dead code or stale props after the layout simplification, no duplication, complete deps lists on memos, and good a11y wiring (role=tooltip, aria-hidden, aria-controls, aria-orientation, role=tablist, focus management via buttonRefs). Static analysis is clean (lint 0 / tsc 0 / build pass / 6628 tests pass / 7 skipped). Only one nice-to-have was found (a minor comment/deps inconsistency in Tooltip.tsx); per the 'avoid over-refactoring' constraint, no code changes are applied. The CustomEvent broadcaster doc improvement is owned by Phase 4 (CLAUDE.md) per acceptance advisory and is intentionally out-of-scope here.",
+  "candidates": [
+    {
+      "id": "R-001",
+      "severity": "nice",
+      "title": "Tooltip.tsx unmount-cleanup comment is mildly misleading vs. its deps array",
+      "file": "src/components/common/Tooltip.tsx",
+      "description": "Lines 89-91 state 'we intentionally close over the stable clearTimer (memoized with []), so an empty deps array is correct', but the useEffect at line 96 actually uses `[clearTimer]` as its dependency array. Since clearTimer is memoized with []-deps the two forms are functionally equivalent, but the comment claims '[]' which the code does not do. A future reader could be confused. Suggested wording: 'we intentionally close over the stable clearTimer (memoized with [] deps) — listing it here keeps react-hooks/exhaustive-deps satisfied with no runtime difference.' No behavior change."
+    },
+    {
+      "id": "R-002",
+      "severity": "nice",
+      "title": "WorktreeDesktopLayout.localActivityWidth does not track activityPaneWidth prop changes",
+      "file": "src/components/worktree/WorktreeDesktopLayout.tsx",
+      "description": "When no onActivityPaneResize is provided (current usage in WorktreeDetailRefactored), the component runs in 'uncontrolled fallback' mode with internal `localActivityWidth` initialized to `activityPaneWidth`. If the parent later passes a different `activityPaneWidth`, the local state will not re-sync. In the current Issue #730 usage the prop is never changed (the parent always uses the default 18 and never wires onActivityPaneResize), so this is a latent issue, not an active bug. A future Issue that needs to drive width from the outside would need to either pass onActivityPaneResize or add a useEffect sync. Out of scope per constraint 'Issue #730 のスコープ外への改善は対象外'."
+    },
+    {
+      "id": "R-003",
+      "severity": "nice",
+      "title": "useHistoryPaneState CustomEvent rationale not yet in CLAUDE.md",
+      "file": "src/hooks/useHistoryPaneState.ts",
+      "description": "The acceptance report explicitly defers this to Phase 4 (documentation). The hook itself already carries a good JSDoc block explaining the broadcaster (lines 99-127). No code change required here; CLAUDE.md update is the Phase 4 owner."
+    }
+  ],
+  "applied": [],
+  "deferred": [
+    {
+      "id": "R-001",
+      "reason": "Pure comment polish with zero behavior or test impact. Per the 'avoid over-refactoring' constraint and the principle that TDD agent already wrote high-quality code, the value of this change does not justify a separate refactor commit. Recommend folding it into the next Tooltip-touching change."
+    },
+    {
+      "id": "R-002",
+      "reason": "Latent issue with no active manifestation in Issue #730. Constraint: 'Issue #730 のスコープ外への改善は対象外'. Recommend addressing only when a future feature requires controlled width."
+    },
+    {
+      "id": "R-003",
+      "reason": "Acceptance report explicitly schedules this for Phase 4 (CLAUDE.md update), not the refactor phase."
+    }
+  ],
+  "review_observations": {
+    "tooltip": "Strong JSDoc explains the four key design decisions (tabIndex=-1 wrapper, no cloneElement, role=tooltip + aria-hidden, useEffect cleanup). Single responsibility. PLACEMENT_CLASS lookup is open-closed (extensible by adding a key). 100% test coverage.",
+    "terminal_container": "Single responsibility: own History visibility/width + lay out History|Resizer|Terminal. ErrorBoundary fault isolation on both halves. HISTORY_PANE_ID exported and reused by HistoryPane's collapse button. handleResize math identical to WorktreeDesktopLayout's pattern (consistent), aria-controls correctly references HISTORY_PANE_ID. Good a11y.",
+    "activity_bar": "Tooltip wrapping preserves ref/click/keyboard transparency. handleKeyDown handles Enter/Space/ArrowUp/ArrowDown/Home/End cleanly with explicit `return` after each branch. aria-label kept as the primary accessible name; Tooltip is aria-hidden to avoid double announcement. tabIndex roving via `isActive || (active===null && index===0) ? 0 : -1` is correct for the closed-pane state. No dead title attribute.",
+    "worktree_desktop_layout": "MobileLayout / historyPane / activityBar / onToggleHistoryPane / onHistoryPaneResize / historyPaneWidth / useIsMobile completely removed (291→145 lines net). Props surface is small and orthogonal: activityPane (null hides column AND resizer) + rightPane. No leaked dead code from the prior 4-column API.",
+    "worktree_detail_refactored": "Outer flex h-full + ActivityBar full-height column + inner column with DesktopHeader/BranchMismatchAlert/WorktreeDesktopLayout/NavigationButtons/MessageInput/PromptPanel is the cleanest expression of the new structure. historyPaneMemo no longer gates on historyPaneVisible (matches Issue #730 design where TerminalContainer owns visibility). Deps list updated (12 entries). MAINTENANCE NOTE block updated with Issue #730 reference. The duplicate `useHistoryPaneState()` call (once here for toggle, once in TerminalContainer for visible/width) is justified by the CustomEvent broadcaster and explicitly documented.",
+    "use_history_pane_state": "DEFAULT_HISTORY_WIDTH 25→40 with JSDoc explaining 'percent of TerminalContainer inner area' and CHANGELOG-style Breaking Change note. CustomEvent broadcaster (HISTORY_PANE_STATE_EVENT = 'commandmate:historyPaneStateChange') with try/catch around CustomEvent construction. visibleRef / widthRef pattern keeps toggle/setWidth callback identities stable (empty deps) while reading current state — standard React idiom. SSR-safe: typeof window guards on every read/write/dispatch.",
+    "tooltip_test": "13 tests cover delay, mouseEnter, mouseLeave-before-delay, mouseLeave-after-visible, unmount cleanup, placement, dark theme, aria semantics, child aria-label preservation, wrapper tabIndex=-1, onClick transparency, custom delay. Uses vi.useFakeTimers + act() correctly. Strong structure with one describe + it-per-assertion. 100% coverage.",
+    "terminal_container_test": "11 tests cover exported HISTORY_PANE_ID constant, visible=true render, history wrapper id+width style, PaneResizer presence, visible=false expand bar (aria-controls + aria-expanded), expand bar toggle wiring, terminal always rendered, ErrorBoundary componentName on both halves, width prop pass-through, keyboard resize delegation. Mocks useHistoryPaneState cleanly and resets between tests."
+  },
+  "quality_after": {
+    "lint": "pass",
+    "tsc": "pass",
+    "test_unit": "6628 passed / 0 failed / 7 skipped (352 files)",
+    "build": "pass"
+  },
+  "constraints_respected": [
+    "TDD test count unchanged (6628 passed, 0 failed)",
+    "lint / tsc / build all PASS",
+    "DEFAULT_HISTORY_WIDTH=40 unchanged",
+    "CustomEvent broadcaster untouched",
+    "MobileContent path untouched",
+    "No code outside the 6 Issue #730 target files inspected for change"
+  ],
+  "next_action": "Proceed to Phase 4 (documentation: CLAUDE.md / docs/UI_UX_GUIDE.md / CHANGELOG.md) per acceptance-result.next_action. When CLAUDE.md is updated, include the one-line useHistoryPaneState CustomEvent note (R-003) and consider folding the Tooltip.tsx comment polish (R-001) into the same docs-touching commit if convenient."
+}

@@ -1,0 +1,293 @@
+{
+  "stage": 3,
+  "focus": "影響範囲（1回目）",
+  "reviewer": "claude-opus",
+  "issue_number": 730,
+  "review_date": "2026-05-30",
+  "summary": "Stage 2 反映後の Issue #730 本文に対し、影響範囲・後方互換性・回帰リスクを精査した。骨格（ActivityBar 全高化 / Tooltip 化 / TerminalContainer 化）は実装可能だが、(a) `WorktreeDesktopLayout` の prop API（`activityBar` / `historyPane` / `historyPaneCollapsed` / `onToggleHistoryPane` / `onHistoryPaneResize` / `historyPaneWidth`）を参照する既存テストが少なくとも 4 ファイル × 多数ケース存在し、Issue 想定の 1 ファイルでは不足する点（Must Fix S3-001）、(b) Tooltip ラップによる ActivityBar の DOM 構造変化で既存テスト（`activity-bar-button-${id}` のクリック / フォーカス / ArrowUp/Down 遷移）が壊れる可能性、特に `buttonRefs` の対象 DOM がボタンから `<span>` に変わると `focus()` ロジックが破綻する点（Should Fix S3-002）、(c) `HistoryPane.tsx:494` の `aria-controls=\"worktree-history-pane\"` が TerminalContainer 内 `id` 移管に依存する点（Should Fix S3-003）、(d) `DEFAULT_HISTORY_WIDTH = 25` percent と Issue の `width: \\${width}%` 設計は整合するが、TerminalContainer 自身は ActivityPane と独立した親に置かれるため「container 幅 = 右ペイン幅」となり、percent 計算の基準が WorktreeDesktopLayout 全体（current）から TerminalContainer 内に変わる（後方互換注意点、Should Fix S3-004）、(e) `WorktreeDesktopLayout.test.tsx` の `historyPaneCollapsed` 関連 6 ケース / Mobile fallback 4 ケース / Resize callback 1 ケース の移管/廃止判断が Issue で「テスト整理」の一文に丸まっている（Should Fix S3-005）、(f) `useHistoryPaneState` の hydration がマウント時に走るため、TerminalContainer 内で SSR/CSR 切替時に History が一瞬 default (visible=true, width=25%) を出してから localStorage 値に切り替わる現象が WorktreeDesktopLayout → TerminalContainer 移管後も同じだが、新規コンポーネントの ErrorBoundary 包含の有無が Issue に明示されていない（Should Fix S3-006）、(g) `UI_UX_GUIDE.md` の「4カラム構成 (ActivityBar / ActivityPane / History / Right)」記述が Issue 完了後は実態と乖離するが、ドキュメント更新がモジュール参照 1 行のみで詳細図の更新範囲が未指定（Nice to Have S3-007）、(h) deep link `?pane=history` が現在 `toActivityId() → null` + `toLeftPaneTab() → 'history'` で「History 列を表示」していたが、TerminalContainer 内包後は「Terminal 領域内の History 表示」に変わる（後方互換上は History が見える点で互換、ただし「History 列が画面の中央」→「右側 Terminal 内の左」と視覚位置が変わる）（Nice to Have S3-008）、(i) Tooltip の `setTimeout`/`clearTimeout` が 6 アイコン × hover 毎に発生するが、ホバーリーブ時に未完了タイマがリークしないか useEffect cleanup の言及が無い（Nice to Have S3-009）の 9 点を指摘する。全体として実装は可能だが、影響テストの具体的列挙とリスク軽減策の事前合意が望ましい。",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "Must Fix",
+      "category": "テスト",
+      "title": "`WorktreeDesktopLayout` の `activityBar` / `historyPane` / `historyPaneCollapsed` props を参照する既存テストが Issue 想定の 1 ファイルでは不足（4 ファイル × 多数ケース）",
+      "description": "Issue 「想定影響範囲 / 変更」では `tests/unit/components/WorktreeDesktopLayout.test.tsx` のみ更新対象として明示されているが、実コード調査で以下のテストファイルも同 props を mock または参照していることが判明:\n\n1. `tests/unit/components/WorktreeDetailRefactored.test.tsx:72-91` — `WorktreeDesktopLayout` を mock し `activityBar` / `activityPane` / `historyPane` / `rightPane` props を分解。15 箇所以上で `screen.getByTestId('activity-bar')` / `screen.getByTestId('history-pane')` を assert。Tooltip ラップで `activity-bar` testid の DOM 構造が変わると影響あり。\n2. `tests/integration/issue-266-acceptance.test.tsx:67-91` — 同様に `WorktreeDesktopLayout` を mock し `activityBar` / `historyPane` slot を assert。\n3. `tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx:63-80` — 同様の mock を持つ。\n4. `tests/unit/components/HistoryPane.test.tsx:548-588` — `aria-controls=\"worktree-history-pane\"` を assert。TerminalContainer に id 移管後も同 assertion が通る必要がある（移管先で同 id を継続使用する設計なら OK だが、Issue では言及あるが「移管」レベルの記載のみでテスト更新範囲未明示）。\n\nさらに `WorktreeDesktopLayout.test.tsx` 本体 (235 行) では:\n- `historyPaneCollapsed=true` 時の `history-expand-bar` (6 ケース、L73-130)\n- Mobile fallback の `MobileLayout` (5 ケース、L151-184) — `historyPaneCollapsed` を渡してモバイル切替テスト\n- `historyPaneWidth` / `onHistoryPaneResize` (4 ケース、L133-149, L205-233)\n- DOM id assertion (`worktree-activity-bar` / `worktree-history-pane` / `worktree-right-pane`、L43-49, L86-93, L138-148, L161-163, L186-198)\n\nが存在し、これらの「移管先テスト（TerminalContainer.test.tsx）」「廃止」「リネーム」のいずれにするかが Issue で未明示。",
+      "location": "Issue ## 想定影響範囲 / 変更 テーブル「tests/unit/components/WorktreeDesktopLayout.test.tsx」行",
+      "affected_files": [
+        "tests/unit/components/WorktreeDesktopLayout.test.tsx",
+        "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+        "tests/integration/issue-266-acceptance.test.tsx",
+        "tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx",
+        "tests/unit/components/HistoryPane.test.tsx"
+      ],
+      "suggested_fix": "Issue 想定影響範囲を以下のように具体化:\n\n```\n| ファイル | 変更内容 |\n| tests/unit/components/WorktreeDesktopLayout.test.tsx | activityBar / historyPane / historyPaneCollapsed / onToggleHistoryPane / historyPaneWidth / onHistoryPaneResize 関連の 11 ケース削除。残るは 2 カラム (activityPane / rightPane) + activityPaneWidth/onActivityPaneResize + role=main + activity-pane-slot id assertion |\n| tests/unit/components/WorktreeDetailRefactored.test.tsx | WorktreeDesktopLayout の mock 定義 (L72-91) から historyPane を削除。`getByTestId('activity-bar')` を呼ぶ 12 ケースは Tooltip ラップ後の DOM 構造に整合させる（Tooltip span を貫通して activity-bar が見える/見えないを確認） |\n| tests/integration/issue-266-acceptance.test.tsx | 同 mock 定義から historyPane を削除（必要なら TerminalContainer mock を追加） |\n| tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx | 同上 |\n| tests/unit/components/HistoryPane.test.tsx | aria-controls=worktree-history-pane assertion (L571) は TerminalContainer 内 id 継続前提で維持。他 collapse button ケース (L548-588) は HistoryPane 単体テストとして残置 |\n```\n\nまた、Issue「想定影響範囲 / 新規」の `TerminalContainer.test.tsx` には少なくとも以下のケースを移管:\n- visible=true 時の history wrapper / id=worktree-history-pane / role assertion\n- visible=false 時の expand bar (`<` / `>` ボタン) 表示\n- width 適用 (`style.width=\"${n}%\"`)\n- toggle/setWidth コールバックの useHistoryPaneState 連携\n- ErrorBoundary 包含（追加判断）",
+      "rationale": "Issue 想定の 1 ファイルだけ更新では確実に 3 ファイル以上のテストが赤になる。CI が失敗してから「テスト範囲が広い」と判明すると手戻りが大きい。事前に範囲を確定しておくことで実装フェーズの見積もりが正確になる。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "Should Fix",
+      "category": "回帰リスク",
+      "title": "Tooltip ラップで ActivityBar の `buttonRefs.current[index]?.focus()` が壊れる可能性（DOM 構造変化）",
+      "description": "現状 `ActivityBar.tsx:95-97` で `ref={(el) => { buttonRefs.current[index] = el; }}` を `<button>` に直接付与し、L83-85 の `handleKeyDown` で `ArrowUp/Down/Home/End` 時に `buttonRefs.current[next]?.focus()` を呼ぶ。Issue「対応方針 1」サンプル `<Tooltip content=\"...\" placement=\"right\"><button ...>icon</button></Tooltip>` で button を Tooltip でラップした場合:\n\n1. Tooltip コンポーネント内部実装が `React.cloneElement(children)` で props を注入する設計なら ref は維持可能だが、Issue 実装方針 1 のサンプル (`<span className=\"relative inline-block\" onMouseEnter onMouseLeave>{children}{visible && <span role=\"tooltip\">...</span>}</span>`) は **children をそのまま render** する単純な wrap であり、button への ref は保持される（OK）。\n2. ただし `<span className=\"relative inline-block\">` がイベントを受けるため、`<button>` への `onMouseEnter`/`onMouseLeave` が変わらないことを確認する必要あり。VS Code 流の `mouseenter` が `<span>` で発火し、内側 `<button>` への delegation が想定通りに動くかは未確認。\n3. `buttonRefs.current[next]?.focus()` が `<button>` を focus する想定だが、Tooltip 表示中に `<span>` がイベントターゲットになると visual focus と semantic focus がずれる可能性。\n4. `tabIndex={isActive || (active === null && index === 0) ? 0 : -1}` (L104) と `<span>` 周りの focusable 要素競合（`<span>` がデフォルトで focus 不可なので問題ないが、Tooltip 内部実装が `tabIndex={0}` を追加すると競合）。\n\n既存テスト `ActivityBar.test.tsx:82-99` で `ArrowDown/ArrowUp` で `document.activeElement === <button>` を assert しており、ここが壊れると即 fail する。",
+      "location": "Issue ## 対応方針 / 1. Tooltip ラップ部分 および ## 実装方針 / 1. Tooltip コンポーネント",
+      "affected_files": [
+        "src/components/worktree/ActivityBar.tsx",
+        "src/components/common/Tooltip.tsx",
+        "tests/unit/components/worktree/ActivityBar.test.tsx"
+      ],
+      "suggested_fix": "Issue「実装方針 1. Tooltip コンポーネント」のサンプルコードに以下を追記:\n\n1. **ref 透過の明示**: 「Tooltip は children をそのまま render し、ref/onClick/onKeyDown/tabIndex を透過する。`React.cloneElement` で props を注入しない（単純 wrap）」と明示。\n2. **イベントハンドリングの確認項目を受入条件 Tooltip に追加**: 「Tooltip ラップ後も `buttonRefs.current[index]?.focus()` が想定通り `<button>` を focus すること」「`ArrowDown/ArrowUp/Home/End` のキーボード遷移が壊れないこと」を受入条件に明示。\n3. **Tooltip wrapper span の focusable 抑止**: `<span tabIndex={-1}>` を明示し、Tab 移動で span が focus されないことを保証。\n4. **テスト更新**: `ActivityBar.test.tsx` の `ArrowDown/ArrowUp` ケース (L81-99) は Tooltip ラップ後も通る前提だが、念のため Tooltip 統合下での同テストケース追加。",
+      "rationale": "現 ActivityBar のキーボードナビゲーションは 6 ケース以上のテストで保証されており、Tooltip ラップで DOM 構造が変わると ref/focus/event の挙動が変わるリスクが大きい。Issue 実装方針サンプルだけでは「Tooltip 内部実装ポリシー（ref 透過 / イベント透過）」が明確でなく、実装者裁量で壊れる可能性がある。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "Should Fix",
+      "category": "後方互換",
+      "title": "`HistoryPane.tsx:494` の `aria-controls=\"worktree-history-pane\"` は TerminalContainer 内 id 継続維持が前提（壊れると HistoryPane の collapse button が aria orphan 化）",
+      "description": "現状 `src/components/worktree/HistoryPane.tsx:494` で history collapse button が `aria-controls=\"worktree-history-pane\"` を持つ (Issue #727 で追加された PC collapse button)。これは現在 `WorktreeDesktopLayout.tsx:80` の `HISTORY_PANE_ID = 'worktree-history-pane'` で付与される id を参照している。\n\nIssue 「対応方針 3」では「`id='worktree-history-pane'` は TerminalContainer 内の history wrapper div に移管して継続使用」と明記され、Issue 「想定影響範囲 / 新規」の `TerminalContainer.test.tsx` で「`id='worktree-history-pane'` 継続付与のテスト」が追加対象として記載されている。\n\nしかし、TerminalContainer 内部実装で id が「history wrapper div」に付与されるか「内側の HistoryPane 自体」に付与されるかが Issue で曖昧。HistoryPane が visible=false で消えた場合、`aria-controls` 参照先が DOM から消えると HistoryPane の collapse button (今度はおそらく表示されない) との関連は問題なくなるが、TerminalContainer 内 expand bar の `aria-controls` (現 `WorktreeDesktopLayout.tsx:224` で `HistoryExpandBar` が `aria-controls={HISTORY_PANE_ID}` を持つ) も同 id を継続参照する必要がある。\n\nさらに、`HistoryPane.tsx:494` 自身は HistoryPane コンポーネント内部にあり、TerminalContainer の外側 id とは独立。「HistoryPane onCollapse 時に親が visible を toggle → DOM から消える」フローで、`aria-controls=worktree-history-pane` が自分自身（の親 wrapper）を指す形になり矛盾はない。ただし HistoryPane 内 collapse button (L497 `data-testid=\"history-pane-collapse-button\"`) と TerminalContainer 外側 expand bar (Issue 受入条件で `<` / `>` 折りたたみ・再表示) が両方存在する場合、両者の `aria-controls` の整合性が要確認。",
+      "location": "Issue ## 対応方針 / 3. History を Terminal 内包 / `id='worktree-history-pane'` の扱い",
+      "affected_files": [
+        "src/components/worktree/HistoryPane.tsx",
+        "src/components/worktree/TerminalContainer.tsx",
+        "src/components/worktree/WorktreeDesktopLayout.tsx",
+        "tests/unit/components/HistoryPane.test.tsx",
+        "tests/unit/components/worktree/TerminalContainer.test.tsx"
+      ],
+      "suggested_fix": "Issue 「対応方針 3」に以下を追記:\n\n1. **id 付与先の明確化**: 「`HISTORY_PANE_ID = 'worktree-history-pane'` は TerminalContainer 内部の **history wrapper div**（HistoryPane の外側 1 階層）に付与する。HistoryPane コンポーネント自身には id を付与しない（HistoryPane が再利用可能なため）」と明示。\n2. **`aria-controls` 参照整合**: 「HistoryPane 内 collapse button (HistoryPane.tsx:494) と TerminalContainer 内 expand bar の双方が `aria-controls=worktree-history-pane` を参照する。両者は visible 状態の表裏（visible 時に collapse button、非 visible 時に expand bar）なので、同時表示されない」と明示。\n3. **テスト追加**: `TerminalContainer.test.tsx` に「`id='worktree-history-pane'` が history wrapper div に付与される」「visible=false 時に expand bar の `aria-controls=worktree-history-pane` が存在する（一方で history wrapper div は DOM から消える）」のケース。",
+      "rationale": "DOM id の移管は a11y 連携（aria-controls）と E2E テスト (`document.getElementById`) に影響するため、移管先の明示と参照整合の保証が必要。曖昧なまま実装すると aria orphan（参照先が DOM に存在しない aria-controls）になりスクリーンリーダー利用者の UX が壊れる。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "Should Fix",
+      "category": "回帰リスク",
+      "title": "TerminalContainer 内 History の `width: ${width}%` 計算基準が WorktreeDesktopLayout 全体 → TerminalContainer 内（右ペイン）に変わるため、既存 width 値（DEFAULT_HISTORY_WIDTH=25）の意味が変わる",
+      "description": "現状 `useHistoryPaneState.ts:26` の `DEFAULT_HISTORY_WIDTH = 25` は WorktreeDesktopLayout 全体（横幅 100%）に対する 25%、つまり画面全体の 25% に相当する。`WorktreeDesktopLayout.tsx:294` で `containerRef.current?.offsetWidth` を基準にした percent 計算をしている。\n\nIssue 「対応方針 3」「実装方針 3」では TerminalContainer 内で `<div style={{ width: \\${width}%` }}>{history}</div>` とあるが、この percent の基準は TerminalContainer の親（Right Pane = 元 rightPaneMemo を内包する flex container）の横幅。すなわち:\n- 現状: 画面全体 1000px → History 25% = 250px\n- 変更後: WorktreeDesktopLayout の Right column（例えば画面 1000px - ActivityBar 48px - ActivityPane 200px - resizers ≈ 750px）→ History 25% = 187px\n\nこれは **同じ width 値で見た目の幅が縮む** という後方互換問題。localStorage に保存された既存ユーザの設定値（例: 35）は、変更後の TerminalContainer 内では「Right ペインの 35%」となり、過去の体験と異なる幅になる。\n\nさらに、`MIN_HISTORY_WIDTH=10` / `MAX_HISTORY_WIDTH=60` の clamp も TerminalContainer 内の percent 基準で再評価する必要があり、TerminalContainer の親幅次第で「最小 10%」が小さすぎる/「最大 60%」が大きすぎる可能性がある。\n\nIssue 受入条件「History 内包」では「`<` / `>` 折りたたみ動作変更なし」「History 幅ドラッグ可変（既存挙動維持、`width` は percent 10-60）」と書かれているが、percent 基準の変更による視覚的差異は明示されていない。",
+      "location": "Issue ## 受入条件 / History 内包 / 「History 幅ドラッグ可変（既存挙動維持、`width` は percent 10-60）」",
+      "affected_files": [
+        "src/hooks/useHistoryPaneState.ts",
+        "src/components/worktree/TerminalContainer.tsx",
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "suggested_fix": "Issue 「対応方針 3」「受入条件 History 内包」に以下のいずれかの方針を明示:\n\n**案 A: percent 基準を保持**: TerminalContainer 内の History は `width: ${width}%` ではなく、計算で「画面全体に対する percent → TerminalContainer 内 percent」に変換する。例: `effectiveWidth = width * (window.innerWidth / terminalContainerWidth)` のような補正。実装は複雑だが既存設定値の体験を維持できる。\n\n**案 B: 仕様変更を明示**: 「width の意味が画面全体 percent → Right ペイン内 percent に変わる。既存ユーザは初回起動で History 幅が縮んで見えるが、ドラッグで再調整可能」と Breaking Changes / 受入条件に追記。マイグレーション処理（既存 localStorage 値を補正して書き直す）は不要だが、ユーザ通知が必要。\n\n**案 C: 推奨**: `MIN_HISTORY_WIDTH` / `MAX_HISTORY_WIDTH` / `DEFAULT_HISTORY_WIDTH` を TerminalContainer 内 percent 用に再設定（例: DEFAULT=40 など）し、`HISTORY_WIDTH_STORAGE_KEY` 自体を新しいキー名（例: `commandmate.worktree.terminalContainerHistoryWidth`）にする。既存キーは読み捨て。Issue 受入条件「localStorage キー維持」は破棄して再評価。\n\nどの方針を選ぶかで実装範囲と UX 影響が大きく変わる。Stage 4 までに方針確定が望ましい。",
+      "rationale": "DOM 配置を変えると percent 計算の基準も変わるため、既存ユーザの設定値が想定外の見た目になる回帰リスクがある。Issue では「既存挙動維持」と書かれているが、技術的には完全維持が難しい。事前に方針を決めることで実装時の判断ぶれと UX 回帰を防げる。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "Should Fix",
+      "category": "テスト",
+      "title": "`WorktreeDesktopLayout.test.tsx` の `Mobile fallback` ブロック (L151-184) の扱いが未明示（モバイル経路維持なら移管、廃止なら削除）",
+      "description": "現状 `tests/unit/components/WorktreeDesktopLayout.test.tsx:151-184` には Mobile fallback テスト 5 ケースあり:\n- L152-156: `useIsMobile=true` で `mobile-layout` が表示\n- L158-163: モバイル時に desktop slots が消える\n- L165-171: モバイル時 history pane が left side として表示\n- L173-183: モバイル時 historyPaneCollapsed=true で activity pane が left side\n- L186-198: Accessibility (history pane / right pane の aria-label)\n\nIssue 受入条件「横断」では「`WorktreeDesktopLayout` の MobileLayout fallback (L89-, L311) は本 Issue では互換維持」と書かれているが、`historyPane` prop を削除すると MobileLayout fallback (L311 `const leftForMobile = !historyPaneCollapsed && historyPane ? historyPane : activityPane;`) も同時に削除/書き換えが必要。\n\nIssue 「対応方針 4. WorktreeDesktopLayout 簡素化」で「MobileLayout fallback がモバイル経路から実呼び出しされないことを実装時に再確認」とあるが、`useIsMobile=true` で `WorktreeDesktopLayout` 自体が描画される経路があるかは要検証。実コードを追うと:\n- `WorktreeDetailRefactored.tsx:1700` で `if (!isMobile)` 分岐 → モバイル時は `MobileContent` を返す (L1968-)\n- → `WorktreeDesktopLayout` はモバイル時に呼ばれない\n- → MobileLayout fallback (L89-) は dead code（テストでのみ呼ばれる）\n\nつまり MobileLayout fallback は dead code であり、L151-184 のテストもプロダクトコード保証のためではなく「内部 fallback の保証」になっている。削除しても UX 影響なし。\n\nIssue では「互換維持または削除（実装時最終判断）」とあるが、dead code 確認できているなら削除推奨。テストも削除でよい。",
+      "location": "Issue ## 受入条件 / 横断 / 「`WorktreeDesktopLayout` の MobileLayout fallback...」",
+      "affected_files": [
+        "src/components/worktree/WorktreeDesktopLayout.tsx",
+        "tests/unit/components/WorktreeDesktopLayout.test.tsx"
+      ],
+      "suggested_fix": "Issue 受入条件「横断」に以下を追記:\n\n- [ ] `WorktreeDesktopLayout` の MobileLayout fallback (L89-, L311) は dead code（モバイル経路は `WorktreeDetailRefactored.tsx:1700` で `MobileContent` 分岐済み、`WorktreeDesktopLayout` を経由しない）。本 Issue で **削除** する。\n- [ ] `tests/unit/components/WorktreeDesktopLayout.test.tsx` の `Mobile fallback` ブロック (L151-184) も削除。\n\nまたは互換維持案を採用する場合:\n- [ ] MobileLayout fallback を維持する。`activityPane` のみで動作する形にリファクタ（`historyPane` 参照を削除し `leftForMobile = activityPane` に簡素化）。Mobile fallback テストは `historyPaneCollapsed=true` ケースのみ残す。\n\nどちらを採用するか実装方針 4 で明示。",
+      "rationale": "「互換維持または削除（実装時最終判断）」のままだと実装者裁量で結果が分岐し、テスト範囲が定まらない。dead code 削除が技術的に正しい判断なので Issue 段階で確定するのが望ましい。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "Should Fix",
+      "category": "回帰リスク",
+      "title": "TerminalContainer の ErrorBoundary 包含が Issue で未明示（既存 WorktreeDesktopLayout は HistoryPane を ErrorBoundary でラップ）",
+      "description": "現状 `WorktreeDesktopLayout.tsx:194` で `<ErrorBoundary componentName=\"HistoryPane\">{children}</ErrorBoundary>` のように History column を ErrorBoundary でラップしている (L17 JSDoc: \"Each pane is wrapped in ErrorBoundary for fault isolation.\")。これにより HistoryPane 内エラーが Terminal や ActivityBar に波及しない。\n\nIssue 「実装方針 3. TerminalContainer」のサンプルコードでは ErrorBoundary 包含が見えない:\n```tsx\n<div className=\"flex h-full min-h-0\">\n  {visible ? (\n    <>\n      <div id={HISTORY_PANE_ID} style={{ width: `${width}%` }} className=\"min-h-0\">\n        {history}  ← ErrorBoundary なし\n      </div>\n      <PaneResizer ... />\n    </>\n  ) : (\n    <CollapsedExpandBar onExpand={toggle} />\n  )}\n  <div className=\"flex-1 min-h-0\">{terminal}</div>  ← ErrorBoundary なし\n</div>\n```\n\nTerminalContainer 内で History と Terminal の ErrorBoundary が無いと、History 内エラー（例: useConversationHistory のリクエスト失敗時 React 例外）が Terminal を巻き込んで全画面崩壊する可能性。同様に Terminal 内エラー（TerminalDisplay の throw）が History に波及。",
+      "location": "Issue ## 実装方針 / 3. TerminalContainer のサンプルコード",
+      "affected_files": [
+        "src/components/worktree/TerminalContainer.tsx",
+        "src/components/worktree/WorktreeDesktopLayout.tsx"
+      ],
+      "suggested_fix": "Issue 「実装方針 3」のサンプルコードに ErrorBoundary 包含を追加:\n\n```tsx\nexport function TerminalContainer({ history, terminal }: TerminalContainerProps) {\n  const { visible, width, toggle, setWidth } = useHistoryPaneState();\n\n  return (\n    <div className=\"flex h-full min-h-0\">\n      {visible ? (\n        <>\n          <div id={HISTORY_PANE_ID} style={{ width: `${width}%` }} className=\"min-h-0\">\n            <ErrorBoundary componentName=\"HistoryPane\">{history}</ErrorBoundary>\n          </div>\n          <PaneResizer onResize={setWidth} ariaValueNow={width} />\n        </>\n      ) : (\n        <CollapsedExpandBar onExpand={toggle} />\n      )}\n      <div className=\"flex-1 min-h-0\">\n        <ErrorBoundary componentName=\"TerminalPane\">{terminal}</ErrorBoundary>\n      </div>\n    </div>\n  );\n}\n```\n\nまた受入条件「History 内包」に「History / Terminal 各々を ErrorBoundary でラップ（既存 WorktreeDesktopLayout の fault isolation 設計を継承）」を追加。",
+      "rationale": "既存 WorktreeDesktopLayout の設計原則 (`Each pane is wrapped in ErrorBoundary for fault isolation.`) を TerminalContainer に引き継がないと、片方のエラーが両方を巻き込む regression が発生する。"
+    },
+    {
+      "id": "S3-007",
+      "severity": "Nice to Have",
+      "category": "ドキュメント",
+      "title": "`UI_UX_GUIDE.md` (L24, L219, L223) と `CHANGELOG.md` [Unreleased] (L11, L18, L26) の更新範囲が Issue で未明示",
+      "description": "Issue 「想定影響範囲 / 変更」では `CLAUDE.md` / `CHANGELOG.md` の更新は明示されているが、`docs/UI_UX_GUIDE.md` / `docs/en/UI_UX_GUIDE.md` の更新が漏れている。実コード確認:\n\n- `docs/UI_UX_GUIDE.md:24`: 「デスクトップ | 4カラム構成 (ActivityBar / ActivityPane / History / Right)」→ Issue 後は「3 カラム (ActivityBar / ActivityPane / Right) + Right 内 History 内包」に変更必要\n- `docs/UI_UX_GUIDE.md:219`: 「WorktreeDesktopLayout.tsx # デスクトップ4カラム (ActivityBar+ActivityPane+History+Right)」→ 「3 カラム」に変更 + 「TerminalContainer.tsx # Right ペイン内 History + Terminal+FilePanel」追加\n- `docs/UI_UX_GUIDE.md:223`: 「HistoryPane.tsx # 履歴ペイン（PC 独立カラム化、折りたたみ対応）」→ 「PC では TerminalContainer 内に配置」に変更\n- `docs/UI_UX_GUIDE.md:47-63`: 「## デスクトップ UI / ### レイアウト構成」の ASCII 図 → 新構造を反映\n- `docs/en/UI_UX_GUIDE.md`: 同等の英語版更新\n\n`CHANGELOG.md [Unreleased]` には Issue #727 の記述があるが、本 Issue #730 で再構成された内容を追記する必要あり:\n- `Changed`: WorktreeDesktopLayout を 4 カラム→3 カラム、ActivityBar を Header 下に移動、History を TerminalContainer に内包\n- `Added`: Tooltip コンポーネント、TerminalContainer コンポーネント\n- `Breaking Changes`: ActivityBar / TerminalContainer の prop API 変更（外部利用は無いが、テスト mock 修正が必要）",
+      "location": "Issue ## 想定影響範囲 / 変更 / 「CLAUDE.md」「CHANGELOG.md」の隣接行",
+      "affected_files": [
+        "docs/UI_UX_GUIDE.md",
+        "docs/en/UI_UX_GUIDE.md",
+        "CHANGELOG.md",
+        "CLAUDE.md"
+      ],
+      "suggested_fix": "Issue 「想定影響範囲 / 変更」テーブルに以下を追加:\n\n```\n| docs/UI_UX_GUIDE.md | L24 / L47-63 / L219-223 を更新。「3 カラム + Right 内 History 内包」に変更。Activity Bar 全高貫通の ASCII 図追加 |\n| docs/en/UI_UX_GUIDE.md | 同等の英語版更新 |\n| CHANGELOG.md | [Unreleased] に Issue #730 追記（Changed: Layout 再構成、Added: Tooltip / TerminalContainer、Breaking: prop API 変更） |\n```\n\nまた CLAUDE.md の更新範囲:\n- L246 `WorktreeDesktopLayout.tsx`: 「4カラム構成」→「3カラム構成」、TerminalContainer 移管を明記\n- `TerminalContainer.tsx` 新規行追加\n- `Tooltip.tsx` 新規行追加\n- L247 (推定) `WorktreeDetailRefactored.tsx`: ActivityBar 全高移動を Issue #730 として追記",
+      "rationale": "ドキュメントが実コードと乖離すると新規参画者の理解が阻害される。Issue 段階で更新範囲を明示しておくことで、PR レビュー時のドキュメント漏れ指摘を防ぐ。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "Nice to Have",
+      "category": "後方互換",
+      "title": "deep link `?pane=history` の挙動が「画面中央の独立 History 列」→「右端 Terminal 領域内 History」と視覚位置が変わる",
+      "description": "現在 `src/lib/deep-link-validator.ts:23` で `'history'` が VALID_PANES に含まれ、`useWorktreeTabState.toActivityId()` (L114) で `history` → `null` にマッピングされる。これにより `?pane=history` 時は ActivityPane が閉じて History 列のみが表示される。\n\nIssue 後の構造では:\n- `?pane=history` → `toActivityId() → null` → ActivityPane 閉じる\n- → WorktreeDesktopLayout は ActivityBar + Right (TerminalContainer) の 2 カラム\n- → TerminalContainer 内 History が visible 状態（`useHistoryPaneState.visible` 依存）\n\n動作上は「History が見える」点で互換だが、視覚位置は:\n- 現状: 画面中央（ActivityBar の右隣の独立列）\n- 変更後: 画面右端（Terminal+FilePanel の左隣）\n\n既存ブックマーク・ドキュメント・チュートリアル等で `?pane=history` を案内している箇所があると、ユーザは「History が見つからない」と感じる可能性。ただし `?pane=history` は History を表示する deep link であり、その意味自体は維持される。\n\nさらに、`?pane=history` で `useHistoryPaneState.visible` が `false` の場合（ユーザが過去に History を閉じていた）、deep link で History を表示する処理（強制 visible=true）が現状あるかは要確認。無い場合、deep link が機能しない regression が発生する。",
+      "location": "Issue 関連 / 既存実装 / `src/lib/deep-link-validator.ts` および `src/hooks/useWorktreeTabState.ts`",
+      "affected_files": [
+        "src/lib/deep-link-validator.ts",
+        "src/hooks/useWorktreeTabState.ts",
+        "src/components/worktree/TerminalContainer.tsx",
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "suggested_fix": "Issue 「対応方針 3」または「想定影響範囲 / 変更」に以下を追記:\n\n1. **deep link `?pane=history` の挙動明示**: 「`?pane=history` 時は TerminalContainer 内 History が visible になる。`useHistoryPaneState.visible=false` の場合は deep link が visible=true に上書きする（または無視する）。挙動を明示し、必要なら `useWorktreeTabState` 側で `setVisible(true)` を呼ぶ実装を追加」\n2. **CHANGELOG.md Breaking Changes 追記**: 「`?pane=history` の視覚位置が画面中央 → 画面右端 Terminal 領域内に変更。表示の意味は維持」\n3. **`useHistoryPaneState` への deep link 連携追加 (オプション)**: `setVisible(value: boolean)` を公開して deep link から強制表示可能にする",
+      "rationale": "deep link は URL 仕様の一部であり、視覚位置が変わると既存ブックマーク・ドキュメントへの影響が生じる。意味的互換性は維持されるが、ユーザ通知（CHANGELOG）と挙動確定（visible=false の場合の上書き挙動）が必要。"
+    },
+    {
+      "id": "S3-009",
+      "severity": "Nice to Have",
+      "category": "パフォーマンス",
+      "title": "Tooltip の `setTimeout`/`clearTimeout` が useEffect cleanup で解除されない場合、アンマウント時にタイマーリーク",
+      "description": "Issue 「実装方針 1. Tooltip コンポーネント」のサンプルコードで `timerRef.current = setTimeout(() => setVisible(true), delay);` とあるが、コンポーネントアンマウント時の cleanup（useEffect の return）が示されていない。\n\nもしユーザが ActivityBar の Files アイコンに hover → タイマー開始 → 100ms 以内に worktree を切り替え（unmount）→ タイマー fire → `setVisible(true)` を unmounted state に呼ぶ、というシナリオで React の dev warning（`Can't perform a React state update on an unmounted component`）が発生する可能性。\n\nさらに、ActivityBar 6 アイコン × 高頻度 hover で setTimeout/clearTimeout が秒間 10 回以上発生すると、ホバー時の体感パフォーマンスへの影響は無視できるが、テスト環境（Vitest jsdom）で時間制御が必要なテスト（`vi.useFakeTimers()` ベース）の書き味に影響。",
+      "location": "Issue ## 実装方針 / 1. Tooltip コンポーネントのサンプルコード",
+      "affected_files": [
+        "src/components/common/Tooltip.tsx",
+        "tests/unit/components/common/Tooltip.test.tsx"
+      ],
+      "suggested_fix": "Issue 「実装方針 1」のサンプルコードに useEffect cleanup を追加:\n\n```tsx\nexport function Tooltip({ content, placement = 'right', delay = TOOLTIP_DELAY_MS, children }: TooltipProps) {\n  const [visible, setVisible] = useState(false);\n  const timerRef = useRef<NodeJS.Timeout | null>(null);\n\n  useEffect(() => {\n    return () => {\n      // Cleanup pending timer on unmount\n      if (timerRef.current) clearTimeout(timerRef.current);\n    };\n  }, []);\n\n  const handleEnter = () => { /* ... */ };\n  const handleLeave = () => { /* ... */ };\n  /* ... */\n}\n```\n\nまた `Tooltip.test.tsx` のテストケースに「`vi.useFakeTimers()` で 100ms 経過前にアンマウント → タイマー fire しないこと」を追加。",
+      "rationale": "タイマーリークは通常無視できるが、React の dev warning が出るとログノイズになり、テスト時の flakiness の原因にもなる。サンプルコードに cleanup を明示しておくと実装者が忘れない。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 5,
+  "nice_to_have_count": 3,
+  "overall_judgement": "Stage 1 反映後の Issue 本文は骨格・実装方針・受入条件いずれも実装可能なレベルに到達している。Stage 3 影響範囲レビューでは、(1) 既存テストの修正範囲が Issue 想定の 1 ファイルでは不足し 4 ファイル以上に波及する点（Must Fix S3-001）が最重要指摘。これは Stage 4 で Issue 本文に反映することでテスト戦略を確定できる。(2) Tooltip ラップによる ActivityBar の DOM 構造変化と既存キーボードナビゲーションテストの整合性 (S3-002)、(3) `HistoryPane.tsx:494` の `aria-controls` 参照と TerminalContainer 内 id 移管の整合性 (S3-003)、(4) percent 基準の変化による既存ユーザの width 設定値の見た目変化 (S3-004)、(5) MobileLayout fallback を「dead code として削除」か「互換維持」かの確定 (S3-005)、(6) TerminalContainer の ErrorBoundary 包含明示 (S3-006) を Should Fix として反映することで、実装フェーズの判断ぶれと回帰リスクを大幅に削減できる。Nice to Have の S3-007（ドキュメント更新範囲）、S3-008（deep link 視覚位置変更）、S3-009（Tooltip タイマーリーク）は実装中に判明しても致命的ではないが、Issue 段階で明示しておくとレビュー・QA 効率が上がる。",
+  "next_action": "Stage 4: apply-issue-review-agent で Issue 本文を更新（S3-001 必須、S3-002〜S3-006 推奨、S3-007〜S3-009 任意で反映）",
+  "code_references": [
+    {
+      "file": "src/components/worktree/WorktreeDesktopLayout.tsx",
+      "lines": "17, 80, 89-100, 194, 224, 246-376",
+      "relevance": "現 4 カラム構造、ErrorBoundary 包含、HISTORY_PANE_ID 定義、MobileLayout fallback の dead code 確認、HistoryExpandBar の aria-controls"
+    },
+    {
+      "file": "src/components/worktree/ActivityBar.tsx",
+      "lines": "45, 47-78, 95-97, 99-114",
+      "relevance": "buttonRefs の <button> ref 付与、ArrowUp/Down/Home/End キーボードナビゲーション、tabIndex 制御、title 属性削除対象"
+    },
+    {
+      "file": "src/components/worktree/HistoryPane.tsx",
+      "lines": "78, 488-497",
+      "relevance": "onCollapse prop / aria-controls=worktree-history-pane 依存"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "272-282, 1490-1509, 1700-1771",
+      "relevance": "useHistoryPaneState 利用、rightPaneMemo 構造、PC レイアウト構造、MobileContent 分岐"
+    },
+    {
+      "file": "src/hooks/useHistoryPaneState.ts",
+      "lines": "22-28, 89-117",
+      "relevance": "localStorage キー、DEFAULT_HISTORY_WIDTH=25%、MIN/MAX clamp、公開 API"
+    },
+    {
+      "file": "src/lib/deep-link-validator.ts",
+      "lines": "21-31",
+      "relevance": "VALID_PANES に 'history' 含む"
+    },
+    {
+      "file": "src/hooks/useWorktreeTabState.ts",
+      "lines": "104-142",
+      "relevance": "toActivityId() で history -> null マッピング"
+    },
+    {
+      "file": "tests/unit/components/WorktreeDesktopLayout.test.tsx",
+      "lines": "17-22, 73-130, 133-149, 151-184, 186-198, 205-233",
+      "relevance": "更新対象テスト 235 行、historyPaneCollapsed/Mobile fallback/Resize callback の各ブロック"
+    },
+    {
+      "file": "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+      "lines": "72-91, 103-111, 600-1377",
+      "relevance": "WorktreeDesktopLayout mock 定義、HistoryPane mock、activity-bar getByTestId 多数"
+    },
+    {
+      "file": "tests/integration/issue-266-acceptance.test.tsx",
+      "lines": "67-82, 99, 167",
+      "relevance": "WorktreeDesktopLayout / HistoryPane / ActivityBar の mock"
+    },
+    {
+      "file": "tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx",
+      "lines": "63-78, 110, 144",
+      "relevance": "WorktreeDesktopLayout / HistoryPane / ActivityBar の mock"
+    },
+    {
+      "file": "tests/unit/components/HistoryPane.test.tsx",
+      "lines": "548-588",
+      "relevance": "collapse button / aria-controls=worktree-history-pane 検証"
+    },
+    {
+      "file": "tests/unit/components/worktree/ActivityBar.test.tsx",
+      "lines": "16-21, 45-48, 64-99",
+      "relevance": "title 属性 (Issue で削除対象) / id assertion / キーボードナビゲーション"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "docs/UI_UX_GUIDE.md",
+      "lines": "24, 47-63, 219, 223",
+      "relevance": "現「4 カラム構成」記述、レイアウト ASCII 図、コンポーネント階層"
+    },
+    {
+      "file": "docs/en/UI_UX_GUIDE.md",
+      "lines": "219",
+      "relevance": "英語版同等部分"
+    },
+    {
+      "file": "CLAUDE.md",
+      "lines": "246",
+      "relevance": "WorktreeDesktopLayout のモジュール参照「PC版 4カラム構成」"
+    },
+    {
+      "file": "CHANGELOG.md",
+      "lines": "8-39",
+      "relevance": "[Unreleased] に Issue #727 由来の 4 カラム化、useHistoryPaneState 永続化キー、Breaking Changes 記述あり。Issue #730 完了時に追記必要"
+    }
+  ],
+  "impact_matrix": {
+    "production_files_affected": {
+      "modified": [
+        "src/components/worktree/ActivityBar.tsx (title 削除, Tooltip ラップ)",
+        "src/components/worktree/WorktreeDesktopLayout.tsx (activityBar/historyPane prop 削除, 3 カラム化)",
+        "src/components/worktree/WorktreeDetailRefactored.tsx (ActivityBar 全高化, TerminalContainer 配置, Header/Alert/NavBtn/MessageInput 再構成)",
+        "src/components/worktree/HistoryPane.tsx (onCollapse 経路は維持)"
+      ],
+      "new": [
+        "src/components/common/Tooltip.tsx",
+        "src/components/worktree/TerminalContainer.tsx"
+      ],
+      "deleted": []
+    },
+    "test_files_affected": {
+      "must_update": [
+        "tests/unit/components/WorktreeDesktopLayout.test.tsx (11 ケース以上)",
+        "tests/unit/components/WorktreeDetailRefactored.test.tsx (mock 定義 + 12 ケース以上)",
+        "tests/integration/issue-266-acceptance.test.tsx (mock 定義)",
+        "tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx (mock 定義)",
+        "tests/unit/components/worktree/ActivityBar.test.tsx (title 関連は元々無し、Tooltip 統合テスト追加)"
+      ],
+      "new": [
+        "tests/unit/components/common/Tooltip.test.tsx",
+        "tests/unit/components/worktree/TerminalContainer.test.tsx"
+      ],
+      "maybe_affected": [
+        "tests/unit/components/HistoryPane.test.tsx (aria-controls assertion は維持される前提)",
+        "tests/unit/hooks/useHistoryPaneState.test.ts (API 変更なしのため影響なし)",
+        "tests/unit/hooks/useActivityBarState.test.ts (API 変更なしのため影響なし)"
+      ],
+      "e2e_unaffected": "tests/e2e/*.spec.ts は layout 識別子 (worktree-activity-bar 等) を参照していないため直接影響なし"
+    },
+    "external_api_compatibility": {
+      "url_deep_link": "?pane=history|terminal|git|files|notes|logs|agent|timer|info は VALID_PANES 維持。視覚位置変化のみ (S3-008)",
+      "localStorage_keys": "commandmate.worktree.historyVisible / historyWidth は維持。ただし width の percent 基準が変わる懸念 (S3-004)。activeActivity は変更なし",
+      "dom_ids": "worktree-activity-bar / worktree-activity-pane / worktree-history-pane / worktree-right-pane は維持または移管 (Issue で明示)"
+    },
+    "documentation_affected": [
+      "CLAUDE.md (L246 WorktreeDesktopLayout 記述, 新規 TerminalContainer/Tooltip 追加)",
+      "docs/UI_UX_GUIDE.md (L24, L47-63, L219-223)",
+      "docs/en/UI_UX_GUIDE.md (同等部分)",
+      "CHANGELOG.md [Unreleased] (Issue #730 として追記)"
+    ],
+    "related_issues_impact": {
+      "#727": "本 Issue は #727 のフォローアップ。#727 で導入した ActivityBar / ActivityPane / HistoryPane / useActivityBarState / useHistoryPaneState の API は維持されるため #727 関連テスト・ドキュメントへの影響は限定的",
+      "#716": "History 内テキスト検索 (HistorySearchBar, useHistorySearch) は HistoryPane 内に閉じているため、TerminalContainer 内包後も動作維持。autoExpandedIds / applyHistoryHighlights も DOM 構造変化の影響を受けない",
+      "#725": "User only フィルタ (historyUserOnly / onHistoryUserOnlyChange) は HistoryPane の prop として伝播される。WorktreeDetailRefactored で props 連携が維持される限り動作維持",
+      "#728": "ターミナル分割は本 Issue で導入する TerminalContainer の terminal prop 側を分割可能コンテナに置き換える前提。Issue Stage 2 で明記済み"
+    }
+  }
+}

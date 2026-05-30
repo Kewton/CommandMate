@@ -1,0 +1,94 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目, 影響範囲レビュー）",
+  "issue_number": 730,
+  "apply_date": "2026-05-31",
+  "reviewer_source": "dev-reports/issue/730/issue-review/stage3-review-result.json",
+  "previous_apply_source": "dev-reports/issue/730/issue-review/stage2-apply-result.json",
+  "applied_findings": [
+    {
+      "id": "S3-001",
+      "severity": "Must Fix",
+      "status": "applied",
+      "note": "「想定影響範囲 > 変更」テーブルの関連テストを 4 ファイル × 多数ケースに展開: (1) tests/unit/components/worktree/WorktreeDesktopLayout.test.tsx (11 ケース整理 + Mobile fallback ブロック削除), (2) tests/unit/components/worktree/WorktreeDetailRefactored.test.tsx (mock 定義 L72-91 から historyPane 削除 + activity-bar 12+ ケース整合), (3) tests/unit/components/worktree/issue-266-acceptance.test.tsx (同 mock 整理), (4) tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx (同 mock 整理), (5) tests/unit/components/HistoryPane.test.tsx (aria-controls 維持)。新規 tests/unit/components/common/Tooltip.test.tsx と tests/unit/components/worktree/TerminalContainer.test.tsx の役割も明記。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "Should Fix",
+      "status": "applied",
+      "note": "対応方針 1 に「ref / イベント透過設計」セクションを追加: Tooltip は children をそのまま render、React.cloneElement で props 注入しない（単純 wrap）。wrapper span は tabIndex={-1}。buttonRefs.current[index] が <button> を直接参照し続け focus() が機能する旨を明示。実装方針 1 のサンプルコードに wrapper span への tabIndex={-1} と「children をそのまま render」コメントを反映。受入条件 Tooltip に「buttonRefs.current[index]?.focus() が <button> を focus」「ArrowDown/Up/Home/End が壊れない」「wrapper span は tabIndex={-1}」を追加。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "Should Fix",
+      "status": "applied",
+      "note": "対応方針 3 に「id='worktree-history-pane' の扱い（S3-003）」サブセクション追加: HISTORY_PANE_ID は TerminalContainer 内部の history wrapper div（HistoryPane の外側 1 階層）に移管。HistoryPane 自身には付与しない。HistoryPane.tsx:494 の collapse button と TerminalContainer 内 expand bar の双方が同 id を aria-controls で参照（visible 状態の表裏で同時表示されない）旨を明示。実装方針 3 のサンプルコードに <CollapsedExpandBar aria-controls={HISTORY_PANE_ID} /> を反映。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "Should Fix",
+      "status": "applied",
+      "note": "対応方針 3 に「History width の percent 基準変化（S3-004）」サブセクション追加: width 基準が WorktreeDesktopLayout 全体 → TerminalContainer 内（Right Pane）に変わる旨を明示。採用方針として DEFAULT_HISTORY_WIDTH を 25 → 約 40 に調整、MIN/MAX も再評価。代替案として px ベース化（DEFAULT_HISTORY_WIDTH_PX = 320 等）を併記。CHANGELOG Breaking Changes に追記する旨も記載。受入条件「History 内包」に DEFAULT 調整チェック項目追加。想定影響範囲「変更」テーブルに src/hooks/useHistoryPaneState.ts の DEFAULT 調整行を追加。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "Should Fix",
+      "status": "applied",
+      "note": "想定影響範囲「削除」セクションを dead code として整理: WorktreeDesktopLayout.tsx の MobileLayout fallback (L89-, L311) と WorktreeDesktopLayout.test.tsx の Mobile fallback ブロック (L151-184) を削除対象として明記。WorktreeDetailRefactored.tsx:1700 で useIsMobile=true 時は MobileContent 分岐済みで本コンポーネントを経由しないことを実コード確認済みである旨を明示。実装方針 4 にも反映。S1-006 由来の「互換維持または削除」の曖昧な記述は受入条件「横断」から削除（実装時最終判断ではなく Issue 段階で削除確定）。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "Should Fix",
+      "status": "applied",
+      "note": "対応方針 3 に「TerminalContainer の ErrorBoundary 包含（S3-006）」サブセクション追加: 既存 WorktreeDesktopLayout の設計原則「Each pane is wrapped in ErrorBoundary for fault isolation」を継承し、TerminalContainer 内で History/Terminal をそれぞれ <ErrorBoundary componentName=\"HistoryPane\"> / <ErrorBoundary componentName=\"TerminalAndFilePanel\"> で包む旨を明示。実装方針 3 のサンプルコードに ErrorBoundary 包含を反映。受入条件「History 内包」に ErrorBoundary チェック項目追加。"
+    },
+    {
+      "id": "S3-007",
+      "severity": "Nice to Have",
+      "status": "applied",
+      "note": "想定影響範囲「変更」テーブルにドキュメント更新行を具体化追加: docs/UI_UX_GUIDE.md (L24 / L47-63 / L219-223 を具体的に指定)、docs/UI_UX_GUIDE-en.md (該当箇所)、CHANGELOG.md (Issue #730 として Changed/Added/Breaking Changes に分けて追記)、CLAUDE.md (L246 WorktreeDesktopLayout 記述更新 + TerminalContainer/Tooltip 新規行追加 + WorktreeDetailRefactored 行に #730 追記)。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "Nice to Have",
+      "status": "applied",
+      "note": "「関連」セクションに「後方互換注意点」として deep link ?pane=history の視覚位置変化を追記: 「画面中央の独立 History 列」→「画面右端 Terminal 領域内 History」。表示の意味（History が見える）は維持されるが視覚位置が変わる旨を CHANGELOG Breaking Changes に明示する方針を記載。useHistoryPaneState.visible=false 時の deep link 上書き挙動（visible=true 強制 or 無視）は実装時に確定する旨も追記。"
+    },
+    {
+      "id": "S3-009",
+      "severity": "Nice to Have",
+      "status": "applied",
+      "note": "実装方針 1 のサンプルコードに useEffect cleanup を追加: 「Cleanup pending timer on unmount (React dev warning 防止 / タイマーリーク防止)」コメント付きで return () => { if (timerRef.current) clearTimeout(timerRef.current); } を明示。受入条件 Tooltip に「Tooltip の setTimeout は useEffect cleanup でアンマウント時に clearTimeout で解除する（React dev warning 防止）」を追加。Tooltip.test.tsx に「vi.useFakeTimers() で 100ms 経過前 unmount → タイマー fire しない」テストを追加対象として明記。"
+    }
+  ],
+  "deferred_findings": [],
+  "summary": {
+    "total_findings": 9,
+    "must_fix_total": 1,
+    "must_fix_applied": 1,
+    "should_fix_total": 5,
+    "should_fix_applied": 5,
+    "nice_to_have_total": 3,
+    "nice_to_have_applied": 3,
+    "applied": 9,
+    "deferred": 0
+  },
+  "total_applied": 9,
+  "total_deferred": 0,
+  "issue_updated": true,
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/730",
+    "title_unchanged": true,
+    "title": "fix(layout): ActivityBar full-height + custom tooltip + History inside Terminal container (#727 follow-up)",
+    "labels_preserved": ["bug", "enhancement"],
+    "assignees_preserved": []
+  },
+  "review_history_added": true,
+  "review_history_entry": "イテレーション 1 (2026-05-30) — Stage 3 影響範囲レビュー反映 セクションを Stage 2 で追加した「レビュー履歴」直下に追記（Stage 1 通常レビュー反映エントリの後）。9 件すべて applied として記録。",
+  "cumulative_iterations": {
+    "iteration_1_stage_1": "通常レビュー 10 件反映 (Must 1 / Should 5 / Nice 4)",
+    "iteration_1_stage_3": "影響範囲レビュー 9 件反映 (Must 1 / Should 5 / Nice 3)"
+  },
+  "next_action": "Issue Review Iteration 1 完了。必要に応じて Iteration 2（Stage 5 通常 + Stage 7 影響範囲）または Phase 4（実装フェーズ）へ進む。"
+}
