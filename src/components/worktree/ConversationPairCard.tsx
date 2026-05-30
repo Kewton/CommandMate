@@ -35,6 +35,15 @@ export interface ConversationPairCardProps {
   onCopy?: (content: string) => void;
   /** Issue #485: Callback when user message is inserted into message input */
   onInsertToMessage?: (content: string) => void;
+  /**
+   * Issue #725: Whether to render the assistant messages section.
+   *
+   * Defaults to `true` (preserves existing behavior). When set to `false`
+   * (e.g. by the HistoryPane "User only" filter toggle), the
+   * AssistantMessagesSection is not rendered even if assistant messages
+   * exist in the pair.
+   */
+  showAssistant?: boolean;
 }
 
 /** Parsed content part type */
@@ -437,6 +446,7 @@ export const ConversationPairCard = memo(function ConversationPairCard({
   onToggleExpand,
   onCopy,
   onInsertToMessage,
+  showAssistant = true,
 }: ConversationPairCardProps) {
   // Determine if expand button should be shown
   const hasLongContent = useMemo(() => {
@@ -499,7 +509,7 @@ export const ConversationPairCard = memo(function ConversationPairCard({
         <div className="bg-gray-800/30 border-l-4 border-gray-600 p-3 border-t border-gray-700">
           <PendingIndicator />
         </div>
-      ) : pair.assistantMessages.length > 0 ? (
+      ) : showAssistant && pair.assistantMessages.length > 0 ? (
         <div className="relative">
           <AssistantMessagesSection
             messages={pair.assistantMessages}
