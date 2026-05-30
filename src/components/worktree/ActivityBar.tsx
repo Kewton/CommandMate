@@ -1,5 +1,5 @@
 /**
- * ActivityBar Component (Issue #727)
+ * ActivityBar Component (Issue #727, updated by Issue #730)
  *
  * VS Code-style vertical 48px Activity Bar. Hosts 6 activity icons.
  *
@@ -13,12 +13,22 @@
  *   - role="tablist" + aria-orientation="vertical"
  *   - Each button: role="tab", aria-selected, aria-label, aria-controls
  *   - id="worktree-activity-bar"
+ *
+ * Issue #730:
+ *   - The native `title` attribute is replaced with a custom `Tooltip`
+ *     component so styling matches the dark UI and shows after a 100ms
+ *     hover delay. `aria-label` is kept as the primary accessible name and
+ *     the Tooltip is `aria-hidden="true"` to avoid duplicate announcements.
+ *   - The Tooltip wraps each button in a `<span tabindex="-1">`, so the
+ *     internal `buttonRefs` still point at the actual `<button>` and the
+ *     ArrowUp/ArrowDown/Home/End keyboard navigation keeps working.
  */
 
 'use client';
 
 import React, { memo, useCallback, useRef } from 'react';
 import { ACTIVITIES, type ActivityId } from '@/config/activity-bar-config';
+import { Tooltip } from '@/components/common/Tooltip';
 
 export interface ActivityBarProps {
   /** Currently active activity, or null when ActivityPane is closed. */
@@ -90,29 +100,29 @@ export const ActivityBar = memo(function ActivityBar({
         const Icon = activity.icon;
         const isActive = active === activity.id;
         return (
-          <button
-            key={activity.id}
-            ref={(el) => {
-              buttonRefs.current[index] = el;
-            }}
-            type="button"
-            role="tab"
-            aria-selected={isActive}
-            aria-label={activity.label}
-            aria-controls={ACTIVITY_PANE_ID}
-            title={activity.label}
-            tabIndex={isActive || (active === null && index === 0) ? 0 : -1}
-            onClick={() => onToggle(activity.id)}
-            onKeyDown={(e) => handleKeyDown(e, index, activity.id)}
-            data-testid={`activity-bar-button-${activity.id}`}
-            className={`flex items-center justify-center h-12 w-12 transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-inset ${
-              isActive
-                ? 'text-cyan-600 dark:text-cyan-400 border-l-2 border-cyan-600 dark:border-cyan-400 bg-white dark:bg-gray-900'
-                : 'text-gray-500 dark:text-gray-400 border-l-2 border-transparent hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700'
-            }`}
-          >
-            <Icon size={20} aria-hidden="true" />
-          </button>
+          <Tooltip key={activity.id} content={activity.label} placement="right">
+            <button
+              ref={(el) => {
+                buttonRefs.current[index] = el;
+              }}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              aria-label={activity.label}
+              aria-controls={ACTIVITY_PANE_ID}
+              tabIndex={isActive || (active === null && index === 0) ? 0 : -1}
+              onClick={() => onToggle(activity.id)}
+              onKeyDown={(e) => handleKeyDown(e, index, activity.id)}
+              data-testid={`activity-bar-button-${activity.id}`}
+              className={`flex items-center justify-center h-12 w-12 transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-inset ${
+                isActive
+                  ? 'text-cyan-600 dark:text-cyan-400 border-l-2 border-cyan-600 dark:border-cyan-400 bg-white dark:bg-gray-900'
+                  : 'text-gray-500 dark:text-gray-400 border-l-2 border-transparent hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700'
+              }`}
+            >
+              <Icon size={20} aria-hidden="true" />
+            </button>
+          </Tooltip>
         );
       })}
     </div>

@@ -1,0 +1,159 @@
+{
+  "stage": 1,
+  "focus": "通常（1回目）",
+  "reviewer": "claude-opus",
+  "issue_number": 730,
+  "review_date": "2026-05-30",
+  "summary": "Issue #730 は Issue #727 のフォローアップとして、(1) カスタム Tooltip 化、(2) ActivityBar 全高貫通、(3) History を Terminal 内包の 3 改善を扱う。仮説検証(Phase 0.5)で既出の H6 (localStorage キー名コロン区切り誤り) は受入条件に影響する Must Fix。H9 (`useHistoryPaneState` の API 名 `isVisible` → `visible`、`toggle` 抜け) は実装方針サンプルコードの Should Fix。加えて、(a) 既存 ActivityBar には `aria-label={activity.label}` が既設のため Tooltip 化時の `aria-describedby` 併設による重複読み上げ回避策、(b) 「変更後」JSX 例で Header/BranchMismatchAlert/NavigationButtons/PromptPanel の配置が省略されている構造リスク、(c) モバイル経路 (useIsMobile=true, MobileContent) への影響非対象の明示、(d) 既存テスト (WorktreeDesktopLayout.test.tsx: activityBar/historyPane/historyPaneCollapsed props 前提) の更新範囲未明示、(e) ActivityBar 全高化と PromptPanel の z-index/overlay 整合性 — を指摘。受入条件の構造・実装方針は概ね妥当だが、上記を反映することで実装ブレを抑止できる。",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "Must Fix",
+      "title": "受入条件 'History 内包' の localStorage キー名がコード実装と不整合（コロン区切り → ドット区切り）",
+      "description": "受入条件「History 内包」の 4 番目チェック項目で localStorage 永続化キー名を `commandmate:historyVisible` / `commandmate:historyWidth` （コロン区切り）と記載しているが、実装 `src/hooks/useHistoryPaneState.ts:22-23` では `commandmate.worktree.historyVisible` / `commandmate.worktree.historyWidth` （ドット区切り）。CLAUDE.md (useHistoryPaneState の節) もドット区切り表記。Phase 0.5 で Rejected と判定済み。このまま着手するとレビュー指摘・実装迷走の原因となる。",
+      "location": "## 受入条件 / History 内包 セクション（4 つ目チェック項目）",
+      "suggested_fix": "受入条件を次のように修正:  - [ ] localStorage 永続化キー `commandmate.worktree.historyVisible` / `commandmate.worktree.historyWidth` 維持。さらに「キー名は既存実装 (useHistoryPaneState.ts) から流用」と注記。",
+      "rationale": "実コード `useHistoryPaneState.ts` および CLAUDE.md の双方の事実と矛盾しており、実装者が誤って新規キーを作成するリスクがある。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "Should Fix",
+      "title": "実装方針 3. TerminalContainer のサンプルコードで `useHistoryPaneState` API 名が実装と不一致",
+      "description": "実装方針セクション「3. TerminalContainer」のコード例で `const { isVisible, width, setWidth } = useHistoryPaneState();` と記載されているが、実 API (`src/hooks/useHistoryPaneState.ts:30-39, 116`) は `{ visible, width, toggle, setWidth }`。`isVisible` プロパティは存在せず、また折りたたみ動作は `toggle()` を使う必要がある。サンプルがこのままだと、実装時に TypeScript エラー or undefined アクセスとなる。",
+      "location": "## 実装方針 / 3. TerminalContainer セクションのコード例",
+      "suggested_fix": "コード例を次のように修正:  ```tsx\n  const { visible, width, toggle, setWidth } = useHistoryPaneState();\n  return (\n    <div className=\"flex h-full min-h-0\">\n      {visible ? (\n        <>\n          <div style={{ width: `${width}%` }}>{history}</div>\n          <PaneResizer onResize={setWidth} ariaValueNow={width} />\n        </>\n      ) : (\n        <CollapsedExpandBar onExpand={toggle} />\n      )}\n      <div className=\"flex-1\">{terminal}</div>\n    </div>\n  );\n  ```  また `width` は percent (10-60) であることを注記（`useHistoryPaneState` の JSDoc 通り）。",
+      "rationale": "実装者が誤った API 名で着手し、TypeScript エラー解消の手戻りが発生する。`toggle` 抜けは折りたたみ動作の実装欠落につながる。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "Should Fix",
+      "title": "「変更後」JSX 例で Header / BranchMismatchAlert / NavigationButtons / PromptPanel の配置が省略されており、ActivityBar 全高化の挙動が曖昧",
+      "description": "現状コード `WorktreeDetailRefactored.tsx:1703-1771` では、外側 `<div className=\"h-full flex flex-col\">` の縦並びに [DesktopHeader, BranchMismatchAlert(条件付), <flex-1>(WorktreeDesktopLayout), NavigationButtons(条件付), MessageInput, PromptPanel(overlay)] という構造がある。Issue 「対応方針 2. 変更後」では `<div className=\"flex h-full\"><ActivityBar /><div className=\"flex flex-col flex-1\">{Layout}{MessageInput}</div></div>` というシンプル化された例しかなく、(1) Header をどこに置くか（ActivityBar の上か、ActivityBar の右の子コンテナの上か）、(2) BranchMismatchAlert の配置、(3) NavigationButtons の配置、(4) PromptPanel (fixed overlay) の z-index・ActivityBar との干渉、が示されていない。「ActivityBar を画面端から下端まで貫通」させると、Header / BranchMismatchAlert を ActivityBar の右側に閉じ込める形になり、ActivityBar が Header の左側まで伸びる選択になるが、これは Issue で明示されていない。",
+      "location": "## 対応方針 / 2. ActivityBar を全高貫通 セクション「変更後」コード例",
+      "suggested_fix": "「変更後」コード例を実態に即した形に拡張:  ```tsx\n  <div className=\"flex h-full overflow-hidden\">\n    <ActivityBar />  {/* 画面端から下端まで全高 */}\n    <div className=\"flex flex-col flex-1 min-h-0\">\n      <DesktopHeader ... />\n      {worktree?.gitStatus && <BranchMismatchAlert ... />}\n      <div className=\"flex-1 min-h-0\">\n        <WorktreeDesktopLayout activityPane={...} rightPane={<TerminalContainer .../>} ... />\n      </div>\n      {isSelectionListActive && <NavigationButtonsWrapper />}\n      <MessageInput ... />\n    </div>\n    {state.prompt.visible && !autoYesEnabled && <PromptPanel ... />}\n  </div>\n  ```  さらに受入条件に「ActivityBar は Header の左側を含めて画面端から下端まで貫通する」または「Header の右側のみ貫通する」のいずれを採用するか明示。VS Code 実装は前者（Activity Bar が Title Bar の下から下端まで）。",
+      "rationale": "省略された構造（Header/Alert/NavigationButtons/PromptPanel）が実装者裁量となり、レイアウト差異・レビュー手戻りの原因となる。全高貫通の定義が一意に決まらない。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "Should Fix",
+      "title": "Tooltip 化時の `aria-label` + `aria-describedby` 重複読み上げ対策が未記載",
+      "description": "現状 `ActivityBar.tsx:101` に `aria-label={activity.label}` (例: 'Files') が既設されている。Issue「Tooltip 受入条件」では `aria-describedby` を新規付与すると記載されているが、スクリーンリーダーは aria-label と aria-describedby の両方を読み上げるため、`label='Files' content='Files'` だと 'Files Files' のような冗長な読み上げになる。VS Code 流の対処は (a) `aria-label` のみ残し `aria-describedby` を付与しない（Tooltip は視覚のみ）、または (b) Tooltip 内容を補足説明 (例: 'Files (Ctrl+Shift+E)') にする、のいずれか。",
+      "location": "## 対応方針 / 1. カスタム Tooltip コンポーネント および ## 受入条件 / Tooltip セクション",
+      "suggested_fix": "受入条件「Tooltip」に次の項目を追加:  - [ ] aria-label と Tooltip 内容の重複読み上げを避ける（aria-describedby を付与する場合は Tooltip 内容を補足情報にする、または aria-describedby を付与しない設計とする）。  対応方針セクションにも「aria-describedby の付与有無は a11y テストで検証し、aria-label と二重読み上げにならないよう調整する」と注記。",
+      "rationale": "スクリーンリーダー利用者に対して同じテキストが二度読み上げられる UX 後退となる。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "Should Fix",
+      "title": "既存テスト `WorktreeDesktopLayout.test.tsx` の `activityBar` / `historyPane` props 前提が変わるが、更新範囲が「関連テスト」の一文のみ",
+      "description": "現状 `tests/unit/components/WorktreeDesktopLayout.test.tsx` は `activityBar={...}` / `historyPane={...}` / `historyPaneCollapsed` props を前提に約 15 ケース以上のアサーションを持つ (L18, L20, L74-216)。Issue「対応方針 4. WorktreeDesktopLayout 簡素化」で `activityBar` / `historyPane` prop を削除するとあるが、想定影響範囲には「関連テスト: レイアウト構造のアサーション更新」と曖昧。具体的にどのケースを残し/削除/再構成するかが不明確で、既存仕様（例: `historyPaneCollapsed` 時の expand bar 表示）の保証範囲が読み取れない。また `ActivityBar.test.tsx` は `title` 属性削除に伴うアサーション変更が想定されるが言及なし。",
+      "location": "## 想定影響範囲 / 変更 表の「関連テスト」行",
+      "suggested_fix": "想定影響範囲を以下のように具体化:  | ファイル | 変更内容 |  | tests/unit/components/WorktreeDesktopLayout.test.tsx | activityBar / historyPane prop 削除に伴うテスト整理（HistoryPane 関連ケースは TerminalContainer のテストに移管） |  | tests/unit/components/worktree/ActivityBar.test.tsx | title 属性アサーション削除、Tooltip 表示の a11y テスト追加 |  | tests/unit/components/common/Tooltip.test.tsx (新規) | 即時表示 / dark theme / placement / role=tooltip テスト |  | tests/unit/components/worktree/TerminalContainer.test.tsx (新規) | History 表示/非表示・幅・折りたたみ動作テスト |",
+      "rationale": "テスト変更範囲が曖昧だと既存挙動の回帰検知が抜け、PR 段階でテスト書き直しが必要になる。"
+    },
+    {
+      "id": "S1-006",
+      "severity": "Should Fix",
+      "title": "モバイル経路（useIsMobile=true, MobileContent）への影響が「PC版のみ対象」の一行のみで、回帰チェックが不明",
+      "description": "現状 `WorktreeDetailRefactored.tsx:1700` で `if (!isMobile)` 分岐し、モバイル経路は L1968- の `<MobileContent>` を使用する。`WorktreeDesktopLayout.tsx` 自体もモバイル時は内部で `MobileLayout` に縮退する設計 (L89, L311)。Issue 受入条件「PC版のみ対象、モバイル変更なし」とあるが、`WorktreeDesktopLayout` から `activityBar` / `historyPane` prop を削除すると、モバイル経路の `MobileLayout` 内 fallback (L311 `const leftForMobile = !historyPaneCollapsed && historyPane ? historyPane : activityPane;`) が壊れる可能性がある。「モバイルは MobileContent 経路で WorktreeDesktopLayout を経由しないため影響なし」または「WorktreeDesktopLayout の MobileLayout fallback も整合性を保つ」のいずれかの明示が必要。",
+      "location": "## 受入条件 / 横断 セクション「PC版のみ対象、モバイル変更なし」",
+      "suggested_fix": "受入条件「横断」に次の項目を追加:  - [ ] モバイル経路 (`useIsMobile=true`) は `MobileContent` を継続使用し、`WorktreeDesktopLayout` の MobileLayout fallback は本 Issue で削除または互換維持する（どちらか選択）。  対応方針セクションに「`WorktreeDesktopLayout` の MobileLayout fallback (L89-, L311) の扱い」を追加（削除する場合は理由、維持する場合は activityPane のみで動作する形にリファクタする旨）。",
+      "rationale": "モバイル経路の回帰検知が漏れる。WorktreeDesktopLayout を経由するモバイルパスがあるかどうかの確認も不明。"
+    },
+    {
+      "id": "S1-007",
+      "severity": "Nice to Have",
+      "title": "Tooltip 遅延 delay 値の整合性 (背景: 約500ms vs 受入条件: 100ms 以内)",
+      "description": "「背景」では「ブラウザネイティブ tooltip は約500ms 遅延」、対応方針 1 では「即時表示（遅延 0ms または 100ms 以下）」、受入条件「Tooltip」では「ホバー後 100ms 以内に表示」、Tooltip サンプルコードでは `delay = 100` (default 100ms)。100ms はホバー直後の意図しない表示を抑制する目的で必要だが、Issue 上「即時表示」「100ms 以内」「100ms」の表現が混在しており、Should/Must の境界が曖昧。",
+      "location": "## 背景 / ## 対応方針 1 / ## 受入条件 Tooltip / 実装方針 1 のサンプルコード",
+      "suggested_fix": "用語を統一: 「即時表示（hover 後 100ms 以下のディレイ）」のように `100ms` で揃え、受入条件側にも「ディレイは 100ms 以下を許容」と明記。サンプルコード `delay = 100` も `delay = 100 (ms)` と単位明示。",
+      "rationale": "表記揺れが軽微だが、QA 検証時の合否判断（150ms はパスかフェイルか）が曖昧になる。"
+    },
+    {
+      "id": "S1-008",
+      "severity": "Nice to Have",
+      "title": "ActivityBar 全高化と既存 PromptPanel (fixed overlay, z-50) の z-index 整合性が未確認",
+      "description": "現状 `WorktreeDetailRefactored.tsx:1759-1771` で PromptPanel は `<div className=\"fixed bottom-20 left-1/2 ... z-50 ...\">` のオーバーレイ表示。ActivityBar を `flex h-full` で画面端から下端まで貫通させた場合、ActivityBar 自体の z-index (現状 ActivityBar.tsx に z-index 指定なし → デフォルト) と PromptPanel の z-50 が衝突するケースは無いが、Tooltip サンプルコードは `z-50` を使っており、PromptPanel と同層になる。ActivityBar アイコンが PromptPanel に被ったときの視覚的優先順位（PromptPanel の幅 `max-w-2xl` 中央配置なので通常被らないが、画面幅次第で被る可能性）の検討が望ましい。",
+      "location": "## 実装方針 / 1. Tooltip コンポーネントの className `z-50` 部分",
+      "suggested_fix": "Tooltip の z-index は ActivityBar/PromptPanel との衝突を避けるため z-40 ～ z-60 のいずれを使うか明示。または「z-index は PromptPanel (z-50) 未満」「ActivityBar 全体に z-10 程度を設定し Tooltip は z-20 程度」など階層を一覧化。",
+      "rationale": "オーバーレイの優先順位は実装裁量に任せると視覚バグ（ホバー時に PromptPanel が Tooltip の下に潜る等）の原因になる。"
+    },
+    {
+      "id": "S1-009",
+      "severity": "Nice to Have",
+      "title": "HistoryPane 内包後の `id=worktree-history-pane` (現 WorktreeDesktopLayout.tsx:80) の扱いが未記載",
+      "description": "現状 `WorktreeDesktopLayout.tsx:80` で `HISTORY_PANE_ID = 'worktree-history-pane'` を ID 属性として付与している。TerminalContainer に History を内包する際、この ID を TerminalContainer 内の history wrapper div に移管するか、廃止するかが未記載。`aria-describedby` 等の参照がある場合は破壊変更となる。",
+      "location": "## 対応方針 / 3. History を Terminal 内包 セクション",
+      "suggested_fix": "対応方針 3 に「`id='worktree-history-pane'` は TerminalContainer 内の history wrapper div に維持する」または「外部参照が無いため廃止する」のいずれかを明記。grep 結果でアサーションがあるかどうかも確認。",
+      "rationale": "DOM ID の移動は a11y や E2E テストへの影響を伴う。"
+    },
+    {
+      "id": "S1-010",
+      "severity": "Nice to Have",
+      "title": "「次Issue: #728 (ターミナル分割) — 本Issue完了後に着手」の前提整合性確認",
+      "description": "「関連」セクション末尾に `次Issue: #728（ターミナル分割）— 本Issue完了後に着手` とあるが、#728 が既に open/closed のどちらか、本 Issue でターミナル分割の前提を破壊しないかが確認できていない。本 Issue で導入する TerminalContainer は #728 のターミナル分割の親コンテナとして再利用できる設計か、別案件として再設計するかの判断が読み取れない。",
+      "location": "## 関連 セクション末尾",
+      "suggested_fix": "「TerminalContainer の API（history/terminal の 2 child）は #728 のターミナル分割実装と整合する設計とする」または「#728 着手時に TerminalContainer を再設計する可能性あり」のいずれかを明示。",
+      "rationale": "後続 Issue との整合性が読み取れず、TerminalContainer のインターフェース設計が短命になるリスクがある。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 5,
+  "nice_to_have_count": 4,
+  "overall_judgement": "Issue の骨格（3 改善の目的・対応方針・スコープ外）は妥当で実装可能。ただし、(1) 受入条件の localStorage キー名がコード実装と不整合 (Must Fix S1-001)、(2) 実装方針サンプルコードの API 名不一致 (Should Fix S1-002)、(3) 全高化時の Header/Alert/PromptPanel 配置が省略 (Should Fix S1-003)、(4) Tooltip a11y 重複読み上げ対策 (Should Fix S1-004)、(5) 既存テスト更新範囲の具体化 (Should Fix S1-005)、(6) モバイル経路の影響非対象明示 (Should Fix S1-006) の 6 点を Issue 本文に反映することで、実装ブレと手戻りを抑止できる。Must Fix が 1 件あるため Stage 2 で Issue 本文を更新するのが必須。",
+  "next_action": "Stage 2: apply-issue-review-agent で Issue 本文を更新（S1-001 を必須、S1-002〜S1-006 を推奨で反映）",
+  "code_references": [
+    {
+      "file": "src/hooks/useHistoryPaneState.ts",
+      "lines": "22-23, 30-39, 116",
+      "relevance": "localStorage キー名 (ドット区切り) と公開 API ({ visible, width, toggle, setWidth }) の確定情報"
+    },
+    {
+      "file": "src/components/worktree/ActivityBar.tsx",
+      "lines": "101, 103",
+      "relevance": "既存 aria-label / title 属性の併存。Tooltip 化時の a11y 影響"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDesktopLayout.tsx",
+      "lines": "1-18, 34-65, 89-100, 247-362",
+      "relevance": "現 4 カラム構造と activityBar/historyPane prop 仕様、MobileLayout fallback"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "272-282, 1700-1771, 1968-",
+      "relevance": "現 useHistoryPaneState 利用箇所、PC レイアウト構造、Mobile 経路"
+    },
+    {
+      "file": "src/config/activity-bar-config.ts",
+      "lines": "40-47",
+      "relevance": "ACTIVITIES 6 アイコン定義（H3 Confirmed の根拠）"
+    },
+    {
+      "file": "tests/unit/components/WorktreeDesktopLayout.test.tsx",
+      "lines": "18, 20, 74-216",
+      "relevance": "既存テストが前提とする activityBar/historyPane/historyPaneCollapsed props"
+    },
+    {
+      "file": "tests/unit/components/worktree/ActivityBar.test.tsx",
+      "lines": "全体",
+      "relevance": "ActivityBar の既存 a11y テストの整合性"
+    },
+    {
+      "file": "tests/unit/hooks/useHistoryPaneState.test.ts",
+      "lines": "全体",
+      "relevance": "公開 API ({ visible, width, toggle, setWidth }) のテスト"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "section": "主要モジュール一覧 / useHistoryPaneState",
+      "relevance": "localStorage キー名 (ドット区切り) と Issue #727 由来の正の値の根拠"
+    },
+    {
+      "file": "dev-reports/issue/730/issue-review/hypothesis-verification.md",
+      "section": "全体（特に H6/H9）",
+      "relevance": "Phase 0.5 で既出の主要指摘"
+    }
+  ]
+}

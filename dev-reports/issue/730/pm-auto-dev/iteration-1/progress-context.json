@@ -1,0 +1,127 @@
+{
+  "issue_number": 730,
+  "issue_title": "fix(layout): ActivityBar full-height + custom tooltip + History inside Terminal container (#727 follow-up)",
+  "iteration": 1,
+  "parent_issue": 727,
+  "labels": ["bug", "enhancement"],
+  "branch": "feature/730-worktree",
+  "commits": [
+    {"hash": "6b14f4c6", "subject": "feat(layout): ActivityBar full-height + custom tooltip + History inside Terminal container (#730)"},
+    {"hash": "076499fd", "subject": "docs: update CLAUDE.md / CHANGELOG.md / UI_UX_GUIDE for #730 layout follow-up"}
+  ],
+
+  "phase_results": {
+    "phase_1_issue_review": {
+      "status": "success",
+      "findings": {
+        "iteration_1_normal": {"must_fix": 1, "should_fix": 5, "nice_to_have": 4, "total": 10, "applied": 10},
+        "iteration_1_impact": {"must_fix": 1, "should_fix": 5, "nice_to_have": 3, "total": 9, "applied": 9}
+      },
+      "iteration_2_codex": "skipped (user feedback)",
+      "summary_report": "dev-reports/issue/730/issue-review/summary-report.md"
+    },
+    "phase_2_design_skipped": "User feedback - skip Phase 2 (design policy) and Phase 3 (design review)",
+    "phase_4_work_plan": {
+      "status": "success",
+      "path": "dev-reports/issue/730/work-plan.md",
+      "tasks_count": "5 (Phase 1-5: 基盤実装/既存修正/テスト/ドキュメント/品質チェック)"
+    },
+    "tdd": {
+      "status": "success",
+      "iteration": 1,
+      "commit": "6b14f4c6",
+      "result_path": "dev-reports/issue/730/pm-auto-dev/iteration-1/tdd-result.json",
+      "files_created": [
+        "src/components/common/Tooltip.tsx",
+        "src/components/worktree/TerminalContainer.tsx",
+        "tests/unit/components/common/Tooltip.test.tsx",
+        "tests/unit/components/worktree/TerminalContainer.test.tsx"
+      ],
+      "files_modified": [
+        "src/components/worktree/ActivityBar.tsx",
+        "src/components/worktree/WorktreeDesktopLayout.tsx",
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/hooks/useHistoryPaneState.ts",
+        "tests/unit/components/worktree/ActivityBar.test.tsx",
+        "tests/unit/components/WorktreeDesktopLayout.test.tsx",
+        "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+        "tests/integration/issue-266-acceptance.test.tsx",
+        "tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx"
+      ],
+      "test_unit": {"passed": 6628, "failed": 0, "skipped": 7},
+      "coverage": {"new_files": "100%", "overall_changed": "80.93%"},
+      "lint": "pass",
+      "tsc": "pass",
+      "build": "pass",
+      "notable_implementation_decisions": [
+        "useHistoryPaneState に CustomEvent 'commandmate:historyPaneStateChange' broadcaster を追加 (WorktreeDetailRefactored + TerminalContainer の 2 hook instance 同期のため)",
+        "DEFAULT_HISTORY_WIDTH 25 → 40 (TerminalContainer 内 percent 基準への補正)",
+        "WorktreeDesktopLayout を 4 → 2 カラムに簡素化 (file 行数 437→145)",
+        "dead code だった MobileLayout fallback を削除"
+      ]
+    },
+    "acceptance": {
+      "status": "passed",
+      "result_path": "dev-reports/issue/730/pm-auto-dev/iteration-1/acceptance-result.json",
+      "criteria_results": {
+        "tooltip": {"total": 11, "passed": 11, "failed": []},
+        "activity_bar_full_height": {"total": 5, "passed": 5, "failed": []},
+        "history_inclusion": {"total": 10, "passed": 10, "failed": []},
+        "cross_cutting": {"total": 3, "passed": 3, "failed": []}
+      },
+      "quality_gate": {
+        "lint": "pass",
+        "tsc": "pass",
+        "test_unit": {"passed": 6628, "failed": 0, "skipped": 7},
+        "test_integration": {"passed": 544, "failed": 39, "note": "39 pre-existing failures (api-clone/api-hooks/tmux/Claude session) unrelated to #730"},
+        "build": "pass"
+      },
+      "advisory": [
+        "useHistoryPaneState の CustomEvent broadcaster の CLAUDE.md 記載 → docs commit 076499fd で対応済み"
+      ]
+    },
+    "refactor": {
+      "status": "skipped",
+      "reason": "TDD 実装の品質が高く必須リファクタが見つからなかった",
+      "result_path": "dev-reports/issue/730/pm-auto-dev/iteration-1/refactor-result.json",
+      "candidates": [
+        "R-001 (nice): Tooltip.tsx の useEffect 依存配列コメントの文言修正 (適用見送り、純粋なコメント整形のため)",
+        "R-002 (out-of-scope): WorktreeDesktopLayout.localActivityWidth の prop sync (Issue #730 範囲外)",
+        "R-003: useHistoryPaneState CustomEvent の CLAUDE.md 記載 → Phase 5 docs で対応済み"
+      ]
+    },
+    "documentation": {
+      "status": "success",
+      "commit": "076499fd",
+      "files_updated": [
+        "CLAUDE.md (4 lines変更: WorktreeDetailRefactored / WorktreeDesktopLayout / ActivityBar / useHistoryPaneState 行を更新, TerminalContainer / Tooltip 行を追加)",
+        "CHANGELOG.md ([Unreleased] に Added 3項目 / Changed 4項目 / Removed 1項目 / Breaking Changes 1項目を追記)",
+        "docs/UI_UX_GUIDE.md (デスクトップレイアウト ASCII 図更新、コンポーネント階層更新)"
+      ],
+      "note": "docs/UI_UX_GUIDE-en.md は存在しないため対象外"
+    }
+  },
+
+  "metrics": {
+    "files_changed": 12,
+    "files_new": 4,
+    "lines_added": "推定 ~1500 (テスト含む)",
+    "lines_removed": "推定 ~500 (MobileLayout fallback + 旧 props 削除)",
+    "wall_clock_phase1_review_minutes": "推定 25",
+    "wall_clock_tdd_minutes": "推定 16 (tdd-result 944s)",
+    "wall_clock_total_minutes": "推定 50"
+  },
+
+  "remaining_work": [
+    "Phase 6: 実機受入テスト (UAT) - /uat スキル相当",
+    "Phase 7: PR 作成 - /create-pr"
+  ],
+
+  "definition_of_done": {
+    "全タスク完了": "tdd / acceptance / refactor / docs ともに完了",
+    "受入条件すべて満たす": "tooltip (11/11) / activity_bar (5/5) / history (10/10) / cross_cutting (3/3) = 29/29 PASS",
+    "品質ゲート": "lint=pass, tsc=pass, unit=6628/0/7, build=pass",
+    "CHANGELOG更新": "Breaking Changes / Added / Changed / Removed すべて記載済み",
+    "CLAUDE.md / UI_UX_GUIDE 更新": "完了"
+  }
+}

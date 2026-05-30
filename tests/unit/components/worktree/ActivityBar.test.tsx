@@ -1,12 +1,13 @@
 /**
- * Tests for ActivityBar (Issue #727)
+ * Tests for ActivityBar (Issue #727, updated by Issue #730)
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { act, render, screen, fireEvent } from '@testing-library/react';
 import { ActivityBar } from '@/components/worktree/ActivityBar';
 import { ACTIVITIES } from '@/config/activity-bar-config';
+import { TOOLTIP_DELAY_MS } from '@/components/common/Tooltip';
 
 describe('ActivityBar', () => {
   beforeEach(() => {
@@ -97,6 +98,26 @@ describe('ActivityBar', () => {
         screen.getByTestId(`activity-bar-button-${ACTIVITIES[ACTIVITIES.length - 1].id}`)
       );
     });
+
+    it('Home moves focus to the first tab', () => {
+      render(<ActivityBar active="git" onToggle={() => {}} />);
+      const mid = screen.getByTestId(`activity-bar-button-${ACTIVITIES[2].id}`);
+      mid.focus();
+      fireEvent.keyDown(mid, { key: 'Home' });
+      expect(document.activeElement).toBe(
+        screen.getByTestId(`activity-bar-button-${ACTIVITIES[0].id}`)
+      );
+    });
+
+    it('End moves focus to the last tab', () => {
+      render(<ActivityBar active="files" onToggle={() => {}} />);
+      const first = screen.getByTestId(`activity-bar-button-${ACTIVITIES[0].id}`);
+      first.focus();
+      fireEvent.keyDown(first, { key: 'End' });
+      expect(document.activeElement).toBe(
+        screen.getByTestId(`activity-bar-button-${ACTIVITIES[ACTIVITIES.length - 1].id}`)
+      );
+    });
   });
 
   it('handles active=null gracefully (no aria-selected=true anywhere)', () => {
@@ -105,5 +126,37 @@ describe('ActivityBar', () => {
     for (const tab of tabs) {
       expect(tab).toHaveAttribute('aria-selected', 'false');
     }
+  });
+
+  it('does not set native title attribute on tabs (Issue #730)', () => {
+    render(<ActivityBar active="files" onToggle={() => {}} />);
+    const tabs = screen.getAllByRole('tab');
+    for (const tab of tabs) {
+      // Either no title attribute or empty
+      const t = tab.getAttribute('title');
+      expect(t === null || t === '').toBe(true);
+    }
+  });
+
+  describe('Tooltip integration (Issue #730)', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('shows a custom Tooltip with the activity label after hover delay', () => {
+      render(<ActivityBar active="files" onToggle={() => {}} />);
+      const tab = screen.getByTestId('activity-bar-button-git');
+      // Hover over the button (mouseenter bubbles up to the wrapper span)
+      fireEvent.mouseEnter(tab);
+      act(() => {
+        vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+      });
+      const tooltip = screen.getByRole('tooltip', { hidden: true });
+      expect(tooltip).toHaveAttribute('aria-hidden', 'true');
+      expect(tooltip).toHaveTextContent(/git/i);
+    });
   });
 });

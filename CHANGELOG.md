@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Layout (PC): **カスタム Tooltip** コンポーネント `src/components/common/Tooltip.tsx` を新設。`TOOLTIP_DELAY_MS = 100` の即時表示、ダークテーマ（`bg-gray-900` / `text-gray-100`）、`placement=top/right/bottom/left`、`role="tooltip"` + `aria-hidden="true"`（`aria-label` 重複読み上げ回避）、wrapper `<span>` の `tabIndex={-1}`、`useEffect` cleanup で `clearTimeout`、`React.cloneElement` を使わず ref/onClick/onKeyDown を透過する設計 (Issue #730)
+- Layout (PC): **TerminalContainer** コンポーネント `src/components/worktree/TerminalContainer.tsx` を新設。History + Terminal+FilePanel を内包する親コンテナ。`HISTORY_PANE_ID = 'worktree-history-pane'` を `WorktreeDesktopLayout` から移管・export。`useHistoryPaneState` で visible/width/toggle/setWidth を管理、可視時は History wrapper div + PaneResizer、非表示時は expand bar（`aria-controls=HISTORY_PANE_ID`）、History/Terminal をそれぞれ `ErrorBoundary` で包含 (Issue #730)
+- Hook: `useHistoryPaneState` に `commandmate:historyPaneStateChange` CustomEvent broadcaster を追加。同一 window 内で `WorktreeDetailRefactored`（HistoryPane onCollapse 用）と `TerminalContainer`（render 用）の 2 instance の visible/width 状態を同期 (Issue #730)
 - Layout (PC): VS Code 風 **Activity Bar** + History 独立カラムを導入。`ActivityBar.tsx` / `ActivityPane.tsx` / `useActivityBarState.ts` / `useHistoryPaneState.ts` / `activity-bar-config.ts` を新設。6 Activity（Files/Git/Notes/Schedules/Agent/Timer）、ArrowUp/Down/Home/End/Enter/Space キーボード対応、`role="tablist"` + `aria-orientation="vertical"` + `aria-selected` + `aria-label` + `aria-controls="worktree-activity-pane"`。History pane は `<` / `>` 折りたたみ + ドラッグリサイズ。`commandmate.worktree.activeActivity` / `historyVisible` / `historyWidth` を localStorage 永続化 (Issue #727)
 - Deep link: `?pane=git|notes|logs|agent|timer|files|history` を新 Activity 体系へマッピングするため `useWorktreeTabState.toActivityId()` を追加。`logs → schedules` リネーム、`history/terminal/info → null` (Issue #727)
 - API: `GET /api/worktrees/:id/files/:path?startLine=N&endLine=M` 行範囲モードを追加。行範囲モード時は `If-Modified-Since` をスキップして常に 200 を返す。レスポンス JSON に `totalLines` / `totalBytes` / `encoding` / `range` のオプショナルメタを追加（`FileContent` 型拡張、後方互換） (Issue #723)
@@ -15,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - History: HistoryPaneヘッダーに「User only」フィルタトグルを追加。トグルON時はAssistantメッセージとorphanペアを非表示にし、検索もuser roleのみに絞る。localStorage（`commandmate:historyUserOnly`, `'true'`/`'false'`）で永続化、aria-pressed準拠、lucide-react `User`/`UserCheck` アイコン、PC/モバイル両経路（MobileContent）に対応 (Issue #725)
 
 ### Changed
+- Layout (PC): `WorktreeDesktopLayout` を 4 カラム→**2 カラム**（ActivityPane + Right=TerminalContainer）に簡素化。`activityBar` / `historyPane` / `historyPaneCollapsed` / `onToggleHistoryPane` / `onHistoryPaneResize` / `historyPaneWidth` props を削除。`HISTORY_PANE_ID` は `TerminalContainer` に移管。dead code だった `MobileLayout` fallback（`useIsMobile=true` 時は `WorktreeDetailRefactored.tsx:1700` の `MobileContent` 分岐済みのため非経由）を削除。ファイル行数 437→145 (Issue #730)
+- Layout (PC): `WorktreeDetailRefactored` の JSX 構造を再構成。`ActivityBar` を `WorktreeDesktopLayout` の外側に配置し、Header の下から画面下端まで貫通する VS Code 流レイアウトに変更。`WorktreeDesktopLayout` の `rightPane` に `<TerminalContainer history={historyPaneMemo} terminal={rightPaneMemo}/>` を渡す構造へ (Issue #730)
+- Layout (PC): `ActivityBar` の各 `<button>` から `title` 属性を削除し、新しい `Tooltip` コンポーネントでラップ。`aria-label` は維持。`buttonRefs` は `<button>` への ref を継続付与（ref 透過のため `ArrowUp/Down/Home/End` キーボードナビは無変更で動作）(Issue #730)
+- Hook: `useHistoryPaneState` の `DEFAULT_HISTORY_WIDTH` を **25 → 40** に変更。percent 基準が「`WorktreeDesktopLayout` 全体」から「`TerminalContainer` 内 (Right Pane)」に変わるための補正 (Issue #730)
 - Layout (PC): `WorktreeDesktopLayout` を 2 カラム→**4 カラム**（`[ActivityBar 48px] + ActivityPane + History + Right`）に再構成。`leftPane` props を廃止し `activityBar` / `activityPane` / `historyPane` / `rightPane` 構造へ。`ResizableColumn` ヘルパーで activity/history カラム JSX を dedup。モバイル時は 2-pane swipe へ縮退 (Issue #727)
 - WorktreeDetailRefactored: 旧 `leftPaneMemo`（38 deps、Issue #411 R3-007）を `activityBarMemo` / `activityContent` / `activityPaneMemo` / `historyPaneMemo` に分割。各 memo にメンテナンスコメント付与。`useFilePolling` の `enabled` 条件を `state.layout.leftPaneTab === 'files'` → `activeActivity === 'files'` に置換 (Issue #727)
 - HistoryPane: `onCollapse` props 追加、ヘッダー右端に `<` 折りたたみボタン追加 (Issue #727)
@@ -23,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - History: HistoryPaneのUser/Assistant視覚優先度を改善。Assistantメッセージのデフォルト折りたたみを2行/100文字に強化（COLLAPSED_MAX_LINES: 5→2、COLLAPSED_MAX_CHARS: 300→100）、Assistantスタイル弱化（text-xs/p-2/bg-gray-900/30、space-y-2）、User側コンテナに防御セット（`[word-break:break-word]` `max-w-full` `overflow-x-hidden`）追加 (Issue #725)
 
 ### Removed
+- `WorktreeDesktopLayout.tsx` 内の `MobileLayout` コンポーネント定義と `HistoryExpandBar` を削除（dead code: `WorktreeDetailRefactored.tsx:1700` で `MobileContent` 分岐済みのため `WorktreeDesktopLayout` を経由しない）。関連テスト `tests/unit/components/WorktreeDesktopLayout.test.tsx` の Mobile fallback ブロックも削除 (Issue #730)
 - `src/components/worktree/LeftPaneTabSwitcher.tsx` を削除（Activity Bar に置換）。関連テスト `tests/unit/components/worktree/LeftPaneTabSwitcher.test.tsx` / `tests/unit/types/left-pane-tab.test.ts` も削除 (Issue #727)
 - PC 版 History ペイン内の `Message | Git` サブタブ UI を除去（Git は独立 Activity に昇格）。`historySubTab` ローカル state はモバイル経路 `MobileContent` props 伝播のため残置 (Issue #727)
 
@@ -30,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - FilePanel: 大規模ファイルでPC版がハングする問題に対するハイブリッド対応（行ベースAPI ＋ `@tanstack/react-virtual` 仮想化 ＋ 編集系2MBサイズ上限）。CodeViewer は `useVirtualizer` で可視範囲＋オーバースキャンのみマウントし、行範囲モード（`startLine`/`endLine` クエリ）でチャンク取得・ハイライトキャッシュを実装。サーバ側は `readFileLineRange` で `createReadStream`＋`readline` ストリーミング（メモリ O(チャンク)）。`useFileContentSearch` に debounce 300ms＋最小2文字、`useFileContentPolling` に大ファイル時無効化（`POLLING_DISABLED_THRESHOLD_BYTES = 1MB`）を追加 (Issue #723)
 
 ### Breaking Changes
+- **Layout (PC) BREAKING (Issue #730)**: PC デスクトップで `ActivityBar` が `WorktreeDesktopLayout` の外側に出て VS Code 風に全高貫通（Header の下から画面下端まで）し、History が `TerminalContainer` 内の左サブパネルに移動します。視覚的な影響:
+  - `?pane=history` deep link の History 表示位置が「画面中央の独立列」→「画面右端 Terminal 領域内」に変わります（表示の意味は維持されます）
+  - `DEFAULT_HISTORY_WIDTH` の意味が「`WorktreeDesktopLayout` 全体に対する %」→「`TerminalContainer` 内 Right Pane に対する %」に変わり、既定値も 25 → **40** に変更。既存ユーザの localStorage 値（25 等）はそのまま使われ続けるため、初回は狭めに見える可能性あり
+  - `WorktreeDesktopLayout` の props API が破壊的に変更: `activityBar` / `historyPane` / `historyPaneCollapsed` / `onToggleHistoryPane` / `onHistoryPaneResize` / `historyPaneWidth` の 6 props を削除。残る公開 props は `activityPane` / `rightPane` / `activityPaneWidth` / `onActivityPaneResize` / `minPaneWidth` / `maxPaneWidth`
+  - モバイル経路は変更なし（`MobileContent` 経由のまま）。詳細仕様: Issue #730
 - **Layout (PC) BREAKING**: PC デスクトップの左パネルが「History/Files/CMATE タブ式 2 カラム」から「Activity Bar + Activity Pane + History 独立カラム + Right の 4 カラム」へ視覚的に変更されます。モバイル経路（`GlobalMobileNav` / `WorktreeDetailSubComponents` / `NotesAndLogsPane`）は変更なし。旧 localStorage キー `commandmate.worktree.leftPaneCollapsed` は読み捨て（マイグレーション処理なし）。詳細仕様: Issue #727
 - 編集系ファイルの GET 事前ガード追加: `.md` / `.yaml` / `.yml` の GET 上限が新規 **2MB** になりました。
   - 2MB 以下: 従来通り開け、保存も可能（改善: 旧来 1MB 超は PUT 失敗していたが 1〜2MB 帯が保存可能に）。

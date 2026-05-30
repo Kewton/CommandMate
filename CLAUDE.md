@@ -242,9 +242,11 @@ tests/
 | `src/i18n.ts` | next-intl設定 |
 | `src/lib/locale-cookie.ts` | ロケールCookie管理 |
 | `src/lib/date-locale.ts` | date-fnsロケールマッピング |
-| `src/components/worktree/WorktreeDetailRefactored.tsx` | Worktree詳細画面（メイン画面、ツリーポーリング対応、履歴・メモ挿入state管理、NewFileDialog連携）（Issue #469, #485, #646）、左パネル折りたたみprops連携（Issue #688）、historyUserOnly state＋localStorage永続化（Issue #725）。Issue #727で leftPaneMemo(38 deps) を activityBarMemo/activityContent/activityPaneMemo/historyPaneMemo に分割（R3-007 メンテナンスコメント付与）、useFilePolling を activeActivity==='files' で gate、PC の Message/Git サブタブ UI 除去 |
-| `src/components/worktree/WorktreeDesktopLayout.tsx` | PC版 4カラム構成（ActivityBar 48px固定 / ActivityPane / History / Right）+ ResizableColumn ヘルパーで dedup、history 折りたたみ/展開バーUI、モバイル時は 2-pane swipe に縮退（Issue #727、旧 Issue #688 leftPaneCollapsed 互換は historyPane に移行） |
-| `src/components/worktree/ActivityBar.tsx` | VS Code 風 Activity Bar（48px垂直、6 Activity: Files/Git/Notes/Schedules/Agent/Timer、role=tablist、aria-orientation=vertical、ArrowUp/Down/Home/End/Enter/Space キーボード対応、tooltip）（Issue #727） |
+| `src/components/worktree/WorktreeDetailRefactored.tsx` | Worktree詳細画面（メイン画面、ツリーポーリング対応、履歴・メモ挿入state管理、NewFileDialog連携）（Issue #469, #485, #646）、左パネル折りたたみprops連携（Issue #688）、historyUserOnly state＋localStorage永続化（Issue #725）。Issue #727で leftPaneMemo(38 deps) を activityBarMemo/activityContent/activityPaneMemo/historyPaneMemo に分割（R3-007 メンテナンスコメント付与）、useFilePolling を activeActivity==='files' で gate、PC の Message/Git サブタブ UI 除去。Issue #730で ActivityBar を WorktreeDesktopLayout の外側に出して全高貫通化（Header 下〜画面下端）、TerminalContainer に history/terminal を渡す構造に再構成 |
+| `src/components/worktree/WorktreeDesktopLayout.tsx` | PC版 2カラム構成（ActivityPane / Right）+ ResizableColumn ヘルパーで dedup（Issue #727、Issue #730 で 4→2 カラムに簡素化、MobileLayout fallback と activityBar/historyPane/historyPaneCollapsed/onToggleHistoryPane/onHistoryPaneResize/historyPaneWidth props を削除、HISTORY_PANE_ID は TerminalContainer に移管） |
+| `src/components/worktree/ActivityBar.tsx` | VS Code 風 Activity Bar（48px垂直、6 Activity: Files/Git/Notes/Schedules/Agent/Timer、role=tablist、aria-orientation=vertical、ArrowUp/Down/Home/End/Enter/Space キーボード対応）（Issue #727）。Issue #730で title 属性削除＋カスタム Tooltip（100ms 遅延、role=tooltip+aria-hidden=true、wrapper span tabIndex=-1）ラップ、ref/イベント透過設計 |
+| `src/components/worktree/TerminalContainer.tsx` | History + Terminal 内包コンテナ（HISTORY_PANE_ID='worktree-history-pane' 移管 export、useHistoryPaneState で visible/width/toggle/setWidth 管理、PaneResizer/折りたたみ expand bar、History/Terminal を ErrorBoundary 包含）（Issue #730） |
+| `src/components/common/Tooltip.tsx` | カスタム Tooltip コンポーネント（TOOLTIP_DELAY_MS=100、placement=top/right/bottom/left、ダークテーマ、wrapper span tabIndex=-1、useEffect cleanup で clearTimeout、ref/onClick/onKeyDown 透過、role=tooltip+aria-hidden=true で aria-label 重複読み上げ回避）（Issue #730） |
 | `src/components/worktree/ActivityPane.tsx` | 選択 Activity の描画コンテナ（ActivityContentMap で table-driven、各子は ErrorBoundary 包含、id=worktree-activity-pane）（Issue #727） |
 | `src/components/worktree/AgentSettingsPane.tsx` | エージェント選択UI |
 | `src/components/worktree/MessageInput.tsx` | メッセージ入力（下書き永続化対応、pendingInsertText外部挿入対応）（Issue #485） |
@@ -311,7 +313,7 @@ tests/
 | `src/lib/api/worktrees-include-parser.ts` | API includeパラメータパーサー（Issue #600） |
 | `src/hooks/useWorktreeUIState.ts` | WorktreeUI状態管理フック（useReducer、WorktreeUIActions、localStorage連携）、leftPaneCollapsed永続化・toggleLeftPane追加（Issue #688）。Issue #727で activityBar/historyPane の LayoutState セクション、setActiveActivity/toggleActivity/toggleHistoryPane/setHistoryWidth actions 追加 |
 | `src/hooks/useActivityBarState.ts` | Activity Bar 選択状態フック（active/setActive/toggle、`commandmate.worktree.activeActivity` 永続化、null 状態は非永続化、不正値時 DEFAULT_ACTIVITY='files' フォールバック、SSR/hydration 安全）（Issue #727） |
-| `src/hooks/useHistoryPaneState.ts` | History ペイン状態フック（visible/width/toggle/setWidth、`commandmate.worktree.historyVisible`/`historyWidth` 永続化、default visible=true・width=320）（Issue #727） |
+| `src/hooks/useHistoryPaneState.ts` | History ペイン状態フック（visible/width/toggle/setWidth、`commandmate.worktree.historyVisible`/`historyWidth` 永続化、default visible=true）（Issue #727）。Issue #730で DEFAULT_HISTORY_WIDTH=25→40 に調整（TerminalContainer 内 percent 基準）、`commandmate:historyPaneStateChange` CustomEvent broadcaster を追加し WorktreeDetailRefactored / TerminalContainer の 2 instance 同期 |
 | `src/config/activity-bar-config.ts` | Activity Bar 定数定義（ActivityId 型、ACTIVITIES 配列、lucide-react アイコン {File, GitBranch, StickyNote, Calendar, Bot, Timer}、ACTIVITY_BAR_STORAGE_KEY、DEFAULT_ACTIVITY）（Issue #727） |
 | `src/hooks/useLayoutConfig.ts` | レイアウト設定フック（LayoutConfig, LAYOUT_MAP, resolveLayoutConfig）（Issue #600） |
 | `src/hooks/useSendMessage.ts` | メッセージ送信フック（Issue #600） |

@@ -1,0 +1,113 @@
+{
+  "issue_number": 730,
+  "iteration": 1,
+  "status": "passed",
+  "summary": "All Issue #730 acceptance criteria verified. Tooltip component (TOOLTIP_DELAY_MS=100, role=tooltip + aria-hidden=true, wrapper span tabIndex=-1, useEffect cleanup, no React.cloneElement = ref/event transparent) implemented correctly. TerminalContainer exports HISTORY_PANE_ID='worktree-history-pane', wraps History/Terminal in ErrorBoundary, owns useHistoryPaneState. ActivityBar's native title attribute completely removed; each button wrapped in Tooltip while preserving aria-label/aria-controls/buttonRefs and ArrowUp/ArrowDown/Home/End keyboard navigation. WorktreeDesktopLayout simplified to 2-column (activityPane + rightPane) — removed activityBar/historyPane/historyPaneCollapsed/onToggleHistoryPane/onHistoryPaneResize/historyPaneWidth props, MobileLayout fallback, useIsMobile import, and HISTORY_PANE_ID. WorktreeDetailRefactored restructured: ActivityBar lives outside WorktreeDesktopLayout as a full-height column; TerminalContainer is passed as rightPane with historyPaneMemo/rightPaneMemo. useHistoryPaneState DEFAULT_HISTORY_WIDTH raised 25→40 with a CustomEvent broadcaster ('commandmate:historyPaneStateChange') to keep the two hook consumers in sync (justified implementation decision; covered by existing tests). Quality gate reproduced: lint OK, tsc OK, unit 6628/0/7 (352 files), build OK. Integration suite 544 pass / 39 fail — all 39 pre-existing and out-of-scope per TDD verification.",
+  "criteria_results": {
+    "tooltip": {
+      "total": 11,
+      "passed": 11,
+      "failed": [],
+      "details": [
+        {"criterion": "All 6 ActivityBar icons have immediate-display tooltip", "verified": "ActivityBar.tsx L103 wraps each tab in <Tooltip content={activity.label} placement=\"right\">; ACTIVITIES has 6 entries"},
+        {"criterion": "Hover delay <=100ms (TOOLTIP_DELAY_MS=100)", "verified": "Tooltip.tsx L27 exports TOOLTIP_DELAY_MS=100; Tooltip.test L24-26 asserts it; ActivityBar.test 'shows custom Tooltip after delay' uses TOOLTIP_DELAY_MS"},
+        {"criterion": "Dark theme (bg-gray-900 / text-gray-100)", "verified": "Tooltip.tsx L113 className contains 'bg-gray-900 text-gray-100'; Tooltip.test 'applies dark theme classes' asserts it"},
+        {"criterion": "placement=right by default", "verified": "Tooltip.tsx L62 default placement='right'; PLACEMENT_CLASS.right yields 'left-full top-1/2 -translate-y-1/2 ml-2'; Tooltip.test 'applies placement=right class' asserts"},
+        {"criterion": "role=tooltip", "verified": "Tooltip.tsx L111 role=\"tooltip\""},
+        {"criterion": "aria-hidden=true, no aria-describedby", "verified": "Tooltip.tsx L112 aria-hidden=\"true\"; Tooltip.test 'uses role=tooltip and aria-hidden=true (no aria-describedby usage)' verifies child button.aria-describedby is absent"},
+        {"criterion": "title attribute removed from ActivityBar", "verified": "grep on ActivityBar.tsx returns no title= occurrence; ActivityBar.test 'does not set native title attribute on tabs (Issue #730)' asserts"},
+        {"criterion": "buttonRefs.current[index]?.focus() targets <button> (ref transparency)", "verified": "Tooltip.tsx never calls React.cloneElement (children rendered as-is L108); ActivityBar.tsx L105-107 attaches ref directly to <button>; ArrowDown/Up tests rely on document.activeElement being the <button> and pass"},
+        {"criterion": "ArrowDown/ArrowUp/Home/End keyboard navigation intact", "verified": "ActivityBar.test Keyboard navigation describe block (5 tests including Enter/Space/ArrowDown/ArrowUp/Home/End) all pass"},
+        {"criterion": "Tooltip wrapper <span> has tabIndex=-1", "verified": "Tooltip.tsx L104 tabIndex={-1}; Tooltip.test 'wrapper span has tabIndex=-1' asserts"},
+        {"criterion": "setTimeout cleared on unmount via useEffect cleanup", "verified": "Tooltip.tsx L92-96 useEffect returns cleanup that calls clearTimer; Tooltip.test 'clears scheduled timer on unmount' passes"}
+      ]
+    },
+    "activity_bar_full_height": {
+      "total": 4,
+      "passed": 4,
+      "failed": [],
+      "details": [
+        {"criterion": "ActivityBar spans from below Header to viewport bottom", "verified": "WorktreeDetailRefactored.tsx L1709-1710 places {activityBarMemo} directly inside outer 'flex h-full overflow-hidden relative' div, sibling to inner column containing DesktopHeader/Alert/Layout/NavigationButtons/MessageInput; ActivityBar.tsx L97 'flex flex-col items-stretch w-12 flex-shrink-0' inside h-full flex inherits full container height"},
+        {"criterion": "All 6 icons visible without scroll", "verified": "ActivityBar.tsx renders ACTIVITIES.map without overflow-y / max-height; w-12/h-12 per icon * 6 = 288px well under realistic viewport; full-height column eliminates the prior Schedules-cutoff issue noted in Issue body"},
+        {"criterion": "MessageInput sits to the right of ActivityBar at the bottom", "verified": "WorktreeDetailRefactored.tsx L1755-1764 places MessageInput inside the inner column (right of ActivityBar) with flex-shrink-0 border-t — anchored to bottom of inner column"},
+        {"criterion": "PromptPanel(z-50) and Tooltip z-index hierarchy", "verified": "Tooltip.tsx L113 z-40; WorktreeDetailRefactored.tsx L1768 PromptPanel wrapper z-50; z-40 < z-50 confirms hierarchy. ActivityBar has no explicit z (defaults to auto/0)"}
+      ]
+    },
+    "history_inclusion": {
+      "total": 10,
+      "passed": 10,
+      "failed": [],
+      "details": [
+        {"criterion": "History removed from WorktreeDesktopLayout, moved into Terminal area", "verified": "WorktreeDesktopLayout.tsx props {activityPane, rightPane, ...} — historyPane gone; WorktreeDetailRefactored.tsx L1737-1742 passes <TerminalContainer history={historyPaneMemo} terminal={rightPaneMemo}/> as rightPane"},
+        {"criterion": "< collapse / > expand buttons", "verified": "HistoryPane internal collapse button preserved (HistoryPane.test L569-571); TerminalContainer.tsx L45-81 HistoryExpandBar renders > arrow when visible=false; both reference HISTORY_PANE_ID"},
+        {"criterion": "Drag-resizable width (percent 10-60)", "verified": "useHistoryPaneState.ts L37-38 MIN=10 MAX=60; TerminalContainer.tsx L94-104 handleResize delegates to setWidth; PaneResizer rendered when visible (L119-123)"},
+        {"criterion": "localStorage keys preserved", "verified": "useHistoryPaneState.ts L27-28 HISTORY_VISIBLE_STORAGE_KEY='commandmate.worktree.historyVisible', HISTORY_WIDTH_STORAGE_KEY='commandmate.worktree.historyWidth' — unchanged"},
+        {"criterion": "DEFAULT_HISTORY_WIDTH 25 -> 40", "verified": "useHistoryPaneState.ts L36 DEFAULT_HISTORY_WIDTH=40; TerminalContainer.test L31 mocks DEFAULT_HISTORY_WIDTH:40 confirming integration expectation"},
+        {"criterion": "FilePanel stays right of Terminal", "verified": "TerminalContainer.tsx L128-136 renders {terminal} (=rightPaneMemo which is FilePanelSplit per WorktreeDetailRefactored) on flex-grow side; FilePanel composition not changed"},
+        {"criterion": "History search (#716) and User only toggle (#725) preserved", "verified": "historyPaneMemo (WorktreeDetailRefactored.tsx L1647-1683) continues to render HistoryPane with historyUserOnly/onHistoryUserOnlyChange/setHistoryHighlightApplier props; not removed by Issue #730"},
+        {"criterion": "id='worktree-history-pane' on TerminalContainer history wrapper", "verified": "TerminalContainer.tsx L34 exports HISTORY_PANE_ID='worktree-history-pane'; L111 id={HISTORY_PANE_ID} on the visible history wrapper div; TerminalContainer.test L62-64,77-87 assert"},
+        {"criterion": "HistoryPane collapse button and expand bar both aria-controls=worktree-history-pane", "verified": "HistoryPane.test L571 asserts collapse button aria-controls; TerminalContainer.tsx L60 expand bar button aria-controls={HISTORY_PANE_ID}; TerminalContainer.test L112 asserts"},
+        {"criterion": "History and Terminal each wrapped in ErrorBoundary", "verified": "TerminalContainer.tsx L117 <ErrorBoundary componentName=\"HistoryPane\">; L133 <ErrorBoundary componentName=\"TerminalAndFilePanel\">; TerminalContainer.test L147-167 assert both boundaries present"}
+      ]
+    },
+    "cross_cutting": {
+      "total": 3,
+      "passed": 3,
+      "failed": [],
+      "details": [
+        {"criterion": "PC-only (useIsMobile=false)", "verified": "WorktreeDetailRefactored.tsx L1696 'if (!isMobile)' guards new layout; mobile path uses MobileContent unchanged; WorktreeDetailRefactored-mobile-overflow.test.tsx still PASS"},
+        {"criterion": "lint / tsc / test:unit / build all PASS", "verified": "Re-run on this verification: npm run lint -> 'No ESLint warnings or errors'; npx tsc --noEmit -> no output (success); npm run test:unit -> 352 files / 6628 passed / 7 skipped / 0 failed; npm run build -> completed with route table printed"},
+        {"criterion": "Most existing tests pass", "verified": "Affected suites (Tooltip 13, TerminalContainer 11, ActivityBar 16, WorktreeDesktopLayout 10, WorktreeDetailRefactored 41, HistoryPane suite, cli-tab-switching 2, issue-266-acceptance 7, useHistoryPaneState 7, mobile-overflow) all PASS; integration 39 pre-existing failures confirmed unrelated (api-clone/api-hooks/tmux/trust-dialog/Claude session)"}
+      ]
+    }
+  },
+  "quality_gate": {
+    "lint": "pass",
+    "tsc": "pass",
+    "test_unit": {
+      "files": 352,
+      "passed": 6628,
+      "failed": 0,
+      "skipped": 7,
+      "total": 6635,
+      "notes": "Numbers are within 2 tests of TDD report (6626) - likely due to dynamic skip flags. Zero failures confirmed."
+    },
+    "test_integration": {
+      "files_total": 44,
+      "files_failed": 16,
+      "tests_passed": 544,
+      "tests_failed": 39,
+      "tests_total": 583,
+      "notes": "All 39 failures are pre-existing and confirmed out-of-scope (api-clone / api-hooks / api-kill-session / api-messages / api-prompt-handling / api-respond / api-worktrees / current-output / trust-dialog / Claude session integration). Verified in TDD step by stashing #730 changes."
+    },
+    "build": "pass"
+  },
+  "verification_targets_status": [
+    {"target": "TDD commit 6b14f4c6 changed 13 files (10 src/tests + 0 docs)", "status": "confirmed", "note": "git show --stat 6b14f4c6: 4 new (Tooltip.tsx, TerminalContainer.tsx, Tooltip.test.tsx, TerminalContainer.test.tsx) + 9 modified (ActivityBar.tsx, WorktreeDesktopLayout.tsx, WorktreeDetailRefactored.tsx, useHistoryPaneState.ts + 5 test files). Docs (CLAUDE.md/UI_UX_GUIDE.md/CHANGELOG.md) are scheduled for Phase 4, not part of TDD commit. Out of acceptance scope here."},
+    {"target": "tdd-result.json: 6626 passed / 7 skipped / 0 failed", "status": "reproduced", "note": "Reran: 6628/7/0. Two-test delta is within noise (dynamically skipped tests can be counted as run depending on order). Zero failures match."},
+    {"target": "DEFAULT_HISTORY_WIDTH=40 reflected in code", "status": "confirmed", "note": "useHistoryPaneState.ts L36 export const DEFAULT_HISTORY_WIDTH = 40; JSDoc L11-17 documents the 25->40 change. TerminalContainer.test mock L31 also uses 40."},
+    {"target": "MobileLayout fallback removed", "status": "confirmed", "note": "grep on WorktreeDesktopLayout.tsx returns zero useIsMobile / MobileLayout / historyPane / activityBar / onToggleHistoryPane / onHistoryPaneResize references. Lines now 145 (down from 437 in prior version)."},
+    {"target": "HISTORY_PANE_ID exported from TerminalContainer.tsx", "status": "confirmed", "note": "TerminalContainer.tsx L34 export const HISTORY_PANE_ID = 'worktree-history-pane'; verified absent from WorktreeDesktopLayout.tsx"},
+    {"target": "title attribute fully removed from ActivityBar.tsx", "status": "confirmed", "note": "grep 'title=' returns nothing; ActivityBar.test L131-139 explicit assertion present"},
+    {"target": "useHistoryPaneState CustomEvent broadcaster", "status": "justified", "note": "useHistoryPaneState.ts L99-127 introduces HISTORY_PANE_STATE_EVENT='commandmate:historyPaneStateChange'. Rationale: WorktreeDetailRefactored uses useHistoryPaneState only for the toggle handle passed into historyPaneMemo (onCollapse wiring), and TerminalContainer calls useHistoryPaneState again for the actual render. Same-window localStorage writes do not fire native 'storage' events, so without this CustomEvent the two hook instances would desync after the first toggle. The implementation is window.dispatchEvent + addEventListener with try/catch around CustomEvent ctor for legacy compatibility, and existing useHistoryPaneState.test.ts (7 tests) still passes. Considered acceptable; recommend a one-line module-reference comment in CLAUDE.md when Phase 4 docs land."}
+  ],
+  "regressions_detected": [],
+  "issues_found": [
+    {
+      "severity": "minor",
+      "title": "Two extra test counts vs TDD report (6628 vs 6626)",
+      "description": "When rerunning unit tests during verification, the suite reports 6628 passed instead of the TDD-reported 6626. Both still show 0 failures and 7 skipped. The +2 delta likely reflects conditionally-included tests that depend on test execution order or environment timing. Not a regression; both runs reach the same pass/fail outcome.",
+      "file": "(test run telemetry)",
+      "suggested_fix": "No action required."
+    },
+    {
+      "severity": "minor",
+      "title": "useHistoryPaneState CustomEvent broadcaster is an undocumented implementation detail",
+      "description": "The new HISTORY_PANE_STATE_EVENT ('commandmate:historyPaneStateChange') broadcaster is necessary because two hook consumers (WorktreeDetailRefactored for onCollapse and TerminalContainer for render) coexist on the same window and same-window localStorage writes don't fire 'storage' events. The implementation is correct and covered by existing tests, but the rationale is not yet captured in CLAUDE.md / UI_UX_GUIDE.md.",
+      "file": "src/hooks/useHistoryPaneState.ts",
+      "suggested_fix": "When Phase 4 documentation lands (CLAUDE.md updates per work plan), add a one-line note next to useHistoryPaneState.ts: 'Broadcasts CustomEvent to keep multiple hook instances in sync (Issue #730)'."
+    }
+  ],
+  "overall_judgment": "passed — all 28 acceptance criteria across the 4 categories (Tooltip / ActivityBar full-height / History inclusion / cross-cutting) are met. Code review confirms intent (title attribute fully removed, HISTORY_PANE_ID re-exported from TerminalContainer, ErrorBoundary wraps both halves, DEFAULT_HISTORY_WIDTH=40, MobileLayout dead code purged from WorktreeDesktopLayout). New tests (Tooltip 13 + TerminalContainer 11) and updated tests (ActivityBar 16, WorktreeDesktopLayout 10, WorktreeDetailRefactored 41, issue-266 7, cli-tab-switching 2, HistoryPane unchanged, useHistoryPaneState 7) all PASS. Quality gate fully reproduced: lint clean, tsc clean, unit 6628/0/7, build OK. Integration 39 pre-existing failures verified out-of-scope per TDD report. Two minor advisory notes recorded (test-count delta, CustomEvent rationale documentation) — neither blocks acceptance.",
+  "next_action": "Proceed to Phase 4 (docs: CLAUDE.md / docs/UI_UX_GUIDE.md / CHANGELOG.md updates) and Phase 5 (PR creation). Recommend including a one-line note in CLAUDE.md's useHistoryPaneState row about the new CustomEvent broadcaster for traceability."
+}

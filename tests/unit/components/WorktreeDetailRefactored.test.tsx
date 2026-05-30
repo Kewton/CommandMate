@@ -69,25 +69,40 @@ vi.mock('@/hooks/useUpdateCheck', () => ({
 }));
 
 // Mock child components to isolate unit tests
+// Issue #730: WorktreeDesktopLayout no longer takes `activityBar`/`historyPane`.
+// ActivityBar is rendered as a sibling by WorktreeDetailRefactored, and
+// History is wrapped inside `TerminalContainer` (passed via `rightPane`).
 vi.mock('@/components/worktree/WorktreeDesktopLayout', () => ({
   WorktreeDesktopLayout: ({
-    activityBar,
     activityPane,
-    historyPane,
     rightPane,
   }: {
-    activityBar: React.ReactNode;
     activityPane: React.ReactNode;
-    historyPane: React.ReactNode;
     rightPane: React.ReactNode;
   }) => (
     <div data-testid="desktop-layout">
-      <div data-testid="activity-bar-slot">{activityBar}</div>
       <div data-testid="activity-pane-slot">{activityPane}</div>
-      <div data-testid="history-pane-slot">{historyPane}</div>
       <div data-testid="right-pane">{rightPane}</div>
     </div>
   ),
+}));
+
+// Issue #730: TerminalContainer mock that exposes both history and terminal
+// children, so tests can still locate them via testids.
+vi.mock('@/components/worktree/TerminalContainer', () => ({
+  TerminalContainer: ({
+    history,
+    terminal,
+  }: {
+    history: React.ReactNode;
+    terminal: React.ReactNode;
+  }) => (
+    <div data-testid="terminal-container">
+      <div data-testid="history-pane-slot">{history}</div>
+      <div data-testid="terminal-slot">{terminal}</div>
+    </div>
+  ),
+  HISTORY_PANE_ID: 'worktree-history-pane',
 }));
 
 vi.mock('@/components/worktree/TerminalDisplay', () => ({
