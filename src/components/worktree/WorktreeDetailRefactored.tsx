@@ -37,7 +37,15 @@ import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { FileTreeView } from '@/components/worktree/FileTreeView';
 import { SearchBar } from '@/components/worktree/SearchBar';
 import { useFileSearch } from '@/hooks/useFileSearch';
-import { LeftPaneTabSwitcher, type LeftPaneTab } from '@/components/worktree/LeftPaneTabSwitcher';
+import { ActivityBar } from '@/components/worktree/ActivityBar';
+import { ActivityPane, type ActivityContentMap } from '@/components/worktree/ActivityPane';
+import { useActivityBarState } from '@/hooks/useActivityBarState';
+import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
+import { MemoPane } from '@/components/worktree/MemoPane';
+import { ExecutionLogPane } from '@/components/worktree/ExecutionLogPane';
+import { TimerPane } from '@/components/worktree/TimerPane';
+import { AgentSettingsPane } from '@/components/worktree/AgentSettingsPane';
+import type { ActivityId } from '@/config/activity-bar-config';
 import { FileViewer } from '@/components/worktree/FileViewer';
 import { FilePanelSplit } from '@/components/worktree/FilePanelSplit';
 import { useFileTabs, MAX_FILE_TABS } from '@/hooks/useFileTabs';
@@ -76,7 +84,6 @@ import {
 } from '@/components/worktree/WorktreeDetailSubComponents';
 import { UPLOADABLE_EXTENSIONS, getMaxFileSize, isUploadableExtension } from '@/config/uploadable-extensions';
 import { ToastContainer, useToast } from '@/components/common/Toast';
-import { NotesAndLogsPane } from '@/components/worktree/NotesAndLogsPane';
 import { GitPane } from '@/components/worktree/GitPane';
 import { Modal } from '@/components/ui/Modal';
 import { useAutoYes } from '@/hooks/useAutoYes';
@@ -262,11 +269,23 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const [showNewFileDialog, setShowNewFileDialog] = useState(false);
   const [newFileParentPath, setNewFileParentPath] = useState('');
 
+  // Issue #727: Activity Bar + History pane state (PC)
+  const {
+    active: activeActivity,
+    toggle: toggleActivity,
+  } = useActivityBarState();
+  const {
+    visible: historyPaneVisible,
+    width: historyPaneWidth,
+    toggle: toggleHistoryPane,
+    setWidth: setHistoryWidth,
+  } = useHistoryPaneState();
+
   // [Issue #469] Tree polling: detect file tree changes via JSON comparison
   const prevTreeHashRef = useRef<string | null>(null);
   useFilePolling({
     intervalMs: FILE_TREE_POLL_INTERVAL_MS,
-    enabled: state.layout.leftPaneTab === 'files',
+    enabled: activeActivity === 'files',
     onPoll: async () => {
       try {
         const response = await fetch(`/api/worktrees/${worktreeId}/tree`);
@@ -669,12 +688,20 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     setFileTreeRefresh(prev => prev + 1);
   }, []);
 
-  /** Handle left pane tab change */
-  const handleLeftPaneTabChange = useCallback(
-    (tab: LeftPaneTab) => {
-      actions.setLeftPaneTab(tab);
+  /** Handle ActivityBar toggle (PC) */
+  const handleActivityToggle = useCallback(
+    (id: ActivityId) => {
+      toggleActivity(id);
     },
-    [actions]
+    [toggleActivity]
+  );
+
+  /** Handle History pane resize from layout (PC) */
+  const handleHistoryPaneResize = useCallback(
+    (nextPercent: number) => {
+      setHistoryWidth(nextPercent);
+    },
+    [setHistoryWidth]
   );
 
   /** Handle back button click - navigate to portal */
@@ -1349,11 +1376,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     [state.layout.mobileActivePane]
   );
 
-  /** Current active tab for desktop left pane */
-  const leftPaneTab = useMemo<LeftPaneTab>(
-    () => state.layout.leftPaneTab,
-    [state.layout.leftPaneTab]
-  );
+  // Note (Issue #727): PC no longer uses `state.layout.leftPaneTab`. The
+  // mobile MobileContent still consumes it via the mobile path. The reducer
+  // value remains for backward compatibility.
 
   /** Display name for worktree */
   const worktreeName = worktree?.name ?? DEFAULT_WORKTREE_NAME;
@@ -1496,130 +1521,165 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   );
 
   /**
-   * Memoized left pane to prevent re-render when terminal state changes.
+   * Issue #727: Activity Bar (memoized).
    *
-   * MAINTENANCE NOTE (Issue #411, R3-007):
-   * The dependency array below lists every prop, state value, and callback
-   * referenced inside the JSX. When adding a new prop or state variable to
-   * the left pane content, you MUST also add it to this dependency array,
-   * otherwise the memoized output will be stale.
+   * MAINTENANCE NOTE (Issue #411 R3-007 / Issue #727):
+   * The dependency array below lists every prop and callback referenced
+   * inside the JSX. When adding a new prop, add it to this array.
    */
-  const leftPaneMemo = useMemo(
-    () => (
-      <div className="h-full flex flex-col">
-        <LeftPaneTabSwitcher
-          activeTab={leftPaneTab}
-          onTabChange={handleLeftPaneTabChange}
-          onCollapse={actions.toggleLeftPane}
-        />
-        <div className="flex-1 min-h-0 overflow-hidden">
-          {leftPaneTab === 'history' && (
-            <div className="h-full flex flex-col">
-              {/* History sub-tab switcher: Message | Git (Issue #447) */}
-              <div className="flex border-b border-gray-200 dark:border-gray-700 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setHistorySubTab('message')}
-                  className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
-                    historySubTab === 'message'
-                      ? 'text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400 bg-cyan-50 dark:bg-cyan-900/30'
-                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                  }`}
-                >
-                  Message
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setHistorySubTab('git')}
-                  className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
-                    historySubTab === 'git'
-                      ? 'text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400 bg-cyan-50 dark:bg-cyan-900/30'
-                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                  }`}
-                >
-                  Git
-                </button>
-              </div>
-              {historySubTab === 'message' && (
-                <HistoryPane
-                  messages={state.messages}
-                  worktreeId={worktreeId}
-                  onFilePathClick={handleFilePathClick}
-                  className="flex-1 min-h-0"
-                  showToast={showToast}
-                  onInsertToMessage={handleInsertToMessage}
-                  showArchived={showArchived}
-                  onShowArchivedChange={handleShowArchivedChange}
-                  historyDisplayLimit={historyDisplayLimit}
-                  onHistoryDisplayLimitChange={handleHistoryDisplayLimitChange}
-                  historyUserOnly={historyUserOnly}
-                  onHistoryUserOnlyChange={handleHistoryUserOnlyChange}
-                />
-              )}
-              {historySubTab === 'git' && (
-                <ErrorBoundary componentName="GitPane">
-                  <GitPane
-                    worktreeId={worktreeId}
-                    onDiffSelect={handleDiffSelect}
-                    isMobile={false}
-                    className="flex-1 min-h-0"
-                  />
-                </ErrorBoundary>
-              )}
-            </div>
-          )}
-          {leftPaneTab === 'files' && (
-            <ErrorBoundary componentName="FileTreeView">
-              <div className="h-full flex flex-col">
-                {/* [Issue #21] Search Bar */}
-                <SearchBar
-                  query={fileSearch.query}
-                  mode={fileSearch.mode}
-                  isSearching={fileSearch.isSearching}
-                  error={fileSearch.error}
-                  onQueryChange={fileSearch.setQuery}
-                  onModeChange={fileSearch.setMode}
-                  onClear={fileSearch.clearSearch}
-                />
-                <FileTreeView
-                  worktreeId={worktreeId}
-                  onFileSelect={handleFileSelect}
-                  onNewFile={handleNewFile}
-                  onNewDirectory={handleNewDirectory}
-                  onRename={handleRename}
-                  onDelete={handleDelete}
-                  onUpload={handleUpload}
-                  onMove={handleMove}
-                  onCmateSetup={handleCmateSetup}
-                  refreshTrigger={fileTreeRefresh}
-                  searchQuery={fileSearch.query}
-                  searchMode={fileSearch.mode}
-                  searchResults={fileSearch.results?.results}
-                  className="flex-1 min-h-0"
-                />
-              </div>
-            </ErrorBoundary>
-          )}
-          {leftPaneTab === 'memo' && (
-            <ErrorBoundary componentName="NotesAndLogsPane">
-              <NotesAndLogsPane
-                worktreeId={worktreeId}
-                className="h-full"
-                selectedAgents={selectedAgents}
-                onSelectedAgentsChange={handleSelectedAgentsChange}
-                vibeLocalModel={vibeLocalModel}
-                onVibeLocalModelChange={handleVibeLocalModelChange}
-                vibeLocalContextWindow={vibeLocalContextWindow}
-                onVibeLocalContextWindowChange={handleVibeLocalContextWindowChange}
-                maxAgents={4}
-                onInsertToMessage={handleInsertToMessage}
-              />
-            </ErrorBoundary>
-          )}
+  const activityBarMemo = useMemo(
+    () => <ActivityBar active={activeActivity} onToggle={handleActivityToggle} />,
+    [activeActivity, handleActivityToggle]
+  );
+
+  /**
+   * Issue #727: Activity Pane content map (memoized).
+   *
+   * MAINTENANCE NOTE (Issue #411 R3-007 / Issue #727):
+   * Add every prop / state / callback used inside any activity child to the
+   * deps array below or the memoized child output will be stale.
+   */
+  const activityContent = useMemo<ActivityContentMap>(
+    () => ({
+      files: (
+        <div className="h-full flex flex-col">
+          <SearchBar
+            query={fileSearch.query}
+            mode={fileSearch.mode}
+            isSearching={fileSearch.isSearching}
+            error={fileSearch.error}
+            onQueryChange={fileSearch.setQuery}
+            onModeChange={fileSearch.setMode}
+            onClear={fileSearch.clearSearch}
+          />
+          <FileTreeView
+            worktreeId={worktreeId}
+            onFileSelect={handleFileSelect}
+            onNewFile={handleNewFile}
+            onNewDirectory={handleNewDirectory}
+            onRename={handleRename}
+            onDelete={handleDelete}
+            onUpload={handleUpload}
+            onMove={handleMove}
+            onCmateSetup={handleCmateSetup}
+            refreshTrigger={fileTreeRefresh}
+            searchQuery={fileSearch.query}
+            searchMode={fileSearch.mode}
+            searchResults={fileSearch.results?.results}
+            className="flex-1 min-h-0"
+          />
         </div>
-      </div>
-    ),
-    [leftPaneTab, handleLeftPaneTabChange, historySubTab, state.messages, worktreeId, handleFilePathClick, showToast, fileSearch.query, fileSearch.mode, fileSearch.isSearching, fileSearch.error, fileSearch.setQuery, fileSearch.setMode, fileSearch.clearSearch, fileSearch.results?.results, handleFileSelect, handleNewFile, handleNewDirectory, handleRename, handleDelete, handleUpload, handleMove, handleCmateSetup, fileTreeRefresh, selectedAgents, handleSelectedAgentsChange, vibeLocalModel, handleVibeLocalModelChange, vibeLocalContextWindow, handleVibeLocalContextWindowChange, handleDiffSelect, handleInsertToMessage, showArchived, handleShowArchivedChange, historyDisplayLimit, handleHistoryDisplayLimitChange, historyUserOnly, handleHistoryUserOnlyChange, actions.toggleLeftPane]
+      ),
+      git: (
+        <GitPane
+          worktreeId={worktreeId}
+          onDiffSelect={handleDiffSelect}
+          isMobile={false}
+          className="h-full"
+        />
+      ),
+      notes: (
+        <MemoPane
+          worktreeId={worktreeId}
+          className="h-full"
+          onInsertToMessage={handleInsertToMessage}
+        />
+      ),
+      schedules: (
+        <ExecutionLogPane worktreeId={worktreeId} className="h-full" />
+      ),
+      agent: (
+        <AgentSettingsPane
+          worktreeId={worktreeId}
+          selectedAgents={selectedAgents}
+          onSelectedAgentsChange={handleSelectedAgentsChange}
+          maxAgents={4}
+          vibeLocalModel={vibeLocalModel}
+          onVibeLocalModelChange={handleVibeLocalModelChange}
+          vibeLocalContextWindow={vibeLocalContextWindow}
+          onVibeLocalContextWindowChange={handleVibeLocalContextWindowChange}
+        />
+      ),
+      timer: <TimerPane worktreeId={worktreeId} />,
+    }),
+    [
+      worktreeId,
+      fileSearch.query,
+      fileSearch.mode,
+      fileSearch.isSearching,
+      fileSearch.error,
+      fileSearch.setQuery,
+      fileSearch.setMode,
+      fileSearch.clearSearch,
+      fileSearch.results?.results,
+      handleFileSelect,
+      handleNewFile,
+      handleNewDirectory,
+      handleRename,
+      handleDelete,
+      handleUpload,
+      handleMove,
+      handleCmateSetup,
+      fileTreeRefresh,
+      handleDiffSelect,
+      handleInsertToMessage,
+      selectedAgents,
+      handleSelectedAgentsChange,
+      vibeLocalModel,
+      handleVibeLocalModelChange,
+      vibeLocalContextWindow,
+      handleVibeLocalContextWindowChange,
+    ]
+  );
+
+  const activityPaneMemo = useMemo(
+    () =>
+      activeActivity === null ? null : (
+        <ActivityPane active={activeActivity} activities={activityContent} />
+      ),
+    [activeActivity, activityContent]
+  );
+
+  /**
+   * Issue #727: History Pane content for the dedicated PC column.
+   *
+   * MAINTENANCE NOTE (Issue #411 R3-007 / Issue #727):
+   * Keep the deps list in sync with everything HistoryPane receives.
+   */
+  const historyPaneMemo = useMemo(
+    () =>
+      historyPaneVisible ? (
+        <HistoryPane
+          messages={state.messages}
+          worktreeId={worktreeId}
+          onFilePathClick={handleFilePathClick}
+          className="h-full"
+          showToast={showToast}
+          onInsertToMessage={handleInsertToMessage}
+          showArchived={showArchived}
+          onShowArchivedChange={handleShowArchivedChange}
+          historyDisplayLimit={historyDisplayLimit}
+          onHistoryDisplayLimitChange={handleHistoryDisplayLimitChange}
+          historyUserOnly={historyUserOnly}
+          onHistoryUserOnlyChange={handleHistoryUserOnlyChange}
+          onCollapse={toggleHistoryPane}
+        />
+      ) : null,
+    [
+      historyPaneVisible,
+      state.messages,
+      worktreeId,
+      handleFilePathClick,
+      showToast,
+      handleInsertToMessage,
+      showArchived,
+      handleShowArchivedChange,
+      historyDisplayLimit,
+      handleHistoryDisplayLimitChange,
+      historyUserOnly,
+      handleHistoryUserOnlyChange,
+      toggleHistoryPane,
+    ]
   );
 
   // ========================================================================
@@ -1665,13 +1725,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           )}
           <div className="flex-1 min-h-0">
             <WorktreeDesktopLayout
-              leftPane={leftPaneMemo}
+              activityBar={activityBarMemo}
+              activityPane={activityPaneMemo}
+              historyPane={historyPaneMemo}
               rightPane={rightPaneMemo}
-              initialLeftWidth={20}
-              minLeftWidth={15}
-              maxLeftWidth={60}
-              leftPaneCollapsed={state.layout.leftPaneCollapsed}
-              onToggleLeftPane={actions.toggleLeftPane}
+              historyPaneWidth={historyPaneWidth}
+              onHistoryPaneResize={handleHistoryPaneResize}
+              historyPaneCollapsed={!historyPaneVisible}
+              onToggleHistoryPane={toggleHistoryPane}
             />
           </div>
           {/* Issue #473: Navigation buttons for OpenCode TUI selection list */}

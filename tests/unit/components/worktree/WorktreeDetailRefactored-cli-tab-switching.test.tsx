@@ -61,9 +61,21 @@ vi.mock('@/hooks/useUpdateCheck', () => ({
 }));
 
 vi.mock('@/components/worktree/WorktreeDesktopLayout', () => ({
-  WorktreeDesktopLayout: ({ leftPane, rightPane }: { leftPane: React.ReactNode; rightPane: React.ReactNode }) => (
+  WorktreeDesktopLayout: ({
+    activityBar,
+    activityPane,
+    historyPane,
+    rightPane,
+  }: {
+    activityBar: React.ReactNode;
+    activityPane: React.ReactNode;
+    historyPane: React.ReactNode;
+    rightPane: React.ReactNode;
+  }) => (
     <div data-testid="desktop-layout">
-      <div data-testid="left-pane">{leftPane}</div>
+      <div data-testid="activity-bar-slot">{activityBar}</div>
+      <div data-testid="activity-pane-slot">{activityPane}</div>
+      <div data-testid="history-pane-slot">{historyPane}</div>
       <div data-testid="right-pane">{rightPane}</div>
     </div>
   ),
@@ -126,12 +138,18 @@ vi.mock('@/components/worktree/FileTreeView', () => ({
   FileTreeView: () => <div data-testid="file-tree-view" />,
 }));
 
-vi.mock('@/components/worktree/LeftPaneTabSwitcher', () => ({
-  LeftPaneTabSwitcher: ({ activeTab, onTabChange }: { activeTab: string; onTabChange: (tab: string) => void }) => (
-    <div data-testid="left-pane-tab-switcher">
-      <button onClick={() => onTabChange('history')} data-active={activeTab === 'history'}>History</button>
-      <button onClick={() => onTabChange('files')} data-active={activeTab === 'files'}>Files</button>
+// Issue #727: ActivityBar replaces LeftPaneTabSwitcher
+vi.mock('@/components/worktree/ActivityBar', () => ({
+  ActivityBar: ({ active, onToggle }: { active: string | null; onToggle: (id: string) => void }) => (
+    <div data-testid="activity-bar">
+      <button onClick={() => onToggle('files')} data-active={active === 'files'}>Files</button>
     </div>
+  ),
+}));
+
+vi.mock('@/components/worktree/ActivityPane', () => ({
+  ActivityPane: ({ active, activities }: { active: string | null; activities: Record<string, React.ReactNode> }) => (
+    <div data-testid="activity-pane">{active && activities[active] ? activities[active] : null}</div>
   ),
 }));
 

@@ -12,6 +12,11 @@ import type { DeepLinkPane } from '@/types/ui-state';
 
 /**
  * Set of valid DeepLinkPane values for runtime validation.
+ *
+ * Issue #727 mapping note: on PC the Activity Bar renames the visual labels
+ *   logs  -> Schedules  (ExecutionLogPane is the same component)
+ * The deep-link key stays `logs` for URL backward compatibility.
+ * See `useWorktreeTabState.toActivityId()` for the runtime mapping.
  */
 export const VALID_PANES: ReadonlySet<DeepLinkPane> = new Set<DeepLinkPane>([
   'terminal',

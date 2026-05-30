@@ -242,9 +242,10 @@ tests/
 | `src/i18n.ts` | next-intl設定 |
 | `src/lib/locale-cookie.ts` | ロケールCookie管理 |
 | `src/lib/date-locale.ts` | date-fnsロケールマッピング |
-| `src/components/worktree/WorktreeDetailRefactored.tsx` | Worktree詳細画面（メイン画面、ツリーポーリング対応、履歴・メモ挿入state管理、NewFileDialog連携）（Issue #469, #485, #646）、左パネル折りたたみprops連携（Issue #688）、historyUserOnly state＋localStorage永続化（Issue #725） |
-| `src/components/worktree/WorktreeDesktopLayout.tsx` | PC版左右2分割レイアウト（PaneResizerドラッグリサイズ対応、leftPaneCollapsed props化・折りたたみ/展開バーUI）（Issue #688） |
-| `src/components/worktree/LeftPaneTabSwitcher.tsx` | 左パネルタブ切替UI（History/Files/CMATE）、折りたたみ◀ボタン追加（Issue #688） |
+| `src/components/worktree/WorktreeDetailRefactored.tsx` | Worktree詳細画面（メイン画面、ツリーポーリング対応、履歴・メモ挿入state管理、NewFileDialog連携）（Issue #469, #485, #646）、左パネル折りたたみprops連携（Issue #688）、historyUserOnly state＋localStorage永続化（Issue #725）。Issue #727で leftPaneMemo(38 deps) を activityBarMemo/activityContent/activityPaneMemo/historyPaneMemo に分割（R3-007 メンテナンスコメント付与）、useFilePolling を activeActivity==='files' で gate、PC の Message/Git サブタブ UI 除去 |
+| `src/components/worktree/WorktreeDesktopLayout.tsx` | PC版 4カラム構成（ActivityBar 48px固定 / ActivityPane / History / Right）+ ResizableColumn ヘルパーで dedup、history 折りたたみ/展開バーUI、モバイル時は 2-pane swipe に縮退（Issue #727、旧 Issue #688 leftPaneCollapsed 互換は historyPane に移行） |
+| `src/components/worktree/ActivityBar.tsx` | VS Code 風 Activity Bar（48px垂直、6 Activity: Files/Git/Notes/Schedules/Agent/Timer、role=tablist、aria-orientation=vertical、ArrowUp/Down/Home/End/Enter/Space キーボード対応、tooltip）（Issue #727） |
+| `src/components/worktree/ActivityPane.tsx` | 選択 Activity の描画コンテナ（ActivityContentMap で table-driven、各子は ErrorBoundary 包含、id=worktree-activity-pane）（Issue #727） |
 | `src/components/worktree/AgentSettingsPane.tsx` | エージェント選択UI |
 | `src/components/worktree/MessageInput.tsx` | メッセージ入力（下書き永続化対応、pendingInsertText外部挿入対応）（Issue #485） |
 | `src/components/worktree/ConversationPairCard.tsx` | 会話ペアカード（ユーザー/アシスタントメッセージ表示、挿入ボタン）（Issue #485）。Issue #716でMessageContent親divに data-message-id 付与（memo維持、props追加なし）。Issue #725で COLLAPSED_MAX_CHARS=100/COLLAPSED_MAX_LINES=2 へ折りたたみ強化、Assistantスタイル弱化（text-xs/p-2/bg-gray-900/30）、User側に防御セット追加、`showAssistant?: boolean` prop追加 |
@@ -252,7 +253,7 @@ tests/
 | `src/components/worktree/HistoryPane.tsx` | 履歴ペイン（会話履歴表示、onInsertToMessage伝播）（Issue #485）。Issue #716でメッセージテキスト検索機能（検索アイコン+HistorySearchBar、autoExpandedIds自動展開、useLayoutEffect副作用でapplyHistoryHighlights、searchStartScrollPositionRef scroll復帰、worktreeId/activeCliTab変化でcloseSearch）。Issue #725で User onlyフィルタトグル追加（lucide-react User/UserCheck、aria-pressed）、searchableMessagesをuser roleフィルタ、orphanペアスキップ |
 | `src/components/worktree/HistorySearchBar.tsx` | 履歴内テキスト検索バーUI（Issue #716）TerminalSearchBar踏襲、role="search"、aria-live、件数表示・前/次ナビ・Esc閉じ、IME composition handler |
 | `src/components/worktree/MemoPane.tsx` | メモペイン（メモ一覧表示、onInsertToMessage伝播）（Issue #485） |
-| `src/components/worktree/NotesAndLogsPane.tsx` | Notes&Logsペイン（メモ・ログタブ、onInsertToMessage伝播）（Issue #485） |
+| `src/components/worktree/NotesAndLogsPane.tsx` | Notes&Logsペイン（メモ・ログタブ、onInsertToMessage伝播）（Issue #485）。Issue #727 後はモバイル経路のみで使用（PC は Activity Bar で個別 Activity に分解） |
 | `src/components/worktree/WorktreeDetailSubComponents.tsx` | Worktree詳細サブコンポーネント（MobileContent等、onInsertToMessage伝播）（Issue #485）。Issue #725で MobileContentProps に historyUserOnly/onHistoryUserOnlyChange を追加・モバイル経路にもUser only props伝播 |
 | `src/components/worktree/MarkdownEditor.tsx` | マークダウンエディタメイン（Issue #479）、汎用テキストエディタ化・YAML等非mdファイルのプレビュー非表示対応（Issue #646） |
 | `src/components/worktree/NewFileDialog.tsx` | 新規ファイル作成ダイアログ（ファイル名入力・拡張子選択、拡張子決定ロジック3パターン）（Issue #646） |
@@ -308,12 +309,15 @@ tests/
 | `src/lib/detection/stalled-detector.ts` | Stalled判定（isWorktreeStalled）（Issue #600） |
 | `src/lib/deep-link-validator.ts` | Deep linkバリデーション（isDeepLinkPane, normalizeDeepLinkPane, VALID_PANES, DeepLinkPane型）（Issue #600） |
 | `src/lib/api/worktrees-include-parser.ts` | API includeパラメータパーサー（Issue #600） |
-| `src/hooks/useWorktreeUIState.ts` | WorktreeUI状態管理フック（useReducer、WorktreeUIActions、localStorage連携）、leftPaneCollapsed永続化・toggleLeftPane追加（Issue #688） |
+| `src/hooks/useWorktreeUIState.ts` | WorktreeUI状態管理フック（useReducer、WorktreeUIActions、localStorage連携）、leftPaneCollapsed永続化・toggleLeftPane追加（Issue #688）。Issue #727で activityBar/historyPane の LayoutState セクション、setActiveActivity/toggleActivity/toggleHistoryPane/setHistoryWidth actions 追加 |
+| `src/hooks/useActivityBarState.ts` | Activity Bar 選択状態フック（active/setActive/toggle、`commandmate.worktree.activeActivity` 永続化、null 状態は非永続化、不正値時 DEFAULT_ACTIVITY='files' フォールバック、SSR/hydration 安全）（Issue #727） |
+| `src/hooks/useHistoryPaneState.ts` | History ペイン状態フック（visible/width/toggle/setWidth、`commandmate.worktree.historyVisible`/`historyWidth` 永続化、default visible=true・width=320）（Issue #727） |
+| `src/config/activity-bar-config.ts` | Activity Bar 定数定義（ActivityId 型、ACTIVITIES 配列、lucide-react アイコン {File, GitBranch, StickyNote, Calendar, Bot, Timer}、ACTIVITY_BAR_STORAGE_KEY、DEFAULT_ACTIVITY）（Issue #727） |
 | `src/hooks/useLayoutConfig.ts` | レイアウト設定フック（LayoutConfig, LAYOUT_MAP, resolveLayoutConfig）（Issue #600） |
 | `src/hooks/useSendMessage.ts` | メッセージ送信フック（Issue #600） |
 | `src/hooks/useWorktreeList.ts` | Worktreeリスト共通フック（ソート・フィルタ・グループ化）（Issue #600） |
 | `src/hooks/useWorktreesCache.ts` | Worktrees共有キャッシュフック（Issue #600）、repositories: RepositorySummary[] state追加（Issue #690） |
-| `src/hooks/useWorktreeTabState.ts` | Worktreeタブ状態管理フック（deep link対応）（Issue #600） |
+| `src/hooks/useWorktreeTabState.ts` | Worktreeタブ状態管理フック（deep link対応）（Issue #600）。Issue #727で toActivityId() 追加（?pane=git→git, logs→schedules, notes/agent/timer/files→同名, history/terminal/info→null）、UseWorktreeTabStateReturn に activityId 追加。既存 toLeftPaneTab/toHistorySubTab はモバイル互換のため残置 |
 | `src/components/mobile/GlobalMobileNav.tsx` | モバイルグローバルナビ（4タブ）（Issue #600） |
 | `src/components/home/HomeSessionSummary.tsx` | Home画面セッション集計サマリー（Issue #600） |
 | `src/components/home/AssistantChatPanel.tsx` | Home画面アシスタントチャットパネル（折りたたみ可能・最大50vh・ポーリング・セッション開始/停止）（Issue #649） |

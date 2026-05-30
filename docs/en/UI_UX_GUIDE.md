@@ -21,7 +21,7 @@ CommandMate provides a responsive UI optimized for both desktop and mobile.
 
 | Screen | Layout | Features |
 |--------|--------|----------|
-| **Desktop** | 2-column split | Resizable panes |
+| **Desktop** | 4-column (ActivityBar / ActivityPane / History / Right) | VS Code-style Activity Bar, resizable panes |
 | **Mobile** | Tab-based | Bottom navigation |
 
 ---
@@ -216,9 +216,11 @@ src/components/
 │   └── MobilePromptSheet.tsx # Bottom sheet for prompts
 ├── worktree/
 │   ├── WorktreeDetailRefactored.tsx  # Main component
-│   ├── WorktreeDesktopLayout.tsx     # Desktop 2-column
+│   ├── WorktreeDesktopLayout.tsx     # Desktop 4-column (ActivityBar+ActivityPane+History+Right)
+│   ├── ActivityBar.tsx               # VS Code-style Activity Bar (Issue #727)
+│   ├── ActivityPane.tsx              # Renders the selected Activity (Issue #727)
 │   ├── TerminalDisplay.tsx           # Terminal display
-│   ├── HistoryPane.tsx               # History pane
+│   ├── HistoryPane.tsx               # History pane (PC standalone column, collapsible)
 │   ├── PromptPanel.tsx               # Desktop prompt
 │   ├── PaneResizer.tsx               # Pane resizer
 │   └── MessageInput.tsx              # Message input

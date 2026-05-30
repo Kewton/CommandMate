@@ -79,9 +79,21 @@ vi.mock('@/hooks/useUpdateCheck', () => ({
 
 // Mock child components
 vi.mock('@/components/worktree/WorktreeDesktopLayout', () => ({
-  WorktreeDesktopLayout: ({ leftPane, rightPane }: { leftPane: React.ReactNode; rightPane: React.ReactNode }) => (
+  WorktreeDesktopLayout: ({
+    activityBar,
+    activityPane,
+    historyPane,
+    rightPane,
+  }: {
+    activityBar: React.ReactNode;
+    activityPane: React.ReactNode;
+    historyPane: React.ReactNode;
+    rightPane: React.ReactNode;
+  }) => (
     <div data-testid="desktop-layout">
-      <div data-testid="left-pane">{leftPane}</div>
+      <div data-testid="activity-bar-slot">{activityBar}</div>
+      <div data-testid="activity-pane-slot">{activityPane}</div>
+      <div data-testid="history-pane-slot">{historyPane}</div>
       <div data-testid="right-pane">{rightPane}</div>
     </div>
   ),
@@ -135,13 +147,13 @@ vi.mock('@/components/worktree/FileTreeView', () => ({
   FileTreeView: () => <div data-testid="file-tree-view" />,
 }));
 
-vi.mock('@/components/worktree/LeftPaneTabSwitcher', () => ({
-  LeftPaneTabSwitcher: ({ activeTab, onTabChange }: { activeTab: string; onTabChange: (tab: string) => void }) => (
-    <div data-testid="left-pane-tab-switcher">
-      <button onClick={() => onTabChange('history')}>History</button>
-      <button onClick={() => onTabChange('files')}>Files</button>
-    </div>
-  ),
+// Issue #727: LeftPaneTabSwitcher removed — ActivityBar mocked instead
+vi.mock('@/components/worktree/ActivityBar', () => ({
+  ActivityBar: () => <div data-testid="activity-bar" />,
+}));
+
+vi.mock('@/components/worktree/ActivityPane', () => ({
+  ActivityPane: () => <div data-testid="activity-pane" />,
 }));
 
 vi.mock('@/components/worktree/FileViewer', () => ({

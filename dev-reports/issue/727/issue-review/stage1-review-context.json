@@ -1,0 +1,11 @@
+{
+  "issue_number": "727",
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "hypothesis_verification_path": "dev-reports/issue/727/issue-review/hypothesis-verification.md",
+  "original_issue_path": "dev-reports/issue/727/issue-review/original-issue.json",
+  "output_path": "dev-reports/issue/727/issue-review/stage1-review-result.json",
+  "instructions": "Issue #727 'feat(layout): replace LeftPaneTabSwitcher with VS Code-style Activity Bar + relocate History pane (PC)' の通常レビューを実施。整合性・正確性・受入条件の妥当性・実装方針の合理性に焦点。Phase 0.5の仮説検証結果（特にH10/H11/H3）を踏まえ、Must Fix/Should Fix/Nice to Haveに分類して指摘事項を整理する。コードベース（src/components/worktree/, src/types/ui-state.ts, src/hooks/useWorktreeTabState.ts等）を参照しながら、Issue記載内容の事実誤認や曖昧さを洗い出す。"
+}

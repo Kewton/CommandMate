@@ -15,6 +15,7 @@ import { useCallback, useMemo } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { normalizeDeepLinkPane } from '@/lib/deep-link-validator';
 import type { DeepLinkPane, MobileActivePane, LeftPaneTab, HistorySubTab } from '@/types/ui-state';
+import type { ActivityId } from '@/config/activity-bar-config';
 
 /**
  * Return value of useWorktreeTabState hook.
@@ -26,8 +27,13 @@ export interface UseWorktreeTabStateReturn {
   leftPaneTab: LeftPaneTab;
   /** Derived MobileActivePane for mobile view */
   mobileActivePane: MobileActivePane;
-  /** Derived HistorySubTab (message or git) */
+  /** Derived HistorySubTab (message or git) — kept for mobile compat (Issue #727) */
   historySubTab: HistorySubTab;
+  /**
+   * Issue #727: Derived ActivityId for the PC Activity Bar.
+   * `null` when the pane should be closed (e.g. `?pane=history` / `terminal` / `info`).
+   */
+  activityId: ActivityId | null;
   /** Update the active pane via router.replace (scroll:false) */
   setPane: (pane: DeepLinkPane) => void;
 }
@@ -96,6 +102,46 @@ function toHistorySubTab(pane: DeepLinkPane): HistorySubTab {
 }
 
 /**
+ * Issue #727: Map DeepLinkPane to ActivityId for the PC Activity Bar.
+ *
+ * Mapping:
+ *   files     -> 'files'
+ *   git       -> 'git'
+ *   notes     -> 'notes'
+ *   logs      -> 'schedules'   (rename only — same data shown by ExecutionLogPane)
+ *   agent     -> 'agent'
+ *   timer     -> 'timer'
+ *   history   -> null          (History pane on PC is a separate column, not an activity)
+ *   terminal  -> null          (no activity should be open)
+ *   info      -> null          (info has no Activity Bar slot)
+ */
+function toActivityId(pane: DeepLinkPane): ActivityId | null {
+  switch (pane) {
+    case 'files':
+      return 'files';
+    case 'git':
+      return 'git';
+    case 'notes':
+      return 'notes';
+    case 'logs':
+      return 'schedules';
+    case 'agent':
+      return 'agent';
+    case 'timer':
+      return 'timer';
+    case 'history':
+    case 'terminal':
+    case 'info':
+      return null;
+    default: {
+      const _exhaustive: never = pane;
+      void _exhaustive;
+      return null;
+    }
+  }
+}
+
+/**
  * Hook for managing tab state via ?pane= searchParam.
  *
  * Validates pane values at the boundary using isDeepLinkPane() [DR4-010].
@@ -115,6 +161,7 @@ export function useWorktreeTabState(): UseWorktreeTabStateReturn {
   const leftPaneTab = useMemo(() => toLeftPaneTab(activePane), [activePane]);
   const mobileActivePane = useMemo(() => toMobileActivePane(activePane), [activePane]);
   const historySubTab = useMemo(() => toHistorySubTab(activePane), [activePane]);
+  const activityId = useMemo(() => toActivityId(activePane), [activePane]);
 
   const setPane = useCallback(
     (pane: DeepLinkPane) => {
@@ -131,6 +178,7 @@ export function useWorktreeTabState(): UseWorktreeTabStateReturn {
     leftPaneTab,
     mobileActivePane,
     historySubTab,
+    activityId,
     setPane,
   };
 }

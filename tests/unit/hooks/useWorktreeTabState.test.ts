@@ -178,4 +178,60 @@ describe('useWorktreeTabState', () => {
       expect(result.current.historySubTab).toBe('message');
     });
   });
+
+  describe('activityId (Issue #727)', () => {
+    it('maps files → "files"', () => {
+      mockSearchParams.set('pane', 'files');
+      const { result } = renderHook(() => useWorktreeTabState());
+      expect(result.current.activityId).toBe('files');
+    });
+
+    it('maps git → "git"', () => {
+      mockSearchParams.set('pane', 'git');
+      const { result } = renderHook(() => useWorktreeTabState());
+      expect(result.current.activityId).toBe('git');
+    });
+
+    it('maps notes → "notes"', () => {
+      mockSearchParams.set('pane', 'notes');
+      const { result } = renderHook(() => useWorktreeTabState());
+      expect(result.current.activityId).toBe('notes');
+    });
+
+    it('maps logs → "schedules"', () => {
+      mockSearchParams.set('pane', 'logs');
+      const { result } = renderHook(() => useWorktreeTabState());
+      expect(result.current.activityId).toBe('schedules');
+    });
+
+    it('maps agent → "agent"', () => {
+      mockSearchParams.set('pane', 'agent');
+      const { result } = renderHook(() => useWorktreeTabState());
+      expect(result.current.activityId).toBe('agent');
+    });
+
+    it('maps timer → "timer"', () => {
+      mockSearchParams.set('pane', 'timer');
+      const { result } = renderHook(() => useWorktreeTabState());
+      expect(result.current.activityId).toBe('timer');
+    });
+
+    it('maps history → null (History pane is separate column on PC)', () => {
+      mockSearchParams.set('pane', 'history');
+      const { result } = renderHook(() => useWorktreeTabState());
+      expect(result.current.activityId).toBeNull();
+    });
+
+    it('maps terminal → null', () => {
+      mockSearchParams.set('pane', 'terminal');
+      const { result } = renderHook(() => useWorktreeTabState());
+      expect(result.current.activityId).toBeNull();
+    });
+
+    it('maps info → null', () => {
+      mockSearchParams.set('pane', 'info');
+      const { result } = renderHook(() => useWorktreeTabState());
+      expect(result.current.activityId).toBeNull();
+    });
+  });
 });

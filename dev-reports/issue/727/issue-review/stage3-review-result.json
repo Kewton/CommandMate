@@ -1,0 +1,136 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "iteration": 1,
+  "focus": "影響範囲",
+  "reviewer": "claude-opus",
+  "issue_number": "727",
+  "summary": "Stage 2 で反映済みの Issue #727 本文（325 行）に対し、影響範囲（波及効果）の観点で再検証した結果、Stage 1 で挙げ切れていない 12 件の追加影響を検出した。Must Fix 4 件は: (1) `WorktreeUIAction` / `WorktreeUIActions` / `worktreeUIReducer` への ActivityBar / HistoryPane 系 action 追加方針が完全欠落（影響表に useWorktreeUIState.ts はあるが ui-actions.ts が未掲載）、(2) `tests/unit/types/left-pane-tab.test.ts`（`LeftPaneTab` 型同一性検証）が `LeftPaneTabSwitcher.tsx` の削除と `LeftPaneTab` export 消失で**コンパイル不能**になる致命的な見落とし、(3) `tests/unit/hooks/deep-link-mapping.test.ts` が `?pane=git → leftPaneTab='history' + historySubTab='git'` を断定するマッピング表テストで存在、これが新 Activity 体系（`?pane=git → activity='git'`）に置換されないと CI 失敗、(4) `tests/unit/components/WorktreeDetailRefactored.test.tsx` 内 11 箇所の `getByTestId('left-pane-tab-switcher')` および `vi.mock('@/components/worktree/LeftPaneTabSwitcher', ...)` が壊滅的に影響、影響範囲表「テスト更新リスト」が `WorktreeDetailRefactored.test.tsx` / `WorktreeDetailRefactored-cli-tab-switching.test.tsx` / `app-version-display.test.tsx` / `issue-266-acceptance.test.tsx` / `useWorktreeTabState.test.ts` / `deep-link-mapping.test.ts` / `left-pane-tab.test.ts` を欠いている。Should Fix 5 件は: (5) `leftPaneMemo` (`WorktreeDetailRefactored.tsx:1507-1623`) の 38 要素 deps 配列が完全に作り直しになる影響（メモ化キャッシュ無効化リスク）、(6) `useFilePolling.enabled` 移行時、Files Activity を**閉じた状態**で `activeActivity === null` の場合の挙動（『ポーリング停止』を本文は明記したが、起動直後 hydration 前など `null` 時の初回 fetch 仕様が不明）、(7) `docs/UI_UX_GUIDE.md:219` / `docs/en/UI_UX_GUIDE.md:219` のアスキー図（『デスクトップ2カラム』）が 4-column に変わるため更新対象から漏れている、(8) `WorktreeDetailRefactored-mobile-overflow.test.tsx` の DOM 構造アサーション（`MobileContent` 周辺）が `historyUserOnly` props 追加経路で props 増加するため確認推奨、(9) Issue #728（ターミナル分割）との `WorktreeDesktopLayout.tsx` 同時編集競合リスク。Nice to Have 3 件は: (10) lucide-react `Files`/`GitBranch`/`StickyNote`/`Calendar`/`Bot`/`Timer` の各アイコン名が package.json 0.554.0 で実在する確認の本文記載なし、(11) ActivityBar の `aria-controls` 連携の DOM ID 設計（既存 `id=\"worktree-left-pane\"` との衝突回避）、(12) `mobile-cmate-tab.spec.ts` などモバイル E2E への影響有無の明示。",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "Must Fix",
+      "category": "useReducer",
+      "title": "WorktreeUIAction / WorktreeUIActions / worktreeUIReducer への ActivityBar / HistoryPane 系 action 追加方針が未記載（src/types/ui-actions.ts 影響範囲漏れ）",
+      "missing_in_issue": "想定影響範囲『既存変更』表に `src/types/ui-actions.ts` が含まれない。`src/hooks/useWorktreeUIState.ts` は記載されているが、Action union type 拡張 (`SET_ACTIVE_ACTIVITY` / `TOGGLE_ACTIVITY` / `SET_HISTORY_VISIBLE` / `SET_HISTORY_WIDTH` 等) と Action creator interface (`WorktreeUIActions` line 210-235) 拡張の具体方針が未記載。reducer の case 追加方針も曖昧。",
+      "evidence": "src/types/ui-actions.ts:16-57 `WorktreeUIAction` union（SET_LEFT_PANE_TAB:34, TOGGLE_LEFT_PANE:37, SET_LEFT_PANE_COLLAPSED:38 等を含む）; src/hooks/useWorktreeUIState.ts:210-235 `WorktreeUIActions` interface (setLeftPaneTab:229, toggleLeftPane:234); src/hooks/useWorktreeUIState.ts:31-204 reducer 本体。Issue 本文の『既存変更』表は ui-state.ts / useWorktreeUIState.ts のみで ui-actions.ts が抜け。",
+      "impact": "実装者が `LayoutState` を拡張しても action 体系を更新する一貫したテンプレートが無く、ActivityBar の状態更新を useReducer で扱うか useState で扱うかでブレが出る。useReducer に統一しないと既存 actions と新 ActivityBar state 管理が分散し、SSR/persistence/test mock すべてが二重化する。",
+      "suggested_fix": "想定影響範囲『既存変更』表に新規行を追加: `src/types/ui-actions.ts` | `WorktreeUIAction` union に ActivityBar/HistoryPane 系 action を追加（`SET_ACTIVE_ACTIVITY`, `TOGGLE_ACTIVITY`, `SET_HISTORY_VISIBLE`, `SET_HISTORY_WIDTH` 等）。また `WorktreeUIActions` interface も拡張。既存 `SET_LEFT_PANE_TAB` / `TOGGLE_LEFT_PANE` / `SET_LEFT_PANE_COLLAPSED` action はモバイル経路の暫定互換のため当面残置、PC 経路からはディスパッチしない、と明文化する。あるいは『ActivityBar / HistoryPane state は useReducer に統合せず、useActivityBarState / useHistoryPaneState の独立 hook（useState + localStorage）で管理する』ことを実装方針 §1-2 に明示する（こちらの方が現実的・テスト容易性高い、推奨）。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "Must Fix",
+      "category": "テスト",
+      "title": "tests/unit/types/left-pane-tab.test.ts が LeftPaneTab export 消失で compile fail する",
+      "missing_in_issue": "テスト更新リストに `tests/unit/types/left-pane-tab.test.ts` が記載されていない。",
+      "evidence": "tests/unit/types/left-pane-tab.test.ts:12 `import type { LeftPaneTab as SwitcherLeftPaneTab } from '@/components/worktree/LeftPaneTabSwitcher';` — Issue で `LeftPaneTabSwitcher.tsx` を削除するため、この import が解決不能になる。tests/unit/types/left-pane-tab.test.ts:20,40 が `LeftPaneTab` 値配列を比較するため、型自体の削除でも fail。",
+      "impact": "`npm run test:unit` / `npx tsc --noEmit` が compile error で停止し、Issue の受入条件『lint / tsc / test:unit / build 全 PASS』が成立しない。Stage 1 / Stage 2 で気付かなかった致命的見落とし。",
+      "suggested_fix": "テスト更新リストに以下を追加: `tests/unit/types/left-pane-tab.test.ts` — **削除**または `LeftPaneTabSwitcher` import を `ui-state` のみに依存するよう書き換え（型同一性検証の意義自体が `LeftPaneTabSwitcher` 削除で消失するため**削除推奨**）。LayoutState マイグレーション戦略 §6 に『`LeftPaneTab` 型は ui-state.ts に残置（モバイル用）、LeftPaneTabSwitcher.tsx は完全削除のため `tests/unit/types/left-pane-tab.test.ts` も削除』を明記。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "Must Fix",
+      "category": "テスト",
+      "title": "tests/unit/hooks/deep-link-mapping.test.ts のマッピング表が新 Activity 体系に追従していない",
+      "missing_in_issue": "テスト更新リストに `tests/unit/hooks/deep-link-mapping.test.ts` が記載されていない。Deep-link 互換性 §5 で `useWorktreeTabState.toLeftPaneTab` / `toHistorySubTab` を Activity 体系に置換すると明記したが、これら関数を直接アサートする MAPPING_TABLE テストの更新方針が無い。",
+      "evidence": "tests/unit/hooks/deep-link-mapping.test.ts:44-52 MAPPING_TABLE（9 行、`{ pane: 'git', leftPaneTab: 'history', mobileActivePane: 'history', historySubTab: 'git' }` 等を断定）; :62-74 `expect(result.current.leftPaneTab).toBe(leftPaneTab)` / `expect(result.current.historySubTab).toBe(historySubTab)` でアサート。`useWorktreeTabState` の戻り値型 `UseWorktreeTabStateReturn`（src/hooks/useWorktreeTabState.ts:22-33）の `leftPaneTab` / `historySubTab` プロパティ自体が PC 廃止で意味が変わる。tests/unit/hooks/useWorktreeTabState.test.ts:78-178 にも同様アサート 22 件。",
+      "impact": "deep-link マッピング変更の影響範囲としてテスト全削除/全置換が必要だが本文は無言。`?pane=git → activity='git'` の新マッピングが追加された後もこれら旧 expect が残ると test:unit が大量失敗し、結果として PC 経路だけでなくモバイル経路の `leftPaneTab='history'` 互換も検証できなくなる。",
+      "suggested_fix": "テスト更新リストに以下 2 件を追加: (1) `tests/unit/hooks/deep-link-mapping.test.ts` — MAPPING_TABLE に `activityId` 列を追加し、PC 用に `?pane=git → activityId='git'` / `?pane=logs → activityId='schedules'` 等を検証。`historySubTab` 列は『モバイル互換: message/git』として残置（モバイル経路のため）。(2) `tests/unit/hooks/useWorktreeTabState.test.ts` — 同様に `activityId` アサーション追加、PC 用 `leftPaneTab` 派生は削除 or deprecated 化して期待値変更。`UseWorktreeTabStateReturn` 型のドキュメントコメント更新も影響表に追加。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "Must Fix",
+      "category": "テスト",
+      "title": "tests/unit/components/WorktreeDetailRefactored.test.tsx の left-pane-tab-switcher 参照 11 箇所が compile/runtime fail する",
+      "missing_in_issue": "テスト更新リストに `tests/unit/components/WorktreeDetailRefactored.test.tsx` / `WorktreeDetailRefactored-cli-tab-switching.test.tsx` / `app-version-display.test.tsx` / `issue-266-acceptance.test.tsx` が含まれていない。",
+      "evidence": "tests/unit/components/WorktreeDetailRefactored.test.tsx:173-180 `vi.mock('@/components/worktree/LeftPaneTabSwitcher', ...)`; :574,599,642,664,694,716,745,765,795,826,1364 で `getByTestId('left-pane-tab-switcher')` を計 11 箇所アサート; tests/unit/components/app-version-display.test.tsx:138-140 同 mock; tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx:131 同 testid; tests/integration/issue-266-acceptance.test.tsx:154 同 testid。",
+      "impact": "`LeftPaneTabSwitcher.tsx` 削除で `vi.mock` は no-op になるが、`getByTestId('left-pane-tab-switcher')` を待つ `waitFor` が timeout してテスト全体がハング/失敗する。さらに `app-version-display.test.tsx` のような無関係テストも fail し、CI 影響が想定より大きい（Issue 本文の『限定的なテスト変更』前提を覆す）。",
+      "suggested_fix": "テスト更新リスト『削除/置換』に 4 ファイル追加: (1) `WorktreeDetailRefactored.test.tsx` — `vi.mock('@/components/worktree/LeftPaneTabSwitcher')` を `ActivityBar` モックに置換、11 箇所の `getByTestId('left-pane-tab-switcher')` を `getByTestId('activity-bar')` 等に置換、Files タブ切替テストは ArrowDown/Enter キー操作経路に書き換え。(2) `WorktreeDetailRefactored-cli-tab-switching.test.tsx` — 同様 mock 置換。(3) `app-version-display.test.tsx` — 関係テストでないため mock 削除のみ。(4) `tests/integration/issue-266-acceptance.test.tsx` — testid 置換または ActivityBar 経由の検証に書き換え。受入条件『横断』の test:unit PASS を満たすために必須。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "Should Fix",
+      "category": "影響ファイル",
+      "title": "leftPaneMemo useMemo (1507-1623) の deps 38 要素再構築方針が未記載",
+      "missing_in_issue": "実装方針 §7 移行手順 5『`historySubTab` state と Message/Git サブタブ UI を PC 経路から除去』とだけあるが、`leftPaneMemo` 全体を ActivityPane ベースで再構築する際の deps 配列管理方針が不在。",
+      "evidence": "src/components/worktree/WorktreeDetailRefactored.tsx:1507-1623 `leftPaneMemo = useMemo(...)`、deps 配列（:1622）に `leftPaneTab, handleLeftPaneTabChange, historySubTab, state.messages, worktreeId, handleFilePathClick, showToast, fileSearch.query, fileSearch.mode, fileSearch.isSearching, fileSearch.error, fileSearch.setQuery, fileSearch.setMode, fileSearch.clearSearch, fileSearch.results?.results, handleFileSelect, handleNewFile, handleNewDirectory, handleRename, handleDelete, handleUpload, handleMove, handleCmateSetup, fileTreeRefresh, selectedAgents, handleSelectedAgentsChange, vibeLocalModel, handleVibeLocalModelChange, vibeLocalContextWindow, handleVibeLocalContextWindowChange, handleDiffSelect, handleInsertToMessage, showArchived, handleShowArchivedChange, historyDisplayLimit, handleHistoryDisplayLimitChange, historyUserOnly, handleHistoryUserOnlyChange, actions.toggleLeftPane` の 38 要素。コメント（:1500-1506）にも『MAINTENANCE NOTE (Issue #411, R3-007): 新プロップ追加時は deps にも追加せよ』と明記。",
+      "impact": "ActivityPane / HistoryPane を分離するに伴い、(A) leftPaneMemo を破棄して `activityPaneMemo` / `historyPaneMemo` に分割する場合、各 deps を再設計する必要がある。(B) deps 漏れがあると stale closure による『Activity 切替しても中身が更新されない』『Search クリアしても旧結果が表示される』などの subtle bug が再発する（Issue #411 の再発リスク）。Issue #411 のマイナンスノートに準拠するため、deps 一覧の明示が必要。",
+      "suggested_fix": "実装方針 §7 移行手順に手順 5.1 を追加: 『`leftPaneMemo` を分解し `activityPaneMemo` / `historyPaneMemo` の 2 つに分離。各々の deps は Issue #411 R3-007 ガイドラインに従い当該 JSX 内参照プロップを完全列挙する。`historySubTab` と `handleLeftPaneTabChange` は deps から除去、`activeActivity` / `setActiveActivity` / `historyVisible` / `historyWidth` 等を新規追加』。さらにテスト方針に『memo 再生成テスト: Activity 切替で activityPane の memo は更新、historyPane の memo は更新されない（再レンダリングコスト最小化検証）』を追加。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "Should Fix",
+      "category": "影響ファイル",
+      "title": "useFilePolling enabled 条件: activeActivity === null（hydration 前 / 閉じた状態）の挙動仕様が曖昧",
+      "missing_in_issue": "実装方針 §7 手順 4 で『`activeActivity === \"files\"` に置換、Pane 閉じ時はポーリング停止』と明記したが、(a) サーバ初回レンダー時 `null` （localStorage 未読込）と (b) ユーザが Pane を閉じた `null` の区別、(c) hydration 直後に最初のフェッチが走るかどうか、が未定義。",
+      "evidence": "src/hooks/useFilePolling.ts:36 `useFilePolling({ intervalMs, enabled, onPoll })`; src/components/worktree/WorktreeDetailRefactored.tsx:267-289 既存実装で `enabled: state.layout.leftPaneTab === 'files'` は SSR 時 'history' で false。新方針では `useActivityBarState()` の戻り値 `ActivityState = ActivityId | null` を使うが、`null` 初期値の場合は localStorage hydration を待つロジック（useLocalStorageState）が必要で、useWorktreeUIState の hydration ロジック（:287-296 isHydratedRef）に倣う必要がある。",
+      "impact": "(1) hydration 前の `null` 状態でも Files が DEFAULT_ACTIVITY=files として表示される一方、`enabled=false` でポーリングが走らない初回フリッカーが発生する可能性。(2) ユーザが Files Activity を閉じた後 reload した場合、`active===null` だが Issue 本文受入条件『起動時の選択 activity は localStorage から復元、デフォルトは Files』との整合が曖昧。",
+      "suggested_fix": "実装方針 §1 永続化方針に追記: 『hydration 完了前は `active` の決定論的初期値として `DEFAULT_ACTIVITY = 'files'` を返し、`useFilePolling.enabled = (active === 'files')` の SSR-CSR 不一致を避ける』。さらに『S1-010 受入条件: `localStorage には最後に選択した Activity ID のみ` の方針を再確認し、Pane 閉じ状態は localStorage に保存しない（次回起動時は前回 ID で open）』を再強調。テスト方針 useFilePolling 移行検証に『hydration 前後で enabled 状態が flip しない（初回フェッチが 1 回のみ走る）』を追加。"
+    },
+    {
+      "id": "S3-007",
+      "severity": "Should Fix",
+      "category": "影響ファイル",
+      "title": "docs/UI_UX_GUIDE.md (ja/en) のアーキテクチャ図が『2カラム』のまま",
+      "missing_in_issue": "想定影響範囲『既存変更』表で `CLAUDE.md` / `CHANGELOG.md` は記載されているが、`docs/UI_UX_GUIDE.md` / `docs/en/UI_UX_GUIDE.md` のドキュメント更新が漏れ。",
+      "evidence": "docs/UI_UX_GUIDE.md:219 `WorktreeDesktopLayout.tsx     # デスクトップ2カラム`; docs/en/UI_UX_GUIDE.md:219 `WorktreeDesktopLayout.tsx     # Desktop 2-column`。Issue 本文では『2col → 4col』化を明記しているが docs 図は古いまま残る。",
+      "impact": "ドキュメント乖離。新規貢献者が UX ガイドを読んでも 4 カラム構造を理解できず、Issue #728（ターミナル分割）並行作業者にも誤情報が伝わる。",
+      "suggested_fix": "想定影響範囲『既存変更』表に 2 行追加: (1) `docs/UI_UX_GUIDE.md` — WorktreeDesktopLayout の説明を『4カラム（ActivityBar / ActivityPane / History / Right）』に更新。(2) `docs/en/UI_UX_GUIDE.md` — 同様英訳更新。CLAUDE.md の `LeftPaneTabSwitcher.tsx` 行（:247）の削除と新規 `ActivityBar.tsx` / `ActivityPane.tsx` / `useActivityBarState.ts` / `useHistoryPaneState.ts` / `activity-bar-config.ts` 行追加方針も明記。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "Should Fix",
+      "category": "テスト",
+      "title": "WorktreeDetailRefactored-mobile-overflow.test.tsx の DOM 構造アサーションが MobileContent props 変化で影響を受ける可能性",
+      "missing_in_issue": "テスト更新リストに `tests/unit/components/worktree/WorktreeDetailRefactored-mobile-overflow.test.tsx` の影響有無検証が含まれていない。",
+      "evidence": "tests/unit/components/worktree/WorktreeDetailRefactored-mobile-overflow.test.tsx:27-40 が `<MobileContent` directly preceded by `<main className=\"...\">` という DOM 配置を文字列マッチで検証。本 Issue では MobileContent の props 変更は『無し（現状維持）』方針だが、PC 側で `historySubTab` state を除去すると `WorktreeDetailRefactored.tsx:1937-1938` の `historySubTab={historySubTab} onHistorySubTabChange={setHistorySubTab}` を **削除するかモバイル限定で残すか** が決まる。後者の場合は MobileContentProps に変更なしで OK、前者の場合は state を別場所（例: useWorktreeTabState の derived）に移すため広範囲影響。",
+      "impact": "テスト自体は MobileContent props を検査しないので直接 fail はしないが、リファクタリング時に MobileContent props のシグネチャ変更が連鎖し、レビュー時に発見されないと build エラー検出が遅れる。",
+      "suggested_fix": "実装方針 §7 手順 5 に明示: 『`historySubTab` state（WorktreeDetailRefactored.tsx:293）はモバイル経路（MobileContent props に伝播、:1937-1938）でも使用中のため、PC 経路の Message/Git UI（:1518-1568）削除後も state 自体は残置する。useState の宣言場所も同位置に維持し、props シグネチャ変更を発生させない』。テスト更新リストに『`WorktreeDetailRefactored-mobile-overflow.test.tsx` — 影響なし（DOM 配置不変）を確認のみ』を追加。"
+    },
+    {
+      "id": "S3-009",
+      "severity": "Should Fix",
+      "category": "競合リスク",
+      "title": "Issue #728（ターミナル分割）との WorktreeDesktopLayout.tsx 同時編集競合リスクの具体的回避策が無い",
+      "missing_in_issue": "スコープ外で『Issue #728 はターミナル + FilePanel 内部の分割のみ』と責務分離は明記したが、`WorktreeDesktopLayout.tsx` 自体は本 Issue（2col→4col 再構成）でも Issue #728 でも触る可能性があり、マージ順序の指針が無い。",
+      "evidence": "Issue 本文（行 297）『Issue #728 は本 Issue で再構成する 4 カラム右ペイン構造には依存しない』；影響範囲『既存変更』表（行 159）『WorktreeDesktopLayout.tsx | 2col → 4col』。Issue #728 が同ファイル内 `rightPane` の構造を変更する場合、git merge conflict 確実。",
+      "impact": "並行開発時、後発 PR が `WorktreeDesktopLayout.tsx` を rebase する際に 4-column props 体系と 2-column 旧体系のどちらをベースにすべきか不明で大規模競合発生リスク。Issue #728 の作業ブランチが既に存在する場合、本 Issue の rightPane props 仕様（行 236）と整合性確認が必要。",
+      "suggested_fix": "対応方針か関連セクションに『マージ順序』ブロック追加: 『(1) 本 Issue（#727）を先にマージし develop に取り込む。(2) Issue #728 は #727 マージ後の WorktreeDesktopLayout.tsx 4-column 体系を前提に `rightPane` 内部のみを分割する。並行作業中の場合、#728 担当者は #727 ブランチを定期的に rebase する』。あるいは『#728 を先行する場合は WorktreeDesktopLayout.tsx の rightPane 内部のみに変更を留め、props シグネチャは触らない』ことを明示。"
+    },
+    {
+      "id": "S3-010",
+      "severity": "Nice to Have",
+      "category": "依存",
+      "title": "lucide-react 0.554.0 で必要アイコン（Files/GitBranch/StickyNote/Calendar/Bot/Timer）の実在確認が本文に無い",
+      "missing_in_issue": "実装方針 §1 の `ActivityDef` 配列で `FileIcon` / `GitBranchIcon` / `StickyNoteIcon` / `CalendarIcon` / `BotIcon` / `TimerIcon` を import する想定だが、lucide-react 0.554.0 で全アイコンが exists するかの確認言及がない。",
+      "evidence": "package.json:69 `\"lucide-react\": \"^0.554.0\"`（既存依存）; src/components/worktree/HistoryPane.tsx:14 `import { Search, User, UserCheck } from 'lucide-react'` 等で既に使用実績あり。lucide-react 0.554.0 の actual export 名は確認必要（例: `File` vs `FileIcon`、`StickyNote` vs `StickyNoteIcon`、`Timer` vs `TimerIcon`）。",
+      "impact": "実装時に名前ミスマッチで import error。低リスクだが本文の型定義 `icon: React.ComponentType<{ size?: number }>` の signature と lucide-react `LucideIcon` 型の互換確認も望ましい。",
+      "suggested_fix": "実装方針 §1 にコメント追加: 『lucide-react 0.554.0 の正式 export 名は `File`, `GitBranch`, `StickyNote`, `Calendar`, `Bot`, `Timer`（接尾辞 `Icon` なし）。例: `import { File as FileIcon, GitBranch as GitBranchIcon, ... } from \"lucide-react\"`。`icon: LucideIcon` 型を採用すると `size`/`className` props の型安全性が向上』。"
+    },
+    {
+      "id": "S3-011",
+      "severity": "Nice to Have",
+      "category": "影響ファイル",
+      "title": "ActivityBar の aria-controls 既存 DOM ID `worktree-left-pane` との衝突回避設計が未記載",
+      "missing_in_issue": "Activity Bar 受入条件アクセシビリティに『aria-controls』を含むが、既存 `WorktreeDesktopLayout.tsx:248` で `id=\"worktree-left-pane\"` が左ペイン全体に付与されている。Activity 単位の aria-controls 連携 DOM ID 命名が無い。",
+      "evidence": "src/components/worktree/WorktreeDesktopLayout.tsx:248 `id=\"worktree-left-pane\"` および aria-controls 参照（:224 `aria-controls=\"worktree-left-pane\"`）。新 4-column 構成では左ペインが ActivityBar/ActivityPane/HistoryPane の 3 領域に分かれるため、ID 構成が破綻する。",
+      "impact": "ID 重複/aria-controls 不整合でアクセシビリティ assertion が誤動作。受入条件『Testing Library の getByRole('tab') / aria-controls 属性アサーションで検証』が暗黙のうちに不可能になる。",
+      "suggested_fix": "実装方針 §3 に追記: 『新 4-column の DOM ID 設計を以下に統一』 (1) ActivityBar: `id=\"worktree-activity-bar\"`、(2) ActivityPane: `id=\"worktree-activity-pane\"`、(3) HistoryPane: `id=\"worktree-history-pane\"`、(4) Right: `id=\"worktree-right-pane\"`（既存）。各 ActivityBar tab の `aria-controls=\"worktree-activity-pane\"` で統一。旧 `id=\"worktree-left-pane\"` は廃止（テスト書き換え対象に追加）。"
+    },
+    {
+      "id": "S3-012",
+      "severity": "Nice to Have",
+      "category": "テスト",
+      "title": "mobile-cmate-tab.spec.ts などモバイル E2E への影響有無の明示が欠如",
+      "missing_in_issue": "受入条件『横断』『PC 版のみが対象。モバイル現状維持』とあるが、tests/e2e/mobile-cmate-tab.spec.ts などモバイル E2E への波及有無の明示が無い。",
+      "evidence": "tests/e2e/mobile-cmate-tab.spec.ts（存在）, tests/e2e/worktree-detail.spec.ts（存在）; tests/unit/prompt-detector.test.ts:2338 で `tests/e2e/mobile-cmate-tab.spec.ts` への参照を確認。これら E2E は NotesAndLogsPane（モバイル経路）を経由するため、本 Issue の『モバイル維持』方針が守られれば影響なし、破壊された場合は E2E 全体が落ちる。",
+      "impact": "リグレッションの早期発見遅延。E2E は CI 必須ではない（README 推奨レベル）が、Issue #136 worktree 並列開発時の品質保証として影響範囲確認は重要。",
+      "suggested_fix": "受入条件『テスト更新リスト』に新規ブロック追加: 『E2E テストへの影響は無いことを確認: `tests/e2e/mobile-cmate-tab.spec.ts` / `tests/e2e/worktree-detail.spec.ts` / `tests/e2e/file-tree-operations.spec.ts` / `tests/e2e/markdown-editor.spec.ts` — モバイル経路維持により実行・PASS を確認（CI 必須対象外でも作業者の手元で 1 回実行する）』。"
+    }
+  ],
+  "must_fix_count": 4,
+  "should_fix_count": 5,
+  "nice_to_have_count": 3,
+  "overall_assessment": "Stage 2 で Issue 本文は大幅改善されたが、影響範囲レビュー（Stage 3）では Stage 1 の通常レビューでは検出しきれなかった『波及効果』を 12 件追加検出した。特に Must Fix 4 件はいずれも CI を物理的に失敗させる致命度: (1) `src/types/ui-actions.ts` 影響表漏れ（実装者の自由裁量に丸投げで一貫性破壊）、(2-4) テスト 7 ファイル（tests/unit/types/left-pane-tab.test.ts / deep-link-mapping.test.ts / useWorktreeTabState.test.ts / WorktreeDetailRefactored.test.tsx / WorktreeDetailRefactored-cli-tab-switching.test.tsx / app-version-display.test.tsx / issue-266-acceptance.test.tsx）が未列挙のままで build / test:unit / tsc どれも PASS しない。Stage 1 の S1-009 で挙げた 4 テスト（LeftPaneTabSwitcher / NotesAndLogsPane / HistoryPane / WorktreeDesktopLayout）だけでは不十分だったことが Stage 3 で明らかになった。Should Fix 5 件（leftPaneMemo deps、useFilePolling hydration、docs/UI_UX_GUIDE.md、MobileContent overflow test、#728 マージ順序）は、いずれも実装時の隠れた不具合・ドキュメント乖離・将来コンフリクトを招く伏線。Nice to Have 3 件（lucide-react export 名、aria-controls DOM ID、E2E 影響）は実装精度向上のための補助情報。",
+  "recommended_next_action": "Stage 4 で Issue #727 本文に以下を反映する: (1) 想定影響範囲『既存変更』表に `src/types/ui-actions.ts` 行追加、または実装方針 §1-2 で『ActivityBar/HistoryPane state は独立 hook で管理し useReducer 統合しない』方針を確定 (S3-001)、(2) テスト更新リスト『削除/置換』に 7 ファイル追加: `tests/unit/types/left-pane-tab.test.ts`（削除）、`tests/unit/hooks/deep-link-mapping.test.ts`（activityId 列追加）、`tests/unit/hooks/useWorktreeTabState.test.ts`（activityId アサーション追加）、`tests/unit/components/WorktreeDetailRefactored.test.tsx`（ActivityBar mock 置換 + testid 11 箇所書き換え）、`tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx`（同様 mock 置換）、`tests/unit/components/app-version-display.test.tsx`（無関係 mock 削除）、`tests/integration/issue-266-acceptance.test.tsx`（testid 置換）(S3-002〜004)、(3) 実装方針 §7 移行手順に手順 5.1『leftPaneMemo 分割と deps 再設計（Issue #411 R3-007 準拠）』を追加 (S3-005)、(4) 実装方針 §1 永続化方針に『hydration 前は DEFAULT_ACTIVITY=files を返し SSR-CSR 不一致を避ける』を追記 (S3-006)、(5) 想定影響範囲『既存変更』表に `docs/UI_UX_GUIDE.md` / `docs/en/UI_UX_GUIDE.md` 追加、CLAUDE.md の新規ファイル行追加方針も具体化 (S3-007)、(6) 実装方針 §7 手順 5 に『historySubTab state はモバイル経路維持のため WorktreeDetailRefactored.tsx に残置』を明示 (S3-008)、(7) 関連セクションに『マージ順序』ブロック追加（#727 を先行マージ、#728 は #727 ベースで再構築）(S3-009)、(8) 実装方針 §1 に lucide-react 正式 export 名（Files/GitBranch/StickyNote/Calendar/Bot/Timer、Icon 接尾辞なし）と LucideIcon 型採用を補足 (S3-010)、(9) 実装方針 §3 に新 4-column DOM ID 設計（worktree-activity-bar / worktree-activity-pane / worktree-history-pane / worktree-right-pane）追加 (S3-011)、(10) 受入条件『テスト更新リスト』に E2E 確認ブロック追加 (S3-012)。Stage 4 で本文反映完了後、Stage 5 で本文の最終整合性レビューを実施する。"
+}

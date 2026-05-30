@@ -12,6 +12,7 @@ import type { WorktreeUIState, UIPhase, ErrorState, MobileActivePane, LeftPaneTa
 import type { WorktreeUIAction } from '@/types/ui-actions';
 import type { ChatMessage, PromptData } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import type { ActivityId } from '@/config/activity-bar-config';
 import {
   createInitialUIState,
   initialTerminalState,
@@ -130,6 +131,65 @@ export function worktreeUIReducer(
         layout: { ...state.layout, leftPaneCollapsed: action.collapsed },
       };
 
+    // Issue #727: Activity Bar actions
+    case 'SET_ACTIVE_ACTIVITY':
+      return {
+        ...state,
+        layout: {
+          ...state.layout,
+          activityBar: { ...state.layout.activityBar, active: action.activity },
+        },
+      };
+
+    case 'TOGGLE_ACTIVITY': {
+      const current = state.layout.activityBar.active;
+      const next = current === action.activity ? null : action.activity;
+      return {
+        ...state,
+        layout: {
+          ...state.layout,
+          activityBar: { ...state.layout.activityBar, active: next },
+        },
+      };
+    }
+
+    case 'TOGGLE_HISTORY_PANE': {
+      const visible = !state.layout.historyPane.visible;
+      return {
+        ...state,
+        layout: {
+          ...state.layout,
+          historyPane: {
+            ...state.layout.historyPane,
+            visible,
+            collapsed: !visible,
+          },
+        },
+      };
+    }
+
+    case 'SET_HISTORY_PANE_VISIBLE':
+      return {
+        ...state,
+        layout: {
+          ...state.layout,
+          historyPane: {
+            ...state.layout.historyPane,
+            visible: action.visible,
+            collapsed: !action.visible,
+          },
+        },
+      };
+
+    case 'SET_HISTORY_WIDTH':
+      return {
+        ...state,
+        layout: {
+          ...state.layout,
+          historyPane: { ...state.layout.historyPane, width: action.width },
+        },
+      };
+
     // Error actions
     case 'SET_ERROR':
       return { ...state, error: action.error };
@@ -232,6 +292,12 @@ export interface WorktreeUIActions {
   setWsConnected: (connected: boolean) => void;
   /** Toggle left pane collapsed state (Issue #688) */
   toggleLeftPane: () => void;
+  // Issue #727: Activity Bar + History pane actions
+  setActiveActivity: (activity: ActivityId | null) => void;
+  toggleActivity: (activity: ActivityId) => void;
+  toggleHistoryPane: () => void;
+  setHistoryPaneVisible: (visible: boolean) => void;
+  setHistoryWidth: (width: number) => void;
 }
 
 /**
@@ -365,6 +431,25 @@ export function useWorktreeUIState(): {
         dispatch({ type: 'SET_LEFT_PANE_COLLAPSED', collapsed: next });
         setStoredCollapsed(next);
       },
+
+      // Issue #727: Activity Bar + History pane actions.
+      // Persistence is owned by useActivityBarState / useHistoryPaneState in
+      // WorktreeDetailRefactored — these dispatchers only update reducer state
+      // so that components reading `state.layout.activityBar` / `historyPane`
+      // stay in sync.
+      setActiveActivity: (activity: ActivityId | null) =>
+        dispatch({ type: 'SET_ACTIVE_ACTIVITY', activity }),
+
+      toggleActivity: (activity: ActivityId) =>
+        dispatch({ type: 'TOGGLE_ACTIVITY', activity }),
+
+      toggleHistoryPane: () => dispatch({ type: 'TOGGLE_HISTORY_PANE' }),
+
+      setHistoryPaneVisible: (visible: boolean) =>
+        dispatch({ type: 'SET_HISTORY_PANE_VISIBLE', visible }),
+
+      setHistoryWidth: (width: number) =>
+        dispatch({ type: 'SET_HISTORY_WIDTH', width }),
     }),
     [setStoredCollapsed]
   );

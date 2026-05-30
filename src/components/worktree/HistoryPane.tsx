@@ -11,7 +11,7 @@
 'use client';
 
 import React, { useMemo, useCallback, memo, useRef, useLayoutEffect, useState, useEffect } from 'react';
-import { Search, User, UserCheck } from 'lucide-react';
+import { Search, User, UserCheck, ChevronRight } from 'lucide-react';
 import type { ChatMessage } from '@/types/models';
 import { useConversationHistory } from '@/hooks/useConversationHistory';
 import { useHistorySearch } from '@/hooks/useHistorySearch';
@@ -70,6 +70,12 @@ export interface HistoryPaneProps {
   historyUserOnly?: boolean;
   /** Issue #725: Callback when the "User only" toggle changes. */
   onHistoryUserOnlyChange?: (next: boolean) => void;
+  /**
+   * Issue #727: When provided, a collapse button (▶) is rendered in the
+   * header so the user can hide the dedicated PC History column.
+   * Omit on mobile or when the column cannot be hidden.
+   */
+  onCollapse?: () => void;
 }
 
 // ============================================================================
@@ -177,6 +183,7 @@ export const HistoryPane = memo(function HistoryPane({
   onHistoryDisplayLimitChange,
   historyUserOnly = false,
   onHistoryUserOnlyChange,
+  onCollapse,
 }: HistoryPaneProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const scrollPositionRef = useRef<number>(0);
@@ -478,6 +485,20 @@ export const HistoryPane = memo(function HistoryPane({
           >
             <Search size={14} aria-hidden="true" />
           </button>
+          {onCollapse && (
+            <button
+              type="button"
+              onClick={onCollapse}
+              aria-label="Collapse history panel"
+              aria-expanded="true"
+              aria-controls="worktree-history-pane"
+              className="p-1 text-gray-400 hover:text-gray-200 rounded transition-colors"
+              title="Collapse history panel"
+              data-testid="history-pane-collapse-button"
+            >
+              <ChevronRight size={14} aria-hidden="true" />
+            </button>
+          )}
         </div>
       </div>
 
