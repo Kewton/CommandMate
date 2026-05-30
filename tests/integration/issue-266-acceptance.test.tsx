@@ -65,9 +65,21 @@ vi.mock('@/hooks/useSlashCommands', () => ({
 
 // Mock child components - we need MessageInput to be trackable
 vi.mock('@/components/worktree/WorktreeDesktopLayout', () => ({
-  WorktreeDesktopLayout: ({ leftPane, rightPane }: { leftPane: React.ReactNode; rightPane: React.ReactNode }) => (
+  WorktreeDesktopLayout: ({
+    activityBar,
+    activityPane,
+    historyPane,
+    rightPane,
+  }: {
+    activityBar: React.ReactNode;
+    activityPane: React.ReactNode;
+    historyPane: React.ReactNode;
+    rightPane: React.ReactNode;
+  }) => (
     <div data-testid="desktop-layout">
-      <div data-testid="left-pane">{leftPane}</div>
+      <div data-testid="activity-bar-slot">{activityBar}</div>
+      <div data-testid="activity-pane-slot">{activityPane}</div>
+      <div data-testid="history-pane-slot">{historyPane}</div>
       <div data-testid="right-pane">{rightPane}</div>
     </div>
   ),
@@ -149,9 +161,16 @@ vi.mock('@/components/worktree/FileTreeView', () => ({
   FileTreeView: () => <div data-testid="file-tree-view">FileTree</div>,
 }));
 
-vi.mock('@/components/worktree/LeftPaneTabSwitcher', () => ({
-  LeftPaneTabSwitcher: ({ activeTab }: { activeTab: string }) => (
-    <div data-testid="left-pane-tab-switcher" data-active={activeTab}>Tabs</div>
+// Issue #727: ActivityBar replaces LeftPaneTabSwitcher
+vi.mock('@/components/worktree/ActivityBar', () => ({
+  ActivityBar: ({ active }: { active: string | null }) => (
+    <div data-testid="activity-bar" data-active={active ?? 'none'}>Activity Bar</div>
+  ),
+}));
+
+vi.mock('@/components/worktree/ActivityPane', () => ({
+  ActivityPane: ({ active }: { active: string | null }) => (
+    <div data-testid="activity-pane" data-active={active ?? 'none'}>Pane</div>
   ),
 }));
 
@@ -449,7 +468,14 @@ describe('Issue #266 Acceptance Tests: Tab switching preserves input content', (
       });
 
       await new Promise((resolve) => setTimeout(resolve, 100));
-      expect(mockFetch).not.toHaveBeenCalled();
+      // Issue #727: ignore unrelated file-tree polling (the 'files' activity is the
+      // new default, so visibilitychange resumes /tree polling independently of the
+      // recovery throttle this scenario is about).
+      const recoveryCalls = mockFetch.mock.calls.filter((call) => {
+        const url = typeof call[0] === 'string' ? call[0] : '';
+        return !url.endsWith('/tree');
+      });
+      expect(recoveryCalls).toHaveLength(0);
 
       // 3rd event at +6s total: should trigger fetch (past 5s window)
       currentTime += 4000;

@@ -1,9 +1,20 @@
 /**
- * WorktreeDesktopLayout Component
+ * WorktreeDesktopLayout Component (Issue #727)
  *
- * Two-column grid layout with resizable panes.
- * Wraps each pane in ErrorBoundary for fault isolation.
- * Responsive: switches to single column on mobile.
+ * 4-column desktop layout:
+ *   [ActivityBar 48px] + Resizer + [ActivityPane (variable, optional)]
+ *   + Resizer + [HistoryPane (variable, optional)] + Resizer + [Right (flex)]
+ *
+ * - When `activityPane` is null, the activity column AND its trailing resizer
+ *   are hidden.
+ * - When `historyPaneCollapsed` is true, the history column AND its
+ *   trailing/leading resizer are hidden, and a 24px expand bar with a ◀
+ *   button is shown to re-open it.
+ * - Mobile (`useIsMobile === true`): falls back to a 2-pane swipe layout to
+ *   preserve the previous behavior. The "left" side composes the history
+ *   pane if visible, otherwise the activity pane.
+ *
+ * Each pane is wrapped in ErrorBoundary for fault isolation.
  */
 
 'use client';
@@ -18,120 +29,70 @@ import { PaneResizer } from './PaneResizer';
 // ============================================================================
 
 /**
- * Props for WorktreeDesktopLayout component
+ * Props for WorktreeDesktopLayout component (Issue #727 4-column API).
  */
 export interface WorktreeDesktopLayoutProps {
-  /** Content for the left pane */
-  leftPane: ReactNode;
-  /** Content for the right pane */
+  /** Vertical 48px Activity Bar element (always rendered on PC). */
+  activityBar: ReactNode;
+  /** Activity Pane content. Pass `null` to hide the column entirely. */
+  activityPane: ReactNode | null;
+  /** History Pane content. Pass `null` (or set `historyPaneCollapsed`) to hide. */
+  historyPane: ReactNode | null;
+  /** Right column (terminal + file panel). Always rendered. */
   rightPane: ReactNode;
-  /** Initial width of left pane as percentage (default: 50) */
-  initialLeftWidth?: number;
-  /** Minimum width of left pane as percentage (default: 20) */
-  minLeftWidth?: number;
-  /** Maximum width of left pane as percentage (default: 80) */
-  maxLeftWidth?: number;
-  /** Additional CSS classes */
+
+  /** Width of the activity pane column in percent (default 18). */
+  activityPaneWidth?: number;
+  /** Width of the history pane column in percent (default 22). */
+  historyPaneWidth?: number;
+  /** Minimum pane width in percent (default 10). */
+  minPaneWidth?: number;
+  /** Maximum pane width in percent (default 60). */
+  maxPaneWidth?: number;
+
+  /** Called when the activity pane is resized (delta in percent). */
+  onActivityPaneResize?: (nextPercent: number) => void;
+  /** Called when the history pane is resized (delta in percent). */
+  onHistoryPaneResize?: (nextPercent: number) => void;
+
+  /** History pane collapsed flag (when true, history column is hidden + expand bar shown). */
+  historyPaneCollapsed?: boolean;
+  /** Toggle the history pane (called by the expand bar). */
+  onToggleHistoryPane?: () => void;
+
+  /** Optional extra className for the root element. */
   className?: string;
-  /**
-   * Whether the left pane is collapsed (Issue #688).
-   * Optional for backward compatibility — when undefined, defaults to expanded.
-   */
-  leftPaneCollapsed?: boolean;
-  /**
-   * Callback to toggle the left pane collapsed state (Issue #688).
-   * Required when leftPaneCollapsed is controlled; the expand bar will not render
-   * a working button without it.
-   */
-  onToggleLeftPane?: () => void;
 }
-
-/** Props for MobileLayout sub-component */
-interface MobileLayoutProps {
-  leftPane: ReactNode;
-  rightPane: ReactNode;
-}
-
-/** Props for DesktopLayout sub-component */
-interface DesktopLayoutProps {
-  leftPane: ReactNode;
-  rightPane: ReactNode;
-  leftWidth: number;
-  onResize: (delta: number) => void;
-  className: string;
-  /** Issue #688: collapsed state for left pane */
-  leftPaneCollapsed: boolean;
-  /** Issue #688: callback to expand the left pane */
-  onToggleLeftPane?: () => void;
-}
-
-/** Active pane type for mobile layout */
-type ActivePane = 'left' | 'right';
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-/** Default pane width settings */
-const DEFAULT_LEFT_WIDTH = 50;
-const DEFAULT_MIN_WIDTH = 20;
-const DEFAULT_MAX_WIDTH = 80;
+const DEFAULT_ACTIVITY_PANE_WIDTH = 18;
+const DEFAULT_HISTORY_PANE_WIDTH = 22;
+const DEFAULT_MIN_PANE_WIDTH = 10;
+const DEFAULT_MAX_PANE_WIDTH = 60;
 
-/** Tab labels for mobile layout */
-const TAB_LABELS = {
-  left: 'History',
-  right: 'Terminal',
-} as const;
+const EXPAND_BAR_WIDTH_PX = 24;
 
-/** Component names for ErrorBoundary */
-const COMPONENT_NAMES = {
-  left: 'HistoryPane',
-  right: 'TerminalPane',
-} as const;
+const ACTIVITY_BAR_ID = 'worktree-activity-bar';
+const ACTIVITY_PANE_ID = 'worktree-activity-pane';
+const HISTORY_PANE_ID = 'worktree-history-pane';
+const RIGHT_PANE_ID = 'worktree-right-pane';
 
 // ============================================================================
-// Sub-components
+// Mobile fallback
 // ============================================================================
 
-/**
- * Tab button for mobile layout.
- * Memoized to prevent unnecessary re-renders.
- */
-const TabButton = memo(function TabButton({
-  pane,
-  isActive,
-  onClick,
-}: {
-  pane: ActivePane;
-  isActive: boolean;
-  onClick: () => void;
-}) {
-  const baseClasses = 'flex-1 py-2 px-4 text-sm font-medium transition-colors';
-  const activeClasses = 'text-blue-400 border-b-2 border-blue-400 bg-gray-900';
-  const inactiveClasses = 'text-gray-400 hover:text-gray-300';
+type ActivePane = 'left' | 'right';
 
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={isActive}
-      aria-controls={`${pane}-panel`}
-      onClick={onClick}
-      className={`${baseClasses} ${isActive ? activeClasses : inactiveClasses}`}
-    >
-      {TAB_LABELS[pane]}
-    </button>
-  );
-});
-
-/**
- * Mobile layout component - single column with toggle.
- * Memoized to prevent unnecessary re-renders.
- */
 const MobileLayout = memo(function MobileLayout({
   leftPane,
   rightPane,
-}: MobileLayoutProps) {
+}: {
+  leftPane: ReactNode;
+  rightPane: ReactNode;
+}) {
   const [activePane, setActivePane] = useState<ActivePane>('right');
 
   const handleLeftClick = useCallback(() => setActivePane('left'), []);
@@ -141,19 +102,44 @@ const MobileLayout = memo(function MobileLayout({
 
   return (
     <div data-testid="mobile-layout" className="flex flex-col h-full">
-      {/* Tab bar */}
       <div className="flex border-b border-gray-700 bg-gray-800" role="tablist">
-        <TabButton pane="left" isActive={activePane === 'left'} onClick={handleLeftClick} />
-        <TabButton pane="right" isActive={activePane === 'right'} onClick={handleRightClick} />
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activePane === 'left'}
+          aria-controls="left-panel"
+          onClick={handleLeftClick}
+          className={`flex-1 py-2 px-4 text-sm font-medium transition-colors ${
+            activePane === 'left'
+              ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-900'
+              : 'text-gray-400 hover:text-gray-300'
+          }`}
+        >
+          History
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activePane === 'right'}
+          aria-controls="right-panel"
+          onClick={handleRightClick}
+          className={`flex-1 py-2 px-4 text-sm font-medium transition-colors ${
+            activePane === 'right'
+              ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-900'
+              : 'text-gray-400 hover:text-gray-300'
+          }`}
+        >
+          Terminal
+        </button>
       </div>
-
-      {/* Active pane content */}
       <div
         id={`${activePane}-panel`}
         role="tabpanel"
         className="flex-1 overflow-hidden"
       >
-        <ErrorBoundary componentName={COMPONENT_NAMES[activePane]}>
+        <ErrorBoundary
+          componentName={activePane === 'left' ? 'HistoryPane' : 'TerminalPane'}
+        >
           {currentPane}
         </ErrorBoundary>
       </div>
@@ -161,201 +147,230 @@ const MobileLayout = memo(function MobileLayout({
   );
 });
 
-/** Width of the expand bar shown when the left pane is collapsed (Issue #688). */
-const EXPAND_BAR_WIDTH_PX = 24;
+// ============================================================================
+// ResizableColumn — DRY helper for the activity / history columns.
+// Both columns share the same wrapper structure (id + data-testid + aria-label
+// + width style + transition class + ErrorBoundary) followed by a resizer.
+// Extracting this avoids drift between the two blocks when DOM contracts are
+// updated. The DOM contract (id, data-testid, aria-label, style.width) is
+// covered by WorktreeDesktopLayout.test.tsx.
+// ============================================================================
 
-/**
- * Desktop layout component - two columns with resizer.
- * Memoized to prevent unnecessary re-renders.
- *
- * Issue #688: Supports left pane collapse. When `leftPaneCollapsed` is true,
- * the left pane is rendered with width 0, the resizer is hidden, and a 24px
- * expand bar with a ▶ button is shown at the left edge.
- */
-const DesktopLayout = memo(function DesktopLayout({
-  leftPane,
-  rightPane,
-  leftWidth,
+interface ResizableColumnProps {
+  /** DOM id used for aria-controls wiring (e.g. `worktree-history-pane`). */
+  id: string;
+  /** data-testid for the column slot wrapper (e.g. `history-pane-slot`). */
+  slotTestId: string;
+  /** aria-label for the column slot wrapper. */
+  ariaLabel: string;
+  /** Width in percent (rendered as `${width}%`). */
+  widthPercent: number;
+  /** ErrorBoundary componentName for fault isolation. */
+  errorBoundaryName: string;
+  /** Resizer callback (delta in pixels). */
+  onResize: (delta: number) => void;
+  /** Column content. */
+  children: ReactNode;
+}
+
+const ResizableColumn = memo(function ResizableColumn({
+  id,
+  slotTestId,
+  ariaLabel,
+  widthPercent,
+  errorBoundaryName,
   onResize,
-  className,
-  leftPaneCollapsed,
-  onToggleLeftPane,
-}: DesktopLayoutProps) {
-  // Memoize pane width styles. When collapsed, force left pane to 0px and
-  // give the right pane the remaining space (full width minus the expand bar).
-  const leftPaneStyle = useMemo(
-    () =>
-      leftPaneCollapsed
-        ? { width: '0px' }
-        : { width: `${leftWidth}%` },
-    [leftWidth, leftPaneCollapsed]
-  );
-  const rightPaneStyle = useMemo(
-    () =>
-      leftPaneCollapsed
-        ? { width: `calc(100% - ${EXPAND_BAR_WIDTH_PX}px)` }
-        : { width: `${100 - leftWidth}%` },
-    [leftWidth, leftPaneCollapsed]
-  );
-
-  // Memoize container className
-  const containerClassName = useMemo(
-    () => `flex h-full min-h-0 ${className}`.trim(),
-    [className]
-  );
-
+  children,
+}: ResizableColumnProps) {
   return (
-    <div
-      data-testid="desktop-layout"
-      role="main"
-      className={containerClassName}
-    >
-      {/* Expand bar — shown only when collapsed */}
-      {leftPaneCollapsed && (
-        <div
-          data-testid="expand-bar"
-          style={{ width: `${EXPAND_BAR_WIDTH_PX}px` }}
-          className="flex-shrink-0 flex items-center justify-center bg-gray-100 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700"
-        >
-          <button
-            type="button"
-            aria-label="Expand left panel"
-            aria-expanded="false"
-            aria-controls="worktree-left-pane"
-            onClick={onToggleLeftPane}
-            className="flex items-center justify-center w-full h-10 text-gray-500 dark:text-gray-400 hover:text-cyan-600 dark:hover:text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 5l7 7-7 7"
-              />
-            </svg>
-          </button>
-        </div>
-      )}
-
-      {/* Left pane */}
+    <>
       <div
-        id="worktree-left-pane"
-        data-testid="left-pane"
-        aria-label="History pane"
-        aria-hidden={leftPaneCollapsed}
-        style={leftPaneStyle}
+        id={id}
+        data-testid={slotTestId}
+        aria-label={ariaLabel}
+        style={{ width: `${widthPercent}%` }}
         className="flex-shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out"
       >
-        <ErrorBoundary componentName={COMPONENT_NAMES.left}>
-          {leftPane}
-        </ErrorBoundary>
+        <ErrorBoundary componentName={errorBoundaryName}>{children}</ErrorBoundary>
       </div>
+      <PaneResizer
+        onResize={onResize}
+        orientation="horizontal"
+        ariaValueNow={widthPercent}
+      />
+    </>
+  );
+});
 
-      {/* Resizer — hidden when collapsed (Issue #688) */}
-      {!leftPaneCollapsed && (
-        <PaneResizer onResize={onResize} orientation="horizontal" ariaValueNow={leftWidth} />
-      )}
+// ============================================================================
+// Expand bar (history)
+// ============================================================================
 
-      {/* Right pane */}
-      <div
-        data-testid="right-pane"
-        aria-label="Terminal pane"
-        style={rightPaneStyle}
-        className="flex-grow overflow-hidden"
+const HistoryExpandBar = memo(function HistoryExpandBar({
+  onToggle,
+}: {
+  onToggle?: () => void;
+}) {
+  return (
+    <div
+      data-testid="history-expand-bar"
+      style={{ width: `${EXPAND_BAR_WIDTH_PX}px` }}
+      className="flex-shrink-0 flex items-center justify-center bg-gray-100 dark:bg-gray-800 border-l border-r border-gray-200 dark:border-gray-700"
+    >
+      <button
+        type="button"
+        aria-label="Expand history panel"
+        aria-expanded="false"
+        aria-controls={HISTORY_PANE_ID}
+        onClick={onToggle}
+        className="flex items-center justify-center w-full h-10 text-gray-500 dark:text-gray-400 hover:text-cyan-600 dark:hover:text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
       >
-        <ErrorBoundary componentName={COMPONENT_NAMES.right}>
-          {rightPane}
-        </ErrorBoundary>
-      </div>
+        <svg
+          className="w-4 h-4"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+      </button>
     </div>
   );
 });
 
 // ============================================================================
-// Main Component
+// Main component
 // ============================================================================
 
-/**
- * WorktreeDesktopLayout component for two-column layout with resizable panes.
- *
- * Features:
- * - Resizable panes with drag support
- * - Responsive design (mobile/desktop)
- * - Error boundary isolation for each pane
- * - Keyboard and touch support
- *
- * @example
- * ```tsx
- * <WorktreeDesktopLayout
- *   leftPane={<HistoryPane messages={messages} />}
- *   rightPane={<TerminalDisplay output={output} />}
- *   initialLeftWidth={40}
- *   minLeftWidth={20}
- *   maxLeftWidth={60}
- * />
- * ```
- */
 export const WorktreeDesktopLayout = memo(function WorktreeDesktopLayout({
-  leftPane,
+  activityBar,
+  activityPane,
+  historyPane,
   rightPane,
-  initialLeftWidth = DEFAULT_LEFT_WIDTH,
-  minLeftWidth = DEFAULT_MIN_WIDTH,
-  maxLeftWidth = DEFAULT_MAX_WIDTH,
+  activityPaneWidth = DEFAULT_ACTIVITY_PANE_WIDTH,
+  historyPaneWidth = DEFAULT_HISTORY_PANE_WIDTH,
+  minPaneWidth = DEFAULT_MIN_PANE_WIDTH,
+  maxPaneWidth = DEFAULT_MAX_PANE_WIDTH,
+  onActivityPaneResize,
+  onHistoryPaneResize,
+  historyPaneCollapsed = false,
+  onToggleHistoryPane,
   className = '',
-  leftPaneCollapsed = false,
-  onToggleLeftPane,
 }: WorktreeDesktopLayoutProps) {
   const isMobile = useIsMobile();
   const containerRef = useRef<HTMLDivElement>(null);
-  const [leftWidth, setLeftWidth] = useState(initialLeftWidth);
 
-  /**
-   * Handle resize from PaneResizer.
-   * Converts pixel delta to percentage and updates state with clamping.
-   */
-  const handleResize = useCallback(
+  // Internal width state (controlled fallback when no on*Resize callback is provided).
+  const [localActivityWidth, setLocalActivityWidth] = useState(activityPaneWidth);
+  const [localHistoryWidth, setLocalHistoryWidth] = useState(historyPaneWidth);
+
+  // Effective widths follow props if they look "controlled", otherwise the
+  // internal state. We update internal state when the user drags.
+  const effectiveActivityWidth = onActivityPaneResize ? activityPaneWidth : localActivityWidth;
+  const effectiveHistoryWidth = onHistoryPaneResize ? historyPaneWidth : localHistoryWidth;
+
+  const handleActivityResize = useCallback(
     (delta: number) => {
       const container = containerRef.current;
       if (!container) return;
-
-      const containerWidth = container.offsetWidth;
-      if (containerWidth === 0) return;
-
-      // Convert pixel delta to percentage
-      const percentageDelta = (delta / containerWidth) * 100;
-
-      setLeftWidth((prev) => {
-        const newWidth = prev + percentageDelta;
-        // Clamp to min/max bounds
-        return Math.min(maxLeftWidth, Math.max(minLeftWidth, newWidth));
-      });
+      const w = container.offsetWidth;
+      if (w === 0) return;
+      const percentDelta = (delta / w) * 100;
+      const current = onActivityPaneResize ? activityPaneWidth : localActivityWidth;
+      const next = Math.min(maxPaneWidth, Math.max(minPaneWidth, current + percentDelta));
+      if (onActivityPaneResize) onActivityPaneResize(next);
+      else setLocalActivityWidth(next);
     },
-    [minLeftWidth, maxLeftWidth]
+    [activityPaneWidth, localActivityWidth, minPaneWidth, maxPaneWidth, onActivityPaneResize]
   );
 
-  // Render mobile layout for small screens
+  const handleHistoryResize = useCallback(
+    (delta: number) => {
+      const container = containerRef.current;
+      if (!container) return;
+      const w = container.offsetWidth;
+      if (w === 0) return;
+      const percentDelta = (delta / w) * 100;
+      const current = onHistoryPaneResize ? historyPaneWidth : localHistoryWidth;
+      const next = Math.min(maxPaneWidth, Math.max(minPaneWidth, current + percentDelta));
+      if (onHistoryPaneResize) onHistoryPaneResize(next);
+      else setLocalHistoryWidth(next);
+    },
+    [historyPaneWidth, localHistoryWidth, minPaneWidth, maxPaneWidth, onHistoryPaneResize]
+  );
+
+  const containerClassName = useMemo(
+    () => `flex h-full min-h-0 ${className}`.trim(),
+    [className]
+  );
+
+  // Mobile fallback: collapse to old 2-pane swipe. Compose left side from
+  // whichever pane is currently "visible" (history wins if open, else activity).
   if (isMobile) {
-    return <MobileLayout leftPane={leftPane} rightPane={rightPane} />;
+    const leftForMobile = !historyPaneCollapsed && historyPane ? historyPane : activityPane;
+    return <MobileLayout leftPane={leftForMobile ?? null} rightPane={rightPane} />;
   }
 
-  // Render desktop layout with resizable panes
+  const showActivityCol = activityPane !== null;
+  const showHistoryCol = historyPane !== null && !historyPaneCollapsed;
+
   return (
     <div ref={containerRef} className="h-full">
-      <DesktopLayout
-        leftPane={leftPane}
-        rightPane={rightPane}
-        leftWidth={leftWidth}
-        onResize={handleResize}
-        className={className}
-        leftPaneCollapsed={leftPaneCollapsed}
-        onToggleLeftPane={onToggleLeftPane}
-      />
+      <div
+        data-testid="desktop-layout"
+        role="main"
+        className={containerClassName}
+      >
+        {/* Activity Bar (48px fixed) */}
+        <div
+          id={ACTIVITY_BAR_ID}
+          data-testid="activity-bar-slot"
+          className="flex-shrink-0"
+        >
+          <ErrorBoundary componentName="ActivityBar">{activityBar}</ErrorBoundary>
+        </div>
+
+        {/* Activity Pane (variable, optional) */}
+        {showActivityCol && (
+          <ResizableColumn
+            id={ACTIVITY_PANE_ID}
+            slotTestId="activity-pane-slot"
+            ariaLabel="Activity pane"
+            widthPercent={effectiveActivityWidth}
+            errorBoundaryName="ActivityPane"
+            onResize={handleActivityResize}
+          >
+            {activityPane}
+          </ResizableColumn>
+        )}
+
+        {/* History Pane (variable, optional) */}
+        {showHistoryCol ? (
+          <ResizableColumn
+            id={HISTORY_PANE_ID}
+            slotTestId="history-pane-slot"
+            ariaLabel="History pane"
+            widthPercent={effectiveHistoryWidth}
+            errorBoundaryName="HistoryPane"
+            onResize={handleHistoryResize}
+          >
+            {historyPane}
+          </ResizableColumn>
+        ) : (
+          historyPaneCollapsed && <HistoryExpandBar onToggle={onToggleHistoryPane} />
+        )}
+
+        {/* Right pane (terminal + file panel) — fills remaining space */}
+        <div
+          id={RIGHT_PANE_ID}
+          data-testid="right-pane-slot"
+          aria-label="Terminal pane"
+          className="flex-grow overflow-hidden min-w-0"
+        >
+          <ErrorBoundary componentName="TerminalPane">{rightPane}</ErrorBoundary>
+        </div>
+      </div>
     </div>
   );
 });

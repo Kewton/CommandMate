@@ -544,4 +544,46 @@ describe('HistoryPane', () => {
       expect(el?.textContent).toContain('sentinel answer');
     });
   });
+
+  describe('Collapse button (Issue #727)', () => {
+    it('does not render the collapse button when onCollapse is omitted', () => {
+      render(
+        <HistoryPane
+          messages={[]}
+          worktreeId={defaultWorktreeId}
+          onFilePathClick={mockOnFilePathClick}
+        />
+      );
+      expect(screen.queryByTestId('history-pane-collapse-button')).not.toBeInTheDocument();
+    });
+
+    it('renders the collapse button when onCollapse is provided', () => {
+      render(
+        <HistoryPane
+          messages={[]}
+          worktreeId={defaultWorktreeId}
+          onFilePathClick={mockOnFilePathClick}
+          onCollapse={() => {}}
+        />
+      );
+      const btn = screen.getByTestId('history-pane-collapse-button');
+      expect(btn).toBeInTheDocument();
+      expect(btn).toHaveAttribute('aria-controls', 'worktree-history-pane');
+      expect(btn).toHaveAttribute('aria-expanded', 'true');
+    });
+
+    it('calls onCollapse when the collapse button is clicked', () => {
+      const onCollapse = vi.fn();
+      render(
+        <HistoryPane
+          messages={[]}
+          worktreeId={defaultWorktreeId}
+          onFilePathClick={mockOnFilePathClick}
+          onCollapse={onCollapse}
+        />
+      );
+      fireEvent.click(screen.getByTestId('history-pane-collapse-button'));
+      expect(onCollapse).toHaveBeenCalledTimes(1);
+    });
+  });
 });

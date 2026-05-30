@@ -8,6 +8,7 @@
 import type { ChatMessage, PromptData } from './models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { UIPhase, ErrorState, MobileActivePane, LeftPaneTab } from './ui-state';
+import type { ActivityId } from '@/config/activity-bar-config';
 
 /**
  * WorktreeUIAction union type
@@ -36,6 +37,13 @@ export type WorktreeUIAction =
   // Issue #688: Left pane collapse/expand
   | { type: 'TOGGLE_LEFT_PANE' }
   | { type: 'SET_LEFT_PANE_COLLAPSED'; collapsed: boolean }
+
+  // Issue #727: Activity Bar + History pane (PC)
+  | { type: 'SET_ACTIVE_ACTIVITY'; activity: ActivityId | null }
+  | { type: 'TOGGLE_ACTIVITY'; activity: ActivityId }
+  | { type: 'TOGGLE_HISTORY_PANE' }
+  | { type: 'SET_HISTORY_PANE_VISIBLE'; visible: boolean }
+  | { type: 'SET_HISTORY_WIDTH'; width: number }
 
   // Error actions
   | { type: 'SET_ERROR'; error: ErrorState }
