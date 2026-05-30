@@ -53,11 +53,21 @@ interface ContentPart {
  */
 const FILE_PATH_REGEX = /(\/[^\s\n<>"']+\.[a-zA-Z0-9]+)/g;
 
-/** Maximum characters to show in collapsed state */
-const COLLAPSED_MAX_CHARS = 300;
+/**
+ * Maximum characters to show in collapsed state.
+ *
+ * Issue #725: Reduced from 300 to 100 to strengthen default-collapse so that
+ * long assistant responses do not dominate the History pane visually.
+ */
+const COLLAPSED_MAX_CHARS = 100;
 
-/** Maximum lines to show in collapsed state */
-const COLLAPSED_MAX_LINES = 5;
+/**
+ * Maximum lines to show in collapsed state.
+ *
+ * Issue #725: Reduced from 5 to 2 so that collapsed assistant messages
+ * occupy at most 2 lines visually, matching the visual hierarchy goal.
+ */
+const COLLAPSED_MAX_LINES = 2;
 
 // ============================================================================
 // Helper Functions
