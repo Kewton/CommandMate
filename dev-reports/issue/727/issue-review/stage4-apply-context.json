@@ -1,0 +1,9 @@
+{
+  "issue_number": "727",
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目・影響範囲レビュー）",
+  "iteration": 1,
+  "review_result_path": "dev-reports/issue/727/issue-review/stage3-review-result.json",
+  "output_path": "dev-reports/issue/727/issue-review/stage4-apply-result.json",
+  "instructions": "Stage 3の影響範囲レビュー結果（12件）をIssue本文に反映。Must Fix 4件は必須、Should Fix 5件も基本的に反映、Nice to Have 3件は妥当な範囲で反映する。特にテスト更新ファイルリスト（Stage 1の4件→Stage 3で追加7件、合計11件）、useReducer state方針、deep-link テスト更新、docs/UI_UX_GUIDE 更新方針 等が重要。gh issue edit で更新。"
+}

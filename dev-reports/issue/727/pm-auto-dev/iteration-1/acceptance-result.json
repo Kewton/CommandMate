@@ -1,0 +1,156 @@
+{
+  "iteration": 1,
+  "issue_number": 727,
+  "overall_status": "passed_with_notes",
+  "scenario_results": [
+    {
+      "id": "TS-01",
+      "title": "Activity Bar が 6 アイコン縦並びで表示される（DOM 検証）",
+      "status": "passed",
+      "coverage_source": "tests/unit/components/worktree/ActivityBar.test.tsx 'renders all 6 activity tabs' / 'container has id=worktree-activity-bar' / 'renders with role=tablist and aria-orientation=vertical'",
+      "evidence": "ACTIVITIES array in src/config/activity-bar-config.ts has exactly 6 entries (files/git/notes/schedules/agent/timer). ActivityBar.tsx renders <div role='tablist' aria-orientation='vertical' className='flex flex-col items-stretch w-12 ...'> and maps over ACTIVITIES to emit 6 <button role='tab'> children.",
+      "notes": "48px width is encoded as Tailwind 'w-12'. Visual 'vertical stacked' look (icon + active border-l-2) is code-inspected; needs final manual UAT for px-perfect alignment."
+    },
+    {
+      "id": "TS-02",
+      "title": "Activity アイコンクリックで対応する Activity Pane が表示される（6 種すべて）",
+      "status": "passed",
+      "coverage_source": "tests/unit/components/worktree/ActivityBar.test.tsx 'calls onToggle with the clicked activity id' + tests/unit/components/worktree/ActivityPane.test.tsx 'renders the content for the active activity' / 'renders different content when active changes' (parametrised over all 6 ids) + tests/unit/hooks/useActivityBarState.test.ts 'toggle(id) opens an inactive activity' / 'toggling between two activities switches between them (no close)'",
+      "evidence": "ActivityPane.tsx selects content via activities[active] with ERROR_BOUNDARY_NAMES covering all 6 ids. WorktreeDetailRefactored.tsx lines 1542-1604 build activityContent: ActivityContentMap with entries for files/git/notes/schedules/agent/timer.",
+      "notes": ""
+    },
+    {
+      "id": "TS-03",
+      "title": "同じアイコン再クリックで Activity Pane が非表示になる",
+      "status": "passed",
+      "coverage_source": "tests/unit/hooks/useActivityBarState.test.ts 'toggle(id) closes the activity when called with the active id' + tests/unit/components/worktree/ActivityBar.test.tsx 're-clicking the active activity also calls onToggle (parent handles close)'",
+      "evidence": "useActivityBarState.toggle() at src/hooks/useActivityBarState.ts:91-100 sets state to null when id === activeRef.current. WorktreeDesktopLayout hides the activity column when activityPane === null (src/components/worktree/WorktreeDesktopLayout.tsx:260,280).",
+      "notes": ""
+    },
+    {
+      "id": "TS-04",
+      "title": "別アイコンクリックで Activity Pane の内容が切替わる",
+      "status": "passed",
+      "coverage_source": "tests/unit/components/worktree/ActivityPane.test.tsx 'renders different content when active changes' + tests/unit/hooks/useActivityBarState.test.ts 'toggling between two activities switches between them (no close)'",
+      "evidence": "ActivityPane is memoised on active+activities; switching active swaps activities[active]. Hook test verifies state flow files → git → notes → … without intermediate null.",
+      "notes": ""
+    },
+    {
+      "id": "TS-05",
+      "title": "localStorage 永続化（commandmate.worktree.activeActivity）動作・不正値時は files にフォールバック",
+      "status": "passed",
+      "coverage_source": "tests/unit/hooks/useActivityBarState.test.ts 'setActive(id) sets the active activity and persists it' / 'does NOT persist the closed (null) state' / 'restores the stored activity on next mount' / 'falls back to DEFAULT_ACTIVITY when stored value is invalid'",
+      "evidence": "ACTIVITY_BAR_STORAGE_KEY = 'commandmate.worktree.activeActivity' (src/config/activity-bar-config.ts:66). readStoredActivity() validates via isActivityId() and falls back to DEFAULT_ACTIVITY = 'files' (src/hooks/useActivityBarState.ts:46-55). null state is intentionally not persisted.",
+      "notes": ""
+    },
+    {
+      "id": "TS-06",
+      "title": "アクセシビリティ（role=tablist / aria-orientation=vertical / aria-selected / aria-label / aria-controls）",
+      "status": "passed",
+      "coverage_source": "tests/unit/components/worktree/ActivityBar.test.tsx 'renders with role=tablist and aria-orientation=vertical' / 'marks the active tab with aria-selected=true and others false' / 'every tab exposes aria-controls=worktree-activity-pane' / 'handles active=null gracefully'",
+      "evidence": "ActivityBar.tsx root has role='tablist' aria-orientation='vertical' aria-label='Activity Bar'. Each button has role='tab', aria-selected, aria-label (activity.label), aria-controls='worktree-activity-pane', title (tooltip).",
+      "notes": "Tooltip-on-hover behaviour relies on native title attribute — confirmed in code; visual hover delay is browser-default and not unit-testable."
+    },
+    {
+      "id": "TS-07",
+      "title": "キーボード操作（ArrowUp/Down/Enter/Space）",
+      "status": "passed",
+      "coverage_source": "tests/unit/components/worktree/ActivityBar.test.tsx > Keyboard navigation: 'Enter key activates the focused tab' / 'Space key activates the focused tab' / 'ArrowDown moves focus to the next tab (wrap-around)' / 'ArrowUp moves focus to the previous tab (wrap-around)'",
+      "evidence": "handleKeyDown in ActivityBar.tsx:47-78 handles Enter/Space/ArrowUp/ArrowDown/Home/End. tabIndex logic puts the active (or first when none active) tab at 0, others at -1 — correct roving-tabindex pattern. Acceptance criteria specified ArrowUp/Down/Enter/Space; Home/End is a bonus.",
+      "notes": ""
+    },
+    {
+      "id": "TS-08",
+      "title": "History pane が独立カラムに配置されている",
+      "status": "passed",
+      "coverage_source": "tests/unit/components/WorktreeDesktopLayout.test.tsx > Basic 4-column rendering: 'renders Activity Bar slot, Activity Pane slot, History Pane slot, and Right Pane slot' / 'exposes new DOM ids on the slot containers' / 'renders two resizers between activity/history and history/right when all panes are visible'",
+      "evidence": "WorktreeDesktopLayout.tsx renders 4 distinct slots with ids worktree-activity-bar, worktree-activity-pane, worktree-history-pane, worktree-right-pane. History column is independent (own width + own resizer), separate from activity column.",
+      "notes": ""
+    },
+    {
+      "id": "TS-09",
+      "title": "PC History pane に Message/Git サブタブが存在しない",
+      "status": "passed_via_code_inspection",
+      "coverage_source": "src/components/worktree/HistoryPane.tsx (header markup) + tests/unit/components/HistoryPane.test.tsx > Basic rendering (no sub-tab assertions)",
+      "evidence": "HistoryPane.tsx header (lines 440-503) contains only: title, history-display-limit selector, User-only toggle, Search toggle, and the new Collapse button. There is no Message/Git tab-strip in the component. (Git data is now reached via the new Git activity in the Activity Bar — see src/components/worktree/WorktreeDetailRefactored.tsx:1573 git: <GitPane>.)",
+      "notes": "No unit test explicitly asserts the absence of Message/Git sub-tabs in HistoryPane; relied on code inspection. Mobile still derives historySubTab from useWorktreeTabState (kept for backward compatibility via WorktreeDetailSubComponents.MobileContent)."
+    },
+    {
+      "id": "TS-10",
+      "title": "History pane の < で折りたたみ、> で展開",
+      "status": "passed",
+      "coverage_source": "tests/unit/components/HistoryPane.test.tsx > Collapse button (Issue #727): 'does not render the collapse button when onCollapse is omitted' / 'renders the collapse button when onCollapse is provided' / 'calls onCollapse when the collapse button is clicked' + tests/unit/components/WorktreeDesktopLayout.test.tsx > History Pane collapse: 'hides history pane and shows expand bar when historyPaneCollapsed=true' / 'expand button has aria-controls=worktree-history-pane and aria-expanded=false' / 'calls onToggleHistoryPane when expand button clicked' / 'also hides the history resizer when collapsed'",
+      "evidence": "HistoryPane.tsx:488-501 renders a ChevronRight (>) collapse button only when onCollapse prop is provided. WorktreeDesktopLayout.tsx:154-185 HistoryExpandBar renders the ◀ (M9 5l7 7-7 7) chevron button with aria-label='Expand history panel'. WorktreeDetailRefactored wires both through historyPaneCollapsed state and toggle.",
+      "notes": "ASCII direction (<>) is conceptual; actual icons are right-chevron in HistoryPane header (collapse direction toward right edge) and right-chevron in the expand bar — consistent with the column being on the left of terminal."
+    },
+    {
+      "id": "TS-11",
+      "title": "History pane visible / width が localStorage 永続化",
+      "status": "passed",
+      "coverage_source": "tests/unit/hooks/useHistoryPaneState.test.ts: 'defaults to visible=true and width=DEFAULT_HISTORY_WIDTH' / 'toggle() flips visibility and persists' / 'setWidth(n) clamps to [MIN_HISTORY_WIDTH, MAX_HISTORY_WIDTH] and persists' / 'restores stored visible=false on mount' / 'restores stored width on mount' / 'falls back to defaults when stored values are invalid' / 'clamps stored out-of-range width on hydration'",
+      "evidence": "src/hooks/useHistoryPaneState.ts stores keys commandmate.worktree.historyVisible (boolean) and commandmate.worktree.historyWidth (number, clamped 10-60). Defaults are visible=true and width=25.",
+      "notes": ""
+    },
+    {
+      "id": "TS-12",
+      "title": "Deep link ?pane=git/notes/logs/agent/timer/files/history が新マッピングに従って解決される",
+      "status": "passed",
+      "coverage_source": "tests/unit/hooks/deep-link-mapping.test.ts (parametrised over MAPPING_TABLE with new activityId column) + tests/unit/hooks/useWorktreeTabState.test.ts > activityId (Issue #727): 'maps files → \"files\"' / 'maps git → \"git\"' / 'maps notes → \"notes\"' / 'maps logs → \"schedules\"' / 'maps agent → \"agent\"' / 'maps timer → \"timer\"' / 'maps history → null' / 'maps terminal → null' / 'maps info → null'",
+      "evidence": "toActivityId() at src/hooks/useWorktreeTabState.ts:118-142 implements the required mapping including the logs → schedules rename and history/terminal/info → null. activityId is exposed on UseWorktreeTabStateReturn (line 36).",
+      "notes": "End-to-end URL routing (browser navigating to ?pane=git actually opens the Git activity) is wired in WorktreeDetailRefactored via useWorktreeTabState + activityId; recommend manual smoke test of each URL during UAT."
+    },
+    {
+      "id": "TS-13",
+      "title": "モバイル経路の memo タブ（NotesAndLogsPane）が変更なしで動作する",
+      "status": "passed",
+      "coverage_source": "git diff --stat src/components/worktree/WorktreeDetailSubComponents.tsx (empty) + ls src/components/worktree/NotesAndLogsPane.tsx (exists) + tests/unit/components/WorktreeDetailRefactored.test.tsx + existing integration tests pass (350 test files, 6610 tests)",
+      "evidence": "WorktreeDetailSubComponents.tsx has 0 modifications (`git diff --stat` returns nothing). NotesAndLogsPane.tsx still exists. WorktreeDesktopLayout.tsx mobile fallback at lines 255-258 composes activity/history panes into the existing 2-pane swipe (left/right). historySubTab state still alive at WorktreeDetailRefactored.tsx:312.",
+      "notes": "Direct DOM-level mobile interaction was not unit-tested in this iteration; rely on the integration suite (issue-266-acceptance.test.tsx) plus E2E mobile-cmate-tab.spec.ts (deferred to UAT) for full coverage."
+    },
+    {
+      "id": "TS-14",
+      "title": "useFilePolling は activeActivity='files' のときのみ enabled、null/他 Activity で停止",
+      "status": "passed",
+      "coverage_source": "Code inspection: src/components/worktree/WorktreeDetailRefactored.tsx:286-288 `useFilePolling({ ..., enabled: activeActivity === 'files' })` + behavioural assertions in tests/unit/components/WorktreeDetailRefactored.test.tsx TC-4 (throttle ignoring /tree polling)",
+      "evidence": "useFilePolling hook (src/hooks/useFilePolling.ts:71-83) starts setInterval only when `enabled` is true and clears it on enabled→false transition. Bound to `activeActivity === 'files'` in WorktreeDetailRefactored. When activeActivity is null (pane closed) or any other id (git/notes/...) the predicate is false and polling stops.",
+      "notes": "No dedicated unit test exercises the polling start/stop transition tied to ActivityBar toggle. Could be added in a follow-up. Code path is small and well-isolated."
+    },
+    {
+      "id": "TS-15",
+      "title": "lint / tsc / test:unit / build がすべてエラーゼロで通る",
+      "status": "passed",
+      "coverage_source": "Live re-run of all 4 gates in this acceptance phase",
+      "evidence": "npx tsc --noEmit → exit 0. npm run lint → 'No ESLint warnings or errors'. npm run test:unit → 6610 passed, 0 failed, 7 skipped (350 test files). npm run build → Next.js compiled successfully with all routes generated.",
+      "notes": ""
+    }
+  ],
+  "quality_gates": {
+    "tsc": "pass",
+    "lint": "pass",
+    "unit_tests": {
+      "status": "pass",
+      "passed": 6610,
+      "failed": 0,
+      "skipped": 7,
+      "total": 6617
+    },
+    "build": "pass"
+  },
+  "invariants_check": {
+    "mobile_subcomponents_untouched": true,
+    "notes_and_logs_pane_kept": true,
+    "history_sub_tab_state_kept": true,
+    "left_pane_tab_switcher_deleted": true
+  },
+  "manual_uat_items": [
+    "Tooltip-on-hover delay/styling for Activity Bar icons (title attribute is in place; native browser behaviour cannot be unit-tested)",
+    "Pixel-perfect visual: Activity Bar 48px width, vertical icon alignment, active-tab left border highlight, dark/light theme parity",
+    "Live URL navigation: open /worktrees/[id]?pane=git, ?pane=notes, ?pane=logs (→ Schedules), ?pane=agent, ?pane=timer, ?pane=files, ?pane=history, ?pane=terminal in a real browser to confirm the Activity Bar opens the correct pane",
+    "Mobile end-to-end smoke (mobile-cmate-tab.spec.ts, worktree-detail.spec.ts, file-tree-operations.spec.ts, markdown-editor.spec.ts) — not run by the agent; recommend running before PR merge",
+    "Manual confirmation that useFilePolling actually stops issuing /tree GETs when the user switches away from the Files activity (network tab inspection in dev tools)",
+    "History pane width drag interaction across the [MIN_HISTORY_WIDTH=10%, MAX_HISTORY_WIDTH=60%] range — verifies the PaneResizer wiring on the live page"
+  ],
+  "blockers": [],
+  "recommendation": "proceed to refactoring",
+  "summary": "All 15 acceptance scenarios are satisfied. TS-09 (no Message/Git sub-tab in PC History pane) and TS-14 (useFilePolling gated by activeActivity='files') are confirmed by code inspection rather than dedicated unit tests; the behaviour is correct and intentional. All 4 quality gates re-ran clean (tsc=pass, lint=clean, 6610/6617 unit tests pass, build succeeds). All 4 invariants confirmed: mobile subcomponents untouched, NotesAndLogsPane kept, historySubTab state kept, LeftPaneTabSwitcher deleted. Manual UAT items recorded above (tooltips, visual layout, live URL navigation, mobile E2E, network-tab polling check, drag-resize). Ready to proceed to refactoring or PR review."
+}
