@@ -1,0 +1,46 @@
+{
+  "issue_number": "725",
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "hypothesis_verification_path": "dev-reports/issue/725/issue-review/hypothesis-verification.md",
+  "original_issue_path": "dev-reports/issue/725/issue-review/original-issue.json",
+  "output_path": "dev-reports/issue/725/issue-review/stage1-review-result.json",
+  "project_root": "/Users/maenokota/share/work/github_kewton/commandmate-issue-725",
+  "review_targets": [
+    "src/components/worktree/ConversationPairCard.tsx",
+    "src/components/worktree/HistoryPane.tsx",
+    "src/config/history-display-config.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/hooks/useWorktreeUIState.ts",
+    "src/types/conversation.ts"
+  ],
+  "instructions": [
+    "1. dev-reports/issue/725/issue-review/original-issue.json から元Issue本文を取得",
+    "2. dev-reports/issue/725/issue-review/hypothesis-verification.md の検証結果を踏まえる",
+    "3. 通常レビュー観点（整合性・正確性・受入条件の明確さ・実装可能性）でレビュー",
+    "4. 既存コード（特に WorktreeDetailRefactored の showArchived/historyDisplayLimit パターン）との整合性を重視",
+    "5. Must Fix / Should Fix / Nice to Have で重要度分類",
+    "6. Must Fix 指摘があれば gh issue edit 725 で Issue 本文に反映するための差分案を JSON 内に含める",
+    "7. 結果を JSON 形式で stage1-review-result.json に出力"
+  ],
+  "output_schema": {
+    "stage": 1,
+    "focus": "通常（1回目）",
+    "reviewer": "issue-review-agent (opus)",
+    "findings": [
+      {
+        "id": "S1-001",
+        "severity": "Must Fix | Should Fix | Nice to Have",
+        "title": "...",
+        "description": "...",
+        "suggested_change": "..."
+      }
+    ],
+    "must_fix_count": 0,
+    "should_fix_count": 0,
+    "nice_to_have_count": 0,
+    "summary": "..."
+  }
+}

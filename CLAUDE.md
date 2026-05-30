@@ -187,7 +187,7 @@ tests/
 | `src/config/copilot-constants.ts` | Copilot CLIタイミング定数（COPILOT_SEND_ENTER_DELAY_MS, COPILOT_TEXT_INPUT_DELAY_MS）（Issue #565）、MODEL_NAME_PATTERN/MAX_MODEL_NAME_LENGTH追加（Issue #588） |
 | `src/config/memo-config.ts` | メモ共有定数（MAX_MEMOS）（Issue #652） |
 | `src/config/repository-config.ts` | リポジトリ共有定数（MAX_DISPLAY_NAME_LENGTH）（Issue #644） |
-| `src/config/history-display-config.ts` | History表示件数定数（HISTORY_DISPLAY_LIMIT_OPTIONS, MAX_MESSAGES_LIMIT派生, DEFAULT_MESSAGES_LIMIT, HISTORY_DISPLAY_LIMIT_STORAGE_KEY, HistoryDisplayLimit型, isHistoryDisplayLimit型ガード）（Issue #701） |
+| `src/config/history-display-config.ts` | History表示件数定数（HISTORY_DISPLAY_LIMIT_OPTIONS, MAX_MESSAGES_LIMIT派生, DEFAULT_MESSAGES_LIMIT, HISTORY_DISPLAY_LIMIT_STORAGE_KEY, HistoryDisplayLimit型, isHistoryDisplayLimit型ガード）（Issue #701）。Issue #725で `HISTORY_USER_ONLY_STORAGE_KEY` 追加 |
 | `src/config/editable-extensions.ts` | 編集可能拡張子定義・バリデーション（EDITABLE_EXTENSIONS, EXTENSION_VALIDATORS, isEditableExtension, validateContent）。.yaml/.yml 追加・YAML危険タグバリデーション（Issue #646）。TEXT_MAX_SIZE_BYTES を 2MB に引き上げ・PUT/GET 共通定数化（Issue #723） |
 | `src/config/file-viewer-config.ts` | 大規模ファイル閲覧用定数（VIEWER_CHUNK_LINE_SIZE, VIEWER_OVERSCAN_LINES, POLLING_DISABLED_THRESHOLD_BYTES）（Issue #723） |
 | `src/config/pdf-extensions.ts` | PDF拡張子・サイズ(20MB)・magic bytes(`%PDF-`)・iframe sandbox定数、isPdfExtension / validatePdfMagicBytes / validatePdfContent（Issue #673） |
@@ -242,18 +242,18 @@ tests/
 | `src/i18n.ts` | next-intl設定 |
 | `src/lib/locale-cookie.ts` | ロケールCookie管理 |
 | `src/lib/date-locale.ts` | date-fnsロケールマッピング |
-| `src/components/worktree/WorktreeDetailRefactored.tsx` | Worktree詳細画面（メイン画面、ツリーポーリング対応、履歴・メモ挿入state管理、NewFileDialog連携）（Issue #469, #485, #646）、左パネル折りたたみprops連携（Issue #688） |
+| `src/components/worktree/WorktreeDetailRefactored.tsx` | Worktree詳細画面（メイン画面、ツリーポーリング対応、履歴・メモ挿入state管理、NewFileDialog連携）（Issue #469, #485, #646）、左パネル折りたたみprops連携（Issue #688）、historyUserOnly state＋localStorage永続化（Issue #725） |
 | `src/components/worktree/WorktreeDesktopLayout.tsx` | PC版左右2分割レイアウト（PaneResizerドラッグリサイズ対応、leftPaneCollapsed props化・折りたたみ/展開バーUI）（Issue #688） |
 | `src/components/worktree/LeftPaneTabSwitcher.tsx` | 左パネルタブ切替UI（History/Files/CMATE）、折りたたみ◀ボタン追加（Issue #688） |
 | `src/components/worktree/AgentSettingsPane.tsx` | エージェント選択UI |
 | `src/components/worktree/MessageInput.tsx` | メッセージ入力（下書き永続化対応、pendingInsertText外部挿入対応）（Issue #485） |
-| `src/components/worktree/ConversationPairCard.tsx` | 会話ペアカード（ユーザー/アシスタントメッセージ表示、挿入ボタン）（Issue #485）。Issue #716でMessageContent親divに data-message-id 付与（memo維持、props追加なし） |
+| `src/components/worktree/ConversationPairCard.tsx` | 会話ペアカード（ユーザー/アシスタントメッセージ表示、挿入ボタン）（Issue #485）。Issue #716でMessageContent親divに data-message-id 付与（memo維持、props追加なし）。Issue #725で COLLAPSED_MAX_CHARS=100/COLLAPSED_MAX_LINES=2 へ折りたたみ強化、Assistantスタイル弱化（text-xs/p-2/bg-gray-900/30）、User側に防御セット追加、`showAssistant?: boolean` prop追加 |
 | `src/components/worktree/MemoCard.tsx` | メモカード（メモ表示・コピー・挿入ボタン）（Issue #485） |
-| `src/components/worktree/HistoryPane.tsx` | 履歴ペイン（会話履歴表示、onInsertToMessage伝播）（Issue #485）。Issue #716でメッセージテキスト検索機能（検索アイコン+HistorySearchBar、autoExpandedIds自動展開、useLayoutEffect副作用でapplyHistoryHighlights、searchStartScrollPositionRef scroll復帰、worktreeId/activeCliTab変化でcloseSearch） |
+| `src/components/worktree/HistoryPane.tsx` | 履歴ペイン（会話履歴表示、onInsertToMessage伝播）（Issue #485）。Issue #716でメッセージテキスト検索機能（検索アイコン+HistorySearchBar、autoExpandedIds自動展開、useLayoutEffect副作用でapplyHistoryHighlights、searchStartScrollPositionRef scroll復帰、worktreeId/activeCliTab変化でcloseSearch）。Issue #725で User onlyフィルタトグル追加（lucide-react User/UserCheck、aria-pressed）、searchableMessagesをuser roleフィルタ、orphanペアスキップ |
 | `src/components/worktree/HistorySearchBar.tsx` | 履歴内テキスト検索バーUI（Issue #716）TerminalSearchBar踏襲、role="search"、aria-live、件数表示・前/次ナビ・Esc閉じ、IME composition handler |
 | `src/components/worktree/MemoPane.tsx` | メモペイン（メモ一覧表示、onInsertToMessage伝播）（Issue #485） |
 | `src/components/worktree/NotesAndLogsPane.tsx` | Notes&Logsペイン（メモ・ログタブ、onInsertToMessage伝播）（Issue #485） |
-| `src/components/worktree/WorktreeDetailSubComponents.tsx` | Worktree詳細サブコンポーネント（MobileContent等、onInsertToMessage伝播）（Issue #485） |
+| `src/components/worktree/WorktreeDetailSubComponents.tsx` | Worktree詳細サブコンポーネント（MobileContent等、onInsertToMessage伝播）（Issue #485）。Issue #725で MobileContentProps に historyUserOnly/onHistoryUserOnlyChange を追加・モバイル経路にもUser only props伝播 |
 | `src/components/worktree/MarkdownEditor.tsx` | マークダウンエディタメイン（Issue #479）、汎用テキストエディタ化・YAML等非mdファイルのプレビュー非表示対応（Issue #646） |
 | `src/components/worktree/NewFileDialog.tsx` | 新規ファイル作成ダイアログ（ファイル名入力・拡張子選択、拡張子決定ロジック3パターン）（Issue #646） |
 | `src/components/worktree/TerminalSearchBar.tsx` | ターミナル内テキスト検索バーUI（Issue #47）件数表示・前/次ナビ・Esc閉じ |

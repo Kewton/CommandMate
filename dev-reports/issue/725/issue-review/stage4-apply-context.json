@@ -1,0 +1,25 @@
+{
+  "issue_number": "725",
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目・影響範囲）",
+  "review_result_path": "dev-reports/issue/725/issue-review/stage3-review-result.json",
+  "output_path": "dev-reports/issue/725/issue-review/stage4-apply-result.json",
+  "project_root": "/Users/maenokota/share/work/github_kewton/commandmate-issue-725",
+  "instructions": [
+    "1. dev-reports/issue/725/issue-review/stage3-review-result.json を読み込む",
+    "2. Must Fix (S3-001) と Should Fix (S3-002, S3-003, S3-004) を Issue 本文に反映",
+    "3. Nice to Have (S3-005〜S3-009) も適宜取り込む（本文を膨張させない範囲）",
+    "4. gh issue edit 725 --body-file <tmpfile> で更新",
+    "5. レビュー履歴セクションに Stage 3 結果を追記",
+    "6. 結果を stage4-apply-result.json に出力"
+  ],
+  "output_schema": {
+    "stage": 4,
+    "applied_findings": [],
+    "skipped_findings": [],
+    "applied_count": 0,
+    "skipped_count": 0,
+    "issue_updated": true,
+    "summary": "..."
+  }
+}

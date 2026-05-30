@@ -1,0 +1,118 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目・影響範囲）",
+  "issue_number": "725",
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/725",
+  "input_review_result": "dev-reports/issue/725/issue-review/stage3-review-result.json",
+  "issue_body_before": "/tmp/issue-725-body-v3.md",
+  "issue_body_after": "/tmp/issue-725-body-v4.md",
+  "applied_findings": [
+    {
+      "id": "S3-001",
+      "severity": "Must Fix",
+      "category": "test",
+      "title": "案B (Assistant スタイル変更) で既存統合テスト `tests/integration/conversation-pair-card.test.tsx` の `.text-sm.text-gray-200` セレクタが破壊される",
+      "application_summary": "想定影響範囲テーブルに `tests/integration/conversation-pair-card.test.tsx` 行を追加し、案B 実装と同時に `.text-sm.text-gray-200` セレクタ (lines 70, 111) を `.text-xs.text-gray-300` へ更新する必要があること、未対応の場合 `should apply word-break constraint to assistant message container` / `should handle very long URLs without horizontal overflow` の 2 テストが破壊されることを明記。案B 受入条件にも同セレクタ更新タスクを 1 項目追加。User 側 (line 185) は変更不要である旨も併記。関連ファイル一覧にも同テストファイルを追加。",
+      "applied_locations": [
+        "想定影響範囲テーブル: 新規行 `tests/integration/conversation-pair-card.test.tsx`",
+        "案B 受入条件: セレクタ更新タスクを 1 項目追加",
+        "実装方針 2 (案B): 案B コード diff 後に同セレクタ更新の補足を追加",
+        "関連 > 既存ファイル: `tests/integration/conversation-pair-card.test.tsx` 追加"
+      ]
+    },
+    {
+      "id": "S3-002",
+      "severity": "Should Fix",
+      "category": "interaction",
+      "title": "案C `autoExpandedIds よりも userOnly を優先` の実装イメージが不明確",
+      "application_summary": "実装方針 3.4 (`ConversationPairCard` に `showAssistant?: boolean` prop 追加) に、`isExpanded` (truncate 制御) と `showAssistant` (表示制御) が独立したレイヤーであり `showAssistant === false` の時点で `isExpanded` の値に関わらず Assistant 部分は描画されないため自然に「userOnly 優先」が成立する旨を補足。HistoryPane 側の集約コード例 (`pairs.map` 内での orphan スキップ + `showAssistant={!historyUserOnly}` 渡し) を追加して実装者の認知負荷を軽減。",
+      "applied_locations": [
+        "実装方針 3.4: 別レイヤーである旨の補足説明 1 段落",
+        "実装方針 3.4: HistoryPane 側 `pairs.map` 集約コード例"
+      ]
+    },
+    {
+      "id": "S3-003",
+      "severity": "Should Fix",
+      "category": "mobile",
+      "title": "モバイル (`MobileContent` 経由) で `historyUserOnly` props 伝播漏れ懸念",
+      "application_summary": "想定影響範囲テーブルに `src/components/worktree/WorktreeDetailSubComponents.tsx` 行を新規追加し、`MobileContentProps` 型への `historyUserOnly` / `onHistoryUserOnlyChange` 追加と内部 `<HistoryPane>` 呼び出しへのフォワーディングが必要 (既存 `showArchived` と同パターン)、これを忘れるとモバイルでトグルが効かない旨を明記。横断受入条件にもモバイル `MobileContent` 経由トグル動作確認を追加。実装方針 3.2 にもモバイル経路の補足を 1 段落追加。CLAUDE.md 更新対象にも同ファイル行を含めた。",
+      "applied_locations": [
+        "想定影響範囲テーブル: 新規行 `WorktreeDetailSubComponents.tsx`",
+        "横断受入条件: モバイルトグル動作確認を 1 項目追加",
+        "実装方針 3.2: モバイル経路バケツリレーの補足 1 段落",
+        "想定影響範囲 CLAUDE.md 行: `WorktreeDetailSubComponents.tsx` 行を含めた 5 行構成に拡張"
+      ]
+    },
+    {
+      "id": "S3-004",
+      "severity": "Should Fix",
+      "category": "compatibility",
+      "title": "User 側コンテナへの `[word-break:break-word] max-w-full overflow-x-hidden` 整合性",
+      "application_summary": "案B 説明の末尾に「任意改善（推奨）」として、User 側コンテナ (`ConversationPairCard.tsx:225`) に Assistant 側と同じ防御セットを追加することで長い URL/日本語による横スクロール発生を防ぐ旨を追記。`tests/integration/conversation-pair-card.test.tsx:182-189` は `toContain` ベースのためテスト破壊なしであることも明記。案B 受入条件にも Should Fix として同タスクを追加。実装方針 2 にも diff サンプル付きで追記。影響範囲表の `ConversationPairCard.tsx` 行にも案B のスタイル変更内容に User 側防御セット追加を含めた。",
+      "applied_locations": [
+        "案B 説明末尾: 「任意改善（推奨）」段落",
+        "案B 受入条件: User 側コンテナ防御セット追加タスク 1 項目",
+        "実装方針 2 (案B): User 側コンテナ diff サンプル",
+        "想定影響範囲 `ConversationPairCard.tsx` 行: 案B 説明にユーザー側防御セット追加を明記"
+      ]
+    },
+    {
+      "id": "S3-005",
+      "severity": "Nice to Have",
+      "category": "perf",
+      "title": "案C 検索併用時 `searchableMessages` 再計算コスト分析",
+      "application_summary": "案C 受入条件の検索併用時挙動セクション末尾に、`useMemo` 依存配列に `historyUserOnly` を加える必要があること、トグル切替時の検索インデックス再計算コストが < 10ms @ `MAX_MESSAGES_LIMIT=250` 想定で許容範囲であること、debounce タイマーは継続でよい (クエリ自体は変わらない) ことを 1 項目として追加。",
+      "applied_locations": [
+        "案C 受入条件 > 検索機能併用時の挙動: 再計算コスト分析 1 項目を追加"
+      ]
+    },
+    {
+      "id": "S3-006",
+      "severity": "Nice to Have",
+      "category": "i18n",
+      "title": "「User only」ラベルの i18n 化方針",
+      "application_summary": "案C 説明セクションに「i18n 方針」段落を追加し、HistoryPane 内部の既存ラベル (`Message History` / `Show archived` / `History display limit`) が全て英語ハードコーディングのため `User only` も英語固定とする (一貫性優先) 旨を明記。HistoryPane 全体の i18n 化は別 Issue で対応する方針も併記。スコープ外セクションにも HistoryPane 全体の i18n 化を追加。",
+      "applied_locations": [
+        "案C 説明: i18n 方針段落を追加",
+        "スコープ外: HistoryPane 全体の i18n 化を追加"
+      ]
+    },
+    {
+      "id": "S3-007",
+      "severity": "Nice to Have",
+      "category": "docs",
+      "title": "CLAUDE.md 更新対象の具体化",
+      "application_summary": "想定影響範囲テーブルの `CLAUDE.md` 行を、Issue #725 注記を追加すべき 5 行 (`ConversationPairCard.tsx` / `HistoryPane.tsx` / `WorktreeDetailRefactored.tsx` / `WorktreeDetailSubComponents.tsx` / `history-display-config.ts`) に具体化。各行に追記すべき注記内容も明示した。",
+      "applied_locations": [
+        "想定影響範囲 CLAUDE.md 行: 5 行の更新対象を箇条書きで具体化"
+      ]
+    },
+    {
+      "id": "S3-008",
+      "severity": "Nice to Have",
+      "category": "compatibility",
+      "title": "案A 副作用としての最新ペア初期 expanded UX 軽減案",
+      "application_summary": "スコープ外（別Issue検討）セクションに、最新ペア (`pairs[pairs.length-1]`) の Assistant 部分を初期 expanded にする UX 改善を追加。案A で `COLLAPSED_MAX_LINES = 2` に絞った副作用として最新応答も毎回 Expand 操作が必要になることへの軽減策である旨、本 Issue では現状の全ペア collapsed 初期化を維持する方針を明記。",
+      "applied_locations": [
+        "スコープ外: 最新ペア初期 expanded UX 軽減案を追加"
+      ]
+    },
+    {
+      "id": "S3-009",
+      "severity": "Nice to Have",
+      "category": "compatibility",
+      "title": "localStorage 旧フォーマット (`'1'/'0'`) フォールバック方針",
+      "application_summary": "実装方針 3.2 の `useState` イニシャライザコメントに、不正値や旧フォーマット (`'1'/'0'`) が残っている場合は false にフォールバックする safe-off ポリシー (既存 `showArchived` と同じ) を明記。",
+      "applied_locations": [
+        "実装方針 3.2: `useState` イニシャライザのコメントを補強"
+      ]
+    }
+  ],
+  "skipped_findings": [],
+  "applied_count": 9,
+  "skipped_count": 0,
+  "issue_updated": true,
+  "review_history_appended": true,
+  "summary": "Stage 3 影響範囲レビュー指摘事項 9 件 (Must Fix 1, Should Fix 3, Nice to Have 5) を Issue #725 本文に全件反映した。\n\n【Must Fix 反映 (S3-001)】影響範囲表に `tests/integration/conversation-pair-card.test.tsx` を新規行として追加し、案B 実装と同時に `.text-sm.text-gray-200` セレクタ (lines 70, 111) を `.text-xs.text-gray-300` に更新する必要があること、未対応時に CI で 2 テストが破壊されることを明記。案B 受入条件と実装方針 2 にも同タスクを追記。\n\n【Should Fix 反映 (S3-002〜S3-004)】(1) 実装方針 3.4 に `isExpanded` (truncate) と `showAssistant` (表示) が別レイヤーである旨を補足し HistoryPane 側集約コード例を追加。(2) `WorktreeDetailSubComponents.tsx` を影響範囲表・横断受入条件・CLAUDE.md 更新対象に追加し、モバイル `MobileContent` 経由のバケツリレー漏れを防止。(3) User 側コンテナへの防御セット追加を案B 説明・受入条件・実装方針に Should Fix として追記。\n\n【Nice to Have 反映 (S3-005〜S3-009)】検索併用時の再計算コスト分析、i18n 方針、CLAUDE.md 更新対象の 5 行具体化、最新ペア初期 expanded のスコープ外明記、localStorage 旧フォーマット safe-off フォールバック方針を、それぞれ受入条件・案C 説明・想定影響範囲・スコープ外・実装方針 3.2 のいずれかに簡潔に追記し本文の肥大化を抑えた。\n\n【レビュー履歴】末尾「## レビュー履歴」セクションに Stage 3 反映内容を 9 件分追記し、Stage 1 → Stage 3 への変更履歴を追跡可能とした。\n\n【検証】`gh issue edit 725 --body-file /tmp/issue-725-body-v4.md` で更新成功、URL `https://github.com/Kewton/CommandMate/issues/725` で反映確認済み。"
+}

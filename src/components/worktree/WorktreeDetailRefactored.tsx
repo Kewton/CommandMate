@@ -97,6 +97,7 @@ import { encodePathForUrl } from '@/lib/url-path-encoder';
 import { parseCmateContent, validateScheduleHeaders, validateSchedulesSection, CMATE_TEMPLATE_CONTENT } from '@/lib/cmate-validator';
 import {
   HISTORY_DISPLAY_LIMIT_STORAGE_KEY,
+  HISTORY_USER_ONLY_STORAGE_KEY,
   DEFAULT_MESSAGES_LIMIT,
   isHistoryDisplayLimit,
   type HistoryDisplayLimit,
@@ -305,6 +306,26 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   useEffect(() => {
     showArchivedRef.current = showArchived;
   }, [showArchived]);
+
+  // Issue #725: HistoryPane "User only" filter toggle with localStorage persistence.
+  // Value representation: 'true' / 'false' (matches commandmate:showArchived).
+  // Any other value (including legacy '1'/'0') is treated as false (safe-off fallback).
+  const [historyUserOnly, setHistoryUserOnly] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return localStorage.getItem(HISTORY_USER_ONLY_STORAGE_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const handleHistoryUserOnlyChange = useCallback((next: boolean) => {
+    setHistoryUserOnly(next);
+    try {
+      localStorage.setItem(HISTORY_USER_ONLY_STORAGE_KEY, String(next));
+    } catch {
+      /* localStorage unavailable */
+    }
+  }, []);
 
   // Issue #701: history display limit state with localStorage persistence
   const [historyDisplayLimit, setHistoryDisplayLimit] = useState<HistoryDisplayLimit>(() => {
@@ -1531,6 +1552,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   onShowArchivedChange={handleShowArchivedChange}
                   historyDisplayLimit={historyDisplayLimit}
                   onHistoryDisplayLimitChange={handleHistoryDisplayLimitChange}
+                  historyUserOnly={historyUserOnly}
+                  onHistoryUserOnlyChange={handleHistoryUserOnlyChange}
                 />
               )}
               {historySubTab === 'git' && (
@@ -1596,7 +1619,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         </div>
       </div>
     ),
-    [leftPaneTab, handleLeftPaneTabChange, historySubTab, state.messages, worktreeId, handleFilePathClick, showToast, fileSearch.query, fileSearch.mode, fileSearch.isSearching, fileSearch.error, fileSearch.setQuery, fileSearch.setMode, fileSearch.clearSearch, fileSearch.results?.results, handleFileSelect, handleNewFile, handleNewDirectory, handleRename, handleDelete, handleUpload, handleMove, handleCmateSetup, fileTreeRefresh, selectedAgents, handleSelectedAgentsChange, vibeLocalModel, handleVibeLocalModelChange, vibeLocalContextWindow, handleVibeLocalContextWindowChange, handleDiffSelect, handleInsertToMessage, showArchived, handleShowArchivedChange, historyDisplayLimit, handleHistoryDisplayLimitChange, actions.toggleLeftPane]
+    [leftPaneTab, handleLeftPaneTabChange, historySubTab, state.messages, worktreeId, handleFilePathClick, showToast, fileSearch.query, fileSearch.mode, fileSearch.isSearching, fileSearch.error, fileSearch.setQuery, fileSearch.setMode, fileSearch.clearSearch, fileSearch.results?.results, handleFileSelect, handleNewFile, handleNewDirectory, handleRename, handleDelete, handleUpload, handleMove, handleCmateSetup, fileTreeRefresh, selectedAgents, handleSelectedAgentsChange, vibeLocalModel, handleVibeLocalModelChange, vibeLocalContextWindow, handleVibeLocalContextWindowChange, handleDiffSelect, handleInsertToMessage, showArchived, handleShowArchivedChange, historyDisplayLimit, handleHistoryDisplayLimitChange, historyUserOnly, handleHistoryUserOnlyChange, actions.toggleLeftPane]
   );
 
   // ========================================================================
@@ -1919,6 +1942,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onShowArchivedChange={handleShowArchivedChange}
             historyDisplayLimit={historyDisplayLimit}
             onHistoryDisplayLimitChange={handleHistoryDisplayLimitChange}
+            historyUserOnly={historyUserOnly}
+            onHistoryUserOnlyChange={handleHistoryUserOnlyChange}
           />
         </main>
 

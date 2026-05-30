@@ -338,4 +338,160 @@ describe('HistoryPane Integration', () => {
       expect(screen.getByTestId('copy-assistant-message')).toBeInTheDocument();
     });
   });
+
+  describe('Issue #725: User only filter', () => {
+    it('should hide assistant message section when historyUserOnly is true', () => {
+      const messages = [
+        createTestMessage('user', 'Hello', T1, 'user-1'),
+        createTestMessage('assistant', 'Hi there!', T2, 'asst-1'),
+      ];
+
+      render(
+        <HistoryPane
+          messages={messages}
+          worktreeId="test"
+          onFilePathClick={mockOnFilePathClick}
+          historyUserOnly={true}
+          onHistoryUserOnlyChange={vi.fn()}
+        />
+      );
+
+      // User message still visible
+      expect(screen.getByText('Hello')).toBeInTheDocument();
+      // Assistant content + label should be hidden
+      expect(screen.queryByText('Hi there!')).not.toBeInTheDocument();
+      expect(screen.queryByText('Assistant')).not.toBeInTheDocument();
+    });
+
+    it('should still show assistant section when historyUserOnly is false', () => {
+      const messages = [
+        createTestMessage('user', 'Hello', T1, 'user-1'),
+        createTestMessage('assistant', 'Hi there!', T2, 'asst-1'),
+      ];
+
+      render(
+        <HistoryPane
+          messages={messages}
+          worktreeId="test"
+          onFilePathClick={mockOnFilePathClick}
+          historyUserOnly={false}
+          onHistoryUserOnlyChange={vi.fn()}
+        />
+      );
+
+      expect(screen.getByText('Hello')).toBeInTheDocument();
+      expect(screen.getByText('Hi there!')).toBeInTheDocument();
+      expect(screen.getByText('Assistant')).toBeInTheDocument();
+    });
+
+    it('should skip orphan pairs (no userMessage) when historyUserOnly is true', () => {
+      const messages = [
+        // Orphan: assistant-only at the beginning
+        createTestMessage('assistant', 'Welcome! I am ready to help.', T1, 'asst-orphan'),
+        createTestMessage('user', 'Hello', T2, 'user-1'),
+        createTestMessage('assistant', 'Hi there!', T3, 'asst-1'),
+      ];
+
+      render(
+        <HistoryPane
+          messages={messages}
+          worktreeId="test"
+          onFilePathClick={mockOnFilePathClick}
+          historyUserOnly={true}
+          onHistoryUserOnlyChange={vi.fn()}
+        />
+      );
+
+      // Only one card (the user-pair) should render. Orphan is skipped.
+      const pairCards = screen.getAllByTestId('conversation-pair-card');
+      expect(pairCards).toHaveLength(1);
+
+      // Orphan indicator and welcome content must not appear
+      expect(screen.queryByTestId('orphan-indicator')).not.toBeInTheDocument();
+      expect(screen.queryByText(/Welcome! I am ready to help/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/System Message/i)).not.toBeInTheDocument();
+    });
+
+    it('toggle button should reflect aria-pressed based on historyUserOnly', () => {
+      const { rerender } = render(
+        <HistoryPane
+          messages={[]}
+          worktreeId="test"
+          onFilePathClick={mockOnFilePathClick}
+          historyUserOnly={false}
+          onHistoryUserOnlyChange={vi.fn()}
+        />
+      );
+
+      const offBtn = screen.getByRole('button', { name: /show user messages only/i });
+      expect(offBtn).toHaveAttribute('aria-pressed', 'false');
+
+      rerender(
+        <HistoryPane
+          messages={[]}
+          worktreeId="test"
+          onFilePathClick={mockOnFilePathClick}
+          historyUserOnly={true}
+          onHistoryUserOnlyChange={vi.fn()}
+        />
+      );
+
+      const onBtn = screen.getByRole('button', { name: /show user messages only/i });
+      expect(onBtn).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('should call onHistoryUserOnlyChange with negated value when toggle is clicked', () => {
+      const handleChange = vi.fn();
+
+      render(
+        <HistoryPane
+          messages={[]}
+          worktreeId="test"
+          onFilePathClick={mockOnFilePathClick}
+          historyUserOnly={false}
+          onHistoryUserOnlyChange={handleChange}
+        />
+      );
+
+      const toggleBtn = screen.getByRole('button', { name: /show user messages only/i });
+      fireEvent.click(toggleBtn);
+      expect(handleChange).toHaveBeenCalledWith(true);
+    });
+
+    it('should not render assistant section even when search query matches only assistant content (userOnly takes priority)', () => {
+      const messages = [
+        createTestMessage('user', 'Hello', T1, 'user-1'),
+        createTestMessage('assistant', 'unique-assistant-text-xyz', T2, 'asst-1'),
+      ];
+
+      render(
+        <HistoryPane
+          messages={messages}
+          worktreeId="test"
+          onFilePathClick={mockOnFilePathClick}
+          historyUserOnly={true}
+          onHistoryUserOnlyChange={vi.fn()}
+        />
+      );
+
+      // Assistant content must not be present in the DOM (showAssistant=false)
+      expect(screen.queryByText('unique-assistant-text-xyz')).not.toBeInTheDocument();
+      // The user message still renders
+      expect(screen.getByText('Hello')).toBeInTheDocument();
+    });
+
+    it('should not render toggle button when onHistoryUserOnlyChange is not provided', () => {
+      render(
+        <HistoryPane
+          messages={[]}
+          worktreeId="test"
+          onFilePathClick={mockOnFilePathClick}
+        />
+      );
+
+      expect(
+        screen.queryByRole('button', { name: /show user messages only/i })
+      ).not.toBeInTheDocument();
+    });
+  });
 });

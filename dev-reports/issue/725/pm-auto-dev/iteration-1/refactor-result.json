@@ -1,0 +1,54 @@
+{
+  "issue_number": 725,
+  "iteration": 1,
+  "refactor_applied": false,
+  "changes": [],
+  "quality_metrics_after": {
+    "tsc": "pass",
+    "lint": "pass",
+    "test_unit_target": "pass",
+    "test_integration_target": "pass",
+    "build": "pass",
+    "details": {
+      "tsc": "npx tsc --noEmit -> exit=0, 0 errors",
+      "lint": "npm run lint -> No ESLint warnings or errors",
+      "ConversationPairCard.test.tsx": "24/24 pass (1.11s)",
+      "HistoryPane.integration.test.tsx": "20/20 pass (1.23s, 13 existing + 7 Issue #725)",
+      "tests/integration/conversation-pair-card.test.tsx": "5/5 pass (922ms)",
+      "build": "Next.js production build success (worktrees/[id] 400 kB, middleware 28.9 kB)"
+    }
+  },
+  "no_refactor_rationale": {
+    "summary": "TDD実装は既存の確立されたパターン(#168/#701/#716)を厳密に踏襲しており、過剰抽象化を避けるYAGNI原則とリファクタコンテキストの制約に照らして、追加リファクタは不要と判定。コード品質はすでに高水準。",
+    "candidate_evaluations": [
+      {
+        "candidate": "1. HistoryPane.tsx ヘッダー領域のサブコンポーネント抽出",
+        "verdict": "no-extract",
+        "reasoning": "ヘッダーには4要素(historyDisplayLimit select / showArchived checkbox / User only button / Search button)が並ぶが、#168(showArchived)/#701(historyDisplayLimit)/#716(search button)が累積追加された経緯でも一貫してインライン配置されてきた。サブコンポーネント化すると以下の問題が発生: (a) 多数のprops(historyDisplayLimit/onChange, showArchived/onChange, historyUserOnly/onChange, isSearchOpen/onToggleSearch, HISTORY_DISPLAY_LIMIT_OPTIONS/isHistoryDisplayLimit 等)を渡す必要があり、props drilling が増える、(b) インライン記述62行が別ファイル+import で約80行に増え、YAGNI(行数増加禁止)に違反、(c) ヘッダーUI要素は HistoryPane 専用で他コンポーネントから再利用されないため抽出のbenefit がない。"
+      },
+      {
+        "candidate": "2. useLocalStorageBool フック抽出 (showArchived / historyUserOnly 重複)",
+        "verdict": "out-of-scope",
+        "reasoning": "WorktreeDetailRefactored.tsx の showArchived(line 295-308) と historyUserOnly(line 310-328) は構造が類似するが、(a) showArchived は #168 由来の try/catch なしバージョン+useRef ミラー付きで、フック化すると #168 の既存コードに影響、(b) historyDisplayLimit は parseInt+isHistoryDisplayLimit 型ガードを含むため共通フックに収まらず、ジェネリック化すると複雑化、(c) refactor-context.json constraint『外部APIや既存パターンを変えるリファクタは禁止(例: showArchived の親持ち構造はそのまま)』に明示的に該当、(d) Issue #725 単独のスコープを超え、リスクと作業範囲が肥大化。Nice to Have として将来Issueで検討推奨。"
+      },
+      {
+        "candidate": "3. HistoryPane.integration.test.tsx Issue #725 describe ブロックの setup 重複",
+        "verdict": "no-extract",
+        "reasoning": "7テストの内、messages配列は (a) [user 'Hello', asst 'Hi there!'] が 2 テスト、(b) その他 5 テストはそれぞれ固有のセットアップ(空配列、orphan + user-pair、unique-text-xyz等)。render() の props も historyUserOnly true/false の組み合わせや onHistoryUserOnlyChange の有無で異なる。renderPane(props) ヘルパを作っても呼び出し側で props オーバーライドが必要で、可読性向上は限定的。同ファイル内の既存 6 describe ブロック(13 既存テスト)もヘルパなしでインライン render しており、Issue #725 ブロックだけヘルパ化すると一貫性が失われる。テスト保守の観点では現状(各テスト自己完結)がデバッグしやすい。"
+      },
+      {
+        "candidate": "4. searchableMessages filter の (!historyUserOnly || m.role === 'user') 表現",
+        "verdict": "no-simplify",
+        "reasoning": "HistoryPane.tsx line 205 の filter 条件は標準的な短絡評価パターン。直前のコメント(line 196-197)で Issue #725 の意図(『assistant を含まないことで検索ヒットも完全に抑制』)が明示されており、関数抽出すると逆に意図が見えにくくなる。3要素の filter (archived / typeof string / userOnly) を1つの useMemo にまとめている形は React の慣用句で、現状で十分可読。"
+      }
+    ]
+  },
+  "nice_to_have_future": [
+    "将来Issue検討: localStorage 連携 boolean state の共通フック化 (useLocalStorageBool<T extends boolean | string | number>) — showArchived / historyUserOnly / 今後追加されうるトグル系state を集約。ただし既存 #168 の useRef ミラー戦略との整合性、try/catch ポリシー統一、SSR safe(typeof window === 'undefined')の扱いを設計書化してから着手すべき。本Issue内では破壊的影響範囲が広いため見送り。",
+    "将来Issue検討: HistoryPane ヘッダー要素が 5 個以上に増えた場合に HeaderControls サブコンポーネント抽出を再評価 (例: Pin button や Filter dropdown 等が追加される時点)。現状の 4 要素 + flex-wrap で UX 上問題なし。",
+    "将来Issue検討: HistoryPane.integration.test.tsx 全体で render ヘルパ統一(13 既存 + 7 新規 = 20 テスト一括)を別 PR で。Issue #725 単独で部分的に変更すると差分が読みづらくなるため、テスト整理 Issue を独立で立てる方が望ましい。",
+    "将来Issue検討: ConversationPairCard.tsx の COLLAPSED_MAX_CHARS=100 / COLLAPSED_MAX_LINES=2 を共通定数ファイル(例: src/config/history-display-config.ts)に移動して、HistoryPane 側からも参照可能にする。現状 ConversationPairCard 内のみで完結しており移動の必要性は低いが、history関連の定数を 1 ファイルに集約する整理は将来的に有用。"
+  ],
+  "summary": "Issue #725 の TDD 実装(3コミット: 46c5f510, c6a81639, 91cba686)は既存パターン(#168 showArchived, #701 historyDisplayLimit, #716 search button)を厳密に踏襲し、YAGNI と『外部APIや既存パターンを変えるリファクタ禁止』制約に照らしてリファクタ不要と判定。4 つの候補すべてを評価した結果、いずれも (a) 行数増加リスク、(b) スコープ外影響、(c) 既存パターン一貫性破壊、のいずれかに該当するため適用せず。品質ゲート 5 項目(tsc/lint/ConversationPairCard 24 tests/HistoryPane 20 tests/conversation-pair-card 5 tests/build)はすべて pass。コード変更ゼロのため commit_hash は null。改善候補は nice_to_have_future に4件記録。",
+  "commit_hash": null
+}

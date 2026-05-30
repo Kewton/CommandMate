@@ -883,6 +883,10 @@ interface MobileContentProps {
   historyDisplayLimit?: HistoryDisplayLimit;
   /** [Issue #701] Callback when history display limit changes */
   onHistoryDisplayLimitChange?: (limit: HistoryDisplayLimit) => void;
+  /** [Issue #725] Whether the HistoryPane "User only" filter is active */
+  historyUserOnly?: boolean;
+  /** [Issue #725] Callback when the "User only" toggle changes */
+  onHistoryUserOnlyChange?: (userOnly: boolean) => void;
 }
 
 /** Renders content based on active mobile tab */
@@ -924,6 +928,8 @@ export const MobileContent = memo(function MobileContent({
   onShowArchivedChange,
   historyDisplayLimit,
   onHistoryDisplayLimitChange,
+  historyUserOnly,
+  onHistoryUserOnlyChange,
 }: MobileContentProps) {
   switch (activeTab) {
     case 'terminal':
@@ -981,6 +987,8 @@ export const MobileContent = memo(function MobileContent({
                 onShowArchivedChange={onShowArchivedChange}
                 historyDisplayLimit={historyDisplayLimit}
                 onHistoryDisplayLimitChange={onHistoryDisplayLimitChange}
+                historyUserOnly={historyUserOnly}
+                onHistoryUserOnlyChange={onHistoryUserOnlyChange}
               />
             </ErrorBoundary>
           ) : (

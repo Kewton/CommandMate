@@ -11,7 +11,7 @@
 'use client';
 
 import React, { useMemo, useCallback, memo, useRef, useLayoutEffect, useState, useEffect } from 'react';
-import { Search } from 'lucide-react';
+import { Search, User, UserCheck } from 'lucide-react';
 import type { ChatMessage } from '@/types/models';
 import { useConversationHistory } from '@/hooks/useConversationHistory';
 import { useHistorySearch } from '@/hooks/useHistorySearch';
@@ -62,6 +62,14 @@ export interface HistoryPaneProps {
   historyDisplayLimit?: HistoryDisplayLimit;
   /** Issue #701: Callback when the history display limit selector changes */
   onHistoryDisplayLimitChange?: (limit: HistoryDisplayLimit) => void;
+  /**
+   * Issue #725: When true, only user messages are shown — assistant message
+   * sections are hidden and orphan (assistant-only) pairs are skipped.
+   * Defaults to `false`.
+   */
+  historyUserOnly?: boolean;
+  /** Issue #725: Callback when the "User only" toggle changes. */
+  onHistoryUserOnlyChange?: (next: boolean) => void;
 }
 
 // ============================================================================
@@ -167,6 +175,8 @@ export const HistoryPane = memo(function HistoryPane({
   onShowArchivedChange,
   historyDisplayLimit,
   onHistoryDisplayLimitChange,
+  historyUserOnly = false,
+  onHistoryUserOnlyChange,
 }: HistoryPaneProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const scrollPositionRef = useRef<number>(0);
@@ -183,12 +193,18 @@ export const HistoryPane = memo(function HistoryPane({
   // [Issue #716] Search
   // ---------------------------------------------------------------
   // Pre-filter searchable messages (archived/empty removed); see design §5.2.
+  // Issue #725: When `historyUserOnly` is true, also filter out assistant role
+  // so search results never highlight assistant content the user cannot see.
   const searchableMessages = useMemo(
     () =>
       messages.filter(
-        (m) => !m.archived && typeof m.content === 'string' && m.content.length > 0
+        (m) =>
+          !m.archived &&
+          typeof m.content === 'string' &&
+          m.content.length > 0 &&
+          (!historyUserOnly || m.role === 'user')
       ),
-    [messages]
+    [messages, historyUserOnly]
   );
 
   const {
@@ -352,6 +368,10 @@ export const HistoryPane = memo(function HistoryPane({
       return <EmptyState />;
     }
     return pairs.map((pair) => {
+      // Issue #725: When User only filter is active, skip pairs that have no
+      // user message (orphan / assistant-only). Determined via `!pair.userMessage`
+      // — equivalent to `pair.status === 'orphan'` in current grouping logic.
+      if (historyUserOnly && !pair.userMessage) return null;
       const isArchived = pair.userMessage?.archived === true ||
         pair.assistantMessages?.some(m => m.archived === true);
       const expanded = isManuallyExpanded(pair.id) || autoExpandedIds.has(pair.id);
@@ -364,6 +384,7 @@ export const HistoryPane = memo(function HistoryPane({
             onToggleExpand={createToggleHandler(pair.id)}
             onCopy={handleCopy}
             onInsertToMessage={onInsertToMessage}
+            showAssistant={!historyUserOnly}
           />
         </div>
       );
@@ -426,6 +447,26 @@ export const HistoryPane = memo(function HistoryPane({
               />
               Show archived
             </label>
+          )}
+          {onHistoryUserOnlyChange && (
+            <button
+              type="button"
+              onClick={() => onHistoryUserOnlyChange(!historyUserOnly)}
+              aria-label="Show user messages only"
+              aria-pressed={historyUserOnly}
+              className={`p-1 rounded transition-colors ${
+                historyUserOnly
+                  ? 'bg-cyan-900/40 text-cyan-300'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+              title={historyUserOnly ? 'Show all messages' : 'Show user messages only'}
+            >
+              {historyUserOnly ? (
+                <UserCheck size={14} aria-hidden="true" />
+              ) : (
+                <User size={14} aria-hidden="true" />
+              )}
+            </button>
           )}
           <button
             type="button"
