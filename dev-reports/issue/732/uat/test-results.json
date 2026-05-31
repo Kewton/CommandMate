@@ -1,0 +1,72 @@
+{
+  "issue_number": 732,
+  "test_date": "2026-05-31",
+  "environment": {
+    "port": 3010,
+    "branch": "feature/732-worktree",
+    "build": "本 worktree のプロダクションビルド（修正適用済み: .next + dist/server/server.js）",
+    "db": "~/.commandmate/data/cm.db のコピー相当（パス検証によりデフォルトDBにフォールバック → MyMLXServer を /api/repositories/scan で登録）",
+    "test_worktree": "mymlxserver-main (/Users/maenokota/share/work/github_kewton/MyMLXServer)",
+    "viewport": "1920x1080",
+    "tool": "Playwright MCP (Chromium)"
+  },
+  "reference_values": {
+    "before_fix_file_panel_pane": { "left": 2473, "right": 3160, "note": "Issue 記載の修正前実測（viewport 1920 を大きく超え画面外）" }
+  },
+  "results": [
+    {
+      "id": "TC-001",
+      "title": "ファイル選択時に FilePanel が viewport 内に表示される",
+      "status": "pass",
+      "operation": "viewport 1920x1080 で worktree を開き Files アクティビティ選択 → README.md クリック",
+      "evidence": "file-panel-pane: left=1522, right=1920, width=398, visible=true。right(1920) <= window.innerWidth(1920) を満たす。horizontalOverflow=false (scrollWidth=clientWidth=1920)",
+      "exit_code": 0
+    },
+    {
+      "id": "TC-002",
+      "title": "desktop-layout の幅が viewport 内に収まる",
+      "status": "pass",
+      "operation": "TC-001 の状態で desktop-layout を測定",
+      "evidence": "desktop-layout: left=272, right=1920, width=1648。272 = サイドバー224 + ActivityBar48。right=1920 <= innerWidth。修正前の 2825px 溢れは解消",
+      "exit_code": 0
+    },
+    {
+      "id": "TC-003",
+      "title": "History 非表示でも FilePanel が viewport 内",
+      "status": "pass",
+      "operation": "history-pane-collapse-button をクリックして History を折りたたみ → 測定",
+      "evidence": "historyVisible=false。file-panel-pane: left=1262, right=1920, width=658（領域拡大も right=1920 維持）。horizontalOverflow=false",
+      "exit_code": 0
+    },
+    {
+      "id": "TC-004",
+      "title": "ActivityPane 幅変更でも FilePanel が viewport 内",
+      "status": "pass",
+      "operation": "ActivityPane resizer をドラッグし幅を 18% → 40.75%（672px）に拡大 → 測定",
+      "evidence": "activity-pane-slot: width=672。file-panel-pane: left=1452, right=1920, width=468。desktop-layout right=1920。horizontalOverflow=false",
+      "exit_code": 0
+    },
+    {
+      "id": "TC-005",
+      "title": "既存挙動（ターミナル/ファイルパネル表示）が壊れない",
+      "status": "pass",
+      "operation": "ファイルを開いた状態で terminal-pane と file-panel-pane の表示を確認",
+      "evidence": "terminal-pane: left=1116, right=1518, width=402, visible=true。file-panel-pane: visible=true。両ペインが正常に並列表示され、レイアウト崩れなし",
+      "exit_code": 0
+    },
+    {
+      "id": "TC-006",
+      "title": "静的検証（モバイル経路非変更・品質ゲート）",
+      "status": "pass",
+      "operation": "git diff 確認 + 品質コマンド（Phase 2-3 実施結果の引用）",
+      "evidence": "モバイル経路 (~L1590 flex-1 min-h-0) は diff に含まれない。lint=pass, tsc=pass, test:unit=6700 passed, build=pass。unit テスト『desktop layout containers carry min-w-0 (Issue #732)』PASS",
+      "exit_code": 0
+    }
+  ],
+  "summary": {
+    "total": 6,
+    "passed": 6,
+    "failed": 0,
+    "pass_rate": "100%"
+  }
+}

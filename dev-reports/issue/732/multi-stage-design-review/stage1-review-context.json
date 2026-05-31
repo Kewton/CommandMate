@@ -1,0 +1,9 @@
+{
+  "issue_number": "732",
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "design_doc_path": "dev-reports/design/issue-732-min-w-0-overflow-fix-design-policy.md",
+  "output_path": "dev-reports/issue/732/multi-stage-design-review/stage1-review-result.json",
+  "note": "Minimal CSS-only bug fix (#730 follow-up). Evaluate SOLID/KISS/YAGNI/DRY adherence of the design policy. Do not invent scope."
+}

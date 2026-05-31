@@ -1,0 +1,44 @@
+{
+  "issue_number": 732,
+  "title": "fix(layout): missing min-w-0 causes horizontal overflow, hiding FilePanel off-screen (#730 follow-up)",
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "files_changed": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+        "CHANGELOG.md"
+      ],
+      "red_green": "Red confirmed (test failed pre-fix), Green confirmed (test passes post-fix)",
+      "tests_added": ["desktop layout containers carry min-w-0 to prevent horizontal overflow (Issue #732)"]
+    },
+    "acceptance": {
+      "status": "passed",
+      "note": "unit/static で検証可能な条件は全PASS。幅ベース条件はUATで検証"
+    },
+    "refactor": {
+      "status": "not-applicable",
+      "reason": "CSS className 2箇所の追記のみ。リファクタリング対象なし"
+    },
+    "documentation": {
+      "status": "success",
+      "updated": ["CHANGELOG.md ([Unreleased] Fixed)", "CLAUDE.md (WorktreeDetailRefactored.tsx エントリに Issue #732 追記)"]
+    },
+    "uat": {
+      "status": "passed",
+      "total": 6,
+      "passed": 6,
+      "failed": 0,
+      "report": "dev-reports/issue/732/uat/acceptance-test-report.html",
+      "key_evidence": "file-panel-pane 修正前 right=3160(画面外) → 修正後 right=1920(viewport内)。History折りたたみ・ActivityPane拡大でも維持"
+    }
+  },
+  "quality_gates": {
+    "lint": "pass",
+    "tsc": "pass",
+    "test_unit": "pass (6700 passed / 7 skipped / 0 failed)",
+    "build": "pass"
+  },
+  "output_path": "dev-reports/issue/732/pm-auto-dev/iteration-1/progress-report.md"
+}

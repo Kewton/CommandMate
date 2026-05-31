@@ -1,0 +1,32 @@
+{
+  "stage": 1,
+  "focus": "通常（1回目）",
+  "reviewer": "claude-opus",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "Should Fix",
+      "title": "受入条件の自動テスト方針が jsdom の制約と矛盾（getBoundingClientRect ベースの幅検証は unit では不可）",
+      "description": "受入条件に「getBoundingClientRect().right が window.innerWidth 以下」「data-testid=\"desktop-layout\" の幅が viewport 内」とあるが、これらは実レイアウト計算（getBoundingClientRect）を必要とする。プロジェクトの unit テストは jsdom（Vitest）であり、レイアウト計算が行われないため width/right は 0 を返し検証不能。さらに既存の tests/unit/components/WorktreeDetailRefactored.test.tsx:83 では WorktreeDesktopLayout 自体がモック化（プレーンな <div data-testid=\"desktop-layout\"> 置換）されており、実 className も検証できない。幅アサーションは Playwright(e2e) でしか成立しない。受入条件の検証手段（unit=className に min-w-0 を含むことのアサーション / e2e=実幅検証）を明示すべき。",
+      "suggestion": "受入条件を2層に分離する: (1) unit では『WorktreeDetailRefactored の該当2 div の className に min-w-0 が含まれる』ことをアサート（ただし現状モック構成では DesktopLayout 内部は対象外なので、対象の 1740/1763 div を実レンダリングで検証できるテスト or e2e へ寄せる）、(2) 実幅 (right <= innerWidth) は Playwright e2e で検証、と記載。または『想定影響範囲』の通り幅アサーション追加を任意（Nice to Have）と明記する。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "Nice to Have",
+      "title": "line 1763 への min-w-0 付与は cross 軸であり主因ではない（防御的修正である旨を明記すると整合性が増す）",
+      "description": "根本原因の主因は line 1740（flex-row コンテナ 1738 の直接 flex item、main 軸=横で min-width:auto が効く）。一方 line 1763 の `flex-1 min-h-0` は親 1740 が flex-col のため横方向は cross 軸であり、flex item の min-width:auto 縮小ガードは主因として働かない。Issue 本文は両者を等価に『OVERFLOW! min-width: auto』と並べているが、Playwright 実測で両 div が 2825px だったのは 1740 起因の幅が子へ伝播した結果。両方への付与自体は無害かつ防御的に妥当だが、原因記述としては『1740 が主因、1763 は防御的補強』と区別する方が正確。",
+      "suggestion": "対応方針に一文追記: 『line 1740 が直接の主因。line 1763 は flex-col 内の cross 軸要素であり厳密には主因ではないが、子への幅伝播を確実に止める防御的修正として併せて付与する（冗長だが無害）』。修正内容自体（2箇所 min-w-0 追記）は変更不要。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "Nice to Have",
+      "title": "行番号『1700行付近』は実際 1740/1763 行（許容範囲だが明確化推奨）",
+      "description": "Issue 本文の『該当箇所は1700行付近』は概算で、実コードは 1740 行（flex flex-col flex-1 min-h-0）・1763 行（flex-1 min-h-0）。概算として許容範囲内であり、diff の前後文字列（className 完全一致）で一意に特定可能なため実害はない。",
+      "suggestion": "任意。className 文字列が一意（'flex flex-col flex-1 min-h-0' と 'flex-1 min-h-0' は当該箇所のみ）なので行番号の精緻化は必須ではないが、『1740/1763 行』と更新すると将来の参照精度が上がる。なお WorktreeDetailRefactored.tsx:1590 にも別の 'flex-1 min-h-0'（mobile 経路）が存在するため、修正対象がデスクトップ経路 1763 であることは diff 文脈で担保すること。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 1,
+  "nice_to_have_count": 2,
+  "overall_assessment": "Issue #732 は小規模かつ十分に特定された CSS バグ修正（2箇所の flex item に min-w-0 を追加）として、原因分析・対応方針・スコープ設定はいずれも実コードと整合し正確。仮説検証レポートの全主張（1740/1763 の min-w-0 欠落、1738 の overflow-hidden クリッピング、right-pane-slot/terminal-slot が既に min-w-0 を持つ既存規約）はコード上で Confirmed。Must Fix なし。Should Fix は1件（S1-001: 受入条件の getBoundingClientRect ベース幅検証が jsdom unit では成立せず、かつ既存 unit テストは DesktopLayout をモック化しているため、検証手段を unit=className アサート / e2e=実幅検証 に分離して明記すべき）。Nice to Have は原因記述の精緻化（1740 が主因・1763 は防御的）と行番号更新で、いずれも修正コード自体には影響しない。最小修正方針は妥当であり、スコープ拡大は不要。"
+}

@@ -1,0 +1,29 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": "732",
+  "applied_findings": [
+    {
+      "id": "S3-001",
+      "severity": "Nice to Have",
+      "title": "「想定影響範囲」に『既存 unit テストはゼロ件破壊』である根拠を一文添える",
+      "action": "想定影響範囲セクションに『既存テストへの影響（破壊ゼロの根拠）』ノートを追記。WorktreeDetailRefactored.test.tsx が WorktreeDesktopLayout と TerminalContainer の両方をモック化し、対象 1740/1763 div はモックをラップするだけで className をアサートするテストが皆無であること、14 箇所の data-testid=\"desktop-layout\" 参照は toBeInTheDocument() の存在確認のみであること、overflow/min-w 系の className アサーションが tests/ 全体で 0 件であることを明記。コード変更なし（Issue 本文への追記のみ）。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "Nice to Have",
+      "title": "コンテキストが挙げた TerminalContainer の unit テストは存在しない（影響範囲表記の整合）",
+      "action": "想定影響範囲セクションに『TerminalContainer の unit テストは存在しない』ノートを追記。tests/unit/components/ に TerminalContainer.test.tsx が無い（TerminalComponent/TerminalDisplay/TerminalPage/TerminalSearchBar のみ）こと、TerminalContainer はモック化されて間接利用されるのみで、レイアウト溢れの実挙動は e2e でしか検証できないことを明示。存在しない unit テストを参照しないよう整合をとった。"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "S3-003",
+      "severity": "Nice to Have",
+      "title": "他経路（モバイル・terminal splits・activity pane resize・history pane）への回帰リスク観点",
+      "reason": "レビュー結果自身が『追加スコープ不要』『既存の受入条件（ターミナル/履歴の表示は壊れない、History 表示/非表示・ActivityPane 幅変更でも FilePanel が viewport 内）で実質カバー』と結論しており、Issue への追記は不要。terminal split 多分割時の e2e 1 ケース追加は Nice to Have の余地に留まるため反映せず。"
+    }
+  ],
+  "issue_updated": true,
+  "summary": "Stage 3（影響範囲・1回目）の Nice to Have 2件（S3-001, S3-002）を Issue #732 の『想定影響範囲』セクションに最小・追加的に反映。実テスト照合により (1) WorktreeDesktopLayout/TerminalContainer 両方のモック化により対象 1740/1763 div の className をアサートするテストが皆無＝既存 unit テスト破壊ゼロ、(2) TerminalContainer 専用 unit テストは実在せず実挙動は e2e でのみ検証可能、の2点を明記。S3-003 はレビュー結果自身が追加スコープ不要と結論したためスキップ。Must Fix / Should Fix は 0 件で、修正コード・スコープへの影響なし。gh issue edit で本文更新済み。"
+}

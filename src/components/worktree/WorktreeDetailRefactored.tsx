@@ -1737,7 +1737,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         */}
         <div className="flex h-full overflow-hidden relative">
           {activityBarMemo}
-          <div className="flex flex-col flex-1 min-h-0">
+          {/* Issue #732: min-w-0 主因。flex-row(L1738) の直接 flex item のため
+              main 軸に min-width:auto が効き、子孫 FilePanelSplit の固定幅ペインの
+              コンテンツ要求まで膨張して FilePanel が viewport 外へ押し出される問題を防ぐ */}
+          <div className="flex flex-col flex-1 min-h-0 min-w-0">
             {/* Desktop Header with back button, status, and info */}
             <DesktopHeader
               worktreeName={worktreeName}
@@ -1760,7 +1763,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 initialBranch={worktree.gitStatus.initialBranch}
               />
             )}
-            <div className="flex-1 min-h-0">
+            {/* Issue #732: min-w-0 防御的補強。横溢れ防止のため main 軸主因(L1740)と
+                併せて付与。将来のクリーンアップで誤削除しないこと */}
+            <div className="flex-1 min-h-0 min-w-0">
               <WorktreeDesktopLayout
                 activityPane={activityPaneMemo}
                 rightPane={

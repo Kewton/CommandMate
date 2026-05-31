@@ -1,0 +1,24 @@
+{
+  "issue_number": 732,
+  "status": "success",
+  "files_changed": [
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+    "CHANGELOG.md"
+  ],
+  "tests_added": [
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx :: WorktreeDetailRefactored > Desktop Mode > desktop layout containers carry min-w-0 to prevent horizontal overflow (Issue #732)"
+  ],
+  "red_green": {
+    "red_confirmed": true,
+    "green_confirmed": true
+  },
+  "verification": {
+    "lint": "pass",
+    "tsc": "pass",
+    "test_unit": "pass",
+    "details": "RED: new test failed with 'Expected the element to have class: flex-1 min-h-0 min-w-0 / Received: flex-1 min-h-0' before the fix. GREEN: passes after adding min-w-0. Affected file: 42 passed | 1 skipped. Full unit suite: 358 test files, 6700 passed | 7 skipped | 0 failed (13.4s). `npm run lint` -> No ESLint warnings or errors. `npx tsc --noEmit` -> exit 0. The 'useWorktreesCacheContext must be used within a WorktreesCacheProvider' console output during the full suite originates from the pre-existing WorktreesCacheProvider.test.tsx error-path test and is unrelated to this change.",
+    "build": "not_run"
+  },
+  "notes": "CSS-only bug fix (#730 follow-up). Added `min-w-0` to two PC desktop flex containers in WorktreeDetailRefactored.tsx: L1740 (PRIMARY cause: direct flex item of the L1738 flex-row, so min-width:auto let descendant FilePanelSplit fixed-width panes expand the layout past the viewport) and L1763 (DEFENSIVE reinforcement). Each gained a Japanese comment noting Issue #732 traceability per design policy DR1-001. Mobile path's `flex-1 min-h-0` at L1590 was intentionally left untouched. The unit test traverses up from the mocked `desktop-layout` testid (parentElement = L1763 div, grandparent = L1740 div) and asserts each carries min-w-0 (jsdom does not compute layout, so width-based assertions are deferred to e2e). No logic/props/public API changes. CHANGELOG [Unreleased] -> added new `### Fixed` section with the bug-fix entry. `npm run build` was not run (not part of the assigned verification set; lint/tsc/test:unit all pass and changes are className-only)."
+}

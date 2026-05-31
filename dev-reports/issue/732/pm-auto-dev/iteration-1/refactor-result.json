@@ -1,0 +1,12 @@
+{
+  "issue_number": 732,
+  "status": "not-applicable",
+  "reason": "本修正は CSS className 2箇所への `min-w-0` 追記のみ。新規ロジック・関数・重複コードの導入がないため、リファクタリング対象が存在しない。既存規約 (right-pane-slot/terminal-slot の min-w-0) を踏襲しており、DRY/KISS/YAGNI は実装時点で満たされている。可読性のため L1740/L1763 に説明コメントを付与済み (DR1-001 反映)。",
+  "files_changed": [],
+  "quality_metrics": {
+    "lint": "pass",
+    "tsc": "pass",
+    "test_unit": "pass",
+    "build": "pass"
+  }
+}

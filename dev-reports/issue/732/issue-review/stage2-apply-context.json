@@ -1,0 +1,8 @@
+{
+  "issue_number": "732",
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "review_result_path": "dev-reports/issue/732/issue-review/stage1-review-result.json",
+  "output_path": "dev-reports/issue/732/issue-review/stage2-apply-result.json",
+  "instructions": "Apply Should Fix and worthwhile Nice to Have findings. Specifically: (1) S1-001 split acceptance criteria into unit-test verifiable (className contains min-w-0) vs e2e-verifiable (actual getBoundingClientRect width); (2) S1-002 note line 1740 is the primary root cause, 1763 is defensive; (3) S1-003 correct line numbers to 1740/1763 and add a caveat that the mobile path also has a `flex-1 min-h-0` at line ~1590 which must NOT be edited. Keep edits minimal and preserve existing issue structure."
+}
