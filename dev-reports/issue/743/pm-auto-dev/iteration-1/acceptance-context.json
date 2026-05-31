@@ -1,0 +1,27 @@
+{
+  "issue_number": 743,
+  "feature_summary": "PCターミナル per-split header の AIエージェント status indicator（dot/スピナー）復活（#728 follow-up）",
+  "acceptance_criteria": [
+    "PC版で各 split header に status indicator が表示される",
+    "状態に応じてアイコン/色が切替: idle→グレーdot / ready→緑dot / waiting→黄dot / running・generating→青スピナー（実 SIDEBAR_STATUS_CONFIG マッピング準拠。'processing' は存在しない）",
+    "スプリットA=running→青スピナー / B=idle→グレーdot が独立して表示される",
+    "worktree切替・CLI切替後も対応する status が反映される",
+    "sessionStatusByCli がポーリング更新されたとき自動で indicator も更新される（かつ status 不変ポーリング周期では split が再renderされない＝memo-safe／S3-001）",
+    "新 prop cliStatus は optional、未指定時は 'idle'（グレーdot）にフォールバック（既存テスト・呼び出し元を無改修温存／S3-002）",
+    "アクセシビリティ属性は Mobile 正準に合わせ title のみ付与（aria-label との二重読み上げを避ける／S3-006）",
+    "モバイル版の status indicator 挙動は変更なし（WorktreeDetailRefactored.tsx:1947-1974 を変更しない）",
+    "npm run lint / npx tsc --noEmit / npm run test:unit / npm run build 全PASS",
+    "回帰テスト追加（状態別描画 / 未指定フォールバック / per-split独立 の3系統）"
+  ],
+  "test_scenarios": [
+    "シナリオ1: cliStatus 各値（idle/ready/waiting/running/generating）で indicator の dot/spinner と className が SIDEBAR_STATUS_CONFIG 通りに切り替わる",
+    "シナリオ2: cliStatus 未指定で idle（グレーdot）にフォールバックし、既存テストが無改修で通る",
+    "シナリオ3: split 0=running（青スピナー）/ split 1=idle（グレーdot）が独立して描画される",
+    "シナリオ4: 親 renderSplitPane が worktree.sessionStatusByCli[paneCli] から導出した cliStatus 文字列を渡す配線になっている（memo-safe）",
+    "シナリオ5: Mobile経路 L1947-1974 が無改修であること（git diff で確認）",
+    "シナリオ6: 静的解析・ユニット・build 全PASS（tdd-result.json で確認）"
+  ],
+  "tdd_result_path": "dev-reports/issue/743/pm-auto-dev/iteration-1/tdd-result.json",
+  "output_path": "dev-reports/issue/743/pm-auto-dev/iteration-1/acceptance-result.json",
+  "repo_root": "/Users/maenokota/share/work/github_kewton/commandmate-issue-743"
+}

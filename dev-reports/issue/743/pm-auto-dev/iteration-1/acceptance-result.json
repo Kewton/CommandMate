@@ -1,0 +1,75 @@
+{
+  "issue_number": 743,
+  "overall_status": "passed",
+  "criteria_results": [
+    {
+      "criterion": "PC版で各 split header に status indicator が表示される（headerExtras 経由の配線）",
+      "status": "passed",
+      "evidence": "TerminalSplitPaneContent.tsx:184-201 builds `statusIndicator` (inline span) and passes it via `headerExtras={statusIndicator}` to TerminalSplitPane (L300). TerminalSplitPane.tsx renders `{headerExtras}` in the split header (L35 prop, L135 render). Test 'split-status-indicator-${splitIndex}' confirms it is present.",
+      "notes": "Wiring verified end-to-end: parent renderSplitPane -> TerminalSplitPaneContent -> TerminalSplitPane header slot."
+    },
+    {
+      "criterion": "状態→色/形マッピング（idle→グレーdot / ready→緑dot / waiting→黄dot / running・generating→青スピナー）が実 SIDEBAR_STATUS_CONFIG 準拠。'processing' は使わない",
+      "status": "passed",
+      "evidence": "statusConfig = SIDEBAR_STATUS_CONFIG[cliStatus] (TerminalSplitPaneContent.tsx:184). status-colors.ts: idle=bg-gray-500/dot, ready=bg-green-500/dot, waiting=bg-yellow-500/dot, running=border-blue-500/spinner, generating=border-blue-500/spinner. Spinner branch keyed on statusConfig.type==='spinner' (L187). it.each test asserts all 5 values produce the matching className and dot/spinner. grep confirms no 'processing' literal in the changed code.",
+      "notes": "Uses statusConfig.className (not colorClass) and statusConfig.type==='spinner' exactly per config; BranchStatus type has no 'processing' member."
+    },
+    {
+      "criterion": "スプリットA=running→青スピナー / B=idle→グレーdot が独立して表示される（per-split data-testid）",
+      "status": "passed",
+      "evidence": "data-testid=`split-status-indicator-${splitIndex}` (L191/L197) makes each split's indicator addressable. Test 'renders each split status independently (A=running spinner, B=idle dot)' renders split 0 cliStatus=running (border-blue-500 + animate-spin) and split 1 cliStatus=idle (bg-gray-500, no animate-spin) and asserts both independently. PASSED.",
+      "notes": "splitIndex flows through to the testid and to the parent-derived per-CLI status."
+    },
+    {
+      "criterion": "worktree切替・CLI切替後も対応する status が反映される",
+      "status": "passed",
+      "evidence": "renderSplitPane derives paneCliStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[paneCli]) (WorktreeDetailRefactored.tsx:1484) keyed on the pane's own CLI (paneCli) and the current worktree's sessionStatusByCli; worktreeId and worktree?.sessionStatusByCli are in the renderSplitPane useCallback deps (L1515,1526). Changing CLI/worktree re-derives and propagates the new status.",
+      "notes": "Per-CLI keyed lookup ensures CLI switch reflects the correct status; worktree change re-renders via dep on worktree?.sessionStatusByCli."
+    },
+    {
+      "criterion": "sessionStatusByCli ポーリング更新で indicator 自動更新、かつ status 不変周期では split 再renderされない（memo-safe / S3-001）",
+      "status": "passed",
+      "evidence": "Parent passes only the derived BranchStatus string (cliStatus={paneCliStatus}) to the memo'd child (WorktreeDetailRefactored.tsx:1510). TerminalSplitPaneContent is React.memo (L99); statusIndicator useMemo deps are [statusConfig.type, statusConfig.className, statusConfig.label, splitIndex] (L200) — all derived solely from the status string. A polling tick that leaves the resolved status unchanged yields an unchanged string prop, so the memo'd child does not re-render. Comment at WorktreeDetailRefactored.tsx:1480-1483 documents S3-001.",
+      "notes": "Only the resolved string crosses the memo boundary, not the raw sessionStatusByCli object."
+    },
+    {
+      "criterion": "新 prop cliStatus は optional、未指定時は 'idle'（グレーdot）にフォールバック（既存呼び出し元/テスト無改修 / S3-002）",
+      "status": "passed",
+      "evidence": "Prop declared `cliStatus?: BranchStatus` (L96) with default `cliStatus = 'idle'` (L114). Test 'falls back to idle (gray dot) when cliStatus is omitted' renders without the prop and asserts bg-gray-500 + no animate-spin. The 13 pre-#743 tests (#728/#740) call TerminalSplitPaneContent without cliStatus and still pass unchanged.",
+      "notes": "Backward compatible; no existing call site required modification."
+    },
+    {
+      "criterion": "アクセシビリティ属性は Mobile 正準に合わせ title のみ（aria-label との二重読み上げ回避 / S3-006）",
+      "status": "passed",
+      "evidence": "Indicator span sets only `title={statusConfig.label}` (L190/196); no aria-label. Test asserts `indicator.getAttribute('title')` is truthy and `getAttribute('aria-label')` is null. Mirrors Mobile canonical span at WorktreeDetailRefactored.tsx:1971-1978 (title only).",
+      "notes": "Markup is identical to the Mobile canonical span (w-2 h-2 rounded-full flex-shrink-0 [+ border-2 border-t-transparent animate-spin for spinner])."
+    },
+    {
+      "criterion": "モバイル版の status indicator 挙動は変更なし（WorktreeDetailRefactored.tsx:1947-1974 を変更しない）",
+      "status": "passed",
+      "evidence": "`git show 9f2f227f -- WorktreeDetailRefactored.tsx` shows the ONLY changes are 11 additions inside the renderSplitPane callback (hunks @@ -1477 / -1501 / -1513): added paneCliStatus derivation, cliStatus prop pass-through, and worktree?.sessionStatusByCli dep. The Mobile path region (current L1944-1978, incl. the canonical AutoYesToggle at L1947 and per-tool status span at L1971-1978) is untouched by the #743 commit.",
+      "notes": "#743 commit (9f2f227f) is purely additive; no Mobile-path lines were modified or removed."
+    },
+    {
+      "criterion": "npm run lint / npx tsc --noEmit / npm run test:unit / npm run build 全PASS",
+      "status": "passed",
+      "evidence": "tsc --noEmit exit 0; npm run lint = 'No ESLint warnings or errors' exit 0; npm run test:unit = 358 files passed, 6710 passed / 7 skipped / 0 failed; npm run build exit 0, 'Compiled successfully'.",
+      "notes": "Console.error lines in unit output are intentional negative-path logs from other suites (SidebarContext/WorktreesCacheProvider), not failures. Build ERROR line is a pre-existing Next.js dynamic-route static-analysis log unrelated to #743."
+    },
+    {
+      "criterion": "回帰テスト追加（状態別描画 / 未指定フォールバック / per-split独立 の3系統）",
+      "status": "passed",
+      "evidence": "tests/unit/components/worktree/TerminalSplitPaneContent.test.tsx 'status indicator in split header (Issue #743)' adds: (1) it.each 5-case state-specific dot/spinner+className+a11y, (2) omitted-prop idle fallback, (3) per-split independence (A=running spinner, B=idle dot). All PASSED in verbose run. Existing TerminalSplitPane.test.tsx (8 tests) and the 13 prior content tests remain green (24 total in the two split files).",
+      "notes": "All 3 required regression systems present and passing; no regressions in the existing 358-file suite."
+    }
+  ],
+  "quality_gates": {
+    "tsc": "pass",
+    "lint": "pass",
+    "test_unit": "pass",
+    "build": "pass"
+  },
+  "passed_count": 10,
+  "failed_count": 0,
+  "summary": "All 10 acceptance criteria for Issue #743 PASS. Code review confirms the PC per-split header status indicator is wired via headerExtras with the exact SIDEBAR_STATUS_CONFIG mapping (idle/ready/waiting=dot, running/generating=blue spinner; no 'processing'), per-split data-testids, parent-derived memo-safe cliStatus propagation (S3-001), optional prop with 'idle' fallback (S3-002), and title-only a11y matching the Mobile canonical span (S3-006). git show of commit 9f2f227f confirms the Mobile path (renderSplitPane-only, +11 lines) was not modified. Quality gates: tsc=0, lint=0, test:unit=358 files/6710 passed/0 failed, build=Compiled successfully. The 3 required regression-test systems (state-specific render, omitted-prop fallback, per-split independence) were added and pass, with no regressions in the existing suite (TerminalSplitPane.test.tsx 8 + TerminalSplitPaneContent.test.tsx 16 = 24)."
+}

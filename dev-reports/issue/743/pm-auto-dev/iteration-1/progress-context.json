@@ -1,0 +1,45 @@
+{
+  "issue_number": 743,
+  "title": "fix(terminal): missing AI agent status indicator in PC per-split header (#728 follow-up)",
+  "iteration": 1,
+  "branch": "feature/743-worktree",
+  "commits": [
+    "9f2f227f fix(terminal): restore AI agent status indicator in PC per-split header",
+    "6fdacdf3 docs: update CHANGELOG.md / CLAUDE.md for PC per-split status indicator (#743)"
+  ],
+  "phase_results": {
+    "issue_review": {
+      "status": "success",
+      "stages": "Phase 0.5 + Stage 1-4 (Codex Stage 5-8 skipped per user policy)",
+      "must_fix_applied": 6,
+      "should_fix_applied": 7,
+      "nice_to_have_applied": 3,
+      "note": "対応方針の6件の参照誤り（誤importパス・存在しないhook/component・誤フィールド名・存在しないstatus値）を正準パターンに全面修正"
+    },
+    "design_policy": {"status": "skipped", "note": "ユーザー方針によりPhase 2スキップ"},
+    "design_review": {"status": "skipped", "note": "ユーザー方針によりPhase 3スキップ"},
+    "work_plan": {"status": "success", "tasks": 6},
+    "tdd": {
+      "status": "success",
+      "files_changed": [
+        "src/components/worktree/TerminalSplitPaneContent.tsx (+36)",
+        "src/components/worktree/WorktreeDetailRefactored.tsx (+11)",
+        "tests/unit/components/worktree/TerminalSplitPaneContent.test.tsx (+109)"
+      ],
+      "tests_added": 7,
+      "test_results": {"passed": 6710, "skipped": 7, "failed": 0},
+      "quality_gates": {"tsc": "pass", "lint": "pass", "test_unit": "pass", "build": "pass"}
+    },
+    "acceptance": {
+      "status": "passed",
+      "passed_count": 10,
+      "failed_count": 0,
+      "quality_gates": {"tsc": "pass", "lint": "pass", "test_unit": "pass", "build": "pass"}
+    },
+    "refactor": {"status": "no_change_needed", "note": "additive 11行・#740パターン踏襲のためコードスメルなし"},
+    "documentation": {"status": "success", "updated": ["CHANGELOG.md", "CLAUDE.md"]},
+    "uat": {"status": "skipped", "note": "PC専用UI修正・ユニット+build+静的解析で網羅検証済みのためユーザー選択でスキップ（#740同様）"}
+  },
+  "output_path": "dev-reports/issue/743/pm-auto-dev/iteration-1/progress-report.md",
+  "repo_root": "/Users/maenokota/share/work/github_kewton/commandmate-issue-743"
+}
