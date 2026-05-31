@@ -45,13 +45,35 @@ function cloneDefault(): TerminalSplitConfig {
   };
 }
 
+/**
+ * Re-normalize widths so they sum to 1.0 while preserving their ratios (Issue #739).
+ *
+ * Why: a sum < 1 makes a flex child (`flex-grow: w`, `flex-basis: 0`) occupy only
+ * that fraction of the container, leaving empty space. `removeSplit` slices the
+ * widths array (e.g. `[0.5, 0.5]` -> `[0.5]`, sum 0.5), so the remainder must be
+ * normalized. Also applied on load to self-heal localStorage states persisted by
+ * the pre-fix buggy `removeSplit`.
+ *
+ * The `sum <= 0` fallback is length-preserving (equal distribution) to keep the
+ * `widths.length === splits.length` invariant; it is unreachable on both call
+ * sites (inputs are pre-validated all-positive, so sum > 0) but kept defensive.
+ */
+function normalizeWidths(widths: number[]): number[] {
+  const sum = widths.reduce((s, w) => s + w, 0);
+  return sum > 0 ? widths.map(w => w / sum) : widths.map(() => 1 / widths.length);
+}
+
 function readInitialState(worktreeId: string): TerminalSplitConfig {
   if (typeof window === 'undefined') return cloneDefault();
   try {
     const raw = window.localStorage.getItem(getTerminalSplitsStorageKey(worktreeId));
     if (!raw) return cloneDefault();
     const parsed: unknown = JSON.parse(raw);
-    if (isValidSplitConfig(parsed)) return parsed;
+    if (isValidSplitConfig(parsed)) {
+      // Self-heal any persisted sum != 1.0 without mutating `parsed`. A valid,
+      // already-normalized config (sum 1.0) passes through unchanged (w / 1 === w).
+      return { ...parsed, widths: normalizeWidths(parsed.widths) };
+    }
     console.warn(
       `[useTerminalSplits] stale state for ${worktreeId}; falling back to DEFAULT_SPLIT_CONFIG`,
     );
@@ -130,7 +152,9 @@ export function useTerminalSplits(worktreeId: string): UseTerminalSplitsReturn {
     setConfig(prev => {
       if (prev.splits.length <= MIN_SPLITS) return prev;
       const splits = prev.splits.slice(0, -1);
-      const widths = prev.widths.slice(0, -1);
+      // Re-normalize so the remaining widths sum to 1.0 (Issue #739); otherwise
+      // the sole/remaining flex children only fill a fraction of the container.
+      const widths = normalizeWidths(prev.widths.slice(0, -1));
       return { splits, widths };
     });
   }, []);
