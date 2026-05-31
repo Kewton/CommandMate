@@ -55,6 +55,7 @@ const HistoryExpandBar = memo(function HistoryExpandBar({
     >
       <button
         type="button"
+        data-testid="history-pane-expand"
         aria-label="Expand history panel"
         aria-expanded="false"
         aria-controls={HISTORY_PANE_ID}

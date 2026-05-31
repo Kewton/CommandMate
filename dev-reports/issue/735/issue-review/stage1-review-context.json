@@ -1,0 +1,10 @@
+{
+  "issue_number": "735",
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "hypothesis_verification_path": "dev-reports/issue/735/issue-review/hypothesis-verification.md",
+  "original_issue_path": "dev-reports/issue/735/issue-review/original-issue.json",
+  "output_path": "dev-reports/issue/735/issue-review/stage1-review-result.json"
+}
