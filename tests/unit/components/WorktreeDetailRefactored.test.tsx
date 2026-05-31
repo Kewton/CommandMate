@@ -365,6 +365,38 @@ describe('WorktreeDetailRefactored', () => {
       });
     });
 
+    // Issue #732: Two desktop flex containers wrapping WorktreeDesktopLayout
+    // must carry `min-w-0` so flex items can shrink below their content's
+    // intrinsic minimum width. Without it, FilePanelSplit's fixed-width panes
+    // expand the layout past the viewport and push FilePanel off-screen.
+    //
+    // DOM structure (PC path):
+    //   <div className="flex h-full overflow-hidden relative">      (L1738, parent)
+    //     {activityBar}
+    //     <div className="flex flex-col flex-1 min-h-0 ...">         (L1740, PRIMARY)
+    //       <DesktopHeader />
+    //       <div className="flex-1 min-h-0 ...">                     (L1763, DEFENSIVE)
+    //         <WorktreeDesktopLayout /> -> data-testid="desktop-layout"
+    //
+    // The mocked `desktop-layout` testid is a descendant of both target divs,
+    // so we traverse up from it to assert `min-w-0` on each container.
+    it('desktop layout containers carry min-w-0 to prevent horizontal overflow (Issue #732)', async () => {
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      const desktopLayout = await screen.findByTestId('desktop-layout');
+
+      // L1763 (DEFENSIVE): direct parent of the WorktreeDesktopLayout mock.
+      const defensiveContainer = desktopLayout.parentElement;
+      expect(defensiveContainer).not.toBeNull();
+      expect(defensiveContainer).toHaveClass('flex-1', 'min-h-0', 'min-w-0');
+
+      // L1740 (PRIMARY): parent of the L1763 container. It is the direct flex
+      // item of the L1738 flex-row, so its missing min-w-0 was the root cause.
+      const primaryContainer = defensiveContainer!.parentElement;
+      expect(primaryContainer).not.toBeNull();
+      expect(primaryContainer).toHaveClass('flex', 'flex-col', 'flex-1', 'min-h-0', 'min-w-0');
+    });
+
     it('shows PromptPanel when prompt is active', async () => {
       mockFetch.mockImplementation((url: string) => {
         if (url.includes('/current-output')) {

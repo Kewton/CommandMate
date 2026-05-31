@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Performance
 - FilePanel: 大規模ファイルでPC版がハングする問題に対するハイブリッド対応（行ベースAPI ＋ `@tanstack/react-virtual` 仮想化 ＋ 編集系2MBサイズ上限）。CodeViewer は `useVirtualizer` で可視範囲＋オーバースキャンのみマウントし、行範囲モード（`startLine`/`endLine` クエリ）でチャンク取得・ハイライトキャッシュを実装。サーバ側は `readFileLineRange` で `createReadStream`＋`readline` ストリーミング（メモリ O(チャンク)）。`useFileContentSearch` に debounce 300ms＋最小2文字、`useFileContentPolling` に大ファイル時無効化（`POLLING_DISABLED_THRESHOLD_BYTES = 1MB`）を追加 (Issue #723)
 
+### Fixed
+- Layout (PC): `min-w-0` 欠落により PC 版でファイル選択時に FilePanel が viewport 外へ押し出され隠れる問題を修正（#730 follow-up）。`WorktreeDetailRefactored.tsx` の外側 2 flex コンテナ（L1740 主因 / L1763 防御的補強）に `min-w-0` を追記し、Flexbox の `min-width: auto` 既定によって flex item がコンテンツ最小幅以下に縮まずレイアウトが viewport を超えて膨張する問題を解消。CSS クラス追記のみでロジック・props・公開API・モバイル経路は無変更 (Issue #732)
+
 ### Breaking Changes
 - **Layout (PC) BREAKING (Issue #730)**: PC デスクトップで `ActivityBar` が `WorktreeDesktopLayout` の外側に出て VS Code 風に全高貫通（Header の下から画面下端まで）し、History が `TerminalContainer` 内の左サブパネルに移動します。視覚的な影響:
   - `?pane=history` deep link の History 表示位置が「画面中央の独立列」→「画面右端 Terminal 領域内」に変わります（表示の意味は維持されます）

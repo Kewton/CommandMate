@@ -1,0 +1,20 @@
+{
+  "issue_number": 732,
+  "feature_summary": "FilePanel 横溢れ修正: WorktreeDetailRefactored.tsx の外側2 flex コンテナ (L1740 主因 / L1763 防御) に min-w-0 を追記",
+  "acceptance_criteria": [
+    "WorktreeDetailRefactored.tsx の対象2コンテナ (L1740, L1763) の className に min-w-0 が含まれる (unit 検証可能)",
+    "モバイル経路 (~L1590 の flex-1 min-h-0) は未変更 (静的確認)",
+    "ターミナル/履歴の既存挙動が壊れない (既存テスト非破壊)",
+    "npm run lint / npx tsc --noEmit / npm run test:unit / npm run build 全PASS",
+    "PC版1920pxでファイル選択時にFilePanelがviewport内 / file-panel-pane.right<=innerWidth / desktop-layout幅がviewport内 / History表示切替・ActivityPane幅変更でも成立 (これらはe2e/Playwrightでのみ厳密検証可能。unit/jsdomでは幅0のため検証不可と明記)"
+  ],
+  "test_scenarios": [
+    "シナリオ1: 新規 unit テストが L1740/L1763 の min-w-0 を検証し PASS する",
+    "シナリオ2: モバイル経路の flex-1 min-h-0 (~L1590) が git diff に含まれない",
+    "シナリオ3: lint/tsc/test:unit/build がすべて成功する",
+    "シナリオ4: 既存の WorktreeDetailRefactored 関連テストが全て PASS する (回帰なし)",
+    "シナリオ5: 幅ベースの受入条件は e2e でのみ検証可能であることを報告書に明記"
+  ],
+  "tdd_result_path": "dev-reports/issue/732/pm-auto-dev/iteration-1/tdd-result.json",
+  "output_path": "dev-reports/issue/732/pm-auto-dev/iteration-1/acceptance-result.json"
+}

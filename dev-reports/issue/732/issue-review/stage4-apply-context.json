@@ -1,0 +1,8 @@
+{
+  "issue_number": "732",
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "review_result_path": "dev-reports/issue/732/issue-review/stage3-review-result.json",
+  "output_path": "dev-reports/issue/732/issue-review/stage4-apply-result.json",
+  "instructions": "Apply the worthwhile Nice-to-Have impact-scope clarifications: (1) state explicitly that zero existing unit tests break because WorktreeDesktopLayout and TerminalContainer are mocked in WorktreeDetailRefactored.test.tsx; (2) correct any reference implying a TerminalContainer unit test exists (it does not). Keep edits minimal."
+}

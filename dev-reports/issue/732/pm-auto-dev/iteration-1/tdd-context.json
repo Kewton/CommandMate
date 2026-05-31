@@ -1,0 +1,29 @@
+{
+  "issue_number": 732,
+  "title": "fix(layout): missing min-w-0 causes horizontal overflow, hiding FilePanel off-screen (#730 follow-up)",
+  "design_policy_path": "dev-reports/design/issue-732-min-w-0-overflow-fix-design-policy.md",
+  "work_plan_path": "dev-reports/issue/732/work-plan.md",
+  "acceptance_criteria": [
+    "PC版 (viewport 1920px) で Files アクティビティ → ファイルクリックすると FilePanel が viewport 内に表示される (e2e)",
+    "file-panel-pane の getBoundingClientRect().right が window.innerWidth 以下 (e2e)",
+    "data-testid=\"desktop-layout\" の幅が viewport 内に収まる (e2e)",
+    "History 表示/非表示、ActivityPane幅変更でも FilePanel が viewport 内 (e2e)",
+    "ターミナル/履歴の表示は壊れない (既存挙動維持)",
+    "モバイル変更なし",
+    "WorktreeDetailRefactored.tsx の対象2コンテナ (L1740, L1763) の className に min-w-0 が含まれる (unit)",
+    "npm run lint / npx tsc --noEmit / npm run test:unit / npm run build 全PASS"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: src/components/worktree/WorktreeDetailRefactored.tsx の L1740 `<div className=\"flex flex-col flex-1 min-h-0\">` に min-w-0 を追記し `flex flex-col flex-1 min-h-0 min-w-0` にする (主因)。簡潔なコメントを付与 (Issue #732 主因である旨)",
+    "Task 1.2: src/components/worktree/WorktreeDetailRefactored.tsx の L1763 `<div className=\"flex-1 min-h-0\">` に min-w-0 を追記し `flex-1 min-h-0 min-w-0` にする (防御的補強)。簡潔なコメントを付与 (Issue #732 防御的補強である旨)。モバイル経路の flex-1 min-h-0 (~L1590) は編集しないこと",
+    "Task 2.1: tests/unit/components/WorktreeDetailRefactored.test.tsx (または適切なunit test) に、対象2コンテナの className に min-w-0 が含まれることを検証するアサーションを追加 (Red→Green)。既存テストは WorktreeDesktopLayout/TerminalContainer をモックするため、対象 div が実DOMに描画される構成でクラスを検証する",
+    "Task 3.1: CHANGELOG.md の [Unreleased] にバグ修正を記載"
+  ],
+  "constraints": [
+    "CSS className 追記のみ。ロジック・props・公開API変更なし",
+    "モバイル経路 (~L1590 の flex-1 min-h-0) は編集禁止",
+    "jsdom は実レイアウトを計算しないため、getBoundingClientRect ベースの幅検証は unit テストでは不可。unit は className レベルの回帰防止に留める",
+    "L1740 が主因、L1763 は防御的補強。両方に min-w-0 を付与する"
+  ],
+  "target_coverage": 80
+}
