@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- fix(terminal): PC版の各ターミナル split footer に `AutoYesToggle` を復活（#728 で per-split footer 移行時に取りこぼされていた）。CLI 単位で独立した Auto-Yes ON/OFF 操作を可能化。`WorktreeDetailRefactored.tsx` の `handleAutoYesToggle` を `makeAutoYesToggleHandler(cliToolId)`（`useCallback`、依存 `worktreeId` で安定参照）にパラメータ化し、API body の `cliToolId` と `setAutoYesStateMap` のキーを引数値に変更。Mobile 経路（L1897-1904）は `makeAutoYesToggleHandler(activeCliTab)` の薄いラッパで従来どおり動作。`TerminalSplitPaneContent` に `autoYesExpiresAt` / `lastAutoResponse` / `onAutoYesToggle` props を追加し footer 先頭で `<AutoYesToggle cliToolName={cliToolId} inline />` を描画。状態は親の per-CLI `autoYesStateMap` を単一の真実源とし、`renderSplitPane` で各 split に per-CLI 値を配布。client-side auto-response は per-split 化せず #501 サーバー poller に委譲。`showPrompt = prompt.visible && !autoYesEnabled` の既存挙動・split0→activeCliTab 同期は維持 (Issue #740)
+
 ### Added
 - test(e2e): #728 AC-27 を Playwright e2e で機械検証。`tests/e2e/terminal-split-resizer-cursor.spec.ts`（PaneResizer 複数インスタンス並存下での drag 後 cursor 非残留）と `tests/e2e/terminal-split-cross-worktree-persistence.spec.ts`（`commandmate:terminalSplits:{worktreeId}` の worktreeId スコープ永続化＝cross-worktree 分離）を新規追加。chromium 限定（`beforeEach` 内 `testInfo.project.name` self-skip で Mobile Safari を除外、`playwright.config.ts` は無変更）、`test.use` で 1920×1080 viewport を spec ローカル指定。フィクスチャ `tests/e2e/fixtures/terminal-split-helpers.ts` は `page.route` による worktree API モック（DB/git/tmux セッション非依存で split UI を描画）＋ sessionStorage ガード付き localStorage 隔離（一意 worktreeId `e2e-split-a/b`）を提供 (Issue #735)
 - test(terminal): `src/components/worktree/TerminalContainer.tsx` の History 展開ボタン（`aria-label="Expand history panel"`）に `data-testid="history-pane-expand"` を付与（e2e 用、純 additive・ランタイム挙動不変） (Issue #735)

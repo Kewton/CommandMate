@@ -3,6 +3,8 @@
  *
  * Smart wrapper around `TerminalSplitPane`. Owns per-(worktreeId, cliToolId)
  * polling via `useTerminalPanePolling` and renders the full footer:
+ *   - AutoYesToggle (Issue #740; per-split, keyed by this split's cliToolId so
+ *     each CLI toggles auto-yes independently)
  *   - NavigationButtons (when CLI is in selection-list state, e.g. OpenCode)
  *   - PromptPanel (when /current-output reports isPromptWaiting)
  *   - MessageInput (always; carries draft persistence per splitIndex)
@@ -27,6 +29,10 @@ import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { PromptPanel } from '@/components/worktree/PromptPanel';
 import { MessageInput } from '@/components/worktree/MessageInput';
+import {
+  AutoYesToggle,
+  type AutoYesToggleParams,
+} from '@/components/worktree/AutoYesToggle';
 import {
   useTerminalPanePolling,
   type PanePromptState,
@@ -53,11 +59,30 @@ export interface TerminalSplitPaneContentProps {
    */
   onMessageSent?: (cliToolId: CLIToolType) => void;
   /**
-   * Whether auto-yes is currently enabled for THIS CLI. When true, the
-   * PromptPanel is hidden because the auto-yes manager will respond instead.
-   * Auto-yes itself is still globally keyed by activeCliTab in the parent.
+   * Whether auto-yes is currently enabled for THIS CLI (Issue #740). When
+   * true, the PromptPanel is hidden because the auto-yes manager will respond
+   * instead. State is sourced from the parent's per-CLI `autoYesStateMap`, so
+   * each split toggles auto-yes independently for its own cliToolId.
    */
   autoYesEnabled?: boolean;
+  /**
+   * Expiration timestamp (ms since epoch) for THIS CLI's auto-yes, used by the
+   * footer AutoYesToggle countdown (Issue #740). Resolved per-CLI by the parent.
+   */
+  autoYesExpiresAt?: number | null;
+  /**
+   * Last auto-response answer for the AutoYesToggle notification (Issue #740).
+   * Sourced from the parent's `useAutoYes` (activeCliTab-scoped); per-split
+   * client-side auto-response is intentionally NOT introduced (Issue #501's
+   * server poller owns auto-responses).
+   */
+  lastAutoResponse?: string | null;
+  /**
+   * Toggle handler bound to THIS split's cliToolId (Issue #740). The parent
+   * supplies a per-CLI curried handler so toggling one split's auto-yes does
+   * not affect the others.
+   */
+  onAutoYesToggle: (params: AutoYesToggleParams) => Promise<void>;
 }
 
 export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
@@ -72,6 +97,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   onInsertConsumed,
   onMessageSent,
   autoYesEnabled = false,
+  autoYesExpiresAt = null,
+  lastAutoResponse = null,
+  onAutoYesToggle,
 }: TerminalSplitPaneContentProps) {
   const {
     terminal,
@@ -161,6 +189,15 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   const footerSlot = useMemo(
     () => (
       <div className="space-y-2">
+        {/* Issue #740: per-split Auto-Yes toggle, keyed by this split's CLI. */}
+        <AutoYesToggle
+          enabled={autoYesEnabled}
+          expiresAt={autoYesExpiresAt ?? null}
+          onToggle={onAutoYesToggle}
+          lastAutoResponse={lastAutoResponse ?? null}
+          cliToolName={cliToolId}
+          inline
+        />
         {showNav ? (
           <NavigationButtons
             worktreeId={worktreeId}
@@ -209,6 +246,10 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       onInsertConsumed,
       splitIndex,
       onFocus,
+      autoYesEnabled,
+      autoYesExpiresAt,
+      lastAutoResponse,
+      onAutoYesToggle,
     ],
   );
 
