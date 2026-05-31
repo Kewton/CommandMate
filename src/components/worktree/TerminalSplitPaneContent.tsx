@@ -39,6 +39,8 @@ import {
 } from '@/hooks/useTerminalPanePolling';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
+import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
+import type { BranchStatus } from '@/types/sidebar';
 
 export interface TerminalSplitPaneContentProps {
   worktreeId: string;
@@ -83,6 +85,15 @@ export interface TerminalSplitPaneContentProps {
    * not affect the others.
    */
   onAutoYesToggle: (params: AutoYesToggleParams) => Promise<void>;
+  /**
+   * Derived AI agent status for THIS split's CLI (Issue #743). Resolved by the
+   * parent from `worktree.sessionStatusByCli[cliToolId]` via `deriveCliStatus`
+   * and rendered as a dot/spinner in the split header (headerExtras). Optional
+   * so existing call sites/tests that never pass it keep working unchanged
+   * (defaults to 'idle' = gray dot). Mirrors the Mobile canonical span at
+   * WorktreeDetailRefactored.tsx:1947-1974.
+   */
+  cliStatus?: BranchStatus;
 }
 
 export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
@@ -100,6 +111,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   autoYesExpiresAt = null,
   lastAutoResponse = null,
   onAutoYesToggle,
+  cliStatus = 'idle',
 }: TerminalSplitPaneContentProps) {
   const {
     terminal,
@@ -164,6 +176,29 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
 
   const showNav = terminal.isSelectionListActive;
   const showPrompt = prompt.visible && !autoYesEnabled;
+
+  // Issue #743: AI agent status indicator (dot/spinner) for the split header.
+  // Uses the same inline span markup as the Mobile canonical implementation
+  // (WorktreeDetailRefactored.tsx:1947-1974): title-only a11y (no aria-label,
+  // to avoid duplicate readout / S3-006), spinner for running/generating.
+  const statusConfig = SIDEBAR_STATUS_CONFIG[cliStatus];
+  const statusIndicator = useMemo(
+    () =>
+      statusConfig.type === 'spinner' ? (
+        <span
+          className={`w-2 h-2 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`}
+          title={statusConfig.label}
+          data-testid={`split-status-indicator-${splitIndex}`}
+        />
+      ) : (
+        <span
+          className={`w-2 h-2 rounded-full flex-shrink-0 ${statusConfig.className}`}
+          title={statusConfig.label}
+          data-testid={`split-status-indicator-${splitIndex}`}
+        />
+      ),
+    [statusConfig.type, statusConfig.className, statusConfig.label, splitIndex],
+  );
 
   const terminalSlot = useMemo(
     () => (
@@ -262,6 +297,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       onCliToolChange={onCliToolChange}
       onFocus={onFocus}
       attaching={terminal.attaching}
+      headerExtras={statusIndicator}
       terminal={terminalSlot}
       footer={footerSlot}
     />
