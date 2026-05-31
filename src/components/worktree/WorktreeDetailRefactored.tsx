@@ -422,8 +422,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       actions.clearMessages();
       // Reset initial load flag to trigger fresh data fetch
       initialLoadCompletedRef.current = false;
-      // Clear terminal output
-      actions.setTerminalOutput('', '');
+      // Issue #736: terminal output reset is handled by the mobile terminal
+      // tab's useTerminalPanePolling (self-resets on worktreeId change).
       // Update ref for next comparison
       prevWorktreeIdRef.current = worktreeId;
     }
@@ -514,18 +514,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         return;
       }
 
-      // Update terminal state - use fullOutput for complete display, fallback to realtimeSnippet
-      // Only clear output if we explicitly have empty fullOutput (session not running returns empty)
-      const terminalOutput = data.fullOutput ?? data.realtimeSnippet ?? '';
-
-      // Only update terminal output if we have content or session is running
-      // This prevents clearing the terminal when polling returns empty during session transitions
-      if (terminalOutput || data.isRunning) {
-        actions.setTerminalOutput(terminalOutput, data.realtimeSnippet ?? '');
-      }
-
-      actions.setTerminalActive(data.isRunning ?? false);
-      actions.setTerminalThinking(data.thinking ?? false);
+      // Issue #736: terminal output/isActive/isThinking are no longer mirrored
+      // into a reducer slice. The mobile terminal tab owns its own
+      // `useTerminalPanePolling` instance (like the PC split panes, #728); this
+      // parent poll only keeps prompt / selection-list / Auto-Yes state in sync.
 
       // Handle prompt state transitions
       if (data.isPromptWaiting && data.promptData) {
@@ -605,11 +597,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   useEffect(() => {
     if (prevCliTabRef.current !== activeCliTab) {
       prevCliTabRef.current = activeCliTab;
-      // Clear stale data immediately for snappy UI
+      // Clear stale data immediately for snappy UI.
+      // Issue #736: terminal reset is owned by useTerminalPanePolling
+      // (self-resets on the new cliToolId); only non-terminal state is cleared here.
       actions.clearMessages();
-      actions.setTerminalOutput('', '');
-      actions.setTerminalActive(false);
-      actions.setTerminalThinking(false);
       actions.clearPrompt();
       setIsSelectionListActive(false);
       // Fetch fresh data for the new tab
@@ -805,14 +796,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     [actions]
   );
 
-  /** Handle terminal auto-scroll toggle */
-  const handleAutoScrollChange = useCallback(
-    (enabled: boolean) => {
-      actions.setAutoScroll(enabled);
-    },
-    [actions]
-  );
-
   /** Handle message sent - refresh messages after sending */
   const handleMessageSent = useCallback(
     () => {
@@ -869,9 +852,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       );
       if (!response.ok) return;
       actions.clearMessages();
-      actions.setTerminalOutput('', '');
-      actions.setTerminalActive(false);
-      actions.setTerminalThinking(false);
+      // Issue #736: terminal reset reflected by useTerminalPanePolling on the
+      // next poll (session no longer running); only non-terminal state cleared here.
       actions.clearPrompt();
       await fetchWorktree();
     } catch (err) {
@@ -1349,11 +1331,20 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     };
   }, [handleVisibilityChange]);
 
-  /** Poll for current output and worktree status at adaptive intervals */
+  /**
+   * Poll for current output and worktree status at adaptive intervals.
+   *
+   * Issue #736: cadence was previously gated on the removed terminal reducer
+   * slice's isActive flag. It now derives the active/idle switch from the active
+   * CLI's running flag (`worktree.sessionStatusByCli[activeCliTab].isRunning`), refreshed
+   * by `fetchWorktree()` inside this same loop — preserving the prior adaptive
+   * behavior without the terminal reducer slice.
+   */
+  const activeCliRunning = worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning ?? false;
   useEffect(() => {
     if (loading || error) return;
 
-    const pollingInterval = state.terminal.isActive
+    const pollingInterval = activeCliRunning
       ? ACTIVE_POLLING_INTERVAL_MS
       : IDLE_POLLING_INTERVAL_MS;
 
@@ -1364,7 +1355,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     const intervalId = setInterval(pollData, pollingInterval);
 
     return () => clearInterval(intervalId);
-  }, [loading, error, fetchCurrentOutput, fetchWorktree, fetchMessages, state.terminal.isActive]);
+  }, [loading, error, fetchCurrentOutput, fetchWorktree, fetchMessages, activeCliRunning]);
 
   /** Sync layout mode with viewport size */
   useEffect(() => {
@@ -1433,9 +1424,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
    * session controls (which are CLI-tab-scoped, not split-scoped) continue
    * working. We only sync activeCliTab when split 0's CLI changes.
    *
-   * Mobile path is unchanged: it still consumes `state.terminal.*` and the
-   * parent's fetchCurrentOutput loop. The reducer slice is now effectively
-   * mobile-only; tracking its removal as a follow-up.
+   * Issue #736: the mobile path now uses the same `useTerminalPanePolling`
+   * hook (via MobileTerminalTab) instead of the old terminal reducer slice,
+   * which has been removed. The parent poll keeps prompt / selection-list /
+   * Auto-Yes state in sync for both layouts.
    */
   const renderSplitPane = useCallback(
     ({
@@ -1983,9 +1975,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             worktreeId={worktreeId}
             worktree={worktree}
             messages={state.messages}
-            terminalOutput={state.terminal.output}
-            isTerminalActive={state.terminal.isActive}
-            isThinking={state.terminal.isThinking}
+            cliToolId={activeCliTab}
             onFilePathClick={handleFilePathClick}
             onFileSelect={handleFileSelect}
             onWorktreeUpdate={setWorktree}
@@ -2005,8 +1995,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onVibeLocalModelChange={handleVibeLocalModelChange}
             vibeLocalContextWindow={vibeLocalContextWindow}
             onVibeLocalContextWindowChange={handleVibeLocalContextWindowChange}
-            autoScroll={state.terminal.autoScroll}
-            onScrollChange={handleAutoScrollChange}
             disableAutoFollow={disableAutoFollow}
             historySubTab={historySubTab}
             onHistorySubTabChange={setHistorySubTab}
@@ -2041,7 +2029,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               worktreeId={worktreeId}
               onMessageSent={handleMessageSent}
               cliToolId={activeCliTab}
-              isSessionRunning={state.terminal.isActive}
+              isSessionRunning={worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning ?? false}
               pendingInsertText={pendingInsertText}
               onInsertConsumed={handleInsertConsumedSingle}
             />

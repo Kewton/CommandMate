@@ -7,14 +7,15 @@
  *   - PromptPanel (when /current-output reports isPromptWaiting)
  *   - MessageInput (always; carries draft persistence per splitIndex)
  *
- * This is the only consumer that translates polled split state into UI on PC.
- * Mobile keeps reading the shared `state.terminal.*` reducer slice and renders
- * its own footer near the bottom of the screen.
+ * This is the consumer that translates polled split state into UI on PC.
+ * Mobile renders its own footer near the bottom of the screen and (since
+ * Issue #736) drives the terminal display through the same
+ * `useTerminalPanePolling` hook via `MobileTerminalTab`.
  *
- * Design note (per R3-005):
- *   The PC `WorktreeDetailRefactored` no longer reads `state.terminal.*` for
- *   any split. The reducer slice survives only because mobile still depends
- *   on it; deleting it is out of scope for #728 and tracked as a follow-up.
+ * Design note (per R3-005 / Issue #736):
+ *   Neither PC nor mobile read a terminal reducer slice anymore — the slice
+ *   was removed in #736 and both layouts now source terminal output from
+ *   `useTerminalPanePolling`.
  */
 
 'use client';

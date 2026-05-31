@@ -6,7 +6,6 @@
  */
 
 import type { ChatMessage, PromptData } from './models';
-import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { UIPhase, ErrorState, MobileActivePane, LeftPaneTab } from './ui-state';
 import type { ActivityId } from '@/config/activity-bar-config';
 
@@ -17,12 +16,6 @@ import type { ActivityId } from '@/config/activity-bar-config';
 export type WorktreeUIAction =
   // Phase transitions
   | { type: 'SET_PHASE'; phase: UIPhase }
-
-  // Terminal actions
-  | { type: 'SET_TERMINAL_OUTPUT'; output: string; realtimeSnippet: string }
-  | { type: 'SET_TERMINAL_ACTIVE'; isActive: boolean }
-  | { type: 'SET_TERMINAL_THINKING'; isThinking: boolean }
-  | { type: 'SET_AUTO_SCROLL'; enabled: boolean }
 
   // Prompt actions
   | { type: 'SHOW_PROMPT'; data: PromptData; messageId: string }
@@ -57,10 +50,5 @@ export type WorktreeUIAction =
   | { type: 'CLEAR_MESSAGES' }
 
   // Connection actions
-  | { type: 'SET_WS_CONNECTED'; connected: boolean }
-
-  // Compound actions (update multiple states simultaneously)
-  | { type: 'START_WAITING_FOR_RESPONSE'; cliToolId: CLIToolType }
-  | { type: 'RESPONSE_RECEIVED'; message: ChatMessage }
-  | { type: 'SESSION_ENDED' };
+  | { type: 'SET_WS_CONNECTED'; connected: boolean };
 

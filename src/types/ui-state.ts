@@ -19,25 +19,6 @@ import type { ActivityId } from '@/config/activity-bar-config';
 export type UIPhase = 'idle' | 'waiting' | 'receiving' | 'prompt' | 'complete';
 
 /**
- * Terminal State
- * Manages the terminal display output and settings
- */
-export interface TerminalState {
-  /** Full terminal output content */
-  output: string;
-  /** Real-time snippet for showing current activity */
-  realtimeSnippet: string;
-  /** Whether the terminal session is active */
-  isActive: boolean;
-  /** Whether Claude is currently thinking/processing */
-  isThinking: boolean;
-  /** Auto-scroll enabled (pause when user scrolls manually) */
-  autoScroll: boolean;
-  /** Last update timestamp */
-  lastUpdated: Date | null;
-}
-
-/**
  * Prompt State
  * Manages Claude's prompt (yes/no, multiple choice) state
  */
@@ -150,8 +131,6 @@ export interface ErrorState {
 export interface WorktreeUIState {
   /** Current UI phase */
   phase: UIPhase;
-  /** Terminal state */
-  terminal: TerminalState;
   /** Prompt state */
   prompt: PromptState;
   /** Layout state */
@@ -163,18 +142,6 @@ export interface WorktreeUIState {
   /** WebSocket connection status */
   wsConnected: boolean;
 }
-
-/**
- * Initial terminal state
- */
-export const initialTerminalState: TerminalState = {
-  output: '',
-  realtimeSnippet: '',
-  isActive: false,
-  isThinking: false,
-  autoScroll: true,
-  lastUpdated: null,
-};
 
 /**
  * Initial prompt state
@@ -218,7 +185,6 @@ export const initialErrorState: ErrorState = {
 export function createInitialUIState(): WorktreeUIState {
   return {
     phase: 'idle',
-    terminal: { ...initialTerminalState },
     prompt: { ...initialPromptState },
     layout: { ...initialLayoutState },
     error: { ...initialErrorState },

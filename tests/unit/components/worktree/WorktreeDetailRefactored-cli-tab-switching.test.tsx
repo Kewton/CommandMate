@@ -1,19 +1,28 @@
 /**
  * @vitest-environment jsdom
  *
- * Issue #728 rewrite rationale:
- *   Pre-#728 these tests asserted on the shared CLI tab header buttons
- *   inside the right pane (Claude / Copilot buttons in `terminalHeaderMemo`).
- *   That header was removed on PC because each TerminalSplitPane now owns
- *   its own CLI selector (`<select>` element). The underlying invariant
- *   under test ("stale fetch responses for the previous CLI never overwrite
- *   the currently-active CLI's state") is unchanged.
+ * Issue #736 (R3-010) rewrite rationale:
+ *   Pre-#736 these tests rendered the real `useTerminalPanePolling` hook plus a
+ *   `/current-output` fetch mock and relied on the (now removed)
+ *   terminal reducer slice for the split-0 terminal display.
  *
- *   The tests now drive the activeCliTab swap through the per-split CLI
- *   selector for splitIndex=0 (which is wired to `setActiveCliTab` in the
- *   compat shim). The rest of the assertion shape (history-messages /
- *   terminal-output / thinking-indicator testids) is identical because
- *   splitIndex=0 still reads from `state.terminal.*` / `state.messages`.
+ *   The terminal reducer slice has been deleted. Both the PC split panes (#728)
+ *   and the mobile terminal tab (#736) now source terminal output from
+ *   `useTerminalPanePolling`, which owns its own per-(worktreeId, cliToolId)
+ *   stale-response guard. So the invariant under test moves:
+ *     - "stale CLI output never overwrites the active CLI" is now the HOOK's
+ *       responsibility (covered by the hook's own unit tests).
+ *     - At the WorktreeDetailRefactored level we instead verify the WIRING:
+ *       switching split-0's CLI re-keys the hook with the new cliToolId
+ *       (poller restart) and the rendered terminal output follows the active CLI.
+ *
+ *   `useTerminalPanePolling` is therefore mocked here and returns output keyed
+ *   off the `cliToolId` it receives, so the test asserts on the wiring directly.
+ *
+ *   The message-history stale-guard (test 1) is a PARENT-level concern
+ *   (`fetchMessages` + activeCliTabRef) untouched by #736 and is kept as-is.
+ *
+ *   All tests run on the PC path (mockIsMobile=false).
  */
 
 import React from 'react';
@@ -39,6 +48,18 @@ const mockIsMobile = vi.fn(() => false);
 vi.mock('@/hooks/useIsMobile', () => ({
   useIsMobile: () => mockIsMobile(),
   MOBILE_BREAKPOINT: 768,
+}));
+
+// Issue #736 (R3-010): mock the per-split polling hook. It returns terminal
+// output derived from the cliToolId it is called with, so we can assert that
+// switching split-0's CLI re-keys the hook (the post-#728/#736 "poller restart").
+const { useTerminalPanePollingMock } = vi.hoisted(() => ({
+  useTerminalPanePollingMock: vi.fn(),
+}));
+vi.mock('@/hooks/useTerminalPanePolling', () => ({
+  ACTIVE_POLLING_INTERVAL_MS: 2000,
+  IDLE_POLLING_INTERVAL_MS: 5000,
+  useTerminalPanePolling: useTerminalPanePollingMock,
 }));
 
 const mockOpenMobileDrawer = vi.fn();
@@ -315,14 +336,41 @@ function getUrlString(input: string | URL | Request): string {
   return input.url;
 }
 
-describe('WorktreeDetailRefactored CLI tab switching', () => {
+/**
+ * Issue #736: deterministic mock for useTerminalPanePolling. Terminal output is
+ * derived from the cliToolId passed to the hook, so split-0 reflects whichever
+ * CLI is currently active. `thinking` is true only for claude (mirrors the
+ * legacy fixture) so the thinking-indicator can be asserted to clear on switch.
+ */
+function makePaneState(cliToolId: string) {
+  return {
+    terminal: {
+      output: `${cliToolId} terminal output`,
+      realtimeSnippet: `${cliToolId} terminal output`,
+      isRunning: true,
+      isThinking: cliToolId === 'claude',
+      isSelectionListActive: false,
+      attaching: false,
+      autoScroll: true,
+    },
+    prompt: { visible: false, data: null, messageId: null, answering: false },
+    setAutoScroll: vi.fn(),
+    setPromptAnswering: vi.fn(),
+    clearPrompt: vi.fn(),
+    refresh: vi.fn(),
+  };
+}
+
+describe('WorktreeDetailRefactored CLI tab switching (Issue #736)', () => {
   let messageQueue: Record<'claude' | 'copilot', Array<Promise<MockFetchResponse>>>;
-  let currentOutputQueue: Record<'claude' | 'copilot', Array<Promise<MockFetchResponse>>>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockIsMobile.mockReturnValue(false);
     mockUseUpdateCheck.mockReturnValue({ data: null, loading: false, error: null });
+    useTerminalPanePollingMock.mockImplementation(
+      ({ cliToolId }: { worktreeId: string; cliToolId: string }) => makePaneState(cliToolId)
+    );
 
     // Issue #728: Reset terminal-splits / draft localStorage so test order
     // does not leak split CLI selection between tests.
@@ -331,7 +379,6 @@ describe('WorktreeDetailRefactored CLI tab switching', () => {
     } catch { /* ignore */ }
 
     messageQueue = { claude: [], copilot: [] };
-    currentOutputQueue = { claude: [], copilot: [] };
 
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
@@ -348,7 +395,7 @@ describe('WorktreeDetailRefactored CLI tab switching', () => {
 
       if (url.pathname.endsWith('/current-output')) {
         const cliTool = (url.searchParams.get('cliTool') ?? 'claude') as 'claude' | 'copilot';
-        return currentOutputQueue[cliTool].shift() ?? okJson(defaultCurrentOutput[cliTool]);
+        return okJson(defaultCurrentOutput[cliTool]);
       }
 
       if (url.pathname === '/api/worktrees/test-worktree-123') {
@@ -373,7 +420,7 @@ describe('WorktreeDetailRefactored CLI tab switching', () => {
     fireEvent.change(select, { target: { value } });
   }
 
-  it('keeps Copilot messages when an older Claude messages response arrives later', async () => {
+  it('keeps Copilot messages when an older Claude messages response arrives later (parent stale guard)', async () => {
     render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
     await waitFor(() => {
@@ -406,39 +453,30 @@ describe('WorktreeDetailRefactored CLI tab switching', () => {
     });
   });
 
-  it('keeps Copilot terminal state when an older Claude current-output response arrives later', async () => {
+  it('re-keys useTerminalPanePolling with the new CLI and renders the active CLI terminal output on switch (R3-010 poller restart)', async () => {
     render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
+    // Initial: split 0 is Claude → hook called with cliToolId 'claude',
+    // so terminal output reflects claude + thinking indicator is shown.
     await waitFor(() => {
       expect(screen.getByTestId('cli-selector-0')).toBeInTheDocument();
-      expect(screen.getByTestId('terminal-output')).toHaveTextContent('Claude terminal output');
+      expect(screen.getByTestId('terminal-output')).toHaveTextContent('claude terminal output');
       expect(screen.getByTestId('thinking-indicator')).toBeInTheDocument();
     });
-
-    const staleClaudeOutput = createDeferred<MockFetchResponse>();
-    currentOutputQueue.claude.push(staleClaudeOutput.promise);
-
-    await act(async () => {
-      document.dispatchEvent(new Event('visibilitychange'));
-      await Promise.resolve();
-    });
+    expect(useTerminalPanePollingMock).toHaveBeenCalledWith(
+      expect.objectContaining({ worktreeId: 'test-worktree-123', cliToolId: 'claude' })
+    );
 
     swapSplitZeroCliTo('copilot');
 
+    // After switch: hook re-keyed to cliToolId 'copilot' → copilot output, thinking cleared.
     await waitFor(() => {
-      expect(screen.getByTestId('terminal-output')).toHaveTextContent('Copilot terminal output');
+      expect(screen.getByTestId('terminal-output')).toHaveTextContent('copilot terminal output');
+      expect(screen.getByTestId('terminal-output')).not.toHaveTextContent('claude terminal output');
       expect(screen.queryByTestId('thinking-indicator')).not.toBeInTheDocument();
     });
-
-    await act(async () => {
-      staleClaudeOutput.resolve(await okJson(defaultCurrentOutput.claude));
-      await Promise.resolve();
-    });
-
-    await waitFor(() => {
-      expect(screen.getByTestId('terminal-output')).toHaveTextContent('Copilot terminal output');
-      expect(screen.getByTestId('terminal-output')).not.toHaveTextContent('Claude terminal output');
-      expect(screen.queryByTestId('thinking-indicator')).not.toBeInTheDocument();
-    });
+    expect(useTerminalPanePollingMock).toHaveBeenCalledWith(
+      expect.objectContaining({ worktreeId: 'test-worktree-123', cliToolId: 'copilot' })
+    );
   });
 });
