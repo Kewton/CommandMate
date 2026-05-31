@@ -806,33 +806,60 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     [fetchMessages, fetchCurrentOutput]
   );
 
-  /** Handle auto-yes toggle (Issue #225: duration, Issue #314: stopPattern) */
-  const handleAutoYesToggle = useCallback(async (params: AutoYesToggleParams): Promise<void> => {
-    try {
-      const response = await fetch(`/api/worktrees/${worktreeId}/auto-yes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          enabled: params.enabled,
-          cliToolId: activeCliTab,
-          duration: params.duration,
-          stopPattern: params.stopPattern,
-        }),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        // Issue #525: Store per-agent state
-        setAutoYesStateMap(prev => {
-          const next = new Map(prev);
-          next.set(activeCliTab, { enabled: data.enabled, expiresAt: data.expiresAt });
-          return next;
-        });
-        prevAutoYesEnabledRef.current = data.enabled;
-      }
-    } catch (err) {
-      console.error('[WorktreeDetailRefactored] Error toggling auto-yes:', err);
-    }
-  }, [worktreeId, activeCliTab]);
+  /**
+   * Handle auto-yes toggle (Issue #225: duration, Issue #314: stopPattern).
+   *
+   * Issue #740: parameterized by cliToolId via a curried factory so each PC
+   * split footer can toggle auto-yes for its OWN CLI independently. The factory
+   * is stable per worktreeId (cliToolId is captured per call), keeping split
+   * re-renders down. `activeCliTabRef` is read inside so the stop-reason ref is
+   * only updated for the active CLI (preserving existing toast detection).
+   */
+  const makeAutoYesToggleHandler = useCallback(
+    (cliToolId: CLIToolType) =>
+      async (params: AutoYesToggleParams): Promise<void> => {
+        try {
+          const response = await fetch(`/api/worktrees/${worktreeId}/auto-yes`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              enabled: params.enabled,
+              cliToolId,
+              duration: params.duration,
+              stopPattern: params.stopPattern,
+            }),
+          });
+          if (response.ok) {
+            const data = await response.json();
+            // Issue #525: Store per-agent state keyed by the toggled CLI.
+            setAutoYesStateMap(prev => {
+              const next = new Map(prev);
+              next.set(cliToolId, { enabled: data.enabled, expiresAt: data.expiresAt });
+              return next;
+            });
+            // Issue #740: the stop-reason ref tracks the ACTIVE CLI only; avoid
+            // clobbering it when a non-active split is toggled.
+            if (cliToolId === activeCliTabRef.current) {
+              prevAutoYesEnabledRef.current = data.enabled;
+            }
+          }
+        } catch (err) {
+          console.error('[WorktreeDetailRefactored] Error toggling auto-yes:', err);
+        }
+      },
+    [worktreeId],
+  );
+
+  /**
+   * Mobile + active-CLI default handler (unchanged behavior). Issue #740: thin
+   * wrapper over the curried factory bound to the current activeCliTab so the
+   * Mobile AutoYesToggle call site stays untouched.
+   */
+  const handleAutoYesToggle = useCallback(
+    (params: AutoYesToggleParams): Promise<void> =>
+      makeAutoYesToggleHandler(activeCliTab)(params),
+    [makeAutoYesToggleHandler, activeCliTab],
+  );
 
   /** Issue #4: Kill session confirmation dialog state */
   const [showKillConfirm, setShowKillConfirm] = useState(false);
@@ -1445,9 +1472,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       isFocused: boolean;
     }) => {
       const panePendingInsert = pendingInsertTextMap.get(splitIndex) ?? null;
-      // autoYesEnabled is globally keyed by activeCliTab; for non-active splits
-      // we look up the same per-agent map by this pane's own CLI.
-      const paneAutoYesEnabled = autoYesStateMap.get(paneCli)?.enabled ?? false;
+      // Issue #525 / #740: auto-yes state is per-CLI in autoYesStateMap; each
+      // split resolves its own enabled/expiresAt by its own cliToolId.
+      const paneAutoYes = autoYesStateMap.get(paneCli);
+      const paneAutoYesEnabled = paneAutoYes?.enabled ?? false;
+      const paneAutoYesExpiresAt = paneAutoYes?.expiresAt ?? null;
       return (
         <TerminalSplitPaneContent
           worktreeId={worktreeId}
@@ -1465,6 +1494,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onInsertConsumed={() => handleInsertConsumed(splitIndex)}
           onMessageSent={handleMessageSent}
           autoYesEnabled={paneAutoYesEnabled}
+          autoYesExpiresAt={paneAutoYesExpiresAt}
+          // Issue #740: lastAutoResponse is activeCliTab-scoped (useAutoYes);
+          // shared across splits for the toggle notification. Per-split
+          // client-side notification is out of scope (Issue #501 owns it).
+          lastAutoResponse={lastAutoResponse}
+          // Issue #740: per-split toggle bound to THIS pane's CLI.
+          onAutoYesToggle={makeAutoYesToggleHandler(paneCli)}
         />
       );
     },
@@ -1475,6 +1511,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       handleInsertConsumed,
       handleMessageSent,
       setActiveCliTab,
+      lastAutoResponse,
+      makeAutoYesToggleHandler,
     ],
   );
 

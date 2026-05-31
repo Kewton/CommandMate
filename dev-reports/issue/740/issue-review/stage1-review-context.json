@@ -1,0 +1,23 @@
+{
+  "issue_number": "740",
+  "focus_area": "通常レビュー（整合性・正確性）+ 影響範囲レビューを統合実施",
+  "iteration": 1,
+  "stage": "1+3",
+  "stage_name": "通常レビュー（1回目）+ 影響範囲レビュー（1回目）",
+  "hypothesis_verification_path": "dev-reports/issue/740/issue-review/hypothesis-verification.md",
+  "original_issue_path": "dev-reports/issue/740/issue-review/original-issue.json",
+  "key_files": [
+    "src/components/worktree/TerminalSplitPaneContent.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/hooks/useAutoYes.ts",
+    "src/hooks/useTerminalPanePolling.ts"
+  ],
+  "verified_facts": [
+    "useAutoYes returns ONLY { lastAutoResponse }; it does NOT return autoYesEnabled/autoYesExpiresAt/toggleAutoYes. The issue's 案A code snippet is therefore not implementable as written.",
+    "autoYesStateMap (WorktreeDetailRefactored.tsx:218) is already a per-CLI Map<string,{enabled,expiresAt}>. Each split already receives paneAutoYesEnabled = autoYesStateMap.get(paneCli)?.enabled (L1450, passed at L1467).",
+    "handleAutoYesToggle (L810-835) hardcodes cliToolId: activeCliTab — must be parameterized by the pane's CLI for per-split toggling.",
+    "Parent fetchCurrentOutput (L501-559) updates autoYesStateMap only for activeCliTab (L540-544). useTerminalPanePolling intentionally does NOT own auto-yes state (useTerminalPanePolling.ts:15-18), so non-active splits have no server-side auto-yes sync.",
+    "AutoYesToggle does its own client-side countdown from expiresAt (AutoYesToggle.tsx:56-69)."
+  ]
+}

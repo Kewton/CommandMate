@@ -1,0 +1,24 @@
+{
+  "status": "success",
+  "files_changed": [
+    "src/components/worktree/TerminalSplitPaneContent.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/worktree/TerminalSplitPaneContent.test.tsx",
+    "CHANGELOG.md",
+    "CLAUDE.md"
+  ],
+  "tests_added": 4,
+  "test_results": {
+    "target_file": "pass - 9 passed / 9 total (5 pre-existing + 4 new Issue #740 tests)",
+    "tsc": "pass - npx tsc --noEmit: 0 errors",
+    "lint": "pass - npm run lint: No ESLint warnings or errors",
+    "test_unit": "6703 passed / 6710 total (7 skipped, 0 failed) across 358 test files"
+  },
+  "coverage_note": "No coverage threshold run (per-file). The 4 new tests cover the added footer branch: AutoYesToggle render with cliToolName=cliToolId, onAutoYesToggle invocation, autoYesEnabled reflection + PromptPanel suppression regression guard, and per-split independence (two splits route to their own handlers). The makeAutoYesToggleHandler cliToolId binding and renderSplitPane per-CLI distribution in WorktreeDetailRefactored are exercised indirectly; full WorktreeDetailRefactored integration was intentionally avoided per the plan (heavy provider tree) and is covered by the per-split unit independence test.",
+  "deviations": [
+    "Pre-existing 5 tests in TerminalSplitPaneContent.test.tsx were given onAutoYesToggle={vi.fn()} because onAutoYesToggle is a REQUIRED prop (per Task 1.2 / context, no '?'). renderSplitPane always passes it, so keeping the prop required is the correct contract; the alternative (optional prop) was rejected to keep the parent obligated to wire it.",
+    "prevAutoYesEnabledRef.current is now updated ONLY when the toggled cliToolId === activeCliTabRef.current (instead of unconditionally). This preserves the existing Issue #314 stop-reason toast detection, which is scoped to the active CLI; a non-active split toggle must not clobber the active CLI's last-known enabled state. This is a refinement consistent with the work plan's note 'prevAutoYesEnabledRef の更新は activeCliTab 分のみに限定するか、影響を検討'.",
+    "Added Task 3.1 (CHANGELOG Fixed entry) and Task 3.2 (CLAUDE.md module-reference updates) since they are part of the work plan's Definition of Done. No new ### Fixed section existed under [Unreleased]; one was added."
+  ],
+  "notes": "TDD Red -> Green -> Refactor completed. Red: 4 new tests failed (AutoYesToggle absent). Green: added per-CLI props + footer render to TerminalSplitPaneContent and curried makeAutoYesToggleHandler(cliToolId) + renderSplitPane distribution in WorktreeDetailRefactored. Constraints honored: useAutoYes NOT called inside TerminalSplitPaneContent; autoYesStateMap remains the single source of truth (no new per-split store); Mobile call at L1897-1904 unchanged (works via handleAutoYesToggle = makeAutoYesToggleHandler(activeCliTab) wrapper); split0->activeCliTab sync (L1461) preserved; no per-split client-side auto-response added; non-active-split server-side sync left out of scope (not tested). showPrompt = prompt.visible && !autoYesEnabled regression guarded. npm run build was NOT run (per instructions; PM will run final build)."
+}

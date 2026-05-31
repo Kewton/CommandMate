@@ -52,6 +52,33 @@ vi.mock('@/components/worktree/PromptPanel', () => ({
     ) : null,
 }));
 
+// Issue #740: lightweight AutoYesToggle mock that exposes enabled / cliToolName
+// and a clickable element invoking onToggle so we can assert the per-split
+// footer wiring without pulling in the real toggle (countdown timers, dialog).
+vi.mock('@/components/worktree/AutoYesToggle', () => ({
+  AutoYesToggle: ({
+    enabled,
+    cliToolName,
+    onToggle,
+  }: {
+    enabled: boolean;
+    cliToolName?: string;
+    onToggle: (params: { enabled: boolean }) => Promise<void>;
+  }) => (
+    <button
+      type="button"
+      data-testid="auto-yes-toggle"
+      data-enabled={String(enabled)}
+      data-cli-tool-name={cliToolName}
+      onClick={() => {
+        void onToggle({ enabled: !enabled });
+      }}
+    >
+      auto-yes
+    </button>
+  ),
+}));
+
 vi.mock('@/hooks/useSlashCommands', () => ({
   useSlashCommands: () => ({
     groups: [], filteredGroups: [], allCommands: [], loading: false,
@@ -114,6 +141,7 @@ describe('TerminalSplitPaneContent', () => {
           availableCliTools={['claude', 'codex']}
           onCliToolChange={vi.fn()}
           onFocus={vi.fn()}
+          onAutoYesToggle={vi.fn()}
         />
         <TerminalSplitPaneContent
           worktreeId="w-1"
@@ -122,6 +150,7 @@ describe('TerminalSplitPaneContent', () => {
           availableCliTools={['claude', 'codex']}
           onCliToolChange={vi.fn()}
           onFocus={vi.fn()}
+          onAutoYesToggle={vi.fn()}
         />
       </>,
     );
@@ -156,6 +185,7 @@ describe('TerminalSplitPaneContent', () => {
         availableCliTools={['codex']}
         onCliToolChange={vi.fn()}
         onFocus={vi.fn()}
+        onAutoYesToggle={vi.fn()}
       />,
     );
 
@@ -192,6 +222,7 @@ describe('TerminalSplitPaneContent', () => {
         availableCliTools={['codex']}
         onCliToolChange={vi.fn()}
         onFocus={vi.fn()}
+        onAutoYesToggle={vi.fn()}
       />,
     );
 
@@ -220,6 +251,7 @@ describe('TerminalSplitPaneContent', () => {
         onCliToolChange={vi.fn()}
         onFocus={vi.fn()}
         autoYesEnabled
+        onAutoYesToggle={vi.fn()}
       />,
     );
     // Let polling settle.
@@ -242,6 +274,7 @@ describe('TerminalSplitPaneContent', () => {
         availableCliTools={['claude']}
         onCliToolChange={vi.fn()}
         onFocus={vi.fn()}
+        onAutoYesToggle={vi.fn()}
       />,
     );
 
@@ -254,6 +287,132 @@ describe('TerminalSplitPaneContent', () => {
 
     await waitFor(() => {
       expect(screen.queryByTestId('terminal-attach-skeleton-0')).not.toBeInTheDocument();
+    });
+  });
+
+  // Issue #740: AutoYesToggle is now rendered in each PC split footer.
+  describe('AutoYesToggle in split footer (Issue #740)', () => {
+    beforeEach(() => {
+      mockFetch.mockImplementation(() =>
+        okJson({ isRunning: true, fullOutput: '', thinking: false }),
+      );
+    });
+
+    it('renders AutoYesToggle in the footer with cliToolName = the split cliToolId', async () => {
+      render(
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={1}
+          cliToolId="codex"
+          availableCliTools={['claude', 'codex']}
+          onCliToolChange={vi.fn()}
+          onFocus={vi.fn()}
+          onAutoYesToggle={vi.fn()}
+        />,
+      );
+
+      const toggle = await screen.findByTestId('auto-yes-toggle');
+      expect(toggle).toBeInTheDocument();
+      expect(toggle.getAttribute('data-cli-tool-name')).toBe('codex');
+    });
+
+    it('invokes onAutoYesToggle (the prop passed in) when the toggle is clicked', async () => {
+      const onAutoYesToggle = vi.fn(() => Promise.resolve());
+      render(
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={0}
+          cliToolId="claude"
+          availableCliTools={['claude']}
+          onCliToolChange={vi.fn()}
+          onFocus={vi.fn()}
+          onAutoYesToggle={onAutoYesToggle}
+        />,
+      );
+
+      const toggle = await screen.findByTestId('auto-yes-toggle');
+      await act(async () => {
+        toggle.click();
+        await Promise.resolve();
+      });
+
+      expect(onAutoYesToggle).toHaveBeenCalledTimes(1);
+      expect(onAutoYesToggle).toHaveBeenCalledWith({ enabled: true });
+    });
+
+    it('reflects autoYesEnabled on the toggle and suppresses PromptPanel when enabled', async () => {
+      mockFetch.mockImplementation(() =>
+        okJson({
+          isRunning: true,
+          fullOutput: '',
+          thinking: false,
+          isPromptWaiting: true,
+          promptData: { type: 'yes_no', question: 'Continue?' },
+        }),
+      );
+      render(
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={0}
+          cliToolId="claude"
+          availableCliTools={['claude']}
+          onCliToolChange={vi.fn()}
+          onFocus={vi.fn()}
+          autoYesEnabled
+          onAutoYesToggle={vi.fn()}
+        />,
+      );
+
+      const toggle = await screen.findByTestId('auto-yes-toggle');
+      expect(toggle.getAttribute('data-enabled')).toBe('true');
+      // Regression guard: showPrompt = prompt.visible && !autoYesEnabled.
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.queryByTestId('prompt-panel')).not.toBeInTheDocument();
+    });
+
+    it('routes each split toggle to its OWN onAutoYesToggle handler (per-split independence)', async () => {
+      const onToggleClaude = vi.fn(() => Promise.resolve());
+      const onToggleCodex = vi.fn(() => Promise.resolve());
+      render(
+        <>
+          <TerminalSplitPaneContent
+            worktreeId="w-1"
+            splitIndex={0}
+            cliToolId="claude"
+            availableCliTools={['claude', 'codex']}
+            onCliToolChange={vi.fn()}
+            onFocus={vi.fn()}
+            onAutoYesToggle={onToggleClaude}
+          />
+          <TerminalSplitPaneContent
+            worktreeId="w-1"
+            splitIndex={1}
+            cliToolId="codex"
+            availableCliTools={['claude', 'codex']}
+            onCliToolChange={vi.fn()}
+            onFocus={vi.fn()}
+            onAutoYesToggle={onToggleCodex}
+          />
+        </>,
+      );
+
+      const toggles = await screen.findAllByTestId('auto-yes-toggle');
+      expect(toggles).toHaveLength(2);
+      const claudeToggle = toggles.find(t => t.getAttribute('data-cli-tool-name') === 'claude');
+      const codexToggle = toggles.find(t => t.getAttribute('data-cli-tool-name') === 'codex');
+      expect(claudeToggle).toBeDefined();
+      expect(codexToggle).toBeDefined();
+
+      await act(async () => {
+        codexToggle?.click();
+        await Promise.resolve();
+      });
+
+      // Only the codex split's handler fires; claude's stays untouched.
+      expect(onToggleCodex).toHaveBeenCalledTimes(1);
+      expect(onToggleClaude).not.toHaveBeenCalled();
     });
   });
 });
