@@ -1,0 +1,7 @@
+{
+  "stage": 4,
+  "action": "apply Stage 3 impact findings to issue body",
+  "applied": ["S3-001","S3-002","S3-003","S3-004"],
+  "method": "appended '📋 Issueレビュー反映（Stage 3: 影響範囲レビュー）' section",
+  "github_issue_updated": true
+}

@@ -13,6 +13,7 @@
 
 import React, { useEffect, useCallback, useState, memo, useRef } from 'react';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
+import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 import { HistoryPane } from '@/components/worktree/HistoryPane';
 import { type WorktreeStatus } from '@/components/mobile/MobileHeader';
 import { DESKTOP_STATUS_CONFIG } from '@/config/status-colors';
@@ -829,9 +830,12 @@ interface MobileContentProps {
   worktreeId: string;
   worktree: Worktree | null;
   messages: ChatMessage[];
-  terminalOutput: string;
-  isTerminalActive: boolean;
-  isThinking: boolean;
+  /**
+   * [Issue #736] Active CLI tool for the mobile terminal tab. The terminal
+   * output is now sourced from `useTerminalPanePolling` (per the #728 PC
+   * architecture) instead of the removed terminal reducer slice.
+   */
+  cliToolId: CLIToolType;
   onFilePathClick: (path: string) => void;
   onFileSelect: (path: string) => void;
   onWorktreeUpdate: (updated: Worktree) => void;
@@ -861,10 +865,6 @@ interface MobileContentProps {
   vibeLocalContextWindow: number | null;
   /** [Issue #374] Callback when vibe-local context window changes */
   onVibeLocalContextWindowChange: (value: number | null) => void;
-  /** [Issue #379] Auto-scroll state for terminal */
-  autoScroll?: boolean;
-  /** [Issue #379] Callback when auto-scroll state changes */
-  onScrollChange?: (enabled: boolean) => void;
   /** [Issue #379] Disable auto-follow for TUI tools (OpenCode) */
   disableAutoFollow?: boolean;
   /** [Issue #447] History sub-tab state */
@@ -889,15 +889,45 @@ interface MobileContentProps {
   onHistoryUserOnlyChange?: (userOnly: boolean) => void;
 }
 
+/**
+ * [Issue #736] Mobile terminal tab content.
+ *
+ * Owns a per-(worktreeId, cliToolId) `useTerminalPanePolling` instance — the
+ * same hook the PC split panes use (#728) — replacing the removed
+ * terminal reducer slice. Mounted only while the terminal tab is
+ * active, so the poller stops when the user is on another mobile tab (and the
+ * hook self-resets on a cliToolId change, mirroring the PC compositeKey reset).
+ */
+const MobileTerminalTab = memo(function MobileTerminalTab({
+  worktreeId,
+  cliToolId,
+  disableAutoFollow,
+}: {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  disableAutoFollow?: boolean;
+}) {
+  const { terminal, setAutoScroll } = useTerminalPanePolling({ worktreeId, cliToolId });
+  return (
+    <TerminalDisplay
+      output={terminal.output}
+      isActive={terminal.isRunning}
+      isThinking={terminal.isThinking}
+      autoScroll={terminal.autoScroll}
+      onScrollChange={setAutoScroll}
+      disableAutoFollow={disableAutoFollow}
+      className="h-full"
+    />
+  );
+});
+
 /** Renders content based on active mobile tab */
 export const MobileContent = memo(function MobileContent({
   activeTab,
   worktreeId,
   worktree,
   messages,
-  terminalOutput,
-  isTerminalActive,
-  isThinking,
+  cliToolId,
   onFilePathClick,
   onFileSelect,
   onWorktreeUpdate,
@@ -917,8 +947,6 @@ export const MobileContent = memo(function MobileContent({
   onVibeLocalModelChange,
   vibeLocalContextWindow,
   onVibeLocalContextWindowChange,
-  autoScroll,
-  onScrollChange,
   disableAutoFollow,
   historySubTab,
   onHistorySubTabChange,
@@ -935,14 +963,10 @@ export const MobileContent = memo(function MobileContent({
     case 'terminal':
       return (
         <ErrorBoundary componentName="TerminalDisplay">
-          <TerminalDisplay
-            output={terminalOutput}
-            isActive={isTerminalActive}
-            isThinking={isThinking}
-            autoScroll={autoScroll}
-            onScrollChange={onScrollChange}
+          <MobileTerminalTab
+            worktreeId={worktreeId}
+            cliToolId={cliToolId}
             disableAutoFollow={disableAutoFollow}
-            className="h-full"
           />
         </ErrorBoundary>
       );
