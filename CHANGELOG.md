@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - FilePanel: 大規模ファイルでPC版がハングする問題に対するハイブリッド対応（行ベースAPI ＋ `@tanstack/react-virtual` 仮想化 ＋ 編集系2MBサイズ上限）。CodeViewer は `useVirtualizer` で可視範囲＋オーバースキャンのみマウントし、行範囲モード（`startLine`/`endLine` クエリ）でチャンク取得・ハイライトキャッシュを実装。サーバ側は `readFileLineRange` で `createReadStream`＋`readline` ストリーミング（メモリ O(チャンク)）。`useFileContentSearch` に debounce 300ms＋最小2文字、`useFileContentPolling` に大ファイル時無効化（`POLLING_DISABLED_THRESHOLD_BYTES = 1MB`）を追加 (Issue #723)
 
 ### Fixed
+- Terminal (PC): ターミナル分割を `+Split` で増やした後 `-Split` で戻すと、本来全幅に戻るべきターミナルが 50% 幅で残り右側が空きスペースになる問題を修正（#728 follow-up）。`useTerminalSplits` の `removeSplit` が末尾 width を切り捨てるだけで再正規化せず合計が 1.0 未満（例 `[0.5,0.5]`→`[0.5]`）となり、CSS `flex-grow` 合計 < 1 で free space が配分されないことが原因。`normalizeWidths` ヘルパーを追加し `removeSplit` 後とロード時（`isValidSplitConfig` 通過後）に widths を比率保持のまま合計 1.0 へ正規化。既存ユーザーの localStorage に残った不正状態（`widths=[0.5]` 等）もロード時に自己回復。`widthsValid`/`isValidSplitConfig` の仕様・モバイル経路・公開 API は無変更 (Issue #739)
 - Layout (PC): `min-w-0` 欠落により PC 版でファイル選択時に FilePanel が viewport 外へ押し出され隠れる問題を修正（#730 follow-up）。`WorktreeDetailRefactored.tsx` の外側 2 flex コンテナ（L1740 主因 / L1763 防御的補強）に `min-w-0` を追記し、Flexbox の `min-width: auto` 既定によって flex item がコンテンツ最小幅以下に縮まずレイアウトが viewport を超えて膨張する問題を解消。CSS クラス追記のみでロジック・props・公開API・モバイル経路は無変更 (Issue #732)
 
 ### Breaking Changes

@@ -277,4 +277,83 @@ describe('useTerminalSplits', () => {
     expect(window.localStorage.getItem(getTerminalSplitsStorageKey('w-1'))).not.toBeNull();
     expect(window.localStorage.getItem(getTerminalSplitsStorageKey('w-2'))).toBeNull();
   });
+
+  // ---------------------------------------------------------------------------
+  // Issue #739: removeSplit must re-normalize widths so their sum stays ~1.0.
+  // A sum < 1 makes the lone flex child (flex-grow < 1, flex-basis: 0) occupy
+  // only that fraction of the container, leaving empty space.
+  // NOTE: assert with toBeCloseTo, never `=== 1.0` — normalized IEEE754 sums
+  // are not guaranteed to equal exactly 1.0 (design review S3-001).
+  // ---------------------------------------------------------------------------
+  const sum = (ws: number[]) => ws.reduce((s, w) => s + w, 0);
+
+  it('removeSplit re-normalizes widths to sum ~1.0 (3->2->1)', () => {
+    const { result } = renderHook(() => useTerminalSplits('w-1'));
+    act(() => result.current.addSplit()); // 1 -> 2: widths [0.5, 0.5]
+    act(() => result.current.addSplit()); // 2 -> 3: widths [0.5, 0.25, 0.25]
+    expect(sum(result.current.widths)).toBeCloseTo(1);
+
+    act(() => result.current.removeSplit()); // 3 -> 2
+    expect(result.current.widths).toHaveLength(2);
+    expect(sum(result.current.widths)).toBeCloseTo(1);
+
+    act(() => result.current.removeSplit()); // 2 -> 1
+    expect(result.current.widths).toHaveLength(1);
+    expect(sum(result.current.widths)).toBeCloseTo(1);
+    // Single remaining split must occupy full width.
+    expect(result.current.widths[0]).toBeCloseTo(1);
+  });
+
+  it('removeSplit preserves the ratio of the remaining widths', () => {
+    const { result } = renderHook(() => useTerminalSplits('w-1'));
+    act(() => result.current.addSplit());
+    act(() => result.current.addSplit());
+    // Set a known, non-uniform ratio across 3 splits (sum = 1.0).
+    act(() => result.current.setSplitWidth([0.6, 0.3, 0.1]));
+    expect(sum(result.current.widths)).toBeCloseTo(1);
+
+    // Drop last -> remaining [0.6, 0.3] (sum 0.9) re-normalized to sum 1.0,
+    // keeping the 2:1 ratio between the first two splits.
+    act(() => result.current.removeSplit());
+    expect(result.current.widths).toHaveLength(2);
+    expect(sum(result.current.widths)).toBeCloseTo(1);
+    expect(result.current.widths[0] / result.current.widths[1]).toBeCloseTo(2);
+  });
+
+  it('self-heals a persisted single-split width of 0.5 to 1.0 on load', () => {
+    // Valid per isValidSplitConfig (length matches, width > 0) but sum=0.5 —
+    // exactly the bad state an existing user gets after the buggy removeSplit.
+    mockTerminalSplitsLocalStorage('w-heal', {
+      splits: [{ cliToolId: 'claude' }],
+      widths: [0.5],
+    });
+    const { result } = renderHook(() => useTerminalSplits('w-heal'));
+    expect(result.current.splits).toEqual([{ cliToolId: 'claude' }]);
+    expect(result.current.widths[0]).toBeCloseTo(1);
+    expect(sum(result.current.widths)).toBeCloseTo(1);
+  });
+
+  it('self-heals a persisted multi-split width that sums below 1.0 on load', () => {
+    mockTerminalSplitsLocalStorage('w-heal2', {
+      splits: [{ cliToolId: 'claude' }, { cliToolId: 'codex' }],
+      widths: [0.25, 0.25], // valid (both > 0) but sum = 0.5
+    });
+    const { result } = renderHook(() => useTerminalSplits('w-heal2'));
+    expect(result.current.splits).toHaveLength(2);
+    expect(sum(result.current.widths)).toBeCloseTo(1);
+    // Equal inputs stay equal after normalization.
+    expect(result.current.widths[0]).toBeCloseTo(0.5);
+    expect(result.current.widths[1]).toBeCloseTo(0.5);
+  });
+
+  it('leaves an already-normalized stored config unchanged on load (no-op)', () => {
+    mockTerminalSplitsLocalStorage('w-noop', {
+      splits: [{ cliToolId: 'claude' }, { cliToolId: 'codex' }],
+      widths: [0.6, 0.4], // sum = 1.0
+    });
+    const { result } = renderHook(() => useTerminalSplits('w-noop'));
+    expect(result.current.widths[0]).toBeCloseTo(0.6);
+    expect(result.current.widths[1]).toBeCloseTo(0.4);
+    expect(sum(result.current.widths)).toBeCloseTo(1);
+  });
 });
