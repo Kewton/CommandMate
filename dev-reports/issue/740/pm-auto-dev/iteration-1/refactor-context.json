@@ -1,0 +1,28 @@
+{
+  "issue_number": 740,
+  "branch": "feature/740-worktree",
+  "implementation_commit": "b9f9d21d",
+  "refactor_targets": [
+    "src/components/worktree/TerminalSplitPaneContent.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/worktree/TerminalSplitPaneContent.test.tsx"
+  ],
+  "quality_metrics": {
+    "tests_passing": "6703 passed / 7 skipped / 0 failed",
+    "tsc": "0 errors",
+    "lint": "clean",
+    "build": "success"
+  },
+  "improvement_goals": [
+    "ONLY assess the Issue #740 diff (b9f9d21d). Apply ONLY safe, high-value, low-risk improvements. If nothing clearly improves quality, report no-change.",
+    "Assess: makeAutoYesToggleHandler(paneCli) is invoked inside renderSplitPane on each render, producing a fresh closure. Determine if this is a real regression (note: renderSplitPane already creates inline arrows like onCliToolChange each render, so TerminalSplitPaneContent's memo was already not preserved across parent re-renders). Only memoize if it is clearly worth it AND does not complicate the code.",
+    "Verify naming/comments are clear and the new props JSDoc is accurate.",
+    "Do NOT expand scope: no useAutoYes refactor, no non-active-split server sync, no AutoYesToggle redesign."
+  ],
+  "constraints": [
+    "All existing tests must remain green.",
+    "npx tsc --noEmit / npm run lint / npm run test:unit must pass after any change.",
+    "If you make changes, keep them minimal and commit-ready.",
+    "Strongly prefer NOT changing behavior — this is a focused bug fix already verified by acceptance test."
+  ]
+}
