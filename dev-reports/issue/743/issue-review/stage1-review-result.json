@@ -1,0 +1,92 @@
+{
+  "stage": 1,
+  "focus": "通常（1回目）",
+  "reviewer": "claude-opus",
+  "review_date": "2026-05-31",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "Must Fix",
+      "title": "対応方針の import パスが2件とも誤り（実コードと不整合）",
+      "description": "「対応方針 > 1. status を TerminalSplitPaneContent.tsx で計算」のコードサンプルで `import { deriveCliStatus } from '@/lib/sidebar-utils';` および `import { SIDEBAR_STATUS_CONFIG } from '@/config/status-config';` と記載されているが、いずれも実コードと一致しない。実際は `deriveCliStatus` は `@/types/sidebar`（src/types/sidebar.ts:32 で export）にあり、`SIDEBAR_STATUS_CONFIG` は `@/config/status-colors`（src/config/status-colors.ts:64 で export）にある。さらに `src/config/status-config.ts` というファイルは存在しない（ls で No such file or directory を確認）。このまま実装するとコンパイルエラーになり、実装者が誤参照を追いかける時間を浪費する。",
+      "suggestion": "import を `import { deriveCliStatus } from '@/types/sidebar';` と `import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';` に修正する。なお正準参照は Mobile 実装（WorktreeDetailRefactored.tsx:1947-1948）であり、そこでも同じ import 元が使われている。",
+      "target_section": "対応方針"
+    },
+    {
+      "id": "S1-002",
+      "severity": "Must Fix",
+      "title": "spinner 判定が存在しない status値 'processing' に依存している",
+      "description": "「対応方針 > 2.」のコードサンプルで `{cliStatus === 'processing' ? <Spinner .../> : <span .../>}` と spinner/dot を分岐しているが、`deriveCliStatus` の戻り値型 `BranchStatus`（src/types/sidebar.ts:19）は `'idle' | 'ready' | 'running' | 'waiting' | 'generating'` であり 'processing' という値は存在しない。`deriveCliStatus` は isProcessing=true のとき 'running' を返す（sidebar.ts:37）。正しい spinner 判定は `statusConfig.type === 'spinner'`（status-colors.ts:75-89 で running/generating が type='spinner'、idle/ready/waiting が type='dot'）。現在の記載のままでは spinner が一度も表示されず、status 切替が機能しない。",
+      "suggestion": "分岐条件を `statusConfig.type === 'spinner' ? (spinner span) : (dot span)` に修正する。Mobile 正準パターン（WorktreeDetailRefactored.tsx:1960）と一致させる。",
+      "target_section": "対応方針"
+    },
+    {
+      "id": "S1-003",
+      "severity": "Must Fix",
+      "title": "StatusConfig のフィールド名が誤り（colorClass は存在しない）",
+      "description": "「対応方針 > 2.」のコードサンプルで `className={`w-2 h-2 rounded-full ${statusConfig.colorClass}`}` と `statusConfig.colorClass` を参照しているが、`StatusConfig` インターフェース（src/config/status-colors.ts:29-36）のフィールドは `className` / `label` / `type` のみで `colorClass` は存在しない。このまま実装すると `undefined` が CSS class に展開され、色が一切付かない（TypeScript の strict モードでも型エラーになる）。",
+      "suggestion": "`statusConfig.colorClass` を `statusConfig.className` に修正する。Mobile 正準パターン（WorktreeDetailRefactored.tsx:1962, 1967）と一致させる。",
+      "target_section": "対応方針"
+    },
+    {
+      "id": "S1-004",
+      "severity": "Must Fix",
+      "title": "存在しない hook `useWorktreeStatusByCli` を使用している（データ供給設計が誤り）",
+      "description": "「対応方針 > 1.」で `const sessionStatus = useWorktreeStatusByCli({ worktreeId, cliToolId });` と記載されているが、`useWorktreeStatusByCli` という hook はコードベースに存在しない（grep 0件）。さらに仮説検証 H11 で確認済みのとおり、`TerminalSplitPaneContent` が既に保持する `useTerminalPanePolling` の `PaneTerminalState`（useTerminalPanePolling.ts:39-47）は isRunning/isThinking/isSelectionListActive のみで、`deriveCliStatus` が必要とする isWaitingForResponse/isProcessing を持たない。したがってローカル polling 状態からは status を導出できず、親 `WorktreeDetailRefactored` が保持する `worktree.sessionStatusByCli[cliToolId]` を prop で propagate する以外に方法がない。",
+      "suggestion": "hook 呼び出しを撤回し、親→子 propagate 方式に明記する。具体的には #740 AutoYesToggle と同型で、`renderSplitPane`（WorktreeDetailRefactored.tsx:1459-1517）内で `worktree?.sessionStatusByCli?.[paneCli]` を解決し、新規 prop（例: `sessionStatus` または `cliStatus`）として `TerminalSplitPaneContent` へ渡す。`TerminalSplitPaneContent` は受け取った status を `deriveCliStatus` に通すか、親で導出済みの値をそのまま受ける。",
+      "target_section": "対応方針"
+    },
+    {
+      "id": "S1-005",
+      "severity": "Must Fix",
+      "title": "存在しない <Spinner /> コンポーネントを使用している",
+      "description": "「対応方針 > 2.」で `<Spinner className=\"w-3 h-3\" />` と記載されているが、`src/components/` 配下に `Spinner` という export は存在しない（grep 0件、src/cli/utils/spinner.ts はターミナル用で無関係）。Mobile 正準パターン（WorktreeDetailRefactored.tsx:1960-1964）は専用コンポーネントではなく、インライン span（`border-2 border-t-transparent animate-spin` + `statusConfig.className`）で spinner を表現している。",
+      "suggestion": "`<Spinner/>` の使用を撤回し、Mobile と同じインライン span 実装に統一する: `<span className={`w-2 h-2 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`} title={statusConfig.label} />`。",
+      "target_section": "対応方針"
+    },
+    {
+      "id": "S1-006",
+      "severity": "Should Fix",
+      "title": "想定影響範囲で WorktreeDetailRefactored.tsx の変更を「必要に応じて」としているが必須",
+      "description": "「想定影響範囲」テーブルで `WorktreeDetailRefactored.tsx` の変更内容を「sessionStatusByCli をsplit に propagate（必要に応じて）」と任意扱いにしているが、S1-004 のとおり親 propagate は status 供給の唯一の手段であり必須である。同様に `TerminalSplitPane.tsx` を「（変更なし）」としている点は headerExtras slot がそのまま使える限り正しい（H12 Confirmed）が、配置調整が必要になった場合の注記がない。",
+      "suggestion": "`WorktreeDetailRefactored.tsx` の変更を必須（renderSplitPane L1459-1517 で sessionStatus を解決し新 prop で配布、#740 と同型）と明記する。`TerminalSplitPane.tsx` 行には「headerExtras 配置は検索ボタンの右端になる点に留意。CLI セレクター直後へ寄せたい場合のみ微修正」と注記を添える。",
+      "target_section": "想定影響範囲"
+    },
+    {
+      "id": "S1-007",
+      "severity": "Should Fix",
+      "title": "受入条件の状態マッピングが対応方針の誤りを引き継いでいる",
+      "description": "受入条件「running → 緑、processing → スピナー、idle → グレー等」という記述が、(a) 存在しない 'processing' status を含み、(b) status と色/形状のマッピングが実際の SIDEBAR_STATUS_CONFIG と食い違う。実際のマッピング（status-colors.ts:64-90）は idle→グレー dot / ready→緑 dot / waiting→黄 dot / running→青ボーダー spinner / generating→青ボーダー spinner。つまり running は「緑」ではなく「青スピナー」、ready が「緑 dot」である。",
+      "suggestion": "受入条件のマッピングを実 config に合わせて修正する: 「idle→グレー dot / ready→緑 dot / waiting→黄 dot / running・generating→青スピナー」。'processing' という語は削除する。",
+      "target_section": "受入条件"
+    },
+    {
+      "id": "S1-008",
+      "severity": "Should Fix",
+      "title": "受入条件サンプルの「Codex（idle）に緑」期待が誤り",
+      "description": "受入条件「スプリットA=Claude（running）/ B=Codex（idle）の構成で、Aに緑・Bにグレー が独立して表示」とあるが、A の running は実 config では「緑」ではなく「青スピナー」である（status-colors.ts:75-79）。B=idle がグレー dot である点のみ正しい。検証手順「3. Claude session を起動 → 該当 split が緑/スピナーに」も同様に「緑」表現が混乱を招く。",
+      "suggestion": "「Aに青スピナー（running）・Bにグレー dot（idle）が独立して表示」に修正。緑 dot を確認したい場合は ready 状態（session 起動済み・処理待ちでない）を例に用いる。",
+      "target_section": "受入条件"
+    },
+    {
+      "id": "S1-009",
+      "severity": "Nice to Have",
+      "title": "Issue本文の行番号参照が現コードと数行ずれている",
+      "description": "「根本原因 2」で TerminalSplitPaneContent.tsx の return を 216-226 行としているが、実際の return（headerExtras 未指定）は 256-268 行付近。「根本原因 1」の TerminalSplitPane.tsx header を 89-136 行としている点は概ね一致（実 88-136）。行番号は参考情報のため致命的ではないが、実装者の混乱を避けるため更新が望ましい。",
+      "suggestion": "行番号を実コードに合わせて更新するか、行番号への依存を避けて「return 文の TerminalSplitPane 呼び出し（headerExtras 未指定）」のように記述する。",
+      "target_section": "根本原因"
+    },
+    {
+      "id": "S1-010",
+      "severity": "Nice to Have",
+      "title": "関連セクションの既存実装リンクが誤パスを温存している",
+      "description": "「関連 > 既存実装」に `src/lib/sidebar-utils.ts (deriveCliStatus)` と `src/config/status-config.ts (SIDEBAR_STATUS_CONFIG)` が列挙されているが、S1-001 のとおり deriveCliStatus は `src/types/sidebar.ts`、SIDEBAR_STATUS_CONFIG は `src/config/status-colors.ts` にある。誤パスが本文の複数箇所（対応方針 import / 関連セクション）に重複しているため、修正時は両方を直す必要がある。",
+      "suggestion": "関連セクションの参照を `src/types/sidebar.ts (deriveCliStatus)` と `src/config/status-colors.ts (SIDEBAR_STATUS_CONFIG)` に修正し、正準パターンとして `WorktreeDetailRefactored.tsx:1947-1974`（Mobile 実装）へのリンクを追加する。",
+      "target_section": "想定影響範囲"
+    }
+  ],
+  "must_fix_count": 5,
+  "should_fix_count": 3,
+  "nice_to_have_count": 2,
+  "summary": "根本原因の診断（PC per-split header に status indicator が無い／TerminalSplitPaneContent が headerExtras を渡していない／Mobile L1947 にのみ存在）は実コードと完全に整合しており正確。一方「対応方針」のコードサンプルは仮説検証で Rejected と判定された誤参照を5件そのまま含む: 誤った import パス2件（@/lib/sidebar-utils→@/types/sidebar、@/config/status-config→@/config/status-colors）、存在しない status値 'processing' での spinner 判定（正しくは statusConfig.type==='spinner'）、存在しないフィールド colorClass（正しくは className）、存在しない hook useWorktreeStatusByCli、存在しない <Spinner/> コンポーネント。これらは全て Must Fix（このまま実装するとコンパイル不能または無描画）。加えてデータ供給は親 propagate が必須だが Issue は「必要に応じて」と任意扱いにしている（Should Fix）。受入条件の状態→色マッピングも 'processing' 誤りを引き継ぎ、running を「緑」と誤記（実際は青スピナー、緑は ready）（Should Fix 2件）。行番号ずれと関連リンクの誤パスは Nice to Have。対応方針は Mobile 正準パターン（WorktreeDetailRefactored.tsx:1947-1974）＋ #740 AutoYesToggle propagate パターン（renderSplitPane L1459-1517 で sessionStatus 解決→prop 配布）ベースに全面書き換えを推奨。"
+}

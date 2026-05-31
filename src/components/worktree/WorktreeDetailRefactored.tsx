@@ -1477,6 +1477,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       const paneAutoYes = autoYesStateMap.get(paneCli);
       const paneAutoYesEnabled = paneAutoYes?.enabled ?? false;
       const paneAutoYesExpiresAt = paneAutoYes?.expiresAt ?? null;
+      // Issue #743: derive THIS pane's AI agent status from the per-CLI session
+      // flags. Only the resolved BranchStatus string is handed to the child, so
+      // a polling tick that leaves the status unchanged does not break the
+      // child's memo (S3-001 memo-safe).
+      const paneCliStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[paneCli]);
       return (
         <TerminalSplitPaneContent
           worktreeId={worktreeId}
@@ -1501,6 +1506,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           lastAutoResponse={lastAutoResponse}
           // Issue #740: per-split toggle bound to THIS pane's CLI.
           onAutoYesToggle={makeAutoYesToggleHandler(paneCli)}
+          // Issue #743: derived per-CLI status string for the split header dot.
+          cliStatus={paneCliStatus}
         />
       );
     },
@@ -1513,6 +1520,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       setActiveCliTab,
       lastAutoResponse,
       makeAutoYesToggleHandler,
+      // Issue #743: re-create renderPane when the per-CLI session status map
+      // changes so the derived `cliStatus` stays current. The child only
+      // re-renders when its resolved status string actually changes (memo-safe).
+      worktree?.sessionStatusByCli,
     ],
   );
 

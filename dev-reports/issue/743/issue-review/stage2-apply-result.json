@@ -1,0 +1,69 @@
+{
+  "stage": 2,
+  "applied_findings": [
+    {
+      "id": "S1-001",
+      "severity": "Must Fix",
+      "status": "applied",
+      "note": "対応方針の import を `import { deriveCliStatus } from '@/types/sidebar';` と `import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';` に修正。存在しない `@/config/status-config` 参照を撤去。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "Must Fix",
+      "status": "applied",
+      "note": "spinner 判定を存在しない status値 'processing' から `statusConfig.type === 'spinner'` に変更（Mobile 正準パターン L1960 と一致）。BranchStatus の取りうる値（idle/ready/running/waiting/generating）を本文に明記。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "Must Fix",
+      "status": "applied",
+      "note": "`statusConfig.colorClass` を `statusConfig.className` に修正。StatusConfig のフィールドは className/label/type のみである旨を注記。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "Must Fix",
+      "status": "applied",
+      "note": "存在しない hook `useWorktreeStatusByCli` の呼び出しを撤回し、親→子 propagate 方式（renderSplitPane L1459-1517 で worktree?.sessionStatusByCli?.[paneCli] を解決し sessionStatus prop で配布、#740 と同型）に書き換え。useTerminalPanePolling では isWaitingForResponse/isProcessing を持たず導出不可である根拠も明記。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "Must Fix",
+      "status": "applied",
+      "note": "存在しない `<Spinner/>` コンポーネントを撤回し、Mobile と同じインライン span（border-2 border-t-transparent animate-spin + statusConfig.className）に統一。"
+    },
+    {
+      "id": "S1-006",
+      "severity": "Should Fix",
+      "status": "applied",
+      "note": "想定影響範囲テーブルで WorktreeDetailRefactored.tsx を「必要に応じて」から「必須」（renderSplitPane L1459-1517 で sessionStatus 解決→新 prop 配布、#740 同型）に格上げ。TerminalSplitPane.tsx 行に headerExtras が検索ボタン右端に描画される点・配置調整時のみ微修正の注記を追加。"
+    },
+    {
+      "id": "S1-007",
+      "severity": "Should Fix",
+      "status": "applied",
+      "note": "受入条件の状態→色マッピングを実 SIDEBAR_STATUS_CONFIG に合わせて修正（idle→グレー dot / ready→緑 dot / waiting→黄 dot / running・generating→青スピナー）。'processing' を削除し、running が緑ではなく青スピナーである点を明示。"
+    },
+    {
+      "id": "S1-008",
+      "severity": "Should Fix",
+      "status": "applied",
+      "note": "受入条件サンプルを「A=Claude(running)→青スピナー / B=Codex(idle)→グレー dot」に修正。検証手順 step3 も「running 中は青スピナー、処理待ち(ready)は緑 dot」に書き換え緑表現の混乱を解消。"
+    },
+    {
+      "id": "S1-009",
+      "severity": "Nice to Have",
+      "status": "applied",
+      "note": "根本原因2の return 行番号を 216-226 → 実 256-268 に修正。根本原因1の header 行番号を line 88-136 に補正し、行番号依存を避ける記述（return 文の TerminalSplitPane 呼び出し）も併記。"
+    },
+    {
+      "id": "S1-010",
+      "severity": "Nice to Have",
+      "status": "applied",
+      "note": "関連セクションの既存実装リンクを `src/types/sidebar.ts (deriveCliStatus)` / `src/config/status-colors.ts (SIDEBAR_STATUS_CONFIG)` に修正し、正準パターンとして WorktreeDetailRefactored.tsx:1947-1974（Mobile 実装）へのリンクを追加。"
+    }
+  ],
+  "applied_count": 10,
+  "skipped_count": 0,
+  "issue_updated": true,
+  "summary": "Stage 1 の全 10 件（Must Fix 5 / Should Fix 3 / Nice to Have 2）を Issue #743 本文に反映。対応方針のコードサンプルを、仮説検証で Rejected と判定された 5 件の誤参照（誤 import パス 2 件・存在しない status値 'processing'・存在しないフィールド colorClass・存在しない hook useWorktreeStatusByCli・存在しない <Spinner/> コンポーネント）を、実コードで確認した正準パターン（WorktreeDetailRefactored.tsx:1947-1974 の Mobile 実装 + #740 AutoYesToggle の親→子 propagate）に基づき全面書き換え。データ供給を親 propagate 必須に格上げ、受入条件の色マッピングを実 config（running/generating=青スピナー、ready=緑 dot、waiting=黄 dot、idle=グレー dot）に修正、return 行番号を 256-268 に補正、関連リンクの誤パスを是正。元の構成・日本語トーンは維持。"
+}
