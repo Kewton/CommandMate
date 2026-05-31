@@ -1,0 +1,91 @@
+{
+  "issue_number": 728,
+  "iteration": 1,
+  "phase": "refactor",
+  "branch": "feature/728-worktree",
+  "repository_root": "/Users/maenokota/share/work/github_kewton/commandmate-issue-728",
+  "tdd_result_path": "dev-reports/issue/728/pm-auto-dev/iteration-1/tdd-result.json",
+  "acceptance_result_path": "dev-reports/issue/728/pm-auto-dev/iteration-1/acceptance-result.json",
+  "work_plan_path": "dev-reports/issue/728/work-plan.md",
+  "issue_body_path": "/tmp/issue-728-final.md",
+  "primary_goal": "TDD iteration 1 で deferred になった R3-005 (per-split polling fan-out) を完了し、splitIndex>=1 のターミナル出力 / NavigationButtons / PromptPanel を機能させる。これにより受入条件 AC-13 / AC-15 / AC-17 / AC-CRITICAL-DEFERRED-FETCH を満たす。",
+  "refactor_targets": [
+    {
+      "id": "R3-005",
+      "severity": "BLOCKING",
+      "title": "per-split polling fan-out (state.terminal.* per-split)",
+      "current_state": "splitIndex=0 は既存 reducer state.terminal.* を読み、splitIndex>=1 は空の TerminalDisplay。NavigationButtons/PromptPanel も splitIndex=0 のみ。",
+      "target_state": "各 TerminalSplitPane が自前で fetchCurrentOutput / fetchMessages を per-split で polling し、それぞれの cliToolId に対応した tmux output を表示。NavigationButtons/PromptPanel/MessageInput が全 split で動作。",
+      "approach": "推奨案 (B): TerminalSplitPane 内で useState によりターミナル output / isThinking / isSelectionListActive を保持。useEffect で polling 起動・停止。worktreeId/cliToolId 変化で polling 再起動。reducer の state.terminal.* slice は Mobile 経路互換のため一旦残す（compat shim）。WorktreeDetailRefactored の Mobile branch は引き続き state.terminal.* を読む。",
+      "files_to_edit": [
+        "src/components/worktree/TerminalSplitPane.tsx",
+        "src/components/worktree/TerminalSplitContainer.tsx (props 伝播)",
+        "src/components/worktree/WorktreeDetailRefactored.tsx (PC branch wiring)"
+      ]
+    },
+    {
+      "id": "R3-006",
+      "severity": "NON_BLOCKING",
+      "title": "TerminalSplitPane.attaching の実 attach 完了検出を配線",
+      "current_state": "attaching prop は受けるが常に false で渡される",
+      "target_state": "初回 fetchCurrentOutput resolve まで attaching=true、resolve 後 false。MessageInput の disabled 連動",
+      "files_to_edit": [
+        "src/components/worktree/TerminalSplitPane.tsx"
+      ]
+    },
+    {
+      "id": "R3-009",
+      "severity": "NON_BLOCKING",
+      "title": "CLAUDE.md / CHANGELOG.md 更新",
+      "approach": "Issue #727 / #730 のフォーマットに従い、モジュールリファレンス表に 4 新規ファイル行追加 + 既存変更ファイル行末尾に注記。CHANGELOG [Unreleased] に 1 行追記。",
+      "files_to_edit": [
+        "CLAUDE.md",
+        "CHANGELOG.md"
+      ]
+    }
+  ],
+  "non_targets_in_this_phase": [
+    "R3-008: Playwright e2e (Should Have、Phase 6 UAT 後に検討)",
+    "R3-007 / R3-010: 既存 state.terminal slice の完全削除と CLI tab switching test の再々設計 (Mobile 経路完全移行後の別 Issue 案件)"
+  ],
+  "quality_metrics_before": {
+    "lint_errors": 0,
+    "tsc_errors": 0,
+    "test_unit_pass": 6687,
+    "test_unit_total": 6694,
+    "coverage_estimate": 92
+  },
+  "improvement_goals": [
+    "splitIndex>=1 でも CLI 出力が描画される (AC-13 / AC-CRITICAL-DEFERRED-FETCH をパスに)",
+    "全 split で NavigationButtons / PromptPanel が動作する (AC-17 をパスに)",
+    "全 split で attach 完了検出により MessageInput disabled が解除される (AC-07 をパスに)",
+    "CLAUDE.md / CHANGELOG.md がリポジトリ規約に従い更新されている (R3-009)",
+    "lint/tsc/test:unit/build 全 PASS 維持",
+    "新規テストを追加: 'splitIndex=1 で別 CLI 選択時に対応する CLI の output がフェッチされる'"
+  ],
+  "constraints": [
+    "FilePanelSplit シグネチャ無変更",
+    "Mobile 経路 (MobileContent) を破壊しない",
+    "useWorktreeUIState reducer / LayoutState に手を入れない (S3-006)",
+    "tmux session 名規約 / Auto-Yes / response-poller の (worktreeId, cliToolId) キー設計は変えない",
+    "lint / tsc / test:unit / build 全 PASS 維持必須",
+    "コメントは WHY のみ最小化 (CLAUDE.md 規約)"
+  ],
+  "output_schema": {
+    "issue_number": 728,
+    "iteration": 1,
+    "phase": "refactor",
+    "status": "success | needs_revision | blocked",
+    "summary": "...",
+    "refactor_results": [
+      {"target_id": "R3-005", "status": "completed|partial|skipped", "edits": ["..."], "tests_added": ["..."]}
+    ],
+    "quality_gates_after": {
+      "lint": "pass|fail",
+      "tsc": "pass|fail",
+      "test_unit": "pass (X/Y)|fail",
+      "build": "pass|fail"
+    },
+    "remaining_followups": []
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "issue_number": 728,
+  "issue_title": "feat(terminal): add 1-3 horizontal terminal split with per-split CLI selection and MessageInput (PC)",
+  "branch": "feature/728-worktree",
+  "repository_root": "/Users/maenokota/share/work/github_kewton/commandmate-issue-728",
+  "work_plan_path": "dev-reports/issue/728/work-plan.md",
+  "issue_review_summary_path": "dev-reports/issue/728/issue-review/summary-report.md",
+  "issue_body_snapshot_path": "/tmp/issue-728-final.md",
+  "scope": "PC only — WorktreeDetailRefactored if(!isMobile) branch / WorktreeDesktopLayout. MobileContent path remains unchanged.",
+  "acceptance_criteria": [
+    "ターミナルヘッダーに分割追加/削除ボタン (1 split: add only / 3 splits: remove only / dragging: both disabled)",
+    "分割追加で新スプリットがデフォルト幅(既存の半分)で末尾に挿入",
+    "分割削除で末尾スプリットが除去 (末尾のみ)",
+    "1→2→3→2→1 遷移で既存スプリット(index 0..n-1)の state (CLI選択 / draft / Auto-Yes / scroll) は保持",
+    "新規スプリット attach 中は MessageInput disabled + スケルトン UI",
+    "同一 (worktreeId, cliToolId) を複数スプリットで開けないこと (CLI セレクター disabled)",
+    "TerminalSplitContainer に role='group' aria-label='Terminal splits'、各 Pane に role='region' + aria-label",
+    "分割追加直後に新スプリット MessageInput textarea に focus",
+    "CLI セレクター(claude/codex/gemini/copilot/opencode/vibe-local)が各スプリットに独立",
+    "各スプリットに独立した MessageInput / NavigationButtons / PromptPanel",
+    "スプリットごとに Auto-Yes / 特殊キー送信 / NavigationButtons が独立動作 (同一CLI禁止により (worktreeId, cliToolId) キーで自然に独立)",
+    "HistoryPane/MemoPane の onInsertToMessage は最後に focus した split (focusedSplitIndex) へ届く",
+    "スプリット数/各 CLI 選択/各幅比率が localStorage(commandmate:terminalSplits:${worktreeId}) に worktreeId-scope で永続化",
+    "localStorage stale state (splits.length 範囲外 / widths 長不一致 / NaN/負値/0) は DEFAULT_SPLIT_CONFIG にフォールバック + warning",
+    "旧 draft key commandmate:draft-message:${worktreeId} は splitIndex=0 の新キーに自動マイグレーション + 旧キー削除 (ベストエフォート)",
+    "FilePanelSplit シグネチャ無変更、tmux session 名 (mcbd-${cliToolId}-${worktreeId}) 無変更、useResponsePoller/auto-yes は (worktreeId, cliToolId) 複合キーのまま",
+    "PaneResizer 並列ドラッグで外側 (WorktreeDesktopLayout / TerminalContainer / FilePanelSplit) リサイザーが二重発火しない",
+    "Mobile (isMobile=true) では TerminalSplitContainer 非適用、単一ターミナル維持",
+    "lint / tsc --noEmit / test:unit / build が全 PASS"
+  ],
+  "design_decisions": {
+    "no_layout_state_change": "useTerminalSplits は独立フックとし LayoutState には追加しない (S3-006)",
+    "no_use_worktree_ui_state_change": "useWorktreeUIState は触らない (S3-006)",
+    "same_cli_forbidden": "同一 (worktreeId, cliToolId) 複数スプリット禁止により Auto-Yes/poller/tmux キーは 2-tuple 維持",
+    "draft_key_format": "commandmate:draft-message:${worktreeId}:${splitIndex}",
+    "storage_key_format": "commandmate:terminalSplits:${worktreeId}",
+    "terminal_state_per_split": "推奨案 (B): state.terminal slice を reducer から除去、各 TerminalSplitPane で useState 保持。モバイル経路の維持に応じて案 (A: Map<cliToolId, TerminalState>) も許容",
+    "file_panel_split_unchanged": "FilePanelSplit シグネチャ無変更、terminalHeader=null 渡し、CLI セレクター/検索ボタンを TerminalSplitPane ヘッダーへ移管",
+    "history_pane_id_unique": "TerminalSplitContainer は HistoryPane を内包しない、HISTORY_PANE_ID 一意性維持",
+    "history_memo_insert_target": "focusedSplitIndex (MessageInput onFocus で更新)",
+    "pending_insert_text_map": "Map<splitIndex, string|null>"
+  },
+  "implementation_tasks": [
+    {"phase": 1, "id": "1.1", "file": "src/config/terminal-split-config.ts", "type": "new"},
+    {"phase": 1, "id": "1.2", "file": "src/hooks/useTerminalSplits.ts", "type": "new"},
+    {"phase": 1, "id": "1.3", "file": "MessageInput draft migration helper", "type": "new_or_inline"},
+    {"phase": 2, "id": "2.1", "file": "src/components/worktree/TerminalSplitPane.tsx", "type": "new"},
+    {"phase": 2, "id": "2.2", "file": "src/components/worktree/TerminalSplitContainer.tsx", "type": "new"},
+    {"phase": 3, "id": "3.1", "file": "src/components/worktree/WorktreeDetailRefactored.tsx", "type": "edit", "note": "state.terminal per-split (推奨案 B)、MessageInput/NavigationButtons/PromptPanel 移管、pendingInsertText Map 化、HistoryPane onInsertToMessage を focusedSplitIndex 経由化"},
+    {"phase": 3, "id": "3.2", "file": "src/components/worktree/MessageInput.tsx", "type": "edit", "note": "splitIndex prop 追加、draft キー scope 化、onFocus prop、旧キー migration"},
+    {"phase": 3, "id": "3.3", "file": "src/components/worktree/NavigationButtons.tsx", "type": "edit_minimal", "note": "cliToolId props を per-split で受ける (既に持っているか確認)"},
+    {"phase": 3, "id": "3.4", "file": "src/components/worktree/PromptPanel.tsx", "type": "edit_minimal", "note": "isSelectionListActive を props で受ける形に整理"},
+    {"phase": 4, "id": "4.x", "file": "UX 詳細詰め", "type": "edit"},
+    {"phase": 6, "id": "6.1", "file": "CLAUDE.md", "type": "edit"},
+    {"phase": 6, "id": "6.2", "file": "CHANGELOG.md", "type": "edit"}
+  ],
+  "test_plan": {
+    "new_unit_tests": [
+      "tests/unit/hooks/useTerminalSplits.test.ts",
+      "tests/unit/config/terminal-split-config.test.ts",
+      "tests/unit/components/worktree/TerminalSplitContainer.test.tsx",
+      "tests/unit/components/worktree/TerminalSplitPane.test.tsx"
+    ],
+    "existing_test_updates": [
+      "tests/unit/components/worktree/MessageInput.test.tsx (splitIndex prop、draft キー、旧キー migration、onFocus)",
+      "tests/unit/components/WorktreeDetailRefactored.test.tsx (PC 経路の DOM 構造変化、HistoryPane onInsertToMessage focusedSplitIndex 経由)",
+      "tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx (activeCliTab 廃止に伴う再設計)",
+      "tests/unit/components/WorktreeDesktopLayout.test.tsx (snapshot)",
+      "tests/unit/hooks/useWorktreeUIState.test.ts (terminalSplits action / state が追加されていない確認)"
+    ],
+    "helpers": [
+      "tests/helpers/terminal-splits.ts (mockTerminalSplitsLocalStorage / seedLegacyDraftKey / clearTerminalSplitsLocalStorage)"
+    ],
+    "target_coverage": 90
+  },
+  "target_coverage": 80,
+  "max_iterations": 3,
+  "quality_gates": [
+    "npm run lint = 0 errors",
+    "npx tsc --noEmit = 0 errors",
+    "npm run test:unit = all green",
+    "npm run build = success"
+  ],
+  "risks": [
+    "state.terminal per-split 化 (Task 3.1) が最大の影響: モバイル経路との二重サポート期間を許容、推奨案 (B) で破綻したら案 (A) に切替",
+    "既存テスト (WorktreeDetailRefactored-cli-tab-switching.test.tsx) は activeCliTab 中心のため大規模再設計が必要",
+    "PaneResizer 並列 5 マウントでの cursor/userSelect 残留",
+    "Mobile 経路は無変更を厳守 (useTerminalSplits を呼ばないか、MIN_SPLITS=1 固定)"
+  ]
+}

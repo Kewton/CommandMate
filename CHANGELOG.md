@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- feat(terminal): add PC terminal 1-3 horizontal split with per-split CLI selector and MessageInput (#728)
 - Layout (PC): **カスタム Tooltip** コンポーネント `src/components/common/Tooltip.tsx` を新設。`TOOLTIP_DELAY_MS = 100` の即時表示、ダークテーマ（`bg-gray-900` / `text-gray-100`）、`placement=top/right/bottom/left`、`role="tooltip"` + `aria-hidden="true"`（`aria-label` 重複読み上げ回避）、wrapper `<span>` の `tabIndex={-1}`、`useEffect` cleanup で `clearTimeout`、`React.cloneElement` を使わず ref/onClick/onKeyDown を透過する設計 (Issue #730)
 - Layout (PC): **TerminalContainer** コンポーネント `src/components/worktree/TerminalContainer.tsx` を新設。History + Terminal+FilePanel を内包する親コンテナ。`HISTORY_PANE_ID = 'worktree-history-pane'` を `WorktreeDesktopLayout` から移管・export。`useHistoryPaneState` で visible/width/toggle/setWidth を管理、可視時は History wrapper div + PaneResizer、非表示時は expand bar（`aria-controls=HISTORY_PANE_ID`）、History/Terminal をそれぞれ `ErrorBoundary` で包含 (Issue #730)
 - Hook: `useHistoryPaneState` に `commandmate:historyPaneStateChange` CustomEvent broadcaster を追加。同一 window 内で `WorktreeDetailRefactored`（HistoryPane onCollapse 用）と `TerminalContainer`（render 用）の 2 instance の visible/width 状態を同期 (Issue #730)

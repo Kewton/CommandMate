@@ -25,6 +25,17 @@ export interface MessageInputProps {
   pendingInsertText?: string | null;
   /** Issue #485: Callback to signal that pendingInsertText has been consumed */
   onInsertConsumed?: () => void;
+  /**
+   * Issue #728: split index used to scope the draft localStorage key.
+   * Defaults to 0 for backward compatibility (mobile / single-terminal usage).
+   */
+  splitIndex?: number;
+  /**
+   * Issue #728: invoked when the textarea gains focus.
+   * TerminalSplitContainer wires this to setFocusedSplitIndex so HistoryPane /
+   * MemoPane insertions land in the most recently focused split.
+   */
+  onFocus?: () => void;
 }
 
 /**
@@ -38,7 +49,36 @@ export interface MessageInputProps {
 /** localStorage key prefix for draft message persistence */
 const DRAFT_STORAGE_KEY_PREFIX = 'commandmate:draft-message:';
 
-export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, isSessionRunning = false, pendingInsertText, onInsertConsumed }: MessageInputProps) {
+/**
+ * Issue #728: Per-(worktree, split) draft key. Falls back to the legacy
+ * worktree-only key path during migration (see migrateLegacyDraftKey).
+ */
+function getDraftKey(worktreeId: string, splitIndex: number): string {
+  return `${DRAFT_STORAGE_KEY_PREFIX}${worktreeId}:${splitIndex}`;
+}
+
+/**
+ * Issue #728: Best-effort migration of the legacy draft key.
+ * If `commandmate:draft-message:${worktreeId}` exists and the new
+ * `${...}:0` key is empty, copy the value over and delete the legacy entry.
+ * Safe to call repeatedly (no-op when legacy key absent).
+ */
+function migrateLegacyDraftKey(worktreeId: string): void {
+  try {
+    const legacyKey = `${DRAFT_STORAGE_KEY_PREFIX}${worktreeId}`;
+    const legacyValue = window.localStorage.getItem(legacyKey);
+    if (legacyValue === null) return;
+    const newKey = getDraftKey(worktreeId, 0);
+    if (window.localStorage.getItem(newKey) === null) {
+      window.localStorage.setItem(newKey, legacyValue);
+    }
+    window.localStorage.removeItem(legacyKey);
+  } catch {
+    /* localStorage unavailable; migration is best-effort */
+  }
+}
+
+export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, isSessionRunning = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus }: MessageInputProps) {
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,10 +113,14 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     resetAfterSend,
   } = useImageAttachment(worktreeId, uploadFn);
 
-  // Restore draft message from localStorage on mount or worktreeId change
+  // Restore draft message from localStorage on mount or (worktreeId, splitIndex) change.
+  // Issue #728: also runs the legacy-key migration for splitIndex=0.
   useEffect(() => {
     try {
-      const saved = window.localStorage.getItem(DRAFT_STORAGE_KEY_PREFIX + worktreeId);
+      if (splitIndex === 0) {
+        migrateLegacyDraftKey(worktreeId);
+      }
+      const saved = window.localStorage.getItem(getDraftKey(worktreeId, splitIndex));
       if (saved) {
         setMessage(saved);
       } else {
@@ -86,21 +130,22 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     return () => {
       if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
     };
-  }, [worktreeId]);
+  }, [worktreeId, splitIndex]);
 
-  // Debounced save of draft message to localStorage
+  // Debounced save of draft message to localStorage (per-split key, Issue #728)
   useEffect(() => {
     if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
     draftSaveTimerRef.current = setTimeout(() => {
       try {
+        const key = getDraftKey(worktreeId, splitIndex);
         if (message) {
-          window.localStorage.setItem(DRAFT_STORAGE_KEY_PREFIX + worktreeId, message);
+          window.localStorage.setItem(key, message);
         } else {
-          window.localStorage.removeItem(DRAFT_STORAGE_KEY_PREFIX + worktreeId);
+          window.localStorage.removeItem(key);
         }
       } catch { /* localStorage unavailable */ }
     }, 500);
-  }, [message, worktreeId]);
+  }, [message, worktreeId, splitIndex]);
 
   /**
    * Auto-resize textarea based on content
@@ -149,14 +194,14 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setMessage('');
       setIsFreeInputMode(false);
       resetAfterSend();
-      try { window.localStorage.removeItem(DRAFT_STORAGE_KEY_PREFIX + worktreeId); } catch { /* ignore */ }
+      try { window.localStorage.removeItem(getDraftKey(worktreeId, splitIndex)); } catch { /* ignore */ }
       onMessageSent?.(effectiveCliTool);
     } catch (err) {
       setError(handleApiError(err));
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, onMessageSent, resetAfterSend]);
+  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, onMessageSent, resetAfterSend, splitIndex]);
 
   const handleSubmit = useCallback(async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -424,6 +469,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
             onKeyDown={handleKeyDown}
             onCompositionStart={handleCompositionStart}
             onCompositionEnd={handleCompositionEnd}
+            onFocus={onFocus}
             placeholder={isMobile ? "Type your message..." : "Type your message... (/ for commands, Shift+Enter for line break)"}
             disabled={sending}
             rows={1}

@@ -1,0 +1,265 @@
+{
+  "issue_number": 728,
+  "iteration": 1,
+  "verified_at": "2026-05-31T01:55:00Z",
+  "overall_status": "partial_pass",
+  "criteria_results": [
+    {
+      "id": "AC-01",
+      "category": "分割操作",
+      "criterion": "ターミナルヘッダーに「分割追加」「分割削除」ボタン",
+      "status": "pass",
+      "evidence": "src/components/worktree/TerminalSplitContainer.tsx:158-180 — '+ Split' / '- Split' ボタン (data-testid=add-terminal-split / remove-terminal-split, aria-label='Add terminal split' / 'Remove last terminal split'). テスト: tests/unit/components/worktree/TerminalSplitContainer.test.tsx:44,51,60",
+      "notes": "ボタンは常時表示で disabled 制御。AC-02 と組み合わせ。"
+    },
+    {
+      "id": "AC-02",
+      "category": "分割操作",
+      "criterion": "1スプリット時は分割追加のみ、3スプリット時は分割削除のみ",
+      "status": "pass",
+      "evidence": "TerminalSplitContainer.tsx:131-132 (canAdd/canRemove境界判定), Tests at tests/unit/components/worktree/TerminalSplitContainer.test.tsx:44 ('disabled remove button at 1 split') and :60 ('disables add at MAX_SPLITS=3 and disables remove at MIN=1')",
+      "notes": "Issue原文「1スプリット時は分割追加のみ表示」は文言上は'表示制御'だが、実装は disabled 制御。挙動上は等価でユーザーは追加/削除のいずれかのみ操作可能。"
+    },
+    {
+      "id": "AC-03",
+      "category": "分割操作",
+      "criterion": "分割追加で新スプリットがデフォルト幅で末尾挿入",
+      "status": "pass",
+      "evidence": "src/hooks/useTerminalSplits.ts:111-127 (addSplit: 末尾追加 + 末尾幅を半分にして新規スプリット幅に割当). Tests at tests/unit/hooks/useTerminalSplits.test.ts:112,126,138 ('halves the last existing width')",
+      "notes": "デフォルト幅 = 直前最後尾の半分。Issueの「既存の半分」と一致。"
+    },
+    {
+      "id": "AC-04",
+      "category": "分割操作",
+      "criterion": "分割削除で末尾スプリットが除去",
+      "status": "pass",
+      "evidence": "useTerminalSplits.ts:129-136 (removeSplit: slice(0,-1)). Tests at tests/unit/hooks/useTerminalSplits.test.ts:153 ('removeSplit shrinks to MIN_SPLITS and then no-ops')",
+      "notes": "末尾削除のみ提供。Issue原文の「末尾削除のみ、途中削除は提供しない」と整合。"
+    },
+    {
+      "id": "AC-05",
+      "category": "分割操作",
+      "criterion": "スプリット間ドラッグで幅可変",
+      "status": "pass",
+      "evidence": "TerminalSplitContainer.tsx:107-126 (handleResize: deltaPx→比率変換 + FLOOR防御), PaneResizerWrapper:232-264, setSplitWidth at useTerminalSplits.ts:160-166. Tests at tests/unit/components/worktree/TerminalSplitContainer.test.tsx:51 ('renders 1 resizer for 2 splits'), tests/unit/hooks/useTerminalSplits.test.ts:190,199 (setSplitWidth)",
+      "notes": "PaneResizer 既存実装流用。5% floor で過小化防御。"
+    },
+    {
+      "id": "AC-06",
+      "category": "分割操作",
+      "criterion": "1→2→3→2→1 遷移で既存スプリット state 保持",
+      "status": "pass",
+      "evidence": "Tests at tests/unit/hooks/useTerminalSplits.test.ts:228 ('focusedSplitIndex clamps when splits shrink below it') and useTerminalSplits.ts:138-146 (clamp focusedSplitIndex). addSplit/removeSplit は末尾だけ操作するため idx 0..n-1 の state は保持される。",
+      "notes": "CLI選択(splits[i].cliToolId)は末尾操作で保たれる構造。Auto-Yes/MessageInput drafts は (worktreeId, cliToolId) / (worktreeId, splitIndex) キーで分離されており単元テストで担保。"
+    },
+    {
+      "id": "AC-07",
+      "category": "分割操作",
+      "criterion": "新規スプリット attach 中 MessageInput disabled + スケルトン UI",
+      "status": "partial",
+      "evidence": "TerminalSplitPane.tsx:33,140-149 — attaching prop と attach-skeleton DOM 自体は実装済み (data-testid=terminal-attach-skeleton-${i}, role=status, aria-live=polite). Test at tests/unit/components/worktree/TerminalSplitPane.test.tsx:94. しかし WorktreeDetailRefactored.tsx の renderSplitPane(L1442-1520) は attaching prop を渡さず、TerminalSplitPane default(attaching=false) で常に非表示。",
+      "notes": "R3-006 として追跡: 実 attach 検出未配線。tdd-result.json deviations_from_plan に明記。MessageInput disabled / スケルトン表示の機能要件は満たされていない。"
+    },
+    {
+      "id": "AC-08",
+      "category": "分割操作",
+      "criterion": "PaneResizer ドラッグ中は分割追加/削除ボタン disabled",
+      "status": "pass",
+      "evidence": "TerminalSplitContainer.tsx:73-74,128-132 (isResizing state, canAdd/canRemove に && !isResizing), PaneResizerWrapper(L232-264) で onMouseDownCapture/onTouchStartCapture/onMouseUpCapture/onTouchEndCapture を介して onStart/onEnd を呼出.",
+      "notes": "明示的な単体テストは未実装だが実装ロジックは構造的に正しい。"
+    },
+    {
+      "id": "AC-09",
+      "category": "分割操作",
+      "criterion": "同一CLI複数選択不可（CLI セレクター disabled）",
+      "status": "pass",
+      "evidence": "useTerminalSplits.ts:168-177 (availableCliTools: 他スプリットで使用中のCLIを除外), TerminalSplitPane.tsx:101-109 (option.disabled=!allowed + ' (in use)' 表示), setSplitCliTool 衝突時 no-op (useTerminalSplits.ts:152-154). Tests: tests/unit/hooks/useTerminalSplits.test.ts:180,211 / tests/unit/components/worktree/TerminalSplitPane.test.tsx:47",
+      "notes": "S1-002 完全準拠。"
+    },
+    {
+      "id": "AC-10",
+      "category": "分割操作",
+      "criterion": "アクセシビリティ: role/aria-label",
+      "status": "pass",
+      "evidence": "TerminalSplitContainer.tsx:147-149 (role=group, aria-label='Terminal splits'), TerminalSplitPane.tsx:78-80 (role=region, aria-label='Terminal split N'), ボタン aria-label/aria-disabled (TerminalSplitContainer.tsx:163,174). Tests: tests/unit/components/worktree/TerminalSplitContainer.test.tsx:38 / TerminalSplitPane.test.tsx:35",
+      "notes": "Issue 要求の全 a11y 属性を網羅。"
+    },
+    {
+      "id": "AC-11",
+      "category": "分割操作",
+      "criterion": "分割追加直後に新スプリットの MessageInput textarea に focus",
+      "status": "pass",
+      "evidence": "TerminalSplitContainer.tsx:76-105 (lastAddedIndex追跡 + useEffect で textarea?.focus() + setFocusedSplitIndex), Test at tests/unit/components/worktree/TerminalSplitContainer.test.tsx:81 ('focuses the newly-added pane textarea after addSplit')",
+      "notes": ""
+    },
+    {
+      "id": "AC-12",
+      "category": "独立性",
+      "criterion": "CLI セレクターが各スプリットに独立",
+      "status": "pass",
+      "evidence": "TerminalSplitPane.tsx:93-110 (id=cli-selector-${splitIndex}, value=split固有のcliToolId), TerminalSplitContainer.tsx:140-144 (cliChangeHandlers per index). Test: tests/unit/components/worktree/TerminalSplitPane.test.tsx:61",
+      "notes": ""
+    },
+    {
+      "id": "AC-13",
+      "category": "独立性",
+      "criterion": "スプリットA=Claude、B=Codex 選択可能",
+      "status": "partial",
+      "evidence": "構造面: useTerminalSplits.splits は per-index cliToolId を独立に保持可。tests/unit/hooks/useTerminalSplits.test.ts:169 ('setSplitCliTool updates only the indexed split') で証明。ただし機能面: WorktreeDetailRefactored.tsx:1457-1460 の compat shim により splitIndex>=1 は paneOutput='' (空 TerminalDisplay)。Codex の出力は描画されない。",
+      "notes": "AC-CRITICAL-DEFERRED-FETCH に直接該当。R3-005 として deferred。構造選択は可、出力描画は不可。"
+    },
+    {
+      "id": "AC-14",
+      "category": "独立性",
+      "criterion": "各スプリットに独立した MessageInput",
+      "status": "pass",
+      "evidence": "WorktreeDetailRefactored.tsx:1506-1515 (renderSplitPane 内で per-split MessageInput をマウント + splitIndex prop 渡し). MessageInput.tsx:56-58 (getDraftKey に splitIndex 含む). Test: tests/unit/components/worktree/MessageInput.test.tsx (splitIndex draft key scoping)",
+      "notes": ""
+    },
+    {
+      "id": "AC-15",
+      "category": "独立性",
+      "criterion": "スプリットAの入力がスプリットBに影響しない",
+      "status": "pass",
+      "evidence": "MessageInput.tsx:56-58 (DRAFT_STORAGE_KEY_PREFIX+worktreeId+':'+splitIndex で完全分離). tests/unit/components/worktree/MessageInput.test.tsx の 'splitIndex draft key scoping' で担保",
+      "notes": "AC-CRITICAL-DEFERRED-FETCH の対象は terminal output であって MessageInput input ではない。MessageInput 自体は独立。"
+    },
+    {
+      "id": "AC-16",
+      "category": "独立性",
+      "criterion": "スプリットごとに Auto-Yes 制御可能",
+      "status": "pass",
+      "evidence": "S1-002 同一CLI禁止 (useTerminalSplits.ts:148-158) により (worktreeId, cliToolId) 複合キーが自然にスプリット間で一意 → 既存 auto-yes-state.ts (Issue #525) のキー設計のままで分離成立。tdd-result.json 'design_decisions_taken' rationale で明文化。",
+      "notes": "実機 Auto-Yes UI は MessageInput / NavigationButtons 内に同梱されており per-split。"
+    },
+    {
+      "id": "AC-17",
+      "category": "独立性",
+      "criterion": "スプリットごとに NavigationButtons 動作",
+      "status": "partial",
+      "evidence": "構造: WorktreeDetailRefactored.tsx:1488-1494 (renderSplitPane で per-split NavigationButtons + cliToolId={paneCli}). しかし :1464 'showNavHere = splitIndex===0 && isSelectionListActive' により splitIndex>=1 では NavigationButtons は描画されない。",
+      "notes": "AC-CRITICAL-DEFERRED-FETCH と同根。isSelectionListActive が per-split 化されていないため splitIndex>=1 では NavigationButtons が表示されない。R3-005 完了後に解消見込み。"
+    },
+    {
+      "id": "AC-18",
+      "category": "独立性",
+      "criterion": "スプリットごとに特殊キー送信動作",
+      "status": "pass",
+      "evidence": "NavigationButtons は cliToolId props で動作 (既存実装), special-keys API は (worktreeId, cliToolId) body 受け取り (Issue #592 既存)。renderSplitPane でも cliToolId={paneCli} を渡している。",
+      "notes": "AC-17 の splitIndex>=1 表示問題はあるが、API/コンポーネント側の独立性は構造的に成立。"
+    },
+    {
+      "id": "AC-19",
+      "category": "独立性",
+      "criterion": "HistoryPane/MemoPane 挿入先 = focusedSplitIndex",
+      "status": "pass",
+      "evidence": "WorktreeDetailRefactored.tsx:381 (pendingInsertTextMap: Map<number, string|null>), :386 (focusedSplitIndex state), :387-393 (handleInsertToMessage で focusedSplitIndex に書き込み), :1549 (TerminalSplitContainer onFocusedSplitChange={setFocusedSplitIndex}). TerminalSplitContainer.tsx:87-89 で focusedSplitIndex 変更通知。",
+      "notes": "S3-004 完全準拠。MemoPane (activityContent.notes) は handleInsertToMessage を受け取り、focusedSplitIndex 経由でルーティング。"
+    },
+    {
+      "id": "AC-20",
+      "category": "永続化",
+      "criterion": "スプリット数/CLI/幅が localStorage 永続化 (worktreeId scope)",
+      "status": "pass",
+      "evidence": "useTerminalSplits.ts:99-109 (config 変更で setItem), getTerminalSplitsStorageKey: 'commandmate:terminalSplits:'+worktreeId (terminal-split-config.ts:49-51). Tests: tests/unit/hooks/useTerminalSplits.test.ts:30,37 ('restores a valid stored config')",
+      "notes": ""
+    },
+    {
+      "id": "AC-21",
+      "category": "永続化",
+      "criterion": "stale state 防御 fallback",
+      "status": "pass",
+      "evidence": "terminal-split-config.ts:62-82 (isValidSplitConfig: 範囲・length・widths positivity 全て検証). useTerminalSplits.ts:48-66 (parse失敗 / 不正値で DEFAULT に fallback + console.warn). Tests: tests/unit/config/terminal-split-config.test.ts (16 tests) + tests/unit/hooks/useTerminalSplits.test.ts:50,65,72,82,105 (5 fallback patterns)",
+      "notes": "Issue要求の全パターン (length OOR / widths不一致 / NaN/負値/0 / 不正JSON) を網羅。"
+    },
+    {
+      "id": "AC-22",
+      "category": "永続化",
+      "criterion": "旧 draft キー migration",
+      "status": "pass",
+      "evidence": "MessageInput.tsx:66-79 (migrateLegacyDraftKey: legacy commandmate:draft-message:${worktreeId} → :0 key, ベストエフォート try/catch), :117-133 (splitIndex===0 で migration 実行). Tests at tests/unit/components/worktree/MessageInput.test.tsx (legacy migration with/without existing new key, splitIndex!=0 skips migration)",
+      "notes": ""
+    },
+    {
+      "id": "AC-23",
+      "category": "互換性",
+      "criterion": "FilePanelSplit シグネチャ無変更",
+      "status": "pass",
+      "evidence": "git diff main --stat src/components/worktree/FilePanelSplit.tsx で変更なし (該当差分なし)。WorktreeDetailRefactored.tsx:1561-1578 で FilePanelSplit に terminalHeader={null} を渡す既存挙動を活用。",
+      "notes": "S3-003 準拠。"
+    },
+    {
+      "id": "AC-24",
+      "category": "互換性",
+      "criterion": "tmux session 名規約無変更",
+      "status": "pass",
+      "evidence": "claude-session.ts / cli-tools/base.ts は本 iteration で変更されていない (TDD result modules_implemented リスト外)。",
+      "notes": ""
+    },
+    {
+      "id": "AC-25",
+      "category": "互換性",
+      "criterion": "useResponsePoller / Auto-Yes は (worktreeId, cliToolId) 複合キー維持",
+      "status": "pass",
+      "evidence": "auto-yes-state.ts / response-poller.ts は本 iteration で変更されていない。S1-002 同一CLI禁止により 2-tuple キー設計が破綻しない。",
+      "notes": ""
+    },
+    {
+      "id": "AC-26",
+      "category": "互換性",
+      "criterion": "検索 (#47) / 履歴検索 (#716) 機能維持",
+      "status": "pass",
+      "evidence": "TerminalSplitPane.tsx:112-134 で per-split 検索ボタンを実装し window.dispatchEvent('terminal-search-open') を発火 (既存 TerminalDisplay リスナと互換)。npx vitest run の Test Files=356, Tests=6687 passed で既存テスト全 green。",
+      "notes": "PC共通 CLI tab header (terminalHeaderMemo) 廃止に伴い検索ボタンが per-split header に移管された。既存 #47 動作は維持。"
+    },
+    {
+      "id": "AC-27",
+      "category": "互換性",
+      "criterion": "PaneResizer 並列ドラッグ非干渉",
+      "status": "not_verifiable_in_unit_test",
+      "evidence": "PaneResizer 既存実装の e.stopPropagation に依存する設計。Playwright e2e (R3-008) は未実装。",
+      "notes": "Issue原文も「e2e で目視確認」と明示。R3-008 として deferred、非ブロッキング。"
+    },
+    {
+      "id": "AC-28",
+      "category": "横断",
+      "criterion": "PC 専用、Mobile は単一ターミナル維持",
+      "status": "pass",
+      "evidence": "WorktreeDetailRefactored.tsx:1780 'if (!isMobile)' gate で PC 経路のみ TerminalSplitContainer 使用。Mobile 経路 (L2031- MobileContent) は handleInsertConsumedSingle/pendingInsertText (splitIndex=0 shim) で従来動作維持。TerminalSplitContainer は mobile では呼ばれない。",
+      "notes": "S3-006 準拠。LayoutState への追加なし、useWorktreeUIState 無変更も tests/unit/hooks/useWorktreeUIState.test.ts 追加テストで担保 (negative test)。"
+    },
+    {
+      "id": "AC-29",
+      "category": "横断",
+      "criterion": "lint/tsc/test/build 全 PASS",
+      "status": "pass",
+      "evidence": "再検証: 'npm run lint' → No ESLint warnings or errors. 'npx tsc --noEmit' → 0 errors. 'npx vitest run' (focused 7 files) → 126 passed. 全体 'npm run test:unit' → 356 files / 6687 passed | 7 skipped. build は TDD result で pass、本受入では skip (短時間内に再回さず TDD 既存 pass を信頼)。",
+      "notes": ""
+    },
+    {
+      "id": "AC-CRITICAL-DEFERRED-FETCH",
+      "category": "致命的注意",
+      "criterion": "splitIndex>=1 のターミナル出力が描画される",
+      "status": "fail",
+      "evidence": "WorktreeDetailRefactored.tsx:1457-1460 のcompat shim により splitIndex>=1 では paneOutput=''、paneActive=false、paneThinking=false、paneAutoScroll=true (固定)。TerminalDisplay は空描画。tdd-result.json design_decisions_taken と deviations_from_plan に明記。R3-005 (fan out fetchCurrentOutput / fetchMessages into per-split polling) として deferred。",
+      "notes": "AC-13/AC-17 の partial 判定の根拠。本 iteration の主要な未達。"
+    }
+  ],
+  "static_verification": {
+    "lint": "pass",
+    "tsc": "pass",
+    "test_unit": "pass (6687/6694, 7 skipped — Issue #728 focused 126/126)",
+    "build": "pass (skipped re-run; TDD iteration result trusted)"
+  },
+  "blocking_issues": [
+    "R3-005 (AC-CRITICAL-DEFERRED-FETCH / AC-13 / AC-17): per-split polling fan-out 未実装。splitIndex>=1 では TerminalDisplay が常に空、NavigationButtons が出ない、PromptPanel が出ない。Issue 受入条件の中核である 'Claude と Codex を並べて同時に作業する' ユースケースが機能上未達。refactor フェーズで fetchCurrentOutput / fetchMessages / isSelectionListActive / state.prompt.* を per-(worktreeId, cliToolId) または per-splitIndex で fan out する必要がある。"
+  ],
+  "non_blocking_followups": [
+    "R3-006: TerminalSplitPane.attaching を実 tmux-attach 検出に配線する (AC-07 partial の解消)。スケルトン DOM とテストは既に整備済。",
+    "R3-008: Playwright e2e を追加し AC-27 (5 instances 並列 PaneResizer 非干渉) と分割追加/削除 + cross-worktree persistence を機械検証する。",
+    "R3-009: CLAUDE.md / CHANGELOG.md に Issue #728 行を追記する。",
+    "R3-007: TerminalSplitContainer / WorktreeDetailRefactored の残存 state.terminal.* slice 参照を per-split state に置換する (R3-005 完了後)。",
+    "R3-010: WorktreeDetailRefactored-cli-tab-switching テストが per-split selector 経由に再設計されているため、R3-005 着地時にテスト方針再評価。"
+  ],
+  "recommendation": "request_refactor"
+}
