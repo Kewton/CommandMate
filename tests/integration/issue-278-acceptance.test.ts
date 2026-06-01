@@ -57,8 +57,10 @@ describe('Issue #278 Acceptance: fetch Data Cache fix & Info notification indica
   // =========================================================================
   describe('Scenario 2 & 3: Desktop Info button update indicator', () => {
     it('should have NotificationDot with data-testid="info-update-indicator" in DesktopHeader', () => {
+      // Issue #755: DesktopHeader was extracted into WorktreeDetailSubComponents.tsx,
+      // so the NotificationDot indicator now lives there (not in the parent).
       const source = readFileSync(
-        resolve(ROOT, 'src/components/worktree/WorktreeDetailRefactored.tsx'),
+        resolve(ROOT, 'src/components/worktree/WorktreeDetailSubComponents.tsx'),
         'utf-8'
       );
 
@@ -71,17 +73,23 @@ describe('Issue #278 Acceptance: fetch Data Cache fix & Info notification indica
       expect(conditionalPattern.test(source)).toBe(true);
     });
 
-    it('should pass hasUpdate prop from WorktreeDetailRefactored to DesktopHeader', () => {
-      const source = readFileSync(
-        resolve(ROOT, 'src/components/worktree/WorktreeDetailRefactored.tsx'),
+    it('should pass hasUpdate prop to DesktopHeader and use useUpdateCheck', () => {
+      // Issue #755: the PC DesktopHeader render moved to WorktreeDetailDesktop.tsx,
+      // and the useUpdateCheck hook moved into the useWorktreeDetailController hook.
+      const desktopSource = readFileSync(
+        resolve(ROOT, 'src/components/worktree/WorktreeDetailDesktop.tsx'),
         'utf-8'
       );
 
       // Verify DesktopHeader receives hasUpdate prop
-      expect(source).toContain('hasUpdate={hasUpdate}');
+      expect(desktopSource).toContain('hasUpdate={hasUpdate}');
 
-      // Verify useUpdateCheck hook is used
-      expect(source).toContain('useUpdateCheck');
+      // Verify useUpdateCheck hook is used (now in the controller hook)
+      const controllerSource = readFileSync(
+        resolve(ROOT, 'src/hooks/useWorktreeDetailController.ts'),
+        'utf-8'
+      );
+      expect(controllerSource).toContain('useUpdateCheck');
     });
   });
 
@@ -149,13 +157,15 @@ describe('Issue #278 Acceptance: fetch Data Cache fix & Info notification indica
       expect(source).toContain('w-2 h-2 rounded-full bg-cyan-500');
     });
 
-    it('should be imported by both MobileTabBar and WorktreeDetailRefactored', () => {
+    it('should be imported by both MobileTabBar and DesktopHeader (WorktreeDetailSubComponents)', () => {
+      // Issue #755: DesktopHeader (which renders NotificationDot) lives in
+      // WorktreeDetailSubComponents.tsx.
       const mobileSource = readFileSync(
         resolve(ROOT, 'src/components/mobile/MobileTabBar.tsx'),
         'utf-8'
       );
       const desktopSource = readFileSync(
-        resolve(ROOT, 'src/components/worktree/WorktreeDetailRefactored.tsx'),
+        resolve(ROOT, 'src/components/worktree/WorktreeDetailSubComponents.tsx'),
         'utf-8'
       );
 
