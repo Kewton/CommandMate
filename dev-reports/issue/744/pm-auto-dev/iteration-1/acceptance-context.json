@@ -1,0 +1,34 @@
+{
+  "issue_number": 744,
+  "feature_summary": "Move HistoryPane into each PC terminal split with per-cliToolId message filtering (#728 follow-up). Each split shows only its own CLI's messages, fetched independently; search-highlight namespace is isolated per split.",
+  "tdd_result_path": "dev-reports/issue/744/pm-auto-dev/iteration-1/tdd-result.json",
+  "work_plan_path": "dev-reports/issue/744/work-plan.md",
+  "acceptance_criteria": [
+    "PC版で1-3 splitに分割時、各splitに独立したHistoryPaneが表示される",
+    "A=Claude / B=Codex で各HistoryがそのCLIのメッセージのみを同時に表示する（per-split独立fetch）",
+    "A=Claude / B=Claude で両方ともClaudeのメッセージを表示する",
+    "2 split同時検索で互いのハイライトを消し合わない（namespace per-split分離）",
+    "既存HistoryPane機能（検索#716 / User onlyトグル#725 / 表示件数#701）がper-splitで動作",
+    "Historyの折りたたみが各splitで動作（MVPは全split共通挙動）",
+    "worktree切替後も各CLIのHistoryが正しく表示",
+    "モバイル版のHistory挙動は変更なし（無改修）",
+    "既存テストはPASS（splitIndex/cliToolId未指定時は従来動作＝後方互換）",
+    "新規テスト: per-split filtering / namespace分離 / useSplitMessages",
+    "npm run lint / npx tsc --noEmit / npm run test:unit / npm run build 全PASS"
+  ],
+  "test_scenarios": [
+    "シナリオ1: useSplitMessagesが cliToolId 別に正しいfetch URLを生成し、stale-guard/visibilitychange/refreshが機能する",
+    "シナリオ2: makeHistoryNamespace(0)とmakeHistoryNamespace(1)が異なる highlightName/overlayId を返し、split間でハイライトが衝突しない",
+    "シナリオ3: HistoryPaneがsplitIndex指定時にper-split namespaceを使用、未指定時は従来のHISTORY_SEARCH_NAMESPACEで動作（後方互換）",
+    "シナリオ4: TerminalSplitPaneContentがsplit内にHistoryPaneを描画し、cliToolIdがuseSplitMessagesに渡る、onInsertToMessageがsplitIndex経由でルーティング",
+    "シナリオ5: TerminalContainerのhistory prop撤去後もPC/Mobile経路が正しく描画される",
+    "シナリオ6: Mobile経路が無改修で従来通り state.messages を使用",
+    "シナリオ7: 全静的チェック（tsc/lint/test:unit/build）がPASS"
+  ],
+  "verification_commands": [
+    "npx tsc --noEmit",
+    "npm run lint",
+    "npm run test:unit -- src/hooks/useSplitMessages tests/unit/hooks/useSplitMessages.test.ts tests/unit/lib/terminal-highlight.test.ts tests/unit/components/HistoryPane.test.tsx tests/unit/components/worktree/TerminalSplitPaneContent.test.tsx tests/unit/components/worktree/TerminalContainer.test.tsx"
+  ],
+  "output_path": "dev-reports/issue/744/pm-auto-dev/iteration-1/acceptance-result.json"
+}

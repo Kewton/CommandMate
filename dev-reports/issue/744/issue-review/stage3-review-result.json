@@ -1,0 +1,81 @@
+{
+  "stage": 3,
+  "focus": "影響範囲（1回目）",
+  "reviewer": "claude-opus",
+  "summary": "Issue #744（per-split HistoryPane + per-split 独立 fetch）の波及範囲をコードで実地検証した。最大の懸念だった検索ハイライトの衝突は実在の重大欠陥として確認できた: src/lib/terminal-highlight.ts の HISTORY_SEARCH_NAMESPACE は単一グローバル（固定の CSS.highlights キー history-search / history-search-current と単一 DOM fallbackOverlayId='history-search-fallback-overlay'）であり、HistoryPane が N split で同時に存在すると各 HistoryPane の useLayoutEffect(L290-318) が applyHistoryHighlights/clearHistoryHighlights を同じグローバル名前空間で奪い合い、(a) ある split の検索が他 split のハイライトを clear、(b) document.getElementById で先頭1つの overlay div しか取れず別 split の overlay が消える/誤配置、(c) findMessageElement の [data-message-id] セレクタは各 HistoryPane の scrollContainerRef スコープ内 querySelector なので message-id 衝突はしないが、ハイライト適用自体が単一グローバルへ書き込むため per-split で破綻する。これは Must Fix。第2の重大点はデータ取得の重複: 親 pollData(L1375-1382) は今も fetchMessages() を 2s/5s 間隔で interval ポーリングし state.messages を更新する（mobile と activeCliTab 用に必要）。一方で各 split に追加する useSplitMessages も独立に /messages?cliTool= をポーリングするため、activeCliTab に一致する split は『親 + 自 split』の二重 fetch、さらに N split で /messages リクエストが N+1 系統に増える。重複自体は機能を壊さないが、cadence/リクエスト多重化/visibility 制御/stale-guard を useSplitMessages で #728 useTerminalPanePolling と同型に実装することを設計に明記する必要がある（Should Fix）。テスト影響は具体的で、TerminalContainer.test.tsx は history prop/展開バー(history-pane-expand)に全面依存し更新必須、WorktreeDetailRefactored.test.tsx / -cli-tab-switching.test.tsx は TerminalContainer モックに history slot を仮定し history-pane-slot/history-messages を assert しており破綻する。insert ルーティング(#728 pendingInsertTextMap/focusedSplitIndex/onInsertConsumed)は split 内 HistoryPane の onInsertToMessage を当該 splitIndex 宛に直結すれば focusedSplitIndex を経由せず確定配線でき、むしろ #728 の暗黙ルーティングより堅牢になる（Should Fix で配線方針を明記）。state/permanence は useHistoryPaneState が単一グローバル + CustomEvent 同期のため、N split が同一 visible/width を共有 = 全 split 同時折りたたみ・幅も共通という UX 帰結。ただし split は別に useTerminalSplits で自前の widths を持つため、history 用 width(%)を split の terminal/history 内で適用する基準が二重化し width 競合の余地がある（Should Fix で history width の適用先を明記）。後方互換: HistoryPane/TerminalContainer は worktree detail 画面外からは import されず、snapshot テストも無し。mobile は HistoryPane を state.messages(activeCliTab) で描画し useHistoryPaneState/HISTORY_PANE_ID/展開バーを一切共有しないため『mobile 変更なし』は構造的に正しいが、HistoryPane コンポーネント本体と global highlight namespace は PC/mobile で共有される点に留意。",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "Must Fix",
+      "category": "correctness",
+      "title": "検索ハイライトの名前空間がグローバル単一のため、複数 HistoryPane（per-split）で衝突する",
+      "description": "src/lib/terminal-highlight.ts の HISTORY_SEARCH_NAMESPACE(L51-56) は固定の CSS Custom Highlight 名（highlightName='history-search', currentHighlightName='history-search-current'）と単一の fallbackOverlayId='history-search-fallback-overlay' を持つグローバル定数。applyHistoryHighlights/clearHistoryHighlights(L249-269) はこの単一名前空間に対して CSS.highlights.set/delete と document.getElementById(overlayId)?.remove()/createElement を行う。HistoryPane.tsx の検索エフェクト(L290-318)は『検索が閉じている/マッチ0なら clearHistoryHighlights()』を呼ぶため、split A で検索中に split B の HistoryPane が（マッチ無しで）clearHistoryHighlights を呼ぶと A のハイライトが消える。さらに showFallbackOverlay(L169-210) は getElementById(fallbackOverlayId) で『ページ内で最初の1つ』の overlay div しか掴めないため、2つの HistoryPane が同時に overlay を出すと取り合い・誤った container への append・座標ズレが発生する。CSS.highlights も Range は全ページの textContent 横断で構築されるため、A の Range と B の Range が同一ハイライト名に上書き合流する。なお findMessageElement(L134-136) は各 HistoryPane の scrollContainerRef スコープ内 container.querySelector で解決するため message-id セレクタ自体の衝突は起きない（同一 message-id が複数 split に存在しても各 container 内で閉じる）が、ハイライト適用先がグローバル単一名前空間である限り per-split 検索は破綻する。これは『複数 HistoryPane が同時にマウントされる』という #744 の前提が #716 実装の単一インスタンス前提を破る、実在の correctness 欠陥。",
+      "location": "src/lib/terminal-highlight.ts:51-56,114-210,249-269 / src/components/worktree/HistoryPane.tsx:290-318,134-136 / 影響: TerminalSplitPaneContent 内に HistoryPane を N 個マウントする設計（Issue §3）",
+      "recommendation": "useSplitMessages / per-split History の設計に『検索ハイライト名前空間を per-split で分離する』影響項目を追加する。具体策: applyHistoryHighlights/clearHistoryHighlights に namespace（または splitIndex/instanceId）引数を足し、HISTORY_SEARCH_NAMESPACE を `history-search-${splitIndex}` 系の派生に拡張（fallbackOverlayId も per-instance 化）。HighlightNamespace 型は既に存在するので、ファクトリ化（makeHistoryNamespace(splitIndex)）が最小変更。HistoryPane に instanceId/splitIndex prop を additive 追加し、未指定時は従来の単一名前空間（mobile 互換）にフォールバックさせる。tests/unit/lib/terminal-highlight.test.ts に per-namespace 分離テスト、HistoryPane.test.tsx に複数インスタンス同時検索の非干渉テストを影響ファイルに追加する。この項目を Issue 本文の受入条件『検索#716 は per-split で独立』の実現条件として明記すること（現状 Issue は『HistoryPane 内部 state なので自動で独立』としているが、ハイライト適用層はグローバルで自動独立しない）。",
+      "title_note": "search-highlight-collision (item 6) — 最重要"
+    },
+    {
+      "id": "S3-002",
+      "severity": "Should Fix",
+      "category": "performance",
+      "title": "親 pollData の fetchMessages 間隔ポーリングと per-split useSplitMessages が重複し、/messages リクエストが N+1 系統に増える",
+      "description": "親 WorktreeDetailRefactored の pollData(L1375-1382) は activeCliRunning に応じ 2s(ACTIVE)/5s(IDLE) 間隔で fetchCurrentOutput/fetchWorktree とともに fetchMessages() を interval ポーリングし state.messages（activeCliTab スコープ）を更新し続ける。この state.messages は mobile の HistoryPane(WorktreeDetailRefactored.tsx:2026) と #730 以降の各経路で依然必要なため撤去できない。一方 Issue は各 split に useSplitMessages を新設し /api/worktrees/[id]/messages?cliTool=<paneCli> を独立ポーリングさせる。結果として (1) activeCliTab=split0 の CLI については『親の fetchMessages』と『split0 の useSplitMessages』が同一 cliTool で二重 fetch、(2) /messages の総リクエストは『親1 + split N』= N+1 系統に増える（最大 split 3 で 4 系統）。messages API(route.ts) は getMessages → SQLite 同期クエリで安価だが、polling 多重化はサーバ負荷・無駄 fetch の増加要因。さらに親 fetchMessages は activeCliRunning（=worktree 全体の running 判定）で cadence が決まるのに対し、split は自分の isRunning を持たないため、useSplitMessages の cadence/visibility 制御の設計が未定だと過剰ポーリングになる。",
+      "location": "src/components/worktree/WorktreeDetailRefactored.tsx:1370-1385,472-497 / Issue §6 useSplitMessages / src/hooks/useTerminalPanePolling.ts:205-246（参照モデル）",
+      "recommendation": "useSplitMessages を #728 useTerminalPanePolling と同型に: (a) document.visibilityState==='hidden' でポーリング停止 + visible 復帰で1回 refetch、(b) requestId + inFlightCliToolRef による stale 応答破棄、(c) cadence は messages 用に IDLE 寄り（例 5s 固定 or split の terminal isRunning 連動）に設計、を Issue §6 に明記する。加えて『activeCliTab に一致する split の二重 fetch』を許容するか（許容＝実装単純・若干の重複 / 親 state.messages を split0 へ流用して二重を避ける＝結合増）を設計判断として明記。少なくとも『/messages リクエストが N+1 系統に増える』ことを想定影響範囲（パフォーマンス）に記載すること。",
+      "title_note": "per-split-fetch-vs-parent-state duplication (item 4)"
+    },
+    {
+      "id": "S3-003",
+      "severity": "Should Fix",
+      "category": "tests",
+      "title": "TerminalContainer.test.tsx / WorktreeDetailRefactored.test.tsx / -cli-tab-switching.test.tsx が history prop・history-pane-slot を前提にしており確実に破綻する",
+      "description": "history prop 削除と HistoryPane の split 内移設で、以下の既存テストが更新必須: (1) tests/unit/components/worktree/TerminalContainer.test.tsx は history prop を全テストで渡し、history-content の描画/HISTORY_PANE_ID/width style/展開バー(terminal-container-expand-bar, history-pane-expand, aria-controls)/ErrorBoundary componentName='HistoryPane' を assert（L62-189）。history prop を撤去/パススルー化するなら本ファイルは大幅改修または削除。(2) tests/unit/components/WorktreeDetailRefactored.test.tsx は TerminalContainer を `{ history, terminal }` を取るモックに置換し history-pane-slot に history を流し込んで assert（L92-122）。(3) tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx は同じく TerminalContainer モックと HistoryPane モックで history-messages を assert（L114-127,165-169,428-452）し、『activeCliTab 切替で history-messages が Claude→Copilot に変わる』ことを検証している。per-split fetch では state.messages 経路自体が PC から消える/変質するため、このタブ切替 history テストの前提（単一 HistoryPane が activeCliTab の messages を表示）が崩れる。(4) tests/unit/components/WorktreeDesktopLayout.test.tsx はコメントで History→TerminalContainer 内包を明記（L6,9）。",
+      "location": "tests/unit/components/worktree/TerminalContainer.test.tsx:62-189 / tests/unit/components/WorktreeDetailRefactored.test.tsx:72-122 / tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx:114-169,428-452 / tests/unit/components/WorktreeDesktopLayout.test.tsx:6-9",
+      "recommendation": "想定影響範囲（削除/変更）表に上記4ファイルを全て列挙する（現状 Issue は TerminalContainer.test.tsx のみ記載）。-cli-tab-switching.test.tsx の『PC で activeCliTab 切替により history が切り替わる』テストは、PC では split0 の useSplitMessages が cliTool を fetch する形へ意味が変わるため、テスト意図を再定義（split0 の cliTool 切替で split0 History が切り替わる、または当該 PC assertion を mobile/per-split fetch テストへ移管）する方針を Issue に明記する。新規 tests/unit/hooks/useSplitMessages.test.ts と TerminalSplitPaneContent.test.tsx の per-split History 描画テストは既に Issue 記載済みで妥当。",
+      "title_note": "tests (item 2)"
+    },
+    {
+      "id": "S3-004",
+      "severity": "Should Fix",
+      "category": "state",
+      "title": "useHistoryPaneState のグローバル width(%) と useTerminalSplits の split 幅が二重化し、history 列幅の適用基準が未定義",
+      "description": "useHistoryPaneState(src/hooks/useHistoryPaneState.ts) は単一グローバルの visible/width(%) を localStorage(commandmate.worktree.historyVisible/historyWidth, default 40%) + CustomEvent(commandmate:historyPaneStateChange) で管理し、現状 TerminalContainer の内側領域に対する % として使われている（#730 のコメント L12-18）。per-split History にすると width(%) の適用先が変わる: 各 split は useTerminalSplits(useTerminalSplits.ts/TerminalSplitContainer.tsx:113-125,184-205) で自前の flexGrow ベース widths を既に持ち、その split 内部で [History | Terminal] を再分割する。Issue §補足のコード例は `style={{ width: historyWidth }}` で history 列を切るが、historyWidth は『TerminalContainer 内側の %』として設計された値であり、split 内部のサブ領域に同じ % を流用すると意味が二重化する（split 全体幅に対する % か、worktree right pane 全体に対する % か曖昧）。さらに visible/width はグローバル単一なので N split が必ず同一値を共有 = ある split で resize すると全 split の history 幅が連動、`<` 折りたたみは全 split 同時。MVP として『共通』は Issue で宣言済みだが、width の適用基準（各 split 幅に対する相対 %）と PaneResizer の onResize が setWidth（グローバル）を叩く帰結（全 split 連動 resize）を受入条件/制約として明記すべき。",
+      "location": "src/hooks/useHistoryPaneState.ts:36,116-178 / src/components/worktree/TerminalSplitContainer.tsx:107-125,184-205 / Issue §5・§補足コード例 / src/components/worktree/TerminalContainer.tsx:92-124（現行 width 適用）",
+      "recommendation": "Issue §5 に『history width(%) は各 split の内側領域に対する相対値として再定義する（TerminalContainer 内側 % からの意味変更）』ことと、『グローバル useHistoryPaneState を全 split が参照するため visible 折りたたみ・width resize は全 split 連動（MVP 仕様）』を制約として明記する。default 40% が『split 全体に対する 40%』だと terminal が狭くなりすぎる懸念があるため、per-split での妥当な default を再検討（または #730 の breaking-change 同様 CHANGELOG 記載）。PaneResizer の onResize がグローバル setWidth を叩く設計（= 全 split 連動 resize）を受入条件に追記。per-split 独立 width は別 Issue（Issue 既述のスコープ調整）で妥当。",
+      "title_note": "state/persistence (item 3)"
+    },
+    {
+      "id": "S3-005",
+      "severity": "Should Fix",
+      "category": "impact",
+      "title": "onInsertToMessage の挿入先ルーティングを split 内 HistoryPane では splitIndex 直結にすべき（#728 focusedSplitIndex 経由は不要・誤配送リスク）",
+      "description": "#728 の挿入ルーティングは、HistoryPane/MemoPane が画面に1つだけ存在する前提で handleInsertToMessage(WorktreeDetailRefactored.tsx:385-391) が focusedSplitIndex 宛に pendingInsertTextMap.set(focusedSplitIndex, text) する『最後にフォーカスした split に挿入する』暗黙ルーティング。per-split History では各 split に HistoryPane が内包されるので、その split の挿入ボタンは『自分の split の MessageInput』に入れたいのが自然。現状の handleInsertToMessage を流用すると、split A の History 挿入ボタンを押しても focusedSplitIndex が B なら B の MessageInput に入る誤配送が起きうる。一方 TerminalSplitPaneContent は既に splitIndex/pendingInsertText/onInsertConsumed を per-split で持つ(props L54-57, renderSplitPane L1474,1498-1499)ので、split 内 HistoryPane の onInsertToMessage を『その split の pendingInsertTextMap.set(splitIndex, text)』へ直結すれば focusedSplitIndex を経由せず確定配線でき #728 の暗黙ルーティングより堅牢になる。Issue §3/§7 はこの配線方針（splitIndex 直結 vs focusedSplitIndex 経由）を明記していない。",
+      "location": "src/components/worktree/WorktreeDetailRefactored.tsx:385-401,1474,1498-1499 / src/components/worktree/TerminalSplitPaneContent.tsx:54-57 / src/components/worktree/TerminalSplitContainer.tsx:86-89,134-138（focusedSplitIndex 通知） / Issue §3・§7",
+      "recommendation": "Issue §3/§7 に『split 内 HistoryPane の onInsertToMessage は当該 splitIndex 宛に直結（pendingInsertTextMap.set(splitIndex, text)）する。focusedSplitIndex 経由の暗黙ルーティングは使わない』と明記する。これにより renderSplitPane で per-split の onInsertToMessage ハンドラを生成し TerminalSplitPaneContent → HistoryPane へ渡す配線になる。mobile 経路（WorktreeDetailSubComponents の MobileContent）は従来通り handleInsertToMessage（focusedSplitIndex=0 固定）を流用するため無改修で互換維持できる点も明記。",
+      "title_note": "onInsertToMessage / insert routing (item 5)"
+    },
+    {
+      "id": "S3-006",
+      "severity": "Nice to Have",
+      "category": "compat",
+      "title": "mobile は構造的に無影響だが、HistoryPane 本体と global highlight namespace を PC と共有する点を明記すべき",
+      "description": "後方互換調査結果: (1) HistoryPane と TerminalContainer は worktree detail 画面（WorktreeDetailRefactored.tsx / WorktreeDetailSubComponents.tsx）以外から import されていない。snapshot テストも存在しない。(2) mobile 経路（WorktreeDetailSubComponents.tsx:1001-1017 MobileContent）は HistoryPane を state.messages(activeCliTab) で描画し、useHistoryPaneState / HISTORY_PANE_ID / 展開バー(history-pane-expand) / CustomEvent 同期を一切使わない。したがって TerminalContainer の history prop 撤去・per-split 化は mobile を構造的に壊さず、Issue の『mobile 変更なし』は正しい。(3) ただし HistoryPane コンポーネント本体は PC/mobile で共有されるため、S3-001 のハイライト名前空間 per-split 化や onInsertToMessage 配線変更を additive（未指定時 mobile 従来動作）にしないと mobile に波及する。(4) e2e は tests/e2e/fixtures/terminal-split-helpers.ts が historyVisible/historyWidth localStorage キーを clear するのみで history-pane DOM を直接 assert する spec は見当たらない（grep で他に history-pane-expand を参照する e2e spec 無し）が、helpers のコメント/キー名は #730 前提なので更新余地あり。",
+      "location": "src/components/worktree/WorktreeDetailSubComponents.tsx:1001-1017 / tests/e2e/fixtures/terminal-split-helpers.ts:35-38,174 / grep: history-pane を assert する e2e spec 無し",
+      "recommendation": "Issue のスコープ外/影響範囲に『mobile は HistoryPane 本体を共有するため、ハイライト名前空間(S3-001) と onInsertToMessage 配線(S3-005) の変更はすべて additive（未指定時 mobile 従来動作）とする』を明記。e2e fixtures の historyVisible/historyWidth キー clear は per-split でも有効なので維持で良いが、コメントを per-split 文脈に更新する。HistoryPane/TerminalContainer に外部 import が無い事実（snapshot 無し）を後方互換の確認済み事項として記載。",
+      "title_note": "backward compat (item 7) + mobile sharing (item 1)"
+    },
+    {
+      "id": "S3-007",
+      "severity": "Nice to Have",
+      "category": "impact",
+      "title": "TerminalContainer の最終形（パススルー化 or 撤去）に伴う HISTORY_PANE_ID / 展開バー / ErrorBoundary 境界の帰結を確定する",
+      "description": "history prop 撤去後、現行 TerminalContainer は visible 時 [history slot | PaneResizer | terminal slot]、collapsed 時 [HistoryExpandBar | terminal slot] を描画（TerminalContainer.tsx:107-138）。history を外すと visible/collapsed の分岐・useHistoryPaneState 呼び出し・PaneResizer・HistoryExpandBar(history-pane-expand) が宙に浮く。Issue §2 は『薄いパススルーとして残す or 撤去を実装時確定』としているが、(a) HISTORY_PANE_ID(='worktree-history-pane') を参照する aria-controls は HistoryPane 内部の collapse ボタン(HistoryPane.tsx:494) と TerminalContainer の展開バー(L61) の双方にあり、per-split で N 個の HistoryPane が同じ id='worktree-history-pane' を aria-controls に持つと DOM id 重複（HistoryPane の collapse ボタンは id を出力しないが aria-controls で参照、TerminalContainer 側 history slot が id を出力 L112）。per-split で history slot を各 split が描くと同一 id が複数出る恐れ。(b) 展開バー(history-pane-expand)を各 split に移すか TerminalContainer に残すかで e2e セレクタが一意でなくなる。(c) ErrorBoundary componentName='HistoryPane'/'TerminalAndFilePanel' の境界も再配置が要る。",
+      "location": "src/components/worktree/TerminalContainer.tsx:34,61,107-138 / src/components/worktree/HistoryPane.tsx:488-501 / Issue §2",
+      "recommendation": "Issue §2 で TerminalContainer 最終形を一意に確定する（推奨: 撤去し WorktreeDetailRefactored から FilePanelSplit を直接 rightPane に渡す。または薄いパススルー）。per-split で HistoryPane を内包する場合、id='worktree-history-pane'（HISTORY_PANE_ID）の DOM 重複を避けるため per-split で `${HISTORY_PANE_ID}-${splitIndex}` 化し、aria-controls/data-testid(history-pane-expand, history-pane-collapse-button)も per-split サフィックスを付与する方針を明記。これは S3-001 の per-instance 名前空間化と同じ instanceId/splitIndex を共有できる。ErrorBoundary 境界の再配置（各 split 内 History を ErrorBoundary 包含）も影響範囲に追記。",
+      "title_note": "component graph / a11y id collision (item 1)"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 4,
+  "nice_to_have_count": 2
+}

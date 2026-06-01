@@ -111,6 +111,8 @@ vi.mock('@/components/worktree/HistoryPane', () => ({
       <span data-testid="message-count">{messages.length}</span>
     </div>
   ),
+  // Issue #744: real export consumed by TerminalSplitPaneContent for the slot id.
+  splitHistorySlotId: (idx: number) => `split-history-slot-${idx}`,
 }));
 
 // Track MessageInput mount/unmount to detect component tree teardown
@@ -482,9 +484,18 @@ describe('Issue #266 Acceptance Tests: Tab switching preserves input content', (
       // Issue #727: ignore unrelated file-tree polling (the 'files' activity is the
       // new default, so visibilitychange resumes /tree polling independently of the
       // recovery throttle this scenario is about).
+      // Issue #728: each TerminalSplitPaneContent owns its own per-(worktreeId,
+      // cliToolId) polling hook that re-fetches /current-output on visibilitychange,
+      // independent of the parent's recovery throttle this scenario targets.
+      // Issue #744: each embedded per-split HistoryPane drives `useSplitMessages`,
+      // which independently re-fetches /messages on visibilitychange (its own
+      // stale-guard, not the parent recovery throttle). Ignore both too.
       const recoveryCalls = mockFetch.mock.calls.filter((call) => {
         const url = typeof call[0] === 'string' ? call[0] : '';
-        return !url.endsWith('/tree');
+        if (url.endsWith('/tree')) return false;
+        if (url.includes('/current-output')) return false;
+        if (url.includes('/messages')) return false;
+        return true;
       });
       expect(recoveryCalls).toHaveLength(0);
 

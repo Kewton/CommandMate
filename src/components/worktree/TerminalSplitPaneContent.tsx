@@ -29,6 +29,8 @@ import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { PromptPanel } from '@/components/worktree/PromptPanel';
 import { MessageInput } from '@/components/worktree/MessageInput';
+import { HistoryPane, splitHistorySlotId } from '@/components/worktree/HistoryPane';
+import { PaneResizer } from '@/components/worktree/PaneResizer';
 import {
   AutoYesToggle,
   type AutoYesToggleParams,
@@ -37,10 +39,13 @@ import {
   useTerminalPanePolling,
   type PanePromptState,
 } from '@/hooks/useTerminalPanePolling';
+import { useSplitMessages } from '@/hooks/useSplitMessages';
+import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import type { BranchStatus } from '@/types/sidebar';
+import type { HistoryDisplayLimit } from '@/config/history-display-config';
 
 export interface TerminalSplitPaneContentProps {
   worktreeId: string;
@@ -94,6 +99,39 @@ export interface TerminalSplitPaneContentProps {
    * WorktreeDetailRefactored.tsx:1947-1974.
    */
   cliStatus?: BranchStatus;
+
+  // ----------------------------------------------------------------------
+  // Issue #744: embedded per-split HistoryPane.
+  //
+  // The HistoryPane now lives INSIDE each split and shows ONLY this split's
+  // cliToolId's messages (fetched independently via `useSplitMessages`). The
+  // following props feed that pane. They are optional so existing call sites
+  // and tests that predate Issue #744 keep working unchanged.
+  // ----------------------------------------------------------------------
+
+  /** File-path click handler forwarded to the embedded HistoryPane. */
+  onFilePathClick?: (path: string) => void;
+  /** Toast callback forwarded to the embedded HistoryPane (copy feedback). */
+  showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
+  /**
+   * Insert-to-message handler bound to THIS split (Issue #744 / S3-005). The
+   * parent supplies a per-split curried handler so a "Insert" click in this
+   * split's HistoryPane targets this split's MessageInput (via
+   * `pendingInsertText`), not the focused split.
+   */
+  onHistoryInsertToMessage?: (content: string) => void;
+  /** Issue #168: whether archived messages are shown (common across splits, MVP). */
+  showArchived?: boolean;
+  /** Issue #168: change handler for the "Show archived" toggle. */
+  onShowArchivedChange?: (show: boolean) => void;
+  /** Issue #701: history display limit (common across splits, MVP). */
+  historyDisplayLimit?: HistoryDisplayLimit;
+  /** Issue #701: change handler for the history display limit. */
+  onHistoryDisplayLimitChange?: (limit: HistoryDisplayLimit) => void;
+  /** Issue #725: "User only" filter (common across splits, MVP). */
+  historyUserOnly?: boolean;
+  /** Issue #725: change handler for the "User only" toggle. */
+  onHistoryUserOnlyChange?: (next: boolean) => void;
 }
 
 export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
@@ -112,6 +150,15 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   lastAutoResponse = null,
   onAutoYesToggle,
   cliStatus = 'idle',
+  onFilePathClick,
+  showToast,
+  onHistoryInsertToMessage,
+  showArchived = false,
+  onShowArchivedChange,
+  historyDisplayLimit,
+  onHistoryDisplayLimitChange,
+  historyUserOnly = false,
+  onHistoryUserOnlyChange,
 }: TerminalSplitPaneContentProps) {
   const {
     terminal,
@@ -126,6 +173,41 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     enabled: !disabled,
   });
 
+  // Issue #744: this split's OWN message history, fetched independently by its
+  // cliToolId. `state.messages` in the parent is server-filtered to the active
+  // CLI tab, so it cannot represent split A=Claude and split B=Codex at once.
+  const {
+    messages: splitMessages,
+    isLoading: splitMessagesLoading,
+    refresh: refreshSplitMessages,
+  } = useSplitMessages({
+    worktreeId,
+    cliToolId,
+    limit: historyDisplayLimit,
+    includeArchived: showArchived,
+    enabled: !disabled,
+  });
+
+  // Issue #744: History visible/width. MVP keeps this common across splits
+  // (single useHistoryPaneState instance per pane, all reading the same
+  // localStorage-backed state). Width is applied relative to THIS split's inner
+  // area, not the whole desktop.
+  const { visible: historyVisible, width: historyWidth, toggle: toggleHistory, setWidth: setHistoryWidth } =
+    useHistoryPaneState();
+  const historyContainerRef = React.useRef<HTMLDivElement>(null);
+
+  const handleHistoryResize = useCallback(
+    (deltaPx: number) => {
+      const container = historyContainerRef.current;
+      if (!container) return;
+      const w = container.offsetWidth;
+      if (w === 0) return;
+      const percentDelta = (deltaPx / w) * 100;
+      setHistoryWidth(historyWidth + percentDelta);
+    },
+    [historyWidth, setHistoryWidth],
+  );
+
   // OpenCode / Copilot render TUIs in alternate screen mode; auto-following
   // would hide the menus at the top of the screen.
   const disableAutoFollow = cliToolId === 'opencode' || cliToolId === 'copilot';
@@ -138,9 +220,12 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   const handleMessageSent = useCallback(
     (sentCli: CLIToolType) => {
       void refresh();
+      // Issue #744 / S1-006: refresh THIS split's history immediately rather
+      // than relying on the parent's activeCliTab-scoped refresh.
+      void refreshSplitMessages();
       onMessageSent?.(sentCli);
     },
-    [refresh, onMessageSent],
+    [refresh, refreshSplitMessages, onMessageSent],
   );
 
   const handlePromptRespond = useCallback(
@@ -200,7 +285,51 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     [statusConfig.type, statusConfig.className, statusConfig.label, splitIndex],
   );
 
-  const terminalSlot = useMemo(
+  // Issue #744: the embedded HistoryPane for THIS split. Receives this split's
+  // own messages (useSplitMessages) and the per-split highlight namespace via
+  // `splitIndex`. Insert routing targets this split (S3-005). No client-side
+  // cliToolId filter — messages are pre-filtered by the fetch (S1-008).
+  const historyPaneSlot = useMemo(
+    () => (
+      <HistoryPane
+        messages={splitMessages}
+        worktreeId={worktreeId}
+        onFilePathClick={onFilePathClick ?? (() => {})}
+        isLoading={splitMessagesLoading}
+        className="h-full"
+        showToast={showToast}
+        onInsertToMessage={onHistoryInsertToMessage}
+        showArchived={showArchived}
+        onShowArchivedChange={onShowArchivedChange}
+        historyDisplayLimit={historyDisplayLimit}
+        onHistoryDisplayLimitChange={onHistoryDisplayLimitChange}
+        historyUserOnly={historyUserOnly}
+        onHistoryUserOnlyChange={onHistoryUserOnlyChange}
+        onCollapse={toggleHistory}
+        splitIndex={splitIndex}
+        cliToolId={cliToolId}
+      />
+    ),
+    [
+      splitMessages,
+      worktreeId,
+      onFilePathClick,
+      splitMessagesLoading,
+      showToast,
+      onHistoryInsertToMessage,
+      showArchived,
+      onShowArchivedChange,
+      historyDisplayLimit,
+      onHistoryDisplayLimitChange,
+      historyUserOnly,
+      onHistoryUserOnlyChange,
+      toggleHistory,
+      splitIndex,
+      cliToolId,
+    ],
+  );
+
+  const terminalDisplaySlot = useMemo(
     () => (
       <TerminalDisplay
         output={terminal.output}
@@ -218,6 +347,77 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       terminal.autoScroll,
       handleAutoScrollChange,
       disableAutoFollow,
+    ],
+  );
+
+  // Issue #744: compose [HistoryPane | PaneResizer | TerminalDisplay]. When the
+  // history is collapsed, a compact expand bar replaces it.
+  const terminalSlot = useMemo(
+    () => (
+      <div ref={historyContainerRef} className="flex h-full min-h-0 w-full">
+        {historyVisible ? (
+          <>
+            <div
+              // Issue #744: real DOM id so the embedded HistoryPane collapse
+              // button's per-split `aria-controls` resolves to this region
+              // (the PC-wide HISTORY_PANE_ID is not rendered inside splits).
+              id={splitHistorySlotId(splitIndex)}
+              data-testid={`split-history-slot-${splitIndex}`}
+              aria-label="History pane"
+              style={{ width: `${historyWidth}%` }}
+              className="flex-shrink-0 overflow-hidden min-h-0"
+            >
+              {historyPaneSlot}
+            </div>
+            <PaneResizer
+              onResize={handleHistoryResize}
+              orientation="horizontal"
+              ariaValueNow={historyWidth}
+            />
+          </>
+        ) : (
+          <div
+            data-testid={`split-history-expand-bar-${splitIndex}`}
+            className="flex-shrink-0 flex items-start justify-center w-6 bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700"
+          >
+            <button
+              type="button"
+              data-testid={`split-history-expand-${splitIndex}`}
+              aria-label="Expand history panel"
+              aria-expanded="false"
+              onClick={toggleHistory}
+              className="flex items-center justify-center w-full h-10 text-gray-500 dark:text-gray-400 hover:text-cyan-600 dark:hover:text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 5l7 7-7 7"
+                />
+              </svg>
+            </button>
+          </div>
+        )}
+        <div className="flex-grow overflow-hidden min-w-0 min-h-0 relative">
+          {terminalDisplaySlot}
+        </div>
+      </div>
+    ),
+    [
+      historyVisible,
+      historyWidth,
+      historyPaneSlot,
+      handleHistoryResize,
+      toggleHistory,
+      terminalDisplaySlot,
+      splitIndex,
     ],
   );
 

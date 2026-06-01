@@ -1,0 +1,56 @@
+{
+  "issue_number": 744,
+  "status": "success",
+  "fixes_applied": [
+    {
+      "finding": "FINDING-1",
+      "description": "Per-split HistoryPane collapse button no longer produces duplicate data-testids or a dangling aria-controls across simultaneously-mounted PC splits. HistoryPane now derives the collapse button's testid and aria-controls from splitIndex: legacy/mobile/single-pane (splitIndex omitted) keep the original `data-testid=\"history-pane-collapse-button\"` + `aria-controls=\"worktree-history-pane\"` (HISTORY_PANE_ID) EXACTLY as before; per-split usage emits `data-testid=\"history-pane-collapse-button-<splitIndex>\"` and `aria-controls=\"split-history-slot-<splitIndex>\"`. The split slot wrapper in TerminalSplitPaneContent now carries a real DOM `id={splitHistorySlotId(splitIndex)}` so the per-split aria-controls resolves to an actually-rendered region (instead of the PC-unrendered HISTORY_PANE_ID). Added exported helpers `splitHistorySlotId(idx)` and `collapseButtonTestId(idx)` in HistoryPane.tsx; imported HISTORY_PANE_ID from TerminalContainer (one-directional, no cycle) so the legacy aria-controls value stays in sync.",
+      "files": [
+        "src/components/worktree/HistoryPane.tsx",
+        "src/components/worktree/TerminalSplitPaneContent.tsx"
+      ]
+    },
+    {
+      "finding": "FINDING-3",
+      "description": "Gated the parent adaptive interval poll's fetchMessages() to mobile-only. Proven safe by code analysis: `state.messages` has exactly ONE reader in the entire component (MobileContent, line ~2014), reachable only on the mobile branch (the `if (!isMobile) return <desktop>` early-return at line 1755 means the MobileContent block runs only when isMobile is true). On PC each terminal split owns its history via useSplitMessages (independent of state.messages), so the parent's periodic /messages fetch was an unused double-fetch of the active CLI. The change only touches the interval poll (line ~1385): tasks now always include fetchCurrentOutput()+fetchWorktree(), and push fetchMessages() only when isMobile; `isMobile` added to the effect deps so the cadence re-establishes correctly on a viewport crossover. ALL other fetchMessages() call sites (initial load, activeCliTab/showArchived/historyDisplayLimit change, handleMessageSent, visibilitychange recovery) remain unchanged and unconditional, so state.messages stays populated on PC for an immediate mobile-switch + search, and mobile behavior is unchanged. No existing test asserted the interval poll fetches /messages on PC.",
+      "files": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ]
+    }
+  ],
+  "deferred": [],
+  "general_cleanup": "Reviewed for dead code/comments from the migration: the only `historyPaneMemo` reference (WorktreeDetailRefactored.tsx:1747) is an accurate historical comment explaining the #744 removal, not dead code — kept intentionally. No stale/unused imports found. New code references Issue #744 in comments per repo convention.",
+  "files_modified": [
+    "src/components/worktree/HistoryPane.tsx",
+    "src/components/worktree/TerminalSplitPaneContent.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/HistoryPane.test.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+    "tests/unit/components/worktree/TerminalSplitPaneContent.test.tsx",
+    "tests/unit/components/app-version-display.test.tsx",
+    "tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx",
+    "tests/integration/issue-266-acceptance.test.tsx"
+  ],
+  "tests_added_or_updated": [
+    "tests/unit/components/HistoryPane.test.tsx: NEW describe 'Per-split collapse button identity (Issue #744)' with 2 tests locking (a) legacy testid+aria-controls when splitIndex omitted, and (b) per-split unique testids (history-pane-collapse-button-0 / -1, no plain history-pane-collapse-button present) + non-dangling aria-controls resolving to split-history-slot-0/1 when two HistoryPanes are mounted simultaneously.",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx: NEW describe 'Adaptive poll /messages gating (Issue #744)' with 2 tests proving the parent interval poll does NOT fetch /messages on PC (isMobile=false) but DOES on mobile (isMobile=true). Added a module mock for useSplitMessages so all /messages fetches in this suite are attributable to the parent. Added splitHistorySlotId to the file's HistoryPane mock.",
+    "tests/unit/components/worktree/TerminalSplitPaneContent.test.tsx: added splitHistorySlotId to the HistoryPane mock (consumed by the real component for the slot id).",
+    "tests/unit/components/app-version-display.test.tsx: added splitHistorySlotId to the HistoryPane mock (test-harness update for the new export).",
+    "tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx: added splitHistorySlotId to the HistoryPane mock.",
+    "tests/integration/issue-266-acceptance.test.tsx: added splitHistorySlotId to the HistoryPane mock AND extended the visibilitychange recovery-throttle filter to also exclude /current-output (#728 per-split terminal poll) and /messages (#744 per-split history poll), mirroring the already-applied unit TC-4 convention. This test was already broken on the #744 branch (missing export -> render error) and is now restored to green."
+  ],
+  "static_checks": {
+    "tsc": "pass (exit 0, no output)",
+    "lint": "pass (exit 0, 'No ESLint warnings or errors')",
+    "test_unit": "6742 passed / 0 failed (7 skipped) across 359 test files",
+    "test_integration_issue266": "7 passed / 0 failed",
+    "build": "pass (exit 0, 'Compiled successfully', full route table incl. /worktrees/[id])"
+  },
+  "quality_metrics": {
+    "before_tests": "6738 passed / 0 failed / 7 skipped",
+    "after_tests": "6742 passed / 0 failed / 7 skipped",
+    "net_new_tests": 4
+  },
+  "committed": false,
+  "notes": "Do-not-commit honored; all changes left in the working tree. FINDING-1 fully fixed with a backward-compatible per-split identity scheme (legacy/mobile path byte-for-byte unchanged) and a test that locks per-split uniqueness + non-dangling aria-controls. FINDING-3 applied (not deferred) because the safety condition was provable: state.messages has a single mobile-only consumer and no PC consumer remains, and a test now locks the isMobile gating; the non-poll fetchMessages() call sites were left untouched so mobile, handleMessageSent, search, and PC<->mobile viewport switches are unaffected. Side effect of the new exported helper: five test files that mock @/components/worktree/HistoryPane needed the additional splitHistorySlotId export (added). One integration test (issue-266-acceptance) also needed its recovery-throttle filter aligned to the documented #728/#744 per-split-polling convention; that test had already been broken by the #744 implementation (missing mock export) and is now green."
+}

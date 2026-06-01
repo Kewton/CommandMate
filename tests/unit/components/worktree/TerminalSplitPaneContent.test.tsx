@@ -31,10 +31,19 @@ vi.mock('@/components/worktree/TerminalDisplay', () => ({
 }));
 
 vi.mock('@/components/worktree/MessageInput', () => ({
-  MessageInput: ({ cliToolId, splitIndex }: { cliToolId: string; splitIndex: number }) => (
+  MessageInput: ({
+    cliToolId,
+    splitIndex,
+    pendingInsertText,
+  }: {
+    cliToolId: string;
+    splitIndex: number;
+    pendingInsertText?: string | null;
+  }) => (
     <div
       data-testid={`message-input-${splitIndex}`}
       data-cli-tool-id={cliToolId}
+      data-pending-insert={pendingInsertText ?? ''}
     />
   ),
 }));
@@ -84,6 +93,62 @@ vi.mock('@/hooks/useSlashCommands', () => ({
     groups: [], filteredGroups: [], allCommands: [], loading: false,
     error: null, filter: '', setFilter: vi.fn(), refresh: vi.fn(),
   }),
+}));
+
+// Issue #744: lightweight HistoryPane mock that exposes the per-split props
+// (splitIndex / cliToolId / messages / onInsertToMessage) so we can assert the
+// wiring without rendering the full conversation-pair tree.
+vi.mock('@/components/worktree/HistoryPane', () => ({
+  HistoryPane: ({
+    splitIndex,
+    cliToolId,
+    messages,
+    onInsertToMessage,
+  }: {
+    splitIndex?: number;
+    cliToolId?: string;
+    messages: Array<{ id: string; content: string }>;
+    onInsertToMessage?: (text: string) => void;
+  }) => (
+    <div
+      data-testid="history-pane"
+      data-split-index={String(splitIndex)}
+      data-cli-tool-id={cliToolId}
+      data-message-count={String(messages.length)}
+    >
+      <button
+        type="button"
+        data-testid="history-insert"
+        onClick={() => onInsertToMessage?.('inserted-from-history')}
+      >
+        insert
+      </button>
+    </div>
+  ),
+  // Issue #744: real export consumed by TerminalSplitPaneContent for the slot id.
+  splitHistorySlotId: (idx: number) => `split-history-slot-${idx}`,
+}));
+
+// Issue #744: control the per-split message fetch.
+const splitMessagesByCli: Record<string, Array<{ id: string; content: string }>> = {};
+const splitMessagesRefresh = vi.fn(() => Promise.resolve());
+vi.mock('@/hooks/useSplitMessages', () => ({
+  useSplitMessages: ({ cliToolId }: { cliToolId: string }) => ({
+    messages: splitMessagesByCli[cliToolId] ?? [],
+    isLoading: false,
+    refresh: splitMessagesRefresh,
+  }),
+}));
+
+// Issue #744: keep history visible so the embedded HistoryPane renders.
+vi.mock('@/hooks/useHistoryPaneState', () => ({
+  useHistoryPaneState: () => ({
+    visible: true,
+    width: 40,
+    toggle: vi.fn(),
+    setWidth: vi.fn(),
+  }),
+  DEFAULT_HISTORY_WIDTH: 40,
 }));
 
 vi.mock('@/hooks/useIsMobile', () => ({
@@ -522,6 +587,140 @@ describe('TerminalSplitPaneContent', () => {
 
       expect(indicator1.className).toContain('bg-gray-500');
       expect(indicator1.className).not.toContain('animate-spin');
+    });
+  });
+
+  // Issue #744: HistoryPane is now embedded inside each PC split and shows only
+  // this split's cliToolId's messages, fetched via useSplitMessages.
+  describe('embedded per-split HistoryPane (Issue #744)', () => {
+    beforeEach(() => {
+      mockFetch.mockImplementation(() =>
+        okJson({ isRunning: true, fullOutput: '', thinking: false }),
+      );
+      for (const k of Object.keys(splitMessagesByCli)) delete splitMessagesByCli[k];
+      splitMessagesRefresh.mockClear();
+    });
+
+    it('renders a HistoryPane inside the split', async () => {
+      render(
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={0}
+          cliToolId="claude"
+          availableCliTools={['claude']}
+          onCliToolChange={vi.fn()}
+          onFocus={vi.fn()}
+          onAutoYesToggle={vi.fn()}
+        />,
+      );
+      const pane = await screen.findByTestId('history-pane');
+      expect(pane).toBeInTheDocument();
+      // splitIndex flows through for per-split highlight namespace.
+      expect(pane.getAttribute('data-split-index')).toBe('0');
+      // cliToolId flows through (metadata).
+      expect(pane.getAttribute('data-cli-tool-id')).toBe('claude');
+    });
+
+    it('passes this split cliToolId messages (from useSplitMessages) to HistoryPane', async () => {
+      splitMessagesByCli['codex'] = [
+        { id: 'm1', content: 'codex one' },
+        { id: 'm2', content: 'codex two' },
+      ];
+      render(
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={1}
+          cliToolId="codex"
+          availableCliTools={['claude', 'codex']}
+          onCliToolChange={vi.fn()}
+          onFocus={vi.fn()}
+          onAutoYesToggle={vi.fn()}
+        />,
+      );
+      const pane = await screen.findByTestId('history-pane');
+      expect(pane.getAttribute('data-cli-tool-id')).toBe('codex');
+      expect(pane.getAttribute('data-message-count')).toBe('2');
+    });
+
+    it('shows each split its OWN cliToolId messages simultaneously (A=claude, B=codex)', async () => {
+      splitMessagesByCli['claude'] = [{ id: 'c1', content: 'claude msg' }];
+      splitMessagesByCli['codex'] = [
+        { id: 'x1', content: 'codex msg a' },
+        { id: 'x2', content: 'codex msg b' },
+      ];
+      render(
+        <>
+          <TerminalSplitPaneContent
+            worktreeId="w-1"
+            splitIndex={0}
+            cliToolId="claude"
+            availableCliTools={['claude', 'codex']}
+            onCliToolChange={vi.fn()}
+            onFocus={vi.fn()}
+            onAutoYesToggle={vi.fn()}
+          />
+          <TerminalSplitPaneContent
+            worktreeId="w-1"
+            splitIndex={1}
+            cliToolId="codex"
+            availableCliTools={['claude', 'codex']}
+            onCliToolChange={vi.fn()}
+            onFocus={vi.fn()}
+            onAutoYesToggle={vi.fn()}
+          />
+        </>,
+      );
+      const panes = await screen.findAllByTestId('history-pane');
+      expect(panes).toHaveLength(2);
+      const claudePane = panes.find(p => p.getAttribute('data-cli-tool-id') === 'claude');
+      const codexPane = panes.find(p => p.getAttribute('data-cli-tool-id') === 'codex');
+      expect(claudePane?.getAttribute('data-message-count')).toBe('1');
+      expect(codexPane?.getAttribute('data-message-count')).toBe('2');
+      // Distinct namespaces per split index.
+      expect(claudePane?.getAttribute('data-split-index')).toBe('0');
+      expect(codexPane?.getAttribute('data-split-index')).toBe('1');
+    });
+
+    it('routes HistoryPane onInsertToMessage through this split onHistoryInsertToMessage handler', async () => {
+      const onHistoryInsertToMessage = vi.fn();
+      render(
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={2}
+          cliToolId="claude"
+          availableCliTools={['claude']}
+          onCliToolChange={vi.fn()}
+          onFocus={vi.fn()}
+          onAutoYesToggle={vi.fn()}
+          onHistoryInsertToMessage={onHistoryInsertToMessage}
+        />,
+      );
+      const insertBtn = await screen.findByTestId('history-insert');
+      await act(async () => {
+        insertBtn.click();
+        await Promise.resolve();
+      });
+      // The split forwards the insert to its own (splitIndex-bound) handler.
+      // The parent closes the loop by setting pendingInsertTextMap.set(2, text).
+      expect(onHistoryInsertToMessage).toHaveBeenCalledTimes(1);
+      expect(onHistoryInsertToMessage).toHaveBeenCalledWith('inserted-from-history');
+    });
+
+    it('forwards pendingInsertText to this split MessageInput (parent-closed loop)', async () => {
+      render(
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={2}
+          cliToolId="claude"
+          availableCliTools={['claude']}
+          onCliToolChange={vi.fn()}
+          onFocus={vi.fn()}
+          onAutoYesToggle={vi.fn()}
+          pendingInsertText="from-parent"
+        />,
+      );
+      const input = await screen.findByTestId('message-input-2');
+      expect(input.getAttribute('data-pending-insert')).toBe('from-parent');
     });
   });
 });

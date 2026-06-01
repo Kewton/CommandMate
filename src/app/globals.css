@@ -155,6 +155,29 @@
   pointer-events: none;
 }
 
+/*
+ * [Issue #744] Per-split History search highlights.
+ * The HistoryPane now lives inside each PC terminal split (MAX_SPLITS=3, see
+ * src/config/terminal-split-config.ts). `::highlight()` rules cannot be created
+ * dynamically, so a static rule per split namespace
+ * (`makeHistoryNamespace(splitIndex)` in src/lib/terminal-highlight.ts) is
+ * declared here. Colors mirror the legacy `history-search` palette so all
+ * splits look identical.
+ */
+::highlight(history-search-0),
+::highlight(history-search-1),
+::highlight(history-search-2) {
+  background-color: rgba(59, 130, 246, 0.4);
+  color: inherit;
+}
+
+::highlight(history-search-current-0),
+::highlight(history-search-current-1),
+::highlight(history-search-current-2) {
+  background-color: rgba(59, 130, 246, 0.8);
+  color: white;
+}
+
 @layer utilities {
   .pt-safe {
     padding-top: env(safe-area-inset-top, 0px);

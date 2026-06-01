@@ -14,6 +14,7 @@ import {
   applyHistoryHighlights,
   clearHistoryHighlights,
   HISTORY_SEARCH_NAMESPACE,
+  makeHistoryNamespace,
   type HighlightNamespace,
 } from '@/lib/terminal-highlight';
 
@@ -324,6 +325,137 @@ describe('terminal-highlight', () => {
       clearHistoryHighlights();
       expect(mockDelete).not.toHaveBeenCalledWith('terminal-search');
       expect(mockDelete).not.toHaveBeenCalledWith('terminal-search-current');
+    });
+  });
+
+  // ============================================================================
+  // [Issue #744] makeHistoryNamespace (per-split namespace isolation)
+  // ============================================================================
+
+  describe('makeHistoryNamespace (Issue #744)', () => {
+    it('returns a namespace whose names are suffixed with the splitIndex', () => {
+      const ns0: HighlightNamespace = makeHistoryNamespace(0);
+      expect(ns0.highlightName).toBe('history-search-0');
+      expect(ns0.currentHighlightName).toBe('history-search-current-0');
+      expect(ns0.fallbackOverlayId).toBe('history-search-fallback-overlay-0');
+      expect(typeof ns0.fallbackOverlayBgColor).toBe('string');
+      expect(ns0.fallbackOverlayBgColor.length).toBeGreaterThan(0);
+    });
+
+    it('produces distinct names for different split indices', () => {
+      const ns0 = makeHistoryNamespace(0);
+      const ns1 = makeHistoryNamespace(1);
+      const ns2 = makeHistoryNamespace(2);
+
+      expect(ns0.highlightName).not.toBe(ns1.highlightName);
+      expect(ns1.highlightName).not.toBe(ns2.highlightName);
+      expect(ns0.currentHighlightName).not.toBe(ns1.currentHighlightName);
+      expect(ns0.fallbackOverlayId).not.toBe(ns1.fallbackOverlayId);
+      expect(ns1.fallbackOverlayId).not.toBe(ns2.fallbackOverlayId);
+    });
+
+    it('reuses the same blue fallback color as the legacy history namespace', () => {
+      expect(makeHistoryNamespace(0).fallbackOverlayBgColor).toBe(
+        HISTORY_SEARCH_NAMESPACE.fallbackOverlayBgColor
+      );
+    });
+
+    it('differs from the legacy global HISTORY_SEARCH_NAMESPACE names', () => {
+      const ns0 = makeHistoryNamespace(0);
+      expect(ns0.highlightName).not.toBe(HISTORY_SEARCH_NAMESPACE.highlightName);
+      expect(ns0.currentHighlightName).not.toBe(
+        HISTORY_SEARCH_NAMESPACE.currentHighlightName
+      );
+      expect(ns0.fallbackOverlayId).not.toBe(
+        HISTORY_SEARCH_NAMESPACE.fallbackOverlayId
+      );
+    });
+
+    it('applying split 0 highlights does not clobber split 1 highlights (CSS.highlights set keys differ)', () => {
+      const store = new Map<string, unknown>();
+      const mockSet = vi.fn((name: string, value: unknown) => store.set(name, value));
+      const mockDelete = vi.fn((name: string) => store.delete(name));
+      function MockHighlight(..._args: unknown[]) { return {}; }
+      Object.defineProperty(globalThis, 'CSS', {
+        value: { highlights: { set: mockSet, delete: mockDelete } },
+        writable: true,
+        configurable: true,
+      });
+      Object.defineProperty(globalThis, 'Highlight', {
+        value: MockHighlight,
+        writable: true,
+        configurable: true,
+      });
+
+      const container0 = document.createElement('div');
+      container0.textContent = 'aaa bbb';
+      const container1 = document.createElement('div');
+      container1.textContent = 'aaa bbb';
+
+      // Split 1 applies its highlights first.
+      applyHistoryHighlights(container1, [{ start: 0, end: 3 }], 0, makeHistoryNamespace(1));
+      // Then split 0 applies its highlights. It must NOT remove split 1's entry.
+      applyHistoryHighlights(container0, [{ start: 4, end: 7 }], 0, makeHistoryNamespace(0));
+
+      // Both namespaces coexist in the registry.
+      expect(store.has('history-search-1')).toBe(true);
+      expect(store.has('history-search-0')).toBe(true);
+    });
+
+    it('clearing one split namespace does not touch the other split namespace', () => {
+      const mockDelete = vi.fn();
+      Object.defineProperty(globalThis, 'CSS', {
+        value: { highlights: { delete: mockDelete } },
+        writable: true,
+        configurable: true,
+      });
+
+      clearHistoryHighlights(makeHistoryNamespace(0));
+      // Only split-0 names are deleted.
+      expect(mockDelete).toHaveBeenCalledWith('history-search-0');
+      expect(mockDelete).toHaveBeenCalledWith('history-search-current-0');
+      expect(mockDelete).not.toHaveBeenCalledWith('history-search-1');
+      expect(mockDelete).not.toHaveBeenCalledWith('history-search-current-1');
+    });
+  });
+
+  // ============================================================================
+  // [Issue #744] applyHistoryHighlights / clearHistoryHighlights backward compat
+  // ============================================================================
+
+  describe('history highlight backward compatibility (Issue #744)', () => {
+    it('applyHistoryHighlights with no namespace arg still uses the legacy history-search name', () => {
+      const mockSet = vi.fn();
+      const mockDelete = vi.fn();
+      function MockHighlight(..._args: unknown[]) { return {}; }
+      Object.defineProperty(globalThis, 'CSS', {
+        value: { highlights: { set: mockSet, delete: mockDelete } },
+        writable: true,
+        configurable: true,
+      });
+      Object.defineProperty(globalThis, 'Highlight', {
+        value: MockHighlight,
+        writable: true,
+        configurable: true,
+      });
+      const container = document.createElement('div');
+      container.textContent = 'hello world';
+      applyHistoryHighlights(container, [{ start: 0, end: 5 }], 0);
+      const setCallNames = mockSet.mock.calls.map((c) => c[0]);
+      expect(setCallNames).toContain('history-search');
+      expect(setCallNames).not.toContain('history-search-0');
+    });
+
+    it('clearHistoryHighlights with no namespace arg still clears the legacy history-search name', () => {
+      const mockDelete = vi.fn();
+      Object.defineProperty(globalThis, 'CSS', {
+        value: { highlights: { delete: mockDelete } },
+        writable: true,
+        configurable: true,
+      });
+      clearHistoryHighlights();
+      expect(mockDelete).toHaveBeenCalledWith('history-search');
+      expect(mockDelete).toHaveBeenCalledWith('history-search-current');
     });
   });
 });

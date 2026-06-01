@@ -32,6 +32,16 @@ vi.mock('@/hooks/useIsMobile', () => ({
   MOBILE_BREAKPOINT: 768,
 }));
 
+// Issue #744: stub the per-split message poller so that the only `/messages`
+// fetches in this suite come from the PARENT (WorktreeDetailRefactored). This
+// lets the "parent poll is gated to mobile" test below attribute every
+// `/messages` request to the parent unambiguously. The embedded split history is
+// covered independently by useSplitMessages.test.ts / TerminalSplitPaneContent.test.tsx.
+vi.mock('@/hooks/useSplitMessages', () => ({
+  useSplitMessages: () => ({ messages: [], isLoading: false, refresh: vi.fn() }),
+  SPLIT_MESSAGES_POLL_INTERVAL_MS: 5000,
+}));
+
 // Mock SidebarContext
 const mockOpenMobileDrawer = vi.fn();
 const mockToggle = vi.fn();
@@ -123,6 +133,8 @@ vi.mock('@/components/worktree/HistoryPane', () => ({
       <button onClick={() => onFilePathClick('/test/path.ts')}>Test Path</button>
     </div>
   ),
+  // Issue #744: real export consumed by TerminalSplitPaneContent for the slot id.
+  splitHistorySlotId: (idx: number) => `split-history-slot-${idx}`,
 }));
 
 vi.mock('@/components/worktree/PromptPanel', () => ({
@@ -1113,11 +1125,15 @@ describe('WorktreeDetailRefactored', () => {
       // cliToolId) polling hook that also fetches /current-output on
       // visibilitychange. That polling is independent of the parent's
       // recovery throttle this test targets, so ignore /current-output too.
+      // Issue #744: each embedded per-split HistoryPane drives `useSplitMessages`,
+      // which independently re-fetches /messages on visibilitychange (its own
+      // stale-guard, not the parent recovery throttle). Ignore /messages too.
       await new Promise((resolve) => setTimeout(resolve, 100));
       const recoveryCalls = mockFetch.mock.calls.filter((call) => {
         const url = typeof call[0] === 'string' ? call[0] : '';
         if (url.endsWith('/tree')) return false;
         if (url.includes('/current-output')) return false;
+        if (url.includes('/messages')) return false;
         return true;
       });
       expect(recoveryCalls).toHaveLength(0);
@@ -1458,5 +1474,76 @@ describe('WorktreeDetailRefactored', () => {
         }
       });
     });
+  });
+
+  // ============================================================================
+  // [Issue #744] Adaptive interval poll gates `fetchMessages()` to mobile.
+  //
+  // On PC, `state.messages` is no longer rendered (each terminal split fetches
+  // its own history via useSplitMessages, which is stubbed in this suite). The
+  // parent's periodic poll therefore SKIPS `/messages` on PC (it would be an
+  // unused double-fetch of the active CLI), but still polls it on mobile, where
+  // MobileContent consumes `state.messages`. The non-poll call sites (initial
+  // load, visibilitychange recovery) keep fetching `/messages` on both.
+  // ============================================================================
+  describe('Adaptive poll /messages gating (Issue #744)', () => {
+    /** Count fetch calls whose URL hits the messages endpoint. */
+    const messagesCallCount = () =>
+      mockFetch.mock.calls.filter(
+        (call) => typeof call[0] === 'string' && call[0].includes('/messages')
+      ).length;
+
+    it('does NOT poll /messages from the parent interval on PC (isMobile=false)', async () => {
+      mockIsMobile.mockReturnValue(false);
+
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      // Let the initial load settle (initial fetchMessages is unconditional).
+      await waitFor(() => {
+        expect(screen.getByTestId('desktop-layout')).toBeInTheDocument();
+      });
+
+      // Ignore everything fetched so far; we only care about subsequent polls.
+      mockFetch.mockClear();
+
+      // Advance well past several IDLE poll intervals (5000ms) so the interval
+      // poll fires multiple times. Use real timers + waitFor on /current-output
+      // (which the poll always fetches) to prove the poll actually ran.
+      await waitFor(
+        () => {
+          const polledOutput = mockFetch.mock.calls.some(
+            (call) => typeof call[0] === 'string' && call[0].includes('/current-output')
+          );
+          expect(polledOutput).toBe(true);
+        },
+        { timeout: 8000 }
+      );
+
+      // The parent interval poll ran (current-output fetched) but must NOT have
+      // fetched /messages on PC (split history is stubbed in this suite).
+      expect(messagesCallCount()).toBe(0);
+    }, 12000);
+
+    it('DOES poll /messages from the parent interval on mobile (isMobile=true)', async () => {
+      mockIsMobile.mockReturnValue(true);
+
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      // Mobile renders MobileContent; wait for the mobile header to confirm mount.
+      await waitFor(() => {
+        expect(screen.getByTestId('mobile-header')).toBeInTheDocument();
+      });
+
+      mockFetch.mockClear();
+
+      // On mobile the interval poll includes fetchMessages(), so /messages is
+      // re-requested after the initial load.
+      await waitFor(
+        () => {
+          expect(messagesCallCount()).toBeGreaterThan(0);
+        },
+        { timeout: 8000 }
+      );
+    }, 12000);
   });
 });

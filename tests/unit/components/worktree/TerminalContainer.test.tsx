@@ -199,4 +199,32 @@ describe('TerminalContainer (Issue #730)', () => {
       value: 0,
     });
   });
+
+  // Issue #744: on PC the History pane now lives inside each terminal split,
+  // so the top-level TerminalContainer is rendered WITHOUT a `history` prop.
+  describe('history prop omitted (Issue #744 PC default)', () => {
+    it('renders only the terminal area when history is omitted', () => {
+      render(<TerminalContainer terminal={<div data-testid="terminal-content">T</div>} />);
+      expect(screen.getByTestId('terminal-content')).toBeInTheDocument();
+      // No history column, no resizer, no expand bar.
+      expect(document.getElementById('worktree-history-pane')).toBeNull();
+      expect(screen.queryByTestId('terminal-container-history-slot')).not.toBeInTheDocument();
+      expect(screen.queryByRole('separator')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('terminal-container-expand-bar')).not.toBeInTheDocument();
+    });
+
+    it('does not render the history-pane-expand button when history is omitted', () => {
+      render(<TerminalContainer terminal={<div data-testid="terminal-content">T</div>} />);
+      expect(
+        screen.queryByRole('button', { name: /expand history panel/i })
+      ).not.toBeInTheDocument();
+    });
+
+    it('still wraps the terminal area in its ErrorBoundary', () => {
+      render(<TerminalContainer terminal={<div data-testid="terminal-content">T</div>} />);
+      expect(
+        screen.getByTestId('error-boundary-TerminalAndFilePanel')
+      ).toBeInTheDocument();
+    });
+  });
 });
