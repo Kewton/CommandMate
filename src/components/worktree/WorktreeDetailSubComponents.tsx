@@ -433,7 +433,13 @@ interface DesktopHeaderProps {
   gitStatus?: GitStatus;
   onBackClick: () => void;
   onInfoClick: () => void;
-  onMenuClick: () => void;
+  /**
+   * Optional sidebar toggle callback.
+   * Issue #747: the sidebar (Branches) toggle moved out of DesktopHeader into
+   * the top of the ActivityBar, so DesktopHeader no longer renders a hamburger.
+   * Kept as an optional prop for backward compatibility.
+   */
+  onMenuClick?: () => void;
   /** Whether an app update is available (shows notification dot on Info button) - Issue #278 */
   hasUpdate?: boolean;
   /** Current worktree status (ready/in_progress/in_review/done/null) */
@@ -462,7 +468,6 @@ export const DesktopHeader = memo(function DesktopHeader({
   gitStatus,
   onBackClick,
   onInfoClick,
-  onMenuClick,
   hasUpdate,
   worktreeStatus,
   onWorktreeStatusChange,
@@ -479,31 +484,8 @@ export const DesktopHeader = memo(function DesktopHeader({
 
   return (
     <div className="flex items-center justify-between px-4 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
-      {/* Left: Menu, Back button and title */}
+      {/* Left: Back button and title (Issue #747: hamburger moved to ActivityBar) */}
       <div className="flex items-center gap-3">
-        {/* Hamburger menu button */}
-        <button
-          type="button"
-          onClick={onMenuClick}
-          className="p-2 -ml-2 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-gray-800 transition-colors"
-          aria-label="Toggle sidebar"
-        >
-          <svg
-            className="w-5 h-5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M4 6h16M4 12h16M4 18h16"
-            />
-          </svg>
-        </button>
-        <div className="w-px h-6 bg-gray-300 dark:bg-gray-600" aria-hidden="true" />
         <button
           type="button"
           onClick={onBackClick}

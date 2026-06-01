@@ -9,9 +9,18 @@ import { ActivityBar } from '@/components/worktree/ActivityBar';
 import { ACTIVITIES } from '@/config/activity-bar-config';
 import { TOOLTIP_DELAY_MS } from '@/components/common/Tooltip';
 
+// Issue #747: ActivityBar now reads/controls the sidebar via useSidebarContext().
+// Mock the hook so the component can render without a SidebarProvider and so the
+// toggle behaviour (click → toggle, aria-expanded ← isOpen) can be asserted.
+const sidebarMock = vi.hoisted(() => ({ isOpen: true, toggle: vi.fn() }));
+vi.mock('@/contexts/SidebarContext', () => ({
+  useSidebarContext: () => ({ isOpen: sidebarMock.isOpen, toggle: sidebarMock.toggle }),
+}));
+
 describe('ActivityBar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sidebarMock.isOpen = true;
   });
 
   it('renders all 6 activity tabs', () => {
@@ -117,6 +126,56 @@ describe('ActivityBar', () => {
       expect(document.activeElement).toBe(
         screen.getByTestId(`activity-bar-button-${ACTIVITIES[ACTIVITIES.length - 1].id}`)
       );
+    });
+  });
+
+  describe('Sidebar toggle (Issue #747)', () => {
+    it('renders the sidebar toggle button at the top with data-testid and aria-label', () => {
+      render(<ActivityBar active="files" onToggle={() => {}} />);
+      const toggle = screen.getByTestId('activity-bar-toggle-sidebar');
+      expect(toggle).toBeInTheDocument();
+      expect(toggle).toHaveAttribute('aria-label', 'Toggle sidebar');
+    });
+
+    it('calls the sidebar context toggle when clicked', () => {
+      render(<ActivityBar active="files" onToggle={() => {}} />);
+      fireEvent.click(screen.getByTestId('activity-bar-toggle-sidebar'));
+      expect(sidebarMock.toggle).toHaveBeenCalledTimes(1);
+    });
+
+    it('reflects the open sidebar state via aria-expanded=true', () => {
+      sidebarMock.isOpen = true;
+      render(<ActivityBar active="files" onToggle={() => {}} />);
+      expect(screen.getByTestId('activity-bar-toggle-sidebar')).toHaveAttribute(
+        'aria-expanded',
+        'true'
+      );
+    });
+
+    it('reflects the closed sidebar state via aria-expanded=false', () => {
+      sidebarMock.isOpen = false;
+      render(<ActivityBar active="files" onToggle={() => {}} />);
+      expect(screen.getByTestId('activity-bar-toggle-sidebar')).toHaveAttribute(
+        'aria-expanded',
+        'false'
+      );
+    });
+
+    it('is NOT a tab and lives outside the tablist (tab count stays 6)', () => {
+      render(<ActivityBar active="files" onToggle={() => {}} />);
+      const toggle = screen.getByTestId('activity-bar-toggle-sidebar');
+      // Regression guard: keeping the toggle out of the tablist preserves the
+      // roving-tabindex keyboard navigation and the WAI-ARIA tab count.
+      expect(toggle).not.toHaveAttribute('role', 'tab');
+      expect(screen.getByRole('tablist')).not.toContainElement(toggle);
+      expect(screen.getAllByRole('tab')).toHaveLength(6);
+    });
+
+    it('does not trigger the activity onToggle when the sidebar toggle is clicked', () => {
+      const onToggle = vi.fn();
+      render(<ActivityBar active="files" onToggle={onToggle} />);
+      fireEvent.click(screen.getByTestId('activity-bar-toggle-sidebar'));
+      expect(onToggle).not.toHaveBeenCalled();
     });
   });
 

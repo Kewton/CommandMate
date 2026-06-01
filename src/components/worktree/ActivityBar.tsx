@@ -22,6 +22,14 @@
  *   - The Tooltip wraps each button in a `<span tabindex="-1">`, so the
  *     internal `buttonRefs` still point at the actual `<button>` and the
  *     ArrowUp/ArrowDown/Home/End keyboard navigation keeps working.
+ *
+ * Issue #747:
+ *   - The sidebar (Branches list) open/close toggle (hamburger) now lives at
+ *     the TOP of the ActivityBar, replacing the one that used to sit in the
+ *     DesktopHeader. It reads/controls the sidebar via `useSidebarContext()`.
+ *   - The toggle is rendered OUTSIDE the `role="tablist"` element so it is not
+ *     part of the roving-tabindex Arrow/Home/End navigation and does not change
+ *     the tab count or WAI-ARIA tablist semantics.
  */
 
 'use client';
@@ -29,6 +37,7 @@
 import React, { memo, useCallback, useRef } from 'react';
 import { ACTIVITIES, type ActivityId } from '@/config/activity-bar-config';
 import { Tooltip } from '@/components/common/Tooltip';
+import { useSidebarContext } from '@/contexts/SidebarContext';
 
 export interface ActivityBarProps {
   /** Currently active activity, or null when ActivityPane is closed. */
@@ -53,6 +62,10 @@ export const ActivityBar = memo(function ActivityBar({
   className = '',
 }: ActivityBarProps) {
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  // Issue #747: the Branches-sidebar toggle is hosted at the top of the
+  // ActivityBar and drives the sidebar directly via SidebarContext.
+  const { isOpen: isSidebarOpen, toggle: toggleSidebar } = useSidebarContext();
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLButtonElement>, index: number, activity: ActivityId) => {
@@ -89,42 +102,79 @@ export const ActivityBar = memo(function ActivityBar({
 
   return (
     <div
-      id={ACTIVITY_BAR_ID}
       data-testid="activity-bar"
-      role="tablist"
-      aria-orientation="vertical"
-      aria-label="Activity Bar"
       className={`flex flex-col items-stretch w-12 flex-shrink-0 bg-gray-100 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 ${className}`.trim()}
     >
-      {ACTIVITIES.map((activity, index) => {
-        const Icon = activity.icon;
-        const isActive = active === activity.id;
-        return (
-          <Tooltip key={activity.id} content={activity.label} placement="right">
-            <button
-              ref={(el) => {
-                buttonRefs.current[index] = el;
-              }}
-              type="button"
-              role="tab"
-              aria-selected={isActive}
-              aria-label={activity.label}
-              aria-controls={ACTIVITY_PANE_ID}
-              tabIndex={isActive || (active === null && index === 0) ? 0 : -1}
-              onClick={() => onToggle(activity.id)}
-              onKeyDown={(e) => handleKeyDown(e, index, activity.id)}
-              data-testid={`activity-bar-button-${activity.id}`}
-              className={`flex items-center justify-center h-12 w-12 transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-inset ${
-                isActive
-                  ? 'text-cyan-600 dark:text-cyan-400 border-l-2 border-cyan-600 dark:border-cyan-400 bg-white dark:bg-gray-900'
-                  : 'text-gray-500 dark:text-gray-400 border-l-2 border-transparent hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700'
-              }`}
-            >
-              <Icon size={20} aria-hidden="true" />
-            </button>
-          </Tooltip>
-        );
-      })}
+      {/* Issue #747: Sidebar (Branches) toggle. Rendered OUTSIDE the tablist so
+          it is excluded from the roving-tabindex Arrow/Home/End navigation and
+          does not change the tab count or WAI-ARIA tablist semantics. */}
+      <Tooltip content="Toggle sidebar" placement="right">
+        <button
+          type="button"
+          data-testid="activity-bar-toggle-sidebar"
+          onClick={toggleSidebar}
+          aria-label="Toggle sidebar"
+          aria-expanded={isSidebarOpen}
+          className="flex items-center justify-center h-12 w-12 text-gray-500 dark:text-gray-400 transition-colors hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-inset"
+        >
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 6h16M4 12h16M4 18h16"
+            />
+          </svg>
+        </button>
+      </Tooltip>
+      {/* Separator between the sidebar toggle and the activity tabs */}
+      <div
+        className="mx-2 my-1 border-b border-gray-200 dark:border-gray-700"
+        aria-hidden="true"
+      />
+      <div
+        id={ACTIVITY_BAR_ID}
+        role="tablist"
+        aria-orientation="vertical"
+        aria-label="Activity Bar"
+        className="flex flex-col items-stretch"
+      >
+        {ACTIVITIES.map((activity, index) => {
+          const Icon = activity.icon;
+          const isActive = active === activity.id;
+          return (
+            <Tooltip key={activity.id} content={activity.label} placement="right">
+              <button
+                ref={(el) => {
+                  buttonRefs.current[index] = el;
+                }}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                aria-label={activity.label}
+                aria-controls={ACTIVITY_PANE_ID}
+                tabIndex={isActive || (active === null && index === 0) ? 0 : -1}
+                onClick={() => onToggle(activity.id)}
+                onKeyDown={(e) => handleKeyDown(e, index, activity.id)}
+                data-testid={`activity-bar-button-${activity.id}`}
+                className={`flex items-center justify-center h-12 w-12 transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-inset ${
+                  isActive
+                    ? 'text-cyan-600 dark:text-cyan-400 border-l-2 border-cyan-600 dark:border-cyan-400 bg-white dark:bg-gray-900'
+                    : 'text-gray-500 dark:text-gray-400 border-l-2 border-transparent hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700'
+                }`}
+              >
+                <Icon size={20} aria-hidden="true" />
+              </button>
+            </Tooltip>
+          );
+        })}
+      </div>
     </div>
   );
 });
