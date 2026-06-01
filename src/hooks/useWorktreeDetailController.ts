@@ -610,8 +610,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     setMobileFileViewerPath(null);
   }, []);
 
-  /** Handle file save in tab panel - refresh tree to reflect changes */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- savedPath accepted for callback interface compatibility
+  /** Handle file save in tab panel - refresh tree to reflect changes (savedPath accepted for callback interface compatibility) */
   const handleFilePanelSave = useCallback((_savedPath: string) => {
     setFileTreeRefresh(prev => prev + 1);
   }, []);
@@ -621,8 +620,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     setEditorFilePath(null);
   }, []);
 
-  /** Handle file save in editor - refresh tree to reflect changes */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- savedPath accepted for callback interface compatibility
+  /** Handle file save in editor - refresh tree to reflect changes (savedPath accepted for callback interface compatibility) */
   const handleEditorSave = useCallback((_savedPath: string) => {
     setFileTreeRefresh(prev => prev + 1);
   }, []);

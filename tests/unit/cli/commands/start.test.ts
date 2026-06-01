@@ -247,14 +247,11 @@ describe('startCommand', () => {
     });
   });
 
-  // Note: Foreground mode tests are skipped because they rely on child process
-  // event handlers that trigger process.exit, which causes Vitest worker to exit.
-  // These are tested via integration/e2e tests instead.
-  describe.skip('foreground mode', () => {
-    it('should start in foreground by default', () => {
-      // Covered by integration tests
-    });
-  });
+  // Issue #764: Removed the empty `describe.skip('foreground mode')` placeholder
+  // (it contained only a no-op test). Foreground mode relies on child-process
+  // event handlers that trigger process.exit, which terminates the Vitest worker,
+  // so it cannot be unit-tested here. Foreground startup is covered by
+  // integration/e2e tests instead.
 
   describe('error handling', () => {
     it('should exit with UNEXPECTED_ERROR on unexpected exception', async () => {

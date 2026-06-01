@@ -371,8 +371,7 @@ export function setupWebSocket(server: HTTPServer | HTTPSServer): void {
     logger.error('server:error', { error: error.message });
   });
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+  wss.on('connection', (ws: WebSocket) => {
     // Connection logging removed to reduce noise
 
     // Initialize client info

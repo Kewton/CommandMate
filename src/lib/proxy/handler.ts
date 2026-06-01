@@ -167,13 +167,12 @@ export async function proxyHttp(
  *   bypasses the upgrade listener and reaches the Next.js route handler, which
  *   is not expected in normal operation.
  *
- * @param request - The incoming WebSocket upgrade request (unused after Issue #395)
- * @param app - The external app configuration (unused, no longer exposed in response)
- * @param path - The full request path (unused, no longer exposed in response)
+ * @param _request - The incoming WebSocket upgrade request (unused after Issue #395)
+ * @param _app - The external app configuration (unused, no longer exposed in response)
+ * @param _path - The full request path (unused, no longer exposed in response)
  * @returns A 426 response indicating WebSocket is not supported
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export async function proxyWebSocket(request: Request, app: ExternalApp, path: string): Promise<Response> {
+export async function proxyWebSocket(_request: Request, _app: ExternalApp, _path: string): Promise<Response> {
   // Next.js Route Handlers cannot handle WebSocket upgrades
   // Issue #395: Return fixed-string response only; do not expose internal URLs
   return new Response(

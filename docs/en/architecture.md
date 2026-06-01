@@ -50,10 +50,10 @@ Naming / Terminology:
 
 ### 1.3 Implemented Features
 
-- **CLI Tool Support** (Implemented in Issue #4, extended in Issue #368)
-  - Claude Code, Codex CLI, Gemini CLI, Vibe-Local (Ollama) support
+- **CLI Tool Support** (Implemented in Issue #4, extended in Issue #368/#379/#545)
+  - Supports 6 tools: Claude Code, Codex CLI, Gemini CLI, Vibe-Local (Ollama), OpenCode, GitHub Copilot
   - Extensible design via Strategy pattern
-  - Select 2 agents per worktree (`selected_agents` column)
+  - Select 2-4 agents per worktree (`selected_agents` column)
   - Vibe-Local supports Ollama model selection (`vibe_local_model` column)
 
 ---
@@ -365,6 +365,8 @@ Message format example:
 - `CodexTool` - Codex CLI
 - `GeminiTool` - Gemini CLI (Issue #368)
 - `VibeLocalTool` - Vibe-Local / Ollama (Issue #368)
+- `OpenCodeTool` - OpenCode (Issue #379)
+- `CopilotTool` - GitHub Copilot CLI (Issue #545)
 
 **Management:**
 - `CLIToolManager` singleton class manages each tool instance
@@ -409,8 +411,8 @@ tmux send-keys -t "{sessionName}" "claude" C-m
 - Tables (conceptual):
   - **worktrees**:
     - id, name, path, last_message_summary, updated_at
-    - **cli_tool_id** (added: Issue #4) - CLI tool to use ('claude' | 'codex' | 'gemini' | 'vibe-local')
-    - **selected_agents** (added: Issue #368) - Selected 2 agents (JSON array, e.g., '["claude","vibe-local"]')
+    - **cli_tool_id** (added: Issue #4, extended in #379/#545) - CLI tool to use ('claude' | 'codex' | 'gemini' | 'vibe-local' | 'opencode' | 'copilot')
+    - **selected_agents** (added: Issue #368) - Selected 2-4 agents (JSON array, e.g., '["claude","vibe-local"]')
     - **vibe_local_model** (added: Issue #368) - Ollama model name for Vibe-Local (nullable)
     - repository_path, repository_name, description
     - last_user_message, last_user_message_at
@@ -496,14 +498,14 @@ A `.env.example` file is expected to be included in the repository.
 
 - By embedding it in `ChatMessage.requestId` and log names, you can more precisely trace "which request this response belongs to."
 
-### 10.2 Multi-LLM / Multi-Session ✅ Implemented (Issue #4)
+### 10.2 Multi-LLM / Multi-Session ✅ Implemented (Issue #4, extended in #368/#379/#545)
 
 **Implementation:**
-- Claude Code support
+- Supports 6 tools: Claude Code / Codex / Gemini / Vibe-Local / OpenCode / GitHub Copilot
 - Each worktree manages its CLI tool via the `cliToolId` field
 - Abstraction via Strategy pattern:
   - `BaseCLITool` abstract class
-  - `ClaudeTool` implementation class
+  - `ClaudeTool` / `CodexTool` / `GeminiTool` / `VibeLocalTool` / `OpenCodeTool` / `CopilotTool` implementation classes
   - `CLIToolManager` singleton for managing tool instances
 - Database schema: `worktrees.cli_tool_id` column (default: 'claude')
 - Supported APIs:
@@ -513,7 +515,7 @@ A `.env.example` file is expected to be included in the repository.
   - `GET /api/worktrees` - List worktrees (including session state)
 
 **Future Extensions:**
-- To add other CLIs (openai, lmstudio, etc.), implement by extending `BaseCLITool`
+- To add other CLIs, implement by extending `BaseCLITool`
 - If Stop hook specifications differ, handle within each tool class
 
 ### 10.3 Real-Time Status Detection ✅ Implemented (Issue #31)
@@ -611,3 +613,107 @@ For details, see [Status Indicator](./features/sidebar-status-indicator.md).
   - Error rates
   - Per-session history metrics
   - Extension fields in ChatMessage and Worktree for metadata to enable visualization.
+
+---
+
+## 11. UI Layout Architecture (PC, Issue #727 / #730 / #747)
+
+> **Note**: The legacy desktop left-pane model (history / files / memo, MobileTabBar) introduced in #600 has been replaced by the ActivityBar model described in this chapter. Reorganizing the older descriptions is out of scope here.
+
+This chapter covers the **responsibility boundaries, state ownership, and data flow** of the top-level PC UI layout (why the structure exists and who owns which state). Visual layout, interactions (keyboard / Tooltip), and the component catalog are owned by [./UI_UX_GUIDE.md](./UI_UX_GUIDE.md) as the single source of truth and are not duplicated here.
+
+### 11.1 Component Responsibilities and State Ownership
+
+- **ActivityBar** (`src/components/worktree/ActivityBar.tsx`): A fully controlled component that **does not own** the activity-selection state. It receives `active` / `onToggle` as props and renders `ACTIVITIES` from `@/config/activity-bar-config` (the 6 activities: Files / Git / Notes / Schedules / Agent / Timer). The one exception is the sidebar toggle at the top (Issue #747), which reads `{ isOpen, toggle }` directly from `useSidebarContext()` and is placed outside the `role="tablist"` so it does not interfere with tab keyboard navigation.
+- **ActivityPane** (`ActivityPane.tsx`): A stateless, table-driven dispatcher. It picks exactly one node — `activities[active]` — from the parent-built `ActivityContentMap` (`Partial<Record<ActivityId, ReactNode>>`) and renders it through an `ErrorBoundary`. Because a single `active` key resolves to a single node, **rendering multiple activities simultaneously is structurally impossible**.
+- **TerminalContainer** (`TerminalContainer.tsx`, Issue #730): Wraps a `terminal` slot (always rendered) and an optional `history` slot. Since Issue #744, the top-level History column is no longer rendered on PC; History was moved inside each terminal split (see §12). The `history` prop and the `useHistoryPaneState` wiring are kept for backward compatibility with the #730 single-column layout.
+- **WorktreeDesktopLayout** (`WorktreeDesktopLayout.tsx`, Issue #730): A **2-column layout** of ActivityPane and the Right pane. Issue #730 simplified it from 4 columns to 2 (History moved into the TerminalContainer in the Right pane, and the ActivityBar moved to full-height rendering in the parent). When `activityPane === null`, both the activity column and its boundary PaneResizer are hidden.
+- **PaneResizer** (`PaneResizer.tsx`): A generic resizer that owns only transient drag state. It **only reports a pixel delta via `onResize(delta)`**; the parent decides the final pane width. It is reused for both the Activity↔Right boundary in WorktreeDesktopLayout and the History↔Terminal boundary in TerminalContainer.
+
+### 11.2 State Owners (Custom Hooks)
+
+- **useActivityBarState** (`src/hooks/useActivityBarState.ts`): The single source of truth for the `active` state. It persists to `commandmate.worktree.activeActivity`, but the **closed state (null) is intentionally not persisted** (only the last selected activity is stored so it reopens on revisit). On invalid/missing values it falls back to `DEFAULT_ACTIVITY = 'files'`; the initial render is deterministically `DEFAULT_ACTIVITY` and the localStorage read happens in a post-mount `useEffect` (to avoid hydration mismatch).
+- **SidebarContext** (`src/contexts/SidebarContext.tsx`): Owns the sidebar `isOpen` via `useReducer`. The ActivityBar hamburger (Issue #747) reads this context directly, forming a separate data-flow path from the props-based activity selection.
+
+The orchestrator (`WorktreeDetailRefactored.tsx`) calls `useActivityBarState`, builds the `ActivityContentMap`, and wires ActivityBar / ActivityPane / WorktreeDesktopLayout together.
+
+### 11.3 Data-Flow Diagram
+
+```mermaid
+graph TD
+    Parent["WorktreeDetailRefactored<br/>(orchestrator)"]
+    ActState["useActivityBarState<br/>(owns active / localStorage)"]
+    SideCtx["SidebarContext<br/>(owns isOpen)"]
+    Bar["ActivityBar<br/>(stateless)"]
+    Pane["ActivityPane<br/>(table-driven dispatch)"]
+    Layout["WorktreeDesktopLayout<br/>(2 columns + PaneResizer)"]
+    Term["TerminalContainer<br/>(terminal + optional history)"]
+
+    ActState -->|active| Parent
+    Parent -->|onToggle| ActState
+    Parent -->|active / onToggle| Bar
+    Bar -->|"sidebar toggle (Issue #747)"| SideCtx
+    Parent -->|"activityPane (nullable)"| Layout
+    Parent -->|"ActivityContentMap"| Pane
+    Pane --> Layout
+    Layout -->|rightPane| Term
+```
+
+> **Forward reference**: The per-agent (per-CLI) session status indicator is already implemented in Issue #743 / #749 / #751 (per-split header status and the DesktopHeader agent status row). It is out of scope for this chapter and may be documented later (optional).
+
+---
+
+## 12. TerminalSplits Strategy (PC, Issue #728 / #736 / #744)
+
+This chapter covers the PC terminal's 1–3 splits and the per-(worktreeId, cliToolId) fan-out polling strategy that runs independently per split.
+
+### 12.1 Split State Management (useTerminalSplits)
+
+- The state owner is `src/hooks/useTerminalSplits.ts` (Issue #728). It is **intentionally kept out of** the VS Code-style layout reducer (activityBar / historyPane, etc.) to avoid action bloat.
+- Constants (`src/config/terminal-split-config.ts`): `MIN_SPLITS = 1`, `MAX_SPLITS = 3`, `DEFAULT_SPLIT_CONFIG = { splits: [{ cliToolId: 'claude' }], widths: [1] }`.
+- Persistence is **per worktree** (splits + widths are stored in localStorage under `getTerminalSplitsStorageKey(worktreeId)`). On a worktreeId change the state is reloaded and `focusedSplitIndex` is reset to 0.
+- On load, the config is validated by `isValidSplitConfig` (`splits.length ∈ [1, 3]`, `widths.length === splits.length`, each width finite and positive); on failure it falls back to `DEFAULT_SPLIT_CONFIG` (defense against external edits / stale data).
+- **Same-CLI duplicate-selection guard**: `setSplitCliTool` rejects the change if another split already uses that CLI, and `availableCliTools(idx)` returns a list excluding in-use CLIs (the UI `<select>` disables those options). Because the number of CLI types (6) exceeds `MAX_SPLITS` (3), `addSplit`'s unused-CLI assignment never runs out.
+
+### 12.2 per-(worktreeId, cliToolId) Fan-out Polling (useTerminalPanePolling)
+
+- Each `TerminalSplitPaneContent` owns one instance of `src/hooks/useTerminalPanePolling.ts` and calls `GET /api/worktrees/{worktreeId}/current-output?cliTool={cliToolId}` **independently** (split 0 = Claude and split 1 = Codex poll on their own).
+- Owned state: `output` / `isRunning` / `isThinking` / `isSelectionListActive` / `attaching` (true until the first successful fetch) / `autoScroll` (per pane) / prompt. Auto-Yes state and History messages are global at activeCliTab scope, so they are **intentionally not owned** here.
+- **Stale-response discard (2 axes)**: a `requestId` incremented on every fetch, and an `inFlightCliToolRef` that records the current CLI on every render, are compared at response time; any response that does not match (out-of-order or CLI-switch crossing) is discarded. A response whose server-provided `cliToolId` differs from the requested CLI is also discarded.
+- The polling cadence switches on `isRunning` (`ACTIVE_POLLING_INTERVAL_MS = 2000` / `IDLE_POLLING_INTERVAL_MS = 5000`). Ticks where `document.visibilityState === 'hidden'` are skipped, and a single re-fetch runs when visibility is restored (polling stops in the background).
+- On a change of `compositeKey = {worktreeId}::{cliToolId}`, `requestId` is bumped, output / prompt are cleared, and the pane returns to the `attaching` state (treated as a fresh attach).
+
+### 12.3 per-split Message History and Namespace Separation
+
+- **useSplitMessages** (`src/hooks/useSplitMessages.ts`, Issue #744): Each split independently fetches `GET /api/worktrees/{worktreeId}/messages?cliTool={cliToolId}` (`SPLIT_MESSAGES_POLL_INTERVAL_MS = 5000`). The parent's `state.messages` is already filtered to activeCliTab, so it cannot be reused to show split A=Claude and split B=Codex at the same time. The stale-guard is identical in form to useTerminalPanePolling.
+- **makeHistoryNamespace** (`src/lib/terminal-highlight.ts`, Issue #744): `CSS.highlights` is a global Map keyed by name, so multiple HistoryPanes using the same namespace (`HISTORY_SEARCH_NAMESPACE`) would clobber each other's search highlights. `makeHistoryNamespace(splitIndex)` returns a namespace suffixed by the split index (`history-search-{idx}`, etc.) so each split keeps its highlights under a distinct registry key, avoiding collisions. `applyHistoryHighlights` and friends default to the shared namespace when the `namespace` argument is omitted, so Mobile / single-pane calls are unchanged (backward compatible).
+
+### 12.4 Difference from the Mobile Path
+
+- On Mobile, `MobileTerminalTab` owns a **single instance** of `useTerminalPanePolling` and mounts it only while the terminal tab is shown (polling only the one CLI corresponding to activeCliTab).
+- Issue #736 removed the terminal reducer slice, so both PC and Mobile obtain output from `useTerminalPanePolling`. The difference is that PC starts up to `MAX_SPLITS` (3) instances **in parallel**, one per split.
+
+### 12.5 Data-Flow Diagram
+
+```mermaid
+graph TD
+    Splits["useTerminalSplits<br/>(owns splits / widths / focusedSplitIndex)"]
+    Container["TerminalSplitContainer<br/>(delegates each split via renderPane)"]
+    P0["TerminalSplitPaneContent[0]<br/>cliTool=claude"]
+    P1["TerminalSplitPaneContent[1]<br/>cliTool=codex"]
+    Poll0["useTerminalPanePolling"]
+    Msg0["useSplitMessages"]
+    Poll1["useTerminalPanePolling"]
+    API0["/current-output?cliTool=claude"]
+    API0b["/messages?cliTool=claude"]
+    API1["/current-output?cliTool=codex"]
+
+    Splits --> Container
+    Container --> P0
+    Container --> P1
+    P0 --> Poll0 --> API0
+    P0 --> Msg0 --> API0b
+    P1 --> Poll1 --> API1
+```
+
+> **Note**: The History pane's visibility / width is shared across all splits via `useHistoryPaneState` in the MVP (per-split independent toggle / width is a future extension).

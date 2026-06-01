@@ -71,9 +71,9 @@ CM_BIND=127.0.0.1
 
 > **Note**: フォールバック機能により、旧名称も引き続き動作しますが、deprecation 警告が出力されます。
 
-### 2. Git remote の更新（Issue #80 完了後）
+### 2. Git remote の更新
 
-> **重要**: この手順は Issue #80（GitHubリポジトリ名変更）完了後に実施してください。
+> **注**: GitHub リポジトリ名は既に `Kewton/CommandMate` へ変更済みです。以前 `MyCodeBranchDesk` をクローンしていた場合は、以下の手順で remote URL を更新してください。
 
 ```bash
 # HTTPS の場合
