@@ -180,13 +180,16 @@ tests/
 | `src/lib/auto-yes-poller.ts` | Auto-Yesポーリングループ本体・複合キー対応（Issue #479, #525） |
 | `src/lib/auto-yes-state.ts` | Auto-Yes状態管理・複合キーヘルパー（Issue #479, #525） |
 | `src/lib/polling/auto-yes-resolver.ts` | Auto-Yes自動応答判定 |
-| `src/config/auto-yes-config.ts` | Auto-Yes設定定数・バリデーション |
+| `src/config/auto-yes-config.ts` | Auto-Yes設定定数・バリデーション、AUTO_YES_COUNTDOWN_INTERVAL_MS追加（Issue #760） |
 | `src/config/html-extensions.ts` | HTML拡張子定義・判定関数・SandboxLevel型・SANDBOX_ATTRIBUTES（Issue #490） |
 | `src/config/file-polling-config.ts` | ファイルポーリング定数（FILE_TREE_POLL_INTERVAL_MS, FILE_CONTENT_POLL_INTERVAL_MS）（Issue #469） |
 | `src/config/timer-constants.ts` | タイマー定数定義（TIMER_DELAYS, MAX_TIMERS_PER_WORKTREE, TIMER_STATUS, isValidTimerDelay）（Issue #534） |
 | `src/config/copilot-constants.ts` | Copilot CLIタイミング定数（COPILOT_SEND_ENTER_DELAY_MS, COPILOT_TEXT_INPUT_DELAY_MS）（Issue #565）、MODEL_NAME_PATTERN/MAX_MODEL_NAME_LENGTH追加（Issue #588） |
+| `src/config/cli-tool-timing-config.ts` | CLI/TUI/sessionツール相互作用タイミング定数（TUI_SESSION_CREATE_WAIT_MS, TUI_TEXT_INPUT_WAIT_MS, TUI_MESSAGE_PROCESSED_WAIT_MS, TUI_INTERRUPT_SETTLE_MS, TUI_EXIT_WAIT_MS, CODEX_DIALOG_SETTLE_MS, OPENCODE_EXIT_WAIT_MS, VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS, CLAUDE_ENV_SANITIZE_WAIT_MS, CLAUDE_RESTART_DELAY_MS）。cli-tools/*・session-key-sender・prompt-answer-sender・claude-session の magic number を集約（Issue #760） |
+| `src/config/ui-feedback-config.ts` | UIフィードバック/操作タイミング定数（COPY_FEEDBACK_RESET_MS, COPY_FEEDBACK_RESET_SHORT_MS, NOTIFICATION_DISMISS_MS, KEY_PRESS_FEEDBACK_RESET_MS, NAV_KEY_REFRESH_DELAY_MS）（Issue #760） |
+| `src/config/external-apps-config.ts` | External Apps定数（EXTERNAL_APPS_POLL_INTERVAL_MS）（Issue #760） |
 | `src/config/memo-config.ts` | メモ共有定数（MAX_MEMOS）（Issue #652） |
-| `src/config/repository-config.ts` | リポジトリ共有定数（MAX_DISPLAY_NAME_LENGTH）（Issue #644） |
+| `src/config/repository-config.ts` | リポジトリ共有定数（MAX_DISPLAY_NAME_LENGTH）（Issue #644）、CLONE_STATUS_POLL_INTERVAL_MS追加（Issue #760） |
 | `src/config/history-display-config.ts` | History表示件数定数（HISTORY_DISPLAY_LIMIT_OPTIONS, MAX_MESSAGES_LIMIT派生, DEFAULT_MESSAGES_LIMIT, HISTORY_DISPLAY_LIMIT_STORAGE_KEY, HistoryDisplayLimit型, isHistoryDisplayLimit型ガード）（Issue #701）。Issue #725で `HISTORY_USER_ONLY_STORAGE_KEY` 追加 |
 | `src/config/editable-extensions.ts` | 編集可能拡張子定義・バリデーション（EDITABLE_EXTENSIONS, EXTENSION_VALIDATORS, isEditableExtension, validateContent）。.yaml/.yml 追加・YAML危険タグバリデーション（Issue #646）。TEXT_MAX_SIZE_BYTES を 2MB に引き上げ・PUT/GET 共通定数化（Issue #723） |
 | `src/config/file-viewer-config.ts` | 大規模ファイル閲覧用定数（VIEWER_CHUNK_LINE_SIZE, VIEWER_OVERSCAN_LINES, POLLING_DISABLED_THRESHOLD_BYTES）（Issue #723） |

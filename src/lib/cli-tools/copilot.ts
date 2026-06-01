@@ -22,6 +22,7 @@ import { detectAndResendIfPastedText } from '../pasted-text-helper';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { COPILOT_PROMPT_PATTERN, COPILOT_SELECTION_LIST_PATTERN, stripAnsi } from '../detection/cli-patterns';
 import { COPILOT_TEXT_INPUT_DELAY_MS, COPILOT_SEND_ENTER_DELAY_MS, COPILOT_MODEL_SWITCH_TIMEOUT_MS } from '@/config/copilot-constants';
+import { TUI_SESSION_CREATE_WAIT_MS, TUI_INTERRUPT_SETTLE_MS, TUI_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
 import { getErrorMessage } from '@/lib/errors';
 import { createLogger } from '@/lib/logger';
 
@@ -135,7 +136,7 @@ export class CopilotTool extends BaseCLITool {
       });
 
       // Wait a moment for the session to be created
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
 
       // Start Copilot CLI in interactive mode
       await sendKeys(sessionName, 'gh copilot', true);
@@ -362,11 +363,11 @@ export class CopilotTool extends BaseCLITool {
       if (exists) {
         // Send Ctrl+C to interrupt any running operation
         await sendSpecialKey(sessionName, 'C-c');
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        await new Promise((resolve) => setTimeout(resolve, TUI_INTERRUPT_SETTLE_MS));
 
         // Send exit to close gracefully
         await sendKeys(sessionName, 'exit', true);
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await new Promise((resolve) => setTimeout(resolve, TUI_EXIT_WAIT_MS));
       }
 
       // Kill the tmux session

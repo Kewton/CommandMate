@@ -27,6 +27,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { access, constants } from 'fs/promises';
 import { createLogger } from '@/lib/logger';
+import { CLAUDE_RESTART_DELAY_MS } from '@/config/cli-tool-timing-config';
 
 const logger = createLogger('claude-session');
 
@@ -733,7 +734,7 @@ export async function restartClaudeSession(
   await stopClaudeSession(worktreeId);
 
   // Wait a moment before restarting
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+  await new Promise((resolve) => setTimeout(resolve, CLAUDE_RESTART_DELAY_MS));
 
   // Start new session
   await startClaudeSession(options);

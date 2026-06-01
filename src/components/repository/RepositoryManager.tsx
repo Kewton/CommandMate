@@ -10,6 +10,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Button, Card } from '@/components/ui';
 import { repositoryApi, handleApiError } from '@/lib/api-client';
 import { UrlNormalizer } from '@/lib/url-normalizer';
+import { CLONE_STATUS_POLL_INTERVAL_MS } from '@/config/repository-config';
 
 export interface RepositoryManagerProps {
   onRepositoryAdded?: () => void;
@@ -64,7 +65,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
         setCloneJobId(null);
       } else if (status.status === 'running' || status.status === 'pending') {
         // Continue polling
-        setTimeout(() => pollCloneStatus(jobId), 2000);
+        setTimeout(() => pollCloneStatus(jobId), CLONE_STATUS_POLL_INTERVAL_MS);
       }
     } catch (err) {
       setError(handleApiError(err));

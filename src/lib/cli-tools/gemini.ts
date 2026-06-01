@@ -22,6 +22,13 @@ import { detectAndResendIfPastedText } from '../pasted-text-helper';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { GEMINI_PROMPT_PATTERN, stripAnsi } from '../detection/cli-patterns';
 import { createLogger } from '@/lib/logger';
+import {
+  TUI_SESSION_CREATE_WAIT_MS,
+  TUI_TEXT_INPUT_WAIT_MS,
+  TUI_MESSAGE_PROCESSED_WAIT_MS,
+  TUI_INTERRUPT_SETTLE_MS,
+  TUI_EXIT_WAIT_MS,
+} from '@/config/cli-tool-timing-config';
 
 const logger = createLogger('cli-tools/gemini');
 
@@ -99,7 +106,7 @@ export class GeminiTool extends BaseCLITool {
       });
 
       // Wait a moment for the session to be created
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
 
       // Start Gemini CLI in interactive mode (no flags = interactive REPL)
       await sendKeys(sessionName, 'gemini', true);
@@ -200,13 +207,13 @@ export class GeminiTool extends BaseCLITool {
       await sendKeys(sessionName, message, false);
 
       // Wait a moment for the text to be typed
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, TUI_TEXT_INPUT_WAIT_MS));
 
       // Send Enter key separately
       await sendSpecialKey(sessionName, 'C-m');
 
       // Wait a moment for the message to be processed
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, TUI_MESSAGE_PROCESSED_WAIT_MS));
 
       // Detect [Pasted text] and resend Enter for multi-line messages
       if (message.includes('\n')) {
@@ -236,11 +243,11 @@ export class GeminiTool extends BaseCLITool {
       if (exists) {
         // Send Ctrl+C to interrupt any running operation
         await sendSpecialKey(sessionName, 'C-c');
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        await new Promise((resolve) => setTimeout(resolve, TUI_INTERRUPT_SETTLE_MS));
 
         // Send /quit to exit Gemini gracefully
         await sendKeys(sessionName, '/quit', true);
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await new Promise((resolve) => setTimeout(resolve, TUI_EXIT_WAIT_MS));
       }
 
       // Kill the tmux session

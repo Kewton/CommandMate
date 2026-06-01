@@ -14,6 +14,7 @@ import { SUMMARY_ALLOWED_TOOLS, MAX_USER_INSTRUCTION_LENGTH } from '@/config/rev
 import { useReportGeneration } from '@/hooks/useReportGeneration';
 import { useGenerationStatus } from '@/hooks/useGenerationStatus';
 import { copyToClipboard } from '@/lib/clipboard-utils';
+import { COPY_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
 import type { GenerationMode } from '@/hooks/useReportGeneration';
 
 /** Format Date to YYYY-MM-DD */
@@ -352,7 +353,7 @@ export default function ReportTab() {
                 onClick={async () => {
                   await copyToClipboard(report.content);
                   setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
+                  setTimeout(() => setCopied(false), COPY_FEEDBACK_RESET_MS);
                 }}
                 className="px-3 py-1 text-xs font-medium rounded transition-colors bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300"
                 data-testid="copy-report-button"

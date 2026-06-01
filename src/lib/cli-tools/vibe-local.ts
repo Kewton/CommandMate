@@ -22,6 +22,14 @@ import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { getDbInstance } from '../db/db-instance';
 import { getWorktreeById } from '../db';
 import { createLogger } from '@/lib/logger';
+import {
+  TUI_SESSION_CREATE_WAIT_MS,
+  TUI_TEXT_INPUT_WAIT_MS,
+  TUI_MESSAGE_PROCESSED_WAIT_MS,
+  TUI_INTERRUPT_SETTLE_MS,
+  TUI_EXIT_WAIT_MS,
+  VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS,
+} from '@/config/cli-tool-timing-config';
 
 const logger = createLogger('cli-tools/vibe-local');
 
@@ -85,7 +93,7 @@ export class VibeLocalTool extends BaseCLITool {
       });
 
       // Wait a moment for the session to be created
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
 
       // Read Ollama model and context window preferences from DB
       // [SEC-001] Re-validate model name at point of use (defense-in-depth)
@@ -144,17 +152,17 @@ export class VibeLocalTool extends BaseCLITool {
       await sendKeys(sessionName, message, false);
 
       // Wait a moment for the text to be typed
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, TUI_TEXT_INPUT_WAIT_MS));
 
       // vibe-local uses IME mode: first Enter creates a new line,
       // second Enter on empty line submits the message.
       // Send Enter twice with a short delay between.
       await sendSpecialKey(sessionName, 'C-m');
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS));
       await sendSpecialKey(sessionName, 'C-m');
 
       // Wait a moment for the message to be processed
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, TUI_MESSAGE_PROCESSED_WAIT_MS));
 
       // Detect [Pasted text] and resend Enter for multi-line messages
       if (message.includes('\n')) {
@@ -184,11 +192,11 @@ export class VibeLocalTool extends BaseCLITool {
       if (exists) {
         // Send Ctrl+C to interrupt any running operation
         await sendSpecialKey(sessionName, 'C-c');
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        await new Promise((resolve) => setTimeout(resolve, TUI_INTERRUPT_SETTLE_MS));
 
         // Send Ctrl+C again to ensure exit
         await sendSpecialKey(sessionName, 'C-c');
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await new Promise((resolve) => setTimeout(resolve, TUI_EXIT_WAIT_MS));
       }
 
       // Kill the tmux session
