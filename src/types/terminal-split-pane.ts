@@ -11,14 +11,15 @@
  *
  * This is a pure type re-organization; runtime behavior is unchanged. The
  * Auto-Yes toggle callback parameter type is the existing
- * `AutoYesToggleParams` (from AutoYesToggle.tsx, Issue #314) — it is reused
- * here, NOT redefined, to avoid a name clash.
+ * `AutoYesToggleParams` (from `@/types/auto-yes`, Issue #314 / relocated in
+ * #756) — it is reused here, NOT redefined, to avoid a name clash. It lives in
+ * a non-TSX module so this file stays importable under tsconfig.server.json.
  */
 
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { BranchStatus } from '@/types/sidebar';
 import type { HistoryDisplayLimit } from '@/config/history-display-config';
-import type { AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
+import type { AutoYesToggleParams } from '@/types/auto-yes';
 
 /** Identity + derived status of a single terminal split (Issue #756). */
 export interface TerminalSplitPaneCoreProps {

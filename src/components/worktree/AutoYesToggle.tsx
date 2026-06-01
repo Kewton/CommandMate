@@ -15,13 +15,11 @@ import { AutoYesConfirmDialog } from './AutoYesConfirmDialog';
 import { formatTimeRemaining } from '@/config/auto-yes-config';
 import type { AutoYesDuration } from '@/config/auto-yes-config';
 import { getCliToolDisplayNameSafe } from '@/lib/cli-tools/types';
-
-/** Parameters for auto-yes toggle callback (Issue #314) */
-export interface AutoYesToggleParams {
-  enabled: boolean;
-  duration?: AutoYesDuration;
-  stopPattern?: string;
-}
+// Issue #756: AutoYesToggleParams moved to a non-TSX module (`@/types/auto-yes`)
+// so server-side type consumers compiled under tsconfig.server.json can import
+// it without TS6142. Re-exported here for backward compatibility.
+import type { AutoYesToggleParams } from '@/types/auto-yes';
+export type { AutoYesToggleParams };
 
 /** Props for AutoYesToggle component */
 export interface AutoYesToggleProps {
