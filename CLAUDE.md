@@ -307,7 +307,7 @@ tests/
 | `src/cli/utils/command-helpers.ts` | CLI共通ヘルパー（TOKEN_WARNING定数・handleCommandError統一エラーハンドラ）（Issue #518） |
 | `src/cli/types/api-responses.ts` | CLI側APIレスポンス型定義（WorktreeListResponse, CurrentOutputResponse, PromptResponseResult等）（Issue #518） |
 | `src/cli/config/duration-constants.ts` | CLI側duration定数（DURATION_MAP, parseDurationToMs）（Issue #518） |
-| `src/cli/config/cli-tool-ids.ts` | CLI側ツールID定義（CLI_TOOL_IDS, isCliToolId、copilot含む6ツール）（Issue #518, #545） |
+| `src/cli/config/cli-tool-ids.ts` | CLI側ツールID定義（CLI_TOOL_IDS, isCliToolId、copilot含む6ツール）（Issue #518, #545）。Issue #757で literal copy を撤廃し `src/lib/cli-tools/types.ts`（単一ソース）からの**相対パス re-export**（`@/` 不可、`isCliToolType as isCliToolId`/`CLIToolType as CLIToolId` エイリアス）に変更。cross-validation test は参照同一性で単一ソース契約を保証 |
 | `src/cli/config/model-validation.ts` | CLI側model名バリデーション（validateCopilotModelName、MODEL_NAME_PATTERN、クロスバリデーション対象）（Issue #588） |
 | `src/config/review-config.ts` | Review設定定数・テンプレート定数（STALLED_THRESHOLD_MS, REVIEW_POLL_INTERVAL_MS, MAX_TEMPLATES, MAX_TEMPLATE_NAME_LENGTH, MAX_TEMPLATE_CONTENT_LENGTH）（Issue #600, #618）、MAX_COMMIT_LOG_LENGTH/GIT_LOG_TOTAL_TIMEOUT_MS追加（Issue #627） |
 | `src/lib/session/next-action-helper.ts` | 次アクション算出ヘルパー（getNextAction, getReviewStatus, ReviewStatus型）（Issue #600） |
