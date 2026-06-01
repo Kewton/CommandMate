@@ -50,10 +50,10 @@ Naming / Terminology:
 
 ### 1.3 Implemented Features
 
-- **CLI Tool Support** (Implemented in Issue #4, extended in Issue #368)
-  - Claude Code, Codex CLI, Gemini CLI, Vibe-Local (Ollama) support
+- **CLI Tool Support** (Implemented in Issue #4, extended in Issue #368/#379/#545)
+  - Supports 6 tools: Claude Code, Codex CLI, Gemini CLI, Vibe-Local (Ollama), OpenCode, GitHub Copilot
   - Extensible design via Strategy pattern
-  - Select 2 agents per worktree (`selected_agents` column)
+  - Select 2-4 agents per worktree (`selected_agents` column)
   - Vibe-Local supports Ollama model selection (`vibe_local_model` column)
 
 ---
@@ -365,6 +365,8 @@ Message format example:
 - `CodexTool` - Codex CLI
 - `GeminiTool` - Gemini CLI (Issue #368)
 - `VibeLocalTool` - Vibe-Local / Ollama (Issue #368)
+- `OpenCodeTool` - OpenCode (Issue #379)
+- `CopilotTool` - GitHub Copilot CLI (Issue #545)
 
 **Management:**
 - `CLIToolManager` singleton class manages each tool instance
@@ -409,8 +411,8 @@ tmux send-keys -t "{sessionName}" "claude" C-m
 - Tables (conceptual):
   - **worktrees**:
     - id, name, path, last_message_summary, updated_at
-    - **cli_tool_id** (added: Issue #4) - CLI tool to use ('claude' | 'codex' | 'gemini' | 'vibe-local')
-    - **selected_agents** (added: Issue #368) - Selected 2 agents (JSON array, e.g., '["claude","vibe-local"]')
+    - **cli_tool_id** (added: Issue #4, extended in #379/#545) - CLI tool to use ('claude' | 'codex' | 'gemini' | 'vibe-local' | 'opencode' | 'copilot')
+    - **selected_agents** (added: Issue #368) - Selected 2-4 agents (JSON array, e.g., '["claude","vibe-local"]')
     - **vibe_local_model** (added: Issue #368) - Ollama model name for Vibe-Local (nullable)
     - repository_path, repository_name, description
     - last_user_message, last_user_message_at
@@ -496,14 +498,14 @@ A `.env.example` file is expected to be included in the repository.
 
 - By embedding it in `ChatMessage.requestId` and log names, you can more precisely trace "which request this response belongs to."
 
-### 10.2 Multi-LLM / Multi-Session ✅ Implemented (Issue #4)
+### 10.2 Multi-LLM / Multi-Session ✅ Implemented (Issue #4, extended in #368/#379/#545)
 
 **Implementation:**
-- Claude Code support
+- Supports 6 tools: Claude Code / Codex / Gemini / Vibe-Local / OpenCode / GitHub Copilot
 - Each worktree manages its CLI tool via the `cliToolId` field
 - Abstraction via Strategy pattern:
   - `BaseCLITool` abstract class
-  - `ClaudeTool` implementation class
+  - `ClaudeTool` / `CodexTool` / `GeminiTool` / `VibeLocalTool` / `OpenCodeTool` / `CopilotTool` implementation classes
   - `CLIToolManager` singleton for managing tool instances
 - Database schema: `worktrees.cli_tool_id` column (default: 'claude')
 - Supported APIs:
@@ -513,7 +515,7 @@ A `.env.example` file is expected to be included in the repository.
   - `GET /api/worktrees` - List worktrees (including session state)
 
 **Future Extensions:**
-- To add other CLIs (openai, lmstudio, etc.), implement by extending `BaseCLITool`
+- To add other CLIs, implement by extending `BaseCLITool`
 - If Stop hook specifications differ, handle within each tool class
 
 ### 10.3 Real-Time Status Detection ✅ Implemented (Issue #31)

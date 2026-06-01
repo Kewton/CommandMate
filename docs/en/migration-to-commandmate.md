@@ -71,9 +71,9 @@ CM_BIND=127.0.0.1
 
 > **Note**: Thanks to the fallback mechanism, legacy names will continue to work, but deprecation warnings will be output.
 
-### 2. Update Git Remote (After Issue #80 Completion)
+### 2. Update Git Remote
 
-> **Important**: Execute this step after Issue #80 (GitHub repository name change) is completed.
+> **Note**: The GitHub repository has already been renamed to `Kewton/CommandMate`. If you previously cloned `MyCodeBranchDesk`, update your remote URL using the steps below.
 
 ```bash
 # For HTTPS
