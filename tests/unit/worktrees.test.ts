@@ -166,15 +166,18 @@ invalid line
   });
 
   describe('scanWorktrees', () => {
-    // Note: The following tests are skipped due to vitest/promisify mocking limitations
-    // These will be covered by integration tests instead
-    it.skip('should execute git worktree list and return parsed worktrees', async () => {
+    // Issue #764: Revived previously-skipped tests. The factory mock for
+    // child_process strips `util.promisify.custom`, so `promisify(exec)` uses
+    // standard promisification and resolves with the FIRST callback value.
+    // The mock must therefore pass `{ stdout, stderr }` as that value so
+    // `const { stdout } = await execAsync(...)` in scanWorktrees works.
+    it('should execute git worktree list and return parsed worktrees', async () => {
       const mockOutput = `/path/to/main abc123 [main]
 /path/to/feature-foo def456 [feature/foo]`;
 
       vi.mocked(exec).mockImplementationOnce(
         ((cmd: string, opts: any, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
-          callback(null, mockOutput, '');
+          callback(null, { stdout: mockOutput, stderr: '' } as any, '');
           return {} as any;
         }) as any
       );
@@ -182,13 +185,14 @@ invalid line
       const result = await scanWorktrees('/path/to/root');
 
       expect(result).toHaveLength(2);
+      // ID is prefixed with the repository name (basename of rootDir, here "root").
       expect(result[0]).toMatchObject({
-        id: 'main',
+        id: 'root-main',
         name: 'main',
         path: '/path/to/main',
       });
       expect(result[1]).toMatchObject({
-        id: 'feature-foo',
+        id: 'root-feature-foo',
         name: 'feature/foo',
         path: '/path/to/feature-foo',
       });
@@ -200,7 +204,7 @@ invalid line
       );
     });
 
-    it.skip('should return empty array for non-git directory', async () => {
+    it('should return empty array for non-git directory', async () => {
       vi.mocked(exec).mockImplementationOnce(
         ((cmd: string, opts: any, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
           const error = new Error('not a git repository') as any;
@@ -215,7 +219,7 @@ invalid line
       expect(result).toEqual([]);
     });
 
-    it.skip('should throw on unexpected git errors', async () => {
+    it('should throw on unexpected git errors', async () => {
       vi.mocked(exec).mockImplementationOnce(
         ((cmd: string, opts: any, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
           const error = new Error('permission denied') as any;
@@ -230,12 +234,12 @@ invalid line
       );
     });
 
-    it.skip('should handle paths with spaces', async () => {
+    it('should handle paths with spaces', async () => {
       const mockOutput = '/path/with spaces/main abc123 [main]';
 
       vi.mocked(exec).mockImplementationOnce(
         ((cmd: string, opts: any, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
-          callback(null, mockOutput, '');
+          callback(null, { stdout: mockOutput, stderr: '' } as any, '');
           return {} as any;
         }) as any
       );
@@ -246,12 +250,12 @@ invalid line
       expect(result[0].path).toBe('/path/with spaces/main');
     });
 
-    it.skip('should resolve paths to absolute', async () => {
+    it('should resolve paths to absolute', async () => {
       const mockOutput = './relative/path abc123 [main]';
 
       vi.mocked(exec).mockImplementationOnce(
         ((cmd: string, opts: any, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
-          callback(null, mockOutput, '');
+          callback(null, { stdout: mockOutput, stderr: '' } as any, '');
           return {} as any;
         }) as any
       );

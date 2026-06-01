@@ -1,0 +1,22 @@
+{
+  "issue_number": "723",
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目・通常レビュー）",
+  "iteration": 1,
+  "input_review_result": "dev-reports/issue/723/issue-review/stage1-review-result.json",
+  "original_issue_path": "dev-reports/issue/723/issue-review/original-issue.json",
+  "hypothesis_verification_path": "dev-reports/issue/723/issue-review/hypothesis-verification.md",
+  "output_path": "dev-reports/issue/723/issue-review/stage2-apply-result.json",
+  "instructions": [
+    "stage1-review-result.json の findings を読み、Must Fix 全件と Should Fix 全件をIssue本文に反映",
+    "Nice to Have は内容により採否を判断（採用しない場合は理由を出力に記載）",
+    "反映方法は gh issue edit 723 --body-file <一時ファイル> を使用",
+    "反映後の本文を dev-reports/issue/723/issue-review/issue-body-after-stage2.md にも保存",
+    "出力JSONには反映済み findings の id 一覧、未反映の id とその理由を記載"
+  ],
+  "constraints": [
+    "Issue タイトルは変更しない（必要なら出力JSONに変更案を残すのみ）",
+    "コードパスの行番号は仮説検証で確認した実際の行に近いものへ調整可（変えた場合は出力に記載）",
+    "既存定数値（1MB, 20MB, 100MB, 5MB等）は実コードと一致させる"
+  ]
+}

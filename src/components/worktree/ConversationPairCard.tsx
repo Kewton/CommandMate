@@ -35,6 +35,15 @@ export interface ConversationPairCardProps {
   onCopy?: (content: string) => void;
   /** Issue #485: Callback when user message is inserted into message input */
   onInsertToMessage?: (content: string) => void;
+  /**
+   * Issue #725: Whether to render the assistant messages section.
+   *
+   * Defaults to `true` (preserves existing behavior). When set to `false`
+   * (e.g. by the HistoryPane "User only" filter toggle), the
+   * AssistantMessagesSection is not rendered even if assistant messages
+   * exist in the pair.
+   */
+  showAssistant?: boolean;
 }
 
 /** Parsed content part type */
@@ -53,11 +62,21 @@ interface ContentPart {
  */
 const FILE_PATH_REGEX = /(\/[^\s\n<>"']+\.[a-zA-Z0-9]+)/g;
 
-/** Maximum characters to show in collapsed state */
-const COLLAPSED_MAX_CHARS = 300;
+/**
+ * Maximum characters to show in collapsed state.
+ *
+ * Issue #725: Reduced from 300 to 100 to strengthen default-collapse so that
+ * long assistant responses do not dominate the History pane visually.
+ */
+const COLLAPSED_MAX_CHARS = 100;
 
-/** Maximum lines to show in collapsed state */
-const COLLAPSED_MAX_LINES = 5;
+/**
+ * Maximum lines to show in collapsed state.
+ *
+ * Issue #725: Reduced from 5 to 2 so that collapsed assistant messages
+ * occupy at most 2 lines visually, matching the visual hierarchy goal.
+ */
+const COLLAPSED_MAX_LINES = 2;
 
 // ============================================================================
 // Helper Functions
@@ -222,7 +241,7 @@ const UserMessageSection = memo(function UserMessageSection({
       </div>
       <div
         data-message-id={message.id}
-        className="text-sm text-gray-200 whitespace-pre-wrap break-words"
+        className="text-sm text-gray-200 whitespace-pre-wrap break-words [word-break:break-word] max-w-full overflow-x-hidden"
       >
         <MessageContent content={message.content} onFilePathClick={onFilePathClick} />
       </div>
@@ -303,7 +322,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
       </div>
       <div
         data-message-id={message.id}
-        className="text-sm text-gray-200 whitespace-pre-wrap break-words [word-break:break-word] max-w-full overflow-x-hidden"
+        className="text-xs text-gray-300 whitespace-pre-wrap break-words [word-break:break-word] max-w-full overflow-x-hidden"
       >
         <MessageContent content={displayContent} onFilePathClick={onFilePathClick} />
         {!isExpanded && isTruncated && (
@@ -346,7 +365,7 @@ const AssistantMessagesSection = memo(function AssistantMessagesSection({
   onCopy?: (content: string) => void;
 }) {
   return (
-    <div className="bg-gray-800/50 border-l-4 border-gray-600 p-3 border-t border-gray-700 space-y-3">
+    <div className="bg-gray-900/30 border-l-4 border-gray-700 p-2 border-t border-gray-700 space-y-2">
       {messages.map((message, index) => (
         <React.Fragment key={message.id}>
           {index > 0 && (
@@ -427,6 +446,7 @@ export const ConversationPairCard = memo(function ConversationPairCard({
   onToggleExpand,
   onCopy,
   onInsertToMessage,
+  showAssistant = true,
 }: ConversationPairCardProps) {
   // Determine if expand button should be shown
   const hasLongContent = useMemo(() => {
@@ -489,7 +509,7 @@ export const ConversationPairCard = memo(function ConversationPairCard({
         <div className="bg-gray-800/30 border-l-4 border-gray-600 p-3 border-t border-gray-700">
           <PendingIndicator />
         </div>
-      ) : pair.assistantMessages.length > 0 ? (
+      ) : showAssistant && pair.assistantMessages.length > 0 ? (
         <div className="relative">
           <AssistantMessagesSection
             messages={pair.assistantMessages}

@@ -55,3 +55,13 @@ export const HISTORY_DISPLAY_LIMIT_STORAGE_KEY = 'commandmate:historyDisplayLimi
 export function isHistoryDisplayLimit(value: number): value is HistoryDisplayLimit {
   return (HISTORY_DISPLAY_LIMIT_OPTIONS as readonly number[]).includes(value);
 }
+
+/**
+ * localStorage key used to persist the HistoryPane "User only" filter toggle
+ * (Issue #725).
+ *
+ * Value representation: `'true'` / `'false'` (string), matching the existing
+ * `commandmate:showArchived` convention. Any other value (including legacy
+ * `'1'`/`'0'` or missing) is treated as `false` (safe-off fallback).
+ */
+export const HISTORY_USER_ONLY_STORAGE_KEY = 'commandmate:historyUserOnly';

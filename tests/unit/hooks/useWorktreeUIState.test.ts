@@ -44,35 +44,28 @@ describe('worktreeUIReducer', () => {
     });
   });
 
-  describe('Terminal actions', () => {
-    it('should handle SET_TERMINAL_OUTPUT action', () => {
-      const action: WorktreeUIAction = {
-        type: 'SET_TERMINAL_OUTPUT',
-        output: 'Test output',
-        realtimeSnippet: 'Snippet',
-      };
-      const result = worktreeUIReducer(initialState, action);
-      expect(result.terminal.output).toBe('Test output');
-      expect(result.terminal.realtimeSnippet).toBe('Snippet');
-      expect(result.terminal.lastUpdated).toBeInstanceOf(Date);
+  // Issue #736: the terminal reducer slice (SET_TERMINAL_OUTPUT / SET_TERMINAL_ACTIVE
+  // / SET_TERMINAL_THINKING / SET_AUTO_SCROLL) and the compound actions that touched
+  // it were removed. Mobile (like the PC split panes, #728) now sources terminal
+  // output from useTerminalPanePolling instead of this reducer.
+  describe('Issue #736 — terminal slice removed', () => {
+    it('does not expose a terminal slice on state', () => {
+      const state = initialState as unknown as Record<string, unknown>;
+      expect(state.terminal).toBeUndefined();
     });
 
-    it('should handle SET_TERMINAL_ACTIVE action', () => {
-      const action: WorktreeUIAction = { type: 'SET_TERMINAL_ACTIVE', isActive: true };
-      const result = worktreeUIReducer(initialState, action);
-      expect(result.terminal.isActive).toBe(true);
-    });
-
-    it('should handle SET_TERMINAL_THINKING action', () => {
-      const action: WorktreeUIAction = { type: 'SET_TERMINAL_THINKING', isThinking: true };
-      const result = worktreeUIReducer(initialState, action);
-      expect(result.terminal.isThinking).toBe(true);
-    });
-
-    it('should handle SET_AUTO_SCROLL action', () => {
-      const action: WorktreeUIAction = { type: 'SET_AUTO_SCROLL', enabled: false };
-      const result = worktreeUIReducer(initialState, action);
-      expect(result.terminal.autoScroll).toBe(false);
+    it('ignores legacy SET_TERMINAL_* / SET_AUTO_SCROLL actions (no-op, no terminal slice created)', () => {
+      const legacyActions = [
+        { type: 'SET_TERMINAL_OUTPUT', output: 'x', realtimeSnippet: 'y' },
+        { type: 'SET_TERMINAL_ACTIVE', isActive: true },
+        { type: 'SET_TERMINAL_THINKING', isThinking: true },
+        { type: 'SET_AUTO_SCROLL', enabled: false },
+      ] as unknown as WorktreeUIAction[];
+      legacyActions.forEach((action) => {
+        const result = worktreeUIReducer(initialState, action) as unknown as Record<string, unknown>;
+        expect(result.terminal).toBeUndefined();
+        expect(result).toEqual(initialState);
+      });
     });
   });
 
@@ -281,54 +274,6 @@ describe('worktreeUIReducer', () => {
     });
   });
 
-  describe('Compound actions', () => {
-    it('should handle START_WAITING_FOR_RESPONSE action', () => {
-      const action: WorktreeUIAction = {
-        type: 'START_WAITING_FOR_RESPONSE',
-        cliToolId: 'claude',
-      };
-      const result = worktreeUIReducer(initialState, action);
-      expect(result.phase).toBe('waiting');
-      expect(result.terminal.isActive).toBe(true);
-      expect(result.terminal.output).toBe('');
-      expect(result.terminal.realtimeSnippet).toBe('');
-      expect(result.prompt.visible).toBe(false);
-    });
-
-    it('should handle RESPONSE_RECEIVED action', () => {
-      const message: ChatMessage = {
-        id: 'msg-1',
-        worktreeId: 'wt-1',
-        role: 'assistant',
-        content: 'Response',
-        timestamp: new Date(),
-        messageType: 'normal',
-        archived: false,
-      };
-      const action: WorktreeUIAction = { type: 'RESPONSE_RECEIVED', message };
-      const result = worktreeUIReducer(initialState, action);
-      expect(result.phase).toBe('complete');
-      expect(result.messages).toContainEqual(message);
-      expect(result.terminal.isActive).toBe(false);
-      expect(result.terminal.isThinking).toBe(false);
-    });
-
-    it('should handle SESSION_ENDED action', () => {
-      // First, simulate an active session
-      const activeState = worktreeUIReducer(initialState, {
-        type: 'START_WAITING_FOR_RESPONSE',
-        cliToolId: 'claude',
-      });
-
-      const action: WorktreeUIAction = { type: 'SESSION_ENDED' };
-      const result = worktreeUIReducer(activeState, action);
-      expect(result.phase).toBe('idle');
-      expect(result.terminal.isActive).toBe(false);
-      expect(result.terminal.output).toBe('');
-      expect(result.prompt.visible).toBe(false);
-    });
-  });
-
   describe('Unknown actions', () => {
     it('should return current state for unknown action', () => {
       const unknownAction = { type: 'UNKNOWN_ACTION' } as unknown as WorktreeUIAction;
@@ -348,18 +293,26 @@ describe('useWorktreeUIState hook', () => {
   it('should provide action creators', () => {
     const { result } = renderHook(() => useWorktreeUIState());
     expect(typeof result.current.actions.setPhase).toBe('function');
-    expect(typeof result.current.actions.setTerminalOutput).toBe('function');
     expect(typeof result.current.actions.showPrompt).toBe('function');
     expect(typeof result.current.actions.clearPrompt).toBe('function');
     expect(typeof result.current.actions.setError).toBe('function');
     expect(typeof result.current.actions.clearError).toBe('function');
     expect(typeof result.current.actions.setMessages).toBe('function');
-    expect(typeof result.current.actions.startWaitingForResponse).toBe('function');
-    expect(typeof result.current.actions.responseReceived).toBe('function');
-    expect(typeof result.current.actions.sessionEnded).toBe('function');
-    expect(typeof result.current.actions.setAutoScroll).toBe('function');
     expect(typeof result.current.actions.setMobileActivePane).toBe('function');
     expect(typeof result.current.actions.toggleLeftPane).toBe('function');
+  });
+
+  // Issue #736: removed terminal/compound action creators must be gone.
+  it('does not expose removed terminal/compound action creators (Issue #736)', () => {
+    const { result } = renderHook(() => useWorktreeUIState());
+    const actions = result.current.actions as unknown as Record<string, unknown>;
+    expect(actions.setTerminalOutput).toBeUndefined();
+    expect(actions.setTerminalActive).toBeUndefined();
+    expect(actions.setTerminalThinking).toBeUndefined();
+    expect(actions.setAutoScroll).toBeUndefined();
+    expect(actions.startWaitingForResponse).toBeUndefined();
+    expect(actions.responseReceived).toBeUndefined();
+    expect(actions.sessionEnded).toBeUndefined();
   });
 
   it('should toggle left pane collapsed state (Issue #688)', () => {
@@ -390,17 +343,6 @@ describe('useWorktreeUIState hook', () => {
     expect(result.current.state.phase).toBe('waiting');
   });
 
-  it('should update terminal output', () => {
-    const { result } = renderHook(() => useWorktreeUIState());
-
-    act(() => {
-      result.current.actions.setTerminalOutput('Test output', 'Snippet');
-    });
-
-    expect(result.current.state.terminal.output).toBe('Test output');
-    expect(result.current.state.terminal.realtimeSnippet).toBe('Snippet');
-  });
-
   it('should show and clear prompt', () => {
     const { result } = renderHook(() => useWorktreeUIState());
 
@@ -426,31 +368,28 @@ describe('useWorktreeUIState hook', () => {
     expect(result.current.state.prompt.data).toBeNull();
   });
 
-  it('should handle compound actions', () => {
-    const { result } = renderHook(() => useWorktreeUIState());
-
-    act(() => {
-      result.current.actions.startWaitingForResponse('claude');
+  // Issue #728: ensure terminal-splits state was NOT added to the reducer.
+  // Independent hook (useTerminalSplits) owns that domain, per S3-006.
+  describe('Issue #728 — no terminalSplits state slice (S3-006)', () => {
+    it('does not expose a terminalSplits slice on state.layout or state root', () => {
+      const { result } = renderHook(() => useWorktreeUIState());
+      const state = result.current.state as unknown as Record<string, unknown> & {
+        layout?: Record<string, unknown>;
+      };
+      expect(state.terminalSplits).toBeUndefined();
+      expect(state.splits).toBeUndefined();
+      expect(state.layout?.terminalSplits).toBeUndefined();
+      expect(state.layout?.splits).toBeUndefined();
     });
 
-    expect(result.current.state.phase).toBe('waiting');
-    expect(result.current.state.terminal.isActive).toBe(true);
-
-    const message: ChatMessage = {
-      id: 'msg-1',
-      worktreeId: 'wt-1',
-      role: 'assistant',
-      content: 'Response',
-      timestamp: new Date(),
-      messageType: 'normal',
-      archived: false,
-    };
-
-    act(() => {
-      result.current.actions.responseReceived(message);
+    it('does not expose terminalSplits action creators', () => {
+      const { result } = renderHook(() => useWorktreeUIState());
+      const actions = result.current.actions as unknown as Record<string, unknown>;
+      expect(actions.addSplit).toBeUndefined();
+      expect(actions.removeSplit).toBeUndefined();
+      expect(actions.setSplitCliTool).toBeUndefined();
+      expect(actions.setSplitWidth).toBeUndefined();
+      expect(actions.setFocusedSplitIndex).toBeUndefined();
     });
-
-    expect(result.current.state.phase).toBe('complete');
-    expect(result.current.state.messages).toHaveLength(1);
   });
 });

@@ -220,12 +220,15 @@ export const PREVIEW_DEBOUNCE_MS = 300;
 
 /**
  * File size thresholds
+ *
+ * [Issue #723] MAX_SIZE raised to 2MB to match TEXT_MAX_SIZE_BYTES in
+ * `editable-extensions.ts`. WARNING_THRESHOLD kept at 500KB.
  */
 export const FILE_SIZE_LIMITS = {
   /** Warning threshold (500KB) */
   WARNING_THRESHOLD: 500 * 1024,
-  /** Maximum file size (1MB) - must match TEXT_MAX_SIZE_BYTES in editable-extensions.ts */
-  MAX_SIZE: 1024 * 1024,
+  /** Maximum file size (2MB) - must match TEXT_MAX_SIZE_BYTES in editable-extensions.ts */
+  MAX_SIZE: 2 * 1024 * 1024,
 } as const;
 
 /**

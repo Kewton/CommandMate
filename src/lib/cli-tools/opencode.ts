@@ -24,6 +24,12 @@ import { ensureOpencodeConfig } from './opencode-config';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { createLogger } from '@/lib/logger';
+import {
+  TUI_SESSION_CREATE_WAIT_MS,
+  TUI_TEXT_INPUT_WAIT_MS,
+  TUI_MESSAGE_PROCESSED_WAIT_MS,
+  OPENCODE_EXIT_WAIT_MS,
+} from '@/config/cli-tool-timing-config';
 
 const logger = createLogger('cli-tools/opencode');
 
@@ -110,7 +116,7 @@ export class OpenCodeTool extends BaseCLITool {
       });
 
       // Wait a moment for the session to be created
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
 
       // Resize tmux window to 80 columns (hide sidebar for clean capture-pane output)
       // [SEC-001] Uses execFile (not exec) to prevent shell meta-character injection via sessionName
@@ -158,13 +164,13 @@ export class OpenCodeTool extends BaseCLITool {
       await sendKeys(sessionName, message, false);
 
       // Wait a moment for the text to be typed
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, TUI_TEXT_INPUT_WAIT_MS));
 
       // Send Enter key separately
       await sendSpecialKey(sessionName, 'C-m');
 
       // Wait a moment for the message to be processed
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, TUI_MESSAGE_PROCESSED_WAIT_MS));
 
       // Detect [Pasted text] and resend Enter for multi-line messages
       if (message.includes('\n')) {
@@ -204,7 +210,7 @@ export class OpenCodeTool extends BaseCLITool {
         await sendKeys(sessionName, OPENCODE_EXIT_COMMAND, true);
 
         // Step 3: Wait for OpenCode to process the exit command
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        await new Promise((resolve) => setTimeout(resolve, OPENCODE_EXIT_WAIT_MS));
 
         // Step 4: Check if session still exists; force-kill if needed [D1-007]
         const stillExists = await hasSession(sessionName);

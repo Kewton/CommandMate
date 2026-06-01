@@ -21,7 +21,7 @@ CommandMate provides a responsive UI optimized for both desktop and mobile.
 
 | Screen | Layout | Features |
 |--------|--------|----------|
-| **Desktop** | 2-column split | Resizable panes |
+| **Desktop** | 3-column (ActivityBar / ActivityPane / Right (History inside TerminalContainer)) | VS Code-style full-height Activity Bar, instant Tooltip, History embedded in the Terminal area, resizable panes |
 | **Mobile** | Tab-based | Bottom navigation |
 
 ---
@@ -46,23 +46,30 @@ The `useIsMobile` hook automatically switches layouts based on screen size.
 
 ## Desktop UI
 
-### Layout Structure
+### Layout Structure (Issue #727 / #730)
+
+Adopts a VS Code-style full-height Activity Bar. History is embedded in the Terminal area and runs down to the bottom of the screen.
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  [←Back]  worktree-name                      [Info] │  ← Header
-├──────────────────────┬──────────────────────────────┤
-│                      │                              │
-│   History Pane       │     Terminal Pane            │
-│   (Message History)  │     (Terminal Output)        │
-│                      │                              │
-│                      │                              │
-├──────────────────────┼──────────────────────────────┤
-│                      │  [Message Input]      [Send] │
-│                      │                              │
-└──────────────────────┴──────────────────────────────┘
-                       ↑
-                   Resize Handle
+┌───┬─────────────────────────────────────────────────┐
+│   │  [←Back]  worktree-name                  [Info] │ ← Header
+│ A │ ├─────────────────────────────────────────────┤  │
+│ c │ │ BranchMismatchAlert (conditional)             │
+│ t │ ├──────────┬─────────────────┬──────────────────┤
+│ B │ │          │                 │                  │
+│ a │ │ Activity │ History         │ Terminal         │
+│ r │ │ Pane     │ (inside TerminalContainer, left sub-panel) │ + FilePanel │
+│ ┃ │ │  - Files │ │  - Git        │                 │                  │
+│ ┃ │ │  - Notes │ │  - Schedules  │                 │                  │
+│ ┃ │ │  - Agent │ │  - Timer      │                 │                  │
+│ ┃ │ ├──────────┴─────────────────┴──────────────────┤
+│ ┃ │ │  NavigationButtons (conditional, OpenCode TUI) │
+│ ┃ │ ├─────────────────────────────────────────────┤  │
+│ ┃ │ │  [Message Input]                       [Send] │
+└───┴─────────────────────────────────────────────────┘
+   ↑          ↑               ↑              ↑
+ActivityBar full-height  ActivityPane  History (collapsible)  FilePanel
+(48px, runs from below Header to bottom)
 ```
 
 ### Feature Details
@@ -72,19 +79,27 @@ The `useIsMobile` hook automatically switches layouts based on screen size.
 - **Worktree name**: Displays the current branch/worktree name
 - **Info button**: Opens the Worktree info modal
 
-#### 2. History Pane (Left Pane)
-- Displays past message history chronologically
-- Differentiates between user messages and AI responses
-- Scrollable
+#### 2. ActivityBar (48px, full-height)
+- VS Code-style vertical Activity Bar
+- 6 Activities: Files / Git / Notes / Schedules / Agent / Timer
+- Runs from below the Header to the bottom of the screen (Issue #730)
+- Instant Tooltip on each icon (100ms, dark theme, right placement) (Issue #730)
+- Keyboard navigation: ArrowUp/Down/Home/End/Enter/Space
 
-#### 3. Terminal Pane (Right Pane)
-- Displays real-time CLI tool output
-- Auto-scroll (follows new output)
-- Message input field and send button
+#### 3. ActivityPane (renders the selected Activity)
+- Displays the content of the currently selected Activity
+- Drag-resizable width via ResizableColumn
 
-#### 4. Resize Feature
-- Drag the resizer between left and right panes to adjust width
-- Minimum width 20%, maximum width 80%
+#### 4. TerminalContainer (Right Pane, Issue #730)
+- Embeds History (left sub-panel) + Terminal + FilePanel (right)
+- History is collapsible (`<` / `>` buttons)
+- History width is drag-resizable (10-60%, DEFAULT 40% relative to the TerminalContainer)
+- History / Terminal are each wrapped in an ErrorBoundary
+- The internal id `worktree-history-pane` is applied to the HistoryPane outer wrapper div
+
+#### 5. Resize Feature
+- Drag the boundary between ActivityPane and TerminalContainer to adjust width
+- Inside the TerminalContainer, drag the boundary between History and Terminal
 - Visual feedback during drag
 
 #### 5. Info Modal
@@ -214,11 +229,16 @@ src/components/
 │   ├── MobileHeader.tsx      # Mobile header
 │   ├── MobileTabBar.tsx      # Bottom tab bar
 │   └── MobilePromptSheet.tsx # Bottom sheet for prompts
+├── common/
+│   └── Tooltip.tsx              # 100ms-delay custom Tooltip (Issue #730)
 ├── worktree/
-│   ├── WorktreeDetailRefactored.tsx  # Main component
-│   ├── WorktreeDesktopLayout.tsx     # Desktop 2-column
+│   ├── WorktreeDetailRefactored.tsx  # Main component (ActivityBar full-height: Issue #730)
+│   ├── WorktreeDesktopLayout.tsx     # Desktop 2-column (ActivityPane + Right) — simplified in Issue #730
+│   ├── ActivityBar.tsx               # VS Code-style Activity Bar (Issue #727), Tooltip wrap (Issue #730)
+│   ├── ActivityPane.tsx              # Renders the selected Activity (Issue #727)
+│   ├── TerminalContainer.tsx         # History + Terminal container (Issue #730)
 │   ├── TerminalDisplay.tsx           # Terminal display
-│   ├── HistoryPane.tsx               # History pane
+│   ├── HistoryPane.tsx               # History pane (delegated inside TerminalContainer, collapsible)
 │   ├── PromptPanel.tsx               # Desktop prompt
 │   ├── PaneResizer.tsx               # Pane resizer
 │   └── MessageInput.tsx              # Message input

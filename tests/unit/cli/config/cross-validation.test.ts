@@ -43,3 +43,14 @@ describe('[DR2-07] CLI_TOOL_IDS cross-validation', () => {
     expect(CLI_TOOL_IDS.length).toBe(SERVER_CLI_TOOL_IDS.length);
   });
 });
+
+describe('[#757] CLI_TOOL_IDS single source of truth', () => {
+  // After Issue #757, src/cli/config/cli-tool-ids.ts re-exports CLI_TOOL_IDS from
+  // src/lib/cli-tools/types.ts (the single source of truth) instead of copying the
+  // literal. This asserts the *same array reference* is shared, which guarantees
+  // there is no second literal that could silently drift. If anyone reintroduces a
+  // standalone copy, this reference check fails even when the values happen to match.
+  it('CLI CLI_TOOL_IDS is the same reference as the server source of truth', () => {
+    expect(CLI_TOOL_IDS).toBe(SERVER_CLI_TOOL_IDS);
+  });
+});

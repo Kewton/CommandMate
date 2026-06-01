@@ -25,5 +25,9 @@
   "connection": {
     "error": "Connection error",
     "serverError": "A problem occurred connecting to the server"
+  },
+  "fileTooLarge": {
+    "editableLimit": "Editable file size limit ({limit}MB) exceeded",
+    "viewerLimit": "Viewer-only file size limit exceeded"
   }
 }

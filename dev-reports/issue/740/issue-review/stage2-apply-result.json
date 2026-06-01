@@ -1,0 +1,23 @@
+{
+  "stage": "2+4",
+  "action": "apply review findings to GitHub Issue #740",
+  "applied_findings": [
+    {"id": "S1-001", "severity": "Must Fix", "applied": true, "how": "対応方針セクションを『親所有 + per-split 配布』へ全面書き換え。useAutoYes を split で呼ばない注記を追加。AutoYesToggle に渡す値の出所を親 props に修正"},
+    {"id": "S1-002", "severity": "Must Fix", "applied": true, "how": "影響範囲表の WorktreeDetailRefactored 行に handleAutoYesToggle の cliToolId 引数化を明記。根本原因 §4(b) にも記載"},
+    {"id": "S1-003", "severity": "Must Fix", "applied": true, "how": "影響範囲表に renderSplitPane の追加配布 + TerminalSplitPaneContent の props 追加（autoYesExpiresAt/lastAutoResponse/onAutoYesToggle）+ footer 描画を明記"},
+    {"id": "S1-004", "severity": "Should Fix", "applied": true, "how": "根本原因 §4 を『3独立状態が無い』から『enabled は既に per-CLI Map で配布済み、欠落は3点(a/b/c)』へ訂正"},
+    {"id": "S1-005", "severity": "Should Fix", "applied": true, "how": "スコープ外に非アクティブ split のサーバー主導自動OFF即時反映を追加。受入条件にスコープ外確認の項目追加"},
+    {"id": "S1-006", "severity": "Should Fix", "applied": true, "how": "対応方針に『client-side auto-response は per-split 化しない（#501 サーバー poller 委譲）』注記を追加。受入条件にも確認項目追加"},
+    {"id": "S1-007", "severity": "Should Fix", "applied": true, "how": "行番号引用を現行コードに更新し『#732/#736 でシフトしうるため目安』注記を追加。§2 を L161-213 に修正"},
+    {"id": "S1-008", "severity": "Should Fix", "applied": true, "how": "受入条件『A=Claude,B=Claude 同期』を削除（useTerminalSplits L175-178/192-201 が同一CLI 2split を禁止すると実コードで確認）。テスト方針セクションを追加"},
+    {"id": "S1-009", "severity": "Nice to Have", "applied": true, "how": "影響範囲表に TerminalSplitPaneContent の props JSDoc(L56-59) 更新を追記"},
+    {"id": "S1-010", "severity": "Nice to Have", "applied": true, "how": "受入条件に Mobile 後方互換(L1897-1904) と split0→activeCliTab 同期(L1461)維持を追加"}
+  ],
+  "must_fix_applied": 3,
+  "should_fix_applied": 5,
+  "nice_to_have_applied": 2,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/740",
+  "verification": {
+    "S1-008_same_cli_forbidden_confirmed": "useTerminalSplits.ts:175-178 (setSplitCliTool no-op) and 192-201 (availableCliTools filter) confirmed in code"
+  }
+}

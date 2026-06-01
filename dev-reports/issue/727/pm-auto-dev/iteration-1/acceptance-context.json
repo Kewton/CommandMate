@@ -1,0 +1,42 @@
+{
+  "issue_number": 727,
+  "feature_summary": "PC版 Worktree詳細画面のレイアウトを VS Code 風 Activity Bar + History 独立カラム化に再構成（モバイル経路は不変）",
+  "branch": "feature/727-worktree",
+  "tdd_result_path": "dev-reports/issue/727/pm-auto-dev/iteration-1/tdd-result.json",
+  "issue_body_source": "Run `gh issue view 727 --json body --jq '.body'` to get the latest acceptance criteria.",
+  "work_plan_path": "dev-reports/issue/727/work-plan.md",
+  "acceptance_criteria_categories": [
+    "Activity Bar: 6 アイコン縦並び・クリックトグル・キーボード操作（Tab + ArrowUp/Down + Enter/Space）・aria 属性（role=tablist / aria-orientation=vertical / aria-selected / aria-label / aria-controls=worktree-activity-pane）・tooltip・localStorage 永続化（DEFAULT_ACTIVITY=files にフォールバック）",
+    "Activity Pane: Files/Git/Notes/Schedules/Agent/Timer の各 Activity が対応する既存コンポーネントを表示・PaneResizer で幅可変・activeActivity=null で useFilePolling 無効化・hydration 前は DEFAULT_ACTIVITY を採用",
+    "History ペイン: Activity Pane の右・ターミナルの左に独立カラム・PC では Message/Git サブタブが存在しない・< ボタンで折りたたみ・> 展開バー・幅ドラッグ可変・visible/width が localStorage 永続化・既存検索(#716)/User only(#725) が動作・初期表示 ON",
+    "Deep link: ?pane=git → Git Activity / ?pane=notes → Notes / ?pane=logs → Schedules / ?pane=agent → Agent / ?pane=timer → Timer / ?pane=files → Files / ?pane=history → ActivityPane closed + History visible",
+    "横断: PC 版のみ対象・モバイル不変・既存右側ターミナル/FilePanel 不変・lint/tsc/test:unit/build 全 PASS",
+    "テスト更新: 11 既存ファイル更新 + 2 削除 + 4 新規・E2E 4 件影響確認"
+  ],
+  "test_scenarios": [
+    "TS-01: Activity Bar が 6 アイコン縦並びで表示される（DOM 検証）",
+    "TS-02: Activity アイコンクリックで対応する Activity Pane が表示される（6 種すべて）",
+    "TS-03: 同じアイコン再クリックで Activity Pane が非表示になる",
+    "TS-04: 別アイコンクリックで Activity Pane の内容が切替わる",
+    "TS-05: localStorage 永続化（commandmate.worktree.activeActivity）動作・不正値時は files にフォールバック",
+    "TS-06: アクセシビリティ（role=tablist / aria-orientation=vertical / aria-selected / aria-label / aria-controls）",
+    "TS-07: キーボード操作（ArrowUp/Down/Enter/Space）",
+    "TS-08: History pane が独立カラムに配置されている",
+    "TS-09: PC History pane に Message/Git サブタブが存在しない",
+    "TS-10: History pane の < で折りたたみ、> で展開",
+    "TS-11: History pane visible / width が localStorage 永続化",
+    "TS-12: Deep link ?pane=git/notes/logs/agent/timer/files/history が新マッピングに従って解決される",
+    "TS-13: モバイル経路の memo タブ（NotesAndLogsPane）が変更なしで動作する",
+    "TS-14: useFilePolling は activeActivity='files' のときのみ enabled、null/他 Activity で停止",
+    "TS-15: lint / tsc / test:unit / build がすべてエラーゼロで通る"
+  ],
+  "verification_commands": [
+    "npm run lint",
+    "npx tsc --noEmit",
+    "npm run test:unit",
+    "npm run build",
+    "git status",
+    "git diff --stat"
+  ],
+  "output_path": "dev-reports/issue/727/pm-auto-dev/iteration-1/acceptance-result.json"
+}

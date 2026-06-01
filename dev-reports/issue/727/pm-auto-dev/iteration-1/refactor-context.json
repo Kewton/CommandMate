@@ -1,0 +1,39 @@
+{
+  "issue_number": 727,
+  "branch": "feature/727-worktree",
+  "tdd_result_path": "dev-reports/issue/727/pm-auto-dev/iteration-1/tdd-result.json",
+  "acceptance_result_path": "dev-reports/issue/727/pm-auto-dev/iteration-1/acceptance-result.json",
+  "refactor_targets": [
+    "src/components/worktree/ActivityBar.tsx (NEW)",
+    "src/components/worktree/ActivityPane.tsx (NEW)",
+    "src/components/worktree/WorktreeDesktopLayout.tsx (508 lines diff)",
+    "src/components/worktree/WorktreeDetailRefactored.tsx (341 lines diff — memo split)",
+    "src/config/activity-bar-config.ts (NEW)",
+    "src/hooks/useActivityBarState.ts (NEW)",
+    "src/hooks/useHistoryPaneState.ts (NEW)",
+    "src/hooks/useWorktreeUIState.ts (85 lines added)",
+    "src/types/ui-state.ts (39 lines diff)",
+    "src/types/ui-actions.ts (8 lines added)"
+  ],
+  "quality_metrics": {
+    "before_test_count": 6610,
+    "before_lint": "pass",
+    "before_tsc": "pass",
+    "before_build": "pass"
+  },
+  "improvement_goals": [
+    "全テスト/lint/tsc/build を緑のまま維持する（最重要）",
+    "新規ファイル 5 件の責務分離・命名・コメント整合性を確認",
+    "WorktreeDetailRefactored.tsx の memo 分割が Issue #411 R3-007 ガイドラインに従っているか確認、メンテナンスコメント明確化",
+    "WorktreeDesktopLayout.tsx の 4-column レイアウト + mobile fallback の DRY 改善余地",
+    "useActivityBarState / useHistoryPaneState の hydration ロジックを useWorktreeUIState の isHydratedRef パターンと整合させる",
+    "ActivityPane.tsx のActivity切替が switch-case ではなくテーブル駆動になっているか確認"
+  ],
+  "constraints": [
+    "MUST NOT change behavior — only structural improvements",
+    "MUST NOT touch mobile path (WorktreeDetailSubComponents.tsx)",
+    "MUST keep all 6610 unit tests green",
+    "MUST keep lint / tsc / build green"
+  ],
+  "output_path": "dev-reports/issue/727/pm-auto-dev/iteration-1/refactor-result.json"
+}

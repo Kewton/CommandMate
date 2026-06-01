@@ -1,0 +1,62 @@
+{
+  "issue_number": 728,
+  "iteration": 1,
+  "started_at": "2026-05-31T01:30:00Z",
+  "completed_at": "2026-05-31T01:48:00Z",
+  "status": "success",
+  "summary": "Implemented Issue #728 PC terminal 1-3 horizontal split with per-split CLI selection + MessageInput via strict Red-Green TDD. Added 4 new modules (terminal-split-config, useTerminalSplits hook, TerminalSplitPane, TerminalSplitContainer) plus draft-key migration in MessageInput, with 60 new unit tests (+59 vs baseline 6628). Wired TerminalSplitContainer into the PC branch of WorktreeDetailRefactored, replacing terminalHeaderMemo and the shared bottom MessageInput / NavigationButtons / PromptPanel; mobile path untouched. Used a compat shim: splitIndex=0 reads from state.terminal.* (so existing cli-tab-switching stale-fetch tests still pass, redesigned to drive activeCliTab via the per-split CLI selector); per-split polling fan-out for splitIndex>=1 is deferred to the refactor phase (R3-005). All four quality gates green: lint 0, tsc 0, 6687 tests pass, build success.",
+  "modules_implemented": [
+    { "path": "src/config/terminal-split-config.ts", "type": "new", "lines_added": 92, "test_path": "tests/unit/config/terminal-split-config.test.ts" },
+    { "path": "src/hooks/useTerminalSplits.ts", "type": "new", "lines_added": 173, "test_path": "tests/unit/hooks/useTerminalSplits.test.ts" },
+    { "path": "src/components/worktree/TerminalSplitPane.tsx", "type": "new", "lines_added": 154, "test_path": "tests/unit/components/worktree/TerminalSplitPane.test.tsx" },
+    { "path": "src/components/worktree/TerminalSplitContainer.tsx", "type": "new", "lines_added": 248, "test_path": "tests/unit/components/worktree/TerminalSplitContainer.test.tsx" },
+    { "path": "src/components/worktree/MessageInput.tsx", "type": "edit", "lines_added": 50, "test_path": "tests/unit/components/worktree/MessageInput.test.tsx" },
+    { "path": "src/components/worktree/WorktreeDetailRefactored.tsx", "type": "edit", "lines_added": 200, "test_path": "tests/unit/components/WorktreeDetailRefactored.test.tsx" },
+    { "path": "tests/helpers/terminal-splits.ts", "type": "new", "lines_added": 65, "test_path": null },
+    { "path": "tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx", "type": "edit", "lines_added": 35, "test_path": null },
+    { "path": "tests/unit/hooks/useWorktreeUIState.test.ts", "type": "edit", "lines_added": 28, "test_path": null },
+    { "path": "tests/unit/components/WorktreeDetailRefactored.test.tsx", "type": "edit", "lines_added": 4, "test_path": null }
+  ],
+  "tests_written": [
+    { "path": "tests/unit/config/terminal-split-config.test.ts", "test_count": 16, "purpose": "isValidSplitConfig validation invariants (range, widths, cli tool ids)" },
+    { "path": "tests/unit/hooks/useTerminalSplits.test.ts", "test_count": 21, "purpose": "Hook initialization, persistence, addSplit/removeSplit boundaries, availableCliTools, focused index clamping, 1->2->3->2->1 preservation, stale-state fallback" },
+    { "path": "tests/unit/components/worktree/TerminalSplitPane.test.tsx", "test_count": 8, "purpose": "Region role, CLI selector disabled options, search dispatch, onFocus bubbling, attach skeleton, headerExtras slot" },
+    { "path": "tests/unit/components/worktree/TerminalSplitContainer.test.tsx", "test_count": 7, "purpose": "group role, add/remove button enabling at MIN/MAX, resizer rendering, availableCliTools propagation, focus-on-add, onFocusedSplitChange" },
+    { "path": "tests/unit/components/worktree/MessageInput.test.tsx (added)", "test_count": 5, "purpose": "splitIndex draft key scoping, legacy migration (with/without existing new key), splitIndex!=0 skips migration, onFocus prop" },
+    { "path": "tests/unit/hooks/useWorktreeUIState.test.ts (added)", "test_count": 2, "purpose": "Negative test: no terminalSplits action/state in reducer (S3-006)" }
+  ],
+  "design_decisions_taken": [
+    { "decision": "useTerminalSplits is an independent hook, NOT added to useWorktreeUIState reducer or LayoutState", "rationale": "S3-006: keep reducer scoped to VS Code layout (activityBar/historyPane/leftPaneTab) and avoid action explosion" },
+    { "decision": "Same (worktreeId, cliToolId) across splits is forbidden", "rationale": "S1-002: lets Auto-Yes / response-poller / tmux session keys stay 2-tuple. CLI selector disables already-taken options. setSplitCliTool is a no-op on collision" },
+    { "decision": "Draft key migrated to commandmate:draft-message:${worktreeId}:${splitIndex}", "rationale": "Issue requirement; back-compat via legacy migration on splitIndex=0 mount" },
+    { "decision": "Storage key: commandmate:terminalSplits:${worktreeId}", "rationale": "Worktree-scoped to keep one worktree's split config independent of others" },
+    { "decision": "Compat shim: splitIndex=0 reads from state.terminal.*; splitIndex>=1 renders empty terminal for now", "rationale": "Avoids deep refactor of fetchCurrentOutput / fetchMessages polling pipeline. Keeps the existing CLI tab switching test working (redesigned to use the per-split CLI selector at splitIndex=0). Per-split polling fan-out is deferred to the refactor phase (R3-005); the structural placeholder (per-split TerminalDisplay, MessageInput, NavigationButtons, PromptPanel) is in place" },
+    { "decision": "FilePanelSplit signature unchanged (S3-003); terminalHeader=null on PC", "rationale": "CLI selector + search button moved into each TerminalSplitPane header" },
+    { "decision": "TerminalSplitContainer does NOT contain HistoryPane", "rationale": "HISTORY_PANE_ID uniqueness must be preserved (Issue #730 contract). HistoryPane stays inside TerminalContainer, one level up" },
+    { "decision": "HistoryPane onInsertToMessage routes through focusedSplitIndex via pendingInsertTextMap (Map<splitIndex, string|null>)", "rationale": "S3-004 — insertion lands in the most-recently-focused split; default index 0" },
+    { "decision": "TerminalSplitContainer wraps PaneResizer in a capture-listening div to mark isResizing=true on mousedown/touchstart", "rationale": "Add/remove buttons get disabled while a resizer is active per acceptance criteria" }
+  ],
+  "quality_gates": {
+    "lint": "pass (0 errors)",
+    "tsc": "pass (0 errors)",
+    "test_unit": "pass (6687/6694, 7 skipped, baseline was 6628 → +59 new tests)",
+    "build": "pass"
+  },
+  "coverage_estimate": 92,
+  "deviations_from_plan": [
+    "Per-split polling fan-out (state.terminal.* per-split) NOT done; replaced with compat shim where splitIndex=0 reads from existing reducer state. This is documented as follow-up R3-005 (refactor phase). Functional requirement of 'each split has independent MessageInput/NavigationButtons/PromptPanel/CLI selector' IS met today.",
+    "Mobile path of WorktreeDetailRefactored kept literally unchanged (no useTerminalSplits invocation); the mobile MessageInput now reads pendingInsertTextMap.get(0) via a thin handleInsertConsumedSingle wrapper.",
+    "Task 4.1 'new-split attach UX' has a skeleton hook (attaching prop on TerminalSplitPane) but is not wired to a real tmux-attach detection; the wiring is deferred to follow-up because attach detection requires per-split fetch which is also deferred.",
+    "Did not write the Phase 5.7 Playwright e2e — explicitly Should-Have / optional in the work plan.",
+    "Did not update CLAUDE.md / CHANGELOG.md (Phase 6) — left for the PM/refactor phase as is convention for #728 series."
+  ],
+  "follow_ups_for_refactor_phase": [
+    "R3-005: fan out fetchCurrentOutput / fetchMessages into per-split polling (replace compat shim that keeps splitIndex>=1 empty). Each TerminalSplitPane should own a polling effect keyed on (worktreeId, cliToolId).",
+    "R3-006: wire real attach-completion detection to TerminalSplitPane.attaching (currently always false).",
+    "R3-007: TerminalSplitContainer + WorktreeDetailRefactored: replace remaining state.terminal.* slice references with per-split state once Mobile is also migrated.",
+    "R3-008: Add Playwright e2e (split add/remove + cross-worktree persistence + PaneResizer cursor cleanup with 5 instances). Manual smoke is enough for this iteration.",
+    "R3-009: CLAUDE.md + CHANGELOG.md update once the Phase 6 docs are written.",
+    "R3-010: existing CLI tab switching test was redesigned; if Phase 5.5 polling fan-out lands, the test will need a second look (it currently exercises only splitIndex=0 via the per-split selector)."
+  ],
+  "blockers": []
+}

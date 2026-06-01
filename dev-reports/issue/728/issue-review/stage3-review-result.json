@@ -1,0 +1,190 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "iteration": 1,
+  "focus": "影響範囲",
+  "reviewer": "claude-opus (issue-review-agent)",
+  "reviewed_at": "2026-05-30T16:10:08Z",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "Must Fix",
+      "title": "MessageInput / NavigationButtons / PromptPanel が WorktreeDetailRefactored 直下にあり TerminalContainer / FilePanelSplit の terminal prop 外にいる — 「各スプリットに独立した MessageInput」を実現するには Issue の「terminal prop 内に閉じる」記述だけでは不可能",
+      "description": "現状: `WorktreeDetailRefactored.tsx:1738-1742` で `TerminalContainer` に渡している `terminal` prop は **TerminalDisplay 単体（output / isActive / isThinking / autoScroll の描画のみ）** であり、`MessageInput`（:1755-1764）/ `NavigationButtons`（:1745-1753）/ `PromptPanel`（:1767-1779）はその外側の `<div className=\"flex flex-col flex-1 min-h-0\">` 直下に配置されている。さらに `state.terminal.output` / `state.terminal.isActive` / `state.terminal.isThinking` / `state.terminal.autoScroll` / `state.prompt.*` / `isSelectionListActive` / `activeCliTab` / `autoYesEnabled` / `pendingInsertText` はすべて WorktreeDetailRefactored の単一 useReducer state（`useWorktreeUIState`）＋ローカル useState（:218 `autoYesStateMap`, :224 `isSelectionListActive`, :377 `pendingInsertText`）に閉じている。問題: Issue 本文「`TerminalContainer` 内の Terminal 領域（= `FilePanelSplit` の terminal 側）を `TerminalSplitContainer` に置換する」だけでは MessageInput / NavigationButtons / PromptPanel は **置換範囲の外** にあり、スプリットの選択 CLI と独立して動かない。各スプリット独立にするには (a) MessageInput / NavigationButtons / PromptPanel / `state.terminal.*` のうちスプリットローカルにすべきもの全てを `TerminalSplitPane` 内部へ移管し、(b) ターミナル出力 state（`state.terminal.output` 等）と Auto-Yes/SelectionList state を **per-(worktreeId, cliToolId)** で持つ Map 構造に拡張する必要がある。推奨対応: Issue「想定影響範囲」表に明示的に追記する。「`WorktreeDetailRefactored.tsx` の MessageInput / NavigationButtons / PromptPanel を `WorktreeDesktopLayout` 直下から `TerminalSplitPane` 内部に移動する。これに伴い `state.terminal`（output / isActive / isThinking / autoScroll）を `Map<CLIToolType, TerminalState>` 形態（または `terminalByCli`）にスコープ化、`isSelectionListActive` を `Map<CLIToolType, boolean>` に変更、`autoYesStateMap`（既に Map）はそのまま流用、`pendingInsertText` を `Map<splitIndex, string|null>` に拡張、`fetchCurrentOutput` を per-cliToolId 並列化（同時に Claude+Codex 両方の output API を呼ぶ）する」。これは Issue の影響範囲を大幅に拡大するため、Issue Body 「想定影響範囲」と「実装方針」両方で明記して開発者に予告しないと、Phase 4 実装で「terminal prop 内にしか触らない」と勘違いして MessageInput が単一のままになる事故を起こす。",
+      "affected_files_or_modules": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/components/worktree/TerminalContainer.tsx",
+        "src/components/worktree/FilePanelSplit.tsx",
+        "src/components/worktree/MessageInput.tsx",
+        "src/components/worktree/NavigationButtons.tsx",
+        "src/components/worktree/PromptPanel.tsx",
+        "src/hooks/useWorktreeUIState.ts",
+        "src/types/ui-state.ts"
+      ],
+      "affected_issues": ["#727", "#730", "#473", "#485", "#525"],
+      "evidence": "src/components/worktree/WorktreeDetailRefactored.tsx:1485-1494 (terminal prop = TerminalDisplay only), :1738-1742 (TerminalContainer に terminal=rightPaneMemo を渡す), :1745-1753 (NavigationButtons WorktreeDesktopLayout の外), :1755-1764 (MessageInput 同様外), :1767-1779 (PromptPanel 同様外), :377 (pendingInsertText single state), :224 (isSelectionListActive single state), :218 (autoYesStateMap Map). src/types/ui-state.ts:25-38 (TerminalState 単一インスタンス)。",
+      "rationale": "Issue 本文を素直に読むと「terminal prop を TerminalSplitContainer に差し替え」だけで済むように見えるが、MessageInput が外側にいるため必ず実装中盤で「Issue に書いていない大改修」が発生する。Stage 3 で明文化しないと Phase 4 のスコープが半日〜数日ぶれる。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "Must Fix",
+      "title": "クライアント側 `state.terminal.output` / `fetchCurrentOutput` は activeCliTab 単一前提 — スプリット2/3 表示時にどちらか片方しか描画されない",
+      "description": "現状: `fetchCurrentOutput`（WorktreeDetailRefactored.tsx:482-548）は `activeCliTabRef.current` を読み、結果を `actions.setTerminalOutput()` で **単一の `state.terminal.output`** に書き込む。Polling interval（:1337-1348）も `state.terminal.isActive` 単一フラグで決定される。サーバ側 `getPollerKey()`（`response-poller-core.ts:59`）と `buildCompositeKey()`（`auto-yes-state.ts:41`）は `(worktreeId, cliToolId)` 複合キーで既に複数CLI並列実行可能なため、サーバ側は無変更で OK だが、クライアントは Claude スプリットと Codex スプリットを同時表示すると `fetchCurrentOutput` がどちらかの CLI 分しかフェッチしない。問題: (1) スプリット 2 が選択中の Codex の output が一切 polling で更新されない（手動 refresh のみ）、(2) Auto-Yes が活性なスプリットの prompt が逆スプリットからは見えない、(3) `isSelectionListActive` も single state なので OpenCode + Copilot 並列時に矛盾する。推奨対応: Issue「想定影響範囲」「実装方針」に追記。「`fetchCurrentOutput` を `fetchCurrentOutputForCli(cliToolId)` にリファクタし、Polling Effect を `splits.map(split => useFetchPoller(worktreeId, split.cliToolId))` で per-split 並列起動する。`state.terminal` を `Map<CLIToolType, TerminalState>` に変更し、`actions.setTerminalOutput(cliToolId, output, snippet)` シグネチャに拡張。`useWorktreeUIState` reducer の SET_TERMINAL_OUTPUT/SET_TERMINAL_ACTIVE/SET_TERMINAL_THINKING/SET_AUTO_SCROLL を cliToolId スコープ化」。これを書かないと Phase 4 で「単一 state を Map 化」する破壊的リファクタが Issue スコープ外として却下されるか、表示バグで受入失敗する。",
+      "affected_files_or_modules": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/hooks/useWorktreeUIState.ts",
+        "src/types/ui-state.ts",
+        "src/types/ui-actions.ts"
+      ],
+      "affected_issues": ["#525", "#473", "#368"],
+      "evidence": "src/components/worktree/WorktreeDetailRefactored.tsx:482-548 (fetchCurrentOutput uses activeCliTabRef single ref), :1337-1348 (polling interval keyed off single state.terminal.isActive), :224 (isSelectionListActive single useState), :505-509 (actions.setTerminalOutput single sink). src/types/ui-state.ts:25-38 (TerminalState 単一), :150-165 (WorktreeUIState.terminal single field). src/hooks/useWorktreeUIState.ts:42-69 (SET_TERMINAL_* reducers single sink)。",
+      "rationale": "サーバ側はマルチCLI並列可能だが、クライアント表示層が single sink。Issue 受入条件「スプリットAでClaude、スプリットBでCodexを並列表示・操作可能」を満たすには表示層の Map 化が必須。Phase 4 で気付くと Issue 再分割になる。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "Must Fix",
+      "title": "Issue「TerminalContainer 内の Terminal 領域（= FilePanelSplit の terminal 側）を TerminalSplitContainer に置換」が指す位置と実際の構造のズレ — FilePanelSplit を置換対象に含めるか含めないかが不明確",
+      "description": "現状: `WorktreeDetailRefactored.tsx:1485` で `<FilePanelSplit terminal={<TerminalDisplay .../>} ...>` を rightPaneMemo に詰め、:1740 で `TerminalContainer.terminal = rightPaneMemo` に渡している。つまり実構造は `TerminalContainer (History+Terminal) > FilePanelSplit (Terminal+Files) > TerminalDisplay (output text)`。Issue 本文「`FilePanelSplit` 自体および右側ファイルパネルは無変更」「`FilePanelSplit` の `terminal` prop 内に閉じる」と書かれているが、その「terminal prop の中」= 現状 `<TerminalDisplay/>` 単体である。したがって `TerminalSplitContainer` を入れる場所は **`FilePanelSplit` の `terminal` prop = `TerminalDisplay` 単体を `TerminalSplitContainer` に差し替える** ことになり、`FilePanelSplit` は無変更で OK（terminalHeader prop も共通維持）。**しかし** `terminalHeader`（CLI tab header / search button）は `FilePanelSplit` に別 prop として渡されているため、スプリット毎の CLI セレクター UI を `terminalHeader` 側に置くなら FilePanelSplit に手を入れる必要がある。Issue は CLI セレクターを「各スプリット内」と書いているので問題ない（各 TerminalSplitPane の上部に CLI セレクターを置く）が、現行 `terminalHeader` の責務（共通ヘッダー）と「各スプリット個別の CLI セレクター」を **同居させるかどちらか一方にするか** が Issue で未定義。推奨対応: Issue「実装方針 3. FilePanel との関係」に追記。「`FilePanelSplit` の `terminal` prop は現在 `<TerminalDisplay/>` であり、これを `<TerminalSplitContainer>` に差し替える。`FilePanelSplit` の `terminalHeader` prop は現在 PC用 CLI tab header（`terminalHeaderMemo`）が入っているが、Issue #728 では各スプリットが独立 CLI セレクターを持つため、`terminalHeader` を **空 / null に変更し各 `TerminalSplitPane` 内部に CLI セレクター UI を持つ**。`FilePanelSplit.tsx` 自体のシグネチャは無変更（terminalHeader が空でも動く既存挙動を流用）」。これを書かないと Phase 4 で `terminalHeader` の扱いに迷う。",
+      "affected_files_or_modules": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/components/worktree/FilePanelSplit.tsx",
+        "src/components/worktree/TerminalContainer.tsx"
+      ],
+      "affected_issues": ["#730", "#469", "#47"],
+      "evidence": "src/components/worktree/WorktreeDetailRefactored.tsx:1404-1479 (terminalHeaderMemo: PC用 CLI tab header + 検索ボタン), :1485-1495 (FilePanelSplit に terminal=TerminalDisplay と terminalHeader=terminalHeaderMemo を渡す), :1738-1742 (TerminalContainer に terminal=rightPaneMemo)。",
+      "rationale": "Issue は影響範囲を「terminal prop 内」と局所化したいが、現状の terminalHeader 経路（CLI タブ・検索ボタン）の扱いが不明だと Phase 4 で実装者が独自判断する。検索ボタン（Issue #47）の置き場所も含めて影響範囲を明文化する必要あり。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "Should Fix",
+      "title": "HistoryPane / MemoPane の onInsertToMessage がどのスプリットの MessageInput に届くか未定義（Issue #485 連携経路の破綻リスク）",
+      "description": "現状: `WorktreeDetailRefactored.tsx:377` で `pendingInsertText` は **単一の useState**、`handleInsertToMessage`（:378-380）は全 HistoryPane / MemoPane から呼ばれて単一 state を書き込み、:1761 / :2040 の MessageInput に props で流される。スプリット導入後は MessageInput が複数になるため、HistoryPane / MemoPane の「挿入」ボタンを押したときに **どのスプリットの MessageInput に挿入されるか** が未定義。問題: (1) UX として最直感的なのは「直前にフォーカスがあったスプリット」だが focus tracking が必要、(2) シンプルなのは「スプリット 0（左端）固定」、(3) または「全スプリットに同時挿入」。Issue で意思決定しないと Phase 4 で開発者の独断で固定される。推奨対応: Issue「対応方針 2. 各スプリットの構成」または「受入条件 > 各スプリットの独立性」に追記。「HistoryPane / MemoPane の挿入ボタン → MessageInput 連携は『最後にフォーカスのあった MessageInput』を対象とする（`lastFocusedSplitIndex` を Ref で管理、デフォルトは splitIndex=0）。`pendingInsertText` を `Map<splitIndex, string|null>` に拡張する」。決定保留にすると Phase 4 でユーザー体験の根幹仕様がぶれる。",
+      "affected_files_or_modules": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/components/worktree/HistoryPane.tsx",
+        "src/components/worktree/MemoPane.tsx",
+        "src/components/worktree/MessageInput.tsx"
+      ],
+      "affected_issues": ["#485", "#727"],
+      "evidence": "src/components/worktree/WorktreeDetailRefactored.tsx:377-383 (pendingInsertText single state, handleInsertToMessage single sink), :1577 (MemoPane onInsertToMessage), :1655 (HistoryPane onInsertToMessage), :1761 (PC MessageInput pendingInsertText), :2040 (Mobile MessageInput pendingInsertText)。",
+      "rationale": "Issue #485 (挿入機能) の連携経路は現状単一ペア前提で設計されているため、複数 MessageInput 化で必ず矛盾する。Issue 段階で挿入先決定ロジックを定義しておかないと受入テストで「どこに入るのが正解か」が判定不能。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "Should Fix",
+      "title": "TerminalContainer 内に TerminalSplitContainer を入れると HISTORY_PANE_ID の重複や useHistoryPaneState 多重インスタンス化リスクがある（Issue #730 構造との結合）",
+      "description": "現状: `TerminalContainer.tsx:34` で `HISTORY_PANE_ID = 'worktree-history-pane'` がエクスポートされており、:91 で `useHistoryPaneState()` を呼ぶ。一方 `WorktreeDetailRefactored.tsx` 側でも `toggleHistoryPane`（:1662）を取得しており、CustomEvent broadcaster で 2 instance 同期している（CLAUDE.md の useHistoryPaneState 行で明記）。Issue #728 で `TerminalContainer.terminal` の中に `TerminalSplitContainer` を入れること自体は構造的に問題ないが、(1) TerminalSplitContainer 内部の各 TerminalSplitPane が誤って HistoryPane を内包すると ID 重複（DOM `id=worktree-history-pane` 重複）、(2) TerminalSplitContainer が `useHistoryPaneState` を不必要に呼ぶと 3rd instance 増えて CustomEvent 同期負荷が増す、(3) TerminalSplitContainer の自身の split width state 用に同じパターン（`commandmate:terminalSplits:${worktreeId}` localStorage + 必要なら CustomEvent broadcaster）が必要か検討要。推奨対応: Issue「想定影響範囲」または「実装方針」に追記。「TerminalSplitContainer / TerminalSplitPane は HistoryPane と無関係（HistoryPane は TerminalContainer 直下に残る）。HISTORY_PANE_ID は引き続き TerminalContainer 内で 1 箇所のみレンダリング。`useHistoryPaneState` は新コンポーネントから呼ばない」「`useTerminalSplits` は単一インスタンス前提（PC では WorktreeDetailRefactored か TerminalSplitContainer のどちらか一方で呼ぶ）。複数インスタンスを想定する場合は useHistoryPaneState と同じ CustomEvent broadcaster パターンを採用」と明記。",
+      "affected_files_or_modules": [
+        "src/components/worktree/TerminalContainer.tsx",
+        "src/components/worktree/TerminalSplitContainer.tsx (新規)",
+        "src/hooks/useHistoryPaneState.ts",
+        "src/hooks/useTerminalSplits.ts (新規)"
+      ],
+      "affected_issues": ["#730", "#727"],
+      "evidence": "src/components/worktree/TerminalContainer.tsx:34 (export const HISTORY_PANE_ID), :87-90 (TerminalContainer signature with terminal prop), :91 (useHistoryPaneState 呼出)。CLAUDE.md 「useHistoryPaneState.ts」行に CustomEvent broadcaster 経由の 2 instance 同期説明あり。",
+      "rationale": "Issue #730 で TerminalContainer / useHistoryPaneState の 2 instance 同期が既に存在し、Issue #728 で TerminalSplitContainer / useTerminalSplits を増やすと同種の問題が再発する。Phase 4 で同期パターンを再発明しないよう Stage 3 で型を示す。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "Should Fix",
+      "title": "useWorktreeUIState reducer に terminalSplits 追加するか否かが未定義（per-worktree localStorage 永続化との重複・複合状態のオーナーシップ不明）",
+      "description": "現状: `useWorktreeUIState.ts` のレデューサ + actions パターンは Issue #688 で `leftPaneCollapsed` (localStorage 永続化)、Issue #727 で `activityBar` / `historyPane` (useActivityBarState / useHistoryPaneState で別途永続化、reducer は mirror のみ) と混在パターンを持つ（:435-441 コメント参照）。Issue #728 の `terminalSplits` は worktreeId-scope の localStorage で永続化する設計（S1-003 で確定済み）だが、(1) reducer に SET_TERMINAL_SPLITS 系の action / state を追加するか、(2) 完全に `useTerminalSplits` だけに閉じるか、(3) ActivityBar/HistoryPane と同じく「永続化は別フック・mirror は reducer」パターンを取るか、Issue で未定義。問題: 既存パターンと一貫しないと Phase 4 で「なぜこれだけ違う？」がレビューで指摘される。`LayoutState` への追加 (Issue 本文「想定影響範囲」表で `ui-state.ts` に terminalSplits セクション追加と書かれている) と `useTerminalSplits` フック (worktreeId-scope) が **二重管理** になり、整合性維持が複雑化する懸念。推奨対応: Issue 「実装方針 1. 状態管理」に追記。「Issue #727 ActivityBar / HistoryPane と同じパターンを採用: `useTerminalSplits` フックが localStorage 永続化のオーナー、`useWorktreeUIState` reducer の `LayoutState.terminalSplits` は **mirror のみ**（コンポーネントが state.layout 経由で参照する用、永続化は呼ばない）。または `LayoutState.terminalSplits` を **追加せず**、useTerminalSplits フックの戻り値を直接消費する単純化パターンを採用」のいずれか明示する。",
+      "affected_files_or_modules": [
+        "src/hooks/useWorktreeUIState.ts",
+        "src/hooks/useTerminalSplits.ts (新規)",
+        "src/types/ui-state.ts",
+        "src/types/ui-actions.ts"
+      ],
+      "affected_issues": ["#688", "#727"],
+      "evidence": "src/hooks/useWorktreeUIState.ts:122-191 (Activity Bar / History pane actions のレデューサ実装), :435-454 (mirror-only pattern コメント). src/types/ui-state.ts:108-129 (LayoutState 現状フィールド)。",
+      "rationale": "既存 2 つのパターン（Issue #688 reducer 主管 / Issue #727 reducer mirror）が混在する中、Issue #728 がどちらを採るか未定だと Phase 4 で実装者が独自選択 → レビュー時に「他の Issue と一貫していない」と指摘されるサイクルになる。"
+    },
+    {
+      "id": "S3-007",
+      "severity": "Should Fix",
+      "title": "既存テスト影響が Issue「テスト方針」セクションに列挙されていない（Phase 4 で多数のスナップショット/プロパティ追加が必要）",
+      "description": "現状: 以下の既存テストが Issue #728 の影響を受ける。(1) `tests/unit/components/worktree/MessageInput.test.tsx` (641 行、`defaultProps` を全テスト共有) → `splitIndex` prop 追加に伴うデフォルト値設定・draft key スコープ化テスト追加が必要、(2) `tests/unit/hooks/useWorktreeUIState.test.ts` (456 行、`initialLayoutState` の expectations) → `terminalSplits` 追加で initial state expectations が壊れる、(3) `tests/unit/components/WorktreeDetailRefactored.test.tsx` (1420 行、ActivityBar / WorktreeDesktopLayout mock 多数) → MessageInput が複数化したときの assertion 全面見直し、(4) `tests/unit/components/WorktreeDesktopLayout.test.tsx` → 構造変更がない場合は維持、(5) `tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx` → activeCliTab の意味が変わる（複数 CLI 並列）ため CLI tab switching テスト全面再設計が必要、(6) `tests/unit/components/app-version-display.test.tsx` → 影響少だが ActivityBar mock 周辺の調整可能性。Issue 本文「テスト方針」は新規テスト 3 種類のみ列挙、既存テスト更新の見積りが完全に抜けている。推奨対応: Issue 「実装方針 5. テスト方針」に「既存テスト更新」セクションを追加し、上記 6 ファイルの **具体的な調整内容**（`splitIndex` プロパティ追加、`terminalSplits` initial state expectations 追加、MessageInput が複数表示される PC レイアウトの assertion 修正、CLI tab switching が「activeCliTab 単一」前提から「splits 配列の選択 CLI」前提へ）を明示する。",
+      "affected_files_or_modules": [
+        "tests/unit/components/worktree/MessageInput.test.tsx",
+        "tests/unit/hooks/useWorktreeUIState.test.ts",
+        "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+        "tests/unit/components/worktree/WorktreeDetailRefactored-cli-tab-switching.test.tsx",
+        "tests/unit/components/WorktreeDesktopLayout.test.tsx",
+        "tests/unit/components/app-version-display.test.tsx"
+      ],
+      "affected_issues": ["#525", "#368", "#727"],
+      "evidence": "tests/unit/components/worktree/MessageInput.test.tsx:60 (describe), :91-394 (defaultProps shared across many tests). tests/unit/hooks/useWorktreeUIState.test.ts:17-26 (createInitialUIState 検証パターン), :150-176 (Issue #688 leftPaneCollapsed テストパターン). tests/unit/components/WorktreeDetailRefactored.test.tsx:200-202 (ActivityBar mock), :1102 (\"clear MessageInput content\" 言及)。",
+      "rationale": "Issue でテスト影響を明文化しないと Phase 4 終盤で「既存テスト壊れた」「想定外の修正コミットが膨らむ」が発生し、CI が落ちるまで気付かない。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "Should Fix",
+      "title": "CHANGELOG.md / CLAUDE.md 追記の precedent と整合する内容粒度が示されていない（Issue #727 / #730 の前例フォーマット未参照）",
+      "description": "現状: Issue 本文「想定影響範囲 > 既存変更」表に `CHANGELOG.md` `CLAUDE.md` の追記指示はあるが、Issue #727 / #730 の前例（CLAUDE.md モジュールリファレンスの「Issue #727」「Issue #730」が同一行末尾に併記され、変更内容を `…で…` の形式で短文記述するパターン）に揃える指針が薄い。CLAUDE.md の既存行（例: `WorktreeDetailRefactored.tsx` 行末尾の「Issue #727で leftPaneMemo(38 deps) を activityBarMemo/activityContent/activityPaneMemo/historyPaneMemo に分割…Issue #730で ActivityBar を WorktreeDesktopLayout の外側に出して全高貫通化」）にどう「Issue #728で …」を追加するかの体裁が未指定。問題: Phase 4 実装者が独自フォーマットで書くと Stage 7 / 受入レビューで CLAUDE.md フォーマット指摘が出る。推奨対応: Issue「想定影響範囲 > 既存変更」の `CLAUDE.md` 行に precedent 参照を追記。「既存 `WorktreeDetailRefactored.tsx` 行末尾に『Issue #728で WorktreeDesktopLayout 内の terminal 領域を TerminalSplitContainer に置換、MessageInput / NavigationButtons / PromptPanel をスプリット内部に移管』のような短文で追記。Issue #727 / #730 の前例（CLAUDE.md L〜〜行）と同形式」。",
+      "affected_files_or_modules": [
+        "CLAUDE.md",
+        "CHANGELOG.md"
+      ],
+      "affected_issues": ["#727", "#730", "#688", "#485"],
+      "evidence": "CLAUDE.md 主要モジュール一覧 `WorktreeDetailRefactored.tsx` 行に Issue #727 / #730 の追記がある形式（CLAUDE.md L 約 130 行付近の `WorktreeDetailRefactored.tsx` セル）。",
+      "rationale": "Issue トレーサビリティを保つ既存規約があり、形式逸脱は受入レビューで返される。Issue 段階で前例を示せばコストゼロで防げる。"
+    },
+    {
+      "id": "S3-009",
+      "severity": "Should Fix",
+      "title": "PaneResizer の document-level mousemove リスナー多重化と cursor / userSelect global side-effect の競合検証が未記述",
+      "description": "現状: `PaneResizer.tsx:218-239` で `document.addEventListener('mousemove'/'mouseup'/'touchmove'/'touchend')` を `isDragging` 中に登録し、`document.body.style.userSelect / cursor` を直接書き換える。Issue #728 後の構造では `WorktreeDesktopLayout (Activity 区切り)` + `TerminalContainer (History 区切り)` + `FilePanelSplit (Files 区切り)` + `TerminalSplitContainer (Splits 区切り×最大 2 個)` = **最大 5 個** の PaneResizer が同時マウントされる（Files が開いていれば）。各 instance は独立 useState で `isDragging` を持つので React 状態は競合しないが、`document.body.style.cursor` のグローバル副作用は **複数 instance が同時に drag end したときに前後関係で cursor が残る/消える** リスクが理論上ある。問題: 単一 drag 時は問題ないが、テストやマウスキャプチャの揺らぎで複数 instance が drag-end race を起こすと CSS が残留する。低頻度バグだが Stage 7 受入で気付くと再現困難。推奨対応: Issue「実装方針」または「想定影響範囲」に追記。「PaneResizer は document-level mousemove + global cursor/userSelect 副作用を持つ。最大 5 個並列マウント時の競合は理論上低リスクだが、Phase 4 で `commandmate:paneResizerDragCount` のような refcount パターンを導入するか、`document.body.style` を `isDragging` 中の最後の instance のみが書き戻す検証を追加する」（最小限なら手動 e2e で確認、Nice to Have に降格可）。",
+      "affected_files_or_modules": [
+        "src/components/worktree/PaneResizer.tsx",
+        "src/components/worktree/TerminalSplitContainer.tsx (新規)"
+      ],
+      "affected_issues": ["#730", "#727"],
+      "evidence": "src/components/worktree/PaneResizer.tsx:111 (useState isDragging local), :219-239 (document-level handlers + document.body.style global mutation in useEffect)。",
+      "rationale": "並列 PaneResizer の global side-effect 競合は典型的なフロント低頻度バグ。Issue 段階でリスクを書いておけば Phase 4 で defensive coding が入る。"
+    },
+    {
+      "id": "S3-010",
+      "severity": "Nice to Have",
+      "title": "tsc 型エラー予測: LayoutState に terminalSplits 追加で downstream consumers の型網羅",
+      "description": "現状: `LayoutState` を読む箇所は `src/types/ui-state.ts:108`（定義） / `src/types/ui-state.ts:192`（initialLayoutState） / `src/hooks/useWorktreeUIState.ts` （reducer・actions） / `src/components/worktree/WorktreeDetailRefactored.tsx` （state.layout 経由） / `tests/unit/hooks/useWorktreeUIState.test.ts` （initialState exhaustiveness）。`terminalSplits` フィールドを `LayoutState` に追加すると、`initialLayoutState` のデフォルト値を提供しない限り tsc エラー、`useWorktreeUIState.test.ts:150-176` パターンで `initialState.layout.terminalSplits` の expectations 追加が必要。一方 `EditorLayoutState`（`src/types/markdown-editor.ts:252`）は **別物** で混同しない（名前は近いが消費者完全別系統）。推奨対応: Issue「想定影響範囲」表の `src/types/ui-state.ts` 行末尾に「`LayoutState.terminalSplits` 追加に伴い `initialLayoutState` のデフォルト値 `{ splits: [{ cliToolId: 'claude' }], widths: [1.0] }` 追加、tests/unit/hooks/useWorktreeUIState.test.ts の initial state テストに expectations 追加」と明記。",
+      "affected_files_or_modules": [
+        "src/types/ui-state.ts",
+        "src/hooks/useWorktreeUIState.ts",
+        "tests/unit/hooks/useWorktreeUIState.test.ts"
+      ],
+      "affected_issues": ["#688", "#727"],
+      "evidence": "src/types/ui-state.ts:108-129 (LayoutState), :192-203 (initialLayoutState), :218-228 (createInitialUIState). tests/unit/hooks/useWorktreeUIState.test.ts:17-26 (createInitialUIState の検証パターン)。`grep` で確認: LayoutState 消費者は src/types/ui-state.ts / src/hooks/useWorktreeUIState.ts のみで影響範囲は狭い。",
+      "rationale": "型追加時のテスト破綻は CI 段階で気付くが、Issue で予告すれば一発で対応可能。"
+    },
+    {
+      "id": "S3-011",
+      "severity": "Nice to Have",
+      "title": "Mobile fallback gating の実装場所が `WorktreeDetailRefactored.tsx:1696 if (!isMobile)` 分岐内であることが明示されていない",
+      "description": "現状: S1-006 で「PC のみが対象」明文化済みで、`WorktreeDetailRefactored.tsx:1696 if (!isMobile) { return <PC layout/>; }` の早期 return パターンで PC / Mobile が完全分離されている（:1976 で Mobile 経路 `<MobileContent/>` を別途レンダリング）。よって `TerminalSplitContainer` の挿入は `:1696` 以下の PC ブロック内のみで、`MobileContent` 経路（`WorktreeDetailSubComponents.tsx:893 MobileContent`）は無変更で OK。Issue 本文「横断 PC版のみが対象」は記載済みだが、**具体的に WorktreeDetailRefactored.tsx の `if (!isMobile)` 分岐内であること** が読み取りにくい。推奨対応: Issue「横断」の該当 bullet に「`WorktreeDetailRefactored.tsx:1696 の `if (!isMobile) return <PC>` 分岐内の `<WorktreeDesktopLayout>` 内側のみ `TerminalSplitContainer` を適用。Mobile 経路（`:1976 <MobileContent>`）は無変更」と code location を明示。",
+      "affected_files_or_modules": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/components/worktree/WorktreeDetailSubComponents.tsx"
+      ],
+      "affected_issues": ["#727", "#730"],
+      "evidence": "src/components/worktree/WorktreeDetailRefactored.tsx:195 (isMobile = useIsMobile), :1696 (if (!isMobile) return PC layout), :1976 (MobileContent別経路). src/components/worktree/WorktreeDetailSubComponents.tsx:893 (MobileContent definition)。",
+      "rationale": "code location を Issue に書いておけば Phase 4 で迷わず置換できる。Nice to Have なのは S1-006 で既に「PC のみ」明文化済みのため。"
+    },
+    {
+      "id": "S3-012",
+      "severity": "Nice to Have",
+      "title": "special-keys API は cliToolId を body で受けるので per-split 呼び出しは安全だが、複数スプリット並列時の `NavigationButtons` keyboard race を Issue に書いておくと親切",
+      "description": "現状: `src/app/api/worktrees/[id]/special-keys/route.ts:40-87` は body の `cliToolId` を `isCliToolType()` で検証 → `manager.getTool(cliToolId)` でツール解決 → そのツールの tmux session に send。`(worktreeId, cliToolId)` で完全に分離されているので、スプリット A (Claude) と スプリット B (Codex) で同時にナビゲーションキーを送っても **サーバ側は別 session に届く** ため race condition なし。問題: クライアント側で `NavigationButtons` を per-split に表示する場合、`activeCliTab` 単一前提のロジックを per-split props に変更する必要あり（S3-001 の MessageInput 移管と同範囲）。推奨対応: Issue「想定影響範囲」または「実装方針」に注記。「special-keys API は `(worktreeId, cliToolId)` でサーバ側が独立しているため per-split で呼んで安全（race condition なし）。クライアント側 `NavigationButtons` は per-split props（`cliToolId` をスプリット選択中の CLI に変更）で動作」。",
+      "affected_files_or_modules": [
+        "src/app/api/worktrees/[id]/special-keys/route.ts",
+        "src/components/worktree/NavigationButtons.tsx"
+      ],
+      "affected_issues": ["#473", "#592"],
+      "evidence": "src/app/api/worktrees/[id]/special-keys/route.ts:40-87 (cliToolId body 検証 + manager.getTool(cliToolId) で per-cli routing)。",
+      "rationale": "サーバ側が独立しているので技術的問題なし。Issue にメモを残せば Phase 4 で「API も変えなきゃ」と誤解しない。"
+    }
+  ],
+  "must_fix_count": 3,
+  "should_fix_count": 6,
+  "nice_to_have_count": 3,
+  "overall_assessment": "Stage 2 Apply 後の Issue 本文は Stage 1 の Must Fix 3 件（draft key 命名 / 同一CLI複数禁止 / worktreeId scope+stale state 防御）を解消し、TDD 着手の前提条件はほぼ整った。一方 Stage 3 影響範囲レビューで判明した最重要事項は『現状の MessageInput / NavigationButtons / PromptPanel / `state.terminal.output` / `isSelectionListActive` が WorktreeDetailRefactored 単一 state として TerminalContainer の外側に存在しており、Issue 本文の「terminal prop 内に TerminalSplitContainer を入れる」表現だけでは独立 MessageInput / 並列 CLI 表示が成立しない』こと（S3-001 / S3-002 / S3-003 が連動）。これらは Issue Body の想定影響範囲・実装方針の追記で解決可能だが、明文化せず Phase 4 に進めると実装スコープが半日〜数日ぶれる確実なリスクを孕む。Should Fix は HistoryPane 挿入先・LayoutState オーナーシップ・既存テスト更新リスト・CLAUDE.md 形式・PaneResizer 並列副作用の 6 件で、いずれも Issue 追記で予防可能。Nice to Have は tsc 型網羅・mobile gating コードロケーション・special-keys API メモの 3 件。"
+}

@@ -11,10 +11,9 @@ import { useReducer, useMemo, useEffect, useRef } from 'react';
 import type { WorktreeUIState, UIPhase, ErrorState, MobileActivePane, LeftPaneTab } from '@/types/ui-state';
 import type { WorktreeUIAction } from '@/types/ui-actions';
 import type { ChatMessage, PromptData } from '@/types/models';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import type { ActivityId } from '@/config/activity-bar-config';
 import {
   createInitialUIState,
-  initialTerminalState,
   initialPromptState,
   initialErrorState,
 } from '@/types/ui-state';
@@ -36,36 +35,6 @@ export function worktreeUIReducer(
     // Phase transitions
     case 'SET_PHASE':
       return { ...state, phase: action.phase };
-
-    // Terminal actions
-    case 'SET_TERMINAL_OUTPUT':
-      return {
-        ...state,
-        terminal: {
-          ...state.terminal,
-          output: action.output,
-          realtimeSnippet: action.realtimeSnippet,
-          lastUpdated: new Date(),
-        },
-      };
-
-    case 'SET_TERMINAL_ACTIVE':
-      return {
-        ...state,
-        terminal: { ...state.terminal, isActive: action.isActive },
-      };
-
-    case 'SET_TERMINAL_THINKING':
-      return {
-        ...state,
-        terminal: { ...state.terminal, isThinking: action.isThinking },
-      };
-
-    case 'SET_AUTO_SCROLL':
-      return {
-        ...state,
-        terminal: { ...state.terminal, autoScroll: action.enabled },
-      };
 
     // Prompt actions
     case 'SHOW_PROMPT':
@@ -130,6 +99,65 @@ export function worktreeUIReducer(
         layout: { ...state.layout, leftPaneCollapsed: action.collapsed },
       };
 
+    // Issue #727: Activity Bar actions
+    case 'SET_ACTIVE_ACTIVITY':
+      return {
+        ...state,
+        layout: {
+          ...state.layout,
+          activityBar: { ...state.layout.activityBar, active: action.activity },
+        },
+      };
+
+    case 'TOGGLE_ACTIVITY': {
+      const current = state.layout.activityBar.active;
+      const next = current === action.activity ? null : action.activity;
+      return {
+        ...state,
+        layout: {
+          ...state.layout,
+          activityBar: { ...state.layout.activityBar, active: next },
+        },
+      };
+    }
+
+    case 'TOGGLE_HISTORY_PANE': {
+      const visible = !state.layout.historyPane.visible;
+      return {
+        ...state,
+        layout: {
+          ...state.layout,
+          historyPane: {
+            ...state.layout.historyPane,
+            visible,
+            collapsed: !visible,
+          },
+        },
+      };
+    }
+
+    case 'SET_HISTORY_PANE_VISIBLE':
+      return {
+        ...state,
+        layout: {
+          ...state.layout,
+          historyPane: {
+            ...state.layout.historyPane,
+            visible: action.visible,
+            collapsed: !action.visible,
+          },
+        },
+      };
+
+    case 'SET_HISTORY_WIDTH':
+      return {
+        ...state,
+        layout: {
+          ...state.layout,
+          historyPane: { ...state.layout.historyPane, width: action.width },
+        },
+      };
+
     // Error actions
     case 'SET_ERROR':
       return { ...state, error: action.error };
@@ -165,40 +193,6 @@ export function worktreeUIReducer(
     case 'SET_WS_CONNECTED':
       return { ...state, wsConnected: action.connected };
 
-    // Compound actions
-    case 'START_WAITING_FOR_RESPONSE':
-      return {
-        ...state,
-        phase: 'waiting',
-        terminal: {
-          ...state.terminal,
-          isActive: true,
-          output: '',
-          realtimeSnippet: '',
-        },
-        prompt: { ...initialPromptState },
-      };
-
-    case 'RESPONSE_RECEIVED':
-      return {
-        ...state,
-        phase: 'complete',
-        messages: [...state.messages, action.message],
-        terminal: {
-          ...state.terminal,
-          isActive: false,
-          isThinking: false,
-        },
-      };
-
-    case 'SESSION_ENDED':
-      return {
-        ...state,
-        phase: 'idle',
-        terminal: { ...initialTerminalState },
-        prompt: { ...initialPromptState },
-      };
-
     default:
       return state;
   }
@@ -209,9 +203,6 @@ export function worktreeUIReducer(
  */
 export interface WorktreeUIActions {
   setPhase: (phase: UIPhase) => void;
-  setTerminalOutput: (output: string, realtimeSnippet: string) => void;
-  setTerminalActive: (isActive: boolean) => void;
-  setTerminalThinking: (isThinking: boolean) => void;
   showPrompt: (data: PromptData, messageId: string) => void;
   clearPrompt: () => void;
   setPromptAnswering: (answering: boolean) => void;
@@ -221,10 +212,6 @@ export interface WorktreeUIActions {
   addMessage: (message: ChatMessage) => void;
   updateMessage: (id: string, updates: Partial<ChatMessage>) => void;
   clearMessages: () => void;
-  startWaitingForResponse: (cliToolId: CLIToolType) => void;
-  responseReceived: (message: ChatMessage) => void;
-  sessionEnded: () => void;
-  setAutoScroll: (enabled: boolean) => void;
   setMobileActivePane: (pane: MobileActivePane) => void;
   setLeftPaneTab: (tab: LeftPaneTab) => void;
   setLayoutMode: (mode: 'split' | 'tabs') => void;
@@ -232,6 +219,12 @@ export interface WorktreeUIActions {
   setWsConnected: (connected: boolean) => void;
   /** Toggle left pane collapsed state (Issue #688) */
   toggleLeftPane: () => void;
+  // Issue #727: Activity Bar + History pane actions
+  setActiveActivity: (activity: ActivityId | null) => void;
+  toggleActivity: (activity: ActivityId) => void;
+  toggleHistoryPane: () => void;
+  setHistoryPaneVisible: (visible: boolean) => void;
+  setHistoryWidth: (width: number) => void;
 }
 
 /**
@@ -245,7 +238,7 @@ export interface WorktreeUIActions {
  *   const { state, actions } = useWorktreeUIState();
  *
  *   const handleSendMessage = () => {
- *     actions.startWaitingForResponse('claude');
+ *     actions.setPhase('waiting');
  *   };
  *
  *   return (
@@ -300,15 +293,6 @@ export function useWorktreeUIState(): {
     () => ({
       setPhase: (phase: UIPhase) => dispatch({ type: 'SET_PHASE', phase }),
 
-      setTerminalOutput: (output: string, realtimeSnippet: string) =>
-        dispatch({ type: 'SET_TERMINAL_OUTPUT', output, realtimeSnippet }),
-
-      setTerminalActive: (isActive: boolean) =>
-        dispatch({ type: 'SET_TERMINAL_ACTIVE', isActive }),
-
-      setTerminalThinking: (isThinking: boolean) =>
-        dispatch({ type: 'SET_TERMINAL_THINKING', isThinking }),
-
       showPrompt: (data: PromptData, messageId: string) =>
         dispatch({ type: 'SHOW_PROMPT', data, messageId }),
 
@@ -332,17 +316,6 @@ export function useWorktreeUIState(): {
 
       clearMessages: () => dispatch({ type: 'CLEAR_MESSAGES' }),
 
-      startWaitingForResponse: (cliToolId: CLIToolType) =>
-        dispatch({ type: 'START_WAITING_FOR_RESPONSE', cliToolId }),
-
-      responseReceived: (message: ChatMessage) =>
-        dispatch({ type: 'RESPONSE_RECEIVED', message }),
-
-      sessionEnded: () => dispatch({ type: 'SESSION_ENDED' }),
-
-      setAutoScroll: (enabled: boolean) =>
-        dispatch({ type: 'SET_AUTO_SCROLL', enabled }),
-
       setMobileActivePane: (pane: MobileActivePane) =>
         dispatch({ type: 'SET_MOBILE_ACTIVE_PANE', pane }),
 
@@ -365,6 +338,25 @@ export function useWorktreeUIState(): {
         dispatch({ type: 'SET_LEFT_PANE_COLLAPSED', collapsed: next });
         setStoredCollapsed(next);
       },
+
+      // Issue #727: Activity Bar + History pane actions.
+      // Persistence is owned by useActivityBarState / useHistoryPaneState in
+      // WorktreeDetailRefactored — these dispatchers only update reducer state
+      // so that components reading `state.layout.activityBar` / `historyPane`
+      // stay in sync.
+      setActiveActivity: (activity: ActivityId | null) =>
+        dispatch({ type: 'SET_ACTIVE_ACTIVITY', activity }),
+
+      toggleActivity: (activity: ActivityId) =>
+        dispatch({ type: 'TOGGLE_ACTIVITY', activity }),
+
+      toggleHistoryPane: () => dispatch({ type: 'TOGGLE_HISTORY_PANE' }),
+
+      setHistoryPaneVisible: (visible: boolean) =>
+        dispatch({ type: 'SET_HISTORY_PANE_VISIBLE', visible }),
+
+      setHistoryWidth: (width: number) =>
+        dispatch({ type: 'SET_HISTORY_WIDTH', width }),
     }),
     [setStoredCollapsed]
   );

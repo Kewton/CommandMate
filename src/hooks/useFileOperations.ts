@@ -18,7 +18,7 @@ import { useState, useCallback } from 'react';
 /**
  * Represents the target of a move operation.
  */
-interface MoveTarget {
+export interface MoveTarget {
   /** Relative path of the file/directory to move */
   path: string;
   /** Whether the target is a file or directory */

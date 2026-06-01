@@ -28,8 +28,9 @@ import {
   renameFileOrDirectory,
   moveFileOrDirectory,
   isEditableFile,
+  readFileLineRange,
 } from '@/lib/file-operations';
-import { validateContent, isEditableExtension } from '@/config/editable-extensions';
+import { validateContent, isEditableExtension, TEXT_MAX_SIZE_BYTES } from '@/config/editable-extensions';
 import {
   isImageExtension,
   validateImageContent,
@@ -99,6 +100,60 @@ function createErrorResponse(
     { success: false, error: { code, message } },
     { status }
   );
+}
+
+/**
+ * [Issue #723] Result of parsing `startLine` / `endLine` query parameters.
+ *
+ * - `{ mode: 'full' }`: neither param present — normal full-content path.
+ * - `{ mode: 'range', startLine, endLine }`: both numeric values; caller delegates
+ *   to {@link readFileLineRange}, which performs its own range validation.
+ * - `{ mode: 'invalid' }`: one or both params present but not numeric.
+ */
+type LineRangeParseResult =
+  | { mode: 'full' }
+  | { mode: 'range'; startLine: number; endLine: number }
+  | { mode: 'invalid' };
+
+function parseLineRangeParams(searchParams: URLSearchParams): LineRangeParseResult {
+  const startLineParam = searchParams.get('startLine');
+  const endLineParam = searchParams.get('endLine');
+  if (startLineParam === null && endLineParam === null) {
+    return { mode: 'full' };
+  }
+  const startLine = Number(startLineParam);
+  const endLine = Number(endLineParam);
+  if (!Number.isFinite(startLine) || !Number.isFinite(endLine)) {
+    return { mode: 'invalid' };
+  }
+  return { mode: 'range', startLine, endLine };
+}
+
+/**
+ * Apply size pre-guards for editable text GETs. Returns the first matching
+ * 413 response (HTML > 5MB, or non-HTML editable > 2MB) or `null` when the
+ * file is within bounds. Centralizes the precedence rule described inline at
+ * the call site.
+ *
+ * [Issue #490] HTML 5MB. [Issue #723] Non-HTML editable 2MB.
+ */
+function enforceEditableSizeGuards(ext: string, sizeBytes: number): NextResponse | null {
+  if (isHtmlExtension(ext)) {
+    if (sizeBytes > HTML_MAX_SIZE_BYTES) {
+      return createErrorResponse(
+        'FILE_TOO_LARGE',
+        `HTML file exceeds ${HTML_MAX_SIZE_BYTES} bytes limit`,
+      );
+    }
+    return null;
+  }
+  if (isEditableExtension(ext) && sizeBytes > TEXT_MAX_SIZE_BYTES) {
+    return createErrorResponse(
+      'FILE_TOO_LARGE',
+      `Editable file exceeds ${TEXT_MAX_SIZE_BYTES} bytes limit (${(TEXT_MAX_SIZE_BYTES / 1024 / 1024).toFixed(0)}MB)`,
+    );
+  }
+  return null;
 }
 
 /**
@@ -307,13 +362,52 @@ export async function GET(
     const fullPath = join(worktree.path, relativePath);
     const fileStat = await stat(fullPath);
 
-    // [Issue #490] HTML file size pre-check (DR4-004: DoS prevention before readFileContent)
-    if (isHtmlExtension(ext) && fileStat.size > HTML_MAX_SIZE_BYTES) {
-      return createErrorResponse(
-        'FILE_TOO_LARGE',
-        `HTML file exceeds ${HTML_MAX_SIZE_BYTES} bytes limit`
-      );
+    // [Issue #723] Line-range mode detection — when present, skip the
+    // If-Modified-Since/304 fast-path and always return 200 with a partial
+    // payload (sub-ranges of the same mtime are independently requestable).
+    const { searchParams } = new URL(request.url);
+    const lineRangeParams = parseLineRangeParams(searchParams);
+
+    if (lineRangeParams.mode === 'invalid') {
+      return createErrorResponse('INVALID_REQUEST', 'startLine and endLine must be numeric');
     }
+
+    if (lineRangeParams.mode === 'range') {
+      const rangeResult = await readFileLineRange(
+        worktree.path,
+        relativePath,
+        lineRangeParams.startLine,
+        lineRangeParams.endLine,
+      );
+
+      if (!rangeResult.success) {
+        return createErrorResponse(
+          rangeResult.error?.code || 'INTERNAL_ERROR',
+          rangeResult.error?.message || 'Failed to read file range',
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        path: relativePath,
+        content: rangeResult.content,
+        extension,
+        worktreePath: worktree.path,
+        totalLines: rangeResult.totalLines,
+        totalBytes: rangeResult.totalBytes,
+        encoding: rangeResult.encoding,
+        range: rangeResult.range,
+      });
+    }
+
+    // Editable-text size guards. Order matters:
+    //   1. [Issue #490] HTML 5MB ceiling — HTML has its own dedicated limit.
+    //   2. [Issue #723] Non-HTML editable text 2MB ceiling — `.md` / `.yaml` /
+    //      `.yml`, evaluated AFTER the HTML branch so HTML keeps its own ceiling.
+    // Non-editable plain text remains uncapped at this layer.
+    const sizeGuardError = enforceEditableSizeGuards(ext, fileStat.size);
+    if (sizeGuardError) return sizeGuardError;
+
     const lastModified = fileStat.mtime.toUTCString();
 
     // Check If-Modified-Since header for 304 response
@@ -351,6 +445,7 @@ export async function GET(
       extension,
       worktreePath: worktree.path,
       ...(isHtml && { isHtml: true }),
+      totalBytes: fileStat.size,
     }, {
       headers: {
         'Last-Modified': lastModified,

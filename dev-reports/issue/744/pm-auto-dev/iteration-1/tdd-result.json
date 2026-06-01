@@ -1,0 +1,106 @@
+{
+  "issue_number": 744,
+  "status": "success",
+  "files_created": [
+    "src/hooks/useSplitMessages.ts",
+    "tests/unit/hooks/useSplitMessages.test.ts"
+  ],
+  "files_modified": [
+    "src/lib/terminal-highlight.ts",
+    "src/app/globals.css",
+    "src/components/worktree/HistoryPane.tsx",
+    "src/components/worktree/TerminalSplitPaneContent.tsx",
+    "src/components/worktree/TerminalContainer.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/lib/terminal-highlight.test.ts",
+    "tests/unit/components/HistoryPane.test.tsx",
+    "tests/unit/components/worktree/TerminalSplitPaneContent.test.tsx",
+    "tests/unit/components/worktree/TerminalContainer.test.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+    "CLAUDE.md",
+    "CHANGELOG.md"
+  ],
+  "tests_added": [
+    "tests/unit/hooks/useSplitMessages.test.ts (9 tests: per-cliToolId fetch URL, limit/includeArchived params, timestamp parse, requestId stale-guard, enabled=false, visibilitychange pause, refresh(), worktree/CLI change reset)",
+    "tests/unit/lib/terminal-highlight.test.ts (8 new tests: makeHistoryNamespace per-split names + isolation, applyHistoryHighlights/clearHistoryHighlights optional-namespace backward compat)",
+    "tests/unit/components/HistoryPane.test.tsx (3 new tests: legacy namespace when splitIndex omitted, history-search-1 when splitIndex=1, cliToolId metadata no client-side filter)",
+    "tests/unit/components/worktree/TerminalSplitPaneContent.test.tsx (6 new tests: embedded HistoryPane render, per-split cliToolId messages from useSplitMessages, simultaneous A=claude/B=codex distinct namespaces, onInsertToMessage->onHistoryInsertToMessage routing, pendingInsertText forwarding)",
+    "tests/unit/components/worktree/TerminalContainer.test.tsx (3 new tests: history omitted -> terminal-only render, no expand button, terminal ErrorBoundary retained)",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx (updated TC-4 throttle filter to ignore independent per-split /messages polling)"
+  ],
+  "test_results": {
+    "unit_passed": 6738,
+    "unit_failed": 0,
+    "total": 6745
+  },
+  "coverage_estimate": "Changed-file coverage (focused 8-file run): useSplitMessages.ts 90.74% lines / 80% branch; TerminalContainer.tsx 100% lines; HistoryPane.tsx 89.47% lines; terminal-highlight.ts 70.66% lines (uncovered is pre-existing Issue #47 terminal-search DOM-overlay paths, not #744 additions); TerminalSplitPaneContent.tsx #744 additions (history slot, useSplitMessages wiring, insert routing) fully covered by new tests. Aggregate of changed files ~80.45% lines / 78.59% stmts. Full suite: 6738 passed, 7 pre-existing skips, 0 failed.",
+  "static_checks": {
+    "tsc": "pass",
+    "lint": "pass",
+    "build": "pass"
+  },
+  "acceptance_criteria_status": [
+    {
+      "criterion": "PC版で1-3 splitに分割時、各splitに独立したHistoryPaneが表示される",
+      "status": "met",
+      "evidence": "TerminalSplitPaneContent terminal slot restructured to [HistoryPane | PaneResizer | TerminalDisplay]; test 'renders a HistoryPane inside the split' passes."
+    },
+    {
+      "criterion": "A=Claude / B=Codex で各HistoryがそのCLIのメッセージのみを同時に表示する（per-split独立fetchで実現）",
+      "status": "met",
+      "evidence": "New useSplitMessages hook fetches /messages?cliTool=<own cliToolId> independently per split; test 'shows each split its OWN cliToolId messages simultaneously (A=claude, B=codex)' asserts distinct message counts + split indices."
+    },
+    {
+      "criterion": "A=Claude / B=Claude で両方ともClaudeのメッセージを表示する",
+      "status": "met",
+      "evidence": "Each split keys useSplitMessages by its own cliToolId; two claude splits fetch the same cliTool and render the same messages (no cross-split client filter; S1-008)."
+    },
+    {
+      "criterion": "2 split同時検索で互いのハイライトを消し合わない（検索ハイライト名前空間のper-split分離）",
+      "status": "met",
+      "evidence": "makeHistoryNamespace(splitIndex) -> history-search-${idx}; HistoryPane uses it when splitIndex provided. Tests assert split-0 apply does not clobber split-1 CSS.highlights key, and clearing one namespace leaves the other untouched. globals.css adds ::highlight(history-search-0|1|2 / -current-0|1|2)."
+    },
+    {
+      "criterion": "既存HistoryPane機能（検索#716 / User onlyトグル#725 / 表示件数#701）がper-splitで動作",
+      "status": "met",
+      "evidence": "Search is per-split (internal state + per-split namespace). User-only / display-limit / showArchived are passed as common values into each split's useSplitMessages fetch (limit, includeArchived) and HistoryPane display props (MVP common, per work plan)."
+    },
+    {
+      "criterion": "Historyの折りたたみが各splitで動作（MVPは全split共通挙動）",
+      "status": "met",
+      "evidence": "Each split uses useHistoryPaneState (common, localStorage-backed); when visible renders history+resizer, when collapsed renders a split-scoped expand bar (data-testid=split-history-expand-${splitIndex}). Width applied relative to split inner area."
+    },
+    {
+      "criterion": "worktree切替後も各CLIのHistoryが正しく表示",
+      "status": "met",
+      "evidence": "useSplitMessages resets messages + re-fetches on (worktreeId, cliToolId) change with requestId stale-guard; test 'resets messages and re-fetches when (worktreeId, cliToolId) changes' passes."
+    },
+    {
+      "criterion": "モバイル版のHistory挙動は変更なし（無改修）",
+      "status": "met",
+      "evidence": "All new props optional with backward-compatible defaults; MobileContent path (WorktreeDetailRefactored ~L1947-1974 / mobile MobileContent HistoryPane) untouched. Mobile-overflow + cli-tab-switching existing tests pass unchanged."
+    },
+    {
+      "criterion": "既存テストはPASS（HistoryPaneのsplitIndex/cliToolIdフィルタ未指定時は従来動作）",
+      "status": "met",
+      "evidence": "Backward-compat test 'uses the legacy global namespace when splitIndex is not provided' passes; full suite 6738 passed / 0 failed. Only one existing test (WorktreeDetailRefactored TC-4 throttle) needed a test-side filter update for independent per-split /messages polling (analogous to the existing /current-output exclusion)."
+    },
+    {
+      "criterion": "新規テスト: per-split filtering / namespace分離 / useSplitMessages",
+      "status": "met",
+      "evidence": "Added 9 useSplitMessages tests, 8 terminal-highlight namespace tests, 3 HistoryPane per-split tests, 6 TerminalSplitPaneContent embedded-history tests."
+    },
+    {
+      "criterion": "npm run lint / npx tsc --noEmit / npm run test:unit / npm run build 全PASS",
+      "status": "met",
+      "evidence": "tsc exit 0; ESLint 'No ESLint warnings or errors'; vitest 6738 passed / 0 failed; next build 'Compiled successfully' + 'Generating static pages (32/32)'."
+    }
+  ],
+  "notes": "Implemented strictly TDD (Red-Green-Refactor) across 5 implementation phases. Phase 1: makeHistoryNamespace(splitIndex) + globals.css per-split ::highlight rules; applyHistoryHighlights/clearHistoryHighlights got optional namespace args (default = HISTORY_SEARCH_NAMESPACE). Phase 2: new useSplitMessages hook mirroring useTerminalPanePolling (requestId stale-guard, visibilitychange pause, refresh, (worktreeId,cliToolId)-keyed reset). Phase 3: HistoryPane additive splitIndex?/cliToolId? props (per-split highlight namespace when splitIndex given; cliToolId is metadata, no client-side filter per S1-008). Phase 4: TerminalSplitPaneContent embeds HistoryPane in a [History|Resizer|Terminal] layout, drives useSplitMessages per its cliToolId, routes onInsertToMessage via onHistoryInsertToMessage (parent binds splitIndex), refreshes split messages after send. Parent renderSplitPane wires history props + handleInsertToSplit(splitIndex). Phase 5: TerminalContainer.history prop made optional; parent stops passing it on PC and removed historyPaneMemo / top-level HistoryPane + useHistoryPaneState imports. All changes additive; mobile path unchanged. The only existing-test adjustment was WorktreeDetailRefactored TC-4: the per-split /messages poll (like the existing /current-output poll) is independent of the parent recovery throttle, so the test's recovery-call filter now also excludes /messages (mirrors the prior /current-output precedent). NOTE: changes left in working tree, not committed, per instructions.",
+  "follow_ups": [
+    "S3-004 (documented MVP deferral): split-internal History visible/width are currently common across splits (single useHistoryPaneState backing localStorage). A future enhancement could make visible/width per-split if UX feedback requires it.",
+    "User-only #725 / display-limit #701 / showArchived #168 are common values across splits in this MVP. Per-split independent controls could be a follow-up.",
+    "e2e: the #735 data-testid='history-pane-expand' now only renders when TerminalContainer is given a history prop (not the PC default). The per-split expand bar uses data-testid='split-history-expand-${splitIndex}'. Any e2e relying on the top-level history-pane-expand on PC should be updated to the split-scoped testid.",
+    "Consider extracting parseMessageTimestamps into a shared util (currently duplicated in useSplitMessages.ts, useInfiniteMessages.ts, and WorktreeDetailSubComponents.tsx) — out of scope for #744."
+  ]
+}

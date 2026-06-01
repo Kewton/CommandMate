@@ -6,6 +6,7 @@
  */
 
 import type { ChatMessage, PromptData } from './models';
+import type { ActivityId } from '@/config/activity-bar-config';
 
 /**
  * UI Phase (state transition center)
@@ -16,25 +17,6 @@ import type { ChatMessage, PromptData } from './models';
  * - complete: Claude's response is complete
  */
 export type UIPhase = 'idle' | 'waiting' | 'receiving' | 'prompt' | 'complete';
-
-/**
- * Terminal State
- * Manages the terminal display output and settings
- */
-export interface TerminalState {
-  /** Full terminal output content */
-  output: string;
-  /** Real-time snippet for showing current activity */
-  realtimeSnippet: string;
-  /** Whether the terminal session is active */
-  isActive: boolean;
-  /** Whether Claude is currently thinking/processing */
-  isThinking: boolean;
-  /** Auto-scroll enabled (pause when user scrolls manually) */
-  autoScroll: boolean;
-  /** Last update timestamp */
-  lastUpdated: Date | null;
-}
 
 /**
  * Prompt State
@@ -76,6 +58,31 @@ export type LeftPaneTab = 'history' | 'files' | 'memo';
 export type HistorySubTab = 'message' | 'git';
 
 /**
+ * Activity Bar state (Issue #727).
+ * Tracks the active VS Code-style activity. `null` means the ActivityPane
+ * is hidden (user clicked the active icon to close it).
+ */
+export interface ActivityBarState {
+  active: ActivityId | null;
+}
+
+/**
+ * History Pane state (Issue #727).
+ * On PC the History pane is a dedicated column that can be hidden / resized.
+ */
+export interface HistoryPaneState {
+  /** Visible on PC */
+  visible: boolean;
+  /** Width in percent */
+  width: number;
+  /**
+   * Convenience flag mirroring `!visible` — useful for components that already
+   * accept a "collapsed" prop.
+   */
+  collapsed: boolean;
+}
+
+/**
  * Layout State
  * Manages responsive layout settings
  */
@@ -84,7 +91,7 @@ export interface LayoutState {
   mode: 'split' | 'tabs';
   /** Active pane in mobile tab view */
   mobileActivePane: MobileActivePane;
-  /** Active tab in desktop left pane (history or files) */
+  /** Active tab in desktop left pane (history or files) — kept for mobile compat (Issue #727) */
   leftPaneTab: LeftPaneTab;
   /** Split ratio for desktop view (0.0 - 1.0) */
   splitRatio: number;
@@ -92,8 +99,14 @@ export interface LayoutState {
    * Whether the desktop left pane is collapsed (Issue #688).
    * When true, the left pane is hidden (width 0) and a 24px expand bar is shown.
    * Persisted to localStorage under key `commandmate.worktree.leftPaneCollapsed`.
+   * Kept for backward compatibility — Issue #727 introduces dedicated
+   * `activityBar` / `historyPane` slots on PC.
    */
   leftPaneCollapsed: boolean;
+  /** VS Code-style Activity Bar state (Issue #727) */
+  activityBar: ActivityBarState;
+  /** History pane PC column state (Issue #727) */
+  historyPane: HistoryPaneState;
 }
 
 /**
@@ -118,8 +131,6 @@ export interface ErrorState {
 export interface WorktreeUIState {
   /** Current UI phase */
   phase: UIPhase;
-  /** Terminal state */
-  terminal: TerminalState;
   /** Prompt state */
   prompt: PromptState;
   /** Layout state */
@@ -131,18 +142,6 @@ export interface WorktreeUIState {
   /** WebSocket connection status */
   wsConnected: boolean;
 }
-
-/**
- * Initial terminal state
- */
-export const initialTerminalState: TerminalState = {
-  output: '',
-  realtimeSnippet: '',
-  isActive: false,
-  isThinking: false,
-  autoScroll: true,
-  lastUpdated: null,
-};
 
 /**
  * Initial prompt state
@@ -163,6 +162,11 @@ export const initialLayoutState: LayoutState = {
   leftPaneTab: 'history',
   splitRatio: 0.5,
   leftPaneCollapsed: false,
+  // Issue #727: Activity Bar + History pane defaults. The actual persisted
+  // values are owned by `useActivityBarState` / `useHistoryPaneState`; this
+  // reducer-level state mirrors them for components that read from `state.layout`.
+  activityBar: { active: 'files' },
+  historyPane: { visible: true, width: 25, collapsed: false },
 };
 
 /**
@@ -181,7 +185,6 @@ export const initialErrorState: ErrorState = {
 export function createInitialUIState(): WorktreeUIState {
   return {
     phase: 'idle',
-    terminal: { ...initialTerminalState },
     prompt: { ...initialPromptState },
     layout: { ...initialLayoutState },
     error: { ...initialErrorState },

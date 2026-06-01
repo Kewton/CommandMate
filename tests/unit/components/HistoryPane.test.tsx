@@ -7,9 +7,29 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { HistoryPane } from '@/components/worktree/HistoryPane';
 import type { ChatMessage } from '@/types/models';
+
+// [Issue #744] Spy on the highlight engine so we can assert which namespace a
+// given HistoryPane uses (legacy global vs per-split). We keep the real
+// implementation (via importOriginal) so the engine still behaves normally.
+const applyHistoryHighlightsSpy = vi.fn();
+const clearHistoryHighlightsSpy = vi.fn();
+vi.mock('@/lib/terminal-highlight', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/terminal-highlight')>();
+  return {
+    ...actual,
+    applyHistoryHighlights: (...args: unknown[]) => {
+      applyHistoryHighlightsSpy(...args);
+      return (actual.applyHistoryHighlights as (...a: unknown[]) => void)(...args);
+    },
+    clearHistoryHighlights: (...args: unknown[]) => {
+      clearHistoryHighlightsSpy(...args);
+      return (actual.clearHistoryHighlights as (...a: unknown[]) => void)(...args);
+    },
+  };
+});
 
 // Helper to create test messages
 function createTestMessage(
@@ -542,6 +562,199 @@ describe('HistoryPane', () => {
       const el = container.querySelector('[data-message-id="a-1"]');
       expect(el).not.toBeNull();
       expect(el?.textContent).toContain('sentinel answer');
+    });
+  });
+
+  describe('Collapse button (Issue #727)', () => {
+    it('does not render the collapse button when onCollapse is omitted', () => {
+      render(
+        <HistoryPane
+          messages={[]}
+          worktreeId={defaultWorktreeId}
+          onFilePathClick={mockOnFilePathClick}
+        />
+      );
+      expect(screen.queryByTestId('history-pane-collapse-button')).not.toBeInTheDocument();
+    });
+
+    it('renders the collapse button when onCollapse is provided', () => {
+      render(
+        <HistoryPane
+          messages={[]}
+          worktreeId={defaultWorktreeId}
+          onFilePathClick={mockOnFilePathClick}
+          onCollapse={() => {}}
+        />
+      );
+      const btn = screen.getByTestId('history-pane-collapse-button');
+      expect(btn).toBeInTheDocument();
+      expect(btn).toHaveAttribute('aria-controls', 'worktree-history-pane');
+      expect(btn).toHaveAttribute('aria-expanded', 'true');
+    });
+
+    it('calls onCollapse when the collapse button is clicked', () => {
+      const onCollapse = vi.fn();
+      render(
+        <HistoryPane
+          messages={[]}
+          worktreeId={defaultWorktreeId}
+          onFilePathClick={mockOnFilePathClick}
+          onCollapse={onCollapse}
+        />
+      );
+      fireEvent.click(screen.getByTestId('history-pane-collapse-button'));
+      expect(onCollapse).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ============================================================================
+  // [Issue #744] Per-split namespace + cliToolId props (additive / backward-compat)
+  // ============================================================================
+
+  describe('Per-split search namespace (Issue #744)', () => {
+    beforeEach(() => {
+      applyHistoryHighlightsSpy.mockClear();
+      clearHistoryHighlightsSpy.mockClear();
+    });
+
+    function renderAndSearch(extraProps: Record<string, unknown>) {
+      const messages: ChatMessage[] = [
+        createTestMessage({ id: 'u-1', content: 'sentinel keyword here', role: 'user' }),
+      ];
+      const utils = render(
+        <HistoryPane
+          messages={messages}
+          worktreeId={defaultWorktreeId}
+          onFilePathClick={mockOnFilePathClick}
+          {...extraProps}
+        />
+      );
+      fireEvent.click(screen.getByRole('button', { name: /open search/i }));
+      const input = screen.getByLabelText('検索キーワード') as HTMLInputElement;
+      fireEvent.change(input, { target: { value: 'sentinel' } });
+      return utils;
+    }
+
+    it('uses the legacy global namespace when splitIndex is not provided (backward compat)', async () => {
+      renderAndSearch({});
+      await waitFor(() => {
+        expect(applyHistoryHighlightsSpy).toHaveBeenCalled();
+      });
+      // 4th arg (namespace) is undefined → engine falls back to history-search.
+      const namespaceArgs = applyHistoryHighlightsSpy.mock.calls.map((c) => c[3]);
+      // No per-split namespace object should be passed.
+      const hasPerSplit = namespaceArgs.some(
+        (ns) =>
+          ns &&
+          typeof ns === 'object' &&
+          'highlightName' in ns &&
+          String((ns as { highlightName: string }).highlightName).startsWith(
+            'history-search-'
+          )
+      );
+      expect(hasPerSplit).toBe(false);
+    });
+
+    it('uses a per-split namespace (history-search-1) when splitIndex=1', async () => {
+      renderAndSearch({ splitIndex: 1 });
+      await waitFor(() => {
+        expect(applyHistoryHighlightsSpy).toHaveBeenCalled();
+      });
+      const namespaceArgs = applyHistoryHighlightsSpy.mock.calls.map((c) => c[3]);
+      const usedSplit1 = namespaceArgs.some(
+        (ns) =>
+          ns &&
+          typeof ns === 'object' &&
+          (ns as { highlightName?: string }).highlightName === 'history-search-1'
+      );
+      expect(usedSplit1).toBe(true);
+    });
+
+    it('accepts an optional cliToolId prop without altering rendering (no client-side filter)', () => {
+      const messages: ChatMessage[] = [
+        createTestMessage({ content: 'visible message', role: 'user' }),
+      ];
+      render(
+        <HistoryPane
+          messages={messages}
+          worktreeId={defaultWorktreeId}
+          onFilePathClick={mockOnFilePathClick}
+          splitIndex={0}
+          cliToolId="codex"
+        />
+      );
+      // S1-008: messages are pre-filtered by the caller's fetch; HistoryPane does
+      // not drop messages by cliToolId, so all passed messages still render.
+      expect(screen.getByText('visible message')).toBeInTheDocument();
+    });
+  });
+
+  // ============================================================================
+  // [Issue #744] Per-split collapse button identity (no duplicate testids /
+  // no dangling aria-controls when multiple splits are mounted simultaneously)
+  // ============================================================================
+
+  describe('Per-split collapse button identity (Issue #744)', () => {
+    it('keeps the legacy testid + aria-controls=HISTORY_PANE_ID when splitIndex is omitted', () => {
+      render(
+        <HistoryPane
+          messages={[]}
+          worktreeId={defaultWorktreeId}
+          onFilePathClick={mockOnFilePathClick}
+          onCollapse={() => {}}
+        />
+      );
+      const btn = screen.getByTestId('history-pane-collapse-button');
+      expect(btn).toBeInTheDocument();
+      // Legacy: points at the PC-wide history pane id (rendered by TerminalContainer).
+      expect(btn).toHaveAttribute('aria-controls', 'worktree-history-pane');
+    });
+
+    it('suffixes the testid and points aria-controls at the per-split slot id when splitIndex is provided', () => {
+      render(
+        <div>
+          {/* Simulate the per-split slot wrapper that TerminalSplitPaneContent
+              renders, so aria-controls resolves to a real element. */}
+          <div id="split-history-slot-0">
+            <HistoryPane
+              messages={[]}
+              worktreeId={defaultWorktreeId}
+              onFilePathClick={mockOnFilePathClick}
+              onCollapse={() => {}}
+              splitIndex={0}
+              cliToolId="claude"
+            />
+          </div>
+          <div id="split-history-slot-1">
+            <HistoryPane
+              messages={[]}
+              worktreeId={defaultWorktreeId}
+              onFilePathClick={mockOnFilePathClick}
+              onCollapse={() => {}}
+              splitIndex={1}
+              cliToolId="codex"
+            />
+          </div>
+        </div>
+      );
+
+      const btn0 = screen.getByTestId('history-pane-collapse-button-0');
+      const btn1 = screen.getByTestId('history-pane-collapse-button-1');
+
+      // Distinct per-split testids — no duplicate `history-pane-collapse-button`.
+      expect(btn0).toBeInTheDocument();
+      expect(btn1).toBeInTheDocument();
+      expect(screen.queryByTestId('history-pane-collapse-button')).toBeNull();
+
+      // aria-controls resolves to each split's own (real, non-dangling) slot id.
+      expect(btn0).toHaveAttribute('aria-controls', 'split-history-slot-0');
+      expect(btn1).toHaveAttribute('aria-controls', 'split-history-slot-1');
+      expect(document.getElementById('split-history-slot-0')).not.toBeNull();
+      expect(document.getElementById('split-history-slot-1')).not.toBeNull();
+
+      // Neither split dangles at the PC-wide HISTORY_PANE_ID (not rendered on PC).
+      expect(btn0).not.toHaveAttribute('aria-controls', 'worktree-history-pane');
+      expect(btn1).not.toHaveAttribute('aria-controls', 'worktree-history-pane');
     });
   });
 });

@@ -1,0 +1,45 @@
+{
+  "issue_number": "728",
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目通常）",
+  "source_review_path": "dev-reports/issue/728/issue-review/stage1-review-result.json",
+  "original_issue_path": "dev-reports/issue/728/issue-review/original-issue.json",
+  "output_path": "dev-reports/issue/728/issue-review/stage2-apply-result.json",
+  "apply_policy": {
+    "must_fix": "全件Issue本文に反映",
+    "should_fix": "全件Issue本文に反映（無理のない範囲、無視する場合は理由をJSONに記載）",
+    "nice_to_have": "可能であれば反映、難しければ未反映で理由を記載"
+  },
+  "edit_rules": [
+    "Issue本文全体を維持しつつ、対象セクションを差し替え/追記する",
+    "新しい論点（仕様未確定の意思決定）が出た場合は本文に小節で明示し、決定を記述する",
+    "MessageInput draft key は `commandmate:draft-message:${worktreeId}:${splitIndex}` に統一",
+    "下位互換マイグレーション仕様も正しいキー名に修正",
+    "S1-002 の論点（同一CLI複数スプリット）はチーム判断として: 後発スプリットは『出力ミラー＋独立 MessageInput 不可（読み取り専用または禁止）』とする初期方針を提示。最終的な可否はIssueで意思決定として記述",
+    "S1-003 の localStorage キー設計はworktreeId-scopeでスプリット永続化する旨を明示し、stale state（splits.length が 1-3 範囲外、widths と splits の長さ不一致）の防御ロジックを記述",
+    "受入条件は『分割数遷移整合性』『初期表示・attach 中UX』を追加",
+    "テスト方針セクションを拡充: Vitest 単体（hook/state/migration）+ Playwright e2e（UI遷移）の切り分けと localStorage フィクスチャ準備を明記",
+    "CLAUDE.md 更新の粒度: モジュールリファレンス表のどの行に追加するか具体名を明記",
+    "アクセシビリティ要件（aria-orientation, ロールベース）を追加"
+  ],
+  "output_schema": {
+    "stage": 2,
+    "applied_findings": [
+      {
+        "finding_id": "S1-NNN",
+        "applied": true,
+        "edit_summary": "どのセクションをどう変えたか",
+        "skip_reason": "（applied=false の場合のみ）"
+      }
+    ],
+    "total_applied": "N",
+    "total_skipped": "N",
+    "skipped_findings": [],
+    "github_update": {
+      "issue_number": 728,
+      "body_updated": true,
+      "diff_summary": "差分の要旨"
+    }
+  }
+}

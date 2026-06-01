@@ -64,13 +64,36 @@ vi.mock('@/hooks/useSlashCommands', () => ({
 }));
 
 // Mock child components - we need MessageInput to be trackable
+// Issue #730: 2-column layout; history moved into TerminalContainer.
 vi.mock('@/components/worktree/WorktreeDesktopLayout', () => ({
-  WorktreeDesktopLayout: ({ leftPane, rightPane }: { leftPane: React.ReactNode; rightPane: React.ReactNode }) => (
+  WorktreeDesktopLayout: ({
+    activityPane,
+    rightPane,
+  }: {
+    activityPane: React.ReactNode;
+    rightPane: React.ReactNode;
+  }) => (
     <div data-testid="desktop-layout">
-      <div data-testid="left-pane">{leftPane}</div>
+      <div data-testid="activity-pane-slot">{activityPane}</div>
       <div data-testid="right-pane">{rightPane}</div>
     </div>
   ),
+}));
+
+vi.mock('@/components/worktree/TerminalContainer', () => ({
+  TerminalContainer: ({
+    history,
+    terminal,
+  }: {
+    history: React.ReactNode;
+    terminal: React.ReactNode;
+  }) => (
+    <div data-testid="terminal-container">
+      <div data-testid="history-pane-slot">{history}</div>
+      <div data-testid="terminal-slot">{terminal}</div>
+    </div>
+  ),
+  HISTORY_PANE_ID: 'worktree-history-pane',
 }));
 
 vi.mock('@/components/worktree/TerminalDisplay', () => ({
@@ -88,6 +111,8 @@ vi.mock('@/components/worktree/HistoryPane', () => ({
       <span data-testid="message-count">{messages.length}</span>
     </div>
   ),
+  // Issue #744: real export consumed by TerminalSplitPaneContent for the slot id.
+  splitHistorySlotId: (idx: number) => `split-history-slot-${idx}`,
 }));
 
 // Track MessageInput mount/unmount to detect component tree teardown
@@ -149,9 +174,16 @@ vi.mock('@/components/worktree/FileTreeView', () => ({
   FileTreeView: () => <div data-testid="file-tree-view">FileTree</div>,
 }));
 
-vi.mock('@/components/worktree/LeftPaneTabSwitcher', () => ({
-  LeftPaneTabSwitcher: ({ activeTab }: { activeTab: string }) => (
-    <div data-testid="left-pane-tab-switcher" data-active={activeTab}>Tabs</div>
+// Issue #727: ActivityBar replaces LeftPaneTabSwitcher
+vi.mock('@/components/worktree/ActivityBar', () => ({
+  ActivityBar: ({ active }: { active: string | null }) => (
+    <div data-testid="activity-bar" data-active={active ?? 'none'}>Activity Bar</div>
+  ),
+}));
+
+vi.mock('@/components/worktree/ActivityPane', () => ({
+  ActivityPane: ({ active }: { active: string | null }) => (
+    <div data-testid="activity-pane" data-active={active ?? 'none'}>Pane</div>
   ),
 }));
 
@@ -449,7 +481,23 @@ describe('Issue #266 Acceptance Tests: Tab switching preserves input content', (
       });
 
       await new Promise((resolve) => setTimeout(resolve, 100));
-      expect(mockFetch).not.toHaveBeenCalled();
+      // Issue #727: ignore unrelated file-tree polling (the 'files' activity is the
+      // new default, so visibilitychange resumes /tree polling independently of the
+      // recovery throttle this scenario is about).
+      // Issue #728: each TerminalSplitPaneContent owns its own per-(worktreeId,
+      // cliToolId) polling hook that re-fetches /current-output on visibilitychange,
+      // independent of the parent's recovery throttle this scenario targets.
+      // Issue #744: each embedded per-split HistoryPane drives `useSplitMessages`,
+      // which independently re-fetches /messages on visibilitychange (its own
+      // stale-guard, not the parent recovery throttle). Ignore both too.
+      const recoveryCalls = mockFetch.mock.calls.filter((call) => {
+        const url = typeof call[0] === 'string' ? call[0] : '';
+        if (url.endsWith('/tree')) return false;
+        if (url.includes('/current-output')) return false;
+        if (url.includes('/messages')) return false;
+        return true;
+      });
+      expect(recoveryCalls).toHaveLength(0);
 
       // 3rd event at +6s total: should trigger fetch (past 5s window)
       currentTime += 4000;

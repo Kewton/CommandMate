@@ -1,0 +1,12 @@
+{
+  "issue_number": "727",
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "hypothesis_verification_path": "dev-reports/issue/727/issue-review/hypothesis-verification.md",
+  "stage1_review_path": "dev-reports/issue/727/issue-review/stage1-review-result.json",
+  "stage2_apply_path": "dev-reports/issue/727/issue-review/stage2-apply-result.json",
+  "output_path": "dev-reports/issue/727/issue-review/stage3-review-result.json",
+  "instructions": "Stage 2で更新されたIssue #727本文に対し、影響範囲レビューを実施。観点: 既存ファイルへの波及効果、既存テストへの影響、API互換性、deep-link/?pane=互換性、localStorage既存値の影響、i18nキー、ErrorBoundary boundaries、Server/Client境界、Accessibility/keyboard nav、useReducer state migration、メモ化（useMemo/memo）への影響、メモリ/再レンダリング性能、新規ファイル数の妥当性、依存パッケージの追加要否など。漏れた影響範囲を Must Fix/Should Fix/Nice to Have で指摘する。"
+}

@@ -638,4 +638,94 @@ describe('MessageInput', () => {
       });
     });
   });
+
+  // ===== Issue #728: splitIndex / draft scoping / migration / onFocus =====
+
+  describe('Issue #728 — splitIndex + draft scoping', () => {
+    beforeEach(() => {
+      window.localStorage.clear();
+    });
+
+    it('persists drafts under per-split keys', async () => {
+      const { rerender } = render(
+        <MessageInput {...defaultProps} splitIndex={0} />
+      );
+      typeMessage('first split text');
+      await waitFor(() => {
+        expect(
+          window.localStorage.getItem('commandmate:draft-message:test-worktree:0'),
+        ).toBe('first split text');
+      });
+
+      rerender(<MessageInput {...defaultProps} splitIndex={1} />);
+      // After rerender with splitIndex=1, draft for index 0 should still be there.
+      expect(
+        window.localStorage.getItem('commandmate:draft-message:test-worktree:0'),
+      ).toBe('first split text');
+      typeMessage('second split text');
+      await waitFor(() => {
+        expect(
+          window.localStorage.getItem('commandmate:draft-message:test-worktree:1'),
+        ).toBe('second split text');
+      });
+      expect(
+        window.localStorage.getItem('commandmate:draft-message:test-worktree:0'),
+      ).toBe('first split text');
+    });
+
+    it('migrates legacy draft key to splitIndex=0 on mount', () => {
+      window.localStorage.setItem(
+        'commandmate:draft-message:test-worktree',
+        'legacy-draft',
+      );
+      render(<MessageInput {...defaultProps} splitIndex={0} />);
+      expect(
+        window.localStorage.getItem('commandmate:draft-message:test-worktree'),
+      ).toBeNull();
+      expect(
+        window.localStorage.getItem('commandmate:draft-message:test-worktree:0'),
+      ).toBe('legacy-draft');
+      const textarea = getTextarea();
+      expect(textarea.value).toBe('legacy-draft');
+    });
+
+    it('migration does not overwrite an existing splitIndex=0 draft', () => {
+      window.localStorage.setItem(
+        'commandmate:draft-message:test-worktree:0',
+        'newer-draft',
+      );
+      window.localStorage.setItem(
+        'commandmate:draft-message:test-worktree',
+        'older-legacy-draft',
+      );
+      render(<MessageInput {...defaultProps} splitIndex={0} />);
+      // Legacy key is still cleaned up.
+      expect(
+        window.localStorage.getItem('commandmate:draft-message:test-worktree'),
+      ).toBeNull();
+      // But the existing new-format draft is preserved.
+      expect(
+        window.localStorage.getItem('commandmate:draft-message:test-worktree:0'),
+      ).toBe('newer-draft');
+    });
+
+    it('migration is skipped for splitIndex !== 0', () => {
+      window.localStorage.setItem(
+        'commandmate:draft-message:test-worktree',
+        'legacy-draft',
+      );
+      render(<MessageInput {...defaultProps} splitIndex={1} />);
+      // Legacy key remains because splitIndex=1 should not run migration
+      expect(
+        window.localStorage.getItem('commandmate:draft-message:test-worktree'),
+      ).toBe('legacy-draft');
+    });
+
+    it('calls onFocus prop when the textarea gains focus', () => {
+      const onFocus = vi.fn();
+      render(<MessageInput {...defaultProps} onFocus={onFocus} />);
+      fireEvent.focus(getTextarea());
+      expect(onFocus).toHaveBeenCalled();
+    });
+  });
 });

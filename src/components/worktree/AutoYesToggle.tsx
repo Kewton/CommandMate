@@ -12,16 +12,15 @@
 
 import React, { memo, useEffect, useState, useCallback } from 'react';
 import { AutoYesConfirmDialog } from './AutoYesConfirmDialog';
-import { formatTimeRemaining } from '@/config/auto-yes-config';
+import { formatTimeRemaining, AUTO_YES_COUNTDOWN_INTERVAL_MS } from '@/config/auto-yes-config';
 import type { AutoYesDuration } from '@/config/auto-yes-config';
+import { NOTIFICATION_DISMISS_MS } from '@/config/ui-feedback-config';
 import { getCliToolDisplayNameSafe } from '@/lib/cli-tools/types';
-
-/** Parameters for auto-yes toggle callback (Issue #314) */
-export interface AutoYesToggleParams {
-  enabled: boolean;
-  duration?: AutoYesDuration;
-  stopPattern?: string;
-}
+// Issue #756: AutoYesToggleParams moved to a non-TSX module (`@/types/auto-yes`)
+// so server-side type consumers compiled under tsconfig.server.json can import
+// it without TS6142. Re-exported here for backward compatibility.
+import type { AutoYesToggleParams } from '@/types/auto-yes';
+export type { AutoYesToggleParams };
 
 /** Props for AutoYesToggle component */
 export interface AutoYesToggleProps {
@@ -64,7 +63,7 @@ export const AutoYesToggle = memo(function AutoYesToggle({
     };
 
     updateTime();
-    const interval = setInterval(updateTime, 1000);
+    const interval = setInterval(updateTime, AUTO_YES_COUNTDOWN_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [enabled, expiresAt]);
 
@@ -73,7 +72,7 @@ export const AutoYesToggle = memo(function AutoYesToggle({
     if (!lastAutoResponse) return;
 
     setNotification(`Auto responded: "${lastAutoResponse}"`);
-    const timeout = setTimeout(() => setNotification(null), 2000);
+    const timeout = setTimeout(() => setNotification(null), NOTIFICATION_DISMISS_MS);
     return () => clearTimeout(timeout);
   }, [lastAutoResponse]);
 

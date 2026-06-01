@@ -25,5 +25,9 @@
   "connection": {
     "error": "接続エラー",
     "serverError": "サーバーへの接続に問題が発生しました"
+  },
+  "fileTooLarge": {
+    "editableLimit": "編集可能ファイルサイズの上限（{limit}MB）を超えています",
+    "viewerLimit": "閲覧専用ファイルサイズの上限を超えています"
   }
 }

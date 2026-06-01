@@ -1,0 +1,29 @@
+{
+  "issue_number": "723",
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "original_issue_path": "dev-reports/issue/723/issue-review/original-issue.json",
+  "hypothesis_verification_path": "dev-reports/issue/723/issue-review/hypothesis-verification.md",
+  "output_path": "dev-reports/issue/723/issue-review/stage1-review-result.json",
+  "review_focus": [
+    "Issue記述と実コードの整合性",
+    "用語・行番号・定数値の正確性",
+    "提案する設計の論理的整合性（既存実装との競合がないか）",
+    "受入条件の網羅性・検証可能性",
+    "スコープ境界の明確性"
+  ],
+  "key_concerns_from_hypothesis_verification": [
+    "H1/H8: 編集系既存上限1MBとIssue提案2MBの矛盾整理",
+    "H6: 画像サイズ20MB（Issueの5MBは誤り）",
+    "H4: 304スキップ機構の存在明記",
+    "H8: .html/.htm も編集系（Issueは未言及）",
+    "複数のサイズガード共存（route.ts事前 + validateContent事後）の整合"
+  ],
+  "project_context": {
+    "tech_stack": "Next.js 14 / TypeScript / React",
+    "claude_md": "CLAUDE.md",
+    "branch": "feature/723-worktree"
+  }
+}

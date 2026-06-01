@@ -12,14 +12,8 @@
 'use client';
 
 import React, { useEffect, useCallback, useState, memo, useRef } from 'react';
-import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
-import { HistoryPane } from '@/components/worktree/HistoryPane';
 import { type WorktreeStatus } from '@/components/mobile/MobileHeader';
-import { DESKTOP_STATUS_CONFIG } from '@/config/status-colors';
-import { type MobileTab } from '@/components/mobile/MobileTabBar';
-import { ErrorBoundary } from '@/components/error/ErrorBoundary';
-import { FileTreeView } from '@/components/worktree/FileTreeView';
-import { SearchBar } from '@/components/worktree/SearchBar';
+import { DESKTOP_STATUS_CONFIG, SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import { LogViewer } from '@/components/worktree/LogViewer';
 import { VersionSection } from '@/components/worktree/VersionSection';
 import { FeedbackSection } from '@/components/worktree/FeedbackSection';
@@ -29,12 +23,10 @@ import { truncateString } from '@/lib/utils';
 import { ClipboardCopy, Check } from 'lucide-react';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { NotificationDot } from '@/components/common/NotificationDot';
-import { NotesAndLogsPane } from '@/components/worktree/NotesAndLogsPane';
-import { GitPane } from '@/components/worktree/GitPane';
+import { deriveCliStatus } from '@/types/sidebar';
 import type { Worktree, ChatMessage, GitStatus } from '@/types/models';
-import type { CLIToolType } from '@/lib/cli-tools/types';
-import type { UseFileSearchReturn } from '@/hooks/useFileSearch';
-import type { HistoryDisplayLimit } from '@/config/history-display-config';
+import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
+import { COPY_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
 
 // ============================================================================
 // Constants
@@ -215,7 +207,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
       await copyToClipboard(worktree.path);
       setPathCopied(true);
       if (pathTimerRef.current) clearTimeout(pathTimerRef.current);
-      pathTimerRef.current = setTimeout(() => setPathCopied(false), 2000);
+      pathTimerRef.current = setTimeout(() => setPathCopied(false), COPY_FEEDBACK_RESET_MS);
     } catch {
       // Silent failure
     }
@@ -226,7 +218,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
       await copyToClipboard(worktree.repositoryPath);
       setRepoPathCopied(true);
       if (repoPathTimerRef.current) clearTimeout(repoPathTimerRef.current);
-      repoPathTimerRef.current = setTimeout(() => setRepoPathCopied(false), 2000);
+      repoPathTimerRef.current = setTimeout(() => setRepoPathCopied(false), COPY_FEEDBACK_RESET_MS);
     } catch {
       // Silent failure
     }
@@ -432,13 +424,27 @@ interface DesktopHeaderProps {
   gitStatus?: GitStatus;
   onBackClick: () => void;
   onInfoClick: () => void;
-  onMenuClick: () => void;
+  /**
+   * Optional sidebar toggle callback.
+   * Issue #747: the sidebar (Branches) toggle moved out of DesktopHeader into
+   * the top of the ActivityBar, so DesktopHeader no longer renders a hamburger.
+   * Kept as an optional prop for backward compatibility.
+   */
+  onMenuClick?: () => void;
   /** Whether an app update is available (shows notification dot on Info button) - Issue #278 */
   hasUpdate?: boolean;
   /** Current worktree status (ready/in_progress/in_review/done/null) */
   worktreeStatus?: 'ready' | 'in_progress' | 'in_review' | 'done' | null;
   /** Callback when worktree status is changed via dropdown */
   onWorktreeStatusChange?: (status: 'ready' | 'in_progress' | 'in_review' | 'done' | null) => void;
+  /** Per-CLI session status map (PC only, optional). Issue #749 */
+  sessionStatusByCli?: Worktree['sessionStatusByCli'];
+  /** Currently selected agents (PC only, optional). Issue #749 */
+  selectedAgents?: CLIToolType[];
+  /** Currently active CLI tab (PC only, optional). Issue #749 */
+  activeCliTab?: CLIToolType;
+  /** Callback when an agent status icon is clicked (PC only, optional). Issue #749 */
+  onActiveCliTabChange?: (cliId: CLIToolType) => void;
 }
 
 /** Worktree status options for dropdown */
@@ -461,10 +467,13 @@ export const DesktopHeader = memo(function DesktopHeader({
   gitStatus,
   onBackClick,
   onInfoClick,
-  onMenuClick,
   hasUpdate,
   worktreeStatus,
   onWorktreeStatusChange,
+  sessionStatusByCli,
+  selectedAgents,
+  activeCliTab,
+  onActiveCliTabChange,
 }: DesktopHeaderProps) {
   const statusConfig = DESKTOP_STATUS_CONFIG[status];
   // Issue #111: DRY - Use shared truncateString utility
@@ -478,31 +487,8 @@ export const DesktopHeader = memo(function DesktopHeader({
 
   return (
     <div className="flex items-center justify-between px-4 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
-      {/* Left: Menu, Back button and title */}
+      {/* Left: Back button and title (Issue #747: hamburger moved to ActivityBar) */}
       <div className="flex items-center gap-3">
-        {/* Hamburger menu button */}
-        <button
-          type="button"
-          onClick={onMenuClick}
-          className="p-2 -ml-2 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-gray-800 transition-colors"
-          aria-label="Toggle sidebar"
-        >
-          <svg
-            className="w-5 h-5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M4 6h16M4 12h16M4 18h16"
-            />
-          </svg>
-        </button>
-        <div className="w-px h-6 bg-gray-300 dark:bg-gray-600" aria-hidden="true" />
         <button
           type="button"
           onClick={onBackClick}
@@ -581,8 +567,50 @@ export const DesktopHeader = memo(function DesktopHeader({
         </div>
       </div>
 
-      {/* Right: Status dropdown + Info button */}
+      {/* Right: Per-agent status row + Status dropdown + Info button */}
       <div className="flex items-center gap-2">
+        {/* Issue #749: Per-agent (CLI) session status indicators (PC only).
+            Distinct from the worktree-level dot on the left (DESKTOP_STATUS_CONFIG):
+            this row is per-agent (SIDEBAR_STATUS_CONFIG) and doubles as a CLI tab
+            switcher. Rendered only when selectedAgents is provided (backward compat). */}
+        {selectedAgents && selectedAgents.length > 0 && (
+          <div className="flex items-center gap-2 flex-shrink-0" data-testid="desktop-agent-status-row">
+            {selectedAgents.map((cliId) => {
+              const cliStatus = deriveCliStatus(sessionStatusByCli?.[cliId]);
+              const agentStatusConfig = SIDEBAR_STATUS_CONFIG[cliStatus];
+              const isActive = cliId === activeCliTab;
+              return (
+                <button
+                  key={cliId}
+                  type="button"
+                  data-testid={`desktop-agent-status-${cliId}`}
+                  onClick={() => onActiveCliTabChange?.(cliId)}
+                  aria-label={`${getCliToolDisplayName(cliId)}: ${agentStatusConfig.label}`}
+                  aria-pressed={isActive}
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${
+                    isActive
+                      ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-900 dark:text-cyan-100'
+                      : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'
+                  }`}
+                >
+                  {/* Issue #751: dot/spinner icon to the LEFT of the always-visible text */}
+                  {agentStatusConfig.type === 'spinner' ? (
+                    <span
+                      className={`block w-2.5 h-2.5 rounded-full border-2 border-t-transparent animate-spin ${agentStatusConfig.className}`}
+                    />
+                  ) : (
+                    <span
+                      className={`block w-2.5 h-2.5 rounded-full ${agentStatusConfig.className}`}
+                    />
+                  )}
+                  <span className="whitespace-nowrap">
+                    {getCliToolDisplayName(cliId)}: {agentStatusConfig.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
         {/* Worktree status dropdown */}
         {onWorktreeStatusChange && (
           <select
@@ -760,300 +788,17 @@ export const ErrorDisplay = memo(function ErrorDisplay({
 });
 
 // ============================================================================
-// Mobile Content Component
+// Mobile Content Components (Issue #755)
 // ============================================================================
 
-/** Props for MobileInfoContent component */
-interface MobileInfoContentProps {
-  worktreeId: string;
-  worktree: Worktree | null;
-  onWorktreeUpdate: (updated: Worktree) => void;
-}
-
 /**
- * Mobile Info tab content with description editing.
- * Uses useDescriptionEditor hook and WorktreeInfoFields for DRY compliance.
+ * Issue #755: MobileContent / MobileInfoContent moved to
+ * `WorktreeDetailMobile.tsx`. Re-exported here for backward compatibility so
+ * existing imports of these symbols from WorktreeDetailSubComponents keep
+ * working. New code should import from `@/components/worktree/WorktreeDetailMobile`.
  */
-export const MobileInfoContent = memo(function MobileInfoContent({
-  worktreeId,
-  worktree,
-  onWorktreeUpdate,
-}: MobileInfoContentProps) {
-  const [showLogs, setShowLogs] = useState(false);
-
-  // Track previous worktree ID to detect worktree changes
-  const prevWorktreeIdRef = useRef(worktree?.id);
-  // Track editing state via ref to avoid circular dependency with useDescriptionEditor
-  const isEditingRef = useRef(false);
-
-  const descriptionEditor = useDescriptionEditor(
-    worktree,
-    onWorktreeUpdate,
-    worktree?.id,
-    () => {
-      const worktreeChanged = worktree?.id !== prevWorktreeIdRef.current;
-      prevWorktreeIdRef.current = worktree?.id;
-      return worktreeChanged && !isEditingRef.current;
-    },
-  );
-
-  // Keep ref in sync with hook state
-  isEditingRef.current = descriptionEditor.isEditing;
-
-  if (!worktree) {
-    return (
-      <div className="text-gray-500 text-center py-8">
-        Loading worktree info...
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-4 space-y-4 overflow-y-auto h-full">
-      <WorktreeInfoFields
-        worktreeId={worktreeId}
-        worktree={worktree}
-        cardClassName="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4"
-        descriptionEditor={descriptionEditor}
-        showLogs={showLogs}
-        onToggleLogs={() => setShowLogs(!showLogs)}
-        onWorktreeUpdate={onWorktreeUpdate}
-      />
-    </div>
-  );
-});
-
-/** Props for MobileContent component */
-interface MobileContentProps {
-  activeTab: MobileTab;
-  worktreeId: string;
-  worktree: Worktree | null;
-  messages: ChatMessage[];
-  terminalOutput: string;
-  isTerminalActive: boolean;
-  isThinking: boolean;
-  onFilePathClick: (path: string) => void;
-  onFileSelect: (path: string) => void;
-  onWorktreeUpdate: (updated: Worktree) => void;
-  onNewFile: (parentPath: string) => void;
-  onNewDirectory: (parentPath: string) => void;
-  onRename: (path: string) => void;
-  onDelete: (path: string) => void;
-  onUpload: (targetDir: string) => void;
-  /** [Issue #162] Move callback */
-  onMove?: (path: string, type: 'file' | 'directory') => void;
-  refreshTrigger: number;
-  /** [Issue #21] File search hook return object */
-  fileSearch: UseFileSearchReturn;
-  /** [Issue #211] Toast notification callback for copy feedback */
-  showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
-  /** [Issue #294] CMATE setup callback */
-  onCmateSetup?: () => void;
-  /** [Issue #368] Selected agents for Agent tab */
-  selectedAgents: CLIToolType[];
-  /** [Issue #368] Callback when selected agents change */
-  onSelectedAgentsChange: (agents: CLIToolType[]) => void;
-  /** [Issue #368] Current vibe-local model selection */
-  vibeLocalModel: string | null;
-  /** [Issue #368] Callback when vibe-local model changes */
-  onVibeLocalModelChange: (model: string | null) => void;
-  /** [Issue #374] Current vibe-local context window (null = default) */
-  vibeLocalContextWindow: number | null;
-  /** [Issue #374] Callback when vibe-local context window changes */
-  onVibeLocalContextWindowChange: (value: number | null) => void;
-  /** [Issue #379] Auto-scroll state for terminal */
-  autoScroll?: boolean;
-  /** [Issue #379] Callback when auto-scroll state changes */
-  onScrollChange?: (enabled: boolean) => void;
-  /** [Issue #379] Disable auto-follow for TUI tools (OpenCode) */
-  disableAutoFollow?: boolean;
-  /** [Issue #447] History sub-tab state */
-  historySubTab: 'message' | 'git';
-  /** [Issue #447] History sub-tab change handler */
-  onHistorySubTabChange: (tab: 'message' | 'git') => void;
-  /** [Issue #447] Diff select handler for GitPane */
-  onDiffSelect: (diff: string, filePath: string) => void;
-  /** [Issue #485] Insert to message callback */
-  onInsertToMessage?: (content: string) => void;
-  /** [Issue #168] Whether to show archived messages */
-  showArchived?: boolean;
-  /** [Issue #168] Callback when showArchived toggle changes */
-  onShowArchivedChange?: (show: boolean) => void;
-  /** [Issue #701] Current history display limit */
-  historyDisplayLimit?: HistoryDisplayLimit;
-  /** [Issue #701] Callback when history display limit changes */
-  onHistoryDisplayLimitChange?: (limit: HistoryDisplayLimit) => void;
-}
-
-/** Renders content based on active mobile tab */
-export const MobileContent = memo(function MobileContent({
-  activeTab,
-  worktreeId,
-  worktree,
-  messages,
-  terminalOutput,
-  isTerminalActive,
-  isThinking,
-  onFilePathClick,
-  onFileSelect,
-  onWorktreeUpdate,
-  onNewFile,
-  onNewDirectory,
-  onRename,
-  onDelete,
-  onUpload,
-  onMove,
-  refreshTrigger,
-  fileSearch,
-  showToast,
-  onCmateSetup,
-  selectedAgents,
-  onSelectedAgentsChange,
-  vibeLocalModel,
-  onVibeLocalModelChange,
-  vibeLocalContextWindow,
-  onVibeLocalContextWindowChange,
-  autoScroll,
-  onScrollChange,
-  disableAutoFollow,
-  historySubTab,
-  onHistorySubTabChange,
-  onDiffSelect,
-  onInsertToMessage,
-  showArchived,
-  onShowArchivedChange,
-  historyDisplayLimit,
-  onHistoryDisplayLimitChange,
-}: MobileContentProps) {
-  switch (activeTab) {
-    case 'terminal':
-      return (
-        <ErrorBoundary componentName="TerminalDisplay">
-          <TerminalDisplay
-            output={terminalOutput}
-            isActive={isTerminalActive}
-            isThinking={isThinking}
-            autoScroll={autoScroll}
-            onScrollChange={onScrollChange}
-            disableAutoFollow={disableAutoFollow}
-            className="h-full"
-          />
-        </ErrorBoundary>
-      );
-    case 'history':
-      return (
-        <div className="h-full flex flex-col">
-          {/* History sub-tab switcher: Message | Git (Issue #447) */}
-          <div className="flex border-b border-gray-200 dark:border-gray-700 shrink-0">
-            <button
-              type="button"
-              onClick={() => onHistorySubTabChange('message')}
-              className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
-                historySubTab === 'message'
-                  ? 'text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400 bg-cyan-50 dark:bg-cyan-900/30'
-                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-              }`}
-            >
-              Message
-            </button>
-            <button
-              type="button"
-              onClick={() => onHistorySubTabChange('git')}
-              className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
-                historySubTab === 'git'
-                  ? 'text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400 bg-cyan-50 dark:bg-cyan-900/30'
-                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-              }`}
-            >
-              Git
-            </button>
-          </div>
-          {historySubTab === 'message' ? (
-            <ErrorBoundary componentName="HistoryPane">
-              <HistoryPane
-                messages={messages}
-                worktreeId={worktreeId}
-                onFilePathClick={onFilePathClick}
-                className="flex-1 min-h-0"
-                showToast={showToast}
-                onInsertToMessage={onInsertToMessage}
-                showArchived={showArchived}
-                onShowArchivedChange={onShowArchivedChange}
-                historyDisplayLimit={historyDisplayLimit}
-                onHistoryDisplayLimitChange={onHistoryDisplayLimitChange}
-              />
-            </ErrorBoundary>
-          ) : (
-            <ErrorBoundary componentName="GitPane">
-              <GitPane
-                worktreeId={worktreeId}
-                onDiffSelect={onDiffSelect}
-                isMobile={true}
-                className="flex-1 min-h-0"
-              />
-            </ErrorBoundary>
-          )}
-        </div>
-      );
-    case 'files':
-      return (
-        <ErrorBoundary componentName="FileTreeView">
-          <div className="h-full flex flex-col overflow-hidden">
-            {/* [Issue #21] Search Bar - Mobile */}
-            <SearchBar
-              query={fileSearch.query}
-              mode={fileSearch.mode}
-              isSearching={fileSearch.isSearching}
-              error={fileSearch.error}
-              onQueryChange={fileSearch.setQuery}
-              onModeChange={fileSearch.setMode}
-              onClear={fileSearch.clearSearch}
-            />
-            <FileTreeView
-              worktreeId={worktreeId}
-              onFileSelect={onFileSelect}
-              onNewFile={onNewFile}
-              onNewDirectory={onNewDirectory}
-              onRename={onRename}
-              onDelete={onDelete}
-              onUpload={onUpload}
-              onMove={onMove}
-              onCmateSetup={onCmateSetup}
-              refreshTrigger={refreshTrigger}
-              searchQuery={fileSearch.query}
-              searchMode={fileSearch.mode}
-              searchResults={fileSearch.results?.results}
-              className="flex-1 min-h-0"
-            />
-          </div>
-        </ErrorBoundary>
-      );
-    case 'memo':
-      return (
-        <ErrorBoundary componentName="NotesAndLogsPane">
-          <NotesAndLogsPane
-            worktreeId={worktreeId}
-            className="h-full"
-            selectedAgents={selectedAgents}
-            onSelectedAgentsChange={onSelectedAgentsChange}
-            vibeLocalModel={vibeLocalModel}
-            onVibeLocalModelChange={onVibeLocalModelChange}
-            vibeLocalContextWindow={vibeLocalContextWindow}
-            onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
-            onInsertToMessage={onInsertToMessage}
-          />
-        </ErrorBoundary>
-      );
-    case 'info':
-      return (
-        <MobileInfoContent
-          worktreeId={worktreeId}
-          worktree={worktree}
-          onWorktreeUpdate={onWorktreeUpdate}
-        />
-      );
-    default:
-      return null;
-  }
-});
+export {
+  MobileContent,
+  MobileInfoContent,
+} from '@/components/worktree/WorktreeDetailMobile';
 

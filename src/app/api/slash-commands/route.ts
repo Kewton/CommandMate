@@ -18,7 +18,6 @@ const logger = createLogger('api/slash-commands');
  *
  * @returns JSON response with command groups
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function GET(_request: NextRequest): Promise<NextResponse> {
   try {
     const groups = await getSlashCommandGroups();

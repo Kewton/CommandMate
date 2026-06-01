@@ -11,17 +11,22 @@
 'use client';
 
 import React, { useMemo, useCallback, memo, useRef, useLayoutEffect, useState, useEffect } from 'react';
-import { Search } from 'lucide-react';
+import { Search, User, UserCheck, ChevronRight } from 'lucide-react';
 import type { ChatMessage } from '@/types/models';
 import { useConversationHistory } from '@/hooks/useConversationHistory';
 import { useHistorySearch } from '@/hooks/useHistorySearch';
 import { ConversationPairCard } from './ConversationPairCard';
 import { HistorySearchBar } from './HistorySearchBar';
+import { HISTORY_PANE_ID } from './TerminalContainer';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import {
   applyHistoryHighlights,
   clearHistoryHighlights,
+  makeHistoryNamespace,
+  HISTORY_SEARCH_NAMESPACE,
+  type HighlightNamespace,
 } from '@/lib/terminal-highlight';
+import type { CLIToolType } from '@/lib/cli-tools/types';
 import {
   HISTORY_DISPLAY_LIMIT_OPTIONS,
   isHistoryDisplayLimit,
@@ -40,6 +45,29 @@ import type { HistoryMatch } from '@/hooks/useHistorySearch';
  * Note: sticky top-0 does not affect scrollTop calculation as content flows below naturally.
  */
 export const STICKY_HEADER_HEIGHT = 48;
+
+/**
+ * Issue #744: id of the per-split slot element that wraps an embedded
+ * HistoryPane. `TerminalSplitPaneContent` renders the wrapping `<div>` with this
+ * exact `id` so the split-embedded collapse button's `aria-controls` resolves to
+ * a real region (instead of dangling at the PC-unrendered HISTORY_PANE_ID).
+ * Keep this format in sync with `TerminalSplitPaneContent`.
+ */
+export function splitHistorySlotId(splitIndex: number): string {
+  return `split-history-slot-${splitIndex}`;
+}
+
+/**
+ * Issue #744: data-testid for the collapse button. Legacy (no splitIndex) keeps
+ * the original stable id for backward compatibility / mobile / existing tests.
+ * Per-split usage suffixes by splitIndex so multiple simultaneously-mounted
+ * panes never produce duplicate testids in the DOM.
+ */
+export function collapseButtonTestId(splitIndex: number | undefined): string {
+  return splitIndex === undefined
+    ? 'history-pane-collapse-button'
+    : `history-pane-collapse-button-${splitIndex}`;
+}
 
 // ============================================================================
 // Types
@@ -62,6 +90,37 @@ export interface HistoryPaneProps {
   historyDisplayLimit?: HistoryDisplayLimit;
   /** Issue #701: Callback when the history display limit selector changes */
   onHistoryDisplayLimitChange?: (limit: HistoryDisplayLimit) => void;
+  /**
+   * Issue #725: When true, only user messages are shown — assistant message
+   * sections are hidden and orphan (assistant-only) pairs are skipped.
+   * Defaults to `false`.
+   */
+  historyUserOnly?: boolean;
+  /** Issue #725: Callback when the "User only" toggle changes. */
+  onHistoryUserOnlyChange?: (next: boolean) => void;
+  /**
+   * Issue #727: When provided, a collapse button (▶) is rendered in the
+   * header so the user can hide the dedicated PC History column.
+   * Omit on mobile or when the column cannot be hidden.
+   */
+  onCollapse?: () => void;
+  /**
+   * Issue #744: When this HistoryPane is rendered inside a PC terminal split,
+   * pass the split index so its in-pane search uses a per-split CSS highlight
+   * namespace (`makeHistoryNamespace(splitIndex)` → `history-search-<idx>`).
+   * Multiple HistoryPanes mounted at once (one per split) would otherwise
+   * clobber each other's highlights via the shared global `history-search`
+   * registry key. When omitted, the legacy global namespace is used
+   * (mobile / single-pane, backward compatible).
+   */
+  splitIndex?: number;
+  /**
+   * Issue #744: The CLI tool this HistoryPane represents (metadata only). The
+   * messages are already filtered by the caller's fetch
+   * (`useSplitMessages({ cliToolId })`), so HistoryPane does NOT apply a
+   * client-side cliToolId filter (S1-008). Provided for clarity / future use.
+   */
+  cliToolId?: CLIToolType;
 }
 
 // ============================================================================
@@ -167,8 +226,37 @@ export const HistoryPane = memo(function HistoryPane({
   onShowArchivedChange,
   historyDisplayLimit,
   onHistoryDisplayLimitChange,
+  historyUserOnly = false,
+  onHistoryUserOnlyChange,
+  onCollapse,
+  splitIndex,
+  cliToolId: _cliToolId,
 }: HistoryPaneProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Issue #744: per-split CSS highlight namespace. When this pane is inside a
+  // PC terminal split, each split gets its own `history-search-<idx>` keys so
+  // simultaneously-mounted panes never overwrite each other's highlights. When
+  // splitIndex is omitted (mobile / single pane) the legacy global namespace
+  // is used for backward compatibility.
+  const highlightNamespace: HighlightNamespace = useMemo(
+    () =>
+      splitIndex === undefined
+        ? HISTORY_SEARCH_NAMESPACE
+        : makeHistoryNamespace(splitIndex),
+    [splitIndex]
+  );
+
+  // Issue #744: derive the collapse button's identity from splitIndex so that
+  // multiple split-embedded HistoryPanes never collide on a shared DOM id/testid.
+  // Legacy (no splitIndex / mobile / single PC column): keep the original
+  // `history-pane-collapse-button` testid + `aria-controls=HISTORY_PANE_ID`
+  // (the slot rendered by TerminalContainer). Per-split: suffix the testid and
+  // point aria-controls at this split's own slot id (rendered by
+  // TerminalSplitPaneContent), so the control always resolves to a real region.
+  const collapseTestId = collapseButtonTestId(splitIndex);
+  const collapseAriaControls =
+    splitIndex === undefined ? HISTORY_PANE_ID : splitHistorySlotId(splitIndex);
   const scrollPositionRef = useRef<number>(0);
   const prevMessageCountRef = useRef<number>(messages.length);
   /** [Issue #716] Saved scrollTop at the moment search was opened. */
@@ -183,12 +271,18 @@ export const HistoryPane = memo(function HistoryPane({
   // [Issue #716] Search
   // ---------------------------------------------------------------
   // Pre-filter searchable messages (archived/empty removed); see design §5.2.
+  // Issue #725: When `historyUserOnly` is true, also filter out assistant role
+  // so search results never highlight assistant content the user cannot see.
   const searchableMessages = useMemo(
     () =>
       messages.filter(
-        (m) => !m.archived && typeof m.content === 'string' && m.content.length > 0
+        (m) =>
+          !m.archived &&
+          typeof m.content === 'string' &&
+          m.content.length > 0 &&
+          (!historyUserOnly || m.role === 'user')
       ),
-    [messages]
+    [messages, historyUserOnly]
   );
 
   const {
@@ -269,7 +363,7 @@ export const HistoryPane = memo(function HistoryPane({
     if (!container) return;
 
     if (!isSearchOpen || matchPositions.length === 0) {
-      clearHistoryHighlights();
+      clearHistoryHighlights(highlightNamespace);
       return;
     }
 
@@ -279,7 +373,7 @@ export const HistoryPane = memo(function HistoryPane({
       if (!el) continue;
       const isCurrent = currentMatch?.messageId === match.messageId;
       const localIdx = isCurrent ? currentMatch.localIndex : -1;
-      applyHistoryHighlights(el, match.ranges, localIdx);
+      applyHistoryHighlights(el, match.ranges, localIdx, highlightNamespace);
       if (isCurrent && el instanceof HTMLElement) {
         currentMatchElement = el;
       }
@@ -290,9 +384,9 @@ export const HistoryPane = memo(function HistoryPane({
     }
 
     return () => {
-      clearHistoryHighlights();
+      clearHistoryHighlights(highlightNamespace);
     };
-  }, [isSearchOpen, matchPositions, currentMatch, autoExpandedIds]);
+  }, [isSearchOpen, matchPositions, currentMatch, autoExpandedIds, highlightNamespace]);
 
   // Save scroll position when the search opens; restore it when search closes.
   useEffect(() => {
@@ -352,6 +446,10 @@ export const HistoryPane = memo(function HistoryPane({
       return <EmptyState />;
     }
     return pairs.map((pair) => {
+      // Issue #725: When User only filter is active, skip pairs that have no
+      // user message (orphan / assistant-only). Determined via `!pair.userMessage`
+      // — equivalent to `pair.status === 'orphan'` in current grouping logic.
+      if (historyUserOnly && !pair.userMessage) return null;
       const isArchived = pair.userMessage?.archived === true ||
         pair.assistantMessages?.some(m => m.archived === true);
       const expanded = isManuallyExpanded(pair.id) || autoExpandedIds.has(pair.id);
@@ -364,6 +462,7 @@ export const HistoryPane = memo(function HistoryPane({
             onToggleExpand={createToggleHandler(pair.id)}
             onCopy={handleCopy}
             onInsertToMessage={onInsertToMessage}
+            showAssistant={!historyUserOnly}
           />
         </div>
       );
@@ -427,6 +526,26 @@ export const HistoryPane = memo(function HistoryPane({
               Show archived
             </label>
           )}
+          {onHistoryUserOnlyChange && (
+            <button
+              type="button"
+              onClick={() => onHistoryUserOnlyChange(!historyUserOnly)}
+              aria-label="Show user messages only"
+              aria-pressed={historyUserOnly}
+              className={`p-1 rounded transition-colors ${
+                historyUserOnly
+                  ? 'bg-cyan-900/40 text-cyan-300'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+              title={historyUserOnly ? 'Show all messages' : 'Show user messages only'}
+            >
+              {historyUserOnly ? (
+                <UserCheck size={14} aria-hidden="true" />
+              ) : (
+                <User size={14} aria-hidden="true" />
+              )}
+            </button>
+          )}
           <button
             type="button"
             onClick={handleToggleSearch}
@@ -437,6 +556,20 @@ export const HistoryPane = memo(function HistoryPane({
           >
             <Search size={14} aria-hidden="true" />
           </button>
+          {onCollapse && (
+            <button
+              type="button"
+              onClick={onCollapse}
+              aria-label="Collapse history panel"
+              aria-expanded="true"
+              aria-controls={collapseAriaControls}
+              className="p-1 text-gray-400 hover:text-gray-200 rounded transition-colors"
+              title="Collapse history panel"
+              data-testid={collapseTestId}
+            >
+              <ChevronRight size={14} aria-hidden="true" />
+            </button>
+          )}
         </div>
       </div>
 

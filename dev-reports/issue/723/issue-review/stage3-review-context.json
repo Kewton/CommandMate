@@ -1,0 +1,24 @@
+{
+  "issue_number": "723",
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "previous_review_path": "dev-reports/issue/723/issue-review/stage1-review-result.json",
+  "previous_apply_path": "dev-reports/issue/723/issue-review/stage2-apply-result.json",
+  "current_issue_body_path": "dev-reports/issue/723/issue-review/issue-body-after-stage2.md",
+  "hypothesis_verification_path": "dev-reports/issue/723/issue-review/hypothesis-verification.md",
+  "output_path": "dev-reports/issue/723/issue-review/stage3-review-result.json",
+  "review_focus": [
+    "コード変更が波及する全ファイル・関数の洗い出し",
+    "API契約変更（既存呼び出し元への影響）",
+    "DB/ストレージへの影響",
+    "既存テストへの影響（破壊的変更の有無）",
+    "他Issue（#469 #490 #673 #302 等）との競合・相補",
+    "ユーザー体験の影響（UI互換性、ショートカット、ファイルパネル既存挙動）",
+    "CLIモジュール・サーバーモジュールへの波及",
+    "i18n（多言語対応）の影響",
+    "認証・セキュリティ・サニタイズへの影響",
+    "ビルド・配布物への影響"
+  ]
+}

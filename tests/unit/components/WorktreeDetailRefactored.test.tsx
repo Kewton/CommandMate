@@ -32,6 +32,16 @@ vi.mock('@/hooks/useIsMobile', () => ({
   MOBILE_BREAKPOINT: 768,
 }));
 
+// Issue #744: stub the per-split message poller so that the only `/messages`
+// fetches in this suite come from the PARENT (WorktreeDetailRefactored). This
+// lets the "parent poll is gated to mobile" test below attribute every
+// `/messages` request to the parent unambiguously. The embedded split history is
+// covered independently by useSplitMessages.test.ts / TerminalSplitPaneContent.test.tsx.
+vi.mock('@/hooks/useSplitMessages', () => ({
+  useSplitMessages: () => ({ messages: [], isLoading: false, refresh: vi.fn() }),
+  SPLIT_MESSAGES_POLL_INTERVAL_MS: 5000,
+}));
+
 // Mock SidebarContext
 const mockOpenMobileDrawer = vi.fn();
 const mockToggle = vi.fn();
@@ -69,13 +79,40 @@ vi.mock('@/hooks/useUpdateCheck', () => ({
 }));
 
 // Mock child components to isolate unit tests
+// Issue #730: WorktreeDesktopLayout no longer takes `activityBar`/`historyPane`.
+// ActivityBar is rendered as a sibling by WorktreeDetailRefactored, and
+// History is wrapped inside `TerminalContainer` (passed via `rightPane`).
 vi.mock('@/components/worktree/WorktreeDesktopLayout', () => ({
-  WorktreeDesktopLayout: ({ leftPane, rightPane }: { leftPane: React.ReactNode; rightPane: React.ReactNode }) => (
+  WorktreeDesktopLayout: ({
+    activityPane,
+    rightPane,
+  }: {
+    activityPane: React.ReactNode;
+    rightPane: React.ReactNode;
+  }) => (
     <div data-testid="desktop-layout">
-      <div data-testid="left-pane">{leftPane}</div>
+      <div data-testid="activity-pane-slot">{activityPane}</div>
       <div data-testid="right-pane">{rightPane}</div>
     </div>
   ),
+}));
+
+// Issue #730: TerminalContainer mock that exposes both history and terminal
+// children, so tests can still locate them via testids.
+vi.mock('@/components/worktree/TerminalContainer', () => ({
+  TerminalContainer: ({
+    history,
+    terminal,
+  }: {
+    history: React.ReactNode;
+    terminal: React.ReactNode;
+  }) => (
+    <div data-testid="terminal-container">
+      <div data-testid="history-pane-slot">{history}</div>
+      <div data-testid="terminal-slot">{terminal}</div>
+    </div>
+  ),
+  HISTORY_PANE_ID: 'worktree-history-pane',
 }));
 
 vi.mock('@/components/worktree/TerminalDisplay', () => ({
@@ -96,6 +133,8 @@ vi.mock('@/components/worktree/HistoryPane', () => ({
       <button onClick={() => onFilePathClick('/test/path.ts')}>Test Path</button>
     </div>
   ),
+  // Issue #744: real export consumed by TerminalSplitPaneContent for the slot id.
+  splitHistorySlotId: (idx: number) => `split-history-slot-${idx}`,
 }));
 
 vi.mock('@/components/worktree/PromptPanel', () => ({
@@ -170,11 +209,25 @@ vi.mock('@/components/worktree/FileTreeView', () => ({
   ),
 }));
 
-vi.mock('@/components/worktree/LeftPaneTabSwitcher', () => ({
-  LeftPaneTabSwitcher: ({ activeTab, onTabChange }: { activeTab: string; onTabChange: (tab: string) => void }) => (
-    <div data-testid="left-pane-tab-switcher">
-      <button onClick={() => onTabChange('history')} data-active={activeTab === 'history'}>History</button>
-      <button onClick={() => onTabChange('files')} data-active={activeTab === 'files'}>Files</button>
+// Issue #727: Mock ActivityBar (replaces LeftPaneTabSwitcher)
+vi.mock('@/components/worktree/ActivityBar', () => ({
+  ActivityBar: ({ active, onToggle }: { active: string | null; onToggle: (id: string) => void }) => (
+    <div data-testid="activity-bar">
+      <button data-testid="activity-bar-button-files" data-active={active === 'files'} onClick={() => onToggle('files')}>Files</button>
+      <button data-testid="activity-bar-button-git" data-active={active === 'git'} onClick={() => onToggle('git')}>Git</button>
+      <button data-testid="activity-bar-button-notes" data-active={active === 'notes'} onClick={() => onToggle('notes')}>Notes</button>
+      <button data-testid="activity-bar-button-schedules" data-active={active === 'schedules'} onClick={() => onToggle('schedules')}>Schedules</button>
+      <button data-testid="activity-bar-button-agent" data-active={active === 'agent'} onClick={() => onToggle('agent')}>Agent</button>
+      <button data-testid="activity-bar-button-timer" data-active={active === 'timer'} onClick={() => onToggle('timer')}>Timer</button>
+    </div>
+  ),
+}));
+
+// Issue #727: Mock ActivityPane so we don't need to wire up every child
+vi.mock('@/components/worktree/ActivityPane', () => ({
+  ActivityPane: ({ active, activities }: { active: string | null; activities: Record<string, React.ReactNode> }) => (
+    <div data-testid="activity-pane" data-active={active ?? 'none'}>
+      {active && activities[active] ? activities[active] : null}
     </div>
   ),
 }));
@@ -205,9 +258,13 @@ vi.mock('@/hooks/useFileTabs', () => ({
   ],
 }));
 
-// Issue #438: Mock FilePanelSplit
+// Issue #438: Mock FilePanelSplit. Issue #728: render the `terminal` slot so
+// that TerminalSplitContainer / TerminalSplitPane / PromptPanel inside it
+// surface in the DOM for tests that assert on them.
 vi.mock('@/components/worktree/FilePanelSplit', () => ({
-  FilePanelSplit: () => <div data-testid="file-panel-split" />,
+  FilePanelSplit: ({ terminal }: { terminal: React.ReactNode }) => (
+    <div data-testid="file-panel-split">{terminal}</div>
+  ),
 }));
 
 // Mock fetch
@@ -318,6 +375,38 @@ describe('WorktreeDetailRefactored', () => {
         // Issue #438: TerminalDisplay is now inside FilePanelSplit
         expect(screen.getByTestId('file-panel-split')).toBeInTheDocument();
       });
+    });
+
+    // Issue #732: Two desktop flex containers wrapping WorktreeDesktopLayout
+    // must carry `min-w-0` so flex items can shrink below their content's
+    // intrinsic minimum width. Without it, FilePanelSplit's fixed-width panes
+    // expand the layout past the viewport and push FilePanel off-screen.
+    //
+    // DOM structure (PC path):
+    //   <div className="flex h-full overflow-hidden relative">      (L1738, parent)
+    //     {activityBar}
+    //     <div className="flex flex-col flex-1 min-h-0 ...">         (L1740, PRIMARY)
+    //       <DesktopHeader />
+    //       <div className="flex-1 min-h-0 ...">                     (L1763, DEFENSIVE)
+    //         <WorktreeDesktopLayout /> -> data-testid="desktop-layout"
+    //
+    // The mocked `desktop-layout` testid is a descendant of both target divs,
+    // so we traverse up from it to assert `min-w-0` on each container.
+    it('desktop layout containers carry min-w-0 to prevent horizontal overflow (Issue #732)', async () => {
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      const desktopLayout = await screen.findByTestId('desktop-layout');
+
+      // L1763 (DEFENSIVE): direct parent of the WorktreeDesktopLayout mock.
+      const defensiveContainer = desktopLayout.parentElement;
+      expect(defensiveContainer).not.toBeNull();
+      expect(defensiveContainer).toHaveClass('flex-1', 'min-h-0', 'min-w-0');
+
+      // L1740 (PRIMARY): parent of the L1763 container. It is the direct flex
+      // item of the L1738 flex-row, so its missing min-w-0 was the root cause.
+      const primaryContainer = defensiveContainer!.parentElement;
+      expect(primaryContainer).not.toBeNull();
+      expect(primaryContainer).toHaveClass('flex', 'flex-col', 'flex-1', 'min-h-0', 'min-w-0');
     });
 
     it('shows PromptPanel when prompt is active', async () => {
@@ -485,18 +574,13 @@ describe('WorktreeDetailRefactored', () => {
   });
 
   describe('Terminal State', () => {
-    // TODO: Fix flaky test - terminal output state update timing issue
-    it.skip('passes terminal output to TerminalDisplay', async () => {
-      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
-
-      await waitFor(
-        () => {
-          expect(screen.getByTestId('terminal-output')).toHaveTextContent('Terminal output');
-        },
-        { timeout: 3000 }
-      );
-    });
-
+    // Issue #764: Removed the obsolete skipped test
+    // 'passes terminal output to TerminalDisplay'. Terminal output is no longer
+    // owned by this parent component: Issue #728/#736 moved it into per-split
+    // useTerminalPanePolling (the parent's terminal reducer slice was deleted),
+    // so the parent never feeds `output` to a parent-controlled TerminalDisplay.
+    // Terminal output rendering is covered by useTerminalPanePolling tests and
+    // TerminalSplitPaneContent tests instead.
     it('renders FilePanelSplit when Claude is thinking (terminal details inside mock)', async () => {
       // Issue #438: TerminalDisplay is now inside FilePanelSplit (mocked).
       // This test verifies the component renders without errors when thinking state is active.
@@ -571,13 +655,11 @@ describe('WorktreeDetailRefactored', () => {
 
       // Wait for component to load and switch to files tab
       await waitFor(() => {
-        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
       });
 
       // Switch to files tab
-      const filesButton = screen.getByText('Files');
-      fireEvent.click(filesButton);
-
+      // Issue #727: 'files' is the default active activity; no need to click.
       await waitFor(() => {
         expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
       });
@@ -596,12 +678,10 @@ describe('WorktreeDetailRefactored', () => {
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
       });
 
-      const filesButton = screen.getByText('Files');
-      fireEvent.click(filesButton);
-
+      // Issue #727: 'files' is the default active activity; no need to click.
       await waitFor(() => {
         expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
       });
@@ -639,12 +719,10 @@ describe('WorktreeDetailRefactored', () => {
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
       });
 
-      const filesButton = screen.getByText('Files');
-      fireEvent.click(filesButton);
-
+      // Issue #727: 'files' is the default active activity; no need to click.
       await waitFor(() => {
         expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
       });
@@ -661,12 +739,10 @@ describe('WorktreeDetailRefactored', () => {
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
       });
 
-      const filesButton = screen.getByText('Files');
-      fireEvent.click(filesButton);
-
+      // Issue #727: 'files' is the default active activity; no need to click.
       await waitFor(() => {
         expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
       });
@@ -691,12 +767,10 @@ describe('WorktreeDetailRefactored', () => {
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
       });
 
-      const filesButton = screen.getByText('Files');
-      fireEvent.click(filesButton);
-
+      // Issue #727: 'files' is the default active activity; no need to click.
       await waitFor(() => {
         expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
       });
@@ -713,12 +787,10 @@ describe('WorktreeDetailRefactored', () => {
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
       });
 
-      const filesButton = screen.getByText('Files');
-      fireEvent.click(filesButton);
-
+      // Issue #727: 'files' is the default active activity; no need to click.
       await waitFor(() => {
         expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
       });
@@ -742,12 +814,10 @@ describe('WorktreeDetailRefactored', () => {
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
       });
 
-      const filesButton = screen.getByText('Files');
-      fireEvent.click(filesButton);
-
+      // Issue #727: 'files' is the default active activity; no need to click.
       await waitFor(() => {
         expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
       });
@@ -762,12 +832,10 @@ describe('WorktreeDetailRefactored', () => {
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
       });
 
-      const filesButton = screen.getByText('Files');
-      fireEvent.click(filesButton);
-
+      // Issue #727: 'files' is the default active activity; no need to click.
       await waitFor(() => {
         expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
       });
@@ -792,12 +860,10 @@ describe('WorktreeDetailRefactored', () => {
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
       });
 
-      const filesButton = screen.getByText('Files');
-      fireEvent.click(filesButton);
-
+      // Issue #727: 'files' is the default active activity; no need to click.
       await waitFor(() => {
         expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
       });
@@ -823,12 +889,10 @@ describe('WorktreeDetailRefactored', () => {
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
       });
 
-      const filesButton = screen.getByText('Files');
-      fireEvent.click(filesButton);
-
+      // Issue #727: 'files' is the default active activity; no need to click.
       await waitFor(() => {
         expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
       });
@@ -1048,9 +1112,26 @@ describe('WorktreeDetailRefactored', () => {
         document.dispatchEvent(new Event('visibilitychange'));
       });
 
-      // Wait a bit to confirm no fetch is triggered
+      // Wait a bit to confirm no fetch is triggered.
+      // Issue #727: file-tree polling fires `/tree` on visibilitychange when the
+      // 'files' activity is active (the new default). That polling is independent
+      // of the visibilitychange recovery throttle this test is about, so ignore it.
+      // Issue #728: each TerminalSplitPaneContent owns its own per-(worktreeId,
+      // cliToolId) polling hook that also fetches /current-output on
+      // visibilitychange. That polling is independent of the parent's
+      // recovery throttle this test targets, so ignore /current-output too.
+      // Issue #744: each embedded per-split HistoryPane drives `useSplitMessages`,
+      // which independently re-fetches /messages on visibilitychange (its own
+      // stale-guard, not the parent recovery throttle). Ignore /messages too.
       await new Promise((resolve) => setTimeout(resolve, 100));
-      expect(mockFetch).not.toHaveBeenCalled();
+      const recoveryCalls = mockFetch.mock.calls.filter((call) => {
+        const url = typeof call[0] === 'string' ? call[0] : '';
+        if (url.endsWith('/tree')) return false;
+        if (url.includes('/current-output')) return false;
+        if (url.includes('/messages')) return false;
+        return true;
+      });
+      expect(recoveryCalls).toHaveLength(0);
 
       // --- 3rd visibilitychange at +6s total: should trigger fetch (past 5s window) ---
       currentTime += 4000;
@@ -1361,13 +1442,11 @@ describe('WorktreeDetailRefactored', () => {
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
       });
 
       // Switch to files tab
-      const filesButton = screen.getByText('Files');
-      fireEvent.click(filesButton);
-
+      // Issue #727: 'files' is the default active activity; no need to click.
       await waitFor(() => {
         expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
       });
@@ -1390,5 +1469,76 @@ describe('WorktreeDetailRefactored', () => {
         }
       });
     });
+  });
+
+  // ============================================================================
+  // [Issue #744] Adaptive interval poll gates `fetchMessages()` to mobile.
+  //
+  // On PC, `state.messages` is no longer rendered (each terminal split fetches
+  // its own history via useSplitMessages, which is stubbed in this suite). The
+  // parent's periodic poll therefore SKIPS `/messages` on PC (it would be an
+  // unused double-fetch of the active CLI), but still polls it on mobile, where
+  // MobileContent consumes `state.messages`. The non-poll call sites (initial
+  // load, visibilitychange recovery) keep fetching `/messages` on both.
+  // ============================================================================
+  describe('Adaptive poll /messages gating (Issue #744)', () => {
+    /** Count fetch calls whose URL hits the messages endpoint. */
+    const messagesCallCount = () =>
+      mockFetch.mock.calls.filter(
+        (call) => typeof call[0] === 'string' && call[0].includes('/messages')
+      ).length;
+
+    it('does NOT poll /messages from the parent interval on PC (isMobile=false)', async () => {
+      mockIsMobile.mockReturnValue(false);
+
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      // Let the initial load settle (initial fetchMessages is unconditional).
+      await waitFor(() => {
+        expect(screen.getByTestId('desktop-layout')).toBeInTheDocument();
+      });
+
+      // Ignore everything fetched so far; we only care about subsequent polls.
+      mockFetch.mockClear();
+
+      // Advance well past several IDLE poll intervals (5000ms) so the interval
+      // poll fires multiple times. Use real timers + waitFor on /current-output
+      // (which the poll always fetches) to prove the poll actually ran.
+      await waitFor(
+        () => {
+          const polledOutput = mockFetch.mock.calls.some(
+            (call) => typeof call[0] === 'string' && call[0].includes('/current-output')
+          );
+          expect(polledOutput).toBe(true);
+        },
+        { timeout: 8000 }
+      );
+
+      // The parent interval poll ran (current-output fetched) but must NOT have
+      // fetched /messages on PC (split history is stubbed in this suite).
+      expect(messagesCallCount()).toBe(0);
+    }, 12000);
+
+    it('DOES poll /messages from the parent interval on mobile (isMobile=true)', async () => {
+      mockIsMobile.mockReturnValue(true);
+
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      // Mobile renders MobileContent; wait for the mobile header to confirm mount.
+      await waitFor(() => {
+        expect(screen.getByTestId('mobile-header')).toBeInTheDocument();
+      });
+
+      mockFetch.mockClear();
+
+      // On mobile the interval poll includes fetchMessages(), so /messages is
+      // re-requested after the initial load.
+      await waitFor(
+        () => {
+          expect(messagesCallCount()).toBeGreaterThan(0);
+        },
+        { timeout: 8000 }
+      );
+    }, 12000);
   });
 });

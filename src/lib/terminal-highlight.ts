@@ -56,6 +56,36 @@ export const HISTORY_SEARCH_NAMESPACE: HighlightNamespace = {
 };
 
 /**
+ * [Issue #744] Per-split History search namespace factory.
+ *
+ * The History pane was moved into each PC terminal split (1-3 splits). Because
+ * the CSS Custom Highlight registry (`CSS.highlights`) is a single global Map
+ * keyed by name, two simultaneously-mounted HistoryPanes that both used the
+ * shared `HISTORY_SEARCH_NAMESPACE` would call
+ * `CSS.highlights.set('history-search', ...)` and clobber each other's matches.
+ *
+ * `makeHistoryNamespace(splitIndex)` returns a namespace whose names are
+ * suffixed with the split index (`history-search-0`, `history-search-current-0`,
+ * `history-search-fallback-overlay-0`, ...) so each split's highlights live
+ * under a distinct registry key and never overwrite one another.
+ *
+ * Static `::highlight()` CSS rules for `history-search-0|1|2` and
+ * `history-search-current-0|1|2` are defined in `src/app/globals.css`
+ * (MAX_SPLITS=3, see `src/config/terminal-split-config.ts`).
+ *
+ * The blue fallback color is intentionally identical to
+ * `HISTORY_SEARCH_NAMESPACE` so all history splits look the same.
+ */
+export function makeHistoryNamespace(splitIndex: number): HighlightNamespace {
+  return {
+    highlightName: `history-search-${splitIndex}`,
+    currentHighlightName: `history-search-current-${splitIndex}`,
+    fallbackOverlayId: `history-search-fallback-overlay-${splitIndex}`,
+    fallbackOverlayBgColor: HISTORY_SEARCH_NAMESPACE.fallbackOverlayBgColor,
+  };
+}
+
+/**
  * Returns true if CSS Custom Highlight API is available in this browser.
  * SEC-TS-002: Used to provide XSS-safe highlighting without DOM modification.
  */
@@ -243,11 +273,19 @@ export function applyTerminalHighlights(
 // ============================================================================
 
 /**
- * Clears all history search highlights (namespace=history-search).
+ * Clears all history search highlights for the given namespace.
+ *
  * Does not affect terminal-search highlights — namespaces are independent.
+ *
+ * [Issue #744] Accepts an optional `namespace` (e.g. from
+ * `makeHistoryNamespace(splitIndex)`) so per-split HistoryPanes can clear only
+ * their own highlights. Defaults to the legacy `HISTORY_SEARCH_NAMESPACE` for
+ * backward compatibility (mobile / single-pane callers pass no argument).
  */
-export function clearHistoryHighlights(): void {
-  clearHighlightsInternal(HISTORY_SEARCH_NAMESPACE);
+export function clearHistoryHighlights(
+  namespace: HighlightNamespace = HISTORY_SEARCH_NAMESPACE
+): void {
+  clearHighlightsInternal(namespace);
 }
 
 /**
@@ -259,11 +297,17 @@ export function clearHistoryHighlights(): void {
  * @param container - The DOM element whose textContent should be highlighted
  * @param matchPositions - Array of {start, end} positions in container.textContent
  * @param currentIndex - Index of the currently focused match (use -1 to skip current)
+ * @param namespace - [Issue #744] Optional per-split namespace (from
+ *   `makeHistoryNamespace(splitIndex)`). Defaults to the legacy
+ *   `HISTORY_SEARCH_NAMESPACE` so existing single-pane / mobile callers are
+ *   unaffected. Passing a per-split namespace prevents simultaneously-mounted
+ *   HistoryPanes from clobbering each other's CSS.highlights entries.
  */
 export function applyHistoryHighlights(
   container: Element,
   matchPositions: MatchPosition[],
-  currentIndex: number
+  currentIndex: number,
+  namespace: HighlightNamespace = HISTORY_SEARCH_NAMESPACE
 ): void {
-  applyHighlightsInternal(container, matchPositions, currentIndex, HISTORY_SEARCH_NAMESPACE);
+  applyHighlightsInternal(container, matchPositions, currentIndex, namespace);
 }

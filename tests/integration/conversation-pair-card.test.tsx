@@ -67,7 +67,8 @@ describe('ConversationPairCard', () => {
       expect(assistantSection).toBeTruthy();
 
       // Find the content container (sibling div with text)
-      const contentContainer = assistantSection?.querySelector('.text-sm.text-gray-200');
+      // Issue #725: Assistant style weakened from text-sm/text-gray-200 to text-xs/text-gray-300.
+      const contentContainer = assistantSection?.querySelector('.text-xs.text-gray-300');
       expect(contentContainer).toBeTruthy();
 
       // Check for required CSS classes for text wrapping (Safari compatible)
@@ -107,8 +108,9 @@ describe('ConversationPairCard', () => {
       expect(card).toBeTruthy();
 
       // Verify assistant section has overflow-x-hidden
+      // Issue #725: Assistant style weakened from text-sm/text-gray-200 to text-xs/text-gray-300.
       const assistantSection = card?.querySelector('.assistant-message-item');
-      const contentContainer = assistantSection?.querySelector('.text-sm.text-gray-200');
+      const contentContainer = assistantSection?.querySelector('.text-xs.text-gray-300');
       expect(contentContainer?.className).toContain('overflow-x-hidden');
     });
 

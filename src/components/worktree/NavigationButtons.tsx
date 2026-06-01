@@ -13,6 +13,7 @@
 import { useCallback, useState, type KeyboardEvent } from 'react';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { NavigationKey } from '@/lib/tmux/tmux';
+import { KEY_PRESS_FEEDBACK_RESET_MS, NAV_KEY_REFRESH_DELAY_MS } from '@/config/ui-feedback-config';
 
 export interface NavigationButtonsProps {
   worktreeId: string;
@@ -37,7 +38,7 @@ export function NavigationButtons({ worktreeId, cliToolId, onKeysSent }: Navigat
   const sendKeys = useCallback((keys: string[]) => {
     // Show immediate visual feedback
     setActiveKey(keys[0]);
-    setTimeout(() => setActiveKey(null), 150);
+    setTimeout(() => setActiveKey(null), KEY_PRESS_FEEDBACK_RESET_MS);
 
     // Send keys and trigger immediate refresh after a short delay for tmux to process
     fetch(`/api/worktrees/${encodeURIComponent(worktreeId)}/special-keys`, {
@@ -47,7 +48,7 @@ export function NavigationButtons({ worktreeId, cliToolId, onKeysSent }: Navigat
     }).then(() => {
       // Trigger immediate terminal refresh after 100ms (allow tmux to process the key)
       if (onKeysSent) {
-        setTimeout(onKeysSent, 100);
+        setTimeout(onKeysSent, NAV_KEY_REFRESH_DELAY_MS);
       }
     }).catch((err) => {
       console.error('Failed to send special keys:', err);

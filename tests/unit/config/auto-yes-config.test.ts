@@ -18,11 +18,23 @@ import {
   REDUCED_CAPTURE_LINES,
   FULL_CAPTURE_LINES,
   AUTO_STOP_ERROR_THRESHOLD,
+  AUTO_YES_COUNTDOWN_INTERVAL_MS,
   type AutoYesDuration,
   type AutoYesStopReason,
 } from '@/config/auto-yes-config';
 
 describe('auto-yes-config', () => {
+  describe('AUTO_YES_COUNTDOWN_INTERVAL_MS (Issue #760)', () => {
+    it('should be 1000 (1 second), preserving the original literal', () => {
+      expect(AUTO_YES_COUNTDOWN_INTERVAL_MS).toBe(1000);
+    });
+
+    it('should be a positive number', () => {
+      expect(typeof AUTO_YES_COUNTDOWN_INTERVAL_MS).toBe('number');
+      expect(AUTO_YES_COUNTDOWN_INTERVAL_MS).toBeGreaterThan(0);
+    });
+  });
+
   describe('ALLOWED_DURATIONS', () => {
     it('should contain exactly 3 duration values', () => {
       expect(ALLOWED_DURATIONS).toHaveLength(3);

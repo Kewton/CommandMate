@@ -1,0 +1,8 @@
+{
+  "issue_number": "743",
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目・影響範囲レビュー）",
+  "review_result_path": "dev-reports/issue/743/issue-review/stage3-review-result.json",
+  "output_path": "dev-reports/issue/743/issue-review/stage4-apply-result.json",
+  "repo_root": "/Users/maenokota/share/work/github_kewton/commandmate-issue-743"
+}
