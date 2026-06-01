@@ -11,6 +11,7 @@ import { Button, Card } from '@/components/ui';
 import { ExternalAppCard } from './ExternalAppCard';
 import { ExternalAppForm } from './ExternalAppForm';
 import type { ExternalApp } from '@/types/external-apps';
+import { EXTERNAL_APPS_POLL_INTERVAL_MS } from '@/config/external-apps-config';
 
 /**
  * ExternalAppsManager component
@@ -53,7 +54,7 @@ export function ExternalAppsManager() {
     fetchApps();
 
     // Poll every 60 seconds
-    const interval = setInterval(fetchApps, 60000);
+    const interval = setInterval(fetchApps, EXTERNAL_APPS_POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [fetchApps]);
 

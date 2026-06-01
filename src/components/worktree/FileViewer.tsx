@@ -27,6 +27,7 @@ import { PdfPreview } from './PdfPreview';
 import type { SandboxLevel } from '@/config/html-extensions';
 import { SANDBOX_ATTRIBUTES } from '@/config/html-extensions';
 import { copyToClipboard } from '@/lib/clipboard-utils';
+import { COPY_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
 import { Copy, Check, Maximize2, Minimize2, ClipboardCopy, Pencil, Search, X } from 'lucide-react';
 import { Z_INDEX } from '@/config/z-index';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
@@ -326,7 +327,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
     try {
       await copyToClipboard(content.content);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setTimeout(() => setCopied(false), COPY_FEEDBACK_RESET_MS);
     } catch {
       // Failure is indicated by icon not changing
     }
@@ -337,7 +338,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
     try {
       await copyToClipboard(filePath);
       setPathCopied(true);
-      setTimeout(() => setPathCopied(false), 2000);
+      setTimeout(() => setPathCopied(false), COPY_FEEDBACK_RESET_MS);
     } catch {
       // Silent failure
     }

@@ -22,6 +22,7 @@ import {
 import { detectAndResendIfPastedText } from './pasted-text-helper';
 import { invalidateCache } from './tmux/tmux-capture-cache';
 import { getErrorMessage } from './errors';
+import { CLAUDE_ENV_SANITIZE_WAIT_MS, TUI_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { createLogger } from '@/lib/logger';
@@ -74,7 +75,7 @@ export async function sanitizeSessionEnvironment(sessionName: string): Promise<v
   // 3-2: Unset inside the session shell (safety net)
   // 100ms wait: empirically determined time for sendKeys command to reach the shell
   await sendKeys(sessionName, 'unset CLAUDECODE', true);
-  await new Promise(resolve => setTimeout(resolve, 100));
+  await new Promise(resolve => setTimeout(resolve, CLAUDE_ENV_SANITIZE_WAIT_MS));
 }
 
 // =============================================================================
@@ -181,7 +182,7 @@ export async function stopSession(sessionName: string): Promise<boolean> {
       invalidateCache(sessionName);
 
       // Wait a moment for Claude to exit
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, TUI_EXIT_WAIT_MS));
     }
 
     // Kill the tmux session

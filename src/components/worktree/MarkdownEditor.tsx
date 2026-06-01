@@ -50,6 +50,7 @@ import { useAutoSave } from '@/hooks/useAutoSave';
 import { useSwipeGesture } from '@/hooks/useSwipeGesture';
 import { useVirtualKeyboard } from '@/hooks/useVirtualKeyboard';
 import { Z_INDEX } from '@/config/z-index';
+import { COPY_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
 import type { EditorProps, EditorFileType, ViewMode } from '@/types/markdown-editor';
 import {
   VIEW_MODE_STRATEGIES,
@@ -417,7 +418,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     try {
       await copyToClipboard(content);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setTimeout(() => setCopied(false), COPY_FEEDBACK_RESET_MS);
     } catch {
       // Silently fail - clipboard may not be available
     }

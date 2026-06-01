@@ -8,6 +8,7 @@ import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/github-dark.css';
 import type { AssistantMessage } from '@/lib/db/assistant-conversation-db';
 import { copyToClipboard } from '@/lib/clipboard-utils';
+import { COPY_FEEDBACK_RESET_SHORT_MS } from '@/config/ui-feedback-config';
 
 interface AssistantMessageListProps {
   messages: AssistantMessage[];
@@ -71,7 +72,7 @@ function CopyButton({ text, className = '', label = 'Copy' }: CopyButtonProps) {
       if (timerRef.current) {
         clearTimeout(timerRef.current);
       }
-      timerRef.current = setTimeout(() => setCopied(false), 1500);
+      timerRef.current = setTimeout(() => setCopied(false), COPY_FEEDBACK_RESET_SHORT_MS);
     } catch {
       // ignore - copyToClipboard handles fallback
     }

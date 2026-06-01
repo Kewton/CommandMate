@@ -28,6 +28,7 @@ import { VIEWER_OVERSCAN_LINES, VIEWER_CHUNK_LINE_SIZE } from '@/config/file-vie
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
 import { Z_INDEX } from '@/config/z-index';
+import { COPY_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
 
 /** Fixed row height for the virtualized CodeViewer (px). Monospace + leading-6. */
 const CODE_VIEWER_ROW_HEIGHT_PX = 24;
@@ -168,7 +169,7 @@ function FileToolbar({ filePath, isMaximized, onToggleMaximize, copyableContent,
       await copyToClipboard(filePath);
       setPathCopied(true);
       if (pathTimerRef.current) clearTimeout(pathTimerRef.current);
-      pathTimerRef.current = setTimeout(() => setPathCopied(false), 2000);
+      pathTimerRef.current = setTimeout(() => setPathCopied(false), COPY_FEEDBACK_RESET_MS);
     } catch {
       // Silent failure
     }
@@ -180,7 +181,7 @@ function FileToolbar({ filePath, isMaximized, onToggleMaximize, copyableContent,
       await copyToClipboard(copyableContent);
       setContentCopied(true);
       if (contentTimerRef.current) clearTimeout(contentTimerRef.current);
-      contentTimerRef.current = setTimeout(() => setContentCopied(false), 2000);
+      contentTimerRef.current = setTimeout(() => setContentCopied(false), COPY_FEEDBACK_RESET_MS);
     } catch {
       // Silent failure
     }

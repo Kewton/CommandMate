@@ -16,3 +16,10 @@
  * both the API route and the inline editor UI automatically.
  */
 export const MAX_DISPLAY_NAME_LENGTH = 100;
+
+/**
+ * Interval (ms) for polling the repository clone status while a clone job is
+ * running or pending (Issue #760).
+ * Site: RepositoryManager.
+ */
+export const CLONE_STATUS_POLL_INTERVAL_MS = 2000;

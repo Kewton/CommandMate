@@ -11,6 +11,7 @@ import type { CLIToolType } from './cli-tools/types';
 import type { PromptData, PromptType, SubmitMode } from '@/types/models';
 import { isValidSubmitMode } from '@/types/models';
 import { invalidateCache } from './tmux/tmux-capture-cache';
+import { TUI_TEXT_INPUT_WAIT_MS } from '@/config/cli-tool-timing-config';
 
 /** Regex pattern to detect checkbox-style multi-select options */
 const CHECKBOX_OPTION_PATTERN = /^\[[ x]\] /;
@@ -134,7 +135,7 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
 
     if (!shouldSuppressEnter(params, resolvedSubmitMode)) {
       // Wait a moment for the input to be processed
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, TUI_TEXT_INPUT_WAIT_MS));
 
       // Send Enter
       await sendKeys(sessionName, '', true);

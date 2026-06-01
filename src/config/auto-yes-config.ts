@@ -48,6 +48,13 @@ export const REDUCED_CAPTURE_LINES = 300;
 /** Full capture lines when stopPattern is set (Issue #499 Item 3) */
 export const FULL_CAPTURE_LINES = 5000;
 
+/**
+ * Interval (ms) for the Auto-Yes countdown timer that refreshes the remaining
+ * time display (Issue #760).
+ * Site: AutoYesToggle.
+ */
+export const AUTO_YES_COUNTDOWN_INTERVAL_MS = 1000;
+
 // =============================================================================
 // Error Threshold Constants (Issue #499)
 // =============================================================================

@@ -37,6 +37,7 @@ import type { Worktree, ChatMessage, GitStatus } from '@/types/models';
 import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
 import type { UseFileSearchReturn } from '@/hooks/useFileSearch';
 import type { HistoryDisplayLimit } from '@/config/history-display-config';
+import { COPY_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
 
 // ============================================================================
 // Constants
@@ -217,7 +218,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
       await copyToClipboard(worktree.path);
       setPathCopied(true);
       if (pathTimerRef.current) clearTimeout(pathTimerRef.current);
-      pathTimerRef.current = setTimeout(() => setPathCopied(false), 2000);
+      pathTimerRef.current = setTimeout(() => setPathCopied(false), COPY_FEEDBACK_RESET_MS);
     } catch {
       // Silent failure
     }
@@ -228,7 +229,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
       await copyToClipboard(worktree.repositoryPath);
       setRepoPathCopied(true);
       if (repoPathTimerRef.current) clearTimeout(repoPathTimerRef.current);
-      repoPathTimerRef.current = setTimeout(() => setRepoPathCopied(false), 2000);
+      repoPathTimerRef.current = setTimeout(() => setRepoPathCopied(false), COPY_FEEDBACK_RESET_MS);
     } catch {
       // Silent failure
     }

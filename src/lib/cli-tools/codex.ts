@@ -17,6 +17,13 @@ import { detectAndResendIfPastedText } from '../pasted-text-helper';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { CODEX_PROMPT_PATTERN, stripAnsi } from '../detection/cli-patterns';
 import { createLogger } from '@/lib/logger';
+import {
+  TUI_SESSION_CREATE_WAIT_MS,
+  TUI_TEXT_INPUT_WAIT_MS,
+  TUI_MESSAGE_PROCESSED_WAIT_MS,
+  TUI_EXIT_WAIT_MS,
+  CODEX_DIALOG_SETTLE_MS,
+} from '@/config/cli-tool-timing-config';
 
 const logger = createLogger('cli-tools/codex');
 
@@ -91,7 +98,7 @@ export class CodexTool extends BaseCLITool {
       });
 
       // Wait a moment for the session to be created
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
 
       // Start Codex CLI in interactive mode
       await sendKeys(sessionName, 'codex', true);
@@ -140,7 +147,7 @@ export class CodexTool extends BaseCLITool {
         if (output.includes('Update') && output.includes('Skip')) {
           await sendKeys(sessionName, '2', true);
           logger.info('skipped-codex-update');
-          await new Promise((resolve) => setTimeout(resolve, 500));
+          await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
           continue;
         }
 
@@ -148,7 +155,7 @@ export class CodexTool extends BaseCLITool {
         if (output.includes('Press enter to continue')) {
           await sendSpecialKey(sessionName, 'Enter');
           logger.info('dismissed-codex-notification');
-          await new Promise((resolve) => setTimeout(resolve, 500));
+          await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
           continue;
         }
 
@@ -158,7 +165,7 @@ export class CodexTool extends BaseCLITool {
           await sendKeys(sessionName, '1', true);
           trustDialogHandled = true;
           logger.info('auto-trusted-folder-for');
-          await new Promise((resolve) => setTimeout(resolve, 500));
+          await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
           continue;
         }
       } catch {
@@ -216,13 +223,13 @@ export class CodexTool extends BaseCLITool {
       await sendKeys(sessionName, message, false);
 
       // Wait a moment for the text to be typed
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, TUI_TEXT_INPUT_WAIT_MS));
 
       // Send Enter key separately
       await sendSpecialKey(sessionName, 'C-m');
 
       // Wait a moment for the message to be processed
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, TUI_MESSAGE_PROCESSED_WAIT_MS));
 
       // Issue #212: Detect [Pasted text] and resend Enter for multi-line messages
       // MF-001: Single-line messages skip detection (+0ms overhead)
@@ -256,7 +263,7 @@ export class CodexTool extends BaseCLITool {
         await sendSpecialKey(sessionName, 'C-d');
 
         // Wait a moment for Codex to exit
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await new Promise((resolve) => setTimeout(resolve, TUI_EXIT_WAIT_MS));
       }
 
       // Kill the tmux session
