@@ -386,8 +386,7 @@ export function MessageList({
   worktreeId,
   loading = false,
   waitingForResponse = false,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  generatingContent = '',
+  generatingContent: _generatingContent = '',
   realtimeOutput = '',
   isThinking = false,
   selectedCliTool = 'claude',

@@ -74,8 +74,7 @@ vi.mock('@/lib/git/github-api', () => ({
 // Mock utils (withTimeout)
 vi.mock('@/lib/utils', async () => {
   return {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    withTimeout: (promise: Promise<any>) => promise,
+    withTimeout: (promise: Promise<unknown>) => promise,
     TimeoutError: class TimeoutError extends Error {
       constructor(message: string) {
         super(message);
@@ -104,11 +103,9 @@ vi.mock('@/config/schedule-config', () => ({
 }));
 
 // Mock summary-prompt-builder
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const mockBuildSummaryPrompt = vi.fn((..._args: any[]) => 'mock prompt');
+const mockBuildSummaryPrompt = vi.fn((..._args: unknown[]) => 'mock prompt');
 vi.mock('@/lib/summary-prompt-builder', () => ({
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  buildSummaryPrompt: (...args: any[]) => mockBuildSummaryPrompt(...args),
+  buildSummaryPrompt: (...args: unknown[]) => mockBuildSummaryPrompt(...args),
 }));
 
 import {
@@ -120,8 +117,7 @@ import {
   MIN_SUMMARY_OUTPUT_LENGTH,
 } from '@/lib/daily-summary-generator';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const mockDb = {} as any;
+const mockDb = {} as unknown as Parameters<typeof generateDailySummary>[0];
 
 describe('daily-summary-generator', () => {
   beforeEach(() => {

@@ -241,7 +241,6 @@ export function clearAllAutoYesStates(): void {
 export function executeRegexWithTimeout(
   regex: RegExp,
   text: string,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _timeoutMs: number = 100
 ): boolean | null {
   try {

@@ -230,7 +230,6 @@ export const HistoryPane = memo(function HistoryPane({
   onHistoryUserOnlyChange,
   onCollapse,
   splitIndex,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   cliToolId: _cliToolId,
 }: HistoryPaneProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);

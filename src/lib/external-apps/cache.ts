@@ -117,8 +117,7 @@ export class ExternalAppCache {
    * // The new worktree will be immediately routable
    * ```
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  invalidateByIssueNo(issueNo: number): void {
+  invalidateByIssueNo(_issueNo: number): void {
     // For simplicity and consistency, we invalidate the entire cache
     // This ensures the new worktree is immediately routable
     // The performance impact is minimal since the cache TTL is short (30s default)
