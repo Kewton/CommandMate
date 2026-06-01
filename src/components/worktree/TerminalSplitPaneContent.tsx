@@ -31,10 +31,7 @@ import { PromptPanel } from '@/components/worktree/PromptPanel';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { HistoryPane, splitHistorySlotId } from '@/components/worktree/HistoryPane';
 import { PaneResizer } from '@/components/worktree/PaneResizer';
-import {
-  AutoYesToggle,
-  type AutoYesToggleParams,
-} from '@/components/worktree/AutoYesToggle';
+import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import {
   useTerminalPanePolling,
   type PanePromptState,
@@ -44,13 +41,20 @@ import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
-import type { BranchStatus } from '@/types/sidebar';
-import type { HistoryDisplayLimit } from '@/config/history-display-config';
+import type {
+  TerminalSplitPaneCoreProps,
+  SplitAutoYesProps,
+  HistoryPaneProps,
+} from '@/types/terminal-split-pane';
 
-export interface TerminalSplitPaneContentProps {
-  worktreeId: string;
-  splitIndex: number;
-  cliToolId: CLIToolType;
+/**
+ * Issue #756: props are grouped into domain types. `TerminalSplitPaneContent`
+ * keeps the split identity/status (via `TerminalSplitPaneCoreProps`) plus a few
+ * direct wiring props, and nests Auto-Yes (`autoYes`) and the embedded
+ * HistoryPane (`history`) under their own domain objects. This drops the direct
+ * prop count to 13 (<= 15) with no behavior change.
+ */
+export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProps {
   availableCliTools: CLIToolType[];
   onCliToolChange: (id: CLIToolType) => void;
   onFocus: () => void;
@@ -65,73 +69,10 @@ export interface TerminalSplitPaneContentProps {
    * refresh the (activeCliTab-scoped) message history.
    */
   onMessageSent?: (cliToolId: CLIToolType) => void;
-  /**
-   * Whether auto-yes is currently enabled for THIS CLI (Issue #740). When
-   * true, the PromptPanel is hidden because the auto-yes manager will respond
-   * instead. State is sourced from the parent's per-CLI `autoYesStateMap`, so
-   * each split toggles auto-yes independently for its own cliToolId.
-   */
-  autoYesEnabled?: boolean;
-  /**
-   * Expiration timestamp (ms since epoch) for THIS CLI's auto-yes, used by the
-   * footer AutoYesToggle countdown (Issue #740). Resolved per-CLI by the parent.
-   */
-  autoYesExpiresAt?: number | null;
-  /**
-   * Last auto-response answer for the AutoYesToggle notification (Issue #740).
-   * Sourced from the parent's `useAutoYes` (activeCliTab-scoped); per-split
-   * client-side auto-response is intentionally NOT introduced (Issue #501's
-   * server poller owns auto-responses).
-   */
-  lastAutoResponse?: string | null;
-  /**
-   * Toggle handler bound to THIS split's cliToolId (Issue #740). The parent
-   * supplies a per-CLI curried handler so toggling one split's auto-yes does
-   * not affect the others.
-   */
-  onAutoYesToggle: (params: AutoYesToggleParams) => Promise<void>;
-  /**
-   * Derived AI agent status for THIS split's CLI (Issue #743). Resolved by the
-   * parent from `worktree.sessionStatusByCli[cliToolId]` via `deriveCliStatus`
-   * and rendered as a dot/spinner in the split header (headerExtras). Optional
-   * so existing call sites/tests that never pass it keep working unchanged
-   * (defaults to 'idle' = gray dot). Mirrors the Mobile canonical span at
-   * WorktreeDetailRefactored.tsx:1947-1974.
-   */
-  cliStatus?: BranchStatus;
-
-  // ----------------------------------------------------------------------
-  // Issue #744: embedded per-split HistoryPane.
-  //
-  // The HistoryPane now lives INSIDE each split and shows ONLY this split's
-  // cliToolId's messages (fetched independently via `useSplitMessages`). The
-  // following props feed that pane. They are optional so existing call sites
-  // and tests that predate Issue #744 keep working unchanged.
-  // ----------------------------------------------------------------------
-
-  /** File-path click handler forwarded to the embedded HistoryPane. */
-  onFilePathClick?: (path: string) => void;
-  /** Toast callback forwarded to the embedded HistoryPane (copy feedback). */
-  showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
-  /**
-   * Insert-to-message handler bound to THIS split (Issue #744 / S3-005). The
-   * parent supplies a per-split curried handler so a "Insert" click in this
-   * split's HistoryPane targets this split's MessageInput (via
-   * `pendingInsertText`), not the focused split.
-   */
-  onHistoryInsertToMessage?: (content: string) => void;
-  /** Issue #168: whether archived messages are shown (common across splits, MVP). */
-  showArchived?: boolean;
-  /** Issue #168: change handler for the "Show archived" toggle. */
-  onShowArchivedChange?: (show: boolean) => void;
-  /** Issue #701: history display limit (common across splits, MVP). */
-  historyDisplayLimit?: HistoryDisplayLimit;
-  /** Issue #701: change handler for the history display limit. */
-  onHistoryDisplayLimitChange?: (limit: HistoryDisplayLimit) => void;
-  /** Issue #725: "User only" filter (common across splits, MVP). */
-  historyUserOnly?: boolean;
-  /** Issue #725: change handler for the "User only" toggle. */
-  onHistoryUserOnlyChange?: (next: boolean) => void;
+  /** AutoYes domain group (Issue #756). 'onToggle' required; rest optional. */
+  autoYes: SplitAutoYesProps;
+  /** History domain group (Issue #756). Optional; pre-#744 callers omit it. */
+  history?: HistoryPaneProps;
 }
 
 export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
@@ -145,21 +86,28 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   pendingInsertText,
   onInsertConsumed,
   onMessageSent,
-  autoYesEnabled = false,
-  autoYesExpiresAt = null,
-  lastAutoResponse = null,
-  onAutoYesToggle,
   cliStatus = 'idle',
-  onFilePathClick,
-  showToast,
-  onHistoryInsertToMessage,
-  showArchived = false,
-  onShowArchivedChange,
-  historyDisplayLimit,
-  onHistoryDisplayLimitChange,
-  historyUserOnly = false,
-  onHistoryUserOnlyChange,
+  autoYes,
+  history,
 }: TerminalSplitPaneContentProps) {
+  // Issue #756: re-derive the legacy local names from the new domain groups so
+  // the entire component body below stays byte-for-byte unchanged (all
+  // useMemo/useCallback deps and JSX identical). Defaults match the previous
+  // per-prop defaults.
+  const autoYesEnabled = autoYes.enabled ?? false;
+  const autoYesExpiresAt = autoYes.expiresAt ?? null;
+  const lastAutoResponse = autoYes.lastAutoResponse ?? null;
+  const onAutoYesToggle = autoYes.onToggle;
+  const showArchived = history?.showArchived ?? false;
+  const onShowArchivedChange = history?.onShowArchivedChange;
+  const historyDisplayLimit = history?.historyDisplayLimit;
+  const onHistoryDisplayLimitChange = history?.onHistoryDisplayLimitChange;
+  const historyUserOnly = history?.historyUserOnly ?? false;
+  const onHistoryUserOnlyChange = history?.onHistoryUserOnlyChange;
+  const onHistoryInsertToMessage = history?.onInsertToMessage;
+  const onFilePathClick = history?.onFilePathClick;
+  const showToast = history?.showToast;
+
   const {
     terminal,
     prompt,

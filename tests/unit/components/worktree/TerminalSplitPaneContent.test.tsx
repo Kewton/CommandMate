@@ -206,7 +206,7 @@ describe('TerminalSplitPaneContent', () => {
           availableCliTools={['claude', 'codex']}
           onCliToolChange={vi.fn()}
           onFocus={vi.fn()}
-          onAutoYesToggle={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
         />
         <TerminalSplitPaneContent
           worktreeId="w-1"
@@ -215,7 +215,7 @@ describe('TerminalSplitPaneContent', () => {
           availableCliTools={['claude', 'codex']}
           onCliToolChange={vi.fn()}
           onFocus={vi.fn()}
-          onAutoYesToggle={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
         />
       </>,
     );
@@ -250,7 +250,7 @@ describe('TerminalSplitPaneContent', () => {
         availableCliTools={['codex']}
         onCliToolChange={vi.fn()}
         onFocus={vi.fn()}
-        onAutoYesToggle={vi.fn()}
+        autoYes={{ onToggle: vi.fn() }}
       />,
     );
 
@@ -287,7 +287,7 @@ describe('TerminalSplitPaneContent', () => {
         availableCliTools={['codex']}
         onCliToolChange={vi.fn()}
         onFocus={vi.fn()}
-        onAutoYesToggle={vi.fn()}
+        autoYes={{ onToggle: vi.fn() }}
       />,
     );
 
@@ -315,8 +315,7 @@ describe('TerminalSplitPaneContent', () => {
         availableCliTools={['claude']}
         onCliToolChange={vi.fn()}
         onFocus={vi.fn()}
-        autoYesEnabled
-        onAutoYesToggle={vi.fn()}
+        autoYes={{ enabled: true, onToggle: vi.fn() }}
       />,
     );
     // Let polling settle.
@@ -339,7 +338,7 @@ describe('TerminalSplitPaneContent', () => {
         availableCliTools={['claude']}
         onCliToolChange={vi.fn()}
         onFocus={vi.fn()}
-        onAutoYesToggle={vi.fn()}
+        autoYes={{ onToggle: vi.fn() }}
       />,
     );
 
@@ -372,7 +371,7 @@ describe('TerminalSplitPaneContent', () => {
           availableCliTools={['claude', 'codex']}
           onCliToolChange={vi.fn()}
           onFocus={vi.fn()}
-          onAutoYesToggle={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
         />,
       );
 
@@ -382,7 +381,7 @@ describe('TerminalSplitPaneContent', () => {
     });
 
     it('invokes onAutoYesToggle (the prop passed in) when the toggle is clicked', async () => {
-      const onAutoYesToggle = vi.fn(() => Promise.resolve());
+      const onToggle = vi.fn(() => Promise.resolve());
       render(
         <TerminalSplitPaneContent
           worktreeId="w-1"
@@ -391,7 +390,7 @@ describe('TerminalSplitPaneContent', () => {
           availableCliTools={['claude']}
           onCliToolChange={vi.fn()}
           onFocus={vi.fn()}
-          onAutoYesToggle={onAutoYesToggle}
+          autoYes={{ onToggle }}
         />,
       );
 
@@ -401,8 +400,8 @@ describe('TerminalSplitPaneContent', () => {
         await Promise.resolve();
       });
 
-      expect(onAutoYesToggle).toHaveBeenCalledTimes(1);
-      expect(onAutoYesToggle).toHaveBeenCalledWith({ enabled: true });
+      expect(onToggle).toHaveBeenCalledTimes(1);
+      expect(onToggle).toHaveBeenCalledWith({ enabled: true });
     });
 
     it('reflects autoYesEnabled on the toggle and suppresses PromptPanel when enabled', async () => {
@@ -423,8 +422,7 @@ describe('TerminalSplitPaneContent', () => {
           availableCliTools={['claude']}
           onCliToolChange={vi.fn()}
           onFocus={vi.fn()}
-          autoYesEnabled
-          onAutoYesToggle={vi.fn()}
+          autoYes={{ enabled: true, onToggle: vi.fn() }}
         />,
       );
 
@@ -449,7 +447,7 @@ describe('TerminalSplitPaneContent', () => {
             availableCliTools={['claude', 'codex']}
             onCliToolChange={vi.fn()}
             onFocus={vi.fn()}
-            onAutoYesToggle={onToggleClaude}
+            autoYes={{ onToggle: onToggleClaude }}
           />
           <TerminalSplitPaneContent
             worktreeId="w-1"
@@ -458,7 +456,7 @@ describe('TerminalSplitPaneContent', () => {
             availableCliTools={['claude', 'codex']}
             onCliToolChange={vi.fn()}
             onFocus={vi.fn()}
-            onAutoYesToggle={onToggleCodex}
+            autoYes={{ onToggle: onToggleCodex }}
           />
         </>,
       );
@@ -510,7 +508,7 @@ describe('TerminalSplitPaneContent', () => {
             availableCliTools={['claude']}
             onCliToolChange={vi.fn()}
             onFocus={vi.fn()}
-            onAutoYesToggle={vi.fn()}
+            autoYes={{ onToggle: vi.fn() }}
             cliStatus={status}
           />,
         );
@@ -541,7 +539,7 @@ describe('TerminalSplitPaneContent', () => {
           availableCliTools={['claude']}
           onCliToolChange={vi.fn()}
           onFocus={vi.fn()}
-          onAutoYesToggle={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
         />,
       );
 
@@ -563,7 +561,7 @@ describe('TerminalSplitPaneContent', () => {
             availableCliTools={['claude', 'codex']}
             onCliToolChange={vi.fn()}
             onFocus={vi.fn()}
-            onAutoYesToggle={vi.fn()}
+            autoYes={{ onToggle: vi.fn() }}
             cliStatus="running"
           />
           <TerminalSplitPaneContent
@@ -573,7 +571,7 @@ describe('TerminalSplitPaneContent', () => {
             availableCliTools={['claude', 'codex']}
             onCliToolChange={vi.fn()}
             onFocus={vi.fn()}
-            onAutoYesToggle={vi.fn()}
+            autoYes={{ onToggle: vi.fn() }}
             cliStatus="idle"
           />
         </>,
@@ -610,7 +608,7 @@ describe('TerminalSplitPaneContent', () => {
           availableCliTools={['claude']}
           onCliToolChange={vi.fn()}
           onFocus={vi.fn()}
-          onAutoYesToggle={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
         />,
       );
       const pane = await screen.findByTestId('history-pane');
@@ -634,7 +632,7 @@ describe('TerminalSplitPaneContent', () => {
           availableCliTools={['claude', 'codex']}
           onCliToolChange={vi.fn()}
           onFocus={vi.fn()}
-          onAutoYesToggle={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
         />,
       );
       const pane = await screen.findByTestId('history-pane');
@@ -657,7 +655,7 @@ describe('TerminalSplitPaneContent', () => {
             availableCliTools={['claude', 'codex']}
             onCliToolChange={vi.fn()}
             onFocus={vi.fn()}
-            onAutoYesToggle={vi.fn()}
+            autoYes={{ onToggle: vi.fn() }}
           />
           <TerminalSplitPaneContent
             worktreeId="w-1"
@@ -666,7 +664,7 @@ describe('TerminalSplitPaneContent', () => {
             availableCliTools={['claude', 'codex']}
             onCliToolChange={vi.fn()}
             onFocus={vi.fn()}
-            onAutoYesToggle={vi.fn()}
+            autoYes={{ onToggle: vi.fn() }}
           />
         </>,
       );
@@ -691,8 +689,8 @@ describe('TerminalSplitPaneContent', () => {
           availableCliTools={['claude']}
           onCliToolChange={vi.fn()}
           onFocus={vi.fn()}
-          onAutoYesToggle={vi.fn()}
-          onHistoryInsertToMessage={onHistoryInsertToMessage}
+          autoYes={{ onToggle: vi.fn() }}
+          history={{ onInsertToMessage: onHistoryInsertToMessage }}
         />,
       );
       const insertBtn = await screen.findByTestId('history-insert');
@@ -715,7 +713,7 @@ describe('TerminalSplitPaneContent', () => {
           availableCliTools={['claude']}
           onCliToolChange={vi.fn()}
           onFocus={vi.fn()}
-          onAutoYesToggle={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
           pendingInsertText="from-parent"
         />,
       );
