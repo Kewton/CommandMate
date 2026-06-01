@@ -574,18 +574,13 @@ describe('WorktreeDetailRefactored', () => {
   });
 
   describe('Terminal State', () => {
-    // TODO: Fix flaky test - terminal output state update timing issue
-    it.skip('passes terminal output to TerminalDisplay', async () => {
-      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
-
-      await waitFor(
-        () => {
-          expect(screen.getByTestId('terminal-output')).toHaveTextContent('Terminal output');
-        },
-        { timeout: 3000 }
-      );
-    });
-
+    // Issue #764: Removed the obsolete skipped test
+    // 'passes terminal output to TerminalDisplay'. Terminal output is no longer
+    // owned by this parent component: Issue #728/#736 moved it into per-split
+    // useTerminalPanePolling (the parent's terminal reducer slice was deleted),
+    // so the parent never feeds `output` to a parent-controlled TerminalDisplay.
+    // Terminal output rendering is covered by useTerminalPanePolling tests and
+    // TerminalSplitPaneContent tests instead.
     it('renders FilePanelSplit when Claude is thinking (terminal details inside mock)', async () => {
       // Issue #438: TerminalDisplay is now inside FilePanelSplit (mocked).
       // This test verifies the component renders without errors when thinking state is active.
