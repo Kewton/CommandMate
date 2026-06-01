@@ -12,6 +12,13 @@
 'use client';
 
 import { useState, useCallback, useEffect, RefObject } from 'react';
+import {
+  isFullscreenSupportedCompat,
+  getFullscreenElementCompat,
+  requestFullscreenCompat,
+  exitFullscreenCompat,
+  addFullscreenChangeListenerCompat,
+} from '@/lib/browser-compat/fullscreen-api';
 
 /**
  * Return type for useFullscreen hook
@@ -72,91 +79,6 @@ function isIOSDevice(): boolean {
 }
 
 /**
- * Check if Fullscreen API is available
- */
-function isFullscreenSupported(): boolean {
-  return (
-    typeof document !== 'undefined' &&
-    (document.fullscreenEnabled ||
-      // @ts-expect-error - webkit prefix
-      document.webkitFullscreenEnabled ||
-      // @ts-expect-error - moz prefix
-      document.mozFullScreenEnabled ||
-      // @ts-expect-error - ms prefix
-      document.msFullscreenEnabled)
-  );
-}
-
-/**
- * Get the current fullscreen element
- */
-function getFullscreenElement(): Element | null {
-  if (typeof document === 'undefined') return null;
-
-  return (
-    document.fullscreenElement ||
-    // @ts-expect-error - webkit prefix
-    document.webkitFullscreenElement ||
-    // @ts-expect-error - moz prefix
-    document.mozFullScreenElement ||
-    // @ts-expect-error - ms prefix
-    document.msFullscreenElement ||
-    null
-  );
-}
-
-/**
- * Request fullscreen on an element
- */
-async function requestFullscreen(element: Element): Promise<void> {
-  if (element.requestFullscreen) {
-    return element.requestFullscreen();
-  }
-  // @ts-expect-error - webkit prefix
-  if (element.webkitRequestFullscreen) {
-    // @ts-expect-error - webkit prefix
-    return element.webkitRequestFullscreen();
-  }
-  // @ts-expect-error - moz prefix
-  if (element.mozRequestFullScreen) {
-    // @ts-expect-error - moz prefix
-    return element.mozRequestFullScreen();
-  }
-  // @ts-expect-error - ms prefix
-  if (element.msRequestFullscreen) {
-    // @ts-expect-error - ms prefix
-    return element.msRequestFullscreen();
-  }
-  throw new Error('Fullscreen API not supported');
-}
-
-/**
- * Exit fullscreen mode
- */
-async function exitFullscreenApi(): Promise<void> {
-  if (typeof document === 'undefined') return;
-
-  if (document.exitFullscreen) {
-    return document.exitFullscreen();
-  }
-  // @ts-expect-error - webkit prefix
-  if (document.webkitExitFullscreen) {
-    // @ts-expect-error - webkit prefix
-    return document.webkitExitFullscreen();
-  }
-  // @ts-expect-error - moz prefix
-  if (document.mozCancelFullScreen) {
-    // @ts-expect-error - moz prefix
-    return document.mozCancelFullScreen();
-  }
-  // @ts-expect-error - ms prefix
-  if (document.msExitFullscreen) {
-    // @ts-expect-error - ms prefix
-    return document.msExitFullscreen();
-  }
-}
-
-/**
  * Hook for managing fullscreen state with API support and CSS fallback
  *
  * @param options - Configuration options
@@ -193,7 +115,7 @@ export function useFullscreen(options: UseFullscreenOptions = {}): UseFullscreen
    * Update fullscreen state from API
    */
   const updateFullscreenState = useCallback(() => {
-    const element = getFullscreenElement();
+    const element = getFullscreenElementCompat();
     const isActive = element != null;
     setIsFullscreen(isActive);
 
@@ -224,9 +146,9 @@ export function useFullscreen(options: UseFullscreenOptions = {}): UseFullscreen
     }
 
     // If API is supported, use it
-    if (isFullscreenSupported() && elementRef?.current) {
+    if (isFullscreenSupportedCompat() && elementRef?.current) {
       try {
-        await requestFullscreen(elementRef.current);
+        await requestFullscreenCompat(elementRef.current);
         setIsFullscreen(true);
         setIsFallbackMode(false);
         onEnter?.();
@@ -264,9 +186,9 @@ export function useFullscreen(options: UseFullscreenOptions = {}): UseFullscreen
     }
 
     // If using API, exit via API
-    if (getFullscreenElement()) {
+    if (getFullscreenElementCompat()) {
       try {
-        await exitFullscreenApi();
+        await exitFullscreenCompat();
         setIsFullscreen(false);
         onExit?.();
       } catch (err) {
@@ -302,19 +224,7 @@ export function useFullscreen(options: UseFullscreenOptions = {}): UseFullscreen
    * Listen for fullscreen change events from API
    */
   useEffect(() => {
-    if (typeof document === 'undefined') return;
-
-    document.addEventListener('fullscreenchange', updateFullscreenState);
-    document.addEventListener('webkitfullscreenchange', updateFullscreenState);
-    document.addEventListener('mozfullscreenchange', updateFullscreenState);
-    document.addEventListener('MSFullscreenChange', updateFullscreenState);
-
-    return () => {
-      document.removeEventListener('fullscreenchange', updateFullscreenState);
-      document.removeEventListener('webkitfullscreenchange', updateFullscreenState);
-      document.removeEventListener('mozfullscreenchange', updateFullscreenState);
-      document.removeEventListener('MSFullscreenChange', updateFullscreenState);
-    };
+    return addFullscreenChangeListenerCompat(updateFullscreenState);
   }, [updateFullscreenState]);
 
   return {

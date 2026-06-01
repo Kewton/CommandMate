@@ -228,6 +228,7 @@ tests/
 | `src/lib/version-checker.ts` | バージョンアップ通知 |
 | `src/lib/slash-commands.ts` | スラッシュコマンドローダー（.claude/commands, .claude/skills, .codex/skills対応、getCopilotBuiltinCommands追加）（Issue #166, #547） |
 | `src/lib/link-utils.ts` | リンク種別判定・相対パス解決・hrefサニタイズ（Issue #505） |
+| `src/lib/browser-compat/fullscreen-api.ts` | Fullscreen API vendor-prefix（webkit/moz/ms）互換シム（Issue #763）。isFullscreenSupportedCompat/getFullscreenElementCompat/requestFullscreenCompat/exitFullscreenCompat/addFullscreenChangeListenerCompat を export。ファイルローカル型 FullscreenElementCompat/FullscreenDocumentCompat + 型アサーション（declare global 禁止）、SSRガード維持、@ts-expect-error 0個。useFullscreen.ts から prefix シムを移送し prefix 由来 @ts-expect-error を全削除 |
 | `src/lib/url-path-encoder.ts` | ファイルパスURLエンコード |
 | `src/lib/file-search.ts` | ファイル内容検索 |
 | `src/lib/terminal-highlight.ts` | CSS Custom Highlight API ラッパー（Issue #47）XSS安全なターミナルハイライト。Issue #716で名前空間分離（HighlightNamespace型、HISTORY_SEARCH_NAMESPACE、applyHistoryHighlights/clearHistoryHighlights追加）。Issue #744で `makeHistoryNamespace(splitIndex)` ファクトリ追加（`history-search-${splitIndex}` 等の per-split namespace で `CSS.highlights` グローバルレジストリの上書き衝突を回避）、`applyHistoryHighlights`/`clearHistoryHighlights` に optional `namespace` 引数を additive 追加（default=`HISTORY_SEARCH_NAMESPACE`＝後方互換） |
