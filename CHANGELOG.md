@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-02
+
+### Added (v0.6.0 リリース準備)
+- feat(branding): favicon を `apple-icon.png` ソースに 32/96/192 px 3 サイズ生成（タイトクロップ）。`src/app/icon.png` (32×32) のキャラクター描画領域が canvas の ~50% しか占めず透明パディングが多いためブラウザタブで小さく見える UX 問題を解消。方式A（ファイル規約のみ、`layout.tsx` 無改修）採用 — Next.js 14.2.35 では `metadata.icons` 設定が file-based icon を上書きするため `apple-touch-icon` 喪失リスクを回避 (Issue #753)
+- feat(layout): PC版 `DesktopHeader` の per-agent indicator を **icon-only + hover Tooltip** から **インライン常時テキスト** `<icon> ${AgentName}: ${StatusLabel}` に変更（`● Claude: Ready  ⟳ Codex: Running`）。Tooltip wrapper と未使用 `import { Tooltip }` を撤去、dot/spinner icon をテキストの左に first child span として配置 (Issue #751)
+
+### Refactored (v0.6.0 リリース準備)
+- refactor(worktree): `WorktreeDetailRefactored.tsx` を責務別に分割（2205 → **610 行**、-1595）。`useWorktreeDetailController` (1489行) / `usePendingInsertText` (116行) hook と `WorktreeDetailDesktop.tsx` (696行) / `WorktreeDetailMobile.tsx` (368行) component に抽出。TODO:[D1-001] 解消、`useFileOperations.ts` の `MoveTarget` 型を export、`tests/integration/issue-278-acceptance.test.ts` pre-existing 2 FAIL を 10/10 に解消。新規 `usePendingInsertText.test.tsx` 10 tests pass (Issue #755)
+- refactor(terminal): `TerminalSplitPaneContent` Props を **27 個 → 13 個**にドメイン別型分割。`src/types/terminal-split-pane.ts` 新設に `TerminalSplitPaneCoreProps` / `SplitAutoYesProps` / `HistoryPaneProps` を export、`autoYes` / `history` を nested 型で受け取り。`AutoYesToggleParams` を `src/types/auto-yes.ts` に抽出して TSX → 非 TSX module へ移動（`tsconfig.server.json` の TS6142 回避） (Issue #756)
+- refactor(cli): `CLI_TOOL_IDS` 配列の重複定義を `src/lib/cli-tools/types.ts` の単一ソースに統合し、`src/cli/config/cli-tool-ids.ts` から re-export（参照同一性保証） (Issue #757)
+- refactor(config): timeout/delay の magic number 約 44 箇所を新規 3 config (`cli-tool-timing-config.ts` / `ui-feedback-config.ts` / `external-apps-config.ts`) + 既存拡張に集約。値保存監査全 44 対で全件一致確認 (Issue #760)
+- refactor(fullscreen): `useFullscreen.ts` の `@ts-expect-error` 19 個クラスタを `src/lib/browser-compat/fullscreen-api.ts` の互換ラッパー 4 関数に抽出 (Issue #763)
+
+### Documentation (v0.6.0 リリース準備)
+- docs(history): `docs/implementation-history.md` および `docs/en/implementation-history.md` に #723〜#754 の約 30 件のエントリを Issue 別テーブル形式で追記 (Issue #758)
+- docs(architecture): `docs/architecture.md` および `docs/en/architecture.md` に §6 UI Layout Architecture (#727/#730) / §7.1 TerminalSplits Strategy (#728/#744) / §X Per-agent Status Architecture (#743/#749/#751) の主要章を追記（Mermaid 図 + Issue 内部リンク） (Issue #759)
+- docs(cleanup): `docs/` 配下の過去 Issue 参照 (#4, #31, #69, #80, #600 等) を 3 分類で棚卸し。`DEFAULT_SELECTED_AGENTS` / `MAX_FILE_TABS` 5→30 をコードと整合、migration の「#80完了後」前提を除去、en/UI_UX_GUIDE を #730 後の 3 カラム構成へ同期、エージェント 2→2〜4 を MIN=2/MAX=4 に統一。markdown-link-check リンク切れ 0 (Issue #767)
+
+### Chore (v0.6.0 リリース準備)
+- chore(test): `tests/` 配下の `.skip` / `.only` を棚卸し（5 件復活 / 2 件削除）。`it.only` / `describe.only` 残留 0 件 (Issue #764)
+- chore(lint): プロジェクト全体の `eslint-disable` コメントを棚卸し。`any` → `unknown` / 適切な型への置換、依存配列の明示化を 14 ファイルに適用。`.eslintrc.json` 調整。テスト 6778 pass (Issue #765)
+
 ### Fixed
 - fix(terminal): PC版の各ターミナル split header に AIエージェント status indicator（dot/スピナー）を復活（#728 で per-split header 構造移行時に取りこぼされていた、#740 と同型の「移行漏れ」パターン）。`TerminalSplitPaneContent.tsx` に optional `cliStatus?: BranchStatus` prop（未指定時 `'idle'` フォールバック）を追加し、`SIDEBAR_STATUS_CONFIG[cliStatus]` から解決した status indicator を `useMemo`（依存 `statusConfig.type`/`className`/`label`/`splitIndex`）で生成して既存 `headerExtras` slot に配線。Mobile 正準（`WorktreeDetailRefactored.tsx:1947-1974`）と同じインライン span（spinner=`animate-spin border-2 border-t-transparent`、dot=`rounded-full`）・`title` のみの a11y・`data-testid="split-status-indicator-${splitIndex}"` を踏襲。データは親 `WorktreeDetailRefactored` の `renderSplitPane` で `deriveCliStatus(worktree?.sessionStatusByCli?.[paneCli])` を導出し、**memo 境界を越えるのは導出済み `BranchStatus` 文字列のみ**（status 不変のポーリング周期では split を再renderしない memo-safe 設計／S3-001）。Mobile 経路（L1947-1974）は無改修 (Issue #743)
 - fix(terminal): PC版の各ターミナル split footer に `AutoYesToggle` を復活（#728 で per-split footer 移行時に取りこぼされていた）。CLI 単位で独立した Auto-Yes ON/OFF 操作を可能化。`WorktreeDetailRefactored.tsx` の `handleAutoYesToggle` を `makeAutoYesToggleHandler(cliToolId)`（`useCallback`、依存 `worktreeId` で安定参照）にパラメータ化し、API body の `cliToolId` と `setAutoYesStateMap` のキーを引数値に変更。Mobile 経路（L1897-1904）は `makeAutoYesToggleHandler(activeCliTab)` の薄いラッパで従来どおり動作。`TerminalSplitPaneContent` に `autoYesExpiresAt` / `lastAutoResponse` / `onAutoYesToggle` props を追加し footer 先頭で `<AutoYesToggle cliToolName={cliToolId} inline />` を描画。状態は親の per-CLI `autoYesStateMap` を単一の真実源とし、`renderSplitPane` で各 split に per-CLI 値を配布。client-side auto-response は per-split 化せず #501 サーバー poller に委譲。`showPrompt = prompt.visible && !autoYesEnabled` の既存挙動・split0→activeCliTab 同期は維持 (Issue #740)
