@@ -52,10 +52,10 @@
 
 ### 1.3 実装済み機能
 
-- **CLI ツールのサポート** (Issue #4で実装完了、Issue #368で拡張)
-  - Claude Code, Codex CLI, Gemini CLI, Vibe-Local (Ollama) 対応
+- **CLI ツールのサポート** (Issue #4で実装完了、Issue #368/#379/#545 で拡張)
+  - Claude Code, Codex CLI, Gemini CLI, Vibe-Local (Ollama), OpenCode, GitHub Copilot の 6 ツール対応
   - Strategy パターンによる拡張可能な設計
-  - worktree毎に2エージェントを選択可能（`selected_agents`カラム）
+  - worktree毎に2〜4エージェントを選択可能（`selected_agents`カラム）
   - Vibe-LocalはOllamaモデルを指定可能（`vibe_local_model`カラム）
 
 ---
@@ -366,6 +366,8 @@ tmux セッション / Claude プロセスが落ちた場合
 - `CodexTool` - Codex CLI
 - `GeminiTool` - Gemini CLI (Issue #368)
 - `VibeLocalTool` - Vibe-Local / Ollama (Issue #368)
+- `OpenCodeTool` - OpenCode (Issue #379)
+- `CopilotTool` - GitHub Copilot CLI (Issue #545)
 
 **管理:**
 - `CLIToolManager` シングルトンクラスで各ツールインスタンスを管理
@@ -407,8 +409,8 @@ tmux send-keys -t "{sessionName}" "claude" C-m
 - テーブル（イメージ）:
 - worktrees:
 - id, name, path, last_message_summary, updated_at
-- **cli_tool_id** (追加: Issue #4) - 使用するCLI tool ('claude' | 'codex' | 'gemini' | 'vibe-local')
-- **selected_agents** (追加: Issue #368) - 選択中の2エージェント (JSON配列, 例: '["claude","vibe-local"]')
+- **cli_tool_id** (追加: Issue #4、#379/#545 で拡張) - 使用するCLI tool ('claude' | 'codex' | 'gemini' | 'vibe-local' | 'opencode' | 'copilot')
+- **selected_agents** (追加: Issue #368) - 選択中の2〜4エージェント (JSON配列, 例: '["claude","vibe-local"]')
 - **vibe_local_model** (追加: Issue #368) - Vibe-Local用Ollamaモデル名 (nullable)
 - repository_path, repository_name, description
 - last_user_message, last_user_message_at
@@ -490,14 +492,14 @@ feature/foo
 
 - ChatMessage.requestId とログ名に埋め込むことで、「どのリクエストの応答か」をより厳密にトレース可能。
 
-### 10.2 マルチ LLM / マルチセッション ✅ 実装済み (Issue #4)
+### 10.2 マルチ LLM / マルチセッション ✅ 実装済み (Issue #4、#368/#379/#545 で拡張)
 
 **実装内容:**
-- Claude Code に対応
+- Claude Code / Codex / Gemini / Vibe-Local / OpenCode / GitHub Copilot の 6 ツールに対応
 - ワークツリーごとに `cliToolId` フィールドで使用するCLIツールを管理
 - Strategy パターンによる抽象化:
   - `BaseCLITool` 抽象クラス
-  - `ClaudeTool` 実装クラス
+  - `ClaudeTool` / `CodexTool` / `GeminiTool` / `VibeLocalTool` / `OpenCodeTool` / `CopilotTool` 実装クラス
   - `CLIToolManager` シングルトンでツールインスタンスを管理
 - データベーススキーマ: `worktrees.cli_tool_id` カラム（デフォルト: 'claude'）
 - 対応API:
@@ -507,7 +509,7 @@ feature/foo
   - `GET /api/worktrees` - ワークツリー一覧（セッション状態含む）
 
 **将来拡張:**
-- その他のCLI（openai, lmstudio等）を追加する場合は、`BaseCLITool`を継承して実装
+- その他のCLIを追加する場合は、`BaseCLITool`を継承して実装
 - Stop フックの仕様が異なる場合は各ツールクラス内で対応
 
 ### 10.3 リアルタイムステータス検出 ✅ 実装済み (Issue #31)
