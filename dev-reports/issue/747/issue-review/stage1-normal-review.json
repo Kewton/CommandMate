@@ -1,0 +1,86 @@
+{
+  "issue_number": 747,
+  "stage": "normal-review",
+  "iteration": 1,
+  "findings": [
+    {
+      "id": "N1",
+      "severity": "must-fix",
+      "category": "feasibility",
+      "title": "toggle ボタンを role=\"tablist\" 内に置くとキーボードナビ index と tablist セマンティクスが破綻する",
+      "description": "ActivityBar の root div は role=\"tablist\" aria-orientation=\"vertical\" で、handleKeyDown が ACTIVITIES.length と buttonRefs.current[index] のindexベースで ArrowUp/Down/Home/End を処理し、roving tabindex（isActive または active===null&&index===0 のとき 0、他は -1）を管理している。Issue のレイアウト案『ActivityBar 最上部に sidebar toggle ボタン＋separator を追加』を tablist コンテナ直下に単純実装すると、(a) toggle が role=\"tab\" 群に混ざると tablist セマンティクス不整合かつ Arrow ナビの index がずれる、(b) role を付けず置いても roving tabindex 設計と矛盾、という問題が生じる。Issue はこの点に一切言及していない。",
+      "recommendation": "toggle ボタンは tablist の tab 群と分離する設計を Issue に明記する。具体策: separator を境に toggle を tablist コンテナの外側に置く（ActivityBar の root を flex コンテナにし、その中に『toggle ボタン + separator』ブロックと『role=\"tablist\" の tab 群』を兄弟として並べる）か、tablist 内に置く場合でも role=\"tab\" を付けず buttonRefs / index 計算に含めない。受入条件に『tablist の aria セマンティクスと既存 Arrow/Home/End ナビゲーションを壊さないこと』を追加する。"
+    },
+    {
+      "id": "N2",
+      "severity": "should-fix",
+      "category": "correctness",
+      "title": "コンテキストファイル(hypothesis-verification.md)のテスト前提が誤り：ActivityBar.test.tsx は既存",
+      "description": "review-context の前提(3)『tests/unit/components/worktree/ActivityBar.test.tsx は存在しない、新規作成が必要』は誤りである。実際には同ファイルは既存（git 上 #727 で追加・#730 で更新、現ブランチでも tracked）で、tablist/role=tab/aria-selected/aria-controls/keyboard nav/Tooltip を網羅している。したがって今回必要なのは『新規作成』ではなく『既存 ActivityBar.test.tsx への toggle ボタン用テストケース追加（更新）』である。一方 DesktopHeader/WorktreeDetailSubComponents 単体テストは確かに存在しないため、ハンバーガー消失の回帰担保は新規作成（または WorktreeDetailRefactored.test.tsx への追加）が必要。",
+      "recommendation": "Issue の受入条件・影響範囲を『ActivityBar.test.tsx は既存ファイルを更新（toggle ボタンの描画／クリックで toggle 呼び出し／aria-label／aria-expanded＝isOpen 反映／data-testid=\"activity-bar-toggle-sidebar\"／separator／既存 tablist ナビへの非干渉を追加検証）』『DesktopHeader からハンバーガー消失の回帰は新規 or 既存 WorktreeDetailRefactored.test.tsx で担保』と正確化する。見積りもこれに合わせて調整。"
+    },
+    {
+      "id": "N3",
+      "severity": "should-fix",
+      "category": "correctness",
+      "title": "onMenuClick の optional 化は『未実施』であり実作業が必要（コンテキストの前提と逆）",
+      "description": "review-context の前提(1)『onMenuClick は DesktopHeader で既に {onMenuClick !== undefined && (...)} ガード済み、optional 化は実現済み』は誤りである。実コードでは DesktopHeaderProps の onMenuClick: () => void; は必須型（WorktreeDetailSubComponents.tsx:436）で、ハンバーガー描画も onClick={onMenuClick}（L487）に直結し undefined ガードは存在しない。したがって Issue 記載どおり『optional 化（onMenuClick?: () => void;）』は実際に必要な作業であり、本文の手順(2)は妥当。ただし optional 化のみではハンバーガーが消えないため、描画ブロック（L484-506 のボタン＋separator）の物理削除も必須。",
+      "recommendation": "Issue の手順(2)を『DesktopHeaderProps の onMenuClick を optional 化し、ハンバーガーボタン（WorktreeDetailSubComponents.tsx:485-505）と直後の separator（L506）の描画ブロックを削除する』と明確化。手順(3)で WorktreeDetailRefactored.tsx:1795 の onMenuClick={toggle} を削除（optional のため props 渡し不要に）。optional 化後に DesktopHeader 内で onMenuClick が未使用になる点（destructure/型/lint no-unused）の整理も明記。"
+    },
+    {
+      "id": "N4",
+      "severity": "consider",
+      "category": "consistency",
+      "title": "aria-label の文字列リテラル指定は既存実装と整合（i18n 化は今回スコープ外で妥当）",
+      "description": "Issue は aria-label=\"Toggle sidebar\" を文字列リテラルで指定している。現行 DesktopHeader のハンバーガーも aria-label=\"Toggle sidebar\" のリテラルで（WorktreeDetailSubComponents.tsx:489）、ActivityBar 自体も next-intl/useTranslations を一切使っていない（activity ラベルは activity-bar-config の固定文字列）。よって文字列リテラル踏襲は既存挙動から後退せず、整合的。i18n 化は本 Issue のスコープ外として問題ない。",
+      "recommendation": "現状の指定で可。将来的な i18n 統一は別 Issue とし、本 Issue では既存ハンバーガーと同じ aria-label=\"Toggle sidebar\" をそのまま移植する旨を明記しておくと意図が伝わる。"
+    },
+    {
+      "id": "N5",
+      "severity": "consider",
+      "category": "completeness",
+      "title": "aria-expanded の参照先（isOpen）と未開閉時の挙動を明記すべき",
+      "description": "Issue は『aria-expanded 反映』を受入条件に含むが、何を真偽値ソースにするかが本文で曖昧。実コードでは useSidebarContext()（WorktreeDetailRefactored が既に使用、value に isOpen/toggle を持つ）の isOpen がサイドバー開閉状態であり、これを aria-expanded に渡すのが正。なお既存ハンバーガーは aria-expanded 自体を付けていないため、本対応は機能追加（改善）となる点も明確化するとよい。",
+      "recommendation": "Issue に『aria-expanded={isOpen}（useSidebarContext().isOpen 由来）、onClick={toggle}』を明記。ActivityBar に新規 props（例: sidebarOpen, onToggleSidebar）を足すか、ActivityBar 内で直接 useSidebarContext() を呼ぶかの方針も確定させる（memo コンポーネントのため props 経由が再render制御上は明快）。"
+    },
+    {
+      "id": "N6",
+      "severity": "consider",
+      "category": "impact",
+      "title": "ActivityBar 非描画経路でのトグル手段喪失リスクの確認が未記載",
+      "description": "ハンバーガーを DesktopHeader から ActivityBar へ移すと、ActivityBar が描画されない経路でサイドバー開閉手段が失われないかの確認が必要。ActivityBar は WorktreeDesktopLayout の activityBar slot（PC 経路、#730 で Header 下〜画面下端を貫通）でのみ描画され、モバイルは別経路。PC では ActivityBar は常時可視想定だが、Issue にこの前提が明記されていない。",
+      "recommendation": "Issue に『PC レイアウトで ActivityBar は常時可視であること（#730 構成）を前提とし、トグル手段が消える経路が無いことを確認する』を前提条件として追記。モバイルは別途トグル手段（MobileHeader 等）を持つため不変、という点も補強。"
+    },
+    {
+      "id": "N7",
+      "severity": "consider",
+      "category": "correctness",
+      "title": "行番号は実コードと軽微にずれ（シンボル参照を推奨）",
+      "description": "Issue/コンテキスト記載の行番号は実コードと軽微にずれる。実測: DesktopHeader ハンバーガー WorktreeDetailSubComponents.tsx:485-505、直後 separator L506、onMenuClick 必須型 L436、WorktreeDetailRefactored の onMenuClick={toggle} は L1795（コンテキストは L1779 と記載＝ずれ）、ActivityBar 呼び出しは activityBarMemo 経由（L1781）。行番号は実装時にドリフトしやすい。",
+      "recommendation": "行番号は参考値とし、実装時はシンボル（DesktopHeader の hamburger ブロック、onMenuClick 受け渡し、activityBarMemo / ActivityBar 配置）で特定する旨を注記。"
+    },
+    {
+      "id": "N8",
+      "severity": "good",
+      "category": "consistency",
+      "title": "VS Code 風レイアウト統一の目的が既存方針(#727/#730)と一貫",
+      "description": "sidebar toggle を ActivityBar 最上部へ集約する方針は #727（VS Code 風 Activity Bar 導入）/#730（ActivityBar 全高貫通化・カスタム Tooltip 導入）のアーキテクチャと一貫し、Tooltip(#730) 流用や data-testid 命名規約（activity-bar-* 系）も既存パターンに沿う。設計意図と既存コードの整合性が取れている。",
+      "recommendation": "現状維持。Tooltip は @/components/common/Tooltip を placement=\"right\"（Activity Bar の既存使用と同じ）で流用する旨を明記するとなお良い。"
+    },
+    {
+      "id": "N9",
+      "severity": "good",
+      "category": "completeness",
+      "title": "受入条件・スコープ外の切り分けが明確で網羅的",
+      "description": "受入条件（☰表示／クリックで Branches サイドバー開閉／separator／hover tooltip／aria-label・aria-expanded／data-testid／DesktopHeader からハンバーガー＋区切り線消失／モバイル不変／lint・tsc・test・build 全PASS／回帰テスト追加）と、スコープ外（アイコンデザイン・モバイル挙動・永続化方法・Activity順序・DesktopHeader 他要素）が明確に分離されており、実装・検証基準として良好。",
+      "recommendation": "現状維持。N1（tablist 非干渉）・N2/N3（テスト更新／optional 化の実作業）を反映すれば実装可能性が十分担保される。"
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 2,
+    "consider": 4,
+    "good": 2
+  },
+  "overall_assessment": "Issue #747 の目的（PC のサイドバートグルを ActivityBar 最上部へ移し VS Code 風レイアウトへ統一）・受入条件・スコープ切り分けは明確で、既存方針(#727/#730)とも整合しており実装可能性は高い。コードベースを直接検証した結果、提供された hypothesis-verification.md / review-context の前提に複数の誤りを発見した点が重要: (a) ActivityBar.test.tsx は『存在しない・新規作成』ではなく既存ファイルの更新であること(N2)、(b) onMenuClick の optional 化は『実現済み』ではなく未実施で実作業が必要なこと(N3)、(c) aria-label リテラルは既存実装と整合し i18n 後退ではないこと(N4)。Issue 本文側の唯一の must-fix は、toggle ボタンを role=\"tablist\" 内へ単純追加すると既存の Arrow/Home/End キーボードナビ index と tablist セマンティクスが破綻するため、tab 群と分離する設計を明記する必要がある点(N1)。これらを反映すれば、そのまま実装着手可能な品質となる。なお Issue が指定する useSidebarContext() は実在フック（WorktreeDetailRefactored が既に使用）であり、フック名自体に誤りはない。"
+}

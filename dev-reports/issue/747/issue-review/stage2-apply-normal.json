@@ -1,0 +1,8 @@
+{
+  "issue_number": 747,
+  "stage": "apply-normal",
+  "iteration": 1,
+  "applied_findings": ["N1", "N2", "N3", "N4"],
+  "changes_summary": "must-fix N1: サイドバートグルボタンを role=tablist の外側（外側コンテナでラップし tablist と兄弟配置）に置く方針へ修正。レイアウト案を tablist 内 toggle から『外側コンテナ + 兄弟 tablist』構成に書き換え、tablist 内に置く場合も role=tab なし・buttonRefs/index 非登録の独立要素とする旨を明記。受入条件にキーボードナビ非干渉・ARIA整合チェックを追加。 must-fix N2: tests/unit/components/worktree/ActivityBar.test.tsx を『追加』→『新規作成（現状未存在）』に修正、DesktopHeader/WorktreeDetailSubComponents テストは『関連テスト更新』→『既存があれば更新、なければ新規 or 不要』に修正。 should-fix N3: 行番号は『目安』と全体注記。実コード照合で原 Issue の誤りを訂正（DesktopHeader は WorktreeDetailSubComponents.tsx 内で layout/DesktopHeader.tsx は不存在、ハンバーガーは L485-505 で条件分岐なし常時描画＝onMenuClick の optional-guard は未実装、onMenuClick は required(L436)・PC では L1795 のみ使用・L1929 は別コンポ MobileHeader、SVG path は実コードでは M4 6h16M4 12h16M4 18h16 でこれをそのまま COPY）。修正方針を『DesktopHeader のハンバーガー button + separator を物理削除＋onMenuClick を optional 化』『WorktreeDetailRefactored L1795 の onMenuClick={toggle} 削除（MobileHeader L1929 無改修）』に具体化。 consider N4: 開閉状態でのアイコン切替を『考慮事項（任意）』として追記。good 相当は反映不要。元の構造（概要/現状/修正方針/モバイル経路/受入条件/想定影響範囲/スコープ外/検証手順/関連）を維持。",
+  "issue_updated": true
+}
