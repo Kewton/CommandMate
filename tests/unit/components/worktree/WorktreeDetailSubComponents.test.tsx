@@ -177,7 +177,7 @@ describe('DesktopHeader per-agent status row (Issue #749)', () => {
       );
     });
 
-    it('inner status span has title-only (no role="status") accessibility', () => {
+    it('icon span (first child) has the status class, no title, and no role (Issue #751)', () => {
       const sessionStatusByCli: SessionStatusMap = {
         claude: { isRunning: true, isWaitingForResponse: true, isProcessing: false },
       };
@@ -188,9 +188,62 @@ describe('DesktopHeader per-agent status row (Issue #749)', () => {
           sessionStatusByCli={sessionStatusByCli}
         />
       );
-      const span = screen.getByTestId('desktop-agent-status-claude').querySelector('span');
-      expect(span?.getAttribute('title')).toBe(SIDEBAR_STATUS_CONFIG.waiting.label); // "Waiting for response"
-      expect(span?.getAttribute('role')).toBeNull();
+      const button = screen.getByTestId('desktop-agent-status-claude');
+      const iconSpan = button.querySelector('span');
+      // Icon span keeps the status color class (waiting → yellow dot).
+      expect(iconSpan?.className).toContain(SIDEBAR_STATUS_CONFIG.waiting.className);
+      // Issue #751: text is now visible inline, so title is redundant and removed.
+      expect(iconSpan?.getAttribute('title')).toBeNull();
+      expect(iconSpan?.getAttribute('role')).toBeNull();
+      // The button shows the visible inline text.
+      expect(button.textContent).toContain('Claude: Waiting for response');
+    });
+  });
+
+  describe('Issue #751: inline always-visible agent name + status text', () => {
+    it('renders visible text "Claude: Running" when claude is processing', () => {
+      const sessionStatusByCli: SessionStatusMap = {
+        claude: { isRunning: true, isWaitingForResponse: false, isProcessing: true },
+      };
+      render(
+        <DesktopHeader
+          {...baseProps}
+          selectedAgents={['claude', 'codex']}
+          sessionStatusByCli={sessionStatusByCli}
+        />
+      );
+      expect(screen.getByText('Claude: Running')).toBeDefined();
+    });
+
+    it('renders visible text "Codex: Idle" when codex has no session', () => {
+      const sessionStatusByCli: SessionStatusMap = {
+        claude: { isRunning: true, isWaitingForResponse: false, isProcessing: true },
+      };
+      render(
+        <DesktopHeader
+          {...baseProps}
+          selectedAgents={['claude', 'codex']}
+          sessionStatusByCli={sessionStatusByCli}
+        />
+      );
+      expect(screen.getByText('Codex: Idle')).toBeDefined();
+    });
+
+    it('does NOT render a Tooltip wrapper (no role="tooltip" on render)', () => {
+      render(
+        <DesktopHeader
+          {...baseProps}
+          selectedAgents={['claude', 'codex']}
+        />
+      );
+      // Tooltip wrapper removed: no tooltip element should be present without hover.
+      expect(screen.queryByRole('tooltip')).toBeNull();
+    });
+
+    it('row container uses gap-2 (Issue #751)', () => {
+      render(<DesktopHeader {...baseProps} selectedAgents={['claude']} />);
+      const row = screen.getByTestId('desktop-agent-status-row');
+      expect(row.className).toContain('gap-2');
     });
   });
 

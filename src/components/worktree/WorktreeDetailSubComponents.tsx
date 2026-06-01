@@ -32,7 +32,6 @@ import { copyToClipboard } from '@/lib/clipboard-utils';
 import { NotificationDot } from '@/components/common/NotificationDot';
 import { NotesAndLogsPane } from '@/components/worktree/NotesAndLogsPane';
 import { GitPane } from '@/components/worktree/GitPane';
-import { Tooltip } from '@/components/common/Tooltip';
 import { deriveCliStatus } from '@/types/sidebar';
 import type { Worktree, ChatMessage, GitStatus } from '@/types/models';
 import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
@@ -585,42 +584,39 @@ export const DesktopHeader = memo(function DesktopHeader({
             this row is per-agent (SIDEBAR_STATUS_CONFIG) and doubles as a CLI tab
             switcher. Rendered only when selectedAgents is provided (backward compat). */}
         {selectedAgents && selectedAgents.length > 0 && (
-          <div className="flex items-center gap-1 flex-shrink-0" data-testid="desktop-agent-status-row">
+          <div className="flex items-center gap-2 flex-shrink-0" data-testid="desktop-agent-status-row">
             {selectedAgents.map((cliId) => {
               const cliStatus = deriveCliStatus(sessionStatusByCli?.[cliId]);
               const agentStatusConfig = SIDEBAR_STATUS_CONFIG[cliStatus];
               const isActive = cliId === activeCliTab;
               return (
-                <Tooltip
+                <button
                   key={cliId}
-                  content={`${getCliToolDisplayName(cliId)}: ${agentStatusConfig.label}`}
-                  placement="bottom"
+                  type="button"
+                  data-testid={`desktop-agent-status-${cliId}`}
+                  onClick={() => onActiveCliTabChange?.(cliId)}
+                  aria-label={`${getCliToolDisplayName(cliId)}: ${agentStatusConfig.label}`}
+                  aria-pressed={isActive}
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${
+                    isActive
+                      ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-900 dark:text-cyan-100'
+                      : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'
+                  }`}
                 >
-                  <button
-                    type="button"
-                    data-testid={`desktop-agent-status-${cliId}`}
-                    onClick={() => onActiveCliTabChange?.(cliId)}
-                    aria-label={`${getCliToolDisplayName(cliId)}: ${agentStatusConfig.label}`}
-                    aria-pressed={isActive}
-                    className={`relative p-1 rounded transition-colors ${
-                      isActive
-                        ? 'bg-cyan-100 dark:bg-cyan-900/30'
-                        : 'hover:bg-gray-100 dark:hover:bg-gray-800'
-                    }`}
-                  >
-                    {agentStatusConfig.type === 'spinner' ? (
-                      <span
-                        className={`block w-2.5 h-2.5 rounded-full border-2 border-t-transparent animate-spin ${agentStatusConfig.className}`}
-                        title={agentStatusConfig.label}
-                      />
-                    ) : (
-                      <span
-                        className={`block w-2.5 h-2.5 rounded-full ${agentStatusConfig.className}`}
-                        title={agentStatusConfig.label}
-                      />
-                    )}
-                  </button>
-                </Tooltip>
+                  {/* Issue #751: dot/spinner icon to the LEFT of the always-visible text */}
+                  {agentStatusConfig.type === 'spinner' ? (
+                    <span
+                      className={`block w-2.5 h-2.5 rounded-full border-2 border-t-transparent animate-spin ${agentStatusConfig.className}`}
+                    />
+                  ) : (
+                    <span
+                      className={`block w-2.5 h-2.5 rounded-full ${agentStatusConfig.className}`}
+                    />
+                  )}
+                  <span className="whitespace-nowrap">
+                    {getCliToolDisplayName(cliId)}: {agentStatusConfig.label}
+                  </span>
+                </button>
               );
             })}
           </div>
