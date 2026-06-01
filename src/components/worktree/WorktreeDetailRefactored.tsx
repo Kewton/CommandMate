@@ -1518,30 +1518,38 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           pendingInsertText={panePendingInsert}
           onInsertConsumed={() => handleInsertConsumed(splitIndex)}
           onMessageSent={handleMessageSent}
-          autoYesEnabled={paneAutoYesEnabled}
-          autoYesExpiresAt={paneAutoYesExpiresAt}
-          // Issue #740: lastAutoResponse is activeCliTab-scoped (useAutoYes);
-          // shared across splits for the toggle notification. Per-split
-          // client-side notification is out of scope (Issue #501 owns it).
-          lastAutoResponse={lastAutoResponse}
-          // Issue #740: per-split toggle bound to THIS pane's CLI.
-          onAutoYesToggle={makeAutoYesToggleHandler(paneCli)}
           // Issue #743: derived per-CLI status string for the split header dot.
           cliStatus={paneCliStatus}
-          // Issue #744: embedded per-split HistoryPane. Each split fetches its
-          // OWN cliToolId's messages (useSplitMessages) and shows them only in
-          // its own pane. History display controls are common (MVP); the insert
-          // handler is bound to THIS splitIndex so an "Insert" click targets
-          // this split's MessageInput directly (S3-005), not focusedSplitIndex.
-          onFilePathClick={handleFilePathClick}
-          showToast={showToast}
-          onHistoryInsertToMessage={(text) => handleInsertToSplit(splitIndex, text)}
-          showArchived={showArchived}
-          onShowArchivedChange={handleShowArchivedChange}
-          historyDisplayLimit={historyDisplayLimit}
-          onHistoryDisplayLimitChange={handleHistoryDisplayLimitChange}
-          historyUserOnly={historyUserOnly}
-          onHistoryUserOnlyChange={handleHistoryUserOnlyChange}
+          // Issue #756: Auto-Yes domain group. Issue #740: enabled/expiresAt are
+          // per-CLI; lastAutoResponse is activeCliTab-scoped (useAutoYes), shared
+          // across splits for the toggle notification (Issue #501 owns per-split
+          // client-side notification, which is out of scope). onToggle is the
+          // per-split toggle bound to THIS pane's CLI. Plain inline object: this
+          // is a render-prop callback so hooks (useMemo) are illegal here, and
+          // the call site already passed unstable inline fns (re-render unchanged).
+          autoYes={{
+            enabled: paneAutoYesEnabled,
+            expiresAt: paneAutoYesExpiresAt,
+            lastAutoResponse: lastAutoResponse,
+            onToggle: makeAutoYesToggleHandler(paneCli),
+          }}
+          // Issue #756: History domain group. Issue #744: embedded per-split
+          // HistoryPane. Each split fetches its OWN cliToolId's messages
+          // (useSplitMessages) and shows them only in its own pane. History
+          // display controls are common (MVP); the insert handler is bound to
+          // THIS splitIndex so an "Insert" click targets this split's
+          // MessageInput directly (S3-005), not focusedSplitIndex.
+          history={{
+            showArchived: showArchived,
+            onShowArchivedChange: handleShowArchivedChange,
+            historyDisplayLimit: historyDisplayLimit,
+            onHistoryDisplayLimitChange: handleHistoryDisplayLimitChange,
+            historyUserOnly: historyUserOnly,
+            onHistoryUserOnlyChange: handleHistoryUserOnlyChange,
+            onInsertToMessage: (text) => handleInsertToSplit(splitIndex, text),
+            onFilePathClick: handleFilePathClick,
+            showToast: showToast,
+          }}
         />
       );
     },
