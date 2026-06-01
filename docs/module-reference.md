@@ -85,7 +85,8 @@
 | `src/hooks/useFileOperations.ts` | ファイル操作フック（Issue #162: move操作の状態管理、MoveTarget型、UIロジック分離） |
 | `src/hooks/useLongPress.ts` | タッチ長押し検出フック（Issue #123、500ms閾値、10px移動キャンセル） |
 | `src/hooks/useSwipeGesture.ts` | スワイプジェスチャー検出フック（Issue #299: isInsideScrollableElement追加でscrollable要素内スワイプを抑制） |
-| `src/hooks/useFullscreen.ts` | Fullscreen API ラッパー（CSSフォールバック対応） |
+| `src/hooks/useFullscreen.ts` | Fullscreen API ラッパー（CSSフォールバック対応）。Issue #763 で browser-compat シム（webkit/moz/ms prefix フォールバック）を `src/lib/browser-compat/fullscreen-api.ts` に抽出し、prefix 由来の `@ts-expect-error` を全削除。`isIOSDevice()`（Issue #104）と公開API（UseFullscreenReturn/UseFullscreenOptions/useFullscreen）は不変 |
+| `src/lib/browser-compat/fullscreen-api.ts` | Fullscreen API の vendor-prefix（webkit/moz/ms）互換シム（Issue #763）。`isFullscreenSupportedCompat`（Boolean正規化）/ `getFullscreenElementCompat`（\|\|null フォールバック）/ `requestFullscreenCompat`（全prefix不在で `throw new Error('Fullscreen API not supported')`）/ `exitFullscreenCompat`（prefix不在で void resolve・throwしない）/ `addFullscreenChangeListenerCompat`（標準+prefix イベント登録・cleanup返却）を export。ファイルローカル型 `FullscreenElementCompat`/`FullscreenDocumentCompat` + 型アサーションで型安全アクセス（`declare global` 禁止）、各関数 SSR ガード（`typeof document==='undefined'`）維持、`@ts-expect-error` 0個 |
 | `src/hooks/useLocalStorageState.ts` | localStorage永続化フック（バリデーション対応） |
 | `src/config/z-index.ts` | z-index値の一元管理（Issue #299: JSDocコメント修正、レイヤー番号繰り上げ MODAL=50, MAXIMIZED_EDITOR=55, TOAST=60, CONTEXT_MENU=70） |
 | `src/config/uploadable-extensions.ts` | アップロード可能拡張子・MIMEタイプ・マジックバイト検証（Issue #302: mp4バリデータ追加、15MB上限、ftypシグネチャ検証） |
