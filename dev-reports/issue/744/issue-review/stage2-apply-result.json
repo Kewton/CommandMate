@@ -1,0 +1,16 @@
+{
+  "stage": 2,
+  "applied_findings": [
+    "S1-001",
+    "S1-002",
+    "S1-003",
+    "S1-004",
+    "S1-005",
+    "S1-006",
+    "S1-007",
+    "S1-008"
+  ],
+  "skipped_findings": [],
+  "issue_updated": true,
+  "notes": "All 2 Must Fix, 4 Should Fix, and 2 Nice to Have findings were applied to Issue #744 via `gh issue edit 744 --body-file`. Core correction (S1-001/S1-002): the design was rewritten from a 'filter state.messages client-side, no backend change' approach to a per-split independent fetch approach (new useSplitMessages({worktreeId, cliToolId, limit, includeArchived}) hook mirroring #728/#736 useTerminalPanePolling), because state.messages is server-side filtered to the active CLI tab (verified at WorktreeDetailRefactored.tsx:472-497 -> messages route -> chat-db.ts getMessages AND cli_tool_id=?), so the previous approach could not show A=Claude and B=Codex simultaneously. Verified test paths: tests/unit/components/HistoryPane.test.tsx exists (corrected from the nonexistent tests/unit/components/worktree/HistoryPane.test.tsx); TerminalSplitPaneContent.test.tsx and TerminalContainer.test.tsx exist. S1-004: added a per-split vs common ownership table (search#716/expand=per-split; UserOnly#725/limit#701/showArchived#168=common feeding the fetch query). S1-005: corrected layout figures to show FilePanel lives inside the terminal slot (FilePanelSplit), and clarified TerminalContainer final form / useHistoryPaneState / HISTORY_PANE_ID / HistoryExpandBar e2e data-testid / TerminalContainer.test.tsx update. S1-006: added per-split refresh() after non-active split sends. S1-007/S1-008: documented HistoryPane prop plumbing (onInsertToMessage per-split routing) and moved filtering responsibility to the fetch query (HistoryPane just renders given messages). A 'レビュー反映履歴 (Stage 2)' section was appended listing all applied finding IDs. Issue structure, headings, and intent preserved; markdown/code fences and Japanese text kept intact."
+}

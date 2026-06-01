@@ -1,0 +1,83 @@
+{
+  "stage": 1,
+  "focus": "通常（1回目）",
+  "reviewer": "claude-opus",
+  "summary": "Issue #744 の課題（per-split で各 CLI の History を出し分ける）と全体方針（HistoryPane を各 split に内包し cliToolId でフィルタ）は妥当で、#728/#736/#740/#743 の per-split 移行系譜とも整合する。しかし設計の中核前提である「§6: state.messages は全 CLI のメッセージを保持しているため UI 側フィルタで十分・バックエンド変更不要」はコード事実と矛盾しており（fetchMessages は activeCliTab で既にサーバ側フィルタ済み → state.messages は1種類の CLI のみ保持）、これに依存した受入条件「A=Claude / B=Codex を同時表示」は当該設計では達成不能。正しくは #728 の useTerminalPanePolling と同型の per-split 独立 fetch（例: useSplitMessages({worktreeId, cliToolId})）に修正すべき（Must Fix）。加えて、影響ファイル表のテストパス誤り（実体は tests/unit/components/HistoryPane.test.tsx）、TerminalContainer / useHistoryPaneState / FilePanel レイアウトの帰結が曖昧、検索#716・User only#725・表示件数#701 の per-split 制御の所在が未定義、handleMessageSent が activeCliTab スコープのため非アクティブ split の履歴更新が抜ける点を指摘する。受入条件の方向性自体は正しいので、設計記述を per-split fetch に揃えれば一貫する。",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "Must Fix",
+      "category": "correctness",
+      "title": "設計前提「state.messages は全CLIを保持・UI側フィルタで十分・バックエンド変更不要」がコード事実と矛盾し、受入条件を満たせない",
+      "description": "Issue §6（メッセージfetch）と §3（messages props 流用）は『state.messages が全 CLI のメッセージを保持しているので cliToolId でクライアントフィルタすれば足り、バックエンド変更は不要』としている。しかし WorktreeDetailRefactored.tsx の fetchMessages（L472-497）は `?cliTool=<activeCliTab>` を付与して取得し、API route（src/app/api/worktrees/[id]/messages/route.ts L35,L59-60）→ chat-db.ts getMessages（L206-209 `AND cli_tool_id = ?`）でサーバ側フィルタされる。よって state.messages は『全CLI』ではなく『現在 activeCliTab の1種類のみ』を保持する。useTerminalPanePolling のヘッダコメントも『History messages — globally keyed by activeCliTab』を per-split が所有しないと明記している。この結果、受入条件『A=Claude History=Claude のみ / B=Codex History=Codex のみ（同時に）』は state.messages フィルタ方式では満たせず（非アクティブ側 split が空表示になる）、案として破綻している。",
+      "location": "Issue 対応方針 §3 / §6, スコープ外『メッセージ取得 API の per-CLI 化』, src/components/worktree/WorktreeDetailRefactored.tsx:472-497, src/lib/db/chat-db.ts:185-218",
+      "recommendation": "設計を #728/#736 の per-split 独立 fetch と同型に修正する。各 split が自分の cliToolId で messages を独立取得する専用フック（例: useSplitMessages({ worktreeId, cliToolId }) ＝ /api/worktrees/[id]/messages?cliTool=<paneCli>&limit=... を fetch、useTerminalPanePolling と同じ requestId stale-guard / visibility 制御を踏襲）を新設し、TerminalSplitPaneContent 内の HistoryPane に渡す。Issue 本文の『バックエンド変更不要』『state.messages フィルタで十分』『messages props 流用』の記述、およびスコープ外の『メッセージ取得APIの per-CLI 化』を撤回・修正すること。なお API/DB は既に cliTool フィルタ対応済みのためサーバ実装の新規追加は不要（フロント側の per-split fetch 追加のみ）。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "Must Fix",
+      "category": "testability",
+      "title": "受入条件「A=Claude / B=Codex を同時に各CLIのみ表示」が現行データフローと内部矛盾し、提示設計ではテスト不能",
+      "description": "受入条件の第2項『スプリットA=Claude, B=Codex の構成で、A History は Claude のメッセージのみ、B History は Codex のメッセージのみ』は機能要件としては正しい。しかし S1-001 の通り設計（state.messages フィルタ）ではこの状態を再現できないため、受入条件と設計が内部矛盾している。さらに第3項『A=Claude, B=Claude → 両方とも同じ Claude メッセージ』も、per-split 独立 fetch なら 2 回 fetch（同一結果）で自然に成立する一方、state.messages フィルタ方式では同一参照のフィルタになり挙動が異なる。設計を S1-001 の per-split fetch に修正すれば両受入条件は一貫してテスト可能になる。",
+      "location": "Issue 受入条件（第2・第3項）, 検証手順（修正後の検証 2-3）",
+      "recommendation": "設計を per-split fetch に修正した上で、受入条件はそのまま維持してよい。新規テストは『split A=Claude は /messages?cliTool=claude を fetch し Claude のみ表示、split B=Codex は cliTool=codex を fetch し Codex のみ表示』という per-split fetch をモックする統合/コンポーネントテストに具体化する（state.messages を共有フィルタする前提のテストにしない）。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "Should Fix",
+      "category": "consistency",
+      "title": "影響ファイル表のテストパスが実在しない（tests/unit/components/worktree/HistoryPane.test.tsx は存在せず、実体は tests/unit/components/HistoryPane.test.tsx）",
+      "description": "影響範囲（新規/拡張）表に `tests/unit/components/worktree/HistoryPane.test.tsx` を cliToolId フィルタテストの追加対象として記載しているが、当該パスのファイルは存在しない。実際の HistoryPane ユニットテストは `tests/unit/components/HistoryPane.test.tsx`（worktree サブディレクトリではなく components 直下）にある。一方 TerminalSplitPaneContent のテストは `tests/unit/components/worktree/TerminalSplitPaneContent.test.tsx` に実在しパスは正しい。",
+      "location": "Issue 想定影響範囲（新規/拡張）テーブル",
+      "recommendation": "テストパスを `tests/unit/components/HistoryPane.test.tsx`（実在）に修正する。S1-001 で per-split fetch フック（useSplitMessages 等）を新設する場合は、その単体テスト（tests/unit/hooks/useSplitMessages.test.ts 等）も影響ファイルに追加する。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "Should Fix",
+      "category": "clarity",
+      "title": "検索#716 / User only#725 / 表示件数#701 の per-split 制御の所在が未定義（state は per-split か共通か、limit は fetch クエリに効く）",
+      "description": "受入条件『既存 HistoryPane の機能（検索#716 / User only#725 / 表示件数#701）は per-split で動作』とあるが、現行これらの制御の所在が混在しており per-split 化時の扱いが Issue で確定していない。(1) 検索#716・展開状態は HistoryPane 内部 state（useHistorySearch / useConversationHistory）なので per-split で自然に独立する。(2) User only#725 と表示件数#701 と showArchived#168 は HistoryPane の制御 props＋親 WorktreeDetailRefactored の state（historyUserOnly / historyDisplayLimit / showArchived と各 onChange、L1726-1731）で管理され localStorage 永続化されている。(3) 特に表示件数 limit は fetch クエリ（fetchMessages L481 `params.set('limit', ...)`）に効くため、per-split 独立 fetch にする場合は各 split の fetch にも limit を渡す必要があり、limit が per-split 設定か全 split 共通かを決めないと『per-split で動作』の意味が曖昧になる。",
+      "location": "Issue 受入条件（第4項）, 対応方針 §4, src/components/worktree/HistoryPane.tsx:48-79, src/components/worktree/WorktreeDetailRefactored.tsx:1726-1731",
+      "recommendation": "MVP として『検索・展開は per-split（HistoryPane 内部 state のため自動）、User only / 表示件数 / showArchived は全 split 共通（親の単一 state を全 split へ配布、localStorage キーも単一）』のように各機能の per-split / 共通の別を明記する。per-split fetch を採る場合は共通 limit/showArchived を各 split の fetch クエリに渡す経路（props もしくはフック引数）も明示する。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "Should Fix",
+      "category": "consistency",
+      "title": "TerminalContainer / useHistoryPaneState / HISTORY_PANE_ID / 折りたたみ・FilePanel レイアウトの帰結が曖昧",
+      "description": "Issue §2 は『TerminalContainer から history prop 廃止、FilePanel との単純並列に』とするが、現状 TerminalContainer は [History | terminal] の2分割であり、FilePanel は terminal スロット内の FilePanelSplit（= TerminalSplitContainer + FilePanel、L1545-1565）に含まれる。よって history を外すと TerminalContainer は単なるパススルー（または不要）になる。Issue では (a) TerminalContainer を削除するのか薄いラッパとして残すのか、(b) useHistoryPaneState（グローバル visible/width、CustomEvent 同期、TerminalContainer 内で呼ぶ）をどうするのか、(c) HISTORY_PANE_ID と HistoryExpandBar（折りたたみ時の展開バー、data-testid=history-pane-expand 等の e2e 依存）をどうするのか、(d) 受入条件『< / > 折りたたみが各 split で動作（state は per-split or 共通、MVP は共通）』を満たすために共通 useHistoryPaneState を各 split が参照するのか、が未定義。tests/unit/components/worktree/TerminalContainer.test.tsx が history prop と展開バーに依存しているため、削除時の既存テスト更新も影響範囲に含める必要がある。",
+      "location": "Issue 対応方針 §1/§2/§5, 受入条件（折りたたみ項）, src/components/worktree/TerminalContainer.tsx, src/hooks/useHistoryPaneState.ts, src/components/worktree/WorktreeDetailRefactored.tsx:1810-1818",
+      "recommendation": "TerminalContainer の最終形（削除 / パススルー化）を明記し、useHistoryPaneState（共通 visible/width）を各 split の HistoryPane へどう配布するか、HISTORY_PANE_ID / HistoryExpandBar / e2e data-testid の取り扱い、影響を受ける既存テスト（TerminalContainer.test.tsx）の更新を影響ファイル表に追記する。FilePanel が terminal スロット内にある事実を踏まえ §1/§2 のレイアウト図を実構造に合わせて訂正する。"
+    },
+    {
+      "id": "S1-006",
+      "severity": "Should Fix",
+      "category": "correctness",
+      "title": "非アクティブ split でのメッセージ送信後の履歴更新が抜ける（handleMessageSent は activeCliTab スコープ）",
+      "description": "親の handleMessageSent（L800-807）は引数 cliToolId を無視し fetchMessages()（activeCliTab スコープ）と fetchCurrentOutput() のみを呼ぶ。現状の MessageInput→TerminalSplitPaneContent.handleMessageSent は自分の useTerminalPanePolling.refresh() でターミナルは更新するが、History は state.messages（activeCliTab）依存のため非アクティブ split のメッセージ送信では当該 split の履歴が即時更新されない。S1-001 の per-split fetch を採れば各 split が自分の messages を refresh できるので解決するが、Issue 本文ではこの送信後リフレッシュ経路が触れられていない。",
+      "location": "Issue 対応方針（メッセージ送信フロー未記載）, src/components/worktree/WorktreeDetailRefactored.tsx:800-807, src/components/worktree/TerminalSplitPaneContent.tsx:138-144",
+      "recommendation": "per-split fetch フック（useSplitMessages）に refresh() を持たせ、TerminalSplitPaneContent の handleMessageSent から自 split の History を refresh する経路を設計に明記する。これにより非アクティブ split での送信→当該 split 履歴即時反映が成立する。"
+    },
+    {
+      "id": "S1-007",
+      "severity": "Nice to Have",
+      "category": "consistency",
+      "title": "HistoryPane に渡す既存 props（onCollapse/onShowArchivedChange 等）の per-split 配線が未記述",
+      "description": "現状 historyPaneMemo（L1717-1734）は HistoryPane に onFilePathClick / showToast / onInsertToMessage / showArchived / onShowArchivedChange / historyDisplayLimit / onHistoryDisplayLimitChange / historyUserOnly / onHistoryUserOnlyChange / onCollapse を渡している。per-split 化で HistoryPane を各 split に内包する際、これら props をどう各 split に配布するか（特に onInsertToMessage は #728 の pendingInsertTextMap / focusedSplitIndex ルーティングと整合させる必要、onCollapse は共通 useHistoryPaneState.toggle を全 split へ）が Issue §3 のコード例では一部省略されている。",
+      "location": "Issue 対応方針 §3 コード例, src/components/worktree/WorktreeDetailRefactored.tsx:1717-1749",
+      "recommendation": "各 split の HistoryPane に配るべき props 一覧（共通配布: showToast/showArchived/limit/userOnly/onCollapse、per-split 配慮: onInsertToMessage は #728 の per-split 挿入ルーティングへ接続）を §3 に明記し、cliToolId 追加だけでなく onInsertToMessage の挿入先 split との整合も触れる。"
+    },
+    {
+      "id": "S1-008",
+      "severity": "Nice to Have",
+      "category": "testability",
+      "title": "既存テスト互換の主張「cliToolId 未指定時は従来動作」は妥当だが、案修正に伴い HistoryPane フィルタ責務が変わる場合は再確認が必要",
+      "description": "受入条件『既存テストは PASS（HistoryPane の cliToolId フィルタ未指定時は従来動作）』は、HistoryPane に optional cliToolId を足し未指定時は messages 素通し（#740/#743 と同型の additive 拡張）であれば既存 tests/unit/components/HistoryPane.test.tsx と互換が保てるため妥当。ただし S1-001 で per-split fetch を採る場合、HistoryPane 自身はクライアントフィルタを持たず『渡された messages をそのまま表示』する設計（フィルタは fetch クエリ側）にする選択肢もあり、その場合 HistoryPane に cliToolId prop 自体が不要になる可能性がある。どちらの責務分担にするかで cliToolId prop の要否とテスト方針が変わる。",
+      "location": "Issue 受入条件（既存テスト項）, 対応方針 §4, tests/unit/components/HistoryPane.test.tsx",
+      "recommendation": "責務分担を明記する。推奨は『フィルタは fetch クエリ（cliTool）側で完結させ、HistoryPane は渡された messages を表示するだけ（cliToolId クライアントフィルタを HistoryPane に持たせない）』。この場合 §4 の HistoryPane への cliToolId prop 追加とクライアント filter は不要になり得るため、案を per-split fetch に統一する際に §4 を見直す。どちらにせよ未指定時従来動作の additive 方針なら既存テスト互換は維持できる。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 4,
+  "nice_to_have_count": 2
+}

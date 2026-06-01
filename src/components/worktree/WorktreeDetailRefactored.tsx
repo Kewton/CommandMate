@@ -25,7 +25,6 @@ import { useIsMobile } from '@/hooks/useIsMobile';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { WorktreeDesktopLayout } from '@/components/worktree/WorktreeDesktopLayout';
 import { TerminalContainer } from '@/components/worktree/TerminalContainer';
-import { HistoryPane } from '@/components/worktree/HistoryPane';
 import { MobileHeader, type WorktreeStatus } from '@/components/mobile/MobileHeader';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import { MobileTabBar, type MobileTab } from '@/components/mobile/MobileTabBar';
@@ -39,7 +38,6 @@ import { useFileSearch } from '@/hooks/useFileSearch';
 import { ActivityBar } from '@/components/worktree/ActivityBar';
 import { ActivityPane, type ActivityContentMap } from '@/components/worktree/ActivityPane';
 import { useActivityBarState } from '@/hooks/useActivityBarState';
-import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
 import { MemoPane } from '@/components/worktree/MemoPane';
 import { ExecutionLogPane } from '@/components/worktree/ExecutionLogPane';
 import { TimerPane } from '@/components/worktree/TimerPane';
@@ -275,11 +273,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     active: activeActivity,
     toggle: toggleActivity,
   } = useActivityBarState();
-  // Issue #730: only `toggle` is consumed here so HistoryPane's internal
-  // collapse button can flip visibility. The visible/width state is owned by
-  // `TerminalContainer` (which calls `useHistoryPaneState` itself); cross-
-  // instance changes are broadcast via a CustomEvent emitted by the hook.
-  const { toggle: toggleHistoryPane } = useHistoryPaneState();
+  // Issue #744: the top-level History column was removed on PC (History moved
+  // into each terminal split), so `WorktreeDetailRefactored` no longer needs a
+  // `useHistoryPaneState` instance. Each `TerminalSplitPaneContent` owns its
+  // own instance for the split-internal History visibility/width.
 
   // [Issue #469] Tree polling: detect file tree changes via JSON comparison
   const prevTreeHashRef = useRef<string | null>(null);
@@ -389,6 +386,15 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       return next;
     });
   }, [focusedSplitIndex]);
+  // Issue #744 / S3-005: insert routed by an explicit splitIndex (each split's
+  // embedded HistoryPane targets its own MessageInput, not focusedSplitIndex).
+  const handleInsertToSplit = useCallback((splitIndex: number, text: string) => {
+    setPendingInsertTextMap(prev => {
+      const next = new Map(prev);
+      next.set(splitIndex, text);
+      return next;
+    });
+  }, []);
   const handleInsertConsumed = useCallback((idx: number) => {
     setPendingInsertTextMap(prev => {
       if (!prev.has(idx)) return prev;
@@ -1376,13 +1382,25 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       : IDLE_POLLING_INTERVAL_MS;
 
     const pollData = async () => {
-      await Promise.all([fetchCurrentOutput(), fetchWorktree(), fetchMessages()]);
+      // Issue #744: `state.messages` is consumed ONLY by the mobile MobileContent
+      // path; on PC each terminal split fetches its own history independently via
+      // `useSplitMessages`. Polling `fetchMessages()` on PC would double-fetch the
+      // active CLI's messages for a result nothing renders, so it is gated to
+      // mobile. The non-poll call sites (initial load, activeCliTab/showArchived/
+      // limit change, handleMessageSent, visibilitychange recovery) keep calling
+      // fetchMessages() unconditionally, so `state.messages` is still populated on
+      // PC for an immediate mobile-switch and search.
+      const tasks: Array<Promise<unknown>> = [fetchCurrentOutput(), fetchWorktree()];
+      if (isMobile) {
+        tasks.push(fetchMessages());
+      }
+      await Promise.all(tasks);
     };
 
     const intervalId = setInterval(pollData, pollingInterval);
 
     return () => clearInterval(intervalId);
-  }, [loading, error, fetchCurrentOutput, fetchWorktree, fetchMessages, activeCliRunning]);
+  }, [loading, error, fetchCurrentOutput, fetchWorktree, fetchMessages, activeCliRunning, isMobile]);
 
   /** Sync layout mode with viewport size */
   useEffect(() => {
@@ -1508,6 +1526,20 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onAutoYesToggle={makeAutoYesToggleHandler(paneCli)}
           // Issue #743: derived per-CLI status string for the split header dot.
           cliStatus={paneCliStatus}
+          // Issue #744: embedded per-split HistoryPane. Each split fetches its
+          // OWN cliToolId's messages (useSplitMessages) and shows them only in
+          // its own pane. History display controls are common (MVP); the insert
+          // handler is bound to THIS splitIndex so an "Insert" click targets
+          // this split's MessageInput directly (S3-005), not focusedSplitIndex.
+          onFilePathClick={handleFilePathClick}
+          showToast={showToast}
+          onHistoryInsertToMessage={(text) => handleInsertToSplit(splitIndex, text)}
+          showArchived={showArchived}
+          onShowArchivedChange={handleShowArchivedChange}
+          historyDisplayLimit={historyDisplayLimit}
+          onHistoryDisplayLimitChange={handleHistoryDisplayLimitChange}
+          historyUserOnly={historyUserOnly}
+          onHistoryUserOnlyChange={handleHistoryUserOnlyChange}
         />
       );
     },
@@ -1524,6 +1556,16 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       // changes so the derived `cliStatus` stays current. The child only
       // re-renders when its resolved status string actually changes (memo-safe).
       worktree?.sessionStatusByCli,
+      // Issue #744: embedded HistoryPane wiring deps.
+      handleFilePathClick,
+      showToast,
+      handleInsertToSplit,
+      showArchived,
+      handleShowArchivedChange,
+      historyDisplayLimit,
+      handleHistoryDisplayLimitChange,
+      historyUserOnly,
+      handleHistoryUserOnlyChange,
     ],
   );
 
@@ -1702,51 +1744,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     [activeActivity, activityContent]
   );
 
-  /**
-   * Issue #727 / Issue #730: History Pane content for the TerminalContainer.
-   *
-   * MAINTENANCE NOTE (Issue #411 R3-007 / Issue #727 / Issue #730):
-   * Keep the deps list in sync with everything HistoryPane receives. Visibility
-   * is now owned by `TerminalContainer` (which calls `useHistoryPaneState`
-   * itself), so we no longer gate this memo on `historyPaneVisible`. We still
-   * read `toggleHistoryPane` from our own `useHistoryPaneState` instance so
-   * HistoryPane's internal collapse button can toggle the pane; the hook
-   * broadcasts cross-instance changes via a CustomEvent so both consumers
-   * stay in sync.
-   */
-  const historyPaneMemo = useMemo(
-    () => (
-      <HistoryPane
-        messages={state.messages}
-        worktreeId={worktreeId}
-        onFilePathClick={handleFilePathClick}
-        className="h-full"
-        showToast={showToast}
-        onInsertToMessage={handleInsertToMessage}
-        showArchived={showArchived}
-        onShowArchivedChange={handleShowArchivedChange}
-        historyDisplayLimit={historyDisplayLimit}
-        onHistoryDisplayLimitChange={handleHistoryDisplayLimitChange}
-        historyUserOnly={historyUserOnly}
-        onHistoryUserOnlyChange={handleHistoryUserOnlyChange}
-        onCollapse={toggleHistoryPane}
-      />
-    ),
-    [
-      state.messages,
-      worktreeId,
-      handleFilePathClick,
-      showToast,
-      handleInsertToMessage,
-      showArchived,
-      handleShowArchivedChange,
-      historyDisplayLimit,
-      handleHistoryDisplayLimitChange,
-      historyUserOnly,
-      handleHistoryUserOnlyChange,
-      toggleHistoryPane,
-    ]
-  );
+  // Issue #744: the top-level HistoryPane (historyPaneMemo) was removed — the
+  // History pane now lives inside each PC terminal split
+  // (`TerminalSplitPaneContent`), fetching its own cliToolId's messages. The
+  // mobile path renders its own HistoryPane via `MobileContent` (unchanged).
 
   // ========================================================================
   // Render
@@ -1810,10 +1811,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               <WorktreeDesktopLayout
                 activityPane={activityPaneMemo}
                 rightPane={
-                  <TerminalContainer
-                    history={historyPaneMemo}
-                    terminal={rightPaneSplitMemo}
-                  />
+                  // Issue #744: History moved into each terminal split, so the
+                  // top-level History column is no longer rendered on PC.
+                  <TerminalContainer terminal={rightPaneSplitMemo} />
                 }
               />
             </div>

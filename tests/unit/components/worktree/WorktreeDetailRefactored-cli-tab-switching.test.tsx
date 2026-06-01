@@ -169,6 +169,8 @@ vi.mock('@/components/worktree/HistoryPane', () => ({
       <span data-testid="history-messages">{messages.map((message) => message.content).join('|')}</span>
     </div>
   ),
+  // Issue #744: real export consumed by TerminalSplitPaneContent for the slot id.
+  splitHistorySlotId: (idx: number) => `split-history-slot-${idx}`,
 }));
 
 vi.mock('@/components/worktree/PromptPanel', () => ({

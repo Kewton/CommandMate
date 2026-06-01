@@ -1,17 +1,21 @@
 /**
- * TerminalContainer Component (Issue #730)
+ * TerminalContainer Component (Issue #730, updated Issue #744)
  *
- * Inner layout wrapper that hosts the History pane next to the Terminal +
- * FilePanel area. Introduced so the ActivityBar can extend full-height in the
- * outer layout while History stays usable as a resizable column next to the
- * terminal.
+ * Inner layout wrapper around the Terminal + FilePanel area.
  *
- * Responsibilities:
+ * Issue #744: the History pane was moved INSIDE each PC terminal split
+ * (`TerminalSplitPaneContent`) so each split shows only its own cliToolId's
+ * messages. The top-level History column is therefore no longer rendered on PC:
+ * the parent stops passing the `history` prop and TerminalContainer renders the
+ * terminal area only. The `history` prop is kept (optional) for backward
+ * compatibility — when provided, the legacy History column + resizer + expand
+ * bar render exactly as before (Issue #730 behavior).
+ *
+ * Responsibilities (when `history` is provided):
  *   - Read History pane visibility / width from `useHistoryPaneState`.
  *   - When visible, render History (with `id={HISTORY_PANE_ID}`) + PaneResizer.
  *   - When collapsed, render a compact expand bar with `aria-controls`
- *     pointing at the same `id`, so screen readers and the HistoryPane
- *     internal collapse button reference the same target.
+ *     pointing at the same `id`.
  *   - Always render the terminal area on the right (flex-grow).
  *   - Wrap each side in its own ErrorBoundary for fault isolation.
  */
@@ -36,8 +40,14 @@ export const HISTORY_PANE_ID = 'worktree-history-pane';
 const EXPAND_BAR_WIDTH_PX = 24;
 
 export interface TerminalContainerProps {
-  /** History pane content. Rendered only when `visible=true`. */
-  history: ReactNode;
+  /**
+   * History pane content. Rendered only when provided AND `visible=true`.
+   *
+   * Issue #744: omitted on PC (History moved into each terminal split). Kept
+   * optional for backward compatibility with the Issue #730 single-column
+   * History layout.
+   */
+  history?: ReactNode;
   /** Terminal + FilePanel content. Always rendered. */
   terminal: ReactNode;
 }
@@ -104,28 +114,33 @@ export const TerminalContainer = memo(function TerminalContainer({
     [width, setWidth]
   );
 
+  // Issue #744: when no history is supplied (PC default), render the terminal
+  // area only — the History pane lives inside each terminal split.
+  const hasHistory = history !== undefined && history !== null;
+
   return (
     <div ref={containerRef} className="flex h-full min-h-0 w-full">
-      {visible ? (
-        <>
-          <div
-            id={HISTORY_PANE_ID}
-            data-testid="terminal-container-history-slot"
-            aria-label="History pane"
-            style={{ width: `${width}%` }}
-            className="flex-shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out"
-          >
-            <ErrorBoundary componentName="HistoryPane">{history}</ErrorBoundary>
-          </div>
-          <PaneResizer
-            onResize={handleResize}
-            orientation="horizontal"
-            ariaValueNow={width}
-          />
-        </>
-      ) : (
-        <HistoryExpandBar onToggle={toggle} />
-      )}
+      {hasHistory &&
+        (visible ? (
+          <>
+            <div
+              id={HISTORY_PANE_ID}
+              data-testid="terminal-container-history-slot"
+              aria-label="History pane"
+              style={{ width: `${width}%` }}
+              className="flex-shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out"
+            >
+              <ErrorBoundary componentName="HistoryPane">{history}</ErrorBoundary>
+            </div>
+            <PaneResizer
+              onResize={handleResize}
+              orientation="horizontal"
+              ariaValueNow={width}
+            />
+          </>
+        ) : (
+          <HistoryExpandBar onToggle={toggle} />
+        ))}
       <div
         data-testid="terminal-container-terminal-slot"
         aria-label="Terminal pane"

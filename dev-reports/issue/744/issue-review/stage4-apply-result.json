@@ -1,0 +1,85 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目・影響範囲）",
+  "issue_number": 744,
+  "applied_findings": [
+    {
+      "id": "S3-001",
+      "severity": "Must Fix",
+      "title": "検索ハイライトの名前空間がグローバル単一のため、複数 HistoryPane（per-split）で衝突する",
+      "applied_to": [
+        "新設 §8『検索ハイライト名前空間の per-split 分離』に欠陥詳細（HISTORY_SEARCH_NAMESPACE / applyHistoryHighlights / clearHistoryHighlights / fallback overlay getElementById）と makeHistoryNamespace(splitIndex) ファクトリ化方針を記載",
+        "§3 / 実装方針補足コードに searchNamespace prop 配線を追加",
+        "受入条件に『2 split 同時検索でハイライトを消し合わない』を追加",
+        "想定影響範囲に src/lib/terminal-highlight.ts の変更と tests/unit/lib/terminal-highlight.test.ts 新規・HistoryPane.test.tsx 非干渉テストを追加",
+        "[data-message-id] は scroll container スコープで衝突しない旨、mobile は単一名前空間維持（additive）を明記"
+      ]
+    },
+    {
+      "id": "S3-002",
+      "severity": "Should Fix",
+      "title": "親 pollData の fetchMessages 間隔ポーリングと per-split useSplitMessages が重複し /messages が N+1 系統に増える",
+      "applied_to": [
+        "§6 に『パフォーマンス影響：/messages リクエストが N+1 系統に増える』blockquote を追加（親 pollData が mobile + activeCliTab 用に fetchMessages 継続、二重 fetch、N+1 系統）",
+        "useSplitMessages を useTerminalPanePolling 同型（requestId + inFlightCliToolRef stale-guard / visibilitychange 停止 / IDLE 寄り cadence）にする必須要件を §6 に記載",
+        "受入条件・想定影響範囲（useSplitMessages.ts / useSplitMessages.test.ts）に反映"
+      ]
+    },
+    {
+      "id": "S3-003",
+      "severity": "Should Fix",
+      "title": "TerminalContainer.test.tsx / WorktreeDetailRefactored.test.tsx / -cli-tab-switching.test.tsx 等が破綻する",
+      "applied_to": [
+        "想定影響範囲『削除/変更』表に TerminalContainer.test.tsx / WorktreeDetailRefactored.test.tsx / WorktreeDetailRefactored-cli-tab-switching.test.tsx / WorktreeDesktopLayout.test.tsx を正確なパス・行番号付きで列挙",
+        "cli-tab-switching の PC history 切替アサーション再定義方針を記載",
+        "新規 HistoryPane.test.tsx / TerminalSplitPaneContent.test.tsx / useSplitMessages.test.ts / terminal-highlight.test.ts を『新規/拡張』表に列挙"
+      ]
+    },
+    {
+      "id": "S3-004",
+      "severity": "Should Fix",
+      "title": "useHistoryPaneState のグローバル width(%) と useTerminalSplits の split 幅が二重化",
+      "applied_to": [
+        "§5 に history width(%) を『各 split 内側領域に対する相対値』へ再定義する旨を追記",
+        "全 split 連動 resize / 折りたたみが MVP の意図的仕様であることを §5・受入条件・実装方針補足コードに明記",
+        "default 40% の per-split 妥当性再検討・CHANGELOG 記載を追記",
+        "PaneResizer onResize → グローバル setWidth が全 split 連動であることを補足コードに注記"
+      ]
+    },
+    {
+      "id": "S3-005",
+      "severity": "Should Fix",
+      "title": "onInsertToMessage の挿入先ルーティングを split 内 HistoryPane では splitIndex 直結にすべき",
+      "applied_to": [
+        "新設 §7『onInsertToMessage の挿入ルーティング』に splitIndex 直結（pendingInsertTextMap.set(splitIndex, text)）方針と focusedSplitIndex 経由の誤配送リスクを記載",
+        "§3 / 実装方針補足コードに onInsertToSplit(splitIndex, text) 配線を追加",
+        "受入条件に『split 内 History 挿入ボタンはその split 自身の MessageInput に挿入される』を追加",
+        "mobile は handleInsertToMessage（focusedSplitIndex=0）流用で無改修互換を明記"
+      ]
+    },
+    {
+      "id": "S3-006",
+      "severity": "Nice to Have",
+      "title": "mobile は構造的に無影響だが HistoryPane 本体と global highlight namespace を PC と共有する点を明記",
+      "applied_to": [
+        "スコープ外に『HistoryPane 本体・global highlight namespace は PC/mobile 共有 → S3-001 名前空間化・S3-005 挿入配線はすべて additive（未指定時 mobile 従来動作）』を追記",
+        "§2 に HistoryPane/TerminalContainer に外部 import が無い（snapshot 無し）後方互換確認済み事項を記載",
+        "§8 で mobile は単一名前空間維持・additive 必須を明記"
+      ]
+    },
+    {
+      "id": "S3-007",
+      "severity": "Nice to Have",
+      "title": "TerminalContainer 最終形と HISTORY_PANE_ID / 展開バー / ErrorBoundary 境界の帰結を確定",
+      "applied_to": [
+        "§2 に HISTORY_PANE_ID（worktree-history-pane）DOM id 重複回避（per-split ${HISTORY_PANE_ID}-${splitIndex} suffix or 撤去、aria-controls / data-testid も per-split suffix）を記載",
+        "TerminalContainer 最終形の一意確定（薄いパススルー or 撤去）を明記",
+        "§3 / 補足コードに paneId prop（HISTORY_PANE_ID suffix）配線を追加",
+        "splitIndex/instanceId は S3-001 と共有可能とする旨を記載"
+      ]
+    }
+  ],
+  "skipped_findings": [],
+  "issue_updated": true,
+  "notes": "Stage 3 影響範囲レビューの全7件（Must Fix 1 / Should Fix 4 / Nice to Have 2）を Issue #744 本文へ反映。Stage 2 で反映済みの内容（§現状アーキテクチャ訂正、per-split fetch 方式、責務分担表、Stage 2 反映履歴）は全て保持。S3-001 用に §8、S3-005 用に §7 を新設。受入条件に S3-001/S3-004/S3-005/S3-002 由来の項目を追加。想定影響範囲表に実際に破綻する4テストファイルと新規テスト（terminal-highlight 名前空間テスト含む）を正確なパスで拡充。検証手順に同時検索・splitIndex 直結挿入のステップを追加。レビュー反映履歴に Stage 4 サブセクションを追記。日本語本文・見出し・コードフェンスを保全。スキップした指摘なし。"
+}

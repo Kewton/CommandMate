@@ -1,0 +1,37 @@
+{
+  "issue_number": 744,
+  "context": "Implementation of Issue #744 (per-split HistoryPane with per-cliToolId filtering) is complete and all checks pass (tsc/lint/test:unit 6738 pass/build). The acceptance-test agent found low-severity quality issues to address before finalizing.",
+  "acceptance_result_path": "dev-reports/issue/744/pm-auto-dev/iteration-1/acceptance-result.json",
+  "refactor_targets": [
+    "src/components/worktree/HistoryPane.tsx",
+    "src/components/worktree/TerminalSplitPaneContent.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/lib/terminal-highlight.ts",
+    "src/hooks/useSplitMessages.ts"
+  ],
+  "improvement_goals": [
+    "FINDING-1 (fix): When HistoryPane is rendered inside a split, the collapse button's hardcoded data-testid (e.g. 'history-pane-collapse-button') and aria-controls='worktree-history-pane' (HISTORY_PANE_ID) are duplicated across splits and dangle (HISTORY_PANE_ID is not rendered on PC). Make these per-split unique (suffix by splitIndex) or omit aria-controls when there is no corresponding pane id. Ensure no duplicate DOM ids / data-testids across simultaneously-rendered splits. Keep backward compatibility for the legacy (no splitIndex) usage and mobile.",
+    "FINDING-3 (assess only, conservative): On PC the parent pollData still calls fetchMessages() to populate state.messages which is now only consumed by the mobile path; the active CLI is thus fetched twice (parent + split). Assess whether the parent /messages poll can be safely gated to mobile/when needed WITHOUT breaking mobile, handleMessageSent, or other state.messages consumers. ONLY apply if clearly safe and well-tested; otherwise document as a deferred follow-up. Do NOT introduce regressions.",
+    "General: ensure useSplitMessages and the per-split wiring follow the same patterns/naming as useTerminalPanePolling; remove any dead code (e.g. leftover historyPaneMemo comments, unused imports); confirm JSDoc/comments reference Issue #744."
+  ],
+  "constraints": [
+    "All changes must keep tsc/lint/test:unit/build green",
+    "Additive/backward-compatible: legacy HistoryPane usage (no splitIndex) and the mobile path must be unchanged in behavior",
+    "Update/extend tests for any DOM id/testid changes so the per-split uniqueness is locked by a test",
+    "Do NOT commit; leave changes in working tree",
+    "PC-only UI change; do not alter mobile rendering"
+  ],
+  "quality_metrics": {
+    "before_tests": "6738 passed / 0 failed / 7 skipped",
+    "before_tsc": "pass",
+    "before_lint": "pass",
+    "before_build": "pass"
+  },
+  "verification_commands": [
+    "npx tsc --noEmit",
+    "npm run lint",
+    "npm run test:unit",
+    "npm run build"
+  ],
+  "output_path": "dev-reports/issue/744/pm-auto-dev/iteration-1/refactor-result.json"
+}
