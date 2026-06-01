@@ -15,8 +15,7 @@ import { isCliToolId } from '../config/cli-tool-ids';
  * Format capture output as JSON (excluding fullOutput for size).
  */
 function formatJson(data: CurrentOutputResponse): string {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { fullOutput, ...rest } = data;
+  const { fullOutput: _fullOutput, ...rest } = data;
   return JSON.stringify(rest, null, 2);
 }
 

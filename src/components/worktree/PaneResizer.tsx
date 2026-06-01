@@ -106,7 +106,7 @@ export const PaneResizer = memo(function PaneResizer({
   orientation = 'horizontal',
   ariaValueNow = 50,
   onDoubleClick,
-  minRatio: _minRatio = 0.1, // eslint-disable-line @typescript-eslint/no-unused-vars
+  minRatio: _minRatio = 0.1,
 }: PaneResizerProps) {
   const [isDragging, setIsDragging] = useState(false);
   const startPositionRef = useRef<number>(0);

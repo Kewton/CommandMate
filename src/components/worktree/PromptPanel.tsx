@@ -375,8 +375,8 @@ function getContainerClasses(animationClass: string): string {
  */
 export const PromptPanel = memo(function PromptPanel({
   promptData,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reserved for future use (tracking, analytics)
-  messageId,
+  // messageId reserved for future use (tracking, analytics)
+  messageId: _messageId,
   visible,
   answering,
   onRespond,

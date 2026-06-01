@@ -391,7 +391,6 @@ async function countFileLines(fullPath: string): Promise<number> {
     crlfDelay: Infinity,
   });
   let count = 0;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   for await (const _line of rl) {
     count += 1;
   }
