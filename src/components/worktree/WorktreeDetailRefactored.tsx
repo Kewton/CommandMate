@@ -1797,6 +1797,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               hasUpdate={hasUpdate}
               worktreeStatus={worktree?.status ?? null}
               onWorktreeStatusChange={handleWorktreeStatusChange}
+              sessionStatusByCli={worktree?.sessionStatusByCli}
+              selectedAgents={selectedAgents}
+              activeCliTab={activeCliTab}
+              onActiveCliTabChange={setActiveCliTab}
             />
             {/* Issue #111: Branch mismatch warning */}
             {worktree?.gitStatus && (
