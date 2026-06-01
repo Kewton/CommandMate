@@ -191,7 +191,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 }: WorktreeDetailRefactoredProps) {
   const router = useRouter();
   const isMobile = useIsMobile();
-  const { toggle, openMobileDrawer } = useSidebarContext();
+  // Issue #747: the sidebar toggle moved into the ActivityBar (which reads
+  // SidebarContext directly), so DesktopHeader no longer needs `toggle` here.
+  const { openMobileDrawer } = useSidebarContext();
   const { state, actions } = useWorktreeUIState();
   const tWorktree = useTranslations('worktree');
   const tError = useTranslations('error');
@@ -1792,7 +1794,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               gitStatus={worktree?.gitStatus}
               onBackClick={handleBackClick}
               onInfoClick={handleInfoClick}
-              onMenuClick={toggle}
               hasUpdate={hasUpdate}
               worktreeStatus={worktree?.status ?? null}
               onWorktreeStatusChange={handleWorktreeStatusChange}
