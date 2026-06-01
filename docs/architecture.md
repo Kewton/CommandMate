@@ -683,3 +683,107 @@ useWorktreesCache() ── 唯一のworktree一覧取得元
 ```
 
 ⸻
+
+## 12. UI Layout Architecture (PC, Issue #727 / #730 / #747)
+
+> **注**: 既存 §11.2 DeepLinkPane 表・§11.4 ナビゲーション構造は #600 時点の旧デスクトップ左ペインモデル（history / files / memo, MobileTabBar）を前提とした記述であり、現行 PC UI は本章の ActivityBar モデルへ置き換わっている（旧 §11.2 / §11.4 の整理は本章のスコープ外）。
+
+本章は PC 版 UI 最上位レイアウトの **責務境界・状態所有・データフロー**（なぜその構造か / 状態の所有者は誰か）を扱う。視覚的なレイアウト・操作（キーボード / Tooltip）・コンポーネントカタログの詳細は [docs/UI_UX_GUIDE.md](./UI_UX_GUIDE.md) を正（SSOT）とし、本章では再掲しない。
+
+### 12.1 コンポーネントの責務と状態所有
+
+- **ActivityBar** (`src/components/worktree/ActivityBar.tsx`): Activity 選択状態を**所有しない**完全な制御コンポーネント。`active` / `onToggle` を props で受け取り、`@/config/activity-bar-config` の `ACTIVITIES`（Files / Git / Notes / Schedules / Agent / Timer の 6 Activity）を描画する。最上部のサイドバートグル (Issue #747) のみ例外で、`useSidebarContext()` から `{ isOpen, toggle }` を直接読み取り、`role="tablist"` の外側に配置されてタブのキーボードナビゲーションに干渉しない。
+- **ActivityPane** (`ActivityPane.tsx`): 状態を持たない table-driven のディスパッチャ。親が構築した `ActivityContentMap`（`Partial<Record<ActivityId, ReactNode>>`）から `activities[active]` を 1 つだけ選び `ErrorBoundary` 経由で描画する。単一の `active` キーで 1 ノードのみを描画するため、**多 Activity 同時表示は構造的に不可能**。
+- **TerminalContainer** (`TerminalContainer.tsx`, Issue #730): `terminal` スロット（常時）と `history` スロット（任意）を内包する。Issue #744 以降、PC では最上位 History カラムを描画せず、History は各ターミナル split 内へ移管された（後述 §13）。`history` prop と `useHistoryPaneState` 配線は #730 単一カラムレイアウトとの後方互換として残置している。
+- **WorktreeDesktopLayout** (`WorktreeDesktopLayout.tsx`, Issue #730): ActivityPane と Right ペインの **2 カラム構成**。Issue #730 で 4 カラムから 2 カラムへ簡素化し（History は Right 内の TerminalContainer へ、ActivityBar は親側で全高描画へ移動）、`activityPane === null` のとき Activity カラムと境界の PaneResizer を共に隠す。
+- **PaneResizer** (`PaneResizer.tsx`): 一過性のドラッグ状態のみを持つ汎用リサイザ。**ピクセル差分を `onResize(delta)` で親へ通知するのみ**で、ペイン幅の確定は親が行う（WorktreeDesktopLayout の Activity↔Right 境界、TerminalContainer の History↔Terminal 境界の両方で再利用）。
+
+### 12.2 状態の所有者（カスタムフック）
+
+- **useActivityBarState** (`src/hooks/useActivityBarState.ts`): `active` 状態の単一情報源。`commandmate.worktree.activeActivity` に永続化するが、**閉じた状態（null）は永続化しない**（最後に選択した Activity のみ保存して再訪時に復元）。不正値・未設定時は `DEFAULT_ACTIVITY = 'files'` にフォールバックし、初期描画は決定的に `DEFAULT_ACTIVITY`・localStorage 読み取りはマウント後の `useEffect` で行う（hydration mismatch 回避）。
+- **SidebarContext** (`src/contexts/SidebarContext.tsx`): サイドバー `isOpen` を `useReducer` で所有。ActivityBar のハンバーガー (Issue #747) は本 context を直接参照し、Activity 選択（props 経由）とは別系統のデータフローを成す。
+
+オーケストレーター (`WorktreeDetailRefactored.tsx`) が `useActivityBarState` を呼んで `ActivityContentMap` を構築し、ActivityBar / ActivityPane / WorktreeDesktopLayout へ配線する。
+
+### 12.3 データフロー図
+
+```mermaid
+graph TD
+    Parent["WorktreeDetailRefactored<br/>(オーケストレーター)"]
+    ActState["useActivityBarState<br/>(active を所有 / localStorage)"]
+    SideCtx["SidebarContext<br/>(isOpen を所有)"]
+    Bar["ActivityBar<br/>(状態を持たない)"]
+    Pane["ActivityPane<br/>(table-driven dispatch)"]
+    Layout["WorktreeDesktopLayout<br/>(2 カラム + PaneResizer)"]
+    Term["TerminalContainer<br/>(terminal + 任意 history)"]
+
+    ActState -->|active| Parent
+    Parent -->|onToggle| ActState
+    Parent -->|active / onToggle| Bar
+    Bar -->|"サイドバートグル (Issue #747)"| SideCtx
+    Parent -->|"activityPane (null 可)"| Layout
+    Parent -->|"ActivityContentMap"| Pane
+    Pane --> Layout
+    Layout -->|rightPane| Term
+```
+
+> **forward-reference**: per-agent（CLI 単位）の session status indicator は Issue #743 / #749 / #751 で実装済み（per-split header の status・DesktopHeader の agent status row）。本章のスコープ外であり、詳細は将来追記する（任意）。
+
+⸻
+
+## 13. TerminalSplits Strategy (PC, Issue #728 / #736 / #744)
+
+本章は PC 版ターミナルの 1〜3 分割と、分割ごとに独立した per-(worktreeId, cliToolId) の fan-out ポーリング戦略を扱う。
+
+### 13.1 分割状態の管理（useTerminalSplits）
+
+- 状態の所有者は `src/hooks/useTerminalSplits.ts`（Issue #728）。VS Code 風レイアウト用 reducer（activityBar / historyPane 等）には**意図的に統合せず**、action の肥大化を避けて分離している。
+- 定数（`src/config/terminal-split-config.ts`）: `MIN_SPLITS = 1`、`MAX_SPLITS = 3`、`DEFAULT_SPLIT_CONFIG = { splits: [{ cliToolId: 'claude' }], widths: [1] }`。
+- 永続化は **worktree 単位**（`getTerminalSplitsStorageKey(worktreeId)` をキーに splits + widths を localStorage へ保存）。worktreeId 変更時に再読込し `focusedSplitIndex` を 0 リセットする。
+- 読込時に `isValidSplitConfig` で検証し（`splits.length ∈ [1, 3]`、`widths.length === splits.length`、各 width は有限かつ正）、不合格なら `DEFAULT_SPLIT_CONFIG` にフォールバックする（外部編集・stale データ防御）。
+- **同一 CLI 複数選択禁止ガード**: `setSplitCliTool` は他 split が同じ CLI を使用中なら変更を拒否し、`availableCliTools(idx)` は使用中 CLI を除外したリストを返す（UI の `<select>` で該当 option を無効化）。CLI 種別数（6）が `MAX_SPLITS`（3）を上回るため、`addSplit` 時の未使用 CLI 割り当ては枯渇しない。
+
+### 13.2 per-(worktreeId, cliToolId) fan-out ポーリング（useTerminalPanePolling）
+
+- 各 `TerminalSplitPaneContent` が `src/hooks/useTerminalPanePolling.ts` を 1 インスタンス所有し、`GET /api/worktrees/{worktreeId}/current-output?cliTool={cliToolId}` を**独立に**叩く（split 0 = Claude、split 1 = Codex がそれぞれポーリング）。
+- 所有する状態: `output` / `isRunning` / `isThinking` / `isSelectionListActive` / `attaching`（初回の成功 fetch まで true）/ `autoScroll`（ペイン単位）/ prompt。Auto-Yes 状態と History メッセージは activeCliTab スコープのグローバルのため**意図的に所有しない**。
+- **stale 応答破棄（2 軸）**: fetch 毎にインクリメントする `requestId` と、毎レンダで現在の CLI を記録する `inFlightCliToolRef` を応答時に照合し、いずれかが一致しない応答（順序逆転・CLI 切替跨ぎ）を破棄する。サーバ応答に含まれる `cliToolId` が要求 CLI と異なる場合も破棄する。
+- ポーリング周期は `isRunning` で切り替える（`ACTIVE_POLLING_INTERVAL_MS = 2000` / `IDLE_POLLING_INTERVAL_MS = 5000`）。`document.visibilityState === 'hidden'` の tick はスキップし、可視復帰時に 1 回だけ再 fetch する（バックグラウンド時のポーリング停止）。
+- `compositeKey = {worktreeId}::{cliToolId}` の変化時に `requestId` を bump し、output / prompt をクリアして `attaching` 状態へ戻す（fresh attach として扱う）。
+
+### 13.3 per-split メッセージ履歴と namespace 分離
+
+- **useSplitMessages** (`src/hooks/useSplitMessages.ts`, Issue #744): 各 split が `GET /api/worktrees/{worktreeId}/messages?cliTool={cliToolId}` を独立 fetch する（`SPLIT_MESSAGES_POLL_INTERVAL_MS = 5000`）。親の `state.messages` は activeCliTab に絞り込み済みのため、split A=Claude と split B=Codex の同時表示には流用できない。stale-guard は useTerminalPanePolling と同型。
+- **makeHistoryNamespace** (`src/lib/terminal-highlight.ts`, Issue #744): `CSS.highlights` は name をキーとするグローバル Map であり、複数の HistoryPane が同一 namespace（`HISTORY_SEARCH_NAMESPACE`）を使うと検索ハイライトが相互に上書きされる。`makeHistoryNamespace(splitIndex)` が split index サフィックス付きの namespace（`history-search-{idx}` 等）を返し、各 split が別レジストリキーでハイライトを保持して衝突を回避する。`applyHistoryHighlights` 等は namespace 引数を省略すると従来の共有 namespace を採用するため、Mobile / 単一ペインの呼び出しは無変更（後方互換）。
+
+### 13.4 Mobile 経路との差分
+
+- Mobile は `MobileTerminalTab` が `useTerminalPanePolling` を**単一インスタンス**のみ所有し、terminal タブ表示時にだけマウントする（activeCliTab に対応する 1 CLI のみポーリング）。
+- Issue #736 で terminal reducer slice を撤去し、PC / Mobile とも `useTerminalPanePolling` から output を取得するようになった。PC は split 数（最大 3）ぶんを**並列**起動する点が Mobile との差分である。
+
+### 13.5 データフロー図
+
+```mermaid
+graph TD
+    Splits["useTerminalSplits<br/>(splits / widths / focusedSplitIndex を所有)"]
+    Container["TerminalSplitContainer<br/>(renderPane で各 split を委譲)"]
+    P0["TerminalSplitPaneContent[0]<br/>cliTool=claude"]
+    P1["TerminalSplitPaneContent[1]<br/>cliTool=codex"]
+    Poll0["useTerminalPanePolling"]
+    Msg0["useSplitMessages"]
+    Poll1["useTerminalPanePolling"]
+    API0["/current-output?cliTool=claude"]
+    API0b["/messages?cliTool=claude"]
+    API1["/current-output?cliTool=codex"]
+
+    Splits --> Container
+    Container --> P0
+    Container --> P1
+    P0 --> Poll0 --> API0
+    P0 --> Msg0 --> API0b
+    P1 --> Poll1 --> API1
+```
+
+> **補足**: History ペインの表示 / 幅は MVP では全 split 共通の `useHistoryPaneState` を参照する（per-split 独立の開閉・幅は将来の拡張余地）。
+
+⸻
