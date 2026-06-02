@@ -12,7 +12,7 @@
 'use client';
 
 import React, { useEffect, useState, useCallback, memo } from 'react';
-import type { CommitInfo, ChangedFile } from '@/types/git';
+import type { CommitInfo, ChangedFile, GitStagedResponse } from '@/types/git';
 import type { GitStatus } from '@/types/models';
 import { useFilePolling } from '@/hooks/useFilePolling';
 import { GIT_STATUS_POLL_INTERVAL_MS } from '@/config/git-status-config';
@@ -29,6 +29,21 @@ interface GitPaneProps {
   isMobile?: boolean;
   className?: string;
 }
+
+// ============================================================================
+// Status -> color mapping (Issue #780)
+// Exhaustive Record over ChangedFile['status']; untracked/unmerged get distinct
+// colors so they never silently fall back to the modified yellow.
+// ============================================================================
+
+const STATUS_TEXT_COLOR: Record<ChangedFile['status'], string> = {
+  added: 'text-green-600 dark:text-green-400',
+  modified: 'text-yellow-600 dark:text-yellow-400',
+  deleted: 'text-red-600 dark:text-red-400',
+  renamed: 'text-blue-600 dark:text-blue-400',
+  untracked: 'text-teal-600 dark:text-teal-400',
+  unmerged: 'text-orange-600 dark:text-orange-400',
+};
 
 // ============================================================================
 // Sub-components
@@ -205,6 +220,268 @@ const CurrentStatusSection = memo(function CurrentStatusSection({
 });
 
 // ============================================================================
+// Changes section (Issue #780): staged / unstaged / untracked + commit form
+// ============================================================================
+
+/**
+ * Working-tree diff mode for the Changes section (Issue #780). Identifies which
+ * git working-tree diff the per-file Diff button should request.
+ */
+type ChangesDiffMode = 'staged' | 'unstaged' | 'untracked';
+
+interface ChangedFileListProps {
+  title: string;
+  testId: string;
+  files: ChangedFile[];
+  /** Action label for the per-file toggle button (e.g. 'Stage' / 'Unstage') */
+  actionLabel: string;
+  /** Which working-tree diff this list's Diff button should request */
+  mode: ChangesDiffMode;
+  defaultOpen: boolean;
+  busy: boolean;
+  onDiff: (filePath: string, mode: ChangesDiffMode) => void;
+  onToggleStage: (filePath: string) => void;
+}
+
+/**
+ * A single collapsible list of changed files (Staged / Unstaged / Untracked).
+ * Each row shows the status badge, the path, a diff button, and a
+ * stage/unstage toggle button.
+ */
+const ChangedFileList = memo(function ChangedFileList({
+  title,
+  testId,
+  files,
+  actionLabel,
+  mode,
+  defaultOpen,
+  busy,
+  onDiff,
+  onToggleStage,
+}: ChangedFileListProps) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div className="border-t border-gray-100 dark:border-gray-800" data-testid={testId}>
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className="w-full flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+      >
+        <span className="w-4 text-center">{open ? '▼' : '▶'}</span>
+        {title} ({files.length})
+      </button>
+      {open && files.length === 0 && (
+        <div className="px-3 py-1.5 text-xs text-gray-400 dark:text-gray-500">None</div>
+      )}
+      {open && files.length > 0 && (
+        <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+          {files.map((file) => (
+            <li key={`${file.status}:${file.path}`} className="flex items-center gap-2 px-3 py-1.5">
+              <span className={`inline-block w-16 shrink-0 text-xs font-medium ${STATUS_TEXT_COLOR[file.status]}`}>
+                {file.status}
+              </span>
+              <span className="flex-1 truncate font-mono text-xs text-gray-700 dark:text-gray-300" title={file.path}>
+                {file.path}
+              </span>
+              <button
+                type="button"
+                onClick={() => onDiff(file.path, mode)}
+                className="shrink-0 px-1.5 py-0.5 text-xs text-cyan-600 dark:text-cyan-400 hover:underline"
+                aria-label={`Show diff for ${file.path}`}
+                data-testid="git-changes-diff-button"
+              >
+                Diff
+              </button>
+              <button
+                type="button"
+                onClick={() => onToggleStage(file.path)}
+                disabled={busy}
+                className="shrink-0 px-1.5 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                aria-label={`${actionLabel} ${file.path}`}
+                data-testid="git-changes-toggle-button"
+              >
+                {actionLabel}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+});
+
+interface ChangesSectionProps {
+  staged: GitStagedResponse | null;
+  loading: boolean;
+  error: string | null;
+  busy: boolean;
+  commitMessage: string;
+  amend: boolean;
+  committing: boolean;
+  commitError: string | null;
+  isMobile: boolean;
+  onRefresh: () => void;
+  onDiff: (filePath: string, mode: ChangesDiffMode) => void;
+  onStage: (filePath: string) => void;
+  onUnstage: (filePath: string) => void;
+  onCommitMessageChange: (value: string) => void;
+  onAmendChange: (value: boolean) => void;
+  onCommit: () => void;
+}
+
+/**
+ * Changes section (Issue #780). Rendered directly below the #779 Current Status
+ * section and above Commit History. Shows three collapsible lists
+ * (Staged / Unstaged / Untracked) plus a commit message textarea, an amend
+ * checkbox, and a commit button. On mobile the sub-lists default-collapse.
+ */
+const ChangesSection = memo(function ChangesSection({
+  staged,
+  loading,
+  error,
+  busy,
+  commitMessage,
+  amend,
+  committing,
+  commitError,
+  isMobile,
+  onRefresh,
+  onDiff,
+  onStage,
+  onUnstage,
+  onCommitMessageChange,
+  onAmendChange,
+  onCommit,
+}: ChangesSectionProps) {
+  const stagedFiles = staged?.staged ?? [];
+  const unstagedFiles = staged?.unstaged ?? [];
+  const untrackedFiles = staged?.untracked ?? [];
+
+  // Commit is allowed when there are staged changes, OR when amending (which can
+  // rewrite the previous commit without new staged content).
+  const canCommit = !committing && commitMessage.trim().length > 0 && (stagedFiles.length > 0 || amend);
+  // Sub-lists default open on PC, collapsed on mobile.
+  const defaultOpen = !isMobile;
+
+  return (
+    <div
+      className="flex flex-col border-b border-gray-200 dark:border-gray-700"
+      data-testid="git-changes-section"
+    >
+      <div className="flex items-center justify-between px-3 py-2">
+        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Changes</span>
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded"
+          aria-label="Refresh changes"
+        >
+          <RefreshIcon />
+        </button>
+      </div>
+
+      {loading && !staged && (
+        <div className="flex items-center gap-2 px-3 pb-2" role="status">
+          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-500" />
+          <span className="sr-only">Loading changes...</span>
+        </div>
+      )}
+
+      {error && !staged && (
+        <div
+          className="px-3 pb-2 text-xs text-red-600 dark:text-red-400"
+          role="alert"
+          data-testid="git-changes-error"
+        >
+          {error}
+        </div>
+      )}
+
+      {staged && (
+        <>
+          <ChangedFileList
+            title="Staged"
+            testId="git-staged-list"
+            files={stagedFiles}
+            actionLabel="Unstage"
+            mode="staged"
+            defaultOpen={defaultOpen}
+            busy={busy}
+            onDiff={onDiff}
+            onToggleStage={onUnstage}
+          />
+          <ChangedFileList
+            title="Unstaged"
+            testId="git-unstaged-list"
+            files={unstagedFiles}
+            actionLabel="Stage"
+            mode="unstaged"
+            defaultOpen={defaultOpen}
+            busy={busy}
+            onDiff={onDiff}
+            onToggleStage={onStage}
+          />
+          <ChangedFileList
+            title="Untracked"
+            testId="git-untracked-list"
+            files={untrackedFiles}
+            actionLabel="Stage"
+            mode="untracked"
+            defaultOpen={defaultOpen}
+            busy={busy}
+            onDiff={onDiff}
+            onToggleStage={onStage}
+          />
+
+          {/* Commit form */}
+          <div className="flex flex-col gap-2 px-3 py-2 border-t border-gray-100 dark:border-gray-800">
+            <textarea
+              value={commitMessage}
+              onChange={(e) => onCommitMessageChange(e.target.value)}
+              placeholder="Commit message"
+              rows={isMobile ? 2 : 3}
+              className="w-full resize-y rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              data-testid="git-commit-message"
+              aria-label="Commit message"
+            />
+            <div className="flex items-center justify-between gap-2">
+              <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
+                <input
+                  type="checkbox"
+                  checked={amend}
+                  onChange={(e) => onAmendChange(e.target.checked)}
+                  data-testid="git-amend-checkbox"
+                />
+                Amend
+              </label>
+              <button
+                type="button"
+                onClick={onCommit}
+                disabled={!canCommit}
+                className="px-3 py-1 text-xs font-medium rounded bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                data-testid="git-commit-button"
+              >
+                {committing ? 'Committing...' : 'Commit'}
+              </button>
+            </div>
+            {commitError && (
+              <div
+                className="text-xs text-red-600 dark:text-red-400"
+                role="alert"
+                data-testid="git-commit-error"
+              >
+                {commitError}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+});
+
+// ============================================================================
 // Main Component
 // ============================================================================
 
@@ -234,6 +511,16 @@ export const GitPane = memo(function GitPane({
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
   const [statusError, setStatusError] = useState<string | null>(null);
+
+  // Issue #780: Changes (staged / unstaged / untracked) + commit form
+  const [staged, setStaged] = useState<GitStagedResponse | null>(null);
+  const [stagedLoading, setStagedLoading] = useState(true);
+  const [stagedError, setStagedError] = useState<string | null>(null);
+  const [opBusy, setOpBusy] = useState(false);
+  const [commitMessage, setCommitMessage] = useState('');
+  const [amend, setAmend] = useState(false);
+  const [committing, setCommitting] = useState(false);
+  const [changesCommitError, setChangesCommitError] = useState<string | null>(null);
 
   /**
    * Fetch current git status (branch / dirty / ahead-behind). Issue #779.
@@ -266,6 +553,33 @@ export const GitPane = memo(function GitPane({
   // keep polling through loading/error so recovery is automatic; stop is handled
   // by visibilitychange + unmount + worktreeId change.
   useFilePolling({ intervalMs: GIT_STATUS_POLL_INTERVAL_MS, enabled: true, onPoll: fetchStatus });
+
+  /**
+   * Fetch the working-tree changes (staged / unstaged / untracked). Issue #780.
+   * Read-only; failures surface inline and never affect commits/diff.
+   */
+  const fetchStaged = useCallback(async () => {
+    setStagedError(null);
+    try {
+      const response = await fetch(`/api/worktrees/${worktreeId}/git/staged`);
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setStagedError(data.error || 'Failed to fetch changes');
+        return;
+      }
+      const data: GitStagedResponse = await response.json();
+      setStaged(data);
+    } catch {
+      setStagedError('Failed to fetch changes');
+    } finally {
+      setStagedLoading(false);
+    }
+  }, [worktreeId]);
+
+  // Mount fetch for changes
+  useEffect(() => {
+    fetchStaged();
+  }, [fetchStaged]);
 
   /**
    * Fetch commit history
@@ -381,6 +695,118 @@ export const GitPane = memo(function GitPane({
     fetchStatus();
   }, [fetchStatus]);
 
+  // ------------------------------------------------------------------------
+  // Issue #780: Changes handlers (stage / unstage / commit + diff)
+  // ------------------------------------------------------------------------
+
+  /**
+   * Stage one or more files, then immediately refetch the changes list.
+   */
+  const handleStage = useCallback(async (filePath: string) => {
+    setOpBusy(true);
+    setStagedError(null);
+    try {
+      const response = await fetch(`/api/worktrees/${worktreeId}/git/stage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: [filePath] }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setStagedError(data.error || 'Failed to stage file');
+        return;
+      }
+      await fetchStaged();
+    } catch {
+      setStagedError('Failed to stage file');
+    } finally {
+      setOpBusy(false);
+    }
+  }, [worktreeId, fetchStaged]);
+
+  /**
+   * Unstage one or more files, then immediately refetch the changes list.
+   */
+  const handleUnstage = useCallback(async (filePath: string) => {
+    setOpBusy(true);
+    setStagedError(null);
+    try {
+      const response = await fetch(`/api/worktrees/${worktreeId}/git/unstage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: [filePath] }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setStagedError(data.error || 'Failed to unstage file');
+        return;
+      }
+      await fetchStaged();
+    } catch {
+      setStagedError('Failed to unstage file');
+    } finally {
+      setOpBusy(false);
+    }
+  }, [worktreeId, fetchStaged]);
+
+  /**
+   * Create a commit. On success: clear the message, refetch changes, AND
+   * refetch commit history + current status immediately (do not wait for the
+   * 5s poll). The /git/log refresh button (handleRefresh) is deliberately NOT
+   * wired here so the existing GitPane test stays intact.
+   */
+  const handleCommit = useCallback(async () => {
+    setCommitting(true);
+    setChangesCommitError(null);
+    try {
+      const response = await fetch(`/api/worktrees/${worktreeId}/git/commit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: commitMessage, amend }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setChangesCommitError(data.error || 'Failed to commit');
+        return;
+      }
+      setCommitMessage('');
+      setAmend(false);
+      await fetchStaged();
+      await fetchCommits();
+      await fetchStatus();
+    } catch {
+      setChangesCommitError('Failed to commit');
+    } finally {
+      setCommitting(false);
+    }
+  }, [worktreeId, commitMessage, amend, fetchStaged, fetchCommits, fetchStatus]);
+
+  /**
+   * Show the diff for a working-tree file (Issue #780). Uses the dedicated
+   * working-tree diff endpoint (NOT the commit-scoped /git/diff route), passing
+   * the list's mode (staged / unstaged / untracked). Routes the result through
+   * onDiffSelect, the same display path as commit diffs (mobile inline reuse
+   * works because setDiffContent feeds the inline viewer). Failures are kept
+   * non-fatal, though they should not occur for valid files.
+   */
+  const handleChangesDiff = useCallback(async (filePath: string, mode: ChangesDiffMode) => {
+    try {
+      const response = await fetch(
+        `/api/worktrees/${worktreeId}/git/working-diff?file=${encodeURIComponent(filePath)}&mode=${mode}`
+      );
+      if (!response.ok) {
+        return;
+      }
+      const data = await response.json();
+      if (typeof data.diff === 'string') {
+        setDiffContent(data.diff);
+        onDiffSelect(data.diff, filePath);
+      }
+    } catch {
+      // Diff failures for working-tree files are non-fatal; ignored.
+    }
+  }, [worktreeId, onDiffSelect]);
+
   // ========================================================================
   // Render
   // ========================================================================
@@ -394,6 +820,26 @@ export const GitPane = memo(function GitPane({
         statusError={statusError}
         isMobile={isMobile}
         onRefresh={handleStatusRefresh}
+      />
+
+      {/* Changes (Issue #780) - below Current Status, above Commit History */}
+      <ChangesSection
+        staged={staged}
+        loading={stagedLoading}
+        error={stagedError}
+        busy={opBusy}
+        commitMessage={commitMessage}
+        amend={amend}
+        committing={committing}
+        commitError={changesCommitError}
+        isMobile={isMobile}
+        onRefresh={fetchStaged}
+        onDiff={handleChangesDiff}
+        onStage={handleStage}
+        onUnstage={handleUnstage}
+        onCommitMessageChange={setCommitMessage}
+        onAmendChange={setAmend}
+        onCommit={handleCommit}
       />
 
       {/* Header */}
@@ -517,12 +963,7 @@ export const GitPane = memo(function GitPane({
                                 : ''
                             }`}
                           >
-                            <span className={`inline-block w-14 font-medium ${
-                              file.status === 'added' ? 'text-green-600 dark:text-green-400' :
-                              file.status === 'deleted' ? 'text-red-600 dark:text-red-400' :
-                              file.status === 'renamed' ? 'text-blue-600 dark:text-blue-400' :
-                              'text-yellow-600 dark:text-yellow-400'
-                            }`}>
+                            <span className={`inline-block w-14 font-medium ${STATUS_TEXT_COLOR[file.status]}`}>
                               {file.status}
                             </span>
                             <span className="font-mono text-gray-700 dark:text-gray-300">

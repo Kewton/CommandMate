@@ -22,9 +22,14 @@ global.fetch = mockFetch;
 /** Default JSON payloads per endpoint; override per-test via setEndpoints(). */
 interface EndpointConfig {
   status?: { ok: boolean; json: unknown };
+  staged?: { ok: boolean; json: unknown };
   log?: { ok: boolean; json: unknown };
   show?: { ok: boolean; json: unknown };
   diff?: { ok: boolean; json: unknown };
+  workingDiff?: { ok: boolean; json: unknown };
+  stage?: { ok: boolean; json: unknown };
+  unstage?: { ok: boolean; json: unknown };
+  commit?: { ok: boolean; json: unknown };
 }
 
 const DEFAULT_STATUS = {
@@ -34,6 +39,12 @@ const DEFAULT_STATUS = {
   commitHash: 'abc1234',
   isDirty: false,
   aheadBehind: null,
+};
+
+const DEFAULT_STAGED = {
+  staged: [] as Array<{ path: string; status: string }>,
+  unstaged: [] as Array<{ path: string; status: string }>,
+  untracked: [] as Array<{ path: string; status: string }>,
 };
 
 let endpoints: EndpointConfig = {};
@@ -48,10 +59,27 @@ function makeResponse(entry: { ok: boolean; json: unknown }) {
 /**
  * Install the URL-discriminating mock implementation. Tests may pass overrides
  * for any endpoint; unspecified endpoints fall back to sensible defaults.
+ *
+ * Note: branch on POST endpoints (stage/unstage/commit) BEFORE the GET-shape
+ * endpoints. /git/staged is checked before /git/stage substring overlap is
+ * avoided by checking the more specific path first.
  */
 function setEndpoints(config: EndpointConfig = {}) {
   endpoints = config;
-  mockFetch.mockImplementation((url: string) => {
+  mockFetch.mockImplementation((url: string, init?: { method?: string }) => {
+    const method = init?.method ?? 'GET';
+    if (url.includes('/git/staged')) {
+      return makeResponse(endpoints.staged ?? { ok: true, json: DEFAULT_STAGED });
+    }
+    if (url.includes('/git/stage') && method === 'POST') {
+      return makeResponse(endpoints.stage ?? { ok: true, json: { success: true } });
+    }
+    if (url.includes('/git/unstage') && method === 'POST') {
+      return makeResponse(endpoints.unstage ?? { ok: true, json: { success: true } });
+    }
+    if (url.includes('/git/commit') && method === 'POST') {
+      return makeResponse(endpoints.commit ?? { ok: true, json: { success: true, commit: null } });
+    }
     if (url.includes('/git/status')) {
       return makeResponse(endpoints.status ?? { ok: true, json: DEFAULT_STATUS });
     }
@@ -65,6 +93,9 @@ function setEndpoints(config: EndpointConfig = {}) {
           },
         }
       );
+    }
+    if (url.includes('/git/working-diff')) {
+      return makeResponse(endpoints.workingDiff ?? { ok: true, json: { diff: '' } });
     }
     if (url.includes('/git/diff')) {
       return makeResponse(endpoints.diff ?? { ok: true, json: { diff: '' } });
@@ -406,6 +437,265 @@ describe('GitPane', () => {
       await waitFor(() => {
         expect(screen.getByTestId('git-status-branch-chip')).toHaveTextContent('feature/mobile');
         expect(screen.getByTestId('git-status-dirty-badge')).toBeInTheDocument();
+      });
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Issue #780: Changes section (staged / unstaged / untracked + commit form)
+  // --------------------------------------------------------------------------
+  describe('Changes (Issue #780)', () => {
+    const STAGED_PAYLOAD = {
+      staged: [{ path: 'src/staged.ts', status: 'modified' }],
+      unstaged: [{ path: 'src/unstaged.ts', status: 'modified' }],
+      untracked: [{ path: 'src/new.ts', status: 'untracked' }],
+    };
+
+    it('should self-fetch /git/staged on mount', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        const calledStaged = mockFetch.mock.calls.some(
+          (call) => typeof call[0] === 'string' && call[0].includes('/git/staged')
+        );
+        expect(calledStaged).toBe(true);
+      });
+    });
+
+    it('should render the three Changes lists', async () => {
+      setEndpoints({ staged: { ok: true, json: STAGED_PAYLOAD } });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-changes-section')).toBeInTheDocument();
+        expect(screen.getByTestId('git-staged-list')).toBeInTheDocument();
+        expect(screen.getByTestId('git-unstaged-list')).toBeInTheDocument();
+        expect(screen.getByTestId('git-untracked-list')).toBeInTheDocument();
+      });
+
+      expect(screen.getByText('src/staged.ts')).toBeInTheDocument();
+      expect(screen.getByText('src/unstaged.ts')).toBeInTheDocument();
+      expect(screen.getByText('src/new.ts')).toBeInTheDocument();
+    });
+
+    it('should render distinct status labels including untracked and unmerged', async () => {
+      setEndpoints({
+        staged: {
+          ok: true,
+          json: {
+            staged: [{ path: 'a.ts', status: 'added' }],
+            unstaged: [{ path: 'c.ts', status: 'unmerged' }],
+            untracked: [{ path: 'd.ts', status: 'untracked' }],
+          },
+        },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('unmerged')).toBeInTheDocument();
+        expect(screen.getByText('untracked')).toBeInTheDocument();
+        expect(screen.getByText('added')).toBeInTheDocument();
+      });
+    });
+
+    it('should POST /git/stage and refetch on stage click', async () => {
+      setEndpoints({ staged: { ok: true, json: STAGED_PAYLOAD } });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Stage src/unstaged.ts')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByLabelText('Stage src/unstaged.ts'));
+
+      await waitFor(() => {
+        const stageCall = mockFetch.mock.calls.find(
+          (call) =>
+            typeof call[0] === 'string' &&
+            call[0].includes('/git/stage') &&
+            (call[1] as { method?: string } | undefined)?.method === 'POST'
+        );
+        expect(stageCall).toBeTruthy();
+      });
+    });
+
+    it('should POST /git/unstage on unstage click', async () => {
+      setEndpoints({ staged: { ok: true, json: STAGED_PAYLOAD } });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Unstage src/staged.ts')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByLabelText('Unstage src/staged.ts'));
+
+      await waitFor(() => {
+        const unstageCall = mockFetch.mock.calls.find(
+          (call) =>
+            typeof call[0] === 'string' &&
+            call[0].includes('/git/unstage') &&
+            (call[1] as { method?: string } | undefined)?.method === 'POST'
+        );
+        expect(unstageCall).toBeTruthy();
+      });
+    });
+
+    it('should disable the commit button when the message is empty', async () => {
+      setEndpoints({ staged: { ok: true, json: STAGED_PAYLOAD } });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-commit-button')).toBeInTheDocument();
+      });
+
+      expect(screen.getByTestId('git-commit-button')).toBeDisabled();
+    });
+
+    it('should POST /git/commit and refetch commits + status on commit', async () => {
+      setEndpoints({ staged: { ok: true, json: STAGED_PAYLOAD } });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-commit-message')).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByTestId('git-commit-message'), {
+        target: { value: 'feat: my change' },
+      });
+      fireEvent.click(screen.getByTestId('git-commit-button'));
+
+      await waitFor(() => {
+        const commitCall = mockFetch.mock.calls.find(
+          (call) =>
+            typeof call[0] === 'string' &&
+            call[0].includes('/git/commit') &&
+            (call[1] as { method?: string } | undefined)?.method === 'POST'
+        );
+        expect(commitCall).toBeTruthy();
+      });
+
+      // After a successful commit, the commit history (/git/log) is refetched.
+      await waitFor(() => {
+        const logCalls = mockFetch.mock.calls.filter(
+          (call) => typeof call[0] === 'string' && call[0].includes('/git/log')
+        );
+        // mount(1) + post-commit refetch(1)
+        expect(logCalls.length).toBeGreaterThanOrEqual(2);
+      });
+    });
+
+    it('should surface a commit error inline', async () => {
+      setEndpoints({
+        staged: { ok: true, json: STAGED_PAYLOAD },
+        commit: { ok: false, json: { error: 'No staged changes to commit' } },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-commit-message')).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByTestId('git-commit-message'), {
+        target: { value: 'feat: nope' },
+      });
+      fireEvent.click(screen.getByTestId('git-commit-button'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-commit-error')).toHaveTextContent('No staged changes to commit');
+      });
+    });
+
+    it('should show an inline error when /git/staged fails', async () => {
+      setEndpoints({ staged: { ok: false, json: { error: 'Not a git repository' } } });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-changes-error')).toBeInTheDocument();
+      });
+    });
+
+    it('should fetch /git/working-diff with mode=unstaged when an unstaged Diff button is clicked', async () => {
+      const onDiffSelect = vi.fn();
+      setEndpoints({
+        staged: { ok: true, json: STAGED_PAYLOAD },
+        workingDiff: { ok: true, json: { diff: 'diff --git a/u b/u\n+x' } },
+      });
+
+      render(<GitPane {...defaultProps} onDiffSelect={onDiffSelect} />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Show diff for src/unstaged.ts')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByLabelText('Show diff for src/unstaged.ts'));
+
+      await waitFor(() => {
+        const wdCall = mockFetch.mock.calls.find(
+          (call) => typeof call[0] === 'string' && (call[0] as string).includes('/git/working-diff')
+        );
+        expect(wdCall).toBeTruthy();
+        const url = wdCall![0] as string;
+        expect(url).toContain('mode=unstaged');
+        expect(url).toContain(`file=${encodeURIComponent('src/unstaged.ts')}`);
+      });
+
+      // Diff is surfaced through the same onDiffSelect path as commit diffs.
+      await waitFor(() => {
+        expect(onDiffSelect).toHaveBeenCalledWith('diff --git a/u b/u\n+x', 'src/unstaged.ts');
+      });
+    });
+
+    it('should fetch /git/working-diff with mode=staged for a staged Diff button', async () => {
+      setEndpoints({
+        staged: { ok: true, json: STAGED_PAYLOAD },
+        workingDiff: { ok: true, json: { diff: 'staged diff' } },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Show diff for src/staged.ts')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByLabelText('Show diff for src/staged.ts'));
+
+      await waitFor(() => {
+        const wdCall = mockFetch.mock.calls.find(
+          (call) => typeof call[0] === 'string' && (call[0] as string).includes('/git/working-diff')
+        );
+        expect(wdCall).toBeTruthy();
+        expect(wdCall![0] as string).toContain('mode=staged');
+      });
+    });
+
+    it('should fetch /git/working-diff with mode=untracked for an untracked Diff button', async () => {
+      setEndpoints({
+        staged: { ok: true, json: STAGED_PAYLOAD },
+        workingDiff: { ok: true, json: { diff: 'untracked diff' } },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Show diff for src/new.ts')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByLabelText('Show diff for src/new.ts'));
+
+      await waitFor(() => {
+        const wdCall = mockFetch.mock.calls.find(
+          (call) => typeof call[0] === 'string' && (call[0] as string).includes('/git/working-diff')
+        );
+        expect(wdCall).toBeTruthy();
+        expect(wdCall![0] as string).toContain('mode=untracked');
       });
     });
   });

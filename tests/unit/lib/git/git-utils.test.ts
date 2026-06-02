@@ -36,7 +36,21 @@ vi.mock('util', () => ({
   promisify: () => mockExecFileAsync,
 }));
 
-import { getCommitsByDateRange, collectRepositoryCommitLogs, extractIssueNumbers } from '@/lib/git/git-utils';
+import {
+  getCommitsByDateRange,
+  collectRepositoryCommitLogs,
+  extractIssueNumbers,
+  parsePorcelainStatus,
+  getStagedStatus,
+  stageFiles,
+  unstageFiles,
+  gitCommit,
+  getWorkingTreeDiff,
+  GitIndexLockedError,
+  GitNothingToCommitError,
+  GitTimeoutError,
+  GitNotRepoError,
+} from '@/lib/git/git-utils';
 
 describe('getCommitsByDateRange (Issue #627)', () => {
   beforeEach(() => {
@@ -240,5 +254,364 @@ describe('extractIssueNumbers (Issue #630)', () => {
     expect(result).toContain(630);
     expect(result).toContain(627);
     expect(result).toContain(626);
+  });
+});
+
+// ============================================================================
+// Issue #780: parsePorcelainStatus
+// ============================================================================
+
+describe('parsePorcelainStatus (Issue #780)', () => {
+  it('should return empty buckets for empty input', () => {
+    expect(parsePorcelainStatus('')).toEqual({ staged: [], unstaged: [], untracked: [] });
+  });
+
+  it('should classify ?? as untracked', () => {
+    const result = parsePorcelainStatus('?? new-file.ts\n');
+    expect(result.untracked).toEqual([{ path: 'new-file.ts', status: 'untracked' }]);
+    expect(result.staged).toEqual([]);
+    expect(result.unstaged).toEqual([]);
+  });
+
+  it('should classify " M" (worktree modified) as unstaged modified', () => {
+    const result = parsePorcelainStatus(' M src/foo.ts\n');
+    expect(result.staged).toEqual([]);
+    expect(result.unstaged).toEqual([{ path: 'src/foo.ts', status: 'modified' }]);
+  });
+
+  it('should classify "M " (index modified) as staged modified', () => {
+    const result = parsePorcelainStatus('M  src/foo.ts\n');
+    expect(result.staged).toEqual([{ path: 'src/foo.ts', status: 'modified' }]);
+    expect(result.unstaged).toEqual([]);
+  });
+
+  it('should classify "MM" as both staged and unstaged modified', () => {
+    const result = parsePorcelainStatus('MM src/foo.ts\n');
+    expect(result.staged).toEqual([{ path: 'src/foo.ts', status: 'modified' }]);
+    expect(result.unstaged).toEqual([{ path: 'src/foo.ts', status: 'modified' }]);
+  });
+
+  it('should classify "A " (added to index) as staged added', () => {
+    const result = parsePorcelainStatus('A  new.ts\n');
+    expect(result.staged).toEqual([{ path: 'new.ts', status: 'added' }]);
+  });
+
+  it('should classify " D" (worktree deleted) as unstaged deleted', () => {
+    const result = parsePorcelainStatus(' D gone.ts\n');
+    expect(result.unstaged).toEqual([{ path: 'gone.ts', status: 'deleted' }]);
+  });
+
+  it('should classify "D " (index deleted) as staged deleted', () => {
+    const result = parsePorcelainStatus('D  gone.ts\n');
+    expect(result.staged).toEqual([{ path: 'gone.ts', status: 'deleted' }]);
+  });
+
+  it('should use the new path for renames (R old -> new)', () => {
+    const result = parsePorcelainStatus('R  old.ts -> new.ts\n');
+    expect(result.staged).toEqual([{ path: 'new.ts', status: 'renamed' }]);
+  });
+
+  it('should classify "UU" as unmerged in the unstaged bucket', () => {
+    const result = parsePorcelainStatus('UU conflict.ts\n');
+    expect(result.unstaged).toEqual([{ path: 'conflict.ts', status: 'unmerged' }]);
+    expect(result.staged).toEqual([]);
+  });
+
+  it('should classify "AA" as unmerged', () => {
+    const result = parsePorcelainStatus('AA both-added.ts\n');
+    expect(result.unstaged).toEqual([{ path: 'both-added.ts', status: 'unmerged' }]);
+  });
+
+  it('should classify "DD" as unmerged', () => {
+    const result = parsePorcelainStatus('DD both-deleted.ts\n');
+    expect(result.unstaged).toEqual([{ path: 'both-deleted.ts', status: 'unmerged' }]);
+  });
+
+  it('should classify "AU" (added by us) as unmerged', () => {
+    const result = parsePorcelainStatus('AU theirs.ts\n');
+    expect(result.unstaged).toEqual([{ path: 'theirs.ts', status: 'unmerged' }]);
+  });
+
+  it('should handle a mixed multi-line status', () => {
+    const output = [
+      'M  staged-mod.ts',
+      ' M worktree-mod.ts',
+      'A  added.ts',
+      '?? untracked.ts',
+      'UU conflict.ts',
+      'R  old.ts -> renamed.ts',
+    ].join('\n') + '\n';
+
+    const result = parsePorcelainStatus(output);
+
+    expect(result.staged).toEqual([
+      { path: 'staged-mod.ts', status: 'modified' },
+      { path: 'added.ts', status: 'added' },
+      { path: 'renamed.ts', status: 'renamed' },
+    ]);
+    expect(result.unstaged).toEqual([
+      { path: 'worktree-mod.ts', status: 'modified' },
+      { path: 'conflict.ts', status: 'unmerged' },
+    ]);
+    expect(result.untracked).toEqual([{ path: 'untracked.ts', status: 'untracked' }]);
+  });
+
+  it('should skip blank / malformed lines', () => {
+    const result = parsePorcelainStatus('\n  \nxy\n M ok.ts\n');
+    expect(result.unstaged).toEqual([{ path: 'ok.ts', status: 'modified' }]);
+  });
+});
+
+// ============================================================================
+// Issue #780: getStagedStatus / stageFiles / unstageFiles / gitCommit
+// ============================================================================
+
+describe('getStagedStatus (Issue #780)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should run git status --porcelain and parse the output', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: 'M  a.ts\n?? b.ts\n' });
+
+    const result = await getStagedStatus('/repo');
+
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['status', '--porcelain'],
+      expect.objectContaining({ cwd: '/repo' })
+    );
+    expect(result.staged).toEqual([{ path: 'a.ts', status: 'modified' }]);
+    expect(result.untracked).toEqual([{ path: 'b.ts', status: 'untracked' }]);
+  });
+});
+
+describe('git write operations (Issue #780)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Default: no index.lock present
+    mockExistsSync.mockReturnValue(false);
+  });
+
+  it('stageFiles should call git add -- with the file list', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '' });
+
+    await stageFiles('/repo', ['a.ts', 'b.ts']);
+
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['add', '--', 'a.ts', 'b.ts'],
+      expect.objectContaining({ cwd: '/repo' })
+    );
+  });
+
+  it('unstageFiles should call git restore --staged --', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '' });
+
+    await unstageFiles('/repo', ['a.ts']);
+
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['restore', '--staged', '--', 'a.ts'],
+      expect.objectContaining({ cwd: '/repo' })
+    );
+  });
+
+  it('gitCommit should call git commit -m <message> -- (no amend)', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '' });
+
+    await gitCommit('/repo', 'feat: thing', false);
+
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['commit', '-m', 'feat: thing', '--'],
+      expect.objectContaining({ cwd: '/repo' })
+    );
+  });
+
+  it('gitCommit should add --amend when amend is true', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '' });
+
+    await gitCommit('/repo', 'reword', true);
+
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['commit', '-m', 'reword', '--amend', '--'],
+      expect.objectContaining({ cwd: '/repo' })
+    );
+  });
+
+  it('gitCommit should normalize "nothing to commit" into GitNothingToCommitError', async () => {
+    mockExecFileAsync.mockRejectedValue(new Error('nothing to commit, working tree clean'));
+
+    await expect(gitCommit('/repo', 'noop', false)).rejects.toBeInstanceOf(GitNothingToCommitError);
+  });
+
+  it('should throw GitIndexLockedError when .git/index.lock exists (stage)', async () => {
+    mockExistsSync.mockReturnValue(true);
+
+    await expect(stageFiles('/repo', ['a.ts'])).rejects.toBeInstanceOf(GitIndexLockedError);
+    // git add must not run when the index is locked
+    expect(mockExecFileAsync).not.toHaveBeenCalled();
+  });
+
+  it('should throw GitIndexLockedError when .git/index.lock exists (commit)', async () => {
+    mockExistsSync.mockReturnValue(true);
+
+    await expect(gitCommit('/repo', 'x', false)).rejects.toBeInstanceOf(GitIndexLockedError);
+    expect(mockExecFileAsync).not.toHaveBeenCalled();
+  });
+
+});
+
+// ============================================================================
+// Issue #780: getWorkingTreeDiff (working-tree per-file diff)
+// ============================================================================
+
+describe('getWorkingTreeDiff (Issue #780)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should run "git diff --cached -- <file>" for the staged mode', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: 'diff --git a/a.ts b/a.ts\n+staged\n' });
+
+    const result = await getWorkingTreeDiff('/repo', 'src/a.ts', 'staged');
+
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['diff', '--cached', '--', 'src/a.ts'],
+      expect.objectContaining({ cwd: '/repo', timeout: 3000 })
+    );
+    expect(result).toBe('diff --git a/a.ts b/a.ts\n+staged');
+  });
+
+  it('should run "git diff -- <file>" for the unstaged mode', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: 'diff --git a/b.ts b/b.ts\n-old\n+new\n' });
+
+    const result = await getWorkingTreeDiff('/repo', 'src/b.ts', 'unstaged');
+
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['diff', '--', 'src/b.ts'],
+      expect.objectContaining({ cwd: '/repo', timeout: 3000 })
+    );
+    expect(result).toBe('diff --git a/b.ts b/b.ts\n-old\n+new');
+  });
+
+  it('should run "git diff --no-index -- /dev/null <file>" for the untracked mode', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: 'diff --git a/new.ts b/new.ts\n+brand new\n' });
+
+    const result = await getWorkingTreeDiff('/repo', 'src/new.ts', 'untracked');
+
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['diff', '--no-index', '--', '/dev/null', 'src/new.ts'],
+      expect.objectContaining({ cwd: '/repo', timeout: 3000 })
+    );
+    expect(result).toBe('diff --git a/new.ts b/new.ts\n+brand new');
+  });
+
+  it('should recover stdout when --no-index exits with code 1 (diff present)', async () => {
+    // `git diff --no-index` exits non-zero (code 1) when there IS a diff, which
+    // is the NORMAL case for an untracked file. execFile rejects, but the error
+    // carries the diff on `stdout`. getWorkingTreeDiff must return that stdout.
+    const err = Object.assign(new Error('Command failed'), {
+      code: 1,
+      stdout: 'diff --git a/new.ts b/new.ts\n+brand new\n',
+      stderr: '',
+    });
+    mockExecFileAsync.mockRejectedValue(err);
+
+    const result = await getWorkingTreeDiff('/repo', 'src/new.ts', 'untracked');
+
+    expect(result).toBe('diff --git a/new.ts b/new.ts\n+brand new');
+  });
+
+  it('should return null when there is no diff (empty stdout)', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '' });
+
+    const result = await getWorkingTreeDiff('/repo', 'src/clean.ts', 'unstaged');
+
+    expect(result).toBeNull();
+  });
+
+  it('should return null when --no-index exits 1 with empty stdout (no diff)', async () => {
+    const err = Object.assign(new Error('Command failed'), {
+      code: 1,
+      stdout: '   \n',
+      stderr: '',
+    });
+    mockExecFileAsync.mockRejectedValue(err);
+
+    const result = await getWorkingTreeDiff('/repo', 'src/new.ts', 'untracked');
+
+    expect(result).toBeNull();
+  });
+
+  it('should re-throw GitTimeoutError on timeout (staged/unstaged)', async () => {
+    const err = Object.assign(new Error('timed out'), { killed: true });
+    mockExecFileAsync.mockRejectedValue(err);
+
+    await expect(getWorkingTreeDiff('/repo', 'src/a.ts', 'unstaged')).rejects.toBeInstanceOf(GitTimeoutError);
+  });
+
+  it('should re-throw GitTimeoutError on timeout (untracked)', async () => {
+    const err = Object.assign(new Error('timed out'), { killed: true });
+    mockExecFileAsync.mockRejectedValue(err);
+
+    await expect(getWorkingTreeDiff('/repo', 'src/new.ts', 'untracked')).rejects.toBeInstanceOf(GitTimeoutError);
+  });
+
+  it('should re-throw GitNotRepoError for a non-git directory', async () => {
+    const err = Object.assign(new Error('fatal: not a git repository'), {
+      code: 128,
+      stderr: 'fatal: not a git repository (or any of the parent directories): .git',
+    });
+    mockExecFileAsync.mockRejectedValue(err);
+
+    await expect(getWorkingTreeDiff('/repo', 'src/a.ts', 'unstaged')).rejects.toBeInstanceOf(GitNotRepoError);
+  });
+});
+
+describe('git write operations - serialization (Issue #780)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExistsSync.mockReturnValue(false);
+  });
+
+  it('should serialize concurrent writes for the same worktree', async () => {
+    const order: string[] = [];
+    let resolveFirst: (() => void) | undefined;
+    mockExecFileAsync
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            order.push('first-start');
+            resolveFirst = () => {
+              order.push('first-end');
+              resolve({ stdout: '' });
+            };
+          })
+      )
+      .mockImplementationOnce(async () => {
+        order.push('second-start');
+        return { stdout: '' };
+      });
+
+    const p1 = stageFiles('/repo', ['a.ts']);
+    const p2 = stageFiles('/repo', ['b.ts']);
+
+    // The second op must not start until the first resolves. Flush a few
+    // microtask ticks so the serialization chain has a chance to start op #1.
+    for (let i = 0; i < 5; i++) {
+      await Promise.resolve();
+    }
+    expect(order).toEqual(['first-start']);
+
+    resolveFirst?.();
+    await Promise.all([p1, p2]);
+
+    expect(order).toEqual(['first-start', 'first-end', 'second-start']);
   });
 });

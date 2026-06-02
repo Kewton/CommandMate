@@ -21,12 +21,38 @@ export interface CommitInfo {
 
 /**
  * Changed file in a commit
+ *
+ * Issue #780: union extended with 'untracked' | 'unmerged' (ADDITIVE — the
+ * original 4 values are unchanged so existing #447/#627 consumers behave
+ * identically). 'untracked' / 'unmerged' only appear in the working-tree
+ * status (parsePorcelainStatus / getStagedStatus), never in commit diffs.
  */
 export interface ChangedFile {
   /** File path */
   path: string;
   /** Change status */
-  status: 'added' | 'modified' | 'deleted' | 'renamed';
+  status: 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked' | 'unmerged';
+}
+
+/**
+ * Response type for the git staged-status API (Issue #780).
+ *
+ * Splits the working-tree status into three buckets:
+ * - staged:    entries with a non-space, non-`?` index (X) column
+ * - unstaged:  entries with a non-space, non-`?` worktree (Y) column
+ * - untracked: porcelain `??` entries
+ *
+ * Unmerged (conflict) entries are surfaced with status `'unmerged'` in the
+ * `unstaged` list (a conflicted file needs working-tree resolution before it
+ * can be staged, so the unstaged bucket is the actionable place for it).
+ */
+export interface GitStagedResponse {
+  /** Files with staged (index) changes */
+  staged: ChangedFile[];
+  /** Files with unstaged (working-tree) changes, including unmerged conflicts */
+  unstaged: ChangedFile[];
+  /** Untracked files (`??` in porcelain output) */
+  untracked: ChangedFile[];
 }
 
 /**
