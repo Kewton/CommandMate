@@ -525,6 +525,71 @@ describe('MessageInput', () => {
     });
   });
 
+  // ===== Dollar trigger for Codex skills (Issue #799) =====
+
+  describe('Dollar trigger for Codex skills (Issue #799)', () => {
+    beforeEach(() => {
+      setMobileMode(false);
+    });
+
+    it('opens the command selector when "$" is typed on the Codex tab', () => {
+      render(<MessageInput {...defaultProps} cliToolId="codex" />);
+
+      expect(queryDesktopSelector()).not.toBeInTheDocument();
+
+      typeMessage('$');
+
+      expect(queryDesktopSelector()).toBeInTheDocument();
+    });
+
+    it('keeps the selector open while typing a "$name" command on the Codex tab', () => {
+      render(<MessageInput {...defaultProps} cliToolId="codex" />);
+
+      typeMessage('$orchestrate');
+
+      expect(queryDesktopSelector()).toBeInTheDocument();
+    });
+
+    it('closes the selector when a space follows the "$" trigger on the Codex tab', () => {
+      render(<MessageInput {...defaultProps} cliToolId="codex" />);
+
+      typeMessage('$');
+      expect(queryDesktopSelector()).toBeInTheDocument();
+
+      typeMessage('$orchestrate now');
+      expect(queryDesktopSelector()).not.toBeInTheDocument();
+    });
+
+    it('does NOT open the selector on "$" for non-Codex tabs (claude)', () => {
+      render(<MessageInput {...defaultProps} cliToolId="claude" />);
+
+      typeMessage('$');
+
+      expect(queryDesktopSelector()).not.toBeInTheDocument();
+    });
+
+    it('does NOT open the selector on "$" when cliToolId is omitted (defaults to claude)', () => {
+      const propsWithoutCliTool = {
+        worktreeId: 'test-worktree',
+        onMessageSent: vi.fn(),
+      };
+
+      render(<MessageInput {...propsWithoutCliTool} />);
+
+      typeMessage('$');
+
+      expect(queryDesktopSelector()).not.toBeInTheDocument();
+    });
+
+    it('still opens the selector on "/" on the Codex tab (existing behavior unchanged)', () => {
+      render(<MessageInput {...defaultProps} cliToolId="codex" />);
+
+      openSelector();
+
+      expect(queryDesktopSelector()).toBeInTheDocument();
+    });
+  });
+
   // ===== pendingInsertText behavior (Issue #485) =====
 
   describe('pendingInsertText insertion (Issue #485)', () => {
