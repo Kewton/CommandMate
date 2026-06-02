@@ -8,6 +8,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { GitPane } from '@/components/worktree/GitPane';
+import {
+  CHECKOUT_HISTORY_LOSS_WARNING,
+  CHECKOUT_RUNNING_SESSION_WARNING,
+} from '@/config/git-status-config';
 
 // ----------------------------------------------------------------------------
 // URL-discriminating fetch mock (Issue #779 hard gate)
@@ -30,6 +34,10 @@ interface EndpointConfig {
   stage?: { ok: boolean; json: unknown };
   unstage?: { ok: boolean; json: unknown };
   commit?: { ok: boolean; json: unknown };
+  branches?: { ok: boolean; json: unknown };
+  checkout?: { ok: boolean; json: unknown };
+  branchCreate?: { ok: boolean; json: unknown };
+  branchDelete?: { ok: boolean; json: unknown };
 }
 
 const DEFAULT_STATUS = {
@@ -45,6 +53,29 @@ const DEFAULT_STAGED = {
   staged: [] as Array<{ path: string; status: string }>,
   unstaged: [] as Array<{ path: string; status: string }>,
   untracked: [] as Array<{ path: string; status: string }>,
+};
+
+const DEFAULT_BRANCHES = {
+  branches: [
+    {
+      name: 'main',
+      isCurrent: false,
+      isRemote: false,
+      isDefault: true,
+      upstream: 'origin/main',
+      aheadBehind: { ahead: 0, behind: 0 },
+      checkedOutWorktreePath: null,
+    },
+    {
+      name: 'feature/current',
+      isCurrent: true,
+      isRemote: false,
+      isDefault: false,
+      upstream: null,
+      aheadBehind: null,
+      checkedOutWorktreePath: null,
+    },
+  ],
 };
 
 let endpoints: EndpointConfig = {};
@@ -79,6 +110,18 @@ function setEndpoints(config: EndpointConfig = {}) {
     }
     if (url.includes('/git/commit') && method === 'POST') {
       return makeResponse(endpoints.commit ?? { ok: true, json: { success: true, commit: null } });
+    }
+    if (url.includes('/git/checkout') && method === 'POST') {
+      return makeResponse(endpoints.checkout ?? { ok: true, json: { success: true, currentBranch: 'main', isDirty: false } });
+    }
+    if (url.includes('/git/branch/create') && method === 'POST') {
+      return makeResponse(endpoints.branchCreate ?? { ok: true, json: { success: true, branch: { name: 'new' } } });
+    }
+    if (url.includes('/git/branch/delete') && method === 'POST') {
+      return makeResponse(endpoints.branchDelete ?? { ok: true, json: { success: true, deleted: 'gone' } });
+    }
+    if (url.includes('/git/branches')) {
+      return makeResponse(endpoints.branches ?? { ok: true, json: DEFAULT_BRANCHES });
     }
     if (url.includes('/git/status')) {
       return makeResponse(endpoints.status ?? { ok: true, json: DEFAULT_STATUS });
@@ -696,6 +739,320 @@ describe('GitPane', () => {
         );
         expect(wdCall).toBeTruthy();
         expect(wdCall![0] as string).toContain('mode=untracked');
+      });
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Issue #781: Branches section (list / checkout / create / delete)
+  // --------------------------------------------------------------------------
+  describe('Branches (Issue #781)', () => {
+    // S3-001 history-loss warning text (Japanese) that MUST appear in the checkout
+    // confirm dialog. Imported from the single source of truth so this assertion
+    // tracks the component verbatim (no drift between a test-local copy and the UI).
+    const HISTORY_LOSS_TEXT = CHECKOUT_HISTORY_LOSS_WARNING;
+
+    it('self-fetches /git/branches on mount', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        const called = mockFetch.mock.calls.some(
+          (call) => typeof call[0] === 'string' && call[0].includes('/git/branches')
+        );
+        expect(called).toBe(true);
+      });
+    });
+
+    it('renders the Branches section with branch names', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-branches-section')).toBeInTheDocument();
+        expect(screen.getByText('main')).toBeInTheDocument();
+        expect(screen.getByText('feature/current')).toBeInTheDocument();
+      });
+    });
+
+    it('shows the S3-001 history-loss warning in the checkout confirm dialog', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Checkout main')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByLabelText('Checkout main'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('branch-checkout-confirm')).toBeInTheDocument();
+        expect(screen.getByTestId('branch-history-loss-warning')).toHaveTextContent(HISTORY_LOSS_TEXT);
+      });
+    });
+
+    it('shows the S3-002 running-session warning when a session is running', async () => {
+      const worktree = {
+        sessionStatusByCli: {
+          claude: { isRunning: true, isWaitingForResponse: false, isProcessing: false },
+        },
+      };
+      render(<GitPane {...defaultProps} worktree={worktree as never} />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Checkout main')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByLabelText('Checkout main'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('branch-session-warning')).toHaveTextContent(
+          CHECKOUT_RUNNING_SESSION_WARNING
+        );
+      });
+    });
+
+    it('does NOT show the running-session warning when no session is running', async () => {
+      const worktree = {
+        sessionStatusByCli: {
+          claude: { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+        },
+      };
+      render(<GitPane {...defaultProps} worktree={worktree as never} />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Checkout main')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByLabelText('Checkout main'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('branch-checkout-confirm')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('branch-session-warning')).not.toBeInTheDocument();
+    });
+
+    it('POSTs /git/checkout and refetches on confirm', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Checkout main')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByLabelText('Checkout main'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('branch-checkout-confirm-button')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByTestId('branch-checkout-confirm-button'));
+
+      await waitFor(() => {
+        const checkoutCall = mockFetch.mock.calls.find(
+          (call) =>
+            typeof call[0] === 'string' &&
+            call[0].includes('/git/checkout') &&
+            (call[1] as { method?: string } | undefined)?.method === 'POST'
+        );
+        expect(checkoutCall).toBeTruthy();
+      });
+
+      // S3-005 cascade: status + staged + branches + log all refetch after checkout.
+      await waitFor(() => {
+        const logCalls = mockFetch.mock.calls.filter(
+          (call) => typeof call[0] === 'string' && call[0].includes('/git/log')
+        );
+        const branchCalls = mockFetch.mock.calls.filter(
+          (call) => typeof call[0] === 'string' && call[0].includes('/git/branches')
+        );
+        expect(logCalls.length).toBeGreaterThanOrEqual(2);
+        expect(branchCalls.length).toBeGreaterThanOrEqual(2);
+      });
+    });
+
+    it('surfaces a checkout error using the reason from the API', async () => {
+      setEndpoints({
+        checkout: {
+          ok: false,
+          json: { error: 'Working tree has uncommitted changes', reason: 'dirty' },
+        },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Checkout main')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByLabelText('Checkout main'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('branch-checkout-confirm-button')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByTestId('branch-checkout-confirm-button'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('branch-checkout-error')).toBeInTheDocument();
+      });
+    });
+
+    it('disables checkout for a branch checked out in another worktree (with a tooltip)', async () => {
+      setEndpoints({
+        branches: {
+          ok: true,
+          json: {
+            branches: [
+              {
+                name: 'feature/elsewhere',
+                isCurrent: false,
+                isRemote: false,
+                isDefault: false,
+                upstream: null,
+                aheadBehind: null,
+                checkedOutWorktreePath: '/other/worktree',
+              },
+            ],
+          },
+        },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Checkout feature/elsewhere')).toBeInTheDocument();
+      });
+
+      const button = screen.getByLabelText('Checkout feature/elsewhere');
+      expect(button).toBeDisabled();
+      expect(button.getAttribute('title')).toContain('/other/worktree');
+    });
+
+    it('does not render a checkout button for the current branch', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('feature/current')).toBeInTheDocument();
+      });
+
+      expect(screen.queryByLabelText('Checkout feature/current')).not.toBeInTheDocument();
+    });
+
+    it('switches to the remote tab and lists remote branches', async () => {
+      setEndpoints({
+        branches: {
+          ok: true,
+          json: {
+            branches: [
+              {
+                name: 'origin/release/1.0',
+                isCurrent: false,
+                isRemote: true,
+                isDefault: false,
+                upstream: null,
+                aheadBehind: null,
+                checkedOutWorktreePath: null,
+              },
+            ],
+          },
+        },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-branches-tab-remote')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByTestId('git-branches-tab-remote'));
+
+      await waitFor(() => {
+        const remoteCall = mockFetch.mock.calls.find(
+          (call) => typeof call[0] === 'string' && (call[0] as string).includes('include=remote')
+        );
+        expect(remoteCall).toBeTruthy();
+      });
+    });
+
+    it('opens the create-branch modal and POSTs /git/branch/create', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-branch-create-open')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByTestId('git-branch-create-open'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('branch-create-name-input')).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByTestId('branch-create-name-input'), {
+        target: { value: 'feature/created' },
+      });
+      fireEvent.click(screen.getByTestId('branch-create-submit'));
+
+      await waitFor(() => {
+        const createCall = mockFetch.mock.calls.find(
+          (call) =>
+            typeof call[0] === 'string' &&
+            call[0].includes('/git/branch/create') &&
+            (call[1] as { method?: string } | undefined)?.method === 'POST'
+        );
+        expect(createCall).toBeTruthy();
+      });
+    });
+
+    it('opens the delete confirm modal and POSTs /git/branch/delete', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Delete main')).toBeInTheDocument();
+      });
+
+      // 'main' is the default branch -> delete should be disabled.
+      expect(screen.getByLabelText('Delete main')).toBeDisabled();
+    });
+
+    it('confirms deletion of a deletable branch and POSTs /git/branch/delete', async () => {
+      setEndpoints({
+        branches: {
+          ok: true,
+          json: {
+            branches: [
+              {
+                name: 'feature/old',
+                isCurrent: false,
+                isRemote: false,
+                isDefault: false,
+                upstream: null,
+                aheadBehind: null,
+                checkedOutWorktreePath: null,
+              },
+            ],
+          },
+        },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Delete feature/old')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByLabelText('Delete feature/old'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('branch-delete-confirm-button')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByTestId('branch-delete-confirm-button'));
+
+      await waitFor(() => {
+        const delCall = mockFetch.mock.calls.find(
+          (call) =>
+            typeof call[0] === 'string' &&
+            call[0].includes('/git/branch/delete') &&
+            (call[1] as { method?: string } | undefined)?.method === 'POST'
+        );
+        expect(delCall).toBeTruthy();
       });
     });
   });

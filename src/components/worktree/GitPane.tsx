@@ -12,10 +12,14 @@
 'use client';
 
 import React, { useEffect, useState, useCallback, memo } from 'react';
-import type { CommitInfo, ChangedFile, GitStagedResponse } from '@/types/git';
-import type { GitStatus } from '@/types/models';
+import type { CommitInfo, ChangedFile, GitStagedResponse, BranchInfo, BranchInclude } from '@/types/git';
+import type { GitStatus, Worktree } from '@/types/models';
 import { useFilePolling } from '@/hooks/useFilePolling';
-import { GIT_STATUS_POLL_INTERVAL_MS } from '@/config/git-status-config';
+import {
+  GIT_STATUS_POLL_INTERVAL_MS,
+  CHECKOUT_HISTORY_LOSS_WARNING,
+  CHECKOUT_RUNNING_SESSION_WARNING,
+} from '@/config/git-status-config';
 
 // ============================================================================
 // Types
@@ -27,8 +31,17 @@ interface GitPaneProps {
   onDiffSelect: (diff: string, filePath: string) => void;
   /** When true, shows diff inline instead of calling onDiffSelect */
   isMobile?: boolean;
+  /**
+   * The worktree this pane belongs to (Issue #781). Optional; only its
+   * sessionStatusByCli is read, to surface the S3-002 running-session warning in
+   * the checkout confirm dialog. When omitted, no session warning is shown.
+   */
+  worktree?: Pick<Worktree, 'sessionStatusByCli'>;
   className?: string;
 }
+
+// The S3-001 history-loss / S3-002 running-session warning strings live in
+// @/config/git-status-config (single source of truth, also imported by the test).
 
 // ============================================================================
 // Status -> color mapping (Issue #780)
@@ -482,6 +495,399 @@ const ChangesSection = memo(function ChangesSection({
 });
 
 // ============================================================================
+// Branches section (Issue #781): list / checkout / create / delete
+// ============================================================================
+
+/** A pending checkout confirmation (null = no dialog open). */
+interface CheckoutTarget {
+  branch: BranchInfo;
+}
+
+interface BranchesSectionProps {
+  branches: BranchInfo[];
+  include: BranchInclude;
+  loading: boolean;
+  error: string | null;
+  busy: boolean;
+  /** Inline error from a checkout/create/delete mutation. */
+  actionError: string | null;
+  /** True when any CLI session is running for this worktree (S3-002). */
+  hasRunningSession: boolean;
+  isMobile: boolean;
+  onIncludeChange: (include: BranchInclude) => void;
+  onRefresh: () => void;
+  onCheckout: (branch: BranchInfo, force: boolean) => void;
+  onCreate: (name: string, from: string | undefined) => void;
+  onDelete: (name: string, force: boolean) => void;
+}
+
+/**
+ * Branches section (Issue #781). Rendered between Current Status (#779) and
+ * Changes (#780). Provides local/remote tabs, a per-branch checkout (with the
+ * S3-001 history-loss + S3-002 running-session confirm dialog), a create modal,
+ * and a delete confirm modal. On mobile the whole section default-collapses.
+ */
+const BranchesSection = memo(function BranchesSection({
+  branches,
+  include,
+  loading,
+  error,
+  busy,
+  actionError,
+  hasRunningSession,
+  isMobile,
+  onIncludeChange,
+  onRefresh,
+  onCheckout,
+  onCreate,
+  onDelete,
+}: BranchesSectionProps) {
+  // Mobile default-collapses the entire section (#780 same approach).
+  const [open, setOpen] = useState(!isMobile);
+  const [checkoutTarget, setCheckoutTarget] = useState<CheckoutTarget | null>(null);
+  const [checkoutForce, setCheckoutForce] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [createFrom, setCreateFrom] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<BranchInfo | null>(null);
+  const [deleteForce, setDeleteForce] = useState(false);
+
+  const openCheckout = useCallback((branch: BranchInfo) => {
+    setCheckoutForce(false);
+    setCheckoutTarget({ branch });
+  }, []);
+
+  const confirmCheckout = useCallback(() => {
+    if (!checkoutTarget) return;
+    onCheckout(checkoutTarget.branch, checkoutForce);
+    setCheckoutTarget(null);
+  }, [checkoutTarget, checkoutForce, onCheckout]);
+
+  const confirmCreate = useCallback(() => {
+    if (createName.trim().length === 0) return;
+    onCreate(createName.trim(), createFrom.trim() || undefined);
+    setShowCreate(false);
+    setCreateName('');
+    setCreateFrom('');
+  }, [createName, createFrom, onCreate]);
+
+  const confirmDelete = useCallback(() => {
+    if (!deleteTarget) return;
+    onDelete(deleteTarget.name, deleteForce);
+    setDeleteTarget(null);
+    setDeleteForce(false);
+  }, [deleteTarget, deleteForce, onDelete]);
+
+  return (
+    <div
+      className="flex flex-col border-b border-gray-200 dark:border-gray-700"
+      data-testid="git-branches-section"
+    >
+      <div className="flex items-center justify-between px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setOpen((prev) => !prev)}
+          className="flex items-center gap-1 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100"
+        >
+          <span className="text-xs w-4 text-center">{open ? '▼' : '▶'}</span>
+          Branches
+        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setShowCreate(true)}
+            className="px-2 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+            data-testid="git-branch-create-open"
+          >
+            + New
+          </button>
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded"
+            aria-label="Refresh branches"
+          >
+            <RefreshIcon />
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <>
+          {/* Local / remote tabs */}
+          <div className="flex items-center gap-1 px-3 pb-2">
+            {(['local', 'remote', 'all'] as BranchInclude[]).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => onIncludeChange(tab)}
+                className={`px-2 py-0.5 text-xs rounded ${
+                  include === tab
+                    ? 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-200'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                }`}
+                data-testid={`git-branches-tab-${tab}`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+
+          {loading && branches.length === 0 && (
+            <div className="flex items-center gap-2 px-3 pb-2" role="status">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-500" />
+              <span className="sr-only">Loading branches...</span>
+            </div>
+          )}
+
+          {error && (
+            <div
+              className="px-3 pb-2 text-xs text-red-600 dark:text-red-400"
+              role="alert"
+              data-testid="git-branches-error"
+            >
+              {error}
+            </div>
+          )}
+
+          {actionError && (
+            <div
+              className="px-3 pb-2 text-xs text-red-600 dark:text-red-400"
+              role="alert"
+              data-testid="branch-checkout-error"
+            >
+              {actionError}
+            </div>
+          )}
+
+          {!loading && !error && branches.length === 0 && (
+            <div className="px-3 pb-2 text-xs text-gray-400 dark:text-gray-500">No branches</div>
+          )}
+
+          {branches.length > 0 && (
+            <ul className="divide-y divide-gray-100 dark:divide-gray-800 max-h-64 overflow-y-auto">
+              {branches.map((branch) => {
+                const checkedOutElsewhere = branch.checkedOutWorktreePath !== null && !branch.isCurrent;
+                const deleteDisabled = busy || branch.isCurrent || branch.isDefault;
+                return (
+                  <li
+                    key={`${branch.isRemote ? 'r' : 'l'}:${branch.name}`}
+                    className="flex items-center gap-2 px-3 py-1.5"
+                    data-testid="git-branch-row"
+                  >
+                    <span
+                      className="flex-1 truncate font-mono text-xs text-gray-700 dark:text-gray-300"
+                      title={branch.name}
+                    >
+                      {branch.isCurrent && <span className="text-cyan-600 dark:text-cyan-400 mr-1">●</span>}
+                      {branch.name}
+                      {branch.isDefault && (
+                        <span className="ml-1.5 text-[10px] text-gray-400 dark:text-gray-500">default</span>
+                      )}
+                    </span>
+                    {!branch.isCurrent && (
+                      <button
+                        type="button"
+                        onClick={() => openCheckout(branch)}
+                        disabled={busy || checkedOutElsewhere}
+                        className="shrink-0 px-1.5 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 text-cyan-700 dark:text-cyan-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                        aria-label={`Checkout ${branch.name}`}
+                        title={
+                          checkedOutElsewhere
+                            ? `Checked out in another worktree: ${branch.checkedOutWorktreePath}`
+                            : undefined
+                        }
+                      >
+                        Checkout
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDeleteForce(false);
+                        setDeleteTarget(branch);
+                      }}
+                      disabled={deleteDisabled}
+                      className="shrink-0 px-1.5 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 text-red-600 dark:text-red-400 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                      aria-label={`Delete ${branch.name}`}
+                    >
+                      Delete
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </>
+      )}
+
+      {/* Checkout confirm dialog */}
+      {checkoutTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          data-testid="branch-checkout-confirm"
+        >
+          <div className="w-full max-w-md rounded-lg bg-white dark:bg-gray-800 p-4 shadow-xl flex flex-col gap-3">
+            <h3 className="text-sm font-medium text-gray-800 dark:text-gray-200">
+              Checkout <span className="font-mono">{checkoutTarget.branch.name}</span>?
+            </h3>
+
+            {/* S3-001: history-loss warning (verified verbatim by acceptance test). */}
+            <div
+              className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/50 dark:bg-amber-900/20 dark:text-amber-300"
+              role="alert"
+              data-testid="branch-history-loss-warning"
+            >
+              {CHECKOUT_HISTORY_LOSS_WARNING}
+            </div>
+
+            {/* S3-002: running-session warning. */}
+            {hasRunningSession && (
+              <div
+                className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-700/50 dark:bg-red-900/20 dark:text-red-300"
+                role="alert"
+                data-testid="branch-session-warning"
+              >
+                {CHECKOUT_RUNNING_SESSION_WARNING}
+              </div>
+            )}
+
+            <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
+              <input
+                type="checkbox"
+                checked={checkoutForce}
+                onChange={(e) => setCheckoutForce(e.target.checked)}
+                data-testid="branch-checkout-force"
+              />
+              Discard uncommitted changes (force) — 未コミットの変更は失われます
+            </label>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setCheckoutTarget(null)}
+                className="px-3 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmCheckout}
+                disabled={busy}
+                className="px-3 py-1 text-xs font-medium rounded bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-50"
+                data-testid="branch-checkout-confirm-button"
+              >
+                Checkout
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create-branch modal */}
+      {showCreate && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          data-testid="branch-create-modal"
+        >
+          <div className="w-full max-w-md rounded-lg bg-white dark:bg-gray-800 p-4 shadow-xl flex flex-col gap-3">
+            <h3 className="text-sm font-medium text-gray-800 dark:text-gray-200">Create branch</h3>
+            <input
+              type="text"
+              value={createName}
+              onChange={(e) => setCreateName(e.target.value)}
+              placeholder="branch name (e.g. feature/123-foo)"
+              className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              data-testid="branch-create-name-input"
+              aria-label="New branch name"
+            />
+            <select
+              value={createFrom}
+              onChange={(e) => setCreateFrom(e.target.value)}
+              className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              data-testid="branch-create-from-select"
+              aria-label="Base branch"
+            >
+              <option value="">(current HEAD)</option>
+              {branches.map((b) => (
+                <option key={`from:${b.isRemote ? 'r' : 'l'}:${b.name}`} value={b.name}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowCreate(false)}
+                className="px-3 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmCreate}
+                disabled={busy || createName.trim().length === 0}
+                className="px-3 py-1 text-xs font-medium rounded bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                data-testid="branch-create-submit"
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirm modal */}
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          data-testid="branch-delete-confirm"
+        >
+          <div className="w-full max-w-md rounded-lg bg-white dark:bg-gray-800 p-4 shadow-xl flex flex-col gap-3">
+            <h3 className="text-sm font-medium text-gray-800 dark:text-gray-200">
+              Delete <span className="font-mono">{deleteTarget.name}</span>?
+            </h3>
+            <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
+              <input
+                type="checkbox"
+                checked={deleteForce}
+                onChange={(e) => setDeleteForce(e.target.checked)}
+                data-testid="branch-delete-force"
+              />
+              Force delete (-D) — unmerged commits will be lost
+            </label>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className="px-3 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                disabled={busy}
+                className="px-3 py-1 text-xs font-medium rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                data-testid="branch-delete-confirm-button"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+// ============================================================================
 // Main Component
 // ============================================================================
 
@@ -489,6 +895,7 @@ export const GitPane = memo(function GitPane({
   worktreeId,
   onDiffSelect,
   isMobile = false,
+  worktree,
   className = '',
 }: GitPaneProps) {
   const [commits, setCommits] = useState<CommitInfo[]>([]);
@@ -521,6 +928,20 @@ export const GitPane = memo(function GitPane({
   const [amend, setAmend] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [changesCommitError, setChangesCommitError] = useState<string | null>(null);
+
+  // Issue #781: Branches (list / checkout / create / delete)
+  const [branches, setBranches] = useState<BranchInfo[]>([]);
+  const [branchInclude, setBranchInclude] = useState<BranchInclude>('local');
+  const [branchesLoading, setBranchesLoading] = useState(true);
+  const [branchesError, setBranchesError] = useState<string | null>(null);
+  const [branchBusy, setBranchBusy] = useState(false);
+  const [branchActionError, setBranchActionError] = useState<string | null>(null);
+
+  // S3-002: any running CLI session for this worktree makes the working-tree
+  // checkout risky; the confirm dialog surfaces a warning when this is true.
+  const hasRunningSession = Object.values(worktree?.sessionStatusByCli ?? {}).some(
+    (s) => s?.isRunning === true
+  );
 
   /**
    * Fetch current git status (branch / dirty / ahead-behind). Issue #779.
@@ -807,6 +1228,130 @@ export const GitPane = memo(function GitPane({
     }
   }, [worktreeId, onDiffSelect]);
 
+  // ------------------------------------------------------------------------
+  // Issue #781: Branches handlers (list / checkout / create / delete)
+  // ------------------------------------------------------------------------
+
+  /**
+   * Fetch the branch list for the current include filter. Read-only; failures
+   * surface inline and never affect the other sections. NO new 5s poll (S3-005):
+   * fetched on mount + on include change + after a mutation.
+   */
+  const fetchBranches = useCallback(async (include: BranchInclude) => {
+    setBranchesError(null);
+    try {
+      const response = await fetch(`/api/worktrees/${worktreeId}/git/branches?include=${include}`);
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setBranchesError(data.error || 'Failed to fetch branches');
+        return;
+      }
+      const data = await response.json();
+      setBranches(Array.isArray(data.branches) ? data.branches : []);
+    } catch {
+      setBranchesError('Failed to fetch branches');
+    } finally {
+      setBranchesLoading(false);
+    }
+  }, [worktreeId]);
+
+  // Mount fetch + refetch when the include tab changes.
+  useEffect(() => {
+    fetchBranches(branchInclude);
+  }, [fetchBranches, branchInclude]);
+
+  const handleBranchIncludeChange = useCallback((include: BranchInclude) => {
+    setBranchInclude(include);
+  }, []);
+
+  const handleBranchesRefresh = useCallback(() => {
+    fetchBranches(branchInclude);
+  }, [fetchBranches, branchInclude]);
+
+  /**
+   * Checkout a branch. On success run the S3-005 cascade (status + staged +
+   * branches + commit history) so every dependent section reflects the new HEAD.
+   */
+  const handleCheckout = useCallback(async (branch: BranchInfo, force: boolean) => {
+    setBranchBusy(true);
+    setBranchActionError(null);
+    try {
+      const response = await fetch(`/api/worktrees/${worktreeId}/git/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ branch: branch.name, force }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setBranchActionError(data.error || 'Failed to checkout branch');
+        return;
+      }
+      // S3-005 cascade: HEAD changed -> refetch everything affected.
+      await Promise.all([
+        fetchStatus(),
+        fetchStaged(),
+        fetchBranches(branchInclude),
+        fetchCommits(),
+      ]);
+    } catch {
+      setBranchActionError('Failed to checkout branch');
+    } finally {
+      setBranchBusy(false);
+    }
+  }, [worktreeId, branchInclude, fetchStatus, fetchStaged, fetchBranches, fetchCommits]);
+
+  /**
+   * Create a branch (no checkout). On success only the branch list changes
+   * (HEAD unchanged), so refetch branches only (S3-005).
+   */
+  const handleBranchCreate = useCallback(async (name: string, from: string | undefined) => {
+    setBranchBusy(true);
+    setBranchActionError(null);
+    try {
+      const response = await fetch(`/api/worktrees/${worktreeId}/git/branch/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, from }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setBranchActionError(data.error || 'Failed to create branch');
+        return;
+      }
+      await fetchBranches(branchInclude);
+    } catch {
+      setBranchActionError('Failed to create branch');
+    } finally {
+      setBranchBusy(false);
+    }
+  }, [worktreeId, branchInclude, fetchBranches]);
+
+  /**
+   * Delete a branch. On success only the branch list changes (HEAD unchanged),
+   * so refetch branches only (S3-005).
+   */
+  const handleBranchDelete = useCallback(async (name: string, force: boolean) => {
+    setBranchBusy(true);
+    setBranchActionError(null);
+    try {
+      const response = await fetch(`/api/worktrees/${worktreeId}/git/branch/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, force }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setBranchActionError(data.error || 'Failed to delete branch');
+        return;
+      }
+      await fetchBranches(branchInclude);
+    } catch {
+      setBranchActionError('Failed to delete branch');
+    } finally {
+      setBranchBusy(false);
+    }
+  }, [worktreeId, branchInclude, fetchBranches]);
+
   // ========================================================================
   // Render
   // ========================================================================
@@ -820,6 +1365,23 @@ export const GitPane = memo(function GitPane({
         statusError={statusError}
         isMobile={isMobile}
         onRefresh={handleStatusRefresh}
+      />
+
+      {/* Branches (Issue #781) - between Current Status and Changes */}
+      <BranchesSection
+        branches={branches}
+        include={branchInclude}
+        loading={branchesLoading}
+        error={branchesError}
+        busy={branchBusy}
+        actionError={branchActionError}
+        hasRunningSession={hasRunningSession}
+        isMobile={isMobile}
+        onIncludeChange={handleBranchIncludeChange}
+        onRefresh={handleBranchesRefresh}
+        onCheckout={handleCheckout}
+        onCreate={handleBranchCreate}
+        onDelete={handleBranchDelete}
       />
 
       {/* Changes (Issue #780) - below Current Status, above Commit History */}

@@ -55,6 +55,91 @@ export interface GitStagedResponse {
   untracked: ChangedFile[];
 }
 
+// =============================================================================
+// Issue #781: branch list / checkout / create / delete (Phase 3/5)
+// =============================================================================
+
+/**
+ * Information about a single git branch (Issue #781).
+ *
+ * Net-new type (no existing consumers) — additive to src/types/git.ts. Built by
+ * the read-path `listBranches()` from `git branch [-r]`, plus best-effort extra
+ * reads (`git symbolic-ref refs/remotes/origin/HEAD` for the default branch,
+ * `git worktree list --porcelain` for checkedOutWorktreePath, `git branch -vv`
+ * for upstream / aheadBehind). When an extra read fails, the corresponding field
+ * degrades to its "unknown" value (isDefault=false / checkedOutWorktreePath=null
+ * / upstream=null / aheadBehind=null) rather than failing the whole list.
+ */
+export interface BranchInfo {
+  /** Local branches are e.g. "feature/781-worktree"; remote refs include the remote, e.g. "origin/main". */
+  name: string;
+  /** The branch currently checked out in this worktree (cannot checkout / delete it). */
+  isCurrent: boolean;
+  /** A remote-tracking ref (checking it out creates a new local tracking branch). */
+  isRemote: boolean;
+  /** The default branch (delete disabled). Sourced from origin/HEAD; false when unresolved. */
+  isDefault: boolean;
+  /** Upstream tracking ref (e.g. "origin/feature/x"), or null when none. */
+  upstream: string | null;
+  /** ahead/behind vs upstream (null when no upstream / detached). Display is best-effort. */
+  aheadBehind: { ahead: number; behind: number } | null;
+  /** Absolute path of another worktree that has this branch checked out, or null. */
+  checkedOutWorktreePath: string | null;
+}
+
+/**
+ * `include` filter for the branches API / listBranches (Issue #781).
+ * - `local`  -> `git branch`     (default)
+ * - `remote` -> `git branch -r`  (cached remote-tracking refs only; NO network)
+ * - `all`    -> local + remote
+ */
+export type BranchInclude = 'local' | 'remote' | 'all';
+
+/**
+ * Response type for GET /api/worktrees/[id]/git/branches (Issue #781).
+ */
+export interface BranchListResponse {
+  branches: BranchInfo[];
+}
+
+/**
+ * Success response for POST /api/worktrees/[id]/git/checkout (Issue #781).
+ */
+export interface CheckoutResponse {
+  success: true;
+  currentBranch: string;
+  isDirty: boolean;
+}
+
+/**
+ * Success response for POST /api/worktrees/[id]/git/branch/create (Issue #781).
+ */
+export interface BranchCreateResponse {
+  success: true;
+  branch: BranchInfo;
+}
+
+/**
+ * Success response for POST /api/worktrees/[id]/git/branch/delete (Issue #781).
+ */
+export interface BranchDeleteResponse {
+  success: true;
+  deleted: string;
+}
+
+/**
+ * Machine-readable failure reasons for branch operations (Issue #781). Surfaced
+ * in the route error body as `{ error, reason }` so the UI can branch / toast.
+ */
+export type GitBranchErrorReason =
+  | 'invalid_branch_name'
+  | 'branch_not_found'
+  | 'not_merged'
+  | 'current_branch'
+  | 'default_branch'
+  | 'checked_out_elsewhere'
+  | 'dirty';
+
 /**
  * Response type for git log API
  */
