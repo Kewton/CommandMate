@@ -28,6 +28,7 @@ import { GitPane } from '@/components/worktree/GitPane';
 import type { Worktree, ChatMessage } from '@/types/models';
 import { type CLIToolType } from '@/lib/cli-tools/types';
 import type { UseFileSearchReturn } from '@/hooks/useFileSearch';
+import type { ShowToast } from '@/types/markdown-editor';
 import type { HistoryDisplayLimit } from '@/config/history-display-config';
 import {
   WorktreeInfoFields,
@@ -127,8 +128,9 @@ interface MobileContentProps {
   refreshTrigger: number;
   /** [Issue #21] File search hook return object */
   fileSearch: UseFileSearchReturn;
-  /** [Issue #211] Toast notification callback for copy feedback */
-  showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
+  /** [Issue #211] Toast notification callback for copy feedback.
+   *  Issue #786 (D-5): widened to the shared `ShowToast` alias for type parity. */
+  showToast?: ShowToast;
   /** [Issue #294] CMATE setup callback */
   onCmateSetup?: () => void;
   /** [Issue #368] Selected agents for Agent tab */

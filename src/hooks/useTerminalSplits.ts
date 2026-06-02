@@ -30,7 +30,18 @@ export interface UseTerminalSplitsReturn {
   widths: number[];
   addSplit: () => void;
   removeSplit: () => void;
-  setSplitCliTool: (idx: number, cliId: CLIToolType) => void;
+  /**
+   * Assign `cliId` to split `idx`.
+   *
+   * Issue #786 (D-1 / S3-005): returns `true` only when the change is actually
+   * applied — `false` for an out-of-range index, a CLI already used by another
+   * split (S1-002 collision), or assigning the split its current CLI (no-op).
+   * This is the single source of truth the drop handler uses to decide whether
+   * to fire the success toast + activeCliTab sync, avoiding a double-judgment
+   * desync with this hook's silent no-op guard. Existing callers may ignore the
+   * return value (backward compatible).
+   */
+  setSplitCliTool: (idx: number, cliId: CLIToolType) => boolean;
   setSplitWidth: (widths: number[]) => void;
   /** Returns CLI tools allowed for `idx` (excludes tools used by other splits). */
   availableCliTools: (idx: number) => CLIToolType[];
@@ -108,6 +119,13 @@ export function useTerminalSplits(worktreeId: string): UseTerminalSplitsReturn {
   const [config, setConfig] = useState<TerminalSplitConfig>(() => readInitialState(worktreeId));
   const [focusedSplitIndex, setFocusedSplitIndexRaw] = useState(0);
 
+  // Issue #786: mirror the latest config in a ref so `setSplitCliTool` can decide
+  // synchronously whether the change will apply (and return that boolean) without
+  // depending on `config` in its useCallback deps (which would re-create the
+  // memoized cliChangeHandlers/dropHandlers on every config change).
+  const configRef = useRef(config);
+  configRef.current = config;
+
   // Re-read when worktreeId changes (worktree switching).
   const prevWorktreeIdRef = useRef(worktreeId);
   useEffect(() => {
@@ -169,16 +187,29 @@ export function useTerminalSplits(worktreeId: string): UseTerminalSplitsReturn {
     });
   }, [config.splits.length]);
 
-  const setSplitCliTool = useCallback((idx: number, cliId: CLIToolType) => {
+  const setSplitCliTool = useCallback((idx: number, cliId: CLIToolType): boolean => {
+    // Issue #786 (D-1): decide synchronously against the latest config so we can
+    // return whether the change applies. This mirrors the guards in the setConfig
+    // updater below exactly, keeping the two in lock-step (single source of truth).
+    const current = configRef.current;
+    if (idx < 0 || idx >= current.splits.length) return false;
+    // No-op: assigning the split its own current CLI changes nothing (S1-008).
+    if (current.splits[idx].cliToolId === cliId) return false;
+    // Same-CLI-across-splits is forbidden (S1-002).
+    for (let i = 0; i < current.splits.length; i++) {
+      if (i !== idx && current.splits[i].cliToolId === cliId) return false;
+    }
     setConfig(prev => {
+      // Re-validate inside the updater in case prev differs from the ref snapshot.
       if (idx < 0 || idx >= prev.splits.length) return prev;
-      // Same-CLI-across-splits is forbidden (S1-002).
+      if (prev.splits[idx].cliToolId === cliId) return prev;
       for (let i = 0; i < prev.splits.length; i++) {
         if (i !== idx && prev.splits[i].cliToolId === cliId) return prev;
       }
       const splits = prev.splits.map((s, i) => (i === idx ? { cliToolId: cliId } : s));
       return { ...prev, splits };
     });
+    return true;
   }, []);
 
   const setSplitWidth = useCallback((newWidths: number[]) => {

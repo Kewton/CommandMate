@@ -118,6 +118,17 @@ export interface EditorProps {
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
 /**
+ * Shared `showToast` callback signature (Issue #786, D-5).
+ *
+ * Single source of truth for every `showToast` prop so the `'warning'` literal
+ * (required by the drag-drop "X is already in use by split N" toast) is never
+ * dropped from one call site while present in another (fix-one-leave-one drift).
+ * Use this alias instead of inline `(message: string, type?: 'success' | ...)`
+ * unions.
+ */
+export type ShowToast = (message: string, type?: ToastType) => void;
+
+/**
  * Toast notification item
  */
 export interface ToastItem {

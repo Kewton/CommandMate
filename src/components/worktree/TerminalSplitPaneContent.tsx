@@ -73,6 +73,15 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
   autoYes: SplitAutoYesProps;
   /** History domain group (Issue #756). Optional; pre-#744 callers omit it. */
   history?: HistoryPaneProps;
+  /**
+   * Issue #786: drag-drop. Threaded straight through to `TerminalSplitPane`.
+   * Optional (backward compat / D-4) — drag-drop is inert when omitted. The
+   * hover ring state stays inside `TerminalSplitPane` (child-local) so this
+   * pass-through does not introduce a new re-render source here (D-3).
+   */
+  onDropCliTool?: (cliId: CLIToolType) => void;
+  /** Issue #786 (D-2): published cliId being dragged, for the dragOver ring. */
+  draggedCliTool?: CLIToolType | null;
 }
 
 export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
@@ -89,6 +98,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   cliStatus = 'idle',
   autoYes,
   history,
+  onDropCliTool,
+  draggedCliTool,
 }: TerminalSplitPaneContentProps) {
   // Issue #756: re-derive the legacy local names from the new domain groups so
   // the entire component body below stays byte-for-byte unchanged (all
@@ -448,6 +459,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       headerExtras={statusIndicator}
       terminal={terminalSlot}
       footer={footerSlot}
+      // Issue #786: drag-drop pass-through (optional; inert when omitted).
+      onDropCliTool={onDropCliTool}
+      draggedCliTool={draggedCliTool}
     />
   );
 });
