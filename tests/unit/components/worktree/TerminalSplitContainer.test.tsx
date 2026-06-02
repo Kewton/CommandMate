@@ -106,3 +106,129 @@ describe('TerminalSplitContainer', () => {
     expect(cb).toHaveBeenCalledWith(0);
   });
 });
+
+// ===========================================================================
+// Issue #786: drag-drop validation owner. The container holds the `splits`
+// array, so it classifies a drop as no-op / reject / apply and owns the toast
+// messaging + activeCliTab sync. Each pane receives `onDropCliTool` via the
+// renderPane args.
+// ===========================================================================
+describe('TerminalSplitContainer drop validation (Issue #786)', () => {
+  beforeEach(() => {
+    clearTerminalSplitsLocalStorage();
+  });
+  afterEach(() => {
+    clearTerminalSplitsLocalStorage();
+  });
+
+  /**
+   * Render a container whose panes expose a button that invokes the
+   * `onDropCliTool` arg with a fixed cliId, so tests can simulate a drop on a
+   * given splitIndex without a full DragEvent.
+   */
+  function setupDrop(opts: {
+    showToast?: (message: string, type?: string) => void;
+    onActiveCliTabChange?: (cliId: string) => void;
+  }) {
+    const renderPane = vi.fn(({ splitIndex, cliToolId, onDropCliTool }) => (
+      <div data-split-index={splitIndex} data-cli-tool={cliToolId}>
+        <span data-testid={`pane-cli-${splitIndex}`}>{cliToolId}</span>
+        <button
+          type="button"
+          data-testid={`drop-claude-${splitIndex}`}
+          onClick={() => onDropCliTool?.('claude')}
+        >
+          drop claude
+        </button>
+        <button
+          type="button"
+          data-testid={`drop-gemini-${splitIndex}`}
+          onClick={() => onDropCliTool?.('gemini')}
+        >
+          drop gemini
+        </button>
+      </div>
+    ));
+    const utils = render(
+      <TerminalSplitContainer
+        worktreeId="w-1"
+        renderPane={renderPane}
+        showToast={opts.showToast}
+        onActiveCliTabChange={opts.onActiveCliTabChange}
+      />,
+    );
+    return { renderPane, ...utils };
+  }
+
+  it('accept: drops an unused CLI onto a split → switches CLI + activeCliTab sync + success toast', () => {
+    const showToast = vi.fn();
+    const onActiveCliTabChange = vi.fn();
+    setupDrop({ showToast, onActiveCliTabChange });
+
+    // Single split starts as 'claude'; drop 'gemini' (unused) onto split 0.
+    fireEvent.click(screen.getByTestId('drop-gemini-0'));
+
+    expect(screen.getByTestId('pane-cli-0')).toHaveTextContent('gemini');
+    expect(onActiveCliTabChange).toHaveBeenCalledTimes(1);
+    expect(onActiveCliTabChange).toHaveBeenCalledWith('gemini');
+    expect(showToast).toHaveBeenCalledTimes(1);
+    expect(showToast.mock.calls[0][1]).toBe('success');
+  });
+
+  it('reject: dropping a CLI already used by another split → warning toast naming split N, no change', () => {
+    const showToast = vi.fn();
+    const onActiveCliTabChange = vi.fn();
+    setupDrop({ showToast, onActiveCliTabChange });
+
+    // Grow to 2 splits: split 0 = claude, split 1 = (auto-picked, e.g. codex).
+    fireEvent.click(screen.getByTestId('add-terminal-split'));
+    showToast.mockClear();
+    onActiveCliTabChange.mockClear();
+
+    // Drop 'claude' (used by split 0, which is "split 1" in 1-based label) onto split 1.
+    fireEvent.click(screen.getByTestId('drop-claude-1'));
+
+    // Split 1 unchanged.
+    expect(screen.getByTestId('pane-cli-1')).not.toHaveTextContent('claude');
+    expect(onActiveCliTabChange).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledTimes(1);
+    const [message, type] = showToast.mock.calls[0];
+    expect(type).toBe('warning');
+    expect(message).toMatch(/already in use by split 1/i);
+    expect(message).toMatch(/Claude/);
+  });
+
+  it('no-op: dropping the split its OWN current CLI → no toast, no activeCliTab sync', () => {
+    const showToast = vi.fn();
+    const onActiveCliTabChange = vi.fn();
+    setupDrop({ showToast, onActiveCliTabChange });
+
+    // Split 0 is 'claude'; drop 'claude' onto it.
+    fireEvent.click(screen.getByTestId('drop-claude-0'));
+
+    expect(showToast).not.toHaveBeenCalled();
+    expect(onActiveCliTabChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId('pane-cli-0')).toHaveTextContent('claude');
+  });
+
+  it('does not throw when showToast / onActiveCliTabChange are omitted', () => {
+    const renderPane = vi.fn(({ splitIndex, cliToolId, onDropCliTool }) => (
+      <div data-split-index={splitIndex}>
+        <span data-testid={`pane-cli-${splitIndex}`}>{cliToolId}</span>
+        <button
+          type="button"
+          data-testid={`drop-gemini-${splitIndex}`}
+          onClick={() => onDropCliTool?.('gemini')}
+        >
+          drop
+        </button>
+      </div>
+    ));
+    render(<TerminalSplitContainer worktreeId="w-1" renderPane={renderPane} />);
+    expect(() =>
+      fireEvent.click(screen.getByTestId('drop-gemini-0')),
+    ).not.toThrow();
+    // Change still applies (toast is optional).
+    expect(screen.getByTestId('pane-cli-0')).toHaveTextContent('gemini');
+  });
+});

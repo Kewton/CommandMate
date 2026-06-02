@@ -26,7 +26,8 @@ import React, {
   useState,
   type ReactNode,
 } from 'react';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
+import type { ShowToast } from '@/types/markdown-editor';
 import { MAX_SPLITS, MIN_SPLITS } from '@/config/terminal-split-config';
 import { useTerminalSplits } from '@/hooks/useTerminalSplits';
 import { PaneResizer } from './PaneResizer';
@@ -40,6 +41,12 @@ export interface RenderTerminalSplitPaneArgs {
   onCliToolChange: (cliId: CLIToolType) => void;
   onFocus: () => void;
   isFocused: boolean;
+  /**
+   * Issue #786: handle a CLI tool dropped onto this split. The container owns
+   * the no-op / reject / apply classification (it holds the `splits` array), so
+   * the pane just forwards the dropped cliId here. Stable per-index reference.
+   */
+  onDropCliTool: (cliId: CLIToolType) => void;
 }
 
 export interface TerminalSplitContainerProps {
@@ -51,12 +58,25 @@ export interface TerminalSplitContainerProps {
    * parent to route HistoryPane / MemoPane insertion targets.
    */
   onFocusedSplitChange?: (idx: number) => void;
+  /**
+   * Issue #786 (S1-004 / D-5): toast callback for drag-drop feedback. Optional
+   * for backward compat — when omitted, drop still applies but no toast shows.
+   */
+  showToast?: ShowToast;
+  /**
+   * Issue #786 (S1-005): called with the new cliId after a successful drop so
+   * the parent can sync the (worktree-global) activeCliTab to the drop target
+   * split's new CLI. Fires only when the change is actually applied.
+   */
+  onActiveCliTabChange?: (cliId: CLIToolType) => void;
 }
 
 export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   worktreeId,
   renderPane,
   onFocusedSplitChange,
+  showToast,
+  onActiveCliTabChange,
 }: TerminalSplitContainerProps) {
   const {
     splits,
@@ -143,6 +163,50 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     [splits, setSplitCliTool],
   );
 
+  /**
+   * Issue #786: per-split drop handlers (drop validation owner / D-1).
+   *
+   * The container holds the `splits` array, so it is the single place that can
+   * classify a drop and resolve a colliding split's index N:
+   *   - no-op   (split already shows this cliId)        → nothing, no toast
+   *   - reject  (another split already uses this cliId) → warning toast "X is
+   *             already in use by split N" (1-based N), no change
+   *   - apply   (cliId unused)                          → setSplitCliTool; only
+   *             when it returns true do we fire the success toast +
+   *             onActiveCliTabChange (single source of truth / S3-005)
+   *
+   * Stable per-index references (useMemo) so passing them through renderPane
+   * does not destabilize the parent's memoized panes (D-3).
+   */
+  const dropHandlers = useMemo(
+    () =>
+      splits.map((_, idx) => (cliId: CLIToolType) => {
+        // no-op: the drop target split already shows this CLI.
+        if (splits[idx]?.cliToolId === cliId) return;
+        // reject: another split already uses this CLI (S1-002).
+        const collidingIdx = splits.findIndex(
+          (s, i) => i !== idx && s.cliToolId === cliId,
+        );
+        if (collidingIdx !== -1) {
+          showToast?.(
+            `${getCliToolDisplayName(cliId)} is already in use by split ${collidingIdx + 1}`,
+            'warning',
+          );
+          return;
+        }
+        // apply: setSplitCliTool returns whether the change was actually applied.
+        const applied = setSplitCliTool(idx, cliId);
+        if (applied) {
+          onActiveCliTabChange?.(cliId);
+          showToast?.(
+            `Moved ${getCliToolDisplayName(cliId)} to Split ${idx + 1}`,
+            'success',
+          );
+        }
+      }),
+    [splits, setSplitCliTool, showToast, onActiveCliTabChange],
+  );
+
   return (
     <div
       role="group"
@@ -201,6 +265,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
                   onCliToolChange: cliChangeHandlers[idx],
                   onFocus: focusHandlers[idx],
                   isFocused: focusedSplitIndex === idx,
+                  onDropCliTool: dropHandlers[idx],
                 })}
               </div>
               {!isLast ? (
