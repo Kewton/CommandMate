@@ -23,12 +23,15 @@ import type {
 } from '@/types/git';
 import type { GitStatus, Worktree } from '@/types/models';
 import { useFilePolling } from '@/hooks/useFilePolling';
+import { useGitPaneNetworkOps } from '@/hooks/useGitPaneNetworkOps';
+import type { GitNetworkOperation } from '@/types/git';
 import {
   GIT_STATUS_POLL_INTERVAL_MS,
   CHECKOUT_HISTORY_LOSS_WARNING,
   CHECKOUT_RUNNING_SESSION_WARNING,
   RESET_HARD_HISTORY_LOSS_WARNING,
   DANGER_ZONE_RUNNING_SESSION_WARNING,
+  PUSH_PROTECTED_BRANCH_WARNING,
 } from '@/config/git-status-config';
 
 // ============================================================================
@@ -237,6 +240,165 @@ const CurrentStatusSection = memo(function CurrentStatusSection({
             </div>
           )}
         </>
+      )}
+    </div>
+  );
+});
+
+// ============================================================================
+// Network operations section (Issue #783): explicit Pull / Push / Fetch
+// ============================================================================
+
+interface NetworkOperationsSectionProps {
+  /** 3-value progress state from useGitPaneNetworkOps. */
+  progressState: 'idle' | 'running' | 'error';
+  /** The in-flight operation tag (for the spinner label), or null. */
+  operation: GitNetworkOperation | null;
+  /** Friendly error message (mapped by reason), or null. */
+  error: string | null;
+  /** Pull conflict flag (HTTP 200 quasi-error, DR1-010). */
+  conflict: boolean;
+  /** Files in conflict after a pull. */
+  conflictFiles: string[];
+  /** True when the current status has no upstream (chip absent). */
+  hasUpstream: boolean;
+  isMobile: boolean;
+  onFetch: () => void;
+  onPull: () => void;
+  onPush: () => void;
+  onAbort: () => void;
+}
+
+/**
+ * NetworkOperationsSection (Issue #783, §7.2). Renders the MVP's only required
+ * entry point: explicit Pull / Push / Fetch buttons. The Push button works even
+ * when upstream is unset (the GitPane body passes setUpstream when there is no
+ * upstream). DR1-005: the ahead/behind chip stays visual-only (no click
+ * dropdown — deferred).
+ *
+ * Progress UI (§7.4): while running, a spinner (role=status) + an abort button
+ * are shown. DR3-005: the OPTIONAL elapsed-seconds tick lives in THIS section's
+ * own useState — never in the GitPane body — so a 60s push re-renders only this
+ * section once per second, not the 5 memo sections.
+ *
+ * DR3-007: on mobile the progress bar is rendered sticky (z-40, BELOW the z-50
+ * confirm modals) inside the GitPane scroll container so the modals still stack
+ * above it.
+ */
+const NetworkOperationsSection = memo(function NetworkOperationsSection({
+  progressState,
+  operation,
+  error,
+  conflict,
+  conflictFiles,
+  hasUpstream,
+  isMobile,
+  onFetch,
+  onPull,
+  onPush,
+  onAbort,
+}: NetworkOperationsSectionProps) {
+  const running = progressState === 'running';
+
+  // DR3-005: elapsed-seconds tick isolated to this section. A plain spinner is
+  // sufficient, but the elapsed seconds reassure the user during a long op. The
+  // tick state lives here so it does not re-render the GitPane body or the 5
+  // memo sections every second.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!running) {
+      setElapsed(0);
+      return;
+    }
+    const id = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [running]);
+
+  return (
+    <div
+      className="flex flex-col gap-1.5 px-3 py-2 border-b border-gray-200 dark:border-gray-700"
+      data-testid="git-network-section"
+    >
+      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+        Remote
+      </span>
+
+      <div className={`flex items-center ${isMobile ? 'flex-wrap gap-1.5' : 'gap-2'}`}>
+        <button
+          type="button"
+          onClick={onFetch}
+          disabled={running}
+          className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+          data-testid="git-fetch-button"
+        >
+          Fetch
+        </button>
+        <button
+          type="button"
+          onClick={onPull}
+          disabled={running}
+          className="px-2 py-1 text-xs rounded border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 disabled:opacity-50"
+          data-testid="git-pull-button"
+        >
+          Pull
+        </button>
+        <button
+          type="button"
+          onClick={onPush}
+          disabled={running}
+          className="px-2 py-1 text-xs rounded border border-green-300 dark:border-green-700 text-green-700 dark:text-green-300 hover:bg-green-50 dark:hover:bg-green-900/30 disabled:opacity-50"
+          data-testid="git-push-button"
+          title={hasUpstream ? undefined : 'No upstream — will set upstream on push'}
+        >
+          Push
+        </button>
+      </div>
+
+      {/* Progress / abort bar (sticky on mobile, z-40 < confirm modals z-50) */}
+      {running && (
+        <div
+          className={`flex items-center gap-2 rounded px-2 py-1 text-xs bg-cyan-50 text-cyan-800 dark:bg-cyan-900/20 dark:text-cyan-300 ${
+            isMobile ? 'sticky top-0 z-40' : ''
+          }`}
+          data-testid="git-network-progress-bar"
+        >
+          <span className="flex items-center gap-2" role="status" data-testid="git-network-operation-spinner">
+            <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-500" aria-hidden="true" />
+            <span>
+              {operation === 'push' ? 'Pushing' : operation === 'pull' ? 'Pulling' : 'Fetching'}… {elapsed}s
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={onAbort}
+            className="ml-auto px-1.5 py-0.5 rounded border border-cyan-400 dark:border-cyan-600 hover:bg-cyan-100 dark:hover:bg-cyan-900/40"
+            data-testid="git-network-abort-button"
+          >
+            Abort
+          </button>
+        </div>
+      )}
+
+      {/* Error (role=alert) — pull conflict is surfaced as a quasi-error here */}
+      {progressState === 'error' && error && (
+        <div
+          className="text-xs text-red-600 dark:text-red-400"
+          role="alert"
+          data-testid="git-network-operation-error"
+        >
+          {error}
+        </div>
+      )}
+
+      {/* Pull conflict (HTTP 200 quasi-error, DR1-010): list files + terminal guidance */}
+      {conflict && (
+        <div
+          className="text-xs text-orange-600 dark:text-orange-400"
+          role="status"
+          data-testid="git-network-conflict"
+        >
+          Pull produced conflicts: {conflictFiles.join(', ')}. Resolve them in the terminal.
+        </div>
       )}
     </div>
   );
@@ -1137,6 +1299,13 @@ interface DangerZoneSectionProps {
   isMobile: boolean;
   onReset: (target: string, mode: GitResetMode, confirmBranch: string | undefined) => void;
   onRevert: (commitHash: string, noCommit: boolean) => void;
+  /**
+   * Issue #783: force-push the current branch. `--force-with-lease` is the
+   * default (forceWithLease=true); the lease check is a second safety net. The
+   * server refuses a force push to the default branch with 409 protected_branch
+   * (PUSH_PROTECTED_BRANCH_WARNING). When omitted, the force-push UI is hidden.
+   */
+  onForcePush?: (forceWithLease: boolean) => void;
 }
 
 /**
@@ -1156,6 +1325,7 @@ const DangerZoneSection = memo(function DangerZoneSection({
   isMobile,
   onReset,
   onRevert,
+  onForcePush,
 }: DangerZoneSectionProps) {
   const [open, setOpen] = useState(false); // default closed
   const [resetMode, setResetMode] = useState<GitResetMode>('mixed');
@@ -1164,6 +1334,10 @@ const DangerZoneSection = memo(function DangerZoneSection({
   const [showResetModal, setShowResetModal] = useState(false);
   const [showRevertModal, setShowRevertModal] = useState(false);
   const [revertNoCommit, setRevertNoCommit] = useState(false);
+  // Issue #783: force-push. --force-with-lease is preferred (the lease check is
+  // a second safety net); the lease-less --force escape hatch is opt-in.
+  const [showForcePushModal, setShowForcePushModal] = useState(false);
+  const [forceWithLease, setForceWithLease] = useState(true);
 
   // Reset target: literal HEAD, or the selected commit (full hash).
   const resetTarget = resetUseHead ? 'HEAD' : selectedCommit;
@@ -1214,6 +1388,17 @@ const DangerZoneSection = memo(function DangerZoneSection({
             >
               Revert…
             </button>
+            {onForcePush && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setShowForcePushModal(true)}
+                className="px-2 py-1 text-xs rounded border border-red-400 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/30 disabled:opacity-50"
+                data-testid="git-force-push-open"
+              >
+                Force Push…
+              </button>
+            )}
           </div>
           {!selectedCommit && (
             <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -1389,6 +1574,61 @@ const DangerZoneSection = memo(function DangerZoneSection({
           </div>
         </div>
       )}
+
+      {/* Force push modal (Issue #783, §7.3) */}
+      {showForcePushModal && onForcePush && (
+        <div
+          className="px-3 py-3 border-t border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20"
+          data-testid="force-push-confirm"
+          role="dialog"
+        >
+          <p className="text-sm font-medium text-red-700 dark:text-red-300 mb-2">Force Push</p>
+          <p
+            className="mb-2 text-xs text-red-700 dark:text-red-300"
+            data-testid="force-push-protected-branch-warning"
+          >
+            {PUSH_PROTECTED_BRANCH_WARNING}
+          </p>
+          {hasRunningSession && (
+            <p
+              className="mb-2 text-xs text-red-700 dark:text-red-300"
+              data-testid="force-push-session-warning"
+            >
+              {DANGER_ZONE_RUNNING_SESSION_WARNING}
+            </p>
+          )}
+          <label className="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 mb-2">
+            <input
+              type="checkbox"
+              checked={forceWithLease}
+              onChange={(e) => setForceWithLease(e.target.checked)}
+              data-testid="force-push-with-lease"
+            />
+            Use --force-with-lease (recommended — refuses if the remote moved)
+          </label>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                onForcePush(forceWithLease);
+                setShowForcePushModal(false);
+              }}
+              className="px-2 py-1 text-xs rounded bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
+              data-testid="force-push-confirm-button"
+            >
+              Force Push
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowForcePushModal(false)}
+              className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 });
@@ -1489,10 +1729,9 @@ export const GitPane = memo(function GitPane({
     fetchStatus();
   }, [fetchStatus]);
 
-  // Polling (5s, visibilitychange-aware). enabled=true is intentional (DR1-002):
-  // keep polling through loading/error so recovery is automatic; stop is handled
-  // by visibilitychange + unmount + worktreeId change.
-  useFilePolling({ intervalMs: GIT_STATUS_POLL_INTERVAL_MS, enabled: true, onPoll: fetchStatus });
+  // NOTE (Issue #783, DR3-006): the 5s status poll is registered LATER in this
+  // component (search "useFilePolling") so its `enabled` can be gated on the
+  // network-op progressState (paused while a push/pull is in-flight).
 
   /**
    * Fetch the working-tree changes (staged / unstaged / untracked). Issue #780.
@@ -2071,6 +2310,60 @@ export const GitPane = memo(function GitPane({
   );
 
   // ========================================================================
+  // Issue #783: network operations (fetch / pull / push)
+  // ========================================================================
+
+  /**
+   * Cascade re-fetch after a network op settles (§7.5). Scope is GitPane's own
+   * self-fetched data only; worktree.gitStatus (header/sidebar) is left to the
+   * next worktree poll (S3-010). fetch->status+branches; pull->+staged+commits;
+   * push->status+branches.
+   */
+  const handleNetworkCascade = useCallback(
+    (op: GitNetworkOperation) => {
+      fetchStatus();
+      fetchBranches(branchInclude);
+      if (op === 'pull') {
+        fetchStaged();
+        fetchCommits();
+      }
+    },
+    [fetchStatus, fetchBranches, branchInclude, fetchStaged, fetchCommits]
+  );
+
+  const {
+    operation: networkOperation,
+    progressState: networkProgressState,
+    error: networkError,
+    conflict: networkConflict,
+    conflictFiles: networkConflictFiles,
+    runFetch: runNetworkFetch,
+    runPull: runNetworkPull,
+    runPush: runNetworkPush,
+    abort: abortNetworkOp,
+  } = useGitPaneNetworkOps(worktreeId, { onCascade: handleNetworkCascade });
+
+  // DR3-004: a push/pull holds the per-worktree writeChain up to 60s; disable
+  // sibling section writes while in-flight by composing this lock into each
+  // section's existing busy. fetch is EXEMPT (not serialized).
+  const networkWriteLock =
+    networkProgressState === 'running' &&
+    (networkOperation === 'push' || networkOperation === 'pull');
+
+  // hasUpstream drives the Push button's setUpstream: getAheadBehind is null when
+  // no upstream is set, so the ahead/behind chip is absent and push must use -u.
+  const hasUpstream = gitStatus?.aheadBehind != null;
+
+  // DR3-006: the 5s status poll is paused while a network op is in-flight so it
+  // does not re-fetch (and flicker) stale ahead/behind; it resumes on settle,
+  // and the cascade refreshes the final state. (visibilitychange-aware; #779.)
+  useFilePolling({
+    intervalMs: GIT_STATUS_POLL_INTERVAL_MS,
+    enabled: networkProgressState !== 'running',
+    onPoll: fetchStatus,
+  });
+
+  // ========================================================================
   // Render
   // ========================================================================
 
@@ -2085,13 +2378,28 @@ export const GitPane = memo(function GitPane({
         onRefresh={handleStatusRefresh}
       />
 
+      {/* Remote network operations (Issue #783) - directly under Current Status */}
+      <NetworkOperationsSection
+        progressState={networkProgressState}
+        operation={networkOperation}
+        error={networkError}
+        conflict={networkConflict}
+        conflictFiles={networkConflictFiles}
+        hasUpstream={hasUpstream}
+        isMobile={isMobile}
+        onFetch={() => runNetworkFetch({})}
+        onPull={() => runNetworkPull({})}
+        onPush={() => runNetworkPush({ setUpstream: !hasUpstream })}
+        onAbort={abortNetworkOp}
+      />
+
       {/* Branches (Issue #781) - between Current Status and Changes */}
       <BranchesSection
         branches={branches}
         include={branchInclude}
         loading={branchesLoading}
         error={branchesError}
-        busy={branchBusy}
+        busy={branchBusy || networkWriteLock}
         actionError={branchActionError}
         hasRunningSession={hasRunningSession}
         isMobile={isMobile}
@@ -2107,7 +2415,7 @@ export const GitPane = memo(function GitPane({
         staged={staged}
         loading={stagedLoading}
         error={stagedError}
-        busy={opBusy}
+        busy={opBusy || networkWriteLock}
         commitMessage={commitMessage}
         amend={amend}
         committing={committing}
@@ -2127,7 +2435,7 @@ export const GitPane = memo(function GitPane({
         stashes={stashes}
         loading={stashLoading}
         error={stashError}
-        busy={stashBusy}
+        busy={stashBusy || networkWriteLock}
         actionError={stashActionError}
         conflictNotice={stashConflictNotice}
         hasRunningSession={hasRunningSession}
@@ -2328,7 +2636,7 @@ export const GitPane = memo(function GitPane({
       {/* Danger Zone (Issue #782) - bottom of the pane, below Commit History */}
       <DangerZoneSection
         selectedCommit={selectedCommit}
-        busy={dangerBusy}
+        busy={dangerBusy || networkWriteLock}
         actionError={dangerActionError}
         conflictNotice={dangerConflictNotice}
         currentBranch={gitStatus?.currentBranch ?? null}
@@ -2336,6 +2644,9 @@ export const GitPane = memo(function GitPane({
         isMobile={isMobile}
         onReset={handleReset}
         onRevert={handleRevert}
+        onForcePush={(forceWithLease) =>
+          runNetworkPush(forceWithLease ? { forceWithLease: true } : { force: true })
+        }
       />
     </div>
   );
