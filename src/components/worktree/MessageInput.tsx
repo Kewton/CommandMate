@@ -302,13 +302,22 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       return;
     }
 
-    // Show command selector when '/' is typed at the start
-    if (newValue === '/' || (newValue.startsWith('/') && !newValue.includes(' '))) {
+    // Show command selector when a trigger character is typed at the start.
+    // Issue #799: Codex skills are surfaced via the `$NAME` trigger (introduced
+    // in #790), so on the Codex tab the selector also opens on a leading '$'.
+    // Other CLI tools (Claude/Copilot/Gemini) treat '$' as a normal character
+    // to avoid false triggers.
+    const isSlashTrigger =
+      newValue === '/' || (newValue.startsWith('/') && !newValue.includes(' '));
+    const isDollarTrigger =
+      cliToolId === 'codex' &&
+      (newValue === '$' || (newValue.startsWith('$') && !newValue.includes(' ')));
+    if (isSlashTrigger || isDollarTrigger) {
       setShowCommandSelector(true);
     } else {
       setShowCommandSelector(false);
     }
-  }, [isFreeInputMode]);
+  }, [isFreeInputMode, cliToolId]);
 
   /**
    * Handle keyboard shortcuts
