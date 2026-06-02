@@ -231,9 +231,9 @@ describe('POST /api/worktrees/:id/memos', () => {
     expect(data.memo.position).toBe(2);
   });
 
-  it('should return 400 when memo limit (10) exceeded', async () => {
-    // Create 10 memos
-    for (let i = 0; i < 10; i++) {
+  it('should return 400 when memo limit (20) exceeded', async () => {
+    // Create 20 memos (the maximum allowed)
+    for (let i = 0; i < 20; i++) {
       createMemo(db, 'test-worktree', { title: `Memo ${i}`, position: i });
     }
 
@@ -242,7 +242,7 @@ describe('POST /api/worktrees/:id/memos', () => {
     const request = new Request('http://localhost:3000/api/worktrees/test-worktree/memos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: 'Memo 6' }),
+      body: JSON.stringify({ title: 'Memo 21' }),
     });
     const params = { params: { id: 'test-worktree' } };
     const response = await POST(request as unknown as import('next/server').NextRequest, params);

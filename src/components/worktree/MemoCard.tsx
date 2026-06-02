@@ -183,7 +183,11 @@ export const MemoCard = memo(function MemoCard({
   return (
     <div
       data-testid="memo-card"
-      className={`bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-3 ${className}`}
+      data-memo-id={memo.id}
+      // Issue #787: tabIndex makes the card a focus target for search next/prev
+      // scroll-to-match (focusable without entering the tab order).
+      tabIndex={-1}
+      className={`bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-3 focus:outline-none ${className}`}
     >
       {/* Header: Title and Delete button */}
       <div className="flex items-center gap-2">
