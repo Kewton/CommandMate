@@ -9,7 +9,7 @@
 
 import { NextResponse } from 'next/server';
 import { isPathSafe } from '@/lib/security/path-validator';
-import { MAX_GIT_FILES } from '@/config/git-status-config';
+import { MAX_GIT_FILES, MAX_STASH_INDEX } from '@/config/git-status-config';
 
 /**
  * Validate the `files` body field shared by the stage and unstage routes.
@@ -131,4 +131,50 @@ export function validateGitBranchName(name: unknown): string | NextResponse {
     return invalid();
   }
   return name;
+}
+
+// ============================================================================
+// Issue #782: stash index validation (pop / apply / drop routes)
+// ============================================================================
+
+/** A `stash@{N}` index must be a run of decimal digits only (no sign / decimal). */
+const STASH_INDEX_PATTERN = /^\d+$/;
+
+/**
+ * Validate the stash `index` shared by the pop / apply / drop routes (Issue
+ * #782). Accepts a non-negative integer (as a `number` from a JSON body, or a
+ * `string` from the `[index]` dynamic route segment), bounded by MAX_STASH_INDEX.
+ *
+ * The validated value is returned as a `number`, so the caller can embed it into
+ * `stash@{N}` with no possibility of argument injection (the value is purely
+ * numeric). Mirrors validateFilesBody (#780) / validateGitBranchName (#781):
+ * returns the value on success, or a 400 NextResponse
+ * (`{ error, reason: 'invalid_stash_index' }`) on failure.
+ *
+ * @param index - Raw `index` value (number from a body, or string from a segment)
+ * @returns The validated non-negative integer, or a 400 NextResponse
+ */
+export function validateStashIndex(index: unknown): number | NextResponse {
+  const invalid = (): NextResponse =>
+    NextResponse.json(
+      { error: 'Invalid stash index', reason: 'invalid_stash_index' },
+      { status: 400 }
+    );
+
+  let n: number;
+  if (typeof index === 'number') {
+    if (!Number.isInteger(index)) return invalid();
+    n = index;
+  } else if (typeof index === 'string') {
+    // Strict digits-only (rejects '', ' 1', '+1', '1.5', 'abc').
+    if (!STASH_INDEX_PATTERN.test(index)) return invalid();
+    n = parseInt(index, 10);
+  } else {
+    return invalid();
+  }
+
+  if (n < 0 || n > MAX_STASH_INDEX) {
+    return invalid();
+  }
+  return n;
 }

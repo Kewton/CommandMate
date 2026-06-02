@@ -140,6 +140,92 @@ export type GitBranchErrorReason =
   | 'checked_out_elsewhere'
   | 'dirty';
 
+// =============================================================================
+// Issue #782: stash + reset/revert (Phase 4/5 - Danger Zone)
+// =============================================================================
+
+/**
+ * Information about a single git stash entry (Issue #782).
+ *
+ * Net-new type (no existing consumers) — additive to src/types/git.ts, same
+ * approach as BranchInfo (L73). Built by the read-path `parseStashList()` from
+ * `git stash list --format='%gd%x09%s%x09%cI%x09%H'` (tab-separated, same policy
+ * as parseForEachRefTracking). Lines whose `%gd` does not match `stash@{N}` are
+ * skipped, so `index` is always a non-negative integer.
+ */
+export interface StashInfo {
+  /** The N in `stash@{N}` (non-negative integer). */
+  index: number;
+  /** The stash subject (`%s`), e.g. "WIP on main: 1234abc commit msg". */
+  message: string;
+  /** Branch parsed from "WIP on <branch>: ..." / "On <branch>: ...", or null. */
+  branch: string | null;
+  /** Committer date in ISO8601 (`%cI`). */
+  date: string;
+  /** The stash commit's full hash (`%H`). */
+  sha: string;
+}
+
+/**
+ * Response type for GET /api/worktrees/[id]/git/stash (Issue #782).
+ */
+export interface StashListResponse {
+  stashes: StashInfo[];
+}
+
+/**
+ * Reset mode for `git reset --<mode>` (Issue #782).
+ * - `soft`  -> move HEAD only (keep index + working tree)
+ * - `mixed` -> move HEAD + reset index (keep working tree) — git default
+ * - `hard`  -> move HEAD + reset index + working tree (DESTRUCTIVE)
+ */
+export type GitResetMode = 'soft' | 'mixed' | 'hard';
+
+/**
+ * Success response for POST /api/worktrees/[id]/git/reset (Issue #782).
+ * Reports the resulting branch / dirty state (best-effort, reset succeeded).
+ */
+export interface ResetResponse {
+  success: true;
+  currentBranch: string;
+  isDirty: boolean;
+}
+
+/**
+ * Success response for POST /api/worktrees/[id]/git/revert (Issue #782).
+ * A conflict that leaves the working tree modified is reported as a SUCCESS
+ * (HTTP 200) with `conflict: true` + the conflicted file paths, NOT a 409.
+ */
+export interface RevertResponse {
+  success: true;
+  conflict?: boolean;
+  conflictFiles?: string[];
+}
+
+/**
+ * Success response for the stash push/pop/apply/drop routes (Issue #782).
+ * `conflict`/`conflictFiles` only appear for pop/apply (and `stashRetained`
+ * specifically for a `pop` that conflicted — git keeps the stash entry).
+ */
+export interface StashMutationResponse {
+  success: true;
+  conflict?: boolean;
+  conflictFiles?: string[];
+  stashRetained?: boolean;
+}
+
+/**
+ * Machine-readable failure reasons for stash/reset/revert operations (Issue
+ * #782). Additive sibling to GitBranchErrorReason (L134); surfaced in route
+ * error bodies as `{ error, reason }`.
+ */
+export type GitDangerZoneErrorReason =
+  | 'nothing_to_stash'
+  | 'invalid_stash_index'
+  | 'invalid_target'
+  | 'confirmation_mismatch'
+  | 'default_branch';
+
 /**
  * Response type for git log API
  */

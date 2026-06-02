@@ -64,6 +64,17 @@ import {
   GitDirtyError,
   GitCurrentBranchError,
   GitDefaultBranchError,
+  // Issue #782: stash + reset/revert
+  parseStashList,
+  getStashList,
+  stashPush,
+  stashPop,
+  stashApply,
+  stashDrop,
+  gitReset,
+  gitRevert,
+  GitNothingToStashError,
+  GitResetDefaultBranchError,
 } from '@/lib/git/git-utils';
 
 describe('getCommitsByDateRange (Issue #627)', () => {
@@ -1223,5 +1234,409 @@ describe('handleGitApiError branch reasons (Issue #781)', () => {
     expect(result.status).toBe(409);
     expect(result.reason).toBe('checked_out_elsewhere');
     expect(result.worktreePath).toBe('/other/wt');
+  });
+});
+
+// ============================================================================
+// Issue #782: stash list parsing (pure function)
+// ============================================================================
+
+describe('parseStashList (Issue #782)', () => {
+  it('returns an empty array for empty input', () => {
+    expect(parseStashList('')).toEqual([]);
+    expect(parseStashList('   \n  ')).toEqual([]);
+  });
+
+  it('parses a WIP-on stash row (index / message / branch / date / sha)', () => {
+    const out = 'stash@{0}\tWIP on main: 1a2b3c4 fix thing\t2026-01-02T03:04:05+09:00\tdeadbeef0123456789abcdef0123456789abcdef';
+    const result = parseStashList(out);
+    expect(result).toEqual([
+      {
+        index: 0,
+        message: 'WIP on main: 1a2b3c4 fix thing',
+        branch: 'main',
+        date: '2026-01-02T03:04:05+09:00',
+        sha: 'deadbeef0123456789abcdef0123456789abcdef',
+      },
+    ]);
+  });
+
+  it('extracts the branch from an "On <branch>:" subject', () => {
+    const out = 'stash@{1}\tOn feature/x: manual stash\t2026-01-01T00:00:00Z\tabc123';
+    const result = parseStashList(out);
+    expect(result[0].branch).toBe('feature/x');
+    expect(result[0].index).toBe(1);
+  });
+
+  it('sets branch to null when the subject does not match WIP/On patterns', () => {
+    const out = 'stash@{2}\tcustom stash message\t2026-01-01T00:00:00Z\tabc123';
+    const result = parseStashList(out);
+    expect(result[0].branch).toBeNull();
+  });
+
+  it('skips lines whose %gd does not match stash@{N}', () => {
+    const out =
+      'notastash\tWIP on main: x\t2026-01-01T00:00:00Z\tabc\n' +
+      'stash@{0}\tWIP on main: y\t2026-01-01T00:00:00Z\tdef';
+    const result = parseStashList(out);
+    expect(result).toHaveLength(1);
+    expect(result[0].index).toBe(0);
+  });
+
+  it('parses multiple stash rows in order', () => {
+    const out =
+      'stash@{0}\tWIP on main: a\t2026-01-02T00:00:00Z\tsha0\n' +
+      'stash@{1}\tWIP on dev: b\t2026-01-01T00:00:00Z\tsha1';
+    const result = parseStashList(out);
+    expect(result.map((s) => s.index)).toEqual([0, 1]);
+    expect(result[1].branch).toBe('dev');
+  });
+});
+
+// ============================================================================
+// Issue #782: getStashList (read path, best-effort, non-throw)
+// ============================================================================
+
+describe('getStashList (Issue #782)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExistsSync.mockReturnValue(false);
+  });
+
+  it('runs git stash list with the tab-separated format and parses output', async () => {
+    const calls: string[][] = [];
+    mockExecFileAsync.mockImplementation(async (_file: string, args: string[]) => {
+      calls.push(args);
+      return { stdout: 'stash@{0}\tWIP on main: a\t2026-01-02T00:00:00Z\tsha0\n' };
+    });
+
+    const result = await getStashList('/repo');
+
+    expect(calls[0]).toEqual(['stash', 'list', "--format=%gd%x09%s%x09%cI%x09%H"]);
+    expect(result).toHaveLength(1);
+    expect(result[0].index).toBe(0);
+  });
+
+  it('degrades to [] (non-throw) when the read fails', async () => {
+    mockExecFileAsync.mockRejectedValue(new Error('boom'));
+    await expect(getStashList('/repo')).resolves.toEqual([]);
+  });
+});
+
+// ============================================================================
+// Issue #782: stash write operations
+// ============================================================================
+
+describe('stash write operations (Issue #782)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExistsSync.mockReturnValue(false);
+  });
+
+  it('stashPush runs git stash push -- (no options)', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '' });
+    await stashPush('/repo', {});
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['stash', 'push', '--'],
+      expect.objectContaining({ cwd: '/repo' })
+    );
+  });
+
+  it('stashPush adds --include-untracked and -m <message>', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '' });
+    await stashPush('/repo', { message: 'wip', includeUntracked: true });
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['stash', 'push', '--include-untracked', '-m', 'wip', '--'],
+      expect.objectContaining({ cwd: '/repo' })
+    );
+  });
+
+  it('stashPush normalizes "No local changes to save" into GitNothingToStashError', async () => {
+    mockExecFileAsync.mockRejectedValue(new Error('No local changes to save'));
+    await expect(stashPush('/repo', {})).rejects.toBeInstanceOf(GitNothingToStashError);
+  });
+
+  it('stashPop runs git stash pop -- stash@{N}', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '' });
+    const result = await stashPop('/repo', 2);
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['stash', 'pop', '--', 'stash@{2}'],
+      expect.objectContaining({ cwd: '/repo' })
+    );
+    expect(result).toEqual({ conflict: false });
+  });
+
+  it('stashApply runs git stash apply -- stash@{N}', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '' });
+    await stashApply('/repo', 0);
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['stash', 'apply', '--', 'stash@{0}'],
+      expect.objectContaining({ cwd: '/repo' })
+    );
+  });
+
+  it('stashDrop runs git stash drop -- stash@{N}', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '' });
+    await stashDrop('/repo', 3);
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['stash', 'drop', '--', 'stash@{3}'],
+      expect.objectContaining({ cwd: '/repo' })
+    );
+  });
+
+  it('stashPop recovers conflict via err.stdout (200 conflict, stash retained)', async () => {
+    const err = Object.assign(new Error('exit 1'), {
+      code: 1,
+      stdout: 'CONFLICT (content): Merge conflict in src/a.ts\nCONFLICT (content): Merge conflict in src/b.ts\n',
+    });
+    mockExecFileAsync.mockRejectedValue(err);
+    const result = await stashPop('/repo', 0);
+    expect(result.conflict).toBe(true);
+    expect(result.conflictFiles).toEqual(['src/a.ts', 'src/b.ts']);
+    expect(result.stashRetained).toBe(true);
+  });
+
+  it('stashApply recovers conflict via err.stdout (200 conflict)', async () => {
+    const err = Object.assign(new Error('exit 1'), {
+      code: 1,
+      stdout: 'CONFLICT (content): Merge conflict in src/a.ts\n',
+    });
+    mockExecFileAsync.mockRejectedValue(err);
+    const result = await stashApply('/repo', 0);
+    expect(result.conflict).toBe(true);
+    expect(result.conflictFiles).toEqual(['src/a.ts']);
+  });
+
+  it('stashPop re-throws GitTimeoutError on a killed process', async () => {
+    mockExecFileAsync.mockRejectedValue(Object.assign(new Error('killed'), { killed: true }));
+    await expect(stashPop('/repo', 0)).rejects.toBeInstanceOf(GitTimeoutError);
+  });
+
+  it('stashPop throws GitIndexLockedError when .git/index.lock exists', async () => {
+    mockExistsSync.mockReturnValue(true);
+    await expect(stashPop('/repo', 0)).rejects.toBeInstanceOf(GitIndexLockedError);
+    expect(mockExecFileAsync).not.toHaveBeenCalled();
+  });
+
+  it('stashDrop throws GitIndexLockedError when .git/index.lock exists', async () => {
+    mockExistsSync.mockReturnValue(true);
+    await expect(stashDrop('/repo', 0)).rejects.toBeInstanceOf(GitIndexLockedError);
+    expect(mockExecFileAsync).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// Issue #782: reset / revert write operations
+// ============================================================================
+
+describe('gitReset (Issue #782)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExistsSync.mockReturnValue(false);
+  });
+
+  it('runs git reset --soft <target> -- for a soft reset', async () => {
+    mockGitByArgs({ 'reset': '' });
+    await gitReset('/repo', { target: 'abc1234', mode: 'soft' });
+    const resetCall = mockExecFileAsync.mock.calls.find((c) => c[1][0] === 'reset');
+    expect(resetCall?.[1]).toEqual(['reset', '--soft', 'abc1234', '--']);
+  });
+
+  it('runs git reset --mixed HEAD -- for a mixed reset', async () => {
+    mockGitByArgs({ 'reset': '' });
+    await gitReset('/repo', { target: 'HEAD', mode: 'mixed' });
+    const resetCall = mockExecFileAsync.mock.calls.find((c) => c[1][0] === 'reset');
+    expect(resetCall?.[1]).toEqual(['reset', '--mixed', 'HEAD', '--']);
+  });
+
+  it('runs git reset --hard for a hard reset on a non-default branch', async () => {
+    mockGitByArgs({
+      'symbolic-ref': 'origin/main',
+      'abbrev-ref': 'feature/x',
+      'reset': '',
+    });
+    await gitReset('/repo', { target: 'HEAD', mode: 'hard' });
+    const resetCall = mockExecFileAsync.mock.calls.find((c) => c[1][0] === 'reset');
+    expect(resetCall?.[1]).toEqual(['reset', '--hard', 'HEAD', '--']);
+  });
+
+  it('rejects a hard reset on the default branch (origin/HEAD -> current)', async () => {
+    mockGitByArgs({
+      'symbolic-ref': 'origin/main',
+      'abbrev-ref': 'main',
+    });
+    await expect(
+      gitReset('/repo', { target: 'HEAD', mode: 'hard' })
+    ).rejects.toBeInstanceOf(GitResetDefaultBranchError);
+    // The reset must not run.
+    expect(mockExecFileAsync.mock.calls.find((c) => c[1][0] === 'reset')).toBeUndefined();
+  });
+
+  it('rejects a hard reset on main when origin/HEAD is unresolved (main/master fallback)', async () => {
+    mockGitByArgs({
+      'symbolic-ref': '',
+      'abbrev-ref': 'main',
+    });
+    // symbolic-ref returns null (unresolved); fallback protects main/master.
+    mockExecFileAsync.mockImplementation(async (_f: string, args: string[]) => {
+      const joined = args.join(' ');
+      if (joined.includes('symbolic-ref')) throw new Error('no origin/HEAD');
+      if (joined.includes('abbrev-ref')) return { stdout: 'main\n' };
+      return { stdout: '' };
+    });
+    await expect(
+      gitReset('/repo', { target: 'HEAD', mode: 'hard' })
+    ).rejects.toBeInstanceOf(GitResetDefaultBranchError);
+  });
+
+  it('does NOT block a soft/mixed reset on the default branch', async () => {
+    mockGitByArgs({
+      'symbolic-ref': 'origin/main',
+      'abbrev-ref': 'main',
+      'reset': '',
+    });
+    await expect(gitReset('/repo', { target: 'HEAD', mode: 'soft' })).resolves.toBeUndefined();
+  });
+
+  it('throws GitIndexLockedError when .git/index.lock exists', async () => {
+    mockExistsSync.mockReturnValue(true);
+    await expect(gitReset('/repo', { target: 'HEAD', mode: 'soft' })).rejects.toBeInstanceOf(
+      GitIndexLockedError
+    );
+  });
+});
+
+describe('gitRevert (Issue #782)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExistsSync.mockReturnValue(false);
+  });
+
+  it('runs git revert <hash> -- for a normal revert', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '' });
+    const result = await gitRevert('/repo', { commitHash: 'abc1234' });
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['revert', 'abc1234', '--'],
+      expect.objectContaining({ cwd: '/repo' })
+    );
+    expect(result).toEqual({ conflict: false });
+  });
+
+  it('adds --no-commit when noCommit is true', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '' });
+    await gitRevert('/repo', { commitHash: 'abc1234', noCommit: true });
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['revert', '--no-commit', 'abc1234', '--'],
+      expect.objectContaining({ cwd: '/repo' })
+    );
+  });
+
+  it('recovers conflict via err.stdout (200 conflict)', async () => {
+    const err = Object.assign(new Error('exit 1'), {
+      code: 1,
+      stdout: 'CONFLICT (content): Merge conflict in src/a.ts\n',
+    });
+    mockExecFileAsync.mockRejectedValue(err);
+    const result = await gitRevert('/repo', { commitHash: 'abc1234' });
+    expect(result.conflict).toBe(true);
+    expect(result.conflictFiles).toEqual(['src/a.ts']);
+  });
+
+  it('re-throws GitTimeoutError on a killed process', async () => {
+    mockExecFileAsync.mockRejectedValue(Object.assign(new Error('killed'), { killed: true }));
+    await expect(gitRevert('/repo', { commitHash: 'abc1234' })).rejects.toBeInstanceOf(
+      GitTimeoutError
+    );
+  });
+
+  it('throws GitIndexLockedError when .git/index.lock exists', async () => {
+    mockExistsSync.mockReturnValue(true);
+    await expect(gitRevert('/repo', { commitHash: 'abc1234' })).rejects.toBeInstanceOf(
+      GitIndexLockedError
+    );
+    expect(mockExecFileAsync).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// Issue #782: handleGitApiError new reasons + #780/#781 byte-invariant regression
+// ============================================================================
+
+describe('handleGitApiError danger-zone reasons (Issue #782)', () => {
+  async function bodyOf(error: Error) {
+    const res = handleGitApiError(error, 'test');
+    const body = (await res.json()) as { error?: string; reason?: string };
+    return { status: res.status, error: body.error, reason: body.reason };
+  }
+
+  it('maps GitNothingToStashError to 400 nothing_to_stash', async () => {
+    const result = await bodyOf(new GitNothingToStashError('x'));
+    expect(result.status).toBe(400);
+    expect(result.reason).toBe('nothing_to_stash');
+  });
+
+  it('maps GitResetDefaultBranchError to 409 default_branch (reset-specific message)', async () => {
+    const result = await bodyOf(new GitResetDefaultBranchError('x'));
+    expect(result.status).toBe(409);
+    expect(result.reason).toBe('default_branch');
+    // Must NOT reuse the delete-specific "Cannot delete the default branch" text.
+    expect(result.error).not.toBe('Cannot delete the default branch');
+  });
+
+  // S3-001: the #780/#781 reason bodies must be byte-identical after the additive
+  // expansion. These assertions lock the EXACT error string + reason + status.
+  it('keeps #780/#781 reason bodies byte-identical (regression)', async () => {
+    expect(await bodyOf(new GitIndexLockedError('x'))).toEqual({
+      status: 409,
+      error: 'Git index is locked by another operation',
+      reason: undefined,
+    });
+    expect(await bodyOf(new GitNothingToCommitError('x'))).toEqual({
+      status: 400,
+      error: 'Nothing to commit',
+      reason: undefined,
+    });
+    expect(await bodyOf(new GitBranchNotFoundError('x'))).toEqual({
+      status: 404,
+      error: 'Branch not found',
+      reason: 'branch_not_found',
+    });
+    expect(await bodyOf(new GitBranchNotMergedError('x'))).toEqual({
+      status: 409,
+      error: 'Branch is not fully merged',
+      reason: 'not_merged',
+    });
+    expect(await bodyOf(new GitCurrentBranchError('x'))).toEqual({
+      status: 409,
+      error: 'Cannot operate on the current branch',
+      reason: 'current_branch',
+    });
+    expect(await bodyOf(new GitDefaultBranchError('x'))).toEqual({
+      status: 409,
+      error: 'Cannot delete the default branch',
+      reason: 'default_branch',
+    });
+    expect(await bodyOf(new GitDirtyError('x'))).toEqual({
+      status: 409,
+      error: 'Working tree has uncommitted changes',
+      reason: 'dirty',
+    });
+    expect(await bodyOf(new GitTimeoutError('x'))).toEqual({
+      status: 504,
+      error: 'Git command timed out',
+      reason: undefined,
+    });
+    expect(await bodyOf(new GitNotRepoError('x'))).toEqual({
+      status: 400,
+      error: 'Not a git repository',
+      reason: undefined,
+    });
   });
 });

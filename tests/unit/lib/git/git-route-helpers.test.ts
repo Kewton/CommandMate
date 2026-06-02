@@ -8,8 +8,12 @@
 
 import { describe, it, expect } from 'vitest';
 import { NextResponse } from 'next/server';
-import { validateFilesBody, validateGitBranchName } from '@/lib/git/git-route-helpers';
-import { MAX_GIT_FILES } from '@/config/git-status-config';
+import {
+  validateFilesBody,
+  validateGitBranchName,
+  validateStashIndex,
+} from '@/lib/git/git-route-helpers';
+import { MAX_GIT_FILES, MAX_STASH_INDEX } from '@/config/git-status-config';
 // Imported only to assert the new validator behaves DIFFERENTLY than the CLI one
 // (S3-003 regression: the CLI pattern allows `-force` and rejects `release/1.2`).
 import { BRANCH_NAME_PATTERN } from '@/cli/utils/input-validators';
@@ -164,5 +168,67 @@ describe('validateGitBranchName (Issue #781)', () => {
     expect(BRANCH_NAME_PATTERN.test('-force')).toBe(true);
     const { reason } = await reasonOf(validateGitBranchName('-force'));
     expect(reason).toBe('invalid_branch_name');
+  });
+});
+
+describe('validateStashIndex (Issue #782)', () => {
+  async function reasonOf(
+    result: number | NextResponse
+  ): Promise<{ status: number; reason: string }> {
+    if (!(result instanceof NextResponse)) {
+      throw new Error('expected a NextResponse error result');
+    }
+    const body = (await result.json()) as { reason: string };
+    return { status: result.status, reason: body.reason };
+  }
+
+  it('accepts a non-negative integer number and returns it', () => {
+    expect(validateStashIndex(0)).toBe(0);
+    expect(validateStashIndex(5)).toBe(5);
+  });
+
+  it('accepts a numeric string and coerces to number', () => {
+    expect(validateStashIndex('0')).toBe(0);
+    expect(validateStashIndex('12')).toBe(12);
+  });
+
+  it('accepts the maximum index', () => {
+    expect(validateStashIndex(MAX_STASH_INDEX)).toBe(MAX_STASH_INDEX);
+  });
+
+  it('rejects an index above the maximum with 400 invalid_stash_index', async () => {
+    const { status, reason } = await reasonOf(validateStashIndex(MAX_STASH_INDEX + 1));
+    expect(status).toBe(400);
+    expect(reason).toBe('invalid_stash_index');
+  });
+
+  it('rejects a negative index', async () => {
+    const { reason } = await reasonOf(validateStashIndex(-1));
+    expect(reason).toBe('invalid_stash_index');
+  });
+
+  it('rejects a non-integer (decimal) string', async () => {
+    const { reason } = await reasonOf(validateStashIndex('1.5'));
+    expect(reason).toBe('invalid_stash_index');
+  });
+
+  it('rejects a non-numeric string', async () => {
+    const { reason } = await reasonOf(validateStashIndex('abc'));
+    expect(reason).toBe('invalid_stash_index');
+  });
+
+  it('rejects an empty string', async () => {
+    const { reason } = await reasonOf(validateStashIndex(''));
+    expect(reason).toBe('invalid_stash_index');
+  });
+
+  it('rejects undefined / null', async () => {
+    expect((await reasonOf(validateStashIndex(undefined))).reason).toBe('invalid_stash_index');
+    expect((await reasonOf(validateStashIndex(null))).reason).toBe('invalid_stash_index');
+  });
+
+  it('rejects a string with a leading sign / whitespace', async () => {
+    expect((await reasonOf(validateStashIndex('+1'))).reason).toBe('invalid_stash_index');
+    expect((await reasonOf(validateStashIndex(' 1'))).reason).toBe('invalid_stash_index');
   });
 });

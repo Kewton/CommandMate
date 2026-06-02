@@ -61,3 +61,37 @@ export const CHECKOUT_HISTORY_LOSS_WARNING =
  */
 export const CHECKOUT_RUNNING_SESSION_WARNING =
   'このブランチに切り替えると、稼働中のセッションの作業ファイルが変化します。';
+
+// =============================================================================
+// Issue #782: stash + reset/revert (Phase 4/5 - Danger Zone)
+// =============================================================================
+
+/**
+ * Maximum accepted `index` for the stash pop/apply/drop routes (Issue #782).
+ * The index is validated to be `/^\d+$/` and <= this bound before it is
+ * embedded into the `stash@{N}` argv (DoS / absurd-index defense). Mirrors the
+ * MAX_GIT_FILES (#780) / MAX_BRANCH_REF_LENGTH (#781) bounding pattern.
+ */
+export const MAX_STASH_INDEX = 1000;
+
+/**
+ * S3-001 history-loss warning shown in the GitPane Danger Zone Reset confirm
+ * dialog for `mode='hard'` (Issue #782). A hard reset discards uncommitted work
+ * AND can move HEAD off committed work.
+ *
+ * Single source of truth: imported by both GitPane.tsx and its unit test so the
+ * assertion verifies the rendered text byte-for-byte. Keep this string verbatim.
+ */
+export const RESET_HARD_HISTORY_LOSS_WARNING =
+  'ハードリセットは未コミットの変更を完全に破棄し、HEAD を移動するとコミットも失われる可能性があります。この操作は取り消せません。';
+
+/**
+ * S3-006 running-session warning shown on the Danger Zone Reset (especially
+ * hard) / Revert / Stash drop confirmations (Issue #782) when any
+ * `sessionStatusByCli[*].isRunning` is true. A live CLI session is operating on
+ * the working tree these operations rewrite.
+ *
+ * Single source of truth: imported by both GitPane.tsx and its unit test.
+ */
+export const DANGER_ZONE_RUNNING_SESSION_WARNING =
+  'この危険な操作は、稼働中のセッションが編集中の作業ファイルを破壊的に書き換えます。';

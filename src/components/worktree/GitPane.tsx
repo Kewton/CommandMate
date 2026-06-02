@@ -12,13 +12,23 @@
 'use client';
 
 import React, { useEffect, useState, useCallback, memo } from 'react';
-import type { CommitInfo, ChangedFile, GitStagedResponse, BranchInfo, BranchInclude } from '@/types/git';
+import type {
+  CommitInfo,
+  ChangedFile,
+  GitStagedResponse,
+  BranchInfo,
+  BranchInclude,
+  StashInfo,
+  GitResetMode,
+} from '@/types/git';
 import type { GitStatus, Worktree } from '@/types/models';
 import { useFilePolling } from '@/hooks/useFilePolling';
 import {
   GIT_STATUS_POLL_INTERVAL_MS,
   CHECKOUT_HISTORY_LOSS_WARNING,
   CHECKOUT_RUNNING_SESSION_WARNING,
+  RESET_HARD_HISTORY_LOSS_WARNING,
+  DANGER_ZONE_RUNNING_SESSION_WARNING,
 } from '@/config/git-status-config';
 
 // ============================================================================
@@ -887,6 +897,495 @@ const BranchesSection = memo(function BranchesSection({
   );
 });
 
+// ----------------------------------------------------------------------------
+// Stash section (Issue #782)
+// ----------------------------------------------------------------------------
+
+interface StashSectionProps {
+  stashes: StashInfo[];
+  loading: boolean;
+  error: string | null;
+  busy: boolean;
+  actionError: string | null;
+  hasRunningSession: boolean;
+  isMobile: boolean;
+  onRefresh: () => void;
+  onPush: (message: string, includeUntracked: boolean) => void;
+  onPop: (index: number) => void;
+  onApply: (index: number) => void;
+  onDrop: (index: number) => void;
+}
+
+/**
+ * Stash section (Issue #782). Lists stashes and exposes push / pop / apply /
+ * drop. Self-fetched on mount + after a mutation only (NO 5s poll, S3-004).
+ * Mobile-collapsed by default like the Changes / Branches sections.
+ */
+const StashSection = memo(function StashSection({
+  stashes,
+  loading,
+  error,
+  busy,
+  actionError,
+  hasRunningSession,
+  isMobile,
+  onRefresh,
+  onPush,
+  onPop,
+  onApply,
+  onDrop,
+}: StashSectionProps) {
+  const [open, setOpen] = useState(!isMobile);
+  const [pushMessage, setPushMessage] = useState('');
+  const [includeUntracked, setIncludeUntracked] = useState(false);
+  const [dropConfirm, setDropConfirm] = useState<number | null>(null);
+
+  return (
+    <div
+      className="border-b border-gray-200 dark:border-gray-700"
+      data-testid="git-stash-section"
+    >
+      <div className="flex items-center justify-between px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setOpen((prev) => !prev)}
+          className="flex items-center gap-1 text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer hover:text-gray-900 dark:hover:text-gray-100"
+        >
+          <span className="text-xs w-4 text-center">{open ? '▼' : '▶'}</span>
+          Stash {stashes.length > 0 && <span className="text-xs text-gray-400">({stashes.length})</span>}
+        </button>
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded"
+          aria-label="Refresh stash list"
+        >
+          <RefreshIcon />
+        </button>
+      </div>
+
+      {open && (
+        <div className="px-3 pb-3 space-y-2">
+          {error && (
+            <div className="text-xs text-red-600 dark:text-red-400" role="alert" data-testid="git-stash-error">
+              {error}
+            </div>
+          )}
+          {actionError && (
+            <div className="text-xs text-red-600 dark:text-red-400" role="alert" data-testid="git-stash-action-error">
+              {actionError}
+            </div>
+          )}
+
+          {/* Push form */}
+          <div className="flex flex-col gap-1.5">
+            <input
+              type="text"
+              value={pushMessage}
+              onChange={(e) => setPushMessage(e.target.value)}
+              placeholder="Stash message (optional)"
+              className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+              data-testid="git-stash-push-message"
+            />
+            <div className="flex items-center justify-between gap-2">
+              <label className="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={includeUntracked}
+                  onChange={(e) => setIncludeUntracked(e.target.checked)}
+                  data-testid="git-stash-include-untracked"
+                />
+                Include untracked
+              </label>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  onPush(pushMessage, includeUntracked);
+                  setPushMessage('');
+                  setIncludeUntracked(false);
+                }}
+                className="px-2 py-1 text-xs rounded bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-50"
+                data-testid="stash-push-button"
+              >
+                Stash
+              </button>
+            </div>
+          </div>
+
+          {/* Stash list */}
+          {loading ? (
+            <div className="py-3 text-center text-xs text-gray-500 dark:text-gray-400" role="status">
+              Loading stashes...
+            </div>
+          ) : stashes.length === 0 ? (
+            <div className="py-3 text-center text-xs text-gray-500 dark:text-gray-400">No stashes</div>
+          ) : (
+            <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+              {stashes.map((stash) => (
+                <li key={stash.index} className="py-1.5" data-testid="git-stash-row">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="font-mono text-xs text-cyan-600 dark:text-cyan-400">
+                        stash@{'{'}{stash.index}{'}'}
+                      </span>
+                      <span className="ml-2 text-xs text-gray-700 dark:text-gray-300 truncate">
+                        {stash.message}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onApply(stash.index)}
+                        className="px-1.5 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                        data-testid="stash-apply-button"
+                      >
+                        Apply
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onPop(stash.index)}
+                        className="px-1.5 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                        data-testid="stash-pop-button"
+                      >
+                        Pop
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => setDropConfirm(stash.index)}
+                        className="px-1.5 py-0.5 text-xs rounded border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-50"
+                        data-testid="stash-drop-button"
+                      >
+                        Drop
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* Drop confirm dialog */}
+      {dropConfirm !== null && (
+        <div
+          className="px-3 py-3 border-t border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20"
+          data-testid="git-stash-drop-confirm"
+          role="dialog"
+        >
+          <p className="text-xs text-red-700 dark:text-red-300">
+            stash@{'{'}{dropConfirm}{'}'} を完全に削除します。この操作は取り消せません。
+          </p>
+          {hasRunningSession && (
+            <p
+              className="mt-1 text-xs text-red-700 dark:text-red-300"
+              data-testid="git-stash-drop-session-warning"
+            >
+              {DANGER_ZONE_RUNNING_SESSION_WARNING}
+            </p>
+          )}
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                onDrop(dropConfirm);
+                setDropConfirm(null);
+              }}
+              className="px-2 py-1 text-xs rounded bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
+              data-testid="git-stash-drop-confirm-button"
+            >
+              Drop
+            </button>
+            <button
+              type="button"
+              onClick={() => setDropConfirm(null)}
+              className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+// ----------------------------------------------------------------------------
+// Danger Zone section (Issue #782)
+// ----------------------------------------------------------------------------
+
+interface DangerZoneSectionProps {
+  /** The currently selected commit (full %H) from the Commit History list. */
+  selectedCommit: string | null;
+  busy: boolean;
+  actionError: string | null;
+  conflictNotice: string | null;
+  currentBranch: string | null;
+  hasRunningSession: boolean;
+  isMobile: boolean;
+  onReset: (target: string, mode: GitResetMode, confirmBranch: string | undefined) => void;
+  onRevert: (commitHash: string, noCommit: boolean) => void;
+}
+
+/**
+ * Danger Zone section (Issue #782). Collapsed by default (red styling), at the
+ * very bottom of the pane. Hosts the Reset modal (target / mode radio / hard
+ * branch-confirm input + running-session + history-loss warnings) and the
+ * Revert modal (commit hash display + noCommit). target/commitHash are sourced
+ * from the Commit History selectedCommit (full %H), S3-003.
+ */
+const DangerZoneSection = memo(function DangerZoneSection({
+  selectedCommit,
+  busy,
+  actionError,
+  conflictNotice,
+  currentBranch,
+  hasRunningSession,
+  isMobile,
+  onReset,
+  onRevert,
+}: DangerZoneSectionProps) {
+  const [open, setOpen] = useState(false); // default closed
+  const [resetMode, setResetMode] = useState<GitResetMode>('mixed');
+  const [resetUseHead, setResetUseHead] = useState(true);
+  const [confirmBranch, setConfirmBranch] = useState('');
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [showRevertModal, setShowRevertModal] = useState(false);
+  const [revertNoCommit, setRevertNoCommit] = useState(false);
+
+  // Reset target: literal HEAD, or the selected commit (full hash).
+  const resetTarget = resetUseHead ? 'HEAD' : selectedCommit;
+  const resetTargetMissing = !resetUseHead && !selectedCommit;
+
+  return (
+    <div
+      className="border-t-2 border-red-300 dark:border-red-800"
+      data-testid="git-danger-zone-section"
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className="w-full flex items-center gap-1 px-3 py-2 text-sm font-medium text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20 cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/30"
+        data-testid="git-danger-zone-toggle"
+      >
+        <span className="text-xs w-4 text-center">{open ? '▼' : '▶'}</span>
+        Danger Zone
+      </button>
+
+      {open && (
+        <div className="px-3 py-3 space-y-2 bg-red-50/50 dark:bg-red-900/10">
+          {actionError && (
+            <div className="text-xs text-red-600 dark:text-red-400" role="alert" data-testid="git-danger-zone-error">
+              {actionError}
+            </div>
+          )}
+          {conflictNotice && (
+            <div className="text-xs text-orange-600 dark:text-orange-400" role="status" data-testid="git-danger-zone-conflict">
+              {conflictNotice}
+            </div>
+          )}
+          <div className={`flex ${isMobile ? 'flex-col' : 'flex-row'} gap-2`}>
+            <button
+              type="button"
+              onClick={() => setShowResetModal(true)}
+              className="px-2 py-1 text-xs rounded border border-red-400 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/30"
+              data-testid="git-danger-zone-reset-open"
+            >
+              Reset…
+            </button>
+            <button
+              type="button"
+              disabled={!selectedCommit}
+              onClick={() => setShowRevertModal(true)}
+              className="px-2 py-1 text-xs rounded border border-red-400 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/30 disabled:opacity-50"
+              data-testid="git-danger-zone-revert-open"
+            >
+              Revert…
+            </button>
+          </div>
+          {!selectedCommit && (
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Select a commit in Commit History to enable revert / reset-to-commit.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Reset modal */}
+      {showResetModal && (
+        <div
+          className="px-3 py-3 border-t border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20"
+          data-testid="reset-confirm"
+          role="dialog"
+        >
+          <p className="text-sm font-medium text-red-700 dark:text-red-300 mb-2">Reset</p>
+
+          {/* Target selection */}
+          <div className="flex flex-col gap-1 mb-2">
+            <label className="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300">
+              <input
+                type="radio"
+                name="reset-target"
+                checked={resetUseHead}
+                onChange={() => setResetUseHead(true)}
+                data-testid="reset-target-head"
+              />
+              HEAD
+            </label>
+            <label className="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300">
+              <input
+                type="radio"
+                name="reset-target"
+                checked={!resetUseHead}
+                disabled={!selectedCommit}
+                onChange={() => setResetUseHead(false)}
+                data-testid="reset-target-commit"
+              />
+              Selected commit {selectedCommit ? `(${selectedCommit.slice(0, 7)})` : '(none selected)'}
+            </label>
+          </div>
+
+          {/* Mode radio */}
+          <div className="flex flex-col gap-1 mb-2">
+            {(['soft', 'mixed', 'hard'] as GitResetMode[]).map((m) => (
+              <label key={m} className="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300">
+                <input
+                  type="radio"
+                  name="reset-mode"
+                  checked={resetMode === m}
+                  onChange={() => setResetMode(m)}
+                  data-testid={`reset-mode-${m}`}
+                />
+                {m}
+              </label>
+            ))}
+          </div>
+
+          {/* Hard-mode warnings + branch confirm */}
+          {resetMode === 'hard' && (
+            <div className="mb-2 space-y-1">
+              <p
+                className="text-xs text-red-700 dark:text-red-300"
+                data-testid="reset-hard-history-loss-warning"
+              >
+                {RESET_HARD_HISTORY_LOSS_WARNING}
+              </p>
+              {hasRunningSession && (
+                <p
+                  className="text-xs text-red-700 dark:text-red-300"
+                  data-testid="reset-hard-session-warning"
+                >
+                  {DANGER_ZONE_RUNNING_SESSION_WARNING}
+                </p>
+              )}
+              <input
+                type="text"
+                value={confirmBranch}
+                onChange={(e) => setConfirmBranch(e.target.value)}
+                placeholder={`Type "${currentBranch ?? ''}" to confirm`}
+                className="w-full px-2 py-1 text-xs border border-red-300 dark:border-red-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                data-testid="reset-hard-branch-input"
+              />
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={
+                busy ||
+                resetTargetMissing ||
+                (resetMode === 'hard' && confirmBranch !== (currentBranch ?? ''))
+              }
+              onClick={() => {
+                if (!resetTarget) return;
+                onReset(resetTarget, resetMode, resetMode === 'hard' ? confirmBranch : undefined);
+                setShowResetModal(false);
+                setConfirmBranch('');
+              }}
+              className="px-2 py-1 text-xs rounded bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
+              data-testid="reset-confirm-button"
+            >
+              Reset
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowResetModal(false);
+                setConfirmBranch('');
+              }}
+              className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Revert modal */}
+      {showRevertModal && selectedCommit && (
+        <div
+          className="px-3 py-3 border-t border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20"
+          data-testid="revert-confirm"
+          role="dialog"
+        >
+          <p className="text-sm font-medium text-red-700 dark:text-red-300 mb-2">Revert</p>
+          <p className="text-xs text-gray-700 dark:text-gray-300 mb-2">
+            Revert commit <span className="font-mono">{selectedCommit.slice(0, 7)}</span>
+          </p>
+          {hasRunningSession && (
+            <p
+              className="mb-2 text-xs text-red-700 dark:text-red-300"
+              data-testid="revert-session-warning"
+            >
+              {DANGER_ZONE_RUNNING_SESSION_WARNING}
+            </p>
+          )}
+          <label className="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 mb-2">
+            <input
+              type="checkbox"
+              checked={revertNoCommit}
+              onChange={(e) => setRevertNoCommit(e.target.checked)}
+              data-testid="revert-no-commit"
+            />
+            No commit (leave staged)
+          </label>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                onRevert(selectedCommit, revertNoCommit);
+                setShowRevertModal(false);
+                setRevertNoCommit(false);
+              }}
+              className="px-2 py-1 text-xs rounded bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
+              data-testid="revert-confirm-button"
+            >
+              Revert
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowRevertModal(false);
+                setRevertNoCommit(false);
+              }}
+              className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
 // ============================================================================
 // Main Component
 // ============================================================================
@@ -936,6 +1435,18 @@ export const GitPane = memo(function GitPane({
   const [branchesError, setBranchesError] = useState<string | null>(null);
   const [branchBusy, setBranchBusy] = useState(false);
   const [branchActionError, setBranchActionError] = useState<string | null>(null);
+
+  // Issue #782: Stash (list / push / pop / apply / drop)
+  const [stashes, setStashes] = useState<StashInfo[]>([]);
+  const [stashLoading, setStashLoading] = useState(true);
+  const [stashError, setStashError] = useState<string | null>(null);
+  const [stashBusy, setStashBusy] = useState(false);
+  const [stashActionError, setStashActionError] = useState<string | null>(null);
+
+  // Issue #782: Danger Zone (reset / revert)
+  const [dangerBusy, setDangerBusy] = useState(false);
+  const [dangerActionError, setDangerActionError] = useState<string | null>(null);
+  const [dangerConflictNotice, setDangerConflictNotice] = useState<string | null>(null);
 
   // S3-002: any running CLI session for this worktree makes the working-tree
   // checkout risky; the confirm dialog surfaces a warning when this is true.
@@ -1352,6 +1863,196 @@ export const GitPane = memo(function GitPane({
     }
   }, [worktreeId, branchInclude, fetchBranches]);
 
+  // ------------------------------------------------------------------------
+  // Issue #782: Stash handlers (list / push / pop / apply / drop)
+  // ------------------------------------------------------------------------
+
+  /**
+   * Fetch the stash list. Read-only; failures surface inline. NO new 5s poll
+   * (S3-004): fetched on mount + after a stash mutation only.
+   */
+  const fetchStash = useCallback(async () => {
+    setStashError(null);
+    try {
+      const response = await fetch(`/api/worktrees/${worktreeId}/git/stash`);
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setStashError(data.error || 'Failed to fetch stashes');
+        return;
+      }
+      const data = await response.json();
+      setStashes(Array.isArray(data.stashes) ? data.stashes : []);
+    } catch {
+      setStashError('Failed to fetch stashes');
+    } finally {
+      setStashLoading(false);
+    }
+  }, [worktreeId]);
+
+  // Mount fetch for stash list (no poll).
+  useEffect(() => {
+    fetchStash();
+  }, [fetchStash]);
+
+  /**
+   * Shared stash-mutation cascade (S3-004): a stash op changes the working tree,
+   * so refetch the stash list + status + staged.
+   */
+  const stashCascade = useCallback(async () => {
+    await Promise.all([fetchStash(), fetchStatus(), fetchStaged()]);
+  }, [fetchStash, fetchStatus, fetchStaged]);
+
+  const runStashOp = useCallback(
+    async (url: string, init: RequestInit, failMessage: string) => {
+      setStashBusy(true);
+      setStashActionError(null);
+      try {
+        const response = await fetch(url, init);
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          setStashActionError(data.error || failMessage);
+          return;
+        }
+        await stashCascade();
+      } catch {
+        setStashActionError(failMessage);
+      } finally {
+        setStashBusy(false);
+      }
+    },
+    [stashCascade]
+  );
+
+  const handleStashPush = useCallback(
+    (message: string, includeUntracked: boolean) => {
+      void runStashOp(
+        `/api/worktrees/${worktreeId}/git/stash/push`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: message || undefined, includeUntracked }),
+        },
+        'Failed to stash changes'
+      );
+    },
+    [worktreeId, runStashOp]
+  );
+
+  const handleStashPop = useCallback(
+    (index: number) => {
+      void runStashOp(
+        `/api/worktrees/${worktreeId}/git/stash/pop`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ index }),
+        },
+        'Failed to pop stash'
+      );
+    },
+    [worktreeId, runStashOp]
+  );
+
+  const handleStashApply = useCallback(
+    (index: number) => {
+      void runStashOp(
+        `/api/worktrees/${worktreeId}/git/stash/apply`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ index }),
+        },
+        'Failed to apply stash'
+      );
+    },
+    [worktreeId, runStashOp]
+  );
+
+  const handleStashDrop = useCallback(
+    (index: number) => {
+      void runStashOp(
+        `/api/worktrees/${worktreeId}/git/stash/${index}`,
+        { method: 'DELETE' },
+        'Failed to drop stash'
+      );
+    },
+    [worktreeId, runStashOp]
+  );
+
+  // ------------------------------------------------------------------------
+  // Issue #782: Danger Zone handlers (reset / revert)
+  // ------------------------------------------------------------------------
+
+  /**
+   * Shared reset/revert cascade (S3-005): HEAD moved, so refetch status +
+   * staged + branches (ahead/behind freshness) + commit history.
+   */
+  const dangerCascade = useCallback(async () => {
+    await Promise.all([
+      fetchStatus(),
+      fetchStaged(),
+      fetchBranches(branchInclude),
+      fetchCommits(),
+    ]);
+  }, [fetchStatus, fetchStaged, fetchBranches, branchInclude, fetchCommits]);
+
+  const handleReset = useCallback(
+    async (target: string, mode: GitResetMode, confirmBranch: string | undefined) => {
+      setDangerBusy(true);
+      setDangerActionError(null);
+      setDangerConflictNotice(null);
+      try {
+        const response = await fetch(`/api/worktrees/${worktreeId}/git/reset`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target, mode, confirmBranch }),
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          setDangerActionError(data.error || 'Failed to reset');
+          return;
+        }
+        await dangerCascade();
+      } catch {
+        setDangerActionError('Failed to reset');
+      } finally {
+        setDangerBusy(false);
+      }
+    },
+    [worktreeId, dangerCascade]
+  );
+
+  const handleRevert = useCallback(
+    async (commitHash: string, noCommit: boolean) => {
+      setDangerBusy(true);
+      setDangerActionError(null);
+      setDangerConflictNotice(null);
+      try {
+        const response = await fetch(`/api/worktrees/${worktreeId}/git/revert`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ commitHash, noCommit }),
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          setDangerActionError(data.error || 'Failed to revert');
+          return;
+        }
+        const data = await response.json().catch(() => ({}));
+        if (data.conflict) {
+          const files = Array.isArray(data.conflictFiles) ? data.conflictFiles.join(', ') : '';
+          setDangerConflictNotice(`Revert produced conflicts: ${files}`);
+        }
+        await dangerCascade();
+      } catch {
+        setDangerActionError('Failed to revert');
+      } finally {
+        setDangerBusy(false);
+      }
+    },
+    [worktreeId, dangerCascade]
+  );
+
   // ========================================================================
   // Render
   // ========================================================================
@@ -1402,6 +2103,22 @@ export const GitPane = memo(function GitPane({
         onCommitMessageChange={setCommitMessage}
         onAmendChange={setAmend}
         onCommit={handleCommit}
+      />
+
+      {/* Stash (Issue #782) - between Changes and Commit History */}
+      <StashSection
+        stashes={stashes}
+        loading={stashLoading}
+        error={stashError}
+        busy={stashBusy}
+        actionError={stashActionError}
+        hasRunningSession={hasRunningSession}
+        isMobile={isMobile}
+        onRefresh={fetchStash}
+        onPush={handleStashPush}
+        onPop={handleStashPop}
+        onApply={handleStashApply}
+        onDrop={handleStashDrop}
       />
 
       {/* Header */}
@@ -1589,6 +2306,19 @@ export const GitPane = memo(function GitPane({
           )}
         </div>
       )}
+
+      {/* Danger Zone (Issue #782) - bottom of the pane, below Commit History */}
+      <DangerZoneSection
+        selectedCommit={selectedCommit}
+        busy={dangerBusy}
+        actionError={dangerActionError}
+        conflictNotice={dangerConflictNotice}
+        currentBranch={gitStatus?.currentBranch ?? null}
+        hasRunningSession={hasRunningSession}
+        isMobile={isMobile}
+        onReset={handleReset}
+        onRevert={handleRevert}
+      />
     </div>
   );
 });
