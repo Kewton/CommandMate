@@ -7,7 +7,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { MemoPane } from '@/components/worktree/MemoPane';
 import type { WorktreeMemo } from '@/types/models';
 
@@ -168,8 +168,8 @@ describe('MemoPane', () => {
       });
     });
 
-    it('should disable add button when at memo limit (10)', async () => {
-      const fiveMemos = Array.from({ length: 10 }, (_, i) => ({
+    it('should disable add button when at memo limit (20)', async () => {
+      const maxMemos = Array.from({ length: 20 }, (_, i) => ({
         id: `memo-${i}`,
         worktreeId: 'worktree-1',
         title: `Memo ${i}`,
@@ -178,13 +178,33 @@ describe('MemoPane', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       }));
-      mockGetAll.mockResolvedValue(fiveMemos);
+      mockGetAll.mockResolvedValue(maxMemos);
 
       render(<MemoPane {...defaultProps} />);
 
       await waitFor(() => {
         const addButton = screen.getByRole('button', { name: /add memo/i });
         expect(addButton).toBeDisabled();
+      });
+    });
+
+    it('should NOT disable add button at the old limit (10) after expansion to 20', async () => {
+      const tenMemos = Array.from({ length: 10 }, (_, i) => ({
+        id: `memo-${i}`,
+        worktreeId: 'worktree-1',
+        title: `Memo ${i}`,
+        content: `Content ${i}`,
+        position: i,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }));
+      mockGetAll.mockResolvedValue(tenMemos);
+
+      render(<MemoPane {...defaultProps} />);
+
+      await waitFor(() => {
+        const addButton = screen.getByRole('button', { name: /add memo/i });
+        expect(addButton).not.toBeDisabled();
       });
     });
   });
@@ -348,6 +368,162 @@ describe('MemoPane', () => {
         const pane = screen.getByTestId('memo-pane');
         expect(pane).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('Search (Issue #787)', () => {
+    const searchMemos: WorktreeMemo[] = [
+      {
+        id: 'memo-a',
+        worktreeId: 'worktree-1',
+        title: 'Alpha note',
+        content: 'first body',
+        position: 0,
+        createdAt: new Date('2024-01-01'),
+        updatedAt: new Date('2024-01-02'),
+      },
+      {
+        id: 'memo-b',
+        worktreeId: 'worktree-1',
+        title: 'Beta note',
+        content: 'unrelated content',
+        position: 1,
+        createdAt: new Date('2024-01-01'),
+        updatedAt: new Date('2024-01-02'),
+      },
+      {
+        id: 'memo-c',
+        worktreeId: 'worktree-1',
+        title: 'Gamma',
+        content: 'mentions alpha inside',
+        position: 2,
+        createdAt: new Date('2024-01-01'),
+        updatedAt: new Date('2024-01-02'),
+      },
+    ];
+
+    beforeEach(() => {
+      mockGetAll.mockResolvedValue(searchMemos);
+      // Element.prototype.scrollIntoView is not implemented in jsdom.
+      Element.prototype.scrollIntoView = vi.fn();
+    });
+
+    /**
+     * The memo title inputs are also textboxes, so scope to the search region
+     * to unambiguously resolve the search field.
+     */
+    function getSearchInput(): HTMLElement {
+      return within(screen.getByRole('search')).getByRole('textbox');
+    }
+
+    it('should show a search toggle button (no bar until opened)', async () => {
+      render(<MemoPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('memo-search-toggle')).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('search')).not.toBeInTheDocument();
+    });
+
+    it('should open the search bar when the toggle is clicked', async () => {
+      render(<MemoPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('memo-search-toggle')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByTestId('memo-search-toggle'));
+      expect(screen.getByRole('search')).toBeInTheDocument();
+    });
+
+    it('should filter the list to matching memos while searching', async () => {
+      render(<MemoPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByTestId('memo-card')).toHaveLength(3);
+      });
+
+      fireEvent.click(screen.getByTestId('memo-search-toggle'));
+      fireEvent.change(getSearchInput(), { target: { value: 'alpha' } });
+
+      // memo-a (title "Alpha note") and memo-c (content "alpha") match; memo-b does not.
+      await waitFor(() => {
+        const cards = screen.getAllByTestId('memo-card');
+        expect(cards).toHaveLength(2);
+      });
+      const ids = screen
+        .getAllByTestId('memo-card')
+        .map((c) => c.getAttribute('data-memo-id'));
+      expect(ids).toEqual(expect.arrayContaining(['memo-a', 'memo-c']));
+      expect(ids).not.toContain('memo-b');
+    });
+
+    it('should hide the Add button while searching', async () => {
+      render(<MemoPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /add memo/i })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByTestId('memo-search-toggle'));
+      fireEvent.change(getSearchInput(), { target: { value: 'alpha' } });
+
+      await waitFor(() => {
+        expect(screen.getAllByTestId('memo-card')).toHaveLength(2);
+      });
+      expect(screen.queryByRole('button', { name: /add memo/i })).not.toBeInTheDocument();
+    });
+
+    it('should restore the full list and Add button when search is closed (Esc)', async () => {
+      render(<MemoPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByTestId('memo-card')).toHaveLength(3);
+      });
+
+      fireEvent.click(screen.getByTestId('memo-search-toggle'));
+      fireEvent.change(getSearchInput(), { target: { value: 'alpha' } });
+
+      await waitFor(() => {
+        expect(screen.getAllByTestId('memo-card')).toHaveLength(2);
+      });
+
+      fireEvent.keyDown(getSearchInput(), { key: 'Escape' });
+
+      await waitFor(() => {
+        expect(screen.queryByRole('search')).not.toBeInTheDocument();
+      });
+      expect(screen.getAllByTestId('memo-card')).toHaveLength(3);
+      expect(screen.getByRole('button', { name: /add memo/i })).toBeInTheDocument();
+    });
+
+    it('should show a no-results message when nothing matches', async () => {
+      render(<MemoPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByTestId('memo-card')).toHaveLength(3);
+      });
+
+      fireEvent.click(screen.getByTestId('memo-search-toggle'));
+      fireEvent.change(getSearchInput(), { target: { value: 'zzzz-nope' } });
+
+      await waitFor(() => {
+        expect(screen.getByText(/no memos match/i)).toBeInTheDocument();
+      });
+      expect(screen.queryAllByTestId('memo-card')).toHaveLength(0);
+    });
+
+    it('works in the mobile h-full layout (className passthrough)', async () => {
+      render(<MemoPane {...defaultProps} className="h-full" />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('memo-search-toggle')).toBeInTheDocument();
+      });
+      const pane = screen.getByTestId('memo-pane');
+      expect(pane).toHaveClass('h-full');
+
+      fireEvent.click(screen.getByTestId('memo-search-toggle'));
+      expect(screen.getByRole('search')).toBeInTheDocument();
     });
   });
 });

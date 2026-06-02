@@ -237,7 +237,7 @@ export interface ChatMessage {
 
 /**
  * Individual memo item for a worktree
- * Supports up to 5 memos per worktree (position 0-4)
+ * Supports up to 20 memos per worktree (position 0-19)
  */
 export interface WorktreeMemo {
   /** Unique memo ID (UUID) */
@@ -248,7 +248,7 @@ export interface WorktreeMemo {
   title: string;
   /** Memo content (max 10000 characters) */
   content: string;
-  /** Position in the memo list (0-4) */
+  /** Position in the memo list (0-19) */
   position: number;
   /** Creation timestamp */
   createdAt: Date;
