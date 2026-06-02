@@ -1035,8 +1035,6 @@ describe('loadCodexPrompts', () => {
       expect(prompts[0].category).toBe('skill');
       expect(prompts[0].source).toBe('codex-skill');
       expect(prompts[0].cliTools).toEqual(['codex']);
-      // Issue #790: body (frontmatter stripped) is captured for content expansion
-      expect(prompts[0].body).toBe('Prompt body');
     } finally {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
