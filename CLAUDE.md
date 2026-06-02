@@ -183,6 +183,7 @@ tests/
 | `src/config/auto-yes-config.ts` | Auto-Yes設定定数・バリデーション、AUTO_YES_COUNTDOWN_INTERVAL_MS追加（Issue #760） |
 | `src/config/html-extensions.ts` | HTML拡張子定義・判定関数・SandboxLevel型・SANDBOX_ATTRIBUTES（Issue #490） |
 | `src/config/file-polling-config.ts` | ファイルポーリング定数（FILE_TREE_POLL_INTERVAL_MS, FILE_CONTENT_POLL_INTERVAL_MS）（Issue #469） |
+| `src/config/git-status-config.ts` | GitPane Current Status ポーリング定数（GIT_STATUS_POLL_INTERVAL_MS=5000、`useFilePolling` 駆動・visibilitychange対応）（Issue #779） |
 | `src/config/timer-constants.ts` | タイマー定数定義（TIMER_DELAYS, MAX_TIMERS_PER_WORKTREE, TIMER_STATUS, isValidTimerDelay）（Issue #534） |
 | `src/config/copilot-constants.ts` | Copilot CLIタイミング定数（COPILOT_SEND_ENTER_DELAY_MS, COPILOT_TEXT_INPUT_DELAY_MS）（Issue #565）、MODEL_NAME_PATTERN/MAX_MODEL_NAME_LENGTH追加（Issue #588） |
 | `src/config/cli-tool-timing-config.ts` | CLI/TUI/sessionツール相互作用タイミング定数（TUI_SESSION_CREATE_WAIT_MS, TUI_TEXT_INPUT_WAIT_MS, TUI_MESSAGE_PROCESSED_WAIT_MS, TUI_INTERRUPT_SETTLE_MS, TUI_EXIT_WAIT_MS, CODEX_DIALOG_SETTLE_MS, OPENCODE_EXIT_WAIT_MS, VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS, CLAUDE_ENV_SANITIZE_WAIT_MS, CLAUDE_RESTART_DELAY_MS）。cli-tools/*・session-key-sender・prompt-answer-sender・claude-session の magic number を集約（Issue #760） |
@@ -233,7 +234,7 @@ tests/
 | `src/lib/file-search.ts` | ファイル内容検索 |
 | `src/lib/terminal-highlight.ts` | CSS Custom Highlight API ラッパー（Issue #47）XSS安全なターミナルハイライト。Issue #716で名前空間分離（HighlightNamespace型、HISTORY_SEARCH_NAMESPACE、applyHistoryHighlights/clearHistoryHighlights追加）。Issue #744で `makeHistoryNamespace(splitIndex)` ファクトリ追加（`history-search-${splitIndex}` 等の per-split namespace で `CSS.highlights` グローバルレジストリの上書き衝突を回避）、`applyHistoryHighlights`/`clearHistoryHighlights` に optional `namespace` 引数を additive 追加（default=`HISTORY_SEARCH_NAMESPACE`＝後方互換） |
 | `src/lib/file-tree.ts` | ディレクトリツリー構造生成 |
-| `src/lib/git/git-utils.ts` | Git情報取得・コミット履歴/diff取得（Issue #447）、getCommitsByDateRange/collectRepositoryCommitLogs追加（Issue #627） |
+| `src/lib/git/git-utils.ts` | Git情報取得・コミット履歴/diff取得（Issue #447）、getCommitsByDateRange/collectRepositoryCommitLogs追加（Issue #627）、getAheadBehind追加（`git rev-list --left-right --count @{upstream}...HEAD`・厳密パース・left=behind/right=ahead・全失敗null・非throw、`getGitStatus`は不変）（Issue #779） |
 | `src/types/git.ts` | Git関連型定義（CommitInfo, ChangedFile, GitLogResponse等）（Issue #447）、CommitLogEntry/RepositoryCommitLogs追加（Issue #627） |
 | `src/lib/sidebar-utils.ts` | サイドバーソート・グループ化ユーティリティ（SortKey, SortDirection, ViewMode型, BranchGroup型, sortBranches(), groupBranches(), generateRepositoryColor()）（Issue #449, #504）、buildHiddenRepositoryPathSet/filterWorktreesByVisibility追加（Issue #690） |
 | `src/contexts/SidebarContext.tsx` | サイドバー状態管理Context（isOpen, sortKey, viewMode, localStorageパターン）（Issue #449）、DEFAULT_SIDEBAR_WIDTH=224(w-56)に変更（Issue #651） |
@@ -283,7 +284,7 @@ tests/
 | `src/components/worktree/TreeContextMenu.tsx` | ファイルツリーコンテキストメニュー（Issue #479） |
 | `src/components/worktree/MarkdownToolbar.tsx` | マークダウンエディタツールバーUI（Issue #479） |
 | `src/components/worktree/MarkdownPreview.tsx` | マークダウンプレビュー表示（Issue #479） |
-| `src/components/worktree/GitPane.tsx` | Gitタブ（コミット履歴・diff表示）（Issue #447） |
+| `src/components/worktree/GitPane.tsx` | Gitタブ（コミット履歴・diff表示）（Issue #447）。Issue #779で最上部に Current Status セクション追加（branch chip / dirty badge / `↑N ↓M` ahead-behind / refresh / branch mismatch 警告、Mobile コンパクト版）。`/api/worktrees/[id]/git/status` を self-fetch（親から gitStatus props 受け取らず）＋`useFilePolling`（`GIT_STATUS_POLL_INTERVAL_MS=5000`・visibilitychange対応）で 5s ポーリング、loading/error/`aheadBehind===null` 非表示の各状態対応 |
 | `src/components/worktree/TimerPane.tsx` | タイマーUI（登録・カウントダウン・キャンセル、visibilitychange対応ポーリング）（Issue #534） |
 | `src/hooks/useFilePolling.ts` | ポーリングライフサイクル管理（visibilitychange対応）（Issue #469） |
 | `src/hooks/useFileContentPolling.ts` | ファイル内容ポーリング（If-Modified-Since/304）（Issue #469）、大ファイル時無効化（`POLLING_DISABLED_THRESHOLD_BYTES`）（Issue #723） |
@@ -302,6 +303,7 @@ tests/
 | `src/app/api/worktrees/[id]/git/log/route.ts` | Gitコミット履歴取得API（Issue #447） |
 | `src/app/api/worktrees/[id]/git/show/[commitHash]/route.ts` | Gitコミット変更ファイル一覧API（Issue #447） |
 | `src/app/api/worktrees/[id]/git/diff/route.ts` | Gitファイルdiff取得API（Issue #447） |
+| `src/app/api/worktrees/[id]/git/status/route.ts` | Git status取得API（GET、`getGitStatus`＋`getAheadBehind` 合成、`{currentBranch, initialBranch, isBranchMismatch, commitHash, isDirty, aheadBehind?}` を返す。ahead/behind は本route内のみで `git rev-list --left-right --count` 実行＝高頻度 `GET /api/worktrees/[id]` poll には載せない。null許容（upstream未設定/detached/timeout→null+200）、try/catch→handleGitApiError）（Issue #779） |
 | `src/app/api/worktrees/[id]/special-keys/route.ts` | 特殊キー送信API（Up/Down/Left/Right/Enter/Escape、6層防御）（Issue #473, #592） |
 | `src/app/api/templates/route.ts` | レポートテンプレートAPI（GET全件取得/POST作成、5件上限・バリデーション）（Issue #618） |
 | `src/app/api/assistant/start/route.ts` | グローバルセッション開始API（POST、DB操作なし、cliToolId検証・ディレクトリバリデーション・コンテキスト送信）（Issue #649） |

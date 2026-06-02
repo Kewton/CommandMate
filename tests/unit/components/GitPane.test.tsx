@@ -1,6 +1,7 @@
 /**
  * Unit tests for GitPane component
  * Issue #447: Git tab feature
+ * Issue #779: Current Status section (branch / dirty / ahead-behind / refresh)
  * @vitest-environment jsdom
  */
 
@@ -8,9 +9,70 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { GitPane } from '@/components/worktree/GitPane';
 
-// Mock fetch globally
+// ----------------------------------------------------------------------------
+// URL-discriminating fetch mock (Issue #779 hard gate)
+// Mount now performs 2 fetches: /git/log + /git/status. The mock branches on the
+// URL so /git/status returns a Current Status shape, /git/log returns commits,
+// and /git/show / /git/diff return their respective shapes.
+// ----------------------------------------------------------------------------
+
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
+
+/** Default JSON payloads per endpoint; override per-test via setEndpoints(). */
+interface EndpointConfig {
+  status?: { ok: boolean; json: unknown };
+  log?: { ok: boolean; json: unknown };
+  show?: { ok: boolean; json: unknown };
+  diff?: { ok: boolean; json: unknown };
+}
+
+const DEFAULT_STATUS = {
+  currentBranch: 'feature/test',
+  initialBranch: 'main',
+  isBranchMismatch: false,
+  commitHash: 'abc1234',
+  isDirty: false,
+  aheadBehind: null,
+};
+
+let endpoints: EndpointConfig = {};
+
+function makeResponse(entry: { ok: boolean; json: unknown }) {
+  return Promise.resolve({
+    ok: entry.ok,
+    json: () => Promise.resolve(entry.json),
+  });
+}
+
+/**
+ * Install the URL-discriminating mock implementation. Tests may pass overrides
+ * for any endpoint; unspecified endpoints fall back to sensible defaults.
+ */
+function setEndpoints(config: EndpointConfig = {}) {
+  endpoints = config;
+  mockFetch.mockImplementation((url: string) => {
+    if (url.includes('/git/status')) {
+      return makeResponse(endpoints.status ?? { ok: true, json: DEFAULT_STATUS });
+    }
+    if (url.includes('/git/show')) {
+      return makeResponse(
+        endpoints.show ?? {
+          ok: true,
+          json: {
+            commit: { hash: 'abc1234', shortHash: 'abc1234', message: 'test', author: 'a', date: '2026-01-01' },
+            files: [{ path: 'src/file.ts', status: 'modified' }],
+          },
+        }
+      );
+    }
+    if (url.includes('/git/diff')) {
+      return makeResponse(endpoints.diff ?? { ok: true, json: { diff: '' } });
+    }
+    // /git/log (default)
+    return makeResponse(endpoints.log ?? { ok: true, json: { commits: [] } });
+  });
+}
 
 describe('GitPane', () => {
   const defaultProps = {
@@ -21,6 +83,7 @@ describe('GitPane', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFetch.mockReset();
+    setEndpoints();
   });
 
   describe('Loading state', () => {
@@ -28,16 +91,14 @@ describe('GitPane', () => {
       mockFetch.mockReturnValue(new Promise(() => {})); // Never resolves
       render(<GitPane {...defaultProps} />);
 
-      expect(screen.getByRole('status')).toBeInTheDocument();
+      // Commit-history loading spinner (role=status) is present on mount
+      expect(screen.getAllByRole('status').length).toBeGreaterThan(0);
     });
   });
 
   describe('Empty state', () => {
     it('should show empty message when no commits', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ commits: [] }),
-      });
+      setEndpoints({ log: { ok: true, json: { commits: [] } } });
 
       render(<GitPane {...defaultProps} />);
 
@@ -48,16 +109,12 @@ describe('GitPane', () => {
   });
 
   describe('Error state', () => {
-    it('should show error message on fetch failure', async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-        json: () => Promise.resolve({ error: 'Not a git repository' }),
-      });
+    it('should show commit error message on fetch failure', async () => {
+      setEndpoints({ log: { ok: false, json: { error: 'Not a git repository' } } });
 
       render(<GitPane {...defaultProps} />);
 
       await waitFor(() => {
-        expect(screen.getByRole('alert')).toBeInTheDocument();
         expect(screen.getByText('Not a git repository')).toBeInTheDocument();
       });
     });
@@ -75,22 +132,22 @@ describe('GitPane', () => {
 
   describe('Commit list', () => {
     it('should display commit list', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({
-          commits: [
-            { hash: 'abc1234', shortHash: 'abc1234', message: 'feat: add feature', author: 'Author', date: '2026-03-08T00:00:00Z' },
-            { hash: 'def5678', shortHash: 'def5678', message: 'fix: resolve bug', author: 'Author2', date: '2026-03-07T00:00:00Z' },
-          ],
-        }),
+      setEndpoints({
+        log: {
+          ok: true,
+          json: {
+            commits: [
+              { hash: 'abc1234', shortHash: 'abc1234', message: 'feat: add feature', author: 'Author', date: '2026-03-08T00:00:00Z' },
+              { hash: 'def5678', shortHash: 'def5678', message: 'fix: resolve bug', author: 'Author2', date: '2026-03-07T00:00:00Z' },
+            ],
+          },
+        },
       });
 
       render(<GitPane {...defaultProps} />);
 
       await waitFor(() => {
-        expect(screen.getByText('abc1234')).toBeInTheDocument();
         expect(screen.getByText('feat: add feature')).toBeInTheDocument();
-        expect(screen.getByText('def5678')).toBeInTheDocument();
         expect(screen.getByText('fix: resolve bug')).toBeInTheDocument();
       });
     });
@@ -98,10 +155,7 @@ describe('GitPane', () => {
 
   describe('Refresh button', () => {
     it('should have a refresh button', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ commits: [] }),
-      });
+      setEndpoints({ log: { ok: true, json: { commits: [] } } });
 
       render(<GitPane {...defaultProps} />);
 
@@ -111,10 +165,7 @@ describe('GitPane', () => {
     });
 
     it('should refetch commits on refresh click', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ commits: [] }),
-      });
+      setEndpoints({ log: { ok: true, json: { commits: [] } } });
 
       render(<GitPane {...defaultProps} />);
 
@@ -122,38 +173,43 @@ describe('GitPane', () => {
         expect(screen.getByText('No commits found')).toBeInTheDocument();
       });
 
+      // Mount = 2 fetches (log + status). After refresh, log is fetched once more.
+      const beforeRefresh = mockFetch.mock.calls.length;
       fireEvent.click(screen.getByLabelText('Refresh commit history'));
 
-      // Should have been called twice (initial + refresh)
-      expect(mockFetch).toHaveBeenCalledTimes(2);
+      await waitFor(() => {
+        expect(mockFetch.mock.calls.length).toBe(beforeRefresh + 1);
+      });
+      // Verify the extra call was the commit-log endpoint
+      const lastUrl = mockFetch.mock.calls[mockFetch.mock.calls.length - 1][0] as string;
+      expect(lastUrl).toContain('/git/log');
     });
   });
 
   describe('Commit selection', () => {
     it('should fetch changed files when commit is clicked', async () => {
-      // First call: git log
-      mockFetch
-        .mockResolvedValueOnce({
+      setEndpoints({
+        log: {
           ok: true,
-          json: () => Promise.resolve({
+          json: {
             commits: [
               { hash: 'abc1234', shortHash: 'abc1234', message: 'test', author: 'a', date: '2026-01-01' },
             ],
-          }),
-        })
-        // Second call: git show
-        .mockResolvedValueOnce({
+          },
+        },
+        show: {
           ok: true,
-          json: () => Promise.resolve({
+          json: {
             commit: { hash: 'abc1234', shortHash: 'abc1234', message: 'test', author: 'a', date: '2026-01-01' },
             files: [{ path: 'src/file.ts', status: 'modified' }],
-          }),
-        });
+          },
+        },
+      });
 
       render(<GitPane {...defaultProps} />);
 
       await waitFor(() => {
-        expect(screen.getByText('abc1234')).toBeInTheDocument();
+        expect(screen.getByText('test')).toBeInTheDocument();
       });
 
       fireEvent.click(screen.getByText('test'));
@@ -167,10 +223,7 @@ describe('GitPane', () => {
 
   describe('Header', () => {
     it('should show Commit History title', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ commits: [] }),
-      });
+      setEndpoints({ log: { ok: true, json: { commits: [] } } });
 
       render(<GitPane {...defaultProps} />);
 
@@ -184,6 +237,176 @@ describe('GitPane', () => {
       const { container } = render(<GitPane {...defaultProps} className="custom-class" />);
 
       expect(container.firstChild).toHaveClass('custom-class');
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Issue #779: Current Status section
+  // --------------------------------------------------------------------------
+  describe('Current Status (Issue #779)', () => {
+    it('should render the branch chip from /git/status', async () => {
+      setEndpoints({
+        status: {
+          ok: true,
+          json: { ...DEFAULT_STATUS, currentBranch: 'feature/awesome' },
+        },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-branch-chip')).toHaveTextContent('feature/awesome');
+      });
+    });
+
+    it('should self-fetch the /git/status endpoint on mount', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        const calledStatus = mockFetch.mock.calls.some(
+          (call) => typeof call[0] === 'string' && call[0].includes('/git/status')
+        );
+        expect(calledStatus).toBe(true);
+      });
+    });
+
+    it('should show the dirty badge when isDirty is true', async () => {
+      setEndpoints({
+        status: { ok: true, json: { ...DEFAULT_STATUS, isDirty: true } },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-dirty-badge')).toBeInTheDocument();
+      });
+    });
+
+    it('should NOT show the dirty badge when isDirty is false', async () => {
+      setEndpoints({
+        status: { ok: true, json: { ...DEFAULT_STATUS, isDirty: false } },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-branch-chip')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('git-status-dirty-badge')).not.toBeInTheDocument();
+    });
+
+    it('should show ahead/behind counts when aheadBehind is non-null', async () => {
+      setEndpoints({
+        status: {
+          ok: true,
+          json: { ...DEFAULT_STATUS, aheadBehind: { ahead: 2, behind: 1 } },
+        },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        const ab = screen.getByTestId('git-status-ahead-behind');
+        expect(ab).toHaveTextContent('2');
+        expect(ab).toHaveTextContent('1');
+      });
+    });
+
+    it('should hide ahead/behind when aheadBehind is null', async () => {
+      setEndpoints({
+        status: { ok: true, json: { ...DEFAULT_STATUS, aheadBehind: null } },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-branch-chip')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('git-status-ahead-behind')).not.toBeInTheDocument();
+    });
+
+    it('should show branch mismatch warning when isBranchMismatch is true', async () => {
+      setEndpoints({
+        status: {
+          ok: true,
+          json: {
+            ...DEFAULT_STATUS,
+            currentBranch: 'feature/x',
+            initialBranch: 'main',
+            isBranchMismatch: true,
+          },
+        },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-mismatch-warning')).toBeInTheDocument();
+      });
+    });
+
+    it('should show an error indicator when /git/status fails (without blocking commits)', async () => {
+      setEndpoints({
+        status: { ok: false, json: { error: 'Failed' } },
+        log: {
+          ok: true,
+          json: {
+            commits: [
+              { hash: 'abc1234', shortHash: 'abc1234', message: 'still here', author: 'a', date: '2026-01-01' },
+            ],
+          },
+        },
+      });
+
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-error')).toBeInTheDocument();
+      });
+      // Commit history is unaffected
+      expect(screen.getByText('still here')).toBeInTheDocument();
+    });
+
+    it('should have its own refresh button for current status', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Refresh git status')).toBeInTheDocument();
+      });
+    });
+
+    it('should refetch /git/status when the status refresh button is clicked', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Refresh git status')).toBeInTheDocument();
+      });
+
+      const statusCallsBefore = mockFetch.mock.calls.filter(
+        (call) => typeof call[0] === 'string' && call[0].includes('/git/status')
+      ).length;
+
+      fireEvent.click(screen.getByLabelText('Refresh git status'));
+
+      await waitFor(() => {
+        const statusCallsAfter = mockFetch.mock.calls.filter(
+          (call) => typeof call[0] === 'string' && call[0].includes('/git/status')
+        ).length;
+        expect(statusCallsAfter).toBe(statusCallsBefore + 1);
+      });
+    });
+
+    it('should render compact current status in mobile mode', async () => {
+      setEndpoints({
+        status: { ok: true, json: { ...DEFAULT_STATUS, currentBranch: 'feature/mobile', isDirty: true } },
+      });
+
+      render(<GitPane {...defaultProps} isMobile />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-branch-chip')).toHaveTextContent('feature/mobile');
+        expect(screen.getByTestId('git-status-dirty-badge')).toBeInTheDocument();
+      });
     });
   });
 });

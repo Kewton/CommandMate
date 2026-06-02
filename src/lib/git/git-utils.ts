@@ -12,7 +12,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { NextResponse } from 'next/server';
 import fs from 'fs';
-import type { GitStatus } from '@/types/models';
+import type { GitStatus, AheadBehind } from '@/types/models';
 import type { CommitInfo, ChangedFile, CommitLogEntry, RepositoryCommitLogs } from '@/types/git';
 import { createLogger } from '@/lib/logger';
 
@@ -107,6 +107,56 @@ export async function getGitStatus(
     commitHash,
     isDirty,
   };
+}
+
+// ============================================================================
+// Issue #779: ahead/behind relative to upstream
+// ============================================================================
+
+/**
+ * Get ahead/behind commit counts relative to the upstream branch.
+ * Issue #779: git status API + GitPane Current Status (Phase 1/5).
+ *
+ * Runs `git rev-list --left-right --count @{upstream}...HEAD` which prints
+ * `<left>\t<right>` where (for `@{upstream}...HEAD`) left = commits only on
+ * upstream = behind, and right = commits only on HEAD = ahead.
+ * (Verified empirically: local ahead2/behind1 -> '1\t2'.)
+ *
+ * @param worktreePath - Path to worktree directory (MUST be from DB, trusted source)
+ * @returns AheadBehind counts, or null when there is no upstream / detached HEAD /
+ *          remote ref missing / timeout / parse failure. NEVER throws.
+ *
+ * @remarks
+ * - Static arg-array (no string concatenation, no @{upstream} substitution) for
+ *   command-injection safety (execFile, trusted path only).
+ * - Reuses the existing non-throwing execGitCommand (1s timeout); all failures -> null.
+ * - The strict parse below (tab-count check + Number.isInteger guard) collapses every
+ *   malformed/empty/corrupt output to null, never disclosing the failure reason.
+ */
+export async function getAheadBehind(
+  worktreePath: string
+): Promise<AheadBehind | null> {
+  const output = await execGitCommand(
+    ['rev-list', '--left-right', '--count', '@{upstream}...HEAD'],
+    worktreePath
+  );
+
+  if (output === null) {
+    return null;
+  }
+
+  const parts = output.split('\t');
+  if (parts.length !== 2) {
+    return null;
+  }
+
+  const behind = parseInt(parts[0], 10);
+  const ahead = parseInt(parts[1], 10);
+  if (!Number.isInteger(behind) || !Number.isInteger(ahead)) {
+    return null;
+  }
+
+  return { ahead, behind };
 }
 
 // ============================================================================
