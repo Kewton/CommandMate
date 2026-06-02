@@ -15,7 +15,6 @@ import { useIsMobile } from '@/hooks/useIsMobile';
 import { useImageAttachment } from '@/hooks/useImageAttachment';
 import type { SlashCommand } from '@/types/slash-commands';
 import { getSlashCommandTrigger } from '@/lib/slash-command-format';
-import { expandCodexPromptMessage } from '@/lib/codex-prompt-expander';
 
 export interface MessageInputProps {
   worktreeId: string;
@@ -191,13 +190,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       if (attachedImage) {
         options.imagePath = attachedImage.path;
       }
-      // Issue #790: Codex prompts (.codex/prompts/*) are sent as their expanded
-      // body, because Codex CLI cannot read worktree-local prompts via
-      // /prompts:NAME. expandCodexPromptMessage returns null for everything else,
-      // so non-codex tools and ordinary slash commands are sent verbatim.
-      const trimmed = message.trim();
-      const outgoing = expandCodexPromptMessage(trimmed, groups) ?? trimmed;
-      await worktreeApi.sendMessage(worktreeId, outgoing, options);
+      await worktreeApi.sendMessage(worktreeId, message.trim(), options);
       setMessage('');
       setIsFreeInputMode(false);
       resetAfterSend();
@@ -208,7 +201,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, onMessageSent, resetAfterSend, splitIndex, groups]);
+  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, onMessageSent, resetAfterSend, splitIndex]);
 
   const handleSubmit = useCallback(async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();

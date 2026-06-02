@@ -38,11 +38,6 @@ export interface SlashCommand {
   name: string;
   /** Command invocation format in the target CLI */
   invocation?: 'slash' | 'codex-prompt';
-  /**
-   * Markdown body (frontmatter stripped) used for content expansion.
-   * Only populated for invocation: 'codex-prompt' (Issue #790).
-   */
-  body?: string;
   /** Command description from frontmatter */
   description: string;
   /** Command category for grouping */
