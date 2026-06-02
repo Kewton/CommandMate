@@ -301,6 +301,7 @@ export const MobileContent = memo(function MobileContent({
                 worktreeId={worktreeId}
                 onDiffSelect={onDiffSelect}
                 isMobile={true}
+                worktree={worktree ?? undefined}
                 className="flex-1 min-h-0"
               />
             </ErrorBoundary>

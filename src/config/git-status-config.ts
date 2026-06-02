@@ -36,3 +36,28 @@ export const MAX_GIT_FILES = 1000;
  * rejected with HTTP 400.
  */
 export const MAX_COMMIT_MESSAGE_LENGTH = 10000;
+
+// =============================================================================
+// Issue #781: branch checkout confirm-dialog warnings (GitPane)
+// =============================================================================
+
+/**
+ * S3-001 history-loss warning shown in the GitPane checkout confirm dialog
+ * (Issue #781). In-place checkout can rekey the worktree identity and CASCADE
+ * delete chat history / memos / schedules on the next sync.
+ *
+ * Single source of truth: imported by both GitPane.tsx and its unit test so the
+ * assertion verifies the rendered text byte-for-byte. Keep this string verbatim.
+ */
+export const CHECKOUT_HISTORY_LOSS_WARNING =
+  '別ブランチへ切り替えると、このワークツリーに紐づくチャット履歴・メモ・スケジュールが次回同期時に失われる可能性があります';
+
+/**
+ * S3-002 running-session warning shown in the GitPane checkout confirm dialog
+ * (Issue #781) when any `sessionStatusByCli[*].isRunning` is true. Switching
+ * branches changes the working files a live session is operating on.
+ *
+ * Single source of truth: imported by both GitPane.tsx and its unit test.
+ */
+export const CHECKOUT_RUNNING_SESSION_WARNING =
+  'このブランチに切り替えると、稼働中のセッションの作業ファイルが変化します。';

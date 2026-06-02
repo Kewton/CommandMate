@@ -523,6 +523,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           worktreeId={worktreeId}
           onDiffSelect={onDiffSelect}
           isMobile={false}
+          worktree={worktree ?? undefined}
           className="h-full"
         />
       ),
@@ -552,6 +553,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     }),
     [
       worktreeId,
+      worktree,
       fileSearch.query,
       fileSearch.mode,
       fileSearch.isSearching,

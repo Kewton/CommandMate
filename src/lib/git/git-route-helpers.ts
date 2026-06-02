@@ -55,3 +55,80 @@ export function validateFilesBody(
   }
   return files as string[];
 }
+
+// ============================================================================
+// Issue #781: branch-name validation (checkout / create / delete routes)
+// ============================================================================
+
+/** Maximum allowed branch-name length (DoS bound, matches git's practical cap). */
+const MAX_BRANCH_REF_LENGTH = 255;
+
+/**
+ * Characters/sequences that `git check-ref-format` forbids in a ref component,
+ * which we reject here without spawning a child process:
+ * - whitespace and ASCII control characters (\x00-\x20 plus DEL \x7F)
+ * - the special ref chars `~ ^ : ? * [ \`
+ *
+ * NOTE: `.` is deliberately ALLOWED (so `release/1.2` passes); only the dotted
+ * SEQUENCES `..` / leading `.` / trailing `.` / trailing `.lock` are rejected
+ * (handled separately below). This is the key behavioral divergence from the CLI
+ * `validateBranchName` (BRANCH_NAME_PATTERN), which both rejects `.` and ALLOWS a
+ * leading `-` (option-injection prone). See S3-003.
+ */
+// eslint-disable-next-line no-control-regex
+const FORBIDDEN_BRANCH_CHARS = /[\x00-\x20\x7F~^:?*[\\]/;
+
+/**
+ * Validate a git branch name for the checkout / create / delete routes
+ * (Issue #781). Distinct from the CLI `validateBranchName` (S3-003): it rejects a
+ * leading `-` (option injection) and ALLOWS a `.` inside the name (`release/1.2`).
+ *
+ * Implements a regex-internal subset of `git check-ref-format` — no child
+ * process. Even with this validation, every git command still terminates branch
+ * args with `--` as defense in depth.
+ *
+ * @param name - Raw `branch` / `name` value from the parsed request body
+ * @returns The validated string on success, or a 400 NextResponse on failure
+ *          (`{ error, reason: 'invalid_branch_name' }`, mirroring validateFilesBody).
+ */
+export function validateGitBranchName(name: unknown): string | NextResponse {
+  const invalid = (): NextResponse =>
+    NextResponse.json(
+      { error: 'Invalid branch name', reason: 'invalid_branch_name' },
+      { status: 400 }
+    );
+
+  if (typeof name !== 'string' || name.length === 0) {
+    return invalid();
+  }
+  if (name.length > MAX_BRANCH_REF_LENGTH) {
+    return invalid();
+  }
+  // Leading `-` would be parsed as a git option (and the CLI validator lets it
+  // through). Reject it outright in addition to the `--` terminator.
+  if (name.startsWith('-')) {
+    return invalid();
+  }
+  // Leading/trailing slash and consecutive slashes.
+  if (name.startsWith('/') || name.endsWith('/') || name.includes('//')) {
+    return invalid();
+  }
+  // Dotted sequences forbidden by check-ref-format (but a plain `.` is allowed).
+  if (
+    name.includes('..') ||
+    name.startsWith('.') ||
+    name.endsWith('.') ||
+    name.endsWith('.lock')
+  ) {
+    return invalid();
+  }
+  // The `@{` reflog sequence is forbidden.
+  if (name.includes('@{')) {
+    return invalid();
+  }
+  // Special ref chars, whitespace, control chars.
+  if (FORBIDDEN_BRANCH_CHARS.test(name)) {
+    return invalid();
+  }
+  return name;
+}
