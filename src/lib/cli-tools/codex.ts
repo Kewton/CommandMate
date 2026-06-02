@@ -195,7 +195,11 @@ export class CodexTool extends BaseCLITool {
       }
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
-    logger.info('codex-prompt-not');
+    // Issue #790 (Bug 2): the timeout proceeds without throwing on purpose. The
+    // prompt pattern may not be captured even when Codex is ready, and throwing
+    // here would break otherwise-valid sends. We warn (instead of info) to
+    // improve observability of this fallback path.
+    logger.warn('codex-prompt-wait-timeout');
   }
 
   /**

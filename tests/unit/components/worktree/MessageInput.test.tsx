@@ -361,7 +361,7 @@ describe('MessageInput', () => {
         });
       });
 
-      it('should insert Codex prompt using /prompts:<name> format when selected', async () => {
+      it('should insert Codex prompt using /<name> format when selected (Issue #790)', async () => {
         const codexGroups = [
           {
             category: 'skill' as const,
@@ -375,6 +375,7 @@ describe('MessageInput', () => {
                 filePath: '.codex/prompts/github-insights.md',
                 source: 'codex-skill' as const,
                 cliTools: ['codex'] as ('codex')[],
+                body: 'Show insights',
               },
             ],
           },
@@ -394,9 +395,59 @@ describe('MessageInput', () => {
         render(<MessageInput {...defaultProps} cliToolId="codex" />);
 
         openSelector();
-        fireEvent.click(screen.getByText('/prompts:github-insights'));
+        fireEvent.click(screen.getByText('/github-insights'));
 
-        expect(getTextarea()).toHaveValue('/prompts:github-insights ');
+        expect(getTextarea()).toHaveValue('/github-insights ');
+      });
+
+      it('should send the EXPANDED codex-prompt body (not the slash trigger) on submit (Issue #790)', async () => {
+        const { worktreeApi } = await import('@/lib/api-client');
+        const codexGroups = [
+          {
+            category: 'skill' as const,
+            label: 'Skills',
+            commands: [
+              {
+                name: 'github-insights',
+                invocation: 'codex-prompt' as const,
+                description: 'Codex custom prompt',
+                category: 'skill' as const,
+                filePath: '.codex/prompts/github-insights.md',
+                source: 'codex-skill' as const,
+                cliTools: ['codex'] as ('codex')[],
+                body: 'Analyze $ARGUMENTS please',
+              },
+            ],
+          },
+        ];
+        vi.mocked(useSlashCommands).mockReturnValue({
+          groups: codexGroups,
+          filteredGroups: codexGroups,
+          allCommands: codexGroups.flatMap(g => g.commands),
+          loading: false,
+          error: null,
+          filter: '',
+          setFilter: vi.fn(),
+          refresh: vi.fn(),
+          cliTool: 'codex',
+        });
+
+        render(<MessageInput {...defaultProps} cliToolId="codex" />);
+
+        openSelector();
+        fireEvent.click(screen.getByText('/github-insights'));
+
+        // The trigger '/github-insights ' is inserted; append arguments.
+        typeMessage('/github-insights 874 875');
+        pressEnter();
+
+        await waitFor(() => {
+          expect(worktreeApi.sendMessage).toHaveBeenCalledWith(
+            'test-worktree',
+            'Analyze 874 875 please',
+            { cliToolId: 'codex' }
+          );
+        });
       });
 
       it('TC-3: should show selector again after clearing message in free input mode', () => {

@@ -226,7 +226,9 @@ tests/
 | `src/lib/file-operations.ts` | ファイルCRUD操作（5層セキュリティ）、`readFileLineRange` で行範囲ストリーミング読み取り（createReadStream + readline、メモリO(チャンク)）（Issue #723） |
 | `src/lib/git/clone-manager.ts` | クローン処理管理（排他制御） |
 | `src/lib/version-checker.ts` | バージョンアップ通知 |
-| `src/lib/slash-commands.ts` | スラッシュコマンドローダー（.claude/commands, .claude/skills, .codex/skills対応、getCopilotBuiltinCommands追加）（Issue #166, #547） |
+| `src/lib/slash-commands.ts` | スラッシュコマンドローダー（.claude/commands, .claude/skills, .codex/skills対応、getCopilotBuiltinCommands追加）（Issue #166, #547）。Issue #790で `parseCodexPromptFile` が frontmatter-stripped body を `SlashCommand.body` に格納（content expansion 用） |
+| `src/lib/slash-command-format.ts` | slash command の trigger 文字列生成。Issue #790で `'codex-prompt'` invocation も `/NAME` を返すように変更（旧 `/prompts:NAME` は Codex CLI が認識しないため撤廃） |
+| `src/lib/codex-prompt-expander.ts` | Codex `.codex/prompts/*.md` の本文展開ユーティリティ（Issue #790）。`$ARGUMENTS` / `$1..$9` 置換 + append fallback、send-time matcher で `/NAME args...` を本文に展開して Codex に送信（"Unrecognized command" 回避、worktree-local prompts も対応） |
 | `src/lib/link-utils.ts` | リンク種別判定・相対パス解決・hrefサニタイズ（Issue #505） |
 | `src/lib/browser-compat/fullscreen-api.ts` | Fullscreen API vendor-prefix（webkit/moz/ms）互換シム（Issue #763）。isFullscreenSupportedCompat/getFullscreenElementCompat/requestFullscreenCompat/exitFullscreenCompat/addFullscreenChangeListenerCompat を export。ファイルローカル型 FullscreenElementCompat/FullscreenDocumentCompat + 型アサーション（declare global 禁止）、SSRガード維持、@ts-expect-error 0個。useFullscreen.ts から prefix シムを移送し prefix 由来 @ts-expect-error を全削除 |
 | `src/lib/url-path-encoder.ts` | ファイルパスURLエンコード |

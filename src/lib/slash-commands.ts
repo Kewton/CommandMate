@@ -382,15 +382,24 @@ function parseCodexPromptFile(filePath: string): SlashCommand | null {
     const content = fs.readFileSync(filePath, 'utf-8');
     const fileName = path.basename(filePath, '.md');
     let description = '';
+    // Issue #790: capture the markdown body (frontmatter stripped) so it can be
+    // expanded into a plain message at send time (Codex CLI cannot read
+    // worktree-local .codex/prompts/* via /prompts:NAME).
+    let body = '';
     try {
-      const { data: frontmatter } = safeParseFrontmatter(content);
+      const { data: frontmatter, content: bodyText } = safeParseFrontmatter(content);
       description = frontmatter.description || '';
+      body = bodyText.trim();
     } catch {
       description = extractFrontmatterFields(content).description || '';
+      // Fallback: frontmatter parsing failed (e.g. invalid YAML), so use the
+      // raw content as a best-effort body.
+      body = content.trim();
     }
     return {
       name: truncateString(fileName, MAX_SKILL_NAME_LENGTH),
       invocation: 'codex-prompt',
+      body,
       description: truncateString(description, MAX_SKILL_DESCRIPTION_LENGTH),
       category: 'skill',
       source: 'codex-skill',
