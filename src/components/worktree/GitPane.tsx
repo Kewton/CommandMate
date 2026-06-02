@@ -907,6 +907,7 @@ interface StashSectionProps {
   error: string | null;
   busy: boolean;
   actionError: string | null;
+  conflictNotice: string | null;
   hasRunningSession: boolean;
   isMobile: boolean;
   onRefresh: () => void;
@@ -927,6 +928,7 @@ const StashSection = memo(function StashSection({
   error,
   busy,
   actionError,
+  conflictNotice,
   hasRunningSession,
   isMobile,
   onRefresh,
@@ -974,6 +976,11 @@ const StashSection = memo(function StashSection({
           {actionError && (
             <div className="text-xs text-red-600 dark:text-red-400" role="alert" data-testid="git-stash-action-error">
               {actionError}
+            </div>
+          )}
+          {conflictNotice && (
+            <div className="text-xs text-orange-600 dark:text-orange-400" role="status" data-testid="git-stash-conflict">
+              {conflictNotice}
             </div>
           )}
 
@@ -1442,6 +1449,7 @@ export const GitPane = memo(function GitPane({
   const [stashError, setStashError] = useState<string | null>(null);
   const [stashBusy, setStashBusy] = useState(false);
   const [stashActionError, setStashActionError] = useState<string | null>(null);
+  const [stashConflictNotice, setStashConflictNotice] = useState<string | null>(null);
 
   // Issue #782: Danger Zone (reset / revert)
   const [dangerBusy, setDangerBusy] = useState(false);
@@ -1906,12 +1914,21 @@ export const GitPane = memo(function GitPane({
     async (url: string, init: RequestInit, failMessage: string) => {
       setStashBusy(true);
       setStashActionError(null);
+      setStashConflictNotice(null);
       try {
         const response = await fetch(url, init);
+        const data = await response.json().catch(() => ({}));
         if (!response.ok) {
-          const data = await response.json().catch(() => ({}));
           setStashActionError(data.error || failMessage);
           return;
+        }
+        // pop/apply can succeed (HTTP 200) yet leave conflict markers; the API
+        // returns { conflict, conflictFiles, stashRetained } in that case. Surface
+        // it like the Danger Zone revert path instead of silently cascading.
+        if (data.conflict) {
+          const files = Array.isArray(data.conflictFiles) ? data.conflictFiles.join(', ') : '';
+          const retained = data.stashRetained ? ' (stash retained)' : '';
+          setStashConflictNotice(`Stash operation produced conflicts: ${files}${retained}`);
         }
         await stashCascade();
       } catch {
@@ -2112,6 +2129,7 @@ export const GitPane = memo(function GitPane({
         error={stashError}
         busy={stashBusy}
         actionError={stashActionError}
+        conflictNotice={stashConflictNotice}
         hasRunningSession={hasRunningSession}
         isMobile={isMobile}
         onRefresh={fetchStash}

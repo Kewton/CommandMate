@@ -1189,6 +1189,31 @@ describe('GitPane', () => {
         expect(dropCall).toBeTruthy();
       });
     });
+
+    it('surfaces a conflict notice when pop returns 200 with conflict (parity with revert)', async () => {
+      setEndpoints({
+        stash: {
+          ok: true,
+          json: {
+            stashes: [{ index: 0, message: 'WIP on main: a', branch: 'main', date: '2026-01-01', sha: 'sha0' }],
+          },
+        },
+        stashPop: {
+          ok: true,
+          json: { success: true, conflict: true, conflictFiles: ['a.ts'], stashRetained: true },
+        },
+      });
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('stash-pop-button')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByTestId('stash-pop-button'));
+      await waitFor(() => {
+        expect(screen.getByTestId('git-stash-conflict')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('git-stash-conflict').textContent).toContain('a.ts');
+      expect(screen.getByTestId('git-stash-conflict').textContent).toContain('stash retained');
+    });
   });
 
   describe('Danger Zone (Issue #782)', () => {
