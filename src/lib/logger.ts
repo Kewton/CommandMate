@@ -84,6 +84,13 @@ const SENSITIVE_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
   { pattern: /Authorization:\s*\S+/gi, replacement: 'Authorization: [REDACTED]' },
   // SSH key
   { pattern: /-----BEGIN\s+\w+\s+PRIVATE\s+KEY-----[\s\S]*?-----END\s+\w+\s+PRIVATE\s+KEY-----/g, replacement: '[SSH_KEY_REDACTED]' },
+  // URL userinfo credentials (Issue #783, DR4-002 — Must Fix). HTTPS remote git
+  // stderr can echo `scheme://user:token@host` (e.g. when a credential helper
+  // injects a token into the remote URL). Strip the userinfo so the token never
+  // reaches the log: `https://user:token@host` / `https://ghp_xxx@host` ->
+  // `https://[REDACTED]@host`. `[^/@\s]+` keeps the match within a single URL
+  // authority (does not cross a `/` or whitespace).
+  { pattern: /(\w+:\/\/)[^/@\s]+@/g, replacement: '$1[REDACTED]@' },
 ];
 
 /**

@@ -226,6 +226,82 @@ export type GitDangerZoneErrorReason =
   | 'confirmation_mismatch'
   | 'default_branch';
 
+// =============================================================================
+// Issue #783: network operations (Phase 5/5 - push / pull / fetch)
+// =============================================================================
+
+/**
+ * Machine-readable failure reasons for the network git operations (Issue #783),
+ * corresponding to the typed errors git-utils throws (auth/non-fast-forward/no
+ * upstream/protected/stale-lease/network). Additive sibling to
+ * GitBranchErrorReason (L134) / GitDangerZoneErrorReason (L222).
+ *
+ * DR2-004: pull's `invalid_options` (rebase + ffOnly contradiction) is NOT in
+ * this type. It is a route-LOCAL body-validation reason the route returns
+ * directly as `{ error, reason: 'invalid_options' }` (400), not a git-utils typed
+ * error — the same way reset's `invalid_mode` / `invalid_target` are returned as
+ * route-local 400 reasons and are not collected into a typed union here.
+ */
+export type GitNetworkErrorReason =
+  | 'auth_failed'
+  | 'non_fast_forward'
+  | 'no_upstream'
+  | 'protected_branch'
+  | 'force_with_lease_stale'
+  | 'network';
+
+/**
+ * Success response for POST /api/worktrees/[id]/git/fetch (Issue #783).
+ */
+export interface FetchResponse {
+  success: true;
+}
+
+/**
+ * Success response for POST /api/worktrees/[id]/git/pull (Issue #783).
+ *
+ * DR1-010: `conflict: true` is returned with HTTP 200 (mirroring #782
+ * execGitConflictAware), but the UI treats it as a "quasi-error": although the
+ * HTTP status is success, useGitPaneNetworkOps classifies `conflict: true` into
+ * its error channel (display conflictFiles + terminal guidance), the same policy
+ * as the #782 stash conflict. conflictFiles is held on a channel separate from
+ * the 3-value progressState.
+ */
+export interface PullResponse {
+  success: true;
+  conflict?: boolean;
+  conflictFiles?: string[];
+}
+
+/**
+ * Success response for POST /api/worktrees/[id]/git/push (Issue #783).
+ */
+export interface PushResponse {
+  success: true;
+}
+
+/**
+ * The three network git operations (Issue #783). Used by useGitPaneNetworkOps to
+ * tag the in-flight operation.
+ */
+export type GitNetworkOperation = 'fetch' | 'pull' | 'push';
+
+/**
+ * Client-side progress state for a network operation (Issue #783).
+ *
+ * DR1-004: reduced from 5 values (idle/started/running/done/error) to 3. With no
+ * server progress endpoint, the route holds its response until completion, so
+ * `started` (issued) and `running` (in-flight) collapse into the same await with
+ * no external observation point, and `done` lives only briefly before the cascade
+ * refetch returns it to idle. Therefore:
+ *   - 'idle'    : not running (before the op / after the cascade completes)
+ *   - 'running' : awaiting the op (in-flight); spinner + optional elapsed seconds
+ *   - 'error'   : rejected. A pull conflict is tracked separately via
+ *                 PullResponse.conflict / the hook's conflictFiles channel.
+ * `done` is expressed as "cascade complete -> back to idle" (no standalone state).
+ */
+export type GitNetworkProgressState = 'idle' | 'running' | 'error';
+
 /**
  * Response type for git log API
  */

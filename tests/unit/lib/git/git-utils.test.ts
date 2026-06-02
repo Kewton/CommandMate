@@ -6,21 +6,27 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Hoist mock functions so they are available in vi.mock() factories
-const { mockExistsSync, mockExecFileAsync } = vi.hoisted(() => ({
+const { mockExistsSync, mockExecFileAsync, mockLogger } = vi.hoisted(() => ({
   mockExistsSync: vi.fn(),
   mockExecFileAsync: vi.fn(),
-}));
-
-// Mock logger
-vi.mock('@/lib/logger', () => ({
-  createLogger: vi.fn(() => ({
+  // Single shared logger instance (git-utils calls createLogger once at module
+  // load). Exposing it lets DR4-002 tests assert no credential reaches the log.
+  mockLogger: {
     debug: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
-    withContext: vi.fn().mockReturnThis(),
-  })),
+    withContext: vi.fn(),
+  },
 }));
+
+// Mock logger
+vi.mock('@/lib/logger', () => {
+  mockLogger.withContext.mockReturnValue(mockLogger);
+  return {
+    createLogger: vi.fn(() => mockLogger),
+  };
+});
 
 // Mock fs
 vi.mock('fs', () => ({
@@ -75,7 +81,23 @@ import {
   gitRevert,
   GitNothingToStashError,
   GitResetDefaultBranchError,
+  // Issue #783: network operation foundation
+  getDefaultBranch,
+  resolveDefaultBranchName,
+  DEFAULT_BRANCH_UNRESOLVED,
+  GitAuthFailedError,
+  GitNonFastForwardError,
+  GitNoUpstreamError,
+  GitProtectedBranchError,
+  GitForceWithLeaseStaleError,
+  GitNetworkError,
+  // Issue #783 (Part 2): network operations + stderr classification
+  classifyNetworkStderr,
+  gitFetch,
+  gitPull,
+  gitPush,
 } from '@/lib/git/git-utils';
+import { GIT_FETCH_TIMEOUT_MS, GIT_PULL_TIMEOUT_MS, GIT_PUSH_TIMEOUT_MS } from '@/config/git-status-config';
 
 describe('getCommitsByDateRange (Issue #627)', () => {
   beforeEach(() => {
@@ -1638,5 +1660,807 @@ describe('handleGitApiError danger-zone reasons (Issue #782)', () => {
       error: 'Not a git repository',
       reason: undefined,
     });
+  });
+});
+
+// ============================================================================
+// Issue #783: getDefaultBranch / resolveDefaultBranchName (3-value contract)
+// ============================================================================
+
+describe('getDefaultBranch (Issue #783, DR1-002)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExistsSync.mockReturnValue(false);
+  });
+
+  it('returns the resolved name when symbolic-ref yields origin/<name>', async () => {
+    mockGitByArgs({ 'symbolic-ref': 'origin/main' });
+    await expect(getDefaultBranch('/repo')).resolves.toBe('main');
+  });
+
+  it('trims a trailing newline (execGitCommand trims) for origin/<name>', async () => {
+    mockGitByArgs({ 'symbolic-ref': 'origin/develop\n' });
+    await expect(getDefaultBranch('/repo')).resolves.toBe('develop');
+  });
+
+  it('returns DEFAULT_BRANCH_UNRESOLVED when symbolic-ref fails (null)', async () => {
+    mockGitByArgs({
+      'symbolic-ref': async () => {
+        throw new Error('no origin/HEAD');
+      },
+    });
+    await expect(getDefaultBranch('/repo')).resolves.toBe(DEFAULT_BRANCH_UNRESOLVED);
+  });
+
+  it('returns null when symbolic-ref yields a non-origin/ value (upstream/main)', async () => {
+    mockGitByArgs({ 'symbolic-ref': 'upstream/main' });
+    await expect(getDefaultBranch('/repo')).resolves.toBeNull();
+  });
+
+  it('returns null when symbolic-ref yields a bare name (main)', async () => {
+    mockGitByArgs({ 'symbolic-ref': 'main' });
+    await expect(getDefaultBranch('/repo')).resolves.toBeNull();
+  });
+
+  it('returns null for an empty-string symbolic-ref value (non-null, non-origin/)', async () => {
+    // symbolic-ref returns '' (non-null) -> startsWith('origin/') false -> null
+    // (matches the original isDefaultBranchForReset edge: empty -> not protected).
+    mockGitByArgs({ 'symbolic-ref': '' });
+    await expect(getDefaultBranch('/repo')).resolves.toBeNull();
+  });
+});
+
+describe('resolveDefaultBranchName (Issue #783)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExistsSync.mockReturnValue(false);
+  });
+
+  it('returns the resolved name for origin/<name>', async () => {
+    mockGitByArgs({ 'symbolic-ref': 'origin/main' });
+    await expect(resolveDefaultBranchName('/repo')).resolves.toBe('main');
+  });
+
+  it('collapses DEFAULT_BRANCH_UNRESOLVED to null', async () => {
+    mockGitByArgs({
+      'symbolic-ref': async () => {
+        throw new Error('no origin/HEAD');
+      },
+    });
+    await expect(resolveDefaultBranchName('/repo')).resolves.toBeNull();
+  });
+
+  it('collapses a non-origin/ value to null', async () => {
+    mockGitByArgs({ 'symbolic-ref': 'upstream/main' });
+    await expect(resolveDefaultBranchName('/repo')).resolves.toBeNull();
+  });
+});
+
+// ============================================================================
+// Issue #783: isDefaultBranchForReset byte-invariant boundary cases (DR1-002)
+// Exercised through gitReset (the only caller). (a)-(d) lock the reset guard.
+// ============================================================================
+
+describe('isDefaultBranchForReset boundary (Issue #783, DR1-002)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExistsSync.mockReturnValue(false);
+  });
+
+  // (a) symbolic-ref returns origin/main, current=main -> protected TRUE.
+  it('(a) protects when origin/HEAD resolves to origin/<current> (main)', async () => {
+    mockGitByArgs({ 'symbolic-ref': 'origin/main', 'abbrev-ref': 'main' });
+    await expect(gitReset('/repo', { target: 'HEAD', mode: 'hard' })).rejects.toBeInstanceOf(
+      GitResetDefaultBranchError
+    );
+    expect(mockExecFileAsync.mock.calls.find((c) => c[1][0] === 'reset')).toBeUndefined();
+  });
+
+  // (b) THE CORE REGRESSION: symbolic-ref returns a NON-origin/ value, current=main
+  //     -> protected FALSE (must NOT fall to the main/master fallback).
+  it('(b) does NOT protect on a non-origin/ symbolic-ref value with current=main', async () => {
+    mockGitByArgs({ 'symbolic-ref': 'upstream/main', 'abbrev-ref': 'main', 'reset': '' });
+    await expect(gitReset('/repo', { target: 'HEAD', mode: 'hard' })).resolves.toBeUndefined();
+    expect(mockExecFileAsync.mock.calls.find((c) => c[1][0] === 'reset')?.[1]).toEqual([
+      'reset',
+      '--hard',
+      'HEAD',
+      '--',
+    ]);
+  });
+
+  it('(b2) does NOT protect on a bare-name symbolic-ref value with current=main', async () => {
+    mockGitByArgs({ 'symbolic-ref': 'main', 'abbrev-ref': 'main', 'reset': '' });
+    await expect(gitReset('/repo', { target: 'HEAD', mode: 'hard' })).resolves.toBeUndefined();
+  });
+
+  // (c) symbolic-ref null (unresolved), current=main/master -> protected TRUE (S3-010).
+  it('(c) protects main when origin/HEAD is unresolved (strong fallback)', async () => {
+    mockExecFileAsync.mockImplementation(async (_f: string, args: string[]) => {
+      const joined = args.join(' ');
+      if (joined.includes('symbolic-ref')) throw new Error('no origin/HEAD');
+      if (joined.includes('abbrev-ref')) return { stdout: 'main\n' };
+      return { stdout: '' };
+    });
+    await expect(gitReset('/repo', { target: 'HEAD', mode: 'hard' })).rejects.toBeInstanceOf(
+      GitResetDefaultBranchError
+    );
+  });
+
+  it('(c2) protects master when origin/HEAD is unresolved (strong fallback)', async () => {
+    mockExecFileAsync.mockImplementation(async (_f: string, args: string[]) => {
+      const joined = args.join(' ');
+      if (joined.includes('symbolic-ref')) throw new Error('no origin/HEAD');
+      if (joined.includes('abbrev-ref')) return { stdout: 'master\n' };
+      return { stdout: '' };
+    });
+    await expect(gitReset('/repo', { target: 'HEAD', mode: 'hard' })).rejects.toBeInstanceOf(
+      GitResetDefaultBranchError
+    );
+  });
+
+  // (d) symbolic-ref null (unresolved), current=feature -> protected FALSE.
+  it('(d) does NOT protect a feature branch when origin/HEAD is unresolved', async () => {
+    mockExecFileAsync.mockImplementation(async (_f: string, args: string[]) => {
+      const joined = args.join(' ');
+      if (joined.includes('symbolic-ref')) throw new Error('no origin/HEAD');
+      if (joined.includes('abbrev-ref')) return { stdout: 'feature/x\n' };
+      return { stdout: '' };
+    });
+    await expect(gitReset('/repo', { target: 'HEAD', mode: 'hard' })).resolves.toBeUndefined();
+  });
+});
+
+// ============================================================================
+// Issue #783: deleteBranch default-branch detection consolidation (DR1-001)
+// Behavior must be byte-invariant: same default_branch reason / 409 / message,
+// and "unresolved = NOT protected" (NO main/master fallback in deleteBranch).
+// ============================================================================
+
+describe('deleteBranch default-branch consolidation (Issue #783, DR1-001)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExistsSync.mockReturnValue(false);
+  });
+
+  it('still rejects deleting the default branch (origin/main\\n trailing-newline boundary)', async () => {
+    mockExecFileAsync.mockImplementation(async (_file: string, args: string[]) => {
+      const joined = args.join(' ');
+      if (joined.includes('--abbrev-ref')) return { stdout: 'feature/x\n' };
+      if (joined.includes('symbolic-ref')) return { stdout: 'origin/main\n' };
+      return { stdout: '' };
+    });
+    await expect(deleteBranch('/repo', { name: 'main' })).rejects.toBeInstanceOf(
+      GitDefaultBranchError
+    );
+    // The branch -d/-D must not run when the default-branch guard fires.
+    expect(
+      mockExecFileAsync.mock.calls.find((c) => c[1][0] === 'branch' && (c[1].includes('-d') || c[1].includes('-D')))
+    ).toBeUndefined();
+  });
+
+  it('does NOT protect via main/master fallback when origin/HEAD is unresolved', async () => {
+    // symbolic-ref unresolved + deleting "main" -> NO fallback (unlike reset).
+    const calls: string[][] = [];
+    mockExecFileAsync.mockImplementation(async (_file: string, args: string[]) => {
+      calls.push(args);
+      const joined = args.join(' ');
+      if (joined.includes('--abbrev-ref')) return { stdout: 'feature/x\n' };
+      if (joined.includes('symbolic-ref')) throw new Error('no origin/HEAD');
+      return { stdout: '' };
+    });
+    await deleteBranch('/repo', { name: 'main' });
+    const delCall = calls.find((a) => a[0] === 'branch' && (a.includes('-d') || a.includes('-D')));
+    expect(delCall).toEqual(['branch', '-d', 'main', '--']);
+  });
+
+  it('does NOT protect a non-default branch when origin/HEAD resolves elsewhere', async () => {
+    const calls: string[][] = [];
+    mockExecFileAsync.mockImplementation(async (_file: string, args: string[]) => {
+      calls.push(args);
+      const joined = args.join(' ');
+      if (joined.includes('--abbrev-ref')) return { stdout: 'feature/cur\n' };
+      if (joined.includes('symbolic-ref')) return { stdout: 'origin/main\n' };
+      return { stdout: '' };
+    });
+    await deleteBranch('/repo', { name: 'feature/done' });
+    const delCall = calls.find((a) => a[0] === 'branch' && (a.includes('-d') || a.includes('-D')));
+    expect(delCall).toEqual(['branch', '-d', 'feature/done', '--']);
+  });
+});
+
+// ============================================================================
+// Issue #783: execGitConflictAware timeout param (DR2-007, byte-invariant)
+// Exercised through gitRevert (a 2-arg caller -> default 30s -> byte-invariant)
+// and through gitPull (Part 2) which will pass a custom timeout. Here we lock
+// that the 2-arg callers keep the GIT_WRITE_TIMEOUT_MS default behavior.
+// ============================================================================
+
+describe('execGitConflictAware timeout default (Issue #783, DR2-007)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExistsSync.mockReturnValue(false);
+  });
+
+  it('gitRevert (2-arg caller) keeps the default 30s timeout (byte-invariant)', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '' });
+    await gitRevert('/repo', { commitHash: 'abc1234' });
+    const revertCall = mockExecFileAsync.mock.calls.find((c) => c[1][0] === 'revert');
+    expect(revertCall?.[2]).toMatchObject({ timeout: 30000 });
+  });
+
+  it('gitRevert (2-arg caller) still re-throws GitTimeoutError on a killed process', async () => {
+    mockExecFileAsync.mockRejectedValue(Object.assign(new Error('killed'), { killed: true }));
+    await expect(gitRevert('/repo', { commitHash: 'abc1234' })).rejects.toBeInstanceOf(
+      GitTimeoutError
+    );
+  });
+});
+
+// ============================================================================
+// Issue #783: 6 network error classes + handleGitApiError extension (DR4-003)
+// Additive NEW it() blocks. The existing byte-identical it (L1595) is UNCHANGED.
+// Bodies are FIXED literals that never echo error.message (no token/URL leakage).
+// ============================================================================
+
+describe('handleGitApiError network reasons (Issue #783, DR4-003)', () => {
+  async function bodyOf(error: Error) {
+    const res = handleGitApiError(error, 'test');
+    const body = (await res.json()) as { error?: string; reason?: string };
+    return { status: res.status, error: body.error, reason: body.reason };
+  }
+
+  it('maps GitAuthFailedError to 401 auth_failed (fixed body)', async () => {
+    expect(await bodyOf(new GitAuthFailedError())).toEqual({
+      status: 401,
+      error: 'Authentication failed; configure credentials in the terminal',
+      reason: 'auth_failed',
+    });
+  });
+
+  it('maps GitNonFastForwardError to 409 non_fast_forward (fixed body)', async () => {
+    expect(await bodyOf(new GitNonFastForwardError())).toEqual({
+      status: 409,
+      error: 'Push rejected (non-fast-forward); pull/rebase first',
+      reason: 'non_fast_forward',
+    });
+  });
+
+  it('maps GitNoUpstreamError to 400 no_upstream (fixed body)', async () => {
+    expect(await bodyOf(new GitNoUpstreamError())).toEqual({
+      status: 400,
+      error: 'No upstream branch configured',
+      reason: 'no_upstream',
+    });
+  });
+
+  it('maps GitProtectedBranchError to 409 protected_branch (fixed body)', async () => {
+    expect(await bodyOf(new GitProtectedBranchError())).toEqual({
+      status: 409,
+      error: 'Force push to the default branch is not allowed',
+      reason: 'protected_branch',
+    });
+  });
+
+  it('maps GitForceWithLeaseStaleError to 409 force_with_lease_stale (fixed body)', async () => {
+    expect(await bodyOf(new GitForceWithLeaseStaleError())).toEqual({
+      status: 409,
+      error: 'Stale info; remote has new commits',
+      reason: 'force_with_lease_stale',
+    });
+  });
+
+  it('maps GitNetworkError to 502 network (fixed body)', async () => {
+    expect(await bodyOf(new GitNetworkError())).toEqual({
+      status: 502,
+      error: 'Could not reach the remote',
+      reason: 'network',
+    });
+  });
+
+  it('never echoes a stderr/message into the HTTP body (no token/URL leakage)', async () => {
+    // Even if a class were constructed with a sensitive message, the fixed body
+    // must not include it. The classes take no message arg, but assert anyway.
+    const leak = 'https://ci-bot:glpat-SECRET@gitlab/repo.git';
+    const err = Object.assign(new GitNetworkError(), { message: leak });
+    const result = await bodyOf(err);
+    expect(result.error).toBe('Could not reach the remote');
+    expect(JSON.stringify(result)).not.toContain('glpat-SECRET');
+    expect(JSON.stringify(result)).not.toContain('ci-bot');
+  });
+
+  // DR3-003: an EXTENDED byte-identical it for the 6 NEW classes (separate from
+  // the existing L1595 it, which stays byte-unchanged).
+  it('locks the 6 #783 network reason bodies byte-identical (extended regression)', async () => {
+    expect(await bodyOf(new GitAuthFailedError())).toEqual({
+      status: 401,
+      error: 'Authentication failed; configure credentials in the terminal',
+      reason: 'auth_failed',
+    });
+    expect(await bodyOf(new GitNonFastForwardError())).toEqual({
+      status: 409,
+      error: 'Push rejected (non-fast-forward); pull/rebase first',
+      reason: 'non_fast_forward',
+    });
+    expect(await bodyOf(new GitNoUpstreamError())).toEqual({
+      status: 400,
+      error: 'No upstream branch configured',
+      reason: 'no_upstream',
+    });
+    expect(await bodyOf(new GitProtectedBranchError())).toEqual({
+      status: 409,
+      error: 'Force push to the default branch is not allowed',
+      reason: 'protected_branch',
+    });
+    expect(await bodyOf(new GitForceWithLeaseStaleError())).toEqual({
+      status: 409,
+      error: 'Stale info; remote has new commits',
+      reason: 'force_with_lease_stale',
+    });
+    expect(await bodyOf(new GitNetworkError())).toEqual({
+      status: 502,
+      error: 'Could not reach the remote',
+      reason: 'network',
+    });
+  });
+});
+
+// ============================================================================
+// Issue #783: execGitCommandTyped preserve regex is NOT modified (DR2-001).
+// network/auth patterns must NOT be added to the preserve-list — that is Part 2's
+// classifyNetworkStderr job. This asserts the source text of the preserve regex.
+// ============================================================================
+
+describe('execGitCommandTyped preserve regex invariant (Issue #783, DR2-001)', () => {
+  it('does not add network/auth patterns to the preserve-list', async () => {
+    // `fs` is vi.mock'd at module scope, so read the real source via importActual.
+    const realFs = await vi.importActual<typeof import('fs')>('fs');
+    const realPath = await vi.importActual<typeof import('path')>('path');
+    const src = realFs.readFileSync(
+      realPath.join(process.cwd(), 'src/lib/git/git-utils.ts'),
+      'utf-8'
+    );
+    // Slice ONLY the execGitCommandTyped function body so the assertion targets
+    // the preserve-list regex specifically (not the #783 network error classes /
+    // bodies elsewhere in the file, which legitimately mention "non-fast-forward").
+    const start = src.indexOf('async function execGitCommandTyped(');
+    expect(start).toBeGreaterThan(-1);
+    const end = src.indexOf('async function parseGitLogOutput', start) > -1
+      ? src.indexOf('function parseGitLogOutput', start)
+      : src.indexOf('function parseGitLogOutput', start);
+    expect(end).toBeGreaterThan(start);
+    const fn = src.slice(start, end);
+
+    // The #781 branch-operation preserve regex must be present and unchanged.
+    expect(fn).toContain(
+      "/did not match|not a valid ref|not found|invalid reference|not fully merged|couldn't find remote ref/i"
+    );
+    // Network/auth patterns must NOT have been spliced into execGitCommandTyped's
+    // preserve-list (they belong in classifyNetworkStderr in Part 2 — DR2-001).
+    expect(fn).not.toMatch(/Authentication failed|could not read Username/);
+    expect(fn).not.toMatch(/non-fast-forward/);
+    expect(fn).not.toMatch(/Could not resolve host|stale info|has no upstream/i);
+  });
+});
+
+// ============================================================================
+// Issue #783 (Part 2): classifyNetworkStderr — single source mapping raw git
+// stderr -> the 6 typed network errors (DR2-001 / DR4-003). CRITICAL: the typed
+// errors are constructed WITHOUT a stderr/message arg, so raw stderr (which may
+// contain a token-bearing URL) never reaches the thrown error.
+// ============================================================================
+
+describe('classifyNetworkStderr (Issue #783, DR2-001/DR4-003)', () => {
+  it('maps "Authentication failed" to GitAuthFailedError', () => {
+    expect(classifyNetworkStderr('fatal: Authentication failed for https://x')).toBeInstanceOf(
+      GitAuthFailedError
+    );
+  });
+
+  it('maps "could not read Username" to GitAuthFailedError', () => {
+    expect(classifyNetworkStderr('fatal: could not read Username for https://x')).toBeInstanceOf(
+      GitAuthFailedError
+    );
+  });
+
+  it('maps "! [rejected] ... (fetch first)" to GitNonFastForwardError', () => {
+    expect(
+      classifyNetworkStderr(' ! [rejected]        main -> main (fetch first)')
+    ).toBeInstanceOf(GitNonFastForwardError);
+  });
+
+  it('maps "non-fast-forward" to GitNonFastForwardError', () => {
+    expect(classifyNetworkStderr('error: failed to push some refs (non-fast-forward)')).toBeInstanceOf(
+      GitNonFastForwardError
+    );
+  });
+
+  it('maps "has no upstream branch" to GitNoUpstreamError', () => {
+    expect(
+      classifyNetworkStderr('fatal: The current branch feature has no upstream branch.')
+    ).toBeInstanceOf(GitNoUpstreamError);
+  });
+
+  it('maps "no upstream" to GitNoUpstreamError', () => {
+    expect(classifyNetworkStderr('fatal: no upstream configured')).toBeInstanceOf(
+      GitNoUpstreamError
+    );
+  });
+
+  it('maps "stale info" to GitForceWithLeaseStaleError', () => {
+    expect(
+      classifyNetworkStderr('! [rejected] main -> main (stale info)')
+    ).toBeInstanceOf(GitForceWithLeaseStaleError);
+  });
+
+  it('maps "Could not resolve host" to GitNetworkError', () => {
+    expect(classifyNetworkStderr('fatal: unable to access ...: Could not resolve host: github.com')).toBeInstanceOf(
+      GitNetworkError
+    );
+  });
+
+  it('maps "unable to access" to GitNetworkError', () => {
+    expect(classifyNetworkStderr("fatal: unable to access 'https://host/repo'")).toBeInstanceOf(
+      GitNetworkError
+    );
+  });
+
+  it('falls back to a generic Error for unknown stderr', () => {
+    const e = classifyNetworkStderr('some completely unknown failure');
+    expect(e).toBeInstanceOf(Error);
+    expect(e).not.toBeInstanceOf(GitAuthFailedError);
+    expect(e).not.toBeInstanceOf(GitNetworkError);
+    expect(e.message).toBe('Failed to execute git command');
+  });
+
+  it('prioritizes stale info (force-with-lease) over non-fast-forward when both appear', () => {
+    // git prints "stale info" alongside "[rejected]" for a force-with-lease miss.
+    expect(
+      classifyNetworkStderr('! [rejected] main -> main (stale info)\n(non-fast-forward)')
+    ).toBeInstanceOf(GitForceWithLeaseStaleError);
+  });
+
+  it('NEVER places raw stderr / a token-bearing URL on the thrown error message', () => {
+    const leak = "fatal: unable to access 'https://ci-bot:glpat-SECRET@gitlab/repo.git'";
+    const e = classifyNetworkStderr(leak);
+    expect(e).toBeInstanceOf(GitNetworkError);
+    expect(e.message).not.toContain('glpat-SECRET');
+    expect(e.message).not.toContain('ci-bot');
+    expect(e.message).not.toContain('https://');
+  });
+
+  it('NEVER places a token-bearing URL on an auth-failed error message', () => {
+    const leak =
+      "fatal: Authentication failed for 'https://ci-bot:glpat-SECRET@gitlab/repo.git'";
+    const e = classifyNetworkStderr(leak);
+    expect(e).toBeInstanceOf(GitAuthFailedError);
+    expect(e.message).not.toContain('glpat-SECRET');
+    expect(e.message).not.toContain('ci-bot');
+  });
+});
+
+// ============================================================================
+// Issue #783 (Part 2): gitFetch / gitPull / gitPush network operations.
+// execGitNetworkAware is exercised through gitFetch / gitPush (it is not
+// exported). gitPull goes through execGitConflictAware (timeout param).
+// ============================================================================
+
+describe('gitFetch (Issue #783, Part 2)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExistsSync.mockReturnValue(false);
+  });
+
+  it('runs git fetch <remote> -- (no prune) and is NOT serialized', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '' });
+    await gitFetch('/repo', { remote: 'origin' });
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['fetch', 'origin', '--'],
+      expect.objectContaining({ cwd: '/repo', timeout: GIT_FETCH_TIMEOUT_MS })
+    );
+    // NOT serialized -> no index.lock check (existsSync never consulted).
+    expect(mockExistsSync).not.toHaveBeenCalled();
+  });
+
+  it('adds --prune when prune is true', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '' });
+    await gitFetch('/repo', { remote: 'upstream', prune: true });
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['fetch', '--prune', 'upstream', '--'],
+      expect.objectContaining({ cwd: '/repo' })
+    );
+  });
+
+  it('throws GitTimeoutError on a killed process', async () => {
+    mockExecFileAsync.mockRejectedValue(Object.assign(new Error('killed'), { killed: true }));
+    await expect(gitFetch('/repo', { remote: 'origin' })).rejects.toBeInstanceOf(GitTimeoutError);
+  });
+
+  it('throws GitNotRepoError when the directory is not a git repository', async () => {
+    mockExecFileAsync.mockRejectedValue(
+      Object.assign(new Error('x'), { stderr: 'fatal: not a git repository' })
+    );
+    await expect(gitFetch('/repo', { remote: 'origin' })).rejects.toBeInstanceOf(GitNotRepoError);
+  });
+
+  it('classifies "Could not resolve host" stderr as GitNetworkError', async () => {
+    mockExecFileAsync.mockRejectedValue(
+      Object.assign(new Error('x'), { stderr: 'fatal: ...: Could not resolve host: github.com' })
+    );
+    await expect(gitFetch('/repo', { remote: 'origin' })).rejects.toBeInstanceOf(GitNetworkError);
+  });
+
+  it('classifies "Authentication failed" stderr as GitAuthFailedError', async () => {
+    mockExecFileAsync.mockRejectedValue(
+      Object.assign(new Error('x'), { stderr: 'fatal: Authentication failed for https://x' })
+    );
+    await expect(gitFetch('/repo', { remote: 'origin' })).rejects.toBeInstanceOf(GitAuthFailedError);
+  });
+
+  it('does NOT log raw stderr/message containing a credential URL', async () => {
+    const leak = "fatal: unable to access 'https://ci-bot:glpat-SECRET@gitlab/repo.git'";
+    mockExecFileAsync.mockRejectedValue(Object.assign(new Error(leak), { stderr: leak }));
+    await expect(gitFetch('/repo', { remote: 'origin' })).rejects.toBeInstanceOf(GitNetworkError);
+    const allLogArgs = JSON.stringify([
+      ...mockLogger.error.mock.calls,
+      ...mockLogger.warn.mock.calls,
+      ...mockLogger.info.mock.calls,
+      ...mockLogger.debug.mock.calls,
+    ]);
+    expect(allLogArgs).not.toContain('glpat-SECRET');
+    expect(allLogArgs).not.toContain('ci-bot');
+  });
+});
+
+describe('gitPull (Issue #783, Part 2)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExistsSync.mockReturnValue(false);
+  });
+
+  it('runs git pull <remote> <branch> -- with GIT_PULL_TIMEOUT_MS (serialized)', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '' });
+    const result = await gitPull('/repo', { remote: 'origin', branch: 'main' });
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['pull', 'origin', 'main', '--'],
+      expect.objectContaining({ cwd: '/repo', timeout: GIT_PULL_TIMEOUT_MS })
+    );
+    expect(result).toEqual({ conflict: false });
+    // Serialized -> index.lock check consulted.
+    expect(mockExistsSync).toHaveBeenCalled();
+  });
+
+  it('adds --rebase when rebase is true', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '' });
+    await gitPull('/repo', { remote: 'origin', branch: 'main', rebase: true });
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['pull', '--rebase', 'origin', 'main', '--'],
+      expect.objectContaining({ cwd: '/repo' })
+    );
+  });
+
+  it('adds --ff-only when ffOnly is true', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '' });
+    await gitPull('/repo', { remote: 'origin', branch: 'main', ffOnly: true });
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['pull', '--ff-only', 'origin', 'main', '--'],
+      expect.objectContaining({ cwd: '/repo' })
+    );
+  });
+
+  it('recovers a merge conflict via err.stdout (200 conflict)', async () => {
+    const err = Object.assign(new Error('exit 1'), {
+      code: 1,
+      stdout: 'CONFLICT (content): Merge conflict in src/a.ts\n',
+    });
+    mockExecFileAsync.mockRejectedValue(err);
+    const result = await gitPull('/repo', { remote: 'origin', branch: 'main' });
+    expect(result.conflict).toBe(true);
+    expect(result.conflictFiles).toEqual(['src/a.ts']);
+  });
+
+  it('classifies a non-fast-forward failure (no longer a raw generic error)', async () => {
+    mockExecFileAsync.mockRejectedValue(
+      Object.assign(new Error('x'), { stderr: 'error: failed to push (non-fast-forward)' })
+    );
+    await expect(gitPull('/repo', { remote: 'origin', branch: 'main' })).rejects.toBeInstanceOf(
+      GitNonFastForwardError
+    );
+  });
+
+  it('classifies an auth failure', async () => {
+    mockExecFileAsync.mockRejectedValue(
+      Object.assign(new Error('x'), { stderr: 'fatal: Authentication failed for https://x' })
+    );
+    await expect(gitPull('/repo', { remote: 'origin', branch: 'main' })).rejects.toBeInstanceOf(
+      GitAuthFailedError
+    );
+  });
+
+  it('re-throws GitTimeoutError on a killed process', async () => {
+    mockExecFileAsync.mockRejectedValue(Object.assign(new Error('killed'), { killed: true }));
+    await expect(gitPull('/repo', { remote: 'origin', branch: 'main' })).rejects.toBeInstanceOf(
+      GitTimeoutError
+    );
+  });
+
+  it('DR4-002: does NOT log a raw credential-bearing URL on the network-generic path', async () => {
+    const leak = "fatal: unable to access 'https://ci-bot:glpat-SECRET@gitlab/repo.git'";
+    mockExecFileAsync.mockRejectedValue(Object.assign(new Error(leak), { stderr: leak }));
+    await expect(gitPull('/repo', { remote: 'origin', branch: 'main' })).rejects.toBeInstanceOf(
+      GitNetworkError
+    );
+    const allLogArgs = JSON.stringify([
+      ...mockLogger.error.mock.calls,
+      ...mockLogger.warn.mock.calls,
+      ...mockLogger.info.mock.calls,
+      ...mockLogger.debug.mock.calls,
+    ]);
+    expect(allLogArgs).not.toContain('glpat-SECRET');
+    expect(allLogArgs).not.toContain('ci-bot');
+  });
+});
+
+describe('gitPush (Issue #783, Part 2)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExistsSync.mockReturnValue(false);
+  });
+
+  it('pushes with an explicit refspec <branch>:refs/heads/<branch> (GIT_PUSH_TIMEOUT_MS, serialized)', async () => {
+    mockGitByArgs({ 'symbolic-ref': 'origin/main', 'push': '' });
+    await gitPush('/repo', { remote: 'origin', branch: 'feature' });
+    const pushCall = mockExecFileAsync.mock.calls.find((c) => c[1][0] === 'push');
+    expect(pushCall?.[1]).toEqual(['push', 'origin', 'feature:refs/heads/feature', '--']);
+    expect(pushCall?.[2]).toEqual(expect.objectContaining({ timeout: GIT_PUSH_TIMEOUT_MS }));
+    expect(mockExistsSync).toHaveBeenCalled(); // serialized
+  });
+
+  it('DR4-004: builds feature:refs/heads/feature (NOT main) even when the upstream is main', async () => {
+    // push.default=upstream scenario: a naive impl might force-update origin/main.
+    // The explicit refspec must target refs/heads/feature deterministically.
+    mockGitByArgs({ 'symbolic-ref': 'origin/main', 'push': '' });
+    await gitPush('/repo', { remote: 'origin', branch: 'feature', force: true });
+    const pushCall = mockExecFileAsync.mock.calls.find((c) => c[1][0] === 'push');
+    expect(pushCall?.[1]).toContain('feature:refs/heads/feature');
+    expect(pushCall?.[1]).not.toContain('feature:refs/heads/main');
+    expect(pushCall?.[1].join(' ')).not.toContain(':refs/heads/main');
+  });
+
+  it('adds -u when setUpstream is true', async () => {
+    mockGitByArgs({ 'symbolic-ref': 'origin/main', 'push': '' });
+    await gitPush('/repo', { remote: 'origin', branch: 'feature', setUpstream: true });
+    const pushCall = mockExecFileAsync.mock.calls.find((c) => c[1][0] === 'push');
+    expect(pushCall?.[1]).toEqual(['push', '-u', 'origin', 'feature:refs/heads/feature', '--']);
+  });
+
+  it('adds --force-with-lease when forceWithLease is true', async () => {
+    mockGitByArgs({ 'symbolic-ref': 'origin/main', 'push': '' });
+    await gitPush('/repo', { remote: 'origin', branch: 'feature', forceWithLease: true });
+    const pushCall = mockExecFileAsync.mock.calls.find((c) => c[1][0] === 'push');
+    expect(pushCall?.[1]).toEqual([
+      'push',
+      '--force-with-lease',
+      'origin',
+      'feature:refs/heads/feature',
+      '--',
+    ]);
+  });
+
+  it('adds --force when force is true (non-default branch)', async () => {
+    mockGitByArgs({ 'symbolic-ref': 'origin/main', 'push': '' });
+    await gitPush('/repo', { remote: 'origin', branch: 'feature', force: true });
+    const pushCall = mockExecFileAsync.mock.calls.find((c) => c[1][0] === 'push');
+    expect(pushCall?.[1]).toContain('--force');
+    expect(pushCall?.[1]).not.toContain('--force-with-lease');
+  });
+
+  it('prefers --force-with-lease over --force when both are set', async () => {
+    mockGitByArgs({ 'symbolic-ref': 'origin/main', 'push': '' });
+    await gitPush('/repo', { remote: 'origin', branch: 'feature', force: true, forceWithLease: true });
+    const pushCall = mockExecFileAsync.mock.calls.find((c) => c[1][0] === 'push');
+    expect(pushCall?.[1]).toContain('--force-with-lease');
+    expect(pushCall?.[1]).not.toContain('--force');
+  });
+
+  it('does NOT add any force flag for a plain push', async () => {
+    mockGitByArgs({ 'symbolic-ref': 'origin/main', 'push': '' });
+    await gitPush('/repo', { remote: 'origin', branch: 'feature' });
+    const pushCall = mockExecFileAsync.mock.calls.find((c) => c[1][0] === 'push');
+    expect(pushCall?.[1]).not.toContain('--force');
+    expect(pushCall?.[1]).not.toContain('--force-with-lease');
+  });
+
+  it('throws GitProtectedBranchError on a force push to the default branch', async () => {
+    mockGitByArgs({ 'symbolic-ref': 'origin/main' });
+    await expect(
+      gitPush('/repo', { remote: 'origin', branch: 'main', force: true })
+    ).rejects.toBeInstanceOf(GitProtectedBranchError);
+    // The push must not run.
+    expect(mockExecFileAsync.mock.calls.find((c) => c[1][0] === 'push')).toBeUndefined();
+  });
+
+  it('throws GitProtectedBranchError on a force-with-lease push to the default branch', async () => {
+    mockGitByArgs({ 'symbolic-ref': 'origin/main' });
+    await expect(
+      gitPush('/repo', { remote: 'origin', branch: 'main', forceWithLease: true })
+    ).rejects.toBeInstanceOf(GitProtectedBranchError);
+  });
+
+  it('allows a NON-force push to the default branch (protection only applies to force)', async () => {
+    mockGitByArgs({ 'symbolic-ref': 'origin/main', 'push': '' });
+    await expect(gitPush('/repo', { remote: 'origin', branch: 'main' })).resolves.toBeUndefined();
+    const pushCall = mockExecFileAsync.mock.calls.find((c) => c[1][0] === 'push');
+    expect(pushCall?.[1]).toEqual(['push', 'origin', 'main:refs/heads/main', '--']);
+  });
+
+  it('allows a force push when the default branch is UNRESOLVED (non-symmetric vs reset)', async () => {
+    // resolveDefaultBranchName collapses UNRESOLVED -> null -> NOT protected.
+    mockExecFileAsync.mockImplementation(async (_f: string, args: string[]) => {
+      const joined = args.join(' ');
+      if (joined.includes('symbolic-ref')) throw new Error('no origin/HEAD');
+      return { stdout: '' };
+    });
+    await expect(
+      gitPush('/repo', { remote: 'origin', branch: 'main', force: true })
+    ).resolves.toBeUndefined();
+    const pushCall = mockExecFileAsync.mock.calls.find((c) => c[1][0] === 'push');
+    expect(pushCall?.[1]).toContain('--force');
+  });
+
+  it('emits a structured force-push danger log WITHOUT credentials', async () => {
+    mockGitByArgs({ 'symbolic-ref': 'origin/main', 'push': '' });
+    await gitPush('/repo', { remote: 'origin', branch: 'feature', forceWithLease: true });
+    const warnCall = mockLogger.warn.mock.calls.find((c) => c[0] === 'git:danger:force-push');
+    expect(warnCall).toBeDefined();
+    const payload = JSON.stringify(warnCall?.[1]);
+    expect(payload).not.toContain('glpat');
+    // The danger log carries only worktreePath / branch / timestamp (no remote URL/creds).
+    expect(warnCall?.[1]).toEqual(
+      expect.objectContaining({ operation: 'push', worktreePath: '/repo', branch: 'feature' })
+    );
+  });
+
+  it('classifies a non-fast-forward push rejection', async () => {
+    mockExecFileAsync.mockImplementation(async (_f: string, args: string[]) => {
+      const joined = args.join(' ');
+      if (joined.includes('symbolic-ref')) return { stdout: 'origin/main' };
+      if (args[0] === 'push') {
+        throw Object.assign(new Error('x'), { stderr: '! [rejected] (fetch first)' });
+      }
+      return { stdout: '' };
+    });
+    await expect(
+      gitPush('/repo', { remote: 'origin', branch: 'feature' })
+    ).rejects.toBeInstanceOf(GitNonFastForwardError);
+  });
+
+  it('classifies a stale-info force-with-lease rejection', async () => {
+    mockExecFileAsync.mockImplementation(async (_f: string, args: string[]) => {
+      const joined = args.join(' ');
+      if (joined.includes('symbolic-ref')) return { stdout: 'origin/main' };
+      if (args[0] === 'push') {
+        throw Object.assign(new Error('x'), { stderr: '! [rejected] (stale info)' });
+      }
+      return { stdout: '' };
+    });
+    await expect(
+      gitPush('/repo', { remote: 'origin', branch: 'feature', forceWithLease: true })
+    ).rejects.toBeInstanceOf(GitForceWithLeaseStaleError);
+  });
+
+  it('throws GitIndexLockedError when .git/index.lock exists (serialized)', async () => {
+    mockExistsSync.mockReturnValue(true);
+    // symbolic-ref resolves so protection check passes; the serialized push then
+    // hits the index.lock guard.
+    mockGitByArgs({ 'symbolic-ref': 'origin/develop' });
+    await expect(
+      gitPush('/repo', { remote: 'origin', branch: 'feature' })
+    ).rejects.toBeInstanceOf(GitIndexLockedError);
   });
 });

@@ -25,7 +25,12 @@ import type {
   StashInfo,
   GitResetMode,
 } from '@/types/git';
-import { GIT_WRITE_TIMEOUT_MS } from '@/config/git-status-config';
+import {
+  GIT_WRITE_TIMEOUT_MS,
+  GIT_FETCH_TIMEOUT_MS,
+  GIT_PULL_TIMEOUT_MS,
+  GIT_PUSH_TIMEOUT_MS,
+} from '@/config/git-status-config';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('git-utils');
@@ -617,6 +622,47 @@ export function handleGitApiError(error: unknown, logPrefix: string): NextRespon
       { status: 409 }
     );
   }
+  // Issue #783 (additive, AFTER all existing branches and BEFORE GitTimeoutError
+  // so #780-#782 reason bodies above stay byte-identical — DR2-005 relative-order
+  // contract). DR4-003: each returns a FIXED literal body that never echoes
+  // error.message, so credential-bearing stderr / absolute paths never leak.
+  if (error instanceof GitAuthFailedError) {
+    return NextResponse.json(
+      { error: 'Authentication failed; configure credentials in the terminal', reason: 'auth_failed' },
+      { status: 401 }
+    );
+  }
+  if (error instanceof GitNonFastForwardError) {
+    return NextResponse.json(
+      { error: 'Push rejected (non-fast-forward); pull/rebase first', reason: 'non_fast_forward' },
+      { status: 409 }
+    );
+  }
+  if (error instanceof GitNoUpstreamError) {
+    return NextResponse.json(
+      { error: 'No upstream branch configured', reason: 'no_upstream' },
+      { status: 400 }
+    );
+  }
+  if (error instanceof GitProtectedBranchError) {
+    return NextResponse.json(
+      { error: 'Force push to the default branch is not allowed', reason: 'protected_branch' },
+      { status: 409 }
+    );
+  }
+  if (error instanceof GitForceWithLeaseStaleError) {
+    return NextResponse.json(
+      { error: 'Stale info; remote has new commits', reason: 'force_with_lease_stale' },
+      { status: 409 }
+    );
+  }
+  if (error instanceof GitNetworkError) {
+    // First 502 for a git route: the remote was unreachable (not the client's fault).
+    return NextResponse.json(
+      { error: 'Could not reach the remote', reason: 'network' },
+      { status: 502 }
+    );
+  }
   if (error instanceof GitTimeoutError) {
     return NextResponse.json(
       { error: 'Git command timed out' },
@@ -744,6 +790,71 @@ export class GitResetDefaultBranchError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'GitResetDefaultBranchError';
+  }
+}
+
+// ============================================================================
+// Issue #783: network-operation typed errors (push / pull / fetch).
+//
+// DR4-003: each is constructed with NO stderr/message argument that gets echoed.
+// handleGitApiError maps each to a FIXED literal body (it never echoes
+// error.message), so raw git stderr — which may contain credential-bearing URLs
+// or absolute paths — never reaches the HTTP body. The default Error message is
+// a static label only.
+// ============================================================================
+
+/** Remote rejected the credentials (-> 401 auth_failed). */
+export class GitAuthFailedError extends Error {
+  constructor() {
+    super('Authentication failed');
+    this.name = 'GitAuthFailedError';
+  }
+}
+
+/** Push rejected because it was not a fast-forward (-> 409 non_fast_forward). */
+export class GitNonFastForwardError extends Error {
+  constructor() {
+    super('Non-fast-forward');
+    this.name = 'GitNonFastForwardError';
+  }
+}
+
+/** The branch has no upstream configured (-> 400 no_upstream). */
+export class GitNoUpstreamError extends Error {
+  constructor() {
+    super('No upstream');
+    this.name = 'GitNoUpstreamError';
+  }
+}
+
+/**
+ * A force push targeted the default branch (-> 409 protected_branch).
+ * DELIBERATELY a SEPARATE reason from `default_branch` (delete/reset): push can
+ * target an ARBITRARY branch via the `branch?` arg (delete/reset have fixed
+ * "delete-target / current-branch" semantics), so its protection trigger and
+ * meaning differ — a distinct reason lets the UI/acceptance criteria diverge
+ * (DR1-008).
+ */
+export class GitProtectedBranchError extends Error {
+  constructor() {
+    super('Protected branch');
+    this.name = 'GitProtectedBranchError';
+  }
+}
+
+/** `--force-with-lease` refused because the remote moved (-> 409 force_with_lease_stale). */
+export class GitForceWithLeaseStaleError extends Error {
+  constructor() {
+    super('Stale info');
+    this.name = 'GitForceWithLeaseStaleError';
+  }
+}
+
+/** Could not reach / resolve the remote (-> 502 network). */
+export class GitNetworkError extends Error {
+  constructor() {
+    super('Network error');
+    this.name = 'GitNetworkError';
   }
 }
 
@@ -1434,11 +1545,13 @@ export async function deleteBranch(
   }
 
   // Precondition: refuse to delete the default branch (origin/HEAD-derived).
-  const defaultOut = await execGitCommand(
-    ['symbolic-ref', 'refs/remotes/origin/HEAD', '--short'],
-    worktreePath
-  );
-  if (defaultOut !== null && defaultOut.trim() === `origin/${name}`) {
+  // Issue #783 (DR1-001): consolidated onto the shared resolveDefaultBranchName
+  // helper. BYTE-INVARIANT: resolveDefaultBranchName collapses both
+  // DEFAULT_BRANCH_UNRESOLVED and a non-origin/ value into null, and null never
+  // equals `name`, so the original "unresolved = NOT protected" behavior is kept
+  // (NO main/master fallback here — deliberately asymmetric to reset, §4.2).
+  const defaultName = await resolveDefaultBranchName(worktreePath);
+  if (defaultName !== null && defaultName === name) {
     throw new GitDefaultBranchError('Cannot delete the default branch');
   }
 
@@ -1572,10 +1685,20 @@ function parseConflictFiles(stdout: string): string[] {
  */
 async function execGitConflictAware(
   args: string[],
-  worktreePath: string
+  worktreePath: string,
+  // Issue #783 (DR2-007): additive timeout param. The 3 existing callers
+  // (stashPop / stashApply / gitRevert) omit it -> default GIT_WRITE_TIMEOUT_MS
+  // -> byte-invariant (#782). gitPull (Part 2) will pass GIT_PULL_TIMEOUT_MS.
+  timeout: number = GIT_WRITE_TIMEOUT_MS,
+  // Issue #783 (DR4-002 / DR2-001): additive flag. When true (gitPull only), the
+  // generic-failure branch routes stderr through classifyNetworkStderr (throwing
+  // a typed network error) and does NOT log the raw err.message — which for an
+  // HTTPS remote can echo a credential-bearing URL. The 3 #782 callers omit it
+  // -> false -> existing log + generic Error -> byte-invariant.
+  classifyNetwork = false
 ): Promise<ConflictResult> {
   try {
-    await execFileAsync('git', args, { cwd: worktreePath, timeout: GIT_WRITE_TIMEOUT_MS });
+    await execFileAsync('git', args, { cwd: worktreePath, timeout });
     return { conflict: false };
   } catch (error) {
     const err = error as Error & {
@@ -1588,7 +1711,7 @@ async function execGitConflictAware(
     // Timeout BEFORE the conflict recovery so a killed process is never mistaken
     // for a "normal" conflicting exit.
     if (err.killed || err.code === 'ERR_CHILD_PROCESS_EXEC_TIMEOUT' || err.code === 'ETIMEDOUT') {
-      throw new GitTimeoutError(`Git command timed out after ${GIT_WRITE_TIMEOUT_MS}ms`);
+      throw new GitTimeoutError(`Git command timed out after ${timeout}ms`);
     }
 
     const combined = `${err.stderr || ''} ${err.message || ''}`;
@@ -1602,11 +1725,90 @@ async function execGitConflictAware(
       return { conflict: true, conflictFiles: parseConflictFiles(stdout) };
     }
 
+    // Issue #783 (DR4-002 / DR2-001): the network path (gitPull) classifies the
+    // stderr into a typed network error WITHOUT logging the raw message (which
+    // can contain a credential-bearing remote URL). classifyNetworkStderr builds
+    // the error with no message argument, so no stderr/URL is retained.
+    if (classifyNetwork) {
+      throw classifyNetworkStderr(combined);
+    }
+
     logger.error('git:conflict-aware-failed', {
       args: args.join(' '),
       error: err.message,
     });
     throw new Error('Failed to execute git command');
+  }
+}
+
+/**
+ * Classify a git network-operation stderr into one of the 6 typed network errors
+ * (Issue #783, DR2-001 / DR4-003). Single source of truth for fetch/pull/push.
+ *
+ * CRITICAL (DR4-003): every error is constructed with NO stderr/message argument,
+ * so the raw stderr — which can contain a credential-bearing remote URL
+ * (`scheme://user:pass@host`) or absolute filesystem paths — is NEVER retained on
+ * the thrown error. The stderr is read ONLY for regex matching, then discarded.
+ *
+ * Order matters: `stale info` (force-with-lease miss) is checked BEFORE
+ * non-fast-forward because git prints both for a `--force-with-lease` rejection.
+ * Unknown stderr maps to the generic, fixed-message Error (no raw stderr) that
+ * matches handleGitApiError's 500 fallback.
+ */
+export function classifyNetworkStderr(stderr: string): Error {
+  const s = stderr || '';
+  if (/Authentication failed|could not read Username|could not read Password/i.test(s)) {
+    return new GitAuthFailedError();
+  }
+  if (/stale info/i.test(s)) {
+    return new GitForceWithLeaseStaleError();
+  }
+  if (/has no upstream branch|no upstream/i.test(s)) {
+    return new GitNoUpstreamError();
+  }
+  if (/\[rejected\][\s\S]*\(fetch first\)|non-fast-forward/i.test(s)) {
+    return new GitNonFastForwardError();
+  }
+  if (
+    /Could not resolve host|unable to access|Could not read from remote|Connection (?:refused|timed out)|network is unreachable|Could not connect/i.test(
+      s
+    )
+  ) {
+    return new GitNetworkError();
+  }
+  return new Error('Failed to execute git command');
+}
+
+/**
+ * Run a git NETWORK command (fetch / push) via execFileAsync directly (Issue
+ * #783, §4.4.1). Mirrors execGitConflictAware's manual normalization but has no
+ * conflict-recovery path (fetch/push don't leave merge markers):
+ *   - killed / ETIMEDOUT     -> GitTimeoutError (504)
+ *   - "not a git repository" -> GitNotRepoError (400)
+ *   - any other failure      -> classifyNetworkStderr (typed network error)
+ *
+ * Does NOT use execGitCommandTyped (whose preserve regex stays unmodified) and
+ * does NOT log the raw stderr/message (DR4-002): a failed network op's stderr can
+ * echo a credential-bearing remote URL, and the typed error carries no message.
+ */
+async function execGitNetworkAware(
+  args: string[],
+  worktreePath: string,
+  timeout: number
+): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync('git', args, { cwd: worktreePath, timeout });
+    return stdout;
+  } catch (error) {
+    const err = error as Error & { code?: string | number; killed?: boolean; stderr?: string };
+    if (err.killed || err.code === 'ERR_CHILD_PROCESS_EXEC_TIMEOUT' || err.code === 'ETIMEDOUT') {
+      throw new GitTimeoutError(`Git command timed out after ${timeout}ms`);
+    }
+    const combined = `${err.stderr || ''} ${err.message || ''}`;
+    if (combined.includes('not a git repository')) {
+      throw new GitNotRepoError('Not a git repository');
+    }
+    throw classifyNetworkStderr(combined);
   }
 }
 
@@ -1708,34 +1910,82 @@ export interface ResetOptions {
 }
 
 /**
+ * Sentinel returned by getDefaultBranch when origin/HEAD is UNRESOLVED (the
+ * `symbolic-ref` read returned null). DISTINCT from `null` (which means
+ * symbolic-ref resolved to a value that is NOT an `origin/` ref). Issue #783,
+ * DR1-002: callers must distinguish "unresolved" from "resolved-but-non-origin/"
+ * so the reset fallback only fires on TRUE unresolution.
+ */
+export const DEFAULT_BRANCH_UNRESOLVED = Symbol('default-branch-unresolved');
+
+/**
+ * Resolve the repository default branch name via origin/HEAD (Issue #783,
+ * shared by reset / deleteBranch / push protection — DR1-001).
+ *
+ * Returns THREE distinguishable outcomes (DR1-002 — required for reset's
+ * byte-invariance):
+ *   - string                    : origin/<name> resolved; returns <name> (e.g. "main")
+ *   - DEFAULT_BRANCH_UNRESOLVED : symbolic-ref returned null (origin/HEAD unresolved)
+ *   - null                      : symbolic-ref returned a value that is NOT an
+ *                                 `origin/` ref (unexpected value)
+ *
+ * Keeping "unresolved" and "resolved-but-non-origin/" separate lets
+ * isDefaultBranchForReset's main/master fallback fire ONLY when truly unresolved,
+ * preserving the original behavior (a naive `startsWith ? slice : null` would
+ * collapse the non-origin/ case into null and wrongly trigger the fallback).
+ */
+export async function getDefaultBranch(
+  worktreePath: string
+): Promise<string | null | typeof DEFAULT_BRANCH_UNRESOLVED> {
+  // DR2-006: execGitCommand returns an already-trimmed string on success / null
+  // on failure, so out is trimmed; the out.trim() below is an idempotent (harmless)
+  // double-trim. The "trimmed string / null" pair maps cleanly onto the 3 values:
+  //   UNRESOLVED (out===null) / resolved name (startsWith 'origin/') / non-origin/ (else -> null).
+  // Empty-string edge: if symbolic-ref returned '' (non-null), v='' -> startsWith
+  // false -> null, matching the original isDefaultBranchForReset behavior.
+  const out = await execGitCommand(
+    ['symbolic-ref', 'refs/remotes/origin/HEAD', '--short'],
+    worktreePath
+  );
+  if (out === null) return DEFAULT_BRANCH_UNRESOLVED;
+  const v = out.trim();
+  return v.startsWith('origin/') ? v.slice('origin/'.length) : null;
+}
+
+/**
+ * Thin wrapper for callers that only want "the resolved default name, or null
+ * when unknown" (Issue #783, DR1-001). Collapses both DEFAULT_BRANCH_UNRESOLVED
+ * and the non-origin/ `null` into `null` (= default name unknown). Used by
+ * deleteBranch (no fallback) and push protection (null = unprotected).
+ */
+export async function resolveDefaultBranchName(worktreePath: string): Promise<string | null> {
+  const r = await getDefaultBranch(worktreePath);
+  return typeof r === 'string' ? r : null;
+}
+
+/**
  * Resolve whether the current branch is the default branch FOR THE PURPOSE OF
  * the hard-reset guard (Issue #782, S3-010).
  *
- * Default detection uses #781's origin/HEAD symbolic-ref. INTENTIONAL ASYMMETRY
- * vs. deleteBranch (git-utils.ts deleteBranch): when origin/HEAD is unresolved,
- * deleteBranch offers NO protection, but hard reset conservatively treats
- * `main` / `master` as default and refuses — the destructiveness of a hard
- * reset warrants the stronger fallback. Whether to propagate this fallback to
- * deleteBranch is deferred to a separate issue (S3-010).
+ * Issue #783 (DR1-001): default detection is consolidated through the shared
+ * getDefaultBranch helper. INTENTIONAL ASYMMETRY vs. deleteBranch: when
+ * origin/HEAD is unresolved (DEFAULT_BRANCH_UNRESOLVED), deleteBranch offers NO
+ * protection, but hard reset conservatively treats `main` / `master` as default
+ * and refuses — the destructiveness of a hard reset warrants the stronger
+ * fallback. A "resolved-but-non-origin/" value (null) is NOT protected (matches
+ * the original behavior; the fallback fires ONLY on true unresolution — DR1-002).
  */
 async function isDefaultBranchForReset(worktreePath: string): Promise<boolean> {
   const current = await execGitCommand(['rev-parse', '--abbrev-ref', 'HEAD'], worktreePath);
   if (current === null) return false;
   const currentBranch = current.trim();
 
-  const defaultOut = await execGitCommand(
-    ['symbolic-ref', 'refs/remotes/origin/HEAD', '--short'],
-    worktreePath
-  );
-  if (defaultOut !== null && defaultOut.trim() === `origin/${currentBranch}`) {
-    return true;
-  }
-  // Conservative fallback when origin/HEAD is unresolved (S3-010): protect
-  // main/master only. This is deliberately stronger than deleteBranch.
-  if (defaultOut === null && (currentBranch === 'main' || currentBranch === 'master')) {
-    return true;
-  }
-  return false;
+  const def = await getDefaultBranch(worktreePath);
+  if (typeof def === 'string') return def === currentBranch; // origin/<name> resolved -> strict compare
+  if (def === null) return false; // resolved but non-origin/ -> original behavior: NOT protected
+  // def === DEFAULT_BRANCH_UNRESOLVED (symbolic-ref null) -> conservative
+  // fallback (S3-010, byte-invariant): protect main/master only.
+  return currentBranch === 'main' || currentBranch === 'master';
 }
 
 /**
@@ -1817,6 +2067,130 @@ export async function gitRevert(
     if (noCommit) args.push('--no-commit');
     args.push(commitHash, '--');
     return execGitConflictAware(args, worktreePath);
+  });
+}
+
+// ============================================================================
+// Issue #783: network operations (Phase 5/5) — fetch / pull / push
+// ============================================================================
+
+/** Options for gitFetch (Issue #783). */
+export interface FetchOptions {
+  remote?: string;
+  prune?: boolean;
+}
+
+/**
+ * Fetch from a remote: `git fetch [--prune] <remote> --` (Issue #783).
+ *
+ * NOT serialized (§6.1): fetch writes only remote-tracking refs / packed-refs
+ * (git locks packed-refs itself) and never touches the index or working tree, so
+ * it is exempt from runSerializedWrite. `remote` is validated by the route
+ * (validateGitBranchName) and the trailing `--` blocks pathspec injection.
+ *
+ * @throws {GitAuthFailedError | GitNetworkError | ...} classified network errors
+ * @throws {GitTimeoutError | GitNotRepoError} infra errors
+ */
+export async function gitFetch(worktreePath: string, options: FetchOptions): Promise<void> {
+  const { remote = 'origin', prune } = options;
+  const args = ['fetch'];
+  if (prune) args.push('--prune');
+  args.push(remote, '--');
+  await execGitNetworkAware(args, worktreePath, GIT_FETCH_TIMEOUT_MS);
+}
+
+/** Options for gitPull (Issue #783). */
+export interface PullOptions {
+  remote?: string;
+  branch?: string;
+  rebase?: boolean;
+  ffOnly?: boolean;
+}
+
+/**
+ * Pull from a remote: `git pull [--rebase] [--ff-only] <remote> <branch> --`
+ * (Issue #783). Serialized per worktree (rewrites HEAD / working tree). A merge
+ * or rebase conflict returns `{ conflict: true, conflictFiles }` (200) rather
+ * than throwing, via execGitConflictAware with GIT_PULL_TIMEOUT_MS (S3-003).
+ *
+ * DR4-002: the network-generic failure path classifies the stderr into a typed
+ * error WITHOUT logging the raw message (classifyNetwork=true), so a credential-
+ * bearing remote URL in git stderr is never logged.
+ */
+export async function gitPull(
+  worktreePath: string,
+  options: PullOptions
+): Promise<ConflictResult> {
+  const { remote = 'origin', branch, rebase, ffOnly } = options;
+  return runSerializedWrite(worktreePath, async () => {
+    const args = ['pull'];
+    if (rebase) args.push('--rebase');
+    if (ffOnly) args.push('--ff-only');
+    args.push(remote);
+    if (branch) args.push(branch);
+    args.push('--');
+    return execGitConflictAware(args, worktreePath, GIT_PULL_TIMEOUT_MS, true);
+  });
+}
+
+/** Options for gitPush (Issue #783). */
+export interface PushOptions {
+  remote?: string;
+  branch: string;
+  force?: boolean;
+  forceWithLease?: boolean;
+  setUpstream?: boolean;
+}
+
+/**
+ * Push to a remote (Issue #783). Serialized per worktree (the remote update is a
+ * write; sibling writes queue behind it).
+ *
+ * DR4-004 (Must Fix): push uses a SERVER-CONSTRUCTED explicit refspec
+ * `<branch>:refs/heads/<branch>` so the destination ref is deterministic and
+ * does NOT depend on `push.default` / the branch's upstream. The default-branch
+ * force-push protection compares THIS destination branch against
+ * resolveDefaultBranchName — never the (config-resolved) upstream. A bare
+ * `git push --force` (no refspec) is never emitted.
+ *
+ * Protection is NON-symmetric vs reset (§4.2.1): when the default branch is
+ * unresolved (resolveDefaultBranchName === null) the force push is ALLOWED.
+ * `--force-with-lease` takes priority when both force flags are set.
+ *
+ * @throws {GitProtectedBranchError} force push targeting the default branch
+ * @throws {GitNonFastForwardError | GitForceWithLeaseStaleError | GitAuthFailedError
+ *   | GitNetworkError | GitTimeoutError | GitNotRepoError | GitIndexLockedError}
+ */
+export async function gitPush(worktreePath: string, options: PushOptions): Promise<void> {
+  const { remote = 'origin', branch, force, forceWithLease, setUpstream } = options;
+
+  // DR4-004: force-push protection on the EXPLICIT destination branch.
+  if (force || forceWithLease) {
+    const defaultName = await resolveDefaultBranchName(worktreePath);
+    if (defaultName !== null && defaultName === branch) {
+      throw new GitProtectedBranchError();
+    }
+    // Structured audit log for the (allowed) destructive force push. NO remote
+    // URL / credentials — only worktreePath / branch / timestamp (DR4-002).
+    logger.warn('git:danger:force-push', {
+      operation: 'push',
+      worktreePath,
+      branch,
+      forceWithLease: forceWithLease === true,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  await runSerializedWrite(worktreePath, async () => {
+    const args = ['push'];
+    if (forceWithLease) args.push('--force-with-lease');
+    else if (force) args.push('--force');
+    if (setUpstream) args.push('-u');
+    // Server-constructed explicit refspec: the `:` is built from a validated
+    // branch name (the route rejects user-supplied `:` via validateGitBranchName),
+    // so this is injection-free and pins the destination ref.
+    args.push(remote, `${branch}:refs/heads/${branch}`, '--');
+    await execGitNetworkAware(args, worktreePath, GIT_PUSH_TIMEOUT_MS);
   });
 }
 

@@ -95,3 +95,59 @@ export const RESET_HARD_HISTORY_LOSS_WARNING =
  */
 export const DANGER_ZONE_RUNNING_SESSION_WARNING =
   'この危険な操作は、稼働中のセッションが編集中の作業ファイルを破壊的に書き換えます。';
+
+// =============================================================================
+// Issue #783: network operations (Phase 5/5 - push / pull / fetch)
+// =============================================================================
+
+/**
+ * Timeout (ms) for `git fetch`. Larger than the 1s `GIT_COMMAND_TIMEOUT_MS`
+ * (status read) and the 30s `GIT_WRITE_TIMEOUT_MS` line: a fetch contacts the
+ * remote and may run longer than a local index write. fetch is NOT serialized
+ * (§6.1) — it only updates remote-tracking refs / packed-refs.
+ */
+export const GIT_FETCH_TIMEOUT_MS = 30000;
+
+/**
+ * Timeout (ms) for `git pull`. 60s because a pull does a fetch AND a merge/rebase
+ * over the working tree (slower than a bare fetch). Serialized per worktree.
+ */
+export const GIT_PULL_TIMEOUT_MS = 60000;
+
+/**
+ * Timeout (ms) for `git push`. 60s because a push uploads objects to a remote
+ * over the network (the slowest network op). Serialized per worktree.
+ */
+export const GIT_PUSH_TIMEOUT_MS = 60000;
+
+/**
+ * DR1-003: This is NOT a server progress-polling interval. There is NO server
+ * progress endpoint; the route holds the git process until completion and the
+ * awaited Promise is the only true state-transition source. This constant is an
+ * OPTIONAL client-side elapsed-time tick (zero server round-trips) used only to
+ * re-render the elapsed seconds while a network op is in-flight. A plain spinner
+ * is sufficient, so this may go unused. The name is kept for compatibility with
+ * the Issue body's "progress polling" wording (its true role is documented here).
+ */
+export const GIT_PROGRESS_POLL_INTERVAL_MS = 1000; // optional elapsed-time tick (in-flight only; NOT server progress)
+
+/**
+ * Guidance shown when a push/pull fails with `Authentication failed`. Credentials
+ * are fully delegated to the git credential helper / SSH agent (never handled in
+ * the browser), so the user is directed to authenticate once in the terminal.
+ *
+ * Single source of truth: imported by both GitPane.tsx and its unit test so the
+ * assertion verifies the rendered text byte-for-byte. Keep this string verbatim.
+ */
+export const PUSH_AUTH_FAILED_GUIDANCE =
+  'ターミナルで一度 push/pull して認証情報を設定してください。';
+
+/**
+ * Warning shown in the GitPane Danger Zone when a force push targets the default
+ * branch (refused server-side with 409 `protected_branch`). Mirrors the
+ * single-source-of-truth approach of CHECKOUT_*_WARNING / RESET_HARD_* warnings.
+ *
+ * Single source of truth: imported by both GitPane.tsx and its unit test.
+ */
+export const PUSH_PROTECTED_BRANCH_WARNING =
+  'デフォルトブランチへの force push は禁止されています。';

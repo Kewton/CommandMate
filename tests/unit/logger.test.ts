@@ -306,6 +306,51 @@ describe('Logger', () => {
       expect(output).toContain('Authorization: [REDACTED]');
       expect(output).not.toContain('secret-value');
     });
+
+    // Issue #783 (DR4-002 — Must Fix): HTTPS remote git stderr can echo
+    // `scheme://user:token@host` credential-bearing URLs. The userinfo must be
+    // redacted so a token never reaches the server log, in either a string value
+    // or an object value.
+    it('should redact userinfo in a scheme://user:token@host URL (string value)', () => {
+      const consoleSpy = vi.spyOn(console, 'error');
+
+      const logger = createLogger('test');
+      logger.error('git:command-failed', {
+        detail: "fatal: unable to access 'https://ci-bot:glpat-xxxx@gitlab/repo'",
+      });
+
+      const output = consoleSpy.mock.calls[0][0] as string;
+      expect(output).toContain('https://[REDACTED]@gitlab/repo');
+      expect(output).not.toContain('glpat-xxxx');
+      expect(output).not.toContain('ci-bot');
+    });
+
+    it('should redact userinfo in a URL nested in an object value', () => {
+      const consoleSpy = vi.spyOn(console, 'warn');
+
+      const logger = createLogger('test');
+      logger.warn('git:pull', {
+        remote: { url: 'https://ci-bot:glpat-xxxx@gitlab/repo' },
+      });
+
+      const output = consoleSpy.mock.calls[0][0] as string;
+      const parsed = JSON.parse(output);
+      expect(parsed.data.remote.url).toBe('https://[REDACTED]@gitlab/repo');
+      expect(output).not.toContain('glpat-xxxx');
+    });
+
+    it('should redact a token-only userinfo URL (ghp_xxx@host)', () => {
+      const consoleSpy = vi.spyOn(console, 'error');
+
+      const logger = createLogger('test');
+      logger.error('git:command-failed', {
+        detail: 'https://ghp_xxx@github.com/owner/repo.git',
+      });
+
+      const output = consoleSpy.mock.calls[0][0] as string;
+      expect(output).toContain('https://[REDACTED]@github.com/owner/repo.git');
+      expect(output).not.toContain('ghp_xxx');
+    });
   });
 
   describe('[SF-2] generateRequestId', () => {

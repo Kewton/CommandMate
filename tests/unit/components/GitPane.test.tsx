@@ -12,6 +12,7 @@ import {
   CHECKOUT_HISTORY_LOSS_WARNING,
   CHECKOUT_RUNNING_SESSION_WARNING,
   RESET_HARD_HISTORY_LOSS_WARNING,
+  PUSH_AUTH_FAILED_GUIDANCE,
 } from '@/config/git-status-config';
 
 // ----------------------------------------------------------------------------
@@ -47,6 +48,10 @@ interface EndpointConfig {
   stashDrop?: { ok: boolean; json: unknown };
   reset?: { ok: boolean; json: unknown };
   revert?: { ok: boolean; json: unknown };
+  // Issue #783: network operations
+  netFetch?: { ok: boolean; json: unknown };
+  pull?: { ok: boolean; json: unknown };
+  push?: { ok: boolean; json: unknown };
 }
 
 const DEFAULT_STATUS = {
@@ -153,6 +158,17 @@ function setEndpoints(config: EndpointConfig = {}) {
     }
     if (url.includes('/git/revert') && method === 'POST') {
       return makeResponse(endpoints.revert ?? { ok: true, json: { success: true, conflict: false } });
+    }
+    // Issue #783: network operations (POST). Checked before the GET-shape
+    // endpoints; /git/fetch must precede /git/staged-style substring fallbacks.
+    if (url.includes('/git/fetch') && method === 'POST') {
+      return makeResponse(endpoints.netFetch ?? { ok: true, json: { success: true } });
+    }
+    if (url.includes('/git/pull') && method === 'POST') {
+      return makeResponse(endpoints.pull ?? { ok: true, json: { success: true } });
+    }
+    if (url.includes('/git/push') && method === 'POST') {
+      return makeResponse(endpoints.push ?? { ok: true, json: { success: true } });
     }
     if (url.includes('/git/status')) {
       return makeResponse(endpoints.status ?? { ok: true, json: DEFAULT_STATUS });
@@ -1313,6 +1329,336 @@ describe('GitPane', () => {
         expect(revertCall).toBeTruthy();
         const body = JSON.parse((revertCall?.[1] as { body: string }).body);
         expect(body.commitHash).toBe('deadbeef0000000000000000000000000000abcd');
+      });
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Issue #783: Network operations (push / pull / fetch) — Phase 5/5
+  // --------------------------------------------------------------------------
+  describe('Network operations (Issue #783)', () => {
+    /** Count fetch calls to a given path with an optional method filter. */
+    const countCalls = (path: string, method?: string) =>
+      mockFetch.mock.calls.filter(
+        (call) =>
+          typeof call[0] === 'string' &&
+          call[0].includes(path) &&
+          (method === undefined ||
+            (call[1] as { method?: string } | undefined)?.method === method)
+      ).length;
+
+    const findCall = (path: string, method = 'POST') =>
+      mockFetch.mock.calls.find(
+        (call) =>
+          typeof call[0] === 'string' &&
+          call[0].includes(path) &&
+          (call[1] as { method?: string } | undefined)?.method === method
+      );
+
+    it('renders explicit Pull / Push / Fetch buttons', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('git-fetch-button')).toBeInTheDocument();
+        expect(screen.getByTestId('git-pull-button')).toBeInTheDocument();
+        expect(screen.getByTestId('git-push-button')).toBeInTheDocument();
+      });
+    });
+
+    it('POSTs /git/fetch when the Fetch button is clicked', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-fetch-button')).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('git-fetch-button'));
+      await waitFor(() => {
+        expect(findCall('/git/fetch')).toBeTruthy();
+      });
+    });
+
+    it('POSTs /git/pull when the Pull button is clicked', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-pull-button')).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('git-pull-button'));
+      await waitFor(() => {
+        expect(findCall('/git/pull')).toBeTruthy();
+      });
+    });
+
+    it('POSTs /git/push (with setUpstream when no upstream) when the Push button is clicked', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-push-button')).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('git-push-button'));
+      await waitFor(() => {
+        const pushCall = findCall('/git/push');
+        expect(pushCall).toBeTruthy();
+        const body = JSON.parse((pushCall?.[1] as { body: string }).body);
+        // No ahead/behind chip in DEFAULT_STATUS (aheadBehind null) => setUpstream.
+        expect(body.setUpstream).toBe(true);
+      });
+    });
+
+    it('shows the spinner + abort button while an operation is in-flight', async () => {
+      // Make /git/push hang so we can observe the running state.
+      let resolvePush: ((value: unknown) => void) | undefined;
+      mockFetch.mockImplementation((url: string, init?: { method?: string }) => {
+        if (url.includes('/git/push') && init?.method === 'POST') {
+          return new Promise((res) => {
+            resolvePush = () => res({ ok: true, json: () => Promise.resolve({ success: true }) });
+          });
+        }
+        if (url.includes('/git/status')) return makeResponse({ ok: true, json: DEFAULT_STATUS });
+        if (url.includes('/git/staged')) return makeResponse({ ok: true, json: DEFAULT_STAGED });
+        if (url.includes('/git/branches')) return makeResponse({ ok: true, json: DEFAULT_BRANCHES });
+        if (url.includes('/git/stash')) return makeResponse({ ok: true, json: { stashes: [] } });
+        return makeResponse({ ok: true, json: { commits: [] } });
+      });
+
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-push-button')).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('git-push-button'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-network-operation-spinner')).toBeInTheDocument();
+        expect(screen.getByTestId('git-network-abort-button')).toBeInTheDocument();
+      });
+
+      // Resolve to clean up.
+      resolvePush?.(undefined);
+      await waitFor(() =>
+        expect(screen.queryByTestId('git-network-operation-spinner')).not.toBeInTheDocument()
+      );
+    });
+
+    it('disables sibling write buttons (Stage/Unstage) during a push and re-enables after (DR3-004)', async () => {
+      let resolvePush: ((value: unknown) => void) | undefined;
+      mockFetch.mockImplementation((url: string, init?: { method?: string }) => {
+        if (url.includes('/git/push') && init?.method === 'POST') {
+          return new Promise((res) => {
+            resolvePush = () => res({ ok: true, json: () => Promise.resolve({ success: true }) });
+          });
+        }
+        if (url.includes('/git/staged')) {
+          return makeResponse({
+            ok: true,
+            json: {
+              staged: [{ path: 'src/staged.ts', status: 'modified' }],
+              unstaged: [],
+              untracked: [],
+            },
+          });
+        }
+        if (url.includes('/git/status')) return makeResponse({ ok: true, json: DEFAULT_STATUS });
+        if (url.includes('/git/branches')) return makeResponse({ ok: true, json: DEFAULT_BRANCHES });
+        if (url.includes('/git/stash')) return makeResponse({ ok: true, json: { stashes: [] } });
+        return makeResponse({ ok: true, json: { commits: [] } });
+      });
+
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-push-button')).toBeInTheDocument());
+
+      // The staged file's Unstage toggle is enabled (busy=false) initially.
+      const toggleBefore = screen.getByTestId('git-changes-toggle-button');
+      expect(toggleBefore).not.toBeDisabled();
+
+      fireEvent.click(screen.getByTestId('git-push-button'));
+
+      await waitFor(() =>
+        expect(screen.getByTestId('git-changes-toggle-button')).toBeDisabled()
+      );
+
+      resolvePush?.(undefined);
+      await waitFor(() =>
+        expect(screen.getByTestId('git-changes-toggle-button')).not.toBeDisabled()
+      );
+    });
+
+    it('does NOT disable sibling write buttons during a fetch (fetch exempt, DR3-004)', async () => {
+      let resolveFetch: ((value: unknown) => void) | undefined;
+      mockFetch.mockImplementation((url: string, init?: { method?: string }) => {
+        if (url.includes('/git/fetch') && init?.method === 'POST') {
+          return new Promise((res) => {
+            resolveFetch = () => res({ ok: true, json: () => Promise.resolve({ success: true }) });
+          });
+        }
+        if (url.includes('/git/staged')) {
+          return makeResponse({
+            ok: true,
+            json: {
+              staged: [{ path: 'src/staged.ts', status: 'modified' }],
+              unstaged: [],
+              untracked: [],
+            },
+          });
+        }
+        if (url.includes('/git/status')) return makeResponse({ ok: true, json: DEFAULT_STATUS });
+        if (url.includes('/git/branches')) return makeResponse({ ok: true, json: DEFAULT_BRANCHES });
+        if (url.includes('/git/stash')) return makeResponse({ ok: true, json: { stashes: [] } });
+        return makeResponse({ ok: true, json: { commits: [] } });
+      });
+
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-fetch-button')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('git-fetch-button'));
+
+      // Spinner appears (fetch in-flight) but the Unstage toggle stays enabled.
+      await waitFor(() =>
+        expect(screen.getByTestId('git-network-operation-spinner')).toBeInTheDocument()
+      );
+      expect(screen.getByTestId('git-changes-toggle-button')).not.toBeDisabled();
+
+      resolveFetch?.(undefined);
+      await waitFor(() =>
+        expect(screen.queryByTestId('git-network-operation-spinner')).not.toBeInTheDocument()
+      );
+    });
+
+    it('pauses the 5s status poll while a push is in-flight and resumes after (DR3-006)', async () => {
+      let resolvePush: ((value: unknown) => void) | undefined;
+      mockFetch.mockImplementation((url: string, init?: { method?: string }) => {
+        if (url.includes('/git/push') && init?.method === 'POST') {
+          return new Promise((res) => {
+            resolvePush = () => res({ ok: true, json: () => Promise.resolve({ success: true }) });
+          });
+        }
+        if (url.includes('/git/status')) return makeResponse({ ok: true, json: DEFAULT_STATUS });
+        if (url.includes('/git/staged')) return makeResponse({ ok: true, json: DEFAULT_STAGED });
+        if (url.includes('/git/branches')) return makeResponse({ ok: true, json: DEFAULT_BRANCHES });
+        if (url.includes('/git/stash')) return makeResponse({ ok: true, json: { stashes: [] } });
+        return makeResponse({ ok: true, json: { commits: [] } });
+      });
+
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-push-button')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('git-push-button'));
+      await waitFor(() =>
+        expect(screen.getByTestId('git-network-operation-spinner')).toBeInTheDocument()
+      );
+
+      // While in-flight, the status poll is paused: the only /git/status calls
+      // are the cascade + mount fetch, not a growing poll. We assert the count
+      // is stable across a tick.
+      const statusCallsDuring = countCalls('/git/status', 'GET');
+      await new Promise((r) => setTimeout(r, 50));
+      expect(countCalls('/git/status', 'GET')).toBe(statusCallsDuring);
+
+      resolvePush?.(undefined);
+      await waitFor(() =>
+        expect(screen.queryByTestId('git-network-operation-spinner')).not.toBeInTheDocument()
+      );
+    });
+
+    it('runs the cascade (re-fetch status + branches) after a fetch completes (§7.5)', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-fetch-button')).toBeInTheDocument());
+
+      // GET reads in GitPane use fetch(url) with no `method`, so count without a
+      // method filter (the cascade re-fetches status + branches after settle).
+      const statusBefore = countCalls('/git/status');
+      const branchesBefore = countCalls('/git/branches');
+
+      fireEvent.click(screen.getByTestId('git-fetch-button'));
+
+      await waitFor(() => {
+        expect(countCalls('/git/status')).toBeGreaterThan(statusBefore);
+        expect(countCalls('/git/branches')).toBeGreaterThan(branchesBefore);
+      });
+    });
+
+    it('surfaces the auth_failed guidance when push is rejected', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-push-button')).toBeInTheDocument());
+      setEndpoints({
+        push: { ok: false, json: { error: 'Authentication failed', reason: 'auth_failed' } },
+      });
+      fireEvent.click(screen.getByTestId('git-push-button'));
+      await waitFor(() => {
+        expect(screen.getByTestId('git-network-operation-error')).toHaveTextContent(
+          PUSH_AUTH_FAILED_GUIDANCE
+        );
+      });
+    });
+
+    it('renders the Mobile progress bar as a sticky (z<50) element, below confirm modals (DR3-007)', async () => {
+      let resolvePush: ((value: unknown) => void) | undefined;
+      mockFetch.mockImplementation((url: string, init?: { method?: string }) => {
+        if (url.includes('/git/push') && init?.method === 'POST') {
+          return new Promise((res) => {
+            resolvePush = () => res({ ok: true, json: () => Promise.resolve({ success: true }) });
+          });
+        }
+        if (url.includes('/git/status')) return makeResponse({ ok: true, json: DEFAULT_STATUS });
+        if (url.includes('/git/staged')) return makeResponse({ ok: true, json: DEFAULT_STAGED });
+        if (url.includes('/git/branches')) return makeResponse({ ok: true, json: DEFAULT_BRANCHES });
+        if (url.includes('/git/stash')) return makeResponse({ ok: true, json: { stashes: [] } });
+        return makeResponse({ ok: true, json: { commits: [] } });
+      });
+
+      render(<GitPane {...defaultProps} isMobile />);
+      await waitFor(() => expect(screen.getByTestId('git-push-button')).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('git-push-button'));
+
+      await waitFor(() =>
+        expect(screen.getByTestId('git-network-progress-bar')).toBeInTheDocument()
+      );
+      const bar = screen.getByTestId('git-network-progress-bar');
+      expect(bar.className).toContain('sticky');
+      // Below the z-50 confirm modals (must NOT be z-50 or higher).
+      expect(bar.className).not.toContain('z-50');
+
+      resolvePush?.(undefined);
+      await waitFor(() =>
+        expect(screen.queryByTestId('git-network-operation-spinner')).not.toBeInTheDocument()
+      );
+    });
+
+    it('keeps the existing 5 section data-testids intact', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-section')).toBeInTheDocument();
+        expect(screen.getByTestId('git-branches-section')).toBeInTheDocument();
+        expect(screen.getByTestId('git-changes-section')).toBeInTheDocument();
+        expect(screen.getByTestId('git-stash-section')).toBeInTheDocument();
+        expect(screen.getByTestId('git-danger-zone-section')).toBeInTheDocument();
+      });
+    });
+
+    it('force-pushes via the Danger Zone with --force-with-lease by default (§7.3)', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-danger-zone-toggle')).toBeInTheDocument());
+
+      // Open the Danger Zone, then the Force Push modal.
+      fireEvent.click(screen.getByTestId('git-danger-zone-toggle'));
+      fireEvent.click(screen.getByTestId('git-force-push-open'));
+      await waitFor(() => expect(screen.getByTestId('force-push-confirm')).toBeInTheDocument());
+
+      // --force-with-lease is checked by default; confirm POSTs /git/push.
+      expect(screen.getByTestId('force-push-with-lease')).toBeChecked();
+      fireEvent.click(screen.getByTestId('force-push-confirm-button'));
+
+      await waitFor(() => {
+        const pushCall = findCall('/git/push');
+        expect(pushCall).toBeTruthy();
+        const body = JSON.parse((pushCall?.[1] as { body: string }).body);
+        expect(body.forceWithLease).toBe(true);
+        expect(body.force).toBe(false);
+      });
+    });
+
+    it('force-pushes with a lease-less --force when the lease checkbox is unticked', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-danger-zone-toggle')).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('git-danger-zone-toggle'));
+      fireEvent.click(screen.getByTestId('git-force-push-open'));
+      await waitFor(() => expect(screen.getByTestId('force-push-confirm')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('force-push-with-lease')); // untick
+      fireEvent.click(screen.getByTestId('force-push-confirm-button'));
+
+      await waitFor(() => {
+        const pushCall = findCall('/git/push');
+        const body = JSON.parse((pushCall?.[1] as { body: string }).body);
+        expect(body.force).toBe(true);
+        expect(body.forceWithLease).toBe(false);
       });
     });
   });
