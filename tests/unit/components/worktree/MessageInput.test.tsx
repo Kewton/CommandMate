@@ -361,7 +361,7 @@ describe('MessageInput', () => {
         });
       });
 
-      it('should insert Codex prompt using /prompts:<name> format when selected', async () => {
+      it('should insert Codex skill using $<name> format when selected (Issue #790)', async () => {
         const codexGroups = [
           {
             category: 'skill' as const,
@@ -369,10 +369,9 @@ describe('MessageInput', () => {
             commands: [
               {
                 name: 'github-insights',
-                invocation: 'codex-prompt' as const,
-                description: 'Codex custom prompt',
+                description: 'Codex skill',
                 category: 'skill' as const,
-                filePath: '.codex/prompts/github-insights.md',
+                filePath: '.codex/skills/github-insights/SKILL.md',
                 source: 'codex-skill' as const,
                 cliTools: ['codex'] as ('codex')[],
               },
@@ -394,9 +393,9 @@ describe('MessageInput', () => {
         render(<MessageInput {...defaultProps} cliToolId="codex" />);
 
         openSelector();
-        fireEvent.click(screen.getByText('/prompts:github-insights'));
+        fireEvent.click(screen.getByText('$github-insights'));
 
-        expect(getTextarea()).toHaveValue('/prompts:github-insights ');
+        expect(getTextarea()).toHaveValue('$github-insights ');
       });
 
       it('TC-3: should show selector again after clearing message in free input mode', () => {

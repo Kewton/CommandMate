@@ -227,7 +227,8 @@ tests/
 | `src/lib/file-operations.ts` | ファイルCRUD操作（5層セキュリティ）、`readFileLineRange` で行範囲ストリーミング読み取り（createReadStream + readline、メモリO(チャンク)）（Issue #723） |
 | `src/lib/git/clone-manager.ts` | クローン処理管理（排他制御） |
 | `src/lib/version-checker.ts` | バージョンアップ通知 |
-| `src/lib/slash-commands.ts` | スラッシュコマンドローダー（.claude/commands, .claude/skills, .codex/skills対応、getCopilotBuiltinCommands追加）（Issue #166, #547） |
+| `src/lib/slash-commands.ts` | スラッシュコマンドローダー（.claude/commands, .claude/skills, .codex/skills対応、getCopilotBuiltinCommands追加）（Issue #166, #547）。Issue #790で `.codex/prompts/` ローダ（loadCodexPrompts/parseCodexPromptFile/CODEX_PROMPTS_SUBDIR）を廃止（Codex CLI が読まないディレクトリのため）。Codex skill は `.codex/skills/{name}/SKILL.md` + `~/.codex/skills/.system/*` built-in のみ（loadCodexSkills の expandSystem 再帰スキャン） |
+| `src/lib/slash-command-format.ts` | スラッシュコマンドトリガ表記（getSlashCommandTrigger）。Issue #790で Codex skill（`source==='codex-skill'`）は Codex CLI 公式構文 `$NAME`、その他（Claude/Copilot/Gemini）は `/NAME` を返す |
 | `src/lib/link-utils.ts` | リンク種別判定・相対パス解決・hrefサニタイズ（Issue #505） |
 | `src/lib/browser-compat/fullscreen-api.ts` | Fullscreen API vendor-prefix（webkit/moz/ms）互換シム（Issue #763）。isFullscreenSupportedCompat/getFullscreenElementCompat/requestFullscreenCompat/exitFullscreenCompat/addFullscreenChangeListenerCompat を export。ファイルローカル型 FullscreenElementCompat/FullscreenDocumentCompat + 型アサーション（declare global 禁止）、SSRガード維持、@ts-expect-error 0個。useFullscreen.ts から prefix シムを移送し prefix 由来 @ts-expect-error を全削除 |
 | `src/lib/url-path-encoder.ts` | ファイルパスURLエンコード |

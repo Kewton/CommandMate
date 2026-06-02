@@ -37,10 +37,9 @@ describe('SlashCommandSelector', () => {
         },
         {
           name: 'github-insights',
-          invocation: 'codex-prompt',
-          description: 'Codex custom prompt',
+          description: 'Codex skill',
           category: 'development',
-          filePath: '.codex/prompts/github-insights.md',
+          filePath: '.codex/skills/github-insights/SKILL.md',
           source: 'codex-skill',
           cliTools: ['codex'],
         },
@@ -204,7 +203,7 @@ describe('SlashCommandSelector', () => {
       await waitFor(() => {
         expect(screen.getByText('/work-plan')).toBeInTheDocument();
         expect(screen.queryByText('/tdd-impl')).not.toBeInTheDocument();
-        expect(screen.queryByText('/prompts:github-insights')).not.toBeInTheDocument();
+        expect(screen.queryByText('$github-insights')).not.toBeInTheDocument();
       });
     });
   });
