@@ -445,6 +445,14 @@ interface DesktopHeaderProps {
   activeCliTab?: CLIToolType;
   /** Callback when an agent status icon is clicked (PC only, optional). Issue #749 */
   onActiveCliTabChange?: (cliId: CLIToolType) => void;
+  /**
+   * Callback to kill the active CLI session (PC only, optional). Issue #784.
+   * Restores the kill button removed by #728 (split-ification) and missed by
+   * #755 (Desktop/Mobile split). When provided and the active CLI session is
+   * running, a kill button is rendered between the per-agent status row and the
+   * worktree status dropdown.
+   */
+  onKillSession?: () => void;
 }
 
 /** Worktree status options for dropdown */
@@ -474,6 +482,7 @@ export const DesktopHeader = memo(function DesktopHeader({
   selectedAgents,
   activeCliTab,
   onActiveCliTabChange,
+  onKillSession,
 }: DesktopHeaderProps) {
   const statusConfig = DESKTOP_STATUS_CONFIG[status];
   // Issue #111: DRY - Use shared truncateString utility
@@ -610,6 +619,24 @@ export const DesktopHeader = memo(function DesktopHeader({
               );
             })}
           </div>
+        )}
+        {/* Issue #784: Session kill button (PC only). Restored after the
+            #728 (split-ification) + #755 (Desktop/Mobile split) regression that
+            left the kill confirmation modal unreachable on PC. Mirrors the
+            Mobile kill button (WorktreeDetailRefactored.tsx:409-421). Rendered
+            only when a kill handler is wired AND the active CLI session is
+            running; click opens the existing confirmation modal. */}
+        {onKillSession && activeCliTab && sessionStatusByCli?.[activeCliTab]?.isRunning && (
+          <button
+            type="button"
+            onClick={onKillSession}
+            className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium rounded-lg text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors flex-shrink-0"
+            aria-label="End session"
+            data-testid="desktop-kill-session"
+          >
+            <span aria-hidden="true">&#x2715;</span>
+            End
+          </button>
         )}
         {/* Worktree status dropdown */}
         {onWorktreeStatusChange && (

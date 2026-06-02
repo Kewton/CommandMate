@@ -275,3 +275,119 @@ describe('DesktopHeader per-agent status row (Issue #749)', () => {
     });
   });
 });
+
+/**
+ * Issue #784: PC DesktopHeader session kill button.
+ *
+ * Regression restored after #728 (split-ification removed the terminal-header
+ * kill button) + #755 (Desktop/Mobile split restored the Mobile kill button
+ * but missed the Desktop one). The Mobile kill button lives in
+ * WorktreeDetailRefactored.tsx:409-421. This suite verifies the additive
+ * desktop-kill-session button placed between the per-agent status row and the
+ * worktree status dropdown: it renders only when the active CLI session is
+ * running, calls onKillSession on click, and is backward compatible (no button
+ * when the handler is omitted or the session is idle).
+ */
+describe('DesktopHeader session kill button (Issue #784)', () => {
+  const runningStatus: SessionStatusMap = {
+    claude: { isRunning: true, isWaitingForResponse: false, isProcessing: false },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('rendering condition', () => {
+    it('renders the kill button when the active CLI session is running', () => {
+      render(
+        <DesktopHeader
+          {...baseProps}
+          activeCliTab="claude"
+          sessionStatusByCli={runningStatus}
+          onKillSession={vi.fn()}
+        />
+      );
+      expect(screen.getByTestId('desktop-kill-session')).toBeDefined();
+    });
+
+    it('does NOT render the kill button when the active CLI session is not running', () => {
+      const idleStatus: SessionStatusMap = {
+        claude: { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+      };
+      render(
+        <DesktopHeader
+          {...baseProps}
+          activeCliTab="claude"
+          sessionStatusByCli={idleStatus}
+          onKillSession={vi.fn()}
+        />
+      );
+      expect(screen.queryByTestId('desktop-kill-session')).toBeNull();
+    });
+
+    it('does NOT render the kill button when there is no session status entry for the active CLI', () => {
+      render(
+        <DesktopHeader
+          {...baseProps}
+          activeCliTab="codex"
+          sessionStatusByCli={runningStatus}
+          onKillSession={vi.fn()}
+        />
+      );
+      // codex has no entry → button hidden
+      expect(screen.queryByTestId('desktop-kill-session')).toBeNull();
+    });
+
+    it('does NOT render the kill button when onKillSession is omitted (backward compat)', () => {
+      render(
+        <DesktopHeader
+          {...baseProps}
+          activeCliTab="claude"
+          sessionStatusByCli={runningStatus}
+        />
+      );
+      expect(screen.queryByTestId('desktop-kill-session')).toBeNull();
+    });
+
+    it('does NOT render the kill button when activeCliTab is omitted', () => {
+      render(
+        <DesktopHeader
+          {...baseProps}
+          sessionStatusByCli={runningStatus}
+          onKillSession={vi.fn()}
+        />
+      );
+      expect(screen.queryByTestId('desktop-kill-session')).toBeNull();
+    });
+  });
+
+  describe('accessibility + interaction', () => {
+    it('has aria-label="End session"', () => {
+      render(
+        <DesktopHeader
+          {...baseProps}
+          activeCliTab="claude"
+          sessionStatusByCli={runningStatus}
+          onKillSession={vi.fn()}
+        />
+      );
+      expect(screen.getByTestId('desktop-kill-session').getAttribute('aria-label')).toBe(
+        'End session'
+      );
+    });
+
+    it('calls onKillSession when clicked', () => {
+      const onKillSession = vi.fn();
+      render(
+        <DesktopHeader
+          {...baseProps}
+          activeCliTab="claude"
+          sessionStatusByCli={runningStatus}
+          onKillSession={onKillSession}
+        />
+      );
+      fireEvent.click(screen.getByTestId('desktop-kill-session'));
+      expect(onKillSession).toHaveBeenCalledTimes(1);
+    });
+  });
+});
