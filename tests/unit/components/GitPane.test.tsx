@@ -11,6 +11,7 @@ import { GitPane } from '@/components/worktree/GitPane';
 import {
   CHECKOUT_HISTORY_LOSS_WARNING,
   CHECKOUT_RUNNING_SESSION_WARNING,
+  RESET_HARD_HISTORY_LOSS_WARNING,
 } from '@/config/git-status-config';
 
 // ----------------------------------------------------------------------------
@@ -38,6 +39,14 @@ interface EndpointConfig {
   checkout?: { ok: boolean; json: unknown };
   branchCreate?: { ok: boolean; json: unknown };
   branchDelete?: { ok: boolean; json: unknown };
+  // Issue #782
+  stash?: { ok: boolean; json: unknown };
+  stashPush?: { ok: boolean; json: unknown };
+  stashPop?: { ok: boolean; json: unknown };
+  stashApply?: { ok: boolean; json: unknown };
+  stashDrop?: { ok: boolean; json: unknown };
+  reset?: { ok: boolean; json: unknown };
+  revert?: { ok: boolean; json: unknown };
 }
 
 const DEFAULT_STATUS = {
@@ -122,6 +131,28 @@ function setEndpoints(config: EndpointConfig = {}) {
     }
     if (url.includes('/git/branches')) {
       return makeResponse(endpoints.branches ?? { ok: true, json: DEFAULT_BRANCHES });
+    }
+    // Issue #782: stash + reset/revert. Order matters — more specific paths first.
+    if (url.includes('/git/stash/push') && method === 'POST') {
+      return makeResponse(endpoints.stashPush ?? { ok: true, json: { success: true } });
+    }
+    if (url.includes('/git/stash/pop') && method === 'POST') {
+      return makeResponse(endpoints.stashPop ?? { ok: true, json: { success: true, conflict: false } });
+    }
+    if (url.includes('/git/stash/apply') && method === 'POST') {
+      return makeResponse(endpoints.stashApply ?? { ok: true, json: { success: true, conflict: false } });
+    }
+    if (method === 'DELETE' && /\/git\/stash\/\d+/.test(url)) {
+      return makeResponse(endpoints.stashDrop ?? { ok: true, json: { success: true, dropped: 0 } });
+    }
+    if (url.includes('/git/stash')) {
+      return makeResponse(endpoints.stash ?? { ok: true, json: { stashes: [] } });
+    }
+    if (url.includes('/git/reset') && method === 'POST') {
+      return makeResponse(endpoints.reset ?? { ok: true, json: { success: true, currentBranch: 'feature/test', isDirty: false } });
+    }
+    if (url.includes('/git/revert') && method === 'POST') {
+      return makeResponse(endpoints.revert ?? { ok: true, json: { success: true, conflict: false } });
     }
     if (url.includes('/git/status')) {
       return makeResponse(endpoints.status ?? { ok: true, json: DEFAULT_STATUS });
@@ -1053,6 +1084,235 @@ describe('GitPane', () => {
             (call[1] as { method?: string } | undefined)?.method === 'POST'
         );
         expect(delCall).toBeTruthy();
+      });
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Issue #782: Stash + Danger Zone
+  // --------------------------------------------------------------------------
+
+  describe('Stash (Issue #782)', () => {
+    it('renders the stash section and fetches the stash list on mount', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('git-stash-section')).toBeInTheDocument();
+      });
+      const stashCall = mockFetch.mock.calls.some(
+        (call) => typeof call[0] === 'string' && call[0].includes('/git/stash') && !call[0].match(/\/git\/stash\/\d/)
+      );
+      expect(stashCall).toBe(true);
+    });
+
+    it('does NOT poll the stash list (mount + mutation only, S3-004)', async () => {
+      vi.useFakeTimers();
+      try {
+        render(<GitPane {...defaultProps} />);
+        // Flush the mount microtasks.
+        await vi.advanceTimersByTimeAsync(0);
+        const before = mockFetch.mock.calls.filter(
+          (call) => typeof call[0] === 'string' && call[0].includes('/git/stash')
+        ).length;
+        // Advance well past the 5s status poll interval.
+        await vi.advanceTimersByTimeAsync(15000);
+        const after = mockFetch.mock.calls.filter(
+          (call) => typeof call[0] === 'string' && call[0].includes('/git/stash')
+        ).length;
+        expect(after).toBe(before);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('lists stashes returned by the API', async () => {
+      setEndpoints({
+        stash: {
+          ok: true,
+          json: {
+            stashes: [
+              { index: 0, message: 'WIP on main: a', branch: 'main', date: '2026-01-01', sha: 'sha0' },
+            ],
+          },
+        },
+      });
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('git-stash-row')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('stash-pop-button')).toBeInTheDocument();
+      expect(screen.getByTestId('stash-apply-button')).toBeInTheDocument();
+      expect(screen.getByTestId('stash-drop-button')).toBeInTheDocument();
+    });
+
+    it('pushes a stash via the push button', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('stash-push-button')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByTestId('stash-push-button'));
+      await waitFor(() => {
+        const pushCall = mockFetch.mock.calls.find(
+          (call) =>
+            typeof call[0] === 'string' &&
+            call[0].includes('/git/stash/push') &&
+            (call[1] as { method?: string } | undefined)?.method === 'POST'
+        );
+        expect(pushCall).toBeTruthy();
+      });
+    });
+
+    it('drop requires confirmation then dispatches DELETE', async () => {
+      setEndpoints({
+        stash: {
+          ok: true,
+          json: {
+            stashes: [{ index: 0, message: 'WIP on main: a', branch: 'main', date: '2026-01-01', sha: 'sha0' }],
+          },
+        },
+      });
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('stash-drop-button')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByTestId('stash-drop-button'));
+      await waitFor(() => {
+        expect(screen.getByTestId('git-stash-drop-confirm-button')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByTestId('git-stash-drop-confirm-button'));
+      await waitFor(() => {
+        const dropCall = mockFetch.mock.calls.find(
+          (call) =>
+            typeof call[0] === 'string' &&
+            /\/git\/stash\/0$/.test(call[0]) &&
+            (call[1] as { method?: string } | undefined)?.method === 'DELETE'
+        );
+        expect(dropCall).toBeTruthy();
+      });
+    });
+
+    it('surfaces a conflict notice when pop returns 200 with conflict (parity with revert)', async () => {
+      setEndpoints({
+        stash: {
+          ok: true,
+          json: {
+            stashes: [{ index: 0, message: 'WIP on main: a', branch: 'main', date: '2026-01-01', sha: 'sha0' }],
+          },
+        },
+        stashPop: {
+          ok: true,
+          json: { success: true, conflict: true, conflictFiles: ['a.ts'], stashRetained: true },
+        },
+      });
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('stash-pop-button')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByTestId('stash-pop-button'));
+      await waitFor(() => {
+        expect(screen.getByTestId('git-stash-conflict')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('git-stash-conflict').textContent).toContain('a.ts');
+      expect(screen.getByTestId('git-stash-conflict').textContent).toContain('stash retained');
+    });
+  });
+
+  describe('Danger Zone (Issue #782)', () => {
+    it('renders the Danger Zone section collapsed by default', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('git-danger-zone-section')).toBeInTheDocument();
+      });
+      // Collapsed: the Reset/Revert open buttons are not rendered yet.
+      expect(screen.queryByTestId('git-danger-zone-reset-open')).not.toBeInTheDocument();
+    });
+
+    it('opens the Reset modal and shows the hard-mode warnings + branch confirm input', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('git-danger-zone-toggle')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByTestId('git-danger-zone-toggle'));
+      fireEvent.click(screen.getByTestId('git-danger-zone-reset-open'));
+      await waitFor(() => {
+        expect(screen.getByTestId('reset-confirm')).toBeInTheDocument();
+      });
+      // Switch to hard mode -> warnings + confirm input appear.
+      fireEvent.click(screen.getByTestId('reset-mode-hard'));
+      expect(screen.getByTestId('reset-hard-history-loss-warning')).toHaveTextContent(
+        RESET_HARD_HISTORY_LOSS_WARNING
+      );
+      expect(screen.getByTestId('reset-hard-branch-input')).toBeInTheDocument();
+    });
+
+    it('keeps the hard Reset button disabled until the branch confirmation matches', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-danger-zone-toggle')).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('git-danger-zone-toggle'));
+      fireEvent.click(screen.getByTestId('git-danger-zone-reset-open'));
+      fireEvent.click(screen.getByTestId('reset-mode-hard'));
+      const confirmButton = screen.getByTestId('reset-confirm-button');
+      expect(confirmButton).toBeDisabled();
+      // DEFAULT_STATUS.currentBranch is 'feature/test'.
+      fireEvent.change(screen.getByTestId('reset-hard-branch-input'), {
+        target: { value: 'feature/test' },
+      });
+      expect(screen.getByTestId('reset-confirm-button')).not.toBeDisabled();
+    });
+
+    it('dispatches a soft reset with target HEAD', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-danger-zone-toggle')).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('git-danger-zone-toggle'));
+      fireEvent.click(screen.getByTestId('git-danger-zone-reset-open'));
+      fireEvent.click(screen.getByTestId('reset-mode-soft'));
+      fireEvent.click(screen.getByTestId('reset-confirm-button'));
+      await waitFor(() => {
+        const resetCall = mockFetch.mock.calls.find(
+          (call) =>
+            typeof call[0] === 'string' &&
+            call[0].includes('/git/reset') &&
+            (call[1] as { method?: string } | undefined)?.method === 'POST'
+        );
+        expect(resetCall).toBeTruthy();
+        const body = JSON.parse((resetCall?.[1] as { body: string }).body);
+        expect(body).toMatchObject({ target: 'HEAD', mode: 'soft' });
+      });
+    });
+
+    it('Revert button is disabled until a commit is selected', async () => {
+      setEndpoints({
+        log: {
+          ok: true,
+          json: {
+            commits: [
+              { hash: 'deadbeef0000000000000000000000000000abcd', shortHash: 'deadbee', message: 'm', author: 'a', date: '2026-01-01' },
+            ],
+          },
+        },
+      });
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-danger-zone-toggle')).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('git-danger-zone-toggle'));
+      expect(screen.getByTestId('git-danger-zone-revert-open')).toBeDisabled();
+
+      // Select a commit, then the revert open button becomes enabled.
+      fireEvent.click(screen.getByText('m'));
+      await waitFor(() => {
+        expect(screen.getByTestId('git-danger-zone-revert-open')).not.toBeDisabled();
+      });
+      fireEvent.click(screen.getByTestId('git-danger-zone-revert-open'));
+      await waitFor(() => expect(screen.getByTestId('revert-confirm')).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('revert-confirm-button'));
+      await waitFor(() => {
+        const revertCall = mockFetch.mock.calls.find(
+          (call) =>
+            typeof call[0] === 'string' &&
+            call[0].includes('/git/revert') &&
+            (call[1] as { method?: string } | undefined)?.method === 'POST'
+        );
+        expect(revertCall).toBeTruthy();
+        const body = JSON.parse((revertCall?.[1] as { body: string }).body);
+        expect(body.commitHash).toBe('deadbeef0000000000000000000000000000abcd');
       });
     });
   });
