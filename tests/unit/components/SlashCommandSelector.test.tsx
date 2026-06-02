@@ -204,7 +204,7 @@ describe('SlashCommandSelector', () => {
       await waitFor(() => {
         expect(screen.getByText('/work-plan')).toBeInTheDocument();
         expect(screen.queryByText('/tdd-impl')).not.toBeInTheDocument();
-        expect(screen.queryByText('/prompts:github-insights')).not.toBeInTheDocument();
+        expect(screen.queryByText('/github-insights')).not.toBeInTheDocument();
       });
     });
   });
