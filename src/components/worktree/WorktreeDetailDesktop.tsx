@@ -146,6 +146,8 @@ export interface WorktreeDetailDesktopProps {
   onFileInputChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
 
   // Kill session confirmation
+  /** Opens the kill confirmation modal for the active CLI session (Issue #784). */
+  onKillSession: () => void;
   showKillConfirm: boolean;
   onKillCancel: () => void;
   onKillConfirm: () => void;
@@ -239,6 +241,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   onWorktreeUpdate,
   fileInputRef,
   onFileInputChange,
+  onKillSession,
   showKillConfirm,
   onKillCancel,
   onKillConfirm,
@@ -589,6 +592,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             selectedAgents={selectedAgents}
             activeCliTab={activeCliTab}
             onActiveCliTabChange={setActiveCliTab}
+            onKillSession={onKillSession}
           />
           {/* Issue #111: Branch mismatch warning */}
           {worktree?.gitStatus && (
