@@ -455,10 +455,17 @@ export function getGeminiBuiltinCommands(): SlashCommand[] {
 }
 
 /**
- * Deduplicate commands and skills by name (Issue #343)
+ * Deduplicate commands and skills by name + CLI tool (Issue #343, #800)
  *
- * Skills are registered first, then commands override any skills with
- * the same name. This ensures commands always take priority over skills.
+ * Skills are registered first, then commands override any skills with the
+ * same name AND the same CLI tool scope. This ensures commands take priority
+ * over skills while keeping CLI-specific entries from masking each other.
+ *
+ * Issue #800: The dedup key is `name + cliTools` (not name alone). Entries
+ * that share a name but target disjoint CLI tools (e.g. a Codex skill with
+ * `cliTools: ['codex']` and a Claude command with `cliTools: undefined`) now
+ * coexist instead of one silently overriding the other. Only entries with an
+ * identical name and identical CLI tool scope are deduplicated (later wins).
  *
  * @param skills - Array of skill SlashCommand objects
  * @param commands - Array of command SlashCommand objects (take priority)
@@ -467,14 +474,23 @@ export function getGeminiBuiltinCommands(): SlashCommand[] {
 export function deduplicateByName(skills: SlashCommand[], commands: SlashCommand[]): SlashCommand[] {
   const map = new Map<string, SlashCommand>();
 
+  // Build a key from name + normalized CLI tool scope. Undefined/empty cliTools
+  // (= Claude-only, backward compatible) collapse to the 'claude' sentinel so
+  // they stay distinct from CLI-specific entries that share the same name.
+  const keyOf = (c: SlashCommand): string => {
+    const toolsKey =
+      c.cliTools && c.cliTools.length > 0 ? [...c.cliTools].sort().join(',') : 'claude';
+    return `${c.name}::${toolsKey}`;
+  };
+
   // Register skills first
   for (const skill of skills) {
-    map.set(skill.name, skill);
+    map.set(keyOf(skill), skill);
   }
 
-  // Commands override skills with same name
+  // Commands override skills with the same name AND same CLI tool scope
   for (const cmd of commands) {
-    map.set(cmd.name, cmd);
+    map.set(keyOf(cmd), cmd);
   }
 
   return Array.from(map.values());

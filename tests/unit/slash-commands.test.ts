@@ -766,7 +766,8 @@ describe('deduplicateByName', () => {
     // Should have 3 unique entries
     expect(result).toHaveLength(3);
 
-    // shared-name should be the command version (override)
+    // shared-name should be the command version (override): same name + same
+    // (undefined) cliTools, so the command wins.
     const shared = result.find((c) => c.name === 'shared-name');
     expect(shared?.description).toBe('Command version');
     expect(shared?.source).toBe('worktree');
@@ -779,6 +780,111 @@ describe('deduplicateByName', () => {
     // cmd-only should remain
     const cmdOnly = result.find((c) => c.name === 'cmd-only');
     expect(cmdOnly).toBeDefined();
+  });
+
+  it('should keep same-name entries with disjoint cliTools (Issue #800)', async () => {
+    const { deduplicateByName } = await import('@/lib/slash-commands');
+
+    // Codex skill from .codex/skills/ (cliTools: ['codex'])
+    const skills: SlashCommand[] = [
+      {
+        name: 'orchestrate',
+        description: 'Codex orchestrate skill',
+        category: 'skill',
+        source: 'codex-skill',
+        cliTools: ['codex'],
+        filePath: '.codex/skills/orchestrate/SKILL.md',
+      },
+    ];
+
+    // Claude command from .claude/commands/ (cliTools: undefined => Claude-only)
+    const commands: SlashCommand[] = [
+      {
+        name: 'orchestrate',
+        description: 'Claude orchestrate command',
+        category: 'workflow',
+        source: 'worktree',
+        filePath: '.claude/commands/orchestrate.md',
+      },
+    ];
+
+    const result = deduplicateByName(skills, commands);
+
+    // Both entries coexist because their cliTools are disjoint
+    expect(result).toHaveLength(2);
+
+    const codexEntry = result.find((c) => c.source === 'codex-skill');
+    expect(codexEntry?.description).toBe('Codex orchestrate skill');
+    expect(codexEntry?.cliTools).toEqual(['codex']);
+
+    const claudeEntry = result.find((c) => c.cliTools === undefined);
+    expect(claudeEntry?.description).toBe('Claude orchestrate command');
+    expect(claudeEntry?.source).toBe('worktree');
+  });
+
+  it('should override only when name AND cliTools are identical (Issue #800)', async () => {
+    const { deduplicateByName } = await import('@/lib/slash-commands');
+
+    const skills: SlashCommand[] = [
+      {
+        name: 'release',
+        description: 'Codex release skill (old)',
+        category: 'skill',
+        source: 'codex-skill',
+        cliTools: ['codex'],
+        filePath: '.codex/skills/release/SKILL.md',
+      },
+    ];
+
+    const commands: SlashCommand[] = [
+      {
+        name: 'release',
+        description: 'Codex release command (new)',
+        category: 'workflow',
+        source: 'worktree',
+        cliTools: ['codex'],
+        filePath: '.claude/commands/release.md',
+      },
+    ];
+
+    const result = deduplicateByName(skills, commands);
+
+    // Same name + same cliTools => later (command) wins, single entry
+    expect(result).toHaveLength(1);
+    expect(result[0].description).toBe('Codex release command (new)');
+    expect(result[0].source).toBe('worktree');
+  });
+
+  it('should treat cliTools order as irrelevant when deduplicating (Issue #800)', async () => {
+    const { deduplicateByName } = await import('@/lib/slash-commands');
+
+    const skills: SlashCommand[] = [
+      {
+        name: 'shared',
+        description: 'Skill version',
+        category: 'skill',
+        source: 'skill',
+        cliTools: ['codex', 'gemini'],
+        filePath: '.claude/skills/shared/SKILL.md',
+      },
+    ];
+
+    const commands: SlashCommand[] = [
+      {
+        name: 'shared',
+        description: 'Command version',
+        category: 'workflow',
+        source: 'worktree',
+        cliTools: ['gemini', 'codex'],
+        filePath: '.claude/commands/shared.md',
+      },
+    ];
+
+    const result = deduplicateByName(skills, commands);
+
+    // Same name + same cliTools set (different order) => command overrides
+    expect(result).toHaveLength(1);
+    expect(result[0].description).toBe('Command version');
   });
 });
 
@@ -1238,9 +1344,11 @@ describe('Issue #586: Copilot builtins must not override Claude standard command
     expect(copilotBuiltins).toHaveLength(0);
   });
 
-  it('deduplicateByName should not be called with Copilot builtins - commands with same names should keep original cliTools', async () => {
+  it('deduplicateByName keeps Claude commands and Copilot builtins separate when names collide (Issue #800)', async () => {
     // Verify that Claude standard command names (clear, model, compact, etc.)
-    // are not overwritten by Copilot builtins in deduplicateByName
+    // are not overwritten by Copilot builtins in deduplicateByName. With the
+    // CLI-aware dedup (Issue #800), the Claude (cliTools=undefined) and Copilot
+    // (cliTools=['copilot']) versions target disjoint CLI tools, so both survive.
     const { deduplicateByName } = await import('@/lib/slash-commands');
 
     const claudeCommands: SlashCommand[] = [
@@ -1253,14 +1361,18 @@ describe('Issue #586: Copilot builtins must not override Claude standard command
       { name: 'model', description: 'Copilot model', category: 'standard-config', cliTools: ['copilot'], filePath: '', source: 'builtin' },
     ];
 
-    // If Copilot builtins are passed as skills (first arg), they get overridden by commands (second arg)
-    // But the bug was that they were in skills, and then mergeCommandGroups SF-1 override caused issues.
-    // The fix ensures Copilot builtins are never in deduplicateByName at all.
     const result = deduplicateByName(copilotBuiltins, claudeCommands);
 
-    // Claude commands should take priority
-    const clearCmd = result.find((c) => c.name === 'clear');
-    expect(clearCmd?.cliTools).toBeUndefined(); // Claude's version has no cliTools
-    expect(clearCmd?.description).toBe('Clear conversation');
+    // Both the Claude and Copilot versions of each name coexist (disjoint cliTools)
+    expect(result.filter((c) => c.name === 'clear')).toHaveLength(2);
+    expect(result.filter((c) => c.name === 'model')).toHaveLength(2);
+
+    // The Claude command keeps its undefined cliTools and is not masked
+    const claudeClear = result.find((c) => c.name === 'clear' && c.cliTools === undefined);
+    expect(claudeClear?.description).toBe('Clear conversation');
+
+    // The Copilot builtin keeps its cliTools scope
+    const copilotClear = result.find((c) => c.name === 'clear' && c.cliTools?.includes('copilot'));
+    expect(copilotClear?.description).toBe('Copilot clear');
   });
 });
