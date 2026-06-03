@@ -24,7 +24,7 @@
  * coupling via a minimal DTO/projection type.
  */
 
-import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN } from './cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CLAUDE_INTERRUPT_HINT_PATTERN } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
 import type { PromptDetectionResult } from './prompt-detector';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -313,6 +313,28 @@ export function detectSessionStatus(
       status: 'running',
       confidence: 'high',
       reason: 'thinking_indicator',
+      hasActivePrompt: false,
+      promptDetection,
+    };
+  }
+
+  // 2.6. Claude status-bar "esc to interrupt" detection — wider STATUS_CHECK_LINE_COUNT window (Issue #805)
+  // When Claude runs a subagent Task (e.g., /pm-auto-dev + general-purpose subagent), the
+  // bottom-of-screen task panel ("⏺ main" / "◯ general-purpose ... 55s" rows) pushes BOTH the
+  // "✶ Running…" spinner (top of the footer) and the "esc to interrupt" status bar above the
+  // narrow THINKING_TAIL_LINE_COUNT (5) window used by step 2. The visible "❯" input box then
+  // matches the input-prompt check at step 3, so the session was misreported as Ready.
+  //
+  // The "esc to interrupt" status bar appears only while Claude is actively processing (idle
+  // sessions show "? for shortcuts" instead) and is repainted live rather than lingering in
+  // scrollback, so matching it in the wider 15-line footer window is a safe running signal and
+  // does not reintroduce the Issue #188 spinner-summary false positive (only the spinner+ellipsis
+  // branch is restricted to the 5-line window).
+  if (cliToolId === 'claude' && CLAUDE_INTERRUPT_HINT_PATTERN.test(lastLines)) {
+    return {
+      status: 'running',
+      confidence: 'high',
+      reason: STATUS_REASON.THINKING_INDICATOR,
       hasActivePrompt: false,
       promptDetection,
     };
