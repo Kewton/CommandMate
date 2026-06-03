@@ -419,6 +419,12 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
           onInsertConsumed={onInsertConsumed}
           splitIndex={splitIndex}
           onFocus={onFocus}
+          // Issue #806: surface a "queued (session busy)" toast when sending to
+          // a session that is still processing the previous task. isProcessing
+          // is sourced from this split's own poller (terminal.isRunning), and
+          // showToast reuses the existing history toast surface.
+          isProcessing={terminal.isRunning}
+          showToast={showToast}
         />
       </div>
     ),
@@ -444,6 +450,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       autoYesExpiresAt,
       lastAutoResponse,
       onAutoYesToggle,
+      // Issue #806: toast surface for the "queued (session busy)" hint.
+      showToast,
     ],
   );
 
