@@ -277,6 +277,107 @@ describe('sendPromptAnswer', () => {
   });
 
   // =========================================================================
+  // Issue #807: AskUserQuestion picker (isAskUserQuestion) cursor engagement
+  // =========================================================================
+  describe('Issue #807: AskUserQuestion picker cursor engagement', () => {
+    it('engages the cursor with Down+Up before Enter when selecting the default (offset=0)', async () => {
+      const promptData: PromptData = {
+        type: 'multiple_choice',
+        question: 'Phase 5 に進んでよいですか？',
+        options: [
+          { number: 1, label: '実装に進む (pm-auto-dev)', isDefault: true },
+          { number: 2, label: '設計/計画を先に確認したい', isDefault: false },
+          { number: 3, label: 'ここで一旦停止', isDefault: false },
+          { number: 4, label: 'Type something.', isDefault: false },
+          { number: 5, label: 'Chat about this', isDefault: false },
+        ],
+        status: 'pending',
+        isAskUserQuestion: true,
+      };
+
+      await sendPromptAnswer({
+        sessionName: 'claude-test',
+        answer: '1',
+        cliToolId: 'claude',
+        promptData,
+      });
+
+      // Net-zero Down+Up nudge engages the picker cursor, then Enter confirms.
+      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Up', 'Enter']);
+      expect(sendKeys).not.toHaveBeenCalled();
+    });
+
+    it('does NOT add the nudge for non-default targets (offset != 0 already engages cursor)', async () => {
+      const promptData: PromptData = {
+        type: 'multiple_choice',
+        question: 'Choose:',
+        options: [
+          { number: 1, label: 'A', isDefault: true },
+          { number: 2, label: 'B', isDefault: false },
+          { number: 3, label: 'C', isDefault: false },
+        ],
+        status: 'pending',
+        isAskUserQuestion: true,
+      };
+
+      await sendPromptAnswer({
+        sessionName: 'claude-test',
+        answer: '3',
+        cliToolId: 'claude',
+        promptData,
+      });
+
+      // offset = 3 - 1 = 2 -> the navigation itself engages the cursor.
+      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Down', 'Enter']);
+    });
+
+    it('keeps bare Enter for the default option when isAskUserQuestion is NOT set (legacy unchanged)', async () => {
+      const promptData: PromptData = {
+        type: 'multiple_choice',
+        question: 'Do you want to proceed?',
+        options: [
+          { number: 1, label: 'Yes', isDefault: true },
+          { number: 2, label: 'No', isDefault: false },
+        ],
+        status: 'pending',
+        // isAskUserQuestion intentionally omitted (legacy numbered confirmation)
+      };
+
+      await sendPromptAnswer({
+        sessionName: 'claude-test',
+        answer: '1',
+        cliToolId: 'claude',
+        promptData,
+      });
+
+      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Enter']);
+    });
+
+    it('does not apply the nudge to multi-select pickers (checkbox flow takes priority)', async () => {
+      const promptData: PromptData = {
+        type: 'multiple_choice',
+        question: 'Select tools:',
+        options: [
+          { number: 1, label: '[ ] Option A', isDefault: true },
+          { number: 2, label: '[ ] Option B', isDefault: false },
+        ],
+        status: 'pending',
+        isAskUserQuestion: true,
+      };
+
+      await sendPromptAnswer({
+        sessionName: 'claude-test',
+        answer: '1',
+        cliToolId: 'claude',
+        promptData,
+      });
+
+      // Multi-select: Space toggle + navigate to "Next" + Enter (unchanged path).
+      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Space', 'Down', 'Down', 'Enter']);
+    });
+  });
+
+  // =========================================================================
   // 8. Offset > 0 -> Down + Enter
   // =========================================================================
   describe('Offset > 0 (navigate Down)', () => {

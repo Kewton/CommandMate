@@ -116,6 +116,35 @@ const SUMMARY_LINE_PATTERN = /^\s*[…]?\s*[+\-↑↓⏵⏷]?\s*\d+\s+(?:pending
 const CLAUDE_PROMPT_FOOTER_PATTERN = /Esc\s+to\s+cancel\s*[·•]\s*Tab\s+to\s+amend/i;
 
 /**
+ * [Issue #807] Pattern for the Claude Code v2.x AskUserQuestion picker footer.
+ * Examples (the `·` separators and arrow glyphs vary by terminal width):
+ *   "Enter to select · ↑/↓ to navigate · Esc to cancel"
+ *   "Enter to select · Tab/Arrow keys to navigate · Esc to cancel"
+ *
+ * The AskUserQuestion picker renders an extra overlay BELOW this footer — most
+ * notably the /pm-auto-dev task panel ("6 tasks (4 done, 2 open)" etc.). That
+ * trailing panel poisons option collection: NORMAL_OPTION_PATTERN matches the
+ * "6 tasks ..." line as option 6, and the reverse scan then stops at this footer
+ * (isQuestionLikeLine matches "select"/"navigate"), so the real 1./2./3. picker
+ * options above are never collected and detection returns no_prompt. As a result
+ * auto-yes goes silent whenever the panel is rendered.
+ *
+ * Used (alongside CLAUDE_PROMPT_FOOTER_PATTERN) to trim effectiveEnd down to the
+ * footer line so the trailing panel falls outside the scan window entirely —
+ * the same defense-in-depth approach introduced for Issue #704. It also flags
+ * the prompt as an AskUserQuestion picker (isAskUserQuestion) so the answer
+ * sender can engage the picker cursor before confirming the default option.
+ *
+ * Distinct from CLAUDE_PROMPT_FOOTER_PATTERN (old Bash-tool confirmation footer,
+ * "Esc to cancel · Tab to amend") which this pattern intentionally does NOT match,
+ * keeping the old-format detection path byte-for-byte unchanged.
+ *
+ * Linear pattern, single unbounded quantifier between literal anchors —
+ * ReDoS safe (S4-001).
+ */
+const CLAUDE_ASK_USER_QUESTION_FOOTER_PATTERN = /Enter\s+to\s+select\b.*\bnavigate\b/i;
+
+/**
  * Codex/OpenAI TUI confirmation footer shown beneath interactive choices.
  * When this footer is present, numbered options form an active prompt even if
  * the default cursor marker is missing from the capture output.
@@ -504,6 +533,7 @@ function extractInstructionText(
  * @param output - Original output text (used for rawContent truncation)
  * @param truncateRawContentFn - Function to truncate raw content
  * @param submitMode - Optional submit mode for the prompt (Issue #616)
+ * @param isAskUserQuestion - Whether this is a Claude Code v2.x AskUserQuestion picker (Issue #807)
  * @returns PromptDetectionResult with isPrompt: true and multiple_choice data
  */
 export function buildMultipleChoiceResult(
@@ -513,6 +543,7 @@ export function buildMultipleChoiceResult(
   output: string,
   truncateRawContentFn: (content: string) => string,
   submitMode?: SubmitMode,
+  isAskUserQuestion?: boolean,
 ): PromptDetectionResult {
   return {
     isPrompt: true,
@@ -533,6 +564,7 @@ export function buildMultipleChoiceResult(
       status: 'pending',
       instructionText,
       ...(submitMode ? { submitMode } : {}),
+      ...(isAskUserQuestion ? { isAskUserQuestion: true } : {}),
     },
     cleanContent: question.trim(),
     rawContent: truncateRawContentFn(output.trim()),  // Issue #235: complete prompt output (truncated) [MF-001]
@@ -595,9 +627,18 @@ export function detectMultipleChoicePrompt(
   // Fallback: if no footer line is found, effectiveEnd is left unchanged —
   // every other CLI tool (Codex, Gemini, OpenCode, Copilot) is therefore
   // untouched by this branch (regression guard).
+  //
+  // [Issue #807] Also trim at the Claude Code v2.x AskUserQuestion picker footer
+  // so a trailing task panel overlay ("N tasks (...)" rows) below it cannot poison
+  // option collection. The bottom-most footer of either kind wins; when the match
+  // is the AskUserQuestion footer, flag the prompt so the answer sender can engage
+  // the picker cursor before confirming.
+  let hasAskUserQuestionFooter = false;
   for (let i = effectiveEnd - 1; i >= scanStart; i--) {
-    if (CLAUDE_PROMPT_FOOTER_PATTERN.test(lines[i])) {
+    const isAskUserQuestionFooter = CLAUDE_ASK_USER_QUESTION_FOOTER_PATTERN.test(lines[i]);
+    if (CLAUDE_PROMPT_FOOTER_PATTERN.test(lines[i]) || isAskUserQuestionFooter) {
       effectiveEnd = i;
+      hasAskUserQuestionFooter = isAskUserQuestionFooter;
       break;
     }
   }
@@ -825,5 +866,5 @@ export function detectMultipleChoicePrompt(
     ? (hasNumberFooter ? 'answer_only' : 'answer_then_enter')
     : undefined;
 
-  return buildMultipleChoiceResult(question, collectedOptions, instructionText, output, truncateRawContentFn, submitMode);
+  return buildMultipleChoiceResult(question, collectedOptions, instructionText, output, truncateRawContentFn, submitMode, hasAskUserQuestionFooter);
 }
