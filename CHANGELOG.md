@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-06-03
+
+### Added
+- feat(git): **GitPane に Git 操作機能を全 5 Phase で追加**。worktree 詳細の Git タブから status 確認〜stage/commit〜branch 操作〜stash/reset/revert〜push/pull/fetch までを UI 完結で実行可能に。
+  - **Phase 1 — Current Status (#779)**: 既存内部実装 `getGitStatus` を API 化（`GET /api/worktrees/[id]/git/status`、`currentBranch` / `isDirty` / `aheadBehind` 等）し、GitPane 最上部に Current Status セクション（branch chip / dirty badge / ↑N ↓M / refresh、branch mismatch 警告、Mobile コンパクト版、visibilitychange 対応ポーリング）を追加 (Issue #779)
+  - **Phase 2 — stage/unstage/commit (#780)**: ローカル完結の write 操作を追加。`git/staged`（Staged/Unstaged/Untracked）/ `git/stage` / `git/unstage` / `git/commit`（空 commit 拒否）/ `git/working-diff` の各 API と Changes セクション（3 折り畳みリスト＋ファイル単位 Diff/Stage/Unstage）を追加。書き込みは Map 直列化 + `index.lock`→409 で排他制御し、#779 の `getGitStatus` バイト不変性を厳守 (Issue #780)
+  - **Phase 3 — branch list/checkout/create/delete (#781)**: `listBranches` / `checkoutBranch` / `createBranch` / `deleteBranch` と専用 typed error 6 種を追加。`git/branches` / `git/checkout`（remote は `switch -c --track` で detached HEAD 回避、`force` で dirty 破棄）/ `git/branch/create` / `git/branch/delete` の API、GitPane に Branches セクション（local/remote タブ、checkout/create/delete モーダル、dirty 時 checkout 警告・履歴喪失警告）を追加 (Issue #781)
+  - **Phase 4 — stash + reset/revert (Danger Zone) (#782)**: `stashPush/Pop/Apply/Drop` / `gitReset` / `gitRevert` と conflict リカバリ（200 で `{conflict, conflictFiles}` 返却）を追加。default branch への hard reset はサーバー側で拒否（`GitResetDefaultBranchError`→409）。GitPane に Stash セクションと Danger Zone（赤・デフォルト折り畳み、Reset/Revert モーダル＋hard branch-confirm・履歴喪失/実行中セッション警告）を追加。pop/apply の conflict は専用 notice として表面化 (Issue #782)
+  - **Phase 5 — push/pull/fetch + credential 処理 (#783)**: `gitFetch` / `gitPull` / `gitPush`、ネットワーク stderr 分類、credential 委譲（git credential helper / SSH-agent）、進捗 polling、abort semantics を追加。push は明示 refspec `${branch}:refs/heads/${branch}` で remote default 誤更新を封鎖、`main`/`develop` への force push は拒否し `forceWithLease` を推奨デフォルト化。logger に userinfo-URL redaction を追加し credential 付き URL の平文ログ漏洩を防止。force push は Danger Zone 内＋多段確認モーダル (Issue #783)
+- feat(memo): メモ登録上限を **10 → 20** に拡張し、MemoPane に title+content の client-side テキスト検索（`useMemoSearch` / `MemoSearchBar`、indexOf ベースで ReDoS 回避、debounce 300ms・最小2文字・IME 対応、フィルタ＋next/prev スクロール）を追加 (Issue #787)
+- feat(layout): PC版 `DesktopHeader` の per-agent status indicator を **HTML5 ネイティブ drag-and-drop** で terminal split にドロップして、その split の CLI tool を切り替え可能に。専用 MIME `application/x-commandmate-cli-tool` で cliId を publish、drop 先で allowed=cyan ring / forbidden=red ring を表示、同一 CLI 複数選択は reject＋warning toast。クリックでの `activeCliTab` 切替（#751）は維持、新規 props は全 optional で既存 call site 非破壊、Mobile 経路は非描画 (Issue #786)
+
+### Fixed
+- fix(layout): PC版でセッションを強制クローズする kill ボタンが消失していた問題を修正。#728（PC ターミナル 1-3 split 化）で Terminal header の kill ボタンを削除した際、#755（Desktop/Mobile 分割）で Mobile 経路のみ復活し Desktop 経路が復活漏れだった（#740 / #743 と同型の per-split 移行漏れパターン）。`DesktopHeader` に per-agent status row と worktree status dropdown の間へ kill button（赤・✕ icon・"End" label、表示条件 `sessionStatusByCli?.[activeCliTab]?.isRunning === true`、`data-testid="desktop-kill-session"`）を配置 (Issue #784)
+- fix(slash-commands): Codex CLI は skill を `$NAME` 構文で起動し `.codex/prompts/` を読まないため、`codex-skill` ソースのコマンド表記を `$NAME` に変更（Claude/Copilot/Gemini は `/NAME` 維持）し、未使用の `.codex/prompts` ローダー（`loadCodexPrompts` 等）と `codex-prompt` invocation を削除 (Issue #790)
+- fix(slash-commands): PC版 Codex タブの composer で先頭 `$` を入力しても slash command palette が開かなかった問題を修正（#790 で `$NAME` 表記化したが trigger 側が未対応だった）。`cliToolId === 'codex'` のときのみ先頭 `$` で palette を開くよう trigger 条件を拡張し、他タブでは `$` を通常文字として扱い誤発火を回避。既存 `/` trigger は不変 (Issue #799)
+- fix(slash-commands): 同名の `.claude/commands/*.md`（`cliTools: undefined`）が `deduplicateByName` で Codex skill を上書きし、その後 `filterCommandsByCliTool` で Claude 専用エントリが Codex タブから除外されて Codex palette からスキルが消える問題を修正。dedup マップのキーを `name` 単独から **`name + cliTools`** に変更し、CLI tool スコープが異なるエントリは共存、name と cliTool スコープが完全一致する場合のみ重複排除（後勝ち）するよう変更 (Issue #800)
+
 ## [0.6.0] - 2026-06-02
 
 ### Added (v0.6.0 リリース準備)
