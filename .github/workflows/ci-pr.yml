@@ -7,6 +7,23 @@ on:
     branches: [main, develop]
 
 jobs:
+  claudemd-size:
+    name: CLAUDE.md size check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check CLAUDE.md size
+        run: |
+          SIZE=$(wc -c < CLAUDE.md)
+          LIMIT=35000  # 35kB hard cap (Issue #809). Store module detail in docs/module-reference.md.
+          if [ "$SIZE" -gt "$LIMIT" ]; then
+            echo "::error::CLAUDE.md size $SIZE exceeds limit $LIMIT bytes. See docs/module-reference.md for detail storage."
+            exit 1
+          fi
+          echo "CLAUDE.md size: $SIZE bytes (under $LIMIT)"
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
