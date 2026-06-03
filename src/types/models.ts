@@ -215,6 +215,15 @@ export interface MultipleChoicePromptData extends BasePromptData {
   options: MultipleChoiceOption[];
   /** How to submit the answer: 'answer_only' (no Enter) or 'answer_then_enter' (default). Issue #616. */
   submitMode?: SubmitMode;
+  /**
+   * Whether this prompt is rendered as a Claude Code v2.x AskUserQuestion picker
+   * (arrow-key navigation, "Enter to select … to navigate" footer). Issue #807.
+   * When true, the answer sender engages the picker cursor with a net-zero
+   * Down+Up nudge before confirming the already-highlighted default option, since
+   * a bare Enter can fail to register on the picker. Absent/false for the legacy
+   * numbered-confirmation format, whose response behavior is therefore unchanged.
+   */
+  isAskUserQuestion?: boolean;
 }
 
 /**
