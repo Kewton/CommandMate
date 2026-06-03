@@ -16,7 +16,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
-import { getSlashCommandGroups, loadCodexSkills, loadCodexPrompts, getCopilotBuiltinCommands, getGeminiBuiltinCommands } from '@/lib/slash-commands';
+import { getSlashCommandGroups, loadCodexSkills, getCopilotBuiltinCommands, getGeminiBuiltinCommands } from '@/lib/slash-commands';
 import { getStandardCommandGroups } from '@/lib/standard-commands';
 import { mergeCommandGroups, filterCommandsByCliTool, groupByCategory } from '@/lib/command-merger';
 import { isValidWorktreePath } from '@/lib/security/worktree-path-validator';
@@ -101,15 +101,15 @@ export async function GET(
       worktreeGroups = [];
     }
 
-    // Load global Codex skills and prompts from ~/.codex/ (Issue #166)
+    // Load global Codex skills from ~/.codex/skills/ (Issue #166, #790)
+    // .codex/prompts/ is intentionally NOT loaded: Codex CLI never reads it, so
+    // surfacing those entries in the palette only misleads users.
     const globalCodexSkills = await loadCodexSkills().catch(() => []);
-    const globalCodexPrompts = await loadCodexPrompts().catch(() => []);
-    const allGlobalCodex = [...globalCodexSkills, ...globalCodexPrompts];
 
     // SF-1: Merge with worktree commands taking priority
-    // Include global Codex skills/prompts in worktree groups (local ones already included via getSlashCommandGroups)
-    const globalCodexGroups: SlashCommandGroup[] = allGlobalCodex.length > 0
-      ? [{ category: 'skill' as const, label: 'Skills', commands: allGlobalCodex }]
+    // Include global Codex skills in worktree groups (local ones already included via getSlashCommandGroups)
+    const globalCodexGroups: SlashCommandGroup[] = globalCodexSkills.length > 0
+      ? [{ category: 'skill' as const, label: 'Skills', commands: globalCodexSkills }]
       : [];
 
     // Builtins are injected per-cli to prevent unrelated tools from overriding

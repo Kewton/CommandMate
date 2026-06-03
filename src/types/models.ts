@@ -5,6 +5,17 @@
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 /**
+ * Remote ahead/behind counts relative to upstream
+ * Issue #779: git status API + GitPane Current Status (Phase 1/5)
+ */
+export interface AheadBehind {
+  /** Commits ahead of upstream */
+  ahead: number;
+  /** Commits behind upstream */
+  behind: number;
+}
+
+/**
  * Git status information for a worktree
  * Issue #111: Branch visualization feature
  *
@@ -12,7 +23,6 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
  * New fields should be optional (?) for backward compatibility
  *
  * @future Potential extensions:
- * - aheadBehind?: { ahead: number; behind: number } - Remote difference (separate Issue)
  * - stashCount?: number - Number of stashes
  * - lastCommitMessage?: string - Latest commit message
  */
@@ -27,6 +37,13 @@ export interface GitStatus {
   commitHash: string;
   /** True if there are uncommitted changes */
   isDirty: boolean;
+  /**
+   * Remote difference (Issue #779).
+   * - undefined: not computed (getGitStatus path / GET /api/worktrees/[id] payload)
+   * - null: computed but no upstream / detached HEAD / error
+   * - AheadBehind: successfully computed
+   */
+  aheadBehind?: AheadBehind | null;
 }
 
 /**
@@ -237,7 +254,7 @@ export interface ChatMessage {
 
 /**
  * Individual memo item for a worktree
- * Supports up to 5 memos per worktree (position 0-4)
+ * Supports up to 20 memos per worktree (position 0-19)
  */
 export interface WorktreeMemo {
   /** Unique memo ID (UUID) */
@@ -248,7 +265,7 @@ export interface WorktreeMemo {
   title: string;
   /** Memo content (max 10000 characters) */
   content: string;
-  /** Position in the memo list (0-4) */
+  /** Position in the memo list (0-19) */
   position: number;
   /** Creation timestamp */
   createdAt: Date;

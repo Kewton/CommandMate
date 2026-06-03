@@ -101,6 +101,13 @@ describe('MemoCard', () => {
       const card = screen.getByTestId('memo-card');
       expect(card).toHaveClass('custom-class');
     });
+
+    it('should expose data-memo-id anchor for scroll targeting (Issue #787)', () => {
+      render(<MemoCard {...defaultProps} />);
+
+      const card = screen.getByTestId('memo-card');
+      expect(card).toHaveAttribute('data-memo-id', mockMemo.id);
+    });
   });
 
   describe('Title editing', () => {

@@ -11,12 +11,15 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback, memo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
+import { Search } from 'lucide-react';
 import { MAX_MEMOS } from '@/config/memo-config';
 import { memoApi, handleApiError } from '@/lib/api-client';
+import { useMemoSearch } from '@/hooks/useMemoSearch';
 import type { WorktreeMemo } from '@/types/models';
 import { MemoCard } from './MemoCard';
 import { MemoAddButton } from './MemoAddButton';
+import { MemoSearchBar } from './MemoSearchBar';
 
 // ============================================================================
 // Types
@@ -54,6 +57,26 @@ export const MemoPane = memo(function MemoPane({
   const [isAdding, setIsAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
+
+  // Issue #787: in-pane title/content text search.
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
+  const {
+    query,
+    matches,
+    currentMatch,
+    totalCount,
+    setQuery,
+    reset: resetSearch,
+    navigateNext,
+    navigatePrev,
+    onCompositionStart,
+    onCompositionEnd,
+  } = useMemoSearch({ memos });
+
+  // Search is "active" once there is an effective query producing filtered results.
+  const isSearchActive = isSearchOpen && query.length > 0;
+  const displayedMemos = isSearchActive ? matches : memos;
 
   /**
    * Fetch memos from API
@@ -134,6 +157,40 @@ export const MemoPane = memo(function MemoPane({
     void fetchMemos();
   }, [fetchMemos]);
 
+  /**
+   * Issue #787: Toggle the search bar. Closing also resets the query so the
+   * full memo list (and the add button) is restored.
+   */
+  const handleToggleSearch = useCallback(() => {
+    setIsSearchOpen((prev) => {
+      if (prev) resetSearch();
+      return !prev;
+    });
+  }, [resetSearch]);
+
+  const handleCloseSearch = useCallback(() => {
+    setIsSearchOpen(false);
+    resetSearch();
+  }, [resetSearch]);
+
+  /**
+   * Issue #787: Scroll the currently focused match into view and focus it via
+   * its `data-memo-id` anchor. CSS Custom Highlight API is not applicable here
+   * because MemoCard renders title/content in editable input/textarea elements.
+   */
+  useEffect(() => {
+    if (!isSearchActive || currentMatch < 0) return;
+    const target = matches[currentMatch];
+    if (!target) return;
+    const el = listRef.current?.querySelector<HTMLElement>(
+      `[data-memo-id="${target.id}"]`
+    );
+    if (el) {
+      el.scrollIntoView({ block: 'nearest' });
+      el.focus({ preventScroll: true });
+    }
+  }, [isSearchActive, currentMatch, matches]);
+
   // Loading state
   if (isLoading) {
     return (
@@ -189,19 +246,59 @@ export const MemoPane = memo(function MemoPane({
 
   return (
     <div
+      ref={listRef}
       data-testid="memo-pane"
       className={`flex flex-col gap-4 p-4 overflow-y-auto ${className}`}
     >
-      {/* Empty state */}
-      {memos.length === 0 && !createError && (
+      {/* Issue #787: Header with search toggle / search bar */}
+      <div data-testid="memo-pane-header" className="flex items-center gap-2">
+        {isSearchOpen ? (
+          <div className="flex-1">
+            <MemoSearchBar
+              query={query}
+              onQueryChange={setQuery}
+              matchCount={totalCount}
+              currentIndex={currentMatch}
+              onNext={navigateNext}
+              onPrev={navigatePrev}
+              onClose={handleCloseSearch}
+              onCompositionStart={onCompositionStart}
+              onCompositionEnd={onCompositionEnd}
+            />
+          </div>
+        ) : (
+          <>
+            <div className="flex-1" />
+            <button
+              type="button"
+              data-testid="memo-search-toggle"
+              onClick={handleToggleSearch}
+              aria-label="Search memos"
+              className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors rounded"
+            >
+              <Search className="w-4 h-4" aria-hidden="true" />
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Empty state (only when there are no memos and search is not filtering) */}
+      {memos.length === 0 && !isSearchActive && !createError && (
         <div className="text-center py-8 text-gray-500 dark:text-gray-400">
           <p>No memos yet.</p>
           <p className="text-sm">Click the button below to add one.</p>
         </div>
       )}
 
+      {/* No-results state while searching */}
+      {isSearchActive && displayedMemos.length === 0 && (
+        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+          <p>No memos match your search.</p>
+        </div>
+      )}
+
       {/* Memo cards */}
-      {memos.map((memo) => (
+      {displayedMemos.map((memo) => (
         <MemoCard
           key={memo.id}
           memo={memo}
@@ -218,14 +315,16 @@ export const MemoPane = memo(function MemoPane({
         </div>
       )}
 
-      {/* Add button */}
-      <MemoAddButton
-        currentCount={memos.length}
-        maxCount={MAX_MEMOS}
-        onAdd={handleAddMemo}
-        isLoading={isAdding}
-        className="mt-2"
-      />
+      {/* Add button (hidden while searching) */}
+      {!isSearchActive && (
+        <MemoAddButton
+          currentCount={memos.length}
+          maxCount={MAX_MEMOS}
+          onAdd={handleAddMemo}
+          isLoading={isAdding}
+          className="mt-2"
+        />
+      )}
     </div>
   );
 });

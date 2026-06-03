@@ -43,10 +43,9 @@ describe('SlashCommandList', () => {
         },
         {
           name: 'github-insights',
-          invocation: 'codex-prompt',
-          description: 'Codex custom prompt',
+          description: 'Codex skill',
           category: 'development',
-          filePath: '.codex/prompts/github-insights.md',
+          filePath: '.codex/skills/github-insights/SKILL.md',
           source: 'codex-skill',
           cliTools: ['codex'],
         },
@@ -78,7 +77,7 @@ describe('SlashCommandList', () => {
       expect(screen.getByText('/work-plan')).toBeInTheDocument();
       expect(screen.getByText('/issue-create')).toBeInTheDocument();
       expect(screen.getByText('/tdd-impl')).toBeInTheDocument();
-      expect(screen.getByText('/prompts:github-insights')).toBeInTheDocument();
+      expect(screen.getByText('$github-insights')).toBeInTheDocument();
     });
 
     it('should render command descriptions', () => {

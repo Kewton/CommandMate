@@ -275,3 +275,239 @@ describe('DesktopHeader per-agent status row (Issue #749)', () => {
     });
   });
 });
+
+/**
+ * Issue #784: PC DesktopHeader session kill button.
+ *
+ * Regression restored after #728 (split-ification removed the terminal-header
+ * kill button) + #755 (Desktop/Mobile split restored the Mobile kill button
+ * but missed the Desktop one). The Mobile kill button lives in
+ * WorktreeDetailRefactored.tsx:409-421. This suite verifies the additive
+ * desktop-kill-session button placed between the per-agent status row and the
+ * worktree status dropdown: it renders only when the active CLI session is
+ * running, calls onKillSession on click, and is backward compatible (no button
+ * when the handler is omitted or the session is idle).
+ */
+describe('DesktopHeader session kill button (Issue #784)', () => {
+  const runningStatus: SessionStatusMap = {
+    claude: { isRunning: true, isWaitingForResponse: false, isProcessing: false },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('rendering condition', () => {
+    it('renders the kill button when the active CLI session is running', () => {
+      render(
+        <DesktopHeader
+          {...baseProps}
+          activeCliTab="claude"
+          sessionStatusByCli={runningStatus}
+          onKillSession={vi.fn()}
+        />
+      );
+      expect(screen.getByTestId('desktop-kill-session')).toBeDefined();
+    });
+
+    it('does NOT render the kill button when the active CLI session is not running', () => {
+      const idleStatus: SessionStatusMap = {
+        claude: { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+      };
+      render(
+        <DesktopHeader
+          {...baseProps}
+          activeCliTab="claude"
+          sessionStatusByCli={idleStatus}
+          onKillSession={vi.fn()}
+        />
+      );
+      expect(screen.queryByTestId('desktop-kill-session')).toBeNull();
+    });
+
+    it('does NOT render the kill button when there is no session status entry for the active CLI', () => {
+      render(
+        <DesktopHeader
+          {...baseProps}
+          activeCliTab="codex"
+          sessionStatusByCli={runningStatus}
+          onKillSession={vi.fn()}
+        />
+      );
+      // codex has no entry → button hidden
+      expect(screen.queryByTestId('desktop-kill-session')).toBeNull();
+    });
+
+    it('does NOT render the kill button when onKillSession is omitted (backward compat)', () => {
+      render(
+        <DesktopHeader
+          {...baseProps}
+          activeCliTab="claude"
+          sessionStatusByCli={runningStatus}
+        />
+      );
+      expect(screen.queryByTestId('desktop-kill-session')).toBeNull();
+    });
+
+    it('does NOT render the kill button when activeCliTab is omitted', () => {
+      render(
+        <DesktopHeader
+          {...baseProps}
+          sessionStatusByCli={runningStatus}
+          onKillSession={vi.fn()}
+        />
+      );
+      expect(screen.queryByTestId('desktop-kill-session')).toBeNull();
+    });
+  });
+
+  describe('accessibility + interaction', () => {
+    it('has aria-label="End session"', () => {
+      render(
+        <DesktopHeader
+          {...baseProps}
+          activeCliTab="claude"
+          sessionStatusByCli={runningStatus}
+          onKillSession={vi.fn()}
+        />
+      );
+      expect(screen.getByTestId('desktop-kill-session').getAttribute('aria-label')).toBe(
+        'End session'
+      );
+    });
+
+    it('calls onKillSession when clicked', () => {
+      const onKillSession = vi.fn();
+      render(
+        <DesktopHeader
+          {...baseProps}
+          activeCliTab="claude"
+          sessionStatusByCli={runningStatus}
+          onKillSession={onKillSession}
+        />
+      );
+      fireEvent.click(screen.getByTestId('desktop-kill-session'));
+      expect(onKillSession).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+/**
+ * Issue #786: DesktopHeader per-agent indicator as a drag source.
+ *
+ * The `desktop-agent-status-${cliId}` button becomes draggable so it can be
+ * dropped on a terminal split to switch that split's CLI. The existing click
+ * behavior (#749/#751: onActiveCliTabChange) MUST be preserved — click and drag
+ * are mutually exclusive (S3-002).
+ */
+const DND_MIME = 'application/x-commandmate-cli-tool';
+
+function makeDataTransfer() {
+  const store: Record<string, string> = {};
+  return {
+    dropEffect: 'none',
+    effectAllowed: 'uninitialized',
+    types: Object.keys(store),
+    getData: (type: string) => store[type] ?? '',
+    setData: (type: string, val: string) => {
+      store[type] = val;
+    },
+  };
+}
+
+describe('DesktopHeader agent indicator drag source (Issue #786)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('marks each agent indicator button as draggable', () => {
+    render(<DesktopHeader {...baseProps} selectedAgents={['claude', 'codex']} />);
+    const btn = screen.getByTestId('desktop-agent-status-claude');
+    expect(btn.getAttribute('draggable')).toBe('true');
+  });
+
+  it('onDragStart writes the cliId to dataTransfer with effectAllowed=move', () => {
+    render(<DesktopHeader {...baseProps} selectedAgents={['claude', 'codex']} />);
+    const btn = screen.getByTestId('desktop-agent-status-codex');
+    const dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(btn, { dataTransfer });
+    expect(dataTransfer.getData(DND_MIME)).toBe('codex');
+    expect(dataTransfer.effectAllowed).toBe('move');
+  });
+
+  it('onDragStart / onDragEnd invoke the optional publish callbacks', () => {
+    const onAgentDragStart = vi.fn();
+    const onAgentDragEnd = vi.fn();
+    render(
+      <DesktopHeader
+        {...baseProps}
+        selectedAgents={['claude']}
+        onAgentDragStart={onAgentDragStart}
+        onAgentDragEnd={onAgentDragEnd}
+      />
+    );
+    const btn = screen.getByTestId('desktop-agent-status-claude');
+    fireEvent.dragStart(btn, { dataTransfer: makeDataTransfer() });
+    expect(onAgentDragStart).toHaveBeenCalledTimes(1);
+    expect(onAgentDragStart).toHaveBeenCalledWith('claude');
+    fireEvent.dragEnd(btn, { dataTransfer: makeDataTransfer() });
+    expect(onAgentDragEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies a drag-active visual on dragStart and removes it on dragEnd', () => {
+    render(<DesktopHeader {...baseProps} selectedAgents={['claude']} />);
+    const btn = screen.getByTestId('desktop-agent-status-claude');
+    expect(btn.className).not.toMatch(/opacity-50/);
+    fireEvent.dragStart(btn, { dataTransfer: makeDataTransfer() });
+    expect(btn.className).toMatch(/opacity-50/);
+    expect(btn.className).toMatch(/cursor-grabbing/);
+    fireEvent.dragEnd(btn, { dataTransfer: makeDataTransfer() });
+    expect(btn.className).not.toMatch(/opacity-50/);
+  });
+
+  it('removes the drag-active visual on dragEnd even if onAgentDragEnd is omitted', () => {
+    render(<DesktopHeader {...baseProps} selectedAgents={['claude']} />);
+    const btn = screen.getByTestId('desktop-agent-status-claude');
+    fireEvent.dragStart(btn, { dataTransfer: makeDataTransfer() });
+    expect(btn.className).toMatch(/opacity-50/);
+    fireEvent.dragEnd(btn, { dataTransfer: makeDataTransfer() });
+    expect(btn.className).not.toMatch(/opacity-50/);
+  });
+
+  // S3-002 regression guard: a plain click (no drag) must still fire
+  // onActiveCliTabChange exactly once. #749/#751 click → activeCliTab switch is
+  // a core behavior that the new draggable attribute must not break.
+  it('(regression) click-only (no drag) fires onActiveCliTabChange exactly once', () => {
+    const onActiveCliTabChange = vi.fn();
+    render(
+      <DesktopHeader
+        {...baseProps}
+        selectedAgents={['claude', 'codex']}
+        activeCliTab="claude"
+        onActiveCliTabChange={onActiveCliTabChange}
+      />
+    );
+    fireEvent.click(screen.getByTestId('desktop-agent-status-codex'));
+    expect(onActiveCliTabChange).toHaveBeenCalledTimes(1);
+    expect(onActiveCliTabChange).toHaveBeenCalledWith('codex');
+  });
+
+  it('does not throw when onAgentDragStart / onAgentDragEnd are omitted', () => {
+    render(<DesktopHeader {...baseProps} selectedAgents={['claude']} />);
+    const btn = screen.getByTestId('desktop-agent-status-claude');
+    expect(() => {
+      fireEvent.dragStart(btn, { dataTransfer: makeDataTransfer() });
+      fireEvent.dragEnd(btn, { dataTransfer: makeDataTransfer() });
+    }).not.toThrow();
+  });
+
+  // Mobile path: WorktreeDetailMobile structurally never renders DesktopHeader
+  // (the agent status row is the only draggable element). Without selectedAgents
+  // — the Mobile-equivalent prop state — no draggable agent indicator exists, so
+  // drag-drop is completely inert on Mobile (no regression).
+  it('renders no draggable agent indicator when the row is absent (Mobile parity)', () => {
+    const { container } = render(<DesktopHeader {...baseProps} />);
+    expect(screen.queryByTestId('desktop-agent-status-row')).toBeNull();
+    expect(container.querySelector('[draggable="true"]')).toBeNull();
+  });
+});

@@ -20,6 +20,7 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { BranchStatus } from '@/types/sidebar';
 import type { HistoryDisplayLimit } from '@/config/history-display-config';
 import type { AutoYesToggleParams } from '@/types/auto-yes';
+import type { ShowToast } from '@/types/markdown-editor';
 
 /** Identity + derived status of a single terminal split (Issue #756). */
 export interface TerminalSplitPaneCoreProps {
@@ -48,5 +49,6 @@ export interface HistoryPaneProps {
   onHistoryUserOnlyChange?: (next: boolean) => void;
   onInsertToMessage?: (content: string) => void;
   onFilePathClick?: (path: string) => void;
-  showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
+  /** Issue #786 (D-5): widened to the shared `ShowToast` alias (`'warning'` included). */
+  showToast?: ShowToast;
 }

@@ -21,13 +21,286 @@ export interface CommitInfo {
 
 /**
  * Changed file in a commit
+ *
+ * Issue #780: union extended with 'untracked' | 'unmerged' (ADDITIVE — the
+ * original 4 values are unchanged so existing #447/#627 consumers behave
+ * identically). 'untracked' / 'unmerged' only appear in the working-tree
+ * status (parsePorcelainStatus / getStagedStatus), never in commit diffs.
  */
 export interface ChangedFile {
   /** File path */
   path: string;
   /** Change status */
-  status: 'added' | 'modified' | 'deleted' | 'renamed';
+  status: 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked' | 'unmerged';
 }
+
+/**
+ * Response type for the git staged-status API (Issue #780).
+ *
+ * Splits the working-tree status into three buckets:
+ * - staged:    entries with a non-space, non-`?` index (X) column
+ * - unstaged:  entries with a non-space, non-`?` worktree (Y) column
+ * - untracked: porcelain `??` entries
+ *
+ * Unmerged (conflict) entries are surfaced with status `'unmerged'` in the
+ * `unstaged` list (a conflicted file needs working-tree resolution before it
+ * can be staged, so the unstaged bucket is the actionable place for it).
+ */
+export interface GitStagedResponse {
+  /** Files with staged (index) changes */
+  staged: ChangedFile[];
+  /** Files with unstaged (working-tree) changes, including unmerged conflicts */
+  unstaged: ChangedFile[];
+  /** Untracked files (`??` in porcelain output) */
+  untracked: ChangedFile[];
+}
+
+// =============================================================================
+// Issue #781: branch list / checkout / create / delete (Phase 3/5)
+// =============================================================================
+
+/**
+ * Information about a single git branch (Issue #781).
+ *
+ * Net-new type (no existing consumers) — additive to src/types/git.ts. Built by
+ * the read-path `listBranches()` from `git branch [-r]`, plus best-effort extra
+ * reads (`git symbolic-ref refs/remotes/origin/HEAD` for the default branch,
+ * `git worktree list --porcelain` for checkedOutWorktreePath, `git branch -vv`
+ * for upstream / aheadBehind). When an extra read fails, the corresponding field
+ * degrades to its "unknown" value (isDefault=false / checkedOutWorktreePath=null
+ * / upstream=null / aheadBehind=null) rather than failing the whole list.
+ */
+export interface BranchInfo {
+  /** Local branches are e.g. "feature/781-worktree"; remote refs include the remote, e.g. "origin/main". */
+  name: string;
+  /** The branch currently checked out in this worktree (cannot checkout / delete it). */
+  isCurrent: boolean;
+  /** A remote-tracking ref (checking it out creates a new local tracking branch). */
+  isRemote: boolean;
+  /** The default branch (delete disabled). Sourced from origin/HEAD; false when unresolved. */
+  isDefault: boolean;
+  /** Upstream tracking ref (e.g. "origin/feature/x"), or null when none. */
+  upstream: string | null;
+  /** ahead/behind vs upstream (null when no upstream / detached). Display is best-effort. */
+  aheadBehind: { ahead: number; behind: number } | null;
+  /** Absolute path of another worktree that has this branch checked out, or null. */
+  checkedOutWorktreePath: string | null;
+}
+
+/**
+ * `include` filter for the branches API / listBranches (Issue #781).
+ * - `local`  -> `git branch`     (default)
+ * - `remote` -> `git branch -r`  (cached remote-tracking refs only; NO network)
+ * - `all`    -> local + remote
+ */
+export type BranchInclude = 'local' | 'remote' | 'all';
+
+/**
+ * Response type for GET /api/worktrees/[id]/git/branches (Issue #781).
+ */
+export interface BranchListResponse {
+  branches: BranchInfo[];
+}
+
+/**
+ * Success response for POST /api/worktrees/[id]/git/checkout (Issue #781).
+ */
+export interface CheckoutResponse {
+  success: true;
+  currentBranch: string;
+  isDirty: boolean;
+}
+
+/**
+ * Success response for POST /api/worktrees/[id]/git/branch/create (Issue #781).
+ */
+export interface BranchCreateResponse {
+  success: true;
+  branch: BranchInfo;
+}
+
+/**
+ * Success response for POST /api/worktrees/[id]/git/branch/delete (Issue #781).
+ */
+export interface BranchDeleteResponse {
+  success: true;
+  deleted: string;
+}
+
+/**
+ * Machine-readable failure reasons for branch operations (Issue #781). Surfaced
+ * in the route error body as `{ error, reason }` so the UI can branch / toast.
+ */
+export type GitBranchErrorReason =
+  | 'invalid_branch_name'
+  | 'branch_not_found'
+  | 'not_merged'
+  | 'current_branch'
+  | 'default_branch'
+  | 'checked_out_elsewhere'
+  | 'dirty';
+
+// =============================================================================
+// Issue #782: stash + reset/revert (Phase 4/5 - Danger Zone)
+// =============================================================================
+
+/**
+ * Information about a single git stash entry (Issue #782).
+ *
+ * Net-new type (no existing consumers) — additive to src/types/git.ts, same
+ * approach as BranchInfo (L73). Built by the read-path `parseStashList()` from
+ * `git stash list --format='%gd%x09%s%x09%cI%x09%H'` (tab-separated, same policy
+ * as parseForEachRefTracking). Lines whose `%gd` does not match `stash@{N}` are
+ * skipped, so `index` is always a non-negative integer.
+ */
+export interface StashInfo {
+  /** The N in `stash@{N}` (non-negative integer). */
+  index: number;
+  /** The stash subject (`%s`), e.g. "WIP on main: 1234abc commit msg". */
+  message: string;
+  /** Branch parsed from "WIP on <branch>: ..." / "On <branch>: ...", or null. */
+  branch: string | null;
+  /** Committer date in ISO8601 (`%cI`). */
+  date: string;
+  /** The stash commit's full hash (`%H`). */
+  sha: string;
+}
+
+/**
+ * Response type for GET /api/worktrees/[id]/git/stash (Issue #782).
+ */
+export interface StashListResponse {
+  stashes: StashInfo[];
+}
+
+/**
+ * Reset mode for `git reset --<mode>` (Issue #782).
+ * - `soft`  -> move HEAD only (keep index + working tree)
+ * - `mixed` -> move HEAD + reset index (keep working tree) — git default
+ * - `hard`  -> move HEAD + reset index + working tree (DESTRUCTIVE)
+ */
+export type GitResetMode = 'soft' | 'mixed' | 'hard';
+
+/**
+ * Success response for POST /api/worktrees/[id]/git/reset (Issue #782).
+ * Reports the resulting branch / dirty state (best-effort, reset succeeded).
+ */
+export interface ResetResponse {
+  success: true;
+  currentBranch: string;
+  isDirty: boolean;
+}
+
+/**
+ * Success response for POST /api/worktrees/[id]/git/revert (Issue #782).
+ * A conflict that leaves the working tree modified is reported as a SUCCESS
+ * (HTTP 200) with `conflict: true` + the conflicted file paths, NOT a 409.
+ */
+export interface RevertResponse {
+  success: true;
+  conflict?: boolean;
+  conflictFiles?: string[];
+}
+
+/**
+ * Success response for the stash push/pop/apply/drop routes (Issue #782).
+ * `conflict`/`conflictFiles` only appear for pop/apply (and `stashRetained`
+ * specifically for a `pop` that conflicted — git keeps the stash entry).
+ */
+export interface StashMutationResponse {
+  success: true;
+  conflict?: boolean;
+  conflictFiles?: string[];
+  stashRetained?: boolean;
+}
+
+/**
+ * Machine-readable failure reasons for stash/reset/revert operations (Issue
+ * #782). Additive sibling to GitBranchErrorReason (L134); surfaced in route
+ * error bodies as `{ error, reason }`.
+ */
+export type GitDangerZoneErrorReason =
+  | 'nothing_to_stash'
+  | 'invalid_stash_index'
+  | 'invalid_target'
+  | 'confirmation_mismatch'
+  | 'default_branch';
+
+// =============================================================================
+// Issue #783: network operations (Phase 5/5 - push / pull / fetch)
+// =============================================================================
+
+/**
+ * Machine-readable failure reasons for the network git operations (Issue #783),
+ * corresponding to the typed errors git-utils throws (auth/non-fast-forward/no
+ * upstream/protected/stale-lease/network). Additive sibling to
+ * GitBranchErrorReason (L134) / GitDangerZoneErrorReason (L222).
+ *
+ * DR2-004: pull's `invalid_options` (rebase + ffOnly contradiction) is NOT in
+ * this type. It is a route-LOCAL body-validation reason the route returns
+ * directly as `{ error, reason: 'invalid_options' }` (400), not a git-utils typed
+ * error — the same way reset's `invalid_mode` / `invalid_target` are returned as
+ * route-local 400 reasons and are not collected into a typed union here.
+ */
+export type GitNetworkErrorReason =
+  | 'auth_failed'
+  | 'non_fast_forward'
+  | 'no_upstream'
+  | 'protected_branch'
+  | 'force_with_lease_stale'
+  | 'network';
+
+/**
+ * Success response for POST /api/worktrees/[id]/git/fetch (Issue #783).
+ */
+export interface FetchResponse {
+  success: true;
+}
+
+/**
+ * Success response for POST /api/worktrees/[id]/git/pull (Issue #783).
+ *
+ * DR1-010: `conflict: true` is returned with HTTP 200 (mirroring #782
+ * execGitConflictAware), but the UI treats it as a "quasi-error": although the
+ * HTTP status is success, useGitPaneNetworkOps classifies `conflict: true` into
+ * its error channel (display conflictFiles + terminal guidance), the same policy
+ * as the #782 stash conflict. conflictFiles is held on a channel separate from
+ * the 3-value progressState.
+ */
+export interface PullResponse {
+  success: true;
+  conflict?: boolean;
+  conflictFiles?: string[];
+}
+
+/**
+ * Success response for POST /api/worktrees/[id]/git/push (Issue #783).
+ */
+export interface PushResponse {
+  success: true;
+}
+
+/**
+ * The three network git operations (Issue #783). Used by useGitPaneNetworkOps to
+ * tag the in-flight operation.
+ */
+export type GitNetworkOperation = 'fetch' | 'pull' | 'push';
+
+/**
+ * Client-side progress state for a network operation (Issue #783).
+ *
+ * DR1-004: reduced from 5 values (idle/started/running/done/error) to 3. With no
+ * server progress endpoint, the route holds its response until completion, so
+ * `started` (issued) and `running` (in-flight) collapse into the same await with
+ * no external observation point, and `done` lives only briefly before the cascade
+ * refetch returns it to idle. Therefore:
+ *   - 'idle'    : not running (before the op / after the cascade completes)
+ *   - 'running' : awaiting the op (in-flight); spinner + optional elapsed seconds
+ *   - 'error'   : rejected. A pull conflict is tracked separately via
+ *                 PullResponse.conflict / the hook's conflictFiles channel.
+ * `done` is expressed as "cascade complete -> back to idle" (no standalone state).
+ */
+export type GitNetworkProgressState = 'idle' | 'running' | 'error';
 
 /**
  * Response type for git log API

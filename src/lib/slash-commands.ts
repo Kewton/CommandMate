@@ -41,9 +41,6 @@ let skillsCache: SlashCommand[] | null = null;
 /** Codex skills subdirectory path (Issue #166) */
 const CODEX_SKILLS_SUBDIR = path.join('.codex', 'skills');
 
-/** Codex prompts subdirectory path (Issue #166) */
-const CODEX_PROMPTS_SUBDIR = path.join('.codex', 'prompts');
-
 /** Skills subdirectory scan limit (Issue #343) */
 const MAX_SKILLS_COUNT = 100;
 /** SKILL.md maximum file size in bytes (64KB) (Issue #343) */
@@ -365,81 +362,6 @@ export async function loadCodexSkills(basePath?: string): Promise<SlashCommand[]
 }
 
 /**
- * Parse a flat .md file as a Codex prompt command (Issue #166)
- *
- * Reuses the shared frontmatter parsing logic (safeParseFrontmatter /
- * extractFrontmatterFields fallback) from parseSkillFile, but differs
- * in that the file name (not a frontmatter `name` field) is the command name,
- * and invocation is set to 'codex-prompt'.
- */
-function parseCodexPromptFile(filePath: string): SlashCommand | null {
-  try {
-    const stat = fs.statSync(filePath);
-    if (stat.size > MAX_SKILL_FILE_SIZE_BYTES) {
-      logger.warn('skipping-oversized-codex-prompt-file');
-      return null;
-    }
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const fileName = path.basename(filePath, '.md');
-    let description = '';
-    try {
-      const { data: frontmatter } = safeParseFrontmatter(content);
-      description = frontmatter.description || '';
-    } catch {
-      description = extractFrontmatterFields(content).description || '';
-    }
-    return {
-      name: truncateString(fileName, MAX_SKILL_NAME_LENGTH),
-      invocation: 'codex-prompt',
-      description: truncateString(description, MAX_SKILL_DESCRIPTION_LENGTH),
-      category: 'skill',
-      source: 'codex-skill',
-      cliTools: ['codex'],
-      filePath: path.relative(process.cwd(), filePath),
-    };
-  } catch (error) {
-    logger.error('error-parsing-codex-prompt-file:', { error: error instanceof Error ? error.message : String(error) });
-    return null;
-  }
-}
-
-/**
- * Load Codex custom prompts from .codex/prompts/*.md (Issue #166)
- *
- * @param basePath - Optional base path. If not provided, uses os.homedir()
- * @returns Promise resolving to array of SlashCommand objects
- */
-export async function loadCodexPrompts(basePath?: string): Promise<SlashCommand[]> {
-  const root = basePath ?? os.homedir();
-  const promptsDir = path.join(root, CODEX_PROMPTS_SUBDIR);
-
-  if (!fs.existsSync(promptsDir)) {
-    return [];
-  }
-
-  const resolvedRoot = path.resolve(promptsDir) + path.sep;
-  const files = fs.readdirSync(promptsDir).filter(f => f.endsWith('.md'));
-  const prompts: SlashCommand[] = [];
-
-  for (const file of files) {
-    if (prompts.length >= MAX_SKILLS_COUNT) {
-      logger.warn('codex-prompts-count-limit');
-      break;
-    }
-    if (file.includes('..')) continue;
-    if (!path.resolve(promptsDir, file).startsWith(resolvedRoot)) continue;
-
-    const prompt = parseCodexPromptFile(path.join(promptsDir, file));
-    if (prompt) {
-      prompts.push(prompt);
-    }
-  }
-
-  prompts.sort((a, b) => a.name.localeCompare(b.name));
-  return prompts;
-}
-
-/**
  * Get Copilot CLI builtin commands (Issue #547)
  *
  * Returns hardcoded builtin slash commands for Copilot CLI.
@@ -533,10 +455,17 @@ export function getGeminiBuiltinCommands(): SlashCommand[] {
 }
 
 /**
- * Deduplicate commands and skills by name (Issue #343)
+ * Deduplicate commands and skills by name + CLI tool (Issue #343, #800)
  *
- * Skills are registered first, then commands override any skills with
- * the same name. This ensures commands always take priority over skills.
+ * Skills are registered first, then commands override any skills with the
+ * same name AND the same CLI tool scope. This ensures commands take priority
+ * over skills while keeping CLI-specific entries from masking each other.
+ *
+ * Issue #800: The dedup key is `name + cliTools` (not name alone). Entries
+ * that share a name but target disjoint CLI tools (e.g. a Codex skill with
+ * `cliTools: ['codex']` and a Claude command with `cliTools: undefined`) now
+ * coexist instead of one silently overriding the other. Only entries with an
+ * identical name and identical CLI tool scope are deduplicated (later wins).
  *
  * @param skills - Array of skill SlashCommand objects
  * @param commands - Array of command SlashCommand objects (take priority)
@@ -545,14 +474,23 @@ export function getGeminiBuiltinCommands(): SlashCommand[] {
 export function deduplicateByName(skills: SlashCommand[], commands: SlashCommand[]): SlashCommand[] {
   const map = new Map<string, SlashCommand>();
 
+  // Build a key from name + normalized CLI tool scope. Undefined/empty cliTools
+  // (= Claude-only, backward compatible) collapse to the 'claude' sentinel so
+  // they stay distinct from CLI-specific entries that share the same name.
+  const keyOf = (c: SlashCommand): string => {
+    const toolsKey =
+      c.cliTools && c.cliTools.length > 0 ? [...c.cliTools].sort().join(',') : 'claude';
+    return `${c.name}::${toolsKey}`;
+  };
+
   // Register skills first
   for (const skill of skills) {
-    map.set(skill.name, skill);
+    map.set(keyOf(skill), skill);
   }
 
-  // Commands override skills with same name
+  // Commands override skills with the same name AND same CLI tool scope
   for (const cmd of commands) {
-    map.set(cmd.name, cmd);
+    map.set(keyOf(cmd), cmd);
   }
 
   return Array.from(map.values());
@@ -576,8 +514,7 @@ export async function getSlashCommandGroups(basePath?: string): Promise<SlashCom
     const commands = await loadSlashCommands(basePath);
     const skills = await loadSkills(basePath);
     const codexLocalSkills = await loadCodexSkills(basePath);
-    const codexLocalPrompts = await loadCodexPrompts(basePath);
-    const deduplicated = deduplicateByName([...skills, ...codexLocalSkills, ...codexLocalPrompts], commands);
+    const deduplicated = deduplicateByName([...skills, ...codexLocalSkills], commands);
     return groupByCategory(deduplicated);
   }
 

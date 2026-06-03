@@ -37,7 +37,7 @@ export interface SlashCommand {
   /** Command name (without leading '/') */
   name: string;
   /** Command invocation format in the target CLI */
-  invocation?: 'slash' | 'codex-prompt';
+  invocation?: 'slash';
   /** Command description from frontmatter */
   description: string;
   /** Command category for grouping */

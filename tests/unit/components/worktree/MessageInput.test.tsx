@@ -361,7 +361,7 @@ describe('MessageInput', () => {
         });
       });
 
-      it('should insert Codex prompt using /prompts:<name> format when selected', async () => {
+      it('should insert Codex skill using $<name> format when selected (Issue #790)', async () => {
         const codexGroups = [
           {
             category: 'skill' as const,
@@ -369,10 +369,9 @@ describe('MessageInput', () => {
             commands: [
               {
                 name: 'github-insights',
-                invocation: 'codex-prompt' as const,
-                description: 'Codex custom prompt',
+                description: 'Codex skill',
                 category: 'skill' as const,
-                filePath: '.codex/prompts/github-insights.md',
+                filePath: '.codex/skills/github-insights/SKILL.md',
                 source: 'codex-skill' as const,
                 cliTools: ['codex'] as ('codex')[],
               },
@@ -394,9 +393,9 @@ describe('MessageInput', () => {
         render(<MessageInput {...defaultProps} cliToolId="codex" />);
 
         openSelector();
-        fireEvent.click(screen.getByText('/prompts:github-insights'));
+        fireEvent.click(screen.getByText('$github-insights'));
 
-        expect(getTextarea()).toHaveValue('/prompts:github-insights ');
+        expect(getTextarea()).toHaveValue('$github-insights ');
       });
 
       it('TC-3: should show selector again after clearing message in free input mode', () => {
@@ -523,6 +522,71 @@ describe('MessageInput', () => {
         // Selector should appear (isFreeInputMode was reset)
         expect(queryMobileSheet()).toBeInTheDocument();
       });
+    });
+  });
+
+  // ===== Dollar trigger for Codex skills (Issue #799) =====
+
+  describe('Dollar trigger for Codex skills (Issue #799)', () => {
+    beforeEach(() => {
+      setMobileMode(false);
+    });
+
+    it('opens the command selector when "$" is typed on the Codex tab', () => {
+      render(<MessageInput {...defaultProps} cliToolId="codex" />);
+
+      expect(queryDesktopSelector()).not.toBeInTheDocument();
+
+      typeMessage('$');
+
+      expect(queryDesktopSelector()).toBeInTheDocument();
+    });
+
+    it('keeps the selector open while typing a "$name" command on the Codex tab', () => {
+      render(<MessageInput {...defaultProps} cliToolId="codex" />);
+
+      typeMessage('$orchestrate');
+
+      expect(queryDesktopSelector()).toBeInTheDocument();
+    });
+
+    it('closes the selector when a space follows the "$" trigger on the Codex tab', () => {
+      render(<MessageInput {...defaultProps} cliToolId="codex" />);
+
+      typeMessage('$');
+      expect(queryDesktopSelector()).toBeInTheDocument();
+
+      typeMessage('$orchestrate now');
+      expect(queryDesktopSelector()).not.toBeInTheDocument();
+    });
+
+    it('does NOT open the selector on "$" for non-Codex tabs (claude)', () => {
+      render(<MessageInput {...defaultProps} cliToolId="claude" />);
+
+      typeMessage('$');
+
+      expect(queryDesktopSelector()).not.toBeInTheDocument();
+    });
+
+    it('does NOT open the selector on "$" when cliToolId is omitted (defaults to claude)', () => {
+      const propsWithoutCliTool = {
+        worktreeId: 'test-worktree',
+        onMessageSent: vi.fn(),
+      };
+
+      render(<MessageInput {...propsWithoutCliTool} />);
+
+      typeMessage('$');
+
+      expect(queryDesktopSelector()).not.toBeInTheDocument();
+    });
+
+    it('still opens the selector on "/" on the Codex tab (existing behavior unchanged)', () => {
+      render(<MessageInput {...defaultProps} cliToolId="codex" />);
+
+      openSelector();
+
+      expect(queryDesktopSelector()).toBeInTheDocument();
     });
   });
 

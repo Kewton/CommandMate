@@ -281,6 +281,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onWorktreeUpdate={setWorktree}
           fileInputRef={fileInputRef}
           onFileInputChange={handleFileInputChange}
+          onKillSession={handleKillSession}
           showKillConfirm={showKillConfirm}
           onKillCancel={handleKillCancel}
           onKillConfirm={handleKillConfirm}

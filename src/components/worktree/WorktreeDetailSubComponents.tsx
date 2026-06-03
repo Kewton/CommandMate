@@ -27,6 +27,7 @@ import { deriveCliStatus } from '@/types/sidebar';
 import type { Worktree, ChatMessage, GitStatus } from '@/types/models';
 import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
 import { COPY_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
+import { CLI_TOOL_DND_MIME } from '@/components/worktree/TerminalSplitPane';
 
 // ============================================================================
 // Constants
@@ -445,6 +446,23 @@ interface DesktopHeaderProps {
   activeCliTab?: CLIToolType;
   /** Callback when an agent status icon is clicked (PC only, optional). Issue #749 */
   onActiveCliTabChange?: (cliId: CLIToolType) => void;
+  /**
+   * Issue #786: published when an agent indicator starts being dragged, so the
+   * parent can share the dragged cliId with the terminal splits for the dragOver
+   * allowed/forbidden ring (D-2). Optional — when omitted, drag still sets the
+   * dataTransfer payload but no cliId is published (drag-over ring stays inert).
+   */
+  onAgentDragStart?: (cliId: CLIToolType) => void;
+  /** Issue #786: published when an agent indicator drag ends (cleanup). */
+  onAgentDragEnd?: () => void;
+  /**
+   * Callback to kill the active CLI session (PC only, optional). Issue #784.
+   * Restores the kill button removed by #728 (split-ification) and missed by
+   * #755 (Desktop/Mobile split). When provided and the active CLI session is
+   * running, a kill button is rendered between the per-agent status row and the
+   * worktree status dropdown.
+   */
+  onKillSession?: () => void;
 }
 
 /** Worktree status options for dropdown */
@@ -474,11 +492,40 @@ export const DesktopHeader = memo(function DesktopHeader({
   selectedAgents,
   activeCliTab,
   onActiveCliTabChange,
+  onAgentDragStart,
+  onAgentDragEnd,
+  onKillSession,
 }: DesktopHeaderProps) {
   const statusConfig = DESKTOP_STATUS_CONFIG[status];
   // Issue #111: DRY - Use shared truncateString utility
   const DESKTOP_BRANCH_MAX_LENGTH = 30;
   const DESCRIPTION_MAX_LENGTH = 50;
+
+  // Issue #786: which agent indicator is currently being dragged (for the
+  // opacity-50/cursor-grabbing visual). Local to the header; the cliId published
+  // to the splits goes through onAgentDragStart/onAgentDragEnd instead.
+  const [draggingCliId, setDraggingCliId] = useState<CLIToolType | null>(null);
+
+  const handleAgentDragStart = useCallback(
+    (e: React.DragEvent<HTMLButtonElement>, cliId: CLIToolType) => {
+      // Issue #786: payload via dedicated MIME so external file/text drags don't
+      // collide. getData is readable only on drop in real browsers (D-2). The
+      // MIME is the single shared constant the drop target reads with (D-1) so
+      // the setData/getData keys can never drift apart.
+      e.dataTransfer.setData(CLI_TOOL_DND_MIME, cliId);
+      e.dataTransfer.effectAllowed = 'move';
+      setDraggingCliId(cliId);
+      onAgentDragStart?.(cliId);
+    },
+    [onAgentDragStart],
+  );
+
+  const handleAgentDragEnd = useCallback(() => {
+    // Always clear the drag-active visual (finally-equivalent), regardless of
+    // whether the drag succeeded or onAgentDragStart wired anything (S3-002).
+    setDraggingCliId(null);
+    onAgentDragEnd?.();
+  }, [onAgentDragEnd]);
 
   // Truncate description using shared utility
   const truncatedDescription = worktreeDescription
@@ -585,13 +632,19 @@ export const DesktopHeader = memo(function DesktopHeader({
                   type="button"
                   data-testid={`desktop-agent-status-${cliId}`}
                   onClick={() => onActiveCliTabChange?.(cliId)}
+                  // Issue #786: drag source. click and drag are mutually
+                  // exclusive in HTML; a plain click (no drag) still fires
+                  // onClick exactly once (S3-002 regression-guarded).
+                  draggable
+                  onDragStart={(e) => handleAgentDragStart(e, cliId)}
+                  onDragEnd={handleAgentDragEnd}
                   aria-label={`${getCliToolDisplayName(cliId)}: ${agentStatusConfig.label}`}
                   aria-pressed={isActive}
                   className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${
                     isActive
                       ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-900 dark:text-cyan-100'
                       : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'
-                  }`}
+                  }${draggingCliId === cliId ? ' opacity-50 cursor-grabbing' : ''}`}
                 >
                   {/* Issue #751: dot/spinner icon to the LEFT of the always-visible text */}
                   {agentStatusConfig.type === 'spinner' ? (
@@ -610,6 +663,24 @@ export const DesktopHeader = memo(function DesktopHeader({
               );
             })}
           </div>
+        )}
+        {/* Issue #784: Session kill button (PC only). Restored after the
+            #728 (split-ification) + #755 (Desktop/Mobile split) regression that
+            left the kill confirmation modal unreachable on PC. Mirrors the
+            Mobile kill button (WorktreeDetailRefactored.tsx:409-421). Rendered
+            only when a kill handler is wired AND the active CLI session is
+            running; click opens the existing confirmation modal. */}
+        {onKillSession && activeCliTab && sessionStatusByCli?.[activeCliTab]?.isRunning && (
+          <button
+            type="button"
+            onClick={onKillSession}
+            className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium rounded-lg text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors flex-shrink-0"
+            aria-label="End session"
+            data-testid="desktop-kill-session"
+          >
+            <span aria-hidden="true">&#x2715;</span>
+            End
+          </button>
         )}
         {/* Worktree status dropdown */}
         {onWorktreeStatusChange && (

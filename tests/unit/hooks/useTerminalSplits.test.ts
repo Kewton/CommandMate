@@ -187,6 +187,58 @@ describe('useTerminalSplits', () => {
     expect(result.current.splits[0].cliToolId).not.toBe(second);
   });
 
+  // ---------------------------------------------------------------------------
+  // Issue #786 (D-1 / S3-005): setSplitCliTool returns a boolean so the drop
+  // handler in TerminalSplitContainer has a single source of truth for whether
+  // the change was actually applied (success toast + activeCliTab sync only when
+  // applied; no double-judgment desync with the hook's silent no-op guard).
+  // ---------------------------------------------------------------------------
+  it('setSplitCliTool returns true when the change is applied', () => {
+    const { result } = renderHook(() => useTerminalSplits('w-1'));
+    act(() => result.current.addSplit());
+
+    let applied: boolean | undefined;
+    act(() => {
+      applied = result.current.setSplitCliTool(0, 'gemini');
+    });
+    expect(applied).toBe(true);
+    expect(result.current.splits[0].cliToolId).toBe('gemini');
+  });
+
+  it('setSplitCliTool returns false when the CLI collides with another split', () => {
+    const { result } = renderHook(() => useTerminalSplits('w-1'));
+    act(() => result.current.addSplit());
+    const second = result.current.splits[1].cliToolId;
+
+    let applied: boolean | undefined;
+    act(() => {
+      applied = result.current.setSplitCliTool(0, second);
+    });
+    expect(applied).toBe(false);
+    expect(result.current.splits[0].cliToolId).not.toBe(second);
+  });
+
+  it('setSplitCliTool returns false when assigning the split its CURRENT CLI (no-op)', () => {
+    const { result } = renderHook(() => useTerminalSplits('w-1'));
+    const current = result.current.splits[0].cliToolId;
+
+    let applied: boolean | undefined;
+    act(() => {
+      applied = result.current.setSplitCliTool(0, current);
+    });
+    expect(applied).toBe(false);
+    expect(result.current.splits[0].cliToolId).toBe(current);
+  });
+
+  it('setSplitCliTool returns false for an out-of-range index', () => {
+    const { result } = renderHook(() => useTerminalSplits('w-1'));
+    let applied: boolean | undefined;
+    act(() => {
+      applied = result.current.setSplitCliTool(5, 'gemini');
+    });
+    expect(applied).toBe(false);
+  });
+
   it('setSplitWidth replaces widths but leaves splits intact', () => {
     const { result } = renderHook(() => useTerminalSplits('w-1'));
     act(() => result.current.addSplit());
