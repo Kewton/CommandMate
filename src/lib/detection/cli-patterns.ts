@@ -36,6 +36,26 @@ export const CLAUDE_THINKING_PATTERN = new RegExp(
 );
 
 /**
+ * Claude status-bar "esc to interrupt" hint (Issue #805)
+ *
+ * Claude Code shows "esc to interrupt" in the bottom status bar ONLY while it is
+ * actively processing. When idle/ready, the status bar shows shortcut hints
+ * (e.g., "? for shortcuts") instead -- so this token is a reliable "running" signal.
+ *
+ * Why this exists separately from CLAUDE_THINKING_PATTERN's "esc to interrupt"
+ * alternative: status detection evaluates the spinner+ellipsis branch of
+ * CLAUDE_THINKING_PATTERN within a narrow 5-line window (THINKING_TAIL_LINE_COUNT)
+ * to avoid mistaking a completed thinking summary in scrollback for active work
+ * (Issue #188). During /pm-auto-dev + subagent runs, the bottom task panel
+ * ("⏺ main" / "◯ general-purpose ..." rows) pushes both the "✶ Running…" spinner
+ * AND the "esc to interrupt" status bar out of that 5-line window, so the session
+ * was misdetected as Ready (Issue #805). Unlike the spinner+ellipsis summary, the
+ * status-bar text is repainted live and never lingers in scrollback, so it can be
+ * matched in a wider footer window without regressing Issue #188.
+ */
+export const CLAUDE_INTERRUPT_HINT_PATTERN = /esc to interrupt/;
+
+/**
  * Codex thinking pattern
  * Matches activity indicators like "• Planning", "• Searching", etc.
  * T1.1: Extended to include "Ran" and "Deciding"

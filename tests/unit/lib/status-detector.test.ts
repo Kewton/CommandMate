@@ -543,4 +543,80 @@ describe('status-detector', () => {
       expect(result.promptDetection?.promptData?.type).toBe('multiple_choice');
     });
   });
+
+  describe('Issue #805: Claude busy state during /pm-auto-dev + subagent execution', () => {
+    // During /pm-auto-dev with a general-purpose subagent, Claude's footer is:
+    //   ✶ Running… spinner (top)        <- pushed above the 5-line thinking window
+    //   ⎿ phase task tree
+    //   ❯                               <- visible input box (user can interrupt)
+    //   ─────────── separator
+    //   esc to interrupt · ctrl+t ...   <- live status bar (running indicator)
+    //   ⏺ main                          <- task panel header
+    //   ◯ general-purpose ... 55s       <- subagent rows (bottom)
+    // The subagent panel pushes the spinner AND "esc to interrupt" out of the
+    // narrow 5-line thinking window, so the session was misdetected as Ready.
+
+    it('should return running when subagent task panel pushes "esc to interrupt" past the 5-line window', () => {
+      const output = [
+        'Some prior conversation output here',
+        '',
+        '✶ Running design→dev pipeline… (6m 1s · ↓ 22.5k tokens)',
+        '  ⎿  ✔ Phase 0.5: Hypothesis verification (issue-review)',
+        '     ◼ Phase 2-6: design-policy → design-review → work-plan → pm-auto-dev → report',
+        '',
+        '❯',
+        '───────────',
+        '  esc to interrupt · ctrl+t to hide tasks · ↓ to manage',
+        '  ⏺ main',
+        '  ◯ general-purpose  TDD implement Issue #919   55s',
+        '  ◯ general-purpose  Review architecture #920   40s',
+        '  ◯ general-purpose  Write acceptance tests #921   22s',
+        '  ◯ general-purpose  Refactor module #922   10s',
+      ].join('\n');
+
+      const result = detectSessionStatus(output, 'claude');
+
+      expect(result.status).toBe('running');
+      expect(result.confidence).toBe('high');
+      expect(result.reason).toBe('thinking_indicator');
+      expect(result.hasActivePrompt).toBe(false);
+    });
+
+    it('should still return running for the single-subagent panel from the issue capture', () => {
+      // Literal capture from the issue body (only one subagent row below the status bar).
+      const output = [
+        '✶ Running design→dev pipeline… (6m 1s · ↓ 22.5k tokens)',
+        '  ⎿  ✔ Phase 0.5: Hypothesis verification (issue-review)',
+        '     ✔ Stages 1-4: opus review + apply (iteration 1)',
+        '     ◼ Phase 2-6: design-policy → design-review → work-plan → pm-auto-dev → report',
+        '',
+        '❯',
+        '───────────',
+        '  esc to interrupt · ctrl+t to hide tasks · ↓ to manage',
+        '  ⏺ main',
+        '  ◯ general-purpose  TDD implement Issue #919   55s',
+      ].join('\n');
+
+      const result = detectSessionStatus(output, 'claude');
+
+      expect(result.status).toBe('running');
+      expect(result.reason).toBe('thinking_indicator');
+    });
+
+    it('should still return ready when an idle ❯ prompt has no "esc to interrupt" status bar', () => {
+      // Regression guard: the wider status-bar check must not turn genuinely idle
+      // prompts into running. An idle Claude footer shows shortcut hints, not "esc to interrupt".
+      const output = [
+        'Previous assistant response here',
+        '───────────────────────────────────────────────────',
+        '❯',
+        '  ? for shortcuts',
+      ].join('\n');
+
+      const result = detectSessionStatus(output, 'claude');
+
+      expect(result.status).toBe('ready');
+      expect(result.reason).toBe('input_prompt');
+    });
+  });
 });

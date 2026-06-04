@@ -120,10 +120,21 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
       await sendSpecialKeys(sessionName, keys);
     } else {
       // Single-select: navigate and Enter to select
-      const keys: string[] = [
-        ...buildNavigationKeys(offset),
-        'Enter',
-      ];
+      const navigationKeys = buildNavigationKeys(offset);
+
+      // [Issue #807] Claude Code v2.x AskUserQuestion picker: when selecting the
+      // already-highlighted default option (offset === 0), a bare Enter can fail
+      // to advance the picker because its internal cursor index is not committed
+      // until a navigation key is pressed. Send a net-zero Down+Up nudge first to
+      // engage the cursor onto the default option, then Enter. For offset !== 0
+      // the Up/Down navigation already engages the cursor, so no extra nudge is
+      // needed. Old-format numbered prompts (isAskUserQuestion unset) keep their
+      // exact prior key sequence, so their response behavior is unchanged.
+      const isAskUserQuestionPicker = promptData?.type === 'multiple_choice'
+        && promptData.isAskUserQuestion === true;
+      const keys: string[] = (isAskUserQuestionPicker && offset === 0)
+        ? ['Down', 'Up', 'Enter']
+        : [...navigationKeys, 'Enter'];
       await sendSpecialKeys(sessionName, keys);
     }
   } else {

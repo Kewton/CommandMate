@@ -15,6 +15,7 @@ import { useIsMobile } from '@/hooks/useIsMobile';
 import { useImageAttachment } from '@/hooks/useImageAttachment';
 import type { SlashCommand } from '@/types/slash-commands';
 import { getSlashCommandTrigger } from '@/lib/slash-command-format';
+import type { ShowToast } from '@/types/markdown-editor';
 
 export interface MessageInputProps {
   worktreeId: string;
@@ -36,6 +37,20 @@ export interface MessageInputProps {
    * MemoPane insertions land in the most recently focused split.
    */
   onFocus?: () => void;
+  /**
+   * Issue #806: whether the target session is currently busy (processing
+   * another task). When true, a successful send is queued behind the running
+   * task on the CLI side rather than executed immediately, so we surface a
+   * "queued (session busy)" toast to avoid the send looking like a no-op.
+   * Defaults to false (idle) for backward compatibility — idle sends behave
+   * exactly as before (no extra toast).
+   */
+  isProcessing?: boolean;
+  /**
+   * Issue #806: toast surface used to show the "queued (session busy)" hint.
+   * Optional — when omitted (or when the session is idle) no toast is shown.
+   */
+  showToast?: ShowToast;
 }
 
 /**
@@ -48,6 +63,15 @@ export interface MessageInputProps {
  */
 /** localStorage key prefix for draft message persistence */
 const DRAFT_STORAGE_KEY_PREFIX = 'commandmate:draft-message:';
+
+/**
+ * Issue #806: shown when a message is successfully sent to a session that is
+ * already busy with another task. The send itself succeeds (200) and the CLI
+ * queues the message, so this clarifies it will not be processed until the
+ * current task finishes.
+ */
+const QUEUED_BUSY_TOAST_MESSAGE =
+  'Queued (session busy) — your message will run after the current task finishes.';
 
 /**
  * Issue #728: Per-(worktree, split) draft key. Falls back to the legacy
@@ -78,7 +102,7 @@ function migrateLegacyDraftKey(worktreeId: string): void {
   }
 }
 
-export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, isSessionRunning = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus }: MessageInputProps) {
+export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, isSessionRunning = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast }: MessageInputProps) {
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -195,13 +219,19 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setIsFreeInputMode(false);
       resetAfterSend();
       try { window.localStorage.removeItem(getDraftKey(worktreeId, splitIndex)); } catch { /* ignore */ }
+      // Issue #806: when the session is busy, the CLI queues this message behind
+      // the running task. Surface a toast so the (successful) send doesn't look
+      // like a no-op. Idle sessions are unchanged (no toast).
+      if (isProcessing) {
+        showToast?.(QUEUED_BUSY_TOAST_MESSAGE, 'warning');
+      }
       onMessageSent?.(effectiveCliTool);
     } catch (err) {
       setError(handleApiError(err));
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, onMessageSent, resetAfterSend, splitIndex]);
+  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, onMessageSent, resetAfterSend, splitIndex, isProcessing, showToast]);
 
   const handleSubmit = useCallback(async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();

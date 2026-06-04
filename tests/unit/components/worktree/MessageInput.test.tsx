@@ -792,4 +792,101 @@ describe('MessageInput', () => {
       expect(onFocus).toHaveBeenCalled();
     });
   });
+
+  // ===== Issue #806: queued (session busy) toast =====
+
+  describe('Issue #806 — queued (session busy) toast', () => {
+    beforeEach(() => {
+      setMobileMode(false);
+    });
+
+    it('shows a warning toast after a successful send when the session is busy (isProcessing=true)', async () => {
+      const { worktreeApi } = await import('@/lib/api-client');
+      const showToast = vi.fn();
+
+      render(
+        <MessageInput {...defaultProps} isProcessing showToast={showToast} />
+      );
+
+      typeMessage('queued while busy');
+      pressEnter();
+
+      await waitFor(() => {
+        expect(worktreeApi.sendMessage).toHaveBeenCalled();
+      });
+      expect(showToast).toHaveBeenCalledWith(
+        expect.stringContaining('Queued (session busy)'),
+        'warning'
+      );
+    });
+
+    it('does NOT show a toast when the session is idle (isProcessing=false)', async () => {
+      const { worktreeApi } = await import('@/lib/api-client');
+      const showToast = vi.fn();
+
+      render(
+        <MessageInput
+          {...defaultProps}
+          isProcessing={false}
+          showToast={showToast}
+        />
+      );
+
+      typeMessage('sent while idle');
+      pressEnter();
+
+      await waitFor(() => {
+        expect(worktreeApi.sendMessage).toHaveBeenCalled();
+      });
+      expect(showToast).not.toHaveBeenCalled();
+    });
+
+    it('does NOT show a toast when isProcessing is omitted (default idle behavior unchanged)', async () => {
+      const { worktreeApi } = await import('@/lib/api-client');
+      const showToast = vi.fn();
+
+      render(<MessageInput {...defaultProps} showToast={showToast} />);
+
+      typeMessage('no isProcessing prop');
+      pressEnter();
+
+      await waitFor(() => {
+        expect(worktreeApi.sendMessage).toHaveBeenCalled();
+      });
+      expect(showToast).not.toHaveBeenCalled();
+    });
+
+    it('does NOT show a toast when the send fails even if the session is busy', async () => {
+      const { worktreeApi } = await import('@/lib/api-client');
+      vi.mocked(worktreeApi.sendMessage).mockRejectedValueOnce(
+        new Error('Network error')
+      );
+      const showToast = vi.fn();
+
+      render(
+        <MessageInput {...defaultProps} isProcessing showToast={showToast} />
+      );
+
+      typeMessage('busy but fails');
+      pressEnter();
+
+      await waitFor(() => {
+        expect(screen.getByText('Network error')).toBeInTheDocument();
+      });
+      expect(showToast).not.toHaveBeenCalled();
+    });
+
+    it('does not throw when busy but no showToast is provided', async () => {
+      const { worktreeApi } = await import('@/lib/api-client');
+
+      render(<MessageInput {...defaultProps} isProcessing />);
+
+      typeMessage('busy without toast surface');
+      pressEnter();
+
+      await waitFor(() => {
+        expect(worktreeApi.sendMessage).toHaveBeenCalled();
+      });
+    });
+  });
 });
