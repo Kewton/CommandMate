@@ -1820,4 +1820,308 @@ describe('GitPane', () => {
       });
     });
   });
+
+  // --------------------------------------------------------------------------
+  // Issue #816: UX Phase 2 — action shortcuts
+  //   A. Changes "Commit + Push" compound button
+  //   B. Commit History inline "View diff" accordion
+  //   C. Changes unstaged-diff inline preview caret
+  // --------------------------------------------------------------------------
+  describe('UX Phase 2 action shortcuts (Issue #816)', () => {
+    const STAGED_PAYLOAD = {
+      staged: [{ path: 'src/staged.ts', status: 'modified' }],
+      unstaged: [{ path: 'src/unstaged.ts', status: 'modified' }],
+      untracked: [{ path: 'src/new.ts', status: 'untracked' }],
+    };
+
+    const findCall = (path: string, method = 'POST') =>
+      mockFetch.mock.calls.find(
+        (call) =>
+          typeof call[0] === 'string' &&
+          call[0].includes(path) &&
+          (call[1] as { method?: string } | undefined)?.method === method
+      );
+
+    // ------------------------------------------------------------------ A
+    describe('A. Commit + Push compound button', () => {
+      it('renders a "Commit + Push" button beside the Commit button', async () => {
+        setEndpoints({ staged: { ok: true, json: STAGED_PAYLOAD } });
+        render(<GitPane {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-push-button')).toBeInTheDocument();
+        });
+        // Existing single Commit button is preserved.
+        expect(screen.getByTestId('git-commit-button')).toBeInTheDocument();
+      });
+
+      it('disables Commit + Push when the message is empty', async () => {
+        setEndpoints({ staged: { ok: true, json: STAGED_PAYLOAD } });
+        render(<GitPane {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-push-button')).toBeInTheDocument();
+        });
+        expect(screen.getByTestId('git-commit-push-button')).toBeDisabled();
+      });
+
+      it('POSTs /git/commit then /git/push in sequence on click', async () => {
+        setEndpoints({ staged: { ok: true, json: STAGED_PAYLOAD } });
+        render(<GitPane {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-message')).toBeInTheDocument();
+        });
+
+        fireEvent.change(screen.getByTestId('git-commit-message'), {
+          target: { value: 'feat: ship it' },
+        });
+        fireEvent.click(screen.getByTestId('git-commit-push-button'));
+
+        await waitFor(() => {
+          expect(findCall('/git/commit')).toBeTruthy();
+          expect(findCall('/git/push')).toBeTruthy();
+        });
+
+        // The commit must precede the push (commit succeeds before pushing).
+        const urls = mockFetch.mock.calls
+          .filter((c) => typeof c[0] === 'string')
+          .map((c) => c[0] as string);
+        const commitIdx = urls.findIndex((u) => u.includes('/git/commit'));
+        const pushIdx = urls.findIndex((u) => u.includes('/git/push'));
+        expect(commitIdx).toBeGreaterThanOrEqual(0);
+        expect(pushIdx).toBeGreaterThan(commitIdx);
+      });
+
+      it('does NOT push when the commit fails', async () => {
+        setEndpoints({
+          staged: { ok: true, json: STAGED_PAYLOAD },
+          commit: { ok: false, json: { error: 'No staged changes to commit' } },
+        });
+        render(<GitPane {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-message')).toBeInTheDocument();
+        });
+
+        fireEvent.change(screen.getByTestId('git-commit-message'), {
+          target: { value: 'feat: nope' },
+        });
+        fireEvent.click(screen.getByTestId('git-commit-push-button'));
+
+        // The commit error surfaces and no push is attempted.
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-error')).toHaveTextContent(
+            'No staged changes to commit'
+          );
+        });
+        expect(findCall('/git/push')).toBeFalsy();
+      });
+    });
+
+    // ------------------------------------------------------------------ B
+    describe('B. Commit History inline View diff', () => {
+      const LOG_PAYLOAD = {
+        commits: [
+          { hash: 'abc1234', shortHash: 'abc1234', message: 'feat: one', author: 'a', date: '2026-01-01' },
+        ],
+      };
+      const SHOW_PAYLOAD = {
+        commit: { hash: 'abc1234', shortHash: 'abc1234', message: 'feat: one', author: 'a', date: '2026-01-01' },
+        files: [{ path: 'src/inline.ts', status: 'modified' }],
+      };
+
+      it('renders a "View diff" button on each commit row', async () => {
+        setEndpoints({ log: { ok: true, json: LOG_PAYLOAD } });
+        render(<GitPane {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-view-diff-button')).toBeInTheDocument();
+        });
+        expect(screen.getByLabelText('View diff for abc1234')).toBeInTheDocument();
+      });
+
+      it('expands an inline accordion file list (GET /git/show) on click', async () => {
+        setEndpoints({
+          log: { ok: true, json: LOG_PAYLOAD },
+          show: { ok: true, json: SHOW_PAYLOAD },
+        });
+        render(<GitPane {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-view-diff-button')).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByTestId('git-commit-view-diff-button'));
+
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-inline-files')).toBeInTheDocument();
+          expect(screen.getByLabelText('Show commit diff for src/inline.ts')).toBeInTheDocument();
+        });
+
+        const showCall = mockFetch.mock.calls.find(
+          (call) => typeof call[0] === 'string' && (call[0] as string).includes('/git/show/abc1234')
+        );
+        expect(showCall).toBeTruthy();
+      });
+
+      it('collapses the inline accordion when View diff is clicked again', async () => {
+        setEndpoints({
+          log: { ok: true, json: LOG_PAYLOAD },
+          show: { ok: true, json: SHOW_PAYLOAD },
+        });
+        render(<GitPane {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-view-diff-button')).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByTestId('git-commit-view-diff-button'));
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-inline-files')).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByTestId('git-commit-view-diff-button'));
+        await waitFor(() => {
+          expect(screen.queryByTestId('git-commit-inline-files')).not.toBeInTheDocument();
+        });
+      });
+
+      it('routes an inline file click through onDiffSelect (the existing diff path)', async () => {
+        const onDiffSelect = vi.fn();
+        setEndpoints({
+          log: { ok: true, json: LOG_PAYLOAD },
+          show: { ok: true, json: SHOW_PAYLOAD },
+          diff: { ok: true, json: { diff: 'diff --git a/inline b/inline\n+x' } },
+        });
+        render(<GitPane {...defaultProps} onDiffSelect={onDiffSelect} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-view-diff-button')).toBeInTheDocument();
+        });
+        fireEvent.click(screen.getByTestId('git-commit-view-diff-button'));
+
+        await waitFor(() => {
+          expect(screen.getByLabelText('Show commit diff for src/inline.ts')).toBeInTheDocument();
+        });
+        fireEvent.click(screen.getByLabelText('Show commit diff for src/inline.ts'));
+
+        await waitFor(() => {
+          expect(onDiffSelect).toHaveBeenCalledWith('diff --git a/inline b/inline\n+x', 'src/inline.ts');
+        });
+      });
+
+      it('keeps the existing commit-select detail path (backwards compat)', async () => {
+        setEndpoints({
+          log: { ok: true, json: LOG_PAYLOAD },
+          show: { ok: true, json: SHOW_PAYLOAD },
+        });
+        render(<GitPane {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByText('feat: one')).toBeInTheDocument();
+        });
+
+        // Clicking the commit row (not the View diff button) still opens the
+        // lower Changed Files detail section.
+        fireEvent.click(screen.getByText('feat: one'));
+        await waitFor(() => {
+          expect(screen.getByText('Changed Files')).toBeInTheDocument();
+        });
+      });
+    });
+
+    // ------------------------------------------------------------------ C
+    describe('C. Changes unstaged-diff inline preview', () => {
+      // 27-line diff so the 20-line preview truncates.
+      const PREVIEW_DIFF = [
+        'diff --git a/src/unstaged.ts b/src/unstaged.ts',
+        '@@ -1 +1 @@',
+        ...Array.from({ length: 25 }, (_, i) => `+L${i + 1}`),
+      ].join('\n');
+
+      it('renders an expand caret on each changed-file row', async () => {
+        setEndpoints({ staged: { ok: true, json: STAGED_PAYLOAD } });
+        render(<GitPane {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(
+            screen.getByLabelText('Toggle diff preview for src/unstaged.ts')
+          ).toBeInTheDocument();
+        });
+      });
+
+      it('fetches /git/working-diff and shows the first 20 lines inline on caret click', async () => {
+        setEndpoints({
+          staged: { ok: true, json: STAGED_PAYLOAD },
+          workingDiff: { ok: true, json: { diff: PREVIEW_DIFF } },
+        });
+        render(<GitPane {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(
+            screen.getByLabelText('Toggle diff preview for src/unstaged.ts')
+          ).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByLabelText('Toggle diff preview for src/unstaged.ts'));
+
+        await waitFor(() => {
+          expect(screen.getByTestId('git-changes-inline-preview')).toBeInTheDocument();
+        });
+
+        // working-diff requested with mode=unstaged for this list.
+        const wdCall = mockFetch.mock.calls.find(
+          (call) => typeof call[0] === 'string' && (call[0] as string).includes('/git/working-diff')
+        );
+        expect(wdCall).toBeTruthy();
+        expect(wdCall![0] as string).toContain('mode=unstaged');
+
+        // First lines are shown; lines past the 20-line cap are not.
+        expect(screen.getByText('+L1')).toBeInTheDocument();
+        expect(screen.queryByText('+L19')).not.toBeInTheDocument();
+        // A "open full diff" affordance is offered when truncated.
+        expect(screen.getByTestId('git-changes-preview-more')).toBeInTheDocument();
+      });
+
+      it('collapses the preview when the caret is clicked again', async () => {
+        setEndpoints({
+          staged: { ok: true, json: STAGED_PAYLOAD },
+          workingDiff: { ok: true, json: { diff: PREVIEW_DIFF } },
+        });
+        render(<GitPane {...defaultProps} />);
+
+        const caretLabel = 'Toggle diff preview for src/unstaged.ts';
+        await waitFor(() => expect(screen.getByLabelText(caretLabel)).toBeInTheDocument());
+
+        fireEvent.click(screen.getByLabelText(caretLabel));
+        await waitFor(() => {
+          expect(screen.getByTestId('git-changes-inline-preview')).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByLabelText(caretLabel));
+        await waitFor(() => {
+          expect(screen.queryByTestId('git-changes-inline-preview')).not.toBeInTheDocument();
+        });
+      });
+
+      it('preserves the existing full-diff "Diff" button (onDiffSelect)', async () => {
+        const onDiffSelect = vi.fn();
+        setEndpoints({
+          staged: { ok: true, json: STAGED_PAYLOAD },
+          workingDiff: { ok: true, json: { diff: PREVIEW_DIFF } },
+        });
+        render(<GitPane {...defaultProps} onDiffSelect={onDiffSelect} />);
+
+        await waitFor(() => {
+          expect(screen.getByLabelText('Show diff for src/unstaged.ts')).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByLabelText('Show diff for src/unstaged.ts'));
+        await waitFor(() => {
+          expect(onDiffSelect).toHaveBeenCalledWith(PREVIEW_DIFF, 'src/unstaged.ts');
+        });
+      });
+    });
+  });
 });
