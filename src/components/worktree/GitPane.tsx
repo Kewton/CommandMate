@@ -24,10 +24,11 @@ import type {
 import type { GitStatus, Worktree } from '@/types/models';
 import { useFilePolling } from '@/hooks/useFilePolling';
 import { useGitPaneNetworkOps } from '@/hooks/useGitPaneNetworkOps';
-import { useLocalStorageState } from '@/hooks/useLocalStorageState';
+import { useGitPaneTabState } from '@/hooks/useGitPaneTabState';
 import type { GitNetworkOperation } from '@/types/git';
 import { BranchCheckoutDropdown } from '@/components/worktree/git/BranchCheckoutDropdown';
 import { AdvancedSection } from '@/components/worktree/git/AdvancedSection';
+import { GitPaneMobileTabs } from '@/components/worktree/git/GitPaneMobileTabs';
 import {
   branchCreatePrompt,
   branchDeletePrompt,
@@ -1845,20 +1846,20 @@ export const GitPane = memo(function GitPane({
   const [detailError, setDetailError] = useState<string | null>(null);
 
   // Collapsible section states
-  const [commitListOpen, setCommitListOpen] = useState(true);
   const [changedFilesOpen, setChangedFilesOpen] = useState(true);
   const [diffOpen, setDiffOpen] = useState(true);
 
-  // Issue #815: "Advanced operations" group (Fetch / Branches create+delete /
-  // Stash / Danger Zone) open-state, default closed and persisted to localStorage
-  // (key `commandmate:gitPane:advancedOpen`). SSR-safe via useLocalStorageState
-  // (starts closed, hydrates on mount).
-  const { value: advancedOpen, setValue: setAdvancedOpen } = useLocalStorageState<boolean>({
-    key: 'commandmate:gitPane:advancedOpen',
-    defaultValue: false,
-    validate: (v): v is boolean => typeof v === 'boolean',
-  });
-  const toggleAdvanced = useCallback(() => setAdvancedOpen((prev) => !prev), [setAdvancedOpen]);
+  // Issue #818: consolidated GitPane UI persistence — mobile active tab plus the
+  // Commit History / Advanced collapse states (the latter keeps Phase 1's
+  // `commandmate:gitPane:advancedOpen` key). SSR-safe (defaults, hydrate on mount).
+  const {
+    activeTab,
+    setActiveTab,
+    historyOpen: commitListOpen,
+    toggleHistory: toggleCommitList,
+    advancedOpen,
+    toggleAdvanced,
+  } = useGitPaneTabState();
 
   // Issue #779: Current Status (self-fetched, independent of commit history)
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
@@ -2663,69 +2664,81 @@ export const GitPane = memo(function GitPane({
   // Render
   // ========================================================================
 
-  return (
-    <div className={`flex flex-col overflow-hidden ${className}`}>
-      {/* Current Status (Issue #779) - top of the pane, above Commit History */}
-      <CurrentStatusSection
-        gitStatus={gitStatus}
-        statusLoading={statusLoading}
-        statusError={statusError}
-        isMobile={isMobile}
-        onRefresh={handleStatusRefresh}
-      />
+  // ------------------------------------------------------------------------
+  // Issue #818: build each logical section once as a render variable so the
+  // mobile tab layout and the desktop visual-grouping layout compose the same
+  // JSX without duplication.
+  // ------------------------------------------------------------------------
 
-      {/* Quick actions (Issue #783 Pull/Push + Issue #815 checkout dropdown) -
-          core, directly under Current Status. Fetch was demoted to Advanced. */}
-      <NetworkOperationsSection
-        progressState={networkProgressState}
-        operation={networkOperation}
-        error={networkError}
-        conflict={networkConflict}
-        conflictFiles={networkConflictFiles}
-        hasUpstream={hasUpstream}
-        isMobile={isMobile}
-        onPull={() => runNetworkPull({})}
-        onPush={() => runNetworkPush({ setUpstream: !hasUpstream })}
-        onAbort={abortNetworkOp}
-        extraActions={
-          <BranchCheckoutDropdown
-            branches={branches}
-            busy={branchBusy || networkWriteLock}
-            actionError={branchActionError}
-            hasRunningSession={hasRunningSession}
-            isMobile={isMobile}
-            onCheckout={handleCheckout}
-          />
-        }
-      />
+  // Current Status (Issue #779) - orientation header (read).
+  const statusSection = (
+    <CurrentStatusSection
+      gitStatus={gitStatus}
+      statusLoading={statusLoading}
+      statusError={statusError}
+      isMobile={isMobile}
+      onRefresh={handleStatusRefresh}
+    />
+  );
 
-      {/* Changes (Issue #780) - core, below Quick actions, above Commit History */}
-      <ChangesSection
-        staged={staged}
-        loading={stagedLoading}
-        error={stagedError}
-        busy={opBusy || networkWriteLock}
-        commitMessage={commitMessage}
-        amend={amend}
-        committing={committing}
-        commitError={changesCommitError}
-        isMobile={isMobile}
-        onRefresh={fetchStaged}
-        onDiff={handleChangesDiff}
-        onPreview={fetchWorkingDiffText}
-        onStage={handleStage}
-        onUnstage={handleUnstage}
-        onCommitMessageChange={setCommitMessage}
-        onAmendChange={setAmend}
-        onCommit={handleCommit}
-        onCommitAndPush={handleCommitAndPush}
-      />
+  // Quick actions (Issue #783 Pull/Push + Issue #815 checkout dropdown).
+  const quickActionsSection = (
+    <NetworkOperationsSection
+      progressState={networkProgressState}
+      operation={networkOperation}
+      error={networkError}
+      conflict={networkConflict}
+      conflictFiles={networkConflictFiles}
+      hasUpstream={hasUpstream}
+      isMobile={isMobile}
+      onPull={() => runNetworkPull({})}
+      onPush={() => runNetworkPush({ setUpstream: !hasUpstream })}
+      onAbort={abortNetworkOp}
+      extraActions={
+        <BranchCheckoutDropdown
+          branches={branches}
+          busy={branchBusy || networkWriteLock}
+          actionError={branchActionError}
+          hasRunningSession={hasRunningSession}
+          isMobile={isMobile}
+          onCheckout={handleCheckout}
+        />
+      }
+    />
+  );
 
+  // Changes (Issue #780) - staged/unstaged/untracked + commit form.
+  const changesSection = (
+    <ChangesSection
+      staged={staged}
+      loading={stagedLoading}
+      error={stagedError}
+      busy={opBusy || networkWriteLock}
+      commitMessage={commitMessage}
+      amend={amend}
+      committing={committing}
+      commitError={changesCommitError}
+      isMobile={isMobile}
+      onRefresh={fetchStaged}
+      onDiff={handleChangesDiff}
+      onPreview={fetchWorkingDiffText}
+      onStage={handleStage}
+      onUnstage={handleUnstage}
+      onCommitMessageChange={setCommitMessage}
+      onAmendChange={setAmend}
+      onCommit={handleCommit}
+      onCommitAndPush={handleCommitAndPush}
+    />
+  );
+
+  // Commit History (Issue #447/#816) - read. Collapse state persisted (Issue #818 C).
+  const historySection = (
+    <>
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700">
         <button
           type="button"
-          onClick={() => setCommitListOpen((prev) => !prev)}
+          onClick={toggleCommitList}
           className="flex items-center gap-1 text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer hover:text-gray-900 dark:hover:text-gray-100"
         >
           <span className="text-xs w-4 text-center">{commitListOpen ? '▼' : '▶'}</span>
@@ -2971,10 +2984,13 @@ export const GitPane = memo(function GitPane({
           )}
         </div>
       )}
+    </>
+  );
 
-      {/* Advanced operations (Issue #815) - collapsed by default, below Commit
-          History. Wraps Fetch + Branches(create/delete) + Stash + Danger Zone. */}
-      <AdvancedSection open={advancedOpen} onToggle={toggleAdvanced}>
+  // Advanced operations (Issue #815) - Fetch + Branches(create/delete) + Stash
+  // + Danger Zone. Collapsed by default; open-state persisted (Issue #818 C).
+  const advancedSection = (
+    <AdvancedSection open={advancedOpen} onToggle={toggleAdvanced}>
         {/* Fetch (Issue #783 op, decoupled from Pull/Push per Issue #815) */}
         <div
           className="flex flex-col gap-1.5 px-3 py-2 border-b border-gray-200 dark:border-gray-700"
@@ -3046,6 +3062,89 @@ export const GitPane = memo(function GitPane({
           onAskAi={onInsertToMessage}
         />
       </AdvancedSection>
+  );
+
+  // ------------------------------------------------------------------------
+  // Issue #818 A: mobile = a 4-tab strip with only the active group mounted
+  // (non-active groups unmount → less DOM + shorter scroll). Status tab pairs
+  // Current Status with Quick actions per the issue spec.
+  // ------------------------------------------------------------------------
+  if (isMobile) {
+    return (
+      <div
+        className={`flex flex-col overflow-hidden ${className}`}
+        data-testid="git-pane-mobile"
+      >
+        <GitPaneMobileTabs activeTab={activeTab} onTabChange={setActiveTab} />
+        <div
+          className="flex-1 flex flex-col min-h-0"
+          data-testid="git-pane-mobile-panel"
+          data-active-tab={activeTab}
+        >
+          {activeTab === 'status' && (
+            <div className="flex-1 overflow-y-auto min-h-0">
+              {statusSection}
+              {quickActionsSection}
+            </div>
+          )}
+          {activeTab === 'changes' && (
+            <div className="flex-1 overflow-y-auto min-h-0">{changesSection}</div>
+          )}
+          {activeTab === 'history' && historySection}
+          {activeTab === 'advanced' && (
+            <div className="flex-1 overflow-y-auto min-h-0">{advancedSection}</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ------------------------------------------------------------------------
+  // Issue #818 B: desktop = visual grouping into read / write / advanced
+  // blocks (background tint + accent border). Section order is unchanged so
+  // the overflow-hidden + flex-1 history layout keeps working.
+  // ------------------------------------------------------------------------
+  return (
+    <div
+      className={`flex flex-col overflow-hidden ${className}`}
+      data-testid="git-pane-desktop"
+    >
+      {/* Read · orientation (sky tint) */}
+      <div
+        data-testid="git-group-read"
+        data-git-group="read"
+        className="border-l-2 border-sky-400/60 dark:border-sky-500/40 bg-sky-50/40 dark:bg-sky-950/20"
+      >
+        {statusSection}
+      </div>
+
+      {/* Write · actions (neutral tint) */}
+      <div
+        data-testid="git-group-write"
+        data-git-group="write"
+        className="border-l-2 border-gray-300 dark:border-gray-600 bg-gray-50/70 dark:bg-gray-800/30"
+      >
+        {quickActionsSection}
+        {changesSection}
+      </div>
+
+      {/* Read · history (sky tint, grows to fill the pane) */}
+      <div
+        data-testid="git-group-history"
+        data-git-group="read"
+        className="flex-1 flex flex-col min-h-0 border-l-2 border-sky-400/60 dark:border-sky-500/40 bg-sky-50/30 dark:bg-sky-950/10"
+      >
+        {historySection}
+      </div>
+
+      {/* Advanced · gray block with a heavier divider */}
+      <div
+        data-testid="git-group-advanced"
+        data-git-group="advanced"
+        className="border-l-2 border-t-2 border-gray-300 dark:border-gray-600 bg-gray-100/50 dark:bg-gray-800/40"
+      >
+        {advancedSection}
+      </div>
     </div>
   );
 });
