@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-06-04
+
+### Added
+- feat(message-input): busy なセッションへメッセージを送信した際に **「queued (session busy)」warning toast** を表示。先行タスク処理中のセッションに送信すると API は 200 を返して CLI 側でメッセージをキューイングするため composer が空になり「何も起きない（no-op）」ように見えていた挙動を改善。`MessageInput` に `isProcessing` / `showToast` props を追加し、送信成功時に `isProcessing === true` なら「現在のタスクの後ろにキューされた」旨の warning toast を表示（idle 送信時は従来どおり toast なし）。`TerminalSplitPaneContent` は当該 split 自身の poller（`useTerminalPanePolling` の `terminal.isRunning`）から `isProcessing` を導出し、既存の `history.showToast` surface を再利用して両者を `MessageInput` へ配線 (Issue #806)
+
+### Fixed
+- fix(status-detector): `/pm-auto-dev` + subagent Task 実行中に Claude セッションが誤って "Ready"（`isProcessing: false`）と検出される問題を修正。footer 下部に subagent task panel（`⏺ main` / `◯ general-purpose ... 55s` 行）が描画されると、`✶ Running…` スピナー（footer 上部）と `esc to interrupt` status bar の両方が step 2（thinking 検出）の狭い 5 行 `THINKING_TAIL_LINE_COUNT` window の外へ押し出され、可視のままの `❯` input box が step 3 の input-prompt チェックに合致して `status='ready'` を返していたことが原因。input-prompt フォールバックの前に、より広い 15 行（`STATUS_CHECK_LINE_COUNT`）footer window 内で `esc to interrupt` status bar を照合する Claude 専用チェック（step 2.6 / `CLAUDE_INTERRUPT_HINT_PATTERN`）を追加。status bar は Claude が能動的に処理中のみ表示され live で再描画されるため（idle 時は `? for shortcuts`）、Issue #188 の spinner-summary 誤検出は再発しない (Issue #805)
+- fix(prompt-detector): Claude Code v2.x の **AskUserQuestion picker** で auto-yes が 30 分以上沈黙する問題を修正。新 picker は `Enter to select · ↑/↓ to navigate · Esc to cancel` footer の**下**に overlay（`/pm-auto-dev` task panel、例 `6 tasks (4 done, 2 open)`）を描画するため、`NORMAL_OPTION_PATTERN` が `6 tasks …` 行を option 6 と誤マッチし逆方向スキャンが footer で停止、本来の `1./2./3.` picker options が収集されず検出が `no_prompt` を返していたことが原因。`CLAUDE_ASK_USER_QUESTION_FOOTER_PATTERN` を追加し `effectiveEnd` footer-trim（Issue #704 機構）を picker footer でもトリムするよう拡張（trailing panel をスキャン窓の外へ排除、`isAskUserQuestion` フラグ付与）。回答送信側（`prompt-answer-sender.ts`）は AskUserQuestion picker でハイライト済みデフォルト（`offset === 0`）選択時に Enter 前へ net-zero の Down+Up nudge を送り picker cursor を確実に engage（裸 Enter での commit 失敗を回避）。legacy footer / 旧フォーマット経路は byte-for-byte 不変 (Issue #807)
+
+### Chore
+- chore(docs): CLAUDE.md の肥大化を構造的に防止。CLAUDE.md からインライン module table（240 行）を削除（92,229 → ~15kB）し全 module detail を `docs/module-reference.md` へ集約、CLAUDE.md 冒頭に anti-pattern directive（モジュール詳細を書かない指示）を追加、CI に CLAUDE.md size の hard-cap（35,000 byte 上限・hard-fail）を追加して回帰を防止 (Issue #809)
+
 ## [0.6.1] - 2026-06-03
 
 ### Added
