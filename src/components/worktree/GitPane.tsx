@@ -24,11 +24,12 @@ import type {
 import type { GitStatus, Worktree } from '@/types/models';
 import { useFilePolling } from '@/hooks/useFilePolling';
 import { useGitPaneNetworkOps } from '@/hooks/useGitPaneNetworkOps';
+import { useLocalStorageState } from '@/hooks/useLocalStorageState';
 import type { GitNetworkOperation } from '@/types/git';
+import { BranchCheckoutDropdown } from '@/components/worktree/git/BranchCheckoutDropdown';
+import { AdvancedSection } from '@/components/worktree/git/AdvancedSection';
 import {
   GIT_STATUS_POLL_INTERVAL_MS,
-  CHECKOUT_HISTORY_LOSS_WARNING,
-  CHECKOUT_RUNNING_SESSION_WARNING,
   RESET_HARD_HISTORY_LOSS_WARNING,
   DANGER_ZONE_RUNNING_SESSION_WARNING,
   PUSH_PROTECTED_BRANCH_WARNING,
@@ -263,10 +264,19 @@ interface NetworkOperationsSectionProps {
   /** True when the current status has no upstream (chip absent). */
   hasUpstream: boolean;
   isMobile: boolean;
-  onFetch: () => void;
+  /**
+   * Issue #815: Fetch was demoted to "Advanced operations". When omitted, the
+   * Fetch button is not rendered here (Pull/Push stay as the core Quick actions).
+   */
+  onFetch?: () => void;
   onPull: () => void;
   onPush: () => void;
   onAbort: () => void;
+  /**
+   * Issue #815: optional slot rendered alongside Pull/Push in the button row
+   * (e.g. the core BranchCheckoutDropdown), keeping checkout beside Quick actions.
+   */
+  extraActions?: React.ReactNode;
 }
 
 /**
@@ -297,6 +307,7 @@ const NetworkOperationsSection = memo(function NetworkOperationsSection({
   onPull,
   onPush,
   onAbort,
+  extraActions,
 }: NetworkOperationsSectionProps) {
   const running = progressState === 'running';
 
@@ -320,19 +331,23 @@ const NetworkOperationsSection = memo(function NetworkOperationsSection({
       data-testid="git-network-section"
     >
       <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
-        Remote
+        Quick actions
       </span>
 
       <div className={`flex items-center ${isMobile ? 'flex-wrap gap-1.5' : 'gap-2'}`}>
-        <button
-          type="button"
-          onClick={onFetch}
-          disabled={running}
-          className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
-          data-testid="git-fetch-button"
-        >
-          Fetch
-        </button>
+        {/* Fetch is rendered here only when onFetch is provided; Issue #815 moved
+            the core Fetch button into the collapsed Advanced operations group. */}
+        {onFetch && (
+          <button
+            type="button"
+            onClick={onFetch}
+            disabled={running}
+            className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+            data-testid="git-fetch-button"
+          >
+            Fetch
+          </button>
+        )}
         <button
           type="button"
           onClick={onPull}
@@ -352,6 +367,8 @@ const NetworkOperationsSection = memo(function NetworkOperationsSection({
         >
           Push
         </button>
+        {/* Issue #815: core BranchCheckoutDropdown slotted beside Quick actions. */}
+        {extraActions}
       </div>
 
       {/* Progress / abort bar (sticky on mobile, z-40 < confirm modals z-50) */}
@@ -667,13 +684,10 @@ const ChangesSection = memo(function ChangesSection({
 });
 
 // ============================================================================
-// Branches section (Issue #781): list / checkout / create / delete
+// Branches section (Issue #781): list / create / delete
+// Issue #815: checkout was extracted to the core BranchCheckoutDropdown; this
+// section (now under "Advanced operations") keeps create/delete only.
 // ============================================================================
-
-/** A pending checkout confirmation (null = no dialog open). */
-interface CheckoutTarget {
-  branch: BranchInfo;
-}
 
 interface BranchesSectionProps {
   branches: BranchInfo[];
@@ -681,23 +695,21 @@ interface BranchesSectionProps {
   loading: boolean;
   error: string | null;
   busy: boolean;
-  /** Inline error from a checkout/create/delete mutation. */
+  /** Inline error from a checkout/create/delete mutation (shared state). */
   actionError: string | null;
-  /** True when any CLI session is running for this worktree (S3-002). */
-  hasRunningSession: boolean;
   isMobile: boolean;
   onIncludeChange: (include: BranchInclude) => void;
   onRefresh: () => void;
-  onCheckout: (branch: BranchInfo, force: boolean) => void;
   onCreate: (name: string, from: string | undefined) => void;
   onDelete: (name: string, force: boolean) => void;
 }
 
 /**
- * Branches section (Issue #781). Rendered between Current Status (#779) and
- * Changes (#780). Provides local/remote tabs, a per-branch checkout (with the
- * S3-001 history-loss + S3-002 running-session confirm dialog), a create modal,
- * and a delete confirm modal. On mobile the whole section default-collapses.
+ * Branches section (Issue #781). Provides local/remote tabs, a create modal, and
+ * a per-branch delete confirm modal. Issue #815 demoted this under the collapsed
+ * "Advanced operations" group and moved checkout to the core
+ * BranchCheckoutDropdown, so this section no longer renders checkout. On mobile
+ * the whole section default-collapses.
  */
 const BranchesSection = memo(function BranchesSection({
   branches,
@@ -706,34 +718,19 @@ const BranchesSection = memo(function BranchesSection({
   error,
   busy,
   actionError,
-  hasRunningSession,
   isMobile,
   onIncludeChange,
   onRefresh,
-  onCheckout,
   onCreate,
   onDelete,
 }: BranchesSectionProps) {
   // Mobile default-collapses the entire section (#780 same approach).
   const [open, setOpen] = useState(!isMobile);
-  const [checkoutTarget, setCheckoutTarget] = useState<CheckoutTarget | null>(null);
-  const [checkoutForce, setCheckoutForce] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [createName, setCreateName] = useState('');
   const [createFrom, setCreateFrom] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<BranchInfo | null>(null);
   const [deleteForce, setDeleteForce] = useState(false);
-
-  const openCheckout = useCallback((branch: BranchInfo) => {
-    setCheckoutForce(false);
-    setCheckoutTarget({ branch });
-  }, []);
-
-  const confirmCheckout = useCallback(() => {
-    if (!checkoutTarget) return;
-    onCheckout(checkoutTarget.branch, checkoutForce);
-    setCheckoutTarget(null);
-  }, [checkoutTarget, checkoutForce, onCheckout]);
 
   const confirmCreate = useCallback(() => {
     if (createName.trim().length === 0) return;
@@ -826,7 +823,7 @@ const BranchesSection = memo(function BranchesSection({
             <div
               className="px-3 pb-2 text-xs text-red-600 dark:text-red-400"
               role="alert"
-              data-testid="branch-checkout-error"
+              data-testid="git-branches-action-error"
             >
               {actionError}
             </div>
@@ -839,7 +836,6 @@ const BranchesSection = memo(function BranchesSection({
           {branches.length > 0 && (
             <ul className="divide-y divide-gray-100 dark:divide-gray-800 max-h-64 overflow-y-auto">
               {branches.map((branch) => {
-                const checkedOutElsewhere = branch.checkedOutWorktreePath !== null && !branch.isCurrent;
                 const deleteDisabled = busy || branch.isCurrent || branch.isDefault;
                 return (
                   <li
@@ -857,22 +853,6 @@ const BranchesSection = memo(function BranchesSection({
                         <span className="ml-1.5 text-[10px] text-gray-400 dark:text-gray-500">default</span>
                       )}
                     </span>
-                    {!branch.isCurrent && (
-                      <button
-                        type="button"
-                        onClick={() => openCheckout(branch)}
-                        disabled={busy || checkedOutElsewhere}
-                        className="shrink-0 px-1.5 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 text-cyan-700 dark:text-cyan-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
-                        aria-label={`Checkout ${branch.name}`}
-                        title={
-                          checkedOutElsewhere
-                            ? `Checked out in another worktree: ${branch.checkedOutWorktreePath}`
-                            : undefined
-                        }
-                      >
-                        Checkout
-                      </button>
-                    )}
                     <button
                       type="button"
                       onClick={() => {
@@ -891,71 +871,6 @@ const BranchesSection = memo(function BranchesSection({
             </ul>
           )}
         </>
-      )}
-
-      {/* Checkout confirm dialog */}
-      {checkoutTarget && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          role="dialog"
-          aria-modal="true"
-          data-testid="branch-checkout-confirm"
-        >
-          <div className="w-full max-w-md rounded-lg bg-white dark:bg-gray-800 p-4 shadow-xl flex flex-col gap-3">
-            <h3 className="text-sm font-medium text-gray-800 dark:text-gray-200">
-              Checkout <span className="font-mono">{checkoutTarget.branch.name}</span>?
-            </h3>
-
-            {/* S3-001: history-loss warning (verified verbatim by acceptance test). */}
-            <div
-              className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/50 dark:bg-amber-900/20 dark:text-amber-300"
-              role="alert"
-              data-testid="branch-history-loss-warning"
-            >
-              {CHECKOUT_HISTORY_LOSS_WARNING}
-            </div>
-
-            {/* S3-002: running-session warning. */}
-            {hasRunningSession && (
-              <div
-                className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-700/50 dark:bg-red-900/20 dark:text-red-300"
-                role="alert"
-                data-testid="branch-session-warning"
-              >
-                {CHECKOUT_RUNNING_SESSION_WARNING}
-              </div>
-            )}
-
-            <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
-              <input
-                type="checkbox"
-                checked={checkoutForce}
-                onChange={(e) => setCheckoutForce(e.target.checked)}
-                data-testid="branch-checkout-force"
-              />
-              Discard uncommitted changes (force) — 未コミットの変更は失われます
-            </label>
-
-            <div className="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setCheckoutTarget(null)}
-                className="px-3 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={confirmCheckout}
-                disabled={busy}
-                className="px-3 py-1 text-xs font-medium rounded bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-50"
-                data-testid="branch-checkout-confirm-button"
-              >
-                Checkout
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Create-branch modal */}
@@ -1659,6 +1574,17 @@ export const GitPane = memo(function GitPane({
   const [commitListOpen, setCommitListOpen] = useState(true);
   const [changedFilesOpen, setChangedFilesOpen] = useState(true);
   const [diffOpen, setDiffOpen] = useState(true);
+
+  // Issue #815: "Advanced operations" group (Fetch / Branches create+delete /
+  // Stash / Danger Zone) open-state, default closed and persisted to localStorage
+  // (key `commandmate:gitPane:advancedOpen`). SSR-safe via useLocalStorageState
+  // (starts closed, hydrates on mount).
+  const { value: advancedOpen, setValue: setAdvancedOpen } = useLocalStorageState<boolean>({
+    key: 'commandmate:gitPane:advancedOpen',
+    defaultValue: false,
+    validate: (v): v is boolean => typeof v === 'boolean',
+  });
+  const toggleAdvanced = useCallback(() => setAdvancedOpen((prev) => !prev), [setAdvancedOpen]);
 
   // Issue #779: Current Status (self-fetched, independent of commit history)
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
@@ -2378,7 +2304,8 @@ export const GitPane = memo(function GitPane({
         onRefresh={handleStatusRefresh}
       />
 
-      {/* Remote network operations (Issue #783) - directly under Current Status */}
+      {/* Quick actions (Issue #783 Pull/Push + Issue #815 checkout dropdown) -
+          core, directly under Current Status. Fetch was demoted to Advanced. */}
       <NetworkOperationsSection
         progressState={networkProgressState}
         operation={networkOperation}
@@ -2387,30 +2314,22 @@ export const GitPane = memo(function GitPane({
         conflictFiles={networkConflictFiles}
         hasUpstream={hasUpstream}
         isMobile={isMobile}
-        onFetch={() => runNetworkFetch({})}
         onPull={() => runNetworkPull({})}
         onPush={() => runNetworkPush({ setUpstream: !hasUpstream })}
         onAbort={abortNetworkOp}
+        extraActions={
+          <BranchCheckoutDropdown
+            branches={branches}
+            busy={branchBusy || networkWriteLock}
+            actionError={branchActionError}
+            hasRunningSession={hasRunningSession}
+            isMobile={isMobile}
+            onCheckout={handleCheckout}
+          />
+        }
       />
 
-      {/* Branches (Issue #781) - between Current Status and Changes */}
-      <BranchesSection
-        branches={branches}
-        include={branchInclude}
-        loading={branchesLoading}
-        error={branchesError}
-        busy={branchBusy || networkWriteLock}
-        actionError={branchActionError}
-        hasRunningSession={hasRunningSession}
-        isMobile={isMobile}
-        onIncludeChange={handleBranchIncludeChange}
-        onRefresh={handleBranchesRefresh}
-        onCheckout={handleCheckout}
-        onCreate={handleBranchCreate}
-        onDelete={handleBranchDelete}
-      />
-
-      {/* Changes (Issue #780) - below Current Status, above Commit History */}
+      {/* Changes (Issue #780) - core, below Quick actions, above Commit History */}
       <ChangesSection
         staged={staged}
         loading={stagedLoading}
@@ -2428,23 +2347,6 @@ export const GitPane = memo(function GitPane({
         onCommitMessageChange={setCommitMessage}
         onAmendChange={setAmend}
         onCommit={handleCommit}
-      />
-
-      {/* Stash (Issue #782) - between Changes and Commit History */}
-      <StashSection
-        stashes={stashes}
-        loading={stashLoading}
-        error={stashError}
-        busy={stashBusy || networkWriteLock}
-        actionError={stashActionError}
-        conflictNotice={stashConflictNotice}
-        hasRunningSession={hasRunningSession}
-        isMobile={isMobile}
-        onRefresh={fetchStash}
-        onPush={handleStashPush}
-        onPop={handleStashPop}
-        onApply={handleStashApply}
-        onDrop={handleStashDrop}
       />
 
       {/* Header */}
@@ -2633,21 +2535,76 @@ export const GitPane = memo(function GitPane({
         </div>
       )}
 
-      {/* Danger Zone (Issue #782) - bottom of the pane, below Commit History */}
-      <DangerZoneSection
-        selectedCommit={selectedCommit}
-        busy={dangerBusy || networkWriteLock}
-        actionError={dangerActionError}
-        conflictNotice={dangerConflictNotice}
-        currentBranch={gitStatus?.currentBranch ?? null}
-        hasRunningSession={hasRunningSession}
-        isMobile={isMobile}
-        onReset={handleReset}
-        onRevert={handleRevert}
-        onForcePush={(forceWithLease) =>
-          runNetworkPush(forceWithLease ? { forceWithLease: true } : { force: true })
-        }
-      />
+      {/* Advanced operations (Issue #815) - collapsed by default, below Commit
+          History. Wraps Fetch + Branches(create/delete) + Stash + Danger Zone. */}
+      <AdvancedSection open={advancedOpen} onToggle={toggleAdvanced}>
+        {/* Fetch (Issue #783 op, decoupled from Pull/Push per Issue #815) */}
+        <div
+          className="flex flex-col gap-1.5 px-3 py-2 border-b border-gray-200 dark:border-gray-700"
+          data-testid="git-advanced-fetch"
+        >
+          <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Remote</span>
+          <div>
+            <button
+              type="button"
+              onClick={() => runNetworkFetch({})}
+              disabled={networkProgressState === 'running'}
+              className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+              data-testid="git-fetch-button"
+            >
+              Fetch
+            </button>
+          </div>
+        </div>
+
+        {/* Branches create/delete (Issue #781; checkout extracted to core #815) */}
+        <BranchesSection
+          branches={branches}
+          include={branchInclude}
+          loading={branchesLoading}
+          error={branchesError}
+          busy={branchBusy || networkWriteLock}
+          actionError={branchActionError}
+          isMobile={isMobile}
+          onIncludeChange={handleBranchIncludeChange}
+          onRefresh={handleBranchesRefresh}
+          onCreate={handleBranchCreate}
+          onDelete={handleBranchDelete}
+        />
+
+        {/* Stash (Issue #782) */}
+        <StashSection
+          stashes={stashes}
+          loading={stashLoading}
+          error={stashError}
+          busy={stashBusy || networkWriteLock}
+          actionError={stashActionError}
+          conflictNotice={stashConflictNotice}
+          hasRunningSession={hasRunningSession}
+          isMobile={isMobile}
+          onRefresh={fetchStash}
+          onPush={handleStashPush}
+          onPop={handleStashPop}
+          onApply={handleStashApply}
+          onDrop={handleStashDrop}
+        />
+
+        {/* Danger Zone (Issue #782) */}
+        <DangerZoneSection
+          selectedCommit={selectedCommit}
+          busy={dangerBusy || networkWriteLock}
+          actionError={dangerActionError}
+          conflictNotice={dangerConflictNotice}
+          currentBranch={gitStatus?.currentBranch ?? null}
+          hasRunningSession={hasRunningSession}
+          isMobile={isMobile}
+          onReset={handleReset}
+          onRevert={handleRevert}
+          onForcePush={(forceWithLease) =>
+            runNetworkPush(forceWithLease ? { forceWithLease: true } : { force: true })
+          }
+        />
+      </AdvancedSection>
     </div>
   );
 });

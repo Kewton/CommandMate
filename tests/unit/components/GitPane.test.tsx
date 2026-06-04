@@ -195,6 +195,36 @@ function setEndpoints(config: EndpointConfig = {}) {
   });
 }
 
+/**
+ * Issue #815: expand the collapsed "Advanced operations" group (Fetch / Branches
+ * create+delete / Stash / Danger Zone). The toggle header is always rendered.
+ */
+function openAdvanced() {
+  fireEvent.click(screen.getByTestId('git-advanced-toggle'));
+}
+
+/**
+ * Issue #815: open the core branch-checkout dropdown menu. The trigger is
+ * disabled until the mount /git/branches fetch populates the list, so we wait
+ * for it to enable before opening.
+ */
+async function openCheckoutMenu() {
+  const toggle = screen.getByTestId('branch-checkout-dropdown-toggle');
+  await waitFor(() => expect(toggle).not.toBeDisabled());
+  fireEvent.click(toggle);
+}
+
+/**
+ * Issue #815: Danger Zone now lives under the collapsed Advanced group AND keeps
+ * its own collapsed toggle. Expand both to reach Reset/Revert/Force-push.
+ */
+async function openDangerZone() {
+  await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+  openAdvanced();
+  await waitFor(() => expect(screen.getByTestId('git-danger-zone-toggle')).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId('git-danger-zone-toggle'));
+}
+
 describe('GitPane', () => {
   const defaultProps = {
     worktreeId: 'test-worktree-id',
@@ -205,6 +235,10 @@ describe('GitPane', () => {
     vi.clearAllMocks();
     mockFetch.mockReset();
     setEndpoints();
+    // Issue #815: GitPane persists the Advanced group open-state to localStorage.
+    // jsdom shares localStorage across tests in a file, so reset it to keep the
+    // default-collapsed precondition deterministic per test.
+    window.localStorage.clear();
   });
 
   describe('Loading state', () => {
@@ -810,8 +844,14 @@ describe('GitPane', () => {
       });
     });
 
-    it('renders the Branches section with branch names', async () => {
+    it('renders the Branches section (create/delete) under Advanced operations', async () => {
       render(<GitPane {...defaultProps} />);
+
+      // Issue #815: Branches moved under the collapsed Advanced group.
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      expect(screen.queryByTestId('git-branches-section')).not.toBeInTheDocument();
+
+      openAdvanced();
 
       await waitFor(() => {
         expect(screen.getByTestId('git-branches-section')).toBeInTheDocument();
@@ -823,10 +863,8 @@ describe('GitPane', () => {
     it('shows the S3-001 history-loss warning in the checkout confirm dialog', async () => {
       render(<GitPane {...defaultProps} />);
 
-      await waitFor(() => {
-        expect(screen.getByLabelText('Checkout main')).toBeInTheDocument();
-      });
-
+      // Issue #815: checkout is now a core dropdown beside Quick actions.
+      await openCheckoutMenu();
       fireEvent.click(screen.getByLabelText('Checkout main'));
 
       await waitFor(() => {
@@ -843,10 +881,7 @@ describe('GitPane', () => {
       };
       render(<GitPane {...defaultProps} worktree={worktree as never} />);
 
-      await waitFor(() => {
-        expect(screen.getByLabelText('Checkout main')).toBeInTheDocument();
-      });
-
+      await openCheckoutMenu();
       fireEvent.click(screen.getByLabelText('Checkout main'));
 
       await waitFor(() => {
@@ -864,10 +899,7 @@ describe('GitPane', () => {
       };
       render(<GitPane {...defaultProps} worktree={worktree as never} />);
 
-      await waitFor(() => {
-        expect(screen.getByLabelText('Checkout main')).toBeInTheDocument();
-      });
-
+      await openCheckoutMenu();
       fireEvent.click(screen.getByLabelText('Checkout main'));
 
       await waitFor(() => {
@@ -879,10 +911,7 @@ describe('GitPane', () => {
     it('POSTs /git/checkout and refetches on confirm', async () => {
       render(<GitPane {...defaultProps} />);
 
-      await waitFor(() => {
-        expect(screen.getByLabelText('Checkout main')).toBeInTheDocument();
-      });
-
+      await openCheckoutMenu();
       fireEvent.click(screen.getByLabelText('Checkout main'));
 
       await waitFor(() => {
@@ -924,10 +953,7 @@ describe('GitPane', () => {
 
       render(<GitPane {...defaultProps} />);
 
-      await waitFor(() => {
-        expect(screen.getByLabelText('Checkout main')).toBeInTheDocument();
-      });
-
+      await openCheckoutMenu();
       fireEvent.click(screen.getByLabelText('Checkout main'));
 
       await waitFor(() => {
@@ -963,22 +989,19 @@ describe('GitPane', () => {
 
       render(<GitPane {...defaultProps} />);
 
-      await waitFor(() => {
-        expect(screen.getByLabelText('Checkout feature/elsewhere')).toBeInTheDocument();
-      });
+      await openCheckoutMenu();
 
       const button = screen.getByLabelText('Checkout feature/elsewhere');
       expect(button).toBeDisabled();
       expect(button.getAttribute('title')).toContain('/other/worktree');
     });
 
-    it('does not render a checkout button for the current branch', async () => {
+    it('does not offer the current branch in the checkout dropdown', async () => {
       render(<GitPane {...defaultProps} />);
 
-      await waitFor(() => {
-        expect(screen.getByText('feature/current')).toBeInTheDocument();
-      });
-
+      await openCheckoutMenu();
+      // The menu lists checkout-able branches; the current branch is excluded.
+      expect(screen.getByLabelText('Checkout main')).toBeInTheDocument();
       expect(screen.queryByLabelText('Checkout feature/current')).not.toBeInTheDocument();
     });
 
@@ -1004,6 +1027,10 @@ describe('GitPane', () => {
 
       render(<GitPane {...defaultProps} />);
 
+      // Issue #815: the local/remote/all tabs live in the Advanced Branches section.
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
+
       await waitFor(() => {
         expect(screen.getByTestId('git-branches-tab-remote')).toBeInTheDocument();
       });
@@ -1020,6 +1047,9 @@ describe('GitPane', () => {
 
     it('opens the create-branch modal and POSTs /git/branch/create', async () => {
       render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
 
       await waitFor(() => {
         expect(screen.getByTestId('git-branch-create-open')).toBeInTheDocument();
@@ -1050,6 +1080,9 @@ describe('GitPane', () => {
     it('opens the delete confirm modal and POSTs /git/branch/delete', async () => {
       render(<GitPane {...defaultProps} />);
 
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
+
       await waitFor(() => {
         expect(screen.getByLabelText('Delete main')).toBeInTheDocument();
       });
@@ -1079,6 +1112,9 @@ describe('GitPane', () => {
       });
 
       render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
 
       await waitFor(() => {
         expect(screen.getByLabelText('Delete feature/old')).toBeInTheDocument();
@@ -1111,13 +1147,19 @@ describe('GitPane', () => {
   describe('Stash (Issue #782)', () => {
     it('renders the stash section and fetches the stash list on mount', async () => {
       render(<GitPane {...defaultProps} />);
+      // Issue #815: stash is fetched on mount even while Advanced stays collapsed.
+      await waitFor(() => {
+        const stashCall = mockFetch.mock.calls.some(
+          (call) => typeof call[0] === 'string' && call[0].includes('/git/stash') && !call[0].match(/\/git\/stash\/\d/)
+        );
+        expect(stashCall).toBe(true);
+      });
+      // The section itself lives under Advanced operations.
+      expect(screen.queryByTestId('git-stash-section')).not.toBeInTheDocument();
+      openAdvanced();
       await waitFor(() => {
         expect(screen.getByTestId('git-stash-section')).toBeInTheDocument();
       });
-      const stashCall = mockFetch.mock.calls.some(
-        (call) => typeof call[0] === 'string' && call[0].includes('/git/stash') && !call[0].match(/\/git\/stash\/\d/)
-      );
-      expect(stashCall).toBe(true);
     });
 
     it('does NOT poll the stash list (mount + mutation only, S3-004)', async () => {
@@ -1152,6 +1194,8 @@ describe('GitPane', () => {
         },
       });
       render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
       await waitFor(() => {
         expect(screen.getByTestId('git-stash-row')).toBeInTheDocument();
       });
@@ -1162,6 +1206,8 @@ describe('GitPane', () => {
 
     it('pushes a stash via the push button', async () => {
       render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
       await waitFor(() => {
         expect(screen.getByTestId('stash-push-button')).toBeInTheDocument();
       });
@@ -1187,6 +1233,8 @@ describe('GitPane', () => {
         },
       });
       render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
       await waitFor(() => {
         expect(screen.getByTestId('stash-drop-button')).toBeInTheDocument();
       });
@@ -1220,6 +1268,8 @@ describe('GitPane', () => {
         },
       });
       render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
       await waitFor(() => {
         expect(screen.getByTestId('stash-pop-button')).toBeInTheDocument();
       });
@@ -1235,6 +1285,10 @@ describe('GitPane', () => {
   describe('Danger Zone (Issue #782)', () => {
     it('renders the Danger Zone section collapsed by default', async () => {
       render(<GitPane {...defaultProps} />);
+      // Issue #815: Danger Zone lives under the collapsed Advanced group.
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      expect(screen.queryByTestId('git-danger-zone-section')).not.toBeInTheDocument();
+      openAdvanced();
       await waitFor(() => {
         expect(screen.getByTestId('git-danger-zone-section')).toBeInTheDocument();
       });
@@ -1244,10 +1298,7 @@ describe('GitPane', () => {
 
     it('opens the Reset modal and shows the hard-mode warnings + branch confirm input', async () => {
       render(<GitPane {...defaultProps} />);
-      await waitFor(() => {
-        expect(screen.getByTestId('git-danger-zone-toggle')).toBeInTheDocument();
-      });
-      fireEvent.click(screen.getByTestId('git-danger-zone-toggle'));
+      await openDangerZone();
       fireEvent.click(screen.getByTestId('git-danger-zone-reset-open'));
       await waitFor(() => {
         expect(screen.getByTestId('reset-confirm')).toBeInTheDocument();
@@ -1262,8 +1313,7 @@ describe('GitPane', () => {
 
     it('keeps the hard Reset button disabled until the branch confirmation matches', async () => {
       render(<GitPane {...defaultProps} />);
-      await waitFor(() => expect(screen.getByTestId('git-danger-zone-toggle')).toBeInTheDocument());
-      fireEvent.click(screen.getByTestId('git-danger-zone-toggle'));
+      await openDangerZone();
       fireEvent.click(screen.getByTestId('git-danger-zone-reset-open'));
       fireEvent.click(screen.getByTestId('reset-mode-hard'));
       const confirmButton = screen.getByTestId('reset-confirm-button');
@@ -1277,8 +1327,7 @@ describe('GitPane', () => {
 
     it('dispatches a soft reset with target HEAD', async () => {
       render(<GitPane {...defaultProps} />);
-      await waitFor(() => expect(screen.getByTestId('git-danger-zone-toggle')).toBeInTheDocument());
-      fireEvent.click(screen.getByTestId('git-danger-zone-toggle'));
+      await openDangerZone();
       fireEvent.click(screen.getByTestId('git-danger-zone-reset-open'));
       fireEvent.click(screen.getByTestId('reset-mode-soft'));
       fireEvent.click(screen.getByTestId('reset-confirm-button'));
@@ -1307,8 +1356,7 @@ describe('GitPane', () => {
         },
       });
       render(<GitPane {...defaultProps} />);
-      await waitFor(() => expect(screen.getByTestId('git-danger-zone-toggle')).toBeInTheDocument());
-      fireEvent.click(screen.getByTestId('git-danger-zone-toggle'));
+      await openDangerZone();
       expect(screen.getByTestId('git-danger-zone-revert-open')).toBeDisabled();
 
       // Select a commit, then the revert open button becomes enabled.
@@ -1355,17 +1403,24 @@ describe('GitPane', () => {
           (call[1] as { method?: string } | undefined)?.method === method
       );
 
-    it('renders explicit Pull / Push / Fetch buttons', async () => {
+    it('renders core Pull / Push buttons and the Advanced Fetch button', async () => {
       render(<GitPane {...defaultProps} />);
       await waitFor(() => {
-        expect(screen.getByTestId('git-fetch-button')).toBeInTheDocument();
         expect(screen.getByTestId('git-pull-button')).toBeInTheDocument();
         expect(screen.getByTestId('git-push-button')).toBeInTheDocument();
+      });
+      // Issue #815: Fetch was demoted to the collapsed Advanced group.
+      expect(screen.queryByTestId('git-fetch-button')).not.toBeInTheDocument();
+      openAdvanced();
+      await waitFor(() => {
+        expect(screen.getByTestId('git-fetch-button')).toBeInTheDocument();
       });
     });
 
     it('POSTs /git/fetch when the Fetch button is clicked', async () => {
       render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
       await waitFor(() => expect(screen.getByTestId('git-fetch-button')).toBeInTheDocument());
       fireEvent.click(screen.getByTestId('git-fetch-button'));
       await waitFor(() => {
@@ -1495,6 +1550,9 @@ describe('GitPane', () => {
       });
 
       render(<GitPane {...defaultProps} />);
+      // Issue #815: Fetch lives under the collapsed Advanced group.
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
       await waitFor(() => expect(screen.getByTestId('git-fetch-button')).toBeInTheDocument());
 
       fireEvent.click(screen.getByTestId('git-fetch-button'));
@@ -1549,6 +1607,8 @@ describe('GitPane', () => {
 
     it('runs the cascade (re-fetch status + branches) after a fetch completes (§7.5)', async () => {
       render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
       await waitFor(() => expect(screen.getByTestId('git-fetch-button')).toBeInTheDocument());
 
       // GET reads in GitPane use fetch(url) with no `method`, so count without a
@@ -1611,12 +1671,21 @@ describe('GitPane', () => {
       );
     });
 
-    it('keeps the existing 5 section data-testids intact', async () => {
+    it('keeps the core section data-testids visible and gates the Advanced ones', async () => {
       render(<GitPane {...defaultProps} />);
+      // Core sections are always visible (Issue #815 2-tier design).
       await waitFor(() => {
         expect(screen.getByTestId('git-status-section')).toBeInTheDocument();
-        expect(screen.getByTestId('git-branches-section')).toBeInTheDocument();
+        expect(screen.getByTestId('git-network-section')).toBeInTheDocument();
         expect(screen.getByTestId('git-changes-section')).toBeInTheDocument();
+      });
+      // Advanced sections are hidden until the group is expanded.
+      expect(screen.queryByTestId('git-branches-section')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('git-stash-section')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('git-danger-zone-section')).not.toBeInTheDocument();
+      openAdvanced();
+      await waitFor(() => {
+        expect(screen.getByTestId('git-branches-section')).toBeInTheDocument();
         expect(screen.getByTestId('git-stash-section')).toBeInTheDocument();
         expect(screen.getByTestId('git-danger-zone-section')).toBeInTheDocument();
       });
@@ -1624,10 +1693,9 @@ describe('GitPane', () => {
 
     it('force-pushes via the Danger Zone with --force-with-lease by default (§7.3)', async () => {
       render(<GitPane {...defaultProps} />);
-      await waitFor(() => expect(screen.getByTestId('git-danger-zone-toggle')).toBeInTheDocument());
 
-      // Open the Danger Zone, then the Force Push modal.
-      fireEvent.click(screen.getByTestId('git-danger-zone-toggle'));
+      // Open Advanced + the Danger Zone, then the Force Push modal (Issue #815).
+      await openDangerZone();
       fireEvent.click(screen.getByTestId('git-force-push-open'));
       await waitFor(() => expect(screen.getByTestId('force-push-confirm')).toBeInTheDocument());
 
@@ -1646,8 +1714,7 @@ describe('GitPane', () => {
 
     it('force-pushes with a lease-less --force when the lease checkbox is unticked', async () => {
       render(<GitPane {...defaultProps} />);
-      await waitFor(() => expect(screen.getByTestId('git-danger-zone-toggle')).toBeInTheDocument());
-      fireEvent.click(screen.getByTestId('git-danger-zone-toggle'));
+      await openDangerZone();
       fireEvent.click(screen.getByTestId('git-force-push-open'));
       await waitFor(() => expect(screen.getByTestId('force-push-confirm')).toBeInTheDocument());
 
@@ -1659,6 +1726,97 @@ describe('GitPane', () => {
         const body = JSON.parse((pushCall?.[1] as { body: string }).body);
         expect(body.force).toBe(true);
         expect(body.forceWithLease).toBe(false);
+      });
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Issue #815: 2-tier information design (core always-visible + Advanced)
+  // --------------------------------------------------------------------------
+  describe('2-tier information design (Issue #815)', () => {
+    const ADVANCED_KEY = 'commandmate:gitPane:advancedOpen';
+
+    it('shows only the core sections by default and hides the complex ops', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      // Core, always visible: Current Status / Quick actions (Pull+Push) /
+      // Changes / Commit History.
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-section')).toBeInTheDocument();
+        expect(screen.getByTestId('git-pull-button')).toBeInTheDocument();
+        expect(screen.getByTestId('git-push-button')).toBeInTheDocument();
+        expect(screen.getByTestId('git-changes-section')).toBeInTheDocument();
+        expect(screen.getByText('Commit History')).toBeInTheDocument();
+      });
+
+      // The "Advanced operations" header is present but collapsed by default, so
+      // none of Fetch / Branches / Stash / Danger Zone render.
+      expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument();
+      expect(screen.queryByTestId('git-fetch-button')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('git-branches-section')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('git-stash-section')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('git-danger-zone-section')).not.toBeInTheDocument();
+    });
+
+    it('expands Fetch / Branches / Stash / Danger Zone when Advanced is clicked', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+
+      openAdvanced();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-fetch-button')).toBeInTheDocument();
+        expect(screen.getByTestId('git-branches-section')).toBeInTheDocument();
+        expect(screen.getByTestId('git-stash-section')).toBeInTheDocument();
+        expect(screen.getByTestId('git-danger-zone-section')).toBeInTheDocument();
+      });
+    });
+
+    it('persists the Advanced open-state to localStorage on toggle', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+
+      // Default closed: nothing persisted yet.
+      expect(window.localStorage.getItem(ADVANCED_KEY)).not.toBe('true');
+
+      openAdvanced();
+      await waitFor(() => {
+        expect(window.localStorage.getItem(ADVANCED_KEY)).toBe('true');
+      });
+
+      // Toggling again persists the closed state.
+      openAdvanced();
+      await waitFor(() => {
+        expect(window.localStorage.getItem(ADVANCED_KEY)).toBe('false');
+      });
+    });
+
+    it('restores the expanded Advanced state from localStorage on mount', async () => {
+      window.localStorage.setItem(ADVANCED_KEY, 'true');
+
+      render(<GitPane {...defaultProps} />);
+
+      // Hydrated open on mount: the advanced sections render without a click.
+      await waitFor(() => {
+        expect(screen.getByTestId('git-branches-section')).toBeInTheDocument();
+        expect(screen.getByTestId('git-danger-zone-section')).toBeInTheDocument();
+      });
+    });
+
+    it('renders the core branch-checkout dropdown beside Quick actions', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      // The checkout dropdown is core (always visible), even while Advanced is
+      // collapsed. It enables once /git/branches has loaded.
+      const toggle = await screen.findByTestId('branch-checkout-dropdown-toggle');
+      await waitFor(() => expect(toggle).not.toBeDisabled());
+
+      // Branches section (its old home) is still collapsed under Advanced.
+      expect(screen.queryByTestId('git-branches-section')).not.toBeInTheDocument();
+
+      fireEvent.click(toggle);
+      await waitFor(() => {
+        expect(screen.getByLabelText('Checkout main')).toBeInTheDocument();
       });
     });
   });
