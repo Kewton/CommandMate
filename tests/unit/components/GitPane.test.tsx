@@ -2375,4 +2375,175 @@ describe('GitPane', () => {
       expect(screen.queryByTestId('branch-create-ask-ai')).not.toBeInTheDocument();
     });
   });
+
+  // --------------------------------------------------------------------------
+  // Issue #818: mobile tab UI + desktop visual grouping + persistence
+  // --------------------------------------------------------------------------
+  describe('Mobile tab UI (Issue #818 A)', () => {
+    const COMMITS = {
+      ok: true,
+      json: {
+        commits: [
+          { hash: 'abc1234', shortHash: 'abc1234', message: 'feat: add feature', author: 'A', date: '2026-03-08T00:00:00Z' },
+        ],
+      },
+    };
+
+    it('renders the 4-tab strip on mobile and defaults to the Status tab', async () => {
+      render(<GitPane {...defaultProps} isMobile />);
+
+      await waitFor(() => expect(screen.getByTestId('git-pane-mobile-tabs')).toBeInTheDocument());
+      expect(screen.getByTestId('git-tab-status')).toBeInTheDocument();
+      expect(screen.getByTestId('git-tab-changes')).toBeInTheDocument();
+      expect(screen.getByTestId('git-tab-history')).toBeInTheDocument();
+      expect(screen.getByTestId('git-tab-advanced')).toBeInTheDocument();
+
+      // Status tab pairs Current Status with Quick actions.
+      expect(screen.getByTestId('git-status-section')).toBeInTheDocument();
+      expect(screen.getByTestId('git-network-section')).toBeInTheDocument();
+      expect(screen.getByTestId('git-pane-mobile-panel')).toHaveAttribute('data-active-tab', 'status');
+    });
+
+    it('mounts only the active tab group (non-active groups unmount)', async () => {
+      render(<GitPane {...defaultProps} isMobile />);
+
+      await waitFor(() => expect(screen.getByTestId('git-status-section')).toBeInTheDocument());
+      // Changes / Advanced groups are NOT in the DOM while Status is active.
+      expect(screen.queryByTestId('git-changes-section')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('git-advanced-section')).not.toBeInTheDocument();
+    });
+
+    it('switches to the Changes tab and unmounts the Status group', async () => {
+      render(<GitPane {...defaultProps} isMobile />);
+      await waitFor(() => expect(screen.getByTestId('git-status-section')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('git-tab-changes'));
+
+      await waitFor(() => expect(screen.getByTestId('git-changes-section')).toBeInTheDocument());
+      expect(screen.queryByTestId('git-status-section')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('git-network-section')).not.toBeInTheDocument();
+    });
+
+    it('shows the commit history on the History tab', async () => {
+      setEndpoints({ log: COMMITS });
+      render(<GitPane {...defaultProps} isMobile />);
+      await waitFor(() => expect(screen.getByTestId('git-tab-history')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('git-tab-history'));
+
+      await waitFor(() => expect(screen.getByText('feat: add feature')).toBeInTheDocument());
+      expect(screen.queryByTestId('git-status-section')).not.toBeInTheDocument();
+    });
+
+    it('shows the Advanced operations on the Advanced tab', async () => {
+      render(<GitPane {...defaultProps} isMobile />);
+      await waitFor(() => expect(screen.getByTestId('git-tab-advanced')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('git-tab-advanced'));
+
+      await waitFor(() => expect(screen.getByTestId('git-advanced-section')).toBeInTheDocument());
+      // Advanced group is already expanded as its own panel content.
+      expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument();
+    });
+
+    it('persists the last active tab and restores it on remount', async () => {
+      const { unmount } = render(<GitPane {...defaultProps} isMobile />);
+      await waitFor(() => expect(screen.getByTestId('git-tab-changes')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('git-tab-changes'));
+      await waitFor(() =>
+        expect(screen.getByTestId('git-pane-mobile-panel')).toHaveAttribute('data-active-tab', 'changes')
+      );
+      unmount();
+
+      render(<GitPane {...defaultProps} isMobile />);
+      await waitFor(() =>
+        expect(screen.getByTestId('git-pane-mobile-panel')).toHaveAttribute('data-active-tab', 'changes')
+      );
+    });
+
+    it('does not render the mobile tab strip on desktop', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-pane-desktop')).toBeInTheDocument());
+      expect(screen.queryByTestId('git-pane-mobile-tabs')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Desktop visual grouping (Issue #818 B)', () => {
+    it('separates the pane into read / write / advanced groups', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => expect(screen.getByTestId('git-group-read')).toBeInTheDocument());
+      expect(screen.getByTestId('git-group-write')).toBeInTheDocument();
+      expect(screen.getByTestId('git-group-history')).toHaveAttribute('data-git-group', 'read');
+      expect(screen.getByTestId('git-group-advanced')).toBeInTheDocument();
+
+      // The three categories are present (read appears for both status + history).
+      const groups = screen.getAllByTestId(/^git-group-/);
+      const categories = new Set(groups.map((el) => el.getAttribute('data-git-group')));
+      expect(categories).toEqual(new Set(['read', 'write', 'advanced']));
+    });
+
+    it('gives the Advanced group a visual divider border', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-group-advanced')).toBeInTheDocument());
+      expect(screen.getByTestId('git-group-advanced').className).toMatch(/border/);
+    });
+
+    it('keeps every core section visible on desktop (no tab gating)', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-section')).toBeInTheDocument();
+        expect(screen.getByTestId('git-network-section')).toBeInTheDocument();
+        expect(screen.getByTestId('git-changes-section')).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('Collapse persistence (Issue #818 C)', () => {
+    const COMMITS = {
+      ok: true,
+      json: {
+        commits: [
+          { hash: 'abc1234', shortHash: 'abc1234', message: 'feat: add feature', author: 'A', date: '2026-03-08T00:00:00Z' },
+        ],
+      },
+    };
+
+    it('persists the collapsed Commit History state across remounts', async () => {
+      setEndpoints({ log: COMMITS });
+      const { unmount } = render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByText('feat: add feature')).toBeInTheDocument());
+
+      // Collapse via the Commit History toggle header.
+      fireEvent.click(screen.getByText('Commit History'));
+      await waitFor(() => expect(screen.queryByText('feat: add feature')).not.toBeInTheDocument());
+      // Collapsed state is persisted under the consolidated key.
+      expect(window.localStorage.getItem('commandmate:gitPane:historyOpen')).toBe('false');
+      unmount();
+
+      setEndpoints({ log: COMMITS });
+      render(<GitPane {...defaultProps} />);
+      // Restored collapsed: the toggle arrow flips to the collapsed indicator.
+      await waitFor(() =>
+        expect(screen.getByText('Commit History').textContent).toContain('▶')
+      );
+      expect(screen.queryByText('feat: add feature')).not.toBeInTheDocument();
+    });
+
+    it('persists the Advanced open state across remounts (Phase 1 key reused)', async () => {
+      const { unmount } = render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      // Default collapsed → Fetch button hidden.
+      expect(screen.queryByTestId('git-fetch-button')).not.toBeInTheDocument();
+
+      openAdvanced();
+      await waitFor(() => expect(screen.getByTestId('git-fetch-button')).toBeInTheDocument());
+      unmount();
+
+      render(<GitPane {...defaultProps} />);
+      // Restored expanded from localStorage.
+      await waitFor(() => expect(screen.getByTestId('git-fetch-button')).toBeInTheDocument());
+    });
+  });
 });
