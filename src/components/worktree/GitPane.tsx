@@ -29,6 +29,15 @@ import type { GitNetworkOperation } from '@/types/git';
 import { BranchCheckoutDropdown } from '@/components/worktree/git/BranchCheckoutDropdown';
 import { AdvancedSection } from '@/components/worktree/git/AdvancedSection';
 import {
+  branchCreatePrompt,
+  branchDeletePrompt,
+  stashCleanupPrompt,
+  stashConflictPrompt,
+  resetPrompt,
+  revertPrompt,
+  forcePushPrompt,
+} from '@/lib/git-ai-prompt-templates';
+import {
   GIT_STATUS_POLL_INTERVAL_MS,
   RESET_HARD_HISTORY_LOSS_WARNING,
   DANGER_ZONE_RUNNING_SESSION_WARNING,
@@ -51,6 +60,13 @@ interface GitPaneProps {
    * the checkout confirm dialog. When omitted, no session warning is shown.
    */
   worktree?: Pick<Worktree, 'sessionStatusByCli'>;
+  /**
+   * Issue #817: pre-populate the active CLI tab's MessageInput composer with an
+   * "Ask AI" prompt (no auto-send). Wired to the parent's `handleInsertToMessage`
+   * (the same `pendingInsertTextMap` path History / Memo panes use). When
+   * omitted, the "Ask AI" buttons are hidden (graceful degradation).
+   */
+  onInsertToMessage?: (text: string) => void;
   className?: string;
 }
 
@@ -92,6 +108,39 @@ const RefreshIcon = memo(function RefreshIcon() {
         d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
       />
     </svg>
+  );
+});
+
+/**
+ * "Ask AI" button (Issue #817). Drafts a context-rich prompt into the active CLI
+ * tab's MessageInput composer (no auto-send) so the user can review/edit before
+ * sending. Presentational only: the call site owns the `onClick` (it builds the
+ * prompt from a `git-ai-prompt-templates` builder and closes any open dialog),
+ * and gates rendering on whether an `onInsertToMessage` handler is wired.
+ */
+const AskAiButton = memo(function AskAiButton({
+  onClick,
+  disabled = false,
+  testId,
+  className = '',
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  testId?: string;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded border border-violet-300 dark:border-violet-700 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/30 disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
+      data-testid={testId}
+      title="現在の状況を AI チャットに下書きします（自動送信はされません）"
+    >
+      <span aria-hidden="true">✨</span>
+      Ask AI
+    </button>
   );
 });
 
@@ -834,6 +883,8 @@ interface BranchesSectionProps {
   onRefresh: () => void;
   onCreate: (name: string, from: string | undefined) => void;
   onDelete: (name: string, force: boolean) => void;
+  /** Issue #817: draft an "Ask AI" prompt into the composer (no auto-send). */
+  onAskAi?: (text: string) => void;
 }
 
 /**
@@ -855,6 +906,7 @@ const BranchesSection = memo(function BranchesSection({
   onRefresh,
   onCreate,
   onDelete,
+  onAskAi,
 }: BranchesSectionProps) {
   // Mobile default-collapses the entire section (#780 same approach).
   const [open, setOpen] = useState(!isMobile);
@@ -1039,6 +1091,17 @@ const BranchesSection = memo(function BranchesSection({
               ))}
             </select>
             <div className="flex items-center justify-end gap-2">
+              {onAskAi && (
+                <AskAiButton
+                  className="mr-auto"
+                  testId="branch-create-ask-ai"
+                  disabled={createName.trim().length === 0}
+                  onClick={() => {
+                    onAskAi(branchCreatePrompt(createName, createFrom));
+                    setShowCreate(false);
+                  }}
+                />
+              )}
               <button
                 type="button"
                 onClick={() => setShowCreate(false)}
@@ -1082,6 +1145,17 @@ const BranchesSection = memo(function BranchesSection({
               Force delete (-D) — unmerged commits will be lost
             </label>
             <div className="flex items-center justify-end gap-2">
+              {onAskAi && deleteTarget && (
+                <AskAiButton
+                  className="mr-auto"
+                  testId="branch-delete-ask-ai"
+                  onClick={() => {
+                    onAskAi(branchDeletePrompt(deleteTarget.name, deleteForce));
+                    setDeleteTarget(null);
+                    setDeleteForce(false);
+                  }}
+                />
+              )}
               <button
                 type="button"
                 onClick={() => setDeleteTarget(null)}
@@ -1124,6 +1198,8 @@ interface StashSectionProps {
   onPop: (index: number) => void;
   onApply: (index: number) => void;
   onDrop: (index: number) => void;
+  /** Issue #817: draft an "Ask AI" prompt into the composer (no auto-send). */
+  onAskAi?: (text: string) => void;
 }
 
 /**
@@ -1145,6 +1221,7 @@ const StashSection = memo(function StashSection({
   onPop,
   onApply,
   onDrop,
+  onAskAi,
 }: StashSectionProps) {
   const [open, setOpen] = useState(!isMobile);
   const [pushMessage, setPushMessage] = useState('');
@@ -1165,14 +1242,22 @@ const StashSection = memo(function StashSection({
           <span className="text-xs w-4 text-center">{open ? '▼' : '▶'}</span>
           Stash {stashes.length > 0 && <span className="text-xs text-gray-400">({stashes.length})</span>}
         </button>
-        <button
-          type="button"
-          onClick={onRefresh}
-          className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded"
-          aria-label="Refresh stash list"
-        >
-          <RefreshIcon />
-        </button>
+        <div className="flex items-center gap-1">
+          {open && onAskAi && stashes.length > 0 && (
+            <AskAiButton
+              testId="stash-cleanup-ask-ai"
+              onClick={() => onAskAi(stashCleanupPrompt(stashes))}
+            />
+          )}
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded"
+            aria-label="Refresh stash list"
+          >
+            <RefreshIcon />
+          </button>
+        </div>
       </div>
 
       {open && (
@@ -1188,8 +1273,17 @@ const StashSection = memo(function StashSection({
             </div>
           )}
           {conflictNotice && (
-            <div className="text-xs text-orange-600 dark:text-orange-400" role="status" data-testid="git-stash-conflict">
-              {conflictNotice}
+            <div className="flex items-start justify-between gap-2">
+              <div className="text-xs text-orange-600 dark:text-orange-400" role="status" data-testid="git-stash-conflict">
+                {conflictNotice}
+              </div>
+              {onAskAi && (
+                <AskAiButton
+                  className="shrink-0"
+                  testId="stash-conflict-ask-ai"
+                  onClick={() => onAskAi(stashConflictPrompt(conflictNotice))}
+                />
+              )}
             </div>
           )}
 
@@ -1342,10 +1436,14 @@ interface DangerZoneSectionProps {
   actionError: string | null;
   conflictNotice: string | null;
   currentBranch: string | null;
+  /** Issue #817: commits ahead of upstream, for the force-push Ask AI prompt. */
+  aheadCount?: number | null;
   hasRunningSession: boolean;
   isMobile: boolean;
   onReset: (target: string, mode: GitResetMode, confirmBranch: string | undefined) => void;
   onRevert: (commitHash: string, noCommit: boolean) => void;
+  /** Issue #817: draft an "Ask AI" prompt into the composer (no auto-send). */
+  onAskAi?: (text: string) => void;
   /**
    * Issue #783: force-push the current branch. `--force-with-lease` is the
    * default (forceWithLease=true); the lease check is a second safety net. The
@@ -1368,11 +1466,13 @@ const DangerZoneSection = memo(function DangerZoneSection({
   actionError,
   conflictNotice,
   currentBranch,
+  aheadCount,
   hasRunningSession,
   isMobile,
   onReset,
   onRevert,
   onForcePush,
+  onAskAi,
 }: DangerZoneSectionProps) {
   const [open, setOpen] = useState(false); // default closed
   const [resetMode, setResetMode] = useState<GitResetMode>('mixed');
@@ -1534,6 +1634,19 @@ const DangerZoneSection = memo(function DangerZoneSection({
           )}
 
           <div className="flex items-center gap-2">
+            {onAskAi && (
+              <AskAiButton
+                className="mr-auto"
+                testId="reset-ask-ai"
+                disabled={resetTargetMissing}
+                onClick={() => {
+                  if (!resetTarget) return;
+                  onAskAi(resetPrompt(resetMode, resetTarget));
+                  setShowResetModal(false);
+                  setConfirmBranch('');
+                }}
+              />
+            )}
             <button
               type="button"
               disabled={
@@ -1595,6 +1708,17 @@ const DangerZoneSection = memo(function DangerZoneSection({
             No commit (leave staged)
           </label>
           <div className="flex items-center gap-2">
+            {onAskAi && (
+              <AskAiButton
+                className="mr-auto"
+                testId="revert-ask-ai"
+                onClick={() => {
+                  onAskAi(revertPrompt(selectedCommit));
+                  setShowRevertModal(false);
+                  setRevertNoCommit(false);
+                }}
+              />
+            )}
             <button
               type="button"
               disabled={busy}
@@ -1654,6 +1778,16 @@ const DangerZoneSection = memo(function DangerZoneSection({
             Use --force-with-lease (recommended — refuses if the remote moved)
           </label>
           <div className="flex items-center gap-2">
+            {onAskAi && (
+              <AskAiButton
+                className="mr-auto"
+                testId="force-push-ask-ai"
+                onClick={() => {
+                  onAskAi(forcePushPrompt({ branch: currentBranch, ahead: aheadCount ?? null }));
+                  setShowForcePushModal(false);
+                }}
+              />
+            )}
             <button
               type="button"
               disabled={busy}
@@ -1689,6 +1823,7 @@ export const GitPane = memo(function GitPane({
   onDiffSelect,
   isMobile = false,
   worktree,
+  onInsertToMessage,
   className = '',
 }: GitPaneProps) {
   const [commits, setCommits] = useState<CommitInfo[]>([]);
@@ -2872,6 +3007,7 @@ export const GitPane = memo(function GitPane({
           onRefresh={handleBranchesRefresh}
           onCreate={handleBranchCreate}
           onDelete={handleBranchDelete}
+          onAskAi={onInsertToMessage}
         />
 
         {/* Stash (Issue #782) */}
@@ -2889,6 +3025,7 @@ export const GitPane = memo(function GitPane({
           onPop={handleStashPop}
           onApply={handleStashApply}
           onDrop={handleStashDrop}
+          onAskAi={onInsertToMessage}
         />
 
         {/* Danger Zone (Issue #782) */}
@@ -2898,6 +3035,7 @@ export const GitPane = memo(function GitPane({
           actionError={dangerActionError}
           conflictNotice={dangerConflictNotice}
           currentBranch={gitStatus?.currentBranch ?? null}
+          aheadCount={gitStatus?.aheadBehind?.ahead ?? null}
           hasRunningSession={hasRunningSession}
           isMobile={isMobile}
           onReset={handleReset}
@@ -2905,6 +3043,7 @@ export const GitPane = memo(function GitPane({
           onForcePush={(forceWithLease) =>
             runNetworkPush(forceWithLease ? { forceWithLease: true } : { force: true })
           }
+          onAskAi={onInsertToMessage}
         />
       </AdvancedSection>
     </div>
