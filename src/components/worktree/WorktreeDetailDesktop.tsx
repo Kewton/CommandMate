@@ -524,6 +524,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           onDiffSelect={onDiffSelect}
           isMobile={false}
           worktree={worktree ?? undefined}
+          onInsertToMessage={handleInsertToMessage}
           className="h-full"
         />
       ),

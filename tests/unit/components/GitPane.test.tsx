@@ -14,6 +14,14 @@ import {
   RESET_HARD_HISTORY_LOSS_WARNING,
   PUSH_AUTH_FAILED_GUIDANCE,
 } from '@/config/git-status-config';
+// Issue #817: SSOT prompt builders — imported so the "Ask AI" wiring tests
+// assert the right builder/context without duplicating the ja wording here.
+import {
+  branchCreatePrompt,
+  branchDeletePrompt,
+  resetPrompt,
+  revertPrompt,
+} from '@/lib/git-ai-prompt-templates';
 
 // ----------------------------------------------------------------------------
 // URL-discriminating fetch mock (Issue #779 hard gate)
@@ -2122,6 +2130,249 @@ describe('GitPane', () => {
           expect(onDiffSelect).toHaveBeenCalledWith(PREVIEW_DIFF, 'src/unstaged.ts');
         });
       });
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Issue #817: "Ask AI" buttons pre-populate the composer (no auto-send)
+  // --------------------------------------------------------------------------
+  describe("'Ask AI' buttons (Issue #817)", () => {
+    /** True if any fetch call hit `path` (optionally with the given method). */
+    function postedTo(path: string, method = 'POST') {
+      return mockFetch.mock.calls.some(
+        (call) =>
+          typeof call[0] === 'string' &&
+          (call[0] as string).includes(path) &&
+          ((call[1] as { method?: string } | undefined)?.method ?? 'GET') === method
+      );
+    }
+
+    it('drafts a create+checkout prompt into the composer and closes the modal (no POST)', async () => {
+      const onInsertToMessage = vi.fn();
+      render(<GitPane {...defaultProps} onInsertToMessage={onInsertToMessage} />);
+
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
+      await waitFor(() => expect(screen.getByTestId('git-branch-create-open')).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('git-branch-create-open'));
+      await waitFor(() => expect(screen.getByTestId('branch-create-name-input')).toBeInTheDocument());
+
+      fireEvent.change(screen.getByTestId('branch-create-name-input'), {
+        target: { value: 'feature/created' },
+      });
+      fireEvent.click(screen.getByTestId('branch-create-ask-ai'));
+
+      expect(onInsertToMessage).toHaveBeenCalledTimes(1);
+      expect(onInsertToMessage).toHaveBeenCalledWith(branchCreatePrompt('feature/created', ''));
+      // Modal closed; the create API was NOT called (delegated to the agent).
+      expect(screen.queryByTestId('branch-create-name-input')).not.toBeInTheDocument();
+      expect(postedTo('/git/branch/create')).toBe(false);
+    });
+
+    it('disables the create Ask AI button until a branch name is entered', async () => {
+      const onInsertToMessage = vi.fn();
+      render(<GitPane {...defaultProps} onInsertToMessage={onInsertToMessage} />);
+
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
+      fireEvent.click(screen.getByTestId('git-branch-create-open'));
+      await waitFor(() => expect(screen.getByTestId('branch-create-ask-ai')).toBeInTheDocument());
+
+      expect(screen.getByTestId('branch-create-ask-ai')).toBeDisabled();
+      fireEvent.change(screen.getByTestId('branch-create-name-input'), {
+        target: { value: 'feature/y' },
+      });
+      expect(screen.getByTestId('branch-create-ask-ai')).not.toBeDisabled();
+    });
+
+    it('drafts a delete prompt into the composer and closes the modal (no POST)', async () => {
+      const onInsertToMessage = vi.fn();
+      setEndpoints({
+        branches: {
+          ok: true,
+          json: {
+            branches: [
+              {
+                name: 'feature/old',
+                isCurrent: false,
+                isRemote: false,
+                isDefault: false,
+                upstream: null,
+                aheadBehind: null,
+                checkedOutWorktreePath: null,
+              },
+            ],
+          },
+        },
+      });
+      render(<GitPane {...defaultProps} onInsertToMessage={onInsertToMessage} />);
+
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
+      await waitFor(() => expect(screen.getByLabelText('Delete feature/old')).toBeInTheDocument());
+      fireEvent.click(screen.getByLabelText('Delete feature/old'));
+      await waitFor(() => expect(screen.getByTestId('branch-delete-ask-ai')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('branch-delete-ask-ai'));
+
+      expect(onInsertToMessage).toHaveBeenCalledWith(branchDeletePrompt('feature/old', false));
+      expect(screen.queryByTestId('branch-delete-ask-ai')).not.toBeInTheDocument();
+      expect(postedTo('/git/branch/delete')).toBe(false);
+    });
+
+    it('drafts a stash cleanup prompt listing the current stashes', async () => {
+      const onInsertToMessage = vi.fn();
+      setEndpoints({
+        stash: {
+          ok: true,
+          json: {
+            stashes: [{ index: 0, message: 'WIP on main: a', branch: 'main', date: '2026-01-01', sha: 'sha0' }],
+          },
+        },
+      });
+      render(<GitPane {...defaultProps} onInsertToMessage={onInsertToMessage} />);
+
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
+      await waitFor(() => expect(screen.getByTestId('stash-cleanup-ask-ai')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('stash-cleanup-ask-ai'));
+
+      expect(onInsertToMessage).toHaveBeenCalledTimes(1);
+      const inserted = onInsertToMessage.mock.calls[0][0] as string;
+      expect(inserted).toContain('古い stash entry');
+      expect(inserted).toContain('stash@{0}: WIP on main: a');
+    });
+
+    it('hides the stash cleanup Ask AI button when there are no stashes', async () => {
+      const onInsertToMessage = vi.fn();
+      render(<GitPane {...defaultProps} onInsertToMessage={onInsertToMessage} />);
+
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
+      await waitFor(() => expect(screen.getByTestId('git-stash-section')).toBeInTheDocument());
+      expect(screen.queryByTestId('stash-cleanup-ask-ai')).not.toBeInTheDocument();
+    });
+
+    it('offers a conflict-resolution Ask AI prompt after a stash pop conflict', async () => {
+      const onInsertToMessage = vi.fn();
+      setEndpoints({
+        stash: {
+          ok: true,
+          json: {
+            stashes: [{ index: 0, message: 'WIP on main: a', branch: 'main', date: '2026-01-01', sha: 'sha0' }],
+          },
+        },
+        stashPop: {
+          ok: true,
+          json: { success: true, conflict: true, conflictFiles: ['a.ts'], stashRetained: true },
+        },
+      });
+      render(<GitPane {...defaultProps} onInsertToMessage={onInsertToMessage} />);
+
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
+      await waitFor(() => expect(screen.getByTestId('stash-pop-button')).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('stash-pop-button'));
+      await waitFor(() => expect(screen.getByTestId('stash-conflict-ask-ai')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('stash-conflict-ask-ai'));
+
+      const inserted = onInsertToMessage.mock.calls[0][0] as string;
+      expect(inserted).toContain('conflict を解決してから commit してください。');
+      expect(inserted).toContain('a.ts');
+    });
+
+    it('drafts a reset prompt and closes the Reset modal (no POST)', async () => {
+      const onInsertToMessage = vi.fn();
+      render(<GitPane {...defaultProps} onInsertToMessage={onInsertToMessage} />);
+
+      await openDangerZone();
+      fireEvent.click(screen.getByTestId('git-danger-zone-reset-open'));
+      await waitFor(() => expect(screen.getByTestId('reset-ask-ai')).toBeInTheDocument());
+
+      // Default target HEAD + mixed mode.
+      fireEvent.click(screen.getByTestId('reset-ask-ai'));
+
+      expect(onInsertToMessage).toHaveBeenCalledWith(resetPrompt('mixed', 'HEAD'));
+      expect(screen.queryByTestId('reset-confirm')).not.toBeInTheDocument();
+      expect(postedTo('/git/reset')).toBe(false);
+    });
+
+    it('includes a git reflog recovery note for a hard reset Ask AI prompt', async () => {
+      const onInsertToMessage = vi.fn();
+      render(<GitPane {...defaultProps} onInsertToMessage={onInsertToMessage} />);
+
+      await openDangerZone();
+      fireEvent.click(screen.getByTestId('git-danger-zone-reset-open'));
+      await waitFor(() => expect(screen.getByTestId('reset-mode-hard')).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('reset-mode-hard'));
+      // Ask AI is not gated by the hard-confirm branch input (only the real Reset is).
+      fireEvent.click(screen.getByTestId('reset-ask-ai'));
+
+      const inserted = onInsertToMessage.mock.calls[0][0] as string;
+      expect(inserted).toContain('git reflog から復旧');
+      expect(postedTo('/git/reset')).toBe(false);
+    });
+
+    it('drafts a revert prompt for the selected commit', async () => {
+      const onInsertToMessage = vi.fn();
+      setEndpoints({
+        log: {
+          ok: true,
+          json: {
+            commits: [
+              { hash: 'abc1234def', shortHash: 'abc1234', message: 'pick me', author: 'a', date: '2026-01-01' },
+            ],
+          },
+        },
+      });
+      render(<GitPane {...defaultProps} onInsertToMessage={onInsertToMessage} />);
+
+      await waitFor(() => expect(screen.getByText('pick me')).toBeInTheDocument());
+      fireEvent.click(screen.getByText('pick me')); // select the commit
+
+      await openDangerZone();
+      await waitFor(() => expect(screen.getByTestId('git-danger-zone-revert-open')).not.toBeDisabled());
+      fireEvent.click(screen.getByTestId('git-danger-zone-revert-open'));
+      await waitFor(() => expect(screen.getByTestId('revert-ask-ai')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('revert-ask-ai'));
+
+      expect(onInsertToMessage).toHaveBeenCalledWith(revertPrompt('abc1234def'));
+      expect(postedTo('/git/revert')).toBe(false);
+    });
+
+    it('drafts a force-push prompt and closes the modal (no POST)', async () => {
+      const onInsertToMessage = vi.fn();
+      render(<GitPane {...defaultProps} onInsertToMessage={onInsertToMessage} />);
+
+      await openDangerZone();
+      fireEvent.click(screen.getByTestId('git-force-push-open'));
+      await waitFor(() => expect(screen.getByTestId('force-push-ask-ai')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('force-push-ask-ai'));
+
+      const inserted = onInsertToMessage.mock.calls[0][0] as string;
+      expect(inserted).toContain('force-with-lease');
+      // DEFAULT_STATUS.currentBranch is 'feature/test'.
+      expect(inserted).toContain('feature/test');
+      expect(screen.queryByTestId('force-push-confirm')).not.toBeInTheDocument();
+      expect(postedTo('/git/push')).toBe(false);
+    });
+
+    it('hides every Ask AI button when no onInsertToMessage handler is wired', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      await openDangerZone();
+      fireEvent.click(screen.getByTestId('git-danger-zone-reset-open'));
+      await waitFor(() => expect(screen.getByTestId('reset-confirm')).toBeInTheDocument());
+      expect(screen.queryByTestId('reset-ask-ai')).not.toBeInTheDocument();
+
+      // Branch create modal also has no Ask AI affordance.
+      fireEvent.click(screen.getByTestId('git-branch-create-open'));
+      await waitFor(() => expect(screen.getByTestId('branch-create-name-input')).toBeInTheDocument());
+      expect(screen.queryByTestId('branch-create-ask-ai')).not.toBeInTheDocument();
     });
   });
 });
