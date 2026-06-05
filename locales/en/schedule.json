@@ -1,6 +1,16 @@
 {
   "title": "Schedules",
   "executionLogs": "Execution Logs",
+  "tabs": {
+    "schedules": "Schedules",
+    "logs": "Logs"
+  },
+  "emptyState": {
+    "title": "No schedules yet",
+    "description": "Run an agent automatically on a cron schedule.",
+    "createButton": "Create Schedule",
+    "manualToggle": "Or edit CMATE.md manually"
+  },
   "noSchedules": "No schedules configured. Add a CMATE.md with a Schedules section.",
   "noSchedulesTitle": "No schedules configured",
   "noSchedulesStep1": "Switch to the Files tab",
