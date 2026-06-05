@@ -1,6 +1,16 @@
 {
   "title": "スケジュール",
   "executionLogs": "実行ログ",
+  "tabs": {
+    "schedules": "スケジュール",
+    "logs": "ログ"
+  },
+  "emptyState": {
+    "title": "スケジュールはまだありません",
+    "description": "cron スケジュールでエージェントを自動実行します。",
+    "createButton": "新規スケジュール作成",
+    "manualToggle": "または CMATE.md を直接編集"
+  },
   "noSchedules": "スケジュールが設定されていません。CMATE.mdにSchedulesセクションを追加してください。",
   "noSchedulesTitle": "スケジュールが設定されていません",
   "noSchedulesStep1": "Files タブに切り替えてください",
