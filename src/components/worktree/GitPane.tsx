@@ -24,11 +24,22 @@ import type {
 import type { GitStatus, Worktree } from '@/types/models';
 import { useFilePolling } from '@/hooks/useFilePolling';
 import { useGitPaneNetworkOps } from '@/hooks/useGitPaneNetworkOps';
+import { useGitPaneTabState } from '@/hooks/useGitPaneTabState';
 import type { GitNetworkOperation } from '@/types/git';
+import { BranchCheckoutDropdown } from '@/components/worktree/git/BranchCheckoutDropdown';
+import { AdvancedSection } from '@/components/worktree/git/AdvancedSection';
+import { GitPaneMobileTabs } from '@/components/worktree/git/GitPaneMobileTabs';
+import {
+  branchCreatePrompt,
+  branchDeletePrompt,
+  stashCleanupPrompt,
+  stashConflictPrompt,
+  resetPrompt,
+  revertPrompt,
+  forcePushPrompt,
+} from '@/lib/git-ai-prompt-templates';
 import {
   GIT_STATUS_POLL_INTERVAL_MS,
-  CHECKOUT_HISTORY_LOSS_WARNING,
-  CHECKOUT_RUNNING_SESSION_WARNING,
   RESET_HARD_HISTORY_LOSS_WARNING,
   DANGER_ZONE_RUNNING_SESSION_WARNING,
   PUSH_PROTECTED_BRANCH_WARNING,
@@ -50,6 +61,13 @@ interface GitPaneProps {
    * the checkout confirm dialog. When omitted, no session warning is shown.
    */
   worktree?: Pick<Worktree, 'sessionStatusByCli'>;
+  /**
+   * Issue #817: pre-populate the active CLI tab's MessageInput composer with an
+   * "Ask AI" prompt (no auto-send). Wired to the parent's `handleInsertToMessage`
+   * (the same `pendingInsertTextMap` path History / Memo panes use). When
+   * omitted, the "Ask AI" buttons are hidden (graceful degradation).
+   */
+  onInsertToMessage?: (text: string) => void;
   className?: string;
 }
 
@@ -91,6 +109,39 @@ const RefreshIcon = memo(function RefreshIcon() {
         d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
       />
     </svg>
+  );
+});
+
+/**
+ * "Ask AI" button (Issue #817). Drafts a context-rich prompt into the active CLI
+ * tab's MessageInput composer (no auto-send) so the user can review/edit before
+ * sending. Presentational only: the call site owns the `onClick` (it builds the
+ * prompt from a `git-ai-prompt-templates` builder and closes any open dialog),
+ * and gates rendering on whether an `onInsertToMessage` handler is wired.
+ */
+const AskAiButton = memo(function AskAiButton({
+  onClick,
+  disabled = false,
+  testId,
+  className = '',
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  testId?: string;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded border border-violet-300 dark:border-violet-700 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/30 disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
+      data-testid={testId}
+      title="現在の状況を AI チャットに下書きします（自動送信はされません）"
+    >
+      <span aria-hidden="true">✨</span>
+      Ask AI
+    </button>
   );
 });
 
@@ -263,10 +314,19 @@ interface NetworkOperationsSectionProps {
   /** True when the current status has no upstream (chip absent). */
   hasUpstream: boolean;
   isMobile: boolean;
-  onFetch: () => void;
+  /**
+   * Issue #815: Fetch was demoted to "Advanced operations". When omitted, the
+   * Fetch button is not rendered here (Pull/Push stay as the core Quick actions).
+   */
+  onFetch?: () => void;
   onPull: () => void;
   onPush: () => void;
   onAbort: () => void;
+  /**
+   * Issue #815: optional slot rendered alongside Pull/Push in the button row
+   * (e.g. the core BranchCheckoutDropdown), keeping checkout beside Quick actions.
+   */
+  extraActions?: React.ReactNode;
 }
 
 /**
@@ -297,6 +357,7 @@ const NetworkOperationsSection = memo(function NetworkOperationsSection({
   onPull,
   onPush,
   onAbort,
+  extraActions,
 }: NetworkOperationsSectionProps) {
   const running = progressState === 'running';
 
@@ -320,19 +381,23 @@ const NetworkOperationsSection = memo(function NetworkOperationsSection({
       data-testid="git-network-section"
     >
       <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
-        Remote
+        Quick actions
       </span>
 
       <div className={`flex items-center ${isMobile ? 'flex-wrap gap-1.5' : 'gap-2'}`}>
-        <button
-          type="button"
-          onClick={onFetch}
-          disabled={running}
-          className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
-          data-testid="git-fetch-button"
-        >
-          Fetch
-        </button>
+        {/* Fetch is rendered here only when onFetch is provided; Issue #815 moved
+            the core Fetch button into the collapsed Advanced operations group. */}
+        {onFetch && (
+          <button
+            type="button"
+            onClick={onFetch}
+            disabled={running}
+            className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+            data-testid="git-fetch-button"
+          >
+            Fetch
+          </button>
+        )}
         <button
           type="button"
           onClick={onPull}
@@ -352,6 +417,8 @@ const NetworkOperationsSection = memo(function NetworkOperationsSection({
         >
           Push
         </button>
+        {/* Issue #815: core BranchCheckoutDropdown slotted beside Quick actions. */}
+        {extraActions}
       </div>
 
       {/* Progress / abort bar (sticky on mobile, z-40 < confirm modals z-50) */}
@@ -414,6 +481,9 @@ const NetworkOperationsSection = memo(function NetworkOperationsSection({
  */
 type ChangesDiffMode = 'staged' | 'unstaged' | 'untracked';
 
+/** Number of diff lines shown in the Changes inline preview (Issue #816, C). */
+const CHANGES_PREVIEW_LINES = 20;
+
 interface ChangedFileListProps {
   title: string;
   testId: string;
@@ -426,12 +496,23 @@ interface ChangedFileListProps {
   busy: boolean;
   onDiff: (filePath: string, mode: ChangesDiffMode) => void;
   onToggleStage: (filePath: string) => void;
+  /**
+   * Issue #816 (C): fetch the raw working-tree diff text for the inline preview
+   * caret. Returns the unified diff (or null on failure / no diff). Distinct from
+   * onDiff, which routes the FULL diff through onDiffSelect (the existing modal).
+   */
+  onPreview: (filePath: string, mode: ChangesDiffMode) => Promise<string | null>;
 }
 
 /**
  * A single collapsible list of changed files (Staged / Unstaged / Untracked).
- * Each row shows the status badge, the path, a diff button, and a
- * stage/unstage toggle button.
+ * Each row shows the status badge, the path, an inline-preview caret
+ * (Issue #816, C), a diff button, and a stage/unstage toggle button.
+ *
+ * Issue #816 (C): the caret expands a short inline preview (first
+ * CHANGES_PREVIEW_LINES lines) of the file's unified diff directly under the
+ * row. The existing "Diff" button still opens the full diff via onDiffSelect, so
+ * the current behavior is preserved.
  */
 const ChangedFileList = memo(function ChangedFileList({
   title,
@@ -443,8 +524,40 @@ const ChangedFileList = memo(function ChangedFileList({
   busy,
   onDiff,
   onToggleStage,
+  onPreview,
 }: ChangedFileListProps) {
   const [open, setOpen] = useState(defaultOpen);
+
+  // Issue #816 (C): inline preview state. Only one row is previewed at a time.
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
+  const [previewText, setPreviewText] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  const togglePreview = useCallback(
+    async (filePath: string) => {
+      // Collapse if the same row's caret is clicked again.
+      if (previewPath === filePath) {
+        setPreviewPath(null);
+        setPreviewText(null);
+        setPreviewError(null);
+        return;
+      }
+      setPreviewPath(filePath);
+      setPreviewText(null);
+      setPreviewError(null);
+      setPreviewLoading(true);
+      try {
+        const text = await onPreview(filePath, mode);
+        setPreviewText(text ?? '');
+      } catch {
+        setPreviewError('Failed to load preview');
+      } finally {
+        setPreviewLoading(false);
+      }
+    },
+    [previewPath, onPreview, mode]
+  );
 
   return (
     <div className="border-t border-gray-100 dark:border-gray-800" data-testid={testId}>
@@ -461,35 +574,93 @@ const ChangedFileList = memo(function ChangedFileList({
       )}
       {open && files.length > 0 && (
         <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-          {files.map((file) => (
-            <li key={`${file.status}:${file.path}`} className="flex items-center gap-2 px-3 py-1.5">
-              <span className={`inline-block w-16 shrink-0 text-xs font-medium ${STATUS_TEXT_COLOR[file.status]}`}>
-                {file.status}
-              </span>
-              <span className="flex-1 truncate font-mono text-xs text-gray-700 dark:text-gray-300" title={file.path}>
-                {file.path}
-              </span>
-              <button
-                type="button"
-                onClick={() => onDiff(file.path, mode)}
-                className="shrink-0 px-1.5 py-0.5 text-xs text-cyan-600 dark:text-cyan-400 hover:underline"
-                aria-label={`Show diff for ${file.path}`}
-                data-testid="git-changes-diff-button"
-              >
-                Diff
-              </button>
-              <button
-                type="button"
-                onClick={() => onToggleStage(file.path)}
-                disabled={busy}
-                className="shrink-0 px-1.5 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
-                aria-label={`${actionLabel} ${file.path}`}
-                data-testid="git-changes-toggle-button"
-              >
-                {actionLabel}
-              </button>
-            </li>
-          ))}
+          {files.map((file) => {
+            const previewOpen = previewPath === file.path;
+            return (
+              <li key={`${file.status}:${file.path}`} className="flex flex-col">
+                <div className="flex items-center gap-2 px-3 py-1.5">
+                  <span className={`inline-block w-16 shrink-0 text-xs font-medium ${STATUS_TEXT_COLOR[file.status]}`}>
+                    {file.status}
+                  </span>
+                  <span className="flex-1 truncate font-mono text-xs text-gray-700 dark:text-gray-300" title={file.path}>
+                    {file.path}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => togglePreview(file.path)}
+                    className="shrink-0 w-5 text-center text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                    aria-label={`Toggle diff preview for ${file.path}`}
+                    aria-expanded={previewOpen}
+                    data-testid="git-changes-preview-toggle"
+                  >
+                    {previewOpen ? '▼' : '▶'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDiff(file.path, mode)}
+                    className="shrink-0 px-1.5 py-0.5 text-xs text-cyan-600 dark:text-cyan-400 hover:underline"
+                    aria-label={`Show diff for ${file.path}`}
+                    data-testid="git-changes-diff-button"
+                  >
+                    Diff
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onToggleStage(file.path)}
+                    disabled={busy}
+                    className="shrink-0 px-1.5 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                    aria-label={`${actionLabel} ${file.path}`}
+                    data-testid="git-changes-toggle-button"
+                  >
+                    {actionLabel}
+                  </button>
+                </div>
+                {previewOpen && (
+                  <div
+                    className="px-3 pb-2 bg-gray-50/60 dark:bg-gray-800/30"
+                    data-testid="git-changes-inline-preview"
+                  >
+                    {previewLoading && (
+                      <div className="flex items-center gap-2 py-2" role="status">
+                        <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-cyan-500" />
+                        <span className="sr-only">Loading diff preview...</span>
+                      </div>
+                    )}
+                    {previewError && (
+                      <div className="py-2 text-xs text-red-600 dark:text-red-400" role="alert">
+                        {previewError}
+                      </div>
+                    )}
+                    {!previewLoading && !previewError && previewText !== null && (
+                      previewText.trim() === '' ? (
+                        <div className="py-2 text-xs text-gray-500 dark:text-gray-400">No diff available</div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <pre className="text-xs">
+                            <code>
+                              {previewText.split('\n').slice(0, CHANGES_PREVIEW_LINES).map((line, index) => (
+                                <DiffLine key={index} line={line} />
+                              ))}
+                            </code>
+                          </pre>
+                          {previewText.split('\n').length > CHANGES_PREVIEW_LINES && (
+                            <button
+                              type="button"
+                              onClick={() => onDiff(file.path, mode)}
+                              className="mt-1 text-xs text-cyan-600 dark:text-cyan-400 hover:underline"
+                              data-testid="git-changes-preview-more"
+                            >
+                              … truncated — open full diff
+                            </button>
+                          )}
+                        </div>
+                      )
+                    )}
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
@@ -508,11 +679,19 @@ interface ChangesSectionProps {
   isMobile: boolean;
   onRefresh: () => void;
   onDiff: (filePath: string, mode: ChangesDiffMode) => void;
+  /** Issue #816 (C): fetch raw working-diff text for the inline preview caret. */
+  onPreview: (filePath: string, mode: ChangesDiffMode) => Promise<string | null>;
   onStage: (filePath: string) => void;
   onUnstage: (filePath: string) => void;
   onCommitMessageChange: (value: string) => void;
   onAmendChange: (value: boolean) => void;
   onCommit: () => void;
+  /**
+   * Issue #816 (A): commit then push in one action. Inherits the same
+   * commit-message / amend / staged guards as onCommit (canCommit). Disabled
+   * while a network op is in-flight (busy).
+   */
+  onCommitAndPush: () => void;
 }
 
 /**
@@ -533,11 +712,13 @@ const ChangesSection = memo(function ChangesSection({
   isMobile,
   onRefresh,
   onDiff,
+  onPreview,
   onStage,
   onUnstage,
   onCommitMessageChange,
   onAmendChange,
   onCommit,
+  onCommitAndPush,
 }: ChangesSectionProps) {
   const stagedFiles = staged?.staged ?? [];
   const unstagedFiles = staged?.unstaged ?? [];
@@ -594,6 +775,7 @@ const ChangesSection = memo(function ChangesSection({
             defaultOpen={defaultOpen}
             busy={busy}
             onDiff={onDiff}
+            onPreview={onPreview}
             onToggleStage={onUnstage}
           />
           <ChangedFileList
@@ -605,6 +787,7 @@ const ChangesSection = memo(function ChangesSection({
             defaultOpen={defaultOpen}
             busy={busy}
             onDiff={onDiff}
+            onPreview={onPreview}
             onToggleStage={onStage}
           />
           <ChangedFileList
@@ -616,6 +799,7 @@ const ChangesSection = memo(function ChangesSection({
             defaultOpen={defaultOpen}
             busy={busy}
             onDiff={onDiff}
+            onPreview={onPreview}
             onToggleStage={onStage}
           />
 
@@ -640,15 +824,30 @@ const ChangesSection = memo(function ChangesSection({
                 />
                 Amend
               </label>
-              <button
-                type="button"
-                onClick={onCommit}
-                disabled={!canCommit}
-                className="px-3 py-1 text-xs font-medium rounded bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                data-testid="git-commit-button"
-              >
-                {committing ? 'Committing...' : 'Commit'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onCommit}
+                  disabled={!canCommit}
+                  className="px-3 py-1 text-xs font-medium rounded bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  data-testid="git-commit-button"
+                >
+                  {committing ? 'Committing...' : 'Commit'}
+                </button>
+                {/* Issue #816 (A): one-shot commit + push. The push runs only if
+                    the commit succeeds; if the push then fails, the commit is
+                    already saved (no rollback) — the title makes that explicit. */}
+                <button
+                  type="button"
+                  onClick={onCommitAndPush}
+                  disabled={!canCommit || busy}
+                  title="Commit, then push. If the push fails the commit is already saved — just retry Push."
+                  className="px-3 py-1 text-xs font-medium rounded border border-cyan-600 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                  data-testid="git-commit-push-button"
+                >
+                  Commit + Push
+                </button>
+              </div>
             </div>
             {commitError && (
               <div
@@ -667,13 +866,10 @@ const ChangesSection = memo(function ChangesSection({
 });
 
 // ============================================================================
-// Branches section (Issue #781): list / checkout / create / delete
+// Branches section (Issue #781): list / create / delete
+// Issue #815: checkout was extracted to the core BranchCheckoutDropdown; this
+// section (now under "Advanced operations") keeps create/delete only.
 // ============================================================================
-
-/** A pending checkout confirmation (null = no dialog open). */
-interface CheckoutTarget {
-  branch: BranchInfo;
-}
 
 interface BranchesSectionProps {
   branches: BranchInfo[];
@@ -681,23 +877,23 @@ interface BranchesSectionProps {
   loading: boolean;
   error: string | null;
   busy: boolean;
-  /** Inline error from a checkout/create/delete mutation. */
+  /** Inline error from a checkout/create/delete mutation (shared state). */
   actionError: string | null;
-  /** True when any CLI session is running for this worktree (S3-002). */
-  hasRunningSession: boolean;
   isMobile: boolean;
   onIncludeChange: (include: BranchInclude) => void;
   onRefresh: () => void;
-  onCheckout: (branch: BranchInfo, force: boolean) => void;
   onCreate: (name: string, from: string | undefined) => void;
   onDelete: (name: string, force: boolean) => void;
+  /** Issue #817: draft an "Ask AI" prompt into the composer (no auto-send). */
+  onAskAi?: (text: string) => void;
 }
 
 /**
- * Branches section (Issue #781). Rendered between Current Status (#779) and
- * Changes (#780). Provides local/remote tabs, a per-branch checkout (with the
- * S3-001 history-loss + S3-002 running-session confirm dialog), a create modal,
- * and a delete confirm modal. On mobile the whole section default-collapses.
+ * Branches section (Issue #781). Provides local/remote tabs, a create modal, and
+ * a per-branch delete confirm modal. Issue #815 demoted this under the collapsed
+ * "Advanced operations" group and moved checkout to the core
+ * BranchCheckoutDropdown, so this section no longer renders checkout. On mobile
+ * the whole section default-collapses.
  */
 const BranchesSection = memo(function BranchesSection({
   branches,
@@ -706,34 +902,20 @@ const BranchesSection = memo(function BranchesSection({
   error,
   busy,
   actionError,
-  hasRunningSession,
   isMobile,
   onIncludeChange,
   onRefresh,
-  onCheckout,
   onCreate,
   onDelete,
+  onAskAi,
 }: BranchesSectionProps) {
   // Mobile default-collapses the entire section (#780 same approach).
   const [open, setOpen] = useState(!isMobile);
-  const [checkoutTarget, setCheckoutTarget] = useState<CheckoutTarget | null>(null);
-  const [checkoutForce, setCheckoutForce] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [createName, setCreateName] = useState('');
   const [createFrom, setCreateFrom] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<BranchInfo | null>(null);
   const [deleteForce, setDeleteForce] = useState(false);
-
-  const openCheckout = useCallback((branch: BranchInfo) => {
-    setCheckoutForce(false);
-    setCheckoutTarget({ branch });
-  }, []);
-
-  const confirmCheckout = useCallback(() => {
-    if (!checkoutTarget) return;
-    onCheckout(checkoutTarget.branch, checkoutForce);
-    setCheckoutTarget(null);
-  }, [checkoutTarget, checkoutForce, onCheckout]);
 
   const confirmCreate = useCallback(() => {
     if (createName.trim().length === 0) return;
@@ -826,7 +1008,7 @@ const BranchesSection = memo(function BranchesSection({
             <div
               className="px-3 pb-2 text-xs text-red-600 dark:text-red-400"
               role="alert"
-              data-testid="branch-checkout-error"
+              data-testid="git-branches-action-error"
             >
               {actionError}
             </div>
@@ -839,7 +1021,6 @@ const BranchesSection = memo(function BranchesSection({
           {branches.length > 0 && (
             <ul className="divide-y divide-gray-100 dark:divide-gray-800 max-h-64 overflow-y-auto">
               {branches.map((branch) => {
-                const checkedOutElsewhere = branch.checkedOutWorktreePath !== null && !branch.isCurrent;
                 const deleteDisabled = busy || branch.isCurrent || branch.isDefault;
                 return (
                   <li
@@ -857,22 +1038,6 @@ const BranchesSection = memo(function BranchesSection({
                         <span className="ml-1.5 text-[10px] text-gray-400 dark:text-gray-500">default</span>
                       )}
                     </span>
-                    {!branch.isCurrent && (
-                      <button
-                        type="button"
-                        onClick={() => openCheckout(branch)}
-                        disabled={busy || checkedOutElsewhere}
-                        className="shrink-0 px-1.5 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 text-cyan-700 dark:text-cyan-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
-                        aria-label={`Checkout ${branch.name}`}
-                        title={
-                          checkedOutElsewhere
-                            ? `Checked out in another worktree: ${branch.checkedOutWorktreePath}`
-                            : undefined
-                        }
-                      >
-                        Checkout
-                      </button>
-                    )}
                     <button
                       type="button"
                       onClick={() => {
@@ -891,71 +1056,6 @@ const BranchesSection = memo(function BranchesSection({
             </ul>
           )}
         </>
-      )}
-
-      {/* Checkout confirm dialog */}
-      {checkoutTarget && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          role="dialog"
-          aria-modal="true"
-          data-testid="branch-checkout-confirm"
-        >
-          <div className="w-full max-w-md rounded-lg bg-white dark:bg-gray-800 p-4 shadow-xl flex flex-col gap-3">
-            <h3 className="text-sm font-medium text-gray-800 dark:text-gray-200">
-              Checkout <span className="font-mono">{checkoutTarget.branch.name}</span>?
-            </h3>
-
-            {/* S3-001: history-loss warning (verified verbatim by acceptance test). */}
-            <div
-              className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/50 dark:bg-amber-900/20 dark:text-amber-300"
-              role="alert"
-              data-testid="branch-history-loss-warning"
-            >
-              {CHECKOUT_HISTORY_LOSS_WARNING}
-            </div>
-
-            {/* S3-002: running-session warning. */}
-            {hasRunningSession && (
-              <div
-                className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-700/50 dark:bg-red-900/20 dark:text-red-300"
-                role="alert"
-                data-testid="branch-session-warning"
-              >
-                {CHECKOUT_RUNNING_SESSION_WARNING}
-              </div>
-            )}
-
-            <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
-              <input
-                type="checkbox"
-                checked={checkoutForce}
-                onChange={(e) => setCheckoutForce(e.target.checked)}
-                data-testid="branch-checkout-force"
-              />
-              Discard uncommitted changes (force) — 未コミットの変更は失われます
-            </label>
-
-            <div className="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setCheckoutTarget(null)}
-                className="px-3 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={confirmCheckout}
-                disabled={busy}
-                className="px-3 py-1 text-xs font-medium rounded bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-50"
-                data-testid="branch-checkout-confirm-button"
-              >
-                Checkout
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Create-branch modal */}
@@ -992,6 +1092,17 @@ const BranchesSection = memo(function BranchesSection({
               ))}
             </select>
             <div className="flex items-center justify-end gap-2">
+              {onAskAi && (
+                <AskAiButton
+                  className="mr-auto"
+                  testId="branch-create-ask-ai"
+                  disabled={createName.trim().length === 0}
+                  onClick={() => {
+                    onAskAi(branchCreatePrompt(createName, createFrom));
+                    setShowCreate(false);
+                  }}
+                />
+              )}
               <button
                 type="button"
                 onClick={() => setShowCreate(false)}
@@ -1035,6 +1146,17 @@ const BranchesSection = memo(function BranchesSection({
               Force delete (-D) — unmerged commits will be lost
             </label>
             <div className="flex items-center justify-end gap-2">
+              {onAskAi && deleteTarget && (
+                <AskAiButton
+                  className="mr-auto"
+                  testId="branch-delete-ask-ai"
+                  onClick={() => {
+                    onAskAi(branchDeletePrompt(deleteTarget.name, deleteForce));
+                    setDeleteTarget(null);
+                    setDeleteForce(false);
+                  }}
+                />
+              )}
               <button
                 type="button"
                 onClick={() => setDeleteTarget(null)}
@@ -1077,6 +1199,8 @@ interface StashSectionProps {
   onPop: (index: number) => void;
   onApply: (index: number) => void;
   onDrop: (index: number) => void;
+  /** Issue #817: draft an "Ask AI" prompt into the composer (no auto-send). */
+  onAskAi?: (text: string) => void;
 }
 
 /**
@@ -1098,6 +1222,7 @@ const StashSection = memo(function StashSection({
   onPop,
   onApply,
   onDrop,
+  onAskAi,
 }: StashSectionProps) {
   const [open, setOpen] = useState(!isMobile);
   const [pushMessage, setPushMessage] = useState('');
@@ -1118,14 +1243,22 @@ const StashSection = memo(function StashSection({
           <span className="text-xs w-4 text-center">{open ? '▼' : '▶'}</span>
           Stash {stashes.length > 0 && <span className="text-xs text-gray-400">({stashes.length})</span>}
         </button>
-        <button
-          type="button"
-          onClick={onRefresh}
-          className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded"
-          aria-label="Refresh stash list"
-        >
-          <RefreshIcon />
-        </button>
+        <div className="flex items-center gap-1">
+          {open && onAskAi && stashes.length > 0 && (
+            <AskAiButton
+              testId="stash-cleanup-ask-ai"
+              onClick={() => onAskAi(stashCleanupPrompt(stashes))}
+            />
+          )}
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded"
+            aria-label="Refresh stash list"
+          >
+            <RefreshIcon />
+          </button>
+        </div>
       </div>
 
       {open && (
@@ -1141,8 +1274,17 @@ const StashSection = memo(function StashSection({
             </div>
           )}
           {conflictNotice && (
-            <div className="text-xs text-orange-600 dark:text-orange-400" role="status" data-testid="git-stash-conflict">
-              {conflictNotice}
+            <div className="flex items-start justify-between gap-2">
+              <div className="text-xs text-orange-600 dark:text-orange-400" role="status" data-testid="git-stash-conflict">
+                {conflictNotice}
+              </div>
+              {onAskAi && (
+                <AskAiButton
+                  className="shrink-0"
+                  testId="stash-conflict-ask-ai"
+                  onClick={() => onAskAi(stashConflictPrompt(conflictNotice))}
+                />
+              )}
             </div>
           )}
 
@@ -1295,10 +1437,14 @@ interface DangerZoneSectionProps {
   actionError: string | null;
   conflictNotice: string | null;
   currentBranch: string | null;
+  /** Issue #817: commits ahead of upstream, for the force-push Ask AI prompt. */
+  aheadCount?: number | null;
   hasRunningSession: boolean;
   isMobile: boolean;
   onReset: (target: string, mode: GitResetMode, confirmBranch: string | undefined) => void;
   onRevert: (commitHash: string, noCommit: boolean) => void;
+  /** Issue #817: draft an "Ask AI" prompt into the composer (no auto-send). */
+  onAskAi?: (text: string) => void;
   /**
    * Issue #783: force-push the current branch. `--force-with-lease` is the
    * default (forceWithLease=true); the lease check is a second safety net. The
@@ -1321,11 +1467,13 @@ const DangerZoneSection = memo(function DangerZoneSection({
   actionError,
   conflictNotice,
   currentBranch,
+  aheadCount,
   hasRunningSession,
   isMobile,
   onReset,
   onRevert,
   onForcePush,
+  onAskAi,
 }: DangerZoneSectionProps) {
   const [open, setOpen] = useState(false); // default closed
   const [resetMode, setResetMode] = useState<GitResetMode>('mixed');
@@ -1487,6 +1635,19 @@ const DangerZoneSection = memo(function DangerZoneSection({
           )}
 
           <div className="flex items-center gap-2">
+            {onAskAi && (
+              <AskAiButton
+                className="mr-auto"
+                testId="reset-ask-ai"
+                disabled={resetTargetMissing}
+                onClick={() => {
+                  if (!resetTarget) return;
+                  onAskAi(resetPrompt(resetMode, resetTarget));
+                  setShowResetModal(false);
+                  setConfirmBranch('');
+                }}
+              />
+            )}
             <button
               type="button"
               disabled={
@@ -1548,6 +1709,17 @@ const DangerZoneSection = memo(function DangerZoneSection({
             No commit (leave staged)
           </label>
           <div className="flex items-center gap-2">
+            {onAskAi && (
+              <AskAiButton
+                className="mr-auto"
+                testId="revert-ask-ai"
+                onClick={() => {
+                  onAskAi(revertPrompt(selectedCommit));
+                  setShowRevertModal(false);
+                  setRevertNoCommit(false);
+                }}
+              />
+            )}
             <button
               type="button"
               disabled={busy}
@@ -1607,6 +1779,16 @@ const DangerZoneSection = memo(function DangerZoneSection({
             Use --force-with-lease (recommended — refuses if the remote moved)
           </label>
           <div className="flex items-center gap-2">
+            {onAskAi && (
+              <AskAiButton
+                className="mr-auto"
+                testId="force-push-ask-ai"
+                onClick={() => {
+                  onAskAi(forcePushPrompt({ branch: currentBranch, ahead: aheadCount ?? null }));
+                  setShowForcePushModal(false);
+                }}
+              />
+            )}
             <button
               type="button"
               disabled={busy}
@@ -1642,11 +1824,19 @@ export const GitPane = memo(function GitPane({
   onDiffSelect,
   isMobile = false,
   worktree,
+  onInsertToMessage,
   className = '',
 }: GitPaneProps) {
   const [commits, setCommits] = useState<CommitInfo[]>([]);
   const [selectedCommit, setSelectedCommit] = useState<string | null>(null);
   const [changedFiles, setChangedFiles] = useState<ChangedFile[]>([]);
+
+  // Issue #816 (B): Commit History inline "View diff" accordion. Independent of
+  // selectedCommit so the existing commit -> Changed Files detail path is kept.
+  const [inlineDiffCommit, setInlineDiffCommit] = useState<string | null>(null);
+  const [inlineFiles, setInlineFiles] = useState<ChangedFile[]>([]);
+  const [inlineFilesLoading, setInlineFilesLoading] = useState(false);
+  const [inlineFilesError, setInlineFilesError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [diffContent, setDiffContent] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -1656,9 +1846,20 @@ export const GitPane = memo(function GitPane({
   const [detailError, setDetailError] = useState<string | null>(null);
 
   // Collapsible section states
-  const [commitListOpen, setCommitListOpen] = useState(true);
   const [changedFilesOpen, setChangedFilesOpen] = useState(true);
   const [diffOpen, setDiffOpen] = useState(true);
+
+  // Issue #818: consolidated GitPane UI persistence — mobile active tab plus the
+  // Commit History / Advanced collapse states (the latter keeps Phase 1's
+  // `commandmate:gitPane:advancedOpen` key). SSR-safe (defaults, hydrate on mount).
+  const {
+    activeTab,
+    setActiveTab,
+    historyOpen: commitListOpen,
+    toggleHistory: toggleCommitList,
+    advancedOpen,
+    toggleAdvanced,
+  } = useGitPaneTabState();
 
   // Issue #779: Current Status (self-fetched, independent of commit history)
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
@@ -1856,6 +2057,53 @@ export const GitPane = memo(function GitPane({
   }, [selectedCommit, fetchDiff]);
 
   /**
+   * Issue #816 (B): toggle the inline "View diff" accordion for a commit row.
+   * Expanding fetches the commit's changed-file list into a state SEPARATE from
+   * the selectedCommit detail path (kept for backwards compat). Re-clicking the
+   * same commit collapses it.
+   */
+  const handleToggleInlineDiff = useCallback(async (commitHash: string) => {
+    if (inlineDiffCommit === commitHash) {
+      setInlineDiffCommit(null);
+      setInlineFiles([]);
+      setInlineFilesError(null);
+      return;
+    }
+    setInlineDiffCommit(commitHash);
+    setInlineFiles([]);
+    setInlineFilesError(null);
+    setInlineFilesLoading(true);
+    try {
+      const response = await fetch(`/api/worktrees/${worktreeId}/git/show/${commitHash}`);
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setInlineFilesError(data.error || 'Failed to fetch commit details');
+        return;
+      }
+      const data = await response.json();
+      setInlineFiles(Array.isArray(data.files) ? data.files : []);
+    } catch {
+      setInlineFilesError('Failed to fetch commit details');
+    } finally {
+      setInlineFilesLoading(false);
+    }
+  }, [worktreeId, inlineDiffCommit]);
+
+  /**
+   * Issue #816 (B): a file clicked inside the inline accordion. Routes through
+   * the existing selection state (selectedCommit / selectedFile / changedFiles)
+   * so the diff is shown via onDiffSelect (PC) / the mobile inline viewer, and
+   * the Danger Zone selectedCommit stays coherent — i.e. it reuses the same
+   * "diff modal" display path as the detail list.
+   */
+  const handleInlineDiffFile = useCallback((commitHash: string, filePath: string) => {
+    setSelectedCommit(commitHash);
+    setSelectedFile(filePath);
+    setChangedFiles(inlineFiles);
+    fetchDiff(commitHash, filePath);
+  }, [inlineFiles, fetchDiff]);
+
+  /**
    * Handle refresh
    */
   const handleRefresh = useCallback(() => {
@@ -1934,8 +2182,7 @@ export const GitPane = memo(function GitPane({
    * 5s poll). The /git/log refresh button (handleRefresh) is deliberately NOT
    * wired here so the existing GitPane test stays intact.
    */
-  const handleCommit = useCallback(async () => {
-    setCommitting(true);
+  const doCommit = useCallback(async (): Promise<boolean> => {
     setChangesCommitError(null);
     try {
       const response = await fetch(`/api/worktrees/${worktreeId}/git/commit`, {
@@ -1946,19 +2193,28 @@ export const GitPane = memo(function GitPane({
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         setChangesCommitError(data.error || 'Failed to commit');
-        return;
+        return false;
       }
       setCommitMessage('');
       setAmend(false);
       await fetchStaged();
       await fetchCommits();
       await fetchStatus();
+      return true;
     } catch {
       setChangesCommitError('Failed to commit');
+      return false;
+    }
+  }, [worktreeId, commitMessage, amend, fetchStaged, fetchCommits, fetchStatus]);
+
+  const handleCommit = useCallback(async () => {
+    setCommitting(true);
+    try {
+      await doCommit();
     } finally {
       setCommitting(false);
     }
-  }, [worktreeId, commitMessage, amend, fetchStaged, fetchCommits, fetchStatus]);
+  }, [doCommit]);
 
   /**
    * Show the diff for a working-tree file (Issue #780). Uses the dedicated
@@ -1985,6 +2241,28 @@ export const GitPane = memo(function GitPane({
       // Diff failures for working-tree files are non-fatal; ignored.
     }
   }, [worktreeId, onDiffSelect]);
+
+  /**
+   * Issue #816 (C): fetch the raw working-tree diff text for the inline preview
+   * caret in the Changes section. Unlike handleChangesDiff, this RETURNS the diff
+   * string (does NOT route through onDiffSelect), so the caller can render a short
+   * inline preview. Failures resolve to null (preview shows "No diff available").
+   */
+  const fetchWorkingDiffText = useCallback(
+    async (filePath: string, mode: ChangesDiffMode): Promise<string | null> => {
+      try {
+        const response = await fetch(
+          `/api/worktrees/${worktreeId}/git/working-diff?file=${encodeURIComponent(filePath)}&mode=${mode}`
+        );
+        if (!response.ok) return null;
+        const data = await response.json();
+        return typeof data.diff === 'string' ? data.diff : null;
+      } catch {
+        return null;
+      }
+    },
+    [worktreeId]
+  );
 
   // ------------------------------------------------------------------------
   // Issue #781: Branches handlers (list / checkout / create / delete)
@@ -2354,6 +2632,25 @@ export const GitPane = memo(function GitPane({
   // no upstream is set, so the ahead/behind chip is absent and push must use -u.
   const hasUpstream = gitStatus?.aheadBehind != null;
 
+  /**
+   * Issue #816 (A): commit, then push in one action. The push runs ONLY if the
+   * commit succeeds (doCommit returns false + surfaces the inline commit error
+   * otherwise). A push failure is surfaced by the NetworkOperationsSection; the
+   * commit is already saved (no rollback — the button title states this). Defined
+   * here (after the network hook) so runNetworkPush / hasUpstream are in scope.
+   */
+  const handleCommitAndPush = useCallback(async () => {
+    setCommitting(true);
+    try {
+      const ok = await doCommit();
+      if (ok) {
+        await runNetworkPush({ setUpstream: !hasUpstream });
+      }
+    } finally {
+      setCommitting(false);
+    }
+  }, [doCommit, runNetworkPush, hasUpstream]);
+
   // DR3-006: the 5s status poll is paused while a network op is in-flight so it
   // does not re-fetch (and flicker) stale ahead/behind; it resumes on settle,
   // and the cascade refreshes the final state. (visibilitychange-aware; #779.)
@@ -2367,91 +2664,81 @@ export const GitPane = memo(function GitPane({
   // Render
   // ========================================================================
 
-  return (
-    <div className={`flex flex-col overflow-hidden ${className}`}>
-      {/* Current Status (Issue #779) - top of the pane, above Commit History */}
-      <CurrentStatusSection
-        gitStatus={gitStatus}
-        statusLoading={statusLoading}
-        statusError={statusError}
-        isMobile={isMobile}
-        onRefresh={handleStatusRefresh}
-      />
+  // ------------------------------------------------------------------------
+  // Issue #818: build each logical section once as a render variable so the
+  // mobile tab layout and the desktop visual-grouping layout compose the same
+  // JSX without duplication.
+  // ------------------------------------------------------------------------
 
-      {/* Remote network operations (Issue #783) - directly under Current Status */}
-      <NetworkOperationsSection
-        progressState={networkProgressState}
-        operation={networkOperation}
-        error={networkError}
-        conflict={networkConflict}
-        conflictFiles={networkConflictFiles}
-        hasUpstream={hasUpstream}
-        isMobile={isMobile}
-        onFetch={() => runNetworkFetch({})}
-        onPull={() => runNetworkPull({})}
-        onPush={() => runNetworkPush({ setUpstream: !hasUpstream })}
-        onAbort={abortNetworkOp}
-      />
+  // Current Status (Issue #779) - orientation header (read).
+  const statusSection = (
+    <CurrentStatusSection
+      gitStatus={gitStatus}
+      statusLoading={statusLoading}
+      statusError={statusError}
+      isMobile={isMobile}
+      onRefresh={handleStatusRefresh}
+    />
+  );
 
-      {/* Branches (Issue #781) - between Current Status and Changes */}
-      <BranchesSection
-        branches={branches}
-        include={branchInclude}
-        loading={branchesLoading}
-        error={branchesError}
-        busy={branchBusy || networkWriteLock}
-        actionError={branchActionError}
-        hasRunningSession={hasRunningSession}
-        isMobile={isMobile}
-        onIncludeChange={handleBranchIncludeChange}
-        onRefresh={handleBranchesRefresh}
-        onCheckout={handleCheckout}
-        onCreate={handleBranchCreate}
-        onDelete={handleBranchDelete}
-      />
+  // Quick actions (Issue #783 Pull/Push + Issue #815 checkout dropdown).
+  const quickActionsSection = (
+    <NetworkOperationsSection
+      progressState={networkProgressState}
+      operation={networkOperation}
+      error={networkError}
+      conflict={networkConflict}
+      conflictFiles={networkConflictFiles}
+      hasUpstream={hasUpstream}
+      isMobile={isMobile}
+      onPull={() => runNetworkPull({})}
+      onPush={() => runNetworkPush({ setUpstream: !hasUpstream })}
+      onAbort={abortNetworkOp}
+      extraActions={
+        <BranchCheckoutDropdown
+          branches={branches}
+          busy={branchBusy || networkWriteLock}
+          actionError={branchActionError}
+          hasRunningSession={hasRunningSession}
+          isMobile={isMobile}
+          onCheckout={handleCheckout}
+        />
+      }
+    />
+  );
 
-      {/* Changes (Issue #780) - below Current Status, above Commit History */}
-      <ChangesSection
-        staged={staged}
-        loading={stagedLoading}
-        error={stagedError}
-        busy={opBusy || networkWriteLock}
-        commitMessage={commitMessage}
-        amend={amend}
-        committing={committing}
-        commitError={changesCommitError}
-        isMobile={isMobile}
-        onRefresh={fetchStaged}
-        onDiff={handleChangesDiff}
-        onStage={handleStage}
-        onUnstage={handleUnstage}
-        onCommitMessageChange={setCommitMessage}
-        onAmendChange={setAmend}
-        onCommit={handleCommit}
-      />
+  // Changes (Issue #780) - staged/unstaged/untracked + commit form.
+  const changesSection = (
+    <ChangesSection
+      staged={staged}
+      loading={stagedLoading}
+      error={stagedError}
+      busy={opBusy || networkWriteLock}
+      commitMessage={commitMessage}
+      amend={amend}
+      committing={committing}
+      commitError={changesCommitError}
+      isMobile={isMobile}
+      onRefresh={fetchStaged}
+      onDiff={handleChangesDiff}
+      onPreview={fetchWorkingDiffText}
+      onStage={handleStage}
+      onUnstage={handleUnstage}
+      onCommitMessageChange={setCommitMessage}
+      onAmendChange={setAmend}
+      onCommit={handleCommit}
+      onCommitAndPush={handleCommitAndPush}
+    />
+  );
 
-      {/* Stash (Issue #782) - between Changes and Commit History */}
-      <StashSection
-        stashes={stashes}
-        loading={stashLoading}
-        error={stashError}
-        busy={stashBusy || networkWriteLock}
-        actionError={stashActionError}
-        conflictNotice={stashConflictNotice}
-        hasRunningSession={hasRunningSession}
-        isMobile={isMobile}
-        onRefresh={fetchStash}
-        onPush={handleStashPush}
-        onPop={handleStashPop}
-        onApply={handleStashApply}
-        onDrop={handleStashDrop}
-      />
-
+  // Commit History (Issue #447/#816) - read. Collapse state persisted (Issue #818 C).
+  const historySection = (
+    <>
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700">
         <button
           type="button"
-          onClick={() => setCommitListOpen((prev) => !prev)}
+          onClick={toggleCommitList}
           className="flex items-center gap-1 text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer hover:text-gray-900 dark:hover:text-gray-100"
         >
           <span className="text-xs w-4 text-center">{commitListOpen ? '▼' : '▶'}</span>
@@ -2496,32 +2783,97 @@ export const GitPane = memo(function GitPane({
           {commitListOpen && (
             <div className={`overflow-y-auto ${selectedCommit ? 'max-h-[40%] shrink-0' : 'flex-1'}`}>
               <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-                {commits.map((commit) => (
-                  <li key={commit.hash}>
-                    <button
-                      type="button"
-                      onClick={() => handleCommitSelect(commit.hash)}
-                      className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
-                        selectedCommit === commit.hash
-                          ? 'bg-cyan-50 dark:bg-cyan-900/30'
-                          : ''
-                      }`}
-                    >
-                      <div className="flex items-baseline gap-2">
-                        <span className="font-mono text-xs text-cyan-600 dark:text-cyan-400 shrink-0">
-                          {commit.shortHash}
-                        </span>
-                        <span className="truncate text-gray-800 dark:text-gray-200">
-                          {commit.message}
-                        </span>
+                {commits.map((commit) => {
+                  // Issue #816 (B): inline "View diff" accordion open-state.
+                  const inlineOpen = inlineDiffCommit === commit.hash;
+                  return (
+                    <li key={commit.hash}>
+                      <div className="flex items-stretch">
+                        <button
+                          type="button"
+                          onClick={() => handleCommitSelect(commit.hash)}
+                          className={`flex-1 min-w-0 text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
+                            selectedCommit === commit.hash
+                              ? 'bg-cyan-50 dark:bg-cyan-900/30'
+                              : ''
+                          }`}
+                        >
+                          <div className="flex items-baseline gap-2">
+                            <span className="font-mono text-xs text-cyan-600 dark:text-cyan-400 shrink-0">
+                              {commit.shortHash}
+                            </span>
+                            <span className="truncate text-gray-800 dark:text-gray-200">
+                              {commit.message}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                            <span>{commit.author}</span>
+                            <span>{new Date(commit.date).toLocaleDateString()}</span>
+                          </div>
+                        </button>
+                        {/* Issue #816 (B): inline diff toggle. Sibling (not nested)
+                            so it does not trigger the commit-select button. */}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleInlineDiff(commit.hash)}
+                          className="shrink-0 px-2 text-xs text-cyan-600 dark:text-cyan-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:underline"
+                          aria-label={`View diff for ${commit.shortHash}`}
+                          aria-expanded={inlineOpen}
+                          data-testid="git-commit-view-diff-button"
+                        >
+                          {inlineOpen ? 'Hide diff' : 'View diff'}
+                        </button>
                       </div>
-                      <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                        <span>{commit.author}</span>
-                        <span>{new Date(commit.date).toLocaleDateString()}</span>
-                      </div>
-                    </button>
-                  </li>
-                ))}
+
+                      {/* Issue #816 (B): inline accordion file list for this commit */}
+                      {inlineOpen && (
+                        <div
+                          className="border-t border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-800/30"
+                          data-testid="git-commit-inline-files"
+                        >
+                          {inlineFilesLoading && (
+                            <div className="flex items-center justify-center py-3" role="status">
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-500" />
+                              <span className="sr-only">Loading changed files...</span>
+                            </div>
+                          )}
+                          {inlineFilesError && <InlineError message={inlineFilesError} />}
+                          {!inlineFilesLoading && !inlineFilesError && inlineFiles.length === 0 && (
+                            <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                              No changed files
+                            </div>
+                          )}
+                          {!inlineFilesLoading && inlineFiles.length > 0 && (
+                            <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                              {inlineFiles.map((file) => (
+                                <li key={file.path}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleInlineDiffFile(commit.hash, file.path)}
+                                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors ${
+                                      selectedFile === file.path && selectedCommit === commit.hash
+                                        ? 'bg-cyan-50 dark:bg-cyan-900/30'
+                                        : ''
+                                    }`}
+                                    aria-label={`Show commit diff for ${file.path}`}
+                                    data-testid="git-commit-inline-file"
+                                  >
+                                    <span className={`inline-block w-14 font-medium ${STATUS_TEXT_COLOR[file.status]}`}>
+                                      {file.status}
+                                    </span>
+                                    <span className="font-mono text-gray-700 dark:text-gray-300">
+                                      {file.path}
+                                    </span>
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
@@ -2632,22 +2984,167 @@ export const GitPane = memo(function GitPane({
           )}
         </div>
       )}
+    </>
+  );
 
-      {/* Danger Zone (Issue #782) - bottom of the pane, below Commit History */}
-      <DangerZoneSection
-        selectedCommit={selectedCommit}
-        busy={dangerBusy || networkWriteLock}
-        actionError={dangerActionError}
-        conflictNotice={dangerConflictNotice}
-        currentBranch={gitStatus?.currentBranch ?? null}
-        hasRunningSession={hasRunningSession}
-        isMobile={isMobile}
-        onReset={handleReset}
-        onRevert={handleRevert}
-        onForcePush={(forceWithLease) =>
-          runNetworkPush(forceWithLease ? { forceWithLease: true } : { force: true })
-        }
-      />
+  // Advanced operations (Issue #815) - Fetch + Branches(create/delete) + Stash
+  // + Danger Zone. Collapsed by default; open-state persisted (Issue #818 C).
+  const advancedSection = (
+    <AdvancedSection open={advancedOpen} onToggle={toggleAdvanced}>
+        {/* Fetch (Issue #783 op, decoupled from Pull/Push per Issue #815) */}
+        <div
+          className="flex flex-col gap-1.5 px-3 py-2 border-b border-gray-200 dark:border-gray-700"
+          data-testid="git-advanced-fetch"
+        >
+          <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Remote</span>
+          <div>
+            <button
+              type="button"
+              onClick={() => runNetworkFetch({})}
+              disabled={networkProgressState === 'running'}
+              className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+              data-testid="git-fetch-button"
+            >
+              Fetch
+            </button>
+          </div>
+        </div>
+
+        {/* Branches create/delete (Issue #781; checkout extracted to core #815) */}
+        <BranchesSection
+          branches={branches}
+          include={branchInclude}
+          loading={branchesLoading}
+          error={branchesError}
+          busy={branchBusy || networkWriteLock}
+          actionError={branchActionError}
+          isMobile={isMobile}
+          onIncludeChange={handleBranchIncludeChange}
+          onRefresh={handleBranchesRefresh}
+          onCreate={handleBranchCreate}
+          onDelete={handleBranchDelete}
+          onAskAi={onInsertToMessage}
+        />
+
+        {/* Stash (Issue #782) */}
+        <StashSection
+          stashes={stashes}
+          loading={stashLoading}
+          error={stashError}
+          busy={stashBusy || networkWriteLock}
+          actionError={stashActionError}
+          conflictNotice={stashConflictNotice}
+          hasRunningSession={hasRunningSession}
+          isMobile={isMobile}
+          onRefresh={fetchStash}
+          onPush={handleStashPush}
+          onPop={handleStashPop}
+          onApply={handleStashApply}
+          onDrop={handleStashDrop}
+          onAskAi={onInsertToMessage}
+        />
+
+        {/* Danger Zone (Issue #782) */}
+        <DangerZoneSection
+          selectedCommit={selectedCommit}
+          busy={dangerBusy || networkWriteLock}
+          actionError={dangerActionError}
+          conflictNotice={dangerConflictNotice}
+          currentBranch={gitStatus?.currentBranch ?? null}
+          aheadCount={gitStatus?.aheadBehind?.ahead ?? null}
+          hasRunningSession={hasRunningSession}
+          isMobile={isMobile}
+          onReset={handleReset}
+          onRevert={handleRevert}
+          onForcePush={(forceWithLease) =>
+            runNetworkPush(forceWithLease ? { forceWithLease: true } : { force: true })
+          }
+          onAskAi={onInsertToMessage}
+        />
+      </AdvancedSection>
+  );
+
+  // ------------------------------------------------------------------------
+  // Issue #818 A: mobile = a 4-tab strip with only the active group mounted
+  // (non-active groups unmount → less DOM + shorter scroll). Status tab pairs
+  // Current Status with Quick actions per the issue spec.
+  // ------------------------------------------------------------------------
+  if (isMobile) {
+    return (
+      <div
+        className={`flex flex-col overflow-hidden ${className}`}
+        data-testid="git-pane-mobile"
+      >
+        <GitPaneMobileTabs activeTab={activeTab} onTabChange={setActiveTab} />
+        <div
+          className="flex-1 flex flex-col min-h-0"
+          data-testid="git-pane-mobile-panel"
+          data-active-tab={activeTab}
+        >
+          {activeTab === 'status' && (
+            <div className="flex-1 overflow-y-auto min-h-0">
+              {statusSection}
+              {quickActionsSection}
+            </div>
+          )}
+          {activeTab === 'changes' && (
+            <div className="flex-1 overflow-y-auto min-h-0">{changesSection}</div>
+          )}
+          {activeTab === 'history' && historySection}
+          {activeTab === 'advanced' && (
+            <div className="flex-1 overflow-y-auto min-h-0">{advancedSection}</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ------------------------------------------------------------------------
+  // Issue #818 B: desktop = visual grouping into read / write / advanced
+  // blocks (background tint + accent border). Section order is unchanged so
+  // the overflow-hidden + flex-1 history layout keeps working.
+  // ------------------------------------------------------------------------
+  return (
+    <div
+      className={`flex flex-col overflow-hidden ${className}`}
+      data-testid="git-pane-desktop"
+    >
+      {/* Read · orientation (sky tint) */}
+      <div
+        data-testid="git-group-read"
+        data-git-group="read"
+        className="border-l-2 border-sky-400/60 dark:border-sky-500/40 bg-sky-50/40 dark:bg-sky-950/20"
+      >
+        {statusSection}
+      </div>
+
+      {/* Write · actions (neutral tint) */}
+      <div
+        data-testid="git-group-write"
+        data-git-group="write"
+        className="border-l-2 border-gray-300 dark:border-gray-600 bg-gray-50/70 dark:bg-gray-800/30"
+      >
+        {quickActionsSection}
+        {changesSection}
+      </div>
+
+      {/* Read · history (sky tint, grows to fill the pane) */}
+      <div
+        data-testid="git-group-history"
+        data-git-group="read"
+        className="flex-1 flex flex-col min-h-0 border-l-2 border-sky-400/60 dark:border-sky-500/40 bg-sky-50/30 dark:bg-sky-950/10"
+      >
+        {historySection}
+      </div>
+
+      {/* Advanced · gray block with a heavier divider */}
+      <div
+        data-testid="git-group-advanced"
+        data-git-group="advanced"
+        className="border-l-2 border-t-2 border-gray-300 dark:border-gray-600 bg-gray-100/50 dark:bg-gray-800/40"
+      >
+        {advancedSection}
+      </div>
     </div>
   );
 });

@@ -119,7 +119,11 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
           <MemoPane worktreeId={worktreeId} className="h-full" onInsertToMessage={onInsertToMessage} />
         )}
         {activeSubTab === 'logs' && (
-          <ExecutionLogPane worktreeId={worktreeId} className="h-full" />
+          <ExecutionLogPane
+            worktreeId={worktreeId}
+            className="h-full"
+            onInsertToMessage={onInsertToMessage}
+          />
         )}
         {activeSubTab === 'agent' && (
           <AgentSettingsPane

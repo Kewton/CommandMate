@@ -524,6 +524,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           onDiffSelect={onDiffSelect}
           isMobile={false}
           worktree={worktree ?? undefined}
+          onInsertToMessage={handleInsertToMessage}
           className="h-full"
         />
       ),
@@ -535,7 +536,11 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
         />
       ),
       schedules: (
-        <ExecutionLogPane worktreeId={worktreeId} className="h-full" />
+        <ExecutionLogPane
+          worktreeId={worktreeId}
+          className="h-full"
+          onInsertToMessage={handleInsertToMessage}
+        />
       ),
       agent: (
         <AgentSettingsPane

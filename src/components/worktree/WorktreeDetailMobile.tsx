@@ -302,6 +302,7 @@ export const MobileContent = memo(function MobileContent({
                 onDiffSelect={onDiffSelect}
                 isMobile={true}
                 worktree={worktree ?? undefined}
+                onInsertToMessage={onInsertToMessage}
                 className="flex-1 min-h-0"
               />
             </ErrorBoundary>

@@ -14,6 +14,14 @@ import {
   RESET_HARD_HISTORY_LOSS_WARNING,
   PUSH_AUTH_FAILED_GUIDANCE,
 } from '@/config/git-status-config';
+// Issue #817: SSOT prompt builders — imported so the "Ask AI" wiring tests
+// assert the right builder/context without duplicating the ja wording here.
+import {
+  branchCreatePrompt,
+  branchDeletePrompt,
+  resetPrompt,
+  revertPrompt,
+} from '@/lib/git-ai-prompt-templates';
 
 // ----------------------------------------------------------------------------
 // URL-discriminating fetch mock (Issue #779 hard gate)
@@ -195,6 +203,36 @@ function setEndpoints(config: EndpointConfig = {}) {
   });
 }
 
+/**
+ * Issue #815: expand the collapsed "Advanced operations" group (Fetch / Branches
+ * create+delete / Stash / Danger Zone). The toggle header is always rendered.
+ */
+function openAdvanced() {
+  fireEvent.click(screen.getByTestId('git-advanced-toggle'));
+}
+
+/**
+ * Issue #815: open the core branch-checkout dropdown menu. The trigger is
+ * disabled until the mount /git/branches fetch populates the list, so we wait
+ * for it to enable before opening.
+ */
+async function openCheckoutMenu() {
+  const toggle = screen.getByTestId('branch-checkout-dropdown-toggle');
+  await waitFor(() => expect(toggle).not.toBeDisabled());
+  fireEvent.click(toggle);
+}
+
+/**
+ * Issue #815: Danger Zone now lives under the collapsed Advanced group AND keeps
+ * its own collapsed toggle. Expand both to reach Reset/Revert/Force-push.
+ */
+async function openDangerZone() {
+  await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+  openAdvanced();
+  await waitFor(() => expect(screen.getByTestId('git-danger-zone-toggle')).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId('git-danger-zone-toggle'));
+}
+
 describe('GitPane', () => {
   const defaultProps = {
     worktreeId: 'test-worktree-id',
@@ -205,6 +243,10 @@ describe('GitPane', () => {
     vi.clearAllMocks();
     mockFetch.mockReset();
     setEndpoints();
+    // Issue #815: GitPane persists the Advanced group open-state to localStorage.
+    // jsdom shares localStorage across tests in a file, so reset it to keep the
+    // default-collapsed precondition deterministic per test.
+    window.localStorage.clear();
   });
 
   describe('Loading state', () => {
@@ -810,8 +852,14 @@ describe('GitPane', () => {
       });
     });
 
-    it('renders the Branches section with branch names', async () => {
+    it('renders the Branches section (create/delete) under Advanced operations', async () => {
       render(<GitPane {...defaultProps} />);
+
+      // Issue #815: Branches moved under the collapsed Advanced group.
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      expect(screen.queryByTestId('git-branches-section')).not.toBeInTheDocument();
+
+      openAdvanced();
 
       await waitFor(() => {
         expect(screen.getByTestId('git-branches-section')).toBeInTheDocument();
@@ -823,10 +871,8 @@ describe('GitPane', () => {
     it('shows the S3-001 history-loss warning in the checkout confirm dialog', async () => {
       render(<GitPane {...defaultProps} />);
 
-      await waitFor(() => {
-        expect(screen.getByLabelText('Checkout main')).toBeInTheDocument();
-      });
-
+      // Issue #815: checkout is now a core dropdown beside Quick actions.
+      await openCheckoutMenu();
       fireEvent.click(screen.getByLabelText('Checkout main'));
 
       await waitFor(() => {
@@ -843,10 +889,7 @@ describe('GitPane', () => {
       };
       render(<GitPane {...defaultProps} worktree={worktree as never} />);
 
-      await waitFor(() => {
-        expect(screen.getByLabelText('Checkout main')).toBeInTheDocument();
-      });
-
+      await openCheckoutMenu();
       fireEvent.click(screen.getByLabelText('Checkout main'));
 
       await waitFor(() => {
@@ -864,10 +907,7 @@ describe('GitPane', () => {
       };
       render(<GitPane {...defaultProps} worktree={worktree as never} />);
 
-      await waitFor(() => {
-        expect(screen.getByLabelText('Checkout main')).toBeInTheDocument();
-      });
-
+      await openCheckoutMenu();
       fireEvent.click(screen.getByLabelText('Checkout main'));
 
       await waitFor(() => {
@@ -879,10 +919,7 @@ describe('GitPane', () => {
     it('POSTs /git/checkout and refetches on confirm', async () => {
       render(<GitPane {...defaultProps} />);
 
-      await waitFor(() => {
-        expect(screen.getByLabelText('Checkout main')).toBeInTheDocument();
-      });
-
+      await openCheckoutMenu();
       fireEvent.click(screen.getByLabelText('Checkout main'));
 
       await waitFor(() => {
@@ -924,10 +961,7 @@ describe('GitPane', () => {
 
       render(<GitPane {...defaultProps} />);
 
-      await waitFor(() => {
-        expect(screen.getByLabelText('Checkout main')).toBeInTheDocument();
-      });
-
+      await openCheckoutMenu();
       fireEvent.click(screen.getByLabelText('Checkout main'));
 
       await waitFor(() => {
@@ -963,22 +997,19 @@ describe('GitPane', () => {
 
       render(<GitPane {...defaultProps} />);
 
-      await waitFor(() => {
-        expect(screen.getByLabelText('Checkout feature/elsewhere')).toBeInTheDocument();
-      });
+      await openCheckoutMenu();
 
       const button = screen.getByLabelText('Checkout feature/elsewhere');
       expect(button).toBeDisabled();
       expect(button.getAttribute('title')).toContain('/other/worktree');
     });
 
-    it('does not render a checkout button for the current branch', async () => {
+    it('does not offer the current branch in the checkout dropdown', async () => {
       render(<GitPane {...defaultProps} />);
 
-      await waitFor(() => {
-        expect(screen.getByText('feature/current')).toBeInTheDocument();
-      });
-
+      await openCheckoutMenu();
+      // The menu lists checkout-able branches; the current branch is excluded.
+      expect(screen.getByLabelText('Checkout main')).toBeInTheDocument();
       expect(screen.queryByLabelText('Checkout feature/current')).not.toBeInTheDocument();
     });
 
@@ -1004,6 +1035,10 @@ describe('GitPane', () => {
 
       render(<GitPane {...defaultProps} />);
 
+      // Issue #815: the local/remote/all tabs live in the Advanced Branches section.
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
+
       await waitFor(() => {
         expect(screen.getByTestId('git-branches-tab-remote')).toBeInTheDocument();
       });
@@ -1020,6 +1055,9 @@ describe('GitPane', () => {
 
     it('opens the create-branch modal and POSTs /git/branch/create', async () => {
       render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
 
       await waitFor(() => {
         expect(screen.getByTestId('git-branch-create-open')).toBeInTheDocument();
@@ -1050,6 +1088,9 @@ describe('GitPane', () => {
     it('opens the delete confirm modal and POSTs /git/branch/delete', async () => {
       render(<GitPane {...defaultProps} />);
 
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
+
       await waitFor(() => {
         expect(screen.getByLabelText('Delete main')).toBeInTheDocument();
       });
@@ -1079,6 +1120,9 @@ describe('GitPane', () => {
       });
 
       render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
 
       await waitFor(() => {
         expect(screen.getByLabelText('Delete feature/old')).toBeInTheDocument();
@@ -1111,13 +1155,19 @@ describe('GitPane', () => {
   describe('Stash (Issue #782)', () => {
     it('renders the stash section and fetches the stash list on mount', async () => {
       render(<GitPane {...defaultProps} />);
+      // Issue #815: stash is fetched on mount even while Advanced stays collapsed.
+      await waitFor(() => {
+        const stashCall = mockFetch.mock.calls.some(
+          (call) => typeof call[0] === 'string' && call[0].includes('/git/stash') && !call[0].match(/\/git\/stash\/\d/)
+        );
+        expect(stashCall).toBe(true);
+      });
+      // The section itself lives under Advanced operations.
+      expect(screen.queryByTestId('git-stash-section')).not.toBeInTheDocument();
+      openAdvanced();
       await waitFor(() => {
         expect(screen.getByTestId('git-stash-section')).toBeInTheDocument();
       });
-      const stashCall = mockFetch.mock.calls.some(
-        (call) => typeof call[0] === 'string' && call[0].includes('/git/stash') && !call[0].match(/\/git\/stash\/\d/)
-      );
-      expect(stashCall).toBe(true);
     });
 
     it('does NOT poll the stash list (mount + mutation only, S3-004)', async () => {
@@ -1152,6 +1202,8 @@ describe('GitPane', () => {
         },
       });
       render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
       await waitFor(() => {
         expect(screen.getByTestId('git-stash-row')).toBeInTheDocument();
       });
@@ -1162,6 +1214,8 @@ describe('GitPane', () => {
 
     it('pushes a stash via the push button', async () => {
       render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
       await waitFor(() => {
         expect(screen.getByTestId('stash-push-button')).toBeInTheDocument();
       });
@@ -1187,6 +1241,8 @@ describe('GitPane', () => {
         },
       });
       render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
       await waitFor(() => {
         expect(screen.getByTestId('stash-drop-button')).toBeInTheDocument();
       });
@@ -1220,6 +1276,8 @@ describe('GitPane', () => {
         },
       });
       render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
       await waitFor(() => {
         expect(screen.getByTestId('stash-pop-button')).toBeInTheDocument();
       });
@@ -1235,6 +1293,10 @@ describe('GitPane', () => {
   describe('Danger Zone (Issue #782)', () => {
     it('renders the Danger Zone section collapsed by default', async () => {
       render(<GitPane {...defaultProps} />);
+      // Issue #815: Danger Zone lives under the collapsed Advanced group.
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      expect(screen.queryByTestId('git-danger-zone-section')).not.toBeInTheDocument();
+      openAdvanced();
       await waitFor(() => {
         expect(screen.getByTestId('git-danger-zone-section')).toBeInTheDocument();
       });
@@ -1244,10 +1306,7 @@ describe('GitPane', () => {
 
     it('opens the Reset modal and shows the hard-mode warnings + branch confirm input', async () => {
       render(<GitPane {...defaultProps} />);
-      await waitFor(() => {
-        expect(screen.getByTestId('git-danger-zone-toggle')).toBeInTheDocument();
-      });
-      fireEvent.click(screen.getByTestId('git-danger-zone-toggle'));
+      await openDangerZone();
       fireEvent.click(screen.getByTestId('git-danger-zone-reset-open'));
       await waitFor(() => {
         expect(screen.getByTestId('reset-confirm')).toBeInTheDocument();
@@ -1262,8 +1321,7 @@ describe('GitPane', () => {
 
     it('keeps the hard Reset button disabled until the branch confirmation matches', async () => {
       render(<GitPane {...defaultProps} />);
-      await waitFor(() => expect(screen.getByTestId('git-danger-zone-toggle')).toBeInTheDocument());
-      fireEvent.click(screen.getByTestId('git-danger-zone-toggle'));
+      await openDangerZone();
       fireEvent.click(screen.getByTestId('git-danger-zone-reset-open'));
       fireEvent.click(screen.getByTestId('reset-mode-hard'));
       const confirmButton = screen.getByTestId('reset-confirm-button');
@@ -1277,8 +1335,7 @@ describe('GitPane', () => {
 
     it('dispatches a soft reset with target HEAD', async () => {
       render(<GitPane {...defaultProps} />);
-      await waitFor(() => expect(screen.getByTestId('git-danger-zone-toggle')).toBeInTheDocument());
-      fireEvent.click(screen.getByTestId('git-danger-zone-toggle'));
+      await openDangerZone();
       fireEvent.click(screen.getByTestId('git-danger-zone-reset-open'));
       fireEvent.click(screen.getByTestId('reset-mode-soft'));
       fireEvent.click(screen.getByTestId('reset-confirm-button'));
@@ -1307,8 +1364,7 @@ describe('GitPane', () => {
         },
       });
       render(<GitPane {...defaultProps} />);
-      await waitFor(() => expect(screen.getByTestId('git-danger-zone-toggle')).toBeInTheDocument());
-      fireEvent.click(screen.getByTestId('git-danger-zone-toggle'));
+      await openDangerZone();
       expect(screen.getByTestId('git-danger-zone-revert-open')).toBeDisabled();
 
       // Select a commit, then the revert open button becomes enabled.
@@ -1355,17 +1411,24 @@ describe('GitPane', () => {
           (call[1] as { method?: string } | undefined)?.method === method
       );
 
-    it('renders explicit Pull / Push / Fetch buttons', async () => {
+    it('renders core Pull / Push buttons and the Advanced Fetch button', async () => {
       render(<GitPane {...defaultProps} />);
       await waitFor(() => {
-        expect(screen.getByTestId('git-fetch-button')).toBeInTheDocument();
         expect(screen.getByTestId('git-pull-button')).toBeInTheDocument();
         expect(screen.getByTestId('git-push-button')).toBeInTheDocument();
+      });
+      // Issue #815: Fetch was demoted to the collapsed Advanced group.
+      expect(screen.queryByTestId('git-fetch-button')).not.toBeInTheDocument();
+      openAdvanced();
+      await waitFor(() => {
+        expect(screen.getByTestId('git-fetch-button')).toBeInTheDocument();
       });
     });
 
     it('POSTs /git/fetch when the Fetch button is clicked', async () => {
       render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
       await waitFor(() => expect(screen.getByTestId('git-fetch-button')).toBeInTheDocument());
       fireEvent.click(screen.getByTestId('git-fetch-button'));
       await waitFor(() => {
@@ -1495,6 +1558,9 @@ describe('GitPane', () => {
       });
 
       render(<GitPane {...defaultProps} />);
+      // Issue #815: Fetch lives under the collapsed Advanced group.
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
       await waitFor(() => expect(screen.getByTestId('git-fetch-button')).toBeInTheDocument());
 
       fireEvent.click(screen.getByTestId('git-fetch-button'));
@@ -1549,6 +1615,8 @@ describe('GitPane', () => {
 
     it('runs the cascade (re-fetch status + branches) after a fetch completes (§7.5)', async () => {
       render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
       await waitFor(() => expect(screen.getByTestId('git-fetch-button')).toBeInTheDocument());
 
       // GET reads in GitPane use fetch(url) with no `method`, so count without a
@@ -1611,12 +1679,21 @@ describe('GitPane', () => {
       );
     });
 
-    it('keeps the existing 5 section data-testids intact', async () => {
+    it('keeps the core section data-testids visible and gates the Advanced ones', async () => {
       render(<GitPane {...defaultProps} />);
+      // Core sections are always visible (Issue #815 2-tier design).
       await waitFor(() => {
         expect(screen.getByTestId('git-status-section')).toBeInTheDocument();
-        expect(screen.getByTestId('git-branches-section')).toBeInTheDocument();
+        expect(screen.getByTestId('git-network-section')).toBeInTheDocument();
         expect(screen.getByTestId('git-changes-section')).toBeInTheDocument();
+      });
+      // Advanced sections are hidden until the group is expanded.
+      expect(screen.queryByTestId('git-branches-section')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('git-stash-section')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('git-danger-zone-section')).not.toBeInTheDocument();
+      openAdvanced();
+      await waitFor(() => {
+        expect(screen.getByTestId('git-branches-section')).toBeInTheDocument();
         expect(screen.getByTestId('git-stash-section')).toBeInTheDocument();
         expect(screen.getByTestId('git-danger-zone-section')).toBeInTheDocument();
       });
@@ -1624,10 +1701,9 @@ describe('GitPane', () => {
 
     it('force-pushes via the Danger Zone with --force-with-lease by default (§7.3)', async () => {
       render(<GitPane {...defaultProps} />);
-      await waitFor(() => expect(screen.getByTestId('git-danger-zone-toggle')).toBeInTheDocument());
 
-      // Open the Danger Zone, then the Force Push modal.
-      fireEvent.click(screen.getByTestId('git-danger-zone-toggle'));
+      // Open Advanced + the Danger Zone, then the Force Push modal (Issue #815).
+      await openDangerZone();
       fireEvent.click(screen.getByTestId('git-force-push-open'));
       await waitFor(() => expect(screen.getByTestId('force-push-confirm')).toBeInTheDocument());
 
@@ -1646,8 +1722,7 @@ describe('GitPane', () => {
 
     it('force-pushes with a lease-less --force when the lease checkbox is unticked', async () => {
       render(<GitPane {...defaultProps} />);
-      await waitFor(() => expect(screen.getByTestId('git-danger-zone-toggle')).toBeInTheDocument());
-      fireEvent.click(screen.getByTestId('git-danger-zone-toggle'));
+      await openDangerZone();
       fireEvent.click(screen.getByTestId('git-force-push-open'));
       await waitFor(() => expect(screen.getByTestId('force-push-confirm')).toBeInTheDocument());
 
@@ -1660,6 +1735,815 @@ describe('GitPane', () => {
         expect(body.force).toBe(true);
         expect(body.forceWithLease).toBe(false);
       });
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Issue #815: 2-tier information design (core always-visible + Advanced)
+  // --------------------------------------------------------------------------
+  describe('2-tier information design (Issue #815)', () => {
+    const ADVANCED_KEY = 'commandmate:gitPane:advancedOpen';
+
+    it('shows only the core sections by default and hides the complex ops', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      // Core, always visible: Current Status / Quick actions (Pull+Push) /
+      // Changes / Commit History.
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-section')).toBeInTheDocument();
+        expect(screen.getByTestId('git-pull-button')).toBeInTheDocument();
+        expect(screen.getByTestId('git-push-button')).toBeInTheDocument();
+        expect(screen.getByTestId('git-changes-section')).toBeInTheDocument();
+        expect(screen.getByText('Commit History')).toBeInTheDocument();
+      });
+
+      // The "Advanced operations" header is present but collapsed by default, so
+      // none of Fetch / Branches / Stash / Danger Zone render.
+      expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument();
+      expect(screen.queryByTestId('git-fetch-button')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('git-branches-section')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('git-stash-section')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('git-danger-zone-section')).not.toBeInTheDocument();
+    });
+
+    it('expands Fetch / Branches / Stash / Danger Zone when Advanced is clicked', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+
+      openAdvanced();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('git-fetch-button')).toBeInTheDocument();
+        expect(screen.getByTestId('git-branches-section')).toBeInTheDocument();
+        expect(screen.getByTestId('git-stash-section')).toBeInTheDocument();
+        expect(screen.getByTestId('git-danger-zone-section')).toBeInTheDocument();
+      });
+    });
+
+    it('persists the Advanced open-state to localStorage on toggle', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+
+      // Default closed: nothing persisted yet.
+      expect(window.localStorage.getItem(ADVANCED_KEY)).not.toBe('true');
+
+      openAdvanced();
+      await waitFor(() => {
+        expect(window.localStorage.getItem(ADVANCED_KEY)).toBe('true');
+      });
+
+      // Toggling again persists the closed state.
+      openAdvanced();
+      await waitFor(() => {
+        expect(window.localStorage.getItem(ADVANCED_KEY)).toBe('false');
+      });
+    });
+
+    it('restores the expanded Advanced state from localStorage on mount', async () => {
+      window.localStorage.setItem(ADVANCED_KEY, 'true');
+
+      render(<GitPane {...defaultProps} />);
+
+      // Hydrated open on mount: the advanced sections render without a click.
+      await waitFor(() => {
+        expect(screen.getByTestId('git-branches-section')).toBeInTheDocument();
+        expect(screen.getByTestId('git-danger-zone-section')).toBeInTheDocument();
+      });
+    });
+
+    it('renders the core branch-checkout dropdown beside Quick actions', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      // The checkout dropdown is core (always visible), even while Advanced is
+      // collapsed. It enables once /git/branches has loaded.
+      const toggle = await screen.findByTestId('branch-checkout-dropdown-toggle');
+      await waitFor(() => expect(toggle).not.toBeDisabled());
+
+      // Branches section (its old home) is still collapsed under Advanced.
+      expect(screen.queryByTestId('git-branches-section')).not.toBeInTheDocument();
+
+      fireEvent.click(toggle);
+      await waitFor(() => {
+        expect(screen.getByLabelText('Checkout main')).toBeInTheDocument();
+      });
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Issue #816: UX Phase 2 — action shortcuts
+  //   A. Changes "Commit + Push" compound button
+  //   B. Commit History inline "View diff" accordion
+  //   C. Changes unstaged-diff inline preview caret
+  // --------------------------------------------------------------------------
+  describe('UX Phase 2 action shortcuts (Issue #816)', () => {
+    const STAGED_PAYLOAD = {
+      staged: [{ path: 'src/staged.ts', status: 'modified' }],
+      unstaged: [{ path: 'src/unstaged.ts', status: 'modified' }],
+      untracked: [{ path: 'src/new.ts', status: 'untracked' }],
+    };
+
+    const findCall = (path: string, method = 'POST') =>
+      mockFetch.mock.calls.find(
+        (call) =>
+          typeof call[0] === 'string' &&
+          call[0].includes(path) &&
+          (call[1] as { method?: string } | undefined)?.method === method
+      );
+
+    // ------------------------------------------------------------------ A
+    describe('A. Commit + Push compound button', () => {
+      it('renders a "Commit + Push" button beside the Commit button', async () => {
+        setEndpoints({ staged: { ok: true, json: STAGED_PAYLOAD } });
+        render(<GitPane {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-push-button')).toBeInTheDocument();
+        });
+        // Existing single Commit button is preserved.
+        expect(screen.getByTestId('git-commit-button')).toBeInTheDocument();
+      });
+
+      it('disables Commit + Push when the message is empty', async () => {
+        setEndpoints({ staged: { ok: true, json: STAGED_PAYLOAD } });
+        render(<GitPane {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-push-button')).toBeInTheDocument();
+        });
+        expect(screen.getByTestId('git-commit-push-button')).toBeDisabled();
+      });
+
+      it('POSTs /git/commit then /git/push in sequence on click', async () => {
+        setEndpoints({ staged: { ok: true, json: STAGED_PAYLOAD } });
+        render(<GitPane {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-message')).toBeInTheDocument();
+        });
+
+        fireEvent.change(screen.getByTestId('git-commit-message'), {
+          target: { value: 'feat: ship it' },
+        });
+        fireEvent.click(screen.getByTestId('git-commit-push-button'));
+
+        await waitFor(() => {
+          expect(findCall('/git/commit')).toBeTruthy();
+          expect(findCall('/git/push')).toBeTruthy();
+        });
+
+        // The commit must precede the push (commit succeeds before pushing).
+        const urls = mockFetch.mock.calls
+          .filter((c) => typeof c[0] === 'string')
+          .map((c) => c[0] as string);
+        const commitIdx = urls.findIndex((u) => u.includes('/git/commit'));
+        const pushIdx = urls.findIndex((u) => u.includes('/git/push'));
+        expect(commitIdx).toBeGreaterThanOrEqual(0);
+        expect(pushIdx).toBeGreaterThan(commitIdx);
+      });
+
+      it('does NOT push when the commit fails', async () => {
+        setEndpoints({
+          staged: { ok: true, json: STAGED_PAYLOAD },
+          commit: { ok: false, json: { error: 'No staged changes to commit' } },
+        });
+        render(<GitPane {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-message')).toBeInTheDocument();
+        });
+
+        fireEvent.change(screen.getByTestId('git-commit-message'), {
+          target: { value: 'feat: nope' },
+        });
+        fireEvent.click(screen.getByTestId('git-commit-push-button'));
+
+        // The commit error surfaces and no push is attempted.
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-error')).toHaveTextContent(
+            'No staged changes to commit'
+          );
+        });
+        expect(findCall('/git/push')).toBeFalsy();
+      });
+    });
+
+    // ------------------------------------------------------------------ B
+    describe('B. Commit History inline View diff', () => {
+      const LOG_PAYLOAD = {
+        commits: [
+          { hash: 'abc1234', shortHash: 'abc1234', message: 'feat: one', author: 'a', date: '2026-01-01' },
+        ],
+      };
+      const SHOW_PAYLOAD = {
+        commit: { hash: 'abc1234', shortHash: 'abc1234', message: 'feat: one', author: 'a', date: '2026-01-01' },
+        files: [{ path: 'src/inline.ts', status: 'modified' }],
+      };
+
+      it('renders a "View diff" button on each commit row', async () => {
+        setEndpoints({ log: { ok: true, json: LOG_PAYLOAD } });
+        render(<GitPane {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-view-diff-button')).toBeInTheDocument();
+        });
+        expect(screen.getByLabelText('View diff for abc1234')).toBeInTheDocument();
+      });
+
+      it('expands an inline accordion file list (GET /git/show) on click', async () => {
+        setEndpoints({
+          log: { ok: true, json: LOG_PAYLOAD },
+          show: { ok: true, json: SHOW_PAYLOAD },
+        });
+        render(<GitPane {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-view-diff-button')).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByTestId('git-commit-view-diff-button'));
+
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-inline-files')).toBeInTheDocument();
+          expect(screen.getByLabelText('Show commit diff for src/inline.ts')).toBeInTheDocument();
+        });
+
+        const showCall = mockFetch.mock.calls.find(
+          (call) => typeof call[0] === 'string' && (call[0] as string).includes('/git/show/abc1234')
+        );
+        expect(showCall).toBeTruthy();
+      });
+
+      it('collapses the inline accordion when View diff is clicked again', async () => {
+        setEndpoints({
+          log: { ok: true, json: LOG_PAYLOAD },
+          show: { ok: true, json: SHOW_PAYLOAD },
+        });
+        render(<GitPane {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-view-diff-button')).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByTestId('git-commit-view-diff-button'));
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-inline-files')).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByTestId('git-commit-view-diff-button'));
+        await waitFor(() => {
+          expect(screen.queryByTestId('git-commit-inline-files')).not.toBeInTheDocument();
+        });
+      });
+
+      it('routes an inline file click through onDiffSelect (the existing diff path)', async () => {
+        const onDiffSelect = vi.fn();
+        setEndpoints({
+          log: { ok: true, json: LOG_PAYLOAD },
+          show: { ok: true, json: SHOW_PAYLOAD },
+          diff: { ok: true, json: { diff: 'diff --git a/inline b/inline\n+x' } },
+        });
+        render(<GitPane {...defaultProps} onDiffSelect={onDiffSelect} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('git-commit-view-diff-button')).toBeInTheDocument();
+        });
+        fireEvent.click(screen.getByTestId('git-commit-view-diff-button'));
+
+        await waitFor(() => {
+          expect(screen.getByLabelText('Show commit diff for src/inline.ts')).toBeInTheDocument();
+        });
+        fireEvent.click(screen.getByLabelText('Show commit diff for src/inline.ts'));
+
+        await waitFor(() => {
+          expect(onDiffSelect).toHaveBeenCalledWith('diff --git a/inline b/inline\n+x', 'src/inline.ts');
+        });
+      });
+
+      it('keeps the existing commit-select detail path (backwards compat)', async () => {
+        setEndpoints({
+          log: { ok: true, json: LOG_PAYLOAD },
+          show: { ok: true, json: SHOW_PAYLOAD },
+        });
+        render(<GitPane {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByText('feat: one')).toBeInTheDocument();
+        });
+
+        // Clicking the commit row (not the View diff button) still opens the
+        // lower Changed Files detail section.
+        fireEvent.click(screen.getByText('feat: one'));
+        await waitFor(() => {
+          expect(screen.getByText('Changed Files')).toBeInTheDocument();
+        });
+      });
+    });
+
+    // ------------------------------------------------------------------ C
+    describe('C. Changes unstaged-diff inline preview', () => {
+      // 27-line diff so the 20-line preview truncates.
+      const PREVIEW_DIFF = [
+        'diff --git a/src/unstaged.ts b/src/unstaged.ts',
+        '@@ -1 +1 @@',
+        ...Array.from({ length: 25 }, (_, i) => `+L${i + 1}`),
+      ].join('\n');
+
+      it('renders an expand caret on each changed-file row', async () => {
+        setEndpoints({ staged: { ok: true, json: STAGED_PAYLOAD } });
+        render(<GitPane {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(
+            screen.getByLabelText('Toggle diff preview for src/unstaged.ts')
+          ).toBeInTheDocument();
+        });
+      });
+
+      it('fetches /git/working-diff and shows the first 20 lines inline on caret click', async () => {
+        setEndpoints({
+          staged: { ok: true, json: STAGED_PAYLOAD },
+          workingDiff: { ok: true, json: { diff: PREVIEW_DIFF } },
+        });
+        render(<GitPane {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(
+            screen.getByLabelText('Toggle diff preview for src/unstaged.ts')
+          ).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByLabelText('Toggle diff preview for src/unstaged.ts'));
+
+        await waitFor(() => {
+          expect(screen.getByTestId('git-changes-inline-preview')).toBeInTheDocument();
+        });
+
+        // working-diff requested with mode=unstaged for this list.
+        const wdCall = mockFetch.mock.calls.find(
+          (call) => typeof call[0] === 'string' && (call[0] as string).includes('/git/working-diff')
+        );
+        expect(wdCall).toBeTruthy();
+        expect(wdCall![0] as string).toContain('mode=unstaged');
+
+        // First lines are shown; lines past the 20-line cap are not.
+        expect(screen.getByText('+L1')).toBeInTheDocument();
+        expect(screen.queryByText('+L19')).not.toBeInTheDocument();
+        // A "open full diff" affordance is offered when truncated.
+        expect(screen.getByTestId('git-changes-preview-more')).toBeInTheDocument();
+      });
+
+      it('collapses the preview when the caret is clicked again', async () => {
+        setEndpoints({
+          staged: { ok: true, json: STAGED_PAYLOAD },
+          workingDiff: { ok: true, json: { diff: PREVIEW_DIFF } },
+        });
+        render(<GitPane {...defaultProps} />);
+
+        const caretLabel = 'Toggle diff preview for src/unstaged.ts';
+        await waitFor(() => expect(screen.getByLabelText(caretLabel)).toBeInTheDocument());
+
+        fireEvent.click(screen.getByLabelText(caretLabel));
+        await waitFor(() => {
+          expect(screen.getByTestId('git-changes-inline-preview')).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByLabelText(caretLabel));
+        await waitFor(() => {
+          expect(screen.queryByTestId('git-changes-inline-preview')).not.toBeInTheDocument();
+        });
+      });
+
+      it('preserves the existing full-diff "Diff" button (onDiffSelect)', async () => {
+        const onDiffSelect = vi.fn();
+        setEndpoints({
+          staged: { ok: true, json: STAGED_PAYLOAD },
+          workingDiff: { ok: true, json: { diff: PREVIEW_DIFF } },
+        });
+        render(<GitPane {...defaultProps} onDiffSelect={onDiffSelect} />);
+
+        await waitFor(() => {
+          expect(screen.getByLabelText('Show diff for src/unstaged.ts')).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByLabelText('Show diff for src/unstaged.ts'));
+        await waitFor(() => {
+          expect(onDiffSelect).toHaveBeenCalledWith(PREVIEW_DIFF, 'src/unstaged.ts');
+        });
+      });
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Issue #817: "Ask AI" buttons pre-populate the composer (no auto-send)
+  // --------------------------------------------------------------------------
+  describe("'Ask AI' buttons (Issue #817)", () => {
+    /** True if any fetch call hit `path` (optionally with the given method). */
+    function postedTo(path: string, method = 'POST') {
+      return mockFetch.mock.calls.some(
+        (call) =>
+          typeof call[0] === 'string' &&
+          (call[0] as string).includes(path) &&
+          ((call[1] as { method?: string } | undefined)?.method ?? 'GET') === method
+      );
+    }
+
+    it('drafts a create+checkout prompt into the composer and closes the modal (no POST)', async () => {
+      const onInsertToMessage = vi.fn();
+      render(<GitPane {...defaultProps} onInsertToMessage={onInsertToMessage} />);
+
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
+      await waitFor(() => expect(screen.getByTestId('git-branch-create-open')).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('git-branch-create-open'));
+      await waitFor(() => expect(screen.getByTestId('branch-create-name-input')).toBeInTheDocument());
+
+      fireEvent.change(screen.getByTestId('branch-create-name-input'), {
+        target: { value: 'feature/created' },
+      });
+      fireEvent.click(screen.getByTestId('branch-create-ask-ai'));
+
+      expect(onInsertToMessage).toHaveBeenCalledTimes(1);
+      expect(onInsertToMessage).toHaveBeenCalledWith(branchCreatePrompt('feature/created', ''));
+      // Modal closed; the create API was NOT called (delegated to the agent).
+      expect(screen.queryByTestId('branch-create-name-input')).not.toBeInTheDocument();
+      expect(postedTo('/git/branch/create')).toBe(false);
+    });
+
+    it('disables the create Ask AI button until a branch name is entered', async () => {
+      const onInsertToMessage = vi.fn();
+      render(<GitPane {...defaultProps} onInsertToMessage={onInsertToMessage} />);
+
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
+      fireEvent.click(screen.getByTestId('git-branch-create-open'));
+      await waitFor(() => expect(screen.getByTestId('branch-create-ask-ai')).toBeInTheDocument());
+
+      expect(screen.getByTestId('branch-create-ask-ai')).toBeDisabled();
+      fireEvent.change(screen.getByTestId('branch-create-name-input'), {
+        target: { value: 'feature/y' },
+      });
+      expect(screen.getByTestId('branch-create-ask-ai')).not.toBeDisabled();
+    });
+
+    it('drafts a delete prompt into the composer and closes the modal (no POST)', async () => {
+      const onInsertToMessage = vi.fn();
+      setEndpoints({
+        branches: {
+          ok: true,
+          json: {
+            branches: [
+              {
+                name: 'feature/old',
+                isCurrent: false,
+                isRemote: false,
+                isDefault: false,
+                upstream: null,
+                aheadBehind: null,
+                checkedOutWorktreePath: null,
+              },
+            ],
+          },
+        },
+      });
+      render(<GitPane {...defaultProps} onInsertToMessage={onInsertToMessage} />);
+
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
+      await waitFor(() => expect(screen.getByLabelText('Delete feature/old')).toBeInTheDocument());
+      fireEvent.click(screen.getByLabelText('Delete feature/old'));
+      await waitFor(() => expect(screen.getByTestId('branch-delete-ask-ai')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('branch-delete-ask-ai'));
+
+      expect(onInsertToMessage).toHaveBeenCalledWith(branchDeletePrompt('feature/old', false));
+      expect(screen.queryByTestId('branch-delete-ask-ai')).not.toBeInTheDocument();
+      expect(postedTo('/git/branch/delete')).toBe(false);
+    });
+
+    it('drafts a stash cleanup prompt listing the current stashes', async () => {
+      const onInsertToMessage = vi.fn();
+      setEndpoints({
+        stash: {
+          ok: true,
+          json: {
+            stashes: [{ index: 0, message: 'WIP on main: a', branch: 'main', date: '2026-01-01', sha: 'sha0' }],
+          },
+        },
+      });
+      render(<GitPane {...defaultProps} onInsertToMessage={onInsertToMessage} />);
+
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
+      await waitFor(() => expect(screen.getByTestId('stash-cleanup-ask-ai')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('stash-cleanup-ask-ai'));
+
+      expect(onInsertToMessage).toHaveBeenCalledTimes(1);
+      const inserted = onInsertToMessage.mock.calls[0][0] as string;
+      expect(inserted).toContain('古い stash entry');
+      expect(inserted).toContain('stash@{0}: WIP on main: a');
+    });
+
+    it('hides the stash cleanup Ask AI button when there are no stashes', async () => {
+      const onInsertToMessage = vi.fn();
+      render(<GitPane {...defaultProps} onInsertToMessage={onInsertToMessage} />);
+
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
+      await waitFor(() => expect(screen.getByTestId('git-stash-section')).toBeInTheDocument());
+      expect(screen.queryByTestId('stash-cleanup-ask-ai')).not.toBeInTheDocument();
+    });
+
+    it('offers a conflict-resolution Ask AI prompt after a stash pop conflict', async () => {
+      const onInsertToMessage = vi.fn();
+      setEndpoints({
+        stash: {
+          ok: true,
+          json: {
+            stashes: [{ index: 0, message: 'WIP on main: a', branch: 'main', date: '2026-01-01', sha: 'sha0' }],
+          },
+        },
+        stashPop: {
+          ok: true,
+          json: { success: true, conflict: true, conflictFiles: ['a.ts'], stashRetained: true },
+        },
+      });
+      render(<GitPane {...defaultProps} onInsertToMessage={onInsertToMessage} />);
+
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      openAdvanced();
+      await waitFor(() => expect(screen.getByTestId('stash-pop-button')).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('stash-pop-button'));
+      await waitFor(() => expect(screen.getByTestId('stash-conflict-ask-ai')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('stash-conflict-ask-ai'));
+
+      const inserted = onInsertToMessage.mock.calls[0][0] as string;
+      expect(inserted).toContain('conflict を解決してから commit してください。');
+      expect(inserted).toContain('a.ts');
+    });
+
+    it('drafts a reset prompt and closes the Reset modal (no POST)', async () => {
+      const onInsertToMessage = vi.fn();
+      render(<GitPane {...defaultProps} onInsertToMessage={onInsertToMessage} />);
+
+      await openDangerZone();
+      fireEvent.click(screen.getByTestId('git-danger-zone-reset-open'));
+      await waitFor(() => expect(screen.getByTestId('reset-ask-ai')).toBeInTheDocument());
+
+      // Default target HEAD + mixed mode.
+      fireEvent.click(screen.getByTestId('reset-ask-ai'));
+
+      expect(onInsertToMessage).toHaveBeenCalledWith(resetPrompt('mixed', 'HEAD'));
+      expect(screen.queryByTestId('reset-confirm')).not.toBeInTheDocument();
+      expect(postedTo('/git/reset')).toBe(false);
+    });
+
+    it('includes a git reflog recovery note for a hard reset Ask AI prompt', async () => {
+      const onInsertToMessage = vi.fn();
+      render(<GitPane {...defaultProps} onInsertToMessage={onInsertToMessage} />);
+
+      await openDangerZone();
+      fireEvent.click(screen.getByTestId('git-danger-zone-reset-open'));
+      await waitFor(() => expect(screen.getByTestId('reset-mode-hard')).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('reset-mode-hard'));
+      // Ask AI is not gated by the hard-confirm branch input (only the real Reset is).
+      fireEvent.click(screen.getByTestId('reset-ask-ai'));
+
+      const inserted = onInsertToMessage.mock.calls[0][0] as string;
+      expect(inserted).toContain('git reflog から復旧');
+      expect(postedTo('/git/reset')).toBe(false);
+    });
+
+    it('drafts a revert prompt for the selected commit', async () => {
+      const onInsertToMessage = vi.fn();
+      setEndpoints({
+        log: {
+          ok: true,
+          json: {
+            commits: [
+              { hash: 'abc1234def', shortHash: 'abc1234', message: 'pick me', author: 'a', date: '2026-01-01' },
+            ],
+          },
+        },
+      });
+      render(<GitPane {...defaultProps} onInsertToMessage={onInsertToMessage} />);
+
+      await waitFor(() => expect(screen.getByText('pick me')).toBeInTheDocument());
+      fireEvent.click(screen.getByText('pick me')); // select the commit
+
+      await openDangerZone();
+      await waitFor(() => expect(screen.getByTestId('git-danger-zone-revert-open')).not.toBeDisabled());
+      fireEvent.click(screen.getByTestId('git-danger-zone-revert-open'));
+      await waitFor(() => expect(screen.getByTestId('revert-ask-ai')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('revert-ask-ai'));
+
+      expect(onInsertToMessage).toHaveBeenCalledWith(revertPrompt('abc1234def'));
+      expect(postedTo('/git/revert')).toBe(false);
+    });
+
+    it('drafts a force-push prompt and closes the modal (no POST)', async () => {
+      const onInsertToMessage = vi.fn();
+      render(<GitPane {...defaultProps} onInsertToMessage={onInsertToMessage} />);
+
+      await openDangerZone();
+      fireEvent.click(screen.getByTestId('git-force-push-open'));
+      await waitFor(() => expect(screen.getByTestId('force-push-ask-ai')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('force-push-ask-ai'));
+
+      const inserted = onInsertToMessage.mock.calls[0][0] as string;
+      expect(inserted).toContain('force-with-lease');
+      // DEFAULT_STATUS.currentBranch is 'feature/test'.
+      expect(inserted).toContain('feature/test');
+      expect(screen.queryByTestId('force-push-confirm')).not.toBeInTheDocument();
+      expect(postedTo('/git/push')).toBe(false);
+    });
+
+    it('hides every Ask AI button when no onInsertToMessage handler is wired', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      await openDangerZone();
+      fireEvent.click(screen.getByTestId('git-danger-zone-reset-open'));
+      await waitFor(() => expect(screen.getByTestId('reset-confirm')).toBeInTheDocument());
+      expect(screen.queryByTestId('reset-ask-ai')).not.toBeInTheDocument();
+
+      // Branch create modal also has no Ask AI affordance.
+      fireEvent.click(screen.getByTestId('git-branch-create-open'));
+      await waitFor(() => expect(screen.getByTestId('branch-create-name-input')).toBeInTheDocument());
+      expect(screen.queryByTestId('branch-create-ask-ai')).not.toBeInTheDocument();
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Issue #818: mobile tab UI + desktop visual grouping + persistence
+  // --------------------------------------------------------------------------
+  describe('Mobile tab UI (Issue #818 A)', () => {
+    const COMMITS = {
+      ok: true,
+      json: {
+        commits: [
+          { hash: 'abc1234', shortHash: 'abc1234', message: 'feat: add feature', author: 'A', date: '2026-03-08T00:00:00Z' },
+        ],
+      },
+    };
+
+    it('renders the 4-tab strip on mobile and defaults to the Status tab', async () => {
+      render(<GitPane {...defaultProps} isMobile />);
+
+      await waitFor(() => expect(screen.getByTestId('git-pane-mobile-tabs')).toBeInTheDocument());
+      expect(screen.getByTestId('git-tab-status')).toBeInTheDocument();
+      expect(screen.getByTestId('git-tab-changes')).toBeInTheDocument();
+      expect(screen.getByTestId('git-tab-history')).toBeInTheDocument();
+      expect(screen.getByTestId('git-tab-advanced')).toBeInTheDocument();
+
+      // Status tab pairs Current Status with Quick actions.
+      expect(screen.getByTestId('git-status-section')).toBeInTheDocument();
+      expect(screen.getByTestId('git-network-section')).toBeInTheDocument();
+      expect(screen.getByTestId('git-pane-mobile-panel')).toHaveAttribute('data-active-tab', 'status');
+    });
+
+    it('mounts only the active tab group (non-active groups unmount)', async () => {
+      render(<GitPane {...defaultProps} isMobile />);
+
+      await waitFor(() => expect(screen.getByTestId('git-status-section')).toBeInTheDocument());
+      // Changes / Advanced groups are NOT in the DOM while Status is active.
+      expect(screen.queryByTestId('git-changes-section')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('git-advanced-section')).not.toBeInTheDocument();
+    });
+
+    it('switches to the Changes tab and unmounts the Status group', async () => {
+      render(<GitPane {...defaultProps} isMobile />);
+      await waitFor(() => expect(screen.getByTestId('git-status-section')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('git-tab-changes'));
+
+      await waitFor(() => expect(screen.getByTestId('git-changes-section')).toBeInTheDocument());
+      expect(screen.queryByTestId('git-status-section')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('git-network-section')).not.toBeInTheDocument();
+    });
+
+    it('shows the commit history on the History tab', async () => {
+      setEndpoints({ log: COMMITS });
+      render(<GitPane {...defaultProps} isMobile />);
+      await waitFor(() => expect(screen.getByTestId('git-tab-history')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('git-tab-history'));
+
+      await waitFor(() => expect(screen.getByText('feat: add feature')).toBeInTheDocument());
+      expect(screen.queryByTestId('git-status-section')).not.toBeInTheDocument();
+    });
+
+    it('shows the Advanced operations on the Advanced tab', async () => {
+      render(<GitPane {...defaultProps} isMobile />);
+      await waitFor(() => expect(screen.getByTestId('git-tab-advanced')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('git-tab-advanced'));
+
+      await waitFor(() => expect(screen.getByTestId('git-advanced-section')).toBeInTheDocument());
+      // Advanced group is already expanded as its own panel content.
+      expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument();
+    });
+
+    it('persists the last active tab and restores it on remount', async () => {
+      const { unmount } = render(<GitPane {...defaultProps} isMobile />);
+      await waitFor(() => expect(screen.getByTestId('git-tab-changes')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByTestId('git-tab-changes'));
+      await waitFor(() =>
+        expect(screen.getByTestId('git-pane-mobile-panel')).toHaveAttribute('data-active-tab', 'changes')
+      );
+      unmount();
+
+      render(<GitPane {...defaultProps} isMobile />);
+      await waitFor(() =>
+        expect(screen.getByTestId('git-pane-mobile-panel')).toHaveAttribute('data-active-tab', 'changes')
+      );
+    });
+
+    it('does not render the mobile tab strip on desktop', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-pane-desktop')).toBeInTheDocument());
+      expect(screen.queryByTestId('git-pane-mobile-tabs')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Desktop visual grouping (Issue #818 B)', () => {
+    it('separates the pane into read / write / advanced groups', async () => {
+      render(<GitPane {...defaultProps} />);
+
+      await waitFor(() => expect(screen.getByTestId('git-group-read')).toBeInTheDocument());
+      expect(screen.getByTestId('git-group-write')).toBeInTheDocument();
+      expect(screen.getByTestId('git-group-history')).toHaveAttribute('data-git-group', 'read');
+      expect(screen.getByTestId('git-group-advanced')).toBeInTheDocument();
+
+      // The three categories are present (read appears for both status + history).
+      const groups = screen.getAllByTestId(/^git-group-/);
+      const categories = new Set(groups.map((el) => el.getAttribute('data-git-group')));
+      expect(categories).toEqual(new Set(['read', 'write', 'advanced']));
+    });
+
+    it('gives the Advanced group a visual divider border', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-group-advanced')).toBeInTheDocument());
+      expect(screen.getByTestId('git-group-advanced').className).toMatch(/border/);
+    });
+
+    it('keeps every core section visible on desktop (no tab gating)', async () => {
+      render(<GitPane {...defaultProps} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('git-status-section')).toBeInTheDocument();
+        expect(screen.getByTestId('git-network-section')).toBeInTheDocument();
+        expect(screen.getByTestId('git-changes-section')).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('Collapse persistence (Issue #818 C)', () => {
+    const COMMITS = {
+      ok: true,
+      json: {
+        commits: [
+          { hash: 'abc1234', shortHash: 'abc1234', message: 'feat: add feature', author: 'A', date: '2026-03-08T00:00:00Z' },
+        ],
+      },
+    };
+
+    it('persists the collapsed Commit History state across remounts', async () => {
+      setEndpoints({ log: COMMITS });
+      const { unmount } = render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByText('feat: add feature')).toBeInTheDocument());
+
+      // Collapse via the Commit History toggle header.
+      fireEvent.click(screen.getByText('Commit History'));
+      await waitFor(() => expect(screen.queryByText('feat: add feature')).not.toBeInTheDocument());
+      // Collapsed state is persisted under the consolidated key.
+      expect(window.localStorage.getItem('commandmate:gitPane:historyOpen')).toBe('false');
+      unmount();
+
+      setEndpoints({ log: COMMITS });
+      render(<GitPane {...defaultProps} />);
+      // Restored collapsed: the toggle arrow flips to the collapsed indicator.
+      await waitFor(() =>
+        expect(screen.getByText('Commit History').textContent).toContain('▶')
+      );
+      expect(screen.queryByText('feat: add feature')).not.toBeInTheDocument();
+    });
+
+    it('persists the Advanced open state across remounts (Phase 1 key reused)', async () => {
+      const { unmount } = render(<GitPane {...defaultProps} />);
+      await waitFor(() => expect(screen.getByTestId('git-advanced-toggle')).toBeInTheDocument());
+      // Default collapsed → Fetch button hidden.
+      expect(screen.queryByTestId('git-fetch-button')).not.toBeInTheDocument();
+
+      openAdvanced();
+      await waitFor(() => expect(screen.getByTestId('git-fetch-button')).toBeInTheDocument());
+      unmount();
+
+      render(<GitPane {...defaultProps} />);
+      // Restored expanded from localStorage.
+      await waitFor(() => expect(screen.getByTestId('git-fetch-button')).toBeInTheDocument());
     });
   });
 });
