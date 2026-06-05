@@ -12,6 +12,9 @@
 
 import React, { useState, useEffect, useCallback, memo } from 'react';
 import { useTranslations } from 'next-intl';
+import { ScheduleEditDialog, type ScheduleFormValues } from '@/components/worktree/schedules/ScheduleEditDialog';
+import { parseCmateContent } from '@/lib/cmate-validator';
+import { parseCliToolColumn } from '@/lib/cmate-cli-tool-parser';
 
 // ============================================================================
 // Types
@@ -123,6 +126,11 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [logDetail, setLogDetail] = useState<ExecutionLogDetail | null>(null);
 
+  // Schedule edit dialog state (Issue #824)
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogInitial, setDialogInitial] = useState<Partial<ScheduleFormValues> | undefined>(undefined);
+  const [dialogOriginalName, setDialogOriginalName] = useState<string | undefined>(undefined);
+
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -180,6 +188,104 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
     }
   }, [worktreeId, expandedLogId]);
 
+  // --------------------------------------------------------------------------
+  // Schedule edit/create/delete/toggle (Issue #824, CMATE.md write-only sync)
+  // --------------------------------------------------------------------------
+
+  /**
+   * Read the worktree's CMATE.md and build full form values for a schedule by
+   * name. CMATE.md is the source of truth for permission/model, which the DB
+   * schedule list does not carry. Returns null when unavailable.
+   */
+  const buildInitialFromCmate = useCallback(
+    async (name: string): Promise<Partial<ScheduleFormValues> | null> => {
+      try {
+        const res = await fetch(`/api/worktrees/${worktreeId}/files/CMATE.md`);
+        if (!res.ok) return null;
+        const data = await res.json();
+        const content: string = typeof data.content === 'string' ? data.content : '';
+        const rows = parseCmateContent(content).get('Schedules') ?? [];
+        const row = rows.find((r) => (r[0] ?? '').trim() === name);
+        if (!row) return null;
+        const parsedTool = parseCliToolColumn(row[3] ?? 'claude');
+        const enabledStr = (row[4] ?? 'true').trim().toLowerCase();
+        return {
+          name,
+          cronExpression: (row[1] ?? '').trim(),
+          message: (row[2] ?? '').trim(),
+          cliToolId: parsedTool.cliToolId || 'claude',
+          enabled: enabledStr === '' || enabledStr === 'true',
+          permission: (row[5] ?? '').trim(),
+          model: parsedTool.model ?? '',
+        };
+      } catch {
+        return null;
+      }
+    },
+    [worktreeId],
+  );
+
+  const handleNewSchedule = useCallback(() => {
+    setDialogOriginalName(undefined);
+    setDialogInitial(undefined);
+    setDialogOpen(true);
+  }, []);
+
+  const handleEditSchedule = useCallback(
+    async (schedule: Schedule) => {
+      const built = await buildInitialFromCmate(schedule.name);
+      setDialogOriginalName(schedule.name);
+      setDialogInitial(
+        built ?? {
+          name: schedule.name,
+          cronExpression: schedule.cron_expression,
+          message: schedule.message,
+          cliToolId: schedule.cli_tool_id,
+          enabled: schedule.enabled === 1,
+          permission: '',
+          model: '',
+        },
+      );
+      setDialogOpen(true);
+    },
+    [buildInitialFromCmate],
+  );
+
+  const handleDeleteSchedule = useCallback(
+    async (name: string) => {
+      if (typeof window !== 'undefined' && !window.confirm(t('edit.confirmDelete', { name }))) {
+        return;
+      }
+      try {
+        const res = await fetch(`/api/worktrees/${worktreeId}/cmate/schedules`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+        if (res.ok) await fetchData();
+      } catch (err) {
+        console.error('Failed to delete schedule:', err);
+      }
+    },
+    [worktreeId, t, fetchData],
+  );
+
+  const handleToggleSchedule = useCallback(
+    async (schedule: Schedule) => {
+      try {
+        const res = await fetch(`/api/worktrees/${worktreeId}/cmate/schedules`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: schedule.name, enabled: schedule.enabled !== 1 }),
+        });
+        if (res.ok) await fetchData();
+      } catch (err) {
+        console.error('Failed to toggle schedule:', err);
+      }
+    },
+    [worktreeId, fetchData],
+  );
+
   if (isLoading) {
     return (
       <div className={`flex items-center justify-center h-full p-4 ${className}`}>
@@ -212,7 +318,17 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
     <div className={`flex flex-col gap-4 p-4 overflow-y-auto ${className}`}>
       {/* Schedules Section */}
       <div>
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">{t('title')} ({schedules.length})</h3>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">{t('title')} ({schedules.length})</h3>
+          <button
+            type="button"
+            data-testid="schedule-new-button"
+            onClick={handleNewSchedule}
+            className="px-2 py-1 text-xs font-medium text-white bg-cyan-600 hover:bg-cyan-700 rounded transition-colors whitespace-nowrap"
+          >
+            + {t('edit.newSchedule')}
+          </button>
+        </div>
         <div className="mb-3 rounded border border-cyan-100 bg-cyan-50/60 p-3 dark:border-cyan-900/40 dark:bg-cyan-950/20">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-sm font-semibold text-cyan-900 dark:text-cyan-200">
@@ -282,6 +398,32 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
                     <span className="ml-3">{t('lastRun')}: {formatTimestamp(schedule.last_executed_at)}</span>
                   )}
                 </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    data-testid={`schedule-edit-${schedule.name}`}
+                    onClick={() => void handleEditSchedule(schedule)}
+                    className="px-2 py-1 text-xs text-cyan-600 dark:text-cyan-400 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded transition-colors"
+                  >
+                    {t('edit.edit')}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid={`schedule-toggle-${schedule.name}`}
+                    onClick={() => void handleToggleSchedule(schedule)}
+                    className="px-2 py-1 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
+                  >
+                    {schedule.enabled ? t('edit.disable') : t('edit.enable')}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid={`schedule-delete-${schedule.name}`}
+                    onClick={() => void handleDeleteSchedule(schedule.name)}
+                    className="px-2 py-1 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
+                  >
+                    {t('edit.delete')}
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -338,6 +480,15 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
           </div>
         )}
       </div>
+
+      <ScheduleEditDialog
+        isOpen={dialogOpen}
+        worktreeId={worktreeId}
+        initialValues={dialogInitial}
+        originalName={dialogOriginalName}
+        onClose={() => setDialogOpen(false)}
+        onSaved={() => { void fetchData(); }}
+      />
     </div>
   );
 });
