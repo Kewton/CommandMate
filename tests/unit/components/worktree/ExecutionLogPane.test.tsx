@@ -166,4 +166,27 @@ describe('ExecutionLogPane (Issue #826)', () => {
       });
     });
   });
+
+  describe('Ask AI forwarding (Issue #827)', () => {
+    it('forwards onInsertToMessage to the dialog so its Ask AI buttons render', async () => {
+      setupFetch({ schedules: [] });
+      render(<ExecutionLogPane worktreeId="wt-1" onInsertToMessage={vi.fn()} />);
+
+      fireEvent.click(await screen.findByTestId('schedule-empty-cta'));
+
+      expect(await screen.findByTestId('schedule-cron-ask-ai')).toBeDefined();
+      expect(screen.getByTestId('schedule-message-ask-ai')).toBeDefined();
+    });
+
+    it('omits the Ask AI buttons when onInsertToMessage is not wired', async () => {
+      setupFetch({ schedules: [] });
+      render(<ExecutionLogPane worktreeId="wt-1" />);
+
+      fireEvent.click(await screen.findByTestId('schedule-empty-cta'));
+
+      expect(await screen.findByTestId('schedule-name-input')).toBeDefined();
+      expect(screen.queryByTestId('schedule-cron-ask-ai')).toBeNull();
+      expect(screen.queryByTestId('schedule-message-ask-ai')).toBeNull();
+    });
+  });
 });

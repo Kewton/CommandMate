@@ -55,6 +55,12 @@ type ScheduleTab = 'schedules' | 'logs';
 export interface ExecutionLogPaneProps {
   worktreeId: string;
   className?: string;
+  /**
+   * Issue #827: forwarded to ScheduleEditDialog so its "Ask AI" buttons can
+   * draft a cron / message prompt into the active CLI tab's composer. Optional —
+   * when omitted the buttons are hidden (graceful degradation).
+   */
+  onInsertToMessage?: (text: string) => void;
 }
 
 // ============================================================================
@@ -84,6 +90,7 @@ function DeleteIcon() {
 export const ExecutionLogPane = memo(function ExecutionLogPane({
   worktreeId,
   className = '',
+  onInsertToMessage,
 }: ExecutionLogPaneProps) {
   const t = useTranslations('schedule');
   const [logs, setLogs] = useState<ExecutionLog[]>([]);
@@ -477,6 +484,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
         worktreeId={worktreeId}
         initialValues={dialogInitial}
         originalName={dialogOriginalName}
+        onInsertToMessage={onInsertToMessage}
         onClose={() => setDialogOpen(false)}
         onSaved={() => { void fetchData(); }}
       />
