@@ -334,6 +334,18 @@ async function syncSchedules(): Promise<void> {
   }
 }
 
+/**
+ * Run a one-shot CMATE.md -> DB sync immediately (Issue #824).
+ *
+ * Invoked after a UI-driven CMATE.md write so the DB-backed schedule list and
+ * in-memory cron jobs reflect the change without waiting for the next 60s poll.
+ * Reuses the same syncSchedules() routine (with its isSyncing guard), so it does
+ * not change the existing watcher behavior.
+ */
+export async function syncSchedulesNow(): Promise<void> {
+  await syncSchedules();
+}
+
 // =============================================================================
 // Manager Lifecycle
 // =============================================================================

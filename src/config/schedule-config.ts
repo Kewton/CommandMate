@@ -56,6 +56,33 @@ export const DEFAULT_PERMISSIONS: Record<string, string> = {
   copilot: 'allow-all-tools',
 };
 
+/**
+ * Resolve the allowed Permission dropdown options for a CLI tool (Issue #824).
+ *
+ * Single source of truth shared by the ScheduleEditDialog (dynamic dropdown)
+ * and the cmate-writer validation. Mirrors the per-tool permission rules that
+ * cmate-parser.ts / cmate-validator.ts enforce on read, so any value the dialog
+ * writes round-trips through the parser without being silently discarded.
+ *
+ * Tools not listed (gemini, vibe-local, opencode) have no permission flags, so
+ * the dialog hides the Permission field and an empty permission is written.
+ *
+ * @param cliToolId - CLI tool identifier
+ * @returns Readonly array of allowed permission values (empty = no permission flags)
+ */
+export function getPermissionOptionsForTool(cliToolId: string): readonly string[] {
+  switch (cliToolId) {
+    case 'codex':
+      return CODEX_SANDBOXES;
+    case 'copilot':
+      return COPILOT_PERMISSIONS;
+    case 'claude':
+      return CLAUDE_PERMISSIONS;
+    default:
+      return GEMINI_PERMISSIONS;
+  }
+}
+
 // =============================================================================
 // UUID Validation
 // =============================================================================
