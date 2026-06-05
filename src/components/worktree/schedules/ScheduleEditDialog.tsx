@@ -38,6 +38,7 @@ import {
 } from '@/config/schedule-config';
 import { NAME_PATTERN, isValidCronExpression } from '@/config/cmate-constants';
 import { validateCopilotModelName } from '@/lib/cmate-cli-tool-parser';
+import { cronPrompt, messageDraftPrompt } from '@/lib/schedule-ai-prompt-templates';
 
 // ============================================================================
 // Types
@@ -60,6 +61,12 @@ export interface ScheduleEditDialogProps {
   initialValues?: Partial<ScheduleFormValues>;
   /** Original name for locating the CMATE.md row on rename (edit mode) */
   originalName?: string;
+  /**
+   * Issue #827: draft a context-aware "Ask AI" prompt into the active CLI tab's
+   * MessageInput composer (no auto-send). When omitted the "Ask AI" buttons are
+   * hidden (graceful degradation, same as the GitPane #817 pattern).
+   */
+  onInsertToMessage?: (text: string) => void;
   onClose: () => void;
   onSaved: () => void;
 }
@@ -100,6 +107,42 @@ const ERROR_CLASS = 'mt-1 text-xs text-red-600 dark:text-red-400';
 
 /** Accordion section identifiers (Issue #825). */
 type SectionId = 'basic' | 'advanced' | 'message';
+
+// ============================================================================
+// AskAiButton
+// ============================================================================
+
+/**
+ * "Ask AI" button (Issue #827). Drafts a context-aware prompt into the active
+ * CLI tab's MessageInput composer (no auto-send) so the user can review/edit
+ * before sending. Presentational only: the call site owns the `onClick` (it
+ * builds the prompt from a `schedule-ai-prompt-templates` builder and closes the
+ * modal). Mirrors the GitPane #817 button styling for a consistent affordance.
+ */
+function AskAiButton({
+  onClick,
+  label,
+  title,
+  testId,
+}: {
+  onClick: () => void;
+  label: string;
+  title: string;
+  testId: string;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      onClick={onClick}
+      title={title}
+      className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded border border-violet-300 dark:border-violet-700 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/30 transition-colors"
+    >
+      <span aria-hidden="true">✨</span>
+      {label}
+    </button>
+  );
+}
 
 // ============================================================================
 // AccordionSection
@@ -170,6 +213,7 @@ export function ScheduleEditDialog({
   worktreeId,
   initialValues,
   originalName,
+  onInsertToMessage,
   onClose,
   onSaved,
 }: ScheduleEditDialogProps) {
@@ -273,6 +317,17 @@ export function ScheduleEditDialog({
     setForm((prev) => ({ ...prev, cronExpression: value }));
   }, []);
 
+  // Issue #827: draft a prompt into the composer, then close the modal so the
+  // user can review the AI's reply (minimal impl — they reopen the modal to
+  // paste the suggested cron / message back in).
+  const handleAskAi = useCallback(
+    (text: string) => {
+      onInsertToMessage?.(text);
+      onClose();
+    },
+    [onInsertToMessage, onClose],
+  );
+
   const handleSubmit = useCallback(async () => {
     if (!isValid || submitting) return;
     setSubmitting(true);
@@ -356,9 +411,19 @@ export function ScheduleEditDialog({
 
       {/* Cron */}
       <div>
-        <label className={LABEL_CLASS} htmlFor="schedule-cron-input">
-          {t('edit.cron')}
-        </label>
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300" htmlFor="schedule-cron-input">
+            {t('edit.cron')}
+          </label>
+          {onInsertToMessage && (
+            <AskAiButton
+              testId="schedule-cron-ask-ai"
+              label={t('edit.askAiCron')}
+              title={t('edit.askAiHint')}
+              onClick={() => handleAskAi(cronPrompt(form.cronExpression))}
+            />
+          )}
+        </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           <input
             id="schedule-cron-input"
@@ -470,9 +535,19 @@ export function ScheduleEditDialog({
 
   const messageFields = (
     <div>
-      <label className={LABEL_CLASS} htmlFor="schedule-message-input">
-        {t('edit.message')}
-      </label>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300" htmlFor="schedule-message-input">
+          {t('edit.message')}
+        </label>
+        {onInsertToMessage && (
+          <AskAiButton
+            testId="schedule-message-ask-ai"
+            label={t('edit.askAiMessage')}
+            title={t('edit.askAiHint')}
+            onClick={() => handleAskAi(messageDraftPrompt(form.name))}
+          />
+        )}
+      </div>
       <textarea
         id="schedule-message-input"
         data-testid="schedule-message-input"

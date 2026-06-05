@@ -536,7 +536,11 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
         />
       ),
       schedules: (
-        <ExecutionLogPane worktreeId={worktreeId} className="h-full" />
+        <ExecutionLogPane
+          worktreeId={worktreeId}
+          className="h-full"
+          onInsertToMessage={handleInsertToMessage}
+        />
       ),
       agent: (
         <AgentSettingsPane

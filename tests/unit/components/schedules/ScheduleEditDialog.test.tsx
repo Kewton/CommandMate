@@ -255,4 +255,51 @@ describe('ScheduleEditDialog', () => {
       expect(footer.querySelector('[data-testid="schedule-save-button"]')).not.toBeNull();
     });
   });
+
+  // --- Phase 4 (Issue #827): "Ask AI" buttons for cron / message drafting ---
+
+  describe('Ask AI buttons (Issue #827)', () => {
+    it('hides the Ask AI buttons when onInsertToMessage is not wired', () => {
+      renderDialog();
+      expect(screen.queryByTestId('schedule-cron-ask-ai')).toBeNull();
+      expect(screen.queryByTestId('schedule-message-ask-ai')).toBeNull();
+    });
+
+    it('shows both Ask AI buttons when onInsertToMessage is wired', () => {
+      renderDialog({ onInsertToMessage: vi.fn() });
+      expect(screen.getByTestId('schedule-cron-ask-ai')).toBeDefined();
+      expect(screen.getByTestId('schedule-message-ask-ai')).toBeDefined();
+    });
+
+    it('drafts a cron prompt into the composer and closes the modal', () => {
+      const onInsertToMessage = vi.fn();
+      const onClose = vi.fn();
+      renderDialog({
+        initialValues: { cronExpression: '0 9 * * *' },
+        onInsertToMessage,
+        onClose,
+      });
+      fireEvent.click(screen.getByTestId('schedule-cron-ask-ai'));
+      expect(onInsertToMessage).toHaveBeenCalledTimes(1);
+      // The drafted prompt echoes the current cron input (SSOT builder wiring).
+      expect(onInsertToMessage.mock.calls[0][0]).toContain('0 9 * * *');
+      expect(onInsertToMessage.mock.calls[0][0]).toContain('cron 式');
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('drafts a message prompt using the schedule name and closes the modal', () => {
+      const onInsertToMessage = vi.fn();
+      const onClose = vi.fn();
+      renderDialog({
+        initialValues: { name: 'daily-review' },
+        onInsertToMessage,
+        onClose,
+      });
+      fireEvent.click(screen.getByTestId('schedule-message-ask-ai'));
+      expect(onInsertToMessage).toHaveBeenCalledTimes(1);
+      expect(onInsertToMessage.mock.calls[0][0]).toContain('daily-review');
+      expect(onInsertToMessage.mock.calls[0][0]).toContain('指示プロンプト');
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+  });
 });
