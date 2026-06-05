@@ -101,6 +101,7 @@
 | `src/hooks/useFileSearch.ts` | 検索状態管理フック（debounce処理、API呼び出し、結果管理） |
 | `src/components/worktree/MoveDialog.tsx` | ファイル移動先選択ダイアログ（Issue #162: ディレクトリツリーブラウザ、ルート選択、ネスト対応、updateTreeNode/findNodeByPath抽出） |
 | `src/components/ui/Modal.tsx` | モーダルダイアログコンポーネント（Issue #299: z-[9999]ハードコード除去、Z_INDEX.MODAL使用に統一） |
+| `src/components/common/FullScreenModal.tsx` | モバイル向けフルスクリーンモーダルシェル（Issue #825: slide-up、右上クローズ、sticky footer、visualViewportでキーボード回避、focus時scrollIntoView） |
 | `src/components/common/Toast.tsx` | トースト通知コンポーネント（Issue #299: z-50ハードコード除去、Z_INDEX.TOAST使用に統一） |
 | `src/components/worktree/ContextMenu.tsx` | ファイル/ディレクトリコンテキストメニュー（Issue #162: 「移動」メニュー項目追加、FolderInputアイコン、onMoveコールバック。Issue #299: z-50除去、Z_INDEX.CONTEXT_MENU使用） |
 | `src/components/worktree/FileViewer.tsx` | ファイルビューア（Issue #162: コピーボタン追加、Copy/Checkアイコン切替、useMemo最適化、画像ファイル非表示。**Issue #302: 動画表示分岐追加、canCopyロジック修正（isVideo除外）**。**Issue #411: React.memo()ラップ（named export形式、isOpen=false時のポーリング起因再レンダースキップ）**）。ファイルビューア、検索ロジックを `useFileContentSearch` に統一（Issue #723） |

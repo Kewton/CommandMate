@@ -1,10 +1,16 @@
 /**
  * ScheduleEditDialog Component
  * Issue #824: Schedules UX Phase 1
+ * Issue #825: Schedules UX Phase 2 (mobile full-screen modal + section accordion)
  *
- * Desktop/Mobile shared modal for creating and editing a schedule. On save it
+ * Desktop/Mobile shared dialog for creating and editing a schedule. On save it
  * writes to CMATE.md via /api/worktrees/:id/cmate/schedules (Option C, write-only
  * sync) — it never calls the schedule DB API directly.
+ *
+ * Layout (Phase 2):
+ * - Desktop (>= md): the Phase 1 centered `Modal` with all three sections expanded.
+ * - Mobile (< md): a `FullScreenModal` (slide up, sticky footer) with the sections
+ *   collapsed into an accordion where only the first section is open by default.
  *
  * Dynamic behavior:
  * - The Permission dropdown options change when the CLI Tool changes.
@@ -15,8 +21,15 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
+import { Info, SlidersHorizontal, MessageSquare, ChevronDown } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
-import { CLI_TOOL_IDS, getCliToolDisplayName } from '@/lib/cli-tools/types';
+import { FullScreenModal } from '@/components/common/FullScreenModal';
+import { useIsMobile } from '@/hooks/useIsMobile';
+import {
+  CLI_TOOL_IDS,
+  getCliToolDisplayName,
+  getCliToolDisplayNameSafe,
+} from '@/lib/cli-tools/types';
 import {
   getPermissionOptionsForTool,
   DEFAULT_PERMISSIONS,
@@ -85,6 +98,69 @@ const INPUT_CLASS =
 const LABEL_CLASS = 'block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1';
 const ERROR_CLASS = 'mt-1 text-xs text-red-600 dark:text-red-400';
 
+/** Accordion section identifiers (Issue #825). */
+type SectionId = 'basic' | 'advanced' | 'message';
+
+// ============================================================================
+// AccordionSection
+// ============================================================================
+
+interface AccordionSectionProps {
+  id: SectionId;
+  title: string;
+  summary: string;
+  icon: React.ReactNode;
+  isOpen: boolean;
+  onToggle: (id: SectionId) => void;
+  children: React.ReactNode;
+}
+
+/** Collapsible section with an icon + summary header (Issue #825). */
+function AccordionSection({
+  id,
+  title,
+  summary,
+  icon,
+  isOpen,
+  onToggle,
+  children,
+}: AccordionSectionProps) {
+  const contentId = `schedule-section-${id}-content`;
+  return (
+    <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+      <button
+        type="button"
+        data-testid={`schedule-section-${id}`}
+        aria-expanded={isOpen}
+        aria-controls={contentId}
+        onClick={() => onToggle(id)}
+        className="w-full flex items-center gap-3 px-3 py-2.5 text-left bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+      >
+        <span className="flex-shrink-0 text-cyan-600 dark:text-cyan-400">{icon}</span>
+        <span className="flex-1 min-w-0">
+          <span className="block text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</span>
+          {summary && (
+            <span
+              data-testid={`schedule-section-${id}-summary`}
+              className="block truncate text-xs text-gray-500 dark:text-gray-400"
+            >
+              {summary}
+            </span>
+          )}
+        </span>
+        <ChevronDown
+          className={`flex-shrink-0 w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+        />
+      </button>
+      {isOpen && (
+        <div id={contentId} className="px-3 py-3 flex flex-col gap-4">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -98,9 +174,14 @@ export function ScheduleEditDialog({
   onSaved,
 }: ScheduleEditDialogProps) {
   const t = useTranslations('schedule');
+  const isMobile = useIsMobile();
   const [form, setForm] = useState<ScheduleFormValues>(DEFAULT_FORM);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Accordion: desktop shows every section open; mobile opens only the first.
+  const [openSections, setOpenSections] = useState<Set<SectionId>>(
+    () => new Set<SectionId>(['basic', 'advanced', 'message']),
+  );
 
   // Seed (or reset) the form whenever the dialog is opened.
   useEffect(() => {
@@ -117,6 +198,25 @@ export function ScheduleEditDialog({
       model: initialValues?.model ?? DEFAULT_FORM.model,
     });
   }, [isOpen, initialValues]);
+
+  // Reset which sections are open whenever the dialog opens or the layout changes.
+  useEffect(() => {
+    if (!isOpen) return;
+    setOpenSections(
+      isMobile
+        ? new Set<SectionId>(['basic'])
+        : new Set<SectionId>(['basic', 'advanced', 'message']),
+    );
+  }, [isOpen, isMobile]);
+
+  const toggleSection = useCallback((id: SectionId) => {
+    setOpenSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   const permissionOptions = getPermissionOptionsForTool(form.cliToolId);
   const showPermission = permissionOptions.length > 0;
@@ -217,195 +317,271 @@ export function ScheduleEditDialog({
     t,
   ]);
 
-  return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      title={isEdit ? t('edit.titleEdit') : t('edit.titleCreate')}
-      size="md"
-    >
-      <div className="flex flex-col gap-4">
-        {/* Name */}
+  // ----- Accordion header summaries -----
+  const cliToolName = getCliToolDisplayNameSafe(form.cliToolId);
+  const basicSummary = form.name.trim()
+    ? `${form.name.trim()} · ${form.cronExpression}`
+    : form.cronExpression;
+  const advancedSummary = [
+    cliToolName,
+    showPermission ? form.permission : null,
+    showModel && form.model.trim() ? form.model.trim() : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const messagePreview = form.message.trim();
+  const messageSummary =
+    messagePreview.length > 32 ? `${messagePreview.slice(0, 32)}…` : messagePreview;
+
+  // ----- Field groups (shared by Desktop and Mobile) -----
+  const basicFields = (
+    <>
+      {/* Name */}
+      <div>
+        <label className={LABEL_CLASS} htmlFor="schedule-name-input">
+          {t('edit.name')}
+        </label>
+        <input
+          id="schedule-name-input"
+          data-testid="schedule-name-input"
+          type="text"
+          value={form.name}
+          maxLength={MAX_SCHEDULE_NAME_LENGTH}
+          placeholder={t('edit.namePlaceholder')}
+          onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+          className={INPUT_CLASS}
+        />
+        {nameError && <p className={ERROR_CLASS} data-testid="schedule-name-error">{nameError}</p>}
+      </div>
+
+      {/* Cron */}
+      <div>
+        <label className={LABEL_CLASS} htmlFor="schedule-cron-input">
+          {t('edit.cron')}
+        </label>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <input
+            id="schedule-cron-input"
+            data-testid="schedule-cron-input"
+            type="text"
+            value={form.cronExpression}
+            placeholder={t('edit.cronPlaceholder')}
+            onChange={(e) => setForm((prev) => ({ ...prev, cronExpression: e.target.value }))}
+            className={`${INPUT_CLASS} font-mono sm:flex-1`}
+          />
+          <select
+            data-testid="schedule-cron-preset"
+            aria-label={t('edit.cronPreset')}
+            value={cronPresetValue}
+            onChange={(e) => handleCronPresetChange(e.target.value)}
+            className={`${INPUT_CLASS} sm:w-48`}
+          >
+            {CRON_PRESETS.map((preset) => (
+              <option key={preset.value} value={preset.value}>
+                {t(`edit.${preset.labelKey}`)}
+              </option>
+            ))}
+            <option value="custom">{t('edit.cronPresetCustom')}</option>
+          </select>
+        </div>
+        {cronError && <p className={ERROR_CLASS} data-testid="schedule-cron-error">{cronError}</p>}
+      </div>
+
+      {/* Enabled */}
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          data-testid="schedule-enabled-toggle"
+          checked={form.enabled}
+          onChange={(e) => setForm((prev) => ({ ...prev, enabled: e.target.checked }))}
+          className="h-4 w-4 rounded border-gray-300 text-cyan-600 focus:ring-cyan-500"
+        />
+        <span className="text-sm text-gray-700 dark:text-gray-300">{t('edit.enabledLabel')}</span>
+      </label>
+    </>
+  );
+
+  const advancedFields = (
+    <>
+      {/* CLI Tool */}
+      <div>
+        <label className={LABEL_CLASS} htmlFor="schedule-cli-tool-select">
+          {t('edit.cliTool')}
+        </label>
+        <select
+          id="schedule-cli-tool-select"
+          data-testid="schedule-cli-tool-select"
+          value={form.cliToolId}
+          onChange={(e) => handleToolChange(e.target.value)}
+          className={INPUT_CLASS}
+        >
+          {CLI_TOOL_IDS.map((tool) => (
+            <option key={tool} value={tool}>
+              {getCliToolDisplayName(tool)}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Model (copilot only) */}
+      {showModel && (
         <div>
-          <label className={LABEL_CLASS} htmlFor="schedule-name-input">
-            {t('edit.name')}
+          <label className={LABEL_CLASS} htmlFor="schedule-model-input">
+            {t('edit.model')}
           </label>
           <input
-            id="schedule-name-input"
-            data-testid="schedule-name-input"
+            id="schedule-model-input"
+            data-testid="schedule-model-input"
             type="text"
-            value={form.name}
-            maxLength={MAX_SCHEDULE_NAME_LENGTH}
-            placeholder={t('edit.namePlaceholder')}
-            onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+            value={form.model}
+            placeholder={t('edit.modelPlaceholder')}
+            onChange={(e) => setForm((prev) => ({ ...prev, model: e.target.value }))}
             className={INPUT_CLASS}
           />
-          {nameError && <p className={ERROR_CLASS} data-testid="schedule-name-error">{nameError}</p>}
+          {modelError && (
+            <p className={ERROR_CLASS} data-testid="schedule-model-error">{modelError}</p>
+          )}
         </div>
+      )}
 
-        {/* Cron */}
+      {/* Permission (dynamic per CLI tool) */}
+      {showPermission && (
         <div>
-          <label className={LABEL_CLASS} htmlFor="schedule-cron-input">
-            {t('edit.cron')}
-          </label>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <input
-              id="schedule-cron-input"
-              data-testid="schedule-cron-input"
-              type="text"
-              value={form.cronExpression}
-              placeholder={t('edit.cronPlaceholder')}
-              onChange={(e) => setForm((prev) => ({ ...prev, cronExpression: e.target.value }))}
-              className={`${INPUT_CLASS} font-mono sm:flex-1`}
-            />
-            <select
-              data-testid="schedule-cron-preset"
-              aria-label={t('edit.cronPreset')}
-              value={cronPresetValue}
-              onChange={(e) => handleCronPresetChange(e.target.value)}
-              className={`${INPUT_CLASS} sm:w-48`}
-            >
-              {CRON_PRESETS.map((preset) => (
-                <option key={preset.value} value={preset.value}>
-                  {t(`edit.${preset.labelKey}`)}
-                </option>
-              ))}
-              <option value="custom">{t('edit.cronPresetCustom')}</option>
-            </select>
-          </div>
-          {cronError && <p className={ERROR_CLASS} data-testid="schedule-cron-error">{cronError}</p>}
-        </div>
-
-        {/* CLI Tool */}
-        <div>
-          <label className={LABEL_CLASS} htmlFor="schedule-cli-tool-select">
-            {t('edit.cliTool')}
+          <label className={LABEL_CLASS} htmlFor="schedule-permission-select">
+            {t('edit.permission')}
           </label>
           <select
-            id="schedule-cli-tool-select"
-            data-testid="schedule-cli-tool-select"
-            value={form.cliToolId}
-            onChange={(e) => handleToolChange(e.target.value)}
+            id="schedule-permission-select"
+            data-testid="schedule-permission-select"
+            value={form.permission}
+            onChange={(e) => setForm((prev) => ({ ...prev, permission: e.target.value }))}
             className={INPUT_CLASS}
           >
-            {CLI_TOOL_IDS.map((tool) => (
-              <option key={tool} value={tool}>
-                {getCliToolDisplayName(tool)}
+            {permissionOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
               </option>
             ))}
           </select>
         </div>
+      )}
+    </>
+  );
 
-        {/* Model (copilot only) */}
-        {showModel && (
-          <div>
-            <label className={LABEL_CLASS} htmlFor="schedule-model-input">
-              {t('edit.model')}
-            </label>
-            <input
-              id="schedule-model-input"
-              data-testid="schedule-model-input"
-              type="text"
-              value={form.model}
-              placeholder={t('edit.modelPlaceholder')}
-              onChange={(e) => setForm((prev) => ({ ...prev, model: e.target.value }))}
-              className={INPUT_CLASS}
-            />
-            {modelError && (
-              <p className={ERROR_CLASS} data-testid="schedule-model-error">{modelError}</p>
-            )}
-          </div>
+  const messageFields = (
+    <div>
+      <label className={LABEL_CLASS} htmlFor="schedule-message-input">
+        {t('edit.message')}
+      </label>
+      <textarea
+        id="schedule-message-input"
+        data-testid="schedule-message-input"
+        value={form.message}
+        rows={4}
+        maxLength={MAX_SCHEDULE_MESSAGE_LENGTH}
+        placeholder={t('edit.messagePlaceholder')}
+        onChange={(e) => setForm((prev) => ({ ...prev, message: e.target.value }))}
+        className={`${INPUT_CLASS} resize-none`}
+      />
+      <div className="mt-1 flex items-center justify-between">
+        {messageError ? (
+          <p className={ERROR_CLASS} data-testid="schedule-message-error">{messageError}</p>
+        ) : (
+          <span />
         )}
+        <span className="text-xs text-gray-400 dark:text-gray-500" data-testid="schedule-message-count">
+          {t('edit.charCount', { count: form.message.length, max: MAX_SCHEDULE_MESSAGE_LENGTH })}
+        </span>
+      </div>
+    </div>
+  );
 
-        {/* Permission (dynamic per CLI tool) */}
-        {showPermission && (
-          <div>
-            <label className={LABEL_CLASS} htmlFor="schedule-permission-select">
-              {t('edit.permission')}
-            </label>
-            <select
-              id="schedule-permission-select"
-              data-testid="schedule-permission-select"
-              value={form.permission}
-              onChange={(e) => setForm((prev) => ({ ...prev, permission: e.target.value }))}
-              className={INPUT_CLASS}
-            >
-              {permissionOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+  // ----- Shared body: three accordion sections -----
+  const sections = (
+    <div className="flex flex-col gap-3">
+      <AccordionSection
+        id="basic"
+        title={t('edit.sectionBasic')}
+        summary={basicSummary}
+        icon={<Info className="w-4 h-4" />}
+        isOpen={openSections.has('basic')}
+        onToggle={toggleSection}
+      >
+        {basicFields}
+      </AccordionSection>
 
-        {/* Message */}
-        <div>
-          <label className={LABEL_CLASS} htmlFor="schedule-message-input">
-            {t('edit.message')}
-          </label>
-          <textarea
-            id="schedule-message-input"
-            data-testid="schedule-message-input"
-            value={form.message}
-            rows={4}
-            maxLength={MAX_SCHEDULE_MESSAGE_LENGTH}
-            placeholder={t('edit.messagePlaceholder')}
-            onChange={(e) => setForm((prev) => ({ ...prev, message: e.target.value }))}
-            className={`${INPUT_CLASS} resize-none`}
-          />
-          <div className="mt-1 flex items-center justify-between">
-            {messageError ? (
-              <p className={ERROR_CLASS} data-testid="schedule-message-error">{messageError}</p>
-            ) : (
-              <span />
-            )}
-            <span className="text-xs text-gray-400 dark:text-gray-500" data-testid="schedule-message-count">
-              {t('edit.charCount', { count: form.message.length, max: MAX_SCHEDULE_MESSAGE_LENGTH })}
-            </span>
-          </div>
+      <AccordionSection
+        id="advanced"
+        title={t('edit.sectionAdvanced')}
+        summary={advancedSummary}
+        icon={<SlidersHorizontal className="w-4 h-4" />}
+        isOpen={openSections.has('advanced')}
+        onToggle={toggleSection}
+      >
+        {advancedFields}
+      </AccordionSection>
+
+      <AccordionSection
+        id="message"
+        title={t('edit.sectionMessage')}
+        summary={messageSummary}
+        icon={<MessageSquare className="w-4 h-4" />}
+        isOpen={openSections.has('message')}
+        onToggle={toggleSection}
+      >
+        {messageFields}
+      </AccordionSection>
+
+      {submitError && (
+        <div
+          className="text-xs p-2 rounded bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400"
+          data-testid="schedule-submit-error"
+        >
+          {submitError}
         </div>
+      )}
+    </div>
+  );
 
-        {/* Enabled */}
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            data-testid="schedule-enabled-toggle"
-            checked={form.enabled}
-            onChange={(e) => setForm((prev) => ({ ...prev, enabled: e.target.checked }))}
-            className="h-4 w-4 rounded border-gray-300 text-cyan-600 focus:ring-cyan-500"
-          />
-          <span className="text-sm text-gray-700 dark:text-gray-300">{t('edit.enabledLabel')}</span>
-        </label>
+  // ----- Shared footer buttons -----
+  const footerButtons = (
+    <div className="flex items-center justify-end gap-2">
+      <button
+        type="button"
+        onClick={onClose}
+        className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors"
+      >
+        {t('edit.cancel')}
+      </button>
+      <button
+        type="button"
+        data-testid="schedule-save-button"
+        onClick={() => void handleSubmit()}
+        disabled={!isValid || submitting}
+        className="px-4 py-2 text-sm font-medium text-white bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
+      >
+        {t('edit.save')}
+      </button>
+    </div>
+  );
 
-        {submitError && (
-          <div
-            className="text-xs p-2 rounded bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400"
-            data-testid="schedule-submit-error"
-          >
-            {submitError}
-          </div>
-        )}
+  const title = isEdit ? t('edit.titleEdit') : t('edit.titleCreate');
 
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors"
-          >
-            {t('edit.cancel')}
-          </button>
-          <button
-            type="button"
-            data-testid="schedule-save-button"
-            onClick={() => void handleSubmit()}
-            disabled={!isValid || submitting}
-            className="px-4 py-2 text-sm font-medium text-white bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
-          >
-            {t('edit.save')}
-          </button>
-        </div>
+  // Mobile: full-screen modal with a sticky footer (Issue #825).
+  if (isMobile) {
+    return (
+      <FullScreenModal isOpen={isOpen} onClose={onClose} title={title} footer={footerButtons}>
+        {sections}
+      </FullScreenModal>
+    );
+  }
+
+  // Desktop: the Phase 1 centered modal, sections expanded.
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title={title} size="md">
+      <div className="flex flex-col gap-4">
+        {sections}
+        <div className="pt-2 border-t border-gray-200 dark:border-gray-700">{footerButtons}</div>
       </div>
     </Modal>
   );

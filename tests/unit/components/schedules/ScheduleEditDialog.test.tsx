@@ -31,9 +31,20 @@ function getSelectValues(testId: string): string[] {
   return Array.from(select.options).map((o) => o.value);
 }
 
+/** Force the viewport so `useIsMobile()` resolves to mobile/desktop. */
+function setViewportWidth(width: number) {
+  Object.defineProperty(window, 'innerWidth', { value: width, configurable: true, writable: true });
+}
+
+beforeEach(() => {
+  // jsdom defaults to 1024 (desktop); keep tests deterministic.
+  setViewportWidth(1024);
+});
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  setViewportWidth(1024);
 });
 
 describe('ScheduleEditDialog', () => {
@@ -158,5 +169,90 @@ describe('ScheduleEditDialog', () => {
       target: { value: '0 9 * * 1' },
     });
     expect((screen.getByTestId('schedule-cron-input') as HTMLInputElement).value).toBe('0 9 * * 1');
+  });
+
+  // --- Phase 2 (Issue #825): section accordion + mobile full-screen modal ---
+
+  describe('section accordion (Issue #825)', () => {
+    it('renders the three section headers', () => {
+      renderDialog();
+      expect(screen.getByTestId('schedule-section-basic')).toBeDefined();
+      expect(screen.getByTestId('schedule-section-advanced')).toBeDefined();
+      expect(screen.getByTestId('schedule-section-message')).toBeDefined();
+    });
+
+    it('expands every section by default on desktop', () => {
+      renderDialog();
+      // Fields from all three sections are visible at once.
+      expect(screen.getByTestId('schedule-name-input')).toBeDefined();
+      expect(screen.getByTestId('schedule-cli-tool-select')).toBeDefined();
+      expect(screen.getByTestId('schedule-message-input')).toBeDefined();
+      ['basic', 'advanced', 'message'].forEach((id) => {
+        expect(screen.getByTestId(`schedule-section-${id}`).getAttribute('aria-expanded')).toBe(
+          'true',
+        );
+      });
+    });
+
+    it('collapses a section when its header is clicked', () => {
+      renderDialog();
+      expect(screen.getByTestId('schedule-message-input')).toBeDefined();
+      fireEvent.click(screen.getByTestId('schedule-section-message'));
+      expect(screen.queryByTestId('schedule-message-input')).toBeNull();
+      expect(screen.getByTestId('schedule-section-message').getAttribute('aria-expanded')).toBe(
+        'false',
+      );
+    });
+
+    it('updates the advanced section summary when the CLI tool changes', () => {
+      renderDialog();
+      const before = screen.getByTestId('schedule-section-advanced-summary').textContent;
+      fireEvent.change(screen.getByTestId('schedule-cli-tool-select'), {
+        target: { value: 'codex' },
+      });
+      const after = screen.getByTestId('schedule-section-advanced-summary').textContent;
+      // Summary reflects the selected tool's default permission (codex → workspace-write).
+      expect(after).not.toBe(before);
+      expect(after).toContain('workspace-write');
+    });
+  });
+
+  describe('mobile full-screen modal (Issue #825)', () => {
+    it('renders a full-screen modal on mobile viewports', () => {
+      setViewportWidth(375);
+      renderDialog();
+      expect(screen.getByTestId('full-screen-modal')).toBeDefined();
+    });
+
+    it('opens only the first section by default on mobile', () => {
+      setViewportWidth(375);
+      renderDialog();
+      // Basic section open, others collapsed.
+      expect(screen.getByTestId('schedule-name-input')).toBeDefined();
+      expect(screen.queryByTestId('schedule-cli-tool-select')).toBeNull();
+      expect(screen.queryByTestId('schedule-message-input')).toBeNull();
+      expect(screen.getByTestId('schedule-section-basic').getAttribute('aria-expanded')).toBe(
+        'true',
+      );
+      expect(screen.getByTestId('schedule-section-message').getAttribute('aria-expanded')).toBe(
+        'false',
+      );
+    });
+
+    it('reveals a collapsed section when its header is tapped on mobile', () => {
+      setViewportWidth(375);
+      renderDialog();
+      expect(screen.queryByTestId('schedule-message-input')).toBeNull();
+      fireEvent.click(screen.getByTestId('schedule-section-message'));
+      expect(screen.getByTestId('schedule-message-input')).toBeDefined();
+    });
+
+    it('renders a sticky footer holding the save button on mobile', () => {
+      setViewportWidth(375);
+      renderDialog({ initialValues: { name: 'task-a', message: 'hello' } });
+      const footer = screen.getByTestId('full-screen-modal-footer');
+      expect(footer).toBeDefined();
+      expect(footer.querySelector('[data-testid="schedule-save-button"]')).not.toBeNull();
+    });
   });
 });
