@@ -23,6 +23,7 @@
 'use client';
 
 import React, { memo, useCallback, useRef, type ReactNode } from 'react';
+import { useTranslations } from 'next-intl';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
 import { PaneResizer } from './PaneResizer';
@@ -37,7 +38,11 @@ import { PaneResizer } from './PaneResizer';
  */
 export const HISTORY_PANE_ID = 'worktree-history-pane';
 
-const EXPAND_BAR_WIDTH_PX = 24;
+/**
+ * Width of the collapsed History bar (px). Issue #840: widened 24 → 36 so the
+ * vertical "History" label is legible and the bar is easier to notice/hit.
+ */
+const EXPAND_BAR_WIDTH_PX = 36;
 
 export interface TerminalContainerProps {
   /**
@@ -57,23 +62,25 @@ const HistoryExpandBar = memo(function HistoryExpandBar({
 }: {
   onToggle: () => void;
 }) {
+  const t = useTranslations('worktree');
   return (
     <div
       data-testid="terminal-container-expand-bar"
       style={{ width: `${EXPAND_BAR_WIDTH_PX}px` }}
-      className="flex-shrink-0 flex items-center justify-center bg-gray-100 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700"
+      className="flex-shrink-0 flex items-start justify-center bg-gray-100 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700"
     >
       <button
         type="button"
         data-testid="history-pane-expand"
-        aria-label="Expand history panel"
+        aria-label={t('terminal.showHistory')}
+        title={t('terminal.showHistory')}
         aria-expanded="false"
         aria-controls={HISTORY_PANE_ID}
         onClick={onToggle}
-        className="flex items-center justify-center w-full h-10 text-gray-500 dark:text-gray-400 hover:text-cyan-600 dark:hover:text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+        className="flex flex-col items-center gap-2 w-full pt-2 text-gray-500 dark:text-gray-400 hover:text-cyan-600 dark:hover:text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
       >
         <svg
-          className="w-4 h-4"
+          className="w-4 h-4 flex-shrink-0"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -86,6 +93,13 @@ const HistoryExpandBar = memo(function HistoryExpandBar({
             d="M9 5l7 7-7 7"
           />
         </svg>
+        <span
+          className="text-xs font-medium tracking-wide select-none"
+          style={{ writingMode: 'vertical-rl' }}
+          aria-hidden="true"
+        >
+          {t('terminal.historyLabel')}
+        </span>
       </button>
     </div>
   );

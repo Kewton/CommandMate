@@ -10,9 +10,11 @@
 'use client';
 
 import React, { memo, useState, useCallback, useRef, useMemo } from 'react';
+import { useTranslations } from 'next-intl';
 import { PaneResizer } from './PaneResizer';
 import { FilePanelTabs } from './FilePanelTabs';
 import { DiffViewer } from './DiffViewer';
+import { useFilePanelState } from '@/hooks/useFilePanelState';
 import type { FileTabsState } from '@/hooks/useFileTabs';
 import type { FileContent } from '@/types/models';
 
@@ -68,8 +70,11 @@ const MIN_TERMINAL_WIDTH = 20;
 /** Maximum terminal width as percentage */
 const MAX_TERMINAL_WIDTH = 80;
 
-/** Width of the collapse/expand bar for the file panel (px) */
-const FILE_PANEL_BAR_WIDTH_PX = 24;
+/**
+ * Width of the collapsed file-panel bar (px). Issue #840: widened 24 → 36 so
+ * the vertical "Files" label is legible and the bar is easier to notice/hit.
+ */
+const FILE_PANEL_BAR_WIDTH_PX = 36;
 
 // ============================================================================
 // Main Component
@@ -99,11 +104,13 @@ export const FilePanelSplit = memo(function FilePanelSplit({
   onMoveToFront,
   onOpenFile,
 }: FilePanelSplitProps) {
+  const t = useTranslations('worktree');
   const containerRef = useRef<HTMLDivElement>(null);
   const [terminalWidth, setTerminalWidth] = useState(INITIAL_TERMINAL_WIDTH);
-  const [filePanelCollapsed, setFilePanelCollapsed] = useState(false);
-
-  const toggleFilePanel = useCallback(() => setFilePanelCollapsed((v) => !v), []);
+  // Issue #840: collapsed state is persisted to localStorage so it survives
+  // reload / re-mount (previously a local useState that reset to default).
+  const { collapsed: filePanelCollapsed, toggle: toggleFilePanel } =
+    useFilePanelState();
 
   const handleResize = useCallback((delta: number) => {
     const container = containerRef.current;
@@ -158,17 +165,25 @@ export const FilePanelSplit = memo(function FilePanelSplit({
         <div
           data-testid="file-panel-expand-bar"
           style={{ width: `${FILE_PANEL_BAR_WIDTH_PX}px` }}
-          className="flex-shrink-0 flex items-center justify-center bg-gray-100 dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700"
+          className="flex-shrink-0 flex items-start justify-center bg-gray-100 dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700"
         >
           <button
             type="button"
-            aria-label="Show file panel"
+            aria-label={t('terminal.showFiles')}
+            title={t('terminal.showFiles')}
             onClick={toggleFilePanel}
-            className="flex items-center justify-center w-full h-10 text-gray-500 dark:text-gray-400 hover:text-cyan-600 dark:hover:text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+            className="flex flex-col items-center gap-2 w-full pt-2 text-gray-500 dark:text-gray-400 hover:text-cyan-600 dark:hover:text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
+            <span
+              className="text-xs font-medium tracking-wide select-none"
+              style={{ writingMode: 'vertical-rl' }}
+              aria-hidden="true"
+            >
+              {t('terminal.filesLabel')}
+            </span>
           </button>
         </div>
       </div>
@@ -202,7 +217,8 @@ export const FilePanelSplit = memo(function FilePanelSplit({
         {/* Collapse button strip — always visible at the left edge of the file panel */}
         <button
           type="button"
-          aria-label="Hide file panel"
+          aria-label={t('terminal.hideFiles')}
+          title={t('terminal.hideFiles')}
           onClick={toggleFilePanel}
           className="flex-shrink-0 flex items-center justify-center w-5 h-full bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500 hover:text-cyan-600 dark:hover:text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
         >
