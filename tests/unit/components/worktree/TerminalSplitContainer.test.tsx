@@ -108,6 +108,110 @@ describe('TerminalSplitContainer', () => {
 });
 
 // ===========================================================================
+// Issue #841 (Phase 2): the existing +Split/-Split Action bar also hosts
+// "History" and "Files" toggle buttons. They are the single source of truth
+// shared with the vertical collapse strips (useHistoryPaneState /
+// useFilePanelState broadcast across instances), so toggling here flips the
+// persisted state and aria-pressed reflects current visibility.
+// ===========================================================================
+describe('TerminalSplitContainer History/Files toggles (Issue #841)', () => {
+  const HISTORY_KEY = 'commandmate.worktree.historyVisible';
+  const FILE_PANEL_KEY = 'commandmate.worktree.filePanelCollapsed';
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+  afterEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('renders History and Files toggle buttons (always visible at 1 split)', () => {
+    setup();
+    expect(screen.getByTestId('toggle-history-pane')).toBeInTheDocument();
+    expect(screen.getByTestId('toggle-file-panel')).toBeInTheDocument();
+  });
+
+  it('keeps the toggles visible at MAX splits (split-count independent)', () => {
+    setup();
+    fireEvent.click(screen.getByTestId('add-terminal-split'));
+    fireEvent.click(screen.getByTestId('add-terminal-split'));
+    expect(screen.getByTestId('add-terminal-split')).toBeDisabled(); // at MAX
+    expect(screen.getByTestId('toggle-history-pane')).toBeInTheDocument();
+    expect(screen.getByTestId('toggle-file-panel')).toBeInTheDocument();
+  });
+
+  it('History toggle defaults to pressed (visible) and flips on click', () => {
+    setup();
+    const btn = screen.getByTestId('toggle-history-pane');
+    expect(btn).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(btn);
+    expect(btn).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(btn);
+    expect(btn).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('Files toggle defaults to pressed (visible) and flips on click', () => {
+    setup();
+    const btn = screen.getByTestId('toggle-file-panel');
+    // collapsed=false → visible → pressed
+    expect(btn).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(btn);
+    expect(btn).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(btn);
+    expect(btn).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('History toggle persists visibility to localStorage', () => {
+    setup();
+    fireEvent.click(screen.getByTestId('toggle-history-pane'));
+    expect(window.localStorage.getItem(HISTORY_KEY)).toBe('false');
+  });
+
+  it('Files toggle persists collapsed state to localStorage', () => {
+    setup();
+    fireEvent.click(screen.getByTestId('toggle-file-panel'));
+    // Files hidden → file panel collapsed=true
+    expect(window.localStorage.getItem(FILE_PANEL_KEY)).toBe('true');
+  });
+
+  it('aria-label / title reflect show vs hide depending on state', () => {
+    setup();
+    const history = screen.getByTestId('toggle-history-pane');
+    // default visible → "hide" wording
+    expect(history).toHaveAttribute('aria-label', 'worktree.terminal.hideHistory');
+    expect(history).toHaveAttribute('title', 'worktree.terminal.hideHistory');
+    fireEvent.click(history);
+    expect(history).toHaveAttribute('aria-label', 'worktree.terminal.showHistory');
+
+    const files = screen.getByTestId('toggle-file-panel');
+    expect(files).toHaveAttribute('aria-label', 'worktree.terminal.hideFiles');
+    fireEvent.click(files);
+    expect(files).toHaveAttribute('aria-label', 'worktree.terminal.showFiles');
+  });
+
+  it('applies cyan accent when active and gray when inactive', () => {
+    setup();
+    const history = screen.getByTestId('toggle-history-pane');
+    // active (visible) → cyan accent classes
+    expect(history.className).toMatch(/cyan/);
+    fireEvent.click(history);
+    // inactive (hidden) → gray text, no cyan accent
+    expect(history.className).not.toMatch(/cyan/);
+    expect(history.className).toMatch(/text-gray-500/);
+  });
+
+  it('does not affect the existing +Split / -Split controls', () => {
+    setup();
+    // +Split still adds; -Split still disabled at MIN=1
+    expect(screen.getByTestId('add-terminal-split')).not.toBeDisabled();
+    expect(screen.getByTestId('remove-terminal-split')).toBeDisabled();
+    fireEvent.click(screen.getByTestId('add-terminal-split'));
+    expect(screen.getByTestId('pane-cli-1')).toBeInTheDocument();
+    expect(screen.getByTestId('remove-terminal-split')).not.toBeDisabled();
+  });
+});
+
+// ===========================================================================
 // Issue #786: drag-drop validation owner. The container holds the `splits`
 // array, so it classifies a drop as no-op / reject / apply and owns the toast
 // messaging + activeCliTab sync. Each pane receives `onDropCliTool` via the
