@@ -170,6 +170,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     loading,
     makeAutoYesToggleHandler,
     mobileFileViewerPath,
+    mobileSelectedAgents,
     moveTarget,
     newFileParentPath,
     openMobileDrawer,
@@ -182,6 +183,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     setFocusedSplitIndex,
     setHistorySubTab,
     setIsEditorMaximized,
+    setMobileSelectedAgents,
     setWorktree,
     showArchived,
     showKillConfirm,
@@ -448,8 +450,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             fileSearch={fileSearch}
             showToast={showToast}
             onCmateSetup={handleCmateSetup}
-            selectedAgents={selectedAgents}
-            onSelectedAgentsChange={handleSelectedAgentsChange}
+            // Issue #837: the Agent tab edits the mobile-only localStorage
+            // preference (≤2) and never the DB. `availableAgents` is the DB
+            // selection (PC source of truth) so picks stay within it.
+            selectedAgents={mobileSelectedAgents}
+            onSelectedAgentsChange={setMobileSelectedAgents}
+            availableAgents={selectedAgents}
+            maxAgents={2}
+            persistToServer={false}
             vibeLocalModel={vibeLocalModel}
             onVibeLocalModelChange={handleVibeLocalModelChange}
             vibeLocalContextWindow={vibeLocalContextWindow}

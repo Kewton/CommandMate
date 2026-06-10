@@ -443,6 +443,52 @@ describe('AgentSettingsPane', () => {
     });
   });
 
+  // Issue #837: Mobile selection is local-only (localStorage); it must not PATCH
+  // the DB, and the selectable pool can be restricted to the DB selection.
+  describe('Mobile local-only mode (Issue #837)', () => {
+    it('should NOT call the DB API when persistToServer=false, only the change callback', async () => {
+      const onSelectedAgentsChange = vi.fn();
+      render(
+        <AgentSettingsPane
+          {...defaultProps}
+          persistToServer={false}
+          maxAgents={2}
+          selectedAgents={['claude', 'codex']}
+          onSelectedAgentsChange={onSelectedAgentsChange}
+        />
+      );
+
+      // Uncheck claude (only 1 left -> no callback yet)
+      fireEvent.click(screen.getByTestId('agent-checkbox-claude'));
+      // Check gemini -> 2 selected -> caller callback fires, but no PATCH
+      fireEvent.click(screen.getByTestId('agent-checkbox-gemini'));
+
+      await waitFor(() => {
+        expect(onSelectedAgentsChange).toHaveBeenCalledWith(['codex', 'gemini']);
+      });
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('should only render checkboxes for availableAgents', () => {
+      render(
+        <AgentSettingsPane
+          {...defaultProps}
+          maxAgents={2}
+          availableAgents={['claude', 'codex', 'gemini']}
+          selectedAgents={['claude', 'codex']}
+        />
+      );
+
+      expect(screen.getByTestId('agent-checkbox-claude')).toBeDefined();
+      expect(screen.getByTestId('agent-checkbox-codex')).toBeDefined();
+      expect(screen.getByTestId('agent-checkbox-gemini')).toBeDefined();
+      // Not in availableAgents -> not rendered
+      expect(screen.queryByTestId('agent-checkbox-vibe-local')).toBeNull();
+      expect(screen.queryByTestId('agent-checkbox-opencode')).toBeNull();
+      expect(screen.queryByTestId('agent-checkbox-copilot')).toBeNull();
+    });
+  });
+
   describe('Loading state', () => {
     it('should show loading indicator during API call', async () => {
       // Make fetch hang to test loading state

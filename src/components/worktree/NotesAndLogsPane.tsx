@@ -44,6 +44,10 @@ export interface NotesAndLogsPaneProps {
   onSelectedAgentsChange: (agents: CLIToolType[]) => void;
   /** Issue #438: Maximum number of agents that can be selected */
   maxAgents?: number;
+  /** Issue #837: Selectable agent pool for AgentSettingsPane (defaults to all CLI tools) */
+  availableAgents?: readonly CLIToolType[];
+  /** Issue #837: When false, AgentSettingsPane changes are not persisted to the DB */
+  persistToServer?: boolean;
   /** Issue #368: Current vibe-local model selection */
   vibeLocalModel: string | null;
   /** Issue #368: Callback when vibe-local model changes */
@@ -85,6 +89,8 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
   vibeLocalContextWindow,
   onVibeLocalContextWindowChange,
   maxAgents,
+  availableAgents,
+  persistToServer,
   onInsertToMessage,
 }: NotesAndLogsPaneProps) {
   const t = useTranslations('schedule');
@@ -135,6 +141,8 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
             vibeLocalContextWindow={vibeLocalContextWindow}
             onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
             maxAgents={maxAgents}
+            availableAgents={availableAgents}
+            persistToServer={persistToServer}
           />
         )}
         {activeSubTab === 'timer' && (
