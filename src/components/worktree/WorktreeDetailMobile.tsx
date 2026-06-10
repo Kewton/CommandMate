@@ -133,10 +133,19 @@ interface MobileContentProps {
   showToast?: ShowToast;
   /** [Issue #294] CMATE setup callback */
   onCmateSetup?: () => void;
-  /** [Issue #368] Selected agents for Agent tab */
+  /**
+   * [Issue #368 / #837] Agents for the Agent tab. On mobile this is the
+   * localStorage-backed mobile preference (≤2), not the DB `selectedAgents`.
+   */
   selectedAgents: CLIToolType[];
-  /** [Issue #368] Callback when selected agents change */
+  /** [Issue #368 / #837] Callback when selected agents change (mobile: localStorage) */
   onSelectedAgentsChange: (agents: CLIToolType[]) => void;
+  /** [Issue #837] Selectable agent pool for AgentSettingsPane (the DB selection on mobile) */
+  availableAgents?: readonly CLIToolType[];
+  /** [Issue #837] Maximum agents selectable in the Agent tab (2 on mobile) */
+  maxAgents?: number;
+  /** [Issue #837] When false, Agent tab changes are not persisted to the DB */
+  persistToServer?: boolean;
   /** [Issue #368] Current vibe-local model selection */
   vibeLocalModel: string | null;
   /** [Issue #368] Callback when vibe-local model changes */
@@ -223,6 +232,9 @@ export const MobileContent = memo(function MobileContent({
   onCmateSetup,
   selectedAgents,
   onSelectedAgentsChange,
+  availableAgents,
+  maxAgents,
+  persistToServer,
   vibeLocalModel,
   onVibeLocalModelChange,
   vibeLocalContextWindow,
@@ -350,6 +362,9 @@ export const MobileContent = memo(function MobileContent({
             className="h-full"
             selectedAgents={selectedAgents}
             onSelectedAgentsChange={onSelectedAgentsChange}
+            availableAgents={availableAgents}
+            maxAgents={maxAgents}
+            persistToServer={persistToServer}
             vibeLocalModel={vibeLocalModel}
             onVibeLocalModelChange={onVibeLocalModelChange}
             vibeLocalContextWindow={vibeLocalContextWindow}

@@ -48,6 +48,7 @@ import type { AutoYesStopReason } from '@/config/auto-yes-config';
 import type { Worktree, ChatMessage, PromptData, FileContent } from '@/types/models';
 import { isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
 import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
+import { useMobileSelectedAgents } from '@/hooks/useMobileSelectedAgents';
 import { useTranslations } from 'next-intl';
 import { useFileOperations } from '@/hooks/useFileOperations';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
@@ -509,11 +510,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     }
   }, [worktreeId, actions, state.prompt.visible]);
 
-  // Mobile: limit displayed agents to 2 (screen space constraint)
-  const MOBILE_MAX_AGENTS = 2;
-  const displayedAgents = isMobile && selectedAgents.length > MOBILE_MAX_AGENTS
-    ? selectedAgents.slice(0, MOBILE_MAX_AGENTS)
-    : selectedAgents;
+  // Issue #837: Mobile keeps its own agent preference (≤2) in localStorage,
+  // resolved against the DB `selectedAgents` (the PC source of truth) so it
+  // never writes the DB. PC continues to use the full DB selection.
+  const { mobileSelectedAgents, setMobileSelectedAgents } = useMobileSelectedAgents({
+    worktreeId,
+    dbSelectedAgents: selectedAgents,
+  });
+  const displayedAgents = isMobile ? mobileSelectedAgents : selectedAgents;
 
   // Issue #368: Sync activeCliTab when displayedAgents changes
   // If current activeCliTab is no longer in displayedAgents, switch to first agent
@@ -1482,6 +1486,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     loading,
     makeAutoYesToggleHandler,
     mobileFileViewerPath,
+    mobileSelectedAgents,
     moveTarget,
     newFileParentPath,
     openMobileDrawer,
@@ -1494,6 +1499,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     setFocusedSplitIndex,
     setHistorySubTab,
     setIsEditorMaximized,
+    setMobileSelectedAgents,
     setWorktree,
     showArchived,
     showKillConfirm,
