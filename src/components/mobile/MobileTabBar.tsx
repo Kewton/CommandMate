@@ -102,7 +102,7 @@ const TABS: TabConfig[] = [
   { id: 'terminal', label: 'Terminal', icon: <Icon path={ICON_PATHS.terminal} /> },
   { id: 'history', label: 'History', icon: <Icon path={ICON_PATHS.history} /> },
   { id: 'files', label: 'Files', icon: <Icon path={ICON_PATHS.files} /> },
-  { id: 'memo', label: 'CMATE', icon: <Icon path={ICON_PATHS.memo} /> },
+  { id: 'memo', label: 'Notes', icon: <Icon path={ICON_PATHS.memo} /> },
   { id: 'info', label: 'Info', icon: <Icon path={ICON_PATHS.info} /> },
 ];
 
