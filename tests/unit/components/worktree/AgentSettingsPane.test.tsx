@@ -487,6 +487,57 @@ describe('AgentSettingsPane', () => {
       expect(screen.queryByTestId('agent-checkbox-opencode')).toBeNull();
       expect(screen.queryByTestId('agent-checkbox-copilot')).toBeNull();
     });
+
+    // Issue #851: mobile passes availableAgents=CLI_TOOL_IDS and maxAgents=6 so
+    // every CLI tool can be selected, local-only (no DB PATCH).
+    it('should expose all CLI tools and allow selecting up to 6 in local-only mode', async () => {
+      const onSelectedAgentsChange = vi.fn();
+      render(
+        <AgentSettingsPane
+          {...defaultProps}
+          persistToServer={false}
+          maxAgents={6}
+          availableAgents={CLI_TOOL_IDS}
+          selectedAgents={['claude', 'codex']}
+          onSelectedAgentsChange={onSelectedAgentsChange}
+        />
+      );
+
+      // All 6 agents are rendered as checkboxes.
+      for (const id of CLI_TOOL_IDS) {
+        expect(screen.getByTestId(`agent-checkbox-${id}`)).toBeDefined();
+      }
+
+      // Select the four remaining agents -> all 6 selected, none disabled.
+      fireEvent.click(screen.getByTestId('agent-checkbox-gemini'));
+      fireEvent.click(screen.getByTestId('agent-checkbox-vibe-local'));
+      fireEvent.click(screen.getByTestId('agent-checkbox-opencode'));
+      fireEvent.click(screen.getByTestId('agent-checkbox-copilot'));
+
+      await waitFor(() => {
+        expect(onSelectedAgentsChange).toHaveBeenLastCalledWith([
+          'claude',
+          'codex',
+          'gemini',
+          'vibe-local',
+          'opencode',
+          'copilot',
+        ]);
+      });
+      // Independence: never PATCHes the worktree DB (vibe-local may GET the
+      // Ollama model list, but the selection itself must not hit the DB).
+      const patchedDb = mockFetch.mock.calls.some(
+        ([url, init]) =>
+          typeof url === 'string' &&
+          url.includes('/api/worktrees/') &&
+          (init as RequestInit | undefined)?.method === 'PATCH'
+      );
+      expect(patchedDb).toBe(false);
+      // With 6 selected and max 6, no checkbox should be disabled.
+      for (const id of CLI_TOOL_IDS) {
+        expect((screen.getByTestId(`agent-checkbox-${id}`) as HTMLInputElement).disabled).toBe(false);
+      }
+    });
   });
 
   describe('Loading state', () => {

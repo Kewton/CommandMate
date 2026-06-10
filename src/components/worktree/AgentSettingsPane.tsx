@@ -1,9 +1,11 @@
 /**
  * AgentSettingsPane Component
  *
- * UI for selecting 2 CLI tools per worktree.
- * Renders CLI_TOOL_IDS as checkboxes with max 2 selection constraint.
- * When 2 are selected, calls PATCH /api/worktrees/[id] to persist.
+ * UI for selecting the CLI tools used in a worktree.
+ * Renders `availableAgents` as checkboxes, capped at `maxAgents` selections
+ * (PC: 5; mobile: 6 / all agents — Issue #851).
+ * When persisting to the server, a selection of >= 2 calls
+ * PATCH /api/worktrees/[id]; mobile (persistToServer=false) skips the PATCH.
  * Also renders Ollama model dropdown when vibe-local is selected.
  */
 
@@ -31,7 +33,7 @@ export interface AgentSettingsPaneProps {
   selectedAgents: CLIToolType[];
   /** Callback when selected agents change (after successful API persist) */
   onSelectedAgentsChange: (agents: CLIToolType[]) => void;
-  /** Maximum number of agents that can be selected (2 on mobile, 5 on PC) */
+  /** Maximum number of agents that can be selected (6 on mobile, 5 on PC) */
   maxAgents?: number;
   /**
    * Issue #837: The selectable agent pool rendered as checkboxes.
@@ -90,7 +92,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
 }: AgentSettingsPaneProps) {
   const t = useTranslations('schedule');
 
-  // Clamp selectedAgents to maxAgents (e.g. mobile limits to 2)
+  // Clamp selectedAgents to maxAgents (PC: 5, mobile: 6 — Issue #851)
   const clampedAgents = selectedAgents.length > maxAgents
     ? selectedAgents.slice(0, maxAgents)
     : selectedAgents;

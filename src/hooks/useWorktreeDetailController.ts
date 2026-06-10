@@ -510,12 +510,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     }
   }, [worktreeId, actions, state.prompt.visible]);
 
-  // Issue #837: Mobile keeps its own agent preference (≤2) in localStorage,
-  // resolved against the DB `selectedAgents` (the PC source of truth) so it
-  // never writes the DB. PC continues to use the full DB selection.
+  // Issue #837/#851: Mobile keeps its own agent preference in localStorage,
+  // resolved against the full agent pool (CLI_TOOL_IDS) so it can pick any CLI
+  // tool independently of the PC, and never writes the DB. PC continues to use
+  // the full DB selection.
   const { mobileSelectedAgents, setMobileSelectedAgents } = useMobileSelectedAgents({
     worktreeId,
-    dbSelectedAgents: selectedAgents,
   });
   const displayedAgents = isMobile ? mobileSelectedAgents : selectedAgents;
 

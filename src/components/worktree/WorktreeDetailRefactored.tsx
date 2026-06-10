@@ -60,7 +60,8 @@ import { ToastContainer } from '@/components/common/Toast';
 import { Modal } from '@/components/ui/Modal';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
-import { getCliToolDisplayName } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, getCliToolDisplayName } from '@/lib/cli-tools/types';
+import { MOBILE_MAX_AGENTS } from '@/hooks/useMobileSelectedAgents';
 import { deriveCliStatus } from '@/types/sidebar';
 import { MoveDialog } from '@/components/worktree/MoveDialog';
 import { NewFileDialog } from '@/components/worktree/NewFileDialog';
@@ -450,13 +451,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             fileSearch={fileSearch}
             showToast={showToast}
             onCmateSetup={handleCmateSetup}
-            // Issue #837: the Agent tab edits the mobile-only localStorage
-            // preference (≤2) and never the DB. `availableAgents` is the DB
-            // selection (PC source of truth) so picks stay within it.
+            // Issue #837/#851: the Agent tab edits the mobile-only localStorage
+            // preference and never the DB. `availableAgents` is the full agent
+            // pool so mobile can pick any of the CLI tools independently of the
+            // PC, up to MOBILE_MAX_AGENTS.
             selectedAgents={mobileSelectedAgents}
             onSelectedAgentsChange={setMobileSelectedAgents}
-            availableAgents={selectedAgents}
-            maxAgents={2}
+            availableAgents={CLI_TOOL_IDS}
+            maxAgents={MOBILE_MAX_AGENTS}
             persistToServer={false}
             vibeLocalModel={vibeLocalModel}
             onVibeLocalModelChange={handleVibeLocalModelChange}

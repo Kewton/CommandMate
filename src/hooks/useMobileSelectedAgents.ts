@@ -1,5 +1,5 @@
 /**
- * useMobileSelectedAgents Hook (Issue #837)
+ * useMobileSelectedAgents Hook (Issue #837, #851)
  *
  * Decouples the *mobile* agent selection from the PC selection.
  *
@@ -8,15 +8,18 @@
  * DesktopHeader indicators. A mobile user picking 2 agents therefore shrank the
  * PC view to 2.
  *
- * Solution (Option A): mobile keeps its 2-agent preference in localStorage only
+ * Solution (Option A): mobile keeps its agent preference in localStorage only
  * and NEVER writes the DB. PC remains the source of truth (DB `selectedAgents`).
- * The mobile preference is resolved *against* the DB selection so it always
- * references agents the PC has actually activated:
- *   - initial value (no stored preference): the first MOBILE_MAX_AGENTS of the
- *     DB `selectedAgents`
- *   - stored items no longer present in the DB selection are dropped, and the
- *     result is topped up from the DB selection (DB order) so up to
- *     MOBILE_MAX_AGENTS valid agents are always shown.
+ *
+ * Issue #851: the mobile preference is now resolved against the full agent pool
+ * (CLI_TOOL_IDS), NOT the DB `selectedAgents`, so mobile can freely pick any of
+ * the 6 CLI tools — independent of what the PC has activated:
+ *   - initial value (no stored preference): the first MOBILE_DEFAULT_AGENTS of
+ *     CLI_TOOL_IDS (e.g. claude/codex).
+ *   - stored items that are not valid CLI tools are dropped; duplicates are
+ *     removed; the result is capped at MOBILE_MAX_AGENTS.
+ *   - if nothing valid remains, it falls back to the initial default so at
+ *     least one agent (a tab) is always shown.
  *
  * @module hooks/useMobileSelectedAgents
  */
@@ -24,10 +27,20 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
 
-/** Maximum number of agents shown on mobile (screen-space constraint). */
-export const MOBILE_MAX_AGENTS = 2;
+/**
+ * Maximum number of agents selectable on mobile.
+ * Issue #851: raised to the full agent count so mobile can pick every CLI tool.
+ */
+export const MOBILE_MAX_AGENTS = CLI_TOOL_IDS.length;
+
+/**
+ * Number of agents shown by default on mobile when no preference is stored.
+ * Kept small (vs. MOBILE_MAX_AGENTS) so first-visit mobile users see a tidy set
+ * of tabs rather than all agents at once (Issue #851 留意: 6 tabs is cramped).
+ */
+export const MOBILE_DEFAULT_AGENTS = 2;
 
 /** localStorage key prefix for the per-worktree mobile agent preference. */
 export const MOBILE_SELECTED_AGENTS_KEY_PREFIX = 'commandmate:worktree:mobileAgents:';
@@ -40,34 +53,34 @@ export function mobileSelectedAgentsKey(worktreeId: string): string {
 export interface UseMobileSelectedAgentsOptions {
   /** Worktree ID (scopes the localStorage key). */
   worktreeId: string;
-  /** DB `selectedAgents` (the PC source of truth). */
-  dbSelectedAgents: CLIToolType[];
 }
 
 export interface UseMobileSelectedAgentsReturn {
-  /** Resolved mobile selection: a subset of dbSelectedAgents, up to MOBILE_MAX_AGENTS. */
+  /** Resolved mobile selection: valid CLI tools, up to MOBILE_MAX_AGENTS. */
   mobileSelectedAgents: CLIToolType[];
   /** Persist a new mobile selection to localStorage (capped at MOBILE_MAX_AGENTS). */
   setMobileSelectedAgents: (agents: CLIToolType[]) => void;
 }
 
 /**
- * Resolve a raw stored preference against the current DB selection.
+ * Resolve a raw stored preference against the full agent pool.
  *
- * Guarantees the result is a subset of `db` containing up to MOBILE_MAX_AGENTS
- * entries, preferring the stored order and topping up from the DB order.
+ * Issue #851: resolution is against `pool` (all CLI tools by default), NOT the
+ * PC's DB selection, so mobile may pick any agent. Guarantees the result is a
+ * deduped subset of `pool` containing up to MOBILE_MAX_AGENTS entries in stored
+ * order. When nothing valid remains, it falls back to the first
+ * MOBILE_DEFAULT_AGENTS of `pool` so at least one tab is always shown (MIN=1).
  */
 export function resolveMobileAgents(
   raw: CLIToolType[] | null,
-  db: CLIToolType[]
+  pool: readonly CLIToolType[] = CLI_TOOL_IDS
 ): CLIToolType[] {
-  const target = Math.min(MOBILE_MAX_AGENTS, db.length);
   const result: CLIToolType[] = [];
 
   if (raw) {
     for (const agent of raw) {
       if (
-        db.includes(agent) &&
+        pool.includes(agent) &&
         !result.includes(agent) &&
         result.length < MOBILE_MAX_AGENTS
       ) {
@@ -76,10 +89,12 @@ export function resolveMobileAgents(
     }
   }
 
-  // Top up from the DB selection (DB order) to reach the target count.
-  for (const agent of db) {
-    if (result.length >= target) break;
-    if (!result.includes(agent)) {
+  // Fall back to the initial default when no valid preference resolved
+  // (first visit, or a stored preference that filtered to empty).
+  if (result.length === 0) {
+    const target = Math.min(MOBILE_DEFAULT_AGENTS, pool.length);
+    for (const agent of pool) {
+      if (result.length >= target) break;
       result.push(agent);
     }
   }
@@ -122,7 +137,6 @@ function writeStoredPreference(worktreeId: string, agents: CLIToolType[]): void 
  */
 export function useMobileSelectedAgents({
   worktreeId,
-  dbSelectedAgents,
 }: UseMobileSelectedAgentsOptions): UseMobileSelectedAgentsReturn {
   // Raw stored preference (null until read from localStorage on mount).
   const [raw, setRaw] = useState<CLIToolType[] | null>(null);
@@ -132,9 +146,11 @@ export function useMobileSelectedAgents({
     setRaw(readStoredPreference(worktreeId));
   }, [worktreeId]);
 
+  // Issue #851: resolved against the full agent pool (CLI_TOOL_IDS), so mobile
+  // is independent of the PC's DB selection.
   const mobileSelectedAgents = useMemo(
-    () => resolveMobileAgents(raw, dbSelectedAgents),
-    [raw, dbSelectedAgents]
+    () => resolveMobileAgents(raw),
+    [raw]
   );
 
   const setMobileSelectedAgents = useCallback(
