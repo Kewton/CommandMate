@@ -58,6 +58,7 @@ vi.mock('@/contexts/WorktreeSelectionContext', () => ({
 import {
   WorktreesCacheProvider,
   useWorktreesCacheContext,
+  useOptionalWorktreesCacheContext,
 } from '@/components/providers/WorktreesCacheProvider';
 
 // ---------------------------------------------------------------------------
@@ -106,6 +107,16 @@ function ContextConsumer() {
         refresh
       </button>
     </div>
+  );
+}
+
+/** Consumer for the non-throwing optional context reader (Issue #839). */
+function OptionalContextConsumer() {
+  const ctx = useOptionalWorktreesCacheContext();
+  return (
+    <span data-testid="optional-ctx">
+      {ctx === null ? 'null' : `count:${ctx.worktrees.length}`}
+    </span>
   );
 }
 
@@ -193,5 +204,25 @@ describe('WorktreesCacheProvider', () => {
     );
 
     errorSpy.mockRestore();
+  });
+
+  // Issue #839: the optional reader must degrade gracefully instead of throwing
+  // so the worktree detail controller can use it as a best-effort optimization.
+  it('useOptionalWorktreesCacheContext returns null outside the Provider (no throw)', () => {
+    render(<OptionalContextConsumer />);
+
+    expect(screen.getByTestId('optional-ctx').textContent).toBe('null');
+  });
+
+  it('useOptionalWorktreesCacheContext exposes the cache when inside the Provider', () => {
+    mockCacheState.worktrees = [makeWorktree({ id: 'wt-a' })];
+
+    render(
+      <WorktreesCacheProvider>
+        <OptionalContextConsumer />
+      </WorktreesCacheProvider>
+    );
+
+    expect(screen.getByTestId('optional-ctx').textContent).toBe('count:1');
   });
 });

@@ -11,6 +11,7 @@
 'use client';
 
 import React, { useMemo, useCallback, memo, useRef, useLayoutEffect, useState, useEffect } from 'react';
+import { useTranslations } from 'next-intl';
 import { Search, User, UserCheck, ChevronRight } from 'lucide-react';
 import type { ChatMessage } from '@/types/models';
 import { useConversationHistory } from '@/hooks/useConversationHistory';
@@ -232,6 +233,7 @@ export const HistoryPane = memo(function HistoryPane({
   splitIndex,
   cliToolId: _cliToolId,
 }: HistoryPaneProps) {
+  const t = useTranslations('worktree');
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Issue #744: per-split CSS highlight namespace. When this pane is inside a
@@ -560,11 +562,11 @@ export const HistoryPane = memo(function HistoryPane({
             <button
               type="button"
               onClick={onCollapse}
-              aria-label="Collapse history panel"
+              aria-label={t('terminal.hideHistory')}
               aria-expanded="true"
               aria-controls={collapseAriaControls}
               className="p-1 text-gray-400 hover:text-gray-200 rounded transition-colors"
-              title="Collapse history panel"
+              title={t('terminal.hideHistory')}
               data-testid={collapseTestId}
             >
               <ChevronRight size={14} aria-hidden="true" />

@@ -47,5 +47,13 @@
     "version": "Version",
     "installTypeGlobal": "npm (global)",
     "installTypeLocal": "Local (git pull)"
+  },
+  "terminal": {
+    "historyLabel": "History",
+    "filesLabel": "Files",
+    "showHistory": "Show history",
+    "hideHistory": "Hide history",
+    "showFiles": "Show files",
+    "hideFiles": "Hide files"
   }
 }

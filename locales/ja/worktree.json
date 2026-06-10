@@ -47,5 +47,13 @@
     "version": "バージョン",
     "installTypeGlobal": "npm（グローバル）",
     "installTypeLocal": "ローカル（git pull）"
+  },
+  "terminal": {
+    "historyLabel": "履歴",
+    "filesLabel": "ファイル",
+    "showHistory": "履歴を表示",
+    "hideHistory": "履歴を非表示",
+    "showFiles": "ファイルを表示",
+    "hideFiles": "ファイルを非表示"
   }
 }

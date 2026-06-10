@@ -98,6 +98,35 @@ describe('AgentSettingsPane', () => {
       expect(codexCheckbox.disabled).toBe(false);
     });
 
+    // Issue #836: PC passes maxAgents={5}; up to 5 agents may be selected.
+    it('should allow up to maxAgents=5 selections before disabling unchecked items', () => {
+      render(
+        <AgentSettingsPane
+          {...defaultProps}
+          maxAgents={5}
+          selectedAgents={['claude', 'codex', 'gemini', 'opencode']}
+        />
+      );
+
+      // 4 of 5 slots used -> the remaining unchecked tool is still enabled
+      const copilotCheckbox = screen.getByTestId('agent-checkbox-copilot') as HTMLInputElement;
+      expect(copilotCheckbox.disabled).toBe(false);
+    });
+
+    it('should disable unchecked items once maxAgents=5 are selected', () => {
+      render(
+        <AgentSettingsPane
+          {...defaultProps}
+          maxAgents={5}
+          selectedAgents={['claude', 'codex', 'gemini', 'opencode', 'copilot']}
+        />
+      );
+
+      // All 5 slots used -> remaining unchecked tool is disabled
+      const vibeLocalCheckbox = screen.getByTestId('agent-checkbox-vibe-local') as HTMLInputElement;
+      expect(vibeLocalCheckbox.disabled).toBe(true);
+    });
+
     it('should display CLI tool display names', () => {
       render(<AgentSettingsPane {...defaultProps} />);
 
@@ -411,6 +440,103 @@ describe('AgentSettingsPane', () => {
       await waitFor(() => {
         expect(input.value).toBe('4096');
       });
+    });
+  });
+
+  // Issue #837: Mobile selection is local-only (localStorage); it must not PATCH
+  // the DB, and the selectable pool can be restricted to the DB selection.
+  describe('Mobile local-only mode (Issue #837)', () => {
+    it('should NOT call the DB API when persistToServer=false, only the change callback', async () => {
+      const onSelectedAgentsChange = vi.fn();
+      render(
+        <AgentSettingsPane
+          {...defaultProps}
+          persistToServer={false}
+          maxAgents={2}
+          selectedAgents={['claude', 'codex']}
+          onSelectedAgentsChange={onSelectedAgentsChange}
+        />
+      );
+
+      // Uncheck claude (only 1 left -> no callback yet)
+      fireEvent.click(screen.getByTestId('agent-checkbox-claude'));
+      // Check gemini -> 2 selected -> caller callback fires, but no PATCH
+      fireEvent.click(screen.getByTestId('agent-checkbox-gemini'));
+
+      await waitFor(() => {
+        expect(onSelectedAgentsChange).toHaveBeenCalledWith(['codex', 'gemini']);
+      });
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('should only render checkboxes for availableAgents', () => {
+      render(
+        <AgentSettingsPane
+          {...defaultProps}
+          maxAgents={2}
+          availableAgents={['claude', 'codex', 'gemini']}
+          selectedAgents={['claude', 'codex']}
+        />
+      );
+
+      expect(screen.getByTestId('agent-checkbox-claude')).toBeDefined();
+      expect(screen.getByTestId('agent-checkbox-codex')).toBeDefined();
+      expect(screen.getByTestId('agent-checkbox-gemini')).toBeDefined();
+      // Not in availableAgents -> not rendered
+      expect(screen.queryByTestId('agent-checkbox-vibe-local')).toBeNull();
+      expect(screen.queryByTestId('agent-checkbox-opencode')).toBeNull();
+      expect(screen.queryByTestId('agent-checkbox-copilot')).toBeNull();
+    });
+
+    // Issue #851: mobile passes availableAgents=CLI_TOOL_IDS and maxAgents=6 so
+    // every CLI tool can be selected, local-only (no DB PATCH).
+    it('should expose all CLI tools and allow selecting up to 6 in local-only mode', async () => {
+      const onSelectedAgentsChange = vi.fn();
+      render(
+        <AgentSettingsPane
+          {...defaultProps}
+          persistToServer={false}
+          maxAgents={6}
+          availableAgents={CLI_TOOL_IDS}
+          selectedAgents={['claude', 'codex']}
+          onSelectedAgentsChange={onSelectedAgentsChange}
+        />
+      );
+
+      // All 6 agents are rendered as checkboxes.
+      for (const id of CLI_TOOL_IDS) {
+        expect(screen.getByTestId(`agent-checkbox-${id}`)).toBeDefined();
+      }
+
+      // Select the four remaining agents -> all 6 selected, none disabled.
+      fireEvent.click(screen.getByTestId('agent-checkbox-gemini'));
+      fireEvent.click(screen.getByTestId('agent-checkbox-vibe-local'));
+      fireEvent.click(screen.getByTestId('agent-checkbox-opencode'));
+      fireEvent.click(screen.getByTestId('agent-checkbox-copilot'));
+
+      await waitFor(() => {
+        expect(onSelectedAgentsChange).toHaveBeenLastCalledWith([
+          'claude',
+          'codex',
+          'gemini',
+          'vibe-local',
+          'opencode',
+          'copilot',
+        ]);
+      });
+      // Independence: never PATCHes the worktree DB (vibe-local may GET the
+      // Ollama model list, but the selection itself must not hit the DB).
+      const patchedDb = mockFetch.mock.calls.some(
+        ([url, init]) =>
+          typeof url === 'string' &&
+          url.includes('/api/worktrees/') &&
+          (init as RequestInit | undefined)?.method === 'PATCH'
+      );
+      expect(patchedDb).toBe(false);
+      // With 6 selected and max 6, no checkbox should be disabled.
+      for (const id of CLI_TOOL_IDS) {
+        expect((screen.getByTestId(`agent-checkbox-${id}`) as HTMLInputElement).disabled).toBe(false);
+      }
     });
   });
 

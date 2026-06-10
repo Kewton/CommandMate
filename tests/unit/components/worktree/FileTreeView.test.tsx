@@ -93,6 +93,30 @@ describe('FileTreeView', () => {
     });
   });
 
+  // [Issue #852] Full filename on hover via native title tooltip for truncated names
+  describe('Filename tooltip (Issue #852)', () => {
+    it('should set title attribute with full name on file name span', async () => {
+      render(<FileTreeView worktreeId="test-worktree" />);
+
+      await waitFor(() => {
+        expect(screen.getByText('package.json')).toBeInTheDocument();
+      });
+
+      expect(screen.getByText('package.json')).toHaveAttribute('title', 'package.json');
+      expect(screen.getByText('README.md')).toHaveAttribute('title', 'README.md');
+    });
+
+    it('should set title attribute with full name on directory name span', async () => {
+      render(<FileTreeView worktreeId="test-worktree" />);
+
+      await waitFor(() => {
+        expect(screen.getByText('src')).toBeInTheDocument();
+      });
+
+      expect(screen.getByText('src')).toHaveAttribute('title', 'src');
+    });
+  });
+
   describe('Directory expand/collapse', () => {
     it('should show chevron icon for directories', async () => {
       render(<FileTreeView worktreeId="test-worktree" />);

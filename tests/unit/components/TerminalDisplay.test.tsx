@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 
 describe('TerminalDisplay', () => {
@@ -304,6 +304,50 @@ describe('TerminalDisplay', () => {
         window.dispatchEvent(new CustomEvent('terminal-search-open'));
       });
       expect(screen.getByRole('textbox')).toBeInTheDocument();
+    });
+  });
+
+  // ============================================================================
+  // [Issue #842] Session-ended placeholder (distinguish loading / not-started / ended)
+  // ============================================================================
+
+  describe('[Issue #842] Session-ended placeholder', () => {
+    afterEach(() => {
+      cleanup();
+    });
+
+    it('shows the ended placeholder after an active session goes inactive with empty output', () => {
+      const { rerender } = render(
+        <TerminalDisplay output="running output" isActive={true} attaching={false} />,
+      );
+      // Kill / natural termination: session becomes inactive and output is cleared.
+      rerender(<TerminalDisplay output="" isActive={false} attaching={false} />);
+      expect(screen.getByTestId('terminal-ended-placeholder')).toBeInTheDocument();
+    });
+
+    it('does NOT show the ended placeholder while attaching (loading)', () => {
+      render(<TerminalDisplay output="" isActive={false} attaching={true} />);
+      expect(screen.queryByTestId('terminal-ended-placeholder')).not.toBeInTheDocument();
+    });
+
+    it('does NOT show the ended placeholder for a never-started session', () => {
+      render(<TerminalDisplay output="" isActive={false} attaching={false} />);
+      expect(screen.queryByTestId('terminal-ended-placeholder')).not.toBeInTheDocument();
+    });
+
+    it('does NOT show the ended placeholder while output is present', () => {
+      render(<TerminalDisplay output="still has content" isActive={false} attaching={false} />);
+      expect(screen.queryByTestId('terminal-ended-placeholder')).not.toBeInTheDocument();
+    });
+
+    it('shows a loading placeholder while attaching with no output', () => {
+      render(<TerminalDisplay output="" isActive={false} attaching={true} />);
+      expect(screen.getByTestId('terminal-loading-placeholder')).toBeInTheDocument();
+    });
+
+    it('does NOT show the loading placeholder once output has arrived', () => {
+      render(<TerminalDisplay output="arrived" isActive={true} attaching={false} />);
+      expect(screen.queryByTestId('terminal-loading-placeholder')).not.toBeInTheDocument();
     });
   });
 });

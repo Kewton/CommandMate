@@ -150,10 +150,13 @@ describe('sidebar types', () => {
 
       const result = toBranchItem(worktree);
 
+      // Issue #836: default fallback is now 5 agents
       expect(result.cliStatus).toEqual({
         claude: 'running',
         codex: 'waiting',
         gemini: 'idle',
+        opencode: 'idle',
+        copilot: 'idle',
       });
     });
 
@@ -168,10 +171,13 @@ describe('sidebar types', () => {
 
       const result = toBranchItem(worktree);
 
+      // Issue #836: default fallback is now 5 agents
       expect(result.cliStatus).toEqual({
         claude: 'idle',
         codex: 'idle',
         gemini: 'idle',
+        opencode: 'idle',
+        copilot: 'idle',
       });
     });
 
@@ -232,11 +238,14 @@ describe('sidebar types', () => {
 
       const result = toBranchItem(worktree);
 
-      // DEFAULT_SELECTED_AGENTS is ['claude', 'codex', 'gemini']
+      // Issue #836: DEFAULT_SELECTED_AGENTS is
+      // ['claude', 'codex', 'gemini', 'opencode', 'copilot']
       expect(result.cliStatus).toEqual({
         claude: 'idle',
         codex: 'idle',
         gemini: 'idle',
+        opencode: 'idle',
+        copilot: 'idle',
       });
     });
 

@@ -1,9 +1,11 @@
 /**
  * AgentSettingsPane Component
  *
- * UI for selecting 2 CLI tools per worktree.
- * Renders CLI_TOOL_IDS as checkboxes with max 2 selection constraint.
- * When 2 are selected, calls PATCH /api/worktrees/[id] to persist.
+ * UI for selecting the CLI tools used in a worktree.
+ * Renders `availableAgents` as checkboxes, capped at `maxAgents` selections
+ * (PC: 5; mobile: 6 / all agents — Issue #851).
+ * When persisting to the server, a selection of >= 2 calls
+ * PATCH /api/worktrees/[id]; mobile (persistToServer=false) skips the PATCH.
  * Also renders Ollama model dropdown when vibe-local is selected.
  */
 
@@ -31,8 +33,20 @@ export interface AgentSettingsPaneProps {
   selectedAgents: CLIToolType[];
   /** Callback when selected agents change (after successful API persist) */
   onSelectedAgentsChange: (agents: CLIToolType[]) => void;
-  /** Maximum number of agents that can be selected (2 on mobile, 4 on PC) */
+  /** Maximum number of agents that can be selected (6 on mobile, 5 on PC) */
   maxAgents?: number;
+  /**
+   * Issue #837: The selectable agent pool rendered as checkboxes.
+   * Defaults to all CLI tools. Mobile passes the DB `selectedAgents` so the
+   * local preference can only pick from agents the PC has activated.
+   */
+  availableAgents?: readonly CLIToolType[];
+  /**
+   * Issue #837: When false, a selection change is NOT persisted to the DB
+   * (no PATCH); only `onSelectedAgentsChange` is invoked so the caller can
+   * persist elsewhere (e.g. localStorage on mobile). Defaults to true.
+   */
+  persistToServer?: boolean;
   /** Current vibe-local model selection (null = default) */
   vibeLocalModel: string | null;
   /** Callback when vibe-local model changes */
@@ -73,10 +87,12 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
   vibeLocalContextWindow,
   onVibeLocalContextWindowChange,
   maxAgents = DEFAULT_MAX_AGENTS,
+  availableAgents = CLI_TOOL_IDS,
+  persistToServer = true,
 }: AgentSettingsPaneProps) {
   const t = useTranslations('schedule');
 
-  // Clamp selectedAgents to maxAgents (e.g. mobile limits to 2)
+  // Clamp selectedAgents to maxAgents (PC: 5, mobile: 6 — Issue #851)
   const clampedAgents = selectedAgents.length > maxAgents
     ? selectedAgents.slice(0, maxAgents)
     : selectedAgents;
@@ -166,6 +182,17 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
       // Persist when at least MIN_AGENTS_FOR_PERSIST are selected
       if (next.size >= MIN_AGENTS_FOR_PERSIST) {
         const pair = Array.from(next) as CLIToolType[];
+
+        // Issue #837: Mobile preference is local-only — never write the DB.
+        // Hand the new pair to the caller (localStorage) and skip the PATCH so
+        // the PC's DB `selectedAgents` (its source of truth) stays unchanged.
+        if (!persistToServer) {
+          setCheckedIds(new Set(pair));
+          onSelectedAgentsChange(pair);
+          setIsEditing(false);
+          return;
+        }
+
         setSaving(true);
         try {
           const response = await fetch(`/api/worktrees/${worktreeId}`, {
@@ -189,7 +216,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
         }
       }
     },
-    [worktreeId, clampedAgents, onSelectedAgentsChange]
+    [worktreeId, clampedAgents, onSelectedAgentsChange, persistToServer]
   );
 
   const handleModelChange = useCallback(
@@ -272,7 +299,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
       </p>
 
       <div className="space-y-3">
-        {CLI_TOOL_IDS.map((toolId) => {
+        {availableAgents.map((toolId) => {
           const isChecked = checkedIds.has(toolId);
           const isDisabled = !isChecked && isMaxSelected;
 

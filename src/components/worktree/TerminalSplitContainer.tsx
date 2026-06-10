@@ -5,6 +5,9 @@
  *  - split configuration via `useTerminalSplits` (worktreeId-scoped)
  *  - add / remove buttons (disabled at the MIN / MAX boundary and while
  *    a PaneResizer drag is in progress)
+ *  - History / Files visibility toggles in the Action bar (Issue #841): a
+ *    second entry point alongside the existing vertical collapse strips, both
+ *    reading the same persisted state (useHistoryPaneState / useFilePanelState)
  *  - PaneResizer widget(s) between splits, with width persistence
  *  - delegating each split's body to a parent-supplied `renderPane`
  *
@@ -26,10 +29,14 @@ import React, {
   useState,
   type ReactNode,
 } from 'react';
+import { useTranslations } from 'next-intl';
+import { History, Files } from 'lucide-react';
 import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
 import type { ShowToast } from '@/types/markdown-editor';
 import { MAX_SPLITS, MIN_SPLITS } from '@/config/terminal-split-config';
 import { useTerminalSplits } from '@/hooks/useTerminalSplits';
+import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
+import { useFilePanelState } from '@/hooks/useFilePanelState';
 import { PaneResizer } from './PaneResizer';
 
 /** Render-prop signature: each pane is supplied externally so the
@@ -89,6 +96,19 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     focusedSplitIndex,
     setFocusedSplitIndex,
   } = useTerminalSplits(worktreeId);
+
+  const t = useTranslations('worktree');
+
+  // Issue #841 (Phase 2): the Action bar hosts History / Files visibility
+  // toggles. These hooks broadcast across instances (useHistoryPaneState /
+  // useFilePanelState), so toggling here is the single source of truth shared
+  // with the existing vertical collapse strips — both stay in sync.
+  const { visible: historyVisible, toggle: toggleHistory } =
+    useHistoryPaneState();
+  const { collapsed: filePanelCollapsed, toggle: toggleFilePanel } =
+    useFilePanelState();
+  // The file panel hook stores `collapsed`; "Files visible" is its inverse.
+  const filesVisible = !filePanelCollapsed;
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [isResizing, setIsResizing] = useState(false);
@@ -219,6 +239,58 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
         <span className="text-xs text-gray-500 dark:text-gray-400">
           {splits.length} / {MAX_SPLITS} splits
         </span>
+
+        {/*
+          Issue #841 (Phase 2): History / Files visibility toggles. Always
+          shown (split-count independent). Active = cyan accent, inactive =
+          gray. `aria-pressed` reflects current visibility. The existing
+          vertical collapse strips remain and share this state (SSOT).
+        */}
+        <button
+          type="button"
+          onClick={toggleHistory}
+          aria-pressed={historyVisible}
+          aria-label={
+            historyVisible
+              ? t('terminal.hideHistory')
+              : t('terminal.showHistory')
+          }
+          title={
+            historyVisible
+              ? t('terminal.hideHistory')
+              : t('terminal.showHistory')
+          }
+          data-testid="toggle-history-pane"
+          className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors ${
+            historyVisible
+              ? 'border-cyan-300 dark:border-cyan-700 bg-cyan-50 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300'
+              : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+          }`}
+        >
+          <History className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+          <span>{t('terminal.historyLabel')}</span>
+        </button>
+        <button
+          type="button"
+          onClick={toggleFilePanel}
+          aria-pressed={filesVisible}
+          aria-label={
+            filesVisible ? t('terminal.hideFiles') : t('terminal.showFiles')
+          }
+          title={
+            filesVisible ? t('terminal.hideFiles') : t('terminal.showFiles')
+          }
+          data-testid="toggle-file-panel"
+          className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors ${
+            filesVisible
+              ? 'border-cyan-300 dark:border-cyan-700 bg-cyan-50 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300'
+              : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+          }`}
+        >
+          <Files className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+          <span>{t('terminal.filesLabel')}</span>
+        </button>
+
         <button
           type="button"
           onClick={addSplit}
