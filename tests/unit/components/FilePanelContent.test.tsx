@@ -163,6 +163,18 @@ describe('FilePanelContent', () => {
       expect(codeElement).toBeInTheDocument();
     });
 
+    // [Issue #852] Full file path on hover via native title tooltip for truncated path
+    it('should set title attribute with full path on toolbar path span', () => {
+      const content = createContent({
+        content: 'const x = 1;',
+        extension: 'ts',
+      });
+      const tab = createTab({ content });
+      render(<FilePanelContent tab={tab} {...defaultProps} />);
+
+      expect(screen.getByText('src/index.ts')).toHaveAttribute('title', 'src/index.ts');
+    });
+
     // [Issue #723] Virtualization test — synthesise a 10,000-line file and
     // assert that mounted rows are far fewer than the total line count.
     it('virtualizes large files so DOM only contains visible rows (Issue #723)', () => {

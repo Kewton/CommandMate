@@ -199,7 +199,8 @@ function FileToolbar({ filePath, isMaximized, onToggleMaximize, copyableContent,
         >
           {pathCopied ? <Check className="w-3.5 h-3.5 text-green-600" /> : <ClipboardCopy className="w-3.5 h-3.5" />}
         </button>
-        <span className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate">{filePath}</span>
+        {/* [Issue #852] title shows full path on hover when truncated */}
+        <span className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate" title={filePath}>{filePath}</span>
       </div>
       <div className="flex items-center gap-1 flex-shrink-0">
         {/* [Issue #47] File content search button */}
