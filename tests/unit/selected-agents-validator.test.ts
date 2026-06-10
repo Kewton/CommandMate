@@ -12,6 +12,23 @@ import {
 } from '@/lib/selected-agents-validator';
 
 
+describe('DEFAULT_SELECTED_AGENTS (Issue #836)', () => {
+  it('should default to 5 PC agents: claude/codex/gemini/opencode/copilot', () => {
+    expect(DEFAULT_SELECTED_AGENTS).toEqual([
+      'claude',
+      'codex',
+      'gemini',
+      'opencode',
+      'copilot',
+    ]);
+  });
+
+  it('should itself be a valid agents pair (2-5 unique valid IDs)', () => {
+    const result = validateAgentsPair(DEFAULT_SELECTED_AGENTS);
+    expect(result.valid).toBe(true);
+  });
+});
+
 describe('validateAgentsPair()', () => {
   it('should return valid for a correct pair of tool IDs', () => {
     const result = validateAgentsPair(['claude', 'codex']);
@@ -33,7 +50,7 @@ describe('validateAgentsPair()', () => {
     expect(result3.value).toEqual(['vibe-local', 'claude']);
   });
 
-  it('should return valid for 3 or 4 tool IDs', () => {
+  it('should return valid for 3, 4, or 5 tool IDs', () => {
     const result3 = validateAgentsPair(['claude', 'codex', 'gemini']);
     expect(result3.valid).toBe(true);
     expect(result3.value).toEqual(['claude', 'codex', 'gemini']);
@@ -41,18 +58,24 @@ describe('validateAgentsPair()', () => {
     const result4 = validateAgentsPair(['claude', 'codex', 'gemini', 'vibe-local']);
     expect(result4.valid).toBe(true);
     expect(result4.value).toEqual(['claude', 'codex', 'gemini', 'vibe-local']);
+
+    // Issue #836: PC default expands to 5 agents
+    const result5 = validateAgentsPair(['claude', 'codex', 'gemini', 'opencode', 'copilot']);
+    expect(result5.valid).toBe(true);
+    expect(result5.value).toEqual(['claude', 'codex', 'gemini', 'opencode', 'copilot']);
   });
 
-  it('should return invalid for arrays with length < 2 or > 4', () => {
+  it('should return invalid for arrays with length < 2 or > 5', () => {
     const result1 = validateAgentsPair([]);
     expect(result1.valid).toBe(false);
-    expect(result1.error).toContain('2-4 elements');
+    expect(result1.error).toContain('2-5 elements');
 
     const result2 = validateAgentsPair(['claude']);
     expect(result2.valid).toBe(false);
 
-    const result5 = validateAgentsPair(['claude', 'codex', 'gemini', 'vibe-local', 'opencode']);
-    expect(result5.valid).toBe(false);
+    // Issue #836: 6 elements (all CLI tool IDs) exceeds the new MAX of 5
+    const result6 = validateAgentsPair(['claude', 'codex', 'gemini', 'vibe-local', 'opencode', 'copilot']);
+    expect(result6.valid).toBe(false);
   });
 
   it('should return invalid for non-string elements', () => {
@@ -106,12 +129,16 @@ describe('parseSelectedAgents()', () => {
     expect(result).toEqual(DEFAULT_SELECTED_AGENTS);
   });
 
-  it('should parse valid JSON with 3 or 4 agents', () => {
+  it('should parse valid JSON with 3, 4, or 5 agents', () => {
     const result3 = parseSelectedAgents('["claude","codex","gemini"]');
     expect(result3).toEqual(['claude', 'codex', 'gemini']);
 
     const result4 = parseSelectedAgents('["claude","codex","gemini","vibe-local"]');
     expect(result4).toEqual(['claude', 'codex', 'gemini', 'vibe-local']);
+
+    // Issue #836: PC default expands to 5 agents
+    const result5 = parseSelectedAgents('["claude","codex","gemini","opencode","copilot"]');
+    expect(result5).toEqual(['claude', 'codex', 'gemini', 'opencode', 'copilot']);
   });
 
   it('should return default for array with wrong length', () => {
@@ -143,19 +170,24 @@ describe('validateSelectedAgentsInput()', () => {
     expect(result.value).toEqual(['claude', 'codex']);
   });
 
-  it('should return valid for 3 or 4 agents', () => {
+  it('should return valid for 3, 4, or 5 agents', () => {
     const result3 = validateSelectedAgentsInput(['claude', 'codex', 'gemini']);
     expect(result3.valid).toBe(true);
     expect(result3.value).toEqual(['claude', 'codex', 'gemini']);
 
     const result4 = validateSelectedAgentsInput(['claude', 'codex', 'gemini', 'vibe-local']);
     expect(result4.valid).toBe(true);
+
+    // Issue #836: PC default expands to 5 agents
+    const result5 = validateSelectedAgentsInput(['claude', 'codex', 'gemini', 'opencode', 'copilot']);
+    expect(result5.valid).toBe(true);
+    expect(result5.value).toEqual(['claude', 'codex', 'gemini', 'opencode', 'copilot']);
   });
 
   it('should return invalid for non-array input', () => {
     const result = validateSelectedAgentsInput('claude,codex');
     expect(result.valid).toBe(false);
-    expect(result.error).toContain('array of 2-4 elements');
+    expect(result.error).toContain('array of 2-5 elements');
   });
 
   it('should return invalid for null input', () => {
@@ -167,8 +199,9 @@ describe('validateSelectedAgentsInput()', () => {
     const result1 = validateSelectedAgentsInput(['claude']);
     expect(result1.valid).toBe(false);
 
-    const result5 = validateSelectedAgentsInput(['claude', 'codex', 'gemini', 'vibe-local', 'opencode']);
-    expect(result5.valid).toBe(false);
+    // Issue #836: 6 elements (all CLI tool IDs) exceeds the new MAX of 5
+    const result6 = validateSelectedAgentsInput(['claude', 'codex', 'gemini', 'vibe-local', 'opencode', 'copilot']);
+    expect(result6.valid).toBe(false);
   });
 
   it('should return invalid for invalid tool IDs', () => {
