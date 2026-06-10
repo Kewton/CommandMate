@@ -135,14 +135,14 @@ interface MobileContentProps {
   onCmateSetup?: () => void;
   /**
    * [Issue #368 / #837] Agents for the Agent tab. On mobile this is the
-   * localStorage-backed mobile preference (≤2), not the DB `selectedAgents`.
+   * localStorage-backed mobile preference, not the DB `selectedAgents`.
    */
   selectedAgents: CLIToolType[];
   /** [Issue #368 / #837] Callback when selected agents change (mobile: localStorage) */
   onSelectedAgentsChange: (agents: CLIToolType[]) => void;
-  /** [Issue #837] Selectable agent pool for AgentSettingsPane (the DB selection on mobile) */
+  /** [Issue #837 / #851] Selectable agent pool for AgentSettingsPane (all CLI tools on mobile) */
   availableAgents?: readonly CLIToolType[];
-  /** [Issue #837] Maximum agents selectable in the Agent tab (2 on mobile) */
+  /** [Issue #837 / #851] Maximum agents selectable in the Agent tab (6 / all on mobile) */
   maxAgents?: number;
   /** [Issue #837] When false, Agent tab changes are not persisted to the DB */
   persistToServer?: boolean;
