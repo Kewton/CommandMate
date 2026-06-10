@@ -98,6 +98,35 @@ describe('AgentSettingsPane', () => {
       expect(codexCheckbox.disabled).toBe(false);
     });
 
+    // Issue #836: PC passes maxAgents={5}; up to 5 agents may be selected.
+    it('should allow up to maxAgents=5 selections before disabling unchecked items', () => {
+      render(
+        <AgentSettingsPane
+          {...defaultProps}
+          maxAgents={5}
+          selectedAgents={['claude', 'codex', 'gemini', 'opencode']}
+        />
+      );
+
+      // 4 of 5 slots used -> the remaining unchecked tool is still enabled
+      const copilotCheckbox = screen.getByTestId('agent-checkbox-copilot') as HTMLInputElement;
+      expect(copilotCheckbox.disabled).toBe(false);
+    });
+
+    it('should disable unchecked items once maxAgents=5 are selected', () => {
+      render(
+        <AgentSettingsPane
+          {...defaultProps}
+          maxAgents={5}
+          selectedAgents={['claude', 'codex', 'gemini', 'opencode', 'copilot']}
+        />
+      );
+
+      // All 5 slots used -> remaining unchecked tool is disabled
+      const vibeLocalCheckbox = screen.getByTestId('agent-checkbox-vibe-local') as HTMLInputElement;
+      expect(vibeLocalCheckbox.disabled).toBe(true);
+    });
+
     it('should display CLI tool display names', () => {
       render(<AgentSettingsPane {...defaultProps} />);
 

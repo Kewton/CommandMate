@@ -13,15 +13,18 @@ import { CLI_TOOL_IDS, type CLIToolType } from './cli-tools/types';
 /** Minimum number of selected agents */
 export const MIN_SELECTED_AGENTS = 2;
 
-/** Maximum number of selected agents (PC can select up to 4) */
-export const MAX_SELECTED_AGENTS = 4;
+/** Maximum number of selected agents (PC can select up to 5, Issue #836) */
+export const MAX_SELECTED_AGENTS = 5;
 
-/** Default selected agents when DB value is missing or invalid */
-export const DEFAULT_SELECTED_AGENTS: CLIToolType[] = ['claude', 'codex', 'gemini'];
+/**
+ * Default selected agents when DB value is missing or invalid.
+ * Issue #836: PC default expands to 5 agents (claude/codex/gemini/opencode/copilot).
+ */
+export const DEFAULT_SELECTED_AGENTS: CLIToolType[] = ['claude', 'codex', 'gemini', 'opencode', 'copilot'];
 
 /**
  * Core validation function for CLI tool ID arrays (R1-001)
- * Accepts 2-4 unique valid CLI tool IDs.
+ * Accepts 2-5 unique valid CLI tool IDs (Issue #836).
  * Shared between parseSelectedAgents() and validateSelectedAgentsInput()
  *
  * @param input - Array of values to validate
@@ -52,7 +55,7 @@ export function validateAgentsPair(input: unknown[]): {
  * Log output is sanitized (R4-005): ANSI stripped, newlines removed, truncated.
  *
  * @param raw - Raw JSON string from DB (or null)
- * @returns Validated array of 2-4 CLIToolType values
+ * @returns Validated array of 2-5 CLIToolType values
  */
 export function parseSelectedAgents(raw: string | null): CLIToolType[] {
   if (!raw) return DEFAULT_SELECTED_AGENTS;
