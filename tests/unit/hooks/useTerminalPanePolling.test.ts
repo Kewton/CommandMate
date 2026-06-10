@@ -156,6 +156,44 @@ describe('useTerminalPanePolling', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  // Issue #842: kill / natural-termination must clear residual output.
+  it('clears output when the session stops (isRunning:false + empty content)', async () => {
+    let phase: 'running' | 'stopped' = 'running';
+    mockFetch.mockImplementation(() => {
+      if (phase === 'running') {
+        return okJson({ isRunning: true, fullOutput: 'live output', thinking: false });
+      }
+      // Mirrors current-output route's stopped response: no fullOutput / realtimeSnippet.
+      return okJson({ isRunning: false, content: '', thinking: false });
+    });
+    const { result } = renderHook(() =>
+      useTerminalPanePolling({ worktreeId: 'w-1', cliToolId: 'claude' }),
+    );
+    await waitFor(() => expect(result.current.terminal.output).toBe('live output'));
+    phase = 'stopped';
+    await act(async () => {
+      await result.current.refresh();
+    });
+    await waitFor(() => expect(result.current.terminal.output).toBe(''));
+    expect(result.current.terminal.isRunning).toBe(false);
+  });
+
+  // Issue #842: a running session that keeps returning content must NOT flicker to empty.
+  it('keeps output across polls while the session stays running (no flicker)', async () => {
+    mockFetch.mockImplementation(() =>
+      okJson({ isRunning: true, fullOutput: 'steady output', thinking: false }),
+    );
+    const { result } = renderHook(() =>
+      useTerminalPanePolling({ worktreeId: 'w-1', cliToolId: 'claude' }),
+    );
+    await waitFor(() => expect(result.current.terminal.output).toBe('steady output'));
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(result.current.terminal.output).toBe('steady output');
+    expect(result.current.terminal.isRunning).toBe(true);
+  });
+
   it('resets output/attaching/prompt when (worktreeId, cliToolId) changes', async () => {
     mockFetch.mockImplementation((input) => {
       const url = new URL(getUrlString(input), 'http://localhost');
