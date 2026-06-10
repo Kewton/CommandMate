@@ -366,7 +366,11 @@ export const TreeNode = memo(function TreeNode({
         )}
 
         {/* Name - with highlight for name search */}
-        <span className="flex-1 truncate text-sm text-gray-700 dark:text-gray-300">
+        {/* [Issue #852] title shows full name on hover when truncated */}
+        <span
+          className="flex-1 truncate text-sm text-gray-700 dark:text-gray-300"
+          title={item.name}
+        >
           {searchMode === 'name' && searchQuery ? (
             <HighlightedText text={item.name} query={searchQuery} />
           ) : (
