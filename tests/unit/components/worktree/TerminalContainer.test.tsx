@@ -108,7 +108,8 @@ describe('TerminalContainer (Issue #730)', () => {
     expect(screen.queryByTestId('history-content')).not.toBeInTheDocument();
     const expandBar = screen.getByTestId('terminal-container-expand-bar');
     expect(expandBar).toBeInTheDocument();
-    const btn = screen.getByRole('button', { name: /expand history panel/i });
+    // Issue #840: aria-label is now driven by i18n (worktree.terminal.showHistory).
+    const btn = screen.getByTestId('history-pane-expand');
     expect(btn).toHaveAttribute('aria-controls', 'worktree-history-pane');
     expect(btn).toHaveAttribute('aria-expanded', 'false');
   });
@@ -121,7 +122,7 @@ describe('TerminalContainer (Issue #730)', () => {
         terminal={<div data-testid="terminal-content">T</div>}
       />
     );
-    fireEvent.click(screen.getByRole('button', { name: /expand history panel/i }));
+    fireEvent.click(screen.getByTestId('history-pane-expand'));
     expect(mockToggle).toHaveBeenCalledTimes(1);
   });
 
@@ -215,9 +216,7 @@ describe('TerminalContainer (Issue #730)', () => {
 
     it('does not render the history-pane-expand button when history is omitted', () => {
       render(<TerminalContainer terminal={<div data-testid="terminal-content">T</div>} />);
-      expect(
-        screen.queryByRole('button', { name: /expand history panel/i })
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId('history-pane-expand')).not.toBeInTheDocument();
     });
 
     it('still wraps the terminal area in its ErrorBoundary', () => {
