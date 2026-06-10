@@ -98,3 +98,22 @@ export function useWorktreesCacheContext(): UseWorktreesCacheReturn {
   }
   return ctx;
 }
+
+/**
+ * Non-throwing variant of {@link useWorktreesCacheContext}.
+ *
+ * Returns the cached worktrees data when called inside a
+ * `WorktreesCacheProvider`, or `null` when no provider is present.
+ *
+ * Issue #839: the worktree detail controller reads this purely as an
+ * optimization (priming `worktree` state from the already-loaded list cache to
+ * eliminate the "Loading worktree info..." flash). Cache priming is therefore a
+ * best-effort enhancement, not a hard dependency — when the provider is absent
+ * (e.g. isolated unit tests) the consumer must degrade gracefully to the
+ * cache-miss path instead of throwing. Reading the shared context (rather than
+ * calling `useWorktreesCache()` directly) keeps the single-poller guarantee from
+ * Issue #709 intact.
+ */
+export function useOptionalWorktreesCacheContext(): UseWorktreesCacheReturn | null {
+  return useContext(WorktreesCacheContext);
+}
