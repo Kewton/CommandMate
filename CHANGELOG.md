@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-06-10
+
+### Added
+- feat(agents): PC `DesktopHeader` の per-agent status indicator のデフォルトを **3 → 5 エージェント**に拡張（claude/codex/gemini → claude/codex/gemini/opencode/copilot）。`selected-agents-validator` の `MAX_SELECTED_AGENTS` を 4 → 5、`DEFAULT_SELECTED_AGENTS` に opencode/copilot を追加し、`validateAgentsPair` を 2〜5 の一意 ID を受理（6 件以上は reject）するよう変更。`WorktreeDetailDesktop` の `AgentSettingsPane` を `maxAgents` 4 → 5 に拡大。stored `selectedAgents` を持つ既存 worktree は無改修（migration なし、新規 worktree のみ 5-agent デフォルト）、Mobile の `DEFAULT_MAX_AGENTS=2` は無影響 (Issue #836)
+- feat(agents): Mobile の Agent タブの選択を **localStorage に分離し PC（DB `selectedAgents`）から独立**。従来 Mobile の選択が worktree の `selectedAgents` DB カラムを PATCH していたため、Mobile で 2 エージェントを選ぶと PC 側の DesktopHeader indicator も 2 に縮小していた。Option A として Mobile は preference を `commandmate:worktree:mobileAgents:<id>` に localStorage 永続化し DB を書かない（PC が単一の真実源を維持）。`useMobileSelectedAgents` フック / `AgentSettingsPane` の `availableAgents`・`persistToServer` props を追加し `NotesAndLogsPane` / `MobileContent` 経由で配線。PC 経路は無改修 (Issue #837)
+- feat(agents): Mobile の Agent タブで **PC とは独立に全 6 CLI ツールから自由に選択可能**に。従来は localStorage preference を PC の DB 選択に対して解決し 2 件に capping していたため Claude/Codex しか選べなかった。`useMobileSelectedAgents` の解決対象を全 agent pool（`CLI_TOOL_IDS`）に変更し `MOBILE_MAX_AGENTS` を 6 へ、`MOBILE_DEFAULT_AGENTS=2`（初期タブ）を追加。`resolveMobileAgents(raw, pool)` で validate/dedupe/cap、未使用の `dbSelectedAgents` option を撤去。DB は引き続き書かない (Issue #851)
+- feat(terminal-split-action-bar): `TerminalSplitContainer` の既存 +Split/-Split Action bar に **History / Files 表示トグルボタンを追加**（Phase 2）。「N / 3 splits」カウントと +Split コントロールの間に配置し split 数に関わらず常時表示。History トグルは `useHistoryPaneState().toggle()`、Files トグルは `useFilePanelState().toggle()` を呼び、両フックの broadcast により縦の collapse strip と単一の真実源を共有。active（可視）= cyan アクセント / inactive = グレー、`aria-pressed` で可視状態を反映、`aria-label`/`title` は Show/Hide 文言（`worktree.terminal` i18n キー再利用）を切替 (Issue #841)
+- feat(mobile): Mobile 下部 tab bar の **'CMATE' タブ label を 'Notes' にリネーム**。PC Activity Bar の Notes activity と用語統一し、実体（`NotesAndLogsPane` の主要コンテンツ＝メモ）を正確に表す。`id='memo'` / icon / 内部 routing は不変（deep-link 影響なし） (Issue #838)
+- feat(mobile): Mobile の **4 番目の tab label を 'Notes' → 'Tools' にリネーム**（より明確な intent）。内部 id（`'memo'`）と deep-link slug（`'notes'`）は既存 pane routing / deep-link 互換のため不変 (Issue #850)
+- feat(file-tree): file tree（`TreeNode`）と `FilePanelContent` ツールバーの open-file path で CSS `truncate` により切り詰められた **ファイル/ディレクトリ名・パスを hover 時に title tooltip でフルネーム表示**。`TreeNode` の name span（PC/Mobile）と `FilePanelContent` の path span に native `title` 属性を追加 (Issue #852)
+- perf(worktree-detail): `useWorktreeDetailController` の worktree/loading state を **共有 worktree リストキャッシュから prime**（stale-while-revalidate）し、キャッシュ済み worktree の詳細画面を開いた際に「Loading worktree info...」のフラッシュなく即座に描画。background `fetchWorktree()` は引き続き走り authoritative payload で上書きする。non-throwing `useOptionalWorktreesCacheContext()` を追加して #709 の single-poller 保証（2 つ目の `/api/worktrees` poller を作らない）を維持し provider 不在でも graceful degrade。cache miss は従来どおり loading-first（回帰なし） (Issue #839)
+
+### Fixed
+- fix(file-panel): PC History/File panel 可視性改善の Phase 1。file-panel の **折りたたみ状態を localStorage（`commandmate.worktree.filePanelCollapsed`）に永続化**（`useFilePanelState` フックを新設し `useHistoryPaneState` をミラー、`FilePanelSplit` の非永続 `useState(false)` を置換）し reload / re-mount を跨いで状態を保持。折りたたみバーを 24 → 36px に拡幅し FilePanel / History の collapsed bar に CSS `vertical-rl` の縦ラベル（"Files" / "History"）を追加。`HistoryPane` / `TerminalContainer` / `TerminalSplitPaneContent` の aria-label/title 文言を新 i18n キー `worktree.terminal.*`（en/ja）由来の "Show / Hide" に統一。既存の collapse/expand 挙動は不変 (Issue #840)
+- fix(terminal-pane): エージェント終了（kill / 自然終了）後に **PC ターミナル split へ残留していた古い出力をクリア**。root cause は `useTerminalPanePolling` が「出力あり または セッション実行中」のときのみ出力をクリアしていたため、「空 + 停止」ケース（まさに kill / 終了ケース）で stale 出力が残っていたこと。`isRunning === false` になったら一度上書き（クリア）するよう修正（実行中セッションは無影響）。加えて `TerminalDisplay` に `attaching` prop を追加し、attaching 中は「読込中...」、active セッションが出力なしで非アクティブ化した際は「セッションは終了しました（メッセージ送信で再開できます）」の ended placeholder を表示（never-started / attaching pane には ended placeholder を出さない） (Issue #842)
+
 ## [0.6.3] - 2026-06-05
 
 ### Added
