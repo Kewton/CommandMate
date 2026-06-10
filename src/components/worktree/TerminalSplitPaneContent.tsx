@@ -293,6 +293,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       <TerminalDisplay
         output={terminal.output}
         isActive={terminal.isRunning}
+        attaching={terminal.attaching}
         isThinking={terminal.isThinking}
         autoScroll={terminal.autoScroll}
         onScrollChange={handleAutoScrollChange}
@@ -302,6 +303,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     [
       terminal.output,
       terminal.isRunning,
+      terminal.attaching,
       terminal.isThinking,
       terminal.autoScroll,
       handleAutoScrollChange,

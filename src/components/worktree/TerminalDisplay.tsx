@@ -7,7 +7,7 @@
 
 'use client';
 
-import React, { useEffect, useRef, useMemo, memo, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useMemo, memo, useCallback } from 'react';
 import { sanitizeTerminalOutput } from '@/lib/security/sanitize';
 import { useTerminalScroll } from '@/hooks/useTerminalScroll';
 import { useTerminalSearch } from '@/hooks/useTerminalSearch';
@@ -21,6 +21,12 @@ export interface TerminalDisplayProps {
   output: string;
   /** Whether the terminal session is currently active */
   isActive: boolean;
+  /**
+   * Issue #842: true while the pane is performing its initial attach (before the
+   * first /current-output response). Used to render a "loading" placeholder and
+   * to suppress the "session ended" placeholder during load / not-started states.
+   */
+  attaching?: boolean;
   /** Whether Claude is currently thinking/processing */
   isThinking?: boolean;
   /** Initial auto-scroll state (default: true) */
@@ -68,6 +74,7 @@ function ThinkingIndicator() {
 export const TerminalDisplay = memo(function TerminalDisplay({
   output,
   isActive,
+  attaching = false,
   isThinking = false,
   autoScroll: initialAutoScroll = true,
   onScrollChange,
@@ -114,6 +121,26 @@ export const TerminalDisplay = memo(function TerminalDisplay({
 
   // Sanitize the output for safe rendering
   const sanitizedOutput = sanitizeTerminalOutput(output || '');
+
+  // Issue #842: distinguish "loading (attaching)" / "not-started" / "ended" so an
+  // empty terminal does not ambiguously read as a dead session. We only show the
+  // "session ended" placeholder once a session that was actually active becomes
+  // inactive with no output — never during initial attach or for a never-started
+  // pane (which would otherwise read as a spurious "ended" state).
+  const [hasBeenActive, setHasBeenActive] = useState(false);
+  useEffect(() => {
+    if (attaching) {
+      // A fresh attach (mount or worktree/CLI switch) resets the lifecycle.
+      setHasBeenActive(false);
+    } else if (isActive) {
+      setHasBeenActive(true);
+    }
+  }, [attaching, isActive]);
+
+  const isEmptyOutput = !output;
+  const showLoadingPlaceholder = isEmptyOutput && attaching;
+  const showEndedPlaceholder =
+    isEmptyOutput && !attaching && !isActive && hasBeenActive;
 
   // Issue #379: Track when we need to scroll to top on next content arrival.
   // When switching to a disableAutoFollow tab (OpenCode), the content is cleared then
@@ -212,6 +239,24 @@ export const TerminalDisplay = memo(function TerminalDisplay({
           className="whitespace-pre-wrap break-words"
           dangerouslySetInnerHTML={{ __html: sanitizedOutput }}
         />
+
+        {/* Issue #842: empty-state placeholders clarify loading vs. ended. */}
+        {showLoadingPlaceholder && (
+          <div
+            data-testid="terminal-loading-placeholder"
+            className="flex h-full items-center justify-center px-4 text-center text-sm text-gray-500 select-none"
+          >
+            読込中...
+          </div>
+        )}
+        {showEndedPlaceholder && (
+          <div
+            data-testid="terminal-ended-placeholder"
+            className="flex h-full items-center justify-center px-4 text-center text-sm text-gray-500 select-none"
+          >
+            セッションは終了しました（メッセージ送信で再開できます）
+          </div>
+        )}
 
         {/* Thinking indicator */}
         {isActive && isThinking && <ThinkingIndicator />}

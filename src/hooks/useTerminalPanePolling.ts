@@ -141,10 +141,14 @@ export function useTerminalPanePolling({
       const nextOutput = data.fullOutput ?? data.realtimeSnippet ?? '';
 
       setTerminal(prev => {
-        // Only overwrite output if we actually have content or the session is
-        // still running. Mirrors WorktreeDetailRefactored's behavior to avoid
-        // clearing during session transitions.
-        const writeOutput = !!nextOutput || !!data.isRunning;
+        // Overwrite output if we have content or the session is still running.
+        // Issue #842: also overwrite (i.e. clear) once the session has stopped,
+        // so kill / natural-termination residue does not linger. The prior guard
+        // only kept stale output in the "empty + stopped" case, which is exactly
+        // the kill case we need to clear. Running sessions are unaffected, so no
+        // meaningful flicker is introduced.
+        const sessionStopped = data.isRunning === false;
+        const writeOutput = !!nextOutput || !!data.isRunning || sessionStopped;
         return {
           ...prev,
           output: writeOutput ? nextOutput : prev.output,
