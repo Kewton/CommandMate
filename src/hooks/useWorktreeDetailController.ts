@@ -24,6 +24,7 @@ import { useRouter } from 'next/navigation';
 import { useWorktreeUIState } from '@/hooks/useWorktreeUIState';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useSidebarContext } from '@/contexts/SidebarContext';
+import { useOptionalWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
 import { type WorktreeStatus } from '@/components/mobile/MobileHeader';
 import { type MobileTab } from '@/components/mobile/MobileTabBar';
 import { useFileSearch } from '@/hooks/useFileSearch';
@@ -146,10 +147,31 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const tAutoYes = useTranslations('autoYes');
   const tSchedule = useTranslations('schedule');
 
+  // Issue #839: Stale-while-revalidate priming. The worktree *list* is already
+  // cached by useWorktreesCache (exposed via WorktreesCacheProvider). When the
+  // user opens a detail screen for a worktree that is already in that cache, we
+  // seed the local `worktree` state from the cached list item so the screen
+  // renders immediately with real data instead of flashing "Loading worktree
+  // info...". The background fetchWorktree() below still runs and overwrites the
+  // seeded value with the authoritative (full) detail payload (fresh > cached).
+  //
+  // Read through the *context* (non-throwing variant) rather than calling
+  // useWorktreesCache() directly: a second direct call would spawn an extra
+  // /api/worktrees poller, the regression Issue #709 fixed. When the provider is
+  // absent (isolated unit tests) this degrades to the cache-miss path.
+  const cache = useOptionalWorktreesCacheContext();
+  const initialFromCache = cache?.worktrees.find((w) => w.id === worktreeId) ?? null;
+
   // Local state for worktree data and loading status
-  const [worktree, setWorktree] = useState<Worktree | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [worktree, setWorktree] = useState<Worktree | null>(initialFromCache);
+  // On a cache hit we already have data to show, so skip the full-screen loading
+  // gate; on a cache miss fall back to the previous loading-first behavior.
+  const [loading, setLoading] = useState(initialFromCache === null);
   const [error, setError] = useState<string | null>(null);
+  // Captured once at mount: whether the initial render was primed from cache.
+  // Drives the loadInitialData loading guard so the background refresh on a
+  // cache hit never flips the screen back to the loading indicator.
+  const primedFromCacheRef = useRef(initialFromCache !== null);
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
   // Issue #438: File tabs state (replaces fileViewerPath for desktop)
   // Issue #683: B案 - [tabsState, tabsActions] tuple; tabsActions is stable across renders
@@ -1246,7 +1268,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     let isMounted = true;
 
     const loadInitialData = async () => {
-      setLoading(true);
+      // Issue #839: Only show the full-screen loading indicator when there was no
+      // cached worktree to display at mount. On a cache hit we keep rendering the
+      // seeded data and revalidate silently in the background (SWR).
+      if (!primedFromCacheRef.current) {
+        setLoading(true);
+      }
       // Parallel: fetch worktree, messages, and current output simultaneously.
       // fetchMessages/fetchCurrentOutput handle missing worktree gracefully.
       await Promise.all([
