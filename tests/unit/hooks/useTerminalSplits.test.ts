@@ -408,4 +408,62 @@ describe('useTerminalSplits', () => {
     expect(result.current.widths[1]).toBeCloseTo(0.4);
     expect(sum(result.current.widths)).toBeCloseTo(1);
   });
+
+  // ---------------------------------------------------------------------------
+  // Issue #861: resetWidths() equalizes the visible split widths to 1/n while
+  // leaving the splits / CLI assignments untouched. Sum stays ~1.0.
+  // ---------------------------------------------------------------------------
+  describe('resetWidths (Issue #861)', () => {
+    it('equalizes 3 unequal widths to 1/3 each (sum ~1.0)', () => {
+      const { result } = renderHook(() => useTerminalSplits('w-1'));
+      act(() => result.current.addSplit()); // -> 2
+      act(() => result.current.addSplit()); // -> 3
+      act(() => result.current.setSplitWidth([0.6, 0.3, 0.1]));
+
+      act(() => result.current.resetWidths());
+      expect(result.current.widths).toHaveLength(3);
+      for (const w of result.current.widths) {
+        expect(w).toBeCloseTo(1 / 3);
+      }
+      expect(sum(result.current.widths)).toBeCloseTo(1);
+    });
+
+    it('equalizes 2 unequal widths to 0.5 each', () => {
+      const { result } = renderHook(() => useTerminalSplits('w-1'));
+      act(() => result.current.addSplit());
+      act(() => result.current.setSplitWidth([0.8, 0.2]));
+
+      act(() => result.current.resetWidths());
+      expect(result.current.widths[0]).toBeCloseTo(0.5);
+      expect(result.current.widths[1]).toBeCloseTo(0.5);
+    });
+
+    it('keeps a single split at width 1 (no-op for n=1)', () => {
+      const { result } = renderHook(() => useTerminalSplits('w-1'));
+      act(() => result.current.resetWidths());
+      expect(result.current.widths).toEqual([1]);
+    });
+
+    it('leaves splits / CLI assignments untouched', () => {
+      const { result } = renderHook(() => useTerminalSplits('w-1'));
+      act(() => result.current.addSplit());
+      act(() => result.current.setSplitCliTool(1, 'codex'));
+      const splitsBefore = result.current.splits;
+
+      act(() => result.current.resetWidths());
+      expect(result.current.splits).toEqual(splitsBefore);
+    });
+
+    it('persists the equalized widths to localStorage', () => {
+      const { result } = renderHook(() => useTerminalSplits('w-1'));
+      act(() => result.current.addSplit());
+      act(() => result.current.setSplitWidth([0.8, 0.2]));
+
+      act(() => result.current.resetWidths());
+      const stored = readTerminalSplitsLocalStorage('w-1');
+      expect(stored?.widths).toHaveLength(2);
+      expect(stored?.widths[0]).toBeCloseTo(0.5);
+      expect(stored?.widths[1]).toBeCloseTo(0.5);
+    });
+  });
 });

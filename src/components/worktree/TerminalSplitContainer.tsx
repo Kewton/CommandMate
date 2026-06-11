@@ -30,12 +30,15 @@ import React, {
   type ReactNode,
 } from 'react';
 import { useTranslations } from 'next-intl';
-import { History, Files } from 'lucide-react';
+import { History, Files, AlignHorizontalDistributeCenter } from 'lucide-react';
 import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
 import type { ShowToast } from '@/types/markdown-editor';
 import { MAX_SPLITS, MIN_SPLITS } from '@/config/terminal-split-config';
 import { useTerminalSplits } from '@/hooks/useTerminalSplits';
-import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
+import {
+  useHistoryPaneState,
+  DEFAULT_HISTORY_WIDTH,
+} from '@/hooks/useHistoryPaneState';
 import { useFilePanelState } from '@/hooks/useFilePanelState';
 import { PaneResizer } from './PaneResizer';
 
@@ -92,6 +95,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     removeSplit,
     setSplitCliTool,
     setSplitWidth,
+    resetWidths,
     availableCliTools,
     focusedSplitIndex,
     setFocusedSplitIndex,
@@ -103,8 +107,11 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   // toggles. These hooks broadcast across instances (useHistoryPaneState /
   // useFilePanelState), so toggling here is the single source of truth shared
   // with the existing vertical collapse strips — both stay in sync.
-  const { visible: historyVisible, toggle: toggleHistory } =
-    useHistoryPaneState();
+  const {
+    visible: historyVisible,
+    toggle: toggleHistory,
+    setWidth: setHistoryWidth,
+  } = useHistoryPaneState();
   const { collapsed: filePanelCollapsed, toggle: toggleFilePanel } =
     useFilePanelState();
   // The file panel hook stores `collapsed`; "Files visible" is its inverse.
@@ -168,8 +175,19 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   const handleResizeStart = useCallback(() => setIsResizing(true), []);
   const handleResizeEnd = useCallback(() => setIsResizing(false), []);
 
+  // Issue #861: equalize the visible terminal split widths (each → 1/n) AND
+  // reset the (split-shared) Message History width to its default. History width
+  // lives in a sibling useHistoryPaneState instance inside each pane; setWidth
+  // broadcasts via CustomEvent so those instances re-render at the new width.
+  const handleEqualizeWidths = useCallback(() => {
+    resetWidths();
+    setHistoryWidth(DEFAULT_HISTORY_WIDTH);
+  }, [resetWidths, setHistoryWidth]);
+
   const canAdd = splits.length < MAX_SPLITS && !isResizing;
   const canRemove = splits.length > MIN_SPLITS && !isResizing;
+  // Nothing to equalize when there is a single split AND History is hidden.
+  const canEqualize = splits.length > MIN_SPLITS || historyVisible;
 
   // Memoize per-split onFocus handlers so prop identity is stable.
   const focusHandlers = useMemo(
@@ -313,6 +331,28 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
         >
           - Split
         </button>
+
+        {/*
+          Issue #861: equalize terminal split widths (each → 1/n) and reset the
+          Message History width to default in one action. Disabled only when
+          there is nothing to equalize (single split AND History hidden).
+        */}
+        <button
+          type="button"
+          onClick={handleEqualizeWidths}
+          disabled={!canEqualize}
+          aria-disabled={!canEqualize}
+          aria-label={t('terminal.equalizeWidthsHint')}
+          title={t('terminal.equalizeWidthsHint')}
+          data-testid="equalize-split-widths"
+          className="flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <AlignHorizontalDistributeCenter
+            className="w-3.5 h-3.5 flex-shrink-0"
+            aria-hidden="true"
+          />
+          <span>{t('terminal.equalizeWidths')}</span>
+        </button>
       </div>
 
       {/* Splits row */}
@@ -351,6 +391,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
                   onResize={handleResize}
                   onStart={handleResizeStart}
                   onEnd={handleResizeEnd}
+                  onDoubleClick={resetWidths}
                 />
               ) : null}
             </React.Fragment>
@@ -372,12 +413,15 @@ function PaneResizerWrapper({
   onResize,
   onStart,
   onEnd,
+  onDoubleClick,
 }: {
   resizerIdx: number;
   ariaValueNow: number;
   onResize: (resizerIdx: number, delta: number) => void;
   onStart: () => void;
   onEnd: () => void;
+  /** Issue #861: double-clicking the resizer equalizes terminal split widths. */
+  onDoubleClick?: () => void;
 }) {
   const handleResize = useCallback(
     (delta: number) => onResize(resizerIdx, delta),
@@ -395,6 +439,7 @@ function PaneResizerWrapper({
         onResize={handleResize}
         orientation="horizontal"
         ariaValueNow={ariaValueNow}
+        onDoubleClick={onDoubleClick}
       />
     </div>
   );
