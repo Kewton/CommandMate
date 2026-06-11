@@ -126,7 +126,6 @@ export interface WorktreeDetailDesktopProps {
   onDelete: (path: string) => void;
   onUpload: (targetDir: string) => void;
   onMove: (path: string, type: 'file' | 'directory') => void;
-  onCmateSetup: () => void;
 
   // Git activity
   onDiffSelect: (diff: string, filePath: string) => void;
@@ -231,7 +230,6 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   onDelete,
   onUpload,
   onMove,
-  onCmateSetup,
   onDiffSelect,
   onSelectedAgentsChange,
   vibeLocalModel,
@@ -509,7 +507,6 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             onDelete={onDelete}
             onUpload={onUpload}
             onMove={onMove}
-            onCmateSetup={onCmateSetup}
             refreshTrigger={fileTreeRefresh}
             searchQuery={fileSearch.query}
             searchMode={fileSearch.mode}
@@ -574,7 +571,6 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       onDelete,
       onUpload,
       onMove,
-      onCmateSetup,
       fileTreeRefresh,
       onDiffSelect,
       handleInsertToMessage,

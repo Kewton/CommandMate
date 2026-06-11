@@ -131,8 +131,6 @@ interface MobileContentProps {
   /** [Issue #211] Toast notification callback for copy feedback.
    *  Issue #786 (D-5): widened to the shared `ShowToast` alias for type parity. */
   showToast?: ShowToast;
-  /** [Issue #294] CMATE setup callback */
-  onCmateSetup?: () => void;
   /**
    * [Issue #368 / #837] Agents for the Agent tab. On mobile this is the
    * localStorage-backed mobile preference, not the DB `selectedAgents`.
@@ -229,7 +227,6 @@ export const MobileContent = memo(function MobileContent({
   refreshTrigger,
   fileSearch,
   showToast,
-  onCmateSetup,
   selectedAgents,
   onSelectedAgentsChange,
   availableAgents,
@@ -344,7 +341,6 @@ export const MobileContent = memo(function MobileContent({
               onDelete={onDelete}
               onUpload={onUpload}
               onMove={onMove}
-              onCmateSetup={onCmateSetup}
               refreshTrigger={refreshTrigger}
               searchQuery={fileSearch.query}
               searchMode={fileSearch.mode}
