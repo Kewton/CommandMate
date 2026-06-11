@@ -239,10 +239,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const [newFileParentPath, setNewFileParentPath] = useState('');
 
   // Issue #727: Activity Bar + History pane state (PC)
+  // Issue #858: persisted per-worktree so the open/closed state no longer
+  // leaks across branch (worktree) switches.
   const {
     active: activeActivity,
     toggle: toggleActivity,
-  } = useActivityBarState();
+  } = useActivityBarState(worktreeId);
   // Issue #744: the top-level History column was removed on PC (History moved
   // into each terminal split), so `WorktreeDetailRefactored` no longer needs a
   // `useHistoryPaneState` instance. Each `TerminalSplitPaneContent` owns its
