@@ -25,7 +25,7 @@ import { ContextMenu } from '@/components/worktree/ContextMenu';
 import { TreeNode } from '@/components/worktree/TreeNode';
 import { computeMatchedPaths } from '@/lib/utils';
 import { useLocale } from 'next-intl';
-import { FilePlus, FolderPlus, FileText, AlertCircle } from 'lucide-react';
+import { FilePlus, FolderPlus, AlertCircle } from 'lucide-react';
 
 // ============================================================================
 // Types
@@ -60,8 +60,6 @@ export interface FileTreeViewProps {
   searchResults?: SearchResultItem[];
   /** [Issue #21] Callback when a search result is selected (optional) */
   onSearchResultSelect?: (filePath: string) => void;
-  /** [Issue #294] Callback for CMATE.md setup/validate button */
-  onCmateSetup?: () => void;
 }
 
 /** Maximum number of concurrent directory fetches during tree reload */
@@ -101,7 +99,6 @@ export const FileTreeView = memo(function FileTreeView({
   searchMode,
   searchResults,
   onSearchResultSelect,
-  onCmateSetup,
 }: FileTreeViewProps) {
   // [Issue #162] Get locale for date formatting
   const locale = useLocale();
@@ -471,7 +468,7 @@ export const FileTreeView = memo(function FileTreeView({
       className={`overflow-auto bg-white dark:bg-gray-900 ${className}`}
     >
       {/* [Issue #300] Toolbar for root-level file/directory creation */}
-      {(onNewFile || onNewDirectory || onCmateSetup || isRefetching) && (
+      {(onNewFile || onNewDirectory || isRefetching) && (
         <div
           data-testid="file-tree-toolbar"
           className="flex items-center gap-1 p-1 border-b border-gray-200 dark:border-gray-700"
@@ -494,16 +491,6 @@ export const FileTreeView = memo(function FileTreeView({
             >
               <FolderPlus className="w-4 h-4" aria-hidden="true" />
               <span>New Directory</span>
-            </button>
-          )}
-          {onCmateSetup && (
-            <button
-              data-testid="toolbar-cmate-button"
-              onClick={onCmateSetup}
-              className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
-            >
-              <FileText className="w-4 h-4" aria-hidden="true" />
-              <span>CMATE</span>
             </button>
           )}
           {/* [Issue #706] Compact refetch indicator. Anchored to the right

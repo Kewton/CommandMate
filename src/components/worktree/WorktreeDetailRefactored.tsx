@@ -113,7 +113,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     handleAutoYesToggle,
     handleBackClick,
     handleCloseDiff,
-    handleCmateSetup,
     handleDelete,
     handleDiffSelect,
     handleDirtyChange,
@@ -272,7 +271,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onDelete={handleDelete}
           onUpload={handleUpload}
           onMove={handleMove}
-          onCmateSetup={handleCmateSetup}
           onDiffSelect={handleDiffSelect}
           onSelectedAgentsChange={handleSelectedAgentsChange}
           vibeLocalModel={vibeLocalModel}
@@ -450,7 +448,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             refreshTrigger={fileTreeRefresh}
             fileSearch={fileSearch}
             showToast={showToast}
-            onCmateSetup={handleCmateSetup}
             // Issue #837/#851: the Agent tab edits the mobile-only localStorage
             // preference and never the DB. `availableAgents` is the full agent
             // pool so mobile can pick any of the CLI tools independently of the

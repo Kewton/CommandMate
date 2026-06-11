@@ -52,7 +52,6 @@ import { useMobileSelectedAgents } from '@/hooks/useMobileSelectedAgents';
 import { useTranslations } from 'next-intl';
 import { useFileOperations } from '@/hooks/useFileOperations';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
-import { parseCmateContent, validateScheduleHeaders, validateSchedulesSection, CMATE_TEMPLATE_CONTENT } from '@/lib/cmate-validator';
 import {
   HISTORY_DISPLAY_LIMIT_STORAGE_KEY,
   HISTORY_USER_ONLY_STORAGE_KEY,
@@ -146,7 +145,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const tError = useTranslations('error');
   const tCommon = useTranslations('common');
   const tAutoYes = useTranslations('autoYes');
-  const tSchedule = useTranslations('schedule');
 
   // Issue #839: Stale-while-revalidate priming. The worktree *list* is already
   // cached by useWorktreesCache (exposed via WorktreesCacheProvider). When the
@@ -1005,92 +1003,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     fileInputRef.current?.click();
   }, []);
 
-  /** [Issue #294] Handle CMATE.md setup/validate button */
-  const handleCmateSetup = useCallback(async () => {
-    try {
-      // Check if CMATE.md exists via tree listing (avoids 404 console noise)
-      const treeResponse = await fetch(`/api/worktrees/${worktreeId}/tree`);
-      if (!treeResponse.ok) {
-        throw new Error(`Failed to list worktree files: ${treeResponse.status}`);
-      }
-      const treeData = await treeResponse.json();
-      const treeItems: { name: string }[] = treeData.items ?? [];
-      const cmateExists = treeItems.some(item => item.name === 'CMATE.md');
-
-      let content: string;
-
-      if (!cmateExists) {
-        // File does not exist - create with template
-        const createResponse = await fetch(
-          `/api/worktrees/${worktreeId}/files/CMATE.md`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'file', content: CMATE_TEMPLATE_CONTENT }),
-          }
-        );
-        if (!createResponse.ok) {
-          throw new Error('Failed to create CMATE.md');
-        }
-        showToast(tSchedule('cmateCreated'), 'success');
-        setFileTreeRefresh(prev => prev + 1);
-        // Use template content directly for validation
-        content = CMATE_TEMPLATE_CONTENT;
-      } else {
-        // File exists - read content for validation
-        const fileResponse = await fetch(
-          `/api/worktrees/${worktreeId}/files/CMATE.md`
-        );
-        if (!fileResponse.ok) {
-          throw new Error(`Failed to read CMATE.md: ${fileResponse.status}`);
-        }
-        const data = await fileResponse.json();
-        if (typeof data.content !== 'string') {
-          showToast(tSchedule('cmateValidation.failed'), 'error');
-          return;
-        }
-        content = data.content;
-      }
-
-      // Validate content
-      const headerErrors = validateScheduleHeaders(content);
-      const sections = parseCmateContent(content);
-      const scheduleRows = sections.get('Schedules');
-
-      if (!scheduleRows || scheduleRows.length === 0) {
-        showToast(tSchedule('cmateValidation.noSchedulesSection'), 'error');
-        return;
-      }
-
-      const rowErrors = validateSchedulesSection(scheduleRows);
-      const errors = [...headerErrors, ...rowErrors];
-
-      if (errors.length === 0) {
-        showToast(
-          tSchedule('cmateValidation.valid', { count: String(scheduleRows.length) }),
-          'success'
-        );
-      } else {
-        const maxDisplay = 3;
-        const details = errors
-          .slice(0, maxDisplay)
-          .map((e) => e.message)
-          .join('; ');
-        const suffix = errors.length > maxDisplay ? ` (+${errors.length - maxDisplay})` : '';
-        showToast(
-          tSchedule('cmateValidation.errors', {
-            errorCount: String(errors.length),
-            details: details + suffix,
-          }),
-          'error'
-        );
-      }
-    } catch (err) {
-      console.error('[WorktreeDetailRefactored] CMATE setup error:', err);
-      showToast(tSchedule('cmateValidation.failed'), 'error');
-    }
-  }, [worktreeId, showToast, tSchedule]);
-
   /** Handle file input change - perform actual upload */
   const handleFileInputChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1428,7 +1340,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     handleAutoYesToggle,
     handleBackClick,
     handleCloseDiff,
-    handleCmateSetup,
     handleDelete,
     handleDiffSelect,
     handleDirtyChange,
