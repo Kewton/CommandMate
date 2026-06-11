@@ -212,6 +212,102 @@ describe('TerminalSplitContainer History/Files toggles (Issue #841)', () => {
 });
 
 // ===========================================================================
+// Issue #861: the Action bar hosts an "equalize widths" button that, in one
+// action, (a) equalizes the terminal split widths to 1/n and (b) resets the
+// (split-shared) Message History width to its default. Disabled only when there
+// is nothing to equalize (single split AND History hidden). Double-clicking a
+// terminal resizer equalizes the split widths only (History is left as-is).
+// ===========================================================================
+describe('TerminalSplitContainer equalize widths (Issue #861)', () => {
+  const HISTORY_WIDTH_KEY = 'commandmate.worktree.historyWidth';
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+  afterEach(() => {
+    window.localStorage.clear();
+  });
+
+  /** Read the flex-grow applied to each split's wrapper div (parent of the pane). */
+  function splitFlexGrows(count: number): number[] {
+    return Array.from({ length: count }, (_, i) => {
+      const pane = document.querySelector(`[data-split-index="${i}"]`);
+      const wrapper = pane?.parentElement as HTMLElement;
+      return Number(wrapper.style.flexGrow);
+    });
+  }
+
+  it('renders the equalize-widths button in the Action bar', () => {
+    setup();
+    expect(screen.getByTestId('equalize-split-widths')).toBeInTheDocument();
+  });
+
+  it('is enabled at 1 split while History is visible', () => {
+    setup();
+    expect(screen.getByTestId('equalize-split-widths')).not.toBeDisabled();
+  });
+
+  it('is disabled at 1 split when History is hidden (nothing to equalize)', () => {
+    setup();
+    fireEvent.click(screen.getByTestId('toggle-history-pane')); // hide History
+    expect(screen.getByTestId('equalize-split-widths')).toBeDisabled();
+  });
+
+  it('is enabled with >1 split even when History is hidden', () => {
+    setup();
+    fireEvent.click(screen.getByTestId('toggle-history-pane')); // hide History
+    fireEvent.click(screen.getByTestId('add-terminal-split')); // -> 2 splits
+    expect(screen.getByTestId('equalize-split-widths')).not.toBeDisabled();
+  });
+
+  it('equalizes split widths on click (3 splits → each flex-grow ~1/3)', () => {
+    setup();
+    fireEvent.click(screen.getByTestId('add-terminal-split')); // -> 2
+    fireEvent.click(screen.getByTestId('add-terminal-split')); // -> 3 ([0.5,0.25,0.25])
+    // Pre-condition: widths are NOT all equal.
+    const before = splitFlexGrows(3);
+    expect(before[0]).not.toBeCloseTo(before[1]);
+
+    fireEvent.click(screen.getByTestId('equalize-split-widths'));
+    for (const g of splitFlexGrows(3)) {
+      expect(g).toBeCloseTo(1 / 3, 5);
+    }
+  });
+
+  it('resets the History width to default (40) on click', () => {
+    window.localStorage.setItem(HISTORY_WIDTH_KEY, '25');
+    setup();
+    fireEvent.click(screen.getByTestId('equalize-split-widths'));
+    expect(window.localStorage.getItem(HISTORY_WIDTH_KEY)).toBe('40');
+  });
+
+  it('has a descriptive aria-label / title', () => {
+    setup();
+    const btn = screen.getByTestId('equalize-split-widths');
+    expect(btn).toHaveAttribute('aria-label', 'worktree.terminal.equalizeWidthsHint');
+    expect(btn).toHaveAttribute('title', 'worktree.terminal.equalizeWidthsHint');
+  });
+
+  it('double-clicking a terminal resizer equalizes widths but leaves History width', () => {
+    window.localStorage.setItem(HISTORY_WIDTH_KEY, '25');
+    setup();
+    fireEvent.click(screen.getByTestId('add-terminal-split')); // -> 2
+    fireEvent.click(screen.getByTestId('add-terminal-split')); // -> 3
+
+    const separator = screen
+      .getByTestId('split-resizer-0')
+      .querySelector('[role="separator"]') as HTMLElement;
+    fireEvent.doubleClick(separator);
+
+    for (const g of splitFlexGrows(3)) {
+      expect(g).toBeCloseTo(1 / 3, 5);
+    }
+    // Double-click is terminal-only: History width is untouched.
+    expect(window.localStorage.getItem(HISTORY_WIDTH_KEY)).toBe('25');
+  });
+});
+
+// ===========================================================================
 // Issue #786: drag-drop validation owner. The container holds the `splits`
 // array, so it classifies a drop as no-op / reject / apply and owns the toast
 // messaging + activeCliTab sync. Each pane receives `onDropCliTool` via the

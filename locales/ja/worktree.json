@@ -54,6 +54,8 @@
     "showHistory": "履歴を表示",
     "hideHistory": "履歴を非表示",
     "showFiles": "ファイルを表示",
-    "hideFiles": "ファイルを非表示"
+    "hideFiles": "ファイルを非表示",
+    "equalizeWidths": "均等幅",
+    "equalizeWidthsHint": "ターミナル幅を均等にし、履歴幅を初期値に戻す"
   }
 }

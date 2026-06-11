@@ -54,6 +54,8 @@
     "showHistory": "Show history",
     "hideHistory": "Hide history",
     "showFiles": "Show files",
-    "hideFiles": "Hide files"
+    "hideFiles": "Hide files",
+    "equalizeWidths": "Equal widths",
+    "equalizeWidthsHint": "Equalize terminal widths and reset History width"
   }
 }

@@ -43,6 +43,12 @@ export interface UseTerminalSplitsReturn {
    */
   setSplitCliTool: (idx: number, cliId: CLIToolType) => boolean;
   setSplitWidth: (widths: number[]) => void;
+  /**
+   * Issue #861: equalize the visible split widths so each split occupies an
+   * equal share (`1 / n`, n = split count). Splits / CLI assignments are left
+   * untouched; only `widths` changes. Sum stays ~1.0 (n * (1/n)).
+   */
+  resetWidths: () => void;
   /** Returns CLI tools allowed for `idx` (excludes tools used by other splits). */
   availableCliTools: (idx: number) => CLIToolType[];
   focusedSplitIndex: number;
@@ -220,6 +226,17 @@ export function useTerminalSplits(worktreeId: string): UseTerminalSplitsReturn {
     });
   }, []);
 
+  // Issue #861: equalize widths to 1/n. Length-preserving (keeps the
+  // widths.length === splits.length invariant); a no-op for n === 1 since the
+  // sole split is already 1/1 === 1 (and self-healed to 1.0 on load).
+  const resetWidths = useCallback(() => {
+    setConfig(prev => {
+      const n = prev.splits.length;
+      if (n === 0) return prev; // defensive; MIN_SPLITS=1 makes this unreachable
+      return { ...prev, widths: Array.from({ length: n }, () => 1 / n) };
+    });
+  }, []);
+
   const availableCliTools = useCallback(
     (idx: number): CLIToolType[] => {
       const usedByOthers = new Set<string>();
@@ -242,6 +259,7 @@ export function useTerminalSplits(worktreeId: string): UseTerminalSplitsReturn {
     removeSplit,
     setSplitCliTool,
     setSplitWidth,
+    resetWidths,
     availableCliTools,
     focusedSplitIndex,
     setFocusedSplitIndex,
