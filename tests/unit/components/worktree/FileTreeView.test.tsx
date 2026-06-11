@@ -93,27 +93,32 @@ describe('FileTreeView', () => {
     });
   });
 
-  // [Issue #852] Full filename on hover via native title tooltip for truncated names
-  describe('Filename tooltip (Issue #852)', () => {
-    it('should set title attribute with full name on file name span', async () => {
+  // [Issue #859] Full filename on hover now uses a JS (Portal) tooltip with a
+  // controllable ~200ms delay (see TruncationTooltip), replacing the native
+  // `title` (#852) whose show-delay is browser-controlled and sluggish.
+  // The tooltip's timing/portal/truncation behavior is unit-tested directly in
+  // tests/unit/components/common/TruncationTooltip.test.tsx; here we only guard
+  // the integration wiring: the native `title` must no longer be present.
+  describe('Filename tooltip (Issue #859)', () => {
+    it('should NOT set a native title attribute on file name spans', async () => {
       render(<FileTreeView worktreeId="test-worktree" />);
 
       await waitFor(() => {
         expect(screen.getByText('package.json')).toBeInTheDocument();
       });
 
-      expect(screen.getByText('package.json')).toHaveAttribute('title', 'package.json');
-      expect(screen.getByText('README.md')).toHaveAttribute('title', 'README.md');
+      expect(screen.getByText('package.json')).not.toHaveAttribute('title');
+      expect(screen.getByText('README.md')).not.toHaveAttribute('title');
     });
 
-    it('should set title attribute with full name on directory name span', async () => {
+    it('should NOT set a native title attribute on directory name spans', async () => {
       render(<FileTreeView worktreeId="test-worktree" />);
 
       await waitFor(() => {
         expect(screen.getByText('src')).toBeInTheDocument();
       });
 
-      expect(screen.getByText('src')).toHaveAttribute('title', 'src');
+      expect(screen.getByText('src')).not.toHaveAttribute('title');
     });
   });
 
