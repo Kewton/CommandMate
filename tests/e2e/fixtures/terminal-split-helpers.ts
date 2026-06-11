@@ -28,9 +28,11 @@ export const E2E_WORKTREE_B = 'e2e-split-b';
  *  `TERMINAL_SPLITS_STORAGE_KEY_PREFIX` in src/config/terminal-split-config.ts). */
 const TERMINAL_SPLITS_PREFIX = 'commandmate:terminalSplits:';
 
-/** Activity-bar persistence key (mirror of ACTIVITY_BAR_STORAGE_KEY). Cleared
- *  so the Files activity toggle starts from a known state. */
-const ACTIVITY_BAR_KEY = 'commandmate.worktree.activeActivity';
+/** Activity-bar persistence key prefix (mirror of
+ *  ACTIVITY_BAR_STORAGE_KEY_PREFIX). Per-worktree since Issue #858
+ *  (`commandmate.worktree.activeActivity-<worktreeId>`); cleared by prefix so
+ *  the Files activity toggle starts from a known state for every worktree. */
+const ACTIVITY_BAR_PREFIX = 'commandmate.worktree.activeActivity-';
 
 /** History pane visibility key (mirror of useHistoryPaneState). Cleared so
  *  History starts from its default (visible=true). */
@@ -157,12 +159,12 @@ const CLEARED_GUARD_KEY = '__e2e_split_cleared__';
  */
 export async function clearSplitStorage(page: Page): Promise<void> {
   await page.addInitScript(
-    ({ prefix, keys, guard }) => {
+    ({ prefixes, keys, guard }) => {
       try {
         if (sessionStorage.getItem(guard)) return;
         sessionStorage.setItem(guard, '1');
         Object.keys(localStorage)
-          .filter(k => k.startsWith(prefix))
+          .filter(k => prefixes.some((p: string) => k.startsWith(p)))
           .forEach(k => localStorage.removeItem(k));
         keys.forEach((k: string) => localStorage.removeItem(k));
       } catch {
@@ -170,8 +172,8 @@ export async function clearSplitStorage(page: Page): Promise<void> {
       }
     },
     {
-      prefix: TERMINAL_SPLITS_PREFIX,
-      keys: [ACTIVITY_BAR_KEY, HISTORY_VISIBLE_KEY, HISTORY_WIDTH_KEY],
+      prefixes: [TERMINAL_SPLITS_PREFIX, ACTIVITY_BAR_PREFIX],
+      keys: [HISTORY_VISIBLE_KEY, HISTORY_WIDTH_KEY],
       guard: CLEARED_GUARD_KEY,
     },
   );
