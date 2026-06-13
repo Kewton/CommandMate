@@ -54,7 +54,7 @@ import {
   type AgentInstance,
 } from '@/lib/cli-tools/types';
 import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
-import { useMobileSelectedAgents } from '@/hooks/useMobileSelectedAgents';
+import { useMobileSelectedInstances } from '@/hooks/useMobileSelectedInstances';
 import { useTranslations } from 'next-intl';
 import { useFileOperations } from '@/hooks/useFileOperations';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
@@ -151,6 +151,11 @@ const DEFAULT_WORKTREE_NAME = 'Unknown';
 export function useWorktreeDetailController({ worktreeId }: { worktreeId: string }) {
   const router = useRouter();
   const isMobile = useIsMobile();
+  // Issue #874: ref mirror so the message/output fetchers (which read state via
+  // refs to keep a stable identity) can mobile-gate the `instance` query param
+  // without being recreated on every isMobile change.
+  const isMobileRef = useRef(isMobile);
+  isMobileRef.current = isMobile;
   // Issue #747: the sidebar toggle moved into the ActivityBar (which reads
   // SidebarContext directly), so DesktopHeader no longer needs `toggle` here.
   const { openMobileDrawer } = useSidebarContext();
@@ -490,9 +495,17 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Issue #4: Use ref for activeCliTab to avoid callback recreation on tab switch
   const fetchMessages = useCallback(async (): Promise<void> => {
     const requestedCliTool = activeCliTabRef.current;
+    // Issue #874: on mobile the History tab follows the active agent *instance*
+    // (tabs are instance-based). Add `instance` only on mobile so PC requests
+    // stay byte-for-byte identical (PC History is per-split, keyed elsewhere).
+    const onMobile = isMobileRef.current;
+    const requestedInstance = activeInstanceIdRef.current;
     const requestId = ++latestMessagesRequestIdRef.current;
     try {
       const params = new URLSearchParams({ cliTool: requestedCliTool });
+      if (onMobile) {
+        params.set('instance', requestedInstance);
+      }
       if (showArchivedRef.current) {
         params.set('includeArchived', 'true');
       }
@@ -503,12 +516,20 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         throw new Error(`Failed to fetch messages: ${response.status}`);
       }
       const data: ChatMessage[] = await response.json();
-      if (latestMessagesRequestIdRef.current !== requestId || activeCliTabRef.current !== requestedCliTool) {
+      if (
+        latestMessagesRequestIdRef.current !== requestId ||
+        activeCliTabRef.current !== requestedCliTool ||
+        (onMobile && activeInstanceIdRef.current !== requestedInstance)
+      ) {
         return;
       }
       actions.setMessages(parseMessageTimestamps(data));
     } catch (err) {
-      if (latestMessagesRequestIdRef.current !== requestId || activeCliTabRef.current !== requestedCliTool) {
+      if (
+        latestMessagesRequestIdRef.current !== requestId ||
+        activeCliTabRef.current !== requestedCliTool ||
+        (onMobile && activeInstanceIdRef.current !== requestedInstance)
+      ) {
         return;
       }
       console.error('[WorktreeDetailRefactored] Error fetching messages:', err);
@@ -519,14 +540,26 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Issue #4: Use ref for activeCliTab to avoid callback recreation on tab switch
   const fetchCurrentOutput = useCallback(async (): Promise<void> => {
     const requestedCliTool = activeCliTabRef.current;
+    // Issue #874: mobile-gate the instance selector (see fetchMessages). PC keeps
+    // the cliTool-keyed parent poll byte-identical; the mobile terminal tab and
+    // History follow the active instance.
+    const onMobile = isMobileRef.current;
+    const requestedInstance = activeInstanceIdRef.current;
     const requestId = ++latestCurrentOutputRequestIdRef.current;
     try {
-      const response = await fetch(`/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCliTool}`);
+      const outputUrl = onMobile
+        ? `/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCliTool}&instance=${encodeURIComponent(requestedInstance)}`
+        : `/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCliTool}`;
+      const response = await fetch(outputUrl);
       if (!response.ok) {
         return;
       }
       const data: CurrentOutputResponse = await response.json();
-      if (latestCurrentOutputRequestIdRef.current !== requestId || activeCliTabRef.current !== requestedCliTool) {
+      if (
+        latestCurrentOutputRequestIdRef.current !== requestId ||
+        activeCliTabRef.current !== requestedCliTool ||
+        (onMobile && activeInstanceIdRef.current !== requestedInstance)
+      ) {
         return;
       }
       if (data.cliToolId && data.cliToolId !== requestedCliTool) {
@@ -570,54 +603,63 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         }
       }
     } catch (err) {
-      if (latestCurrentOutputRequestIdRef.current !== requestId || activeCliTabRef.current !== requestedCliTool) {
+      if (
+        latestCurrentOutputRequestIdRef.current !== requestId ||
+        activeCliTabRef.current !== requestedCliTool ||
+        (onMobile && activeInstanceIdRef.current !== requestedInstance)
+      ) {
         return;
       }
       console.error('[WorktreeDetailRefactored] Error fetching current output:', err);
     }
   }, [worktreeId, actions, state.prompt.visible]);
 
-  // Issue #837/#851: Mobile keeps its own agent preference in localStorage,
-  // resolved against the full agent pool (CLI_TOOL_IDS) so it can pick any CLI
-  // tool independently of the PC, and never writes the DB. PC continues to use
-  // the full DB selection.
-  const { mobileSelectedAgents, setMobileSelectedAgents } = useMobileSelectedAgents({
-    worktreeId,
-  });
+  // Issue #874: Mobile now manages agent *instances* (折衷案). The shared roster
+  // (agentInstances) lives in the DB; this hook owns ONLY the per-device "which
+  // instances to show as tabs" selection (localStorage, never the DB) — so a
+  // mobile user narrowing their tabs does not shrink the PC view (#837/#851).
+  const {
+    visibleInstances,
+    visibleInstanceIds,
+    toggleInstanceVisible,
+  } = useMobileSelectedInstances({ worktreeId, roster: agentInstances });
+
+  // Mobile tabs are the per-device visible subset; PC uses the full roster.
+  const displayedInstances = isMobile ? visibleInstances : agentInstances;
+
+  // Derived CLI-tool list for surfaces that still take CLIToolType[] (TimerPane,
+  // legacy props). Mobile = unique cliTools of the visible instances (instance
+  // order); PC = the DB selection (unchanged).
+  const mobileSelectedAgents = useMemo(
+    () => Array.from(new Set(visibleInstances.map((inst) => inst.cliTool))),
+    [visibleInstances],
+  );
   const displayedAgents = isMobile ? mobileSelectedAgents : selectedAgents;
 
-  // Issue #368/#869: Sync activeCliTab to displayedAgents on MOBILE only.
-  // Mobile keeps the CLI-tool tab model. On PC the active tab follows the
-  // active agent *instance* (the two effects below), so this reconcile must
-  // not fight the instance-driven sync.
+  // Issue #869/#874: keep activeInstanceId pointing at a currently-displayed
+  // instance. PC uses the full roster; mobile uses the visible subset. When the
+  // active instance disappears (rename/delete/reorder, or hidden on this
+  // device), fall back to the first displayed instance. setActiveInstanceId
+  // mirrors the instance's CLI tool into activeCliTab, so cliTool-keyed concerns
+  // (auto-yes, status, kill, message/output fetch) follow the active instance on
+  // both PC and mobile.
   useEffect(() => {
-    if (!isMobile) return;
-    if (!displayedAgents.includes(activeCliTab)) {
-      setActiveCliTab(displayedAgents[0]);
+    if (displayedInstances.length === 0) return;
+    if (!displayedInstances.some(inst => inst.id === activeInstanceId)) {
+      setActiveInstanceId(displayedInstances[0].id);
     }
-  }, [isMobile, displayedAgents, activeCliTab, setActiveCliTab]);
+  }, [displayedInstances, activeInstanceId, setActiveInstanceId]);
 
-  // Issue #869 (PC): keep activeInstanceId pointing at a roster instance.
-  // When the active instance is removed (rename/delete/reorder), fall back to
-  // the first instance. Skipped on mobile (instances are a PC concern).
+  // Idempotent mirror: keep activeCliTab in sync with the active instance's CLI
+  // tool even when activeInstanceId itself is unchanged (e.g. localStorage
+  // restored an instance/cliTool pair that drifted). setActiveCliTab no-ops when
+  // already equal.
   useEffect(() => {
-    if (isMobile) return;
-    if (agentInstances.length === 0) return;
-    if (!agentInstances.some(inst => inst.id === activeInstanceId)) {
-      setActiveInstanceId(agentInstances[0].id);
-    }
-  }, [isMobile, agentInstances, activeInstanceId, setActiveInstanceId]);
-
-  // Issue #869 (PC): mirror the active instance's CLI tool into activeCliTab so
-  // cliTool-keyed concerns (auto-yes, status, kill, message/output fetch)
-  // follow the active instance. Idempotent — setActiveCliTab no-ops when equal.
-  useEffect(() => {
-    if (isMobile) return;
-    const inst = agentInstances.find(i => i.id === activeInstanceId);
+    const inst = displayedInstances.find(i => i.id === activeInstanceId);
     if (inst && inst.cliTool !== activeCliTab) {
       setActiveCliTab(inst.cliTool);
     }
-  }, [isMobile, agentInstances, activeInstanceId, activeCliTab, setActiveCliTab]);
+  }, [displayedInstances, activeInstanceId, activeCliTab, setActiveCliTab]);
 
   // Issue #379: Disable auto-follow for full-screen TUI tools (OpenCode, Copilot).
   // These tools render in alternate screen mode where menus appear at the top.
@@ -815,7 +857,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       try {
         // Issue #287: Use shared builder to include promptType and defaultOptionNumber
         // so the API can use cursor-key navigation even when promptCheck re-verification fails.
-        const requestBody = buildPromptResponseBody(answer, activeCliTab, state.prompt.data);
+        // Issue #874: on mobile target the active agent instance (the builder only
+        // attaches instanceId when non-primary, so PC stays byte-identical).
+        const requestBody = buildPromptResponseBody(
+          answer,
+          activeCliTab,
+          state.prompt.data,
+          isMobileRef.current ? activeInstanceIdRef.current : undefined,
+        );
 
         const response = await fetch(`/api/worktrees/${worktreeId}/prompt-response`, {
           method: 'POST',
@@ -927,10 +976,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const handleKillConfirm = useCallback(async (): Promise<void> => {
     setShowKillConfirm(false);
     try {
-      const response = await fetch(
-        `/api/worktrees/${worktreeId}/kill-session?cliTool=${activeCliTab}`,
-        { method: 'POST' }
-      );
+      // Issue #874: on mobile scope the kill to the active agent instance; PC
+      // omits the param (byte-identical, kill resolves to the primary instance).
+      const killUrl = isMobileRef.current
+        ? `/api/worktrees/${worktreeId}/kill-session?cliTool=${activeCliTab}&instance=${encodeURIComponent(activeInstanceIdRef.current)}`
+        : `/api/worktrees/${worktreeId}/kill-session?cliTool=${activeCliTab}`;
+      const response = await fetch(killUrl, { method: 'POST' });
       if (!response.ok) return;
       actions.clearMessages();
       // Issue #736: terminal reset reflected by useTerminalPanePolling on the
@@ -1435,6 +1486,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     diffFilePath,
     disableAutoFollow,
     displayedAgents,
+    displayedInstances,
     editorFilePath,
     error,
     fetchCurrentOutput,
@@ -1517,7 +1569,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     setFocusedSplitIndex,
     setHistorySubTab,
     setIsEditorMaximized,
-    setMobileSelectedAgents,
     setWorktree,
     showArchived,
     showKillConfirm,
@@ -1529,8 +1580,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     tabsActions,
     tabsState,
     toasts,
+    toggleInstanceVisible,
     vibeLocalContextWindow,
     vibeLocalModel,
+    visibleInstanceIds,
     worktree,
     worktreeName,
     worktreeStatus,
