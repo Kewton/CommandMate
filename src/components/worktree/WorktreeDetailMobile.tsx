@@ -26,7 +26,7 @@ import { SearchBar } from '@/components/worktree/SearchBar';
 import { NotesAndLogsPane } from '@/components/worktree/NotesAndLogsPane';
 import { GitPane } from '@/components/worktree/GitPane';
 import type { Worktree, ChatMessage } from '@/types/models';
-import { type CLIToolType } from '@/lib/cli-tools/types';
+import { type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
 import type { UseFileSearchReturn } from '@/hooks/useFileSearch';
 import type { ShowToast } from '@/types/markdown-editor';
 import type { HistoryDisplayLimit } from '@/config/history-display-config';
@@ -115,6 +115,12 @@ interface MobileContentProps {
    * architecture) instead of the removed terminal reducer slice.
    */
   cliToolId: CLIToolType;
+  /**
+   * [Issue #874] Active agent instance id for the mobile terminal tab. Defaults
+   * to the primary instance (`=== cliToolId`); additional instances (e.g.
+   * `claude-2`) target their own session via the `instance` query param.
+   */
+  instanceId?: string;
   onFilePathClick: (path: string) => void;
   onFileSelect: (path: string) => void;
   onWorktreeUpdate: (updated: Worktree) => void;
@@ -174,6 +180,20 @@ interface MobileContentProps {
   historyUserOnly?: boolean;
   /** [Issue #725] Callback when the "User only" toggle changes */
   onHistoryUserOnlyChange?: (userOnly: boolean) => void;
+  /**
+   * [Issue #874] When true, the Agent sub-tab in the memo tab renders the
+   * instance-management UI (MobileAgentInstancesPane) instead of the legacy
+   * checkbox AgentSettingsPane. Requires the instance props below.
+   */
+  useInstanceManagement?: boolean;
+  /** [Issue #874] Shared agent instance roster (instance-management mode). */
+  instances?: AgentInstance[];
+  /** [Issue #874] Callback when the roster changes (after a successful PATCH). */
+  onInstancesChange?: (instances: AgentInstance[]) => void;
+  /** [Issue #874] Per-device visible instance ids (localStorage, never the DB). */
+  visibleInstanceIds?: string[];
+  /** [Issue #874] Toggle one instance's per-device visibility. */
+  onToggleInstanceVisible?: (instanceId: string) => void;
 }
 
 /**
@@ -188,13 +208,16 @@ interface MobileContentProps {
 const MobileTerminalTab = memo(function MobileTerminalTab({
   worktreeId,
   cliToolId,
+  instanceId,
   disableAutoFollow,
 }: {
   worktreeId: string;
   cliToolId: CLIToolType;
+  /** Issue #874: agent instance id for this tab (defaults to primary === cliToolId). */
+  instanceId?: string;
   disableAutoFollow?: boolean;
 }) {
-  const { terminal, setAutoScroll } = useTerminalPanePolling({ worktreeId, cliToolId });
+  const { terminal, setAutoScroll } = useTerminalPanePolling({ worktreeId, cliToolId, instanceId });
   return (
     <TerminalDisplay
       output={terminal.output}
@@ -215,6 +238,7 @@ export const MobileContent = memo(function MobileContent({
   worktree,
   messages,
   cliToolId,
+  instanceId,
   onFilePathClick,
   onFileSelect,
   onWorktreeUpdate,
@@ -247,6 +271,11 @@ export const MobileContent = memo(function MobileContent({
   onHistoryDisplayLimitChange,
   historyUserOnly,
   onHistoryUserOnlyChange,
+  useInstanceManagement,
+  instances,
+  onInstancesChange,
+  visibleInstanceIds,
+  onToggleInstanceVisible,
 }: MobileContentProps) {
   switch (activeTab) {
     case 'terminal':
@@ -255,6 +284,7 @@ export const MobileContent = memo(function MobileContent({
           <MobileTerminalTab
             worktreeId={worktreeId}
             cliToolId={cliToolId}
+            instanceId={instanceId}
             disableAutoFollow={disableAutoFollow}
           />
         </ErrorBoundary>
@@ -366,6 +396,11 @@ export const MobileContent = memo(function MobileContent({
             vibeLocalContextWindow={vibeLocalContextWindow}
             onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
             onInsertToMessage={onInsertToMessage}
+            useInstanceManagement={useInstanceManagement}
+            instances={instances}
+            onInstancesChange={onInstancesChange}
+            visibleInstanceIds={visibleInstanceIds}
+            onToggleInstanceVisible={onToggleInstanceVisible}
           />
         </ErrorBoundary>
       );
