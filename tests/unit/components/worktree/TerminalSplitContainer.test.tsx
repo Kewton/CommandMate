@@ -1,5 +1,5 @@
 /**
- * Tests for TerminalSplitContainer (Issue #728)
+ * Tests for TerminalSplitContainer (Issue #728, instance-keyed in Issue #869)
  *
  * @vitest-environment jsdom
  */
@@ -9,20 +9,42 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { TerminalSplitContainer } from '@/components/worktree/TerminalSplitContainer';
 import { clearTerminalSplitsLocalStorage } from '@tests/helpers/terminal-splits';
+import {
+  CLI_TOOL_IDS,
+  getCliToolDisplayName,
+  type AgentInstance,
+} from '@/lib/cli-tools/types';
 
-function setup(renderImpl?: () => React.ReactNode) {
-  const renderPane = vi.fn(({ splitIndex, cliToolId, availableCliTools, onFocus }) => (
+/**
+ * Issue #869: the container is now driven by an agent-instance roster. The
+ * default roster mirrors the pre-#869 selectable CLI tools: one PRIMARY instance
+ * per CLI tool (id === cliTool), so split availability math (own + not-taken) is
+ * unchanged (CLI_TOOL_IDS.length - taken).
+ */
+const ROSTER: AgentInstance[] = CLI_TOOL_IDS.map((cliTool, order) => ({
+  id: cliTool,
+  cliTool,
+  alias: getCliToolDisplayName(cliTool),
+  order,
+}));
+
+function setup(renderImpl?: () => React.ReactNode, instances: AgentInstance[] = ROSTER) {
+  const renderPane = vi.fn(({ splitIndex, cliToolId, availableInstances, onFocus }) => (
     <div data-split-index={splitIndex} data-cli-tool={cliToolId}>
       <span data-testid={`pane-cli-${splitIndex}`}>{cliToolId}</span>
       <span data-testid={`pane-available-count-${splitIndex}`}>
-        {availableCliTools.length}
+        {availableInstances.length}
       </span>
       <textarea data-testid={`pane-textarea-${splitIndex}`} onFocus={onFocus} />
       {renderImpl?.()}
     </div>
   ));
   const utils = render(
-    <TerminalSplitContainer worktreeId="w-1" renderPane={renderPane} />,
+    <TerminalSplitContainer
+      worktreeId="w-1"
+      instances={instances}
+      renderPane={renderPane}
+    />,
   );
   return { renderPane, ...utils };
 }
@@ -69,11 +91,11 @@ describe('TerminalSplitContainer', () => {
     expect(screen.getByTestId('remove-terminal-split')).toBeDisabled();
   });
 
-  it('availableCliTools excludes CLI used by other splits', () => {
+  it('availableInstances excludes instances used by other splits', () => {
     setup();
     fireEvent.click(screen.getByTestId('add-terminal-split'));
-    // split 0 has 'claude', split 1 picked a different CLI; both panes should
-    // show CLI_TOOL_IDS.length - 1 = 5 available tools (own + 4 others not taken).
+    // split 0 has 'claude', split 1 auto-picked a different instance; both panes
+    // should show ROSTER.length - 1 = 5 available instances (own + not-taken).
     expect(screen.getByTestId('pane-available-count-0')).toHaveTextContent('5');
     expect(screen.getByTestId('pane-available-count-1')).toHaveTextContent('5');
   });
@@ -96,6 +118,7 @@ describe('TerminalSplitContainer', () => {
     render(
       <TerminalSplitContainer
         worktreeId="w-1"
+        instances={ROSTER}
         renderPane={renderPane}
         onFocusedSplitChange={cb}
       />,
@@ -104,6 +127,23 @@ describe('TerminalSplitContainer', () => {
     cb.mockClear();
     fireEvent.focus(screen.getByTestId('ta-0'));
     expect(cb).toHaveBeenCalledWith(0);
+  });
+
+  // Issue #869: a worktree may register two instances of the SAME CLI tool. Both
+  // must be usable in separate splits and addressable in the availability list.
+  it('supports two instances of the same CLI tool (Claude × 2) in separate splits', () => {
+    const dualClaude: AgentInstance[] = [
+      { id: 'claude', cliTool: 'claude', alias: 'Primary', order: 0 },
+      { id: 'claude-2', cliTool: 'claude', alias: 'Review', order: 1 },
+    ];
+    setup(undefined, dualClaude);
+    fireEvent.click(screen.getByTestId('add-terminal-split'));
+    // Two splits, each backed by a distinct claude instance (same cliTool).
+    expect(screen.getByTestId('pane-cli-0')).toHaveTextContent('claude');
+    expect(screen.getByTestId('pane-cli-1')).toHaveTextContent('claude');
+    // Each split sees only its own instance available (the other is taken).
+    expect(screen.getByTestId('pane-available-count-0')).toHaveTextContent('1');
+    expect(screen.getByTestId('pane-available-count-1')).toHaveTextContent('1');
   });
 });
 
@@ -308,12 +348,12 @@ describe('TerminalSplitContainer equalize widths (Issue #861)', () => {
 });
 
 // ===========================================================================
-// Issue #786: drag-drop validation owner. The container holds the `splits`
-// array, so it classifies a drop as no-op / reject / apply and owns the toast
-// messaging + activeCliTab sync. Each pane receives `onDropCliTool` via the
-// renderPane args.
+// Issue #786 / #869: drag-drop validation owner. The container holds the
+// `splits` array, so it classifies a drop as no-op / reject / apply and owns the
+// toast messaging + active-instance sync. Each pane receives `onDropInstance`
+// via the renderPane args; the payload is now an agent `instanceId`.
 // ===========================================================================
-describe('TerminalSplitContainer drop validation (Issue #786)', () => {
+describe('TerminalSplitContainer drop validation (Issue #786 / #869)', () => {
   beforeEach(() => {
     clearTerminalSplitsLocalStorage();
   });
@@ -322,28 +362,28 @@ describe('TerminalSplitContainer drop validation (Issue #786)', () => {
   });
 
   /**
-   * Render a container whose panes expose a button that invokes the
-   * `onDropCliTool` arg with a fixed cliId, so tests can simulate a drop on a
-   * given splitIndex without a full DragEvent.
+   * Render a container whose panes expose buttons that invoke `onDropInstance`
+   * with a fixed instanceId, so tests can simulate a drop on a given splitIndex
+   * without a full DragEvent.
    */
   function setupDrop(opts: {
     showToast?: (message: string, type?: string) => void;
-    onActiveCliTabChange?: (cliId: string) => void;
+    onActiveInstanceChange?: (instanceId: string) => void;
   }) {
-    const renderPane = vi.fn(({ splitIndex, cliToolId, onDropCliTool }) => (
+    const renderPane = vi.fn(({ splitIndex, cliToolId, onDropInstance }) => (
       <div data-split-index={splitIndex} data-cli-tool={cliToolId}>
         <span data-testid={`pane-cli-${splitIndex}`}>{cliToolId}</span>
         <button
           type="button"
           data-testid={`drop-claude-${splitIndex}`}
-          onClick={() => onDropCliTool?.('claude')}
+          onClick={() => onDropInstance?.('claude')}
         >
           drop claude
         </button>
         <button
           type="button"
           data-testid={`drop-gemini-${splitIndex}`}
-          onClick={() => onDropCliTool?.('gemini')}
+          onClick={() => onDropInstance?.('gemini')}
         >
           drop gemini
         </button>
@@ -352,45 +392,46 @@ describe('TerminalSplitContainer drop validation (Issue #786)', () => {
     const utils = render(
       <TerminalSplitContainer
         worktreeId="w-1"
+        instances={ROSTER}
         renderPane={renderPane}
         showToast={opts.showToast}
-        onActiveCliTabChange={opts.onActiveCliTabChange}
+        onActiveInstanceChange={opts.onActiveInstanceChange}
       />,
     );
     return { renderPane, ...utils };
   }
 
-  it('accept: drops an unused CLI onto a split → switches CLI + activeCliTab sync + success toast', () => {
+  it('accept: drops an unused instance onto a split → switches instance + active sync + success toast', () => {
     const showToast = vi.fn();
-    const onActiveCliTabChange = vi.fn();
-    setupDrop({ showToast, onActiveCliTabChange });
+    const onActiveInstanceChange = vi.fn();
+    setupDrop({ showToast, onActiveInstanceChange });
 
     // Single split starts as 'claude'; drop 'gemini' (unused) onto split 0.
     fireEvent.click(screen.getByTestId('drop-gemini-0'));
 
     expect(screen.getByTestId('pane-cli-0')).toHaveTextContent('gemini');
-    expect(onActiveCliTabChange).toHaveBeenCalledTimes(1);
-    expect(onActiveCliTabChange).toHaveBeenCalledWith('gemini');
+    expect(onActiveInstanceChange).toHaveBeenCalledTimes(1);
+    expect(onActiveInstanceChange).toHaveBeenCalledWith('gemini');
     expect(showToast).toHaveBeenCalledTimes(1);
     expect(showToast.mock.calls[0][1]).toBe('success');
   });
 
-  it('reject: dropping a CLI already used by another split → warning toast naming split N, no change', () => {
+  it('reject: dropping an instance already used by another split → warning toast naming split N, no change', () => {
     const showToast = vi.fn();
-    const onActiveCliTabChange = vi.fn();
-    setupDrop({ showToast, onActiveCliTabChange });
+    const onActiveInstanceChange = vi.fn();
+    setupDrop({ showToast, onActiveInstanceChange });
 
     // Grow to 2 splits: split 0 = claude, split 1 = (auto-picked, e.g. codex).
     fireEvent.click(screen.getByTestId('add-terminal-split'));
     showToast.mockClear();
-    onActiveCliTabChange.mockClear();
+    onActiveInstanceChange.mockClear();
 
     // Drop 'claude' (used by split 0, which is "split 1" in 1-based label) onto split 1.
     fireEvent.click(screen.getByTestId('drop-claude-1'));
 
     // Split 1 unchanged.
     expect(screen.getByTestId('pane-cli-1')).not.toHaveTextContent('claude');
-    expect(onActiveCliTabChange).not.toHaveBeenCalled();
+    expect(onActiveInstanceChange).not.toHaveBeenCalled();
     expect(showToast).toHaveBeenCalledTimes(1);
     const [message, type] = showToast.mock.calls[0];
     expect(type).toBe('warning');
@@ -398,33 +439,39 @@ describe('TerminalSplitContainer drop validation (Issue #786)', () => {
     expect(message).toMatch(/Claude/);
   });
 
-  it('no-op: dropping the split its OWN current CLI → no toast, no activeCliTab sync', () => {
+  it('no-op: dropping the split its OWN current instance → no toast, no active sync', () => {
     const showToast = vi.fn();
-    const onActiveCliTabChange = vi.fn();
-    setupDrop({ showToast, onActiveCliTabChange });
+    const onActiveInstanceChange = vi.fn();
+    setupDrop({ showToast, onActiveInstanceChange });
 
     // Split 0 is 'claude'; drop 'claude' onto it.
     fireEvent.click(screen.getByTestId('drop-claude-0'));
 
     expect(showToast).not.toHaveBeenCalled();
-    expect(onActiveCliTabChange).not.toHaveBeenCalled();
+    expect(onActiveInstanceChange).not.toHaveBeenCalled();
     expect(screen.getByTestId('pane-cli-0')).toHaveTextContent('claude');
   });
 
-  it('does not throw when showToast / onActiveCliTabChange are omitted', () => {
-    const renderPane = vi.fn(({ splitIndex, cliToolId, onDropCliTool }) => (
+  it('does not throw when showToast / onActiveInstanceChange are omitted', () => {
+    const renderPane = vi.fn(({ splitIndex, cliToolId, onDropInstance }) => (
       <div data-split-index={splitIndex}>
         <span data-testid={`pane-cli-${splitIndex}`}>{cliToolId}</span>
         <button
           type="button"
           data-testid={`drop-gemini-${splitIndex}`}
-          onClick={() => onDropCliTool?.('gemini')}
+          onClick={() => onDropInstance?.('gemini')}
         >
           drop
         </button>
       </div>
     ));
-    render(<TerminalSplitContainer worktreeId="w-1" renderPane={renderPane} />);
+    render(
+      <TerminalSplitContainer
+        worktreeId="w-1"
+        instances={ROSTER}
+        renderPane={renderPane}
+      />,
+    );
     expect(() =>
       fireEvent.click(screen.getByTestId('drop-gemini-0')),
     ).not.toThrow();

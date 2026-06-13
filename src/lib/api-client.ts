@@ -244,16 +244,20 @@ export const worktreeApi = {
    *
    * @param id - Worktree ID
    * @param content - Message content
-   * @param options - Optional settings (cliToolId, imagePath)
+   * @param options - Optional settings (cliToolId, instanceId, imagePath)
    */
   async sendMessage(
     id: string,
     content: string,
-    options?: { cliToolId?: CLIToolType; imagePath?: string }
+    options?: { cliToolId?: CLIToolType; instanceId?: string; imagePath?: string }
   ): Promise<{ success: boolean }> {
-    const body: { content: string; cliToolId?: string; imagePath?: string } = { content };
+    const body: { content: string; cliToolId?: string; instanceId?: string; imagePath?: string } = { content };
     if (options?.cliToolId) {
       body.cliToolId = options.cliToolId;
+    }
+    // Issue #869: target a specific agent instance (defaults to primary === cliToolId).
+    if (options?.instanceId) {
+      body.instanceId = options.instanceId;
     }
     if (options?.imagePath) {
       body.imagePath = options.imagePath;

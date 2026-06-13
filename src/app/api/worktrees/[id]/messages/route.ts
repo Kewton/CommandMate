@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById, getMessages } from '@/lib/db';
-import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 import { MAX_MESSAGES_LIMIT, DEFAULT_MESSAGES_LIMIT } from '@/config/history-display-config';
 
@@ -33,6 +33,7 @@ export async function GET(
     const beforeParam = searchParams.get('before');
     const limitParam = searchParams.get('limit');
     const cliToolParam = searchParams.get('cliTool');
+    const instanceParam = searchParams.get('instance');
 
     const before = beforeParam ? new Date(beforeParam) : undefined;
     const limit = limitParam ? parseInt(limitParam, 10) : DEFAULT_MESSAGES_LIMIT;
@@ -48,6 +49,16 @@ export async function GET(
       );
     }
 
+    // Issue #869: optional instance selector. When provided, scopes messages to a
+    // single agent instance (overrides cliTool filtering in getMessages).
+    if (instanceParam !== null && !isValidInstanceId(instanceParam)) {
+      return NextResponse.json(
+        { error: 'Invalid instance parameter' },
+        { status: 400 }
+      );
+    }
+    const instanceId = instanceParam ?? undefined;
+
     // Validate limit. Upper bound is MAX_MESSAGES_LIMIT (Issue #701).
     if (isNaN(limit) || limit < 1 || limit > MAX_MESSAGES_LIMIT) {
       return NextResponse.json(
@@ -56,8 +67,8 @@ export async function GET(
       );
     }
 
-    // Get messages with optional CLI tool filter
-    const messages = getMessages(db, params.id, { before, limit, cliToolId, includeArchived });
+    // Get messages with optional CLI tool / instance filter
+    const messages = getMessages(db, params.id, { before, limit, cliToolId, instanceId, includeArchived });
 
     // Filter out messages with empty content (defensive programming)
     const validMessages = messages.filter((m) => m.content && m.content.trim() !== '');

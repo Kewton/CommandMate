@@ -32,6 +32,12 @@ export const SPLIT_MESSAGES_POLL_INTERVAL_MS = 5000;
 export interface UseSplitMessagesOptions {
   worktreeId: string;
   cliToolId: CLIToolType;
+  /**
+   * Issue #869: agent instance id for this pane. Defaults to the primary
+   * instance (`=== cliToolId`). Additional instances scope their history via
+   * the `instance` query param.
+   */
+  instanceId?: string;
   /** Issue #701: history display limit. Defaults to the API's own default when omitted. */
   limit?: number;
   /** Issue #168: include archived (previous-session) messages. Defaults to false. */
@@ -58,6 +64,7 @@ function parseMessageTimestamps(messages: ChatMessage[]): ChatMessage[] {
 export function useSplitMessages({
   worktreeId,
   cliToolId,
+  instanceId,
   limit,
   includeArchived = false,
   enabled = true,
@@ -65,18 +72,25 @@ export function useSplitMessages({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Resolve to the primary instance when omitted (instanceId === cliToolId).
+  const resolvedInstanceId = instanceId ?? cliToolId;
+
   // Stale-response guard. Bump on every fetch; ignore older resolutions.
   const requestIdRef = useRef(0);
   // The cliToolId active when the in-flight request started. Drop responses
   // that landed under a different CLI (mirrors useTerminalPanePolling).
   const inFlightCliToolRef = useRef<CLIToolType>(cliToolId);
   inFlightCliToolRef.current = cliToolId;
+  // Issue #869: also drop responses that landed under a different instance.
+  const inFlightInstanceRef = useRef<string>(resolvedInstanceId);
+  inFlightInstanceRef.current = resolvedInstanceId;
 
   const fetchMessages = useCallback(async (): Promise<void> => {
     const requestedCli = cliToolId;
+    const requestedInstance = resolvedInstanceId;
     const requestId = ++requestIdRef.current;
     try {
-      const params = new URLSearchParams({ cliTool: requestedCli });
+      const params = new URLSearchParams({ cliTool: requestedCli, instance: requestedInstance });
       if (limit !== undefined) {
         params.set('limit', String(limit));
       }
@@ -88,10 +102,11 @@ export function useSplitMessages({
       );
       if (!response.ok) return;
       const data: ChatMessage[] = await response.json();
-      // Drop if a newer request superseded us or the CLI changed.
+      // Drop if a newer request superseded us, or the CLI / instance changed.
       if (
         requestIdRef.current !== requestId ||
-        inFlightCliToolRef.current !== requestedCli
+        inFlightCliToolRef.current !== requestedCli ||
+        inFlightInstanceRef.current !== requestedInstance
       ) {
         return;
       }
@@ -100,7 +115,8 @@ export function useSplitMessages({
     } catch (err) {
       if (
         requestIdRef.current !== requestId ||
-        inFlightCliToolRef.current !== requestedCli
+        inFlightCliToolRef.current !== requestedCli ||
+        inFlightInstanceRef.current !== requestedInstance
       ) {
         return;
       }
@@ -108,11 +124,11 @@ export function useSplitMessages({
       console.error('[useSplitMessages] fetch error:', err);
       setIsLoading(false);
     }
-  }, [worktreeId, cliToolId, limit, includeArchived]);
+  }, [worktreeId, cliToolId, resolvedInstanceId, limit, includeArchived]);
 
-  // When (worktreeId, cliToolId) changes, clear stale messages so the new CLI
-  // starts from an empty state and we re-enter the loading phase.
-  const compositeKey = `${worktreeId}::${cliToolId}`;
+  // When (worktreeId, cliToolId, instanceId) changes, clear stale messages so
+  // the new instance starts from an empty state and re-enters the loading phase.
+  const compositeKey = `${worktreeId}::${cliToolId}::${resolvedInstanceId}`;
   const prevCompositeKeyRef = useRef(compositeKey);
   useEffect(() => {
     if (prevCompositeKeyRef.current === compositeKey) return;

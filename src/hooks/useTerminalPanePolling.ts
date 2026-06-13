@@ -68,6 +68,13 @@ interface CurrentOutputResponse {
 export interface UseTerminalPanePollingOptions {
   worktreeId: string;
   cliToolId: CLIToolType;
+  /**
+   * Issue #869: agent instance id for this pane. Defaults to the primary
+   * instance (`=== cliToolId`), in which case the request is identical to the
+   * pre-#869 behavior. Additional instances (e.g. `claude-2`) target their own
+   * session via the `instance` query param.
+   */
+  instanceId?: string;
   /** When false the poller is suspended (e.g. parent unmounted / error state). */
   enabled?: boolean;
 }
@@ -85,8 +92,11 @@ export interface UseTerminalPanePollingReturn {
 export function useTerminalPanePolling({
   worktreeId,
   cliToolId,
+  instanceId,
   enabled = true,
 }: UseTerminalPanePollingOptions): UseTerminalPanePollingReturn {
+  // Resolve to the primary instance when omitted (instanceId === cliToolId).
+  const resolvedInstanceId = instanceId ?? cliToolId;
   const [terminal, setTerminal] = useState<PaneTerminalState>(() => ({
     output: '',
     realtimeSnippet: '',
@@ -111,6 +121,10 @@ export function useTerminalPanePolling({
   // we also need to drop responses that landed under a different CLI.
   const inFlightCliToolRef = useRef<CLIToolType>(cliToolId);
   inFlightCliToolRef.current = cliToolId;
+  // Issue #869: also drop responses that landed under a different instance (two
+  // splits may share a CLI tool but differ by instance).
+  const inFlightInstanceRef = useRef<string>(resolvedInstanceId);
+  inFlightInstanceRef.current = resolvedInstanceId;
 
   // promptVisible is read inside fetchCurrentOutput; keep it as a ref so the
   // fetchCurrentOutput callback identity stays stable across prompt visibility
@@ -120,17 +134,19 @@ export function useTerminalPanePolling({
 
   const fetchCurrentOutput = useCallback(async (): Promise<void> => {
     const requestedCli = cliToolId;
+    const requestedInstance = resolvedInstanceId;
     const requestId = ++requestIdRef.current;
     try {
       const response = await fetch(
-        `/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCli}`,
+        `/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCli}&instance=${encodeURIComponent(requestedInstance)}`,
       );
       if (!response.ok) return;
       const data: CurrentOutputResponse = await response.json();
-      // Drop if a newer request superseded us or the CLI changed.
+      // Drop if a newer request superseded us, or the CLI / instance changed.
       if (
         requestIdRef.current !== requestId ||
-        inFlightCliToolRef.current !== requestedCli
+        inFlightCliToolRef.current !== requestedCli ||
+        inFlightInstanceRef.current !== requestedInstance
       ) {
         return;
       }
@@ -175,19 +191,20 @@ export function useTerminalPanePolling({
     } catch (err) {
       if (
         requestIdRef.current !== requestId ||
-        inFlightCliToolRef.current !== requestedCli
+        inFlightCliToolRef.current !== requestedCli ||
+        inFlightInstanceRef.current !== requestedInstance
       ) {
         return;
       }
       // Network errors are swallowed; next interval will retry.
       console.error('[useTerminalPanePolling] fetch error:', err);
     }
-  }, [worktreeId, cliToolId]);
+  }, [worktreeId, cliToolId, resolvedInstanceId]);
 
   // When (worktreeId, cliToolId) changes, treat it like a fresh attach.
   // We reset attaching=true and clear stale output/prompt so the new CLI starts
   // from a blank state.
-  const compositeKey = `${worktreeId}::${cliToolId}`;
+  const compositeKey = `${worktreeId}::${cliToolId}::${resolvedInstanceId}`;
   const prevCompositeKeyRef = useRef(compositeKey);
   useEffect(() => {
     if (prevCompositeKeyRef.current === compositeKey) return;

@@ -249,6 +249,25 @@ export function getCliToolDisplayNameSafe(cliToolId?: string, fallback = 'Assist
 }
 
 /**
+ * Resolve a human-readable label for an agent instance (Issue #869).
+ *
+ * Alias-first: returns the instance alias when it is a non-empty string,
+ * otherwise falls back to the backing CLI tool's display name. Use this for all
+ * UI surfaces (header badge, terminal tabs, split selector) so additional
+ * instances of the same tool remain distinguishable.
+ *
+ * @param instance - Agent instance (or a minimal `{ cliTool, alias }` shape)
+ * @returns Non-empty display label
+ */
+export function getInstanceLabel(instance: { cliTool: CLIToolType; alias?: string }): string {
+  const alias = instance.alias;
+  if (typeof alias === 'string' && alias.trim().length > 0) {
+    return alias;
+  }
+  return getCliToolDisplayName(instance.cliTool);
+}
+
+/**
  * Build the default set of agent instances from a worktree's selectedAgents
  * (Issue #868 migration / fallback).
  *
