@@ -19,6 +19,32 @@ It directly parses terminal output to accurately detect Claude's state (waiting 
 | `waiting` | ● | Yellow | Waiting for user input (yes/no, choices, etc.) |
 | `generating` | ⟳ | Blue spinner | Generating response |
 
+## Aggregated status icon to the left of the branch (Issue #867)
+
+Each branch in the sidebar shows the status of all selected agents **aggregated into a single icon** to the left of the branch name (previously it rendered up to five separate dots).
+
+### Aggregation logic
+
+`aggregateCliStatus(cliStatus)` (`src/types/sidebar.ts`) picks the single most significant status across all agents. The priority order (distinct from the sort-only `STATUS_PRIORITY`) is:
+
+```
+waiting > running / generating > ready > idle
+```
+
+- If any agent is `waiting`, the icon is `waiting` (yellow dot).
+- Otherwise, if any agent is `running` or `generating`, the icon is a spinner (`running` wins).
+- Otherwise, if any agent is `ready`, the icon is `ready` (green dot).
+- Otherwise, `idle` (gray dot).
+
+### Per-agent breakdown
+
+Aggregation does not lose per-agent detail. The icon's `title` / `aria-label` is set from
+`formatCliStatusBreakdown(cliStatus)` (e.g. `Claude: running, Codex: idle`), so the breakdown is
+revealed on hover/focus.
+
+> Sorting (`STATUS_PRIORITY`, `waiting` first) operates on the per-branch `status`, so this
+> aggregated icon does not change existing sort behavior.
+
 ## Detection Logic
 
 ### Thinking Indicator Detection
