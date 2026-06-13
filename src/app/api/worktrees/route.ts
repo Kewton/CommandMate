@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 // Force dynamic rendering - this route uses searchParams and database access
 export const dynamic = 'force-dynamic';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { getWorktrees, getRepositories, getMessages, markPendingPromptsAsAnswered } from '@/lib/db';
+import { getWorktrees, getRepositories, getMessages, markPendingPromptsAsAnswered, getAgentInstances } from '@/lib/db';
 import { listSessions } from '@/lib/tmux/tmux';
 import { detectWorktreeSessionStatus } from '@/lib/session/worktree-status-helper';
 import { parseIncludeParam } from '@/lib/api/worktrees-include-parser';
@@ -59,6 +59,7 @@ export async function GET(request: NextRequest) {
           db,
           getMessages,
           markPendingPromptsAsAnswered,
+          getAgentInstances,
         );
 
         const base = {

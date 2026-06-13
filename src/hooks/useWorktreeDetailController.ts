@@ -976,11 +976,13 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const handleKillConfirm = useCallback(async (): Promise<void> => {
     setShowKillConfirm(false);
     try {
-      // Issue #874: on mobile scope the kill to the active agent instance; PC
-      // omits the param (byte-identical, kill resolves to the primary instance).
-      const killUrl = isMobileRef.current
-        ? `/api/worktrees/${worktreeId}/kill-session?cliTool=${activeCliTab}&instance=${encodeURIComponent(activeInstanceIdRef.current)}`
-        : `/api/worktrees/${worktreeId}/kill-session?cliTool=${activeCliTab}`;
+      // Issue #874/#875: always scope the kill to the active agent instance, on
+      // PC as well as mobile. The primary instance uses instanceId === cliToolId
+      // (byte-identical session name), so this is unchanged for primary
+      // instances; for alias instances it terminates only that instance's
+      // session instead of every session of the backing CLI tool.
+      const killUrl =
+        `/api/worktrees/${worktreeId}/kill-session?cliTool=${activeCliTab}&instance=${encodeURIComponent(activeInstanceIdRef.current)}`;
       const response = await fetch(killUrl, { method: 'POST' });
       if (!response.ok) return;
       actions.clearMessages();
