@@ -32,7 +32,8 @@ describe('CLIToolManager.stopPollers (T2.4 - MF1-001)', () => {
 
     manager.stopPollers('test-worktree', 'codex');
 
-    expect(stopPolling).toHaveBeenCalledWith('test-worktree', 'codex');
+    // Issue #868: stopPollers forwards an optional instanceId (undefined → primary).
+    expect(stopPolling).toHaveBeenCalledWith('test-worktree', 'codex', undefined);
   });
 
 });

@@ -399,39 +399,52 @@ export function extractResponse(
 /**
  * Check for CLI tool response once
  *
+ * Issue #868: Optionally scoped to a specific agent instance. The instanceId
+ * keys the poller, tmux session, session_states row and chat_messages; cliToolId
+ * continues to drive tool-specific parsing behavior. When instanceId is omitted
+ * it defaults to cliToolId (the primary instance), preserving legacy behavior.
+ *
  * @param worktreeId - Worktree ID
+ * @param cliToolId - CLI tool ID (claude, codex, gemini, ...)
+ * @param instanceId - Optional agent instance ID (defaults to primary)
  * @returns True if response was found and processed
  */
-export async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Promise<boolean> {
+export async function checkForResponse(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): Promise<boolean> {
   const db = getDbInstance();
+  // Instance used for all keying/scoping (poller, session state, prompts).
+  const resolvedInstanceId = instanceId ?? cliToolId;
 
   try {
     // Get worktree to verify it exists
     const worktree = getWorktreeById(db, worktreeId);
     if (!worktree) {
       logger.error('worktree-worktreeid-not');
-      stopPolling(worktreeId, cliToolId);
+      stopPolling(worktreeId, cliToolId, instanceId);
       return false;
     }
 
     // Check if CLI tool session is running
-    const running = await isSessionRunning(worktreeId, cliToolId);
+    const running = await isSessionRunning(worktreeId, cliToolId, instanceId);
     if (!running) {
       logger.info('session-not-running');
-      stopPolling(worktreeId, cliToolId);
+      stopPolling(worktreeId, cliToolId, instanceId);
       return false;
     }
 
     // Get session state (last captured line count)
-    const sessionState = getSessionState(db, worktreeId, cliToolId);
+    const sessionState = getSessionState(db, worktreeId, resolvedInstanceId);
     const lastCapturedLine = sessionState?.lastCapturedLine || 0;
 
     // Capture current output
-    const output = await captureSessionOutput(worktreeId, cliToolId, 10000);
+    const output = await captureSessionOutput(worktreeId, cliToolId, 10000, instanceId);
 
     // Layer 2: Accumulate TUI content for full-screen TUI tools (for overlap tracking only).
     if (cliToolId === 'opencode' || cliToolId === 'copilot') {
-      const pollerKey = getPollerKey(worktreeId, cliToolId);
+      const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
       accumulateTuiContent(pollerKey, output, cliToolId);
     }
 
@@ -444,7 +457,7 @@ export async function checkForResponse(worktreeId: string, cliToolId: CLIToolTyp
       const cleanOutput = stripAnsi(output);
       const tailLines = cleanOutput.split('\n').slice(-THINKING_TAIL_LINE_COUNT).join('\n');
       if (thinkingPattern.test(tailLines)) {
-        const answeredCount = markPendingPromptsAsAnswered(db, worktreeId, cliToolId);
+        const answeredCount = markPendingPromptsAsAnswered(db, worktreeId, cliToolId, resolvedInstanceId);
         if (answeredCount > 0) {
           logger.info('marked-answeredcount-pending');
         }
@@ -470,7 +483,7 @@ export async function checkForResponse(worktreeId: string, cliToolId: CLIToolTyp
     if (promptDetection.isPrompt) {
       // Issue #565: Content hash-based duplicate prompt prevention
       const promptContent = promptDetection.rawContent || promptDetection.cleanContent;
-      const pollerKey = getPollerKey(worktreeId, cliToolId);
+      const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
       const normalizedForDedup = normalizePromptForDedup(promptContent, cliToolId);
       if (isDuplicatePrompt(pollerKey, normalizedForDedup)) {
         logger.info('duplicate-prompt-skipped', { worktreeId, cliToolId });
@@ -485,7 +498,7 @@ export async function checkForResponse(worktreeId: string, cliToolId: CLIToolTyp
       }
 
       // This is a prompt - save as prompt message
-      clearInProgressMessageId(db, worktreeId, cliToolId);
+      clearInProgressMessageId(db, worktreeId, cliToolId, resolvedInstanceId);
 
       const message = createMessage(db, {
         worktreeId,
@@ -495,13 +508,14 @@ export async function checkForResponse(worktreeId: string, cliToolId: CLIToolTyp
         promptData: promptDetection.promptData,
         timestamp: new Date(),
         cliToolId,
+        instanceId: resolvedInstanceId,
       });
 
-      updateSessionState(db, worktreeId, cliToolId, result.lineCount);
+      updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
       broadcastMessage('message', { worktreeId, message });
 
       if (!isFullScreenTui) {
-        stopPolling(worktreeId, cliToolId);
+        stopPolling(worktreeId, cliToolId, instanceId);
       }
 
       return true;
@@ -509,7 +523,7 @@ export async function checkForResponse(worktreeId: string, cliToolId: CLIToolTyp
 
     // Validate response content is not empty
     if (!result.response || result.response.trim() === '') {
-      updateSessionState(db, worktreeId, cliToolId, result.lineCount);
+      updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
       return false;
     }
 
@@ -525,7 +539,7 @@ export async function checkForResponse(worktreeId: string, cliToolId: CLIToolTyp
     } else if (cliToolId === 'claude') {
       cleanedResponse = cleanClaudeResponse(result.response);
     } else if (cliToolId === 'copilot') {
-      const pollerKey = getPollerKey(worktreeId, cliToolId);
+      const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
       const accumulatedContent = getAccumulatedContent(pollerKey);
       const sourceContent = accumulatedContent || result.response;
       cleanedResponse = cleanCopilotResponse(sourceContent);
@@ -535,14 +549,14 @@ export async function checkForResponse(worktreeId: string, cliToolId: CLIToolTyp
     } else if (cliToolId === 'opencode') {
       cleanedResponse = cleanOpenCodeResponse(result.response);
 
-      const pollerKey = getPollerKey(worktreeId, cliToolId);
+      const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
       clearTuiAccumulator(pollerKey);
     }
 
     // If cleaned response is empty or just "[No content]", skip saving
     if (!cleanedResponse || cleanedResponse.trim() === '' || cleanedResponse === '[No content]') {
-      updateSessionState(db, worktreeId, cliToolId, result.lineCount);
-      clearInProgressMessageId(db, worktreeId, cliToolId);
+      updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
+      clearInProgressMessageId(db, worktreeId, cliToolId, resolvedInstanceId);
       return false;
     }
 
@@ -552,13 +566,13 @@ export async function checkForResponse(worktreeId: string, cliToolId: CLIToolTyp
     }
 
     // Mark any pending prompts as answered
-    const answeredCount = markPendingPromptsAsAnswered(db, worktreeId, cliToolId);
+    const answeredCount = markPendingPromptsAsAnswered(db, worktreeId, cliToolId, resolvedInstanceId);
     if (answeredCount > 0) {
       logger.info('marked-answeredcount-pending');
     }
 
     // Race condition prevention: re-check session state before saving
-    const currentSessionState = getSessionState(db, worktreeId, cliToolId);
+    const currentSessionState = getSessionState(db, worktreeId, resolvedInstanceId);
     if (!isFullScreenTui && currentSessionState && result.lineCount <= currentSessionState.lastCapturedLine) {
       logger.info('race-condition-detected-skipping-save-re');
       return false;
@@ -572,6 +586,7 @@ export async function checkForResponse(worktreeId: string, cliToolId: CLIToolTyp
       messageType: 'normal',
       timestamp: new Date(),
       cliToolId,
+      instanceId: resolvedInstanceId,
       summary: claudeMetadata?.summary,
       logFileName: claudeMetadata?.logFileName,
       requestId: claudeMetadata?.requestId,
@@ -581,11 +596,11 @@ export async function checkForResponse(worktreeId: string, cliToolId: CLIToolTyp
     broadcastMessage('message', { worktreeId, message });
 
     // Update session state
-    updateSessionState(db, worktreeId, cliToolId, result.lineCount);
+    updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
 
     // For full-screen TUIs, stop polling after saving the response.
     if (isFullScreenTui) {
-      stopPolling(worktreeId, cliToolId);
+      stopPolling(worktreeId, cliToolId, instanceId);
     }
 
     return true;

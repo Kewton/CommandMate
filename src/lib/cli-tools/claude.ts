@@ -37,8 +37,8 @@ export class ClaudeTool extends BaseCLITool implements IImageCapableCLITool {
    * @param worktreeId - Worktree ID
    * @returns True if session is running
    */
-  async isRunning(worktreeId: string): Promise<boolean> {
-    return await isClaudeRunning(worktreeId);
+  async isRunning(worktreeId: string, instanceId?: string): Promise<boolean> {
+    return await isClaudeRunning(worktreeId, instanceId);
   }
 
   /**
@@ -46,11 +46,13 @@ export class ClaudeTool extends BaseCLITool implements IImageCapableCLITool {
    *
    * @param worktreeId - Worktree ID
    * @param worktreePath - Worktree path
+   * @param instanceId - Optional agent instance ID (defaults to primary)
    */
-  async startSession(worktreeId: string, worktreePath: string): Promise<void> {
+  async startSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
     const options: ClaudeSessionOptions = {
       worktreeId,
       worktreePath,
+      instanceId,
     };
 
     await startClaudeSession(options);
@@ -61,9 +63,10 @@ export class ClaudeTool extends BaseCLITool implements IImageCapableCLITool {
    *
    * @param worktreeId - Worktree ID
    * @param message - Message to send
+   * @param instanceId - Optional agent instance ID (defaults to primary)
    */
-  async sendMessage(worktreeId: string, message: string): Promise<void> {
-    await sendMessageToClaude(worktreeId, message);
+  async sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void> {
+    await sendMessageToClaude(worktreeId, message, instanceId);
   }
 
   /**
@@ -81,19 +84,21 @@ export class ClaudeTool extends BaseCLITool implements IImageCapableCLITool {
    * @param worktreeId - Worktree ID
    * @param message - Message text
    * @param imagePath - Absolute path to the image file
+   * @param instanceId - Optional agent instance ID (defaults to primary)
    */
-  async sendMessageWithImage(worktreeId: string, message: string, imagePath: string): Promise<void> {
+  async sendMessageWithImage(worktreeId: string, message: string, imagePath: string, instanceId?: string): Promise<void> {
     const imageMarkdown = `\n![](${imagePath})`;
     const fullMessage = message ? `${message}${imageMarkdown}` : imageMarkdown;
-    await this.sendMessage(worktreeId, fullMessage);
+    await this.sendMessage(worktreeId, fullMessage, instanceId);
   }
 
   /**
    * Kill Claude session
    *
    * @param worktreeId - Worktree ID
+   * @param instanceId - Optional agent instance ID (defaults to primary)
    */
-  async killSession(worktreeId: string): Promise<void> {
-    await stopClaudeSession(worktreeId);
+  async killSession(worktreeId: string, instanceId?: string): Promise<void> {
+    await stopClaudeSession(worktreeId, instanceId);
   }
 }

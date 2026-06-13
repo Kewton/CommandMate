@@ -7,7 +7,7 @@ import { Command } from 'commander';
 import { ExitCode } from '../types';
 import type { SendOptions } from '../types';
 import type { ChatMessage } from '../types/api-responses';
-import { ApiClient, isValidWorktreeId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
+import { ApiClient, isValidWorktreeId, isValidInstanceId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constants';
 import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
@@ -42,6 +42,9 @@ async function enableAutoYes(
   if (options.agent) {
     autoYesBody.cliToolId = options.agent;
   }
+  // Issue #868: auto-yes is tool-scoped in this PR (the poller keys on
+  // worktreeId:cliToolId). Instance-level auto-yes is deferred with the UI
+  // work (#866-C), so --instance does not narrow auto-yes here.
   if (options.stopPattern) {
     autoYesBody.stopPattern = options.stopPattern;
   }
@@ -57,6 +60,7 @@ export function createSendCommand(): Command {
     .argument('<worktree-id>', 'Worktree ID')
     .argument('<message>', 'Message to send')
     .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode, copilot)')
+    .option('--instance <id>', 'Agent instance ID (defaults to the agent\'s primary instance)')
     .option('--model <model>', 'Specify AI model for Copilot agent')
     .option('--auto-yes', 'Enable auto-yes before sending')
     .option('--duration <duration>', `Auto-yes duration (${ALLOWED_DURATIONS.join(', ')})`)
@@ -73,6 +77,12 @@ export function createSendCommand(): Command {
         // Validate agent if provided
         if (options.agent && !isCliToolId(options.agent)) {
           console.error(`Error: Invalid agent. Must be one of: ${CLI_TOOL_IDS.join(', ')}`);
+          process.exit(ExitCode.CONFIG_ERROR);
+        }
+
+        // Issue #868: Validate instance ID if provided
+        if (options.instance && !isValidInstanceId(options.instance)) {
+          console.error('Error: Invalid --instance. Must be an alphanumeric/underscore/hyphen identifier (max 64 chars).');
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
@@ -107,6 +117,10 @@ export function createSendCommand(): Command {
         const sendBody: Record<string, unknown> = { content: message };
         if (options.agent) {
           sendBody.cliToolId = options.agent;
+        }
+        // Issue #868: Include instance ID in send body
+        if (options.instance) {
+          sendBody.instanceId = options.instance;
         }
         // Issue #576: Include model in send body
         if (options.model) {

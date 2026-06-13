@@ -7,7 +7,7 @@ import { Command } from 'commander';
 import { ExitCode } from '../types';
 import type { CaptureOptions } from '../types';
 import type { CurrentOutputResponse } from '../types/api-responses';
-import { ApiClient, isValidWorktreeId } from '../utils/api-client';
+import { ApiClient, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { isCliToolId } from '../config/cli-tool-ids';
 
@@ -26,6 +26,7 @@ export function createCaptureCommand(): Command {
     .argument('<worktree-id>', 'Worktree ID')
     .option('--json', 'JSON output (excludes fullOutput)')
     .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode, copilot)')
+    .option('--instance <id>', 'Agent instance ID (defaults to the agent\'s primary instance)')
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeId: string, options: CaptureOptions) => {
       try {
@@ -40,13 +41,24 @@ export function createCaptureCommand(): Command {
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
+        // Issue #868: Validate instance ID if provided
+        if (options.instance && !isValidInstanceId(options.instance)) {
+          console.error('Error: Invalid --instance. Must be an alphanumeric/underscore/hyphen identifier (max 64 chars).');
+          process.exit(ExitCode.CONFIG_ERROR);
+        }
+
         const client = new ApiClient({ token: options.token });
 
-        // Build path with optional cliTool query parameter
-        let path = `/api/worktrees/${worktreeId}/current-output`;
+        // Build path with optional cliTool/instance query parameters
+        const query = new URLSearchParams();
         if (options.agent) {
-          path += `?cliTool=${encodeURIComponent(options.agent)}`;
+          query.set('cliTool', options.agent);
         }
+        if (options.instance) {
+          query.set('instance', options.instance);
+        }
+        const qs = query.toString();
+        const path = `/api/worktrees/${worktreeId}/current-output${qs ? `?${qs}` : ''}`;
 
         const data = await client.get<CurrentOutputResponse>(path);
 

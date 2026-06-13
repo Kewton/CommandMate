@@ -9,7 +9,7 @@ import { Command } from 'commander';
 import { ExitCode } from '../types';
 import type { RespondOptions } from '../types';
 import type { PromptResponseResult } from '../types/api-responses';
-import { ApiClient, isValidWorktreeId } from '../utils/api-client';
+import { ApiClient, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { isCliToolId } from '../config/cli-tool-ids';
 
@@ -20,6 +20,7 @@ export function createRespondCommand(): Command {
     .argument('<worktree-id>', 'Worktree ID')
     .argument('<answer>', 'Response answer (yes, no, number, or free text)')
     .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode, copilot)')
+    .option('--instance <id>', 'Agent instance ID (defaults to the agent\'s primary instance)')
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeId: string, answer: string, options: RespondOptions) => {
       try {
@@ -35,6 +36,12 @@ export function createRespondCommand(): Command {
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
+        // Issue #868: Validate instance ID if provided
+        if (options.instance && !isValidInstanceId(options.instance)) {
+          console.error('Error: Invalid --instance. Must be an alphanumeric/underscore/hyphen identifier (max 64 chars).');
+          process.exit(ExitCode.CONFIG_ERROR);
+        }
+
         // Validate answer is not empty
         if (!answer.trim()) {
           console.error('Error: Answer cannot be empty.');
@@ -47,6 +54,10 @@ export function createRespondCommand(): Command {
         const body: Record<string, unknown> = { answer };
         if (options.agent) {
           body.cliTool = options.agent;
+        }
+        // Issue #868: target a specific agent instance
+        if (options.instance) {
+          body.instanceId = options.instance;
         }
 
         const result = await client.post<PromptResponseResult>(

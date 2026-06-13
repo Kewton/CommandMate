@@ -28,6 +28,7 @@ import { promisify } from 'util';
 import { access, constants } from 'fs/promises';
 import { createLogger } from '@/lib/logger';
 import { CLAUDE_RESTART_DELAY_MS } from '@/config/cli-tool-timing-config';
+import { deriveSessionSuffix } from '@/lib/cli-tools/types';
 
 const logger = createLogger('claude-session');
 
@@ -401,6 +402,8 @@ async function ensureHealthySession(sessionName: string): Promise<boolean> {
 export interface ClaudeSessionOptions {
   worktreeId: string;
   worktreePath: string;
+  /** Optional agent instance ID (Issue #868). Defaults to the primary instance. */
+  instanceId?: string;
 }
 
 /**
@@ -415,16 +418,28 @@ export interface ClaudeSessionState {
 /**
  * Get tmux session name for a worktree
  *
+ * Issue #868: Supports additional agent instances. The primary instance
+ * (instanceId omitted or equal to 'claude') keeps the original
+ * `mcbd-claude-{worktreeId}` name for backward compatibility. Additional
+ * instances append a suffix derived from the instance ID.
+ *
  * @param worktreeId - Worktree ID
+ * @param instanceId - Optional agent instance ID (defaults to primary)
  * @returns tmux session name
  *
  * @example
  * ```typescript
  * getSessionName('feature-foo') // => 'mcbd-claude-feature-foo'
+ * getSessionName('feature-foo', 'claude-2') // => 'mcbd-claude-feature-foo-2'
  * ```
  */
-export function getSessionName(worktreeId: string): string {
-  return `mcbd-claude-${worktreeId}`;
+export function getSessionName(worktreeId: string, instanceId?: string): string {
+  const base = `mcbd-claude-${worktreeId}`;
+  if (!instanceId || instanceId === 'claude') {
+    return base;
+  }
+  const suffix = deriveSessionSuffix(instanceId, 'claude');
+  return suffix ? `${base}-${suffix}` : base;
 }
 
 /**
@@ -461,8 +476,8 @@ export async function isClaudeInstalled(): Promise<boolean> {
  * }
  * ```
  */
-export async function isClaudeRunning(worktreeId: string): Promise<boolean> {
-  const sessionName = getSessionName(worktreeId);
+export async function isClaudeRunning(worktreeId: string, instanceId?: string): Promise<boolean> {
+  const sessionName = getSessionName(worktreeId, instanceId);
   const exists = await hasSession(sessionName);
   if (!exists) {
     return false;
@@ -493,9 +508,10 @@ export async function isClaudeRunning(worktreeId: string): Promise<boolean> {
  * @returns Session state information (existence-based, not health-based)
  */
 export async function getClaudeSessionState(
-  worktreeId: string
+  worktreeId: string,
+  instanceId?: string
 ): Promise<ClaudeSessionState> {
-  const sessionName = getSessionName(worktreeId);
+  const sessionName = getSessionName(worktreeId, instanceId);
   const isRunning = await hasSession(sessionName);
 
   return {
@@ -543,7 +559,7 @@ export async function waitForPrompt(
 export async function startClaudeSession(
   options: ClaudeSessionOptions
 ): Promise<void> {
-  const { worktreeId, worktreePath } = options;
+  const { worktreeId, worktreePath, instanceId } = options;
 
   // Check if Claude is installed
   const claudeAvailable = await isClaudeInstalled();
@@ -551,7 +567,7 @@ export async function startClaudeSession(
     throw new Error('Claude CLI is not installed or not in PATH');
   }
 
-  const sessionName = getSessionName(worktreeId);
+  const sessionName = getSessionName(worktreeId, instanceId);
 
   // Check if session already exists
   const exists = await hasSession(sessionName);
@@ -652,9 +668,10 @@ export async function startClaudeSession(
  */
 export async function sendMessageToClaude(
   worktreeId: string,
-  message: string
+  message: string,
+  instanceId?: string
 ): Promise<void> {
-  const sessionName = getSessionName(worktreeId);
+  const sessionName = getSessionName(worktreeId, instanceId);
   await sendMessageToSession(
     sessionName,
     message,
@@ -678,9 +695,10 @@ export async function sendMessageToClaude(
  */
 export async function captureClaudeOutput(
   worktreeId: string,
-  lines: number = 1000
+  lines: number = 1000,
+  instanceId?: string
 ): Promise<string> {
-  const sessionName = getSessionName(worktreeId);
+  const sessionName = getSessionName(worktreeId, instanceId);
 
   // Check if session exists
   const exists = await hasSession(sessionName);
@@ -707,8 +725,8 @@ export async function captureClaudeOutput(
  * await stopClaudeSession('feature-foo');
  * ```
  */
-export async function stopClaudeSession(worktreeId: string): Promise<boolean> {
-  const sessionName = getSessionName(worktreeId);
+export async function stopClaudeSession(worktreeId: string, instanceId?: string): Promise<boolean> {
+  const sessionName = getSessionName(worktreeId, instanceId);
   return stopSession(sessionName);
 }
 
@@ -728,10 +746,10 @@ export async function stopClaudeSession(worktreeId: string): Promise<boolean> {
 export async function restartClaudeSession(
   options: ClaudeSessionOptions
 ): Promise<void> {
-  const { worktreeId } = options;
+  const { worktreeId, instanceId } = options;
 
   // Stop existing session
-  await stopClaudeSession(worktreeId);
+  await stopClaudeSession(worktreeId, instanceId);
 
   // Wait a moment before restarting
   await new Promise((resolve) => setTimeout(resolve, CLAUDE_RESTART_DELAY_MS));

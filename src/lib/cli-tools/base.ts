@@ -6,6 +6,7 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import type { ICLITool, CLIToolType } from './types';
+import { deriveSessionSuffix } from './types';
 import { validateSessionName } from './validation';
 import { sendSpecialKey } from '../tmux/tmux';
 
@@ -34,35 +35,47 @@ export abstract class BaseCLITool implements ICLITool {
   }
 
   /**
-   * Generate session name for a worktree
-   * Format: mcbd-{cli_tool_id}-{worktree_id}
+   * Generate session name for a worktree (Issue #868: instance-aware)
+   *
+   * Format:
+   * - Primary instance (instanceId omitted or === cliToolId): `mcbd-{cli_tool_id}-{worktree_id}`
+   *   (unchanged — backward-compatible anchor)
+   * - Additional instance: `mcbd-{cli_tool_id}-{worktree_id}-{suffix}`
    *
    * T2.3: Added validation to prevent command injection (MF4-001)
    *
    * @param worktreeId - Worktree ID
+   * @param instanceId - Agent instance ID (defaults to the primary instance)
    * @returns Session name
    * @throws Error if the resulting session name is invalid
    */
-  getSessionName(worktreeId: string): string {
-    const sessionName = `mcbd-${this.id}-${worktreeId}`;
+  getSessionName(worktreeId: string, instanceId?: string): string {
+    const base = `mcbd-${this.id}-${worktreeId}`;
+    if (!instanceId || instanceId === this.id) {
+      validateSessionName(base);
+      return base;
+    }
+    const suffix = deriveSessionSuffix(instanceId, this.id);
+    const sessionName = suffix ? `${base}-${suffix}` : base;
     validateSessionName(sessionName);
     return sessionName;
   }
 
   // Abstract methods that must be implemented by subclasses
-  abstract isRunning(worktreeId: string): Promise<boolean>;
-  abstract startSession(worktreeId: string, worktreePath: string): Promise<void>;
-  abstract sendMessage(worktreeId: string, message: string): Promise<void>;
-  abstract killSession(worktreeId: string): Promise<void>;
+  abstract isRunning(worktreeId: string, instanceId?: string): Promise<boolean>;
+  abstract startSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void>;
+  abstract sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void>;
+  abstract killSession(worktreeId: string, instanceId?: string): Promise<void>;
 
   /**
    * Interrupt processing by sending Escape key
    * Default implementation: send Escape key to tmux session
    *
    * @param worktreeId - Worktree ID
+   * @param instanceId - Agent instance ID (defaults to the primary instance)
    */
-  async interrupt(worktreeId: string): Promise<void> {
-    const sessionName = this.getSessionName(worktreeId);
+  async interrupt(worktreeId: string, instanceId?: string): Promise<void> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
     await sendSpecialKey(sessionName, 'Escape');
   }
 }

@@ -223,14 +223,19 @@ export function cleanCliResponse(output: string, cliToolId: CLIToolType): string
  * @param worktreeId - Worktree ID
  * @param cliToolId - CLI tool ID (claude, codex, gemini)
  * @param userMessageTimestamp - Timestamp of the new user message (for timestamp ordering)
+ * @param instanceId - Agent instance ID (Issue #868). Defaults to the primary instance (=== cliToolId).
  * @returns Saved message or null if no response to save
  */
 export async function savePendingAssistantResponse(
   db: Database.Database,
   worktreeId: string,
   cliToolId: CLIToolType,
-  userMessageTimestamp: Date
+  userMessageTimestamp: Date,
+  instanceId?: string
 ): Promise<ChatMessage | null> {
+  // Issue #868: session_states / chat_messages are keyed by instance. The
+  // primary instance uses instanceId === cliToolId, preserving legacy behavior.
+  const resolvedInstanceId = instanceId ?? cliToolId;
   try {
     // OpenCode runs in alternate screen mode (fixed-size pane, no scrollback).
     // Previous conversation history remains visible in the TUI, making it impossible
@@ -242,13 +247,13 @@ export async function savePendingAssistantResponse(
     }
 
     // 1. Get session state for last captured position
-    const sessionState = getSessionState(db, worktreeId, cliToolId);
+    const sessionState = getSessionState(db, worktreeId, resolvedInstanceId);
     const lastCapturedLine = sessionState?.lastCapturedLine || 0;
 
     // 2. Capture current tmux output
     let output: string;
     try {
-      output = await captureSessionOutput(worktreeId, cliToolId, SESSION_OUTPUT_BUFFER_SIZE);
+      output = await captureSessionOutput(worktreeId, cliToolId, SESSION_OUTPUT_BUFFER_SIZE, instanceId);
     } catch {
       // Session not running or capture failed - return null without error
       logger.info('failed-to-capture');
@@ -288,7 +293,7 @@ export async function savePendingAssistantResponse(
       // from before the trimming fix), update it to the current trimmed count so the
       // response-poller's dedup check can work correctly.
       if (currentLineCount < lastCapturedLine) {
-        updateSessionState(db, worktreeId, cliToolId, currentLineCount);
+        updateSessionState(db, worktreeId, cliToolId, currentLineCount, instanceId);
         logger.info('position:corrected-stale', { from: lastCapturedLine, to: currentLineCount });
       }
       return null;
@@ -315,7 +320,7 @@ export async function savePendingAssistantResponse(
     // 9. Check if cleaned response is empty
     if (!cleanedResponse || cleanedResponse.trim() === '') {
       // Output exists but cleaned to empty - update position but don't save
-      updateSessionState(db, worktreeId, cliToolId, currentLineCount);
+      updateSessionState(db, worktreeId, cliToolId, currentLineCount, instanceId);
       logger.debug('response:empty-after-clean', { currentLineCount });
       return null;
     }
@@ -332,10 +337,11 @@ export async function savePendingAssistantResponse(
       messageType: 'normal',
       timestamp: assistantTimestamp,
       cliToolId,
+      instanceId: resolvedInstanceId,
     });
 
     // 11. Update session state with new position
-    updateSessionState(db, worktreeId, cliToolId, currentLineCount);
+    updateSessionState(db, worktreeId, cliToolId, currentLineCount, instanceId);
 
     // 12. Broadcast to WebSocket clients
     broadcastMessage('message', { worktreeId, message });

@@ -15,6 +15,118 @@ export const CLI_TOOL_IDS = ['claude', 'codex', 'gemini', 'vibe-local', 'opencod
  */
 export type CLIToolType = typeof CLI_TOOL_IDS[number];
 
+// ============================================================================
+// Agent Instances (Issue #868: multi-session foundation)
+// ============================================================================
+
+/**
+ * Maximum number of agent instances allowed per worktree (Issue #868).
+ * Caps how many concurrent sessions — including multiple instances of the same
+ * CLI tool — a single worktree may hold.
+ */
+export const MAX_AGENT_INSTANCES = 10;
+
+/**
+ * Maximum length for an agent instance alias (display name).
+ */
+export const MAX_AGENT_ALIAS_LENGTH = 50;
+
+/**
+ * Valid instance ID character pattern (Issue #868).
+ * Mirrors SESSION_NAME_PATTERN constraints so instance IDs can be embedded in
+ * tmux session names without triggering command-injection defenses.
+ * Length is bounded to keep generated session names well under tmux limits.
+ */
+export const INSTANCE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+
+/** Maximum length for an instance ID. */
+export const MAX_INSTANCE_ID_LENGTH = 64;
+
+/**
+ * Agent instance definition (Issue #868).
+ *
+ * Replaces the implicit `(worktreeId, cliToolId)` identity with an explicit,
+ * stable `(worktreeId, instanceId)` identity that supports multiple instances
+ * of the same CLI tool within one worktree.
+ *
+ * The PRIMARY instance of a CLI tool has `id === cliTool`, which keeps existing
+ * session names, poller keys, and DB rows byte-for-byte identical (backward
+ * compatibility / migration anchor).
+ */
+export interface AgentInstance {
+  /** Stable instance identifier. Primary instance: `id === cliTool`. */
+  id: string;
+  /** CLI tool backing this instance. */
+  cliTool: CLIToolType;
+  /** Human-readable display name (defaults to the CLI tool's display name). */
+  alias: string;
+  /** Sort order within the worktree (0-based). */
+  order: number;
+}
+
+/**
+ * Validate an instance ID string (Issue #868).
+ * @param id - Candidate instance ID
+ * @returns True if the ID is a safe, bounded identifier
+ */
+export function isValidInstanceId(id: string): id is string {
+  return typeof id === 'string'
+    && id.length > 0
+    && id.length <= MAX_INSTANCE_ID_LENGTH
+    && INSTANCE_ID_PATTERN.test(id);
+}
+
+/**
+ * Get the primary instance ID for a CLI tool (Issue #868).
+ * The primary instance is identified by `instanceId === cliTool`, which is the
+ * backward-compatibility anchor: session names / poller keys / DB rows are
+ * unchanged for the primary instance.
+ *
+ * @param cliTool - CLI tool type
+ * @returns The primary instance ID (equal to the cliTool id)
+ */
+export function getPrimaryInstanceId(cliTool: CLIToolType): string {
+  return cliTool;
+}
+
+/**
+ * Determine whether an instance ID refers to the primary instance of a CLI tool.
+ *
+ * @param instanceId - Instance ID (may be undefined → treated as primary)
+ * @param cliTool - CLI tool type
+ * @returns True when the instance is the primary instance
+ */
+export function isPrimaryInstance(instanceId: string | undefined, cliTool: CLIToolType): boolean {
+  return !instanceId || instanceId === cliTool;
+}
+
+/**
+ * Build a non-primary instance ID from a suffix (Issue #868).
+ * Format: `{cliTool}-{suffix}` (e.g. `claude-2`). Keeps the CLI tool encoded in
+ * the ID so the backing tool can be recovered without a DB lookup.
+ *
+ * @param cliTool - CLI tool type
+ * @param suffix - Distinguishing suffix (alphanumeric/underscore/hyphen)
+ * @returns Composite instance ID
+ */
+export function buildInstanceId(cliTool: CLIToolType, suffix: string): string {
+  return `${cliTool}-${suffix}`;
+}
+
+/**
+ * Derive the tmux session-name suffix for a (non-primary) instance (Issue #868).
+ * Strips a leading `{cliTool}-` prefix so `claude-2` yields `2`, avoiding a
+ * redundant `mcbd-claude-{wt}-claude-2` session name. Falls back to the raw ID.
+ *
+ * @param instanceId - Instance ID
+ * @param cliTool - CLI tool type
+ * @returns Session-name-safe suffix
+ */
+export function deriveSessionSuffix(instanceId: string, cliTool: CLIToolType): string {
+  const prefix = `${cliTool}-`;
+  return instanceId.startsWith(prefix) ? instanceId.slice(prefix.length) : instanceId;
+}
+
 /**
  * SWE CLIツールの共通インターフェース
  */
@@ -37,42 +149,48 @@ export interface ICLITool {
   /**
    * セッションが実行中かチェック
    * @param worktreeId - Worktree ID
+   * @param instanceId - Agent instance ID (Issue #868). Defaults to the primary instance.
    * @returns 実行中の場合true
    */
-  isRunning(worktreeId: string): Promise<boolean>;
+  isRunning(worktreeId: string, instanceId?: string): Promise<boolean>;
 
   /**
    * 新しいセッションを開始
    * @param worktreeId - Worktree ID
    * @param worktreePath - Worktreeのパス
+   * @param instanceId - Agent instance ID (Issue #868). Defaults to the primary instance.
    */
-  startSession(worktreeId: string, worktreePath: string): Promise<void>;
+  startSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void>;
 
   /**
    * メッセージを送信
    * @param worktreeId - Worktree ID
    * @param message - 送信するメッセージ
+   * @param instanceId - Agent instance ID (Issue #868). Defaults to the primary instance.
    */
-  sendMessage(worktreeId: string, message: string): Promise<void>;
+  sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void>;
 
   /**
    * セッションを終了
    * @param worktreeId - Worktree ID
+   * @param instanceId - Agent instance ID (Issue #868). Defaults to the primary instance.
    */
-  killSession(worktreeId: string): Promise<void>;
+  killSession(worktreeId: string, instanceId?: string): Promise<void>;
 
   /**
    * セッション名を取得
    * @param worktreeId - Worktree ID
+   * @param instanceId - Agent instance ID (Issue #868). Defaults to the primary instance.
    * @returns セッション名
    */
-  getSessionName(worktreeId: string): string;
+  getSessionName(worktreeId: string, instanceId?: string): string;
 
   /**
    * 処理を中断（Escapeキー送信）
    * @param worktreeId - Worktree ID
+   * @param instanceId - Agent instance ID (Issue #868). Defaults to the primary instance.
    */
-  interrupt(worktreeId: string): Promise<void>;
+  interrupt(worktreeId: string, instanceId?: string): Promise<void>;
 }
 
 /**
@@ -128,6 +246,25 @@ export function getCliToolDisplayNameSafe(cliToolId?: string, fallback = 'Assist
   if (!cliToolId) return fallback;
   if (isCliToolType(cliToolId)) return getCliToolDisplayName(cliToolId);
   return fallback;
+}
+
+/**
+ * Build the default set of agent instances from a worktree's selectedAgents
+ * (Issue #868 migration / fallback).
+ *
+ * Each selected tool becomes its own PRIMARY instance (`id === cliTool`), so a
+ * worktree with no explicit instance configuration behaves exactly as before.
+ *
+ * @param selectedAgents - Ordered list of selected CLI tools
+ * @returns One primary AgentInstance per selected tool, preserving order
+ */
+export function agentInstancesFromSelectedAgents(selectedAgents: CLIToolType[]): AgentInstance[] {
+  return selectedAgents.map((cliTool, order) => ({
+    id: getPrimaryInstanceId(cliTool),
+    cliTool,
+    alias: getCliToolDisplayName(cliTool),
+    order,
+  }));
 }
 
 /**
@@ -196,8 +333,9 @@ export interface IImageCapableCLITool extends ICLITool {
    * @param worktreeId - Worktree ID
    * @param message - Message text
    * @param imagePath - Absolute path to the image file
+   * @param instanceId - Agent instance ID (Issue #868). Defaults to the primary instance.
    */
-  sendMessageWithImage(worktreeId: string, message: string, imagePath: string): Promise<void>;
+  sendMessageWithImage(worktreeId: string, message: string, imagePath: string, instanceId?: string): Promise<void>;
 }
 
 /**

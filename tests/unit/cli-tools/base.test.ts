@@ -68,6 +68,26 @@ describe('BaseCLITool', () => {
       expect(() => tool.getSessionName('test_feature')).not.toThrow();
       expect(() => tool.getSessionName('main')).not.toThrow();
     });
+
+    // Issue #868: instance-aware session naming
+    it('should return the base session name for the primary instance (instanceId === id)', () => {
+      // Primary instance must be byte-identical to the pre-#868 name.
+      expect(tool.getSessionName('feature-foo', 'claude')).toBe('mcbd-claude-feature-foo');
+    });
+
+    it('should return the base session name when instanceId is omitted', () => {
+      expect(tool.getSessionName('feature-foo')).toBe('mcbd-claude-feature-foo');
+    });
+
+    it('should append a derived suffix for additional instances', () => {
+      expect(tool.getSessionName('feature-foo', 'claude-2')).toBe('mcbd-claude-feature-foo-2');
+      expect(tool.getSessionName('feature-foo', 'claude-review')).toBe('mcbd-claude-feature-foo-review');
+    });
+
+    it('should reject an instance suffix containing unsafe characters', () => {
+      // A suffix with a slash must be caught by session-name validation.
+      expect(() => tool.getSessionName('feature-foo', 'claude-a/b')).toThrow(/Invalid session name format/);
+    });
   });
 
   describe('isInstalled', () => {

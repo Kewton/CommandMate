@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById, getSessionState } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/session/cli-session';
 import { detectSessionStatus, STATUS_REASON, SELECTION_LIST_REASONS } from '@/lib/detection/status-detector';
 import { getAutoYesState, getLastServerResponseTimestamp, isPollerActive, buildCompositeKey } from '@/lib/polling/auto-yes-manager';
@@ -50,11 +50,23 @@ export async function GET(
     const cliToolParam = url.searchParams.get('cliTool');
     const cliToolId: CLIToolType = isCliTool(cliToolParam) ? cliToolParam : (worktree.cliToolId || 'claude');
 
+    // Issue #868: optional instance selector. Validate (embedded in session name)
+    // and resolve to the primary instance (instanceId === cliToolId) when omitted.
+    const instanceParam = url.searchParams.get('instance');
+    if (instanceParam !== null && !isValidInstanceId(instanceParam)) {
+      return NextResponse.json(
+        { error: 'Invalid instance parameter' },
+        { status: 400 }
+      );
+    }
+    const instanceId = instanceParam ?? undefined;
+    const resolvedInstanceId = instanceId ?? cliToolId;
+
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(cliToolId);
 
     // Check if CLI session is running
-    const running = await cliTool.isRunning(params.id);
+    const running = await cliTool.isRunning(params.id, instanceId);
     if (!running) {
       return NextResponse.json(
         {
@@ -70,12 +82,12 @@ export async function GET(
       );
     }
 
-    // Get session state
-    const sessionState = getSessionState(db, params.id, cliToolId);
+    // Get session state (Issue #868: per-instance)
+    const sessionState = getSessionState(db, params.id, resolvedInstanceId);
     const lastCapturedLine = sessionState?.lastCapturedLine || 0;
 
-    // Capture current output
-    const output = await captureSessionOutput(params.id, cliToolId, STATUS_CAPTURE_LINES);
+    // Capture current output (Issue #868: per-instance session)
+    const output = await captureSessionOutput(params.id, cliToolId, STATUS_CAPTURE_LINES, instanceId);
     const lines = output.split('\n');
     const totalLines = lines.length;
 

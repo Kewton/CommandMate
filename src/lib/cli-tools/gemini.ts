@@ -69,8 +69,8 @@ export class GeminiTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    * @returns True if session is running
    */
-  async isRunning(worktreeId: string): Promise<boolean> {
-    const sessionName = this.getSessionName(worktreeId);
+  async isRunning(worktreeId: string, instanceId?: string): Promise<boolean> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
     return await hasSession(sessionName);
   }
 
@@ -81,14 +81,14 @@ export class GeminiTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    * @param worktreePath - Worktree path
    */
-  async startSession(worktreeId: string, worktreePath: string): Promise<void> {
+  async startSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
     // Check if Gemini is installed
     const geminiAvailable = await this.isInstalled();
     if (!geminiAvailable) {
       throw new Error('Gemini CLI is not installed or not in PATH');
     }
 
-    const sessionName = this.getSessionName(worktreeId);
+    const sessionName = this.getSessionName(worktreeId, instanceId);
 
     // Check if session already exists
     const exists = await hasSession(sessionName);
@@ -188,8 +188,8 @@ export class GeminiTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    * @param message - Message to send
    */
-  async sendMessage(worktreeId: string, message: string): Promise<void> {
-    const sessionName = this.getSessionName(worktreeId);
+  async sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
 
     // Check if session exists
     const exists = await hasSession(sessionName);
@@ -235,8 +235,8 @@ export class GeminiTool extends BaseCLITool {
    *
    * @param worktreeId - Worktree ID
    */
-  async killSession(worktreeId: string): Promise<void> {
-    const sessionName = this.getSessionName(worktreeId);
+  async killSession(worktreeId: string, instanceId?: string): Promise<void> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
 
     try {
       const exists = await hasSession(sessionName);

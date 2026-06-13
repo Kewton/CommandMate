@@ -2,7 +2,9 @@
  * Data models for myCodeBranchDesk
  */
 
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
+
+export type { AgentInstance };
 
 /**
  * Remote ahead/behind counts relative to upstream
@@ -96,6 +98,14 @@ export interface Worktree {
   cliToolId?: CLIToolType;
   /** Selected agents for UI display (Issue #368) - 2-4 CLI tool IDs */
   selectedAgents?: CLIToolType[];
+  /**
+   * Agent instances for this worktree (Issue #868).
+   * Replaces selectedAgents as the canonical model for the
+   * 1-agent-multiple-sessions feature. Each entry maps a stable instanceId to a
+   * CLI tool, with a user-facing alias and display order. When absent, callers
+   * should derive primary instances from {@link selectedAgents}.
+   */
+  agentInstances?: AgentInstance[];
   /** Ollama model name for vibe-local (Issue #368) - null means default */
   vibeLocalModel?: string | null;
   /** Ollama context window size for vibe-local (Issue #374) - null means default */
@@ -257,6 +267,11 @@ export interface ChatMessage {
   promptData?: PromptData;
   /** CLI tool type (claude, codex, gemini, vibe-local) - defaults to 'claude' */
   cliToolId?: CLIToolType;
+  /**
+   * Agent instance ID (Issue #868). Identifies which instance of a CLI tool
+   * produced/owns this message. Defaults to the primary instance (=== cliToolId).
+   */
+  instanceId?: string;
   /** Whether this message is archived (from a previous session) */
   archived: boolean;
 }
@@ -290,6 +305,11 @@ export interface WorktreeSessionState {
   worktreeId: string;
   /** CLI tool identifier for this session state */
   cliToolId: CLIToolType;
+  /**
+   * Agent instance ID (Issue #868). Together with worktreeId forms the
+   * primary key of session_states. Defaults to the primary instance (=== cliToolId).
+   */
+  instanceId?: string;
   /** Last captured line number from tmux */
   lastCapturedLine: number;
   /** ID of the message currently being updated (null when no message is in progress) */

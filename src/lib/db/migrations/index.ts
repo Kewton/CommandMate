@@ -15,6 +15,7 @@ import { v29_migrations } from './v29-assistant-non-interactive';
 import { v30_migrations } from './v30-assistant-context-snapshot';
 import { v31_migrations } from './v31-repository-visible';
 import { v32_migrations } from './v32-add-messages-role-composite-index';
+import { v33_migrations } from './v33-agent-instances';
 
 /**
  * Complete ordered list of all migrations.
@@ -35,4 +36,5 @@ export const migrations: Migration[] = [
   ...v30_migrations,
   ...v31_migrations,
   ...v32_migrations,
+  ...v33_migrations,
 ];

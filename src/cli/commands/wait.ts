@@ -13,7 +13,7 @@ import { Command } from 'commander';
 import { ExitCode, WaitExitCode } from '../types';
 import type { WaitOptions } from '../types';
 import type { CurrentOutputResponse, WaitPromptOutput } from '../types/api-responses';
-import { ApiClient, ApiError, isValidWorktreeId } from '../utils/api-client';
+import { ApiClient, ApiError, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 
 /** [IA3-02] Polling interval 5 seconds (matches tmux-capture-cache TTL=2s) */
@@ -51,9 +51,11 @@ async function pollWorktree(
     }
 
     try {
-      const data = await client.get<CurrentOutputResponse>(
-        `/api/worktrees/${worktreeId}/current-output`
-      );
+      // Issue #868: scope polling to a specific agent instance when provided.
+      const path = options.instance
+        ? `/api/worktrees/${worktreeId}/current-output?instance=${encodeURIComponent(options.instance)}`
+        : `/api/worktrees/${worktreeId}/current-output`;
+      const data = await client.get<CurrentOutputResponse>(path);
 
       // Track content changes for stall detection
       if (data.content !== lastContent) {
@@ -118,6 +120,7 @@ export function createWaitCommand(): Command {
     .option('--timeout <seconds>', 'Maximum wait time in seconds', parseInt)
     .option('--on-prompt <mode>', 'Prompt handling: agent (default) or human')
     .option('--stall-timeout <seconds>', 'Maximum time without output change', parseInt)
+    .option('--instance <id>', 'Agent instance ID (defaults to the agent\'s primary instance)')
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeIds: string[], options: WaitOptions) => {
       try {
@@ -127,6 +130,12 @@ export function createWaitCommand(): Command {
             console.error(`Error: Invalid worktree ID format: ${id}`);
             process.exit(ExitCode.CONFIG_ERROR);
           }
+        }
+
+        // Issue #868: Validate instance ID if provided
+        if (options.instance && !isValidInstanceId(options.instance)) {
+          console.error('Error: Invalid --instance. Must be an alphanumeric/underscore/hyphen identifier (max 64 chars).');
+          process.exit(ExitCode.CONFIG_ERROR);
         }
 
         const client = new ApiClient({ token: options.token });
