@@ -1,11 +1,16 @@
 /**
- * TerminalSplitPane Component (Issue #728)
+ * TerminalSplitPane Component (Issue #728, instance-keyed in Issue #869)
  *
  * Single split within `TerminalSplitContainer`. Renders:
- *  - Header: CLI selector (with "other-split-uses" disabled options) +
+ *  - Header: agent-instance selector (with "other-split-uses" excluded) +
  *    terminal-search button (Issue #47).
  *  - Body: caller-supplied terminal content (TerminalDisplay).
  *  - Footer: caller-supplied navigation / prompt / message input.
+ *
+ * Issue #869: the split is identified by an agent `instanceId` (so two
+ * instances of the same CLI tool can each occupy a split). The selector lists
+ * the worktree's instances by their alias (`getInstanceLabel`); switching the
+ * selector swaps the instance backing this split.
  *
  * `role="region"` + `aria-label="Terminal split N"` for a11y. The pane is
  * intentionally presentational: state ownership lives in the parent.
@@ -15,26 +20,39 @@
 
 import React, { memo, useCallback, useState } from 'react';
 import {
-  CLI_TOOL_IDS,
+  getInstanceLabel,
+  type AgentInstance,
   type CLIToolType,
-  getCliToolDisplayName,
 } from '@/lib/cli-tools/types';
 
-/** Issue #786: dedicated MIME so the drag payload never collides with file/text drags. */
-export const CLI_TOOL_DND_MIME = 'application/x-commandmate-cli-tool';
+/**
+ * Issue #786 / #869: dedicated MIME so the drag payload never collides with
+ * file/text drags. The payload carries the agent `instanceId` (Issue #869,
+ * previously a bare CLI tool id).
+ */
+export const AGENT_INSTANCE_DND_MIME = 'application/x-commandmate-agent-instance';
 
 export interface TerminalSplitPaneProps {
   worktreeId: string;
   splitIndex: number;
+  /** CLI tool backing this split (derived from the instance; used for labels). */
   cliToolId: CLIToolType;
-  availableCliTools: CLIToolType[];
-  /** Called when the CLI selector picks a new tool. */
-  onCliToolChange: (cliId: CLIToolType) => void;
+  /** Issue #869: the agent instance id backing this split (tab/split identity). */
+  instanceId: string;
+  /** Issue #869: the resolved instance for alias display (may be undefined if stale). */
+  instance?: AgentInstance;
+  /**
+   * Issue #869: instances selectable for this split. Already excludes instances
+   * used by other splits, and always includes this split's own instance.
+   */
+  availableInstances: AgentInstance[];
+  /** Called when the instance selector picks a different instance. */
+  onInstanceChange: (instanceId: string) => void;
   /** Called when the textarea (or any input) inside this pane gains focus. */
   onFocus: () => void;
   /** Whether tmux attach is in progress for this split. */
   attaching?: boolean;
-  /** Rendered above the CLI selector — usually empty (`null`). */
+  /** Rendered above the instance selector — usually empty (`null`). */
   headerExtras?: React.ReactNode;
   /** Terminal output area (TerminalDisplay). */
   terminal: React.ReactNode;
@@ -43,33 +61,36 @@ export interface TerminalSplitPaneProps {
   /** Optional inline width (flex-grow ratio). When omitted, parent controls layout. */
   style?: React.CSSProperties;
   /**
-   * Issue #786: called when a CLI tool indicator is dropped on this split. The
-   * container (drop validation owner) decides no-op / reject / apply. Optional —
-   * when omitted, drag-drop is inert (backward compat, D-4).
+   * Issue #786 / #869: called when an agent instance is dropped on this split.
+   * The container (drop validation owner) decides no-op / reject / apply.
+   * Optional — when omitted, drag-drop is inert (backward compat, D-4).
    */
-  onDropCliTool?: (cliId: CLIToolType) => void;
+  onDropInstance?: (instanceId: string) => void;
   /**
-   * Issue #786 (D-2): the cliId currently being dragged, published by the drag
-   * source via shared state. Used ONLY to drive the dragOver allowed/forbidden
-   * ring, since `dataTransfer.getData()` is unreadable during dragover in real
-   * browsers (readable only on drop). `undefined` when nothing is being dragged.
+   * Issue #786 / #869 (D-2): the instanceId currently being dragged, published
+   * by the drag source via shared state. Used ONLY to drive the dragOver
+   * allowed/forbidden ring, since `dataTransfer.getData()` is unreadable during
+   * dragover in real browsers (readable only on drop). `undefined`/`null` when
+   * nothing is being dragged.
    */
-  draggedCliTool?: CLIToolType | null;
+  draggedInstanceId?: string | null;
 }
 
 export const TerminalSplitPane = memo(function TerminalSplitPane({
   splitIndex,
   cliToolId,
-  availableCliTools,
-  onCliToolChange,
+  instanceId,
+  instance,
+  availableInstances,
+  onInstanceChange,
   onFocus,
   attaching = false,
   headerExtras,
   terminal,
   footer,
   style,
-  onDropCliTool,
-  draggedCliTool,
+  onDropInstance,
+  draggedInstanceId,
 }: TerminalSplitPaneProps) {
   // Issue #786: drag-over hover state lives LOCAL to this pane (D-3) so a hover
   // change never re-creates the parent's renderSplitPane / terminalSplitRegion
@@ -77,18 +98,20 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   const [dragOverState, setDragOverState] = useState<'allowed' | 'forbidden' | null>(null);
 
   // Whether drag-drop is active for this pane (the parent wired a handler).
-  const dropEnabled = onDropCliTool != null;
+  const dropEnabled = onDropInstance != null;
 
-  // Classify the in-flight drag against THIS split using the published cliId
-  // (D-2). Forbidden when the dragged CLI is used by another split (i.e. not in
-  // availableCliTools, which is the complement of other-split CLIs and always
-  // includes this split's own current CLI). Dropping this split's own current
-  // CLI is a harmless no-op handled by the container, so it is treated as
-  // 'allowed' for the ring.
+  // Classify the in-flight drag against THIS split using the published
+  // instanceId (D-2). Forbidden when the dragged instance is used by another
+  // split (i.e. not in availableInstances, which is the complement of
+  // other-split instances and always includes this split's own current one).
+  // Dropping this split's own current instance is a harmless no-op handled by
+  // the container, so it is treated as 'allowed' for the ring.
   const classifyDrag = useCallback((): 'allowed' | 'forbidden' => {
-    if (draggedCliTool == null) return 'allowed';
-    return availableCliTools.includes(draggedCliTool) ? 'allowed' : 'forbidden';
-  }, [draggedCliTool, availableCliTools]);
+    if (draggedInstanceId == null) return 'allowed';
+    return availableInstances.some(inst => inst.id === draggedInstanceId)
+      ? 'allowed'
+      : 'forbidden';
+  }, [draggedInstanceId, availableInstances]);
 
   const handleDragOver = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
@@ -123,11 +146,11 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
       e.preventDefault();
       setDragOverState(null);
       // D-2: getData is readable here (on drop) in real browsers.
-      const cliId = e.dataTransfer.getData(CLI_TOOL_DND_MIME);
-      if (!cliId) return;
-      onDropCliTool?.(cliId as CLIToolType);
+      const droppedId = e.dataTransfer.getData(AGENT_INSTANCE_DND_MIME);
+      if (!droppedId) return;
+      onDropInstance?.(droppedId);
     },
-    [dropEnabled, onDropCliTool],
+    [dropEnabled, onDropInstance],
   );
 
   const dragRingClass =
@@ -139,10 +162,9 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
 
   const handleSelectorChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const next = e.target.value as CLIToolType;
-      onCliToolChange(next);
+      onInstanceChange(e.target.value);
     },
-    [onCliToolChange],
+    [onInstanceChange],
   );
 
   const handleSearchClick = useCallback(() => {
@@ -157,6 +179,8 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   }, [onFocus]);
 
   const splitLabel = `Terminal split ${splitIndex + 1}`;
+  // Alias-first label for the attach skeleton (falls back to the CLI tool name).
+  const attachLabel = getInstanceLabel(instance ?? { cliTool: cliToolId });
 
   return (
     <div
@@ -176,28 +200,24 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* Header: CLI selector + search button */}
+      {/* Header: instance selector + search button */}
       <div className="px-2 py-1 flex items-center gap-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
         <label className="sr-only" htmlFor={`cli-selector-${splitIndex}`}>
-          {`Select CLI for ${splitLabel}`}
+          {`Select agent instance for ${splitLabel}`}
         </label>
         <select
           id={`cli-selector-${splitIndex}`}
-          value={cliToolId}
+          value={instanceId}
           onChange={handleSelectorChange}
           data-testid={`cli-selector-${splitIndex}`}
-          aria-label={`Select CLI for ${splitLabel}`}
+          aria-label={`Select agent instance for ${splitLabel}`}
           className="text-xs bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded px-1.5 py-0.5"
         >
-          {CLI_TOOL_IDS.map(id => {
-            const allowed = availableCliTools.includes(id) || id === cliToolId;
-            return (
-              <option key={id} value={id} disabled={!allowed}>
-                {getCliToolDisplayName(id)}
-                {!allowed ? ' (in use)' : ''}
-              </option>
-            );
-          })}
+          {availableInstances.map(inst => (
+            <option key={inst.id} value={inst.id}>
+              {getInstanceLabel(inst)}
+            </option>
+          ))}
         </select>
 
         <button
@@ -235,7 +255,7 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
             role="status"
             aria-live="polite"
           >
-            Attaching {getCliToolDisplayName(cliToolId)} session...
+            Attaching {attachLabel} session...
           </div>
         ) : null}
         {terminal}

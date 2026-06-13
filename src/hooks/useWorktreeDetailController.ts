@@ -46,7 +46,13 @@ import { useUpdateCheck } from '@/hooks/useUpdateCheck';
 import { type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import type { AutoYesStopReason } from '@/config/auto-yes-config';
 import type { Worktree, ChatMessage, PromptData, FileContent } from '@/types/models';
-import { isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
+import {
+  isCliToolType,
+  isValidInstanceId,
+  agentInstancesFromSelectedAgents,
+  type CLIToolType,
+  type AgentInstance,
+} from '@/lib/cli-tools/types';
 import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
 import { useMobileSelectedAgents } from '@/hooks/useMobileSelectedAgents';
 import { useTranslations } from 'next-intl';
@@ -66,6 +72,14 @@ import {
 
 /** localStorage key prefix for persisting the active CLI tool tab per worktree */
 const ACTIVE_CLI_TAB_STORAGE_KEY_PREFIX = 'activeCliTab-';
+
+/**
+ * Issue #869: localStorage key prefix for the active agent *instance* per
+ * worktree. Supersedes `activeCliTab-<wt>` (which stored a bare CLI tool id).
+ * Migration: when the new key is absent we fall back to the legacy key, whose
+ * value is a primary instance id (primary instance id === its CLI tool id).
+ */
+const ACTIVE_INSTANCE_STORAGE_KEY_PREFIX = 'activeInstanceId-';
 
 // ============================================================================
 // Types
@@ -198,6 +212,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Ref to access latest selectedAgents inside fetchWorktree without adding to useCallback deps
   const selectedAgentsRef = useRef(selectedAgents);
   selectedAgentsRef.current = selectedAgents;
+  // Issue #869: Agent instance roster (PC). Drives the instance tabs / split
+  // selectors. Decoupled from selectedAgents server-side; seeded from the
+  // default selection until the worktree's agentInstances arrive from the API.
+  const [agentInstances, setAgentInstances] = useState<AgentInstance[]>(
+    () => agentInstancesFromSelectedAgents(DEFAULT_SELECTED_AGENTS),
+  );
+  const agentInstancesRef = useRef(agentInstances);
+  agentInstancesRef.current = agentInstances;
   // Issue #368: Vibe-local Ollama model state (initialized from API)
   const [vibeLocalModel, setVibeLocalModel] = useState<string | null>(null);
   // Issue #374: Vibe-local context window state (initialized from API)
@@ -222,6 +244,37 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Issue #4: Ref to avoid polling callback recreation on tab switch
   const activeCliTabRef = useRef<CLIToolType>(activeCliTab);
   activeCliTabRef.current = activeCliTab;
+  // Issue #869: active agent *instance* (PC). The instance is the tab/split
+  // identity; `activeCliTab` is kept in sync with the active instance's CLI tool
+  // (cliTool-keyed concerns — auto-yes, status, kill — stay keyed on it).
+  const [activeInstanceId, setActiveInstanceIdRaw] = useState<string>(() => {
+    try {
+      const saved = window.localStorage.getItem(ACTIVE_INSTANCE_STORAGE_KEY_PREFIX + worktreeId);
+      if (saved && isValidInstanceId(saved)) {
+        return saved;
+      }
+      // Migration: legacy key stored a bare CLI tool id (== primary instance id).
+      const legacy = window.localStorage.getItem(ACTIVE_CLI_TAB_STORAGE_KEY_PREFIX + worktreeId);
+      if (legacy && isCliToolType(legacy)) {
+        return legacy;
+      }
+    } catch { /* localStorage unavailable (SSR) */ }
+    return DEFAULT_SELECTED_AGENTS[0];
+  });
+  // Wrapper: persist activeInstanceId AND sync activeCliTab from the instance's
+  // CLI tool so cliTool-keyed concerns follow the active instance.
+  const setActiveInstanceId = useCallback((instanceId: string) => {
+    setActiveInstanceIdRaw(instanceId);
+    try {
+      window.localStorage.setItem(ACTIVE_INSTANCE_STORAGE_KEY_PREFIX + worktreeId, instanceId);
+    } catch { /* localStorage unavailable */ }
+    const inst = agentInstancesRef.current.find(i => i.id === instanceId);
+    if (inst) {
+      setActiveCliTab(inst.cliTool);
+    }
+  }, [worktreeId, setActiveCliTab]);
+  const activeInstanceIdRef = useRef<string>(activeInstanceId);
+  activeInstanceIdRef.current = activeInstanceId;
   // Issue #597: Latest-request guards prevent stale async responses from older
   // polls/tab switches from overwriting the active CLI tab state.
   const latestMessagesRequestIdRef = useRef(0);
@@ -403,6 +456,20 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
           setSelectedAgents(data.selectedAgents);
         }
       }
+      // Issue #869: sync the agent instance roster (GET always returns it,
+      // falling back to a selectedAgents-derived primary set server-side).
+      if (data.agentInstances) {
+        const current = agentInstancesRef.current;
+        const next = data.agentInstances;
+        const isSame = next.length === current.length &&
+          next.every((inst, i) =>
+            inst.id === current[i].id &&
+            inst.cliTool === current[i].cliTool &&
+            inst.alias === current[i].alias);
+        if (!isSame) {
+          setAgentInstances(next);
+        }
+      }
       // Issue #368: Sync vibeLocalModel from API response
       if ('vibeLocalModel' in data) {
         setVibeLocalModel(data.vibeLocalModel ?? null);
@@ -519,13 +586,38 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   });
   const displayedAgents = isMobile ? mobileSelectedAgents : selectedAgents;
 
-  // Issue #368: Sync activeCliTab when displayedAgents changes
-  // If current activeCliTab is no longer in displayedAgents, switch to first agent
+  // Issue #368/#869: Sync activeCliTab to displayedAgents on MOBILE only.
+  // Mobile keeps the CLI-tool tab model. On PC the active tab follows the
+  // active agent *instance* (the two effects below), so this reconcile must
+  // not fight the instance-driven sync.
   useEffect(() => {
+    if (!isMobile) return;
     if (!displayedAgents.includes(activeCliTab)) {
       setActiveCliTab(displayedAgents[0]);
     }
-  }, [displayedAgents, activeCliTab, setActiveCliTab]);
+  }, [isMobile, displayedAgents, activeCliTab, setActiveCliTab]);
+
+  // Issue #869 (PC): keep activeInstanceId pointing at a roster instance.
+  // When the active instance is removed (rename/delete/reorder), fall back to
+  // the first instance. Skipped on mobile (instances are a PC concern).
+  useEffect(() => {
+    if (isMobile) return;
+    if (agentInstances.length === 0) return;
+    if (!agentInstances.some(inst => inst.id === activeInstanceId)) {
+      setActiveInstanceId(agentInstances[0].id);
+    }
+  }, [isMobile, agentInstances, activeInstanceId, setActiveInstanceId]);
+
+  // Issue #869 (PC): mirror the active instance's CLI tool into activeCliTab so
+  // cliTool-keyed concerns (auto-yes, status, kill, message/output fetch)
+  // follow the active instance. Idempotent — setActiveCliTab no-ops when equal.
+  useEffect(() => {
+    if (isMobile) return;
+    const inst = agentInstances.find(i => i.id === activeInstanceId);
+    if (inst && inst.cliTool !== activeCliTab) {
+      setActiveCliTab(inst.cliTool);
+    }
+  }, [isMobile, agentInstances, activeInstanceId, activeCliTab, setActiveCliTab]);
 
   // Issue #379: Disable auto-follow for full-screen TUI tools (OpenCode, Copilot).
   // These tools render in alternate screen mode where menus appear at the top.
@@ -535,6 +627,15 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   /** Issue #368: Callback for AgentSettingsPane to update selectedAgents */
   const handleSelectedAgentsChange = useCallback((agents: CLIToolType[]) => {
     setSelectedAgents(agents);
+  }, []);
+
+  /**
+   * Issue #869: Callback for AgentSettingsPane to update the agent instance
+   * roster after a successful PATCH. The reconcile effect keeps activeInstanceId
+   * valid if the active instance was renamed/removed.
+   */
+  const handleAgentInstancesChange = useCallback((instances: AgentInstance[]) => {
+    setAgentInstances(instances);
   }, []);
 
   /** Issue #368: Callback for AgentSettingsPane to update vibeLocalModel */
@@ -1324,7 +1425,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   return {
     activeActivity,
     activeCliTab,
+    activeInstanceId,
     activeTab,
+    agentInstances,
     autoYesEnabled,
     autoYesExpiresAt,
     autoYesStateMap,
@@ -1339,6 +1442,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     fileSearch,
     fileTreeRefresh,
     handleActivityToggle,
+    handleAgentInstancesChange,
     handleAutoYesToggle,
     handleBackClick,
     handleCloseDiff,
@@ -1408,6 +1512,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     removeToast,
     selectedAgents,
     setActiveCliTab,
+    setActiveInstanceId,
     setEditorFilePath,
     setFocusedSplitIndex,
     setHistorySubTab,

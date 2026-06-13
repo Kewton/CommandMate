@@ -25,9 +25,9 @@ import { copyToClipboard } from '@/lib/clipboard-utils';
 import { NotificationDot } from '@/components/common/NotificationDot';
 import { deriveCliStatus } from '@/types/sidebar';
 import type { Worktree, ChatMessage, GitStatus } from '@/types/models';
-import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
+import { getInstanceLabel, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
 import { COPY_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
-import { CLI_TOOL_DND_MIME } from '@/components/worktree/TerminalSplitPane';
+import { AGENT_INSTANCE_DND_MIME } from '@/components/worktree/TerminalSplitPane';
 
 // ============================================================================
 // Constants
@@ -440,20 +440,24 @@ interface DesktopHeaderProps {
   onWorktreeStatusChange?: (status: 'ready' | 'in_progress' | 'in_review' | 'done' | null) => void;
   /** Per-CLI session status map (PC only, optional). Issue #749 */
   sessionStatusByCli?: Worktree['sessionStatusByCli'];
-  /** Currently selected agents (PC only, optional). Issue #749 */
-  selectedAgents?: CLIToolType[];
-  /** Currently active CLI tab (PC only, optional). Issue #749 */
-  activeCliTab?: CLIToolType;
-  /** Callback when an agent status icon is clicked (PC only, optional). Issue #749 */
-  onActiveCliTabChange?: (cliId: CLIToolType) => void;
   /**
-   * Issue #786: published when an agent indicator starts being dragged, so the
-   * parent can share the dragged cliId with the terminal splits for the dragOver
-   * allowed/forbidden ring (D-2). Optional — when omitted, drag still sets the
-   * dataTransfer payload but no cliId is published (drag-over ring stays inert).
+   * Issue #869: agent instance roster (PC only, optional). The per-agent status
+   * row is now an instance-tab switcher: one tab per instance, labelled by alias
+   * (`getInstanceLabel`). Status is still resolved per backing CLI tool.
    */
-  onAgentDragStart?: (cliId: CLIToolType) => void;
-  /** Issue #786: published when an agent indicator drag ends (cleanup). */
+  instances?: AgentInstance[];
+  /** Issue #869: currently active agent instance id (PC only, optional). */
+  activeInstanceId?: string;
+  /** Issue #869: callback when an instance tab is clicked (PC only, optional). */
+  onActiveInstanceChange?: (instanceId: string) => void;
+  /**
+   * Issue #786 / #869: published when an instance tab starts being dragged, so
+   * the parent can share the dragged instanceId with the terminal splits for the
+   * dragOver allowed/forbidden ring (D-2). Optional — when omitted, drag still
+   * sets the dataTransfer payload but no id is published (ring stays inert).
+   */
+  onAgentDragStart?: (instanceId: string) => void;
+  /** Issue #786: published when an instance tab drag ends (cleanup). */
   onAgentDragEnd?: () => void;
   /**
    * Callback to kill the active CLI session (PC only, optional). Issue #784.
@@ -489,9 +493,9 @@ export const DesktopHeader = memo(function DesktopHeader({
   worktreeStatus,
   onWorktreeStatusChange,
   sessionStatusByCli,
-  selectedAgents,
-  activeCliTab,
-  onActiveCliTabChange,
+  instances,
+  activeInstanceId,
+  onActiveInstanceChange,
   onAgentDragStart,
   onAgentDragEnd,
   onKillSession,
@@ -501,21 +505,27 @@ export const DesktopHeader = memo(function DesktopHeader({
   const DESKTOP_BRANCH_MAX_LENGTH = 30;
   const DESCRIPTION_MAX_LENGTH = 50;
 
-  // Issue #786: which agent indicator is currently being dragged (for the
-  // opacity-50/cursor-grabbing visual). Local to the header; the cliId published
-  // to the splits goes through onAgentDragStart/onAgentDragEnd instead.
-  const [draggingCliId, setDraggingCliId] = useState<CLIToolType | null>(null);
+  // Issue #786 / #869: which instance tab is currently being dragged (for the
+  // opacity-50/cursor-grabbing visual). Local to the header; the instanceId
+  // published to the splits goes through onAgentDragStart/onAgentDragEnd.
+  const [draggingInstanceId, setDraggingInstanceId] = useState<string | null>(null);
+
+  // Issue #869: the CLI tool backing the active instance. Kill-session controls
+  // remain keyed on the CLI tool (a CLI session is per worktree+tool), so we
+  // resolve the active instance's CLI tool for the running-session check below.
+  const activeCliTab = instances?.find((inst) => inst.id === activeInstanceId)?.cliTool;
 
   const handleAgentDragStart = useCallback(
-    (e: React.DragEvent<HTMLButtonElement>, cliId: CLIToolType) => {
-      // Issue #786: payload via dedicated MIME so external file/text drags don't
-      // collide. getData is readable only on drop in real browsers (D-2). The
-      // MIME is the single shared constant the drop target reads with (D-1) so
-      // the setData/getData keys can never drift apart.
-      e.dataTransfer.setData(CLI_TOOL_DND_MIME, cliId);
+    (e: React.DragEvent<HTMLButtonElement>, instanceId: string) => {
+      // Issue #786 / #869: payload via dedicated MIME so external file/text
+      // drags don't collide. getData is readable only on drop in real browsers
+      // (D-2). The MIME is the single shared constant the drop target reads with
+      // (D-1) so the setData/getData keys can never drift apart. Payload is the
+      // agent instanceId (previously a bare CLI tool id).
+      e.dataTransfer.setData(AGENT_INSTANCE_DND_MIME, instanceId);
       e.dataTransfer.effectAllowed = 'move';
-      setDraggingCliId(cliId);
-      onAgentDragStart?.(cliId);
+      setDraggingInstanceId(instanceId);
+      onAgentDragStart?.(instanceId);
     },
     [onAgentDragStart],
   );
@@ -523,7 +533,7 @@ export const DesktopHeader = memo(function DesktopHeader({
   const handleAgentDragEnd = useCallback(() => {
     // Always clear the drag-active visual (finally-equivalent), regardless of
     // whether the drag succeeded or onAgentDragStart wired anything (S3-002).
-    setDraggingCliId(null);
+    setDraggingInstanceId(null);
     onAgentDragEnd?.();
   }, [onAgentDragEnd]);
 
@@ -616,35 +626,38 @@ export const DesktopHeader = memo(function DesktopHeader({
 
       {/* Right: Per-agent status row + Status dropdown + Info button */}
       <div className="flex items-center gap-2">
-        {/* Issue #749: Per-agent (CLI) session status indicators (PC only).
+        {/* Issue #749/#869: Per-instance session status indicators (PC only).
             Distinct from the worktree-level dot on the left (DESKTOP_STATUS_CONFIG):
-            this row is per-agent (SIDEBAR_STATUS_CONFIG) and doubles as a CLI tab
-            switcher. Rendered only when selectedAgents is provided (backward compat). */}
-        {selectedAgents && selectedAgents.length > 0 && (
+            this row is per-agent-instance (SIDEBAR_STATUS_CONFIG) and doubles as
+            an instance-tab switcher. Each tab is labelled by its alias
+            (getInstanceLabel); status is resolved per backing CLI tool. Rendered
+            only when instances is provided (backward compat). */}
+        {instances && instances.length > 0 && (
           <div className="flex items-center gap-2 flex-shrink-0" data-testid="desktop-agent-status-row">
-            {selectedAgents.map((cliId) => {
-              const cliStatus = deriveCliStatus(sessionStatusByCli?.[cliId]);
+            {instances.map((inst) => {
+              const cliStatus = deriveCliStatus(sessionStatusByCli?.[inst.cliTool]);
               const agentStatusConfig = SIDEBAR_STATUS_CONFIG[cliStatus];
-              const isActive = cliId === activeCliTab;
+              const isActive = inst.id === activeInstanceId;
+              const label = getInstanceLabel(inst);
               return (
                 <button
-                  key={cliId}
+                  key={inst.id}
                   type="button"
-                  data-testid={`desktop-agent-status-${cliId}`}
-                  onClick={() => onActiveCliTabChange?.(cliId)}
+                  data-testid={`desktop-agent-status-${inst.id}`}
+                  onClick={() => onActiveInstanceChange?.(inst.id)}
                   // Issue #786: drag source. click and drag are mutually
                   // exclusive in HTML; a plain click (no drag) still fires
                   // onClick exactly once (S3-002 regression-guarded).
                   draggable
-                  onDragStart={(e) => handleAgentDragStart(e, cliId)}
+                  onDragStart={(e) => handleAgentDragStart(e, inst.id)}
                   onDragEnd={handleAgentDragEnd}
-                  aria-label={`${getCliToolDisplayName(cliId)}: ${agentStatusConfig.label}`}
+                  aria-label={`${label}: ${agentStatusConfig.label}`}
                   aria-pressed={isActive}
                   className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${
                     isActive
                       ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-900 dark:text-cyan-100'
                       : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'
-                  }${draggingCliId === cliId ? ' opacity-50 cursor-grabbing' : ''}`}
+                  }${draggingInstanceId === inst.id ? ' opacity-50 cursor-grabbing' : ''}`}
                 >
                   {/* Issue #751: dot/spinner icon to the LEFT of the always-visible text */}
                   {agentStatusConfig.type === 'spinner' ? (
@@ -657,7 +670,7 @@ export const DesktopHeader = memo(function DesktopHeader({
                     />
                   )}
                   <span className="whitespace-nowrap">
-                    {getCliToolDisplayName(cliId)}: {agentStatusConfig.label}
+                    {label}: {agentStatusConfig.label}
                   </span>
                 </button>
               );

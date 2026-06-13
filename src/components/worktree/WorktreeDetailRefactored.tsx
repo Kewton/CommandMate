@@ -95,7 +95,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const {
     activeActivity,
     activeCliTab,
+    activeInstanceId,
     activeTab,
+    agentInstances,
     autoYesEnabled,
     autoYesExpiresAt,
     autoYesStateMap,
@@ -110,6 +112,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     fileSearch,
     fileTreeRefresh,
     handleActivityToggle,
+    handleAgentInstancesChange,
     handleAutoYesToggle,
     handleBackClick,
     handleCloseDiff,
@@ -150,7 +153,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     handlePromptRespond,
     handleRename,
     handleRetry,
-    handleSelectedAgentsChange,
     handleSetLoading,
     handleShowArchivedChange,
     handleUpload,
@@ -177,8 +179,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     pendingInsertText,
     pendingInsertTextMap,
     removeToast,
-    selectedAgents,
     setActiveCliTab,
+    setActiveInstanceId,
     setEditorFilePath,
     setFocusedSplitIndex,
     setHistorySubTab,
@@ -225,9 +227,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           worktree={worktree}
           worktreeName={worktreeName}
           worktreeStatus={worktreeStatus}
-          activeCliTab={activeCliTab}
-          setActiveCliTab={setActiveCliTab}
-          selectedAgents={selectedAgents}
+          instances={agentInstances}
+          activeInstanceId={activeInstanceId}
+          setActiveInstanceId={setActiveInstanceId}
           hasUpdate={hasUpdate}
           lastAutoResponse={lastAutoResponse}
           activeActivity={activeActivity}
@@ -272,7 +274,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onUpload={handleUpload}
           onMove={handleMove}
           onDiffSelect={handleDiffSelect}
-          onSelectedAgentsChange={handleSelectedAgentsChange}
+          onAgentInstancesChange={handleAgentInstancesChange}
           vibeLocalModel={vibeLocalModel}
           onVibeLocalModelChange={handleVibeLocalModelChange}
           vibeLocalContextWindow={vibeLocalContextWindow}

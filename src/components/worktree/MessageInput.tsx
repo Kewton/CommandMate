@@ -21,6 +21,11 @@ export interface MessageInputProps {
   worktreeId: string;
   onMessageSent?: (cliToolId: CLIToolType) => void;
   cliToolId?: CLIToolType;
+  /**
+   * Issue #869: agent instance id to send to. Defaults to the primary instance
+   * (`=== cliToolId`) when omitted, preserving pre-#869 single-session behavior.
+   */
+  instanceId?: string;
   isSessionRunning?: boolean;
   /** Issue #485: Text to insert into message input from history or memo */
   pendingInsertText?: string | null;
@@ -102,7 +107,7 @@ function migrateLegacyDraftKey(worktreeId: string): void {
   }
 }
 
-export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, isSessionRunning = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast }: MessageInputProps) {
+export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast }: MessageInputProps) {
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -210,7 +215,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setSending(true);
       setError(null);
       const effectiveCliTool: CLIToolType = cliToolId || 'claude';
-      const options: { cliToolId: CLIToolType; imagePath?: string } = { cliToolId: effectiveCliTool };
+      const options: { cliToolId: CLIToolType; instanceId?: string; imagePath?: string } = { cliToolId: effectiveCliTool };
+      // Issue #869: route to the specific instance when it differs from the primary.
+      if (instanceId && instanceId !== effectiveCliTool) {
+        options.instanceId = instanceId;
+      }
       if (attachedImage) {
         options.imagePath = attachedImage.path;
       }
@@ -231,7 +240,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, onMessageSent, resetAfterSend, splitIndex, isProcessing, showToast]);
+  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, splitIndex, isProcessing, showToast]);
 
   const handleSubmit = useCallback(async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();

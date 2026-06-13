@@ -38,7 +38,7 @@ import { TerminalSplitPaneContent } from '@/components/worktree/TerminalSplitPan
 import { MemoPane } from '@/components/worktree/MemoPane';
 import { ExecutionLogPane } from '@/components/worktree/ExecutionLogPane';
 import { TimerPane } from '@/components/worktree/TimerPane';
-import { AgentSettingsPane } from '@/components/worktree/AgentSettingsPane';
+import { AgentInstancesPane } from '@/components/worktree/AgentInstancesPane';
 import { GitPane } from '@/components/worktree/GitPane';
 import { Modal } from '@/components/ui/Modal';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
@@ -48,7 +48,7 @@ import { ToastContainer, type ToastItem } from '@/components/common/Toast';
 import { DesktopHeader, InfoModal } from '@/components/worktree/WorktreeDetailSubComponents';
 import { UPLOADABLE_EXTENSIONS } from '@/config/uploadable-extensions';
 import { deriveCliStatus } from '@/types/sidebar';
-import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
+import { getCliToolDisplayName, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
 import type { AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import type { ShowToast } from '@/types/markdown-editor';
 import type { Worktree, FileContent } from '@/types/models';
@@ -63,9 +63,12 @@ export interface WorktreeDetailDesktopProps {
   worktree: Worktree | null;
   worktreeName: string;
   worktreeStatus: WorktreeStatus;
-  activeCliTab: CLIToolType;
-  setActiveCliTab: (tool: CLIToolType) => void;
-  selectedAgents: CLIToolType[];
+  /** Issue #869: agent instance roster (drives instance tabs / split selectors). */
+  instances: AgentInstance[];
+  /** Issue #869: active agent instance id (tab/split identity). */
+  activeInstanceId: string;
+  /** Issue #869: set the active agent instance (also syncs activeCliTab). */
+  setActiveInstanceId: (instanceId: string) => void;
   hasUpdate: boolean;
   lastAutoResponse: string | null;
 
@@ -130,8 +133,8 @@ export interface WorktreeDetailDesktopProps {
   // Git activity
   onDiffSelect: (diff: string, filePath: string) => void;
 
-  // Agent activity
-  onSelectedAgentsChange: (agents: CLIToolType[]) => void;
+  // Agent activity (Issue #869: instance roster manager)
+  onAgentInstancesChange: (instances: AgentInstance[]) => void;
   vibeLocalModel: string | null;
   onVibeLocalModelChange: (model: string | null) => void;
   vibeLocalContextWindow: number | null;
@@ -184,9 +187,9 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   worktree,
   worktreeName,
   worktreeStatus,
-  activeCliTab,
-  setActiveCliTab,
-  selectedAgents,
+  instances,
+  activeInstanceId,
+  setActiveInstanceId,
   hasUpdate,
   lastAutoResponse,
   activeActivity,
@@ -231,7 +234,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   onUpload,
   onMove,
   onDiffSelect,
-  onSelectedAgentsChange,
+  onAgentInstancesChange,
   vibeLocalModel,
   onVibeLocalModelChange,
   vibeLocalContextWindow,
@@ -261,20 +264,21 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   endLabel,
 }: WorktreeDetailDesktopProps) {
   /**
-   * Issue #786: the cliId currently being dragged from a DesktopHeader agent
-   * indicator. Published here so each split can drive its dragOver
-   * allowed/forbidden ring (D-2; getData is unreadable during dragover in real
-   * browsers). This is React state, not a ref, because the splits must re-render
-   * to show the ring while a drag is in flight. That transient re-render only
-   * happens at drag start/end — NOT on the polling cadence — so it does not
-   * regress the #743/#756 memo stability (which concerns the steady state).
+   * Issue #786 / #869: the agent instanceId currently being dragged from a
+   * DesktopHeader instance tab. Published here so each split can drive its
+   * dragOver allowed/forbidden ring (D-2; getData is unreadable during dragover
+   * in real browsers). This is React state, not a ref, because the splits must
+   * re-render to show the ring while a drag is in flight. That transient
+   * re-render only happens at drag start/end — NOT on the polling cadence — so
+   * it does not regress the #743/#756 memo stability (which concerns the steady
+   * state).
    */
-  const [draggedCliTool, setDraggedCliTool] = React.useState<CLIToolType | null>(null);
+  const [draggedInstanceId, setDraggedInstanceId] = React.useState<string | null>(null);
   const handleAgentDragStart = useCallback(
-    (cliId: CLIToolType) => setDraggedCliTool(cliId),
+    (instanceId: string) => setDraggedInstanceId(instanceId),
     [],
   );
-  const handleAgentDragEnd = useCallback(() => setDraggedCliTool(null), []);
+  const handleAgentDragEnd = useCallback(() => setDraggedInstanceId(null), []);
 
   /**
    * Issue #728 (R3-005): PC-only per-split polling fan-out.
@@ -293,22 +297,27 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     ({
       splitIndex,
       cliToolId: paneCli,
-      availableCliTools: paneAvailable,
-      onCliToolChange,
+      instanceId: paneInstanceId,
+      instance: paneInstance,
+      availableInstances: paneAvailableInstances,
+      onInstanceChange,
       onFocus: onPaneFocus,
-      onDropCliTool,
+      onDropInstance,
     }: {
       splitIndex: number;
       cliToolId: CLIToolType;
-      availableCliTools: CLIToolType[];
-      onCliToolChange: (id: CLIToolType) => void;
+      instanceId: string;
+      instance: AgentInstance | undefined;
+      availableInstances: AgentInstance[];
+      onInstanceChange: (instanceId: string) => void;
       onFocus: () => void;
       isFocused: boolean;
-      onDropCliTool: (cliId: CLIToolType) => void;
+      onDropInstance: (instanceId: string) => void;
     }) => {
       const panePendingInsert = pendingInsertTextMap.get(splitIndex) ?? null;
       // Issue #525 / #740: auto-yes state is per-CLI in autoYesStateMap; each
-      // split resolves its own enabled/expiresAt by its own cliToolId.
+      // split resolves its own enabled/expiresAt by its own cliToolId (the
+      // instance's backing CLI tool — auto-yes stays cliTool-keyed in #869).
       const paneAutoYes = autoYesStateMap.get(paneCli);
       const paneAutoYesEnabled = paneAutoYes?.enabled ?? false;
       const paneAutoYesExpiresAt = paneAutoYes?.expiresAt ?? null;
@@ -322,12 +331,15 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           worktreeId={worktreeId}
           splitIndex={splitIndex}
           cliToolId={paneCli}
-          availableCliTools={paneAvailable}
-          onCliToolChange={(id) => {
-            onCliToolChange(id);
-            // Sync the (worktree-global) activeCliTab so HistoryPane / Auto-Yes
-            // toggle UI / kill-session controls follow split 0.
-            if (splitIndex === 0) setActiveCliTab(id);
+          instanceId={paneInstanceId}
+          instance={paneInstance}
+          availableInstances={paneAvailableInstances}
+          onInstanceChange={(id) => {
+            onInstanceChange(id);
+            // Issue #869: sync the (worktree-global) active instance so the
+            // Header badge / kill-session controls follow split 0. The
+            // controller mirrors activeCliTab from the instance's CLI tool.
+            if (splitIndex === 0) setActiveInstanceId(id);
           }}
           onFocus={onPaneFocus}
           pendingInsertText={panePendingInsert}
@@ -365,12 +377,12 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             onFilePathClick: onFilePathClick,
             showToast: showToast,
           }}
-          // Issue #786: drag-drop. onDropCliTool is the container-owned drop
-          // handler (no-op/reject/apply classification) supplied via renderPane
-          // args — passed through unchanged. draggedCliTool drives the dragOver
-          // ring (D-2). The hover ring state itself stays child-local (D-3).
-          onDropCliTool={onDropCliTool}
-          draggedCliTool={draggedCliTool}
+          // Issue #786 / #869: drag-drop. onDropInstance is the container-owned
+          // drop handler (no-op/reject/apply classification) supplied via
+          // renderPane args — passed through unchanged. draggedInstanceId drives
+          // the dragOver ring (D-2). The hover ring state stays child-local (D-3).
+          onDropInstance={onDropInstance}
+          draggedInstanceId={draggedInstanceId}
         />
       );
     },
@@ -380,7 +392,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       autoYesStateMap,
       handleInsertConsumed,
       onMessageSent,
-      setActiveCliTab,
+      setActiveInstanceId,
       lastAutoResponse,
       makeAutoYesToggleHandler,
       // Issue #743: re-create renderPane when the per-CLI session status map
@@ -397,10 +409,10 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       onHistoryDisplayLimitChange,
       historyUserOnly,
       onHistoryUserOnlyChange,
-      // Issue #786: re-create renderPane when the dragged cliId changes so each
-      // split's dragOver ring reflects the in-flight drag (drag-time only, not a
-      // polling-cadence re-render).
-      draggedCliTool,
+      // Issue #786 / #869: re-create renderPane when the dragged instanceId
+      // changes so each split's dragOver ring reflects the in-flight drag
+      // (drag-time only, not a polling-cadence re-render).
+      draggedInstanceId,
     ],
   );
 
@@ -408,18 +420,20 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     () => (
       <TerminalSplitContainer
         worktreeId={worktreeId}
+        instances={instances}
         renderPane={renderSplitPane}
         onFocusedSplitChange={setFocusedSplitIndex}
-        // Issue #786: the container is the drop validation owner; it fires the
-        // success/reject toast and syncs activeCliTab on an applied drop.
+        // Issue #786 / #869: the container is the drop validation owner; it
+        // fires the success/reject toast and syncs the active instance on an
+        // applied drop.
         showToast={showToast}
-        onActiveCliTabChange={setActiveCliTab}
+        onActiveInstanceChange={setActiveInstanceId}
       />
     ),
-    // setFocusedSplitIndex / setActiveCliTab are stable callbacks, and showToast
-    // is a stable parent callback, so listing them does not destabilize the memo
-    // beyond the existing per-render cadence.
-    [worktreeId, renderSplitPane, setFocusedSplitIndex, showToast, setActiveCliTab],
+    // setFocusedSplitIndex / setActiveInstanceId are stable callbacks, and
+    // showToast is a stable parent callback, so listing them does not
+    // destabilize the memo beyond the existing per-render cadence.
+    [worktreeId, instances, renderSplitPane, setFocusedSplitIndex, showToast, setActiveInstanceId],
   );
 
   /**
@@ -540,11 +554,10 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
         />
       ),
       agent: (
-        <AgentSettingsPane
+        <AgentInstancesPane
           worktreeId={worktreeId}
-          selectedAgents={selectedAgents}
-          onSelectedAgentsChange={onSelectedAgentsChange}
-          maxAgents={5}
+          instances={instances}
+          onInstancesChange={onAgentInstancesChange}
           vibeLocalModel={vibeLocalModel}
           onVibeLocalModelChange={onVibeLocalModelChange}
           vibeLocalContextWindow={vibeLocalContextWindow}
@@ -574,8 +587,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       fileTreeRefresh,
       onDiffSelect,
       handleInsertToMessage,
-      selectedAgents,
-      onSelectedAgentsChange,
+      instances,
+      onAgentInstancesChange,
       vibeLocalModel,
       onVibeLocalModelChange,
       vibeLocalContextWindow,
@@ -627,11 +640,11 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             worktreeStatus={worktree?.status ?? null}
             onWorktreeStatusChange={onWorktreeStatusChange}
             sessionStatusByCli={worktree?.sessionStatusByCli}
-            selectedAgents={selectedAgents}
-            activeCliTab={activeCliTab}
-            onActiveCliTabChange={setActiveCliTab}
-            // Issue #786: publish the dragged agent's cliId so each terminal
-            // split can show its dragOver allowed/forbidden ring (D-2).
+            instances={instances}
+            activeInstanceId={activeInstanceId}
+            onActiveInstanceChange={setActiveInstanceId}
+            // Issue #786 / #869: publish the dragged agent's instanceId so each
+            // terminal split can show its dragOver allowed/forbidden ring (D-2).
             onAgentDragStart={handleAgentDragStart}
             onAgentDragEnd={handleAgentDragEnd}
             onKillSession={onKillSession}

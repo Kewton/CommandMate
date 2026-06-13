@@ -16,7 +16,7 @@
  * a non-TSX module so this file stays importable under tsconfig.server.json.
  */
 
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import type { BranchStatus } from '@/types/sidebar';
 import type { HistoryDisplayLimit } from '@/config/history-display-config';
 import type { AutoYesToggleParams } from '@/types/auto-yes';
@@ -27,6 +27,13 @@ export interface TerminalSplitPaneCoreProps {
   worktreeId: string;
   splitIndex: number;
   cliToolId: CLIToolType;
+  /**
+   * Issue #869: agent instance id backing this split (the tab/split identity).
+   * Defaults to the primary instance (`=== cliToolId`) when omitted.
+   */
+  instanceId?: string;
+  /** Issue #869: the resolved agent instance (for alias display); may be undefined if stale. */
+  instance?: AgentInstance;
   /** Issue #743: derived AI agent status (defaults to 'idle' when omitted). */
   cliStatus?: BranchStatus;
 }
