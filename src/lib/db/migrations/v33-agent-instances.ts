@@ -67,6 +67,12 @@ export const v33_migrations: Migration[] = [
       `);
 
       // Backfill instance_id = cli_tool_id (primary-instance anchor).
+      // NOTE: long-lived databases can accumulate orphaned session_states rows
+      // whose worktree was deleted (the pre-v33 table had a FK but rows may
+      // predate it / FK enforcement was off at write time). The new table's
+      // FOREIGN KEY would reject those orphans and abort the whole migration,
+      // so we skip rows without a matching worktree. PRAGMA foreign_keys cannot
+      // be toggled inside the migration transaction, hence the WHERE filter.
       db.exec(`
         INSERT INTO session_states_new
           (worktree_id, cli_tool_id, instance_id, last_captured_line, in_progress_message_id)
@@ -76,7 +82,8 @@ export const v33_migrations: Migration[] = [
           COALESCE(cli_tool_id, 'claude'),
           last_captured_line,
           in_progress_message_id
-        FROM session_states;
+        FROM session_states
+        WHERE worktree_id IN (SELECT id FROM worktrees);
       `);
 
       db.exec(`DROP TABLE session_states;`);

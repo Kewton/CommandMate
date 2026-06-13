@@ -160,4 +160,28 @@ describe('migration v33: legacy backfill (up() in isolation)', () => {
     ).all('wt-d') as Array<{ instance_id: string; cli_tool_id: string }>;
     expect(rows).toEqual([{ instance_id: 'codex', cli_tool_id: 'codex' }]);
   });
+
+  it('skips orphaned session_states rows so the FK rebuild does not abort (regression)', () => {
+    // Production enforces FK; long-lived DBs accumulate session_states rows
+    // whose worktree was deleted. The rebuilt table's FK would reject them and
+    // abort the whole migration ("FOREIGN KEY constraint failed").
+    db.pragma('foreign_keys = ON');
+    db.prepare(`INSERT INTO worktrees (id, name, path, cli_tool_id, selected_agents, updated_at) VALUES (?,?,?,?,?,?)`)
+      .run('wt-live', 'Live', '/tmp/live', 'claude', null, 1700000000000);
+    // Valid row + orphan row (worktree 'wt-gone' does not exist).
+    db.prepare(`INSERT INTO session_states (worktree_id, cli_tool_id, last_captured_line) VALUES (?,?,?)`)
+      .run('wt-live', 'claude', 7);
+    db.prepare(`INSERT INTO session_states (worktree_id, cli_tool_id, last_captured_line) VALUES (?,?,?)`)
+      .run('wt-gone', 'claude', 99);
+
+    expect(() => runV33()).not.toThrow();
+
+    // Migration completed: agent_instances exists, valid row kept, orphan dropped.
+    expect(tableExists(db, 'agent_instances')).toBe(true);
+    const live = db.prepare(`SELECT last_captured_line FROM session_states WHERE worktree_id = ?`)
+      .get('wt-live') as { last_captured_line: number } | undefined;
+    expect(live?.last_captured_line).toBe(7);
+    const orphan = db.prepare(`SELECT 1 FROM session_states WHERE worktree_id = ?`).get('wt-gone');
+    expect(orphan).toBeUndefined();
+  });
 });
