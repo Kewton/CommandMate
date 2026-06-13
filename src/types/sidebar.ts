@@ -5,7 +5,7 @@
  */
 
 import type { Worktree } from '@/types/models';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
 import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
 
 /**
@@ -37,6 +37,57 @@ export function deriveCliStatus(
   if (toolStatus.isProcessing) return 'running';
   if (toolStatus.isRunning) return 'ready';
   return 'idle';
+}
+
+/**
+ * Aggregate per-agent CLI statuses into a single representative BranchStatus
+ * for the sidebar's single status indicator (Issue #867).
+ *
+ * Priority (highest first): waiting > running/generating > ready > idle.
+ * The first matching tier wins, so any agent waiting for input dominates the
+ * icon, then any active (running/generating) agent, then ready, then idle.
+ * An empty or absent map yields 'idle'.
+ *
+ * NOTE: This priority is intentionally distinct from `STATUS_PRIORITY`
+ * (sidebar-utils.ts) which orders the sidebar SORT. Sorting keeps
+ * ready above running; the aggregated icon surfaces active work above ready.
+ *
+ * @param cliStatus - Per-CLI tool status map (e.g. from `SidebarBranchItem`)
+ * @returns The single most significant status to display
+ */
+export function aggregateCliStatus(
+  cliStatus?: Partial<Record<CLIToolType, BranchStatus>>
+): BranchStatus {
+  if (!cliStatus) return 'idle';
+  const statuses = Object.values(cliStatus).filter(
+    (s): s is BranchStatus => s !== undefined
+  );
+  if (statuses.length === 0) return 'idle';
+  if (statuses.includes('waiting')) return 'waiting';
+  if (statuses.includes('running')) return 'running';
+  if (statuses.includes('generating')) return 'generating';
+  if (statuses.includes('ready')) return 'ready';
+  return 'idle';
+}
+
+/**
+ * Format a per-agent status breakdown for tooltips / aria-labels (Issue #867),
+ * e.g. "Claude: running, Codex: idle". Lets the single aggregated icon still
+ * expose each agent's individual status on hover/focus.
+ *
+ * @param cliStatus - Per-CLI tool status map
+ * @returns Comma-separated "DisplayName: status" string ('' when empty/absent)
+ */
+export function formatCliStatusBreakdown(
+  cliStatus?: Partial<Record<CLIToolType, BranchStatus>>
+): string {
+  if (!cliStatus) return '';
+  return Object.entries(cliStatus)
+    .map(
+      ([tool, status]) =>
+        `${getCliToolDisplayName(tool as CLIToolType)}: ${status ?? 'idle'}`
+    )
+    .join(', ');
 }
 
 /**

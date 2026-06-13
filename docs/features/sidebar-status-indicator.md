@@ -19,6 +19,32 @@
 | `waiting` | ● | 黄 | ユーザー入力待ち（yes/no、選択肢など） |
 | `generating` | ⟳ | 青スピナー | レスポンス生成中 |
 
+## ブランチ左の集約ステータスアイコン（Issue #867）
+
+サイドバーの各ブランチ左には、選択中エージェントごとのステータスを**1つのアイコンに集約**して表示します（以前は最大5個のドットを並べて描画していました）。
+
+### 集約ロジック
+
+`aggregateCliStatus(cliStatus)`（`src/types/sidebar.ts`）が、各エージェントのステータスから最も重要な1つを選びます。優先度は以下の通りです（ソート用の `STATUS_PRIORITY` とは別物）。
+
+```
+waiting > running / generating > ready > idle
+```
+
+- いずれかのエージェントが `waiting` なら `waiting`（黄ドット）。
+- `waiting` がなく `running` または `generating` があればスピナー（`running` を優先）。
+- 上記がなく `ready` があれば `ready`（緑ドット）。
+- それ以外は `idle`（グレードット）。
+
+### エージェント別内訳の表示
+
+集約後も各エージェントのステータスは失われません。アイコンの `title` / `aria-label` に
+`formatCliStatusBreakdown(cliStatus)` が生成する内訳（例: `Claude: running, Codex: idle`）を設定し、
+ホバー／フォーカスで確認できます。
+
+> ソート（`STATUS_PRIORITY`、`waiting` 優先）はブランチ単位の `status` を基準としており、
+> この集約アイコンの導入によって既存のソート挙動は変わりません。
+
 ## 検出ロジック
 
 ### 思考インジケータの検出

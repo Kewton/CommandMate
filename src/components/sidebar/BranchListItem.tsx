@@ -9,9 +9,9 @@
 
 import React, { memo, useRef, useState, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
-import type { SidebarBranchItem, BranchStatus } from '@/types/sidebar';
-import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
-import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
+import type { SidebarBranchItem } from '@/types/sidebar';
+import { aggregateCliStatus, formatCliStatusBreakdown } from '@/types/sidebar';
+import { BranchStatusIndicator } from '@/components/sidebar/BranchStatusIndicator';
 
 // ============================================================================
 // Types
@@ -32,30 +32,6 @@ export interface BranchListItemProps {
 // ============================================================================
 // Sub-components
 // ============================================================================
-
-/** Small status indicator dot for a CLI tool */
-function CliStatusDot({ status, label }: { status: BranchStatus; label: string }) {
-  const config = SIDEBAR_STATUS_CONFIG[status];
-  const title = `${label}: ${config.label}`;
-
-  if (config.type === 'spinner') {
-    return (
-      <span
-        className={`w-2 h-2 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${config.className}`}
-        title={title}
-        aria-label={title}
-      />
-    );
-  }
-
-  return (
-    <span
-      className={`w-2 h-2 rounded-full flex-shrink-0 ${config.className}`}
-      title={title}
-      aria-label={title}
-    />
-  );
-}
 
 /**
  * Tooltip shown on hover/focus with branch details (Issue #651, #676).
@@ -263,18 +239,19 @@ export const BranchListItem = memo(function BranchListItem({
         ${isSelected ? 'bg-gray-600 border-l-2 border-cyan-500' : 'border-l-2 border-transparent'}
       `}
     >
-      {/* Main row: CLI status dots, info, unread */}
+      {/* Main row: aggregated CLI status, info, unread */}
       <div className="flex items-center gap-3 w-full">
-        {/* CLI tool status dots (Issue #368: dynamic from selectedAgents) */}
+        {/*
+          Aggregated CLI tool status (Issue #867): a single icon replaces the
+          per-agent dots. The most significant status is shown; hover/focus
+          reveals the per-agent breakdown via the indicator's title/aria-label.
+        */}
         {branch.cliStatus && Object.keys(branch.cliStatus).length > 0 && (
-          <div className="flex items-center gap-1 flex-shrink-0 w-11" aria-label="CLI tool status">
-            {Object.entries(branch.cliStatus).map(([tool, status]) => (
-              <CliStatusDot
-                key={tool}
-                status={status ?? 'idle'}
-                label={getCliToolDisplayName(tool as CLIToolType)}
-              />
-            ))}
+          <div className="flex items-center justify-center flex-shrink-0 w-4" aria-label="CLI tool status">
+            <BranchStatusIndicator
+              status={aggregateCliStatus(branch.cliStatus)}
+              label={formatCliStatusBreakdown(branch.cliStatus)}
+            />
           </div>
         )}
 

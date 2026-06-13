@@ -6,7 +6,12 @@
 
 import { describe, it, expect } from 'vitest';
 import type { BranchStatus, SidebarBranchItem } from '@/types/sidebar';
-import { toBranchItem, deriveCliStatus } from '@/types/sidebar';
+import {
+  toBranchItem,
+  deriveCliStatus,
+  aggregateCliStatus,
+  formatCliStatusBreakdown,
+} from '@/types/sidebar';
 import type { Worktree } from '@/types/models';
 
 describe('sidebar types', () => {
@@ -329,6 +334,74 @@ describe('sidebar types', () => {
 
     it('should prioritize waiting over running', () => {
       expect(deriveCliStatus({ isRunning: true, isWaitingForResponse: true, isProcessing: true })).toBe('waiting');
+    });
+  });
+
+  describe('aggregateCliStatus (Issue #867)', () => {
+    it('should return idle when cliStatus is undefined', () => {
+      expect(aggregateCliStatus(undefined)).toBe('idle');
+    });
+
+    it('should return idle for an empty map', () => {
+      expect(aggregateCliStatus({})).toBe('idle');
+    });
+
+    it('should return idle when all agents are idle', () => {
+      expect(aggregateCliStatus({ claude: 'idle', codex: 'idle' })).toBe('idle');
+    });
+
+    it('should prioritize waiting above everything else', () => {
+      expect(
+        aggregateCliStatus({ claude: 'running', codex: 'waiting', gemini: 'ready' })
+      ).toBe('waiting');
+    });
+
+    it('should prioritize running over ready and idle', () => {
+      expect(aggregateCliStatus({ claude: 'ready', codex: 'running' })).toBe('running');
+    });
+
+    it('should prioritize generating over ready and idle', () => {
+      expect(aggregateCliStatus({ claude: 'ready', codex: 'generating' })).toBe('generating');
+    });
+
+    it('should prefer running over generating when both are present', () => {
+      // Both render as spinners; ordering is deterministic (running wins).
+      expect(aggregateCliStatus({ claude: 'generating', codex: 'running' })).toBe('running');
+    });
+
+    it('should return ready when the highest status is ready', () => {
+      expect(aggregateCliStatus({ claude: 'idle', codex: 'ready' })).toBe('ready');
+    });
+
+    it('should ignore undefined per-agent entries', () => {
+      expect(aggregateCliStatus({ claude: undefined, codex: 'ready' })).toBe('ready');
+      expect(aggregateCliStatus({ claude: undefined })).toBe('idle');
+    });
+  });
+
+  describe('formatCliStatusBreakdown (Issue #867)', () => {
+    it('should return an empty string when cliStatus is undefined', () => {
+      expect(formatCliStatusBreakdown(undefined)).toBe('');
+    });
+
+    it('should return an empty string for an empty map', () => {
+      expect(formatCliStatusBreakdown({})).toBe('');
+    });
+
+    it('should format each agent with its display name and status', () => {
+      expect(
+        formatCliStatusBreakdown({ claude: 'running', codex: 'idle' })
+      ).toBe('Claude: running, Codex: idle');
+    });
+
+    it('should use the friendly display name for hyphenated agent ids', () => {
+      expect(
+        formatCliStatusBreakdown({ claude: 'idle', 'vibe-local': 'ready' })
+      ).toBe('Claude: idle, Vibe Local: ready');
+    });
+
+    it('should fall back to idle for undefined per-agent entries', () => {
+      expect(formatCliStatusBreakdown({ claude: undefined })).toBe('Claude: idle');
     });
   });
 });

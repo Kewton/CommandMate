@@ -21,6 +21,13 @@ import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 export interface BranchStatusIndicatorProps {
   /** Current branch status */
   status: BranchStatus;
+  /**
+   * Optional accessible label override (Issue #867).
+   * When provided (e.g. a per-agent breakdown like "Claude: running, Codex: idle"),
+   * it replaces the default status-config label for both `title` and `aria-label`.
+   * Falls back to the status config label when omitted.
+   */
+  label?: string;
 }
 
 // ============================================================================
@@ -37,8 +44,11 @@ export interface BranchStatusIndicatorProps {
  */
 export const BranchStatusIndicator = memo(function BranchStatusIndicator({
   status,
+  label,
 }: BranchStatusIndicatorProps) {
   const config = SIDEBAR_STATUS_CONFIG[status];
+  // Issue #867: prefer the caller-supplied breakdown label when present.
+  const accessibleLabel = label ?? config.label;
 
   if (config.type === 'spinner') {
     return (
@@ -50,8 +60,8 @@ export const BranchStatusIndicator = memo(function BranchStatusIndicator({
           ${config.className}
           animate-spin
         `}
-        title={config.label}
-        aria-label={config.label}
+        title={accessibleLabel}
+        aria-label={accessibleLabel}
       />
     );
   }
@@ -63,8 +73,8 @@ export const BranchStatusIndicator = memo(function BranchStatusIndicator({
         w-3 h-3 rounded-full flex-shrink-0
         ${config.className}
       `}
-      title={config.label}
-      aria-label={config.label}
+      title={accessibleLabel}
+      aria-label={accessibleLabel}
     />
   );
 });

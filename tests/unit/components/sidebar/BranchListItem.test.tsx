@@ -223,6 +223,75 @@ describe('BranchListItem', () => {
     });
   });
 
+  describe('Aggregated CLI status indicator (Issue #867)', () => {
+    it('should render exactly one status indicator regardless of agent count', () => {
+      render(
+        <BranchListItem
+          branch={{
+            ...defaultBranch,
+            cliStatus: { claude: 'idle', codex: 'running', gemini: 'ready' },
+          }}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      // A single aggregated icon, not one dot per agent.
+      expect(screen.getAllByTestId('status-indicator')).toHaveLength(1);
+    });
+
+    it('should reflect waiting as the highest-priority aggregated status', () => {
+      render(
+        <BranchListItem
+          branch={{
+            ...defaultBranch,
+            cliStatus: { claude: 'running', codex: 'waiting', gemini: 'idle' },
+          }}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      const indicator = screen.getByTestId('status-indicator');
+      // waiting renders as a static yellow dot (no spinner).
+      expect(indicator.className).toMatch(/bg-yellow-500/);
+      expect(indicator.className).not.toMatch(/animate-spin/);
+    });
+
+    it('should prioritize running over ready in the aggregated icon', () => {
+      render(
+        <BranchListItem
+          branch={{
+            ...defaultBranch,
+            cliStatus: { claude: 'ready', codex: 'running' },
+          }}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      const indicator = screen.getByTestId('status-indicator');
+      expect(indicator.className).toMatch(/animate-spin/);
+    });
+
+    it('should expose the per-agent breakdown via the indicator label', () => {
+      render(
+        <BranchListItem
+          branch={{
+            ...defaultBranch,
+            cliStatus: { claude: 'running', codex: 'idle' },
+          }}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      const indicator = screen.getByTestId('status-indicator');
+      expect(indicator.getAttribute('aria-label')).toBe('Claude: running, Codex: idle');
+      expect(indicator.getAttribute('title')).toBe('Claude: running, Codex: idle');
+    });
+  });
+
   describe('Unread indicator', () => {
     it('should show unread indicator when hasUnread is true', () => {
       render(
