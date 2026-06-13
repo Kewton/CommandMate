@@ -33,8 +33,8 @@ describe('db-migrations', () => {
   });
 
   describe('CURRENT_SCHEMA_VERSION', () => {
-    it('should be 32 after Migration #32', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(32);
+    it('should be 33 after Migration #33 (Issue #868: agent instances)', () => {
+      expect(CURRENT_SCHEMA_VERSION).toBe(33);
     });
   });
 

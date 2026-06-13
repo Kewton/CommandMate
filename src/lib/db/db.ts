@@ -45,6 +45,7 @@ export {
   deleteAllMessages,
   deleteMessageById,
   deleteMessagesByCliTool,
+  deleteMessagesByInstance,
   updateLastUserMessage,
   clearLastUserMessage,
   getMessageById,
@@ -63,6 +64,18 @@ export {
   clearInProgressMessageId,
   deleteSessionState,
 } from './session-db';
+
+// agent-instances-db (Issue #868)
+export {
+  getAgentInstances,
+  getAgentInstance,
+  countAgentInstances,
+  setAgentInstances,
+  addAgentInstance,
+  removeAgentInstance,
+  AgentInstanceLimitError,
+  InvalidAgentInstanceError,
+} from './agent-instances-db';
 
 // memo-db
 export {

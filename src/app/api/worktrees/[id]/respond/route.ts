@@ -137,12 +137,16 @@ export async function POST(
     // Use the CLI tool ID from the message (the tool that asked the prompt)
     const cliToolId = message.cliToolId || worktree.cliToolId || 'claude';
 
+    // Issue #868: respond to the same agent instance that asked the prompt. The
+    // message's instanceId defaults to cliToolId (primary) for legacy messages.
+    const instanceId = message.instanceId ?? cliToolId;
+
     // Get CLI tool instance from manager
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(cliToolId);
 
     // Get session name for the CLI tool
-    const sessionName = cliTool.getSessionName(params.id);
+    const sessionName = cliTool.getSessionName(params.id, instanceId);
 
     // Send answer to tmux via shared sendPromptAnswer() (Issue #616)
     try {
@@ -173,7 +177,7 @@ export async function POST(
     });
 
     // Resume polling for CLI tool's next response
-    startPolling(params.id, cliToolId);
+    startPolling(params.id, cliToolId, instanceId);
 
     logger.info('resumed-polling-for');
 

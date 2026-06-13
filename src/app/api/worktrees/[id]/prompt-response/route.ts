@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
+import { isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutputFresh } from '@/lib/session/cli-session';
 import { detectPrompt, type PromptDetectionResult } from '@/lib/detection/prompt-detector';
 import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/detection/cli-patterns';
@@ -23,6 +23,8 @@ const logger = createLogger('api/prompt-response');
 interface PromptResponseRequest {
   answer: string;
   cliTool?: string;
+  /** Issue #868: target a specific agent instance (defaults to the primary). */
+  instanceId?: string;
   /** Issue #287: Prompt type from client-side detection (fallback when promptCheck fails) */
   promptType?: PromptType;
   /** Issue #287: Default option number from client-side detection (fallback when promptCheck fails) */
@@ -44,7 +46,7 @@ export async function POST(
     }
 
     const body: PromptResponseRequest = await req.json();
-    const { answer, cliTool: cliToolParam, promptType: bodyPromptType, defaultOptionNumber: bodyDefaultOptionNumber, submitMode: bodySubmitMode } = body;
+    const { answer, cliTool: cliToolParam, instanceId: instanceParam, promptType: bodyPromptType, defaultOptionNumber: bodyDefaultOptionNumber, submitMode: bodySubmitMode } = body;
 
     // Issue #616: Allowlist validation for submitMode
     const validSubmitMode: SubmitMode | undefined =
@@ -64,6 +66,15 @@ export async function POST(
         { status: 400 }
       );
     }
+
+    // Issue #868: validate the optional instance selector (embedded in session name).
+    if (instanceParam !== undefined && !isValidInstanceId(instanceParam)) {
+      return NextResponse.json(
+        { error: 'Invalid instanceId parameter' },
+        { status: 400 }
+      );
+    }
+    const instanceId = instanceParam;
 
     const db = getDbInstance();
 
@@ -85,8 +96,8 @@ export async function POST(
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(cliToolId);
 
-    // Check if session is running
-    const running = await cliTool.isRunning(params.id);
+    // Check if session is running (Issue #868: per-instance)
+    const running = await cliTool.isRunning(params.id, instanceId);
     if (!running) {
       return NextResponse.json(
         { error: `${cliTool.name} session is not running` },
@@ -94,8 +105,8 @@ export async function POST(
       );
     }
 
-    // Get session name for the CLI tool
-    const sessionName = cliTool.getSessionName(params.id);
+    // Get session name for the CLI tool (Issue #868: per-instance)
+    const sessionName = cliTool.getSessionName(params.id, instanceId);
 
     // Issue #161: Re-verify that a prompt is still active before sending keys.
     // This prevents a race condition where the prompt disappears between
@@ -103,7 +114,7 @@ export async function POST(
     // be typed at the Claude user input prompt instead of a tool permission prompt.
     let promptCheck: PromptDetectionResult | null = null;
     try {
-      const currentOutput = await captureSessionOutputFresh(params.id, cliToolId);
+      const currentOutput = await captureSessionOutputFresh(params.id, cliToolId, undefined, instanceId);
       const cleanOutput = stripAnsi(currentOutput);
       const promptOptions = buildDetectPromptOptions(cliToolId);
       promptCheck = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions);

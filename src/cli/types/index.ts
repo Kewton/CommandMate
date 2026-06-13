@@ -191,6 +191,8 @@ export interface SendOptions {
   token?: string;
   /** Issue #576: AI model name for Copilot agent */
   model?: string;
+  /** Issue #868: agent instance ID or alias (defaults to the agent's primary instance) */
+  instance?: string;
 }
 
 /** wait command options [Issue #518] */
@@ -199,12 +201,16 @@ export interface WaitOptions {
   onPrompt?: 'agent' | 'human';
   stallTimeout?: number;
   token?: string;
+  /** Issue #868: agent instance ID or alias (defaults to the agent's primary instance) */
+  instance?: string;
 }
 
 /** respond command options [Issue #518] */
 export interface RespondOptions {
   agent?: string;
   token?: string;
+  /** Issue #868: agent instance ID or alias (defaults to the agent's primary instance) */
+  instance?: string;
 }
 
 /** capture command options [Issue #518] */
@@ -212,6 +218,8 @@ export interface CaptureOptions {
   json?: boolean;
   agent?: string;
   token?: string;
+  /** Issue #868: agent instance ID or alias (defaults to the agent's primary instance) */
+  instance?: string;
 }
 
 /** auto-yes command options [Issue #518] */

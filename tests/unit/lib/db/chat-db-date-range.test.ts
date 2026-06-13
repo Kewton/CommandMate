@@ -38,6 +38,7 @@ function setupTestDb(): Database.Database {
       message_type TEXT DEFAULT 'normal',
       prompt_data TEXT,
       cli_tool_id TEXT DEFAULT 'claude',
+      instance_id TEXT DEFAULT NULL,
       archived INTEGER DEFAULT 0,
       FOREIGN KEY (worktree_id) REFERENCES worktrees(id) ON DELETE CASCADE
     );

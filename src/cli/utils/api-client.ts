@@ -26,6 +26,26 @@ export function isValidWorktreeId(id: string): boolean {
 }
 
 /**
+ * Agent instance ID validation pattern (Issue #868).
+ * Mirrors the server-side INSTANCE_ID_PATTERN so invalid identifiers are
+ * rejected client-side before hitting the API (which embeds the id in a tmux
+ * session name).
+ */
+const INSTANCE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+
+/** Maximum length for an agent instance ID (mirrors server MAX_INSTANCE_ID_LENGTH). */
+const MAX_INSTANCE_ID_LENGTH = 64;
+
+/**
+ * Validate agent instance ID format (Issue #868).
+ * @param id - Instance ID to validate
+ * @returns True if valid
+ */
+export function isValidInstanceId(id: string): boolean {
+  return id.length > 0 && id.length <= MAX_INSTANCE_ID_LENGTH && INSTANCE_ID_PATTERN.test(id);
+}
+
+/**
  * Resolve authentication token from options or environment.
  * [SEC4-01] Warns on stderr when --token flag is used.
  *

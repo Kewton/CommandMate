@@ -142,8 +142,9 @@
 | `src/types/slash-commands.ts` | スラッシュコマンド型定義（Issue #343: SlashCommandCategoryに'skill'追加、SlashCommandSourceに'skill'追加、CATEGORY_LABELSにskill:'Skills'追加） |
 | `src/lib/command-merger.ts` | コマンドマージロジック（Issue #343: CATEGORY_ORDERに'skill'をworkflowとstandard-sessionの間に追加） |
 | `src/lib/db/worktree-db.ts` | Worktree CRUD操作、archivedフィルタ対応（Issue #479, #168）、getRepositories に visible/enabled 追加（Issue #690） |
-| `src/lib/db/chat-db.ts` | チャットメッセージCRUD操作、論理削除（archived）・GetMessagesOptions・ACTIVE_FILTER（Issue #479, #168） |
-| `src/lib/db/session-db.ts` | セッション状態管理（Issue #479） |
+| `src/lib/db/chat-db.ts` | チャットメッセージCRUD操作、論理削除（archived）・GetMessagesOptions・ACTIVE_FILTER（Issue #479, #168）、instance_id 列・getMessages の instanceId フィルタ・deleteMessagesByInstance（Issue #868） |
+| `src/lib/db/session-db.ts` | セッション状態管理（Issue #479）、PK を (worktree_id, instance_id) に拡張しインスタンス単位で状態保持（Issue #868） |
+| `src/lib/db/agent-instances-db.ts` | agent_instances テーブル CRUD（set/get/add/removeAgentInstances）、MAX_AGENT_INSTANCES=10 上限・重複/不正id検証・primary フォールバック（Issue #868） |
 | `src/lib/db/memo-db.ts` | メモ管理CRUD（Issue #479） |
 | `src/lib/db/template-db.ts` | レポートテンプレートCRUD操作（getAllTemplates, getTemplateById, createTemplate, updateTemplate, deleteTemplate, getTemplateCount）（Issue #618） |
 | `src/lib/polling/prompt-dedup.ts` | プロンプト重複検出（SHA-256ハッシュキャッシュ）（Issue #565） |

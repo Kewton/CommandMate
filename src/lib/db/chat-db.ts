@@ -21,6 +21,8 @@ export interface GetMessagesOptions {
   before?: Date;
   limit?: number;
   cliToolId?: CLIToolType;
+  /** Issue #868: scope to a single agent instance (overrides cliToolId filtering when set). */
+  instanceId?: string;
   includeArchived?: boolean;
 }
 
@@ -36,10 +38,12 @@ type ChatMessageRow = {
   message_type: string | null;
   prompt_data: string | null;
   cli_tool_id: string | null;
+  instance_id: string | null;
   archived: number;
 };
 
 function mapChatMessage(row: ChatMessageRow): ChatMessage {
+  const cliToolId = (row.cli_tool_id as CLIToolType | null) ?? 'claude';
   return {
     id: row.id,
     worktreeId: row.worktree_id,
@@ -51,7 +55,8 @@ function mapChatMessage(row: ChatMessageRow): ChatMessage {
     requestId: row.request_id || undefined,
     messageType: (row.message_type as 'normal' | 'prompt') || 'normal',
     promptData: row.prompt_data ? JSON.parse(row.prompt_data) : undefined,
-    cliToolId: (row.cli_tool_id as CLIToolType | null) ?? 'claude',
+    cliToolId,
+    instanceId: row.instance_id ?? cliToolId,
     archived: row.archived === 1,
   };
 }
@@ -106,10 +111,14 @@ export function createMessage(
 ): ChatMessage {
   const id = randomUUID();
 
+  const cliToolId = message.cliToolId || 'claude';
+  // Issue #868: instance_id defaults to the primary instance (=== cliToolId).
+  const instanceId = message.instanceId || cliToolId;
+
   const stmt = db.prepare(`
     INSERT INTO chat_messages
-    (id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, instance_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -123,7 +132,8 @@ export function createMessage(
     message.requestId || null,
     message.messageType || 'normal',
     message.promptData ? JSON.stringify(message.promptData) : null,
-    message.cliToolId || 'claude'
+    cliToolId,
+    instanceId
   );
 
   // Update worktree's updated_at timestamp
@@ -187,10 +197,10 @@ export function getMessages(
   worktreeId: string,
   options: GetMessagesOptions = {}
 ): ChatMessage[] {
-  const { before, limit = 50, cliToolId, includeArchived = false } = options;
+  const { before, limit = 50, cliToolId, instanceId, includeArchived = false } = options;
 
   let query = `
-    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, archived
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, instance_id, archived
     FROM chat_messages
     WHERE worktree_id = ? AND (? IS NULL OR timestamp < ?)
   `;
@@ -202,8 +212,11 @@ export function getMessages(
     query += ` ${ACTIVE_FILTER}`;
   }
 
-  // Add CLI tool filter if specified
-  if (cliToolId) {
+  // Issue #868: instance filter takes precedence; otherwise fall back to CLI tool filter.
+  if (instanceId) {
+    query += ` AND instance_id = ?`;
+    params.push(instanceId);
+  } else if (cliToolId) {
     query += ` AND cli_tool_id = ?`;
     params.push(cliToolId);
   }
@@ -225,7 +238,7 @@ export function getLastUserMessage(
   worktreeId: string
 ): ChatMessage | null {
   const stmt = db.prepare(`
-    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, archived
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, instance_id, archived
     FROM chat_messages
     WHERE worktree_id = ? AND role = 'user' ${ACTIVE_FILTER}
     ORDER BY timestamp DESC
@@ -246,7 +259,7 @@ export function getLastMessage(
   worktreeId: string
 ): ChatMessage | null {
   const stmt = db.prepare(`
-    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, archived
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, instance_id, archived
     FROM chat_messages
     WHERE worktree_id = ? ${ACTIVE_FILTER}
     ORDER BY timestamp DESC
@@ -337,6 +350,32 @@ export function deleteMessagesByCliTool(
 }
 
 /**
+ * Archive messages for a specific agent instance in a worktree (logical deletion).
+ * Issue #868: instance-scoped counterpart of deleteMessagesByCliTool, used when
+ * killing a single agent instance while preserving other instances' history.
+ *
+ * @param db - Database instance
+ * @param worktreeId - Worktree ID
+ * @param instanceId - Agent instance ID to archive messages for
+ * @returns Number of archived messages
+ */
+export function deleteMessagesByInstance(
+  db: Database.Database,
+  worktreeId: string,
+  instanceId: string
+): number {
+  const stmt = db.prepare(`
+    UPDATE chat_messages
+    SET archived = 1
+    WHERE worktree_id = ? AND instance_id = ? ${ACTIVE_FILTER}
+  `);
+
+  const result = stmt.run(worktreeId, instanceId);
+  logger.info('archived-messages-by-instance', { worktreeId, instanceId, count: result.changes });
+  return result.changes;
+}
+
+/**
  * Update worktree's last user message
  */
 export function updateLastUserMessage(
@@ -399,7 +438,7 @@ export function getMessagesByDateRange(
   const { after, before, includeArchived = false } = options;
 
   let query = `
-    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, archived
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, instance_id, archived
     FROM chat_messages
     WHERE timestamp >= ? AND timestamp < ?
   `;
@@ -424,7 +463,7 @@ export function getMessageById(
   messageId: string
 ): ChatMessage | null {
   const stmt = db.prepare(`
-    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, archived
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, instance_id, archived
     FROM chat_messages
     WHERE id = ?
   `);
@@ -463,21 +502,25 @@ export function updatePromptData(
 export function markPendingPromptsAsAnswered(
   db: Database.Database,
   worktreeId: string,
-  cliToolId: CLIToolType
+  cliToolId: CLIToolType,
+  instanceId?: string
 ): number {
-  // Find all pending prompt messages for this worktree/CLI tool
+  // Find all pending prompt messages for this worktree/CLI tool.
+  // Issue #868: When instanceId is provided, scope to that instance only;
+  // otherwise fall back to the legacy cli_tool_id scoping.
+  const resolvedInstanceId = instanceId ?? cliToolId;
   const selectStmt = db.prepare(`
     SELECT id, prompt_data
     FROM chat_messages
     WHERE worktree_id = ?
-      AND cli_tool_id = ?
+      AND instance_id = ?
       AND message_type = 'prompt'
       AND json_extract(prompt_data, '$.status') = 'pending'
       ${ACTIVE_FILTER}
     ORDER BY timestamp DESC
   `);
 
-  const rows = selectStmt.all(worktreeId, cliToolId) as { id: string; prompt_data: string }[];
+  const rows = selectStmt.all(worktreeId, resolvedInstanceId) as { id: string; prompt_data: string }[];
 
   if (rows.length === 0) {
     return 0;

@@ -9,7 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { isCliToolType } from '@/lib/cli-tools/types';
+import { isCliToolType, isValidInstanceId } from '@/lib/cli-tools/types';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db/db-instance';
@@ -37,12 +37,21 @@ export async function POST(
   }
 
   try {
-    const { cliToolId, keys } = body;
+    const { cliToolId, keys, instanceId } = body;
 
     // 1. cliToolId validation (isCliToolType)
     if (!cliToolId || typeof cliToolId !== 'string' || !isCliToolType(cliToolId)) {
       return NextResponse.json(
         { error: 'Invalid cliToolId parameter' },
+        { status: 400 }
+      );
+    }
+
+    // Issue #868: optional instanceId selects a specific agent instance (defaults
+    // to the primary). Validate format since it is embedded in the session name.
+    if (instanceId !== undefined && (typeof instanceId !== 'string' || !isValidInstanceId(instanceId))) {
+      return NextResponse.json(
+        { error: 'Invalid instanceId parameter' },
         { status: 400 }
       );
     }
@@ -85,7 +94,7 @@ export async function POST(
     // 5. Session existence check
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(cliToolId);
-    const sessionName = cliTool.getSessionName(params.id);
+    const sessionName = cliTool.getSessionName(params.id, instanceId);
 
     const sessionExists = await hasSession(sessionName);
     if (!sessionExists) {
