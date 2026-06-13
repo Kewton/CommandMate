@@ -3,16 +3,23 @@
  *
  * Issue #501: Verify that detectSessionStatus() receives lastOutputTimestamp
  * from getLastServerResponseTimestamp() when auto-yes is active.
+ *
+ * Issue #875: Verify per-instance status detection (sessionStatusByInstance),
+ * alias-instance detection, and the per-CLI aggregate folding alias activity in.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import type { CLIToolType, AgentInstance } from '@/lib/cli-tools/types';
 
-// Mock all dependencies
+// Mock all dependencies. getSessionName honors instanceId so alias instances
+// (instanceId !== cliToolId) map to a distinct session name (Issue #875).
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
     getInstance: () => ({
       getTool: (cliToolId: string) => ({
-        getSessionName: (worktreeId: string) => `${cliToolId}-${worktreeId}`,
+        getSessionName: (worktreeId: string, instanceId?: string) =>
+          instanceId && instanceId !== cliToolId
+            ? `${cliToolId}-${worktreeId}-${instanceId}`
+            : `${cliToolId}-${worktreeId}`,
         name: cliToolId,
       }),
     }),
@@ -66,9 +73,12 @@ describe('worktree-status-helper (Issue #501)', () => {
   const mockDb = {} as ReturnType<typeof import('@/lib/db/db-instance').getDbInstance>;
   const mockGetMessages = vi.fn().mockReturnValue([]);
   const mockMarkPending = vi.fn();
+  const mockGetAgentInstances = vi.fn(() => [] as AgentInstance[]);
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetMessages.mockReturnValue([]);
+    mockGetAgentInstances.mockReturnValue([]);
   });
 
   it('should pass lastOutputTimestamp as Date to detectSessionStatus when timestamp exists', async () => {
@@ -76,7 +86,7 @@ describe('worktree-status-helper (Issue #501)', () => {
     vi.mocked(getLastServerResponseTimestamp).mockReturnValue(timestamp);
 
     const sessionNameSet = new Set(['claude-wt-1']);
-    await detectWorktreeSessionStatus('wt-1', sessionNameSet, mockDb, mockGetMessages, mockMarkPending);
+    await detectWorktreeSessionStatus('wt-1', sessionNameSet, mockDb, mockGetMessages, mockMarkPending, mockGetAgentInstances);
 
     expect(detectSessionStatus).toHaveBeenCalledWith(
       expect.any(String),
@@ -94,7 +104,7 @@ describe('worktree-status-helper (Issue #501)', () => {
     vi.mocked(getLastServerResponseTimestamp).mockReturnValue(null);
 
     const sessionNameSet = new Set(['claude-wt-2']);
-    await detectWorktreeSessionStatus('wt-2', sessionNameSet, mockDb, mockGetMessages, mockMarkPending);
+    await detectWorktreeSessionStatus('wt-2', sessionNameSet, mockDb, mockGetMessages, mockMarkPending, mockGetAgentInstances);
 
     expect(detectSessionStatus).toHaveBeenCalledWith(
       expect.any(String),
@@ -108,7 +118,7 @@ describe('worktree-status-helper (Issue #501)', () => {
 
     // No session running (empty set)
     const sessionNameSet = new Set<string>();
-    const result = await detectWorktreeSessionStatus('wt-3', sessionNameSet, mockDb, mockGetMessages, mockMarkPending);
+    const result = await detectWorktreeSessionStatus('wt-3', sessionNameSet, mockDb, mockGetMessages, mockMarkPending, mockGetAgentInstances);
 
     // detectSessionStatus should not be called when session is not running
     expect(detectSessionStatus).not.toHaveBeenCalled();
@@ -119,9 +129,85 @@ describe('worktree-status-helper (Issue #501)', () => {
     vi.mocked(getLastServerResponseTimestamp).mockReturnValue(null);
 
     const sessionNameSet = new Set(['gemini-wt-4']);
-    await detectWorktreeSessionStatus('wt-4', sessionNameSet, mockDb, mockGetMessages, mockMarkPending);
+    await detectWorktreeSessionStatus('wt-4', sessionNameSet, mockDb, mockGetMessages, mockMarkPending, mockGetAgentInstances);
 
     const { captureSessionOutput } = await import('@/lib/session/cli-session');
-    expect(captureSessionOutput).toHaveBeenCalledWith('wt-4', 'gemini', 200);
+    // Issue #875: primary instances pass instanceId === cliToolId.
+    expect(captureSessionOutput).toHaveBeenCalledWith('wt-4', 'gemini', 200, 'gemini');
+  });
+});
+
+describe('worktree-status-helper per-instance detection (Issue #875)', () => {
+  const mockDb = {} as ReturnType<typeof import('@/lib/db/db-instance').getDbInstance>;
+  const mockGetMessages = vi.fn().mockReturnValue([]);
+  const mockMarkPending = vi.fn();
+  const mockGetAgentInstances = vi.fn(() => [] as AgentInstance[]);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetMessages.mockReturnValue([]);
+    mockGetAgentInstances.mockReturnValue([]);
+    vi.mocked(getLastServerResponseTimestamp).mockReturnValue(null);
+  });
+
+  it('keys primary instances in sessionStatusByInstance by their cliToolId', async () => {
+    const sessionNameSet = new Set(['claude-wt-p']);
+    const result = await detectWorktreeSessionStatus(
+      'wt-p', sessionNameSet, mockDb, mockGetMessages, mockMarkPending, mockGetAgentInstances
+    );
+
+    expect(result.sessionStatusByInstance.claude?.isRunning).toBe(true);
+    expect(result.sessionStatusByInstance.gemini?.isRunning).toBe(false);
+    // Primary status mirrors the per-CLI map for backward compat.
+    expect(result.sessionStatusByCli.claude?.isRunning).toBe(true);
+  });
+
+  it('detects an alias instance session and keys it by instanceId', async () => {
+    mockGetAgentInstances.mockReturnValue([
+      { id: 'claude-2', cliTool: 'claude', alias: 'photon', order: 1 },
+    ]);
+    // Only the alias session is running; the primary claude session is NOT.
+    const sessionNameSet = new Set(['claude-wt-a-claude-2']);
+
+    const result = await detectWorktreeSessionStatus(
+      'wt-a', sessionNameSet, mockDb, mockGetMessages, mockMarkPending, mockGetAgentInstances
+    );
+
+    // Alias instance is detected independently of the primary.
+    expect(result.sessionStatusByInstance['claude-2']?.isRunning).toBe(true);
+    expect(result.sessionStatusByInstance.claude?.isRunning).toBe(false);
+    // Per-CLI aggregate folds the alias activity in (sidebar #867 correctness).
+    expect(result.sessionStatusByCli.claude?.isRunning).toBe(true);
+    // Worktree-level flag reflects an alias-only running session.
+    expect(result.isSessionRunning).toBe(true);
+  });
+
+  it('reports independent statuses for two instances of the same CLI tool', async () => {
+    mockGetAgentInstances.mockReturnValue([
+      { id: 'claude-2', cliTool: 'claude', alias: 'photon', order: 1 },
+    ]);
+    // Primary running, alias not running.
+    const sessionNameSet = new Set(['claude-wt-b']);
+
+    const result = await detectWorktreeSessionStatus(
+      'wt-b', sessionNameSet, mockDb, mockGetMessages, mockMarkPending, mockGetAgentInstances
+    );
+
+    expect(result.sessionStatusByInstance.claude?.isRunning).toBe(true);
+    expect(result.sessionStatusByInstance['claude-2']?.isRunning).toBe(false);
+  });
+
+  it('captures alias output scoped to the alias instanceId', async () => {
+    mockGetAgentInstances.mockReturnValue([
+      { id: 'claude-2', cliTool: 'claude', alias: 'photon', order: 1 },
+    ]);
+    const sessionNameSet = new Set(['claude-wt-c-claude-2']);
+
+    await detectWorktreeSessionStatus(
+      'wt-c', sessionNameSet, mockDb, mockGetMessages, mockMarkPending, mockGetAgentInstances
+    );
+
+    const { captureSessionOutput } = await import('@/lib/session/cli-session');
+    expect(captureSessionOutput).toHaveBeenCalledWith('wt-c', 'claude', expect.any(Number), 'claude-2');
   });
 });

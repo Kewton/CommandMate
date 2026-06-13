@@ -74,6 +74,7 @@ export async function GET(
         db,
         getMessages,
         markPendingPromptsAsAnswered,
+        getAgentInstances,
       ),
       getGitStatus(worktree.path, initialBranch).catch((gitError) => {
         // Log but don't fail - git status is non-critical

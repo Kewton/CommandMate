@@ -433,6 +433,105 @@ describe('DesktopHeader session kill button (Issue #784 / #869)', () => {
 });
 
 /**
+ * Issue #875: per-instance status resolution. The status dot/spinner and the
+ * "End" button must resolve each instance's status from `sessionStatusByInstance`
+ * (keyed by instanceId) so alias instances (instanceId !== cliToolId) show their
+ * own status. The per-CLI map is only a fallback when an instance entry is absent.
+ */
+describe('DesktopHeader per-instance status resolution (Issue #875)', () => {
+  type InstanceStatusMap = NonNullable<Worktree['sessionStatusByInstance']>;
+
+  const dualClaude: AgentInstance[] = [
+    { id: 'claude', cliTool: 'claude', alias: 'Primary', order: 0 },
+    { id: 'claude-2', cliTool: 'claude', alias: 'Photon', order: 1 },
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('shows independent status for two instances of the same CLI tool', () => {
+    // Primary idle, alias processing — same backing CLI tool.
+    const sessionStatusByInstance: InstanceStatusMap = {
+      claude: { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+      'claude-2': { isRunning: true, isWaitingForResponse: false, isProcessing: true },
+    };
+    render(
+      <DesktopHeader
+        {...baseProps}
+        instances={dualClaude}
+        sessionStatusByInstance={sessionStatusByInstance}
+      />
+    );
+
+    const primarySpan = screen.getByTestId('desktop-agent-status-claude').querySelector('span');
+    const aliasSpan = screen.getByTestId('desktop-agent-status-claude-2').querySelector('span');
+
+    // Primary → idle gray dot, no spinner.
+    expect(primarySpan?.className).toContain(SIDEBAR_STATUS_CONFIG.idle.className);
+    expect(primarySpan?.className).not.toContain('animate-spin');
+    // Alias → running blue spinner.
+    expect(aliasSpan?.className).toContain(SIDEBAR_STATUS_CONFIG.running.className);
+    expect(aliasSpan?.className).toContain('animate-spin');
+  });
+
+  it('renders the "End" button for an alias instance whose own session is running', () => {
+    // Primary not running; alias running. Button must follow the active alias.
+    const sessionStatusByInstance: InstanceStatusMap = {
+      claude: { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+      'claude-2': { isRunning: true, isWaitingForResponse: false, isProcessing: false },
+    };
+    render(
+      <DesktopHeader
+        {...baseProps}
+        instances={dualClaude}
+        activeInstanceId="claude-2"
+        sessionStatusByInstance={sessionStatusByInstance}
+        onKillSession={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId('desktop-kill-session')).toBeDefined();
+  });
+
+  it('hides the "End" button for an alias whose own session is idle even if the primary (same tool) is running', () => {
+    const sessionStatusByInstance: InstanceStatusMap = {
+      claude: { isRunning: true, isWaitingForResponse: false, isProcessing: false },
+      'claude-2': { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+    };
+    render(
+      <DesktopHeader
+        {...baseProps}
+        instances={dualClaude}
+        activeInstanceId="claude-2"
+        sessionStatusByInstance={sessionStatusByInstance}
+        onKillSession={vi.fn()}
+      />
+    );
+    // Keyed by instance, not by tool → no button for the idle alias.
+    expect(screen.queryByTestId('desktop-kill-session')).toBeNull();
+  });
+
+  it('falls back to the per-CLI map when no per-instance entry exists (backward compat)', () => {
+    const sessionStatusByCli: SessionStatusMap = {
+      claude: { isRunning: true, isWaitingForResponse: false, isProcessing: false },
+    };
+    render(
+      <DesktopHeader
+        {...baseProps}
+        instances={mkInstances(['claude'])}
+        activeInstanceId="claude"
+        sessionStatusByCli={sessionStatusByCli}
+        onKillSession={vi.fn()}
+      />
+    );
+    // No sessionStatusByInstance → primary resolves via sessionStatusByCli.
+    const span = screen.getByTestId('desktop-agent-status-claude').querySelector('span');
+    expect(span?.className).toContain(SIDEBAR_STATUS_CONFIG.ready.className);
+    expect(screen.getByTestId('desktop-kill-session')).toBeDefined();
+  });
+});
+
+/**
  * Issue #786 / #869: DesktopHeader per-instance indicator as a drag source.
  *
  * The `desktop-agent-status-${instanceId}` button is draggable so it can be

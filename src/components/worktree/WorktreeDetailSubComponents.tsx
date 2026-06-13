@@ -441,9 +441,17 @@ interface DesktopHeaderProps {
   /** Per-CLI session status map (PC only, optional). Issue #749 */
   sessionStatusByCli?: Worktree['sessionStatusByCli'];
   /**
+   * Per-instance session status map keyed by instanceId (PC only, optional).
+   * Issue #875: the per-agent status row and "End" button resolve each
+   * instance's status from here so alias instances (instanceId !== cliToolId)
+   * show their own status. Falls back to {@link sessionStatusByCli} per backing
+   * CLI tool when an instance entry is absent (transition / backward compat).
+   */
+  sessionStatusByInstance?: Worktree['sessionStatusByInstance'];
+  /**
    * Issue #869: agent instance roster (PC only, optional). The per-agent status
    * row is now an instance-tab switcher: one tab per instance, labelled by alias
-   * (`getInstanceLabel`). Status is still resolved per backing CLI tool.
+   * (`getInstanceLabel`). Status is resolved per instance (Issue #875).
    */
   instances?: AgentInstance[];
   /** Issue #869: currently active agent instance id (PC only, optional). */
@@ -493,6 +501,7 @@ export const DesktopHeader = memo(function DesktopHeader({
   worktreeStatus,
   onWorktreeStatusChange,
   sessionStatusByCli,
+  sessionStatusByInstance,
   instances,
   activeInstanceId,
   onActiveInstanceChange,
@@ -510,10 +519,16 @@ export const DesktopHeader = memo(function DesktopHeader({
   // published to the splits goes through onAgentDragStart/onAgentDragEnd.
   const [draggingInstanceId, setDraggingInstanceId] = useState<string | null>(null);
 
-  // Issue #869: the CLI tool backing the active instance. Kill-session controls
-  // remain keyed on the CLI tool (a CLI session is per worktree+tool), so we
-  // resolve the active instance's CLI tool for the running-session check below.
-  const activeCliTab = instances?.find((inst) => inst.id === activeInstanceId)?.cliTool;
+  // Issue #875: the active instance's CLI tool + its own running state. The
+  // "End" button targets the active *instance* (kill-session is instance-scoped),
+  // so its visibility is driven by the per-instance status; we fall back to the
+  // per-CLI map when the per-instance entry is absent (transition / backward compat).
+  const activeInstance = instances?.find((inst) => inst.id === activeInstanceId);
+  const activeInstanceRunning = activeInstanceId
+    ? (sessionStatusByInstance?.[activeInstanceId]?.isRunning
+        ?? (activeInstance ? sessionStatusByCli?.[activeInstance.cliTool]?.isRunning : undefined)
+        ?? false)
+    : false;
 
   const handleAgentDragStart = useCallback(
     (e: React.DragEvent<HTMLButtonElement>, instanceId: string) => {
@@ -635,7 +650,12 @@ export const DesktopHeader = memo(function DesktopHeader({
         {instances && instances.length > 0 && (
           <div className="flex items-center gap-2 flex-shrink-0" data-testid="desktop-agent-status-row">
             {instances.map((inst) => {
-              const cliStatus = deriveCliStatus(sessionStatusByCli?.[inst.cliTool]);
+              // Issue #875: resolve each instance's status from the per-instance
+              // map so alias instances (instanceId !== cliToolId) show their own
+              // status; fall back to the per-CLI map for backward compat.
+              const cliStatus = deriveCliStatus(
+                sessionStatusByInstance?.[inst.id] ?? sessionStatusByCli?.[inst.cliTool]
+              );
               const agentStatusConfig = SIDEBAR_STATUS_CONFIG[cliStatus];
               const isActive = inst.id === activeInstanceId;
               const label = getInstanceLabel(inst);
@@ -683,7 +703,7 @@ export const DesktopHeader = memo(function DesktopHeader({
             Mobile kill button (WorktreeDetailRefactored.tsx:409-421). Rendered
             only when a kill handler is wired AND the active CLI session is
             running; click opens the existing confirmation modal. */}
-        {onKillSession && activeCliTab && sessionStatusByCli?.[activeCliTab]?.isRunning && (
+        {onKillSession && activeInstanceRunning && (
           <button
             type="button"
             onClick={onKillSession}

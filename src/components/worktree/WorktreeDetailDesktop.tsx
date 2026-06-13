@@ -321,11 +321,15 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       const paneAutoYes = autoYesStateMap.get(paneCli);
       const paneAutoYesEnabled = paneAutoYes?.enabled ?? false;
       const paneAutoYesExpiresAt = paneAutoYes?.expiresAt ?? null;
-      // Issue #743: derive THIS pane's AI agent status from the per-CLI session
-      // flags. Only the resolved BranchStatus string is handed to the child, so
-      // a polling tick that leaves the status unchanged does not break the
-      // child's memo (S3-001 memo-safe).
-      const paneCliStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[paneCli]);
+      // Issue #743/#875: derive THIS pane's AI agent status. Splits are
+      // per-instance, so resolve from the per-instance status map keyed by the
+      // pane's instanceId (alias instances show their own status); fall back to
+      // the per-CLI map for backward compat. Only the resolved BranchStatus
+      // string is handed to the child, so a polling tick that leaves the status
+      // unchanged does not break the child's memo (S3-001 memo-safe).
+      const paneCliStatus = deriveCliStatus(
+        worktree?.sessionStatusByInstance?.[paneInstanceId] ?? worktree?.sessionStatusByCli?.[paneCli]
+      );
       return (
         <TerminalSplitPaneContent
           worktreeId={worktreeId}
@@ -395,10 +399,11 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       setActiveInstanceId,
       lastAutoResponse,
       makeAutoYesToggleHandler,
-      // Issue #743: re-create renderPane when the per-CLI session status map
-      // changes so the derived `cliStatus` stays current. The child only
+      // Issue #743/#875: re-create renderPane when the session status maps
+      // change so the derived `cliStatus` stays current. The child only
       // re-renders when its resolved status string actually changes (memo-safe).
       worktree?.sessionStatusByCli,
+      worktree?.sessionStatusByInstance,
       // Issue #744: embedded HistoryPane wiring deps.
       onFilePathClick,
       showToast,
@@ -640,6 +645,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             worktreeStatus={worktree?.status ?? null}
             onWorktreeStatusChange={onWorktreeStatusChange}
             sessionStatusByCli={worktree?.sessionStatusByCli}
+            sessionStatusByInstance={worktree?.sessionStatusByInstance}
             instances={instances}
             activeInstanceId={activeInstanceId}
             onActiveInstanceChange={setActiveInstanceId}

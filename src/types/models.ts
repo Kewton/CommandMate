@@ -88,6 +88,13 @@ export interface Worktree {
   isProcessing?: boolean;
   /** Session status per CLI tool */
   sessionStatusByCli?: Partial<Record<CLIToolType, { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean }>>;
+  /**
+   * Session status per agent instance (Issue #875), keyed by instanceId.
+   * Primary instances are keyed by their CLI tool id (instanceId === cliToolId);
+   * alias instances by their own instanceId. Each entry is that instance's own
+   * (un-aggregated) status, so the per-instance UI can resolve each independently.
+   */
+  sessionStatusByInstance?: Partial<Record<string, { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean }>>;
   /** Whether this worktree is marked as favorite */
   favorite?: boolean;
   /** Worktree status: ready, in_progress, in_review, done, or null if not set */

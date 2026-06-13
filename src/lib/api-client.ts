@@ -332,14 +332,23 @@ export const worktreeApi = {
    * Kill the tmux session for a worktree
    * @param id - Worktree ID
    * @param cliToolId - Optional CLI tool ID (claude, codex, gemini). If not specified, uses worktree's default.
+   * @param instanceId - Optional agent instance ID (Issue #875). When provided,
+   *   scopes the kill to that single instance; the primary instance uses
+   *   instanceId === cliToolId. Sent as the `instance` query parameter that the
+   *   kill-session route already understands.
    */
-  async killSession(id: string, cliToolId?: CLIToolType): Promise<{ success: boolean; message: string }> {
+  async killSession(
+    id: string,
+    cliToolId?: CLIToolType,
+    instanceId?: string,
+  ): Promise<{ success: boolean; message: string }> {
+    const query = new URLSearchParams();
+    if (cliToolId) query.set('cliTool', cliToolId);
+    if (instanceId) query.set('instance', instanceId);
+    const queryString = query.toString();
     return fetchApi<{ success: boolean; message: string }>(
-      `/api/worktrees/${id}/kill-session`,
-      {
-        method: 'POST',
-        body: cliToolId ? JSON.stringify({ cliToolId }) : undefined,
-      }
+      `/api/worktrees/${id}/kill-session${queryString ? `?${queryString}` : ''}`,
+      { method: 'POST' }
     );
   },
 };
