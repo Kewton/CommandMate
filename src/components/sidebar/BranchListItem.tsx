@@ -250,7 +250,7 @@ export const BranchListItem = memo(function BranchListItem({
           <div className="flex items-center justify-center flex-shrink-0 w-4" aria-label="CLI tool status">
             <BranchStatusIndicator
               status={aggregateCliStatus(branch.cliStatus)}
-              label={formatCliStatusBreakdown(branch.cliStatus)}
+              label={formatCliStatusBreakdown(branch.cliStatus, branch.cliStatusLabels)}
             />
           </div>
         )}

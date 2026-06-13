@@ -15,6 +15,7 @@ import { detectWorktreeSessionStatus } from '@/lib/session/worktree-status-helpe
 import { parseIncludeParam } from '@/lib/api/worktrees-include-parser';
 import { isWorktreeStalled } from '@/lib/detection/stalled-detector';
 import { getNextAction, getReviewStatus } from '@/lib/session/next-action-helper';
+import { resolveAgentInstances } from '@/lib/session/agent-instances-resolver';
 import { createLogger } from '@/lib/logger';
 import type { SessionStatus } from '@/lib/detection/status-detector';
 import type { PromptType } from '@/types/models';
@@ -62,9 +63,14 @@ export async function GET(request: NextRequest) {
           getAgentInstances,
         );
 
+        // Issue #878: include the agent-instance roster so the sidebar can
+        // aggregate per-instance status (matches the single worktree API).
+        const agentInstances = resolveAgentInstances(db, worktree.id, worktree.selectedAgents);
+
         const base = {
           ...worktree,
           ...status,
+          agentInstances,
         };
 
         // Issue #600: Add review fields when ?include=review
