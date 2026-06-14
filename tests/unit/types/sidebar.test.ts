@@ -311,6 +311,168 @@ describe('sidebar types', () => {
     });
   });
 
+  describe('toBranchItem per-instance aggregation (Issue #878)', () => {
+    const baseWorktree: Worktree = {
+      id: 'photon-mlx-develop',
+      name: 'photon-mlx/develop',
+      path: '/path/to/worktree',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'MyRepo',
+    };
+
+    it('should reflect a running instance NOT in selectedAgents (e.g. claude)', () => {
+      // Regression: photon-mlx-develop has selectedAgents=[copilot,codex] but a
+      // claude session is running. The sidebar icon must show "running"/"ready".
+      const worktree: Worktree = {
+        ...baseWorktree,
+        selectedAgents: ['copilot', 'codex'],
+        isSessionRunning: true,
+        sessionStatusByInstance: {
+          claude: { isRunning: true, isWaitingForResponse: false, isProcessing: false },
+          copilot: { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+          codex: { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+        },
+      };
+
+      const result = toBranchItem(worktree);
+
+      // claude (running) is surfaced even though it is not in selectedAgents
+      expect(result.cliStatus?.claude).toBe('ready');
+      expect(result.cliStatus?.copilot).toBe('idle');
+      expect(result.cliStatus?.codex).toBe('idle');
+      // The aggregated sidebar icon reflects the running instance
+      expect(aggregateCliStatus(result.cliStatus)).toBe('ready');
+    });
+
+    it('should reflect an alias instance (claude-2) running via the roster', () => {
+      const worktree: Worktree = {
+        ...baseWorktree,
+        selectedAgents: ['copilot'],
+        agentInstances: [
+          { id: 'copilot', cliTool: 'copilot', alias: 'Copilot', order: 0 },
+          { id: 'claude', cliTool: 'claude', alias: 'Claude', order: 1 },
+          { id: 'claude-2', cliTool: 'claude', alias: 'Claude 2', order: 2 },
+        ],
+        sessionStatusByInstance: {
+          copilot: { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+          claude: { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+          'claude-2': { isRunning: true, isWaitingForResponse: false, isProcessing: true },
+        },
+      };
+
+      const result = toBranchItem(worktree);
+
+      expect(result.cliStatus?.['claude-2']).toBe('running');
+      expect(aggregateCliStatus(result.cliStatus)).toBe('running');
+      // The breakdown label uses the instance alias
+      expect(result.cliStatusLabels?.['claude-2']).toBe('Claude 2');
+    });
+
+    it('should surface a running alias instance even when absent from the roster', () => {
+      // No agentInstances roster (legacy) → roster derives from selectedAgents.
+      // A running claude-2 alias is still surfaced via sessionStatusByInstance.
+      const worktree: Worktree = {
+        ...baseWorktree,
+        selectedAgents: ['copilot', 'codex'],
+        sessionStatusByInstance: {
+          copilot: { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+          codex: { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+          'claude-2': { isRunning: true, isWaitingForResponse: true, isProcessing: false },
+        },
+      };
+
+      const result = toBranchItem(worktree);
+
+      expect(result.cliStatus?.['claude-2']).toBe('waiting');
+      expect(aggregateCliStatus(result.cliStatus)).toBe('waiting');
+      // Label is derived from the instance id when no roster alias exists
+      expect(result.cliStatusLabels?.['claude-2']).toBe('Claude 2');
+    });
+
+    it('should NOT surface idle instances outside the roster', () => {
+      // sessionStatusByInstance from the list API contains every primary tool;
+      // idle non-roster instances should not clutter the breakdown.
+      const worktree: Worktree = {
+        ...baseWorktree,
+        selectedAgents: ['copilot', 'codex'],
+        sessionStatusByInstance: {
+          copilot: { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+          codex: { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+          claude: { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+          gemini: { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+        },
+      };
+
+      const result = toBranchItem(worktree);
+
+      expect(Object.keys(result.cliStatus ?? {}).sort()).toEqual(['codex', 'copilot']);
+      expect(aggregateCliStatus(result.cliStatus)).toBe('idle');
+    });
+
+    it('should use the agentInstances roster to key and label cliStatus', () => {
+      const worktree: Worktree = {
+        ...baseWorktree,
+        selectedAgents: ['claude', 'codex'],
+        agentInstances: [
+          { id: 'claude', cliTool: 'claude', alias: 'Claude', order: 0 },
+          { id: 'codex', cliTool: 'codex', alias: 'My Codex', order: 1 },
+        ],
+        sessionStatusByInstance: {
+          claude: { isRunning: true, isWaitingForResponse: false, isProcessing: true },
+          codex: { isRunning: true, isWaitingForResponse: false, isProcessing: false },
+        },
+      };
+
+      const result = toBranchItem(worktree);
+
+      expect(result.cliStatus).toEqual({ claude: 'running', codex: 'ready' });
+      expect(result.cliStatusLabels).toEqual({ claude: 'Claude', codex: 'My Codex' });
+    });
+
+    it('should preserve legacy behaviour when sessionStatusByInstance is absent', () => {
+      // No per-instance data → fall back to selectedAgents + sessionStatusByCli.
+      // A running claude is NOT surfaced because it is not in selectedAgents and
+      // there is no per-instance source (matches pre-#878 behaviour).
+      const worktree: Worktree = {
+        ...baseWorktree,
+        selectedAgents: ['copilot', 'codex'],
+        sessionStatusByCli: {
+          codex: { isRunning: true, isWaitingForResponse: false, isProcessing: false },
+        },
+      };
+
+      const result = toBranchItem(worktree);
+
+      expect(result.cliStatus).toEqual({ copilot: 'idle', codex: 'ready' });
+      expect(result.cliStatus?.claude).toBeUndefined();
+    });
+
+    it('should not break the all-agents default selection', () => {
+      const worktree: Worktree = {
+        ...baseWorktree,
+        selectedAgents: ['claude', 'codex', 'gemini', 'opencode', 'copilot'],
+        sessionStatusByInstance: {
+          claude: { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+          codex: { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+          gemini: { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+          opencode: { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+          copilot: { isRunning: false, isWaitingForResponse: false, isProcessing: false },
+        },
+      };
+
+      const result = toBranchItem(worktree);
+
+      expect(result.cliStatus).toEqual({
+        claude: 'idle',
+        codex: 'idle',
+        gemini: 'idle',
+        opencode: 'idle',
+        copilot: 'idle',
+      });
+      expect(aggregateCliStatus(result.cliStatus)).toBe('idle');
+    });
+  });
+
   describe('deriveCliStatus', () => {
     it('should return idle when toolStatus is undefined', () => {
       expect(deriveCliStatus(undefined)).toBe('idle');
@@ -402,6 +564,21 @@ describe('sidebar types', () => {
 
     it('should fall back to idle for undefined per-agent entries', () => {
       expect(formatCliStatusBreakdown({ claude: undefined })).toBe('Claude: idle');
+    });
+
+    it('should use the provided instance-id label map (Issue #878)', () => {
+      expect(
+        formatCliStatusBreakdown(
+          { claude: 'running', 'claude-2': 'idle' },
+          { claude: 'Claude', 'claude-2': 'Claude 2' }
+        )
+      ).toBe('Claude: running, Claude 2: idle');
+    });
+
+    it('should fall back to a derived label for alias instance ids without a label map (Issue #878)', () => {
+      // 'claude-2' is not a CLI tool id → getCliToolDisplayNameSafe returns the
+      // id itself as the fallback rather than a generic 'Assistant'.
+      expect(formatCliStatusBreakdown({ 'claude-2': 'running' })).toBe('claude-2: running');
     });
   });
 });

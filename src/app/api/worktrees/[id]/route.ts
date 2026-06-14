@@ -8,7 +8,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById, updateWorktreeDescription, updateWorktreeLink, updateFavorite, updateStatus, updateCliToolId, updateSelectedAgents, updateVibeLocalModel, updateVibeLocalContextWindow, getMessages, markPendingPromptsAsAnswered, getInitialBranch, getAgentInstances, setAgentInstances, AgentInstanceLimitError, InvalidAgentInstanceError } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { CLI_TOOL_IDS, OLLAMA_MODEL_PATTERN, isValidVibeLocalContextWindow, VIBE_LOCAL_CONTEXT_WINDOW_MIN, VIBE_LOCAL_CONTEXT_WINDOW_MAX, agentInstancesFromSelectedAgents, type CLIToolType, type AgentInstance } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, OLLAMA_MODEL_PATTERN, isValidVibeLocalContextWindow, VIBE_LOCAL_CONTEXT_WINDOW_MIN, VIBE_LOCAL_CONTEXT_WINDOW_MAX, type CLIToolType, type AgentInstance } from '@/lib/cli-tools/types';
+import { resolveAgentInstances } from '@/lib/session/agent-instances-resolver';
 import { getGitStatus } from '@/lib/git/git-utils';
 import type { GitStatus } from '@/types/models';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
@@ -19,24 +20,6 @@ import { detectWorktreeSessionStatus } from '@/lib/session/worktree-status-helpe
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/worktrees');
-
-/**
- * Resolve the agent-instance roster for a worktree (Issue #869).
- * Prefers the explicit `agent_instances` rows; when none exist (legacy
- * worktrees), derives primary instances from `selectedAgents` so the client
- * always receives a non-empty roster.
- */
-function resolveAgentInstances(
-  db: ReturnType<typeof getDbInstance>,
-  worktreeId: string,
-  selectedAgents: CLIToolType[] | undefined,
-): AgentInstance[] {
-  const stored = getAgentInstances(db, worktreeId);
-  if (stored.length > 0) {
-    return stored;
-  }
-  return agentInstancesFromSelectedAgents(selectedAgents ?? []);
-}
 
 export async function GET(
   request: NextRequest,
