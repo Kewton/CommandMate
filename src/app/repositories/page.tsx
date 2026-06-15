@@ -3,12 +3,13 @@
  *
  * Issue #600: UX refresh - Repository management.
  * Issue #644: Repository list + inline display_name edit.
- *   - RepositoryList is placed ABOVE RepositoryManager.
  *   - refreshKey is incremented when Add/Sync finishes in RepositoryManager
  *     so RepositoryList refetches automatically.
  *   - It is also incremented when a row's display_name is updated so that
  *     other screens reading the same data via worktreeApi can be refreshed
  *     indirectly (via parent refreshKey bump).
+ * Issue #880: RepositoryManager (Add Repository / Sync All actions) is placed
+ *   ABOVE RepositoryList so the action buttons appear at the top of the page.
  */
 
 'use client';
@@ -35,8 +36,8 @@ export default function RepositoriesPage() {
         </div>
 
         <div className="space-y-6">
-          <RepositoryList refreshKey={refreshKey} onChanged={handleChanged} />
           <RepositoryManager onRepositoryAdded={handleChanged} />
+          <RepositoryList refreshKey={refreshKey} onChanged={handleChanged} />
         </div>
       </div>
     </AppShell>
