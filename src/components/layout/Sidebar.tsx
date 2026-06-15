@@ -12,8 +12,10 @@
 'use client';
 
 import React, { memo, useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useDeferredValue } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { Database } from 'lucide-react';
 import {
   DndContext,
   PointerSensor,
@@ -429,6 +431,16 @@ export const Sidebar = memo(function Sidebar() {
             <ViewModeToggle viewMode={viewMode} onToggle={setViewMode} />
             <SortSelector />
             <SyncButton refreshWorktrees={refreshWorktrees} />
+            <Link
+              href="/repositories"
+              aria-label="Repositories"
+              title="Repositories"
+              className="p-1 rounded text-gray-300 hover:text-white hover:bg-gray-700
+                focus:outline-none focus:ring-2 focus:ring-blue-500
+                transition-colors inline-flex items-center"
+            >
+              <Database className="w-3 h-3" aria-hidden="true" />
+            </Link>
           </div>
         </div>
       </div>

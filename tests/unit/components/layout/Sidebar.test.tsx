@@ -546,6 +546,20 @@ describe('Sidebar', () => {
         expect(screen.getByText('Branches')).toBeInTheDocument();
       });
     });
+
+    // Issue #880: header link to the repository management page
+    it('should render a Repositories link pointing to /repositories', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const link = await screen.findByRole('link', { name: 'Repositories' });
+      expect(link).toHaveAttribute('href', '/repositories');
+      // The link lives inside the sidebar header alongside the other actions
+      expect(screen.getByTestId('sidebar-header')).toContainElement(link);
+    });
   });
 
   describe('Grouped view (default)', () => {
