@@ -10,6 +10,7 @@
 'use client';
 
 import React, { memo, useState, useRef, useEffect, useCallback } from 'react';
+import { Tooltip } from '@/components/common/Tooltip';
 import type { SortKey, SortDirection } from '@/lib/sidebar-utils';
 
 // ============================================================================
@@ -38,6 +39,12 @@ export interface SortSelectorBaseProps {
   defaultDirections?: Partial<Record<SortKey, SortDirection>>;
   /** When true, hides the label text to save horizontal space (used in compact sidebar) */
   compact?: boolean;
+  /**
+   * Optional hover tooltip for the trigger button (Issue #882). When provided,
+   * the trigger is wrapped in the shared {@link Tooltip} (placement `bottom`).
+   * Omitted callers (e.g. Sessions page) keep the plain button.
+   */
+  tooltip?: string;
 }
 
 // ============================================================================
@@ -60,6 +67,7 @@ export const SortSelectorBase = memo(function SortSelectorBase({
   options,
   defaultDirections,
   compact,
+  tooltip,
 }: SortSelectorBaseProps) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -118,26 +126,36 @@ export const SortSelectorBase = memo(function SortSelectorBase({
 
   const currentLabel = options.find((opt) => opt.key === sortKey)?.label || 'Sort';
 
+  const triggerButton = (
+    <button
+      type="button"
+      onClick={handleToggle}
+      aria-expanded={isOpen}
+      aria-haspopup="listbox"
+      aria-label={`Sort by ${currentLabel}`}
+      className="
+        flex items-center gap-1 px-2 py-1 rounded
+        text-xs text-gray-300 hover:text-white hover:bg-gray-700
+        focus:outline-none focus:ring-2 focus:ring-blue-500
+        transition-colors
+      "
+    >
+      <SortIcon className="w-3 h-3" />
+      <span className={compact ? 'hidden' : 'hidden sm:inline'}>{currentLabel}</span>
+    </button>
+  );
+
   return (
     <div ref={containerRef} className="relative" data-testid="sort-selector-base">
       {/* Trigger button */}
       <div className="flex items-center gap-1">
-        <button
-          type="button"
-          onClick={handleToggle}
-          aria-expanded={isOpen}
-          aria-haspopup="listbox"
-          aria-label={`Sort by ${currentLabel}`}
-          className="
-            flex items-center gap-1 px-2 py-1 rounded
-            text-xs text-gray-300 hover:text-white hover:bg-gray-700
-            focus:outline-none focus:ring-2 focus:ring-blue-500
-            transition-colors
-          "
-        >
-          <SortIcon className="w-3 h-3" />
-          <span className={compact ? 'hidden' : 'hidden sm:inline'}>{currentLabel}</span>
-        </button>
+        {tooltip ? (
+          <Tooltip content={tooltip} placement="bottom">
+            {triggerButton}
+          </Tooltip>
+        ) : (
+          triggerButton
+        )}
 
         {/* Direction toggle */}
         <button
