@@ -527,6 +527,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             onUpload={onUpload}
             onMove={onMove}
             refreshTrigger={fileTreeRefresh}
+            pollingEnabled={activeActivity === 'files'}
             searchQuery={fileSearch.query}
             searchMode={fileSearch.mode}
             searchResults={fileSearch.results?.results}
@@ -574,6 +575,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     [
       worktreeId,
       worktree,
+      activeActivity,
       fileSearch.query,
       fileSearch.mode,
       fileSearch.isSearching,

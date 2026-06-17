@@ -31,8 +31,6 @@ import { useFileSearch } from '@/hooks/useFileSearch';
 import { useActivityBarState } from '@/hooks/useActivityBarState';
 import type { ActivityId } from '@/config/activity-bar-config';
 import { useFileTabs, MAX_FILE_TABS } from '@/hooks/useFileTabs';
-import { useFilePolling } from '@/hooks/useFilePolling';
-import { FILE_TREE_POLL_INTERVAL_MS } from '@/config/file-polling-config';
 import { usePendingInsertText } from '@/hooks/usePendingInsertText';
 import {
   deriveWorktreeStatus,
@@ -306,32 +304,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // `useHistoryPaneState` instance. Each `TerminalSplitPaneContent` owns its
   // own instance for the split-internal History visibility/width.
 
-  // [Issue #469] Tree polling: detect file tree changes via JSON comparison
-  const prevTreeHashRef = useRef<string | null>(null);
-  useFilePolling({
-    intervalMs: FILE_TREE_POLL_INTERVAL_MS,
-    enabled: activeActivity === 'files',
-    onPoll: async () => {
-      try {
-        const response = await fetch(`/api/worktrees/${worktreeId}/tree`);
-        if (!response.ok) return; // Ignore errors in polling
-        const data = await response.json();
-        const newHash = JSON.stringify(data?.items);
-        // [Issue #706] On the very first poll we have no baseline to
-        // compare against, so just record the hash. Firing a refresh here
-        // would be a false positive that resets the user's scroll/selection
-        // state in FileTreeView for no actual change.
-        if (prevTreeHashRef.current === null) {
-          prevTreeHashRef.current = newHash;
-        } else if (newHash !== prevTreeHashRef.current) {
-          prevTreeHashRef.current = newHash;
-          setFileTreeRefresh(prev => prev + 1);
-        }
-      } catch {
-        // Silently ignore network errors during polling
-      }
-    },
-  });
+  // [Issue #888] File-tree external-change detection was moved INTO
+  // FileTreeView (it now covers the root + every expanded subdirectory, not
+  // just the root). The controller only retains `fileTreeRefresh` to force an
+  // explicit refresh after local file operations (create/rename/delete/upload).
 
   // [Issue #447] History sub-tab: 'message' (default) or 'git'
   const [historySubTab, setHistorySubTab] = useState<'message' | 'git'>('message');
