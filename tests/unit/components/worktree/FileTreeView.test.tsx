@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { FileTreeView } from '@/components/worktree/FileTreeView';
+import { FILE_TREE_POLL_INTERVAL_MS } from '@/config/file-polling-config';
 import type { TreeResponse } from '@/types/models';
 
 // Mock fetch globally
@@ -1540,7 +1541,7 @@ describe('FileTreeView', () => {
       expect(onNewFile).toHaveBeenCalledWith('');
     });
 
-    it('should not show file-tree-toolbar when neither onNewFile nor onNewDirectory is provided', async () => {
+    it('should always show file-tree-toolbar (manual refresh button) but omit create buttons when neither onNewFile nor onNewDirectory is provided (Issue #888)', async () => {
       render(
         <FileTreeView worktreeId="test-worktree" />
       );
@@ -1549,7 +1550,12 @@ describe('FileTreeView', () => {
         expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
       });
 
-      expect(screen.queryByTestId('file-tree-toolbar')).not.toBeInTheDocument();
+      // [Issue #888] The toolbar is now always present because it hosts the
+      // manual refresh button — but the create buttons remain callback-gated.
+      expect(screen.getByTestId('file-tree-toolbar')).toBeInTheDocument();
+      expect(screen.getByTestId('file-tree-refresh-button')).toBeInTheDocument();
+      expect(screen.queryByTestId('toolbar-new-file-button')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('toolbar-new-directory-button')).not.toBeInTheDocument();
     });
 
     it('should still show empty-new-directory-button in empty state', async () => {
@@ -1745,6 +1751,160 @@ describe('FileTreeView', () => {
         expect(screen.queryByTestId('file-tree-refetch-error')).not.toBeInTheDocument();
       });
       expect(screen.getByText('src')).toBeInTheDocument();
+    });
+  });
+
+  /**
+   * Issue #888: Files 表示中に新規ファイルが自動反映されない問題の修正
+   *
+   * B案: Files パネルヘッダーに手動「更新」ボタンを追加。
+   */
+  describe('manual refresh button (Issue #888)', () => {
+    it('should render a manual refresh button in the toolbar', async () => {
+      render(<FileTreeView worktreeId="test-worktree" />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
+      });
+
+      expect(screen.getByTestId('file-tree-refresh-button')).toBeInTheDocument();
+    });
+
+    it('should re-fetch the root and all expanded directories when clicked', async () => {
+      render(<FileTreeView worktreeId="test-worktree" />);
+
+      await waitFor(() => {
+        expect(screen.getByText('src')).toBeInTheDocument();
+      });
+
+      // Expand src so the refresh must re-fetch the subdirectory too.
+      fireEvent.click(screen.getByTestId('tree-item-src'));
+      await waitFor(() => {
+        expect(screen.getByText('index.ts')).toBeInTheDocument();
+      });
+
+      mockFetch.mockClear();
+      fireEvent.click(screen.getByTestId('file-tree-refresh-button'));
+
+      await waitFor(() => {
+        const calls = mockFetch.mock.calls.map((c) => c[0]);
+        expect(calls).toContain('/api/worktrees/test-worktree/tree');
+        expect(calls).toContain('/api/worktrees/test-worktree/tree/src');
+      });
+    });
+  });
+
+  /**
+   * Issue #888: A案 - 監視範囲の是正
+   *
+   * 変更検知を FileTreeView 内へ移設し、ルート＋展開中の全サブディレクトリを
+   * 対象に合成ハッシュで変化検知する。変化時のみ reloadTreeWithExpandedDirs()
+   * を実行し、スクロール/選択/展開状態は維持する（Issue #706 配慮）。
+   */
+  describe('external change polling (Issue #888)', () => {
+    it('should NOT poll when pollingEnabled is omitted (default off)', async () => {
+      render(<FileTreeView worktreeId="test-worktree" />);
+
+      await waitFor(() => {
+        expect(screen.getByText('src')).toBeInTheDocument();
+      });
+
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        mockFetch.mockClear();
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(FILE_TREE_POLL_INTERVAL_MS * 3);
+        });
+        expect(mockFetch).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('should only establish a baseline on the first poll tick (no reload — Issue #706)', async () => {
+      // Fake timers must be active BEFORE mount so the polling interval is
+      // registered against the fake clock.
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        render(<FileTreeView worktreeId="test-worktree" pollingEnabled />);
+
+        // Flush the mount reload.
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(1);
+        });
+        expect(screen.getByText('src')).toBeInTheDocument();
+
+        mockFetch.mockClear();
+        // One poll tick: it reads the root exactly once to record the baseline
+        // and must NOT trigger a reload (which would read the root a 2nd time).
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(FILE_TREE_POLL_INTERVAL_MS);
+        });
+
+        const rootFetches = mockFetch.mock.calls.filter(
+          (c) => c[0] === '/api/worktrees/test-worktree/tree'
+        );
+        expect(rootFetches).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('should refresh when a file is added inside an expanded subdirectory', async () => {
+      // Mutable src payload so a later poll observes the added file.
+      let srcData: TreeResponse = mockSrcData;
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/tree/src')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(srcData) });
+        }
+        if (url.includes('/tree')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(mockRootData) });
+        }
+        return Promise.reject(new Error('Not found'));
+      });
+
+      // Fake timers must be active BEFORE mount so the polling interval is
+      // registered against the fake clock.
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        render(<FileTreeView worktreeId="test-worktree" pollingEnabled />);
+
+        // Flush the mount reload.
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(1);
+        });
+        expect(screen.getByText('src')).toBeInTheDocument();
+
+        // Expand src.
+        fireEvent.click(screen.getByTestId('tree-item-src'));
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(1);
+        });
+        expect(screen.getByText('index.ts')).toBeInTheDocument();
+
+        // Poll #1: baseline over root + src (unchanged), no reload.
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(FILE_TREE_POLL_INTERVAL_MS);
+        });
+
+        // A new file appears inside the expanded src directory.
+        srcData = {
+          ...mockSrcData,
+          items: [
+            ...mockSrcData.items,
+            { name: 'new-file.ts', type: 'file' as const, size: 10, extension: 'ts' },
+          ],
+        };
+
+        // Poll #2: src content hash differs from baseline -> reload.
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(FILE_TREE_POLL_INTERVAL_MS);
+        });
+
+        expect(screen.getByText('new-file.ts')).toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });

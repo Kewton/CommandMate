@@ -24,8 +24,10 @@ import { useContextMenu } from '@/hooks/useContextMenu';
 import { ContextMenu } from '@/components/worktree/ContextMenu';
 import { TreeNode } from '@/components/worktree/TreeNode';
 import { computeMatchedPaths } from '@/lib/utils';
+import { useFilePolling } from '@/hooks/useFilePolling';
+import { FILE_TREE_POLL_INTERVAL_MS } from '@/config/file-polling-config';
 import { useLocale } from 'next-intl';
-import { FilePlus, FolderPlus, AlertCircle } from 'lucide-react';
+import { FilePlus, FolderPlus, AlertCircle, RefreshCw } from 'lucide-react';
 
 // ============================================================================
 // Types
@@ -52,6 +54,14 @@ export interface FileTreeViewProps {
   className?: string;
   /** Trigger to refresh the tree (increment to refresh) */
   refreshTrigger?: number;
+  /**
+   * [Issue #888] When true, poll for external file changes across the root and
+   * all currently-expanded subdirectories, refreshing only when something
+   * actually changed. The caller passes the activation condition (e.g.
+   * `activeActivity === 'files'`) so detection stays scoped to when the tree
+   * is visible. Defaults to off.
+   */
+  pollingEnabled?: boolean;
   /** [Issue #21] Search query for filtering (optional) */
   searchQuery?: string;
   /** [Issue #21] Search mode: 'name' or 'content' (optional) */
@@ -95,6 +105,7 @@ export const FileTreeView = memo(function FileTreeView({
   onMove,
   className = '',
   refreshTrigger = 0,
+  pollingEnabled = false,
   searchQuery,
   searchMode,
   searchResults,
@@ -236,6 +247,97 @@ export const FileTreeView = memo(function FileTreeView({
     // is stable as long as fetchDirectory (= worktreeId) is unchanged.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadTreeWithExpandedDirs, refreshTrigger]);
+
+  // ==========================================================================
+  // [Issue #888] External change detection (polling)
+  //
+  // The previous implementation polled only the ROOT directory
+  // (useWorktreeDetailController), so files created inside an *expanded*
+  // subdirectory were never detected while the Files tab stayed mounted — the
+  // root listing (and thus its hash) was unchanged. Detection now lives here,
+  // next to `expandedRef` + `fetchDirectory`, and covers the root PLUS every
+  // expanded subdirectory, so the detection scope matches the refresh scope of
+  // `reloadTreeWithExpandedDirs()`. A real change triggers a single reload that
+  // preserves scroll/selection/expansion (Issue #706).
+  // ==========================================================================
+
+  // Per-directory content signature (path -> hash of its items) captured on the
+  // previous poll. Comparing per directory (rather than one flat hash) means
+  // newly-expanded dirs — freshly loaded by loadChildren — and collapsed dirs
+  // do NOT count as external changes, avoiding false-positive refreshes.
+  const pollSignatureRef = useRef<Map<string, string> | null>(null);
+  // Guard against overlapping polls if a tick fires before the previous one's
+  // fetches have settled.
+  const pollInFlightRef = useRef(false);
+
+  // Reset the baseline when the target worktree changes so a stale signature
+  // from a previous worktree can never trip a false refresh.
+  useEffect(() => {
+    pollSignatureRef.current = null;
+  }, [worktreeId]);
+
+  const detectExternalChanges = useCallback(async () => {
+    if (!mountedRef.current || pollInFlightRef.current) return;
+    pollInFlightRef.current = true;
+    try {
+      // The directories currently on screen: root ('') + expanded subdirs.
+      const paths = ['', ...Array.from(expandedRef.current)];
+      const signature = new Map<string, string>();
+
+      for (let i = 0; i < paths.length; i += CONCURRENT_LIMIT) {
+        if (!mountedRef.current) return;
+        const chunk = paths.slice(i, i + CONCURRENT_LIMIT);
+        const results = await Promise.all(
+          chunk.map(async (dirPath) => {
+            try {
+              const data = await fetchDirectory(dirPath);
+              return { dirPath, hash: JSON.stringify(data?.items ?? null) };
+            } catch {
+              // A directory we previously listed that now errors (deleted /
+              // inaccessible) is itself a change — record a sentinel so the
+              // comparison trips and the reload prunes the stale path.
+              return { dirPath, hash: ' unavailable' };
+            }
+          })
+        );
+        for (const { dirPath, hash } of results) {
+          signature.set(dirPath, hash);
+        }
+      }
+
+      if (!mountedRef.current) return;
+
+      const baseline = pollSignatureRef.current;
+      pollSignatureRef.current = signature;
+
+      // First poll only records a baseline (no reload) so we never fire a
+      // false-positive refresh that would disturb scroll/selection (Issue #706).
+      if (baseline === null) return;
+
+      // Reload only when a directory present in BOTH snapshots changed content.
+      let changed = false;
+      for (const [dirPath, hash] of signature) {
+        const prev = baseline.get(dirPath);
+        if (prev !== undefined && prev !== hash) {
+          changed = true;
+          break;
+        }
+      }
+
+      if (changed) {
+        void reloadTreeWithExpandedDirs();
+      }
+    } finally {
+      pollInFlightRef.current = false;
+    }
+  }, [fetchDirectory, reloadTreeWithExpandedDirs]);
+
+  // Reuse the shared polling lifecycle (5s interval + visibilitychange pause).
+  useFilePolling({
+    intervalMs: FILE_TREE_POLL_INTERVAL_MS,
+    enabled: pollingEnabled,
+    onPoll: detectExternalChanges,
+  });
 
   /**
    * Load children for a directory
@@ -467,41 +569,43 @@ export const FileTreeView = memo(function FileTreeView({
       aria-label="File tree"
       className={`overflow-auto bg-white dark:bg-gray-900 ${className}`}
     >
-      {/* [Issue #300] Toolbar for root-level file/directory creation */}
-      {(onNewFile || onNewDirectory || isRefetching) && (
-        <div
-          data-testid="file-tree-toolbar"
-          className="flex items-center gap-1 p-1 border-b border-gray-200 dark:border-gray-700"
-        >
-          {onNewFile && (
-            <button
-              data-testid="toolbar-new-file-button"
-              onClick={() => onNewFile('')}
-              className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
-            >
-              <FilePlus className="w-4 h-4" aria-hidden="true" />
-              <span>New File</span>
-            </button>
-          )}
-          {onNewDirectory && (
-            <button
-              data-testid="toolbar-new-directory-button"
-              onClick={() => onNewDirectory('')}
-              className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
-            >
-              <FolderPlus className="w-4 h-4" aria-hidden="true" />
-              <span>New Directory</span>
-            </button>
-          )}
-          {/* [Issue #706] Compact refetch indicator. Anchored to the right
-              edge of the existing toolbar so the tree DOM (and its scroll
-              position) is preserved while a background refresh is running. */}
+      {/* [Issue #300/#888] Toolbar: root-level create actions + manual refresh.
+          Always rendered so the manual refresh button (Issue #888) is available
+          even when no create callbacks are wired in. */}
+      <div
+        data-testid="file-tree-toolbar"
+        className="flex items-center gap-1 p-1 border-b border-gray-200 dark:border-gray-700"
+      >
+        {onNewFile && (
+          <button
+            data-testid="toolbar-new-file-button"
+            onClick={() => onNewFile('')}
+            className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+          >
+            <FilePlus className="w-4 h-4" aria-hidden="true" />
+            <span>New File</span>
+          </button>
+        )}
+        {onNewDirectory && (
+          <button
+            data-testid="toolbar-new-directory-button"
+            onClick={() => onNewDirectory('')}
+            className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+          >
+            <FolderPlus className="w-4 h-4" aria-hidden="true" />
+            <span>New Directory</span>
+          </button>
+        )}
+        {/* Right-aligned group: refetch indicator + manual refresh button. */}
+        <div className="ml-auto flex items-center gap-1">
+          {/* [Issue #706] Compact refetch indicator. The tree DOM (and its
+              scroll position) is preserved while a background refresh runs. */}
           {isRefetching && (
             <div
               data-testid="file-tree-refetch-indicator"
               role="status"
               aria-live="polite"
-              className="ml-auto flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"
+              className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"
             >
               <span
                 aria-hidden="true"
@@ -510,8 +614,26 @@ export const FileTreeView = memo(function FileTreeView({
               <span className="sr-only">Refreshing files</span>
             </div>
           )}
+          {/* [Issue #888] Manual refresh: re-fetch the root + all expanded
+              directories on demand (preserves scroll/selection/expansion). */}
+          <button
+            data-testid="file-tree-refresh-button"
+            type="button"
+            onClick={() => {
+              void reloadTreeWithExpandedDirs();
+            }}
+            disabled={isRefetching}
+            aria-label="Refresh file tree"
+            title="更新"
+            className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw
+              className={`w-4 h-4 ${isRefetching ? 'animate-spin' : ''}`}
+              aria-hidden="true"
+            />
+          </button>
         </div>
-      )}
+      </div>
       {/* [Issue #706] Non-destructive refetch error banner. The previous
           tree DOM remains mounted, so we surface the error inline with a
           retry action instead of replacing the whole view. */}

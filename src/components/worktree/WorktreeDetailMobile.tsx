@@ -372,6 +372,7 @@ export const MobileContent = memo(function MobileContent({
               onUpload={onUpload}
               onMove={onMove}
               refreshTrigger={refreshTrigger}
+              pollingEnabled={activeTab === 'files'}
               searchQuery={fileSearch.query}
               searchMode={fileSearch.mode}
               searchResults={fileSearch.results?.results}
