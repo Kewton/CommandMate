@@ -24,7 +24,7 @@ export interface Migration {
  * Current schema version
  * Increment this when adding new migrations
  */
-export const CURRENT_SCHEMA_VERSION = 32;
+export const CURRENT_SCHEMA_VERSION = 33;
 
 /**
  * Get current schema version from database
@@ -238,6 +238,7 @@ export function validateSchema(db: Database.Database): boolean {
       'assistant_conversations',
       'assistant_messages',
       'assistant_session_states',
+      'agent_instances',
     ];
 
     const missingTables = requiredTables.filter(t => !tableNames.includes(t));

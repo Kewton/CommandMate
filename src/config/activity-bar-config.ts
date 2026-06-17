@@ -59,11 +59,37 @@ export const VALID_ACTIVITY_IDS: ReadonlySet<ActivityId> = new Set<ActivityId>(
 export const DEFAULT_ACTIVITY: ActivityId = 'files';
 
 /**
- * localStorage key used by `useActivityBarState`.
- * Only persists when an activity is selected. A `null` (closed) state is
- * intentionally NOT persisted — see useActivityBarState.ts for rationale.
+ * localStorage key prefix used by `useActivityBarState` (Issue #858).
+ *
+ * The active activity is persisted *per worktree* — the full key is
+ * `${ACTIVITY_BAR_STORAGE_KEY_PREFIX}${worktreeId}`. This mirrors the
+ * per-worktree CLI tab key (`activeCliTab-<worktreeId>`) so the Activity Bar
+ * open/closed state no longer leaks across branch (worktree) switches.
+ *
+ * Prior to #858 a single global key (`commandmate.worktree.activeActivity`,
+ * no worktree suffix) was used, which caused the hidden/shown state to reset
+ * when switching branches.
  */
-export const ACTIVITY_BAR_STORAGE_KEY = 'commandmate.worktree.activeActivity';
+export const ACTIVITY_BAR_STORAGE_KEY_PREFIX = 'commandmate.worktree.activeActivity-';
+
+/**
+ * Sentinel value persisted to localStorage to represent the *explicitly closed*
+ * (hidden) pane state (Issue #858).
+ *
+ * Unlike the pre-#858 behavior — which intentionally did NOT persist the closed
+ * state — the closed state is now stored so that hiding the pane on one branch
+ * survives a round-trip to another branch and back. It is distinct from "no
+ * stored value" (an unvisited worktree), which still defaults to
+ * {@link DEFAULT_ACTIVITY}.
+ */
+export const ACTIVITY_CLOSED_SENTINEL = '__closed__';
+
+/**
+ * Build the per-worktree localStorage key for the Activity Bar state.
+ */
+export function getActivityBarStorageKey(worktreeId: string): string {
+  return `${ACTIVITY_BAR_STORAGE_KEY_PREFIX}${worktreeId}`;
+}
 
 /**
  * Runtime type guard for ActivityId.

@@ -30,12 +30,15 @@ import React, {
   type ReactNode,
 } from 'react';
 import { useTranslations } from 'next-intl';
-import { History, Files } from 'lucide-react';
-import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
+import { History, Files, AlignHorizontalDistributeCenter } from 'lucide-react';
+import { getInstanceLabel, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
 import type { ShowToast } from '@/types/markdown-editor';
 import { MAX_SPLITS, MIN_SPLITS } from '@/config/terminal-split-config';
 import { useTerminalSplits } from '@/hooks/useTerminalSplits';
-import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
+import {
+  useHistoryPaneState,
+  DEFAULT_HISTORY_WIDTH,
+} from '@/hooks/useHistoryPaneState';
 import { useFilePanelState } from '@/hooks/useFilePanelState';
 import { PaneResizer } from './PaneResizer';
 
@@ -44,20 +47,28 @@ import { PaneResizer } from './PaneResizer';
 export interface RenderTerminalSplitPaneArgs {
   splitIndex: number;
   cliToolId: CLIToolType;
-  availableCliTools: CLIToolType[];
-  onCliToolChange: (cliId: CLIToolType) => void;
+  /** Issue #869: agent instance backing this split (tab/split identity). */
+  instanceId: string;
+  /** Issue #869: the resolved instance (for alias display); undefined if stale. */
+  instance: AgentInstance | undefined;
+  /** Issue #869: instances selectable for this split (excludes ones used by other splits). */
+  availableInstances: AgentInstance[];
+  onInstanceChange: (instanceId: string) => void;
   onFocus: () => void;
   isFocused: boolean;
   /**
-   * Issue #786: handle a CLI tool dropped onto this split. The container owns
-   * the no-op / reject / apply classification (it holds the `splits` array), so
-   * the pane just forwards the dropped cliId here. Stable per-index reference.
+   * Issue #786 / #869: handle an agent instance dropped onto this split. The
+   * container owns the no-op / reject / apply classification (it holds the
+   * `splits` array), so the pane just forwards the dropped instanceId here.
+   * Stable per-index reference.
    */
-  onDropCliTool: (cliId: CLIToolType) => void;
+  onDropInstance: (instanceId: string) => void;
 }
 
 export interface TerminalSplitContainerProps {
   worktreeId: string;
+  /** Issue #869: the worktree's agent-instance roster (drives split identity). */
+  instances: AgentInstance[];
   /** Render a single split body. Caller wires sendMessage / TerminalDisplay. */
   renderPane: (args: RenderTerminalSplitPaneArgs) => ReactNode;
   /**
@@ -71,31 +82,40 @@ export interface TerminalSplitContainerProps {
    */
   showToast?: ShowToast;
   /**
-   * Issue #786 (S1-005): called with the new cliId after a successful drop so
-   * the parent can sync the (worktree-global) activeCliTab to the drop target
-   * split's new CLI. Fires only when the change is actually applied.
+   * Issue #786 / #869 (S1-005): called with the new instanceId after a
+   * successful drop so the parent can sync the (worktree-global) active
+   * instance to the drop target split. Fires only when the change is applied.
    */
-  onActiveCliTabChange?: (cliId: CLIToolType) => void;
+  onActiveInstanceChange?: (instanceId: string) => void;
 }
 
 export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   worktreeId,
+  instances,
   renderPane,
   onFocusedSplitChange,
   showToast,
-  onActiveCliTabChange,
+  onActiveInstanceChange,
 }: TerminalSplitContainerProps) {
   const {
     splits,
     widths,
     addSplit,
     removeSplit,
-    setSplitCliTool,
+    setSplitInstance,
     setSplitWidth,
-    availableCliTools,
+    resetWidths,
+    availableInstanceIds,
     focusedSplitIndex,
     setFocusedSplitIndex,
-  } = useTerminalSplits(worktreeId);
+  } = useTerminalSplits(worktreeId, instances);
+
+  // Stable lookup from instanceId → AgentInstance for label / availability.
+  const instanceById = useMemo(() => {
+    const map = new Map<string, AgentInstance>();
+    for (const inst of instances) map.set(inst.id, inst);
+    return map;
+  }, [instances]);
 
   const t = useTranslations('worktree');
 
@@ -103,8 +123,11 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   // toggles. These hooks broadcast across instances (useHistoryPaneState /
   // useFilePanelState), so toggling here is the single source of truth shared
   // with the existing vertical collapse strips — both stay in sync.
-  const { visible: historyVisible, toggle: toggleHistory } =
-    useHistoryPaneState();
+  const {
+    visible: historyVisible,
+    toggle: toggleHistory,
+    setWidth: setHistoryWidth,
+  } = useHistoryPaneState();
   const { collapsed: filePanelCollapsed, toggle: toggleFilePanel } =
     useFilePanelState();
   // The file panel hook stores `collapsed`; "Files visible" is its inverse.
@@ -168,8 +191,19 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   const handleResizeStart = useCallback(() => setIsResizing(true), []);
   const handleResizeEnd = useCallback(() => setIsResizing(false), []);
 
+  // Issue #861: equalize the visible terminal split widths (each → 1/n) AND
+  // reset the (split-shared) Message History width to its default. History width
+  // lives in a sibling useHistoryPaneState instance inside each pane; setWidth
+  // broadcasts via CustomEvent so those instances re-render at the new width.
+  const handleEqualizeWidths = useCallback(() => {
+    resetWidths();
+    setHistoryWidth(DEFAULT_HISTORY_WIDTH);
+  }, [resetWidths, setHistoryWidth]);
+
   const canAdd = splits.length < MAX_SPLITS && !isResizing;
   const canRemove = splits.length > MIN_SPLITS && !isResizing;
+  // Nothing to equalize when there is a single split AND History is hidden.
+  const canEqualize = splits.length > MIN_SPLITS || historyVisible;
 
   // Memoize per-split onFocus handlers so prop identity is stable.
   const focusHandlers = useMemo(
@@ -177,54 +211,54 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     [splits, setFocusedSplitIndex],
   );
 
-  const cliChangeHandlers = useMemo(
+  const instanceChangeHandlers = useMemo(
     () =>
-      splits.map((_, idx) => (cliId: CLIToolType) => setSplitCliTool(idx, cliId)),
-    [splits, setSplitCliTool],
+      splits.map((_, idx) => (instanceId: string) => setSplitInstance(idx, instanceId)),
+    [splits, setSplitInstance],
   );
 
   /**
-   * Issue #786: per-split drop handlers (drop validation owner / D-1).
+   * Issue #786 / #869: per-split drop handlers (drop validation owner / D-1).
    *
    * The container holds the `splits` array, so it is the single place that can
    * classify a drop and resolve a colliding split's index N:
-   *   - no-op   (split already shows this cliId)        → nothing, no toast
-   *   - reject  (another split already uses this cliId) → warning toast "X is
-   *             already in use by split N" (1-based N), no change
-   *   - apply   (cliId unused)                          → setSplitCliTool; only
-   *             when it returns true do we fire the success toast +
-   *             onActiveCliTabChange (single source of truth / S3-005)
+   *   - no-op   (split already shows this instance)        → nothing, no toast
+   *   - reject  (another split already uses this instance) → warning toast
+   *             "X is already in use by split N" (1-based N), no change
+   *   - apply   (instance unused)                          → setSplitInstance;
+   *             only when it returns true do we fire the success toast +
+   *             onActiveInstanceChange (single source of truth / S3-005)
    *
    * Stable per-index references (useMemo) so passing them through renderPane
    * does not destabilize the parent's memoized panes (D-3).
    */
   const dropHandlers = useMemo(
     () =>
-      splits.map((_, idx) => (cliId: CLIToolType) => {
-        // no-op: the drop target split already shows this CLI.
-        if (splits[idx]?.cliToolId === cliId) return;
-        // reject: another split already uses this CLI (S1-002).
+      splits.map((_, idx) => (instanceId: string) => {
+        const label = getInstanceLabel(
+          instanceById.get(instanceId) ?? { cliTool: 'claude', alias: instanceId },
+        );
+        // no-op: the drop target split already shows this instance.
+        if (splits[idx]?.instanceId === instanceId) return;
+        // reject: another split already uses this instance (S1-002).
         const collidingIdx = splits.findIndex(
-          (s, i) => i !== idx && s.cliToolId === cliId,
+          (s, i) => i !== idx && s.instanceId === instanceId,
         );
         if (collidingIdx !== -1) {
           showToast?.(
-            `${getCliToolDisplayName(cliId)} is already in use by split ${collidingIdx + 1}`,
+            `${label} is already in use by split ${collidingIdx + 1}`,
             'warning',
           );
           return;
         }
-        // apply: setSplitCliTool returns whether the change was actually applied.
-        const applied = setSplitCliTool(idx, cliId);
+        // apply: setSplitInstance returns whether the change was actually applied.
+        const applied = setSplitInstance(idx, instanceId);
         if (applied) {
-          onActiveCliTabChange?.(cliId);
-          showToast?.(
-            `Moved ${getCliToolDisplayName(cliId)} to Split ${idx + 1}`,
-            'success',
-          );
+          onActiveInstanceChange?.(instanceId);
+          showToast?.(`Moved ${label} to Split ${idx + 1}`, 'success');
         }
       }),
-    [splits, setSplitCliTool, showToast, onActiveCliTabChange],
+    [splits, setSplitInstance, showToast, onActiveInstanceChange, instanceById],
   );
 
   return (
@@ -313,6 +347,28 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
         >
           - Split
         </button>
+
+        {/*
+          Issue #861: equalize terminal split widths (each → 1/n) and reset the
+          Message History width to default in one action. Disabled only when
+          there is nothing to equalize (single split AND History hidden).
+        */}
+        <button
+          type="button"
+          onClick={handleEqualizeWidths}
+          disabled={!canEqualize}
+          aria-disabled={!canEqualize}
+          aria-label={t('terminal.equalizeWidthsHint')}
+          title={t('terminal.equalizeWidthsHint')}
+          data-testid="equalize-split-widths"
+          className="flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <AlignHorizontalDistributeCenter
+            className="w-3.5 h-3.5 flex-shrink-0"
+            aria-hidden="true"
+          />
+          <span>{t('terminal.equalizeWidths')}</span>
+        </button>
       </div>
 
       {/* Splits row */}
@@ -333,11 +389,15 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
                 {renderPane({
                   splitIndex: idx,
                   cliToolId: split.cliToolId,
-                  availableCliTools: availableCliTools(idx),
-                  onCliToolChange: cliChangeHandlers[idx],
+                  instanceId: split.instanceId,
+                  instance: instanceById.get(split.instanceId),
+                  availableInstances: availableInstanceIds(idx)
+                    .map(id => instanceById.get(id))
+                    .filter((inst): inst is AgentInstance => inst !== undefined),
+                  onInstanceChange: instanceChangeHandlers[idx],
                   onFocus: focusHandlers[idx],
                   isFocused: focusedSplitIndex === idx,
-                  onDropCliTool: dropHandlers[idx],
+                  onDropInstance: dropHandlers[idx],
                 })}
               </div>
               {!isLast ? (
@@ -351,6 +411,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
                   onResize={handleResize}
                   onStart={handleResizeStart}
                   onEnd={handleResizeEnd}
+                  onDoubleClick={resetWidths}
                 />
               ) : null}
             </React.Fragment>
@@ -372,12 +433,15 @@ function PaneResizerWrapper({
   onResize,
   onStart,
   onEnd,
+  onDoubleClick,
 }: {
   resizerIdx: number;
   ariaValueNow: number;
   onResize: (resizerIdx: number, delta: number) => void;
   onStart: () => void;
   onEnd: () => void;
+  /** Issue #861: double-clicking the resizer equalizes terminal split widths. */
+  onDoubleClick?: () => void;
 }) {
   const handleResize = useCallback(
     (delta: number) => onResize(resizerIdx, delta),
@@ -395,6 +459,7 @@ function PaneResizerWrapper({
         onResize={handleResize}
         orientation="horizontal"
         ariaValueNow={ariaValueNow}
+        onDoubleClick={onDoubleClick}
       />
     </div>
   );

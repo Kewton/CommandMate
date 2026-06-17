@@ -546,6 +546,81 @@ describe('Sidebar', () => {
         expect(screen.getByText('Branches')).toBeInTheDocument();
       });
     });
+
+    // Issue #880: header link to the repository management page
+    it('should render a Repositories link pointing to /repositories', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const link = await screen.findByRole('link', { name: 'Repositories' });
+      expect(link).toHaveAttribute('href', '/repositories');
+      // The link lives inside the sidebar header alongside the other actions
+      expect(screen.getByTestId('sidebar-header')).toContainElement(link);
+    });
+  });
+
+  // Issue #882: unify hover tooltips on the four header action buttons via the
+  // shared Tooltip component (action-oriented text, native `title` removed,
+  // aria-label preserved for screen readers).
+  describe('Header action tooltips (Issue #882)', () => {
+    it('shows an action tooltip when hovering the Repositories link', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const link = await screen.findByRole('link', { name: 'Repositories' });
+      fireEvent.mouseEnter(link);
+
+      const tooltip = await screen.findByRole('tooltip', { hidden: true });
+      expect(tooltip).toHaveTextContent('common.tooltips.repositories');
+    });
+
+    it('drops the native title on the Repositories link but keeps aria-label', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const link = await screen.findByRole('link', { name: 'Repositories' });
+      expect(link).not.toHaveAttribute('title');
+      expect(link).toHaveAttribute('aria-label', 'Repositories');
+    });
+
+    it('shows an action tooltip when hovering the view mode toggle', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const toggle = await screen.findByTestId('view-mode-toggle');
+      // Native title is replaced by the shared Tooltip.
+      expect(toggle).not.toHaveAttribute('title');
+
+      fireEvent.mouseEnter(toggle);
+      const tooltip = await screen.findByRole('tooltip', { hidden: true });
+      expect(tooltip).toHaveTextContent('common.tooltips.viewMode');
+    });
+
+    it('shows an action tooltip when hovering the sync button', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const syncButton = await screen.findByLabelText('common.syncButtonLabel');
+      fireEvent.mouseEnter(syncButton);
+
+      const tooltip = await screen.findByRole('tooltip', { hidden: true });
+      expect(tooltip).toHaveTextContent('common.tooltips.sync');
+    });
   });
 
   describe('Grouped view (default)', () => {

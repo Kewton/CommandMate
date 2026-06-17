@@ -9,12 +9,13 @@ import { NextRequest, NextResponse } from 'next/server';
 // Force dynamic rendering - this route uses searchParams and database access
 export const dynamic = 'force-dynamic';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { getWorktrees, getRepositories, getMessages, markPendingPromptsAsAnswered } from '@/lib/db';
+import { getWorktrees, getRepositories, getMessages, markPendingPromptsAsAnswered, getAgentInstances } from '@/lib/db';
 import { listSessions } from '@/lib/tmux/tmux';
 import { detectWorktreeSessionStatus } from '@/lib/session/worktree-status-helper';
 import { parseIncludeParam } from '@/lib/api/worktrees-include-parser';
 import { isWorktreeStalled } from '@/lib/detection/stalled-detector';
 import { getNextAction, getReviewStatus } from '@/lib/session/next-action-helper';
+import { resolveAgentInstances } from '@/lib/session/agent-instances-resolver';
 import { createLogger } from '@/lib/logger';
 import type { SessionStatus } from '@/lib/detection/status-detector';
 import type { PromptType } from '@/types/models';
@@ -59,11 +60,17 @@ export async function GET(request: NextRequest) {
           db,
           getMessages,
           markPendingPromptsAsAnswered,
+          getAgentInstances,
         );
+
+        // Issue #878: include the agent-instance roster so the sidebar can
+        // aggregate per-instance status (matches the single worktree API).
+        const agentInstances = resolveAgentInstances(db, worktree.id, worktree.selectedAgents);
 
         const base = {
           ...worktree,
           ...status,
+          agentInstances,
         };
 
         // Issue #600: Add review fields when ?include=review

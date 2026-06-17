@@ -1,5 +1,5 @@
 /**
- * useActivityBarState Hook (Issue #727)
+ * useActivityBarState Hook (Issue #727, per-worktree persistence Issue #858)
  *
  * Manages the active ActivityId for the VS Code-style Activity Bar.
  *
@@ -8,25 +8,33 @@
  * - `setActive(id)`: select an activity (open the pane if currently closed).
  * - `toggle(id)`: clicking the same active icon closes the pane (null).
  *
- * Persistence:
- * - The last *selected* ActivityId is persisted to localStorage under
- *   `ACTIVITY_BAR_STORAGE_KEY` so the next visit reopens the same activity.
- * - A `null` (closed) state is intentionally NOT persisted. This keeps the
- *   "next visit shows the previously-opened activity" UX while still allowing
- *   the user to temporarily close the pane.
+ * Persistence (Issue #858):
+ * - The state is persisted *per worktree* under
+ *   `getActivityBarStorageKey(worktreeId)` (mirrors the per-worktree CLI tab
+ *   key). This prevents the open/closed state from leaking across branch
+ *   (worktree) switches.
+ * - Both the selected ActivityId *and* the explicitly closed (null) state are
+ *   persisted. A closed pane is stored as `ACTIVITY_CLOSED_SENTINEL` so that
+ *   hiding the pane on branch A survives a visit to branch B and back to A.
+ * - An *unvisited* worktree (no stored value) still defaults to
+ *   DEFAULT_ACTIVITY ('files').
  *
  * SSR / hydration:
  * - Before the first effect runs we deterministically return DEFAULT_ACTIVITY
  *   ('files'). The localStorage read happens in a useEffect so SSR and the
  *   first client render agree (no hydration mismatch).
+ * - The hydration effect re-runs whenever `worktreeId` changes, so switching
+ *   worktrees in-place (without a full remount) still re-reads the correct
+ *   per-worktree state.
  */
 
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ACTIVITY_BAR_STORAGE_KEY,
+  ACTIVITY_CLOSED_SENTINEL,
   DEFAULT_ACTIVITY,
+  getActivityBarStorageKey,
   isActivityId,
   type ActivityId,
 } from '@/config/activity-bar-config';
@@ -43,10 +51,17 @@ export interface UseActivityBarStateReturn {
   toggle: (id: ActivityId) => void;
 }
 
-function readStoredActivity(): ActivityId {
+/**
+ * Read the persisted activity for a worktree.
+ * - A valid ActivityId string → that activity.
+ * - The closed sentinel → `null` (explicitly hidden).
+ * - No / invalid value → DEFAULT_ACTIVITY (unvisited worktree).
+ */
+function readStoredActivity(worktreeId: string): ActivityId | null {
   if (typeof window === 'undefined') return DEFAULT_ACTIVITY;
   try {
-    const raw = window.localStorage.getItem(ACTIVITY_BAR_STORAGE_KEY);
+    const raw = window.localStorage.getItem(getActivityBarStorageKey(worktreeId));
+    if (raw === ACTIVITY_CLOSED_SENTINEL) return null;
     if (raw && isActivityId(raw)) return raw;
   } catch {
     /* localStorage unavailable */
@@ -54,10 +69,16 @@ function readStoredActivity(): ActivityId {
   return DEFAULT_ACTIVITY;
 }
 
-function writeStoredActivity(id: ActivityId): void {
+/**
+ * Persist the activity (or the closed sentinel for `null`) for a worktree.
+ */
+function writeStoredActivity(worktreeId: string, value: ActivityId | null): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(ACTIVITY_BAR_STORAGE_KEY, id);
+    window.localStorage.setItem(
+      getActivityBarStorageKey(worktreeId),
+      value ?? ACTIVITY_CLOSED_SENTINEL,
+    );
   } catch {
     /* localStorage unavailable */
   }
@@ -65,8 +86,11 @@ function writeStoredActivity(id: ActivityId): void {
 
 /**
  * React hook for the VS Code-style Activity Bar state.
+ *
+ * @param worktreeId - the worktree whose Activity Bar state to manage. The
+ *   open/closed/selected state is persisted and restored per worktree.
  */
-export function useActivityBarState(): UseActivityBarStateReturn {
+export function useActivityBarState(worktreeId: string): UseActivityBarStateReturn {
   // SSR-safe initial value. The post-mount effect below replaces this with
   // the persisted value (if any).
   const [active, setActiveState] = useState<ActivityId | null>(DEFAULT_ACTIVITY);
@@ -75,28 +99,33 @@ export function useActivityBarState(): UseActivityBarStateReturn {
   const activeRef = useRef<ActivityId | null>(active);
   activeRef.current = active;
 
-  // Hydrate from localStorage exactly once on mount.
+  // Keep the latest worktreeId available to the stable callbacks below.
+  const worktreeIdRef = useRef(worktreeId);
+  worktreeIdRef.current = worktreeId;
+
+  // Hydrate from localStorage on mount and whenever the worktree changes.
   useEffect(() => {
-    const stored = readStoredActivity();
+    const stored = readStoredActivity(worktreeId);
     if (stored !== activeRef.current) {
       setActiveState(stored);
     }
-  }, []);
+  }, [worktreeId]);
 
   const setActive = useCallback((id: ActivityId): void => {
     setActiveState(id);
-    writeStoredActivity(id);
+    writeStoredActivity(worktreeIdRef.current, id);
   }, []);
 
   const toggle = useCallback((id: ActivityId): void => {
     if (activeRef.current === id) {
-      // Close (do NOT persist null — keep the last *opened* activity in storage
-      // so the next session reopens it).
+      // Close: persist the closed sentinel so the hidden state survives a
+      // round-trip to another worktree and back (Issue #858).
       setActiveState(null);
+      writeStoredActivity(worktreeIdRef.current, null);
       return;
     }
     setActiveState(id);
-    writeStoredActivity(id);
+    writeStoredActivity(worktreeIdRef.current, id);
   }, []);
 
   return { active, setActive, toggle };

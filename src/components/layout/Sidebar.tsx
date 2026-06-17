@@ -12,8 +12,10 @@
 'use client';
 
 import React, { memo, useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useDeferredValue } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { Database } from 'lucide-react';
 import {
   DndContext,
   PointerSensor,
@@ -33,6 +35,7 @@ import { useWorktreeSelection } from '@/contexts/WorktreeSelectionContext';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { BranchListItem } from '@/components/sidebar/BranchListItem';
 import { SortSelector } from '@/components/sidebar/SortSelector';
+import { Tooltip } from '@/components/common/Tooltip';
 import { LocaleSwitcher } from '@/components/common/LocaleSwitcher';
 import { ThemeToggle } from '@/components/common/ThemeToggle';
 import { LogoutButton } from '@/components/common/LogoutButton';
@@ -159,6 +162,7 @@ export const Sidebar = memo(function Sidebar() {
     refreshWorktrees,
   } = useWorktreeSelection();
   const { closeMobileDrawer, sortKey, sortDirection, viewMode, setViewMode } = useSidebarContext();
+  const t = useTranslations('common');
   const [searchQuery, setSearchQuery] = useState('');
   const branchListRef = useRef<HTMLDivElement>(null);
 
@@ -429,6 +433,17 @@ export const Sidebar = memo(function Sidebar() {
             <ViewModeToggle viewMode={viewMode} onToggle={setViewMode} />
             <SortSelector />
             <SyncButton refreshWorktrees={refreshWorktrees} />
+            <Tooltip content={t('tooltips.repositories')} placement="bottom">
+              <Link
+                href="/repositories"
+                aria-label="Repositories"
+                className="p-1 rounded text-gray-300 hover:text-white hover:bg-gray-700
+                  focus:outline-none focus:ring-2 focus:ring-blue-500
+                  transition-colors inline-flex items-center"
+              >
+                <Database className="w-3 h-3" aria-hidden="true" />
+              </Link>
+            </Tooltip>
           </div>
         </div>
       </div>
@@ -681,29 +696,31 @@ function ViewModeToggle({
   viewMode: ViewMode;
   onToggle: (mode: ViewMode) => void;
 }) {
+  const t = useTranslations('common');
   const handleClick = () => {
     onToggle(viewMode === 'grouped' ? 'flat' : 'grouped');
   };
 
   return (
-    <button
-      data-testid="view-mode-toggle"
-      type="button"
-      onClick={handleClick}
-      aria-label={viewMode === 'grouped' ? 'Switch to flat view' : 'Switch to grouped view'}
-      title={viewMode === 'grouped' ? 'Flat view' : 'Grouped view'}
-      className="
-        p-1 rounded text-gray-300 hover:text-white hover:bg-gray-700
-        focus:outline-none focus:ring-2 focus:ring-blue-500
-        transition-colors
-      "
-    >
-      {viewMode === 'grouped' ? (
-        <FlatListIcon className="w-3 h-3" />
-      ) : (
-        <GroupIcon className="w-3 h-3" />
-      )}
-    </button>
+    <Tooltip content={t('tooltips.viewMode')} placement="bottom">
+      <button
+        data-testid="view-mode-toggle"
+        type="button"
+        onClick={handleClick}
+        aria-label={viewMode === 'grouped' ? 'Switch to flat view' : 'Switch to grouped view'}
+        className="
+          p-1 rounded text-gray-300 hover:text-white hover:bg-gray-700
+          focus:outline-none focus:ring-2 focus:ring-blue-500
+          transition-colors
+        "
+      >
+        {viewMode === 'grouped' ? (
+          <FlatListIcon className="w-3 h-3" />
+        ) : (
+          <GroupIcon className="w-3 h-3" />
+        )}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -832,17 +849,19 @@ const SyncButton = memo(function SyncButton({
 
   return (
     <>
-      <button
-        type="button"
-        onClick={handleSync}
-        disabled={isSyncing}
-        aria-label={t('syncButtonLabel')}
-        className="p-1 rounded text-gray-300 hover:text-white hover:bg-gray-700
-          focus:outline-none focus:ring-2 focus:ring-blue-500
-          disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-      >
-        <SyncIcon className={isSyncing ? 'animate-spin' : ''} />
-      </button>
+      <Tooltip content={t('tooltips.sync')} placement="bottom">
+        <button
+          type="button"
+          onClick={handleSync}
+          disabled={isSyncing}
+          aria-label={t('syncButtonLabel')}
+          className="p-1 rounded text-gray-300 hover:text-white hover:bg-gray-700
+            focus:outline-none focus:ring-2 focus:ring-blue-500
+            disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          <SyncIcon className={isSyncing ? 'animate-spin' : ''} />
+        </button>
+      </Tooltip>
       <ToastContainer toasts={toasts} onClose={removeToast} />
     </>
   );

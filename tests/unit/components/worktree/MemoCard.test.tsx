@@ -237,6 +237,28 @@ describe('MemoCard', () => {
     });
   });
 
+  describe('Header layout (Issue #884)', () => {
+    it('should allow the title input to shrink so action buttons stay visible', () => {
+      render(<MemoCard {...defaultProps} onInsertToMessage={vi.fn()} />);
+
+      // min-w-0 lets the flex-1 input shrink below its content width,
+      // preventing it from pushing the action buttons out of the row.
+      const titleInput = screen.getByDisplayValue('Test Memo');
+      expect(titleInput).toHaveClass('flex-1');
+      expect(titleInput).toHaveClass('min-w-0');
+    });
+
+    it('should keep action buttons from shrinking', () => {
+      render(<MemoCard {...defaultProps} onInsertToMessage={vi.fn()} />);
+
+      // flex-shrink-0 keeps each button at its natural size when the title
+      // is long, so insert/copy/delete never collapse or overflow.
+      expect(screen.getByTestId('insert-memo-content')).toHaveClass('flex-shrink-0');
+      expect(getCopyButton()).toHaveClass('flex-shrink-0');
+      expect(screen.getByRole('button', { name: /delete/i })).toHaveClass('flex-shrink-0');
+    });
+  });
+
   describe('Insert to message (Issue #485)', () => {
     it('should render insert button when onInsertToMessage is provided', () => {
       const onInsert = vi.fn();

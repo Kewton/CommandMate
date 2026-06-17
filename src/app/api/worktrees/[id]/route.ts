@@ -6,13 +6,15 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { getWorktreeById, updateWorktreeDescription, updateWorktreeLink, updateFavorite, updateStatus, updateCliToolId, updateSelectedAgents, updateVibeLocalModel, updateVibeLocalContextWindow, getMessages, markPendingPromptsAsAnswered, getInitialBranch } from '@/lib/db';
+import { getWorktreeById, updateWorktreeDescription, updateWorktreeLink, updateFavorite, updateStatus, updateCliToolId, updateSelectedAgents, updateVibeLocalModel, updateVibeLocalContextWindow, getMessages, markPendingPromptsAsAnswered, getInitialBranch, getAgentInstances, setAgentInstances, AgentInstanceLimitError, InvalidAgentInstanceError } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { CLI_TOOL_IDS, OLLAMA_MODEL_PATTERN, isValidVibeLocalContextWindow, VIBE_LOCAL_CONTEXT_WINDOW_MIN, VIBE_LOCAL_CONTEXT_WINDOW_MAX, type CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, OLLAMA_MODEL_PATTERN, isValidVibeLocalContextWindow, VIBE_LOCAL_CONTEXT_WINDOW_MIN, VIBE_LOCAL_CONTEXT_WINDOW_MAX, type CLIToolType, type AgentInstance } from '@/lib/cli-tools/types';
+import { resolveAgentInstances } from '@/lib/session/agent-instances-resolver';
 import { getGitStatus } from '@/lib/git/git-utils';
 import type { GitStatus } from '@/types/models';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { validateSelectedAgentsInput } from '@/lib/selected-agents-validator';
+import { validateAgentInstancesInput } from '@/lib/agent-instances-validator';
 import { listSessions } from '@/lib/tmux/tmux';
 import { detectWorktreeSessionStatus } from '@/lib/session/worktree-status-helper';
 import { createLogger } from '@/lib/logger';
@@ -55,6 +57,7 @@ export async function GET(
         db,
         getMessages,
         markPendingPromptsAsAnswered,
+        getAgentInstances,
       ),
       getGitStatus(worktree.path, initialBranch).catch((gitError) => {
         // Log but don't fail - git status is non-critical
@@ -64,9 +67,12 @@ export async function GET(
     ]);
 
     // Issue #368: selectedAgents is already included in worktree from getWorktreeById
+    // Issue #869: include the agent-instance roster (fallback derived from selectedAgents)
+    const agentInstances = resolveAgentInstances(db, params.id, worktree.selectedAgents);
     return NextResponse.json(
       {
         ...worktree,
+        agentInstances,
         gitStatus,
         ...sessionStatus,
       },
@@ -181,6 +187,43 @@ export async function PATCH(
       }
     }
 
+    // Update agent instances if provided (Issue #869)
+    // The roster is authoritative for the 1-agent-multiple-sessions UI. It is
+    // kept decoupled from selectedAgents (which allows only 2-5 unique tools);
+    // we only keep cli_tool_id pointing at a tool that still has an instance.
+    if ('agentInstances' in body) {
+      const validation = validateAgentInstancesInput(body.agentInstances);
+      if (!validation.valid) {
+        return NextResponse.json(
+          { error: validation.error, code: 'INVALID_AGENT_INSTANCES' },
+          { status: 400 }
+        );
+      }
+
+      const validatedInstances = validation.value as AgentInstance[];
+      try {
+        setAgentInstances(db, params.id, validatedInstances);
+      } catch (instanceError) {
+        if (instanceError instanceof AgentInstanceLimitError || instanceError instanceof InvalidAgentInstanceError) {
+          return NextResponse.json(
+            { error: instanceError.message, code: 'INVALID_AGENT_INSTANCES' },
+            { status: 400 }
+          );
+        }
+        throw instanceError;
+      }
+
+      // R1-007 (extended): keep cli_tool_id backed by an existing instance.
+      const instanceTools = new Set(validatedInstances.map((instance) => instance.cliTool));
+      if (!instanceTools.has(nextCliToolId)) {
+        const newCliToolId = validatedInstances[0].cliTool;
+        logger.info('worktree:auto-update-cli-tool-from-instances', { from: nextCliToolId, to: newCliToolId });
+        updateCliToolId(db, params.id, newCliToolId);
+        nextCliToolId = newCliToolId;
+        cliToolIdAutoUpdated = true;
+      }
+    }
+
     // Update vibe-local model if provided (Issue #368)
     if ('vibeLocalModel' in body) {
       const model = body.vibeLocalModel;
@@ -222,9 +265,11 @@ export async function PATCH(
     const cliToolId = updatedWorktree?.cliToolId || 'claude';
     const cliTool = manager.getTool(cliToolId);
     const isRunning = await cliTool.isRunning(params.id);
+    const agentInstances = resolveAgentInstances(db, params.id, updatedWorktree?.selectedAgents);
     return NextResponse.json(
       {
         ...updatedWorktree,
+        agentInstances,
         isSessionRunning: isRunning,
         ...(cliToolIdAutoUpdated ? { cliToolIdAutoUpdated: true } : {}),
       },

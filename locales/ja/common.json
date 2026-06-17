@@ -16,5 +16,11 @@
   "syncSuccess": "{count}件のworktreeを同期しました",
   "syncError": "同期に失敗しました",
   "syncAuthError": "認証エラー",
-  "syncButtonLabel": "ブランチを同期"
+  "syncButtonLabel": "ブランチを同期",
+  "tooltips": {
+    "viewMode": "表示モード切替（グループ / フラット）",
+    "sort": "ブランチの並び替え",
+    "sync": "worktree を同期",
+    "repositories": "リポジトリを管理（追加・同期）"
+  }
 }

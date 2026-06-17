@@ -7,12 +7,13 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import React from 'react';
 import { SortSelectorBase } from '@/components/sidebar/SortSelectorBase';
 import type { SortOption } from '@/components/sidebar/SortSelectorBase';
 import type { SortKey, SortDirection } from '@/lib/sidebar-utils';
+import { TOOLTIP_DELAY_MS } from '@/components/common/Tooltip';
 
 const TEST_OPTIONS: SortOption[] = [
   { key: 'repositoryName', label: 'Repository' },
@@ -27,6 +28,7 @@ function renderSelector(overrides: Partial<{
   onSortDirectionChange: (dir: SortDirection) => void;
   options: ReadonlyArray<SortOption>;
   defaultDirections: Partial<Record<SortKey, SortDirection>>;
+  tooltip: string;
 }> = {}) {
   const props = {
     sortKey: 'lastSent' as SortKey,
@@ -149,5 +151,42 @@ describe('SortSelectorBase', () => {
 
     fireEvent.click(screen.getByText('Repository'));
     expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  // Issue #882: optional shared Tooltip on the trigger button
+  describe('tooltip prop (Issue #882)', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('shows the shared Tooltip on hover when tooltip prop is provided', () => {
+      renderSelector({ tooltip: 'Sort branches' });
+
+      const trigger = screen.getByRole('button', { name: /Sort by/i });
+      // mouseenter bubbles up to the Tooltip wrapper span
+      fireEvent.mouseEnter(trigger);
+      act(() => {
+        vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+      });
+
+      const tooltip = screen.getByRole('tooltip', { hidden: true });
+      expect(tooltip).toHaveTextContent('Sort branches');
+      expect(tooltip).toHaveAttribute('aria-hidden', 'true');
+    });
+
+    it('does NOT render a tooltip wrapper when tooltip prop is omitted', () => {
+      renderSelector();
+
+      const trigger = screen.getByRole('button', { name: /Sort by/i });
+      fireEvent.mouseEnter(trigger);
+      act(() => {
+        vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+      });
+
+      expect(screen.queryByRole('tooltip', { hidden: true })).toBeNull();
+    });
   });
 });

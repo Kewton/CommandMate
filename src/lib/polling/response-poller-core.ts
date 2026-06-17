@@ -41,23 +41,39 @@ export const GEMINI_LOADING_INDICATORS: readonly string[] = [
 // ============================================================================
 
 /**
- * Active pollers map: "worktreeId:cliToolId" -> NodeJS.Timeout
+ * Active pollers map: "worktreeId:instanceId" -> NodeJS.Timeout
  *
  * Module-scope variable (not globalThis). Node.js module cache ensures
  * singleton behavior. See D3-004 in design policy for details.
+ *
+ * Issue #868: The key is scoped by instanceId so multiple instances of the
+ * same CLI tool on one worktree get independent pollers. For the primary
+ * instance (instanceId omitted or equal to cliToolId), the key is identical
+ * to the legacy "worktreeId:cliToolId" form for backward compatibility.
  */
 export const activePollers = new Map<string, NodeJS.Timeout>();
 
 /**
- * Polling start times map: "worktreeId:cliToolId" -> timestamp
+ * Polling start times map: "worktreeId:instanceId" -> timestamp
  */
 export const pollingStartTimes = new Map<string, number>();
 
 /**
- * Generate poller key from worktree ID and CLI tool ID
+ * Generate poller key from worktree ID and agent instance.
+ *
+ * Issue #868: When instanceId is omitted it defaults to cliToolId (the primary
+ * instance), preserving the legacy "worktreeId:cliToolId" key.
+ *
+ * @param worktreeId - Worktree ID
+ * @param cliToolId - CLI tool ID (claude, codex, gemini, ...)
+ * @param instanceId - Optional agent instance ID (defaults to cliToolId)
  */
-export function getPollerKey(worktreeId: string, cliToolId: CLIToolType): string {
-  return `${worktreeId}:${cliToolId}`;
+export function getPollerKey(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): string {
+  return `${worktreeId}:${instanceId ?? cliToolId}`;
 }
 
 // ============================================================================
@@ -69,17 +85,18 @@ export function getPollerKey(worktreeId: string, cliToolId: CLIToolType): string
  *
  * @param worktreeId - Worktree ID
  * @param cliToolId - CLI tool ID (claude, codex, gemini)
+ * @param instanceId - Optional agent instance ID (defaults to primary)
  *
  * @example
  * ```typescript
  * startPolling('feature-foo', 'claude');
  * ```
  */
-export function startPolling(worktreeId: string, cliToolId: CLIToolType): void {
-  const pollerKey = getPollerKey(worktreeId, cliToolId);
+export function startPolling(worktreeId: string, cliToolId: CLIToolType, instanceId?: string): void {
+  const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
 
   // Stop existing poller if any
-  stopPolling(worktreeId, cliToolId);
+  stopPolling(worktreeId, cliToolId, instanceId);
 
   // Record start time
   pollingStartTimes.set(pollerKey, Date.now());
@@ -90,24 +107,28 @@ export function startPolling(worktreeId: string, cliToolId: CLIToolType): void {
   }
 
   // Start polling with setTimeout chain to prevent race conditions
-  scheduleNextResponsePoll(worktreeId, cliToolId);
+  scheduleNextResponsePoll(worktreeId, cliToolId, instanceId);
 }
 
 /** Schedule next checkForResponse() after current one completes (setTimeout chain) */
-export function scheduleNextResponsePoll(worktreeId: string, cliToolId: CLIToolType): void {
-  const pollerKey = getPollerKey(worktreeId, cliToolId);
+export function scheduleNextResponsePoll(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): void {
+  const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
 
   const timerId = setTimeout(async () => {
     // Check if max duration exceeded
     const startTime = pollingStartTimes.get(pollerKey);
     if (startTime && Date.now() - startTime > MAX_POLLING_DURATION) {
-      stopPolling(worktreeId, cliToolId);
+      stopPolling(worktreeId, cliToolId, instanceId);
       return;
     }
 
     // Check for response
     try {
-      await checkForResponse(worktreeId, cliToolId);
+      await checkForResponse(worktreeId, cliToolId, instanceId);
     } catch (error: unknown) {
       logger.error('error:', { error: error instanceof Error ? error.message : String(error) });
     }
@@ -115,7 +136,7 @@ export function scheduleNextResponsePoll(worktreeId: string, cliToolId: CLIToolT
     // Schedule next poll ONLY after current one completes
     // Guard: only if poller is still active (not stopped during checkForResponse)
     if (activePollers.has(pollerKey)) {
-      scheduleNextResponsePoll(worktreeId, cliToolId);
+      scheduleNextResponsePoll(worktreeId, cliToolId, instanceId);
     }
   }, POLLING_INTERVAL);
 
@@ -123,18 +144,10 @@ export function scheduleNextResponsePoll(worktreeId: string, cliToolId: CLIToolT
 }
 
 /**
- * Stop polling for a worktree and CLI tool combination
- *
- * @param worktreeId - Worktree ID
- * @param cliToolId - CLI tool ID (claude, codex, gemini)
- *
- * @example
- * ```typescript
- * stopPolling('feature-foo', 'claude');
- * ```
+ * Stop the poller identified by an already-computed poller key.
+ * Shared by stopPolling() and stopAllPolling() so cleanup logic stays in one place.
  */
-export function stopPolling(worktreeId: string, cliToolId: CLIToolType): void {
-  const pollerKey = getPollerKey(worktreeId, cliToolId);
+function stopPollingByKey(pollerKey: string): void {
   const timerId = activePollers.get(pollerKey);
 
   if (timerId) {
@@ -151,13 +164,28 @@ export function stopPolling(worktreeId: string, cliToolId: CLIToolType): void {
 }
 
 /**
+ * Stop polling for a worktree and CLI tool / instance combination
+ *
+ * @param worktreeId - Worktree ID
+ * @param cliToolId - CLI tool ID (claude, codex, gemini)
+ * @param instanceId - Optional agent instance ID (defaults to primary)
+ *
+ * @example
+ * ```typescript
+ * stopPolling('feature-foo', 'claude');
+ * ```
+ */
+export function stopPolling(worktreeId: string, cliToolId: CLIToolType, instanceId?: string): void {
+  stopPollingByKey(getPollerKey(worktreeId, cliToolId, instanceId));
+}
+
+/**
  * Stop all active pollers
  * Used for cleanup on server shutdown
  */
 export function stopAllPolling(): void {
-  for (const pollerKey of activePollers.keys()) {
-    const [worktreeId, cliToolId] = pollerKey.split(':') as [string, CLIToolType];
-    stopPolling(worktreeId, cliToolId);
+  for (const pollerKey of Array.from(activePollers.keys())) {
+    stopPollingByKey(pollerKey);
   }
 }
 

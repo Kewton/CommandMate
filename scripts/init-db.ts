@@ -8,7 +8,9 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import { initDatabase } from '../src/lib/db';
 
-const dbPath = path.join(process.cwd(), 'db.sqlite');
+// Respect CM_DB_PATH so `db:init` (incl. build-and-start) migrates the same
+// database the server uses; fall back to ./db.sqlite for local/dev defaults.
+const dbPath = process.env.CM_DB_PATH || path.join(process.cwd(), 'db.sqlite');
 
 console.log('Initializing database...');
 console.log(`Database path: ${dbPath}`);

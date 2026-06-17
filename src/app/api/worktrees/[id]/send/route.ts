@@ -17,7 +17,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById, createMessage, updateLastUserMessage, clearInProgressMessageId, saveInitialBranch, getInitialBranch, getMessages, deleteMessageById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { CLI_TOOL_IDS, isImageCapableCLITool, type CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, isImageCapableCLITool, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { startPolling } from '@/lib/polling/response-poller';
 import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
 import { getGitStatus } from '@/lib/git/git-utils';
@@ -41,6 +41,7 @@ const DEFAULT_CLI_TOOL: CLIToolType = 'claude';
 interface SendMessageRequest {
   content: string;
   cliToolId?: CLIToolType;  // Optional: override the worktree's default CLI tool
+  instanceId?: string;  // Issue #868: agent instance ID (defaults to primary === cliToolId)
   imagePath?: string;  // Issue #474: relative path within .commandmate/attachments/
   model?: string;  // Issue #576: AI model name for Copilot agent
 }
@@ -158,6 +159,18 @@ export async function POST(
       );
     }
 
+    // Issue #868: Resolve the agent instance. When omitted, the primary instance
+    // (instanceId === cliToolId) is used, preserving legacy single-session behavior.
+    // The instance ID is embedded in tmux session names, so it must match the safe
+    // identifier pattern to prevent command injection.
+    if (body.instanceId !== undefined && !isValidInstanceId(body.instanceId)) {
+      return NextResponse.json(
+        { error: 'Invalid instanceId. Must be an alphanumeric/underscore/hyphen identifier.' },
+        { status: 400 }
+      );
+    }
+    const instanceId = body.instanceId;
+
     // Issue #576/#588: Validate model parameter via shared validator (DR1-003)
     if (body.model) {
       // model is only supported for copilot
@@ -190,12 +203,12 @@ export async function POST(
     }
 
     // Check if CLI tool session is running
-    const running = await cliTool.isRunning(params.id);
+    const running = await cliTool.isRunning(params.id, instanceId);
 
     // Start CLI tool session if not running
     if (!running) {
       try {
-        await cliTool.startSession(params.id, worktree.path);
+        await cliTool.startSession(params.id, worktree.path, instanceId);
 
         // Issue #111: Save initial branch at session start
         // Get current branch and save it if not already recorded
@@ -228,7 +241,7 @@ export async function POST(
     // Save any pending assistant response before sending the new user message
     // This captures the CLI tool's response to the previous user message
     try {
-      await savePendingAssistantResponse(db, params.id, cliToolId, userMessageTimestamp);
+      await savePendingAssistantResponse(db, params.id, cliToolId, userMessageTimestamp, instanceId);
     } catch (error) {
       // Log but don't fail - user message should still be saved
       logger.error('failed-to-save-pending-assistant-response:', { error: error instanceof Error ? error.message : String(error) });
@@ -240,7 +253,7 @@ export async function POST(
     // Remove it to prevent duplicates.
     let orphanedMessageIdToDelete: string | null = null;
     try {
-      const recentMessages = getMessages(db, params.id, { limit: 1, cliToolId });
+      const recentMessages = getMessages(db, params.id, { limit: 1, cliToolId, instanceId });
       if (
         recentMessages.length > 0 &&
         recentMessages[0].role === 'user' &&
@@ -267,7 +280,7 @@ export async function POST(
     if (body.model && cliToolId === 'copilot') {
       try {
         const copilotTool = cliTool as CopilotTool;
-        await copilotTool.sendModelCommand(params.id, body.model);
+        await copilotTool.sendModelCommand(params.id, body.model, instanceId);
         logger.info('copilot-model-command-sent', { model: body.model });
       } catch (error: unknown) {
         logger.error('failed-to-send-model-command:', { error: error instanceof Error ? error.message : String(error) });
@@ -284,13 +297,13 @@ export async function POST(
       if (absoluteImagePath) {
         if (isImageCapableCLITool(cliTool)) {
           // Image-capable tool: use native image sending
-          await cliTool.sendMessageWithImage(params.id, trimmedContent, absoluteImagePath);
+          await cliTool.sendMessageWithImage(params.id, trimmedContent, absoluteImagePath, instanceId);
         } else {
           // Fallback: embed path in message
           const messageWithPath = trimmedContent
             ? `${trimmedContent}\n\n[添付画像: ${absoluteImagePath}]`
             : `[添付画像: ${absoluteImagePath}]`;
-          await cliTool.sendMessage(params.id, messageWithPath);
+          await cliTool.sendMessage(params.id, messageWithPath, instanceId);
         }
       } else if (cliToolId === 'copilot') {
         // Copilot: use sendKeys directly to avoid waitForPrompt blocking (#559)
@@ -298,7 +311,7 @@ export async function POST(
         // In multi-line mode, C-m (bundled with text) adds a newline instead of
         // submitting. Sending Enter as a separate tmux command after a delay
         // allows the TUI to process the text first, then accept Enter as submit.
-        const sessionName = cliTool.getSessionName(params.id);
+        const sessionName = cliTool.getSessionName(params.id, instanceId);
         // Replace newlines with spaces to prevent Copilot CLI multi-line mode
         const copilotContent = trimmedContent.replace(/\n+/g, ' ').trim();
         await sendKeys(sessionName, copilotContent, false);
@@ -306,7 +319,7 @@ export async function POST(
         await sendSpecialKeys(sessionName, ['Enter']);
         invalidateCache(sessionName);
       } else {
-        await cliTool.sendMessage(params.id, trimmedContent);
+        await cliTool.sendMessage(params.id, trimmedContent, instanceId);
       }
     } catch (error: unknown) {
       logger.error('failed-to-send-message-to:', { error: error instanceof Error ? error.message : String(error) });
@@ -326,6 +339,7 @@ export async function POST(
       messageType: 'normal',
       timestamp: userMessageTimestamp,
       cliToolId,
+      instanceId,
     });
 
     // Remove the prior orphan only after the retry message is persisted.
@@ -346,11 +360,11 @@ export async function POST(
     updateLastUserMessage(db, params.id, trimmedContent, userMessageTimestamp);
 
     // Clear in-progress message ID (session state is managed by savePendingAssistantResponse)
-    clearInProgressMessageId(db, params.id, cliToolId);
+    clearInProgressMessageId(db, params.id, cliToolId, instanceId);
     logger.info('cleared-in-progress-message-for');
 
     // Start polling for CLI tool's response
-    startPolling(params.id, cliToolId);
+    startPolling(params.id, cliToolId, instanceId);
 
     return NextResponse.json(message, { status: 201 });
   } catch (error: unknown) {

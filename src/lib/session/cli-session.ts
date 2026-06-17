@@ -30,10 +30,10 @@ function getDefaultTransport(): SessionTransport {
   return getPollingTmuxTransport();
 }
 
-function resolveSessionContext(worktreeId: string, cliToolId: CLIToolType) {
+function resolveSessionContext(worktreeId: string, cliToolId: CLIToolType, instanceId?: string) {
   const manager = CLIToolManager.getInstance();
   const cliTool = manager.getTool(cliToolId);
-  const sessionName = cliTool.getSessionName(worktreeId);
+  const sessionName = cliTool.getSessionName(worktreeId, instanceId);
   return { cliTool, sessionName };
 }
 
@@ -42,13 +42,15 @@ function resolveSessionContext(worktreeId: string, cliToolId: CLIToolType) {
  *
  * @param worktreeId - Worktree ID
  * @param cliToolId - CLI tool ID (claude, codex, gemini)
+ * @param instanceId - Optional agent instance ID (defaults to primary)
  * @returns True if session exists and is running
  */
 export async function isSessionRunning(
   worktreeId: string,
-  cliToolId: CLIToolType
+  cliToolId: CLIToolType,
+  instanceId?: string
 ): Promise<boolean> {
-  const { sessionName } = resolveSessionContext(worktreeId, cliToolId);
+  const { sessionName } = resolveSessionContext(worktreeId, cliToolId, instanceId);
   return getDefaultTransport().sessionExists(sessionName);
 }
 
@@ -66,12 +68,13 @@ export async function isSessionRunning(
 export async function captureSessionOutput(
   worktreeId: string,
   cliToolId: CLIToolType,
-  lines: number = 1000
+  lines: number = 1000,
+  instanceId?: string
 ): Promise<string> {
   const log = logger.withContext({ worktreeId, cliToolId });
   log.debug('captureSessionOutput:start', { requestedLines: lines });
 
-  const { cliTool, sessionName } = resolveSessionContext(worktreeId, cliToolId);
+  const { cliTool, sessionName } = resolveSessionContext(worktreeId, cliToolId, instanceId);
   const transport = getDefaultTransport();
 
   try {
@@ -116,12 +119,13 @@ export async function captureSessionOutput(
 export async function captureSessionOutputFresh(
   worktreeId: string,
   cliToolId: CLIToolType,
-  lines: number = 5000
+  lines: number = 5000,
+  instanceId?: string
 ): Promise<string> {
   const log = logger.withContext({ worktreeId, cliToolId });
   log.debug('captureSessionOutputFresh:start', { requestedLines: lines });
 
-  const { cliTool, sessionName } = resolveSessionContext(worktreeId, cliToolId);
+  const { cliTool, sessionName } = resolveSessionContext(worktreeId, cliToolId, instanceId);
   const transport = getDefaultTransport();
 
   try {
@@ -149,8 +153,9 @@ export async function captureSessionOutputFresh(
  *
  * @param worktreeId - Worktree ID
  * @param cliToolId - CLI tool ID
+ * @param instanceId - Optional agent instance ID (defaults to primary)
  * @returns Session name
  */
-export function getSessionName(worktreeId: string, cliToolId: CLIToolType): string {
-  return resolveSessionContext(worktreeId, cliToolId).sessionName;
+export function getSessionName(worktreeId: string, cliToolId: CLIToolType, instanceId?: string): string {
+  return resolveSessionContext(worktreeId, cliToolId, instanceId).sessionName;
 }

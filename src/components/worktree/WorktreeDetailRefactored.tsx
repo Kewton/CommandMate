@@ -60,8 +60,7 @@ import { ToastContainer } from '@/components/common/Toast';
 import { Modal } from '@/components/ui/Modal';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
-import { CLI_TOOL_IDS, getCliToolDisplayName } from '@/lib/cli-tools/types';
-import { MOBILE_MAX_AGENTS } from '@/hooks/useMobileSelectedAgents';
+import { getCliToolDisplayName, getInstanceLabel } from '@/lib/cli-tools/types';
 import { deriveCliStatus } from '@/types/sidebar';
 import { MoveDialog } from '@/components/worktree/MoveDialog';
 import { NewFileDialog } from '@/components/worktree/NewFileDialog';
@@ -75,6 +74,15 @@ export interface WorktreeDetailRefactoredProps {
   /** Worktree ID to display */
   worktreeId: string;
 }
+
+/**
+ * Issue #874: Mobile agent selection is now driven by per-instance visibility
+ * (useMobileSelectedInstances), so the legacy `onSelectedAgentsChange` callback
+ * is never invoked on mobile. A stable module-level no-op keeps the prop
+ * satisfied (it stays required for the PC-style AgentSettingsPane fallback)
+ * without recreating a function on every render.
+ */
+const NOOP_SELECTED_AGENTS_CHANGE = (): void => {};
 
 // ============================================================================
 // Main Component
@@ -95,14 +103,16 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const {
     activeActivity,
     activeCliTab,
+    activeInstanceId,
     activeTab,
+    agentInstances,
     autoYesEnabled,
     autoYesExpiresAt,
     autoYesStateMap,
     diffContent,
     diffFilePath,
     disableAutoFollow,
-    displayedAgents,
+    displayedInstances,
     editorFilePath,
     error,
     fetchCurrentOutput,
@@ -110,10 +120,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     fileSearch,
     fileTreeRefresh,
     handleActivityToggle,
+    handleAgentInstancesChange,
     handleAutoYesToggle,
     handleBackClick,
     handleCloseDiff,
-    handleCmateSetup,
     handleDelete,
     handleDiffSelect,
     handleDirtyChange,
@@ -151,7 +161,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     handlePromptRespond,
     handleRename,
     handleRetry,
-    handleSelectedAgentsChange,
     handleSetLoading,
     handleShowArchivedChange,
     handleUpload,
@@ -178,13 +187,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     pendingInsertText,
     pendingInsertTextMap,
     removeToast,
-    selectedAgents,
-    setActiveCliTab,
+    setActiveInstanceId,
     setEditorFilePath,
     setFocusedSplitIndex,
     setHistorySubTab,
     setIsEditorMaximized,
-    setMobileSelectedAgents,
     setWorktree,
     showArchived,
     showKillConfirm,
@@ -196,8 +203,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     tabsActions,
     tabsState,
     toasts,
+    toggleInstanceVisible,
     vibeLocalContextWindow,
     vibeLocalModel,
+    visibleInstanceIds,
     worktree,
     worktreeName,
     worktreeStatus,
@@ -226,9 +235,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           worktree={worktree}
           worktreeName={worktreeName}
           worktreeStatus={worktreeStatus}
-          activeCliTab={activeCliTab}
-          setActiveCliTab={setActiveCliTab}
-          selectedAgents={selectedAgents}
+          instances={agentInstances}
+          activeInstanceId={activeInstanceId}
+          setActiveInstanceId={setActiveInstanceId}
           hasUpdate={hasUpdate}
           lastAutoResponse={lastAutoResponse}
           activeActivity={activeActivity}
@@ -272,9 +281,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onDelete={handleDelete}
           onUpload={handleUpload}
           onMove={handleMove}
-          onCmateSetup={handleCmateSetup}
           onDiffSelect={handleDiffSelect}
-          onSelectedAgentsChange={handleSelectedAgentsChange}
+          onAgentInstancesChange={handleAgentInstancesChange}
           vibeLocalModel={vibeLocalModel}
           onVibeLocalModelChange={handleVibeLocalModelChange}
           vibeLocalContextWindow={vibeLocalContextWindow}
@@ -366,20 +374,26 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           />
           {/* Right: CLI tool tabs + End button */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            <nav className="flex gap-2" aria-label="CLI Tool Selection">
-              {displayedAgents.map((tool) => {
-                const toolStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[tool]);
+            {/* Issue #874: Mobile tabs are now per-agent-instance (alias-aware)
+                so multiple instances of the same CLI tool are independently
+                selectable, mirroring the PC header. `displayedInstances` is the
+                per-device visible subset (localStorage); status is still
+                resolved per backing CLI tool, consistent with PC. */}
+            <nav className="flex gap-2" aria-label="Agent Instance Selection">
+              {displayedInstances.map((inst) => {
+                const toolStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[inst.cliTool]);
                 const statusConfig = SIDEBAR_STATUS_CONFIG[toolStatus];
+                const isActive = activeInstanceId === inst.id;
                 return (
                   <button
-                    key={tool}
-                    onClick={() => setActiveCliTab(tool)}
+                    key={inst.id}
+                    onClick={() => setActiveInstanceId(inst.id)}
                     className={`px-1.5 py-0.5 rounded font-medium text-xs transition-colors flex items-center gap-1 ${
-                      activeCliTab === tool
+                      isActive
                         ? 'bg-blue-100 text-blue-700'
                         : 'text-gray-500 hover:text-gray-700'
                     }`}
-                    aria-current={activeCliTab === tool ? 'page' : undefined}
+                    aria-current={isActive ? 'page' : undefined}
                   >
                     {statusConfig.type === 'spinner' ? (
                       <span
@@ -392,7 +406,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                         title={statusConfig.label}
                       />
                     )}
-                    {getCliToolDisplayName(tool)}
+                    {getInstanceLabel(inst)}
                   </button>
                 );
               })}
@@ -438,6 +452,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             worktree={worktree}
             messages={state.messages}
             cliToolId={activeCliTab}
+            instanceId={activeInstanceId}
             onFilePathClick={handleFilePathClick}
             onFileSelect={handleFileSelect}
             onWorktreeUpdate={setWorktree}
@@ -450,16 +465,21 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             refreshTrigger={fileTreeRefresh}
             fileSearch={fileSearch}
             showToast={showToast}
-            onCmateSetup={handleCmateSetup}
-            // Issue #837/#851: the Agent tab edits the mobile-only localStorage
-            // preference and never the DB. `availableAgents` is the full agent
-            // pool so mobile can pick any of the CLI tools independently of the
-            // PC, up to MOBILE_MAX_AGENTS.
+            // Issue #874 (折衷案): the Agent tab manages the shared instance
+            // ROSTER (entity + alias → DB, consistent with PC via
+            // handleAgentInstancesChange) PLUS a per-device "show as tabs"
+            // selection that only writes localStorage (toggleInstanceVisible),
+            // preserving the #837/#851 intent that narrowing tabs on mobile must
+            // not shrink the PC view. `selectedAgents` is still passed for the
+            // TimerPane; mobile selection itself is now instance-driven so the
+            // legacy change callback is a no-op.
             selectedAgents={mobileSelectedAgents}
-            onSelectedAgentsChange={setMobileSelectedAgents}
-            availableAgents={CLI_TOOL_IDS}
-            maxAgents={MOBILE_MAX_AGENTS}
-            persistToServer={false}
+            onSelectedAgentsChange={NOOP_SELECTED_AGENTS_CHANGE}
+            useInstanceManagement
+            instances={agentInstances}
+            onInstancesChange={handleAgentInstancesChange}
+            visibleInstanceIds={visibleInstanceIds}
+            onToggleInstanceVisible={toggleInstanceVisible}
             vibeLocalModel={vibeLocalModel}
             onVibeLocalModelChange={handleVibeLocalModelChange}
             vibeLocalContextWindow={vibeLocalContextWindow}
@@ -489,6 +509,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               <NavigationButtons
                 worktreeId={worktreeId}
                 cliToolId={activeCliTab}
+                instanceId={activeInstanceId}
                 onKeysSent={fetchCurrentOutput}
               />
             </div>
@@ -498,6 +519,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               worktreeId={worktreeId}
               onMessageSent={handleMessageSent}
               cliToolId={activeCliTab}
+              instanceId={activeInstanceId}
               isSessionRunning={worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning ?? false}
               pendingInsertText={pendingInsertText}
               onInsertConsumed={handleInsertConsumedSingle}

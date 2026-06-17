@@ -99,8 +99,8 @@ export class CopilotTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    * @returns True if session is running
    */
-  async isRunning(worktreeId: string): Promise<boolean> {
-    const sessionName = this.getSessionName(worktreeId);
+  async isRunning(worktreeId: string, instanceId?: string): Promise<boolean> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
     return await hasSession(sessionName);
   }
 
@@ -111,14 +111,14 @@ export class CopilotTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    * @param worktreePath - Worktree path
    */
-  async startSession(worktreeId: string, worktreePath: string): Promise<void> {
+  async startSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
     // Check if Copilot is installed
     const copilotAvailable = await this.isInstalled();
     if (!copilotAvailable) {
       throw new Error('GitHub Copilot CLI is not installed. Install with: gh extension install github/gh-copilot');
     }
 
-    const sessionName = this.getSessionName(worktreeId);
+    const sessionName = this.getSessionName(worktreeId, instanceId);
 
     // Check if session already exists
     const exists = await hasSession(sessionName);
@@ -246,8 +246,8 @@ export class CopilotTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    * @param message - Message to send
    */
-  async sendMessage(worktreeId: string, message: string): Promise<void> {
-    const sessionName = this.getSessionName(worktreeId);
+  async sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
 
     // Check if session exists
     const exists = await hasSession(sessionName);
@@ -314,8 +314,8 @@ export class CopilotTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    * @param modelName - Model name to switch to
    */
-  async sendModelCommand(worktreeId: string, modelName: string): Promise<void> {
-    const sessionName = this.getSessionName(worktreeId);
+  async sendModelCommand(worktreeId: string, modelName: string, instanceId?: string): Promise<void> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
 
     // Check if session exists
     const exists = await hasSession(sessionName);
@@ -355,8 +355,8 @@ export class CopilotTool extends BaseCLITool {
    *
    * @param worktreeId - Worktree ID
    */
-  async killSession(worktreeId: string): Promise<void> {
-    const sessionName = this.getSessionName(worktreeId);
+  async killSession(worktreeId: string, instanceId?: string): Promise<void> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
 
     try {
       const exists = await hasSession(sessionName);

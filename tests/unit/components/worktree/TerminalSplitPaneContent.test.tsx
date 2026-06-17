@@ -12,6 +12,16 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import { TerminalSplitPaneContent } from '@/components/worktree/TerminalSplitPaneContent';
+import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
+
+/**
+ * Issue #869: build a primary AgentInstance (id === cliTool) for tests. The
+ * split selector is now instance-keyed; primaries keep instanceId === cliToolId
+ * so this content wrapper's polling/fetch behavior stays byte-for-byte the same.
+ */
+function inst(cliTool: CLIToolType): AgentInstance {
+  return { id: cliTool, cliTool, alias: cliTool, order: 0 };
+}
 
 // Mock the heavy descendants so we can assert the wiring without pulling in
 // the full TerminalDisplay / MessageInput / PromptPanel / NavigationButtons
@@ -203,8 +213,8 @@ describe('TerminalSplitPaneContent', () => {
           worktreeId="w-1"
           splitIndex={0}
           cliToolId="claude"
-          availableCliTools={['claude', 'codex']}
-          onCliToolChange={vi.fn()}
+          availableInstances={[inst('claude'), inst('codex')]}
+          onInstanceChange={vi.fn()}
           onFocus={vi.fn()}
           autoYes={{ onToggle: vi.fn() }}
         />
@@ -212,8 +222,8 @@ describe('TerminalSplitPaneContent', () => {
           worktreeId="w-1"
           splitIndex={1}
           cliToolId="codex"
-          availableCliTools={['claude', 'codex']}
-          onCliToolChange={vi.fn()}
+          availableInstances={[inst('claude'), inst('codex')]}
+          onInstanceChange={vi.fn()}
           onFocus={vi.fn()}
           autoYes={{ onToggle: vi.fn() }}
         />
@@ -247,8 +257,8 @@ describe('TerminalSplitPaneContent', () => {
         worktreeId="w-1"
         splitIndex={1}
         cliToolId="codex"
-        availableCliTools={['codex']}
-        onCliToolChange={vi.fn()}
+        availableInstances={[inst('codex')]}
+        onInstanceChange={vi.fn()}
         onFocus={vi.fn()}
         autoYes={{ onToggle: vi.fn() }}
       />,
@@ -284,8 +294,8 @@ describe('TerminalSplitPaneContent', () => {
         worktreeId="w-1"
         splitIndex={1}
         cliToolId="codex"
-        availableCliTools={['codex']}
-        onCliToolChange={vi.fn()}
+        availableInstances={[inst('codex')]}
+        onInstanceChange={vi.fn()}
         onFocus={vi.fn()}
         autoYes={{ onToggle: vi.fn() }}
       />,
@@ -312,8 +322,8 @@ describe('TerminalSplitPaneContent', () => {
         worktreeId="w-1"
         splitIndex={0}
         cliToolId="claude"
-        availableCliTools={['claude']}
-        onCliToolChange={vi.fn()}
+        availableInstances={[inst('claude')]}
+        onInstanceChange={vi.fn()}
         onFocus={vi.fn()}
         autoYes={{ enabled: true, onToggle: vi.fn() }}
       />,
@@ -335,8 +345,8 @@ describe('TerminalSplitPaneContent', () => {
         worktreeId="w-1"
         splitIndex={0}
         cliToolId="claude"
-        availableCliTools={['claude']}
-        onCliToolChange={vi.fn()}
+        availableInstances={[inst('claude')]}
+        onInstanceChange={vi.fn()}
         onFocus={vi.fn()}
         autoYes={{ onToggle: vi.fn() }}
       />,
@@ -368,8 +378,8 @@ describe('TerminalSplitPaneContent', () => {
           worktreeId="w-1"
           splitIndex={1}
           cliToolId="codex"
-          availableCliTools={['claude', 'codex']}
-          onCliToolChange={vi.fn()}
+          availableInstances={[inst('claude'), inst('codex')]}
+          onInstanceChange={vi.fn()}
           onFocus={vi.fn()}
           autoYes={{ onToggle: vi.fn() }}
         />,
@@ -387,8 +397,8 @@ describe('TerminalSplitPaneContent', () => {
           worktreeId="w-1"
           splitIndex={0}
           cliToolId="claude"
-          availableCliTools={['claude']}
-          onCliToolChange={vi.fn()}
+          availableInstances={[inst('claude')]}
+          onInstanceChange={vi.fn()}
           onFocus={vi.fn()}
           autoYes={{ onToggle }}
         />,
@@ -419,8 +429,8 @@ describe('TerminalSplitPaneContent', () => {
           worktreeId="w-1"
           splitIndex={0}
           cliToolId="claude"
-          availableCliTools={['claude']}
-          onCliToolChange={vi.fn()}
+          availableInstances={[inst('claude')]}
+          onInstanceChange={vi.fn()}
           onFocus={vi.fn()}
           autoYes={{ enabled: true, onToggle: vi.fn() }}
         />,
@@ -444,8 +454,8 @@ describe('TerminalSplitPaneContent', () => {
             worktreeId="w-1"
             splitIndex={0}
             cliToolId="claude"
-            availableCliTools={['claude', 'codex']}
-            onCliToolChange={vi.fn()}
+            availableInstances={[inst('claude'), inst('codex')]}
+            onInstanceChange={vi.fn()}
             onFocus={vi.fn()}
             autoYes={{ onToggle: onToggleClaude }}
           />
@@ -453,8 +463,8 @@ describe('TerminalSplitPaneContent', () => {
             worktreeId="w-1"
             splitIndex={1}
             cliToolId="codex"
-            availableCliTools={['claude', 'codex']}
-            onCliToolChange={vi.fn()}
+            availableInstances={[inst('claude'), inst('codex')]}
+            onInstanceChange={vi.fn()}
             onFocus={vi.fn()}
             autoYes={{ onToggle: onToggleCodex }}
           />
@@ -505,8 +515,8 @@ describe('TerminalSplitPaneContent', () => {
             worktreeId="w-1"
             splitIndex={0}
             cliToolId="claude"
-            availableCliTools={['claude']}
-            onCliToolChange={vi.fn()}
+            availableInstances={[inst('claude')]}
+            onInstanceChange={vi.fn()}
             onFocus={vi.fn()}
             autoYes={{ onToggle: vi.fn() }}
             cliStatus={status}
@@ -536,8 +546,8 @@ describe('TerminalSplitPaneContent', () => {
           worktreeId="w-1"
           splitIndex={0}
           cliToolId="claude"
-          availableCliTools={['claude']}
-          onCliToolChange={vi.fn()}
+          availableInstances={[inst('claude')]}
+          onInstanceChange={vi.fn()}
           onFocus={vi.fn()}
           autoYes={{ onToggle: vi.fn() }}
         />,
@@ -558,8 +568,8 @@ describe('TerminalSplitPaneContent', () => {
             worktreeId="w-1"
             splitIndex={0}
             cliToolId="claude"
-            availableCliTools={['claude', 'codex']}
-            onCliToolChange={vi.fn()}
+            availableInstances={[inst('claude'), inst('codex')]}
+            onInstanceChange={vi.fn()}
             onFocus={vi.fn()}
             autoYes={{ onToggle: vi.fn() }}
             cliStatus="running"
@@ -568,8 +578,8 @@ describe('TerminalSplitPaneContent', () => {
             worktreeId="w-1"
             splitIndex={1}
             cliToolId="codex"
-            availableCliTools={['claude', 'codex']}
-            onCliToolChange={vi.fn()}
+            availableInstances={[inst('claude'), inst('codex')]}
+            onInstanceChange={vi.fn()}
             onFocus={vi.fn()}
             autoYes={{ onToggle: vi.fn() }}
             cliStatus="idle"
@@ -605,8 +615,8 @@ describe('TerminalSplitPaneContent', () => {
           worktreeId="w-1"
           splitIndex={0}
           cliToolId="claude"
-          availableCliTools={['claude']}
-          onCliToolChange={vi.fn()}
+          availableInstances={[inst('claude')]}
+          onInstanceChange={vi.fn()}
           onFocus={vi.fn()}
           autoYes={{ onToggle: vi.fn() }}
         />,
@@ -629,8 +639,8 @@ describe('TerminalSplitPaneContent', () => {
           worktreeId="w-1"
           splitIndex={1}
           cliToolId="codex"
-          availableCliTools={['claude', 'codex']}
-          onCliToolChange={vi.fn()}
+          availableInstances={[inst('claude'), inst('codex')]}
+          onInstanceChange={vi.fn()}
           onFocus={vi.fn()}
           autoYes={{ onToggle: vi.fn() }}
         />,
@@ -652,8 +662,8 @@ describe('TerminalSplitPaneContent', () => {
             worktreeId="w-1"
             splitIndex={0}
             cliToolId="claude"
-            availableCliTools={['claude', 'codex']}
-            onCliToolChange={vi.fn()}
+            availableInstances={[inst('claude'), inst('codex')]}
+            onInstanceChange={vi.fn()}
             onFocus={vi.fn()}
             autoYes={{ onToggle: vi.fn() }}
           />
@@ -661,8 +671,8 @@ describe('TerminalSplitPaneContent', () => {
             worktreeId="w-1"
             splitIndex={1}
             cliToolId="codex"
-            availableCliTools={['claude', 'codex']}
-            onCliToolChange={vi.fn()}
+            availableInstances={[inst('claude'), inst('codex')]}
+            onInstanceChange={vi.fn()}
             onFocus={vi.fn()}
             autoYes={{ onToggle: vi.fn() }}
           />
@@ -686,8 +696,8 @@ describe('TerminalSplitPaneContent', () => {
           worktreeId="w-1"
           splitIndex={2}
           cliToolId="claude"
-          availableCliTools={['claude']}
-          onCliToolChange={vi.fn()}
+          availableInstances={[inst('claude')]}
+          onInstanceChange={vi.fn()}
           onFocus={vi.fn()}
           autoYes={{ onToggle: vi.fn() }}
           history={{ onInsertToMessage: onHistoryInsertToMessage }}
@@ -710,8 +720,8 @@ describe('TerminalSplitPaneContent', () => {
           worktreeId="w-1"
           splitIndex={2}
           cliToolId="claude"
-          availableCliTools={['claude']}
-          onCliToolChange={vi.fn()}
+          availableInstances={[inst('claude')]}
+          onInstanceChange={vi.fn()}
           onFocus={vi.fn()}
           autoYes={{ onToggle: vi.fn() }}
           pendingInsertText="from-parent"

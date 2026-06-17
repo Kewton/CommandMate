@@ -166,6 +166,7 @@ export class CLIToolManager {
    *
    * @param worktreeId - Worktree ID
    * @param cliToolId - CLI tool ID
+   * @param instanceId - Agent instance ID (Issue #868). Defaults to the primary instance.
    *
    * @example
    * ```typescript
@@ -173,8 +174,8 @@ export class CLIToolManager {
    * manager.stopPollers('my-worktree', 'claude');
    * ```
    */
-  stopPollers(worktreeId: string, cliToolId: CLIToolType): void {
+  stopPollers(worktreeId: string, cliToolId: CLIToolType, instanceId?: string): void {
     // Stop response-poller for all tools
-    stopResponsePolling(worktreeId, cliToolId);
+    stopResponsePolling(worktreeId, cliToolId, instanceId);
   }
 }

@@ -58,8 +58,8 @@ export class VibeLocalTool extends BaseCLITool {
   /**
    * Check if vibe-local session is running for a worktree
    */
-  async isRunning(worktreeId: string): Promise<boolean> {
-    const sessionName = this.getSessionName(worktreeId);
+  async isRunning(worktreeId: string, instanceId?: string): Promise<boolean> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
     return await hasSession(sessionName);
   }
 
@@ -70,13 +70,13 @@ export class VibeLocalTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    * @param worktreePath - Worktree path
    */
-  async startSession(worktreeId: string, worktreePath: string): Promise<void> {
+  async startSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
     const vibeLocalAvailable = await this.isInstalled();
     if (!vibeLocalAvailable) {
       throw new Error('vibe-local is not installed or not in PATH');
     }
 
-    const sessionName = this.getSessionName(worktreeId);
+    const sessionName = this.getSessionName(worktreeId, instanceId);
 
     const exists = await hasSession(sessionName);
     if (exists) {
@@ -137,8 +137,8 @@ export class VibeLocalTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    * @param message - Message to send
    */
-  async sendMessage(worktreeId: string, message: string): Promise<void> {
-    const sessionName = this.getSessionName(worktreeId);
+  async sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
 
     const exists = await hasSession(sessionName);
     if (!exists) {
@@ -184,8 +184,8 @@ export class VibeLocalTool extends BaseCLITool {
    *
    * @param worktreeId - Worktree ID
    */
-  async killSession(worktreeId: string): Promise<void> {
-    const sessionName = this.getSessionName(worktreeId);
+  async killSession(worktreeId: string, instanceId?: string): Promise<void> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
 
     try {
       const exists = await hasSession(sessionName);

@@ -10,6 +10,7 @@
 'use client';
 
 import React, { memo } from 'react';
+import { useTranslations } from 'next-intl';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { SortSelectorBase } from './SortSelectorBase';
 import type { SortOption } from './SortSelectorBase';
@@ -49,6 +50,7 @@ const SIDEBAR_DEFAULT_DIRECTIONS = {
  */
 export const SortSelector = memo(function SortSelector() {
   const { sortKey, sortDirection, setSortKey, setSortDirection } = useSidebarContext();
+  const t = useTranslations('common');
 
   return (
     <SortSelectorBase
@@ -59,6 +61,7 @@ export const SortSelector = memo(function SortSelector() {
       options={SIDEBAR_SORT_OPTIONS}
       defaultDirections={SIDEBAR_DEFAULT_DIRECTIONS}
       compact
+      tooltip={t('tooltips.sort')}
     />
   );
 });

@@ -11,11 +11,11 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { getWorktreeById, deleteSessionState, deleteAllMessages, deleteMessagesByCliTool, clearLastUserMessage } from '@/lib/db';
+import { getWorktreeById, deleteSessionState, deleteAllMessages, deleteMessagesByCliTool, deleteMessagesByInstance, clearLastUserMessage, getAgentInstances, getAgentInstance } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { killSession } from '@/lib/tmux/tmux';
 import { broadcast } from '@/lib/ws-server';
-import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/kill-session');
@@ -48,24 +48,75 @@ export async function POST(
       );
     }
 
+    // Issue #868: optional instance query param scopes the kill to a single
+    // agent instance. The primary instance uses instanceId === cliToolId.
+    const instanceParam = request.nextUrl.searchParams.get('instance');
+    if (instanceParam && !isValidInstanceId(instanceParam)) {
+      return NextResponse.json(
+        { error: 'Invalid instance parameter' },
+        { status: 400 }
+      );
+    }
+
     // Get CLI tool manager
     const manager = CLIToolManager.getInstance();
 
-    // Determine which tools to kill
-    const toolsToKill: CLIToolType[] = targetCliTool ? [targetCliTool] : [...CLI_TOOL_IDS];
+    // Build the list of (cliToolId, instanceId) pairs to kill.
+    const targets: Array<{ cliToolId: CLIToolType; instanceId: string }> = [];
+
+    if (instanceParam) {
+      // Single-instance kill: resolve the backing CLI tool from (in priority order)
+      // the explicit cliTool param, the registered instance, or the instance id
+      // itself when it names a primary instance.
+      const known = getAgentInstance(db, params.id, instanceParam);
+      const resolvedTool: CLIToolType | null =
+        (targetCliTool ?? null)
+        ?? (known ? known.cliTool : null)
+        ?? (isCliToolType(instanceParam) ? instanceParam : null);
+      if (!resolvedTool) {
+        return NextResponse.json(
+          { error: 'Could not resolve CLI tool for the specified instance. Provide cliTool.' },
+          { status: 400 }
+        );
+      }
+      targets.push({ cliToolId: resolvedTool, instanceId: instanceParam });
+    } else {
+      // Determine which tools to kill, seeding each tool's primary instance
+      // (instanceId === cliToolId) for backward compatibility.
+      const toolsToKill: CLIToolType[] = targetCliTool ? [targetCliTool] : [...CLI_TOOL_IDS];
+      const seen = new Set<string>();
+      for (const tool of toolsToKill) {
+        const key = `${tool}:${tool}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          targets.push({ cliToolId: tool, instanceId: tool });
+        }
+      }
+      // Include any additional registered instances of the targeted tools so
+      // their sessions are not orphaned.
+      for (const ai of getAgentInstances(db, params.id)) {
+        if (toolsToKill.includes(ai.cliTool)) {
+          const key = `${ai.cliTool}:${ai.id}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            targets.push({ cliToolId: ai.cliTool, instanceId: ai.id });
+          }
+        }
+      }
+    }
 
     // Track killed sessions
     const killedSessions: string[] = [];
     let anySessionRunning = false;
 
-    // Kill specified CLI tool sessions
-    for (const cliToolId of toolsToKill) {
+    // Kill targeted sessions
+    for (const { cliToolId, instanceId } of targets) {
       const cliTool = manager.getTool(cliToolId);
-      const isRunning = await cliTool.isRunning(params.id);
+      const isRunning = await cliTool.isRunning(params.id, instanceId);
 
       if (isRunning) {
         anySessionRunning = true;
-        const sessionName = cliTool.getSessionName(params.id);
+        const sessionName = cliTool.getSessionName(params.id, instanceId);
         const killed = await killSession(sessionName);
 
         if (killed) {
@@ -74,24 +125,28 @@ export async function POST(
         }
 
         // Stop poller if running (uses CLIToolManager.stopPollers for DIP compliance - MF1-001)
-        manager.stopPollers(params.id, cliToolId);
+        manager.stopPollers(params.id, cliToolId, instanceId);
 
-        // Clean up session state
-        deleteSessionState(db, params.id, cliToolId);
+        // Clean up session state for this instance
+        deleteSessionState(db, params.id, cliToolId, instanceId);
       }
     }
 
     if (!anySessionRunning) {
-      const targetMsg = targetCliTool ? ` for ${targetCliTool}` : '';
+      const targetMsg = instanceParam
+        ? ` for instance ${instanceParam}`
+        : (targetCliTool ? ` for ${targetCliTool}` : '');
       return NextResponse.json(
         { error: `No active sessions found${targetMsg} for this worktree` },
         { status: 404 }
       );
     }
 
-    // Archive messages based on whether targeting specific CLI tool or all
-    // Issue #168: Changed from physical delete to logical archive (archived=1)
-    if (targetCliTool) {
+    // Archive messages based on scope (Issue #168: logical archive, archived=1).
+    if (instanceParam) {
+      // Issue #868: archive only the targeted instance's messages.
+      deleteMessagesByInstance(db, params.id, instanceParam);
+    } else if (targetCliTool) {
       // Issue #4: Archive only messages for the specific CLI tool
       deleteMessagesByCliTool(db, params.id, targetCliTool);
     } else {
@@ -110,16 +165,18 @@ export async function POST(
       isRunning: false,
       messagesCleared: true,
       cliTool: targetCliTool || null,
+      instance: instanceParam || null,
     });
 
     return NextResponse.json(
       {
         success: true,
-        message: targetCliTool
+        message: (instanceParam || targetCliTool)
           ? `Session killed successfully: ${killedSessions.join(', ')}`
           : `All sessions killed successfully: ${killedSessions.join(', ')}`,
         killedSessions,
         cliTool: targetCliTool || null,
+        instance: instanceParam || null,
       },
       { status: 200 }
     );

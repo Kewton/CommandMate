@@ -1,5 +1,5 @@
 /**
- * Tests for TerminalSplitPane (Issue #728)
+ * Tests for TerminalSplitPane (Issue #728, instance-keyed in Issue #869)
  *
  * @vitest-environment jsdom
  */
@@ -7,8 +7,25 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import {
+  TerminalSplitPane,
+  AGENT_INSTANCE_DND_MIME,
+} from '@/components/worktree/TerminalSplitPane';
+import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
+
+/** Build a primary AgentInstance (id === cliTool) for tests. */
+function inst(cliTool: CLIToolType, alias?: string): AgentInstance {
+  return { id: cliTool, cliTool, alias: alias ?? cliTool, order: 0 };
+}
+
+const ALL_INSTANCES: AgentInstance[] = [
+  inst('claude'),
+  inst('codex'),
+  inst('gemini'),
+  inst('copilot'),
+  inst('opencode'),
+  inst('vibe-local'),
+];
 
 function renderPane(
   overrides: Partial<React.ComponentProps<typeof TerminalSplitPane>> = {},
@@ -17,8 +34,10 @@ function renderPane(
     worktreeId: 'w-1',
     splitIndex: 0,
     cliToolId: 'claude',
-    availableCliTools: ['claude', 'codex', 'gemini', 'copilot', 'opencode', 'vibe-local'] as CLIToolType[],
-    onCliToolChange: vi.fn(),
+    instanceId: 'claude',
+    instance: inst('claude'),
+    availableInstances: ALL_INSTANCES,
+    onInstanceChange: vi.fn(),
     onFocus: vi.fn(),
     terminal: <div data-testid="terminal-body">term</div>,
     footer: <div data-testid="footer-body">footer</div>,
@@ -44,26 +63,39 @@ describe('TerminalSplitPane', () => {
     expect(screen.getByTestId('footer-body')).toBeInTheDocument();
   });
 
-  it('disables CLI options taken by other splits but allows current CLI', () => {
+  it('renders only the available instances as selector options', () => {
+    // Issue #869: the parent already excludes instances used by other splits and
+    // always includes this split's own instance, so the pane simply lists them.
     renderPane({
-      cliToolId: 'claude',
-      availableCliTools: ['claude', 'gemini'] as CLIToolType[],
+      instanceId: 'claude',
+      instance: inst('claude'),
+      availableInstances: [inst('claude'), inst('gemini')],
     });
     const select = screen.getByTestId('cli-selector-0') as HTMLSelectElement;
-    const options = Array.from(select.querySelectorAll('option'));
-    const byValue = Object.fromEntries(options.map(o => [o.value, o]));
-    expect(byValue['claude'].disabled).toBe(false);
-    expect(byValue['gemini'].disabled).toBe(false);
-    expect(byValue['codex'].disabled).toBe(true);
-    expect(byValue['copilot'].disabled).toBe(true);
+    const values = Array.from(select.querySelectorAll('option')).map(o => o.value);
+    expect(values).toEqual(['claude', 'gemini']);
   });
 
-  it('fires onCliToolChange when selector changes', () => {
-    const onCliToolChange = vi.fn();
-    renderPane({ onCliToolChange });
+  it('labels options by the instance alias', () => {
+    renderPane({
+      instanceId: 'claude',
+      instance: { id: 'claude', cliTool: 'claude', alias: 'Primary', order: 0 },
+      availableInstances: [
+        { id: 'claude', cliTool: 'claude', alias: 'Primary', order: 0 },
+        { id: 'claude-2', cliTool: 'claude', alias: 'Review', order: 1 },
+      ],
+    });
+    const select = screen.getByTestId('cli-selector-0') as HTMLSelectElement;
+    const labels = Array.from(select.querySelectorAll('option')).map(o => o.textContent);
+    expect(labels).toEqual(['Primary', 'Review']);
+  });
+
+  it('fires onInstanceChange when selector changes', () => {
+    const onInstanceChange = vi.fn();
+    renderPane({ onInstanceChange });
     const select = screen.getByTestId('cli-selector-0') as HTMLSelectElement;
     fireEvent.change(select, { target: { value: 'codex' } });
-    expect(onCliToolChange).toHaveBeenCalledWith('codex');
+    expect(onInstanceChange).toHaveBeenCalledWith('codex');
   });
 
   it('dispatches terminal-search-open on the search button click', () => {
@@ -107,16 +139,14 @@ describe('TerminalSplitPane', () => {
 });
 
 // ===========================================================================
-// Issue #786: drop target behavior. jsdom does not implement DragEvent /
+// Issue #786 / #869: drop target behavior. jsdom does not implement DragEvent /
 // dataTransfer, so we hand-mock the dataTransfer interface and pass it to
 // fireEvent.dragOver / drop. Production reads getData only on drop (D-2); the
-// dragOver allowed/forbidden ring is driven by the published `draggedCliTool`.
+// dragOver allowed/forbidden ring is driven by the published `draggedInstanceId`.
 // ===========================================================================
-const DND_MIME = 'application/x-commandmate-cli-tool';
-
 function makeDataTransfer(payload?: string) {
   const store: Record<string, string> = {};
-  if (payload !== undefined) store[DND_MIME] = payload;
+  if (payload !== undefined) store[AGENT_INSTANCE_DND_MIME] = payload;
   return {
     dropEffect: 'none',
     effectAllowed: 'all',
@@ -128,13 +158,13 @@ function makeDataTransfer(payload?: string) {
   };
 }
 
-describe('TerminalSplitPane drop target (Issue #786)', () => {
+describe('TerminalSplitPane drop target (Issue #786 / #869)', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
 
   it('onDragOver calls preventDefault so the drop is allowed', () => {
-    renderPane({ onDropCliTool: vi.fn(), draggedCliTool: 'codex' });
+    renderPane({ onDropInstance: vi.fn(), draggedInstanceId: 'codex' });
     const region = screen.getByRole('region', { name: /Terminal split 1/i });
     // fireEvent returns false when a handler called preventDefault.
     const notCanceled = fireEvent.dragOver(region, {
@@ -152,12 +182,12 @@ describe('TerminalSplitPane drop target (Issue #786)', () => {
     expect(notCanceled).toBe(true);
   });
 
-  it('shows the allowed (cyan) ring when dragging a CLI available to this split', () => {
-    // availableCliTools includes 'codex' → allowed.
+  it('shows the allowed (cyan) ring when dragging an instance available to this split', () => {
+    // availableInstances includes 'codex' → allowed.
     renderPane({
-      onDropCliTool: vi.fn(),
-      draggedCliTool: 'codex',
-      availableCliTools: ['claude', 'codex', 'gemini'] as CLIToolType[],
+      onDropInstance: vi.fn(),
+      draggedInstanceId: 'codex',
+      availableInstances: [inst('claude'), inst('codex'), inst('gemini')],
     });
     const region = screen.getByRole('region', { name: /Terminal split 1/i });
     fireEvent.dragEnter(region, { dataTransfer: makeDataTransfer() });
@@ -165,12 +195,12 @@ describe('TerminalSplitPane drop target (Issue #786)', () => {
     expect(region.className).not.toMatch(/ring-red/);
   });
 
-  it('shows the forbidden (red) ring + not-allowed cursor when dragging a CLI used by another split', () => {
-    // 'opencode' is NOT in availableCliTools → used by another split → forbidden.
+  it('shows the forbidden (red) ring + not-allowed cursor when dragging an instance used by another split', () => {
+    // 'opencode' is NOT in availableInstances → used by another split → forbidden.
     renderPane({
-      onDropCliTool: vi.fn(),
-      draggedCliTool: 'opencode',
-      availableCliTools: ['claude', 'codex'] as CLIToolType[],
+      onDropInstance: vi.fn(),
+      draggedInstanceId: 'opencode',
+      availableInstances: [inst('claude'), inst('codex')],
     });
     const region = screen.getByRole('region', { name: /Terminal split 1/i });
     fireEvent.dragEnter(region, { dataTransfer: makeDataTransfer() });
@@ -180,9 +210,9 @@ describe('TerminalSplitPane drop target (Issue #786)', () => {
 
   it('clears the hover ring on dragLeave', () => {
     renderPane({
-      onDropCliTool: vi.fn(),
-      draggedCliTool: 'codex',
-      availableCliTools: ['claude', 'codex'] as CLIToolType[],
+      onDropInstance: vi.fn(),
+      draggedInstanceId: 'codex',
+      availableInstances: [inst('claude'), inst('codex')],
     });
     const region = screen.getByRole('region', { name: /Terminal split 1/i });
     fireEvent.dragEnter(region, { dataTransfer: makeDataTransfer() });
@@ -191,21 +221,21 @@ describe('TerminalSplitPane drop target (Issue #786)', () => {
     expect(region.className).not.toMatch(/ring-cyan-400/);
   });
 
-  it('onDrop reads the dropped cliId from dataTransfer and calls onDropCliTool', () => {
-    const onDropCliTool = vi.fn();
-    renderPane({ onDropCliTool, draggedCliTool: 'codex' });
+  it('onDrop reads the dropped instanceId from dataTransfer and calls onDropInstance', () => {
+    const onDropInstance = vi.fn();
+    renderPane({ onDropInstance, draggedInstanceId: 'codex' });
     const region = screen.getByRole('region', { name: /Terminal split 1/i });
     fireEvent.drop(region, { dataTransfer: makeDataTransfer('codex') });
-    expect(onDropCliTool).toHaveBeenCalledTimes(1);
-    expect(onDropCliTool).toHaveBeenCalledWith('codex');
+    expect(onDropInstance).toHaveBeenCalledTimes(1);
+    expect(onDropInstance).toHaveBeenCalledWith('codex');
   });
 
   it('onDrop clears the hover ring', () => {
-    const onDropCliTool = vi.fn();
+    const onDropInstance = vi.fn();
     renderPane({
-      onDropCliTool,
-      draggedCliTool: 'codex',
-      availableCliTools: ['claude', 'codex'] as CLIToolType[],
+      onDropInstance,
+      draggedInstanceId: 'codex',
+      availableInstances: [inst('claude'), inst('codex')],
     });
     const region = screen.getByRole('region', { name: /Terminal split 1/i });
     fireEvent.dragEnter(region, { dataTransfer: makeDataTransfer() });
@@ -214,12 +244,12 @@ describe('TerminalSplitPane drop target (Issue #786)', () => {
     expect(region.className).not.toMatch(/ring-cyan-400/);
   });
 
-  it('onDrop ignores an empty / foreign payload (no onDropCliTool call)', () => {
-    const onDropCliTool = vi.fn();
-    renderPane({ onDropCliTool, draggedCliTool: 'codex' });
+  it('onDrop ignores an empty / foreign payload (no onDropInstance call)', () => {
+    const onDropInstance = vi.fn();
+    renderPane({ onDropInstance, draggedInstanceId: 'codex' });
     const region = screen.getByRole('region', { name: /Terminal split 1/i });
     fireEvent.drop(region, { dataTransfer: makeDataTransfer() });
-    expect(onDropCliTool).not.toHaveBeenCalled();
+    expect(onDropInstance).not.toHaveBeenCalled();
   });
 
   it('is inert (no ring, no throw) when drop props are omitted (backward compat)', () => {

@@ -12,7 +12,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { isCliToolType } from '@/lib/cli-tools/types';
+import { isCliToolType, isValidInstanceId } from '@/lib/cli-tools/types';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db/db-instance';
@@ -26,12 +26,22 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { cliToolId, lines = 1000 } = await req.json();
+    const { cliToolId, lines = 1000, instanceId } = await req.json();
 
     // Validate cliToolId against known CLI tool types
     if (!cliToolId || typeof cliToolId !== 'string' || !isCliToolType(cliToolId)) {
       return NextResponse.json(
         { error: 'Invalid cliToolId parameter' },
+        { status: 400 }
+      );
+    }
+
+    // Issue #868: optional instanceId selects a specific agent instance. When
+    // omitted, the primary instance (=== cliToolId) is used. Validate format
+    // since it is embedded in the tmux session name.
+    if (instanceId !== undefined && (typeof instanceId !== 'string' || !isValidInstanceId(instanceId))) {
+      return NextResponse.json(
+        { error: 'Invalid instanceId parameter' },
         { status: 400 }
       );
     }
@@ -58,7 +68,7 @@ export async function POST(
     // Derive session name via CLIToolManager (validates via BaseCLITool.getSessionName)
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(cliToolId);
-    const sessionName = cliTool.getSessionName(params.id);
+    const sessionName = cliTool.getSessionName(params.id, instanceId);
 
     // No auto-creation; return 404 if session does not exist
     const sessionExists = await hasSession(sessionName);

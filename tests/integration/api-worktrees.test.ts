@@ -124,6 +124,33 @@ describe('GET /api/worktrees', () => {
     expect(data.worktrees[0].lastMessageSummary).toBe('Last message summary');
   });
 
+  it('should include agentInstances roster for each worktree (Issue #878)', async () => {
+    const worktree: Worktree = {
+      id: 'feature-instances',
+      name: 'feature/instances',
+      path: '/path/to/feature-instances',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
+    };
+
+    upsertWorktree(db, worktree);
+
+    const request = new Request('http://localhost:3000/api/worktrees');
+    const response = await getWorktrees(request as unknown as import('next/server').NextRequest);
+
+    expect(response.status).toBe(200);
+
+    const data = await response.json();
+    const item = data.worktrees.find((w: { id: string }) => w.id === 'feature-instances');
+    expect(item).toBeDefined();
+    // With no explicit agent_instances rows, the roster is derived as one
+    // primary instance per selectedAgent (id === cliTool).
+    expect(Array.isArray(item.agentInstances)).toBe(true);
+    expect(item.agentInstances.length).toBeGreaterThan(0);
+    expect(item.agentInstances.map((i: { id: string }) => i.id)).toEqual(item.selectedAgents);
+    expect(item.agentInstances.every((i: { id: string; cliTool: string }) => i.id === i.cliTool)).toBe(true);
+  });
+
   it('should return 500 on database error', async () => {
     // Close database to simulate error
     db.close();

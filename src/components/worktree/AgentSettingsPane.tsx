@@ -16,10 +16,9 @@ import { useTranslations } from 'next-intl';
 import {
   CLI_TOOL_IDS,
   getCliToolDisplayName,
-  VIBE_LOCAL_CONTEXT_WINDOW_MIN,
-  VIBE_LOCAL_CONTEXT_WINDOW_MAX,
   type CLIToolType,
 } from '@/lib/cli-tools/types';
+import { VibeLocalSettings } from '@/components/worktree/VibeLocalSettings';
 
 // ============================================================================
 // Types
@@ -55,13 +54,6 @@ export interface AgentSettingsPaneProps {
   vibeLocalContextWindow?: number | null;
   /** Callback when vibe-local context window changes */
   onVibeLocalContextWindowChange?: (value: number | null) => void;
-}
-
-/** Ollama model info from API */
-interface OllamaModelInfo {
-  name: string;
-  size: number;
-  parameterSize: string;
 }
 
 // ============================================================================
@@ -105,17 +97,6 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
   // Prevents polling-driven prop sync from overwriting intermediate checkbox state
   const [isEditing, setIsEditing] = useState(false);
 
-  // Ollama model state
-  const [ollamaModels, setOllamaModels] = useState<OllamaModelInfo[]>([]);
-  const [ollamaError, setOllamaError] = useState<string | null>(null);
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [savingModel, setSavingModel] = useState(false);
-  // Context window local input state (decoupled from prop to allow free typing)
-  const [contextWindowInput, setContextWindowInput] = useState<string>(
-    vibeLocalContextWindow != null ? String(vibeLocalContextWindow) : ''
-  );
-  const [savingContextWindow, setSavingContextWindow] = useState(false);
-
   // Use ref to access latest checkedIds inside async callback without recreating it
   const checkedIdsRef = useRef(checkedIds);
   checkedIdsRef.current = checkedIds;
@@ -129,44 +110,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAgents, isEditing, maxAgents]);
 
-  // Keep local context window input in sync with server-backed prop.
-  useEffect(() => {
-    setContextWindowInput(
-      vibeLocalContextWindow != null ? String(vibeLocalContextWindow) : ''
-    );
-  }, [vibeLocalContextWindow]);
-
   const isVibeLocalChecked = checkedIds.has('vibe-local');
-
-  // Fetch Ollama models when vibe-local is checked
-  useEffect(() => {
-    if (!isVibeLocalChecked) {
-      setOllamaModels([]);
-      setOllamaError(null);
-      return;
-    }
-
-    let cancelled = false;
-    setLoadingModels(true);
-
-    fetch('/api/ollama/models')
-      .then((res) => res.json())
-      .then((data: { models: OllamaModelInfo[]; error?: string }) => {
-        if (cancelled) return;
-        setOllamaModels(data.models);
-        setOllamaError(data.models.length === 0 && data.error ? data.error : null);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setOllamaModels([]);
-        setOllamaError('Failed to fetch models');
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingModels(false);
-      });
-
-    return () => { cancelled = true; };
-  }, [isVibeLocalChecked]);
 
   const handleCheckboxChange = useCallback(
     async (toolId: CLIToolType, checked: boolean) => {
@@ -217,74 +161,6 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
       }
     },
     [worktreeId, clampedAgents, onSelectedAgentsChange, persistToServer]
-  );
-
-  const handleModelChange = useCallback(
-    async (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const value = e.target.value;
-      const model = value === '' ? null : value;
-      setSavingModel(true);
-      try {
-        const response = await fetch(`/api/worktrees/${worktreeId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ vibeLocalModel: model }),
-        });
-        if (response.ok) {
-          onVibeLocalModelChange(model);
-        }
-      } catch {
-        // Silently fail - model selection is non-critical
-      } finally {
-        setSavingModel(false);
-      }
-    },
-    [worktreeId, onVibeLocalModelChange]
-  );
-
-  const handleContextWindowInput = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setContextWindowInput(e.target.value);
-    },
-    []
-  );
-
-  /** Save context window on blur (when user finishes editing) */
-  const handleContextWindowBlur = useCallback(
-    async () => {
-      const raw = contextWindowInput.trim();
-      const parsed = parseInt(raw, 10);
-      const ctxWindow = raw === '' ? null : (Number.isNaN(parsed) ? null : parsed);
-
-      // Skip API call if value hasn't changed
-      const currentValue = vibeLocalContextWindow ?? null;
-      if (ctxWindow === currentValue) return;
-
-      setSavingContextWindow(true);
-      try {
-        const response = await fetch(`/api/worktrees/${worktreeId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ vibeLocalContextWindow: ctxWindow }),
-        });
-        if (response.ok) {
-          onVibeLocalContextWindowChange?.(ctxWindow);
-        } else {
-          // Revert input to previous value on server rejection
-          setContextWindowInput(
-            currentValue != null ? String(currentValue) : ''
-          );
-        }
-      } catch {
-        // Revert input on network error
-        setContextWindowInput(
-          currentValue != null ? String(currentValue) : ''
-        );
-      } finally {
-        setSavingContextWindow(false);
-      }
-    },
-    [contextWindowInput, vibeLocalContextWindow, worktreeId, onVibeLocalContextWindowChange]
   );
 
   const isMaxSelected = checkedIds.size >= maxAgents;
@@ -341,59 +217,15 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
         </div>
       )}
 
-      {/* Ollama model selector */}
+      {/* Ollama model selector (vibe-local only) */}
       {isVibeLocalChecked && (
-        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-          <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">
-            {t('vibeLocalModel')}
-          </h4>
-
-          {loadingModels ? (
-            <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-              <span className="w-3 h-3 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
-              {t('loading')}
-            </div>
-          ) : ollamaError && ollamaModels.length === 0 ? (
-            <p className="text-xs text-amber-600 dark:text-amber-400">
-              {t('ollamaNotAvailable')}
-            </p>
-          ) : (
-            <select
-              data-testid="vibe-local-model-select"
-              value={vibeLocalModel ?? ''}
-              onChange={handleModelChange}
-              disabled={savingModel}
-              className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 disabled:opacity-50"
-            >
-              <option value="">{t('vibeLocalModelDefault')}</option>
-              {ollamaModels.map((model) => (
-                <option key={model.name} value={model.name}>
-                  {model.name}{model.parameterSize ? ` (${model.parameterSize})` : ''}
-                </option>
-              ))}
-            </select>
-          )}
-
-          {/* Context window input */}
-          <div className="mt-3">
-            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">
-              {t('vibeLocalContextWindow')}
-            </h4>
-            <input
-              type="number"
-              data-testid="vibe-local-context-window-input"
-              step="1"
-              min={VIBE_LOCAL_CONTEXT_WINDOW_MIN}
-              max={VIBE_LOCAL_CONTEXT_WINDOW_MAX}
-              value={contextWindowInput}
-              onChange={handleContextWindowInput}
-              onBlur={handleContextWindowBlur}
-              placeholder={t('vibeLocalContextWindowDefault')}
-              disabled={savingContextWindow}
-              className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 disabled:opacity-50"
-            />
-          </div>
-        </div>
+        <VibeLocalSettings
+          worktreeId={worktreeId}
+          vibeLocalModel={vibeLocalModel}
+          onVibeLocalModelChange={onVibeLocalModelChange}
+          vibeLocalContextWindow={vibeLocalContextWindow}
+          onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
+        />
       )}
     </div>
   );

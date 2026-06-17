@@ -16,5 +16,11 @@
   "syncSuccess": "Synced {count} worktrees",
   "syncError": "Sync failed",
   "syncAuthError": "Authentication error",
-  "syncButtonLabel": "Sync branches"
+  "syncButtonLabel": "Sync branches",
+  "tooltips": {
+    "viewMode": "Toggle view mode (grouped / flat)",
+    "sort": "Sort branches",
+    "sync": "Sync worktrees",
+    "repositories": "Manage repositories (add / sync)"
+  }
 }

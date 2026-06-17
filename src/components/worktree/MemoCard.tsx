@@ -197,7 +197,7 @@ export const MemoCard = memo(function MemoCard({
           onChange={handleTitleChange}
           onBlur={handleTitleBlur}
           placeholder="Memo title"
-          className="flex-1 text-sm font-medium text-gray-900 dark:text-gray-100 bg-transparent border-none focus:outline-none focus:ring-0 p-0"
+          className="flex-1 min-w-0 text-sm font-medium text-gray-900 dark:text-gray-100 bg-transparent border-none focus:outline-none focus:ring-0 p-0"
         />
         {isSaving && (
           <span
@@ -214,7 +214,7 @@ export const MemoCard = memo(function MemoCard({
             data-testid="insert-memo-content"
             onClick={handleInsert}
             aria-label="Insert to message"
-            className="p-1 text-gray-400 dark:text-gray-500 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors rounded"
+            className="flex-shrink-0 p-1 text-gray-400 dark:text-gray-500 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors rounded"
             title="Insert to message"
           >
             <ArrowDownToLine className="w-4 h-4" aria-hidden="true" />
@@ -225,7 +225,7 @@ export const MemoCard = memo(function MemoCard({
           type="button"
           onClick={handleCopy}
           aria-label="Copy memo content"
-          className="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors rounded"
+          className="flex-shrink-0 p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors rounded"
         >
           {copied ? (
             <Check className="w-4 h-4 text-green-600" />
@@ -237,7 +237,7 @@ export const MemoCard = memo(function MemoCard({
           type="button"
           onClick={handleDelete}
           aria-label="Delete memo"
-          className="p-1 text-gray-400 dark:text-gray-500 hover:text-red-500 transition-colors rounded"
+          className="flex-shrink-0 p-1 text-gray-400 dark:text-gray-500 hover:text-red-500 transition-colors rounded"
         >
           <svg
             className="w-4 h-4"

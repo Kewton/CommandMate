@@ -244,16 +244,20 @@ export const worktreeApi = {
    *
    * @param id - Worktree ID
    * @param content - Message content
-   * @param options - Optional settings (cliToolId, imagePath)
+   * @param options - Optional settings (cliToolId, instanceId, imagePath)
    */
   async sendMessage(
     id: string,
     content: string,
-    options?: { cliToolId?: CLIToolType; imagePath?: string }
+    options?: { cliToolId?: CLIToolType; instanceId?: string; imagePath?: string }
   ): Promise<{ success: boolean }> {
-    const body: { content: string; cliToolId?: string; imagePath?: string } = { content };
+    const body: { content: string; cliToolId?: string; instanceId?: string; imagePath?: string } = { content };
     if (options?.cliToolId) {
       body.cliToolId = options.cliToolId;
+    }
+    // Issue #869: target a specific agent instance (defaults to primary === cliToolId).
+    if (options?.instanceId) {
+      body.instanceId = options.instanceId;
     }
     if (options?.imagePath) {
       body.imagePath = options.imagePath;
@@ -328,14 +332,23 @@ export const worktreeApi = {
    * Kill the tmux session for a worktree
    * @param id - Worktree ID
    * @param cliToolId - Optional CLI tool ID (claude, codex, gemini). If not specified, uses worktree's default.
+   * @param instanceId - Optional agent instance ID (Issue #875). When provided,
+   *   scopes the kill to that single instance; the primary instance uses
+   *   instanceId === cliToolId. Sent as the `instance` query parameter that the
+   *   kill-session route already understands.
    */
-  async killSession(id: string, cliToolId?: CLIToolType): Promise<{ success: boolean; message: string }> {
+  async killSession(
+    id: string,
+    cliToolId?: CLIToolType,
+    instanceId?: string,
+  ): Promise<{ success: boolean; message: string }> {
+    const query = new URLSearchParams();
+    if (cliToolId) query.set('cliTool', cliToolId);
+    if (instanceId) query.set('instance', instanceId);
+    const queryString = query.toString();
     return fetchApi<{ success: boolean; message: string }>(
-      `/api/worktrees/${id}/kill-session`,
-      {
-        method: 'POST',
-        body: cliToolId ? JSON.stringify({ cliToolId }) : undefined,
-      }
+      `/api/worktrees/${id}/kill-session${queryString ? `?${queryString}` : ''}`,
+      { method: 'POST' }
     );
   },
 };

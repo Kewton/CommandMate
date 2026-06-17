@@ -18,6 +18,11 @@ import { KEY_PRESS_FEEDBACK_RESET_MS, NAV_KEY_REFRESH_DELAY_MS } from '@/config/
 export interface NavigationButtonsProps {
   worktreeId: string;
   cliToolId: CLIToolType;
+  /**
+   * Issue #869: agent instance id to target. Defaults to the primary instance
+   * (`=== cliToolId`) when omitted, preserving pre-#869 behavior.
+   */
+  instanceId?: string;
   /** Optional callback to trigger immediate terminal refresh after key send */
   onKeysSent?: () => void;
 }
@@ -32,7 +37,7 @@ const NAVIGATION_BUTTONS: ReadonlyArray<{ key: NavigationKey; label: string; ari
   { key: 'Escape', label: 'Esc', ariaLabel: 'Escape' },
 ];
 
-export function NavigationButtons({ worktreeId, cliToolId, onKeysSent }: NavigationButtonsProps) {
+export function NavigationButtons({ worktreeId, cliToolId, instanceId, onKeysSent }: NavigationButtonsProps) {
   const [activeKey, setActiveKey] = useState<string | null>(null);
 
   const sendKeys = useCallback((keys: string[]) => {
@@ -41,10 +46,14 @@ export function NavigationButtons({ worktreeId, cliToolId, onKeysSent }: Navigat
     setTimeout(() => setActiveKey(null), KEY_PRESS_FEEDBACK_RESET_MS);
 
     // Send keys and trigger immediate refresh after a short delay for tmux to process
+    // Issue #869: include instanceId so additional instances target their own session.
+    const body = instanceId && instanceId !== cliToolId
+      ? { cliToolId, keys, instanceId }
+      : { cliToolId, keys };
     fetch(`/api/worktrees/${encodeURIComponent(worktreeId)}/special-keys`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cliToolId, keys }),
+      body: JSON.stringify(body),
     }).then(() => {
       // Trigger immediate terminal refresh after 100ms (allow tmux to process the key)
       if (onKeysSent) {
@@ -53,7 +62,7 @@ export function NavigationButtons({ worktreeId, cliToolId, onKeysSent }: Navigat
     }).catch((err) => {
       console.error('Failed to send special keys:', err);
     });
-  }, [worktreeId, cliToolId, onKeysSent]);
+  }, [worktreeId, cliToolId, instanceId, onKeysSent]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
     const keyMap: Record<string, string> = {

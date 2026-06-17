@@ -158,6 +158,23 @@ describe('BranchStatusIndicator', () => {
       expect(indicator.getAttribute('title')).toBe('Generating');
       expect(indicator.getAttribute('aria-label')).toBe('Generating');
     });
+
+    it('should override the label when a custom label is provided (Issue #867)', () => {
+      render(
+        <BranchStatusIndicator status="running" label="Claude: running, Codex: idle" />
+      );
+
+      const indicator = screen.getByTestId('status-indicator');
+      expect(indicator.getAttribute('title')).toBe('Claude: running, Codex: idle');
+      expect(indicator.getAttribute('aria-label')).toBe('Claude: running, Codex: idle');
+    });
+
+    it('should fall back to the config label when label is omitted (Issue #867)', () => {
+      render(<BranchStatusIndicator status="waiting" />);
+
+      const indicator = screen.getByTestId('status-indicator');
+      expect(indicator.getAttribute('aria-label')).toBe('Waiting for response');
+    });
   });
 
   describe('All status types', () => {

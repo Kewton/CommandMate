@@ -24,7 +24,7 @@
 
 import React, { memo, useCallback, useMemo } from 'react';
 import { useTranslations } from 'next-intl';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import { TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
@@ -56,8 +56,10 @@ import type {
  * prop count to 13 (<= 15) with no behavior change.
  */
 export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProps {
-  availableCliTools: CLIToolType[];
-  onCliToolChange: (id: CLIToolType) => void;
+  /** Issue #869: instances selectable for this split (excludes other-split instances; includes own). */
+  availableInstances: AgentInstance[];
+  /** Issue #869: called when the instance selector picks a different instance. */
+  onInstanceChange: (instanceId: string) => void;
   onFocus: () => void;
   /** Set to true to suppress polling (e.g. component is currently hidden). */
   disabled?: boolean;
@@ -67,7 +69,7 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
   onInsertConsumed?: () => void;
   /**
    * Called after a message is successfully sent so the parent can also
-   * refresh the (activeCliTab-scoped) message history.
+   * refresh the (active-instance-scoped) message history.
    */
   onMessageSent?: (cliToolId: CLIToolType) => void;
   /** AutoYes domain group (Issue #756). 'onToggle' required; rest optional. */
@@ -75,22 +77,25 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
   /** History domain group (Issue #756). Optional; pre-#744 callers omit it. */
   history?: HistoryPaneProps;
   /**
-   * Issue #786: drag-drop. Threaded straight through to `TerminalSplitPane`.
-   * Optional (backward compat / D-4) — drag-drop is inert when omitted. The
-   * hover ring state stays inside `TerminalSplitPane` (child-local) so this
-   * pass-through does not introduce a new re-render source here (D-3).
+   * Issue #786 / #869: drag-drop. Threaded straight through to
+   * `TerminalSplitPane`. Optional (backward compat / D-4) — drag-drop is inert
+   * when omitted. The hover ring state stays inside `TerminalSplitPane`
+   * (child-local) so this pass-through does not introduce a new re-render
+   * source here (D-3). The payload is now an agent `instanceId`.
    */
-  onDropCliTool?: (cliId: CLIToolType) => void;
-  /** Issue #786 (D-2): published cliId being dragged, for the dragOver ring. */
-  draggedCliTool?: CLIToolType | null;
+  onDropInstance?: (instanceId: string) => void;
+  /** Issue #786 / #869 (D-2): published instanceId being dragged, for the dragOver ring. */
+  draggedInstanceId?: string | null;
 }
 
 export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   worktreeId,
   splitIndex,
   cliToolId,
-  availableCliTools,
-  onCliToolChange,
+  instanceId,
+  instance,
+  availableInstances,
+  onInstanceChange,
   onFocus,
   disabled = false,
   pendingInsertText,
@@ -99,9 +104,13 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   cliStatus = 'idle',
   autoYes,
   history,
-  onDropCliTool,
-  draggedCliTool,
+  onDropInstance,
+  draggedInstanceId,
 }: TerminalSplitPaneContentProps) {
+  // Issue #869: resolve the instance id this split targets. Defaults to the
+  // primary instance (`=== cliToolId`) so pre-#869 single-instance behavior —
+  // and every primary-instance request — stays byte-for-byte identical.
+  const resolvedInstanceId = instanceId ?? cliToolId;
   // Issue #756: re-derive the legacy local names from the new domain groups so
   // the entire component body below stays byte-for-byte unchanged (all
   // useMemo/useCallback deps and JSX identical). Defaults match the previous
@@ -132,6 +141,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   } = useTerminalPanePolling({
     worktreeId,
     cliToolId,
+    instanceId: resolvedInstanceId,
     enabled: !disabled,
   });
 
@@ -145,6 +155,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   } = useSplitMessages({
     worktreeId,
     cliToolId,
+    instanceId: resolvedInstanceId,
     limit: historyDisplayLimit,
     includeArchived: showArchived,
     enabled: !disabled,
@@ -194,7 +205,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     async (answer: string): Promise<void> => {
       setPromptAnswering(true);
       try {
-        const requestBody = buildPromptResponseBody(answer, cliToolId, prompt.data);
+        const requestBody = buildPromptResponseBody(answer, cliToolId, prompt.data, resolvedInstanceId);
         const response = await fetch(
           `/api/worktrees/${worktreeId}/prompt-response`,
           {
@@ -214,7 +225,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
         setPromptAnswering(false);
       }
     },
-    [worktreeId, cliToolId, prompt.data, setPromptAnswering, clearPrompt, refresh],
+    [worktreeId, cliToolId, resolvedInstanceId, prompt.data, setPromptAnswering, clearPrompt, refresh],
   );
 
   const handlePromptDismiss = useCallback(() => {
@@ -410,6 +421,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
           <NavigationButtons
             worktreeId={worktreeId}
             cliToolId={cliToolId}
+            instanceId={resolvedInstanceId}
             onKeysSent={refresh}
           />
         ) : null}
@@ -428,6 +440,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
           worktreeId={worktreeId}
           onMessageSent={handleMessageSent}
           cliToolId={cliToolId}
+          instanceId={resolvedInstanceId}
           isSessionRunning={terminal.isRunning}
           pendingInsertText={pendingInsertText ?? null}
           onInsertConsumed={onInsertConsumed}
@@ -447,6 +460,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       showPrompt,
       worktreeId,
       cliToolId,
+      resolvedInstanceId,
       refresh,
       prompt.data,
       prompt.messageId,
@@ -474,16 +488,18 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       worktreeId={worktreeId}
       splitIndex={splitIndex}
       cliToolId={cliToolId}
-      availableCliTools={availableCliTools}
-      onCliToolChange={onCliToolChange}
+      instanceId={resolvedInstanceId}
+      instance={instance}
+      availableInstances={availableInstances}
+      onInstanceChange={onInstanceChange}
       onFocus={onFocus}
       attaching={terminal.attaching}
       headerExtras={statusIndicator}
       terminal={terminalSlot}
       footer={footerSlot}
-      // Issue #786: drag-drop pass-through (optional; inert when omitted).
-      onDropCliTool={onDropCliTool}
-      draggedCliTool={draggedCliTool}
+      // Issue #786 / #869: drag-drop pass-through (optional; inert when omitted).
+      onDropInstance={onDropInstance}
+      draggedInstanceId={draggedInstanceId}
     />
   );
 });

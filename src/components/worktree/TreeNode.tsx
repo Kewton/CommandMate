@@ -21,6 +21,7 @@ import { useLongPress } from '@/hooks/useLongPress';
 import { escapeRegExp } from '@/lib/utils';
 import { formatRelativeTime } from '@/lib/date-utils';
 import { getDateFnsLocale } from '@/lib/date-locale';
+import { TruncationTooltip } from '@/components/common/TruncationTooltip';
 
 // ============================================================================
 // Types
@@ -366,17 +367,18 @@ export const TreeNode = memo(function TreeNode({
         )}
 
         {/* Name - with highlight for name search */}
-        {/* [Issue #852] title shows full name on hover when truncated */}
-        <span
+        {/* [Issue #859] JS tooltip (Portal) shows full name on hover when truncated,
+            replacing the native `title` whose show-delay is browser-controlled and slow */}
+        <TruncationTooltip
+          content={item.name}
           className="flex-1 truncate text-sm text-gray-700 dark:text-gray-300"
-          title={item.name}
         >
           {searchMode === 'name' && searchQuery ? (
             <HighlightedText text={item.name} query={searchQuery} />
           ) : (
             item.name
           )}
-        </span>
+        </TruncationTooltip>
 
         {/* File size or item count */}
         <span className="text-xs text-gray-400 flex-shrink-0">

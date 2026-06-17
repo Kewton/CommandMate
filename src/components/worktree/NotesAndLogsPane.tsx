@@ -2,6 +2,7 @@
  * NotesAndLogsPane Component
  * Issue #294: Combined Memo + Execution Log pane
  * Issue #368: Added 'agent' sub-tab for Agent settings
+ * Issue #874: The 'agent' sub-tab can switch to instance-management mode (mobile)
  *
  * [S1-013] Props: { worktreeId: string; className?: string; }
  * Sub-tab state is managed internally (not exposed to parent)
@@ -15,8 +16,9 @@ import { useTranslations } from 'next-intl';
 import { MemoPane } from './MemoPane';
 import { ExecutionLogPane } from './ExecutionLogPane';
 import { AgentSettingsPane } from './AgentSettingsPane';
+import { MobileAgentInstancesPane } from './MobileAgentInstancesPane';
 import { TimerPane } from './TimerPane';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 
 // ============================================================================
 // Types
@@ -56,6 +58,21 @@ export interface NotesAndLogsPaneProps {
   vibeLocalContextWindow?: number | null;
   /** Issue #374: Callback when vibe-local context window changes */
   onVibeLocalContextWindowChange?: (value: number | null) => void;
+  /**
+   * Issue #874: When true the 'agent' sub-tab renders the instance-management UI
+   * (MobileAgentInstancesPane) instead of AgentSettingsPane. Requires the
+   * instance props below. Defaults to false (legacy checkbox UI) for backward
+   * compatibility.
+   */
+  useInstanceManagement?: boolean;
+  /** Issue #874: Shared agent instance roster (instance-management mode). */
+  instances?: AgentInstance[];
+  /** Issue #874: Callback when the roster changes (after a successful PATCH). */
+  onInstancesChange?: (instances: AgentInstance[]) => void;
+  /** Issue #874: Per-device visible instance ids (localStorage, never the DB). */
+  visibleInstanceIds?: string[];
+  /** Issue #874: Toggle one instance's per-device visibility. */
+  onToggleInstanceVisible?: (instanceId: string) => void;
 }
 
 // ============================================================================
@@ -92,6 +109,11 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
   availableAgents,
   persistToServer,
   onInsertToMessage,
+  useInstanceManagement = false,
+  instances,
+  onInstancesChange,
+  visibleInstanceIds,
+  onToggleInstanceVisible,
 }: NotesAndLogsPaneProps) {
   const t = useTranslations('schedule');
   // Internal sub-tab state (not leaked to parent)
@@ -132,18 +154,34 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
           />
         )}
         {activeSubTab === 'agent' && (
-          <AgentSettingsPane
-            worktreeId={worktreeId}
-            selectedAgents={selectedAgents}
-            onSelectedAgentsChange={onSelectedAgentsChange}
-            vibeLocalModel={vibeLocalModel}
-            onVibeLocalModelChange={onVibeLocalModelChange}
-            vibeLocalContextWindow={vibeLocalContextWindow}
-            onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
-            maxAgents={maxAgents}
-            availableAgents={availableAgents}
-            persistToServer={persistToServer}
-          />
+          useInstanceManagement && instances && onInstancesChange && visibleInstanceIds && onToggleInstanceVisible ? (
+            <div className="h-full overflow-y-auto">
+              <MobileAgentInstancesPane
+                worktreeId={worktreeId}
+                instances={instances}
+                onInstancesChange={onInstancesChange}
+                vibeLocalModel={vibeLocalModel}
+                onVibeLocalModelChange={onVibeLocalModelChange}
+                vibeLocalContextWindow={vibeLocalContextWindow}
+                onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
+                visibleInstanceIds={visibleInstanceIds}
+                onToggleInstanceVisible={onToggleInstanceVisible}
+              />
+            </div>
+          ) : (
+            <AgentSettingsPane
+              worktreeId={worktreeId}
+              selectedAgents={selectedAgents}
+              onSelectedAgentsChange={onSelectedAgentsChange}
+              vibeLocalModel={vibeLocalModel}
+              onVibeLocalModelChange={onVibeLocalModelChange}
+              vibeLocalContextWindow={vibeLocalContextWindow}
+              onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
+              maxAgents={maxAgents}
+              availableAgents={availableAgents}
+              persistToServer={persistToServer}
+            />
+          )
         )}
         {activeSubTab === 'timer' && (
           <TimerPane

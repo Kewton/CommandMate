@@ -46,13 +46,18 @@ import { useUpdateCheck } from '@/hooks/useUpdateCheck';
 import { type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import type { AutoYesStopReason } from '@/config/auto-yes-config';
 import type { Worktree, ChatMessage, PromptData, FileContent } from '@/types/models';
-import { isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
+import {
+  isCliToolType,
+  isValidInstanceId,
+  agentInstancesFromSelectedAgents,
+  type CLIToolType,
+  type AgentInstance,
+} from '@/lib/cli-tools/types';
 import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
-import { useMobileSelectedAgents } from '@/hooks/useMobileSelectedAgents';
+import { useMobileSelectedInstances } from '@/hooks/useMobileSelectedInstances';
 import { useTranslations } from 'next-intl';
 import { useFileOperations } from '@/hooks/useFileOperations';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
-import { parseCmateContent, validateScheduleHeaders, validateSchedulesSection, CMATE_TEMPLATE_CONTENT } from '@/lib/cmate-validator';
 import {
   HISTORY_DISPLAY_LIMIT_STORAGE_KEY,
   HISTORY_USER_ONLY_STORAGE_KEY,
@@ -67,6 +72,14 @@ import {
 
 /** localStorage key prefix for persisting the active CLI tool tab per worktree */
 const ACTIVE_CLI_TAB_STORAGE_KEY_PREFIX = 'activeCliTab-';
+
+/**
+ * Issue #869: localStorage key prefix for the active agent *instance* per
+ * worktree. Supersedes `activeCliTab-<wt>` (which stored a bare CLI tool id).
+ * Migration: when the new key is absent we fall back to the legacy key, whose
+ * value is a primary instance id (primary instance id === its CLI tool id).
+ */
+const ACTIVE_INSTANCE_STORAGE_KEY_PREFIX = 'activeInstanceId-';
 
 // ============================================================================
 // Types
@@ -138,6 +151,11 @@ const DEFAULT_WORKTREE_NAME = 'Unknown';
 export function useWorktreeDetailController({ worktreeId }: { worktreeId: string }) {
   const router = useRouter();
   const isMobile = useIsMobile();
+  // Issue #874: ref mirror so the message/output fetchers (which read state via
+  // refs to keep a stable identity) can mobile-gate the `instance` query param
+  // without being recreated on every isMobile change.
+  const isMobileRef = useRef(isMobile);
+  isMobileRef.current = isMobile;
   // Issue #747: the sidebar toggle moved into the ActivityBar (which reads
   // SidebarContext directly), so DesktopHeader no longer needs `toggle` here.
   const { openMobileDrawer } = useSidebarContext();
@@ -146,7 +164,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const tError = useTranslations('error');
   const tCommon = useTranslations('common');
   const tAutoYes = useTranslations('autoYes');
-  const tSchedule = useTranslations('schedule');
 
   // Issue #839: Stale-while-revalidate priming. The worktree *list* is already
   // cached by useWorktreesCache (exposed via WorktreesCacheProvider). When the
@@ -200,6 +217,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Ref to access latest selectedAgents inside fetchWorktree without adding to useCallback deps
   const selectedAgentsRef = useRef(selectedAgents);
   selectedAgentsRef.current = selectedAgents;
+  // Issue #869: Agent instance roster (PC). Drives the instance tabs / split
+  // selectors. Decoupled from selectedAgents server-side; seeded from the
+  // default selection until the worktree's agentInstances arrive from the API.
+  const [agentInstances, setAgentInstances] = useState<AgentInstance[]>(
+    () => agentInstancesFromSelectedAgents(DEFAULT_SELECTED_AGENTS),
+  );
+  const agentInstancesRef = useRef(agentInstances);
+  agentInstancesRef.current = agentInstances;
   // Issue #368: Vibe-local Ollama model state (initialized from API)
   const [vibeLocalModel, setVibeLocalModel] = useState<string | null>(null);
   // Issue #374: Vibe-local context window state (initialized from API)
@@ -224,6 +249,37 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Issue #4: Ref to avoid polling callback recreation on tab switch
   const activeCliTabRef = useRef<CLIToolType>(activeCliTab);
   activeCliTabRef.current = activeCliTab;
+  // Issue #869: active agent *instance* (PC). The instance is the tab/split
+  // identity; `activeCliTab` is kept in sync with the active instance's CLI tool
+  // (cliTool-keyed concerns — auto-yes, status, kill — stay keyed on it).
+  const [activeInstanceId, setActiveInstanceIdRaw] = useState<string>(() => {
+    try {
+      const saved = window.localStorage.getItem(ACTIVE_INSTANCE_STORAGE_KEY_PREFIX + worktreeId);
+      if (saved && isValidInstanceId(saved)) {
+        return saved;
+      }
+      // Migration: legacy key stored a bare CLI tool id (== primary instance id).
+      const legacy = window.localStorage.getItem(ACTIVE_CLI_TAB_STORAGE_KEY_PREFIX + worktreeId);
+      if (legacy && isCliToolType(legacy)) {
+        return legacy;
+      }
+    } catch { /* localStorage unavailable (SSR) */ }
+    return DEFAULT_SELECTED_AGENTS[0];
+  });
+  // Wrapper: persist activeInstanceId AND sync activeCliTab from the instance's
+  // CLI tool so cliTool-keyed concerns follow the active instance.
+  const setActiveInstanceId = useCallback((instanceId: string) => {
+    setActiveInstanceIdRaw(instanceId);
+    try {
+      window.localStorage.setItem(ACTIVE_INSTANCE_STORAGE_KEY_PREFIX + worktreeId, instanceId);
+    } catch { /* localStorage unavailable */ }
+    const inst = agentInstancesRef.current.find(i => i.id === instanceId);
+    if (inst) {
+      setActiveCliTab(inst.cliTool);
+    }
+  }, [worktreeId, setActiveCliTab]);
+  const activeInstanceIdRef = useRef<string>(activeInstanceId);
+  activeInstanceIdRef.current = activeInstanceId;
   // Issue #597: Latest-request guards prevent stale async responses from older
   // polls/tab switches from overwriting the active CLI tab state.
   const latestMessagesRequestIdRef = useRef(0);
@@ -239,10 +295,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const [newFileParentPath, setNewFileParentPath] = useState('');
 
   // Issue #727: Activity Bar + History pane state (PC)
+  // Issue #858: persisted per-worktree so the open/closed state no longer
+  // leaks across branch (worktree) switches.
   const {
     active: activeActivity,
     toggle: toggleActivity,
-  } = useActivityBarState();
+  } = useActivityBarState(worktreeId);
   // Issue #744: the top-level History column was removed on PC (History moved
   // into each terminal split), so `WorktreeDetailRefactored` no longer needs a
   // `useHistoryPaneState` instance. Each `TerminalSplitPaneContent` owns its
@@ -403,6 +461,20 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
           setSelectedAgents(data.selectedAgents);
         }
       }
+      // Issue #869: sync the agent instance roster (GET always returns it,
+      // falling back to a selectedAgents-derived primary set server-side).
+      if (data.agentInstances) {
+        const current = agentInstancesRef.current;
+        const next = data.agentInstances;
+        const isSame = next.length === current.length &&
+          next.every((inst, i) =>
+            inst.id === current[i].id &&
+            inst.cliTool === current[i].cliTool &&
+            inst.alias === current[i].alias);
+        if (!isSame) {
+          setAgentInstances(next);
+        }
+      }
       // Issue #368: Sync vibeLocalModel from API response
       if ('vibeLocalModel' in data) {
         setVibeLocalModel(data.vibeLocalModel ?? null);
@@ -423,9 +495,17 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Issue #4: Use ref for activeCliTab to avoid callback recreation on tab switch
   const fetchMessages = useCallback(async (): Promise<void> => {
     const requestedCliTool = activeCliTabRef.current;
+    // Issue #874: on mobile the History tab follows the active agent *instance*
+    // (tabs are instance-based). Add `instance` only on mobile so PC requests
+    // stay byte-for-byte identical (PC History is per-split, keyed elsewhere).
+    const onMobile = isMobileRef.current;
+    const requestedInstance = activeInstanceIdRef.current;
     const requestId = ++latestMessagesRequestIdRef.current;
     try {
       const params = new URLSearchParams({ cliTool: requestedCliTool });
+      if (onMobile) {
+        params.set('instance', requestedInstance);
+      }
       if (showArchivedRef.current) {
         params.set('includeArchived', 'true');
       }
@@ -436,12 +516,20 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         throw new Error(`Failed to fetch messages: ${response.status}`);
       }
       const data: ChatMessage[] = await response.json();
-      if (latestMessagesRequestIdRef.current !== requestId || activeCliTabRef.current !== requestedCliTool) {
+      if (
+        latestMessagesRequestIdRef.current !== requestId ||
+        activeCliTabRef.current !== requestedCliTool ||
+        (onMobile && activeInstanceIdRef.current !== requestedInstance)
+      ) {
         return;
       }
       actions.setMessages(parseMessageTimestamps(data));
     } catch (err) {
-      if (latestMessagesRequestIdRef.current !== requestId || activeCliTabRef.current !== requestedCliTool) {
+      if (
+        latestMessagesRequestIdRef.current !== requestId ||
+        activeCliTabRef.current !== requestedCliTool ||
+        (onMobile && activeInstanceIdRef.current !== requestedInstance)
+      ) {
         return;
       }
       console.error('[WorktreeDetailRefactored] Error fetching messages:', err);
@@ -452,14 +540,26 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Issue #4: Use ref for activeCliTab to avoid callback recreation on tab switch
   const fetchCurrentOutput = useCallback(async (): Promise<void> => {
     const requestedCliTool = activeCliTabRef.current;
+    // Issue #874: mobile-gate the instance selector (see fetchMessages). PC keeps
+    // the cliTool-keyed parent poll byte-identical; the mobile terminal tab and
+    // History follow the active instance.
+    const onMobile = isMobileRef.current;
+    const requestedInstance = activeInstanceIdRef.current;
     const requestId = ++latestCurrentOutputRequestIdRef.current;
     try {
-      const response = await fetch(`/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCliTool}`);
+      const outputUrl = onMobile
+        ? `/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCliTool}&instance=${encodeURIComponent(requestedInstance)}`
+        : `/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCliTool}`;
+      const response = await fetch(outputUrl);
       if (!response.ok) {
         return;
       }
       const data: CurrentOutputResponse = await response.json();
-      if (latestCurrentOutputRequestIdRef.current !== requestId || activeCliTabRef.current !== requestedCliTool) {
+      if (
+        latestCurrentOutputRequestIdRef.current !== requestId ||
+        activeCliTabRef.current !== requestedCliTool ||
+        (onMobile && activeInstanceIdRef.current !== requestedInstance)
+      ) {
         return;
       }
       if (data.cliToolId && data.cliToolId !== requestedCliTool) {
@@ -503,29 +603,63 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         }
       }
     } catch (err) {
-      if (latestCurrentOutputRequestIdRef.current !== requestId || activeCliTabRef.current !== requestedCliTool) {
+      if (
+        latestCurrentOutputRequestIdRef.current !== requestId ||
+        activeCliTabRef.current !== requestedCliTool ||
+        (onMobile && activeInstanceIdRef.current !== requestedInstance)
+      ) {
         return;
       }
       console.error('[WorktreeDetailRefactored] Error fetching current output:', err);
     }
   }, [worktreeId, actions, state.prompt.visible]);
 
-  // Issue #837/#851: Mobile keeps its own agent preference in localStorage,
-  // resolved against the full agent pool (CLI_TOOL_IDS) so it can pick any CLI
-  // tool independently of the PC, and never writes the DB. PC continues to use
-  // the full DB selection.
-  const { mobileSelectedAgents, setMobileSelectedAgents } = useMobileSelectedAgents({
-    worktreeId,
-  });
+  // Issue #874: Mobile now manages agent *instances* (折衷案). The shared roster
+  // (agentInstances) lives in the DB; this hook owns ONLY the per-device "which
+  // instances to show as tabs" selection (localStorage, never the DB) — so a
+  // mobile user narrowing their tabs does not shrink the PC view (#837/#851).
+  const {
+    visibleInstances,
+    visibleInstanceIds,
+    toggleInstanceVisible,
+  } = useMobileSelectedInstances({ worktreeId, roster: agentInstances });
+
+  // Mobile tabs are the per-device visible subset; PC uses the full roster.
+  const displayedInstances = isMobile ? visibleInstances : agentInstances;
+
+  // Derived CLI-tool list for surfaces that still take CLIToolType[] (TimerPane,
+  // legacy props). Mobile = unique cliTools of the visible instances (instance
+  // order); PC = the DB selection (unchanged).
+  const mobileSelectedAgents = useMemo(
+    () => Array.from(new Set(visibleInstances.map((inst) => inst.cliTool))),
+    [visibleInstances],
+  );
   const displayedAgents = isMobile ? mobileSelectedAgents : selectedAgents;
 
-  // Issue #368: Sync activeCliTab when displayedAgents changes
-  // If current activeCliTab is no longer in displayedAgents, switch to first agent
+  // Issue #869/#874: keep activeInstanceId pointing at a currently-displayed
+  // instance. PC uses the full roster; mobile uses the visible subset. When the
+  // active instance disappears (rename/delete/reorder, or hidden on this
+  // device), fall back to the first displayed instance. setActiveInstanceId
+  // mirrors the instance's CLI tool into activeCliTab, so cliTool-keyed concerns
+  // (auto-yes, status, kill, message/output fetch) follow the active instance on
+  // both PC and mobile.
   useEffect(() => {
-    if (!displayedAgents.includes(activeCliTab)) {
-      setActiveCliTab(displayedAgents[0]);
+    if (displayedInstances.length === 0) return;
+    if (!displayedInstances.some(inst => inst.id === activeInstanceId)) {
+      setActiveInstanceId(displayedInstances[0].id);
     }
-  }, [displayedAgents, activeCliTab, setActiveCliTab]);
+  }, [displayedInstances, activeInstanceId, setActiveInstanceId]);
+
+  // Idempotent mirror: keep activeCliTab in sync with the active instance's CLI
+  // tool even when activeInstanceId itself is unchanged (e.g. localStorage
+  // restored an instance/cliTool pair that drifted). setActiveCliTab no-ops when
+  // already equal.
+  useEffect(() => {
+    const inst = displayedInstances.find(i => i.id === activeInstanceId);
+    if (inst && inst.cliTool !== activeCliTab) {
+      setActiveCliTab(inst.cliTool);
+    }
+  }, [displayedInstances, activeInstanceId, activeCliTab, setActiveCliTab]);
 
   // Issue #379: Disable auto-follow for full-screen TUI tools (OpenCode, Copilot).
   // These tools render in alternate screen mode where menus appear at the top.
@@ -535,6 +669,15 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   /** Issue #368: Callback for AgentSettingsPane to update selectedAgents */
   const handleSelectedAgentsChange = useCallback((agents: CLIToolType[]) => {
     setSelectedAgents(agents);
+  }, []);
+
+  /**
+   * Issue #869: Callback for AgentSettingsPane to update the agent instance
+   * roster after a successful PATCH. The reconcile effect keeps activeInstanceId
+   * valid if the active instance was renamed/removed.
+   */
+  const handleAgentInstancesChange = useCallback((instances: AgentInstance[]) => {
+    setAgentInstances(instances);
   }, []);
 
   /** Issue #368: Callback for AgentSettingsPane to update vibeLocalModel */
@@ -714,7 +857,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       try {
         // Issue #287: Use shared builder to include promptType and defaultOptionNumber
         // so the API can use cursor-key navigation even when promptCheck re-verification fails.
-        const requestBody = buildPromptResponseBody(answer, activeCliTab, state.prompt.data);
+        // Issue #874: on mobile target the active agent instance (the builder only
+        // attaches instanceId when non-primary, so PC stays byte-identical).
+        const requestBody = buildPromptResponseBody(
+          answer,
+          activeCliTab,
+          state.prompt.data,
+          isMobileRef.current ? activeInstanceIdRef.current : undefined,
+        );
 
         const response = await fetch(`/api/worktrees/${worktreeId}/prompt-response`, {
           method: 'POST',
@@ -826,10 +976,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const handleKillConfirm = useCallback(async (): Promise<void> => {
     setShowKillConfirm(false);
     try {
-      const response = await fetch(
-        `/api/worktrees/${worktreeId}/kill-session?cliTool=${activeCliTab}`,
-        { method: 'POST' }
-      );
+      // Issue #874/#875: always scope the kill to the active agent instance, on
+      // PC as well as mobile. The primary instance uses instanceId === cliToolId
+      // (byte-identical session name), so this is unchanged for primary
+      // instances; for alias instances it terminates only that instance's
+      // session instead of every session of the backing CLI tool.
+      const killUrl =
+        `/api/worktrees/${worktreeId}/kill-session?cliTool=${activeCliTab}&instance=${encodeURIComponent(activeInstanceIdRef.current)}`;
+      const response = await fetch(killUrl, { method: 'POST' });
       if (!response.ok) return;
       actions.clearMessages();
       // Issue #736: terminal reset reflected by useTerminalPanePolling on the
@@ -1004,92 +1158,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     uploadTargetPathRef.current = targetDir;
     fileInputRef.current?.click();
   }, []);
-
-  /** [Issue #294] Handle CMATE.md setup/validate button */
-  const handleCmateSetup = useCallback(async () => {
-    try {
-      // Check if CMATE.md exists via tree listing (avoids 404 console noise)
-      const treeResponse = await fetch(`/api/worktrees/${worktreeId}/tree`);
-      if (!treeResponse.ok) {
-        throw new Error(`Failed to list worktree files: ${treeResponse.status}`);
-      }
-      const treeData = await treeResponse.json();
-      const treeItems: { name: string }[] = treeData.items ?? [];
-      const cmateExists = treeItems.some(item => item.name === 'CMATE.md');
-
-      let content: string;
-
-      if (!cmateExists) {
-        // File does not exist - create with template
-        const createResponse = await fetch(
-          `/api/worktrees/${worktreeId}/files/CMATE.md`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'file', content: CMATE_TEMPLATE_CONTENT }),
-          }
-        );
-        if (!createResponse.ok) {
-          throw new Error('Failed to create CMATE.md');
-        }
-        showToast(tSchedule('cmateCreated'), 'success');
-        setFileTreeRefresh(prev => prev + 1);
-        // Use template content directly for validation
-        content = CMATE_TEMPLATE_CONTENT;
-      } else {
-        // File exists - read content for validation
-        const fileResponse = await fetch(
-          `/api/worktrees/${worktreeId}/files/CMATE.md`
-        );
-        if (!fileResponse.ok) {
-          throw new Error(`Failed to read CMATE.md: ${fileResponse.status}`);
-        }
-        const data = await fileResponse.json();
-        if (typeof data.content !== 'string') {
-          showToast(tSchedule('cmateValidation.failed'), 'error');
-          return;
-        }
-        content = data.content;
-      }
-
-      // Validate content
-      const headerErrors = validateScheduleHeaders(content);
-      const sections = parseCmateContent(content);
-      const scheduleRows = sections.get('Schedules');
-
-      if (!scheduleRows || scheduleRows.length === 0) {
-        showToast(tSchedule('cmateValidation.noSchedulesSection'), 'error');
-        return;
-      }
-
-      const rowErrors = validateSchedulesSection(scheduleRows);
-      const errors = [...headerErrors, ...rowErrors];
-
-      if (errors.length === 0) {
-        showToast(
-          tSchedule('cmateValidation.valid', { count: String(scheduleRows.length) }),
-          'success'
-        );
-      } else {
-        const maxDisplay = 3;
-        const details = errors
-          .slice(0, maxDisplay)
-          .map((e) => e.message)
-          .join('; ');
-        const suffix = errors.length > maxDisplay ? ` (+${errors.length - maxDisplay})` : '';
-        showToast(
-          tSchedule('cmateValidation.errors', {
-            errorCount: String(errors.length),
-            details: details + suffix,
-          }),
-          'error'
-        );
-      }
-    } catch (err) {
-      console.error('[WorktreeDetailRefactored] CMATE setup error:', err);
-      showToast(tSchedule('cmateValidation.failed'), 'error');
-    }
-  }, [worktreeId, showToast, tSchedule]);
 
   /** Handle file input change - perform actual upload */
   const handleFileInputChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1410,7 +1478,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   return {
     activeActivity,
     activeCliTab,
+    activeInstanceId,
     activeTab,
+    agentInstances,
     autoYesEnabled,
     autoYesExpiresAt,
     autoYesStateMap,
@@ -1418,6 +1488,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     diffFilePath,
     disableAutoFollow,
     displayedAgents,
+    displayedInstances,
     editorFilePath,
     error,
     fetchCurrentOutput,
@@ -1425,10 +1496,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     fileSearch,
     fileTreeRefresh,
     handleActivityToggle,
+    handleAgentInstancesChange,
     handleAutoYesToggle,
     handleBackClick,
     handleCloseDiff,
-    handleCmateSetup,
     handleDelete,
     handleDiffSelect,
     handleDirtyChange,
@@ -1495,11 +1566,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     removeToast,
     selectedAgents,
     setActiveCliTab,
+    setActiveInstanceId,
     setEditorFilePath,
     setFocusedSplitIndex,
     setHistorySubTab,
     setIsEditorMaximized,
-    setMobileSelectedAgents,
     setWorktree,
     showArchived,
     showKillConfirm,
@@ -1511,8 +1582,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     tabsActions,
     tabsState,
     toasts,
+    toggleInstanceVisible,
     vibeLocalContextWindow,
     vibeLocalModel,
+    visibleInstanceIds,
     worktree,
     worktreeName,
     worktreeStatus,

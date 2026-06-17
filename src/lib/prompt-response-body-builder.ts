@@ -18,6 +18,8 @@ import type { PromptData, SubmitMode } from '@/types/models';
 export interface PromptResponseBody {
   answer: string;
   cliTool: string;
+  /** Issue #869: agent instance id (defaults server-side to primary === cliTool). */
+  instanceId?: string;
   promptType?: string;
   defaultOptionNumber?: number;
   /** Issue #616: Submit mode for multiple choice prompts */
@@ -34,14 +36,23 @@ export interface PromptResponseBody {
  * @param answer - The answer string to send
  * @param cliTool - The CLI tool identifier (e.g., 'claude', 'codex')
  * @param promptData - Current prompt data from client-side detection (may be null)
+ * @param instanceId - Issue #869: optional agent instance id; included only when
+ *                     it differs from the primary instance (`!== cliTool`)
  * @returns The structured request body ready for JSON serialization
  */
 export function buildPromptResponseBody(
   answer: string,
   cliTool: string,
   promptData: PromptData | null,
+  instanceId?: string,
 ): PromptResponseBody {
   const body: PromptResponseBody = { answer, cliTool };
+
+  // Issue #869: only attach instanceId for non-primary instances so primary
+  // requests stay byte-for-byte identical to pre-#869 behavior.
+  if (instanceId && instanceId !== cliTool) {
+    body.instanceId = instanceId;
+  }
 
   if (promptData) {
     body.promptType = promptData.type;
