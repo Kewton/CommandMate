@@ -88,9 +88,9 @@ export interface WorktreeDetailDesktopProps {
   handleInsertConsumed: (idx: number) => void;
   handleInsertToMessage: (text: string) => void;
 
-  // Auto-yes (per-CLI)
+  // Auto-yes (Issue #896: per-instance; map keyed by instanceId)
   autoYesStateMap: Map<string, { enabled: boolean; expiresAt: number | null }>;
-  makeAutoYesToggleHandler: (cliToolId: CLIToolType) => (params: AutoYesToggleParams) => Promise<void>;
+  makeAutoYesToggleHandler: (cliToolId: CLIToolType, instanceId?: string) => (params: AutoYesToggleParams) => Promise<void>;
 
   // History controls
   showArchived: boolean;
@@ -315,10 +315,10 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       onDropInstance: (instanceId: string) => void;
     }) => {
       const panePendingInsert = pendingInsertTextMap.get(splitIndex) ?? null;
-      // Issue #525 / #740: auto-yes state is per-CLI in autoYesStateMap; each
-      // split resolves its own enabled/expiresAt by its own cliToolId (the
-      // instance's backing CLI tool — auto-yes stays cliTool-keyed in #869).
-      const paneAutoYes = autoYesStateMap.get(paneCli);
+      // Issue #525 / #740 / #896: auto-yes state is per-INSTANCE in
+      // autoYesStateMap; each split resolves its own enabled/expiresAt by its own
+      // instanceId so multiple instances of the same CLI tool toggle independently.
+      const paneAutoYes = autoYesStateMap.get(paneInstanceId);
       const paneAutoYesEnabled = paneAutoYes?.enabled ?? false;
       const paneAutoYesExpiresAt = paneAutoYes?.expiresAt ?? null;
       // Issue #743/#875: derive THIS pane's AI agent status. Splits are
@@ -362,7 +362,9 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             enabled: paneAutoYesEnabled,
             expiresAt: paneAutoYesExpiresAt,
             lastAutoResponse: lastAutoResponse,
-            onToggle: makeAutoYesToggleHandler(paneCli),
+            // Issue #896: bind the toggle to THIS pane's instance so each
+            // instance enables/disables its own auto-yes poller independently.
+            onToggle: makeAutoYesToggleHandler(paneCli, paneInstanceId),
           }}
           // Issue #756: History domain group. Issue #744: embedded per-split
           // HistoryPane. Each split fetches its OWN cliToolId's messages

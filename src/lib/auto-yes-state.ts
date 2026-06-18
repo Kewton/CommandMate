@@ -25,50 +25,81 @@ const logger = createLogger('auto-yes-state');
 export const COMPOSITE_KEY_SEPARATOR = ':' as const;
 
 /**
- * Build a composite key from worktreeId and cliToolId.
+ * Build a composite key from worktreeId, cliToolId and (optionally) instanceId.
  *
- * @precondition worktreeId must not contain COMPOSITE_KEY_SEPARATOR (':').
- *   This precondition is guaranteed by isValidWorktreeId() which restricts
- *   to alphanumeric + hyphens + underscores. If isValidWorktreeId() allowed
- *   characters change, this function must be reviewed.
+ * Issue #896: per-instance auto-yes. A single worktree can run multiple instances
+ * of the same CLI tool (e.g. "claude" + "claude-2"). Each instance must have its
+ * own independent auto-yes state + poller.
  *
- * [SEC4-SF-004] Defensive assertion: throws if worktreeId contains separator.
+ * Key shape is backward-compatible:
+ * - Primary instance (instanceId omitted or === cliToolId): 2-part "worktreeId:cliToolId"
+ *   (unchanged from Issue #525, so existing state/tests are unaffected).
+ * - Alias instance (instanceId !== cliToolId): 3-part "worktreeId:cliToolId:instanceId".
+ *
+ * @precondition worktreeId / instanceId must not contain COMPOSITE_KEY_SEPARATOR (':').
+ *   Guaranteed by isValidWorktreeId() / isValidInstanceId() which restrict to
+ *   alphanumeric + hyphens + underscores. If those allowed characters change,
+ *   this function must be reviewed.
+ *
+ * [SEC4-SF-004] Defensive assertion: throws if worktreeId/instanceId contains separator.
  *
  * @param worktreeId - Worktree identifier
  * @param cliToolId - CLI tool type
- * @returns Composite key string "worktreeId:cliToolId"
+ * @param instanceId - Optional instance identifier (defaults to the primary, i.e. cliToolId)
+ * @returns Composite key string
  */
-export function buildCompositeKey(worktreeId: string, cliToolId: CLIToolType): string {
+export function buildCompositeKey(worktreeId: string, cliToolId: CLIToolType, instanceId?: string): string {
   if (worktreeId.includes(COMPOSITE_KEY_SEPARATOR)) {
     throw new Error(`worktreeId must not contain '${COMPOSITE_KEY_SEPARATOR}': ${worktreeId}`);
   }
-  return `${worktreeId}${COMPOSITE_KEY_SEPARATOR}${cliToolId}`;
+  // Primary instance keeps the 2-part key for backward compatibility.
+  if (!instanceId || instanceId === cliToolId) {
+    return `${worktreeId}${COMPOSITE_KEY_SEPARATOR}${cliToolId}`;
+  }
+  if (instanceId.includes(COMPOSITE_KEY_SEPARATOR)) {
+    throw new Error(`instanceId must not contain '${COMPOSITE_KEY_SEPARATOR}': ${instanceId}`);
+  }
+  return `${worktreeId}${COMPOSITE_KEY_SEPARATOR}${cliToolId}${COMPOSITE_KEY_SEPARATOR}${instanceId}`;
 }
 
 /**
  * Extract worktreeId from a composite key.
- * Uses lastIndexOf for safety (cliToolId may contain hyphens but not colons).
+ * worktreeId never contains a colon, so it is always the first segment.
  *
  * @param compositeKey - Composite key string
  * @returns worktreeId portion, or the full string if no separator found
  */
 export function extractWorktreeId(compositeKey: string): string {
-  const lastIndex = compositeKey.lastIndexOf(COMPOSITE_KEY_SEPARATOR);
-  return lastIndex === -1 ? compositeKey : compositeKey.substring(0, lastIndex);
+  const firstIndex = compositeKey.indexOf(COMPOSITE_KEY_SEPARATOR);
+  return firstIndex === -1 ? compositeKey : compositeKey.substring(0, firstIndex);
 }
 
 /**
  * Extract cliToolId from a composite key.
+ * cliToolId is always the second segment (it never contains a colon).
  * Validates the extracted value against known CLI tool IDs.
  *
  * @param compositeKey - Composite key string
  * @returns CLIToolType if valid, null otherwise
  */
 export function extractCliToolId(compositeKey: string): CLIToolType | null {
-  const lastIndex = compositeKey.lastIndexOf(COMPOSITE_KEY_SEPARATOR);
-  if (lastIndex === -1) return null;
-  const cliToolId = compositeKey.substring(lastIndex + 1);
+  const cliToolId = compositeKey.split(COMPOSITE_KEY_SEPARATOR)[1];
+  if (cliToolId === undefined) return null;
   return isCliToolType(cliToolId) ? cliToolId : null;
+}
+
+/**
+ * Extract instanceId from a composite key (Issue #896).
+ * - 3-part key "wt:cli:instance" -> "instance" (alias instance)
+ * - 2-part key "wt:cli"          -> "cli"      (primary instance id === cliToolId)
+ *
+ * @param compositeKey - Composite key string
+ * @returns instanceId portion, or null if the key has no cliToolId segment
+ */
+export function extractInstanceId(compositeKey: string): string | null {
+  const parts = compositeKey.split(COMPOSITE_KEY_SEPARATOR);
+  // parts[2] = alias instanceId; fall back to parts[1] (cliToolId) for primary keys.
+  return parts[2] ?? parts[1] ?? null;
 }
 
 // Re-export from shared config for backward compatibility (Issue #314)
@@ -133,16 +164,21 @@ export function isAutoYesExpired(state: AutoYesState): boolean {
  *
  * @param worktreeId - Worktree identifier
  * @param cliToolId - CLI tool type (default: 'claude')
+ * @param instanceId - Optional instance identifier (Issue #896; defaults to primary)
  * @returns Current auto-yes state, or null if no state exists
  */
-export function getAutoYesState(worktreeId: string, cliToolId: CLIToolType = 'claude'): AutoYesState | null {
-  const key = buildCompositeKey(worktreeId, cliToolId);
+export function getAutoYesState(
+  worktreeId: string,
+  cliToolId: CLIToolType = 'claude',
+  instanceId?: string
+): AutoYesState | null {
+  const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
   const state = autoYesStates.get(key);
   if (!state) return null;
 
   // Auto-disable if expired (Issue #314: delegate to disableAutoYes)
   if (isAutoYesExpired(state)) {
-    return disableAutoYes(worktreeId, cliToolId, 'expired');
+    return disableAutoYes(worktreeId, cliToolId, 'expired', instanceId);
   }
 
   return state;
@@ -160,15 +196,17 @@ export function getAutoYesState(worktreeId: string, cliToolId: CLIToolType = 'cl
  * @param duration - Optional duration in milliseconds (must be an ALLOWED_DURATIONS value).
  *                   Defaults to DEFAULT_AUTO_YES_DURATION (1 hour) when omitted.
  * @param stopPattern - Optional regex pattern for stop condition (Issue #314).
+ * @param instanceId - Optional instance identifier (Issue #896; defaults to primary).
  */
 export function setAutoYesEnabled(
   worktreeId: string,
   cliToolId: CLIToolType,
   enabled: boolean,
   duration?: AutoYesDuration,
-  stopPattern?: string
+  stopPattern?: string,
+  instanceId?: string
 ): AutoYesState {
-  const key = buildCompositeKey(worktreeId, cliToolId);
+  const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
   if (enabled) {
     const now = Date.now();
     const effectiveDuration = duration ?? DEFAULT_AUTO_YES_DURATION;
@@ -182,7 +220,7 @@ export function setAutoYesEnabled(
     return state;
   } else {
     // Issue #314: Delegate disable path to disableAutoYes()
-    return disableAutoYes(worktreeId, cliToolId);
+    return disableAutoYes(worktreeId, cliToolId, undefined, instanceId);
   }
 }
 
@@ -196,14 +234,16 @@ export function setAutoYesEnabled(
  * @param worktreeId - Worktree identifier
  * @param cliToolId - CLI tool type (default: 'claude')
  * @param reason - Optional reason for disabling ('expired' | 'stop_pattern_matched')
+ * @param instanceId - Optional instance identifier (Issue #896; defaults to primary)
  * @returns Updated auto-yes state
  */
 export function disableAutoYes(
   worktreeId: string,
   cliToolId: CLIToolType = 'claude',
-  reason?: AutoYesStopReason
+  reason?: AutoYesStopReason,
+  instanceId?: string
 ): AutoYesState {
-  const key = buildCompositeKey(worktreeId, cliToolId);
+  const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
   const existing = autoYesStates.get(key);
   const state: AutoYesState = {
     enabled: false,
@@ -271,14 +311,17 @@ export function checkStopCondition(
   const worktreeId = extractWorktreeId(compositeKey);
   const cliToolId = extractCliToolId(compositeKey);
   if (!cliToolId) return false;
+  // Issue #896: alias instances carry a 3-part key; resolve their instanceId so
+  // the stop-condition disable targets the correct instance state.
+  const instanceId = extractInstanceId(compositeKey) ?? undefined;
 
-  const autoYesState = getAutoYesState(worktreeId, cliToolId);
+  const autoYesState = getAutoYesState(worktreeId, cliToolId, instanceId);
   if (!autoYesState?.stopPattern) return false;
 
   const validation = validateStopPattern(autoYesState.stopPattern);
   if (!validation.valid) {
     logger.warn('invalid-stop-pattern', { detail: String({ compositeKey }) });
-    disableAutoYes(worktreeId, cliToolId);
+    disableAutoYes(worktreeId, cliToolId, undefined, instanceId);
     return false;
   }
 
@@ -289,12 +332,12 @@ export function checkStopCondition(
     if (matched === null) {
       // Execution failed - disable to prevent future errors
       logger.warn('stop-condition-check', { detail: String({ compositeKey }) });
-      disableAutoYes(worktreeId, cliToolId);
+      disableAutoYes(worktreeId, cliToolId, undefined, instanceId);
       return false;
     }
 
     if (matched) {
-      disableAutoYes(worktreeId, cliToolId, 'stop_pattern_matched');
+      disableAutoYes(worktreeId, cliToolId, 'stop_pattern_matched', instanceId);
       if (onStopMatched) {
         onStopMatched(compositeKey);
       }

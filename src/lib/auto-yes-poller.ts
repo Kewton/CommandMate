@@ -34,6 +34,7 @@ import {
   buildCompositeKey,
   extractWorktreeId,
   extractCliToolId,
+  extractInstanceId,
   filterCompositeKeysByWorktree,
   getAutoYesState,
   disableAutoYes,
@@ -50,12 +51,14 @@ import {
 // Poller Types
 // =============================================================================
 
-/** Poller state for a worktree/agent (Issue #138, #525) */
+/** Poller state for a worktree/agent (Issue #138, #525, #896) */
 export interface AutoYesPollerState {
   /** setTimeout ID */
   timerId: ReturnType<typeof setTimeout> | null;
   /** CLI tool ID being polled */
   cliToolId: CLIToolType;
+  /** Agent instance ID being polled (Issue #896; equals cliToolId for the primary instance) */
+  instanceId: string;
   /** Consecutive error count */
   consecutiveErrors: number;
   /** Current polling interval (with backoff applied) */
@@ -191,7 +194,8 @@ function incrementErrorCount(compositeKey: string): void {
       const worktreeId = extractWorktreeId(compositeKey);
       const cliToolId = extractCliToolId(compositeKey);
       if (cliToolId) {
-        disableAutoYes(worktreeId, cliToolId, 'consecutive_errors');
+        // Issue #896: target the specific instance state (3-part keys carry instanceId).
+        disableAutoYes(worktreeId, cliToolId, 'consecutive_errors', extractInstanceId(compositeKey) ?? undefined);
       }
       stopAutoYesPolling(compositeKey);
     }
@@ -242,7 +246,9 @@ export function validatePollingContext(
     return 'expired';
   }
 
-  const autoYesState = getAutoYesState(worktreeId, cliToolId);
+  // Issue #896: resolve instanceId so per-instance enabled state is checked.
+  const instanceId = extractInstanceId(compositeKey) ?? undefined;
+  const autoYesState = getAutoYesState(worktreeId, cliToolId, instanceId);
   if (!autoYesState?.enabled) {
     stopAutoYesPolling(compositeKey);
     return 'expired';
@@ -257,15 +263,18 @@ export function validatePollingContext(
  * @internal Exported for testing purposes only.
  * @param worktreeId - Worktree identifier
  * @param cliToolId - CLI tool type being polled
+ * @param captureLines - Optional number of lines to capture
+ * @param instanceId - Optional agent instance ID (Issue #896; defaults to primary session)
  * @returns Cleaned output string (ANSI stripped)
  */
 export async function captureAndCleanOutput(
   worktreeId: string,
   cliToolId: CLIToolType,
-  captureLines?: number
+  captureLines?: number,
+  instanceId?: string
 ): Promise<string> {
   const lines = captureLines ?? FULL_CAPTURE_LINES;
-  const output = await captureSessionOutput(worktreeId, cliToolId, lines);
+  const output = await captureSessionOutput(worktreeId, cliToolId, lines, instanceId);
   return stripBoxDrawing(stripAnsi(output));
 }
 
@@ -310,6 +319,8 @@ export function processStopConditionDelta(
  * @param pollerState - Current poller state (mutated: lastAnsweredPromptKey updated)
  * @param cliToolId - CLI tool type
  * @param cleanOutput - ANSI-stripped terminal output
+ * @param precomputedLines - Optional pre-split lines to reuse
+ * @param instanceId - Optional agent instance ID (Issue #896; defaults to primary session)
  * @returns 'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'
  */
 export async function detectAndRespondToPrompt(
@@ -317,9 +328,10 @@ export async function detectAndRespondToPrompt(
   pollerState: AutoYesPollerState,
   cliToolId: CLIToolType,
   cleanOutput: string,
-  precomputedLines?: string[]
+  precomputedLines?: string[],
+  instanceId?: string
 ): Promise<'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'> {
-  const compositeKey = buildCompositeKey(worktreeId, cliToolId);
+  const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
   try {
     // 1. Detect prompt
     const promptOptions = buildDetectPromptOptions(cliToolId);
@@ -346,10 +358,10 @@ export async function detectAndRespondToPrompt(
       return 'no_answer';
     }
 
-    // 4. Send answer to tmux
+    // 4. Send answer to tmux (Issue #896: resolve the instance-specific session)
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(cliToolId);
-    const sessionName = cliTool.getSessionName(worktreeId);
+    const sessionName = cliTool.getSessionName(worktreeId, instanceId);
 
     try {
       await sendPromptAnswer({
@@ -370,12 +382,12 @@ export async function detectAndRespondToPrompt(
     pollerState.lastAnsweredPromptKey = promptKey;
     pollerState.lastAnsweredAt = Date.now();
 
-    logger.info('poller:response-sent', { worktreeId, cliToolId });
+    logger.info('poller:response-sent', { worktreeId, cliToolId, instanceId });
 
     return 'responded';
   } catch {
     incrementErrorCount(compositeKey);
-    logger.warn('poller:detect-respond-error', { worktreeId, cliToolId });
+    logger.warn('poller:detect-respond-error', { worktreeId, cliToolId, instanceId });
     return 'error';
   }
 }
@@ -385,9 +397,10 @@ export async function detectAndRespondToPrompt(
  *
  * @param worktreeId - Worktree identifier
  * @param cliToolId - CLI tool type being polled
+ * @param instanceId - Agent instance ID being polled (Issue #896; equals cliToolId for primary)
  */
-async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<void> {
-  const compositeKey = buildCompositeKey(worktreeId, cliToolId);
+async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType, instanceId?: string): Promise<void> {
+  const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
 
   // 1. Validate context
   const pollerState = getPollerState(compositeKey);
@@ -398,11 +411,11 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
 
   try {
     // 2. Capture and clean output
-    const autoYesState = getAutoYesState(worktreeId, cliToolId);
+    const autoYesState = getAutoYesState(worktreeId, cliToolId, instanceId);
     const captureLines = autoYesState?.stopPattern
       ? FULL_CAPTURE_LINES
       : REDUCED_CAPTURE_LINES;
-    const cleanOutput = await captureAndCleanOutput(worktreeId, cliToolId, captureLines);
+    const cleanOutput = await captureAndCleanOutput(worktreeId, cliToolId, captureLines, instanceId);
 
     const lines = cleanOutput.split('\n');
 
@@ -412,9 +425,9 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     }
 
     // 4. Detect and respond to prompt
-    const result = await detectAndRespondToPrompt(worktreeId, pollerState!, cliToolId, cleanOutput, lines);
+    const result = await detectAndRespondToPrompt(worktreeId, pollerState!, cliToolId, cleanOutput, lines, instanceId);
     if (result === 'responded') {
-      scheduleNextPoll(worktreeId, cliToolId, COOLDOWN_INTERVAL_MS);
+      scheduleNextPoll(worktreeId, cliToolId, instanceId, COOLDOWN_INTERVAL_MS);
       return;
     }
 
@@ -422,33 +435,39 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     if (result === 'no_prompt') {
       const recentLines = lines.slice(-THINKING_CHECK_LINE_COUNT).join('\n');
       if (detectThinking(cliToolId, recentLines)) {
-        scheduleNextPoll(worktreeId, cliToolId, THINKING_POLLING_INTERVAL_MS);
+        scheduleNextPoll(worktreeId, cliToolId, instanceId, THINKING_POLLING_INTERVAL_MS);
         return;
       }
     }
   } catch (error) {
     incrementErrorCount(compositeKey);
-    logger.warn('poller:poll-error', { worktreeId, cliToolId, error: getErrorMessage(error) });
+    logger.warn('poller:poll-error', { worktreeId, cliToolId, instanceId, error: getErrorMessage(error) });
   }
 
-  scheduleNextPoll(worktreeId, cliToolId);
+  scheduleNextPoll(worktreeId, cliToolId, instanceId);
 }
 
 /**
  * Schedule the next polling iteration
+ *
+ * @param worktreeId - Worktree identifier
+ * @param cliToolId - CLI tool type being polled
+ * @param instanceId - Agent instance ID being polled (Issue #896)
+ * @param overrideInterval - Optional override for the next poll delay
  */
 function scheduleNextPoll(
   worktreeId: string,
   cliToolId: CLIToolType,
+  instanceId?: string,
   overrideInterval?: number
 ): void {
-  const compositeKey = buildCompositeKey(worktreeId, cliToolId);
+  const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
   const pollerState = getPollerState(compositeKey);
   if (!pollerState) return;
 
   const interval = Math.max(overrideInterval ?? pollerState.currentInterval, POLLING_INTERVAL_MS);
   pollerState.timerId = setTimeout(() => {
-    pollAutoYes(worktreeId, cliToolId);
+    pollAutoYes(worktreeId, cliToolId, instanceId);
   }, interval);
 }
 
@@ -457,28 +476,37 @@ function scheduleNextPoll(
 // =============================================================================
 
 /**
- * Start server-side auto-yes polling for a worktree/agent.
+ * Start server-side auto-yes polling for a worktree/agent instance.
+ *
+ * Issue #896: per-instance polling. Each agent instance gets its own poller keyed
+ * by the (worktreeId, cliToolId, instanceId) composite key, so multiple instances
+ * of the same CLI tool on one worktree are polled independently.
  *
  * @param worktreeId - Worktree identifier (must match WORKTREE_ID_PATTERN)
  * @param cliToolId - CLI tool type to poll for
+ * @param instanceId - Optional agent instance ID (defaults to the primary instance)
  * @returns Result indicating whether the poller was started
  */
 export function startAutoYesPolling(
   worktreeId: string,
-  cliToolId: CLIToolType
+  cliToolId: CLIToolType,
+  instanceId?: string
 ): StartPollingResult {
   // Validate worktree ID (security)
   if (!isValidWorktreeId(worktreeId)) {
     return { started: false, reason: 'invalid worktree ID' };
   }
 
+  // Resolve the effective instance ID (primary === cliToolId).
+  const effectiveInstanceId = instanceId ?? cliToolId;
+
   // Check if auto-yes is enabled
-  const autoYesState = getAutoYesState(worktreeId, cliToolId);
+  const autoYesState = getAutoYesState(worktreeId, cliToolId, effectiveInstanceId);
   if (!autoYesState?.enabled) {
     return { started: false, reason: 'auto-yes not enabled' };
   }
 
-  const compositeKey = buildCompositeKey(worktreeId, cliToolId);
+  const compositeKey = buildCompositeKey(worktreeId, cliToolId, effectiveInstanceId);
 
   // Check concurrent poller limit (DoS protection)
   const existingPollerState = getPollerState(compositeKey);
@@ -486,7 +514,8 @@ export function startAutoYesPolling(
     return { started: false, reason: 'max concurrent pollers reached' };
   }
 
-  // Issue #501: Idempotency check
+  // Issue #501: Idempotency check (key already encodes the instance, so a matching
+  // poller is the same instance).
   if (existingPollerState && existingPollerState.cliToolId === cliToolId) {
     return { started: true, reason: 'already_running' };
   }
@@ -500,6 +529,7 @@ export function startAutoYesPolling(
   const pollerState: AutoYesPollerState = {
     timerId: null,
     cliToolId,
+    instanceId: effectiveInstanceId,
     consecutiveErrors: 0,
     currentInterval: POLLING_INTERVAL_MS,
     lastServerResponseTimestamp: null,
@@ -511,10 +541,10 @@ export function startAutoYesPolling(
 
   // Start polling immediately
   pollerState.timerId = setTimeout(() => {
-    pollAutoYes(worktreeId, cliToolId);
+    pollAutoYes(worktreeId, cliToolId, effectiveInstanceId);
   }, POLLING_INTERVAL_MS);
 
-  logger.info('poller:started', { worktreeId, cliToolId });
+  logger.info('poller:started', { worktreeId, cliToolId, instanceId: effectiveInstanceId });
   return { started: true };
 }
 

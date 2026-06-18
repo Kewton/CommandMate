@@ -119,10 +119,10 @@ async function detectInstanceSessionStatus(
     try {
       const captureLines = getStatusCaptureLines(cliToolId);
       const output = await captureSessionOutput(worktreeId, cliToolId, captureLines, instanceId);
-      // Issue #501, #525: Pass last server response timestamp using compositeKey.
-      // Auto-yes / last-response tracking stays cliTool-keyed (#869), so alias
-      // instances share the tool's composite key — acceptable as a status hint.
-      const compositeKey = buildCompositeKey(worktreeId, cliToolId);
+      // Issue #501, #525, #896: Pass last server response timestamp using the
+      // per-instance compositeKey. Auto-yes / last-response tracking is now
+      // per-instance, so alias instances read their own poller timestamp.
+      const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
       const lastServerResponseTs = getLastServerResponseTimestamp(compositeKey);
       const lastOutputTimestamp = lastServerResponseTs ? new Date(lastServerResponseTs) : undefined;
       const statusResult = detectSessionStatus(output, cliToolId, lastOutputTimestamp);

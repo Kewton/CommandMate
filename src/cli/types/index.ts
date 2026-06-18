@@ -229,6 +229,8 @@ export interface AutoYesOptions {
   duration?: string;
   stopPattern?: string;
   agent?: string;
+  /** Issue #896: agent instance ID (defaults to the agent's primary instance) */
+  instance?: string;
   token?: string;
 }
 
