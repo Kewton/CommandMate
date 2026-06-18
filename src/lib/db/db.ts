@@ -87,6 +87,16 @@ export {
   reorderMemos,
 } from './memo-db';
 
+// todo-db (repository-scoped Home ToDo widget)
+export {
+  getTodosByRepositoryId,
+  getTodoById,
+  createTodo,
+  updateTodo,
+  deleteTodo,
+} from './todo-db';
+export type { RepositoryTodo } from './todo-db';
+
 // timer-db (Issue #534, #540)
 export {
   createTimer,
