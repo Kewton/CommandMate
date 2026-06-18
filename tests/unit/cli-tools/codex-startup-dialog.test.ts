@@ -84,6 +84,20 @@ const READY_WITH_BANNER = [
   '› Summarize recent commits',
 ].join('\n');
 
+// Issue #892: capturePane(50) returns scrollback, so the just-dismissed update
+// dialog stays in the SAME capture ABOVE the now-live genuine prompt. This is the
+// real-device frame the Issue #890 whole-window check missed -- it stayed "not
+// ready" forever (hang) AND kept re-matching "Update"+"Skip", re-sending "2" every
+// poll ("222..."). Position-based detection must treat this as READY.
+const UPDATE_RESIDUAL_PLUS_PROMPT = [
+  '✨ Update available! 0.139.0 -> 0.140.0',
+  '› 1. Update now (runs `npm install -g @openai/codex`)',
+  '  2. Skip',
+  '  3. Skip until next version',
+  'Press enter to continue',
+  '› ',
+].join('\n');
+
 describe('CodexTool first-launch dialog handling (Issue #890)', () => {
   let tool: CodexTool;
 
@@ -218,6 +232,96 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
       expect(vi.mocked(capturePane).mock.calls.length).toBeLessThanOrEqual(2);
       expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello world', false);
       expect(sendSpecialKey).toHaveBeenCalledWith(SESSION, 'C-m');
+    });
+  });
+
+  // Issue #892: scrollback retention of a dismissed dialog in the SAME capture.
+  describe('residual dialog + genuine prompt coexist in one capture (Issue #892)', () => {
+    it('waitForReady: sends update "2" exactly ONCE and never re-sends on the residual dialog ("222..." guard)', async () => {
+      vi.mocked(hasSession).mockResolvedValue(false);
+      vi.mocked(capturePane)
+        .mockResolvedValueOnce(UPDATE_DIALOG)                // active dialog -> send "2"
+        .mockResolvedValueOnce(UPDATE_DIALOG)                // transient: dialog still bottom, must NOT re-send
+        .mockResolvedValue(UPDATE_RESIDUAL_PLUS_PROMPT);     // dialog now residual above the live prompt -> ready
+
+      vi.useFakeTimers();
+      try {
+        const promise = tool.startSession(WORKTREE_ID, '/test/path');
+        await vi.runAllTimersAsync();
+        await promise;
+      } finally {
+        vi.useRealTimers();
+      }
+
+      // The core "222..." regression: "2" must be sent exactly once even though the
+      // dialog text re-appears in later captures (transient + residual scrollback).
+      const skipCalls = vi.mocked(sendKeys).mock.calls.filter(
+        (c) => c[0] === SESSION && c[1] === '2'
+      );
+      expect(skipCalls).toHaveLength(1);
+    });
+
+    it('waitForReady: treats the residual-dialog-above-prompt frame as ready without sending any number key', async () => {
+      vi.mocked(hasSession).mockResolvedValue(false);
+      vi.mocked(capturePane).mockResolvedValue(UPDATE_RESIDUAL_PLUS_PROMPT);
+
+      vi.useFakeTimers();
+      try {
+        const promise = tool.startSession(WORKTREE_ID, '/test/path');
+        await vi.runAllTimersAsync();
+        await promise;
+      } finally {
+        vi.useRealTimers();
+      }
+
+      // Genuine prompt is below the stale dialog -> ready on the first poll, no keys.
+      expect(vi.mocked(capturePane).mock.calls.length).toBeLessThanOrEqual(2);
+      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '2', false);
+      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '1', false);
+    });
+
+    it('waitForPrompt: sends the message immediately when a stale dialog sits above the live prompt', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(capturePane).mockResolvedValue(UPDATE_RESIDUAL_PLUS_PROMPT);
+
+      vi.useFakeTimers();
+      try {
+        const promise = tool.sendMessage(WORKTREE_ID, 'explain this branch');
+        await vi.runAllTimersAsync();
+        await promise;
+      } finally {
+        vi.useRealTimers();
+      }
+
+      // No "2" prefix is injected; the message is delivered cleanly.
+      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '2', false);
+      expect(sendKeys).toHaveBeenCalledWith(SESSION, 'explain this branch', false);
+      expect(sendSpecialKey).toHaveBeenCalledWith(SESSION, 'C-m');
+    });
+  });
+
+  // Issue #892: fall-through removal -- a failed readiness check must STOP the send.
+  describe('waitForPrompt timeout does not send the message (Issue #892)', () => {
+    it('throws (no message typed) when the prompt never becomes ready before the timeout', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      // Dialog stays active forever -> isCodexPromptReady never true -> timeout.
+      vi.mocked(capturePane).mockResolvedValue(UPDATE_DIALOG);
+
+      vi.useFakeTimers();
+      try {
+        const promise = tool.sendMessage(WORKTREE_ID, 'should never be typed');
+        const assertion = expect(promise).rejects.toThrow(
+          /Failed to send message to Codex/
+        );
+        await vi.runAllTimersAsync();
+        await assertion;
+      } finally {
+        vi.useRealTimers();
+      }
+
+      // The whole point: on timeout the message is NOT typed and Enter is NOT sent.
+      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, 'should never be typed', false);
+      expect(sendSpecialKey).not.toHaveBeenCalledWith(SESSION, 'C-m');
     });
   });
 });
