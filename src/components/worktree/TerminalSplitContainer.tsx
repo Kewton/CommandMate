@@ -69,6 +69,15 @@ export interface TerminalSplitContainerProps {
   worktreeId: string;
   /** Issue #869: the worktree's agent-instance roster (drives split identity). */
   instances: AgentInstance[];
+  /**
+   * Issue #898: `true` once `instances` is the REAL roster for `worktreeId`
+   * (not the transient seed/default shown before the API responds or right
+   * after a sidebar worktree switch). Gates the split reconcile so persisted
+   * alias splits (`claude-2`) are not evicted against an incomplete roster.
+   * Optional (defaults to `true`) for callers/tests that always pass a concrete
+   * roster.
+   */
+  rosterReady?: boolean;
   /** Render a single split body. Caller wires sendMessage / TerminalDisplay. */
   renderPane: (args: RenderTerminalSplitPaneArgs) => ReactNode;
   /**
@@ -92,6 +101,7 @@ export interface TerminalSplitContainerProps {
 export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   worktreeId,
   instances,
+  rosterReady = true,
   renderPane,
   onFocusedSplitChange,
   showToast,
@@ -108,7 +118,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     availableInstanceIds,
     focusedSplitIndex,
     setFocusedSplitIndex,
-  } = useTerminalSplits(worktreeId, instances);
+  } = useTerminalSplits(worktreeId, instances, rosterReady);
 
   // Stable lookup from instanceId → AgentInstance for label / availability.
   const instanceById = useMemo(() => {

@@ -95,8 +95,9 @@ export async function GET(
     const newLines = lines.slice(Math.max(0, lastCapturedLine));
     const newContent = newLines.join('\n');
 
-    // Issue #501, #525: Get last server response timestamp using compositeKey
-    const compositeKey = buildCompositeKey(params.id, cliToolId);
+    // Issue #501, #525, #896: Get last server response timestamp using the
+    // per-instance compositeKey (alias instances build a 3-part key).
+    const compositeKey = buildCompositeKey(params.id, cliToolId, instanceId);
     const lastServerResponseTimestamp = getLastServerResponseTimestamp(compositeKey);
     const lastOutputTimestamp = lastServerResponseTimestamp ? new Date(lastServerResponseTimestamp) : undefined;
 
@@ -124,8 +125,8 @@ export async function GET(
     // Extract realtime snippet (last 100 lines for better context)
     const realtimeSnippet = lines.slice(-100).join('\n');
 
-    // Get auto-yes state (Issue #525: per-agent)
-    const autoYesState = getAutoYesState(params.id, cliToolId);
+    // Get auto-yes state (Issue #525: per-agent, #896: per-instance)
+    const autoYesState = getAutoYesState(params.id, cliToolId, instanceId);
 
     return NextResponse.json({
       isRunning: true,

@@ -31,8 +31,6 @@ import { useFileSearch } from '@/hooks/useFileSearch';
 import { useActivityBarState } from '@/hooks/useActivityBarState';
 import type { ActivityId } from '@/config/activity-bar-config';
 import { useFileTabs, MAX_FILE_TABS } from '@/hooks/useFileTabs';
-import { useFilePolling } from '@/hooks/useFilePolling';
-import { FILE_TREE_POLL_INTERVAL_MS } from '@/config/file-polling-config';
 import { usePendingInsertText } from '@/hooks/usePendingInsertText';
 import {
   deriveWorktreeStatus,
@@ -199,7 +197,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const [editorFilePath, setEditorFilePath] = useState<string | null>(null);
   // Issue #104: Track editor maximized state to disable Modal close handlers
   const [isEditorMaximized, setIsEditorMaximized] = useState(false);
-  // Issue #525: Per-agent auto-yes state management
+  // Issue #525: Per-agent auto-yes state management.
+  // Issue #896: re-keyed by *instanceId* so each agent instance has its own
+  // auto-yes state (the primary instance's id === its cliToolId, preserving the
+  // previous cliTool-keyed behavior for single-instance worktrees).
   const [autoYesStateMap, setAutoYesStateMap] = useState<Map<string, { enabled: boolean; expiresAt: number | null }>>(new Map());
   // Issue #501: Track last server-side auto-yes response timestamp for duplicate prevention
   const [lastServerResponseTimestamp, setLastServerResponseTimestamp] = useState<number | null>(null);
@@ -225,6 +226,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   );
   const agentInstancesRef = useRef(agentInstances);
   agentInstancesRef.current = agentInstances;
+  // Issue #898: which worktreeId the current `agentInstances` roster was loaded
+  // for. `null` until the first real roster arrives. Until it equals the active
+  // `worktreeId`, the roster in hand is the transient seed/default (or a
+  // previous worktree's roster right after a sidebar switch), which lacks alias
+  // instances (claude-2). `rosterReady` gates the terminal-split reconcile so it
+  // never evicts persisted aliases against that incomplete roster.
+  const [rosterWorktreeId, setRosterWorktreeId] = useState<string | null>(null);
+  const rosterReady = rosterWorktreeId === worktreeId;
   // Issue #368: Vibe-local Ollama model state (initialized from API)
   const [vibeLocalModel, setVibeLocalModel] = useState<string | null>(null);
   // Issue #374: Vibe-local context window state (initialized from API)
@@ -284,9 +293,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // polls/tab switches from overwriting the active CLI tab state.
   const latestMessagesRequestIdRef = useRef(0);
   const latestCurrentOutputRequestIdRef = useRef(0);
-  // Issue #525: Derive active agent's auto-yes state from per-agent map
-  const autoYesEnabled = autoYesStateMap.get(activeCliTab)?.enabled ?? false;
-  const autoYesExpiresAt = autoYesStateMap.get(activeCliTab)?.expiresAt ?? null;
+  // Issue #902: Latest-request guard for the bulk per-instance auto-yes refetch
+  // so a slow reply for worktree A can't pollute worktree B's map during rapid
+  // A→B→A navigation (newest reply wins; the server is the source of truth).
+  const latestAutoYesRequestIdRef = useRef(0);
+  // Issue #525/#896: Derive the active instance's auto-yes state from the
+  // per-instance map (keyed by activeInstanceId; primary instance id === cliToolId).
+  const autoYesEnabled = autoYesStateMap.get(activeInstanceId)?.enabled ?? false;
+  const autoYesExpiresAt = autoYesStateMap.get(activeInstanceId)?.expiresAt ?? null;
   // Trigger to refresh FileTreeView after file operations
   const [fileTreeRefresh, setFileTreeRefresh] = useState(0);
 
@@ -306,32 +320,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // `useHistoryPaneState` instance. Each `TerminalSplitPaneContent` owns its
   // own instance for the split-internal History visibility/width.
 
-  // [Issue #469] Tree polling: detect file tree changes via JSON comparison
-  const prevTreeHashRef = useRef<string | null>(null);
-  useFilePolling({
-    intervalMs: FILE_TREE_POLL_INTERVAL_MS,
-    enabled: activeActivity === 'files',
-    onPoll: async () => {
-      try {
-        const response = await fetch(`/api/worktrees/${worktreeId}/tree`);
-        if (!response.ok) return; // Ignore errors in polling
-        const data = await response.json();
-        const newHash = JSON.stringify(data?.items);
-        // [Issue #706] On the very first poll we have no baseline to
-        // compare against, so just record the hash. Firing a refresh here
-        // would be a false positive that resets the user's scroll/selection
-        // state in FileTreeView for no actual change.
-        if (prevTreeHashRef.current === null) {
-          prevTreeHashRef.current = newHash;
-        } else if (newHash !== prevTreeHashRef.current) {
-          prevTreeHashRef.current = newHash;
-          setFileTreeRefresh(prev => prev + 1);
-        }
-      } catch {
-        // Silently ignore network errors during polling
-      }
-    },
-  });
+  // [Issue #888] File-tree external-change detection was moved INTO
+  // FileTreeView (it now covers the root + every expanded subdirectory, not
+  // just the root). The controller only retains `fileTreeRefresh` to force an
+  // explicit refresh after local file operations (create/rename/delete/upload).
 
   // [Issue #447] History sub-tab: 'message' (default) or 'git'
   const [historySubTab, setHistorySubTab] = useState<'message' | 'git'>('message');
@@ -434,6 +426,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       initialLoadCompletedRef.current = false;
       // Issue #736: terminal output reset is handled by the mobile terminal
       // tab's useTerminalPanePolling (self-resets on worktreeId change).
+      // Issue #902 (案2): discard the previous worktree's per-instance auto-yes
+      // map so B's values can never bleed onto A's same-named keys (e.g.
+      // "claude") during the transition. The 案1 bulk refetch below repopulates
+      // the map from the server an instant later (primary AND alias).
+      setAutoYesStateMap(new Map());
       // Update ref for next comparison
       prevWorktreeIdRef.current = worktreeId;
     }
@@ -474,6 +471,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         if (!isSame) {
           setAgentInstances(next);
         }
+        // Issue #898: the real roster for THIS worktree is now confirmed (even
+        // when unchanged), so terminal-split reconcile may run. `worktreeId` is
+        // captured from this callback's closure, so a stale response for a
+        // previous worktree tags its own id — `rosterReady` stays false until the
+        // active worktree's roster arrives.
+        setRosterWorktreeId(worktreeId);
       }
       // Issue #368: Sync vibeLocalModel from API response
       if ('vibeLocalModel' in data) {
@@ -585,13 +588,18 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       setLastServerResponseTimestamp(data.lastServerResponseTimestamp ?? null);
       setServerPollerActive(data.serverPollerActive ?? false);
 
-      // Update auto-yes state from server (Issue #314: stopReason tracking, Issue #525: per-agent)
+      // Update auto-yes state from server (Issue #314: stopReason tracking,
+      // Issue #525: per-agent, Issue #896: per-instance).
+      // PC keeps the parent poll byte-identical (no `instance` param) so the
+      // server resolves the PRIMARY instance, whose id === requestedCliTool.
+      // Mobile sends `instance`, so the response is the requested instance's state.
       if (data.autoYes) {
         const wasEnabled = prevAutoYesEnabledRef.current;
         const autoYes = data.autoYes;
+        const seedInstanceId = onMobile ? requestedInstance : requestedCliTool;
         setAutoYesStateMap(prev => {
           const next = new Map(prev);
-          next.set(requestedCliTool, { enabled: autoYes.enabled, expiresAt: autoYes.expiresAt });
+          next.set(seedInstanceId, { enabled: autoYes.enabled, expiresAt: autoYes.expiresAt });
           return next;
         });
         prevAutoYesEnabledRef.current = autoYes.enabled;
@@ -613,6 +621,49 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       console.error('[WorktreeDetailRefactored] Error fetching current output:', err);
     }
   }, [worktreeId, actions, state.prompt.visible]);
+
+  /**
+   * Issue #902: Re-fetch the FULL per-instance auto-yes map in one request.
+   *
+   * Root cause of the reset-on-return bug: the only UI re-seed path for auto-yes
+   * was the `current-output` poll, whose PC variant carries no `instance` query
+   * param and therefore re-seeds ONLY the primary instance (the server resolves
+   * `resolvedInstanceId === cliToolId`). After a sidebar branch switch and back,
+   * ALIAS instances (e.g. `claude-2`) had no re-seed path and stayed stuck OFF,
+   * while primary merely flickered until the next poll.
+   *
+   * This calls the existing (previously unused) GET `/api/worktrees/:id/auto-yes`
+   * with no `cliToolId`, which returns the full `instances` map, and reflects it
+   * into `autoYesStateMap` wholesale so primary AND alias instances are restored
+   * to the server's truth at once. The latest-request guard drops replies from
+   * older worktrees (rapid A→B→A) so a slow A reply can't pollute B's map.
+   */
+  const fetchAutoYesStates = useCallback(async (): Promise<void> => {
+    const requestId = ++latestAutoYesRequestIdRef.current;
+    try {
+      const response = await fetch(`/api/worktrees/${worktreeId}/auto-yes`);
+      if (!response.ok) return;
+      const data = await response.json();
+      // Latest-request guard: only the newest refetch may write the map.
+      if (latestAutoYesRequestIdRef.current !== requestId) return;
+      const instances = data?.instances;
+      if (!instances || typeof instances !== 'object') return;
+      const next = new Map<string, { enabled: boolean; expiresAt: number | null }>();
+      for (const [instanceId, raw] of Object.entries(instances)) {
+        if (raw && typeof raw === 'object') {
+          const s = raw as { enabled?: boolean; expiresAt?: number | null };
+          next.set(instanceId, {
+            enabled: s.enabled ?? false,
+            expiresAt: s.expiresAt ?? null,
+          });
+        }
+      }
+      setAutoYesStateMap(next);
+    } catch (err) {
+      if (latestAutoYesRequestIdRef.current !== requestId) return;
+      console.error('[WorktreeDetailRefactored] Error fetching auto-yes states:', err);
+    }
+  }, [worktreeId]);
 
   // Issue #874: Mobile now manages agent *instances* (折衷案). The shared roster
   // (agentInstances) lives in the DB; this hook owns ONLY the per-device "which
@@ -678,7 +729,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    */
   const handleAgentInstancesChange = useCallback((instances: AgentInstance[]) => {
     setAgentInstances(instances);
-  }, []);
+    // Issue #898: a roster edit applies to the active worktree, so keep the
+    // roster tagged to it — reconcile must run against the edited roster (e.g.
+    // a removed alias should be evicted from splits as before).
+    setRosterWorktreeId(worktreeId);
+  }, [worktreeId]);
 
   /** Issue #368: Callback for AgentSettingsPane to update vibeLocalModel */
   const handleVibeLocalModelChange = useCallback((model: string | null) => {
@@ -915,12 +970,17 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    * Issue #740: parameterized by cliToolId via a curried factory so each PC
    * split footer can toggle auto-yes for its OWN CLI independently. The factory
    * is stable per worktreeId (cliToolId is captured per call), keeping split
-   * re-renders down. `activeCliTabRef` is read inside so the stop-reason ref is
-   * only updated for the active CLI (preserving existing toast detection).
+   * re-renders down. `activeInstanceIdRef` is read inside so the stop-reason ref
+   * is only updated for the active instance (preserving existing toast detection).
+   *
+   * Issue #896: also parameterized by instanceId so each instance toggles its
+   * OWN auto-yes (a 3-part poller key for aliases). instanceId defaults to the
+   * primary (=== cliToolId) when omitted.
    */
   const makeAutoYesToggleHandler = useCallback(
-    (cliToolId: CLIToolType) =>
+    (cliToolId: CLIToolType, instanceId?: string) =>
       async (params: AutoYesToggleParams): Promise<void> => {
+        const effectiveInstanceId = instanceId ?? cliToolId;
         try {
           const response = await fetch(`/api/worktrees/${worktreeId}/auto-yes`, {
             method: 'POST',
@@ -928,21 +988,22 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
             body: JSON.stringify({
               enabled: params.enabled,
               cliToolId,
+              instanceId: effectiveInstanceId,
               duration: params.duration,
               stopPattern: params.stopPattern,
             }),
           });
           if (response.ok) {
             const data = await response.json();
-            // Issue #525: Store per-agent state keyed by the toggled CLI.
+            // Issue #525/#896: Store per-instance state keyed by the toggled instance.
             setAutoYesStateMap(prev => {
               const next = new Map(prev);
-              next.set(cliToolId, { enabled: data.enabled, expiresAt: data.expiresAt });
+              next.set(effectiveInstanceId, { enabled: data.enabled, expiresAt: data.expiresAt });
               return next;
             });
-            // Issue #740: the stop-reason ref tracks the ACTIVE CLI only; avoid
-            // clobbering it when a non-active split is toggled.
-            if (cliToolId === activeCliTabRef.current) {
+            // Issue #740/#896: the stop-reason ref tracks the ACTIVE instance only;
+            // avoid clobbering it when a non-active split is toggled.
+            if (effectiveInstanceId === activeInstanceIdRef.current) {
               prevAutoYesEnabledRef.current = data.enabled;
             }
           }
@@ -954,14 +1015,15 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   );
 
   /**
-   * Mobile + active-CLI default handler (unchanged behavior). Issue #740: thin
-   * wrapper over the curried factory bound to the current activeCliTab so the
-   * Mobile AutoYesToggle call site stays untouched.
+   * Mobile + active-instance default handler (unchanged behavior). Issue #740:
+   * thin wrapper over the curried factory bound to the current active instance
+   * so the Mobile AutoYesToggle call site stays untouched. Issue #896: binds the
+   * active instance id so mobile toggles the active instance's auto-yes.
    */
   const handleAutoYesToggle = useCallback(
     (params: AutoYesToggleParams): Promise<void> =>
-      makeAutoYesToggleHandler(activeCliTab)(params),
-    [makeAutoYesToggleHandler, activeCliTab],
+      makeAutoYesToggleHandler(activeCliTab, activeInstanceId)(params),
+    [makeAutoYesToggleHandler, activeCliTab, activeInstanceId],
   );
 
   /** Issue #4: Kill session confirmation dialog state */
@@ -1422,6 +1484,20 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     return () => clearInterval(intervalId);
   }, [loading, error, fetchCurrentOutput, fetchWorktree, fetchMessages, activeCliRunning, isMobile]);
 
+  /**
+   * Issue #902 (案1): re-seed the FULL per-instance auto-yes map whenever the
+   * active worktree changes OR its real instance roster becomes ready
+   * (`rosterReady`). `fetchAutoYesStates` is keyed to `worktreeId`, so this fires
+   * once on mount, once per branch switch (immediately, restoring primary +
+   * alias before the next poll), and once more when the worktree's true roster
+   * arrives. Paired with the 案2 map-clear in the worktreeId reset effect, the
+   * server stays the single source of truth and stale cross-worktree values
+   * never linger — fixing the alias-stuck-OFF reset and the primary flicker.
+   */
+  useEffect(() => {
+    void fetchAutoYesStates();
+  }, [worktreeId, rosterReady, fetchAutoYesStates]);
+
   /** Sync layout mode with viewport size */
   useEffect(() => {
     actions.setLayoutMode(isMobile ? 'tabs' : 'split');
@@ -1542,6 +1618,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     handleShowArchivedChange,
     handleUpload,
     handleVibeLocalContextWindowChange,
+    rosterReady,
     handleVibeLocalModelChange,
     handleWorktreeStatusChange,
     hasUpdate,

@@ -6,7 +6,7 @@
 import { Command } from 'commander';
 import { ExitCode } from '../types';
 import type { AutoYesOptions } from '../types';
-import { ApiClient, isValidWorktreeId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
+import { ApiClient, isValidWorktreeId, isValidInstanceId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constants';
 import { isCliToolId } from '../config/cli-tool-ids';
@@ -21,6 +21,7 @@ export function createAutoYesCommand(): Command {
     .option('--duration <duration>', `Duration (${ALLOWED_DURATIONS.join(', ')})`)
     .option('--stop-pattern <pattern>', 'Stop pattern (regex, max 500 chars)')
     .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode, copilot)')
+    .option('--instance <id>', 'Agent instance ID (defaults to the agent\'s primary instance)')
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeId: string, options: AutoYesOptions) => {
       try {
@@ -43,6 +44,12 @@ export function createAutoYesCommand(): Command {
 
         if (options.agent && !isCliToolId(options.agent)) {
           console.error('Error: Invalid agent.');
+          process.exit(ExitCode.CONFIG_ERROR);
+        }
+
+        // Issue #896: Validate instance ID if provided
+        if (options.instance && !isValidInstanceId(options.instance)) {
+          console.error('Error: Invalid --instance. Must be an alphanumeric/underscore/hyphen identifier (max 64 chars).');
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
@@ -78,6 +85,11 @@ export function createAutoYesCommand(): Command {
 
         if (options.agent) {
           body.cliToolId = options.agent;
+        }
+
+        // Issue #896: per-instance auto-yes
+        if (options.instance) {
+          body.instanceId = options.instance;
         }
 
         await client.post<void>(`/api/worktrees/${worktreeId}/auto-yes`, body);

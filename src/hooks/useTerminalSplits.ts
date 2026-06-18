@@ -150,29 +150,56 @@ function reconcileConfig(config: TerminalSplitConfig, instances: AgentInstance[]
   return { splits: newSplits, widths };
 }
 
-function readInitialState(worktreeId: string, instances: AgentInstance[]): TerminalSplitConfig {
-  if (typeof window === 'undefined') return reconcileConfig(defaultConfigFor(instances), instances);
+/**
+ * Load the persisted (or default) split config for a worktree WITHOUT
+ * reconciling it against the roster. Widths are self-healed (sum -> 1.0) so the
+ * value is render-safe, but instance assignments are preserved verbatim — alias
+ * instances (e.g. `claude-2`) survive even when the caller's roster does not yet
+ * contain them (Issue #898).
+ */
+function loadPersistedConfig(worktreeId: string, instances: AgentInstance[]): TerminalSplitConfig {
+  if (typeof window === 'undefined') return defaultConfigFor(instances);
   try {
     const raw = window.localStorage.getItem(getTerminalSplitsStorageKey(worktreeId));
-    if (!raw) return reconcileConfig(defaultConfigFor(instances), instances);
+    if (!raw) return defaultConfigFor(instances);
     const parsed: unknown = JSON.parse(raw);
     const normalized = normalizeSplitConfig(parsed);
     if (normalized) {
-      // Self-heal widths (sum -> 1.0) then reconcile against the live roster.
-      const healed = { ...normalized, widths: normalizeWidths(normalized.widths) };
-      return reconcileConfig(healed, instances);
+      // Self-heal widths (sum -> 1.0); leave splits untouched.
+      return { ...normalized, widths: normalizeWidths(normalized.widths) };
     }
     console.warn(
       `[useTerminalSplits] stale state for ${worktreeId}; falling back to default`,
     );
-    return reconcileConfig(defaultConfigFor(instances), instances);
+    return defaultConfigFor(instances);
   } catch (err) {
     console.warn(
       `[useTerminalSplits] failed to parse stored state for ${worktreeId}; using default`,
       err,
     );
-    return reconcileConfig(defaultConfigFor(instances), instances);
+    return defaultConfigFor(instances);
   }
+}
+
+/**
+ * Issue #898: derive the initial config, reconciling against the roster ONLY
+ * when `rosterReady` is true.
+ *
+ * Until the worktree's REAL agent-instance roster has loaded, the caller seeds a
+ * default primary-only roster (claude/codex/… — no aliases). Reconciling the
+ * persisted `[claude, claude-2]` against that transient roster would evict
+ * `claude-2` (it is absent) and back-fill an unrelated primary, which is exactly
+ * the split-reset bug. So while `rosterReady` is false we preserve the persisted
+ * config verbatim; a later reconcile pass (fired when `rosterReady` flips true)
+ * fixes it against the real roster.
+ */
+function readInitialState(
+  worktreeId: string,
+  instances: AgentInstance[],
+  rosterReady: boolean,
+): TerminalSplitConfig {
+  const loaded = loadPersistedConfig(worktreeId, instances);
+  return rosterReady ? reconcileConfig(loaded, instances) : loaded;
 }
 
 function pickUnusedInstance(
@@ -196,9 +223,18 @@ function widthsValid(widths: unknown): widths is number[] {
 export function useTerminalSplits(
   worktreeId: string,
   instances: AgentInstance[],
+  /**
+   * Issue #898: `true` once the REAL agent-instance roster for `worktreeId` has
+   * loaded (vs. the transient seed/default roster shown before the API responds
+   * or right after a sidebar worktree switch). While `false`, reconcile is
+   * suppressed so persisted alias instances (`claude-2`) are not evicted against
+   * an incomplete roster. Defaults to `true` for callers/tests that always pass
+   * a concrete roster (pre-#898 behavior).
+   */
+  rosterReady: boolean = true,
 ): UseTerminalSplitsReturn {
   const [config, setConfig] = useState<TerminalSplitConfig>(() =>
-    readInitialState(worktreeId, instances),
+    readInitialState(worktreeId, instances, rosterReady),
   );
   const [focusedSplitIndex, setFocusedSplitIndexRaw] = useState(0);
 
@@ -210,13 +246,17 @@ export function useTerminalSplits(
   configRef.current = config;
   const instancesRef = useRef(instances);
   instancesRef.current = instances;
+  // Issue #898: read the latest rosterReady inside the worktreeId-change effect
+  // without re-running it when only rosterReady flips.
+  const rosterReadyRef = useRef(rosterReady);
+  rosterReadyRef.current = rosterReady;
 
   // Re-read when worktreeId changes (worktree switching).
   const prevWorktreeIdRef = useRef(worktreeId);
   useEffect(() => {
     if (prevWorktreeIdRef.current === worktreeId) return;
     prevWorktreeIdRef.current = worktreeId;
-    setConfig(readInitialState(worktreeId, instancesRef.current));
+    setConfig(readInitialState(worktreeId, instancesRef.current, rosterReadyRef.current));
     setFocusedSplitIndexRaw(0);
   }, [worktreeId]);
 
@@ -224,19 +264,33 @@ export function useTerminalSplits(
   // removed). Keyed on a roster signature so the effect only runs on a real
   // roster change, not on every render. reconcileConfig returns the same
   // reference when nothing changed, so setConfig bails out (no re-render).
+  // Issue #898: also re-runs when `rosterReady` flips false→true so the first
+  // reconcile happens once the real roster is confirmed; while false the
+  // reconcile is skipped to preserve persisted alias assignments.
   const rosterSignature = useMemo(
     () => instances.map(i => `${i.id}:${i.cliTool}`).join('|'),
     [instances],
   );
   useEffect(() => {
+    if (!rosterReady) return;
     setConfig(prev => reconcileConfig(prev, instancesRef.current));
     // rosterSignature is the real dependency; instancesRef is read fresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rosterSignature]);
+  }, [rosterSignature, rosterReady]);
 
   // Persist on every change. Quota / unavailability is swallowed.
+  // Issue #898: skip the single transient render right after a worktree switch
+  // where `config` still reflects the PREVIOUS worktree (the worktreeId effect
+  // above re-derives it via a fresh setConfig → re-render, which then persists
+  // correctly). This avoids momentarily writing the old config under the new
+  // worktreeId's storage key.
+  const persistedWorktreeIdRef = useRef(worktreeId);
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    if (persistedWorktreeIdRef.current !== worktreeId) {
+      persistedWorktreeIdRef.current = worktreeId;
+      return;
+    }
     try {
       window.localStorage.setItem(
         getTerminalSplitsStorageKey(worktreeId),

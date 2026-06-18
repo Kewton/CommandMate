@@ -15,7 +15,7 @@ import {
 } from '../tmux/tmux';
 import { detectAndResendIfPastedText } from '../pasted-text-helper';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
-import { CODEX_PROMPT_PATTERN, stripAnsi } from '../detection/cli-patterns';
+import { isCodexPromptReady, getCodexActiveDialog, stripAnsi } from '../detection/cli-patterns';
 import { createLogger } from '@/lib/logger';
 import {
   TUI_SESSION_CREATE_WAIT_MS,
@@ -121,38 +121,54 @@ export class CodexTool extends BaseCLITool {
    * Wait for Codex CLI to become ready (prompt visible).
    * Handles trust dialog ("Do you trust the contents of this directory?")
    * and update notification automatically by sending Enter/number keys.
-   * Polls until CODEX_PROMPT_PATTERN is detected or max attempts reached.
+   * Polls until a genuine interactive prompt is detected or max attempts reached.
    */
   private async waitForReady(sessionName: string): Promise<void> {
+    // Issue #892: one-shot guards. capturePane(50) keeps a dismissed dialog in
+    // scrollback, so a key must be sent at most once per dialog -- otherwise the
+    // update branch re-sends "2" every poll and the live prompt gets "222...".
+    let updateDialogHandled = false;
     let trustDialogHandled = false;
     for (let i = 0; i < CODEX_INIT_MAX_ATTEMPTS; i++) {
       try {
         const rawOutput = await capturePane(sessionName, 50);
         const output = stripAnsi(rawOutput);
 
-        // Check if interactive prompt is ready
-        if (CODEX_PROMPT_PATTERN.test(output)) {
-          // Verify it's the actual input prompt, not a prompt inside a dialog
-          // by checking no trust/update dialog is still active
-          if (!output.includes('Do you trust') && !output.includes('Press enter to continue')) {
-            logger.info('codex-prompt-detected');
-            return;
-          }
+        // Check if the genuine interactive input prompt is ready.
+        // Issue #892: isCodexPromptReady() is position-based -- a genuine "› " line
+        // below stale dialog scrollback IS ready, while an active dialog (option
+        // line "› 1." as the bottom element) is not.
+        if (isCodexPromptReady(output)) {
+          logger.info('codex-prompt-detected');
+          return;
         }
+
+        // Issue #892: classify the bottom-most ACTIVE dialog by position. A dialog
+        // whose text is only residual scrollback above a genuine prompt returns
+        // null here, so no stray key is sent after it has been dismissed.
+        const activeDialog = getCodexActiveDialog(output);
 
         // Handle update notification BEFORE trust dialog check.
         // Update notification shows: › 1. Update now / 2. Skip / 3. Skip until next version
         // followed by "Press enter to continue". Must send "2" (Skip) to avoid
         // triggering npm install which kills the Codex process.
-        if (output.includes('Update') && output.includes('Skip')) {
-          await sendKeys(sessionName, '2', true);
+        if (activeDialog === 'update' && !updateDialogHandled) {
+          // Issue #890: Codex confirms a numbered selection instantly (no Enter).
+          // Appending Enter (sendEnter=true) would land on the NEXT screen as a
+          // stray keypress -- an empty submit on the main prompt, or worst case the
+          // default "1. Update now" confirm if "2" was dropped during a re-render.
+          // Send "2" alone and let the next poll observe the result.
+          await sendKeys(sessionName, '2', false);
+          updateDialogHandled = true;
           logger.info('skipped-codex-update');
           await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
           continue;
         }
 
-        // Handle "Press enter to continue" (after update skip or other notification)
-        if (output.includes('Press enter to continue')) {
+        // Handle "Press enter to continue" (genuine press-enter screens only).
+        // Numbered selection dialogs are dismissed by the number key above, so this
+        // branch is reached only when no number selection is pending.
+        if (activeDialog === 'press-enter') {
           await sendSpecialKey(sessionName, 'Enter');
           logger.info('dismissed-codex-notification');
           await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
@@ -161,8 +177,9 @@ export class CodexTool extends BaseCLITool {
 
         // Handle trust dialog: "Do you trust the contents of this directory?"
         // Options: › 1. Yes, continue / 2. No, quit
-        if (!trustDialogHandled && output.includes('Do you trust')) {
-          await sendKeys(sessionName, '1', true);
+        if (activeDialog === 'trust' && !trustDialogHandled) {
+          // Issue #890: number-key selection confirms instantly; no trailing Enter.
+          await sendKeys(sessionName, '1', false);
           trustDialogHandled = true;
           logger.info('auto-trusted-folder-for');
           await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
@@ -179,6 +196,13 @@ export class CodexTool extends BaseCLITool {
   /**
    * Wait for Codex prompt before sending a message.
    * Used by sendMessage to ensure Codex is ready to accept input.
+   *
+   * Issue #892: throws on timeout instead of falling through. The previous version
+   * only logged and returned, so sendMessage typed the message regardless of
+   * readiness -- the exact path that let "222..." (or an empty submit) reach the
+   * session when detection failed. A failed readiness check must STOP the send.
+   *
+   * @throws Error when the genuine input prompt is not detected within the timeout
    */
   private async waitForPrompt(sessionName: string): Promise<void> {
     const startTime = Date.now();
@@ -187,7 +211,10 @@ export class CodexTool extends BaseCLITool {
       try {
         const rawOutput = await capturePane(sessionName, 50);
         const output = stripAnsi(rawOutput);
-        if (CODEX_PROMPT_PATTERN.test(output)) {
+        // Issue #890/#892: position-based guard so a residual update/trust dialog
+        // ("› 1. ...") is never mistaken for a ready prompt -- yet a genuine "› "
+        // prompt below stale dialog scrollback IS accepted.
+        if (isCodexPromptReady(output)) {
           return;
         }
       } catch {
@@ -196,6 +223,9 @@ export class CodexTool extends BaseCLITool {
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
     logger.info('codex-prompt-not');
+    throw new Error(
+      'Codex prompt not ready: timed out waiting for the input prompt before sending'
+    );
   }
 
   /**

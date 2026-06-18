@@ -18,11 +18,12 @@ export type { AutoYesStopReason } from '../auto-yes-state';
 export type { AutoYesState } from '../auto-yes-state';
 
 export {
-  // Composite key helpers (Issue #525)
+  // Composite key helpers (Issue #525, #896)
   COMPOSITE_KEY_SEPARATOR,
   buildCompositeKey,
   extractWorktreeId,
   extractCliToolId,
+  extractInstanceId,
 
   // State management
   isAutoYesExpired,

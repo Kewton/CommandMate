@@ -65,6 +65,13 @@ export interface WorktreeDetailDesktopProps {
   worktreeStatus: WorktreeStatus;
   /** Issue #869: agent instance roster (drives instance tabs / split selectors). */
   instances: AgentInstance[];
+  /**
+   * Issue #898: `true` once the real roster for this worktree has loaded.
+   * Forwarded to TerminalSplitContainer so the split reconcile is suppressed
+   * while the roster is still the transient seed/default (which would otherwise
+   * evict persisted alias splits like `claude-2`).
+   */
+  rosterReady: boolean;
   /** Issue #869: active agent instance id (tab/split identity). */
   activeInstanceId: string;
   /** Issue #869: set the active agent instance (also syncs activeCliTab). */
@@ -88,9 +95,9 @@ export interface WorktreeDetailDesktopProps {
   handleInsertConsumed: (idx: number) => void;
   handleInsertToMessage: (text: string) => void;
 
-  // Auto-yes (per-CLI)
+  // Auto-yes (Issue #896: per-instance; map keyed by instanceId)
   autoYesStateMap: Map<string, { enabled: boolean; expiresAt: number | null }>;
-  makeAutoYesToggleHandler: (cliToolId: CLIToolType) => (params: AutoYesToggleParams) => Promise<void>;
+  makeAutoYesToggleHandler: (cliToolId: CLIToolType, instanceId?: string) => (params: AutoYesToggleParams) => Promise<void>;
 
   // History controls
   showArchived: boolean;
@@ -188,6 +195,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   worktreeName,
   worktreeStatus,
   instances,
+  rosterReady,
   activeInstanceId,
   setActiveInstanceId,
   hasUpdate,
@@ -315,10 +323,10 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       onDropInstance: (instanceId: string) => void;
     }) => {
       const panePendingInsert = pendingInsertTextMap.get(splitIndex) ?? null;
-      // Issue #525 / #740: auto-yes state is per-CLI in autoYesStateMap; each
-      // split resolves its own enabled/expiresAt by its own cliToolId (the
-      // instance's backing CLI tool — auto-yes stays cliTool-keyed in #869).
-      const paneAutoYes = autoYesStateMap.get(paneCli);
+      // Issue #525 / #740 / #896: auto-yes state is per-INSTANCE in
+      // autoYesStateMap; each split resolves its own enabled/expiresAt by its own
+      // instanceId so multiple instances of the same CLI tool toggle independently.
+      const paneAutoYes = autoYesStateMap.get(paneInstanceId);
       const paneAutoYesEnabled = paneAutoYes?.enabled ?? false;
       const paneAutoYesExpiresAt = paneAutoYes?.expiresAt ?? null;
       // Issue #743/#875: derive THIS pane's AI agent status. Splits are
@@ -362,7 +370,9 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             enabled: paneAutoYesEnabled,
             expiresAt: paneAutoYesExpiresAt,
             lastAutoResponse: lastAutoResponse,
-            onToggle: makeAutoYesToggleHandler(paneCli),
+            // Issue #896: bind the toggle to THIS pane's instance so each
+            // instance enables/disables its own auto-yes poller independently.
+            onToggle: makeAutoYesToggleHandler(paneCli, paneInstanceId),
           }}
           // Issue #756: History domain group. Issue #744: embedded per-split
           // HistoryPane. Each split fetches its OWN cliToolId's messages
@@ -426,6 +436,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       <TerminalSplitContainer
         worktreeId={worktreeId}
         instances={instances}
+        // Issue #898: suppress split reconcile until the real roster is loaded.
+        rosterReady={rosterReady}
         renderPane={renderSplitPane}
         onFocusedSplitChange={setFocusedSplitIndex}
         // Issue #786 / #869: the container is the drop validation owner; it
@@ -438,7 +450,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     // setFocusedSplitIndex / setActiveInstanceId are stable callbacks, and
     // showToast is a stable parent callback, so listing them does not
     // destabilize the memo beyond the existing per-render cadence.
-    [worktreeId, instances, renderSplitPane, setFocusedSplitIndex, showToast, setActiveInstanceId],
+    [worktreeId, instances, rosterReady, renderSplitPane, setFocusedSplitIndex, showToast, setActiveInstanceId],
   );
 
   /**
@@ -527,6 +539,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             onUpload={onUpload}
             onMove={onMove}
             refreshTrigger={fileTreeRefresh}
+            pollingEnabled={activeActivity === 'files'}
             searchQuery={fileSearch.query}
             searchMode={fileSearch.mode}
             searchResults={fileSearch.results?.results}
@@ -574,6 +587,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     [
       worktreeId,
       worktree,
+      activeActivity,
       fileSearch.query,
       fileSearch.mode,
       fileSearch.isSearching,

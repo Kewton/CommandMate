@@ -335,6 +335,36 @@ describe('auto-yes-manager', () => {
       expect(result.started).toBe(false);
       expect(result.reason).toBe('max concurrent pollers reached');
     });
+
+    // Issue #896: per-instance pollers
+    it('should run independent pollers for the primary and an alias of the same cliTool', () => {
+      setAutoYesEnabled('wt-1', 'claude', true);
+      setAutoYesEnabled('wt-1', 'claude', true, undefined, undefined, 'claude-2');
+
+      const primary = startAutoYesPolling('wt-1', 'claude');
+      const alias = startAutoYesPolling('wt-1', 'claude', 'claude-2');
+
+      expect(primary.started).toBe(true);
+      expect(alias.started).toBe(true);
+      // Two distinct composite keys -> two distinct pollers
+      expect(getActivePollerCount()).toBe(2);
+    });
+
+    it('should stop only the targeted instance poller, leaving the other running', () => {
+      setAutoYesEnabled('wt-1', 'claude', true);
+      setAutoYesEnabled('wt-1', 'claude', true, undefined, undefined, 'claude-2');
+      startAutoYesPolling('wt-1', 'claude');
+      startAutoYesPolling('wt-1', 'claude', 'claude-2');
+      expect(getActivePollerCount()).toBe(2);
+
+      // Stop just the alias (3-part composite key)
+      stopAutoYesPolling('wt-1:claude:claude-2');
+      expect(getActivePollerCount()).toBe(1);
+
+      // Primary poller is still active
+      stopAutoYesPolling('wt-1:claude');
+      expect(getActivePollerCount()).toBe(0);
+    });
   });
 
   describe('stopAutoYesPolling', () => {
@@ -1369,6 +1399,7 @@ describe('auto-yes-manager', () => {
     return {
       timerId: null,
       cliToolId: 'claude',
+      instanceId: 'claude',
       consecutiveErrors: 0,
       currentInterval: POLLING_INTERVAL_MS,
       lastServerResponseTimestamp: null,
@@ -1455,7 +1486,8 @@ describe('auto-yes-manager', () => {
       expect(result).toBe('Hello World');
 
       // Verify captureSessionOutput was called with 5000 line limit
-      expect(captureSessionOutput).toHaveBeenCalledWith('test-wt', 'claude', 5000);
+      // Issue #896: instanceId is passed as 4th arg (undefined for primary)
+      expect(captureSessionOutput).toHaveBeenCalledWith('test-wt', 'claude', 5000, undefined);
 
       vi.mocked(captureSessionOutput).mockReset();
     });
@@ -2091,15 +2123,16 @@ describe('auto-yes-manager', () => {
       vi.mocked(captureSessionOutput).mockResolvedValue('test output');
 
       // Call with explicit REDUCED_CAPTURE_LINES
+      // Issue #896: instanceId is passed as 4th arg (undefined for primary)
       await captureAndCleanOutput('test-wt', 'claude', REDUCED_CAPTURE_LINES);
-      expect(captureSessionOutput).toHaveBeenCalledWith('test-wt', 'claude', 300);
+      expect(captureSessionOutput).toHaveBeenCalledWith('test-wt', 'claude', 300, undefined);
 
       vi.mocked(captureSessionOutput).mockReset();
       vi.mocked(captureSessionOutput).mockResolvedValue('test output');
 
       // Call with explicit FULL_CAPTURE_LINES
       await captureAndCleanOutput('test-wt', 'claude', FULL_CAPTURE_LINES);
-      expect(captureSessionOutput).toHaveBeenCalledWith('test-wt', 'claude', 5000);
+      expect(captureSessionOutput).toHaveBeenCalledWith('test-wt', 'claude', 5000, undefined);
 
       vi.mocked(captureSessionOutput).mockReset();
     });

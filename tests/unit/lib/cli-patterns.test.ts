@@ -7,11 +7,12 @@ import { describe, it, expect } from 'vitest';
 import {
   CODEX_THINKING_PATTERN,
   CODEX_PROMPT_PATTERN,
+  CODEX_DIALOG_PATTERN,
+  isCodexPromptReady,
+  getCodexActiveDialog,
   PASTED_TEXT_PATTERN,
   PASTED_TEXT_DETECT_DELAY,
   MAX_PASTED_TEXT_RETRIES,
-  OPENCODE_THINKING_PATTERN,
-  OPENCODE_PROMPT_PATTERN,
   GEMINI_PROMPT_PATTERN,
   getCliToolPatterns,
   detectThinking,
@@ -19,7 +20,6 @@ import {
   stripAnsi,
   stripBoxDrawing,
 } from '@/lib/detection/cli-patterns';
-import type { CLIToolType } from '@/lib/cli-tools/types';
 
 describe('cli-patterns', () => {
   describe('CODEX_THINKING_PATTERN', () => {
@@ -76,6 +76,226 @@ More text`;
     it('should not match non-prompt lines', () => {
       expect(CODEX_PROMPT_PATTERN.test('Some random text')).toBe(false);
       expect(CODEX_PROMPT_PATTERN.test('> not codex prompt')).toBe(false);
+    });
+  });
+
+  // Issue #890: startup dialog detection so the input-prompt check is not fooled
+  // by dialog option lines like "› 1. Update now".
+  describe('CODEX_DIALOG_PATTERN (Issue #890)', () => {
+    // Real codex captures render the selected option marker "›" at column 0
+    // (same column as the genuine input prompt), which is why "^›" is fooled.
+    const UPDATE_DIALOG = [
+      '✨ Update available! 0.139.0 -> 0.140.0',
+      '› 1. Update now (runs `npm install -g @openai/codex`)',
+      '  2. Skip',
+      '  3. Skip until next version',
+      'Press enter to continue',
+    ].join('\n');
+
+    const TRUST_DIALOG = [
+      'Do you trust the contents of this directory?',
+      '› 1. Yes, continue',
+      '  2. No, quit',
+    ].join('\n');
+
+    it('should match the update notification dialog', () => {
+      expect(CODEX_DIALOG_PATTERN.test(UPDATE_DIALOG)).toBe(true);
+    });
+
+    it('should match the trust dialog', () => {
+      expect(CODEX_DIALOG_PATTERN.test(TRUST_DIALOG)).toBe(true);
+    });
+
+    it('should match a numbered selection option line ("› 1. ...")', () => {
+      expect(CODEX_DIALOG_PATTERN.test('   › 1. Update now')).toBe(true);
+      expect(CODEX_DIALOG_PATTERN.test('› 2. Skip')).toBe(true);
+    });
+
+    it('should match the "Press enter to continue" footer', () => {
+      expect(CODEX_DIALOG_PATTERN.test('Press enter to continue')).toBe(true);
+    });
+
+    it('should NOT match a genuine empty or suggestion prompt', () => {
+      expect(CODEX_DIALOG_PATTERN.test('› ')).toBe(false);
+      expect(CODEX_DIALOG_PATTERN.test('› Find and fix a bug in @filename')).toBe(false);
+    });
+  });
+
+  describe('isCodexPromptReady (Issue #890)', () => {
+    it('should be true for a genuine empty prompt', () => {
+      expect(isCodexPromptReady('› ')).toBe(true);
+    });
+
+    it('should be true for a genuine prompt with placeholder suggestion', () => {
+      expect(isCodexPromptReady('› Find and fix a bug in @filename')).toBe(true);
+    });
+
+    it('should be FALSE while the update dialog is active (prompt pattern matches "› 1.")', () => {
+      const output = [
+        '✨ Update available! 0.139.0 -> 0.140.0',
+        '› 1. Update now (runs `npm install -g @openai/codex`)',
+        '  2. Skip',
+        'Press enter to continue',
+      ].join('\n');
+      // Sanity: the legacy prompt pattern alone is fooled by the "› 1." option line.
+      expect(CODEX_PROMPT_PATTERN.test(output)).toBe(true);
+      // The hardened check rejects it.
+      expect(isCodexPromptReady(output)).toBe(false);
+    });
+
+    it('should be FALSE while the trust dialog is active', () => {
+      const output = [
+        'Do you trust the contents of this directory?',
+        '› 1. Yes, continue',
+        '  2. No, quit',
+      ].join('\n');
+      // "^›" matches the "› 1." option line, but the dialog guard rejects it.
+      expect(CODEX_PROMPT_PATTERN.test(output)).toBe(true);
+      expect(isCodexPromptReady(output)).toBe(false);
+    });
+
+    it('should be FALSE for non-prompt output (no › at all)', () => {
+      expect(isCodexPromptReady('Loading Codex...')).toBe(false);
+    });
+
+    // Issue #890 regression: after skipping the update, codex keeps a NON-interactive
+    // "✨ Update available!" banner box rendered above the genuine prompt. The prompt
+    // must still be considered ready -- matching "Update available" here would hang
+    // waitForReady / waitForPrompt for the whole timeout window.
+    it('should be TRUE when the persistent post-skip "Update available" banner coexists with the prompt', () => {
+      const output = [
+        '╭──────────────────────────────────────────────────╮',
+        '│ ✨ Update available! 0.139.0 -> 0.140.0          │',
+        '│ Run npm install -g @openai/codex to update.      │',
+        '╰──────────────────────────────────────────────────╯',
+        '',
+        '› Summarize recent commits',
+      ].join('\n');
+      expect(isCodexPromptReady(output)).toBe(true);
+    });
+
+    it('should still be FALSE for the INTERACTIVE update dialog (detected without "Update available")', () => {
+      const output = [
+        '✨ Update available! 0.139.0 -> 0.140.0',
+        '› 1. Update now (runs `npm install -g @openai/codex`)',
+        '  2. Skip',
+        '  3. Skip until next version',
+        'Press enter to continue',
+      ].join('\n');
+      // The interactive dialog is detected via "› 1.", "Skip until next version",
+      // and "Press enter to continue" -- never via the "Update available" substring.
+      expect(isCodexPromptReady(output)).toBe(false);
+    });
+  });
+
+  // Issue #892: capturePane(50) returns scrollback, so a dismissed update/trust
+  // dialog can remain in the SAME capture ABOVE the now-live genuine prompt. The
+  // whole-window Issue #890 form stayed false here forever (hang + "222..." re-send);
+  // position-based detection treats the bottom-most genuine prompt as ready.
+  describe('isCodexPromptReady - position-based (Issue #892)', () => {
+    it('is TRUE when a dismissed update dialog lingers in scrollback ABOVE the live prompt', () => {
+      const output = [
+        '✨ Update available! 0.139.0 -> 0.140.0',
+        '› 1. Update now (runs `npm install -g @openai/codex`)',
+        '  2. Skip',
+        '  3. Skip until next version',
+        'Press enter to continue',
+        '› ',
+      ].join('\n');
+      // The whole-window check (CODEX_DIALOG_PATTERN.test) still matches the stale
+      // dialog lines -- proving the regression scenario -- yet the prompt is ready.
+      expect(CODEX_DIALOG_PATTERN.test(output)).toBe(true);
+      expect(isCodexPromptReady(output)).toBe(true);
+    });
+
+    it('is TRUE when a dismissed trust dialog lingers in scrollback ABOVE the live prompt', () => {
+      const output = [
+        'Do you trust the contents of this directory?',
+        '› 1. Yes, continue',
+        '  2. No, quit',
+        '',
+        '› ',
+      ].join('\n');
+      expect(CODEX_DIALOG_PATTERN.test(output)).toBe(true);
+      expect(isCodexPromptReady(output)).toBe(true);
+    });
+
+    it('is TRUE for a genuine prompt carrying a suggestion below residual dialog lines', () => {
+      const output = [
+        'Press enter to continue',
+        '› Summarize recent commits',
+      ].join('\n');
+      expect(isCodexPromptReady(output)).toBe(true);
+    });
+
+    it('is FALSE while the dialog is the bottom-most element (no genuine prompt below)', () => {
+      const output = [
+        '› ',
+        '✨ Update available! 0.139.0 -> 0.140.0',
+        '› 1. Update now (runs `npm install -g @openai/codex`)',
+        '  2. Skip',
+        '  3. Skip until next version',
+        'Press enter to continue',
+      ].join('\n');
+      // A genuine "› " appears, but it is ABOVE the active dialog -- not ready.
+      expect(isCodexPromptReady(output)).toBe(false);
+    });
+  });
+
+  describe('getCodexActiveDialog (Issue #892)', () => {
+    it('classifies an active update dialog', () => {
+      const output = [
+        '✨ Update available! 0.139.0 -> 0.140.0',
+        '› 1. Update now (runs `npm install -g @openai/codex`)',
+        '  2. Skip',
+        '  3. Skip until next version',
+        'Press enter to continue',
+      ].join('\n');
+      expect(getCodexActiveDialog(output)).toBe('update');
+    });
+
+    it('classifies an active trust dialog', () => {
+      const output = [
+        'Do you trust the contents of this directory?',
+        '› 1. Yes, continue',
+        '  2. No, quit',
+      ].join('\n');
+      expect(getCodexActiveDialog(output)).toBe('trust');
+    });
+
+    it('classifies a standalone press-enter screen', () => {
+      const output = ['Some release notes', 'Press enter to continue'].join('\n');
+      expect(getCodexActiveDialog(output)).toBe('press-enter');
+    });
+
+    it('returns null for a genuine prompt with no dialog', () => {
+      expect(getCodexActiveDialog('› ')).toBeNull();
+    });
+
+    it('returns null when the dialog is only residual scrollback ABOVE the live prompt', () => {
+      // The core "222..." fix: a dismissed update dialog left in scrollback must NOT
+      // be treated as active, so waitForReady does not re-send "2".
+      const output = [
+        '✨ Update available! 0.139.0 -> 0.140.0',
+        '› 1. Update now (runs `npm install -g @openai/codex`)',
+        '  2. Skip',
+        '  3. Skip until next version',
+        'Press enter to continue',
+        '› ',
+      ].join('\n');
+      expect(getCodexActiveDialog(output)).toBeNull();
+    });
+
+    it('prefers update over its own "Press enter to continue" footer', () => {
+      const output = [
+        '› 1. Update now',
+        '  2. Skip',
+        '  3. Skip until next version',
+        'Press enter to continue',
+      ].join('\n');
+      // Enter on the update dialog could confirm "1. Update now" (npm install), so
+      // the update classification must win over the footer.
+      expect(getCodexActiveDialog(output)).toBe('update');
     });
   });
 
