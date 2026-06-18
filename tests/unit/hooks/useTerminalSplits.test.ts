@@ -528,4 +528,123 @@ describe('useTerminalSplits', () => {
       expect(stored?.widths[1]).toBeCloseTo(0.5);
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Issue #898: split restoration must NOT reconcile against the transient
+  // seed/default roster (primary-only, no aliases) shown before the real roster
+  // arrives or right after a sidebar worktree switch. Reconciling there evicts
+  // persisted alias splits (`claude-2`) and back-fills an unrelated primary,
+  // resetting the 2nd pane to the dropdown head. `rosterReady` gates reconcile.
+  // ---------------------------------------------------------------------------
+  describe('rosterReady gating (Issue #898)', () => {
+    // Real roster (alias included), as returned by the API for the worktree.
+    const REAL_A: AgentInstance[] = [
+      { id: 'claude', cliTool: 'claude', alias: 'Claude', order: 0 },
+      { id: 'claude-2', cliTool: 'claude', alias: 'Claude (review)', order: 1 },
+      { id: 'codex', cliTool: 'codex', alias: 'Codex', order: 2 },
+    ];
+    // Transient seed roster: primary-only, no `claude-2` (mirrors
+    // agentInstancesFromSelectedAgents(DEFAULT_SELECTED_AGENTS)).
+    const SEED: AgentInstance[] = [
+      { id: 'claude', cliTool: 'claude', alias: 'Claude', order: 0 },
+      { id: 'codex', cliTool: 'codex', alias: 'Codex', order: 1 },
+      { id: 'gemini', cliTool: 'gemini', alias: 'Gemini', order: 2 },
+    ];
+
+    const aliasConfig = {
+      splits: [
+        { cliToolId: 'claude', instanceId: 'claude' },
+        { cliToolId: 'claude', instanceId: 'claude-2' },
+      ],
+      widths: [0.5, 0.5],
+    };
+
+    // Test point 1: persisted [claude, claude-2] + transient seed roster +
+    // rosterReady=false → config preserved verbatim (no eviction).
+    it('preserves persisted alias splits while the roster is not ready', () => {
+      mockTerminalSplitsLocalStorage('w-a', aliasConfig);
+      const { result } = renderHook(() => useTerminalSplits('w-a', SEED, false));
+      expect(result.current.splits.map(s => s.instanceId)).toEqual(['claude', 'claude-2']);
+    });
+
+    // Test point 2: once the real roster (with claude-2) arrives and
+    // rosterReady flips true, the alias assignment is still preserved.
+    it('keeps the alias assignment after the real roster arrives (false → true)', () => {
+      mockTerminalSplitsLocalStorage('w-a', aliasConfig);
+      const { result, rerender } = renderHook(
+        ({ roster, ready }: { roster: AgentInstance[]; ready: boolean }) =>
+          useTerminalSplits('w-a', roster, ready),
+        { initialProps: { roster: SEED, ready: false } },
+      );
+      expect(result.current.splits.map(s => s.instanceId)).toEqual(['claude', 'claude-2']);
+
+      rerender({ roster: REAL_A, ready: true });
+      expect(result.current.splits.map(s => s.instanceId)).toEqual(['claude', 'claude-2']);
+    });
+
+    // Test point 3: A → B → A sidebar round trip. The 2nd pane must return as
+    // `claude-2`, not morph into the alternate primary (codex) that B's roster
+    // would have back-filled during the transient reconcile.
+    it('keeps the 2nd pane as claude-2 across an A → B → A round trip', () => {
+      mockTerminalSplitsLocalStorage('w-a', aliasConfig);
+      // B's real roster (no claude-2; shares codex with the buggy back-fill).
+      const REAL_B: AgentInstance[] = [
+        { id: 'claude', cliTool: 'claude', alias: 'Claude', order: 0 },
+        { id: 'codex', cliTool: 'codex', alias: 'Codex', order: 1 },
+      ];
+
+      const { result, rerender } = renderHook(
+        ({ wid, roster, ready }: { wid: string; roster: AgentInstance[]; ready: boolean }) =>
+          useTerminalSplits(wid, roster, ready),
+        { initialProps: { wid: 'w-a', roster: REAL_A, ready: true } },
+      );
+      expect(result.current.splits.map(s => s.instanceId)).toEqual(['claude', 'claude-2']);
+
+      // Navigate to B: transient roster (seed) then B's real roster.
+      rerender({ wid: 'w-b', roster: SEED, ready: false });
+      rerender({ wid: 'w-b', roster: REAL_B, ready: true });
+
+      // Navigate back to A. During the transient window the in-hand roster is
+      // still B's (no claude-2) and rosterReady is false → reconcile suppressed.
+      rerender({ wid: 'w-a', roster: REAL_B, ready: false });
+      expect(result.current.splits.map(s => s.instanceId)).toEqual(['claude', 'claude-2']);
+
+      // A's real roster arrives → reconcile keeps claude-2 (it exists again).
+      rerender({ wid: 'w-a', roster: REAL_A, ready: true });
+      expect(result.current.splits.map(s => s.instanceId)).toEqual(['claude', 'claude-2']);
+    });
+
+    // Test point 4: when the alias is genuinely gone from the REAL roster (and
+    // rosterReady=true), the pre-#898 eviction behavior is unchanged.
+    it('still evicts an alias that is truly absent from the real roster', () => {
+      mockTerminalSplitsLocalStorage('w-a', aliasConfig);
+      // ROSTER has no claude-2 → claude-2 evicted, slot back-filled with codex.
+      const { result } = renderHook(() => useTerminalSplits('w-a', ROSTER, true));
+      expect(result.current.splits.map(s => s.instanceId)).toEqual(['claude', 'codex']);
+    });
+
+    // Test point 5 (persistence guard): switching worktrees must not write the
+    // previous worktree's config under the new worktreeId's storage key.
+    it('does not pollute the new worktree storage with the old config on switch', () => {
+      mockTerminalSplitsLocalStorage('w-a', aliasConfig);
+      const { result, rerender } = renderHook(
+        ({ wid, roster, ready }: { wid: string; roster: AgentInstance[]; ready: boolean }) =>
+          useTerminalSplits(wid, roster, ready),
+        { initialProps: { wid: 'w-a', roster: REAL_A, ready: true } },
+      );
+      expect(result.current.splits.map(s => s.instanceId)).toEqual(['claude', 'claude-2']);
+
+      // Switch to a fresh worktree with no stored config; its config must be the
+      // default single split — never the previous worktree's [claude, claude-2].
+      rerender({ wid: 'w-b', roster: SEED, ready: false });
+      const storedB = readTerminalSplitsLocalStorage('w-b');
+      expect(storedB?.splits.map(s => s.instanceId)).not.toEqual(['claude', 'claude-2']);
+      expect(storedB?.splits).toHaveLength(1);
+      // w-a's persisted config is untouched.
+      expect(readTerminalSplitsLocalStorage('w-a')?.splits.map(s => s.instanceId)).toEqual([
+        'claude',
+        'claude-2',
+      ]);
+    });
+  });
 });

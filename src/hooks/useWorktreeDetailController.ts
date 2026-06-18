@@ -226,6 +226,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   );
   const agentInstancesRef = useRef(agentInstances);
   agentInstancesRef.current = agentInstances;
+  // Issue #898: which worktreeId the current `agentInstances` roster was loaded
+  // for. `null` until the first real roster arrives. Until it equals the active
+  // `worktreeId`, the roster in hand is the transient seed/default (or a
+  // previous worktree's roster right after a sidebar switch), which lacks alias
+  // instances (claude-2). `rosterReady` gates the terminal-split reconcile so it
+  // never evicts persisted aliases against that incomplete roster.
+  const [rosterWorktreeId, setRosterWorktreeId] = useState<string | null>(null);
+  const rosterReady = rosterWorktreeId === worktreeId;
   // Issue #368: Vibe-local Ollama model state (initialized from API)
   const [vibeLocalModel, setVibeLocalModel] = useState<string | null>(null);
   // Issue #374: Vibe-local context window state (initialized from API)
@@ -454,6 +462,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         if (!isSame) {
           setAgentInstances(next);
         }
+        // Issue #898: the real roster for THIS worktree is now confirmed (even
+        // when unchanged), so terminal-split reconcile may run. `worktreeId` is
+        // captured from this callback's closure, so a stale response for a
+        // previous worktree tags its own id — `rosterReady` stays false until the
+        // active worktree's roster arrives.
+        setRosterWorktreeId(worktreeId);
       }
       // Issue #368: Sync vibeLocalModel from API response
       if ('vibeLocalModel' in data) {
@@ -663,7 +677,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    */
   const handleAgentInstancesChange = useCallback((instances: AgentInstance[]) => {
     setAgentInstances(instances);
-  }, []);
+    // Issue #898: a roster edit applies to the active worktree, so keep the
+    // roster tagged to it — reconcile must run against the edited roster (e.g.
+    // a removed alias should be evicted from splits as before).
+    setRosterWorktreeId(worktreeId);
+  }, [worktreeId]);
 
   /** Issue #368: Callback for AgentSettingsPane to update vibeLocalModel */
   const handleVibeLocalModelChange = useCallback((model: string | null) => {
@@ -1534,6 +1552,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     handleShowArchivedChange,
     handleUpload,
     handleVibeLocalContextWindowChange,
+    rosterReady,
     handleVibeLocalModelChange,
     handleWorktreeStatusChange,
     hasUpdate,

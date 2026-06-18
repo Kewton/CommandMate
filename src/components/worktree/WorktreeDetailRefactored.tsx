@@ -187,6 +187,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     pendingInsertText,
     pendingInsertTextMap,
     removeToast,
+    rosterReady,
     setActiveInstanceId,
     setEditorFilePath,
     setFocusedSplitIndex,
@@ -236,6 +237,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           worktreeName={worktreeName}
           worktreeStatus={worktreeStatus}
           instances={agentInstances}
+          rosterReady={rosterReady}
           activeInstanceId={activeInstanceId}
           setActiveInstanceId={setActiveInstanceId}
           hasUpdate={hasUpdate}

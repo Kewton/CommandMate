@@ -65,6 +65,13 @@ export interface WorktreeDetailDesktopProps {
   worktreeStatus: WorktreeStatus;
   /** Issue #869: agent instance roster (drives instance tabs / split selectors). */
   instances: AgentInstance[];
+  /**
+   * Issue #898: `true` once the real roster for this worktree has loaded.
+   * Forwarded to TerminalSplitContainer so the split reconcile is suppressed
+   * while the roster is still the transient seed/default (which would otherwise
+   * evict persisted alias splits like `claude-2`).
+   */
+  rosterReady: boolean;
   /** Issue #869: active agent instance id (tab/split identity). */
   activeInstanceId: string;
   /** Issue #869: set the active agent instance (also syncs activeCliTab). */
@@ -188,6 +195,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   worktreeName,
   worktreeStatus,
   instances,
+  rosterReady,
   activeInstanceId,
   setActiveInstanceId,
   hasUpdate,
@@ -428,6 +436,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       <TerminalSplitContainer
         worktreeId={worktreeId}
         instances={instances}
+        // Issue #898: suppress split reconcile until the real roster is loaded.
+        rosterReady={rosterReady}
         renderPane={renderSplitPane}
         onFocusedSplitChange={setFocusedSplitIndex}
         // Issue #786 / #869: the container is the drop validation owner; it
@@ -440,7 +450,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     // setFocusedSplitIndex / setActiveInstanceId are stable callbacks, and
     // showToast is a stable parent callback, so listing them does not
     // destabilize the memo beyond the existing per-render cadence.
-    [worktreeId, instances, renderSplitPane, setFocusedSplitIndex, showToast, setActiveInstanceId],
+    [worktreeId, instances, rosterReady, renderSplitPane, setFocusedSplitIndex, showToast, setActiveInstanceId],
   );
 
   /**
