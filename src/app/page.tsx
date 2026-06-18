@@ -17,6 +17,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { AppShell } from '@/components/layout';
 import { HomeSessionSummary } from '@/components/home/HomeSessionSummary';
+import { TodoWidget } from '@/components/home/TodoWidget';
 import type { Worktree } from '@/types/models';
 
 /**
@@ -157,6 +158,12 @@ export default function Home() {
         <div className="mb-8">
           <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-gray-100">Session Overview</h2>
           <HomeSessionSummary worktrees={worktrees} />
+        </div>
+
+        {/* ToDo */}
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-gray-100">ToDo</h2>
+          <TodoWidget />
         </div>
 
         {/* Shortcut Cards */}
