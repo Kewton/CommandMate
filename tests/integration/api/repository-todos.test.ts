@@ -93,6 +93,19 @@ describe('GET /api/repositories/:id/todos', () => {
     expect(data.todos.map((t: { content: string }) => t.content)).toEqual(['first', 'second']);
   });
 
+  it('includes the resolved repository name (Issue #900)', async () => {
+    createTodo(db, repoId, { content: 'task', position: 0 });
+
+    const { GET } = await import('@/app/api/repositories/[id]/todos/route');
+    const res = await GET(
+      asReq(new Request(`http://localhost/api/repositories/${repoId}/todos`)),
+      { params: Promise.resolve({ id: repoId }) },
+    );
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.todos[0].repositoryName).toBe('TestRepo');
+  });
+
   it('returns 404 for a non-existent repository', async () => {
     const { GET } = await import('@/app/api/repositories/[id]/todos/route');
     const res = await GET(
@@ -137,6 +150,7 @@ describe('POST /api/repositories/:id/todos', () => {
     expect(data.todo.content).toBe('Write tests');
     expect(data.todo.done).toBe(false);
     expect(data.todo.repositoryId).toBe(repoId);
+    expect(data.todo.repositoryName).toBe('TestRepo');
     expect(data.todo.position).toBe(0);
   });
 

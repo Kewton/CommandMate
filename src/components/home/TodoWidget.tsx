@@ -30,6 +30,11 @@ function repoLabel(repo: RepositoryOption): string {
   return repo.displayName?.trim() || repo.name;
 }
 
+/** Human-readable repository name for a todo (Issue #900). */
+function todoRepoLabel(todo: TodoItem): string {
+  return todo.repositoryDisplayName?.trim() || todo.repositoryName || '';
+}
+
 export function TodoWidget() {
   const [repositories, setRepositories] = useState<RepositoryOption[]>([]);
   const [selectedRepoId, setSelectedRepoId] = useState('');
@@ -276,6 +281,15 @@ export function TodoWidget() {
                   >
                     {todo.content}
                   </span>
+                  {todoRepoLabel(todo) && (
+                    <span
+                      className="shrink-0 max-w-[8rem] truncate rounded-full bg-gray-100 dark:bg-gray-700 px-2 py-0.5 text-[10px] font-medium text-gray-500 dark:text-gray-400"
+                      data-testid="todo-repo-badge"
+                      title={todoRepoLabel(todo)}
+                    >
+                      {todoRepoLabel(todo)}
+                    </span>
+                  )}
                   <button
                     type="button"
                     onClick={() => handleDelete(todo)}

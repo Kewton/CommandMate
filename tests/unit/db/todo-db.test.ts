@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
-import { createRepository } from '@/lib/db/db-repository';
+import { createRepository, updateRepository } from '@/lib/db/db-repository';
 import {
   getTodosByRepositoryId,
   getTodoById,
@@ -55,6 +55,36 @@ describe('todo-db', () => {
     expect(todo.done).toBe(false);
     expect(todo.position).toBe(0);
     expect(todo.createdAt).toBeInstanceOf(Date);
+  });
+
+  it('resolves the repository name via JOIN (Issue #900)', () => {
+    const todo = createTodo(db, repositoryId, { content: 'task', position: 0 });
+    // createTodo re-fetches so the returned object carries the name.
+    expect(todo.repositoryName).toBe('TestRepo');
+    expect(todo.repositoryDisplayName).toBeUndefined();
+
+    const [listed] = getTodosByRepositoryId(db, repositoryId);
+    expect(listed.repositoryName).toBe('TestRepo');
+
+    const fetched = getTodoById(db, todo.id);
+    expect(fetched?.repositoryName).toBe('TestRepo');
+  });
+
+  it('returns the repository display name when set (Issue #900)', () => {
+    updateRepository(db, repositoryId, { displayName: 'My Repo' });
+    const todo = createTodo(db, repositoryId, { content: 'task', position: 0 });
+    expect(todo.repositoryName).toBe('TestRepo');
+    expect(todo.repositoryDisplayName).toBe('My Repo');
+  });
+
+  it('reflects the latest repository name after a rename (Issue #900)', () => {
+    const todo = createTodo(db, repositoryId, { content: 'task', position: 0 });
+    expect(getTodoById(db, todo.id)?.repositoryName).toBe('TestRepo');
+
+    updateRepository(db, repositoryId, { name: 'RenamedRepo' });
+
+    expect(getTodoById(db, todo.id)?.repositoryName).toBe('RenamedRepo');
+    expect(getTodosByRepositoryId(db, repositoryId)[0].repositoryName).toBe('RenamedRepo');
   });
 
   it('lists todos sorted by position', () => {
