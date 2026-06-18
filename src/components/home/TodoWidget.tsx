@@ -187,8 +187,14 @@ export function TodoWidget() {
       className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700"
       data-testid="home-todo-widget"
     >
-      {/* Repository selector + remaining count */}
-      <div className="flex items-center justify-between gap-3 mb-3">
+      {/* Repository selector + remaining count.
+          Mobile: stack vertically so the select can use the full width; the
+          `N open` count drops to its own line. Desktop (>= sm): unchanged
+          single-row layout with the select capped at 16rem (Issue #909). */}
+      <div
+        className="flex flex-col gap-2 mb-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
+        data-testid="todo-selector-row"
+      >
         <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 min-w-0">
           <span className="shrink-0">Repository</span>
           <select
@@ -196,7 +202,7 @@ export function TodoWidget() {
             onChange={(e) => setSelectedRepoId(e.target.value)}
             disabled={!hasRepositories}
             data-testid="todo-repo-select"
-            className="min-w-0 max-w-[16rem] truncate rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm text-gray-900 dark:text-gray-100 disabled:opacity-50"
+            className="min-w-0 flex-1 truncate rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm text-gray-900 dark:text-gray-100 disabled:opacity-50 sm:flex-initial sm:max-w-[16rem]"
           >
             {repositories.map((repo) => (
               <option key={repo.id} value={repo.id}>
@@ -260,46 +266,60 @@ export function TodoWidget() {
               {todos.map((todo) => (
                 <li
                   key={todo.id}
-                  className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-gray-50 dark:hover:bg-gray-700/40 group"
+                  className="flex flex-col gap-1 rounded-md px-1 py-1 hover:bg-gray-50 dark:hover:bg-gray-700/40 group sm:flex-row sm:items-center sm:gap-2"
                   data-testid="todo-item"
                 >
-                  <input
-                    type="checkbox"
-                    checked={todo.done}
-                    onChange={() => handleToggle(todo)}
-                    data-testid="todo-checkbox"
-                    aria-label={todo.done ? 'Mark as not done' : 'Mark as done'}
-                    className="shrink-0 h-4 w-4 rounded border-gray-300 text-cyan-600 focus:ring-cyan-400"
-                  />
-                  <span
-                    className={`flex-1 min-w-0 break-words text-sm ${
-                      todo.done
-                        ? 'line-through text-gray-400 dark:text-gray-500'
-                        : 'text-gray-800 dark:text-gray-200'
-                    }`}
-                  >
-                    {todo.content}
-                  </span>
-                  {todoRepoLabel(todo) && (
+                  {/* Top row (mobile) / left section (desktop): checkbox + content.
+                      The checkbox is wrapped in a label that provides a ~44px
+                      touch target on mobile while the box itself stays small
+                      (Issue #909). */}
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                    <label className="shrink-0 inline-flex min-h-[44px] min-w-[44px] cursor-pointer items-center justify-center sm:min-h-0 sm:min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={todo.done}
+                        onChange={() => handleToggle(todo)}
+                        data-testid="todo-checkbox"
+                        aria-label={todo.done ? 'Mark as not done' : 'Mark as done'}
+                        className="h-4 w-4 rounded border-gray-300 text-cyan-600 focus:ring-cyan-400"
+                      />
+                    </label>
                     <span
-                      className="shrink-0 max-w-[8rem] truncate rounded-full bg-gray-100 dark:bg-gray-700 px-2 py-0.5 text-[10px] font-medium text-gray-500 dark:text-gray-400"
-                      data-testid="todo-repo-badge"
-                      title={todoRepoLabel(todo)}
+                      className={`min-w-0 flex-1 break-words text-sm ${
+                        todo.done
+                          ? 'line-through text-gray-400 dark:text-gray-500'
+                          : 'text-gray-800 dark:text-gray-200'
+                      }`}
                     >
-                      {todoRepoLabel(todo)}
+                      {todo.content}
                     </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(todo)}
-                    aria-label="Delete todo"
-                    data-testid="todo-delete"
-                    className="shrink-0 text-gray-300 hover:text-red-500 dark:text-gray-600 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
+                  </div>
+                  {/* Bottom row (mobile) / right section (desktop): repo badge +
+                      delete. On mobile the delete button is always visible with
+                      a ~44px touch target; on desktop the original hover-reveal
+                      (sm:opacity-0 → sm:group-hover) is restored (Issue #909). */}
+                  <div className="flex shrink-0 items-center justify-end gap-2">
+                    {todoRepoLabel(todo) && (
+                      <span
+                        className="shrink-0 max-w-[8rem] truncate rounded-full bg-gray-100 dark:bg-gray-700 px-2 py-0.5 text-[10px] font-medium text-gray-500 dark:text-gray-400"
+                        data-testid="todo-repo-badge"
+                        title={todoRepoLabel(todo)}
+                      >
+                        {todoRepoLabel(todo)}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(todo)}
+                      aria-label="Delete todo"
+                      data-testid="todo-delete"
+                      className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center text-gray-300 opacity-100 transition-opacity hover:text-red-500 dark:text-gray-600 dark:hover:text-red-400 sm:min-h-0 sm:min-w-0 sm:opacity-0 sm:group-hover:opacity-100"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>
