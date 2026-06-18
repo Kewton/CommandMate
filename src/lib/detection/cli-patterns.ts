@@ -99,6 +99,49 @@ export const CLAUDE_TRUST_DIALOG_PATTERN = /Yes, I trust this folder/m;
 export const CODEX_PROMPT_PATTERN = /^›\s*/m;
 
 /**
+ * Codex INTERACTIVE startup dialog pattern (Issue #890)
+ *
+ * Codex shows interactive update-notification and trust dialogs on first launch.
+ * Their currently-selected option lines render as "› 1. Update now", which ALSO
+ * matches CODEX_PROMPT_PATTERN (the bare "^›" input-prompt pattern). So "is the
+ * input prompt ready?" cannot be decided by CODEX_PROMPT_PATTERN alone -- it must
+ * also confirm no INTERACTIVE dialog is still active. This pattern matches markers
+ * that appear ONLY in interactive dialogs:
+ *   - Interactive update dialog: "Skip until next version" (the option-3 label)
+ *   - Trust dialog:              "Do you trust the contents of this directory?"
+ *   - Dialog confirm footer:     "Press enter to continue"
+ *   - Numbered selection option: "› 1. ..." (leading ›, a digit, a dot)
+ *
+ * IMPORTANT (Issue #890 regression): the substring "Update available" is
+ * deliberately NOT a marker. After the update is skipped, codex keeps a
+ * non-interactive banner box ("✨ Update available! ... / Run npm install -g
+ * @openai/codex to update.") rendered ABOVE the genuine "› " prompt. Matching
+ * "Update available" would make isCodexPromptReady() return false for as long as
+ * that banner is visible, hanging waitForReady (~30s) and waitForPrompt (15s) on
+ * exactly the first-launch + update-pending case this fix targets. The interactive
+ * update dialog is still reliably detected via its other three markers above
+ * ("› 1. Update now" + "Skip until next version" + "Press enter to continue").
+ *
+ * No /g flag (would make .test() stateful); no nested quantifiers (ReDoS-safe).
+ */
+export const CODEX_DIALOG_PATTERN =
+  /Skip until next version|Do you trust|Press enter to continue|^\s*›\s*\d+\.\s/m;
+
+/**
+ * Decide whether Codex output shows a genuine interactive input prompt rather than
+ * a startup dialog (Issue #890).
+ *
+ * Returns true only when the prompt pattern matches AND no update/trust dialog
+ * marker is present. Used by both CodexTool.waitForReady() (startup) and
+ * CodexTool.waitForPrompt() (before every send) so a residual dialog is never
+ * mistaken for "ready", which would otherwise type the first message into the
+ * dialog or fire a stray Enter.
+ */
+export function isCodexPromptReady(output: string): boolean {
+  return CODEX_PROMPT_PATTERN.test(output) && !CODEX_DIALOG_PATTERN.test(output);
+}
+
+/**
  * Codex separator pattern
  */
 export const CODEX_SEPARATOR_PATTERN = /^─.*Worked for.*─+$/m;
