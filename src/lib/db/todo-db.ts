@@ -103,6 +103,30 @@ export function getTodosByRepositoryId(
 }
 
 /**
+ * Get every todo across all repositories, for the global Home ToDo widget
+ * (Issue #907). Unlike {@link getTodosByRepositoryId}, this is not scoped to a
+ * single repository — the widget displays all repositories' todos at once.
+ *
+ * Ordered by the effective repository label (display name, falling back to
+ * name, case-insensitive) so the cross-repo list is grouped per repository,
+ * then by `position` / `created_at` within a repository, with `id` as a final
+ * tiebreaker for fully deterministic ordering.
+ */
+export function getAllTodos(db: Database.Database): RepositoryTodo[] {
+  const stmt = db.prepare(`
+    ${TODO_SELECT}
+    ORDER BY
+      COALESCE(NULLIF(TRIM(r.display_name), ''), r.name) COLLATE NOCASE ASC,
+      t.position ASC,
+      t.created_at ASC,
+      t.id ASC
+  `);
+
+  const rows = stmt.all() as RepositoryTodoRow[];
+  return rows.map(mapTodoRow);
+}
+
+/**
  * Get a todo by ID.
  *
  * @returns Todo or null if not found.

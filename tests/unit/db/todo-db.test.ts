@@ -10,6 +10,7 @@ import { runMigrations } from '@/lib/db/db-migrations';
 import { createRepository, updateRepository } from '@/lib/db/db-repository';
 import {
   getTodosByRepositoryId,
+  getAllTodos,
   getTodoById,
   createTodo,
   updateTodo,
@@ -111,6 +112,46 @@ describe('todo-db', () => {
 
   it('getTodoById returns null for a missing id', () => {
     expect(getTodoById(db, 'nope')).toBeNull();
+  });
+
+  describe('getAllTodos (cross-repository, Issue #907)', () => {
+    it('returns an empty list when no todos exist', () => {
+      expect(getAllTodos(db)).toEqual([]);
+    });
+
+    it('returns todos from every repository ordered by repo label then position', () => {
+      // 'Alpha' sorts before 'TestRepo' (the beforeEach repo) case-insensitively.
+      const alpha = createRepository(db, {
+        name: 'Alpha',
+        path: '/path/to/alpha',
+        cloneSource: 'local',
+      });
+      createTodo(db, repositoryId, { content: 'b', position: 1 });
+      createTodo(db, repositoryId, { content: 'a', position: 0 });
+      createTodo(db, alpha.id, { content: 'z', position: 0 });
+
+      const all = getAllTodos(db);
+      // Alpha first (z), then TestRepo by position (a, b).
+      expect(all.map((t) => t.content)).toEqual(['z', 'a', 'b']);
+      expect(all[0].repositoryId).toBe(alpha.id);
+      expect(all[0].repositoryName).toBe('Alpha');
+      expect(all[1].repositoryId).toBe(repositoryId);
+      expect(all[1].repositoryName).toBe('TestRepo');
+    });
+
+    it('orders by the repository display name when set', () => {
+      // Give TestRepo a display name that sorts before a repo named 'Bbb'.
+      updateRepository(db, repositoryId, { displayName: 'Aaa' });
+      const bbb = createRepository(db, {
+        name: 'Bbb',
+        path: '/path/to/bbb',
+        cloneSource: 'local',
+      });
+      createTodo(db, bbb.id, { content: 'bbb-todo', position: 0 });
+      createTodo(db, repositoryId, { content: 'aaa-todo', position: 0 });
+
+      expect(getAllTodos(db).map((t) => t.content)).toEqual(['aaa-todo', 'bbb-todo']);
+    });
   });
 
   it('updates content', () => {
