@@ -293,6 +293,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // polls/tab switches from overwriting the active CLI tab state.
   const latestMessagesRequestIdRef = useRef(0);
   const latestCurrentOutputRequestIdRef = useRef(0);
+  // Issue #902: Latest-request guard for the bulk per-instance auto-yes refetch
+  // so a slow reply for worktree A can't pollute worktree B's map during rapid
+  // A→B→A navigation (newest reply wins; the server is the source of truth).
+  const latestAutoYesRequestIdRef = useRef(0);
   // Issue #525/#896: Derive the active instance's auto-yes state from the
   // per-instance map (keyed by activeInstanceId; primary instance id === cliToolId).
   const autoYesEnabled = autoYesStateMap.get(activeInstanceId)?.enabled ?? false;
@@ -422,6 +426,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       initialLoadCompletedRef.current = false;
       // Issue #736: terminal output reset is handled by the mobile terminal
       // tab's useTerminalPanePolling (self-resets on worktreeId change).
+      // Issue #902 (案2): discard the previous worktree's per-instance auto-yes
+      // map so B's values can never bleed onto A's same-named keys (e.g.
+      // "claude") during the transition. The 案1 bulk refetch below repopulates
+      // the map from the server an instant later (primary AND alias).
+      setAutoYesStateMap(new Map());
       // Update ref for next comparison
       prevWorktreeIdRef.current = worktreeId;
     }
@@ -612,6 +621,49 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       console.error('[WorktreeDetailRefactored] Error fetching current output:', err);
     }
   }, [worktreeId, actions, state.prompt.visible]);
+
+  /**
+   * Issue #902: Re-fetch the FULL per-instance auto-yes map in one request.
+   *
+   * Root cause of the reset-on-return bug: the only UI re-seed path for auto-yes
+   * was the `current-output` poll, whose PC variant carries no `instance` query
+   * param and therefore re-seeds ONLY the primary instance (the server resolves
+   * `resolvedInstanceId === cliToolId`). After a sidebar branch switch and back,
+   * ALIAS instances (e.g. `claude-2`) had no re-seed path and stayed stuck OFF,
+   * while primary merely flickered until the next poll.
+   *
+   * This calls the existing (previously unused) GET `/api/worktrees/:id/auto-yes`
+   * with no `cliToolId`, which returns the full `instances` map, and reflects it
+   * into `autoYesStateMap` wholesale so primary AND alias instances are restored
+   * to the server's truth at once. The latest-request guard drops replies from
+   * older worktrees (rapid A→B→A) so a slow A reply can't pollute B's map.
+   */
+  const fetchAutoYesStates = useCallback(async (): Promise<void> => {
+    const requestId = ++latestAutoYesRequestIdRef.current;
+    try {
+      const response = await fetch(`/api/worktrees/${worktreeId}/auto-yes`);
+      if (!response.ok) return;
+      const data = await response.json();
+      // Latest-request guard: only the newest refetch may write the map.
+      if (latestAutoYesRequestIdRef.current !== requestId) return;
+      const instances = data?.instances;
+      if (!instances || typeof instances !== 'object') return;
+      const next = new Map<string, { enabled: boolean; expiresAt: number | null }>();
+      for (const [instanceId, raw] of Object.entries(instances)) {
+        if (raw && typeof raw === 'object') {
+          const s = raw as { enabled?: boolean; expiresAt?: number | null };
+          next.set(instanceId, {
+            enabled: s.enabled ?? false,
+            expiresAt: s.expiresAt ?? null,
+          });
+        }
+      }
+      setAutoYesStateMap(next);
+    } catch (err) {
+      if (latestAutoYesRequestIdRef.current !== requestId) return;
+      console.error('[WorktreeDetailRefactored] Error fetching auto-yes states:', err);
+    }
+  }, [worktreeId]);
 
   // Issue #874: Mobile now manages agent *instances* (折衷案). The shared roster
   // (agentInstances) lives in the DB; this hook owns ONLY the per-device "which
@@ -1431,6 +1483,20 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
 
     return () => clearInterval(intervalId);
   }, [loading, error, fetchCurrentOutput, fetchWorktree, fetchMessages, activeCliRunning, isMobile]);
+
+  /**
+   * Issue #902 (案1): re-seed the FULL per-instance auto-yes map whenever the
+   * active worktree changes OR its real instance roster becomes ready
+   * (`rosterReady`). `fetchAutoYesStates` is keyed to `worktreeId`, so this fires
+   * once on mount, once per branch switch (immediately, restoring primary +
+   * alias before the next poll), and once more when the worktree's true roster
+   * arrives. Paired with the 案2 map-clear in the worktreeId reset effect, the
+   * server stays the single source of truth and stale cross-worktree values
+   * never linger — fixing the alias-stuck-OFF reset and the primary flicker.
+   */
+  useEffect(() => {
+    void fetchAutoYesStates();
+  }, [worktreeId, rosterReady, fetchAutoYesStates]);
 
   /** Sync layout mode with viewport size */
   useEffect(() => {
