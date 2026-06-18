@@ -128,17 +128,103 @@ export const CODEX_DIALOG_PATTERN =
   /Skip until next version|Do you trust|Press enter to continue|^\s*›\s*\d+\.\s/m;
 
 /**
- * Decide whether Codex output shows a genuine interactive input prompt rather than
- * a startup dialog (Issue #890).
+ * Codex genuine input-prompt line (Issue #892).
  *
- * Returns true only when the prompt pattern matches AND no update/trust dialog
- * marker is present. Used by both CodexTool.waitForReady() (startup) and
- * CodexTool.waitForPrompt() (before every send) so a residual dialog is never
- * mistaken for "ready", which would otherwise type the first message into the
- * dialog or fire a stray Enter.
+ * A line whose first non-space glyph is "›" but which is NOT a numbered dialog
+ * option ("› 1. ..."). The selected dialog option renders "›" at column 0 too
+ * (same column as the live prompt), so the digit-dot negative lookahead is what
+ * distinguishes the genuine input line from a dialog option line. Single-line
+ * (no /m, no /g) -- callers test it per line to locate the prompt's position.
+ */
+const CODEX_GENUINE_PROMPT_LINE = /^\s*›(?!\s*\d+\.)/;
+
+/**
+ * Decide whether Codex output shows a genuine interactive input prompt rather than
+ * a startup dialog (Issue #890, reworked in Issue #892).
+ *
+ * POSITION-based: capturePane(50) returns scrollback, so a dismissed update/trust
+ * dialog lingers ABOVE the live prompt. The original Issue #890 form
+ * (`CODEX_PROMPT_PATTERN && !CODEX_DIALOG_PATTERN`) is a whole-window test, so a
+ * residual dialog line anywhere in the frame keeps it false forever -- hanging
+ * waitForReady/waitForPrompt and (via the re-firing branches) injecting "222...".
+ *
+ * Instead the frame is ready when a genuine input-prompt line sits BELOW every
+ * interactive dialog marker -- i.e. the prompt is the bottom-most active element.
+ * CODEX_PROMPT_PATTERN / CODEX_DIALOG_PATTERN are intentionally unchanged here
+ * (status-detector.ts / response-checker.ts depend on them).
+ *
+ * Used by both CodexTool.waitForReady() (startup) and CodexTool.waitForPrompt()
+ * (before every send) so a residual dialog is never mistaken for "ready" and, just
+ * as importantly, a genuine prompt below stale dialog scrollback IS detected.
  */
 export function isCodexPromptReady(output: string): boolean {
-  return CODEX_PROMPT_PATTERN.test(output) && !CODEX_DIALOG_PATTERN.test(output);
+  const lines = output.split('\n');
+  let lastDialogMarkerIdx = -1;
+  let lastPromptIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (CODEX_DIALOG_PATTERN.test(line)) {
+      // A dialog marker/option line is never itself a genuine prompt.
+      lastDialogMarkerIdx = i;
+      continue;
+    }
+    if (CODEX_GENUINE_PROMPT_LINE.test(line)) {
+      lastPromptIdx = i;
+    }
+  }
+  return lastPromptIdx >= 0 && lastPromptIdx > lastDialogMarkerIdx;
+}
+
+/**
+ * The bottom-most active Codex startup dialog awaiting a key press (Issue #892).
+ * `null` means no dialog needs handling -- either none is present, or the only
+ * dialog text is residual scrollback above a genuine prompt.
+ */
+export type CodexActiveDialog = 'update' | 'press-enter' | 'trust' | null;
+
+/**
+ * Classify the bottom-most active Codex startup dialog (Issue #892).
+ *
+ * POSITION-based companion to isCodexPromptReady(): only dialog text appearing
+ * BELOW the genuine input-prompt line is considered "active". Dialog lines that
+ * remain in scrollback ABOVE a live prompt are ignored, so a dismissed dialog is
+ * never re-acted on (this is what stops the update branch from re-sending "2" once
+ * the dialog has been skipped -- the root cause of the "222..." prefix).
+ *
+ * Precedence matches CodexTool.waitForReady()'s historical branch order: the
+ * update dialog wins over its own "Press enter to continue" footer, because Enter
+ * on the update dialog could confirm the default "1. Update now" (npm install).
+ */
+export function getCodexActiveDialog(output: string): CodexActiveDialog {
+  const lines = output.split('\n');
+  // Index of the bottom-most genuine input-prompt line (-1 if none).
+  let promptIdx = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (CODEX_GENUINE_PROMPT_LINE.test(lines[i])) {
+      promptIdx = i;
+      break;
+    }
+  }
+  // Active region = lines strictly below the genuine prompt (the whole frame when
+  // there is no genuine prompt). Residual dialog text above a live prompt is
+  // excluded, so a dialog lingering in scrollback is never treated as active.
+  const active = lines.slice(promptIdx + 1).join('\n');
+  if (active === '') {
+    return null;
+  }
+  if (
+    active.includes('Skip until next version') ||
+    (active.includes('Update') && active.includes('Skip'))
+  ) {
+    return 'update';
+  }
+  if (active.includes('Do you trust')) {
+    return 'trust';
+  }
+  if (active.includes('Press enter to continue')) {
+    return 'press-enter';
+  }
+  return null;
 }
 
 /**
