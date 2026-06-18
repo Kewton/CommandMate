@@ -32,6 +32,19 @@ export const todoApi = {
     return data.todos ?? [];
   },
 
+  /**
+   * List todos across all repositories (Issue #907). Used by the Home widget
+   * to show a cross-repository list regardless of the selected target repo.
+   */
+  async listAll(): Promise<TodoItem[]> {
+    const res = await fetch('/api/todos');
+    if (!res.ok) {
+      return parseError(res, 'Failed to load todos');
+    }
+    const data = (await res.json()) as { todos: TodoItem[] };
+    return data.todos ?? [];
+  },
+
   async create(repositoryId: string, content: string): Promise<TodoItem> {
     const res = await fetch(
       `/api/repositories/${encodeURIComponent(repositoryId)}/todos`,

@@ -1,13 +1,15 @@
 /**
  * TodoWidget Component
  *
- * Home page lightweight ToDo widget. A single global widget where the user
- * picks a target repository and jots down checkbox-style ToDo / memo items
- * scoped to that repository.
+ * Home page lightweight ToDo widget. A single global widget that lists ToDo /
+ * memo items across all repositories (Issue #907). The dropdown selects only
+ * the *target* repository for newly added items; the displayed list is always
+ * the cross-repository set and is not filtered by the selection.
  *
  * Repository list is fetched from GET /api/worktrees (the same `repositories`
- * array used by the Home Assistant chat). ToDos are keyed by repository id and
- * persisted via /api/repositories/:id/todos.
+ * array used by the Home Assistant chat). The cross-repo list is loaded via
+ * GET /api/todos; creation/toggle/delete go through /api/repositories/:id/todos
+ * keyed by each todo's own repository id.
  */
 
 'use client';
@@ -87,15 +89,13 @@ export function TodoWidget() {
     void fetchRepos();
   }, []);
 
-  const loadTodos = useCallback(async (repositoryId: string) => {
-    if (!repositoryId) {
-      setTodos([]);
-      return;
-    }
+  // Load the cross-repository todo list (Issue #907): not scoped to the
+  // selected repository, so the dropdown never filters the displayed list.
+  const loadTodos = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const items = await todoApi.list(repositoryId);
+      const items = await todoApi.listAll();
       setTodos(items);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load todos');
@@ -105,7 +105,13 @@ export function TodoWidget() {
     }
   }, []);
 
-  // Reload todos whenever the selected repository changes.
+  // Load all todos once on mount; the list is repository-agnostic.
+  useEffect(() => {
+    void loadTodos();
+  }, [loadTodos]);
+
+  // Persist the selected target repository (used for new todos only). Changing
+  // it must NOT reload/filter the list — only the add target changes.
   useEffect(() => {
     if (!selectedRepoId) {
       return;
@@ -113,8 +119,7 @@ export function TodoWidget() {
     if (typeof window !== 'undefined') {
       localStorage.setItem(SELECTED_REPO_KEY, selectedRepoId);
     }
-    void loadTodos(selectedRepoId);
-  }, [selectedRepoId, loadTodos]);
+  }, [selectedRepoId]);
 
   const handleAdd = useCallback(async () => {
     const content = input.trim();
@@ -126,7 +131,7 @@ export function TodoWidget() {
     try {
       await todoApi.create(selectedRepoId, content);
       setInput('');
-      await loadTodos(selectedRepoId);
+      await loadTodos();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add todo');
     } finally {
@@ -136,39 +141,33 @@ export function TodoWidget() {
 
   const handleToggle = useCallback(
     async (todo: TodoItem) => {
-      if (!selectedRepoId) {
-        return;
-      }
       // Optimistic update for snappy checkbox feedback.
       setTodos((prev) =>
         prev.map((t) => (t.id === todo.id ? { ...t, done: !t.done } : t)),
       );
       setError(null);
       try {
-        await todoApi.update(selectedRepoId, todo.id, { done: !todo.done });
+        // Operate on the todo's own repository, not the dropdown selection,
+        // so cross-repo todos toggle correctly (Issue #907).
+        await todoApi.update(todo.repositoryId, todo.id, { done: !todo.done });
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to update todo');
-        void loadTodos(selectedRepoId);
+        void loadTodos();
       }
     },
-    [selectedRepoId, loadTodos],
+    [loadTodos],
   );
 
-  const handleDelete = useCallback(
-    async (todo: TodoItem) => {
-      if (!selectedRepoId) {
-        return;
-      }
-      setError(null);
-      try {
-        await todoApi.remove(selectedRepoId, todo.id);
-        setTodos((prev) => prev.filter((t) => t.id !== todo.id));
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to delete todo');
-      }
-    },
-    [selectedRepoId],
-  );
+  const handleDelete = useCallback(async (todo: TodoItem) => {
+    setError(null);
+    try {
+      // Use the todo's own repository id so cross-repo deletes don't 404.
+      await todoApi.remove(todo.repositoryId, todo.id);
+      setTodos((prev) => prev.filter((t) => t.id !== todo.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete todo');
+    }
+  }, []);
 
   const handleInputKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {

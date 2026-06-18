@@ -90,6 +90,7 @@ export {
 // todo-db (repository-scoped Home ToDo widget)
 export {
   getTodosByRepositoryId,
+  getAllTodos,
   getTodoById,
   createTodo,
   updateTodo,
