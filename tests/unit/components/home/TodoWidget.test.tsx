@@ -149,3 +149,83 @@ describe('TodoWidget (Issue #907)', () => {
     expect(mockedApi.list).not.toHaveBeenCalled();
   });
 });
+
+describe('TodoWidget mobile layout (Issue #909)', () => {
+  it('keeps the delete button visible on mobile and hover-reveal only on desktop', async () => {
+    render(<TodoWidget />);
+    await screen.findByText('alpha task');
+
+    for (const btn of screen.getAllByTestId('todo-delete')) {
+      const classes = btn.className.split(/\s+/);
+      // Always visible on touch screens (no :hover available).
+      expect(classes).toContain('opacity-100');
+      // Hover-reveal restored only at >= sm so desktop is unchanged.
+      expect(classes).toContain('sm:opacity-0');
+      expect(classes).toContain('sm:group-hover:opacity-100');
+      // Must NOT carry the pre-#909 mobile-hiding tokens.
+      expect(classes).not.toContain('opacity-0');
+      expect(classes).not.toContain('group-hover:opacity-100');
+    }
+  });
+
+  it('renders rows as a responsive two-row (mobile) / single-row (desktop) layout', async () => {
+    render(<TodoWidget />);
+    await screen.findByText('alpha task');
+
+    for (const item of screen.getAllByTestId('todo-item')) {
+      const classes = item.className.split(/\s+/);
+      expect(classes).toContain('flex-col'); // stacked on mobile
+      expect(classes).toContain('sm:flex-row'); // single row on desktop
+    }
+  });
+
+  it('gives the checkbox and delete button a ~44px touch target on mobile', async () => {
+    render(<TodoWidget />);
+    await screen.findByText('alpha task');
+
+    for (const btn of screen.getAllByTestId('todo-delete')) {
+      const classes = btn.className.split(/\s+/);
+      expect(classes).toContain('min-h-[44px]');
+      expect(classes).toContain('min-w-[44px]');
+      // Compact again on desktop so the single row stays tight.
+      expect(classes).toContain('sm:min-h-0');
+      expect(classes).toContain('sm:min-w-0');
+    }
+
+    for (const cb of screen.getAllByTestId('todo-checkbox')) {
+      const label = cb.closest('label');
+      expect(label).not.toBeNull();
+      const classes = label!.className.split(/\s+/);
+      expect(classes).toContain('min-h-[44px]');
+      expect(classes).toContain('min-w-[44px]');
+      expect(classes).toContain('sm:min-h-0');
+      expect(classes).toContain('sm:min-w-0');
+    }
+  });
+
+  it('stacks the repository selector row on mobile and aligns it on desktop', async () => {
+    render(<TodoWidget />);
+    await screen.findByText('alpha task');
+
+    const classes = screen.getByTestId('todo-selector-row').className.split(/\s+/);
+    expect(classes).toContain('flex-col');
+    expect(classes).toContain('sm:flex-row');
+  });
+
+  it('still toggles and deletes via each todo own repositoryId after the layout change', async () => {
+    mockedApi.update.mockResolvedValue(TODOS[1]);
+    mockedApi.remove.mockResolvedValue(undefined);
+    render(<TodoWidget />);
+    await screen.findByText('beta task');
+
+    fireEvent.click(screen.getAllByTestId('todo-checkbox')[1]);
+    await waitFor(() =>
+      expect(mockedApi.update).toHaveBeenCalledWith('repo-b', 't2', { done: true }),
+    );
+
+    fireEvent.click(screen.getAllByTestId('todo-delete')[0]);
+    await waitFor(() =>
+      expect(mockedApi.remove).toHaveBeenCalledWith('repo-a', 't1'),
+    );
+  });
+});
