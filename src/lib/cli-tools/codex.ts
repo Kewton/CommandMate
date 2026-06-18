@@ -15,7 +15,7 @@ import {
 } from '../tmux/tmux';
 import { detectAndResendIfPastedText } from '../pasted-text-helper';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
-import { CODEX_PROMPT_PATTERN, stripAnsi } from '../detection/cli-patterns';
+import { isCodexPromptReady, stripAnsi } from '../detection/cli-patterns';
 import { createLogger } from '@/lib/logger';
 import {
   TUI_SESSION_CREATE_WAIT_MS,
@@ -121,7 +121,7 @@ export class CodexTool extends BaseCLITool {
    * Wait for Codex CLI to become ready (prompt visible).
    * Handles trust dialog ("Do you trust the contents of this directory?")
    * and update notification automatically by sending Enter/number keys.
-   * Polls until CODEX_PROMPT_PATTERN is detected or max attempts reached.
+   * Polls until a genuine interactive prompt is detected or max attempts reached.
    */
   private async waitForReady(sessionName: string): Promise<void> {
     let trustDialogHandled = false;
@@ -130,14 +130,13 @@ export class CodexTool extends BaseCLITool {
         const rawOutput = await capturePane(sessionName, 50);
         const output = stripAnsi(rawOutput);
 
-        // Check if interactive prompt is ready
-        if (CODEX_PROMPT_PATTERN.test(output)) {
-          // Verify it's the actual input prompt, not a prompt inside a dialog
-          // by checking no trust/update dialog is still active
-          if (!output.includes('Do you trust') && !output.includes('Press enter to continue')) {
-            logger.info('codex-prompt-detected');
-            return;
-          }
+        // Check if the genuine interactive input prompt is ready.
+        // Issue #890: CODEX_PROMPT_PATTERN also matches dialog option lines
+        // (e.g. "› 1. Update now"), so isCodexPromptReady() additionally rejects
+        // any still-active update/trust dialog before returning.
+        if (isCodexPromptReady(output)) {
+          logger.info('codex-prompt-detected');
+          return;
         }
 
         // Handle update notification BEFORE trust dialog check.
@@ -145,13 +144,20 @@ export class CodexTool extends BaseCLITool {
         // followed by "Press enter to continue". Must send "2" (Skip) to avoid
         // triggering npm install which kills the Codex process.
         if (output.includes('Update') && output.includes('Skip')) {
-          await sendKeys(sessionName, '2', true);
+          // Issue #890: Codex confirms a numbered selection instantly (no Enter).
+          // Appending Enter (sendEnter=true) would land on the NEXT screen as a
+          // stray keypress -- an empty submit on the main prompt, or worst case the
+          // default "1. Update now" confirm if "2" was dropped during a re-render.
+          // Send "2" alone and let the next poll observe the result.
+          await sendKeys(sessionName, '2', false);
           logger.info('skipped-codex-update');
           await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
           continue;
         }
 
-        // Handle "Press enter to continue" (after update skip or other notification)
+        // Handle "Press enter to continue" (genuine press-enter screens only).
+        // Numbered selection dialogs are dismissed by the number key above, so this
+        // branch is reached only when no number selection is pending.
         if (output.includes('Press enter to continue')) {
           await sendSpecialKey(sessionName, 'Enter');
           logger.info('dismissed-codex-notification');
@@ -162,7 +168,8 @@ export class CodexTool extends BaseCLITool {
         // Handle trust dialog: "Do you trust the contents of this directory?"
         // Options: › 1. Yes, continue / 2. No, quit
         if (!trustDialogHandled && output.includes('Do you trust')) {
-          await sendKeys(sessionName, '1', true);
+          // Issue #890: number-key selection confirms instantly; no trailing Enter.
+          await sendKeys(sessionName, '1', false);
           trustDialogHandled = true;
           logger.info('auto-trusted-folder-for');
           await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
@@ -187,7 +194,10 @@ export class CodexTool extends BaseCLITool {
       try {
         const rawOutput = await capturePane(sessionName, 50);
         const output = stripAnsi(rawOutput);
-        if (CODEX_PROMPT_PATTERN.test(output)) {
+        // Issue #890: apply the same dialog guard as waitForReady so a residual
+        // update/trust dialog ("› 1. ...") is never mistaken for a ready prompt,
+        // which would type the first message straight into the dialog.
+        if (isCodexPromptReady(output)) {
           return;
         }
       } catch {
