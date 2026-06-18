@@ -247,4 +247,73 @@ describe('auto-yes-state composite key migration (Issue #525)', () => {
       expect(deleteAutoYesStateByWorktree('wt-nonexistent')).toBe(0);
     });
   });
+
+  // ==========================================================================
+  // Issue #896: per-instance state isolation
+  // Two instances of the SAME cliTool (primary "claude" + alias "claude-2")
+  // must own completely independent auto-yes states.
+  // ==========================================================================
+  describe('per-instance state isolation (Issue #896)', () => {
+    it('should keep primary and alias states independent for the same cliTool', () => {
+      setAutoYesEnabled('wt-1', 'claude', true);
+      setAutoYesEnabled('wt-1', 'claude', true, undefined, undefined, 'claude-2');
+
+      expect(getAutoYesState('wt-1', 'claude')?.enabled).toBe(true);
+      expect(getAutoYesState('wt-1', 'claude', 'claude-2')?.enabled).toBe(true);
+
+      // Disabling the alias must NOT disable the primary
+      disableAutoYes('wt-1', 'claude', 'expired', 'claude-2');
+      expect(getAutoYesState('wt-1', 'claude', 'claude-2')?.enabled).toBe(false);
+      expect(getAutoYesState('wt-1', 'claude')?.enabled).toBe(true);
+    });
+
+    it('should treat instanceId === cliToolId as the primary (same 2-part key)', () => {
+      setAutoYesEnabled('wt-1', 'claude', true);
+      // Passing the primary instanceId resolves to the same state, not a new one
+      expect(getAutoYesState('wt-1', 'claude', 'claude')?.enabled).toBe(true);
+    });
+
+    it('should not leak the alias state when querying the primary before it exists', () => {
+      setAutoYesEnabled('wt-1', 'claude', true, undefined, undefined, 'claude-2');
+
+      expect(getAutoYesState('wt-1', 'claude', 'claude-2')?.enabled).toBe(true);
+      // Primary was never enabled -> still null
+      expect(getAutoYesState('wt-1', 'claude')).toBeNull();
+    });
+
+    it('should include both primary and alias keys for the worktree', () => {
+      setAutoYesEnabled('wt-1', 'claude', true);
+      setAutoYesEnabled('wt-1', 'claude', true, undefined, undefined, 'claude-2');
+
+      const keys = getCompositeKeysByWorktree('wt-1');
+      expect(keys).toContain('wt-1:claude');
+      expect(keys).toContain('wt-1:claude:claude-2');
+    });
+
+    it('should delete both primary and alias states by worktree', () => {
+      setAutoYesEnabled('wt-1', 'claude', true);
+      setAutoYesEnabled('wt-1', 'claude', true, undefined, undefined, 'claude-2');
+
+      const count = deleteAutoYesStateByWorktree('wt-1');
+
+      expect(count).toBe(2);
+      expect(getAutoYesState('wt-1', 'claude')).toBeNull();
+      expect(getAutoYesState('wt-1', 'claude', 'claude-2')).toBeNull();
+    });
+
+    it('should auto-disable an expired alias independently of the primary', () => {
+      vi.useFakeTimers();
+      const now = 1700000000000;
+      vi.setSystemTime(now);
+
+      setAutoYesEnabled('wt-1', 'claude', true, 10800000); // primary: 3h
+      setAutoYesEnabled('wt-1', 'claude', true, undefined, undefined, 'claude-2'); // alias: 1h default
+
+      // Advance past the alias expiration but not the primary's
+      vi.setSystemTime(now + 3600001);
+
+      expect(getAutoYesState('wt-1', 'claude', 'claude-2')?.enabled).toBe(false);
+      expect(getAutoYesState('wt-1', 'claude')?.enabled).toBe(true);
+    });
+  });
 });

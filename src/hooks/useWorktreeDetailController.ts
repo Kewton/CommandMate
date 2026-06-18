@@ -197,7 +197,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const [editorFilePath, setEditorFilePath] = useState<string | null>(null);
   // Issue #104: Track editor maximized state to disable Modal close handlers
   const [isEditorMaximized, setIsEditorMaximized] = useState(false);
-  // Issue #525: Per-agent auto-yes state management
+  // Issue #525: Per-agent auto-yes state management.
+  // Issue #896: re-keyed by *instanceId* so each agent instance has its own
+  // auto-yes state (the primary instance's id === its cliToolId, preserving the
+  // previous cliTool-keyed behavior for single-instance worktrees).
   const [autoYesStateMap, setAutoYesStateMap] = useState<Map<string, { enabled: boolean; expiresAt: number | null }>>(new Map());
   // Issue #501: Track last server-side auto-yes response timestamp for duplicate prevention
   const [lastServerResponseTimestamp, setLastServerResponseTimestamp] = useState<number | null>(null);
@@ -282,9 +285,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // polls/tab switches from overwriting the active CLI tab state.
   const latestMessagesRequestIdRef = useRef(0);
   const latestCurrentOutputRequestIdRef = useRef(0);
-  // Issue #525: Derive active agent's auto-yes state from per-agent map
-  const autoYesEnabled = autoYesStateMap.get(activeCliTab)?.enabled ?? false;
-  const autoYesExpiresAt = autoYesStateMap.get(activeCliTab)?.expiresAt ?? null;
+  // Issue #525/#896: Derive the active instance's auto-yes state from the
+  // per-instance map (keyed by activeInstanceId; primary instance id === cliToolId).
+  const autoYesEnabled = autoYesStateMap.get(activeInstanceId)?.enabled ?? false;
+  const autoYesExpiresAt = autoYesStateMap.get(activeInstanceId)?.expiresAt ?? null;
   // Trigger to refresh FileTreeView after file operations
   const [fileTreeRefresh, setFileTreeRefresh] = useState(0);
 
@@ -561,13 +565,18 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       setLastServerResponseTimestamp(data.lastServerResponseTimestamp ?? null);
       setServerPollerActive(data.serverPollerActive ?? false);
 
-      // Update auto-yes state from server (Issue #314: stopReason tracking, Issue #525: per-agent)
+      // Update auto-yes state from server (Issue #314: stopReason tracking,
+      // Issue #525: per-agent, Issue #896: per-instance).
+      // PC keeps the parent poll byte-identical (no `instance` param) so the
+      // server resolves the PRIMARY instance, whose id === requestedCliTool.
+      // Mobile sends `instance`, so the response is the requested instance's state.
       if (data.autoYes) {
         const wasEnabled = prevAutoYesEnabledRef.current;
         const autoYes = data.autoYes;
+        const seedInstanceId = onMobile ? requestedInstance : requestedCliTool;
         setAutoYesStateMap(prev => {
           const next = new Map(prev);
-          next.set(requestedCliTool, { enabled: autoYes.enabled, expiresAt: autoYes.expiresAt });
+          next.set(seedInstanceId, { enabled: autoYes.enabled, expiresAt: autoYes.expiresAt });
           return next;
         });
         prevAutoYesEnabledRef.current = autoYes.enabled;
@@ -891,12 +900,17 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    * Issue #740: parameterized by cliToolId via a curried factory so each PC
    * split footer can toggle auto-yes for its OWN CLI independently. The factory
    * is stable per worktreeId (cliToolId is captured per call), keeping split
-   * re-renders down. `activeCliTabRef` is read inside so the stop-reason ref is
-   * only updated for the active CLI (preserving existing toast detection).
+   * re-renders down. `activeInstanceIdRef` is read inside so the stop-reason ref
+   * is only updated for the active instance (preserving existing toast detection).
+   *
+   * Issue #896: also parameterized by instanceId so each instance toggles its
+   * OWN auto-yes (a 3-part poller key for aliases). instanceId defaults to the
+   * primary (=== cliToolId) when omitted.
    */
   const makeAutoYesToggleHandler = useCallback(
-    (cliToolId: CLIToolType) =>
+    (cliToolId: CLIToolType, instanceId?: string) =>
       async (params: AutoYesToggleParams): Promise<void> => {
+        const effectiveInstanceId = instanceId ?? cliToolId;
         try {
           const response = await fetch(`/api/worktrees/${worktreeId}/auto-yes`, {
             method: 'POST',
@@ -904,21 +918,22 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
             body: JSON.stringify({
               enabled: params.enabled,
               cliToolId,
+              instanceId: effectiveInstanceId,
               duration: params.duration,
               stopPattern: params.stopPattern,
             }),
           });
           if (response.ok) {
             const data = await response.json();
-            // Issue #525: Store per-agent state keyed by the toggled CLI.
+            // Issue #525/#896: Store per-instance state keyed by the toggled instance.
             setAutoYesStateMap(prev => {
               const next = new Map(prev);
-              next.set(cliToolId, { enabled: data.enabled, expiresAt: data.expiresAt });
+              next.set(effectiveInstanceId, { enabled: data.enabled, expiresAt: data.expiresAt });
               return next;
             });
-            // Issue #740: the stop-reason ref tracks the ACTIVE CLI only; avoid
-            // clobbering it when a non-active split is toggled.
-            if (cliToolId === activeCliTabRef.current) {
+            // Issue #740/#896: the stop-reason ref tracks the ACTIVE instance only;
+            // avoid clobbering it when a non-active split is toggled.
+            if (effectiveInstanceId === activeInstanceIdRef.current) {
               prevAutoYesEnabledRef.current = data.enabled;
             }
           }
@@ -930,14 +945,15 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   );
 
   /**
-   * Mobile + active-CLI default handler (unchanged behavior). Issue #740: thin
-   * wrapper over the curried factory bound to the current activeCliTab so the
-   * Mobile AutoYesToggle call site stays untouched.
+   * Mobile + active-instance default handler (unchanged behavior). Issue #740:
+   * thin wrapper over the curried factory bound to the current active instance
+   * so the Mobile AutoYesToggle call site stays untouched. Issue #896: binds the
+   * active instance id so mobile toggles the active instance's auto-yes.
    */
   const handleAutoYesToggle = useCallback(
     (params: AutoYesToggleParams): Promise<void> =>
-      makeAutoYesToggleHandler(activeCliTab)(params),
-    [makeAutoYesToggleHandler, activeCliTab],
+      makeAutoYesToggleHandler(activeCliTab, activeInstanceId)(params),
+    [makeAutoYesToggleHandler, activeCliTab, activeInstanceId],
   );
 
   /** Issue #4: Kill session confirmation dialog state */

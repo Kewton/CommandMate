@@ -42,9 +42,12 @@ async function enableAutoYes(
   if (options.agent) {
     autoYesBody.cliToolId = options.agent;
   }
-  // Issue #868: auto-yes is tool-scoped in this PR (the poller keys on
-  // worktreeId:cliToolId). Instance-level auto-yes is deferred with the UI
-  // work (#866-C), so --instance does not narrow auto-yes here.
+  // Issue #896: per-instance auto-yes. When --instance is given, the poller keys
+  // on worktreeId:cliToolId:instanceId so the targeted instance is auto-answered
+  // independently of other instances of the same agent.
+  if (options.instance) {
+    autoYesBody.instanceId = options.instance;
+  }
   if (options.stopPattern) {
     autoYesBody.stopPattern = options.stopPattern;
   }
