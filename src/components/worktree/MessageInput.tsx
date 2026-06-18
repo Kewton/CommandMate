@@ -480,6 +480,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
             <InterruptButton
               worktreeId={worktreeId}
               cliToolId={cliToolId || 'claude'}
+              instanceId={instanceId}
               disabled={!isSessionRunning}
             />
           </div>
@@ -530,6 +531,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
             <InterruptButton
               worktreeId={worktreeId}
               cliToolId={cliToolId || 'claude'}
+              instanceId={instanceId}
               disabled={!isSessionRunning}
             />
           )}

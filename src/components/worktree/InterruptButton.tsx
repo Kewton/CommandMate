@@ -13,6 +13,12 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 export interface InterruptButtonProps {
   worktreeId: string;
   cliToolId: CLIToolType;
+  /**
+   * Issue #901: agent instance id to target. Defaults to the primary instance
+   * (`=== cliToolId`) when omitted, so interrupt no longer broadcasts to other
+   * instances of the same cliTool (e.g. split `claude` vs `claude-2`).
+   */
+  instanceId?: string;
   disabled?: boolean;
   onInterrupt?: () => void;
 }
@@ -42,6 +48,7 @@ const DEBOUNCE_DELAY_MS = 1000;
 export const InterruptButton = memo(function InterruptButton({
   worktreeId,
   cliToolId,
+  instanceId,
   disabled = false,
   onInterrupt,
 }: InterruptButtonProps) {
@@ -58,12 +65,18 @@ export const InterruptButton = memo(function InterruptButton({
 
     setIsLoading(true);
     try {
+      // Issue #901: include instanceId so interrupt targets only this split's
+      // session. The primary instance (`=== cliToolId` or omitted) keeps sending
+      // `{ cliToolId }` only, preserving the CLI broadcast behavior.
+      const body = instanceId && instanceId !== cliToolId
+        ? { cliToolId, instanceId }
+        : { cliToolId };
       const response = await fetch(`/api/worktrees/${worktreeId}/interrupt`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ cliToolId }),
+        body: JSON.stringify(body),
       });
 
       if (!response.ok) {
@@ -77,7 +90,7 @@ export const InterruptButton = memo(function InterruptButton({
     } finally {
       setIsLoading(false);
     }
-  }, [worktreeId, cliToolId, onInterrupt]);
+  }, [worktreeId, cliToolId, instanceId, onInterrupt]);
 
   return (
     <button
