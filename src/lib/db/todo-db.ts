@@ -11,10 +11,18 @@ import Database from 'better-sqlite3';
 
 /**
  * A single ToDo item scoped to a repository.
+ *
+ * `repositoryName` / `repositoryDisplayName` are resolved at read time by
+ * JOINing `repositories` (Issue #900). The table itself stays normalized
+ * (only `repository_id` is stored), so renames are reflected automatically.
  */
 export interface RepositoryTodo {
   id: string;
   repositoryId: string;
+  /** Repository `name` resolved via JOIN (always present, FK-guaranteed). */
+  repositoryName: string;
+  /** Repository `display_name` override; `undefined` when not set. */
+  repositoryDisplayName?: string;
   content: string;
   done: boolean;
   position: number;
@@ -24,10 +32,15 @@ export interface RepositoryTodo {
 
 /**
  * Database row type for repository todos.
+ *
+ * `repository_name` / `repository_display_name` come from the JOIN on
+ * `repositories`, not the `repository_todos` table itself.
  */
 type RepositoryTodoRow = {
   id: string;
   repository_id: string;
+  repository_name: string;
+  repository_display_name: string | null;
   content: string;
   done: number;
   position: number;
@@ -36,12 +49,34 @@ type RepositoryTodoRow = {
 };
 
 /**
+ * SELECT clause shared by todo read queries. Resolves the repository name at
+ * read time so consumers (widget, future cross-repo views, API/CLI) all get a
+ * human-readable name without denormalizing the table.
+ */
+const TODO_SELECT = `
+  SELECT
+    t.id,
+    t.repository_id,
+    r.name AS repository_name,
+    r.display_name AS repository_display_name,
+    t.content,
+    t.done,
+    t.position,
+    t.created_at,
+    t.updated_at
+  FROM repository_todos t
+  JOIN repositories r ON r.id = t.repository_id
+`;
+
+/**
  * Map database row to RepositoryTodo model.
  */
 function mapTodoRow(row: RepositoryTodoRow): RepositoryTodo {
   return {
     id: row.id,
     repositoryId: row.repository_id,
+    repositoryName: row.repository_name,
+    repositoryDisplayName: row.repository_display_name || undefined,
     content: row.content,
     done: row.done === 1,
     position: row.position,
@@ -58,10 +93,9 @@ export function getTodosByRepositoryId(
   repositoryId: string
 ): RepositoryTodo[] {
   const stmt = db.prepare(`
-    SELECT id, repository_id, content, done, position, created_at, updated_at
-    FROM repository_todos
-    WHERE repository_id = ?
-    ORDER BY position ASC, created_at ASC
+    ${TODO_SELECT}
+    WHERE t.repository_id = ?
+    ORDER BY t.position ASC, t.created_at ASC
   `);
 
   const rows = stmt.all(repositoryId) as RepositoryTodoRow[];
@@ -78,9 +112,8 @@ export function getTodoById(
   todoId: string
 ): RepositoryTodo | null {
   const stmt = db.prepare(`
-    SELECT id, repository_id, content, done, position, created_at, updated_at
-    FROM repository_todos
-    WHERE id = ?
+    ${TODO_SELECT}
+    WHERE t.id = ?
   `);
 
   const row = stmt.get(todoId) as RepositoryTodoRow | undefined;
@@ -108,15 +141,13 @@ export function createTodo(
 
   stmt.run(id, repositoryId, options.content, options.position, now, now);
 
-  return {
-    id,
-    repositoryId,
-    content: options.content,
-    done: false,
-    position: options.position,
-    createdAt: new Date(now),
-    updatedAt: new Date(now),
-  };
+  // Re-fetch so the returned todo carries the JOIN-resolved repository name
+  // (Issue #900), keeping POST responses consistent with GET.
+  const created = getTodoById(db, id);
+  if (!created) {
+    throw new Error(`Failed to load created todo '${id}'`);
+  }
+  return created;
 }
 
 /**

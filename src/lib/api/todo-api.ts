@@ -6,6 +6,10 @@
 export interface TodoItem {
   id: string;
   repositoryId: string;
+  /** Repository name resolved by the API via JOIN (Issue #900). */
+  repositoryName: string;
+  /** Optional repository display-name override. */
+  repositoryDisplayName?: string;
   content: string;
   done: boolean;
   position: number;
