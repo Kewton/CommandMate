@@ -13,6 +13,11 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { getAllTodos } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
 
+// Issue #911: Force dynamic rendering so the route reads the live DB on every
+// request instead of being statically prerendered at build time. Without this,
+// ToDo add/done/delete mutations would not reflect until a hard reload.
+export const dynamic = 'force-dynamic';
+
 const logger = createLogger('api/todos');
 
 /**
