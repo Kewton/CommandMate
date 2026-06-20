@@ -56,13 +56,9 @@ import { useMobileSelectedInstances } from '@/hooks/useMobileSelectedInstances';
 import { useTranslations } from 'next-intl';
 import { useFileOperations } from '@/hooks/useFileOperations';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
-import {
-  HISTORY_DISPLAY_LIMIT_STORAGE_KEY,
-  HISTORY_USER_ONLY_STORAGE_KEY,
-  DEFAULT_MESSAGES_LIMIT,
-  isHistoryDisplayLimit,
-  type HistoryDisplayLimit,
-} from '@/config/history-display-config';
+import { useHistoryFilters } from '@/hooks/useHistoryFilters';
+import { useDiffViewerState } from '@/hooks/useDiffViewerState';
+import { useVisibilityRecovery } from '@/hooks/useVisibilityRecovery';
 
 // ============================================================================
 // Constants
@@ -118,17 +114,6 @@ const ACTIVE_POLLING_INTERVAL_MS = 2000;
 
 /** Polling interval when terminal is idle (ms) */
 const IDLE_POLLING_INTERVAL_MS = 5000;
-
-/**
- * Throttle interval for visibilitychange recovery (ms).
- * Prevents excessive API calls when the page rapidly transitions between
- * visible and hidden states.
- * Same value as IDLE_POLLING_INTERVAL_MS but semantically independent:
- * - IDLE_POLLING_INTERVAL_MS: steady-state polling frequency
- * - RECOVERY_THROTTLE_MS: visibilitychange burst prevention threshold
- * (Issue #246, SF-001)
- */
-const RECOVERY_THROTTLE_MS = 5000;
 
 /** Default worktree name when not loaded */
 const DEFAULT_WORKTREE_NAME = 'Unknown';
@@ -325,65 +310,28 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // just the root). The controller only retains `fileTreeRefresh` to force an
   // explicit refresh after local file operations (create/rename/delete/upload).
 
-  // [Issue #447] History sub-tab: 'message' (default) or 'git'
-  const [historySubTab, setHistorySubTab] = useState<'message' | 'git'>('message');
-
-  // Issue #168: showArchived toggle state with localStorage persistence
-  const [showArchived, setShowArchived] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return localStorage.getItem('commandmate:showArchived') === 'true';
-  });
-  const handleShowArchivedChange = useCallback((show: boolean) => {
-    setShowArchived(show);
-    localStorage.setItem('commandmate:showArchived', String(show));
-  }, []);
-  // Ref for showArchived to avoid callback recreation
+  // [Issue #447 / #168 / #725 / #701] History pane filter/display state.
+  // Issue #923: extracted to the useHistoryFilters hook (former inline state +
+  // localStorage-synced handlers). The hook owns the filter values; the ref
+  // mirrors below (read by fetchMessages to stay a stable closure) and the
+  // re-fetch-on-change effects remain here as part of the fetch/polling concern.
+  const {
+    historySubTab,
+    setHistorySubTab,
+    showArchived,
+    handleShowArchivedChange,
+    historyUserOnly,
+    handleHistoryUserOnlyChange,
+    historyDisplayLimit,
+    handleHistoryDisplayLimitChange,
+  } = useHistoryFilters();
+  // Ref mirrors so fetchMessages reads the latest filter values without being
+  // recreated on toggle (kept local: refs from a hook return would trip
+  // react-hooks/exhaustive-deps since ESLint can't see them as stable).
   const showArchivedRef = useRef(showArchived);
   useEffect(() => {
     showArchivedRef.current = showArchived;
   }, [showArchived]);
-
-  // Issue #725: HistoryPane "User only" filter toggle with localStorage persistence.
-  // Value representation: 'true' / 'false' (matches commandmate:showArchived).
-  // Any other value (including legacy '1'/'0') is treated as false (safe-off fallback).
-  const [historyUserOnly, setHistoryUserOnly] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    try {
-      return localStorage.getItem(HISTORY_USER_ONLY_STORAGE_KEY) === 'true';
-    } catch {
-      return false;
-    }
-  });
-  const handleHistoryUserOnlyChange = useCallback((next: boolean) => {
-    setHistoryUserOnly(next);
-    try {
-      localStorage.setItem(HISTORY_USER_ONLY_STORAGE_KEY, String(next));
-    } catch {
-      /* localStorage unavailable */
-    }
-  }, []);
-
-  // Issue #701: history display limit state with localStorage persistence
-  const [historyDisplayLimit, setHistoryDisplayLimit] = useState<HistoryDisplayLimit>(() => {
-    if (typeof window === 'undefined') return DEFAULT_MESSAGES_LIMIT;
-    try {
-      const stored = localStorage.getItem(HISTORY_DISPLAY_LIMIT_STORAGE_KEY);
-      if (stored === null) return DEFAULT_MESSAGES_LIMIT;
-      const parsed = parseInt(stored, 10);
-      return isHistoryDisplayLimit(parsed) ? parsed : DEFAULT_MESSAGES_LIMIT;
-    } catch {
-      return DEFAULT_MESSAGES_LIMIT;
-    }
-  });
-  const handleHistoryDisplayLimitChange = useCallback((limit: HistoryDisplayLimit) => {
-    setHistoryDisplayLimit(limit);
-    try {
-      localStorage.setItem(HISTORY_DISPLAY_LIMIT_STORAGE_KEY, String(limit));
-    } catch {
-      /* localStorage unavailable */
-    }
-  }, []);
-  // Ref for historyDisplayLimit to avoid fetchMessages callback recreation
   const historyDisplayLimitRef = useRef(historyDisplayLimit);
   useEffect(() => {
     historyDisplayLimitRef.current = historyDisplayLimit;
@@ -403,9 +351,15 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     handleInsertConsumedSingle,
   } = usePendingInsertText();
 
-  // [Issue #447] Diff content for right pane display (PC only)
-  const [diffContent, setDiffContent] = useState<string | null>(null);
-  const [diffFilePath, setDiffFilePath] = useState<string | null>(null);
+  // [Issue #447] Diff content for right pane display (PC only).
+  // Issue #923: extracted to the useDiffViewerState hook (state + open/close
+  // handlers). handleDiffSelect no-ops on mobile, so isMobile is passed in.
+  const {
+    diffContent,
+    diffFilePath,
+    handleDiffSelect,
+    handleCloseDiff,
+  } = useDiffViewerState(isMobile);
 
   // [Issue #21] File search state
   const fileSearch = useFileSearch({ worktreeId });
@@ -862,22 +816,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     router.push('/');
   }, [router]);
 
-  /** Handle diff selection from GitPane (Issue #447) */
-  const handleDiffSelect = useCallback((diff: string, filePath: string) => {
-    if (!isMobile) {
-      // PC: show diff in right pane file panel area
-      setDiffContent(diff);
-      setDiffFilePath(filePath);
-    }
-    // Mobile: diff is shown inline within GitPane
-  }, [isMobile]);
-
-  /** Close diff view in right pane (Issue #447) */
-  const handleCloseDiff = useCallback(() => {
-    setDiffContent(null);
-    setDiffFilePath(null);
-  }, []);
-
   /** Handle worktree status change via dropdown */
   const handleWorktreeStatusChange = useCallback(async (newStatus: 'ready' | 'in_progress' | 'in_review' | 'done' | null) => {
     try {
@@ -1307,86 +1245,18 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Visibility Change Recovery (Issue #246, Issue #266)
   // ========================================================================
 
-  /**
-   * Timestamp of the last visibilitychange recovery to prevent rapid re-fetches.
-   * Used as a throttle guard: if less than RECOVERY_THROTTLE_MS has elapsed
-   * since the last recovery, the handler skips execution.
-   */
-  const lastRecoveryTimestampRef = useRef<number>(0);
-
-  /**
-   * Handle page visibility change for background recovery.
-   * When the page becomes visible again (e.g., smartphone foreground restoration),
-   * performs data re-fetch to synchronize stale state.
-   *
-   * Design rationale (Issue #246, Issue #266):
-   *
-   * [SF-001] SRP: handleVisibilityChange is responsible for "background recovery
-   *   data sync" only. Full recovery (handleRetry) is a separate concern.
-   *
-   * [SF-002] KISS: Simple error guard - error state uses handleRetry (full recovery),
-   *   normal state uses lightweight recovery (no loading state change).
-   *
-   * [IA-002] Overlap: When the page becomes visible, up to 3 data-fetch
-   *   sources may fire concurrently:
-   *   1. This visibilitychange handler (lightweight recovery)
-   *   2. The setInterval polling timer (if it fires during the same tick)
-   *   3. WebSocket reconnection triggering a broadcast-based fetch
-   *   All fetches are idempotent GET requests, so concurrent execution is
-   *   safe -- it may cause redundant network calls but no data corruption.
-   */
-  const handleVisibilityChange = useCallback(async () => {
-    if (document.visibilityState !== 'visible') return;
-
-    const now = Date.now();
-    if (now - lastRecoveryTimestampRef.current < RECOVERY_THROTTLE_MS) {
-      return;
-    }
-    lastRecoveryTimestampRef.current = now;
-
-    // [SF-001] Error state requires full recovery (handleRetry) to reset
-    // loading state and rebuild the UI from ErrorDisplay back to normal.
-    if (error) {
-      handleRetry();
-      return;
-    }
-
-    // [SF-002] Normal state uses lightweight recovery (loading state unchanged).
-    // This preserves the component tree, preventing MessageInput/PromptPanel
-    // content from being cleared by unmount/remount caused by setLoading(true/false).
-    //
-    // [SF-DRY-001] Note: These fetch calls duplicate the data retrieval done by
-    // handleRetry(). handleRetry uses setLoading(true/false) for full recovery,
-    // while this path intentionally omits loading state changes for lightweight
-    // recovery. When adding/changing fetch functions, update handleRetry() as well.
-    //
-    // [SF-CONS-001] handleRetry uses a sequential pattern (fetchWorktree first,
-    // then conditionally fetchMessages/fetchCurrentOutput). Lightweight recovery
-    // uses Promise.all for parallel execution because: failure is silently ignored
-    // (next polling cycle recovers), all requests are idempotent GETs (no data
-    // corruption risk), and parallel execution improves response time.
-    try {
-      await Promise.all([
-        fetchWorktree(),
-        fetchMessages(),
-        fetchCurrentOutput(),
-      ]);
-    } finally {
-      // [SF-IMP-001] fetchWorktree() internally catches errors and calls
-      // setError(message) without rethrowing. This means Promise.all resolves
-      // successfully even when fetchWorktree fails, but error state has already
-      // been set internally. Call setError(null) unconditionally to counter any
-      // internal setError() calls and maintain the component tree.
-      // On success, this is a no-op (error is already null).
-      // On failure, this prevents ErrorDisplay from replacing the normal UI,
-      // allowing the next polling cycle to recover naturally.
-      setError(null);
-    }
-    // [SF-IMP-002] Note: error in the dependency array causes useCallback to
-    // regenerate when error state changes, triggering useEffect listener
-    // re-registration (removeEventListener/addEventListener). Performance impact
-    // is negligible as these are synchronous lightweight operations.
-  }, [error, handleRetry, fetchWorktree, fetchMessages, fetchCurrentOutput]);
+  // Issue #923: extracted to the useVisibilityRecovery hook (throttle ref +
+  // visibilitychange handler + listener registration effect). It re-syncs data
+  // when the page returns to the foreground: full recovery (handleRetry) on
+  // error, lightweight parallel re-fetch otherwise.
+  useVisibilityRecovery({
+    error,
+    handleRetry,
+    fetchWorktree,
+    fetchMessages,
+    fetchCurrentOutput,
+    setError,
+  });
 
   // ========================================================================
   // Effects
@@ -1427,24 +1297,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       isMounted = false;
     };
   }, [fetchWorktree, fetchMessages, fetchCurrentOutput]);
-
-  /**
-   * Register visibilitychange event listener for background recovery (Issue #246, #266).
-   * When the page becomes visible, performs lightweight recovery (normal state)
-   * or full recovery via handleRetry() (error state) to re-fetch all data.
-   * This handles the case where the browser suspended network requests while
-   * the page was in the background (common on mobile browsers).
-   *
-   * Unlike WorktreeList.tsx (SF-003), this component needs:
-   * - Error state branching: full recovery (handleRetry) vs lightweight recovery
-   * - Throttle guard (RECOVERY_THROTTLE_MS) to prevent rapid re-fetches
-   */
-  useEffect(() => {
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [handleVisibilityChange]);
 
   /**
    * Poll for current output and worktree status at adaptive intervals.
