@@ -1,4 +1,4 @@
-[English](../en/user-guide/wsl2-setup.md)
+[日本語版](../../user-guide/wsl2-setup.md)
 
 # WSL2 Setup Guide (Windows)
 
@@ -49,10 +49,10 @@ sudo apt install -y git tmux build-essential
 
 ### Install GitHub CLI (gh)
 
-CommandMate's Issue連携機能に必要です:
+Required for CommandMate's Issue integration features:
 
 ```bash
-# GitHub公式リポジトリを追加してインストール
+# Add the official GitHub repository and install
 (type -p wget >/dev/null || (sudo apt update && sudo apt-get install wget -y)) \
   && sudo mkdir -p -m 755 /etc/apt/keyrings \
   && out=$(mktemp) && wget -nv -O$out https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -62,10 +62,10 @@ CommandMate's Issue連携機能に必要です:
   && sudo apt update \
   && sudo apt install gh -y
 
-# 確認
+# Verify
 gh --version
 
-# GitHubにログイン
+# Log in to GitHub
 gh auth login
 ```
 
@@ -188,10 +188,10 @@ tmux -V
 ### Node.js version too old
 
 ```bash
-# apt版が入っている場合は先に削除
+# If the apt version is installed, remove it first
 sudo apt remove -y nodejs npm && sudo apt autoremove -y
 
-# nvmで最新LTSをインストール
+# Install the latest LTS via nvm
 nvm install --lts
 nvm use --lts
 node -v
@@ -199,7 +199,7 @@ node -v
 
 ### better-sqlite3: NODE_MODULE_VERSION mismatch
 
-`npm install` 時と実行時でNode.jsのバージョンが異なると、以下のエラーが発生します:
+If the Node.js version differs between `npm install` time and runtime, the following error occurs:
 
 ```
 was compiled against a different Node.js version using
@@ -207,23 +207,23 @@ NODE_MODULE_VERSION 137. This version of Node.js requires
 NODE_MODULE_VERSION 115.
 ```
 
-**原因:** `nvm` でNode.jsバージョンを切り替えた後、ネイティブモジュールが古いバージョン向けのまま残っている。
+**Cause:** After switching the Node.js version with `nvm`, the native module is left built for the old version.
 
-**解決方法:**
+**Solution:**
 
 ```bash
-# 現在のNodeバージョンを確認
+# Check the current Node version
 node -v
 
-# ネイティブモジュールを現在のバージョン向けにリビルド
+# Rebuild the native module for the current version
 npm rebuild better-sqlite3
 
-# 再起動
+# Restart
 npx commandmate start
 ```
 
-> **Tip:** `nvm` でバージョンを切り替えたら、必ず `npm rebuild better-sqlite3` を実行してください。
-> それでも解決しない場合は `rm -rf node_modules && npm install` で再インストールしてください。
+> **Tip:** Whenever you switch versions with `nvm`, always run `npm rebuild better-sqlite3`.
+> If that still does not resolve it, reinstall with `rm -rf node_modules && npm install`.
 
 ### Port already in use
 
