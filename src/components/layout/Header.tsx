@@ -11,6 +11,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { PcDisplaySizeSelector } from './PcDisplaySizeSelector';
 
 export interface HeaderProps {
   title?: string;
@@ -84,6 +85,8 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
                 </Link>
               );
             })}
+            {/* PC display size selector (Issue #915) - hidden on mobile */}
+            <PcDisplaySizeSelector />
             <a
               href="https://github.com/kewton/MyCodeBranchDesk"
               target="_blank"

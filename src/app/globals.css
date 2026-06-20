@@ -3,6 +3,26 @@
 @tailwind utilities;
 
 @layer base {
+  /*
+   * [Issue #915] PC display size (案A: rem カスケード).
+   * Applied to <html data-pc-size> on PC only (see PcDisplaySizeProvider).
+   * rem-based Tailwind spacing/typography scales with the root font-size;
+   * fixed-px surfaces (sidebar width, xterm fontSize) are scaled separately via
+   * PC_DISPLAY_SIZE_META in src/hooks/usePcDisplaySize.ts (keep values in sync).
+   */
+  html[data-pc-size='large'] {
+    font-size: 18px;
+  }
+  html[data-pc-size='medium'] {
+    font-size: 16px;
+  }
+  html[data-pc-size='small'] {
+    font-size: 14px;
+  }
+  html[data-pc-size='xsmall'] {
+    font-size: 12.5px;
+  }
+
   body {
     @apply text-gray-900 dark:text-gray-100 antialiased;
   }
