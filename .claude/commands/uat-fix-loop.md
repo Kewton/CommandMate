@@ -166,7 +166,7 @@ commandmatedev send <worktree-id> \
 
 ```bash
 for issue_num in {issue_numbers}; do
-  gh pr list --repo Kewton/MyCodeBranchDesk \
+  gh pr list --repo Kewton/CommandMate \
     --head "feature/${issue_num}-worktree" \
     --state all --json number,state -q '.[0] | "\(.number) \(.state)"'
 done
@@ -176,7 +176,7 @@ done
 
 - **OPEN**: pushで自動更新済み。CIの通過を待つ。
   ```bash
-  gh pr checks <PR_NUM> --repo Kewton/MyCodeBranchDesk --watch
+  gh pr checks <PR_NUM> --repo Kewton/CommandMate --watch
   ```
 
 - **MERGED**: 修正コミットのための新規PR作成が必要。
@@ -195,7 +195,7 @@ done
 
 ```bash
 for each PR:
-  gh pr checks <PR_NUM> --repo Kewton/MyCodeBranchDesk --watch
+  gh pr checks <PR_NUM> --repo Kewton/CommandMate --watch
 ```
 
 CI失敗時はワーカーに修正指示（最大3回）。
@@ -205,13 +205,13 @@ CI失敗時はワーカーに修正指示（最大3回）。
 ```bash
 for each PR:
   # コンフリクト確認
-  gh pr view <PR_NUM> --repo Kewton/MyCodeBranchDesk --json mergeable
+  gh pr view <PR_NUM> --repo Kewton/CommandMate --json mergeable
 
   # コンフリクト時はワーカーに rebase 指示
   # （必要に応じて）
 
   # マージ
-  gh pr merge <PR_NUM> --merge --repo Kewton/MyCodeBranchDesk
+  gh pr merge <PR_NUM> --merge --repo Kewton/CommandMate
 
   # develop更新・ビルド検証
   git pull origin develop

@@ -63,7 +63,7 @@ TodoWriteツールで作業計画を作成：
 
 ```bash
 for issue_num in {issue_numbers}; do
-  gh issue view "$issue_num" --repo Kewton/MyCodeBranchDesk --json number,title,body,labels
+  gh issue view "$issue_num" --repo Kewton/CommandMate --json number,title,body,labels
 done
 ```
 
@@ -73,7 +73,7 @@ done
 
 ```bash
 for issue_num in {issue_numbers}; do
-  labels=$(gh issue view "$issue_num" --repo Kewton/MyCodeBranchDesk --json labels -q '[.labels[].name] | join(",")')
+  labels=$(gh issue view "$issue_num" --repo Kewton/CommandMate --json labels -q '[.labels[].name] | join(",")')
   if echo "$labels" | grep -q "bug"; then
     echo "BUG: #${issue_num}"
   else
@@ -164,7 +164,7 @@ develop worktree上でバグIssueごとに根本原因分析を実行する：
 WORKTREE_ID="mycodebranchdesk-develop"
 
 for bug_issue in $BUG_ISSUES; do
-  ISSUE_BODY=$(gh issue view "$bug_issue" --repo Kewton/MyCodeBranchDesk --json body -q '.body')
+  ISSUE_BODY=$(gh issue view "$bug_issue" --repo Kewton/CommandMate --json body -q '.body')
 
   # 必ず --agent copilot 等でclaude以外のエージェントを指定
   commandmatedev send "$WORKTREE_ID" "Issue #${bug_issue} の根本原因分析を実施してください。コードを変更せず分析のみ行い、結果をテキストで出力してください。
@@ -188,7 +188,7 @@ done
 分析結果をオーケストレーターが検証し、Issue本文に追記する：
 
 ```bash
-gh issue edit "$bug_issue" --repo Kewton/MyCodeBranchDesk --body "${CURRENT_BODY}${ANALYSIS_SECTION}"
+gh issue edit "$bug_issue" --repo Kewton/CommandMate --body "${CURRENT_BODY}${ANALYSIS_SECTION}"
 ```
 
 ### 2.5-3. 複数バグIssueの場合

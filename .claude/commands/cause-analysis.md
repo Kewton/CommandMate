@@ -35,7 +35,7 @@ Issueに記載されている不具合事象を元に、他のコーディング
 
 ```bash
 ISSUE_NUM="$ARGUMENTS"
-gh issue view "$ISSUE_NUM" --repo Kewton/MyCodeBranchDesk --json number,title,body,labels,comments
+gh issue view "$ISSUE_NUM" --repo Kewton/CommandMate --json number,title,body,labels,comments
 ```
 
 Issue本文から以下を抽出：
@@ -66,7 +66,7 @@ WORKTREE_ID="mycodebranchdesk-develop"
 ANALYSIS_PROMPT="Issue #${ISSUE_NUM} の根本原因分析を実施してください。
 
 ## Issue内容
-$(gh issue view ${ISSUE_NUM} --repo Kewton/MyCodeBranchDesk --json body -q '.body')
+$(gh issue view ${ISSUE_NUM} --repo Kewton/CommandMate --json body -q '.body')
 
 ## 分析要求
 
@@ -162,7 +162,7 @@ ${推奨する対策とその理由}
 ```
 
 ```bash
-gh issue edit "$ISSUE_NUM" --repo Kewton/MyCodeBranchDesk --body "$UPDATED_BODY"
+gh issue edit "$ISSUE_NUM" --repo Kewton/CommandMate --body "$UPDATED_BODY"
 ```
 
 ### Step 7: 結果報告
