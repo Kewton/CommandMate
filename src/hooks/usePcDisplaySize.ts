@@ -36,8 +36,6 @@ export const PC_DISPLAY_SIZE_ORDER: readonly PcDisplaySize[] = [
 export interface PcDisplaySizeMeta {
   /** Stored value. */
   value: PcDisplaySize;
-  /** Accessible Japanese label (大 / 中 / 小 / 極小). */
-  label: string;
   /** `<html>` font-size in px applied via the globals.css cascade. */
   rootFontSizePx: number;
   /** Scale factor relative to medium, for fixed-px surfaces (e.g. sidebar width). */
@@ -49,12 +47,16 @@ export interface PcDisplaySizeMeta {
 /**
  * Size factor table (Issue #915 採用方針: 案A rem カスケード).
  * Keep in sync with the `html[data-pc-size=...]` rules in `globals.css`.
+ *
+ * Display labels are intentionally NOT stored here — they live in the i18n
+ * dictionaries (`common.displaySize.*`) so the selector follows the active
+ * locale instead of hard-coded Japanese (Issue #918).
  */
 export const PC_DISPLAY_SIZE_META: Record<PcDisplaySize, PcDisplaySizeMeta> = {
-  large: { value: 'large', label: '大', rootFontSizePx: 18, factor: 1.125, terminalFontSize: 16 },
-  medium: { value: 'medium', label: '中', rootFontSizePx: 16, factor: 1, terminalFontSize: 14 },
-  small: { value: 'small', label: '小', rootFontSizePx: 14, factor: 0.875, terminalFontSize: 12 },
-  xsmall: { value: 'xsmall', label: '極小', rootFontSizePx: 12.5, factor: 0.78, terminalFontSize: 11 },
+  large: { value: 'large', rootFontSizePx: 18, factor: 1.125, terminalFontSize: 16 },
+  medium: { value: 'medium', rootFontSizePx: 16, factor: 1, terminalFontSize: 14 },
+  small: { value: 'small', rootFontSizePx: 14, factor: 0.875, terminalFontSize: 12 },
+  xsmall: { value: 'xsmall', rootFontSizePx: 12.5, factor: 0.78, terminalFontSize: 11 },
 };
 
 /** Type guard / validator for stored values. */

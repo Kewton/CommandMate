@@ -62,7 +62,25 @@ describe('PcDisplaySizeSelector (Issue #915)', () => {
     expect(select).toBeDefined();
     expect(select.options).toHaveLength(4);
     expect(select.value).toBe('medium');
-    expect(screen.getByLabelText('表示サイズ')).toBeDefined();
+    // Issue #918: the accessible label is localized via next-intl
+    // (`common.displaySize.ariaLabel`) rather than a hard-coded Japanese string.
+    // The global next-intl mock (tests/setup.ts) echoes the full key.
+    expect(screen.getByLabelText('common.displaySize.ariaLabel')).toBeDefined();
+  });
+
+  it('labels each size option from the i18n dictionary, not hard-coded Japanese (Issue #918)', () => {
+    renderSelector();
+    const select = screen.getByTestId('pc-display-size-select') as HTMLSelectElement;
+    const optionText = Array.from(select.options).map((o) => o.textContent);
+    expect(optionText).toEqual([
+      'common.displaySize.large',
+      'common.displaySize.medium',
+      'common.displaySize.small',
+      'common.displaySize.xsmall',
+    ]);
+    // No raw Japanese label should leak through (regression guard for the bug).
+    expect(optionText).not.toContain('大');
+    expect(optionText).not.toContain('極小');
   });
 
   it('persists the chosen size to localStorage on change', () => {

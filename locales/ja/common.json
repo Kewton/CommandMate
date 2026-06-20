@@ -22,5 +22,12 @@
     "sort": "ブランチの並び替え",
     "sync": "worktree を同期",
     "repositories": "リポジトリを管理（追加・同期）"
+  },
+  "displaySize": {
+    "ariaLabel": "表示サイズ",
+    "large": "大",
+    "medium": "中",
+    "small": "小",
+    "xsmall": "極小"
   }
 }

@@ -22,5 +22,12 @@
     "sort": "Sort branches",
     "sync": "Sync worktrees",
     "repositories": "Manage repositories (add / sync)"
+  },
+  "displaySize": {
+    "ariaLabel": "Display size",
+    "large": "Large",
+    "medium": "Medium",
+    "small": "Small",
+    "xsmall": "Extra small"
   }
 }
