@@ -10,6 +10,8 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { ArrowLeft, Terminal, Monitor, Code, Loader2 } from 'lucide-react';
 import { isTmuxControlModeEnabledForClient } from '@/lib/tmux/tmux-control-mode-flags';
+import { usePcDisplaySizeContext } from '@/contexts/PcDisplaySizeContext';
+import { getTerminalFontSize } from '@/hooks/usePcDisplaySize';
 
 /**
  * Dynamic import of TerminalComponent with SSR disabled.
@@ -39,6 +41,9 @@ export default function TerminalPage({
 }) {
   const [selectedTool, setSelectedTool] = useState<string>('claude');
   const controlModeEnabled = isTmuxControlModeEnabledForClient();
+  // Issue #915: terminal font size follows the PC display size selection.
+  const { size: pcDisplaySize } = usePcDisplaySizeContext();
+  const terminalFontSize = getTerminalFontSize(pcDisplaySize);
 
   const cliTools = [
     { id: 'claude', name: 'Claude', icon: '🤖', color: 'bg-purple-600' },
@@ -105,6 +110,7 @@ export default function TerminalPage({
             cliToolId={selectedTool}
             className="h-full"
             controlModeEnabled={controlModeEnabled}
+            fontSize={terminalFontSize}
           />
         </div>
       </div>
