@@ -139,13 +139,16 @@ commandmate start --port 3001
 ### Checking Server Status
 
 ```bash
-commandmate status
+commandmate status              # Main server status
+commandmate status --all        # All servers (main + worktrees)
+commandmate status --issue 135  # Worktree server for Issue #135
 ```
 
 ### Stopping the Server
 
 ```bash
-commandmate stop
+commandmate stop                # Stop the main server
+commandmate stop --issue 135    # Stop the worktree server for Issue #135
 ```
 
 #### Force Stop
@@ -201,7 +204,34 @@ commandmate start [options]
 |--------|-------------|
 | `--daemon` | Start in background |
 | `--dev` | Start in development mode |
-| `--port <port>` | Specify port (default: 3000) |
+| `-p, --port <number>` | Specify port (default: 3000) |
+| `-i, --issue <number>` | Start a server for a specific issue worktree (Issue #136) |
+| `--auto-port` | Automatically allocate a port for the worktree server (Issue #136) |
+| `--auth` | Enable token authentication (Issue #331) |
+| `--auth-expire <duration>` | Token expiration (e.g., `24h`, `7d`, `90m`) |
+| `--https` | Enable HTTPS |
+| `--cert <path>` | Path to TLS certificate file |
+| `--key <path>` | Path to TLS private key file |
+| `--allow-http` | Suppress the HTTPS warning when using `--auth` without certificates |
+| `--allowed-ips <cidrs>` | Allowed IP addresses/CIDR ranges (comma-separated, Issue #331) |
+| `--trust-proxy` | Trust the `X-Forwarded-For` header from a reverse proxy |
+
+#### Parallel Worktree Development (Issue #136)
+
+Run an independent server per worktree.
+
+```bash
+commandmate start --issue 135 --auto-port  # Start a server for Issue #135 (auto port)
+commandmate start --issue 135 --port 3135  # Start on a specific port
+```
+
+#### Authentication / External Access (Issue #331)
+
+```bash
+commandmate start --auth --auth-expire 24h          # Token auth (24h expiry)
+commandmate start --auth --allowed-ips 192.168.1.0/24  # With IP restriction
+commandmate start --https --cert ./cert.pem --key ./key.pem  # HTTPS
+```
 
 ### commandmate stop
 
@@ -213,15 +243,21 @@ commandmate stop [options]
 
 | Option | Description |
 |--------|-------------|
-| `--force` | Force stop |
+| `-f, --force` | Force stop (SIGKILL) |
+| `-i, --issue <number>` | Stop the server for a specific issue worktree (Issue #136) |
 
 ### commandmate status
 
 Display server status.
 
 ```bash
-commandmate status
+commandmate status [options]
 ```
+
+| Option | Description |
+|--------|-------------|
+| `-i, --issue <number>` | Show status for a specific issue worktree (Issue #136) |
+| `-a, --all` | Show status for all servers (main + worktrees) |
 
 ### commandmate issue
 
