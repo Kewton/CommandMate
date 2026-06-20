@@ -113,38 +113,54 @@ bin/
 src/
 ├── app/           # Next.js App Router
 │   ├── api/       # APIルート
+│   ├── chat/      # Assistant Chat画面
+│   ├── login/     # ログイン画面（Issue #331, #383）
+│   ├── proxy/     # 外部アプリプロキシルート（Issue #42）
 │   ├── sessions/  # Sessions画面（Issue #600）
 │   ├── repositories/ # Repositories画面（Issue #600）
 │   ├── review/    # Review画面（Issue #600）
+│   ├── worktrees/ # Worktree詳細・ターミナル画面
 │   └── more/      # More画面（Issue #600）
 ├── cli/           # CLIモジュール（Issue #96）
 │   ├── index.ts       # CLIメインロジック（commander設定）
-│   ├── commands/      # サブコマンド（init, start, stop, status, ls, send, wait, respond, capture, auto-yes）
+│   ├── commands/      # サブコマンド（init, start, stop, status, ls, send, wait, respond, capture, auto-yes, report）
 │   ├── utils/         # 依存チェック、環境設定、デーモン管理
-│   ├── config/        # 依存関係定義
+│   ├── config/        # 依存関係定義・CLIツールID・定数
+│   ├── docs/          # CLI埋め込みドキュメント（Issue #264）
 │   └── types/         # CLI共通型定義（ExitCode enum）
 ├── components/    # UIコンポーネント
+│   ├── auth/      # 認証UI（QRコード等、Issue #383）
 │   ├── common/    # 再利用可能な共通UIコンポーネント（Toast等）
+│   ├── error/     # ErrorBoundary・フォールバックUI
+│   ├── external-apps/ # 外部アプリ管理UI（Issue #42）
 │   ├── home/      # Home画面コンポーネント（Issue #600）
 │   ├── layout/    # レイアウトコンポーネント（Header, AppShell）
 │   ├── mobile/    # モバイル専用
 │   ├── providers/ # プロバイダーコンポーネント（Issue #600）
+│   ├── repository/ # リポジトリ管理UI（Issue #644, #690）
 │   ├── review/    # Review画面コンポーネント（Issue #600）
 │   ├── sidebar/   # サイドバー関連
+│   ├── ui/        # 汎用UIプリミティブ（Button, Card, Modal, Badge）
 │   └── worktree/  # ワークツリー詳細
 ├── config/        # 設定（ステータス色、編集可能拡張子など）
 ├── contexts/      # React Context
 ├── hooks/         # カスタムフック（useContextMenu等）
 ├── lib/           # ユーティリティ・ビジネスロジック
 │   ├── api/       # APIユーティリティ（Issue #600）
+│   ├── assistant/ # Assistant Chat実行（コンテキスト生成・非インタラクティブ実行）
+│   ├── browser-compat/ # ブラウザ互換シム（Fullscreen API等、Issue #763）
 │   ├── cli-tools/ # CLIツール抽象化層
 │   ├── db/        # データベース（Issue #481）
-│   ├── tmux/      # tmuxセッション管理・トランスポート（Issue #481）
-│   ├── security/  # 認証・IP制限・パス検証・サニタイズ（Issue #481）
 │   ├── detection/ # ステータス検出・プロンプト検出（Issue #481）
-│   ├── session/   # セッション管理・実行エンジン（Issue #481）
+│   ├── external-apps/ # 外部アプリ設定・キャッシュ・DB連携（Issue #42）
+│   ├── git/       # Git操作・worktree管理・クローン（Issue #481）
 │   ├── polling/   # ポーリング・Auto-Yes（Issue #481）
-│   └── git/       # Git操作・worktree管理・クローン（Issue #481）
+│   ├── proxy/     # HTTPプロキシハンドラ（Issue #42）
+│   ├── security/  # 認証・IP制限・パス検証・サニタイズ（Issue #481）
+│   ├── session/   # セッション管理・実行エンジン（Issue #481）
+│   ├── tmux/      # tmuxセッション管理・トランスポート（Issue #481）
+│   ├── ws-server.ts  # WebSocketサーバ（リアルタイム通信・認証、Issue #331）
+│   └── logger.ts  # 構造化ロギング基盤（Issue #41）
 └── types/         # 型定義
 
 tests/

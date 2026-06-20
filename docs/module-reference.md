@@ -60,6 +60,8 @@
 | `src/lib/security/env-sanitizer.ts` | 環境変数サニタイズユーティリティ（Issue #294: SENSITIVE_ENV_KEYS配列[CLAUDECODE, CM_AUTH_TOKEN_HASH, CM_AUTH_EXPIRE, CM_HTTPS_KEY, CM_HTTPS_CERT, CM_ALLOWED_IPS, CM_TRUST_PROXY, CM_DB_PATH] + sanitizeEnvForChildProcess()関数。S1-001/S4-001: CLAUDECODE除去ロジックの一元管理） |
 | `src/lib/cmate-parser.ts` | CMATE.md汎用パーサー（Issue #294: parseCmateFile()→Map<string,string[][]>、parseSchedulesSection()→ScheduleEntry[]、sanitizeMessageContent()でUnicode制御文字除去[S4-002]、NAME_PATTERN/MAX_NAME_LENGTH でName列バリデーション[S4-011]、validateCmatePath()でパストラバーサル防御、isValidCronExpression()でcron式バリデーション。**Issue #406: 同期I/O非同期化** - import変更(fs→fs/promises)、validateCmatePath()をasync化(realpathSync→await realpath、Promise<boolean>戻り値)、readCmateFile()をasync化(readFileSync→await readFile、Promise<CmateConfig。CMATE.md汎用パーサー、parseAndValidateCliToolColumn連携（Issue #588） |
 | `src/types/cmate.ts` | CMATE.md型定義（Issue #294: ScheduleEntry interface、CmateConfig型） |
+| `src/lib/cmate-validator.ts` | CMATE.md クライアントサイドバリデータ（Issue #294: fs非依存の純粋関数、parseCmateContent/validateScheduleHeaders/validateSchedulesSection、CMATE_TEMPLATE_CONTENT、cmate-parser.ts のルールをミラーしエラーを返す）。CMATE.md バリデーション・テンプレート生成 |
+| `src/lib/cmate-writer.ts` | CMATE.md ライタ（Issue #824: cmate-parser.ts の対称実装、upsertScheduleInContent/removeScheduleFromContent/setScheduleEnabledInContent の純粋トランスフォーム＋tmp→rename アトミック書込、escapeTableCell でユーザー入力エスケープ、writeScheduleToCmate。UI は schedule DB API を直接叩かず CMATE.md 書込→schedule-manager watcher が DB 同期）。CMATE.md 書込同期 |
 | `src/lib/session/claude-executor.ts` | CLI非インタラクティブ実行エンジン（Issue #294: child_process.execFile使用[SEC-001]、sanitizeEnvForChildProcess()でSENSITIVE_ENV_KEYS除去、MAX_OUTPUT_SIZE=1MB/MAX_STORED_OUTPUT_SIZE=100KB[S1-014]、EXECUTION_TIMEOUT_MS=5分、MAX_MESSAGE_LENGTH=10000、executeClaudeCommand()、truncateOutput()。**Issue #379: ALLOWED_CLI_TOOLSに'opencode'追加、buildCliArgs()にcase 'opencode'追加（['run', '-m', 'ollama/{model}', message]形式）**） |
 | `src/lib/schedule-manager.ts` | サーバーサイドスケジューラー（Issue #294: globalThis.__scheduleManagerStates/globalThis.__scheduleActiveProcesses、cronパターンでcron評価[croner]、単一タイマー全worktree巡回[60秒]、同時実行防止、MAX_CONCURRENT_SCHEDULES=100、再起動リカバリ[status=running→failed]、initScheduleManager()はinitializeWorktrees()完了後に呼び出し[S3-010]、stopAllSchedules()でSIGKILL fire-and-forget[S3-001]。**Issue #409: パフォーマンス最適化** - ManagerStateに`cmateFileCache: Map<string, number>`追加（mtimeMs保持、SEC4-001サイズ上限根拠付きJSDoc）、`getCmateMtime()`でfs.statSync().mtimeMsキャッシュしCMATE.md未変更時のパース・DBクエリをスキップ（ENOENT→null、SEC4-003トラスト境界）、`batchUpsertSchedules()`でworktree単位バルクSELECT+db.transaction()バッチ化（旧`upsertSchedule()`を完全置換、SEC4-002 SQLインジェクション安全IN句）、stopAllSchedules()でcmateFileCache.clear()追加（DR1-008ライフサイクル管理）。**Issue #404: worktree単位停止** - stopScheduleForWorktree(worktreeId: string): void追加（schedulesマップ全イテレーションでworktreeIdフィルタ・cronJob停止・schedules削除、cmateFileCache DBルックアップでworktreeId→path変換・エントリ削除、DBルックアップ失敗時フォールバック、activeProcessesは自然回収委任）、getScheduleWorktreeIds(): string[]追加（@internal、Set重複除去）。**Issue #406: syncSchedules()非同期化** - syncSchedules()をasync化（await readCmateFile()）、ManagerStateにisSyncing: boolean追加（DJ-007並行実行防止ガード、try-finallyでリセット）、initScheduleManager()内をvoid syncSchedules()にfire-and-forget化（DJ-002: .catchなし、fail-fast）、setInterval内をvoid syncSchedules().catch()に変更（DJ-003: 繰返し実行安全性））。スケジューラーメイン・ジョブ登録管理（Issue #409, Issue #479）、ActiveScheduleInfo.model追加（Issue #588） |
 | `src/config/schedule-config.ts` | スケジュール関連設定定数の一元管理（Issue #294リファクタリング: UUID_V4_PATTERN、isValidUuidV4()、MAX_NAME_LENGTH、MAX_MESSAGE_LENGTH、MAX_CRON_LENGTH。DRY原則対応） |
@@ -128,6 +130,23 @@
 | `src/config/log-config.ts` | LOG_DIR定数の一元管理（getLogDir()関数、DRY原則対応） |
 | `src/lib/log-export-sanitizer.ts` | エクスポート用パス・環境情報・機密データサニタイズ（Issue #11: sanitizeForExport()関数、HOME/CM_ROOT_DIR/CM_DB_PATH/ホスト名/トークン/パスワード/SSHキーのマスキング）。エクスポート用データサニタイズ |
 | `src/lib/api-logger.ts` | 共通withLogging()ヘルパー（Issue #11: 開発環境APIリクエスト/レスポンスロギング、ジェネリクス型ApiHandler、skipResponseBodyオプション）。開発環境APIロギング |
+| `src/lib/logger.ts` | 構造化ロギング基盤（Issue #41: createLogger(module)/generateRequestId、LogLevel/LogEntry/Logger型、sanitize による機密データフィルタ、Server/Client ログ分離、withContext）。構造化ロギング |
+| `src/lib/ws-server.ts` | WebSocket サーバ（リアルタイム通信・room ベースブロードキャスト。Issue #331: Cookie ヘッダ認証＋IP制限。setupWebSocket/broadcast/broadcastMessage/cleanupRooms/closeWebSocket、handleProxyUpgrade で外部アプリ WebSocket プロキシ）。WebSocket サーバ |
+| `src/lib/errors.ts` | アプリケーション共通エラー定義（Issue #136: ErrorCode 定数/ErrorCodeType、AppError クラス、createAppError/isAppError/wrapError/getErrorMessage。SF-SEC-003: クライアント向け/内部エラーメッセージ分離） |
+| `src/lib/api-client.ts` | 型安全 fetch ラッパー（worktreeApi/repositoryApi、RepositorySummary/WorktreesResponse/ApiError、Issue #690: visible/enabled フラグ surface）。バックエンドAPIクライアント |
+| `src/lib/message-sync.ts` | メッセージ同期ユーティリティ（Issue #54: mergeMessages で ID 重複排除＋timestamp ソート、addOptimisticMessage/confirmOptimisticMessage/removeOptimisticMessage で楽観的UI更新、MAX_MESSAGES=200 でメモリ上限）。メッセージマージ・楽観的更新 |
+| `src/lib/claude-output.ts` | Claude CLI 出力パース（parseClaudeOutput→ParsedClaudeOutput、logFileName/requestId/summary をtmuxキャプチャから抽出、webhook/polling 間で共有）。Claude出力メタデータ抽出 |
+| `src/lib/log-manager.ts` | Claude 出力の Markdown ログファイル管理（getLogFilePath/createLog/appendToLog/readLog/listLogs/cleanupOldLogs、CLIツール別ディレクトリ、date-fns でファイル名生成）。Markdownログファイル管理 |
+| `src/lib/conversation-logger.ts` | 会話ログヘルパー（recordClaudeConversation で Claude レスポンスを直近ユーザー入力とペアリングし Markdown ログに記録、エラーは握り潰し API 継続）。会話ログ記録 |
+| `src/lib/conversation-grouper.ts` | 会話グルーピング（groupMessagesIntoPairs でフラットなメッセージ配列を ConversationPair に変換、isCompletedPair/isPendingPair/isOrphanPair/getCombinedAssistantContent、UI 表示用）。会話ペアグルーピング |
+| `src/lib/assistant-response-saver.ts` | 保留アシスタントレスポンス保存（Issue #53: 次ユーザー入力トリガーパターン、extractAssistantResponseBeforeLastPrompt/detectBufferReset/cleanCliResponse/savePendingAssistantResponse、CLIツール別クリーニング＋timestamp 順序保証＋重複保存防止）。保留レスポンス保存 |
+| `src/lib/prompt-answer-sender.ts` | プロンプト応答送信共通モジュール（Issue #287 Bug2: route.ts/auto-yes-manager.ts から抽出、sendPromptAnswer で cursor-key/text ベース tmux 入力、SubmitMode 解決＋promptType/defaultOptionNumber フォールバック、送信後 invalidateCache）。プロンプト応答送信 |
+| `src/lib/standard-commands.ts` | 組み込みスラッシュコマンド静的定義（Issue #56, #4: STANDARD_COMMANDS、Claude/Codex 別 cliTools、FREQUENTLY_USED、getStandardCommandGroups/getFrequentlyUsedCommands。Issue #594: Codex 共有は cliTools 明示オプトイン）。標準CLIツールコマンド定義 |
+| `src/lib/agent-instances-validator.ts` | エージェントインスタンスバリデータ（Issue #869: PATCH /api/worktrees/[id] の agentInstances 検証、validateAgentInstancesInput→{valid,value?,error?}、1..MAX_AGENT_INSTANCES、id 一意性／primary anchor の id===cliTool 整合／order 正規化）。agentInstances 検証 |
+| `src/lib/git-ai-prompt-templates.ts` | Git「Ask AI」プロンプトテンプレート（Issue #817: GitPane の Ask AI ボタンが MessageInput に投入する日本語プロンプトの単一ソース、branchCreatePrompt/branchDeletePrompt/stashCleanupPrompt/resetPrompt/revertPrompt/forcePushPrompt 等の純粋文字列ビルダー）。Git Ask AI プロンプト |
+| `src/lib/schedule-ai-prompt-templates.ts` | Schedule「Ask AI」プロンプトテンプレート（Issue #827: ScheduleEditDialog の Ask AI ボタン用、cronPrompt/messageDraftPrompt の純粋文字列ビルダー、git-ai-prompt-templates.ts をミラー）。Schedule Ask AI プロンプト |
+| `src/lib/daily-summary-generator.ts` | 日次サマリー生成（Issue #607: チャットメッセージから AI 日次レポート生成、generateDailySummary/isGenerating、globalThis フラグで同時実行制御＋スタックフラグ自動リセット、出力バリデーション／サニタイズ、ConcurrentGenerationError/GenerationTimeoutError/OutputValidationError）。日次サマリー生成 |
+| `src/lib/summary-prompt-builder.ts` | サマリープロンプトビルダー（Issue #607: buildSummaryPrompt で日次サマリー用構造化プロンプト構築、sanitizeMessage で XML タグインジェクション防止[DR4-003]、<user_data> タグでシステムプロンプトとユーザーデータ分離、MAX_TOTAL_MESSAGE_LENGTH 上限）。サマリープロンプト構築 |
 | `src/config/i18n-config.ts` | i18n設定の一元管理（SUPPORTED_LOCALES, DEFAULT_LOCALE, LOCALE_LABELS, LOCALE_COOKIE_NAME） |
 | `src/i18n.ts` | next-intl getRequestConfig（Cookie→Accept-Language→DEFAULT_LOCALEフォールバック、全名前空間マージ）。next-intl設定 |
 | `src/lib/locale-cookie.ts` | ロケールCookieユーティリティ（SameSite=Lax、条件付きSecure、1年有効期限）。ロケールCookie管理 |
@@ -175,6 +194,23 @@
 | `src/lib/assistant/context-builder.ts` | グローバルセッション用デフォルトコンテキスト生成（buildGlobalContext, getEnabledRepositories）（Issue #649） |
 | `src/lib/api/assistant-api.ts` | アシスタントAPIクライアント（startSession, sendCommand, getCurrentOutput, stopSession, getInstalledTools）（Issue #649） |
 | `src/types/assistant.ts` | アシスタント機能型定義（StartAssistantRequest, StartAssistantResponse, AssistantCurrentOutputResponse等）（Issue #649） |
+| `src/lib/assistant/conversation-session.ts` | アシスタント会話→tmux セッション識別子マッピングヘルパー（Assistant Chat）。会話セッション識別 |
+| `src/lib/assistant/conversation-response-saver.ts` | Home Assistant Chat 会話の完了レスポンス永続化（Assistant Chat）。アシスタントレスポンス保存 |
+| `src/lib/assistant/tool-capabilities.ts` | アシスタント実行モード判定（getAssistantExecutionMode/isAssistantNonInteractiveTool、CLIツール別にインタラクティブ/非インタラクティブを解決）。アシスタント実行能力判定 |
+| `src/lib/assistant/non-interactive-runner.ts` | 非インタラクティブアシスタント実行エンジン（startNonInteractiveAssistantExecution、Claude/Codex を非対話モードで実行）。非インタラクティブ実行 |
+| `src/lib/assistant/non-interactive-prompt-builder.ts` | 非インタラクティブ実行用プロンプト構築（buildNonInteractivePrompt）。非インタラクティブプロンプト構築 |
+| `src/lib/assistant/non-interactive-output-parser.ts` | 非インタラクティブ出力パース（parseClaudeStructuredOutput/parseCodexStructuredOutput→ParsedAssistantOutput）。構造化出力パース |
+| `src/lib/assistant/non-interactive-process-registry.ts` | 実行中プロセスレジストリ（register/unregister/get/cancelAssistantExecutionProcess、conversationId/executionId でキャンセル制御）。実行プロセスレジストリ |
+| `src/lib/assistant/non-interactive-execution-reconciler.ts` | 実行状態リコンサイラ（reconcileAssistantConversationExecution/reconcileAllAssistantExecutions、サーバー再起動時の実行状態整合）。実行状態整合 |
+| `src/lib/external-apps/index.ts` | 外部アプリモジュールバレル（Issue #42）。外部アプリエクスポート集約 |
+| `src/lib/external-apps/interfaces.ts` | 外部アプリインターフェース定義（Issue #42: CLIToolManager 同様の Strategy パターン）。外部アプリ型・契約 |
+| `src/lib/external-apps/db.ts` | 外部アプリ設定 DB 操作（Issue #42, #136: SQLite CRUD、issue_no による worktree 外部アプリ対応）。外部アプリDB操作 |
+| `src/lib/external-apps/cache.ts` | 外部アプリキャッシュ層（Issue #42: TTL メモリキャッシュで proxy リクエスト時の DB クエリ削減。Issue #136: invalidateByIssueNo で worktree キャッシュ無効化）。外部アプリキャッシュ |
+| `src/lib/external-apps/validation.ts` | 外部アプリ共有バリデーション定数・ユーティリティ（Issue #42: API 層と UI 層で共用）。外部アプリバリデーション |
+| `src/lib/proxy/index.ts` | プロキシモジュールバレル（Issue #42）。プロキシエクスポート集約 |
+| `src/app/proxy/[...path]/route.ts` | 外部アプリプロキシルートハンドラ（Issue #42: GET/POST/PUT/PATCH/DELETE /proxy/{pathPrefix}/* を外部アプリへ転送、external-apps cache 経由で解決）。プロキシルート |
+| `src/app/chat/page.tsx` | Chat 画面（/chat、Home から分離した Assistant Chat 専用ページ、AppShell + AssistantChatPanel）。Assistant Chat ページ |
+| `src/app/login/page.tsx` | ログイン画面（Issue #331: トークン認証フォーム、Rate limit/ロックアウト表示、認証無効時は / へリダイレクト。Issue #383: ngrok 経由モバイルアクセス用 QR コードログイン）。ログインページ |
 | `src/lib/session-key-sender.ts` | Claudeセッションキー送信ロジック（Issue #479） |
 | `src/lib/prompt-answer-input.ts` | プロンプト応答入力ロジック（getAnswerInput）（Issue #479） |
 | `src/lib/slash-command-format.ts` | スラッシュコマンドトリガ表記（getSlashCommandTrigger）。Issue #790で Codex skill（`source==='codex-skill'`）は Codex CLI 公式構文 `$NAME`、その他（Claude/Copilot/Gemini）は `/NAME` を返す |
