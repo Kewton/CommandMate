@@ -1,10 +1,10 @@
-[English](../en/internal/PROMPT_HANDLING_IMPLEMENTATION_PLAN.md)
+[日本語版](../../internal/PROMPT_HANDLING_IMPLEMENTATION_PLAN.md)
 
 # Claude Prompt Handling Implementation Plan
 
 **Project**: CommandMate
 **Feature**: Interactive Prompt Support (yes/no confirmations)
-**Approach**: Structured Prompt Message Type (案3)
+**Approach**: Structured Prompt Message Type (Option 3)
 **Date**: 2025-11-17
 **Target Phase**: Phase 1 - Basic yes/no Support
 
@@ -745,7 +745,7 @@ export function PromptMessage({ message, worktreeId, onRespond }: PromptMessageP
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <span className="text-2xl">⚠️</span>
-            <span className="font-bold text-yellow-800">Claudeからの確認</span>
+            <span className="font-bold text-yellow-800">Confirmation from Claude</span>
           </div>
           <span className="text-xs text-yellow-600">{timestamp}</span>
         </div>
@@ -787,14 +787,14 @@ export function PromptMessage({ message, worktreeId, onRespond }: PromptMessageP
             {responding && (
               <div className="flex items-center gap-2 text-sm text-gray-500">
                 <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-blue-600" />
-                <span>送信中...</span>
+                <span>Sending...</span>
               </div>
             )}
           </div>
         ) : (
           <div className="bg-white border border-gray-300 rounded-lg px-4 py-2 inline-block">
             <span className="text-sm text-gray-600">
-              ✅ 回答済み: <strong className="text-gray-900">{prompt.answer}</strong>
+              ✅ Answered: <strong className="text-gray-900">{prompt.answer}</strong>
             </span>
           </div>
         )}

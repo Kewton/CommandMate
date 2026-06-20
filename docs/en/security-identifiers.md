@@ -1,4 +1,4 @@
-[English](./en/security-identifiers.md)
+[日本語版](../security-identifiers.md)
 
 # Security Identifiers
 

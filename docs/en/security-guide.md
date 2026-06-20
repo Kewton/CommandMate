@@ -1,4 +1,4 @@
-[English](./en/security-guide.md)
+[日本語版](../security-guide.md)
 
 # CommandMate Security Guide
 
@@ -74,10 +74,10 @@ After installation, set up the local CA and generate a certificate:
 
 ```bash
 mkcert -install
-mkcert localhost <サーバーIP>
+mkcert localhost <server-IP>
 ```
 
-Replace `<サーバーIP>` with your server's LAN IP (e.g., `192.168.1.10`).
+Replace `<server-IP>` with your server's LAN IP (e.g., `192.168.1.10`).
 
 #### Distributing the CA Certificate to Client Devices (Linux)
 

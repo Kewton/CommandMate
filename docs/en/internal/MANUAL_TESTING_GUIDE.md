@@ -1,4 +1,4 @@
-[English](../en/internal/MANUAL_TESTING_GUIDE.md)
+[日本語版](../../internal/MANUAL_TESTING_GUIDE.md)
 
 # Manual Testing Guide - Prompt Handling Feature
 
@@ -55,7 +55,7 @@ Would you like me to create this file? (y/n)
 #### Step 2: Verify prompt detection
 - **Expected**: The prompt should be displayed with:
   - ⚠️ Yellow background card
-  - "Claudeからの確認" header
+  - "Confirmation from Claude" header
   - Question text: "Would you like me to create this file?"
   - Two buttons: "Yes" and "No"
   - Status: Pending (buttons enabled)
@@ -63,10 +63,10 @@ Would you like me to create this file? (y/n)
 #### Step 3: Answer "Yes"
 - Click the "Yes" button
 - **Expected**:
-  - Loading indicator appears ("送信中...")
+  - Loading indicator appears ("Sending...")
   - Buttons become disabled
   - After ~1 second, the prompt card updates to show:
-    - "✅ 回答済み: yes"
+    - "✅ Answered: yes"
     - Buttons are replaced with answered status
   - Claude continues execution in the background
   - A new Claude response appears with the result
@@ -106,7 +106,7 @@ SELECT id, message_type, prompt_data FROM chat_messages WHERE message_type = 'pr
 3. Click the "No" button
 
 4. **Expected**:
-   - Prompt updates to show "回答済み: no"
+   - Prompt updates to show "Answered: no"
    - Claude receives "n" and stops the operation
    - Claude responds with something like "Operation cancelled"
 
@@ -126,7 +126,7 @@ SELECT id, message_type, prompt_data FROM chat_messages WHERE message_type = 'pr
 
 4. **Expected**:
    - Each prompt appears one at a time
-   - Previous prompts show "回答済み" status
+   - Previous prompts show "Answered" status
    - Current prompt shows interactive buttons
    - System handles sequential prompts correctly
 
@@ -142,14 +142,14 @@ SELECT id, message_type, prompt_data FROM chat_messages WHERE message_type = 'pr
 3. **Expected**:
    - The prompt appears in both tabs immediately (via WebSocket)
    - Answer the prompt in Tab 1
-   - Tab 2 should update to show "回答済み" status without refresh
+   - Tab 2 should update to show "Answered" status without refresh
 
 ## Test Scenario 5: Error Handling
 
 ### Test 5a: Network Error
 1. Stop the backend server: `pkill -f "tsx server.ts"`
 2. Try to answer a pending prompt
-3. **Expected**: Error alert "応答の送信に失敗しました。もう一度お試しください。"
+3. **Expected**: Error alert "Failed to send the response. Please try again."
 
 ### Test 5b: Already Answered
 1. Answer a prompt successfully
