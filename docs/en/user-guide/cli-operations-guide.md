@@ -47,6 +47,7 @@ node bin/commandmate.js ls
 | [`commandmate respond`](#commandmate-respond) | Respond to a prompt |
 | [`commandmate capture`](#commandmate-capture) | Get terminal output |
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Control auto-yes |
+| [`commandmate report`](#commandmate-report) | Generate, show, and list daily reports |
 
 ---
 
@@ -196,6 +197,67 @@ Control auto-yes (automatic prompt response) individually.
 commandmate auto-yes <worktree-id> --enable --duration 3h
 commandmate auto-yes <worktree-id> --enable --stop-pattern "error"
 commandmate auto-yes <worktree-id> --disable
+```
+
+---
+
+## commandmate report
+
+Generate, show, and list daily reports (a summary of the day's agent activity, Issue #636).
+While the server is running, the selected AI tool generates the report from registered session history.
+
+```bash
+commandmate report generate                       # Generate today's report (claude)
+commandmate report generate --date 2026-06-21      # Specific date
+commandmate report generate --tool codex           # Choose AI tool
+commandmate report generate --template <id>        # Use a template as the instruction
+commandmate report generate --instruction "Summarize"  # Custom instruction
+
+commandmate report show                            # Show today's report
+commandmate report show --date 2026-06-21 --json   # Specific date + JSON
+
+commandmate report list                            # List the last 7 days
+commandmate report list --days 30                  # List the last 30 days
+commandmate report list --json                     # JSON output
+```
+
+### Subcommands
+
+| Subcommand | Purpose |
+|------------|---------|
+| `generate` | Generate the report for a date and print its content to stdout |
+| `show` | Show an existing report (`No report found` if not generated) |
+| `list` | List report presence, message count, and tool for the last N days |
+
+### generate Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--date <date>` | Target date (`YYYY-MM-DD`) | today |
+| `--tool <tool>` | AI tool to use (claude, codex, copilot) | claude |
+| `--model <model>` | Model name (for copilot) | - |
+| `--template <id>` | Template ID used as the instruction | - |
+| `--instruction <text>` | Custom instruction text (alternative to `--template`) | - |
+| `--token <token>` | Auth token (prefer the `CM_AUTH_TOKEN` env var) | - |
+
+### show / list Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--date <date>` (show) | Target date (`YYYY-MM-DD`) | today |
+| `--days <days>` (list) | Number of days to list | 7 |
+| `--json` | JSON output | - |
+| `--token <token>` | Auth token (prefer the `CM_AUTH_TOKEN` env var) | - |
+
+> **Note**: `--date` accepts only `YYYY-MM-DD`. An invalid format exits with code 2 (CONFIG_ERROR).
+> `--tool` must be one of claude / codex / copilot, and `--days` must be at least 1.
+
+### list Output Example
+
+```
+2026-06-21  [report] tool=claude  messages=12
+2026-06-20  [no report]  messages=3
+2026-06-19  [report] tool=codex  messages=8
 ```
 
 ---

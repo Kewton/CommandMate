@@ -139,13 +139,16 @@ commandmate start --port 3001
 ### サーバーの状態確認
 
 ```bash
-commandmate status
+commandmate status              # メインサーバーの状態
+commandmate status --all        # 全サーバー（main + worktree）の状態
+commandmate status --issue 135  # Issue #135用worktreeサーバーの状態
 ```
 
 ### サーバーの停止
 
 ```bash
-commandmate stop
+commandmate stop                # メインサーバーを停止
+commandmate stop --issue 135    # Issue #135用worktreeサーバーを停止
 ```
 
 #### 強制停止
@@ -201,7 +204,34 @@ commandmate start [options]
 |-----------|------|
 | `--daemon` | バックグラウンドで起動 |
 | `--dev` | 開発モードで起動 |
-| `--port <port>` | ポートを指定（デフォルト: 3000） |
+| `-p, --port <number>` | ポートを指定（デフォルト: 3000） |
+| `-i, --issue <number>` | 指定Issueのworktree用サーバーを起動（Issue #136） |
+| `--auto-port` | worktree用サーバーのポートを自動割当（Issue #136） |
+| `--auth` | トークン認証を有効化（Issue #331） |
+| `--auth-expire <duration>` | トークン有効期限（例: `24h`, `7d`, `90m`） |
+| `--https` | HTTPSを有効化 |
+| `--cert <path>` | TLS証明書ファイルのパス |
+| `--key <path>` | TLS秘密鍵ファイルのパス |
+| `--allow-http` | 証明書なしで `--auth` を使う際のHTTPS警告を抑制 |
+| `--allowed-ips <cidrs>` | 許可するIP/CIDR（カンマ区切り、Issue #331） |
+| `--trust-proxy` | リバースプロキシの `X-Forwarded-For` ヘッダーを信頼 |
+
+#### Worktree並列開発（Issue #136）
+
+worktree ごとに独立したサーバーを起動できます。
+
+```bash
+commandmate start --issue 135 --auto-port  # Issue #135用サーバーを起動（ポート自動割当）
+commandmate start --issue 135 --port 3135  # 特定ポートで起動
+```
+
+#### 認証・外部公開（Issue #331）
+
+```bash
+commandmate start --auth --auth-expire 24h          # トークン認証（有効期限24h）
+commandmate start --auth --allowed-ips 192.168.1.0/24  # IP制限付き
+commandmate start --https --cert ./cert.pem --key ./key.pem  # HTTPS
+```
 
 ### commandmate stop
 
@@ -213,15 +243,21 @@ commandmate stop [options]
 
 | オプション | 説明 |
 |-----------|------|
-| `--force` | 強制停止 |
+| `-f, --force` | 強制停止（SIGKILL） |
+| `-i, --issue <number>` | 指定Issueのworktree用サーバーを停止（Issue #136） |
 
 ### commandmate status
 
 サーバーの状態を表示します。
 
 ```bash
-commandmate status
+commandmate status [options]
 ```
+
+| オプション | 説明 |
+|-----------|------|
+| `-i, --issue <number>` | 指定Issueのworktree用サーバーの状態を表示（Issue #136） |
+| `-a, --all` | 全サーバー（main + worktree）の状態を表示 |
 
 ### commandmate issue
 
