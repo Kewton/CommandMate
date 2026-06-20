@@ -1,17 +1,20 @@
 /**
  * PcDisplaySizeSelector (Issue #915)
  *
- * PC-only dropdown for choosing the UI display size (大 / 中 / 小 / 極小).
+ * PC-only dropdown for choosing the UI display size (large / medium / small / xsmall).
  * Hidden on mobile. Two-way bound to the persisted size via the context.
+ *
+ * Labels and the accessible label are localized via next-intl (`common.displaySize.*`)
+ * so they follow the active locale instead of being hard-coded Japanese (Issue #918).
  */
 
 'use client';
 
 import React from 'react';
+import { useTranslations } from 'next-intl';
 import { usePcDisplaySizeContext } from '@/contexts/PcDisplaySizeContext';
 import {
   PC_DISPLAY_SIZE_ORDER,
-  PC_DISPLAY_SIZE_META,
   isPcDisplaySize,
 } from '@/hooks/usePcDisplaySize';
 
@@ -21,20 +24,23 @@ import {
  */
 export function PcDisplaySizeSelector() {
   const { size, setSize, isMobile } = usePcDisplaySizeContext();
+  const t = useTranslations('common');
 
   if (isMobile) {
     return null;
   }
 
+  const ariaLabel = t('displaySize.ariaLabel');
+
   return (
     <div className="flex items-center">
       <label htmlFor="pc-display-size" className="sr-only">
-        表示サイズ
+        {ariaLabel}
       </label>
       <select
         id="pc-display-size"
         data-testid="pc-display-size-select"
-        aria-label="表示サイズ"
+        aria-label={ariaLabel}
         value={size}
         onChange={(event) => {
           const next = event.target.value;
@@ -46,7 +52,7 @@ export function PcDisplaySizeSelector() {
       >
         {PC_DISPLAY_SIZE_ORDER.map((option) => (
           <option key={option} value={option}>
-            {PC_DISPLAY_SIZE_META[option].label}
+            {t(`displaySize.${option}`)}
           </option>
         ))}
       </select>

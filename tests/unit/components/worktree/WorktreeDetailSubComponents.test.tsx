@@ -648,4 +648,22 @@ describe('DesktopHeader agent indicator drag source (Issue #786 / #869)', () => 
     expect(screen.queryByTestId('desktop-agent-status-row')).toBeNull();
     expect(container.querySelector('[draggable="true"]')).toBeNull();
   });
+
+  // Issue #917: the PC display-size selector must be reachable from the worktree
+  // detail page. The global Header is suppressed on /worktrees/[id] (useLayoutConfig
+  // showGlobalNav:false), so DesktopHeader surfaces the selector in its top bar.
+  // PcDisplaySizeContext has a non-throwing default (isMobile:false) so it renders
+  // without an explicit provider.
+  describe('PC display-size selector (Issue #917)', () => {
+    it('renders the display-size selector in the desktop top bar', () => {
+      render(<DesktopHeader {...baseProps} />);
+      expect(screen.getByTestId('pc-display-size-select')).toBeDefined();
+    });
+
+    it('keeps the selector present alongside the per-instance status row', () => {
+      render(<DesktopHeader {...baseProps} instances={mkInstances(['claude', 'codex'])} />);
+      expect(screen.getByTestId('desktop-agent-status-row')).toBeDefined();
+      expect(screen.getByTestId('pc-display-size-select')).toBeDefined();
+    });
+  });
 });
