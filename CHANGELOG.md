@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-06-21
+
+> **Highlight**: PC 版に表示サイズ切替（大/中/小/極小、既定=中）を追加（#915/#919）。本リリースは大きな機能追加よりも、God モジュール／God コンポーネント／God フックを per-concern に分解する**内部リファクタ**（#920-#923）と、旧リポジトリ名・環境変数表記・リンク・i18n パリティを揃える**ドキュメント整備**（#924-#929）が中心。いずれも振る舞い不変で、既存テストをセーフティネットに据えている。
+
+### Added
+- feat(display): PC 専用の**表示サイズ切替（大/中/小/極小、既定=中）**を rem カスケード（案A）で実装。`usePcDisplaySize`（localStorage `mcbd-pc-display-size`・検証付き永続化、サイズ係数表／ターミナル fontSize／root font-size のメタ定義）と `PcDisplaySizeContext`/Provider（単一の真実源、PC（`!isMobile`）時のみ `<html data-pc-size>` を付与し rem カスケード適用、モバイル/アンマウント時は除去）を新設。`globals.css` で `html[data-pc-size=...]` を 18/16/14/12.5px に切替、Header に表示サイズドロップダウンを追加、`AppShell` のサイドバー幅 MIN/MAX/表示幅をサイズ係数で連動（clamp 維持・往復で非破壊）、`Terminal` の `fontSize` を prop 化し変更時は `term.options.fontSize` 更新＋`fit()` で再接続なし再フィット。モバイル（<768px）は非適用 (Issue #915)
+
+### Fixed
+- fix(display): #915 で追加した表示サイズセレクタが **worktree 詳細ページ（`/worktrees/[id]`）で表示されない**問題（#917、`useLayoutConfig showGlobalNav:false` がグローバル Header を抑止）を、`DesktopHeader` トップバーにセレクタを surface して修正（PC 専用・モバイルは null）。あわせてセレクタのラベル（大/中/小/極小）と aria-label が**ハードコード日本語でロケール非追従**だった問題（#918）を、文言を i18n 辞書（`common.displaySize.*`）へ移し `useTranslations` 経由で消費するよう修正（英語では Large/Medium/Small/Extra small を表示、未使用化した `PC_DISPLAY_SIZE_META.label` を撤去して i18n を単一の真実源に統一）。回帰テストを追加 (Issue #919)
+
+### Changed
+- refactor(git): 2327 行・37 export の `src/lib/git/git-utils.ts` God モジュールを **per-concern モジュールに分割**（git-errors / git-exec / git-default-branch / git-status / git-log / git-diff / git-commit / git-branches / git-stash / git-reset / git-remote、循環依存なし）。`git-utils.ts` は後方互換の re-export barrel として残置し barrel 経由の全 caller を不変に保つ。public API / export signature は不変（振る舞い不変）、203 ケースのテストを 11 ファイルへ verbatim 分割 (Issue #921)
+- refactor(worktree): 約 3.1k 行の `GitPane.tsx` God コンポーネントを、focused custom hooks（ロジック）と memo 化した panel コンポーネント（プレゼンテーション）を共有レイアウトで束ねる薄い coordinator へ**分解**。副作用を `useGitStatus`/`useCommitHistory`/`useChanges`/`useBranches`/`useStash`/`useDangerZone` に抽出（既存 `useGitPaneNetworkOps`/`useGitPaneTabState` に合流、refetch カスケードは callback 注入で疎結合）、プレゼンテーションを `git/panels/*` + `gitPaneShared` へ、レスポンシブ（mobile-tabs / desktop-grouping）を `GitPaneLayout` へ移設、ambient config を `GitPaneContext` で供給し prop-drilling を排除。external props / data-testid / 振る舞いは不変、112 件の既存テストをセーフティネットに据え新フック・context/layout の focused test を追加 (Issue #922)
+- refactor(worktree): `useWorktreeDetailController` God フックの低リスク・無結合な 3 関心事を独立サブフックへ**抽出**（純構造リファクタ・振る舞い不変）: `useHistoryFilters`（historySubTab / showArchived / historyUserOnly / historyDisplayLimit + localStorage 同期）、`useDiffViewerState`（diffContent / diffFilePath + open/close、mobile は no-op）、`useVisibilityRecovery`（visibilitychange リスナ + スロットル復帰処理）。`fetchMessages` 結合用の ref ミラーは polling 関心として controller に残置。本体は 1671→1514 行に縮小、focused unit test 18 ケースを追加 (Issue #923)
+- refactor(worktree): レンダーパスを持たない dead-code の **`WorktreeDetailHeader` コンポーネントを削除**（PC worktree 詳細トップバーの実体は `WorktreeDetailSubComponents.tsx` の `DesktopHeader`、参照は自身の unit test のみの test-backed dead code）。`WorktreeDetailHeader.tsx` とそのテストを削除し repo 全体で残参照ゼロを確認（barrel は未 export）、振る舞い不変 (Issue #920)
+
+### Docs
+- docs: 旧リポジトリ名 `Kewton/MyCodeBranchDesk` を `Kewton/CommandMate` に統一修正 (Issue #924)
+- docs(architecture): 環境変数表記を `MCBD_` から `CM_` に統一 (Issue #925)
+- docs: implementation-history の **design-policy リンク切れを修正** (Issue #926)
+- docs: CLI ガイドに **report コマンドおよび start/stop/status フラグを追記** (Issue #927)
+- docs: **CLAUDE.md の tree と module-reference.md を現状の `src/` に同期** (Issue #928)
+- docs(i18n): `docs/` ↔ `docs/en/` の**英訳パリティ**を達成（英訳を追加） (Issue #929)
+
 ## [0.7.1] - 2026-06-20
 
 > **Highlight**: リポジトリ別の軽量 ToDo 機能（#894）。Home に対象リポジトリを選択して書けるチェックボックス形式の ToDo / 備忘録ウィジェットを追加。さらに全リポジトリ横断表示（#908）・モバイルレイアウト最適化（#909）・リポジトリ名表示（#903）・即時反映の担保（#911）まで一連で拡張した。あわせてエイリアスインスタンス周りの Auto-Yes / terminal-split / codex 起動の修正を取り込んでいる。
