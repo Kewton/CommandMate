@@ -33,8 +33,8 @@ describe('db-migrations', () => {
   });
 
   describe('CURRENT_SCHEMA_VERSION', () => {
-    it('should be 34 after Migration #34 (repository_todos)', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(34);
+    it('should be 35 after Migration #35 (timer instance_id)', () => {
+      expect(CURRENT_SCHEMA_VERSION).toBe(35);
     });
   });
 
@@ -515,6 +515,58 @@ describe('db-migrations', () => {
 
       const msg = db.prepare('SELECT archived FROM chat_messages WHERE id = ?').get('msg-archived-test') as { archived: number };
       expect(msg.archived).toBe(0);
+    });
+  });
+
+  describe('Migration #35: add-instance-id-to-timer-messages (Issue #942)', () => {
+    beforeEach(() => {
+      runMigrations(db);
+    });
+
+    it('should add a nullable instance_id column to timer_messages', () => {
+      const columns = db.prepare("PRAGMA table_info('timer_messages')").all() as Array<{
+        name: string;
+        type: string;
+        notnull: number;
+        dflt_value: string | null;
+      }>;
+
+      const instanceCol = columns.find(col => col.name === 'instance_id');
+      expect(instanceCol).toBeDefined();
+      expect(instanceCol?.type).toBe('TEXT');
+      // Nullable so pre-v35 rows are accepted; the app layer falls back to cli_tool_id.
+      expect(instanceCol?.notnull).toBe(0);
+    });
+
+    it('should backfill instance_id = cli_tool_id for rows created before the migration', async () => {
+      // Build a pre-v35 timer_messages table (no instance_id) in an isolated DB,
+      // seed a row, then run only the v35 up() to verify the backfill UPDATE.
+      const legacyDb = new Database(':memory:');
+      try {
+        legacyDb.exec(`
+          CREATE TABLE timer_messages (
+            id TEXT PRIMARY KEY,
+            worktree_id TEXT NOT NULL,
+            cli_tool_id TEXT NOT NULL,
+            message TEXT NOT NULL,
+            delay_ms INTEGER NOT NULL,
+            scheduled_send_time INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at INTEGER NOT NULL,
+            sent_at INTEGER
+          );
+          INSERT INTO timer_messages (id, worktree_id, cli_tool_id, message, delay_ms, scheduled_send_time, status, created_at, sent_at)
+          VALUES ('legacy-1', 'wt-1', 'codex', 'hi', 300000, 9999999999999, 'pending', 1, NULL);
+        `);
+
+        const { v35_migrations } = await import('../../../src/lib/db/migrations/v35-timer-instance-id');
+        v35_migrations[0].up(legacyDb);
+
+        const row = legacyDb.prepare('SELECT instance_id FROM timer_messages WHERE id = ?').get('legacy-1') as { instance_id: string };
+        expect(row.instance_id).toBe('codex');
+      } finally {
+        legacyDb.close();
+      }
     });
   });
 

@@ -79,15 +79,20 @@ async function executeTimer(timerId: string): Promise<void> {
     // [DP-004/CON-MF-001] Resolve session name via CLIToolManager singleton
     const cliTool = CLIToolManager.getInstance().getTool(timer.cliToolId as CLIToolType);
 
+    // [Issue #942] Target the specific agent instance session. Legacy timers
+    // (and primary instances) have instanceId === cliToolId, preserving the
+    // original single-session behavior.
+    const instanceId = timer.instanceId;
+
     // [Issue #539] Check if session is running before sending
-    const isRunning = await cliTool.isRunning(timer.worktreeId);
+    const isRunning = await cliTool.isRunning(timer.worktreeId, instanceId);
     if (!isRunning) {
-      logger.warn('timer:no-session', { timerId, worktreeId: timer.worktreeId });
+      logger.warn('timer:no-session', { timerId, worktreeId: timer.worktreeId, instanceId });
       updateTimerStatus(db, timerId, TIMER_STATUS.NO_SESSION);
       return;
     }
 
-    const sessionName = cliTool.getSessionName(timer.worktreeId);
+    const sessionName = cliTool.getSessionName(timer.worktreeId, instanceId);
 
     updateTimerStatus(db, timerId, 'sending');
     await sendKeys(sessionName, timer.message, true);

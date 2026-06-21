@@ -569,6 +569,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           worktreeId={worktreeId}
           className="h-full"
           onInsertToMessage={handleInsertToMessage}
+          instances={instances}
         />
       ),
       agent: (
@@ -582,7 +583,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
         />
       ),
-      timer: <TimerPane worktreeId={worktreeId} />,
+      timer: <TimerPane worktreeId={worktreeId} instances={instances} />,
     }),
     [
       worktreeId,

@@ -20,6 +20,11 @@ export interface TimerMessage {
   id: string;
   worktreeId: string;
   cliToolId: string;
+  /**
+   * Agent instance the timer targets (Issue #942). For the primary instance and
+   * legacy rows this equals `cliToolId` (the primary anchor: `id === cliTool`).
+   */
+  instanceId: string;
   message: string;
   delayMs: number;
   scheduledSendTime: number;
@@ -32,6 +37,8 @@ export interface TimerMessage {
 export interface CreateTimerParams {
   worktreeId: string;
   cliToolId: string;
+  /** Target agent instance (Issue #942). Defaults to the primary (`cliToolId`). */
+  instanceId?: string;
   message: string;
   delayMs: number;
 }
@@ -53,6 +60,8 @@ interface TimerMessageRow {
   id: string;
   worktree_id: string;
   cli_tool_id: string;
+  /** Nullable for rows created before the v35 migration (Issue #942). */
+  instance_id: string | null;
   message: string;
   delay_ms: number;
   scheduled_send_time: number;
@@ -66,7 +75,7 @@ interface TimerMessageRow {
 // =============================================================================
 
 /** SELECT column list for timer_messages queries */
-const TIMER_COLUMNS = 'id, worktree_id, cli_tool_id, message, delay_ms, scheduled_send_time, status, created_at, sent_at';
+const TIMER_COLUMNS = 'id, worktree_id, cli_tool_id, instance_id, message, delay_ms, scheduled_send_time, status, created_at, sent_at';
 
 // =============================================================================
 // Row Mapping
@@ -78,6 +87,9 @@ function mapRow(row: TimerMessageRow): TimerMessage {
     id: row.id,
     worktreeId: row.worktree_id,
     cliToolId: row.cli_tool_id,
+    // Legacy rows (pre-v35) have NULL instance_id → fall back to the primary
+    // instance anchor (instanceId === cliToolId).
+    instanceId: row.instance_id ?? row.cli_tool_id,
     message: row.message,
     delayMs: row.delay_ms,
     scheduledSendTime: row.scheduled_send_time,
@@ -102,16 +114,19 @@ export function createTimer(
   const id = randomUUID();
   const now = Date.now();
   const scheduledSendTime = now + params.delayMs;
+  // Default to the primary instance anchor when no instance is specified.
+  const instanceId = params.instanceId ?? params.cliToolId;
 
   const stmt = db.prepare(`
-    INSERT INTO timer_messages (id, worktree_id, cli_tool_id, message, delay_ms, scheduled_send_time, status, created_at, sent_at)
-    VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, NULL)
+    INSERT INTO timer_messages (id, worktree_id, cli_tool_id, instance_id, message, delay_ms, scheduled_send_time, status, created_at, sent_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL)
   `);
 
   stmt.run(
     id,
     params.worktreeId,
     params.cliToolId,
+    instanceId,
     params.message,
     params.delayMs,
     scheduledSendTime,
@@ -122,6 +137,7 @@ export function createTimer(
     id,
     worktreeId: params.worktreeId,
     cliToolId: params.cliToolId,
+    instanceId,
     message: params.message,
     delayMs: params.delayMs,
     scheduledSendTime,

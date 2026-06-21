@@ -13,7 +13,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
 import { useTranslations } from 'next-intl';
 import {
   TIMER_DELAYS,
@@ -23,8 +23,8 @@ import {
   DEFAULT_TIMER_HISTORY_LIMIT,
 } from '@/config/timer-constants';
 import { formatTimeRemaining } from '@/config/auto-yes-config';
-import type { CLIToolType } from '@/lib/cli-tools/types';
-import { CLI_TOOL_IDS, getCliToolDisplayName } from '@/lib/cli-tools/types';
+import type { CLIToolType, AgentInstance } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, agentInstancesFromSelectedAgents } from '@/lib/cli-tools/types';
 
 // =============================================================================
 // Types
@@ -32,13 +32,21 @@ import { CLI_TOOL_IDS, getCliToolDisplayName } from '@/lib/cli-tools/types';
 
 interface TimerPaneProps {
   worktreeId: string;
-  /** @deprecated No longer used — CLI_TOOL_IDS is used directly */
+  /**
+   * Registered agent instances (Issue #942). Drives the agent selector so the
+   * timer can target a specific instance session. Falls back to the primary
+   * instance of every CLI tool when omitted/empty (legacy behavior).
+   */
+  instances?: AgentInstance[];
+  /** @deprecated No longer used — instances drives the selector */
   selectedAgents?: CLIToolType[];
 }
 
 interface TimerItem {
   id: string;
   cliToolId: string;
+  /** Target agent instance (Issue #942). Legacy rows fall back to cliToolId. */
+  instanceId: string;
   message: string;
   delayMs: number;
   scheduledSendTime: number;
@@ -81,11 +89,23 @@ function getStatusColor(status: string): string {
 // Component
 // =============================================================================
 
-export const TimerPane = memo(function TimerPane({ worktreeId }: TimerPaneProps) {
+export const TimerPane = memo(function TimerPane({ worktreeId, instances }: TimerPaneProps) {
   const t = useTranslations('schedule');
+
+  // Resolve the agent roster: explicit instances when configured, otherwise the
+  // primary instance of every CLI tool (legacy behavior, byte-for-byte compat).
+  const resolvedInstances = useMemo<AgentInstance[]>(
+    () => (instances && instances.length > 0
+      ? instances
+      : agentInstancesFromSelectedAgents([...CLI_TOOL_IDS])),
+    [instances]
+  );
+
   const [timers, setTimers] = useState<TimerItem[]>([]);
   const [message, setMessage] = useState('');
-  const [selectedAgent, setSelectedAgent] = useState<CLIToolType>(CLI_TOOL_IDS[0]);
+  const [selectedInstanceId, setSelectedInstanceId] = useState<string>(
+    () => resolvedInstances[0]?.id ?? CLI_TOOL_IDS[0]
+  );
   const [selectedDelay, setSelectedDelay] = useState(TIMER_DELAYS[0]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -95,6 +115,14 @@ export const TimerPane = memo(function TimerPane({ worktreeId }: TimerPaneProps)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastCreatedAtRef = useRef<number | null>(null);
+
+  // Keep the selection valid when the instance roster changes (e.g. an instance
+  // is renamed/removed in the Agents panel while the Timer tab is open).
+  useEffect(() => {
+    if (!resolvedInstances.some((inst) => inst.id === selectedInstanceId)) {
+      setSelectedInstanceId(resolvedInstances[0]?.id ?? CLI_TOOL_IDS[0]);
+    }
+  }, [resolvedInstances, selectedInstanceId]);
 
   // ==========================================================================
   // Fetch timers
@@ -190,6 +218,9 @@ export const TimerPane = memo(function TimerPane({ worktreeId }: TimerPaneProps)
   const handleRegister = useCallback(async () => {
     if (!message.trim() || isSubmitting) return;
 
+    const selected = resolvedInstances.find((inst) => inst.id === selectedInstanceId);
+    if (!selected) return;
+
     setWarning(null);
     setIsSubmitting(true);
     try {
@@ -197,7 +228,8 @@ export const TimerPane = memo(function TimerPane({ worktreeId }: TimerPaneProps)
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          cliToolId: selectedAgent,
+          cliToolId: selected.cliTool,
+          instanceId: selected.id,
           message: message.trim(),
           delayMs: selectedDelay,
         }),
@@ -216,7 +248,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId }: TimerPaneProps)
     } finally {
       setIsSubmitting(false);
     }
-  }, [worktreeId, selectedAgent, message, selectedDelay, isSubmitting, fetchTimers]);
+  }, [worktreeId, resolvedInstances, selectedInstanceId, message, selectedDelay, isSubmitting, fetchTimers]);
 
   const handleCancel = useCallback(async (timerId: string) => {
     try {
@@ -265,15 +297,15 @@ export const TimerPane = memo(function TimerPane({ worktreeId }: TimerPaneProps)
           {t('timer.title')}
         </div>
 
-        {/* Agent selector */}
+        {/* Agent instance selector (Issue #942) */}
         <select
-          value={selectedAgent}
-          onChange={(e) => setSelectedAgent(e.target.value as CLIToolType)}
+          value={selectedInstanceId}
+          onChange={(e) => setSelectedInstanceId(e.target.value)}
           className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500"
         >
-          {CLI_TOOL_IDS.map((agent) => (
-            <option key={agent} value={agent}>
-              {getCliToolDisplayName(agent)}
+          {resolvedInstances.map((inst) => (
+            <option key={inst.id} value={inst.id}>
+              {inst.alias}
             </option>
           ))}
         </select>
@@ -343,7 +375,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId }: TimerPaneProps)
                 </div>
                 <div className="flex items-center gap-2 text-xs">
                   <span className="text-cyan-600 dark:text-cyan-400 font-medium">
-                    {timer.cliToolId}
+                    {resolvedInstances.find((inst) => inst.id === timer.instanceId)?.alias ?? timer.cliToolId}
                   </span>
                   <span className={getStatusColor(timer.status)}>
                     {t(`timer.status.${timer.status}`)}

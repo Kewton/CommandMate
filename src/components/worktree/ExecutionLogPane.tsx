@@ -18,6 +18,7 @@ import { ExecutionLogsView, type ExecutionLog } from '@/components/worktree/sche
 import { formatTimestamp } from '@/components/worktree/schedules/format';
 import { parseCmateContent } from '@/lib/cmate-validator';
 import { parseCliToolColumn } from '@/lib/cmate-cli-tool-parser';
+import type { AgentInstance } from '@/lib/cli-tools/types';
 
 // ============================================================================
 // Types
@@ -61,6 +62,12 @@ export interface ExecutionLogPaneProps {
    * when omitted the buttons are hidden (graceful degradation).
    */
   onInsertToMessage?: (text: string) => void;
+  /**
+   * Issue #942: registered agent instances. Forwarded to ScheduleEditDialog so
+   * its agent selector shows registered instance aliases. Schedule execution
+   * still routes by the selected instance's backing CLI tool (UI-label only).
+   */
+  instances?: AgentInstance[];
 }
 
 // ============================================================================
@@ -91,6 +98,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
   worktreeId,
   className = '',
   onInsertToMessage,
+  instances,
 }: ExecutionLogPaneProps) {
   const t = useTranslations('schedule');
   const [logs, setLogs] = useState<ExecutionLog[]>([]);
@@ -485,6 +493,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
         initialValues={dialogInitial}
         originalName={dialogOriginalName}
         onInsertToMessage={onInsertToMessage}
+        instances={instances}
         onClose={() => setDialogOpen(false)}
         onSaved={() => { void fetchData(); }}
       />
