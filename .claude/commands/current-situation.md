@@ -62,7 +62,7 @@ sqlite3 db.sqlite "SELECT COUNT(*) FROM chat_messages;" 2>/dev/null
 
 ```bash
 # 類似のオープンIssueがないか確認
-gh issue list --repo Kewton/MyCodeBranchDesk --state open --json number,title --limit 30
+gh issue list --repo Kewton/CommandMate --state open --json number,title --limit 30
 ```
 
 類似Issueが存在する場合はユーザーに報告し、新規作成か既存への追記かを確認します。
@@ -121,7 +121,7 @@ ${会話中に判明したその他の情報}
 ### Step 6: Issue登録
 
 ```bash
-gh issue create --repo Kewton/MyCodeBranchDesk \
+gh issue create --repo Kewton/CommandMate \
   --title "[Bug] ${タイトル}" \
   --body "${Issue本文}"
 ```

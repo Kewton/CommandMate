@@ -59,7 +59,7 @@ commandmatedev ls --json
 
 ```bash
 for issue_num in {issue_numbers}; do
-  gh pr list --repo Kewton/MyCodeBranchDesk --head "feature/${issue_num}-worktree" --json number,title,state
+  gh pr list --repo Kewton/CommandMate --head "feature/${issue_num}-worktree" --json number,title,state
 done
 ```
 
@@ -90,7 +90,7 @@ for each worktree:
 
 ```bash
 for issue_num in {issue_numbers}; do
-  PR_NUM=$(gh pr list --repo Kewton/MyCodeBranchDesk --head "feature/${issue_num}-worktree" --json number -q '.[0].number')
+  PR_NUM=$(gh pr list --repo Kewton/CommandMate --head "feature/${issue_num}-worktree" --json number -q '.[0].number')
   echo "Issue #${issue_num} → PR #${PR_NUM}"
 done
 ```
@@ -105,7 +105,7 @@ PR番号を記録し、以降のステップで使用する。
 
 ```bash
 for each PR:
-  gh pr checks <PR_NUM> --repo Kewton/MyCodeBranchDesk
+  gh pr checks <PR_NUM> --repo Kewton/CommandMate
 ```
 
 ### 3-2. CI完了待ち
@@ -114,7 +114,7 @@ CIが実行中の場合は完了を待つ。定期的にステータスを確認
 
 ```bash
 for each PR:
-  gh pr checks <PR_NUM> --repo Kewton/MyCodeBranchDesk --watch
+  gh pr checks <PR_NUM> --repo Kewton/CommandMate --watch
 ```
 
 ### 3-3. CI失敗時のリカバリ
@@ -123,7 +123,7 @@ CI失敗を検出した場合:
 
 1. 失敗内容を取得：
    ```bash
-   gh pr checks <PR_NUM> --repo Kewton/MyCodeBranchDesk
+   gh pr checks <PR_NUM> --repo Kewton/CommandMate
    ```
 
 2. ワーカーに修正を指示：
@@ -151,7 +151,7 @@ CI失敗を検出した場合:
 1. **各PRの変更規模を取得**:
    ```bash
    for each PR:
-     gh pr diff <PR_NUM> --repo Kewton/MyCodeBranchDesk --stat
+     gh pr diff <PR_NUM> --repo Kewton/CommandMate --stat
    ```
 
 2. **共通変更ファイルの特定**:
@@ -185,7 +185,7 @@ CI失敗を検出した場合:
 #### 5-1. マージ可能性の確認
 
 ```bash
-gh pr view <PR_NUM> --repo Kewton/MyCodeBranchDesk --json mergeable,mergeStateStatus
+gh pr view <PR_NUM> --repo Kewton/CommandMate --json mergeable,mergeStateStatus
 ```
 
 - **mergeable**: マージ可能 → 5-3 へ
@@ -211,7 +211,7 @@ commandmatedev wait <worktree-id> --timeout 3600
 #### 5-3. マージ実行
 
 ```bash
-gh pr merge <PR_NUM> --merge --repo Kewton/MyCodeBranchDesk
+gh pr merge <PR_NUM> --merge --repo Kewton/CommandMate
 ```
 
 #### 5-4. develop更新・ビルド検証

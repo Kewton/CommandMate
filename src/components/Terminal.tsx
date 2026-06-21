@@ -17,7 +17,12 @@ interface TerminalComponentProps {
   cliToolId: string;
   className?: string;
   controlModeEnabled?: boolean;
+  /** xterm.js font size in px (Issue #915 — driven by PC display size). */
+  fontSize?: number;
 }
+
+/** Default xterm.js font size (matches PC display size "medium"). */
+const DEFAULT_TERMINAL_FONT_SIZE = 14;
 
 type ConnectionStatus =
   | 'disabled'
@@ -33,9 +38,18 @@ export function TerminalComponent({
   cliToolId,
   className = '',
   controlModeEnabled,
+  fontSize = DEFAULT_TERMINAL_FONT_SIZE,
 }: TerminalComponentProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Refs to the live xterm instance + fit addon so font size can be updated
+  // without tearing down the WebSocket connection (Issue #915).
+  const termRef = useRef<Terminal | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  // Keep the latest fontSize available to the connection effect without making
+  // it a dependency (avoids reconnecting when only the size changes).
+  const fontSizeRef = useRef(fontSize);
+  fontSizeRef.current = fontSize;
   const [terminal, setTerminal] = useState<Terminal | null>(null);
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
@@ -69,7 +83,7 @@ export function TerminalComponent({
         brightWhite: '#ffffff',
       },
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      fontSize: 14,
+      fontSize: fontSizeRef.current,
       cursorBlink: true,
       convertEol: true,
     });
@@ -78,6 +92,10 @@ export function TerminalComponent({
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.loadAddon(new WebLinksAddon());
+
+    // Track the live instances so the font-size effect can update them.
+    termRef.current = term;
+    fitAddonRef.current = fitAddon;
 
     // Open terminal in the DOM
     term.open(terminalRef.current);
@@ -113,6 +131,8 @@ export function TerminalComponent({
           reconnectTimerRef.current = null;
         }
         term.dispose();
+        termRef.current = null;
+        fitAddonRef.current = null;
       };
     }
 
@@ -203,8 +223,28 @@ export function TerminalComponent({
       }
       ws?.close();
       term.dispose();
+      termRef.current = null;
+      fitAddonRef.current = null;
     };
   }, [worktreeId, cliToolId, controlModeEnabled, reconnectAttempt]);
+
+  // Issue #915: react to font-size changes without reconnecting. Updates the live
+  // xterm fontSize, re-fits, and notifies the server of the new dimensions.
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    if (term.options) {
+      term.options.fontSize = fontSize;
+    }
+    fitAddonRef.current?.fit();
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({
+        type: 'terminal_resize',
+        cols: term.cols,
+        rows: term.rows,
+      }));
+    }
+  }, [fontSize, socket]);
 
   const statusMeta: Record<ConnectionStatus, { dot: string; label: string; detail: string }> = {
     disabled: {

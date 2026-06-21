@@ -1,3 +1,5 @@
+[English](./en/security-guide.md)
+
 # CommandMate Security Guide
 
 This guide describes security best practices for deploying CommandMate,

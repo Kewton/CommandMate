@@ -74,7 +74,7 @@
 ### 2.2 実行モード
 
 - **ローカルモード（デフォルト）**
-  - `MCBD_BIND = 127.0.0.1`
+  - `CM_BIND = 127.0.0.1`
   - 接続元は同一マシンのみ
 - **LAN アクセスモード（任意）**
   - `CM_BIND = 0.0.0.0`
@@ -140,8 +140,8 @@ graph TD
 
 ### 3.2 プロセス & ポート
 	•	Next.js / Node.js プロセス
-	•	ポート: MCBD_PORT（例: 3000）
-	•	バインド: MCBD_BIND（127.0.0.1 or 0.0.0.0）
+	•	ポート: CM_PORT（例: 3000）
+	•	バインド: CM_BIND（127.0.0.1 or 0.0.0.0）
 	•	機能:
 	•	HTTP サーバ（UI, API Routes）
 	•	WebSocket サーバ
@@ -173,7 +173,7 @@ interface Worktree {
 - URL パラメータに使用可能な形式へ正規化した識別子
 - 例: feature/foo → feature-foo
 - path
-- MCBD_ROOT_DIR を起点とした絶対パス
+- CM_ROOT_DIR を起点とした絶対パス
 - updatedAt
 - Worktree 一覧を最終更新日時順に並べるために利用
 
@@ -218,7 +218,7 @@ interface WorktreeSessionState {
 ## 5. Core Flows
 
 ### 5.1 起動 & Worktree スキャン
-1. アプリ起動時、MCBD_ROOT_DIR を基準として git worktree をスキャン。
+1. アプリ起動時、CM_ROOT_DIR を基準として git worktree をスキャン。
 1. 取得した worktree 情報を基に Worktree レコードを DB に格納／更新。
 1. 既存の cw_{worktreeId} tmux セッションがあれば、Worktree と突き合わせて整合性をとる（任意）。
 
@@ -455,13 +455,15 @@ feature/foo
 ## 8. Configuration
 
 ### 8.1 環境変数一覧（予定）
-- MCBD_ROOT_DIR (必須)
+- CM_ROOT_DIR (必須)
 - git worktree 管理のルートディレクトリ
-- MCBD_PORT (任意, デフォルト: 3000)
-- MCBD_BIND (任意, デフォルト: 127.0.0.1)
+- CM_PORT (任意, デフォルト: 3000)
+- CM_BIND (任意, デフォルト: 127.0.0.1)
 - 将来的に追加される可能性のあるもの:
-- MCBD_DB_PATH（db.sqlite の保存先）
-- MCBD_LOG_LEVEL（ログ出力レベル）
+- CM_DB_PATH（db.sqlite の保存先）
+- CM_LOG_LEVEL（ログ出力レベル）
+
+> **レガシー fallback について**: 旧プレフィックス `MCBD_*`（`MCBD_ROOT_DIR` / `MCBD_PORT` / `MCBD_BIND` / `MCBD_DB_PATH` / `MCBD_LOG_LEVEL` 等）は後方互換のため引き続き参照される。`CM_*` が未設定の場合のみ対応する `MCBD_*` の値に fallback し、その際は deprecation 警告を出力する（実装: `src/lib/env.ts` の `ENV_MAPPING` / `getEnvWithFallback`）。新規設定では `CM_*` を使用すること。
 
 .env.example としてリポジトリに同梱することを想定。
 
@@ -470,7 +472,7 @@ feature/foo
 ## 9. Security Model
 
 ### 9.1 ローカルモード
-- デフォルトは MCBD_BIND=127.0.0.1
+- デフォルトは CM_BIND=127.0.0.1
 - 同一マシンからのアクセスに限定。
 - セキュリティリスクはほぼ OS ユーザーに依存。
 

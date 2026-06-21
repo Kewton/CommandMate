@@ -1,3 +1,5 @@
+[English](../en/user-guide/wsl2-setup.md)
+
 # WSL2 Setup Guide (Windows)
 
 CommandMate runs on Windows via WSL2 (Windows Subsystem for Linux).

@@ -14,6 +14,7 @@ import React, { memo, useCallback, useRef, type ReactNode } from 'react';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useLayoutConfig } from '@/hooks/useLayoutConfig';
+import { usePcDisplaySizeContext } from '@/contexts/PcDisplaySizeContext';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { GlobalMobileNav } from '@/components/mobile/GlobalMobileNav';
@@ -71,15 +72,27 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
   const { isOpen, isMobileDrawerOpen, closeMobileDrawer, width, setWidth } = useSidebarContext();
   const isMobile = useIsMobile();
   const { showSidebar, showGlobalNav } = useLayoutConfig();
+  // Issue #915: scale fixed-px sidebar width by the PC display-size factor.
+  const { factor } = usePcDisplaySizeContext();
+
+  // Stored width is kept in medium-base px; the displayed width (and clamps) are
+  // scaled by the current size factor so the sidebar roughly follows the UI scale.
+  const minWidth = Math.round(MIN_SIDEBAR_WIDTH * factor);
+  const maxWidth = Math.round(MAX_SIDEBAR_WIDTH * factor);
+  const displayWidth = Math.round(
+    Math.min(maxWidth, Math.max(minWidth, width * factor))
+  );
 
   // Refs for direct DOM manipulation during drag (avoids React re-render lag)
   const sidebarRef = useRef<HTMLElement>(null);
   const mainRef = useRef<HTMLElement>(null);
 
-  // Called only on mouseup — persists final width to React state + localStorage
+  // Called only on mouseup — persists final width to React state + localStorage.
+  // newWidth is in display space; convert back to medium-base before storing so
+  // it survives size changes without compounding the factor.
   const handleWidthChange = useCallback((newWidth: number) => {
-    setWidth(newWidth); // already clamped by ResizeHandle
-  }, [setWidth]);
+    setWidth(Math.round(newWidth / factor)); // already clamped by ResizeHandle
+  }, [setWidth, factor]);
 
   // Mobile layout with drawer
   if (isMobile) {
@@ -141,13 +154,15 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
               ${SIDEBAR_TRANSITION}
               ${isOpen ? 'translate-x-0' : '-translate-x-full'}
             `}
-            style={{ width: `${width}px`, zIndex: Z_INDEX.SIDEBAR }}
+            style={{ width: `${displayWidth}px`, zIndex: Z_INDEX.SIDEBAR }}
             role="complementary"
             aria-hidden={!isOpen}
           >
             <Sidebar />
             <ResizeHandle
-              currentWidth={width}
+              currentWidth={displayWidth}
+              minWidth={minWidth}
+              maxWidth={maxWidth}
               sidebarRef={sidebarRef}
               mainRef={mainRef}
               onWidthChange={handleWidthChange}
@@ -159,7 +174,7 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
         <main
           ref={mainRef}
           className="flex-1 min-w-0 h-full overflow-hidden transition-[padding] duration-300 ease-out"
-          style={{ paddingLeft: showSidebar && isOpen ? `${width}px` : 0 }}
+          style={{ paddingLeft: showSidebar && isOpen ? `${displayWidth}px` : 0 }}
           role="main"
         >
           {children}
@@ -182,11 +197,15 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
  */
 function ResizeHandle({
   currentWidth,
+  minWidth,
+  maxWidth,
   sidebarRef,
   mainRef,
   onWidthChange,
 }: {
   currentWidth: number;
+  minWidth: number;
+  maxWidth: number;
   sidebarRef: { current: HTMLElement | null };
   mainRef: { current: HTMLElement | null };
   onWidthChange: (width: number) => void;
@@ -204,7 +223,7 @@ function ResizeHandle({
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const raw = startWidth + (moveEvent.clientX - startX);
-      finalWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, raw));
+      finalWidth = Math.max(minWidth, Math.min(maxWidth, raw));
       // Direct DOM writes — bypasses React state for lag-free tracking
       if (sidebarRef.current) {
         sidebarRef.current.style.width = `${finalWidth}px`;

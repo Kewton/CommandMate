@@ -28,6 +28,7 @@ import type { Worktree, ChatMessage, GitStatus } from '@/types/models';
 import { getInstanceLabel, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
 import { COPY_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
 import { AGENT_INSTANCE_DND_MIME } from '@/components/worktree/TerminalSplitPane';
+import { PcDisplaySizeSelector } from '@/components/layout/PcDisplaySizeSelector';
 
 // ============================================================================
 // Constants
@@ -735,6 +736,11 @@ export const DesktopHeader = memo(function DesktopHeader({
             ))}
           </select>
         )}
+        {/* Issue #917: PC display-size selector. The global Header (where it
+            also lives) is suppressed on /worktrees/[id] (useLayoutConfig
+            showGlobalNav:false), so it is surfaced here too. PC only — the
+            selector returns null on mobile. */}
+        <PcDisplaySizeSelector />
       <button
         type="button"
         onClick={onInfoClick}

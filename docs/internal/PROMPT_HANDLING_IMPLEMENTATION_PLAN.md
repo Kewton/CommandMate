@@ -1,3 +1,5 @@
+[English](../en/internal/PROMPT_HANDLING_IMPLEMENTATION_PLAN.md)
+
 # Claude Prompt Handling Implementation Plan
 
 **Project**: CommandMate

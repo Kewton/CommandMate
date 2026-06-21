@@ -1,3 +1,5 @@
+[English](../en/internal/MANUAL_TESTING_GUIDE.md)
+
 # Manual Testing Guide - Prompt Handling Feature
 
 This guide explains how to manually test the interactive prompt handling feature (Phase 1: Yes/No prompts).

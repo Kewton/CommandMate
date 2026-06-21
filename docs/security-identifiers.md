@@ -1,3 +1,5 @@
+[English](./en/security-identifiers.md)
+
 # Security Identifiers
 
 This document is the Single Source of Truth for security identifier mappings in CommandMate.
