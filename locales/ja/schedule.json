@@ -127,6 +127,10 @@
   "timerTab": "Timer",
   "timer": {
     "title": "遅延メッセージ",
+    "titleCreate": "タイマー作成",
+    "createButton": "タイマー作成",
+    "newTimer": "新規タイマー",
+    "close": "キャンセル",
     "agent": "エージェント",
     "message": "メッセージ",
     "delay": "送信タイミング",

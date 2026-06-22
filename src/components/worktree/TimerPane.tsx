@@ -1,9 +1,11 @@
 /**
  * TimerPane Component
  * Issue #534: Timer-based delayed message sending UI
+ * Issue #945: input switched from an always-on inline form to a
+ *             "+ Create Timer" button + popup dialog (unified with Schedule).
  *
  * Features:
- * - Timer registration form (agent + message + delay)
+ * - "+ Create Timer" / "+ New Timer" button opening TimerEditDialog
  * - Timer list with countdown display (setInterval 1s)
  * - Cancel button for pending timers
  * - Polling: TIMER_LIST_POLL_INTERVAL_MS [CON-C-003]
@@ -15,16 +17,17 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
 import { useTranslations } from 'next-intl';
+import { Plus, Clock } from 'lucide-react';
 import {
-  TIMER_DELAYS,
   MAX_TIMERS_PER_WORKTREE,
-  MAX_TIMER_MESSAGE_LENGTH,
   TIMER_LIST_POLL_INTERVAL_MS,
   DEFAULT_TIMER_HISTORY_LIMIT,
 } from '@/config/timer-constants';
 import { formatTimeRemaining } from '@/config/auto-yes-config';
 import type { CLIToolType, AgentInstance } from '@/lib/cli-tools/types';
 import { CLI_TOOL_IDS, agentInstancesFromSelectedAgents } from '@/lib/cli-tools/types';
+import { formatDelayLabel } from './timers/timer-format';
+import { TimerEditDialog } from './timers/TimerEditDialog';
 
 // =============================================================================
 // Types
@@ -59,20 +62,6 @@ interface TimerItem {
 // Helpers
 // =============================================================================
 
-function formatDelayLabel(delayMs: number): string {
-  const totalMinutes = Math.floor(delayMs / 60000);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-
-  if (hours > 0 && minutes > 0) {
-    return `${hours}h ${minutes}m`;
-  }
-  if (hours > 0) {
-    return `${hours}h`;
-  }
-  return `${minutes}m`;
-}
-
 function getStatusColor(status: string): string {
   switch (status) {
     case 'pending': return 'text-blue-600 dark:text-blue-400';
@@ -93,7 +82,8 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
   const t = useTranslations('schedule');
 
   // Resolve the agent roster: explicit instances when configured, otherwise the
-  // primary instance of every CLI tool (legacy behavior, byte-for-byte compat).
+  // primary instance of every CLI tool (legacy behavior). Used here only to
+  // render the instance alias on each timer row; the dialog owns the selector.
   const resolvedInstances = useMemo<AgentInstance[]>(
     () => (instances && instances.length > 0
       ? instances
@@ -102,27 +92,13 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
   );
 
   const [timers, setTimers] = useState<TimerItem[]>([]);
-  const [message, setMessage] = useState('');
-  const [selectedInstanceId, setSelectedInstanceId] = useState<string>(
-    () => resolvedInstances[0]?.id ?? CLI_TOOL_IDS[0]
-  );
-  const [selectedDelay, setSelectedDelay] = useState(TIMER_DELAYS[0]);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasMore, setHasMore] = useState(false);
-  const [warning, setWarning] = useState<string | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [, setTick] = useState(0); // Force re-render for countdown
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastCreatedAtRef = useRef<number | null>(null);
-
-  // Keep the selection valid when the instance roster changes (e.g. an instance
-  // is renamed/removed in the Agents panel while the Timer tab is open).
-  useEffect(() => {
-    if (!resolvedInstances.some((inst) => inst.id === selectedInstanceId)) {
-      setSelectedInstanceId(resolvedInstances[0]?.id ?? CLI_TOOL_IDS[0]);
-    }
-  }, [resolvedInstances, selectedInstanceId]);
 
   // ==========================================================================
   // Fetch timers
@@ -215,41 +191,6 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
   // Actions
   // ==========================================================================
 
-  const handleRegister = useCallback(async () => {
-    if (!message.trim() || isSubmitting) return;
-
-    const selected = resolvedInstances.find((inst) => inst.id === selectedInstanceId);
-    if (!selected) return;
-
-    setWarning(null);
-    setIsSubmitting(true);
-    try {
-      const res = await fetch(`/api/worktrees/${worktreeId}/timers`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cliToolId: selected.cliTool,
-          instanceId: selected.id,
-          message: message.trim(),
-          delayMs: selectedDelay,
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.warning === 'session_not_running') {
-          setWarning('session_not_running');
-        }
-        setMessage('');
-        void fetchTimers();
-      }
-    } catch {
-      // Error handled silently
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [worktreeId, resolvedInstances, selectedInstanceId, message, selectedDelay, isSubmitting, fetchTimers]);
-
   const handleCancel = useCallback(async (timerId: string) => {
     try {
       const res = await fetch(`/api/worktrees/${worktreeId}/timers?timerId=${timerId}`, {
@@ -282,8 +223,10 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
   // Derived state
   // ==========================================================================
 
-  const pendingCount = timers.filter(t => t.status === 'pending').length;
-  const canRegister = pendingCount < MAX_TIMERS_PER_WORKTREE && message.trim().length > 0;
+  const pendingCount = timers.filter(timer => timer.status === 'pending').length;
+  // Disable the opener (not a dialog field) when the worktree is at capacity, so
+  // the user cannot open a dialog whose registration would be rejected.
+  const atMax = pendingCount >= MAX_TIMERS_PER_WORKTREE;
 
   // ==========================================================================
   // Render
@@ -291,79 +234,45 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
 
   return (
     <div className="flex flex-col h-full p-3 gap-3 overflow-auto">
-      {/* Registration Form */}
-      <div className="flex flex-col gap-2 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-        <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
-          {t('timer.title')}
-        </div>
-
-        {/* Agent instance selector (Issue #942) */}
-        <select
-          value={selectedInstanceId}
-          onChange={(e) => setSelectedInstanceId(e.target.value)}
-          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-        >
-          {resolvedInstances.map((inst) => (
-            <option key={inst.id} value={inst.id}>
-              {inst.alias}
-            </option>
-          ))}
-        </select>
-
-        {/* Message input */}
-        <textarea
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          placeholder={t('timer.message')}
-          maxLength={MAX_TIMER_MESSAGE_LENGTH}
-          rows={2}
-          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 resize-none focus:outline-none focus:ring-2 focus:ring-cyan-500"
-        />
-
-        {/* Delay selector + Register button */}
-        <div className="flex gap-2 items-center">
-          <select
-            value={selectedDelay}
-            onChange={(e) => setSelectedDelay(Number(e.target.value))}
-            className="flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-          >
-            {TIMER_DELAYS.map((delay) => (
-              <option key={delay} value={delay}>
-                {formatDelayLabel(delay)}
-              </option>
-            ))}
-          </select>
-
+      {timers.length === 0 ? (
+        /* Empty state: centered CTA (mirrors the Schedule pane's empty state) */
+        <div className="flex flex-col items-center text-center py-8 px-4">
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-cyan-50 text-cyan-600 dark:bg-cyan-900/30 dark:text-cyan-300">
+            <Clock className="w-7 h-7" />
+          </div>
+          <p className="font-semibold text-gray-700 dark:text-gray-200 mb-1">{t('timer.title')}</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-5 max-w-xs">{t('timer.noTimers')}</p>
           <button
             type="button"
-            onClick={handleRegister}
-            disabled={!canRegister || isSubmitting}
-            className="px-4 py-2 text-sm font-medium text-white bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors whitespace-nowrap"
+            data-testid="timer-empty-cta"
+            onClick={() => setDialogOpen(true)}
+            className="inline-flex items-center gap-1.5 px-5 py-2.5 text-sm font-semibold text-white bg-cyan-600 hover:bg-cyan-700 rounded-lg shadow-sm transition-colors"
           >
-            {t('timer.register')}
+            <Plus className="w-4 h-4" />
+            {t('timer.createButton')}
           </button>
-        </div>
-
-        {pendingCount >= MAX_TIMERS_PER_WORKTREE && (
-          <div className="text-xs text-amber-600 dark:text-amber-400">
-            {t('timer.maxReached', { max: MAX_TIMERS_PER_WORKTREE })}
-          </div>
-        )}
-
-        {warning === 'session_not_running' && (
-          <div className="text-xs p-2 rounded bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-400">
-            {t('timer.sessionWarning')}
-          </div>
-        )}
-      </div>
-
-      {/* Timer List */}
-      {timers.length === 0 ? (
-        <div className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
-          {t('timer.noTimers')}
         </div>
       ) : (
         <div className="flex flex-col gap-2">
+          {/* Header: new-timer button (disabled at capacity) + max-reached note */}
+          <div className="flex items-center justify-end gap-2">
+            {atMax && (
+              <span className="text-xs text-amber-600 dark:text-amber-400">
+                {t('timer.maxReached', { max: MAX_TIMERS_PER_WORKTREE })}
+              </span>
+            )}
+            <button
+              type="button"
+              data-testid="timer-new-button"
+              onClick={() => setDialogOpen(true)}
+              disabled={atMax}
+              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors whitespace-nowrap"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              {t('timer.newTimer')}
+            </button>
+          </div>
+
           {timers.map((timer) => (
             <div
               key={timer.id}
@@ -415,7 +324,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
           )}
 
           {/* Clear history button (Issue #540) */}
-          {timers.some(t => t.status !== 'pending') && (
+          {timers.some(timer => timer.status !== 'pending') && (
             <button
               type="button"
               onClick={handleClearHistory}
@@ -426,6 +335,14 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
           )}
         </div>
       )}
+
+      <TimerEditDialog
+        isOpen={dialogOpen}
+        worktreeId={worktreeId}
+        instances={instances}
+        onClose={() => setDialogOpen(false)}
+        onSaved={() => { void fetchTimers(); }}
+      />
     </div>
   );
 });
