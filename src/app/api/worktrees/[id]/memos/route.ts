@@ -2,11 +2,14 @@
  * API Route: /api/worktrees/:id/memos
  * GET: Returns all memos for a worktree
  * POST: Creates a new memo for a worktree
+ * PATCH: Reorders the memos of a worktree (Issue #944)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { getWorktreeById, getMemosByWorktreeId, createMemo } from '@/lib/db';
+import { getWorktreeById, getMemosByWorktreeId, createMemo, reorderMemos } from '@/lib/db';
+import { isValidWorktreeId } from '@/lib/security/path-validator';
+import { validateMemoReorderInput } from '@/lib/memo-reorder-validator';
 import { createLogger } from '@/lib/logger';
 import { MAX_MEMOS } from '@/config/memo-config';
 
@@ -132,6 +135,70 @@ export async function POST(
     logger.error('error-creating-memo:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to create memo' },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * PATCH /api/worktrees/:id/memos
+ * Reorders the memos of a worktree (Issue #944).
+ *
+ * Request body:
+ * - memoIds: string[] - The complete set of memo IDs in the desired order
+ *
+ * Responses:
+ * - 200 { success: true }   - Reorder applied
+ * - 400 INVALID_WORKTREE_ID - Malformed worktree ID
+ * - 400 INVALID_MEMO_IDS    - Payload failed domain validation
+ * - 404                     - Worktree not found
+ * - 500                     - Unexpected server error
+ */
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    // Validate worktree ID format (mirrors PATCH /api/worktrees/[id])
+    if (!isValidWorktreeId(params.id)) {
+      return NextResponse.json(
+        { error: 'Invalid worktree ID format', code: 'INVALID_WORKTREE_ID' },
+        { status: 400 }
+      );
+    }
+
+    const db = getDbInstance();
+
+    // Check if worktree exists
+    const worktree = getWorktreeById(db, params.id);
+    if (!worktree) {
+      return NextResponse.json(
+        { error: `Worktree '${params.id}' not found`, code: 'WORKTREE_NOT_FOUND' },
+        { status: 404 }
+      );
+    }
+
+    // Parse request body
+    const body = await request.json().catch(() => ({}));
+    const memoIds = (body as { memoIds?: unknown }).memoIds;
+
+    // Domain validation against the worktree's existing memos
+    const existingMemos = getMemosByWorktreeId(db, params.id);
+    const validation = validateMemoReorderInput(memoIds, existingMemos);
+    if (!validation.valid) {
+      return NextResponse.json(
+        { error: validation.error, code: 'INVALID_MEMO_IDS' },
+        { status: 400 }
+      );
+    }
+
+    reorderMemos(db, params.id, memoIds as string[]);
+
+    return NextResponse.json({ success: true }, { status: 200 });
+  } catch (error) {
+    logger.error('error-reordering-memos:', { error: error instanceof Error ? error.message : String(error) });
+    return NextResponse.json(
+      { error: 'Failed to reorder memos' },
       { status: 500 }
     );
   }

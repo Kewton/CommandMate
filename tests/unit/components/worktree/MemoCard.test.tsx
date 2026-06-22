@@ -259,6 +259,92 @@ describe('MemoCard', () => {
     });
   });
 
+  describe('Reorder buttons (Issue #944)', () => {
+    it('should render move-up and move-down buttons', () => {
+      render(
+        <MemoCard
+          {...defaultProps}
+          onMoveUp={vi.fn()}
+          onMoveDown={vi.fn()}
+          canMoveUp
+          canMoveDown
+        />
+      );
+
+      expect(screen.getByTestId('memo-move-up-memo-1')).toBeInTheDocument();
+      expect(screen.getByTestId('memo-move-down-memo-1')).toBeInTheDocument();
+    });
+
+    it('should disable the up button when canMoveUp is false', () => {
+      render(
+        <MemoCard
+          {...defaultProps}
+          onMoveUp={vi.fn()}
+          onMoveDown={vi.fn()}
+          canMoveUp={false}
+          canMoveDown
+        />
+      );
+
+      expect(screen.getByTestId('memo-move-up-memo-1')).toBeDisabled();
+      expect(screen.getByTestId('memo-move-down-memo-1')).not.toBeDisabled();
+    });
+
+    it('should disable the down button when canMoveDown is false', () => {
+      render(
+        <MemoCard
+          {...defaultProps}
+          onMoveUp={vi.fn()}
+          onMoveDown={vi.fn()}
+          canMoveUp
+          canMoveDown={false}
+        />
+      );
+
+      expect(screen.getByTestId('memo-move-down-memo-1')).toBeDisabled();
+      expect(screen.getByTestId('memo-move-up-memo-1')).not.toBeDisabled();
+    });
+
+    it('should call onMoveUp when the up button is clicked', () => {
+      const onMoveUp = vi.fn();
+      render(
+        <MemoCard
+          {...defaultProps}
+          onMoveUp={onMoveUp}
+          onMoveDown={vi.fn()}
+          canMoveUp
+          canMoveDown
+        />
+      );
+
+      fireEvent.click(screen.getByTestId('memo-move-up-memo-1'));
+      expect(onMoveUp).toHaveBeenCalledTimes(1);
+    });
+
+    it('should call onMoveDown when the down button is clicked', () => {
+      const onMoveDown = vi.fn();
+      render(
+        <MemoCard
+          {...defaultProps}
+          onMoveUp={vi.fn()}
+          onMoveDown={onMoveDown}
+          canMoveUp
+          canMoveDown
+        />
+      );
+
+      fireEvent.click(screen.getByTestId('memo-move-down-memo-1'));
+      expect(onMoveDown).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not render move buttons when no move handlers are provided', () => {
+      render(<MemoCard {...defaultProps} />);
+
+      expect(screen.queryByTestId('memo-move-up-memo-1')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('memo-move-down-memo-1')).not.toBeInTheDocument();
+    });
+  });
+
   describe('Insert to message (Issue #485)', () => {
     it('should render insert button when onInsertToMessage is provided', () => {
       const onInsert = vi.fn();
