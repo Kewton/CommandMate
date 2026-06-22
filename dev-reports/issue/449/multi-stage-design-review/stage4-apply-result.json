@@ -1,9 +1,0 @@
-{
-  "stage": 4,
-  "stage_name": "セキュリティレビュー",
-  "issue_number": 449,
-  "applied_findings": ["DR4-001"],
-  "skipped_findings": ["DR4-002", "DR4-003", "DR4-004", "DR4-005", "DR4-006", "DR4-007"],
-  "updated_sections": ["セクション9"],
-  "design_doc_updated": true
-}

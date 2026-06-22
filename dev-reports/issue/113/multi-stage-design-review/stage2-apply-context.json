@@ -1,8 +1,0 @@
-{
-  "issue_number": 113,
-  "stage": 2,
-  "stage_name": "整合性レビュー",
-  "target_file": "dev-reports/design/issue-113-server-build-design-policy.md",
-  "review_result_file": "dev-reports/issue/113/multi-stage-design-review/stage2-review-result.json",
-  "instruction": "設計方針書に対してStage 2のレビュー指摘事項を反映する。ソースコードは変更しない。"
-}

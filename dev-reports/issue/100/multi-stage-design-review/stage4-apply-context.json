@@ -1,7 +1,0 @@
-{
-  "issue_number": 100,
-  "review_result_path": "dev-reports/issue/100/multi-stage-design-review/stage4-review-result.json",
-  "design_doc_path": "dev-reports/design/issue-100-mermaid-diagram-design-policy.md",
-  "stage": 4,
-  "stage_name": "セキュリティレビュー指摘対応"
-}

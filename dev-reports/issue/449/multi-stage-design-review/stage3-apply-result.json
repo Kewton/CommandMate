@@ -1,9 +1,0 @@
-{
-  "stage": 3,
-  "stage_name": "影響分析レビュー",
-  "issue_number": 449,
-  "applied_findings": ["DR3-001", "DR3-002", "DR3-003", "DR3-004", "DR3-006", "DR3-007", "DR3-009", "DR3-010"],
-  "skipped_findings": ["DR3-005", "DR3-008"],
-  "updated_sections": ["セクション6", "セクション7", "セクション8", "セクション10", "セクション12"],
-  "design_doc_updated": true
-}

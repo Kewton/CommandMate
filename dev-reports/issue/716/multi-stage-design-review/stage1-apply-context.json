@@ -1,9 +1,0 @@
-{
-  "issue_number": "716",
-  "stage": 1,
-  "stage_name": "Stage 1: 設計原則レビュー反映",
-  "review_result_path": "dev-reports/issue/716/multi-stage-design-review/stage1-review-result.json",
-  "design_doc_path": "dev-reports/design/issue-716-history-search-design-policy.md",
-  "output_path": "dev-reports/issue/716/multi-stage-design-review/stage1-apply-result.json",
-  "instructions": "Stage 1（設計原則）レビューの指摘事項（Must Fix 2 / Should Fix 7 / Nice to Have 3）を設計方針書に反映してください。ソースコードは変更しないこと。"
-}

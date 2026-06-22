@@ -1,7 +1,0 @@
-{
-  "stage": 2,
-  "applied_findings": ["S1-001", "S1-002", "S1-003"],
-  "skipped_findings": [],
-  "issue_updated": true,
-  "summary": "Issue #732 の本文に Stage 1 レビュー指摘の3件を反映。S1-001: 受入条件を「unit テストで検証可能（className に min-w-0 を含むアサーション、ただし既存テストは WorktreeDesktopLayout をモック化している点を注記）」「e2e（Playwright）でのみ検証可能（getBoundingClientRect 幅検証は jsdom では 0 を返すため成立しない旨を明記）」「共通（既存挙動維持）」の3層に分離。S1-002: 根本原因セクションに『line 1740 が直接の主因、line 1763 は flex-col 内 cross 軸の防御的補強（冗長だが無害）』の区別を追記し、対応方針にも注記。S1-003: 『1700行付近』を実際の line 1740/1763 に修正、想定影響範囲にモバイル経路の `flex-1 min-h-0`（line 1590 付近）は編集してはならない旨の重要注意を追加。既存構造は維持。"
-}

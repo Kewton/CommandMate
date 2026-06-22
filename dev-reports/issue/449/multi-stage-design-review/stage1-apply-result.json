@@ -1,9 +1,0 @@
-{
-  "stage": 1,
-  "stage_name": "通常レビュー",
-  "issue_number": 449,
-  "applied_findings": ["DR1-001", "DR1-002", "DR1-006"],
-  "skipped_findings": ["DR1-003", "DR1-004", "DR1-005", "DR1-007", "DR1-008"],
-  "updated_sections": ["セクション5: 状態管理設計", "セクション6: コンポーネント設計", "セクション13: トレードオフ"],
-  "design_doc_updated": true
-}
