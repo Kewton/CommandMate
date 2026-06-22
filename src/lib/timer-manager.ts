@@ -16,7 +16,6 @@ import {
   cleanupOldTimers,
   recoverStuckSendingTimers,
 } from './db/timer-db';
-import { sendKeys } from './tmux/tmux';
 import { CLIToolManager } from './cli-tools/manager';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { createLogger } from '@/lib/logger';
@@ -92,10 +91,14 @@ async function executeTimer(timerId: string): Promise<void> {
       return;
     }
 
-    const sessionName = cliTool.getSessionName(timer.worktreeId, instanceId);
-
     updateTimerStatus(db, timerId, 'sending');
-    await sendKeys(sessionName, timer.message, true);
+    // [Issue #947] Delegate to the CLI tool's sendMessage so timer sends take the
+    // exact same path as manual sends: per-tool text/Enter separation and waits.
+    // The previous direct sendKeys(sessionName, message, true) batched text+Enter
+    // in a single send-keys; codex's TUI never confirmed the input, leaving the
+    // message typed but unsent. sendMessage resolves the session name from
+    // (worktreeId, instanceId) internally, so claude/codex/gemini all work.
+    await cliTool.sendMessage(timer.worktreeId, timer.message, instanceId);
     updateTimerStatus(db, timerId, 'sent', Date.now());
 
     logger.info('timer:sent', { timerId, worktreeId: timer.worktreeId });
