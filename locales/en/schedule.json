@@ -127,6 +127,10 @@
   "timerTab": "Timer",
   "timer": {
     "title": "Delayed Messages",
+    "titleCreate": "New Timer",
+    "createButton": "Create Timer",
+    "newTimer": "New Timer",
+    "close": "Cancel",
     "agent": "Agent",
     "message": "Message",
     "delay": "Send After",
