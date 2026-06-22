@@ -560,6 +560,48 @@ describe('Sidebar', () => {
       // The link lives inside the sidebar header alongside the other actions
       expect(screen.getByTestId('sidebar-header')).toContainElement(link);
     });
+
+    // Issue #946: enlarge the header action icons from w-3 h-3 (12px) to w-4 h-4 (16px)
+    describe('header icon sizing (Issue #946)', () => {
+      it('renders the Repositories icon at w-4 h-4', async () => {
+        render(
+          <Wrapper>
+            <Sidebar />
+          </Wrapper>
+        );
+
+        const link = await screen.findByRole('link', { name: 'Repositories' });
+        const svg = link.querySelector('svg');
+        expect(svg?.getAttribute('class')).toContain('w-4');
+        expect(svg?.getAttribute('class')).toContain('h-4');
+      });
+
+      it('renders the view-mode-toggle icon at w-4 h-4', async () => {
+        render(
+          <Wrapper>
+            <Sidebar />
+          </Wrapper>
+        );
+
+        const toggle = await screen.findByTestId('view-mode-toggle');
+        const svg = toggle.querySelector('svg');
+        expect(svg?.getAttribute('class')).toContain('w-4');
+        expect(svg?.getAttribute('class')).toContain('h-4');
+      });
+
+      it('renders the sync icon at w-4 h-4', async () => {
+        render(
+          <Wrapper>
+            <Sidebar />
+          </Wrapper>
+        );
+
+        const syncButton = await screen.findByLabelText('common.syncButtonLabel');
+        const svg = syncButton.querySelector('svg');
+        expect(svg?.getAttribute('class')).toContain('w-4');
+        expect(svg?.getAttribute('class')).toContain('h-4');
+      });
+    });
   });
 
   // Issue #882: unify hover tooltips on the four header action buttons via the

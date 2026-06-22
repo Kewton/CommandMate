@@ -65,6 +65,13 @@ const SIDEBAR_SCROLL_TOP_STORAGE_KEY = 'mcbd-sidebar-scroll-top';
 /** LocalStorage key for repository group order cache */
 const SIDEBAR_GROUP_ORDER_CACHE_STORAGE_KEY = 'mcbd-sidebar-group-order-cache';
 
+/**
+ * Shared Tailwind size for the sidebar header action icons (Issue #946).
+ * Applied to the view-mode toggle, sync button, sort selector and Repositories
+ * link so the five header icons share a single, easily-tunable size (16px).
+ */
+const HEADER_ICON_CLASS = 'w-4 h-4';
+
 /** In-memory cache used across client-side remounts */
 let lastSidebarScrollTop = 0;
 let lastRepositoryOrder: string[] | null = null;
@@ -441,7 +448,7 @@ export const Sidebar = memo(function Sidebar() {
                   focus:outline-none focus:ring-2 focus:ring-blue-500
                   transition-colors inline-flex items-center"
               >
-                <Database className="w-3 h-3" aria-hidden="true" />
+                <Database className={HEADER_ICON_CLASS} aria-hidden="true" />
               </Link>
             </Tooltip>
           </div>
@@ -715,9 +722,9 @@ function ViewModeToggle({
         "
       >
         {viewMode === 'grouped' ? (
-          <FlatListIcon className="w-3 h-3" />
+          <FlatListIcon className={HEADER_ICON_CLASS} />
         ) : (
-          <GroupIcon className="w-3 h-3" />
+          <GroupIcon className={HEADER_ICON_CLASS} />
         )}
       </button>
     </Tooltip>
@@ -797,7 +804,7 @@ function GripVerticalIcon() {
 function SyncIcon({ className = '' }: { className?: string }) {
   return (
     <svg
-      className={`w-3 h-3 ${className}`}
+      className={`${HEADER_ICON_CLASS} ${className}`}
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"

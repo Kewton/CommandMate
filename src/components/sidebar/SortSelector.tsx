@@ -62,6 +62,7 @@ export const SortSelector = memo(function SortSelector() {
       defaultDirections={SIDEBAR_DEFAULT_DIRECTIONS}
       compact
       tooltip={t('tooltips.sort')}
+      iconClassName="w-4 h-4"
     />
   );
 });
