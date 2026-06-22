@@ -1,7 +1,0 @@
-{
-  "issue_number": 94,
-  "review_result_path": "dev-reports/issue/94/multi-stage-design-review/stage4-review-result.json",
-  "stage": 4,
-  "stage_name": "セキュリティレビュー",
-  "target_file": "dev-reports/design/issue-94-file-upload-design-policy.md"
-}

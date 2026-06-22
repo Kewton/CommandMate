@@ -705,7 +705,7 @@ Are you sure you want to continue? (yes/no)
         'Do you want to proceed?',
         '❯ 1. Yes',
         "  2. Yes, and don't ask again for curl and python3 commands in",
-        '/Users/maenokota/share/work/github_kewton/comma',
+        '/Users/example/share/work/github_kewton/comma',
         'ndmate-issue-161',
         '  3. No',
         '',
@@ -731,7 +731,7 @@ Are you sure you want to continue? (yes/no)
         'Do you want to proceed?',
         '❯ 1. Yes',
         "  2. Yes, and don't ask again for curl and python3 commands in",
-        '/Users/maenokota/share/work/github_kewton/comma',
+        '/Users/example/share/work/github_kewton/comma',
         'ndmate-issue-161',
         '  3. No',
       ].join('\n');
@@ -748,7 +748,7 @@ Are you sure you want to continue? (yes/no)
 
     it('should detect yes/no prompt with path lines (not false-positive multiple choice)', () => {
       const output = [
-        'File /Users/maenokota/share/work/github_kewton/comma',
+        'File /Users/example/share/work/github_kewton/comma',
         'ndmate-issue-161/src/lib/test.ts already exists',
         'Do you want to overwrite? (y/n)',
       ].join('\n');
@@ -1119,7 +1119,7 @@ Are you sure you want to continue? (yes/no)
       const output = [
         '  Do you want to proceed?',
         "  1. Yes, and don't ask again for curl commands in",
-        '/Users/maenokota/share/work/test',
+        '/Users/example/share/work/test',
         '  2. No',
         '  3. Cancel',
       ].join('\n');

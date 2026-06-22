@@ -1,9 +1,0 @@
-{
-  "issue_number": 162,
-  "stage": 4,
-  "stage_name": "セキュリティレビュー",
-  "design_policy_path": "dev-reports/design/issue-162-file-enhancement-design-policy.md",
-  "review_result_path": "dev-reports/issue/162/multi-stage-design-review/stage4-review-result.json",
-  "action": "update_design_policy_only",
-  "note": "設計方針書のみを更新し、ソースコードは変更しない"
-}

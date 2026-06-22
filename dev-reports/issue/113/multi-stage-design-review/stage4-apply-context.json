@@ -1,8 +1,0 @@
-{
-  "issue_number": 113,
-  "stage": 4,
-  "stage_name": "セキュリティレビュー",
-  "target_file": "dev-reports/design/issue-113-server-build-design-policy.md",
-  "review_result_file": "dev-reports/issue/113/multi-stage-design-review/stage4-review-result.json",
-  "instruction": "設計方針書に対してStage 4のレビュー指摘事項を反映する。ソースコードは変更しない。"
-}

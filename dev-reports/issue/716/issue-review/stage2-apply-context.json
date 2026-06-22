@@ -1,8 +1,0 @@
-{
-  "issue_number": "716",
-  "stage": 2,
-  "stage_name": "指摘事項反映（1回目）",
-  "review_result_path": "dev-reports/issue/716/issue-review/stage1-review-result.json",
-  "output_path": "dev-reports/issue/716/issue-review/stage2-apply-result.json",
-  "instructions": "Stage 1 のレビュー結果（Must Fix 3件、Should Fix 7件、Nice to Have 3件）を GitHub Issue #716 の本文に反映してください。Must Fix と Should Fix は必ず反映、Nice to Have は適切に取り込んでください。反映後、gh issue edit で Issue 本文を更新してください。"
-}
