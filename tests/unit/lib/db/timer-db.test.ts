@@ -37,12 +37,13 @@ function setupTestDb(): Database.Database {
     );
   `);
 
-  // Create timer_messages table (v23 migration)
+  // Create timer_messages table (v23 migration + v35 instance_id, Issue #942)
   testDb.exec(`
     CREATE TABLE timer_messages (
       id TEXT PRIMARY KEY,
       worktree_id TEXT NOT NULL,
       cli_tool_id TEXT NOT NULL,
+      instance_id TEXT,
       message TEXT NOT NULL,
       delay_ms INTEGER NOT NULL,
       scheduled_send_time INTEGER NOT NULL,
@@ -113,6 +114,47 @@ describe('timer-db', () => {
       const timer = createTimer(db, params);
 
       expect(timer.scheduledSendTime).toBe(timer.createdAt + timer.delayMs);
+    });
+
+    // Issue #942: instance_id routing
+    it('should default instanceId to cliToolId when omitted', () => {
+      const timer = createTimer(db, {
+        worktreeId: 'wt-1',
+        cliToolId: 'claude',
+        message: 'Hello',
+        delayMs: 300000,
+      });
+
+      expect(timer.instanceId).toBe('claude');
+      // Persisted value also defaults to the primary anchor.
+      const fetched = getTimerById(db, timer.id);
+      expect(fetched!.instanceId).toBe('claude');
+    });
+
+    it('should persist an explicit instanceId distinct from cliToolId', () => {
+      const timer = createTimer(db, {
+        worktreeId: 'wt-1',
+        cliToolId: 'claude',
+        instanceId: 'claude-reviewer',
+        message: 'Hello',
+        delayMs: 300000,
+      });
+
+      expect(timer.cliToolId).toBe('claude');
+      expect(timer.instanceId).toBe('claude-reviewer');
+      const fetched = getTimerById(db, timer.id);
+      expect(fetched!.instanceId).toBe('claude-reviewer');
+    });
+
+    it('should fall back to cliToolId for legacy rows with NULL instance_id', () => {
+      // Simulate a pre-v35 row by inserting NULL instance_id directly.
+      db.prepare(`
+        INSERT INTO timer_messages (id, worktree_id, cli_tool_id, instance_id, message, delay_ms, scheduled_send_time, status, created_at, sent_at)
+        VALUES ('legacy-1', 'wt-1', 'codex', NULL, 'legacy', 300000, 9999999999999, 'pending', 1, NULL)
+      `).run();
+
+      const fetched = getTimerById(db, 'legacy-1');
+      expect(fetched!.instanceId).toBe('codex');
     });
   });
 

@@ -151,6 +151,7 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
             worktreeId={worktreeId}
             className="h-full"
             onInsertToMessage={onInsertToMessage}
+            instances={instances}
           />
         )}
         {activeSubTab === 'agent' && (
@@ -186,6 +187,7 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
         {activeSubTab === 'timer' && (
           <TimerPane
             worktreeId={worktreeId}
+            instances={instances}
             selectedAgents={selectedAgents}
           />
         )}

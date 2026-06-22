@@ -27,8 +27,9 @@ import { FullScreenModal } from '@/components/common/FullScreenModal';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import {
   CLI_TOOL_IDS,
-  getCliToolDisplayName,
   getCliToolDisplayNameSafe,
+  agentInstancesFromSelectedAgents,
+  type AgentInstance,
 } from '@/lib/cli-tools/types';
 import {
   getPermissionOptionsForTool,
@@ -67,6 +68,15 @@ export interface ScheduleEditDialogProps {
    * hidden (graceful degradation, same as the GitPane #817 pattern).
    */
   onInsertToMessage?: (text: string) => void;
+  /**
+   * Issue #942: registered agent instances. Drives the agent selector so it
+   * lists registered instance aliases instead of the raw CLI tool names. The
+   * schedule is persisted/executed by the selected instance's backing CLI tool
+   * (UI-label only — Schedule runs a fresh `claude -p` process, so per-instance
+   * session routing is not meaningful here). Falls back to the primary instance
+   * of every CLI tool when omitted/empty.
+   */
+  instances?: AgentInstance[];
   onClose: () => void;
   onSaved: () => void;
 }
@@ -214,12 +224,24 @@ export function ScheduleEditDialog({
   initialValues,
   originalName,
   onInsertToMessage,
+  instances,
   onClose,
   onSaved,
 }: ScheduleEditDialogProps) {
   const t = useTranslations('schedule');
   const isMobile = useIsMobile();
+
+  // Resolve the agent roster: explicit instances when configured, otherwise the
+  // primary instance of every CLI tool (legacy behavior).
+  const resolvedInstances = useMemo<AgentInstance[]>(
+    () => (instances && instances.length > 0
+      ? instances
+      : agentInstancesFromSelectedAgents([...CLI_TOOL_IDS])),
+    [instances]
+  );
+
   const [form, setForm] = useState<ScheduleFormValues>(DEFAULT_FORM);
+  const [selectedInstanceId, setSelectedInstanceId] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   // Accordion: desktop shows every section open; mobile opens only the first.
@@ -232,16 +254,21 @@ export function ScheduleEditDialog({
     if (!isOpen) return;
     setSubmitError(null);
     setSubmitting(false);
+    const cliToolId = initialValues?.cliToolId ?? DEFAULT_FORM.cliToolId;
     setForm({
       name: initialValues?.name ?? DEFAULT_FORM.name,
       cronExpression: initialValues?.cronExpression ?? DEFAULT_FORM.cronExpression,
       message: initialValues?.message ?? DEFAULT_FORM.message,
-      cliToolId: initialValues?.cliToolId ?? DEFAULT_FORM.cliToolId,
+      cliToolId,
       enabled: initialValues?.enabled ?? DEFAULT_FORM.enabled,
       permission: initialValues?.permission ?? DEFAULT_FORM.permission,
       model: initialValues?.model ?? DEFAULT_FORM.model,
     });
-  }, [isOpen, initialValues]);
+    // Issue #942: pick the instance backing the seeded CLI tool. The modal is
+    // blocking, so the roster cannot change while it is open.
+    const match = resolvedInstances.find((inst) => inst.cliTool === cliToolId);
+    setSelectedInstanceId(match?.id ?? resolvedInstances[0]?.id ?? cliToolId);
+  }, [isOpen, initialValues, resolvedInstances]);
 
   // Reset which sections are open whenever the dialog opens or the layout changes.
   useEffect(() => {
@@ -308,6 +335,15 @@ export function ScheduleEditDialog({
     }));
   }, []);
 
+  // Issue #942: the agent selector picks an instance (by alias); the schedule is
+  // still keyed by the instance's backing CLI tool (UI-label only).
+  const handleInstanceChange = useCallback((instanceId: string) => {
+    const selected = resolvedInstances.find((inst) => inst.id === instanceId);
+    if (!selected) return;
+    setSelectedInstanceId(instanceId);
+    handleToolChange(selected.cliTool);
+  }, [resolvedInstances, handleToolChange]);
+
   const cronPresetValue = CRON_PRESETS.some((p) => p.value === form.cronExpression)
     ? form.cronExpression
     : 'custom';
@@ -373,7 +409,10 @@ export function ScheduleEditDialog({
   ]);
 
   // ----- Accordion header summaries -----
-  const cliToolName = getCliToolDisplayNameSafe(form.cliToolId);
+  // Show the selected instance alias, falling back to the CLI tool name.
+  const cliToolName =
+    resolvedInstances.find((inst) => inst.id === selectedInstanceId)?.alias
+    ?? getCliToolDisplayNameSafe(form.cliToolId);
   const basicSummary = form.name.trim()
     ? `${form.name.trim()} · ${form.cronExpression}`
     : form.cronExpression;
@@ -476,13 +515,13 @@ export function ScheduleEditDialog({
         <select
           id="schedule-cli-tool-select"
           data-testid="schedule-cli-tool-select"
-          value={form.cliToolId}
-          onChange={(e) => handleToolChange(e.target.value)}
+          value={selectedInstanceId}
+          onChange={(e) => handleInstanceChange(e.target.value)}
           className={INPUT_CLASS}
         >
-          {CLI_TOOL_IDS.map((tool) => (
-            <option key={tool} value={tool}>
-              {getCliToolDisplayName(tool)}
+          {resolvedInstances.map((inst) => (
+            <option key={inst.id} value={inst.id}>
+              {inst.alias}
             </option>
           ))}
         </select>

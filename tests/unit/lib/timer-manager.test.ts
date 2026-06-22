@@ -236,6 +236,7 @@ describe('timer-manager', () => {
         id: timerId,
         worktreeId: 'wt-1',
         cliToolId: 'claude',
+        instanceId: 'claude',
         message: 'Hello',
         delayMs: 300000,
         scheduledSendTime: Date.now() + 300000,
@@ -258,7 +259,7 @@ describe('timer-manager', () => {
       // Advance timers to trigger callback
       await vi.advanceTimersByTimeAsync(200);
 
-      expect(mockIsRunning).toHaveBeenCalledWith('wt-1');
+      expect(mockIsRunning).toHaveBeenCalledWith('wt-1', 'claude');
       expect(mockUpdateTimerStatus).toHaveBeenCalledWith(
         expect.anything(),
         timerId,
@@ -273,12 +274,48 @@ describe('timer-manager', () => {
       );
     });
 
+    // Issue #942: route to the specific agent instance session
+    it('should resolve the instance session when timer targets a non-primary instance', async () => {
+      const timerId = 'timer-instance-1';
+      const timer = {
+        id: timerId,
+        worktreeId: 'wt-1',
+        cliToolId: 'claude',
+        instanceId: 'claude-reviewer',
+        message: 'Hello',
+        delayMs: 300000,
+        scheduledSendTime: Date.now() + 300000,
+        status: 'pending',
+        createdAt: Date.now(),
+        sentAt: null,
+      };
+
+      const mockGetSessionName = vi.fn().mockReturnValue('session-wt-1-reviewer');
+      mockGetPendingTimers.mockReturnValueOnce([]);
+      mockGetTimerById.mockReturnValue(timer);
+      mockIsRunning.mockResolvedValue(true);
+      mockGetTool.mockReturnValue({
+        getSessionName: mockGetSessionName,
+        isRunning: mockIsRunning,
+      });
+
+      initTimerManager();
+      scheduleTimer(timerId, 'wt-1', 100);
+
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(mockIsRunning).toHaveBeenCalledWith('wt-1', 'claude-reviewer');
+      expect(mockGetSessionName).toHaveBeenCalledWith('wt-1', 'claude-reviewer');
+      expect(mockSendKeys).toHaveBeenCalledWith('session-wt-1-reviewer', 'Hello', true);
+    });
+
     it('should set status to no_session when session is not running', async () => {
       const timerId = 'timer-nosession-1';
       const timer = {
         id: timerId,
         worktreeId: 'wt-1',
         cliToolId: 'claude',
+        instanceId: 'claude',
         message: 'Hello',
         delayMs: 300000,
         scheduledSendTime: Date.now() + 300000,
@@ -300,7 +337,7 @@ describe('timer-manager', () => {
 
       await vi.advanceTimersByTimeAsync(200);
 
-      expect(mockIsRunning).toHaveBeenCalledWith('wt-1');
+      expect(mockIsRunning).toHaveBeenCalledWith('wt-1', 'claude');
       expect(mockUpdateTimerStatus).toHaveBeenCalledWith(
         expect.anything(),
         timerId,
@@ -316,6 +353,7 @@ describe('timer-manager', () => {
         id: timerId,
         worktreeId: 'wt-1',
         cliToolId: 'claude',
+        instanceId: 'claude',
         message: 'Hello',
         delayMs: 300000,
         scheduledSendTime: Date.now() + 300000,
