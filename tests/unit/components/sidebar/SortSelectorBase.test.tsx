@@ -29,6 +29,7 @@ function renderSelector(overrides: Partial<{
   options: ReadonlyArray<SortOption>;
   defaultDirections: Partial<Record<SortKey, SortDirection>>;
   tooltip: string;
+  iconClassName: string;
 }> = {}) {
   const props = {
     sortKey: 'lastSent' as SortKey,
@@ -187,6 +188,37 @@ describe('SortSelectorBase', () => {
       });
 
       expect(screen.queryByRole('tooltip', { hidden: true })).toBeNull();
+    });
+  });
+
+  // Issue #946: the sort/direction icon size must be controllable per-consumer so
+  // the sidebar header can enlarge them WITHOUT affecting the Sessions page, which
+  // shares this component and must keep the original w-3 h-3 size.
+  describe('icon sizing (Issue #946)', () => {
+    it('defaults the sort and direction icons to w-3 h-3 when iconClassName is omitted (Sessions regression guard)', () => {
+      const { container } = renderSelector();
+
+      const svgs = Array.from(container.querySelectorAll('svg'));
+      // Trigger SortIcon + direction Arrow icon are rendered when the dropdown is closed
+      expect(svgs.length).toBeGreaterThanOrEqual(2);
+      svgs.forEach((svg) => {
+        const cls = svg.getAttribute('class') ?? '';
+        expect(cls).toContain('w-3');
+        expect(cls).toContain('h-3');
+      });
+    });
+
+    it('applies a custom iconClassName to the sort and direction icons (sidebar header enlargement)', () => {
+      const { container } = renderSelector({ iconClassName: 'w-4 h-4' });
+
+      const svgs = Array.from(container.querySelectorAll('svg'));
+      expect(svgs.length).toBeGreaterThanOrEqual(2);
+      svgs.forEach((svg) => {
+        const cls = svg.getAttribute('class') ?? '';
+        expect(cls).toContain('w-4');
+        expect(cls).toContain('h-4');
+        expect(cls).not.toContain('w-3');
+      });
     });
   });
 });

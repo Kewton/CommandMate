@@ -256,6 +256,62 @@ describe('ScheduleEditDialog', () => {
     });
   });
 
+  // --- Issue #942: agent instance selector (alias-driven, UI-label only) ---
+
+  describe('agent instance selector (Issue #942)', () => {
+    const instances = [
+      { id: 'claude', cliTool: 'claude' as const, alias: 'Main Claude', order: 0 },
+      { id: 'claude-reviewer', cliTool: 'claude' as const, alias: 'Reviewer', order: 1 },
+      { id: 'codex', cliTool: 'codex' as const, alias: 'My Codex', order: 2 },
+    ];
+
+    it('lists registered instance aliases in the agent selector', () => {
+      renderDialog({ instances });
+      const select = screen.getByTestId('schedule-cli-tool-select') as HTMLSelectElement;
+      const labels = Array.from(select.options).map((o) => o.textContent);
+      expect(labels).toEqual(['Main Claude', 'Reviewer', 'My Codex']);
+      // The option values are the instance ids.
+      expect(Array.from(select.options).map((o) => o.value)).toEqual([
+        'claude',
+        'claude-reviewer',
+        'codex',
+      ]);
+    });
+
+    it('persists the backing CLI tool of the selected instance on save (UI-label only)', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true }) });
+      vi.stubGlobal('fetch', fetchMock);
+
+      renderDialog({
+        worktreeId: 'wt-9',
+        instances,
+        initialValues: { name: 'task-a', message: 'hello' },
+      });
+
+      // Pick the second instance, which is a *non-primary* claude instance.
+      fireEvent.change(screen.getByTestId('schedule-cli-tool-select'), {
+        target: { value: 'claude-reviewer' },
+      });
+      fireEvent.click(screen.getByTestId('schedule-save-button'));
+
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      // No instanceId is persisted — only the backing CLI tool.
+      expect(body.cliToolId).toBe('claude');
+      expect(body.instanceId).toBeUndefined();
+    });
+
+    it('selects the instance backing the seeded CLI tool in edit mode', () => {
+      renderDialog({
+        instances,
+        originalName: 'task-a',
+        initialValues: { name: 'task-a', message: 'do it', cliToolId: 'codex' },
+      });
+      const select = screen.getByTestId('schedule-cli-tool-select') as HTMLSelectElement;
+      expect(select.value).toBe('codex');
+    });
+  });
+
   // --- Phase 4 (Issue #827): "Ask AI" buttons for cron / message drafting ---
 
   describe('Ask AI buttons (Issue #827)', () => {

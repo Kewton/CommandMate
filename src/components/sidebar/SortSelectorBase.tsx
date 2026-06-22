@@ -45,6 +45,12 @@ export interface SortSelectorBaseProps {
    * Omitted callers (e.g. Sessions page) keep the plain button.
    */
   tooltip?: string;
+  /**
+   * Tailwind size classes for the sort / direction icons (Issue #946). Defaults
+   * to `w-3 h-3`. The sidebar header passes `w-4 h-4` for better visibility,
+   * while other consumers (e.g. Sessions page) omit it and keep the original size.
+   */
+  iconClassName?: string;
 }
 
 // ============================================================================
@@ -68,6 +74,7 @@ export const SortSelectorBase = memo(function SortSelectorBase({
   defaultDirections,
   compact,
   tooltip,
+  iconClassName = 'w-3 h-3',
 }: SortSelectorBaseProps) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -140,7 +147,7 @@ export const SortSelectorBase = memo(function SortSelectorBase({
         transition-colors
       "
     >
-      <SortIcon className="w-3 h-3" />
+      <SortIcon className={iconClassName} />
       <span className={compact ? 'hidden' : 'hidden sm:inline'}>{currentLabel}</span>
     </button>
   );
@@ -169,9 +176,9 @@ export const SortSelectorBase = memo(function SortSelectorBase({
           "
         >
           {sortDirection === 'asc' ? (
-            <ArrowUpIcon className="w-3 h-3" />
+            <ArrowUpIcon className={iconClassName} />
           ) : (
-            <ArrowDownIcon className="w-3 h-3" />
+            <ArrowDownIcon className={iconClassName} />
           )}
         </button>
       </div>

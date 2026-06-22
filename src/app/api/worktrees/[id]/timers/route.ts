@@ -14,10 +14,11 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { isCliToolType } from '@/lib/cli-tools/types';
+import { isCliToolType, isValidInstanceId, isPrimaryInstance } from '@/lib/cli-tools/types';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { getWorktreeById } from '@/lib/db';
+import { getAgentInstances } from '@/lib/db/agent-instances-db';
 import { getDbInstance } from '@/lib/db/db-instance';
 import {
   createTimer,
@@ -57,11 +58,35 @@ export async function POST(
     }
 
     const body = await req.json();
-    const { cliToolId, message, delayMs } = body;
+    const { cliToolId, message, delayMs, instanceId } = body;
 
-    // Validate cliToolId
+    // Validate cliToolId (the backing CLI tool is always a real tool type)
     if (!cliToolId || typeof cliToolId !== 'string' || !isCliToolType(cliToolId)) {
       return NextResponse.json({ error: 'Invalid agent' }, { status: 400 });
+    }
+
+    // [Issue #942] Resolve the target agent instance. When omitted (legacy
+    // clients) the primary instance anchor (instanceId === cliToolId) is used.
+    let resolvedInstanceId: string = cliToolId;
+    if (instanceId !== undefined && instanceId !== null) {
+      if (typeof instanceId !== 'string' || !isValidInstanceId(instanceId)) {
+        return NextResponse.json({ error: 'Invalid agent instance' }, { status: 400 });
+      }
+      const registered = getAgentInstances(db, id);
+      const match = registered.find((inst) => inst.id === instanceId);
+      if (match) {
+        // The instance must be backed by the declared CLI tool.
+        if (match.cliTool !== cliToolId) {
+          return NextResponse.json({ error: 'Invalid agent instance' }, { status: 400 });
+        }
+        resolvedInstanceId = instanceId;
+      } else if (isPrimaryInstance(instanceId, cliToolId as CLIToolType)) {
+        // Primary anchor (id === cliTool) is always valid even if no explicit
+        // agent_instances row exists (backward compatibility).
+        resolvedInstanceId = instanceId;
+      } else {
+        return NextResponse.json({ error: 'Invalid agent instance' }, { status: 400 });
+      }
     }
 
     // Validate message
@@ -87,7 +112,7 @@ export async function POST(
     let warning: string | undefined;
     try {
       const cliTool = CLIToolManager.getInstance().getTool(cliToolId as CLIToolType);
-      const running = await cliTool.isRunning(id);
+      const running = await cliTool.isRunning(id, resolvedInstanceId);
       if (!running) {
         warning = 'session_not_running';
       }
@@ -99,6 +124,7 @@ export async function POST(
     const timer = createTimer(db, {
       worktreeId: id,
       cliToolId,
+      instanceId: resolvedInstanceId,
       message,
       delayMs,
     });
@@ -111,6 +137,7 @@ export async function POST(
       id: timer.id,
       worktreeId: timer.worktreeId,
       cliToolId: timer.cliToolId,
+      instanceId: timer.instanceId,
       message: timer.message,
       delayMs: timer.delayMs,
       scheduledSendTime: timer.scheduledSendTime,
@@ -180,6 +207,7 @@ export async function GET(
       timers: timers.map(t => ({
         id: t.id,
         cliToolId: t.cliToolId,
+        instanceId: t.instanceId,
         message: t.message,
         delayMs: t.delayMs,
         scheduledSendTime: t.scheduledSendTime,

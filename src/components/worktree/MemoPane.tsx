@@ -151,6 +151,33 @@ export const MemoPane = memo(function MemoPane({
   );
 
   /**
+   * Issue #944: Move a memo up (-1) or down (+1) within the full memo list.
+   *
+   * Operates on the complete `memos` array (never the filtered `displayedMemos`)
+   * so the index maps directly to a stable position. The list is optimistically
+   * swapped, then persisted via PATCH; on failure we surface the error and
+   * re-fetch to roll back to the server's authoritative order.
+   */
+  const handleMove = useCallback(
+    async (index: number, direction: -1 | 1) => {
+      const target = index + direction;
+      if (target < 0 || target >= memos.length) return;
+
+      const next = [...memos];
+      [next[index], next[target]] = [next[target], next[index]];
+      setMemos(next);
+
+      try {
+        await memoApi.reorder(worktreeId, next.map((m) => m.id));
+      } catch (err) {
+        setError(handleApiError(err));
+        await fetchMemos();
+      }
+    },
+    [memos, worktreeId, fetchMemos]
+  );
+
+  /**
    * Handle retry
    */
   const handleRetry = useCallback(() => {
@@ -298,13 +325,23 @@ export const MemoPane = memo(function MemoPane({
       )}
 
       {/* Memo cards */}
-      {displayedMemos.map((memo) => (
+      {/*
+        Issue #944: reordering is disabled while searching because the filtered
+        list (displayedMemos = matches) breaks the index<->position alignment
+        that handleMove relies on. When not searching, displayedMemos === memos
+        so the map index equals the full-array index.
+      */}
+      {displayedMemos.map((memo, index) => (
         <MemoCard
           key={memo.id}
           memo={memo}
           onUpdate={handleUpdateMemo}
           onDelete={handleDeleteMemo}
           onInsertToMessage={onInsertToMessage}
+          onMoveUp={isSearchActive ? undefined : () => handleMove(index, -1)}
+          onMoveDown={isSearchActive ? undefined : () => handleMove(index, 1)}
+          canMoveUp={!isSearchActive && index > 0}
+          canMoveDown={!isSearchActive && index < memos.length - 1}
         />
       ))}
 

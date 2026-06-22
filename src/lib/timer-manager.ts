@@ -16,7 +16,6 @@ import {
   cleanupOldTimers,
   recoverStuckSendingTimers,
 } from './db/timer-db';
-import { sendKeys } from './tmux/tmux';
 import { CLIToolManager } from './cli-tools/manager';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { createLogger } from '@/lib/logger';
@@ -79,18 +78,27 @@ async function executeTimer(timerId: string): Promise<void> {
     // [DP-004/CON-MF-001] Resolve session name via CLIToolManager singleton
     const cliTool = CLIToolManager.getInstance().getTool(timer.cliToolId as CLIToolType);
 
+    // [Issue #942] Target the specific agent instance session. Legacy timers
+    // (and primary instances) have instanceId === cliToolId, preserving the
+    // original single-session behavior.
+    const instanceId = timer.instanceId;
+
     // [Issue #539] Check if session is running before sending
-    const isRunning = await cliTool.isRunning(timer.worktreeId);
+    const isRunning = await cliTool.isRunning(timer.worktreeId, instanceId);
     if (!isRunning) {
-      logger.warn('timer:no-session', { timerId, worktreeId: timer.worktreeId });
+      logger.warn('timer:no-session', { timerId, worktreeId: timer.worktreeId, instanceId });
       updateTimerStatus(db, timerId, TIMER_STATUS.NO_SESSION);
       return;
     }
 
-    const sessionName = cliTool.getSessionName(timer.worktreeId);
-
     updateTimerStatus(db, timerId, 'sending');
-    await sendKeys(sessionName, timer.message, true);
+    // [Issue #947] Delegate to the CLI tool's sendMessage so timer sends take the
+    // exact same path as manual sends: per-tool text/Enter separation and waits.
+    // The previous direct sendKeys(sessionName, message, true) batched text+Enter
+    // in a single send-keys; codex's TUI never confirmed the input, leaving the
+    // message typed but unsent. sendMessage resolves the session name from
+    // (worktreeId, instanceId) internally, so claude/codex/gemini all work.
+    await cliTool.sendMessage(timer.worktreeId, timer.message, instanceId);
     updateTimerStatus(db, timerId, 'sent', Date.now());
 
     logger.info('timer:sent', { timerId, worktreeId: timer.worktreeId });

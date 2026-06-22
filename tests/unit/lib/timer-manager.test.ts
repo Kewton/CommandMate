@@ -47,15 +47,13 @@ vi.mock('@/lib/db/timer-db', () => ({
   recoverStuckSendingTimers: (...args: unknown[]) => mockRecoverStuckSendingTimers(...args),
 }));
 
-// Mock tmux sendKeys
-const mockSendKeys = vi.fn().mockResolvedValue(undefined);
-vi.mock('@/lib/tmux/tmux', () => ({
-  sendKeys: (...args: unknown[]) => mockSendKeys(...args),
-}));
-
 // Mock CLIToolManager
+// Issue #947: timer-manager now delegates sending to cliTool.sendMessage()
+// (which performs the per-tool text/Enter separation) instead of calling tmux
+// sendKeys() directly.
 const mockGetTool = vi.fn();
 const mockIsRunning = vi.fn().mockResolvedValue(true);
+const mockSendMessage = vi.fn().mockResolvedValue(undefined);
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
     getInstance: vi.fn().mockReturnValue({
@@ -236,6 +234,7 @@ describe('timer-manager', () => {
         id: timerId,
         worktreeId: 'wt-1',
         cliToolId: 'claude',
+        instanceId: 'claude',
         message: 'Hello',
         delayMs: 300000,
         scheduledSendTime: Date.now() + 300000,
@@ -248,8 +247,8 @@ describe('timer-manager', () => {
       mockGetTimerById.mockReturnValue(timer);
       mockIsRunning.mockResolvedValue(true);
       mockGetTool.mockReturnValue({
-        getSessionName: vi.fn().mockReturnValue('session-wt-1'),
         isRunning: mockIsRunning,
+        sendMessage: mockSendMessage,
       });
 
       initTimerManager();
@@ -258,13 +257,15 @@ describe('timer-manager', () => {
       // Advance timers to trigger callback
       await vi.advanceTimersByTimeAsync(200);
 
-      expect(mockIsRunning).toHaveBeenCalledWith('wt-1');
+      expect(mockIsRunning).toHaveBeenCalledWith('wt-1', 'claude');
       expect(mockUpdateTimerStatus).toHaveBeenCalledWith(
         expect.anything(),
         timerId,
         'sending'
       );
-      expect(mockSendKeys).toHaveBeenCalledWith('session-wt-1', 'Hello', true);
+      // Issue #947: delegates to cliTool.sendMessage (worktreeId, message,
+      // instanceId) rather than calling tmux sendKeys directly.
+      expect(mockSendMessage).toHaveBeenCalledWith('wt-1', 'Hello', 'claude');
       expect(mockUpdateTimerStatus).toHaveBeenCalledWith(
         expect.anything(),
         timerId,
@@ -273,12 +274,48 @@ describe('timer-manager', () => {
       );
     });
 
+    // Issue #942: route to the specific agent instance session
+    it('should resolve the instance session when timer targets a non-primary instance', async () => {
+      const timerId = 'timer-instance-1';
+      const timer = {
+        id: timerId,
+        worktreeId: 'wt-1',
+        cliToolId: 'claude',
+        instanceId: 'claude-reviewer',
+        message: 'Hello',
+        delayMs: 300000,
+        scheduledSendTime: Date.now() + 300000,
+        status: 'pending',
+        createdAt: Date.now(),
+        sentAt: null,
+      };
+
+      mockGetPendingTimers.mockReturnValueOnce([]);
+      mockGetTimerById.mockReturnValue(timer);
+      mockIsRunning.mockResolvedValue(true);
+      mockGetTool.mockReturnValue({
+        isRunning: mockIsRunning,
+        sendMessage: mockSendMessage,
+      });
+
+      initTimerManager();
+      scheduleTimer(timerId, 'wt-1', 100);
+
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(mockIsRunning).toHaveBeenCalledWith('wt-1', 'claude-reviewer');
+      // Issue #947: the instanceId is forwarded to sendMessage, which resolves
+      // the instance session internally (same path as manual sends).
+      expect(mockSendMessage).toHaveBeenCalledWith('wt-1', 'Hello', 'claude-reviewer');
+    });
+
     it('should set status to no_session when session is not running', async () => {
       const timerId = 'timer-nosession-1';
       const timer = {
         id: timerId,
         worktreeId: 'wt-1',
         cliToolId: 'claude',
+        instanceId: 'claude',
         message: 'Hello',
         delayMs: 300000,
         scheduledSendTime: Date.now() + 300000,
@@ -291,8 +328,8 @@ describe('timer-manager', () => {
       mockGetTimerById.mockReturnValue(timer);
       mockIsRunning.mockResolvedValue(false);
       mockGetTool.mockReturnValue({
-        getSessionName: vi.fn().mockReturnValue('session-wt-1'),
         isRunning: mockIsRunning,
+        sendMessage: mockSendMessage,
       });
 
       initTimerManager();
@@ -300,14 +337,14 @@ describe('timer-manager', () => {
 
       await vi.advanceTimersByTimeAsync(200);
 
-      expect(mockIsRunning).toHaveBeenCalledWith('wt-1');
+      expect(mockIsRunning).toHaveBeenCalledWith('wt-1', 'claude');
       expect(mockUpdateTimerStatus).toHaveBeenCalledWith(
         expect.anything(),
         timerId,
         'no_session'
       );
-      // Should NOT call sendKeys
-      expect(mockSendKeys).not.toHaveBeenCalled();
+      // Should NOT attempt to send when no session is running
+      expect(mockSendMessage).not.toHaveBeenCalled();
     });
 
     it('should set status to failed on send error when session is running', async () => {
@@ -316,6 +353,7 @@ describe('timer-manager', () => {
         id: timerId,
         worktreeId: 'wt-1',
         cliToolId: 'claude',
+        instanceId: 'claude',
         message: 'Hello',
         delayMs: 300000,
         scheduledSendTime: Date.now() + 300000,
@@ -328,10 +366,10 @@ describe('timer-manager', () => {
       mockGetTimerById.mockReturnValue(timer);
       mockIsRunning.mockResolvedValue(true);
       mockGetTool.mockReturnValue({
-        getSessionName: vi.fn().mockReturnValue('session-wt-1'),
         isRunning: mockIsRunning,
+        sendMessage: mockSendMessage,
       });
-      mockSendKeys.mockRejectedValueOnce(new Error('tmux session not found'));
+      mockSendMessage.mockRejectedValueOnce(new Error('tmux session not found'));
 
       initTimerManager();
       scheduleTimer(timerId, 'wt-1', 100);

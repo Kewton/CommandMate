@@ -710,6 +710,21 @@ export const memoApi = {
       { method: 'DELETE' }
     );
   },
+
+  /**
+   * Reorder the memos of a worktree (Issue #944)
+   * @param worktreeId - ID of the worktree
+   * @param memoIds - Complete set of memo IDs in the desired order
+   */
+  async reorder(worktreeId: string, memoIds: string[]): Promise<void> {
+    await fetchApi<{ success: boolean }>(
+      `/api/worktrees/${worktreeId}/memos`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ memoIds }),
+      }
+    );
+  },
 };
 
 /**
