@@ -5,6 +5,7 @@
  * Tests for:
  * - GET /api/worktrees/:id/memos - List all memos for a worktree
  * - POST /api/worktrees/:id/memos - Create a new memo
+ * - PATCH /api/worktrees/:id/memos - Reorder memos (Issue #944)
  * - PUT /api/worktrees/:id/memos/:memoId - Update a memo
  * - DELETE /api/worktrees/:id/memos/:memoId - Delete a memo
  *
@@ -521,6 +522,158 @@ describe('PUT /api/worktrees/:id/memos/:memoId', () => {
 
     expect(response.status).toBe(500);
 
+    const data = await response.json();
+    expect(data).toHaveProperty('error');
+  });
+});
+
+describe('PATCH /api/worktrees/:id/memos (reorder, Issue #944)', () => {
+  let db: Database.Database;
+
+  beforeEach(async () => {
+    db = new Database(':memory:');
+    runMigrations(db);
+
+    const { setMockDb } = await import('@/lib/db/db-instance');
+    setMockDb(db);
+
+    const worktree: Worktree = {
+      id: 'test-worktree',
+      name: 'test',
+      path: '/path/to/test',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
+    };
+    upsertWorktree(db, worktree);
+  });
+
+  afterEach(async () => {
+    const { closeDbInstance } = await import('@/lib/db/db-instance');
+    closeDbInstance();
+    db.close();
+  });
+
+  function makeRequest(worktreeId: string, body: unknown): Request {
+    return new Request(`http://localhost:3000/api/worktrees/${worktreeId}/memos`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it('reorders memos and persists the new order (happy path, 200)', async () => {
+    const m0 = createMemo(db, 'test-worktree', { title: 'A', position: 0 });
+    const m1 = createMemo(db, 'test-worktree', { title: 'B', position: 1 });
+    const m2 = createMemo(db, 'test-worktree', { title: 'C', position: 2 });
+
+    const { PATCH } = await import('@/app/api/worktrees/[id]/memos/route');
+
+    const request = makeRequest('test-worktree', { memoIds: [m2.id, m0.id, m1.id] });
+    const params = { params: { id: 'test-worktree' } };
+    const response = await PATCH(request as unknown as import('next/server').NextRequest, params);
+
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data).toHaveProperty('success', true);
+
+    // Verify persisted order matches the requested order.
+    const memos = getMemosByWorktreeId(db, 'test-worktree');
+    expect(memos.map((m) => m.id)).toEqual([m2.id, m0.id, m1.id]);
+    expect(memos.map((m) => m.position)).toEqual([0, 1, 2]);
+  });
+
+  it('returns 400 for an invalid worktree ID format', async () => {
+    const { PATCH } = await import('@/app/api/worktrees/[id]/memos/route');
+
+    const request = makeRequest('../etc/passwd', { memoIds: [] });
+    const params = { params: { id: '../etc/passwd' } };
+    const response = await PATCH(request as unknown as import('next/server').NextRequest, params);
+
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data).toHaveProperty('error');
+    expect(data.code).toBe('INVALID_WORKTREE_ID');
+  });
+
+  it('returns 404 for a non-existent worktree', async () => {
+    const { PATCH } = await import('@/app/api/worktrees/[id]/memos/route');
+
+    const request = makeRequest('nonexistent', { memoIds: ['some-id'] });
+    const params = { params: { id: 'nonexistent' } };
+    const response = await PATCH(request as unknown as import('next/server').NextRequest, params);
+
+    expect(response.status).toBe(404);
+    const data = await response.json();
+    expect(data).toHaveProperty('error');
+    expect(data.error).toContain('not found');
+  });
+
+  it('returns 400 when memoIds is not an array', async () => {
+    createMemo(db, 'test-worktree', { title: 'A', position: 0 });
+
+    const { PATCH } = await import('@/app/api/worktrees/[id]/memos/route');
+
+    const request = makeRequest('test-worktree', { memoIds: 'a,b' });
+    const params = { params: { id: 'test-worktree' } };
+    const response = await PATCH(request as unknown as import('next/server').NextRequest, params);
+
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.code).toBe('INVALID_MEMO_IDS');
+  });
+
+  it('returns 400 when the count does not match existing memos', async () => {
+    const m0 = createMemo(db, 'test-worktree', { title: 'A', position: 0 });
+    createMemo(db, 'test-worktree', { title: 'B', position: 1 });
+
+    const { PATCH } = await import('@/app/api/worktrees/[id]/memos/route');
+
+    const request = makeRequest('test-worktree', { memoIds: [m0.id] });
+    const params = { params: { id: 'test-worktree' } };
+    const response = await PATCH(request as unknown as import('next/server').NextRequest, params);
+
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.code).toBe('INVALID_MEMO_IDS');
+  });
+
+  it('returns 400 when an id from another worktree is mixed in', async () => {
+    // second worktree with its own memo
+    upsertWorktree(db, {
+      id: 'other-worktree',
+      name: 'other',
+      path: '/path/to/other',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
+    });
+    const m0 = createMemo(db, 'test-worktree', { title: 'A', position: 0 });
+    const foreign = createMemo(db, 'other-worktree', { title: 'X', position: 0 });
+
+    const { PATCH } = await import('@/app/api/worktrees/[id]/memos/route');
+
+    const request = makeRequest('test-worktree', { memoIds: [m0.id, foreign.id] });
+    const params = { params: { id: 'test-worktree' } };
+    const response = await PATCH(request as unknown as import('next/server').NextRequest, params);
+
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.code).toBe('INVALID_MEMO_IDS');
+
+    // Order must remain unchanged because validation failed before reorder.
+    const memos = getMemosByWorktreeId(db, 'test-worktree');
+    expect(memos.map((m) => m.id)).toEqual([m0.id]);
+  });
+
+  it('returns 500 on database error', async () => {
+    db.close();
+
+    const { PATCH } = await import('@/app/api/worktrees/[id]/memos/route');
+
+    const request = makeRequest('test-worktree', { memoIds: ['a'] });
+    const params = { params: { id: 'test-worktree' } };
+    const response = await PATCH(request as unknown as import('next/server').NextRequest, params);
+
+    expect(response.status).toBe(500);
     const data = await response.json();
     expect(data).toHaveProperty('error');
   });

@@ -14,7 +14,8 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
-import { Copy, Check, ArrowDownToLine } from 'lucide-react';
+import { useTranslations } from 'next-intl';
+import { Copy, Check, ArrowDownToLine, ChevronUp, ChevronDown } from 'lucide-react';
 import { useAutoSave } from '@/hooks/useAutoSave';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import type { WorktreeMemo } from '@/types/models';
@@ -45,6 +46,14 @@ export interface MemoCardProps {
   className?: string;
   /** Issue #485: Callback when memo content is inserted into message input */
   onInsertToMessage?: (content: string) => void;
+  /** Issue #944: Move this memo up one position */
+  onMoveUp?: () => void;
+  /** Issue #944: Move this memo down one position */
+  onMoveDown?: () => void;
+  /** Issue #944: Whether the memo can move up (false disables the ↑ button) */
+  canMoveUp?: boolean;
+  /** Issue #944: Whether the memo can move down (false disables the ↓ button) */
+  canMoveDown?: boolean;
 }
 
 // ============================================================================
@@ -71,7 +80,16 @@ export const MemoCard = memo(function MemoCard({
   error: externalError,
   className = '',
   onInsertToMessage,
+  onMoveUp,
+  onMoveDown,
+  canMoveUp = true,
+  canMoveDown = true,
 }: MemoCardProps) {
+  const t = useTranslations('schedule');
+
+  // Issue #944: reorder controls are shown only when a move handler is provided.
+  const showReorder = Boolean(onMoveUp || onMoveDown);
+
   // Local state for title and content
   const [title, setTitle] = useState(memo.title);
   const [content, setContent] = useState(memo.content);
@@ -206,6 +224,33 @@ export const MemoCard = memo(function MemoCard({
           >
             Saving...
           </span>
+        )}
+        {/* Issue #944: Reorder buttons */}
+        {showReorder && (
+          <>
+            <button
+              type="button"
+              data-testid={`memo-move-up-${memo.id}`}
+              onClick={onMoveUp}
+              disabled={!canMoveUp}
+              aria-label={t('memoMoveUp')}
+              title={t('memoMoveUp')}
+              className="flex-shrink-0 p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors rounded disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <ChevronUp className="w-4 h-4" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              data-testid={`memo-move-down-${memo.id}`}
+              onClick={onMoveDown}
+              disabled={!canMoveDown}
+              aria-label={t('memoMoveDown')}
+              title={t('memoMoveDown')}
+              className="flex-shrink-0 p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors rounded disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <ChevronDown className="w-4 h-4" aria-hidden="true" />
+            </button>
+          </>
         )}
         {/* Issue #485: Insert to message button */}
         {onInsertToMessage && (

@@ -16,6 +16,7 @@ const mockGetAll = vi.fn();
 const mockCreate = vi.fn();
 const mockUpdate = vi.fn();
 const mockDelete = vi.fn();
+const mockReorder = vi.fn();
 
 vi.mock('@/lib/api-client', () => ({
   memoApi: {
@@ -23,6 +24,7 @@ vi.mock('@/lib/api-client', () => ({
     create: (...args: unknown[]) => mockCreate(...args),
     update: (...args: unknown[]) => mockUpdate(...args),
     delete: (...args: unknown[]) => mockDelete(...args),
+    reorder: (...args: unknown[]) => mockReorder(...args),
   },
   handleApiError: (error: unknown) =>
     error instanceof Error ? error.message : 'Unknown error',
@@ -68,6 +70,7 @@ describe('MemoPane', () => {
     });
     mockUpdate.mockResolvedValue(mockMemos[0]);
     mockDelete.mockResolvedValue({ success: true });
+    mockReorder.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -524,6 +527,96 @@ describe('MemoPane', () => {
 
       fireEvent.click(screen.getByTestId('memo-search-toggle'));
       expect(screen.getByRole('search')).toBeInTheDocument();
+    });
+  });
+
+  describe('Reorder (Issue #944)', () => {
+    it('renders move buttons with correct disabled edges (first up / last down)', async () => {
+      render(<MemoPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByTestId('memo-card')).toHaveLength(2);
+      });
+
+      // First memo: up disabled, down enabled.
+      expect(screen.getByTestId('memo-move-up-memo-1')).toBeDisabled();
+      expect(screen.getByTestId('memo-move-down-memo-1')).not.toBeDisabled();
+      // Last memo: down disabled, up enabled.
+      expect(screen.getByTestId('memo-move-down-memo-2')).toBeDisabled();
+      expect(screen.getByTestId('memo-move-up-memo-2')).not.toBeDisabled();
+    });
+
+    it('swaps and calls memoApi.reorder with the new order when moving down', async () => {
+      render(<MemoPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByTestId('memo-card')).toHaveLength(2);
+      });
+
+      fireEvent.click(screen.getByTestId('memo-move-down-memo-1'));
+
+      await waitFor(() => {
+        expect(mockReorder).toHaveBeenCalledWith('worktree-1', ['memo-2', 'memo-1']);
+      });
+
+      // Optimistic update: DOM order is swapped.
+      const ids = screen
+        .getAllByTestId('memo-card')
+        .map((c) => c.getAttribute('data-memo-id'));
+      expect(ids).toEqual(['memo-2', 'memo-1']);
+    });
+
+    it('rolls back via fetchMemos when reorder fails', async () => {
+      mockReorder.mockRejectedValueOnce(new Error('reorder failed'));
+      render(<MemoPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByTestId('memo-card')).toHaveLength(2);
+      });
+
+      // getAll called once on mount.
+      expect(mockGetAll).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByTestId('memo-move-down-memo-1'));
+
+      // On failure, fetchMemos re-fetches to restore the server order.
+      await waitFor(() => {
+        expect(mockGetAll).toHaveBeenCalledTimes(2);
+      });
+
+      await waitFor(() => {
+        const ids = screen
+          .getAllByTestId('memo-card')
+          .map((c) => c.getAttribute('data-memo-id'));
+        expect(ids).toEqual(['memo-1', 'memo-2']);
+      });
+    });
+
+    it('disables reordering while search is active', async () => {
+      const searchMemos: WorktreeMemo[] = [
+        { ...mockMemos[0], id: 'memo-a', title: 'Alpha' },
+        { ...mockMemos[1], id: 'memo-b', title: 'Beta' },
+      ];
+      mockGetAll.mockResolvedValue(searchMemos);
+      Element.prototype.scrollIntoView = vi.fn();
+
+      render(<MemoPane {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByTestId('memo-card')).toHaveLength(2);
+      });
+
+      fireEvent.click(screen.getByTestId('memo-search-toggle'));
+      const searchInput = within(screen.getByRole('search')).getByRole('textbox');
+      fireEvent.change(searchInput, { target: { value: 'Alpha' } });
+
+      await waitFor(() => {
+        expect(screen.getAllByTestId('memo-card')).toHaveLength(1);
+      });
+
+      // Move buttons must be absent (or disabled) while searching.
+      expect(screen.queryByTestId('memo-move-up-memo-a')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('memo-move-down-memo-a')).not.toBeInTheDocument();
     });
   });
 });
