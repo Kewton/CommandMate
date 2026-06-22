@@ -50,3 +50,7 @@ server.log
 /workspace/
 .playwright-mcp/
 logs/
+
+# Auto-generated AI-agent dev logs (pm-auto-dev / issue / review / bug-fix / uat reports).
+# Machine output, not source — kept locally but never committed (Issue: repo bloat cleanup).
+/dev-reports/

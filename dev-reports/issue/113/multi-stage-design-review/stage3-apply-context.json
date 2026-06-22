@@ -1,8 +1,0 @@
-{
-  "issue_number": 113,
-  "stage": 3,
-  "stage_name": "影響分析レビュー",
-  "target_file": "dev-reports/design/issue-113-server-build-design-policy.md",
-  "review_result_file": "dev-reports/issue/113/multi-stage-design-review/stage3-review-result.json",
-  "instruction": "設計方針書に対してStage 3のレビュー指摘事項を反映する。ソースコードは変更しない。"
-}
