@@ -60,7 +60,7 @@ import { ToastContainer } from '@/components/common/Toast';
 import { Modal } from '@/components/ui/Modal';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
-import { getCliToolDisplayName, getInstanceLabel } from '@/lib/cli-tools/types';
+import { getCliToolDisplayName, getInstanceLabel, getActiveInstanceLabel } from '@/lib/cli-tools/types';
 import { deriveCliStatus } from '@/types/sidebar';
 import { MoveDialog } from '@/components/worktree/MoveDialog';
 import { NewFileDialog } from '@/components/worktree/NewFileDialog';
@@ -226,6 +226,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     return <ErrorDisplay message={error} onRetry={handleRetry} />;
   }
 
+  // Issue #956: the kill-session confirmation dialog must show the active
+  // instance's user-defined alias (e.g. "レビュー担当"), not the bare CLI tool
+  // name. Resolve via getActiveInstanceLabel (alias-aware; falls back to the CLI
+  // display name when no alias is set or the active instance is stale).
+  const activeInstanceLabel = getActiveInstanceLabel(agentInstances, activeInstanceId, activeCliTab);
+
   // Render desktop layout
   if (!isMobile) {
     return (
@@ -308,7 +314,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onNewFileCancel={handleNewFileCancel}
           toasts={toasts}
           onToastClose={removeToast}
-          killDialogTitle={tWorktree('session.confirmEnd', { tool: getCliToolDisplayName(activeCliTab) })}
+          killDialogTitle={tWorktree('session.confirmEnd', { tool: activeInstanceLabel })}
           killDialogWarning={tWorktree('session.endWarning')}
           cancelLabel={tCommon('cancel')}
           endLabel={tCommon('end')}
@@ -590,7 +596,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         <Modal
           isOpen={showKillConfirm}
           onClose={handleKillCancel}
-          title={tWorktree('session.confirmEnd', { tool: getCliToolDisplayName(activeCliTab) })}
+          title={tWorktree('session.confirmEnd', { tool: activeInstanceLabel })}
           size="sm"
           showCloseButton={true}
         >
