@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-06-23
+
+> **Highlight**: Timer / メモ / サイドバー周りの UX 改善が中心。Timer と Schedule を AgentInstance システム（#869）に追従させ登録済みインスタンスを選択可能に（#942）、Timer 入力を Schedule と同様の「+ Create Timer」ボタン + モーダル化（#945）、Activity Bar の Notes に並び替えを追加（#944）、サイドバーヘッダーのアクションアイコンを拡大（#946）。あわせて codex で Timer 送信が確定しない不具合を sendMessage 委譲で修正（#947）し、自動生成物（dev-reports 等）を untrack してリポジトリを軽量化（#953）した。
+
+### Added
+- feat(timer): **Timer と Schedule で登録済みエージェントインスタンスを選択可能**に。Timer（#534）/ Schedule（#824-827）は AgentInstance システム（#869）以前の実装で、エージェントセレクタが静的な `CLI_TOOL_IDS` に束縛され Agents パネルで登録したインスタンスを指定できなかった。**Timer はフルインスタンス対応**: migration v35 で nullable な `timer_messages.instance_id` 列を追加（`cli_tool_id` ＝ primary instance anchor で backfill）、`timer-db` / timers API が instanceId を通し（登録済みインスタンス + primary anchor に対して検証）、`timer-manager` が `isRunning` / `getSessionName(worktreeId, instanceId)` で当該インスタンスの tmux セッションへ実行をルーティング。`TimerPane` はセレクタを登録済みインスタンス（alias ラベル）から駆動し選択インスタンスを記録/表示（未登録時は全 CLI ツールの primary インスタンスへフォールバックし legacy 挙動を byte-for-byte 維持）。**Schedule は UI ラベルのみ**: `ScheduleEditDialog` がインスタンス alias を列挙しつつ永続化/実行は選択インスタンスの backing CLI ツール基準（Schedule は新規 `claude -p` プロセスを起動するため per-instance ルーティングは無意味、CMATE.md スキーマ変更なし）。`instances` を `WorktreeDetailDesktop`（PC）/ `NotesAndLogsPane`（mobile）経由で `TimerPane` / `ExecutionLogPane` / `ScheduleEditDialog` へ配線 (Issue #942)
+- feat(timer): Timer 入力を常時表示のインラインフォームから **「+ Create Timer」空状態 CTA / 「+ New Timer」ボタン + モーダルダイアログ**化（PC=Modal、mobile=FullScreenModal）し Schedule UX に揃えた。`formatDelayLabel` を `timers/timer-format.ts` へ抽出しペインとダイアログで共有。一覧/ポーリング/キャンセル/履歴クリア/さらに読み込みは維持し public props も不変のため呼び出し側（`WorktreeDetailDesktop` / `NotesAndLogsPane`）は無改修 (Issue #945)
+- feat(memo): **Activity Bar の Notes（メモ）に ↑↓ 並び替えボタンを追加**。`PATCH /api/worktrees/[id]/memos` が position の再採番を検証付きで実行（新規 `src/lib/memo-reorder-validator.ts` が件数/重複/未知 ID を pure に検証）、`memoApi.reorder()` クライアントメソッド、`MemoCard` の ↑↓ 移動ボタン（両端で disabled、後方互換 props）、`MemoPane` の `handleMove`（楽観更新 + ロールバック、検索中は無効化）、i18n `memoMoveUp` / `memoMoveDown`（en/ja）を追加 (Issue #944)
+- feat(sidebar): サイドバーヘッダー上段の **アクションアイコン（view-mode toggle / sort / sort-direction / sync / Repositories リンク）を視認性向上のため 12px → 16px に拡大**。共有 `HEADER_ICON_CLASS`（`w-4 h-4`）を導入し 5 つのアイコンへ適用。`SortSelectorBase` に optional `iconClassName` prop（既定 `w-3 h-3`）を追加し Sessions ページなど他の利用箇所は従来サイズを維持 (Issue #946)
+
+### Fixed
+- fix(timer): Timer 発火時に **メッセージが入力欄に残ったまま送信されない**不具合（特に codex）を修正。発火処理が tmux に直接 `sendKeys(text+Enter 一括)` を投入していたため、codex の TUI がテキスト確定前に Enter を受け取っていた。恒久対策として `executeTimer` の送信を `cliTool.sendMessage(worktreeId, message, instanceId)` に委譲し、手動送信と完全に同じコードパス（CLI ツールごとのテキスト/Enter 分離・待機）を通して claude / codex / gemini すべてで Enter 確定を保証。セッション名は `sendMessage` 内で `(worktreeId, instanceId)` から解決されるため `timer-manager` 側の `getSessionName` / 直 `sendKeys` 呼び出しを削除 (Issue #947)
+
+### Chore
+- chore(repo): リポジトリ肥大化（追跡 8,481 ファイル中 7,136＝84% が `dev-reports/` の AI エージェント自動生成ログ）とローカル絶対パスのリークに対応。`git rm -r --cached` で **`dev-reports` / `workspace` / `.playwright-mcp` を追跡解除**（計 7,169 件、ローカル実ファイルは保持）、`.gitignore` に `/dev-reports/` を追加（既存の `/workspace/` `.playwright-mcp/` ルールは追跡済みで空振りしていたため追跡解除で実効化）、`tests/unit/prompt-detector.test.ts` のテストフィクスチャ内の絶対パスを汎用化（`/Users/maenokota` → `/Users/example`、検証ロジックは不変）。履歴の書き換えは行わず既存クローン/fork に無影響 (Issue #953)
+
 ## [0.7.2] - 2026-06-21
 
 > **Highlight**: PC 版に表示サイズ切替（大/中/小/極小、既定=中）を追加（#915/#919）。本リリースは大きな機能追加よりも、God モジュール／God コンポーネント／God フックを per-concern に分解する**内部リファクタ**（#920-#923）と、旧リポジトリ名・環境変数表記・リンク・i18n パリティを揃える**ドキュメント整備**（#924-#929）が中心。いずれも振る舞い不変で、既存テストをセーフティネットに据えている。
