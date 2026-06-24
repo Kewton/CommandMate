@@ -370,55 +370,65 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         )}
 
         {/* Auto Yes + CLI Tool Tabs combined row (Mobile) */}
-        <div className="sticky top-0 z-30 flex items-center justify-between px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-          {/* Left: Auto Yes toggle (inline mode) */}
-          <AutoYesToggle
-            enabled={autoYesEnabled}
-            expiresAt={autoYesExpiresAt}
-            onToggle={handleAutoYesToggle}
-            lastAutoResponse={lastAutoResponse}
-            cliToolName={activeCliTab}
-            inline
-          />
-          {/* Right: CLI tool tabs + End button */}
+        <div className="sticky top-0 z-30 flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+          {/* Left: Auto Yes toggle (inline mode) — fixed, does not shrink */}
+          <div className="flex-shrink-0">
+            <AutoYesToggle
+              enabled={autoYesEnabled}
+              expiresAt={autoYesExpiresAt}
+              onToggle={handleAutoYesToggle}
+              lastAutoResponse={lastAutoResponse}
+              cliToolName={activeCliTab}
+              inline
+            />
+          </div>
+          {/* Center: CLI tool tabs — horizontally scrollable so 3+ agents
+              never overflow off-screen (Issue #958). `min-w-0` is required to
+              release the flex item's default min-width:auto, otherwise the nav
+              expands past the parent instead of scrolling.
+              Issue #874: Mobile tabs are per-agent-instance (alias-aware) so
+              multiple instances of the same CLI tool are independently
+              selectable, mirroring the PC header. `displayedInstances` is the
+              per-device visible subset (localStorage); status is still
+              resolved per backing CLI tool, consistent with PC. */}
+          <nav
+            className="flex gap-2 flex-1 min-w-0 overflow-x-auto scrollbar-thin"
+            aria-label="Agent Instance Selection"
+          >
+            {displayedInstances.map((inst) => {
+              const toolStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[inst.cliTool]);
+              const statusConfig = SIDEBAR_STATUS_CONFIG[toolStatus];
+              const isActive = activeInstanceId === inst.id;
+              return (
+                <button
+                  key={inst.id}
+                  onClick={() => setActiveInstanceId(inst.id)}
+                  className={`flex-shrink-0 whitespace-nowrap px-1.5 py-0.5 rounded font-medium text-xs transition-colors flex items-center gap-1 ${
+                    isActive
+                      ? 'bg-blue-100 text-blue-700'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                  aria-current={isActive ? 'page' : undefined}
+                >
+                  {statusConfig.type === 'spinner' ? (
+                    <span
+                      className={`w-2 h-2 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`}
+                      title={statusConfig.label}
+                    />
+                  ) : (
+                    <span
+                      className={`w-2 h-2 rounded-full flex-shrink-0 ${statusConfig.className}`}
+                      title={statusConfig.label}
+                    />
+                  )}
+                  {getInstanceLabel(inst)}
+                </button>
+              );
+            })}
+          </nav>
+          {/* Right: search + End button — pinned, always reachable regardless
+              of tab count (Issue #958) */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            {/* Issue #874: Mobile tabs are now per-agent-instance (alias-aware)
-                so multiple instances of the same CLI tool are independently
-                selectable, mirroring the PC header. `displayedInstances` is the
-                per-device visible subset (localStorage); status is still
-                resolved per backing CLI tool, consistent with PC. */}
-            <nav className="flex gap-2" aria-label="Agent Instance Selection">
-              {displayedInstances.map((inst) => {
-                const toolStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[inst.cliTool]);
-                const statusConfig = SIDEBAR_STATUS_CONFIG[toolStatus];
-                const isActive = activeInstanceId === inst.id;
-                return (
-                  <button
-                    key={inst.id}
-                    onClick={() => setActiveInstanceId(inst.id)}
-                    className={`px-1.5 py-0.5 rounded font-medium text-xs transition-colors flex items-center gap-1 ${
-                      isActive
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                    aria-current={isActive ? 'page' : undefined}
-                  >
-                    {statusConfig.type === 'spinner' ? (
-                      <span
-                        className={`w-2 h-2 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`}
-                        title={statusConfig.label}
-                      />
-                    ) : (
-                      <span
-                        className={`w-2 h-2 rounded-full flex-shrink-0 ${statusConfig.className}`}
-                        title={statusConfig.label}
-                      />
-                    )}
-                    {getInstanceLabel(inst)}
-                  </button>
-                );
-              })}
-            </nav>
             {/* [Issue #47] Terminal search button (Mobile) */}
             <button
               onClick={() => {
