@@ -145,11 +145,16 @@ const autoYesStates = globalThis.__autoYesStates ??
  * Check if an auto-yes state has expired.
  * Compares current time against the expiresAt timestamp.
  *
+ * Issue #959: Uses `>=` so the state expires exactly when the countdown reaches
+ * 00:00 (the moment `Date.now() === expiresAt`). This matches the display side
+ * (`formatTimeRemaining`), which clamps to 0 at that same instant. A strict `>`
+ * left the state enabled for one extra polling tick after the timer hit zero.
+ *
  * @param state - Auto-yes state to check
- * @returns true if the current time is past the expiration time
+ * @returns true if the current time is at or past the expiration time
  */
 export function isAutoYesExpired(state: AutoYesState): boolean {
-  return Date.now() > state.expiresAt;
+  return Date.now() >= state.expiresAt;
 }
 
 // =============================================================================

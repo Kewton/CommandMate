@@ -222,8 +222,9 @@ describe('auto-yes-manager', () => {
       vi.useFakeTimers();
       vi.setSystemTime(2000);
 
-      // At exact expiration, Date.now() === expiresAt, so not expired (> not >=)
-      expect(isAutoYesExpired(state)).toBe(false);
+      // Issue #959: at exact expiration Date.now() === expiresAt, which is the
+      // instant the countdown shows 00:00, so it must already be expired (>=).
+      expect(isAutoYesExpired(state)).toBe(true);
     });
   });
 
