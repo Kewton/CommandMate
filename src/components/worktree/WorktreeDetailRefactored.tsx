@@ -232,6 +232,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // display name when no alias is set or the active instance is stale).
   const activeInstanceLabel = getActiveInstanceLabel(agentInstances, activeInstanceId, activeCliTab);
 
+  // Issue #960: derive the active session's running state per-instance優先
+  // （PC版と整合）so the End button and MessageInput reflect the selected
+  // instance rather than the per-CLI aggregate. Falls back to the per-CLI map
+  // for backward compat (single-instance / legacy configs).
+  const activeSessionRunning =
+    (worktree?.sessionStatusByInstance?.[activeInstanceId] ?? worktree?.sessionStatusByCli?.[activeCliTab])
+      ?.isRunning ?? false;
+
   // Render desktop layout
   if (!isMobile) {
     return (
@@ -389,14 +397,21 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               Issue #874: Mobile tabs are per-agent-instance (alias-aware) so
               multiple instances of the same CLI tool are independently
               selectable, mirroring the PC header. `displayedInstances` is the
-              per-device visible subset (localStorage); status is still
-              resolved per backing CLI tool, consistent with PC. */}
+              per-device visible subset (localStorage); status is resolved
+              per-instance優先（PC版と整合, Issue #960）so closing one instance
+              of a duplicated CLI tool no longer leaves a sibling's status. */}
           <nav
             className="flex gap-2 flex-1 min-w-0 overflow-x-auto scrollbar-thin"
             aria-label="Agent Instance Selection"
           >
             {displayedInstances.map((inst) => {
-              const toolStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[inst.cliTool]);
+              // Issue #960: resolve each instance's status from the
+              // per-instance map first so a closed instance of a duplicated
+              // CLI tool no longer inherits a running sibling's status; fall
+              // back to the per-CLI aggregate for backward compat (PC版と整合).
+              const toolStatus = deriveCliStatus(
+                worktree?.sessionStatusByInstance?.[inst.id] ?? worktree?.sessionStatusByCli?.[inst.cliTool]
+              );
               const statusConfig = SIDEBAR_STATUS_CONFIG[toolStatus];
               const isActive = activeInstanceId === inst.id;
               return (
@@ -444,9 +459,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             </button>
             <button
               onClick={handleKillSession}
-              disabled={!worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning}
+              disabled={!activeSessionRunning}
               className={`flex items-center gap-0.5 px-1.5 py-0.5 text-xs font-medium rounded transition-colors ${
-                worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning
+                activeSessionRunning
                   ? 'text-red-600 hover:bg-red-50'
                   : 'invisible'
               }`}
@@ -538,7 +553,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               onMessageSent={handleMessageSent}
               cliToolId={activeCliTab}
               instanceId={activeInstanceId}
-              isSessionRunning={worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning ?? false}
+              isSessionRunning={activeSessionRunning}
               pendingInsertText={pendingInsertText}
               onInsertConsumed={handleInsertConsumedSingle}
             />
