@@ -7,9 +7,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { AutoYesToggle, type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
-import { DEFAULT_AUTO_YES_DURATION } from '@/config/auto-yes-config';
+import { DEFAULT_AUTO_YES_DURATION, AUTO_YES_COUNTDOWN_INTERVAL_MS } from '@/config/auto-yes-config';
 
 describe('AutoYesToggle', () => {
   const defaultProps = {
@@ -25,6 +25,7 @@ describe('AutoYesToggle', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   describe('OFF to ON (should show dialog)', () => {
@@ -199,6 +200,63 @@ describe('AutoYesToggle', () => {
 
       // Dialog should show tool-specific title
       expect(screen.getByText(/autoYes\.enableTitleWithTool/)).toBeDefined();
+    });
+  });
+
+  // ==========================================================================
+  // Issue #959: UI reflects expiry the instant the countdown reaches 00:00
+  // ==========================================================================
+  describe('Issue #959: countdown reaching zero disables the toggle in the UI', () => {
+    it('flips the toggle to OFF and hides the countdown when expiresAt is reached', () => {
+      vi.useFakeTimers();
+      const now = 1_700_000_000_000;
+      vi.setSystemTime(now);
+
+      render(
+        <AutoYesToggle {...defaultProps} enabled={true} expiresAt={now + 2000} />
+      );
+
+      // Initially ON with a visible countdown.
+      expect(screen.getByRole('switch').getAttribute('aria-checked')).toBe('true');
+      expect(screen.getByLabelText('Time remaining')).toBeDefined();
+
+      // Advance to the exact expiration instant and let the 1s tick fire.
+      act(() => {
+        vi.setSystemTime(now + 2000);
+        vi.advanceTimersByTime(AUTO_YES_COUNTDOWN_INTERVAL_MS);
+      });
+
+      // UI now presents as OFF and the countdown is gone.
+      expect(screen.getByRole('switch').getAttribute('aria-checked')).toBe('false');
+      expect(screen.queryByLabelText('Time remaining')).toBeNull();
+    });
+
+    it('invokes onExpire exactly once when the countdown reaches zero', () => {
+      vi.useFakeTimers();
+      const now = 1_700_000_000_000;
+      vi.setSystemTime(now);
+      const onExpire = vi.fn();
+
+      render(
+        <AutoYesToggle
+          {...defaultProps}
+          enabled={true}
+          expiresAt={now + 1000}
+          onExpire={onExpire}
+        />
+      );
+
+      act(() => {
+        vi.setSystemTime(now + 1000);
+        vi.advanceTimersByTime(AUTO_YES_COUNTDOWN_INTERVAL_MS);
+      });
+      expect(onExpire).toHaveBeenCalledTimes(1);
+
+      // Subsequent ticks must not re-fire the callback.
+      act(() => {
+        vi.advanceTimersByTime(AUTO_YES_COUNTDOWN_INTERVAL_MS * 3);
+      });
+      expect(onExpire).toHaveBeenCalledTimes(1);
     });
   });
 

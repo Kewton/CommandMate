@@ -15,6 +15,8 @@ import {
   getCompositeKeysByWorktree,
   deleteAutoYesStateByWorktree,
   buildCompositeKey,
+  isAutoYesExpired,
+  type AutoYesState,
 } from '@/lib/auto-yes-state';
 import { DEFAULT_AUTO_YES_DURATION } from '@/config/auto-yes-config';
 
@@ -314,6 +316,43 @@ describe('auto-yes-state composite key migration (Issue #525)', () => {
 
       expect(getAutoYesState('wt-1', 'claude', 'claude-2')?.enabled).toBe(false);
       expect(getAutoYesState('wt-1', 'claude')?.enabled).toBe(true);
+    });
+  });
+
+  // ==========================================================================
+  // Issue #959: exact-expiry boundary (now === expiresAt)
+  // The countdown shows 00:00 the instant Date.now() === expiresAt, so the
+  // state must already be treated as expired/disabled at that exact moment.
+  // Existing tests used a +1ms offset and therefore missed this off-by-one.
+  // ==========================================================================
+  describe('exact-expiry boundary (Issue #959)', () => {
+    it('isAutoYesExpired returns true when now === expiresAt exactly', () => {
+      vi.useFakeTimers();
+      const expiresAt = 1700000000000;
+      vi.setSystemTime(expiresAt);
+
+      const state: AutoYesState = {
+        enabled: true,
+        enabledAt: expiresAt - DEFAULT_AUTO_YES_DURATION,
+        expiresAt,
+      };
+
+      expect(isAutoYesExpired(state)).toBe(true);
+    });
+
+    it('getAutoYesState auto-disables at the exact expiration instant', () => {
+      vi.useFakeTimers();
+      const now = 1700000000000;
+      vi.setSystemTime(now);
+
+      setAutoYesEnabled('wt-1', 'claude', true); // expiresAt = now + DEFAULT_AUTO_YES_DURATION
+
+      // Jump to the exact expiration instant (countdown reads 00:00).
+      vi.setSystemTime(now + DEFAULT_AUTO_YES_DURATION);
+
+      const state = getAutoYesState('wt-1', 'claude');
+      expect(state?.enabled).toBe(false);
+      expect(state?.stopReason).toBe('expired');
     });
   });
 });
