@@ -268,6 +268,32 @@ export function getInstanceLabel(instance: { cliTool: CLIToolType; alias?: strin
 }
 
 /**
+ * Resolve the alias-aware display label for the *active* agent instance within
+ * a roster (Issue #956).
+ *
+ * Finds the instance whose id matches `activeInstanceId` and returns its label
+ * via {@link getInstanceLabel} (alias-first). When no instance matches — e.g. a
+ * stale `activeInstanceId` or an empty roster — falls back to the bare CLI tool
+ * display name so callers still render something sensible.
+ *
+ * Used by the kill-session confirmation dialog so it shows the user-defined
+ * alias (e.g. "レビュー担当") instead of the raw CLI tool name (e.g. "Claude").
+ *
+ * @param instances - Agent instance roster
+ * @param activeInstanceId - Id of the currently active instance
+ * @param fallbackCliTool - CLI tool used when no instance matches
+ * @returns Non-empty display label
+ */
+export function getActiveInstanceLabel(
+  instances: ReadonlyArray<{ id: string; cliTool: CLIToolType; alias?: string }>,
+  activeInstanceId: string,
+  fallbackCliTool: CLIToolType,
+): string {
+  const active = instances.find((inst) => inst.id === activeInstanceId);
+  return active ? getInstanceLabel(active) : getCliToolDisplayName(fallbackCliTool);
+}
+
+/**
  * Build the default set of agent instances from a worktree's selectedAgents
  * (Issue #868 migration / fallback).
  *
