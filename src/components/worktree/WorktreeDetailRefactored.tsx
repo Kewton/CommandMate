@@ -401,7 +401,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               per-instance優先（PC版と整合, Issue #960）so closing one instance
               of a duplicated CLI tool no longer leaves a sibling's status. */}
           <nav
-            className="flex gap-2 flex-1 min-w-0 overflow-x-auto scrollbar-thin"
+            className="flex gap-2 flex-1 min-w-0 overflow-x-auto scrollbar-hide"
             aria-label="Agent Instance Selection"
           >
             {displayedInstances.map((inst) => {
