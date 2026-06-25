@@ -60,7 +60,7 @@ import { ToastContainer } from '@/components/common/Toast';
 import { Modal } from '@/components/ui/Modal';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
-import { getCliToolDisplayName, getInstanceLabel } from '@/lib/cli-tools/types';
+import { getCliToolDisplayName, getInstanceLabel, getActiveInstanceLabel } from '@/lib/cli-tools/types';
 import { deriveCliStatus } from '@/types/sidebar';
 import { MoveDialog } from '@/components/worktree/MoveDialog';
 import { NewFileDialog } from '@/components/worktree/NewFileDialog';
@@ -226,6 +226,20 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     return <ErrorDisplay message={error} onRetry={handleRetry} />;
   }
 
+  // Issue #956: the kill-session confirmation dialog must show the active
+  // instance's user-defined alias (e.g. "レビュー担当"), not the bare CLI tool
+  // name. Resolve via getActiveInstanceLabel (alias-aware; falls back to the CLI
+  // display name when no alias is set or the active instance is stale).
+  const activeInstanceLabel = getActiveInstanceLabel(agentInstances, activeInstanceId, activeCliTab);
+
+  // Issue #960: derive the active session's running state per-instance優先
+  // （PC版と整合）so the End button and MessageInput reflect the selected
+  // instance rather than the per-CLI aggregate. Falls back to the per-CLI map
+  // for backward compat (single-instance / legacy configs).
+  const activeSessionRunning =
+    (worktree?.sessionStatusByInstance?.[activeInstanceId] ?? worktree?.sessionStatusByCli?.[activeCliTab])
+      ?.isRunning ?? false;
+
   // Render desktop layout
   if (!isMobile) {
     return (
@@ -308,7 +322,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onNewFileCancel={handleNewFileCancel}
           toasts={toasts}
           onToastClose={removeToast}
-          killDialogTitle={tWorktree('session.confirmEnd', { tool: getCliToolDisplayName(activeCliTab) })}
+          killDialogTitle={tWorktree('session.confirmEnd', { tool: activeInstanceLabel })}
           killDialogWarning={tWorktree('session.endWarning')}
           cancelLabel={tCommon('cancel')}
           endLabel={tCommon('end')}
@@ -364,55 +378,72 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         )}
 
         {/* Auto Yes + CLI Tool Tabs combined row (Mobile) */}
-        <div className="sticky top-0 z-30 flex items-center justify-between px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-          {/* Left: Auto Yes toggle (inline mode) */}
-          <AutoYesToggle
-            enabled={autoYesEnabled}
-            expiresAt={autoYesExpiresAt}
-            onToggle={handleAutoYesToggle}
-            lastAutoResponse={lastAutoResponse}
-            cliToolName={activeCliTab}
-            inline
-          />
-          {/* Right: CLI tool tabs + End button */}
+        <div className="sticky top-0 z-30 flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+          {/* Left: Auto Yes toggle (inline mode) — fixed, does not shrink */}
+          <div className="flex-shrink-0">
+            <AutoYesToggle
+              enabled={autoYesEnabled}
+              expiresAt={autoYesExpiresAt}
+              onToggle={handleAutoYesToggle}
+              lastAutoResponse={lastAutoResponse}
+              cliToolName={activeCliTab}
+              inline
+            />
+          </div>
+          {/* Center: CLI tool tabs — horizontally scrollable so 3+ agents
+              never overflow off-screen (Issue #958). `min-w-0` is required to
+              release the flex item's default min-width:auto, otherwise the nav
+              expands past the parent instead of scrolling.
+              Issue #874: Mobile tabs are per-agent-instance (alias-aware) so
+              multiple instances of the same CLI tool are independently
+              selectable, mirroring the PC header. `displayedInstances` is the
+              per-device visible subset (localStorage); status is resolved
+              per-instance優先（PC版と整合, Issue #960）so closing one instance
+              of a duplicated CLI tool no longer leaves a sibling's status. */}
+          <nav
+            className="flex gap-2 flex-1 min-w-0 overflow-x-auto scrollbar-hide"
+            aria-label="Agent Instance Selection"
+          >
+            {displayedInstances.map((inst) => {
+              // Issue #960: resolve each instance's status from the
+              // per-instance map first so a closed instance of a duplicated
+              // CLI tool no longer inherits a running sibling's status; fall
+              // back to the per-CLI aggregate for backward compat (PC版と整合).
+              const toolStatus = deriveCliStatus(
+                worktree?.sessionStatusByInstance?.[inst.id] ?? worktree?.sessionStatusByCli?.[inst.cliTool]
+              );
+              const statusConfig = SIDEBAR_STATUS_CONFIG[toolStatus];
+              const isActive = activeInstanceId === inst.id;
+              return (
+                <button
+                  key={inst.id}
+                  onClick={() => setActiveInstanceId(inst.id)}
+                  className={`flex-shrink-0 whitespace-nowrap px-1.5 py-0.5 rounded font-medium text-xs transition-colors flex items-center gap-1 ${
+                    isActive
+                      ? 'bg-blue-100 text-blue-700'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                  aria-current={isActive ? 'page' : undefined}
+                >
+                  {statusConfig.type === 'spinner' ? (
+                    <span
+                      className={`w-2 h-2 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`}
+                      title={statusConfig.label}
+                    />
+                  ) : (
+                    <span
+                      className={`w-2 h-2 rounded-full flex-shrink-0 ${statusConfig.className}`}
+                      title={statusConfig.label}
+                    />
+                  )}
+                  {getInstanceLabel(inst)}
+                </button>
+              );
+            })}
+          </nav>
+          {/* Right: search + End button — pinned, always reachable regardless
+              of tab count (Issue #958) */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            {/* Issue #874: Mobile tabs are now per-agent-instance (alias-aware)
-                so multiple instances of the same CLI tool are independently
-                selectable, mirroring the PC header. `displayedInstances` is the
-                per-device visible subset (localStorage); status is still
-                resolved per backing CLI tool, consistent with PC. */}
-            <nav className="flex gap-2" aria-label="Agent Instance Selection">
-              {displayedInstances.map((inst) => {
-                const toolStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[inst.cliTool]);
-                const statusConfig = SIDEBAR_STATUS_CONFIG[toolStatus];
-                const isActive = activeInstanceId === inst.id;
-                return (
-                  <button
-                    key={inst.id}
-                    onClick={() => setActiveInstanceId(inst.id)}
-                    className={`px-1.5 py-0.5 rounded font-medium text-xs transition-colors flex items-center gap-1 ${
-                      isActive
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                    aria-current={isActive ? 'page' : undefined}
-                  >
-                    {statusConfig.type === 'spinner' ? (
-                      <span
-                        className={`w-2 h-2 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`}
-                        title={statusConfig.label}
-                      />
-                    ) : (
-                      <span
-                        className={`w-2 h-2 rounded-full flex-shrink-0 ${statusConfig.className}`}
-                        title={statusConfig.label}
-                      />
-                    )}
-                    {getInstanceLabel(inst)}
-                  </button>
-                );
-              })}
-            </nav>
             {/* [Issue #47] Terminal search button (Mobile) */}
             <button
               onClick={() => {
@@ -428,9 +459,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             </button>
             <button
               onClick={handleKillSession}
-              disabled={!worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning}
+              disabled={!activeSessionRunning}
               className={`flex items-center gap-0.5 px-1.5 py-0.5 text-xs font-medium rounded transition-colors ${
-                worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning
+                activeSessionRunning
                   ? 'text-red-600 hover:bg-red-50'
                   : 'invisible'
               }`}
@@ -522,7 +553,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               onMessageSent={handleMessageSent}
               cliToolId={activeCliTab}
               instanceId={activeInstanceId}
-              isSessionRunning={worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning ?? false}
+              isSessionRunning={activeSessionRunning}
               pendingInsertText={pendingInsertText}
               onInsertConsumed={handleInsertConsumedSingle}
             />
@@ -590,7 +621,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         <Modal
           isOpen={showKillConfirm}
           onClose={handleKillCancel}
-          title={tWorktree('session.confirmEnd', { tool: getCliToolDisplayName(activeCliTab) })}
+          title={tWorktree('session.confirmEnd', { tool: activeInstanceLabel })}
           size="sm"
           showCloseButton={true}
         >

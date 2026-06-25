@@ -36,6 +36,13 @@ export interface AutoYesToggleProps {
   cliToolName?: string;
   /** If true, render without outer container styles (for inline embedding) */
   inline?: boolean;
+  /**
+   * Optional callback fired once when the countdown reaches 00:00 (Issue #959).
+   * Lets a parent proactively disable auto-yes the instant the timer expires
+   * instead of waiting for the next server poll. Optional so existing callers
+   * need not change.
+   */
+  onExpire?: () => void;
 }
 
 export const AutoYesToggle = memo(function AutoYesToggle({
@@ -45,27 +52,54 @@ export const AutoYesToggle = memo(function AutoYesToggle({
   lastAutoResponse,
   cliToolName,
   inline = false,
+  onExpire,
 }: AutoYesToggleProps) {
   const [timeRemaining, setTimeRemaining] = useState<string>('');
   const [notification, setNotification] = useState<string | null>(null);
   const [toggling, setToggling] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  // Issue #959: latch that flips the UI to OFF the instant the countdown hits
+  // 00:00, so the toggle no longer shows ON while the server-side state catches
+  // up on the next poll.
+  const [hasExpired, setHasExpired] = useState(false);
 
   // Countdown timer
   useEffect(() => {
     if (!enabled || !expiresAt) {
       setTimeRemaining('');
+      setHasExpired(false);
       return;
     }
 
-    const updateTime = () => {
+    // Fresh enable window: clear any stale expiry latch from a previous run.
+    setHasExpired(false);
+
+    let expiredNotified = false;
+
+    // Refresh the displayed time. Returns true once the countdown has reached
+    // zero (Issue #959): at that point the UI proactively reflects expiry and
+    // notifies the parent once, instead of waiting for the next polling cycle.
+    const tick = (): boolean => {
       setTimeRemaining(formatTimeRemaining(expiresAt));
+      if (expiresAt - Date.now() <= 0 && !expiredNotified) {
+        expiredNotified = true;
+        setHasExpired(true);
+        onExpire?.();
+        return true;
+      }
+      return false;
     };
 
-    updateTime();
-    const interval = setInterval(updateTime, AUTO_YES_COUNTDOWN_INTERVAL_MS);
+    // Already past expiry at mount: no interval needed.
+    if (tick()) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      if (tick()) clearInterval(interval);
+    }, AUTO_YES_COUNTDOWN_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [enabled, expiresAt]);
+  }, [enabled, expiresAt, onExpire]);
 
   // Auto-response notification (2 second display)
   useEffect(() => {
@@ -76,8 +110,13 @@ export const AutoYesToggle = memo(function AutoYesToggle({
     return () => clearTimeout(timeout);
   }, [lastAutoResponse]);
 
+  // Issue #959: the UI presents as OFF the moment the countdown expires, even
+  // before the parent's polled `enabled` prop catches up. Derive a single source
+  // of truth so the visual state, click behaviour and countdown all agree.
+  const displayEnabled = enabled && !hasExpired;
+
   const handleToggle = useCallback(() => {
-    if (enabled) {
+    if (displayEnabled) {
       // OFF: execute directly
       setToggling(true);
       onToggle({ enabled: false }).finally(() => setToggling(false));
@@ -85,7 +124,7 @@ export const AutoYesToggle = memo(function AutoYesToggle({
       // ON: show confirmation dialog
       setShowConfirmDialog(true);
     }
-  }, [enabled, onToggle]);
+  }, [displayEnabled, onToggle]);
 
   const handleConfirm = useCallback((duration: AutoYesDuration, stopPattern?: string) => {
     setShowConfirmDialog(false);
@@ -103,17 +142,17 @@ export const AutoYesToggle = memo(function AutoYesToggle({
       <button
         type="button"
         role="switch"
-        aria-checked={enabled}
+        aria-checked={displayEnabled}
         aria-label="Auto Yes mode"
         disabled={toggling}
         onClick={handleToggle}
         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 ${
-          enabled ? 'bg-cyan-600' : 'bg-gray-300 dark:bg-gray-600'
+          displayEnabled ? 'bg-cyan-600' : 'bg-gray-300 dark:bg-gray-600'
         } ${toggling ? 'opacity-50' : ''}`}
       >
         <span
           className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-            enabled ? 'translate-x-6' : 'translate-x-1'
+            displayEnabled ? 'translate-x-6' : 'translate-x-1'
           }`}
         />
       </button>
@@ -127,7 +166,7 @@ export const AutoYesToggle = memo(function AutoYesToggle({
       )}
 
       {/* Countdown timer */}
-      {enabled && timeRemaining && (
+      {displayEnabled && timeRemaining && (
         <span className="text-sm text-gray-500 dark:text-gray-400" aria-label="Time remaining">
           {timeRemaining}
         </span>

@@ -7,7 +7,7 @@
  *
  * Cache key: sessionName (mcbd-{cliToolId}-{worktreeId} format)
  * Cache value: CacheEntry (output + metadata)
- * TTL: 2 seconds (CACHE_TTL_MS)
+ * TTL: 5 seconds (CACHE_TTL_MS)
  *
  * [SEC4-001] Trust Boundary: sessionName is validated by the caller chain
  * (CLIToolManager.getTool(cliToolId).getSessionName()). This module does not
@@ -35,8 +35,14 @@ interface CacheEntry {
 // Constants
 // =========================================================================
 
-/** Cache TTL in milliseconds (Issue #499 Item 6: extended from 2000 to 3000 for improved cache hit rate) */
-export const CACHE_TTL_MS = 3000;
+/**
+ * Cache TTL in milliseconds.
+ * Issue #499 Item 6: extended from 2000 to 3000 for improved cache hit rate.
+ * Issue #965: extended from 3000 to 5000 to further cut redundant tmux
+ * capture-pane invocations during sidebar→detail status probes. Kept modest to
+ * preserve real-time responsiveness of the terminal/status UI.
+ */
+export const CACHE_TTL_MS = 5000;
 
 /** Maximum number of cache entries */
 export const CACHE_MAX_ENTRIES = 100;

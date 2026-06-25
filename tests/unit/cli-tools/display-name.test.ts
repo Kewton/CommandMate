@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 import {
   getCliToolDisplayName,
   getCliToolDisplayNameSafe,
+  getActiveInstanceLabel,
   isCliToolType,
   CLI_TOOL_DISPLAY_NAMES,
   CLI_TOOL_IDS,
@@ -115,5 +116,35 @@ describe('getCliToolDisplayNameSafe()', () => {
     expect(getCliToolDisplayNameSafe(undefined, '')).toBe('');
     expect(getCliToolDisplayNameSafe('', 'N/A')).toBe('N/A');
     expect(getCliToolDisplayNameSafe('unknown', 'Custom')).toBe('Custom');
+  });
+});
+
+describe('getActiveInstanceLabel() (Issue #956)', () => {
+  const roster = [
+    { id: 'claude', cliTool: 'claude' as CLIToolType, alias: 'Claude' },
+    { id: 'claude-2', cliTool: 'claude' as CLIToolType, alias: 'レビュー担当' },
+    { id: 'codex', cliTool: 'codex' as CLIToolType, alias: '' },
+  ];
+
+  it('should return the active instance alias when set', () => {
+    expect(getActiveInstanceLabel(roster, 'claude-2', 'claude')).toBe('レビュー担当');
+  });
+
+  it('should fall back to the CLI display name when the active instance has no alias', () => {
+    // codex instance has an empty alias -> getInstanceLabel falls back to "Codex"
+    expect(getActiveInstanceLabel(roster, 'codex', 'codex')).toBe('Codex');
+  });
+
+  it('should fall back to the fallback CLI tool when activeInstanceId is not found (stale)', () => {
+    expect(getActiveInstanceLabel(roster, 'missing-instance', 'codex')).toBe('Codex');
+  });
+
+  it('should fall back to the fallback CLI tool when the roster is empty', () => {
+    expect(getActiveInstanceLabel([], 'claude', 'claude')).toBe('Claude');
+  });
+
+  it('should treat whitespace-only alias as no alias', () => {
+    const ws = [{ id: 'claude', cliTool: 'claude' as CLIToolType, alias: '   ' }];
+    expect(getActiveInstanceLabel(ws, 'claude', 'claude')).toBe('Claude');
   });
 });

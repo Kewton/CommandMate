@@ -231,6 +231,16 @@
     background-color: rgb(148 163 184);
   }
 
+  /* スクロールバー非表示・スワイプ/スクロールは維持 */
+  .scrollbar-hide {
+    -ms-overflow-style: none; /* IE/旧Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none; /* Chrome/Safari/WebKit */
+  }
+
   .assistant-md > *:first-child {
     margin-top: 0;
   }

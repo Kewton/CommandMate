@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-06-25
+
+> **Highlight**: モバイル Agent タブヘッダーの操作性改善が中心。タブを横スクロール可能化（#958）したうえで横スクロールバーを非表示化（#964）、ステータスを CLI ツール単位ではなくインスタンス単位で解決（#960）、kill-session 確認ダイアログにインスタンスのエイリアスを表示（#956）。あわせて Auto-Yes をカウントダウン 0 到達の正確なタイミングで無効化（#959）し、サイドバークリック→詳細表示の体感遅延を低減する perf クイックウィン 4 件（#965）を追加した。
+
+### Fixed
+- fix(worktree): モバイルヘッダーの Agent インスタンスタブを**横スクロール可能**に。Auto Yes トグルを左、検索 + End（kill session）ボタンを右にピン留めし、中央のタブ領域を `flex-1 min-w-0 overflow-x-auto` 化。従来は 3 つ以上のエージェントでタブと End ボタンが画面外に押し出されスクロール不能だった (Issue #958)
+- fix(worktree): モバイル Agent タブヘッダーの**横スクロールバーを非表示**に（スワイプ/スクロールは維持）。新規 `.scrollbar-hide` ユーティリティを追加し当該 nav にのみ適用、表示領域の圧迫を解消（`.scrollbar-thin` は他 3 箇所で使用中のため不変） (Issue #964)
+- fix(worktree): モバイル Agent タブの**ステータスを CLI ツール単位ではなくインスタンス単位で解決**。エイリアスインスタンスごとに正しい稼働ステータスがサイドバー/タブに反映されるよう修正 (Issue #960)
+- fix(worktree): セッションクローズ確認ダイアログ（ヘッダー「✕ End」）のタイトルが CLI ツール名（Claude/Codex）を表示していた問題を修正。新規 `getActiveInstanceLabel()` で**インスタンスのエイリアスを優先表示**（未設定/stale 時は CLI 表示名へフォールバック＝後方互換） (Issue #956)
+- fix(auto-yes): カウントダウンが 00:00 に到達した**正確なタイミングで Auto-Yes を無効化**。期限判定を `>` から `>=` に変更し、UI も次のサーバーポーリングを待たず即座に OFF 反映（`onExpire` コールバック追加、呼び出し側は無改修） (Issue #959)
+
+### Performance
+- perf(worktree): **サイドバークリック→worktree 詳細表示の体感遅延を低減**するクイックウィン 4 件。①一覧キャッシュから詳細を楽観的に即描画し `getById` はバックグラウンド反映（stale-while-revalidate、キャッシュミス時のみローディング）②ステータス検出用キャプチャ行数を表示用（10000）と分離し 1000 に削減（末尾空行トリム前提で #604 退行なし）③`/api/worktrees/[id]` で git status を listSessions と並走 ④tmux キャプチャキャッシュ TTL を 3000→5000ms に延長 (Issue #965)
+
 ## [0.7.3] - 2026-06-23
 
 > **Highlight**: Timer / メモ / サイドバー周りの UX 改善が中心。Timer と Schedule を AgentInstance システム（#869）に追従させ登録済みインスタンスを選択可能に（#942）、Timer 入力を Schedule と同様の「+ Create Timer」ボタン + モーダル化（#945）、Activity Bar の Notes に並び替えを追加（#944）、サイドバーヘッダーのアクションアイコンを拡大（#946）。あわせて codex で Timer 送信が確定しない不具合を sendMessage 委譲で修正（#947）し、自動生成物（dev-reports 等）を untrack してリポジトリを軽量化（#953）した。
