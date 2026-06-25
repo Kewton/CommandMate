@@ -2178,10 +2178,10 @@ describe('auto-yes-manager', () => {
       vi.mocked(captureSessionOutput).mockReset();
     });
 
-    // Item 6: Cache TTL constant value
-    it('Item 6: CACHE_TTL_MS should be 3000', async () => {
+    // Item 6: Cache TTL constant value (Issue #965: extended 3000 -> 5000)
+    it('Item 6: CACHE_TTL_MS should be 5000', async () => {
       const { CACHE_TTL_MS } = await import('@/lib/tmux/tmux-capture-cache');
-      expect(CACHE_TTL_MS).toBe(3000);
+      expect(CACHE_TTL_MS).toBe(5000);
     });
 
     // Item 7: validatePollingContext should not call isAutoYesExpired

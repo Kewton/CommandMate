@@ -53,6 +53,7 @@ function TestConsumer() {
   return (
     <div>
       <span data-testid="selectedWorktreeId">{context.selectedWorktreeId ?? 'null'}</span>
+      <span data-testid="selectedWorktreeDetailId">{context.selectedWorktreeDetail?.id ?? 'null'}</span>
       <span data-testid="worktreeCount">{context.worktrees.length}</span>
       <span data-testid="isLoadingDetail">{String(context.isLoadingDetail)}</span>
       <span data-testid="error">{context.error ?? 'null'}</span>
@@ -61,6 +62,12 @@ function TestConsumer() {
         onClick={() => context.selectWorktree('feature-test-1')}
       >
         Select
+      </button>
+      <button
+        data-testid="selectWorktreeMissing"
+        onClick={() => context.selectWorktree('not-in-cache')}
+      >
+        Select Missing
       </button>
       <button
         data-testid="refreshWorktrees"
@@ -151,8 +158,11 @@ describe('WorktreeSelectionContext', () => {
         expect(screen.getByTestId('worktreeCount').textContent).toBe('2');
       });
 
+      // Issue #965: the loading state only applies on a cache miss now (a cached
+      // worktree is seeded immediately). Select one not in the list cache so the
+      // loading path is still exercised.
       act(() => {
-        screen.getByTestId('selectWorktree').click();
+        screen.getByTestId('selectWorktreeMissing').click();
       });
 
       // Should show loading immediately
@@ -249,9 +259,50 @@ describe('WorktreeSelectionContext', () => {
 
       // Should immediately update the selected ID (optimistic update)
       expect(screen.getByTestId('selectedWorktreeId').textContent).toBe('feature-test-1');
+
+      // Issue #965: stale-while-revalidate. The worktree is in the list cache,
+      // so the detail is seeded immediately and the loading state is NOT shown
+      // while getById() runs in the background.
+      expect(screen.getByTestId('isLoadingDetail').textContent).toBe('false');
+      expect(screen.getByTestId('selectedWorktreeDetailId').textContent).toBe('feature-test-1');
+
+      // Now resolve the API call (fresh detail overwrites the seeded value)
+      act(() => {
+        resolveGetById!(mockWorktrees[0]);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('isLoadingDetail').textContent).toBe('false');
+      });
+      expect(screen.getByTestId('selectedWorktreeDetailId').textContent).toBe('feature-test-1');
+    });
+
+    it('should show the loading state only when the worktree is NOT in the list cache (Issue #965)', async () => {
+      // Make the getById call take some time
+      let resolveGetById: (value: Worktree) => void;
+      (worktreeApi.getById as ReturnType<typeof vi.fn>).mockImplementation(
+        () => new Promise((resolve) => { resolveGetById = resolve; })
+      );
+
+      render(
+        <WorktreeSelectionProvider>
+          <TestConsumer />
+        </WorktreeSelectionProvider>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('worktreeCount').textContent).toBe('2');
+      });
+
+      act(() => {
+        screen.getByTestId('selectWorktreeMissing').click();
+      });
+
+      // Cache miss: fall back to the previous blocking behavior (loading shown).
+      expect(screen.getByTestId('selectedWorktreeId').textContent).toBe('not-in-cache');
       expect(screen.getByTestId('isLoadingDetail').textContent).toBe('true');
 
-      // Now resolve the API call
+      // Resolve the API call - loading clears once the detail arrives.
       act(() => {
         resolveGetById!(mockWorktrees[0]);
       });

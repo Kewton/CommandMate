@@ -169,8 +169,20 @@ function worktreeSelectionReducer(
       return { ...state, worktrees: action.worktrees, isLoading: false };
     case 'SET_REPOSITORIES':
       return { ...state, repositories: action.repositories };
-    case 'SELECT_WORKTREE':
-      return { ...state, selectedWorktreeId: action.id };
+    case 'SELECT_WORKTREE': {
+      // Issue #965: Stale-while-revalidate. The sidebar already holds the
+      // worktree list (with per-instance session status, agent instances, etc.),
+      // so seed the detail pane from that cache immediately instead of blocking
+      // on getById(). Only fall back to the loading state on a cache miss; the
+      // background getById() in selectWorktree() overwrites with the fresh detail.
+      const cached = state.worktrees.find((wt) => wt.id === action.id) ?? null;
+      return {
+        ...state,
+        selectedWorktreeId: action.id,
+        selectedWorktreeDetail: cached ?? state.selectedWorktreeDetail,
+        isLoadingDetail: cached === null,
+      };
+    }
     case 'SET_WORKTREE_DETAIL':
       return { ...state, selectedWorktreeDetail: action.detail };
     case 'SET_LOADING':
@@ -245,9 +257,11 @@ export function WorktreeSelectionProvider({
 
   // Select a worktree with optimistic update
   const selectWorktree = useCallback(async (id: string) => {
-    // Optimistic update: immediately set selected ID
+    // Optimistic update: immediately set selected ID and seed the detail from
+    // the list cache (Issue #965). SELECT_WORKTREE sets isLoadingDetail only on
+    // a cache miss, so the detail pane renders instantly when the worktree is
+    // already in the sidebar list (the common path for external access).
     dispatch({ type: 'SELECT_WORKTREE', id });
-    dispatch({ type: 'SET_LOADING_DETAIL', isLoadingDetail: true });
     dispatch({ type: 'SET_ERROR', error: null });
 
     try {

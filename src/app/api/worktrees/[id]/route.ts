@@ -44,26 +44,34 @@ export async function GET(
       );
     }
 
-    // Issue #405: Batch query all tmux sessions once (N+1 elimination)
-    const tmuxSessions = await listSessions();
-    const sessionNameSet = new Set(tmuxSessions.map(s => s.name));
-
-    // Parallel: session status detection + git status (independent operations)
     const initialBranch = getInitialBranch(db, params.id);
-    const [sessionStatus, gitStatus] = await Promise.all([
-      detectWorktreeSessionStatus(
+
+    // Issue #965: git status is independent of the tmux session list, so start
+    // it immediately instead of waiting for listSessions() to resolve first.
+    const gitStatusPromise = getGitStatus(worktree.path, initialBranch).catch((gitError) => {
+      // Log but don't fail - git status is non-critical
+      logger.error('get-apiworktrees:id-failed-to-get-git-status', { error: gitError instanceof Error ? gitError.message : String(gitError) });
+      return undefined as GitStatus | undefined;
+    });
+
+    // Issue #405: Batch query all tmux sessions once (N+1 elimination). Only the
+    // session status detection depends on the session name set, so it chains off
+    // listSessions() while git status runs concurrently above.
+    const sessionStatusPromise = listSessions().then((tmuxSessions) => {
+      const sessionNameSet = new Set(tmuxSessions.map(s => s.name));
+      return detectWorktreeSessionStatus(
         params.id,
         sessionNameSet,
         db,
         getMessages,
         markPendingPromptsAsAnswered,
         getAgentInstances,
-      ),
-      getGitStatus(worktree.path, initialBranch).catch((gitError) => {
-        // Log but don't fail - git status is non-critical
-        logger.error('get-apiworktrees:id-failed-to-get-git-status', { error: gitError instanceof Error ? gitError.message : String(gitError) });
-        return undefined as GitStatus | undefined;
-      }),
+      );
+    });
+
+    const [sessionStatus, gitStatus] = await Promise.all([
+      sessionStatusPromise,
+      gitStatusPromise,
     ]);
 
     // Issue #368: selectedAgents is already included in worktree from getWorktreeById
