@@ -8,7 +8,7 @@
  * - Search query highlighting
  * - Right-click and long-press context menu support
  * - Keyboard navigation
- * - File metadata display (size, birthtime)
+ * - Toggleable inline file metadata (size / created / modified) + hover tooltip [Issue #969]
  *
  * [Issue #123] Touch long press context menu for iPad/iPhone
  */
@@ -16,12 +16,17 @@
 'use client';
 
 import React, { useState, useCallback, useMemo, memo } from 'react';
+import { useTranslations } from 'next-intl';
 import type { TreeItem, SearchMode } from '@/types/models';
 import { useLongPress } from '@/hooks/useLongPress';
 import { escapeRegExp } from '@/lib/utils';
-import { formatRelativeTime } from '@/lib/date-utils';
+import { formatRelativeTime, formatMessageTimestamp } from '@/lib/date-utils';
 import { getDateFnsLocale } from '@/lib/date-locale';
 import { TruncationTooltip } from '@/components/common/TruncationTooltip';
+import {
+  DEFAULT_FILE_METADATA_DISPLAY,
+  type FileMetadataDisplaySettings,
+} from '@/hooks/useFileMetadataDisplay';
 
 // ============================================================================
 // Types
@@ -74,6 +79,11 @@ export interface TreeNodeProps {
   matchedPaths?: Set<string>;
   /** [Issue #162] date-fns locale string for formatRelativeTime */
   dateFnsLocaleStr?: string;
+  /**
+   * [Issue #969] Which metadata columns (size / created / modified) to render
+   * inline. Defaults to size-only (timestamps available on hover) when omitted.
+   */
+  metadataDisplay?: FileMetadataDisplaySettings;
 }
 
 // ============================================================================
@@ -253,12 +263,44 @@ export const TreeNode = memo(function TreeNode({
   searchMode,
   matchedPaths,
   dateFnsLocaleStr,
+  metadataDisplay = DEFAULT_FILE_METADATA_DISPLAY,
 }: TreeNodeProps) {
+  const t = useTranslations('worktree');
   const [loading, setLoading] = useState(false);
   const fullPath = path ? `${path}/${item.name}` : item.name;
   const isExpanded = expanded.has(fullPath);
   const isDirectory = item.type === 'directory';
   const children = cache.get(fullPath);
+
+  // [Issue #969] date-fns locale resolved once for both inline relative times
+  // and the hover tooltip's absolute timestamps.
+  const dateFnsLocale = useMemo(
+    () => (dateFnsLocaleStr ? getDateFnsLocale(dateFnsLocaleStr) : undefined),
+    [dateFnsLocaleStr]
+  );
+
+  /**
+   * [Issue #969] Formatted, locale-aware metadata tooltip for file rows.
+   * Built into the row's `title` attribute (newline-separated) so the
+   * created/modified/size info is always available on hover, even when the
+   * inline columns are toggled off. Directories get no tooltip.
+   */
+  const metadataTitle = useMemo(() => {
+    if (isDirectory) return undefined;
+    const lines: string[] = [];
+    if (item.size !== undefined) {
+      lines.push(`${t('fileTree.metadata.size')}: ${formatFileSize(item.size)}`);
+    }
+    if (item.birthtime) {
+      const created = formatMessageTimestamp(new Date(item.birthtime), dateFnsLocale);
+      if (created) lines.push(`${t('fileTree.metadata.created')}: ${created}`);
+    }
+    if (item.mtime) {
+      const modified = formatMessageTimestamp(new Date(item.mtime), dateFnsLocale);
+      if (modified) lines.push(`${t('fileTree.metadata.modified')}: ${modified}`);
+    }
+    return lines.length > 0 ? lines.join('\n') : undefined;
+  }, [isDirectory, item.size, item.birthtime, item.mtime, dateFnsLocale, t]);
 
   const handleClick = useCallback(async () => {
     if (isDirectory) {
@@ -338,6 +380,7 @@ export const TreeNode = memo(function TreeNode({
         tabIndex={0}
         className="flex items-center gap-2 py-1.5 pr-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
         style={combinedStyle}
+        title={metadataTitle}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
         onContextMenu={handleContextMenu}
@@ -380,20 +423,35 @@ export const TreeNode = memo(function TreeNode({
           )}
         </TruncationTooltip>
 
-        {/* File size or item count */}
-        <span className="text-xs text-gray-400 flex-shrink-0">
-          {isDirectory
-            ? item.itemCount !== undefined && `${item.itemCount} items`
-            : formatFileSize(item.size)}
-        </span>
-
-        {/* [Issue #162] File birthtime display */}
-        {!isDirectory && item.birthtime && (
+        {/* [Issue #969] File size or item count — toggleable inline column */}
+        {metadataDisplay.showSize && (
           <span
+            data-testid="tree-item-size"
             className="text-xs text-gray-400 flex-shrink-0"
-            title={item.birthtime}
           >
-            {formatRelativeTime(item.birthtime, dateFnsLocaleStr ? getDateFnsLocale(dateFnsLocaleStr) : undefined)}
+            {isDirectory
+              ? item.itemCount !== undefined && `${item.itemCount} items`
+              : formatFileSize(item.size)}
+          </span>
+        )}
+
+        {/* [Issue #162/#969] File creation time (birthtime) — toggleable inline column */}
+        {!isDirectory && metadataDisplay.showCreated && item.birthtime && (
+          <span
+            data-testid="tree-item-created"
+            className="text-xs text-gray-400 flex-shrink-0"
+          >
+            {formatRelativeTime(item.birthtime, dateFnsLocale)}
+          </span>
+        )}
+
+        {/* [Issue #969] File modification time (mtime) — toggleable inline column */}
+        {!isDirectory && metadataDisplay.showModified && item.mtime && (
+          <span
+            data-testid="tree-item-modified"
+            className="text-xs text-gray-400 flex-shrink-0"
+          >
+            {formatRelativeTime(item.mtime, dateFnsLocale)}
           </span>
         )}
       </div>
@@ -460,6 +518,7 @@ export const TreeNode = memo(function TreeNode({
                 searchMode={searchMode}
                 matchedPaths={matchedPaths}
                 dateFnsLocaleStr={dateFnsLocaleStr}
+                metadataDisplay={metadataDisplay}
               />
             ))}
         </div>
