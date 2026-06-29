@@ -36,6 +36,7 @@ import { useSidebarContext } from '@/contexts/SidebarContext';
 import { BranchListItem } from '@/components/sidebar/BranchListItem';
 import { SortSelector } from '@/components/sidebar/SortSelector';
 import { Tooltip } from '@/components/common/Tooltip';
+import { TruncationTooltip } from '@/components/common/TruncationTooltip';
 import { LocaleSwitcher } from '@/components/common/LocaleSwitcher';
 import { ThemeToggle } from '@/components/common/ThemeToggle';
 import { LogoutButton } from '@/components/common/LogoutButton';
@@ -478,7 +479,7 @@ export const Sidebar = memo(function Sidebar() {
         onScroll={saveBranchListScroll}
         onMouseEnter={handleListMouseEnter}
         onMouseLeave={handleListMouseLeave}
-        className="flex-1 overflow-y-auto"
+        className="flex-1 overflow-y-auto overflow-x-hidden"
       >
         {isEmpty ? (
           <div className="px-4 py-8 text-center text-gray-400">
@@ -575,7 +576,7 @@ function SortableGroupItem({
   };
 
   return (
-    <div ref={setNodeRef} style={style}>
+    <div ref={setNodeRef} style={style} className="w-full min-w-0">
       <GroupHeader
         repositoryName={group.repositoryName}
         branchCount={group.branches.length}
@@ -680,7 +681,7 @@ function GroupHeader({
         onClick={onClick}
         aria-expanded={isExpanded}
         className="
-          flex-1 flex items-center gap-2 px-2 py-2
+          flex-1 min-w-0 flex items-center gap-2 px-2 py-2
           text-xs font-semibold text-gray-300 uppercase tracking-wider
           focus:outline-none focus:ring-2 focus:ring-inset focus:ring-cyan-500
           transition-colors
@@ -688,7 +689,9 @@ function GroupHeader({
       >
         <ChevronIcon isExpanded={isExpanded} />
         <GroupIcon color={generateRepositoryColor(repositoryName)} />
-        <span className="flex-1 text-left truncate">{repositoryName}</span>
+        <TruncationTooltip content={repositoryName} className="flex-1 min-w-0 text-left truncate">
+          {repositoryName}
+        </TruncationTooltip>
         <span className="text-gray-500 font-normal pr-2">{branchCount}</span>
       </button>
     </div>

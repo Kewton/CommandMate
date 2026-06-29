@@ -837,6 +837,67 @@ describe('Sidebar', () => {
     });
   });
 
+  describe('Horizontal scrollbar suppression (Issue #971)', () => {
+    const longNameWorktrees: Worktree[] = [
+      {
+        id: 'long-repo-feature',
+        name: 'feature/some-work',
+        path: '/path/to/long',
+        repositoryPath: '/path/to/very-long-repo',
+        repositoryName: 'a-very-long-repository-name-that-overflows-the-sidebar-width',
+      },
+    ];
+
+    beforeEach(() => {
+      (worktreeApi.getAll as ReturnType<typeof vi.fn>).mockResolvedValue({
+        worktrees: longNameWorktrees,
+        repositories: [],
+      });
+    });
+
+    it('disables horizontal scrolling on the branch list container', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        const branchList = screen.getByTestId('branch-list');
+        expect(branchList.className).toMatch(/overflow-x-hidden/);
+      });
+    });
+
+    it('makes the group header a min-w-0 flex container so truncate can apply', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const groupHeader = await screen.findByTestId('group-header');
+      expect(groupHeader.className).toMatch(/min-w-0/);
+    });
+
+    it('truncates the repository name without a native title attribute', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const repoName = await screen.findByText(
+        'a-very-long-repository-name-that-overflows-the-sidebar-width'
+      );
+      // Truncation is enabled so the long name is clipped rather than overflowing.
+      expect(repoName).toHaveClass('truncate');
+      expect(repoName).toHaveClass('min-w-0');
+      // TruncationTooltip controls the hover delay in JS; it must not fall back
+      // to a native title attribute (Issue #971 / #859).
+      expect(repoName).not.toHaveAttribute('title');
+    });
+  });
+
   describe('Flat view', () => {
     it('should show flat list when view mode is flat', async () => {
       // Set localStorage to flat mode before rendering
