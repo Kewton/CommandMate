@@ -1371,8 +1371,11 @@ describe('FileTreeView', () => {
       expect(fetchCount).toBeLessThan(10);
     });
 
-    it('should display birthtime without hidden class (visible on all screen sizes)', async () => {
-      // [Issue #162] birthtime should be visible on all screen sizes (no hidden sm:inline)
+    it('hides the created column inline by default and exposes metadata via the row title [Issue #969]', async () => {
+      // [Issue #162 -> #969] birthtime is no longer rendered inline by default
+      // (default = size only). The created/modified/size data is instead
+      // available via the row's formatted `title` tooltip.
+      window.localStorage.clear();
       const birthtimeData: TreeResponse = {
         path: '',
         name: '',
@@ -1383,6 +1386,7 @@ describe('FileTreeView', () => {
             size: 512,
             extension: 'ts',
             birthtime: '2026-02-10T10:00:00Z',
+            mtime: '2026-02-11T12:00:00Z',
           },
         ],
         parentPath: null,
@@ -1399,14 +1403,59 @@ describe('FileTreeView', () => {
         expect(screen.getByText('test-file.ts')).toBeInTheDocument();
       });
 
-      // Find the birthtime span by its title attribute
-      const birthtimeSpan = screen.getByTitle('2026-02-10T10:00:00Z');
-      expect(birthtimeSpan).toBeInTheDocument();
+      // Default: created/modified columns are NOT rendered inline.
+      expect(screen.queryByTestId('tree-item-created')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('tree-item-modified')).not.toBeInTheDocument();
+      // Size column IS shown inline by default.
+      expect(screen.getByTestId('tree-item-size')).toBeInTheDocument();
 
-      // Bug fix: birthtime should NOT have 'hidden' class (was 'hidden sm:inline')
-      expect(birthtimeSpan).not.toHaveClass('hidden');
-      // It should also NOT have 'sm:inline' class
-      expect(birthtimeSpan.className).not.toContain('sm:inline');
+      // The raw ISO string is no longer used as a title (it is now formatted).
+      expect(screen.queryByTitle('2026-02-10T10:00:00Z')).not.toBeInTheDocument();
+
+      // The row carries a formatted, multi-line metadata title for hover.
+      const row = screen.getByTestId('tree-item-test-file.ts');
+      const title = row.getAttribute('title');
+      expect(title).toBeTruthy();
+      expect(title).toContain('512 B');
+      expect(title!.split('\n').length).toBe(3);
+    });
+
+    it('toggles inline metadata columns via the toolbar gear [Issue #969]', async () => {
+      window.localStorage.clear();
+      const data: TreeResponse = {
+        path: '',
+        name: '',
+        items: [
+          {
+            name: 'toggle-me.ts',
+            type: 'file',
+            size: 512,
+            extension: 'ts',
+            birthtime: '2026-02-10T10:00:00Z',
+            mtime: '2026-02-11T12:00:00Z',
+          },
+        ],
+        parentPath: null,
+      };
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(data),
+      });
+
+      render(<FileTreeView worktreeId="test-worktree" />);
+
+      await waitFor(() => {
+        expect(screen.getByText('toggle-me.ts')).toBeInTheDocument();
+      });
+
+      // Open the gear popover and enable the "created" column.
+      fireEvent.click(screen.getByTestId('file-metadata-toggle-button'));
+      fireEvent.click(screen.getByTestId('file-metadata-toggle-showCreated'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('tree-item-created')).toBeInTheDocument();
+      });
     });
 
     it('should cancel previous reload when refreshTrigger changes rapidly', async () => {

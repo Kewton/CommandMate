@@ -36,7 +36,17 @@
     "moveConfirm": "Move here",
     "moveSuccess": "Moved successfully",
     "timeAgo": "{time} ago",
-    "rootDirectory": "Root"
+    "rootDirectory": "Root",
+    "metadata": {
+      "size": "Size",
+      "created": "Created",
+      "modified": "Modified",
+      "settingsLabel": "Metadata display settings",
+      "settingsTitle": "Show inline",
+      "showSize": "File size",
+      "showCreated": "Created date",
+      "showModified": "Modified date"
+    }
   },
   "update": {
     "available": "A new version is available",

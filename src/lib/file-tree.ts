@@ -192,11 +192,18 @@ export async function readDirectory(
         });
       } else if (entryStat.isFile()) {
         const ext = extname(name);
+        // [Issue #969] Expose both creation (birthtime) and last-modification
+        // (mtime) timestamps so the UI can show them inline and/or on hover.
+        // Platform note: `birthtime` is reliable on macOS/Windows but on some
+        // Linux filesystems it is not a true creation time (may equal ctime or
+        // be zeroed). `mtime` is portable. `ctime` is intentionally NOT exposed
+        // because its meaning is OS-dependent (inode change time on Linux).
         const item: TreeItem = {
           name,
           type: 'file',
           size: entryStat.size,
           birthtime: entryStat.birthtime.toISOString(),
+          mtime: entryStat.mtime.toISOString(),
         };
         if (ext && ext.length > 1) {
           item.extension = ext.slice(1); // Remove the leading dot
