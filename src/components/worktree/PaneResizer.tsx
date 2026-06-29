@@ -40,25 +40,67 @@ export interface PaneResizerProps {
 /** Keyboard step size in pixels for arrow key navigation */
 const KEYBOARD_STEP = 10;
 
-/** Base classes shared by all resizer states */
+/**
+ * Base classes shared by all resizer states.
+ *
+ * VS Code-style thin divider (Issue #970): the line stays a constant 1px and
+ * uses the same subtle color as fixed panel borders (`gray-200`/`gray-700`),
+ * so it blends in until hovered. An accent color appears on hover/focus only —
+ * the line never thickens on hover. `relative` provides the positioning context
+ * for the transparent `::before` hit area added per-orientation below.
+ */
 const BASE_CLASSES = [
+  'relative',
   'flex-shrink-0',
-  'bg-gray-700',
+  'bg-gray-200',
+  'dark:bg-gray-700',
   'transition-colors',
   'duration-150',
   'hover:bg-cyan-500',
+  // Explicit dark hover variant: with `darkMode: 'class'`, the base
+  // `dark:bg-gray-700` outranks a plain `hover:` accent in dark mode, so the
+  // hover accent must be re-stated under `dark:` to win (Issue #970).
+  'dark:hover:bg-cyan-500',
   'focus:outline-none',
   'focus:ring-2',
   'focus:ring-cyan-500',
   'focus:ring-offset-2',
-  'focus:ring-offset-gray-900',
+  'focus:ring-offset-white',
+  'dark:focus:ring-offset-gray-900',
 ] as const;
 
-/** Classes for horizontal orientation */
-const HORIZONTAL_CLASSES = ['w-1', 'h-full', 'cursor-col-resize', 'hover:w-2'] as const;
+/**
+ * Classes for horizontal orientation.
+ *
+ * The visible line is 1px (`w-1`); a transparent `::before` extends the click
+ * target ±4px horizontally (`before:-inset-x-1`) so the thin divider stays easy
+ * to grab without looking thick (VS Code technique, Issue #970).
+ */
+const HORIZONTAL_CLASSES = [
+  'w-1',
+  'h-full',
+  'cursor-col-resize',
+  "before:content-['']",
+  'before:absolute',
+  'before:inset-y-0',
+  'before:-inset-x-1',
+] as const;
 
-/** Classes for vertical orientation */
-const VERTICAL_CLASSES = ['h-1', 'w-full', 'cursor-row-resize', 'hover:h-2'] as const;
+/**
+ * Classes for vertical orientation.
+ *
+ * The visible line is 1px (`h-1`); a transparent `::before` extends the click
+ * target ±4px vertically (`before:-inset-y-1`) for easy grabbing.
+ */
+const VERTICAL_CLASSES = [
+  'h-1',
+  'w-full',
+  'cursor-row-resize',
+  "before:content-['']",
+  'before:absolute',
+  'before:inset-x-0',
+  'before:-inset-y-1',
+] as const;
 
 // ============================================================================
 // Helper Functions
@@ -241,8 +283,11 @@ export const PaneResizer = memo(function PaneResizer({
   // Build class names with memoization for performance
   const className = useMemo(() => {
     const orientationClasses = isHorizontal ? HORIZONTAL_CLASSES : VERTICAL_CLASSES;
+    // While dragging, accent the line and let it thicken slightly as live
+    // feedback (only hover stays a constant 1px — Issue #970). `dark:bg-cyan-500`
+    // is needed so the accent outranks the base `dark:bg-gray-700` in dark mode.
     const draggingClasses = isDragging
-      ? ['bg-cyan-500', 'dragging', isHorizontal ? 'w-2' : 'h-2']
+      ? ['bg-cyan-500', 'dark:bg-cyan-500', 'dragging', isHorizontal ? 'w-2' : 'h-2']
       : [];
 
     return [...BASE_CLASSES, ...orientationClasses, ...draggingClasses].join(' ');
