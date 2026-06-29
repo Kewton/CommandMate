@@ -1,26 +1,18 @@
 /**
  * MermaidCodeBlock Component Tests
  *
- * Tests for the code block wrapper component including:
- * - Mermaid language detection (className='language-mermaid')
- * - Non-mermaid code block passthrough
- * - Inline code block passthrough
+ * MermaidCodeBlock renders a mermaid diagram for `language-mermaid` fenced
+ * blocks and a plain <code> element for everything else (inline code and
+ * non-mermaid block code). Since Issue #983 the copy button for block code is
+ * attached by MarkdownPreview's `pre` renderer — not here — so this component
+ * never renders a copy button.
  *
  * @vitest-environment jsdom
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { MermaidCodeBlock } from '@/components/worktree/MermaidCodeBlock';
-
-// Hoisted clipboard mock for the copy button (Issue #981)
-const { mockCopyToClipboard } = vi.hoisted(() => ({
-  mockCopyToClipboard: vi.fn(),
-}));
-
-vi.mock('@/lib/clipboard-utils', () => ({
-  copyToClipboard: mockCopyToClipboard,
-}));
 
 // Mock MermaidDiagram component
 vi.mock('@/components/worktree/MermaidDiagram', () => ({
@@ -31,11 +23,7 @@ vi.mock('@/components/worktree/MermaidDiagram', () => ({
 
 // Mock next/dynamic to render the component directly
 vi.mock('next/dynamic', () => ({
-  default: (
-    loader: () => Promise<{ MermaidDiagram: React.ComponentType<{ code: string }> }>,
-    _options: unknown
-  ) => {
-    // Return a component that renders the loading state briefly then the actual component
+  default: () => {
     const DynamicComponent = (props: { code: string }) => {
       return <div data-testid="mermaid-diagram-mock">{props.code}</div>;
     };
@@ -99,7 +87,7 @@ describe('MermaidCodeBlock', () => {
       expect(codeElement).toHaveClass('language-javascript');
     });
 
-    it('should render regular code element when no className', () => {
+    it('should render regular code element when no className (inline code)', () => {
       const plainCode = 'plain text';
 
       render(
@@ -124,36 +112,6 @@ describe('MermaidCodeBlock', () => {
       const codeElement = screen.getByText(pythonCode);
       expect(codeElement.tagName).toBe('CODE');
       expect(codeElement).toHaveClass('language-python');
-    });
-  });
-
-  describe('Inline Code Block Passthrough', () => {
-    it('should render inline code as regular code element', () => {
-      const inlineCode = 'inline code';
-
-      render(
-        <MermaidCodeBlock inline={true}>
-          {inlineCode}
-        </MermaidCodeBlock>
-      );
-
-      const codeElement = screen.getByText(inlineCode);
-      expect(codeElement.tagName).toBe('CODE');
-    });
-
-    it('should not render MermaidDiagram for inline code even with mermaid className', () => {
-      const inlineCode = 'graph TD';
-
-      render(
-        <MermaidCodeBlock inline={true} className="language-mermaid">
-          {inlineCode}
-        </MermaidCodeBlock>
-      );
-
-      // Should render as regular code, not MermaidDiagram
-      const codeElement = screen.getByText(inlineCode);
-      expect(codeElement.tagName).toBe('CODE');
-      expect(screen.queryByTestId('mermaid-diagram-mock')).not.toBeInTheDocument();
     });
   });
 
@@ -204,37 +162,20 @@ describe('MermaidCodeBlock', () => {
     });
   });
 
-  describe('Copy button (Issue #981)', () => {
-    beforeEach(() => {
-      mockCopyToClipboard.mockResolvedValue(undefined);
-    });
-
-    it('renders a copy button for non-mermaid block code', () => {
+  describe('No copy button here (Issue #983)', () => {
+    it('does not render a copy button for non-mermaid block code', () => {
       render(
         <MermaidCodeBlock className="language-javascript">
           const x = 1;
         </MermaidCodeBlock>
       );
 
-      expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
-      // The underlying code element is preserved
+      // The copy button is attached by MarkdownPreview's `pre` renderer, not
+      // here, so this component renders only the plain <code> element.
+      expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
       const codeElement = screen.getByText('const x = 1;');
       expect(codeElement.tagName).toBe('CODE');
       expect(codeElement).toHaveClass('language-javascript');
-    });
-
-    it('copies the code text when the copy button is clicked', async () => {
-      render(
-        <MermaidCodeBlock className="language-javascript">
-          const x = 1;
-        </MermaidCodeBlock>
-      );
-
-      await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
-      });
-
-      expect(mockCopyToClipboard).toHaveBeenCalledWith('const x = 1;');
     });
 
     it('does not render a copy button for mermaid diagrams', () => {
@@ -245,16 +186,6 @@ describe('MermaidCodeBlock', () => {
       );
 
       expect(screen.getByTestId('mermaid-diagram-mock')).toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
-    });
-
-    it('does not render a copy button for inline code', () => {
-      render(
-        <MermaidCodeBlock inline={true} className="language-javascript">
-          inline code
-        </MermaidCodeBlock>
-      );
-
       expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
     });
   });
