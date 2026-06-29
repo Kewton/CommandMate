@@ -435,9 +435,14 @@ export const Sidebar = memo(function Sidebar() {
         data-testid="sidebar-header"
         className="flex-shrink-0 px-4 py-4 border-b border-gray-700"
       >
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-white">Branches</h2>
-          <div className="flex items-center gap-1">
+        {/* Issue #976: wrap the heading + actions when the sidebar is narrow so
+            the button group drops to a new line instead of overflowing
+            horizontally into the adjacent ActivityBar. flex-wrap on both the row
+            and the actions group keeps everything within the sidebar width
+            without an overflow clip (which would crop the Sort dropdown). */}
+        <div className="flex flex-wrap items-center justify-between gap-y-2">
+          <h2 className="min-w-0 truncate text-lg font-semibold text-white">Branches</h2>
+          <div className="flex flex-wrap items-center gap-1">
             <ViewModeToggle viewMode={viewMode} onToggle={setViewMode} />
             <SortSelector />
             <SyncButton refreshWorktrees={refreshWorktrees} />
