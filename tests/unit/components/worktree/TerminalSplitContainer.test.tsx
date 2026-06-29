@@ -479,3 +479,37 @@ describe('TerminalSplitContainer drop validation (Issue #786 / #869)', () => {
     expect(screen.getByTestId('pane-cli-0')).toHaveTextContent('gemini');
   });
 });
+
+// ===========================================================================
+// Issue #977: the action-bar buttons are all left-aligned in a single group,
+// ordered +Split → -Split → Equal widths → History → Files. The `ml-auto` that
+// previously split the bar into left/right groups has been removed.
+// ===========================================================================
+describe('TerminalSplitContainer action-bar layout (Issue #977)', () => {
+  it('renders the action buttons in DOM order +Split → -Split → Equal widths → History → Files', () => {
+    setup();
+    const order = [
+      'add-terminal-split',
+      'remove-terminal-split',
+      'equalize-split-widths',
+      'toggle-history-pane',
+      'toggle-file-panel',
+    ];
+    // Each button must precede the next in document order (left-to-right bar).
+    for (let i = 0; i < order.length - 1; i++) {
+      const current = screen.getByTestId(order[i]);
+      const next = screen.getByTestId(order[i + 1]);
+      expect(
+        current.compareDocumentPosition(next) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+  });
+
+  it('does not push +Split to the right with ml-auto (left-aligned bar)', () => {
+    setup();
+    expect(screen.getByTestId('add-terminal-split').className).not.toContain(
+      'ml-auto',
+    );
+  });
+});

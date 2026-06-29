@@ -285,6 +285,57 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
         </span>
 
         {/*
+          Issue #977: all action-bar buttons are left-aligned in a single
+          group, ordered +Split → -Split → Equal widths → History → Files.
+          The `ml-auto` that previously pushed +Split (and everything after)
+          to the right has been removed so the bar reads left-to-right.
+        */}
+        <button
+          type="button"
+          onClick={addSplit}
+          disabled={!canAdd}
+          aria-disabled={!canAdd}
+          aria-label="Add terminal split"
+          data-testid="add-terminal-split"
+          className="text-xs px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          + Split
+        </button>
+        <button
+          type="button"
+          onClick={removeSplit}
+          disabled={!canRemove}
+          aria-disabled={!canRemove}
+          aria-label="Remove last terminal split"
+          data-testid="remove-terminal-split"
+          className="text-xs px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          - Split
+        </button>
+
+        {/*
+          Issue #861: equalize terminal split widths (each → 1/n) and reset the
+          Message History width to default in one action. Disabled only when
+          there is nothing to equalize (single split AND History hidden).
+        */}
+        <button
+          type="button"
+          onClick={handleEqualizeWidths}
+          disabled={!canEqualize}
+          aria-disabled={!canEqualize}
+          aria-label={t('terminal.equalizeWidthsHint')}
+          title={t('terminal.equalizeWidthsHint')}
+          data-testid="equalize-split-widths"
+          className="flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <AlignHorizontalDistributeCenter
+            className="w-3.5 h-3.5 flex-shrink-0"
+            aria-hidden="true"
+          />
+          <span>{t('terminal.equalizeWidths')}</span>
+        </button>
+
+        {/*
           Issue #841 (Phase 2): History / Files visibility toggles. Always
           shown (split-count independent). Active = cyan accent, inactive =
           gray. `aria-pressed` reflects current visibility. The existing
@@ -333,51 +384,6 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
         >
           <Files className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
           <span>{t('terminal.filesLabel')}</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={addSplit}
-          disabled={!canAdd}
-          aria-disabled={!canAdd}
-          aria-label="Add terminal split"
-          data-testid="add-terminal-split"
-          className="ml-auto text-xs px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          + Split
-        </button>
-        <button
-          type="button"
-          onClick={removeSplit}
-          disabled={!canRemove}
-          aria-disabled={!canRemove}
-          aria-label="Remove last terminal split"
-          data-testid="remove-terminal-split"
-          className="text-xs px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          - Split
-        </button>
-
-        {/*
-          Issue #861: equalize terminal split widths (each → 1/n) and reset the
-          Message History width to default in one action. Disabled only when
-          there is nothing to equalize (single split AND History hidden).
-        */}
-        <button
-          type="button"
-          onClick={handleEqualizeWidths}
-          disabled={!canEqualize}
-          aria-disabled={!canEqualize}
-          aria-label={t('terminal.equalizeWidthsHint')}
-          title={t('terminal.equalizeWidthsHint')}
-          data-testid="equalize-split-widths"
-          className="flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <AlignHorizontalDistributeCenter
-            className="w-3.5 h-3.5 flex-shrink-0"
-            aria-hidden="true"
-          />
-          <span>{t('terminal.equalizeWidths')}</span>
         </button>
       </div>
 
