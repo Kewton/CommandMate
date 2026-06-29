@@ -12,6 +12,7 @@
 import React from 'react';
 import dynamic from 'next/dynamic';
 import { Loader2 } from 'lucide-react';
+import { CodeBlockWithCopy } from '@/components/common/CodeBlockWithCopy';
 
 /**
  * Dynamic import of MermaidDiagram with SSR disabled
@@ -130,10 +131,14 @@ export function MermaidCodeBlock({
     return <MermaidDiagram code={code} />;
   }
 
-  // Non-mermaid code blocks are rendered as regular code elements
+  // Non-mermaid code blocks are rendered as regular code elements, wrapped with
+  // a copy button (Issue #981). The wrapper is a <span> so it stays valid
+  // phrasing content inside the parent <pre>.
   return (
-    <code className={className}>
-      {children}
-    </code>
+    <CodeBlockWithCopy as="span">
+      <code className={className}>
+        {children}
+      </code>
+    </CodeBlockWithCopy>
   );
 }
