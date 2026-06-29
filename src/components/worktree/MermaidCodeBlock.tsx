@@ -12,7 +12,6 @@
 import React from 'react';
 import dynamic from 'next/dynamic';
 import { Loader2 } from 'lucide-react';
-import { CodeBlockWithCopy } from '@/components/common/CodeBlockWithCopy';
 
 /**
  * Dynamic import of MermaidDiagram with SSR disabled
@@ -49,8 +48,6 @@ export interface MermaidCodeBlockProps {
   children?: React.ReactNode | string | string[];
   /** ReactMarkdown passes AST node */
   node?: unknown;
-  /** Whether this is an inline code block */
-  inline?: boolean;
 }
 
 /**
@@ -114,31 +111,17 @@ function isMermaidLanguage(className?: string): boolean {
 export function MermaidCodeBlock({
   className,
   children,
-  inline,
 }: MermaidCodeBlockProps): JSX.Element {
-  // Inline code blocks are always rendered as regular code
-  if (inline) {
-    return (
-      <code className={className}>
-        {children}
-      </code>
-    );
-  }
-
-  // Check if this is a mermaid code block
+  // Fenced mermaid blocks render as a diagram.
   if (isMermaidLanguage(className)) {
     const code = extractCodeString(children);
     return <MermaidDiagram code={code} />;
   }
 
-  // Non-mermaid code blocks are rendered as regular code elements, wrapped with
-  // a copy button (Issue #981). The wrapper is a <span> so it stays valid
-  // phrasing content inside the parent <pre>.
-  return (
-    <CodeBlockWithCopy as="span">
-      <code className={className}>
-        {children}
-      </code>
-    </CodeBlockWithCopy>
-  );
+  // Everything else — inline code and non-mermaid block code — renders as a
+  // plain <code>. react-markdown v10 no longer passes an `inline` prop, so the
+  // copy button is attached by MarkdownPreview's `pre` renderer (block code
+  // only); inline code has no <pre> ancestor and is therefore never decorated,
+  // fixing the inline-code line-break regression. (Issue #983)
+  return <code className={className}>{children}</code>;
 }
