@@ -1371,10 +1371,10 @@ describe('FileTreeView', () => {
       expect(fetchCount).toBeLessThan(10);
     });
 
-    it('hides the created column inline by default and exposes metadata via the row title [Issue #969]', async () => {
+    it('hides the created column inline by default and exposes metadata via the hover tooltip [Issue #969, #975]', async () => {
       // [Issue #162 -> #969] birthtime is no longer rendered inline by default
-      // (default = size only). The created/modified/size data is instead
-      // available via the row's formatted `title` tooltip.
+      // (default = size only). [Issue #975] The created/modified/size data is
+      // instead surfaced through the unified hover tooltip (no native `title`).
       window.localStorage.clear();
       const birthtimeData: TreeResponse = {
         path: '',
@@ -1411,13 +1411,15 @@ describe('FileTreeView', () => {
 
       // The raw ISO string is no longer used as a title (it is now formatted).
       expect(screen.queryByTitle('2026-02-10T10:00:00Z')).not.toBeInTheDocument();
-
-      // The row carries a formatted, multi-line metadata title for hover.
+      // No native `title` remains on the row — metadata moved to the tooltip.
       const row = screen.getByTestId('tree-item-test-file.ts');
-      const title = row.getAttribute('title');
-      expect(title).toBeTruthy();
-      expect(title).toContain('512 B');
-      expect(title!.split('\n').length).toBe(3);
+      expect(row.getAttribute('title')).toBeNull();
+
+      // Hovering the file name surfaces the formatted metadata in one bubble.
+      fireEvent.mouseEnter(screen.getByText('test-file.ts'));
+      const tooltip = await screen.findByRole('tooltip', { hidden: true });
+      expect(tooltip).toHaveTextContent('test-file.ts');
+      expect(tooltip).toHaveTextContent('512 B');
     });
 
     it('toggles inline metadata columns via the toolbar gear [Issue #969]', async () => {

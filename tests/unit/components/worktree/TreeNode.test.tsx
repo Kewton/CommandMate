@@ -1,14 +1,16 @@
 /**
- * Tests for TreeNode metadata display (Issue #969)
+ * Tests for TreeNode metadata display (Issue #969, #975)
  *
  * Covers the toggleable inline columns (size / created / modified) and the
- * formatted hover tooltip built into the row's `title` attribute.
+ * unified hover tooltip (file name + metadata) rendered by TruncationTooltip
+ * — replacing the previous native `title` metadata tooltip (Issue #975).
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { TreeNode } from '@/components/worktree/TreeNode';
+import { TRUNCATION_TOOLTIP_DELAY_MS } from '@/components/common/TruncationTooltip';
 import type { TreeItem } from '@/types/models';
 import type { FileMetadataDisplaySettings } from '@/hooks/useFileMetadataDisplay';
 
@@ -65,26 +67,58 @@ describe('TreeNode metadata display [Issue #969]', () => {
     expect(screen.getByTestId('tree-item-modified')).toBeInTheDocument();
   });
 
-  it('builds a formatted, multi-line title tooltip on file rows', () => {
-    renderNode(FILE);
-    const row = screen.getByTestId('tree-item-app.ts');
-    const title = row.getAttribute('title');
-    expect(title).toBeTruthy();
-    // Size line (formatFileSize(2048) === '2.0 KB')
-    expect(title).toContain('2.0 KB');
-    // Localized labels resolve via the mocked useTranslations (key passthrough)
-    expect(title).toContain('worktree.fileTree.metadata.size');
-    expect(title).toContain('worktree.fileTree.metadata.created');
-    expect(title).toContain('worktree.fileTree.metadata.modified');
-    // Multi-line (newline-separated)
-    expect(title!.split('\n').length).toBe(3);
-  });
+  describe('unified hover tooltip [Issue #975]', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
 
-  it('does not set a metadata title on directory rows', () => {
-    const dir: TreeItem = { name: 'src', type: 'directory', itemCount: 3 };
-    renderNode(dir);
-    const row = screen.getByTestId('tree-item-src');
-    expect(row.getAttribute('title')).toBeNull();
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('no longer sets a native title attribute on file rows', () => {
+      renderNode(FILE);
+      const row = screen.getByTestId('tree-item-app.ts');
+      // Metadata moved out of the native `title` into the custom tooltip.
+      expect(row.getAttribute('title')).toBeNull();
+    });
+
+    it('shows name + formatted metadata in a single bubble on hover', () => {
+      renderNode(FILE);
+      // The name trigger carries metadata, so the bubble appears on hover
+      // even though jsdom reports the name as non-truncated.
+      const trigger = screen.getByText('app.ts');
+      fireEvent.mouseEnter(trigger);
+      act(() => {
+        vi.advanceTimersByTime(TRUNCATION_TOOLTIP_DELAY_MS);
+      });
+
+      const tooltip = screen.getByRole('tooltip', { hidden: true });
+      // File name is part of the same bubble.
+      expect(tooltip).toHaveTextContent('app.ts');
+      // Size line (formatFileSize(2048) === '2.0 KB')
+      expect(tooltip).toHaveTextContent('2.0 KB');
+      // Localized labels resolve via the mocked useTranslations (key passthrough)
+      expect(tooltip).toHaveTextContent('worktree.fileTree.metadata.size');
+      expect(tooltip).toHaveTextContent('worktree.fileTree.metadata.created');
+      expect(tooltip).toHaveTextContent('worktree.fileTree.metadata.modified');
+    });
+
+    it('does not show a metadata tooltip on directory rows', () => {
+      const dir: TreeItem = { name: 'src', type: 'directory', itemCount: 3 };
+      renderNode(dir);
+      const row = screen.getByTestId('tree-item-src');
+      expect(row.getAttribute('title')).toBeNull();
+
+      // Directories pass no metadata; with a non-truncated name (jsdom) the
+      // bubble never appears.
+      const trigger = screen.getByText('src');
+      fireEvent.mouseEnter(trigger);
+      act(() => {
+        vi.advanceTimersByTime(TRUNCATION_TOOLTIP_DELAY_MS + 50);
+      });
+      expect(screen.queryByRole('tooltip', { hidden: true })).not.toBeInTheDocument();
+    });
   });
 
   it('shows item count for directories when size column is on', () => {
