@@ -10,8 +10,17 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { MermaidCodeBlock } from '@/components/worktree/MermaidCodeBlock';
+
+// Hoisted clipboard mock for the copy button (Issue #981)
+const { mockCopyToClipboard } = vi.hoisted(() => ({
+  mockCopyToClipboard: vi.fn(),
+}));
+
+vi.mock('@/lib/clipboard-utils', () => ({
+  copyToClipboard: mockCopyToClipboard,
+}));
 
 // Mock MermaidDiagram component
 vi.mock('@/components/worktree/MermaidDiagram', () => ({
@@ -192,6 +201,61 @@ describe('MermaidCodeBlock', () => {
 
       // Should still render (empty diagram will show error)
       expect(screen.getByTestId('mermaid-diagram-mock')).toBeInTheDocument();
+    });
+  });
+
+  describe('Copy button (Issue #981)', () => {
+    beforeEach(() => {
+      mockCopyToClipboard.mockResolvedValue(undefined);
+    });
+
+    it('renders a copy button for non-mermaid block code', () => {
+      render(
+        <MermaidCodeBlock className="language-javascript">
+          const x = 1;
+        </MermaidCodeBlock>
+      );
+
+      expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+      // The underlying code element is preserved
+      const codeElement = screen.getByText('const x = 1;');
+      expect(codeElement.tagName).toBe('CODE');
+      expect(codeElement).toHaveClass('language-javascript');
+    });
+
+    it('copies the code text when the copy button is clicked', async () => {
+      render(
+        <MermaidCodeBlock className="language-javascript">
+          const x = 1;
+        </MermaidCodeBlock>
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+      });
+
+      expect(mockCopyToClipboard).toHaveBeenCalledWith('const x = 1;');
+    });
+
+    it('does not render a copy button for mermaid diagrams', () => {
+      render(
+        <MermaidCodeBlock className="language-mermaid">
+          graph TD
+        </MermaidCodeBlock>
+      );
+
+      expect(screen.getByTestId('mermaid-diagram-mock')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
+    });
+
+    it('does not render a copy button for inline code', () => {
+      render(
+        <MermaidCodeBlock inline={true} className="language-javascript">
+          inline code
+        </MermaidCodeBlock>
+      );
+
+      expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
     });
   });
 });

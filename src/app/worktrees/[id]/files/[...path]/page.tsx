@@ -15,6 +15,7 @@ import rehypeHighlight from 'rehype-highlight';
 import { FileContent } from '@/types/models';
 import { ImageViewer } from '@/components/worktree/ImageViewer';
 import { VideoViewer } from '@/components/worktree/VideoViewer';
+import { CodeBlockWithCopy } from '@/components/common/CodeBlockWithCopy';
 
 export default function FileViewerPage() {
   const router = useRouter();
@@ -167,10 +168,15 @@ export default function FileViewerPage() {
                           </code>
                         );
                       },
+                      // Issue #981: wrap code blocks with a copy button. The
+                      // wrapper sits outside the scrollable <pre> so the button
+                      // stays pinned to the top-right while code scrolls.
                       pre: ({ children }: { children?: React.ReactNode }) => (
-                        <pre className="overflow-x-auto">
-                          {children}
-                        </pre>
+                        <CodeBlockWithCopy>
+                          <pre className="overflow-x-auto">
+                            {children}
+                          </pre>
+                        </CodeBlockWithCopy>
                       ),
                       table: ({ children }: { children?: React.ReactNode }) => (
                         <div className="overflow-x-auto">
