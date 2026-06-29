@@ -280,12 +280,15 @@ export const TreeNode = memo(function TreeNode({
   );
 
   /**
-   * [Issue #969] Formatted, locale-aware metadata tooltip for file rows.
-   * Built into the row's `title` attribute (newline-separated) so the
-   * created/modified/size info is always available on hover, even when the
-   * inline columns are toggled off. Directories get no tooltip.
+   * [Issue #969, #975] Formatted, locale-aware metadata for file rows,
+   * newline-separated. Passed to `TruncationTooltip` so the size/created/
+   * modified info shows in the SAME bubble as the file name (one unified
+   * tooltip instead of the old native `title`). The full set is always
+   * surfaced on hover regardless of which inline columns are toggled, so the
+   * created/modified data stays reachable even in the default size-only view.
+   * Directories get no metadata (undefined → name-only tooltip when clipped).
    */
-  const metadataTitle = useMemo(() => {
+  const metadataTooltip = useMemo(() => {
     if (isDirectory) return undefined;
     const lines: string[] = [];
     if (item.size !== undefined) {
@@ -380,7 +383,6 @@ export const TreeNode = memo(function TreeNode({
         tabIndex={0}
         className="flex items-center gap-2 py-1.5 pr-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
         style={combinedStyle}
-        title={metadataTitle}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
         onContextMenu={handleContextMenu}
@@ -410,10 +412,12 @@ export const TreeNode = memo(function TreeNode({
         )}
 
         {/* Name - with highlight for name search */}
-        {/* [Issue #859] JS tooltip (Portal) shows full name on hover when truncated,
-            replacing the native `title` whose show-delay is browser-controlled and slow */}
+        {/* [Issue #859/#975] One JS tooltip (Portal) shows the full name plus the
+            file's metadata (size/created/modified) on hover, replacing both the
+            slow native `title` and the previous separate metadata tooltip. */}
         <TruncationTooltip
           content={item.name}
+          metadata={metadataTooltip}
           className="flex-1 truncate text-sm text-gray-700 dark:text-gray-300"
         >
           {searchMode === 'name' && searchQuery ? (

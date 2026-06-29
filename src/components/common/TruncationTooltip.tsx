@@ -1,16 +1,23 @@
 /**
- * TruncationTooltip Component (Issue #859)
+ * TruncationTooltip Component (Issue #859, #975)
  *
  * A hover-delayed tooltip for text that is visually truncated (CSS
  * `text-overflow: ellipsis`). It replaces the native `title` attribute on
  * file names in the file tree, whose show-delay is browser-controlled and
  * sluggish (~0.5–1s in Chrome) and cannot be tuned from JS/CSS.
  *
+ * [Issue #975] An optional `metadata` prop lets a caller surface extra
+ * formatted info (e.g. a file's size / created / modified lines) inside the
+ * SAME bubble as the name, so a single styled tooltip replaces the previous
+ * two independent ones (native `title` metadata + this name tooltip).
+ *
  * Design notes:
  *   - The trigger is the truncating element itself (the caller passes the
  *     same `truncate`/`overflow-hidden` className it used before), so we can
  *     measure `scrollWidth > clientWidth` to decide whether the text is
- *     actually clipped. Short names that fit never show a tooltip.
+ *     actually clipped. Short names that fit never show a tooltip — unless
+ *     `metadata` is supplied, in which case the bubble always appears on hover
+ *     so the metadata is reachable even for short, non-clipped names.
  *   - The tooltip is rendered through a React portal to `document.body` with
  *     `position: fixed`, mirroring `BranchListItem`'s approach, so it is never
  *     clipped by the file tree's `overflow-y: auto` scroll container.
@@ -55,6 +62,14 @@ export interface TruncationTooltipProps {
    * `content` when omitted.
    */
   children?: React.ReactNode;
+  /**
+   * [Issue #975] Optional pre-formatted metadata (newline-separated lines)
+   * rendered below the name inside the same bubble. When present, the tooltip
+   * shows on hover even if the name is not truncated, so callers can attach
+   * always-available info (e.g. file size / created / modified). Omit it for a
+   * name-only tooltip (the default truncation behavior is unchanged).
+   */
+  metadata?: string;
 }
 
 /**
@@ -73,6 +88,7 @@ export function TruncationTooltip({
   delay = TRUNCATION_TOOLTIP_DELAY_MS,
   className,
   children,
+  metadata,
 }: TruncationTooltipProps): React.ReactElement {
   const triggerRef = useRef<HTMLSpanElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -91,8 +107,11 @@ export function TruncationTooltip({
   const handleMouseEnter = useCallback(() => {
     const el = triggerRef.current;
     if (!el) return;
-    // Only show a tooltip when the name is actually clipped.
-    if (el.scrollWidth <= el.clientWidth) return;
+    // Show when the name is actually clipped OR when there is metadata to
+    // surface (file rows attach metadata so their info is reachable on hover
+    // even when the name itself fits). [Issue #975]
+    const isTruncated = el.scrollWidth > el.clientWidth;
+    if (!isTruncated && !metadata) return;
 
     clearTimer();
     timerRef.current = setTimeout(() => {
@@ -109,7 +128,7 @@ export function TruncationTooltip({
       setVisible(true);
       timerRef.current = null;
     }, delay);
-  }, [clearTimer, delay]);
+  }, [clearTimer, delay, metadata]);
 
   const handleMouseLeave = useCallback(() => {
     clearTimer();
@@ -133,10 +152,15 @@ export function TruncationTooltip({
           <span
             role="tooltip"
             aria-hidden="true"
-            className="fixed z-[9999] max-w-md px-2 py-1 text-xs font-medium rounded bg-gray-900 text-gray-100 shadow-lg pointer-events-none break-all"
+            className="fixed z-[9999] max-w-md px-2 py-1 text-xs font-medium rounded bg-gray-900 text-gray-100 shadow-lg pointer-events-none"
             style={{ top: coords.top, left: coords.left }}
           >
-            {content}
+            <span className="block break-all">{content}</span>
+            {metadata && (
+              <span className="mt-0.5 block whitespace-pre-line font-normal text-gray-300">
+                {metadata}
+              </span>
+            )}
           </span>,
           document.body
         )}
