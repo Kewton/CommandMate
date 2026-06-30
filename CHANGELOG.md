@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-06-30
+
+> **Highlight**: worktree 詳細画面の UI 改善が中心。Files ツリーにメタデータ列（size / created / modified）のトグル表示を追加（#969）し、ファイル行のメタデータと名前のツールチップを単一バブルに統合（#975）。マークダウンファイルプレビューのコードブロックにコピーボタンを追加（#981、inline code への誤付与を #983 で修正）。あわせて PaneResizer の仕切りを VS Code 風の控えめな 1px 細線化（#970）、PC ターミナルヘッダーのアクションバーボタンを左寄せ + 順序統一（#977）、サイドバーの横スクロールバーを truncate + hover ツールチップで除去（#971）し、狭幅時にヘッダーボタンを折り返して ActivityBar との重なりを解消（#976）した。
+
+### Added
+- feat(files): Files ツリーの各行に常時インライン表示されていた **size / created（birthtime）/ modified（mtime）のメタデータ列を個別にトグル表示**できるよう変更（既定は VS Code 流に size のみインライン、タイムスタンプは hover）。`readDirectory` が `mtime` を返すよう拡張し `TreeItem` に `mtime?` を追加（`ctime` は意図的に非採用）、新規 `useFileMetadataDisplay`（localStorage + CustomEvent でタブ間同期）、ツールバーに 3 チェックボックスのギアポップオーバー `FileMetadataToggle`、`TreeNode` が列を条件描画しつつ `formatMessageTimestamp` / `formatFileSize` でロケール対応の複数行 title ツールチップを構築。i18n `worktree.fileTree.metadata`（en/ja パリティ）を追加 (Issue #969)
+- feat(markdown): マークダウンファイルプレビュー（PC / mobile 両レンダーパス）の **非 mermaid コードブロックにコピーボタンを追加**。`CopyButton` を `src/components/common/CopyButton.tsx` へ抽出して `AssistantMessageList`（挙動不変）と新規ラッパで共有、`CodeBlockWithCopy` が code/pre を relative group で包んで `CopyButton` をオーバーレイし `rehype-highlight` の React ツリーから再帰的にプレーンテキストを抽出してコピー。md+ では hover 表示・タッチ幅では常時表示、React レンダラ経由で付与し `rehype-sanitize` に落とされないようにした（mermaid 図 / inline code は不変） (Issue #981)
+
+### Changed
+- feat(ui): worktree 詳細画面の 4 つのドラッグ可能な仕切り（`PaneResizer`）を**太く濃い線から VS Code 風の控えめな 1px 細線**に変更。線色を `bg-gray-700` から `bg-gray-200 dark:bg-gray-700`（固定パネル枠線と同色）へ、hover 時の線幅拡大（`hover:w-2` / `hover:h-2`）を撤去して常時 1px を維持し hover/focus 時のみ accent 色（cyan-500）を表示。`darkMode: 'class'` で base の `dark:bg-gray-700` が specificity で勝つため `dark:hover:bg-cyan-500` とドラッグ時の `dark:bg-cyan-500` を明示、透明な `::before` 疑似要素でクリック判定を ±4px に拡張（見た目 1px でも掴みやすさ維持）、focus ring offset をテーマ対応化、ドラッグ中のみ線幅拡大 + accent をライブフィードバックとして維持 (Issue #970)
+- feat(files): ファイル行の**2 つの独立ツールチップ（#969 のメタデータ native `title` と #859 の名前 `TruncationTooltip`）を単一のスタイル付きバブルに統合**。従来は遅延（native 約 0.5〜1s vs custom 200ms）とスタイルが異なっていた。`TruncationTooltip` に optional `metadata` prop を追加し「名前が省略表示 OR メタデータあり」のとき hover で名前 + メタデータ（複数行）を 1 つの portal バブルに描画、`TreeNode` は native `title` を撤去して整形済み size/created/modified を `metadata` で渡す（インライン列のトグル状態に関わらず hover で全項目を参照可能＝#969 の意図を保持）。サイドバー利用箇所は optional/additive のため無影響 (Issue #975)
+- feat(terminal): PC ターミナルヘッダーのアクションバーボタンを**左寄せ + +Split → -Split → Equal widths → History → Files の順に統一**。+Split の `ml-auto`（バーを左右グループに分割していた）を撤去し JSX を並べ替えて全ボタンを左→右に整列。PC 専用（`TerminalSplitContainer` は `WorktreeDetailDesktop` のみで描画）でモバイル経路は無影響、ボタンの挙動・有効/無効条件・aria 状態は不変。順序検証の単体テストを追加 (Issue #977)
+
+### Fixed
+- fix(sidebar): 長いリポジトリ名がグループヘッダーをはみ出して生じる**サイドバーの横スクロールバーを除去**。グループヘッダーを `min-w-0` flex コンテナ化して既存の `truncate` を効かせ、リポジトリ名を `TruncationTooltip` で包んで省略時のみ hover でフルネーム表示（`BranchListItem` と同様）、ブランチリストに `overflow-x-hidden` を safeguard として追加、DnD sortable ラッパを `w-full min-w-0` で制約してドラッグ中の overflow を防止 (Issue #971)
+- fix(sidebar): サイドバーを狭めた際に**ヘッダーの見出し + アクションボタン群（ViewModeToggle / SortSelector / SyncButton / Repositories）が横方向にあふれ隣接 ActivityBar と重なる**問題を修正。ヘッダー行が `flex-nowrap` + 既定 `overflow:visible` だったため、ヘッダー行に `flex-wrap` + `gap-y-2` を付与してボタン群を入りきらない時に改行、ボタン群自体にも `flex-wrap`、Branches 見出しに `min-w-0 truncate` を付与して縮小させた（下方向に開く Sort ドロップダウンが切れるため overflow clip は不使用） (Issue #976)
+- fix(markdown): react-markdown v10 が `code` コンポーネントに `inline` prop を渡さなくなったため `MermaidCodeBlock` の inline 判定が常に undefined となり、**全ての inline code に誤ってコピーボタンが付き `as="span"` のブロッククラスで単独行に押し出される**問題（#981 で混入）を修正。コピーボタンの付与を `MarkdownPreview` の `pre` レンダラ（fenced/indented コードブロックでのみ発火、inline code では決して発火しない）へ移して誤検出を構造的に不可能化、mermaid ブロックはプレーン `<pre>`（ボタンなし）で不変、ファイルビューアページの壊れた `inline` 判定もクラスベース検出へ置換。inline code はボタンなし/改行なし、fenced ブロックは言語有無を問わずボタンが機能、mermaid 図はボタンなしを固定する回帰テストを追加 (Issue #983)
+
 ## [0.7.4] - 2026-06-25
 
 > **Highlight**: モバイル Agent タブヘッダーの操作性改善が中心。タブを横スクロール可能化（#958）したうえで横スクロールバーを非表示化（#964）、ステータスを CLI ツール単位ではなくインスタンス単位で解決（#960）、kill-session 確認ダイアログにインスタンスのエイリアスを表示（#956）。あわせて Auto-Yes をカウントダウン 0 到達の正確なタイミングで無効化（#959）し、サイドバークリック→詳細表示の体感遅延を低減する perf クイックウィン 4 件（#965）を追加した。
