@@ -213,6 +213,74 @@ describe('TruncationTooltip (Issue #859)', () => {
     expect(screen.getByRole('tooltip', { hidden: true })).toBeInTheDocument();
   });
 
+  // [Issue #975] Metadata is folded into the same bubble as the name so a
+  // single styled tooltip replaces the old native `title` + name tooltip pair.
+  it('shows the tooltip with name + metadata even when the text is NOT truncated', () => {
+    render(
+      <TruncationTooltip
+        content="app.ts"
+        metadata={'Size: 2.0 KB\nModified: yesterday'}
+        className="truncate"
+      >
+        app.ts
+      </TruncationTooltip>
+    );
+    const trigger = screen.getByText('app.ts');
+    setTruncation(trigger, false);
+
+    fireEvent.mouseEnter(trigger);
+    act(() => {
+      vi.advanceTimersByTime(TRUNCATION_TOOLTIP_DELAY_MS);
+    });
+
+    const tooltip = screen.getByRole('tooltip', { hidden: true });
+    expect(tooltip).toBeInTheDocument();
+    // One bubble carries both the name and the formatted metadata lines.
+    expect(tooltip).toHaveTextContent('app.ts');
+    expect(tooltip).toHaveTextContent('Size: 2.0 KB');
+    expect(tooltip).toHaveTextContent('Modified: yesterday');
+  });
+
+  it('still shows name + metadata together when the name IS truncated', () => {
+    render(
+      <TruncationTooltip
+        content="a-very-long-file-name.tsx"
+        metadata={'Size: 3.5 MB'}
+        className="truncate"
+      >
+        a-very-long-file-name.tsx
+      </TruncationTooltip>
+    );
+    const trigger = screen.getByText('a-very-long-file-name.tsx');
+    setTruncation(trigger, true);
+
+    fireEvent.mouseEnter(trigger);
+    act(() => {
+      vi.advanceTimersByTime(TRUNCATION_TOOLTIP_DELAY_MS);
+    });
+
+    const tooltip = screen.getByRole('tooltip', { hidden: true });
+    expect(tooltip).toHaveTextContent('a-very-long-file-name.tsx');
+    expect(tooltip).toHaveTextContent('Size: 3.5 MB');
+  });
+
+  it('does NOT show a tooltip when there is no metadata and the text is not truncated', () => {
+    render(
+      <TruncationTooltip content="short.ts" className="truncate">
+        short.ts
+      </TruncationTooltip>
+    );
+    const trigger = screen.getByText('short.ts');
+    setTruncation(trigger, false);
+
+    fireEvent.mouseEnter(trigger);
+    act(() => {
+      vi.advanceTimersByTime(TRUNCATION_TOOLTIP_DELAY_MS + 50);
+    });
+
+    expect(screen.queryByRole('tooltip', { hidden: true })).not.toBeInTheDocument();
+  });
+
   it('clears the scheduled timer on unmount (no tooltip flash after unmount)', () => {
     const { unmount } = render(
       <TruncationTooltip content="a-very-long-file-name.tsx" className="truncate">

@@ -66,6 +66,41 @@ describe('readDirectory birthtime', () => {
     });
   });
 
+  describe('file mtime [Issue #969]', () => {
+    it('should include mtime for files', async () => {
+      writeFileSync(join(testDir, 'test.txt'), 'content');
+
+      const result = await readDirectory(testDir, '');
+
+      const file = result.items.find(item => item.name === 'test.txt');
+      expect(file).toBeDefined();
+      expect(file?.mtime).toBeDefined();
+      expect(typeof file?.mtime).toBe('string');
+    });
+
+    it('should return mtime as valid ISO 8601 string', async () => {
+      writeFileSync(join(testDir, 'test.txt'), 'content');
+
+      const result = await readDirectory(testDir, '');
+
+      const file = result.items.find(item => item.name === 'test.txt');
+      const date = new Date(file!.mtime!);
+      expect(date.getTime()).not.toBeNaN();
+    });
+
+    it('should return a recent mtime for a newly written file', async () => {
+      const beforeWrite = new Date();
+      writeFileSync(join(testDir, 'recent.txt'), 'content');
+
+      const result = await readDirectory(testDir, '');
+
+      const file = result.items.find(item => item.name === 'recent.txt');
+      const mtime = new Date(file!.mtime!);
+      expect(mtime.getTime()).toBeGreaterThanOrEqual(beforeWrite.getTime() - 1000);
+      expect(mtime.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
+    });
+  });
+
   describe('directory items', () => {
     it('should NOT include birthtime for directories', async () => {
       mkdirSync(join(testDir, 'subdir'));
@@ -75,6 +110,16 @@ describe('readDirectory birthtime', () => {
       const dir = result.items.find(item => item.name === 'subdir');
       expect(dir).toBeDefined();
       expect(dir?.birthtime).toBeUndefined();
+    });
+
+    it('should NOT include mtime for directories [Issue #969]', async () => {
+      mkdirSync(join(testDir, 'subdir'));
+
+      const result = await readDirectory(testDir, '');
+
+      const dir = result.items.find(item => item.name === 'subdir');
+      expect(dir).toBeDefined();
+      expect(dir?.mtime).toBeUndefined();
     });
   });
 

@@ -36,7 +36,17 @@
     "moveConfirm": "ここに移動",
     "moveSuccess": "移動しました",
     "timeAgo": "{time}前",
-    "rootDirectory": "ルート"
+    "rootDirectory": "ルート",
+    "metadata": {
+      "size": "サイズ",
+      "created": "作成",
+      "modified": "更新",
+      "settingsLabel": "メタデータ表示設定",
+      "settingsTitle": "インライン表示",
+      "showSize": "ファイルサイズ",
+      "showCreated": "作成日時",
+      "showModified": "更新日時"
+    }
   },
   "update": {
     "available": "新しいバージョンが利用可能です",

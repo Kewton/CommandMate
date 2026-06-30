@@ -15,6 +15,7 @@ import rehypeHighlight from 'rehype-highlight';
 import { FileContent } from '@/types/models';
 import { ImageViewer } from '@/components/worktree/ImageViewer';
 import { VideoViewer } from '@/components/worktree/VideoViewer';
+import { CodeBlockWithCopy } from '@/components/common/CodeBlockWithCopy';
 
 export default function FileViewerPage() {
   const router = useRouter();
@@ -152,9 +153,14 @@ export default function FileViewerPage() {
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[rehypeHighlight]}
                     components={{
-                      // Custom components for better rendering
-                      code: ({ inline, className, children, ...props }: { inline?: boolean; className?: string; children?: React.ReactNode }) => {
-                        if (inline) {
+                      // Custom components for better rendering.
+                      // Issue #983: react-markdown v10 dropped the `inline`
+                      // prop. Inline code carries no `language-*` class; fenced
+                      // block code does (and gets a copy button via the `pre`
+                      // renderer below). Detect inline via the class instead.
+                      code: ({ className, children, ...props }: { className?: string; children?: React.ReactNode }) => {
+                        const isInline = !className || !className.includes('language-');
+                        if (isInline) {
                           return (
                             <code className="bg-gray-100 text-gray-800 px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
                               {children}
@@ -167,10 +173,15 @@ export default function FileViewerPage() {
                           </code>
                         );
                       },
+                      // Issue #981: wrap code blocks with a copy button. The
+                      // wrapper sits outside the scrollable <pre> so the button
+                      // stays pinned to the top-right while code scrolls.
                       pre: ({ children }: { children?: React.ReactNode }) => (
-                        <pre className="overflow-x-auto">
-                          {children}
-                        </pre>
+                        <CodeBlockWithCopy>
+                          <pre className="overflow-x-auto">
+                            {children}
+                          </pre>
+                        </CodeBlockWithCopy>
                       ),
                       table: ({ children }: { children?: React.ReactNode }) => (
                         <div className="overflow-x-auto">

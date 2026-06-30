@@ -23,8 +23,10 @@ import type { TreeItem, TreeResponse, SearchMode, SearchResultItem } from '@/typ
 import { useContextMenu } from '@/hooks/useContextMenu';
 import { ContextMenu } from '@/components/worktree/ContextMenu';
 import { TreeNode } from '@/components/worktree/TreeNode';
+import { FileMetadataToggle } from '@/components/worktree/FileMetadataToggle';
 import { computeMatchedPaths } from '@/lib/utils';
 import { useFilePolling } from '@/hooks/useFilePolling';
+import { useFileMetadataDisplay } from '@/hooks/useFileMetadataDisplay';
 import { FILE_TREE_POLL_INTERVAL_MS } from '@/config/file-polling-config';
 import { useLocale } from 'next-intl';
 import { FilePlus, FolderPlus, AlertCircle, RefreshCw } from 'lucide-react';
@@ -113,6 +115,10 @@ export const FileTreeView = memo(function FileTreeView({
 }: FileTreeViewProps) {
   // [Issue #162] Get locale for date formatting
   const locale = useLocale();
+  // [Issue #969] Inline metadata column visibility (size / created / modified),
+  // localStorage-persisted and synced across hook instances.
+  const { settings: metadataDisplay, toggle: toggleMetadata } =
+    useFileMetadataDisplay();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rootItems, setRootItems] = useState<TreeItem[]>([]);
@@ -596,8 +602,10 @@ export const FileTreeView = memo(function FileTreeView({
             <span>New Directory</span>
           </button>
         )}
-        {/* Right-aligned group: refetch indicator + manual refresh button. */}
+        {/* Right-aligned group: metadata toggle + refetch indicator + manual refresh button. */}
         <div className="ml-auto flex items-center gap-1">
+          {/* [Issue #969] Toggle which metadata columns show inline per file row. */}
+          <FileMetadataToggle settings={metadataDisplay} onToggle={toggleMetadata} />
           {/* [Issue #706] Compact refetch indicator. The tree DOM (and its
               scroll position) is preserved while a background refresh runs. */}
           {isRefetching && (
@@ -673,6 +681,7 @@ export const FileTreeView = memo(function FileTreeView({
           searchMode={searchMode}
           matchedPaths={matchedPaths}
           dateFnsLocaleStr={locale}
+          metadataDisplay={metadataDisplay}
         />
       ))}
 

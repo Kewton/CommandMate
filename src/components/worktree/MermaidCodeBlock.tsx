@@ -48,8 +48,6 @@ export interface MermaidCodeBlockProps {
   children?: React.ReactNode | string | string[];
   /** ReactMarkdown passes AST node */
   node?: unknown;
-  /** Whether this is an inline code block */
-  inline?: boolean;
 }
 
 /**
@@ -113,27 +111,17 @@ function isMermaidLanguage(className?: string): boolean {
 export function MermaidCodeBlock({
   className,
   children,
-  inline,
 }: MermaidCodeBlockProps): JSX.Element {
-  // Inline code blocks are always rendered as regular code
-  if (inline) {
-    return (
-      <code className={className}>
-        {children}
-      </code>
-    );
-  }
-
-  // Check if this is a mermaid code block
+  // Fenced mermaid blocks render as a diagram.
   if (isMermaidLanguage(className)) {
     const code = extractCodeString(children);
     return <MermaidDiagram code={code} />;
   }
 
-  // Non-mermaid code blocks are rendered as regular code elements
-  return (
-    <code className={className}>
-      {children}
-    </code>
-  );
+  // Everything else — inline code and non-mermaid block code — renders as a
+  // plain <code>. react-markdown v10 no longer passes an `inline` prop, so the
+  // copy button is attached by MarkdownPreview's `pre` renderer (block code
+  // only); inline code has no <pre> ancestor and is therefore never decorated,
+  // fixing the inline-code line-break regression. (Issue #983)
+  return <code className={className}>{children}</code>;
 }

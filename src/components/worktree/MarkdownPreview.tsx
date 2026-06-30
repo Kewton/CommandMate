@@ -29,6 +29,7 @@ import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/github-dark.css';
 import { X, AlertTriangle, FileText, Eye } from 'lucide-react';
 import { MermaidCodeBlock } from '@/components/worktree/MermaidCodeBlock';
+import { CodeBlockWithCopy } from '@/components/common/CodeBlockWithCopy';
 import { classifyLink, resolveRelativePath, sanitizeHref, REHYPE_SANITIZE_SCHEMA } from '@/lib/link-utils';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
 import type { Components } from 'react-markdown';
@@ -71,6 +72,20 @@ export interface LargeFileWarningProps {
 // ============================================================================
 // MarkdownPreview Component
 // ============================================================================
+
+/**
+ * Detects whether a `<pre>`'s child is a mermaid fenced block. react-markdown
+ * passes the (unrendered) `<code>` element as the pre's only child; mermaid
+ * blocks carry a `language-mermaid` class. Such blocks render a diagram rather
+ * than copyable source, so the `pre` renderer must not wrap them with a copy
+ * button. (Issue #983)
+ */
+function isMermaidPreChild(children: React.ReactNode): boolean {
+  const child = React.Children.toArray(children)[0];
+  if (!React.isValidElement(child)) return false;
+  const className = (child.props as { className?: string }).className;
+  return typeof className === 'string' && className.split(' ').includes('language-mermaid');
+}
 
 /**
  * Fetches an image from the worktree file API and displays it as a data URI.
@@ -158,6 +173,22 @@ export const MarkdownPreview = memo(function MarkdownPreview({
   const markdownComponents: Partial<Components> = useMemo(
     () => ({
       code: MermaidCodeBlock, // [Issue #100] mermaid diagram support
+      // [Issue #983] Attach the copy button at the block level. The `pre`
+      // renderer fires only for fenced/indented code (never inline code), so
+      // inline code is never decorated or forced onto its own line. The wrapper
+      // sits outside the scrollable <pre> so the button stays pinned. Mermaid
+      // blocks render a diagram, not copyable source, so they keep a plain
+      // <pre> (no button) exactly as the default renderer produced.
+      pre: ({ children }) => {
+        if (isMermaidPreChild(children)) {
+          return <pre>{children}</pre>;
+        }
+        return (
+          <CodeBlockWithCopy>
+            <pre className="overflow-x-auto">{children}</pre>
+          </CodeBlockWithCopy>
+        );
+      },
       // Resolve relative image paths via worktree file API (returns Base64 data URI in JSON)
       img: ({ src, alt, width, height, ...props }) => {
         const w = (width ?? props.node?.properties?.width) as string | undefined;
