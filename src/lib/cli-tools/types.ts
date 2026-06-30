@@ -7,7 +7,7 @@
  * T2.1: Single source of truth for CLI tool IDs
  * CLIToolType is derived from this constant (DRY principle)
  */
-export const CLI_TOOL_IDS = ['claude', 'codex', 'gemini', 'vibe-local', 'opencode', 'copilot'] as const;
+export const CLI_TOOL_IDS = ['claude', 'codex', 'gemini', 'vibe-local', 'opencode', 'copilot', 'antigravity'] as const;
 
 /**
  * CLIツールタイプ
@@ -207,6 +207,7 @@ export const CLI_TOOL_DISPLAY_NAMES: Record<CLIToolType, string> = {
   'vibe-local': 'Vibe Local',
   opencode: 'OpenCode',
   copilot: 'Copilot',
+  antigravity: 'Antigravity',
 };
 
 /**

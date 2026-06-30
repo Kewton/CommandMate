@@ -95,9 +95,10 @@ describe('TerminalSplitContainer', () => {
     setup();
     fireEvent.click(screen.getByTestId('add-terminal-split'));
     // split 0 has 'claude', split 1 auto-picked a different instance; both panes
-    // should show ROSTER.length - 1 = 5 available instances (own + not-taken).
-    expect(screen.getByTestId('pane-available-count-0')).toHaveTextContent('5');
-    expect(screen.getByTestId('pane-available-count-1')).toHaveTextContent('5');
+    // should show ROSTER.length - 1 available instances (own + not-taken).
+    const expectedAvailable = String(ROSTER.length - 1);
+    expect(screen.getByTestId('pane-available-count-0')).toHaveTextContent(expectedAvailable);
+    expect(screen.getByTestId('pane-available-count-1')).toHaveTextContent(expectedAvailable);
   });
 
   it('focuses the newly-added pane textarea after addSplit', async () => {

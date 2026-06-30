@@ -64,6 +64,13 @@ describe('CLIToolManager', () => {
       expect(tool.command).toBe('gh');
     });
 
+    it('should return AntigravityTool for antigravity (Issue #988)', () => {
+      const tool = manager.getTool('antigravity');
+      expect(tool.id).toBe('antigravity');
+      expect(tool.name).toBe('Antigravity CLI');
+      expect(tool.command).toBe('agy');
+    });
+
     it('should return the same instance for the same tool type', () => {
       const tool1 = manager.getTool('claude');
       const tool2 = manager.getTool('claude');
@@ -72,9 +79,9 @@ describe('CLIToolManager', () => {
   });
 
   describe('getAllTools', () => {
-    it('should return all six tools', () => {
+    it('should return all seven tools', () => {
       const tools = manager.getAllTools();
-      expect(tools).toHaveLength(6);
+      expect(tools).toHaveLength(7);
 
       const ids = tools.map(t => t.id);
       expect(ids).toContain('claude');
@@ -83,6 +90,7 @@ describe('CLIToolManager', () => {
       expect(ids).toContain('vibe-local');
       expect(ids).toContain('opencode');
       expect(ids).toContain('copilot');
+      expect(ids).toContain('antigravity');
     });
 
     it('should return tools in consistent order', () => {
@@ -121,7 +129,7 @@ describe('CLIToolManager', () => {
     it('should return info for all tools', async () => {
       const allInfo = await manager.getAllToolsInfo();
 
-      expect(allInfo).toHaveLength(6);
+      expect(allInfo).toHaveLength(7);
 
       const ids = allInfo.map(info => info.id);
       expect(ids).toContain('claude');
@@ -130,6 +138,7 @@ describe('CLIToolManager', () => {
       expect(ids).toContain('vibe-local');
       expect(ids).toContain('opencode');
       expect(ids).toContain('copilot');
+      expect(ids).toContain('antigravity');
     });
 
     it('should include installation status for each tool', async () => {

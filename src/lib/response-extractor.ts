@@ -39,7 +39,8 @@ export function isOpenCodeComplete(output: string): boolean {
  *
  * Implements a 5-branch decision tree for startIndex determination:
  *   1. bufferWasReset  -> findRecentUserPromptIndex(40) + 1, or 0 if not found
- *   2a. cliToolId === 'opencode' -> findRecentUserPromptIndex(totalLines) + 1, or 0
+ *   2a. cliToolId === 'opencode' | 'copilot' -> findRecentUserPromptIndex(totalLines) + 1, or 0
+ *   2a'. cliToolId === 'antigravity' -> findRecentUserPromptIndex(totalLines) + 1, or lastCapturedLine
  *   2b. cliToolId === 'codex' -> Math.max(0, lastCapturedLine)
  *   3. lastCapturedLine >= totalLines - 5 (scroll boundary) ->
  *        findRecentUserPromptIndex(50) + 1, or totalLines - 40 if not found
@@ -88,6 +89,17 @@ export function resolveExtractionStartIndex(
   if (cliToolId === 'opencode' || cliToolId === 'copilot') {
     const foundUserPrompt = findRecentUserPromptIndex(totalLines);
     return foundUserPrompt >= 0 ? foundUserPrompt + 1 : 0;
+  }
+
+  // Branch 2a' (Antigravity / agy, Issue #988): agy is inline-rendered (scrollback
+  // retained, like Codex), so lastCapturedLine is meaningful. But the user echo
+  // ("> <message>") is reliably present in the captured buffer and gives a cleaner
+  // turn boundary than lastCapturedLine, so anchor on it when found and fall back to
+  // lastCapturedLine (Codex-style) when the echo has scrolled out of the window
+  // (very long responses).
+  if (cliToolId === 'antigravity') {
+    const foundUserPrompt = findRecentUserPromptIndex(totalLines);
+    return foundUserPrompt >= 0 ? foundUserPrompt + 1 : Math.max(0, lastCapturedLine);
   }
 
   // Compute bufferWasReset internally (MF-001: responsibility boundary)
