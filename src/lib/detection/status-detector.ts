@@ -509,6 +509,37 @@ export function detectSessionStatus(
     }
   }
 
+  // 2.8. Antigravity (agy) footer-based detection (Issue #988)
+  // agy renders inline (scrollback retained), with the status bar as the last
+  // non-empty line and a bare "> " input box always visible just above it — even
+  // while generating. So the always-visible "> " would make step 3's generic
+  // prompt check report ready during generation. The footer is the source of
+  // truth: "esc to cancel" + braille spinner / "Generating..." while running,
+  // "? for shortcuts" when idle. Resolve running explicitly here first, then idle.
+  if (cliToolId === 'antigravity') {
+    // Running: thinking footer/spinner anywhere in the 15-line footer window.
+    if (detectThinking('antigravity', lastLines)) {
+      return {
+        status: 'running',
+        confidence: 'high',
+        reason: STATUS_REASON.THINKING_INDICATOR,
+        hasActivePrompt: false,
+        promptDetection,
+      };
+    }
+    // Idle: bare "> " input prompt visible and the response has completed.
+    const { promptPattern: agyPromptPattern } = getCliToolPatterns('antigravity');
+    if (agyPromptPattern.test(lastLines)) {
+      return {
+        status: 'ready',
+        confidence: 'high',
+        reason: STATUS_REASON.INPUT_PROMPT,
+        hasActivePrompt: false,
+        promptDetection,
+      };
+    }
+  }
+
   // 3. Input prompt detection
   // CLI tool is waiting for user input (shows >, ❯, ›, $, %, etc.)
   const { promptPattern } = getCliToolPatterns(cliToolId);

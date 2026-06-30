@@ -226,7 +226,7 @@ export function extractResponse(
   const isThinking = thinkingPattern.test(cleanOutputToCheck);
 
   // Prompt-based completion logic
-  const isPromptBasedComplete = (cliToolId === 'codex' || cliToolId === 'gemini' || cliToolId === 'vibe-local' || cliToolId === 'copilot') && hasPrompt && !isThinking;
+  const isPromptBasedComplete = (cliToolId === 'codex' || cliToolId === 'gemini' || cliToolId === 'vibe-local' || cliToolId === 'copilot' || cliToolId === 'antigravity') && hasPrompt && !isThinking;
   const isClaudeComplete = cliToolId === 'claude' && hasPrompt && hasSeparator && !isThinking;
   const isOpenCodeDone = cliToolId === 'opencode' && isOpenCodeComplete(cleanOutputToCheck);
 
@@ -249,6 +249,13 @@ export function extractResponse(
       }
 
       if (cliToolId === 'gemini' && /^(%|\$|.*@.*[%$#])\s*$/.test(cleanLine)) {
+        endIndex = i;
+        break;
+      }
+
+      // Antigravity (agy): the bare ">" input box line marks the end of the
+      // response (the status bar and shortcuts footer follow below it). (Issue #988)
+      if (cliToolId === 'antigravity' && /^>\s*$/.test(cleanLine)) {
         endIndex = i;
         break;
       }

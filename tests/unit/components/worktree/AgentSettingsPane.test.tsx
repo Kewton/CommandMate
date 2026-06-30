@@ -489,7 +489,7 @@ describe('AgentSettingsPane', () => {
     });
 
     // Issue #851: mobile passes availableAgents=CLI_TOOL_IDS and maxAgents=6 so
-    // every CLI tool can be selected, local-only (no DB PATCH).
+    // every CLI tool is selectable up to the cap, local-only (no DB PATCH).
     it('should expose all CLI tools and allow selecting up to 6 in local-only mode', async () => {
       const onSelectedAgentsChange = vi.fn();
       render(
@@ -503,12 +503,12 @@ describe('AgentSettingsPane', () => {
         />
       );
 
-      // All 6 agents are rendered as checkboxes.
+      // Every CLI tool is rendered as a checkbox.
       for (const id of CLI_TOOL_IDS) {
         expect(screen.getByTestId(`agent-checkbox-${id}`)).toBeDefined();
       }
 
-      // Select the four remaining agents -> all 6 selected, none disabled.
+      // Select four more agents -> 6 selected (maxAgents cap reached).
       fireEvent.click(screen.getByTestId('agent-checkbox-gemini'));
       fireEvent.click(screen.getByTestId('agent-checkbox-vibe-local'));
       fireEvent.click(screen.getByTestId('agent-checkbox-opencode'));
@@ -533,9 +533,19 @@ describe('AgentSettingsPane', () => {
           (init as RequestInit | undefined)?.method === 'PATCH'
       );
       expect(patchedDb).toBe(false);
-      // With 6 selected and max 6, no checkbox should be disabled.
+      // With maxAgents (6) reached, the selected checkboxes stay enabled while
+      // any still-unselected CLI tool is disabled (cannot exceed the cap).
+      const selectedSet = new Set([
+        'claude',
+        'codex',
+        'gemini',
+        'vibe-local',
+        'opencode',
+        'copilot',
+      ]);
       for (const id of CLI_TOOL_IDS) {
-        expect((screen.getByTestId(`agent-checkbox-${id}`) as HTMLInputElement).disabled).toBe(false);
+        const checkbox = screen.getByTestId(`agent-checkbox-${id}`) as HTMLInputElement;
+        expect(checkbox.disabled).toBe(!selectedSet.has(id));
       }
     });
   });
