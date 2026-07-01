@@ -516,6 +516,26 @@ export const ANTIGRAVITY_THINKING_PATTERN = /[\u2800-\u28FF]|Generating|esc to c
 export const ANTIGRAVITY_SEPARATOR_PATTERN = /^─{3,}$/m;
 
 /**
+ * Antigravity (agy) selection list pattern (Issue #995)
+ * Detects agy's interactive arrow-key selection TUIs (e.g. the "Switch Model"
+ * model picker, permission-approval menus). Their footer status bar renders
+ * "esc to cancel", which ANTIGRAVITY_THINKING_PATTERN also matches, so this
+ * pattern must be checked BEFORE thinking detection in status-detector.ts to
+ * keep the selection screen from being misreported as "generating".
+ *
+ * Matches (either is sufficient):
+ *   - The "Switch Model" header of the model picker.
+ *   - The keyboard navigation hint line combining ↑/↓ Navigate + enter Select,
+ *     e.g. "Keyboard: ↑/↓ Navigate  enter Select  esc Go Back". This hint is
+ *     common to agy selection TUIs, so it also covers non-model selection lists.
+ *
+ * No /g flag (S4-5: would make test() stateful).
+ * Single unnested `.*` (SEC4-001: ReDoS safe); `.` never crosses newlines, so the
+ * Navigate/Select alternative requires both hints on the same (keyboard hint) line.
+ */
+export const ANTIGRAVITY_SELECTION_LIST_PATTERN = /Switch Model|↑\/↓\s+Navigate.*enter\s+Select/m;
+
+/**
  * Antigravity (agy) skip patterns for response cleaning (Issue #988)
  * Filters turn/input-box separators, the bare ">" input prompt, the idle status
  * bar ("? for shortcuts ... <model>"), the thinking footer/spinner, banner block

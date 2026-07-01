@@ -14,6 +14,7 @@ import {
   OPENCODE_RESPONSE_COMPLETE,
   COPILOT_SELECTION_LIST_PATTERN,
   CLAUDE_SELECTION_LIST_FOOTER,
+  ANTIGRAVITY_SELECTION_LIST_PATTERN,
 } from '@/lib/detection/cli-patterns';
 
 describe('OPENCODE_SELECTION_LIST_PATTERN', () => {
@@ -144,5 +145,49 @@ describe('CLAUDE_SELECTION_LIST_FOOTER', () => {
     expect(CLAUDE_SELECTION_LIST_FOOTER.test('> ')).toBe(false);
     expect(CLAUDE_SELECTION_LIST_FOOTER.test('esc to interrupt')).toBe(false);
     expect(CLAUDE_SELECTION_LIST_FOOTER.test('Press enter to continue')).toBe(false);
+  });
+});
+
+describe('ANTIGRAVITY_SELECTION_LIST_PATTERN (Issue #995)', () => {
+  it('should be a RegExp', () => {
+    expect(ANTIGRAVITY_SELECTION_LIST_PATTERN).toBeInstanceOf(RegExp);
+  });
+
+  it('should match the "Switch Model" header', () => {
+    expect(ANTIGRAVITY_SELECTION_LIST_PATTERN.test('Switch Model')).toBe(true);
+  });
+
+  it('should match the "↑/↓ Navigate ... enter Select" keyboard hint line', () => {
+    expect(ANTIGRAVITY_SELECTION_LIST_PATTERN.test('Keyboard: ↑/↓ Navigate  enter Select  esc Go Back')).toBe(true);
+  });
+
+  it('should match the actual Switch Model TUI (multiline)', () => {
+    const multiline = [
+      'Switch Model',
+      '',
+      '> Gemini 3.5 Flash (Medium)    (current)',
+      '  Gemini 3.5 Flash (High)',
+      '  Claude Sonnet 4.6 (Thinking)',
+      '',
+      'Keyboard: ↑/↓ Navigate  enter Select  esc Go Back',
+      '',
+      'esc to cancel                                        Gemini 3.5 Flash (Medium)',
+    ].join('\n');
+    expect(ANTIGRAVITY_SELECTION_LIST_PATTERN.test(multiline)).toBe(true);
+  });
+
+  it('should not match the idle status bar / thinking footer', () => {
+    expect(ANTIGRAVITY_SELECTION_LIST_PATTERN.test('? for shortcuts                          gemini-2.5')).toBe(false);
+    expect(ANTIGRAVITY_SELECTION_LIST_PATTERN.test('⠉ esc to cancel')).toBe(false);
+    expect(ANTIGRAVITY_SELECTION_LIST_PATTERN.test('  Generating a response for you')).toBe(false);
+  });
+
+  it('should not match regular conversational output', () => {
+    expect(ANTIGRAVITY_SELECTION_LIST_PATTERN.test('Here is your code:')).toBe(false);
+    expect(ANTIGRAVITY_SELECTION_LIST_PATTERN.test('Please navigate to the settings page and select a model.')).toBe(false);
+  });
+
+  it('should not use the global flag (no /g)', () => {
+    expect(ANTIGRAVITY_SELECTION_LIST_PATTERN.global).toBe(false);
   });
 });
