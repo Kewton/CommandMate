@@ -307,6 +307,13 @@ commandmate auto-yes <worktree-id> --enable --duration 3h      # 時間指定（
 commandmate auto-yes <worktree-id> --enable --stop-pattern "error"  # 停止パターン指定
 commandmate auto-yes <worktree-id> --disable                   # Auto-Yes無効化
 
+# エージェントインスタンス管理（1エージェント複数セッション、Issue #1000、詳細は docs/user-guide/cli-operations-guide.md）
+commandmate instances <worktree-id>                            # roster＋稼働状況を一覧（--json対応）
+commandmate instances <worktree-id> add --agent codex           # インスタンス追加（--alias/--id指定可）
+commandmate instances <worktree-id> remove <instance-id> --kill # roster削除＋セッション停止
+commandmate instances <worktree-id> alias <instance-id> "名前"  # alias変更
+commandmate send <worktree-id> "メッセージ" --agent codex --instance codex-2 --register  # アドホック起動+roster登録
+
 # 日次レポート（Issue #636、詳細は docs/user-guide/cli-operations-guide.md）
 commandmate report generate                  # 本日分のレポート生成（--date/--tool/--template/--instruction）
 commandmate report show --date 2026-06-21    # レポート表示（--json）

@@ -193,6 +193,8 @@ export interface SendOptions {
   model?: string;
   /** Issue #868: agent instance ID or alias (defaults to the agent's primary instance) */
   instance?: string;
+  /** Issue #1000: register the ad-hoc --instance session into the roster after sending */
+  register?: boolean;
 }
 
 /** wait command options [Issue #518] */
@@ -231,6 +233,20 @@ export interface AutoYesOptions {
   agent?: string;
   /** Issue #896: agent instance ID (defaults to the agent's primary instance) */
   instance?: string;
+  token?: string;
+}
+
+/** instances command options [Issue #1000] */
+export interface InstancesOptions {
+  json?: boolean;
+  /** add action: CLI tool backing the new instance */
+  agent?: string;
+  /** add/alias actions: display alias */
+  alias?: string;
+  /** add action: explicit instance ID (default: auto-generated, e.g. claude-2) */
+  id?: string;
+  /** remove action: also kill the running session */
+  kill?: boolean;
   token?: string;
 }
 

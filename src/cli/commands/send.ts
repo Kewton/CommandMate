@@ -12,6 +12,7 @@ import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constants';
 import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
 import { validateCopilotModelName, validateAntigravityModelName } from '../config/model-validation';
+import { fetchAgentInstances, saveAgentInstances, defaultAlias, MAX_AGENT_INSTANCES } from '../utils/agent-instances';
 
 /**
  * Build auto-yes request body and send it to the API (DRY extraction).
@@ -56,6 +57,31 @@ async function enableAutoYes(
   console.error('Auto-yes enabled.');
 }
 
+/**
+ * Register an ad-hoc --instance session into the agent-instance roster
+ * (Issue #1000: --register). No-ops when already registered so `send
+ * --register` is safe to repeat across multiple messages to the same instance.
+ */
+async function registerInstance(
+  client: ApiClient,
+  worktreeId: string,
+  instanceId: string,
+  cliTool: string
+): Promise<void> {
+  const existing = await fetchAgentInstances(client, worktreeId);
+  if (existing.some((inst) => inst.id === instanceId)) {
+    return;
+  }
+  if (existing.length >= MAX_AGENT_INSTANCES) {
+    console.error(`Warning: could not register '${instanceId}' in the roster (already at the ${MAX_AGENT_INSTANCES}-instance limit).`);
+    return;
+  }
+
+  const next = [...existing, { id: instanceId, cliTool, alias: defaultAlias(cliTool, instanceId), order: existing.length }];
+  await saveAgentInstances(client, worktreeId, next);
+  console.error(`Instance registered in roster: ${instanceId}`);
+}
+
 export function createSendCommand(): Command {
   const cmd = new Command('send');
   cmd
@@ -63,7 +89,8 @@ export function createSendCommand(): Command {
     .argument('<worktree-id>', 'Worktree ID')
     .argument('<message>', 'Message to send')
     .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode, copilot, antigravity)')
-    .option('--instance <id>', 'Agent instance ID (defaults to the agent\'s primary instance)')
+    .option('--instance <id>', 'Agent instance ID: <agent> or <agent>-<n> (e.g. claude-2). Defaults to the agent\'s primary instance.')
+    .option('--register', 'Register the --instance session into the agent-instance roster (Issue #1000)')
     .option('--model <model>', 'Specify AI model for Copilot or Antigravity agent')
     .option('--auto-yes', 'Enable auto-yes before sending')
     .option('--duration <duration>', `Auto-yes duration (${ALLOWED_DURATIONS.join(', ')})`)
@@ -87,6 +114,19 @@ export function createSendCommand(): Command {
         if (options.instance && !isValidInstanceId(options.instance)) {
           console.error('Error: Invalid --instance. Must be an alphanumeric/underscore/hyphen identifier (max 64 chars).');
           process.exit(ExitCode.CONFIG_ERROR);
+        }
+
+        // Issue #1000: --register requires --instance, and requires --agent
+        // unless the instance id is itself a primary CLI tool id (e.g. claude).
+        if (options.register) {
+          if (!options.instance) {
+            console.error('Error: --register requires --instance.');
+            process.exit(ExitCode.CONFIG_ERROR);
+          }
+          if (!options.agent && !isCliToolId(options.instance)) {
+            console.error('Error: --register requires --agent when --instance is not a primary instance id (e.g. claude, codex).');
+            process.exit(ExitCode.CONFIG_ERROR);
+          }
         }
 
         // [SEC4-06] Validate stop-pattern length
@@ -134,6 +174,12 @@ export function createSendCommand(): Command {
 
         await client.post<ChatMessage>(`/api/worktrees/${worktreeId}/send`, sendBody);
         console.error('Message sent.');
+
+        // Issue #1000: register the ad-hoc instance into the roster after the
+        // session has started, so a follow-up `commandmate instances` lists it.
+        if (options.register && options.instance) {
+          await registerInstance(client, worktreeId, options.instance, options.agent ?? options.instance);
+        }
 
         // Issue #576: Enable auto-yes AFTER send when --model is specified
         // This avoids auto-yes interfering with the /model command interaction
