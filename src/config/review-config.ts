@@ -33,8 +33,9 @@ export const SUMMARY_GENERATION_TIMEOUT_MS = 60_000;
 /**
  * Allowed CLI tools for AI summary generation.
  * Issue #607: Only claude, codex, copilot support non-interactive execution.
+ * Issue #990 (Phase C): antigravity (`agy -p`) added to non-interactive tools.
  */
-export const SUMMARY_ALLOWED_TOOLS = ['claude', 'codex', 'copilot'] as const;
+export const SUMMARY_ALLOWED_TOOLS = ['claude', 'codex', 'copilot', 'antigravity'] as const;
 export type SummaryAllowedTool = typeof SUMMARY_ALLOWED_TOOLS[number];
 
 /**
