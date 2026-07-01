@@ -120,7 +120,7 @@ export function createWaitCommand(): Command {
     .option('--timeout <seconds>', 'Maximum wait time in seconds', parseInt)
     .option('--on-prompt <mode>', 'Prompt handling: agent (default) or human')
     .option('--stall-timeout <seconds>', 'Maximum time without output change', parseInt)
-    .option('--instance <id>', 'Agent instance ID (defaults to the agent\'s primary instance)')
+    .option('--instance <id>', 'Agent instance ID: <agent> or <agent>-<n> (e.g. claude-2). Defaults to the agent\'s primary instance.')
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeIds: string[], options: WaitOptions) => {
       try {

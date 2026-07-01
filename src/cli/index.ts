@@ -19,6 +19,8 @@ import { createCaptureCommand } from './commands/capture';
 import { createAutoYesCommand } from './commands/auto-yes';
 // Issue #636: Report command
 import { createReportCommand } from './commands/report';
+// Issue #1000: Agent-instance roster management (discover/add/remove/alias/kill)
+import { createInstancesCommand } from './commands/instances';
 
 // Read version from package.json
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -124,6 +126,9 @@ program.addCommand(createAutoYesCommand());
 
 // Issue #636: Report command
 program.addCommand(createReportCommand());
+
+// Issue #1000: Agent-instance roster management
+program.addCommand(createInstancesCommand());
 
 // Issue #264: AI Tool Integration help section
 program.addHelpText('after', `

@@ -20,7 +20,7 @@ export function createRespondCommand(): Command {
     .argument('<worktree-id>', 'Worktree ID')
     .argument('<answer>', 'Response answer (yes, no, number, or free text)')
     .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode, copilot, antigravity)')
-    .option('--instance <id>', 'Agent instance ID (defaults to the agent\'s primary instance)')
+    .option('--instance <id>', 'Agent instance ID: <agent> or <agent>-<n> (e.g. claude-2). Defaults to the agent\'s primary instance.')
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeId: string, answer: string, options: RespondOptions) => {
       try {

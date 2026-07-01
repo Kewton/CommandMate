@@ -26,7 +26,7 @@ export function createCaptureCommand(): Command {
     .argument('<worktree-id>', 'Worktree ID')
     .option('--json', 'JSON output (excludes fullOutput)')
     .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode, copilot, antigravity)')
-    .option('--instance <id>', 'Agent instance ID (defaults to the agent\'s primary instance)')
+    .option('--instance <id>', 'Agent instance ID: <agent> or <agent>-<n> (e.g. claude-2). Defaults to the agent\'s primary instance.')
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeId: string, options: CaptureOptions) => {
       try {

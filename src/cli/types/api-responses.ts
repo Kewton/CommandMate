@@ -27,6 +27,23 @@ export interface WorktreeItem {
     isWaitingForResponse: boolean;
     isProcessing: boolean;
   }>>;
+  // Mirrors: src/lib/cli-tools/types.ts AgentInstance[] (Issue #869/#1000).
+  // Present on both GET /api/worktrees and GET /api/worktrees/[id].
+  agentInstances?: AgentInstance[];
+}
+
+// Mirrors: src/lib/cli-tools/types.ts AgentInstance (Issue #868/#1000)
+export interface AgentInstance {
+  id: string;
+  cliTool: string;
+  alias: string;
+  order: number;
+}
+
+// Mirrors: src/app/api/worktrees/[id]/route.ts GET response shape (subset used
+// by the CLI `instances` command; omits gitStatus/session fields not needed here)
+export interface WorktreeDetailResponse extends WorktreeItem {
+  agentInstances: AgentInstance[];
 }
 
 // Mirrors: src/app/api/worktrees/[id]/current-output/route.ts response shape
