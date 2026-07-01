@@ -161,6 +161,29 @@ describe('ANTIGRAVITY_SELECTION_LIST_PATTERN (Issue #995)', () => {
     expect(ANTIGRAVITY_SELECTION_LIST_PATTERN.test('Keyboard: ↑/↓ Navigate  enter Select  esc Go Back')).toBe(true);
   });
 
+  // Issue #997: the permission-approval menu footer has "↑/↓ Navigate" but NO
+  // "enter Select" hint, so the #995 pattern (which required both) missed it.
+  it('should match the permission-menu footer that lacks an "enter Select" hint (Issue #997)', () => {
+    expect(
+      ANTIGRAVITY_SELECTION_LIST_PATTERN.test('  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command · ctrl+r Review'),
+    ).toBe(true);
+  });
+
+  it('should match the actual "Do you want to proceed?" permission menu (multiline, Issue #997)', () => {
+    const multiline = [
+      '  Requesting permission for:',
+      '     git status',
+      'Do you want to proceed?',
+      '> 1. Yes',
+      "  2. Yes, and always allow in this conversation for commands that start with 'git status'",
+      "  3. Yes, and always allow for commands that start with 'git status' (Persist to settings.json)",
+      '  4. No',
+      '  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command · ctrl+r Review',
+      'esc to cancel                                                          Gemini 3.5 Flash (Medium)',
+    ].join('\n');
+    expect(ANTIGRAVITY_SELECTION_LIST_PATTERN.test(multiline)).toBe(true);
+  });
+
   it('should match the actual Switch Model TUI (multiline)', () => {
     const multiline = [
       'Switch Model',

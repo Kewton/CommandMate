@@ -516,24 +516,29 @@ export const ANTIGRAVITY_THINKING_PATTERN = /[\u2800-\u28FF]|Generating|esc to c
 export const ANTIGRAVITY_SEPARATOR_PATTERN = /^─{3,}$/m;
 
 /**
- * Antigravity (agy) selection list pattern (Issue #995)
+ * Antigravity (agy) selection list pattern (Issue #995, broadened in #997)
  * Detects agy's interactive arrow-key selection TUIs (e.g. the "Switch Model"
- * model picker, permission-approval menus). Their footer status bar renders
- * "esc to cancel", which ANTIGRAVITY_THINKING_PATTERN also matches, so this
- * pattern must be checked BEFORE thinking detection in status-detector.ts to
- * keep the selection screen from being misreported as "generating".
+ * model picker, the "Do you want to proceed?" permission-approval menu). Their
+ * footer status bar renders "esc to cancel", which ANTIGRAVITY_THINKING_PATTERN
+ * also matches, so this pattern must be checked BEFORE thinking detection in
+ * status-detector.ts to keep the selection screen from being misreported as
+ * "generating".
  *
  * Matches (either is sufficient):
  *   - The "Switch Model" header of the model picker.
- *   - The keyboard navigation hint line combining ↑/↓ Navigate + enter Select,
- *     e.g. "Keyboard: ↑/↓ Navigate  enter Select  esc Go Back". This hint is
- *     common to agy selection TUIs, so it also covers non-model selection lists.
+ *   - The "↑/↓ Navigate" arrow-key navigation hint, common to every agy
+ *     selection TUI footer. Issue #995 originally required an "enter Select"
+ *     hint too, but the permission-approval menu footer is
+ *     "↑/↓ Navigate · tab Amend · ctrl+g … · ctrl+r Review" (no "enter Select"),
+ *     so #997 relaxes this to the "↑/↓ Navigate" footer alone. This covers the
+ *     Switch Model picker, permission-approval menus, and future agy selection
+ *     TUIs in one shot, while staying agy-specific (the cliToolId === 'antigravity'
+ *     guard in status-detector.ts keeps other tools unaffected).
  *
  * No /g flag (S4-5: would make test() stateful).
- * Single unnested `.*` (SEC4-001: ReDoS safe); `.` never crosses newlines, so the
- * Navigate/Select alternative requires both hints on the same (keyboard hint) line.
+ * No `.*` at all (SEC4-001: ReDoS safe — strictly safer than the #995 form).
  */
-export const ANTIGRAVITY_SELECTION_LIST_PATTERN = /Switch Model|↑\/↓\s+Navigate.*enter\s+Select/m;
+export const ANTIGRAVITY_SELECTION_LIST_PATTERN = /Switch Model|↑\/↓\s*Navigate/m;
 
 /**
  * Antigravity (agy) skip patterns for response cleaning (Issue #988)
