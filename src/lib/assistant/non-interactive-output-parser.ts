@@ -107,6 +107,24 @@ export function parseClaudeStructuredOutput(stdout: string): ParsedAssistantOutp
   return parseStructuredStdout(stdout);
 }
 
+/**
+ * Parse Antigravity (`agy -p`) output.
+ *
+ * Issue #990 (Phase C): `agy -p` does not support structured JSON output. It
+ * prints a clean plain-text response body to stdout (no session id). We treat
+ * the whole stdout as the final message, defensively stripping ANSI codes and
+ * trimming surrounding whitespace to guard against future output noise.
+ * Antigravity does not expose a resumable session id in print mode, so
+ * `resumeSessionId` is always null.
+ */
+export function parseAntigravityPlainOutput(stdout: string): ParsedAssistantOutput {
+  const cleaned = stripAnsi(stdout).trim();
+  return {
+    finalMessage: cleaned.length > 0 ? cleaned : null,
+    resumeSessionId: null,
+  };
+}
+
 function extractCodexAgentMessage(parsed: Record<string, unknown>): string | null {
   if (parsed.type !== 'item.completed') {
     return null;

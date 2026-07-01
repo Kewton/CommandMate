@@ -28,7 +28,8 @@ import path from 'path';
 import { createLogger } from '@/lib/logger';
 import { COPILOT_SEND_ENTER_DELAY_MS } from '@/config/copilot-constants';
 import { CopilotTool } from '@/lib/cli-tools/copilot';
-import { validateCopilotModelName } from '@/lib/cmate-cli-tool-parser';
+import { AntigravityTool } from '@/lib/cli-tools/antigravity';
+import { validateCopilotModelName, validateAntigravityModelName } from '@/lib/cmate-cli-tool-parser';
 
 const logger = createLogger('api/send');
 
@@ -43,7 +44,7 @@ interface SendMessageRequest {
   cliToolId?: CLIToolType;  // Optional: override the worktree's default CLI tool
   instanceId?: string;  // Issue #868: agent instance ID (defaults to primary === cliToolId)
   imagePath?: string;  // Issue #474: relative path within .commandmate/attachments/
-  model?: string;  // Issue #576: AI model name for Copilot agent
+  model?: string;  // Issue #576/#989: AI model name for Copilot or Antigravity agent
 }
 
 // Issue #588: MODEL_NAME_PATTERN and MAX_MODEL_NAME_LENGTH are now centralized
@@ -171,16 +172,18 @@ export async function POST(
     }
     const instanceId = body.instanceId;
 
-    // Issue #576/#588: Validate model parameter via shared validator (DR1-003)
+    // Issue #576/#588/#989: Validate model parameter via shared validator (DR1-003)
     if (body.model) {
-      // model is only supported for copilot
-      if (cliToolId !== 'copilot') {
+      // model is only supported for copilot and antigravity
+      if (cliToolId !== 'copilot' && cliToolId !== 'antigravity') {
         return NextResponse.json(
-          { error: 'The model parameter is only supported for copilot agent' },
+          { error: 'The model parameter is only supported for copilot and antigravity agents' },
           { status: 400 }
         );
       }
-      const modelValidation = validateCopilotModelName(body.model);
+      const modelValidation = cliToolId === 'antigravity'
+        ? validateAntigravityModelName(body.model)
+        : validateCopilotModelName(body.model);
       if (!modelValidation.valid) {
         return NextResponse.json(
           { error: `Invalid model name: ${modelValidation.reason}` },
@@ -205,10 +208,25 @@ export async function POST(
     // Check if CLI tool session is running
     const running = await cliTool.isRunning(params.id, instanceId);
 
+    // Issue #989: Antigravity has no in-session model-switch command (unlike
+    // Copilot's /model), so --model can only be honored when starting a new
+    // session. Reject rather than silently ignoring the requested model.
+    if (body.model && cliToolId === 'antigravity' && running) {
+      return NextResponse.json(
+        { error: 'Antigravity model can only be set when starting a new session. Stop the current Antigravity session and resend with --model to switch models.' },
+        { status: 400 }
+      );
+    }
+
     // Start CLI tool session if not running
     if (!running) {
       try {
-        await cliTool.startSession(params.id, worktree.path, instanceId);
+        if (cliToolId === 'antigravity' && body.model) {
+          const antigravityTool = cliTool as AntigravityTool;
+          await antigravityTool.startSession(params.id, worktree.path, instanceId, body.model);
+        } else {
+          await cliTool.startSession(params.id, worktree.path, instanceId);
+        }
 
         // Issue #111: Save initial branch at session start
         // Get current branch and save it if not already recorded

@@ -16,7 +16,7 @@ import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { createSpinner } from '../utils/spinner';
 
 /** Allowed tool values for report generation */
-const ALLOWED_TOOLS = ['claude', 'codex', 'copilot'] as const;
+const ALLOWED_TOOLS = ['claude', 'codex', 'copilot', 'antigravity'] as const;
 
 /** Validate YYYY-MM-DD date format (client-side) */
 function isValidDate(date: string): boolean {
@@ -55,7 +55,7 @@ export function createReportCommand(): Command {
     .command('generate')
     .description('Generate a daily report')
     .option('--date <date>', 'Target date (YYYY-MM-DD, default: today)')
-    .option('--tool <tool>', 'AI tool to use (claude, codex, copilot)', 'claude')
+    .option('--tool <tool>', 'AI tool to use (claude, codex, copilot, antigravity)', 'claude')
     .option('--model <model>', 'Model name (for copilot)')
     .option('--template <id>', 'Template ID to use as instruction')
     .option('--instruction <text>', 'Custom instruction text')

@@ -328,6 +328,18 @@ More text`;
       expect(Array.isArray(patterns.skipPatterns)).toBe(true);
     });
 
+    it('should return patterns for antigravity (Issue #988)', () => {
+      const patterns = getCliToolPatterns('antigravity');
+      expect(patterns).toHaveProperty('promptPattern');
+      expect(patterns).toHaveProperty('separatorPattern');
+      expect(patterns).toHaveProperty('thinkingPattern');
+      expect(patterns).toHaveProperty('skipPatterns');
+      expect(Array.isArray(patterns.skipPatterns)).toBe(true);
+      // Bare ">" input box is the prompt; "> content" (user echo) is not.
+      expect(patterns.promptPattern.test('> ')).toBe(true);
+      expect(patterns.promptPattern.test('> hello')).toBe(false);
+    });
+
     it('should return claude patterns as default for unknown tool', () => {
       // @ts-expect-error - Testing invalid input
       const patterns = getCliToolPatterns('unknown');
@@ -365,6 +377,32 @@ More text`;
         expect(escPattern!.test('(press esc to interrupt)')).toBe(true);
       });
     });
+
+    // Issue #988: Antigravity (agy) skipPatterns
+    describe('antigravity skipPatterns (Issue #988)', () => {
+      const skips = (line: string): boolean =>
+        getCliToolPatterns('antigravity').skipPatterns.some(p => p.test(line));
+
+      it('should skip the turn separator (─ runs)', () => {
+        expect(skips('────────────')).toBe(true);
+      });
+
+      it('should skip the bare ">" input prompt line', () => {
+        expect(skips('> ')).toBe(true);
+      });
+
+      it('should skip the idle status bar ("? for shortcuts")', () => {
+        expect(skips('? for shortcuts                          gemini-2.5')).toBe(true);
+      });
+
+      it('should skip the thinking footer ("esc to cancel")', () => {
+        expect(skips('esc to cancel')).toBe(true);
+      });
+
+      it('should NOT skip ordinary response content', () => {
+        expect(skips('Here is the answer you asked for.')).toBe(false);
+      });
+    });
   });
 
   describe('detectThinking', () => {
@@ -388,6 +426,19 @@ More text`;
 
     it('should return false for gemini', () => {
       expect(detectThinking('gemini', 'any content')).toBe(false);
+    });
+
+    it('should detect thinking for antigravity (Issue #988)', () => {
+      // braille spinner / "Generating..." / "esc to cancel" footer = running
+      expect(detectThinking('antigravity', '⠉ Generating...')).toBe(true);
+      expect(detectThinking('antigravity', 'Generating')).toBe(true);
+      expect(detectThinking('antigravity', 'esc to cancel')).toBe(true);
+    });
+
+    it('should not detect thinking for antigravity when idle (Issue #988)', () => {
+      // idle footer and bare prompt are not "thinking"
+      expect(detectThinking('antigravity', '? for shortcuts')).toBe(false);
+      expect(detectThinking('antigravity', '> ')).toBe(false);
     });
 
     it('should use claude patterns as default for unknown tool', () => {

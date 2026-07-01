@@ -20,6 +20,7 @@ import {
   unregisterAssistantExecutionProcess,
 } from './non-interactive-process-registry';
 import {
+  parseAntigravityPlainOutput,
   parseClaudeStructuredOutput,
   parseCodexStructuredOutput,
 } from './non-interactive-output-parser';
@@ -27,7 +28,13 @@ import {
 const EXECUTION_TIMEOUT_MS = 15 * 60 * 1000;
 
 function getCommandForTool(cliToolId: CLIToolType): string {
-  return cliToolId;
+  switch (cliToolId) {
+    // Issue #990 (Phase C): Antigravity's executable is `agy`, not the tool id.
+    case 'antigravity':
+      return 'agy';
+    default:
+      return cliToolId;
+  }
 }
 
 function buildCommandArgs(cliToolId: CLIToolType, resumeSessionId?: string): string[] {
@@ -42,17 +49,28 @@ function buildCommandArgs(cliToolId: CLIToolType, resumeSessionId?: string): str
         ? ['exec', 'resume', resumeSessionId, '--json', ...autoFlags]
         : ['exec', '--json', ...autoFlags];
     }
+    case 'antigravity': {
+      // Issue #990 (Phase C): `agy -p` runs a single prompt non-interactively.
+      // The prompt is delivered via stdin (see child.stdin.write below), and
+      // --dangerously-skip-permissions auto-approves tool use to prevent the
+      // process from hanging (mirrors claude bypassPermissions / codex --full-auto).
+      // Antigravity print mode has no resumable session id, so resumeSessionId is unused.
+      return ['-p', '--dangerously-skip-permissions'];
+    }
     default:
       return [];
   }
 }
 
 function parseExecutionOutput(cliToolId: CLIToolType, stdout: string) {
-  if (cliToolId === 'claude') {
-    return parseClaudeStructuredOutput(stdout);
+  switch (cliToolId) {
+    case 'claude':
+      return parseClaudeStructuredOutput(stdout);
+    case 'antigravity':
+      return parseAntigravityPlainOutput(stdout);
+    default:
+      return parseCodexStructuredOutput(stdout);
   }
-
-  return parseCodexStructuredOutput(stdout);
 }
 
 export async function startNonInteractiveAssistantExecution(params: {

@@ -420,6 +420,40 @@ describe('status-detector', () => {
     });
   });
 
+  describe('Issue #988: Antigravity (agy) status detection', () => {
+    it('should detect running from the "esc to cancel" footer even when the bare ">" is visible', () => {
+      // agy keeps the "> " input box visible while generating; the footer is the
+      // source of truth. running must win over the always-visible prompt.
+      const output = [
+        '  Generating a response for you',
+        '────────────────────────────',
+        '> ',
+        '⠉ esc to cancel',
+      ].join('\n');
+
+      const result = detectSessionStatus(output, 'antigravity');
+      expect(result.status).toBe('running');
+      expect(result.confidence).toBe('high');
+      expect(result.reason).toBe('thinking_indicator');
+      expect(result.hasActivePrompt).toBe(false);
+    });
+
+    it('should detect ready from the bare ">" prompt when idle', () => {
+      const output = [
+        '  Here is the answer.',
+        '────────────────────────────',
+        '> ',
+        '? for shortcuts                          gemini-2.5',
+      ].join('\n');
+
+      const result = detectSessionStatus(output, 'antigravity');
+      expect(result.status).toBe('ready');
+      expect(result.confidence).toBe('high');
+      expect(result.reason).toBe('input_prompt');
+      expect(result.hasActivePrompt).toBe(false);
+    });
+  });
+
   describe('existing behavior preservation', () => {
     it('should return ready with time-based heuristic when no patterns match', () => {
       const output = 'Some generic output without patterns';

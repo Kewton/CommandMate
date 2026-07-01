@@ -24,7 +24,7 @@
  * coupling via a minimal DTO/projection type.
  */
 
-import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CLAUDE_INTERRUPT_HINT_PATTERN } from './cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CLAUDE_INTERRUPT_HINT_PATTERN, ANTIGRAVITY_SELECTION_LIST_PATTERN } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
 import type { PromptDetectionResult } from './prompt-detector';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -104,6 +104,7 @@ export const STATUS_REASON = {
   CLAUDE_SELECTION_LIST: 'claude_selection_list',
   COPILOT_SELECTION_LIST: 'copilot_selection_list',
   CODEX_SELECTION_LIST: 'codex_selection_list',
+  ANTIGRAVITY_SELECTION_LIST: 'antigravity_selection_list',
   OPENCODE_RESPONSE_COMPLETE: 'opencode_response_complete',
   INPUT_PROMPT: 'input_prompt',
   NO_RECENT_OUTPUT: 'no_recent_output',
@@ -122,6 +123,7 @@ export const SELECTION_LIST_REASONS = new Set<string>([
   STATUS_REASON.CLAUDE_SELECTION_LIST,
   STATUS_REASON.COPILOT_SELECTION_LIST,
   STATUS_REASON.CODEX_SELECTION_LIST,
+  STATUS_REASON.ANTIGRAVITY_SELECTION_LIST,
 ]);
 
 /**
@@ -260,6 +262,25 @@ export function detectSessionStatus(
         };
       }
     }
+  }
+
+  // 0.9. Antigravity: selection list detection BEFORE thinking detection (Issue #995)
+  // agy's "Switch Model" (and other) selection TUIs render an "esc to cancel"
+  // footer that ANTIGRAVITY_THINKING_PATTERN also matches, so the generic thinking
+  // check at priority 2 (and the antigravity footer branch at 2.8) would otherwise
+  // misreport the selection screen as "generating" and NavigationButtons would never
+  // be shown. Detecting the selection list here — ahead of thinking — is the fix.
+  // Mirrors the Copilot (priority 0) / Codex (priority 0.8) early-detection pattern.
+  if (cliToolId === 'antigravity' && ANTIGRAVITY_SELECTION_LIST_PATTERN.test(lastLines)) {
+    const agyPromptOptions = buildDetectPromptOptions(cliToolId);
+    const agyPromptDetection = detectPrompt(stripBoxDrawing(cleanOutput), agyPromptOptions);
+    return {
+      status: 'waiting',
+      confidence: 'high',
+      reason: STATUS_REASON.ANTIGRAVITY_SELECTION_LIST,
+      hasActivePrompt: false,
+      promptDetection: agyPromptDetection,
+    };
   }
 
   // 1. Interactive prompt detection (highest priority)
@@ -506,6 +527,37 @@ export function detectSessionStatus(
           promptDetection,
         };
       }
+    }
+  }
+
+  // 2.8. Antigravity (agy) footer-based detection (Issue #988)
+  // agy renders inline (scrollback retained), with the status bar as the last
+  // non-empty line and a bare "> " input box always visible just above it — even
+  // while generating. So the always-visible "> " would make step 3's generic
+  // prompt check report ready during generation. The footer is the source of
+  // truth: "esc to cancel" + braille spinner / "Generating..." while running,
+  // "? for shortcuts" when idle. Resolve running explicitly here first, then idle.
+  if (cliToolId === 'antigravity') {
+    // Running: thinking footer/spinner anywhere in the 15-line footer window.
+    if (detectThinking('antigravity', lastLines)) {
+      return {
+        status: 'running',
+        confidence: 'high',
+        reason: STATUS_REASON.THINKING_INDICATOR,
+        hasActivePrompt: false,
+        promptDetection,
+      };
+    }
+    // Idle: bare "> " input prompt visible and the response has completed.
+    const { promptPattern: agyPromptPattern } = getCliToolPatterns('antigravity');
+    if (agyPromptPattern.test(lastLines)) {
+      return {
+        status: 'ready',
+        confidence: 'high',
+        reason: STATUS_REASON.INPUT_PROMPT,
+        hasActivePrompt: false,
+        promptDetection,
+      };
     }
   }
 

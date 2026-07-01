@@ -492,6 +492,65 @@ export const VIBE_LOCAL_PROMPT_PATTERN = /ctx:\d+%\s*[>❯]/m;
 export const VIBE_LOCAL_THINKING_PATTERN = /[\u2800-\u28FF]|Thinking|⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|Running|Executing/;
 
 /**
+ * Antigravity (agy) interactive REPL prompt pattern (Issue #988)
+ * agy shows a bare ">" input box line when waiting for user input. The input box
+ * is always rendered (even while generating), so prompt presence alone does not
+ * mean "ready" — running vs idle is resolved together with the thinking pattern /
+ * footer status bar in status-detector.ts. (Confirmed on machine: line is "> ".)
+ */
+export const ANTIGRAVITY_PROMPT_PATTERN = /^>\s*$/m;
+
+/**
+ * Antigravity (agy) thinking/processing pattern (Issue #988)
+ * While generating, agy shows a braille spinner with "Generating..." in the
+ * conversation area and an "esc to cancel" hint in the footer status bar. When
+ * idle the footer shows "? for shortcuts" instead, so "esc to cancel" is a
+ * reliable running signal. Braille spinner chars (U+2800-U+28FF) also matched.
+ */
+export const ANTIGRAVITY_THINKING_PATTERN = /[\u2800-\u28FF]|Generating|esc to cancel/;
+
+/**
+ * Antigravity (agy) separator pattern (Issue #988)
+ * agy draws turn separators and the input-box border with runs of U+2500 (─).
+ */
+export const ANTIGRAVITY_SEPARATOR_PATTERN = /^─{3,}$/m;
+
+/**
+ * Antigravity (agy) selection list pattern (Issue #995)
+ * Detects agy's interactive arrow-key selection TUIs (e.g. the "Switch Model"
+ * model picker, permission-approval menus). Their footer status bar renders
+ * "esc to cancel", which ANTIGRAVITY_THINKING_PATTERN also matches, so this
+ * pattern must be checked BEFORE thinking detection in status-detector.ts to
+ * keep the selection screen from being misreported as "generating".
+ *
+ * Matches (either is sufficient):
+ *   - The "Switch Model" header of the model picker.
+ *   - The keyboard navigation hint line combining ↑/↓ Navigate + enter Select,
+ *     e.g. "Keyboard: ↑/↓ Navigate  enter Select  esc Go Back". This hint is
+ *     common to agy selection TUIs, so it also covers non-model selection lists.
+ *
+ * No /g flag (S4-5: would make test() stateful).
+ * Single unnested `.*` (SEC4-001: ReDoS safe); `.` never crosses newlines, so the
+ * Navigate/Select alternative requires both hints on the same (keyboard hint) line.
+ */
+export const ANTIGRAVITY_SELECTION_LIST_PATTERN = /Switch Model|↑\/↓\s+Navigate.*enter\s+Select/m;
+
+/**
+ * Antigravity (agy) skip patterns for response cleaning (Issue #988)
+ * Filters turn/input-box separators, the bare ">" input prompt, the idle status
+ * bar ("? for shortcuts ... <model>"), the thinking footer/spinner, banner block
+ * art, and pasted-text markers from extracted responses.
+ */
+export const ANTIGRAVITY_SKIP_PATTERNS: readonly RegExp[] = [
+  ANTIGRAVITY_SEPARATOR_PATTERN, // Turn + input-box separators (─ runs)
+  /^>\s*$/, // Bare input prompt line
+  /^\?\s+for\s+shortcuts/, // Idle status bar (model name follows on the same line)
+  ANTIGRAVITY_THINKING_PATTERN, // Spinner / Generating / "esc to cancel" footer
+  /[▄▀█▌▐]/, // Banner block art (defensive; normally above the user-prompt anchor)
+  PASTED_TEXT_PATTERN, // [Pasted text #N +XX lines]
+] as const;
+
+/**
  * Detect if CLI tool is showing "thinking" indicator
  */
 export function detectThinking(cliToolId: CLIToolType, content: string): boolean {
@@ -517,6 +576,9 @@ export function detectThinking(cliToolId: CLIToolType, content: string): boolean
       break;
     case 'copilot':
       result = COPILOT_THINKING_PATTERN.test(content);
+      break;
+    case 'antigravity':
+      result = ANTIGRAVITY_THINKING_PATTERN.test(content);
       break;
     default:
       result = CLAUDE_THINKING_PATTERN.test(content);
@@ -627,6 +689,14 @@ export function getCliToolPatterns(cliToolId: CLIToolType): {
         separatorPattern: COPILOT_SEPARATOR_PATTERN,
         thinkingPattern: COPILOT_THINKING_PATTERN,
         skipPatterns: [...COPILOT_SKIP_PATTERNS],
+      };
+
+    case 'antigravity':
+      return {
+        promptPattern: ANTIGRAVITY_PROMPT_PATTERN,
+        separatorPattern: ANTIGRAVITY_SEPARATOR_PATTERN,
+        thinkingPattern: ANTIGRAVITY_THINKING_PATTERN,
+        skipPatterns: [...ANTIGRAVITY_SKIP_PATTERNS],
       };
 
     default:
@@ -748,5 +818,7 @@ export function buildDetectPromptOptions(
   if (cliToolId === 'copilot') {
     return { requireDefaultIndicator: false };
   }
+  // [Issue #988] Antigravity (agy) uses the standard ">" indicator, so the
+  // default (requireDefaultIndicator = true) is correct — no special case needed.
   return undefined; // Default behavior (requireDefaultIndicator = true)
 }

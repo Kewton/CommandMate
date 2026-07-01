@@ -34,7 +34,7 @@ The user runs a CommandMate server locally. These are the CLI commands available
 - \`${bin} capture <worktree-id> [--json] [--agent NAME]\` — Capture the current terminal output of a session
 - \`${bin} auto-yes <worktree-id> [--enable] [--disable] [--duration T] [--stop-pattern PAT]\` — Toggle Auto-Yes
 - \`--duration\` accepts values like \`1h\`, \`3h\`, \`8h\`.
-- \`--agent\` selects the CLI tool: \`claude\`, \`codex\`, \`gemini\`, \`vibe-local\`, \`opencode\`, \`copilot\`.
+- \`--agent\` selects the CLI tool: \`claude\`, \`codex\`, \`gemini\`, \`vibe-local\`, \`opencode\`, \`copilot\`, \`antigravity\`.
 `;
 }
 

@@ -160,6 +160,31 @@ describe('send command action', () => {
     expect(mockExit).toHaveBeenCalledWith(2);
   });
 
+  // Issue #989: antigravity --model support
+  it('sends with --model flag for antigravity', async () => {
+    mockFetchResponse({ id: 1, role: 'user', content: 'test', worktreeId: 'wt1' }, 201);
+    const { createSendCommand } = await import('../../../../src/cli/commands/send');
+    const cmd = createSendCommand();
+    await cmd.parseAsync(['node', 'send', 'wt1', 'test', '--agent', 'antigravity', '--model', 'Gemini 3.1 Pro (High)']);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/worktrees/wt1/send'),
+      expect.objectContaining({
+        body: JSON.stringify({ content: 'test', cliToolId: 'antigravity', model: 'Gemini 3.1 Pro (High)' }),
+      })
+    );
+  });
+
+  it('rejects --model with invalid characters for antigravity', async () => {
+    const { createSendCommand } = await import('../../../../src/cli/commands/send');
+    const cmd = createSendCommand();
+    await cmd.parseAsync(['node', 'send', 'wt1', 'hello', '--agent', 'antigravity', '--model', "model'; rm -rf ~"]);
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      expect.stringContaining('model')
+    );
+    expect(mockExit).toHaveBeenCalledWith(2);
+  });
+
   it('sends auto-yes after message when --model and --auto-yes combined', async () => {
     // With --model, auto-yes should be enabled AFTER the send (not before)
     const mockFn = vi.fn()

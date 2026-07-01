@@ -33,7 +33,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [currentMatchIndex, setCurrentMatchIndex] = useState<number>(0);
-  const [cliToolFilter, setCliToolFilter] = useState<'all' | 'claude' | 'codex' | 'gemini'>('all');
+  const [cliToolFilter, setCliToolFilter] = useState<'all' | 'claude' | 'codex' | 'gemini' | 'antigravity'>('all');
   const [exporting, setExporting] = useState(false);
   const { toasts, showToast, removeToast } = useToast();
 
@@ -252,6 +252,13 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
                 onClick={() => setCliToolFilter('gemini')}
               >
                 Gemini ({logFiles.filter(f => f.toLowerCase().includes('gemini')).length})
+              </Button>
+              <Button
+                variant={cliToolFilter === 'antigravity' ? 'primary' : 'ghost'}
+                size="sm"
+                onClick={() => setCliToolFilter('antigravity')}
+              >
+                Antigravity ({logFiles.filter(f => f.toLowerCase().includes('antigravity')).length})
               </Button>
             </div>
           </div>

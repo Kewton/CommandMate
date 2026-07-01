@@ -21,6 +21,7 @@ import {
   CLAUDE_PERMISSIONS,
   CODEX_SANDBOXES,
   COPILOT_PERMISSIONS,
+  ANTIGRAVITY_PERMISSIONS,
   DEFAULT_PERMISSIONS,
 } from '@/config/schedule-config';
 import {
@@ -263,6 +264,9 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
         break;
       case 'copilot':
         allowedValues = COPILOT_PERMISSIONS;
+        break;
+      case 'antigravity':
+        allowedValues = ANTIGRAVITY_PERMISSIONS;
         break;
       case 'gemini':
       case 'vibe-local':

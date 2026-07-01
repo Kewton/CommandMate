@@ -51,8 +51,8 @@ export const GET = withLogging<{ id: string; filename: string }>(async (
       );
     }
 
-    // Try to find file in CLI tool subdirectories (claude, codex, gemini)
-    const cliTools = ['claude', 'codex', 'gemini'];
+    // Try to find file in CLI tool subdirectories (claude, codex, gemini, antigravity)
+    const cliTools = ['claude', 'codex', 'gemini', 'antigravity'];
     let fileFound = false;
     let fileContent = '';
     let fileStat: { size: number; mtime: Date } | null = null;

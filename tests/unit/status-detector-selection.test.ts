@@ -156,15 +156,16 @@ describe('SELECTION_LIST_REASONS Set', () => {
     expect(SELECTION_LIST_REASONS).toBeInstanceOf(Set);
   });
 
-  it('should contain all four selection list reasons', () => {
+  it('should contain all five selection list reasons', () => {
     expect(SELECTION_LIST_REASONS.has(STATUS_REASON.OPENCODE_SELECTION_LIST)).toBe(true);
     expect(SELECTION_LIST_REASONS.has(STATUS_REASON.CLAUDE_SELECTION_LIST)).toBe(true);
     expect(SELECTION_LIST_REASONS.has(STATUS_REASON.COPILOT_SELECTION_LIST)).toBe(true);
     expect(SELECTION_LIST_REASONS.has(STATUS_REASON.CODEX_SELECTION_LIST)).toBe(true);
+    expect(SELECTION_LIST_REASONS.has(STATUS_REASON.ANTIGRAVITY_SELECTION_LIST)).toBe(true);
   });
 
-  it('should have exactly 4 entries', () => {
-    expect(SELECTION_LIST_REASONS.size).toBe(4);
+  it('should have exactly 5 entries', () => {
+    expect(SELECTION_LIST_REASONS.size).toBe(5);
   });
 
   it('should not contain unrelated reasons', () => {
@@ -455,5 +456,97 @@ describe('detectSessionStatus - Codex /model Step 1 model selection (Issue #622)
     const result = detectSessionStatus(output, 'codex');
 
     expect(result.reason).not.toBe(STATUS_REASON.CODEX_SELECTION_LIST);
+  });
+});
+
+describe('STATUS_REASON - ANTIGRAVITY_SELECTION_LIST (Issue #995)', () => {
+  it('should export ANTIGRAVITY_SELECTION_LIST constant', () => {
+    expect(STATUS_REASON.ANTIGRAVITY_SELECTION_LIST).toBe('antigravity_selection_list');
+  });
+});
+
+// Actual agy "Switch Model" TUI from Issue #995. The footer status bar renders
+// "esc to cancel", which ANTIGRAVITY_THINKING_PATTERN also matches — so this is
+// the exact collision the fix must resolve (selection list must win over thinking).
+const AGY_SWITCH_MODEL_OUTPUT = [
+  'Switch Model',
+  '',
+  '> Gemini 3.5 Flash (Medium)    (current)',
+  '  Gemini 3.5 Flash (High)',
+  '  Gemini 3.1 Pro (Low)',
+  '  Claude Sonnet 4.6 (Thinking)',
+  '  Claude Opus 4.6 (Thinking)',
+  '  GPT-OSS 120B (Medium)',
+  '',
+  'Keyboard: ↑/↓ Navigate  enter Select  esc Go Back',
+  '',
+  'esc to cancel                                        Gemini 3.5 Flash (Medium)',
+].join('\n');
+
+describe('detectSessionStatus - Antigravity selection_list detection (Issue #995)', () => {
+  it('should detect the Switch Model TUI and return waiting status', () => {
+    const result = detectSessionStatus(AGY_SWITCH_MODEL_OUTPUT, 'antigravity');
+    expect(result.status).toBe('waiting');
+    expect(result.confidence).toBe('high');
+    expect(result.reason).toBe(STATUS_REASON.ANTIGRAVITY_SELECTION_LIST);
+    expect(result.hasActivePrompt).toBe(false);
+  });
+
+  it('should prioritize selection list over the "esc to cancel" thinking footer', () => {
+    // Regression guard for the root cause: the "esc to cancel" footer matches
+    // ANTIGRAVITY_THINKING_PATTERN, so without priority-0.9 ordering the screen
+    // would be misreported as running/thinking_indicator.
+    const result = detectSessionStatus(AGY_SWITCH_MODEL_OUTPUT, 'antigravity');
+    expect(result.reason).not.toBe(STATUS_REASON.THINKING_INDICATOR);
+    expect(result.status).not.toBe('running');
+  });
+
+  it('should mark the reason as a selection-list reason (NavigationButtons shown)', () => {
+    const result = detectSessionStatus(AGY_SWITCH_MODEL_OUTPUT, 'antigravity');
+    expect(SELECTION_LIST_REASONS.has(result.reason)).toBe(true);
+  });
+
+  it('should still detect running from the "esc to cancel" footer during generation', () => {
+    // No selection-list markers → the thinking footer must still win (running).
+    const output = [
+      '  Generating a response for you',
+      '────────────────────────────',
+      '> ',
+      '⠉ esc to cancel',
+    ].join('\n');
+
+    const result = detectSessionStatus(output, 'antigravity');
+    expect(result.status).toBe('running');
+    expect(result.reason).toBe(STATUS_REASON.THINKING_INDICATOR);
+  });
+
+  it('should still detect ready from the bare ">" prompt when idle', () => {
+    const output = [
+      '  Here is the answer.',
+      '────────────────────────────',
+      '> ',
+      '? for shortcuts                          gemini-2.5',
+    ].join('\n');
+
+    const result = detectSessionStatus(output, 'antigravity');
+    expect(result.status).toBe('ready');
+    expect(result.reason).toBe(STATUS_REASON.INPUT_PROMPT);
+  });
+
+  it('should NOT trigger antigravity_selection_list for non-antigravity tools', () => {
+    const result = detectSessionStatus(AGY_SWITCH_MODEL_OUTPUT, 'claude');
+    expect(result.reason).not.toBe(STATUS_REASON.ANTIGRAVITY_SELECTION_LIST);
+  });
+
+  it('should NOT detect selection list for a normal antigravity response', () => {
+    const output = [
+      '  Here is your refactored function.',
+      '────────────────────────────',
+      '> ',
+      '? for shortcuts                          gemini-2.5',
+    ].join('\n');
+
+    const result = detectSessionStatus(output, 'antigravity');
+    expect(result.reason).not.toBe(STATUS_REASON.ANTIGRAVITY_SELECTION_LIST);
   });
 });

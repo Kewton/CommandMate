@@ -11,7 +11,9 @@ import {
   UUID_V4_PATTERN,
   isValidUuidV4,
   COPILOT_PERMISSIONS,
+  ANTIGRAVITY_PERMISSIONS,
   DEFAULT_PERMISSIONS,
+  getPermissionOptionsForTool,
 } from '../../../src/config/schedule-config';
 
 describe('schedule-config', () => {
@@ -104,6 +106,22 @@ describe('schedule-config', () => {
   describe('DEFAULT_PERMISSIONS', () => {
     it('should have copilot default as allow-all-tools', () => {
       expect(DEFAULT_PERMISSIONS['copilot']).toBe('allow-all-tools');
+    });
+
+    it('should have antigravity default as --dangerously-skip-permissions (Issue #989)', () => {
+      expect(DEFAULT_PERMISSIONS['antigravity']).toBe('--dangerously-skip-permissions');
+    });
+  });
+
+  describe('ANTIGRAVITY_PERMISSIONS (Issue #989)', () => {
+    it('should contain exactly --dangerously-skip-permissions', () => {
+      expect(ANTIGRAVITY_PERMISSIONS).toEqual(['--dangerously-skip-permissions']);
+    });
+  });
+
+  describe('getPermissionOptionsForTool() antigravity (Issue #989)', () => {
+    it('should return ANTIGRAVITY_PERMISSIONS for antigravity', () => {
+      expect(getPermissionOptionsForTool('antigravity')).toBe(ANTIGRAVITY_PERMISSIONS);
     });
   });
 });

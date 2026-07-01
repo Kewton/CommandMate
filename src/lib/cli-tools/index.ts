@@ -16,6 +16,7 @@ export { BaseCLITool } from './base';
 export { ClaudeTool } from './claude';
 export { CodexTool } from './codex';
 export { GeminiTool } from './gemini';
+export { AntigravityTool } from './antigravity';
 
 // Export CLI tool manager
 export { CLIToolManager } from './manager';

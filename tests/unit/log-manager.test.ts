@@ -59,6 +59,7 @@ import {
   getLogFilePath,
   cleanupOldLogs,
 } from '@/lib/log-manager';
+import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
 
 describe('log-manager', () => {
   beforeEach(() => {
@@ -300,8 +301,8 @@ describe('log-manager', () => {
 
       const result = await listLogs('wt', 'all');
 
-      // Should have called readdir for all CLI_TOOL_IDS (6 tools)
-      expect(fs.readdir).toHaveBeenCalledTimes(6);
+      // Should have called readdir once for every CLI_TOOL_IDS directory
+      expect(fs.readdir).toHaveBeenCalledTimes(CLI_TOOL_IDS.length);
       expect(result).toHaveLength(2);
     });
 
@@ -311,8 +312,8 @@ describe('log-manager', () => {
 
       await listLogs('wt');
 
-      // Should be called for all CLI_TOOL_IDS (6 tools)
-      expect(fs.readdir).toHaveBeenCalledTimes(6);
+      // Should be called once for every CLI_TOOL_IDS directory
+      expect(fs.readdir).toHaveBeenCalledTimes(CLI_TOOL_IDS.length);
     });
 
     it('should return empty array when no log files match', async () => {
@@ -458,8 +459,8 @@ describe('log-manager', () => {
 
       await cleanupOldLogs(30);
 
-      // Should check all CLI_TOOL_IDS directories (6 tools)
-      expect(fs.readdir).toHaveBeenCalledTimes(6);
+      // Should check every CLI_TOOL_IDS directory
+      expect(fs.readdir).toHaveBeenCalledTimes(CLI_TOOL_IDS.length);
     });
 
     it('should return 0 when no files to delete', async () => {

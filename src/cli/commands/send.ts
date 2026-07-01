@@ -11,7 +11,7 @@ import { ApiClient, isValidWorktreeId, isValidInstanceId, MAX_STOP_PATTERN_LENGT
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constants';
 import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
-import { validateCopilotModelName } from '../config/model-validation';
+import { validateCopilotModelName, validateAntigravityModelName } from '../config/model-validation';
 
 /**
  * Build auto-yes request body and send it to the API (DRY extraction).
@@ -62,9 +62,9 @@ export function createSendCommand(): Command {
     .description('Send a message to a worktree agent')
     .argument('<worktree-id>', 'Worktree ID')
     .argument('<message>', 'Message to send')
-    .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode, copilot)')
+    .option('--agent <agent>', 'CLI tool agent (claude, codex, gemini, vibe-local, opencode, copilot, antigravity)')
     .option('--instance <id>', 'Agent instance ID (defaults to the agent\'s primary instance)')
-    .option('--model <model>', 'Specify AI model for Copilot agent')
+    .option('--model <model>', 'Specify AI model for Copilot or Antigravity agent')
     .option('--auto-yes', 'Enable auto-yes before sending')
     .option('--duration <duration>', `Auto-yes duration (${ALLOWED_DURATIONS.join(', ')})`)
     .option('--stop-pattern <pattern>', 'Auto-yes stop pattern (regex)')
@@ -95,14 +95,16 @@ export function createSendCommand(): Command {
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
-        // Issue #576/#588: Validate --model option via shared validator (DR1-003)
+        // Issue #576/#588/#989: Validate --model option via shared validator (DR1-003)
         if (options.model) {
-          // --model requires --agent copilot
-          if (!options.agent || options.agent !== 'copilot') {
-            console.error('Error: --model option requires --agent copilot');
+          // --model requires --agent copilot or --agent antigravity
+          if (!options.agent || (options.agent !== 'copilot' && options.agent !== 'antigravity')) {
+            console.error('Error: --model option requires --agent copilot or --agent antigravity');
             process.exit(ExitCode.CONFIG_ERROR);
           }
-          const modelValidation = validateCopilotModelName(options.model);
+          const modelValidation = options.agent === 'antigravity'
+            ? validateAntigravityModelName(options.model)
+            : validateCopilotModelName(options.model);
           if (!modelValidation.valid) {
             console.error(`Error: Invalid model name: ${modelValidation.reason}`);
             process.exit(ExitCode.CONFIG_ERROR);
