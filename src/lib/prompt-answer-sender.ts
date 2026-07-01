@@ -67,7 +67,8 @@ export interface SendPromptAnswerParams {
 
 /**
  * Send an answer to a tmux session, using cursor-key navigation for
- * Claude Code multiple-choice prompts and text input for everything else.
+ * Claude Code / Antigravity multiple-choice prompts and text input for
+ * everything else.
  *
  * This function unifies the logic previously duplicated in:
  * - src/app/api/worktrees/[id]/prompt-response/route.ts (L114-187)
@@ -76,12 +77,16 @@ export interface SendPromptAnswerParams {
 export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<void> {
   const { sessionName, answer, cliToolId, promptData, fallbackPromptType, fallbackDefaultOptionNumber } = params;
 
-  // Determine if this is a Claude Code multiple-choice prompt requiring cursor navigation
-  const isClaudeMultiChoice = cliToolId === 'claude'
+  // Determine if this is an arrow-key-navigated multiple-choice prompt.
+  // Claude Code and Antigravity (agy) both render selection menus that only
+  // respond to cursor navigation + Enter, not to typed option numbers
+  // ([Issue #999] agy's "Do you want to proceed?" permission menu). Everything
+  // else (codex/gemini/copilot/opencode) accepts "N" + Enter as text.
+  const isCursorNavMultiChoice = (cliToolId === 'claude' || cliToolId === 'antigravity')
     && (promptData?.type === 'multiple_choice' || fallbackPromptType === 'multiple_choice')
     && /^\d+$/.test(answer);
 
-  if (isClaudeMultiChoice) {
+  if (isCursorNavMultiChoice) {
     const targetNum = parseInt(answer, 10);
 
     let defaultNum: number;

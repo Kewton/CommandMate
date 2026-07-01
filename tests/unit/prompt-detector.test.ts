@@ -1551,6 +1551,68 @@ Are you sure you want to continue? (yes/no)
 
       expect(result).toBeUndefined();
     });
+
+    it('should return requireDefaultIndicator: false for antigravity (Issue #999)', async () => {
+      const { buildDetectPromptOptions } = await import('@/lib/detection/cli-patterns');
+      const result = buildDetectPromptOptions('antigravity');
+
+      expect(result).toEqual({ requireDefaultIndicator: false });
+    });
+  });
+
+  // ==========================================================================
+  // Issue #999: Auto-Yes must detect + auto-answer the Antigravity (agy)
+  // permission-approval menu. This mirrors the real auto-yes-poller path:
+  //   detectPrompt(pane, buildDetectPromptOptions('antigravity')) -> resolveAutoAnswer
+  // The agy menu highlights the default with ASCII ">" (not ❯/●/›) and its
+  // footer is "↑/↓ Navigate" (no "press enter to confirm"), which the default
+  // requireDefaultIndicator=true gate rejected -> response-sent count was 0.
+  // ==========================================================================
+  describe('Issue #999: Antigravity permission-approval menu auto-answer', () => {
+    // Actual agy "Do you want to proceed?" pane text (from Issue #997 fixture).
+    const AGY_PERMISSION_MENU = [
+      '  Requesting permission for:',
+      '     git status',
+      'Do you want to proceed?',
+      '> 1. Yes',
+      "  2. Yes, and always allow in this conversation for commands that start with 'git status'",
+      "  3. Yes, and always allow for commands that start with 'git status' (Persist to settings.json)",
+      '  4. No',
+      '  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command · ctrl+r Review',
+      'esc to cancel                                                          Gemini 3.5 Flash (Medium)',
+    ].join('\n');
+
+    it('detects the agy menu as a multiple_choice prompt with option 1 = Yes', async () => {
+      const { buildDetectPromptOptions } = await import('@/lib/detection/cli-patterns');
+      const result = detectPrompt(AGY_PERMISSION_MENU, buildDetectPromptOptions('antigravity'));
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData).toBeDefined();
+      expect(isMultipleChoicePrompt(result.promptData!)).toBe(true);
+      const mc = result.promptData!;
+      if (!isMultipleChoicePrompt(mc)) throw new Error('expected multiple_choice');
+      expect(mc.options[0].number).toBe(1);
+      expect(mc.options[0].label).toBe('Yes');
+    });
+
+    it('is NOT detected under the default gate (proves the fix is required)', () => {
+      // requireDefaultIndicator defaults to true: agy's ">" is not an ❯/●/›
+      // indicator and there is no "press enter to confirm" footer, so Pass 1
+      // rejects the menu -> Auto-Yes never responds (the reported bug).
+      const result = detectPrompt(AGY_PERMISSION_MENU);
+      expect(result.isPrompt).toBe(false);
+    });
+
+    it('resolveAutoAnswer picks "1" (Yes) since no option carries the default flag', async () => {
+      const { buildDetectPromptOptions } = await import('@/lib/detection/cli-patterns');
+      const { resolveAutoAnswer } = await import('@/lib/polling/auto-yes-resolver');
+      const result = detectPrompt(AGY_PERMISSION_MENU, buildDetectPromptOptions('antigravity'));
+
+      expect(result.promptData).toBeDefined();
+      // ASCII ">" is not a DEFAULT_OPTION_PATTERN indicator, so isDefault is unset
+      // on every option and resolveAutoAnswer falls back to the first option (Yes).
+      expect(resolveAutoAnswer(result.promptData!)).toBe('1');
+    });
   });
 
   // ==========================================================================
