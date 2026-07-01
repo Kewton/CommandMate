@@ -111,6 +111,20 @@ describe('report generate', () => {
     );
   });
 
+  it('passes --tool antigravity option (Issue #990 Phase C)', async () => {
+    mockFetchResponse(sampleGenerateResponse);
+    const { createReportCommand } = await import('../../../../src/cli/commands/report');
+    const cmd = createReportCommand();
+    await cmd.parseAsync(['node', 'report', 'generate', '--tool', 'antigravity']);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/daily-summary'),
+      expect.objectContaining({
+        body: expect.stringContaining('"tool":"antigravity"'),
+      })
+    );
+  });
+
   it('passes --model option', async () => {
     mockFetchResponse(sampleGenerateResponse);
     const { createReportCommand } = await import('../../../../src/cli/commands/report');

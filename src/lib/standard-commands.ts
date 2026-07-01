@@ -34,7 +34,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
     isStandard: true,
     source: 'standard',
     filePath: '',
-    cliTools: ['claude', 'codex'],
+    cliTools: ['claude', 'codex', 'antigravity'],
   },
   {
     name: 'compact',
@@ -43,7 +43,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
     isStandard: true,
     source: 'standard',
     filePath: '',
-    cliTools: ['claude', 'codex', 'opencode'],
+    cliTools: ['claude', 'codex', 'opencode', 'antigravity'],
   },
   {
     name: 'resume',
@@ -52,7 +52,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
     isStandard: true,
     source: 'standard',
     filePath: '',
-    cliTools: ['claude', 'codex'],
+    cliTools: ['claude', 'codex', 'antigravity'],
   },
   {
     name: 'rewind',
@@ -79,7 +79,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
     isStandard: true,
     source: 'standard',
     filePath: '',
-    cliTools: ['claude', 'codex'],
+    cliTools: ['claude', 'codex', 'antigravity'],
   },
   {
     name: 'permissions',
@@ -88,7 +88,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
     isStandard: true,
     source: 'standard',
     filePath: '',
-    cliTools: ['claude', 'codex'],
+    cliTools: ['claude', 'codex', 'antigravity'],
   },
 
   // Monitoring
@@ -99,7 +99,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
     isStandard: true,
     source: 'standard',
     filePath: '',
-    cliTools: ['claude', 'codex'],
+    cliTools: ['claude', 'codex', 'antigravity'],
   },
   {
     name: 'context',
@@ -126,7 +126,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
     isStandard: true,
     source: 'standard',
     filePath: '',
-    cliTools: ['claude', 'codex'],
+    cliTools: ['claude', 'codex', 'antigravity'],
   },
   {
     name: 'pr-comments',

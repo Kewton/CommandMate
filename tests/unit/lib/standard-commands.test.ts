@@ -67,6 +67,31 @@ describe('STANDARD_COMMANDS', () => {
     });
   });
 
+  // Issue #990 (Phase C): Antigravity shares the universal claude/codex commands.
+  it('should have shared session/config/monitor/git commands including "antigravity"', () => {
+    const antigravitySharedCommands = [
+      'clear',
+      'compact',
+      'resume',
+      'model',
+      'permissions',
+      'status',
+      'review',
+    ];
+    antigravitySharedCommands.forEach((name) => {
+      const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
+      expect(cmd).toBeDefined();
+      expect(cmd?.cliTools).toEqual(expect.arrayContaining(['antigravity']));
+    });
+  });
+
+  it('should have 7 commands available for Antigravity', () => {
+    const antigravityCommands = STANDARD_COMMANDS.filter(
+      (cmd) => cmd.cliTools?.includes('antigravity')
+    );
+    expect(antigravityCommands.length).toBe(7);
+  });
+
   it('should have commands shared between Claude and OpenCode', () => {
     const sharedCommands = ['compact', 'help'];
     sharedCommands.forEach((name) => {

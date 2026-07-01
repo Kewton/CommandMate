@@ -18,7 +18,7 @@ import type {
 } from '@/lib/db/assistant-conversation-db';
 
 const CLI_TOOL_KEY = 'commandmate-assistant-cli-tool';
-const ASSISTANT_ALLOWED_TOOLS: readonly CLIToolType[] = ['claude', 'codex'];
+const ASSISTANT_ALLOWED_TOOLS: readonly CLIToolType[] = ['claude', 'codex', 'antigravity'];
 
 function isAssistantAllowedTool(value: string): value is CLIToolType {
   return (ASSISTANT_ALLOWED_TOOLS as readonly string[]).includes(value);

@@ -3,7 +3,7 @@
  * Issue #294: Executes CLI tool commands for scheduled executions
  * Issue #379: Added OpenCode support (opencode run)
  *
- * Supported tools: claude, codex, gemini, vibe-local, opencode, copilot
+ * Supported tools: claude, codex, gemini, vibe-local, opencode, copilot, antigravity
  *
  * Security:
  * - Uses execFile (not exec) to prevent shell injection
@@ -58,6 +58,9 @@ export function getCommandForTool(cliToolId: string): string {
   switch (cliToolId) {
     case 'copilot':
       return 'gh';
+    // Issue #990 (Phase C): Antigravity's executable is `agy`, not the tool id.
+    case 'antigravity':
+      return 'agy';
     default:
       return cliToolId;
   }
@@ -117,6 +120,7 @@ export function truncateOutput(output: string): string {
  * - gemini: -p <message>
  * - vibe-local: [-p <message> -y] or [--model <model> -p <message> -y]
  * - opencode: [run <message>] or [run -m ollama/<model> <message>]
+ * - antigravity: -p <message> --dangerously-skip-permissions
  * - others: -p <message> (fallback)
  *
  * @param message - Prompt message
@@ -142,6 +146,11 @@ export function buildCliArgs(message: string, cliToolId: string, permission?: st
         return ['run', '-m', `ollama/${options.model}`, message];
       }
       return ['run', message];
+    case 'antigravity':
+      // Issue #990 (Phase C): `agy -p <message>` runs a single prompt non-interactively.
+      // --dangerously-skip-permissions auto-approves tool use so the process does not
+      // hang on a permission prompt (stdin is closed immediately by executeClaudeCommand).
+      return ['-p', message, '--dangerously-skip-permissions'];
     case 'copilot': {
       // SEC4-001: COPILOT_PERMISSIONS whitelist validation for direct call path safety.
       // Unlike Codex's ?? (nullish coalescing), we use explicit whitelist check (DR2-003).
