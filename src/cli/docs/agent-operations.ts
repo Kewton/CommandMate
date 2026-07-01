@@ -38,7 +38,7 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   Send a message to an agent (async). Starts session automatically if not running.
 
   Options:
-    --agent <id>           Agent type: claude (default), codex, gemini, vibe-local, opencode
+    --agent <id>           Agent type: claude (default), codex, gemini, vibe-local, opencode, copilot, antigravity
     --auto-yes             Enable auto-yes before sending
     --duration <d>         Auto-yes duration: 1h, 3h, 8h (default: 1h)
     --stop-pattern <p>     Auto-yes stop condition (regex)

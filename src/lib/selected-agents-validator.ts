@@ -13,14 +13,14 @@ import { CLI_TOOL_IDS, type CLIToolType } from './cli-tools/types';
 /** Minimum number of selected agents */
 export const MIN_SELECTED_AGENTS = 2;
 
-/** Maximum number of selected agents (PC can select up to 5, Issue #836) */
-export const MAX_SELECTED_AGENTS = 5;
+/** Maximum number of selected agents (PC can select up to 6, Issue #989) */
+export const MAX_SELECTED_AGENTS = 6;
 
 /**
  * Default selected agents when DB value is missing or invalid.
- * Issue #836: PC default expands to 5 agents (claude/codex/gemini/opencode/copilot).
+ * Issue #989: PC default expands to 6 agents (claude/codex/gemini/opencode/copilot/antigravity).
  */
-export const DEFAULT_SELECTED_AGENTS: CLIToolType[] = ['claude', 'codex', 'gemini', 'opencode', 'copilot'];
+export const DEFAULT_SELECTED_AGENTS: CLIToolType[] = ['claude', 'codex', 'gemini', 'opencode', 'copilot', 'antigravity'];
 
 /**
  * Core validation function for CLI tool ID arrays (R1-001)

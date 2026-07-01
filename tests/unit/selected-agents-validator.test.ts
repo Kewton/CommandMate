@@ -9,23 +9,31 @@ import {
   validateSelectedAgentsInput,
   validateAgentsPair,
   DEFAULT_SELECTED_AGENTS,
+  MAX_SELECTED_AGENTS,
 } from '@/lib/selected-agents-validator';
 
 
-describe('DEFAULT_SELECTED_AGENTS (Issue #836)', () => {
-  it('should default to 5 PC agents: claude/codex/gemini/opencode/copilot', () => {
+describe('DEFAULT_SELECTED_AGENTS (Issue #989)', () => {
+  it('should default to 6 PC agents: claude/codex/gemini/opencode/copilot/antigravity', () => {
     expect(DEFAULT_SELECTED_AGENTS).toEqual([
       'claude',
       'codex',
       'gemini',
       'opencode',
       'copilot',
+      'antigravity',
     ]);
   });
 
-  it('should itself be a valid agents pair (2-5 unique valid IDs)', () => {
+  it('should itself be a valid agents pair (2-6 unique valid IDs)', () => {
     const result = validateAgentsPair(DEFAULT_SELECTED_AGENTS);
     expect(result.valid).toBe(true);
+  });
+});
+
+describe('MAX_SELECTED_AGENTS (Issue #989)', () => {
+  it('should be 6', () => {
+    expect(MAX_SELECTED_AGENTS).toBe(6);
   });
 });
 
@@ -50,7 +58,7 @@ describe('validateAgentsPair()', () => {
     expect(result3.value).toEqual(['vibe-local', 'claude']);
   });
 
-  it('should return valid for 3, 4, or 5 tool IDs', () => {
+  it('should return valid for 3, 4, 5, or 6 tool IDs', () => {
     const result3 = validateAgentsPair(['claude', 'codex', 'gemini']);
     expect(result3.valid).toBe(true);
     expect(result3.value).toEqual(['claude', 'codex', 'gemini']);
@@ -63,19 +71,24 @@ describe('validateAgentsPair()', () => {
     const result5 = validateAgentsPair(['claude', 'codex', 'gemini', 'opencode', 'copilot']);
     expect(result5.valid).toBe(true);
     expect(result5.value).toEqual(['claude', 'codex', 'gemini', 'opencode', 'copilot']);
+
+    // Issue #989: PC default expands to 6 agents (antigravity added)
+    const result6 = validateAgentsPair(['claude', 'codex', 'gemini', 'opencode', 'copilot', 'antigravity']);
+    expect(result6.valid).toBe(true);
+    expect(result6.value).toEqual(['claude', 'codex', 'gemini', 'opencode', 'copilot', 'antigravity']);
   });
 
-  it('should return invalid for arrays with length < 2 or > 5', () => {
+  it('should return invalid for arrays with length < 2 or > 6', () => {
     const result1 = validateAgentsPair([]);
     expect(result1.valid).toBe(false);
-    expect(result1.error).toContain('2-5 elements');
+    expect(result1.error).toContain('2-6 elements');
 
     const result2 = validateAgentsPair(['claude']);
     expect(result2.valid).toBe(false);
 
-    // Issue #836: 6 elements (all CLI tool IDs) exceeds the new MAX of 5
-    const result6 = validateAgentsPair(['claude', 'codex', 'gemini', 'vibe-local', 'opencode', 'copilot']);
-    expect(result6.valid).toBe(false);
+    // Issue #989: 7 elements (all CLI tool IDs) exceeds the new MAX of 6
+    const result7 = validateAgentsPair(['claude', 'codex', 'gemini', 'vibe-local', 'opencode', 'copilot', 'antigravity']);
+    expect(result7.valid).toBe(false);
   });
 
   it('should return invalid for non-string elements', () => {
@@ -129,7 +142,7 @@ describe('parseSelectedAgents()', () => {
     expect(result).toEqual(DEFAULT_SELECTED_AGENTS);
   });
 
-  it('should parse valid JSON with 3, 4, or 5 agents', () => {
+  it('should parse valid JSON with 3, 4, 5, or 6 agents', () => {
     const result3 = parseSelectedAgents('["claude","codex","gemini"]');
     expect(result3).toEqual(['claude', 'codex', 'gemini']);
 
@@ -139,6 +152,10 @@ describe('parseSelectedAgents()', () => {
     // Issue #836: PC default expands to 5 agents
     const result5 = parseSelectedAgents('["claude","codex","gemini","opencode","copilot"]');
     expect(result5).toEqual(['claude', 'codex', 'gemini', 'opencode', 'copilot']);
+
+    // Issue #989: PC default expands to 6 agents (antigravity added)
+    const result6 = parseSelectedAgents('["claude","codex","gemini","opencode","copilot","antigravity"]');
+    expect(result6).toEqual(['claude', 'codex', 'gemini', 'opencode', 'copilot', 'antigravity']);
   });
 
   it('should return default for array with wrong length', () => {
@@ -170,7 +187,7 @@ describe('validateSelectedAgentsInput()', () => {
     expect(result.value).toEqual(['claude', 'codex']);
   });
 
-  it('should return valid for 3, 4, or 5 agents', () => {
+  it('should return valid for 3, 4, 5, or 6 agents', () => {
     const result3 = validateSelectedAgentsInput(['claude', 'codex', 'gemini']);
     expect(result3.valid).toBe(true);
     expect(result3.value).toEqual(['claude', 'codex', 'gemini']);
@@ -182,12 +199,17 @@ describe('validateSelectedAgentsInput()', () => {
     const result5 = validateSelectedAgentsInput(['claude', 'codex', 'gemini', 'opencode', 'copilot']);
     expect(result5.valid).toBe(true);
     expect(result5.value).toEqual(['claude', 'codex', 'gemini', 'opencode', 'copilot']);
+
+    // Issue #989: PC default expands to 6 agents (antigravity added)
+    const result6 = validateSelectedAgentsInput(['claude', 'codex', 'gemini', 'opencode', 'copilot', 'antigravity']);
+    expect(result6.valid).toBe(true);
+    expect(result6.value).toEqual(['claude', 'codex', 'gemini', 'opencode', 'copilot', 'antigravity']);
   });
 
   it('should return invalid for non-array input', () => {
     const result = validateSelectedAgentsInput('claude,codex');
     expect(result.valid).toBe(false);
-    expect(result.error).toContain('array of 2-5 elements');
+    expect(result.error).toContain('array of 2-6 elements');
   });
 
   it('should return invalid for null input', () => {
@@ -199,9 +221,9 @@ describe('validateSelectedAgentsInput()', () => {
     const result1 = validateSelectedAgentsInput(['claude']);
     expect(result1.valid).toBe(false);
 
-    // Issue #836: 6 elements (all CLI tool IDs) exceeds the new MAX of 5
-    const result6 = validateSelectedAgentsInput(['claude', 'codex', 'gemini', 'vibe-local', 'opencode', 'copilot']);
-    expect(result6.valid).toBe(false);
+    // Issue #989: 7 elements (all CLI tool IDs) exceeds the new MAX of 6
+    const result7 = validateSelectedAgentsInput(['claude', 'codex', 'gemini', 'vibe-local', 'opencode', 'copilot', 'antigravity']);
+    expect(result7.valid).toBe(false);
   });
 
   it('should return invalid for invalid tool IDs', () => {

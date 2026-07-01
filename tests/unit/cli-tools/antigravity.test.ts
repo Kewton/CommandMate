@@ -186,6 +186,64 @@ describe('AntigravityTool', () => {
         vi.useRealTimers();
       }
     });
+
+    // Issue #989: --model is a launch-time flag (agy has no in-session /model
+    // command), so it must be embedded in the launch command typed at session start.
+    describe('with model (Issue #989)', () => {
+      it('should launch agy with --model when a model is specified', async () => {
+        vi.useFakeTimers();
+        try {
+          const { hasSession, sendKeys, capturePane } = await import('@/lib/tmux/tmux');
+          vi.spyOn(tool, 'isInstalled').mockResolvedValue(true);
+          vi.mocked(hasSession).mockResolvedValue(false);
+          vi.mocked(capturePane).mockResolvedValue(IDLE_FOOTER);
+
+          const promise = tool.startSession('test-wt', '/path/to/wt', undefined, 'Gemini 3.1 Pro (High)');
+          await vi.advanceTimersByTimeAsync(40000);
+          await promise;
+
+          expect(sendKeys).toHaveBeenCalledWith(SESSION, "agy --model 'Gemini 3.1 Pro (High)'", true);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('should launch plain agy when model is undefined', async () => {
+        vi.useFakeTimers();
+        try {
+          const { hasSession, sendKeys, capturePane } = await import('@/lib/tmux/tmux');
+          vi.spyOn(tool, 'isInstalled').mockResolvedValue(true);
+          vi.mocked(hasSession).mockResolvedValue(false);
+          vi.mocked(capturePane).mockResolvedValue(IDLE_FOOTER);
+
+          const promise = tool.startSession('test-wt', '/path/to/wt');
+          await vi.advanceTimersByTimeAsync(40000);
+          await promise;
+
+          expect(sendKeys).toHaveBeenCalledWith(SESSION, 'agy', true);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('should safely escape an embedded single quote in the model value', async () => {
+        vi.useFakeTimers();
+        try {
+          const { hasSession, sendKeys, capturePane } = await import('@/lib/tmux/tmux');
+          vi.spyOn(tool, 'isInstalled').mockResolvedValue(true);
+          vi.mocked(hasSession).mockResolvedValue(false);
+          vi.mocked(capturePane).mockResolvedValue(IDLE_FOOTER);
+
+          const promise = tool.startSession('test-wt', '/path/to/wt', undefined, "model'; rm -rf ~ #");
+          await vi.advanceTimersByTimeAsync(40000);
+          await promise;
+
+          expect(sendKeys).toHaveBeenCalledWith(SESSION, `agy --model 'model'\\''; rm -rf ~ #'`, true);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+    });
   });
 
   describe('sendMessage', () => {

@@ -3,7 +3,7 @@
  *
  * UI for selecting the CLI tools used in a worktree.
  * Renders `availableAgents` as checkboxes, capped at `maxAgents` selections
- * (PC: 5; mobile: 6 / all agents — Issue #851).
+ * (PC: 6, mobile: 6 / all agents — Issue #851, #989).
  * When persisting to the server, a selection of >= 2 calls
  * PATCH /api/worktrees/[id]; mobile (persistToServer=false) skips the PATCH.
  * Also renders Ollama model dropdown when vibe-local is selected.
@@ -32,7 +32,7 @@ export interface AgentSettingsPaneProps {
   selectedAgents: CLIToolType[];
   /** Callback when selected agents change (after successful API persist) */
   onSelectedAgentsChange: (agents: CLIToolType[]) => void;
-  /** Maximum number of agents that can be selected (6 on mobile, 5 on PC) */
+  /** Maximum number of agents that can be selected (6 on mobile, 6 on PC — Issue #989) */
   maxAgents?: number;
   /**
    * Issue #837: The selectable agent pool rendered as checkboxes.

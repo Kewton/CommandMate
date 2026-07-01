@@ -328,6 +328,28 @@ describe('cmate-validator', () => {
       expect(errors).toEqual([]);
     });
 
+    // Issue #989: antigravity permission validation
+    it('should accept valid antigravity permission (--dangerously-skip-permissions)', () => {
+      const rows = [['antigravity-task', '0 * * * *', 'Do something', 'antigravity', 'true', '--dangerously-skip-permissions']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors).toEqual([]);
+    });
+
+    it('should detect invalid antigravity permission', () => {
+      const rows = [['antigravity-task', '0 * * * *', 'Do something', 'antigravity', 'true', 'read-only']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors).toHaveLength(1);
+      expect(errors[0].field).toBe('permission');
+      expect(errors[0].message).toContain('invalid permission');
+      expect(errors[0].message).toContain('antigravity');
+    });
+
+    it('should allow omitted antigravity permission column', () => {
+      const rows = [['antigravity-task', '0 * * * *', 'Do something', 'antigravity', 'true']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors).toEqual([]);
+    });
+
     // Issue #588: copilot --model validation
     it('should accept copilot --model with valid model name', () => {
       const rows = [['copilot-task', '0 * * * *', 'Do something', 'copilot --model gpt-4', 'true', 'allow-all-tools']];
