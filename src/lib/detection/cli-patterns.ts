@@ -823,7 +823,15 @@ export function buildDetectPromptOptions(
   if (cliToolId === 'copilot') {
     return { requireDefaultIndicator: false };
   }
-  // [Issue #988] Antigravity (agy) uses the standard ">" indicator, so the
-  // default (requireDefaultIndicator = true) is correct — no special case needed.
+  // [Issue #999] Antigravity (agy) permission-approval menus highlight the
+  // default with an ASCII ">" (0x3E), not the "❯/●/›" indicators that
+  // DEFAULT_OPTION_PATTERN recognizes, and their footer is "↑/↓ Navigate"
+  // (no "press enter to confirm"). Under the default requireDefaultIndicator=true
+  // the Pass 1 gate rejects these menus, so Auto-Yes never responds. Treat agy
+  // like claude/opencode/copilot so Pass 2 collects its "1. Yes / … / N. No"
+  // options and reports isPrompt=true.
+  if (cliToolId === 'antigravity') {
+    return { requireDefaultIndicator: false };
+  }
   return undefined; // Default behavior (requireDefaultIndicator = true)
 }
