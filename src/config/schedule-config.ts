@@ -41,6 +41,12 @@ export const COPILOT_PERMISSIONS = [
 ] as const;
 export type CopilotPermission = (typeof COPILOT_PERMISSIONS)[number];
 
+/** Allowed permission values for antigravity CLI (--dangerously-skip-permissions) */
+export const ANTIGRAVITY_PERMISSIONS = [
+  '--dangerously-skip-permissions',
+] as const;
+export type AntigravityPermission = (typeof ANTIGRAVITY_PERMISSIONS)[number];
+
 /** Allowed permission values for gemini CLI (no permission flags) */
 export const GEMINI_PERMISSIONS = [] as const;
 
@@ -54,6 +60,7 @@ export const DEFAULT_PERMISSIONS: Record<string, string> = {
   gemini: '',
   'vibe-local': '',
   copilot: 'allow-all-tools',
+  antigravity: '--dangerously-skip-permissions',
 };
 
 /**
@@ -76,6 +83,8 @@ export function getPermissionOptionsForTool(cliToolId: string): readonly string[
       return CODEX_SANDBOXES;
     case 'copilot':
       return COPILOT_PERMISSIONS;
+    case 'antigravity':
+      return ANTIGRAVITY_PERMISSIONS;
     case 'claude':
       return CLAUDE_PERMISSIONS;
     default:

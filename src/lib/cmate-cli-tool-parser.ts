@@ -8,11 +8,13 @@
  * Exports:
  * - parseCliToolColumn(): tokenize raw CLI Tool column string
  * - validateCopilotModelName(): validate model name (reject approach)
+ * - validateAntigravityModelName(): validate Antigravity --model value (Issue #989)
  * - parseAndValidateCliToolColumn(): combined pipeline entry point
  * - TOOLS_WITH_MODEL_SUPPORT: Set of tools supporting --model in CMATE.md
  */
 
 import { MODEL_NAME_PATTERN, MAX_MODEL_NAME_LENGTH } from '@/config/copilot-constants';
+import { ANTIGRAVITY_MODEL_NAME_PATTERN, MAX_ANTIGRAVITY_MODEL_NAME_LENGTH } from '@/config/antigravity-constants';
 
 // =============================================================================
 // Types
@@ -117,6 +119,39 @@ export function validateCopilotModelName(modelName: string): { valid: boolean; r
   // Length validation
   if (modelName.length > MAX_MODEL_NAME_LENGTH) {
     return { valid: false, reason: `Model name exceeds ${MAX_MODEL_NAME_LENGTH} characters` };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Validate an Antigravity model name using the reject approach (no sanitization).
+ * Issue #989: Antigravity's `--model` value is the display name from `agy models`
+ * (e.g. "Gemini 3.1 Pro (High)"), which includes spaces and parentheses that
+ * Copilot's MODEL_NAME_PATTERN disallows, hence a dedicated pattern.
+ *
+ * @param modelName - Model name to validate
+ * @returns Validation result with optional reason for rejection
+ */
+export function validateAntigravityModelName(modelName: string): { valid: boolean; reason?: string } {
+  // Control character rejection
+  if (/[\x00-\x1f\x7f]/.test(modelName)) {
+    return { valid: false, reason: 'Model name contains control characters' };
+  }
+
+  // Empty / whitespace-only rejection
+  if (modelName.trim() === '') {
+    return { valid: false, reason: 'Model name must not be empty' };
+  }
+
+  // Pattern validation (leading alphanumeric required, DR4-001)
+  if (!ANTIGRAVITY_MODEL_NAME_PATTERN.test(modelName)) {
+    return { valid: false, reason: 'Model name contains invalid characters' };
+  }
+
+  // Length validation
+  if (modelName.length > MAX_ANTIGRAVITY_MODEL_NAME_LENGTH) {
+    return { valid: false, reason: `Model name exceeds ${MAX_ANTIGRAVITY_MODEL_NAME_LENGTH} characters` };
   }
 
   return { valid: true };

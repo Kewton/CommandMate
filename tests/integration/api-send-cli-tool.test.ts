@@ -61,6 +61,27 @@ vi.mock('@/lib/cli-tools/copilot', () => ({
   }
 }));
 
+// Issue #989: mutable per-test flag lets antigravity tests simulate an
+// already-running session without a shared class-level static.
+let antigravityIsRunning = false;
+const antigravityStartSession = vi.fn(async (_worktreeId: string, _worktreePath: string, _instanceId?: string, _model?: string) => {});
+
+vi.mock('@/lib/cli-tools/antigravity', () => ({
+  AntigravityTool: class {
+    id = 'antigravity';
+    name = 'Antigravity CLI';
+    command = 'agy';
+    async isInstalled() { return true; }
+    async isRunning() { return antigravityIsRunning; }
+    async startSession(worktreeId: string, worktreePath: string, instanceId?: string, model?: string) {
+      return antigravityStartSession(worktreeId, worktreePath, instanceId, model);
+    }
+    async sendMessage() {}
+    async killSession() {}
+    getSessionName(id: string) { return `mcbd-antigravity-${id}`; }
+  }
+}));
+
 // Declare mock function type
 declare module '@/lib/db/db-instance' {
   export function setMockDb(db: Database.Database): void;
@@ -103,6 +124,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
 
     // Reset mocks
     vi.clearAllMocks();
+    antigravityIsRunning = false;
   });
 
   afterEach(async () => {
@@ -409,6 +431,105 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
       // Should succeed (201) or at least not be 400
       // Note: might be 500 if copilot session fails to start in test env, but not 400
       expect(response.status).not.toBe(400);
+    });
+  });
+
+  describe('Antigravity model parameter (Issue #989)', () => {
+    it('should start a new session with the model when antigravity is not running', async () => {
+      const worktree: Worktree = {
+        id: 'test-agy-model-new',
+        name: 'Test Antigravity Model',
+        path: '/path/to/test',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'TestRepo',
+        cliToolId: 'antigravity',
+      };
+      upsertWorktree(db, worktree);
+
+      const request = new Request('http://localhost:3000/api/worktrees/test-agy-model-new/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'Test message', model: 'Gemini 3.1 Pro (High)' }),
+      });
+
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-agy-model-new' } });
+      expect(response.status).toBe(201);
+      expect(antigravityStartSession).toHaveBeenCalledWith(
+        'test-agy-model-new',
+        '/path/to/test',
+        undefined,
+        'Gemini 3.1 Pro (High)'
+      );
+    });
+
+    it('should reject a model change when antigravity is already running', async () => {
+      antigravityIsRunning = true;
+      const worktree: Worktree = {
+        id: 'test-agy-model-running',
+        name: 'Test Antigravity Model Running',
+        path: '/path/to/test',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'TestRepo',
+        cliToolId: 'antigravity',
+      };
+      upsertWorktree(db, worktree);
+
+      const request = new Request('http://localhost:3000/api/worktrees/test-agy-model-running/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'Test message', model: 'Gemini 3.1 Pro (High)' }),
+      });
+
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-agy-model-running' } });
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.error).toContain('new session');
+      expect(antigravityStartSession).not.toHaveBeenCalled();
+    });
+
+    it('should reject an antigravity model containing shell metacharacters', async () => {
+      const worktree: Worktree = {
+        id: 'test-agy-model-invalid',
+        name: 'Test Antigravity Model Invalid',
+        path: '/path/to/test',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'TestRepo',
+        cliToolId: 'antigravity',
+      };
+      upsertWorktree(db, worktree);
+
+      const request = new Request('http://localhost:3000/api/worktrees/test-agy-model-invalid/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'Test message', model: "model'; rm -rf ~" }),
+      });
+
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-agy-model-invalid' } });
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.error).toContain('model');
+    });
+
+    it('should reject model when cliToolId is neither copilot nor antigravity', async () => {
+      const worktree: Worktree = {
+        id: 'test-agy-model-claude',
+        name: 'Test Antigravity Model Claude',
+        path: '/path/to/test',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'TestRepo',
+      };
+      upsertWorktree(db, worktree);
+
+      const request = new Request('http://localhost:3000/api/worktrees/test-agy-model-claude/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'Test', model: 'Gemini 3.1 Pro (High)', cliToolId: 'claude' }),
+      });
+
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-agy-model-claude' } });
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.error).toContain('antigravity');
     });
   });
 

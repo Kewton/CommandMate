@@ -19,6 +19,7 @@ import {
   CLAUDE_PERMISSIONS,
   CODEX_SANDBOXES,
   COPILOT_PERMISSIONS,
+  ANTIGRAVITY_PERMISSIONS,
 } from '@/config/schedule-config';
 import { parseAndValidateCliToolColumn } from '@/lib/cmate-cli-tool-parser';
 import { isCliToolType } from '@/lib/cli-tools/types';
@@ -274,6 +275,7 @@ export function validateSchedulesSection(
       const allowedValues: readonly string[] =
         cliToolId === 'codex' ? CODEX_SANDBOXES
         : cliToolId === 'copilot' ? COPILOT_PERMISSIONS
+        : cliToolId === 'antigravity' ? ANTIGRAVITY_PERMISSIONS
         : (cliToolId === 'gemini' || cliToolId === 'vibe-local') ? []
         : CLAUDE_PERMISSIONS;
       if (!allowedValues.includes(trimmedPermission)) {

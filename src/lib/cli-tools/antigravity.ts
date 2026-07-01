@@ -40,6 +40,18 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Single-quote a value for safe embedding in a shell command typed into a
+ * tmux pane (Issue #989). Unlike other CLI tools, agy's `--model` is a
+ * launch-time flag whose value (e.g. "Gemini 3.1 Pro (High)") must be typed
+ * into the pane's shell prompt before agy itself starts, so it needs to be
+ * quoted the same way a user would quote it at a real terminal.
+ * Embedded single quotes are escaped as '\'' (close, escaped quote, reopen).
+ */
+function shellSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 /** Wait for agy to initialize after launch (mirrors CODEX_INIT_WAIT_MS). */
 const ANTIGRAVITY_INIT_WAIT_MS = 3000;
 
@@ -111,8 +123,13 @@ export class AntigravityTool extends BaseCLITool {
    *
    * @param worktreeId - Worktree ID
    * @param worktreePath - Worktree path
+   * @param instanceId - Agent instance ID (defaults to the primary instance)
+   * @param model - Issue #989: Model to launch with (`agy --model <model>`).
+   *   agy has no in-session model-switch command, so this only takes effect
+   *   when starting a brand-new session; the caller must not pass a model
+   *   for a session that is already running.
    */
-  async startSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
+  async startSession(worktreeId: string, worktreePath: string, instanceId?: string, model?: string): Promise<void> {
     // Check if agy is installed
     const available = await this.isInstalled();
     if (!available) {
@@ -140,8 +157,9 @@ export class AntigravityTool extends BaseCLITool {
       // Wait a moment for the session to be created
       await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
 
-      // Start agy in interactive mode
-      await sendKeys(sessionName, 'agy', true);
+      // Start agy in interactive mode, optionally pinned to a model
+      const launchCommand = model ? `agy --model ${shellSingleQuote(model)}` : 'agy';
+      await sendKeys(sessionName, launchCommand, true);
 
       // Wait for agy to initialize
       await new Promise((resolve) => setTimeout(resolve, ANTIGRAVITY_INIT_WAIT_MS));

@@ -522,6 +522,37 @@ More text here.
       expect(entries[0].permission).toBe('allow-all-tools');
     });
 
+    // Issue #989: antigravity permission parsing
+    it('should parse antigravity with --dangerously-skip-permissions permission', () => {
+      const rows = [
+        ['antigravity-task', '0 9 * * *', 'Do something', 'antigravity', 'true', '--dangerously-skip-permissions'],
+      ];
+      const entries = parseSchedulesSection(rows);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].cliToolId).toBe('antigravity');
+      expect(entries[0].permission).toBe('--dangerously-skip-permissions');
+    });
+
+    it('should fallback antigravity invalid permission to default (--dangerously-skip-permissions)', () => {
+      mockLogger.warn.mockClear();
+      const rows = [
+        ['antigravity-task', '0 9 * * *', 'Do something', 'antigravity', 'true', 'invalid-perm'],
+      ];
+      const entries = parseSchedulesSection(rows);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].permission).toBe('--dangerously-skip-permissions');
+      expect(mockLogger.warn).toHaveBeenCalledWith('parse:invalid-permission', expect.any(Object));
+    });
+
+    it('should apply default permission (--dangerously-skip-permissions) when antigravity permission is not specified', () => {
+      const rows = [
+        ['antigravity-task', '0 9 * * *', 'Do something', 'antigravity', 'true'],
+      ];
+      const entries = parseSchedulesSection(rows);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].permission).toBe('--dangerously-skip-permissions');
+    });
+
     // Issue #588: copilot --model parsing
     it('should parse copilot --model gpt-4 and set model field', () => {
       const rows = [

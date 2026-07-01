@@ -7,11 +7,13 @@ import { describe, it, expect } from 'vitest';
 import {
   parseCliToolColumn,
   validateCopilotModelName,
+  validateAntigravityModelName,
   parseAndValidateCliToolColumn,
   TOOLS_WITH_MODEL_SUPPORT,
   type ParsedCliToolColumn,
 } from '@/lib/cmate-cli-tool-parser';
 import { MODEL_NAME_PATTERN, MAX_MODEL_NAME_LENGTH } from '@/config/copilot-constants';
+import { MAX_ANTIGRAVITY_MODEL_NAME_LENGTH } from '@/config/antigravity-constants';
 
 // =============================================================================
 // parseCliToolColumn
@@ -226,6 +228,61 @@ describe('validateCopilotModelName', () => {
 });
 
 // =============================================================================
+// validateAntigravityModelName (Issue #989)
+// =============================================================================
+
+describe('validateAntigravityModelName', () => {
+  it('should accept agy display names with spaces and parentheses', () => {
+    expect(validateAntigravityModelName('Gemini 3.1 Pro (High)')).toEqual({ valid: true });
+    expect(validateAntigravityModelName('Claude Sonnet 4.6 (Thinking)')).toEqual({ valid: true });
+    expect(validateAntigravityModelName('GPT-OSS 120B (Medium)')).toEqual({ valid: true });
+  });
+
+  it('should reject empty string', () => {
+    const result = validateAntigravityModelName('');
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain('empty');
+  });
+
+  it('should reject whitespace-only string', () => {
+    const result = validateAntigravityModelName('   ');
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain('empty');
+  });
+
+  it('should reject model name starting with hyphen (DR4-001)', () => {
+    const result = validateAntigravityModelName('-model');
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain('invalid characters');
+  });
+
+  it('should reject model name with control characters', () => {
+    const result = validateAntigravityModelName('model\x00name');
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain('control characters');
+  });
+
+  it('should reject shell metacharacters', () => {
+    for (const bad of ["model';rm -rf ~", 'model`whoami`', 'model$(whoami)', 'model|pipe', 'model;semi', 'model"quote', 'model<redir', 'model>redir']) {
+      const result = validateAntigravityModelName(bad);
+      expect(result.valid).toBe(false);
+    }
+  });
+
+  it('should accept model name at max length boundary', () => {
+    const name = 'a' + 'b'.repeat(MAX_ANTIGRAVITY_MODEL_NAME_LENGTH - 1);
+    expect(validateAntigravityModelName(name)).toEqual({ valid: true });
+  });
+
+  it('should reject model name exceeding max length', () => {
+    const name = 'a'.repeat(MAX_ANTIGRAVITY_MODEL_NAME_LENGTH + 1);
+    const result = validateAntigravityModelName(name);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain(`exceeds ${MAX_ANTIGRAVITY_MODEL_NAME_LENGTH}`);
+  });
+});
+
+// =============================================================================
 // parseAndValidateCliToolColumn (combined pipeline)
 // =============================================================================
 
@@ -306,6 +363,14 @@ describe('TOOLS_WITH_MODEL_SUPPORT', () => {
 
   it('should have exactly 1 member', () => {
     expect(TOOLS_WITH_MODEL_SUPPORT.size).toBe(1);
+  });
+
+  // Issue #989: antigravity model names contain spaces (e.g. "Gemini 3.1 Pro
+  // (High)"), which the CMATE.md "<tool> --model <name>" single-cell tokenizer
+  // cannot represent. Antigravity --model is only supported via `commandmate
+  // send --model`, not the CMATE.md schedule column, by design.
+  it('should not contain antigravity', () => {
+    expect(TOOLS_WITH_MODEL_SUPPORT.has('antigravity')).toBe(false);
   });
 });
 

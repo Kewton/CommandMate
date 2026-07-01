@@ -22,7 +22,7 @@ vi.mock('@/lib/logger', () => ({
 
 import { parseSchedulesSection } from '@/lib/cmate-parser';
 import { validateSchedulesSection } from '@/lib/cmate-validator';
-import { COPILOT_PERMISSIONS } from '@/config/schedule-config';
+import { COPILOT_PERMISSIONS, ANTIGRAVITY_PERMISSIONS } from '@/config/schedule-config';
 
 describe('cmate-parser / cmate-validator consistency (SEC4-004)', () => {
   for (const permission of COPILOT_PERMISSIONS) {
@@ -79,5 +79,31 @@ describe('cmate-parser / cmate-validator consistency (SEC4-004)', () => {
     // Validator should report error
     const errors = validateSchedulesSection([row]);
     expect(errors.length).toBeGreaterThan(0);
+  });
+
+  // Issue #989: antigravity permission consistency
+  for (const permission of ANTIGRAVITY_PERMISSIONS) {
+    it(`should accept antigravity permission "${permission}" in both parser and validator`, () => {
+      const row = ['antigravity-task', '0 9 * * *', 'Do something', 'antigravity', 'true', permission];
+
+      const entries = parseSchedulesSection([row]);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].permission).toBe(permission);
+
+      const errors = validateSchedulesSection([row]);
+      expect(errors).toEqual([]);
+    });
+  }
+
+  it('should reject the same invalid antigravity permission in both parser and validator', () => {
+    const row = ['antigravity-task', '0 9 * * *', 'Do something', 'antigravity', 'true', 'invalid-perm'];
+
+    const entries = parseSchedulesSection([row]);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].permission).not.toBe('invalid-perm');
+
+    const errors = validateSchedulesSection([row]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].field).toBe('permission');
   });
 });

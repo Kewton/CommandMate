@@ -127,6 +127,35 @@ describe('AgentSettingsPane', () => {
       expect(vibeLocalCheckbox.disabled).toBe(true);
     });
 
+    // Issue #989: PC default expands to 6 agents (antigravity added)
+    it('should allow selecting antigravity as the 6th PC agent (maxAgents=6)', () => {
+      render(
+        <AgentSettingsPane
+          {...defaultProps}
+          maxAgents={6}
+          selectedAgents={['claude', 'codex', 'gemini', 'opencode', 'copilot']}
+        />
+      );
+
+      // 5 of 6 slots used -> antigravity checkbox is still enabled
+      const antigravityCheckbox = screen.getByTestId('agent-checkbox-antigravity') as HTMLInputElement;
+      expect(antigravityCheckbox.disabled).toBe(false);
+    });
+
+    it('should disable unchecked items once maxAgents=6 are selected (antigravity included)', () => {
+      render(
+        <AgentSettingsPane
+          {...defaultProps}
+          maxAgents={6}
+          selectedAgents={['claude', 'codex', 'gemini', 'opencode', 'copilot', 'antigravity']}
+        />
+      );
+
+      // All 6 slots used -> remaining unchecked tool is disabled
+      const vibeLocalCheckbox = screen.getByTestId('agent-checkbox-vibe-local') as HTMLInputElement;
+      expect(vibeLocalCheckbox.disabled).toBe(true);
+    });
+
     it('should display CLI tool display names', () => {
       render(<AgentSettingsPane {...defaultProps} />);
 
