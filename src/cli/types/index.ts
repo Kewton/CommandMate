@@ -179,6 +179,8 @@ export interface LsOptions {
   json?: boolean;
   quiet?: boolean;
   branch?: string;
+  /** Issue #1005: filter by worktree id prefix (front-match, AND-combined with branch) */
+  id?: string;
   token?: string;
 }
 

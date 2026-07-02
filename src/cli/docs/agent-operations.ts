@@ -27,6 +27,12 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   commandmate ls --json                   # JSON output (for agent consumption)
   commandmate ls --quiet                  # IDs only, one per line (for piping)
   commandmate ls --branch <prefix>        # Filter by branch name prefix
+  commandmate ls --id <prefix>            # Filter by worktree id prefix
+
+  Worktree ids are <repo>-<branch> slugs (e.g. anvil-develop). --id / --branch
+  front-match is case-sensitive and does NOT guarantee uniqueness (e.g.
+  --id anvil-develop also matches anvil-develop-2). --branch and --id combine
+  as AND. Use --id to disambiguate the same branch across repositories.
 
   STATUS values:
     idle     - Session not started
@@ -47,6 +53,7 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
 
   Finding worktree IDs:
     WT=$(commandmate ls --branch feature/101 --quiet)
+    WT=$(commandmate ls --id anvil- --quiet)   # disambiguate by repo (id prefix)
     commandmate send "$WT" "Implement this"
 
 ### commandmate wait <worktree-id...>
