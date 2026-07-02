@@ -17,6 +17,11 @@ export interface WorktreeListResponse {
 // is the real git branch. They usually coincide for sync-generated worktrees
 // but can diverge, so `ls --branch` filters on `branch` (falling back to `name`).
 export interface WorktreeItem {
+  /**
+   * Primary worktree identifier: a `<repo>-<branch>` slug (e.g. `anvil-develop`),
+   * sanitized/lowercased. This is the prefix users pass to `ls --id` (Issue #1005)
+   * and the id accepted by send/capture/wait/respond/instances.
+   */
   id: string;
   name: string;
   /**

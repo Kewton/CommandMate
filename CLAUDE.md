@@ -278,6 +278,7 @@ commandmate ls                             # worktree一覧表示
 commandmate ls --json                      # JSON形式で出力
 commandmate ls --quiet                     # IDのみ出力（1行1ID）
 commandmate ls --branch feature/           # ブランチ名プレフィックスでフィルタ
+commandmate ls --id <prefix>               # worktree IDのプレフィックスでフィルタ
 
 # メッセージ送信
 commandmate send <worktree-id> "メッセージ"                    # エージェントにメッセージ送信

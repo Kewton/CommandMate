@@ -77,7 +77,10 @@ commandmate ls                          # テーブル形式
 commandmate ls --json                   # JSON形式（エージェント向け）
 commandmate ls --quiet                  # IDのみ（1行1ID、パイプ用）
 commandmate ls --branch feature/        # ブランチ名プレフィックスでフィルタ
+commandmate ls --id anvil-              # worktree IDプレフィックスでフィルタ
 ```
+
+> **`--id` について**: worktree ID は `<リポジトリ名>-<ブランチ名>` 形式のスラッグ（例 `anvil-develop`）です。`--id` はこの ID の前方一致でフィルタします。`--branch` と `--id` は独立して適用され、同時指定すると両方が適用されます（AND）。同一ブランチ名（例 `develop`）が複数リポジトリに存在する場合、`--id anvil-` のように ID プレフィックスで特定リポジトリの worktree に絞り込めます。前方一致は case-sensitive で、一意性は保証しません（`--id anvil-develop` は `anvil-develop-2` にもマッチし得ます）。厳密に1件へ絞るには `--quiet` の出力を `grep -x` する等してください。
 
 ### 出力例
 
@@ -139,6 +142,10 @@ commandmate ls --quiet
 # ブランチ名でフィルタしてID取得
 commandmate ls --branch feature/101 --quiet
 # → mycodebranchdesk-feature-101
+
+# worktree IDプレフィックスでフィルタ（同一ブランチ×複数リポジトリの絞り込み）
+commandmate ls --id anvil- --quiet
+# → anvil-develop
 
 # 変数に格納
 WT=$(commandmate ls --branch feature/101 --quiet)

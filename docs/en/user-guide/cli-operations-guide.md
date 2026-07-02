@@ -60,7 +60,10 @@ commandmate ls                          # Table format
 commandmate ls --json                   # JSON (for agents)
 commandmate ls --quiet                  # IDs only (one per line)
 commandmate ls --branch feature/        # Filter by branch prefix
+commandmate ls --id anvil-             # Filter by worktree id prefix
 ```
+
+> **About `--id`**: Worktree IDs are `<repo>-<branch>` slugs (e.g. `anvil-develop`), and `--id` front-matches on that ID. `--branch` and `--id` are applied independently; specifying both applies both (AND). When the same branch name (e.g. `develop`) exists across multiple repositories, an ID prefix such as `--id anvil-` narrows the result to a single repository's worktree. The front-match is case-sensitive and does not guarantee uniqueness (`--id anvil-develop` may also match `anvil-develop-2`). To pin down exactly one worktree, pipe `--quiet` output through `grep -x` or pass a prefix that is already unique.
 
 ### Output Example
 
@@ -107,6 +110,8 @@ commandmate send <worktree-id> "<message>" --auto-yes --duration 3h
 
 ```bash
 WT=$(commandmate ls --branch feature/101 --quiet)
+# Or disambiguate the same branch across repositories by worktree id prefix:
+WT=$(commandmate ls --id anvil- --quiet)
 commandmate send "$WT" "Implement this"
 ```
 
