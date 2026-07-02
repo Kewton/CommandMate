@@ -19,7 +19,7 @@ import { ImageViewer } from '@/components/worktree/ImageViewer';
 import { VideoViewer } from '@/components/worktree/VideoViewer';
 import { MarkdownToc } from '@/components/worktree/MarkdownToc';
 import { CodeBlockWithCopy } from '@/components/common/CodeBlockWithCopy';
-import { extractToc } from '@/lib/markdown-toc';
+import { extractToc, TOC_VISIBLE_STORAGE_KEY } from '@/lib/markdown-toc';
 
 /**
  * Sticky page-header height (px). Rendered headings get this much
@@ -27,9 +27,6 @@ import { extractToc } from '@/lib/markdown-toc';
  * jumped-to headings clear the header (Issue #1007).
  */
 const HEADER_OFFSET_PX = 57;
-
-/** localStorage key for TOC visibility (commandmate: namespace, Issue #1007). */
-const TOC_VISIBLE_STORAGE_KEY = 'commandmate:md-toc-visible';
 
 export default function FileViewerPage() {
   const router = useRouter();
