@@ -105,3 +105,39 @@ describe('ls command action', () => {
     expect(output).toBe('No worktrees found.');
   });
 });
+
+describe('ls --branch filter uses real branch, not name (Issue #1003)', () => {
+  // Fixture where the derived `name` differs from the real git `branch`.
+  // The `id`/`name` here mimic sync-generated slugs (repo-prefixed, sanitized),
+  // so filtering by name would NOT match a `feature/` prefix.
+  const mockWorktreesWithBranch = {
+    worktrees: [
+      { id: 'wt1', name: 'myrepo-main', branch: 'main' },
+      { id: 'wt2', name: 'myrepo-feature-x', branch: 'feature/x' },
+      // No branch field: filter must fall back to `name` (legacy behavior).
+      { id: 'wt3', name: 'myrepo-fix-bug' },
+    ],
+    repositories: [],
+  };
+
+  it('filters by the real branch name, not the derived name field', async () => {
+    mockFetchResponse(mockWorktreesWithBranch);
+    const { createLsCommand } = await import('../../../../src/cli/commands/ls');
+    const cmd = createLsCommand();
+    await cmd.parseAsync(['node', 'ls', '--quiet', '--branch', 'feature/']);
+    const output = mockConsoleLog.mock.calls[0][0];
+    // wt2's branch is "feature/x" (matches); its name "myrepo-feature-x" would NOT
+    // match "feature/" under the old name-based filter.
+    expect(output).toBe('wt2');
+  });
+
+  it('falls back to name when branch is absent', async () => {
+    mockFetchResponse(mockWorktreesWithBranch);
+    const { createLsCommand } = await import('../../../../src/cli/commands/ls');
+    const cmd = createLsCommand();
+    await cmd.parseAsync(['node', 'ls', '--quiet', '--branch', 'myrepo-fix']);
+    const output = mockConsoleLog.mock.calls[0][0];
+    // wt3 has no branch, so the filter falls back to name "myrepo-fix-bug".
+    expect(output).toBe('wt3');
+  });
+});

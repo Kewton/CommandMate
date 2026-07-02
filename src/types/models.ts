@@ -62,6 +62,21 @@ export interface Worktree {
   repositoryPath: string;
   /** Repository display name (e.g., "MyProject") */
   repositoryName: string;
+  /**
+   * Git branch captured at sync time (scanWorktrees), Issue #1003.
+   *
+   * This is a THIRD, distinct branch concept — do not conflate it with the
+   * existing two:
+   *   - {@link GitStatus.initialBranch}: branch recorded at session start.
+   *   - {@link GitStatus.currentBranch}: the live branch resolved on read.
+   *   - branch (this field): a `git worktree list` snapshot from the last sync.
+   *
+   * Freshness/meaning therefore differ: it lags behind a checkout until the
+   * next sync. Optional and may be undefined for rows synced before Issue #1003
+   * (NULL in DB) or written by non-sync paths; consumers should fall back to
+   * {@link name}.
+   */
+  branch?: string;
   /** Repository user-defined alias (Issue #642) */
   repositoryDisplayName?: string;
   /** User description for this worktree */

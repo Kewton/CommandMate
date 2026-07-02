@@ -13,10 +13,20 @@ export interface WorktreeListResponse {
 }
 
 // Mirrors: src/types/models.ts Worktree (subset)
-// [DR2-08] Field name is "name" (not "branch") matching server-side Worktree type
+// [DR2-08] `name` is the display name / id-derived slug; `branch` (Issue #1003)
+// is the real git branch. They usually coincide for sync-generated worktrees
+// but can diverge, so `ls --branch` filters on `branch` (falling back to `name`).
 export interface WorktreeItem {
   id: string;
   name: string;
+  /**
+   * Mirrors: src/types/models.ts Worktree.branch (Issue #1003).
+   * Git branch captured at sync time — a distinct concept from
+   * gitStatus.currentBranch (live) and initialBranch (session start); it lags a
+   * checkout until the next sync. Undefined for rows synced before Issue #1003
+   * or written by non-sync paths; consumers fall back to {@link name}.
+   */
+  branch?: string;
   cliToolId?: string;
   isSessionRunning?: boolean;
   isWaitingForResponse?: boolean;

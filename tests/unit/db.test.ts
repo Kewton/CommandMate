@@ -195,6 +195,56 @@ describe('Database Operations', () => {
         expect(result).toBeNull();
       });
     });
+
+    describe('branch persistence (Issue #1003)', () => {
+      it('round-trips branch through upsert -> getWorktrees / getWorktreeById', () => {
+        upsertWorktree(testDb, {
+          id: 'repo-feature-foo',
+          name: 'feature/foo',
+          path: '/path/to/feature-foo',
+          repositoryPath: '/path/to/repo',
+          repositoryName: 'repo',
+          branch: 'feature/foo',
+        });
+
+        expect(getWorktrees(testDb)[0].branch).toBe('feature/foo');
+        expect(getWorktreeById(testDb, 'repo-feature-foo')?.branch).toBe('feature/foo');
+      });
+
+      it('returns undefined branch when not provided (NULL in DB)', () => {
+        upsertWorktree(testDb, {
+          id: 'main',
+          name: 'main',
+          path: '/path/to/main',
+          repositoryPath: '/path/to/repo',
+          repositoryName: 'repo',
+        });
+
+        expect(getWorktrees(testDb)[0].branch).toBeUndefined();
+        expect(getWorktreeById(testDb, 'main')?.branch).toBeUndefined();
+      });
+
+      it('preserves a stored branch when a later upsert omits it (COALESCE)', () => {
+        upsertWorktree(testDb, {
+          id: 'main',
+          name: 'main',
+          path: '/path/to/main',
+          repositoryPath: '/path/to/repo',
+          repositoryName: 'repo',
+          branch: 'main',
+        });
+        // A non-sync writer re-upserts without branch; the stored value must survive.
+        upsertWorktree(testDb, {
+          id: 'main',
+          name: 'main-renamed',
+          path: '/path/to/main',
+          repositoryPath: '/path/to/repo',
+          repositoryName: 'repo',
+        });
+
+        expect(getWorktreeById(testDb, 'main')?.branch).toBe('main');
+      });
+    });
   });
 
   describe('ChatMessage Operations', () => {

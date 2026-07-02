@@ -185,6 +185,9 @@ export async function scanWorktrees(rootDir: string): Promise<Worktree[]> {
       .map((wt) => ({
         id: generateWorktreeId(wt.branch, repositoryName),
         name: wt.branch,
+        // Issue #1003: persist the real branch (sync-time snapshot) so
+        // `ls --branch` can filter on it rather than the derived name/id slug.
+        branch: wt.branch,
         path: path.resolve(wt.path),
         repositoryPath,
         repositoryName,

@@ -151,6 +151,27 @@ describe('GET /api/worktrees', () => {
     expect(item.agentInstances.every((i: { id: string; cliTool: string }) => i.id === i.cliTool)).toBe(true);
   });
 
+  it('should include branch for each worktree (Issue #1003)', async () => {
+    upsertWorktree(db, {
+      id: 'feature-branch',
+      name: 'feature/branch',
+      path: '/path/to/feature-branch',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
+      branch: 'feature/branch',
+    });
+
+    const request = new Request('http://localhost:3000/api/worktrees');
+    const response = await getWorktrees(request as unknown as import('next/server').NextRequest);
+
+    expect(response.status).toBe(200);
+
+    const data = await response.json();
+    const item = data.worktrees.find((w: { id: string }) => w.id === 'feature-branch');
+    expect(item).toBeDefined();
+    expect(item.branch).toBe('feature/branch');
+  });
+
   it('should return 500 on database error', async () => {
     // Close database to simulate error
     db.close();
@@ -203,6 +224,26 @@ describe('GET /api/worktrees/:id', () => {
     expect(data.id).toBe('feature-foo');
     expect(data.name).toBe('feature/foo');
     expect(data.path).toBe('/path/to/feature-foo');
+  });
+
+  it('should include branch in response (Issue #1003)', async () => {
+    upsertWorktree(db, {
+      id: 'feature-foo',
+      name: 'feature/foo',
+      path: '/path/to/feature-foo',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
+      branch: 'feature/foo',
+    });
+
+    const request = new Request('http://localhost:3000/api/worktrees/feature-foo');
+    const params = { params: { id: 'feature-foo' } };
+    const response = await getWorktreeById(request as unknown as import('next/server').NextRequest, params);
+
+    expect(response.status).toBe(200);
+
+    const data = await response.json();
+    expect(data.branch).toBe('feature/foo');
   });
 
   it('should return 404 when worktree not found', async () => {
