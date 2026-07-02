@@ -5,22 +5,37 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { List, BookOpen } from 'lucide-react';
 import { Card } from '@/components/ui';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
+import rehypeSlug from 'rehype-slug';
 import { FileContent } from '@/types/models';
 import { ImageViewer } from '@/components/worktree/ImageViewer';
 import { VideoViewer } from '@/components/worktree/VideoViewer';
+import { MarkdownToc } from '@/components/worktree/MarkdownToc';
 import { CodeBlockWithCopy } from '@/components/common/CodeBlockWithCopy';
+import { extractToc } from '@/lib/markdown-toc';
+
+/**
+ * Sticky page-header height (px). Rendered headings get this much
+ * `scroll-margin-top` and the scroll-spy uses it as a `rootMargin` offset so
+ * jumped-to headings clear the header (Issue #1007).
+ */
+const HEADER_OFFSET_PX = 57;
+
+/** localStorage key for TOC visibility (commandmate: namespace, Issue #1007). */
+const TOC_VISIBLE_STORAGE_KEY = 'commandmate:md-toc-visible';
 
 export default function FileViewerPage() {
   const router = useRouter();
   const params = useParams();
   const tCommon = useTranslations('common');
+  const tWorktree = useTranslations('worktree');
   const worktreeId = params.id as string;
   const filePath = (params.path as string[]).join('/');
 
@@ -28,8 +43,41 @@ export default function FileViewerPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // TOC visibility. Start from the hydration-safe default (visible), then read
+  // the persisted value after mount so the server and first client render match
+  // (Issue #1007). The 0–1 heading auto-hide below takes precedence.
+  const [tocVisible, setTocVisible] = useState(true);
+  const [tocHydrated, setTocHydrated] = useState(false);
+
   // Check if file is markdown
   const isMarkdown = content?.extension === 'md' || content?.extension === 'markdown';
+
+  // Headings for the TOC (only for markdown). ≥2 headings are required for the
+  // sidebar/toggle to appear.
+  const tocEntries = useMemo(
+    () => (isMarkdown && content ? extractToc(content.content) : []),
+    [isMarkdown, content]
+  );
+  const hasToc = tocEntries.length >= 2;
+  const showToc = isMarkdown && hasToc && tocVisible;
+
+  // Restore persisted TOC visibility after mount (hydration-safe).
+  useEffect(() => {
+    const stored = localStorage.getItem(TOC_VISIBLE_STORAGE_KEY);
+    if (stored === 'true') {
+      setTocVisible(true);
+    } else if (stored === 'false') {
+      setTocVisible(false);
+    }
+    setTocHydrated(true);
+  }, []);
+
+  // Persist TOC visibility once hydrated (avoid clobbering before restore).
+  useEffect(() => {
+    if (tocHydrated) {
+      localStorage.setItem(TOC_VISIBLE_STORAGE_KEY, String(tocVisible));
+    }
+  }, [tocVisible, tocHydrated]);
 
   useEffect(() => {
     const fetchFile = async () => {
@@ -88,6 +136,24 @@ export default function FileViewerPage() {
               {filePath}
             </h1>
           </div>
+          {/* TOC toggle — desktop only, and only when there is a TOC to show
+              (no no-op control on mobile / short docs). Issue #1007 */}
+          {isMarkdown && hasToc && (
+            <button
+              onClick={() => setTocVisible((visible) => !visible)}
+              aria-pressed={tocVisible}
+              aria-label={tocVisible ? tWorktree('toc.hide') : tWorktree('toc.show')}
+              title={tocVisible ? tWorktree('toc.hide') : tWorktree('toc.show')}
+              className="hidden lg:flex items-center gap-1.5 flex-shrink-0 rounded-md border border-gray-200 px-2.5 py-1.5 text-sm text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+            >
+              {tocVisible ? (
+                <List className="w-4 h-4" />
+              ) : (
+                <BookOpen className="w-4 h-4" />
+              )}
+              <span className="hidden xl:inline">{tWorktree('toc.title')}</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -147,11 +213,14 @@ export default function FileViewerPage() {
                   mimeType={content.mimeType}
                 />
               ) : isMarkdown ? (
-                // Markdown rendering with GitHub-like styling
-                <div className="prose prose-slate max-w-none prose-headings:font-semibold prose-h1:text-3xl prose-h1:border-b prose-h1:pb-2 prose-h2:text-2xl prose-h2:border-b prose-h2:pb-2 prose-h3:text-xl prose-a:text-blue-600 prose-a:no-underline hover:prose-a:underline prose-code:text-sm prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-img:rounded-lg prose-img:shadow-md">
+                // Markdown rendering with GitHub-like styling. Layout changes
+                // (flex row + side TOC) are scoped to this branch only so the
+                // image/video/code viewers are unaffected (Issue #1007).
+                <div className="lg:flex lg:gap-6 lg:items-start">
+                <div className="min-w-0 lg:flex-1 prose prose-slate max-w-none prose-headings:font-semibold prose-headings:scroll-mt-[57px] prose-h1:text-3xl prose-h1:border-b prose-h1:pb-2 prose-h2:text-2xl prose-h2:border-b prose-h2:pb-2 prose-h3:text-xl prose-a:text-blue-600 prose-a:no-underline hover:prose-a:underline prose-code:text-sm prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-img:rounded-lg prose-img:shadow-md">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
-                    rehypePlugins={[rehypeHighlight]}
+                    rehypePlugins={[rehypeSlug, rehypeHighlight]}
                     components={{
                       // Custom components for better rendering.
                       // Issue #983: react-markdown v10 dropped the `inline`
@@ -209,6 +278,21 @@ export default function FileViewerPage() {
                   >
                     {content.content}
                   </ReactMarkdown>
+                </div>
+                {/* Side TOC — desktop only, hidden below lg and when the
+                    document has 0–1 headings (auto-hide takes precedence over
+                    the persisted visible state). Issue #1007 */}
+                {showToc && (
+                  <aside className="hidden lg:block lg:w-64 lg:flex-shrink-0">
+                    <div className="lg:sticky" style={{ top: `${HEADER_OFFSET_PX + 8}px` }}>
+                      <MarkdownToc
+                        entries={tocEntries}
+                        title={tWorktree('toc.title')}
+                        headerOffset={HEADER_OFFSET_PX}
+                      />
+                    </div>
+                  </aside>
+                )}
                 </div>
               ) : (
                 // Code rendering with line wrapping
