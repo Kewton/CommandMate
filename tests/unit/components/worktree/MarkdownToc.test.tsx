@@ -156,4 +156,30 @@ describe('MarkdownToc', () => {
     ).not.toThrow();
     expect(screen.getByRole('navigation', { name: 'Contents' })).toBeInTheDocument();
   });
+
+  // Issue #1009: the inline worktree preview passes its own scroll pane as
+  // `root` so the scroll-spy tracks that pane instead of the viewport.
+  describe('root prop (Issue #1009)', () => {
+    it('defaults to a null (viewport) root when omitted', () => {
+      render(<MarkdownToc entries={ENTRIES} title="Contents" />);
+      expect(lastObserverOptions?.root).toBeNull();
+    });
+
+    it('passes a custom root through to the IntersectionObserver', () => {
+      const pane = document.createElement('div');
+      render(<MarkdownToc entries={ENTRIES} title="Contents" root={pane} />);
+      expect(lastObserverOptions?.root).toBe(pane);
+    });
+
+    it('re-subscribes the observer when the root changes', () => {
+      const paneA = document.createElement('div');
+      const paneB = document.createElement('div');
+      const { rerender } = render(<MarkdownToc entries={ENTRIES} title="Contents" root={paneA} />);
+      expect(disconnectSpy).not.toHaveBeenCalled();
+
+      rerender(<MarkdownToc entries={ENTRIES} title="Contents" root={paneB} />);
+      expect(disconnectSpy).toHaveBeenCalled();
+      expect(lastObserverOptions?.root).toBe(paneB);
+    });
+  });
 });

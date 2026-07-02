@@ -9,6 +9,11 @@
  *   currently in view. The observer's top `rootMargin` is offset by the sticky
  *   header height so a heading hidden behind the header is not counted as
  *   "in view".
+ * - The observer's `root` defaults to the viewport, matching the standalone
+ *   file viewer page. The optional `root` prop lets an embedded, independently
+ *   scrolling pane (e.g. the worktree inline Markdown preview, Issue #1009)
+ *   pass its own scroll container instead (back-compat: omitting it keeps the
+ *   original viewport-root behaviour, Issue #1007).
  *
  * SSR / test safe: guards `typeof IntersectionObserver` before use.
  */
@@ -25,6 +30,12 @@ export interface MarkdownTocProps {
   title: string;
   /** Height (px) of the sticky page header, used for scroll-spy offset. */
   headerOffset?: number;
+  /**
+   * Scroll-spy `IntersectionObserver` root. Pass the scrolling pane element
+   * when the TOC lives inside its own scroll container (rather than the page
+   * viewport). Defaults to `null` (viewport root), matching prior behaviour.
+   */
+  root?: HTMLElement | null;
   /** Optional extra class names for the wrapper. */
   className?: string;
 }
@@ -46,6 +57,7 @@ export function MarkdownToc({
   entries,
   title,
   headerOffset = DEFAULT_HEADER_OFFSET,
+  root = null,
   className = '',
 }: MarkdownTocProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -67,6 +79,7 @@ export function MarkdownToc({
         }
       },
       {
+        root,
         // Shift the top edge down by the sticky header height so headings behind
         // the header do not register as "in view".
         rootMargin: `-${headerOffset}px 0px -70% 0px`,
@@ -87,7 +100,7 @@ export function MarkdownToc({
       observer.disconnect();
       observed.length = 0;
     };
-  }, [entries, headerOffset]);
+  }, [entries, headerOffset, root]);
 
   const handleClick = (event: React.MouseEvent<HTMLAnchorElement>, id: string) => {
     event.preventDefault();

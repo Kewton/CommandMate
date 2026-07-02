@@ -24,6 +24,12 @@
 
 import GithubSlugger from 'github-slugger';
 
+/**
+ * localStorage key for TOC visibility, shared across all Markdown TOC surfaces
+ * (standalone file viewer, Issue #1007; inline worktree preview, Issue #1009).
+ */
+export const TOC_VISIBLE_STORAGE_KEY = 'commandmate:md-toc-visible';
+
 /** A single table-of-contents entry. */
 export interface TocEntry {
   /** Heading level, 1–6 (number of leading `#`). */

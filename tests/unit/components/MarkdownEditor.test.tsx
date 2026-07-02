@@ -59,6 +59,29 @@ const mockRemoveEventListener = vi.fn();
 const originalAddEventListener = window.addEventListener;
 const originalRemoveEventListener = window.removeEventListener;
 
+// Mock ResizeObserver (jsdom has no native implementation), capturing the
+// callback so tests can simulate a pane resize (Issue #1009 TOC sidebar).
+type ROCallback = (entries: Array<{ contentRect: { width: number } }>) => void;
+let lastResizeObserverCallback: ROCallback | null = null;
+const resizeObserveSpy = vi.fn();
+const resizeDisconnectSpy = vi.fn();
+
+class MockResizeObserver {
+  constructor(cb: ROCallback) {
+    lastResizeObserverCallback = cb;
+  }
+  observe = resizeObserveSpy;
+  unobserve = vi.fn();
+  disconnect = resizeDisconnectSpy;
+}
+
+/** Simulate the preview pane container resizing to `width` px. */
+function fireResize(width: number) {
+  act(() => {
+    lastResizeObserverCallback?.([{ contentRect: { width } }]);
+  });
+}
+
 describe('MarkdownEditor', () => {
   const defaultProps = {
     worktreeId: 'test-worktree-123',
@@ -83,12 +106,16 @@ describe('MarkdownEditor', () => {
     // Mock window event listeners
     window.addEventListener = mockAddEventListener;
     window.removeEventListener = mockRemoveEventListener;
+
+    lastResizeObserverCallback = null;
+    vi.stubGlobal('ResizeObserver', MockResizeObserver);
   });
 
   afterEach(() => {
     window.addEventListener = originalAddEventListener;
     window.removeEventListener = originalRemoveEventListener;
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   /**
@@ -1466,6 +1493,90 @@ def hello():
       }).not.toThrow();
 
       await waitForEditorReady();
+    });
+  });
+
+  describe('Inline TOC Sidebar (Issue #1009)', () => {
+    const contentWithHeadings =
+      '# Title\n\nIntro text.\n\n## Section A\n\nBody A.\n\n## Section B\n\nBody B.';
+
+    beforeEach(() => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ success: true, content: contentWithHeadings }),
+      });
+    });
+
+    it('shows the TOC sidebar and toggle once the pane is wide enough', async () => {
+      render(<MarkdownEditor {...defaultProps} />);
+      await waitForEditorReady();
+
+      fireResize(700);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('markdown-preview-toc')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('markdown-preview-toc-toggle')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Section A' })).toBeInTheDocument();
+    });
+
+    it('hides the TOC sidebar and toggle when the pane is narrower than the threshold', async () => {
+      render(<MarkdownEditor {...defaultProps} />);
+      await waitForEditorReady();
+
+      fireResize(500);
+
+      expect(screen.queryByTestId('markdown-preview-toc')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('markdown-preview-toc-toggle')).not.toBeInTheDocument();
+    });
+
+    it('hides the TOC sidebar/toggle for documents with 0-1 headings even when the pane is wide', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ success: true, content: mockFileContent }),
+      });
+
+      render(<MarkdownEditor {...defaultProps} />);
+      await waitForEditorReady();
+
+      fireResize(900);
+
+      expect(screen.queryByTestId('markdown-preview-toc')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('markdown-preview-toc-toggle')).not.toBeInTheDocument();
+    });
+
+    it('toggles TOC visibility and persists the choice to localStorage', async () => {
+      render(<MarkdownEditor {...defaultProps} />);
+      await waitForEditorReady();
+
+      fireResize(700);
+      await waitFor(() => {
+        expect(screen.getByTestId('markdown-preview-toc')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByTestId('markdown-preview-toc-toggle'));
+
+      expect(screen.queryByTestId('markdown-preview-toc')).not.toBeInTheDocument();
+      expect(localStorageMock.setItem).toHaveBeenCalledWith(
+        'commandmate:md-toc-visible',
+        'false'
+      );
+    });
+
+    it('restores persisted (hidden) TOC visibility on mount, keeping the toggle available', async () => {
+      localStorageMock.getItem.mockImplementation((key: string) =>
+        key === 'commandmate:md-toc-visible' ? 'false' : null
+      );
+
+      render(<MarkdownEditor {...defaultProps} />);
+      await waitForEditorReady();
+
+      fireResize(700);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('markdown-preview-toc-toggle')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('markdown-preview-toc')).not.toBeInTheDocument();
     });
   });
 });

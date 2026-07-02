@@ -25,6 +25,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
+import rehypeSlug from 'rehype-slug';
 import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/github-dark.css';
 import { X, AlertTriangle, FileText, Eye } from 'lucide-react';
@@ -231,8 +232,13 @@ export const MarkdownPreview = memo(function MarkdownPreview({
   // New array references cause ReactMarkdown to fully rebuild the DOM tree,
   // which detaches link elements and makes them unclickable.
   const remarkPlugins = useMemo(() => [remarkGfm], []);
+  // [Issue #1009] rehype-slug MUST run after rehype-sanitize: rehype-sanitize's
+  // clobberPrefix rewrites any pre-existing `id` to `user-content-<id>`, which
+  // would desync heading ids from the plain slugs `extractToc` (the inline TOC
+  // sidebar's data source) produces. Running slug after sanitize assigns plain
+  // ids that are never re-sanitized, so they match `extractToc` exactly.
   const rehypePlugins = useMemo(
-    () => [rehypeRaw, [rehypeSanitize, REHYPE_SANITIZE_SCHEMA], rehypeHighlight],
+    () => [rehypeRaw, [rehypeSanitize, REHYPE_SANITIZE_SCHEMA], rehypeSlug, rehypeHighlight],
     [],
   );
 

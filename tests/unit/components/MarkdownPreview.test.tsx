@@ -99,4 +99,23 @@ describe('MarkdownPreview', () => {
       expect(link.getAttribute('href')).toBe('./readme.md');
     });
   });
+
+  // Issue #1009: headings need a plain (non-prefixed) id so the inline TOC
+  // sidebar's `extractToc`-derived anchors (`#slug`) resolve to the rendered
+  // heading. rehype-slug must run AFTER rehype-sanitize, else sanitize's
+  // clobberPrefix would rename the id to `user-content-slug` and desync it.
+  describe('heading ids (rehype-slug, Issue #1009)', () => {
+    it('assigns a plain slug id to headings, not "user-content-" prefixed', () => {
+      render(<MarkdownPreview content="## Section One" />);
+      const heading = screen.getByRole('heading', { name: 'Section One' });
+      expect(heading).toHaveAttribute('id', 'section-one');
+    });
+
+    it('assigns distinct ids matching document order for duplicate headings', () => {
+      render(<MarkdownPreview content={'## Section\n\ntext\n\n## Section'} />);
+      const headings = screen.getAllByRole('heading', { name: 'Section' });
+      expect(headings[0]).toHaveAttribute('id', 'section');
+      expect(headings[1]).toHaveAttribute('id', 'section-1');
+    });
+  });
 });
