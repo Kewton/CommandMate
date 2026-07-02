@@ -1524,7 +1524,8 @@ def hello():
       render(<MarkdownEditor {...defaultProps} />);
       await waitForEditorReady();
 
-      fireResize(500);
+      // Below TOC_SIDEBAR_MIN_WIDTH_PX (480): sidebar/toggle must stay hidden.
+      fireResize(400);
 
       expect(screen.queryByTestId('markdown-preview-toc')).not.toBeInTheDocument();
       expect(screen.queryByTestId('markdown-preview-toc-toggle')).not.toBeInTheDocument();
