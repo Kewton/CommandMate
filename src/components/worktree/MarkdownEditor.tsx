@@ -108,9 +108,11 @@ function getInitialViewMode(initialViewMode?: ViewMode): ViewMode {
  * Minimum preview-pane width (px) for the inline TOC sidebar to show
  * (Issue #1009). Measured via `ResizeObserver` on the pane container itself
  * (not the viewport) so the sidebar auto-hides in narrow split-view panes
- * even on a wide screen.
+ * even on a wide screen. Tuned to 480 so the worktree detail page's inline
+ * preview pane (~551px in the default multi-panel layout) shows the TOC; the
+ * narrow `w-48` sidebar keeps the body readable at that width.
  */
-const TOC_SIDEBAR_MIN_WIDTH_PX = 640;
+const TOC_SIDEBAR_MIN_WIDTH_PX = 480;
 
 export interface MarkdownPreviewPaneProps {
   /** Debounced markdown content to render. */
@@ -198,7 +200,7 @@ const MarkdownPreviewPane = memo(function MarkdownPreviewPane({
       {showToc && (
         <aside
           data-testid="markdown-preview-toc"
-          className="w-56 flex-shrink-0 overflow-y-auto border-l border-gray-200 dark:border-gray-700 py-4"
+          className="w-48 flex-shrink-0 overflow-y-auto border-l border-gray-200 dark:border-gray-700 py-4"
         >
           <div className="sticky top-0">
             <MarkdownToc entries={tocEntries} title={tocTitle} headerOffset={0} root={scrollEl} />
