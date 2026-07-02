@@ -79,10 +79,12 @@ export function createLsCommand(): Command {
 
         let worktrees = data.worktrees;
 
-        // [DR2-08] Filter by name (not branch) prefix
+        // [DR2-08] Filter by real branch prefix (Issue #1003), falling back to
+        // `name` when the branch is not yet synced (NULL) so legacy behavior and
+        // pre-#1003 rows keep working.
         if (options.branch) {
           worktrees = worktrees.filter(wt =>
-            wt.name.startsWith(options.branch!)
+            (wt.branch ?? wt.name).startsWith(options.branch!)
           );
         }
 
