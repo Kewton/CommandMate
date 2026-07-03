@@ -27,6 +27,12 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   commandmate ls --json                   # JSON output (for agent consumption)
   commandmate ls --quiet                  # IDs only, one per line (for piping)
   commandmate ls --branch <prefix>        # Filter by branch name prefix
+  commandmate ls --id <prefix>            # Filter by worktree id prefix
+
+  Worktree ids are <repo>-<branch> slugs (e.g. anvil-develop). --id / --branch
+  front-match is case-sensitive and does NOT guarantee uniqueness (e.g.
+  --id anvil-develop also matches anvil-develop-2). --branch and --id combine
+  as AND. Use --id to disambiguate the same branch across repositories.
 
   STATUS values:
     idle     - Session not started
@@ -39,12 +45,15 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
 
   Options:
     --agent <id>           Agent type: claude (default), codex, gemini, vibe-local, opencode, copilot, antigravity
+    --instance <id>        Agent instance ID: <agent> or <agent>-<n> (e.g. claude-2). See "Multi-Session" below.
+    --register             Register the --instance session into the agent-instance roster
     --auto-yes             Enable auto-yes before sending
     --duration <d>         Auto-yes duration: 1h, 3h, 8h (default: 1h)
     --stop-pattern <p>     Auto-yes stop condition (regex)
 
   Finding worktree IDs:
     WT=$(commandmate ls --branch feature/101 --quiet)
+    WT=$(commandmate ls --id anvil- --quiet)   # disambiguate by repo (id prefix)
     commandmate send "$WT" "Implement this"
 
 ### commandmate wait <worktree-id...>
@@ -92,6 +101,46 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   commandmate auto-yes <id> --enable --duration 3h      # With duration
   commandmate auto-yes <id> --enable --stop-pattern "error"
   commandmate auto-yes <id> --disable                   # Disable
+
+### commandmate instances <worktree-id> [action] [args]
+  Discover and manage a worktree's agent-instance roster (1 agent, multiple sessions).
+
+  commandmate instances <id>                            # List roster + running/auto-yes status
+  commandmate instances <id> --json                     # JSON output
+  commandmate instances <id> add --agent codex          # Add an instance (auto-generates ID, e.g. codex-2)
+  commandmate instances <id> add --agent codex --alias "Review" --id codex-3
+  commandmate instances <id> remove <instance-id>       # Remove from roster
+  commandmate instances <id> remove <instance-id> --kill  # Remove and kill its session
+  commandmate instances <id> alias <instance-id> "New Name"
+  commandmate instances <id> kill <instance-id>         # Kill only that instance's session
+
+  See "Multi-Session" below for the ID convention and roster semantics.
+
+## Multi-Session (1 agent, multiple sessions)
+
+  A worktree can run several sessions of the same CLI tool concurrently. Each
+  session is an "instance" identified by an instance ID:
+    <agent>        - the agent's primary instance (e.g. "claude")
+    <agent>-<n>    - an additional instance, n >= 2 (e.g. "claude-2", "claude-3")
+
+  --instance is accepted by send / wait / respond / capture / auto-yes.
+  send --instance auto-starts the session if it is not already running.
+
+  The roster (visible in the browser UI's Agent panel) is the list of known
+  instances with aliases and display order. Ad-hoc sessions started via
+  'send --instance' do NOT appear in the roster unless registered:
+    commandmate send <id> "..." --instance claude-2 --register
+  Without --register, the session still runs and responds to CLI commands,
+  but it will not show up in the UI sidebar/roster until added there or via
+  'commandmate instances <id> add'.
+
+  Per-instance auto-yes: --instance scopes --auto-yes/--duration/--stop-pattern
+  to that specific session, independent of other instances of the same agent.
+
+  commandmate instances <id>                        # discover valid --instance values
+  commandmate send <id> "task" --agent codex --instance codex-2 --auto-yes
+  commandmate wait <id> --instance codex-2 --timeout 600
+  commandmate capture <id> --agent codex --instance codex-2
 
 ## All Exit Codes
 
@@ -199,4 +248,23 @@ Copy and adapt these patterns for your use case.
     124) echo "Timeout"; commandmate capture "$WT" --json ;;
     *)   echo "Error: exit $EXIT_CODE" ;;
   esac
+
+## 7. Multi-Session: run a second Codex session alongside the primary agent
+
+  WT=$(commandmate ls --branch feature/101 --quiet)
+
+  # Discover the roster before picking an --instance value
+  commandmate instances "$WT"
+
+  # Register a second Codex instance, then send/wait/capture scoped to it
+  commandmate instances "$WT" add --agent codex --alias "Review"
+  commandmate send "$WT" "Review the diff" --agent codex --instance codex-2 --auto-yes
+  commandmate wait "$WT" --instance codex-2 --timeout 600
+  commandmate capture "$WT" --agent codex --instance codex-2 --json
+
+  # Ad-hoc instance without pre-registering (still runs; register to show in UI)
+  commandmate send "$WT" "Quick check" --agent codex --instance codex-3 --register
+
+  # Clean up when done
+  commandmate instances "$WT" remove codex-2 --kill
 `;

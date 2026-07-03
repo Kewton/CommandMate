@@ -378,6 +378,80 @@ describe('sendPromptAnswer', () => {
   });
 
   // =========================================================================
+  // Issue #999: Antigravity (agy) permission menus are arrow-key-navigated,
+  // like Claude Code. detectPrompt yields options with NO isDefault flag
+  // (ASCII ">" is not an ❯/●/› indicator), so defaultNum falls back to 1.
+  // Auto-answering "Yes" (option 1) => offset 0 => a bare Enter. A typed
+  // option number would be ignored by agy's arrow-nav TUI, so sendKeys must
+  // not be used.
+  // =========================================================================
+  describe('Issue #999: Antigravity multiple_choice uses cursor navigation', () => {
+    // Options exactly as detectPrompt produces them for the real agy menu:
+    // no option carries isDefault (the ">" highlight is not a default indicator).
+    const agyMenuOptions = [
+      { number: 1, label: 'Yes' },
+      { number: 2, label: "Yes, and always allow in this conversation for commands that start with 'git status'" },
+      { number: 3, label: "Yes, and always allow for commands that start with 'git status' (Persist to settings.json)" },
+      { number: 4, label: 'No' },
+    ];
+
+    it('sends a bare Enter (cursor nav, offset 0) when auto-answering "Yes" (option 1)', async () => {
+      const promptData: PromptData = {
+        type: 'multiple_choice',
+        question: 'Do you want to proceed?',
+        options: agyMenuOptions,
+        status: 'pending',
+      };
+
+      await sendPromptAnswer({
+        sessionName: 'agy-test',
+        answer: '1',
+        cliToolId: 'antigravity',
+        promptData,
+      });
+
+      // defaultNum falls back to 1 (no isDefault), targetNum 1 => offset 0 => Enter.
+      expect(sendSpecialKeys).toHaveBeenCalledWith('agy-test', ['Enter']);
+      // A typed "1" would be ignored by agy's arrow-nav TUI, so no text send.
+      expect(sendKeys).not.toHaveBeenCalled();
+    });
+
+    it('navigates Down to reach a non-default option ("No" = option 4)', async () => {
+      const promptData: PromptData = {
+        type: 'multiple_choice',
+        question: 'Do you want to proceed?',
+        options: agyMenuOptions,
+        status: 'pending',
+      };
+
+      await sendPromptAnswer({
+        sessionName: 'agy-test',
+        answer: '4',
+        cliToolId: 'antigravity',
+        promptData,
+      });
+
+      // offset = 4 - 1 = 3 => three Downs then Enter.
+      expect(sendSpecialKeys).toHaveBeenCalledWith('agy-test', ['Down', 'Down', 'Down', 'Enter']);
+      expect(sendKeys).not.toHaveBeenCalled();
+    });
+
+    it('uses cursor nav via fallbackPromptType when promptData is undefined', async () => {
+      await sendPromptAnswer({
+        sessionName: 'agy-test',
+        answer: '1',
+        cliToolId: 'antigravity',
+        promptData: undefined,
+        fallbackPromptType: 'multiple_choice',
+      });
+
+      // fallbackDefaultOptionNumber defaults to 1 => offset 0 => Enter.
+      expect(sendSpecialKeys).toHaveBeenCalledWith('agy-test', ['Enter']);
+      expect(sendKeys).not.toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
   // 8. Offset > 0 -> Down + Enter
   // =========================================================================
   describe('Offset > 0 (navigate Down)', () => {

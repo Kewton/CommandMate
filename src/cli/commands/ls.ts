@@ -71,6 +71,7 @@ export function createLsCommand(): Command {
     .option('--json', 'JSON output')
     .option('--quiet', 'IDs only (one per line)')
     .option('--branch <prefix>', 'Filter by branch name prefix')
+    .option('--id <prefix>', 'Filter by worktree id prefix')
     .option('--token <token>', TOKEN_WARNING)
     .action(async (options: LsOptions) => {
       try {
@@ -79,11 +80,21 @@ export function createLsCommand(): Command {
 
         let worktrees = data.worktrees;
 
-        // [DR2-08] Filter by name (not branch) prefix
+        // [DR2-08] Filter by real branch prefix (Issue #1003), falling back to
+        // `name` when the branch is not yet synced (NULL) so legacy behavior and
+        // pre-#1003 rows keep working.
         if (options.branch) {
           worktrees = worktrees.filter(wt =>
-            wt.name.startsWith(options.branch!)
+            (wt.branch ?? wt.name).startsWith(options.branch!)
           );
+        }
+
+        // Issue #1005: Filter by worktree id prefix. Independent of `--branch`
+        // (AND-combined when both are given). Front-match / case-sensitive;
+        // the prefix does not guarantee uniqueness because ids are
+        // `<repo>-<branch>` slugs and startsWith can match sibling slugs.
+        if (options.id) {
+          worktrees = worktrees.filter(wt => wt.id.startsWith(options.id!));
         }
 
         const output = formatOutput(worktrees, options);

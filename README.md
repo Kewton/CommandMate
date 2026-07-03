@@ -153,6 +153,7 @@ Operate agent sessions from the CLI. See the [CLI Operations Guide](./docs/en/us
 | `commandmate ls --json` | JSON output (for agent consumption) |
 | `commandmate ls --quiet` | IDs only, one per line (for piping) |
 | `commandmate ls --branch feature/` | Filter by branch name prefix |
+| `commandmate ls --id <prefix>` | Filter by worktree ID prefix |
 | `commandmate send <id> "message"` | Send a message to an agent |
 | `commandmate send <id> "msg" --auto-yes` | Send with auto-yes enabled |
 | `commandmate send <id> "msg" --agent codex` | Send to a specific agent |

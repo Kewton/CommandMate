@@ -550,3 +550,49 @@ describe('detectSessionStatus - Antigravity selection_list detection (Issue #995
     expect(result.reason).not.toBe(STATUS_REASON.ANTIGRAVITY_SELECTION_LIST);
   });
 });
+
+// Actual agy "Do you want to proceed?" permission-approval menu from Issue #997.
+// Its footer is "↑/↓ Navigate · tab Amend · ctrl+g … · ctrl+r Review" — note there
+// is NO "enter Select" hint, so the #995 pattern missed it and the "esc to cancel"
+// footer misreported the screen as running/thinking. #997 broadens the pattern to
+// the "↑/↓ Navigate" footer alone.
+const AGY_PERMISSION_MENU_OUTPUT = [
+  '  Requesting permission for:',
+  '     git status',
+  'Do you want to proceed?',
+  '> 1. Yes',
+  "  2. Yes, and always allow in this conversation for commands that start with 'git status'",
+  "  3. Yes, and always allow for commands that start with 'git status' (Persist to settings.json)",
+  '  4. No',
+  '  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command · ctrl+r Review',
+  'esc to cancel                                                          Gemini 3.5 Flash (Medium)',
+].join('\n');
+
+describe('detectSessionStatus - Antigravity permission-approval menu detection (Issue #997)', () => {
+  it('should detect the "Do you want to proceed?" menu and return waiting status', () => {
+    const result = detectSessionStatus(AGY_PERMISSION_MENU_OUTPUT, 'antigravity');
+    expect(result.status).toBe('waiting');
+    expect(result.confidence).toBe('high');
+    expect(result.reason).toBe(STATUS_REASON.ANTIGRAVITY_SELECTION_LIST);
+    expect(result.hasActivePrompt).toBe(false);
+  });
+
+  it('should prioritize the selection list over the "esc to cancel" thinking footer', () => {
+    // Root-cause regression guard: the "esc to cancel" footer matches
+    // ANTIGRAVITY_THINKING_PATTERN, so without priority-0.9 ordering the
+    // permission menu would be misreported as running/thinking_indicator.
+    const result = detectSessionStatus(AGY_PERMISSION_MENU_OUTPUT, 'antigravity');
+    expect(result.reason).not.toBe(STATUS_REASON.THINKING_INDICATOR);
+    expect(result.status).not.toBe('running');
+  });
+
+  it('should mark the reason as a selection-list reason (NavigationButtons shown)', () => {
+    const result = detectSessionStatus(AGY_PERMISSION_MENU_OUTPUT, 'antigravity');
+    expect(SELECTION_LIST_REASONS.has(result.reason)).toBe(true);
+  });
+
+  it('should NOT trigger antigravity_selection_list for non-antigravity tools', () => {
+    const result = detectSessionStatus(AGY_PERMISSION_MENU_OUTPUT, 'claude');
+    expect(result.reason).not.toBe(STATUS_REASON.ANTIGRAVITY_SELECTION_LIST);
+  });
+});

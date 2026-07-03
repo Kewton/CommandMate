@@ -30,7 +30,8 @@ import React, {
   useRef,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle } from 'lucide-react';
+import { useTranslations } from 'next-intl';
+import { AlertTriangle, List } from 'lucide-react';
 import { debounce } from '@/lib/utils';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { ToastContainer, useToast } from '@/components/common/Toast';
@@ -43,6 +44,8 @@ import {
   LargeFileWarning,
   type MobileTab,
 } from '@/components/worktree/MarkdownPreview';
+import { MarkdownToc } from '@/components/worktree/MarkdownToc';
+import { extractToc, TOC_VISIBLE_STORAGE_KEY } from '@/lib/markdown-toc';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useFullscreen } from '@/hooks/useFullscreen';
 import { useLocalStorageState } from '@/hooks/useLocalStorageState';
@@ -102,6 +105,125 @@ function getInitialViewMode(initialViewMode?: ViewMode): ViewMode {
 }
 
 /**
+ * Minimum preview-pane width (px) for the inline TOC sidebar to show
+ * (Issue #1009). Measured via `ResizeObserver` on the pane container itself
+ * (not the viewport) so the sidebar auto-hides in narrow split-view panes
+ * even on a wide screen. Tuned to 480 so the worktree detail page's inline
+ * preview pane (~551px in the default multi-panel layout) shows the TOC; the
+ * narrow `w-48` sidebar keeps the body readable at that width.
+ */
+const TOC_SIDEBAR_MIN_WIDTH_PX = 480;
+
+export interface MarkdownPreviewPaneProps {
+  /** Debounced markdown content to render. */
+  previewContent: string;
+  /** Callback to open a file from a relative link. */
+  onOpenFile?: (path: string) => void;
+  /** Current file path for resolving relative links. */
+  filePath: string;
+  /** Worktree ID for resolving relative image paths. */
+  worktreeId: string;
+  /** Persisted TOC visibility (shared with the standalone file viewer). */
+  tocVisible: boolean;
+  /** Toggle callback for the TOC visibility. */
+  onToggleTocVisible: () => void;
+  /** i18n label for the TOC nav / toggle title. */
+  tocTitle: string;
+  /** i18n label for the toggle button when the TOC is hidden. */
+  tocShowLabel: string;
+  /** i18n label for the toggle button when the TOC is visible. */
+  tocHideLabel: string;
+}
+
+/**
+ * Markdown preview pane: renders the preview body plus an optional side TOC
+ * (Issue #1009). Reuses `extractToc`/`MarkdownToc` from the standalone file
+ * viewer (Issue #1007). The TOC sidebar and its toggle only appear when there
+ * are ≥2 headings AND the pane itself (not the viewport) is wide enough —
+ * measured with `ResizeObserver` so split-view panes narrower than the
+ * threshold never show a cramped sidebar.
+ */
+const MarkdownPreviewPane = memo(function MarkdownPreviewPane({
+  previewContent,
+  onOpenFile,
+  filePath,
+  worktreeId,
+  tocVisible,
+  onToggleTocVisible,
+  tocTitle,
+  tocShowLabel,
+  tocHideLabel,
+}: MarkdownPreviewPaneProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const [widthAllowsToc, setWidthAllowsToc] = useState(false);
+
+  useEffect(() => {
+    setScrollEl(scrollRef.current);
+  }, []);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0;
+      setWidthAllowsToc(width >= TOC_SIDEBAR_MIN_WIDTH_PX);
+    });
+    observer.observe(el);
+
+    return () => observer.disconnect();
+  }, []);
+
+  const tocEntries = useMemo(() => extractToc(previewContent), [previewContent]);
+  const hasToc = tocEntries.length >= 2;
+  // No-op toggle is never shown: narrow panes and 0-1 heading docs hide the
+  // control entirely rather than rendering a disabled/inert button.
+  const showToggle = hasToc && widthAllowsToc;
+  const showToc = showToggle && tocVisible;
+
+  return (
+    <div ref={containerRef} className="relative flex flex-1 overflow-hidden">
+      <div
+        ref={scrollRef}
+        data-testid="markdown-preview"
+        className="flex-1 min-w-0 p-4 overflow-y-auto prose prose-sm dark:prose-invert max-w-none prose-headings:scroll-mt-2"
+      >
+        <MarkdownPreview
+          content={previewContent}
+          onOpenFile={onOpenFile}
+          currentFilePath={filePath}
+          worktreeId={worktreeId}
+        />
+      </div>
+      {showToc && (
+        <aside
+          data-testid="markdown-preview-toc"
+          className="w-48 flex-shrink-0 overflow-y-auto border-l border-gray-200 dark:border-gray-700 py-4"
+        >
+          <div className="sticky top-0">
+            <MarkdownToc entries={tocEntries} title={tocTitle} headerOffset={0} root={scrollEl} />
+          </div>
+        </aside>
+      )}
+      {showToggle && (
+        <button
+          data-testid="markdown-preview-toc-toggle"
+          onClick={onToggleTocVisible}
+          aria-pressed={tocVisible}
+          aria-label={tocVisible ? tocHideLabel : tocShowLabel}
+          title={tocVisible ? tocHideLabel : tocShowLabel}
+          className="absolute top-2 right-2 z-10 flex items-center justify-center rounded-md border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-gray-800/90 p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 shadow-sm"
+        >
+          <List className="h-4 w-4" />
+        </button>
+      )}
+    </div>
+  );
+});
+
+/**
  * MarkdownEditor Component
  *
  * @example
@@ -128,6 +250,8 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   // Resolve file type: explicit prop > auto-detect from extension (Issue #646)
   const fileType = fileTypeProp ?? detectFileType(filePath);
   const isTextMode = fileType === 'text';
+
+  const tWorktree = useTranslations('worktree');
 
   // State
   const [content, setContent] = useState('');
@@ -206,6 +330,17 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     defaultValue: false,
     validate: isValidBoolean,
   });
+
+  // Inline preview TOC visibility, shared with the standalone file viewer
+  // (Issue #1007 / #1009) so toggling one keeps the other in sync.
+  const { value: tocVisible, setValue: setTocVisible } = useLocalStorageState({
+    key: TOC_VISIBLE_STORAGE_KEY,
+    defaultValue: true,
+    validate: isValidBoolean,
+  });
+  const handleToggleTocVisible = useCallback(() => {
+    setTocVisible((visible) => !visible);
+  }, [setTocVisible]);
 
   // Swipe gesture for exiting maximized mode (mobile)
   const { ref: swipeRef } = useSwipeGesture({
@@ -789,12 +924,17 @@ export const MarkdownEditor = memo(function MarkdownEditor({
               data-testid="markdown-preview-container"
               className="flex flex-col overflow-hidden w-full"
             >
-              <div
-                data-testid="markdown-preview"
-                className="flex-1 p-4 overflow-y-auto prose prose-sm dark:prose-invert max-w-none"
-              >
-                <MarkdownPreview content={previewContent} onOpenFile={onOpenFile} currentFilePath={filePath} worktreeId={worktreeId} />
-              </div>
+              <MarkdownPreviewPane
+                previewContent={previewContent}
+                onOpenFile={onOpenFile}
+                filePath={filePath}
+                worktreeId={worktreeId}
+                tocVisible={tocVisible}
+                onToggleTocVisible={handleToggleTocVisible}
+                tocTitle={tWorktree('toc.title')}
+                tocShowLabel={tWorktree('toc.show')}
+                tocHideLabel={tWorktree('toc.hide')}
+              />
             </div>
           )
         ) : (
@@ -806,12 +946,17 @@ export const MarkdownEditor = memo(function MarkdownEditor({
             }`}
             style={viewMode === 'split' ? previewWidthStyle : { width: strategy.showPreview ? '100%' : '0%' }}
           >
-            <div
-              data-testid="markdown-preview"
-              className="flex-1 p-4 overflow-y-auto prose prose-sm dark:prose-invert max-w-none"
-            >
-              <MarkdownPreview content={previewContent} onOpenFile={onOpenFile} currentFilePath={filePath} worktreeId={worktreeId} />
-            </div>
+            <MarkdownPreviewPane
+              previewContent={previewContent}
+              onOpenFile={onOpenFile}
+              filePath={filePath}
+              worktreeId={worktreeId}
+              tocVisible={tocVisible}
+              onToggleTocVisible={handleToggleTocVisible}
+              tocTitle={tWorktree('toc.title')}
+              tocShowLabel={tWorktree('toc.show')}
+              tocHideLabel={tWorktree('toc.hide')}
+            />
           </div>
         )}
       </div>

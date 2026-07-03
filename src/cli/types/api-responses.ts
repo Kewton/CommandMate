@@ -13,10 +13,25 @@ export interface WorktreeListResponse {
 }
 
 // Mirrors: src/types/models.ts Worktree (subset)
-// [DR2-08] Field name is "name" (not "branch") matching server-side Worktree type
+// [DR2-08] `name` is the display name / id-derived slug; `branch` (Issue #1003)
+// is the real git branch. They usually coincide for sync-generated worktrees
+// but can diverge, so `ls --branch` filters on `branch` (falling back to `name`).
 export interface WorktreeItem {
+  /**
+   * Primary worktree identifier: a `<repo>-<branch>` slug (e.g. `anvil-develop`),
+   * sanitized/lowercased. This is the prefix users pass to `ls --id` (Issue #1005)
+   * and the id accepted by send/capture/wait/respond/instances.
+   */
   id: string;
   name: string;
+  /**
+   * Mirrors: src/types/models.ts Worktree.branch (Issue #1003).
+   * Git branch captured at sync time — a distinct concept from
+   * gitStatus.currentBranch (live) and initialBranch (session start); it lags a
+   * checkout until the next sync. Undefined for rows synced before Issue #1003
+   * or written by non-sync paths; consumers fall back to {@link name}.
+   */
+  branch?: string;
   cliToolId?: string;
   isSessionRunning?: boolean;
   isWaitingForResponse?: boolean;
@@ -27,6 +42,23 @@ export interface WorktreeItem {
     isWaitingForResponse: boolean;
     isProcessing: boolean;
   }>>;
+  // Mirrors: src/lib/cli-tools/types.ts AgentInstance[] (Issue #869/#1000).
+  // Present on both GET /api/worktrees and GET /api/worktrees/[id].
+  agentInstances?: AgentInstance[];
+}
+
+// Mirrors: src/lib/cli-tools/types.ts AgentInstance (Issue #868/#1000)
+export interface AgentInstance {
+  id: string;
+  cliTool: string;
+  alias: string;
+  order: number;
+}
+
+// Mirrors: src/app/api/worktrees/[id]/route.ts GET response shape (subset used
+// by the CLI `instances` command; omits gitStatus/session fields not needed here)
+export interface WorktreeDetailResponse extends WorktreeItem {
+  agentInstances: AgentInstance[];
 }
 
 // Mirrors: src/app/api/worktrees/[id]/current-output/route.ts response shape

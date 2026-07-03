@@ -91,7 +91,7 @@ export function getWorktrees(
       w.id, w.name, w.path, w.repository_path, w.repository_name, w.description,
       w.last_user_message, w.last_user_message_at, w.last_message_summary,
       w.updated_at, w.favorite, w.status, w.link, w.cli_tool_id, w.last_viewed_at,
-      w.selected_agents, w.vibe_local_model, w.vibe_local_context_window,
+      w.selected_agents, w.vibe_local_model, w.vibe_local_context_window, w.branch,
       r.display_name as repository_display_name,
       (SELECT MAX(timestamp) FROM chat_messages
        WHERE worktree_id = w.id AND role = 'assistant' ${ACTIVE_FILTER}) as last_assistant_message_at
@@ -128,6 +128,7 @@ export function getWorktrees(
     selected_agents: string | null;
     vibe_local_model: string | null;
     vibe_local_context_window: number | null;
+    branch: string | null;
     repository_display_name: string | null;
     last_assistant_message_at: number | null;
   }>;
@@ -143,6 +144,7 @@ export function getWorktrees(
       id: row.id,
       name: row.name,
       path: row.path,
+      branch: row.branch ?? undefined,
       repositoryPath: row.repository_path || '',
       repositoryName: row.repository_name || '',
       repositoryDisplayName: row.repository_display_name || undefined,
@@ -233,7 +235,7 @@ export function getWorktreeById(
       w.id, w.name, w.path, w.repository_path, w.repository_name, w.description,
       w.last_user_message, w.last_user_message_at, w.last_message_summary,
       w.updated_at, w.favorite, w.status, w.link, w.cli_tool_id, w.last_viewed_at,
-      w.selected_agents, w.vibe_local_model, w.vibe_local_context_window,
+      w.selected_agents, w.vibe_local_model, w.vibe_local_context_window, w.branch,
       r.display_name as repository_display_name,
       (SELECT MAX(timestamp) FROM chat_messages
        WHERE worktree_id = w.id AND role = 'assistant' ${ACTIVE_FILTER}) as last_assistant_message_at
@@ -261,6 +263,7 @@ export function getWorktreeById(
     selected_agents: string | null;
     vibe_local_model: string | null;
     vibe_local_context_window: number | null;
+    branch: string | null;
     repository_display_name: string | null;
     last_assistant_message_at: number | null;
   } | undefined;
@@ -273,6 +276,7 @@ export function getWorktreeById(
     id: row.id,
     name: row.name,
     path: row.path,
+    branch: row.branch ?? undefined,
     repositoryPath: row.repository_path || '',
     repositoryName: row.repository_name || '',
     repositoryDisplayName: row.repository_display_name || undefined,
@@ -307,9 +311,9 @@ export function upsertWorktree(
   const stmt = db.prepare(`
     INSERT INTO worktrees (
       id, name, path, repository_path, repository_name, description,
-      last_user_message, last_user_message_at, last_message_summary, updated_at, cli_tool_id
+      last_user_message, last_user_message_at, last_message_summary, updated_at, cli_tool_id, branch
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       path = excluded.path,
@@ -320,7 +324,9 @@ export function upsertWorktree(
       last_user_message_at = COALESCE(excluded.last_user_message_at, worktrees.last_user_message_at),
       last_message_summary = COALESCE(excluded.last_message_summary, worktrees.last_message_summary),
       updated_at = COALESCE(excluded.updated_at, worktrees.updated_at),
-      cli_tool_id = COALESCE(excluded.cli_tool_id, worktrees.cli_tool_id)
+      cli_tool_id = COALESCE(excluded.cli_tool_id, worktrees.cli_tool_id),
+      -- Issue #1003: keep the last known branch when a non-sync writer omits it.
+      branch = COALESCE(excluded.branch, worktrees.branch)
   `);
 
   stmt.run(
@@ -334,7 +340,8 @@ export function upsertWorktree(
     worktree.lastUserMessageAt?.getTime() || null,
     worktree.lastMessageSummary || null,
     worktree.updatedAt?.getTime() || null,
-    worktree.cliToolId || 'claude'
+    worktree.cliToolId || 'claude',
+    worktree.branch || null
   );
 }
 

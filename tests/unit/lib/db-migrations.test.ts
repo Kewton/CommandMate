@@ -33,8 +33,8 @@ describe('db-migrations', () => {
   });
 
   describe('CURRENT_SCHEMA_VERSION', () => {
-    it('should be 35 after Migration #35 (timer instance_id)', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(35);
+    it('should be 36 after Migration #36 (worktree branch)', () => {
+      expect(CURRENT_SCHEMA_VERSION).toBe(36);
     });
   });
 

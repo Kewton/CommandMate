@@ -1,4 +1,10 @@
 {
+  "toc": {
+    "title": "Contents",
+    "show": "Show table of contents",
+    "hide": "Hide table of contents",
+    "empty": "No headings"
+  },
   "session": {
     "confirmKill": "End session for \"{name}\"?\n\nAll message history will be deleted. Log files will be retained.",
     "failedToKill": "Failed to end session",

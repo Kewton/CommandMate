@@ -210,4 +210,85 @@ describe('send command action', () => {
     await cmd.parseAsync(['node', 'send', 'wt1', 'hello']);
     expect(mockExit).toHaveBeenCalledWith(1); // DEPENDENCY_ERROR
   });
+
+  // Issue #1000: --register registers an ad-hoc --instance session into the roster
+  describe('--register', () => {
+    it('registers a primary-instance id (no --agent required) after sending', async () => {
+      const mockFn = vi.fn()
+        .mockResolvedValueOnce({ ok: true, status: 201, json: () => Promise.resolve({ id: 1 }), text: () => Promise.resolve('{"id":1}') })
+        .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ id: 'wt1', agentInstances: [] }), text: () => Promise.resolve('{"id":"wt1","agentInstances":[]}') })
+        .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({}), text: () => Promise.resolve('{}') });
+      global.fetch = mockFn;
+
+      const { createSendCommand } = await import('../../../../src/cli/commands/send');
+      const cmd = createSendCommand();
+      await cmd.parseAsync(['node', 'send', 'wt1', 'hello', '--instance', 'codex', '--register']);
+
+      expect(mockFn).toHaveBeenCalledTimes(3);
+      expect(mockFn.mock.calls[0][0]).toContain('/send');
+      expect(mockFn.mock.calls[1][0]).toContain('/api/worktrees/wt1');
+      expect(mockFn.mock.calls[2][1]).toEqual(
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ agentInstances: [{ id: 'codex', cliTool: 'codex', alias: 'Codex', order: 0 }] }),
+        })
+      );
+      expect(mockConsoleError).toHaveBeenCalledWith('Instance registered in roster: codex');
+    });
+
+    it('registers a non-primary instance when --agent is provided', async () => {
+      const mockFn = vi.fn()
+        .mockResolvedValueOnce({ ok: true, status: 201, json: () => Promise.resolve({ id: 1 }), text: () => Promise.resolve('{"id":1}') })
+        .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ id: 'wt1', agentInstances: [{ id: 'codex', cliTool: 'codex', alias: 'Codex', order: 0 }] }), text: () => Promise.resolve('{}') })
+        .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({}), text: () => Promise.resolve('{}') });
+      global.fetch = mockFn;
+
+      const { createSendCommand } = await import('../../../../src/cli/commands/send');
+      const cmd = createSendCommand();
+      await cmd.parseAsync(['node', 'send', 'wt1', 'hello', '--agent', 'codex', '--instance', 'codex-2', '--register']);
+
+      expect(mockFn).toHaveBeenCalledTimes(3);
+      expect(mockFn.mock.calls[2][1]).toEqual(
+        expect.objectContaining({
+          body: JSON.stringify({
+            agentInstances: [
+              { id: 'codex', cliTool: 'codex', alias: 'Codex', order: 0 },
+              { id: 'codex-2', cliTool: 'codex', alias: 'Codex 2', order: 1 },
+            ],
+          }),
+        })
+      );
+    });
+
+    it('does not PATCH when the instance is already registered', async () => {
+      const mockFn = vi.fn()
+        .mockResolvedValueOnce({ ok: true, status: 201, json: () => Promise.resolve({ id: 1 }), text: () => Promise.resolve('{"id":1}') })
+        .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ id: 'wt1', agentInstances: [{ id: 'codex', cliTool: 'codex', alias: 'Codex', order: 0 }] }), text: () => Promise.resolve('{}') });
+      global.fetch = mockFn;
+
+      const { createSendCommand } = await import('../../../../src/cli/commands/send');
+      const cmd = createSendCommand();
+      await cmd.parseAsync(['node', 'send', 'wt1', 'hello', '--instance', 'codex', '--register']);
+
+      expect(mockFn).toHaveBeenCalledTimes(2); // send + roster GET only, no PATCH
+    });
+
+    it('rejects --register without --instance', async () => {
+      mockFetchResponse({ id: 1 }, 201);
+      const { createSendCommand } = await import('../../../../src/cli/commands/send');
+      const cmd = createSendCommand();
+      await cmd.parseAsync(['node', 'send', 'wt1', 'hello', '--register']);
+      expect(mockConsoleError).toHaveBeenCalledWith(expect.stringContaining('--register requires --instance'));
+      expect(mockExit).toHaveBeenCalledWith(2);
+    });
+
+    it('rejects --register with a non-primary --instance and no --agent', async () => {
+      mockFetchResponse({ id: 1 }, 201);
+      const { createSendCommand } = await import('../../../../src/cli/commands/send');
+      const cmd = createSendCommand();
+      await cmd.parseAsync(['node', 'send', 'wt1', 'hello', '--instance', 'codex-2', '--register']);
+      expect(mockConsoleError).toHaveBeenCalledWith(expect.stringContaining('--register requires --agent'));
+      expect(mockExit).toHaveBeenCalledWith(2);
+    });
+  });
 });

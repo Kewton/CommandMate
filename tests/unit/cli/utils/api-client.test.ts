@@ -223,6 +223,40 @@ describe('ApiClient', () => {
     await expect(client.post('/api/test', {})).rejects.toThrow(ApiError);
   });
 
+  // Issue #1000: PATCH support for agent-instance roster mutations
+  it('patch sends JSON body with method PATCH', async () => {
+    mockFetchResponse({ success: true }, 200);
+    const client = new ApiClient();
+    const body = { agentInstances: [{ id: 'claude', cliTool: 'claude', alias: 'Claude', order: 0 }] };
+    await client.patch('/api/worktrees/abc', body);
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      })
+    );
+  });
+
+  it('patch returns parsed JSON on success', async () => {
+    mockFetchResponse({ id: 'abc', agentInstances: [] });
+    const client = new ApiClient();
+    const result = await client.patch<{ id: string }>('/api/worktrees/abc', {});
+    expect(result).toEqual({ id: 'abc', agentInstances: [] });
+  });
+
+  it('patch throws ApiError on HTTP error', async () => {
+    mockFetchResponse({ error: 'Bad Request' }, 400);
+    const client = new ApiClient();
+    await expect(client.patch('/api/worktrees/abc', {})).rejects.toThrow(ApiError);
+  });
+
+  it('patch throws ApiError on network error', async () => {
+    mockFetchError('connect ECONNREFUSED 127.0.0.1:3000');
+    const client = new ApiClient();
+    await expect(client.patch('/api/worktrees/abc', {})).rejects.toThrow(ApiError);
+  });
+
   it('[SEC4-02] warns about HTTP to non-localhost', () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     process.env.CM_AUTH_TOKEN = 'test-token';

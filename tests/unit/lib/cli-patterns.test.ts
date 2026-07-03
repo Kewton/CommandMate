@@ -594,6 +594,16 @@ More text`;
       expect(options?.requireDefaultIndicator).toBe(false);
     });
 
+    // Issue #999: agy permission menus highlight the default with ASCII ">"
+    // (not ❯/●/›) and lack a "press enter to confirm" footer, so the default
+    // requireDefaultIndicator=true gate rejected them and Auto-Yes never
+    // responded. antigravity must be treated like claude/opencode/copilot.
+    it('should return requireDefaultIndicator: false for antigravity (Issue #999)', () => {
+      const options = buildDetectPromptOptions('antigravity');
+      expect(options).toBeDefined();
+      expect(options?.requireDefaultIndicator).toBe(false);
+    });
+
     it('should return undefined for codex (default behavior)', () => {
       const options = buildDetectPromptOptions('codex');
       expect(options).toBeUndefined();

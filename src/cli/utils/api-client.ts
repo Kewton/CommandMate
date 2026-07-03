@@ -243,6 +243,34 @@ export class ApiClient {
       throw new ApiError(errResult.message, errResult.exitCode);
     }
   }
+
+  /**
+   * HTTP PATCH request (Issue #1000: agent-instance roster mutations via
+   * PATCH /api/worktrees/[id]).
+   * [DR1-05] Generic type parameter specified at call site
+   */
+  async patch<T>(path: string, body?: unknown): Promise<T> {
+    try {
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        method: 'PATCH',
+        headers: this.getHeaders(),
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+
+      if (!response.ok) {
+        const errResult = handleApiError(null, response.status);
+        throw new ApiError(errResult.message, errResult.exitCode, response.status);
+      }
+
+      const text = await response.text();
+      if (!text) return undefined as T;
+      return JSON.parse(text) as T;
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      const errResult = handleApiError(error);
+      throw new ApiError(errResult.message, errResult.exitCode);
+    }
+  }
 }
 
 /**
