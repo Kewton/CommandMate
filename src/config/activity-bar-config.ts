@@ -13,7 +13,7 @@
  */
 
 import type { ComponentType, SVGProps } from 'react';
-import { File, GitBranch, StickyNote, Calendar, Bot, Timer } from 'lucide-react';
+import { Folder, GitBranch, StickyNote, Calendar, Bot, Timer } from 'lucide-react';
 
 /**
  * Unique identifier for an activity in the Activity Bar.
@@ -38,7 +38,7 @@ export interface ActivityDefinition {
  * navigation order (ArrowDown/ArrowUp).
  */
 export const ACTIVITIES: readonly ActivityDefinition[] = [
-  { id: 'files', label: 'Files', icon: File },
+  { id: 'files', label: 'Files', icon: Folder },
   { id: 'git', label: 'Git', icon: GitBranch },
   { id: 'notes', label: 'Notes', icon: StickyNote },
   { id: 'schedules', label: 'Schedules', icon: Calendar },
