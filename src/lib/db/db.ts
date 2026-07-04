@@ -98,6 +98,18 @@ export {
 } from './todo-db';
 export type { RepositoryTodo } from './todo-db';
 
+// worktree-todo-db (branch-scoped ToDo list, Issue #1015)
+// Aliased to avoid colliding with the repository-scoped todo-db exports above.
+export {
+  getTodosByWorktreeId,
+  getTodoById as getWorktreeTodoById,
+  createTodo as createWorktreeTodo,
+  updateTodo as updateWorktreeTodo,
+  deleteTodo as deleteWorktreeTodo,
+  reorderTodos as reorderWorktreeTodos,
+} from './worktree-todo-db';
+export type { WorktreeTodo } from './worktree-todo-db';
+
 // timer-db (Issue #534, #540)
 export {
   createTimer,

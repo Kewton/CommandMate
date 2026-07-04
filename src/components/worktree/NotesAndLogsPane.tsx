@@ -14,6 +14,7 @@
 import React, { useState, useCallback, memo } from 'react';
 import { useTranslations } from 'next-intl';
 import { MemoPane } from './MemoPane';
+import { TodoPane } from './TodoPane';
 import { ExecutionLogPane } from './ExecutionLogPane';
 import { AgentSettingsPane } from './AgentSettingsPane';
 import { MobileAgentInstancesPane } from './MobileAgentInstancesPane';
@@ -24,8 +25,8 @@ import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 // Types
 // ============================================================================
 
-/** Issue #368: Extended with 'agent' sub-tab. Issue #534: Extended with 'timer' sub-tab */
-type SubTab = 'notes' | 'logs' | 'agent' | 'timer';
+/** Issue #368: Extended with 'agent' sub-tab. Issue #534: Extended with 'timer' sub-tab. Issue #1015: 'todo' sub-tab */
+type SubTab = 'notes' | 'logs' | 'agent' | 'timer' | 'todo';
 
 /** Configuration for a sub-tab button */
 interface SubTabConfig {
@@ -85,6 +86,9 @@ const SUB_TABS: readonly SubTabConfig[] = [
   { id: 'logs', labelKey: 'logs' },
   { id: 'agent', labelKey: 'agentTab' },
   { id: 'timer', labelKey: 'timerTab' },
+  // Issue #1015: branch-scoped ToDo list. Label resolves from schedule.json
+  // `todoTab` (added to BOTH en and ja, [S3-003]).
+  { id: 'todo', labelKey: 'todoTab' },
 ] as const;
 
 /** CSS class for the active sub-tab button */
@@ -190,6 +194,9 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
             instances={instances}
             selectedAgents={selectedAgents}
           />
+        )}
+        {activeSubTab === 'todo' && (
+          <TodoPane worktreeId={worktreeId} className="h-full" />
         )}
       </div>
     </div>

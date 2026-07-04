@@ -24,7 +24,7 @@ export interface Migration {
  * Current schema version
  * Increment this when adding new migrations
  */
-export const CURRENT_SCHEMA_VERSION = 36;
+export const CURRENT_SCHEMA_VERSION = 37;
 
 /**
  * Get current schema version from database
@@ -227,6 +227,7 @@ export function validateSchema(db: Database.Database): boolean {
       'session_states',
       'schema_version',
       'worktree_memos',
+      'worktree_todos',
       'external_apps',
       'repositories',
       'clone_jobs',

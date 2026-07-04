@@ -1,7 +1,7 @@
 /**
  * ActivityBar Component (Issue #727, updated by Issue #730)
  *
- * VS Code-style vertical 48px Activity Bar. Hosts 6 activity icons.
+ * VS Code-style vertical 48px Activity Bar. Hosts 7 activity icons.
  *
  * Behavior:
  *   - Clicking an inactive icon switches to that activity.

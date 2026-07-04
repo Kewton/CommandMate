@@ -592,8 +592,8 @@ export function getWorktreeIdsByRepository(
 
 /**
  * Delete all worktrees for a given repository path
- * Related data (chat_messages, session_states, worktree_memos) will be
- * automatically deleted via CASCADE foreign key constraints.
+ * Related data (chat_messages, session_states, worktree_memos, worktree_todos)
+ * will be automatically deleted via CASCADE foreign key constraints.
  *
  * @param db - Database instance
  * @param repositoryPath - Path of the repository to delete
@@ -613,8 +613,8 @@ export function deleteRepositoryWorktrees(
 
 /**
  * Delete worktrees by their IDs
- * Related data (chat_messages, session_states, worktree_memos) will be
- * automatically deleted via CASCADE foreign key constraints.
+ * Related data (chat_messages, session_states, worktree_memos, worktree_todos)
+ * will be automatically deleted via CASCADE foreign key constraints.
  *
  * @param db - Database instance
  * @param worktreeIds - Array of worktree IDs to delete
