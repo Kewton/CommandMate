@@ -127,6 +127,7 @@
     "errorModelInvalid": "モデル名が不正です。"
   },
   "timerTab": "Timer",
+  "todoTab": "ToDo",
   "timer": {
     "title": "遅延メッセージ",
     "titleCreate": "タイマー作成",

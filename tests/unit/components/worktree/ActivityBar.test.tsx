@@ -23,11 +23,11 @@ describe('ActivityBar', () => {
     sidebarMock.isOpen = true;
   });
 
-  it('renders all 6 activity tabs', () => {
+  it('renders all 7 activity tabs', () => {
     render(<ActivityBar active="files" onToggle={() => {}} />);
     const tabs = screen.getAllByRole('tab');
     expect(tabs).toHaveLength(ACTIVITIES.length);
-    expect(tabs).toHaveLength(6);
+    expect(tabs).toHaveLength(7);
   });
 
   it('renders with role="tablist" and aria-orientation="vertical"', () => {
@@ -161,14 +161,14 @@ describe('ActivityBar', () => {
       );
     });
 
-    it('is NOT a tab and lives outside the tablist (tab count stays 6)', () => {
+    it('is NOT a tab and lives outside the tablist (tab count stays 7)', () => {
       render(<ActivityBar active="files" onToggle={() => {}} />);
       const toggle = screen.getByTestId('activity-bar-toggle-sidebar');
       // Regression guard: keeping the toggle out of the tablist preserves the
       // roving-tabindex keyboard navigation and the WAI-ARIA tab count.
       expect(toggle).not.toHaveAttribute('role', 'tab');
       expect(screen.getByRole('tablist')).not.toContainElement(toggle);
-      expect(screen.getAllByRole('tab')).toHaveLength(6);
+      expect(screen.getAllByRole('tab')).toHaveLength(7);
     });
 
     it('does not trigger the activity onToggle when the sidebar toggle is clicked', () => {

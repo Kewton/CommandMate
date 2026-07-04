@@ -8,17 +8,17 @@
  *   - `src/components/worktree/ActivityPane.tsx`
  *   - `src/components/worktree/WorktreeDetailRefactored.tsx`
  *
- * The Activity Bar is a 48px-wide vertical bar that hosts 6 activities.
+ * The Activity Bar is a 48px-wide vertical bar that hosts 7 activities.
  * Re-clicking the active icon toggles the ActivityPane closed (null).
  */
 
 import type { ComponentType, SVGProps } from 'react';
-import { File, GitBranch, StickyNote, Calendar, Bot, Timer } from 'lucide-react';
+import { File, GitBranch, StickyNote, Calendar, Bot, Timer, ListTodo } from 'lucide-react';
 
 /**
  * Unique identifier for an activity in the Activity Bar.
  */
-export type ActivityId = 'files' | 'git' | 'notes' | 'schedules' | 'agent' | 'timer';
+export type ActivityId = 'files' | 'git' | 'notes' | 'schedules' | 'agent' | 'timer' | 'todo';
 
 /**
  * Metadata for a single Activity Bar icon.
@@ -44,6 +44,9 @@ export const ACTIVITIES: readonly ActivityDefinition[] = [
   { id: 'schedules', label: 'Schedules', icon: Calendar },
   { id: 'agent', label: 'Agent', icon: Bot },
   { id: 'timer', label: 'Timer', icon: Timer },
+  // Issue #1015: branch-scoped ToDo list. Label is hardcoded English (i18n
+  // non-transit), consistent with the other PC Activity Bar labels.
+  { id: 'todo', label: 'ToDo', icon: ListTodo },
 ] as const;
 
 /**

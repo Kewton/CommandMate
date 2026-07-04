@@ -1,0 +1,178 @@
+/**
+ * API Route: /api/worktrees/:id/todos
+ * GET:   Returns all todos for a worktree (sorted by position)
+ * POST:  Creates a new todo for a worktree
+ * PATCH: Reorders the todos of a worktree
+ *
+ * Branch-scoped ToDo list (Issue #1015). URL/CRUD structure mirrors
+ * /api/worktrees/:id/memos; item updates live on the child [todoId] route and
+ * use PATCH (matching the repository ToDo template, not memo's PUT).
+ */
+
+import { NextRequest, NextResponse } from 'next/server';
+import { getDbInstance } from '@/lib/db/db-instance';
+import {
+  getWorktreeById,
+  getTodosByWorktreeId,
+  createWorktreeTodo,
+  reorderWorktreeTodos,
+} from '@/lib/db';
+import { createLogger } from '@/lib/logger';
+import { MAX_TODOS_PER_WORKTREE, MAX_TODO_CONTENT_LENGTH } from '@/config/todo-config';
+
+const logger = createLogger('api/worktree-todos');
+
+/**
+ * GET /api/worktrees/:id/todos
+ * Returns all todos for a worktree sorted by position.
+ */
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const db = getDbInstance();
+
+    const worktree = getWorktreeById(db, params.id);
+    if (!worktree) {
+      return NextResponse.json(
+        { error: `Worktree '${params.id}' not found` },
+        { status: 404 }
+      );
+    }
+
+    const todos = getTodosByWorktreeId(db, params.id);
+
+    return NextResponse.json({ todos }, { status: 200 });
+  } catch (error) {
+    logger.error('error-fetching-todos:', { error: error instanceof Error ? error.message : String(error) });
+    return NextResponse.json(
+      { error: 'Failed to fetch todos' },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * POST /api/worktrees/:id/todos
+ * Creates a new todo for a worktree.
+ *
+ * Request body:
+ * - content: string - ToDo text (required, non-empty, max MAX_TODO_CONTENT_LENGTH chars)
+ */
+export async function POST(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const db = getDbInstance();
+
+    const worktree = getWorktreeById(db, params.id);
+    if (!worktree) {
+      return NextResponse.json(
+        { error: `Worktree '${params.id}' not found` },
+        { status: 404 }
+      );
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const { content } = body;
+
+    // Validate content presence.
+    if (typeof content !== 'string' || content.trim().length === 0) {
+      return NextResponse.json(
+        { error: 'content is required' },
+        { status: 400 }
+      );
+    }
+
+    const trimmed = content.trim();
+    if (trimmed.length > MAX_TODO_CONTENT_LENGTH) {
+      return NextResponse.json(
+        { error: `content must be ${MAX_TODO_CONTENT_LENGTH} characters or less` },
+        { status: 400 }
+      );
+    }
+
+    // Enforce the per-worktree todo count limit.
+    const existing = getTodosByWorktreeId(db, params.id);
+    if (existing.length >= MAX_TODOS_PER_WORKTREE) {
+      return NextResponse.json(
+        { error: `Maximum todo limit (${MAX_TODOS_PER_WORKTREE}) reached` },
+        { status: 400 }
+      );
+    }
+
+    const todo = createWorktreeTodo(db, params.id, {
+      content: trimmed,
+      position: existing.length,
+    });
+
+    return NextResponse.json({ todo }, { status: 201 });
+  } catch (error) {
+    logger.error('error-creating-todo:', { error: error instanceof Error ? error.message : String(error) });
+    return NextResponse.json(
+      { error: 'Failed to create todo' },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * PATCH /api/worktrees/:id/todos
+ * Reorders the todos of a worktree.
+ *
+ * Request body:
+ * - todoIds: string[] - The complete set of todo IDs in the desired order.
+ *
+ * Note: item-level updates (content/done) use PATCH on the child [todoId]
+ * route; this collection-level PATCH is dedicated to reordering (mirrors the
+ * memos collection route).
+ */
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const db = getDbInstance();
+
+    const worktree = getWorktreeById(db, params.id);
+    if (!worktree) {
+      return NextResponse.json(
+        { error: `Worktree '${params.id}' not found` },
+        { status: 404 }
+      );
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const todoIds = (body as { todoIds?: unknown }).todoIds;
+
+    // The payload must be the complete set of the worktree's todo IDs, in the
+    // desired order (no missing/extra/duplicate ids).
+    const existing = getTodosByWorktreeId(db, params.id);
+    const existingIds = existing.map((t) => t.id);
+
+    if (
+      !Array.isArray(todoIds) ||
+      todoIds.some((id) => typeof id !== 'string') ||
+      todoIds.length !== existingIds.length ||
+      new Set(todoIds as string[]).size !== todoIds.length ||
+      !(todoIds as string[]).every((id) => existingIds.includes(id))
+    ) {
+      return NextResponse.json(
+        { error: 'todoIds must be the complete set of this worktree\'s todo ids' },
+        { status: 400 }
+      );
+    }
+
+    reorderWorktreeTodos(db, params.id, todoIds as string[]);
+
+    return NextResponse.json({ success: true }, { status: 200 });
+  } catch (error) {
+    logger.error('error-reordering-todos:', { error: error instanceof Error ? error.message : String(error) });
+    return NextResponse.json(
+      { error: 'Failed to reorder todos' },
+      { status: 500 }
+    );
+  }
+}
