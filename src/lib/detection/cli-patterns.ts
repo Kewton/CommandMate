@@ -250,6 +250,38 @@ export const CODEX_SEPARATOR_PATTERN = /^─.*Worked for.*─+$/m;
 export const CODEX_SELECTION_LIST_PATTERN = /press\s+enter\s+to\s+(?:confirm|select)/i;
 
 /**
+ * Codex CLI pager / edit-previous (transcript) mode footer pattern (Issue #1017)
+ *
+ * When Codex enters its transcript pager / "edit previous message" mode, the
+ * bottom of the frame shows scroll / edit key hints INSTEAD of the usual
+ * "model · N% left · path" status bar, e.g.:
+ *   "↑/↓ to scroll   pgup/pgdn to page   home/end to jump"
+ *   "q to quit   esc/← to edit prev   → to edit next   enter to edit message"
+ * together with a scroll-percentage separator ("─ N% ─", NOT "N% left ·").
+ *
+ * Neither CODEX_SELECTION_LIST_PATTERN (which needs "press enter to
+ * confirm/select") nor the "N% left ·" status-bar boundary logic in
+ * status-detector.ts fires here, so the read-only TerminalDisplay is left with no
+ * way to scroll or escape (the reported bug). This pattern recognizes the pager
+ * footer directly — independent of the status bar — so the selection window
+ * (NavigationButtons) can be rendered.
+ *
+ * Matches any of the pager-specific hints (either footer line is sufficient):
+ *   - scroll/page/jump hints: "↑/↓ to scroll" / "pgup/pgdn to page" / "home/end to jump"
+ *   - edit-previous hints:    "esc/← to edit prev" / "→ to edit next" / "enter to edit message"
+ * The two branches are independent so a mangled unicode-arrow footer line is still
+ * caught by the ASCII "to edit prev/next/message" and "pgup/pgdn"/"home/end" hints.
+ *
+ * Does NOT match the genuine "/model" selection list ("press enter to select") —
+ * that footer has no scroll/page/jump or edit-prev/next/message hint — so the
+ * existing CODEX_SELECTION_LIST_PATTERN path is unaffected (no regression).
+ *
+ * No /g flag (S4-5: keeps test() stateless). No nested quantifiers (SEC4-001: ReDoS-safe).
+ */
+export const CODEX_PAGER_FOOTER_PATTERN =
+  /(?:↑\/↓|pgup\/pgdn|home\/end)\s+to\s+(?:scroll|page|jump)|to\s+edit\s+(?:prev|next|message)/i;
+
+/**
  * Pasted text pattern
  *
  * Claude CLI displays this when it detects multi-line text paste in the
