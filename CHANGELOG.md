@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-07-05
+
+> **Highlight**: worktree（ブランチ）単位の **ToDo リスト**を新設（PC=アクティビティバー / スマホ=Tools、PC/スマホ共通 `TodoPane`、`worktree_todos` テーブル + migration v37、#1015）。あわせて Codex の**ページャ/選択リスト状態で選択ウィンドウ（NavigationButtons）が表示されない不具合**を修正し、ページャキー（PgUp/PgDn/Home/End/q）と検出非依存の脱出ハッチ `TerminalEscapeHatch`（Esc/q）を追加（#1017）、**History パネルのヘッダー（Message History）を固定**してスクロールをヘッダーの下に限定した（#1019）。
+
+### Added
+- feat(worktree): worktree（ブランチ）単位の **ToDo リスト**を追加。PC 版はアクティビティバー、スマホ版は Tools（NotesAndLogsPane）から利用でき、PC/スマホ共通の `TodoPane` を共有。`worktree_todos` テーブル（migration v37、`worktree_id` FK・ON DELETE CASCADE）＋ `worktree-todo-db`（CRUD）、`/api/worktrees/[id]/todos`（GET/POST・PATCH/DELETE）、クライアント `todo-api`、i18n `todoTab`（en/ja パリティ）を追加。既存のリポジトリ単位 ToDo（`repository_todos`）とは独立して併存 (Issue #1015)
+
+### Fixed
+- fix(terminal): Codex が**ページャ/edit-previous モード**のとき選択ウィンドウ（NavigationButtons）が表示されず、読み取り専用ターミナルから操作・脱出できない問題を修正（複数インスタンス codex-2/codex-3 で顕在化）。`CODEX_PAGER_FOOTER_PATTERN` とステータスバー非依存のページャ検出分岐（`STATUS_REASON.CODEX_PAGER`、`/model` 等の "press enter to confirm/select" には非マッチでリグレッションなし）を追加し、NavigationButtons にページャキー（PgUp/PgDn/Home/End/q・PC分割＋モバイル）、共有 `useSpecialKeys` フックと検出非依存の脱出ハッチ `TerminalEscapeHatch`（Esc/q、未分類 interactive 状態のみ表示）を新設 (Issue #1017)
+- fix(history): History パネルの「Message History」ヘッダーがスクロールコンテナ内で `sticky` だったため、メッセージがヘッダーの背後を通過する違和感を修正。固定ヘッダー行 ＋ 独立スクロール領域のレイアウトに変更（ヘッダー/検索バーを `flex-shrink-0`、メッセージを内側 `overflow-y-auto` へ、`scrollContainerRef` を内側 div へ移設、未使用の `STICKY_HEADER_HEIGHT` を撤去）。PC（`TerminalSplitPaneContent`）/モバイル（`WorktreeDetailMobile`）共用のため両方で検証 (Issue #1019)
+
 ## [0.8.0] - 2026-07-03
 
 > **Highlight**: 新エージェント **Antigravity（agy）CLI 対応**が中心。inline TUI として `agy` を選択可能なエージェントに登録（Phase A #988）し、Auto-Yes（`--dangerously-skip-permissions`）／`--model` 起動フラグ（Phase B #989）、Assistant Chat・Schedule・日次レポート等すべての非インタラクティブ実行経路（`agy -p`、Phase C #990）まで一貫対応した。あわせて選択 TUI／権限承認メニューのステータス検出と Auto-Yes 応答の不具合を修正（#995 / #997 / #999）。CLI 側では **1 エージェント複数セッションの管理**（`instances` サブコマンド＋`send --instance --register`、#1000）、`ls --branch` を実ブランチ名で絞り込む修正（#1003）と `ls --id <prefix>` フィルタ（#1005）を追加。UI では **PC 版マークダウンビューワーおよび worktree 詳細インラインプレビューにサイド TOC（目次）** を追加した（#1007 / #1009）。
