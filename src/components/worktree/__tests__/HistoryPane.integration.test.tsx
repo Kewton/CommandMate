@@ -339,6 +339,58 @@ describe('HistoryPane Integration', () => {
     });
   });
 
+  describe('Issue #1019: fixed header + isolated scroll region', () => {
+    it('should keep the header outside the scroll container and messages inside it', () => {
+      const messages = [
+        createTestMessage('user', 'Hello', T1, 'user-1'),
+        createTestMessage('assistant', 'Hi there!', T2, 'asst-1'),
+      ];
+
+      render(
+        <HistoryPane
+          messages={messages}
+          worktreeId="test"
+          onFilePathClick={mockOnFilePathClick}
+        />
+      );
+
+      const scrollContainer = screen.getByTestId('history-scroll-container');
+
+      // The header ("Message History") must NOT live inside the scroll region,
+      // otherwise messages would scroll behind it (the Issue #1019 defect).
+      const header = screen.getByText('Message History');
+      expect(scrollContainer.contains(header)).toBe(false);
+
+      // Messages must render inside the scroll region.
+      const pairCard = screen.getByTestId('conversation-pair-card');
+      expect(scrollContainer.contains(pairCard)).toBe(true);
+    });
+
+    it('should keep the search bar outside the scroll container when open', () => {
+      const messages = [
+        createTestMessage('user', 'Hello', T1, 'user-1'),
+        createTestMessage('assistant', 'Hi there!', T2, 'asst-1'),
+      ];
+
+      render(
+        <HistoryPane
+          messages={messages}
+          worktreeId="test"
+          onFilePathClick={mockOnFilePathClick}
+        />
+      );
+
+      // Open the in-pane search bar.
+      fireEvent.click(screen.getByRole('button', { name: /open search/i }));
+
+      const scrollContainer = screen.getByTestId('history-scroll-container');
+      const searchInput = screen.getByLabelText('検索キーワード');
+
+      // The search bar is a fixed row above the scroll region, not inside it.
+      expect(scrollContainer.contains(searchInput)).toBe(false);
+    });
+  });
+
   describe('Issue #725: User only filter', () => {
     it('should hide assistant message section when historyUserOnly is true', () => {
       const messages = [
