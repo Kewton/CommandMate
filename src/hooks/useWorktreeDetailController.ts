@@ -94,6 +94,8 @@ interface CurrentOutputResponse {
   thinking?: boolean;
   /** Issue #473: OpenCode TUI selection list active flag */
   isSelectionListActive?: boolean;
+  /** Issue #1017: Codex pager/edit-previous mode (subset of isSelectionListActive) */
+  isPagerActive?: boolean;
   autoYes?: {
     enabled: boolean;
     expiresAt: number | null;
@@ -193,6 +195,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const [serverPollerActive, setServerPollerActive] = useState(false);
   // Issue #473: Track OpenCode TUI selection list state
   const [isSelectionListActive, setIsSelectionListActive] = useState(false);
+  // Issue #1017: Track Codex pager/edit-previous mode (drives pager keys on mobile)
+  const [isPagerActive, setIsPagerActive] = useState(false);
   // Issue #314: Track previous auto-yes enabled state for stop reason toast
   const prevAutoYesEnabledRef = useRef<boolean>(false);
   // Issue #314 / #499 Item 5: Pending stop reason toast (deferred until showToast is available)
@@ -537,6 +541,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
 
       // Issue #473: Update selection list state from server
       setIsSelectionListActive(data.isSelectionListActive ?? false);
+      // Issue #1017: Update Codex pager/edit-previous mode from server
+      setIsPagerActive(data.isPagerActive ?? false);
 
       // Issue #501: Update last server response timestamp for useAutoYes duplicate prevention
       setLastServerResponseTimestamp(data.lastServerResponseTimestamp ?? null);
@@ -1482,6 +1488,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     isMobile,
     isMoveDialogOpen,
     isSelectionListActive,
+    isPagerActive,
     lastAutoResponse,
     loading,
     makeAutoYesToggleHandler,

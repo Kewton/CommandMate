@@ -122,6 +122,21 @@ export async function GET(
     const isSelectionListActive = statusResult.status === 'waiting'
       && SELECTION_LIST_REASONS.has(statusResult.reason);
 
+    // Issue #1017: Codex pager / edit-previous mode flag. A subset of
+    // isSelectionListActive that additionally tells the client to surface the
+    // pager-specific keys (PgUp/PgDn/Home/End/q) in NavigationButtons.
+    const isPagerActive = statusResult.reason === STATUS_REASON.CODEX_PAGER;
+
+    // Issue #1017 (C-lite): "detection could not classify this frame" signal for the
+    // detection-independent Esc/q escape hatch. reason 'default' is the low-confidence
+    // fallback returned only when no prompt / selection list / thinking / input-prompt
+    // matched — i.e. the session is interactive but stuck in an unrecognized TUI mode.
+    // Normal generation is 'thinking_indicator' (the status bar is present), so this
+    // stays false during ordinary processing and only surfaces the safety net when
+    // detection genuinely gave up.
+    const isUnclassifiedActive = statusResult.status === 'running'
+      && statusResult.reason === STATUS_REASON.DEFAULT;
+
     // Extract realtime snippet (last 100 lines for better context)
     const realtimeSnippet = lines.slice(-100).join('\n');
 
@@ -156,6 +171,10 @@ export async function GET(
       },
       // Issue #473: Selection list active flag for OpenCode TUI navigation
       isSelectionListActive,
+      // Issue #1017: Codex pager/edit-previous mode -> show pager keys in NavigationButtons
+      isPagerActive,
+      // Issue #1017: unclassified interactive state -> show the Esc/q escape hatch
+      isUnclassifiedActive,
       // Issue #138: Server-side response timestamp for duplicate prevention
       lastServerResponseTimestamp,
       // Issue #501, #525: Whether server-side auto-yes poller is active (per-agent)

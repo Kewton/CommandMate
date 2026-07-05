@@ -156,16 +156,18 @@ describe('SELECTION_LIST_REASONS Set', () => {
     expect(SELECTION_LIST_REASONS).toBeInstanceOf(Set);
   });
 
-  it('should contain all five selection list reasons', () => {
+  it('should contain all selection list reasons', () => {
     expect(SELECTION_LIST_REASONS.has(STATUS_REASON.OPENCODE_SELECTION_LIST)).toBe(true);
     expect(SELECTION_LIST_REASONS.has(STATUS_REASON.CLAUDE_SELECTION_LIST)).toBe(true);
     expect(SELECTION_LIST_REASONS.has(STATUS_REASON.COPILOT_SELECTION_LIST)).toBe(true);
     expect(SELECTION_LIST_REASONS.has(STATUS_REASON.CODEX_SELECTION_LIST)).toBe(true);
     expect(SELECTION_LIST_REASONS.has(STATUS_REASON.ANTIGRAVITY_SELECTION_LIST)).toBe(true);
+    // Issue #1017: Codex pager/edit-previous mode also drives NavigationButtons.
+    expect(SELECTION_LIST_REASONS.has(STATUS_REASON.CODEX_PAGER)).toBe(true);
   });
 
-  it('should have exactly 5 entries', () => {
-    expect(SELECTION_LIST_REASONS.size).toBe(5);
+  it('should have exactly 6 entries', () => {
+    expect(SELECTION_LIST_REASONS.size).toBe(6);
   });
 
   it('should not contain unrelated reasons', () => {
@@ -456,6 +458,117 @@ describe('detectSessionStatus - Codex /model Step 1 model selection (Issue #622)
     const result = detectSessionStatus(output, 'codex');
 
     expect(result.reason).not.toBe(STATUS_REASON.CODEX_SELECTION_LIST);
+  });
+});
+
+// Helper: Build Codex pager / edit-previous (transcript) output (Issue #1017).
+// Unlike buildCodexOutput, the pager renders a scroll-percentage separator
+// ("─ N% ─") and key-hint footer INSTEAD of the "model · N% left · path" bar.
+function buildCodexPagerOutput(footerLines: string[]): string {
+  const transcript = [
+    'user',
+    'Please summarize the previous conversation.',
+    '',
+    'codex',
+    'Here is the full transcript of our conversation so far:',
+    'line 1 of the transcript',
+    'line 2 of the transcript',
+    'line 3 of the transcript',
+  ];
+  const scrollSeparator = '──────────────────────── 2% ────────────────────────';
+  const padding = Array(3).fill('');
+  return [...transcript, scrollSeparator, ...footerLines, ...padding].join('\n');
+}
+
+const CODEX_PAGER_SCROLL_FOOTER = [
+  '↑/↓ to scroll   pgup/pgdn to page   home/end to jump',
+  'q to quit   esc/← to edit prev   → to edit next   enter to edit message',
+];
+
+describe('STATUS_REASON - CODEX_PAGER (Issue #1017)', () => {
+  it('should export CODEX_PAGER constant', () => {
+    expect(STATUS_REASON.CODEX_PAGER).toBe('codex_pager');
+  });
+
+  it('should include CODEX_PAGER in SELECTION_LIST_REASONS (NavigationButtons shown)', () => {
+    expect(SELECTION_LIST_REASONS.has(STATUS_REASON.CODEX_PAGER)).toBe(true);
+  });
+});
+
+describe('detectSessionStatus - Codex pager / edit-previous detection (Issue #1017)', () => {
+  it('should detect the pager scroll/edit footer and return waiting status', () => {
+    const output = buildCodexPagerOutput(CODEX_PAGER_SCROLL_FOOTER);
+    const result = detectSessionStatus(output, 'codex');
+    expect(result.status).toBe('waiting');
+    expect(result.confidence).toBe('high');
+    expect(result.reason).toBe(STATUS_REASON.CODEX_PAGER);
+    expect(result.hasActivePrompt).toBe(false);
+  });
+
+  it('should detect the scroll-hint footer line alone', () => {
+    const output = buildCodexPagerOutput([
+      '↑/↓ to scroll   pgup/pgdn to page   home/end to jump',
+    ]);
+    const result = detectSessionStatus(output, 'codex');
+    expect(result.reason).toBe(STATUS_REASON.CODEX_PAGER);
+    expect(result.status).toBe('waiting');
+  });
+
+  it('should detect the edit-previous footer line alone', () => {
+    const output = buildCodexPagerOutput([
+      'q to quit   esc/← to edit prev   → to edit next   enter to edit message',
+    ]);
+    const result = detectSessionStatus(output, 'codex');
+    expect(result.reason).toBe(STATUS_REASON.CODEX_PAGER);
+    expect(result.status).toBe('waiting');
+  });
+
+  it('should be content-based / instance-independent (primary and additional instances alike)', () => {
+    // detectSessionStatus takes no instance parameter: the same captured pager
+    // frame yields the same result whether it came from codex (primary) or
+    // codex-2 / codex-3. This is the "instance non-dependence" acceptance check.
+    const output = buildCodexPagerOutput(CODEX_PAGER_SCROLL_FOOTER);
+    const primary = detectSessionStatus(output, 'codex');
+    const additional = detectSessionStatus(output, 'codex');
+    expect(primary.reason).toBe(STATUS_REASON.CODEX_PAGER);
+    expect(additional.reason).toBe(primary.reason);
+  });
+
+  it('should NOT detect pager for a normal Codex response (no false positive)', () => {
+    const output = buildCodexOutput([
+      'Here is the implementation:',
+      '```typescript',
+      'function hello() { return "world"; }',
+      '```',
+      '› Write tests for @filename',
+    ]);
+    const result = detectSessionStatus(output, 'codex');
+    expect(result.reason).not.toBe(STATUS_REASON.CODEX_PAGER);
+  });
+
+  it('should NOT reclassify the genuine /model selection list as pager (no regression)', () => {
+    // The /model footer is "press enter to select ... esc to dismiss" — it has no
+    // scroll/page/jump or edit-prev/next/message hint, so it stays CODEX_SELECTION_LIST.
+    const output = buildCodexOutput([
+      'Select Model and Effort',
+      '',
+      '› 1. gpt-5.4 (current)   Latest frontier agentic coding model.',
+      '  2. gpt-5.4-mini        Smaller frontier agentic coding model.',
+      '',
+      'Press enter to select reasoning effort, or esc to dismiss.',
+    ]);
+    const result = detectSessionStatus(output, 'codex');
+    expect(result.reason).toBe(STATUS_REASON.CODEX_SELECTION_LIST);
+    expect(result.reason).not.toBe(STATUS_REASON.CODEX_PAGER);
+  });
+
+  it('should NOT trigger pager detection for non-codex tools', () => {
+    const output = [
+      'q to quit   esc/← to edit prev   → to edit next   enter to edit message',
+      '> ',
+    ].join('\n');
+    const result = detectSessionStatus(output, 'claude');
+    expect(result.reason).not.toBe(STATUS_REASON.CODEX_PAGER);
   });
 });
 

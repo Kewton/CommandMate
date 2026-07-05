@@ -15,6 +15,8 @@ import {
   COPILOT_SELECTION_LIST_PATTERN,
   CLAUDE_SELECTION_LIST_FOOTER,
   ANTIGRAVITY_SELECTION_LIST_PATTERN,
+  CODEX_PAGER_FOOTER_PATTERN,
+  CODEX_SELECTION_LIST_PATTERN,
 } from '@/lib/detection/cli-patterns';
 
 describe('OPENCODE_SELECTION_LIST_PATTERN', () => {
@@ -212,5 +214,39 @@ describe('ANTIGRAVITY_SELECTION_LIST_PATTERN (Issue #995)', () => {
 
   it('should not use the global flag (no /g)', () => {
     expect(ANTIGRAVITY_SELECTION_LIST_PATTERN.global).toBe(false);
+  });
+});
+
+describe('CODEX_PAGER_FOOTER_PATTERN (Issue #1017)', () => {
+  it('should be a RegExp without the global flag (no /g)', () => {
+    expect(CODEX_PAGER_FOOTER_PATTERN).toBeInstanceOf(RegExp);
+    expect(CODEX_PAGER_FOOTER_PATTERN.global).toBe(false);
+  });
+
+  it('should match the pager scroll-hint footer', () => {
+    expect(CODEX_PAGER_FOOTER_PATTERN.test('↑/↓ to scroll   pgup/pgdn to page   home/end to jump')).toBe(true);
+  });
+
+  it('should match the pager edit-previous footer', () => {
+    expect(CODEX_PAGER_FOOTER_PATTERN.test('q to quit   esc/← to edit prev   → to edit next   enter to edit message')).toBe(true);
+  });
+
+  it('should match each pager hint independently (resilient to arrow-glyph loss)', () => {
+    expect(CODEX_PAGER_FOOTER_PATTERN.test('pgup/pgdn to page')).toBe(true);
+    expect(CODEX_PAGER_FOOTER_PATTERN.test('home/end to jump')).toBe(true);
+    expect(CODEX_PAGER_FOOTER_PATTERN.test('esc/← to edit prev')).toBe(true);
+    expect(CODEX_PAGER_FOOTER_PATTERN.test('enter to edit message')).toBe(true);
+  });
+
+  it('should NOT match the genuine /model selection footer (no regression)', () => {
+    expect(CODEX_PAGER_FOOTER_PATTERN.test('Press enter to select reasoning effort, or esc to dismiss.')).toBe(false);
+    expect(CODEX_PAGER_FOOTER_PATTERN.test('press enter to confirm or esc to cancel')).toBe(false);
+    // The /model footer must still be matched by its own pattern.
+    expect(CODEX_SELECTION_LIST_PATTERN.test('Press enter to select reasoning effort, or esc to dismiss.')).toBe(true);
+  });
+
+  it('should NOT match regular conversational output', () => {
+    expect(CODEX_PAGER_FOOTER_PATTERN.test('Here is the implementation of the scroll handler.')).toBe(false);
+    expect(CODEX_PAGER_FOOTER_PATTERN.test('I will edit the file and run the tests.')).toBe(false);
   });
 });

@@ -176,6 +176,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     isMobile,
     isMoveDialogOpen,
     isSelectionListActive,
+    isPagerActive,
     lastAutoResponse,
     loading,
     makeAutoYesToggleHandler,
@@ -544,6 +545,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 cliToolId={activeCliTab}
                 instanceId={activeInstanceId}
                 onKeysSent={fetchCurrentOutput}
+                showPagerKeys={isPagerActive}
               />
             </div>
           )}

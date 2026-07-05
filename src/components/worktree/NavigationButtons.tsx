@@ -10,10 +10,11 @@
  * [DR4-006] No dangerouslySetInnerHTML usage.
  */
 
-import { useCallback, useState, type KeyboardEvent } from 'react';
+import { useCallback, useMemo, useState, type KeyboardEvent } from 'react';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { NavigationKey } from '@/lib/tmux/tmux';
-import { KEY_PRESS_FEEDBACK_RESET_MS, NAV_KEY_REFRESH_DELAY_MS } from '@/config/ui-feedback-config';
+import { useSpecialKeys } from '@/hooks/useSpecialKeys';
+import { KEY_PRESS_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
 
 export interface NavigationButtonsProps {
   worktreeId: string;
@@ -25,9 +26,16 @@ export interface NavigationButtonsProps {
   instanceId?: string;
   /** Optional callback to trigger immediate terminal refresh after key send */
   onKeysSent?: () => void;
+  /**
+   * Issue #1017: when true, append the Codex pager / edit-previous keys
+   * (PgUp/PgDn/Home/End/q) so the read-only terminal can scroll and quit the
+   * transcript pager. Off by default \u2014 the base arrow/Enter/Esc set is unchanged
+   * for every existing selection-list (e.g. /model) caller.
+   */
+  showPagerKeys?: boolean;
 }
 
-/** Navigation button configuration */
+/** Base navigation button configuration (arrow-key selection lists). */
 const NAVIGATION_BUTTONS: ReadonlyArray<{ key: NavigationKey; label: string; ariaLabel: string }> = [
   { key: 'Left', label: '\u25C0', ariaLabel: 'Left' },
   { key: 'Up', label: '\u25B2', ariaLabel: 'Up' },
@@ -37,34 +45,38 @@ const NAVIGATION_BUTTONS: ReadonlyArray<{ key: NavigationKey; label: string; ari
   { key: 'Escape', label: 'Esc', ariaLabel: 'Escape' },
 ];
 
-export function NavigationButtons({ worktreeId, cliToolId, instanceId, onKeysSent }: NavigationButtonsProps) {
+/**
+ * Issue #1017: Codex pager / edit-previous mode keys, appended when showPagerKeys
+ * is set. PgUp/PgDn/Home/End scroll the transcript; 'q' quits the pager.
+ */
+const PAGER_BUTTONS: ReadonlyArray<{ key: NavigationKey; label: string; ariaLabel: string }> = [
+  { key: 'PageUp', label: 'PgUp', ariaLabel: 'Page Up' },
+  { key: 'PageDown', label: 'PgDn', ariaLabel: 'Page Down' },
+  { key: 'Home', label: 'Home', ariaLabel: 'Home' },
+  { key: 'End', label: 'End', ariaLabel: 'End' },
+  { key: 'q', label: 'q', ariaLabel: 'Quit pager' },
+];
+
+export function NavigationButtons({ worktreeId, cliToolId, instanceId, onKeysSent, showPagerKeys = false }: NavigationButtonsProps) {
   const [activeKey, setActiveKey] = useState<string | null>(null);
 
+  const send = useSpecialKeys(worktreeId, cliToolId, instanceId, onKeysSent);
+
   const sendKeys = useCallback((keys: string[]) => {
-    // Show immediate visual feedback
+    // Show immediate visual feedback, then delegate to the shared sender.
     setActiveKey(keys[0]);
     setTimeout(() => setActiveKey(null), KEY_PRESS_FEEDBACK_RESET_MS);
+    send(keys);
+  }, [send]);
 
-    // Send keys and trigger immediate refresh after a short delay for tmux to process
-    // Issue #869: include instanceId so additional instances target their own session.
-    const body = instanceId && instanceId !== cliToolId
-      ? { cliToolId, keys, instanceId }
-      : { cliToolId, keys };
-    fetch(`/api/worktrees/${encodeURIComponent(worktreeId)}/special-keys`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }).then(() => {
-      // Trigger immediate terminal refresh after 100ms (allow tmux to process the key)
-      if (onKeysSent) {
-        setTimeout(onKeysSent, NAV_KEY_REFRESH_DELAY_MS);
-      }
-    }).catch((err) => {
-      console.error('Failed to send special keys:', err);
-    });
-  }, [worktreeId, cliToolId, instanceId, onKeysSent]);
+  const buttons = useMemo(
+    () => (showPagerKeys ? [...NAVIGATION_BUTTONS, ...PAGER_BUTTONS] : NAVIGATION_BUTTONS),
+    [showPagerKeys],
+  );
 
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
+    // Only arrow/Enter/Escape are handled via keyboard; the pager 'q'/PgUp/etc.
+    // remain click-only to avoid capturing the literal 'q' character.
     const keyMap: Record<string, string> = {
       ArrowLeft: 'Left',
       ArrowUp: 'Up',
@@ -82,13 +94,13 @@ export function NavigationButtons({ worktreeId, cliToolId, instanceId, onKeysSen
 
   return (
     <div
-      className="flex items-center gap-1.5 py-1.5 bg-gray-100 dark:bg-gray-800 rounded-lg"
+      className="flex flex-wrap items-center gap-1.5 py-1.5 bg-gray-100 dark:bg-gray-800 rounded-lg"
       onKeyDown={handleKeyDown}
       role="toolbar"
       aria-label="TUI Navigation"
     >
       <span className="text-xs text-gray-500 dark:text-gray-400 mx-2">Nav</span>
-      {NAVIGATION_BUTTONS.map(({ key, label, ariaLabel }) => (
+      {buttons.map(({ key, label, ariaLabel }) => (
         <button
           key={key}
           type="button"

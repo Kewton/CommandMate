@@ -24,7 +24,7 @@
  * coupling via a minimal DTO/projection type.
  */
 
-import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CLAUDE_INTERRUPT_HINT_PATTERN, ANTIGRAVITY_SELECTION_LIST_PATTERN } from './cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CODEX_PAGER_FOOTER_PATTERN, CLAUDE_INTERRUPT_HINT_PATTERN, ANTIGRAVITY_SELECTION_LIST_PATTERN } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
 import type { PromptDetectionResult } from './prompt-detector';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -104,6 +104,8 @@ export const STATUS_REASON = {
   CLAUDE_SELECTION_LIST: 'claude_selection_list',
   COPILOT_SELECTION_LIST: 'copilot_selection_list',
   CODEX_SELECTION_LIST: 'codex_selection_list',
+  /** Issue #1017: Codex pager / edit-previous (transcript) mode. */
+  CODEX_PAGER: 'codex_pager',
   ANTIGRAVITY_SELECTION_LIST: 'antigravity_selection_list',
   OPENCODE_RESPONSE_COMPLETE: 'opencode_response_complete',
   INPUT_PROMPT: 'input_prompt',
@@ -123,6 +125,8 @@ export const SELECTION_LIST_REASONS = new Set<string>([
   STATUS_REASON.CLAUDE_SELECTION_LIST,
   STATUS_REASON.COPILOT_SELECTION_LIST,
   STATUS_REASON.CODEX_SELECTION_LIST,
+  // Issue #1017: Codex pager/edit-previous mode also drives NavigationButtons.
+  STATUS_REASON.CODEX_PAGER,
   STATUS_REASON.ANTIGRAVITY_SELECTION_LIST,
 ]);
 
@@ -219,6 +223,32 @@ export function detectSessionStatus(
       reason: 'thinking_indicator',
       hasActivePrompt: false,
       promptDetection,
+    };
+  }
+
+  // 0.7. Codex: pager / edit-previous (transcript) mode detection (Issue #1017)
+  // Codex's transcript pager renders scroll / edit key-hint footers, e.g.:
+  //   "↑/↓ to scroll   pgup/pgdn to page   home/end to jump"
+  //   "q to quit   esc/← to edit prev   → to edit next   enter to edit message"
+  // together with a scroll-percentage separator ("─ N% ─") in place of the usual
+  // "model · N% left · path" status bar. So neither CODEX_SELECTION_LIST_PATTERN
+  // (footer is "enter to edit message", not "press enter to confirm/select") nor the
+  // status-bar boundary logic in 0.8 / 2.7 fire, leaving the read-only TerminalDisplay
+  // with no way to scroll or escape. Detect the pager footer directly — independent of
+  // the "N% left ·" status bar — and surface it as a selection list so NavigationButtons
+  // render (isSelectionListActive via SELECTION_LIST_REASONS). Checked ahead of
+  // detectPrompt/thinking because the pager has no active y/n prompt and its transcript
+  // content must not be misread as one. CODEX_PAGER_FOOTER_PATTERN does not match the
+  // genuine "/model" selection footer, so the 0.8 path below is unaffected (no regression).
+  if (cliToolId === 'codex' && CODEX_PAGER_FOOTER_PATTERN.test(lastLines)) {
+    const codexPagerPromptOptions = buildDetectPromptOptions(cliToolId);
+    const codexPagerPromptDetection = detectPrompt(stripBoxDrawing(cleanOutput), codexPagerPromptOptions);
+    return {
+      status: 'waiting',
+      confidence: 'high',
+      reason: STATUS_REASON.CODEX_PAGER,
+      hasActivePrompt: false,
+      promptDetection: codexPagerPromptDetection,
     };
   }
 

@@ -247,6 +247,10 @@ const ALLOWED_SPECIAL_KEYS = new Set([
   'Up', 'Down', 'Left', 'Right',
   'Enter', 'Space', 'Tab', 'Escape',
   'BSpace', 'DC',  // Backspace, Delete
+  // Issue #1017: Codex pager / edit-previous mode navigation. PageUp/PageDown/Home/End
+  // are tmux named keys; 'q' is the pager's literal "quit" character (sent verbatim by
+  // `tmux send-keys`, no injection risk — single fixed char via execFile, not a shell).
+  'PageUp', 'PageDown', 'Home', 'End', 'q',
 ]);
 
 /** Delay between individual key presses for TUI apps that need processing time (ms). */
@@ -492,7 +496,12 @@ export async function sendSpecialKey(
  * [DR3-001] Named NAVIGATION_KEY_VALUES to avoid collision with existing SPECIAL_KEY_VALUES.
  * [DR2-004] Exported as as const array + type guard (not Set) for immutability guarantee.
  */
-export const NAVIGATION_KEY_VALUES = ['Up', 'Down', 'Left', 'Right', 'Enter', 'Escape', 'Tab', 'BTab'] as const;
+export const NAVIGATION_KEY_VALUES = [
+  'Up', 'Down', 'Left', 'Right', 'Enter', 'Escape', 'Tab', 'BTab',
+  // Issue #1017: Codex pager / edit-previous mode keys surfaced by NavigationButtons.
+  // 'q' is the pager quit key (literal char). PageUp/PageDown/Home/End are tmux named keys.
+  'PageUp', 'PageDown', 'Home', 'End', 'q',
+] as const;
 
 /**
  * Navigation key type derived from NAVIGATION_KEY_VALUES.
