@@ -50,6 +50,7 @@ import {
 import { extname } from 'path';
 import { readFile, stat } from 'fs/promises';
 import { createLogger } from '@/lib/logger';
+import { buildAttachmentContentDisposition } from '@/lib/http/content-disposition';
 
 const logger = createLogger('api/files');
 
@@ -219,6 +220,36 @@ export async function GET(
     const { worktree, relativePath } = result;
     const extension = relativePath.split('.').pop() || '';
     const ext = extname(relativePath).toLowerCase();
+
+    // [Issue #1024] Raw attachment download branch.
+    // Placed AFTER getWorktreeAndValidatePath (isPathSafe [SF-002] +
+    // resolveAndValidateRealPath [SEC-394]) and BEFORE the type-specific
+    // (image/video/PDF/text) branches, so path validation is never bypassed.
+    // Strict gate: only `?download=1` (exact) triggers attachment delivery; any
+    // other value / absence leaves existing GET behavior unchanged.
+    // Serves the RAW bytes (never the base64 JSON path), bypassing preview size
+    // limits. octet-stream + attachment + X-Content-Type-Options: nosniff
+    // (next.config.js) prevent inline execution of SVG/HTML.
+    if (request.nextUrl.searchParams.get('download') === '1') {
+      // Reuse the validated real path: worktree.path is trusted (DB) and
+      // relativePath is normalized + validated. Never re-join untrusted input.
+      const downloadPath = join(worktree.path, relativePath);
+      try {
+        const fileBuffer = await readFile(downloadPath);
+        return new NextResponse(fileBuffer, {
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'Content-Disposition': buildAttachmentContentDisposition(relativePath),
+            'Cache-Control': 'no-store, private',
+          },
+        });
+      } catch (err: unknown) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          return createErrorResponse('FILE_NOT_FOUND', 'File not found');
+        }
+        throw err;
+      }
+    }
 
     // Check if this is an image file
     if (isImageExtension(ext)) {
