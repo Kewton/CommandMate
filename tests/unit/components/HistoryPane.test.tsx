@@ -282,7 +282,9 @@ describe('HistoryPane', () => {
   });
 
   describe('Independent scrolling', () => {
-    it('should have overflow-y-auto for independent scrolling', () => {
+    // Issue #1019: The header and search bar are fixed rows; only the dedicated
+    // inner scroll container scrolls, so messages never pass behind the header.
+    it('should confine scrolling to the inner scroll container, not the outer region', () => {
       const messages: ChatMessage[] = [
         createTestMessage({ content: 'Test message' }),
       ];
@@ -295,11 +297,17 @@ describe('HistoryPane', () => {
         />
       );
 
+      // The outer region only clips its rounded corners — it must NOT scroll.
       const region = screen.getByRole('region');
-      expect(region.className).toMatch(/overflow/);
+      expect(region.className).toMatch(/overflow-hidden/);
+      expect(region.className).not.toMatch(/overflow-y-auto/);
+
+      // The inner scroll container is the single vertical scroll surface.
+      const scrollContainer = screen.getByTestId('history-scroll-container');
+      expect(scrollContainer.className).toMatch(/overflow-y-auto/);
     });
 
-    it('should have flexible height for scrolling', () => {
+    it('should have flexible height for scrolling on the scroll container', () => {
       const messages: ChatMessage[] = [
         createTestMessage({ content: 'Test message' }),
       ];
@@ -312,8 +320,14 @@ describe('HistoryPane', () => {
         />
       );
 
+      // Outer region keeps the flex column layout that pins the header rows.
       const region = screen.getByRole('region');
-      expect(region.className).toMatch(/h-full|flex|min-h/);
+      expect(region.className).toMatch(/h-full|flex/);
+
+      // Scroll container grows to fill the remaining space (flex-1 min-h-0).
+      const scrollContainer = screen.getByTestId('history-scroll-container');
+      expect(scrollContainer.className).toMatch(/flex-1/);
+      expect(scrollContainer.className).toMatch(/min-h-0/);
     });
   });
 

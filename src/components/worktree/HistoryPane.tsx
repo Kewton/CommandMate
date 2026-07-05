@@ -41,13 +41,6 @@ import type { HistoryMatch } from '@/hooks/useHistorySearch';
 // ============================================================================
 
 /**
- * Height of the sticky header in pixels.
- * Used for scroll position calculations and future reference.
- * Note: sticky top-0 does not affect scrollTop calculation as content flows below naturally.
- */
-export const STICKY_HEADER_HEIGHT = 48;
-
-/**
  * Issue #744: id of the per-split slot element that wraps an embedded
  * HistoryPane. `TerminalSplitPaneContent` renders the wrapping `<div>` with this
  * exact `id` so the split-embedded collapse button's `aria-controls` resolves to
@@ -203,12 +196,15 @@ function computeMatchedPairIds(
 // Main Component
 // ============================================================================
 
+// Issue #1019: The outer wrapper no longer scrolls. It only clips its rounded
+// corners (`overflow-hidden`) and lays out the fixed header, fixed search bar
+// and the single inner scroll region as flex rows. Scrolling is delegated to a
+// dedicated inner div (see render) so the header stays pinned above it.
 const BASE_CONTAINER_CLASSES = [
   'h-full',
   'flex',
   'flex-col',
-  'overflow-y-auto',
-  'overflow-x-hidden',
+  'overflow-hidden',
   'bg-gray-900',
   'rounded-lg',
   'border',
@@ -491,13 +487,12 @@ export const HistoryPane = memo(function HistoryPane({
 
   return (
     <div
-      ref={scrollContainerRef}
       role="region"
       aria-label="Message history"
       className={containerClasses}
     >
-      {/* Header */}
-      <div className="sticky top-0 bg-gray-900 border-b border-gray-700 px-4 py-2 z-10 flex items-center justify-between flex-wrap gap-1">
+      {/* Header — fixed row, always pinned at the top (Issue #1019) */}
+      <div className="flex-shrink-0 bg-gray-900 border-b border-gray-700 px-4 py-2 flex items-center justify-between flex-wrap gap-1">
         <h3 className="text-sm font-medium text-gray-300">Message History</h3>
         <div className="flex items-center gap-2 flex-wrap">
           {onHistoryDisplayLimitChange && historyDisplayLimit !== undefined && (
@@ -575,9 +570,9 @@ export const HistoryPane = memo(function HistoryPane({
         </div>
       </div>
 
-      {/* Search bar (toggleable) */}
+      {/* Search bar (toggleable) — fixed row below the header (Issue #1019) */}
       {isSearchOpen && (
-        <div className="sticky top-12 z-10 px-3 py-2 bg-gray-900 border-b border-gray-700">
+        <div className="flex-shrink-0 px-3 py-2 bg-gray-900 border-b border-gray-700">
           <HistorySearchBar
             query={searchQuery}
             onQueryChange={setSearchQuery}
@@ -593,8 +588,17 @@ export const HistoryPane = memo(function HistoryPane({
         </div>
       )}
 
-      {/* Content */}
-      <div className="flex-1 p-4 min-h-0">{renderContent()}</div>
+      {/* Content — the only scroll region. Messages scroll below the fixed
+          header/search bar, never behind them (Issue #1019). scrollContainerRef
+          points here so scroll save/restore (#716) and search scrollIntoView
+          operate on the real scroll element. */}
+      <div
+        ref={scrollContainerRef}
+        data-testid="history-scroll-container"
+        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4"
+      >
+        {renderContent()}
+      </div>
     </div>
   );
 });

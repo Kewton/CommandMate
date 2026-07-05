@@ -83,6 +83,8 @@ export interface CurrentOutputResponse {
   thinkingMessage: string | null;
   cliToolId?: string;
   isSelectionListActive: boolean;
+  /** Issue #1017: Codex pager/edit-previous mode (subset of isSelectionListActive). */
+  isPagerActive?: boolean;
   lastServerResponseTimestamp: number | null;
   serverPollerActive: boolean;
   /** Issue #520: Session status from detectSessionStatus() */

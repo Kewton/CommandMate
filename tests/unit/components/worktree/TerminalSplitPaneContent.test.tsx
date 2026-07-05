@@ -59,8 +59,19 @@ vi.mock('@/components/worktree/MessageInput', () => ({
 }));
 
 vi.mock('@/components/worktree/NavigationButtons', () => ({
-  NavigationButtons: ({ cliToolId }: { cliToolId: string }) => (
-    <div data-testid="navigation-buttons" data-cli-tool-id={cliToolId} />
+  NavigationButtons: ({ cliToolId, showPagerKeys }: { cliToolId: string; showPagerKeys?: boolean }) => (
+    <div
+      data-testid="navigation-buttons"
+      data-cli-tool-id={cliToolId}
+      data-show-pager-keys={String(showPagerKeys ?? false)}
+    />
+  ),
+}));
+
+// Issue #1017: C-lite escape hatch mock.
+vi.mock('@/components/worktree/TerminalEscapeHatch', () => ({
+  TerminalEscapeHatch: ({ cliToolId }: { cliToolId: string }) => (
+    <div data-testid="terminal-escape-hatch" data-cli-tool-id={cliToolId} />
   ),
 }));
 
@@ -274,6 +285,105 @@ describe('TerminalSplitPaneContent', () => {
       expect(screen.getByTestId('navigation-buttons')).toBeInTheDocument();
     });
     expect(screen.getByTestId('navigation-buttons').getAttribute('data-cli-tool-id')).toBe('codex');
+  });
+
+  it('passes showPagerKeys to NavigationButtons when /current-output reports isPagerActive (Issue #1017)', async () => {
+    mockFetch.mockImplementation(() =>
+      okJson({
+        isRunning: true,
+        fullOutput: 'codex pager body',
+        thinking: false,
+        // Codex pager mode: selection list active + pager flag.
+        isSelectionListActive: true,
+        isPagerActive: true,
+        sessionStatus: 'waiting',
+      }),
+    );
+
+    render(
+      <TerminalSplitPaneContent
+        worktreeId="w-1"
+        splitIndex={1}
+        cliToolId="codex"
+        availableInstances={[inst('codex')]}
+        onInstanceChange={vi.fn()}
+        onFocus={vi.fn()}
+        autoYes={{ onToggle: vi.fn() }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('navigation-buttons')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('navigation-buttons').getAttribute('data-show-pager-keys')).toBe('true');
+    // The escape hatch is redundant while NavigationButtons is shown.
+    expect(screen.queryByTestId('terminal-escape-hatch')).not.toBeInTheDocument();
+  });
+
+  it('renders the C-lite escape hatch for an unclassified running session (Issue #1017)', async () => {
+    mockFetch.mockImplementation(() =>
+      okJson({
+        isRunning: true,
+        fullOutput: 'stuck in an unknown TUI mode',
+        thinking: false,
+        // No selection list, no prompt, detection could not classify -> stuck/unknown.
+        isSelectionListActive: false,
+        isPagerActive: false,
+        isPromptWaiting: false,
+        isUnclassifiedActive: true,
+      }),
+    );
+
+    render(
+      <TerminalSplitPaneContent
+        worktreeId="w-1"
+        splitIndex={1}
+        cliToolId="codex"
+        availableInstances={[inst('codex')]}
+        onInstanceChange={vi.fn()}
+        onFocus={vi.fn()}
+        autoYes={{ onToggle: vi.fn() }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-escape-hatch')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('terminal-escape-hatch').getAttribute('data-cli-tool-id')).toBe('codex');
+  });
+
+  it('does NOT render the escape hatch when detection classified the frame (e.g. idle prompt)', async () => {
+    mockFetch.mockImplementation(() =>
+      okJson({
+        isRunning: true,
+        fullOutput: '› ',
+        thinking: false,
+        isSelectionListActive: false,
+        isPagerActive: false,
+        isPromptWaiting: false,
+        // Classified (idle composer / generation): 'q' would insert a literal char,
+        // so the hatch must stay hidden.
+        isUnclassifiedActive: false,
+      }),
+    );
+
+    render(
+      <TerminalSplitPaneContent
+        worktreeId="w-1"
+        splitIndex={1}
+        cliToolId="codex"
+        availableInstances={[inst('codex')]}
+        onInstanceChange={vi.fn()}
+        onFocus={vi.fn()}
+        autoYes={{ onToggle: vi.fn() }}
+      />,
+    );
+
+    // Message input is unconditional; use it as the "poll landed" anchor.
+    await waitFor(() => {
+      expect(screen.getByTestId('message-input-1')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('terminal-escape-hatch')).not.toBeInTheDocument();
   });
 
   it('renders PromptPanel for splitIndex >= 1 when /current-output reports isPromptWaiting', async () => {

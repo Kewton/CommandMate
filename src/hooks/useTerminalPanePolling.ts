@@ -42,6 +42,19 @@ export interface PaneTerminalState {
   isRunning: boolean;
   isThinking: boolean;
   isSelectionListActive: boolean;
+  /**
+   * Issue #1017: Codex pager / edit-previous mode (a subset of
+   * isSelectionListActive). Drives the pager-specific keys in NavigationButtons.
+   */
+  isPagerActive: boolean;
+  /**
+   * Issue #1017: the session is interactive but detection could not classify the
+   * frame (status 'running', reason 'default') — i.e. stuck in an unrecognized TUI
+   * mode. Gates the detection-independent Esc/q escape hatch. Deliberately false
+   * during normal generation (which is 'thinking_indicator') and at an idle input
+   * prompt ('ready'), so the hatch never appears where 'q' would insert text.
+   */
+  isUnclassifiedActive: boolean;
   attaching: boolean;
   autoScroll: boolean;
 }
@@ -63,6 +76,8 @@ interface CurrentOutputResponse {
   realtimeSnippet?: string;
   thinking?: boolean;
   isSelectionListActive?: boolean;
+  isPagerActive?: boolean;
+  isUnclassifiedActive?: boolean;
 }
 
 export interface UseTerminalPanePollingOptions {
@@ -103,6 +118,8 @@ export function useTerminalPanePolling({
     isRunning: false,
     isThinking: false,
     isSelectionListActive: false,
+    isPagerActive: false,
+    isUnclassifiedActive: false,
     attaching: true,
     autoScroll: true,
   }));
@@ -172,6 +189,8 @@ export function useTerminalPanePolling({
           isRunning: data.isRunning ?? false,
           isThinking: data.thinking ?? false,
           isSelectionListActive: data.isSelectionListActive ?? false,
+          isPagerActive: data.isPagerActive ?? false,
+          isUnclassifiedActive: data.isUnclassifiedActive ?? false,
           // First successful fetch flips attaching off.
           attaching: false,
         };
@@ -218,6 +237,8 @@ export function useTerminalPanePolling({
       isRunning: false,
       isThinking: false,
       isSelectionListActive: false,
+      isPagerActive: false,
+      isUnclassifiedActive: false,
       attaching: true,
     }));
     setPrompt({ visible: false, data: null, messageId: null, answering: false });

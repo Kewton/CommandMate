@@ -127,6 +127,7 @@
     "errorModelInvalid": "Invalid model name."
   },
   "timerTab": "Timer",
+  "todoTab": "ToDo",
   "timer": {
     "title": "Delayed Messages",
     "titleCreate": "New Timer",

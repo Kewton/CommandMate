@@ -19,6 +19,7 @@ import { v33_migrations } from './v33-agent-instances';
 import { v34_migrations } from './v34-repository-todos';
 import { v35_migrations } from './v35-timer-instance-id';
 import { v36_migrations } from './v36-worktree-branch';
+import { v37_migrations } from './v37-worktree-todos';
 
 /**
  * Complete ordered list of all migrations.
@@ -43,4 +44,5 @@ export const migrations: Migration[] = [
   ...v34_migrations,
   ...v35_migrations,
   ...v36_migrations,
+  ...v37_migrations,
 ];

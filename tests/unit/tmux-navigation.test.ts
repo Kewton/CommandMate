@@ -35,8 +35,18 @@ describe('NAVIGATION_KEY_VALUES', () => {
     expect(Array.isArray(NAVIGATION_KEY_VALUES)).toBe(true);
   });
 
-  it('should contain exactly the 8 allowed navigation keys', () => {
-    expect(NAVIGATION_KEY_VALUES).toEqual(['Up', 'Down', 'Left', 'Right', 'Enter', 'Escape', 'Tab', 'BTab']);
+  it('should contain the base navigation keys plus the Issue #1017 pager keys', () => {
+    expect(NAVIGATION_KEY_VALUES).toEqual([
+      'Up', 'Down', 'Left', 'Right', 'Enter', 'Escape', 'Tab', 'BTab',
+      // Issue #1017: Codex pager / edit-previous mode keys.
+      'PageUp', 'PageDown', 'Home', 'End', 'q',
+    ]);
+  });
+
+  it('should include the Codex pager keys (Issue #1017)', () => {
+    for (const key of ['PageUp', 'PageDown', 'Home', 'End', 'q']) {
+      expect(NAVIGATION_KEY_VALUES).toContain(key);
+    }
   });
 
   it('should be distinct from SPECIAL_KEY_VALUES (no name collision)', () => {
@@ -71,6 +81,17 @@ describe('isAllowedSpecialKey', () => {
     expect(isAllowedSpecialKey('UP')).toBe(false);
     expect(isAllowedSpecialKey('down')).toBe(false);
     expect(isAllowedSpecialKey('enter')).toBe(false);
+  });
+
+  it('should accept the Codex pager keys (Issue #1017)', () => {
+    expect(isAllowedSpecialKey('PageUp')).toBe(true);
+    expect(isAllowedSpecialKey('PageDown')).toBe(true);
+    expect(isAllowedSpecialKey('Home')).toBe(true);
+    expect(isAllowedSpecialKey('End')).toBe(true);
+    expect(isAllowedSpecialKey('q')).toBe(true);
+    // Only the single literal 'q' is allowed — not arbitrary letters.
+    expect(isAllowedSpecialKey('Q')).toBe(false);
+    expect(isAllowedSpecialKey('quit')).toBe(false);
   });
 
   it('should reject Space, BSpace, and DC keys (security regression)', () => {

@@ -36,6 +36,7 @@ import { FilePanelSplit } from '@/components/worktree/FilePanelSplit';
 import { TerminalSplitContainer } from '@/components/worktree/TerminalSplitContainer';
 import { TerminalSplitPaneContent } from '@/components/worktree/TerminalSplitPaneContent';
 import { MemoPane } from '@/components/worktree/MemoPane';
+import { TodoPane } from '@/components/worktree/TodoPane';
 import { ExecutionLogPane } from '@/components/worktree/ExecutionLogPane';
 import { TimerPane } from '@/components/worktree/TimerPane';
 import { AgentInstancesPane } from '@/components/worktree/AgentInstancesPane';
@@ -584,6 +585,11 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
         />
       ),
       timer: <TimerPane worktreeId={worktreeId} instances={instances} />,
+      // Issue #1015: branch-scoped ToDo list. NOTE: ActivityContentMap is a
+      // Partial<Record<ActivityId, ReactNode>> ([S3-002]) so omitting this entry
+      // would NOT be a tsc error — it would silently render an empty pane. Keep
+      // both this map entry and `worktreeId` in the deps array below.
+      todo: <TodoPane worktreeId={worktreeId} className="h-full" />,
     }),
     [
       worktreeId,

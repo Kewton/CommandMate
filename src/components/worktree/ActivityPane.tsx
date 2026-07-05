@@ -47,6 +47,7 @@ const ERROR_BOUNDARY_NAMES: Record<ActivityId, string> = {
   schedules: 'ExecutionLogPane',
   agent: 'AgentSettingsPane',
   timer: 'TimerPane',
+  todo: 'TodoPane',
 };
 
 export const ActivityPane = memo(function ActivityPane({

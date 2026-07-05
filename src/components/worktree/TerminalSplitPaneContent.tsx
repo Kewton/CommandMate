@@ -28,6 +28,7 @@ import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import { TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
+import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import { PromptPanel } from '@/components/worktree/PromptPanel';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { HistoryPane, splitHistorySlotId } from '@/components/worktree/HistoryPane';
@@ -235,6 +236,17 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   const showNav = terminal.isSelectionListActive;
   const showPrompt = prompt.visible && !autoYesEnabled;
 
+  // Issue #1017 (C-lite): detection-independent Esc/q safety net. Shown only when
+  // the session is interactive but detection could not classify the frame
+  // (isUnclassifiedActive) — the "stuck in an unrecognized TUI mode" case — and no
+  // selection list / prompt panel is already driving it. Stays hidden during normal
+  // generation ('thinking_indicator') and at an idle input prompt ('ready'), so it
+  // is neither noisy nor able to insert a stray 'q' at the composer.
+  const showEscapeHatch =
+    terminal.isUnclassifiedActive &&
+    !showNav &&
+    !showPrompt;
+
   // Issue #743: AI agent status indicator (dot/spinner) for the split header.
   // Uses the same inline span markup as the Mobile canonical implementation
   // (WorktreeDetailRefactored.tsx:1947-1974): title-only a11y (no aria-label,
@@ -423,6 +435,15 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             cliToolId={cliToolId}
             instanceId={resolvedInstanceId}
             onKeysSent={refresh}
+            showPagerKeys={terminal.isPagerActive}
+          />
+        ) : null}
+        {showEscapeHatch ? (
+          <TerminalEscapeHatch
+            worktreeId={worktreeId}
+            cliToolId={cliToolId}
+            instanceId={resolvedInstanceId}
+            onKeysSent={refresh}
           />
         ) : null}
         {showPrompt ? (
@@ -458,6 +479,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     [
       showNav,
       showPrompt,
+      showEscapeHatch,
+      terminal.isPagerActive,
       worktreeId,
       cliToolId,
       resolvedInstanceId,
