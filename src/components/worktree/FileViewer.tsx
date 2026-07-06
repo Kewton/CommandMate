@@ -28,7 +28,7 @@ import type { SandboxLevel } from '@/config/html-extensions';
 import { SANDBOX_ATTRIBUTES } from '@/config/html-extensions';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { COPY_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
-import { Copy, Check, Maximize2, Minimize2, ClipboardCopy, Pencil, Search, X } from 'lucide-react';
+import { Copy, Check, Maximize2, Minimize2, ClipboardCopy, Pencil, Search, X, Download } from 'lucide-react';
 import { Z_INDEX } from '@/config/z-index';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
 import { useFileContentSearch } from '@/hooks/useFileContentSearch';
@@ -580,7 +580,35 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
     );
   };
 
-  /** Toolbar with path copy, content copy, and fullscreen buttons */
+  /**
+   * [Issue #1024] Download URL / link for the current file.
+   *
+   * Uses the same `encodePathForUrl` helper and `worktreeId` as the preview
+   * fetch above, plus `?download=1` so the server streams the RAW bytes as an
+   * attachment (bypassing base64 preview size limits). Rendered independently
+   * of `canCopy`/preview success so it is reachable in EVERY state (success,
+   * error, oversize FILE_TOO_LARGE, unsupported/binary). Labels are hardcoded
+   * because FileViewer does not use next-intl (consistent with the other
+   * toolbar buttons).
+   */
+  const downloadUrl = `/api/worktrees/${worktreeId}/files/${encodePathForUrl(filePath)}?download=1`;
+  const downloadName = filePath ? filePath.split('/').pop() || filePath : '';
+
+  const renderDownloadLink = (className: string, showLabel = false) => (
+    <a
+      data-testid="download-file-button"
+      href={downloadUrl}
+      download={downloadName}
+      className={className}
+      aria-label="Download file"
+      title="Download"
+    >
+      <Download className="w-3.5 h-3.5" />
+      {showLabel && <span>Download</span>}
+    </a>
+  );
+
+  /** Toolbar with path copy, content copy, download, and fullscreen buttons */
   const renderToolbar = () => (
     <div className="bg-gray-100 dark:bg-gray-700 px-3 py-1.5 border-b border-gray-200 dark:border-gray-600 flex items-center justify-between gap-2">
       <div className="flex items-center gap-1 min-w-0">
@@ -636,6 +664,10 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
               <Copy className="w-3.5 h-3.5" />
             )}
           </button>
+        )}
+        {/* [Issue #1024] Download link — always present (not gated on canCopy) */}
+        {renderDownloadLink(
+          'p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
         )}
         <button
           onClick={toggleFullscreen}
@@ -709,6 +741,14 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
                 />
               </svg>
               <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
+            </div>
+            {/* [Issue #1024] DL stays reachable even when preview fails
+                (e.g. oversize FILE_TOO_LARGE / unsupported / read error). */}
+            <div className="mt-3">
+              {renderDownloadLink(
+                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors',
+                true
+              )}
             </div>
           </div>
         )}
