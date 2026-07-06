@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-07-06
+
+> **Highlight**: スマホ版のファイルビューア（`FileViewer`）から**任意種別のファイルをダウンロード可能**にした（#1024 / #1026）。サーバ側は `files/[...path]` GET に download 分岐を追加し、生バイトを `Content-Type: application/octet-stream` ＋ `Content-Disposition: attachment` で返却（base64 JSON を経由しないためプレビュー上限を超える大容量にも対応）。filename は新設の content-disposition ヘルパーで RFC 準拠にサニタイズし、UI 側は FileViewer ツールバーにダウンロードボタンを追加した。
+
+### Added
+- feat(files): スマホ版のファイルビューア（`FileViewer`、#438 でモバイル専用化）から**任意種別のファイルをダウンロード可能**に。サーバ側は `src/app/api/worktrees/[id]/files/[...path]` GET に download 分岐を追加し、生バイトを `Content-Type: application/octet-stream` ＋ `Content-Disposition: attachment` で返却（既存 `getWorktreeAndValidatePath` でパス検証を再利用、base64 JSON を経由しないためプレビュー上限を超える大容量にも対応）。filename は新設の `src/lib/http/content-disposition` ヘルパーで RFC 準拠にサニタイズ（ASCII フォールバック ＋ `filename*=UTF-8''` パーセントエンコード、ヘッダインジェクション回避）。UI 側は `FileViewer` ツールバーにダウンロードボタンを追加し同一オリジンの download URL へ遷移（iOS Safari 含めネイティブ DL に対応）。テスト 29 本を新規追加（download API のヘッダ/パス検証/filename、content-disposition ヘルパー、FileViewer ボタン） (Issue #1024, #1026)
+
 ## [0.8.1] - 2026-07-05
 
 > **Highlight**: worktree（ブランチ）単位の **ToDo リスト**を新設（PC=アクティビティバー / スマホ=Tools、PC/スマホ共通 `TodoPane`、`worktree_todos` テーブル + migration v37、#1015）。あわせて Codex の**ページャ/選択リスト状態で選択ウィンドウ（NavigationButtons）が表示されない不具合**を修正し、ページャキー（PgUp/PgDn/Home/End/q）と検出非依存の脱出ハッチ `TerminalEscapeHatch`（Esc/q）を追加（#1017）、**History パネルのヘッダー（Message History）を固定**してスクロールをヘッダーの下に限定した（#1019）。
