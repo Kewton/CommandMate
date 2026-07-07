@@ -20,6 +20,7 @@ import { CLIToolManager } from './cli-tools/manager';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { createLogger } from '@/lib/logger';
 import { TIMER_CLEANUP_RETENTION_DAYS, TIMER_STATUS } from '@/config/timer-constants';
+import { sendUserMessage } from '@/lib/session/send-user-message';
 import type { CLIToolType } from './cli-tools/types';
 
 const logger = createLogger('timer-manager');
@@ -92,13 +93,27 @@ async function executeTimer(timerId: string): Promise<void> {
     }
 
     updateTimerStatus(db, timerId, 'sending');
-    // [Issue #947] Delegate to the CLI tool's sendMessage so timer sends take the
-    // exact same path as manual sends: per-tool text/Enter separation and waits.
-    // The previous direct sendKeys(sessionName, message, true) batched text+Enter
-    // in a single send-keys; codex's TUI never confirmed the input, leaving the
-    // message typed but unsent. sendMessage resolves the session name from
-    // (worktreeId, instanceId) internally, so claude/codex/gemini all work.
-    await cliTool.sendMessage(timer.worktreeId, timer.message, instanceId);
+    // [Issue #947] Delegate sending so timer sends take the exact same path as
+    // manual sends: per-tool text/Enter separation and waits. The previous direct
+    // sendKeys(sessionName, message, true) batched text+Enter in a single send-keys;
+    // codex's TUI never confirmed the input, leaving the message typed but unsent.
+    // [Issue #1028] Delegate to sendUserMessage (the same service the send API uses)
+    // rather than the low-level cliTool.sendMessage, so timer-fired messages also
+    // record the user message in chat_messages and start response polling —
+    // otherwise they never appear in Message History.
+    const result = await sendUserMessage(db, {
+      worktreeId: timer.worktreeId,
+      content: timer.message,
+      cliToolId: timer.cliToolId as CLIToolType,
+      instanceId,
+    });
+
+    if (!result.ok) {
+      updateTimerStatus(db, timerId, 'failed');
+      logger.error('timer:send-failed', { timerId, stage: result.stage, error: result.error });
+      return;
+    }
+
     updateTimerStatus(db, timerId, 'sent', Date.now());
 
     logger.info('timer:sent', { timerId, worktreeId: timer.worktreeId });

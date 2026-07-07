@@ -48,9 +48,8 @@ vi.mock('@/lib/db/timer-db', () => ({
 }));
 
 // Mock CLIToolManager
-// Issue #947: timer-manager now delegates sending to cliTool.sendMessage()
-// (which performs the per-tool text/Enter separation) instead of calling tmux
-// sendKeys() directly.
+// Issue #947: timer-manager delegates sending instead of calling tmux sendKeys()
+// directly. executeTimer still uses the tool for the isRunning() gate.
 const mockGetTool = vi.fn();
 const mockIsRunning = vi.fn().mockResolvedValue(true);
 const mockSendMessage = vi.fn().mockResolvedValue(undefined);
@@ -60,6 +59,14 @@ vi.mock('@/lib/cli-tools/manager', () => ({
       getTool: (...args: unknown[]) => mockGetTool(...args),
     }),
   },
+}));
+
+// Mock the shared send service (Issue #1028)
+// executeTimer now delegates to sendUserMessage so timer-fired messages record
+// in chat_messages / History (createMessage + startPolling) just like manual sends.
+const mockSendUserMessage = vi.fn().mockResolvedValue({ ok: true, message: { id: 'msg-1' } });
+vi.mock('@/lib/session/send-user-message', () => ({
+  sendUserMessage: (...args: unknown[]) => mockSendUserMessage(...args),
 }));
 
 // Import after mocking
@@ -263,9 +270,17 @@ describe('timer-manager', () => {
         timerId,
         'sending'
       );
-      // Issue #947: delegates to cliTool.sendMessage (worktreeId, message,
-      // instanceId) rather than calling tmux sendKeys directly.
-      expect(mockSendMessage).toHaveBeenCalledWith('wt-1', 'Hello', 'claude');
+      // Issue #1028: delegates to sendUserMessage (the shared send+record service)
+      // rather than the low-level cliTool.sendMessage, so timer sends land in History.
+      expect(mockSendUserMessage).toHaveBeenCalledWith(
+        expect.anything(),
+        {
+          worktreeId: 'wt-1',
+          content: 'Hello',
+          cliToolId: 'claude',
+          instanceId: 'claude',
+        }
+      );
       expect(mockUpdateTimerStatus).toHaveBeenCalledWith(
         expect.anything(),
         timerId,
@@ -304,9 +319,17 @@ describe('timer-manager', () => {
       await vi.advanceTimersByTimeAsync(200);
 
       expect(mockIsRunning).toHaveBeenCalledWith('wt-1', 'claude-reviewer');
-      // Issue #947: the instanceId is forwarded to sendMessage, which resolves
-      // the instance session internally (same path as manual sends).
-      expect(mockSendMessage).toHaveBeenCalledWith('wt-1', 'Hello', 'claude-reviewer');
+      // Issue #1028: the instanceId is forwarded to sendUserMessage, which
+      // records + sends against the instance session (same path as manual sends).
+      expect(mockSendUserMessage).toHaveBeenCalledWith(
+        expect.anything(),
+        {
+          worktreeId: 'wt-1',
+          content: 'Hello',
+          cliToolId: 'claude',
+          instanceId: 'claude-reviewer',
+        }
+      );
     });
 
     it('should set status to no_session when session is not running', async () => {
@@ -343,11 +366,11 @@ describe('timer-manager', () => {
         timerId,
         'no_session'
       );
-      // Should NOT attempt to send when no session is running
-      expect(mockSendMessage).not.toHaveBeenCalled();
+      // Should NOT attempt to send/record when no session is running
+      expect(mockSendUserMessage).not.toHaveBeenCalled();
     });
 
-    it('should set status to failed on send error when session is running', async () => {
+    it('should set status to failed when sendUserMessage reports a send failure', async () => {
       const timerId = 'timer-fail-1';
       const timer = {
         id: timerId,
@@ -369,7 +392,56 @@ describe('timer-manager', () => {
         isRunning: mockIsRunning,
         sendMessage: mockSendMessage,
       });
-      mockSendMessage.mockRejectedValueOnce(new Error('tmux session not found'));
+      // Issue #1028: sendUserMessage returns { ok: false } on send failure
+      // rather than throwing.
+      mockSendUserMessage.mockResolvedValueOnce({
+        ok: false,
+        stage: 'send',
+        error: 'tmux session not found',
+      });
+
+      initTimerManager();
+      scheduleTimer(timerId, 'wt-1', 100);
+
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(mockUpdateTimerStatus).toHaveBeenCalledWith(
+        expect.anything(),
+        timerId,
+        'failed'
+      );
+      // Must NOT mark as sent when the send failed
+      expect(mockUpdateTimerStatus).not.toHaveBeenCalledWith(
+        expect.anything(),
+        timerId,
+        'sent',
+        expect.any(Number)
+      );
+    });
+
+    it('should set status to failed when sendUserMessage throws', async () => {
+      const timerId = 'timer-throw-1';
+      const timer = {
+        id: timerId,
+        worktreeId: 'wt-1',
+        cliToolId: 'claude',
+        instanceId: 'claude',
+        message: 'Hello',
+        delayMs: 300000,
+        scheduledSendTime: Date.now() + 300000,
+        status: 'pending',
+        createdAt: Date.now(),
+        sentAt: null,
+      };
+
+      mockGetPendingTimers.mockReturnValueOnce([]);
+      mockGetTimerById.mockReturnValue(timer);
+      mockIsRunning.mockResolvedValue(true);
+      mockGetTool.mockReturnValue({
+        isRunning: mockIsRunning,
+        sendMessage: mockSendMessage,
+      });
+      mockSendUserMessage.mockRejectedValueOnce(new Error('createMessage failed'));
 
       initTimerManager();
       scheduleTimer(timerId, 'wt-1', 100);

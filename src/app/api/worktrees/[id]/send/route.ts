@@ -15,19 +15,14 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { getWorktreeById, createMessage, updateLastUserMessage, clearInProgressMessageId, saveInitialBranch, getInitialBranch, getMessages, deleteMessageById } from '@/lib/db';
+import { getWorktreeById, saveInitialBranch, getInitialBranch } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { CLI_TOOL_IDS, isImageCapableCLITool, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
-import { startPolling } from '@/lib/polling/response-poller';
-import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
+import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
+import { sendUserMessage } from '@/lib/session/send-user-message';
 import { getGitStatus } from '@/lib/git/git-utils';
 import { isPathSafe, resolveAndValidateRealPath } from '@/lib/security/path-validator';
-import { sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
-import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 import path from 'path';
 import { createLogger } from '@/lib/logger';
-import { COPILOT_SEND_ENTER_DELAY_MS } from '@/config/copilot-constants';
-import { CopilotTool } from '@/lib/cli-tools/copilot';
 import { AntigravityTool } from '@/lib/cli-tools/antigravity';
 import { validateCopilotModelName, validateAntigravityModelName } from '@/lib/cmate-cli-tool-parser';
 
@@ -252,39 +247,7 @@ export async function POST(
       }
     }
 
-    // Generate timestamp for user message BEFORE saving pending response
-    // This ensures timestamp ordering: assistantResponse < userMessage
-    const userMessageTimestamp = new Date();
-
-    // Save any pending assistant response before sending the new user message
-    // This captures the CLI tool's response to the previous user message
-    try {
-      await savePendingAssistantResponse(db, params.id, cliToolId, userMessageTimestamp, instanceId);
-    } catch (error) {
-      // Log but don't fail - user message should still be saved
-      logger.error('failed-to-save-pending-assistant-response:', { error: error instanceof Error ? error.message : String(error) });
-    }
-
-    // Clean up orphaned user messages (Issue #379: duplicate message prevention)
-    // If the most recent message for this cliToolId is a user message with the
-    // same content, it means the assistant never responded and the user is retrying.
-    // Remove it to prevent duplicates.
-    let orphanedMessageIdToDelete: string | null = null;
-    try {
-      const recentMessages = getMessages(db, params.id, { limit: 1, cliToolId, instanceId });
-      if (
-        recentMessages.length > 0 &&
-        recentMessages[0].role === 'user' &&
-        recentMessages[0].content === trimmedContent
-      ) {
-        orphanedMessageIdToDelete = recentMessages[0].id;
-      }
-    } catch (error) {
-      // Log but don't fail - cleanup candidate discovery is best-effort
-      logger.error('failed-to-detect-orphaned-messages:', { error: error instanceof Error ? error.message : String(error) });
-    }
-
-    // Issue #474: Validate imagePath if provided
+    // Issue #474: Validate imagePath if provided (HTTP-layer validation stays here)
     let absoluteImagePath: string | undefined;
     if (body.imagePath) {
       const validationResult = validateImagePath(body.imagePath, worktree.path);
@@ -294,97 +257,34 @@ export async function POST(
       absoluteImagePath = validationResult;
     }
 
-    // Issue #576: Send /model command before message if model is specified
-    if (body.model && cliToolId === 'copilot') {
-      try {
-        const copilotTool = cliTool as CopilotTool;
-        await copilotTool.sendModelCommand(params.id, body.model, instanceId);
-        logger.info('copilot-model-command-sent', { model: body.model });
-      } catch (error: unknown) {
-        logger.error('failed-to-send-model-command:', { error: error instanceof Error ? error.message : String(error) });
+    // Issue #1028: Delegate the send + history-recording flow to the shared
+    // sendUserMessage service so manual sends and Timer-fired sends (executeTimer)
+    // record identically in chat_messages / Message History.
+    const result = await sendUserMessage(db, {
+      worktreeId: params.id,
+      content: trimmedContent,
+      cliToolId,
+      instanceId,
+      absoluteImagePath,
+      // Issue #576: copilot /model switch (antigravity model is applied at
+      // session start above, not mid-session).
+      copilotModel: cliToolId === 'copilot' ? body.model : undefined,
+    });
+
+    if (!result.ok) {
+      if (result.stage === 'model') {
         return NextResponse.json(
-          { error: `Failed to switch model to ${body.model}: ${getErrorMessage(error)}` },
+          { error: `Failed to switch model to ${body.model}: ${result.error}` },
           { status: 500 }
         );
       }
-    }
-
-    // Send message to CLI tool
-    try {
-      // Issue #474: Image-aware sending
-      if (absoluteImagePath) {
-        if (isImageCapableCLITool(cliTool)) {
-          // Image-capable tool: use native image sending
-          await cliTool.sendMessageWithImage(params.id, trimmedContent, absoluteImagePath, instanceId);
-        } else {
-          // Fallback: embed path in message
-          const messageWithPath = trimmedContent
-            ? `${trimmedContent}\n\n[添付画像: ${absoluteImagePath}]`
-            : `[添付画像: ${absoluteImagePath}]`;
-          await cliTool.sendMessage(params.id, messageWithPath, instanceId);
-        }
-      } else if (cliToolId === 'copilot') {
-        // Copilot: use sendKeys directly to avoid waitForPrompt blocking (#559)
-        // Copilot CLI auto-enters multi-line mode when text exceeds pane width.
-        // In multi-line mode, C-m (bundled with text) adds a newline instead of
-        // submitting. Sending Enter as a separate tmux command after a delay
-        // allows the TUI to process the text first, then accept Enter as submit.
-        const sessionName = cliTool.getSessionName(params.id, instanceId);
-        // Replace newlines with spaces to prevent Copilot CLI multi-line mode
-        const copilotContent = trimmedContent.replace(/\n+/g, ' ').trim();
-        await sendKeys(sessionName, copilotContent, false);
-        await new Promise(resolve => setTimeout(resolve, COPILOT_SEND_ENTER_DELAY_MS));
-        await sendSpecialKeys(sessionName, ['Enter']);
-        invalidateCache(sessionName);
-      } else {
-        await cliTool.sendMessage(params.id, trimmedContent, instanceId);
-      }
-    } catch (error: unknown) {
-      logger.error('failed-to-send-message-to:', { error: error instanceof Error ? error.message : String(error) });
       return NextResponse.json(
-        { error: `Failed to send message to ${cliTool.name}: ${getErrorMessage(error)}` },
+        { error: `Failed to send message to ${cliTool.name}: ${result.error}` },
         { status: 500 }
       );
     }
 
-    // Create user message in database with CLI tool ID
-    // Use the pre-generated timestamp for consistency
-    // [DRY] Use trimmedContent consistently (same value sent to CLI and used for orphan detection)
-    const message = createMessage(db, {
-      worktreeId: params.id,
-      role: 'user',
-      content: trimmedContent,
-      messageType: 'normal',
-      timestamp: userMessageTimestamp,
-      cliToolId,
-      instanceId,
-    });
-
-    // Remove the prior orphan only after the retry message is persisted.
-    // This avoids data loss if send/create fails partway through the request.
-    if (orphanedMessageIdToDelete) {
-      try {
-        const deleted = deleteMessageById(db, orphanedMessageIdToDelete);
-        if (deleted) {
-          logger.info('cleaned-up-orphaned-user');
-        }
-      } catch (error) {
-        // Log but don't fail - cleanup is best-effort
-        logger.error('failed-to-clean-up-orphaned-message:', { error: error instanceof Error ? error.message : String(error) });
-      }
-    }
-
-    // Update last user message for worktree
-    updateLastUserMessage(db, params.id, trimmedContent, userMessageTimestamp);
-
-    // Clear in-progress message ID (session state is managed by savePendingAssistantResponse)
-    clearInProgressMessageId(db, params.id, cliToolId, instanceId);
-    logger.info('cleared-in-progress-message-for');
-
-    // Start polling for CLI tool's response
-    startPolling(params.id, cliToolId, instanceId);
-
-    return NextResponse.json(message, { status: 201 });
+    return NextResponse.json(result.message, { status: 201 });
   } catch (error: unknown) {
     logger.error('error-sending-message:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
