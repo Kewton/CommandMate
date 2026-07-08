@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-07-09
+
+> **Highlight**: **Timer 機能（#534）から送った指示が History（`chat_messages`）に残らない**不具合を修正（#1028 / #1030）。原因は `executeTimer` が `cliTool.sendMessage` だけを呼び、`createMessage` / `startPolling` をスキップしていたこと（#947 の委譲変更が起点）。send route L262-385 のインライン記録ロジックを HTTP 層非依存の共通関数 `sendUserMessage()`（`src/lib/session/send-user-message.ts`）として抽出し、send route POST と `timer-manager.executeTimer` の双方から共有することで、Timer 送信でも user メッセージと assistant 応答の両方が History に記録されるようにした。
+
+### Fixed
+- fix(session): **Timer 発火の送信を History に記録**（send ロジックを共有サービス化）。`executeTimer` が `cliTool.sendMessage` のみを呼び `createMessage` / `startPolling` をスキップしていたため Timer からの指示が `chat_messages` に残らなかった問題を修正（#947 の委譲変更が起点）。send route L262-385 のインライン記録ロジックを `src/lib/session/send-user-message.ts` の共通関数 `sendUserMessage()`（`savePendingAssistantResponse` → send（画像/Copilot 分岐含む）→ `createMessage` → `updateLastUserMessage`/orphan 処理 → `startPolling`）として抽出（HTTP 層非依存）。send route POST を `sendUserMessage()` 利用へリファクタ（挙動不変）し、`timer-manager.executeTimer` を `sendUserMessage()` 経由に変更（`timer_messages` の status 遷移 sending/sent/failed は維持）。これにより Timer 送信も user メッセージと assistant 応答の両方が History に残る。テスト新規 9 件（`sendUserMessage` / `executeTimer`）＋ timer 既存更新（計 26 件） (Issue #1028)
+
 ## [0.8.2] - 2026-07-06
 
 > **Highlight**: スマホ版のファイルビューア（`FileViewer`）から**任意種別のファイルをダウンロード可能**にした（#1024 / #1026）。サーバ側は `files/[...path]` GET に download 分岐を追加し、生バイトを `Content-Type: application/octet-stream` ＋ `Content-Disposition: attachment` で返却（base64 JSON を経由しないためプレビュー上限を超える大容量にも対応）。filename は新設の content-disposition ヘルパーで RFC 準拠にサニタイズし、UI 側は FileViewer ツールバーにダウンロードボタンを追加した。
