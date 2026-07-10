@@ -62,10 +62,21 @@ describe('worktree-todo-db', () => {
     expect(todo.id).toBeTruthy();
     expect(todo.worktreeId).toBe(worktreeId);
     expect(todo.content).toBe('Buy milk');
+    expect(todo.detail).toBe('');
     expect(todo.status).toBe('todo');
     expect(todo.done).toBe(false);
     expect(todo.position).toBe(0);
     expect(todo.createdAt).toBeInstanceOf(Date);
+  });
+
+  it('creates a todo with an explicit detail (Issue #1034)', () => {
+    const todo = createTodo(db, worktreeId, {
+      content: 'Deploy',
+      position: 0,
+      detail: 'Run migration v39 first',
+    });
+    expect(todo.detail).toBe('Run migration v39 first');
+    expect(getTodoById(db, todo.id)?.detail).toBe('Run migration v39 first');
   });
 
   it('creates a todo with an explicit status', () => {
@@ -113,6 +124,26 @@ describe('worktree-todo-db', () => {
     const todo = createTodo(db, worktreeId, { content: 'old', position: 0 });
     updateTodo(db, todo.id, { content: 'new' });
     expect(getTodoById(db, todo.id)?.content).toBe('new');
+  });
+
+  it('updates detail (Issue #1034)', () => {
+    const todo = createTodo(db, worktreeId, { content: 'task', position: 0 });
+    updateTodo(db, todo.id, { detail: 'some notes' });
+    expect(getTodoById(db, todo.id)?.detail).toBe('some notes');
+  });
+
+  it('clears detail back to an empty string', () => {
+    const todo = createTodo(db, worktreeId, { content: 'task', position: 0, detail: 'notes' });
+    updateTodo(db, todo.id, { detail: '' });
+    expect(getTodoById(db, todo.id)?.detail).toBe('');
+  });
+
+  it('updates content and detail together', () => {
+    const todo = createTodo(db, worktreeId, { content: 'a', position: 0 });
+    updateTodo(db, todo.id, { content: 'b', detail: 'd' });
+    const updated = getTodoById(db, todo.id);
+    expect(updated?.content).toBe('b');
+    expect(updated?.detail).toBe('d');
   });
 
   it('toggles done state (legacy) and keeps status consistent', () => {

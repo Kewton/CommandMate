@@ -28,8 +28,8 @@ vi.mock('@/lib/api/todo-api', () => ({
 const mockedApi = vi.mocked(worktreeTodoApi);
 
 const TODOS: WorktreeTodoItem[] = [
-  { id: 't1', worktreeId: 'wt-1', content: 'first task', status: 'todo', done: false, position: 0 },
-  { id: 't2', worktreeId: 'wt-1', content: 'second task', status: 'done', done: true, position: 1 },
+  { id: 't1', worktreeId: 'wt-1', content: 'first task', detail: '', status: 'todo', done: false, position: 0 },
+  { id: 't2', worktreeId: 'wt-1', content: 'second task', detail: 'some notes', status: 'done', done: true, position: 1 },
 ];
 
 beforeEach(() => {
@@ -63,6 +63,7 @@ describe('TodoPane', () => {
       id: 't-new',
       worktreeId: 'wt-1',
       content: 'brand new',
+      detail: '',
       status: 'todo',
       done: false,
       position: 0,
@@ -169,5 +170,83 @@ describe('TodoPane', () => {
 
     expect(await screen.findByTestId('todo-error')).toHaveTextContent('load failed');
     expect(screen.getByTestId('todo-empty')).toBeInTheDocument();
+  });
+
+  it('marks items that have a detail with an indicator (Issue #1034)', async () => {
+    render(<TodoPane worktreeId="wt-1" />);
+    await screen.findByText('first task');
+
+    // Fixture: only t2 has a non-empty detail.
+    expect(screen.getAllByTestId('todo-detail-indicator')).toHaveLength(1);
+  });
+
+  it('opens the edit modal prefilled with content and detail on item click', async () => {
+    render(<TodoPane worktreeId="wt-1" />);
+    await screen.findByText('second task');
+
+    // t2 is the second item; click its content to open the editor.
+    fireEvent.click(screen.getAllByTestId('todo-content')[1]);
+
+    const contentInput = await screen.findByTestId('todo-edit-content');
+    const detailInput = screen.getByTestId('todo-edit-detail');
+    expect(contentInput).toHaveValue('second task');
+    expect(detailInput).toHaveValue('some notes');
+  });
+
+  it('saves edited content and detail via worktreeTodoApi.update (Issue #1034)', async () => {
+    mockedApi.update.mockResolvedValue({
+      ...TODOS[0],
+      content: 'first task edited',
+      detail: 'brand new detail',
+    });
+    render(<TodoPane worktreeId="wt-1" />);
+    await screen.findByText('first task');
+
+    fireEvent.click(screen.getAllByTestId('todo-content')[0]);
+    await screen.findByTestId('todo-edit-content');
+
+    fireEvent.change(screen.getByTestId('todo-edit-content'), {
+      target: { value: 'first task edited' },
+    });
+    fireEvent.change(screen.getByTestId('todo-edit-detail'), {
+      target: { value: 'brand new detail' },
+    });
+    fireEvent.click(screen.getByTestId('todo-edit-save'));
+
+    await waitFor(() => {
+      expect(mockedApi.update).toHaveBeenCalledWith('wt-1', 't1', {
+        content: 'first task edited',
+        detail: 'brand new detail',
+      });
+    });
+    expect(await screen.findByText('first task edited')).toBeInTheDocument();
+  });
+
+  it('does not save when the title is emptied in the editor', async () => {
+    render(<TodoPane worktreeId="wt-1" />);
+    await screen.findByText('first task');
+
+    fireEvent.click(screen.getAllByTestId('todo-content')[0]);
+    await screen.findByTestId('todo-edit-content');
+
+    fireEvent.change(screen.getByTestId('todo-edit-content'), { target: { value: '   ' } });
+    const saveButton = screen.getByTestId('todo-edit-save');
+    expect(saveButton).toBeDisabled();
+  });
+
+  it('discards edits on cancel without calling update', async () => {
+    render(<TodoPane worktreeId="wt-1" />);
+    await screen.findByText('first task');
+
+    fireEvent.click(screen.getAllByTestId('todo-content')[0]);
+    await screen.findByTestId('todo-edit-content');
+
+    fireEvent.change(screen.getByTestId('todo-edit-content'), { target: { value: 'changed' } });
+    fireEvent.click(screen.getByTestId('todo-edit-cancel'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('todo-edit-content')).not.toBeInTheDocument();
+    });
+    expect(mockedApi.update).not.toHaveBeenCalled();
   });
 });
