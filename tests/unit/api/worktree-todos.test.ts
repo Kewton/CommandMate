@@ -162,6 +162,7 @@ describe('POST /api/worktrees/:id/todos', () => {
     expect(res.status).toBe(201);
     const data = await res.json();
     expect(data.todo.content).toBe('Write tests');
+    expect(data.todo.status).toBe('todo');
     expect(data.todo.done).toBe(false);
     expect(data.todo.worktreeId).toBe(wtId);
     expect(data.todo.position).toBe(0);
@@ -224,6 +225,33 @@ describe('PATCH /api/worktrees/:id/todos/:todoId', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.todo.done).toBe(true);
+    expect(data.todo.status).toBe('done');
+  });
+
+  it('updates the status to doing', async () => {
+    const todo = createTodo(db, wtId, { content: 'task', position: 0 });
+    const res = await patch(wtId, todo.id, { status: 'doing' });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.todo.status).toBe('doing');
+    expect(data.todo.done).toBe(false);
+  });
+
+  it('updates the status to done', async () => {
+    const todo = createTodo(db, wtId, { content: 'task', position: 0 });
+    const res = await patch(wtId, todo.id, { status: 'done' });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.todo.status).toBe('done');
+    expect(data.todo.done).toBe(true);
+  });
+
+  it('returns 400 for an invalid status', async () => {
+    const todo = createTodo(db, wtId, { content: 'task', position: 0 });
+    const res = await patch(wtId, todo.id, { status: 'nope' });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.error).toContain('status');
   });
 
   it('updates content', async () => {

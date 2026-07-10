@@ -14,6 +14,8 @@ import {
   getWorktreeTodoById,
   updateWorktreeTodo,
   deleteWorktreeTodo,
+  isWorktreeTodoStatus,
+  WORKTREE_TODO_STATUSES,
 } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
 import { MAX_TODO_CONTENT_LENGTH } from '@/config/todo-config';
@@ -24,9 +26,10 @@ const logger = createLogger('api/worktree-todos');
  * PATCH /api/worktrees/:id/todos/:todoId
  * Updates a todo's content and/or done state.
  *
- * Request body:
+ * Request body (at least one of):
  * - content?: string - New content (non-empty, max MAX_TODO_CONTENT_LENGTH chars)
- * - done?: boolean - Completion state
+ * - status?: 'todo' | 'doing' | 'done' - Progress state (Issue #1032)
+ * - done?: boolean - Legacy completion state (mapped to status when status omitted)
  */
 export async function PATCH(
   request: NextRequest,
@@ -52,11 +55,11 @@ export async function PATCH(
     }
 
     const body = await request.json().catch(() => ({}));
-    const { content, done } = body;
+    const { content, done, status } = body;
 
-    if (content === undefined && done === undefined) {
+    if (content === undefined && done === undefined && status === undefined) {
       return NextResponse.json(
-        { error: 'content or done is required' },
+        { error: 'content, status, or done is required' },
         { status: 400 }
       );
     }
@@ -85,7 +88,14 @@ export async function PATCH(
       );
     }
 
-    updateWorktreeTodo(db, params.todoId, { content: trimmed, done });
+    if (status !== undefined && !isWorktreeTodoStatus(status)) {
+      return NextResponse.json(
+        { error: `status must be one of: ${WORKTREE_TODO_STATUSES.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
+    updateWorktreeTodo(db, params.todoId, { content: trimmed, done, status });
 
     const updatedTodo = getWorktreeTodoById(db, params.todoId);
 
