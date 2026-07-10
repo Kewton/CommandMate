@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-07-10
+
+> **Highlight**: worktree（ブランチ）単位の **ToDo リスト（#1015）を大幅強化**（まとめて #1038）。①完了/未完了の 2 値から **未着手 / 仕掛 / 完了の 3 状態**へ拡張（`status` カラム、migration v38、#1032）、②各項目に **詳細フィールド**を追加し**項目クリックで件名・詳細を編集**できるモーダルを新設（`detail` カラム、migration v39、#1034）、③編集モーダルの**詳細本文にコピーボタン**を追加（#1036）。DB マイグレーションは v37→v39、`CURRENT_SCHEMA_VERSION` を 37→39 に更新。
+
+### Added
+- feat(todo): worktree（ブランチ）単位 ToDo を **完了/未完了の 2 値から未着手（todo）/ 仕掛（doing）/ 完了（done）の 3 状態**へ拡張。`worktree_todos` に `status` カラムを追加（migration v38、`done=1`→`'done'` へ backfill、`CURRENT_SCHEMA_VERSION` 37→38）し、DB 層は `status` を真実源に `done := status==='done'` を派生（後方互換維持、writer 整合）。API/クライアントは PATCH で `status ∈ {todo, doing, done}` を検証・適用（`done` 後方互換）。UI は 3 状態を巡回するチップ＋色バッジ＋状態別件数を追加し、`TodoPane` 全体を next-intl 化、`locales/{en,ja}/worktree.json` に `todo` namespace を追加。テストは既存 5 件更新＋ migration-v38（backfill 検証）を新規追加 (Issue #1032)
+- feat(todo): worktree 単位 ToDo に **詳細フィールドを追加し、項目クリックで件名・詳細を編集**できるモーダルを新設。`worktree_todos` に `detail` カラム（`TEXT NOT NULL DEFAULT ''`、既存行は空詳細で移行）を追加（migration v39）し、`WorktreeTodo` に `detail` を追加して create/update で受理、API の POST/PATCH で `detail` を検証・適用（`MAX_TODO_DETAIL_LENGTH` 新設）。UI は項目クリックで編集モーダル（`Modal.tsx` 再利用）を開き件名＋詳細を編集でき、詳細ありインジケータを表示。`locales/{en,ja}/worktree.json` に詳細/編集の文言を追加。テストは既存 6 件更新＋ migration-v39 を新規追加、`docs/module-reference.md` を更新 (Issue #1034)
+- feat(todo): worktree 単位 ToDo の**編集モーダルの詳細欄にコピーボタン**を追加し、詳細本文をクリップボードへコピー可能に（詳細が空のときは非表示）。既存の `src/components/common/CopyButton.tsx` / `clipboard-utils.ts` を再利用（スマホ HTTP 環境は `execCommand` フォールバック）、`locales/{en,ja}/worktree.json` に `todo.copyDetail` を追加。`TodoPane.test.tsx` にコピー導線テスト 3 件を追加（migration/DB/API 変更なし、UI のみ） (Issue #1036)
+
 ## [0.8.3] - 2026-07-09
 
 > **Highlight**: **Timer 機能（#534）から送った指示が History（`chat_messages`）に残らない**不具合を修正（#1028 / #1030）。原因は `executeTimer` が `cliTool.sendMessage` だけを呼び、`createMessage` / `startPolling` をスキップしていたこと（#947 の委譲変更が起点）。send route L262-385 のインライン記録ロジックを HTTP 層非依存の共通関数 `sendUserMessage()`（`src/lib/session/send-user-message.ts`）として抽出し、send route POST と `timer-manager.executeTimer` の双方から共有することで、Timer 送信でも user メッセージと assistant 応答の両方が History に記録されるようにした。
