@@ -57,14 +57,33 @@ describe('worktree-todo-db', () => {
     expect(getTodosByWorktreeId(db, worktreeId)).toEqual([]);
   });
 
-  it('creates a todo with done=false by default', () => {
+  it('creates a todo with status "todo" (done=false) by default', () => {
     const todo = createTodo(db, worktreeId, { content: 'Buy milk', position: 0 });
     expect(todo.id).toBeTruthy();
     expect(todo.worktreeId).toBe(worktreeId);
     expect(todo.content).toBe('Buy milk');
+    expect(todo.detail).toBe('');
+    expect(todo.status).toBe('todo');
     expect(todo.done).toBe(false);
     expect(todo.position).toBe(0);
     expect(todo.createdAt).toBeInstanceOf(Date);
+  });
+
+  it('creates a todo with an explicit detail (Issue #1034)', () => {
+    const todo = createTodo(db, worktreeId, {
+      content: 'Deploy',
+      position: 0,
+      detail: 'Run migration v39 first',
+    });
+    expect(todo.detail).toBe('Run migration v39 first');
+    expect(getTodoById(db, todo.id)?.detail).toBe('Run migration v39 first');
+  });
+
+  it('creates a todo with an explicit status', () => {
+    const todo = createTodo(db, worktreeId, { content: 'WIP', position: 0, status: 'doing' });
+    expect(todo.status).toBe('doing');
+    expect(todo.done).toBe(false);
+    expect(getTodoById(db, todo.id)?.status).toBe('doing');
   });
 
   it('lists todos sorted by position', () => {
@@ -107,12 +126,63 @@ describe('worktree-todo-db', () => {
     expect(getTodoById(db, todo.id)?.content).toBe('new');
   });
 
-  it('toggles done state', () => {
+  it('updates detail (Issue #1034)', () => {
+    const todo = createTodo(db, worktreeId, { content: 'task', position: 0 });
+    updateTodo(db, todo.id, { detail: 'some notes' });
+    expect(getTodoById(db, todo.id)?.detail).toBe('some notes');
+  });
+
+  it('clears detail back to an empty string', () => {
+    const todo = createTodo(db, worktreeId, { content: 'task', position: 0, detail: 'notes' });
+    updateTodo(db, todo.id, { detail: '' });
+    expect(getTodoById(db, todo.id)?.detail).toBe('');
+  });
+
+  it('updates content and detail together', () => {
+    const todo = createTodo(db, worktreeId, { content: 'a', position: 0 });
+    updateTodo(db, todo.id, { content: 'b', detail: 'd' });
+    const updated = getTodoById(db, todo.id);
+    expect(updated?.content).toBe('b');
+    expect(updated?.detail).toBe('d');
+  });
+
+  it('toggles done state (legacy) and keeps status consistent', () => {
     const todo = createTodo(db, worktreeId, { content: 'task', position: 0 });
     updateTodo(db, todo.id, { done: true });
-    expect(getTodoById(db, todo.id)?.done).toBe(true);
+    let updated = getTodoById(db, todo.id);
+    expect(updated?.done).toBe(true);
+    expect(updated?.status).toBe('done');
     updateTodo(db, todo.id, { done: false });
-    expect(getTodoById(db, todo.id)?.done).toBe(false);
+    updated = getTodoById(db, todo.id);
+    expect(updated?.done).toBe(false);
+    expect(updated?.status).toBe('todo');
+  });
+
+  it('cycles through the three statuses and derives done', () => {
+    const todo = createTodo(db, worktreeId, { content: 'task', position: 0 });
+
+    updateTodo(db, todo.id, { status: 'doing' });
+    let updated = getTodoById(db, todo.id);
+    expect(updated?.status).toBe('doing');
+    expect(updated?.done).toBe(false);
+
+    updateTodo(db, todo.id, { status: 'done' });
+    updated = getTodoById(db, todo.id);
+    expect(updated?.status).toBe('done');
+    expect(updated?.done).toBe(true);
+
+    updateTodo(db, todo.id, { status: 'todo' });
+    updated = getTodoById(db, todo.id);
+    expect(updated?.status).toBe('todo');
+    expect(updated?.done).toBe(false);
+  });
+
+  it('prefers status over the legacy done flag when both are provided', () => {
+    const todo = createTodo(db, worktreeId, { content: 'task', position: 0 });
+    updateTodo(db, todo.id, { status: 'doing', done: true });
+    const updated = getTodoById(db, todo.id);
+    expect(updated?.status).toBe('doing');
+    expect(updated?.done).toBe(false);
   });
 
   it('updates content and done together', () => {

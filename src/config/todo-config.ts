@@ -21,3 +21,9 @@ export const MAX_TODOS_PER_WORKTREE = 50;
 
 /** Maximum length (characters) of a single ToDo's content (shared by both scopes). */
 export const MAX_TODO_CONTENT_LENGTH = 2000;
+
+/**
+ * Maximum length (characters) of a worktree ToDo's free-text detail (Issue #1034).
+ * Scoped to branch ToDos only; repository ToDos have no detail field.
+ */
+export const MAX_TODO_DETAIL_LENGTH = 4000;

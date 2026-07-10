@@ -15,12 +15,36 @@ import { randomUUID } from 'crypto';
 import Database from 'better-sqlite3';
 
 /**
+ * Progress state of a worktree ToDo (Issue #1032).
+ * `todo` = not started, `doing` = in progress, `done` = completed.
+ */
+export type WorktreeTodoStatus = 'todo' | 'doing' | 'done';
+
+/** All valid ToDo statuses, in cycle order (todo -> doing -> done). */
+export const WORKTREE_TODO_STATUSES: readonly WorktreeTodoStatus[] = [
+  'todo',
+  'doing',
+  'done',
+];
+
+/** Type guard for the three-state ToDo status. */
+export function isWorktreeTodoStatus(value: unknown): value is WorktreeTodoStatus {
+  return value === 'todo' || value === 'doing' || value === 'done';
+}
+
+/**
  * A single ToDo item scoped to a worktree (branch).
+ *
+ * `status` is the source of truth (Issue #1032); `done` is a derived
+ * convenience flag (`status === 'done'`) retained for backward compatibility.
  */
 export interface WorktreeTodo {
   id: string;
   worktreeId: string;
   content: string;
+  /** Free-text supplementary notes for the item (Issue #1034); '' when unset. */
+  detail: string;
+  status: WorktreeTodoStatus;
   done: boolean;
   position: number;
   createdAt: Date;
@@ -34,21 +58,38 @@ type WorktreeTodoRow = {
   id: string;
   worktree_id: string;
   content: string;
+  detail: string;
   done: number;
+  status: string;
   position: number;
   created_at: number;
   updated_at: number;
 };
 
 /**
+ * Resolve a row's persisted status, falling back to the legacy `done` flag when
+ * the value is missing or unrecognized (defensive; the column is NOT NULL with a
+ * 'todo' default and backfilled at migration v38).
+ */
+function resolveStatus(rawStatus: string, done: number): WorktreeTodoStatus {
+  if (isWorktreeTodoStatus(rawStatus)) {
+    return rawStatus;
+  }
+  return done === 1 ? 'done' : 'todo';
+}
+
+/**
  * Map database row to WorktreeTodo model.
  */
 function mapTodoRow(row: WorktreeTodoRow): WorktreeTodo {
+  const status = resolveStatus(row.status, row.done);
   return {
     id: row.id,
     worktreeId: row.worktree_id,
     content: row.content,
-    done: row.done === 1,
+    detail: row.detail ?? '',
+    status,
+    done: status === 'done',
     position: row.position,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
@@ -63,7 +104,7 @@ export function getTodosByWorktreeId(
   worktreeId: string
 ): WorktreeTodo[] {
   const stmt = db.prepare(`
-    SELECT id, worktree_id, content, done, position, created_at, updated_at
+    SELECT id, worktree_id, content, detail, done, status, position, created_at, updated_at
     FROM worktree_todos
     WHERE worktree_id = ?
     ORDER BY position ASC, created_at ASC
@@ -83,7 +124,7 @@ export function getTodoById(
   todoId: string
 ): WorktreeTodo | null {
   const stmt = db.prepare(`
-    SELECT id, worktree_id, content, done, position, created_at, updated_at
+    SELECT id, worktree_id, content, detail, done, status, position, created_at, updated_at
     FROM worktree_todos
     WHERE id = ?
   `);
@@ -101,23 +142,30 @@ export function createTodo(
   options: {
     content: string;
     position: number;
+    status?: WorktreeTodoStatus;
+    detail?: string;
   }
 ): WorktreeTodo {
   const id = randomUUID();
   const now = Date.now();
+  const status: WorktreeTodoStatus = options.status ?? 'todo';
+  const done = status === 'done' ? 1 : 0;
+  const detail = options.detail ?? '';
 
   const stmt = db.prepare(`
-    INSERT INTO worktree_todos (id, worktree_id, content, done, position, created_at, updated_at)
-    VALUES (?, ?, ?, 0, ?, ?, ?)
+    INSERT INTO worktree_todos (id, worktree_id, content, detail, done, status, position, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  stmt.run(id, worktreeId, options.content, options.position, now, now);
+  stmt.run(id, worktreeId, options.content, detail, done, status, options.position, now, now);
 
   return {
     id,
     worktreeId,
     content: options.content,
-    done: false,
+    detail,
+    status,
+    done: status === 'done',
     position: options.position,
     createdAt: new Date(now),
     updatedAt: new Date(now),
@@ -125,14 +173,21 @@ export function createTodo(
 }
 
 /**
- * Update an existing todo (content and/or done state).
+ * Update an existing todo (content, status, and/or done state).
+ *
+ * `status` is authoritative. For backward compatibility a legacy `done` boolean
+ * is still accepted and mapped to a status (`true` -> 'done', `false` -> 'todo')
+ * only when `status` is not supplied. The persisted `done` column is always kept
+ * consistent with the resolved status.
  */
 export function updateTodo(
   db: Database.Database,
   todoId: string,
   updates: {
     content?: string;
+    detail?: string;
     done?: boolean;
+    status?: WorktreeTodoStatus;
   }
 ): void {
   const now = Date.now();
@@ -144,9 +199,23 @@ export function updateTodo(
     params.push(updates.content);
   }
 
-  if (updates.done !== undefined) {
+  if (updates.detail !== undefined) {
+    assignments.push('detail = ?');
+    params.push(updates.detail);
+  }
+
+  let resolvedStatus: WorktreeTodoStatus | undefined;
+  if (updates.status !== undefined) {
+    resolvedStatus = updates.status;
+  } else if (updates.done !== undefined) {
+    resolvedStatus = updates.done ? 'done' : 'todo';
+  }
+
+  if (resolvedStatus !== undefined) {
+    assignments.push('status = ?');
+    params.push(resolvedStatus);
     assignments.push('done = ?');
-    params.push(updates.done ? 1 : 0);
+    params.push(resolvedStatus === 'done' ? 1 : 0);
   }
 
   params.push(todoId);

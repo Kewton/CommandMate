@@ -14,9 +14,11 @@ import {
   getWorktreeTodoById,
   updateWorktreeTodo,
   deleteWorktreeTodo,
+  isWorktreeTodoStatus,
+  WORKTREE_TODO_STATUSES,
 } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
-import { MAX_TODO_CONTENT_LENGTH } from '@/config/todo-config';
+import { MAX_TODO_CONTENT_LENGTH, MAX_TODO_DETAIL_LENGTH } from '@/config/todo-config';
 
 const logger = createLogger('api/worktree-todos');
 
@@ -24,9 +26,11 @@ const logger = createLogger('api/worktree-todos');
  * PATCH /api/worktrees/:id/todos/:todoId
  * Updates a todo's content and/or done state.
  *
- * Request body:
+ * Request body (at least one of):
  * - content?: string - New content (non-empty, max MAX_TODO_CONTENT_LENGTH chars)
- * - done?: boolean - Completion state
+ * - detail?: string - Supplementary notes (may be empty, max MAX_TODO_DETAIL_LENGTH chars, Issue #1034)
+ * - status?: 'todo' | 'doing' | 'done' - Progress state (Issue #1032)
+ * - done?: boolean - Legacy completion state (mapped to status when status omitted)
  */
 export async function PATCH(
   request: NextRequest,
@@ -52,11 +56,16 @@ export async function PATCH(
     }
 
     const body = await request.json().catch(() => ({}));
-    const { content, done } = body;
+    const { content, detail, done, status } = body;
 
-    if (content === undefined && done === undefined) {
+    if (
+      content === undefined &&
+      detail === undefined &&
+      done === undefined &&
+      status === undefined
+    ) {
       return NextResponse.json(
-        { error: 'content or done is required' },
+        { error: 'content, detail, status, or done is required' },
         { status: 400 }
       );
     }
@@ -78,6 +87,23 @@ export async function PATCH(
       }
     }
 
+    // detail (Issue #1034) may be empty and is stored verbatim; only the type
+    // and max length are validated.
+    if (detail !== undefined) {
+      if (typeof detail !== 'string') {
+        return NextResponse.json(
+          { error: 'detail must be a string' },
+          { status: 400 }
+        );
+      }
+      if (detail.length > MAX_TODO_DETAIL_LENGTH) {
+        return NextResponse.json(
+          { error: `detail must be ${MAX_TODO_DETAIL_LENGTH} characters or less` },
+          { status: 400 }
+        );
+      }
+    }
+
     if (done !== undefined && typeof done !== 'boolean') {
       return NextResponse.json(
         { error: 'done must be a boolean' },
@@ -85,7 +111,14 @@ export async function PATCH(
       );
     }
 
-    updateWorktreeTodo(db, params.todoId, { content: trimmed, done });
+    if (status !== undefined && !isWorktreeTodoStatus(status)) {
+      return NextResponse.json(
+        { error: `status must be one of: ${WORKTREE_TODO_STATUSES.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
+    updateWorktreeTodo(db, params.todoId, { content: trimmed, detail, done, status });
 
     const updatedTodo = getWorktreeTodoById(db, params.todoId);
 

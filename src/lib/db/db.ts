@@ -107,8 +107,10 @@ export {
   updateTodo as updateWorktreeTodo,
   deleteTodo as deleteWorktreeTodo,
   reorderTodos as reorderWorktreeTodos,
+  isWorktreeTodoStatus,
+  WORKTREE_TODO_STATUSES,
 } from './worktree-todo-db';
-export type { WorktreeTodo } from './worktree-todo-db';
+export type { WorktreeTodo, WorktreeTodoStatus } from './worktree-todo-db';
 
 // timer-db (Issue #534, #540)
 export {
