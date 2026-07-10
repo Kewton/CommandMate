@@ -110,6 +110,8 @@ export interface WorktreeTodoItem {
   id: string;
   worktreeId: string;
   content: string;
+  /** Free-text supplementary notes (Issue #1034); '' when unset. */
+  detail: string;
   /** Progress state (Issue #1032). */
   status: WorktreeTodoStatus;
   /** Derived convenience flag (`status === 'done'`), kept for compatibility. */
@@ -133,13 +135,17 @@ export const worktreeTodoApi = {
     return data.todos ?? [];
   },
 
-  async create(worktreeId: string, content: string): Promise<WorktreeTodoItem> {
+  async create(
+    worktreeId: string,
+    content: string,
+    detail?: string,
+  ): Promise<WorktreeTodoItem> {
     const res = await fetch(
       `/api/worktrees/${encodeURIComponent(worktreeId)}/todos`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify(detail !== undefined ? { content, detail } : { content }),
       },
     );
     if (!res.ok) {
@@ -152,7 +158,7 @@ export const worktreeTodoApi = {
   async update(
     worktreeId: string,
     todoId: string,
-    updates: { content?: string; done?: boolean; status?: WorktreeTodoStatus },
+    updates: { content?: string; detail?: string; done?: boolean; status?: WorktreeTodoStatus },
   ): Promise<WorktreeTodoItem> {
     const res = await fetch(
       `/api/worktrees/${encodeURIComponent(worktreeId)}/todos/${encodeURIComponent(todoId)}`,

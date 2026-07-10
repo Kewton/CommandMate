@@ -21,7 +21,8 @@ import {
   type WorktreeTodoItem,
   type WorktreeTodoStatus,
 } from '@/lib/api/todo-api';
-import { MAX_TODO_CONTENT_LENGTH } from '@/config/todo-config';
+import { MAX_TODO_CONTENT_LENGTH, MAX_TODO_DETAIL_LENGTH } from '@/config/todo-config';
+import { Modal } from '@/components/ui/Modal';
 
 export interface TodoPaneProps {
   /** Worktree ID to scope the todo list to. */
@@ -53,6 +54,11 @@ export const TodoPane = React.memo(function TodoPane({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Item being edited in the modal (title + detail); null when closed (Issue #1034).
+  const [editing, setEditing] = useState<WorktreeTodoItem | null>(null);
+  const [editContent, setEditContent] = useState('');
+  const [editDetail, setEditDetail] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const statusLabel = useCallback(
     (status: WorktreeTodoStatus) => {
@@ -141,6 +147,42 @@ export const TodoPane = React.memo(function TodoPane({
     },
     [worktreeId, t],
   );
+
+  const openEditor = useCallback((todo: WorktreeTodoItem) => {
+    setEditing(todo);
+    setEditContent(todo.content);
+    setEditDetail(todo.detail);
+    setError(null);
+  }, []);
+
+  const closeEditor = useCallback(() => {
+    setEditing(null);
+    setSaving(false);
+  }, []);
+
+  const handleSaveEdit = useCallback(async () => {
+    if (!editing) {
+      return;
+    }
+    const content = editContent.trim();
+    // Title is required (mirrors the add form); detail may be empty.
+    if (!content || saving) {
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const updated = await worktreeTodoApi.update(worktreeId, editing.id, {
+        content,
+        detail: editDetail,
+      });
+      setTodos((prev) => prev.map((item) => (item.id === editing.id ? updated : item)));
+      closeEditor();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('todo.updateError'));
+      setSaving(false);
+    }
+  }, [editing, editContent, editDetail, saving, worktreeId, closeEditor, t]);
 
   const handleMove = useCallback(
     async (index: number, direction: -1 | 1) => {
@@ -257,15 +299,37 @@ export const TodoPane = React.memo(function TodoPane({
               >
                 {statusLabel(todo.status)}
               </button>
-              <span
-                className={`min-w-0 flex-1 break-words text-sm ${
-                  todo.status === 'done'
-                    ? 'line-through text-gray-400 dark:text-gray-500'
-                    : 'text-gray-800 dark:text-gray-200'
-                }`}
+              <button
+                type="button"
+                onClick={() => openEditor(todo)}
+                data-testid="todo-content"
+                aria-label={t('todo.edit')}
+                title={t('todo.edit')}
+                className="group/content flex min-h-[44px] min-w-0 flex-1 items-center gap-1.5 text-left sm:min-h-0"
               >
-                {todo.content}
-              </span>
+                <span
+                  className={`min-w-0 break-words text-sm ${
+                    todo.status === 'done'
+                      ? 'line-through text-gray-400 dark:text-gray-500'
+                      : 'text-gray-800 dark:text-gray-200 group-hover/content:text-cyan-700 dark:group-hover/content:text-cyan-300'
+                  }`}
+                >
+                  {todo.content}
+                </span>
+                {todo.detail.trim() !== '' && (
+                  <svg
+                    data-testid="todo-detail-indicator"
+                    aria-label={t('todo.hasDetail')}
+                    className="h-3.5 w-3.5 shrink-0 text-gray-400 dark:text-gray-500"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <title>{t('todo.hasDetail')}</title>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h10" />
+                  </svg>
+                )}
+              </button>
               <div className="flex shrink-0 items-center gap-1">
                 <button
                   type="button"
@@ -307,6 +371,64 @@ export const TodoPane = React.memo(function TodoPane({
           ))}
         </ul>
       )}
+
+      {/* Edit modal: title + detail (Issue #1034). Reuses the shared Modal. */}
+      <Modal
+        isOpen={editing !== null}
+        onClose={closeEditor}
+        title={t('todo.editTitle')}
+        size="md"
+      >
+        <div className="flex flex-col gap-4">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
+              {t('todo.contentLabel')}
+            </span>
+            <input
+              type="text"
+              value={editContent}
+              onChange={(e) => setEditContent(e.target.value)}
+              maxLength={MAX_TODO_CONTENT_LENGTH}
+              placeholder={t('todo.contentPlaceholder')}
+              data-testid="todo-edit-content"
+              className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
+              {t('todo.detailLabel')}
+            </span>
+            <textarea
+              value={editDetail}
+              onChange={(e) => setEditDetail(e.target.value)}
+              maxLength={MAX_TODO_DETAIL_LENGTH}
+              rows={6}
+              placeholder={t('todo.detailPlaceholder')}
+              data-testid="todo-edit-detail"
+              className="w-full resize-y rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400"
+            />
+          </label>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={closeEditor}
+              data-testid="todo-edit-cancel"
+              className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
+            >
+              {t('todo.cancel')}
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveEdit}
+              disabled={saving || editContent.trim().length === 0}
+              data-testid="todo-edit-save"
+              className="rounded-md bg-cyan-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
+            >
+              {t('todo.save')}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 });

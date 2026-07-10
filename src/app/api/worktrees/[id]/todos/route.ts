@@ -18,7 +18,11 @@ import {
   reorderWorktreeTodos,
 } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
-import { MAX_TODOS_PER_WORKTREE, MAX_TODO_CONTENT_LENGTH } from '@/config/todo-config';
+import {
+  MAX_TODOS_PER_WORKTREE,
+  MAX_TODO_CONTENT_LENGTH,
+  MAX_TODO_DETAIL_LENGTH,
+} from '@/config/todo-config';
 
 const logger = createLogger('api/worktree-todos');
 
@@ -59,6 +63,7 @@ export async function GET(
  *
  * Request body:
  * - content: string - ToDo text (required, non-empty, max MAX_TODO_CONTENT_LENGTH chars)
+ * - detail?: string - Supplementary notes (optional, max MAX_TODO_DETAIL_LENGTH chars, Issue #1034)
  */
 export async function POST(
   request: NextRequest,
@@ -76,7 +81,7 @@ export async function POST(
     }
 
     const body = await request.json().catch(() => ({}));
-    const { content } = body;
+    const { content, detail } = body;
 
     // Validate content presence.
     if (typeof content !== 'string' || content.trim().length === 0) {
@@ -94,6 +99,21 @@ export async function POST(
       );
     }
 
+    // Validate the optional detail (Issue #1034). Unlike content it may be empty
+    // and is stored verbatim (leading/trailing whitespace preserved).
+    if (detail !== undefined && typeof detail !== 'string') {
+      return NextResponse.json(
+        { error: 'detail must be a string' },
+        { status: 400 }
+      );
+    }
+    if (typeof detail === 'string' && detail.length > MAX_TODO_DETAIL_LENGTH) {
+      return NextResponse.json(
+        { error: `detail must be ${MAX_TODO_DETAIL_LENGTH} characters or less` },
+        { status: 400 }
+      );
+    }
+
     // Enforce the per-worktree todo count limit.
     const existing = getTodosByWorktreeId(db, params.id);
     if (existing.length >= MAX_TODOS_PER_WORKTREE) {
@@ -105,6 +125,7 @@ export async function POST(
 
     const todo = createWorktreeTodo(db, params.id, {
       content: trimmed,
+      detail: typeof detail === 'string' ? detail : undefined,
       position: existing.length,
     });
 

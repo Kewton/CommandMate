@@ -162,10 +162,33 @@ describe('POST /api/worktrees/:id/todos', () => {
     expect(res.status).toBe(201);
     const data = await res.json();
     expect(data.todo.content).toBe('Write tests');
+    expect(data.todo.detail).toBe('');
     expect(data.todo.status).toBe('todo');
     expect(data.todo.done).toBe(false);
     expect(data.todo.worktreeId).toBe(wtId);
     expect(data.todo.position).toBe(0);
+  });
+
+  it('creates a todo with a detail (Issue #1034)', async () => {
+    const res = await post(wtId, { content: 'Ship', detail: 'notes here' });
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.todo.content).toBe('Ship');
+    expect(data.todo.detail).toBe('notes here');
+  });
+
+  it('returns 400 when detail is not a string', async () => {
+    const res = await post(wtId, { content: 'x', detail: 123 });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.error).toContain('detail');
+  });
+
+  it('returns 400 when detail exceeds the max length', async () => {
+    const res = await post(wtId, { content: 'x', detail: 'a'.repeat(4001) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.error).toContain('detail');
   });
 
   it('trims content and auto-assigns the next position', async () => {
@@ -260,6 +283,43 @@ describe('PATCH /api/worktrees/:id/todos/:todoId', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.todo.content).toBe('new');
+  });
+
+  it('updates detail (Issue #1034)', async () => {
+    const todo = createTodo(db, wtId, { content: 'task', position: 0 });
+    const res = await patch(wtId, todo.id, { detail: 'fresh notes' });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.todo.detail).toBe('fresh notes');
+  });
+
+  it('updates content and detail together', async () => {
+    const todo = createTodo(db, wtId, { content: 'old', position: 0, detail: 'old notes' });
+    const res = await patch(wtId, todo.id, { content: 'new', detail: 'new notes' });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.todo.content).toBe('new');
+    expect(data.todo.detail).toBe('new notes');
+  });
+
+  it('clears detail with an empty string', async () => {
+    const todo = createTodo(db, wtId, { content: 'task', position: 0, detail: 'to be cleared' });
+    const res = await patch(wtId, todo.id, { detail: '' });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.todo.detail).toBe('');
+  });
+
+  it('returns 400 when detail is not a string', async () => {
+    const todo = createTodo(db, wtId, { content: 'task', position: 0 });
+    const res = await patch(wtId, todo.id, { detail: 42 });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when detail exceeds the max length', async () => {
+    const todo = createTodo(db, wtId, { content: 'task', position: 0 });
+    const res = await patch(wtId, todo.id, { detail: 'a'.repeat(4001) });
+    expect(res.status).toBe(400);
   });
 
   it('returns 400 when neither content nor done is provided', async () => {

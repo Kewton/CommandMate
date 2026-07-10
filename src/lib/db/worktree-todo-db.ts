@@ -42,6 +42,8 @@ export interface WorktreeTodo {
   id: string;
   worktreeId: string;
   content: string;
+  /** Free-text supplementary notes for the item (Issue #1034); '' when unset. */
+  detail: string;
   status: WorktreeTodoStatus;
   done: boolean;
   position: number;
@@ -56,6 +58,7 @@ type WorktreeTodoRow = {
   id: string;
   worktree_id: string;
   content: string;
+  detail: string;
   done: number;
   status: string;
   position: number;
@@ -84,6 +87,7 @@ function mapTodoRow(row: WorktreeTodoRow): WorktreeTodo {
     id: row.id,
     worktreeId: row.worktree_id,
     content: row.content,
+    detail: row.detail ?? '',
     status,
     done: status === 'done',
     position: row.position,
@@ -100,7 +104,7 @@ export function getTodosByWorktreeId(
   worktreeId: string
 ): WorktreeTodo[] {
   const stmt = db.prepare(`
-    SELECT id, worktree_id, content, done, status, position, created_at, updated_at
+    SELECT id, worktree_id, content, detail, done, status, position, created_at, updated_at
     FROM worktree_todos
     WHERE worktree_id = ?
     ORDER BY position ASC, created_at ASC
@@ -120,7 +124,7 @@ export function getTodoById(
   todoId: string
 ): WorktreeTodo | null {
   const stmt = db.prepare(`
-    SELECT id, worktree_id, content, done, status, position, created_at, updated_at
+    SELECT id, worktree_id, content, detail, done, status, position, created_at, updated_at
     FROM worktree_todos
     WHERE id = ?
   `);
@@ -139,24 +143,27 @@ export function createTodo(
     content: string;
     position: number;
     status?: WorktreeTodoStatus;
+    detail?: string;
   }
 ): WorktreeTodo {
   const id = randomUUID();
   const now = Date.now();
   const status: WorktreeTodoStatus = options.status ?? 'todo';
   const done = status === 'done' ? 1 : 0;
+  const detail = options.detail ?? '';
 
   const stmt = db.prepare(`
-    INSERT INTO worktree_todos (id, worktree_id, content, done, status, position, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO worktree_todos (id, worktree_id, content, detail, done, status, position, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  stmt.run(id, worktreeId, options.content, done, status, options.position, now, now);
+  stmt.run(id, worktreeId, options.content, detail, done, status, options.position, now, now);
 
   return {
     id,
     worktreeId,
     content: options.content,
+    detail,
     status,
     done: status === 'done',
     position: options.position,
@@ -178,6 +185,7 @@ export function updateTodo(
   todoId: string,
   updates: {
     content?: string;
+    detail?: string;
     done?: boolean;
     status?: WorktreeTodoStatus;
   }
@@ -189,6 +197,11 @@ export function updateTodo(
   if (updates.content !== undefined) {
     assignments.push('content = ?');
     params.push(updates.content);
+  }
+
+  if (updates.detail !== undefined) {
+    assignments.push('detail = ?');
+    params.push(updates.detail);
   }
 
   let resolvedStatus: WorktreeTodoStatus | undefined;
