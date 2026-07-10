@@ -92,11 +92,27 @@ export const todoApi = {
   },
 };
 
+/**
+ * Progress state of a worktree ToDo (Issue #1032).
+ * `todo` = not started, `doing` = in progress, `done` = completed.
+ */
+export type WorktreeTodoStatus = 'todo' | 'doing' | 'done';
+
+/** All valid ToDo statuses, in cycle order (todo -> doing -> done). */
+export const WORKTREE_TODO_STATUSES: readonly WorktreeTodoStatus[] = [
+  'todo',
+  'doing',
+  'done',
+];
+
 /** A worktree(branch)-scoped ToDo item as consumed by the UI (Issue #1015). */
 export interface WorktreeTodoItem {
   id: string;
   worktreeId: string;
   content: string;
+  /** Progress state (Issue #1032). */
+  status: WorktreeTodoStatus;
+  /** Derived convenience flag (`status === 'done'`), kept for compatibility. */
   done: boolean;
   position: number;
 }
@@ -136,7 +152,7 @@ export const worktreeTodoApi = {
   async update(
     worktreeId: string,
     todoId: string,
-    updates: { content?: string; done?: boolean },
+    updates: { content?: string; done?: boolean; status?: WorktreeTodoStatus },
   ): Promise<WorktreeTodoItem> {
     const res = await fetch(
       `/api/worktrees/${encodeURIComponent(worktreeId)}/todos/${encodeURIComponent(todoId)}`,

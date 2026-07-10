@@ -15,6 +15,7 @@ const TODO: WorktreeTodoItem = {
   id: 't1',
   worktreeId: 'wt-1',
   content: 'task',
+  status: 'todo',
   done: false,
   position: 0,
 };
@@ -66,6 +67,14 @@ describe('worktreeTodoApi', () => {
     expect(url).toBe('/api/worktrees/wt-1/todos/t1');
     expect(init.method).toBe('PATCH');
     expect(JSON.parse(init.body)).toEqual({ done: true });
+  });
+
+  it('update() sends a status change', async () => {
+    mockFetchOnce({ todo: { ...TODO, status: 'doing' } });
+    const result = await worktreeTodoApi.update('wt-1', 't1', { status: 'doing' });
+    expect(result.status).toBe('doing');
+    const [, init] = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual({ status: 'doing' });
   });
 
   it('remove() uses DELETE on the item route', async () => {

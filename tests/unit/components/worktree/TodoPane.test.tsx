@@ -15,6 +15,7 @@ import { TodoPane } from '@/components/worktree/TodoPane';
 import { worktreeTodoApi, type WorktreeTodoItem } from '@/lib/api/todo-api';
 
 vi.mock('@/lib/api/todo-api', () => ({
+  WORKTREE_TODO_STATUSES: ['todo', 'doing', 'done'],
   worktreeTodoApi: {
     list: vi.fn(),
     create: vi.fn(),
@@ -27,8 +28,8 @@ vi.mock('@/lib/api/todo-api', () => ({
 const mockedApi = vi.mocked(worktreeTodoApi);
 
 const TODOS: WorktreeTodoItem[] = [
-  { id: 't1', worktreeId: 'wt-1', content: 'first task', done: false, position: 0 },
-  { id: 't2', worktreeId: 'wt-1', content: 'second task', done: true, position: 1 },
+  { id: 't1', worktreeId: 'wt-1', content: 'first task', status: 'todo', done: false, position: 0 },
+  { id: 't2', worktreeId: 'wt-1', content: 'second task', status: 'done', done: true, position: 1 },
 ];
 
 beforeEach(() => {
@@ -62,6 +63,7 @@ describe('TodoPane', () => {
       id: 't-new',
       worktreeId: 'wt-1',
       content: 'brand new',
+      status: 'todo',
       done: false,
       position: 0,
     });
@@ -78,17 +80,42 @@ describe('TodoPane', () => {
     expect(await screen.findByText('brand new')).toBeInTheDocument();
   });
 
-  it('toggles a todo done state via worktreeTodoApi.update', async () => {
-    mockedApi.update.mockResolvedValue({ ...TODOS[0], done: true });
+  it('cycles a todo status (todo -> doing) via worktreeTodoApi.update', async () => {
+    mockedApi.update.mockResolvedValue({ ...TODOS[0], status: 'doing' });
     render(<TodoPane worktreeId="wt-1" />);
     await screen.findByText('first task');
 
-    const checkboxes = screen.getAllByTestId('todo-checkbox');
-    fireEvent.click(checkboxes[0]);
+    // t1 starts as 'todo'; one click advances it to 'doing'.
+    const statusButtons = screen.getAllByTestId('todo-status');
+    fireEvent.click(statusButtons[0]);
 
     await waitFor(() => {
-      expect(mockedApi.update).toHaveBeenCalledWith('wt-1', 't1', { done: true });
+      expect(mockedApi.update).toHaveBeenCalledWith('wt-1', 't1', { status: 'doing' });
     });
+  });
+
+  it('cycles a done todo back to todo via worktreeTodoApi.update', async () => {
+    mockedApi.update.mockResolvedValue({ ...TODOS[1], status: 'todo', done: false });
+    render(<TodoPane worktreeId="wt-1" />);
+    await screen.findByText('second task');
+
+    // t2 starts as 'done'; one click wraps around to 'todo'.
+    const statusButtons = screen.getAllByTestId('todo-status');
+    fireEvent.click(statusButtons[1]);
+
+    await waitFor(() => {
+      expect(mockedApi.update).toHaveBeenCalledWith('wt-1', 't2', { status: 'todo' });
+    });
+  });
+
+  it('shows per-status counts (todo/doing/done)', async () => {
+    render(<TodoPane worktreeId="wt-1" />);
+    await screen.findByText('first task');
+
+    // Fixture: t1 = 'todo', t2 = 'done', none 'doing'.
+    expect(screen.getByTestId('todo-count-todo')).toHaveTextContent('1');
+    expect(screen.getByTestId('todo-count-doing')).toHaveTextContent('0');
+    expect(screen.getByTestId('todo-count-done')).toHaveTextContent('1');
   });
 
   it('deletes a todo via worktreeTodoApi.remove', async () => {

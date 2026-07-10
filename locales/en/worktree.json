@@ -73,5 +73,23 @@
     "hideFiles": "Hide files",
     "equalizeWidths": "Equal widths",
     "equalizeWidthsHint": "Equalize terminal widths and reset History width"
+  },
+  "todo": {
+    "addPlaceholder": "Add a todo…",
+    "add": "Add",
+    "empty": "No todos yet.",
+    "loading": "Loading…",
+    "statusTodo": "Todo",
+    "statusDoing": "In progress",
+    "statusDone": "Done",
+    "cycleStatus": "Status: {status} (click to change)",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "delete": "Delete todo",
+    "loadError": "Failed to load todos",
+    "addError": "Failed to add todo",
+    "updateError": "Failed to update todo",
+    "deleteError": "Failed to delete todo",
+    "reorderError": "Failed to reorder todos"
   }
 }
