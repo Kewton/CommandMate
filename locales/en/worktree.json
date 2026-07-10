@@ -93,6 +93,7 @@
     "detailLabel": "Detail",
     "detailPlaceholder": "Add notes (optional)…",
     "hasDetail": "Has detail",
+    "copyDetail": "Copy detail",
     "save": "Save",
     "cancel": "Cancel",
     "loadError": "Failed to load todos",

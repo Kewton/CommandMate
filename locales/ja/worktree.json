@@ -93,6 +93,7 @@
     "detailLabel": "詳細",
     "detailPlaceholder": "詳細を入力（任意）…",
     "hasDetail": "詳細あり",
+    "copyDetail": "詳細をコピー",
     "save": "保存",
     "cancel": "キャンセル",
     "loadError": "ToDoの読み込みに失敗しました",

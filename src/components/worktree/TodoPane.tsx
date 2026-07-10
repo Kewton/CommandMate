@@ -23,6 +23,14 @@ import {
 } from '@/lib/api/todo-api';
 import { MAX_TODO_CONTENT_LENGTH, MAX_TODO_DETAIL_LENGTH } from '@/config/todo-config';
 import { Modal } from '@/components/ui/Modal';
+import { CopyButton } from '@/components/common/CopyButton';
+
+/**
+ * Restyle CopyButton for the light/dark TodoPane modal — its defaults assume a
+ * dark code-block surface. `!` wins over the component's own base color classes.
+ */
+const COPY_DETAIL_BUTTON_CLASS =
+  '!border-gray-300 !bg-white !text-gray-600 hover:!bg-gray-50 dark:!border-gray-600 dark:!bg-gray-900 dark:!text-gray-300 dark:hover:!bg-gray-800';
 
 export interface TodoPaneProps {
   /** Worktree ID to scope the todo list to. */
@@ -395,8 +403,17 @@ export const TodoPane = React.memo(function TodoPane({
             />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
-              {t('todo.detailLabel')}
+            <span className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                {t('todo.detailLabel')}
+              </span>
+              {editDetail.trim() !== '' && (
+                <CopyButton
+                  text={editDetail}
+                  label={t('todo.copyDetail')}
+                  className={COPY_DETAIL_BUTTON_CLASS}
+                />
+              )}
             </span>
             <textarea
               value={editDetail}

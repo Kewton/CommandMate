@@ -14,6 +14,9 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { TodoPane } from '@/components/worktree/TodoPane';
 import { worktreeTodoApi, type WorktreeTodoItem } from '@/lib/api/todo-api';
 
+// Hoisted so the vi.mock factory (itself hoisted above imports) can reference it.
+const { mockCopyToClipboard } = vi.hoisted(() => ({ mockCopyToClipboard: vi.fn() }));
+
 vi.mock('@/lib/api/todo-api', () => ({
   WORKTREE_TODO_STATUSES: ['todo', 'doing', 'done'],
   worktreeTodoApi: {
@@ -23,6 +26,11 @@ vi.mock('@/lib/api/todo-api', () => ({
     remove: vi.fn(),
     reorder: vi.fn(),
   },
+}));
+
+// CopyButton delegates to copyToClipboard; mock it so the detail copy is observable.
+vi.mock('@/lib/clipboard-utils', () => ({
+  copyToClipboard: mockCopyToClipboard,
 }));
 
 const mockedApi = vi.mocked(worktreeTodoApi);
@@ -35,7 +43,11 @@ const TODOS: WorktreeTodoItem[] = [
 beforeEach(() => {
   vi.clearAllMocks();
   mockedApi.list.mockResolvedValue(TODOS);
+  mockCopyToClipboard.mockResolvedValue(undefined);
 });
+
+/** aria-label the CopyButton exposes for the detail copy action (mocked i18n key). */
+const COPY_DETAIL_LABEL = 'worktree.todo.copyDetail';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -248,5 +260,49 @@ describe('TodoPane', () => {
       expect(screen.queryByTestId('todo-edit-content')).not.toBeInTheDocument();
     });
     expect(mockedApi.update).not.toHaveBeenCalled();
+  });
+
+  it('copies the detail from the editor via CopyButton (Issue #1036)', async () => {
+    render(<TodoPane worktreeId="wt-1" />);
+    await screen.findByText('second task');
+
+    // t2 carries detail 'some notes'; open its editor.
+    fireEvent.click(screen.getAllByTestId('todo-content')[1]);
+    await screen.findByTestId('todo-edit-detail');
+
+    fireEvent.click(screen.getByRole('button', { name: COPY_DETAIL_LABEL }));
+
+    await waitFor(() => {
+      expect(mockCopyToClipboard).toHaveBeenCalledWith('some notes');
+    });
+  });
+
+  it('hides the copy button when the edited detail is empty (Issue #1036)', async () => {
+    render(<TodoPane worktreeId="wt-1" />);
+    await screen.findByText('first task');
+
+    // t1 has an empty detail; the copy affordance must not appear.
+    fireEvent.click(screen.getAllByTestId('todo-content')[0]);
+    await screen.findByTestId('todo-edit-content');
+
+    expect(screen.queryByRole('button', { name: COPY_DETAIL_LABEL })).not.toBeInTheDocument();
+  });
+
+  it('reveals the copy button once a detail is typed for an empty todo (Issue #1036)', async () => {
+    render(<TodoPane worktreeId="wt-1" />);
+    await screen.findByText('first task');
+
+    fireEvent.click(screen.getAllByTestId('todo-content')[0]);
+    await screen.findByTestId('todo-edit-detail');
+    expect(screen.queryByRole('button', { name: COPY_DETAIL_LABEL })).not.toBeInTheDocument();
+
+    // Copy targets the live editor value, not just the persisted detail.
+    fireEvent.change(screen.getByTestId('todo-edit-detail'), { target: { value: 'freshly typed' } });
+
+    fireEvent.click(await screen.findByRole('button', { name: COPY_DETAIL_LABEL }));
+
+    await waitFor(() => {
+      expect(mockCopyToClipboard).toHaveBeenCalledWith('freshly typed');
+    });
   });
 });
