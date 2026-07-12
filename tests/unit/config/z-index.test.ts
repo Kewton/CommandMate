@@ -33,6 +33,10 @@ describe('Z_INDEX configuration', () => {
       expect(Z_INDEX.TOAST).toBe(60);
     });
 
+    it('should define POPOVER as 65', () => {
+      expect(Z_INDEX.POPOVER).toBe(65);
+    });
+
     it('should define CONTEXT_MENU as 70', () => {
       expect(Z_INDEX.CONTEXT_MENU).toBe(70);
     });
@@ -55,17 +59,26 @@ describe('Z_INDEX configuration', () => {
       expect(Z_INDEX.MAXIMIZED_EDITOR).toBeLessThan(Z_INDEX.TOAST);
     });
 
-    it('should have TOAST < CONTEXT_MENU', () => {
-      expect(Z_INDEX.TOAST).toBeLessThan(Z_INDEX.CONTEXT_MENU);
+    it('should have TOAST < POPOVER', () => {
+      expect(Z_INDEX.TOAST).toBeLessThan(Z_INDEX.POPOVER);
     });
 
-    it('should maintain complete ordering: DROPDOWN < SIDEBAR < MODAL < MAXIMIZED_EDITOR < TOAST < CONTEXT_MENU', () => {
+    it('should have POPOVER above MODAL so Radix overlays are not clipped by dialogs', () => {
+      expect(Z_INDEX.POPOVER).toBeGreaterThan(Z_INDEX.MODAL);
+    });
+
+    it('should have POPOVER < CONTEXT_MENU', () => {
+      expect(Z_INDEX.POPOVER).toBeLessThan(Z_INDEX.CONTEXT_MENU);
+    });
+
+    it('should maintain complete ordering: DROPDOWN < SIDEBAR < MODAL < MAXIMIZED_EDITOR < TOAST < POPOVER < CONTEXT_MENU', () => {
       const orderedValues = [
         Z_INDEX.DROPDOWN,
         Z_INDEX.SIDEBAR,
         Z_INDEX.MODAL,
         Z_INDEX.MAXIMIZED_EDITOR,
         Z_INDEX.TOAST,
+        Z_INDEX.POPOVER,
         Z_INDEX.CONTEXT_MENU,
       ];
 
@@ -84,6 +97,7 @@ describe('Z_INDEX configuration', () => {
         Z_INDEX.MODAL,
         Z_INDEX.MAXIMIZED_EDITOR,
         Z_INDEX.TOAST,
+        Z_INDEX.POPOVER,
         Z_INDEX.CONTEXT_MENU,
       ];
 
@@ -92,9 +106,9 @@ describe('Z_INDEX configuration', () => {
       });
     });
 
-    it('should have exactly 6 z-index levels', () => {
+    it('should have exactly 7 z-index levels', () => {
       const keys = Object.keys(Z_INDEX);
-      expect(keys).toHaveLength(6);
+      expect(keys).toHaveLength(7);
     });
 
     it('should contain all expected keys', () => {
@@ -104,6 +118,7 @@ describe('Z_INDEX configuration', () => {
       expect(keys).toContain('MODAL');
       expect(keys).toContain('MAXIMIZED_EDITOR');
       expect(keys).toContain('TOAST');
+      expect(keys).toContain('POPOVER');
       expect(keys).toContain('CONTEXT_MENU');
     });
   });
