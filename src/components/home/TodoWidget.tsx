@@ -184,7 +184,12 @@ export function TodoWidget() {
   const hasRepositories = repositories.length > 0;
 
   return (
-    <Card data-testid="home-todo-widget">
+    <Card className="h-full" data-testid="home-todo-widget">
+      {/* Tile heading — parity with the Session Overview tile (Issue #1052). */}
+      <h2 className="mb-3 text-lg font-semibold text-gray-900 dark:text-gray-100">
+        ToDo
+      </h2>
+
       {/* Repository selector + remaining count.
           Mobile: stack vertically so the select can use the full width; the
           `N open` count drops to its own line. Desktop (>= sm): unchanged
