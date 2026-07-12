@@ -4,9 +4,37 @@
  */
 
 import React from 'react';
+import { cva } from 'class-variance-authority';
+import { cn } from '@/lib/utils/cn';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost';
 export type ButtonSize = 'sm' | 'md' | 'lg';
+
+const buttonVariants = cva('btn', {
+  variants: {
+    variant: {
+      primary: 'btn-primary',
+      secondary: 'btn-secondary',
+      danger: 'btn-danger',
+      ghost:
+        'bg-transparent text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 focus:ring-gray-500',
+    },
+    size: {
+      sm: 'btn-sm',
+      md: '',
+      lg: 'btn-lg',
+    },
+    fullWidth: {
+      true: 'w-full',
+      false: '',
+    },
+  },
+  defaultVariants: {
+    variant: 'primary',
+    size: 'md',
+    fullWidth: false,
+  },
+});
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
@@ -36,39 +64,18 @@ export function Button({
   children,
   ...props
 }: ButtonProps) {
-  const baseStyles = 'btn';
+  const isDisabled = disabled || loading;
 
-  const variantStyles: Record<ButtonVariant, string> = {
-    primary: 'btn-primary',
-    secondary: 'btn-secondary',
-    danger: 'btn-danger',
-    ghost: 'bg-transparent text-gray-700 hover:bg-gray-100 focus:ring-gray-500',
-  };
-
-  const sizeStyles: Record<ButtonSize, string> = {
-    sm: 'btn-sm',
-    md: '',
-    lg: 'btn-lg',
-  };
-
-  const widthStyles = fullWidth ? 'w-full' : '';
-  const disabledStyles = disabled || loading ? 'opacity-50 cursor-not-allowed' : '';
-
-  const classes = [
-    baseStyles,
-    variantStyles[variant],
-    sizeStyles[size],
-    widthStyles,
-    disabledStyles,
-    className,
-  ]
-    .filter(Boolean)
-    .join(' ');
+  const classes = cn(
+    buttonVariants({ variant, size, fullWidth }),
+    isDisabled && 'opacity-50 cursor-not-allowed',
+    className
+  );
 
   return (
     <button
       className={classes}
-      disabled={disabled || loading}
+      disabled={isDisabled}
       {...props}
     >
       {loading && (
