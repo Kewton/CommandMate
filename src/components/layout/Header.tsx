@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Folder, Github } from 'lucide-react';
 import { PcDisplaySizeSelector } from './PcDisplaySizeSelector';
+import { ThemeToggle } from '@/components/common/ThemeToggle';
 
 export interface HeaderProps {
   title?: string;
@@ -76,6 +77,8 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
             })}
             {/* PC display size selector (Issue #915) - hidden on mobile */}
             <PcDisplaySizeSelector />
+            {/* Theme toggle promoted to the header (Issue #1071) */}
+            <ThemeToggle />
             <a
               href="https://github.com/kewton/MyCodeBranchDesk"
               target="_blank"

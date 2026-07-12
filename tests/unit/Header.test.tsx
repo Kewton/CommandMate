@@ -24,6 +24,11 @@ vi.mock('next/link', () => ({
   ),
 }));
 
+// Mock next-themes so the header-mounted ThemeToggle (Issue #1071) renders deterministically
+vi.mock('next-themes', () => ({
+  useTheme: () => ({ theme: 'dark', setTheme: vi.fn() }),
+}));
+
 import { Header } from '@/components/layout/Header';
 
 describe('Header', () => {
@@ -98,6 +103,11 @@ describe('Header', () => {
     render(<Header />);
     const nav = screen.getByRole('navigation');
     expect(nav).toBeDefined();
+  });
+
+  it('should render the ThemeToggle in the header (Issue #1071)', () => {
+    render(<Header />);
+    expect(screen.getByTestId('theme-toggle')).toBeInTheDocument();
   });
 
   it('should apply a translucent backdrop-blur header with an opaque fallback (Issue #1049)', () => {
