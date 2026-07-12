@@ -2,107 +2,34 @@
  * Home Page (/)
  *
  * Issue #600: UX refresh - Mission Control / Inbox.
- * Provides session summary and shortcut cards to specialized screens.
+ * Issue #1052: Bento-grid dashboard — Session Overview + Recent sessions,
+ * ToDo, and compact quick actions arranged in a CSS grid on desktop and a
+ * single stacked column on mobile (Tailwind breakpoints, no useIsMobile JS
+ * branch). The welcome banner stays outside the grid at the top.
  *
- * Previously contained RepositoryManager, WorktreeList, ExternalAppsManager.
- * These have been moved to their respective dedicated pages:
- * - RepositoryManager -> /repositories
- * - WorktreeList -> /sessions
- * - ExternalAppsManager -> /more
+ * Session data is read from the shared worktrees cache
+ * (`useWorktreesCacheContext`) instead of a page-local fetch, keeping a single
+ * poller against `/api/worktrees` (Issue #709) and adding no new API.
  */
 
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import Link from 'next/link';
 import { AppShell } from '@/components/layout';
-import { Button, Card } from '@/components/ui';
-import { HomeSessionSummary } from '@/components/home/HomeSessionSummary';
+import { Button } from '@/components/ui';
+import { useWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
+import { SessionOverviewTile } from '@/components/home/SessionOverviewTile';
 import { TodoWidget } from '@/components/home/TodoWidget';
-import { STAGGER_ENTER_CLASS, staggerDelay } from '@/lib/utils/stagger';
-import type { Worktree } from '@/types/models';
+import { HomeQuickActions } from '@/components/home/HomeQuickActions';
 
 /**
  * localStorage key for dismissing the welcome banner.
  */
 const BANNER_DISMISSED_KEY = 'commandmate-home-banner-dismissed';
 
-/**
- * Shortcut card data for navigation.
- */
-const SHORTCUT_CARDS = [
-  {
-    title: 'Chat',
-    description: 'Talk to a local CLI assistant scoped to a repository',
-    href: '/chat',
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-      </svg>
-    ),
-  },
-  {
-    title: 'Sessions',
-    description: 'View and manage all worktree sessions',
-    href: '/sessions',
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
-      </svg>
-    ),
-  },
-  {
-    title: 'Repositories',
-    description: 'Manage repositories and worktrees',
-    href: '/repositories',
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-      </svg>
-    ),
-  },
-  {
-    title: 'Review',
-    description: 'Review done, approval, and stalled sessions',
-    href: '/review',
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-    ),
-  },
-  {
-    title: 'More',
-    description: 'Settings, external apps, and help',
-    href: '/more',
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-      </svg>
-    ),
-  },
-];
-
 export default function Home() {
-  const [worktrees, setWorktrees] = useState<Worktree[]>([]);
+  const { worktrees } = useWorktreesCacheContext();
   const [bannerDismissed, setBannerDismissed] = useState(true);
-
-  // Load worktrees for session summary
-  useEffect(() => {
-    async function fetchWorktrees() {
-      try {
-        const response = await fetch('/api/worktrees');
-        if (response.ok) {
-          const data = await response.json();
-          setWorktrees(data.worktrees ?? []);
-        }
-      } catch {
-        // Silently handle fetch errors on home page
-      }
-    }
-    fetchWorktrees();
-  }, []);
 
   // Check banner dismissed state
   useEffect(() => {
@@ -122,7 +49,7 @@ export default function Home() {
   return (
     <AppShell>
       <div className="container-custom py-8 overflow-auto h-full">
-        {/* Welcome banner (dismissible) */}
+        {/* Welcome banner (dismissible) — kept outside the bento grid */}
         {!bannerDismissed && (
           <div
             data-testid="welcome-banner"
@@ -157,41 +84,23 @@ export default function Home() {
           </p>
         </div>
 
-        {/* Session Summary */}
-        <div className="mb-8">
-          <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-gray-100">Session Overview</h2>
-          <HomeSessionSummary worktrees={worktrees} />
-        </div>
+        {/* Bento grid: 12-col on desktop, single stacked column on mobile.
+            DOM order (mobile stack): Session Overview → ToDo → Quick actions. */}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-12" data-testid="home-bento-grid">
+          {/* Session Overview + Recent sessions — large tile */}
+          <div className="md:col-span-8">
+            <SessionOverviewTile worktrees={worktrees} />
+          </div>
 
-        {/* ToDo */}
-        <div className="mb-8">
-          <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-gray-100">ToDo</h2>
-          <TodoWidget />
-        </div>
+          {/* ToDo — medium tile */}
+          <div className="md:col-span-4">
+            <TodoWidget />
+          </div>
 
-        {/* Shortcut Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          {SHORTCUT_CARDS.map((card, index) => (
-            <Link
-              key={card.href}
-              href={card.href}
-              className="group block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              data-testid={`shortcut-${card.title.toLowerCase()}`}
-            >
-              <Card
-                interactive
-                padding="lg"
-                style={{ animationDelay: staggerDelay(index) }}
-                className={`h-full hover:border-accent-300 dark:hover:border-accent-700 motion-safe:group-focus-visible:-translate-y-0.5 ${STAGGER_ENTER_CLASS}`}
-              >
-                <div className="text-gray-400 dark:text-gray-500 group-hover:text-accent-600 dark:group-hover:text-accent-400 transition-colors mb-3">
-                  {card.icon}
-                </div>
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">{card.title}</h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400">{card.description}</p>
-              </Card>
-            </Link>
-          ))}
+          {/* Quick actions — compact icon row spanning the full width */}
+          <div className="md:col-span-12">
+            <HomeQuickActions />
+          </div>
         </div>
       </div>
     </AppShell>
