@@ -18,6 +18,7 @@ import { usePcDisplaySizeContext } from '@/contexts/PcDisplaySizeContext';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { GlobalMobileNav } from '@/components/mobile/GlobalMobileNav';
+import { CommandPalette } from '@/components/common/CommandPalette';
 import { Z_INDEX } from '@/config/z-index';
 
 // ============================================================================
@@ -130,6 +131,9 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
 
         {/* Global mobile nav (bottom tab bar) */}
         {showGlobalNav && <GlobalMobileNav />}
+
+        {/* Global command palette (⌘K / Ctrl+K) - single instance (Issue #1053) */}
+        <CommandPalette />
       </div>
     );
   }
@@ -180,6 +184,9 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
           {children}
         </main>
       </div>
+
+      {/* Global command palette (⌘K / Ctrl+K) - single instance (Issue #1053) */}
+      <CommandPalette />
     </div>
   );
 });

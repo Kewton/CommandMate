@@ -1,0 +1,26 @@
+{
+  "title": "コマンドパレット",
+  "placeholder": "コマンドを入力または検索...",
+  "empty": "該当する項目がありません。",
+  "loading": "ワークツリーを読み込み中...",
+  "groups": {
+    "navigation": "ナビゲーション",
+    "worktrees": "ワークツリー",
+    "actions": "アクション"
+  },
+  "nav": {
+    "home": "ホーム",
+    "chat": "チャット",
+    "sessions": "セッション",
+    "repositories": "リポジトリ",
+    "review": "レビュー",
+    "more": "その他"
+  },
+  "actions": {
+    "toLight": "ライトテーマに切り替え",
+    "toDark": "ダークテーマに切り替え",
+    "displaySizePrefix": "表示サイズ"
+  },
+  "mobileTrigger": "コマンドパレットを開く",
+  "mobileLabel": "検索"
+}

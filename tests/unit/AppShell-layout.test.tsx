@@ -53,6 +53,12 @@ vi.mock('@/components/layout/Header', () => ({
   Header: () => <div data-testid="header">Header</div>,
 }));
 
+// Mock CommandPalette (Issue #1053) - it is mounted by AppShell but needs
+// router/theme context; this layout test only cares about shell structure.
+vi.mock('@/components/common/CommandPalette', () => ({
+  CommandPalette: () => <div data-testid="command-palette-mock" />,
+}));
+
 // Mock z-index config
 vi.mock('@/config/z-index', () => ({
   Z_INDEX: { SIDEBAR: 30 },

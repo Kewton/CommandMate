@@ -16,6 +16,7 @@ import { ThemeProvider } from 'next-themes';
 import { SidebarProvider } from '@/contexts/SidebarContext';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { PcDisplaySizeProvider } from '@/contexts/PcDisplaySizeContext';
+import { CommandPaletteProvider } from '@/contexts/CommandPaletteContext';
 import { WorktreesCacheProvider } from '@/components/providers/WorktreesCacheProvider';
 
 interface AppProvidersProps {
@@ -44,7 +45,9 @@ export function AppProviders({ children, locale, messages, timeZone, authEnabled
           <PcDisplaySizeProvider>
             <SidebarProvider>
               <WorktreesCacheProvider>
-                {children}
+                <CommandPaletteProvider>
+                  {children}
+                </CommandPaletteProvider>
               </WorktreesCacheProvider>
             </SidebarProvider>
           </PcDisplaySizeProvider>

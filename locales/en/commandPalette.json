@@ -1,0 +1,26 @@
+{
+  "title": "Command palette",
+  "placeholder": "Type a command or search...",
+  "empty": "No results found.",
+  "loading": "Loading worktrees...",
+  "groups": {
+    "navigation": "Navigation",
+    "worktrees": "Worktrees",
+    "actions": "Actions"
+  },
+  "nav": {
+    "home": "Home",
+    "chat": "Chat",
+    "sessions": "Sessions",
+    "repositories": "Repositories",
+    "review": "Review",
+    "more": "More"
+  },
+  "actions": {
+    "toLight": "Switch to light theme",
+    "toDark": "Switch to dark theme",
+    "displaySizePrefix": "Display size"
+  },
+  "mobileTrigger": "Open command palette",
+  "mobileLabel": "Search"
+}

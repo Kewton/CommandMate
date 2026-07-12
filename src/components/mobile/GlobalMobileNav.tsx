@@ -13,7 +13,9 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, MessageSquare, AlignJustify, CircleCheck, MoreHorizontal } from 'lucide-react';
+import { useTranslations } from 'next-intl';
+import { Home, MessageSquare, AlignJustify, CircleCheck, MoreHorizontal, Search } from 'lucide-react';
+import { useCommandPalette } from '@/contexts/CommandPaletteContext';
 
 /**
  * Mobile navigation tab definition.
@@ -43,6 +45,8 @@ const MOBILE_NAV_TABS: MobileNavTab[] = [
  */
 export function GlobalMobileNav() {
   const pathname = usePathname();
+  const { setOpen } = useCommandPalette();
+  const t = useTranslations('commandPalette');
 
   return (
     <nav
@@ -67,6 +71,18 @@ export function GlobalMobileNav() {
             </Link>
           );
         })}
+
+        {/* Command palette trigger (Issue #1053) */}
+        <button
+          type="button"
+          data-testid="mobile-command-palette-trigger"
+          onClick={() => setOpen(true)}
+          aria-label={t('mobileTrigger')}
+          className="flex flex-col items-center justify-center flex-1 h-full text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+        >
+          <Search size={20} aria-hidden="true" />
+          <span className="mt-1">{t('mobileLabel')}</span>
+        </button>
       </div>
     </nav>
   );
