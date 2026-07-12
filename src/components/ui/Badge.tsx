@@ -4,8 +4,33 @@
  */
 
 import React from 'react';
+import { cva } from 'class-variance-authority';
+import { cn } from '@/lib/utils/cn';
 
 export type BadgeVariant = 'success' | 'warning' | 'error' | 'info' | 'gray';
+
+const badgeVariants = cva('badge', {
+  variants: {
+    variant: {
+      success: 'badge-success',
+      warning: 'badge-warning',
+      error: 'badge-error',
+      info: 'badge-info',
+      gray: 'badge-gray',
+    },
+  },
+  defaultVariants: {
+    variant: 'gray',
+  },
+});
+
+const dotColorStyles: Record<BadgeVariant, string> = {
+  success: 'bg-green-600',
+  warning: 'bg-yellow-600',
+  error: 'bg-red-600',
+  info: 'bg-blue-600',
+  gray: 'bg-gray-600',
+};
 
 export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
   variant?: BadgeVariant;
@@ -29,33 +54,11 @@ export function Badge({
   children,
   ...props
 }: BadgeProps) {
-  const baseStyles = 'badge';
-
-  const variantStyles: Record<BadgeVariant, string> = {
-    success: 'badge-success',
-    warning: 'badge-warning',
-    error: 'badge-error',
-    info: 'badge-info',
-    gray: 'badge-gray',
-  };
-
-  const dotColorStyles: Record<BadgeVariant, string> = {
-    success: 'bg-green-600',
-    warning: 'bg-yellow-600',
-    error: 'bg-red-600',
-    info: 'bg-blue-600',
-    gray: 'bg-gray-600',
-  };
-
-  const classes = [baseStyles, variantStyles[variant], className]
-    .filter(Boolean)
-    .join(' ');
-
   return (
-    <span className={classes} {...props}>
+    <span className={cn(badgeVariants({ variant }), className)} {...props}>
       {dot && (
         <span
-          className={`mr-1.5 inline-block h-2 w-2 rounded-full ${dotColorStyles[variant]}`}
+          className={cn('mr-1.5 inline-block h-2 w-2 rounded-full', dotColorStyles[variant])}
           aria-hidden="true"
         />
       )}

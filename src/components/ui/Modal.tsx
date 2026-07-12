@@ -7,7 +7,24 @@
 
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { cva } from 'class-variance-authority';
 import { Z_INDEX } from '@/config/z-index';
+import { cn } from '@/lib/utils/cn';
+
+const modalSizeVariants = cva('', {
+  variants: {
+    size: {
+      sm: 'max-w-[calc(100vw-2rem)] sm:max-w-md',
+      md: 'max-w-[calc(100vw-2rem)] sm:max-w-2xl',
+      lg: 'max-w-[calc(100vw-2rem)] sm:max-w-4xl',
+      xl: 'max-w-[calc(100vw-2rem)] sm:max-w-6xl',
+      full: 'max-w-[calc(100vw-2rem)] sm:max-w-[95vw]',
+    },
+  },
+  defaultVariants: {
+    size: 'lg',
+  },
+});
 
 export interface ModalProps {
   isOpen: boolean;
@@ -74,14 +91,6 @@ export function Modal({
 
   if (!isOpen) return null;
 
-  const sizeClasses = {
-    sm: 'max-w-[calc(100vw-2rem)] sm:max-w-md',
-    md: 'max-w-[calc(100vw-2rem)] sm:max-w-2xl',
-    lg: 'max-w-[calc(100vw-2rem)] sm:max-w-4xl',
-    xl: 'max-w-[calc(100vw-2rem)] sm:max-w-6xl',
-    full: 'max-w-[calc(100vw-2rem)] sm:max-w-[95vw]',
-  };
-
   // Use portal to render at document.body level, escaping any parent stacking context
   return createPortal(
     <div className="fixed inset-0 overflow-y-auto" style={{ zIndex: Z_INDEX.MODAL }}>
@@ -95,7 +104,11 @@ export function Modal({
       <div className="relative flex min-h-full items-center justify-center p-2 sm:p-4">
         <div
           ref={modalRef}
-          className={`relative w-full ${sizeClasses[size]} max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-2rem)] flex flex-col bg-white dark:bg-gray-900 rounded-lg shadow-xl transform transition-all`}
+          className={cn(
+            'relative w-full',
+            modalSizeVariants({ size }),
+            'max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-2rem)] flex flex-col bg-white dark:bg-gray-900 rounded-lg shadow-xl transform transition-all'
+          )}
         >
           {/* Header */}
           {(title || showCloseButton) && (
