@@ -35,6 +35,7 @@ import { useWorktreeSelection } from '@/contexts/WorktreeSelectionContext';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { BranchListItem } from '@/components/sidebar/BranchListItem';
 import { SortSelector } from '@/components/sidebar/SortSelector';
+import { Input } from '@/components/ui';
 import { Tooltip } from '@/components/common/Tooltip';
 import { TruncationTooltip } from '@/components/common/TruncationTooltip';
 import { LocaleSwitcher } from '@/components/common/LocaleSwitcher';
@@ -463,17 +464,12 @@ export const Sidebar = memo(function Sidebar() {
 
       {/* Search */}
       <div className="flex-shrink-0 px-4 py-3 border-b border-gray-700">
-        <input
+        <Input
           type="text"
           placeholder="Search branches..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="
-            w-full px-3 py-2 rounded-md
-            bg-gray-700 text-white placeholder-gray-400
-            border border-gray-600
-            focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent
-          "
+          className="bg-gray-700 text-white placeholder:text-gray-400 border-gray-600 shadow-none"
         />
       </div>
 

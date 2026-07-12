@@ -15,6 +15,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button, Card, Input } from '@/components/ui';
 import { todoApi, type TodoItem } from '@/lib/api/todo-api';
 import { MAX_TODO_CONTENT_LENGTH } from '@/config/todo-config';
 
@@ -183,10 +184,7 @@ export function TodoWidget() {
   const hasRepositories = repositories.length > 0;
 
   return (
-    <div
-      className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700"
-      data-testid="home-todo-widget"
-    >
+    <Card data-testid="home-todo-widget">
       {/* Repository selector + remaining count.
           Mobile: stack vertically so the select can use the full width; the
           `N open` count drops to its own line. Desktop (>= sm): unchanged
@@ -227,7 +225,7 @@ export function TodoWidget() {
         <>
           {/* Add form */}
           <div className="flex items-center gap-2 mb-3">
-            <input
+            <Input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -235,17 +233,19 @@ export function TodoWidget() {
               maxLength={MAX_TODO_CONTENT_LENGTH}
               placeholder="Add a todo…"
               data-testid="todo-input"
-              className="flex-1 min-w-0 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-auto flex-1 min-w-0"
             />
-            <button
+            <Button
               type="button"
+              variant="primary"
+              size="sm"
               onClick={handleAdd}
               disabled={busy || input.trim().length === 0}
               data-testid="todo-add-button"
-              className="shrink-0 rounded-md bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-700 disabled:opacity-50"
+              className="shrink-0"
             >
               Add
-            </button>
+            </Button>
           </div>
 
           {error && (
@@ -326,6 +326,6 @@ export function TodoWidget() {
           )}
         </>
       )}
-    </div>
+    </Card>
   );
 }

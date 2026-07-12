@@ -16,6 +16,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { AppShell } from '@/components/layout';
+import { Button, Card } from '@/components/ui';
 import { HomeSessionSummary } from '@/components/home/HomeSessionSummary';
 import { TodoWidget } from '@/components/home/TodoWidget';
 import type { Worktree } from '@/types/models';
@@ -134,15 +135,16 @@ export default function Home() {
                 The interface has been reorganized. Repositories, Sessions, and External Apps now have their own dedicated pages accessible from the navigation.
               </p>
             </div>
-            <button
+            <Button
+              variant="ghost"
               onClick={dismissBanner}
-              className="ml-4 text-accent-600 dark:text-accent-400 hover:text-accent-800 dark:hover:text-accent-200"
               aria-label="Dismiss banner"
+              className="ml-4 p-0 text-accent-600 dark:text-accent-400 hover:bg-transparent dark:hover:bg-transparent hover:text-accent-800 dark:hover:text-accent-200"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
-            </button>
+            </Button>
           </div>
         )}
 
@@ -172,14 +174,20 @@ export default function Home() {
             <Link
               key={card.href}
               href={card.href}
-              className="bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700 hover:border-accent-300 dark:hover:border-accent-700 transition-colors group"
+              className="group block"
               data-testid={`shortcut-${card.title.toLowerCase()}`}
             >
-              <div className="text-gray-400 dark:text-gray-500 group-hover:text-accent-600 dark:group-hover:text-accent-400 transition-colors mb-3">
-                {card.icon}
-              </div>
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">{card.title}</h3>
-              <p className="text-xs text-gray-500 dark:text-gray-400">{card.description}</p>
+              <Card
+                hover
+                padding="lg"
+                className="h-full transition-all hover:border-accent-300 dark:hover:border-accent-700"
+              >
+                <div className="text-gray-400 dark:text-gray-500 group-hover:text-accent-600 dark:group-hover:text-accent-400 transition-colors mb-3">
+                  {card.icon}
+                </div>
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">{card.title}</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{card.description}</p>
+              </Card>
             </Link>
           ))}
         </div>

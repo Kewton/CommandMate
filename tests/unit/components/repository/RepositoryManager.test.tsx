@@ -110,7 +110,7 @@ describe('RepositoryManager', () => {
       fireEvent.click(addButton);
 
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       // Clone URL tab should be selected
       expect(urlTab).toHaveAttribute('aria-selected', 'true');
@@ -131,7 +131,7 @@ describe('RepositoryManager', () => {
 
       // Switch to URL mode
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       // Enter URL
       const urlInput = screen.getByPlaceholderText('https://github.com/user/repo.git');
@@ -139,7 +139,7 @@ describe('RepositoryManager', () => {
 
       // Switch back to local mode
       const localTab = screen.getByRole('tab', { name: /local path/i });
-      fireEvent.click(localTab);
+      fireEvent.mouseDown(localTab);
 
       // Local path should be preserved
       expect(screen.getByDisplayValue('/my/local/path')).toBeInTheDocument();
@@ -154,9 +154,9 @@ describe('RepositoryManager', () => {
       fireEvent.click(addButton);
 
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
-      const urlInput = screen.getByLabelText(/clone url/i);
+      const urlInput = screen.getByLabelText(/clone url/i, { selector: 'input' });
       expect(urlInput).toBeInTheDocument();
       expect(urlInput).toHaveAttribute('placeholder', 'https://github.com/user/repo.git');
     });
@@ -168,7 +168,7 @@ describe('RepositoryManager', () => {
       fireEvent.click(addButton);
 
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       expect(screen.getByText(/supports https and ssh urls/i)).toBeInTheDocument();
     });
@@ -180,7 +180,7 @@ describe('RepositoryManager', () => {
       fireEvent.click(addButton);
 
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       const urlInput = screen.getByPlaceholderText('https://github.com/user/repo.git');
       fireEvent.change(urlInput, { target: { value: 'https://github.com/test/myrepo.git' } });
@@ -197,7 +197,7 @@ describe('RepositoryManager', () => {
       fireEvent.click(addButton);
 
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       // Enter whitespace-only URL (button still disabled due to trim())
       const urlInput = screen.getByPlaceholderText('https://github.com/user/repo.git');
@@ -215,7 +215,7 @@ describe('RepositoryManager', () => {
       fireEvent.click(addButton);
 
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       const urlInput = screen.getByPlaceholderText('https://github.com/user/repo.git');
       fireEvent.change(urlInput, { target: { value: 'not-a-valid-url' } });
@@ -235,7 +235,7 @@ describe('RepositoryManager', () => {
       fireEvent.click(addButton);
 
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       const urlInput = screen.getByPlaceholderText('https://github.com/user/repo.git');
       fireEvent.change(urlInput, { target: { value: 'https://github.com/user/myrepo.git' } });
@@ -251,7 +251,7 @@ describe('RepositoryManager', () => {
       fireEvent.click(addButton);
 
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       const urlInput = screen.getByPlaceholderText('https://github.com/user/repo.git');
       fireEvent.change(urlInput, { target: { value: 'git@github.com:user/myrepo.git' } });
@@ -278,7 +278,7 @@ describe('RepositoryManager', () => {
       fireEvent.click(addButton);
 
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       const urlInput = screen.getByPlaceholderText('https://github.com/user/repo.git');
       fireEvent.change(urlInput, { target: { value: 'https://github.com/user/myrepo.git' } });
@@ -308,7 +308,7 @@ describe('RepositoryManager', () => {
       fireEvent.click(addButton);
 
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       const urlInput = screen.getByPlaceholderText('https://github.com/user/repo.git');
       fireEvent.change(urlInput, { target: { value: 'https://github.com/user/myrepo.git' } });
@@ -336,7 +336,7 @@ describe('RepositoryManager', () => {
       fireEvent.click(addButton);
 
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       const urlInput = screen.getByPlaceholderText('https://github.com/user/repo.git');
       fireEvent.change(urlInput, { target: { value: 'https://github.com/user/myrepo.git' } });
@@ -357,7 +357,7 @@ describe('RepositoryManager', () => {
       fireEvent.click(addButton);
 
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       const urlInput = screen.getByPlaceholderText('https://github.com/user/repo.git');
       fireEvent.change(urlInput, { target: { value: 'https://github.com/user/myrepo.git' } });
@@ -403,7 +403,7 @@ describe('RepositoryManager', () => {
       fireEvent.click(addButton);
 
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       const urlInput = screen.getByPlaceholderText('https://github.com/user/repo.git');
       fireEvent.change(urlInput, { target: { value: 'https://github.com/user/myrepo.git' } });
@@ -431,7 +431,7 @@ describe('RepositoryManager', () => {
       fireEvent.click(addButton);
 
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       const urlInput = screen.getByPlaceholderText('https://github.com/user/repo.git');
       fireEvent.change(urlInput, { target: { value: 'https://github.com/user/myrepo.git' } });
@@ -459,7 +459,7 @@ describe('RepositoryManager', () => {
       fireEvent.click(addButton);
 
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       const urlInput = screen.getByPlaceholderText('https://github.com/user/repo.git');
       fireEvent.change(urlInput, { target: { value: 'https://github.com/user/myrepo.git' } });
@@ -491,7 +491,7 @@ describe('RepositoryManager', () => {
       fireEvent.click(addButton);
 
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       const urlInput = screen.getByPlaceholderText('https://github.com/user/repo.git');
       fireEvent.change(urlInput, { target: { value: 'https://github.com/user/myrepo.git' } });
@@ -519,7 +519,7 @@ describe('RepositoryManager', () => {
       fireEvent.click(addButton);
 
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       const urlInput = screen.getByPlaceholderText('https://github.com/user/repo.git');
       fireEvent.change(urlInput, { target: { value: 'https://github.com/user/myrepo.git' } });
@@ -547,7 +547,7 @@ describe('RepositoryManager', () => {
       fireEvent.click(addButton);
 
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       const urlInput = screen.getByPlaceholderText('https://github.com/user/repo.git');
       fireEvent.change(urlInput, { target: { value: 'https://github.com/user/myrepo.git' } });
@@ -569,7 +569,7 @@ describe('RepositoryManager', () => {
       fireEvent.click(addButton);
 
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       const urlInput = screen.getByPlaceholderText('https://github.com/user/repo.git');
       fireEvent.change(urlInput, { target: { value: 'https://github.com/user/myrepo.git' } });
@@ -591,7 +591,7 @@ describe('RepositoryManager', () => {
       fireEvent.click(addButton);
 
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       const urlInput = screen.getByPlaceholderText('https://github.com/user/repo.git');
       fireEvent.change(urlInput, { target: { value: 'https://github.com/user/myrepo.git' } });
@@ -635,7 +635,7 @@ describe('RepositoryManager', () => {
 
       // Switch to URL mode
       const urlTab = screen.getByRole('tab', { name: /clone url/i });
-      fireEvent.click(urlTab);
+      fireEvent.mouseDown(urlTab);
 
       // URL mode - should show Clone button
       expect(screen.getByRole('button', { name: /^clone$/i })).toBeInTheDocument();

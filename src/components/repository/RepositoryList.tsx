@@ -28,7 +28,7 @@
 'use client';
 
 import React, { memo, useCallback, useEffect, useState } from 'react';
-import { Badge, Button, Card } from '@/components/ui';
+import { Badge, Button, Card, Input } from '@/components/ui';
 import {
   handleApiError,
   repositoryApi,
@@ -355,7 +355,7 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                     <td className="px-4 py-3 align-top">
                       {isEditing ? (
                         <div className="space-y-1">
-                          <input
+                          <Input
                             aria-label={`Edit display name for ${repo.name}`}
                             type="text"
                             value={edit.value}
@@ -363,7 +363,6 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                             maxLength={MAX_DISPLAY_NAME_LENGTH + 1}
                             onChange={(e) => handleChangeValue(e.target.value)}
                             onKeyDown={(e) => handleKeyDown(e, repo)}
-                            className="input w-full text-sm"
                           />
                           {edit.error && (
                             <p className="text-xs text-red-600 dark:text-red-400">

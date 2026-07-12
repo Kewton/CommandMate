@@ -19,6 +19,7 @@ import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
 import { useAuthEnabled } from '@/contexts/AuthContext';
 import { useFragmentLogin } from '@/hooks/useFragmentLogin';
+import { Button, Input } from '@/components/ui';
 
 const QrCodeGenerator = dynamic(
   () => import('@/components/auth/QrCodeGenerator').then((m) => ({ default: m.QrCodeGenerator })),
@@ -131,13 +132,12 @@ export default function LoginPage() {
             >
               {t('login.tokenLabel')}
             </label>
-            <input
+            <Input
               id="token"
               type="password"
               value={token}
               onChange={(e) => setToken(e.target.value)}
               placeholder={t('login.tokenPlaceholder')}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring dark:bg-gray-700 dark:text-white"
               autoFocus
               autoComplete="off"
               disabled={retryAfter !== null && retryAfter > 0}
@@ -155,13 +155,14 @@ export default function LoginPage() {
             </div>
           )}
 
-          <button
+          <Button
             type="submit"
-            disabled={loading || !token || (retryAfter !== null && retryAfter > 0)}
-            className="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-accent-600 hover:bg-accent-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
+            fullWidth
+            loading={loading}
+            disabled={!token || (retryAfter !== null && retryAfter > 0)}
           >
-            {loading ? '...' : t('login.submitButton')}
-          </button>
+            {t('login.submitButton')}
+          </Button>
         </form>
 
         {/* QR Code Generator - PC only (768px+), hidden on mobile */}

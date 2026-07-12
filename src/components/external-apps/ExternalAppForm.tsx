@@ -9,7 +9,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Button, Modal } from '@/components/ui';
+import { Button, Input, Modal, Switch, Textarea } from '@/components/ui';
 import {
   validateFormData,
   VALID_APP_TYPES,
@@ -215,12 +215,12 @@ export function ExternalAppForm({
           >
             Display Name <span className="text-red-500">*</span>
           </label>
-          <input
+          <Input
             id="displayName"
             type="text"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
-            className={`input w-full ${errors.displayName ? 'border-red-500' : ''}`}
+            className={errors.displayName ? 'border-red-500' : ''}
             placeholder="My App"
             disabled={isSubmitting}
           />
@@ -238,12 +238,12 @@ export function ExternalAppForm({
             >
               Identifier Name <span className="text-red-500">*</span>
             </label>
-            <input
+            <Input
               id="name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className={`input w-full font-mono ${errors.name ? 'border-red-500' : ''}`}
+              className={`font-mono ${errors.name ? 'border-red-500' : ''}`}
               placeholder="my-app"
               disabled={isSubmitting}
             />
@@ -267,12 +267,12 @@ export function ExternalAppForm({
             </label>
             <div className="flex items-center">
               <span className="text-sm text-gray-500 dark:text-gray-400 mr-1">/proxy/</span>
-              <input
+              <Input
                 id="pathPrefix"
                 type="text"
                 value={pathPrefix}
                 onChange={(e) => setPathPrefix(e.target.value)}
-                className={`input flex-1 font-mono ${errors.pathPrefix ? 'border-red-500' : ''}`}
+                className={`w-auto flex-1 font-mono ${errors.pathPrefix ? 'border-red-500' : ''}`}
                 placeholder="app-name"
                 disabled={isSubmitting}
               />
@@ -295,14 +295,14 @@ export function ExternalAppForm({
           >
             Port Number <span className="text-red-500">*</span>
           </label>
-          <input
+          <Input
             id="targetPort"
             type="number"
             value={targetPort}
             onChange={(e) =>
               setTargetPort(e.target.value ? parseInt(e.target.value, 10) : '')
             }
-            className={`input w-full font-mono ${errors.targetPort ? 'border-red-500' : ''}`}
+            className={`font-mono ${errors.targetPort ? 'border-red-500' : ''}`}
             placeholder="5173"
             min={PORT_CONSTRAINTS.MIN}
             max={PORT_CONSTRAINTS.MAX}
@@ -353,11 +353,10 @@ export function ExternalAppForm({
           >
             Description
           </label>
-          <textarea
+          <Textarea
             id="description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className="input w-full"
             placeholder="Optional description..."
             rows={2}
             disabled={isSubmitting}
@@ -365,18 +364,16 @@ export function ExternalAppForm({
         </div>
 
         {/* WebSocket */}
-        <div className="flex items-center">
-          <input
+        <div className="flex items-center gap-2">
+          <Switch
             id="websocketEnabled"
-            type="checkbox"
             checked={websocketEnabled}
-            onChange={(e) => setWebsocketEnabled(e.target.checked)}
-            className="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-ring"
+            onCheckedChange={setWebsocketEnabled}
             disabled={isSubmitting}
           />
           <label
             htmlFor="websocketEnabled"
-            className="ml-2 text-sm text-gray-700 dark:text-gray-200"
+            className="text-sm text-gray-700 dark:text-gray-200"
           >
             Enable WebSocket support
           </label>
@@ -384,16 +381,14 @@ export function ExternalAppForm({
 
         {/* Enabled (only for edit) */}
         {isEdit && (
-          <div className="flex items-center">
-            <input
+          <div className="flex items-center gap-2">
+            <Switch
               id="enabled"
-              type="checkbox"
               checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-ring"
+              onCheckedChange={setEnabled}
               disabled={isSubmitting}
             />
-            <label htmlFor="enabled" className="ml-2 text-sm text-gray-700 dark:text-gray-200">
+            <label htmlFor="enabled" className="text-sm text-gray-700 dark:text-gray-200">
               App is enabled
             </label>
           </div>

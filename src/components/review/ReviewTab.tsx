@@ -10,6 +10,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
+import { Button, Card } from '@/components/ui';
 import { REVIEW_POLL_INTERVAL_MS } from '@/config/review-config';
 import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
 import { deriveCliStatus } from '@/types/sidebar';
@@ -125,18 +126,14 @@ export default function ReviewTab() {
       {/* Filter tabs */}
       <div className="flex gap-2 mb-6" data-testid="review-filters">
         {FILTER_TABS.map((tab) => (
-          <button
+          <Button
             key={tab.value}
+            variant={activeFilter === tab.value ? 'primary' : 'secondary'}
             onClick={() => setActiveFilter(tab.value)}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-              activeFilter === tab.value
-                ? 'bg-accent-600 text-white'
-                : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-            }`}
             data-testid={`review-filter-${tab.value}`}
           >
             {tab.label}
-          </button>
+          </Button>
         ))}
       </div>
 
@@ -161,9 +158,10 @@ export default function ReviewTab() {
                 <Link
                   key={wt.id}
                   href={`/worktrees/${wt.id}`}
-                  className={`block bg-white dark:bg-gray-800 rounded-lg p-4 border transition-colors ${getBorderClass(activeFilter)}`}
+                  className="block"
                   data-testid={`review-item-${wt.id}`}
                 >
+                  <Card padding="md" className={`transition-colors ${getBorderClass(activeFilter)}`}>
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
@@ -198,6 +196,7 @@ export default function ReviewTab() {
                       </p>
                     </div>
                   )}
+                  </Card>
                 </Link>
               );
             })
