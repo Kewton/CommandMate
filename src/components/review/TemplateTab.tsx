@@ -248,7 +248,7 @@ export default function TemplateTab() {
 
       {/* Create form (only shown when under limit) */}
       {templates.length < MAX_TEMPLATES && (
-        <div className="p-4 bg-gray-50 dark:bg-gray-800/50 border dark:border-gray-700 rounded-lg" data-testid="create-form">
+        <div className="p-4 bg-surface border border-border rounded-lg shadow-sm" data-testid="create-form">
           <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">New Template</h3>
           <div className="space-y-3">
             <Input

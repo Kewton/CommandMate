@@ -288,7 +288,7 @@ export default function SessionsPage() {
                   <Link
                     key={wt.id}
                     href={`/worktrees/${wt.id}`}
-                    className="block bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700 hover:border-accent-300 dark:hover:border-accent-700 transition-colors"
+                    className="block bg-surface rounded-lg p-4 border border-border shadow-sm hover:border-accent-300 dark:hover:border-accent-700 transition-colors"
                     data-testid={`session-item-${wt.id}`}
                   >
                     {/* Row 1: Name, Agent statuses */}

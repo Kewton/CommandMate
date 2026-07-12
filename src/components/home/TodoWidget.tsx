@@ -200,7 +200,7 @@ export function TodoWidget() {
             onChange={(e) => setSelectedRepoId(e.target.value)}
             disabled={!hasRepositories}
             data-testid="todo-repo-select"
-            className="min-w-0 flex-1 truncate rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm text-gray-900 dark:text-gray-100 disabled:opacity-50 sm:flex-initial sm:max-w-[16rem]"
+            className="min-w-0 flex-1 truncate rounded-md border border-input bg-surface dark:bg-surface-2 px-2 py-1 text-sm text-surface-foreground disabled:opacity-50 sm:flex-initial sm:max-w-[16rem]"
           >
             {repositories.map((repo) => (
               <option key={repo.id} value={repo.id}>

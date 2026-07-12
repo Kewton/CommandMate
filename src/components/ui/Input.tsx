@@ -9,7 +9,7 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils/cn';
 
 const inputVariants = cva(
-  'flex w-full rounded-md border border-input bg-surface text-surface-foreground shadow-sm ' +
+  'flex w-full rounded-md border border-input bg-surface dark:bg-surface-2 text-surface-foreground shadow-sm ' +
     'placeholder:text-muted-foreground ' +
     'focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring ' +
     'disabled:cursor-not-allowed disabled:opacity-50',
