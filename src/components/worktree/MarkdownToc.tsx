@@ -134,7 +134,7 @@ export function MarkdownToc({
                 className={[
                   'block truncate rounded py-1 pr-2 transition-colors',
                   isActive
-                    ? 'bg-blue-50 font-medium text-blue-700'
+                    ? 'bg-accent-50 font-medium text-accent-700'
                     : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
                 ].join(' ')}
                 title={entry.text}

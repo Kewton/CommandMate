@@ -502,7 +502,7 @@ export const HistoryPane = memo(function HistoryPane({
                 value={historyDisplayLimit}
                 onChange={handleHistoryDisplayLimitSelectChange}
                 aria-label="History display limit"
-                className="rounded border border-gray-600 bg-gray-800 text-gray-200 text-xs px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                className="rounded border border-gray-600 bg-gray-800 text-gray-200 text-xs px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-ring"
               >
                 {HISTORY_DISPLAY_LIMIT_OPTIONS.map((opt) => (
                   <option key={opt} value={opt}>
@@ -518,7 +518,7 @@ export const HistoryPane = memo(function HistoryPane({
                 type="checkbox"
                 checked={showArchived}
                 onChange={(e) => onShowArchivedChange(e.target.checked)}
-                className="rounded border-gray-600 bg-gray-800 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-0 h-3.5 w-3.5"
+                className="rounded border-gray-600 bg-gray-800 text-accent-500 focus:ring-ring focus:ring-offset-0 h-3.5 w-3.5"
               />
               Show archived
             </label>
@@ -531,7 +531,7 @@ export const HistoryPane = memo(function HistoryPane({
               aria-pressed={historyUserOnly}
               className={`p-1 rounded transition-colors ${
                 historyUserOnly
-                  ? 'bg-cyan-900/40 text-cyan-300'
+                  ? 'bg-accent-900/40 text-accent-300'
                   : 'text-gray-400 hover:text-gray-200'
               }`}
               title={historyUserOnly ? 'Show all messages' : 'Show user messages only'}

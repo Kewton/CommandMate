@@ -256,7 +256,7 @@ export function HtmlPreview({
               onClick={() => setViewMode(mode)}
               className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
                 viewMode === mode
-                  ? 'bg-cyan-100 dark:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300'
+                  ? 'bg-accent-100 dark:bg-accent-900/50 text-accent-700 dark:text-accent-300'
                   : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
               }`}
             >

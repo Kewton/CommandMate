@@ -93,7 +93,7 @@ function UserMessageBubble({ message, canEdit, onEdit }: UserMessageBubbleProps)
   }, [draft, message, onEdit, saving]);
 
   return (
-    <div className="group ml-auto max-w-[88%] rounded-2xl border border-cyan-500/40 bg-cyan-500/12 px-4 py-3 text-cyan-50 shadow-sm">
+    <div className="group ml-auto max-w-[88%] rounded-2xl border border-accent-500/40 bg-accent-500/12 px-4 py-3 text-accent-50 shadow-sm">
       <div className="mb-2 flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.12em] text-slate-400">
         <span>You</span>
         <span>{formatTimestamp(message.timestamp)}</span>
@@ -102,7 +102,7 @@ function UserMessageBubble({ message, canEdit, onEdit }: UserMessageBubbleProps)
       {editing ? (
         <div className="space-y-2">
           <textarea
-            className="w-full resize-y rounded border border-slate-600 bg-slate-950/70 p-2 text-sm text-slate-100 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+            className="w-full resize-y rounded border border-slate-600 bg-slate-950/70 p-2 text-sm text-slate-100 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-ring"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             rows={Math.max(3, Math.min(12, draft.split('\n').length + 1))}
@@ -123,7 +123,7 @@ function UserMessageBubble({ message, canEdit, onEdit }: UserMessageBubbleProps)
               type="button"
               onClick={handleSave}
               disabled={saving || !draft.trim()}
-              className="rounded bg-cyan-500 px-3 py-1 text-[11px] font-medium text-slate-950 transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-slate-600 disabled:text-slate-300"
+              className="rounded bg-accent-500 px-3 py-1 text-[11px] font-medium text-slate-950 transition-colors hover:bg-accent-400 disabled:cursor-not-allowed disabled:bg-slate-600 disabled:text-slate-300"
               data-testid="assistant-edit-save"
             >
               {saving ? 'Resending...' : 'Save & Resend'}
@@ -279,7 +279,7 @@ export function AssistantMessageList({
               aria-live="polite"
             >
               <svg
-                className="h-4 w-4 animate-spin text-cyan-400"
+                className="h-4 w-4 animate-spin text-accent-400"
                 xmlns="http://www.w3.org/2000/svg"
                 fill="none"
                 viewBox="0 0 24 24"

@@ -191,7 +191,7 @@ describe('TerminalSplitPane drop target (Issue #786 / #869)', () => {
     });
     const region = screen.getByRole('region', { name: /Terminal split 1/i });
     fireEvent.dragEnter(region, { dataTransfer: makeDataTransfer() });
-    expect(region.className).toMatch(/ring-cyan-400/);
+    expect(region.className).toMatch(/ring-accent-400/);
     expect(region.className).not.toMatch(/ring-red/);
   });
 
@@ -216,9 +216,9 @@ describe('TerminalSplitPane drop target (Issue #786 / #869)', () => {
     });
     const region = screen.getByRole('region', { name: /Terminal split 1/i });
     fireEvent.dragEnter(region, { dataTransfer: makeDataTransfer() });
-    expect(region.className).toMatch(/ring-cyan-400/);
+    expect(region.className).toMatch(/ring-accent-400/);
     fireEvent.dragLeave(region, { dataTransfer: makeDataTransfer() });
-    expect(region.className).not.toMatch(/ring-cyan-400/);
+    expect(region.className).not.toMatch(/ring-accent-400/);
   });
 
   it('onDrop reads the dropped instanceId from dataTransfer and calls onDropInstance', () => {
@@ -239,9 +239,9 @@ describe('TerminalSplitPane drop target (Issue #786 / #869)', () => {
     });
     const region = screen.getByRole('region', { name: /Terminal split 1/i });
     fireEvent.dragEnter(region, { dataTransfer: makeDataTransfer() });
-    expect(region.className).toMatch(/ring-cyan-400/);
+    expect(region.className).toMatch(/ring-accent-400/);
     fireEvent.drop(region, { dataTransfer: makeDataTransfer('codex') });
-    expect(region.className).not.toMatch(/ring-cyan-400/);
+    expect(region.className).not.toMatch(/ring-accent-400/);
   });
 
   it('onDrop ignores an empty / foreign payload (no onDropInstance call)', () => {
@@ -260,7 +260,7 @@ describe('TerminalSplitPane drop target (Issue #786 / #869)', () => {
       fireEvent.dragEnter(region, { dataTransfer: makeDataTransfer() });
       fireEvent.drop(region, { dataTransfer: makeDataTransfer('codex') });
     }).not.toThrow();
-    expect(region.className).not.toMatch(/ring-cyan-400/);
+    expect(region.className).not.toMatch(/ring-accent-400/);
     expect(region.className).not.toMatch(/ring-red-300/);
   });
 });

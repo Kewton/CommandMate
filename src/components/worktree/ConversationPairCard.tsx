@@ -172,7 +172,7 @@ const MessageContent = memo(function MessageContent({
             key={index}
             type="button"
             onClick={handlePathClick(part.content)}
-            className="text-blue-400 hover:text-blue-300 hover:underline cursor-pointer font-mono text-sm"
+            className="text-accent-400 hover:text-accent-300 hover:underline cursor-pointer font-mono text-sm"
             aria-label={`Open file: ${part.content}`}
           >
             {part.content}
@@ -234,9 +234,9 @@ const UserMessageSection = memo(function UserMessageSection({
   const formattedTime = formatMessageTimestamp(message.timestamp, dateFnsLocale);
 
   return (
-    <div className="relative bg-blue-900/30 border-l-4 border-blue-500 p-3">
+    <div className="relative bg-accent-900/30 border-l-4 border-accent-500 p-3">
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-xs font-medium text-blue-400">You</span>
+        <span className="text-xs font-medium text-accent-400">You</span>
         <span className="text-xs text-gray-500">{formattedTime}</span>
       </div>
       <div
@@ -250,7 +250,7 @@ const UserMessageSection = memo(function UserMessageSection({
           type="button"
           data-testid="insert-user-message"
           onClick={() => onInsertToMessage(message.content)}
-          className="absolute top-2 right-10 p-1 text-gray-400 hover:text-cyan-400 bg-gray-800/80 rounded transition-colors"
+          className="absolute top-2 right-10 p-1 text-gray-400 hover:text-accent-400 bg-gray-800/80 rounded transition-colors"
           aria-label="Insert to message"
           title="Insert to message"
         >
@@ -523,7 +523,7 @@ export const ConversationPairCard = memo(function ConversationPairCard({
               <button
                 type="button"
                 onClick={handleToggle}
-                className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors bg-gray-800/80 px-2 py-1 rounded"
+                className="text-xs text-accent-400 hover:text-accent-300 flex items-center gap-1 transition-colors bg-gray-800/80 px-2 py-1 rounded"
                 aria-expanded={isExpanded}
                 aria-label={isExpanded ? 'Collapse message' : 'Expand message'}
               >

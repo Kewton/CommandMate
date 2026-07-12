@@ -49,7 +49,7 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
           {/* Logo and Title */}
           <div className="flex items-center space-x-4">
             <Link href="/" className="flex items-center space-x-2 hover:opacity-80 transition-opacity">
-              <div className="w-8 h-8 bg-cyan-600 rounded-lg flex items-center justify-center">
+              <div className="w-8 h-8 bg-accent-600 rounded-lg flex items-center justify-center">
                 <Folder size={20} strokeWidth={2} className="text-white" aria-hidden="true" />
               </div>
               <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">{title}</h1>
@@ -66,7 +66,7 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
                   href={item.href}
                   className={`text-sm font-medium transition-colors ${
                     active
-                      ? 'text-cyan-600 dark:text-cyan-400'
+                      ? 'text-accent-600 dark:text-accent-400'
                       : 'text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100'
                   }`}
                 >

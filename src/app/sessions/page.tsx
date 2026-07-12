@@ -101,7 +101,7 @@ function formatStatus(status: string | null | undefined): string {
 const STATUS_BADGE_CLASSES: Record<string, string> = {
   done: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
   in_review: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400',
-  in_progress: 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-400',
+  in_progress: 'bg-accent-100 dark:bg-accent-900/30 text-accent-700 dark:text-accent-400',
 };
 
 const DEFAULT_BADGE_CLASS = 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300';
@@ -200,7 +200,7 @@ export default function SessionsPage() {
             placeholder="Filter by name or repository..."
             value={filterText}
             onChange={handleFilterChange}
-            className="flex-1 max-w-md px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+            className="flex-1 max-w-md px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-ring focus:border-transparent"
             data-testid="sessions-filter"
           />
           <SortSelectorBase
@@ -248,7 +248,7 @@ export default function SessionsPage() {
                   <Link
                     key={wt.id}
                     href={`/worktrees/${wt.id}`}
-                    className="block bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700 hover:border-cyan-300 dark:hover:border-cyan-700 transition-colors"
+                    className="block bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700 hover:border-accent-300 dark:hover:border-accent-700 transition-colors"
                     data-testid={`session-item-${wt.id}`}
                   >
                     {/* Row 1: Name, Agent statuses */}

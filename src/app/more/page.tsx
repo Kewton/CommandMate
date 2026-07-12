@@ -29,7 +29,7 @@ export default function MorePage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Link
               href="/repositories"
-              className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700 hover:border-cyan-300 dark:hover:border-cyan-700 transition-colors"
+              className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700 hover:border-accent-300 dark:hover:border-accent-700 transition-colors"
               data-testid="more-link-repositories"
             >
               <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Repositories</div>

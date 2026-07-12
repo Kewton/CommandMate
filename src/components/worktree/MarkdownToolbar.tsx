@@ -116,7 +116,7 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
               onClick={() => onViewModeChange('split')}
               className={`p-1.5 rounded ${
                 viewMode === 'split'
-                  ? 'bg-white dark:bg-gray-600 shadow-sm text-cyan-600 dark:text-cyan-400'
+                  ? 'bg-white dark:bg-gray-600 shadow-sm text-accent-600 dark:text-accent-400'
                   : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
               }`}
               title="Split view"
@@ -129,7 +129,7 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
               onClick={() => onViewModeChange('editor')}
               className={`p-1.5 rounded ${
                 viewMode === 'editor'
-                  ? 'bg-white dark:bg-gray-600 shadow-sm text-cyan-600 dark:text-cyan-400'
+                  ? 'bg-white dark:bg-gray-600 shadow-sm text-accent-600 dark:text-accent-400'
                   : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
               }`}
               title="Editor only"
@@ -142,7 +142,7 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
               onClick={() => onViewModeChange('preview')}
               className={`p-1.5 rounded ${
                 viewMode === 'preview'
-                  ? 'bg-white dark:bg-gray-600 shadow-sm text-cyan-600 dark:text-cyan-400'
+                  ? 'bg-white dark:bg-gray-600 shadow-sm text-accent-600 dark:text-accent-400'
                   : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
               }`}
               title="Preview only"
@@ -192,7 +192,7 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
             aria-checked={isAutoSaveEnabled}
             onClick={() => onAutoSaveToggle(!isAutoSaveEnabled)}
             className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-              isAutoSaveEnabled ? 'bg-cyan-600' : 'bg-gray-300 dark:bg-gray-600'
+              isAutoSaveEnabled ? 'bg-accent-600' : 'bg-gray-300 dark:bg-gray-600'
             }`}
           >
             <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
@@ -213,7 +213,7 @@ export const MarkdownToolbar = memo(function MarkdownToolbar({
             disabled={!isDirty || isSaving}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
               isDirty && !isSaving
-                ? 'bg-cyan-600 text-white hover:bg-cyan-700'
+                ? 'bg-accent-600 text-white hover:bg-accent-700'
                 : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
             }`}
           >

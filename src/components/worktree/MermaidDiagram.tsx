@@ -138,7 +138,7 @@ export function MermaidDiagram({
         className="flex items-center justify-center p-4 text-gray-500"
       >
         <div className="flex items-center gap-2">
-          <div className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-blue-600" />
+          <div className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-accent-600" />
           <span>Rendering diagram...</span>
         </div>
       </div>

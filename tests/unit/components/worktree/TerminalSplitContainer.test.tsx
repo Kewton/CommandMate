@@ -230,14 +230,14 @@ describe('TerminalSplitContainer History/Files toggles (Issue #841)', () => {
     expect(files).toHaveAttribute('aria-label', 'worktree.terminal.showFiles');
   });
 
-  it('applies cyan accent when active and gray when inactive', () => {
+  it('applies accent accent when active and gray when inactive', () => {
     setup();
     const history = screen.getByTestId('toggle-history-pane');
-    // active (visible) → cyan accent classes
-    expect(history.className).toMatch(/cyan/);
+    // active (visible) → accent accent classes
+    expect(history.className).toMatch(/accent/);
     fireEvent.click(history);
-    // inactive (hidden) → gray text, no cyan accent
-    expect(history.className).not.toMatch(/cyan/);
+    // inactive (hidden) → gray text, no accent accent
+    expect(history.className).not.toMatch(/accent/);
     expect(history.className).toMatch(/text-gray-500/);
   });
 

@@ -197,7 +197,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
         'h-full',
         // Active state
         isActive ? 'active' : '',
-        isActive ? 'border-blue-500' : '',
+        isActive ? 'border-accent-500' : '',
         // Custom classes
         className,
       ]
@@ -266,7 +266,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
       {autoScroll ? (
         <button
           onClick={scrollToTop}
-          className="absolute bottom-4 right-4 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-md text-sm shadow-lg transition-colors"
+          className="absolute bottom-4 right-4 bg-accent-600 hover:bg-accent-700 text-white px-3 py-1 rounded-md text-sm shadow-lg transition-colors"
           aria-label="Scroll to top"
         >
           Scroll to top
@@ -274,7 +274,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
       ) : (
         <button
           onClick={scrollToBottom}
-          className="absolute bottom-4 right-4 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-md text-sm shadow-lg transition-colors"
+          className="absolute bottom-4 right-4 bg-accent-600 hover:bg-accent-700 text-white px-3 py-1 rounded-md text-sm shadow-lg transition-colors"
           aria-label="Scroll to bottom"
         >
           Scroll to bottom

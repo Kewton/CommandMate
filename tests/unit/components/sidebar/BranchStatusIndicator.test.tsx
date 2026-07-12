@@ -47,7 +47,7 @@ describe('BranchStatusIndicator', () => {
       render(<BranchStatusIndicator status="running" />);
 
       const indicator = screen.getByTestId('status-indicator');
-      expect(indicator.className).toMatch(/border-blue-500|blue/);
+      expect(indicator.className).toMatch(/border-info/);
     });
 
     it('should have yellow color for waiting status', () => {
@@ -61,7 +61,7 @@ describe('BranchStatusIndicator', () => {
       render(<BranchStatusIndicator status="generating" />);
 
       const indicator = screen.getByTestId('status-indicator');
-      expect(indicator.className).toMatch(/border-blue-500|blue/);
+      expect(indicator.className).toMatch(/border-info/);
     });
   });
 

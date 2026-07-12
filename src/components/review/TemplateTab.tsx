@@ -193,7 +193,7 @@ export default function TemplateTab() {
                       <button
                         onClick={handleSave}
                         disabled={isSaving}
-                        className="px-3 py-1 text-xs font-medium rounded bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-50"
+                        className="px-3 py-1 text-xs font-medium rounded bg-accent-600 text-white hover:bg-accent-700 disabled:opacity-50"
                         data-testid="edit-save-button"
                       >
                         {isSaving ? 'Saving...' : 'Save'}
@@ -270,7 +270,7 @@ export default function TemplateTab() {
               className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
                 isCreating || !newName.trim() || !newContent.trim()
                   ? 'bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
-                  : 'bg-cyan-600 text-white hover:bg-cyan-700'
+                  : 'bg-accent-600 text-white hover:bg-accent-700'
               }`}
               data-testid="create-button"
             >

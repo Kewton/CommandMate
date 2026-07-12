@@ -155,7 +155,7 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
 
   const dragRingClass =
     dragOverState === 'allowed'
-      ? ' ring-2 ring-cyan-400'
+      ? ' ring-2 ring-accent-400'
       : dragOverState === 'forbidden'
         ? ' ring-2 ring-red-300 cursor-not-allowed'
         : '';

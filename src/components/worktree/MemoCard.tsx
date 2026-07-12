@@ -259,7 +259,7 @@ export const MemoCard = memo(function MemoCard({
             data-testid="insert-memo-content"
             onClick={handleInsert}
             aria-label="Insert to message"
-            className="flex-shrink-0 p-1 text-gray-400 dark:text-gray-500 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors rounded"
+            className="flex-shrink-0 p-1 text-gray-400 dark:text-gray-500 hover:text-accent-600 dark:hover:text-accent-400 transition-colors rounded"
             title="Insert to message"
           >
             <ArrowDownToLine className="w-4 h-4" aria-hidden="true" />
@@ -308,7 +308,7 @@ export const MemoCard = memo(function MemoCard({
         onBlur={handleContentBlur}
         placeholder="Enter memo content..."
         rows={4}
-        className="w-full text-sm text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md p-2 resize-y focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+        className="w-full text-sm text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md p-2 resize-y focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
       />
 
       {/* Error message */}

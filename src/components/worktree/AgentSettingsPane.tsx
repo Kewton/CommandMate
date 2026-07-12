@@ -184,7 +184,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
               key={toolId}
               className={`flex items-center gap-3 p-2 rounded-lg border transition-colors ${
                 isChecked
-                  ? 'border-cyan-200 dark:border-cyan-700 bg-cyan-50 dark:bg-cyan-900/30'
+                  ? 'border-accent-200 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30'
                   : isDisabled
                     ? 'border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800 opacity-50'
                     : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
@@ -197,7 +197,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
                 checked={isChecked}
                 disabled={isDisabled || saving}
                 onChange={(e) => handleCheckboxChange(toolId, e.target.checked)}
-                className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-cyan-600 focus:ring-cyan-500"
+                className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-accent-600 focus:ring-ring"
               />
               <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
                 {getCliToolDisplayName(toolId)}
@@ -212,7 +212,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
           data-testid="agent-settings-loading"
           className="mt-3 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400"
         >
-          <span className="w-3 h-3 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+          <span className="w-3 h-3 border-2 border-accent-500 border-t-transparent rounded-full animate-spin" />
           {t('loading')}
         </div>
       )}

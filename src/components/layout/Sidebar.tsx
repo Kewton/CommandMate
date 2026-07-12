@@ -451,7 +451,7 @@ export const Sidebar = memo(function Sidebar() {
                 href="/repositories"
                 aria-label="Repositories"
                 className="p-1 rounded text-gray-300 hover:text-white hover:bg-gray-700
-                  focus:outline-none focus:ring-2 focus:ring-blue-500
+                  focus:outline-none focus:ring-2 focus:ring-ring
                   transition-colors inline-flex items-center"
               >
                 <Database className={HEADER_ICON_CLASS} aria-hidden="true" />
@@ -472,7 +472,7 @@ export const Sidebar = memo(function Sidebar() {
             w-full px-3 py-2 rounded-md
             bg-gray-700 text-white placeholder-gray-400
             border border-gray-600
-            focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent
+            focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent
           "
         />
       </div>
@@ -688,7 +688,7 @@ function GroupHeader({
         className="
           flex-1 min-w-0 flex items-center gap-2 px-2 py-2
           text-xs font-semibold text-gray-300 uppercase tracking-wider
-          focus:outline-none focus:ring-2 focus:ring-inset focus:ring-cyan-500
+          focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring
           transition-colors
         "
       >
@@ -725,7 +725,7 @@ function ViewModeToggle({
         aria-label={viewMode === 'grouped' ? 'Switch to flat view' : 'Switch to grouped view'}
         className="
           p-1 rounded text-gray-300 hover:text-white hover:bg-gray-700
-          focus:outline-none focus:ring-2 focus:ring-blue-500
+          focus:outline-none focus:ring-2 focus:ring-ring
           transition-colors
         "
       >
@@ -871,7 +871,7 @@ const SyncButton = memo(function SyncButton({
           disabled={isSyncing}
           aria-label={t('syncButtonLabel')}
           className="p-1 rounded text-gray-300 hover:text-white hover:bg-gray-700
-            focus:outline-none focus:ring-2 focus:ring-blue-500
+            focus:outline-none focus:ring-2 focus:ring-ring
             disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           <SyncIcon className={isSyncing ? 'animate-spin' : ''} />

@@ -199,7 +199,7 @@ export const MoveDialog = memo(function MoveDialog({
       <div key={node.path}>
         <div
           className={`flex items-center gap-1 py-1.5 px-2 cursor-pointer rounded text-sm transition-colors ${
-            isSelected ? 'bg-blue-100 text-blue-800' : 'hover:bg-gray-100 text-gray-700'
+            isSelected ? 'bg-accent-100 text-accent-800' : 'hover:bg-gray-100 text-gray-700'
           } ${!isValid ? 'opacity-40 cursor-not-allowed' : ''}`}
           style={{ paddingLeft: `${0.5 + depth * 1.25}rem` }}
           onClick={() => {
@@ -256,7 +256,7 @@ export const MoveDialog = memo(function MoveDialog({
           {/* Root directory option */}
           <div
             className={`flex items-center gap-1 py-1.5 px-2 cursor-pointer rounded text-sm transition-colors ${
-              selectedPath === '' ? 'bg-blue-100 text-blue-800' : 'hover:bg-gray-100 text-gray-700'
+              selectedPath === '' ? 'bg-accent-100 text-accent-800' : 'hover:bg-gray-100 text-gray-700'
             } ${!isValidDestination('') ? 'opacity-40 cursor-not-allowed' : ''}`}
             onClick={() => {
               if (isValidDestination('')) {
@@ -289,7 +289,7 @@ export const MoveDialog = memo(function MoveDialog({
           <button
             onClick={() => onConfirm(selectedPath)}
             disabled={!canConfirm}
-            className="px-4 py-2 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 text-sm text-white bg-accent-600 rounded-md hover:bg-accent-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {t('fileTree.moveConfirm')}
           </button>

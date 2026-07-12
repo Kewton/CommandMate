@@ -371,7 +371,7 @@ export function ExternalAppForm({
             type="checkbox"
             checked={websocketEnabled}
             onChange={(e) => setWebsocketEnabled(e.target.checked)}
-            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            className="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-ring"
             disabled={isSubmitting}
           />
           <label
@@ -390,7 +390,7 @@ export function ExternalAppForm({
               type="checkbox"
               checked={enabled}
               onChange={(e) => setEnabled(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              className="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-ring"
               disabled={isSubmitting}
             />
             <label htmlFor="enabled" className="ml-2 text-sm text-gray-700 dark:text-gray-200">

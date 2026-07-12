@@ -118,7 +118,7 @@ export function ExternalAppsManager() {
       {isLoading ? (
         <Card padding="lg">
           <div className="flex items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-600" />
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent-600" />
             <span className="ml-3 text-gray-600 dark:text-gray-300">Loading apps...</span>
           </div>
         </Card>

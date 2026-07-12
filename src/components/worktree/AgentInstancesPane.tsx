@@ -241,7 +241,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') e.currentTarget.blur();
                   }}
-                  className="w-full text-sm font-medium border border-gray-300 dark:border-gray-600 rounded-md px-2 py-1 bg-white dark:bg-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 disabled:opacity-50"
+                  className="w-full text-sm font-medium border border-gray-300 dark:border-gray-600 rounded-md px-2 py-1 bg-white dark:bg-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-ring focus:border-accent-500 disabled:opacity-50"
                 />
                 <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
                   {getCliToolDisplayName(inst.cliTool)}
@@ -296,7 +296,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
           value={addToolId}
           disabled={saving || atMax}
           onChange={(e) => setAddToolId(e.target.value as CLIToolType)}
-          className="flex-1 min-w-0 text-sm border border-gray-300 dark:border-gray-600 rounded-md px-2 py-2 bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 disabled:opacity-50"
+          className="flex-1 min-w-0 text-sm border border-gray-300 dark:border-gray-600 rounded-md px-2 py-2 bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-ring focus:border-accent-500 disabled:opacity-50"
         >
           {CLI_TOOL_IDS.map((toolId) => (
             <option key={toolId} value={toolId}>
@@ -309,7 +309,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
           data-testid="agent-instance-add"
           disabled={saving || atMax}
           onClick={handleAdd}
-          className="flex items-center gap-1 text-sm font-medium px-3 py-2 rounded-md border border-cyan-200 dark:border-cyan-700 bg-cyan-50 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+          className="flex items-center gap-1 text-sm font-medium px-3 py-2 rounded-md border border-accent-200 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300 hover:bg-accent-100 dark:hover:bg-accent-900/50 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
         >
           <Plus className="w-4 h-4" />
           {t('agentInstanceAdd')}
@@ -332,7 +332,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
           data-testid="agent-instances-loading"
           className="mt-3 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400"
         >
-          <span className="w-3 h-3 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+          <span className="w-3 h-3 border-2 border-accent-500 border-t-transparent rounded-full animate-spin" />
           {t('loading')}
         </div>
       )}

@@ -143,7 +143,7 @@ export const SortSelectorBase = memo(function SortSelectorBase({
       className="
         flex items-center gap-1 px-2 py-1 rounded
         text-xs text-gray-300 hover:text-white hover:bg-gray-700
-        focus:outline-none focus:ring-2 focus:ring-blue-500
+        focus:outline-none focus:ring-2 focus:ring-ring
         transition-colors
       "
     >
@@ -171,7 +171,7 @@ export const SortSelectorBase = memo(function SortSelectorBase({
           aria-label={sortDirection === 'asc' ? 'Sort ascending' : 'Sort descending'}
           className="
             p-1 rounded text-gray-300 hover:text-white hover:bg-gray-700
-            focus:outline-none focus:ring-2 focus:ring-blue-500
+            focus:outline-none focus:ring-2 focus:ring-ring
             transition-colors
           "
         >
@@ -205,7 +205,7 @@ export const SortSelectorBase = memo(function SortSelectorBase({
                 w-full px-3 py-2 text-left text-sm
                 flex items-center justify-between
                 hover:bg-gray-600 transition-colors
-                ${sortKey === option.key ? 'text-blue-400' : 'text-gray-300'}
+                ${sortKey === option.key ? 'text-accent-400' : 'text-gray-300'}
               `}
             >
               <span>{option.label}</span>

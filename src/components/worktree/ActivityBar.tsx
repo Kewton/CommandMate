@@ -116,7 +116,7 @@ export const ActivityBar = memo(function ActivityBar({
           onClick={toggleSidebar}
           aria-label="Toggle sidebar"
           aria-expanded={isSidebarOpen}
-          className="flex items-center justify-center h-12 w-12 text-gray-500 dark:text-gray-400 transition-colors hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-inset"
+          className="flex items-center justify-center h-12 w-12 text-gray-500 dark:text-gray-400 transition-colors hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-inset"
         >
           <Menu size={20} aria-hidden="true" />
         </button>
@@ -151,9 +151,9 @@ export const ActivityBar = memo(function ActivityBar({
                 onClick={() => onToggle(activity.id)}
                 onKeyDown={(e) => handleKeyDown(e, index, activity.id)}
                 data-testid={`activity-bar-button-${activity.id}`}
-                className={`flex items-center justify-center h-12 w-12 transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-inset ${
+                className={`flex items-center justify-center h-12 w-12 transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-inset ${
                   isActive
-                    ? 'text-cyan-600 dark:text-cyan-400 border-l-2 border-cyan-600 dark:border-cyan-400 bg-white dark:bg-gray-900'
+                    ? 'text-accent-600 dark:text-accent-400 border-l-2 border-accent-600 dark:border-accent-400 bg-white dark:bg-gray-900'
                     : 'text-gray-500 dark:text-gray-400 border-l-2 border-transparent hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700'
                 }`}
               >

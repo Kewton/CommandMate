@@ -45,8 +45,8 @@ export const STATUS_COLORS = {
   idle: 'bg-gray-500',
   /** Green for ready/active state */
   ready: 'bg-green-500',
-  /** Blue border for spinner states (running/generating) */
-  spinner: 'border-blue-500',
+  /** Info (blue) border for spinner states (running/generating); kept distinct from the cyan accent */
+  spinner: 'border-info',
   /** Yellow for waiting state (G1: distinguishes from ready) */
   waiting: 'bg-yellow-500',
   /** Red for error state */

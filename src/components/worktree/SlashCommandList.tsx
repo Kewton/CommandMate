@@ -75,15 +75,15 @@ export function SlashCommandList({
                   data-command-item
                   data-highlighted={isHighlighted}
                   onClick={() => onSelect(command)}
-                  className={`w-full px-3 py-2 text-left flex items-start gap-2 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 transition-colors ${
-                    isHighlighted ? 'bg-cyan-100 dark:bg-cyan-900/40' : ''
+                  className={`w-full px-3 py-2 text-left flex items-start gap-2 hover:bg-accent-50 dark:hover:bg-accent-900/30 transition-colors ${
+                    isHighlighted ? 'bg-accent-100 dark:bg-accent-900/40' : ''
                   }`}
                 >
-                  <span className="text-cyan-600 dark:text-cyan-400 font-mono text-sm flex-shrink-0">
+                  <span className="text-accent-600 dark:text-accent-400 font-mono text-sm flex-shrink-0">
                     {getSlashCommandTrigger(command)}
                   </span>
                   {command.cliTools?.length === 1 && command.cliTools[0] === 'codex' && (
-                    <span className="mt-0.5 rounded border border-cyan-200 bg-cyan-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:border-cyan-800 dark:bg-cyan-950/40 dark:text-cyan-300">
+                    <span className="mt-0.5 rounded border border-accent-200 bg-accent-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-700 dark:border-accent-800 dark:bg-accent-950/40 dark:text-accent-300">
                       Codex
                     </span>
                   )}

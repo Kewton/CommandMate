@@ -146,8 +146,8 @@ export const AutoYesToggle = memo(function AutoYesToggle({
         aria-label="Auto Yes mode"
         disabled={toggling}
         onClick={handleToggle}
-        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 ${
-          displayEnabled ? 'bg-cyan-600' : 'bg-gray-300 dark:bg-gray-600'
+        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 dark:focus:ring-offset-gray-800 ${
+          displayEnabled ? 'bg-accent-600' : 'bg-gray-300 dark:bg-gray-600'
         } ${toggling ? 'opacity-50' : ''}`}
       >
         <span
@@ -160,7 +160,7 @@ export const AutoYesToggle = memo(function AutoYesToggle({
 
       {/* Active CLI tool indicator (Issue #525: show regardless of enabled state) */}
       {cliToolName && (
-        <span className="text-xs text-cyan-600 dark:text-cyan-400 font-medium" aria-label="Auto Yes target">
+        <span className="text-xs text-accent-600 dark:text-accent-400 font-medium" aria-label="Auto Yes target">
           ({getCliToolDisplayNameSafe(cliToolName, '')})
         </span>
       )}

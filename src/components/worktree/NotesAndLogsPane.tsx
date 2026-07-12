@@ -92,7 +92,7 @@ const SUB_TABS: readonly SubTabConfig[] = [
 ] as const;
 
 /** CSS class for the active sub-tab button */
-const ACTIVE_TAB_CLASS = 'text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400 bg-cyan-50 dark:bg-cyan-900/30';
+const ACTIVE_TAB_CLASS = 'text-accent-600 dark:text-accent-400 border-b-2 border-accent-600 dark:border-accent-400 bg-accent-50 dark:bg-accent-900/30';
 /** CSS class for inactive sub-tab buttons */
 const INACTIVE_TAB_CLASS = 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800';
 

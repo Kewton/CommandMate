@@ -374,7 +374,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
               title={t('terminal.showHistory')}
               aria-expanded="false"
               onClick={toggleHistory}
-              className="flex flex-col items-center gap-2 w-full pt-2 text-gray-500 dark:text-gray-400 hover:text-cyan-600 dark:hover:text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+              className="flex flex-col items-center gap-2 w-full pt-2 text-gray-500 dark:text-gray-400 hover:text-accent-600 dark:hover:text-accent-400 focus:outline-none focus:ring-2 focus:ring-ring"
             >
               <svg
                 className="w-4 h-4 flex-shrink-0"

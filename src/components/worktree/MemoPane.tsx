@@ -229,7 +229,7 @@ export const MemoPane = memo(function MemoPane({
           data-testid="memo-loading"
           className="flex flex-col items-center gap-3"
         >
-          <div className="w-8 h-8 border-4 border-gray-200 dark:border-gray-700 border-t-cyan-500 rounded-full animate-spin" />
+          <div className="w-8 h-8 border-4 border-gray-200 dark:border-gray-700 border-t-accent-500 rounded-full animate-spin" />
           <span className="text-sm text-gray-500 dark:text-gray-400">Loading memos...</span>
         </div>
       </div>
@@ -262,7 +262,7 @@ export const MemoPane = memo(function MemoPane({
             type="button"
             onClick={handleRetry}
             aria-label="Retry"
-            className="px-4 py-2 text-sm font-medium text-white bg-cyan-500 rounded-lg hover:bg-cyan-600 transition-colors"
+            className="px-4 py-2 text-sm font-medium text-white bg-accent-500 rounded-lg hover:bg-accent-600 transition-colors"
           >
             Retry
           </button>

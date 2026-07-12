@@ -615,8 +615,8 @@ describe('TerminalSplitPaneContent', () => {
       ['idle', 'dot', 'bg-gray-500'],
       ['ready', 'dot', 'bg-green-500'],
       ['waiting', 'dot', 'bg-yellow-500'],
-      ['running', 'spinner', 'border-blue-500'],
-      ['generating', 'spinner', 'border-blue-500'],
+      ['running', 'spinner', 'border-info'],
+      ['generating', 'spinner', 'border-info'],
     ] as const)(
       'renders %s as a %s with class %s',
       async (status, kind, colorClass) => {
@@ -700,7 +700,7 @@ describe('TerminalSplitPaneContent', () => {
       const indicator0 = await screen.findByTestId('split-status-indicator-0');
       const indicator1 = await screen.findByTestId('split-status-indicator-1');
 
-      expect(indicator0.className).toContain('border-blue-500');
+      expect(indicator0.className).toContain('border-info');
       expect(indicator0.className).toContain('animate-spin');
 
       expect(indicator1.className).toContain('bg-gray-500');

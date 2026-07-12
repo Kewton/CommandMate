@@ -147,7 +147,7 @@ describe('PaneResizer', () => {
       fireEvent.mouseDown(separator, { clientX: 100, clientY: 50 });
 
       // Should have visual indication of dragging
-      expect(separator.className).toMatch(/dragging|active|bg-cyan/);
+      expect(separator.className).toMatch(/dragging|active|bg-accent/);
 
       fireEvent.mouseUp(document);
 
@@ -253,10 +253,10 @@ describe('PaneResizer', () => {
     it('should show an accent color on hover in both themes', () => {
       render(<PaneResizer onResize={mockOnResize} />);
       const separator = screen.getByRole('separator');
-      expect(separator.className).toContain('hover:bg-cyan-500');
+      expect(separator.className).toContain('hover:bg-accent-500');
       // dark:class strategy requires an explicit dark hover variant to beat the
       // base dark:bg-gray-700.
-      expect(separator.className).toContain('dark:hover:bg-cyan-500');
+      expect(separator.className).toContain('dark:hover:bg-accent-500');
     });
 
     it('should provide a transparent ±4px hit area for horizontal resizer', () => {
@@ -284,8 +284,8 @@ describe('PaneResizer', () => {
 
       fireEvent.mouseDown(separator, { clientX: 100, clientY: 50 });
       // Dragging: accent + thicken as live feedback.
-      expect(separator.className).toContain('bg-cyan-500');
-      expect(separator.className).toContain('dark:bg-cyan-500');
+      expect(separator.className).toContain('bg-accent-500');
+      expect(separator.className).toContain('dark:bg-accent-500');
       expect(separator.className).toMatch(/(^|\s)w-2(\s|$)/);
 
       fireEvent.mouseUp(document);

@@ -35,7 +35,7 @@ const DiffLine = memo(function DiffLine({ line }: { line: string }) {
   } else if (line.startsWith('-') && !line.startsWith('---')) {
     className += ' text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20';
   } else if (line.startsWith('@@')) {
-    className += ' text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/10';
+    className += ' text-info bg-info/10';
   } else if (line.startsWith('diff --git') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) {
     className += ' text-gray-500 dark:text-gray-400';
   } else {
@@ -59,7 +59,7 @@ export const DiffViewer = memo(function DiffViewer({
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-xs font-medium text-cyan-600 dark:text-cyan-400 shrink-0">
+          <span className="text-xs font-medium text-accent-600 dark:text-accent-400 shrink-0">
             DIFF
           </span>
           <span className="text-xs font-mono text-gray-600 dark:text-gray-300 truncate">

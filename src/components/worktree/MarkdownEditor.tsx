@@ -640,7 +640,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         onChange={handleContentChange}
         onKeyDown={handleKeyDown}
         onScroll={handleEditorScroll}
-        className={`flex-1 py-4 pr-4 pl-3 font-mono text-sm resize-none bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none leading-[1.5rem]${showFocusRing ? ' focus:ring-2 focus:ring-cyan-500 focus:ring-inset' : ''}`}
+        className={`flex-1 py-4 pr-4 pl-3 font-mono text-sm resize-none bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none leading-[1.5rem]${showFocusRing ? ' focus:ring-2 focus:ring-ring focus:ring-inset' : ''}`}
         placeholder={isTextMode ? 'Start typing...' : 'Start typing markdown...'}
         spellCheck={false}
       />
@@ -797,7 +797,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         className="flex items-center justify-center h-full bg-white dark:bg-gray-900"
       >
         <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-cyan-600 dark:border-t-cyan-400" />
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-accent-600 dark:border-t-accent-400" />
           <p className="mt-4 text-gray-600 dark:text-gray-400">Loading...</p>
         </div>
       </div>

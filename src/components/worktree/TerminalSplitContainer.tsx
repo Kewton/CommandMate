@@ -358,7 +358,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
           data-testid="toggle-history-pane"
           className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors ${
             historyVisible
-              ? 'border-cyan-300 dark:border-cyan-700 bg-cyan-50 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300'
+              ? 'border-accent-300 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300'
               : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
           }`}
         >
@@ -378,7 +378,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
           data-testid="toggle-file-panel"
           className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors ${
             filesVisible
-              ? 'border-cyan-300 dark:border-cyan-700 bg-cyan-50 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300'
+              ? 'border-accent-300 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300'
               : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
           }`}
         >

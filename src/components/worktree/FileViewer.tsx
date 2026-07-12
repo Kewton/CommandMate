@@ -77,7 +77,7 @@ function FileViewerSearchBar({
           if (e.key === 'Enter') { if (e.shiftKey) { onPrev(); } else { onNext(); } }
         }}
         placeholder="検索..."
-        className="flex-1 min-w-0 px-2 py-0.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-cyan-500"
+        className="flex-1 min-w-0 px-2 py-0.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-ring"
         autoComplete="off"
         autoCorrect="off"
         autoCapitalize="off"
@@ -196,7 +196,7 @@ function HtmlPreviewMobile({
               onClick={() => setActiveTab(tab)}
               className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
                 activeTab === tab
-                  ? 'bg-cyan-100 dark:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300'
+                  ? 'bg-accent-100 dark:bg-accent-900/50 text-accent-700 dark:text-accent-300'
                   : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
               }`}
             >
@@ -719,7 +719,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
       <div className="max-h-[60vh] sm:max-h-[70vh] flex flex-col">
         {loading && (
           <div className="flex items-center justify-center py-12">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-cyan-600 dark:border-t-cyan-400" />
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-accent-600 dark:border-t-accent-400" />
             <p className="ml-3 text-gray-600 dark:text-gray-400">Loading file...</p>
           </div>
         )}

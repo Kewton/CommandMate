@@ -50,7 +50,7 @@ export interface TimerEditDialogProps {
 }
 
 const INPUT_CLASS =
-  'w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500';
+  'w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-ring';
 
 // =============================================================================
 // Component
@@ -238,7 +238,7 @@ export function TimerEditDialog({
         data-testid="timer-register-button"
         onClick={() => void handleRegister()}
         disabled={!canRegister}
-        className="px-4 py-2 text-sm font-medium text-white bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
+        className="px-4 py-2 text-sm font-medium text-white bg-accent-600 hover:bg-accent-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
       >
         {t('timer.register')}
       </button>
