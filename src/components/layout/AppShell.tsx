@@ -153,8 +153,9 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
             ref={sidebarRef}
             data-testid="sidebar-container"
             className={`
-              fixed left-0 top-0 h-full
-              border-r border-gray-200 dark:border-gray-600
+              fixed left-0
+              ${showGlobalNav ? 'top-16 h-[calc(100vh-4rem)]' : 'top-0 h-full'}
+              border-r border-border
               ${SIDEBAR_TRANSITION}
               ${isOpen ? 'translate-x-0' : '-translate-x-full'}
             `}
