@@ -23,13 +23,16 @@ const ROOT = path.resolve(__dirname, '../../..');
  * Tokens whose value differs between light and dark modes.
  * background/surface/surface-2/border were revised in Issue #1049 to form a
  * deliberate depth ladder (the first intentional visual change).
+ * Issue #1074 inverted the LIGHT ladder: the page is now a near-white gray
+ * (--background), cards are pure white (--surface, brightest), and the
+ * secondary surface is a recessed well (--surface-2, darkest). Dark unchanged.
  */
 const MODE_VARYING: Record<string, { light: string; dark: string }> = {
-  '--background': { light: '255 255 255', dark: '10 12 18' },
+  '--background': { light: '250 250 251', dark: '10 12 18' },
   '--foreground': { light: '17 24 39', dark: '243 244 246' },
-  '--surface': { light: '248 250 252', dark: '20 24 33' },
+  '--surface': { light: '255 255 255', dark: '20 24 33' },
   '--surface-foreground': { light: '17 24 39', dark: '243 244 246' },
-  '--surface-2': { light: '241 245 249', dark: '15 18 26' },
+  '--surface-2': { light: '244 246 250', dark: '15 18 26' },
   '--muted': { light: '243 244 246', dark: '31 41 55' },
   '--muted-foreground': { light: '107 114 128', dark: '156 163 175' },
   '--border': { light: '226 232 240', dark: '42 48 62' },
@@ -137,6 +140,20 @@ describe('Design tokens (Issue #1041)', () => {
     it('no longer exposes the removed primary / cmd-bg-dark colors', () => {
       expect(colors.primary).toBeUndefined();
       expect(colors['cmd-bg-dark']).toBeUndefined();
+    });
+
+    // [Issue #1074] The light page went gray + white cards, so shadow-sm must
+    // read as a real 2-layer elevation (was the flat Tailwind default
+    // `0 1px 2px 0 rgb(0 0 0 / 0.05)`). boxShadow is mode-independent; the
+    // slate tint is near-invisible on the dark #0a0c12 base so dark is unchanged.
+    it('defines a custom 2-layer boxShadow.sm (Issue #1074)', () => {
+      const boxShadow = resolveConfig(config).theme.boxShadow as Record<string, string>;
+      const sm = boxShadow.sm;
+      expect(sm).toBeDefined();
+      // No longer the flat single-layer Tailwind default.
+      expect(sm).not.toBe('0 1px 2px 0 rgb(0 0 0 / 0.05)');
+      // Two comma-separated shadow layers.
+      expect(sm.split('),').length).toBeGreaterThanOrEqual(2);
     });
   });
 
