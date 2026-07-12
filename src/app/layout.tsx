@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
 import { getLocale, getMessages, getTimeZone } from 'next-intl/server';
+import { GeistSans } from 'geist/font/sans';
+import { GeistMono } from 'geist/font/mono';
 import { AppProviders } from '@/components/providers/AppProviders';
 import './globals.css';
 
@@ -18,7 +20,11 @@ export default async function RootLayout({
   const timeZone = await getTimeZone();
 
   return (
-    <html lang={locale} suppressHydrationWarning>
+    <html
+      lang={locale}
+      className={`${GeistSans.variable} ${GeistMono.variable}`}
+      suppressHydrationWarning
+    >
       <body className="min-h-screen bg-background">
         <AppProviders locale={locale} messages={messages as Record<string, unknown>} timeZone={timeZone} authEnabled={!!process.env.CM_AUTH_TOKEN_HASH}>
           {children}

@@ -339,7 +339,7 @@
     padding: 0.08em 0.35em;
     border-radius: 4px;
     font-size: 0.9em;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: theme('fontFamily.mono');
   }
   .assistant-md pre {
     background-color: rgb(15 23 42 / 0.85);

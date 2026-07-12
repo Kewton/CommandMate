@@ -8,6 +8,28 @@ module.exports = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        // Geist Sans first, then Japanese fallback (Geist lacks JP glyphs),
+        // then the system sans stack. CSS var is provided by next/font (geist)
+        // via the className applied to <html> in src/app/layout.tsx.
+        sans: [
+          'var(--font-geist-sans)',
+          'Hiragino Kaku Gothic ProN',
+          'Noto Sans JP',
+          'system-ui',
+          '-apple-system',
+          'sans-serif',
+        ],
+        // Geist Mono first, preserving the previous monospace stack as fallback.
+        mono: [
+          'var(--font-geist-mono)',
+          'ui-monospace',
+          'SFMono-Regular',
+          'Menlo',
+          'Monaco',
+          'monospace',
+        ],
+      },
       colors: {
         // [Issue #1041] Semantic tokens backed by CSS variables (see src/app/globals.css).
         // The `<alpha-value>` placeholder lets Tailwind compose opacity utilities.
