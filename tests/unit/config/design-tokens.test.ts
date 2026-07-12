@@ -19,16 +19,20 @@ import resolveConfig from 'tailwindcss/resolveConfig';
 
 const ROOT = path.resolve(__dirname, '../../..');
 
-/** Tokens whose value differs between light and dark modes. */
+/**
+ * Tokens whose value differs between light and dark modes.
+ * background/surface/surface-2/border were revised in Issue #1049 to form a
+ * deliberate depth ladder (the first intentional visual change).
+ */
 const MODE_VARYING: Record<string, { light: string; dark: string }> = {
-  '--background': { light: '249 250 251', dark: '15 17 23' },
+  '--background': { light: '255 255 255', dark: '10 12 18' },
   '--foreground': { light: '17 24 39', dark: '243 244 246' },
-  '--surface': { light: '255 255 255', dark: '31 41 55' },
+  '--surface': { light: '248 250 252', dark: '20 24 33' },
   '--surface-foreground': { light: '17 24 39', dark: '243 244 246' },
-  '--surface-2': { light: '249 250 251', dark: '17 24 39' },
+  '--surface-2': { light: '241 245 249', dark: '15 18 26' },
   '--muted': { light: '243 244 246', dark: '31 41 55' },
   '--muted-foreground': { light: '107 114 128', dark: '156 163 175' },
-  '--border': { light: '229 231 235', dark: '55 65 81' },
+  '--border': { light: '226 232 240', dark: '42 48 62' },
   '--input': { light: '209 213 219', dark: '75 85 99' },
 };
 

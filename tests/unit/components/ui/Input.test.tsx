@@ -44,6 +44,14 @@ describe('Input', () => {
     expect(screen.getByLabelText('c').className).toContain('max-w-md');
   });
 
+  it('recedes to surface-2 in dark so it sinks within a surface card (Issue #1049)', () => {
+    render(<Input aria-label="d" />);
+    const cls = screen.getByLabelText('d').className;
+    // light keeps bg-surface; dark drops to the recessed surface-2 fill
+    expect(cls).toContain('bg-surface');
+    expect(cls).toContain('dark:bg-surface-2');
+  });
+
   it('forwards ref to the input element', () => {
     function Wrapper() {
       const ref = useRef<HTMLInputElement>(null);

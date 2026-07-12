@@ -116,10 +116,12 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       expect(content).toContain('dark:text-gray-100');
     });
 
-    it('Card keeps dark background/border variants', () => {
+    it('Card uses semantic surface/border tokens (migrated in Issue #1049)', () => {
+      // The hardcoded dark:bg-gray-900 / dark:border-gray-700 were replaced by
+      // bg-surface / border-border so the depth-token revision propagates.
       const content = readPrimitive('src/components/ui/Card.tsx');
-      expect(content).toContain('dark:bg-gray-900');
-      expect(content).toContain('dark:border-gray-700');
+      expect(content).toContain('bg-surface');
+      expect(content).toContain('border-border');
     });
 
     it('Badge info keeps accent tokens with dark variants', () => {
@@ -148,10 +150,12 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       expect(content).toContain('focus:border-ring');
     });
 
-    it('Input uses semantic border-input / bg-surface tokens', () => {
+    it('Input uses semantic border-input / bg-surface tokens and recedes to surface-2 in dark (Issue #1049)', () => {
       const content = readPrimitive('src/components/ui/Input.tsx');
       expect(content).toContain('border-input');
       expect(content).toContain('bg-surface');
+      // dark recede so an Input inside a bg-surface Card is distinguishable
+      expect(content).toContain('dark:bg-surface-2');
     });
   });
 
