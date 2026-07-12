@@ -133,7 +133,7 @@ const ChangedFileList = memo(function ChangedFileList({
                   <button
                     type="button"
                     onClick={() => onDiff(file.path, mode)}
-                    className="shrink-0 px-1.5 py-0.5 text-xs text-cyan-600 dark:text-cyan-400 hover:underline"
+                    className="shrink-0 px-1.5 py-0.5 text-xs text-accent-600 dark:text-accent-400 hover:underline"
                     aria-label={`Show diff for ${file.path}`}
                     data-testid="git-changes-diff-button"
                   >
@@ -157,7 +157,7 @@ const ChangedFileList = memo(function ChangedFileList({
                   >
                     {previewLoading && (
                       <div className="flex items-center gap-2 py-2" role="status">
-                        <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-cyan-500" />
+                        <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-accent-500" />
                         <span className="sr-only">Loading diff preview...</span>
                       </div>
                     )}
@@ -182,7 +182,7 @@ const ChangedFileList = memo(function ChangedFileList({
                             <button
                               type="button"
                               onClick={() => onDiff(file.path, mode)}
-                              className="mt-1 text-xs text-cyan-600 dark:text-cyan-400 hover:underline"
+                              className="mt-1 text-xs text-accent-600 dark:text-accent-400 hover:underline"
                               data-testid="git-changes-preview-more"
                             >
                               … truncated — open full diff
@@ -277,7 +277,7 @@ export const GitChangesPanel = memo(function GitChangesPanel({
 
       {loading && !staged && (
         <div className="flex items-center gap-2 px-3 pb-2" role="status">
-          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-500" />
+          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-accent-500" />
           <span className="sr-only">Loading changes...</span>
         </div>
       )}
@@ -338,7 +338,7 @@ export const GitChangesPanel = memo(function GitChangesPanel({
               onChange={(e) => onCommitMessageChange(e.target.value)}
               placeholder="Commit message"
               rows={isMobile ? 2 : 3}
-              className="w-full resize-y rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              className="w-full resize-y rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-ring"
               data-testid="git-commit-message"
               aria-label="Commit message"
             />
@@ -357,7 +357,7 @@ export const GitChangesPanel = memo(function GitChangesPanel({
                   type="button"
                   onClick={onCommit}
                   disabled={!canCommit}
-                  className="px-3 py-1 text-xs font-medium rounded bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-3 py-1 text-xs font-medium rounded bg-accent-600 text-white hover:bg-accent-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   data-testid="git-commit-button"
                 >
                   {committing ? 'Committing...' : 'Commit'}
@@ -370,7 +370,7 @@ export const GitChangesPanel = memo(function GitChangesPanel({
                   onClick={onCommitAndPush}
                   disabled={!canCommit || busy}
                   title="Commit, then push. If the push fails the commit is already saved — just retry Push."
-                  className="px-3 py-1 text-xs font-medium rounded border border-cyan-600 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-3 py-1 text-xs font-medium rounded border border-accent-600 text-accent-700 dark:text-accent-300 hover:bg-accent-50 dark:hover:bg-accent-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
                   data-testid="git-commit-push-button"
                 >
                   Commit + Push

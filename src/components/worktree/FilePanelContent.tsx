@@ -37,7 +37,7 @@ const CODE_VIEWER_ROW_HEIGHT_PX = 24;
 function DynamicImportSpinner() {
   return (
     <div className="flex items-center justify-center py-12 bg-white dark:bg-gray-900">
-      <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-cyan-600 dark:border-t-cyan-400" />
+      <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-accent-600 dark:border-t-accent-400" />
     </div>
   );
 }
@@ -119,7 +119,7 @@ const MARP_FRONTMATTER_REGEX = /^---\s*\nmarp:\s*true/;
 function LoadingSpinner() {
   return (
     <div className="flex items-center justify-center py-12">
-      <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-cyan-600 dark:border-t-cyan-400" />
+      <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-accent-600 dark:border-t-accent-400" />
       <p className="ml-3 text-gray-600 dark:text-gray-400">Loading file...</p>
     </div>
   );
@@ -580,7 +580,7 @@ function MarpEditorWithSlides({
             onClick={() => setMarpViewMode('slides')}
             className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
               marpViewMode === 'slides'
-                ? 'bg-cyan-100 dark:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300'
+                ? 'bg-accent-100 dark:bg-accent-900/50 text-accent-700 dark:text-accent-300'
                 : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
             }`}
           >
@@ -591,7 +591,7 @@ function MarpEditorWithSlides({
             onClick={() => setMarpViewMode('editor')}
             className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
               marpViewMode === 'editor'
-                ? 'bg-cyan-100 dark:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300'
+                ? 'bg-accent-100 dark:bg-accent-900/50 text-accent-700 dark:text-accent-300'
                 : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
             }`}
           >

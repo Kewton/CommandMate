@@ -484,7 +484,7 @@ function VisibilityToggle({
       className={`
         inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium
         border transition-colors
-        focus:outline-none focus:ring-2 focus:ring-cyan-500
+        focus:outline-none focus:ring-2 focus:ring-ring
         disabled:opacity-60 disabled:cursor-not-allowed
         ${
           isVisible

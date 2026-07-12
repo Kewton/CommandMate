@@ -140,7 +140,7 @@ describe('DesktopHeader per-instance status row (Issue #749 / #869)', () => {
         />
       );
       const span = screen.getByTestId('desktop-agent-status-claude').querySelector('span');
-      expect(span?.className).toContain(SIDEBAR_STATUS_CONFIG.running.className); // border-blue-500
+      expect(span?.className).toContain(SIDEBAR_STATUS_CONFIG.running.className); // border-info
       expect(span?.className).toContain('animate-spin');
     });
   });
@@ -158,11 +158,11 @@ describe('DesktopHeader per-instance status row (Issue #749 / #869)', () => {
       const inactive = screen.getByTestId('desktop-agent-status-claude');
 
       expect(active.getAttribute('aria-pressed')).toBe('true');
-      expect(active.className).toContain('bg-cyan-100');
-      expect(active.className).toContain('dark:bg-cyan-900/30');
+      expect(active.className).toContain('bg-accent-100');
+      expect(active.className).toContain('dark:bg-accent-900/30');
 
       expect(inactive.getAttribute('aria-pressed')).toBe('false');
-      expect(inactive.className).not.toContain('bg-cyan-100');
+      expect(inactive.className).not.toContain('bg-accent-100');
     });
   });
 

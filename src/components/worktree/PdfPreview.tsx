@@ -110,7 +110,7 @@ export function PdfPreview({ dataUri, filePath, variant = 'iframe' }: PdfPreview
         className="h-full flex items-center justify-center"
         data-testid="pdf-preview-loading"
       >
-        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-cyan-600 dark:border-t-cyan-400" />
+        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-accent-600 dark:border-t-accent-400" />
       </div>
     );
   }
@@ -144,7 +144,7 @@ export function PdfPreview({ dataUri, filePath, variant = 'iframe' }: PdfPreview
             href={blobUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg bg-cyan-600 hover:bg-cyan-700 active:bg-cyan-800 text-white text-sm font-medium transition-colors"
+            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg bg-accent-600 hover:bg-accent-700 active:bg-accent-800 text-white text-sm font-medium transition-colors"
           >
             PDFを新しいタブで開く
           </a>

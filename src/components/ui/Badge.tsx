@@ -28,7 +28,7 @@ const dotColorStyles: Record<BadgeVariant, string> = {
   success: 'bg-green-600',
   warning: 'bg-yellow-600',
   error: 'bg-red-600',
-  info: 'bg-blue-600',
+  info: 'bg-info',
   gray: 'bg-gray-600',
 };
 

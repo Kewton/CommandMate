@@ -138,7 +138,7 @@ export const GitStashPanel = memo(function GitStashPanel({
                   setPushMessage('');
                   setIncludeUntracked(false);
                 }}
-                className="px-2 py-1 text-xs rounded bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-50"
+                className="px-2 py-1 text-xs rounded bg-accent-600 hover:bg-accent-700 text-white disabled:opacity-50"
                 data-testid="stash-push-button"
               >
                 Stash
@@ -159,7 +159,7 @@ export const GitStashPanel = memo(function GitStashPanel({
                 <li key={stash.index} className="py-1.5" data-testid="git-stash-row">
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
-                      <span className="font-mono text-xs text-cyan-600 dark:text-cyan-400">
+                      <span className="font-mono text-xs text-accent-600 dark:text-accent-400">
                         stash@{'{'}{stash.index}{'}'}
                       </span>
                       <span className="ml-2 text-xs text-gray-700 dark:text-gray-300 truncate">

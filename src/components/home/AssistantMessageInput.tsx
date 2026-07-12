@@ -118,7 +118,7 @@ export const AssistantMessageInput = memo(function AssistantMessageInput({
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex shrink-0 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-1.5 focus-within:border-cyan-500 focus-within:ring-1 focus-within:ring-cyan-500 dark:border-gray-600 dark:bg-gray-800"
+      className="flex shrink-0 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-1.5 focus-within:border-accent-500 focus-within:ring-1 focus-within:ring-accent-500 dark:border-gray-600 dark:bg-gray-800"
       data-testid="assistant-message-input"
     >
       <textarea
@@ -145,7 +145,7 @@ export const AssistantMessageInput = memo(function AssistantMessageInput({
       <button
         type="submit"
         disabled={!message.trim() || sending || disabled}
-        className="flex-shrink-0 p-1.5 text-cyan-600 hover:bg-cyan-50 dark:text-cyan-400 dark:hover:bg-cyan-900/30 rounded-full transition-colors disabled:text-gray-300 dark:disabled:text-gray-600 disabled:hover:bg-transparent"
+        className="flex-shrink-0 p-1.5 text-accent-600 hover:bg-accent-50 dark:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors disabled:text-gray-300 dark:disabled:text-gray-600 disabled:hover:bg-transparent"
         aria-label="Send message"
         data-testid="assistant-send-button"
       >

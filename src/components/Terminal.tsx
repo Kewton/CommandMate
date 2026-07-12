@@ -341,7 +341,7 @@ export function TerminalComponent({
           <button
             onClick={() => sendCommand('ls -la')}
             disabled={connectionStatus !== 'connected'}
-            className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded disabled:cursor-not-allowed disabled:opacity-50"
+            className="px-3 py-1 text-xs bg-accent-600 hover:bg-accent-700 text-white rounded disabled:cursor-not-allowed disabled:opacity-50"
           >
             ls -la
           </button>

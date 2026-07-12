@@ -299,7 +299,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
               // Silently handle
             }
           }}
-          className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-cyan-500 focus:border-transparent w-full"
+          className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-ring focus:border-transparent w-full"
           data-testid="mobile-status-dropdown"
           aria-label="Worktree status"
         >
@@ -319,7 +319,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
             <button
               type="button"
               onClick={startEditing}
-              className="text-sm text-cyan-600 hover:text-cyan-800 dark:text-cyan-400 dark:hover:text-cyan-300"
+              className="text-sm text-accent-600 hover:text-accent-800 dark:text-accent-400 dark:hover:text-accent-300"
             >
               Edit
             </button>
@@ -331,7 +331,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
               value={text}
               onChange={(e) => setText(e.target.value)}
               placeholder="Add notes about this branch..."
-              className="w-full min-h-[150px] p-3 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+              className="w-full min-h-[150px] p-3 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
               autoFocus
             />
             <div className="flex gap-2">
@@ -339,7 +339,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
                 type="button"
                 onClick={handleSave}
                 disabled={isSaving}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
+                className="px-4 py-2 bg-accent-600 text-white rounded-lg hover:bg-accent-700 disabled:opacity-50 text-sm font-medium"
               >
                 {isSaving ? 'Saving...' : 'Save'}
               </button>
@@ -372,7 +372,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
             href={worktree.link}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-sm text-blue-600 hover:underline break-all"
+            className="text-sm text-accent-600 hover:underline break-all"
           >
             {worktree.link}
           </a>
@@ -402,7 +402,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
           <button
             type="button"
             onClick={onToggleLogs}
-            className="text-sm text-blue-600 hover:text-blue-800"
+            className="text-sm text-accent-600 hover:text-accent-800"
           >
             {showLogs ? 'Hide' : 'Show'}
           </button>
@@ -676,7 +676,7 @@ export const DesktopHeader = memo(function DesktopHeader({
                   aria-pressed={isActive}
                   className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${
                     isActive
-                      ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-900 dark:text-cyan-100'
+                      ? 'bg-accent-100 dark:bg-accent-900/30 text-accent-900 dark:text-accent-100'
                       : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'
                   }${draggingInstanceId === inst.id ? ' opacity-50 cursor-grabbing' : ''}`}
                 >
@@ -725,7 +725,7 @@ export const DesktopHeader = memo(function DesktopHeader({
               onWorktreeStatusChange(val === '' ? null : val as 'ready' | 'in_progress' | 'in_review' | 'done');
             }}
             onClick={(e) => e.stopPropagation()}
-            className="text-xs px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-cyan-500 focus:border-transparent cursor-pointer"
+            className="text-xs px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-ring focus:border-transparent cursor-pointer"
             data-testid="desktop-status-dropdown"
             aria-label="Worktree status"
           >
@@ -840,7 +840,7 @@ export const LoadingIndicator = memo(function LoadingIndicator() {
     >
       <div className="flex flex-col items-center gap-3">
         <div
-          className="animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-cyan-600 dark:border-t-cyan-400"
+          className="animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-accent-600 dark:border-t-accent-400"
           aria-hidden="true"
         />
         <p className="text-gray-600 dark:text-gray-400">Loading worktree...</p>

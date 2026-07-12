@@ -266,7 +266,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
         <CardContent>
           {loading && logFiles.length === 0 && (
             <div className="text-center py-4">
-              <div className="inline-block animate-spin rounded-full h-6 w-6 border-4 border-gray-300 border-t-blue-600" />
+              <div className="inline-block animate-spin rounded-full h-6 w-6 border-4 border-gray-300 border-t-accent-600" />
             </div>
           )}
 
@@ -290,7 +290,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
                   onClick={() => loadLogFile(file)}
                   className={`w-full text-left px-3 py-2 rounded text-sm font-mono transition-colors ${
                     selectedFile === file
-                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                      ? 'bg-accent-50 text-accent-700 border border-accent-200'
                       : 'hover:bg-gray-50 border border-transparent'
                   }`}
                 >
@@ -381,7 +381,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
           <CardContent>
             {loading && (
               <div className="text-center py-8">
-                <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 border-t-blue-600" />
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 border-t-accent-600" />
               </div>
             )}
 

@@ -92,7 +92,7 @@ describe('Toast Component', () => {
       const toast = screen.getByTestId('toast-test-3');
       expect(toast).toBeInTheDocument();
       expect(toast).toHaveTextContent('Info message');
-      expect(toast).toHaveClass('bg-cyan-50');
+      expect(toast).toHaveClass('bg-accent-50');
     });
 
     it('should display success icon for success toast', () => {

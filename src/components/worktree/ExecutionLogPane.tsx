@@ -256,7 +256,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
     return (
       <div className={`flex items-center justify-center h-full p-4 ${className}`}>
         <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-4 border-gray-200 dark:border-gray-700 border-t-cyan-500 rounded-full animate-spin" />
+          <div className="w-8 h-8 border-4 border-gray-200 dark:border-gray-700 border-t-accent-500 rounded-full animate-spin" />
           <span className="text-sm text-gray-500 dark:text-gray-400">{t('loading')}</span>
         </div>
       </div>
@@ -271,7 +271,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
           <button
             type="button"
             onClick={() => void fetchData()}
-            className="ml-2 px-3 py-1 text-sm text-white bg-cyan-500 rounded hover:bg-cyan-600"
+            className="ml-2 px-3 py-1 text-sm text-white bg-accent-500 rounded hover:bg-accent-600"
           >
             {t('retry')}
           </button>
@@ -292,7 +292,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
           onClick={() => setActiveTab('schedules')}
           className={`-mb-px px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
             activeTab === 'schedules'
-              ? 'border-cyan-500 text-cyan-700 dark:text-cyan-300'
+              ? 'border-accent-500 text-accent-700 dark:text-accent-300'
               : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
           }`}
         >
@@ -306,7 +306,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
           onClick={() => setActiveTab('logs')}
           className={`-mb-px px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
             activeTab === 'logs'
-              ? 'border-cyan-500 text-cyan-700 dark:text-cyan-300'
+              ? 'border-accent-500 text-accent-700 dark:text-accent-300'
               : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
           }`}
         >
@@ -318,21 +318,21 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
         {activeTab === 'schedules' ? (
           <div className="flex flex-col gap-4">
             {/* Active Schedules overview */}
-            <div className="rounded border border-cyan-100 bg-cyan-50/60 p-3 dark:border-cyan-900/40 dark:bg-cyan-950/20">
+            <div className="rounded border border-accent-100 bg-accent-50/60 p-3 dark:border-accent-900/40 dark:bg-accent-950/20">
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-sm font-semibold text-cyan-900 dark:text-cyan-200">
+                <span className="text-sm font-semibold text-accent-900 dark:text-accent-200">
                   {t('activeSchedulesTitle')} ({activeSchedules.length})
                 </span>
-                <span className="text-xs text-cyan-700 dark:text-cyan-300">
+                <span className="text-xs text-accent-700 dark:text-accent-300">
                   {t('activeSchedulesDescription')}
                 </span>
               </div>
               {activeSchedules.length === 0 ? (
-                <p className="text-xs text-cyan-800 dark:text-cyan-300">{t('noActiveSchedules')}</p>
+                <p className="text-xs text-accent-800 dark:text-accent-300">{t('noActiveSchedules')}</p>
               ) : (
                 <div className="space-y-2">
                   {activeSchedules.map((schedule) => (
-                    <div key={schedule.scheduleId} className="rounded border border-cyan-200/80 bg-white/80 p-3 dark:border-cyan-900/40 dark:bg-gray-900/60">
+                    <div key={schedule.scheduleId} className="rounded border border-accent-200/80 bg-white/80 p-3 dark:border-accent-900/40 dark:bg-gray-900/60">
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-medium text-sm text-gray-900 dark:text-gray-100">{schedule.name}</span>
                         <div className="flex items-center gap-2">
@@ -340,7 +340,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
                             {schedule.isCronActive ? t('activeState.active') : t('activeState.inactive')}
                           </span>
                           {schedule.isExecuting && (
-                            <span className="text-xs px-2 py-0.5 rounded bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300">
+                            <span className="text-xs px-2 py-0.5 rounded bg-accent-100 text-accent-700 dark:bg-accent-900/30 dark:text-accent-300">
                               {t('activeState.executing')}
                             </span>
                           )}
@@ -365,7 +365,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
             {/* Configured schedules */}
             {schedules.length === 0 ? (
               <div className="flex flex-col items-center text-center py-8 px-4">
-                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-cyan-50 text-cyan-600 dark:bg-cyan-900/30 dark:text-cyan-300">
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-accent-50 text-accent-600 dark:bg-accent-900/30 dark:text-accent-300">
                   <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-7 h-7">
                     <circle cx="12" cy="12" r="9" />
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 7.5V12l3 2" />
@@ -377,7 +377,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
                   type="button"
                   data-testid="schedule-empty-cta"
                   onClick={handleNewSchedule}
-                  className="inline-flex items-center gap-1.5 px-5 py-2.5 text-sm font-semibold text-white bg-cyan-600 hover:bg-cyan-700 rounded-lg shadow-sm transition-colors"
+                  className="inline-flex items-center gap-1.5 px-5 py-2.5 text-sm font-semibold text-white bg-accent-600 hover:bg-accent-700 rounded-lg shadow-sm transition-colors"
                 >
                   <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
                     <path d="M10 4a1 1 0 011 1v4h4a1 1 0 110 2h-4v4a1 1 0 11-2 0v-4H5a1 1 0 110-2h4V5a1 1 0 011-1z" />
@@ -389,7 +389,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
                   data-testid="schedule-manual-toggle"
                   aria-expanded={manualStepsOpen}
                   onClick={() => setManualStepsOpen((open) => !open)}
-                  className="mt-5 text-xs text-cyan-700 dark:text-cyan-300 hover:underline"
+                  className="mt-5 text-xs text-accent-700 dark:text-accent-300 hover:underline"
                 >
                   {t('emptyState.manualToggle')}
                 </button>
@@ -412,7 +412,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
                     type="button"
                     data-testid="schedule-new-button"
                     onClick={handleNewSchedule}
-                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-cyan-600 hover:bg-cyan-700 rounded transition-colors whitespace-nowrap"
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-accent-600 hover:bg-accent-700 rounded transition-colors whitespace-nowrap"
                   >
                     <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
                       <path d="M10 4a1 1 0 011 1v4h4a1 1 0 110 2h-4v4a1 1 0 11-2 0v-4H5a1 1 0 110-2h4V5a1 1 0 011-1z" />
@@ -453,7 +453,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
                               aria-label={t('edit.edit')}
                               title={t('edit.edit')}
                               onClick={() => void handleEditSchedule(schedule)}
-                              className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded transition-colors"
+                              className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-accent-600 dark:hover:text-accent-400 hover:bg-accent-50 dark:hover:bg-accent-900/20 rounded transition-colors"
                             >
                               <EditIcon />
                             </button>

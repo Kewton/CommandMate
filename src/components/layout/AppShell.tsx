@@ -257,7 +257,7 @@ function ResizeHandle({
       data-testid="sidebar-resize-handle"
       aria-hidden="true"
       onMouseDown={handleMouseDown}
-      className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-cyan-500/40 transition-colors"
+      className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-accent-500/40 transition-colors"
     />
   );
 }

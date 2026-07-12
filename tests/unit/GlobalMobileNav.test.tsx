@@ -68,28 +68,28 @@ describe('GlobalMobileNav', () => {
     mockPathname.mockReturnValue('/');
     render(<GlobalMobileNav />);
     const homeLink = screen.getByText('Home').closest('a');
-    expect(homeLink?.className).toContain('text-cyan-600');
+    expect(homeLink?.className).toContain('text-accent-600');
   });
 
   it('should highlight active Sessions tab when on /sessions', () => {
     mockPathname.mockReturnValue('/sessions');
     render(<GlobalMobileNav />);
     const sessionsLink = screen.getByText('Sessions').closest('a');
-    expect(sessionsLink?.className).toContain('text-cyan-600');
+    expect(sessionsLink?.className).toContain('text-accent-600');
   });
 
   it('should highlight active Review tab when on /review', () => {
     mockPathname.mockReturnValue('/review');
     render(<GlobalMobileNav />);
     const reviewLink = screen.getByText('Review').closest('a');
-    expect(reviewLink?.className).toContain('text-cyan-600');
+    expect(reviewLink?.className).toContain('text-accent-600');
   });
 
   it('should highlight active More tab when on /more', () => {
     mockPathname.mockReturnValue('/more');
     render(<GlobalMobileNav />);
     const moreLink = screen.getByText('More').closest('a');
-    expect(moreLink?.className).toContain('text-cyan-600');
+    expect(moreLink?.className).toContain('text-accent-600');
   });
 
   it('should have a nav element with data-testid', () => {

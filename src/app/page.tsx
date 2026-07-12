@@ -124,19 +124,19 @@ export default function Home() {
         {!bannerDismissed && (
           <div
             data-testid="welcome-banner"
-            className="mb-6 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 rounded-lg p-4 flex items-start justify-between"
+            className="mb-6 bg-accent-50 dark:bg-accent-900/20 border border-accent-200 dark:border-accent-800 rounded-lg p-4 flex items-start justify-between"
           >
             <div>
-              <h2 className="text-sm font-semibold text-cyan-800 dark:text-cyan-200">
+              <h2 className="text-sm font-semibold text-accent-800 dark:text-accent-200">
                 Welcome to the new CommandMate UI
               </h2>
-              <p className="text-sm text-cyan-700 dark:text-cyan-300 mt-1">
+              <p className="text-sm text-accent-700 dark:text-accent-300 mt-1">
                 The interface has been reorganized. Repositories, Sessions, and External Apps now have their own dedicated pages accessible from the navigation.
               </p>
             </div>
             <button
               onClick={dismissBanner}
-              className="ml-4 text-cyan-600 dark:text-cyan-400 hover:text-cyan-800 dark:hover:text-cyan-200"
+              className="ml-4 text-accent-600 dark:text-accent-400 hover:text-accent-800 dark:hover:text-accent-200"
               aria-label="Dismiss banner"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -172,10 +172,10 @@ export default function Home() {
             <Link
               key={card.href}
               href={card.href}
-              className="bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700 hover:border-cyan-300 dark:hover:border-cyan-700 transition-colors group"
+              className="bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700 hover:border-accent-300 dark:hover:border-accent-700 transition-colors group"
               data-testid={`shortcut-${card.title.toLowerCase()}`}
             >
-              <div className="text-gray-400 dark:text-gray-500 group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors mb-3">
+              <div className="text-gray-400 dark:text-gray-500 group-hover:text-accent-600 dark:group-hover:text-accent-400 transition-colors mb-3">
                 {card.icon}
               </div>
               <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">{card.title}</h3>

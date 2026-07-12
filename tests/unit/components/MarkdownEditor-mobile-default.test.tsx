@@ -101,7 +101,7 @@ describe('MarkdownEditor - Issue #549: Mobile Default Preview Tab', () => {
     await waitFor(() => {
       const previewTab = screen.getByTestId('mobile-tab-preview');
       // Active tab has cyan color class
-      expect(previewTab.className).toContain('text-cyan-600');
+      expect(previewTab.className).toContain('text-accent-600');
     });
   });
 
@@ -135,7 +135,7 @@ describe('MarkdownEditor - Issue #549: Mobile Default Preview Tab', () => {
 
     await waitFor(() => {
       const previewTab = screen.getByTestId('mobile-tab-preview');
-      expect(previewTab.className).toContain('text-cyan-600');
+      expect(previewTab.className).toContain('text-accent-600');
     });
   });
 
@@ -147,7 +147,7 @@ describe('MarkdownEditor - Issue #549: Mobile Default Preview Tab', () => {
     // Wait for initial load with preview tab
     await waitFor(() => {
       const previewTab = screen.getByTestId('mobile-tab-preview');
-      expect(previewTab.className).toContain('text-cyan-600');
+      expect(previewTab.className).toContain('text-accent-600');
     });
 
     // Switch to editor tab manually
@@ -159,7 +159,7 @@ describe('MarkdownEditor - Issue #549: Mobile Default Preview Tab', () => {
     // Verify editor tab is now active
     await waitFor(() => {
       const editorTabAfterClick = screen.getByTestId('mobile-tab-editor');
-      expect(editorTabAfterClick.className).toContain('text-cyan-600');
+      expect(editorTabAfterClick.className).toContain('text-accent-600');
     });
 
     // Change filePath - should NOT reset mobileTab
@@ -176,7 +176,7 @@ describe('MarkdownEditor - Issue #549: Mobile Default Preview Tab', () => {
     // Editor tab should still be active (not reset to preview)
     await waitFor(() => {
       const editorTabAfterRerender = screen.getByTestId('mobile-tab-editor');
-      expect(editorTabAfterRerender.className).toContain('text-cyan-600');
+      expect(editorTabAfterRerender.className).toContain('text-accent-600');
     });
   });
 });

@@ -235,14 +235,14 @@ export function TodoWidget() {
               maxLength={MAX_TODO_CONTENT_LENGTH}
               placeholder="Add a todo…"
               data-testid="todo-input"
-              className="flex-1 min-w-0 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400"
+              className="flex-1 min-w-0 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-ring"
             />
             <button
               type="button"
               onClick={handleAdd}
               disabled={busy || input.trim().length === 0}
               data-testid="todo-add-button"
-              className="shrink-0 rounded-md bg-cyan-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
+              className="shrink-0 rounded-md bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-700 disabled:opacity-50"
             >
               Add
             </button>
@@ -281,7 +281,7 @@ export function TodoWidget() {
                         onChange={() => handleToggle(todo)}
                         data-testid="todo-checkbox"
                         aria-label={todo.done ? 'Mark as not done' : 'Mark as done'}
-                        className="h-4 w-4 rounded border-gray-300 text-cyan-600 focus:ring-cyan-400"
+                        className="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-ring"
                       />
                     </label>
                     <span

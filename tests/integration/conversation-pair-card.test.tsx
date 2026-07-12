@@ -181,7 +181,7 @@ describe('ConversationPairCard', () => {
       );
 
       // User message should also have word-break classes
-      const userSection = screen.getByText('You').closest('.bg-blue-900\\/30');
+      const userSection = screen.getByText('You').closest('.bg-accent-900\\/30');
       expect(userSection).toBeTruthy();
 
       const userContentContainer = userSection?.querySelector('.text-sm.text-gray-200');

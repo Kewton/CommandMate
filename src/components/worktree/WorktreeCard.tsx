@@ -179,7 +179,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
             {nextAction && (
               <span
                 data-testid="worktree-card-next-action"
-                className="inline-block px-2 py-0.5 text-xs rounded bg-cyan-50 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300"
+                className="inline-block px-2 py-0.5 text-xs rounded bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300"
               >
                 {nextAction}
               </span>
@@ -199,7 +199,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Link</p>
                 <button
                   onClick={handleLinkClick}
-                  className="flex items-center gap-1 text-sm text-cyan-600 dark:text-cyan-400 hover:text-cyan-800 dark:hover:text-cyan-300 hover:underline transition-colors"
+                  className="flex items-center gap-1 text-sm text-accent-600 dark:text-accent-400 hover:text-accent-800 dark:hover:text-accent-300 hover:underline transition-colors"
                   title="Open link in new tab"
                 >
                   <svg
@@ -229,7 +229,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
                     : currentStatus === 'in_review'
                     ? 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300'
                     : currentStatus === 'in_progress'
-                    ? 'bg-cyan-100 dark:bg-cyan-900 text-cyan-700 dark:text-cyan-300'
+                    ? 'bg-accent-100 dark:bg-accent-900 text-accent-700 dark:text-accent-300'
                     : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
                 }`}>
                   {currentStatus === 'in_progress' ? 'In Progress' : currentStatus === 'in_review' ? 'In Review' : currentStatus === 'ready' ? 'Ready' : 'Done'}

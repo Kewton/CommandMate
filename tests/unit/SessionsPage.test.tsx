@@ -33,10 +33,10 @@ vi.mock('@/components/layout', () => ({
 vi.mock('@/config/status-colors', () => ({
   SIDEBAR_STATUS_CONFIG: {
     idle: { type: 'dot', className: 'bg-gray-400', label: 'Idle' },
-    ready: { type: 'dot', className: 'bg-cyan-500', label: 'Ready' },
+    ready: { type: 'dot', className: 'bg-accent-500', label: 'Ready' },
     running: { type: 'spinner', className: 'border-green-500', label: 'Running' },
     waiting: { type: 'dot', className: 'bg-yellow-500', label: 'Waiting' },
-    generating: { type: 'spinner', className: 'border-blue-500', label: 'Generating' },
+    generating: { type: 'spinner', className: 'border-info', label: 'Generating' },
   },
 }));
 

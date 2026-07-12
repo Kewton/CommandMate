@@ -23,7 +23,7 @@ export const STATUS_TEXT_COLOR: Record<ChangedFile['status'], string> = {
   added: 'text-green-600 dark:text-green-400',
   modified: 'text-yellow-600 dark:text-yellow-400',
   deleted: 'text-red-600 dark:text-red-400',
-  renamed: 'text-blue-600 dark:text-blue-400',
+  renamed: 'text-info',
   untracked: 'text-teal-600 dark:text-teal-400',
   unmerged: 'text-orange-600 dark:text-orange-400',
 };
@@ -100,7 +100,7 @@ export const DiffLine = memo(function DiffLine({ line }: { line: string }) {
   } else if (line.startsWith('-') && !line.startsWith('---')) {
     className += ' text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20';
   } else if (line.startsWith('@@')) {
-    className += ' text-blue-600 dark:text-blue-400';
+    className += ' text-info';
   } else {
     className += ' text-gray-700 dark:text-gray-300';
   }

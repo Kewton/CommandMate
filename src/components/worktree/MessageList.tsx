@@ -127,7 +127,7 @@ const MessageBubble = React.memo(function MessageBubble({
               onFilePathClickRef.current(filePath);
             }}
             className={`underline hover:no-underline font-mono transition-colors break-all inline ${
-              isUser ? 'text-blue-100 hover:text-white' : 'text-blue-600 hover:text-blue-800'
+              isUser ? 'text-accent-100 hover:text-white' : 'text-accent-600 hover:text-accent-800'
             }`}
           >
             {fullMatch}
@@ -181,16 +181,16 @@ const MessageBubble = React.memo(function MessageBubble({
         <div
           className={`rounded-lg px-4 py-3 ${
             isUser
-              ? 'bg-blue-600 text-white'
+              ? 'bg-accent-600 text-white'
               : 'bg-white border border-gray-200'
           }`}
         >
           {/* Header */}
           <div className="flex items-center gap-2 mb-2">
-            <span className={`text-xs font-medium ${isUser ? 'text-blue-100' : 'text-gray-500'}`}>
+            <span className={`text-xs font-medium ${isUser ? 'text-accent-100' : 'text-gray-500'}`}>
               {isUser ? 'You' : getCliToolDisplayNameSafe(message.cliToolId)}
             </span>
-            <span className={`text-xs ${isUser ? 'text-blue-200' : 'text-gray-400'}`}>
+            <span className={`text-xs ${isUser ? 'text-accent-200' : 'text-gray-400'}`}>
               {timestamp}
             </span>
           </div>
@@ -198,7 +198,7 @@ const MessageBubble = React.memo(function MessageBubble({
           {/* Content */}
           <div className={`prose prose-sm max-w-none break-words overflow-wrap-anywhere ${isUser ? 'prose-invert' : ''}`}>
             {message.summary && (
-              <div className={`text-sm font-medium mb-2 ${isUser ? 'text-blue-50' : 'text-gray-700'}`}>
+              <div className={`text-sm font-medium mb-2 ${isUser ? 'text-accent-50' : 'text-gray-700'}`}>
                 {message.summary}
               </div>
             )}
@@ -227,7 +227,7 @@ const MessageBubble = React.memo(function MessageBubble({
                 href={`/api/worktrees/${message.worktreeId}/logs/${message.logFileName}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={`text-xs ${isUser ? 'text-blue-100 hover:text-white' : 'text-blue-600 hover:text-blue-700'}`}
+                className={`text-xs ${isUser ? 'text-accent-100 hover:text-white' : 'text-accent-600 hover:text-accent-700'}`}
               >
                 View log file →
               </a>
@@ -289,7 +289,7 @@ const MessageBubble = React.memo(function MessageBubble({
                           selectedTextInputOption === option.number
                             ? 'bg-purple-600 text-white hover:bg-purple-700 ring-2 ring-purple-400 ring-opacity-50'
                             : option.isDefault
-                            ? 'bg-blue-600 text-white hover:bg-blue-700 ring-2 ring-blue-400 ring-opacity-50'
+                            ? 'bg-accent-600 text-white hover:bg-accent-700 ring-2 ring-accent-400 ring-opacity-50'
                             : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
                         }`}
                       >
@@ -297,7 +297,7 @@ const MessageBubble = React.memo(function MessageBubble({
                           <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
                             selectedTextInputOption === option.number
                               ? 'bg-purple-500'
-                              : option.isDefault ? 'bg-blue-500' : 'bg-gray-200 text-gray-600'
+                              : option.isDefault ? 'bg-accent-500' : 'bg-gray-200 text-gray-600'
                           }`}>
                             {option.number}
                           </span>
@@ -486,7 +486,7 @@ export function MessageList({
     return (
       <Card padding="lg">
         <div className="text-center py-8">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 border-t-blue-600" />
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 border-t-accent-600" />
           <p className="mt-4 text-gray-600">Loading messages...</p>
         </div>
       </Card>

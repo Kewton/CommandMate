@@ -106,10 +106,10 @@ export function NavigationButtons({ worktreeId, cliToolId, instanceId, onKeysSen
           type="button"
           className={`min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
             border border-gray-300 dark:border-gray-600
-            focus:outline-none focus:ring-2 focus:ring-blue-500
+            focus:outline-none focus:ring-2 focus:ring-ring
             transition-colors duration-75
             ${activeKey === key
-              ? 'bg-blue-500 text-white border-blue-500 scale-95'
+              ? 'bg-accent-500 text-white border-accent-500 scale-95'
               : 'bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 active:bg-gray-100 dark:active:bg-gray-500'
             }`}
           aria-label={ariaLabel}

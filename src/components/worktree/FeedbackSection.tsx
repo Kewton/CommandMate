@@ -58,7 +58,7 @@ export function FeedbackSection({ className }: FeedbackSectionProps) {
             href={href}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center text-sm text-blue-600 hover:text-blue-800 underline"
+            className="inline-flex items-center text-sm text-accent-600 hover:text-accent-800 underline"
           >
             {label}
             <span className="ml-1" aria-hidden="true">&rarr;</span>

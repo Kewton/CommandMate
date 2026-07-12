@@ -51,7 +51,7 @@ export const GitCurrentStatusBar = memo(function GitCurrentStatusBar({
       {/* Loading: only show the spinner before the first successful load */}
       {statusLoading && !gitStatus && (
         <div className="flex items-center gap-2 py-1" role="status">
-          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-500" />
+          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-accent-500" />
           <span className="sr-only">Loading git status...</span>
         </div>
       )}
@@ -72,7 +72,7 @@ export const GitCurrentStatusBar = memo(function GitCurrentStatusBar({
           <div className={`flex items-center flex-wrap ${isMobile ? 'gap-1.5' : 'gap-2'}`}>
             {/* Branch chip */}
             <span
-              className="inline-flex items-center max-w-full truncate rounded px-2 py-0.5 text-xs font-mono bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300"
+              className="inline-flex items-center max-w-full truncate rounded px-2 py-0.5 text-xs font-mono bg-accent-50 text-accent-700 dark:bg-accent-900/30 dark:text-accent-300"
               data-testid="git-status-branch-chip"
               title={gitStatus.currentBranch}
             >

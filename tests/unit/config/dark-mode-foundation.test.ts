@@ -80,9 +80,9 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       expect(cssContent).toContain('dark:border-gray-700');
     });
 
-    it('should have cyan colors for .btn-primary', () => {
-      expect(cssContent).toContain('bg-cyan-600');
-      expect(cssContent).toContain('dark:bg-cyan-500');
+    it('should have accent tokens for .btn-primary', () => {
+      expect(cssContent).toContain('bg-accent-600');
+      expect(cssContent).toContain('dark:bg-accent-500');
     });
 
     it('should have dark: variants for .btn-secondary', () => {
@@ -90,11 +90,11 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       expect(cssContent).toContain('dark:text-gray-100');
     });
 
-    it('should have cyan colors for .badge-info', () => {
-      expect(cssContent).toContain('bg-cyan-100');
-      expect(cssContent).toContain('dark:bg-cyan-900');
-      expect(cssContent).toContain('text-cyan-800');
-      expect(cssContent).toContain('dark:text-cyan-300');
+    it('should have accent tokens for .badge-info', () => {
+      expect(cssContent).toContain('bg-accent-100');
+      expect(cssContent).toContain('dark:bg-accent-900');
+      expect(cssContent).toContain('text-accent-800');
+      expect(cssContent).toContain('dark:text-accent-300');
     });
 
     it('should have dark: variants for .badge-success', () => {
@@ -122,9 +122,9 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       expect(cssContent).toContain('dark:text-gray-200');
     });
 
-    it('should have cyan colors for .input focus ring', () => {
-      expect(cssContent).toContain('focus:ring-cyan-500');
-      expect(cssContent).toContain('focus:border-cyan-500');
+    it('should have ring token for .input focus ring', () => {
+      expect(cssContent).toContain('focus:ring-ring');
+      expect(cssContent).toContain('focus:border-ring');
     });
 
     it('should have dark: variants for .input', () => {
@@ -171,9 +171,12 @@ describe('Dark Mode Foundation (Issue #424)', () => {
   describe('status-colors.ts constraint', () => {
     const statusColorsPath = path.join(ROOT, 'src/config/status-colors.ts');
 
-    it('should preserve border-blue-500 in STATUS_COLORS (NOT migrated to cyan)', () => {
+    it('should use the info token for the STATUS_COLORS spinner (blue, kept distinct from the cyan accent)', () => {
       const content = fs.readFileSync(statusColorsPath, 'utf-8');
-      expect(content).toContain('border-blue-500');
+      expect(content).toContain('border-info');
+      // The running/generating spinner stays blue (info), not migrated to the cyan accent.
+      expect(content).not.toContain('border-blue-500');
+      expect(content).not.toContain('border-accent-500');
     });
   });
 });

@@ -62,7 +62,7 @@ export const FileSearchBar = memo(function FileSearchBar({
           if (e.key === 'Enter') { if (e.shiftKey) { onPrevMatch(); } else { onNextMatch(); } }
         }}
         placeholder="検索..."
-        className="flex-1 min-w-0 px-2 py-0.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-cyan-500"
+        className="flex-1 min-w-0 px-2 py-0.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-ring"
         autoComplete="off"
         autoCorrect="off"
         autoCapitalize="off"

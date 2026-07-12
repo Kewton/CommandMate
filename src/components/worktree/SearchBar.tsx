@@ -86,7 +86,7 @@ const LoadingSpinner = memo(function LoadingSpinner() {
   return (
     <div
       data-testid="search-loading"
-      className="w-4 h-4 border-2 border-gray-300 border-t-cyan-500 rounded-full animate-spin"
+      className="w-4 h-4 border-2 border-gray-300 border-t-accent-500 rounded-full animate-spin"
       aria-label="Searching..."
     />
   );
@@ -186,7 +186,7 @@ export const SearchBar = memo(function SearchBar({
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          className="flex-1 min-w-0 px-2 py-1 text-sm bg-gray-50 dark:bg-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-cyan-500 focus:border-cyan-500"
+          className="flex-1 min-w-0 px-2 py-1 text-sm bg-gray-50 dark:bg-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-ring focus:border-accent-500"
           aria-label="Search files"
           aria-busy={isSearching}
         />
@@ -218,7 +218,7 @@ export const SearchBar = memo(function SearchBar({
           onClick={() => onModeChange('name')}
           className={`px-2 py-0.5 text-xs rounded transition-colors ${
             mode === 'name'
-              ? 'bg-cyan-100 dark:bg-cyan-900 text-cyan-700 dark:text-cyan-300 font-medium'
+              ? 'bg-accent-100 dark:bg-accent-900 text-accent-700 dark:text-accent-300 font-medium'
               : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
           }`}
           aria-pressed={mode === 'name'}
@@ -231,7 +231,7 @@ export const SearchBar = memo(function SearchBar({
           onClick={() => onModeChange('content')}
           className={`px-2 py-0.5 text-xs rounded transition-colors ${
             mode === 'content'
-              ? 'bg-cyan-100 dark:bg-cyan-900 text-cyan-700 dark:text-cyan-300 font-medium'
+              ? 'bg-accent-100 dark:bg-accent-900 text-accent-700 dark:text-accent-300 font-medium'
               : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
           }`}
           aria-pressed={mode === 'content'}

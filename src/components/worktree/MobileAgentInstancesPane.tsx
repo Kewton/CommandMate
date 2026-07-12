@@ -108,7 +108,7 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
                   checked={checked}
                   disabled={disabled}
                   onChange={() => onToggleInstanceVisible(inst.id)}
-                  className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-cyan-600 focus:ring-cyan-500 disabled:opacity-50"
+                  className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-accent-600 focus:ring-ring disabled:opacity-50"
                 />
                 <span className="flex-1 min-w-0">
                   <span className="block text-sm font-medium text-gray-700 dark:text-gray-200 truncate">

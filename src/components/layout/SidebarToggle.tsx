@@ -38,7 +38,7 @@ export const SidebarToggle = memo(function SidebarToggle() {
         bg-gray-800 hover:bg-gray-700
         text-gray-300 hover:text-white
         transition-all duration-200
-        focus:outline-none focus:ring-2 focus:ring-blue-500
+        focus:outline-none focus:ring-2 focus:ring-ring
         ${isOpen ? 'left-[284px]' : 'left-2'}
         top-16
       `}

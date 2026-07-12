@@ -111,7 +111,7 @@ function permissionDefaultFor(cliToolId: string): string {
 }
 
 const INPUT_CLASS =
-  'w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500';
+  'w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-ring';
 const LABEL_CLASS = 'block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1';
 const ERROR_CLASS = 'mt-1 text-xs text-red-600 dark:text-red-400';
 
@@ -189,7 +189,7 @@ function AccordionSection({
         onClick={() => onToggle(id)}
         className="w-full flex items-center gap-3 px-3 py-2.5 text-left bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
       >
-        <span className="flex-shrink-0 text-cyan-600 dark:text-cyan-400">{icon}</span>
+        <span className="flex-shrink-0 text-accent-600 dark:text-accent-400">{icon}</span>
         <span className="flex-1 min-w-0">
           <span className="block text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</span>
           {summary && (
@@ -498,7 +498,7 @@ export function ScheduleEditDialog({
           data-testid="schedule-enabled-toggle"
           checked={form.enabled}
           onChange={(e) => setForm((prev) => ({ ...prev, enabled: e.target.checked }))}
-          className="h-4 w-4 rounded border-gray-300 text-cyan-600 focus:ring-cyan-500"
+          className="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-ring"
         />
         <span className="text-sm text-gray-700 dark:text-gray-300">{t('edit.enabledLabel')}</span>
       </label>
@@ -672,7 +672,7 @@ export function ScheduleEditDialog({
         data-testid="schedule-save-button"
         onClick={() => void handleSubmit()}
         disabled={!isValid || submitting}
-        className="px-4 py-2 text-sm font-medium text-white bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
+        className="px-4 py-2 text-sm font-medium text-white bg-accent-600 hover:bg-accent-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
       >
         {t('edit.save')}
       </button>

@@ -106,7 +106,7 @@ export const FileMetadataToggle = memo(function FileMetadataToggle({
                 data-testid={`file-metadata-toggle-${row.key}`}
                 checked={settings[row.key]}
                 onChange={() => handleToggle(row.key)}
-                className="h-3.5 w-3.5 accent-cyan-500"
+                className="h-3.5 w-3.5 accent-accent-500"
               />
               <span>{t(row.labelKey)}</span>
             </label>

@@ -177,7 +177,7 @@ export const VibeLocalSettings = memo(function VibeLocalSettings({
 
       {loadingModels ? (
         <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-          <span className="w-3 h-3 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+          <span className="w-3 h-3 border-2 border-accent-500 border-t-transparent rounded-full animate-spin" />
           {t('loading')}
         </div>
       ) : ollamaError && ollamaModels.length === 0 ? (
@@ -190,7 +190,7 @@ export const VibeLocalSettings = memo(function VibeLocalSettings({
           value={vibeLocalModel ?? ''}
           onChange={handleModelChange}
           disabled={savingModel}
-          className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 disabled:opacity-50"
+          className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-ring focus:border-accent-500 disabled:opacity-50"
         >
           <option value="">{t('vibeLocalModelDefault')}</option>
           {ollamaModels.map((model) => (
@@ -217,7 +217,7 @@ export const VibeLocalSettings = memo(function VibeLocalSettings({
           onBlur={handleContextWindowBlur}
           placeholder={t('vibeLocalContextWindowDefault')}
           disabled={savingContextWindow}
-          className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 disabled:opacity-50"
+          className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-ring focus:border-accent-500 disabled:opacity-50"
         />
       </div>
     </div>

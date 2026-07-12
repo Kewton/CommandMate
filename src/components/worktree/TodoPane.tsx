@@ -247,14 +247,14 @@ export const TodoPane = React.memo(function TodoPane({
           maxLength={MAX_TODO_CONTENT_LENGTH}
           placeholder={t('todo.addPlaceholder')}
           data-testid="todo-input"
-          className="flex-1 min-w-0 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400"
+          className="flex-1 min-w-0 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-ring"
         />
         <button
           type="button"
           onClick={handleAdd}
           disabled={busy || input.trim().length === 0}
           data-testid="todo-add-button"
-          className="shrink-0 rounded-md bg-cyan-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
+          className="shrink-0 rounded-md bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-700 disabled:opacity-50"
         >
           {t('todo.add')}
         </button>
@@ -319,7 +319,7 @@ export const TodoPane = React.memo(function TodoPane({
                   className={`min-w-0 break-words text-sm ${
                     todo.status === 'done'
                       ? 'line-through text-gray-400 dark:text-gray-500'
-                      : 'text-gray-800 dark:text-gray-200 group-hover/content:text-cyan-700 dark:group-hover/content:text-cyan-300'
+                      : 'text-gray-800 dark:text-gray-200 group-hover/content:text-accent-700 dark:group-hover/content:text-accent-300'
                   }`}
                 >
                   {todo.content}
@@ -399,7 +399,7 @@ export const TodoPane = React.memo(function TodoPane({
               maxLength={MAX_TODO_CONTENT_LENGTH}
               placeholder={t('todo.contentPlaceholder')}
               data-testid="todo-edit-content"
-              className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400"
+              className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </label>
           <label className="flex flex-col gap-1">
@@ -422,7 +422,7 @@ export const TodoPane = React.memo(function TodoPane({
               rows={6}
               placeholder={t('todo.detailPlaceholder')}
               data-testid="todo-edit-detail"
-              className="w-full resize-y rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400"
+              className="w-full resize-y rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </label>
           <div className="flex justify-end gap-2">
@@ -439,7 +439,7 @@ export const TodoPane = React.memo(function TodoPane({
               onClick={handleSaveEdit}
               disabled={saving || editContent.trim().length === 0}
               data-testid="todo-edit-save"
-              className="rounded-md bg-cyan-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
+              className="rounded-md bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-700 disabled:opacity-50"
             >
               {t('todo.save')}
             </button>

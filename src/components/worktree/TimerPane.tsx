@@ -64,7 +64,7 @@ interface TimerItem {
 
 function getStatusColor(status: string): string {
   switch (status) {
-    case 'pending': return 'text-blue-600 dark:text-blue-400';
+    case 'pending': return 'text-info';
     case 'sending': return 'text-yellow-600 dark:text-yellow-400';
     case 'sent': return 'text-green-600 dark:text-green-400';
     case 'failed': return 'text-red-600 dark:text-red-400';
@@ -237,7 +237,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
       {timers.length === 0 ? (
         /* Empty state: centered CTA (mirrors the Schedule pane's empty state) */
         <div className="flex flex-col items-center text-center py-8 px-4">
-          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-cyan-50 text-cyan-600 dark:bg-cyan-900/30 dark:text-cyan-300">
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-accent-50 text-accent-600 dark:bg-accent-900/30 dark:text-accent-300">
             <Clock className="w-7 h-7" />
           </div>
           <p className="font-semibold text-gray-700 dark:text-gray-200 mb-1">{t('timer.title')}</p>
@@ -246,7 +246,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
             type="button"
             data-testid="timer-empty-cta"
             onClick={() => setDialogOpen(true)}
-            className="inline-flex items-center gap-1.5 px-5 py-2.5 text-sm font-semibold text-white bg-cyan-600 hover:bg-cyan-700 rounded-lg shadow-sm transition-colors"
+            className="inline-flex items-center gap-1.5 px-5 py-2.5 text-sm font-semibold text-white bg-accent-600 hover:bg-accent-700 rounded-lg shadow-sm transition-colors"
           >
             <Plus className="w-4 h-4" />
             {t('timer.createButton')}
@@ -266,7 +266,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
               data-testid="timer-new-button"
               onClick={() => setDialogOpen(true)}
               disabled={atMax}
-              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors whitespace-nowrap"
+              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-accent-600 hover:bg-accent-700 disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors whitespace-nowrap"
             >
               <Plus className="w-3.5 h-3.5" />
               {t('timer.newTimer')}
@@ -283,7 +283,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
                   {timer.message.length > 60 ? timer.message.slice(0, 60) + '...' : timer.message}
                 </div>
                 <div className="flex items-center gap-2 text-xs">
-                  <span className="text-cyan-600 dark:text-cyan-400 font-medium">
+                  <span className="text-accent-600 dark:text-accent-400 font-medium">
                     {resolvedInstances.find((inst) => inst.id === timer.instanceId)?.alias ?? timer.cliToolId}
                   </span>
                   <span className={getStatusColor(timer.status)}>
@@ -317,7 +317,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
             <button
               type="button"
               onClick={loadMoreTimers}
-              className="px-3 py-2 text-sm text-cyan-600 dark:text-cyan-400 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded-md transition-colors text-center"
+              className="px-3 py-2 text-sm text-accent-600 dark:text-accent-400 hover:bg-accent-50 dark:hover:bg-accent-900/20 rounded-md transition-colors text-center"
             >
               {t('timer.loadMore')}
             </button>

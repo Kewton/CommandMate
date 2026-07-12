@@ -224,7 +224,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
                 onClick={() => setInputMode('local')}
                 className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
                   inputMode === 'local'
-                    ? 'border-cyan-500 text-cyan-600 dark:text-cyan-400'
+                    ? 'border-accent-500 text-accent-600 dark:text-accent-400'
                     : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
               >
@@ -236,7 +236,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
                 onClick={() => setInputMode('url')}
                 className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
                   inputMode === 'url'
-                    ? 'border-cyan-500 text-cyan-600 dark:text-cyan-400'
+                    ? 'border-accent-500 text-accent-600 dark:text-accent-400'
                     : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
               >

@@ -68,7 +68,7 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
         type="button"
         onClick={() => setMenuOpen((prev) => !prev)}
         disabled={busy || options.length === 0}
-        className="flex items-center gap-1 px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-cyan-700 dark:text-cyan-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+        className="flex items-center gap-1 px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-accent-700 dark:text-accent-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
         data-testid="branch-checkout-dropdown-toggle"
         aria-haspopup="menu"
         aria-expanded={menuOpen}
@@ -183,7 +183,7 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
                 type="button"
                 onClick={confirmCheckout}
                 disabled={busy}
-                className="px-3 py-1 text-xs font-medium rounded bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-50"
+                className="px-3 py-1 text-xs font-medium rounded bg-accent-600 text-white hover:bg-accent-700 disabled:opacity-50"
                 data-testid="branch-checkout-confirm-button"
               >
                 Checkout

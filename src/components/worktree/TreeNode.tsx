@@ -210,8 +210,8 @@ export const FileIcon = memo(function FileIcon({ extension }: { extension?: stri
     if (!extension) return 'text-gray-400';
 
     const colorMap: Record<string, string> = {
-      ts: 'text-blue-500',
-      tsx: 'text-blue-500',
+      ts: 'text-info',
+      tsx: 'text-info',
       js: 'text-yellow-400',
       jsx: 'text-yellow-400',
       json: 'text-yellow-600',
@@ -395,7 +395,7 @@ export const TreeNode = memo(function TreeNode({
         {isDirectory ? (
           <span className="w-4 h-4 flex items-center justify-center">
             {loading ? (
-              <span className="w-3 h-3 border-2 border-gray-300 dark:border-gray-600 border-t-cyan-500 rounded-full animate-spin" />
+              <span className="w-3 h-3 border-2 border-gray-300 dark:border-gray-600 border-t-accent-500 rounded-full animate-spin" />
             ) : (
               <ChevronIcon expanded={isExpanded} />
             )}

@@ -63,13 +63,13 @@ export function SimpleMessageInput({ worktreeId, cliToolId }: SimpleMessageInput
         onKeyDown={handleKeyDown}
         placeholder="Send a message..."
         disabled={isSending}
-        className="flex-1 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-cyan-500 focus:border-transparent disabled:opacity-50"
+        className="flex-1 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-ring focus:border-transparent disabled:opacity-50"
       />
       <button
         onClick={handleSend}
         disabled={isSending || !text.trim()}
         aria-label="Send"
-        className="px-3 py-1.5 text-sm font-medium text-white bg-cyan-600 hover:bg-cyan-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className="px-3 py-1.5 text-sm font-medium text-white bg-accent-600 hover:bg-accent-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
         {isSending ? 'Sending...' : 'Send'}
       </button>

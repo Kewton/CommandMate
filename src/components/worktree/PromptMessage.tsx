@@ -59,7 +59,7 @@ function SendingIndicator({ className = '' }: { className?: string }) {
   const t = useTranslations('prompt');
   return (
     <div className={`flex items-center gap-2 text-sm text-gray-500 ${className}`.trim()}>
-      <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-blue-600" />
+      <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-accent-600" />
       <span>{t('sending')}</span>
     </div>
   );
@@ -123,7 +123,7 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
                 <button
                   onClick={() => handleRespond('yes')}
                   disabled={responding}
-                  className={`px-6 py-2 ${BUTTON_BASE_CLASSES} bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500`}
+                  className={`px-6 py-2 ${BUTTON_BASE_CLASSES} bg-accent-600 text-white hover:bg-accent-700 focus:ring-ring`}
                 >
                   {t('yes')}
                 </button>
@@ -149,19 +149,19 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
                     className={`
                       w-full text-left px-4 py-3 ${BUTTON_BASE_CLASSES}
                       ${option.isDefault
-                        ? 'bg-blue-600 text-white hover:bg-blue-700 border-2 border-blue-600'
+                        ? 'bg-accent-600 text-white hover:bg-accent-700 border-2 border-accent-600'
                         : 'bg-white border-2 border-gray-300 hover:bg-gray-50 text-gray-900'
                       }
-                      focus:ring-blue-500
+                      focus:ring-ring
                     `}
                   >
                     <div className="flex items-start gap-3">
-                      <span className={`font-bold ${option.isDefault ? 'text-white' : 'text-blue-600'}`}>
+                      <span className={`font-bold ${option.isDefault ? 'text-white' : 'text-accent-600'}`}>
                         {option.number}.
                       </span>
                       <span className="flex-1">{option.label}</span>
                       {option.isDefault && (
-                        <span className="text-blue-100 text-sm">❯ {t('default')}</span>
+                        <span className="text-accent-100 text-sm">❯ {t('default')}</span>
                       )}
                     </div>
                   </button>

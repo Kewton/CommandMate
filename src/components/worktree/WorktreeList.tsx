@@ -469,7 +469,7 @@ Type "delete" to confirm:`;
       {/* Loading State */}
       {loading && !worktrees.length && (
         <div className="text-center py-12">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-cyan-600" />
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-accent-600" />
           <p className="mt-4 text-gray-600 dark:text-gray-400">Loading worktrees...</p>
         </div>
       )}

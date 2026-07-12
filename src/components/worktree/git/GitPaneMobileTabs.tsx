@@ -91,7 +91,7 @@ export const GitPaneMobileTabs = memo(function GitPaneMobileTabs({
             onClick={() => onTabChange(tab)}
             className={`flex flex-1 flex-col items-center justify-center gap-1 py-2 px-1 text-xs transition-colors border-b-2 ${
               isActive
-                ? 'text-cyan-600 dark:text-cyan-400 border-cyan-500 bg-cyan-50 dark:bg-cyan-900/30'
+                ? 'text-accent-600 dark:text-accent-400 border-accent-500 bg-accent-50 dark:bg-accent-900/30'
                 : 'text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
             }`}
           >

@@ -102,7 +102,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
       {/* Loading state */}
       {commitListOpen && isLoading && (
         <div className="flex items-center justify-center py-8" role="status">
-          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-cyan-500" />
+          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-accent-500" />
           <span className="sr-only">Loading commit history...</span>
         </div>
       )}
@@ -139,12 +139,12 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                           onClick={() => onCommitSelect(commit.hash)}
                           className={`flex-1 min-w-0 text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
                             selectedCommit === commit.hash
-                              ? 'bg-cyan-50 dark:bg-cyan-900/30'
+                              ? 'bg-accent-50 dark:bg-accent-900/30'
                               : ''
                           }`}
                         >
                           <div className="flex items-baseline gap-2">
-                            <span className="font-mono text-xs text-cyan-600 dark:text-cyan-400 shrink-0">
+                            <span className="font-mono text-xs text-accent-600 dark:text-accent-400 shrink-0">
                               {commit.shortHash}
                             </span>
                             <span className="truncate text-gray-800 dark:text-gray-200">
@@ -161,7 +161,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                         <button
                           type="button"
                           onClick={() => onToggleInlineDiff(commit.hash)}
-                          className="shrink-0 px-2 text-xs text-cyan-600 dark:text-cyan-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:underline"
+                          className="shrink-0 px-2 text-xs text-accent-600 dark:text-accent-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:underline"
                           aria-label={`View diff for ${commit.shortHash}`}
                           aria-expanded={inlineOpen}
                           data-testid="git-commit-view-diff-button"
@@ -178,7 +178,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                         >
                           {inlineFilesLoading && (
                             <div className="flex items-center justify-center py-3" role="status">
-                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-500" />
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-accent-500" />
                               <span className="sr-only">Loading changed files...</span>
                             </div>
                           )}
@@ -197,7 +197,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                                     onClick={() => onInlineDiffFile(commit.hash, file.path)}
                                     className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors ${
                                       selectedFile === file.path && selectedCommit === commit.hash
-                                        ? 'bg-cyan-50 dark:bg-cyan-900/30'
+                                        ? 'bg-accent-50 dark:bg-accent-900/30'
                                         : ''
                                     }`}
                                     aria-label={`Show commit diff for ${file.path}`}
@@ -243,7 +243,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
 
                   {isLoadingFiles && (
                     <div className="flex items-center justify-center py-4" role="status">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-500" />
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-accent-500" />
                       <span className="sr-only">Loading changed files...</span>
                     </div>
                   )}
@@ -261,7 +261,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                             onClick={() => onFileSelect(file.path)}
                             className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
                               selectedFile === file.path
-                                ? 'bg-cyan-50 dark:bg-cyan-900/30'
+                                ? 'bg-accent-50 dark:bg-accent-900/30'
                                 : ''
                             }`}
                           >
@@ -294,7 +294,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                     <>
                       {isLoadingDiff && (
                         <div className="flex items-center justify-center py-4" role="status">
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-500" />
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-accent-500" />
                           <span className="sr-only">Loading diff...</span>
                         </div>
                       )}

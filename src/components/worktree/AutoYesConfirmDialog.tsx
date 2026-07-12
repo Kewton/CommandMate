@@ -125,7 +125,7 @@ export function AutoYesConfirmDialog({
                 onClick={() => setSelectedDuration(duration)}
                 className={`flex-1 py-2 px-3 text-sm font-medium rounded-md border-2 transition-colors ${
                   selectedDuration === duration
-                    ? 'border-cyan-600 bg-cyan-50 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-400'
+                    ? 'border-accent-600 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-400'
                     : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:border-gray-400 dark:hover:border-gray-500'
                 }`}
                 style={{ minHeight: '44px' }}
@@ -177,7 +177,7 @@ export function AutoYesConfirmDialog({
             className={`w-full px-3 py-2 border rounded-md text-sm font-mono dark:bg-gray-800 dark:text-gray-100 ${
               regexError
                 ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
-                : 'border-gray-300 dark:border-gray-600 focus:ring-cyan-500 focus:border-cyan-500'
+                : 'border-gray-300 dark:border-gray-600 focus:ring-ring focus:border-accent-500'
             } focus:outline-none focus:ring-1`}
             data-testid="stop-pattern-input"
           />

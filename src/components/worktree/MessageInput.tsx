@@ -409,15 +409,15 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
 
       {/* Issue #474: Image attachment preview */}
       {attachedImage && (
-        <div className="flex items-center gap-2 px-4 py-1.5 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 rounded-lg text-sm" data-testid="image-attachment-preview">
-          <svg className="h-4 w-4 flex-shrink-0 text-cyan-600 dark:text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="flex items-center gap-2 px-4 py-1.5 bg-accent-50 dark:bg-accent-900/20 border border-accent-200 dark:border-accent-800 rounded-lg text-sm" data-testid="image-attachment-preview">
+          <svg className="h-4 w-4 flex-shrink-0 text-accent-600 dark:text-accent-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
-          <span className="truncate text-cyan-800 dark:text-cyan-300">{attachedImage.file.name}</span>
+          <span className="truncate text-accent-800 dark:text-accent-300">{attachedImage.file.name}</span>
           <button
             type="button"
             onClick={removeAttachment}
-            className="flex-shrink-0 p-0.5 text-cyan-600 hover:text-red-500 dark:text-cyan-400 dark:hover:text-red-400 rounded transition-colors"
+            className="flex-shrink-0 p-0.5 text-accent-600 hover:text-red-500 dark:text-accent-400 dark:hover:text-red-400 rounded transition-colors"
             aria-label="Remove attachment"
             data-testid="remove-attachment-button"
           >
@@ -438,7 +438,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         data-testid="image-file-input"
       />
 
-      <form onSubmit={handleSubmit} className={`bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus-within:border-cyan-500 focus-within:ring-1 focus-within:ring-cyan-500 ${isMobile ? 'flex flex-col gap-1' : 'flex items-center gap-2'}`}>
+      <form onSubmit={handleSubmit} className={`bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus-within:border-accent-500 focus-within:ring-1 focus-within:ring-accent-500 ${isMobile ? 'flex flex-col gap-1' : 'flex items-center gap-2'}`}>
         {/* Mobile: Row 1 - action buttons (slash command, attach, interrupt) */}
         {isMobile && (
           <div className="flex items-center gap-1">
@@ -450,7 +450,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
                 }
                 setShowCommandSelector(true);
               }}
-              className="flex-shrink-0 p-2 text-gray-500 hover:text-cyan-600 hover:bg-cyan-50 dark:text-gray-400 dark:hover:text-cyan-400 dark:hover:bg-cyan-900/30 rounded-full transition-colors"
+              className="flex-shrink-0 p-2 text-gray-500 hover:text-accent-600 hover:bg-accent-50 dark:text-gray-400 dark:hover:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors"
               aria-label="Show slash commands"
               data-testid="mobile-command-button"
             >
@@ -462,7 +462,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
               type="button"
               onClick={openFileDialog}
               disabled={isUploading || sending}
-              className="flex-shrink-0 p-2 text-gray-500 hover:text-cyan-600 hover:bg-cyan-50 dark:text-gray-400 dark:hover:text-cyan-400 dark:hover:bg-cyan-900/30 rounded-full transition-colors disabled:text-gray-300 dark:disabled:text-gray-600 disabled:hover:bg-transparent"
+              className="flex-shrink-0 p-2 text-gray-500 hover:text-accent-600 hover:bg-accent-50 dark:text-gray-400 dark:hover:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors disabled:text-gray-300 dark:disabled:text-gray-600 disabled:hover:bg-transparent"
               aria-label="Attach image"
               data-testid="attach-image-button"
             >
@@ -492,7 +492,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
             type="button"
             onClick={openFileDialog}
             disabled={isUploading || sending}
-            className="flex-shrink-0 p-2 text-gray-500 hover:text-cyan-600 hover:bg-cyan-50 dark:text-gray-400 dark:hover:text-cyan-400 dark:hover:bg-cyan-900/30 rounded-full transition-colors disabled:text-gray-300 dark:disabled:text-gray-600 disabled:hover:bg-transparent"
+            className="flex-shrink-0 p-2 text-gray-500 hover:text-accent-600 hover:bg-accent-50 dark:text-gray-400 dark:hover:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors disabled:text-gray-300 dark:disabled:text-gray-600 disabled:hover:bg-transparent"
             aria-label="Attach image"
             data-testid="attach-image-button"
           >
@@ -539,7 +539,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
           <button
             type="submit"
             disabled={(!message.trim() && !attachedImage) || sending}
-            className="flex-shrink-0 p-2 text-cyan-600 hover:bg-cyan-50 dark:text-cyan-400 dark:hover:bg-cyan-900/30 rounded-full transition-colors disabled:text-gray-300 dark:disabled:text-gray-600 disabled:hover:bg-transparent"
+            className="flex-shrink-0 p-2 text-accent-600 hover:bg-accent-50 dark:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors disabled:text-gray-300 dark:disabled:text-gray-600 disabled:hover:bg-transparent"
             aria-label="Send message"
           >
             {sending ? (

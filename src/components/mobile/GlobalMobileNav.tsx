@@ -58,7 +58,7 @@ export function GlobalMobileNav() {
               href={tab.href}
               className={`flex flex-col items-center justify-center flex-1 h-full text-xs transition-colors ${
                 active
-                  ? 'text-cyan-600 dark:text-cyan-400'
+                  ? 'text-accent-600 dark:text-accent-400'
                   : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
               }`}
             >

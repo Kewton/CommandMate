@@ -85,7 +85,7 @@ const TabButton = memo(function TabButton({
   );
 
   const activeClasses = isActive
-    ? 'border-cyan-500 text-cyan-600 dark:text-cyan-400 bg-white dark:bg-gray-800'
+    ? 'border-accent-500 text-accent-600 dark:text-accent-400 bg-white dark:bg-gray-800'
     : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100';
 
   return (

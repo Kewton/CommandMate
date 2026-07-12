@@ -54,7 +54,7 @@ function getStatusColor(status: ExecutionLogStatus): string {
     case 'completed': return 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/30';
     case 'failed': return 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30';
     case 'timeout': return 'text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-900/30';
-    case 'running': return 'text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-900/30';
+    case 'running': return 'text-accent-600 dark:text-accent-400 bg-accent-50 dark:bg-accent-900/30';
     case 'cancelled': return 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800';
   }
 }

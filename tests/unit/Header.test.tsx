@@ -69,21 +69,21 @@ describe('Header', () => {
     mockPathname.mockReturnValue('/');
     render(<Header />);
     const homeLink = screen.getByText('Home').closest('a');
-    expect(homeLink?.className).toContain('text-cyan-600');
+    expect(homeLink?.className).toContain('text-accent-600');
   });
 
   it('should highlight the active Sessions link when on /sessions', () => {
     mockPathname.mockReturnValue('/sessions');
     render(<Header />);
     const sessionsLink = screen.getByText('Sessions').closest('a');
-    expect(sessionsLink?.className).toContain('text-cyan-600');
+    expect(sessionsLink?.className).toContain('text-accent-600');
   });
 
   it('should highlight the active Review/Report link when on /review', () => {
     mockPathname.mockReturnValue('/review');
     render(<Header />);
     const reviewLink = screen.getByText('Review/Report').closest('a');
-    expect(reviewLink?.className).toContain('text-cyan-600');
+    expect(reviewLink?.className).toContain('text-accent-600');
   });
 
   it('should still render GitHub link', () => {

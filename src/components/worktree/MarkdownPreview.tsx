@@ -272,7 +272,7 @@ export const MobileTabBar = memo(function MobileTabBar({
         onClick={() => onTabChange('editor')}
         className={`flex-1 py-2 text-sm font-medium ${
           mobileTab === 'editor'
-            ? 'text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400'
+            ? 'text-accent-600 dark:text-accent-400 border-b-2 border-accent-600 dark:border-accent-400'
             : 'text-gray-500 dark:text-gray-400'
         }`}
       >
@@ -284,7 +284,7 @@ export const MobileTabBar = memo(function MobileTabBar({
         onClick={() => onTabChange('preview')}
         className={`flex-1 py-2 text-sm font-medium ${
           mobileTab === 'preview'
-            ? 'text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400'
+            ? 'text-accent-600 dark:text-accent-400 border-b-2 border-accent-600 dark:border-accent-400'
             : 'text-gray-500 dark:text-gray-400'
         }`}
       >

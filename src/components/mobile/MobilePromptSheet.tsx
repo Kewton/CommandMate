@@ -23,7 +23,7 @@ const BUTTON_STYLES = {
   /** Common button base styles */
   base: 'px-6 py-3 rounded-lg font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2',
   /** Primary button styles */
-  primary: 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500',
+  primary: 'bg-accent-600 text-white hover:bg-accent-700 focus:ring-ring',
   /** Secondary button styles */
   secondary: 'bg-white dark:bg-gray-700 border-2 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 focus:ring-gray-500',
   /** Default selected button styles */
@@ -280,7 +280,7 @@ function PromptContent({
       {/* Answering indicator */}
       {isDisabled && (
         <div data-testid="answering-indicator" className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400" role="status" aria-live="polite">
-          <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 dark:border-gray-600 border-t-blue-600" aria-hidden="true" />
+          <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 dark:border-gray-600 border-t-accent-600" aria-hidden="true" />
           <span>{t('sending')}</span>
         </div>
       )}
@@ -341,7 +341,7 @@ const YesNoActions = memo(function YesNoActions({
         type="button"
         onClick={onYes}
         disabled={disabled}
-        className={`flex-1 ${BUTTON_STYLES.base} ${BUTTON_STYLES.primary} ${isYesDefault ? 'ring-2 ring-blue-300' : ''}`}
+        className={`flex-1 ${BUTTON_STYLES.base} ${BUTTON_STYLES.primary} ${isYesDefault ? 'ring-2 ring-accent-300' : ''}`}
       >
         {t('yes')}
       </button>
@@ -399,7 +399,7 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
                 key={option.number}
                 className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-all ${
                   isSelected
-                    ? 'bg-blue-50 dark:bg-blue-900/30 border-2 border-blue-500'
+                    ? 'bg-accent-50 dark:bg-accent-900/30 border-2 border-accent-500'
                     : 'bg-white dark:bg-gray-700 border-2 border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
                 } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
@@ -415,7 +415,7 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
                 <div className="flex-1">
                   <span className="font-medium dark:text-gray-200">{option.number}. {option.label}</span>
                   {option.isDefault && (
-                    <span className="ml-2 text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded">
+                    <span className="ml-2 text-xs text-accent-600 bg-accent-100 px-2 py-0.5 rounded">
                       {t('default')}
                     </span>
                   )}
@@ -437,7 +437,7 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
             onChange={(e) => onTextInputChange(e.target.value)}
             disabled={disabled}
             placeholder={t('enterValuePlaceholder')}
-            className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+            className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:border-ring disabled:opacity-50"
           />
         </div>
       )}

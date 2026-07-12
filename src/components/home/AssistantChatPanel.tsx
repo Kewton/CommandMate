@@ -331,7 +331,7 @@ export function AssistantChatPanel() {
       data-testid="assistant-chat-panel"
     >
       <div
-        className="flex h-[78vh] min-h-[34rem] max-h-[48rem] flex-col gap-4 overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950/80 p-4"
+        className="flex h-[78vh] min-h-[34rem] max-h-[48rem] flex-col gap-4 overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-accent-950/80 p-4"
       >
           <div className="flex flex-col gap-1">
             <div className="grid gap-3 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto]">
@@ -349,7 +349,7 @@ export function AssistantChatPanel() {
                 value={selectedRepoId}
                 onChange={(e) => void handleRepoChange(e.target.value)}
                 disabled={repositories.length === 0}
-                className="w-full rounded-lg border border-slate-600 bg-slate-100 px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+                className="w-full rounded-lg border border-slate-600 bg-slate-100 px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:bg-slate-300"
                 data-testid="assistant-repo-select"
               >
                 {repositories.length === 0 && <option value="">No repositories</option>}
@@ -364,7 +364,7 @@ export function AssistantChatPanel() {
                 value={selectedTool}
                 onChange={(e) => handleToolChange(e.target.value as CLIToolType)}
                 disabled={conversationActive}
-                className="w-full rounded-lg border border-slate-600 bg-slate-100 px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+                className="w-full rounded-lg border border-slate-600 bg-slate-100 px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:bg-slate-300"
                 data-testid="assistant-tool-select"
               >
                 {allowedTools.map((tool) => (
@@ -379,7 +379,7 @@ export function AssistantChatPanel() {
                   <button
                     onClick={handleStart}
                     disabled={!selectedRepoId || starting}
-                    className="w-full rounded-lg bg-cyan-500 px-4 py-2 text-sm font-medium text-slate-950 transition-colors hover:bg-cyan-400 disabled:bg-slate-500 disabled:text-slate-300 md:w-auto"
+                    className="w-full rounded-lg bg-accent-500 px-4 py-2 text-sm font-medium text-slate-950 transition-colors hover:bg-accent-400 disabled:bg-slate-500 disabled:text-slate-300 md:w-auto"
                     data-testid="assistant-start-button"
                   >
                     {starting ? 'Starting...' : 'Start'}

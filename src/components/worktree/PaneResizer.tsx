@@ -56,14 +56,14 @@ const BASE_CLASSES = [
   'dark:bg-gray-700',
   'transition-colors',
   'duration-150',
-  'hover:bg-cyan-500',
+  'hover:bg-accent-500',
   // Explicit dark hover variant: with `darkMode: 'class'`, the base
   // `dark:bg-gray-700` outranks a plain `hover:` accent in dark mode, so the
   // hover accent must be re-stated under `dark:` to win (Issue #970).
-  'dark:hover:bg-cyan-500',
+  'dark:hover:bg-accent-500',
   'focus:outline-none',
   'focus:ring-2',
-  'focus:ring-cyan-500',
+  'focus:ring-ring',
   'focus:ring-offset-2',
   'focus:ring-offset-white',
   'dark:focus:ring-offset-gray-900',
@@ -284,10 +284,10 @@ export const PaneResizer = memo(function PaneResizer({
   const className = useMemo(() => {
     const orientationClasses = isHorizontal ? HORIZONTAL_CLASSES : VERTICAL_CLASSES;
     // While dragging, accent the line and let it thicken slightly as live
-    // feedback (only hover stays a constant 1px — Issue #970). `dark:bg-cyan-500`
+    // feedback (only hover stays a constant 1px — Issue #970). `dark:bg-accent-500`
     // is needed so the accent outranks the base `dark:bg-gray-700` in dark mode.
     const draggingClasses = isDragging
-      ? ['bg-cyan-500', 'dark:bg-cyan-500', 'dragging', isHorizontal ? 'w-2' : 'h-2']
+      ? ['bg-accent-500', 'dark:bg-accent-500', 'dragging', isHorizontal ? 'w-2' : 'h-2']
       : [];
 
     return [...BASE_CLASSES, ...orientationClasses, ...draggingClasses].join(' ');
