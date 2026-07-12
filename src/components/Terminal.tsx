@@ -82,7 +82,7 @@ export function TerminalComponent({
         brightCyan: '#89ddff',
         brightWhite: '#ffffff',
       },
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      fontFamily: 'var(--font-geist-mono), Menlo, Monaco, "Courier New", monospace',
       fontSize: fontSizeRef.current,
       cursorBlink: true,
       convertEol: true,
