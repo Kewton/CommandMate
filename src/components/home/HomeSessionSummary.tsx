@@ -15,6 +15,7 @@
 
 import React, { useMemo } from 'react';
 import { StatusDot } from '@/components/ui';
+import { cn } from '@/lib/utils/cn';
 import type { Worktree } from '@/types/models';
 
 export interface HomeSessionSummaryProps {
@@ -43,20 +44,32 @@ export function HomeSessionSummary({ worktrees }: HomeSessionSummaryProps) {
   return (
     <div className="grid grid-cols-2 gap-3" data-testid="home-session-summary">
       <div className="rounded-lg border border-border bg-surface-2 px-3 py-2">
-        <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <StatusDot status={runningCount > 0 ? 'running' : 'idle'} size="sm" label="Running" />
           Running
         </div>
-        <div className="text-2xl font-bold text-green-600 dark:text-green-400" data-testid="running-count">
+        <div
+          className={cn(
+            'text-3xl font-bold tabular-nums',
+            runningCount > 0 ? 'text-foreground' : 'text-muted-foreground',
+          )}
+          data-testid="running-count"
+        >
           {runningCount}
         </div>
       </div>
       <div className="rounded-lg border border-border bg-surface-2 px-3 py-2">
-        <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <StatusDot status={waitingCount > 0 ? 'waiting' : 'idle'} size="sm" label="Waiting" />
           Waiting
         </div>
-        <div className="text-2xl font-bold text-amber-600 dark:text-amber-400" data-testid="waiting-count">
+        <div
+          className={cn(
+            'text-3xl font-bold tabular-nums',
+            waitingCount > 0 ? 'text-foreground' : 'text-muted-foreground',
+          )}
+          data-testid="waiting-count"
+        >
           {waitingCount}
         </div>
       </div>

@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { format } from 'date-fns';
-import { formatRelativeTime, formatMessageTimestamp } from '@/lib/date-utils';
+import { formatRelativeTime, formatRelativeTimeShort, formatMessageTimestamp } from '@/lib/date-utils';
 import { ja } from 'date-fns/locale/ja';
 import { enUS } from 'date-fns/locale/en-US';
 
@@ -179,6 +179,69 @@ describe('formatMessageTimestamp [SF-001]', () => {
         expect(formatMessageTimestamp(d, ja)).toBe(format(d, 'PPp', { locale: ja }));
         expect(formatMessageTimestamp(d, enUS)).toBe(format(d, 'PPp', { locale: enUS }));
       }
+    });
+  });
+});
+
+describe('formatRelativeTimeShort (Issue #1072)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function withNow(iso: string, fn: () => void): void {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(iso));
+    try {
+      fn();
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  it('returns an empty string for invalid input', () => {
+    expect(formatRelativeTimeShort('invalid')).toBe('');
+    expect(formatRelativeTimeShort('')).toBe('');
+  });
+
+  it('returns "now" for very recent timestamps', () => {
+    withNow('2026-07-12T12:00:00Z', () => {
+      expect(formatRelativeTimeShort('2026-07-12T11:59:40Z')).toBe('now');
+    });
+  });
+
+  it('formats minutes as "Nm ago"', () => {
+    withNow('2026-07-12T12:00:00Z', () => {
+      expect(formatRelativeTimeShort('2026-07-12T11:55:00Z')).toBe('5m ago');
+    });
+  });
+
+  it('formats hours as "Nh ago"', () => {
+    withNow('2026-07-12T12:00:00Z', () => {
+      expect(formatRelativeTimeShort('2026-07-12T08:00:00Z')).toBe('4h ago');
+    });
+  });
+
+  it('formats days as "Nd ago"', () => {
+    withNow('2026-07-12T12:00:00Z', () => {
+      expect(formatRelativeTimeShort('2026-07-09T12:00:00Z')).toBe('3d ago');
+    });
+  });
+
+  it('formats weeks as "Nw ago"', () => {
+    withNow('2026-07-12T12:00:00Z', () => {
+      expect(formatRelativeTimeShort('2026-06-28T12:00:00Z')).toBe('2w ago');
+    });
+  });
+
+  it('formats months as "Nmo ago"', () => {
+    withNow('2026-07-12T12:00:00Z', () => {
+      expect(formatRelativeTimeShort('2026-05-12T12:00:00Z')).toBe('2mo ago');
+    });
+  });
+
+  it('formats years as "Ny ago"', () => {
+    withNow('2026-07-12T12:00:00Z', () => {
+      expect(formatRelativeTimeShort('2025-07-12T12:00:00Z')).toBe('1y ago');
     });
   });
 });

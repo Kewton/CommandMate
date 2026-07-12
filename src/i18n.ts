@@ -22,7 +22,7 @@ export default getRequestConfig(async ({ requestLocale }) => {
   }
 
   // Load all namespace files and merge them
-  const [common, worktree, autoYes, error, prompt, auth, schedule, commandPalette] = await Promise.all([
+  const [common, worktree, autoYes, error, prompt, auth, schedule, commandPalette, home] = await Promise.all([
     import(`../locales/${locale}/common.json`),
     import(`../locales/${locale}/worktree.json`),
     import(`../locales/${locale}/autoYes.json`),
@@ -31,6 +31,7 @@ export default getRequestConfig(async ({ requestLocale }) => {
     import(`../locales/${locale}/auth.json`),
     import(`../locales/${locale}/schedule.json`),
     import(`../locales/${locale}/commandPalette.json`),
+    import(`../locales/${locale}/home.json`),
   ]);
 
   return {
@@ -46,6 +47,7 @@ export default getRequestConfig(async ({ requestLocale }) => {
       auth: auth.default,
       schedule: schedule.default,
       commandPalette: commandPalette.default,
+      home: home.default,
     },
   };
 });

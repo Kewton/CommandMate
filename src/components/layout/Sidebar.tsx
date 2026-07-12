@@ -693,7 +693,7 @@ function GroupHeader({
         <TruncationTooltip content={repositoryName} className="flex-1 min-w-0 text-left truncate">
           {repositoryName}
         </TruncationTooltip>
-        <span className="text-gray-500 font-normal pr-2">{branchCount}</span>
+        <span className="text-gray-500 font-normal tabular-nums pr-2">{branchCount}</span>
       </button>
     </div>
   );

@@ -12,7 +12,7 @@
 import React, { useMemo } from 'react';
 import Link from 'next/link';
 import { compareByTimestamp } from '@/lib/sidebar-utils';
-import { formatRelativeTime } from '@/lib/date-utils';
+import { formatRelativeTimeShort } from '@/lib/date-utils';
 import type { Worktree } from '@/types/models';
 
 export interface RecentSessionsListProps {
@@ -60,7 +60,7 @@ export function RecentSessionsList({ worktrees, limit = 5 }: RecentSessionsListP
     <ul className="space-y-1" data-testid="recent-sessions">
       {recent.map((wt) => {
         const recency = recencyOf(wt);
-        const relativeTime = recency ? formatRelativeTime(String(recency)) : '';
+        const relativeTime = recency ? formatRelativeTimeShort(String(recency)) : '';
         return (
           <li key={wt.id}>
             <Link
@@ -81,7 +81,7 @@ export function RecentSessionsList({ worktrees, limit = 5 }: RecentSessionsListP
                 </span>
               </span>
               {relativeTime && (
-                <span className="shrink-0 text-xs text-gray-400 dark:text-gray-500">
+                <span className="shrink-0 text-xs tabular-nums text-gray-400 dark:text-gray-500">
                   {relativeTime}
                 </span>
               )}
