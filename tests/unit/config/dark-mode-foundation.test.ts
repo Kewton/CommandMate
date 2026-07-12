@@ -75,61 +75,83 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       expect(cssContent).toContain('bg-[#0d1117]');
     });
 
-    it('should have dark: variants for .card component', () => {
-      expect(cssContent).toContain('dark:bg-gray-900');
-      expect(cssContent).toContain('dark:border-gray-700');
-    });
-
-    it('should have accent tokens for .btn-primary', () => {
-      expect(cssContent).toContain('bg-accent-600');
-      expect(cssContent).toContain('dark:bg-accent-500');
-    });
-
-    it('should have dark: variants for .btn-secondary', () => {
-      expect(cssContent).toContain('dark:bg-gray-700');
-      expect(cssContent).toContain('dark:text-gray-100');
-    });
-
-    it('should have accent tokens for .badge-info', () => {
-      expect(cssContent).toContain('bg-accent-100');
-      expect(cssContent).toContain('dark:bg-accent-900');
-      expect(cssContent).toContain('text-accent-800');
-      expect(cssContent).toContain('dark:text-accent-300');
-    });
-
-    it('should have dark: variants for .badge-success', () => {
-      expect(cssContent).toContain('dark:bg-green-900');
-      expect(cssContent).toContain('dark:text-green-300');
-    });
-
-    it('should have dark: variants for .badge-warning', () => {
-      expect(cssContent).toContain('dark:bg-yellow-900');
-      expect(cssContent).toContain('dark:text-yellow-300');
-    });
-
-    it('should have dark: variants for .badge-error', () => {
-      expect(cssContent).toContain('dark:bg-red-900');
-      expect(cssContent).toContain('dark:text-red-300');
-    });
-
-    it('should have dark: variants for .badge-gray', () => {
-      expect(cssContent).toContain('dark:bg-gray-800');
-      expect(cssContent).toContain('dark:text-gray-300');
-    });
-
     it('should have dark: variants for inline code in .prose', () => {
       expect(cssContent).toContain('dark:bg-gray-800');
       expect(cssContent).toContain('dark:text-gray-200');
     });
 
-    it('should have ring token for .input focus ring', () => {
-      expect(cssContent).toContain('focus:ring-ring');
-      expect(cssContent).toContain('focus:border-ring');
+    it('should no longer define the legacy @apply component classes (Issue #1048)', () => {
+      // .card/.btn*/.badge*/.input moved into the cva primitives to remove the
+      // style-definition double structure. globals.css must not redefine them.
+      expect(cssContent).not.toMatch(/\.card\s*\{/);
+      expect(cssContent).not.toMatch(/\.btn(-\w+)?\s*\{/);
+      expect(cssContent).not.toMatch(/\.badge(-\w+)?\s*\{/);
+      expect(cssContent).not.toMatch(/\.input\s*\{/);
     });
 
-    it('should have dark: variants for .input', () => {
-      expect(cssContent).toContain('dark:border-gray-600');
-      expect(cssContent).toContain('dark:bg-gray-800');
+    it('should keep the semantic --input / --surface tokens with a dark override', () => {
+      // The Input primitive relies on border-input / bg-surface, whose dark
+      // values come from the .dark override block.
+      expect(cssContent).toContain('--input:');
+      expect(cssContent).toContain('--surface:');
+      expect(cssContent).toContain('.dark {');
+    });
+  });
+
+  describe('UI primitives dark mode (Issue #1048: @apply → cva)', () => {
+    // The dark-mode component styling now lives in the cva primitives rather
+    // than in globals.css @apply classes.
+    const readPrimitive = (rel: string): string =>
+      fs.readFileSync(path.join(ROOT, rel), 'utf-8');
+
+    it('Button primary keeps accent tokens with dark variant', () => {
+      const content = readPrimitive('src/components/ui/Button.tsx');
+      expect(content).toContain('bg-accent-600');
+      expect(content).toContain('dark:bg-accent-500');
+    });
+
+    it('Button secondary keeps dark variants', () => {
+      const content = readPrimitive('src/components/ui/Button.tsx');
+      expect(content).toContain('dark:bg-gray-700');
+      expect(content).toContain('dark:text-gray-100');
+    });
+
+    it('Card keeps dark background/border variants', () => {
+      const content = readPrimitive('src/components/ui/Card.tsx');
+      expect(content).toContain('dark:bg-gray-900');
+      expect(content).toContain('dark:border-gray-700');
+    });
+
+    it('Badge info keeps accent tokens with dark variants', () => {
+      const content = readPrimitive('src/components/ui/Badge.tsx');
+      expect(content).toContain('bg-accent-100');
+      expect(content).toContain('dark:bg-accent-900');
+      expect(content).toContain('text-accent-800');
+      expect(content).toContain('dark:text-accent-300');
+    });
+
+    it('Badge success/warning/error/gray keep dark variants', () => {
+      const content = readPrimitive('src/components/ui/Badge.tsx');
+      expect(content).toContain('dark:bg-green-900');
+      expect(content).toContain('dark:text-green-300');
+      expect(content).toContain('dark:bg-yellow-900');
+      expect(content).toContain('dark:text-yellow-300');
+      expect(content).toContain('dark:bg-red-900');
+      expect(content).toContain('dark:text-red-300');
+      expect(content).toContain('dark:bg-gray-800');
+      expect(content).toContain('dark:text-gray-300');
+    });
+
+    it('Input keeps the semantic focus ring tokens', () => {
+      const content = readPrimitive('src/components/ui/Input.tsx');
+      expect(content).toContain('focus:ring-ring');
+      expect(content).toContain('focus:border-ring');
+    });
+
+    it('Input uses semantic border-input / bg-surface tokens', () => {
+      const content = readPrimitive('src/components/ui/Input.tsx');
+      expect(content).toContain('border-input');
+      expect(content).toContain('bg-surface');
     });
   });
 

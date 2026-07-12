@@ -139,69 +139,11 @@
     content: none;
   }
 
-  /* Card component base */
-  .card {
-    @apply bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm;
-  }
-
-  .card-hover {
-    @apply transition-shadow duration-200 hover:shadow-md;
-  }
-
-  /* Button base styles */
-  .btn {
-    @apply inline-flex items-center justify-center px-4 py-2 rounded-md font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2;
-  }
-
-  .btn-primary {
-    @apply bg-accent-600 dark:bg-accent-500 text-white hover:bg-accent-700 dark:hover:bg-accent-600 focus:ring-ring;
-  }
-
-  .btn-secondary {
-    @apply bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 hover:bg-gray-300 dark:hover:bg-gray-600 focus:ring-gray-500;
-  }
-
-  .btn-danger {
-    @apply bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
-  }
-
-  .btn-sm {
-    @apply px-3 py-1.5 text-sm;
-  }
-
-  .btn-lg {
-    @apply px-6 py-3 text-lg;
-  }
-
-  /* Badge styles */
-  .badge {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
-  }
-
-  .badge-success {
-    @apply bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300;
-  }
-
-  .badge-warning {
-    @apply bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-300;
-  }
-
-  .badge-error {
-    @apply bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-300;
-  }
-
-  .badge-info {
-    @apply bg-accent-100 dark:bg-accent-900 text-accent-800 dark:text-accent-300;
-  }
-
-  .badge-gray {
-    @apply bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-300;
-  }
-
-  /* Input styles */
-  .input {
-    @apply w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring;
-  }
+  /*
+   * [Issue #1048] Legacy @apply component classes were removed here to
+   * eliminate the style-definition double structure; their Tailwind classes
+   * now live directly in the cva primitives under src/components/ui/.
+   */
 
   /* Container utilities */
   .container-custom {

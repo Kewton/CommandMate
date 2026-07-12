@@ -9,7 +9,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Button, Input, Modal, Switch, Textarea } from '@/components/ui';
+import { Button, Input, Modal, Switch, Textarea, inputVariants } from '@/components/ui';
+import { cn } from '@/lib/utils/cn';
 import {
   validateFormData,
   VALID_APP_TYPES,
@@ -329,7 +330,7 @@ export function ExternalAppForm({
               id="appType"
               value={appType}
               onChange={(e) => setAppType(e.target.value as ExternalAppType)}
-              className={`input w-full ${errors.appType ? 'border-red-500' : ''}`}
+              className={cn(inputVariants(), errors.appType && 'border-red-500')}
               disabled={isSubmitting}
             >
               <option value="">Select app type...</option>

@@ -14,21 +14,25 @@ function classesOf(text: string): string[] {
 }
 
 describe('Button', () => {
-  it('renders base btn class and defaults to the primary variant / md size', () => {
+  it('renders base classes and defaults to the primary variant / md size', () => {
     render(<Button>Go</Button>);
     const cls = classesOf('Go');
-    expect(cls).toContain('btn');
-    expect(cls).toContain('btn-primary');
-    // md size contributes no extra size class
-    expect(cls).not.toContain('btn-sm');
-    expect(cls).not.toContain('btn-lg');
+    // base classes (inlined from the former .btn @apply utility, Issue #1048)
+    expect(cls).toContain('inline-flex');
+    expect(cls).toContain('rounded-md');
+    // primary variant
+    expect(cls).toContain('bg-accent-600');
+    // md size keeps the base px-4 padding and adds no sm/lg override
+    expect(cls).toContain('px-4');
+    expect(cls).not.toContain('px-3');
+    expect(cls).not.toContain('px-6');
   });
 
   it.each([
-    ['primary', 'btn-primary'],
-    ['secondary', 'btn-secondary'],
-    ['danger', 'btn-danger'],
-  ] as const)('applies the %s variant class', (variant, expected) => {
+    ['primary', 'bg-accent-600'],
+    ['secondary', 'bg-gray-200'],
+    ['danger', 'bg-red-600'],
+  ] as const)('applies the %s variant classes', (variant, expected) => {
     render(
       <Button variant={variant}>{variant}</Button>
     );
@@ -48,9 +52,9 @@ describe('Button', () => {
   });
 
   it.each([
-    ['sm', 'btn-sm'],
-    ['lg', 'btn-lg'],
-  ] as const)('applies the %s size class', (size, expected) => {
+    ['sm', 'text-sm'],
+    ['lg', 'text-lg'],
+  ] as const)('applies the %s size classes', (size, expected) => {
     render(<Button size={size}>{size}</Button>);
     expect(classesOf(size)).toContain(expected);
   });
@@ -76,12 +80,13 @@ describe('Button', () => {
   });
 
   it('merges a custom className with last-wins for conflicts', () => {
-    render(<Button className="btn-primary text-black">custom</Button>);
+    // primary sets bg-accent-600; a custom bg utility must win via tailwind-merge
+    render(<Button className="bg-black">custom</Button>);
     const cls = classesOf('custom');
-    // custom class is appended
-    expect(cls).toContain('text-black');
-    // base btn class preserved
-    expect(cls).toContain('btn');
+    expect(cls).toContain('bg-black');
+    expect(cls).not.toContain('bg-accent-600');
+    // base classes preserved
+    expect(cls).toContain('inline-flex');
   });
 
   it('forwards native button props such as type and onClick', () => {

@@ -10,20 +10,23 @@ import { render, screen } from '@testing-library/react';
 import { Badge } from '@/components/ui/Badge';
 
 describe('Badge', () => {
-  it('renders base badge class and defaults to the gray variant', () => {
+  it('renders base classes and defaults to the gray variant', () => {
     render(<Badge data-testid="badge">Neutral</Badge>);
     const cls = screen.getByTestId('badge').className;
-    expect(cls).toContain('badge');
-    expect(cls).toContain('badge-gray');
+    // base classes (inlined from the former .badge @apply utility, Issue #1048)
+    expect(cls).toContain('rounded-full');
+    expect(cls).toContain('inline-flex');
+    // gray variant
+    expect(cls).toContain('bg-gray-100');
   });
 
   it.each([
-    ['success', 'badge-success'],
-    ['warning', 'badge-warning'],
-    ['error', 'badge-error'],
-    ['info', 'badge-info'],
-    ['gray', 'badge-gray'],
-  ] as const)('applies the %s variant class', (variant, expected) => {
+    ['success', 'bg-green-100'],
+    ['warning', 'bg-yellow-100'],
+    ['error', 'bg-red-100'],
+    ['info', 'bg-accent-100'],
+    ['gray', 'bg-gray-100'],
+  ] as const)('applies the %s variant classes', (variant, expected) => {
     render(
       <Badge data-testid="badge" variant={variant}>
         {variant}
@@ -56,7 +59,7 @@ describe('Badge', () => {
       </Badge>
     );
     const cls = screen.getByTestId('badge').className;
-    expect(cls).toContain('badge-success');
+    expect(cls).toContain('bg-green-100');
     expect(cls).toContain('ml-2');
   });
 });

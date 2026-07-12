@@ -7,24 +7,27 @@ import React from 'react';
 import { cva } from 'class-variance-authority';
 import { cn } from '@/lib/utils/cn';
 
-const cardVariants = cva('card', {
-  variants: {
-    hover: {
-      true: 'card-hover',
-      false: '',
+const cardVariants = cva(
+  'bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm',
+  {
+    variants: {
+      hover: {
+        true: 'transition-shadow duration-200 hover:shadow-md',
+        false: '',
+      },
+      padding: {
+        none: '',
+        sm: 'p-3',
+        md: 'p-4',
+        lg: 'p-6',
+      },
     },
-    padding: {
-      none: '',
-      sm: 'p-3',
-      md: 'p-4',
-      lg: 'p-6',
+    defaultVariants: {
+      hover: false,
+      padding: 'md',
     },
-  },
-  defaultVariants: {
-    hover: false,
-    padding: 'md',
-  },
-});
+  }
+);
 
 export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   hover?: boolean;
