@@ -262,3 +262,65 @@ import { Skeleton } from '@/components/ui';
 
 <Skeleton className="h-4 w-32" />
 ```
+
+---
+
+## モーション (Motion, Issue #1050)
+
+マイクロインタラクションは **[`tailwindcss-animate`](https://github.com/jamiebuilds/tailwindcss-animate)**
+で統一する。`framer-motion` は採用しない（バンドル軽量・Server Components 相性）。
+
+### 規約（duration / easing）
+
+| トークン | 値 | 用途 |
+|---------|-----|------|
+| `--motion-duration-fast` | 150ms | hover / 状態遷移・小さな要素 |
+| `--motion-duration-base` | 200ms | Modal・ドロップダウンの開閉（標準） |
+| `--motion-duration-slow` | 300ms | 一覧の stagger 入場など |
+| `--motion-ease-out` | `cubic-bezier(0.16, 1, 0.3, 1)` | 入場（enter）基調 |
+| `--motion-stagger-step` | 40ms | 一覧 stagger の 1 件あたり遅延 |
+
+- 定義: [`src/app/globals.css`](../src/app/globals.css) の `:root`（モード非依存のため 1 箇所）。
+- Tailwind からは `duration-150` / `duration-200` / `duration-300` で参照する
+  （`tailwindcss-animate` の `duration-*` は `animation-duration` にも適用される）。
+- easing は入場を `ease-out` 基調とし、急に現れる印象を避ける。
+
+### enter / exit の標準パターン
+
+- **Modal**（`src/components/ui/Modal.tsx`）: `data-state="open"` を付与し、
+  `data-[state=open]:animate-in fade-in-0 zoom-in-95 duration-200`（fade + scale）。
+  パネルは閉時に unmount するため入場アニメは **マウント時のみ発火**する。
+- **MobilePromptSheet**（`src/components/mobile/MobilePromptSheet.tsx`）: 既存の
+  `usePromptAnimation` による slide-up（`translate-y-full → 0`）の enter/exit を踏襲。
+- **Radix プリミティブ**（Select / DropdownMenu / Tooltip）: Radix の `data-state`
+  （`open` / `closed` / Tooltip は `delayed-open`）と `data-side` に連動して
+  `animate-in` / `animate-out` + `fade` + `zoom-95` + `slide-in-from-*` を適用。
+  Radix が閉時も要素を保持するため exit アニメが再生される。
+
+### 一覧の stagger
+
+`src/lib/utils/stagger.ts` の `STAGGER_ENTER_CLASS` + `staggerDelay(index)` を使う。
+
+- `fill-mode-backwards` で遅延中のみ開始フレーム（不可視）を保持し、入場後は素の
+  スタイルへ戻す（後続の hover lift を上書きしない）。
+- 最大 10 件程度まで `animation-delay` を段階付与し、それ以降は 0ms。
+- **再ポーリングで再発火させない**: 一覧項目は必ず**安定したキー**（例: `wt.id`）を
+  付ける。DOM ノードが再利用される限り、CSS アニメは再生されない。`key={index}` の
+  ような不安定キーは禁止。
+
+### hover lift / active press
+
+- インタラクティブな **Card** は `interactive` prop（`hover:-translate-y-0.5 hover:shadow-lg`
+  + `active:translate-y-0`）。装飾のみの影は従来どおり `hover` prop。
+- **Button** は既定で hover lift + active press を持つ（無効時は付与しない）。
+
+### 適用しない領域（重要）
+
+- **ターミナル出力・仮想スクロール領域にはモーションを適用しない**（パフォーマンス優先）。
+  xterm.js 描画や `@tanstack/react-virtual` の行にアニメーションクラスを付けないこと。
+
+### `prefers-reduced-motion`
+
+OS の「視差効果を減らす（reduce motion）」設定時は、[`src/app/globals.css`](../src/app/globals.css)
+末尾のグローバル `@media (prefers-reduced-motion: reduce)` が全アニメーション/トランジションを
+実質無効化する。コンポーネント側でこのメディアクエリを再実装しないこと。

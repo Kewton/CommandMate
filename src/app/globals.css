@@ -41,6 +41,18 @@
     --warning: 245 158 11; /* amber-500 */
     --danger: 239 68 68; /* red-500 */
     --info: 59 130 246; /* blue-500 */
+
+    /*
+     * [Issue #1050] Motion tokens. Mode-independent, so defined once on :root.
+     * Durations map to the tailwindcss-animate `duration-*` scale used across
+     * Modal / Radix data-state primitives / list stagger. Easing is ease-out
+     * biased for entrances. See docs/design-system.md (Motion section).
+     */
+    --motion-duration-fast: 150ms;
+    --motion-duration-base: 200ms;
+    --motion-duration-slow: 300ms;
+    --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --motion-stagger-step: 40ms;
   }
 
   .dark {
@@ -336,5 +348,26 @@
     border: none;
     border-top: 1px solid rgb(51 65 85);
     margin: 0.8em 0;
+  }
+}
+
+/*
+ * [Issue #1050] Reduced-motion utility.
+ * Honors the OS "reduce motion" setting by neutralizing all animations and
+ * transitions globally. Declared as plain CSS (outside @layer) so the
+ * !important reset reliably wins over both core Tailwind and
+ * tailwindcss-animate utilities. Keep this the single source of truth for
+ * motion suppression — components should not re-implement the media query.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
   }
 }

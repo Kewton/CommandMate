@@ -116,4 +116,12 @@ describe('Select', () => {
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('listbox')).toBeNull();
   });
+
+  it('applies Radix data-state enter/exit animation classes to the content (Issue #1050)', () => {
+    render(<Fixture defaultOpen />);
+    const cls = screen.getByRole('listbox').className;
+    expect(cls).toContain('data-[state=open]:animate-in');
+    expect(cls).toContain('data-[state=closed]:animate-out');
+    expect(cls).toContain('data-[side=bottom]:slide-in-from-top-2');
+  });
 });

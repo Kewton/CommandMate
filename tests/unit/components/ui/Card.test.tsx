@@ -36,6 +36,25 @@ describe('Card', () => {
     expect(screen.getByTestId('card').className).toContain('hover:shadow-md');
   });
 
+  it('adds motion-safe hover-lift / active-press classes when interactive is set (Issue #1050)', () => {
+    render(
+      <Card data-testid="card" interactive>
+        body
+      </Card>
+    );
+    const cls = screen.getByTestId('card').className;
+    // motion-safe: so the transform is suppressed under prefers-reduced-motion
+    expect(cls).toContain('motion-safe:hover:-translate-y-0.5');
+    expect(cls).toContain('hover:shadow-lg');
+    expect(cls).toContain('motion-safe:active:translate-y-0');
+    expect(cls).toContain('cursor-pointer');
+  });
+
+  it('stays flat (no lift) when interactive is not set', () => {
+    render(<Card data-testid="card">body</Card>);
+    expect(screen.getByTestId('card').className).not.toContain('translate-y-0.5');
+  });
+
   it('renders the elevated variant with a gradient and stronger shadow (Issue #1049)', () => {
     render(
       <Card data-testid="card" variant="elevated">
@@ -57,7 +76,7 @@ describe('Card', () => {
     );
     const cls = screen.getByTestId('card').className;
     expect(cls).toContain('hover:border-accent-500');
-    expect(cls).toContain('hover:-translate-y-0.5');
+    expect(cls).toContain('motion-safe:hover:-translate-y-0.5');
     expect(cls).toContain('transition-all');
   });
 
@@ -71,7 +90,7 @@ describe('Card', () => {
     expect(cls).toContain('cursor-pointer');
     expect(cls).toContain('focus-visible:ring-ring');
     expect(cls).toContain('focus-visible:border-accent-500');
-    expect(cls).toContain('focus-visible:-translate-y-0.5');
+    expect(cls).toContain('motion-safe:focus-visible:-translate-y-0.5');
     expect(cls).toContain('focus-visible:shadow-md');
   });
 

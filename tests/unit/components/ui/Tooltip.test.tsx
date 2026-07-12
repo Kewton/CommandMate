@@ -52,4 +52,20 @@ describe('Tooltip', () => {
     fireEvent.blur(trigger);
     expect(screen.queryByRole('tooltip')).toBeNull();
   });
+
+  it('applies an unconditional enter and a closed-gated exit to the content (Issue #1050)', () => {
+    render(<Fixture defaultOpen />);
+    // Radix's role="tooltip" is the visually-hidden a11y copy; the styled,
+    // visible content is the element carrying our base `bg-foreground` class.
+    const content = document.querySelector('.bg-foreground');
+    expect(content).not.toBeNull();
+    const cls = content!.className;
+    // Enter is unconditional so instant-open (not just delayed-open) animates.
+    expect(cls).toContain('animate-in');
+    expect(cls).toContain('fade-in-0');
+    expect(cls).toContain('zoom-in-95');
+    expect(cls).not.toContain('data-[state=delayed-open]:animate-in');
+    // Exit is gated on the closed state.
+    expect(cls).toContain('data-[state=closed]:animate-out');
+  });
 });

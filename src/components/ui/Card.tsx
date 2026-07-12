@@ -22,12 +22,21 @@ const cardVariants = cva(
         elevated: 'bg-gradient-to-b from-surface to-surface-2 shadow-md',
         interactive:
           'cursor-pointer transition-all duration-200 ' +
-          'hover:border-accent-500 hover:shadow-md hover:-translate-y-0.5 ' +
+          'hover:border-accent-500 hover:shadow-md motion-safe:hover:-translate-y-0.5 ' +
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ' +
-          'focus-visible:border-accent-500 focus-visible:shadow-md focus-visible:-translate-y-0.5',
+          'focus-visible:border-accent-500 focus-visible:shadow-md motion-safe:focus-visible:-translate-y-0.5',
       },
       hover: {
         true: 'transition-shadow duration-200 hover:shadow-md',
+        false: '',
+      },
+      // [Issue #1050] Interactive cards (clickable shortcuts, links) get a
+      // hover lift + active press. Kept separate from `hover` (shadow-only) so
+      // non-interactive cards stay flat. The translate is gated behind
+      // motion-safe so it is suppressed under prefers-reduced-motion (the
+      // globals.css reset neutralizes duration/delay, not transform).
+      interactive: {
+        true: 'cursor-pointer transition-all duration-200 hover:shadow-lg active:shadow-md motion-safe:hover:-translate-y-0.5 motion-safe:active:translate-y-0',
         false: '',
       },
       padding: {
@@ -40,6 +49,7 @@ const cardVariants = cva(
     defaultVariants: {
       variant: 'default',
       hover: false,
+      interactive: false,
       padding: 'md',
     },
   }
@@ -48,6 +58,7 @@ const cardVariants = cva(
 export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   variant?: 'default' | 'elevated' | 'interactive';
   hover?: boolean;
+  interactive?: boolean;
   padding?: 'none' | 'sm' | 'md' | 'lg';
   children: React.ReactNode;
 }
@@ -66,13 +77,14 @@ export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
 export function Card({
   variant = 'default',
   hover = false,
+  interactive = false,
   padding = 'md',
   className = '',
   children,
   ...props
 }: CardProps) {
   return (
-    <div className={cn(cardVariants({ variant, hover, padding }), className)} {...props}>
+    <div className={cn(cardVariants({ variant, hover, interactive, padding }), className)} {...props}>
       {children}
     </div>
   );

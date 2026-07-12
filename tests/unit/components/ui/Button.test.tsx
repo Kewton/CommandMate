@@ -72,6 +72,22 @@ describe('Button', () => {
     expect(btn.className).toContain('cursor-not-allowed');
   });
 
+  it('applies motion-safe hover-lift / active-press interaction classes when enabled (Issue #1050)', () => {
+    render(<Button>Go</Button>);
+    const cls = classesOf('Go');
+    // motion-safe: so the transform is suppressed under prefers-reduced-motion
+    expect(cls).toContain('motion-safe:hover:-translate-y-0.5');
+    expect(cls).toContain('motion-safe:active:translate-y-0');
+    // transition-all (not transition-colors) so transform animates
+    expect(cls).toContain('transition-all');
+  });
+
+  it('omits the hover-lift interaction when disabled (Issue #1050)', () => {
+    render(<Button disabled>off</Button>);
+    const cls = classesOf('off');
+    expect(cls).not.toContain('motion-safe:hover:-translate-y-0.5');
+  });
+
   it('shows a spinner and disables the button while loading', () => {
     render(<Button loading>loading</Button>);
     const btn = screen.getByRole('button', { name: 'loading' });
