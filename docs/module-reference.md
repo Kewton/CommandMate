@@ -22,6 +22,7 @@
 | `src/lib/db/db-instance.ts` | DBインスタンス管理（getEnv().CM_DB_PATH使用） |
 | `src/config/system-directories.ts` | システムディレクトリ定数（SYSTEM_DIRECTORIES、isSystemDirectory()） |
 | `src/config/status-colors.ts` | ステータス色の一元管理 |
+| `src/app/globals.css` / `tailwind.config.js` | セマンティックデザイントークン（CSS変数）の定義・登録（Issue #1041）。詳細は [docs/design-system.md](./design-system.md) を参照 |
 | `src/lib/detection/cli-patterns.ts` | CLIツール別パターン定義（Issue #212: PASTED_TEXT_PATTERN定数追加、skipPatterns拡張。**Issue #265: セッションエラーパターン追加** - CLAUDE_SESSION_ERROR_PATTERNS/CLAUDE_SESSION_ERROR_REGEX_PATTERNSでセッション起動失敗検出。**Issue #379: OpenCodeパターン追加** - OPENCODE_PROMPT_PATTERN/OPENCODE_PROMPT_AFTER_RESPONSE/OPENCODE_THINKING_PATTERN/OPENCODE_LOADING_PATTERN/OPENCODE_RESPONSE_COMPLETE/OPENCODE_PROCESSING_INDICATOR/OPENCODE_SEPARATOR_PATTERN/OPENCODE_SKIP_PATTERNS定数、detectThinking()/getCliToolPatterns()/buildDetectPromptOptions()にcase 'opencode'追加、buildDetectPromptOptions('opencode')はrequireDefaultIndicator:false）。CLIツール別パターン定義、COPILOT_SELECTION_LIST_PATTERN（Issue #547）、COPILOT_SKIP_PATTERNS拡張（Issue #565）。**Issue #988: ANTIGRAVITY_PROMPT_PATTERN/ANTIGRAVITY_THINKING_PATTERN/ANTIGRAVITY_SEPARATOR_PATTERN/ANTIGRAVITY_SKIP_PATTERNS追加、detectThinking()/getCliToolPatterns()にcase 'antigravity'追加。buildDetectPromptOptions()はagy追加せず（標準">"インジケータ使用＝default正）** |
 | `src/lib/pasted-text-helper.ts` | Pasted text検知とEnter再送の共通ヘルパー（Issue #212: detectAndResendIfPastedText関数、リトライロジック、構造化ログ）。Pasted text検知・Enter再送 |
 | `src/lib/clipboard-utils.ts` | クリップボードコピーユーティリティ（stripAnsi利用、空文字バリデーション、Issue #211） |
