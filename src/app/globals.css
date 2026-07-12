@@ -16,6 +16,12 @@
    * WCAG AA (>=4.5:1) and auxiliary text >=3:1 against these surfaces.
    */
   :root {
+    /*
+     * [Issue #1071] Declare color-scheme so the UA themes native controls
+     * (select dropdowns, scrollbars, form widgets) to match the active theme
+     * instead of rendering light-on-dark (or vice versa).
+     */
+    color-scheme: light;
     --background: 255 255 255; /* pure white page */
     --foreground: 17 24 39; /* gray-900 */
     --surface: 248 250 252; /* slate-50 — subtly grayed panel */
@@ -56,6 +62,7 @@
   }
 
   .dark {
+    color-scheme: dark; /* [Issue #1071] see :root note */
     --background: 10 12 18; /* #0a0c12 — deep base */
     --foreground: 243 244 246; /* gray-100 */
     --surface: 20 24 33; /* #141821 — subtly lifted card */

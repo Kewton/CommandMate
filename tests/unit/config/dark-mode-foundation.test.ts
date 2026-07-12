@@ -96,6 +96,17 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       expect(cssContent).toContain('--surface:');
       expect(cssContent).toContain('.dark {');
     });
+
+    it('should declare color-scheme on both :root and .dark (Issue #1071: native chrome)', () => {
+      // color-scheme tells the UA to theme native controls (select dropdowns,
+      // scrollbars, form widgets) so they don't render light-on-dark.
+      const rootBlock = cssContent.match(/:root\s*\{([^}]*)\}/);
+      const darkBlock = cssContent.match(/\.dark\s*\{([^}]*)\}/);
+      expect(rootBlock, 'expected a :root block').not.toBeNull();
+      expect(darkBlock, 'expected a .dark block').not.toBeNull();
+      expect(rootBlock![1]).toMatch(/color-scheme:\s*light;/);
+      expect(darkBlock![1]).toMatch(/color-scheme:\s*dark;/);
+    });
   });
 
   describe('UI primitives dark mode (Issue #1048: @apply → cva)', () => {
@@ -172,14 +183,16 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       expect(content).toContain('attribute="class"');
     });
 
-    it('should configure ThemeProvider with defaultTheme="dark"', () => {
+    it('should configure ThemeProvider with defaultTheme="system" (Issue #1071: follow OS)', () => {
       const content = fs.readFileSync(providersPath, 'utf-8');
-      expect(content).toContain('defaultTheme="dark"');
+      expect(content).toContain('defaultTheme="system"');
+      expect(content).not.toContain('defaultTheme="dark"');
     });
 
-    it('should configure ThemeProvider with enableSystem={false}', () => {
+    it('should enable system theme detection (Issue #1071)', () => {
       const content = fs.readFileSync(providersPath, 'utf-8');
-      expect(content).toContain('enableSystem={false}');
+      expect(content).toContain('enableSystem');
+      expect(content).not.toContain('enableSystem={false}');
     });
 
     it('should place ThemeProvider inside NextIntlClientProvider and outside AuthProvider', () => {
