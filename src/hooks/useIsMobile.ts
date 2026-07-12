@@ -1,8 +1,10 @@
 /**
  * useIsMobile Hook
  *
- * Detects if the current viewport is mobile-sized
- * Based on window width compared to a breakpoint (default: 768px)
+ * Detects if the current viewport is mobile-sized using `matchMedia`, so the
+ * breakpoint is evaluated against the CSS viewport — exactly like Tailwind's
+ * `md:` — rather than the layout width, which can diverge from the CSS viewport
+ * under zoom, WebView, and device-emulation environments (Issue #1069).
  */
 
 'use client';
@@ -55,24 +57,21 @@ export function useIsMobile(options: UseIsMobileOptions = {}): boolean {
   const [isMobile, setIsMobile] = useState<boolean>(false);
 
   useEffect(() => {
-    /**
-     * Check if current window width is below breakpoint
-     */
-    const checkIsMobile = (): boolean => {
-      return window.innerWidth < breakpoint;
+    // `max-width: breakpoint - 1` is the exact complement of Tailwind's `md:`
+    // (`min-width: breakpoint`); for the default 768 this is `max-width: 767px`.
+    const mediaQuery = window.matchMedia(`(max-width: ${breakpoint - 1}px)`);
+
+    // Sync state on mount (after hydration is complete)
+    setIsMobile(mediaQuery.matches);
+
+    const handleChange = (event: MediaQueryListEvent) => {
+      setIsMobile(event.matches);
     };
 
-    // Update state on mount (after hydration is complete)
-    setIsMobile(checkIsMobile());
-
-    const handleResize = () => {
-      setIsMobile(checkIsMobile());
-    };
-
-    window.addEventListener('resize', handleResize);
+    mediaQuery.addEventListener('change', handleChange);
 
     return () => {
-      window.removeEventListener('resize', handleResize);
+      mediaQuery.removeEventListener('change', handleChange);
     };
   }, [breakpoint]);
 

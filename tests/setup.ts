@@ -34,6 +34,59 @@ beforeAll(() => {
       }
     };
   }
+
+  // Polyfill window.matchMedia for jsdom (Issue #1069). jsdom does not
+  // implement it, so hooks that switched from window.innerWidth to matchMedia
+  // (e.g. useIsMobile) would throw. This lightweight stub evaluates the
+  // min-/max-width bounds of a query against window.innerWidth and re-evaluates
+  // on window `resize`, translating each crossing into a `change` event — so
+  // component tests that drive layout by mutating innerWidth + dispatching
+  // `resize` keep working without per-file matchMedia mocks.
+  if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
+    const evaluate = (query: string): boolean => {
+      const maxMatch = query.match(/max-width:\s*(\d+(?:\.\d+)?)px/);
+      const minMatch = query.match(/min-width:\s*(\d+(?:\.\d+)?)px/);
+      const width = window.innerWidth;
+      if (maxMatch && width > Number(maxMatch[1])) return false;
+      if (minMatch && width < Number(minMatch[1])) return false;
+      return Boolean(maxMatch || minMatch);
+    };
+
+    window.matchMedia = (query: string): MediaQueryList => {
+      const listeners = new Set<(event: MediaQueryListEvent) => void>();
+      let matches = evaluate(query);
+      const onResize = () => {
+        const next = evaluate(query);
+        if (next !== matches) {
+          matches = next;
+          const event = { matches, media: query } as MediaQueryListEvent;
+          listeners.forEach((listener) => listener(event));
+        }
+      };
+      window.addEventListener('resize', onResize);
+
+      return {
+        media: query,
+        get matches() {
+          return matches;
+        },
+        onchange: null,
+        addEventListener: (type: string, listener: (event: MediaQueryListEvent) => void) => {
+          if (type === 'change') listeners.add(listener);
+        },
+        removeEventListener: (type: string, listener: (event: MediaQueryListEvent) => void) => {
+          if (type === 'change') listeners.delete(listener);
+        },
+        addListener: (listener: (event: MediaQueryListEvent) => void) => {
+          listeners.add(listener);
+        },
+        removeListener: (listener: (event: MediaQueryListEvent) => void) => {
+          listeners.delete(listener);
+        },
+        dispatchEvent: () => false,
+      } as unknown as MediaQueryList;
+    };
+  }
 });
 
 afterEach(() => {
