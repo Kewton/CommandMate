@@ -25,7 +25,7 @@ export default async function RootLayout({
       className={`${GeistSans.variable} ${GeistMono.variable}`}
       suppressHydrationWarning
     >
-      <body className="min-h-screen bg-gray-50 dark:bg-cmd-bg-dark">
+      <body className="min-h-screen bg-background">
         <AppProviders locale={locale} messages={messages as Record<string, unknown>} timeZone={timeZone} authEnabled={!!process.env.CM_AUTH_TOKEN_HASH}>
           {children}
         </AppProviders>
