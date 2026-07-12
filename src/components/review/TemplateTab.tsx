@@ -8,6 +8,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { Button, Card, Input, Textarea } from '@/components/ui';
 import {
   MAX_TEMPLATES,
   MAX_TEMPLATE_NAME_LENGTH,
@@ -166,45 +167,47 @@ export default function TemplateTab() {
         ) : (
           <div className="space-y-3" data-testid="template-list">
             {templates.map((template) => (
-              <div
+              <Card
                 key={template.id}
-                className="p-3 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg"
+                padding="sm"
                 data-testid={`template-item-${template.id}`}
               >
                 {editingId === template.id ? (
                   <div className="space-y-2">
-                    <input
+                    <Input
                       type="text"
+                      inputSize="sm"
                       value={editName}
                       onChange={(e) => setEditName(e.target.value)}
                       maxLength={MAX_TEMPLATE_NAME_LENGTH}
-                      className="w-full px-3 py-1 text-sm border rounded dark:bg-gray-900 dark:border-gray-600 dark:text-gray-200"
                       data-testid="edit-name-input"
                     />
-                    <textarea
+                    <Textarea
                       value={editContent}
                       onChange={(e) => setEditContent(e.target.value)}
                       maxLength={MAX_TEMPLATE_CONTENT_LENGTH}
                       rows={3}
-                      className="w-full px-3 py-1 text-sm border rounded dark:bg-gray-900 dark:border-gray-600 dark:text-gray-200 resize-y"
+                      className="resize-y"
                       data-testid="edit-content-input"
                     />
                     <div className="flex gap-2">
-                      <button
+                      <Button
+                        variant="primary"
+                        size="sm"
                         onClick={handleSave}
                         disabled={isSaving}
-                        className="px-3 py-1 text-xs font-medium rounded bg-accent-600 text-white hover:bg-accent-700 disabled:opacity-50"
                         data-testid="edit-save-button"
                       >
                         {isSaving ? 'Saving...' : 'Save'}
-                      </button>
-                      <button
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
                         onClick={handleCancelEdit}
-                        className="px-3 py-1 text-xs font-medium rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
                         data-testid="edit-cancel-button"
                       >
                         Cancel
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ) : (
@@ -214,20 +217,22 @@ export default function TemplateTab() {
                         {template.name}
                       </span>
                       <div className="flex gap-2">
-                        <button
+                        <Button
+                          variant="secondary"
+                          size="sm"
                           onClick={() => handleEdit(template)}
-                          className="px-2 py-1 text-xs font-medium rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
                           data-testid={`edit-button-${template.id}`}
                         >
                           Edit
-                        </button>
-                        <button
+                        </Button>
+                        <Button
+                          variant="danger"
+                          size="sm"
                           onClick={() => handleDelete(template.id)}
-                          className="px-2 py-1 text-xs font-medium rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50"
                           data-testid={`delete-button-${template.id}`}
                         >
                           Delete
-                        </button>
+                        </Button>
                       </div>
                     </div>
                     <p className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap" data-testid="template-content">
@@ -235,7 +240,7 @@ export default function TemplateTab() {
                     </p>
                   </div>
                 )}
-              </div>
+              </Card>
             ))}
           </div>
         )}
@@ -246,36 +251,31 @@ export default function TemplateTab() {
         <div className="p-4 bg-gray-50 dark:bg-gray-800/50 border dark:border-gray-700 rounded-lg" data-testid="create-form">
           <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">New Template</h3>
           <div className="space-y-3">
-            <input
+            <Input
               type="text"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               maxLength={MAX_TEMPLATE_NAME_LENGTH}
               placeholder="Template name"
-              className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200"
               data-testid="new-name-input"
             />
-            <textarea
+            <Textarea
               value={newContent}
               onChange={(e) => setNewContent(e.target.value)}
               maxLength={MAX_TEMPLATE_CONTENT_LENGTH}
               rows={3}
               placeholder="Template content (instructions for report generation)"
-              className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200 resize-y"
+              className="resize-y"
               data-testid="new-content-input"
             />
-            <button
+            <Button
+              variant="primary"
               onClick={handleCreate}
               disabled={isCreating || !newName.trim() || !newContent.trim()}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                isCreating || !newName.trim() || !newContent.trim()
-                  ? 'bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
-                  : 'bg-accent-600 text-white hover:bg-accent-700'
-              }`}
               data-testid="create-button"
             >
               {isCreating ? 'Creating...' : 'Create Template'}
-            </button>
+            </Button>
           </div>
         </div>
       )}

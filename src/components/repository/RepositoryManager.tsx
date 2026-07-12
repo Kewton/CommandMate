@@ -7,7 +7,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Button, Card } from '@/components/ui';
+import { Button, Card, Input, Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui';
 import { repositoryApi, handleApiError } from '@/lib/api-client';
 import { UrlNormalizer } from '@/lib/url-normalizer';
 import { CLONE_STATUS_POLL_INTERVAL_MS } from '@/config/repository-config';
@@ -217,120 +217,103 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
             </div>
 
             {/* Mode Toggle Tabs */}
-            <div className="flex border-b border-gray-200 dark:border-gray-700" role="tablist">
-              <button
-                role="tab"
-                aria-selected={inputMode === 'local'}
-                onClick={() => setInputMode('local')}
-                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                  inputMode === 'local'
-                    ? 'border-accent-500 text-accent-600 dark:text-accent-400'
-                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                }`}
-              >
-                Local Path
-              </button>
-              <button
-                role="tab"
-                aria-selected={inputMode === 'url'}
-                onClick={() => setInputMode('url')}
-                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                  inputMode === 'url'
-                    ? 'border-accent-500 text-accent-600 dark:text-accent-400'
-                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                }`}
-              >
-                Clone URL
-              </button>
-            </div>
+            <Tabs
+              value={inputMode}
+              onValueChange={(value) => setInputMode(value as InputMode)}
+            >
+              <TabsList className="w-full">
+                <TabsTrigger value="local">Local Path</TabsTrigger>
+                <TabsTrigger value="url">Clone URL</TabsTrigger>
+              </TabsList>
 
-            {/* Local Path Mode */}
-            {inputMode === 'local' && (
-              <form onSubmit={handleAddRepository} className="space-y-4">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
-                    Enter the absolute path to a git repository containing worktrees.
-                  </p>
-                  <label htmlFor="repositoryPath" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-                    Repository Path
-                  </label>
-                  <input
-                    id="repositoryPath"
-                    type="text"
-                    value={repositoryPath}
-                    onChange={(e) => setRepositoryPath(e.target.value)}
-                    placeholder="/absolute/path/to/repository"
-                    className="input w-full font-mono text-sm"
-                    disabled={isScanning}
-                  />
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    Example: /Users/username/projects/my-repo
-                  </p>
-                </div>
+              {/* Local Path Mode */}
+              <TabsContent value="local">
+                <form onSubmit={handleAddRepository} className="space-y-4">
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+                      Enter the absolute path to a git repository containing worktrees.
+                    </p>
+                    <label htmlFor="repositoryPath" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+                      Repository Path
+                    </label>
+                    <Input
+                      id="repositoryPath"
+                      type="text"
+                      value={repositoryPath}
+                      onChange={(e) => setRepositoryPath(e.target.value)}
+                      placeholder="/absolute/path/to/repository"
+                      className="font-mono"
+                      disabled={isScanning}
+                    />
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Example: /Users/username/projects/my-repo
+                    </p>
+                  </div>
 
-                <div className="flex gap-2">
-                  <Button
-                    type="submit"
-                    variant="primary"
-                    disabled={isScanning || !repositoryPath.trim()}
-                  >
-                    {isScanning ? 'Scanning...' : 'Scan & Add'}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={handleCancel}
-                    disabled={isScanning}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </form>
-            )}
+                  <div className="flex gap-2">
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      disabled={isScanning || !repositoryPath.trim()}
+                    >
+                      {isScanning ? 'Scanning...' : 'Scan & Add'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={handleCancel}
+                      disabled={isScanning}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </form>
+              </TabsContent>
 
-            {/* Clone URL Mode */}
-            {inputMode === 'url' && (
-              <form onSubmit={handleCloneRepository} className="space-y-4">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
-                    Enter a git clone URL to clone a remote repository.
-                  </p>
-                  <label htmlFor="cloneUrl" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-                    Clone URL
-                  </label>
-                  <input
-                    id="cloneUrl"
-                    type="text"
-                    value={cloneUrl}
-                    onChange={(e) => setCloneUrl(e.target.value)}
-                    placeholder="https://github.com/user/repo.git"
-                    className="input w-full font-mono text-sm"
-                    disabled={isCloning}
-                  />
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    Supports HTTPS and SSH URLs
-                  </p>
-                </div>
+              {/* Clone URL Mode */}
+              <TabsContent value="url">
+                <form onSubmit={handleCloneRepository} className="space-y-4">
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+                      Enter a git clone URL to clone a remote repository.
+                    </p>
+                    <label htmlFor="cloneUrl" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+                      Clone URL
+                    </label>
+                    <Input
+                      id="cloneUrl"
+                      type="text"
+                      value={cloneUrl}
+                      onChange={(e) => setCloneUrl(e.target.value)}
+                      placeholder="https://github.com/user/repo.git"
+                      className="font-mono"
+                      disabled={isCloning}
+                    />
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Supports HTTPS and SSH URLs
+                    </p>
+                  </div>
 
-                <div className="flex gap-2">
-                  <Button
-                    type="submit"
-                    variant="primary"
-                    disabled={isCloning || !cloneUrl.trim()}
-                  >
-                    {isCloning ? 'Cloning...' : 'Clone'}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={handleCancel}
-                    disabled={isCloning}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </form>
-            )}
+                  <div className="flex gap-2">
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      disabled={isCloning || !cloneUrl.trim()}
+                    >
+                      {isCloning ? 'Cloning...' : 'Clone'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={handleCancel}
+                      disabled={isCloning}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </form>
+              </TabsContent>
+            </Tabs>
           </div>
         </Card>
       )}

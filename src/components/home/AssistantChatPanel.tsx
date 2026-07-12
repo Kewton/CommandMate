@@ -6,6 +6,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { Button } from '@/components/ui';
 import { AssistantMessageInput } from './AssistantMessageInput';
 import { AssistantMessageList } from './AssistantMessageList';
 import { assistantApi } from '@/lib/api/assistant-api';
@@ -376,23 +377,25 @@ export function AssistantChatPanel() {
 
               <div>
                 {!conversationActive ? (
-                  <button
+                  <Button
+                    variant="primary"
                     onClick={handleStart}
                     disabled={!selectedRepoId || starting}
-                    className="w-full rounded-lg bg-accent-500 px-4 py-2 text-sm font-medium text-slate-950 transition-colors hover:bg-accent-400 disabled:bg-slate-500 disabled:text-slate-300 md:w-auto"
+                    className="w-full md:w-auto"
                     data-testid="assistant-start-button"
                   >
                     {starting ? 'Starting...' : 'Start'}
-                  </button>
+                  </Button>
                 ) : (
-                  <button
+                  <Button
+                    variant="danger"
                     onClick={handleStop}
                     disabled={stopping}
-                    className="w-full rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-500 disabled:bg-slate-500 disabled:text-slate-300 md:w-auto"
+                    className="w-full md:w-auto"
                     data-testid="assistant-stop-button"
                   >
                     {stopping ? 'Stopping...' : 'Stop'}
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
@@ -415,18 +418,20 @@ export function AssistantChatPanel() {
               <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
                 History
               </span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={handleClearHistory}
                 disabled={!conversation || clearing || executionRunning || messages.length === 0}
-                className="inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-900/80 px-2.5 py-1 text-xs font-medium text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-900/40 disabled:text-slate-500"
+                className="gap-1"
                 data-testid="assistant-clear-button"
               >
                 <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" />
                 </svg>
                 {clearing ? 'Clearing...' : 'Clear history'}
-              </button>
+              </Button>
             </div>
 
             <div className="min-h-0 flex-1 overflow-hidden">

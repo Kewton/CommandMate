@@ -9,6 +9,7 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { Card } from '@/components/ui';
 import type { ReviewStatus } from '@/lib/session/next-action-helper';
 
 export interface ReviewCardProps {
@@ -59,10 +60,7 @@ export function ReviewCard({
   children,
 }: ReviewCardProps) {
   return (
-    <div
-      data-testid="review-card"
-      className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700"
-    >
+    <Card data-testid="review-card">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <Link
@@ -94,6 +92,6 @@ export function ReviewCard({
         </span>
       </div>
       {children && <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">{children}</div>}
-    </div>
+    </Card>
   );
 }

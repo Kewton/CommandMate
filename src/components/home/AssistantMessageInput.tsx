@@ -14,6 +14,7 @@
 'use client';
 
 import React, { memo, useState, useCallback, useRef, useEffect } from 'react';
+import { Button } from '@/components/ui';
 
 export interface AssistantMessageInputProps {
   /** Called when the user sends a message */
@@ -142,10 +143,11 @@ export const AssistantMessageInput = memo(function AssistantMessageInput({
         data-testid="assistant-message-textarea"
       />
 
-      <button
+      <Button
         type="submit"
+        variant="ghost"
         disabled={!message.trim() || sending || disabled}
-        className="flex-shrink-0 p-1.5 text-accent-600 hover:bg-accent-50 dark:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors disabled:text-gray-300 dark:disabled:text-gray-600 disabled:hover:bg-transparent"
+        className="flex-shrink-0 rounded-full p-1.5 text-accent-600 hover:bg-accent-50 dark:text-accent-400 dark:hover:bg-accent-900/30 disabled:text-gray-300 dark:disabled:text-gray-600 disabled:hover:bg-transparent"
         aria-label="Send message"
         data-testid="assistant-send-button"
       >
@@ -180,7 +182,7 @@ export const AssistantMessageInput = memo(function AssistantMessageInput({
             />
           </svg>
         )}
-      </button>
+      </Button>
     </form>
   );
 });
