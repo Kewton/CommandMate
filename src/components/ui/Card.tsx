@@ -4,6 +4,27 @@
  */
 
 import React from 'react';
+import { cva } from 'class-variance-authority';
+import { cn } from '@/lib/utils/cn';
+
+const cardVariants = cva('card', {
+  variants: {
+    hover: {
+      true: 'card-hover',
+      false: '',
+    },
+    padding: {
+      none: '',
+      sm: 'p-3',
+      md: 'p-4',
+      lg: 'p-6',
+    },
+  },
+  defaultVariants: {
+    hover: false,
+    padding: 'md',
+  },
+});
 
 export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   hover?: boolean;
@@ -29,27 +50,8 @@ export function Card({
   children,
   ...props
 }: CardProps) {
-  const baseStyles = 'card';
-  const hoverStyles = hover ? 'card-hover' : '';
-
-  const paddingStyles: Record<NonNullable<CardProps['padding']>, string> = {
-    none: '',
-    sm: 'p-3',
-    md: 'p-4',
-    lg: 'p-6',
-  };
-
-  const classes = [
-    baseStyles,
-    hoverStyles,
-    paddingStyles[padding],
-    className,
-  ]
-    .filter(Boolean)
-    .join(' ');
-
   return (
-    <div className={classes} {...props}>
+    <div className={cn(cardVariants({ hover, padding }), className)} {...props}>
       {children}
     </div>
   );
@@ -64,7 +66,7 @@ export interface CardHeaderProps extends React.HTMLAttributes<HTMLDivElement> {
 
 export function CardHeader({ className = '', children, ...props }: CardHeaderProps) {
   return (
-    <div className={`mb-3 ${className}`} {...props}>
+    <div className={cn('mb-3', className)} {...props}>
       {children}
     </div>
   );
@@ -79,7 +81,7 @@ export interface CardTitleProps extends React.HTMLAttributes<HTMLHeadingElement>
 
 export function CardTitle({ className = '', children, ...props }: CardTitleProps) {
   return (
-    <h3 className={`text-lg font-semibold text-gray-900 dark:text-gray-100 ${className}`} {...props}>
+    <h3 className={cn('text-lg font-semibold text-gray-900 dark:text-gray-100', className)} {...props}>
       {children}
     </h3>
   );
@@ -94,7 +96,7 @@ export interface CardContentProps extends React.HTMLAttributes<HTMLDivElement> {
 
 export function CardContent({ className = '', children, ...props }: CardContentProps) {
   return (
-    <div className={className} {...props}>
+    <div className={cn(className)} {...props}>
       {children}
     </div>
   );
@@ -109,7 +111,7 @@ export interface CardFooterProps extends React.HTMLAttributes<HTMLDivElement> {
 
 export function CardFooter({ className = '', children, ...props }: CardFooterProps) {
   return (
-    <div className={`mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 ${className}`} {...props}>
+    <div className={cn('mt-4 pt-4 border-t border-gray-200 dark:border-gray-700', className)} {...props}>
       {children}
     </div>
   );

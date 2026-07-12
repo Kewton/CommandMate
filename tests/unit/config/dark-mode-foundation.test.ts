@@ -22,20 +22,18 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       expect(content).toContain("darkMode: 'class'");
     });
 
-    it('should define primary color palette with cyan values', () => {
+    it('should register the accent scale via CSS variables (migrated from primary in Issue #1041)', () => {
       const content = fs.readFileSync(configPath, 'utf-8');
-      // Check for cyan-50 hex value
-      expect(content).toContain('#ecfeff');
-      // Check for cyan-400 hex value
-      expect(content).toContain('#22d3ee');
-      // Check for cyan-600 hex value
-      expect(content).toContain('#0891b2');
+      // The former `primary` cyan palette is now the semantic `accent` scale,
+      // backed by CSS variables. Hex values live in globals.css instead.
+      expect(content).toContain('rgb(var(--accent-500) / <alpha-value>)');
+      expect(content).not.toContain('primary:');
     });
 
-    it('should define cmd-bg-dark custom color', () => {
+    it('should no longer define the cmd-bg-dark color (absorbed into --background in Issue #1041)', () => {
       const content = fs.readFileSync(configPath, 'utf-8');
-      expect(content).toContain("'cmd-bg-dark'");
-      expect(content).toContain('#0f1117');
+      expect(content).not.toContain('cmd-bg-dark');
+      expect(content).toContain('rgb(var(--background) / <alpha-value>)');
     });
   });
 
@@ -47,14 +45,12 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       expect(content).toContain('suppressHydrationWarning');
     });
 
-    it('should have dark:bg-cmd-bg-dark on body', () => {
+    it('should use the semantic bg-background token on body (Issue #1041)', () => {
       const content = fs.readFileSync(layoutPath, 'utf-8');
-      expect(content).toContain('dark:bg-cmd-bg-dark');
-    });
-
-    it('should maintain bg-gray-50 for light mode on body', () => {
-      const content = fs.readFileSync(layoutPath, 'utf-8');
-      expect(content).toContain('bg-gray-50');
+      // Replaces the former `bg-gray-50 dark:bg-cmd-bg-dark`; --background carries
+      // the same effective values (gray-50 light / #0f1117 dark).
+      expect(content).toContain('bg-background');
+      expect(content).not.toContain('cmd-bg-dark');
     });
   });
 
