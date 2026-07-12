@@ -14,6 +14,12 @@
    * (deep base → subtly-lifted surface → recessed secondary → hairline border)
    * so screens read as layered rather than "flat gray boxes". Body text keeps
    * WCAG AA (>=4.5:1) and auxiliary text >=3:1 against these surfaces.
+   *
+   * [Issue #1074] Light ladder INVERTED to match dark's intent: the page is a
+   * near-white gray (--background), cards are pure white (--surface, brightest
+   * top-lit layer) and the secondary surface is a recessed well (--surface-2,
+   * darkest). Reads as "white card floats above a gray page": surface-2 <
+   * background < surface. Not a monotone mirror of dark — dark unchanged.
    */
   :root {
     /*
@@ -22,11 +28,11 @@
      * instead of rendering light-on-dark (or vice versa).
      */
     color-scheme: light;
-    --background: 255 255 255; /* pure white page */
+    --background: 250 250 251; /* near-white gray page [#1074] */
     --foreground: 17 24 39; /* gray-900 */
-    --surface: 248 250 252; /* slate-50 — subtly grayed panel */
+    --surface: 255 255 255; /* white card — brightest, top-lit [#1074] */
     --surface-foreground: 17 24 39; /* gray-900 */
-    --surface-2: 241 245 249; /* slate-100 — recessed secondary */
+    --surface-2: 244 246 250; /* recessed well — darkest light surface [#1074] */
     --muted: 243 244 246; /* gray-100 */
     --muted-foreground: 107 114 128; /* gray-500 */
     --border: 226 232 240; /* slate-200 — hairline */
