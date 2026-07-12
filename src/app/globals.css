@@ -6,20 +6,24 @@
   /*
    * [Issue #1041] Semantic design tokens.
    * Values are RGB channel triplets (not hex) so Tailwind can synthesize alpha
-   * via `rgb(var(--token) / <alpha-value>)`. Each value mirrors the current
-   * effective Tailwind shade (noted in the trailing comment) so this issue
-   * changes no visuals — component migration to these tokens lands in #1045.
+   * via `rgb(var(--token) / <alpha-value>)`.
    * See docs/design-system.md for naming rules and the hardcoded-color policy.
+   *
+   * [Issue #1049] Surface/depth revision — the FIRST intentional visual change.
+   * background/surface/surface-2/border now form a deliberate elevation ladder
+   * (deep base → subtly-lifted surface → recessed secondary → hairline border)
+   * so screens read as layered rather than "flat gray boxes". Body text keeps
+   * WCAG AA (>=4.5:1) and auxiliary text >=3:1 against these surfaces.
    */
   :root {
-    --background: 249 250 251; /* gray-50 */
+    --background: 255 255 255; /* pure white page */
     --foreground: 17 24 39; /* gray-900 */
-    --surface: 255 255 255; /* white */
+    --surface: 248 250 252; /* slate-50 — subtly grayed panel */
     --surface-foreground: 17 24 39; /* gray-900 */
-    --surface-2: 249 250 251; /* gray-50 */
+    --surface-2: 241 245 249; /* slate-100 — recessed secondary */
     --muted: 243 244 246; /* gray-100 */
     --muted-foreground: 107 114 128; /* gray-500 */
-    --border: 229 231 235; /* gray-200 */
+    --border: 226 232 240; /* slate-200 — hairline */
     --input: 209 213 219; /* gray-300 */
     --ring: 6 182 212; /* cyan-500 */
     --accent-50: 236 254 255; /* cyan-50 */
@@ -52,14 +56,14 @@
   }
 
   .dark {
-    --background: 15 17 23; /* #0f1117 (legacy cmd-bg-dark) */
+    --background: 10 12 18; /* #0a0c12 — deep base */
     --foreground: 243 244 246; /* gray-100 */
-    --surface: 31 41 55; /* gray-800 */
+    --surface: 20 24 33; /* #141821 — subtly lifted card */
     --surface-foreground: 243 244 246; /* gray-100 */
-    --surface-2: 17 24 39; /* gray-900 */
+    --surface-2: 15 18 26; /* #0f121a — recessed secondary */
     --muted: 31 41 55; /* gray-800 */
     --muted-foreground: 156 163 175; /* gray-400 */
-    --border: 55 65 81; /* gray-700 */
+    --border: 42 48 62; /* #2a303e — hairline */
     --input: 75 85 99; /* gray-600 */
     --ring: 6 182 212; /* cyan-500 */
     --accent-50: 236 254 255; /* cyan-50 */
@@ -103,24 +107,28 @@
     @apply text-gray-900 dark:text-gray-100 antialiased;
   }
 
+  /*
+   * [Issue #1049] Heading hierarchy: bolder, tighter display headings (h1/h2)
+   * step down to semibold section headings (h3/h4). tracking-tight throughout.
+   */
   h1, h2, h3, h4, h5, h6 {
     @apply font-semibold tracking-tight;
   }
 
   h1 {
-    @apply text-3xl md:text-4xl;
+    @apply text-3xl md:text-4xl font-bold leading-tight;
   }
 
   h2 {
-    @apply text-2xl md:text-3xl;
+    @apply text-2xl md:text-3xl font-bold leading-tight;
   }
 
   h3 {
-    @apply text-xl md:text-2xl;
+    @apply text-xl md:text-2xl leading-snug;
   }
 
   h4 {
-    @apply text-lg md:text-xl;
+    @apply text-lg md:text-xl leading-snug;
   }
 }
 

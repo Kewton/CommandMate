@@ -301,7 +301,7 @@ export default function SessionsPage() {
                     key={wt.id}
                     href={`/worktrees/${wt.id}`}
                     style={{ animationDelay: staggerDelay(index) }}
-                    className={`block bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700 hover:border-accent-300 dark:hover:border-accent-700 transition-colors ${STAGGER_ENTER_CLASS}`}
+                    className={`block bg-surface rounded-lg p-4 border border-border shadow-sm hover:border-accent-300 dark:hover:border-accent-700 transition-colors ${STAGGER_ENTER_CLASS}`}
                     data-testid={`session-item-${wt.id}`}
                   >
                     {/* Row 1: Name, Agent statuses */}

@@ -43,7 +43,7 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
   const pathname = usePathname();
 
   return (
-    <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50">
+    <header className="sticky top-0 z-50 border-b border-border bg-background supports-[backdrop-filter]:bg-background/80 backdrop-blur-md">
       <div className="container-custom">
         <div className="flex items-center justify-between h-16">
           {/* Logo and Title */}

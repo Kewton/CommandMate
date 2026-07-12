@@ -19,10 +19,10 @@ describe('Card', () => {
   it('renders base classes and default md padding', () => {
     render(<Card data-testid="card">body</Card>);
     const el = screen.getByTestId('card');
-    // base classes (inlined from the former .card @apply utility, Issue #1048)
+    // base now uses semantic surface/border tokens (Issue #1049)
     expect(el.className).toContain('rounded-lg');
-    expect(el.className).toContain('border');
-    expect(el.className).toContain('bg-white');
+    expect(el.className).toContain('border-border');
+    expect(el.className).toContain('bg-surface');
     expect(el.className).toContain('p-4');
     expect(el.className).not.toContain('hover:shadow-md');
   });
@@ -53,6 +53,52 @@ describe('Card', () => {
   it('stays flat (no lift) when interactive is not set', () => {
     render(<Card data-testid="card">body</Card>);
     expect(screen.getByTestId('card').className).not.toContain('translate-y-0.5');
+  });
+
+  it('renders the elevated variant with a gradient and stronger shadow (Issue #1049)', () => {
+    render(
+      <Card data-testid="card" variant="elevated">
+        body
+      </Card>
+    );
+    const cls = screen.getByTestId('card').className;
+    expect(cls).toContain('bg-gradient-to-b');
+    expect(cls).toContain('from-surface');
+    expect(cls).toContain('to-surface-2');
+    expect(cls).toContain('shadow-md');
+  });
+
+  it('renders the interactive variant with accent hover border and lift (Issue #1049)', () => {
+    render(
+      <Card data-testid="card" variant="interactive">
+        body
+      </Card>
+    );
+    const cls = screen.getByTestId('card').className;
+    expect(cls).toContain('hover:border-accent-500');
+    expect(cls).toContain('motion-safe:hover:-translate-y-0.5');
+    expect(cls).toContain('transition-all');
+  });
+
+  it('interactive variant is keyboard-focusable: cursor + focus-visible mirrors hover (Issue #1049)', () => {
+    render(
+      <Card data-testid="card" variant="interactive">
+        body
+      </Card>
+    );
+    const cls = screen.getByTestId('card').className;
+    expect(cls).toContain('cursor-pointer');
+    expect(cls).toContain('focus-visible:ring-ring');
+    expect(cls).toContain('focus-visible:border-accent-500');
+    expect(cls).toContain('motion-safe:focus-visible:-translate-y-0.5');
+    expect(cls).toContain('focus-visible:shadow-md');
+  });
+
+  it('defaults to the default variant with no elevated/interactive classes', () => {
+    render(<Card data-testid="card">body</Card>);
+    const cls = screen.getByTestId('card').className;
+    expect(cls).not.toContain('bg-gradient-to-b');
+    expect(cls).not.toContain('hover:border-accent-500');
   });
 
   it.each([

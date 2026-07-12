@@ -99,4 +99,16 @@ describe('Header', () => {
     const nav = screen.getByRole('navigation');
     expect(nav).toBeDefined();
   });
+
+  it('should apply a translucent backdrop-blur header with an opaque fallback (Issue #1049)', () => {
+    const { container } = render(<Header />);
+    const header = container.querySelector('header');
+    expect(header).not.toBeNull();
+    const cls = header!.className;
+    // opaque fallback + translucent-only-when-supported + blur + hairline token
+    expect(cls).toContain('bg-background');
+    expect(cls).toContain('supports-[backdrop-filter]:bg-background/80');
+    expect(cls).toContain('backdrop-blur-md');
+    expect(cls).toContain('border-border');
+  });
 });

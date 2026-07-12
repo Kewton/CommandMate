@@ -103,4 +103,13 @@ describe('GlobalMobileNav', () => {
     expect(nav.className).toContain('fixed');
     expect(nav.className).toContain('bottom-0');
   });
+
+  it('should apply a translucent backdrop-blur bar with an opaque fallback (Issue #1049)', () => {
+    render(<GlobalMobileNav />);
+    const cls = screen.getByTestId('global-mobile-nav').className;
+    expect(cls).toContain('bg-background');
+    expect(cls).toContain('supports-[backdrop-filter]:bg-background/80');
+    expect(cls).toContain('backdrop-blur-md');
+    expect(cls).toContain('border-border');
+  });
 });
