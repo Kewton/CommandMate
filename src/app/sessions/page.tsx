@@ -15,13 +15,21 @@
 
 import { useState, useMemo, useCallback } from 'react';
 import Link from 'next/link';
+import { ArrowDown, ArrowUp } from 'lucide-react';
 import { AppShell } from '@/components/layout';
 import { useWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
 import { deriveCliStatus } from '@/types/sidebar';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
-import { SortSelectorBase } from '@/components/sidebar/SortSelectorBase';
+import {
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui';
 import { compareByTimestamp } from '@/lib/sidebar-utils';
 import { formatRelativeTime } from '@/lib/date-utils';
 import {
@@ -30,7 +38,6 @@ import {
   sanitizePreview,
 } from '@/config/message-preview-config';
 import type { SortKey, SortDirection } from '@/lib/sidebar-utils';
-import type { SortOption } from '@/components/sidebar/SortSelectorBase';
 import type { Worktree } from '@/types/models';
 import type { BranchStatus } from '@/types/sidebar';
 
@@ -39,7 +46,7 @@ import type { BranchStatus } from '@/types/sidebar';
 // ============================================================================
 
 /** Sort options for Sessions page (includes lastSent, no branchName/updatedAt) [CON-002] */
-const SESSIONS_SORT_OPTIONS: ReadonlyArray<SortOption> = [
+const SESSIONS_SORT_OPTIONS: ReadonlyArray<{ key: SortKey; label: string }> = [
   { key: 'repositoryName', label: 'Repository' },
   { key: 'status', label: 'Status' },
   { key: 'lastSent', label: 'Last Sent' },
@@ -183,6 +190,17 @@ export default function SessionsPage() {
     setFilterText(e.target.value);
   }, []);
 
+  // Selecting a new sort key applies its default direction [CON-005].
+  const handleSortKeyChange = useCallback((key: string) => {
+    const sortKeyValue = key as SortKey;
+    setSortKey(sortKeyValue);
+    setSortDirection(SESSIONS_DEFAULT_DIRECTIONS[sortKeyValue] ?? 'asc');
+  }, []);
+
+  const toggleSortDirection = useCallback(() => {
+    setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+  }, []);
+
   return (
     <AppShell>
       <div className="container-custom py-8 overflow-auto h-full">
@@ -194,23 +212,45 @@ export default function SessionsPage() {
         </div>
 
         {/* Search / Filter + Sort */}
-        <div className="mb-6 flex items-center gap-4">
-          <input
+        <div className="mb-6 flex items-center gap-3">
+          <Input
             type="text"
             placeholder="Filter by name or repository..."
             value={filterText}
             onChange={handleFilterChange}
-            className="flex-1 max-w-md px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-ring focus:border-transparent"
+            className="max-w-md flex-1"
             data-testid="sessions-filter"
+            aria-label="Filter sessions by name or repository"
           />
-          <SortSelectorBase
-            sortKey={sortKey}
-            sortDirection={sortDirection}
-            onSortKeyChange={setSortKey}
-            onSortDirectionChange={setSortDirection}
-            options={SESSIONS_SORT_OPTIONS}
-            defaultDirections={SESSIONS_DEFAULT_DIRECTIONS}
-          />
+          <Select value={sortKey} onValueChange={handleSortKeyChange}>
+            <SelectTrigger
+              className="w-40"
+              data-testid="sessions-sort-select"
+              aria-label="Sort by"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SESSIONS_SORT_OPTIONS.map((opt) => (
+                <SelectItem key={opt.key} value={opt.key}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <button
+            type="button"
+            onClick={toggleSortDirection}
+            data-testid="sessions-sort-direction"
+            aria-label={sortDirection === 'asc' ? 'Sort ascending' : 'Sort descending'}
+            className="rounded-md border border-input bg-surface p-2 text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            {sortDirection === 'asc' ? (
+              <ArrowUp size={16} aria-hidden="true" />
+            ) : (
+              <ArrowDown size={16} aria-hidden="true" />
+            )}
+          </button>
         </div>
 
         {/* Loading */}

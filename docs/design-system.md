@@ -148,3 +148,117 @@ import { Bot } from 'lucide-react';
 // テキストインライン(16px)
 <Star size={16} className="inline align-[-2px] mr-1" aria-hidden="true" />
 ```
+
+---
+
+## UI プリミティブ (Issue #1046)
+
+`src/components/ui/` の共通プリミティブ。すべて `cn()` + セマンティックトークンで
+着色し、ライト/ダーク両モードに自動対応する。`@/components/ui` から import する。
+
+- **着色**: セマンティックトークン経由(`bg-surface` / `border-input` / `ring-ring` 等)。直書き色は使わない。
+- **SSR**: Radix の Portal 系(Select / Tooltip / DropdownMenu / Switch / Tabs)は `'use client'` 必須。
+- **z-index**: Portal コンテンツは `Z_INDEX.POPOVER`(65)で描画され、Modal(50)より前面に出る(`src/config/z-index.ts`)。
+- **a11y / キーボード**: Radix 既定のロール・aria 属性・キーボード操作(Tab/矢印/Escape)を壊さない。
+
+### Input / Textarea
+
+ネイティブ要素ベース。`inputSize`(`sm` / `md` / `lg`)で高さを切り替える。
+
+```tsx
+import { Input, Textarea } from '@/components/ui';
+
+<Input placeholder="Filter..." value={q} onChange={(e) => setQ(e.target.value)} />
+<Input inputSize="sm" aria-label="検索" />
+<Textarea rows={4} placeholder="説明" />
+```
+
+### Select
+
+`@radix-ui/react-select` ベース。トリガーは `role="combobox"`、項目は `role="option"`。
+
+```tsx
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui';
+
+<Select value={sortKey} onValueChange={setSortKey}>
+  <SelectTrigger className="w-40" aria-label="並び替え">
+    <SelectValue />
+  </SelectTrigger>
+  <SelectContent>
+    <SelectItem value="repositoryName">Repository</SelectItem>
+    <SelectItem value="lastSent">Last Sent</SelectItem>
+  </SelectContent>
+</Select>
+```
+
+### Tabs
+
+`underline`(既定)と `pill` の 2 バリアント。`variant` は `Tabs` に渡す。
+
+```tsx
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui';
+
+<Tabs defaultValue="overview" variant="pill">
+  <TabsList>
+    <TabsTrigger value="overview">概要</TabsTrigger>
+    <TabsTrigger value="detail">詳細</TabsTrigger>
+  </TabsList>
+  <TabsContent value="overview">...</TabsContent>
+  <TabsContent value="detail">...</TabsContent>
+</Tabs>
+```
+
+### Tooltip
+
+`TooltipProvider` でラップして使う(アプリ全体を 1 回で囲ってもよい)。
+
+```tsx
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui';
+
+<TooltipProvider delayDuration={300}>
+  <Tooltip>
+    <TooltipTrigger aria-label="ヘルプ"><HelpCircle size={16} /></TooltipTrigger>
+    <TooltipContent>補足説明</TooltipContent>
+  </Tooltip>
+</TooltipProvider>
+```
+
+### DropdownMenu
+
+`Item` / `CheckboxItem` / `RadioItem` / `Label` / `Separator` を提供。
+
+```tsx
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui';
+
+<DropdownMenu>
+  <DropdownMenuTrigger aria-label="操作">…</DropdownMenuTrigger>
+  <DropdownMenuContent>
+    <DropdownMenuItem onSelect={onRename}>名前変更</DropdownMenuItem>
+    <DropdownMenuSeparator />
+    <DropdownMenuItem onSelect={onDelete}>削除</DropdownMenuItem>
+  </DropdownMenuContent>
+</DropdownMenu>
+```
+
+### Switch
+
+`role="switch"`。`checked` / `onCheckedChange` で制御する。ラベルは `aria-label` で付与。
+
+```tsx
+import { Switch } from '@/components/ui';
+
+<Switch checked={enabled} onCheckedChange={setEnabled} aria-label="通知を有効化" />
+```
+
+### Skeleton
+
+`animate-pulse` のローディングプレースホルダ。サイズは `className` で指定。
+
+```tsx
+import { Skeleton } from '@/components/ui';
+
+<Skeleton className="h-4 w-32" />
+```
