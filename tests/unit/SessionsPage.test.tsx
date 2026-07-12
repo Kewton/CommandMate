@@ -332,8 +332,9 @@ describe('SessionsPage', () => {
 
       render(<SessionsPage />);
 
-      // SortSelectorBase should be rendered
-      expect(screen.getByTestId('sort-selector-base')).toBeDefined();
+      // Sort primitive (Radix Select trigger) and direction toggle are rendered
+      expect(screen.getByTestId('sessions-sort-select')).toBeDefined();
+      expect(screen.getByTestId('sessions-sort-direction')).toBeDefined();
     });
   });
 
