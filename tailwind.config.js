@@ -83,5 +83,9 @@ module.exports = {
   },
   plugins: [
     require('@tailwindcss/typography'),
+    // [Issue #1050] Micro-interaction utilities (animate-in/out, fade/zoom/slide,
+    // fill-mode, animation delay/duration) used by Modal, Radix data-state
+    // primitives, and list stagger. framer-motion intentionally not used.
+    require('tailwindcss-animate'),
   ],
 }

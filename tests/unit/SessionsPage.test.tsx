@@ -338,6 +338,79 @@ describe('SessionsPage', () => {
     });
   });
 
+  describe('entrance stagger (Issue #1050)', () => {
+    it('applies stagger entrance classes with an incremental delay per item', () => {
+      mockWorktrees = [
+        createWorktree({ id: 'wt-1', lastUserMessageAt: '2026-04-03T10:00:00Z' }),
+        createWorktree({ id: 'wt-2', lastUserMessageAt: '2026-04-02T10:00:00Z' }),
+        createWorktree({ id: 'wt-3', lastUserMessageAt: '2026-04-01T10:00:00Z' }),
+      ];
+
+      render(<SessionsPage />);
+
+      const first = screen.getByTestId('session-item-wt-1');
+      const second = screen.getByTestId('session-item-wt-2');
+      const third = screen.getByTestId('session-item-wt-3');
+
+      // Entrance animation classes present on every item
+      expect(first.className).toContain('animate-in');
+      expect(first.className).toContain('fill-mode-backwards');
+
+      // First item: no delay; subsequent items: 40ms increments
+      expect(first.style.animationDelay).toBe('');
+      expect(second.style.animationDelay).toBe('40ms');
+      expect(third.style.animationDelay).toBe('80ms');
+    });
+
+    it('does NOT re-fire the entrance animation on a polling re-render (stable keys)', () => {
+      mockWorktrees = [
+        createWorktree({ id: 'wt-1', lastUserMessage: 'first', lastUserMessageAt: '2026-04-03T10:00:00Z' }),
+        createWorktree({ id: 'wt-2', lastUserMessage: 'second', lastUserMessageAt: '2026-04-02T10:00:00Z' }),
+      ];
+
+      const { rerender } = render(<SessionsPage />);
+      const before = screen.getByTestId('session-item-wt-1');
+
+      // Simulate a polling update: same worktree ids, changed payload.
+      mockWorktrees = [
+        createWorktree({ id: 'wt-1', lastUserMessage: 'first (updated)', lastUserMessageAt: '2026-04-03T10:05:00Z' }),
+        createWorktree({ id: 'wt-2', lastUserMessage: 'second', lastUserMessageAt: '2026-04-02T10:00:00Z' }),
+      ];
+      rerender(<SessionsPage />);
+      const after = screen.getByTestId('session-item-wt-1');
+
+      // Same DOM node is reused (not remounted) → CSS entrance animation cannot
+      // restart. This is the guard against animations re-firing on each poll.
+      expect(after).toBe(before);
+      expect(after.className).toContain('animate-in');
+    });
+
+    it('keeps the list mounted (no re-fire) through a transient polling error', () => {
+      mockWorktrees = [
+        createWorktree({ id: 'wt-1', lastUserMessageAt: '2026-04-03T10:00:00Z' }),
+      ];
+      const { rerender } = render(<SessionsPage />);
+      const before = screen.getByTestId('session-item-wt-1');
+      expect(screen.getByTestId('sessions-list')).toBeDefined();
+
+      // Transient poll failure (e.g. server rebuild): data still present, error set.
+      mockError = new Error('fetch failed');
+      rerender(<SessionsPage />);
+
+      // The list stays mounted with the SAME DOM node (animation cannot re-fire),
+      // and the error surfaces as a non-blocking banner rather than replacing it.
+      const during = screen.getByTestId('session-item-wt-1');
+      expect(during).toBe(before);
+      expect(screen.getByTestId('sessions-error-banner')).toBeDefined();
+      expect(screen.queryByTestId('sessions-error')).toBeNull();
+
+      // Recovery poll: error clears, list node still identical.
+      mockError = null;
+      rerender(<SessionsPage />);
+      expect(screen.getByTestId('session-item-wt-1')).toBe(before);
+    });
+  });
+
   describe('existing functionality preserved', () => {
     it('should filter by name or repository', () => {
       mockWorktrees = [

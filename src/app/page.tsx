@@ -19,6 +19,7 @@ import { AppShell } from '@/components/layout';
 import { Button, Card } from '@/components/ui';
 import { HomeSessionSummary } from '@/components/home/HomeSessionSummary';
 import { TodoWidget } from '@/components/home/TodoWidget';
+import { STAGGER_ENTER_CLASS, staggerDelay } from '@/lib/utils/stagger';
 import type { Worktree } from '@/types/models';
 
 /**
@@ -170,17 +171,18 @@ export default function Home() {
 
         {/* Shortcut Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          {SHORTCUT_CARDS.map((card) => (
+          {SHORTCUT_CARDS.map((card, index) => (
             <Link
               key={card.href}
               href={card.href}
-              className="group block"
+              className="group block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               data-testid={`shortcut-${card.title.toLowerCase()}`}
             >
               <Card
-                hover
+                interactive
                 padding="lg"
-                className="h-full transition-all hover:border-accent-300 dark:hover:border-accent-700"
+                style={{ animationDelay: staggerDelay(index) }}
+                className={`h-full hover:border-accent-300 dark:hover:border-accent-700 motion-safe:group-focus-visible:-translate-y-0.5 ${STAGGER_ENTER_CLASS}`}
               >
                 <div className="text-gray-400 dark:text-gray-500 group-hover:text-accent-600 dark:group-hover:text-accent-400 transition-colors mb-3">
                   {card.icon}

@@ -95,8 +95,10 @@ export function Modal({
   return createPortal(
     <div className="fixed inset-0 overflow-y-auto" style={{ zIndex: Z_INDEX.MODAL }}>
       {/* Backdrop - Issue #104: skip onClick if disableClose is true */}
+      {/* [Issue #1050] data-state drives the fade-in enter animation (mount-only). */}
       <div
-        className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
+        data-state="open"
+        className="fixed inset-0 bg-black bg-opacity-50 transition-opacity data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-200"
         onClick={disableClose ? undefined : onClose}
       />
 
@@ -104,10 +106,16 @@ export function Modal({
       <div className="relative flex min-h-full items-center justify-center p-2 sm:p-4">
         <div
           ref={modalRef}
+          data-state="open"
+          data-testid="modal-panel"
           className={cn(
             'relative w-full',
             modalSizeVariants({ size }),
-            'max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-2rem)] flex flex-col bg-white dark:bg-gray-900 rounded-lg shadow-xl transform transition-all'
+            'max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-2rem)] flex flex-col bg-white dark:bg-gray-900 rounded-lg shadow-xl transform transition-all',
+            // [Issue #1050] fade + scale enter on mount. Runs once per open (the
+            // panel unmounts on close via `if (!isOpen) return null`), so
+            // parent re-renders do not re-fire the animation.
+            'data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:duration-200'
           )}
         >
           {/* Header */}

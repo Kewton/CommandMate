@@ -15,6 +15,15 @@ const cardVariants = cva(
         true: 'transition-shadow duration-200 hover:shadow-md',
         false: '',
       },
+      // [Issue #1050] Interactive cards (clickable shortcuts, links) get a
+      // hover lift + active press. Kept separate from `hover` (shadow-only) so
+      // non-interactive cards stay flat. The translate is gated behind
+      // motion-safe so it is suppressed under prefers-reduced-motion (the
+      // globals.css reset neutralizes duration/delay, not transform).
+      interactive: {
+        true: 'cursor-pointer transition-all duration-200 hover:shadow-lg active:shadow-md motion-safe:hover:-translate-y-0.5 motion-safe:active:translate-y-0',
+        false: '',
+      },
       padding: {
         none: '',
         sm: 'p-3',
@@ -24,6 +33,7 @@ const cardVariants = cva(
     },
     defaultVariants: {
       hover: false,
+      interactive: false,
       padding: 'md',
     },
   }
@@ -31,6 +41,7 @@ const cardVariants = cva(
 
 export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   hover?: boolean;
+  interactive?: boolean;
   padding?: 'none' | 'sm' | 'md' | 'lg';
   children: React.ReactNode;
 }
@@ -48,13 +59,14 @@ export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
  */
 export function Card({
   hover = false,
+  interactive = false,
   padding = 'md',
   className = '',
   children,
   ...props
 }: CardProps) {
   return (
-    <div className={cn(cardVariants({ hover, padding }), className)} {...props}>
+    <div className={cn(cardVariants({ hover, interactive, padding }), className)} {...props}>
       {children}
     </div>
   );

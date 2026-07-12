@@ -11,7 +11,9 @@ export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center px-4 py-2 rounded-md font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2',
+  // [Issue #1050] transition-all (was transition-colors) so the hover lift /
+  // active press below animate smoothly. Reduced-motion handled in globals.css.
+  'inline-flex items-center justify-center px-4 py-2 rounded-md font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2',
   {
     variants: {
       variant: {
@@ -73,6 +75,11 @@ export function Button({
 
   const classes = cn(
     buttonVariants({ variant, size, fullWidth }),
+    // [Issue #1050] Unified hover lift + active press. Skipped when disabled so
+    // inert buttons don't move on hover. Gated behind motion-safe so the
+    // transform is suppressed under prefers-reduced-motion (the globals.css
+    // reset only neutralizes duration/delay, not transform).
+    !isDisabled && 'motion-safe:hover:-translate-y-0.5 motion-safe:active:translate-y-0',
     isDisabled && 'opacity-50 cursor-not-allowed',
     className
   );

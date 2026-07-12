@@ -9,6 +9,45 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { Modal } from '@/components/ui/Modal';
 
+// [Issue #1050] Motion foundation: data-state + enter animation.
+describe('Modal (Issue #1050 motion)', () => {
+  afterEach(() => {
+    cleanup();
+    document.body.style.overflow = 'unset';
+  });
+
+  it('exposes data-state="open" and fade+scale enter classes on the panel when open', () => {
+    render(
+      <Modal isOpen onClose={() => {}} title="Anim">
+        <p>content</p>
+      </Modal>
+    );
+    const panel = screen.getByTestId('modal-panel');
+    expect(panel).toHaveAttribute('data-state', 'open');
+    const cls = panel.className;
+    expect(cls).toContain('data-[state=open]:animate-in');
+    expect(cls).toContain('data-[state=open]:fade-in-0');
+    expect(cls).toContain('data-[state=open]:zoom-in-95');
+  });
+
+  it('transitions from an open panel to no panel when closed', () => {
+    const { rerender } = render(
+      <Modal isOpen onClose={() => {}} title="Anim">
+        <p>content</p>
+      </Modal>
+    );
+    expect(screen.getByTestId('modal-panel')).toHaveAttribute('data-state', 'open');
+
+    rerender(
+      <Modal isOpen={false} onClose={() => {}} title="Anim">
+        <p>content</p>
+      </Modal>
+    );
+    // Closed modals unmount, so the panel (and its data-state) is gone.
+    expect(screen.queryByTestId('modal-panel')).toBeNull();
+  });
+});
+
 afterEach(() => {
   cleanup();
   document.body.style.overflow = 'unset';

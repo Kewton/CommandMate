@@ -32,6 +32,7 @@ import {
 } from '@/components/ui';
 import { compareByTimestamp } from '@/lib/sidebar-utils';
 import { formatRelativeTime } from '@/lib/date-utils';
+import { STAGGER_ENTER_CLASS, staggerDelay } from '@/lib/utils/stagger';
 import {
   MESSAGE_PREVIEW_MAX_LENGTH_PC,
   MESSAGE_PREVIEW_MAX_LENGTH_SP,
@@ -119,6 +120,9 @@ const DEFAULT_BADGE_CLASS = 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:tex
 
 export default function SessionsPage() {
   const { worktrees, isLoading, error } = useWorktreesCacheContext();
+  // [Issue #1050] Whether we have any data to keep mounted. Based on the raw
+  // (unfiltered) list so an active text filter never unmounts the list.
+  const hasWorktrees = worktrees.length > 0;
   const [filterText, setFilterText] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('lastSent');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
@@ -253,29 +257,35 @@ export default function SessionsPage() {
           </button>
         </div>
 
-        {/* Loading */}
-        {isLoading && (
-          <div className="text-gray-500 dark:text-gray-400" data-testid="sessions-loading">
-            Loading sessions...
-          </div>
-        )}
-
-        {/* Error */}
-        {error && (
-          <div className="text-red-500 dark:text-red-400" data-testid="sessions-error">
-            Failed to load sessions: {error.message}
-          </div>
-        )}
-
-        {/* Session list */}
-        {!isLoading && !error && (
-          <div className="space-y-2" data-testid="sessions-list">
-            {filteredAndSorted.length === 0 ? (
-              <div className="text-gray-500 dark:text-gray-400 py-8 text-center" data-testid="sessions-empty">
-                {filterText ? 'No matching sessions found.' : 'No sessions yet.'}
+        {/*
+          * [Issue #1050] Keep the list mounted across transient polling errors.
+          * `worktrees` comes from a shared polling cache; a temporary fetch
+          * failure (e.g. server rebuild) must NOT unmount the list, otherwise
+          * the next successful poll remounts it and re-fires the entrance
+          * stagger. Mirrors the #266 SF-IMP-001 "don't collapse the tree on a
+          * transient error" pattern: show a non-blocking banner when we already
+          * have data, and only surface a blocking error/loading state when we
+          * have nothing to show.
+          */}
+        {hasWorktrees ? (
+          <>
+            {/* Non-blocking error banner (data already visible below) */}
+            {error && (
+              <div
+                className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-400"
+                role="status"
+                data-testid="sessions-error-banner"
+              >
+                Failed to refresh sessions: {error.message}
               </div>
-            ) : (
-              filteredAndSorted.map((wt: Worktree) => {
+            )}
+            <div className="space-y-2" data-testid="sessions-list">
+              {filteredAndSorted.length === 0 ? (
+                <div className="text-gray-500 dark:text-gray-400 py-8 text-center" data-testid="sessions-empty">
+                  No matching sessions found.
+                </div>
+              ) : (
+                filteredAndSorted.map((wt: Worktree, index: number) => {
                 const agents = wt.selectedAgents ?? DEFAULT_SELECTED_AGENTS;
                 const sanitizedMessage = wt.lastUserMessage
                   ? sanitizePreview(wt.lastUserMessage)
@@ -285,10 +295,13 @@ export default function SessionsPage() {
                   : null;
 
                 return (
+                  // [Issue #1050] Stable key (wt.id) keeps the entrance stagger
+                  // from re-firing on polling re-renders.
                   <Link
                     key={wt.id}
                     href={`/worktrees/${wt.id}`}
-                    className="block bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700 hover:border-accent-300 dark:hover:border-accent-700 transition-colors"
+                    style={{ animationDelay: staggerDelay(index) }}
+                    className={`block bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700 hover:border-accent-300 dark:hover:border-accent-700 transition-colors ${STAGGER_ENTER_CLASS}`}
                     data-testid={`session-item-${wt.id}`}
                   >
                     {/* Row 1: Name, Agent statuses */}
@@ -366,8 +379,28 @@ export default function SessionsPage() {
                   </Link>
                 );
               })
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            {/* No data yet: loading / blocking error / empty are mutually exclusive. */}
+            {isLoading && (
+              <div className="text-gray-500 dark:text-gray-400" data-testid="sessions-loading">
+                Loading sessions...
+              </div>
             )}
-          </div>
+            {!isLoading && error && (
+              <div className="text-red-500 dark:text-red-400" data-testid="sessions-error">
+                Failed to load sessions: {error.message}
+              </div>
+            )}
+            {!isLoading && !error && (
+              <div className="text-gray-500 dark:text-gray-400 py-8 text-center" data-testid="sessions-empty">
+                {filterText ? 'No matching sessions found.' : 'No sessions yet.'}
+              </div>
+            )}
+          </>
         )}
       </div>
     </AppShell>

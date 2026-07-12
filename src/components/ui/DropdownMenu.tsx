@@ -27,6 +27,12 @@ export const DropdownMenuContent = React.forwardRef<
       style={{ zIndex: Z_INDEX.POPOVER }}
       className={cn(
         'min-w-[8rem] overflow-hidden rounded-md border border-border bg-surface p-1 text-surface-foreground shadow-lg',
+        // [Issue #1050] Radix data-state driven enter/exit (fade + zoom + slide-from-side).
+        'data-[state=open]:animate-in data-[state=closed]:animate-out',
+        'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+        'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
+        'data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2',
+        'data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2',
         className
       )}
       {...props}
