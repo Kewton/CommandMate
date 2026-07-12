@@ -142,7 +142,7 @@ export const SortSelectorBase = memo(function SortSelectorBase({
       aria-label={`Sort by ${currentLabel}`}
       className="
         flex items-center gap-1 px-2 py-1 rounded
-        text-xs text-gray-300 hover:text-white hover:bg-gray-700
+        text-xs text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover
         focus:outline-none focus:ring-2 focus:ring-ring
         transition-colors
       "
@@ -170,7 +170,7 @@ export const SortSelectorBase = memo(function SortSelectorBase({
           onClick={handleToggleDirection}
           aria-label={sortDirection === 'asc' ? 'Sort ascending' : 'Sort descending'}
           className="
-            p-1 rounded text-gray-300 hover:text-white hover:bg-gray-700
+            p-1 rounded text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover
             focus:outline-none focus:ring-2 focus:ring-ring
             transition-colors
           "
@@ -191,7 +191,7 @@ export const SortSelectorBase = memo(function SortSelectorBase({
           className="
             absolute right-0 top-full mt-1 z-50
             min-w-[140px] py-1 rounded-md shadow-lg
-            bg-gray-700 border border-gray-600
+            bg-sidebar border border-sidebar-border
           "
         >
           {options.map((option) => (
@@ -204,8 +204,8 @@ export const SortSelectorBase = memo(function SortSelectorBase({
               className={`
                 w-full px-3 py-2 text-left text-sm
                 flex items-center justify-between
-                hover:bg-gray-600 transition-colors
-                ${sortKey === option.key ? 'text-accent-400' : 'text-gray-300'}
+                hover:bg-sidebar-hover transition-colors
+                ${sortKey === option.key ? 'text-accent-700 dark:text-accent-400' : 'text-sidebar-muted'}
               `}
             >
               <span>{option.label}</span>

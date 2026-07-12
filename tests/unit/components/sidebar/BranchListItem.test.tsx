@@ -92,7 +92,9 @@ describe('BranchListItem', () => {
       );
 
       const item = screen.getByTestId('branch-list-item');
-      expect(item.className).toMatch(/bg-gray-600|bg-gray-700|selected|border-l|border-accent/);
+      // Issue #1073: selected background migrated to the `bg-sidebar-hover`
+      // token; the accent left border remains the primary selection marker.
+      expect(item.className).toMatch(/bg-sidebar-hover|selected|border-l|border-accent/);
     });
 
     it('should not apply selected styling when not selected', () => {
@@ -105,8 +107,8 @@ describe('BranchListItem', () => {
       );
 
       const item = screen.getByTestId('branch-list-item');
-      // bg-gray-600 is the selected background; unselected should not have it
-      expect(item.className).not.toMatch(/(?<![a-z-])bg-gray-600/);
+      // border-accent-500 is the selected marker; unselected must not have it.
+      expect(item.className).not.toMatch(/border-accent-500/);
     });
 
     it('should have aria-current attribute when selected', () => {

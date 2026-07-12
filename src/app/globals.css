@@ -49,6 +49,19 @@
     --info: 59 130 246; /* blue-500 */
 
     /*
+     * [Issue #1073] Sidebar surface tokens. STANDALONE literal RGB values — they
+     * intentionally do NOT reference --surface via var(), so #1074's light
+     * --surface ladder revision cannot bleed into the sidebar color. Theme-
+     * following: light = slate-50 panel + hairline, dark = #141821 (aligned with
+     * the #1049 surface elevation). See docs/design-system.md.
+     */
+    --sidebar: 248 250 252; /* slate-50 — light panel */
+    --sidebar-foreground: 17 24 39; /* gray-900 */
+    --sidebar-border: 226 232 240; /* slate-200 — hairline */
+    --sidebar-hover: 241 245 249; /* slate-100 — hover/selected bg */
+    --sidebar-muted: 107 114 128; /* gray-500 — secondary text */
+
+    /*
      * [Issue #1050] Motion tokens. Mode-independent, so defined once on :root.
      * Durations map to the tailwindcss-animate `duration-*` scale used across
      * Modal / Radix data-state primitives / list stagger. Easing is ease-out
@@ -88,6 +101,14 @@
     --warning: 245 158 11; /* amber-500 */
     --danger: 239 68 68; /* red-500 */
     --info: 59 130 246; /* blue-500 */
+
+    /* [Issue #1073] Sidebar surface tokens (see :root note). Dark values match
+       the #1049 elevation ladder so the sidebar lifts subtly above the base. */
+    --sidebar: 20 24 33; /* #141821 — matches --surface */
+    --sidebar-foreground: 243 244 246; /* gray-100 */
+    --sidebar-border: 42 48 62; /* #2a303e — hairline */
+    --sidebar-hover: 31 41 55; /* gray-800 — hover/selected bg */
+    --sidebar-muted: 156 163 175; /* gray-400 — secondary text */
   }
 
   /*
