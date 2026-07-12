@@ -55,4 +55,23 @@ describe('HomeSessionSummary', () => {
     expect(screen.getByText('Running')).toBeDefined();
     expect(screen.getByText('Waiting')).toBeDefined();
   });
+
+  it('should apply tabular-nums to the count elements (Issue #1072)', () => {
+    render(<HomeSessionSummary worktrees={[]} />);
+    expect(screen.getByTestId('running-count').className).toContain('tabular-nums');
+    expect(screen.getByTestId('waiting-count').className).toContain('tabular-nums');
+  });
+
+  it('should mute the count color when the count is zero (Issue #1072)', () => {
+    render(
+      <HomeSessionSummary
+        worktrees={[
+          createMockWorktree({ id: '1', isSessionRunning: true, isWaitingForResponse: false }),
+        ]}
+      />,
+    );
+    // running > 0 → foreground; waiting == 0 → muted
+    expect(screen.getByTestId('running-count').className).toContain('text-foreground');
+    expect(screen.getByTestId('waiting-count').className).toContain('text-muted-foreground');
+  });
 });
