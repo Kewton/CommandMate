@@ -21,7 +21,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
-import { Info, SlidersHorizontal, MessageSquare, ChevronDown } from 'lucide-react';
+import { Info, SlidersHorizontal, MessageSquare, ChevronDown, Sparkles } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { FullScreenModal } from '@/components/common/FullScreenModal';
 import { useIsMobile } from '@/hooks/useIsMobile';
@@ -148,7 +148,7 @@ function AskAiButton({
       title={title}
       className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded border border-violet-300 dark:border-violet-700 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/30 transition-colors"
     >
-      <span aria-hidden="true">✨</span>
+      <Sparkles size={14} aria-hidden="true" />
       {label}
     </button>
   );

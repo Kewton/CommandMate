@@ -6,6 +6,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Star } from 'lucide-react';
 import { WorktreeCard } from './WorktreeCard';
 import { Button, Badge } from '@/components/ui';
 import { worktreeApi, repositoryApi, handleApiError, type RepositorySummary, type ExcludedRepository } from '@/lib/api-client';
@@ -440,7 +441,7 @@ Type "delete" to confirm:`;
           size="sm"
           onClick={() => toggleSort('favorite')}
         >
-          ⭐ Favorite {sortBy === 'favorite' && (sortDirection === 'asc' ? '↑' : '↓')}
+          <Star size={14} className="inline align-[-2px] mr-1" aria-hidden="true" />Favorite {sortBy === 'favorite' && (sortDirection === 'asc' ? '↑' : '↓')}
         </Button>
         <Button
           variant={sortBy === 'name' ? 'primary' : 'ghost'}

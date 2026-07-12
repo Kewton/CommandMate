@@ -35,6 +35,7 @@
 'use client';
 
 import React, { memo, useCallback, useRef } from 'react';
+import { Menu } from 'lucide-react';
 import { ACTIVITIES, type ActivityId } from '@/config/activity-bar-config';
 import { Tooltip } from '@/components/common/Tooltip';
 import { useSidebarContext } from '@/contexts/SidebarContext';
@@ -117,20 +118,7 @@ export const ActivityBar = memo(function ActivityBar({
           aria-expanded={isSidebarOpen}
           className="flex items-center justify-center h-12 w-12 text-gray-500 dark:text-gray-400 transition-colors hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-inset"
         >
-          <svg
-            className="w-5 h-5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M4 6h16M4 12h16M4 18h16"
-            />
-          </svg>
+          <Menu size={20} aria-hidden="true" />
         </button>
       </Tooltip>
       {/* Separator between the sidebar toggle and the activity tabs */}
