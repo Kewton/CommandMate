@@ -65,6 +65,15 @@ module.exports = {
         danger: 'rgb(var(--danger) / <alpha-value>)',
         info: 'rgb(var(--info) / <alpha-value>)',
       },
+      // [Issue #1074] Light mode inverted to a gray page with white cards, so
+      // shadow-sm must read as a real 2-layer elevation instead of the flat
+      // Tailwind default (`0 1px 2px 0 rgb(0 0 0 / 0.05)`). The slate tint
+      // (rgb(15 23 42)) is near-invisible on the dark #0a0c12 base, so dark is
+      // unchanged (dark separates surfaces by border, not shadow). md/lg stay
+      // Tailwind defaults — this issue is scoped to sm.
+      boxShadow: {
+        sm: '0 1px 2px rgb(15 23 42 / 0.06), 0 1px 1px rgb(15 23 42 / 0.04)',
+      },
       animation: {
         'slide-in': 'slide-in 0.3s ease-out',
         'slide-up': 'slide-up 0.25s ease-out',
