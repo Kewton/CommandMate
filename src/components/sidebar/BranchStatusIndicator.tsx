@@ -2,16 +2,16 @@
  * BranchStatusIndicator Component
  *
  * Displays a colored dot indicating the branch's current status.
- * Includes animation for active states.
- *
- * SF1: Uses centralized status colors from @/config/status-colors
+ * Delegates rendering to the shared StatusDot primitive (Issue #1051): active
+ * states (running/generating) glow and pulse, waiting blinks, and the rest are
+ * static dots.
  */
 
 'use client';
 
 import React, { memo } from 'react';
 import type { BranchStatus } from '@/types/sidebar';
-import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
+import { StatusDot } from '@/components/ui/StatusDot';
 
 // ============================================================================
 // Types
@@ -46,35 +46,14 @@ export const BranchStatusIndicator = memo(function BranchStatusIndicator({
   status,
   label,
 }: BranchStatusIndicatorProps) {
-  const config = SIDEBAR_STATUS_CONFIG[status];
-  // Issue #867: prefer the caller-supplied breakdown label when present.
-  const accessibleLabel = label ?? config.label;
-
-  if (config.type === 'spinner') {
-    return (
-      <span
-        data-testid="status-indicator"
-        className={`
-          w-3 h-3 rounded-full flex-shrink-0
-          border-2 border-t-transparent
-          ${config.className}
-          animate-spin
-        `}
-        title={accessibleLabel}
-        aria-label={accessibleLabel}
-      />
-    );
-  }
-
+  // Issue #867: `label` (per-agent breakdown) overrides the default; StatusDot
+  // falls back to the status's own label when omitted.
   return (
-    <span
+    <StatusDot
       data-testid="status-indicator"
-      className={`
-        w-3 h-3 rounded-full flex-shrink-0
-        ${config.className}
-      `}
-      title={accessibleLabel}
-      aria-label={accessibleLabel}
+      status={status}
+      label={label}
+      size="lg"
     />
   );
 });

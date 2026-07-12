@@ -183,7 +183,7 @@ describe('BranchListItem', () => {
       expect(screen.queryByLabelText('CLI tool status')).not.toBeInTheDocument();
     });
 
-    it('should reflect running status with spinner styling', () => {
+    it('should reflect running status with a glowing dot (Issue #1051)', () => {
       render(
         <BranchListItem
           branch={{ ...defaultBranch, cliStatus: { claude: 'running', codex: 'idle' } }}
@@ -193,7 +193,7 @@ describe('BranchListItem', () => {
       );
 
       const claudeDot = screen.getByLabelText(/Claude:/);
-      expect(claudeDot.className).toMatch(/animate-spin/);
+      expect(claudeDot.className).toMatch(/animate-status-glow/);
     });
 
     it('should render vibe-local status dot dynamically (Issue #368)', () => {
@@ -253,8 +253,8 @@ describe('BranchListItem', () => {
       );
 
       const indicator = screen.getByTestId('status-indicator');
-      // waiting renders as a static yellow dot (no spinner).
-      expect(indicator.className).toMatch(/bg-yellow-500/);
+      // waiting renders as an amber dot that blinks (never spins).
+      expect(indicator.className).toMatch(/bg-warning/);
       expect(indicator.className).not.toMatch(/animate-spin/);
     });
 
@@ -271,7 +271,7 @@ describe('BranchListItem', () => {
       );
 
       const indicator = screen.getByTestId('status-indicator');
-      expect(indicator.className).toMatch(/animate-spin/);
+      expect(indicator.className).toMatch(/animate-status-glow/);
     });
 
     it('should expose the per-agent breakdown via the indicator label', () => {
