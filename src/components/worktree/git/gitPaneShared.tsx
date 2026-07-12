@@ -10,6 +10,7 @@
 'use client';
 
 import { memo } from 'react';
+import { Sparkles } from 'lucide-react';
 import type { ChangedFile } from '@/types/git';
 
 // ============================================================================
@@ -82,7 +83,7 @@ export const AskAiButton = memo(function AskAiButton({
       data-testid={testId}
       title="現在の状況を AI チャットに下書きします（自動送信はされません）"
     >
-      <span aria-hidden="true">✨</span>
+      <Sparkles size={14} aria-hidden="true" />
       Ask AI
     </button>
   );

@@ -13,6 +13,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { Home, MessageSquare, AlignJustify, CircleCheck, MoreHorizontal } from 'lucide-react';
 
 /**
  * Mobile navigation tab definition.
@@ -25,47 +26,15 @@ interface MobileNavTab {
 }
 
 /**
- * SVG icon components for mobile nav tabs.
- */
-const HomeIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-  </svg>
-);
-
-const ChatIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-  </svg>
-);
-
-const SessionsIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
-  </svg>
-);
-
-const ReviewIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-  </svg>
-);
-
-const MoreIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z" />
-  </svg>
-);
-
-/**
  * Mobile navigation tabs - 4 tabs (Repositories is under More).
+ * Icons: lucide-react at 20px / strokeWidth 2 (see docs/design-system.md).
  */
 const MOBILE_NAV_TABS: MobileNavTab[] = [
-  { label: 'Home', href: '/', isActive: (p) => p === '/', icon: <HomeIcon /> },
-  { label: 'Chat', href: '/chat', isActive: (p) => p.startsWith('/chat'), icon: <ChatIcon /> },
-  { label: 'Sessions', href: '/sessions', isActive: (p) => p.startsWith('/sessions'), icon: <SessionsIcon /> },
-  { label: 'Review', href: '/review', isActive: (p) => p.startsWith('/review'), icon: <ReviewIcon /> },
-  { label: 'More', href: '/more', isActive: (p) => p.startsWith('/more'), icon: <MoreIcon /> },
+  { label: 'Home', href: '/', isActive: (p) => p === '/', icon: <Home size={20} aria-hidden="true" /> },
+  { label: 'Chat', href: '/chat', isActive: (p) => p.startsWith('/chat'), icon: <MessageSquare size={20} aria-hidden="true" /> },
+  { label: 'Sessions', href: '/sessions', isActive: (p) => p.startsWith('/sessions'), icon: <AlignJustify size={20} aria-hidden="true" /> },
+  { label: 'Review', href: '/review', isActive: (p) => p.startsWith('/review'), icon: <CircleCheck size={20} aria-hidden="true" /> },
+  { label: 'More', href: '/more', isActive: (p) => p.startsWith('/more'), icon: <MoreHorizontal size={20} aria-hidden="true" /> },
 ];
 
 /**

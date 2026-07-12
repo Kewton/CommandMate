@@ -6,7 +6,8 @@
 
 'use client';
 
-import { useCallback, useMemo, memo } from 'react';
+import { useCallback, useMemo } from 'react';
+import { SquareTerminal, Clock, Folder, FileText, Info } from 'lucide-react';
 import { NotificationDot } from '@/components/common/NotificationDot';
 import type { DeepLinkPane } from '@/types/ui-state';
 
@@ -46,49 +47,6 @@ interface TabConfig {
   icon: React.ReactNode;
 }
 
-/** Common SVG icon props */
-interface IconProps {
-  /** SVG path d attribute */
-  path: string;
-  /** Icon size class (default: w-5 h-5) */
-  className?: string;
-}
-
-/**
- * Base icon component to reduce SVG attribute repetition
- */
-const Icon = memo(function Icon({ path, className = 'w-5 h-5' }: IconProps) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      aria-hidden="true"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d={path}
-      />
-    </svg>
-  );
-});
-
-/** Icon path definitions */
-const ICON_PATHS = {
-  terminal: 'M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z',
-  history: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
-  files: 'M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z',
-  memo: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
-  info: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
-} as const;
-
-/**
- * Tab configurations
- * Order: Terminal, History, Files, Memo, Info
- */
 /**
  * Map MobileTab to DeepLinkPane for searchParams integration (Issue #600).
  * memo tab maps to 'notes' (the first sub-pane); others map 1:1.
@@ -98,12 +56,17 @@ function toDeepLinkPane(tab: MobileTab): DeepLinkPane {
   return tab;
 }
 
+/**
+ * Tab configurations
+ * Order: Terminal, History, Files, Memo, Info
+ * Icons: lucide-react at 20px / strokeWidth 2 (see docs/design-system.md).
+ */
 const TABS: TabConfig[] = [
-  { id: 'terminal', label: 'Terminal', icon: <Icon path={ICON_PATHS.terminal} /> },
-  { id: 'history', label: 'History', icon: <Icon path={ICON_PATHS.history} /> },
-  { id: 'files', label: 'Files', icon: <Icon path={ICON_PATHS.files} /> },
-  { id: 'memo', label: 'Tools', icon: <Icon path={ICON_PATHS.memo} /> },
-  { id: 'info', label: 'Info', icon: <Icon path={ICON_PATHS.info} /> },
+  { id: 'terminal', label: 'Terminal', icon: <SquareTerminal size={20} aria-hidden="true" /> },
+  { id: 'history', label: 'History', icon: <Clock size={20} aria-hidden="true" /> },
+  { id: 'files', label: 'Files', icon: <Folder size={20} aria-hidden="true" /> },
+  { id: 'memo', label: 'Tools', icon: <FileText size={20} aria-hidden="true" /> },
+  { id: 'info', label: 'Info', icon: <Info size={20} aria-hidden="true" /> },
 ];
 
 /**

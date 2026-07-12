@@ -6,6 +6,7 @@
 'use client';
 
 import { useState } from 'react';
+import { TriangleAlert, CircleCheck } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useLocale } from 'next-intl';
 import type { ChatMessage } from '@/types/models';
@@ -93,7 +94,7 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <span className="text-2xl">⚠️</span>
+            <TriangleAlert className="w-6 h-6 text-yellow-600" aria-hidden="true" />
             <span className="font-bold text-yellow-800">{t('confirmationFrom', { toolName: getCliToolDisplayNameSafe(message.cliToolId, 'Claude') })}</span>
           </div>
           <span className="text-xs text-yellow-600">{timestamp}</span>
@@ -172,7 +173,7 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
         ) : (
           <div className="bg-white border border-gray-300 rounded-lg px-4 py-2 inline-block">
             <span className="text-sm text-gray-600">
-              ✅ {t('answered')}: <strong className="text-gray-900">{prompt.answer}</strong>
+              <CircleCheck size={16} className="inline align-[-3px] mr-1 text-green-600" aria-hidden="true" />{t('answered')}: <strong className="text-gray-900">{prompt.answer}</strong>
             </span>
           </div>
         )}
