@@ -232,7 +232,10 @@ describe('Sidebar', () => {
   });
 
   describe('Styling', () => {
-    it('should have dark background', async () => {
+    // Issue #1073: the sidebar background migrated from the hard-coded
+    // `bg-gray-800` to the theme-following `bg-sidebar` token (light = slate-50
+    // panel, dark = #141821), so it no longer paints a fixed dark chrome.
+    it('should use the sidebar surface token for its background', async () => {
       render(
         <Wrapper>
           <Sidebar />
@@ -241,7 +244,7 @@ describe('Sidebar', () => {
 
       await waitFor(() => {
         const sidebar = screen.getByTestId('sidebar');
-        expect(sidebar.className).toMatch(/bg-gray-800|bg-gray-900|bg-slate-900|bg-zinc-900/);
+        expect(sidebar.className).toMatch(/bg-sidebar/);
       });
     });
   });

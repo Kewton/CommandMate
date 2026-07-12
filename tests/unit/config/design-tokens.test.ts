@@ -37,6 +37,13 @@ const MODE_VARYING: Record<string, { light: string; dark: string }> = {
   '--muted-foreground': { light: '107 114 128', dark: '156 163 175' },
   '--border': { light: '226 232 240', dark: '42 48 62' },
   '--input': { light: '209 213 219', dark: '75 85 99' },
+  // [Issue #1073] Sidebar theme-following tokens. Standalone literal RGB values
+  // (NOT var() references) so #1074's --surface ladder revision cannot bleed in.
+  '--sidebar': { light: '248 250 252', dark: '20 24 33' },
+  '--sidebar-foreground': { light: '17 24 39', dark: '243 244 246' },
+  '--sidebar-border': { light: '226 232 240', dark: '42 48 62' },
+  '--sidebar-hover': { light: '241 245 249', dark: '31 41 55' },
+  '--sidebar-muted': { light: '107 114 128', dark: '156 163 175' },
 };
 
 /** Tokens with identical values in both modes (defined in both blocks). */
@@ -135,6 +142,20 @@ describe('Design tokens (Issue #1041)', () => {
       for (const shade of [50, 100, 200, 300, 400, 500, 600, 700]) {
         expect(accent[String(shade)]).toBe(`rgb(var(--accent-${shade}) / <alpha-value>)`);
       }
+    });
+
+    // [Issue #1073] Round-trip guard: globals.css defines --sidebar-* (checked in
+    // the MODE_VARYING block above) AND tailwind.config.js must register the
+    // matching `sidebar` scale. Without this, `bg-sidebar` would be an unknown
+    // utility and the sidebar could silently render transparent while every
+    // other gate still passes (Must Fix S3-003).
+    it('registers the sidebar color scale (Issue #1073)', () => {
+      const sidebar = colors.sidebar as Record<string, string>;
+      expect(sidebar.DEFAULT).toBe('rgb(var(--sidebar) / <alpha-value>)');
+      expect(sidebar.foreground).toBe('rgb(var(--sidebar-foreground) / <alpha-value>)');
+      expect(sidebar.border).toBe('rgb(var(--sidebar-border) / <alpha-value>)');
+      expect(sidebar.hover).toBe('rgb(var(--sidebar-hover) / <alpha-value>)');
+      expect(sidebar.muted).toBe('rgb(var(--sidebar-muted) / <alpha-value>)');
     });
 
     it('no longer exposes the removed primary / cmd-bg-dark colors', () => {

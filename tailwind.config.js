@@ -44,6 +44,16 @@ module.exports = {
           DEFAULT: 'rgb(var(--muted) / <alpha-value>)',
           foreground: 'rgb(var(--muted-foreground) / <alpha-value>)',
         },
+        // [Issue #1073] Sidebar surface scale (bg-sidebar / text-sidebar-foreground
+        // / border-sidebar-border / hover:bg-sidebar-hover / text-sidebar-muted).
+        // Backed by the standalone --sidebar-* tokens in globals.css.
+        sidebar: {
+          DEFAULT: 'rgb(var(--sidebar) / <alpha-value>)',
+          foreground: 'rgb(var(--sidebar-foreground) / <alpha-value>)',
+          border: 'rgb(var(--sidebar-border) / <alpha-value>)',
+          hover: 'rgb(var(--sidebar-hover) / <alpha-value>)',
+          muted: 'rgb(var(--sidebar-muted) / <alpha-value>)',
+        },
         border: 'rgb(var(--border) / <alpha-value>)',
         input: 'rgb(var(--input) / <alpha-value>)',
         ring: 'rgb(var(--ring) / <alpha-value>)',
