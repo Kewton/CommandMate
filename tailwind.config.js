@@ -68,6 +68,12 @@ module.exports = {
       animation: {
         'slide-in': 'slide-in 0.3s ease-out',
         'slide-up': 'slide-up 0.25s ease-out',
+        // [Issue #1051] StatusDot "living" states. Infinite CSS animations so
+        // polling re-renders never restart them (no JS/inline-style keying).
+        // OS "reduce motion" is honored globally in globals.css (#1050), which
+        // freezes these to a static dot — do not re-implement the media query.
+        'status-glow': 'status-glow 2.4s ease-in-out infinite',
+        'status-blink': 'status-blink 1.6s ease-in-out infinite',
       },
       keyframes: {
         'slide-in': {
@@ -77,6 +83,17 @@ module.exports = {
         'slide-up': {
           '0%': { transform: 'translateY(100%)' },
           '100%': { transform: 'translateY(0)' },
+        },
+        // Pulsing box-shadow glow keyed to the dot's own color via currentColor,
+        // so a single keyframe works for any status color (running=green).
+        'status-glow': {
+          '0%, 100%': { boxShadow: '0 0 3px 0 currentColor', opacity: '0.85' },
+          '50%': { boxShadow: '0 0 8px 2px currentColor', opacity: '1' },
+        },
+        // Weak amber blink for the waiting state.
+        'status-blink': {
+          '0%, 100%': { opacity: '1' },
+          '50%': { opacity: '0.45' },
         },
       },
     },

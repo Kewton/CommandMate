@@ -29,6 +29,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  StatusDot,
 } from '@/components/ui';
 import { compareByTimestamp } from '@/lib/sidebar-utils';
 import { formatRelativeTime } from '@/lib/date-utils';
@@ -40,6 +41,7 @@ import {
 } from '@/config/message-preview-config';
 import type { SortKey, SortDirection } from '@/lib/sidebar-utils';
 import type { Worktree } from '@/types/models';
+import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { BranchStatus } from '@/types/sidebar';
 
 // ============================================================================
@@ -74,21 +76,18 @@ const DEFAULT_STATUS_PRIORITY = 4;
 // Helpers
 // ============================================================================
 
-/** Small CLI status dot for Sessions list */
+/** Small CLI status dot for Sessions list (Issue #1051: shared StatusDot). */
 function CliDot({ status, label }: { status: BranchStatus; label: string }) {
-  const config = SIDEBAR_STATUS_CONFIG[status];
-  const title = `${label}: ${config.label}`;
-  const base = 'w-2.5 h-2.5 rounded-full flex-shrink-0';
+  const title = `${label}: ${SIDEBAR_STATUS_CONFIG[status].label}`;
+  return <StatusDot status={status} size="md" label={title} />;
+}
 
-  if (config.type === 'spinner') {
-    return (
-      <span
-        className={`${base} border-2 border-t-transparent animate-spin ${config.className}`}
-        title={title}
-      />
-    );
-  }
-  return <span className={`${base} ${config.className}`} title={title} />;
+/** Whether any selected agent is actively working (running/generating). */
+function isWorktreeActive(wt: Worktree, agents: readonly CLIToolType[]): boolean {
+  return agents.some((agent) => {
+    const s = deriveCliStatus(wt.sessionStatusByCli?.[agent]);
+    return s === 'running' || s === 'generating';
+  });
 }
 
 /** Status display labels */
@@ -293,6 +292,12 @@ export default function SessionsPage() {
                 const relativeTime = wt.lastUserMessageAt
                   ? formatRelativeTime(String(wt.lastUserMessageAt))
                   : null;
+                // [Issue #1051] Active (running) cards get an accent border +
+                // subtle glow so a working session stands out at a glance.
+                const isActive = isWorktreeActive(wt, agents);
+                const cardStateClasses = isActive
+                  ? 'border-accent-500/40 shadow-[0_0_16px_-4px_rgb(var(--accent-500)/0.45)] hover:border-accent-400'
+                  : 'border-border shadow-sm hover:border-accent-300 dark:hover:border-accent-700';
 
                 return (
                   // [Issue #1050] Stable key (wt.id) keeps the entrance stagger
@@ -301,7 +306,7 @@ export default function SessionsPage() {
                     key={wt.id}
                     href={`/worktrees/${wt.id}`}
                     style={{ animationDelay: staggerDelay(index) }}
-                    className={`block bg-surface rounded-lg p-4 border border-border shadow-sm hover:border-accent-300 dark:hover:border-accent-700 transition-colors ${STAGGER_ENTER_CLASS}`}
+                    className={`block bg-surface rounded-lg p-4 border transition-colors ${cardStateClasses} ${STAGGER_ENTER_CLASS}`}
                     data-testid={`session-item-${wt.id}`}
                   >
                     {/* Row 1: Name, Agent statuses */}

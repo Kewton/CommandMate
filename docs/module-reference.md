@@ -111,6 +111,7 @@
 | `src/hooks/useFileSearch.ts` | 検索状態管理フック（debounce処理、API呼び出し、結果管理） |
 | `src/components/worktree/MoveDialog.tsx` | ファイル移動先選択ダイアログ（Issue #162: ディレクトリツリーブラウザ、ルート選択、ネスト対応、updateTreeNode/findNodeByPath抽出） |
 | `src/components/ui/Modal.tsx` | モーダルダイアログコンポーネント（Issue #299: z-[9999]ハードコード除去、Z_INDEX.MODAL使用に統一） |
+| `src/components/ui/StatusDot.tsx` | 共通ステータスドット（Issue #1051: running/generating=緑グロー+パルス+静的リング(reduced-motion凍結時もreadyと識別)、waiting=amber弱点滅、idle/ready/error+未知state=静的、size sm/md/lg。infinite CSSアニメでポーリング非リセット、reduced-motionはglobals.css準拠。適用はサイドバー/Home/Sessionsのみ、worktree詳細/MobileHeaderは従来spinner据置） |
 | `src/components/common/FullScreenModal.tsx` | モバイル向けフルスクリーンモーダルシェル（Issue #825: slide-up、右上クローズ、sticky footer、visualViewportでキーボード回避、focus時scrollIntoView） |
 | `src/components/common/Toast.tsx` | トースト通知コンポーネント（Issue #299: z-50ハードコード除去、Z_INDEX.TOAST使用に統一） |
 | `src/components/worktree/ContextMenu.tsx` | ファイル/ディレクトリコンテキストメニュー（Issue #162: 「移動」メニュー項目追加、FolderInputアイコン、onMoveコールバック。Issue #299: z-50除去、Z_INDEX.CONTEXT_MENU使用） |
