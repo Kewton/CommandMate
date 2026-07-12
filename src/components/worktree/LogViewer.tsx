@@ -7,7 +7,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Card, CardHeader, CardTitle, CardContent, Button, Badge } from '@/components/ui';
+import { Card, CardHeader, CardTitle, CardContent, Button, Badge, Input } from '@/components/ui';
 import { ToastContainer, useToast } from '@/components/common/Toast';
 import { worktreeApi, handleApiError } from '@/lib/api-client';
 import { copyToClipboard } from '@/lib/clipboard-utils';
@@ -337,13 +337,13 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
               {/* Search Controls */}
               <div className="flex items-center gap-2">
                 <div className="relative flex-1">
-                  <input
+                  <Input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     onKeyDown={handleSearchKeyDown}
                     placeholder="Search in log file..."
-                    className="input w-full pr-20"
+                    className="w-full pr-20"
                   />
                   {matches.length > 0 && (
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-500">

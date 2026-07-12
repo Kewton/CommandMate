@@ -16,21 +16,24 @@ import {
 } from '@/components/ui/Card';
 
 describe('Card', () => {
-  it('renders base card class and default md padding', () => {
+  it('renders base classes and default md padding', () => {
     render(<Card data-testid="card">body</Card>);
     const el = screen.getByTestId('card');
-    expect(el.className).toContain('card');
+    // base classes (inlined from the former .card @apply utility, Issue #1048)
+    expect(el.className).toContain('rounded-lg');
+    expect(el.className).toContain('border');
+    expect(el.className).toContain('bg-white');
     expect(el.className).toContain('p-4');
-    expect(el.className).not.toContain('card-hover');
+    expect(el.className).not.toContain('hover:shadow-md');
   });
 
-  it('adds card-hover when hover is set', () => {
+  it('adds the hover transition classes when hover is set', () => {
     render(
       <Card data-testid="card" hover>
         body
       </Card>
     );
-    expect(screen.getByTestId('card').className).toContain('card-hover');
+    expect(screen.getByTestId('card').className).toContain('hover:shadow-md');
   });
 
   it.each([

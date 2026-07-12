@@ -84,6 +84,15 @@ export interface WorktreeDetailRefactoredProps {
  */
 const NOOP_SELECTED_AGENTS_CHANGE = (): void => {};
 
+/**
+ * Mobile bottom-anchored layout offsets (both include the iOS safe-area inset).
+ * The MobileTabBar is 4rem tall and the fixed MessageInput sits directly above
+ * it; the scrollable content reserves 12rem so nothing is hidden behind the
+ * input stack + tab bar.
+ */
+const MOBILE_MESSAGE_INPUT_BOTTOM = 'calc(4rem + env(safe-area-inset-bottom, 0px))';
+const MOBILE_CONTENT_BOTTOM_PADDING = 'calc(12rem + env(safe-area-inset-bottom, 0px))';
+
 // ============================================================================
 // Main Component
 // ============================================================================
@@ -477,7 +486,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         <main
           className="flex-1 overflow-y-auto"
           style={{
-            paddingBottom: 'calc(12rem + env(safe-area-inset-bottom, 0px))',
+            paddingBottom: MOBILE_CONTENT_BOTTOM_PADDING,
           }}
         >
           <MobileContent
@@ -535,7 +544,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         {/* Message Input - fixed above tab bar */}
         <div
           className="fixed left-0 right-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 z-30"
-          style={{ bottom: 'calc(4rem + env(safe-area-inset-bottom, 0px))' }}
+          style={{ bottom: MOBILE_MESSAGE_INPUT_BOTTOM }}
         >
           {/* Issue #473: Navigation buttons for OpenCode TUI selection list (mobile) */}
           {isSelectionListActive && (

@@ -8,7 +8,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Star } from 'lucide-react';
 import { WorktreeCard } from './WorktreeCard';
-import { Button, Badge } from '@/components/ui';
+import { Button, Badge, Input } from '@/components/ui';
 import { worktreeApi, repositoryApi, handleApiError, type RepositorySummary, type ExcludedRepository } from '@/lib/api-client';
 import { useWebSocket, type WebSocketMessage, type SessionStatusPayload, type BroadcastPayload } from '@/hooks/useWebSocket';
 import type { Worktree } from '@/types/models';
@@ -342,12 +342,12 @@ Type "delete" to confirm:`;
 
       {/* Search Bar - First */}
       <div className="flex flex-col sm:flex-row gap-3">
-        <input
+        <Input
           type="text"
           placeholder="Search worktrees..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="input flex-1"
+          className="flex-1"
         />
       </div>
 

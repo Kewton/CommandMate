@@ -10,31 +10,36 @@ import { cn } from '@/lib/utils/cn';
 export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
-const buttonVariants = cva('btn', {
-  variants: {
-    variant: {
-      primary: 'btn-primary',
-      secondary: 'btn-secondary',
-      danger: 'btn-danger',
-      ghost:
-        'bg-transparent text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 focus:ring-gray-500',
+const buttonVariants = cva(
+  'inline-flex items-center justify-center px-4 py-2 rounded-md font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2',
+  {
+    variants: {
+      variant: {
+        primary:
+          'bg-accent-600 dark:bg-accent-500 text-white hover:bg-accent-700 dark:hover:bg-accent-600 focus:ring-ring',
+        secondary:
+          'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 hover:bg-gray-300 dark:hover:bg-gray-600 focus:ring-gray-500',
+        danger: 'bg-red-600 text-white hover:bg-red-700 focus:ring-red-500',
+        ghost:
+          'bg-transparent text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 focus:ring-gray-500',
+      },
+      size: {
+        sm: 'px-3 py-1.5 text-sm',
+        md: '',
+        lg: 'px-6 py-3 text-lg',
+      },
+      fullWidth: {
+        true: 'w-full',
+        false: '',
+      },
     },
-    size: {
-      sm: 'btn-sm',
-      md: '',
-      lg: 'btn-lg',
+    defaultVariants: {
+      variant: 'primary',
+      size: 'md',
+      fullWidth: false,
     },
-    fullWidth: {
-      true: 'w-full',
-      false: '',
-    },
-  },
-  defaultVariants: {
-    variant: 'primary',
-    size: 'md',
-    fullWidth: false,
-  },
-});
+  }
+);
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
