@@ -11,9 +11,12 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Folder, Github } from 'lucide-react';
+import { useTranslations } from 'next-intl';
+import { Folder, Github, Search } from 'lucide-react';
 import { PcDisplaySizeSelector } from './PcDisplaySizeSelector';
 import { ThemeToggle } from '@/components/common/ThemeToggle';
+import { Kbd } from '@/components/ui/Kbd';
+import { useCommandPalette } from '@/contexts/CommandPaletteContext';
 
 export interface HeaderProps {
   title?: string;
@@ -42,6 +45,18 @@ const NAV_ITEMS: Array<{ label: string; href: string; isActive: (pathname: strin
  */
 export function Header({ title = 'CommandMate' }: HeaderProps) {
   const pathname = usePathname();
+  const t = useTranslations('commandPalette');
+  const { setOpen } = useCommandPalette();
+
+  // Platform-specific modifier resolved after mount to avoid SSR hydration
+  // mismatch (server can't know the OS). Null until then → no key badge shown.
+  const [modKey, setModKey] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    const isMac =
+      typeof navigator !== 'undefined' &&
+      /Mac|iPhone|iPad|iPod/i.test(navigator.platform || '');
+    setModKey(isMac ? '⌘' : 'Ctrl');
+  }, []);
 
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-background supports-[backdrop-filter]:bg-background/80 backdrop-blur-md">
@@ -75,6 +90,23 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
                 </Link>
               );
             })}
+            {/* ⌘K command palette entry point (Issue #1077) - desktop only */}
+            <button
+              type="button"
+              data-testid="header-command-palette-trigger"
+              onClick={() => setOpen(true)}
+              aria-label={t('mobileTrigger')}
+              className="hidden md:inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-surface-2 transition-colors"
+            >
+              <Search size={16} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+              <span>{t('searchAction')}</span>
+              {modKey && (
+                <span className="flex items-center gap-0.5">
+                  <Kbd>{modKey}</Kbd>
+                  <Kbd>K</Kbd>
+                </span>
+              )}
+            </button>
             {/* PC display size selector (Issue #915) - hidden on mobile */}
             <PcDisplaySizeSelector />
             {/* Theme toggle promoted to the header (Issue #1071) */}

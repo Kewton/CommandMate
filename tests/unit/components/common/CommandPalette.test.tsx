@@ -57,9 +57,26 @@ vi.mock('@/components/providers/WorktreesCacheProvider', () => ({
   useOptionalWorktreesCacheContext: () => mockCache,
 }));
 
+// Enhancements (Issue #1077): repository sync + language switch actions.
+const { repositorySyncMock, switchLocaleMock } = vi.hoisted(() => ({
+  repositorySyncMock: vi.fn(),
+  switchLocaleMock: vi.fn(),
+}));
+vi.mock('@/lib/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api-client')>();
+  return {
+    ...actual,
+    repositoryApi: { ...actual.repositoryApi, sync: repositorySyncMock },
+  };
+});
+vi.mock('@/hooks/useLocaleSwitch', () => ({
+  useLocaleSwitch: () => ({ currentLocale: 'en', switchLocale: switchLocaleMock }),
+}));
+
 import { CommandPalette, isTypingTarget } from '@/components/common/CommandPalette';
 import { CommandPaletteProvider } from '@/contexts/CommandPaletteContext';
 import { GlobalMobileNav } from '@/components/mobile/GlobalMobileNav';
+import { Header } from '@/components/layout/Header';
 
 const SAMPLE_WORKTREES = [
   { id: 'wt-login', name: 'feature/login', branch: 'feature/login', repositoryName: 'MyApp' },
@@ -99,6 +116,16 @@ describe('CommandPalette (Issue #1053)', () => {
     pushMock.mockClear();
     setThemeMock.mockClear();
     setSizeMock.mockClear();
+    switchLocaleMock.mockClear();
+    repositorySyncMock.mockReset();
+    repositorySyncMock.mockResolvedValue({
+      success: true,
+      message: '',
+      worktreeCount: 0,
+      repositoryCount: 0,
+      repositories: [],
+    });
+    localStorage.clear();
     vi.stubGlobal(
       'ResizeObserver',
       class {
@@ -380,5 +407,64 @@ describe('CommandPalette (Issue #1053)', () => {
     expect(screen.queryByTestId('command-palette')).toBeNull();
     fireEvent.click(screen.getByTestId('mobile-command-palette-trigger'));
     expect(screen.getByTestId('command-palette')).toBeInTheDocument();
+  });
+
+  // --- Enhancements (Issue #1077) -------------------------------------------
+
+  it('renders the keyboard-hint footer', () => {
+    renderPalette();
+    pressKey(window, { key: 'k', metaKey: true });
+    expect(screen.getByText('commandPalette.footer.navigate')).toBeInTheDocument();
+    expect(screen.getByText('commandPalette.footer.select')).toBeInTheDocument();
+    expect(screen.getByText('commandPalette.footer.close')).toBeInTheDocument();
+  });
+
+  it('opens the palette from the header search pill', () => {
+    render(
+      <CommandPaletteProvider>
+        <Header />
+        <CommandPalette />
+      </CommandPaletteProvider>
+    );
+    expect(screen.queryByTestId('command-palette')).toBeNull();
+    fireEvent.click(screen.getByTestId('header-command-palette-trigger'));
+    expect(screen.getByTestId('command-palette')).toBeInTheDocument();
+  });
+
+  it('syncs repositories from the Actions group and shows a success toast', async () => {
+    renderPalette();
+    pressKey(window, { key: 'k', metaKey: true });
+
+    fireEvent.click(screen.getByText('commandPalette.actions.syncRepositories'));
+    expect(repositorySyncMock).toHaveBeenCalledTimes(1);
+    // The toast survives the palette closing (persistent ToastContainer).
+    expect(
+      await screen.findByText('commandPalette.actions.syncSuccess')
+    ).toBeInTheDocument();
+  });
+
+  it('records an executed command and surfaces it in the Recent group on reopen', () => {
+    renderPalette();
+    pressKey(window, { key: 'k', metaKey: true });
+    fireEvent.click(screen.getByText('commandPalette.nav.sessions'));
+    expect(pushMock).toHaveBeenCalledWith('/sessions');
+
+    // Reopen: the executed command now appears under the Recent group too.
+    pressKey(window, { key: 'k', metaKey: true });
+    expect(screen.getByText('commandPalette.groups.recent')).toBeInTheDocument();
+    expect(
+      screen.getAllByText('commandPalette.nav.sessions').length
+    ).toBeGreaterThanOrEqual(2);
+  });
+
+  it('ignores a recent entry whose worktree no longer exists', () => {
+    localStorage.setItem(
+      'cm.palette.recents',
+      JSON.stringify([{ kind: 'worktree', id: 'wt-gone' }])
+    );
+    renderPalette();
+    pressKey(window, { key: 'k', metaKey: true });
+    // The only recent entry is a dead worktree → no Recent group at all.
+    expect(screen.queryByText('commandPalette.groups.recent')).toBeNull();
   });
 });
