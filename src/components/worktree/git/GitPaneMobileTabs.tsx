@@ -76,11 +76,12 @@ export const GitPaneMobileTabs = memo(function GitPaneMobileTabs({
       role="tablist"
       aria-label="Git pane sections"
       data-testid="git-pane-mobile-tabs"
-      className="flex shrink-0 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 sticky top-0 z-30"
+      className="flex shrink-0 border-b border-border bg-surface sticky top-0 z-30"
     >
       {GIT_PANE_TABS.map((tab) => {
         const isActive = tab === activeTab;
         return (
+          // Issue #1061: segmented tab (role=tab/aria-selected) — 残置
           <button
             key={tab}
             type="button"
@@ -92,7 +93,7 @@ export const GitPaneMobileTabs = memo(function GitPaneMobileTabs({
             className={`flex flex-1 flex-col items-center justify-center gap-1 py-2 px-1 text-xs transition-colors border-b-2 ${
               isActive
                 ? 'text-accent-600 dark:text-accent-400 border-accent-500 bg-accent-50 dark:bg-accent-900/30'
-                : 'text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+                : 'text-muted-foreground border-transparent hover:text-foreground hover:bg-muted'
             }`}
           >
             <TabIcon path={ICON_PATHS[tab]} />

@@ -46,7 +46,7 @@ export function SlashCommandList({
 
   if (groups.length === 0) {
     return (
-      <div className={`text-sm text-gray-500 p-4 text-center ${className}`}>
+      <div className={`text-sm text-muted-foreground p-4 text-center ${className}`}>
         No commands available
       </div>
     );
@@ -57,7 +57,7 @@ export function SlashCommandList({
       {groups.map((group) => (
         <div key={group.category} className="mb-2">
           {/* Category label */}
-          <div className="px-3 py-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-800">
+          <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-muted">
             {group.label}
           </div>
 
@@ -69,6 +69,7 @@ export function SlashCommandList({
               const isHighlighted = currentIndex === highlightedIndex;
 
               return (
+                /* Issue #1061: full-width text-left menu row — 残置 */
                 <button
                   key={command.name}
                   type="button"
@@ -87,7 +88,7 @@ export function SlashCommandList({
                       Codex
                     </span>
                   )}
-                  <span className="text-gray-600 dark:text-gray-300 text-sm truncate">
+                  <span className="text-muted-foreground text-sm truncate">
                     {command.description}
                   </span>
                 </button>

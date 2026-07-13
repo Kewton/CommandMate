@@ -28,6 +28,7 @@ import { LogViewer } from '@/components/worktree/LogViewer';
 import { VersionSection } from '@/components/worktree/VersionSection';
 import { FeedbackSection } from '@/components/worktree/FeedbackSection';
 import { Modal } from '@/components/ui/Modal';
+import { Button } from '@/components/ui';
 import { worktreeApi } from '@/lib/api-client';
 import { truncateString } from '@/lib/utils';
 import { ClipboardCopy, Check } from 'lucide-react';
@@ -240,18 +241,19 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
     <>
       {/* Worktree Name */}
       <div className={cardClassName}>
-        <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Worktree</h2>
-        <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">{worktree.name}</p>
+        <h2 className="text-sm font-medium text-muted-foreground mb-1">Worktree</h2>
+        <p className="text-lg font-semibold text-foreground">{worktree.name}</p>
       </div>
 
       {/* Repository Info */}
       <div className={cardClassName}>
         <div className="flex items-center gap-1.5 mb-1">
-          <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400">Repository</h2>
-          <button
+          <h2 className="text-sm font-medium text-muted-foreground">Repository</h2>
+          <Button
+            variant="ghost"
             type="button"
             onClick={handleCopyRepoPath}
-            className="flex-shrink-0 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+            className="flex-shrink-0 p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
             aria-label="Copy repository path"
             title={repoPathCopied ? 'Copied!' : 'Copy repository path'}
           >
@@ -260,20 +262,21 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
             ) : (
               <ClipboardCopy className="w-3.5 h-3.5" />
             )}
-          </button>
+          </Button>
         </div>
-        <p className="text-base text-gray-900 dark:text-gray-100">{worktree.repositoryDisplayName ?? worktree.repositoryName}</p>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 break-all">{worktree.repositoryPath}</p>
+        <p className="text-base text-foreground">{worktree.repositoryDisplayName ?? worktree.repositoryName}</p>
+        <p className="text-xs text-muted-foreground mt-1 break-all">{worktree.repositoryPath}</p>
       </div>
 
       {/* Path */}
       <div className={cardClassName}>
         <div className="flex items-center gap-1.5 mb-1">
-          <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400">Path</h2>
-          <button
+          <h2 className="text-sm font-medium text-muted-foreground">Path</h2>
+          <Button
+            variant="ghost"
             type="button"
             onClick={handleCopyPath}
-            className="flex-shrink-0 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+            className="flex-shrink-0 p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
             aria-label="Copy worktree path"
             title={pathCopied ? 'Copied!' : 'Copy path'}
           >
@@ -282,14 +285,14 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
             ) : (
               <ClipboardCopy className="w-3.5 h-3.5" />
             )}
-          </button>
+          </Button>
         </div>
-        <p className="text-sm text-gray-700 dark:text-gray-300 break-all font-mono">{worktree.path}</p>
+        <p className="text-sm text-foreground break-all font-mono">{worktree.path}</p>
       </div>
 
       {/* Status - dropdown for mobile */}
       <div className={cardClassName}>
-        <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Status</h2>
+        <h2 className="text-sm font-medium text-muted-foreground mb-1">Status</h2>
         <select
           value={worktree.status ?? ''}
           onChange={async (e) => {
@@ -309,7 +312,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
               // Silently handle
             }
           }}
-          className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-ring focus:border-transparent w-full"
+          className="text-sm px-3 py-1.5 rounded-lg border border-input bg-surface text-foreground focus:ring-2 focus:ring-ring focus:border-transparent w-full"
           data-testid="mobile-status-dropdown"
           aria-label="Worktree status"
         >
@@ -324,8 +327,9 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
       {/* Description - Editable */}
       <div className={cardClassName}>
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400">Description</h2>
+          <h2 className="text-sm font-medium text-muted-foreground">Description</h2>
           {!isEditing && (
+            /* Issue #1061: borderless text-link — Button base padding/hover-lift would distort the inline link — 残置 */
             <button
               type="button"
               onClick={startEditing}
@@ -341,34 +345,36 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
               value={text}
               onChange={(e) => setText(e.target.value)}
               placeholder="Add notes about this branch..."
-              className="w-full min-h-[150px] p-3 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
+              className="w-full min-h-[150px] p-3 border border-input dark:bg-surface dark:text-foreground rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
               autoFocus
             />
             <div className="flex gap-2">
-              <button
+              <Button
+                variant="ghost"
                 type="button"
                 onClick={handleSave}
                 disabled={isSaving}
                 className="px-4 py-2 bg-accent-600 text-white rounded-lg hover:bg-accent-700 disabled:opacity-50 text-sm font-medium"
               >
                 {isSaving ? 'Saving...' : 'Save'}
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="ghost"
                 type="button"
                 onClick={handleCancel}
                 disabled={isSaving}
-                className="px-4 py-2 bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600 rounded-lg hover:bg-gray-300 disabled:opacity-50 text-sm font-medium"
+                className="px-4 py-2 bg-muted text-foreground rounded-lg hover:bg-border disabled:opacity-50 text-sm font-medium"
               >
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         ) : (
           <div className="min-h-[50px]">
             {worktree.description ? (
-              <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{worktree.description}</p>
+              <p className="text-sm text-foreground whitespace-pre-wrap">{worktree.description}</p>
             ) : (
-              <p className="text-sm text-gray-400 italic">No description added yet</p>
+              <p className="text-sm text-muted-foreground italic">No description added yet</p>
             )}
           </div>
         )}
@@ -377,7 +383,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
       {/* Link */}
       {worktree.link && (
         <div className={cardClassName}>
-          <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Link</h2>
+          <h2 className="text-sm font-medium text-muted-foreground mb-1">Link</h2>
           <a
             href={worktree.link}
             target="_blank"
@@ -392,8 +398,8 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
       {/* Last Updated */}
       {worktree.updatedAt && (
         <div className={cardClassName}>
-          <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Last Updated</h2>
-          <p className="text-sm text-gray-700 dark:text-gray-300">
+          <h2 className="text-sm font-medium text-muted-foreground mb-1">Last Updated</h2>
+          <p className="text-sm text-foreground">
             {new Date(worktree.updatedAt).toLocaleString()}
           </p>
         </div>
@@ -408,7 +414,8 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
       {/* Logs */}
       <div className={cardClassName}>
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-medium text-gray-500">Logs</h2>
+          <h2 className="text-sm font-medium text-muted-foreground">Logs</h2>
+          {/* Issue #1061: borderless text-link — Button base padding/hover-lift would distort the inline link — 残置 */}
           <button
             type="button"
             onClick={onToggleLogs}
@@ -577,13 +584,14 @@ export const DesktopHeader = memo(function DesktopHeader({
     : null;
 
   return (
-    <div className="flex items-center justify-between px-4 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+    <div className="flex items-center justify-between px-4 py-3 bg-surface border-b border-border">
       {/* Left: Back button and title (Issue #747: hamburger moved to ActivityBar) */}
       <div className="flex items-center gap-3">
+        {/* Issue #1061: paddingless nav link — Button base px-4 py-2 would enlarge/misalign the header back control — 残置 */}
         <button
           type="button"
           onClick={onBackClick}
-          className="flex items-center gap-1 text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 transition-colors"
+          className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
           aria-label="Go back to worktree list"
         >
           <svg
@@ -602,7 +610,7 @@ export const DesktopHeader = memo(function DesktopHeader({
           </svg>
           <span className="text-sm font-medium">Home</span>
         </button>
-        <div className="w-px h-6 bg-gray-300 dark:bg-gray-600" aria-hidden="true" />
+        <div className="w-px h-6 bg-border" aria-hidden="true" />
         {/* Worktree-level status (Issue #1078: unified StatusDot visual language) */}
         <StatusDot
           data-testid="desktop-status-indicator"
@@ -612,16 +620,16 @@ export const DesktopHeader = memo(function DesktopHeader({
         />
         {/* Worktree name, memo, and repository */}
         <div className="flex flex-col min-w-0">
-          <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate max-w-[200px] leading-tight">
+          <h1 className="text-lg font-semibold text-foreground truncate max-w-[200px] leading-tight">
             {worktreeName}
           </h1>
-          <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="truncate max-w-[200px]">
               {repositoryName}
             </span>
             {gitStatus && gitStatus.currentBranch !== '(unknown)' && (
               <>
-                <span className="text-gray-300 dark:text-gray-600">/</span>
+                <span className="text-muted-foreground">/</span>
                 <span
                   className="truncate max-w-[150px] font-mono"
                   title={gitStatus.currentBranch}
@@ -636,9 +644,9 @@ export const DesktopHeader = memo(function DesktopHeader({
             )}
             {truncatedDescription && (
               <>
-                <span className="text-gray-300 dark:text-gray-600">—</span>
+                <span className="text-muted-foreground">—</span>
                 <span
-                  className="truncate max-w-[300px] text-gray-400 dark:text-gray-500"
+                  className="truncate max-w-[300px] text-muted-foreground"
                   title={worktreeDescription}
                 >
                   {truncatedDescription}
@@ -703,6 +711,7 @@ export const DesktopHeader = memo(function DesktopHeader({
 
                 if (c.slot === 'pill') {
                   return (
+                    /* Issue #1061: draggable instance-tab switcher (aria-pressed) with typed drag handlers — 残置 */
                     <button
                       key={inst.id}
                       type="button"
@@ -714,7 +723,7 @@ export const DesktopHeader = memo(function DesktopHeader({
                       className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${
                         isActive
                           ? 'bg-accent-100 dark:bg-accent-900/30 text-accent-900 dark:text-accent-100'
-                          : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'
+                          : 'hover:bg-muted text-foreground'
                       }${dragActive}`}
                     >
                       {/* Issue #1078: unified StatusDot (decorative; the button carries the label) */}
@@ -727,6 +736,7 @@ export const DesktopHeader = memo(function DesktopHeader({
                 // Idle/ready → icon-only 24px circular button; full label via Tooltip.
                 return (
                   <Tooltip key={inst.id} content={fullLabel} placement="bottom">
+                    {/* Issue #1061: draggable instance-tab switcher (aria-pressed) — 残置 */}
                     <button
                       type="button"
                       data-testid={`desktop-agent-status-${inst.id}`}
@@ -737,7 +747,7 @@ export const DesktopHeader = memo(function DesktopHeader({
                       className={`flex items-center justify-center w-6 h-6 rounded-full transition-colors ${
                         isActive
                           ? 'bg-accent-100 dark:bg-accent-900/30'
-                          : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+                          : 'hover:bg-muted'
                       }${dragActive}`}
                     >
                       <StatusDot status={c.status} size="sm" aria-hidden title={undefined} />
@@ -750,6 +760,7 @@ export const DesktopHeader = memo(function DesktopHeader({
               {overflow.length > 0 && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
+                    {/* Issue #1061: DropdownMenuTrigger asChild requires ref forwarding; Button forwards no ref — 残置 */}
                     <button
                       type="button"
                       data-testid="desktop-agent-status-overflow"
@@ -790,7 +801,8 @@ export const DesktopHeader = memo(function DesktopHeader({
             only when a kill handler is wired AND the active CLI session is
             running; click opens the existing confirmation modal. */}
         {onKillSession && activeInstanceRunning && (
-          <button
+          <Button
+            variant="ghost"
             type="button"
             onClick={onKillSession}
             className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium rounded-lg text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors flex-shrink-0"
@@ -799,7 +811,7 @@ export const DesktopHeader = memo(function DesktopHeader({
           >
             <span aria-hidden="true">&#x2715;</span>
             End
-          </button>
+          </Button>
         )}
         {/* Worktree status dropdown */}
         {onWorktreeStatusChange && (
@@ -810,7 +822,7 @@ export const DesktopHeader = memo(function DesktopHeader({
               onWorktreeStatusChange(val === '' ? null : val as 'ready' | 'in_progress' | 'in_review' | 'done');
             }}
             onClick={(e) => e.stopPropagation()}
-            className="text-xs px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-ring focus:border-transparent cursor-pointer"
+            className="text-xs px-2 py-1.5 rounded-lg border border-input bg-surface text-foreground focus:ring-2 focus:ring-ring focus:border-transparent cursor-pointer"
             data-testid="desktop-status-dropdown"
             aria-label="Worktree status"
           >
@@ -826,10 +838,11 @@ export const DesktopHeader = memo(function DesktopHeader({
             showGlobalNav:false), so it is surfaced here too. PC only — the
             selector returns null on mobile. */}
         <PcDisplaySizeSelector />
-      <button
+      <Button
+        variant="ghost"
         type="button"
         onClick={onInfoClick}
-        className="relative flex items-center gap-1.5 px-3 py-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+        className="relative flex items-center gap-1.5 px-3 py-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
         aria-label="View worktree information"
       >
         <svg
@@ -854,7 +867,7 @@ export const DesktopHeader = memo(function DesktopHeader({
             aria-label="Update available"
           />
         )}
-      </button>
+      </Button>
       </div>
     </div>
   );
@@ -904,7 +917,7 @@ export const InfoModal = memo(function InfoModal({
         <WorktreeInfoFields
           worktreeId={worktreeId}
           worktree={worktree}
-          cardClassName="bg-gray-50 dark:bg-gray-800 rounded-lg p-4"
+          cardClassName="bg-muted rounded-lg p-4"
           descriptionEditor={descriptionEditor}
           showLogs={showLogs}
           onToggleLogs={() => setShowLogs(!showLogs)}
@@ -925,10 +938,10 @@ export const LoadingIndicator = memo(function LoadingIndicator() {
     >
       <div className="flex flex-col items-center gap-3">
         <div
-          className="animate-spin rounded-full h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-accent-600 dark:border-t-accent-400"
+          className="animate-spin rounded-full h-8 w-8 border-4 border-input border-t-accent-600 dark:border-t-accent-400"
           aria-hidden="true"
         />
-        <p className="text-gray-600 dark:text-gray-400">Loading worktree...</p>
+        <p className="text-muted-foreground">Loading worktree...</p>
       </div>
     </div>
   );
@@ -969,13 +982,14 @@ export const ErrorDisplay = memo(function ErrorDisplay({
         <p className="text-red-600 font-medium">Error loading worktree</p>
         <p className="text-red-500 text-sm mt-2">{message}</p>
         {onRetry && (
-          <button
+          <Button
+            variant="ghost"
             type="button"
             onClick={onRetry}
             className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
           >
             Retry
-          </button>
+          </Button>
         )}
       </div>
     </div>

@@ -10,6 +10,7 @@ import { useTranslations } from 'next-intl';
 import { worktreeApi, handleApiError } from '@/lib/api-client';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { Kbd } from '@/components/ui/Kbd';
+import { Button } from '@/components/ui';
 import { SlashCommandSelector } from './SlashCommandSelector';
 import { InterruptButton } from './InterruptButton';
 import { useSlashCommands } from '@/hooks/useSlashCommands';
@@ -423,6 +424,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
           <span className="truncate text-accent-800 dark:text-accent-300">{attachedImage.file.name}</span>
+          {/* Issue #1061: dense p-0.5 icon action in the attachment pill (hover-lift would disturb the compact pill) — 残置 */}
           <button
             type="button"
             onClick={removeAttachment}
@@ -453,7 +455,8 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         {/* Mobile: Row 1 - action buttons (slash command, attach, interrupt) */}
         {isMobile && (
           <div className="flex items-center gap-1">
-            <button
+            <Button
+              variant="ghost"
               type="button"
               onClick={() => {
                 if (isFreeInputMode) {
@@ -461,19 +464,20 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
                 }
                 setShowCommandSelector(true);
               }}
-              className="flex-shrink-0 p-2 text-gray-500 hover:text-accent-600 hover:bg-accent-50 dark:text-gray-400 dark:hover:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors"
+              className="flex-shrink-0 p-2 text-muted-foreground hover:text-accent-600 hover:bg-accent-50 dark:hover:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors"
               aria-label="Show slash commands"
               data-testid="mobile-command-button"
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
               </svg>
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
               type="button"
               onClick={openFileDialog}
               disabled={isUploading || sending}
-              className="flex-shrink-0 p-2 text-gray-500 hover:text-accent-600 hover:bg-accent-50 dark:text-gray-400 dark:hover:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors disabled:text-gray-300 dark:disabled:text-gray-600 disabled:hover:bg-transparent"
+              className="flex-shrink-0 p-2 text-muted-foreground hover:text-accent-600 hover:bg-accent-50 dark:hover:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
               aria-label="Attach image"
               data-testid="attach-image-button"
             >
@@ -487,7 +491,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                 </svg>
               )}
-            </button>
+            </Button>
             <InterruptButton
               worktreeId={worktreeId}
               cliToolId={cliToolId || 'claude'}
@@ -499,11 +503,12 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
 
         {/* Desktop: Image attach button (inline) */}
         {!isMobile && (
-          <button
+          <Button
+            variant="ghost"
             type="button"
             onClick={openFileDialog}
             disabled={isUploading || sending}
-            className="flex-shrink-0 p-2 text-gray-500 hover:text-accent-600 hover:bg-accent-50 dark:text-gray-400 dark:hover:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors disabled:text-gray-300 dark:disabled:text-gray-600 disabled:hover:bg-transparent"
+            className="flex-shrink-0 p-2 text-muted-foreground hover:text-accent-600 hover:bg-accent-50 dark:hover:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
             aria-label="Attach image"
             data-testid="attach-image-button"
           >
@@ -517,7 +522,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
               </svg>
             )}
-          </button>
+          </Button>
         )}
 
         {/* Row 2 (mobile) / inline (desktop): message input + send */}
@@ -548,7 +553,8 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
             />
           )}
 
-          <button
+          <Button
+            variant="ghost"
             type="submit"
             data-testid="send-message-button"
             data-can-send={String((!!message.trim() || !!attachedImage) && !sending)}
@@ -570,7 +576,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
               </svg>
             )}
-          </button>
+          </Button>
         </div>
         </div>
 
