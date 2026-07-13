@@ -6,7 +6,14 @@
 
 import React, { useState } from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import {
+  render,
+  screen,
+  fireEvent,
+  cleanup,
+  waitFor,
+  waitForElementToBeRemoved,
+} from '@testing-library/react';
 import {
   ConfirmDialog,
   ConfirmProvider,
@@ -169,7 +176,9 @@ describe('useConfirm + ConfirmProvider', () => {
 
     fireEvent.click(screen.getByTestId('confirm-dialog-confirm'));
     await waitFor(() => expect(screen.getByTestId('result')).toHaveTextContent('true'));
-    expect(screen.queryByTestId('confirm-dialog')).toBeNull();
+    // [Issue #1114] The Modal plays a 200ms exit animation before unmounting,
+    // so the dialog leaves the DOM after the exit window instead of instantly.
+    await waitForElementToBeRemoved(() => screen.queryByTestId('confirm-dialog'));
   });
 
   it('resolves false when the user cancels', async () => {
@@ -181,7 +190,10 @@ describe('useConfirm + ConfirmProvider', () => {
     fireEvent.click(screen.getByTestId('open'));
     fireEvent.click(screen.getByTestId('confirm-dialog-cancel'));
     await waitFor(() => expect(screen.getByTestId('result')).toHaveTextContent('false'));
-    expect(screen.queryByTestId('confirm-dialog')).toBeNull();
+    // [Issue #1114] Content must stay intact (not blank out) while the exit
+    // animation plays, then the dialog unmounts after the exit window.
+    expect(screen.getByText('harness description')).toBeInTheDocument();
+    await waitForElementToBeRemoved(() => screen.queryByTestId('confirm-dialog'));
   });
 
   it('resolves false when dismissed with Escape', async () => {

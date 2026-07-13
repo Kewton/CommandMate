@@ -12,6 +12,8 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { CheckCircle, XCircle, Info, AlertTriangle, X } from 'lucide-react';
 import { Z_INDEX } from '@/config/z-index';
+import { EXIT_ANIMATION_DURATION_MS } from '@/config/ui-feedback-config';
+import { useExitAnimation } from '@/hooks/useExitAnimation';
 import type { ToastType, ToastItem } from '@/types/markdown-editor';
 
 /** Default duration for auto-dismiss (3 seconds) */
@@ -138,11 +140,30 @@ export function Toast({
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const styles = getToastStyles(type);
 
+  // [Issue #1114] Exit animation: closing (auto or manual) only flips local
+  // `open` state; onClose (which unmounts the toast via the parent list) is
+  // deferred until the fade+slide-out window has played.
+  const [open, setOpen] = useState(true);
+  const { shouldRender, isExiting } = useExitAnimation(
+    open,
+    EXIT_ANIMATION_DURATION_MS
+  );
+
+  // Notify the parent once the exit window elapsed. onClose is read through a
+  // ref so an unstable callback identity cannot re-fire the notification.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    if (!shouldRender) {
+      onCloseRef.current(id);
+    }
+  }, [shouldRender, id]);
+
   useEffect(() => {
     // Set up auto-dismiss if duration > 0
     if (duration > 0) {
       timeoutRef.current = setTimeout(() => {
-        onClose(id);
+        setOpen(false);
       }, duration);
     }
 
@@ -152,15 +173,15 @@ export function Toast({
         clearTimeout(timeoutRef.current);
       }
     };
-  }, [id, duration, onClose]);
+  }, [duration]);
 
   const handleClose = useCallback(() => {
     // Clear timeout if manually closed
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
     }
-    onClose(id);
-  }, [id, onClose]);
+    setOpen(false);
+  }, []);
 
   return (
     <div
@@ -172,7 +193,11 @@ export function Toast({
         ${styles.textColor}
         border rounded-lg shadow-lg p-4 min-w-[300px] max-w-[400px]
         flex items-start gap-3
-        animate-slide-in
+        ${
+          isExiting
+            ? 'animate-out fade-out-0 slide-out-to-right-full duration-200 fill-mode-forwards pointer-events-none'
+            : 'animate-slide-in'
+        }
       `}
     >
       <ToastIcon type={type} iconColor={styles.iconColor} />

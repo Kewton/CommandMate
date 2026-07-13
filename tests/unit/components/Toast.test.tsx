@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { Toast, ToastContainer, useToast } from '@/components/common/Toast';
+import { EXIT_ANIMATION_DURATION_MS } from '@/config/ui-feedback-config';
 import type { ToastType } from '@/types/markdown-editor';
 
 // Helper component to test useToast hook
@@ -178,7 +179,7 @@ describe('Toast Component', () => {
       expect(screen.getByTestId('toast-close-button')).toBeInTheDocument();
     });
 
-    it('should call onClose when close button is clicked', () => {
+    it('should call onClose after the exit animation when close button is clicked', () => {
       const mockOnClose = vi.fn();
       render(
         <Toast
@@ -190,6 +191,13 @@ describe('Toast Component', () => {
       );
 
       fireEvent.click(screen.getByTestId('toast-close-button'));
+      // [Issue #1114] The toast plays its exit animation before notifying
+      // the parent (which unmounts it), so onClose is deferred.
+      expect(mockOnClose).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(EXIT_ANIMATION_DURATION_MS);
+      });
       expect(mockOnClose).toHaveBeenCalledWith('test-close-click');
     });
 
@@ -226,7 +234,12 @@ describe('Toast Component', () => {
       act(() => {
         vi.advanceTimersByTime(3000);
       });
+      // [Issue #1114] Still in the exit-animation window at this point.
+      expect(mockOnClose).not.toHaveBeenCalled();
 
+      act(() => {
+        vi.advanceTimersByTime(EXIT_ANIMATION_DURATION_MS);
+      });
       expect(mockOnClose).toHaveBeenCalledWith('test-auto-dismiss');
     });
 
@@ -249,6 +262,12 @@ describe('Toast Component', () => {
 
       act(() => {
         vi.advanceTimersByTime(2000);
+      });
+      // [Issue #1114] Exit-animation window: onClose is deferred.
+      expect(mockOnClose).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(EXIT_ANIMATION_DURATION_MS);
       });
       expect(mockOnClose).toHaveBeenCalledWith('test-custom-duration');
     });
@@ -337,6 +356,9 @@ describe('Toast Component', () => {
       render(<ToastContainer toasts={toasts} onClose={mockOnClose} />);
 
       fireEvent.click(screen.getByTestId('toast-close-button'));
+      act(() => {
+        vi.advanceTimersByTime(EXIT_ANIMATION_DURATION_MS);
+      });
       expect(mockOnClose).toHaveBeenCalledWith('toast-close-1');
     });
   });
@@ -360,7 +382,7 @@ describe('Toast Component', () => {
       expect(screen.getByText('Error message')).toBeInTheDocument();
     });
 
-    it('should remove toast when removeToast is called', () => {
+    it('should remove toast after the exit animation when closed', () => {
       render(<TestComponent />);
 
       fireEvent.click(screen.getByTestId('show-success'));
@@ -369,10 +391,16 @@ describe('Toast Component', () => {
       // Click close button
       fireEvent.click(screen.getByTestId('toast-close-button'));
 
+      // [Issue #1114] Stays in the DOM until the exit animation finished.
+      expect(screen.getByText('Success message')).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(EXIT_ANIMATION_DURATION_MS);
+      });
       expect(screen.queryByText('Success message')).not.toBeInTheDocument();
     });
 
-    it('should auto-dismiss toast after 3 seconds', () => {
+    it('should auto-dismiss toast after 3 seconds plus exit animation', () => {
       render(<TestComponent />);
 
       fireEvent.click(screen.getByTestId('show-success'));
@@ -381,7 +409,12 @@ describe('Toast Component', () => {
       act(() => {
         vi.advanceTimersByTime(3000);
       });
+      // [Issue #1114] Exit-animation window: still mounted.
+      expect(screen.getByText('Success message')).toBeInTheDocument();
 
+      act(() => {
+        vi.advanceTimersByTime(EXIT_ANIMATION_DURATION_MS);
+      });
       expect(screen.queryByText('Success message')).not.toBeInTheDocument();
     });
 
@@ -435,6 +468,26 @@ describe('Toast Component', () => {
 
       const toast = screen.getByTestId('toast-test-animation');
       expect(toast).toHaveClass('animate-slide-in');
+    });
+
+    it('should swap to exit animation classes while closing (Issue #1114)', () => {
+      const mockOnClose = vi.fn();
+      render(
+        <Toast
+          id="test-exit-animation"
+          message="Exit animation test"
+          type="success"
+          onClose={mockOnClose}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId('toast-close-button'));
+
+      const toast = screen.getByTestId('toast-test-exit-animation');
+      expect(toast).toHaveClass('animate-out');
+      expect(toast).toHaveClass('fade-out-0');
+      expect(toast).toHaveClass('slide-out-to-right-full');
+      expect(toast).not.toHaveClass('animate-slide-in');
     });
   });
 });

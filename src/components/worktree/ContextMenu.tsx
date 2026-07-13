@@ -18,6 +18,8 @@
 import React, { memo, useCallback, useEffect, useRef } from 'react';
 import { FilePlus, FolderPlus, Pencil, Trash2, Upload, FolderInput } from 'lucide-react';
 import { Z_INDEX } from '@/config/z-index';
+import { CONTEXT_MENU_EXIT_DURATION_MS } from '@/config/ui-feedback-config';
+import { useExitAnimation } from '@/hooks/useExitAnimation';
 
 /**
  * Props for ContextMenu component
@@ -93,6 +95,13 @@ export const ContextMenu = memo(function ContextMenu({
   onMove,
 }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // [Issue #1114] Keep the menu mounted briefly after close so the fade-out
+  // exit animation can play (matches the duration-100 enter animation).
+  const { shouldRender, isExiting } = useExitAnimation(
+    isOpen,
+    CONTEXT_MENU_EXIT_DURATION_MS
+  );
 
   /**
    * Handle menu item click
@@ -216,9 +225,15 @@ export const ContextMenu = memo(function ContextMenu({
     }
   }, [isOpen]);
 
-  if (!isOpen) {
+  if (!shouldRender) {
     return null;
   }
+
+  // [Issue #1114] Swap enter/exit animation classes; pointer-events-none
+  // keeps a dismissing menu from swallowing clicks during the exit window.
+  const animationClasses = isExiting
+    ? 'animate-out fade-out-0 zoom-out-95 duration-100 fill-mode-forwards pointer-events-none'
+    : 'animate-in fade-in-0 zoom-in-95 duration-100';
 
   return (
     <div
@@ -226,7 +241,7 @@ export const ContextMenu = memo(function ContextMenu({
       data-testid="context-menu"
       role="menu"
       aria-label="File actions"
-      className="fixed min-w-[160px] py-1 bg-surface rounded-lg shadow-lg border border-border animate-in fade-in-0 zoom-in-95 duration-100"
+      className={`fixed min-w-[160px] py-1 bg-surface rounded-lg shadow-lg border border-border ${animationClasses}`}
       style={{
         zIndex: Z_INDEX.CONTEXT_MENU,
         left: `${position.x}px`,

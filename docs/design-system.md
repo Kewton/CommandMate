@@ -366,9 +366,19 @@ import { Skeleton } from '@/components/ui';
 
 ### enter / exit の標準パターン
 
-- **Modal**（`src/components/ui/Modal.tsx`）: `data-state="open"` を付与し、
-  `data-[state=open]:animate-in fade-in-0 zoom-in-95 duration-200`（fade + scale）。
-  パネルは閉時に unmount するため入場アニメは **マウント時のみ発火**する。
+- **Modal**（`src/components/ui/Modal.tsx`）: `data-state`（`open` / `closed`）に
+  `data-[state=open]:animate-in fade-in-0 zoom-in-95 duration-200`（enter）と
+  `data-[state=closed]:animate-out fade-out-0 zoom-out-95 duration-200 fill-mode-forwards`
+  （exit）を連動。閉要求後は `useExitAnimation`（Issue #1114）が 200ms 描画を保持し、
+  exit アニメ完了後に unmount する。
+- **Toast / ContextMenu**: 同じく `useExitAnimation` で unmount を遅延し、Toast は
+  `animate-out fade-out-0 slide-out-to-right-full`（200ms）、ContextMenu は
+  `animate-out fade-out-0 zoom-out-95`（enter と同じ 100ms）で退場する。JS タイマーは
+  `src/config/ui-feedback-config.ts` の `EXIT_ANIMATION_DURATION_MS` /
+  `CONTEXT_MENU_EXIT_DURATION_MS` で CSS と同期する。
+- **PromptPanel**（`usePromptAnimation`）: `animate-fade-in` / `animate-fade-out`
+  （`tailwind.config.js` の keyframes、`var(--motion-duration-base)` +
+  `var(--motion-ease-out)`）でフェードし、フック内タイマーで unmount を遅延する。
 - **MobilePromptSheet**（`src/components/mobile/MobilePromptSheet.tsx`）: 既存の
   `usePromptAnimation` による slide-up（`translate-y-full → 0`）の enter/exit を踏襲。
 - **Radix プリミティブ**（Select / DropdownMenu / Tooltip）: Radix の `data-state`
