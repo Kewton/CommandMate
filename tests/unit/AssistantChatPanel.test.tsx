@@ -57,10 +57,14 @@ describe('AssistantChatPanel', () => {
     vi.restoreAllMocks();
   });
 
-  it('uses a dark background treatment for the panel shell', () => {
+  it('uses a theme-following elevated surface for the panel shell (Issue #1075)', () => {
     render(<AssistantChatPanel />);
 
-    expect(screen.getByTestId('assistant-chat-panel')).toHaveClass('bg-slate-950/95');
+    // Panel shell is now a Card(variant=elevated): surface tokens flip with the
+    // active theme instead of the previous always-dark slate treatment.
+    const panel = screen.getByTestId('assistant-chat-panel');
+    expect(panel).toHaveClass('from-surface');
+    expect(panel).not.toHaveClass('bg-slate-950/95');
   });
 
   it('shows repository selector and start directory hint', async () => {

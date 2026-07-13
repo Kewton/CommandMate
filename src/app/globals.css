@@ -331,21 +331,41 @@
   .assistant-md li {
     margin: 0.15em 0;
   }
+  /*
+   * [Issue #1075] Theme-follow the assistant markdown so it reads as light on a
+   * light card and dark on a dark card. Accent tokens are identical in both
+   * modes, so links need an explicit .dark override (not just a token swap):
+   * accent-700 clears AA (>=4.5:1) on the white card; accent-300 clears AA on
+   * the dark card. code/table/blockquote/hr use semantic tokens that flip.
+   * Fenced code blocks are the deliberate exception — see `.assistant-md pre`.
+   */
   .assistant-md a {
-    color: rgb(var(--accent-300));
+    color: rgb(var(--accent-700));
     text-decoration: underline;
     word-break: break-all;
   }
+  .dark .assistant-md a {
+    color: rgb(var(--accent-300));
+  }
   .assistant-md code {
-    background-color: rgb(15 23 42 / 0.85);
+    background-color: rgb(var(--muted));
+    color: rgb(var(--foreground));
     padding: 0.08em 0.35em;
     border-radius: 4px;
     font-size: 0.9em;
     font-family: theme('fontFamily.mono');
   }
+  /*
+   * Fenced code blocks carry rehype-highlight (github-dark) syntax tokens, which
+   * are light colors tuned for a dark canvas. Keep the block dark in BOTH themes
+   * so those tokens stay AA-legible — same rationale (and #0d1117 value) as the
+   * always-dark terminal / `.prose pre` exception in docs/design-system.md. The
+   * explicit light `color` covers non-highlighted blocks (no .hljs class).
+   */
   .assistant-md pre {
-    background-color: rgb(15 23 42 / 0.85);
-    border: 1px solid rgb(51 65 85);
+    background-color: #0d1117;
+    color: rgb(201 209 217);
+    border: 1px solid rgb(var(--border));
     border-radius: 6px;
     padding: 0.6em 0.8em;
     margin: 0.5em 0;
@@ -355,14 +375,15 @@
   }
   .assistant-md pre code {
     background: transparent;
+    color: inherit;
     padding: 0;
     font-size: inherit;
   }
   .assistant-md blockquote {
     margin: 0.5em 0;
     padding-left: 0.8em;
-    border-left: 3px solid rgb(51 65 85);
-    color: rgb(203 213 225);
+    border-left: 3px solid rgb(var(--border));
+    color: rgb(var(--muted-foreground));
   }
   .assistant-md table {
     border-collapse: collapse;
@@ -371,16 +392,16 @@
   }
   .assistant-md th,
   .assistant-md td {
-    border: 1px solid rgb(51 65 85);
+    border: 1px solid rgb(var(--border));
     padding: 0.3em 0.6em;
     text-align: left;
   }
   .assistant-md th {
-    background-color: rgb(15 23 42 / 0.6);
+    background-color: rgb(var(--muted));
   }
   .assistant-md hr {
     border: none;
-    border-top: 1px solid rgb(51 65 85);
+    border-top: 1px solid rgb(var(--border));
     margin: 0.8em 0;
   }
 }

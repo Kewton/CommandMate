@@ -32,8 +32,8 @@ function IconPencil() {
 
 function SystemMessageBubble({ message }: { message: AssistantMessage }) {
   return (
-    <div className="text-center text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
-      <span className="rounded-full border border-slate-700 bg-slate-900/70 px-3 py-1">
+    <div className="text-center text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+      <span className="rounded-full border border-border bg-surface-2 px-3 py-1">
         {message.content}
       </span>
     </div>
@@ -93,8 +93,8 @@ function UserMessageBubble({ message, canEdit, onEdit }: UserMessageBubbleProps)
   }, [draft, message, onEdit, saving]);
 
   return (
-    <div className="group ml-auto max-w-[88%] rounded-2xl border border-accent-500/40 bg-accent-500/12 px-4 py-3 text-accent-50 shadow-sm">
-      <div className="mb-2 flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.12em] text-slate-400">
+    <div className="group ml-auto max-w-[88%] rounded-2xl border border-accent-500/40 bg-accent-500/10 px-4 py-3 text-foreground shadow-sm">
+      <div className="mb-2 flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
         <span>You</span>
         <span>{formatTimestamp(message.timestamp)}</span>
       </div>
@@ -102,20 +102,20 @@ function UserMessageBubble({ message, canEdit, onEdit }: UserMessageBubbleProps)
       {editing ? (
         <div className="space-y-2">
           <textarea
-            className="w-full resize-y rounded border border-slate-600 bg-slate-950/70 p-2 text-sm text-slate-100 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-ring"
+            className="w-full resize-y rounded border border-input bg-surface p-2 text-sm text-foreground focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-ring"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             rows={Math.max(3, Math.min(12, draft.split('\n').length + 1))}
             disabled={saving}
             data-testid="assistant-edit-textarea"
           />
-          {error && <p className="text-[11px] text-red-300">{error}</p>}
+          {error && <p className="text-[11px] text-red-600 dark:text-red-300">{error}</p>}
           <div className="flex items-center justify-end gap-2">
             <button
               type="button"
               onClick={handleCancel}
               disabled={saving}
-              className="rounded border border-slate-700 bg-slate-900/70 px-3 py-1 text-[11px] text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-50"
+              className="rounded border border-border bg-surface px-3 py-1 text-[11px] text-foreground transition-colors hover:bg-muted disabled:opacity-50"
             >
               Cancel
             </button>
@@ -123,7 +123,7 @@ function UserMessageBubble({ message, canEdit, onEdit }: UserMessageBubbleProps)
               type="button"
               onClick={handleSave}
               disabled={saving || !draft.trim()}
-              className="rounded bg-accent-500 px-3 py-1 text-[11px] font-medium text-slate-950 transition-colors hover:bg-accent-400 disabled:cursor-not-allowed disabled:bg-slate-600 disabled:text-slate-300"
+              className="rounded bg-accent-500 px-3 py-1 text-[11px] font-medium text-slate-950 transition-colors hover:bg-accent-400 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
               data-testid="assistant-edit-save"
             >
               {saving ? 'Resending...' : 'Save & Resend'}
@@ -136,7 +136,9 @@ function UserMessageBubble({ message, canEdit, onEdit }: UserMessageBubbleProps)
           <div className="mt-2 flex items-center justify-between gap-3">
             <span
               className={`text-[11px] font-medium ${
-                message.deliveryStatus === 'failed' ? 'text-red-300' : 'text-slate-400'
+                message.deliveryStatus === 'failed'
+                  ? 'text-red-600 dark:text-red-300'
+                  : 'text-muted-foreground'
               }`}
             >
               {statusText ?? ''}
@@ -147,7 +149,7 @@ function UserMessageBubble({ message, canEdit, onEdit }: UserMessageBubbleProps)
                 <button
                   type="button"
                   onClick={handleStartEdit}
-                  className="inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-900/70 px-2 py-0.5 text-[11px] font-medium text-slate-300 transition-colors hover:bg-slate-800"
+                  className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-foreground transition-colors hover:bg-muted"
                   aria-label="Edit message"
                   data-testid="assistant-edit-button"
                   title="Edit and resend"
@@ -172,8 +174,8 @@ function AssistantMessageBubble({
   assistantLabel: string;
 }) {
   return (
-    <div className="group mr-auto max-w-[88%] rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-slate-100 shadow-sm">
-      <div className="mb-2 flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.12em] text-slate-400">
+    <div className="group mr-auto max-w-[88%] rounded-2xl border border-border bg-surface px-4 py-3 text-foreground shadow-sm">
+      <div className="mb-2 flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
         <span>{assistantLabel}</span>
         <span>{formatTimestamp(message.timestamp)}</span>
       </div>
@@ -235,7 +237,7 @@ export function AssistantMessageList({
   return (
     <div
       ref={containerRef}
-      className="h-full min-h-0 overflow-y-scroll rounded-xl border border-slate-700 bg-slate-950/70 p-3"
+      className="h-full min-h-0 overflow-y-scroll rounded-xl border border-border bg-surface-2 p-3"
       style={{ scrollbarGutter: 'stable' }}
       onScroll={(event) => {
         const element = event.currentTarget;
@@ -245,7 +247,7 @@ export function AssistantMessageList({
       data-testid="assistant-message-list"
     >
       {messages.length === 0 && !waitingForResponse ? (
-        <div className="flex h-full min-h-[160px] items-center justify-center text-sm text-slate-300">
+        <div className="flex h-full min-h-[160px] items-center justify-center text-sm text-muted-foreground">
           {emptyState}
         </div>
       ) : (
@@ -274,12 +276,12 @@ export function AssistantMessageList({
           })}
           {waitingForResponse && (
             <div
-              className="mr-auto flex max-w-[88%] items-center gap-3 rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 shadow-sm"
+              className="mr-auto flex max-w-[88%] items-center gap-3 rounded-2xl border border-border bg-surface px-4 py-3 shadow-sm"
               data-testid="assistant-waiting-indicator"
               aria-live="polite"
             >
               <svg
-                className="h-4 w-4 animate-spin text-accent-400"
+                className="h-4 w-4 animate-spin text-accent-600 dark:text-accent-400"
                 xmlns="http://www.w3.org/2000/svg"
                 fill="none"
                 viewBox="0 0 24 24"
@@ -298,7 +300,7 @@ export function AssistantMessageList({
                   d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                 />
               </svg>
-              <span className="text-sm text-slate-200">
+              <span className="text-sm text-foreground">
                 {assistantLabel} is thinking...
               </span>
             </div>
