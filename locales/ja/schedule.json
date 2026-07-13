@@ -159,6 +159,12 @@
     "loadMore": "もっと見る",
     "clearHistory": "履歴クリア",
     "clearConfirm": "送信済み・失敗・キャンセル済みのタイマー履歴をすべて削除しますか？",
-    "cleared": "履歴を削除しました（{count}件）"
+    "cleared": "履歴を削除しました（{count}件）",
+    "detailTitle": "タイマー詳細",
+    "statusLabel": "ステータス",
+    "scheduledTime": "予定送信時刻",
+    "createdTime": "作成時刻",
+    "sentTime": "送信時刻",
+    "failureReason": "失敗理由"
   }
 }

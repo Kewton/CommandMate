@@ -24,6 +24,7 @@ interface FakeTimer {
   status: string;
   createdAt: number;
   sentAt: number | null;
+  error: string | null;
 }
 
 function makeTimer(overrides: Partial<FakeTimer> = {}): FakeTimer {
@@ -37,6 +38,7 @@ function makeTimer(overrides: Partial<FakeTimer> = {}): FakeTimer {
     status: 'pending',
     createdAt: 1_700_000_000_000,
     sentAt: null,
+    error: null,
     ...overrides,
   };
 }
@@ -109,5 +111,62 @@ describe('TimerPane (Issue #945)', () => {
     await waitFor(() => expect(screen.getByTestId('timer-new-button')).toBeDefined());
     expect((screen.getByTestId('timer-new-button') as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText('schedule.timer.maxReached')).toBeDefined();
+  });
+});
+
+describe('TimerPane detail modal (Issue #1107)', () => {
+  const longMessage = 'x'.repeat(80); // > 60 chars so the list row truncates
+
+  it('opens the detail modal with the full message when a row is clicked', async () => {
+    stubTimers([makeTimer({ status: 'sent', sentAt: 1_700_000_100_000, message: longMessage })]);
+    render(<TimerPane worktreeId="wt-1" />);
+    await waitFor(() => expect(screen.getByTestId('timer-row')).toBeDefined());
+
+    // Modal is closed initially.
+    expect(screen.queryByTestId('timer-detail-message')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('timer-row'));
+
+    const detail = screen.getByTestId('timer-detail-message');
+    expect(detail.textContent).toBe(longMessage); // full, not truncated
+  });
+
+  it('shows the failure reason for a failed timer', async () => {
+    stubTimers([
+      makeTimer({ status: 'failed', error: '[send] tmux session not found' }),
+    ]);
+    render(<TimerPane worktreeId="wt-1" />);
+    await waitFor(() => expect(screen.getByTestId('timer-row')).toBeDefined());
+
+    fireEvent.click(screen.getByTestId('timer-row'));
+
+    expect(screen.getByText('schedule.timer.failureReason')).toBeDefined();
+    expect(screen.getByTestId('timer-detail-error').textContent).toBe('[send] tmux session not found');
+  });
+
+  it('does not show a failure reason section for non-failed timers', async () => {
+    stubTimers([makeTimer({ status: 'sent', sentAt: 1_700_000_100_000 })]);
+    render(<TimerPane worktreeId="wt-1" />);
+    await waitFor(() => expect(screen.getByTestId('timer-row')).toBeDefined());
+
+    fireEvent.click(screen.getByTestId('timer-row'));
+
+    expect(screen.queryByTestId('timer-detail-error')).toBeNull();
+  });
+
+  it('does not open the modal when the pending cancel button is clicked', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ timers: [makeTimer({ status: 'pending' })], hasMore: false }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<TimerPane worktreeId="wt-1" />);
+    await waitFor(() => expect(screen.getByTestId('timer-row')).toBeDefined());
+
+    // Click the cancel button nested inside the clickable row.
+    fireEvent.click(screen.getByText('schedule.timer.cancel'));
+
+    // stopPropagation prevents the row's onClick → modal stays closed.
+    expect(screen.queryByTestId('timer-detail-message')).toBeNull();
   });
 });
