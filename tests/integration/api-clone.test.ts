@@ -14,8 +14,11 @@ import {
   getCloneJob,
 } from '@/lib/db/db-repository';
 
-// Mock environment variables (must be before route imports)
-vi.mock('@/lib/env', () => ({
+// Mock environment variables (must be before route imports). Partial mock via
+// importOriginal keeps the module's other exports real (e.g. getLogConfig, used
+// by the logger) so only getEnv is overridden (Issue #1102).
+vi.mock('@/lib/env', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/env')>()),
   getEnv: () => ({
     CM_ROOT_DIR: '/test/clone-root',
     CM_PORT: 3000,
@@ -41,8 +44,13 @@ vi.mock('fs', async (importOriginal) => {
   };
 });
 
-// Mock child_process - don't auto-call callbacks to prevent async issues
-vi.mock('child_process', () => ({
+// Mock child_process - only stub spawn (used by CloneManager to launch git
+// clone) and don't auto-call callbacks to prevent async issues. Keep the rest of
+// the module real via importOriginal so git-exec's `promisify(execFile)` at
+// module load has a real execFile (Issue #1102: the previous full mock omitted
+// execFile, throwing "No execFile export" and failing the whole file).
+vi.mock('child_process', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('child_process')>()),
   spawn: vi.fn(() => ({
     pid: 12345,
     stderr: {

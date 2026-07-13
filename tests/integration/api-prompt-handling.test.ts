@@ -38,9 +38,12 @@ vi.mock('@/lib/db/db-instance', () => {
   };
 });
 
-// Mock tmux module
+// Mock tmux module. sendPromptAnswer (Issue #616) imports both sendKeys and
+// sendSpecialKeys; provide both so multiple-choice answers don't throw
+// "No sendSpecialKeys export" (Issue #1102).
 vi.mock('@/lib/tmux/tmux', () => ({
   sendKeys: vi.fn().mockResolvedValue(undefined),
+  sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
   isClaudeRunning: vi.fn().mockResolvedValue(true),
 }));
 
@@ -196,7 +199,10 @@ describe('POST /api/worktrees/:id/respond', () => {
 
       await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'test-worktree' } });
 
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-test-worktree', 'y', true);
+      // Session name comes from the CLI tool (mcbd-<cliToolId>-<worktreeId>), and
+      // the answer is sent first without Enter, then a separate Enter (Issue #616/#1102).
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-test-worktree', 'y', false);
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-test-worktree', '', true);
     });
 
     it('should send "n" to tmux when answering no', async () => {
@@ -227,7 +233,9 @@ describe('POST /api/worktrees/:id/respond', () => {
 
       await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'test-worktree' } });
 
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-test-worktree', 'n', true);
+      // Answer sent without Enter, then a separate Enter (Issue #616/#1102).
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-test-worktree', 'n', false);
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-test-worktree', '', true);
     });
 
     it('should broadcast updated message via WebSocket', async () => {

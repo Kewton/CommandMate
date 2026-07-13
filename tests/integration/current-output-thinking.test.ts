@@ -187,10 +187,13 @@ describe('Issue #188: current-output thinking integration', () => {
   });
 
   describe('SF-004 (S3): isPromptWaiting source of truth', () => {
-    it('should use 15-line window for prompt detection (statusResult.hasActivePrompt)', () => {
-      // y/n prompt at top, pushed outside the 15-line STATUS_CHECK_LINE_COUNT window
-      // by 16 response lines. Even though detectPrompt's internal 50-line window
-      // would find it, detectSessionStatus's 15-line window does not.
+    it('detects a prompt within detectPrompt\'s 50-line window (statusResult.hasActivePrompt)', () => {
+      // Issue #235/#408: for claude, detectSessionStatus feeds the full output to
+      // detectPrompt(), which applies its own 50-line window (to support long
+      // prompts) rather than the 15-line STATUS_CHECK_LINE_COUNT. A y/n prompt at
+      // the top, pushed up by only 16 response lines, is still inside that 50-line
+      // window and therefore IS detected (Issue #1102: was asserting the old
+      // 15-line behavior, which returned false).
       const lines: string[] = [];
       lines.push('Do you want to proceed? (y/n)');
       for (let i = 0; i < 16; i++) {
@@ -200,7 +203,7 @@ describe('Issue #188: current-output thinking integration', () => {
       const output = lines.join('\n');
       const result = detectSessionStatus(output, 'claude');
 
-      expect(result.hasActivePrompt).toBe(false);
+      expect(result.hasActivePrompt).toBe(true);
     });
   });
 

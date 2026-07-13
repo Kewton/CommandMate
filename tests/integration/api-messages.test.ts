@@ -11,6 +11,23 @@ import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree, createMessage } from '@/lib/db';
 import type { Worktree, ChatMessage } from '@/types/models';
 
+// Issue #1102: the POST /send happy path drives the real CLI-tool → session →
+// tmux/git layers (isInstalled → startSession → getGitStatus → sendMessage),
+// which are unavailable in CI's clean environment (no claude CLI / tmux / git).
+// That made "should create a new user message" return 503 (tool "not installed")
+// there while passing locally. Partially mock @/lib/session/claude-session
+// (importOriginal keeps every other export real) so the claude tool reports
+// installed + already-running (which skips startSession AND the getGitStatus
+// call) and the send is a no-op — making the test environment-independent.
+// Mirrors the mocking already used by api-send-cli-tool.test.ts.
+vi.mock('@/lib/session/claude-session', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/session/claude-session')>()),
+  isClaudeInstalled: vi.fn(() => Promise.resolve(true)),
+  isClaudeRunning: vi.fn(() => Promise.resolve(true)),
+  startClaudeSession: vi.fn(() => Promise.resolve()),
+  sendMessageToClaude: vi.fn(() => Promise.resolve()),
+}));
+
 // Declare mock function type
 declare module '@/lib/db/db-instance' {
   export function setMockDb(db: Database.Database): void;
@@ -77,7 +94,7 @@ describe('GET /api/worktrees/:id/messages', () => {
     expect(data).toEqual([]);
   });
 
-  it('should return messages sorted by timestamp DESC', async () => {
+  it('should return messages sorted by timestamp ASC (chronological)', async () => {
     // Create test messages
     const message1 = createMessage(db, {
       worktreeId: 'test-worktree',
@@ -104,9 +121,10 @@ describe('GET /api/worktrees/:id/messages', () => {
     const data = await response.json();
     expect(data).toHaveLength(2);
 
-    // Should be sorted by timestamp DESC (newest first)
-    expect(data[0].id).toBe(message2.id);
-    expect(data[1].id).toBe(message1.id);
+    // The route returns chronological (ASC) order — API consumers expect
+    // oldest-first for message display (Issue #1102: was asserting old DESC order).
+    expect(data[0].id).toBe(message1.id);
+    expect(data[1].id).toBe(message2.id);
   });
 
   it('should support pagination with before parameter', async () => {
@@ -145,10 +163,11 @@ describe('GET /api/worktrees/:id/messages', () => {
 
     const data = await response.json();
 
-    // Should only return message1 and message2 (before the specified time)
+    // Should only return message1 and message2 (before the specified time),
+    // in chronological (ASC) order (Issue #1102).
     expect(data).toHaveLength(2);
-    expect(data[0].id).toBe(message2.id);
-    expect(data[1].id).toBe(message1.id);
+    expect(data[0].id).toBe(message1.id);
+    expect(data[1].id).toBe(message2.id);
   });
 
   it('should support pagination with limit parameter', async () => {

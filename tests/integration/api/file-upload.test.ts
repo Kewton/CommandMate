@@ -19,6 +19,7 @@ import {
   getMaxFileSize,
   isYamlSafe,
   isJsonValid,
+  DEFAULT_MAX_FILE_SIZE,
 } from '@/config/uploadable-extensions';
 import { isValidNewName } from '@/lib/file-operations';
 
@@ -201,14 +202,16 @@ describe('POST /api/worktrees/:id/files/:path/upload', () => {
   });
 
   describe('File size limit', () => {
-    it('should return 5MB limit for all extensions', () => {
-      expect(getMaxFileSize('.png')).toBe(5 * 1024 * 1024);
-      expect(getMaxFileSize('.txt')).toBe(5 * 1024 * 1024);
-      expect(getMaxFileSize('.json')).toBe(5 * 1024 * 1024);
+    // Compare against the config constant (single source of truth) rather than a
+    // hardcoded literal, so raising DEFAULT_MAX_FILE_SIZE won't drift the test (Issue #1102).
+    it('should return the default limit for all extensions', () => {
+      expect(getMaxFileSize('.png')).toBe(DEFAULT_MAX_FILE_SIZE);
+      expect(getMaxFileSize('.txt')).toBe(DEFAULT_MAX_FILE_SIZE);
+      expect(getMaxFileSize('.json')).toBe(DEFAULT_MAX_FILE_SIZE);
     });
 
-    it('should return 5MB limit for unknown extensions', () => {
-      expect(getMaxFileSize('.xyz')).toBe(5 * 1024 * 1024);
+    it('should return the default limit for unknown extensions', () => {
+      expect(getMaxFileSize('.xyz')).toBe(DEFAULT_MAX_FILE_SIZE);
     });
   });
 });
