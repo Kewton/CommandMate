@@ -30,7 +30,7 @@ import { CopyButton } from '@/components/common/CopyButton';
  * dark code-block surface. `!` wins over the component's own base color classes.
  */
 const COPY_DETAIL_BUTTON_CLASS =
-  '!border-gray-300 !bg-white !text-gray-600 hover:!bg-gray-50 dark:!border-gray-600 dark:!bg-gray-900 dark:!text-gray-300 dark:hover:!bg-gray-800';
+  '!border-input !bg-surface dark:!bg-surface-2 !text-muted-foreground hover:!bg-muted';
 
 export interface TodoPaneProps {
   /** Worktree ID to scope the todo list to. */
@@ -41,7 +41,7 @@ export interface TodoPaneProps {
 
 /** Chip styling per status (border + text/background), light and dark. */
 const STATUS_CHIP_CLASS: Record<WorktreeTodoStatus, string> = {
-  todo: 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-300',
+  todo: 'border-input text-muted-foreground',
   doing:
     'border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-500/60 dark:bg-amber-500/10 dark:text-amber-300',
   done: 'border-green-500 bg-green-50 text-green-700 dark:border-green-500/60 dark:bg-green-500/10 dark:text-green-300',
@@ -247,7 +247,7 @@ export const TodoPane = React.memo(function TodoPane({
           maxLength={MAX_TODO_CONTENT_LENGTH}
           placeholder={t('todo.addPlaceholder')}
           data-testid="todo-input"
-          className="flex-1 min-w-0 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-ring"
+          className="flex-1 min-w-0 rounded-md border border-input bg-surface dark:bg-surface-2 px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         />
         <button
           type="button"
@@ -261,7 +261,7 @@ export const TodoPane = React.memo(function TodoPane({
       </div>
 
       {/* Per-status counts */}
-      <div className="mb-2 flex justify-end gap-2 text-xs text-gray-400 dark:text-gray-500">
+      <div className="mb-2 flex justify-end gap-2 text-xs text-muted-foreground">
         <span data-testid="todo-count-todo">
           {statusLabel('todo')} {counts.todo}
         </span>
@@ -281,11 +281,11 @@ export const TodoPane = React.memo(function TodoPane({
 
       {/* Todo list */}
       {loading ? (
-        <p className="text-sm text-gray-400 dark:text-gray-500" data-testid="todo-loading">
+        <p className="text-sm text-muted-foreground" data-testid="todo-loading">
           {t('todo.loading')}
         </p>
       ) : todos.length === 0 ? (
-        <p className="text-sm text-gray-500 dark:text-gray-400" data-testid="todo-empty">
+        <p className="text-sm text-muted-foreground" data-testid="todo-empty">
           {t('todo.empty')}
         </p>
       ) : (
@@ -293,7 +293,7 @@ export const TodoPane = React.memo(function TodoPane({
           {todos.map((todo, index) => (
             <li
               key={todo.id}
-              className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-gray-50 dark:hover:bg-gray-700/40 group"
+              className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-muted group"
               data-testid="todo-item"
             >
               <button
@@ -318,8 +318,8 @@ export const TodoPane = React.memo(function TodoPane({
                 <span
                   className={`min-w-0 break-words text-sm ${
                     todo.status === 'done'
-                      ? 'line-through text-gray-400 dark:text-gray-500'
-                      : 'text-gray-800 dark:text-gray-200 group-hover/content:text-accent-700 dark:group-hover/content:text-accent-300'
+                      ? 'line-through text-muted-foreground'
+                      : 'text-foreground group-hover/content:text-accent-700 dark:group-hover/content:text-accent-300'
                   }`}
                 >
                   {todo.content}
@@ -328,7 +328,7 @@ export const TodoPane = React.memo(function TodoPane({
                   <svg
                     data-testid="todo-detail-indicator"
                     aria-label={t('todo.hasDetail')}
-                    className="h-3.5 w-3.5 shrink-0 text-gray-400 dark:text-gray-500"
+                    className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -345,7 +345,7 @@ export const TodoPane = React.memo(function TodoPane({
                   disabled={index === 0}
                   aria-label={t('todo.moveUp')}
                   data-testid="todo-move-up"
-                  className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 disabled:opacity-30"
+                  className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
@@ -357,7 +357,7 @@ export const TodoPane = React.memo(function TodoPane({
                   disabled={index === todos.length - 1}
                   aria-label={t('todo.moveDown')}
                   data-testid="todo-move-down"
-                  className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 disabled:opacity-30"
+                  className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -368,7 +368,7 @@ export const TodoPane = React.memo(function TodoPane({
                   onClick={() => handleDelete(todo)}
                   aria-label={t('todo.delete')}
                   data-testid="todo-delete"
-                  className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center text-gray-300 opacity-100 transition-opacity hover:text-red-500 dark:text-gray-600 dark:hover:text-red-400 sm:min-h-0 sm:min-w-0 sm:opacity-0 sm:group-hover:opacity-100"
+                  className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center text-muted-foreground opacity-100 transition-opacity hover:text-red-500 dark:hover:text-red-400 sm:min-h-0 sm:min-w-0 sm:opacity-0 sm:group-hover:opacity-100"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -389,7 +389,7 @@ export const TodoPane = React.memo(function TodoPane({
       >
         <div className="flex flex-col gap-4">
           <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
+            <span className="text-xs font-medium text-muted-foreground">
               {t('todo.contentLabel')}
             </span>
             <input
@@ -399,12 +399,12 @@ export const TodoPane = React.memo(function TodoPane({
               maxLength={MAX_TODO_CONTENT_LENGTH}
               placeholder={t('todo.contentPlaceholder')}
               data-testid="todo-edit-content"
-              className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-full rounded-md border border-input bg-surface dark:bg-surface-2 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </label>
           <label className="flex flex-col gap-1">
             <span className="flex items-center justify-between gap-2">
-              <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
+              <span className="text-xs font-medium text-muted-foreground">
                 {t('todo.detailLabel')}
               </span>
               {editDetail.trim() !== '' && (
@@ -422,7 +422,7 @@ export const TodoPane = React.memo(function TodoPane({
               rows={6}
               placeholder={t('todo.detailPlaceholder')}
               data-testid="todo-edit-detail"
-              className="w-full resize-y rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-full resize-y rounded-md border border-input bg-surface dark:bg-surface-2 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </label>
           <div className="flex justify-end gap-2">
@@ -430,7 +430,7 @@ export const TodoPane = React.memo(function TodoPane({
               type="button"
               onClick={closeEditor}
               data-testid="todo-edit-cancel"
-              className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
+              className="rounded-md border border-input px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"
             >
               {t('todo.cancel')}
             </button>

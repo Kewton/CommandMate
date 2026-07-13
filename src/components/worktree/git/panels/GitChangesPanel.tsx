@@ -96,20 +96,20 @@ const ChangedFileList = memo(function ChangedFileList({
   );
 
   return (
-    <div className="border-t border-gray-100 dark:border-gray-800" data-testid={testId}>
+    <div className="border-t border-border" data-testid={testId}>
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="w-full flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+        className="w-full flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
       >
         <span className="w-4 text-center">{open ? '▼' : '▶'}</span>
         {title} ({files.length})
       </button>
       {open && files.length === 0 && (
-        <div className="px-3 py-1.5 text-xs text-gray-400 dark:text-gray-500">None</div>
+        <div className="px-3 py-1.5 text-xs text-muted-foreground">None</div>
       )}
       {open && files.length > 0 && (
-        <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+        <ul className="divide-y divide-border">
           {files.map((file) => {
             const previewOpen = previewPath === file.path;
             return (
@@ -118,13 +118,13 @@ const ChangedFileList = memo(function ChangedFileList({
                   <span className={`inline-block w-16 shrink-0 text-xs font-medium ${STATUS_TEXT_COLOR[file.status]}`}>
                     {file.status}
                   </span>
-                  <span className="flex-1 truncate font-mono text-xs text-gray-700 dark:text-gray-300" title={file.path}>
+                  <span className="flex-1 truncate font-mono text-xs text-foreground" title={file.path}>
                     {file.path}
                   </span>
                   <button
                     type="button"
                     onClick={() => togglePreview(file.path)}
-                    className="shrink-0 w-5 text-center text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                    className="shrink-0 w-5 text-center text-xs text-muted-foreground hover:text-foreground"
                     aria-label={`Toggle diff preview for ${file.path}`}
                     aria-expanded={previewOpen}
                     data-testid="git-changes-preview-toggle"
@@ -144,7 +144,7 @@ const ChangedFileList = memo(function ChangedFileList({
                     type="button"
                     onClick={() => onToggleStage(file.path)}
                     disabled={busy}
-                    className="shrink-0 px-1.5 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                    className="shrink-0 px-1.5 py-0.5 text-xs rounded border border-input text-foreground hover:bg-muted disabled:opacity-50"
                     aria-label={`${actionLabel} ${file.path}`}
                     data-testid="git-changes-toggle-button"
                   >
@@ -153,7 +153,7 @@ const ChangedFileList = memo(function ChangedFileList({
                 </div>
                 {previewOpen && (
                   <div
-                    className="px-3 pb-2 bg-gray-50/60 dark:bg-gray-800/30"
+                    className="px-3 pb-2 bg-muted/40"
                     data-testid="git-changes-inline-preview"
                   >
                     {previewLoading && (
@@ -169,7 +169,7 @@ const ChangedFileList = memo(function ChangedFileList({
                     )}
                     {!previewLoading && !previewError && previewText !== null && (
                       previewText.trim() === '' ? (
-                        <div className="py-2 text-xs text-gray-500 dark:text-gray-400">No diff available</div>
+                        <div className="py-2 text-xs text-muted-foreground">No diff available</div>
                       ) : (
                         <div className="overflow-x-auto">
                           <pre className="text-xs">
@@ -261,15 +261,15 @@ export const GitChangesPanel = memo(function GitChangesPanel({
 
   return (
     <div
-      className="flex flex-col border-b border-gray-200 dark:border-gray-700"
+      className="flex flex-col border-b border-border"
       data-testid="git-changes-section"
     >
       <div className="flex items-center justify-between px-3 py-2">
-        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Changes</span>
+        <span className="text-sm font-medium text-foreground">Changes</span>
         <button
           type="button"
           onClick={onRefresh}
-          className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded"
+          className="p-1 text-muted-foreground hover:text-foreground rounded"
           aria-label="Refresh changes"
         >
           <RefreshIcon />
@@ -333,18 +333,18 @@ export const GitChangesPanel = memo(function GitChangesPanel({
           />
 
           {/* Commit form */}
-          <div className="flex flex-col gap-2 px-3 py-2 border-t border-gray-100 dark:border-gray-800">
+          <div className="flex flex-col gap-2 px-3 py-2 border-t border-border">
             <textarea
               value={commitMessage}
               onChange={(e) => onCommitMessageChange(e.target.value)}
               placeholder="Commit message"
               rows={isMobile ? 2 : 3}
-              className="w-full resize-y rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-ring"
+              className="w-full resize-y rounded border border-input bg-surface dark:bg-surface-2 px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               data-testid="git-commit-message"
               aria-label="Commit message"
             />
             <div className="flex items-center justify-between gap-2">
-              <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Checkbox
                   checked={amend}
                   onCheckedChange={(checked) => onAmendChange(checked === true)}

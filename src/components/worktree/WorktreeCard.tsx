@@ -123,7 +123,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
               >
                 <svg
                   className={`w-5 h-5 ${
-                    isFavorite ? 'fill-yellow-400 text-yellow-400' : 'fill-none text-gray-400'
+                    isFavorite ? 'fill-yellow-400 text-yellow-400' : 'fill-none text-muted-foreground'
                   }`}
                   stroke="currentColor"
                   strokeWidth="2"
@@ -169,7 +169,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
             {repositoryName && (
               <span
                 data-testid="worktree-card-repo-name"
-                className="text-xs text-gray-500 dark:text-gray-400"
+                className="text-xs text-muted-foreground"
               >
                 {repositoryName}
               </span>
@@ -188,15 +188,15 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
             {/* Description */}
             {description && (
               <div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Description</p>
-                <p className="text-sm text-gray-700 dark:text-gray-300 line-clamp-2 whitespace-pre-wrap">{description}</p>
+                <p className="text-xs text-muted-foreground mb-1">Description</p>
+                <p className="text-sm text-foreground line-clamp-2 whitespace-pre-wrap">{description}</p>
               </div>
             )}
 
             {/* Link */}
             {link && (
               <div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Link</p>
+                <p className="text-xs text-muted-foreground mb-1">Link</p>
                 <button
                   onClick={handleLinkClick}
                   className="flex items-center gap-1 text-sm text-accent-600 dark:text-accent-400 hover:text-accent-800 dark:hover:text-accent-300 hover:underline transition-colors"
@@ -230,7 +230,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
                     ? 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300'
                     : currentStatus === 'in_progress'
                     ? 'bg-accent-100 dark:bg-accent-900 text-accent-700 dark:text-accent-300'
-                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                    : 'bg-muted text-muted-foreground'
                 }`}>
                   {currentStatus === 'in_progress' ? 'In Progress' : currentStatus === 'in_review' ? 'In Review' : currentStatus === 'ready' ? 'Ready' : 'Done'}
                 </span>
@@ -239,7 +239,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
 
             {/* Updated At */}
             {relativeTime && (
-              <div className="flex items-center text-xs text-gray-500 dark:text-gray-400">
+              <div className="flex items-center text-xs text-muted-foreground">
                 <svg
                   className="w-4 h-4 mr-1"
                   fill="none"

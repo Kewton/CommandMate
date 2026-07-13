@@ -80,11 +80,11 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
   return (
     <>
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
         <button
           type="button"
           onClick={onToggleCommitList}
-          className="flex items-center gap-1 text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer hover:text-gray-900 dark:hover:text-gray-100"
+          className="flex items-center gap-1 text-sm font-medium text-muted-foreground cursor-pointer hover:text-foreground"
         >
           <span className="text-xs w-4 text-center">{commitListOpen ? '▼' : '▶'}</span>
           Commit History
@@ -92,7 +92,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
         <button
           type="button"
           onClick={onRefresh}
-          className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded"
+          className="p-1 text-muted-foreground hover:text-foreground rounded"
           aria-label="Refresh commit history"
         >
           <RefreshIcon />
@@ -116,7 +116,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
 
       {/* Empty state */}
       {commitListOpen && !isLoading && !commitError && commits.length === 0 && (
-        <div className="px-3 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+        <div className="px-3 py-8 text-center text-sm text-muted-foreground">
           No commits found
         </div>
       )}
@@ -127,7 +127,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
           {/* Upper: Commit list (scrollable, max 40% when open) */}
           {commitListOpen && (
             <div className={`overflow-y-auto ${selectedCommit ? 'max-h-[40%] shrink-0' : 'flex-1'}`}>
-              <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+              <ul className="divide-y divide-border">
                 {commits.map((commit) => {
                   // Issue #816 (B): inline "View diff" accordion open-state.
                   const inlineOpen = inlineDiffCommit === commit.hash;
@@ -137,7 +137,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                         <button
                           type="button"
                           onClick={() => onCommitSelect(commit.hash)}
-                          className={`flex-1 min-w-0 text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
+                          className={`flex-1 min-w-0 text-left px-3 py-2 text-sm hover:bg-muted transition-colors ${
                             selectedCommit === commit.hash
                               ? 'bg-accent-50 dark:bg-accent-900/30'
                               : ''
@@ -147,11 +147,11 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                             <span className="font-mono text-xs text-accent-600 dark:text-accent-400 shrink-0">
                               {commit.shortHash}
                             </span>
-                            <span className="truncate text-gray-800 dark:text-gray-200">
+                            <span className="truncate text-foreground">
                               {commit.message}
                             </span>
                           </div>
-                          <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                          <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
                             <span>{commit.author}</span>
                             <span>{new Date(commit.date).toLocaleDateString()}</span>
                           </div>
@@ -161,7 +161,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                         <button
                           type="button"
                           onClick={() => onToggleInlineDiff(commit.hash)}
-                          className="shrink-0 px-2 text-xs text-accent-600 dark:text-accent-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:underline"
+                          className="shrink-0 px-2 text-xs text-accent-600 dark:text-accent-400 hover:bg-muted hover:underline"
                           aria-label={`View diff for ${commit.shortHash}`}
                           aria-expanded={inlineOpen}
                           data-testid="git-commit-view-diff-button"
@@ -173,7 +173,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                       {/* Issue #816 (B): inline accordion file list for this commit */}
                       {inlineOpen && (
                         <div
-                          className="border-t border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-800/30"
+                          className="border-t border-border bg-muted/40"
                           data-testid="git-commit-inline-files"
                         >
                           {inlineFilesLoading && (
@@ -184,18 +184,18 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                           )}
                           {inlineFilesError && <InlineError message={inlineFilesError} />}
                           {!inlineFilesLoading && !inlineFilesError && inlineFiles.length === 0 && (
-                            <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                            <div className="px-3 py-2 text-xs text-muted-foreground">
                               No changed files
                             </div>
                           )}
                           {!inlineFilesLoading && inlineFiles.length > 0 && (
-                            <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                            <ul className="divide-y divide-border">
                               {inlineFiles.map((file) => (
                                 <li key={file.path}>
                                   <button
                                     type="button"
                                     onClick={() => onInlineDiffFile(commit.hash, file.path)}
-                                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors ${
+                                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors ${
                                       selectedFile === file.path && selectedCommit === commit.hash
                                         ? 'bg-accent-50 dark:bg-accent-900/30'
                                         : ''
@@ -206,7 +206,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                                     <span className={`inline-block w-14 font-medium ${STATUS_TEXT_COLOR[file.status]}`}>
                                       {file.status}
                                     </span>
-                                    <span className="font-mono text-gray-700 dark:text-gray-300">
+                                    <span className="font-mono text-foreground">
                                       {file.path}
                                     </span>
                                   </button>
@@ -225,12 +225,12 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
 
           {/* Lower: Changed files + Diff (scrollable) */}
           {selectedCommit && (
-            <div className="flex-1 overflow-y-auto min-h-0 border-t border-gray-200 dark:border-gray-700">
+            <div className="flex-1 overflow-y-auto min-h-0 border-t border-border">
               {/* Changed files header */}
               <button
                 type="button"
                 onClick={() => setChangedFilesOpen((prev) => !prev)}
-                className="w-full flex items-center gap-1 px-3 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/50 sticky top-0 z-10 cursor-pointer hover:text-gray-700 dark:hover:text-gray-200"
+                className="w-full flex items-center gap-1 px-3 py-2 text-xs font-medium text-muted-foreground bg-surface-2 sticky top-0 z-10 cursor-pointer hover:text-foreground"
               >
                 <span className="w-4 text-center">{changedFilesOpen ? '▼' : '▶'}</span>
                 Changed Files
@@ -248,18 +248,18 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                     </div>
                   )}
                   {!isLoadingFiles && !detailError && changedFiles.length === 0 && (
-                    <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                    <div className="px-3 py-2 text-xs text-muted-foreground">
                       No changed files
                     </div>
                   )}
                   {!isLoadingFiles && changedFiles.length > 0 && (
-                    <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                    <ul className="divide-y divide-border">
                       {changedFiles.map((file) => (
                         <li key={file.path}>
                           <button
                             type="button"
                             onClick={() => onFileSelect(file.path)}
-                            className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
+                            className={`w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors ${
                               selectedFile === file.path
                                 ? 'bg-accent-50 dark:bg-accent-900/30'
                                 : ''
@@ -268,7 +268,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                             <span className={`inline-block w-14 font-medium ${STATUS_TEXT_COLOR[file.status]}`}>
                               {file.status}
                             </span>
-                            <span className="font-mono text-gray-700 dark:text-gray-300">
+                            <span className="font-mono text-foreground">
                               {file.path}
                             </span>
                           </button>
@@ -281,11 +281,11 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
 
               {/* Inline diff viewer (mobile only) */}
               {isMobile && selectedFile && (
-                <div className="border-t border-gray-200 dark:border-gray-700">
+                <div className="border-t border-border">
                   <button
                     type="button"
                     onClick={() => setDiffOpen((prev) => !prev)}
-                    className="w-full flex items-center gap-1 px-3 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/50 sticky top-0 z-10 cursor-pointer hover:text-gray-700 dark:hover:text-gray-200"
+                    className="w-full flex items-center gap-1 px-3 py-2 text-xs font-medium text-muted-foreground bg-surface-2 sticky top-0 z-10 cursor-pointer hover:text-foreground"
                   >
                     <span className="w-4 text-center">{diffOpen ? '▼' : '▶'}</span>
                     Diff: {selectedFile}
@@ -310,7 +310,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
                         </div>
                       )}
                       {!isLoadingDiff && !diffContent && !detailError && (
-                        <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                        <div className="px-3 py-2 text-xs text-muted-foreground">
                           No diff available
                         </div>
                       )}
@@ -321,7 +321,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
 
               {/* PC: show selected file indicator */}
               {!isMobile && selectedFile && !detailError && (
-                <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 border-t border-gray-200 dark:border-gray-700">
+                <div className="px-3 py-2 text-xs text-muted-foreground border-t border-border">
                   {isLoadingDiff ? 'Loading diff...' : `Diff displayed in file panel: ${selectedFile}`}
                 </div>
               )}

@@ -205,7 +205,7 @@ export const MemoCard = memo(function MemoCard({
       // Issue #787: tabIndex makes the card a focus target for search next/prev
       // scroll-to-match (focusable without entering the tab order).
       tabIndex={-1}
-      className={`bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-3 focus:outline-none ${className}`}
+      className={`bg-surface dark:bg-surface-2 border border-border rounded-lg p-4 space-y-3 focus:outline-none ${className}`}
     >
       {/* Header: Title and Delete button */}
       <div className="flex items-center gap-2">
@@ -215,12 +215,12 @@ export const MemoCard = memo(function MemoCard({
           onChange={handleTitleChange}
           onBlur={handleTitleBlur}
           placeholder="Memo title"
-          className="flex-1 min-w-0 text-sm font-medium text-gray-900 dark:text-gray-100 bg-transparent border-none focus:outline-none focus:ring-0 p-0"
+          className="flex-1 min-w-0 text-sm font-medium text-foreground bg-transparent border-none focus:outline-none focus:ring-0 p-0"
         />
         {isSaving && (
           <span
             data-testid="saving-indicator"
-            className="text-xs text-gray-400 dark:text-gray-500"
+            className="text-xs text-muted-foreground"
           >
             Saving...
           </span>
@@ -235,7 +235,7 @@ export const MemoCard = memo(function MemoCard({
               disabled={!canMoveUp}
               aria-label={t('memoMoveUp')}
               title={t('memoMoveUp')}
-              className="flex-shrink-0 p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors rounded disabled:opacity-30 disabled:cursor-not-allowed"
+              className="flex-shrink-0 p-1 text-muted-foreground hover:text-foreground transition-colors rounded disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <ChevronUp className="w-4 h-4" aria-hidden="true" />
             </button>
@@ -246,7 +246,7 @@ export const MemoCard = memo(function MemoCard({
               disabled={!canMoveDown}
               aria-label={t('memoMoveDown')}
               title={t('memoMoveDown')}
-              className="flex-shrink-0 p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors rounded disabled:opacity-30 disabled:cursor-not-allowed"
+              className="flex-shrink-0 p-1 text-muted-foreground hover:text-foreground transition-colors rounded disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <ChevronDown className="w-4 h-4" aria-hidden="true" />
             </button>
@@ -259,7 +259,7 @@ export const MemoCard = memo(function MemoCard({
             data-testid="insert-memo-content"
             onClick={handleInsert}
             aria-label="Insert to message"
-            className="flex-shrink-0 p-1 text-gray-400 dark:text-gray-500 hover:text-accent-600 dark:hover:text-accent-400 transition-colors rounded"
+            className="flex-shrink-0 p-1 text-muted-foreground hover:text-accent-600 dark:hover:text-accent-400 transition-colors rounded"
             title="Insert to message"
           >
             <ArrowDownToLine className="w-4 h-4" aria-hidden="true" />
@@ -270,7 +270,7 @@ export const MemoCard = memo(function MemoCard({
           type="button"
           onClick={handleCopy}
           aria-label="Copy memo content"
-          className="flex-shrink-0 p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors rounded"
+          className="flex-shrink-0 p-1 text-muted-foreground hover:text-foreground transition-colors rounded"
         >
           {copied ? (
             <Check className="w-4 h-4 text-green-600" />
@@ -282,7 +282,7 @@ export const MemoCard = memo(function MemoCard({
           type="button"
           onClick={handleDelete}
           aria-label="Delete memo"
-          className="flex-shrink-0 p-1 text-gray-400 dark:text-gray-500 hover:text-red-500 transition-colors rounded"
+          className="flex-shrink-0 p-1 text-muted-foreground hover:text-red-500 transition-colors rounded"
         >
           <svg
             className="w-4 h-4"
@@ -308,7 +308,7 @@ export const MemoCard = memo(function MemoCard({
         onBlur={handleContentBlur}
         placeholder="Enter memo content..."
         rows={4}
-        className="w-full text-sm text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md p-2 resize-y focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
+        className="w-full text-sm text-foreground bg-muted border border-border rounded-md p-2 resize-y focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
       />
 
       {/* Error message */}

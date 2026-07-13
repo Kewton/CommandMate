@@ -7,7 +7,7 @@
  * MobileInfoContent (line 775-779). Both locations now use this component.
  *
  * [CONS-005] Accepts className prop to absorb style differences between
- * InfoModal (bg-gray-50) and MobileInfoContent (bg-white border).
+ * InfoModal (recessed surface) and MobileInfoContent (card + border).
  *
  * @module components/worktree/VersionSection
  */
@@ -53,13 +53,13 @@ export function VersionSection({ version, className }: VersionSectionProps) {
 
   return (
     <div className={className} data-testid="version-section">
-      <h2 className="text-sm font-medium text-gray-500 mb-1">
+      <h2 className="text-sm font-medium text-muted-foreground mb-1">
         {t('update.version')}
       </h2>
-      <p className="text-sm text-gray-700">{version}</p>
+      <p className="text-sm text-foreground">{version}</p>
 
       {loading && (
-        <p className="text-xs text-gray-400 mt-1" data-testid="version-loading">
+        <p className="text-xs text-muted-foreground mt-1" data-testid="version-loading">
           ...
         </p>
       )}
