@@ -2,16 +2,15 @@
  * Unit Tests for HtmlPreview Component - postMessage link handling
  *
  * Issue #505: HTML preview link navigation via postMessage
+ * Issue #1113: interactive-mode confirmation now uses ConfirmDialog (useConfirm)
  * @vitest-environment jsdom
  */
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, act, cleanup } from '@testing-library/react';
+import { render, screen, act, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { HtmlPreview } from '@/components/worktree/HtmlPreview';
-
-// Mock window.confirm for interactive mode
-const confirmSpy = vi.spyOn(window, 'confirm');
+import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 
 describe('HtmlPreview - postMessage link handling', () => {
   const defaultProps = {
@@ -22,27 +21,33 @@ describe('HtmlPreview - postMessage link handling', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    confirmSpy.mockReturnValue(true);
   });
 
   afterEach(() => {
     cleanup();
   });
 
-  /** Helper to switch to interactive mode */
-  function switchToInteractive() {
-    const interactiveButton = screen.getByText('Interactive');
-    act(() => {
-      interactiveButton.click();
-    });
+  function renderPreview(ui: React.ReactElement) {
+    return render(<ConfirmProvider>{ui}</ConfirmProvider>);
   }
 
-  it('should listen for postMessage in interactive mode', () => {
+  /** Helper to switch to interactive mode (accepts the ConfirmDialog) */
+  async function switchToInteractive() {
+    fireEvent.click(screen.getByText('Interactive'));
+    fireEvent.click(await screen.findByTestId('confirm-dialog-confirm'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('confirm-dialog')).toBeNull();
+    });
+    // Flush the awaited confirm() continuation (setSandboxLevel)
+    await act(async () => {});
+  }
+
+  it('should listen for postMessage in interactive mode', async () => {
     const onOpenFile = vi.fn();
     const addEventSpy = vi.spyOn(window, 'addEventListener');
 
-    render(<HtmlPreview {...defaultProps} onOpenFile={onOpenFile} />);
-    switchToInteractive();
+    renderPreview(<HtmlPreview {...defaultProps} onOpenFile={onOpenFile} />);
+    await switchToInteractive();
 
     expect(addEventSpy).toHaveBeenCalledWith(
       'message',
@@ -50,10 +55,10 @@ describe('HtmlPreview - postMessage link handling', () => {
     );
   });
 
-  it('should call onOpenFile for relative path postMessage', () => {
+  it('should call onOpenFile for relative path postMessage', async () => {
     const onOpenFile = vi.fn();
-    render(<HtmlPreview {...defaultProps} onOpenFile={onOpenFile} />);
-    switchToInteractive();
+    renderPreview(<HtmlPreview {...defaultProps} onOpenFile={onOpenFile} />);
+    await switchToInteractive();
 
     act(() => {
       const event = new MessageEvent('message', {
@@ -66,10 +71,10 @@ describe('HtmlPreview - postMessage link handling', () => {
     expect(onOpenFile).toHaveBeenCalledWith('docs/readme.md');
   });
 
-  it('should open external link via window.open for external postMessage', () => {
+  it('should open external link via window.open for external postMessage', async () => {
     const windowOpen = vi.spyOn(window, 'open').mockImplementation(() => null);
-    render(<HtmlPreview {...defaultProps} />);
-    switchToInteractive();
+    renderPreview(<HtmlPreview {...defaultProps} />);
+    await switchToInteractive();
 
     act(() => {
       const event = new MessageEvent('message', {
@@ -86,10 +91,10 @@ describe('HtmlPreview - postMessage link handling', () => {
     );
   });
 
-  it('should ignore postMessage with wrong origin [DR1-007]', () => {
+  it('should ignore postMessage with wrong origin [DR1-007]', async () => {
     const onOpenFile = vi.fn();
-    render(<HtmlPreview {...defaultProps} onOpenFile={onOpenFile} />);
-    switchToInteractive();
+    renderPreview(<HtmlPreview {...defaultProps} onOpenFile={onOpenFile} />);
+    await switchToInteractive();
 
     act(() => {
       const event = new MessageEvent('message', {
@@ -102,10 +107,10 @@ describe('HtmlPreview - postMessage link handling', () => {
     expect(onOpenFile).not.toHaveBeenCalled();
   });
 
-  it('should ignore postMessage with wrong type', () => {
+  it('should ignore postMessage with wrong type', async () => {
     const onOpenFile = vi.fn();
-    render(<HtmlPreview {...defaultProps} onOpenFile={onOpenFile} />);
-    switchToInteractive();
+    renderPreview(<HtmlPreview {...defaultProps} onOpenFile={onOpenFile} />);
+    await switchToInteractive();
 
     act(() => {
       const event = new MessageEvent('message', {
@@ -121,7 +126,7 @@ describe('HtmlPreview - postMessage link handling', () => {
   it('should not register listener in safe mode', () => {
     const onOpenFile = vi.fn();
     const addEventSpy = vi.spyOn(window, 'addEventListener');
-    render(<HtmlPreview {...defaultProps} onOpenFile={onOpenFile} />);
+    renderPreview(<HtmlPreview {...defaultProps} onOpenFile={onOpenFile} />);
 
     // In safe mode (default), no message listener should be registered
     const messageListeners = addEventSpy.mock.calls.filter(
@@ -130,13 +135,13 @@ describe('HtmlPreview - postMessage link handling', () => {
     expect(messageListeners).toHaveLength(0);
   });
 
-  it('should clean up listener on unmount', () => {
+  it('should clean up listener on unmount', async () => {
     const removeEventSpy = vi.spyOn(window, 'removeEventListener');
     const onOpenFile = vi.fn();
-    const { unmount } = render(
+    const { unmount } = renderPreview(
       <HtmlPreview {...defaultProps} onOpenFile={onOpenFile} />,
     );
-    switchToInteractive();
+    await switchToInteractive();
 
     unmount();
 
@@ -146,10 +151,10 @@ describe('HtmlPreview - postMessage link handling', () => {
     expect(removedListeners.length).toBeGreaterThan(0);
   });
 
-  it('should reject postMessage with href exceeding 2048 chars [DR4-003]', () => {
+  it('should reject postMessage with href exceeding 2048 chars [DR4-003]', async () => {
     const onOpenFile = vi.fn();
-    render(<HtmlPreview {...defaultProps} onOpenFile={onOpenFile} />);
-    switchToInteractive();
+    renderPreview(<HtmlPreview {...defaultProps} onOpenFile={onOpenFile} />);
+    await switchToInteractive();
 
     act(() => {
       const event = new MessageEvent('message', {

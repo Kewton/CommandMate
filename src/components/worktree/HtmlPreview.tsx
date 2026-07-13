@@ -19,6 +19,8 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { useTranslations } from 'next-intl';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import type { SandboxLevel } from '@/config/html-extensions';
 import { SANDBOX_ATTRIBUTES } from '@/config/html-extensions';
 import { classifyLink, resolveRelativePath, sanitizeHref } from '@/lib/link-utils';
@@ -159,20 +161,22 @@ export function HtmlPreview({
   const [viewMode, setViewMode] = useState<HtmlViewMode>('preview');
   const [sandboxLevel, setSandboxLevel] = useState<SandboxLevel>('safe');
   const confirmedFilesRef = useRef<Set<string>>(new Set());
+  const tWorktree = useTranslations('worktree');
+  const confirm = useConfirm();
 
   /** Handle sandbox level change with confirmation for Interactive mode (DR4-002) */
-  const handleSandboxChange = useCallback((newLevel: SandboxLevel) => {
+  const handleSandboxChange = useCallback(async (newLevel: SandboxLevel) => {
     if (newLevel === 'interactive' && !confirmedFilesRef.current.has(filePath)) {
-      const confirmed = window.confirm(
-        'Interactiveモードではスクリプトが実行されます。信頼できないHTMLファイルではSafeモードを使用してください。'
-      );
+      const confirmed = await confirm({
+        description: tWorktree('htmlPreview.interactiveModeConfirm'),
+      });
       if (!confirmed) {
         return;
       }
       confirmedFilesRef.current.add(filePath);
     }
     setSandboxLevel(newLevel);
-  }, [filePath]);
+  }, [filePath, confirm, tWorktree]);
 
   /**
    * Handle link click from iframe postMessage.

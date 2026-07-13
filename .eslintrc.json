@@ -4,6 +4,25 @@
     "next/typescript"
   ],
   "rules": {
+    "no-restricted-globals": [
+      "error",
+      {
+        "name": "confirm",
+        "message": "Use useConfirm() / ConfirmDialog instead of the native confirm dialog (Issue #1113)."
+      },
+      {
+        "name": "alert",
+        "message": "Use a styled notification (e.g. Toast) instead of the native alert dialog (Issue #1113)."
+      }
+    ],
+    "no-restricted-properties": [
+      "error",
+      {
+        "object": "window",
+        "property": "confirm",
+        "message": "Use useConfirm() / ConfirmDialog instead of window.confirm (Issue #1113)."
+      }
+    ],
     "@typescript-eslint/no-unused-vars": [
       "error",
       {

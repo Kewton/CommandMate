@@ -6,8 +6,10 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useTranslations } from 'next-intl';
 import { Trash2 } from 'lucide-react';
 import { Button, Card } from '@/components/ui';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { AssistantMessageInput } from './AssistantMessageInput';
 import { AssistantMessageList } from './AssistantMessageList';
 import { assistantApi } from '@/lib/api/assistant-api';
@@ -34,6 +36,8 @@ interface RepositoryOption {
 }
 
 export function AssistantChatPanel() {
+  const t = useTranslations('home');
+  const confirm = useConfirm();
   const [repositories, setRepositories] = useState<RepositoryOption[]>([]);
   const [availableTools, setAvailableTools] = useState<AssistantToolInfo[]>([]);
   const [selectedRepoId, setSelectedRepoId] = useState('');
@@ -244,9 +248,10 @@ export function AssistantChatPanel() {
       return;
     }
 
-    const confirmed = window.confirm(
-      'Clear all chat history for this repository and CLI? Past messages will no longer be sent back to the assistant.',
-    );
+    const confirmed = await confirm({
+      description: t('assistant.clearHistoryConfirm'),
+      variant: 'danger',
+    });
     if (!confirmed) {
       return;
     }
@@ -261,7 +266,7 @@ export function AssistantChatPanel() {
     } finally {
       setClearing(false);
     }
-  }, [clearing, conversation, executionRunning, loadConversation]);
+  }, [clearing, conversation, executionRunning, loadConversation, confirm, t]);
 
   const handleSendMessage = useCallback(
     async (message: string) => {
@@ -306,9 +311,9 @@ export function AssistantChatPanel() {
   const handleRepoChange = useCallback(
     async (newRepoId: string) => {
       if (conversationActive) {
-        const confirmed = window.confirm(
-          'Changing repository will stop the active conversation. Do you want to continue?',
-        );
+        const confirmed = await confirm({
+          description: t('assistant.changeRepoConfirm'),
+        });
         if (!confirmed) {
           return;
         }
@@ -324,7 +329,7 @@ export function AssistantChatPanel() {
       setSelectedRepoId(newRepoId);
       setError(null);
     },
-    [conversation, conversationActive, selectedTool],
+    [conversation, conversationActive, selectedTool, confirm, t],
   );
 
   return (

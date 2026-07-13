@@ -38,6 +38,7 @@ import {
 } from '@/components/worktree/WorktreeDetailSubComponents';
 import { UPLOADABLE_EXTENSIONS, getMaxFileSize, isUploadableExtension } from '@/config/uploadable-extensions';
 import { useToast } from '@/components/common/Toast';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { useAutoYes } from '@/hooks/useAutoYes';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { useUpdateCheck } from '@/hooks/useUpdateCheck';
@@ -149,6 +150,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const tError = useTranslations('error');
   const tCommon = useTranslations('common');
   const tAutoYes = useTranslations('autoYes');
+  const confirm = useConfirm();
 
   // Issue #839: Stale-while-revalidate priming. The worktree *list* is already
   // cached by useWorktreesCache (exposed via WorktreesCacheProvider). When the
@@ -1117,7 +1119,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   /** Handle file/directory delete in FileTreeView */
   const handleDelete = useCallback(async (path: string) => {
     const name = path.split('/').pop() || path;
-    if (!window.confirm(tCommon('confirmDelete', { name }))) return;
+    if (!(await confirm({ description: tCommon('confirmDelete', { name }), variant: 'danger' }))) return;
 
     try {
       const response = await fetch(
@@ -1141,7 +1143,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       console.error('[WorktreeDetailRefactored] Failed to delete:', err);
       window.alert(tError('fileOps.failedToDelete'));
     }
-  }, [worktreeId, editorFilePath, tabsActions, tCommon, tError]);
+  }, [worktreeId, editorFilePath, tabsActions, tCommon, tError, confirm]);
 
   // Issue #314 / #499 Item 5: Show stop reason toast when pending (deferred from fetchCurrentOutput)
   useEffect(() => {

@@ -33,5 +33,9 @@
     "medium": "中",
     "small": "小",
     "xsmall": "極小"
+  },
+  "confirmDialog": {
+    "title": "確認",
+    "confirm": "OK"
   }
 }
