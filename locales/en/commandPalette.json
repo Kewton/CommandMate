@@ -1,9 +1,11 @@
 {
   "title": "Command palette",
   "placeholder": "Type a command or search...",
+  "searchAction": "Search…",
   "empty": "No results found.",
   "loading": "Loading worktrees...",
   "groups": {
+    "recent": "Recent",
     "navigation": "Navigation",
     "worktrees": "Worktrees",
     "actions": "Actions"
@@ -19,7 +21,17 @@
   "actions": {
     "toLight": "Switch to light theme",
     "toDark": "Switch to dark theme",
-    "displaySizePrefix": "Display size"
+    "displaySizePrefix": "Display size",
+    "syncRepositories": "Sync repositories",
+    "syncSuccess": "Repositories synced",
+    "syncError": "Failed to sync repositories",
+    "switchLanguage": "Switch language",
+    "openGitHub": "Open GitHub"
+  },
+  "footer": {
+    "navigate": "Navigate",
+    "select": "Select",
+    "close": "Close"
   },
   "mobileTrigger": "Open command palette",
   "mobileLabel": "Search"
