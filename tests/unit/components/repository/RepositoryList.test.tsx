@@ -114,7 +114,7 @@ describe('RepositoryList (Issue #644)', () => {
       expect(disabledRow.textContent).toMatch(/Disabled/);
     });
 
-    it('shows "(none)" placeholder when displayName is null', async () => {
+    it('shows a muted em-dash placeholder when displayName is null', async () => {
       vi.mocked(repositoryApi.list).mockResolvedValue({
         success: true,
         repositories: [buildRepo({ displayName: null })],
@@ -123,8 +123,25 @@ describe('RepositoryList (Issue #644)', () => {
       render(<RepositoryList refreshKey={0} />);
 
       await waitFor(() => {
-        expect(screen.getByText('(none)')).toBeInTheDocument();
+        expect(screen.getByText('—')).toBeInTheDocument();
       });
+      expect(screen.queryByText('(none)')).not.toBeInTheDocument();
+    });
+
+    it('renders the Edit control as an icon button with an aria-label', async () => {
+      vi.mocked(repositoryApi.list).mockResolvedValue({
+        success: true,
+        repositories: [buildRepo({ id: 'r1', name: 'repo-a' })],
+      });
+
+      render(<RepositoryList refreshKey={0} />);
+
+      const editButton = await screen.findByRole('button', {
+        name: /edit display name for repo-a/i,
+      });
+      // Icon-only: no visible "Edit" text label, but an SVG icon is present.
+      expect(editButton).not.toHaveTextContent(/edit/i);
+      expect(editButton.querySelector('svg')).toBeInTheDocument();
     });
 
     it('shows the displayName when it is set', async () => {

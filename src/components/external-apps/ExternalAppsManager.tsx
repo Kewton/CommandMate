@@ -106,9 +106,9 @@ export function ExternalAppsManager() {
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">External Apps</h2>
+      {/* Heading is owned by the parent page (More) — this section only
+          provides the add-app action to avoid a duplicate "External Apps" title. */}
+      <div className="flex items-center justify-end">
         <Button variant="primary" size="sm" onClick={handleAdd}>
           + Add App
         </Button>
