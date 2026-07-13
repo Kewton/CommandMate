@@ -68,7 +68,7 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
               <div className="w-8 h-8 bg-accent-600 rounded-lg flex items-center justify-center">
                 <Folder size={20} strokeWidth={2} className="text-white" aria-hidden="true" />
               </div>
-              <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">{title}</h1>
+              <h1 className="text-xl font-bold text-foreground">{title}</h1>
             </Link>
           </div>
 
@@ -83,7 +83,7 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
                   className={`text-sm font-medium transition-colors ${
                     active
                       ? 'text-accent-600 dark:text-accent-400'
-                      : 'text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100'
+                      : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
                   {item.label}
@@ -115,7 +115,7 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
               href="https://github.com/kewton/MyCodeBranchDesk"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors flex items-center space-x-1"
+              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors flex items-center space-x-1"
             >
               <Github size={20} strokeWidth={2} aria-hidden="true" />
               <span>GitHub</span>

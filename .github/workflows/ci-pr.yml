@@ -24,6 +24,50 @@ jobs:
           fi
           echo "CLAUDE.md size: $SIZE bytes (under $LIMIT)"
 
+  token-discipline:
+    name: Token discipline (raw gray/slate guard)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Guard against raw gray/slate in migrated directories
+        run: |
+          # [Issue #1082] Hard-fail if raw Tailwind gray/slate color utilities
+          # (bg-/text-/border-/ring-<gray|slate>-<n>) reappear in directories that
+          # have already been migrated to semantic tokens. Same mechanism as the
+          # CLAUDE.md size check above. Fix violations with the semantic tokens in
+          # docs/design-system.md (foreground / muted / muted-foreground / border /
+          # surface / input / ring), NOT by editing this whitelist.
+          #
+          # WHITELIST (guarded) = migrated dirs only.
+          # EXCLUDED (NOT yet migrated — #1061 will extend the guard):
+          #   - src/components/worktree, src/components/mobile,
+          #     src/components/external-apps
+          #   - src/app/worktrees/**  (worktree domain; incl. the intentionally
+          #     always-dark terminal page and its CLI brand colors)
+          # Test files (*.test.*, *.spec.*, __tests__) are excluded because they
+          # assert on concrete class strings.
+          PATTERN='(bg|text|border|ring)-(gray|slate)-[0-9]'
+          MATCHES=$(git grep -nE "$PATTERN" -- \
+            'src/app' \
+            'src/components/ui' \
+            'src/components/layout' \
+            'src/components/home' \
+            'src/components/review' \
+            'src/components/repository' \
+            'src/components/common' \
+            'src/components/sidebar' \
+            'src/components/providers' \
+            ':(exclude)src/app/worktrees' \
+            | grep -vE '\.test\.|\.spec\.|__tests__' || true)
+          if [ -n "$MATCHES" ]; then
+            echo "::error::Raw gray/slate color utilities found in migrated directories (Issue #1082). Replace with semantic tokens — see docs/design-system.md."
+            echo "$MATCHES"
+            exit 1
+          fi
+          echo "Token discipline: no raw gray/slate utilities in migrated directories."
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

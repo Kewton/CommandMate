@@ -35,10 +35,10 @@ export const SidebarToggle = memo(function SidebarToggle() {
       aria-expanded={isOpen}
       className={`
         absolute z-10 p-2 rounded-md
-        bg-gray-800 hover:bg-gray-700
-        text-gray-300 hover:text-white
+        bg-muted hover:bg-muted/80
+        text-foreground
         transition-all duration-200
-        focus:outline-none focus:ring-2 focus:ring-ring
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
         ${isOpen ? 'left-[284px]' : 'left-2'}
         top-16
       `}

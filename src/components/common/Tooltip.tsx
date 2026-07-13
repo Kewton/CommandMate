@@ -110,7 +110,7 @@ export function Tooltip({
         <span
           role="tooltip"
           aria-hidden="true"
-          className={`absolute z-40 whitespace-nowrap px-2 py-1 text-xs font-medium rounded bg-gray-900 text-gray-100 shadow-lg pointer-events-none ${placementClass}`}
+          className={`absolute z-40 whitespace-nowrap px-2 py-1 text-xs font-medium rounded bg-foreground text-background shadow-lg pointer-events-none ${placementClass}`}
         >
           {content}
         </span>

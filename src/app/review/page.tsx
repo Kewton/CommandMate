@@ -33,8 +33,8 @@ export default function ReviewPage() {
     <AppShell>
       <div className="container-custom py-8 overflow-auto h-full">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Review</h1>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
+          <h1 className="text-2xl font-bold text-foreground mb-2">Review</h1>
+          <p className="text-sm text-muted-foreground">
             Worktrees that need your attention.
           </p>
         </div>

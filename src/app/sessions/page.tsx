@@ -109,7 +109,7 @@ const STATUS_BADGE_CLASSES: Record<string, string> = {
   in_progress: 'bg-accent-100 dark:bg-accent-900/30 text-accent-700 dark:text-accent-400',
 };
 
-const DEFAULT_BADGE_CLASS = 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300';
+const DEFAULT_BADGE_CLASS = 'bg-muted text-muted-foreground';
 
 // ============================================================================
 // Component
@@ -207,8 +207,8 @@ export default function SessionsPage() {
     <AppShell>
       <div className="container-custom py-8 overflow-auto h-full">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Sessions</h1>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
+          <h1 className="text-2xl font-bold text-foreground mb-2">Sessions</h1>
+          <p className="text-sm text-muted-foreground">
             All worktree sessions across repositories.
           </p>
         </div>
@@ -245,7 +245,7 @@ export default function SessionsPage() {
             onClick={toggleSortDirection}
             data-testid="sessions-sort-direction"
             aria-label={sortDirection === 'asc' ? 'Sort ascending' : 'Sort descending'}
-            className="rounded-md border border-input bg-surface p-2 text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            className="rounded-md border border-input bg-surface p-2 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {sortDirection === 'asc' ? (
               <ArrowUp size={16} aria-hidden="true" />
@@ -279,7 +279,7 @@ export default function SessionsPage() {
             )}
             <div className="space-y-2" data-testid="sessions-list">
               {filteredAndSorted.length === 0 ? (
-                <div className="text-gray-500 dark:text-gray-400 py-8 text-center" data-testid="sessions-empty">
+                <div className="text-muted-foreground py-8 text-center" data-testid="sessions-empty">
                   No matching sessions found.
                 </div>
               ) : (
@@ -320,10 +320,10 @@ export default function SessionsPage() {
                     {/* Row 1: Name, Agent statuses */}
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0 flex-1">
-                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                        <div className="text-sm font-medium text-foreground truncate">
                           {wt.repositoryDisplayName ?? wt.repositoryName}
                         </div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                        <div className="text-xs text-muted-foreground truncate">
                           {wt.name}
                         </div>
                       </div>
@@ -333,7 +333,7 @@ export default function SessionsPage() {
                         {workingAgents.map(({ agent, status }) => (
                           <div key={agent} className="flex items-center gap-1" data-testid={`session-agent-${agent}`}>
                             <CliDot status={status} label={getCliToolDisplayName(agent)} />
-                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                            <span className="text-xs text-muted-foreground">
                               {getCliToolDisplayName(agent)}
                             </span>
                           </div>
@@ -345,7 +345,7 @@ export default function SessionsPage() {
                             aria-label={tCommon('sessions.idleAgents', { count: idleCount })}
                           >
                             <StatusDot status="idle" size="sm" aria-hidden title={undefined} />
-                            <span className="text-xs text-gray-400 dark:text-gray-500 tabular-nums">
+                            <span className="text-xs text-muted-foreground tabular-nums">
                               +{idleCount}
                             </span>
                           </div>
@@ -356,7 +356,7 @@ export default function SessionsPage() {
                     {/* Row 2: Description (if present) */}
                     {wt.description && (
                       <div className="mt-2">
-                        <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 whitespace-pre-wrap">
+                        <p className="text-xs text-muted-foreground line-clamp-2 whitespace-pre-wrap">
                           {wt.description}
                         </p>
                       </div>
@@ -379,7 +379,7 @@ export default function SessionsPage() {
                         {/* [Issue #1078] CSS truncate (not char-slice): byte-width is
                             consistent across JP/EN and adapts to the container width. */}
                         <span
-                          className="text-xs text-gray-500 dark:text-gray-400 truncate min-w-0 flex-1"
+                          className="text-xs text-muted-foreground truncate min-w-0 flex-1"
                           data-testid={`session-message-text-${wt.id}`}
                           title={sanitizedMessage}
                         >
@@ -387,7 +387,7 @@ export default function SessionsPage() {
                         </span>
                         {relativeTime && (
                           <span
-                            className="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0 whitespace-nowrap tabular-nums"
+                            className="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap tabular-nums"
                             data-testid={`session-time-${wt.id}`}
                           >
                             {relativeTime}
@@ -405,7 +405,7 @@ export default function SessionsPage() {
           <>
             {/* No data yet: loading / blocking error / empty are mutually exclusive. */}
             {isLoading && (
-              <div className="text-gray-500 dark:text-gray-400" data-testid="sessions-loading">
+              <div className="text-muted-foreground" data-testid="sessions-loading">
                 Loading sessions...
               </div>
             )}
@@ -415,7 +415,7 @@ export default function SessionsPage() {
               </div>
             )}
             {!isLoading && !error && (
-              <div className="text-gray-500 dark:text-gray-400 py-8 text-center" data-testid="sessions-empty">
+              <div className="text-muted-foreground py-8 text-center" data-testid="sessions-empty">
                 {filterText ? 'No matching sessions found.' : 'No sessions yet.'}
               </div>
             )}

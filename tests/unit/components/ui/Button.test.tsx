@@ -30,8 +30,8 @@ describe('Button', () => {
 
   it.each([
     ['primary', 'bg-accent-600'],
-    ['secondary', 'bg-gray-200'],
-    ['danger', 'bg-red-600'],
+    ['secondary', 'bg-muted'],
+    ['danger', 'bg-danger'],
   ] as const)('applies the %s variant classes', (variant, expected) => {
     render(
       <Button variant={variant}>{variant}</Button>
@@ -39,16 +39,26 @@ describe('Button', () => {
     expect(classesOf(variant)).toContain(expected);
   });
 
-  it('ghost variant includes dark-mode classes (Issue #1042 fix)', () => {
+  it('ghost variant uses semantic tokens (Issue #1082 token discipline)', () => {
     render(<Button variant="ghost">ghost</Button>);
     const cls = classesOf('ghost');
     expect(cls).toContain('bg-transparent');
-    expect(cls).toContain('text-gray-700');
-    expect(cls).toContain('hover:bg-gray-100');
-    expect(cls).toContain('focus:ring-gray-500');
-    // Regression guard: dark: variants must be present
-    expect(cls).toContain('dark:text-gray-300');
-    expect(cls).toContain('dark:hover:bg-gray-800');
+    expect(cls).toContain('text-foreground');
+    expect(cls).toContain('hover:bg-muted');
+    // Tokens auto-adapt to light/dark; no `dark:` raw-gray overrides remain.
+    expect(cls.some((c) => c.startsWith('dark:'))).toBe(false);
+  });
+
+  it('focus ring is keyboard-only with a background-tied offset (Issue #1082)', () => {
+    render(<Button>Go</Button>);
+    const cls = classesOf('Go');
+    // focus-visible (not focus) so mouse clicks do not paint a ring, and the
+    // offset color follows the page background to kill the dark white halo.
+    expect(cls).toContain('focus-visible:ring-2');
+    expect(cls).toContain('focus-visible:ring-ring');
+    expect(cls).toContain('focus-visible:ring-offset-2');
+    expect(cls).toContain('ring-offset-background');
+    expect(cls.some((c) => c.startsWith('focus:ring'))).toBe(false);
   });
 
   it.each([

@@ -213,7 +213,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
         <Card padding="lg">
           <div className="space-y-4">
             <div>
-              <h3 className="text-lg font-semibold mb-2 dark:text-gray-100">Add New Repository</h3>
+              <h3 className="text-lg font-semibold mb-2 text-foreground">Add New Repository</h3>
             </div>
 
             {/* Mode Toggle Tabs */}
@@ -230,10 +230,10 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
               <TabsContent value="local">
                 <form onSubmit={handleAddRepository} className="space-y-4">
                   <div>
-                    <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+                    <p className="text-sm text-muted-foreground mb-4">
                       Enter the absolute path to a git repository containing worktrees.
                     </p>
-                    <label htmlFor="repositoryPath" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+                    <label htmlFor="repositoryPath" className="block text-sm font-medium text-foreground mb-2">
                       Repository Path
                     </label>
                     <Input
@@ -245,7 +245,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
                       className="font-mono"
                       disabled={isScanning}
                     />
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    <p className="text-xs text-muted-foreground mt-1">
                       Example: /Users/username/projects/my-repo
                     </p>
                   </div>
@@ -274,10 +274,10 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
               <TabsContent value="url">
                 <form onSubmit={handleCloneRepository} className="space-y-4">
                   <div>
-                    <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+                    <p className="text-sm text-muted-foreground mb-4">
                       Enter a git clone URL to clone a remote repository.
                     </p>
-                    <label htmlFor="cloneUrl" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+                    <label htmlFor="cloneUrl" className="block text-sm font-medium text-foreground mb-2">
                       Clone URL
                     </label>
                     <Input
@@ -289,7 +289,7 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
                       className="font-mono"
                       disabled={isCloning}
                     />
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    <p className="text-xs text-muted-foreground mt-1">
                       Supports HTTPS and SSH URLs
                     </p>
                   </div>

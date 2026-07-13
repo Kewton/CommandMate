@@ -156,14 +156,14 @@ export default function TemplateTab() {
 
       {/* Template list */}
       <div className="mb-6">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3">
+        <h2 className="text-lg font-semibold text-foreground mb-3">
           Templates ({templates.length}/{MAX_TEMPLATES})
         </h2>
 
         {isLoading ? (
-          <div className="text-sm text-gray-500" data-testid="template-loading">Loading...</div>
+          <div className="text-sm text-muted-foreground" data-testid="template-loading">Loading...</div>
         ) : templates.length === 0 ? (
-          <div className="text-sm text-gray-500" data-testid="template-empty">No templates yet.</div>
+          <div className="text-sm text-muted-foreground" data-testid="template-empty">No templates yet.</div>
         ) : (
           <div className="space-y-3" data-testid="template-list">
             {templates.map((template) => (
@@ -213,7 +213,7 @@ export default function TemplateTab() {
                 ) : (
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="font-medium text-sm text-gray-900 dark:text-gray-100" data-testid="template-name">
+                      <span className="font-medium text-sm text-foreground" data-testid="template-name">
                         {template.name}
                       </span>
                       <div className="flex gap-2">
@@ -235,7 +235,7 @@ export default function TemplateTab() {
                         </Button>
                       </div>
                     </div>
-                    <p className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap" data-testid="template-content">
+                    <p className="text-xs text-muted-foreground whitespace-pre-wrap" data-testid="template-content">
                       {template.content}
                     </p>
                   </div>
@@ -249,7 +249,7 @@ export default function TemplateTab() {
       {/* Create form (only shown when under limit) */}
       {templates.length < MAX_TEMPLATES && (
         <div className="p-4 bg-surface border border-border rounded-lg shadow-sm" data-testid="create-form">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">New Template</h3>
+          <h3 className="text-sm font-semibold text-foreground mb-3">New Template</h3>
           <div className="space-y-3">
             <Input
               type="text"

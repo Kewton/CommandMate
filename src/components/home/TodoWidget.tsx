@@ -186,7 +186,7 @@ export function TodoWidget() {
   return (
     <Card className="h-full" data-testid="home-todo-widget">
       {/* Tile heading — parity with the Session Overview tile (Issue #1052). */}
-      <h2 className="mb-3 text-lg font-semibold text-gray-900 dark:text-gray-100">
+      <h2 className="mb-3 text-lg font-semibold text-foreground">
         ToDo
       </h2>
 
@@ -198,7 +198,7 @@ export function TodoWidget() {
         className="flex flex-col gap-2 mb-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
         data-testid="todo-selector-row"
       >
-        <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 min-w-0">
+        <label className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
           <span className="shrink-0">Repository</span>
           <select
             value={selectedRepoId}
@@ -215,14 +215,14 @@ export function TodoWidget() {
           </select>
         </label>
         {hasRepositories && (
-          <span className="shrink-0 text-xs text-gray-400 dark:text-gray-500" data-testid="todo-remaining">
+          <span className="shrink-0 text-xs text-muted-foreground" data-testid="todo-remaining">
             {remainingCount} open
           </span>
         )}
       </div>
 
       {!hasRepositories ? (
-        <p className="text-sm text-gray-500 dark:text-gray-400">
+        <p className="text-sm text-muted-foreground">
           No repositories yet. Add one from the Repositories screen to start
           adding todos.
         </p>
@@ -261,9 +261,9 @@ export function TodoWidget() {
 
           {/* Todo list */}
           {loading ? (
-            <p className="text-sm text-gray-400 dark:text-gray-500">Loading…</p>
+            <p className="text-sm text-muted-foreground">Loading…</p>
           ) : todos.length === 0 ? (
-            <p className="text-sm text-gray-500 dark:text-gray-400" data-testid="todo-empty">
+            <p className="text-sm text-muted-foreground" data-testid="todo-empty">
               No todos yet.
             </p>
           ) : (
@@ -271,7 +271,7 @@ export function TodoWidget() {
               {todos.map((todo) => (
                 <li
                   key={todo.id}
-                  className="flex flex-col gap-1 rounded-md px-1 py-1 hover:bg-gray-50 dark:hover:bg-gray-700/40 group sm:flex-row sm:items-center sm:gap-2"
+                  className="flex flex-col gap-1 rounded-md px-1 py-1 hover:bg-muted group sm:flex-row sm:items-center sm:gap-2"
                   data-testid="todo-item"
                 >
                   {/* Top row (mobile) / left section (desktop): checkbox + content.
@@ -290,8 +290,8 @@ export function TodoWidget() {
                     <span
                       className={`min-w-0 flex-1 break-words text-sm ${
                         todo.done
-                          ? 'line-through text-gray-400 dark:text-gray-500'
-                          : 'text-gray-800 dark:text-gray-200'
+                          ? 'line-through text-muted-foreground'
+                          : 'text-foreground'
                       }`}
                     >
                       {todo.content}
@@ -304,7 +304,7 @@ export function TodoWidget() {
                   <div className="flex shrink-0 items-center justify-end gap-2">
                     {todoRepoLabel(todo) && (
                       <span
-                        className="shrink-0 max-w-[8rem] truncate rounded-full bg-gray-100 dark:bg-gray-700 px-2 py-0.5 text-[10px] font-medium text-gray-500 dark:text-gray-400"
+                        className="shrink-0 max-w-[8rem] truncate rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
                         data-testid="todo-repo-badge"
                         title={todoRepoLabel(todo)}
                       >
@@ -316,7 +316,7 @@ export function TodoWidget() {
                       onClick={() => handleDelete(todo)}
                       aria-label="Delete todo"
                       data-testid="todo-delete"
-                      className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center text-gray-300 opacity-100 transition-opacity hover:text-red-500 dark:text-gray-600 dark:hover:text-red-400 sm:min-h-0 sm:min-w-0 sm:opacity-0 sm:group-hover:opacity-100"
+                      className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center text-muted-foreground opacity-100 transition-opacity hover:text-red-500 dark:hover:text-red-400 sm:min-h-0 sm:min-w-0 sm:opacity-0 sm:group-hover:opacity-100"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

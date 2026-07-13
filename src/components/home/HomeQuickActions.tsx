@@ -69,10 +69,10 @@ export function HomeQuickActions() {
             style={{ animationDelay: staggerDelay(index) }}
             className={`flex h-full flex-col items-center justify-center gap-1.5 py-3 text-center hover:border-accent-300 dark:hover:border-accent-700 ${STAGGER_ENTER_CLASS}`}
           >
-            <span className="text-gray-400 dark:text-gray-500 group-hover:text-accent-600 dark:group-hover:text-accent-400 transition-colors">
+            <span className="text-muted-foreground group-hover:text-accent-600 dark:group-hover:text-accent-400 transition-colors">
               {action.icon}
             </span>
-            <span className="text-xs font-medium text-gray-900 dark:text-gray-100">
+            <span className="text-xs font-medium text-foreground">
               {action.title}
             </span>
           </Card>

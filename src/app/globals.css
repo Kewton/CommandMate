@@ -138,7 +138,13 @@
   }
 
   body {
-    @apply text-gray-900 dark:text-gray-100 antialiased;
+    @apply text-foreground antialiased;
+  }
+
+  /* [Issue #1082] Text selection uses a translucent accent wash so highlights
+     read as brand-tinted in both themes (accent is mode-independent). */
+  ::selection {
+    background-color: rgb(var(--accent-500) / 0.25);
   }
 
   /*
@@ -183,9 +189,10 @@
     padding: 1rem;
   }
 
-  /* Inline code styling (not in pre blocks) */
+  /* Inline code styling (not in pre blocks) — theme-follows via tokens, same
+     look as `.assistant-md code` (Issue #1082). */
   .prose :not(pre) > code {
-    @apply bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded text-sm font-mono;
+    @apply bg-muted text-foreground px-1.5 py-0.5 rounded text-sm font-mono;
   }
 
   .prose :not(pre) > code::before,
@@ -267,10 +274,11 @@
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
-  /* Custom scrollbar */
+  /* Custom scrollbar — [Issue #1082] tokenized so the thumb follows the theme
+     (was a fixed slate). --input tracks the light/dark form-border shade. */
   .scrollbar-thin {
     scrollbar-width: thin;
-    scrollbar-color: rgb(203 213 225) transparent;
+    scrollbar-color: rgb(var(--input)) transparent;
   }
 
   .scrollbar-thin::-webkit-scrollbar {
@@ -283,12 +291,12 @@
   }
 
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    background-color: rgb(203 213 225);
+    background-color: rgb(var(--input));
     border-radius: 3px;
   }
 
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    background-color: rgb(148 163 184);
+    background-color: rgb(var(--muted-foreground));
   }
 
   /* スクロールバー非表示・スワイプ/スクロールは維持 */

@@ -172,7 +172,7 @@ export default function ReviewTab() {
 
       {/* Loading */}
       {isLoading && (
-        <div className="text-gray-500 dark:text-gray-400" data-testid="review-loading">
+        <div className="text-muted-foreground" data-testid="review-loading">
           Loading...
         </div>
       )}
@@ -181,7 +181,7 @@ export default function ReviewTab() {
       {!isLoading && (
         <div className="space-y-2" data-testid="review-list">
           {filteredWorktrees.length === 0 ? (
-            <div className="text-gray-500 dark:text-gray-400 py-8 text-center" data-testid="review-empty">
+            <div className="text-muted-foreground py-8 text-center" data-testid="review-empty">
               {emptyMessage}
             </div>
           ) : (
@@ -197,10 +197,10 @@ export default function ReviewTab() {
                   <Card padding="md" className={`transition-colors ${getBorderClass(activeFilter)}`}>
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                      <div className="text-sm font-medium text-foreground truncate">
                         {wt.name}
                       </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                      <div className="text-xs text-muted-foreground truncate">
                         {wt.repositoryName}
                       </div>
                     </div>
@@ -213,7 +213,7 @@ export default function ReviewTab() {
                         return (
                           <div key={agent} className="flex items-center gap-1">
                             <CliDot status={agentStatus} label={getCliToolDisplayName(agent)} />
-                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                            <span className="text-xs text-muted-foreground">
                               {getCliToolDisplayName(agent)}
                             </span>
                           </div>
@@ -224,7 +224,7 @@ export default function ReviewTab() {
 
                   {wt.description && (
                     <div className="mt-2">
-                      <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 whitespace-pre-wrap">
+                      <p className="text-xs text-muted-foreground line-clamp-2 whitespace-pre-wrap">
                         {wt.description}
                       </p>
                     </div>

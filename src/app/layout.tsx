@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { getLocale, getMessages, getTimeZone } from 'next-intl/server';
 import { GeistSans } from 'geist/font/sans';
 import { GeistMono } from 'geist/font/mono';
@@ -6,8 +6,22 @@ import { AppProviders } from '@/components/providers/AppProviders';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'CommandMate',
+  // [Issue #1082] Title template: per-page `title` renders as "<page> | CommandMate";
+  // pages without their own title fall back to `default`.
+  title: {
+    default: 'CommandMate',
+    template: '%s | CommandMate',
+  },
   description: 'Git worktree management with Claude CLI and tmux sessions',
+};
+
+// [Issue #1082] themeColor follows the light/dark --background token so the
+// browser chrome (mobile address bar / PWA) matches the active theme.
+export const viewport: Viewport = {
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#fafafb' },
+    { media: '(prefers-color-scheme: dark)', color: '#0a0c12' },
+  ],
 };
 
 export default async function RootLayout({

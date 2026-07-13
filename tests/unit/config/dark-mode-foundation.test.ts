@@ -62,12 +62,14 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       cssContent = fs.readFileSync(cssPath, 'utf-8');
     });
 
-    it('should have dark:text-gray-100 in body base layer', () => {
-      expect(cssContent).toContain('dark:text-gray-100');
+    it('body uses the semantic text-foreground token (Issue #1082)', () => {
+      // The body color was `text-gray-900 dark:text-gray-100`; #1082 replaced it
+      // with the theme-following `text-foreground` token.
+      expect(cssContent).toContain('text-foreground');
     });
 
-    it('should maintain text-gray-900 for light mode body', () => {
-      expect(cssContent).toContain('text-gray-900');
+    it('body no longer hardcodes raw gray text (Issue #1082)', () => {
+      expect(cssContent).not.toContain('@apply text-gray-900 dark:text-gray-100');
     });
 
     it('should NOT modify .prose pre styles (dark fixed)', () => {
@@ -75,9 +77,10 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       expect(cssContent).toContain('bg-[#0d1117]');
     });
 
-    it('should have dark: variants for inline code in .prose', () => {
-      expect(cssContent).toContain('dark:bg-gray-800');
-      expect(cssContent).toContain('dark:text-gray-200');
+    it('inline code in .prose uses semantic tokens (Issue #1082)', () => {
+      // Was `bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200`;
+      // now theme-following tokens (same look as `.assistant-md code`).
+      expect(cssContent).toContain('bg-muted text-foreground');
     });
 
     it('should no longer define the legacy @apply component classes (Issue #1048)', () => {
@@ -121,10 +124,12 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       expect(content).toContain('dark:bg-accent-500');
     });
 
-    it('Button secondary keeps dark variants', () => {
+    it('Button secondary uses semantic muted/foreground tokens (Issue #1082)', () => {
       const content = readPrimitive('src/components/ui/Button.tsx');
-      expect(content).toContain('dark:bg-gray-700');
-      expect(content).toContain('dark:text-gray-100');
+      // Was `bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100`.
+      expect(content).toContain('bg-muted');
+      expect(content).toContain('text-foreground');
+      expect(content).not.toContain('dark:bg-gray-700');
     });
 
     it('Card uses semantic surface/border tokens (migrated in Issue #1049)', () => {
@@ -143,7 +148,7 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       expect(content).toContain('dark:text-accent-300');
     });
 
-    it('Badge success/warning/error/gray keep dark variants', () => {
+    it('Badge success/warning/error keep dark variants; gray uses muted token (Issue #1082)', () => {
       const content = readPrimitive('src/components/ui/Badge.tsx');
       expect(content).toContain('dark:bg-green-900');
       expect(content).toContain('dark:text-green-300');
@@ -151,14 +156,15 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       expect(content).toContain('dark:text-yellow-300');
       expect(content).toContain('dark:bg-red-900');
       expect(content).toContain('dark:text-red-300');
-      expect(content).toContain('dark:bg-gray-800');
-      expect(content).toContain('dark:text-gray-300');
+      // gray variant migrated to the muted token (was dark:bg-gray-800/dark:text-gray-300)
+      expect(content).toContain('bg-muted text-muted-foreground');
     });
 
-    it('Input keeps the semantic focus ring tokens', () => {
+    it('Input uses focus-visible ring/border tokens (Issue #1082)', () => {
       const content = readPrimitive('src/components/ui/Input.tsx');
-      expect(content).toContain('focus:ring-ring');
-      expect(content).toContain('focus:border-ring');
+      // focus: → focus-visible: so the ring is keyboard-only.
+      expect(content).toContain('focus-visible:ring-ring');
+      expect(content).toContain('focus-visible:border-ring');
     });
 
     it('Input uses semantic border-input / bg-surface tokens and recedes to surface-2 in dark (Issue #1049)', () => {

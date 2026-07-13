@@ -201,11 +201,11 @@ export default function ReportTab() {
         <ReportDatePicker value={selectedDate} onChange={handleDateChange} />
 
         <div className="flex items-center gap-2">
-          <label className="text-sm text-gray-600 dark:text-gray-400">Tool:</label>
+          <label className="text-sm text-muted-foreground">Tool:</label>
           <select
             value={selectedTool}
             onChange={(e) => setSelectedTool(e.target.value)}
-            className="px-3 py-1 text-sm border rounded dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200"
+            className="px-3 py-1 text-sm rounded border border-input bg-surface dark:bg-surface-2 text-surface-foreground"
             data-testid="tool-selector"
           >
             {SUMMARY_ALLOWED_TOOLS.map((tool) => (
@@ -230,7 +230,7 @@ export default function ReportTab() {
 
       {/* Generation mode selector */}
       <div className="mb-4" data-testid="generation-mode-selector">
-        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+        <label className="text-sm font-medium text-foreground mb-2 block">
           Generation Mode
         </label>
         <RadioGroup
@@ -242,7 +242,7 @@ export default function ReportTab() {
           {MODE_OPTIONS.map((option) => (
             <label key={option.value} className="flex items-center gap-2 text-sm cursor-pointer">
               <RadioGroupItem value={option.value} data-testid={`mode-radio-${option.value}`} />
-              <span className="text-gray-700 dark:text-gray-300">{option.label}</span>
+              <span className="text-foreground">{option.label}</span>
             </label>
           ))}
         </RadioGroup>
@@ -251,18 +251,18 @@ export default function ReportTab() {
       {/* Template selector (only in template mode) */}
       {mode === 'template' && (
         <div className="mb-4" data-testid="template-selector">
-          <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+          <label className="text-sm font-medium text-foreground mb-2 block">
             Select Template
           </label>
           {isLoadingTemplates ? (
-            <div className="text-sm text-gray-500">Loading templates...</div>
+            <div className="text-sm text-muted-foreground">Loading templates...</div>
           ) : templates.length === 0 ? (
-            <div className="text-sm text-gray-500">No templates available. Create one in the Template tab.</div>
+            <div className="text-sm text-muted-foreground">No templates available. Create one in the Template tab.</div>
           ) : (
             <select
               value={selectedTemplateId || ''}
               onChange={(e) => selectTemplate(e.target.value)}
-              className="px-3 py-1 text-sm border rounded dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200"
+              className="px-3 py-1 text-sm rounded border border-input bg-surface dark:bg-surface-2 text-surface-foreground"
               data-testid="template-select"
             >
               <option value="">-- Select a template --</option>
@@ -289,7 +289,7 @@ export default function ReportTab() {
                 : 'Additional instructions for summary generation'
             }
             className={`resize-y ${
-              isUserInstructionReadOnly ? 'bg-gray-100 dark:bg-gray-900 cursor-not-allowed' : ''
+              isUserInstructionReadOnly ? 'bg-muted cursor-not-allowed' : ''
             }`}
             data-testid="user-instruction-input"
           />
@@ -309,7 +309,7 @@ export default function ReportTab() {
       </div>
 
       {/* Message count */}
-      <div className="mb-4 text-sm text-gray-600 dark:text-gray-400" data-testid="message-count">
+      <div className="mb-4 text-sm text-muted-foreground" data-testid="message-count">
         {isLoading ? (
           'Loading...'
         ) : messageCount === 0 ? (
@@ -328,7 +328,7 @@ export default function ReportTab() {
 
       {/* Loading spinner for generation (local or remote) */}
       {(isGenerating || isRemoteGenerating) && (
-        <div className="flex items-center gap-2 mb-4 text-sm text-gray-600 dark:text-gray-400" data-testid="generating-spinner">
+        <div className="flex items-center gap-2 mb-4 text-sm text-muted-foreground" data-testid="generating-spinner">
           <div className="w-4 h-4 border-2 border-accent-600 border-t-transparent rounded-full animate-spin" />
           {isRemoteGenerating && remoteStatus.tool
             ? `Generating report... (tool: ${remoteStatus.tool}${remoteStatus.startedAt ? `, started: ${Math.round((Date.now() - new Date(remoteStatus.startedAt).getTime()) / 1000)}s ago` : ''})`
@@ -340,7 +340,7 @@ export default function ReportTab() {
       {!isLoading && report && (
         <Card data-testid="report-content">
           <div className="flex items-center justify-between mb-3">
-            <div className="text-xs text-gray-500 dark:text-gray-400">
+            <div className="text-xs text-muted-foreground">
               Generated by: {report.generatedByTool}
               {report.model && ` (${report.model})`}
             </div>
