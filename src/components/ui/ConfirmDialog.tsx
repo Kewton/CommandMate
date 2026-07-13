@@ -12,6 +12,7 @@ import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useRef,
   useState,
 } from 'react';
@@ -99,6 +100,17 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   const [pending, setPending] = useState<PendingConfirm | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
 
+  // [Issue #1114] The Modal stays mounted while its exit animation plays
+  // after `pending` clears; keep the last options so the dialog content
+  // doesn't blank out mid-fade.
+  const lastOptionsRef = useRef<ConfirmOptions | null>(null);
+  useEffect(() => {
+    if (pending) {
+      lastOptionsRef.current = pending.options;
+    }
+  }, [pending]);
+  const displayOptions = pending?.options ?? lastOptionsRef.current;
+
   const confirm = useCallback<ConfirmFn>((options) => {
     return new Promise<boolean>((resolve) => {
       restoreFocusRef.current =
@@ -125,11 +137,11 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
       {children}
       <ConfirmDialog
         isOpen={pending !== null}
-        title={pending?.options.title}
-        description={pending?.options.description ?? ''}
-        confirmLabel={pending?.options.confirmLabel}
-        cancelLabel={pending?.options.cancelLabel}
-        variant={pending?.options.variant}
+        title={displayOptions?.title}
+        description={displayOptions?.description ?? ''}
+        confirmLabel={displayOptions?.confirmLabel}
+        cancelLabel={displayOptions?.cancelLabel}
+        variant={displayOptions?.variant}
         onConfirm={() => settle(true)}
         onCancel={() => settle(false)}
       />
