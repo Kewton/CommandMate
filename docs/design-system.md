@@ -344,6 +344,24 @@ import { Skeleton } from '@/components/ui';
 
 ---
 
+## 角丸スケール (Border Radius, Issue #1119)
+
+角丸は用途ごとに以下のスケールから選ぶ（Tailwind v3: `sm`=2px / `md`=6px / `lg`=8px）。
+
+| 用途 | クラス | 対象例 |
+|------|--------|--------|
+| コントロール | `rounded-md` | Button / Input / Select / Textarea / アイコンボタン |
+| コンテナ | `rounded-lg` | Card / Modal / Panel |
+| ポップアップ面 | `rounded-md` | DropdownMenu / Select content / Tooltip |
+| チップ・円形要素 | `rounded-full` | Badge / Switch / StatusDot / RadioGroup / ピル |
+| 小型インライン要素 | `rounded-sm` | Checkbox / Kbd / メニュー項目（高さ ~20px 以下） |
+
+- 裸の `rounded`（4px）は**原則禁止**。新規コードでは上記スケールから選択する
+- `src/components/ui/` と `src/components/layout/` は本規約に準拠済み。feature 配下に残る
+  裸 `rounded` は一括置換せず、該当ファイルを変更する際に随時規約へ寄せる
+
+---
+
 ## モーション (Motion, Issue #1050)
 
 マイクロインタラクションは **[`tailwindcss-animate`](https://github.com/jamiebuilds/tailwindcss-animate)**
