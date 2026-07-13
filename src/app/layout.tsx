@@ -17,11 +17,14 @@ export const metadata: Metadata = {
 
 // [Issue #1082] themeColor follows the light/dark --background token so the
 // browser chrome (mobile address bar / PWA) matches the active theme.
+// [Issue #1131] viewportFit: 'cover' is required for iOS to expose non-zero
+// env(safe-area-inset-*) values; without it every pt-safe/pb-safe is a no-op.
 export const viewport: Viewport = {
   themeColor: [
     { media: '(prefers-color-scheme: light)', color: '#fafafb' },
     { media: '(prefers-color-scheme: dark)', color: '#0a0c12' },
   ],
+  viewportFit: 'cover',
 };
 
 export default async function RootLayout({
