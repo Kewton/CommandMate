@@ -27,8 +27,12 @@
 
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorktreeDetailRefactored } from '@/components/worktree/WorktreeDetailRefactored';
+import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
+
+// Issue #1079: split-0's CLI selector is now a Radix DropdownMenu (portalled).
+beforeAll(() => installRadixJsdomPolyfills());
 
 const mockPush = vi.fn();
 vi.mock('next/navigation', () => ({
@@ -416,10 +420,12 @@ describe('WorktreeDetailRefactored CLI tab switching (Issue #736)', () => {
     vi.restoreAllMocks();
   });
 
-  // Issue #728: Drive activeCliTab swaps through split-0's CLI selector.
+  // Issue #728 / #1079: drive activeCliTab swaps through split-0's CLI selector.
+  // The selector is now a Radix DropdownMenu: open it, then pick the target CLI's
+  // radio item (matched case-insensitively by its display-name label).
   function swapSplitZeroCliTo(value: 'copilot' | 'claude') {
-    const select = screen.getByTestId('cli-selector-0') as HTMLSelectElement;
-    fireEvent.change(select, { target: { value } });
+    fireEvent.keyDown(screen.getByTestId('cli-selector-0'), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('menuitemradio', { name: new RegExp(value, 'i') }));
   }
 
   it('keeps Copilot messages when an older Claude messages response arrives later (parent stale guard)', async () => {

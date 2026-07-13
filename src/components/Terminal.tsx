@@ -60,12 +60,17 @@ export function TerminalComponent({
 
     // Initialize xterm.js terminal
     const term = new Terminal({
+      // Issue #1079: align the terminal chrome with the app's dark surface ladder
+      // (#1049 / #1074) instead of the floating VS Code #1e1e1e. Terminal output
+      // stays dark in both themes (#1075), so the base colors are pinned to the
+      // dark token values (--surface-2 / accent-500) and need no theme-switch
+      // update — a deliberate simplification over live getComputedStyle wiring.
       theme: {
-        background: '#1e1e1e',
-        foreground: '#d4d4d4',
-        cursor: '#d4d4d4',
-        selectionBackground: '#264f78',
-        black: '#1e1e1e',
+        background: '#0f121a', // --surface-2 (dark): recessed well
+        foreground: '#e5e7eb', // gray-200: soft foreground on the dark surface
+        cursor: '#e5e7eb',
+        selectionBackground: 'rgba(6, 182, 212, 0.3)', // accent-500 / 30%
+        black: '#0f121a',
         red: '#f48771',
         green: '#89d185',
         yellow: '#f4bf75',

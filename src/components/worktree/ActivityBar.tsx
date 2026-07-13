@@ -104,7 +104,7 @@ export const ActivityBar = memo(function ActivityBar({
   return (
     <div
       data-testid="activity-bar"
-      className={`flex flex-col items-stretch w-12 flex-shrink-0 bg-gray-100 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 ${className}`.trim()}
+      className={`flex flex-col items-stretch w-12 flex-shrink-0 bg-muted border-r border-border ${className}`.trim()}
     >
       {/* Issue #747: Sidebar (Branches) toggle. Rendered OUTSIDE the tablist so
           it is excluded from the roving-tabindex Arrow/Home/End navigation and
@@ -116,14 +116,14 @@ export const ActivityBar = memo(function ActivityBar({
           onClick={toggleSidebar}
           aria-label="Toggle sidebar"
           aria-expanded={isSidebarOpen}
-          className="flex items-center justify-center h-12 w-12 text-gray-500 dark:text-gray-400 transition-colors hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-inset"
+          className="flex items-center justify-center h-12 w-12 text-muted-foreground transition-colors hover:text-surface-foreground hover:bg-muted-foreground/10 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-inset"
         >
           <Menu size={20} aria-hidden="true" />
         </button>
       </Tooltip>
       {/* Separator between the sidebar toggle and the activity tabs */}
       <div
-        className="mx-2 my-1 border-b border-gray-200 dark:border-gray-700"
+        className="mx-2 my-1 border-b border-border"
         aria-hidden="true"
       />
       <div
@@ -151,13 +151,20 @@ export const ActivityBar = memo(function ActivityBar({
                 onClick={() => onToggle(activity.id)}
                 onKeyDown={(e) => handleKeyDown(e, index, activity.id)}
                 data-testid={`activity-bar-button-${activity.id}`}
-                className={`flex items-center justify-center h-12 w-12 transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-inset ${
-                  isActive
-                    ? 'text-accent-600 dark:text-accent-400 border-l-2 border-accent-600 dark:border-accent-400 bg-white dark:bg-gray-900'
-                    : 'text-gray-500 dark:text-gray-400 border-l-2 border-transparent hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700'
-                }`}
+                className="group flex items-center justify-center h-12 w-12 transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-inset"
               >
-                <Icon size={20} aria-hidden="true" />
+                {/* Issue #1079: active state is a soft accent-tinted rounded pill
+                    (bg-accent-500/10) instead of a full-cell bar + white fill. */}
+                <span
+                  aria-hidden="true"
+                  className={`flex items-center justify-center h-9 w-9 rounded-md transition-colors ${
+                    isActive
+                      ? 'bg-accent-500/10 text-accent-600 dark:text-accent-400'
+                      : 'text-muted-foreground group-hover:text-surface-foreground group-hover:bg-muted-foreground/10'
+                  }`}
+                >
+                  <Icon size={20} aria-hidden="true" />
+                </span>
               </button>
             </Tooltip>
           );
