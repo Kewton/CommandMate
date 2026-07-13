@@ -72,7 +72,10 @@
     "showFiles": "ファイルを表示",
     "hideFiles": "ファイルを非表示",
     "equalizeWidths": "均等幅",
-    "equalizeWidthsHint": "ターミナル幅を均等にし、履歴幅を初期値に戻す"
+    "equalizeWidthsHint": "ターミナル幅を均等にし、履歴幅を初期値に戻す",
+    "addSplit": "分割を追加",
+    "removeSplit": "分割を削除",
+    "selectInstance": "{split} のエージェントインスタンスを選択"
   },
   "todo": {
     "addPlaceholder": "ToDoを追加…",
