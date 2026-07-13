@@ -131,7 +131,7 @@ export const GitBranchPanel = memo(function GitBranchPanel({
 
           {error && (
             <div
-              className="px-3 pb-2 text-xs text-red-600 dark:text-red-400"
+              className="px-3 pb-2 text-xs text-danger-foreground"
               role="alert"
               data-testid="git-branches-error"
             >
@@ -141,7 +141,7 @@ export const GitBranchPanel = memo(function GitBranchPanel({
 
           {actionError && (
             <div
-              className="px-3 pb-2 text-xs text-red-600 dark:text-red-400"
+              className="px-3 pb-2 text-xs text-danger-foreground"
               role="alert"
               data-testid="git-branches-action-error"
             >
@@ -180,7 +180,7 @@ export const GitBranchPanel = memo(function GitBranchPanel({
                         setDeleteTarget(branch);
                       }}
                       disabled={deleteDisabled}
-                      className="shrink-0 px-1.5 py-0.5 text-xs rounded border border-input text-red-600 dark:text-red-400 hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="shrink-0 px-1.5 py-0.5 text-xs rounded border border-input text-danger-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
                       aria-label={`Delete ${branch.name}`}
                     >
                       Delete
@@ -302,7 +302,7 @@ export const GitBranchPanel = memo(function GitBranchPanel({
                 type="button"
                 onClick={confirmDelete}
                 disabled={busy}
-                className="px-3 py-1 text-xs font-medium rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                className="px-3 py-1 text-xs font-medium rounded bg-danger text-white hover:bg-danger/90 disabled:opacity-50"
                 data-testid="branch-delete-confirm-button"
               >
                 Delete

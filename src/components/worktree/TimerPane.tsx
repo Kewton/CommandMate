@@ -56,11 +56,11 @@ interface TimerPaneProps {
 function getStatusColor(status: string): string {
   switch (status) {
     case 'pending': return 'text-info';
-    case 'sending': return 'text-yellow-600 dark:text-yellow-400';
-    case 'sent': return 'text-green-600 dark:text-green-400';
-    case 'failed': return 'text-red-600 dark:text-red-400';
+    case 'sending': return 'text-warning-foreground';
+    case 'sent': return 'text-success-foreground';
+    case 'failed': return 'text-danger-foreground';
     case 'cancelled': return 'text-muted-foreground';
-    case 'no_session': return 'text-orange-600 dark:text-orange-400';
+    case 'no_session': return 'text-warning-foreground';
     default: return 'text-muted-foreground';
   }
 }
@@ -250,7 +250,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
           {/* Header: new-timer button (disabled at capacity) + max-reached note */}
           <div className="flex items-center justify-end gap-2">
             {atMax && (
-              <span className="text-xs text-amber-600 dark:text-amber-400">
+              <span className="text-xs text-warning-foreground">
                 {t('timer.maxReached', { max: MAX_TIMERS_PER_WORKTREE })}
               </span>
             )}
@@ -311,7 +311,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
                     e.stopPropagation();
                     void handleCancel(timer.id);
                   }}
-                  className="px-2 py-1 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
+                  className="px-2 py-1 text-xs text-danger-foreground hover:bg-danger-subtle rounded transition-colors"
                 >
                   {t('timer.cancel')}
                 </button>

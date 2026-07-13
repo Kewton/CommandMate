@@ -819,8 +819,8 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         className="flex items-center justify-center h-full bg-surface"
       >
         <div className="text-center">
-          <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-          <p className="text-red-600 dark:text-red-400">{error}</p>
+          <AlertTriangle className="h-12 w-12 text-danger mx-auto mb-4" />
+          <p className="text-danger-foreground">{error}</p>
           {onClose && (
             <button
               onClick={onClose}

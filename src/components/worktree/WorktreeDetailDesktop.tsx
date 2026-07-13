@@ -750,7 +750,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
               <button
                 type="button"
                 onClick={onKillConfirm}
-                className="px-4 py-2 text-sm font-medium rounded-md bg-red-600 hover:bg-red-700 text-white"
+                className="px-4 py-2 text-sm font-medium rounded-md bg-danger hover:bg-danger/90 text-white"
               >
                 {endLabel}
               </button>

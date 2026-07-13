@@ -412,7 +412,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     <div ref={containerRef} className="space-y-2 relative">
       {/* Error display (send error or image error) */}
       {(error || imageError) && (
-        <div className="p-2 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded text-sm text-red-800 dark:text-red-300">
+        <div className="p-2 bg-danger-subtle border border-danger-border rounded text-sm text-danger-foreground">
           {error || imageError}
         </div>
       )}
@@ -428,7 +428,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
           <button
             type="button"
             onClick={removeAttachment}
-            className="flex-shrink-0 p-0.5 text-accent-600 hover:text-red-500 dark:text-accent-400 dark:hover:text-red-400 rounded transition-colors"
+            className="flex-shrink-0 p-0.5 text-accent-600 hover:text-danger-foreground dark:text-accent-400 rounded transition-colors"
             aria-label="Remove attachment"
             data-testid="remove-attachment-button"
           >

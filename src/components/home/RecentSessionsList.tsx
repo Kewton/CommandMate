@@ -33,10 +33,10 @@ function recencyOf(wt: Worktree): Date | string | undefined {
 /** Small status dot reflecting whether the session is active/waiting. */
 function statusDotClass(wt: Worktree): string {
   if (wt.isWaitingForResponse) {
-    return 'bg-amber-500 dark:bg-amber-400';
+    return 'bg-warning';
   }
   if (wt.isSessionRunning) {
-    return 'bg-green-500 dark:bg-green-400';
+    return 'bg-success';
   }
   return 'bg-muted-foreground';
 }

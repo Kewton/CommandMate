@@ -20,12 +20,12 @@ import type { ChangedFile } from '@/types/git';
 // ============================================================================
 
 export const STATUS_TEXT_COLOR: Record<ChangedFile['status'], string> = {
-  added: 'text-green-600 dark:text-green-400',
-  modified: 'text-yellow-600 dark:text-yellow-400',
-  deleted: 'text-red-600 dark:text-red-400',
+  added: 'text-success-foreground',
+  modified: 'text-warning-foreground',
+  deleted: 'text-danger-foreground',
   renamed: 'text-info',
   untracked: 'text-teal-600 dark:text-teal-400',
-  unmerged: 'text-orange-600 dark:text-orange-400',
+  unmerged: 'text-warning-foreground',
 };
 
 /**
@@ -79,7 +79,7 @@ export const AskAiButton = memo(function AskAiButton({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded border border-violet-300 dark:border-violet-700 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/30 disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded border border-info-border text-info-foreground hover:bg-info-subtle disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
       data-testid={testId}
       title="現在の状況を AI チャットに下書きします（自動送信はされません）"
     >
@@ -96,9 +96,9 @@ export const DiffLine = memo(function DiffLine({ line }: { line: string }) {
   let className = 'whitespace-pre font-mono text-xs';
 
   if (line.startsWith('+') && !line.startsWith('+++')) {
-    className += ' text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20';
+    className += ' text-success-foreground bg-success-subtle';
   } else if (line.startsWith('-') && !line.startsWith('---')) {
-    className += ' text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20';
+    className += ' text-danger-foreground bg-danger-subtle';
   } else if (line.startsWith('@@')) {
     className += ' text-info';
   } else {
@@ -113,7 +113,7 @@ export const DiffLine = memo(function DiffLine({ line }: { line: string }) {
  */
 export const InlineError = memo(function InlineError({ message }: { message: string }) {
   return (
-    <div className="px-3 py-2 text-xs text-red-600 dark:text-red-400" role="alert">
+    <div className="px-3 py-2 text-xs text-danger-foreground" role="alert">
       {message}
     </div>
   );

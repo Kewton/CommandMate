@@ -90,7 +90,7 @@ export function PdfPreview({ dataUri, filePath, variant = 'iframe' }: PdfPreview
         className="h-full flex flex-col items-center justify-center gap-3 p-6 text-center"
         data-testid="pdf-preview-error"
       >
-        <p className="text-sm text-red-600 dark:text-red-400">
+        <p className="text-sm text-danger-foreground">
           PDFプレビューを読み込めませんでした。
         </p>
         <a

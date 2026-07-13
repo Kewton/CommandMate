@@ -151,10 +151,10 @@ export function MermaidDiagram({
     return (
       <div
         data-testid="mermaid-error"
-        className="bg-red-50 border border-red-200 p-4 rounded"
+        className="bg-danger-subtle border border-danger-border p-4 rounded"
       >
-        <p className="text-red-600 font-medium">Diagram Error</p>
-        <pre className="text-sm text-red-500 mt-2 whitespace-pre-wrap break-words bg-red-50">
+        <p className="text-danger font-medium">Diagram Error</p>
+        <pre className="text-sm text-danger mt-2 whitespace-pre-wrap break-words bg-danger-subtle">
           {error}
         </pre>
       </div>

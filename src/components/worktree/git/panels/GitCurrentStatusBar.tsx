@@ -60,7 +60,7 @@ export const GitCurrentStatusBar = memo(function GitCurrentStatusBar({
       {/* Error (does not affect commit history / diff) */}
       {statusError && !gitStatus && (
         <div
-          className="text-xs text-red-600 dark:text-red-400"
+          className="text-xs text-danger-foreground"
           role="alert"
           data-testid="git-status-error"
         >
@@ -83,7 +83,7 @@ export const GitCurrentStatusBar = memo(function GitCurrentStatusBar({
             {/* Dirty badge */}
             {gitStatus.isDirty && (
               <span
-                className="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-yellow-50 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300"
+                className="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-warning-subtle text-warning-foreground"
                 data-testid="git-status-dirty-badge"
               >
                 uncommitted
@@ -105,7 +105,7 @@ export const GitCurrentStatusBar = memo(function GitCurrentStatusBar({
           {/* Branch mismatch warning */}
           {gitStatus.isBranchMismatch && (
             <div
-              className="flex items-center gap-1.5 rounded px-2 py-1 text-xs bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800/40"
+              className="flex items-center gap-1.5 rounded px-2 py-1 text-xs bg-warning-subtle text-warning-foreground border border-warning-border"
               role="alert"
               data-testid="git-status-mismatch-warning"
             >

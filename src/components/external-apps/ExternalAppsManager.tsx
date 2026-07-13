@@ -125,7 +125,7 @@ export function ExternalAppsManager() {
       ) : error ? (
         <Card padding="lg">
           <div className="text-center py-8">
-            <p className="text-red-600 dark:text-red-400 mb-4">Failed to load external apps</p>
+            <p className="text-danger-foreground mb-4">Failed to load external apps</p>
             <Button variant="secondary" size="sm" onClick={fetchApps}>
               Retry
             </Button>

@@ -228,9 +228,9 @@ export const MoveDialog = memo(function MoveDialog({
             )}
           </button>
           {isExpanded ? (
-            <FolderOpen className="w-4 h-4 text-yellow-500 flex-shrink-0" />
+            <FolderOpen className="w-4 h-4 text-warning flex-shrink-0" />
           ) : (
-            <Folder className="w-4 h-4 text-yellow-500 flex-shrink-0" />
+            <Folder className="w-4 h-4 text-warning flex-shrink-0" />
           )}
           <span className="truncate">{node.name}</span>
         </div>
@@ -267,7 +267,7 @@ export const MoveDialog = memo(function MoveDialog({
             }}
           >
             <span className="w-4 h-4" />
-            <Folder className="w-4 h-4 text-yellow-500 flex-shrink-0" />
+            <Folder className="w-4 h-4 text-warning flex-shrink-0" />
             <span>{t('fileTree.rootDirectory')}</span>
           </div>
 

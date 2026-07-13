@@ -33,9 +33,9 @@ export interface ReviewCardProps {
  * Status badge color mapping.
  */
 const STATUS_COLORS: Record<ReviewStatus, string> = {
-  done: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
-  approval: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400',
-  stalled: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400',
+  done: 'bg-success-subtle text-success-foreground',
+  approval: 'bg-warning-subtle text-warning-foreground',
+  stalled: 'bg-danger-subtle text-danger-foreground',
 };
 
 /**

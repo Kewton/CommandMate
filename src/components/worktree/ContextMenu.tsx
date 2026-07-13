@@ -256,7 +256,7 @@ export const ContextMenu = memo(function ContextMenu({
             disabled={!targetPath}
             className={`w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors focus:outline-none focus:bg-muted ${
               item.variant === 'danger'
-                ? 'text-red-600 hover:bg-red-50 focus:bg-red-50'
+                ? 'text-danger hover:bg-danger-subtle focus:bg-danger-subtle'
                 : 'text-foreground hover:bg-muted'
             } ${!targetPath ? 'opacity-50 cursor-not-allowed' : ''}`}
           >

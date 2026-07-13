@@ -110,7 +110,7 @@ export const GitCommitHistoryPanel = memo(function GitCommitHistoryPanel({
 
       {/* Commit-level error state */}
       {commitListOpen && commitError && !isLoading && (
-        <div className="px-3 py-4 text-sm text-red-600 dark:text-red-400" role="alert">
+        <div className="px-3 py-4 text-sm text-danger-foreground" role="alert">
           {commitError}
         </div>
       )}

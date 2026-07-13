@@ -258,7 +258,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
             title={repoPathCopied ? 'Copied!' : 'Copy repository path'}
           >
             {repoPathCopied ? (
-              <Check className="w-3.5 h-3.5 text-green-600" />
+              <Check className="w-3.5 h-3.5 text-success" />
             ) : (
               <ClipboardCopy className="w-3.5 h-3.5" />
             )}
@@ -281,7 +281,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
             title={pathCopied ? 'Copied!' : 'Copy path'}
           >
             {pathCopied ? (
-              <Check className="w-3.5 h-3.5 text-green-600" />
+              <Check className="w-3.5 h-3.5 text-success" />
             ) : (
               <ClipboardCopy className="w-3.5 h-3.5" />
             )}
@@ -638,7 +638,7 @@ export const DesktopHeader = memo(function DesktopHeader({
                   {truncateString(gitStatus.currentBranch, DESKTOP_BRANCH_MAX_LENGTH)}
                 </span>
                 {gitStatus.isDirty && (
-                  <span className="text-amber-500" title="Uncommitted changes">*</span>
+                  <span className="text-warning" title="Uncommitted changes">*</span>
                 )}
               </>
             )}
@@ -805,7 +805,7 @@ export const DesktopHeader = memo(function DesktopHeader({
             variant="ghost"
             type="button"
             onClick={onKillSession}
-            className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium rounded-lg text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors flex-shrink-0"
+            className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium rounded-lg text-danger-foreground hover:bg-danger-subtle transition-colors flex-shrink-0"
             aria-label="End session"
             data-testid="desktop-kill-session"
           >

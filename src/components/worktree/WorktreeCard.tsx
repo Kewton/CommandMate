@@ -125,7 +125,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
               >
                 <svg
                   className={`w-5 h-5 ${
-                    isFavorite ? 'fill-yellow-400 text-yellow-400' : 'fill-none text-muted-foreground'
+                    isFavorite ? 'fill-warning text-warning' : 'fill-none text-muted-foreground'
                   }`}
                   stroke="currentColor"
                   strokeWidth="2"
@@ -227,9 +227,9 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
               <div>
                 <span className={`px-2 py-1 text-xs font-medium rounded ${
                   currentStatus === 'done'
-                    ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
+                    ? 'bg-success-subtle text-success-foreground'
                     : currentStatus === 'in_review'
-                    ? 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300'
+                    ? 'bg-info-subtle text-info-foreground'
                     : currentStatus === 'in_progress'
                     ? 'bg-accent-100 dark:bg-accent-900 text-accent-700 dark:text-accent-300'
                     : 'bg-muted text-muted-foreground'

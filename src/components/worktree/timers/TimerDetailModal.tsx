@@ -57,11 +57,11 @@ export interface TimerDetailModalProps {
 function getStatusColor(status: string): string {
   switch (status) {
     case 'pending': return 'text-info';
-    case 'sending': return 'text-yellow-600 dark:text-yellow-400';
-    case 'sent': return 'text-green-600 dark:text-green-400';
-    case 'failed': return 'text-red-600 dark:text-red-400';
+    case 'sending': return 'text-warning-foreground';
+    case 'sent': return 'text-success-foreground';
+    case 'failed': return 'text-danger-foreground';
     case 'cancelled': return 'text-muted-foreground';
-    case 'no_session': return 'text-orange-600 dark:text-orange-400';
+    case 'no_session': return 'text-warning-foreground';
     default: return 'text-muted-foreground';
   }
 }
@@ -122,12 +122,12 @@ export function TimerDetailModal({ timer, instances, onClose }: TimerDetailModal
       {/* Failure reason: only for failed timers that recorded one. */}
       {timer.status === 'failed' && timer.error && (
         <div>
-          <div className="text-xs font-semibold text-red-600 dark:text-red-400 mb-1">
+          <div className="text-xs font-semibold text-danger-foreground mb-1">
             {t('timer.failureReason')}
           </div>
           <pre
             data-testid="timer-detail-error"
-            className="text-xs whitespace-pre-wrap break-words font-mono text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded p-2 max-h-40 overflow-y-auto"
+            className="text-xs whitespace-pre-wrap break-words font-mono text-danger-foreground bg-danger-subtle rounded p-2 max-h-40 overflow-y-auto"
           >
             {timer.error}
           </pre>

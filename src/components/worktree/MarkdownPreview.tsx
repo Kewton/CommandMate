@@ -328,13 +328,13 @@ export const LargeFileWarning = memo(function LargeFileWarning({
   return (
     <div
       data-testid="large-file-warning"
-      className="flex items-center gap-2 px-4 py-2 bg-yellow-50 dark:bg-yellow-900/30 border-b border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-300 text-sm"
+      className="flex items-center gap-2 px-4 py-2 bg-warning-subtle border-b border-warning-border text-warning-foreground text-sm"
     >
       <AlertTriangle className="h-4 w-4" />
       Large file: Performance may be affected.
       <button
         onClick={onDismiss}
-        className="ml-auto text-yellow-600 hover:text-yellow-800"
+        className="ml-auto text-warning hover:text-warning"
       >
         <X className="h-4 w-4" />
       </button>

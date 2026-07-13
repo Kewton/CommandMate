@@ -123,7 +123,7 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
 
       {actionError && (
         <div
-          className="mt-1 text-xs text-red-600 dark:text-red-400"
+          className="mt-1 text-xs text-danger-foreground"
           role="alert"
           data-testid="branch-checkout-error"
         >
@@ -146,7 +146,7 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
 
             {/* S3-001: history-loss warning (verified verbatim by acceptance test). */}
             <div
-              className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/50 dark:bg-amber-900/20 dark:text-amber-300"
+              className="rounded border border-warning-border bg-warning-subtle px-3 py-2 text-xs text-warning-foreground"
               role="alert"
               data-testid="branch-history-loss-warning"
             >
@@ -156,7 +156,7 @@ export const BranchCheckoutDropdown = memo(function BranchCheckoutDropdown({
             {/* S3-002: running-session warning. */}
             {hasRunningSession && (
               <div
-                className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-700/50 dark:bg-red-900/20 dark:text-red-300"
+                className="rounded border border-danger-border bg-danger-subtle px-3 py-2 text-xs text-danger-foreground"
                 role="alert"
                 data-testid="branch-session-warning"
               >

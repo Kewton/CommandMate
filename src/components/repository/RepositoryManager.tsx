@@ -320,15 +320,15 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
 
       {/* Success Message */}
       {success && (
-        <div className="p-4 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-lg">
-          <p className="text-sm text-green-800 dark:text-green-300">{success}</p>
+        <div className="p-4 bg-success-subtle border border-success-border rounded-lg">
+          <p className="text-sm text-success-foreground">{success}</p>
         </div>
       )}
 
       {/* Error Message */}
       {error && (
-        <div className="p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg">
-          <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
+        <div className="p-4 bg-danger-subtle border border-danger-border rounded-lg">
+          <p className="text-sm text-danger-foreground">{error}</p>
         </div>
       )}
     </div>

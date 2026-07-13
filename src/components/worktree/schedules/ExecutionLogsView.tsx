@@ -51,9 +51,9 @@ export interface ExecutionLogsViewProps {
 /** Map execution log status to Tailwind CSS color classes */
 function getStatusColor(status: ExecutionLogStatus): string {
   switch (status) {
-    case 'completed': return 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/30';
-    case 'failed': return 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30';
-    case 'timeout': return 'text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-900/30';
+    case 'completed': return 'text-success-foreground bg-success-subtle';
+    case 'failed': return 'text-danger-foreground bg-danger-subtle';
+    case 'timeout': return 'text-warning-foreground bg-warning-subtle';
     case 'running': return 'text-accent-600 dark:text-accent-400 bg-accent-50 dark:bg-accent-900/30';
     case 'cancelled': return 'text-muted-foreground bg-muted';
   }
