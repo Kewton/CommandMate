@@ -118,9 +118,9 @@ export default function LoginPage() {
   const displayError = autoLoginError || error;
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900">
-      <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-md w-full max-w-md">
-        <h1 className="text-2xl font-bold mb-6 text-center text-gray-900 dark:text-white">
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="bg-surface p-8 rounded-lg shadow-md w-full max-w-md">
+        <h1 className="text-2xl font-bold mb-6 text-center text-foreground">
           {t('login.title')}
         </h1>
 
@@ -128,7 +128,7 @@ export default function LoginPage() {
           <div>
             <label
               htmlFor="token"
-              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+              className="block text-sm font-medium text-foreground mb-1"
             >
               {t('login.tokenLabel')}
             </label>

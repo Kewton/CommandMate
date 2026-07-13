@@ -13,17 +13,20 @@ export type ButtonSize = 'sm' | 'md' | 'lg';
 const buttonVariants = cva(
   // [Issue #1050] transition-all (was transition-colors) so the hover lift /
   // active press below animate smoothly. Reduced-motion handled in globals.css.
-  'inline-flex items-center justify-center px-4 py-2 rounded-md font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2',
+  // focus-visible + ring-offset-background: keyboard-only ring, and the offset
+  // color is tied to the page background so dark mode no longer paints the
+  // default white halo (Tabs/Switch are the reference).
+  'inline-flex items-center justify-center px-4 py-2 rounded-md font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background',
   {
     variants: {
       variant: {
         primary:
-          'bg-accent-600 dark:bg-accent-500 text-white hover:bg-accent-700 dark:hover:bg-accent-600 focus:ring-ring',
+          'bg-accent-600 dark:bg-accent-500 text-white hover:bg-accent-700 dark:hover:bg-accent-600',
         secondary:
-          'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 hover:bg-gray-300 dark:hover:bg-gray-600 focus:ring-gray-500',
-        danger: 'bg-red-600 text-white hover:bg-red-700 focus:ring-red-500',
+          'bg-muted text-foreground hover:bg-muted/80',
+        danger: 'bg-danger text-white hover:bg-danger/90',
         ghost:
-          'bg-transparent text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 focus:ring-gray-500',
+          'bg-transparent text-foreground hover:bg-muted',
       },
       size: {
         sm: 'px-3 py-1.5 text-sm',

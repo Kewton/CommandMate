@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils/cn';
 const inputVariants = cva(
   'flex w-full rounded-md border border-input bg-surface dark:bg-surface-2 text-surface-foreground shadow-sm ' +
     'placeholder:text-muted-foreground ' +
-    'focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring ' +
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring ' +
     'disabled:cursor-not-allowed disabled:opacity-50',
   {
     variants: {

@@ -18,7 +18,7 @@ const badgeVariants = cva(
         warning: 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-300',
         error: 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-300',
         info: 'bg-accent-100 dark:bg-accent-900 text-accent-800 dark:text-accent-300',
-        gray: 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-300',
+        gray: 'bg-muted text-muted-foreground',
       },
     },
     defaultVariants: {
@@ -32,7 +32,7 @@ const dotColorStyles: Record<BadgeVariant, string> = {
   warning: 'bg-yellow-600',
   error: 'bg-red-600',
   info: 'bg-info',
-  gray: 'bg-gray-600',
+  gray: 'bg-muted-foreground',
 };
 
 export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {

@@ -23,14 +23,14 @@ export interface SessionOverviewTileProps {
 export function SessionOverviewTile({ worktrees }: SessionOverviewTileProps) {
   return (
     <Card variant="elevated" className="h-full" data-testid="session-overview-tile">
-      <h2 className="mb-3 text-lg font-semibold text-gray-900 dark:text-gray-100">
+      <h2 className="mb-3 text-lg font-semibold text-foreground">
         Session Overview
       </h2>
 
       <HomeSessionSummary worktrees={worktrees} />
 
       <div className="mt-4 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+        <h3 className="text-sm font-semibold text-foreground">
           Recent sessions
         </h3>
         <Link

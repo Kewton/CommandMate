@@ -266,7 +266,7 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
   if (loading && repositories.length === 0) {
     return (
       <Card padding="lg">
-        <p className="text-sm text-gray-600 dark:text-gray-400">
+        <p className="text-sm text-muted-foreground">
           Loading repositories...
         </p>
       </Card>
@@ -306,28 +306,28 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
       <Card padding="none">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+            <thead className="bg-muted border-b border-border">
               <tr>
-                <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
+                <th className="px-4 py-2 text-left font-medium text-foreground">
                   Name
                 </th>
-                <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
+                <th className="px-4 py-2 text-left font-medium text-foreground">
                   Display name
                 </th>
                 {/* Issue #690: Visibility column placed before Path so it is always reachable on narrow screens */}
-                <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
+                <th className="px-4 py-2 text-left font-medium text-foreground">
                   Visibility
                 </th>
-                <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
+                <th className="px-4 py-2 text-left font-medium text-foreground">
                   Path
                 </th>
-                <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
+                <th className="px-4 py-2 text-left font-medium text-foreground">
                   Worktrees
                 </th>
-                <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
+                <th className="px-4 py-2 text-left font-medium text-foreground">
                   Status
                 </th>
-                <th className="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-200">
+                <th className="px-4 py-2 text-left font-medium text-foreground">
                   Actions
                 </th>
               </tr>
@@ -337,7 +337,7 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                 <tr>
                   <td
                     colSpan={7}
-                    className="px-4 py-6 text-center text-gray-500 dark:text-gray-400"
+                    className="px-4 py-6 text-center text-muted-foreground"
                   >
                     No repositories registered yet.
                   </td>
@@ -348,10 +348,10 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                 return (
                   <tr
                     key={repo.id}
-                    className="border-b border-gray-100 dark:border-gray-800"
+                    className="border-b border-border"
                     data-testid={`repository-row-${repo.id}`}
                   >
-                    <td className="px-4 py-3 align-top text-gray-900 dark:text-gray-100">
+                    <td className="px-4 py-3 align-top text-foreground">
                       {repo.name}
                     </td>
                     <td className="px-4 py-3 align-top">
@@ -396,7 +396,7 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                         {repo.path}
                       </span>
                     </td>
-                    <td className="px-4 py-3 align-top text-gray-700 dark:text-gray-300">
+                    <td className="px-4 py-3 align-top text-foreground">
                       {repo.worktreeCount}
                     </td>
                     <td className="px-4 py-3 align-top">

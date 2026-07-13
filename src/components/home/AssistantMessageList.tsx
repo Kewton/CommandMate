@@ -123,7 +123,7 @@ function UserMessageBubble({ message, canEdit, onEdit }: UserMessageBubbleProps)
               type="button"
               onClick={handleSave}
               disabled={saving || !draft.trim()}
-              className="rounded bg-accent-500 px-3 py-1 text-[11px] font-medium text-slate-950 transition-colors hover:bg-accent-400 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
+              className="rounded bg-accent-600 px-3 py-1 text-[11px] font-medium text-white transition-colors hover:bg-accent-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
               data-testid="assistant-edit-save"
             >
               {saving ? 'Resending...' : 'Save & Resend'}

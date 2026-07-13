@@ -18,15 +18,15 @@ export default function MorePage() {
     <AppShell>
       <div className="container-custom py-8 overflow-auto h-full">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">More</h1>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
+          <h1 className="text-2xl font-bold text-foreground mb-2">More</h1>
+          <p className="text-sm text-muted-foreground">
             Settings, external apps, and more.
           </p>
         </div>
 
         {/* Quick Links */}
         <div className="mb-8">
-          <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-gray-100">Quick Links</h2>
+          <h2 className="text-lg font-semibold mb-4 text-foreground">Quick Links</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Link
               href="/repositories"
@@ -34,8 +34,8 @@ export default function MorePage() {
               data-testid="more-link-repositories"
             >
               <Card hover className="transition-colors hover:border-accent-300 dark:hover:border-accent-700">
-                <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Repositories</div>
-                <div className="text-xs text-gray-500 dark:text-gray-400">Manage repositories and worktrees</div>
+                <div className="text-sm font-medium text-foreground">Repositories</div>
+                <div className="text-xs text-muted-foreground">Manage repositories and worktrees</div>
               </Card>
             </Link>
           </div>
@@ -43,15 +43,15 @@ export default function MorePage() {
 
         {/* External Apps */}
         <div className="mb-8">
-          <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-gray-100">External Apps</h2>
+          <h2 className="text-lg font-semibold mb-4 text-foreground">External Apps</h2>
           <ExternalAppsManager />
         </div>
 
         {/* About */}
         <div className="mb-8">
-          <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-gray-100">About</h2>
+          <h2 className="text-lg font-semibold mb-4 text-foreground">About</h2>
           <Card>
-            <div className="text-sm text-gray-600 dark:text-gray-400">
+            <div className="text-sm text-muted-foreground">
               CommandMate - A local control plane for agent CLIs.
             </div>
           </Card>

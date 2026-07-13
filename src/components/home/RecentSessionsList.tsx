@@ -35,7 +35,7 @@ function statusDotClass(wt: Worktree): string {
   if (wt.isSessionRunning) {
     return 'bg-green-500 dark:bg-green-400';
   }
-  return 'bg-gray-300 dark:bg-gray-600';
+  return 'bg-muted-foreground';
 }
 
 export function RecentSessionsList({ worktrees, limit = 5 }: RecentSessionsListProps) {
@@ -48,7 +48,7 @@ export function RecentSessionsList({ worktrees, limit = 5 }: RecentSessionsListP
   if (recent.length === 0) {
     return (
       <p
-        className="text-sm text-gray-500 dark:text-gray-400"
+        className="text-sm text-muted-foreground"
         data-testid="recent-sessions-empty"
       >
         No recent sessions yet.
@@ -66,22 +66,22 @@ export function RecentSessionsList({ worktrees, limit = 5 }: RecentSessionsListP
             <Link
               href={`/worktrees/${wt.id}`}
               data-testid={`recent-session-${wt.id}`}
-              className="flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <span
                 className={`h-2 w-2 shrink-0 rounded-full ${statusDotClass(wt)}`}
                 aria-hidden="true"
               />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                <span className="block truncate text-sm font-medium text-foreground">
                   {wt.repositoryDisplayName ?? wt.repositoryName}
                 </span>
-                <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
+                <span className="block truncate text-xs text-muted-foreground">
                   {wt.name}
                 </span>
               </span>
               {relativeTime && (
-                <span className="shrink-0 text-xs tabular-nums text-gray-400 dark:text-gray-500">
+                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                   {relativeTime}
                 </span>
               )}

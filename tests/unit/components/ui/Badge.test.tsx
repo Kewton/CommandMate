@@ -16,8 +16,8 @@ describe('Badge', () => {
     // base classes (inlined from the former .badge @apply utility, Issue #1048)
     expect(cls).toContain('rounded-full');
     expect(cls).toContain('inline-flex');
-    // gray variant
-    expect(cls).toContain('bg-gray-100');
+    // gray variant (Issue #1082: semantic muted token)
+    expect(cls).toContain('bg-muted');
   });
 
   it.each([
@@ -25,7 +25,7 @@ describe('Badge', () => {
     ['warning', 'bg-yellow-100'],
     ['error', 'bg-red-100'],
     ['info', 'bg-accent-100'],
-    ['gray', 'bg-gray-100'],
+    ['gray', 'bg-muted'],
   ] as const)('applies the %s variant classes', (variant, expected) => {
     render(
       <Badge data-testid="badge" variant={variant}>

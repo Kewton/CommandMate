@@ -128,8 +128,9 @@ describe('Tooltip (Issue #730)', () => {
       vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
     });
     const tooltip = screen.getByRole('tooltip', { hidden: true });
-    expect(tooltip.className).toMatch(/bg-gray-900/);
-    expect(tooltip.className).toMatch(/text-gray-100/);
+    // Issue #1082: inverted-surface tokens (theme-following) replace raw gray.
+    expect(tooltip.className).toMatch(/bg-foreground/);
+    expect(tooltip.className).toMatch(/text-background/);
   });
 
   it('uses role="tooltip" and aria-hidden="true" (no aria-describedby usage)', () => {
