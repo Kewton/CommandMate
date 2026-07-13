@@ -35,6 +35,7 @@ import { AlertTriangle, List } from 'lucide-react';
 import { debounce } from '@/lib/utils';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { ToastContainer, useToast } from '@/components/common/Toast';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { PaneResizer } from '@/components/worktree/PaneResizer';
 import { MarkdownToolbar } from '@/components/worktree/MarkdownToolbar';
 import {
@@ -252,6 +253,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   const isTextMode = fileType === 'text';
 
   const tWorktree = useTranslations('worktree');
+  const confirm = useConfirm();
 
   // State
   const [content, setContent] = useState('');
@@ -531,20 +533,24 @@ export const MarkdownEditor = memo(function MarkdownEditor({
       if (isDirty || isAutoSaving) {
         await saveNow();
         if (autoSaveError) {
-          const confirmed = window.confirm('Save failed. Close anyway?');
+          const confirmed = await confirm({
+            description: tWorktree('editor.saveFailedCloseConfirm'),
+            variant: 'danger',
+          });
           if (!confirmed) return;
         }
       }
     } else {
       if (isDirty) {
-        const confirmed = window.confirm(
-          'You have unsaved changes. Are you sure you want to close?'
-        );
+        const confirmed = await confirm({
+          description: tWorktree('editor.unsavedCloseConfirm'),
+          variant: 'danger',
+        });
         if (!confirmed) return;
       }
     }
     onClose?.();
-  }, [isAutoSaveEnabled, isDirty, isAutoSaving, saveNow, autoSaveError, onClose]);
+  }, [isAutoSaveEnabled, isDirty, isAutoSaving, saveNow, autoSaveError, onClose, confirm, tWorktree]);
 
   /**
    * Handle copy content to clipboard

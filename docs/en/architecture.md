@@ -604,7 +604,6 @@ For details, see [Status Indicator](./features/sidebar-status-indicator.md).
 - `src/app/api/repositories/route.ts` - DELETE endpoint
 - `src/lib/db.ts` - `getWorktreeIdsByRepository()`, `deleteRepositoryWorktrees()`
 - `src/lib/ws-server.ts` - `cleanupRooms()`
-- `src/components/worktree/WorktreeList.tsx` - Delete UI
 
 ### 10.5 Observability
 

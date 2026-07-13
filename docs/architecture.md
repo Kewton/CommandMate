@@ -598,7 +598,6 @@ feature/foo
 - `src/app/api/repositories/route.ts` - DELETEエンドポイント
 - `src/lib/db.ts` - `getWorktreeIdsByRepository()`, `deleteRepositoryWorktrees()`
 - `src/lib/ws-server.ts` - `cleanupRooms()`
-- `src/components/worktree/WorktreeList.tsx` - 削除UI
 
 ### 10.5 Observability
 - 将来的に:

@@ -20,6 +20,7 @@ import { parseCmateContent } from '@/lib/cmate-validator';
 import { parseCliToolColumn } from '@/lib/cmate-cli-tool-parser';
 import type { AgentInstance } from '@/lib/cli-tools/types';
 import { Button } from '@/components/ui';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 // ============================================================================
 // Types
@@ -102,6 +103,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
   instances,
 }: ExecutionLogPaneProps) {
   const t = useTranslations('schedule');
+  const confirm = useConfirm();
   const [logs, setLogs] = useState<ExecutionLog[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [activeSchedules, setActiveSchedules] = useState<ActiveSchedule[]>([]);
@@ -220,7 +222,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
 
   const handleDeleteSchedule = useCallback(
     async (name: string) => {
-      if (typeof window !== 'undefined' && !window.confirm(t('edit.confirmDelete', { name }))) {
+      if (!(await confirm({ description: t('edit.confirmDelete', { name }), variant: 'danger' }))) {
         return;
       }
       try {
@@ -234,7 +236,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
         console.error('Failed to delete schedule:', err);
       }
     },
-    [worktreeId, t, fetchData],
+    [worktreeId, t, fetchData, confirm],
   );
 
   const handleToggleSchedule = useCallback(

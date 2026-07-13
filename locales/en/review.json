@@ -1,0 +1,8 @@
+{
+  "report": {
+    "regenerateConfirm": "A report already exists for this date. Regenerate and overwrite?"
+  },
+  "template": {
+    "deleteConfirm": "Delete this template?"
+  }
+}

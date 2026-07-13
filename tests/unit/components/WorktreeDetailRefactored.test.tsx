@@ -9,6 +9,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { WorktreeDetailRefactored } from '@/components/worktree/WorktreeDetailRefactored';
+import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 
 // Mock next/navigation
 const mockPush = vi.fn();
@@ -640,9 +641,8 @@ describe('WorktreeDetailRefactored', () => {
   describe('File Operations Handlers', () => {
     beforeEach(() => {
       mockIsMobile.mockReturnValue(false);
-      // Mock window.prompt and window.confirm
+      // Mock window.prompt and window.alert (confirm uses ConfirmDialog, Issue #1113)
       vi.spyOn(window, 'prompt').mockImplementation(() => 'newfile.md');
-      vi.spyOn(window, 'confirm').mockImplementation(() => true);
       vi.spyOn(window, 'alert').mockImplementation(() => {});
     });
 
@@ -811,7 +811,11 @@ describe('WorktreeDetailRefactored', () => {
     });
 
     it('passes onDelete handler to FileTreeView', async () => {
-      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+      render(
+        <ConfirmProvider>
+          <WorktreeDetailRefactored worktreeId="test-worktree-123" />
+        </ConfirmProvider>
+      );
 
       await waitFor(() => {
         expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
@@ -825,11 +829,17 @@ describe('WorktreeDetailRefactored', () => {
       const deleteBtn = screen.getByTestId('delete-btn');
       fireEvent.click(deleteBtn);
 
-      expect(window.confirm).toHaveBeenCalledWith('common.confirmDelete');
+      // Issue #1113: delete confirmation is a ConfirmDialog, not window.confirm
+      expect(await screen.findByTestId('confirm-dialog')).toBeInTheDocument();
+      expect(screen.getByText('common.confirmDelete')).toBeInTheDocument();
     });
 
     it('calls DELETE API when deleting a file', async () => {
-      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+      render(
+        <ConfirmProvider>
+          <WorktreeDetailRefactored worktreeId="test-worktree-123" />
+        </ConfirmProvider>
+      );
 
       await waitFor(() => {
         expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
@@ -842,6 +852,7 @@ describe('WorktreeDetailRefactored', () => {
 
       const deleteBtn = screen.getByTestId('delete-btn');
       fireEvent.click(deleteBtn);
+      fireEvent.click(await screen.findByTestId('confirm-dialog-confirm'));
 
       await waitFor(() => {
         const deleteCall = mockFetch.mock.calls.find(

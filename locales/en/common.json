@@ -33,5 +33,9 @@
     "medium": "Medium",
     "small": "Small",
     "xsmall": "Extra small"
+  },
+  "confirmDialog": {
+    "title": "Confirm",
+    "confirm": "OK"
   }
 }

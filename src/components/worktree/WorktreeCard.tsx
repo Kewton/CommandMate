@@ -8,6 +8,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardContent, Badge, Button } from '@/components/ui';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import type { Worktree } from '@/types/models';
 import { useTranslations } from 'next-intl';
 import { useLocale } from 'next-intl';
@@ -37,6 +38,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
   const currentStatus = status || null;
 
   const t = useTranslations();
+  const confirm = useConfirm();
   const locale = useLocale();
   const dateFnsLocale = getDateFnsLocale(locale);
 
@@ -56,7 +58,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
     e.preventDefault();
     e.stopPropagation();
 
-    if (!confirm(t('worktree.session.confirmKill', { name }))) {
+    if (!(await confirm({ description: t('worktree.session.confirmKill', { name }), variant: 'danger' }))) {
       return;
     }
 
@@ -70,7 +72,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
       }
     } catch (err) {
       const errorMessage = handleApiError(err);
-      alert(`${t('worktree.session.failedToKill')}: ${errorMessage}`);
+      window.alert(`${t('worktree.session.failedToKill')}: ${errorMessage}`);
     } finally {
       setIsKilling(false);
     }
@@ -90,7 +92,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
       setIsFavorite(newFavorite);
     } catch (err) {
       const errorMessage = handleApiError(err);
-      alert(`${t('worktree.errors.failedToUpdateFavorite')}: ${errorMessage}`);
+      window.alert(`${t('worktree.errors.failedToUpdateFavorite')}: ${errorMessage}`);
     } finally {
       setIsTogglingFavorite(false);
     }

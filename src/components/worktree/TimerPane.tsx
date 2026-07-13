@@ -26,6 +26,7 @@ import {
 import { formatTimeRemaining } from '@/config/auto-yes-config';
 import type { CLIToolType, AgentInstance } from '@/lib/cli-tools/types';
 import { CLI_TOOL_IDS, agentInstancesFromSelectedAgents } from '@/lib/cli-tools/types';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { formatDelayLabel } from './timers/timer-format';
 import { TimerEditDialog } from './timers/TimerEditDialog';
 import { TimerDetailModal, type TimerItem } from './timers/TimerDetailModal';
@@ -70,6 +71,7 @@ function getStatusColor(status: string): string {
 
 export const TimerPane = memo(function TimerPane({ worktreeId, instances }: TimerPaneProps) {
   const t = useTranslations('schedule');
+  const confirm = useConfirm();
 
   // Resolve the agent roster: explicit instances when configured, otherwise the
   // primary instance of every CLI tool (legacy behavior). Used here only to
@@ -197,7 +199,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
 
   // [CS-SF-003] Clear history with confirmation (Issue #540)
   const handleClearHistory = useCallback(async () => {
-    if (!window.confirm(t('timer.clearConfirm'))) return;
+    if (!(await confirm({ description: t('timer.clearConfirm'), variant: 'danger' }))) return;
     try {
       const res = await fetch(`/api/worktrees/${worktreeId}/timers/history`, {
         method: 'DELETE',
@@ -208,7 +210,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
     } catch {
       // Error handled silently
     }
-  }, [worktreeId, fetchTimers, t]);
+  }, [worktreeId, fetchTimers, t, confirm]);
 
   // ==========================================================================
   // Derived state
